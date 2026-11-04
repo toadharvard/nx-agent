@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """fnv-nx P6n: run every measurement and write render/native/perf/report.json (schema: docs/RENDER_PERF.md §5).
 
-    python3 -I report.py <work dir> <out report.json>
+    python3 -I report.py <work dir> <out report.json> [--reuse]   (--reuse: no new measurement, rebuild from
+                                                                   <work>/out/measured.json + gpu.json + dk_record.json)
 <work dir> holds what run.sh built: b/ (native_drv.nso/.elf, native_drv_host, native_drv_cap, nine_drv,
 n1/shaders), streams/ (gen_stream.py output), and gets out/ (raw results), cg/ (callgrind dumps).
 """
@@ -16,6 +17,8 @@ CLOCKS_GHZ = (1.02, 1.785)  # Switch CPU: 1020 MHz (retail default, docked and h
 FIF = 2                     # frames in flight for the measurement (3 overflows the UBO ring at the high mix, see notes)
 STORE_GBS = 4.0             # effective A57 streaming-store bandwidth for the memory term (GB/s), hi estimate only
 TARGETS_MS = {"30": 33.3, "45": 22.2, "60": 16.7}
+GATE_CONFIGS = ("docked_720p", "handheld_720p")   # owner: 720p, dynres off; 45 fps stable handheld is the target
+FRAME_MS = 22.2                                   # hotspot shares are of the 45 fps frame
 # bytes the front writes per draw that miss the caches: 512 B UBO slice + 256 B epilogue (ring), 64 B packet,
 # ~32 B encoded words; per frame the 65536-entry radix count table (256 KiB) per sort digit actually used
 BYTES_PER_DRAW = 512 + 256 + 64 + 32
@@ -72,6 +75,15 @@ def main():
     work, out = sys.argv[1], sys.argv[2]
     spec = json.load(open(os.path.join(work, "streams", "streams.json")))
     b = os.path.join(work, "b")
+    cache = os.path.join(work, "out", "measured.json")
+    if "--reuse" in sys.argv and os.path.exists(cache):   # rebuild the report from the last measurements
+        m = json.load(open(cache))
+        dkf = os.path.join(work, "out", "dk_record.json")
+        dk = json.load(open(dkf)) if os.path.exists(dkf) else None
+        rep = build_report(spec, m["raw"], m["prof"], m["ovf"], dk, work)
+        json.dump(rep, open(out, "w"), indent=1)
+        print(json.dumps(rep["summary"], indent=1))
+        return
     names = ["fam_" + f["name"] for f in gen_stream.FAMILIES] + ["mix_lo", "mix_hi", "empty"] + \
         ["wo_" + f["name"] for f in gen_stream.FAMILIES]
     raw = {}
@@ -101,10 +113,73 @@ def main():
     dkf = os.path.join(work, "out", "dk_record.json")
     if os.path.exists(dkf):
         dk = json.load(open(dkf))
+    json.dump({"raw": raw, "prof": pr, "ovf": ovf}, open(cache, "w"))
     rep = build_report(spec, raw, pr, ovf, dk, work)
     json.dump(rep, open(out, "w"), indent=1)
     json.dump(raw, open(os.path.join(work, "out", "raw.json"), "w"), indent=1)
     print(json.dumps(rep["summary"], indent=1))
+
+
+def cpu_ms(instr):
+    return instr / (IPC[0] * CLOCKS_GHZ[0] * 1e9) * 1e3
+
+
+def build_hotspots(raw, prof, dk, gpu):
+    """ranked rows per scene: CPU by function / family, GPU by pass / shader program (docked + handheld 720p).
+    ms: CPU at IPC 0.6, 1.02 GHz (instructions of one measured mix_hi frame); GPU at issue efficiency 0.6."""
+    def row(kind, name, ms, **kw):
+        d = {"kind": kind, "name": name, "ms": round(ms, 3), "share_of_22_2ms": round(ms / FRAME_MS, 4)}
+        d.update(kw)
+        return d
+    out = {}
+    fam_names = [f["name"] for f in gen_stream.FAMILIES]
+    cpu_fn = []
+    for fn, n in (prof.get("profile") or {}).items():
+        if fn == "main":
+            continue    # native_drv's stream decoder (harness), not renderer code
+        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread="main+render (front)", module="render/native front"))
+    for fn, n in ((dk or {}).get("streams", {}).get("mix_hi", {}).get("profile_last_frame") or {}).items():
+        cpu_fn.append(row("cpu_function", fn, cpu_ms(n), instr=n, thread="render (backend)", module="nxgpu.c + libdeko3d"))
+    cpu_fn.sort(key=lambda r: -r["ms"])
+    cpu_fam = []
+    for f in fam_names:
+        full, wo = raw["mix_hi"], raw["wo_" + f]
+        m = full["a64"]["main"] - wo["a64"]["main"]; r = full["a64"]["render"] - wo["a64"]["render"]
+        b = 0
+        if dk and "wo_" + f in dk["streams"]:
+            b = dk["streams"]["mix_hi"]["record"] - dk["streams"]["wo_" + f]["record"]
+        cpu_fam.append(row("cpu_family", f, cpu_ms(m + r + b), instr={"main": m, "render_front": r, "render_backend": b}))
+    cpu_fam.sort(key=lambda r: -r["ms"])
+    out["cpu_by_function"] = cpu_fn[:30]
+    out["cpu_by_family_pass"] = cpu_fam
+    for scene_name in [k for k in gpu["scenes"] if k.endswith("mix_hi")]:
+        for s in gpu["scenes"][scene_name]:
+            if s["config"] not in GATE_CONFIGS or s["efficiency"] != 0.6:
+                continue
+            key = scene_name + "/" + s["config"]
+            fams = s["families"]
+            out["gpu_by_pass/" + key] = sorted((row("gpu_pass", f, v["ms"], bound=v["bound"], pixels=v["pixels"],
+                                                    frag_ms=v["frag_ms"], vertex_ms=v["vertex_ms"], dram_mb=v["dram_mb"],
+                                                    target_format=v.get("target_format"))
+                                                for f, v in fams.items()), key=lambda r: -r["ms"])
+            prog = {}
+            for f, v in fams.items():
+                prog.setdefault(("ps", v.get("ps")), 0.0)
+                prog[("ps", v.get("ps"))] += v["frag_ms"]
+                prog.setdefault(("vs", v.get("vs")), 0.0)
+                prog[("vs", v.get("vs"))] += v["vertex_ms"]
+            out["gpu_by_program/" + key] = sorted((row("gpu_program", "%s %s" % k, ms) for k, ms in prog.items() if ms > 0),
+                                                  key=lambda r: -r["ms"])
+            out["gpu_frame_ms/" + key] = s["frame_ms"]
+    # the top 10 of what eats the 45 fps frame: CPU functions (each thread's work) and GPU passes at handheld 720p
+    # (the owner's target), native shaders; ranked by ms
+    top = cpu_fn[:20] + [dict(r, config="handheld_720p") for r in out.get("gpu_by_pass/mix_hi/handheld_720p", [])]
+    top.sort(key=lambda r: -r["ms"])
+    out["top10"] = top[:10]
+    out["input"] = ("synthetic mix_hi (docs/RENDER_PERF.md §2; S16's NXD9 captures of the real game replace it); "
+                    "GPU: S6n's native shaders, and real019_ = the game's shaderpackage019 programs translated by "
+                    "sdp2dksh (class averages) on the same pass mix")
+    return out
 
 
 def build_report(spec, raw, prof, ovf, dk, work):
@@ -172,8 +247,6 @@ def build_report(spec, raw, prof, ovf, dk, work):
             m = hi["ms"][str(ghz)]
             worst = max(m["main"]["hi"], m["render"]["hi"])
             targets[t][str(ghz)] = "pass" if worst <= budget else "fail"
-    budget_fraction = {t: {str(g): round(max(hi["ms"][str(g)]["main"]["hi"], hi["ms"][str(g)]["render"]["hi"]) / b, 3)
-                           for g in CLOCKS_GHZ} for t, b in TARGETS_MS.items()}
     commit = sh(["git", "-C", HERE, "rev-parse", "HEAD"]).stdout.strip()
     # the commit changes when the branch is rebased; the tree of render/native (+ dirty flag) identifies the code
     tree = sh(["git", "-C", HERE, "rev-parse", "HEAD:ports/fnv-nx/render/native"]).stdout.strip()
@@ -187,6 +260,22 @@ def build_report(spec, raw, prof, ovf, dk, work):
     for t, budget in TARGETS_MS.items():
         gpu_targets[t] = {cfg: ("pass" if v["eff_0.6"] <= budget else "pass_at_peak_only" if v["eff_1.0"] <= budget else "fail")
                           for cfg, v in gpu_sum["mix_hi"].items()}
+    # the gate's field: fraction of each target's budget, CPU (worst thread, IPC 0.6) and GPU (720p, dynres off,
+    # efficiency 0.6), and the frame = max(CPU at 1.02 GHz, GPU) per gate config (the CPU clock is 1.02 GHz both
+    # docked and handheld). > 1.0 = over budget.
+    cpu_worst = {str(g): max(hi["ms"][str(g)]["main"]["hi"], hi["ms"][str(g)]["render"]["hi"]) for g in CLOCKS_GHZ}
+    gpu_gate = {cfg: gpu_sum["mix_hi"][cfg]["eff_0.6"] for cfg in GATE_CONFIGS}
+    budget_fraction = {}
+    for t, b in TARGETS_MS.items():
+        e = {g: round(v / b, 3) for g, v in cpu_worst.items()}
+        for cfg, v in gpu_gate.items():
+            e["gpu_" + cfg] = round(v / b, 3)
+            e["frame_" + cfg] = round(max(cpu_worst["1.02"], v) / b, 3)
+        budget_fraction[t] = e
+    for t, b in TARGETS_MS.items():
+        for cfg in GATE_CONFIGS:
+            targets[t]["frame_" + cfg] = "pass" if budget_fraction[t]["frame_" + cfg] <= 1.0 else "fail"
+    hotspots = build_hotspots(raw, prof, dk, gpu)
     passes = {}
     for name in ("mix_lo", "mix_hi"):
         pf = os.path.join(work, "out", name + ".passes.json")
@@ -208,11 +297,20 @@ def build_report(spec, raw, prof, ovf, dk, work):
                                      "StateTracker + Renderer::Render); render = Frame::Finish + deko3d recording",
                     "assumptions": {"ipc": {"lo": IPC[0], "hi": IPC[1]}, "clock_ghz": list(CLOCKS_GHZ),
                                     "gate_value": "gate = hi = IPC 0.6 at 1.02 GHz, mix_hi (+ memory term on main)"},
-                    "targets": targets, "targets_budget_fraction": budget_fraction,
+                    "targets_budget_fraction": budget_fraction,
+                    "targets_budget_fraction_rule": "THE GATE FIELD. Per target (30/45/60 fps = 33.3/22.2/16.7 ms): "
+                        "'1.02'/'1.785' = worst CPU renderer thread (mix_hi, IPC 0.6, store term) / budget; "
+                        "'gpu_<cfg>' = GPU model (mix_hi, issue efficiency 0.6) / budget; 'frame_<cfg>' = "
+                        "max(CPU at 1.02 GHz, GPU) / budget for the gate configs docked_720p and handheld_720p "
+                        "(dynamic resolution off). <= 1.0 passes. CPU covers the renderer only (engine not counted)",
+                    "targets": targets,
                     "targets_rule": "CPU verdict: max(main hi, render hi) of mix_hi at IPC 0.6 (the low IPC bound decides) <= "
                                     "33.3/22.2/16.7 ms; covers the renderer only (engine update/cull/accumulation not measured); "
                                     "GPU time is a separate estimate (gpu.targets)",
                     "render_backend_counted": dk is not None},
+        "hotspots": hotspots,
+        "optimizations": json.load(open(os.path.join(HERE, "optimizations.json")))
+                         if os.path.exists(os.path.join(HERE, "optimizations.json")) else [],
         "families": fams,
         "frame": frames,
         "fixed_per_frame_instr": {"main": empty["main"], "render": empty["render"]},

@@ -46,7 +46,7 @@ def pack_shaders(sdir):
     return out
 
 
-def run(elf, cap, sdir):
+def run(elf, cap, sdir, profile=False):
     s = syms(elf)
     uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
     uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)
@@ -60,14 +60,22 @@ def run(elf, cap, sdir):
     uc.mem_write(INPUT, blob)
     uc.mem_map(STACK_TOP - 0x1000000, 0x1000000, UC_PROT_ALL)
     entry = load(uc, elf)
-    st = {"insns": 0, "marks": {}, "exit": None, "intr": []}
+    st = {"insns": 0, "marks": {}, "exit": None, "intr": [], "prof": {}, "on": False, "last": None}
 
     def on_block(u, addr, size, _):
         st["insns"] += size >> 2
+        if st["on"]:
+            st["prof"][addr] = st["prof"].get(addr, 0) + (size >> 2)
 
     def on_mark(u, addr, size, _):
         if addr == s["perf_mark"]:
-            st["marks"][u.reg_read(UC_ARM64_REG_X0)] = st["insns"]
+            mid = u.reg_read(UC_ARM64_REG_X0)
+            st["marks"][mid] = st["insns"]
+            if profile:     # keep only the latest frame: reset at each frame's start mark
+                if mid & 1:
+                    st["prof"] = {}; st["on"] = True
+                else:
+                    st["on"] = False; st["last"] = dict(st["prof"])
         elif addr == s["perf_exit"]:
             st["exit"] = u.reg_read(UC_ARM64_REG_X0)
             u.emu_stop()
@@ -89,7 +97,19 @@ def run(elf, cap, sdir):
     m = st["marks"]
     frames = res[7]
     per = [m[2 * f + 2] - m[2 * f + 1] for f in range(frames) if (2 * f + 2) in m]
-    return {"exit": st["exit"], "error": err, "intr": st["intr"][:3], "result": list(res[:8]), "frames": frames,
+    prof = None
+    if profile and st["last"]:
+        import bisect
+        out = subprocess.run(["aarch64-none-elf-nm", "-n", "-C", "--defined-only", elf], capture_output=True, text=True).stdout
+        sy = [(int(p[0], 16), p[2]) for p in (l.split(" ", 2) for l in out.splitlines()) if len(p) == 3 and p[1] in "tTwW"]
+        ad = [a for a, _ in sy]
+        agg = {}
+        for a, n in st["last"].items():
+            i = bisect.bisect_right(ad, a) - 1
+            nm = sy[i][1] if i >= 0 else "?"
+            agg[nm] = agg.get(nm, 0) + n
+        prof = dict(sorted(agg.items(), key=lambda kv: -kv[1])[:40])
+    return {"profile_last_frame": prof, "exit": st["exit"], "error": err, "intr": st["intr"][:3], "result": list(res[:8]), "frames": frames,
             "record_per_frame": per, "record": per[-1] if per else None,
             "last_frame": {"draws": res[2], "state_binds": res[3], "block_binds": res[4], "words": res[5],
                            "captured_blocks": res[6]}}
@@ -106,7 +126,7 @@ def main():
     res = {"method": __doc__.strip().split("\n\n")[2], "streams": {}}
     for f in sorted(os.listdir(os.path.join(work, "out"))):
         if f.endswith(".nxcap"):
-            r = run(elf, os.path.join(work, "out", f), sdir)
+            r = run(elf, os.path.join(work, "out", f), sdir, profile=f.startswith("mix_hi"))
             if r["exit"] != 0:
                 raise SystemExit("%s: %s" % (f, r))
             res["streams"][f[:-6]] = r

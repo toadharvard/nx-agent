@@ -1,9 +1,9 @@
 {
  "schema": "fnv-nx P6n report v1 (docs/RENDER_PERF.md \u00a75)",
  "summary": {
-  "commit": "e02c871a80ea1b970ae9c30bd279c4a4797adae4",
-  "render_native_tree": "439efb38e628ddc78e86c953dd933fe9217a97fd",
-  "worktree_dirty": false,
+  "commit": "0bef759e72b51f9b1863ccaaf54e7896cd1ed4f2",
+  "render_native_tree": "237ab2b6a6e4641e462564a45ca3e871b568ed9a",
+  "worktree_dirty": true,
   "per_draw_us": {
    "native": {
     "lo": 1.671,
@@ -41,37 +41,1452 @@
    ],
    "gate_value": "gate = hi = IPC 0.6 at 1.02 GHz, mix_hi (+ memory term on main)"
   },
-  "targets": {
-   "30": {
-    "1.02": "pass",
-    "1.785": "pass"
-   },
-   "45": {
-    "1.02": "pass",
-    "1.785": "pass"
-   },
-   "60": {
-    "1.02": "pass",
-    "1.785": "pass"
-   }
-  },
   "targets_budget_fraction": {
    "30": {
     "1.02": 0.301,
-    "1.785": 0.182
+    "1.785": 0.182,
+    "gpu_docked_720p": 0.375,
+    "frame_docked_720p": 0.375,
+    "gpu_handheld_720p": 0.7,
+    "frame_handheld_720p": 0.7
    },
    "45": {
     "1.02": 0.451,
-    "1.785": 0.273
+    "1.785": 0.273,
+    "gpu_docked_720p": 0.563,
+    "frame_docked_720p": 0.563,
+    "gpu_handheld_720p": 1.05,
+    "frame_handheld_720p": 1.05
    },
    "60": {
     "1.02": 0.6,
-    "1.785": 0.363
+    "1.785": 0.363,
+    "gpu_docked_720p": 0.748,
+    "frame_docked_720p": 0.748,
+    "gpu_handheld_720p": 1.396,
+    "frame_handheld_720p": 1.396
+   }
+  },
+  "targets_budget_fraction_rule": "THE GATE FIELD. Per target (30/45/60 fps = 33.3/22.2/16.7 ms): '1.02'/'1.785' = worst CPU renderer thread (mix_hi, IPC 0.6, store term) / budget; 'gpu_<cfg>' = GPU model (mix_hi, issue efficiency 0.6) / budget; 'frame_<cfg>' = max(CPU at 1.02 GHz, GPU) / budget for the gate configs docked_720p and handheld_720p (dynamic resolution off). <= 1.0 passes. CPU covers the renderer only (engine not counted)",
+  "targets": {
+   "30": {
+    "1.02": "pass",
+    "1.785": "pass",
+    "frame_docked_720p": "pass",
+    "frame_handheld_720p": "pass"
+   },
+   "45": {
+    "1.02": "pass",
+    "1.785": "pass",
+    "frame_docked_720p": "pass",
+    "frame_handheld_720p": "fail"
+   },
+   "60": {
+    "1.02": "pass",
+    "1.785": "pass",
+    "frame_docked_720p": "pass",
+    "frame_handheld_720p": "fail"
    }
   },
   "targets_rule": "CPU verdict: max(main hi, render hi) of mix_hi at IPC 0.6 (the low IPC bound decides) <= 33.3/22.2/16.7 ms; covers the renderer only (engine update/cull/accumulation not measured); GPU time is a separate estimate (gpu.targets)",
   "render_backend_counted": true
  },
+ "hotspots": {
+  "cpu_by_function": [
+   {
+    "kind": "cpu_function",
+    "name": "nx::SortPackets(nx::Packet const*, unsigned long, unsigned long*, unsigned long*, unsigned long long*, unsigned long long*)",
+    "ms": 3.744,
+    "share_of_22_2ms": 0.1687,
+    "instr": 2291497,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "record",
+    "ms": 1.633,
+    "share_of_22_2ms": 0.0736,
+    "instr": 999610,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Frame::Finish(nx::StateCache&, NxFrameStats*, bool)",
+    "ms": 1.459,
+    "share_of_22_2ms": 0.0657,
+    "instr": 892912,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Renderer::Render(nx::Renderer::Draw const&)",
+    "ms": 1.081,
+    "share_of_22_2ms": 0.0487,
+    "instr": 661825,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx_d3d9_sampler",
+    "ms": 1.01,
+    "share_of_22_2ms": 0.0455,
+    "instr": 618170,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::StateTracker::SetSamplerState(unsigned long, unsigned long, unsigned long, bool)",
+    "ms": 0.938,
+    "share_of_22_2ms": 0.0422,
+    "instr": 574015,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "dkCmdBufBindUniformBuffers",
+    "ms": 0.839,
+    "share_of_22_2ms": 0.0378,
+    "instr": 513360,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::StateTracker::SetRenderState(unsigned long, unsigned long, bool)",
+    "ms": 0.787,
+    "share_of_22_2ms": 0.0355,
+    "instr": 481694,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::StateTracker::Handles(nx::Backend*, unsigned long*, unsigned long)",
+    "ms": 0.707,
+    "share_of_22_2ms": 0.0319,
+    "instr": 432766,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::StateCache::State(unsigned short, unsigned short, unsigned short, NxRenderState const&)",
+    "ms": 0.521,
+    "share_of_22_2ms": 0.0235,
+    "instr": 318985,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "memcmp",
+    "ms": 0.457,
+    "share_of_22_2ms": 0.0206,
+    "instr": 279816,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "memmove",
+    "ms": 0.449,
+    "share_of_22_2ms": 0.0202,
+    "instr": 274983,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "memset",
+    "ms": 0.41,
+    "share_of_22_2ms": 0.0185,
+    "instr": 251108,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "dkCmdBufBindVtxBuffers",
+    "ms": 0.279,
+    "share_of_22_2ms": 0.0126,
+    "instr": 170569,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::StateTracker::Resolve(NxD3D9Viewport const&, NxD3D9Rect const&, unsigned long)",
+    "ms": 0.253,
+    "share_of_22_2ms": 0.0114,
+    "instr": 154973,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::StateTracker::SetTexture(unsigned long, unsigned long, NxD3D9Texture const&)",
+    "ms": 0.188,
+    "share_of_22_2ms": 0.0084,
+    "instr": 114803,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "dkCmdBufBindTextures",
+    "ms": 0.186,
+    "share_of_22_2ms": 0.0084,
+    "instr": 114004,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Frame::AddTextures(unsigned long const*, unsigned long)",
+    "ms": 0.176,
+    "share_of_22_2ms": 0.0079,
+    "instr": 107473,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Frame::AddDyn(nx::DynRec const&)",
+    "ms": 0.14,
+    "share_of_22_2ms": 0.0063,
+    "instr": 85456,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "dkCmdBufBindIdxBuffer",
+    "ms": 0.114,
+    "share_of_22_2ms": 0.0051,
+    "instr": 69620,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx_d3d9_translate",
+    "ms": 0.109,
+    "share_of_22_2ms": 0.0049,
+    "instr": 66960,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Frame::Epilogue(nx::Packet*)",
+    "ms": 0.109,
+    "share_of_22_2ms": 0.0049,
+    "instr": 66780,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Frame::Emit()",
+    "ms": 0.103,
+    "share_of_22_2ms": 0.0046,
+    "instr": 63070,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Frame::Constants(unsigned long*)",
+    "ms": 0.103,
+    "share_of_22_2ms": 0.0046,
+    "instr": 63070,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "dkCmdBufDrawIndexed",
+    "ms": 0.103,
+    "share_of_22_2ms": 0.0046,
+    "instr": 63070,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Frame::Tag(nx::Packet const*, unsigned short, unsigned short)",
+    "ms": 0.097,
+    "share_of_22_2ms": 0.0044,
+    "instr": 59360,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Encoder::Op(unsigned long, unsigned long)",
+    "ms": 0.093,
+    "share_of_22_2ms": 0.0042,
+    "instr": 57002,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::DynFromD3D9(nx::DynRec*, NxDynamicState const&)",
+    "ms": 0.091,
+    "share_of_22_2ms": 0.0041,
+    "instr": 55650,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "memmove",
+    "ms": 0.089,
+    "share_of_22_2ms": 0.004,
+    "instr": 54383,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "dkMemBlockGetGpuAddr",
+    "ms": 0.047,
+    "share_of_22_2ms": 0.0021,
+    "instr": 28800,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   }
+  ],
+  "cpu_by_family_pass": [
+   {
+    "kind": "cpu_family",
+    "name": "lit",
+    "ms": 7.099,
+    "share_of_22_2ms": 0.3198,
+    "instr": {
+     "main": 2785893,
+     "render_front": 659624,
+     "render_backend": 899078
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "trees",
+    "ms": 1.697,
+    "share_of_22_2ms": 0.0764,
+    "instr": {
+     "main": 635461,
+     "render_front": 174412,
+     "render_backend": 228535
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "water_refl",
+    "ms": 1.189,
+    "share_of_22_2ms": 0.0536,
+    "instr": {
+     "main": 431610,
+     "render_front": 123047,
+     "render_backend": 172982
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "grass",
+    "ms": 0.918,
+    "share_of_22_2ms": 0.0413,
+    "instr": {
+     "main": 316051,
+     "render_front": 106871,
+     "render_backend": 138854
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "actors",
+    "ms": 0.888,
+    "share_of_22_2ms": 0.04,
+    "instr": {
+     "main": 346780,
+     "render_front": 81889,
+     "render_backend": 114521
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "land",
+    "ms": 0.817,
+    "share_of_22_2ms": 0.0368,
+    "instr": {
+     "main": 350849,
+     "render_front": 62914,
+     "render_backend": 86115
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "shadow",
+    "ms": 0.805,
+    "share_of_22_2ms": 0.0362,
+    "instr": {
+     "main": 227298,
+     "render_front": 107812,
+     "render_backend": 157318
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "lod",
+    "ms": 0.731,
+    "share_of_22_2ms": 0.0329,
+    "instr": {
+     "main": 263707,
+     "render_front": 78125,
+     "render_backend": 105305
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "particles",
+    "ms": 0.532,
+    "share_of_22_2ms": 0.024,
+    "instr": {
+     "main": 182140,
+     "render_front": 59788,
+     "render_backend": 83662
+    }
+   },
+   {
+    "kind": "cpu_family",
+    "name": "imagespace_ui",
+    "ms": 0.292,
+    "share_of_22_2ms": 0.0132,
+    "instr": {
+     "main": 93970,
+     "render_front": 26910,
+     "render_backend": 58078
+    }
+   }
+  ],
+  "gpu_by_pass/mix_hi/docked_720p": [
+   {
+    "kind": "gpu_pass",
+    "name": "lit",
+    "ms": 3.633,
+    "share_of_22_2ms": 0.1636,
+    "bound": "alu",
+    "pixels": 912384,
+    "frag_ms": 3.177,
+    "vertex_ms": 0.456,
+    "dram_mb": 11.4,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "imagespace_ui",
+    "ms": 3.525,
+    "share_of_22_2ms": 0.1588,
+    "bound": "alu",
+    "pixels": 3225600,
+    "frag_ms": 3.525,
+    "vertex_ms": 0.0,
+    "dram_mb": 27.42,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "trees",
+    "ms": 0.995,
+    "share_of_22_2ms": 0.0448,
+    "bound": "alu",
+    "pixels": 345600,
+    "frag_ms": 0.93,
+    "vertex_ms": 0.064,
+    "dram_mb": 4.32,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "water_refl",
+    "ms": 0.904,
+    "share_of_22_2ms": 0.0407,
+    "bound": "alu",
+    "pixels": 314573,
+    "frag_ms": 0.847,
+    "vertex_ms": 0.057,
+    "dram_mb": 3.93,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "grass",
+    "ms": 0.772,
+    "share_of_22_2ms": 0.0348,
+    "bound": "alu",
+    "pixels": 552960,
+    "frag_ms": 0.604,
+    "vertex_ms": 0.168,
+    "dram_mb": 6.91,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "land",
+    "ms": 0.672,
+    "share_of_22_2ms": 0.0303,
+    "bound": "alu",
+    "pixels": 497664,
+    "frag_ms": 0.628,
+    "vertex_ms": 0.044,
+    "dram_mb": 6.97,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "lod",
+    "ms": 0.485,
+    "share_of_22_2ms": 0.0218,
+    "bound": "alu",
+    "pixels": 165888,
+    "frag_ms": 0.447,
+    "vertex_ms": 0.038,
+    "dram_mb": 2.07,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "sky",
+    "ms": 0.413,
+    "share_of_22_2ms": 0.0186,
+    "bound": "alu",
+    "pixels": 322560,
+    "frag_ms": 0.413,
+    "vertex_ms": 0.001,
+    "dram_mb": 3.39,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "particles",
+    "ms": 0.411,
+    "share_of_22_2ms": 0.0185,
+    "bound": "alu",
+    "pixels": 368640,
+    "frag_ms": 0.403,
+    "vertex_ms": 0.009,
+    "dram_mb": 6.82,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "actors",
+    "ms": 0.359,
+    "share_of_22_2ms": 0.0162,
+    "bound": "alu",
+    "pixels": 59904,
+    "frag_ms": 0.209,
+    "vertex_ms": 0.15,
+    "dram_mb": 0.75,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "shadow",
+    "ms": 0.317,
+    "share_of_22_2ms": 0.0143,
+    "bound": "alu",
+    "pixels": 2831155,
+    "frag_ms": 0.264,
+    "vertex_ms": 0.053,
+    "dram_mb": 11.32,
+    "target_format": null
+   }
+  ],
+  "gpu_by_program/mix_hi/docked_720p": [
+   {
+    "kind": "gpu_program",
+    "name": "ps tex.frag",
+    "ms": 3.525,
+    "share_of_22_2ms": 0.1588
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps lit_spec.frag",
+    "ms": 3.386,
+    "share_of_22_2ms": 0.1525
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps lit.frag",
+    "ms": 2.224,
+    "share_of_22_2ms": 0.1002
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps nolight_tex.frag",
+    "ms": 1.007,
+    "share_of_22_2ms": 0.0454
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps land.frag",
+    "ms": 0.628,
+    "share_of_22_2ms": 0.0283
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs lit.vert",
+    "ms": 0.615,
+    "share_of_22_2ms": 0.0277
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps sky_clouds.frag",
+    "ms": 0.413,
+    "share_of_22_2ms": 0.0186
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps depth.frag",
+    "ms": 0.264,
+    "share_of_22_2ms": 0.0119
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs nolight_tex.vert",
+    "ms": 0.168,
+    "share_of_22_2ms": 0.0076
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs lit_vc.vert",
+    "ms": 0.15,
+    "share_of_22_2ms": 0.0068
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs depth.vert",
+    "ms": 0.053,
+    "share_of_22_2ms": 0.0024
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs land.vert",
+    "ms": 0.044,
+    "share_of_22_2ms": 0.002
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs nolight_texvc.vert",
+    "ms": 0.009,
+    "share_of_22_2ms": 0.0004
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs sky.vert",
+    "ms": 0.001,
+    "share_of_22_2ms": 0.0
+   }
+  ],
+  "gpu_frame_ms/mix_hi/docked_720p": 12.49,
+  "gpu_by_pass/mix_hi/handheld_720p": [
+   {
+    "kind": "gpu_pass",
+    "name": "lit",
+    "ms": 7.266,
+    "share_of_22_2ms": 0.3273,
+    "bound": "alu",
+    "pixels": 912384,
+    "frag_ms": 6.355,
+    "vertex_ms": 0.911,
+    "dram_mb": 11.4,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "imagespace_ui",
+    "ms": 7.049,
+    "share_of_22_2ms": 0.3175,
+    "bound": "alu",
+    "pixels": 3225600,
+    "frag_ms": 7.049,
+    "vertex_ms": 0.0,
+    "dram_mb": 27.42,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "trees",
+    "ms": 1.989,
+    "share_of_22_2ms": 0.0896,
+    "bound": "alu",
+    "pixels": 345600,
+    "frag_ms": 1.861,
+    "vertex_ms": 0.128,
+    "dram_mb": 4.32,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "grass",
+    "ms": 1.544,
+    "share_of_22_2ms": 0.0695,
+    "bound": "alu",
+    "pixels": 552960,
+    "frag_ms": 1.208,
+    "vertex_ms": 0.336,
+    "dram_mb": 6.91,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "land",
+    "ms": 1.344,
+    "share_of_22_2ms": 0.0605,
+    "bound": "alu",
+    "pixels": 497664,
+    "frag_ms": 1.256,
+    "vertex_ms": 0.089,
+    "dram_mb": 6.97,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "lod",
+    "ms": 0.969,
+    "share_of_22_2ms": 0.0436,
+    "bound": "alu",
+    "pixels": 165888,
+    "frag_ms": 0.893,
+    "vertex_ms": 0.076,
+    "dram_mb": 2.07,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "sky",
+    "ms": 0.827,
+    "share_of_22_2ms": 0.0373,
+    "bound": "alu",
+    "pixels": 322560,
+    "frag_ms": 0.825,
+    "vertex_ms": 0.002,
+    "dram_mb": 3.39,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "particles",
+    "ms": 0.823,
+    "share_of_22_2ms": 0.0371,
+    "bound": "alu",
+    "pixels": 368640,
+    "frag_ms": 0.806,
+    "vertex_ms": 0.017,
+    "dram_mb": 6.82,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "actors",
+    "ms": 0.717,
+    "share_of_22_2ms": 0.0323,
+    "bound": "alu",
+    "pixels": 59904,
+    "frag_ms": 0.417,
+    "vertex_ms": 0.3,
+    "dram_mb": 0.75,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "water_refl",
+    "ms": 0.537,
+    "share_of_22_2ms": 0.0242,
+    "bound": "alu",
+    "pixels": 78643,
+    "frag_ms": 0.423,
+    "vertex_ms": 0.114,
+    "dram_mb": 0.98,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "shadow",
+    "ms": 0.239,
+    "share_of_22_2ms": 0.0108,
+    "bound": "alu",
+    "pixels": 707789,
+    "frag_ms": 0.132,
+    "vertex_ms": 0.107,
+    "dram_mb": 2.83,
+    "target_format": null
+   }
+  ],
+  "gpu_by_program/mix_hi/handheld_720p": [
+   {
+    "kind": "gpu_program",
+    "name": "ps tex.frag",
+    "ms": 7.049,
+    "share_of_22_2ms": 0.3175
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps lit_spec.frag",
+    "ms": 6.772,
+    "share_of_22_2ms": 0.305
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps lit.frag",
+    "ms": 3.177,
+    "share_of_22_2ms": 0.1431
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps nolight_tex.frag",
+    "ms": 2.014,
+    "share_of_22_2ms": 0.0907
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps land.frag",
+    "ms": 1.256,
+    "share_of_22_2ms": 0.0566
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs lit.vert",
+    "ms": 1.229,
+    "share_of_22_2ms": 0.0554
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps sky_clouds.frag",
+    "ms": 0.825,
+    "share_of_22_2ms": 0.0372
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs nolight_tex.vert",
+    "ms": 0.336,
+    "share_of_22_2ms": 0.0151
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs lit_vc.vert",
+    "ms": 0.3,
+    "share_of_22_2ms": 0.0135
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps depth.frag",
+    "ms": 0.132,
+    "share_of_22_2ms": 0.0059
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs depth.vert",
+    "ms": 0.107,
+    "share_of_22_2ms": 0.0048
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs land.vert",
+    "ms": 0.089,
+    "share_of_22_2ms": 0.004
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs nolight_texvc.vert",
+    "ms": 0.017,
+    "share_of_22_2ms": 0.0008
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs sky.vert",
+    "ms": 0.002,
+    "share_of_22_2ms": 0.0001
+   }
+  ],
+  "gpu_frame_ms/mix_hi/handheld_720p": 23.31,
+  "gpu_by_pass/real019_mix_hi/docked_720p": [
+   {
+    "kind": "gpu_pass",
+    "name": "imagespace_ui",
+    "ms": 4.43,
+    "share_of_22_2ms": 0.1995,
+    "bound": "alu",
+    "pixels": 3225600,
+    "frag_ms": 4.43,
+    "vertex_ms": 0.0,
+    "dram_mb": 28.18,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "shadow",
+    "ms": 4.137,
+    "share_of_22_2ms": 0.1864,
+    "bound": "alu",
+    "pixels": 2831155,
+    "frag_ms": 3.869,
+    "vertex_ms": 0.269,
+    "dram_mb": 13.83,
+    "target_format": null
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "lit",
+    "ms": 2.679,
+    "share_of_22_2ms": 0.1207,
+    "bound": "alu",
+    "pixels": 912384,
+    "frag_ms": 1.247,
+    "vertex_ms": 1.432,
+    "dram_mb": 11.76,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "grass",
+    "ms": 1.616,
+    "share_of_22_2ms": 0.0728,
+    "bound": "alu",
+    "pixels": 552960,
+    "frag_ms": 0.551,
+    "vertex_ms": 1.066,
+    "dram_mb": 6.91,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "actors",
+    "ms": 1.075,
+    "share_of_22_2ms": 0.0484,
+    "bound": "alu",
+    "pixels": 59904,
+    "frag_ms": 0.211,
+    "vertex_ms": 0.863,
+    "dram_mb": 0.84,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "land",
+    "ms": 0.924,
+    "share_of_22_2ms": 0.0416,
+    "bound": "alu",
+    "pixels": 497664,
+    "frag_ms": 0.68,
+    "vertex_ms": 0.244,
+    "dram_mb": 6.41,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "water_refl",
+    "ms": 0.609,
+    "share_of_22_2ms": 0.0274,
+    "bound": "alu",
+    "pixels": 314573,
+    "frag_ms": 0.43,
+    "vertex_ms": 0.179,
+    "dram_mb": 4.05,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "trees",
+    "ms": 0.58,
+    "share_of_22_2ms": 0.0261,
+    "bound": "alu",
+    "pixels": 345600,
+    "frag_ms": 0.394,
+    "vertex_ms": 0.186,
+    "dram_mb": 4.49,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "particles",
+    "ms": 0.397,
+    "share_of_22_2ms": 0.0179,
+    "bound": "alu",
+    "pixels": 368640,
+    "frag_ms": 0.356,
+    "vertex_ms": 0.041,
+    "dram_mb": 6.82,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "lod",
+    "ms": 0.199,
+    "share_of_22_2ms": 0.009,
+    "bound": "alu",
+    "pixels": 165888,
+    "frag_ms": 0.103,
+    "vertex_ms": 0.096,
+    "dram_mb": 2.04,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "sky",
+    "ms": 0.189,
+    "share_of_22_2ms": 0.0085,
+    "bound": "alu",
+    "pixels": 322560,
+    "frag_ms": 0.189,
+    "vertex_ms": 0.001,
+    "dram_mb": 3.23,
+    "target_format": "RGBA16F"
+   }
+  ],
+  "gpu_by_program/real019_mix_hi/docked_720p": [
+   {
+    "kind": "gpu_program",
+    "name": "ps SLS pso",
+    "ms": 6.226,
+    "share_of_22_2ms": 0.2805
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps IS pso",
+    "ms": 4.43,
+    "share_of_22_2ms": 0.1995
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs SLS vso",
+    "ms": 2.124,
+    "share_of_22_2ms": 0.0957
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs GRASS vso",
+    "ms": 1.066,
+    "share_of_22_2ms": 0.048
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs SKIN vso",
+    "ms": 0.863,
+    "share_of_22_2ms": 0.0389
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps STLEAF pso",
+    "ms": 0.551,
+    "share_of_22_2ms": 0.0248
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps STB pso",
+    "ms": 0.394,
+    "share_of_22_2ms": 0.0177
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps PARTICLE pso",
+    "ms": 0.356,
+    "share_of_22_2ms": 0.016
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps SKIN pso",
+    "ms": 0.211,
+    "share_of_22_2ms": 0.0095
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps SKY pso",
+    "ms": 0.189,
+    "share_of_22_2ms": 0.0085
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs STB vso",
+    "ms": 0.186,
+    "share_of_22_2ms": 0.0084
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps SM pso",
+    "ms": 0.103,
+    "share_of_22_2ms": 0.0046
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs DISTLOD vso",
+    "ms": 0.096,
+    "share_of_22_2ms": 0.0043
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs PAR vso",
+    "ms": 0.041,
+    "share_of_22_2ms": 0.0018
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs SKY vso",
+    "ms": 0.001,
+    "share_of_22_2ms": 0.0
+   }
+  ],
+  "gpu_frame_ms/real019_mix_hi/docked_720p": 16.84,
+  "gpu_by_pass/real019_mix_hi/handheld_720p": [
+   {
+    "kind": "gpu_pass",
+    "name": "imagespace_ui",
+    "ms": 8.859,
+    "share_of_22_2ms": 0.3991,
+    "bound": "alu",
+    "pixels": 3225600,
+    "frag_ms": 8.859,
+    "vertex_ms": 0.0,
+    "dram_mb": 28.18,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "lit",
+    "ms": 5.358,
+    "share_of_22_2ms": 0.2414,
+    "bound": "alu",
+    "pixels": 912384,
+    "frag_ms": 2.494,
+    "vertex_ms": 2.865,
+    "dram_mb": 11.76,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "grass",
+    "ms": 3.233,
+    "share_of_22_2ms": 0.1456,
+    "bound": "alu",
+    "pixels": 552960,
+    "frag_ms": 1.102,
+    "vertex_ms": 2.131,
+    "dram_mb": 6.91,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "shadow",
+    "ms": 2.472,
+    "share_of_22_2ms": 0.1114,
+    "bound": "alu",
+    "pixels": 707789,
+    "frag_ms": 1.934,
+    "vertex_ms": 0.537,
+    "dram_mb": 3.46,
+    "target_format": null
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "actors",
+    "ms": 2.149,
+    "share_of_22_2ms": 0.0968,
+    "bound": "alu",
+    "pixels": 59904,
+    "frag_ms": 0.423,
+    "vertex_ms": 1.727,
+    "dram_mb": 0.84,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "land",
+    "ms": 1.848,
+    "share_of_22_2ms": 0.0832,
+    "bound": "alu",
+    "pixels": 497664,
+    "frag_ms": 1.36,
+    "vertex_ms": 0.487,
+    "dram_mb": 6.41,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "trees",
+    "ms": 1.16,
+    "share_of_22_2ms": 0.0523,
+    "bound": "alu",
+    "pixels": 345600,
+    "frag_ms": 0.789,
+    "vertex_ms": 0.372,
+    "dram_mb": 4.49,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "particles",
+    "ms": 0.795,
+    "share_of_22_2ms": 0.0358,
+    "bound": "alu",
+    "pixels": 368640,
+    "frag_ms": 0.713,
+    "vertex_ms": 0.082,
+    "dram_mb": 6.82,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "water_refl",
+    "ms": 0.573,
+    "share_of_22_2ms": 0.0258,
+    "bound": "alu",
+    "pixels": 78643,
+    "frag_ms": 0.215,
+    "vertex_ms": 0.358,
+    "dram_mb": 1.01,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "lod",
+    "ms": 0.398,
+    "share_of_22_2ms": 0.0179,
+    "bound": "alu",
+    "pixels": 165888,
+    "frag_ms": 0.206,
+    "vertex_ms": 0.192,
+    "dram_mb": 2.04,
+    "target_format": "RGBA16F"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "sky",
+    "ms": 0.379,
+    "share_of_22_2ms": 0.0171,
+    "bound": "alu",
+    "pixels": 322560,
+    "frag_ms": 0.377,
+    "vertex_ms": 0.002,
+    "dram_mb": 3.23,
+    "target_format": "RGBA16F"
+   }
+  ],
+  "gpu_by_program/real019_mix_hi/handheld_720p": [
+   {
+    "kind": "gpu_program",
+    "name": "ps IS pso",
+    "ms": 8.859,
+    "share_of_22_2ms": 0.3991
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps SLS pso",
+    "ms": 6.003,
+    "share_of_22_2ms": 0.2704
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs SLS vso",
+    "ms": 4.247,
+    "share_of_22_2ms": 0.1913
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs GRASS vso",
+    "ms": 2.131,
+    "share_of_22_2ms": 0.096
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs SKIN vso",
+    "ms": 1.727,
+    "share_of_22_2ms": 0.0778
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps STLEAF pso",
+    "ms": 1.102,
+    "share_of_22_2ms": 0.0496
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps STB pso",
+    "ms": 0.789,
+    "share_of_22_2ms": 0.0355
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps PARTICLE pso",
+    "ms": 0.713,
+    "share_of_22_2ms": 0.0321
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps SKIN pso",
+    "ms": 0.423,
+    "share_of_22_2ms": 0.0191
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps SKY pso",
+    "ms": 0.377,
+    "share_of_22_2ms": 0.017
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs STB vso",
+    "ms": 0.372,
+    "share_of_22_2ms": 0.0168
+   },
+   {
+    "kind": "gpu_program",
+    "name": "ps SM pso",
+    "ms": 0.206,
+    "share_of_22_2ms": 0.0093
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs DISTLOD vso",
+    "ms": 0.192,
+    "share_of_22_2ms": 0.0086
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs PAR vso",
+    "ms": 0.082,
+    "share_of_22_2ms": 0.0037
+   },
+   {
+    "kind": "gpu_program",
+    "name": "vs SKY vso",
+    "ms": 0.002,
+    "share_of_22_2ms": 0.0001
+   }
+  ],
+  "gpu_frame_ms/real019_mix_hi/handheld_720p": 27.22,
+  "top10": [
+   {
+    "kind": "gpu_pass",
+    "name": "lit",
+    "ms": 7.266,
+    "share_of_22_2ms": 0.3273,
+    "bound": "alu",
+    "pixels": 912384,
+    "frag_ms": 6.355,
+    "vertex_ms": 0.911,
+    "dram_mb": 11.4,
+    "target_format": "RGBA16F",
+    "config": "handheld_720p"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "imagespace_ui",
+    "ms": 7.049,
+    "share_of_22_2ms": 0.3175,
+    "bound": "alu",
+    "pixels": 3225600,
+    "frag_ms": 7.049,
+    "vertex_ms": 0.0,
+    "dram_mb": 27.42,
+    "target_format": "RGBA16F",
+    "config": "handheld_720p"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::SortPackets(nx::Packet const*, unsigned long, unsigned long*, unsigned long*, unsigned long long*, unsigned long long*)",
+    "ms": 3.744,
+    "share_of_22_2ms": 0.1687,
+    "instr": 2291497,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "trees",
+    "ms": 1.989,
+    "share_of_22_2ms": 0.0896,
+    "bound": "alu",
+    "pixels": 345600,
+    "frag_ms": 1.861,
+    "vertex_ms": 0.128,
+    "dram_mb": 4.32,
+    "target_format": "RGBA16F",
+    "config": "handheld_720p"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "record",
+    "ms": 1.633,
+    "share_of_22_2ms": 0.0736,
+    "instr": 999610,
+    "thread": "render (backend)",
+    "module": "nxgpu.c + libdeko3d"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "grass",
+    "ms": 1.544,
+    "share_of_22_2ms": 0.0695,
+    "bound": "alu",
+    "pixels": 552960,
+    "frag_ms": 1.208,
+    "vertex_ms": 0.336,
+    "dram_mb": 6.91,
+    "target_format": "RGBA16F",
+    "config": "handheld_720p"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Frame::Finish(nx::StateCache&, NxFrameStats*, bool)",
+    "ms": 1.459,
+    "share_of_22_2ms": 0.0657,
+    "instr": 892912,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "gpu_pass",
+    "name": "land",
+    "ms": 1.344,
+    "share_of_22_2ms": 0.0605,
+    "bound": "alu",
+    "pixels": 497664,
+    "frag_ms": 1.256,
+    "vertex_ms": 0.089,
+    "dram_mb": 6.97,
+    "target_format": "RGBA16F",
+    "config": "handheld_720p"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx::Renderer::Render(nx::Renderer::Draw const&)",
+    "ms": 1.081,
+    "share_of_22_2ms": 0.0487,
+    "instr": 661825,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   },
+   {
+    "kind": "cpu_function",
+    "name": "nx_d3d9_sampler",
+    "ms": 1.01,
+    "share_of_22_2ms": 0.0455,
+    "instr": 618170,
+    "thread": "main+render (front)",
+    "module": "render/native front"
+   }
+  ],
+  "input": "synthetic mix_hi (docs/RENDER_PERF.md \u00a72; S16's NXD9 captures of the real game replace it); GPU: S6n's native shaders, and real019_ = the game's shaderpackage019 programs translated by sdp2dksh (class averages) on the same pass mix"
+ },
+ "optimizations": [],
  "families": {
   "shadow": {
    "draws": {
@@ -815,7 +2230,7 @@
   ]
  },
  "gpu": {
-  "model": "Per DKSH: registers (DkshProgramHeader.num_gprs), Maxwell instructions (code words that are not scheduling words,\nnot uam's NOP / \"BRA $\" padding), and from uam's TGSI (-t): static instruction count, texture instructions, and a\ndynamic estimate (the light loop of lit*.frag run LIGHTS times; every other TGSI loop is a compiled switch and runs\nonce; both arms of every IF are counted, so branchy epilogues are upper bounds). maxwell_dyn = maxwell_static x\ntgsi_dyn / tgsi_static.\n\nScene model (MODEL below, every number is copied into the JSON): per family, covered pixels = target pixels x\ncoverage x overdraw; fragment time = pixels x max(ALU: maxwell_dyn / 256 lanes, TEX: tex x TEX_COST / 16 TMUs,\nROP: 1 / 16 (depth-only 1 / 32)) / clock, ALU and TEX divided by an issue efficiency (EFF: 1.0 and 0.6 give the\nlo/hi estimate); vertex time = draws x vertices x vs maxwell_dyn / 256 / clock; frame\ntime = max(sum over families, DRAM traffic / (25.6 GB/s x efficiency)). No caches, no early-z rejection benefit\nbeyond the overdraw factor, no cross-family overlap, no CPU/GPU sync stalls.",
+  "model": "Per DKSH: registers (DkshProgramHeader.num_gprs), Maxwell instructions (code words that are not scheduling words,\nnot uam's NOP / \"BRA $\" padding), and from uam's TGSI (-t): static instruction count, texture instructions, and a\ndynamic estimate (the light loop of lit*.frag run LIGHTS times; every other TGSI loop is a compiled switch and runs\nonce; both arms of every IF are counted, so branchy epilogues are upper bounds). maxwell_dyn = maxwell_static x\ntgsi_dyn / tgsi_static.\n\nScene model (MODEL below, every number is copied into the JSON): per family, covered pixels = target pixels x\ncoverage x overdraw; fragment time = pixels x max(ALU: maxwell_dyn / 256 lanes, TEX: tex x TEX_COST / 16 TMUs,\nROP: 1 / 16, depth-only 1 / 32, 64-bit colour 1 / 8) / clock, ALU and TEX divided by an issue efficiency (EFF: 1.0 and\n0.6 give the lo/hi estimate); ALU slots count fp16x2 instructions at half cost (FP16_RATE); DRAM bytes per pixel\nfrom the family's render-target format (TARGET_FORMATS, colour x2 when blending), depth traffic x Z_COMPRESS and\nTEX_BYTES per texture fetch; presets (PRESETS) give target size, shadow map and reflection size per config; vertex time = draws x vertices x vs maxwell_dyn / 256 / clock; frame\ntime = max(sum over families, DRAM traffic / (25.6 GB/s x efficiency)). No caches, no early-z rejection benefit\nbeyond the overdraw factor, no cross-family overlap, no CPU/GPU sync stalls.",
   "assumptions": {
    "lights": 3,
    "tex_cost": 1.5,
@@ -837,111 +2252,167 @@
      "handheld_boost": 460.8
     }
    },
-   "configs": [
-    [
-     "docked_720p",
-     "docked",
-     1280,
-     720
-    ],
-    [
-     "docked_1080p",
-     "docked",
-     1920,
-     1080
-    ],
-    [
-     "handheld_720p",
-     "handheld",
-     1280,
-     720
-    ],
-    [
-     "handheld_540p",
-     "handheld",
-     960,
-     540
-    ]
-   ],
+   "presets": {
+    "docked_720p": {
+     "clock": "docked",
+     "w": 1280,
+     "h": 720,
+     "shadow": [
+      3,
+      1024
+     ],
+     "refl": [
+      512,
+      512
+     ],
+     "gate": true
+    },
+    "handheld_720p": {
+     "clock": "handheld",
+     "w": 1280,
+     "h": 720,
+     "shadow": [
+      3,
+      512
+     ],
+     "refl": [
+      256,
+      256
+     ],
+     "gate": true
+    },
+    "docked_1080p": {
+     "clock": "docked",
+     "w": 1920,
+     "h": 1080,
+     "shadow": [
+      3,
+      1024
+     ],
+     "refl": [
+      512,
+      512
+     ],
+     "gate": false
+    },
+    "handheld_540p_dynres": {
+     "clock": "handheld",
+     "w": 960,
+     "h": 540,
+     "shadow": [
+      3,
+      512
+     ],
+     "refl": [
+      256,
+      256
+     ],
+     "gate": false
+    }
+   },
+   "target_formats": {
+    "main": "RGBA16F",
+    "refl": "RGBA16F",
+    "imagespace": "RGBA16F",
+    "shadow": "D24",
+    "depth": "D24S8"
+   },
+   "format_bytes": {
+    "RGBA8": 4,
+    "RGB10A2": 4,
+    "R11G11B10F": 4,
+    "RGBA16F": 8,
+    "RG16F": 4,
+    "R16F": 2,
+    "D24": 4,
+    "D24S8": 4,
+    "D32F": 4
+   },
+   "z_compress": 0.5,
+   "tex_bytes": 0.5,
+   "fp16_rate": 2.0,
    "families": {
     "shadow": {
      "vs": "depth.vert",
      "ps": "depth.frag",
-     "target": [
-      1024,
-      1024,
-      3
-     ],
+     "target": "shadow",
      "coverage": 0.6,
      "overdraw": 1.5,
      "verts": 600,
-     "bpp": 6,
+     "depth": 2,
      "depth_only": true
     },
     "water_refl": {
      "vs": "lit.vert",
      "ps": "lit.frag",
-     "scale": 0.25,
+     "target": "refl",
      "coverage": 0.8,
      "overdraw": 1.5,
      "verts": 400,
-     "bpp": 12
+     "depth": 2
     },
     "lit": {
      "vs": "lit.vert",
      "ps": "lit_spec.frag",
+     "target": "main",
      "coverage": 0.55,
      "overdraw": 1.8,
      "verts": 600,
-     "bpp": 12
+     "depth": 2
     },
     "land": {
      "vs": "land.vert",
      "ps": "land.frag",
+     "target": "main",
      "coverage": 0.45,
      "overdraw": 1.2,
      "verts": 1089,
-     "bpp": 14
+     "depth": 2
     },
     "lod": {
      "vs": "lit.vert",
      "ps": "lit.frag",
+     "target": "main",
      "coverage": 0.15,
      "overdraw": 1.2,
      "verts": 400,
-     "bpp": 12
+     "depth": 2
     },
     "trees": {
      "vs": "lit.vert",
      "ps": "lit.frag",
+     "target": "main",
      "coverage": 0.15,
      "overdraw": 2.5,
      "verts": 300,
-     "bpp": 12
+     "depth": 2
     },
     "grass": {
      "vs": "nolight_tex.vert",
      "ps": "nolight_tex.frag",
+     "target": "main",
      "coverage": 0.2,
      "overdraw": 3.0,
      "verts": 2000,
-     "bpp": 10
+     "depth": 2
     },
     "actors": {
      "vs": "lit_vc.vert",
      "ps": "lit_spec.frag",
+     "target": "main",
      "coverage": 0.05,
      "overdraw": 1.3,
      "verts": 1500,
-     "bpp": 12
+     "depth": 2
     },
     "sky": {
      "vs": "sky.vert",
      "ps": "sky_clouds.frag",
+     "target": "main",
      "coverage": 0.35,
      "overdraw": 1.0,
      "verts": 500,
-     "bpp": 8,
+     "depth": 1,
      "draws": [
       4,
       6
@@ -950,19 +2421,68 @@
     "particles": {
      "vs": "nolight_texvc.vert",
      "ps": "nolight_tex.frag",
+     "target": "main",
      "coverage": 0.1,
      "overdraw": 4.0,
      "verts": 200,
-     "bpp": 12
+     "depth": 1,
+     "blend": true
     },
     "imagespace_ui": {
      "vs": "quad.vert",
      "ps": "tex.frag",
+     "target": "imagespace",
      "coverage": 3.5,
      "overdraw": 1.0,
      "verts": 4,
-     "bpp": 12
+     "depth": 0
     }
+   },
+   "real_map": {
+    "shadow": [
+     "SLS vso",
+     "SLS pso"
+    ],
+    "water_refl": [
+     "SLS vso",
+     "SLS pso"
+    ],
+    "lit": [
+     "SLS vso",
+     "SLS pso"
+    ],
+    "land": [
+     "SLS vso",
+     "SLS pso"
+    ],
+    "lod": [
+     "DISTLOD vso",
+     "SM pso"
+    ],
+    "trees": [
+     "STB vso",
+     "STB pso"
+    ],
+    "grass": [
+     "GRASS vso",
+     "STLEAF pso"
+    ],
+    "actors": [
+     "SKIN vso",
+     "SKIN pso"
+    ],
+    "sky": [
+     "SKY vso",
+     "SKY pso"
+    ],
+    "particles": [
+     "PAR vso",
+     "PARTICLE pso"
+    ],
+    "imagespace_ui": [
+     "ISBLUR vso",
+     "IS pso"
+    ]
    }
   },
   "shaders": {
@@ -970,361 +2490,2170 @@
     "gprs": 4,
     "code_bytes": 256,
     "maxwell_static": 11,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 1,
     "tgsi_dyn": 1.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 11.0
+    "maxwell_dyn": 11.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 11.0
    },
    "depth.vert": {
     "gprs": 8,
     "code_bytes": 512,
     "maxwell_static": 35,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 6,
     "tgsi_dyn": 6.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 35.0
+    "maxwell_dyn": 35.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 35.0
    },
    "depth_out.frag": {
     "gprs": 4,
     "code_bytes": 256,
     "maxwell_static": 10,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 3,
     "tgsi_dyn": 3.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 10.0
+    "maxwell_dyn": 10.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 10.0
    },
    "land.frag": {
     "gprs": 17,
     "code_bytes": 1792,
     "maxwell_static": 151,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 139,
     "tgsi_dyn": 137.0,
     "tex": 4,
     "light_loops": 0,
-    "maxwell_dyn": 148.8
+    "maxwell_dyn": 148.8,
+    "fp16_dyn": 0.0,
+    "alu_slots": 148.8
    },
    "land.vert": {
     "gprs": 8,
     "code_bytes": 512,
     "maxwell_static": 32,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 10,
     "tgsi_dyn": 10.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 32.0
+    "maxwell_dyn": 32.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 32.0
    },
    "lit.frag": {
     "gprs": 20,
     "code_bytes": 2304,
     "maxwell_static": 201,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 200,
     "tgsi_dyn": 316.0,
     "tex": 1,
     "light_loops": 1,
-    "maxwell_dyn": 317.6
+    "maxwell_dyn": 317.6,
+    "fp16_dyn": 0.0,
+    "alu_slots": 317.6
    },
    "lit.vert": {
     "gprs": 12,
     "code_bytes": 768,
     "maxwell_static": 56,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 17,
     "tgsi_dyn": 17.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 56.0
+    "maxwell_dyn": 56.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 56.0
    },
    "lit_spec.frag": {
     "gprs": 26,
     "code_bytes": 2816,
     "maxwell_static": 250,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 227,
     "tgsi_dyn": 373.0,
     "tex": 1,
     "light_loops": 1,
-    "maxwell_dyn": 410.8
+    "maxwell_dyn": 410.8,
+    "fp16_dyn": 0.0,
+    "alu_slots": 410.8
    },
    "lit_vc.vert": {
     "gprs": 12,
     "code_bytes": 768,
     "maxwell_static": 59,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 17,
     "tgsi_dyn": 17.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 59.0
+    "maxwell_dyn": 59.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 59.0
    },
    "nolight_col.frag": {
     "gprs": 7,
     "code_bytes": 1536,
     "maxwell_static": 127,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 121,
     "tgsi_dyn": 119.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 124.9
+    "maxwell_dyn": 124.9,
+    "fp16_dyn": 0.0,
+    "alu_slots": 124.9
    },
    "nolight_tex.frag": {
     "gprs": 7,
     "code_bytes": 1536,
     "maxwell_static": 131,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 123,
     "tgsi_dyn": 121.0,
     "tex": 1,
     "light_loops": 0,
-    "maxwell_dyn": 128.9
+    "maxwell_dyn": 128.9,
+    "fp16_dyn": 0.0,
+    "alu_slots": 128.9
    },
    "nolight_tex.vert": {
     "gprs": 8,
     "code_bytes": 512,
     "maxwell_static": 33,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 9,
     "tgsi_dyn": 9.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 33.0
+    "maxwell_dyn": 33.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 33.0
    },
    "nolight_texfall.vert": {
     "gprs": 16,
     "code_bytes": 1024,
     "maxwell_static": 83,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 28,
     "tgsi_dyn": 28.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 83.0
+    "maxwell_dyn": 83.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 83.0
    },
    "nolight_texvc.vert": {
     "gprs": 12,
     "code_bytes": 512,
     "maxwell_static": 34,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 10,
     "tgsi_dyn": 10.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 34.0
+    "maxwell_dyn": 34.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 34.0
    },
    "nolight_texvcfall.vert": {
     "gprs": 17,
     "code_bytes": 1024,
     "maxwell_static": 79,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 29,
     "tgsi_dyn": 29.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 79.0
+    "maxwell_dyn": 79.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 79.0
    },
    "nolight_vc.vert": {
     "gprs": 12,
     "code_bytes": 512,
     "maxwell_static": 34,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 10,
     "tgsi_dyn": 10.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 34.0
+    "maxwell_dyn": 34.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 34.0
    },
    "quad.vert": {
     "gprs": 12,
     "code_bytes": 768,
     "maxwell_static": 55,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 29,
     "tgsi_dyn": 29.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 55.0
+    "maxwell_dyn": 55.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 55.0
    },
    "sky.frag": {
     "gprs": 7,
     "code_bytes": 1792,
     "maxwell_static": 155,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 137,
     "tgsi_dyn": 135.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 152.7
+    "maxwell_dyn": 152.7,
+    "fp16_dyn": 0.0,
+    "alu_slots": 152.7
    },
    "sky.vert": {
     "gprs": 9,
     "code_bytes": 512,
     "maxwell_static": 33,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 10,
     "tgsi_dyn": 10.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 33.0
+    "maxwell_dyn": 33.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 33.0
    },
    "sky_clouds.frag": {
     "gprs": 9,
     "code_bytes": 1792,
     "maxwell_static": 153,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 144,
     "tgsi_dyn": 142.0,
     "tex": 1,
     "light_loops": 0,
-    "maxwell_dyn": 150.9
+    "maxwell_dyn": 150.9,
+    "fp16_dyn": 0.0,
+    "alu_slots": 150.9
    },
    "solid.frag": {
     "gprs": 7,
     "code_bytes": 1536,
     "maxwell_static": 127,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 121,
     "tgsi_dyn": 119.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 124.9
+    "maxwell_dyn": 124.9,
+    "fp16_dyn": 0.0,
+    "alu_slots": 124.9
    },
    "tex.frag": {
     "gprs": 7,
     "code_bytes": 1536,
     "maxwell_static": 131,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 123,
     "tgsi_dyn": 121.0,
     "tex": 1,
     "light_loops": 0,
-    "maxwell_dyn": 128.9
+    "maxwell_dyn": 128.9,
+    "fp16_dyn": 0.0,
+    "alu_slots": 128.9
    },
    "text.frag": {
     "gprs": 6,
     "code_bytes": 1536,
     "maxwell_static": 131,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 126,
     "tgsi_dyn": 124.0,
     "tex": 1,
     "light_loops": 0,
-    "maxwell_dyn": 128.9
+    "maxwell_dyn": 128.9,
+    "fp16_dyn": 0.0,
+    "alu_slots": 128.9
    },
    "tile.frag": {
     "gprs": 7,
     "code_bytes": 1536,
     "maxwell_static": 127,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 124,
     "tgsi_dyn": 122.0,
     "tex": 1,
     "light_loops": 0,
-    "maxwell_dyn": 125.0
+    "maxwell_dyn": 125.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 125.0
    },
    "tile.vert": {
     "gprs": 8,
     "code_bytes": 512,
     "maxwell_static": 35,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 8,
     "tgsi_dyn": 8.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 35.0
+    "maxwell_dyn": 35.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 35.0
    },
    "tile_alphamap.frag": {
     "gprs": 6,
     "code_bytes": 1536,
     "maxwell_static": 130,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 128,
     "tgsi_dyn": 126.0,
     "tex": 1,
     "light_loops": 0,
-    "maxwell_dyn": 128.0
+    "maxwell_dyn": 128.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 128.0
    },
    "tile_scroll.vert": {
     "gprs": 8,
     "code_bytes": 512,
     "maxwell_static": 31,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 9,
     "tgsi_dyn": 9.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 31.0
+    "maxwell_dyn": 31.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 31.0
    },
    "tile_vc.frag": {
     "gprs": 7,
     "code_bytes": 1536,
     "maxwell_static": 129,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 125,
     "tgsi_dyn": 123.0,
     "tex": 1,
     "light_loops": 0,
-    "maxwell_dyn": 126.9
+    "maxwell_dyn": 126.9,
+    "fp16_dyn": 0.0,
+    "alu_slots": 126.9
    },
    "tile_vc.vert": {
     "gprs": 8,
     "code_bytes": 512,
     "maxwell_static": 32,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 8,
     "tgsi_dyn": 8.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 32.0
+    "maxwell_dyn": 32.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 32.0
    },
    "tri.vert": {
     "gprs": 4,
     "code_bytes": 256,
     "maxwell_static": 10,
+    "fp16_static": 0,
     "scratch_per_warp": 0,
     "occupancy_warps_per_sm": 64,
     "tgsi_static": 4,
     "tgsi_dyn": 4.0,
     "tex": 0,
     "light_loops": 0,
-    "maxwell_dyn": 10.0
+    "maxwell_dyn": 10.0,
+    "fp16_dyn": 0.0,
+    "alu_slots": 10.0
+   },
+   "real:SLS vso": {
+    "programs": 129,
+    "maxwell_static": 176.0,
+    "maxwell_dyn": 176.0,
+    "alu_slots": 176.0,
+    "fp16_dyn": 0,
+    "gprs": 26.6,
+    "tex": 0.0
+   },
+   "real:SLS1S vso": {
+    "programs": 19,
+    "maxwell_static": 343.9,
+    "maxwell_dyn": 343.9,
+    "alu_slots": 343.9,
+    "fp16_dyn": 0,
+    "gprs": 42.3,
+    "tex": 0.0
+   },
+   "real:SLS pso": {
+    "programs": 70,
+    "maxwell_static": 161.2,
+    "maxwell_dyn": 161.2,
+    "alu_slots": 161.2,
+    "fp16_dyn": 0,
+    "gprs": 10.9,
+    "tex": 1.77
+   },
+   "real:SLS2070s pso": {
+    "programs": 1,
+    "maxwell_static": 120.0,
+    "maxwell_dyn": 120.0,
+    "alu_slots": 120.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 0.0
+   },
+   "real:SLS2071s pso": {
+    "programs": 1,
+    "maxwell_static": 116.0,
+    "maxwell_dyn": 116.0,
+    "alu_slots": 116.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 1.0
+   },
+   "real:SLS2072s pso": {
+    "programs": 1,
+    "maxwell_static": 120.0,
+    "maxwell_dyn": 120.0,
+    "alu_slots": 120.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 0.0
+   },
+   "real:SLS2073s pso": {
+    "programs": 1,
+    "maxwell_static": 116.0,
+    "maxwell_dyn": 116.0,
+    "alu_slots": 116.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 1.0
+   },
+   "real:GRASS23x vso": {
+    "programs": 24,
+    "maxwell_static": 203.8,
+    "maxwell_dyn": 203.8,
+    "alu_slots": 203.8,
+    "fp16_dyn": 0,
+    "gprs": 23.6,
+    "tex": 0.0
+   },
+   "real:GRASS vso": {
+    "programs": 24,
+    "maxwell_static": 209.5,
+    "maxwell_dyn": 209.5,
+    "alu_slots": 209.5,
+    "fp16_dyn": 0,
+    "gprs": 23.6,
+    "tex": 0.0
+   },
+   "real:DISTLOD vso": {
+    "programs": 2,
+    "maxwell_static": 141.5,
+    "maxwell_dyn": 141.5,
+    "alu_slots": 141.5,
+    "fp16_dyn": 0,
+    "gprs": 20.0,
+    "tex": 0.0
+   },
+   "real:STB vso": {
+    "programs": 30,
+    "maxwell_static": 162.4,
+    "maxwell_dyn": 162.4,
+    "alu_slots": 162.4,
+    "fp16_dyn": 0,
+    "gprs": 21.0,
+    "tex": 0.0
+   },
+   "real:STB pso": {
+    "programs": 10,
+    "maxwell_static": 134.6,
+    "maxwell_dyn": 134.6,
+    "alu_slots": 134.6,
+    "fp16_dyn": 0,
+    "gprs": 8.9,
+    "tex": 2.0
+   },
+   "real:STFROND vso": {
+    "programs": 4,
+    "maxwell_static": 126.0,
+    "maxwell_dyn": 126.0,
+    "alu_slots": 126.0,
+    "fp16_dyn": 0,
+    "gprs": 14.2,
+    "tex": 0.0
+   },
+   "real:STFROND pso": {
+    "programs": 2,
+    "maxwell_static": 123.0,
+    "maxwell_dyn": 123.0,
+    "alu_slots": 123.0,
+    "fp16_dyn": 0,
+    "gprs": 10.5,
+    "tex": 1.0
+   },
+   "real:STLEAF vso": {
+    "programs": 4,
+    "maxwell_static": 239.2,
+    "maxwell_dyn": 239.2,
+    "alu_slots": 239.2,
+    "fp16_dyn": 0,
+    "gprs": 17.0,
+    "tex": 0.0
+   },
+   "real:STLEAF pso": {
+    "programs": 4,
+    "maxwell_static": 117.5,
+    "maxwell_dyn": 117.5,
+    "alu_slots": 117.5,
+    "fp16_dyn": 0,
+    "gprs": 9.5,
+    "tex": 1.0
+   },
+   "real:BS vso": {
+    "programs": 1,
+    "maxwell_static": 30.0,
+    "maxwell_dyn": 30.0,
+    "alu_slots": 30.0,
+    "fp16_dyn": 0,
+    "gprs": 9.0,
+    "tex": 0.0
+   },
+   "real:BSF vso": {
+    "programs": 1,
+    "maxwell_static": 30.0,
+    "maxwell_dyn": 30.0,
+    "alu_slots": 30.0,
+    "fp16_dyn": 0,
+    "gprs": 9.0,
+    "tex": 0.0
+   },
+   "real:BS pso": {
+    "programs": 1,
+    "maxwell_static": 131.0,
+    "maxwell_dyn": 131.0,
+    "alu_slots": 131.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 2.0
+   },
+   "real:BSF pso": {
+    "programs": 1,
+    "maxwell_static": 115.0,
+    "maxwell_dyn": 115.0,
+    "alu_slots": 115.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 2.0
+   },
+   "real:DISTTREE vso": {
+    "programs": 1,
+    "maxwell_static": 84.0,
+    "maxwell_dyn": 84.0,
+    "alu_slots": 84.0,
+    "fp16_dyn": 0,
+    "gprs": 16.0,
+    "tex": 0.0
+   },
+   "real:DISTTREE pso": {
+    "programs": 1,
+    "maxwell_static": 122.0,
+    "maxwell_dyn": 122.0,
+    "alu_slots": 122.0,
+    "fp16_dyn": 0,
+    "gprs": 12.0,
+    "tex": 1.0
+   },
+   "real:DISTTREESil pso": {
+    "programs": 1,
+    "maxwell_static": 119.0,
+    "maxwell_dyn": 119.0,
+    "alu_slots": 119.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:DEBUG vso": {
+    "programs": 1,
+    "maxwell_static": 10.0,
+    "maxwell_dyn": 10.0,
+    "alu_slots": 10.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 0.0
+   },
+   "real:DEBUG pso": {
+    "programs": 2,
+    "maxwell_static": 110.0,
+    "maxwell_dyn": 110.0,
+    "alu_slots": 110.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 1.0
+   },
+   "real:SKY vso": {
+    "programs": 1,
+    "maxwell_static": 32.0,
+    "maxwell_dyn": 32.0,
+    "alu_slots": 32.0,
+    "fp16_dyn": 0,
+    "gprs": 13.0,
+    "tex": 0.0
+   },
+   "real:SKYT vso": {
+    "programs": 1,
+    "maxwell_static": 37.0,
+    "maxwell_dyn": 37.0,
+    "alu_slots": 37.0,
+    "fp16_dyn": 0,
+    "gprs": 14.0,
+    "tex": 0.0
+   },
+   "real:SKYMM vso": {
+    "programs": 1,
+    "maxwell_static": 37.0,
+    "maxwell_dyn": 37.0,
+    "alu_slots": 37.0,
+    "fp16_dyn": 0,
+    "gprs": 14.0,
+    "tex": 0.0
+   },
+   "real:SKYSTARS vso": {
+    "programs": 1,
+    "maxwell_static": 41.0,
+    "maxwell_dyn": 41.0,
+    "alu_slots": 41.0,
+    "fp16_dyn": 0,
+    "gprs": 13.0,
+    "tex": 0.0
+   },
+   "real:SKYOCC vso": {
+    "programs": 1,
+    "maxwell_static": 20.0,
+    "maxwell_dyn": 20.0,
+    "alu_slots": 20.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 0.0
+   },
+   "real:SKYCLOUDS vso": {
+    "programs": 1,
+    "maxwell_static": 38.0,
+    "maxwell_dyn": 38.0,
+    "alu_slots": 38.0,
+    "fp16_dyn": 0,
+    "gprs": 14.0,
+    "tex": 0.0
+   },
+   "real:SKYCLOUDSFADE vso": {
+    "programs": 1,
+    "maxwell_static": 45.0,
+    "maxwell_dyn": 45.0,
+    "alu_slots": 45.0,
+    "fp16_dyn": 0,
+    "gprs": 13.0,
+    "tex": 0.0
+   },
+   "real:SKY pso": {
+    "programs": 1,
+    "maxwell_static": 69.0,
+    "maxwell_dyn": 69.0,
+    "alu_slots": 69.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 0.0
+   },
+   "real:SKYTEX pso": {
+    "programs": 1,
+    "maxwell_static": 99.0,
+    "maxwell_dyn": 99.0,
+    "alu_slots": 99.0,
+    "fp16_dyn": 0,
+    "gprs": 15.0,
+    "tex": 2.0
+   },
+   "real:SKYTEXFADE pso": {
+    "programs": 1,
+    "maxwell_static": 69.0,
+    "maxwell_dyn": 69.0,
+    "alu_slots": 69.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 1.0
+   },
+   "real:SKYSUNOCCL pso": {
+    "programs": 1,
+    "maxwell_static": 65.0,
+    "maxwell_dyn": 65.0,
+    "alu_slots": 65.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 0.0
+   },
+   "real:SKYSHORIZFADE pso": {
+    "programs": 1,
+    "maxwell_static": 69.0,
+    "maxwell_dyn": 69.0,
+    "alu_slots": 69.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 1.0
+   },
+   "real:SKYFAR vso": {
+    "programs": 1,
+    "maxwell_static": 22.0,
+    "maxwell_dyn": 22.0,
+    "alu_slots": 22.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:SKYCLOUDSI vso": {
+    "programs": 1,
+    "maxwell_static": 25.0,
+    "maxwell_dyn": 25.0,
+    "alu_slots": 25.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:SKYQUADSI vso": {
+    "programs": 1,
+    "maxwell_static": 8.0,
+    "maxwell_dyn": 8.0,
+    "alu_slots": 8.0,
+    "fp16_dyn": 0,
+    "gprs": 4.0,
+    "tex": 0.0
+   },
+   "real:SKYSI pso": {
+    "programs": 1,
+    "maxwell_static": 58.0,
+    "maxwell_dyn": 58.0,
+    "alu_slots": 58.0,
+    "fp16_dyn": 0,
+    "gprs": 4.0,
+    "tex": 0.0
+   },
+   "real:SKYSISUN pso": {
+    "programs": 1,
+    "maxwell_static": 58.0,
+    "maxwell_dyn": 58.0,
+    "alu_slots": 58.0,
+    "fp16_dyn": 0,
+    "gprs": 4.0,
+    "tex": 0.0
+   },
+   "real:SKYSICLOUDS pso": {
+    "programs": 1,
+    "maxwell_static": 67.0,
+    "maxwell_dyn": 67.0,
+    "alu_slots": 67.0,
+    "fp16_dyn": 0,
+    "gprs": 4.0,
+    "tex": 2.0
+   },
+   "real:HAIR vso": {
+    "programs": 14,
+    "maxwell_static": 43.5,
+    "maxwell_dyn": 43.5,
+    "alu_slots": 43.5,
+    "fp16_dyn": 0,
+    "gprs": 13.0,
+    "tex": 0.0
+   },
+   "real:SKIN vso": {
+    "programs": 26,
+    "maxwell_static": 339.5,
+    "maxwell_dyn": 339.5,
+    "alu_slots": 339.5,
+    "fp16_dyn": 0,
+    "gprs": 43.7,
+    "tex": 0.0
+   },
+   "real:SKIN pso": {
+    "programs": 3,
+    "maxwell_static": 416.0,
+    "maxwell_dyn": 416.0,
+    "alu_slots": 416.0,
+    "fp16_dyn": 0,
+    "gprs": 29.0,
+    "tex": 4.0
+   },
+   "real:PAR vso": {
+    "programs": 20,
+    "maxwell_static": 162.2,
+    "maxwell_dyn": 162.2,
+    "alu_slots": 162.2,
+    "fp16_dyn": 0,
+    "gprs": 26.5,
+    "tex": 0.0
+   },
+   "real:GDECAL vso": {
+    "programs": 1,
+    "maxwell_static": 30.0,
+    "maxwell_dyn": 30.0,
+    "alu_slots": 30.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:GDECALS vso": {
+    "programs": 1,
+    "maxwell_static": 177.0,
+    "maxwell_dyn": 177.0,
+    "alu_slots": 177.0,
+    "fp16_dyn": 0,
+    "gprs": 17.0,
+    "tex": 0.0
+   },
+   "real:GDECAL pso": {
+    "programs": 1,
+    "maxwell_static": 116.0,
+    "maxwell_dyn": 116.0,
+    "alu_slots": 116.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:WATER vso": {
+    "programs": 3,
+    "maxwell_static": 94.3,
+    "maxwell_dyn": 94.3,
+    "alu_slots": 94.3,
+    "fp16_dyn": 0,
+    "gprs": 29.7,
+    "tex": 0.0
+   },
+   "real:WATER pso": {
+    "programs": 1,
+    "maxwell_static": 64.0,
+    "maxwell_dyn": 64.0,
+    "alu_slots": 64.0,
+    "fp16_dyn": 0,
+    "gprs": 4.0,
+    "tex": 0.0
+   },
+   "real:PARTICLE pso": {
+    "programs": 1,
+    "maxwell_static": 114.0,
+    "maxwell_dyn": 114.0,
+    "alu_slots": 114.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:BOLT vso": {
+    "programs": 1,
+    "maxwell_static": 138.0,
+    "maxwell_dyn": 138.0,
+    "alu_slots": 138.0,
+    "fp16_dyn": 0,
+    "gprs": 12.0,
+    "tex": 0.0
+   },
+   "real:BOLT pso": {
+    "programs": 1,
+    "maxwell_static": 124.0,
+    "maxwell_dyn": 124.0,
+    "alu_slots": 124.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 0.0
+   },
+   "real:BEAM vso": {
+    "programs": 1,
+    "maxwell_static": 41.0,
+    "maxwell_dyn": 41.0,
+    "alu_slots": 41.0,
+    "fp16_dyn": 0,
+    "gprs": 12.0,
+    "tex": 0.0
+   },
+   "real:BEAM pso": {
+    "programs": 1,
+    "maxwell_static": 108.0,
+    "maxwell_dyn": 108.0,
+    "alu_slots": 108.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:SM vso": {
+    "programs": 57,
+    "maxwell_static": 177.1,
+    "maxwell_dyn": 177.1,
+    "alu_slots": 177.1,
+    "fp16_dyn": 0,
+    "gprs": 22.0,
+    "tex": 0.0
+   },
+   "real:SM pso": {
+    "programs": 19,
+    "maxwell_static": 73.4,
+    "maxwell_dyn": 73.4,
+    "alu_slots": 73.4,
+    "fp16_dyn": 0,
+    "gprs": 4.8,
+    "tex": 0.63
+   },
+   "real:PRECIP vso": {
+    "programs": 4,
+    "maxwell_static": 162.2,
+    "maxwell_dyn": 162.2,
+    "alu_slots": 162.2,
+    "fp16_dyn": 0,
+    "gprs": 16.2,
+    "tex": 0.0
+   },
+   "real:PRECIP pso": {
+    "programs": 2,
+    "maxwell_static": 67.0,
+    "maxwell_dyn": 67.0,
+    "alu_slots": 67.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 1.0
+   },
+   "real:TILE vso": {
+    "programs": 3,
+    "maxwell_static": 28.3,
+    "maxwell_dyn": 28.3,
+    "alu_slots": 28.3,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:TILE pso": {
+    "programs": 3,
+    "maxwell_static": 111.7,
+    "maxwell_dyn": 111.7,
+    "alu_slots": 111.7,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.33
+   },
+   "real:NOLIGHT vso": {
+    "programs": 28,
+    "maxwell_static": 153.4,
+    "maxwell_dyn": 153.4,
+    "alu_slots": 153.4,
+    "fp16_dyn": 0,
+    "gprs": 18.1,
+    "tex": 0.0
+   },
+   "real:NOLIGHTTEX pso": {
+    "programs": 1,
+    "maxwell_static": 145.0,
+    "maxwell_dyn": 145.0,
+    "alu_slots": 145.0,
+    "fp16_dyn": 0,
+    "gprs": 15.0,
+    "tex": 1.0
+   },
+   "real:NOLIGHTVCONLY pso": {
+    "programs": 1,
+    "maxwell_static": 146.0,
+    "maxwell_dyn": 146.0,
+    "alu_slots": 146.0,
+    "fp16_dyn": 0,
+    "gprs": 15.0,
+    "tex": 0.0
+   },
+   "real:NOLIGHTTEXVC pso": {
+    "programs": 1,
+    "maxwell_static": 153.0,
+    "maxwell_dyn": 153.0,
+    "alu_slots": 153.0,
+    "fp16_dyn": 0,
+    "gprs": 15.0,
+    "tex": 1.0
+   },
+   "real:NOLIGHTTEXVCPMA pso": {
+    "programs": 1,
+    "maxwell_static": 135.0,
+    "maxwell_dyn": 135.0,
+    "alu_slots": 135.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 1.0
+   },
+   "real:NOLIGHTMAT pso": {
+    "programs": 1,
+    "maxwell_static": 137.0,
+    "maxwell_dyn": 137.0,
+    "alu_slots": 137.0,
+    "fp16_dyn": 0,
+    "gprs": 11.0,
+    "tex": 0.0
+   },
+   "real:NOLIGHTWF pso": {
+    "programs": 1,
+    "maxwell_static": 147.0,
+    "maxwell_dyn": 147.0,
+    "alu_slots": 147.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 0.0
+   },
+   "real:NOLIGHTWFAt pso": {
+    "programs": 1,
+    "maxwell_static": 149.0,
+    "maxwell_dyn": 149.0,
+    "alu_slots": 149.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:VolumetricFog vso": {
+    "programs": 2,
+    "maxwell_static": 34.0,
+    "maxwell_dyn": 34.0,
+    "alu_slots": 34.0,
+    "fp16_dyn": 0,
+    "gprs": 11.0,
+    "tex": 0.0
+   },
+   "real:VolumetricFog pso": {
+    "programs": 2,
+    "maxwell_static": 98.0,
+    "maxwell_dyn": 98.0,
+    "alu_slots": 98.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 1.0
+   },
+   "real:ISCOPY vso": {
+    "programs": 2,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISCOPY pso": {
+    "programs": 2,
+    "maxwell_static": 106.0,
+    "maxwell_dyn": 106.0,
+    "alu_slots": 106.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:IS pso": {
+    "programs": 78,
+    "maxwell_static": 162.0,
+    "maxwell_dyn": 162.0,
+    "alu_slots": 162.0,
+    "fp16_dyn": 0,
+    "gprs": 19.6,
+    "tex": 1.47
+   },
+   "real:ISCOPYRT vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISCOPYRT pso": {
+    "programs": 1,
+    "maxwell_static": 111.0,
+    "maxwell_dyn": 111.0,
+    "alu_slots": 111.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 1.0
+   },
+   "real:ISNULL vso": {
+    "programs": 1,
+    "maxwell_static": 10.0,
+    "maxwell_dyn": 10.0,
+    "alu_slots": 10.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 0.0
+   },
+   "real:ISSTENCILCOPY vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISSTENCILCOPY pso": {
+    "programs": 1,
+    "maxwell_static": 106.0,
+    "maxwell_dyn": 106.0,
+    "alu_slots": 106.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISSTENCILCOPYNOTEXNODEPTH vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISSTENCILCOPYNOTEXNODEPTH pso": {
+    "programs": 1,
+    "maxwell_static": 115.0,
+    "maxwell_dyn": 115.0,
+    "alu_slots": 115.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 0.0
+   },
+   "real:ISREFRACT vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISREFRACT pso": {
+    "programs": 1,
+    "maxwell_static": 160.0,
+    "maxwell_dyn": 160.0,
+    "alu_slots": 160.0,
+    "fp16_dyn": 0,
+    "gprs": 15.0,
+    "tex": 2.0
+   },
+   "real:ISVFOG vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISVFOG pso": {
+    "programs": 1,
+    "maxwell_static": 115.0,
+    "maxwell_dyn": 115.0,
+    "alu_slots": 115.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 2.0
+   },
+   "real:ISBLUR vso": {
+    "programs": 8,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISBLUR pso": {
+    "programs": 8,
+    "maxwell_static": 163.4,
+    "maxwell_dyn": 163.4,
+    "alu_slots": 163.4,
+    "fp16_dyn": 0,
+    "gprs": 30.8,
+    "tex": 1.0
+   },
+   "real:ISDOUBLEVIS vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISDOUBLEVIS pso": {
+    "programs": 1,
+    "maxwell_static": 162.0,
+    "maxwell_dyn": 162.0,
+    "alu_slots": 162.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 2.0
+   },
+   "real:ISALPHAMULT vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISALPHAMULT pso": {
+    "programs": 1,
+    "maxwell_static": 123.0,
+    "maxwell_dyn": 123.0,
+    "alu_slots": 123.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISBLEND vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISBLEND pso": {
+    "programs": 1,
+    "maxwell_static": 122.0,
+    "maxwell_dyn": 122.0,
+    "alu_slots": 122.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 2.0
+   },
+   "real:ISTEXMASK vso": {
+    "programs": 1,
+    "maxwell_static": 22.0,
+    "maxwell_dyn": 22.0,
+    "alu_slots": 22.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISTEXMASK pso": {
+    "programs": 1,
+    "maxwell_static": 109.0,
+    "maxwell_dyn": 109.0,
+    "alu_slots": 109.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISMAP vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISMAP pso": {
+    "programs": 1,
+    "maxwell_static": 181.0,
+    "maxwell_dyn": 181.0,
+    "alu_slots": 181.0,
+    "fp16_dyn": 0,
+    "gprs": 35.0,
+    "tex": 1.0
+   },
+   "real:ISMENUBG vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 0.0
+   },
+   "real:ISMENUBG pso": {
+    "programs": 1,
+    "maxwell_static": 129.0,
+    "maxwell_dyn": 129.0,
+    "alu_slots": 129.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 1.0
+   },
+   "real:ISCinematic vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISCinematic pso": {
+    "programs": 1,
+    "maxwell_static": 142.0,
+    "maxwell_dyn": 142.0,
+    "alu_slots": 142.0,
+    "fp16_dyn": 0,
+    "gprs": 9.0,
+    "tex": 1.0
+   },
+   "real:ISDOF vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISDOF pso": {
+    "programs": 1,
+    "maxwell_static": 155.0,
+    "maxwell_dyn": 155.0,
+    "alu_slots": 155.0,
+    "fp16_dyn": 0,
+    "gprs": 13.0,
+    "tex": 3.0
+   },
+   "real:ISDOFMASK vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISDOFMASK pso": {
+    "programs": 1,
+    "maxwell_static": 260.0,
+    "maxwell_dyn": 260.0,
+    "alu_slots": 260.0,
+    "fp16_dyn": 0,
+    "gprs": 44.0,
+    "tex": 4.0
+   },
+   "real:ISMOTBLUR vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISMOTBLUR pso": {
+    "programs": 1,
+    "maxwell_static": 264.0,
+    "maxwell_dyn": 264.0,
+    "alu_slots": 264.0,
+    "fp16_dyn": 0,
+    "gprs": 47.0,
+    "tex": 2.0
+   },
+   "real:ISRBLUR vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISRBLUR pso": {
+    "programs": 1,
+    "maxwell_static": 178.0,
+    "maxwell_dyn": 178.0,
+    "alu_slots": 178.0,
+    "fp16_dyn": 0,
+    "gprs": 17.0,
+    "tex": 1.0
+   },
+   "real:ISRBLURM vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISRBLURM pso": {
+    "programs": 1,
+    "maxwell_static": 242.0,
+    "maxwell_dyn": 242.0,
+    "alu_slots": 242.0,
+    "fp16_dyn": 0,
+    "gprs": 49.0,
+    "tex": 1.0
+   },
+   "real:ISRBLURH vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISRBLURH pso": {
+    "programs": 1,
+    "maxwell_static": 306.0,
+    "maxwell_dyn": 306.0,
+    "alu_slots": 306.0,
+    "fp16_dyn": 0,
+    "gprs": 81.0,
+    "tex": 1.0
+   },
+   "real:ISSunbeams vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISSunbeams pso": {
+    "programs": 1,
+    "maxwell_static": 179.0,
+    "maxwell_dyn": 179.0,
+    "alu_slots": 179.0,
+    "fp16_dyn": 0,
+    "gprs": 35.0,
+    "tex": 1.0
+   },
+   "real:ISHDRBLENDINSHADER vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISHDRBLENDINSHADER pso": {
+    "programs": 1,
+    "maxwell_static": 125.0,
+    "maxwell_dyn": 125.0,
+    "alu_slots": 125.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 2.0
+   },
+   "real:ISHDRBLENDINSHADERCIN vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISHDRBLENDINSHADERCIN pso": {
+    "programs": 1,
+    "maxwell_static": 153.0,
+    "maxwell_dyn": 153.0,
+    "alu_slots": 153.0,
+    "fp16_dyn": 0,
+    "gprs": 9.0,
+    "tex": 2.0
+   },
+   "real:ISHDRBLENDINSHADERCINAM vso": {
+    "programs": 1,
+    "maxwell_static": 17.0,
+    "maxwell_dyn": 17.0,
+    "alu_slots": 17.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 0.0
+   },
+   "real:ISHDRBLENDINSHADERCINAM pso": {
+    "programs": 1,
+    "maxwell_static": 168.0,
+    "maxwell_dyn": 168.0,
+    "alu_slots": 168.0,
+    "fp16_dyn": 0,
+    "gprs": 13.0,
+    "tex": 2.0
+   },
+   "real:ISHDRBLUR vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISHDRBLUR pso": {
+    "programs": 1,
+    "maxwell_static": 198.0,
+    "maxwell_dyn": 198.0,
+    "alu_slots": 198.0,
+    "fp16_dyn": 0,
+    "gprs": 47.0,
+    "tex": 1.0
+   },
+   "real:ISHDRBRIGHT vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISHDRBRIGHT pso": {
+    "programs": 1,
+    "maxwell_static": 116.0,
+    "maxwell_dyn": 116.0,
+    "alu_slots": 116.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISHDRDOWN vso": {
+    "programs": 3,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISHDRDOWN pso": {
+    "programs": 3,
+    "maxwell_static": 197.3,
+    "maxwell_dyn": 197.3,
+    "alu_slots": 197.3,
+    "fp16_dyn": 0,
+    "gprs": 30.7,
+    "tex": 1.0
+   },
+   "real:ISHDRDS vso": {
+    "programs": 4,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISHDRDS pso": {
+    "programs": 4,
+    "maxwell_static": 193.5,
+    "maxwell_dyn": 193.5,
+    "alu_slots": 193.5,
+    "fp16_dyn": 0,
+    "gprs": 33.0,
+    "tex": 1.5
+   },
+   "real:ISHDRADAPT vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISHDRADAPT pso": {
+    "programs": 1,
+    "maxwell_static": 139.0,
+    "maxwell_dyn": 139.0,
+    "alu_slots": 139.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 2.0
+   },
+   "real:ISHDRLUMCLAMP vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISHDRLUMCLAMP pso": {
+    "programs": 1,
+    "maxwell_static": 126.0,
+    "maxwell_dyn": 126.0,
+    "alu_slots": 126.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISIFSCANBLEND vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISIFSCANBLEND pso": {
+    "programs": 1,
+    "maxwell_static": 212.0,
+    "maxwell_dyn": 212.0,
+    "alu_slots": 212.0,
+    "fp16_dyn": 0,
+    "gprs": 49.0,
+    "tex": 4.0
+   },
+   "real:ISIFVATSSCANBLEND vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISIFVATSSCANBLEND pso": {
+    "programs": 1,
+    "maxwell_static": 217.0,
+    "maxwell_dyn": 217.0,
+    "alu_slots": 217.0,
+    "fp16_dyn": 0,
+    "gprs": 29.0,
+    "tex": 4.0
+   },
+   "real:ISIFVATSSCAN vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISIFVATSSCAN pso": {
+    "programs": 1,
+    "maxwell_static": 162.0,
+    "maxwell_dyn": 162.0,
+    "alu_slots": 162.0,
+    "fp16_dyn": 0,
+    "gprs": 16.0,
+    "tex": 4.0
+   },
+   "real:ISCOPYUNPACK vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISCOPYUNPACK pso": {
+    "programs": 1,
+    "maxwell_static": 106.0,
+    "maxwell_dyn": 106.0,
+    "alu_slots": 106.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISTV vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISTV pso": {
+    "programs": 1,
+    "maxwell_static": 217.0,
+    "maxwell_dyn": 217.0,
+    "alu_slots": 217.0,
+    "fp16_dyn": 0,
+    "gprs": 27.0,
+    "tex": 3.0
+   },
+   "real:ISBPBLUR vso": {
+    "programs": 7,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISBPBLUR pso": {
+    "programs": 7,
+    "maxwell_static": 246.0,
+    "maxwell_dyn": 246.0,
+    "alu_slots": 246.0,
+    "fp16_dyn": 0,
+    "gprs": 32.6,
+    "tex": 2.0
+   },
+   "real:ISFFTWATERSPECTRUM vso": {
+    "programs": 2,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTWATERSPECTRUM pso": {
+    "programs": 2,
+    "maxwell_static": 145.0,
+    "maxwell_dyn": 145.0,
+    "alu_slots": 145.0,
+    "fp16_dyn": 0,
+    "gprs": 12.0,
+    "tex": 2.0
+   },
+   "real:ISFFTHORIZONTALBUTTERFLY vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTHORIZONTALBUTTERFLY pso": {
+    "programs": 1,
+    "maxwell_static": 122.0,
+    "maxwell_dyn": 122.0,
+    "alu_slots": 122.0,
+    "fp16_dyn": 0,
+    "gprs": 9.0,
+    "tex": 2.0
+   },
+   "real:ISFFTVERTICALBUTTERFLY vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTVERTICALBUTTERFLY pso": {
+    "programs": 1,
+    "maxwell_static": 122.0,
+    "maxwell_dyn": 122.0,
+    "alu_slots": 122.0,
+    "fp16_dyn": 0,
+    "gprs": 9.0,
+    "tex": 2.0
+   },
+   "real:ISFFTHORIZONTALSCRAMBLE vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTHORIZONTALSCRAMBLE pso": {
+    "programs": 1,
+    "maxwell_static": 111.0,
+    "maxwell_dyn": 111.0,
+    "alu_slots": 111.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 2.0
+   },
+   "real:ISFFTVERTICALSCRAMBLE vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTVERTICALSCRAMBLE pso": {
+    "programs": 1,
+    "maxwell_static": 107.0,
+    "maxwell_dyn": 107.0,
+    "alu_slots": 107.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 2.0
+   },
+   "real:ISFFTNORMALS vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTNORMALS pso": {
+    "programs": 1,
+    "maxwell_static": 150.0,
+    "maxwell_dyn": 150.0,
+    "alu_slots": 150.0,
+    "fp16_dyn": 0,
+    "gprs": 11.0,
+    "tex": 1.0
+   },
+   "real:ISFFTFILTER vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTFILTER pso": {
+    "programs": 1,
+    "maxwell_static": 117.0,
+    "maxwell_dyn": 117.0,
+    "alu_slots": 117.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 1.0
+   },
+   "real:ISFFTDISPLAYNORMALS vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTDISPLAYNORMALS pso": {
+    "programs": 1,
+    "maxwell_static": 106.0,
+    "maxwell_dyn": 106.0,
+    "alu_slots": 106.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISFFTDISPLAYHIGHW vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTDISPLAYHIGHW pso": {
+    "programs": 1,
+    "maxwell_static": 114.0,
+    "maxwell_dyn": 114.0,
+    "alu_slots": 114.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 1.0
+   },
+   "real:ISFFTDISPLAYAMPLITUDE vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTDISPLAYAMPLITUDE pso": {
+    "programs": 1,
+    "maxwell_static": 119.0,
+    "maxwell_dyn": 119.0,
+    "alu_slots": 119.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 1.0
+   },
+   "real:ISFFTDISPLAYWATERHEIGHT vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISFFTDISPLAYWATERHEIGHT pso": {
+    "programs": 1,
+    "maxwell_static": 117.0,
+    "maxwell_dyn": 117.0,
+    "alu_slots": 117.0,
+    "fp16_dyn": 0,
+    "gprs": 6.0,
+    "tex": 1.0
+   },
+   "real:ISWATERDISPLACEMENTCLEARSIMULATION vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTCLEARSIMULATION pso": {
+    "programs": 1,
+    "maxwell_static": 115.0,
+    "maxwell_dyn": 115.0,
+    "alu_slots": 115.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTTEXOFFSET vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTTEXOFFSET pso": {
+    "programs": 1,
+    "maxwell_static": 130.0,
+    "maxwell_dyn": 130.0,
+    "alu_slots": 130.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISWATERDISPLACEMENTWADINGRIPPLE vso": {
+    "programs": 1,
+    "maxwell_static": 20.0,
+    "maxwell_dyn": 20.0,
+    "alu_slots": 20.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTWADINGRIPPLE pso": {
+    "programs": 1,
+    "maxwell_static": 116.0,
+    "maxwell_dyn": 116.0,
+    "alu_slots": 116.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTRAINRIPPLE vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTRAINRIPPLE pso": {
+    "programs": 1,
+    "maxwell_static": 116.0,
+    "maxwell_dyn": 116.0,
+    "alu_slots": 116.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTWADINGHEIGHTMAP vso": {
+    "programs": 1,
+    "maxwell_static": 30.0,
+    "maxwell_dyn": 30.0,
+    "alu_slots": 30.0,
+    "fp16_dyn": 0,
+    "gprs": 12.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTWADINGHEIGHTMAP pso": {
+    "programs": 1,
+    "maxwell_static": 136.0,
+    "maxwell_dyn": 136.0,
+    "alu_slots": 136.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 1.0
+   },
+   "real:ISWATERDISPLACEMENTRAINHEIGHTMAP vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTRAINHEIGHTMAP pso": {
+    "programs": 1,
+    "maxwell_static": 136.0,
+    "maxwell_dyn": 136.0,
+    "alu_slots": 136.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 1.0
+   },
+   "real:ISWATERDISPLACEMENTBLENDHEIGHTMAPS vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTBLENDHEIGHTMAPS pso": {
+    "programs": 1,
+    "maxwell_static": 128.0,
+    "maxwell_dyn": 128.0,
+    "alu_slots": 128.0,
+    "fp16_dyn": 0,
+    "gprs": 5.0,
+    "tex": 2.0
+   },
+   "real:ISWATERSMOOTHHEIGHTMAP vso": {
+    "programs": 1,
+    "maxwell_static": 30.0,
+    "maxwell_dyn": 30.0,
+    "alu_slots": 30.0,
+    "fp16_dyn": 0,
+    "gprs": 12.0,
+    "tex": 0.0
+   },
+   "real:ISWATERSMOOTHHEIGHTMAP pso": {
+    "programs": 1,
+    "maxwell_static": 106.0,
+    "maxwell_dyn": 106.0,
+    "alu_slots": 106.0,
+    "fp16_dyn": 0,
+    "gprs": 7.0,
+    "tex": 1.0
+   },
+   "real:ISWATERDISPLACEMENTNORMALS vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISWATERDISPLACEMENTNORMALS pso": {
+    "programs": 1,
+    "maxwell_static": 178.0,
+    "maxwell_dyn": 178.0,
+    "alu_slots": 178.0,
+    "fp16_dyn": 0,
+    "gprs": 10.0,
+    "tex": 1.0
+   },
+   "real:ISNOISESCROLLANDBLEND vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISNOISESCROLLANDBLEND pso": {
+    "programs": 1,
+    "maxwell_static": 139.0,
+    "maxwell_dyn": 139.0,
+    "alu_slots": 139.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 1.0
+   },
+   "real:ISNOISENORMALMAP vso": {
+    "programs": 1,
+    "maxwell_static": 14.0,
+    "maxwell_dyn": 14.0,
+    "alu_slots": 14.0,
+    "fp16_dyn": 0,
+    "gprs": 8.0,
+    "tex": 0.0
+   },
+   "real:ISNOISENORMALMAP pso": {
+    "programs": 1,
+    "maxwell_static": 157.0,
+    "maxwell_dyn": 157.0,
+    "alu_slots": 157.0,
+    "fp16_dyn": 0,
+    "gprs": 12.0,
+    "tex": 1.0
    }
   },
   "scenes": {
@@ -1335,6 +4664,8 @@
      "height": 720,
      "gpu_mhz": 768.0,
      "efficiency": 1.0,
+     "gate": true,
+     "dynres": "off",
      "families": {
       "shadow": {
        "draws": 100,
@@ -1343,16 +4674,22 @@
        "frag_ms": 0.158,
        "vertex_ms": 0.011,
        "ms": 0.169,
-       "dram_mb": 16.99
+       "dram_mb": 11.32,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 100,
-       "pixels": 276480,
+       "pixels": 314573,
        "bound": "alu",
-       "frag_ms": 0.447,
+       "frag_ms": 0.508,
        "vertex_ms": 0.011,
-       "ms": 0.458,
-       "dram_mb": 3.32
+       "ms": 0.52,
+       "dram_mb": 3.93,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 720,
@@ -1361,7 +4698,10 @@
        "frag_ms": 1.906,
        "vertex_ms": 0.123,
        "ms": 2.029,
-       "dram_mb": 10.95
+       "dram_mb": 11.4,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 100,
@@ -1370,7 +4710,10 @@
        "frag_ms": 0.377,
        "vertex_ms": 0.018,
        "ms": 0.394,
-       "dram_mb": 6.97
+       "dram_mb": 6.97,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 100,
@@ -1379,7 +4722,10 @@
        "frag_ms": 0.268,
        "vertex_ms": 0.011,
        "ms": 0.279,
-       "dram_mb": 1.99
+       "dram_mb": 2.07,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 150,
@@ -1388,7 +4734,10 @@
        "frag_ms": 0.558,
        "vertex_ms": 0.013,
        "ms": 0.571,
-       "dram_mb": 4.15
+       "dram_mb": 4.32,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 100,
@@ -1397,7 +4746,10 @@
        "frag_ms": 0.363,
        "vertex_ms": 0.034,
        "ms": 0.396,
-       "dram_mb": 5.53
+       "dram_mb": 6.91,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 50,
@@ -1406,7 +4758,10 @@
        "frag_ms": 0.125,
        "vertex_ms": 0.023,
        "ms": 0.148,
-       "dram_mb": 0.72
+       "dram_mb": 0.75,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -1415,7 +4770,10 @@
        "frag_ms": 0.248,
        "vertex_ms": 0.001,
        "ms": 0.248,
-       "dram_mb": 2.58
+       "dram_mb": 3.39,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 50,
@@ -1424,7 +4782,10 @@
        "frag_ms": 0.242,
        "vertex_ms": 0.002,
        "ms": 0.243,
-       "dram_mb": 4.42
+       "dram_mb": 6.82,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 20,
@@ -1433,12 +4794,15 @@
        "frag_ms": 2.115,
        "vertex_ms": 0.0,
        "ms": 2.115,
-       "dram_mb": 38.71
+       "dram_mb": 27.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 7.05,
-     "dram_ms": 6.27,
-     "frame_ms": 7.05,
+     "compute_ms": 7.11,
+     "dram_ms": 5.55,
+     "frame_ms": 7.11,
      "bound": "compute"
     },
     {
@@ -1447,6 +4811,8 @@
      "height": 720,
      "gpu_mhz": 768.0,
      "efficiency": 0.6,
+     "gate": true,
+     "dynres": "off",
      "families": {
       "shadow": {
        "draws": 100,
@@ -1455,16 +4821,22 @@
        "frag_ms": 0.264,
        "vertex_ms": 0.018,
        "ms": 0.282,
-       "dram_mb": 16.99
+       "dram_mb": 11.32,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 100,
-       "pixels": 276480,
+       "pixels": 314573,
        "bound": "alu",
-       "frag_ms": 0.744,
+       "frag_ms": 0.847,
        "vertex_ms": 0.019,
-       "ms": 0.763,
-       "dram_mb": 3.32
+       "ms": 0.866,
+       "dram_mb": 3.93,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 720,
@@ -1473,7 +4845,10 @@
        "frag_ms": 3.177,
        "vertex_ms": 0.205,
        "ms": 3.382,
-       "dram_mb": 10.95
+       "dram_mb": 11.4,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 100,
@@ -1482,7 +4857,10 @@
        "frag_ms": 0.628,
        "vertex_ms": 0.03,
        "ms": 0.657,
-       "dram_mb": 6.97
+       "dram_mb": 6.97,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 100,
@@ -1491,7 +4869,10 @@
        "frag_ms": 0.447,
        "vertex_ms": 0.019,
        "ms": 0.466,
-       "dram_mb": 1.99
+       "dram_mb": 2.07,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 150,
@@ -1500,7 +4881,10 @@
        "frag_ms": 0.93,
        "vertex_ms": 0.021,
        "ms": 0.952,
-       "dram_mb": 4.15
+       "dram_mb": 4.32,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 100,
@@ -1509,7 +4893,10 @@
        "frag_ms": 0.604,
        "vertex_ms": 0.056,
        "ms": 0.66,
-       "dram_mb": 5.53
+       "dram_mb": 6.91,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 50,
@@ -1518,7 +4905,10 @@
        "frag_ms": 0.209,
        "vertex_ms": 0.038,
        "ms": 0.246,
-       "dram_mb": 0.72
+       "dram_mb": 0.75,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -1527,7 +4917,10 @@
        "frag_ms": 0.413,
        "vertex_ms": 0.001,
        "ms": 0.413,
-       "dram_mb": 2.58
+       "dram_mb": 3.39,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 50,
@@ -1536,7 +4929,10 @@
        "frag_ms": 0.403,
        "vertex_ms": 0.003,
        "ms": 0.406,
-       "dram_mb": 4.42
+       "dram_mb": 6.82,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 20,
@@ -1545,236 +4941,15 @@
        "frag_ms": 3.525,
        "vertex_ms": 0.0,
        "ms": 3.525,
-       "dram_mb": 38.71
+       "dram_mb": 27.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 11.75,
-     "dram_ms": 6.27,
-     "frame_ms": 11.75,
-     "bound": "compute"
-    },
-    {
-     "config": "docked_1080p",
-     "width": 1920,
-     "height": 1080,
-     "gpu_mhz": 768.0,
-     "efficiency": 1.0,
-     "families": {
-      "shadow": {
-       "draws": 100,
-       "pixels": 2831155,
-       "bound": "alu",
-       "frag_ms": 0.158,
-       "vertex_ms": 0.011,
-       "ms": 0.169,
-       "dram_mb": 16.99
-      },
-      "water_refl": {
-       "draws": 100,
-       "pixels": 622080,
-       "bound": "alu",
-       "frag_ms": 1.005,
-       "vertex_ms": 0.011,
-       "ms": 1.016,
-       "dram_mb": 7.46
-      },
-      "lit": {
-       "draws": 720,
-       "pixels": 2052864,
-       "bound": "alu",
-       "frag_ms": 4.289,
-       "vertex_ms": 0.123,
-       "ms": 4.412,
-       "dram_mb": 24.63
-      },
-      "land": {
-       "draws": 100,
-       "pixels": 1119744,
-       "bound": "alu",
-       "frag_ms": 0.847,
-       "vertex_ms": 0.018,
-       "ms": 0.865,
-       "dram_mb": 15.68
-      },
-      "lod": {
-       "draws": 100,
-       "pixels": 373248,
-       "bound": "alu",
-       "frag_ms": 0.603,
-       "vertex_ms": 0.011,
-       "ms": 0.614,
-       "dram_mb": 4.48
-      },
-      "trees": {
-       "draws": 150,
-       "pixels": 777600,
-       "bound": "alu",
-       "frag_ms": 1.256,
-       "vertex_ms": 0.013,
-       "ms": 1.269,
-       "dram_mb": 9.33
-      },
-      "grass": {
-       "draws": 100,
-       "pixels": 1244160,
-       "bound": "alu",
-       "frag_ms": 0.816,
-       "vertex_ms": 0.034,
-       "ms": 0.849,
-       "dram_mb": 12.44
-      },
-      "actors": {
-       "draws": 50,
-       "pixels": 134784,
-       "bound": "alu",
-       "frag_ms": 0.282,
-       "vertex_ms": 0.023,
-       "ms": 0.304,
-       "dram_mb": 1.62
-      },
-      "sky": {
-       "draws": 6,
-       "pixels": 725760,
-       "bound": "alu",
-       "frag_ms": 0.557,
-       "vertex_ms": 0.001,
-       "ms": 0.558,
-       "dram_mb": 5.81
-      },
-      "particles": {
-       "draws": 50,
-       "pixels": 829440,
-       "bound": "alu",
-       "frag_ms": 0.544,
-       "vertex_ms": 0.002,
-       "ms": 0.546,
-       "dram_mb": 9.95
-      },
-      "imagespace_ui": {
-       "draws": 20,
-       "pixels": 7257600,
-       "bound": "alu",
-       "frag_ms": 4.758,
-       "vertex_ms": 0.0,
-       "ms": 4.758,
-       "dram_mb": 87.09
-      }
-     },
-     "compute_ms": 15.36,
-     "dram_ms": 12.73,
-     "frame_ms": 15.36,
-     "bound": "compute"
-    },
-    {
-     "config": "docked_1080p",
-     "width": 1920,
-     "height": 1080,
-     "gpu_mhz": 768.0,
-     "efficiency": 0.6,
-     "families": {
-      "shadow": {
-       "draws": 100,
-       "pixels": 2831155,
-       "bound": "alu",
-       "frag_ms": 0.264,
-       "vertex_ms": 0.018,
-       "ms": 0.282,
-       "dram_mb": 16.99
-      },
-      "water_refl": {
-       "draws": 100,
-       "pixels": 622080,
-       "bound": "alu",
-       "frag_ms": 1.675,
-       "vertex_ms": 0.019,
-       "ms": 1.694,
-       "dram_mb": 7.46
-      },
-      "lit": {
-       "draws": 720,
-       "pixels": 2052864,
-       "bound": "alu",
-       "frag_ms": 7.149,
-       "vertex_ms": 0.205,
-       "ms": 7.354,
-       "dram_mb": 24.63
-      },
-      "land": {
-       "draws": 100,
-       "pixels": 1119744,
-       "bound": "alu",
-       "frag_ms": 1.412,
-       "vertex_ms": 0.03,
-       "ms": 1.442,
-       "dram_mb": 15.68
-      },
-      "lod": {
-       "draws": 100,
-       "pixels": 373248,
-       "bound": "alu",
-       "frag_ms": 1.005,
-       "vertex_ms": 0.019,
-       "ms": 1.024,
-       "dram_mb": 4.48
-      },
-      "trees": {
-       "draws": 150,
-       "pixels": 777600,
-       "bound": "alu",
-       "frag_ms": 2.094,
-       "vertex_ms": 0.021,
-       "ms": 2.115,
-       "dram_mb": 9.33
-      },
-      "grass": {
-       "draws": 100,
-       "pixels": 1244160,
-       "bound": "alu",
-       "frag_ms": 1.359,
-       "vertex_ms": 0.056,
-       "ms": 1.415,
-       "dram_mb": 12.44
-      },
-      "actors": {
-       "draws": 50,
-       "pixels": 134784,
-       "bound": "alu",
-       "frag_ms": 0.469,
-       "vertex_ms": 0.038,
-       "ms": 0.507,
-       "dram_mb": 1.62
-      },
-      "sky": {
-       "draws": 6,
-       "pixels": 725760,
-       "bound": "alu",
-       "frag_ms": 0.928,
-       "vertex_ms": 0.001,
-       "ms": 0.929,
-       "dram_mb": 5.81
-      },
-      "particles": {
-       "draws": 50,
-       "pixels": 829440,
-       "bound": "alu",
-       "frag_ms": 0.906,
-       "vertex_ms": 0.003,
-       "ms": 0.909,
-       "dram_mb": 9.95
-      },
-      "imagespace_ui": {
-       "draws": 20,
-       "pixels": 7257600,
-       "bound": "alu",
-       "frag_ms": 7.93,
-       "vertex_ms": 0.0,
-       "ms": 7.93,
-       "dram_mb": 87.09
-      }
-     },
-     "compute_ms": 25.6,
-     "dram_ms": 12.73,
-     "frame_ms": 25.6,
+     "compute_ms": 11.85,
+     "dram_ms": 5.55,
+     "frame_ms": 11.85,
      "bound": "compute"
     },
     {
@@ -1783,24 +4958,32 @@
      "height": 720,
      "gpu_mhz": 384.0,
      "efficiency": 1.0,
+     "gate": true,
+     "dynres": "off",
      "families": {
       "shadow": {
        "draws": 100,
-       "pixels": 2831155,
+       "pixels": 707789,
        "bound": "alu",
-       "frag_ms": 0.317,
+       "frag_ms": 0.079,
        "vertex_ms": 0.021,
-       "ms": 0.338,
-       "dram_mb": 16.99
+       "ms": 0.101,
+       "dram_mb": 2.83,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 100,
-       "pixels": 276480,
+       "pixels": 78643,
        "bound": "alu",
-       "frag_ms": 0.893,
+       "frag_ms": 0.254,
        "vertex_ms": 0.023,
-       "ms": 0.916,
-       "dram_mb": 3.32
+       "ms": 0.277,
+       "dram_mb": 0.98,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 720,
@@ -1809,7 +4992,10 @@
        "frag_ms": 3.813,
        "vertex_ms": 0.246,
        "ms": 4.059,
-       "dram_mb": 10.95
+       "dram_mb": 11.4,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 100,
@@ -1818,7 +5004,10 @@
        "frag_ms": 0.753,
        "vertex_ms": 0.035,
        "ms": 0.789,
-       "dram_mb": 6.97
+       "dram_mb": 6.97,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 100,
@@ -1827,7 +5016,10 @@
        "frag_ms": 0.536,
        "vertex_ms": 0.023,
        "ms": 0.559,
-       "dram_mb": 1.99
+       "dram_mb": 2.07,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 150,
@@ -1836,7 +5028,10 @@
        "frag_ms": 1.117,
        "vertex_ms": 0.026,
        "ms": 1.142,
-       "dram_mb": 4.15
+       "dram_mb": 4.32,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 100,
@@ -1845,7 +5040,10 @@
        "frag_ms": 0.725,
        "vertex_ms": 0.067,
        "ms": 0.792,
-       "dram_mb": 5.53
+       "dram_mb": 6.91,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 50,
@@ -1854,7 +5052,10 @@
        "frag_ms": 0.25,
        "vertex_ms": 0.045,
        "ms": 0.295,
-       "dram_mb": 0.72
+       "dram_mb": 0.75,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -1863,7 +5064,10 @@
        "frag_ms": 0.495,
        "vertex_ms": 0.001,
        "ms": 0.496,
-       "dram_mb": 2.58
+       "dram_mb": 3.39,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 50,
@@ -1872,7 +5076,10 @@
        "frag_ms": 0.483,
        "vertex_ms": 0.003,
        "ms": 0.487,
-       "dram_mb": 4.42
+       "dram_mb": 6.82,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 20,
@@ -1881,12 +5088,15 @@
        "frag_ms": 4.23,
        "vertex_ms": 0.0,
        "ms": 4.23,
-       "dram_mb": 38.71
+       "dram_mb": 27.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 14.1,
-     "dram_ms": 6.27,
-     "frame_ms": 14.1,
+     "compute_ms": 13.23,
+     "dram_ms": 4.81,
+     "frame_ms": 13.23,
      "bound": "compute"
     },
     {
@@ -1895,24 +5105,32 @@
      "height": 720,
      "gpu_mhz": 384.0,
      "efficiency": 0.6,
+     "gate": true,
+     "dynres": "off",
      "families": {
       "shadow": {
        "draws": 100,
-       "pixels": 2831155,
+       "pixels": 707789,
        "bound": "alu",
-       "frag_ms": 0.528,
+       "frag_ms": 0.132,
        "vertex_ms": 0.036,
-       "ms": 0.564,
-       "dram_mb": 16.99
+       "ms": 0.168,
+       "dram_mb": 2.83,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 100,
-       "pixels": 276480,
+       "pixels": 78643,
        "bound": "alu",
-       "frag_ms": 1.489,
+       "frag_ms": 0.423,
        "vertex_ms": 0.038,
-       "ms": 1.527,
-       "dram_mb": 3.32
+       "ms": 0.461,
+       "dram_mb": 0.98,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 720,
@@ -1921,7 +5139,10 @@
        "frag_ms": 6.355,
        "vertex_ms": 0.41,
        "ms": 6.765,
-       "dram_mb": 10.95
+       "dram_mb": 11.4,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 100,
@@ -1930,7 +5151,10 @@
        "frag_ms": 1.256,
        "vertex_ms": 0.059,
        "ms": 1.315,
-       "dram_mb": 6.97
+       "dram_mb": 6.97,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 100,
@@ -1939,7 +5163,10 @@
        "frag_ms": 0.893,
        "vertex_ms": 0.038,
        "ms": 0.931,
-       "dram_mb": 1.99
+       "dram_mb": 2.07,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 150,
@@ -1948,7 +5175,10 @@
        "frag_ms": 1.861,
        "vertex_ms": 0.043,
        "ms": 1.904,
-       "dram_mb": 4.15
+       "dram_mb": 4.32,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 100,
@@ -1957,7 +5187,10 @@
        "frag_ms": 1.208,
        "vertex_ms": 0.112,
        "ms": 1.32,
-       "dram_mb": 5.53
+       "dram_mb": 6.91,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 50,
@@ -1966,7 +5199,10 @@
        "frag_ms": 0.417,
        "vertex_ms": 0.075,
        "ms": 0.492,
-       "dram_mb": 0.72
+       "dram_mb": 0.75,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -1975,7 +5211,10 @@
        "frag_ms": 0.825,
        "vertex_ms": 0.002,
        "ms": 0.827,
-       "dram_mb": 2.58
+       "dram_mb": 3.39,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 50,
@@ -1984,7 +5223,10 @@
        "frag_ms": 0.806,
        "vertex_ms": 0.006,
        "ms": 0.811,
-       "dram_mb": 4.42
+       "dram_mb": 6.82,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 20,
@@ -1993,38 +5235,343 @@
        "frag_ms": 7.049,
        "vertex_ms": 0.0,
        "ms": 7.049,
-       "dram_mb": 38.71
+       "dram_mb": 27.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 23.5,
-     "dram_ms": 6.27,
-     "frame_ms": 23.5,
+     "compute_ms": 22.04,
+     "dram_ms": 4.81,
+     "frame_ms": 22.04,
      "bound": "compute"
     },
     {
-     "config": "handheld_540p",
-     "width": 960,
-     "height": 540,
-     "gpu_mhz": 384.0,
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
      "efficiency": 1.0,
+     "gate": false,
+     "dynres": "on (informational)",
      "families": {
       "shadow": {
        "draws": 100,
        "pixels": 2831155,
        "bound": "alu",
-       "frag_ms": 0.317,
-       "vertex_ms": 0.021,
-       "ms": 0.338,
-       "dram_mb": 16.99
+       "frag_ms": 0.158,
+       "vertex_ms": 0.011,
+       "ms": 0.169,
+       "dram_mb": 11.32,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 100,
-       "pixels": 155520,
+       "pixels": 314573,
        "bound": "alu",
-       "frag_ms": 0.502,
+       "frag_ms": 0.508,
+       "vertex_ms": 0.011,
+       "ms": 0.52,
+       "dram_mb": 3.93,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 4.289,
+       "vertex_ms": 0.123,
+       "ms": 4.412,
+       "dram_mb": 25.66,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 0.847,
+       "vertex_ms": 0.018,
+       "ms": 0.865,
+       "dram_mb": 15.68,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 0.603,
+       "vertex_ms": 0.011,
+       "ms": 0.614,
+       "dram_mb": 4.67,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 1.256,
+       "vertex_ms": 0.013,
+       "ms": 1.269,
+       "dram_mb": 9.72,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 0.816,
+       "vertex_ms": 0.034,
+       "ms": 0.849,
+       "dram_mb": 15.55,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.282,
        "vertex_ms": 0.023,
-       "ms": 0.525,
-       "dram_mb": 1.87
+       "ms": 0.304,
+       "dram_mb": 1.68,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.557,
+       "vertex_ms": 0.001,
+       "ms": 0.558,
+       "dram_mb": 7.62,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.544,
+       "vertex_ms": 0.002,
+       "ms": 0.546,
+       "dram_mb": 15.34,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 4.758,
+       "vertex_ms": 0.0,
+       "ms": 4.758,
+       "dram_mb": 61.69,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 14.86,
+     "dram_ms": 11.25,
+     "frame_ms": 14.86,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
+     "efficiency": 0.6,
+     "gate": false,
+     "dynres": "on (informational)",
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.264,
+       "vertex_ms": 0.018,
+       "ms": 0.282,
+       "dram_mb": 11.32,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 314573,
+       "bound": "alu",
+       "frag_ms": 0.847,
+       "vertex_ms": 0.019,
+       "ms": 0.866,
+       "dram_mb": 3.93,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 720,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 7.149,
+       "vertex_ms": 0.205,
+       "ms": 7.354,
+       "dram_mb": 25.66,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 100,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 1.412,
+       "vertex_ms": 0.03,
+       "ms": 1.442,
+       "dram_mb": 15.68,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 100,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 1.005,
+       "vertex_ms": 0.019,
+       "ms": 1.024,
+       "dram_mb": 4.67,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 150,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 2.094,
+       "vertex_ms": 0.021,
+       "ms": 2.115,
+       "dram_mb": 9.72,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 100,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 1.359,
+       "vertex_ms": 0.056,
+       "ms": 1.415,
+       "dram_mb": 15.55,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 50,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.469,
+       "vertex_ms": 0.038,
+       "ms": 0.507,
+       "dram_mb": 1.68,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.928,
+       "vertex_ms": 0.001,
+       "ms": 0.929,
+       "dram_mb": 7.62,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 50,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.906,
+       "vertex_ms": 0.003,
+       "ms": 0.909,
+       "dram_mb": 15.34,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 20,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 7.93,
+       "vertex_ms": 0.0,
+       "ms": 7.93,
+       "dram_mb": 61.69,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 24.77,
+     "dram_ms": 11.25,
+     "frame_ms": 24.77,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_540p_dynres",
+     "width": 960,
+     "height": 540,
+     "gpu_mhz": 384.0,
+     "efficiency": 1.0,
+     "gate": false,
+     "dynres": "on (informational)",
+     "families": {
+      "shadow": {
+       "draws": 100,
+       "pixels": 707789,
+       "bound": "alu",
+       "frag_ms": 0.079,
+       "vertex_ms": 0.021,
+       "ms": 0.101,
+       "dram_mb": 2.83,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 100,
+       "pixels": 78643,
+       "bound": "alu",
+       "frag_ms": 0.254,
+       "vertex_ms": 0.023,
+       "ms": 0.277,
+       "dram_mb": 0.98,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 720,
@@ -2033,7 +5580,10 @@
        "frag_ms": 2.145,
        "vertex_ms": 0.246,
        "ms": 2.391,
-       "dram_mb": 6.16
+       "dram_mb": 6.42,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 100,
@@ -2042,7 +5592,10 @@
        "frag_ms": 0.424,
        "vertex_ms": 0.035,
        "ms": 0.459,
-       "dram_mb": 3.92
+       "dram_mb": 3.92,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 100,
@@ -2051,7 +5604,10 @@
        "frag_ms": 0.301,
        "vertex_ms": 0.023,
        "ms": 0.324,
-       "dram_mb": 1.12
+       "dram_mb": 1.17,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 150,
@@ -2060,7 +5616,10 @@
        "frag_ms": 0.628,
        "vertex_ms": 0.026,
        "ms": 0.654,
-       "dram_mb": 2.33
+       "dram_mb": 2.43,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 100,
@@ -2069,7 +5628,10 @@
        "frag_ms": 0.408,
        "vertex_ms": 0.067,
        "ms": 0.475,
-       "dram_mb": 3.11
+       "dram_mb": 3.89,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 50,
@@ -2078,7 +5640,10 @@
        "frag_ms": 0.141,
        "vertex_ms": 0.045,
        "ms": 0.186,
-       "dram_mb": 0.4
+       "dram_mb": 0.42,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -2087,7 +5652,10 @@
        "frag_ms": 0.279,
        "vertex_ms": 0.001,
        "ms": 0.28,
-       "dram_mb": 1.45
+       "dram_mb": 1.91,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 50,
@@ -2096,7 +5664,10 @@
        "frag_ms": 0.272,
        "vertex_ms": 0.003,
        "ms": 0.275,
-       "dram_mb": 2.49
+       "dram_mb": 3.84,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 20,
@@ -2105,38 +5676,49 @@
        "frag_ms": 2.379,
        "vertex_ms": 0.0,
        "ms": 2.379,
-       "dram_mb": 21.77
+       "dram_mb": 15.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 8.29,
-     "dram_ms": 4.01,
-     "frame_ms": 8.29,
+     "compute_ms": 7.8,
+     "dram_ms": 2.81,
+     "frame_ms": 7.8,
      "bound": "compute"
     },
     {
-     "config": "handheld_540p",
+     "config": "handheld_540p_dynres",
      "width": 960,
      "height": 540,
      "gpu_mhz": 384.0,
      "efficiency": 0.6,
+     "gate": false,
+     "dynres": "on (informational)",
      "families": {
       "shadow": {
        "draws": 100,
-       "pixels": 2831155,
+       "pixels": 707789,
        "bound": "alu",
-       "frag_ms": 0.528,
+       "frag_ms": 0.132,
        "vertex_ms": 0.036,
-       "ms": 0.564,
-       "dram_mb": 16.99
+       "ms": 0.168,
+       "dram_mb": 2.83,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 100,
-       "pixels": 155520,
+       "pixels": 78643,
        "bound": "alu",
-       "frag_ms": 0.837,
+       "frag_ms": 0.423,
        "vertex_ms": 0.038,
-       "ms": 0.875,
-       "dram_mb": 1.87
+       "ms": 0.461,
+       "dram_mb": 0.98,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 720,
@@ -2145,7 +5727,10 @@
        "frag_ms": 3.574,
        "vertex_ms": 0.41,
        "ms": 3.985,
-       "dram_mb": 6.16
+       "dram_mb": 6.42,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 100,
@@ -2154,7 +5739,10 @@
        "frag_ms": 0.706,
        "vertex_ms": 0.059,
        "ms": 0.765,
-       "dram_mb": 3.92
+       "dram_mb": 3.92,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 100,
@@ -2163,7 +5751,10 @@
        "frag_ms": 0.502,
        "vertex_ms": 0.038,
        "ms": 0.54,
-       "dram_mb": 1.12
+       "dram_mb": 1.17,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 150,
@@ -2172,7 +5763,10 @@
        "frag_ms": 1.047,
        "vertex_ms": 0.043,
        "ms": 1.09,
-       "dram_mb": 2.33
+       "dram_mb": 2.43,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 100,
@@ -2181,7 +5775,10 @@
        "frag_ms": 0.68,
        "vertex_ms": 0.112,
        "ms": 0.792,
-       "dram_mb": 3.11
+       "dram_mb": 3.89,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 50,
@@ -2190,7 +5787,10 @@
        "frag_ms": 0.235,
        "vertex_ms": 0.075,
        "ms": 0.31,
-       "dram_mb": 0.4
+       "dram_mb": 0.42,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -2199,7 +5799,10 @@
        "frag_ms": 0.464,
        "vertex_ms": 0.002,
        "ms": 0.466,
-       "dram_mb": 1.45
+       "dram_mb": 1.91,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 50,
@@ -2208,7 +5811,10 @@
        "frag_ms": 0.453,
        "vertex_ms": 0.006,
        "ms": 0.459,
-       "dram_mb": 2.49
+       "dram_mb": 3.84,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 20,
@@ -2217,12 +5823,15 @@
        "frag_ms": 3.965,
        "vertex_ms": 0.0,
        "ms": 3.965,
-       "dram_mb": 21.77
+       "dram_mb": 15.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 13.81,
-     "dram_ms": 4.01,
-     "frame_ms": 13.81,
+     "compute_ms": 13.0,
+     "dram_ms": 2.81,
+     "frame_ms": 13.0,
      "bound": "compute"
     }
    ],
@@ -2233,6 +5842,8 @@
      "height": 720,
      "gpu_mhz": 768.0,
      "efficiency": 1.0,
+     "gate": true,
+     "dynres": "off",
      "families": {
       "shadow": {
        "draws": 300,
@@ -2241,16 +5852,22 @@
        "frag_ms": 0.158,
        "vertex_ms": 0.032,
        "ms": 0.19,
-       "dram_mb": 16.99
+       "dram_mb": 11.32,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 300,
-       "pixels": 276480,
+       "pixels": 314573,
        "bound": "alu",
-       "frag_ms": 0.447,
+       "frag_ms": 0.508,
        "vertex_ms": 0.034,
-       "ms": 0.481,
-       "dram_mb": 3.32
+       "ms": 0.542,
+       "dram_mb": 3.93,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 1600,
@@ -2259,7 +5876,10 @@
        "frag_ms": 1.906,
        "vertex_ms": 0.273,
        "ms": 2.18,
-       "dram_mb": 10.95
+       "dram_mb": 11.4,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 150,
@@ -2268,7 +5888,10 @@
        "frag_ms": 0.377,
        "vertex_ms": 0.027,
        "ms": 0.403,
-       "dram_mb": 6.97
+       "dram_mb": 6.97,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 200,
@@ -2277,7 +5900,10 @@
        "frag_ms": 0.268,
        "vertex_ms": 0.023,
        "ms": 0.291,
-       "dram_mb": 1.99
+       "dram_mb": 2.07,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 450,
@@ -2286,7 +5912,10 @@
        "frag_ms": 0.558,
        "vertex_ms": 0.038,
        "ms": 0.597,
-       "dram_mb": 4.15
+       "dram_mb": 4.32,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 300,
@@ -2295,7 +5924,10 @@
        "frag_ms": 0.363,
        "vertex_ms": 0.101,
        "ms": 0.463,
-       "dram_mb": 5.53
+       "dram_mb": 6.91,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 200,
@@ -2304,7 +5936,10 @@
        "frag_ms": 0.125,
        "vertex_ms": 0.09,
        "ms": 0.215,
-       "dram_mb": 0.72
+       "dram_mb": 0.75,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -2313,7 +5948,10 @@
        "frag_ms": 0.248,
        "vertex_ms": 0.001,
        "ms": 0.248,
-       "dram_mb": 2.58
+       "dram_mb": 3.39,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 150,
@@ -2322,7 +5960,10 @@
        "frag_ms": 0.242,
        "vertex_ms": 0.005,
        "ms": 0.247,
-       "dram_mb": 4.42
+       "dram_mb": 6.82,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 60,
@@ -2331,12 +5972,15 @@
        "frag_ms": 2.115,
        "vertex_ms": 0.0,
        "ms": 2.115,
-       "dram_mb": 38.71
+       "dram_mb": 27.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 7.43,
-     "dram_ms": 6.27,
-     "frame_ms": 7.43,
+     "compute_ms": 7.49,
+     "dram_ms": 5.55,
+     "frame_ms": 7.49,
      "bound": "compute"
     },
     {
@@ -2345,6 +5989,8 @@
      "height": 720,
      "gpu_mhz": 768.0,
      "efficiency": 0.6,
+     "gate": true,
+     "dynres": "off",
      "families": {
       "shadow": {
        "draws": 300,
@@ -2353,16 +5999,22 @@
        "frag_ms": 0.264,
        "vertex_ms": 0.053,
        "ms": 0.317,
-       "dram_mb": 16.99
+       "dram_mb": 11.32,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 300,
-       "pixels": 276480,
+       "pixels": 314573,
        "bound": "alu",
-       "frag_ms": 0.744,
+       "frag_ms": 0.847,
        "vertex_ms": 0.057,
-       "ms": 0.801,
-       "dram_mb": 3.32
+       "ms": 0.904,
+       "dram_mb": 3.93,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 1600,
@@ -2371,7 +6023,10 @@
        "frag_ms": 3.177,
        "vertex_ms": 0.456,
        "ms": 3.633,
-       "dram_mb": 10.95
+       "dram_mb": 11.4,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 150,
@@ -2380,7 +6035,10 @@
        "frag_ms": 0.628,
        "vertex_ms": 0.044,
        "ms": 0.672,
-       "dram_mb": 6.97
+       "dram_mb": 6.97,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 200,
@@ -2389,7 +6047,10 @@
        "frag_ms": 0.447,
        "vertex_ms": 0.038,
        "ms": 0.485,
-       "dram_mb": 1.99
+       "dram_mb": 2.07,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 450,
@@ -2398,7 +6059,10 @@
        "frag_ms": 0.93,
        "vertex_ms": 0.064,
        "ms": 0.995,
-       "dram_mb": 4.15
+       "dram_mb": 4.32,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 300,
@@ -2407,7 +6071,10 @@
        "frag_ms": 0.604,
        "vertex_ms": 0.168,
        "ms": 0.772,
-       "dram_mb": 5.53
+       "dram_mb": 6.91,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 200,
@@ -2416,7 +6083,10 @@
        "frag_ms": 0.209,
        "vertex_ms": 0.15,
        "ms": 0.359,
-       "dram_mb": 0.72
+       "dram_mb": 0.75,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -2425,7 +6095,10 @@
        "frag_ms": 0.413,
        "vertex_ms": 0.001,
        "ms": 0.413,
-       "dram_mb": 2.58
+       "dram_mb": 3.39,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 150,
@@ -2434,7 +6107,10 @@
        "frag_ms": 0.403,
        "vertex_ms": 0.009,
        "ms": 0.411,
-       "dram_mb": 4.42
+       "dram_mb": 6.82,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 60,
@@ -2443,236 +6119,15 @@
        "frag_ms": 3.525,
        "vertex_ms": 0.0,
        "ms": 3.525,
-       "dram_mb": 38.71
+       "dram_mb": 27.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 12.38,
-     "dram_ms": 6.27,
-     "frame_ms": 12.38,
-     "bound": "compute"
-    },
-    {
-     "config": "docked_1080p",
-     "width": 1920,
-     "height": 1080,
-     "gpu_mhz": 768.0,
-     "efficiency": 1.0,
-     "families": {
-      "shadow": {
-       "draws": 300,
-       "pixels": 2831155,
-       "bound": "alu",
-       "frag_ms": 0.158,
-       "vertex_ms": 0.032,
-       "ms": 0.19,
-       "dram_mb": 16.99
-      },
-      "water_refl": {
-       "draws": 300,
-       "pixels": 622080,
-       "bound": "alu",
-       "frag_ms": 1.005,
-       "vertex_ms": 0.034,
-       "ms": 1.039,
-       "dram_mb": 7.46
-      },
-      "lit": {
-       "draws": 1600,
-       "pixels": 2052864,
-       "bound": "alu",
-       "frag_ms": 4.289,
-       "vertex_ms": 0.273,
-       "ms": 4.563,
-       "dram_mb": 24.63
-      },
-      "land": {
-       "draws": 150,
-       "pixels": 1119744,
-       "bound": "alu",
-       "frag_ms": 0.847,
-       "vertex_ms": 0.027,
-       "ms": 0.874,
-       "dram_mb": 15.68
-      },
-      "lod": {
-       "draws": 200,
-       "pixels": 373248,
-       "bound": "alu",
-       "frag_ms": 0.603,
-       "vertex_ms": 0.023,
-       "ms": 0.626,
-       "dram_mb": 4.48
-      },
-      "trees": {
-       "draws": 450,
-       "pixels": 777600,
-       "bound": "alu",
-       "frag_ms": 1.256,
-       "vertex_ms": 0.038,
-       "ms": 1.295,
-       "dram_mb": 9.33
-      },
-      "grass": {
-       "draws": 300,
-       "pixels": 1244160,
-       "bound": "alu",
-       "frag_ms": 0.816,
-       "vertex_ms": 0.101,
-       "ms": 0.916,
-       "dram_mb": 12.44
-      },
-      "actors": {
-       "draws": 200,
-       "pixels": 134784,
-       "bound": "alu",
-       "frag_ms": 0.282,
-       "vertex_ms": 0.09,
-       "ms": 0.372,
-       "dram_mb": 1.62
-      },
-      "sky": {
-       "draws": 6,
-       "pixels": 725760,
-       "bound": "alu",
-       "frag_ms": 0.557,
-       "vertex_ms": 0.001,
-       "ms": 0.558,
-       "dram_mb": 5.81
-      },
-      "particles": {
-       "draws": 150,
-       "pixels": 829440,
-       "bound": "alu",
-       "frag_ms": 0.544,
-       "vertex_ms": 0.005,
-       "ms": 0.549,
-       "dram_mb": 9.95
-      },
-      "imagespace_ui": {
-       "draws": 60,
-       "pixels": 7257600,
-       "bound": "alu",
-       "frag_ms": 4.758,
-       "vertex_ms": 0.0,
-       "ms": 4.758,
-       "dram_mb": 87.09
-      }
-     },
-     "compute_ms": 15.74,
-     "dram_ms": 12.73,
-     "frame_ms": 15.74,
-     "bound": "compute"
-    },
-    {
-     "config": "docked_1080p",
-     "width": 1920,
-     "height": 1080,
-     "gpu_mhz": 768.0,
-     "efficiency": 0.6,
-     "families": {
-      "shadow": {
-       "draws": 300,
-       "pixels": 2831155,
-       "bound": "alu",
-       "frag_ms": 0.264,
-       "vertex_ms": 0.053,
-       "ms": 0.317,
-       "dram_mb": 16.99
-      },
-      "water_refl": {
-       "draws": 300,
-       "pixels": 622080,
-       "bound": "alu",
-       "frag_ms": 1.675,
-       "vertex_ms": 0.057,
-       "ms": 1.732,
-       "dram_mb": 7.46
-      },
-      "lit": {
-       "draws": 1600,
-       "pixels": 2052864,
-       "bound": "alu",
-       "frag_ms": 7.149,
-       "vertex_ms": 0.456,
-       "ms": 7.605,
-       "dram_mb": 24.63
-      },
-      "land": {
-       "draws": 150,
-       "pixels": 1119744,
-       "bound": "alu",
-       "frag_ms": 1.412,
-       "vertex_ms": 0.044,
-       "ms": 1.457,
-       "dram_mb": 15.68
-      },
-      "lod": {
-       "draws": 200,
-       "pixels": 373248,
-       "bound": "alu",
-       "frag_ms": 1.005,
-       "vertex_ms": 0.038,
-       "ms": 1.043,
-       "dram_mb": 4.48
-      },
-      "trees": {
-       "draws": 450,
-       "pixels": 777600,
-       "bound": "alu",
-       "frag_ms": 2.094,
-       "vertex_ms": 0.064,
-       "ms": 2.158,
-       "dram_mb": 9.33
-      },
-      "grass": {
-       "draws": 300,
-       "pixels": 1244160,
-       "bound": "alu",
-       "frag_ms": 1.359,
-       "vertex_ms": 0.168,
-       "ms": 1.527,
-       "dram_mb": 12.44
-      },
-      "actors": {
-       "draws": 200,
-       "pixels": 134784,
-       "bound": "alu",
-       "frag_ms": 0.469,
-       "vertex_ms": 0.15,
-       "ms": 0.619,
-       "dram_mb": 1.62
-      },
-      "sky": {
-       "draws": 6,
-       "pixels": 725760,
-       "bound": "alu",
-       "frag_ms": 0.928,
-       "vertex_ms": 0.001,
-       "ms": 0.929,
-       "dram_mb": 5.81
-      },
-      "particles": {
-       "draws": 150,
-       "pixels": 829440,
-       "bound": "alu",
-       "frag_ms": 0.906,
-       "vertex_ms": 0.009,
-       "ms": 0.915,
-       "dram_mb": 9.95
-      },
-      "imagespace_ui": {
-       "draws": 60,
-       "pixels": 7257600,
-       "bound": "alu",
-       "frag_ms": 7.93,
-       "vertex_ms": 0.0,
-       "ms": 7.93,
-       "dram_mb": 87.09
-      }
-     },
-     "compute_ms": 26.23,
-     "dram_ms": 12.73,
-     "frame_ms": 26.23,
+     "compute_ms": 12.49,
+     "dram_ms": 5.55,
+     "frame_ms": 12.49,
      "bound": "compute"
     },
     {
@@ -2681,24 +6136,32 @@
      "height": 720,
      "gpu_mhz": 384.0,
      "efficiency": 1.0,
+     "gate": true,
+     "dynres": "off",
      "families": {
       "shadow": {
        "draws": 300,
-       "pixels": 2831155,
+       "pixels": 707789,
        "bound": "alu",
-       "frag_ms": 0.317,
+       "frag_ms": 0.079,
        "vertex_ms": 0.064,
-       "ms": 0.381,
-       "dram_mb": 16.99
+       "ms": 0.143,
+       "dram_mb": 2.83,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 300,
-       "pixels": 276480,
+       "pixels": 78643,
        "bound": "alu",
-       "frag_ms": 0.893,
+       "frag_ms": 0.254,
        "vertex_ms": 0.068,
-       "ms": 0.962,
-       "dram_mb": 3.32
+       "ms": 0.322,
+       "dram_mb": 0.98,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 1600,
@@ -2707,7 +6170,10 @@
        "frag_ms": 3.813,
        "vertex_ms": 0.547,
        "ms": 4.36,
-       "dram_mb": 10.95
+       "dram_mb": 11.4,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 150,
@@ -2716,7 +6182,10 @@
        "frag_ms": 0.753,
        "vertex_ms": 0.053,
        "ms": 0.806,
-       "dram_mb": 6.97
+       "dram_mb": 6.97,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 200,
@@ -2725,7 +6194,10 @@
        "frag_ms": 0.536,
        "vertex_ms": 0.046,
        "ms": 0.582,
-       "dram_mb": 1.99
+       "dram_mb": 2.07,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 450,
@@ -2734,7 +6206,10 @@
        "frag_ms": 1.117,
        "vertex_ms": 0.077,
        "ms": 1.193,
-       "dram_mb": 4.15
+       "dram_mb": 4.32,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 300,
@@ -2743,7 +6218,10 @@
        "frag_ms": 0.725,
        "vertex_ms": 0.201,
        "ms": 0.926,
-       "dram_mb": 5.53
+       "dram_mb": 6.91,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 200,
@@ -2752,7 +6230,10 @@
        "frag_ms": 0.25,
        "vertex_ms": 0.18,
        "ms": 0.43,
-       "dram_mb": 0.72
+       "dram_mb": 0.75,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -2761,7 +6242,10 @@
        "frag_ms": 0.495,
        "vertex_ms": 0.001,
        "ms": 0.496,
-       "dram_mb": 2.58
+       "dram_mb": 3.39,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 150,
@@ -2770,7 +6254,10 @@
        "frag_ms": 0.483,
        "vertex_ms": 0.01,
        "ms": 0.494,
-       "dram_mb": 4.42
+       "dram_mb": 6.82,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 60,
@@ -2779,12 +6266,15 @@
        "frag_ms": 4.23,
        "vertex_ms": 0.0,
        "ms": 4.23,
-       "dram_mb": 38.71
+       "dram_mb": 27.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 14.86,
-     "dram_ms": 6.27,
-     "frame_ms": 14.86,
+     "compute_ms": 13.98,
+     "dram_ms": 4.81,
+     "frame_ms": 13.98,
      "bound": "compute"
     },
     {
@@ -2793,24 +6283,32 @@
      "height": 720,
      "gpu_mhz": 384.0,
      "efficiency": 0.6,
+     "gate": true,
+     "dynres": "off",
      "families": {
       "shadow": {
        "draws": 300,
-       "pixels": 2831155,
+       "pixels": 707789,
        "bound": "alu",
-       "frag_ms": 0.528,
+       "frag_ms": 0.132,
        "vertex_ms": 0.107,
-       "ms": 0.635,
-       "dram_mb": 16.99
+       "ms": 0.239,
+       "dram_mb": 2.83,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 300,
-       "pixels": 276480,
+       "pixels": 78643,
        "bound": "alu",
-       "frag_ms": 1.489,
+       "frag_ms": 0.423,
        "vertex_ms": 0.114,
-       "ms": 1.603,
-       "dram_mb": 3.32
+       "ms": 0.537,
+       "dram_mb": 0.98,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 1600,
@@ -2819,7 +6317,10 @@
        "frag_ms": 6.355,
        "vertex_ms": 0.911,
        "ms": 7.266,
-       "dram_mb": 10.95
+       "dram_mb": 11.4,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 150,
@@ -2828,7 +6329,10 @@
        "frag_ms": 1.256,
        "vertex_ms": 0.089,
        "ms": 1.344,
-       "dram_mb": 6.97
+       "dram_mb": 6.97,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 200,
@@ -2837,7 +6341,10 @@
        "frag_ms": 0.893,
        "vertex_ms": 0.076,
        "ms": 0.969,
-       "dram_mb": 1.99
+       "dram_mb": 2.07,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 450,
@@ -2846,7 +6353,10 @@
        "frag_ms": 1.861,
        "vertex_ms": 0.128,
        "ms": 1.989,
-       "dram_mb": 4.15
+       "dram_mb": 4.32,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 300,
@@ -2855,7 +6365,10 @@
        "frag_ms": 1.208,
        "vertex_ms": 0.336,
        "ms": 1.544,
-       "dram_mb": 5.53
+       "dram_mb": 6.91,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 200,
@@ -2864,7 +6377,10 @@
        "frag_ms": 0.417,
        "vertex_ms": 0.3,
        "ms": 0.717,
-       "dram_mb": 0.72
+       "dram_mb": 0.75,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -2873,7 +6389,10 @@
        "frag_ms": 0.825,
        "vertex_ms": 0.002,
        "ms": 0.827,
-       "dram_mb": 2.58
+       "dram_mb": 3.39,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 150,
@@ -2882,7 +6401,10 @@
        "frag_ms": 0.806,
        "vertex_ms": 0.017,
        "ms": 0.823,
-       "dram_mb": 4.42
+       "dram_mb": 6.82,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 60,
@@ -2891,38 +6413,343 @@
        "frag_ms": 7.049,
        "vertex_ms": 0.0,
        "ms": 7.049,
-       "dram_mb": 38.71
+       "dram_mb": 27.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 24.77,
-     "dram_ms": 6.27,
-     "frame_ms": 24.77,
+     "compute_ms": 23.31,
+     "dram_ms": 4.81,
+     "frame_ms": 23.31,
      "bound": "compute"
     },
     {
-     "config": "handheld_540p",
-     "width": 960,
-     "height": 540,
-     "gpu_mhz": 384.0,
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
      "efficiency": 1.0,
+     "gate": false,
+     "dynres": "on (informational)",
      "families": {
       "shadow": {
        "draws": 300,
        "pixels": 2831155,
        "bound": "alu",
-       "frag_ms": 0.317,
-       "vertex_ms": 0.064,
-       "ms": 0.381,
-       "dram_mb": 16.99
+       "frag_ms": 0.158,
+       "vertex_ms": 0.032,
+       "ms": 0.19,
+       "dram_mb": 11.32,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 300,
-       "pixels": 155520,
+       "pixels": 314573,
        "bound": "alu",
-       "frag_ms": 0.502,
+       "frag_ms": 0.508,
+       "vertex_ms": 0.034,
+       "ms": 0.542,
+       "dram_mb": 3.93,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 4.289,
+       "vertex_ms": 0.273,
+       "ms": 4.563,
+       "dram_mb": 25.66,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 0.847,
+       "vertex_ms": 0.027,
+       "ms": 0.874,
+       "dram_mb": 15.68,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 0.603,
+       "vertex_ms": 0.023,
+       "ms": 0.626,
+       "dram_mb": 4.67,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 1.256,
+       "vertex_ms": 0.038,
+       "ms": 1.295,
+       "dram_mb": 9.72,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 0.816,
+       "vertex_ms": 0.101,
+       "ms": 0.916,
+       "dram_mb": 15.55,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.282,
+       "vertex_ms": 0.09,
+       "ms": 0.372,
+       "dram_mb": 1.68,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.557,
+       "vertex_ms": 0.001,
+       "ms": 0.558,
+       "dram_mb": 7.62,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.544,
+       "vertex_ms": 0.005,
+       "ms": 0.549,
+       "dram_mb": 15.34,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 4.758,
+       "vertex_ms": 0.0,
+       "ms": 4.758,
+       "dram_mb": 61.69,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 15.24,
+     "dram_ms": 11.25,
+     "frame_ms": 15.24,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
+     "efficiency": 0.6,
+     "gate": false,
+     "dynres": "on (informational)",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 0.264,
+       "vertex_ms": 0.053,
+       "ms": 0.317,
+       "dram_mb": 11.32,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 314573,
+       "bound": "alu",
+       "frag_ms": 0.847,
+       "vertex_ms": 0.057,
+       "ms": 0.904,
+       "dram_mb": 3.93,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 7.149,
+       "vertex_ms": 0.456,
+       "ms": 7.605,
+       "dram_mb": 25.66,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 1.412,
+       "vertex_ms": 0.044,
+       "ms": 1.457,
+       "dram_mb": 15.68,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 1.005,
+       "vertex_ms": 0.038,
+       "ms": 1.043,
+       "dram_mb": 4.67,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 2.094,
+       "vertex_ms": 0.064,
+       "ms": 2.158,
+       "dram_mb": 9.72,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 1.359,
+       "vertex_ms": 0.168,
+       "ms": 1.527,
+       "dram_mb": 15.55,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.469,
+       "vertex_ms": 0.15,
+       "ms": 0.619,
+       "dram_mb": 1.68,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.928,
+       "vertex_ms": 0.001,
+       "ms": 0.929,
+       "dram_mb": 7.62,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.906,
+       "vertex_ms": 0.009,
+       "ms": 0.915,
+       "dram_mb": 15.34,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 7.93,
+       "vertex_ms": 0.0,
+       "ms": 7.93,
+       "dram_mb": 61.69,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 25.4,
+     "dram_ms": 11.25,
+     "frame_ms": 25.4,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_540p_dynres",
+     "width": 960,
+     "height": 540,
+     "gpu_mhz": 384.0,
+     "efficiency": 1.0,
+     "gate": false,
+     "dynres": "on (informational)",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 707789,
+       "bound": "alu",
+       "frag_ms": 0.079,
+       "vertex_ms": 0.064,
+       "ms": 0.143,
+       "dram_mb": 2.83,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 78643,
+       "bound": "alu",
+       "frag_ms": 0.254,
        "vertex_ms": 0.068,
-       "ms": 0.571,
-       "dram_mb": 1.87
+       "ms": 0.322,
+       "dram_mb": 0.98,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 1600,
@@ -2931,7 +6758,10 @@
        "frag_ms": 2.145,
        "vertex_ms": 0.547,
        "ms": 2.692,
-       "dram_mb": 6.16
+       "dram_mb": 6.42,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 150,
@@ -2940,7 +6770,10 @@
        "frag_ms": 0.424,
        "vertex_ms": 0.053,
        "ms": 0.477,
-       "dram_mb": 3.92
+       "dram_mb": 3.92,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 200,
@@ -2949,7 +6782,10 @@
        "frag_ms": 0.301,
        "vertex_ms": 0.046,
        "ms": 0.347,
-       "dram_mb": 1.12
+       "dram_mb": 1.17,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 450,
@@ -2958,7 +6794,10 @@
        "frag_ms": 0.628,
        "vertex_ms": 0.077,
        "ms": 0.705,
-       "dram_mb": 2.33
+       "dram_mb": 2.43,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 300,
@@ -2967,7 +6806,10 @@
        "frag_ms": 0.408,
        "vertex_ms": 0.201,
        "ms": 0.609,
-       "dram_mb": 3.11
+       "dram_mb": 3.89,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 200,
@@ -2976,7 +6818,10 @@
        "frag_ms": 0.141,
        "vertex_ms": 0.18,
        "ms": 0.321,
-       "dram_mb": 0.4
+       "dram_mb": 0.42,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -2985,7 +6830,10 @@
        "frag_ms": 0.279,
        "vertex_ms": 0.001,
        "ms": 0.28,
-       "dram_mb": 1.45
+       "dram_mb": 1.91,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 150,
@@ -2994,7 +6842,10 @@
        "frag_ms": 0.272,
        "vertex_ms": 0.01,
        "ms": 0.282,
-       "dram_mb": 2.49
+       "dram_mb": 3.84,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 60,
@@ -3003,38 +6854,49 @@
        "frag_ms": 2.379,
        "vertex_ms": 0.0,
        "ms": 2.379,
-       "dram_mb": 21.77
+       "dram_mb": 15.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 9.04,
-     "dram_ms": 4.01,
-     "frame_ms": 9.04,
+     "compute_ms": 8.56,
+     "dram_ms": 2.81,
+     "frame_ms": 8.56,
      "bound": "compute"
     },
     {
-     "config": "handheld_540p",
+     "config": "handheld_540p_dynres",
      "width": 960,
      "height": 540,
      "gpu_mhz": 384.0,
      "efficiency": 0.6,
+     "gate": false,
+     "dynres": "on (informational)",
      "families": {
       "shadow": {
        "draws": 300,
-       "pixels": 2831155,
+       "pixels": 707789,
        "bound": "alu",
-       "frag_ms": 0.528,
+       "frag_ms": 0.132,
        "vertex_ms": 0.107,
-       "ms": 0.635,
-       "dram_mb": 16.99
+       "ms": 0.239,
+       "dram_mb": 2.83,
+       "vs": "depth.vert",
+       "ps": "depth.frag",
+       "target_format": null
       },
       "water_refl": {
        "draws": 300,
-       "pixels": 155520,
+       "pixels": 78643,
        "bound": "alu",
-       "frag_ms": 0.837,
+       "frag_ms": 0.423,
        "vertex_ms": 0.114,
-       "ms": 0.951,
-       "dram_mb": 1.87
+       "ms": 0.537,
+       "dram_mb": 0.98,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "lit": {
        "draws": 1600,
@@ -3043,7 +6905,10 @@
        "frag_ms": 3.574,
        "vertex_ms": 0.911,
        "ms": 4.486,
-       "dram_mb": 6.16
+       "dram_mb": 6.42,
+       "vs": "lit.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "land": {
        "draws": 150,
@@ -3052,7 +6917,10 @@
        "frag_ms": 0.706,
        "vertex_ms": 0.089,
        "ms": 0.795,
-       "dram_mb": 3.92
+       "dram_mb": 3.92,
+       "vs": "land.vert",
+       "ps": "land.frag",
+       "target_format": "RGBA16F"
       },
       "lod": {
        "draws": 200,
@@ -3061,7 +6929,10 @@
        "frag_ms": 0.502,
        "vertex_ms": 0.076,
        "ms": 0.578,
-       "dram_mb": 1.12
+       "dram_mb": 1.17,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "trees": {
        "draws": 450,
@@ -3070,7 +6941,10 @@
        "frag_ms": 1.047,
        "vertex_ms": 0.128,
        "ms": 1.175,
-       "dram_mb": 2.33
+       "dram_mb": 2.43,
+       "vs": "lit.vert",
+       "ps": "lit.frag",
+       "target_format": "RGBA16F"
       },
       "grass": {
        "draws": 300,
@@ -3079,7 +6953,10 @@
        "frag_ms": 0.68,
        "vertex_ms": 0.336,
        "ms": 1.015,
-       "dram_mb": 3.11
+       "dram_mb": 3.89,
+       "vs": "nolight_tex.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "actors": {
        "draws": 200,
@@ -3088,7 +6965,10 @@
        "frag_ms": 0.235,
        "vertex_ms": 0.3,
        "ms": 0.535,
-       "dram_mb": 0.4
+       "dram_mb": 0.42,
+       "vs": "lit_vc.vert",
+       "ps": "lit_spec.frag",
+       "target_format": "RGBA16F"
       },
       "sky": {
        "draws": 6,
@@ -3097,7 +6977,10 @@
        "frag_ms": 0.464,
        "vertex_ms": 0.002,
        "ms": 0.466,
-       "dram_mb": 1.45
+       "dram_mb": 1.91,
+       "vs": "sky.vert",
+       "ps": "sky_clouds.frag",
+       "target_format": "RGBA16F"
       },
       "particles": {
        "draws": 150,
@@ -3106,7 +6989,10 @@
        "frag_ms": 0.453,
        "vertex_ms": 0.017,
        "ms": 0.47,
-       "dram_mb": 2.49
+       "dram_mb": 3.84,
+       "vs": "nolight_texvc.vert",
+       "ps": "nolight_tex.frag",
+       "target_format": "RGBA16F"
       },
       "imagespace_ui": {
        "draws": 60,
@@ -3115,12 +7001,1193 @@
        "frag_ms": 3.965,
        "vertex_ms": 0.0,
        "ms": 3.965,
-       "dram_mb": 21.77
+       "dram_mb": 15.42,
+       "vs": "quad.vert",
+       "ps": "tex.frag",
+       "target_format": "RGBA16F"
       }
      },
-     "compute_ms": 15.07,
-     "dram_ms": 4.01,
-     "frame_ms": 15.07,
+     "compute_ms": 14.26,
+     "dram_ms": 2.81,
+     "frame_ms": 14.26,
+     "bound": "compute"
+    }
+   ],
+   "real019_mix_hi": [
+    {
+     "config": "docked_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 768.0,
+     "efficiency": 1.0,
+     "gate": true,
+     "dynres": "off",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 2.321,
+       "vertex_ms": 0.161,
+       "ms": 2.482,
+       "dram_mb": 13.83,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 314573,
+       "bound": "alu",
+       "frag_ms": 0.258,
+       "vertex_ms": 0.107,
+       "ms": 0.365,
+       "dram_mb": 4.05,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 0.748,
+       "vertex_ms": 0.859,
+       "ms": 1.607,
+       "dram_mb": 11.76,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.408,
+       "vertex_ms": 0.146,
+       "ms": 0.554,
+       "dram_mb": 6.41,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.062,
+       "vertex_ms": 0.058,
+       "ms": 0.12,
+       "dram_mb": 2.04,
+       "vs": "DISTLOD vso",
+       "ps": "SM pso",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 0.237,
+       "vertex_ms": 0.112,
+       "ms": 0.348,
+       "dram_mb": 4.49,
+       "vs": "STB vso",
+       "ps": "STB pso",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.33,
+       "vertex_ms": 0.639,
+       "ms": 0.97,
+       "dram_mb": 6.91,
+       "vs": "GRASS vso",
+       "ps": "STLEAF pso",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.127,
+       "vertex_ms": 0.518,
+       "ms": 0.645,
+       "dram_mb": 0.84,
+       "vs": "SKIN vso",
+       "ps": "SKIN pso",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.113,
+       "vertex_ms": 0.0,
+       "ms": 0.114,
+       "dram_mb": 3.23,
+       "vs": "SKY vso",
+       "ps": "SKY pso",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.214,
+       "vertex_ms": 0.025,
+       "ms": 0.238,
+       "dram_mb": 6.82,
+       "vs": "PAR vso",
+       "ps": "PARTICLE pso",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 2.658,
+       "vertex_ms": 0.0,
+       "ms": 2.658,
+       "dram_mb": 28.18,
+       "vs": "ISBLUR vso",
+       "ps": "IS pso",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 10.1,
+     "dram_ms": 5.77,
+     "frame_ms": 10.1,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 768.0,
+     "efficiency": 0.6,
+     "gate": true,
+     "dynres": "off",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 3.869,
+       "vertex_ms": 0.269,
+       "ms": 4.137,
+       "dram_mb": 13.83,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 314573,
+       "bound": "alu",
+       "frag_ms": 0.43,
+       "vertex_ms": 0.179,
+       "ms": 0.609,
+       "dram_mb": 4.05,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 1.247,
+       "vertex_ms": 1.432,
+       "ms": 2.679,
+       "dram_mb": 11.76,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.68,
+       "vertex_ms": 0.244,
+       "ms": 0.924,
+       "dram_mb": 6.41,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.103,
+       "vertex_ms": 0.096,
+       "ms": 0.199,
+       "dram_mb": 2.04,
+       "vs": "DISTLOD vso",
+       "ps": "SM pso",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 0.394,
+       "vertex_ms": 0.186,
+       "ms": 0.58,
+       "dram_mb": 4.49,
+       "vs": "STB vso",
+       "ps": "STB pso",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.551,
+       "vertex_ms": 1.066,
+       "ms": 1.616,
+       "dram_mb": 6.91,
+       "vs": "GRASS vso",
+       "ps": "STLEAF pso",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.211,
+       "vertex_ms": 0.863,
+       "ms": 1.075,
+       "dram_mb": 0.84,
+       "vs": "SKIN vso",
+       "ps": "SKIN pso",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.189,
+       "vertex_ms": 0.001,
+       "ms": 0.189,
+       "dram_mb": 3.23,
+       "vs": "SKY vso",
+       "ps": "SKY pso",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.356,
+       "vertex_ms": 0.041,
+       "ms": 0.397,
+       "dram_mb": 6.82,
+       "vs": "PAR vso",
+       "ps": "PARTICLE pso",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 4.43,
+       "vertex_ms": 0.0,
+       "ms": 4.43,
+       "dram_mb": 28.18,
+       "vs": "ISBLUR vso",
+       "ps": "IS pso",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 16.84,
+     "dram_ms": 5.77,
+     "frame_ms": 16.84,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 384.0,
+     "efficiency": 1.0,
+     "gate": true,
+     "dynres": "off",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 707789,
+       "bound": "alu",
+       "frag_ms": 1.161,
+       "vertex_ms": 0.322,
+       "ms": 1.483,
+       "dram_mb": 3.46,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 78643,
+       "bound": "alu",
+       "frag_ms": 0.129,
+       "vertex_ms": 0.215,
+       "ms": 0.344,
+       "dram_mb": 1.01,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 1.496,
+       "vertex_ms": 1.719,
+       "ms": 3.215,
+       "dram_mb": 11.76,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 0.816,
+       "vertex_ms": 0.292,
+       "ms": 1.109,
+       "dram_mb": 6.41,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.124,
+       "vertex_ms": 0.115,
+       "ms": 0.239,
+       "dram_mb": 2.04,
+       "vs": "DISTLOD vso",
+       "ps": "SM pso",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 0.473,
+       "vertex_ms": 0.223,
+       "ms": 0.696,
+       "dram_mb": 4.49,
+       "vs": "STB vso",
+       "ps": "STB pso",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 0.661,
+       "vertex_ms": 1.279,
+       "ms": 1.94,
+       "dram_mb": 6.91,
+       "vs": "GRASS vso",
+       "ps": "STLEAF pso",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.254,
+       "vertex_ms": 1.036,
+       "ms": 1.29,
+       "dram_mb": 0.84,
+       "vs": "SKIN vso",
+       "ps": "SKIN pso",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.226,
+       "vertex_ms": 0.001,
+       "ms": 0.227,
+       "dram_mb": 3.23,
+       "vs": "SKY vso",
+       "ps": "SKY pso",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.427,
+       "vertex_ms": 0.049,
+       "ms": 0.477,
+       "dram_mb": 6.82,
+       "vs": "PAR vso",
+       "ps": "PARTICLE pso",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 5.316,
+       "vertex_ms": 0.0,
+       "ms": 5.316,
+       "dram_mb": 28.18,
+       "vs": "ISBLUR vso",
+       "ps": "IS pso",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 16.33,
+     "dram_ms": 4.89,
+     "frame_ms": 16.33,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_720p",
+     "width": 1280,
+     "height": 720,
+     "gpu_mhz": 384.0,
+     "efficiency": 0.6,
+     "gate": true,
+     "dynres": "off",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 707789,
+       "bound": "alu",
+       "frag_ms": 1.934,
+       "vertex_ms": 0.537,
+       "ms": 2.472,
+       "dram_mb": 3.46,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 78643,
+       "bound": "alu",
+       "frag_ms": 0.215,
+       "vertex_ms": 0.358,
+       "ms": 0.573,
+       "dram_mb": 1.01,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 912384,
+       "bound": "alu",
+       "frag_ms": 2.494,
+       "vertex_ms": 2.865,
+       "ms": 5.358,
+       "dram_mb": 11.76,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 497664,
+       "bound": "alu",
+       "frag_ms": 1.36,
+       "vertex_ms": 0.487,
+       "ms": 1.848,
+       "dram_mb": 6.41,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 165888,
+       "bound": "alu",
+       "frag_ms": 0.206,
+       "vertex_ms": 0.192,
+       "ms": 0.398,
+       "dram_mb": 2.04,
+       "vs": "DISTLOD vso",
+       "ps": "SM pso",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 345600,
+       "bound": "alu",
+       "frag_ms": 0.789,
+       "vertex_ms": 0.372,
+       "ms": 1.16,
+       "dram_mb": 4.49,
+       "vs": "STB vso",
+       "ps": "STB pso",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 552960,
+       "bound": "alu",
+       "frag_ms": 1.102,
+       "vertex_ms": 2.131,
+       "ms": 3.233,
+       "dram_mb": 6.91,
+       "vs": "GRASS vso",
+       "ps": "STLEAF pso",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 59904,
+       "bound": "alu",
+       "frag_ms": 0.423,
+       "vertex_ms": 1.727,
+       "ms": 2.149,
+       "dram_mb": 0.84,
+       "vs": "SKIN vso",
+       "ps": "SKIN pso",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 322560,
+       "bound": "alu",
+       "frag_ms": 0.377,
+       "vertex_ms": 0.002,
+       "ms": 0.379,
+       "dram_mb": 3.23,
+       "vs": "SKY vso",
+       "ps": "SKY pso",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 368640,
+       "bound": "alu",
+       "frag_ms": 0.713,
+       "vertex_ms": 0.082,
+       "ms": 0.795,
+       "dram_mb": 6.82,
+       "vs": "PAR vso",
+       "ps": "PARTICLE pso",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 3225600,
+       "bound": "alu",
+       "frag_ms": 8.859,
+       "vertex_ms": 0.0,
+       "ms": 8.859,
+       "dram_mb": 28.18,
+       "vs": "ISBLUR vso",
+       "ps": "IS pso",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 27.22,
+     "dram_ms": 4.89,
+     "frame_ms": 27.22,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
+     "efficiency": 1.0,
+     "gate": false,
+     "dynres": "on (informational)",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 2.321,
+       "vertex_ms": 0.161,
+       "ms": 2.482,
+       "dram_mb": 13.83,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 314573,
+       "bound": "alu",
+       "frag_ms": 0.258,
+       "vertex_ms": 0.107,
+       "ms": 0.365,
+       "dram_mb": 4.05,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 1.683,
+       "vertex_ms": 0.859,
+       "ms": 2.543,
+       "dram_mb": 26.45,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 0.918,
+       "vertex_ms": 0.146,
+       "ms": 1.064,
+       "dram_mb": 14.43,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 0.139,
+       "vertex_ms": 0.058,
+       "ms": 0.197,
+       "dram_mb": 4.6,
+       "vs": "DISTLOD vso",
+       "ps": "SM pso",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 0.532,
+       "vertex_ms": 0.112,
+       "ms": 0.644,
+       "dram_mb": 10.11,
+       "vs": "STB vso",
+       "ps": "STB pso",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 0.744,
+       "vertex_ms": 0.639,
+       "ms": 1.383,
+       "dram_mb": 15.55,
+       "vs": "GRASS vso",
+       "ps": "STLEAF pso",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.285,
+       "vertex_ms": 0.518,
+       "ms": 0.803,
+       "dram_mb": 1.89,
+       "vs": "SKIN vso",
+       "ps": "SKIN pso",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.255,
+       "vertex_ms": 0.0,
+       "ms": 0.255,
+       "dram_mb": 7.26,
+       "vs": "SKY vso",
+       "ps": "SKY pso",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.481,
+       "vertex_ms": 0.025,
+       "ms": 0.506,
+       "dram_mb": 15.34,
+       "vs": "PAR vso",
+       "ps": "PARTICLE pso",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 5.98,
+       "vertex_ms": 0.0,
+       "ms": 5.98,
+       "dram_mb": 63.4,
+       "vs": "ISBLUR vso",
+       "ps": "IS pso",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 16.22,
+     "dram_ms": 11.52,
+     "frame_ms": 16.22,
+     "bound": "compute"
+    },
+    {
+     "config": "docked_1080p",
+     "width": 1920,
+     "height": 1080,
+     "gpu_mhz": 768.0,
+     "efficiency": 0.6,
+     "gate": false,
+     "dynres": "on (informational)",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 2831155,
+       "bound": "alu",
+       "frag_ms": 3.869,
+       "vertex_ms": 0.269,
+       "ms": 4.137,
+       "dram_mb": 13.83,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 314573,
+       "bound": "alu",
+       "frag_ms": 0.43,
+       "vertex_ms": 0.179,
+       "ms": 0.609,
+       "dram_mb": 4.05,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 2052864,
+       "bound": "alu",
+       "frag_ms": 2.805,
+       "vertex_ms": 1.432,
+       "ms": 4.238,
+       "dram_mb": 26.45,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 1119744,
+       "bound": "alu",
+       "frag_ms": 1.53,
+       "vertex_ms": 0.244,
+       "ms": 1.774,
+       "dram_mb": 14.43,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 373248,
+       "bound": "alu",
+       "frag_ms": 0.232,
+       "vertex_ms": 0.096,
+       "ms": 0.328,
+       "dram_mb": 4.6,
+       "vs": "DISTLOD vso",
+       "ps": "SM pso",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 777600,
+       "bound": "alu",
+       "frag_ms": 0.887,
+       "vertex_ms": 0.186,
+       "ms": 1.073,
+       "dram_mb": 10.11,
+       "vs": "STB vso",
+       "ps": "STB pso",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 1244160,
+       "bound": "alu",
+       "frag_ms": 1.239,
+       "vertex_ms": 1.066,
+       "ms": 2.305,
+       "dram_mb": 15.55,
+       "vs": "GRASS vso",
+       "ps": "STLEAF pso",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 134784,
+       "bound": "alu",
+       "frag_ms": 0.475,
+       "vertex_ms": 0.863,
+       "ms": 1.339,
+       "dram_mb": 1.89,
+       "vs": "SKIN vso",
+       "ps": "SKIN pso",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 725760,
+       "bound": "alu",
+       "frag_ms": 0.425,
+       "vertex_ms": 0.001,
+       "ms": 0.425,
+       "dram_mb": 7.26,
+       "vs": "SKY vso",
+       "ps": "SKY pso",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 829440,
+       "bound": "alu",
+       "frag_ms": 0.802,
+       "vertex_ms": 0.041,
+       "ms": 0.843,
+       "dram_mb": 15.34,
+       "vs": "PAR vso",
+       "ps": "PARTICLE pso",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 7257600,
+       "bound": "alu",
+       "frag_ms": 9.967,
+       "vertex_ms": 0.0,
+       "ms": 9.967,
+       "dram_mb": 63.4,
+       "vs": "ISBLUR vso",
+       "ps": "IS pso",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 27.04,
+     "dram_ms": 11.52,
+     "frame_ms": 27.04,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_540p_dynres",
+     "width": 960,
+     "height": 540,
+     "gpu_mhz": 384.0,
+     "efficiency": 1.0,
+     "gate": false,
+     "dynres": "on (informational)",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 707789,
+       "bound": "alu",
+       "frag_ms": 1.161,
+       "vertex_ms": 0.322,
+       "ms": 1.483,
+       "dram_mb": 3.46,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 78643,
+       "bound": "alu",
+       "frag_ms": 0.129,
+       "vertex_ms": 0.215,
+       "ms": 0.344,
+       "dram_mb": 1.01,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 513216,
+       "bound": "alu",
+       "frag_ms": 0.842,
+       "vertex_ms": 1.719,
+       "ms": 2.56,
+       "dram_mb": 6.61,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 279936,
+       "bound": "alu",
+       "frag_ms": 0.459,
+       "vertex_ms": 0.292,
+       "ms": 0.751,
+       "dram_mb": 3.61,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 93312,
+       "bound": "alu",
+       "frag_ms": 0.07,
+       "vertex_ms": 0.115,
+       "ms": 0.185,
+       "dram_mb": 1.15,
+       "vs": "DISTLOD vso",
+       "ps": "SM pso",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 194400,
+       "bound": "alu",
+       "frag_ms": 0.266,
+       "vertex_ms": 0.223,
+       "ms": 0.489,
+       "dram_mb": 2.53,
+       "vs": "STB vso",
+       "ps": "STB pso",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 311040,
+       "bound": "alu",
+       "frag_ms": 0.372,
+       "vertex_ms": 1.279,
+       "ms": 1.65,
+       "dram_mb": 3.89,
+       "vs": "GRASS vso",
+       "ps": "STLEAF pso",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 33696,
+       "bound": "alu",
+       "frag_ms": 0.143,
+       "vertex_ms": 1.036,
+       "ms": 1.179,
+       "dram_mb": 0.47,
+       "vs": "SKIN vso",
+       "ps": "SKIN pso",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 181440,
+       "bound": "alu",
+       "frag_ms": 0.127,
+       "vertex_ms": 0.001,
+       "ms": 0.128,
+       "dram_mb": 1.81,
+       "vs": "SKY vso",
+       "ps": "SKY pso",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 207360,
+       "bound": "alu",
+       "frag_ms": 0.24,
+       "vertex_ms": 0.049,
+       "ms": 0.29,
+       "dram_mb": 3.84,
+       "vs": "PAR vso",
+       "ps": "PARTICLE pso",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 1814400,
+       "bound": "alu",
+       "frag_ms": 2.99,
+       "vertex_ms": 0.0,
+       "ms": 2.99,
+       "dram_mb": 15.85,
+       "vs": "ISBLUR vso",
+       "ps": "IS pso",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 12.05,
+     "dram_ms": 2.88,
+     "frame_ms": 12.05,
+     "bound": "compute"
+    },
+    {
+     "config": "handheld_540p_dynres",
+     "width": 960,
+     "height": 540,
+     "gpu_mhz": 384.0,
+     "efficiency": 0.6,
+     "gate": false,
+     "dynres": "on (informational)",
+     "families": {
+      "shadow": {
+       "draws": 300,
+       "pixels": 707789,
+       "bound": "alu",
+       "frag_ms": 1.934,
+       "vertex_ms": 0.537,
+       "ms": 2.472,
+       "dram_mb": 3.46,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": null
+      },
+      "water_refl": {
+       "draws": 300,
+       "pixels": 78643,
+       "bound": "alu",
+       "frag_ms": 0.215,
+       "vertex_ms": 0.358,
+       "ms": 0.573,
+       "dram_mb": 1.01,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lit": {
+       "draws": 1600,
+       "pixels": 513216,
+       "bound": "alu",
+       "frag_ms": 1.403,
+       "vertex_ms": 2.865,
+       "ms": 4.267,
+       "dram_mb": 6.61,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "land": {
+       "draws": 150,
+       "pixels": 279936,
+       "bound": "alu",
+       "frag_ms": 0.765,
+       "vertex_ms": 0.487,
+       "ms": 1.252,
+       "dram_mb": 3.61,
+       "vs": "SLS vso",
+       "ps": "SLS pso",
+       "target_format": "RGBA16F"
+      },
+      "lod": {
+       "draws": 200,
+       "pixels": 93312,
+       "bound": "alu",
+       "frag_ms": 0.116,
+       "vertex_ms": 0.192,
+       "ms": 0.308,
+       "dram_mb": 1.15,
+       "vs": "DISTLOD vso",
+       "ps": "SM pso",
+       "target_format": "RGBA16F"
+      },
+      "trees": {
+       "draws": 450,
+       "pixels": 194400,
+       "bound": "alu",
+       "frag_ms": 0.444,
+       "vertex_ms": 0.372,
+       "ms": 0.815,
+       "dram_mb": 2.53,
+       "vs": "STB vso",
+       "ps": "STB pso",
+       "target_format": "RGBA16F"
+      },
+      "grass": {
+       "draws": 300,
+       "pixels": 311040,
+       "bound": "alu",
+       "frag_ms": 0.62,
+       "vertex_ms": 2.131,
+       "ms": 2.751,
+       "dram_mb": 3.89,
+       "vs": "GRASS vso",
+       "ps": "STLEAF pso",
+       "target_format": "RGBA16F"
+      },
+      "actors": {
+       "draws": 200,
+       "pixels": 33696,
+       "bound": "alu",
+       "frag_ms": 0.238,
+       "vertex_ms": 1.727,
+       "ms": 1.964,
+       "dram_mb": 0.47,
+       "vs": "SKIN vso",
+       "ps": "SKIN pso",
+       "target_format": "RGBA16F"
+      },
+      "sky": {
+       "draws": 6,
+       "pixels": 181440,
+       "bound": "alu",
+       "frag_ms": 0.212,
+       "vertex_ms": 0.002,
+       "ms": 0.214,
+       "dram_mb": 1.81,
+       "vs": "SKY vso",
+       "ps": "SKY pso",
+       "target_format": "RGBA16F"
+      },
+      "particles": {
+       "draws": 150,
+       "pixels": 207360,
+       "bound": "alu",
+       "frag_ms": 0.401,
+       "vertex_ms": 0.082,
+       "ms": 0.483,
+       "dram_mb": 3.84,
+       "vs": "PAR vso",
+       "ps": "PARTICLE pso",
+       "target_format": "RGBA16F"
+      },
+      "imagespace_ui": {
+       "draws": 60,
+       "pixels": 1814400,
+       "bound": "alu",
+       "frag_ms": 4.983,
+       "vertex_ms": 0.0,
+       "ms": 4.983,
+       "dram_mb": 15.85,
+       "vs": "ISBLUR vso",
+       "ps": "IS pso",
+       "target_format": "RGBA16F"
+      }
+     },
+     "compute_ms": 20.08,
+     "dram_ms": 2.88,
+     "frame_ms": 20.08,
      "bound": "compute"
     }
    ]
@@ -3128,59 +8195,77 @@
   "summary_ms": {
    "mix_lo": {
     "docked_720p": {
-     "eff_1.0": 7.05,
-     "eff_0.6": 11.75
-    },
-    "docked_1080p": {
-     "eff_1.0": 15.36,
-     "eff_0.6": 25.6
+     "eff_1.0": 7.11,
+     "eff_0.6": 11.85
     },
     "handheld_720p": {
-     "eff_1.0": 14.1,
-     "eff_0.6": 23.5
+     "eff_1.0": 13.23,
+     "eff_0.6": 22.04
     },
-    "handheld_540p": {
-     "eff_1.0": 8.29,
-     "eff_0.6": 13.81
+    "docked_1080p": {
+     "eff_1.0": 14.86,
+     "eff_0.6": 24.77
+    },
+    "handheld_540p_dynres": {
+     "eff_1.0": 7.8,
+     "eff_0.6": 13.0
     }
    },
    "mix_hi": {
     "docked_720p": {
-     "eff_1.0": 7.43,
-     "eff_0.6": 12.38
-    },
-    "docked_1080p": {
-     "eff_1.0": 15.74,
-     "eff_0.6": 26.23
+     "eff_1.0": 7.49,
+     "eff_0.6": 12.49
     },
     "handheld_720p": {
-     "eff_1.0": 14.86,
-     "eff_0.6": 24.77
+     "eff_1.0": 13.98,
+     "eff_0.6": 23.31
     },
-    "handheld_540p": {
-     "eff_1.0": 9.04,
-     "eff_0.6": 15.07
+    "docked_1080p": {
+     "eff_1.0": 15.24,
+     "eff_0.6": 25.4
+    },
+    "handheld_540p_dynres": {
+     "eff_1.0": 8.56,
+     "eff_0.6": 14.26
+    }
+   },
+   "real019_mix_hi": {
+    "docked_720p": {
+     "eff_1.0": 10.1,
+     "eff_0.6": 16.84
+    },
+    "handheld_720p": {
+     "eff_1.0": 16.33,
+     "eff_0.6": 27.22
+    },
+    "docked_1080p": {
+     "eff_1.0": 16.22,
+     "eff_0.6": 27.04
+    },
+    "handheld_540p_dynres": {
+     "eff_1.0": 12.05,
+     "eff_0.6": 20.08
     }
    }
   },
   "targets": {
    "30": {
     "docked_720p": "pass",
-    "docked_1080p": "pass",
     "handheld_720p": "pass",
-    "handheld_540p": "pass"
+    "docked_1080p": "pass",
+    "handheld_540p_dynres": "pass"
    },
    "45": {
     "docked_720p": "pass",
-    "docked_1080p": "pass_at_peak_only",
     "handheld_720p": "pass_at_peak_only",
-    "handheld_540p": "pass"
+    "docked_1080p": "pass_at_peak_only",
+    "handheld_540p_dynres": "pass"
    },
    "60": {
     "docked_720p": "pass",
-    "docked_1080p": "pass_at_peak_only",
     "handheld_720p": "pass_at_peak_only",
-    "handheld_540p": "pass"
+    "docked_1080p": "pass_at_peak_only",
+    "handheld_540p_dynres": "pass"
    }
   }
  },
@@ -4603,6 +9688,48 @@
   "method": "Counted per frame: dkCmdBufClear + dkCmdBufAddMemory + record() (stream decode, state-block replay, every dkCmdBuf*\ncall, dkCmdBufFinishList, dkQueueSubmitCommands, swapchain acquire/present bookkeeping). The libnx services under\nit are stand-ins that return at once (perf/dk/stubs.c): the kernel/ioctl time of a real submit is not counted.",
   "streams": {
    "mix_hi": {
+    "profile_last_frame": {
+     "record": 999610,
+     "dkCmdBufBindUniformBuffers": 513360,
+     "dkCmdBufBindVtxBuffers": 170569,
+     "dkCmdBufBindTextures": 114004,
+     "dkCmdBufBindIdxBuffer": 69620,
+     "dkCmdBufDrawIndexed": 63070,
+     "memmove": 54383,
+     "dkMemBlockGetGpuAddr": 28800,
+     "dkCmdBufReplayCmds": 15768,
+     "block_get": 2788,
+     "dk::detail::ImageInfo::fromImageView(DkImageView const*, unsigned int)": 2737,
+     "dkCmdBufBindRenderTargets": 2716,
+     "dkCmdBufSetViewports": 1245,
+     "dkCmdBufSetScissors": 600,
+     "dkCmdBufClearColor": 525,
+     "dkCmdBufBarrier": 453,
+     "dkCmdBufSetDepthBias": 420,
+     "dkCmdBufClearDepthStencil": 399,
+     "dkCmdBufSetBlendConst": 345,
+     "dk::detail::Device::calcZcullStorageInfo(dk::detail::ZcullStorageInfo&, unsigned int, unsigned int, unsigned int, DkImageFormat, DkMsMode)": 189,
+     "dk::detail::Queue::signalFence(dk::detail::Fence&, bool)": 144,
+     "dk::detail::CmdBuf::appendRawGpfifoEntry(unsigned long, unsigned int, unsigned int)": 97,
+     "dk::detail::Queue::flush()": 96,
+     "dk::detail::Queue::appendGpfifoEntries(dk::detail::CtrlCmdGpfifoEntry const*, unsigned int)": 87,
+     "dk::detail::Queue::decompressSurface(dk::detail::Image const*)": 74,
+     "_malloc_r": 61,
+     "dk::detail::Queue::submitCommands(unsigned long) [clone .localalias]": 61,
+     "dkCmdBufReportCounter": 58,
+     "dk::detail::CmdBuf::appendCtrlCmd(unsigned long)": 56,
+     "dk::detail::Queue::postSubmitFlush()": 56,
+     "dk::detail::CmdBuf::addMemory(dk::detail::MemBlock*, unsigned int, unsigned int)": 50,
+     "dk::detail::Queue::addCmdMemory(unsigned long)": 44,
+     "dkCmdBufSignalFence": 35,
+     "dkQueuePresentImage": 31,
+     "nvGpuChannelAppendEntry": 24,
+     "dkCmdBufBindImageDescriptorSet": 20,
+     "dkCmdBufBindSamplerDescriptorSet": 20,
+     "main": 18,
+     "dkQueueAcquireImage": 18,
+     "nwindowDequeueBuffer": 18
+    },
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4632,6 +9759,7 @@
     }
    },
    "mix_lo": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4661,6 +9789,7 @@
     }
    },
    "wo_actors": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4690,6 +9819,7 @@
     }
    },
    "wo_grass": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4719,6 +9849,7 @@
     }
    },
    "wo_imagespace_ui": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4748,6 +9879,7 @@
     }
    },
    "wo_land": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4777,6 +9909,7 @@
     }
    },
    "wo_lit": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4806,6 +9939,7 @@
     }
    },
    "wo_lod": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4835,6 +9969,7 @@
     }
    },
    "wo_particles": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4864,6 +9999,7 @@
     }
    },
    "wo_shadow": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4893,6 +10029,7 @@
     }
    },
    "wo_trees": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],
@@ -4922,6 +10059,7 @@
     }
    },
    "wo_water_refl": {
+    "profile_last_frame": null,
     "exit": 0,
     "error": null,
     "intr": [],

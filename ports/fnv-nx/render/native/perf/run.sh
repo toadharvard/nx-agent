@@ -11,7 +11,12 @@ mkdir -p "$W/out"
 source <("$P/../env.sh" --print)
 "$P/build.sh" "$W/b"
 python3 -I "$P/gen_stream.py" "$W/streams"
-python3 -I "$P/gpu_cost.py" "$W/b/n1/shaders" "$UAM" "$W/out/gpu.json"
+# real-like shader costs: the game's shaderpackage019 through S6b's sdp2dksh (local only; skipped without them)
+SDP=${SDP:-/home/user/gamedata/data/Data/Shaders/shaderpackage019.sdp}
+SDP2DKSH=${SDP2DKSH:-/home/user/wt-s6b/ports/fnv-nx/render/shaders/build/host/sdp2dksh}
+REAL=()
+if [ -f "$SDP" ] && [ -x "$SDP2DKSH" ]; then mkdir -p "$W/sdp/out019"; "$SDP2DKSH" -o "$W/sdp/out019" "$SDP" >"$W/out/sdp2dksh.log" 2>&1 || true; REAL=(--real "$W/sdp/out019"); fi
+python3 -I "$P/gpu_cost.py" "$W/b/n1/shaders" "$UAM" "$W/out/gpu.json" "${REAL[@]}"
 # per-pass counters: the synthetic mixes through the native front with CaptureBackend, and S6n's N0 capture
 for m in mix_lo mix_hi; do
 	"$W/b/native_drv_cap" "$W/streams/$m.nxd3d" 0 "$W/out/$m.nxcap" - 2 >/dev/null
