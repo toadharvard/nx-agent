@@ -763,6 +763,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 rq_.qual[:-1] != dq_.qual[:-1]:
                             target = MSVC_ENTRY_SYM % addr
                             stats['msvc_entry_refs'] += 1
+                    if nd.get('msvc_entry') and target == ADDR_SYM % addr and \
+                            slotfill2.other_class_entry(isig, itanium(nd['sym'].name)):   # S2c-vt2
+                        target = MSVC_ENTRY_SYM % addr
+                        stats['msvc_entry_refs_itanium'] += 1
                     defdecl = nd['msvc']
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
@@ -1289,6 +1293,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 exe_path, providers, exe_alt)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
+        for a in rebind:   # S2c-vt2: shifted secondary groups moved their address points (slotfill2.shifted)
+            rebind[a] = vmap[a][:2]
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
     # FUN_00404950's, ...): the map can give one native vtable; every class's own is listed, so a native vptr store
     # can be traced back to its image vftable (S13's vtable-store comparison)
@@ -2098,6 +2104,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     targets of exe_slot_fill (slot_over: one symbol whose vtables in an object disagree on the exe address), for the
     kept copy of the group (the first in link order), secondary vtables included. Returns the counts."""
     st = collections.Counter()
+    slotfill2.shift_reset(out)   # S2c-vt2: no shifted secondary groups yet (vtshift.tsv)
     by_obj = {u.obj: u for u in have}
     want = collections.defaultdict(list)    # (z, path) -> [exe vftable]
     for v, (z, ap, path, note) in vmap.items():
@@ -2153,7 +2160,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         extend = len(slots) > nm
         if extend:
             st['short'] += 1
-        if extend and len(pts) != 1:
+        shift = slotfill2.shift_plan(z, pts, n, nm, slots, out, have, st) if extend and len(pts) != 1 else None
+        if extend and len(pts) != 1 and not shift:   # S2c-vt2: shifted secondary groups (slotfill2.shift_plan)
             st['skipped-secondary-vtables'] += 1
             extend = False
         if not extend and not ov:
@@ -2213,14 +2221,14 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         lines = ['// %s from the exe vftable(s) %s: %d native slots + %d, %d slots per use (S2c-vt)' % (
                      z, ' '.join('%08x' % v for v in sorted(vs)), n, len(extra), len(ov)),
                  '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3', '    .globl %s' % z,
-                 '    .type %s, %%object' % z, '%s:' % z] + words + extra + ['    .size %s, .-%s' % (z, z), '    .text']
+                 '    .type %s, %%object' % z, '%s:' % z] + slotfill2.place_extra(words, extra, shift, z, out) + ['    .size %s, .-%s' % (z, z), '    .text']
         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
         st['extended' if extra else 'copied-per-slot'] += 1
         st['slots-added'] += len(extra)
         st['slots-per-use'] += len(ov)
         for v, (z_, ap_, path_, note_) in list(vmap.items()):
             if z_ == z:
-                vmap[v] = (z_, ap_, VTEXT_OBJ, note_ + (', extended from the exe (+%d slots)' % len(extra) if extra
+                vmap[v] = (z_, slotfill2.shifted(ap_, shift), VTEXT_OBJ, note_ + (', extended from the exe (+%d slots)' % len(extra) if extra
                                                         else ', slots per use from the exe'))
         rows.append((z, os.path.basename(path), str(n), str(len(extra)), ' '.join('%08x' % v for v in sorted(vs)),
                      str(len(ov))))
@@ -3191,6 +3199,8 @@ def apply(out, fixed):
         for t in temps:
             os.remove(t)
         n += 1
+    sk, sn, sb = slotfill2.shift_fixed(out, fixed)   # S2c-vt2: references into shifted secondary groups
+    print('shifted secondary vtable groups: %d patches in %d objects, %d objects failed' % (sn, sk, sb))
     ov = os.path.join(out, 'overrides.list')
     if os.path.exists(ov):
         for obj in sorted(set(open(ov).read().split('\n')) - {''}):
