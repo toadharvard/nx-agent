@@ -2468,3 +2468,35 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - FALL1: 004ff7e0 and 00c25f40 still trap on links older than 77b2693.
   - Harness, open: about 160 oracle-only null dereferences from canned null results; about 330 native-only faults
     (~40% were TLS, now fixed); devirtualised indirect calls.
+
+### J-0113 | 2026-11-04 | stream: S11-equivalence,S13-difffuzz | status: wip | parent: J-0104,J-0112
+
+* **measured** - First full MSVC gate from the eq farms: all six shards pass. Shards 1-6 come from heads edf9fd1,
+  49f6666 (2, 3, 6), 650bf10 and 808c50b, with the same decomp, rules and pristine objects. The shards agree across
+  heads, and match the local gate.
+  - Units: 2,988 in all; 2,362 identical, 545 differ, 80 do not build on the prepared side, 1 does not build in
+    pristine (vc8).
+  - Functions: 1,067 of 59,567 differ. EH-only 777, retarget 174, code 116.
+  - Code differences by rule: CTOR1 58, STATIC1 23, DECL1 9 (6 after 4e75fd9), XINC1 8, PTR1 5, RET1 2, MATH1 2,
+    GOTO1/NEW4/UNIT1 1 each.
+  - EXC1 accounts for 646 of the EH-only functions (exceptional paths only). DECL1's 155 retargets are CRT calls by
+    name where the exe calls game wrapper addresses: same behaviour, different binding, which matters to S2.
+  - The table is in EQUIVALENCE.md (`1bc32ed`). The classes and examples went to S1, S1b and S2.
+* **did** - S11 `4e75fd9` DECL1-MATHNS. In a namespace other than std, the decomp's `extern "C" double fabs(double);`
+  hides the float overloads, so the exe computes in double. DECL1 used to replace it with `using ::fabs;`, which brought
+  `float fabs(float)` in.
+  - The namespace now keeps the C declaration (33 sites in 24 files).
+  - The signature check ignores SAL attributes, and MATH1 keeps a namespace's own float copy.
+  - niobbox 0x00eba680, bhkrigidbody 0x00c8e160 and hkpworldviewerbase 0x00ddd040 are identical to pristine again.
+    DECL1's math row is now 21/27.
+  - tests/s1 and tests/s11 pass.
+* **did** - S13 `88606c8` difffuzz-9 (HARNESS bump, merged before any farm paid for difffuzz-8):
+  - An intercepted call's canned result follows the callee's definition and the calling unit's declaration. A `T&`
+    result is a valid non-null address, and the bool rule applies when either side says bool. 5 of 16 sampled
+    oracle-only faults are gone.
+  - The bytes an intercepted callee pops come from its oracle code (`ret N`) rather than the declaration (00a4fc90 is
+    gone).
+  - Native-only faults that remain: ilp32-pointer from negative fuzzed indexes (soft); 00d234e0, a Havok custom
+    convention (oracle gap); 00bc2360 Emitter, a field read as a pointer versus embedded storage (S1 layout, not
+    confirmed); 006041d0 open.
+  - Self-test: 0 failures.
