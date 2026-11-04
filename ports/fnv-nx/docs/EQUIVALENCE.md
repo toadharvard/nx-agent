@@ -1,19 +1,72 @@
 # Rule equivalence under MSVC 2008 x86 (stream S11)
 
-**Status: interim** (decomp `87eb9373`; neutral-set build 1,899 of 2,988 units at the time of writing). Numbers below
-are marked with the run they come from; the tables are completed as the runs finish.
+Decomp `87eb9373`, prepare rules as of `8fff58b` (J-0052). The decomp is byte-matching MSVC 2008 x86-32 code, so the
+compiler it matches is an oracle for the prepare rules: a rule that only changes spelling must leave every function
+compiling to the same code under that compiler. S11 builds the pristine decomp and prepared trees with MSVC 2008
+SP1 / RTM under Wine and compares them per function with the decomp's own `compare_builds.py` logic (code bytes,
+padding, every relocation resolved to its original address). A differing function means the rule changed what the
+code does under x86, or the rule was misclassified, or MSVC cannot express what the target does (then the
+difference is explained, not counted against the rule).
 
-The decomp is byte-matching MSVC 2008 x86-32 code, so the compiler it matches is an oracle for the prepare rules: a
-rule that only changes spelling must leave every function compiling to the same code under that compiler. S11 builds
-the pristine decomp and prepared trees with MSVC 2008 SP1 / RTM under Wine and compares them per function with the
-decomp's own `compare_builds.py` logic (code bytes, padding, every relocation resolved to its original address).
-A differing function means the rule changed what the code does under x86, or the rule was misclassified, or MSVC
-cannot express what the target does (then the difference is explained, not counted against the rule).
-
-Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, hashes and commands). Tests:
+Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md`: compiler setup, installer hashes, commands). Tests:
 `tests/s11/run.sh`.
 
+## Result (neutral set + FTOL1, all 2,988 units)
+
+| | units | functions |
+|---|---:|---:|
+| compiled on both sides | 2,890 | 59,122 |
+| identical | 2,348 | 58,077 |
+| differ | 542 | 1,045 |
+| - only in exception-handling code (identical when both sides build with `/EHs-c-`) | | 754 |
+| - same code bytes, a call or data reference reaches another address (*retarget*) | | 177 |
+| - other code | | 114 |
+| prepared side does not compile under MSVC 2008 | 97 | |
+| pristine does not compile (the `vc8` unit: VC 2005 not installed) | 1 | |
+
+Every pristine unit that compiles has every one of its recipe functions in its object at exactly the recipe size
+(68,456 functions): the oracle builds what the decomp claims.
+
+## Verdicts per rule
+
+Leave-one-out attribution (method below). `eh` / `retarget` / `code`: kinds of the differing functions the rule
+explains; `no-build`: units that compile under MSVC without the rule but not with it.
+
+| Rule | eh | retarget | code | no-build | Verdict |
+|---|---:|---:|---:|---:|---|
+| `EXC1` | 562 | | | | **exceptional paths only.** Without `throw()` MSVC adds EH frames / unwind states (318 units, e.g. `NiRenderedTexture::Create` frees the memory when the constructor throws). Every one is identical with `/EHs-c-`. |
+| `DECL1` | 4 | 153 | 27 | 65 | **changes callees and math precision.** Retargets: the decomp's C++ prototypes of `strcpy_s` / `strcat_s` / `_stricmp` / `sprintf_s` / `memset` / `memcpy` / `strchr` are bound to game wrappers (0x00406d30 `TaskQueueInterface::CopyStringToBuffer`, 0x00404dc0, 0x00406d00, 0x00403d30, ...) that only forward to the CRT function; DECL1 calls the CRT directly (equivalent). Code: the CRT's `<math.h>` overloads replace the decomp's declarations, so `fabs` / `sqrt` / `floor` of a `float` round through `float` where the matched code stayed in x87 precision, or the other way round (`Calendar::GetGameHoursPassed` passed `floor` a `float` to the game helper 0x00406cc0 bound to `_floor`; it now passes a `double`: hours can differ by one at a boundary); CRT attributes change code after `_invalid_parameter_noinfo` and EH states around CRT calls. No-build: MSVC-only (`std::abs` 29, SDK names, `float` math overloads). |
+| `GAME1` | | | | | **fixes DECL1's rebinding (D13).** No unit differs because of it; `falloutaudiomedia.cpp` (14 functions), `bsspinlock_console`, `memorymanager.cpp` are identical again (they call 0x00830470, `FUN_008691b0::Lock`, the Interlocked import slots as the exe does). |
+| `CTOR1` | 31 | 2 | 60 | | **null check only.** `::new ((void*)p) T(args)` calls `<new>`'s placement form (`throw()`): MSVC null-checks the pointer before the constructor, and at `/Od` calls the placement function instead of inlining it. Same behaviour for a non-null `this`. |
+| `NEW2` | 55 | | | | **exceptional paths only** (MSVC's placement forms are `throw()`, the decomp's were not). |
+| `NEW4` | | | 1 | | **allocator.** `bsmultitargettreadtransfcontroller_ehsc_noehsc_variant.cpp` 0x00a35a80: with `<new>` included, `new[]` reaches the global `operator new[]` instead of the unit's inline MemoryManager copy (on the target ALLOC1 removes that copy anyway; equivalent if the game's global `new[]` forwards to MemoryManager, as ALLOC1 assumes). |
+| `STATIC1` | | | 15 | | **reloads only.** An external variable is read again after every call (13 units); the internal static was kept in a register. Same values unless another unit writes the variable during the call. |
+| `XINC1` | | | 4 | | as S1b states: 4 functions (bssegmentedtrishape x2, nivbset, hkpprojectilegun) reload `ecx` / pass the argument explicitly; the rest identical. |
+| `FTOL1` | | 9 | | | **other helper.** `(__int64)(x)` compiles to a call of `_ftol2` (0x00ec62f6) where the exe calls `_ftol2_sse` (0x00ec62c0): the same truncating conversion. |
+| `UNIT1` | | | 1 | | the SpeedTree entry is a deliberate decomp-bug fix (the stack object passed to `std::exception`'s constructor grows from 8 to 12 bytes, frame +4) - a DBUG1-style patch, not a rename. |
+| `GOTO1` | | | | 3 | **bug at `8fff58b`** (fixed upstream in `66d2007`): `T a = f(x), b = g(y);` became `T a; a = f(x), b = g(y);`, `b` undeclared (4 sites). |
+| `STR1` | | | | 2 | **bug**: a file declares `extern const char str_x[]` in one place and `extern char str_x` in another; `&str_x` where the scalar is in scope became `str_x` (a `char`). |
+| `IFX1` | | | | 2 | **platform at two sites**: `__if_not_exists(_mm_mul_ps)` resolved as "exists" (sse2neon declares it on the target), so the decomp's own SSE declarations go, as SSE1/SSE2 would remove them; MSVC without `<xmmintrin.h>` has neither. |
+| `CALL1` `DECL2` | | | | 2 + 2 | stand-in limits only (units that include `<windows.h>` themselves, decomp types the full SDK also defines). |
+| `CSX1` | | | | | asserts only, no code; but see D15 below. |
+| `DUPINT1` `LINK1` `NEW1` `NEW3` `RET1` `SPEC1` `RCAST1` `TYPEID1` `SAL1` | | | | | **identical** in every unit they touch. |
+| `KEEP1` | | | | | inert by construction under MSVC (`FNVNX_KEEP` is empty). |
+| `DBUG1` | | | | | no sites. |
+| two or more rules together | 102 | 13 | 6 | 21 | explained only by leaving out a group or a pair of groups: the EH-only ones are EXC1 with NEW2 / CTOR1 or two NEWDEL rules; the retargets are CRT wrappers (DECL1 with DECL2 / CALL1) and `FUN_00ee6de6` (declared with the SDK's global `tagRECT` instead of the namespace's: a decoration the recipe does not bind); code: `GraphicsRenderer::BeginUsingRenderTargetGroup` (D15, below) and 5 functions; no-build: stand-in limits. |
+
+**D15 (CS28 removed, CSX1) is refuted by the matched code.** Of the eight critical-section units, four are identical
+(abstractheap_h_unit, oei_io_thread, bsshaderaccumulator_od_variant, aitaskmanager), three differ only in EH code,
+and `niconsolerenderer_h_unit.cpp`'s `GraphicsRenderer::BeginUsingRenderTargetGroup` reads `+0x1f4` / `+0x1fc` where
+the exe reads `+0x200` / `+0x208`: with the 24-byte PC CRITICAL_SECTION, `NiCriticalSection` shrinks from 128 to 124
+bytes (`m_ulThreadOwner` 0x1C -> 0x18, `m_uiLockCount` 0x20 -> 0x1C) and `GraphicsRenderer` (three of them) from
+2,432 to 2,420. The byte-matched code needs 4 more bytes behind each critical section of NiCriticalSection (CS28's
+`FNVNX_CS28` kept every offset: with it these classes differed in member type names only). BSThread, AbstractHeap and
+RecursiveLock (D15's evidence) show no code difference in the units that compile, but `RecursiveLock` also shrinks
+(40 -> 36) and `BSShaderAccumulator` (896 -> 888).
+
 ## Classification
+
+Rules of S1 round 8 (`RREF1` ... `SPEC2`, after `8fff58b`) are classified (orchestrator, J-0058) but not gated yet.
 
 * **neutral** - claims to change spelling only, on any target. Compared on all units: expected identical.
 * **layout** - changes a layout on purpose (for GCC) or swaps in another definition of a type. MSVC class layouts
@@ -25,25 +78,29 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 | Rule | Class | Why | MSVC meaning used in the comparison |
 |---|---|---|---|
 | `SSE1` `SSE2` `SSE3` `SSE4` | platform | the decomp's copies of MSVC's vector types / intrinsic prototypes give way to sse2neon's | - |
-| `DECL1` | neutral | the platform header declares the same CRT / Win32 function | the real MSVC CRT / SDK headers |
+| `DECL1` | neutral (claim) | the platform header declares the same CRT / Win32 function | the real MSVC CRT / SDK headers |
+| `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | `fnvnx_game_X` bound like the decomp's `X` |
 | `NEW1` | neutral | `unsigned int` is `size_t` on x86 (same type, same decoration) | as is |
-| `UNIT1` | neutral | renames two local types of tesdatahandler (same layout) | as is; decorated names compared up to the rename |
-| `KEEP1` | neutral | `__attribute__((used))`: emission only, no code meaning | `FNVNX_KEEP` empty |
-| `IFX1` | neutral | static resolution of `__if_exists`; MSVC evaluates the original itself | as is (strongest check) |
+| `UNIT1` | neutral | renames local types of tesdatahandler (same layout) | as is |
+| `KEEP1` | neutral | `__attribute__((used))`: emission only, no code meaning | `FNVNX_KEEP` empty: inert by construction |
+| `IFX1` | neutral (claim) | static resolution of `__if_exists`; MSVC evaluates the original itself | as is (strongest check) |
 | `SAL1` | neutral | attribute-syntax SAL annotations have no code meaning | as is |
+| `CSX1` | neutral (claim) | drops the decomp's Xbox 360 critical-section asserts (D15, J-0051); asserts emit no code | as is |
 | `DECL2` | neutral (claim) | the SDK's definition of the type replaces the decomp's copy | real SDK |
 | `EXC1` | neutral (claim) | MSVC 2008 never enforced `throw()`; but it is an optimizer hint there | as is |
 | `NEW2` | neutral | `<new>` defines the placement forms identically | real `<new>` |
+| `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
 | `CTOR1` | neutral | explicit constructor call = placement new of the same class at the same address | real `<new>` |
 | `LINK1` | neutral | C and C++ linkage of a global variable name the same symbol under Itanium | data names bound by variable name |
+| `STATIC1` | neutral (claim) | internal -> external linkage of image-bound variables | variable bound by the recipe's address |
 | `GOTO1` | neutral | `T x = e;` -> `T x; x = e;` for scalars | as is |
 | `STR1` | neutral | `&arr` and `arr` are the same address | as is |
 | `CALL1` | neutral | the cast is the conversion the dropped prototype made implicitly | real SDK parameter types |
 | `RCAST1` | neutral | `fnvnx_lvalue` returns the temporary itself | `fnvnx_lvalue(x)` = `(x)` |
 | `NEW3` | neutral | deallocation functions are implicitly `noexcept` (C++11) | `noexcept` empty |
 | `TYPEID1` | neutral | adds `<typeinfo>` only | real `<typeinfo>` |
-| `CSX1` | neutral | drops the decomp's Xbox 360 critical-section size / offset asserts (D15, J-0051); asserts emit no code | as is |
-| `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address; same callee, same bits | as is |
+| `SPEC1` | neutral | early `template<>` declarations of member specializations | declarations only |
+| `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address | as is |
 | `RREF1` | neutral | `fnvnx_lvalue(...)` around an argument passed to a non-const reference parameter (every declaration the unit sees) that is not a plain lvalue | the temporary MSVC bound, same lifetime |
 | `TPL1` | neutral | `this->` in front of the members of a dependent base that a class template's member functions use by plain name | the members MSVC's (one-phase) lookup found |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
@@ -60,84 +117,70 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md` has the compiler setup, ha
 | `LEX1` | neutral | MSVC token spellings: `i64`/`ui64` suffixes -> `LL`/`ULL`, `0xae-0x34` -> `0xae -0x34`, `"C"enum` -> `"C" enum`, `inline __forceinline` -> `__forceinline`, `unsigned long(-1)` -> `((unsigned long)(-1))` | same tokens as MSVC lexed them |
 | `STD1` | platform | a decomp `struct std { static float abs(float); }` (the std namespace of the headers) -> `#include <cmath>`: the calls reach the standard `std::abs(float)` | MSVC called the out-of-line copy at 0x00408840 (fabsf) |
 | `SPEC2` | neutral | `template <>` on the decomp's member definitions of class template specializations (5 files) | MSVC accepts both spellings |
-| `NEW4` | neutral | adds `<new>` where placement new is used without a declaration | real `<new>` |
-| `ALLOC1` | platform | drops untagged file-scope replacements of the global operator new/delete; the game's are bound by address | target only |
+| `XINC1` | neutral (claim) | caller declarations corrected from the x86 code (S1b) | as is |
+| `RET1` | neutral | `return <trailing stmt>` where MSVC's code is identical (S1b) | as is |
+| `DBUG1` | neutral | per-site debug fixes (no sites) | - |
+| `FTOL1` | platform | `fnvnx_ftol2(expr)` for arg-less `_ftol2_sse` calls | `fnvnx_ftol2(x)` = `(__int64)(x)` (gated anyway) |
 | `SDK1` | layout | the PC SDK definitions win over the decomp's guarded copies (Xbox 360 layouts) | real SDK |
 | `TAIL1` | layout | GCC must not reuse a base's tail padding; MSVC never does | zero-width bit-field, as on the target |
-| `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | same code, other symbol name |
-| `SPEC1` | neutral | early `template<>` declarations of member specializations | declarations only |
-| `STATIC1` | neutral | internal -> external linkage of image-bound variables | may change MSVC inlining; the gate decides |
-| `XINC1` | neutral | caller declarations corrected from the x86 code (S1b) | 62/66 identical, 4 differ by an ecx reload |
-| `RET1` | neutral | `return <trailing stmt>` where MSVC's code is identical (S1b) | identical by construction |
-| `DBUG1` | neutral | per-site debug fixes (no sites yet) | - |
+| `INTL1` | platform | edits only the decomp's non-MSVC branch (`#else` of `_MSC_VER`) | invisible to MSVC |
+| `ALLOC1` | platform | drops untagged file-scope replacements of the global operator new/delete | target only |
 | `XC1` | platform | dynamic initializers become extern + `__fnvnx_dyninit_<addr>` run by S10 | target only |
 | `VA1` | platform | MSVC `char*` va_lists -> real `va_list` | target only |
 | `FALL1` | platform | `__builtin_trap()` at fall-off ends of non-void functions | GCC only |
-| `FTOL1` | platform | `fnvnx_ftol2(expr)` for arg-less `_ftol2_sse` calls; neutral with `fnvnx_ftol2(x) = (__int64)(x)` under MSVC | S1b: 1,535/1,535 identical |
-| `INTL1` | platform | edits only the decomp's non-MSVC branch (`#else` of `_MSC_VER`) | invisible to MSVC |
 | `ASM1` `ASM2` `ASM4` | platform | x87 / rdtsc / cpuid asm -> portable helpers (docs/ASM.md has their own checks) | - |
 | `NATIVE1` | platform | units leave the build (native renderer, D6) | - |
 
+## Class layouts (238 units, `/d1reportAllClassLayout`)
+
+| Trees (pristine vs) | classes | differ | what differs |
+|---|---:|---:|---|
+| TAIL1 alone | 18,269 | 0 | nothing: the zero-width bit-field is inert under MSVC (also for virtual, 8-/16-aligned, empty, packed and template bases in a synthetic test) |
+| neutral set (`8fff58b`) | 15,685 | 75 | D15: `NiCriticalSection` 128 -> 124, `RecursiveLock` 40 -> 36, `BSShaderAccumulator` / `AccumWIP` 896 -> 888; the decomp's Xbox 360 copies replaced by the PC SDK's (`_FILETIME` halves swapped, `_ULARGE_INTEGER`, `_WIN32_FIND_DATAA`); 59 SDK structs with 8-byte members shrink because the SDK header lands inside the decomp's `#pragma pack(push, 4)` |
+| neutral + SDK1 + CS28 (earlier rules) | 15,225 | 73 | `NiCriticalSection` / `RecursiveLock` member type names only (CS28 kept every offset); the same SDK structs |
+
+The `#pragma pack(push, 4)` placement is a DECL1 / DECL2 property (16 inserted `#include "fnvnx_win32.h"` sit inside
+an open `pack(push, 4)`, `include/layout_support.h` among them). On the target the shim's `_LARGE_INTEGER`,
+`_ULARGE_INTEGER` and `_MEMORYSTATUSEX` then get 4-byte alignment in those units and 8 elsewhere (sizes unchanged):
+the shim should push its own packing.
+
 ## Method
 
-Trees: pristine decomp; `equiv.py prepare --rules neutral` (FNVNX_PREPARE_SKIP = every other rule function,
-NATIVE1 off; the prepare stats are checked to contain only allowed rules); `neutral,SDK1`; `TAIL1` alone. Every
-unit is compiled with its recipe compiler and flags; objects are kept for re-fingerprinting.
+Trees: the pristine decomp; `equiv.py prepare --rules neutral,FTOL1` (FNVNX_PREPARE_SKIP = every other rule
+function, NATIVE1 off, S1b's units.json renames only with an S1b rule; the prepare stats are checked to contain only
+allowed rules); leave-out trees (the same set minus a group or one rule); `TAIL1` alone. Every unit is compiled with
+its recipe compiler and flags; objects are kept and fingerprinted again whenever the fingerprint changes. Units
+whose include closure did not change between two rule sets reuse the earlier objects (compare_builds' closure test).
 
 What the rules include is given its MSVC meaning (`tools/equiv/msvc/`): `fnvnx_win32.h` = the real `<windows.h>`
 (SDK v6.0A) adjusted where the target shim deliberately differs (no A/W name macros, no `min`/`max`, the shim's
 looser parameter types and `void *` overloads as dllimport declarations of the same imports, `_ULARGE_INTEGER` with
-the forward-declared class key), `fnvnx_crt.h` = MSVC's CRT headers, `fnvnx_new.h` = MSVC's placement forms, and
-for prepared trees only `fnvnx_equiv_compat.h` = what `fnvnx_compat.h` declares for DECL1 (intrinsics, the decomp's
-sized-delete helper names, C++14 sized deallocation). Both sides get the macro-only `fnvnx_equiv_fi.h`.
+the forward-declared class key), `fnvnx_crt.h` / `fnvnx_iobuf.h` = MSVC's CRT headers, `fnvnx_new.h` = MSVC's
+placement forms, and for prepared trees only `fnvnx_equiv_compat.h` = what `fnvnx_compat.h` declares for DECL1
+(intrinsics, the decomp's sized-delete helper names, C++14 sized deallocation). Both sides get the macro-only
+`fnvnx_equiv_fi.h` (`FNVNX_KEEP`, `noexcept`, `fnvnx_lvalue`, `FNVNX_MSVC_BASE_END`, `fnvnx_ftol2`).
 
-Fingerprint: `compare_builds.fingerprint` with the recipe's names (strict) and with extra bindings, used for the
-verdict: names the whole recipe binds to one address; the other linkage of a global variable (LINK1); another
-decoration of the same import slot; the same decorated name up to MSVC's class-key letter (U/V/T: Itanium does not
-encode it); string literals by content instead of by `$SGnnnn` number (MSVC numbers literals with a counter every
-included header advances).
+Fingerprint: `compare_builds.fingerprint` with the recipe's names (strict) and with link-by-address bindings, used
+for the verdict: names the whole recipe binds to one address; the other linkage of a global variable, referenced
+(LINK1) or defined (STATIC1); another decoration of the same import slot; the same decorated name up to MSVC's
+class-key letter (U/V/T: Itanium does not encode it); `fnvnx_game_X` = the decomp's `X` (GAME1); a prepared recipe's
+renamed decorations (S1b); string literals by their bytes (MSVC numbers literals with a counter every included
+header advances, and a header can move them inside the data section).
 
-Attribution: for each differing (or no longer compiling) unit, rebuild with the rule set minus one rule, and minus
-groups (`SDK` = DECL1, DECL2, SDK1, CALL1, CSX1, INTL1; `NEWDEL` = NEW1, NEW2, NEW3, CTOR1) for interacting rules;
-a function identical again without R is attributed to R. Differences are also sorted by kind: *retarget* (same code
-bytes, a call or data reference reaches another address), *EH* (identical when both sides build with `/EHs-c-`),
-*code*.
+Attribution: every differing or no longer compiling unit is built again with the rule set minus one group of rules
+(`sdk` = DECL1 DECL2 CALL1 GAME1 DUPINT1; `newdel` = NEW1 NEW2 NEW3 NEW4 CTOR1; `exc` = EXC1; `link` = LINK1
+STATIC1; `s1b` = XINC1 RET1 FTOL1; `rest` = UNIT1 IFX1 SAL1 GOTO1 STR1 RCAST1 TYPEID1 SPEC1 CSX1; KEEP1 is inert by
+construction), then minus each rule of the groups that explain something, then minus pairs of groups for what no
+single group explains. A function identical again without R is attributed to R. Kinds: *eh* (identical when both
+sides build with `/EHs-c-`), *retarget* (same code bytes, a relocation reaches another address), *code*.
 
-Control: every pristine unit compiles to COFF (2,987 / 2,988, the `vc8` unit needs VC 2005) and every one of its
-68,456 recipe functions is in its object with exactly the recipe size.
+## Not comparable under MSVC
 
-## Interim findings
+MSVC 2008 with the real SDK cannot express some of what the target accepts; those units are counted as no-build, not
+against a rule: `std::abs` after DECL1 (libstdc++'s C headers export into `std`, MSVC's do not; 29 units), names the
+full SDK defines that the target shim does not (`RequestLocation` in winioctl.h, `vc_attributes`, `_MEMORYSTATUS`,
+`IUnknown`, `PCH`), MSVC's `float` math overloads colliding with the decomp's own (`fabsf`, `cosf`, `sqrt(float)`),
+and `-fpermissive` conversions (`HANDLE` -> integer). The `vc8` unit needs VC 2005 SP1.
 
-From the neutral-set run (1,831 compiled units, 42,974 functions): 563 functions differ in 308 units, 147 of them
-with identical code bytes; 68 units no longer compile under MSVC. Attributed so far (leave-one-out on samples):
-
-* **DECL1 changes callees.** The recipe binds decorated names, not functions: the decomp's own prototypes of Win32 /
-  CRT names are often bound to other addresses, and DECL1, by replacing them with the platform declaration, rebinds
-  the call by name. `equiv.py bindings` lists 27 such names statically. Real semantic changes:
-  `GetCurrentThreadId()` in `falloutaudiomedia.cpp` is the game function 0x00830470 (it calls an
-  `ActorTaskManager` method; 14 functions now call kernel32 instead); `Sleep` in `bsspinlock_console` is
-  `FUN_008691b0::Lock` (a spin-lock acquire becomes a sleep); `EnterCriticalSection` / `LeaveCriticalSection` in
-  `memorymanager.cpp` are the `InterlockedIncrement` / `InterlockedDecrement` import slots; `GetFileSize` is
-  `FileSizeInfo::GetFileSize` (0x0065c1f0). Equivalent retargets: `strcpy_s` / `strcat_s` / `_stricmp` /
-  `sprintf_s` / `memset` C++ prototypes bound to game wrappers that only forward to the CRT function.
-* **EXC1 changes EH code.** Removing `throw()` makes MSVC add EH frames / unwind states (e.g.
-  `NiRenderedTexture::Create` gains a frame around `new NiRenderedTexture` that frees the memory if the constructor
-  throws). Only exceptional paths differ.
-* **NEW2 / CTOR1: placement new through `<new>`** (declared `throw()`) makes MSVC null-check the result; the
-  decomp's own placement forms had no exception specification. Only a null pointer behaves differently.
-* **DECL2 / SDK1 swap Xbox 360 layouts for PC ones**: the decomp's guarded `_RTL_CRITICAL_SECTION` (28 bytes,
-  `OwningThread` at 0x18) and `_FILETIME` (`dwHighDateTime` first) copies are dropped by DECL2 too, not only by SDK1:
-  the decomp's own static asserts then fail (`RecursiveLock.h`, `bsshaderaccumulator_types.h`). With CS28 the
-  asserts hold and those units compile identical.
-* **DECL1 misses `operator new(unsigned, void*)`** (`unsigned` without `int` is not in `PLACEMENT_PARAMS`): the
-  prototype is dropped without `<new>` in its place (`tile_ob1_variant_helpers_variant.cpp`, 3 more units).
-
-Not comparable under MSVC (the target accepts what MSVC 2008 cannot express): `std::abs` after DECL1 (libstdc++'s
-C headers export into `std`, MSVC's do not; 25+ units), class/union key mismatches, `HANDLE` -> integer
-conversions (`-fpermissive`), decomp-local SDK structs that the real SDK also defines (`_MEMORYSTATUS`, `IUnknown`).
-
-## Not covered
-
-The `vc8` unit (VC 2005 SP1 not installed). Platform rules. What only the target can show: GCC layout equals MSVC
-layout (TAIL1's purpose) needs a GCC-side comparison; MSVC can only show that the TAIL1 construct is inert (it is,
-for every edge case tried: virtual / 8- and 16-aligned / empty / packed / template bases).
+What only the target can show: that GCC's layout equals MSVC's (TAIL1's purpose) needs a GCC-side comparison; MSVC
+shows that the TAIL1 construct is inert.
