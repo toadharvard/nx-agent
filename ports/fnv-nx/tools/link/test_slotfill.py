@@ -36,6 +36,8 @@ rest; its exe vftable holds the same bodies. Checks:
   (`sub ecx, 8; jmp M::s2body`) and the native vtable's offset-to-top is -8, gets `sub w0, w0, #8; b __fnv_<a>`;
 * a reference that uses the result of the constructor at 0x00401130 (MSVC returns this) binds to a stub that calls
   the C1 and returns this, and the address map's C row names that stub (S5 s5-002 item 4);
+* Dd's D1, defined nowhere (MSVC folded ~Dd into ??_GDd, which the unit binds to a (this, flags) function), is
+  `??_G(this, 0)` through the flag stub (S1-refs-004);
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
   (c: the abi gap).
 """
@@ -68,6 +70,7 @@ struct Vp { virtual int h(); virtual void v00(); int u; }; // v00: a placeholder
 struct Sh { virtual int p() { return 5; } int s; };         // a shell: its exe vftable has two slots more
 struct Vk { virtual int kk(); virtual int k(int); virtual int kz(); virtual int kp(); virtual void kq(); int t; };
 void qbody(int);   // kq's body: a free cdecl function taking the slot's first (undeclared) argument
+struct Dd { ~Dd(); void *FUN_00401140(unsigned); int w; };   // ~Dd defined nowhere: MSVC folded it into ??_G
 struct Ct { Ct(); int v; };                          // an MSVC constructor returns this
 struct CtShell { void *FUN_00401130(); };             // a unit that calls it for its result
 struct S1 { virtual int s1(); int a; };
@@ -86,6 +89,7 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'int S1::s1() { return 1; }\nint M::s1() { return 2; }\nint M::s2body() { return c; }\n'
                     'M *mk_m() { return new M; }\n'
                     'Ct::Ct() { v = 7; }\nvoid *use_ct(CtShell *p) { return p->FUN_00401130(); }\n'
+                    'void *Dd::FUN_00401140(unsigned f) { return f ? this : 0; }\nvoid del_dd(Dd *p) { delete p; }\n'
                     'Vb *mk_vb() { return new Vb; }\nDer *mk_der() { return new Der; }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
@@ -166,12 +170,13 @@ def main():
                 F(0x401098, '??_GGd@@UAEPAXI@Z'), F(0x4010a0, '??1Gd@@UAE@XZ'), F(0x401028, '?impl4@Shell@@QAEHXZ'),
                 F(0x4010c0, '?kk@Vk@@UAEHXZ'), F(0x4010c8, '?kbody@@YGHH@Z'), F(0x4010f0, '?qbody@@YAXH@Z'),
                 F(0x401120, '?s1@M@@UAEHXZ'), F(0x401100, '?s2body@M@@QAEHXZ'), F(0x401128, '?s1@S1@@UAEHXZ'),
-                F(0x401130, '??0Ct@@QAE@XZ'), F(0x401138, '?use_ct@@YAPAXPAUCtShell@@@Z')],
+                F(0x401130, '??0Ct@@QAE@XZ'), F(0x401138, '?use_ct@@YAPAXPAUCtShell@@@Z'),
+                F(0x401140, '?FUN_00401140@Dd@@QAEPAXI@Z'), F(0x401148, '?del_dd@@YAXPAUDd@@@Z')],
              'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
                          '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp'],
                          '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk'],
                          '??_7M@@6BS1@@@': '0x%08x' % where['M'], '??_7M@@6BS2@@@': '0x%08x' % where['M2'],
-                         '?FUN_00401130@CtShell@@QAEPAXXZ': '0x00401130'}},
+                         '?FUN_00401130@CtShell@@QAEPAXXZ': '0x00401130', '??_GDd@@QAEPAXI@Z': '0x00401140'}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
                 F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {}},
         ]}
@@ -257,6 +262,10 @@ def main():
         crow = {l.split('\t')[0]: l.split('\t') for l in open(os.path.join(out, 'addrmap.tsv'))
                 if not l.startswith('#')}.get('00401130', [''] * 6)
         check(crow[1] == 'C' and crow[2] == '__fnvnx_cthis_00401130', 'the C row names the stub: %s' % (crow,))
+        rd = refs.get('_ZN2DdD1Ev')
+        check(rd is not None and rd[2] == 'dtor-by-deldtor' and rd[5] == '__fnvnx_vflag_00401140_0',
+              'Dd\'s D1 (defined nowhere; the unit binds ??_GDd to a (this, flags) function) -> ??_G(this, 0): %s'
+              % (rd,))
         rk = refs.get('_ZN2Vk1kEi')
         check(rk is not None and rk[2] == 'vslot-exe' and rk[5].startswith('__fnvnx_br_004010c8_') and
               ('%s:\n    mov x0, x1\n    b __fnv_004010c8' % rk[5]) in bridges_,

@@ -586,6 +586,37 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for c_ in cs:
             ddtor_of[c_].add(a_)
 
+    deldtor_cache = {}
+
+    def unit_deldtor(u_, isig_):
+        """(address, target) for an unbound D1/D2 of class C whose unit names C's scalar deleting destructor
+        (`??_GC@@...`): the native D1 at that address (a G row), or the decomp's (this, flags) function through
+        the flag stub with flags 0; else None."""
+        if u_.source not in deldtor_cache:
+            m_ = {}
+            for n_, a_ in list(u_.refs.items()) + [(n2, a2) for a2, n2 in u_.defs]:
+                if n_.startswith('??_G'):
+                    sg_ = msvc(n_)
+                    if sg_.kind == 'func' and sg_.qual and len(sg_.qual) >= 2:
+                        m_.setdefault('::'.join(sigs.canon_qual(sg_.qual[:-1])), set()).add(a_)
+            deldtor_cache[u_.source] = m_
+        cq = '::'.join(sigs.canon_qual(isig_.qual[:-1])) if isig_.qual and len(isig_.qual) >= 2 else None
+        gs = deldtor_cache[u_.source].get(cq) or set()
+        if len(gs) != 1:
+            return None
+        g_ = next(iter(gs))
+        nd_ = native.get(g_)
+        if nd_ is None:
+            return None
+        for var_ in ('D1', 'D2'):
+            if nd_['variants'].get(var_) is not None and sigs.itanium_variant(nd_['sym'].name) == 'D0':
+                return g_, (ADDR_SYM % g_) + ('' if nd_['variants'][var_] is nd_['sym'] else '_' + var_)
+        if sigs.itanium_variant(nd_['sym'].name) is None and flags_param(msvc(nd_['msvc']) if nd_['msvc'] else None):
+            name_ = FLAG_SYM % (g_, 0)
+            bridges.setdefault(name_, emit_flag_stub(name_, ADDR_SYM % g_, 0))
+            return g_, name_
+        return None
+
     def dtor_alias(sig):
         q = tuple(sig.qual[:-1])
         got = {nat_dtor[c_][sig.variant] for a_ in ddtor_of.get(q, ()) for c_ in ddtor_cls[a_] - {q}
@@ -937,8 +968,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             elif cls == 'unresolved' and isig.variant:
                 cls = 'unresolved-ctor-dtor'
                 alias = dtor_alias(isig) if isig.variant in ('D1', 'D2') else None
+                gd = unit_deldtor(u, isig) if not alias and isig.variant in ('D1', 'D2') else None
                 if alias:
                     cls, target = 'ctor-dtor-alias', alias
+                elif gd:
+                    # S1-refs (S1-refs-004): MSVC folds `~C` into its scalar deleting destructor; the unit binds ??_GC,
+                    # GCC's `delete p` calls D1 + operator delete: D1(this) = ??_G(this, 0), destroy without freeing
+                    cls, addr, target = 'dtor-by-deldtor', gd[0], gd[1]
+                    stats['dtor_by_deldtor'] += 1
                 else:
                     if u.host is None and u.source not in unwind_cache:
                         unwind_cache[u.source] = unwind_only(u.obj, {n_ for n_ in undefs if itanium(n_).variant})
