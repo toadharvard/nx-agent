@@ -14,6 +14,9 @@ fixed-width, the scan is exact for code and conservative for data placed in text
            tpidr_el0, tpidrro_el0 (read), dczid_el0, cntfrq_el0 and cntpct_el0 (read). cntvct_el0 and ctr_el0 are
            refused too: Mesosphere does not open them to EL0 (CNTKCTL_EL1.EL0VCTEN, SCTLR_EL1.UCT);
            brk is counted (trap stubs), not refused: it ends in the crash handler with a log;
+           nothing newer than ARMv8.0 (the A57 implements ARMv8.0 + CRC + crypto only): LSE atomics (ldadd/cas/swp...),
+           LOR, RCpc (ldapr/ldapur), RDM, FP16 arithmetic (scalar and vector; fcvt to/from half is v8.0), DotProd,
+           JSCVT, PAuth outside the hint space, FlagM, dc cvap (POST_V80, each class checked against GNU as);
   services every IPC service name in the host and launcher (string literals libnx's sm calls use) is reviewed:
            APP_SERVICES, or one of the alternatives libnx itself picks by service type at run time (vi:m/vi:s/vi:u,
            nvdrv/nvdrv:a/:s/:t, acc:u0/u1/su, set:fd). Both NPDMs grant service_access "*", so sm grants any name;
@@ -82,11 +85,55 @@ SYSREG_OK = {
 SYSREG_NAMES = {(3, 3, 14, 0, 2): "cntvct_el0", (3, 3, 0, 0, 1): "ctr_el0", (3, 0, 0, 0, 0): "midr_el1",
                 (3, 0, 0, 0, 5): "mpidr_el1", (3, 3, 4, 2, 1): "daif", (3, 0, 4, 2, 2): "currentel"}
 SYS_OK = {(3, 7, 4, 1): "dc zva", (3, 7, 10, 1): "dc cvac", (3, 7, 11, 1): "dc cvau", (3, 7, 14, 1): "dc civac",
-          (3, 7, 12, 1): "dc cvap", (3, 7, 5, 1): "ic ivau"}
+          (3, 7, 5, 1): "ic ivau"}   # not dc cvap: ARMv8.2 FEAT_DPB, UNDEFINED on the A57 (V1 NX1-S1)
+
+# Encoding classes of instructions newer than ARMv8.0 (UNDEFINED on the Cortex-A57 of the Switch). Each row:
+# (mask, value, feature). Verified against GNU as: every row of a positive corpus assembled with
+# -march=armv8.5-a+fp16+dotprod+rcpc+lse+rdm+pauth+flagm matches, no word of an ARMv8.0 corpus does.
+POST_V80 = [
+    (0x3F200C00, 0x38200000, "v8.1 LSE atomic (ldadd/ldclr/ldeor/ldset/ldsmax/ldumin/swp; v8.3 ldapr)"),
+    (0x3FA07C00, 0x08A07C00, "v8.1 LSE cas"),
+    (0xBFA07C00, 0x08207C00, "v8.1 LSE casp"),
+    (0x3FBFFC00, 0x089F7C00, "v8.1 LOR ldlar/stllr"),
+    (0x3F200C00, 0x19000000, "v8.4 RCpc ldapur/stlur"),
+    (0xBF20F400, 0x2E008400, "v8.1 RDM sqrdmlah/sqrdmlsh (vector)"),
+    (0xFF20F400, 0x7E008400, "v8.1 RDM sqrdmlah/sqrdmlsh (scalar)"),
+    (0x9F60C400, 0x0E400400, "v8.2 FP16 vector arithmetic"),
+    (0x9F20FC00, 0x0E009400, "v8.2 DotProd sdot/udot"),
+    (0xFFFFFC00, 0x1E7E0000, "v8.3 JSCVT fjcvtzs"),
+    (0xFF200400, 0xF8200400, "v8.3 PAuth ldraa/ldrab"),
+    (0xFFFF0000, 0xDAC10000, "v8.3 PAuth pac*/aut*/xpac* (non-hint)"),
+    (0xFE000800, 0xD6000800, "v8.3 PAuth braa/blraa/retaa/eretaa"),
+    (0xFFE07C10, 0xBA000400, "v8.4 FlagM rmif"),
+    (0xFFFFBC1F, 0x3A00080D, "v8.4 FlagM setf8/setf16"),
+]
+
+
+def fp16_scalar(w):
+    """scalar FP data processing with ftype 11 (half precision): ARMv8.2 FEAT_FP16; FCVT to/from half is ARMv8.0"""
+    if (w & 0x5F200000) != 0x1E200000 or ((w >> 22) & 3) != 3:
+        return False
+    is_fcvt = ((w >> 17) & 0xF) == 1 and ((w >> 10) & 0x1F) == 0x10
+    return not is_fcvt
+
+
+def post_v80(w):
+    for m, v, name in POST_V80:
+        if w & m == v:
+            return name
+    if fp16_scalar(w):
+        return "v8.2 FP16 scalar arithmetic/convert"
+    if w & 0xFFFFFFE0 == 0xD50B7C20:   # dc cvap (v8.2 FEAT_DPB)
+        return "v8.2 DPB dc cvap"
+    return None
+
 
 
 def classify(w: int):
     """None for an ordinary instruction, else (kind, detail)."""
+    newer = post_v80(w)   # the Switch's Cortex-A57 is ARMv8.0: anything newer is UNDEFINED there (V1 NX1-S1/S2)
+    if newer:
+        return ("bad", newer)
     if w & 0xFF000000 == 0xD4000000:     # exception generation
         opc, ll = (w >> 21) & 7, w & 0x1F
         imm = (w >> 5) & 0xFFFF
@@ -164,8 +211,6 @@ def scan(path: str, role: str, c: Checks):
         n = len(seg) // 4
         words += n
         for i, w in enumerate(struct.unpack_from(f"<{n}I", seg)):
-            if w & 0xFF000000 not in (0xD4000000, 0xD5000000, 0xD6000000):
-                continue
             r = classify(w)
             if not r:
                 continue
