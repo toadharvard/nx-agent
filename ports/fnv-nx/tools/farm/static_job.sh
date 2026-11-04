@@ -62,7 +62,8 @@ REQ=(/usr/bin/clang++-18:clang-18 "$LLVM/include/clang/Tooling/Tooling.h:libclan
      "$LLVM/include/llvm/Frontend/OpenMP/OMP.inc:llvm-18-dev" "$LLVM/lib/libLLVM.so:llvm-18-dev"
      "$LLVM/bin/llvm-config:llvm-18" "$LLVM/lib/libclang-cpp.so.18.1:libclang-cpp18"
      /usr/include/x86_64-linux-gnu/c++/13/32:lib32stdc++-13-dev /usr/include/x86_64-linux-gnu/gnu/stubs-32.h:libc6-dev-i386
-     /usr/bin/aarch64-linux-gnu-g++:g++-aarch64-linux-gnu /usr/bin/g++:g++ /usr/bin/jq:jq /usr/bin/rsync:rsync)
+     /usr/bin/aarch64-linux-gnu-g++:g++-aarch64-linux-gnu /usr/bin/g++:g++ /usr/bin/jq:jq /usr/bin/rsync:rsync
+     /usr/lib/gcc-cross/aarch64-linux-gnu/13/plugin/include/gcc-plugin.h:gcc-13-plugin-dev-aarch64-linux-gnu)
 check_req() { missing=(); for r in "${REQ[@]}"; do [ -e "${r%:*}" ] || missing+=("$r"); done; }
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
 check_req

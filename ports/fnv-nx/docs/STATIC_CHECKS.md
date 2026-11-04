@@ -112,16 +112,29 @@ meaning, or the original would have crashed), **flag** (a compiler flag gives MS
 The authoritative table with counts is `report.md` of a run; the classes are defined in `tools/static/report.py`
 (`CLASSES`). Summary of the reasoning per class:
 
-* **float -> unsigned (F2U)**. **rule**. MSVC converts through `_ftol2` (64-bit truncation, low bits kept); AArch64
-  `fcvtzu` saturates, so a negative value becomes 0 instead of wrapping. Colour bytes, `(DWORD)` timers and
-  counters are typical. Rule **FTOI1**, keyed by the site list: `(T)x` becomes `(T)(long long)(x)`, and an implicit
-  conversion gets the same explicit cast. `fcvtzs x` followed by truncation is exactly `_ftol2` below 2^63
-  (verified). Not implemented yet: S1b's FTOL1 is a different fix (arg-less `_ftol2_sse` calls), and no fuzzed
-  function has an F2U site yet (cross-check below).
-* **float -> signed (F2S)**. **runtime**, mostly benign. The result differs only for NaN or values outside int32:
-  0x80000000 against saturation. The default is no change. `FTOI2` (same site list, helper
-  `fnvnx_ftol(x)` = `fcvtzs x` plus a range/NaN check giving 0x80000000) is for sites that can see such values.
-  Debug builds can use `-fsanitize=float-cast-overflow` with a logging handler to find them.
+* **float -> integer (F2S, F2U, F2S64, F2U64)**. **compiler support: the fnvnx_ftoi plugin (FTOI2)**. What MSVC
+  2008 SP1 compiles for `(T)x`, x float or double, read from its output (the same at /Od and /O2; a test file
+  through cl.exe, and every conversion of the 2,987 pristine objects):
+
+  | T | MSVC | NaN / out of range on an SSE2 PC | pristine objects |
+  |---|---|---|---:|
+  | int, long, short, signed char (also implicit, `i += f`) | `call __ftol2_sse` = `cvttsd2si` | 0x80000000, then its low bits | 1,253 calls |
+  | unsigned short, unsigned char | inline `fistp DWORD` (truncating control word) | 0x80000000, low bits: 0 | 445 |
+  | unsigned int, unsigned long | inline `fistp QWORD`, low dword | 0x8000000000000000: 0 | 267 |
+  | __int64, unsigned __int64 | `call __ftol2` (x87 QWORD) | 0x8000000000000000 | 10 |
+
+  So unsigned int is an int64 truncation (-1.0 -> 0xFFFFFFFF, 3e9 -> 3000000000) while unsigned short / char are
+  int32 ones, and FTOI1's `(T)(long long)x` was right only in range. AArch64 `fcvtzs` / `fcvtzu` saturate (NaN -> 0,
+  too large -> the maximum, negative -> 0 for unsigned): 240 of the 810 conversions of tests/s12 `ftoi/` differ.
+  A source rule cannot reach all of them: implicit conversions, compound assignments (`i += f`, no cast node in
+  clang, so the F2S/F2U counts miss them too), macros, templates. `toolchain/ftoi/fnvnx_ftoi.cc` is a GCC plugin
+  that rewrites every GIMPLE `lhs = (T) x` (after the CFG is built) into MSVC's computation for T: int32 path for
+  every target up to 32 bits but unsigned int (`ok = x > -2^31-1 && x < 2^31`, else 0x80000000 - S1b's
+  `fnvnx_ftol2_sse` verbatim), int64 path for unsigned int and both 64-bit types (`x >= -2^63 && x < 2^63`, else
+  INT64_MIN), then the low bits for T. Tested: tests/s12 `ftoi/` runs plain casts compiled with the plugin under
+  qemu-aarch64 against the host executing `cvttsd2si` / `fisttp` (the instructions MSVC uses) - 810 of 810 equal;
+  in ILP32 with the build's flags on f8 units (font.cpp: 44 conversions including S13's 0x00a1b450,
+  blk_00a60000_o2: 8, animation.cpp: 1). Adoption (S1, compile.sh) is one flag; see "Fix proposals".
 * **argument order (ORDER-ARGS, ORDER-OBJECT, ORDER-OPERATOR)**. **per-site**. MSVC evaluates call arguments right
   to left, GCC left to right. Rows tagged `stream` (reads, random numbers, iterators in two arguments), `same-callee`
   or `same-object` come first; getters with a visible side-effect-free body are not counted. Fix: hoist the
@@ -172,15 +185,21 @@ The authoritative table with counts is `report.md` of a run; the classes are def
   from newlib (RUNTIME.md), which does not know `%I64d`, `%S`, or 16-bit `wchar_t`. Route them through S4's MSVC
   formatter, as `fprintf`/`printf` already are, and give the wide functions 16-bit implementations.
 * **uninitialized reads, missing returns, dangling stack addresses, unsequenced modifications (W-UNINIT, W-RETURN,
-  W-STACKADDR, W-UNSEQ)**. **per-site**, plus `-fno-isolate-erroneous-paths-dereference` (return the stale address,
-  not NULL). `report.md` counts how many W-UNINIT sites are in units the original built with `/Od`. There the stack
-  contents decided what was read, so the original value is often recoverable from the exe.
+  W-STACKADDR, W-UNSEQ)**. **per-site**. `report.md` counts how many W-UNINIT sites are in units the original built
+  with `/Od`. There the stack contents decided what was read, so the original value is often recoverable from the
+  exe. `-fno-isolate-erroneous-paths-dereference` is no longer proposed: it would return a dead local's stale
+  address instead of NULL (W-STACKADDR, 1 site in the sample), but the same GCC pass also turns a division by a
+  provable zero into a trap (facts: `divzero`), which is what x86 does there (#DE); without it AArch64's `udiv`
+  returns 0 and the game runs on.
   * W-RETURN is **closed** by S1's FALL1 (`__builtin_trap()` at the end of every non-void function without a final
     return) and the build's `-Werror=return-type`. 91 warnings in the old run, 3 on the 249 units both runs compiled,
     0 on f8. What remains is where FALL1's trap is reachable and MSVC returned eax: GCC keeps only 11 `brk` in the
     323 FALL1-marked units of f8 that compile (it removes the other traps as dead code), 8 of them in units with no
     other trap source (HasValidTriangle, FUN_00bb62b0, FUN_00af28f0, RegisterActorValue, AddAtFirstFreeSlot,
-    UploadQuads, PopRecord, FUN_00cf6f10). These are S1b's RET1 candidates.
+    UploadQuads, PopRecord, FUN_00cf6f10). These were S1b's RET1 candidates. One is not FALL1: UploadQuads
+    0x00e723a0 traps in the middle, at `byteCount / stride` where its inlined `GetStride()` returns 0 for a geometry
+    with no streams (`count > 0 ? strides[0] : 0`); GCC's isolate-erroneous-paths pass made that division a `brk`.
+    The x86 code divides by zero on the same path and raises #DE, so both crash there: benign, nothing to fix.
 * **loop UB (W-LOOP-UB)**, **pointer overflow**, **forward progress**: **flag**, see below.
 * **pointer sign (P2I-SIGNED, P2I64)**. **runtime**. `FalloutNV.exe` is not large-address-aware, so no address at
   or above 2 GiB ever reached this code on Windows. S5 puts the guest heap at 0x40000000 + 2 GiB, which crosses
@@ -225,7 +244,7 @@ The authoritative table with counts is `report.md` of a run; the classes are def
 ### Flags (proposed addition to D10)
 
 ```
--fwrapv-pointer -fno-finite-loops -fno-aggressive-loop-optimizations -fno-isolate-erroneous-paths-dereference
+-fwrapv-pointer -fno-finite-loops -fno-aggressive-loop-optimizations
 ```
 
 None of them is in compile.sh yet (0c630cf and the branch head). The array is `PROPOSED_FLAGS` in
@@ -250,7 +269,8 @@ inline __attribute__((always_inline)) void _WriteBarrier(void) { __atomic_thread
   `struct|class|union __declspec(align(n)) X {`, for declarations without a declarator (exactly the ones GCC
   reports as "attribute ignored in declaration of"). Same meaning under MSVC; GCC then aligns the type (tests/s12
   `layouts.cpp`: `UsesPre` 20 bytes against MSVC's 32, `UsesPost` 32).
-* **FTOI1**: the F2U sites. `(T)x` becomes `(T)(long long)(x)`; an implicit conversion gets the same cast.
+* (FTOI1 / FTOI2 as source rules: superseded by the fnvnx_ftoi plugin, which covers every conversion, see the
+  float -> integer class.)
 * **ENUM2** (S1's ENUM1 id is taken by the opaque-enum rule): the ENUM-BITFIELD / ENUM-UNSIGNED enums get
   `enum E : int`, with `(int)` casts on enumerators above `INT_MAX`.
 * **ATOM1**: the ATOMIC-PLAIN-STORE sites become `__atomic_store_n(&lhs, rhs, __ATOMIC_RELEASE)` (3 in the sample,
@@ -279,8 +299,8 @@ coverage. The classes added in this round have no earlier count.
 | W-UNINIT | 8 | 4 -> 0 | 3 | open (per-site); the 4 (an `int&` out-parameter local, 3 temporaries) went away with the source changes, not with D16 (checked with and without `-fPIC`) |
 | W-ARRAY-BOUNDS | 194 | 96 -> 91 | 125 | open (per-site) |
 | W-LOOP-UB | 1 | 1 -> 2 | 2 | open: `-fno-aggressive-loop-optimizations` not adopted |
-| F2U | 135 | 75 -> 75 | 152 | open: FTOI1 not implemented, never fuzzed |
-| F2S | 792 | 432 -> 432 | 536 | runtime (NaN / out of range only) |
+| F2U | 135 | 75 -> 75 | 152 | open: the fnvnx_ftoi plugin closes it once compile.sh loads it; never fuzzed |
+| F2S | 792 | 432 -> 432 | 536 | open: NaN / out of int32 give 0x80000000 on x86 (S13 0x00a1b450); the fnvnx_ftoi plugin closes it once compile.sh loads it |
 | ORDER-ARGS / -OBJECT / -OPERATOR | 1,018 / 578 / 53 | 441 / 270 / 24, unchanged | 897 / 490 / 47 | open (per-site; ORDER1 or a plugin) |
 | ORDER-BINOP / -ASSIGN | 1,046 / 17 | 470 / 4, unchanged | 831 / 51 | listed (unspecified on both) |
 | VOLATILE-DECL / BARRIER / POLL-* | 146 / 15 / 5 | 41 / 5 / 3, unchanged | 928 / 197 / 5 | open: barrier header not adopted (no `dmb` in the objects) |
@@ -366,9 +386,10 @@ What follows:
 |---|---|---|---|
 | S1 (rule) | **ALIGN1**: `__declspec(align(n))` after the class key when no declarator follows | ALIGN-IGNORED, LAYOUT-ALIGN-IGNORED | real layout differences confirmed by GCC (probe, layouts.cpp); 22 roots in the sample |
 | S1 (rule) | **ENUM2**: `enum E : int` for the ENUM-BITFIELD / ENUM-UNSIGNED lists, `(int)` casts on enumerators above INT_MAX | ENUM-* | ENUM1 leaves these out by design |
-| S1 (rule) | **FTOI1** for F2U; **ATOM1** for ATOMIC-PLAIN-STORE (3 sites, `m_uiRefCount`) | F2U, ATOMIC-PLAIN-STORE | facts; not fuzzed yet |
+| S1 (compile.sh) | **FTOI2**: load the fnvnx_ftoi plugin - `-fplugin="$(bash "$HERE/toolchain/ftoi/build.sh" "$OUT/.ftoi")"` in FLAGS (build hosts: `gcc-13-plugin-dev-aarch64-linux-gnu`; compile_job.sh's flags hash should include `toolchain/ftoi/fnvnx_ftoi.cc`). The gate follows on its own (gcc_warn.sh loads the plugin when compile.sh names toolchain/ftoi; static_job.sh installs the headers) | F2S, F2U, F2S64, F2U64 (every float -> integer conversion; 1,975 in the MSVC objects) | tests/s12 ftoi 810/810 against x86; S13 0x00a1b450 |
+| S1 (rule) | **ATOM1** for ATOMIC-PLAIN-STORE (3 sites, `m_uiRefCount`) | ATOMIC-PLAIN-STORE | not fuzzed yet |
 | S1 (header) | `_ReadWriteBarrier` / `_ReadBarrier` / `_WriteBarrier` as fences | BARRIER | 0 `dmb` in the f8 objects |
-| S1/S2 (flags) | `-fwrapv-pointer -fno-finite-loops -fno-aggressive-loop-optimizations -fno-isolate-erroneous-paths-dereference` | pointer overflow, forward progress, W-LOOP-UB, W-STACKADDR | facts (`fixed:` lines) |
+| S1/S2 (flags) | `-fwrapv-pointer -fno-finite-loops -fno-aggressive-loop-optimizations` | pointer overflow, forward progress, W-LOOP-UB | facts (`fixed:` lines) |
 | S1b (patch) | **RET1** for the 8 reachable FALL1 traps (HasValidTriangle and 7 more, list above) | W-RETURN residue | `brk` kept in the f8 objects |
 | S1 (rule, conditional) | **BOOL1** where a BOOL-PUN byte is a flag byte or counter typed `bool` | BOOL-PUN | 2 bool-repr hits; soft otherwise |
 | S13 (harness) | stubs write out-parameters identically (or zero them); fuzz `crosscheck.py targets`; trace the 3 ORDER candidates; unclassified x86-only faults concentrate in /O2 units (27 of 41 records, while /O2 units hold 388 of the 1,523 fuzzed functions) | OUTARG-UNINIT, F2U, ORDER-* | matrix above |

@@ -20,21 +20,20 @@ import sys
 from collections import Counter, defaultdict
 
 # class -> (title, MSVC x86-32 vs GCC AArch64 ILP32, verdict, fix). Verdicts: benign / flag / header / rule /
-# per-site / runtime. The ids are the fnvcheck check names, the clang/GCC warning classes below, and LAYOUT-*.
+# per-site / runtime / compiler (a GCC plugin). The ids are the fnvcheck check names, the clang/GCC warning classes below, and LAYOUT-*.
 CLASSES = [
-    ('F2U', 'float -> unsigned integer (any width)',
-     'negative input: MSVC _ftol2 truncates to int64 and keeps the low bits (-1.0 -> 0xFF / 0xFFFFFFFF); AArch64 '
-     'fcvtzu saturates to 0. Input >= 2^w: low bits vs all-ones', 'rule',
-     'FTOI1: rewrite each listed site to (T)(long long)(x) - fcvtzs x + truncation is exactly _ftol2 below 2^63'),
-    ('F2U64', 'float -> unsigned __int64', 'MSVC helper semantics vs fcvtzu saturation for negative / >= 2^64',
-     'per-site', 'review each site; (unsigned __int64)(__int64)x where the value is known < 2^63'),
+    ('F2U', 'float -> unsigned integer (32 bits and narrower)',
+     'MSVC: unsigned int is x87 fistp QWORD (int64 truncation, low dword; NaN / out of int64 -> 0), unsigned short / '
+     'char fistp DWORD (int32, 0x80000000 -> low bits 0); AArch64 fcvtzu saturates (negative -> 0, too large -> max)',
+     'compiler', 'the fnvnx_ftoi GCC plugin (toolchain/ftoi, FTOI2) once compile.sh loads it'),
+    ('F2U64', 'float -> unsigned __int64', 'MSVC __ftol2 (x87 int64: 0x8000000000000000 for NaN / >= 2^63) vs fcvtzu '
+     'saturation', 'compiler', 'the fnvnx_ftoi plugin'),
     ('F2S', 'float -> signed integer (32/16/8 bit)',
-     'only NaN or outside int32: MSVC 0x80000000 (integer indefinite), AArch64 saturates (NaN -> 0); in-range values '
-     'identical; 8/16-bit targets truncate the int32 on both', 'runtime',
-     'none by default; FTOI2 (same site list) to fnvnx_ftol(x) = fcvtzs x + range/NaN check -> 0x80000000 where a '
-     'site can see NaN/huge values; debug builds: -fsanitize=float-cast-overflow with a logging handler'),
-    ('F2S64', 'float -> signed __int64', 'NaN / >= 2^63: 0x8000000000000000 vs saturation', 'benign',
-     'none (values that large do not occur); same FTOI2 helper if one does'),
+     'MSVC __ftol2_sse = cvttsd2si on SSE2 PCs: 0x80000000 for NaN and anything outside int32, then its low bits; '
+     'AArch64 fcvtzs saturates (NaN -> 0, too large -> 0x7fffffff)', 'compiler',
+     'the fnvnx_ftoi plugin (S1b fnvnx_ftol2_sse semantics for every conversion; S13 0x00a1b450)'),
+    ('F2S64', 'float -> signed __int64', 'MSVC __ftol2: 0x8000000000000000 for NaN / out of int64; fcvtzs saturates',
+     'compiler', 'the fnvnx_ftoi plugin'),
     ('SHIFT64-VAR', 'variable shift of a 64-bit value',
      'count >= 64: MSVC __allshl/__allshr/__aullshr give 0 (or the sign), AArch64 lslv/asrv/lsrv use count & 63',
      'per-site', 'review: counts that can reach 64 get an explicit (n >= 64 ? 0 : x << n)'),

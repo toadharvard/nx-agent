@@ -39,8 +39,10 @@ void vwrite(int v) { g_data = v; g_flag = 1; }
 int uninit(int c) { int x; if (c) x = 5; return x; }
 extern void use(char *);
 // fact: dangle  mov\tw0, 0                         (address of a dead local returned as NULL)
-// fixed: dangle  !mov\tw0, 0$                     (-fno-isolate-erroneous-paths-dereference: the address, as MSVC)
 const char *dangle(int c) { const char *s; { char buf[16]; buf[0] = c; s = buf; } char o[16]; o[0] = 0; use(o); return s; }
+// fact: divzero  brk                            (division by a provable zero: the path traps - x86 div raises #DE there)
+struct Geo { unsigned count; unsigned strides[4]; unsigned stride() { return count > 0 ? strides[0] : 0; } };
+unsigned divzero(unsigned bytes, Geo *g) { return bytes / g->stride(); }   // UploadQuads 0x00e723a0's shape
 int noret(int x) { if (x) return 1; }
 // fact: noret  !brk                                (missing return: the other path is assumed unreachable)
 // (the build rejects this with -Werror=return-type; FALL1 puts __builtin_trap() where the decomp lacks the return)
