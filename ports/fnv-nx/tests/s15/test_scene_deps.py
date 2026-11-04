@@ -112,7 +112,7 @@ keys, untyped = w.reach([(TEXT + F_ROOT, 'NiNode')])
 fns = {k[0] - TEXT for k in keys}
 check(F_A in fns, 'typed vcall on this: NiNode slot 41 reached')
 check(F_SIB not in fns, 'a sibling family (NiProperty) slot 41 is not reached')
-check(F_B in fns and (TEXT + F_B, 'NiAVObject') in keys, 'child from the +0xa0 array typed NiAVObject: slot 46 reached')
+check(F_B in fns and (TEXT + F_B, 'NiAVObject', False) in keys, 'child from the +0xa0 array typed NiAVObject: slot 46 reached')
 check(('NiRefObject', 1) in {k: v for k, v in w.base_calls.items()} and F_BASE not in fns,
       'untyped NiRefObject slot 1 is a base-virtual call, not walked')
 check(F_TAIL in fns, 'jmp to a known start is a tail call')

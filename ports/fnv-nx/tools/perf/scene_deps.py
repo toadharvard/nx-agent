@@ -252,6 +252,9 @@ class Walker:
             return self.cache[key]
         exe = self.exe
         res = {'calls': set(), 'vcalls': [], 'globals': {}, 'imports': set(), 'insns': 0, 'indirect': 0}
+        wsites, csites, cands = [], [], []   # (pc, global) writes, (pc, target) calls, guard candidates
+        pend, loadg = None, {}               # a global just tested (guard candidate), registers loaded from one
+        areg = {}                            # register -> the global whose address it holds (lea / mov r, imm)
         self.cache[key] = res
         start = {X86_REG_ECX: ('obj', cls)} if cls else {}
         todo, seen = [(entry, start)], set()
@@ -268,7 +271,18 @@ class Walker:
                 mn, ops = ins.mnemonic, ins.operands
                 lock = X86_PREFIX_LOCK in ins.prefix or mn.startswith('xchg') or mn.startswith('cmpxchg')
                 for op in ops:
-                    if op.type == X86_OP_MEM and op.mem.base == X86_REG_INVALID and op.mem.segment == X86_REG_INVALID:
+                    if op.type == X86_OP_MEM and op.mem.base in areg and op.mem.segment == X86_REG_INVALID \
+                            and 0 <= op.mem.disp < 0x1000 and mn != 'lea':
+                        # through a register holding a global's address: an access to that global
+                        a = (areg[op.mem.base] + op.mem.disp) & 0xffffffff
+                        g = res['globals'].setdefault(a, set())
+                        if op.access & CS_AC_READ or not op.access:
+                            g.add('r')
+                        if op.access & CS_AC_WRITE:
+                            wsites.append((pc, areg[op.mem.base]))
+                        if lock:
+                            g.add('atomic')
+                    elif op.type == X86_OP_MEM and op.mem.base == X86_REG_INVALID and op.mem.segment == X86_REG_INVALID:
                         a = op.mem.disp & 0xffffffff
                         if exe.in_data(a):
                             g = res['globals'].setdefault(a, set())
@@ -278,13 +292,54 @@ class Walker:
                                 if op.access & CS_AC_READ or not op.access:
                                     g.add('r')
                                 if op.access & CS_AC_WRITE:
-                                    g.add('w')
+                                    wsites.append((pc, a))
                             if op.mem.index != X86_REG_INVALID:
                                 g.add('array')
                             if lock:
                                 g.add('atomic')
                     elif op.type == X86_OP_IMM and mn in ('mov', 'push') and exe.in_data(op.imm & 0xffffffff):
-                        res['globals'].setdefault(op.imm & 0xffffffff, set()).update(('addr', 'r', 'w'))
+                        res['globals'].setdefault(op.imm & 0xffffffff, set()).update(('addr', 'r'))
+                        wsites.append((pc, op.imm & 0xffffffff))
+                # guard candidates: `cmp/test [G], ..` or `mov r, [G]; test/cmp r, ..`, then a forward jcc past a
+                # region that writes G (a function-local static's init bit, a lazy singleton `if (!g) g = new X`)
+                if pend:
+                    pend = (pend[0], pend[1] - 1) if pend[1] > 1 else None
+                gm = [op.mem.disp & 0xffffffff for op in ops if op.type == X86_OP_MEM and op.mem.base == X86_REG_INVALID
+                      and op.mem.segment == X86_REG_INVALID and exe.in_data(op.mem.disp & 0xffffffff)]   # [g], [g+r*4]
+                if mn in ('cmp', 'test') and gm:
+                    pend = (gm[0], 3)
+                elif mn in ('cmp', 'test') and ops and ops[0].type == X86_OP_REG and ops[0].reg in loadg:
+                    pend = (loadg[ops[0].reg], 3)
+                elif mn.startswith('j') and mn != 'jmp' and pend and ops and ops[0].type == X86_OP_IMM \
+                        and (ops[0].imm & 0xffffffff) > nxt:
+                    cands.append((nxt, ops[0].imm & 0xffffffff, pend[0]))
+                    pend = None
+                if mn == 'mov' and len(ops) == 2 and ops[0].type == X86_OP_REG and gm and ops[1].type == X86_OP_MEM:
+                    loadg[ops[0].reg] = gm[0]
+                else:
+                    for op in ops:
+                        if op.type == X86_OP_REG and op.access & CS_AC_WRITE:
+                            loadg.pop(op.reg, None)
+                ga = None
+                if mn == 'lea' and gm and ops[0].type == X86_OP_REG:
+                    ga = gm[0]
+                elif mn == 'mov' and len(ops) == 2 and ops[0].type == X86_OP_REG and ops[1].type == X86_OP_IMM \
+                        and exe.in_data(ops[1].imm & 0xffffffff):
+                    ga = ops[1].imm & 0xffffffff
+                elif mn == 'mov' and len(ops) == 2 and ops[0].type == X86_OP_REG and ops[1].type == X86_OP_REG:
+                    ga = areg.get(ops[1].reg)
+                for op in ops:
+                    if op.type == X86_OP_REG and op.access & CS_AC_WRITE:
+                        areg.pop(op.reg, None)
+                if ga is not None:
+                    areg[ops[0].reg] = ga
+                if mn == 'push' and ops and ops[0].type == X86_OP_REG and ops[0].reg in areg:
+                    wsites.append((pc, areg[ops[0].reg]))   # a global's address as an argument: may be written
+                if mn == 'call':
+                    if X86_REG_ECX in areg:
+                        wsites.append((pc, areg[X86_REG_ECX]))   # a global as `this` (NiPointer::operator= etc.)
+                    for r in (X86_REG_EAX, X86_REG_ECX, X86_REG_EDX):   # caller-saved
+                        areg.pop(r, None)
                 # receiver types through registers
                 new = None
                 if mn == 'mov' and len(ops) == 2 and ops[0].type == X86_OP_REG:
@@ -334,6 +389,7 @@ class Walker:
                             pc = t
                             continue
                         res['calls'].add(t)
+                        csites.append((pc, t))
                     elif op.type == X86_OP_MEM and op.mem.base == X86_REG_INVALID:
                         a = op.mem.disp & 0xffffffff
                         if op.mem.index != X86_REG_INVALID and mn == 'jmp' and op.mem.scale == 4:
@@ -348,6 +404,7 @@ class Walker:
                             t = exe.u32(a)
                             if t and exe.in_text(t):
                                 res['calls'].add(t)
+                                csites.append((pc, t))
                             else:
                                 res['indirect'] += 1
                     else:
@@ -364,22 +421,35 @@ class Walker:
                     if ops and ops[0].type == X86_OP_IMM:
                         todo.append((ops[0].imm & 0xffffffff, rt))
                 pc = nxt
+        regions = [(lo, hi, g) for lo, hi, g in cands if any(lo <= p < hi and a == g for p, a in wsites)]
+
+        def inr(p):
+            return any(lo <= p < hi for lo, hi, _ in regions)
+        for p, a in wsites:
+            res['globals'].setdefault(a, set()).add('wonce' if inr(p) else 'w')
+        res['guards'] = {g for _, _, g in regions}
+        res['csites'] = [(p, t, inr(p)) for p, t in csites]
+        res['once_vsites'] = {p for p, _, _ in res['vcalls'] if inr(p)}
         return res
 
     def reach(self, roots):
-        """every (function, receiver class) reachable from roots [(entry, class)]: {key: (depth, parent key)};
-        and the vcall sites whose receiver class is unknown (not walked: listed for the audit)"""
+        """every (function, receiver class, once) reachable from roots [(entry, class)]: {key: (depth, parent key)};
+        and the vcall sites whose receiver class is unknown (not walked: listed for the audit). `once`: reached only
+        through a guard region (a static's init, a lazy singleton's construction): runs once per process"""
+        roots = [(f, c, False) for f, c in roots]
         out = {r: (0, None) for r in roots}
         todo = list(roots)
         untyped = []
         while todo:
             key = todo.pop(0)
-            f, cls = key
+            f, cls, once = key
             if self.stopped(f):
                 continue
             r = self.func(f, cls)
-            nxt = {(t, cls) for t in r['calls']}   # a direct call: same receiver class (members and helpers)
+            # a direct call: same receiver class (members and helpers)
+            nxt = {(t, cls, once or o) for _, t, o in r['csites']}
             for site, k, c in r['vcalls']:
+                o = once or site in r['once_vsites']
                 rc = c or cls
                 i = self.cl.intro(k, rc) if rc else None
                 if i is None:
@@ -391,7 +461,7 @@ class Walker:
                     # audited class `base-virtual` (PERF.md 6.12), not walked
                     self.base_calls.setdefault((i, k), set()).add(f)
                     continue
-                nxt |= self.cl.resolve(k, rc)
+                nxt |= {(t, tc, o) for t, tc in self.cl.resolve(k, rc)}
             for t in nxt:
                 if t not in out and self.exe.in_text(t[0]):
                     self.starts.add(t[0])
@@ -405,7 +475,7 @@ def group_map(w, roots):
     glob, imps, vsites, indirect, insns = {}, {}, [], 0, 0
     stopped, fns = {}, set()
     for key in keys:
-        f, cls = key
+        f, cls, once = key
         lab = w.stopped(f)
         if lab is not None:
             stopped[lab] = stopped.get(lab, 0) + 1
@@ -414,20 +484,32 @@ def group_map(w, roots):
         if f not in fns:
             insns += r['insns']
             indirect += r['indirect']
+            vsites += [(s, k, c, f) for s, k, c in r['vcalls']]
         fns.add(f)
         for a, fl in r['globals'].items():
             g = glob.setdefault(a, {'flags': set(), 'by': set()})
-            g['flags'] |= fl
+            g['flags'] |= {'wonce' if x == 'w' and once else x for x in fl}
             g['by'].add(f)
+            if a in r['guards']:
+                g['flags'].add('guard')
         for i in r['imports']:
             imps.setdefault(i, set()).add(f)
-        vsites += [(s, k, c, f) for s, k, c in r['vcalls']]
     return {'functions': fns, 'keys': keys, 'globals': glob, 'imports': imps, 'vcalls': vsites, 'indirect': indirect,
             'insns': insns, 'stopped': stopped, 'untyped': untyped}
 
 
 def writes(g):
-    return 'w' in g['flags']
+    return 'w' in g['flags'] or 'wonce' in g['flags']
+
+
+def klass(flags):
+    """the class of a global from its flags: atomic, once (every write under an init guard or in a function only
+    reached through one), plain (a write on the per-frame path: a race for a split), read (never written)"""
+    if 'w' in flags:
+        return 'atomic' if 'atomic' in flags else 'plain'
+    if 'wonce' in flags:
+        return 'once'
+    return 'read'
 
 
 def main(argv):
@@ -472,8 +554,9 @@ def main(argv):
             'globals': {'0x%08x' % k: {'flags': sorted(v['flags']), 'by': ['0x%08x' % f for f in sorted(v['by'])]}
                         for k, v in sorted(g['globals'].items())},
             'imports': {k: len(v) for k, v in sorted(g['imports'].items())},
-            'self_writes': ['0x%08x' % k for k, v in sorted(g['globals'].items()) if writes(v)
-                            and 'atomic' not in v['flags']],
+            'self_writes': ['0x%08x' % k for k, v in sorted(g['globals'].items()) if klass(v['flags']) == 'plain'],
+            'classes': {c: sum(1 for v in g['globals'].values() if klass(v['flags']) == c)
+                        for c in ('plain', 'once', 'atomic', 'read')},
         }
     names = list(groups)
     for i, x in enumerate(names):
@@ -496,10 +579,9 @@ def main(argv):
     if not a.quiet:
         print('%d classes with a primary vftable' % len(classes.vt))
         for name, g in out['groups'].items():
-            nw = len(g['self_writes'])
-            print('%-8s %6d functions %8d insns  %5d globals (%d written, non-atomic)  %4d vcall sites  %4d unresolved'
-                  % (name, g['functions'], g['insns'], len(g['globals']), nw, g['vcall_sites'],
-                     g['indirect_unresolved']))
+            print('%-8s %6d functions %8d insns  %5d globals (%s)  %4d vcall sites  %4d unresolved'
+                  % (name, g['functions'], g['insns'], len(g['globals']),
+                     ', '.join('%s %d' % kv for kv in g['classes'].items()), g['vcall_sites'], g['indirect_unresolved']))
             print('         untyped vcall sites (not walked): %d; stopped at: %s' % (len(g['untyped_vcalls']),
                   ', '.join('%s x%d' % kv for kv in g['stopped'].items()) or '-'))
             print('         imports: ' + ', '.join('%s x%d' % (k.split('!')[1], v) for k, v in g['imports'].items()))
