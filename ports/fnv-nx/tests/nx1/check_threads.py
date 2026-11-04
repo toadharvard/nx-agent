@@ -63,9 +63,9 @@ def check(host_elf: str | None) -> Checks:
             exe = os.path.join(t, "h")
             r = subprocess.run([cc, "-O1", "-Wall", "-Werror", "-I" + os.path.join(ROOT, "toolchain", "host"),
                                 "-I" + os.path.join(ROOT, "toolchain", "include"),
-                                os.path.join(HERE, "threads_harness.c"), "-o", exe], capture_output=True, text=True)
+                                os.path.join(HERE, "threads_harness.c"), "-o", exe], capture_output=True, text=True, errors="replace")
             if c.ok("placement.build", r.returncode == 0, r.stderr.strip()[:200]):
-                r = subprocess.run([exe], capture_output=True, text=True)
+                r = subprocess.run([exe], capture_output=True, text=True, errors="replace")
                 c.ok("placement.exhaustive", r.returncode == 0,
                      "; ".join(l for l in r.stdout.splitlines() if l.startswith("FAIL"))[:300])
 
@@ -111,7 +111,7 @@ def check(host_elf: str | None) -> Checks:
     c.ok("guest.stack_rounded", m is not None and "0xFFF" in m.group(1), "h_thread_create does not round the stack")
     if host_elf:
         nm = shutil.which("aarch64-linux-gnu-nm") or shutil.which("nm")
-        r = subprocess.run([nm, host_elf], capture_output=True, text=True) if nm else None
+        r = subprocess.run([nm, host_elf], capture_output=True, text=True, errors="replace") if nm else None
         syms = r.stdout if r and r.returncode == 0 else ""
         c.ok("elf.symbols", "threadCreate" in syms, "no symbols in the host ELF")
     return c

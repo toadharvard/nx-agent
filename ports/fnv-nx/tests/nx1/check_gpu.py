@@ -73,7 +73,7 @@ def check(host_elf) -> Checks:
     c.ok("nine.guest_console_only", not bad, f"desktop-only code in render/nine guest side: {bad[:4]}")
     if host_elf:
         nm = shutil.which("aarch64-linux-gnu-nm") or shutil.which("nm")
-        syms = subprocess.run([nm, host_elf], capture_output=True, text=True).stdout if nm else ""
+        syms = subprocess.run([nm, host_elf], capture_output=True, text=True, errors="replace").stdout if nm else ""
         be = "native" if "dkDeviceCreate" in syms else "nine" if "nx_nine_shader_cache_init" in syms else None
         c.ok("package.backend", be is not None, "the packaged host has no GPU backend (HOST=plain, D3D9=null): the game "
              "draws nothing on the console; the full build needs NINE=1 or the native renderer")

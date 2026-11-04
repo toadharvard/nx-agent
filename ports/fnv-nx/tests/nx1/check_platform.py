@@ -103,11 +103,11 @@ def check(run: bool) -> Checks:
                 r = subprocess.run([cc, "-static", "-O1", "-Wall", "-Werror", "-Wno-unused-function", "-D__SWITCH__",
                                     "-isystem", os.path.join(HERE, "syntax"), "-I" + os.path.join(ROOT, "toolchain", "include"),
                                     "-I" + libnx, os.path.join(HERE, "host_device_test.c"), "-o", exe],
-                                   capture_output=True, text=True)
+                                   capture_output=True, text=True, errors="replace")
                 if c.ok("run.build", r.returncode == 0, r.stderr.strip()[-300:]):
                     wd = os.path.join(t, "wd")
                     os.makedirs(wd)
-                    r = subprocess.run([qemu, exe, wd], capture_output=True, text=True, timeout=120)
+                    r = subprocess.run([qemu, exe, wd], capture_output=True, text=True, errors="replace", timeout=120)
                     c.ok("run.host_device", r.returncode == 0,
                          "; ".join(l for l in r.stdout.splitlines() if l.startswith("FAIL"))[:300] or r.stderr[-200:])
     return c

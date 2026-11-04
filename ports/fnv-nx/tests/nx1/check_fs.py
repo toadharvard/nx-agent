@@ -127,7 +127,7 @@ def check(sd: str | None, run_s4: bool) -> Checks:
          "os_fs_case_insensitive() is a constant: case folding of the SD is assumed, not probed")
 
     if run_s4:
-        r = subprocess.run(["make", "-s", "-C", os.path.join(ROOT, "tests", "s4")], capture_output=True, text=True,
+        r = subprocess.run(["make", "-s", "-C", os.path.join(ROOT, "tests", "s4")], capture_output=True, text=True, errors="replace",
                            timeout=900)
         out = r.stdout + r.stderr
         want = ["nx1_sd_layout_game_paths", "nx1_profile_writable", "path_case_insensitive_resolution",

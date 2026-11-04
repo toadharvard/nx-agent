@@ -51,7 +51,7 @@ class Art:
 
 
 def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", cwd=ROOT)
     return r.returncode, r.stdout + r.stderr
 
 

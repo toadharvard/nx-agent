@@ -1382,7 +1382,7 @@ def main(argv):
     ap.add_argument("--addrmap", metavar="TSV", help="the link's out/addrmap.tsv (for exe-vtables)")
     ap.add_argument("--exe-vtables", action="store_true",
                     help="fill the trap slots of native vtables from the exe's vftables (needs --elf, --addrmap and "
-                    "the exe as --file fnvnx/game/FalloutNV.exe=PATH); also the line 'exe-vtables' of --stub-faults")
+                    "the exe as --file switch/fnv/FalloutNV.exe=PATH); also the line 'exe-vtables' of --stub-faults")
     ap.add_argument("--summary-json", metavar="FILE", help="write the machine-readable boot summary here")
     ap.add_argument("--watch", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
