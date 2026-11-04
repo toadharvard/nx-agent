@@ -22,6 +22,7 @@ import os
 import shutil
 import struct
 import sys
+import traceback
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -132,7 +133,7 @@ class Emu:
             b = self.uc.mem_read(addr + len(out), 64)
             i = b.find(0)
             if i >= 0:
-                return (out + b[:i]).decode()
+                return (out + b[:i]).decode(errors="surrogateescape")   # the guest may pass any bytes
             out += b
 
     def path(self, p):
@@ -640,14 +641,20 @@ def main(argv):
         emu.load_symbols(a.elf)
         if a.skip_faulting_init:
             emu.install_guards()
-    try:
-        rc = emu.run()
-    except SystemExit as e:
+    def stopped(why):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        print(f"STOPPED: {e}")
+        print(f"STOPPED: {why}")
         return 1
+    try:
+        rc = emu.run()
+    except SystemExit as e:
+        return stopped(e)
+    except Exception as e:   # the Python host stand-in failed on a request: still show where the guest was
+        traceback.print_exc()
+        emu.trace(f"host stand-in raised {e!r}")
+        return stopped(f"host stand-in error: {e!r}")
     out = emu.console.decode(errors="replace")
     tp_ok = getattr(emu, "tp_after", None) == 0xDEAD0000
     print(f"== guest at {emu.base:#010x} (link base {emu.link_base:#x}, {'relocatable' if emu.relocatable else 'fixed'}): rc={rc:#x} host_calls={emu.calls} threads={len(emu.threads)} "

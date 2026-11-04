@@ -51,6 +51,18 @@ for f in "$P"/win32/*.cpp "$P"/crt/*.c "$P"/crt/*.cpp "$P"/audio/*.cpp "$P"/inpu
 	SRCS+=("$f")
 done
 SRCS+=("$TC/guest/os_guest.c" "$TC/guest/platform_glue.cpp" "$TC/game/boot.cpp")
+# Global operator new/delete. The decomp replaces them as the original does (FNV's MemoryManager), but in S2's
+# object set operator new is a stub returning 0 (tesregiondatagrass.cpp) and new[] ends in the untranslated
+# MemoryManager::Allocate (0x00aa3e40, a trap), so every `new` in the guest (platform/ and libstdc++ included)
+# returned NULL. GAME_NEW=runtime (default): the game objects' definitions are weakened (objlist.py) and
+# global_new.cpp (malloc/free) provides them, plus weak malloc stand-ins for the game's own heap entry points
+# that have no native definition yet (heap_standin.c: FormHeap_Allocate, MemoryManager::Allocate);
+# GAME_NEW=game: the game's own.
+case "${GAME_NEW:-runtime}" in
+	runtime) SRCS+=("$TC/game/global_new.cpp" "$TC/game/heap_standin.c") ;;
+	game) ;;
+	*) echo "GAME_NEW must be runtime or game"; exit 1 ;;
+esac
 # D3D9=null (default): headless null device (null_d3d9.cpp, generated); D3D9=external: none here, the
 # renderer (render/nine's guest-side proxy) provides Direct3DCreate9 and is added with EXTRA_OBJS.
 case "${D3D9:-null}" in
@@ -79,7 +91,8 @@ for f in "${SRCS[@]}"; do
 done | xargs -P "$JOBS" -L 1 bash -c 'compile "$0" "$1" ${@:2}'
 
 
-for f in "$FIXED"/*.o; do printf '"%s"\n' "$f"; done > "$OUT/game_objects.list"
+rm -rf "$OUT/obj_new"
+python3 -I "$HERE/objlist.py" "$FIXED" "$OUT" "${GAME_NEW:-runtime}" aarch64-none-elf-nm aarch64-none-elf-objcopy
 LIBS="-L$OUT/rt"
 [ -n "$VORBIS" ] && LIBS="$LIBS -L$VORBIS/lib -lvorbisfile -lvorbis -logg"
 link() {   # extra objects...

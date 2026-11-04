@@ -45,6 +45,10 @@ struct __pthread_t {               /* newlib's opaque pthread_t is a pointer to 
     uint32_t detached;
 };
 
+/* Optional: called on every new guest thread once its TLS is live (the game boot copies the image's .tls
+ * template into S2's native block __fnvnx_tls_image there). */
+extern void fnvnx_guest_thread_tls_hook(void) __attribute__((weak));
+
 static __thread struct __pthread_t *t_self;
 static __thread struct _reent t_reent;
 static __thread int t_reent_ready;
@@ -77,6 +81,7 @@ static uint64_t guest_thread_entry(uint64_t rec_addr) {
     struct __pthread_t *t = (struct __pthread_t *)(uintptr_t)rec_addr;
     __asm__ volatile("msr tpidr_el0, %0" :: "r"((uint64_t)(uintptr_t)t->tls_block) : "memory");
     t_self = t;
+    if (fnvnx_guest_thread_tls_hook) fnvnx_guest_thread_tls_hook();   /* e.g. the game's image TLS template */
     t->ret = t->fn(t->arg);
     _reclaim_reent(&t_reent);
     __atomic_store_n(&t->done, 1, __ATOMIC_RELEASE);

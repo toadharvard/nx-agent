@@ -52,10 +52,20 @@ extern "C" uint64_t __fnvnx_undef_trap(const char *name, uintptr_t lr) {
 #endif
 }
 
+/* Image code pointers (and IAT words, see load_image) without a native target: S3's trap stubs land here.
+ * FNVNX_TRAPS_FATAL stops; the default logs the first ones and returns 0 to the caller, like the symbol traps. */
+static uint32_t g_iat_lo, g_iat_hi;   /* the image's IAT, for the message */
+static unsigned g_ptrtrap_hits;
 static void report_trap(uint32_t orig) {
-    printf("fnvnx boot: STOP: image code pointer to %#010" PRIx32 " has no native implementation\n", orig);
+    const char *what = orig >= g_iat_lo && orig < g_iat_hi ? "IAT slot" : "image code pointer to";
+#ifdef FNVNX_TRAPS_FATAL
+    printf("fnvnx boot: STOP: %s %#010" PRIx32 " has no native implementation\n", what, orig);
     fflush(stdout);
     exit(0xE2);
+#else
+    if (++g_ptrtrap_hits <= 100)
+        printf("fnvnx boot: trap: %s %#010" PRIx32 " has no native implementation, returning 0\n", what, orig);
+#endif
 }
 
 /* ---- loader OS hooks */
@@ -83,9 +93,14 @@ static void *os_alloc(void *, uint32_t n) { return malloc(n); }
 static void os_free(void *, void *p) { free(p); }
 static void os_log(void *, const char *m) { printf("  loader: %s\n", m); }
 
+static unsigned g_unresolved_imports;
 static uint32_t resolve_import(void *, const char *dll, const char *name, uint32_t ordinal, unsigned) {
-    if (ordinal != FNVNX_BY_NAME || !name) return 0;
-    return (uint32_t)(uintptr_t)fnvnx_win32_lookup_export(dll, name);
+    uint32_t v = ordinal == FNVNX_BY_NAME && name ? (uint32_t)(uintptr_t)fnvnx_win32_lookup_export(dll, name) : 0;
+    if (!v && ++g_unresolved_imports <= 64) {
+        if (name) printf("fnvnx boot: import %s!%s: no export\n", dll, name);
+        else printf("fnvnx boot: import %s!#%" PRIu32 ": no export\n", dll, ordinal);
+    }
+    return v;
 }
 
 /* ---- S10 IMAGE mode: the image's own __xc table, captured from .rdata before S3 rewrites code pointers */
@@ -124,6 +139,21 @@ static void capture_xc(const fnvnx_pe *pe, const fnvnx_image *img) {
     }
 }
 
+/* S2 binds every image .tls variable to its slot in one native TLS block, __fnvnx_tls_image, laid out like
+ * the image's template (docs/LINK.md "Thread-local variables"); it starts zeroed in each thread, so copy the
+ * template (mapped at __fnvnx_tls_image_orig) into it: on the main thread after mapping, on every guest thread
+ * at its start (threads.c calls this hook). */
+extern "C" {
+extern __thread char __fnvnx_tls_image[] __attribute__((weak));
+extern char __fnvnx_tls_image_orig[] __attribute__((weak));   /* absolute symbols: address = value */
+extern char __fnvnx_tls_image_size[] __attribute__((weak));
+static int g_image_mapped;
+void fnvnx_guest_thread_tls_hook(void) {
+    if (!g_image_mapped || !__fnvnx_tls_image_orig || !__fnvnx_tls_image_size) return;
+    memcpy(__fnvnx_tls_image, (const void *)__fnvnx_tls_image_orig, (size_t)(uintptr_t)__fnvnx_tls_image_size);
+}
+}
+
 static int load_image(void) {
     static const fnvnx_os os = {nullptr, os_read, os_map_fixed, os_protect, os_alloc, os_free, os_log};
     g_fd = os_file_open(k_exe, OS_O_READ);
@@ -145,11 +175,26 @@ static int load_image(void) {
     static fnvnx_image img;
     rc = fnvnx_image_map(&img, &pe, &os, pe.image_base, 0, 0x00400000u, 0x02100000u, 0);
     if (rc) { printf("fnvnx boot: STOP: image_map: %s\n", fnvnx_strerror(rc)); return -1; }
+    g_image_mapped = 1;
     fnvnx_image_load_relocs(&img, &os);
     capture_xc(&pe, &img);
     fnvnx_import_stats is = {};
     fnvnx_imports_bind(&img, resolve_import, nullptr, fnvnx_trap_value(nullptr, 0), &is);
     printf("fnvnx boot: imports: %u slots, %u resolved, %u unresolved\n", is.slots, is.resolved, is.unresolved);
+    /* IAT words the import directory did not name (a synthesized image names only the slots it knows) stay 0 and
+     * a call through one jumps to address 0: give each a trap stub that reports the slot (terminators too,
+     * nothing reads them after binding). */
+    if (pe.ndirs > 12 && pe.dir[12].rva && pe.dir[12].size) {
+        g_iat_lo = pe.image_base + pe.dir[12].rva;
+        g_iat_hi = g_iat_lo + pe.dir[12].size;
+        unsigned filled = 0;
+        for (uint32_t a = g_iat_lo; a + 4 <= g_iat_hi; a += 4) {
+            uint32_t *w = (uint32_t *)(uintptr_t)a;
+            if (*w == 0) { *w = fnvnx_trap_value(nullptr, a); filled++; }
+        }
+        printf("fnvnx boot: IAT %#" PRIx32 "..%#" PRIx32 ": %u words unbound (terminators or unnamed slots) -> traps\n",
+               g_iat_lo, g_iat_hi, filled);
+    }
     fnvnx_codemap map;
     rc = fnvnx_codemap_from_s2(&map, &os, (const fnvnx_s2_addrmap_entry *)fnvnx_addrmap, fnvnx_addrmap_count,
                                fnvnx_addrmap_kinds, nullptr, 0);
@@ -165,6 +210,7 @@ static int load_image(void) {
     printf("fnvnx boot: code pointers: %" PRIu32 " found, %" PRIu32 " applied, %" PRIu32 " trapped, %" PRIu32 " mismatched\n",
            n, as.applied, as.trapped, as.mismatched);
     fnvnx_image_finalize(&img, &os);
+    fnvnx_guest_thread_tls_hook();   /* main thread: image .tls template -> __fnvnx_tls_image */
     return 0;
 }
 

@@ -416,6 +416,72 @@ on. Result:
 * `main` reached; STOP: WinMain (0x0086a850) is not in the link; then `fnvnx_xc_cexit` runs the game's exit handlers
   and faults in one on the empty image.
 
+## 10. Round 4: S2c's fresh object set, WinMain entered (J-0032, J-0042 follow-up)
+
+Input: S2c's J-0034 object set (3,464 objects incl. WinMain and S1's XC1 rewrite; address map 61,620 entries),
+`D3D9=null`, vorbis on. `toolchain/game/build.sh` links it unchanged apart from the points below; one build takes
+35 to 50 s with `JOBS=3`. mkxctab: 17,191 initializers from the address map (6,265 of them `__fnvnx_dyninit_`),
+all inside the group 0x00f34eb0..0x00fc7a70. Guest: relocatable, 19 MiB incl. bss (0x13d4000), `guest.nso`
+10.99 MB.
+
+Undefined after the link (`undefined_report.txt`, each one a trap stub): **8,224**
+
+| count | class |
+|------:|-------|
+| 4,725 | image `.text` address without a native definition (S1/S2) |
+| 2,595 | C++ function/variable declared but not defined (S1/S2) |
+| 615 | Ghidra `FUN_xxxxxxxx` placeholder (S2 by-address) |
+| 131 | other C symbols |
+| 47 | Ghidra `DAT_` placeholder (S2) |
+| 39 | vtable/typeinfo, key function not compiled (S1) |
+| 29 | MSVC std:: internals (`_Xlen`, `_Xran`, `StandardLibrarySingletonObject`, ...) |
+| 21 / 9 | D3DX9 / Bink (S6) |
+| 9 / 4 | CRT/MSVC helpers / Win32 by plain name (S4) |
+
+### Build and boot fixes (toolchain/, tests/s5/)
+
+* **Image TLS template.** S2 binds every image `.tls` variable into one native block `__fnvnx_tls_image`
+  (`.tbss`, so zero in every thread). `boot.cpp` copies the image template (`__fnvnx_tls_image_orig`,
+  `__fnvnx_tls_image_size`) into it after mapping, and `threads.c` calls the weak hook
+  `fnvnx_guest_thread_tls_hook()` at the start of every guest thread, which does the same.
+* **Global operator new/delete (`GAME_NEW=runtime`, default).** Four game objects define the replaceable global
+  allocation functions as the original does. `operator new` in `tesregiondatagrass.cpp` is a stub that returns 0, and
+  `new[]` ends in the untranslated `MemoryManager::Allocate` (0x00aa3e40, a trap). So every `new` in the guest
+  returned NULL, in platform/ and libstdc++ too; for example the first platform initializer
+  (`_GLOBAL__sub_I_GetPrivateProfileStringA`) wrote to address 0. `objlist.py` writes the object list and weakens
+  these definitions in copies of the four objects (`<out>/obj_new/`, listed in `global_new.txt`).
+  `global_new.cpp` then provides malloc/free versions. `heap_standin.c` adds weak malloc versions of the game's two
+  undefined heap entry points: FormHeap_Allocate 0x00401000 (the `__fnv_00401000` call in every setting
+  constructor) and MemoryManager::Allocate 0x00aa3e40. They are weak, so native definitions replace them
+  without a build change. `GAME_NEW=game` keeps the game's definitions.
+* **Unbound IAT words.** Calls through IAT words the import directory does not name used to jump to 0. Those
+  words now get an S3 trap stub that reports the slot. Image code-pointer traps and IAT traps log and return 0
+  unless the build defines `FNVNX_TRAPS_FATAL`. Imports without an export are logged by name.
+* `emu_guest.py`: a guest path that is not UTF-8 is passed through (surrogateescape). If the Python host
+  stand-in raises, the emulator prints the guest trace and console instead of a bare traceback. `--budget` is
+  needed for the synthesized image: S3's code-pointer scan alone runs over 400 M instructions.
+  `tests/s5/emu_summary.py <log> [addrmap.tsv]` condenses a run: milestones, traps by class, skipped
+  initializers, and the stop with its trace.
+
+### Emulated boot (`--skip-faulting-init --budget 6000000000`)
+
+| | empty image (trace mode) | S14 synthesized image (`synth.exe`) |
+|---|---|---|
+| loader | window mapped empty | 181 IAT slots, 149 bound, 32 unresolved (Bink, `kernel32!CoCreateGuid`, d3d9 extras); 114 unbound IAT words trapped; 3,809 code pointers (291 applied, 726 trapped, 0 mismatched) |
+| S10 ADDRESS mode | 17,191 / 17,191 called, rc 0 | 17,191 / 17,191 called, rc 0 |
+| static-init traps | 3,686 hits, 127 distinct (5,353 before the heap stand-ins) | 3,687 hits, 128 distinct (5,355 before) |
+| initializers skipped after a fault | 2,886 | 2,885 |
+| WinMain | **entered** | **entered** |
+| first fault | pc 0: WinMain [0086a850]+0x118 -> `BGSSaveLoadManager::GetSaveDirectory` [00876ad0]+0x7c calls through its first IAT slot, which is empty without a loaded exe | WinMain [0086a850]+0x1cc calls `FUN_008526c0`; that tail-calls the untranslated 0x00af3020 (trap returns 0), and the NULL goes to the setter that S2 names `CombatProcedure::Initialize` [006ecd40], which writes at +4 |
+
+Inside WinMain the synthesized image passes 0x00c3bd30/bb90/bbe0/bc30/bc80 (CRT, traps), then
+`BGSSaveLoadManager::GetSaveDirectory`. Its `SHGetFolderPathA` IAT slot 0x00fdf274 is not named in S14's import
+directory (S4's `imports.tsv` lacks it too), so it is trapped. Then 0x004b4a30 and
+`StandardLibrarySingletonObject`'s constructor (traps), then the fault above. Most skipped initializers are the
+game's setting constructors: `FUN_00404920` -> `FUN_00aa1070` loads the heap pointer at 0x011f6080 (bss: the
+memory manager is never initialized) and calls through it. The other 4 write `RegisterFloatKeyOps` tables that a
+unit defines in `.text` (S1/S2, already reported in round 3).
+
 ## 7. Not yet done / untested
 
 * Nothing has run on hardware. Untested: ldr accepting the 64-bit + `32BitNoReserved` NPDM as an application
