@@ -45,6 +45,10 @@ TEX_BYTES = 0.5             # DRAM bytes per texture fetch after the texture cac
 FP16_RATE = 2.0             # Tegra X1: HFMA2/HADD2/HMUL2 issue two fp16 lanes per fp32 lane
 # family -> shaders, target kind, coverage, overdraw, vertices/draw; blend: colour read-modify-write;
 # depth: 0 none, 1 test only, 2 test + write.
+# Families whose native shader is a stand-in (no dedicated native shader yet): their native row is a lower bound,
+# real019 (the game's own programs, translated) is the metric for them.
+STAND_IN = {"water_refl": "lit.frag", "lod": "lit.frag", "trees": "lit.frag", "grass": "nolight_tex.frag",
+            "particles": "nolight_tex.frag", "imagespace_ui": "tex.frag (one copy for the whole chain)"}
 MODEL = {
     "shadow":       dict(vs="depth.vert", ps="depth.frag", target="shadow", coverage=0.6, overdraw=1.5, verts=600, depth=2, depth_only=True),
     "water_refl":   dict(vs="lit.vert", ps="lit.frag", target="refl", coverage=0.8, overdraw=1.5, verts=400, depth=2),
@@ -299,6 +303,9 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
                      "dram_mb": round(b / 1e6, 2), "vs": vs.get("name", m["vs"]) if not shader_map else shader_map[fam][0],
                      "ps": (bound[0][0] if bound else m["ps"]) if not shader_map else shader_map[fam][1],
                      "ps_mix": [[n, round(f, 3)] for n, f in bound] if bound else None, "ps_alu_slots": round(ps["alu_slots"], 1),
+                     "stand_in": (fam in STAND_IN) if not shader_map else False,
+                     "shader_source": ("native stand-in: " + STAND_IN[fam] if fam in STAND_IN else "native family shader")
+                                      if not shader_map else "the game's programs (shaderpackage019 via sdp2dksh), class average",
                      "target_format": None if m.get("depth_only") else fmts[m["target"]]}
         total_s += t; dram += b
     bw_s = dram / (GPU["dram_gbs"] * 1e9 * GPU["dram_eff"])
@@ -335,7 +342,7 @@ def main():
     res = {"method": __doc__.strip().split("\n\n", 2)[2], "assumptions": {"lights": LIGHTS, "tex_cost": TEX_COST, "efficiency": EFF, "gpu": GPU,
            "presets": PRESETS, "target_formats": fmts, "format_bytes": FORMAT_BYTES, "z_compress": Z_COMPRESS,
            "tex_bytes": TEX_BYTES, "fp16_rate": FP16_RATE, "families": MODEL, "permutations": PERMUTATIONS,
-           "lit_permutation": LIT_PERMUTATION,
+           "lit_permutation": LIT_PERMUTATION, "stand_in": STAND_IN,
            "epilogue_mix_hi": {f: {"at%d_fog%d" % k: n for k, n in v.items()} for f, v in epis["hi"].items()},
            "real_map": REAL_MAP if real_tab else None}, "shaders": tab, "scenes": scenes}
     json.dump(res, open(out, "w"), indent=1)

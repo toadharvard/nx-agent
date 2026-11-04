@@ -12,8 +12,9 @@ source <("$P/../env.sh" --print)
 "$P/build.sh" "$W/b"
 python3 -I "$P/gen_stream.py" "$W/streams"
 # real-like shader costs: the game's shaderpackage019 through S6b's sdp2dksh (local only; skipped without them)
-SDP=${SDP:-/home/user/gamedata/data/Data/Shaders/shaderpackage019.sdp}
-SDP2DKSH=${SDP2DKSH:-/home/user/wt-s6b/ports/fnv-nx/render/shaders/build/host/sdp2dksh}
+# (the GPU metric since 2026-11-04: rebuilt every run, never carried; ~2 min, one core)
+SDP=${SDP:-/home/user/work/shaders/shaderpackage019.sdp}
+SDP2DKSH=${SDP2DKSH:-/home/user/work/s6b/host/sdp2dksh}
 REAL=()
 if [ -f "$SDP" ] && [ -x "$SDP2DKSH" ]; then mkdir -p "$W/sdp/out019"; "$SDP2DKSH" -o "$W/sdp/out019" "$SDP" >"$W/out/sdp2dksh.log" 2>&1 || true; REAL=(--real "$W/sdp/out019"); fi
 python3 -I "$P/gpu_cost.py" "$W/b/n1/shaders" "$UAM" "$W/out/gpu.json" "${REAL[@]}"
