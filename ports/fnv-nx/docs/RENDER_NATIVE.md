@@ -467,6 +467,24 @@ old interfaces (one texture for the alpha map, no vertex colour for the sky, `la
 without uv); with the inputs in the last column all 12 cases match (run locally from a copy of the harness with
 those inputs; nothing of it is in the repo). Request to V6n: update those four cases' family inputs accordingly.
 
+### 4.3 Compile-time epilogue permutations (P6n hotspot 1)
+
+Every fragment shader that includes `d3d9_epilogue.glsl` is also built as `<name>__e0` (no fog, no alpha test: no
+epilogue code, no epilogue UBO), `<name>__ea` (alpha test only) and `<name>__ef` (fog only); `<name>` keeps the full
+runtime epilogue for draws with both. `nx::Renderer::Render` picks the permutation from the draw's resolved shader
+bits (alpha test enable, fog mode) for any package shader (it finds the blob from the shader's GLSL address,
+`Backend::ShaderGlsl`, so callers that create shaders themselves benefit too) and binds the epilogue UBO only when
+the permutation uses it. Image space (`menubg`) never had an epilogue. Maxwell code (uam, raw bytes x 3/32):
+
+| shader | full | __e0 | __ea | __ef |
+|---|---|---|---|---|
+| tex (P6n's image-space stand-in) | ~114 | ~18 | ~66 | ~60 |
+| tile (UI) | ~114 | ~12 | | |
+| lit_spec | ~246 | ~150 | | |
+
+The permutations are the same source with the branches folded, so results are identical (all scenes, the N1
+self-test and V6n's c69 cases unchanged). The N0 scenes still use the full runtime shaders (they exercise it).
+
 ### 4.1 N2 skinning (started)
 
 Gamebryo skins on the GPU per NiSkinPartition: each partition has its bone list (the palette), up to 4 weights and

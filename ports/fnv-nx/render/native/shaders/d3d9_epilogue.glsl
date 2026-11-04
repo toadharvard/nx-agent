@@ -4,8 +4,10 @@
 //   nxFogColor   = NxDynamicState.fogColor
 //   nxFogParams  = (fogEnd, fogScale, fogDensity, alphaRef)
 //   nxModes      = (alpha func NxCompare, fog mode NxFog, alpha test enable, 0)
-// Static permutations: define NX_FOG_MODE / NX_ALPHA_TEST (+ NX_ALPHA_FUNC) before the include to fold the
-// branches; the UBO still supplies the values.
+// Static permutations: define NX_FOG_MODE / NX_ALPHA_TEST (+ NX_ALPHA_FUNC) / NX_NO_ALPHA_TEST before the include
+// to fold the branches; the UBO still supplies the values. build.py builds every fragment shader that includes this
+// file also as <name>__e0 (no fog, no alpha test: no epilogue at all), <name>__ea (alpha test only) and
+// <name>__ef (fog only); nx::Renderer picks the variant from the draw's shader bits (RENDER_NATIVE.md §4.3).
 layout (std140, binding = 2) uniform NxEpilogue {
     vec4 nxFogColor;
     vec4 nxFogParams;
@@ -53,7 +55,7 @@ vec4 nx_d3d9_epilogue(vec4 c, float vertexFog) {
 #else
     if (!nx_compare(nxModes.x, c.a, nxFogParams.w)) discard;
 #endif
-#else
+#elif !defined(NX_NO_ALPHA_TEST)
     if (nxModes.z != 0u && !nx_compare(nxModes.x, c.a, nxFogParams.w)) discard;
 #endif
     return c;

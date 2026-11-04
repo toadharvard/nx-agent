@@ -116,6 +116,11 @@ public:
     // The engine pass the following draws belong to (family NxFam_None: none). Tagged into the stream as NxOp_Marker.
     void SetEnginePass(uint16_t enginePass, uint16_t family) { curPass_ = enginePass; curFamily_ = family; }
     bool Render(const Draw& d);
+    // A fragment shader of the package with its compile-time epilogue permutations (build.py: name__e0 none,
+    // __ea alpha test, __ef fog). Render() then binds the cheapest permutation the draw's D3D9 state allows and
+    // skips the epilogue UBO when it is not used. Returns the base (full runtime epilogue) shader id.
+    uint16_t FragmentShader(const char* name);
+    uint16_t lastPs() const { return lastPs_; }
 
     // N1 geometry path (Do_RenderShape / Do_RenderTristrips): an engine NiTriShape / NiTriStrips described
     // engine-independently (n1/engine_stubs.cpp reads the engine objects). Drawn with the tile family (tile_vc):
@@ -170,7 +175,14 @@ private:
     const Group* FindGroup(const void* g) const;
     void OpenPass(uint32_t clearMode);
     Backend* be_ = nullptr;
-    uint16_t curPass_ = 0, curFamily_ = 0;
+    uint16_t curPass_ = 0, curFamily_ = 0, lastPs_ = 0;
+    struct EpiSet { uint16_t base, e0, ea, ef; };
+    EpiSet epi_[64];
+    uint32_t nEpi_ = 0;
+    uint16_t noEpi_[64];
+    uint32_t nNoEpi_ = 0;
+    bool EpiKnown(uint16_t ps) const;
+    void LearnEpilogueVariants(uint16_t ps);
     Ring geomRing_;
     uint32_t white_ = 0, geomDraws_ = 0;
     uint16_t geomVsScroll_ = 0, geomVsPlain_ = 0, geomVsPlainScroll_ = 0, geomPsPlain_ = 0, geomPsAlphaMap_ = 0;

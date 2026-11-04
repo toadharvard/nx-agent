@@ -31,7 +31,14 @@ struct ApiBe final : Backend {
     uint32_t SamplerCreate(const NxSamplerState& s) override {
         return (uint32_t)Call(NXGPU_FN_SAMPLER_CREATE, FNVNX_ADDR_(&s));
     }
-    uint32_t ShaderCreate(const NxShaderDesc& d) override { return (uint32_t)Call(NXGPU_FN_SHADER_CREATE, FNVNX_ADDR_(&d)); }
+    uint32_t ShaderCreate(const NxShaderDesc& d) override {
+        uint32_t id = (uint32_t)Call(NXGPU_FN_SHADER_CREATE, FNVNX_ADDR_(&d));
+        if (id && id < kShaderTable) glsl_[id] = d.glsl;
+        return id;
+    }
+    uint64_t ShaderGlsl(uint32_t id) const override { return id < kShaderTable ? glsl_[id] : 0; }
+    enum { kShaderTable = 4096 };
+    uint64_t glsl_[kShaderTable] = {};
     void Submit(const NxSubmit& s) override { Call(NXGPU_FN_SUBMIT, FNVNX_ADDR_(&s)); }
     void WaitFrame(uint32_t f) override { Call(NXGPU_FN_WAIT_FRAME, f); }
     bool Readback(const NxReadback& r) override { return Call(NXGPU_FN_READBACK, FNVNX_ADDR_(&r)) == 0; }

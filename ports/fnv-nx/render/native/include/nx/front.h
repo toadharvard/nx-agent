@@ -21,6 +21,9 @@ struct Backend {
     virtual bool Readback(const NxReadback& r) = 0;
     virtual void Shutdown() = 0;
     virtual const NxGpuInfo& Info() const = 0;
+    // The GLSL address a shader id was created from (0 if unknown): lets nx::Renderer find a package shader's
+    // compile-time permutations by name (RENDER_NATIVE.md §4.3).
+    virtual uint64_t ShaderGlsl(uint32_t) const { return 0; }
 };
 
 // The backend behind an NxGpuApi. In the ILP32 guest pass api = 0: calls go through S5's ext_call slot to the host

@@ -3,6 +3,7 @@
 #include "nx/families.h"
 #include "nx_shaders.h"
 #include <string.h>
+#include <stdio.h>
 #include <new>
 
 namespace nx {
@@ -256,7 +257,19 @@ bool Renderer::Render(const Draw& d) {
     const Group* g = cur_ ? cur_ : &groups_[0];
     NxD3D9Rect sc = scissorSet_ ? scissor_ : NxD3D9Rect{0, 0, (int32_t)g->w, (int32_t)g->h};
     const StateTracker::Resolved& r = state_.Resolve(vp_, sc, g->depth ? 75 : 0);
-    uint16_t st = sc_.State(d.vs, d.ps, d.layout, r.rs);
+    // compile-time epilogue permutation for this draw's alpha test / fog
+    uint16_t ps = d.ps;
+    bool needEpi = true;
+    if (d.ps && !EpiKnown(d.ps)) LearnEpilogueVariants(d.ps);
+    for (uint32_t i = 0; i < nEpi_; i++)
+        if (epi_[i].base == d.ps) {
+            const bool at = (r.shaderBits >> NXSB_ALPHATEST) & 1, fog = ((r.shaderBits >> NXSB_FOG) & 7) != 0;
+            const uint16_t v = !at && !fog ? epi_[i].e0 : at && !fog ? epi_[i].ea : !at && fog ? epi_[i].ef : 0;
+            if (v) { ps = v; needEpi = at || fog; }
+            break;
+        }
+    lastPs_ = ps;
+    uint16_t st = sc_.State(d.vs, ps, d.layout, r.rs);
     Packet* p = frame_.Emit();
     if (!st || !p) return false;
     uint32_t h[StateTracker::kStages], n = d.textures ? state_.Handles(be_, h, d.textures) : 0;
@@ -270,8 +283,10 @@ bool Renderer::Render(const Draw& d) {
     if (!u) return false;
     memset(u, 0, 512);
     if (d.ubo) memcpy(u, d.ubo, d.uboSize > 512 ? 512 : d.uboSize);
-    NxEpilogue* e = frame_.Epilogue(p);
-    if (e) nx_epilogue_fill(e, &r.dyn, r.shaderBits);
+    if (needEpi) {
+        NxEpilogue* e = frame_.Epilogue(p);
+        if (e) nx_epilogue_fill(e, &r.dyn, r.shaderBits);
+    }
     DynRec dr;
     DynFromD3D9(&dr, r.dyn);
     p->dyn = frame_.AddDyn(dr);
@@ -289,6 +304,41 @@ static uint16_t BlobShader(Backend* be, const char* name, uint32_t stage) {
     d.stage = stage; d.dksh = FNVNX_ADDR_(nx_shader_blobs[i].dksh); d.dksh_size = nx_shader_blobs[i].dksh_size;
     d.glsl = FNVNX_ADDR_(nx_shader_blobs[i].glsl); d.glsl_size = nx_shader_blobs[i].glsl_size;
     return (uint16_t)be->ShaderCreate(d);
+}
+
+bool Renderer::EpiKnown(uint16_t ps) const {
+    for (uint32_t i = 0; i < nEpi_; i++) if (epi_[i].base == ps) return true;
+    for (uint32_t i = 0; i < nNoEpi_; i++) if (noEpi_[i] == ps) return true;
+    return false;
+}
+
+// a fragment shader created from the package (by anyone): find its blob by GLSL address, then its permutations
+void Renderer::LearnEpilogueVariants(uint16_t ps) {
+    const uint64_t glsl = be_->ShaderGlsl(ps);
+    int blob = -1;
+    for (uint32_t i = 0; glsl && i < nx_shader_blob_count; i++)
+        if (nx_shader_blobs[i].stage == NxStage_Fragment && FNVNX_ADDR_(nx_shader_blobs[i].glsl) == glsl) { blob = (int)i; break; }
+    char n[96];
+    EpiSet e = {ps, 0, 0, 0};
+    if (blob >= 0 && nEpi_ < sizeof epi_ / sizeof epi_[0]) {
+        snprintf(n, sizeof n, "%s__e0", nx_shader_blobs[blob].name); e.e0 = BlobShader(be_, n, NxStage_Fragment);
+        snprintf(n, sizeof n, "%s__ea", nx_shader_blobs[blob].name); e.ea = BlobShader(be_, n, NxStage_Fragment);
+        snprintf(n, sizeof n, "%s__ef", nx_shader_blobs[blob].name); e.ef = BlobShader(be_, n, NxStage_Fragment);
+    }
+    if (e.e0 || e.ea || e.ef) epi_[nEpi_++] = e;
+    else if (nNoEpi_ < sizeof noEpi_ / sizeof noEpi_[0]) noEpi_[nNoEpi_++] = ps;
+}
+
+uint16_t Renderer::FragmentShader(const char* name) {
+    uint16_t base = BlobShader(be_, name, NxStage_Fragment);
+    if (!base || nEpi_ >= sizeof epi_ / sizeof epi_[0]) return base;
+    char n[96];
+    EpiSet e = {base, 0, 0, 0};
+    snprintf(n, sizeof n, "%s__e0", name); e.e0 = BlobShader(be_, n, NxStage_Fragment);
+    snprintf(n, sizeof n, "%s__ea", name); e.ea = BlobShader(be_, n, NxStage_Fragment);
+    snprintf(n, sizeof n, "%s__ef", name); e.ef = BlobShader(be_, n, NxStage_Fragment);
+    if (e.e0 || e.ea || e.ef) epi_[nEpi_++] = e;
+    return base;
 }
 
 namespace {
@@ -316,11 +366,11 @@ bool Renderer::RenderGeometry(const GeomView& g) {
     if (!geomVs_) {
         geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
         geomVsScroll_ = BlobShader(be_, "tile_vc_scroll", NxStage_Vertex);
-        geomPs_ = BlobShader(be_, "tile_vc", NxStage_Fragment);
+        geomPs_ = FragmentShader("tile_vc");
         geomVsPlain_ = BlobShader(be_, "tile", NxStage_Vertex);
         geomVsPlainScroll_ = BlobShader(be_, "tile_scroll", NxStage_Vertex);
-        geomPsPlain_ = BlobShader(be_, "tile", NxStage_Fragment);
-        geomPsAlphaMap_ = BlobShader(be_, "tile_alphamap", NxStage_Fragment);
+        geomPsPlain_ = FragmentShader("tile");
+        geomPsAlphaMap_ = FragmentShader("tile_alphamap");
         NxVtxLayout ll;
         memset(&ll, 0, sizeof ll);
         ll.count = 3; ll.stride = sizeof(GeomVtx);

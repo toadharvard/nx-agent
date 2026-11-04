@@ -390,9 +390,12 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
         eng->Do_SetScreenSpaceCameraData(nullptr);
         r.SetEnginePass(757, NxFam_Tile);
         eng->Do_RenderGeometry(eng3 + 0);
+        const uint16_t psBg = r.lastPs();
         eng->Do_RenderGeometry(eng3 + 704);
         eng->Do_RenderGeometry(eng3 + 1536);
+        const uint16_t psText = r.lastPs();
         r.SetEnginePass(0, NxFam_None);
+        t.Check(psBg != 0 && psText != 0 && psBg != psText, "epilogue permutations: no-epilogue tile vs alpha-tested tile", psBg, psText);
         t.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame(), "frame 3: End");
         t.Check(be->Readback(rb), "frame 3: readback");
         p = px(16, 12); q = px(80, 12);   // checker 2x2 over 128x96: texel (0,0) red, (1,0) blue
