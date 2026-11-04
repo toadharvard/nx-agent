@@ -402,7 +402,7 @@ Instruction mix of fresh8 (2.43 M static instructions) **[M]**: loads 22.2 %, st
 | `fs:[0x2c]` TLS unification | correctness first, enables MT rendering | **done** (S5 `31cdca3`) | S4 |
 | release stores for the RecursiveSpinLock (6.5) | correctness on AArch64 | out-of-line Unlock **done** (override); 43 inline sites need an S1 rule | S15, S1 |
 | inline Interlocked* in game units (6.7) | the call/return and 1-2 instructions per operation; +8.8 static instructions per site | **done** (fnvnx_win32.h) | S15 |
-| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | per-site argument | S12, S15 |
+| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | **done** (S12 `52cb478`, `ORDER_REFCOUNT=weak` by default; mtqemu litmus `ref` race-checks it); B9 confirms on an A57 | S12, S15 |
 
 ## 9. What needs hardware, and the first on-device benchmark set
 
@@ -528,7 +528,7 @@ Model items (M instructions per frame, exterior, native renderer; [E] unless mar
 | renderer submission worker (P6n: Frame::Finish + deko3d recording) | render worker (core 1) | **3.36-5.43 [M]** | `render_f2f4`, `instancing` |
 | tasklets, IO, audio | mask 0b110 (0b1110 with core 3) | 1-3 | `core3` |
 
-Main thread total **23.8 M (13.2-34.4)** as placed today. It was 19.7 M (11.3-28.1) before the render machine's
+Main thread total **22.9 M (13.1-33.2)** as built today (placement + `barrier_relax`; 23.8 M before S12's refcount rule was counted). It was 19.7 M (11.3-28.1) before the render machine's
 measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked barrier item.
 
 ### 11.3 The plan, ranked by main-thread time moved
@@ -540,7 +540,7 @@ measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked 
 | 3 | render machine F2-F4 (`render_f2f4`) | 1.4 M | proposed (RENDER_PERF.md 10) | no |
 | 4 | Havok worker pool (`havok_workers`) | 1.4 M | not traced whether bhkWorld uses the MT simulation | yes |
 | 5 | threaded morpher/particles/blood (`threaded_anim`) | 0.9 M | PC defaults on (hearsay names) | no (PC path) |
-| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | per-site argument (S12) | B9 |
+| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | **in the build** (S12 `52cb478`, ORDER_REFCOUNT=weak) | B9 |
 | 7 | NEON per-object math (`neon_math`) | 0.9 M | proposed (S15) | no |
 | 8 | instancing / sorted packets in the native renderer | 1.0 M main, 1.3 M worker | S6n plan | no (the render machine measures) |
 | 9 | core 3 for background roles | frees 1-3 M on cores 1-2 | S5 opt-in, off by default | yes: what the system runs on core 3 |
@@ -551,7 +551,7 @@ lo-hi range; level by the mid case):
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
-| placed (no lever) | 23.8 (13.2-34.4) | 29.1 (12.9-56.3) / 36.4 | **fail** | 16.6 (7.4-32.2) / 20.8 | stretch_60 |
+| placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.2 | **fail** | 16.1 (7.3-31.0) / 20.1 | stretch_60 |
 | plan45 (mt_cull, havok_workers, threaded_anim) | 17.2 (8.5-27.0) | 21.1 (8.4-44.1) / 26.4 | pass_30 | 12.1 (7.1-25.2) / 15.1 | stretch_60 |
 | plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | **pass_45** | 9.9 (7.1-22.0) / 12.4 | stretch_60 |
 | plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | stretch_60 | 9.7 (7.1-20.6) / 12.1 | stretch_60 |
@@ -626,7 +626,7 @@ stock clock (plan45b):
 | 3 | renderer, main side | render machine F2-F4 (sort fixed cost, bind elimination) | 1.75 (1.0-2.5) | 2.1 / 1.2 | S6n, P6n | no |
 | 4 | Havok | Havok's multithreaded simulation on the worker pool (trace bhkWorld first) | 1.55 (0.6-2.5) | 1.9 / 1.1 | S15 | yes |
 | 5 | animation | `threaded_anim` (PC defaults) + NEON Slerp / FromRotationMatrix | 1.15 (0.5-1.8) | 1.4 / 0.8 | S15 | no |
-| 6 | Interlocked barriers | inlined (done); next: no barrier on refcount increments | 0.85 (0.1-1.6) | 1.0 / 0.6 | S12, S15 | B9 |
+| - | Interlocked barriers | inlined and refcounts relaxed (**done**, `barrier_relax` is in the build: `built_levers`, the queue leaves it out) | 0.85 (0.1-1.6) | 1.0 / 0.6 | S12, S15 | B9 |
 | 7 | scene graph update | NEON overrides of NiMatrix3 product, NiBound::Update, transform compose; GOT movz/movk pass | 0.6 (0.3-0.9) | 0.7 / 0.4 | S15, S2 | no |
 | - | boot | an index for S3's code-pointer scan (212 M of 243 M) | boot only | 0.26 s / 0.15 s | S3 | no |
 

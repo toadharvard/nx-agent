@@ -343,7 +343,7 @@
    },
    "basis": "E",
    "needs_hardware": true,
-   "status": "needs S12's per-site argument and the B9 measurement"
+   "status": "in the build: S12 52cb478 ORDER_REFCOUNT=weak is compile.sh's default (ORDERING.md Refcounts; sample 110 increments relaxed, 220 decrements release, 201 sites full); race-checked by mtqemu litmus-order ref; B9 on an A57 confirms the stall saving"
   },
   {
    "id": "neon_math",
@@ -366,8 +366,8 @@
  "scenarios": [
   {
    "id": "placed",
-   "name": "placement as implemented, no lever",
-   "levers": []
+   "name": "as built: the placement plus the levers that are in the build (barrier_relax)",
+   "levers": ["barrier_relax"]
   },
   {
    "id": "plan45",
@@ -613,7 +613,8 @@
    "needs_hardware": false
   },
   "interlocked barriers": {
-   "fix": "inlined (done, fnvnx_win32.h); next: a per-site argument to drop the barrier of refcount increments (an increment publishes nothing), about half of the stalls",
+   "fix": "inlined and refcounts relaxed (done: S12 52cb478, ORDER_REFCOUNT=weak, lever barrier_relax in the build); the 201 sites kept full stay x86-ordered",
+   "done": true,
    "gain_main_minsn": [
     0.1,
     1.6
