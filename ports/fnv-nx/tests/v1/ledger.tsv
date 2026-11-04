@@ -92,4 +92,4 @@ S15S-METRIC	S15-simd	b7a4022	b7a4022	confirmed	-	test_slerp_decomp.py	hotspot me
 GATES-FZ-R16a	gates	82805db	82805db	refuted	-	test_ready_fuzz_shards.py	fnvnx-fuzz-summary per shard: shard 1 at 18/10 masks shard 2 at 0/10, fuzz.coverage passes 90 % (text and summary)
 NX1-NRO-N2	NX1	5256786	5256786	refuted	-	test_nx1_nro.py	check_nro passes a RELATIVE relocation into rodata, which hbloader maps read-only (header offsets ok, N1)
 S15-MTQEMU-B1	S15-threads	79481ab	79481ab	refuted	-	test_weak_interlocked.py	tests/s15/mtqemu/build.sh no longer links after S4 79481ab: handles.cpp needs w32_is_std_handle from crt_kernel32.cpp, not in build.sh
-NXR-H1-FIX	render	e0485fc	e0485fc	confirmed	-	test_nx_render_robust.py	.nxcap draws bounded by vertices x instances: H1 exit 1 (ASan build of the head), D1-D7/C1-C6 and 1,000 t.nxd9 mutations clean
+NXR-H1-FIX	render	e0485fc	e0485fc	confirmed	-	test_nx_render_robust.py	.nxcap draws bounded by vertices x instances: H1 exit 1 (ASan build of the head), D1-D7/C1-C6 and 1,000 mutations each of t.nxd9 and n0.nxcap clean
