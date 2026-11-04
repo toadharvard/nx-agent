@@ -3228,3 +3228,18 @@ The owner moves the work to another session or account (quota). Resume with docs
 * **note** - Subagent worktrees see sse2neon at `/tmp/claude-0/-home-user-nx-agent/<session>/scratchpad/ext/sse2neon`.
 
 * **correction (J-0146)** - COM1 `f3ca74a` was NOT merged: the cherry-pick conflicted. The commit survives on the private branch `wip/aa7b13cae4bb` (push_wip). Cherry-pick it again in the new session; until then bsshader keeps its IUnknown error.
+
+### J-0147 | 2026-11-04 | stream: V1 | status: wip | parent: J-0146
+
+* **merged** - The V1 commits: e42c593, b6be277, 67bc967, ba67ffe, dd65a14, aa17bfd.
+* **verdicts** - Fixes are in V1's commits.
+  - job_gamedata G4 (a refused exe stayed cached): fixed.
+  - full_job: make's exit 2 was read as "no inputs", and meta.json named a boot image when no boot ran. Both fixed.
+  - TAIL1: confirmed fixed.
+  - S5 milestones: partial. parentCell +0x40 under ILP32 is unverified.
+  - S15 mtqemu: confirmed.
+  - ready.py: **refuted**, 10 of 12 adversarial cases (tests/v1/test_ready_adversarial.py) -> R0.
+  - nx_render: **partial**. Malformed .nxd9/.nxcap input crashes it (segfault, bad_alloc, a 4 GB allocation) -> render machine.
+  - FTOI2: **partial**. An enum with only non-negative enumerators takes the unsigned path; MSVC enums are int. Fix via TYPE_LANG_FLAG_5; it forces a full recompile, which is the owner's call.
+  - fastcall non-POD: the ecx rule is confirmed. layout.py's POD bit is wrong for 3 of 24 kinds; proposed predicate __is_aggregate && no base && trivial dtor && trivially assignable -> S2c.
+* **owner action** - A V1 test ran with an empty mktemp and wrote synthetic files under `/` (12:48-12:49): /a-g1 /a-g2 /a-g3 /artifacts /build /fake.exe /farm /origin.git /outside.bin /pub /r-g1 /r-g2 /r-g3 /report.md. They are not removed: check what they are before deleting. The tests now stop when mktemp fails.
