@@ -945,18 +945,18 @@ _shutil.rmtree(_s2, ignore_errors=True)
 _G = ('struct Gate { char v; Gate() {} Gate(bool b) : v(b) {} operator bool() const { return v != 0; } };\n'
       'struct Only { char v; operator bool() const { return v != 0; } };\n'
       'struct N { Gate test(float e) const; int other(float e) const; Only probe(float e) const; };\n')
-check('COND1 the gate operand of `? false :` gets the bool conversion',
+check('COND1 the literal of `? false :` becomes the gate class (MSVC\'s conversion)',
       run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->test(0.5f)) g(); }\n'),
-      ['!n ? false : (bool)(n->test(0.5f))) g();'])
+      ['!n ? Gate(false) : n->test(0.5f)) g();'])
 check('COND1 a call returning int stays',
       run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->other(0.5f)) g(); }\n'),
-      [], ['(bool)('])
+      [], ['Gate(false)', 'Gate(true)'])
 check('COND1 a class without a bool constructor (no ambiguity) stays',
       run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->probe(0.5f)) g(); }\n'),
-      [], ['(bool)('])
+      [], ['Gate(false)', 'Gate(true)'])
 check('COND1 an operand that does not end in the call stays',
       run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { int x = !n ? false : n->test(0.5f) + 1; }\n'),
-      [], ['(bool)('])
+      [], ['Gate(false)', 'Gate(true)'])
 _R = ('template <class T> struct Arr { void AddBack(const T& v); void Set(int i, T* p); };\n'
       'struct S { int a; };\n')
 check('RSTR1 restrict local passed to a const T& parameter',

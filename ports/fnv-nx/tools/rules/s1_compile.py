@@ -3670,7 +3670,9 @@ def r_lane_array_address(path, text, stats):
 # address of the definition's `// @fnv` tag.
 
 STD2_DEF = re.compile(r'//\s*@fnv\s+(0x[0-9a-fA-F]{8})[^\n]*\n((?:[A-Z_]+\s+)*[^\n;{}()]*?)\bstd::([A-Za-z_]\w*)\s*\(')
-STD2_RENAMES = set()      # (unit source, address, old symbol, new symbol), filled while the tree is prepared
+# (unit source, address, old symbol, new symbol), filled while the tree is prepared. Kept on the prepare module: equiv.py
+# loads the stream modules twice and keeps the first copy's POST hook, which must see the second copy's renames.
+STD2_RENAMES = prepare.__dict__.setdefault('_fnvnx_std2_renames', set())
 _STD2_FNS = None
 
 def _std2_functions(path):
@@ -3735,13 +3737,13 @@ POST.append(rename_std_definitions)
 #
 # `c ? false : x.f(a)` where f returns a class G that converts both ways with bool (`G(bool)` and `operator bool()`),
 # a stand-in for a byte-sized boolean result: GCC refuses the conditional ("operands to '?:' have different types
-# 'bool' and 'G' ... each type can be converted to the other"); MSVC accepted it. Both readings give the same value
-# where the conditional is used as a condition: G(false) converts back to false, and G g to bool g. COND1 writes the
-# conversion to bool on the G operand: `c ? false : (bool)(x.f(a))`. Only where the other operand is the literal
-# `true` / `false`, the G operand ends in a call of a name the unit declares returning G with as many parameters as
-# the call has arguments, and every declaration of that name with that many parameters returns a class with an
-# `operator bool()` (hkgpmesh.cpp: GateE10 and S_e1ce10_Bool, both one-byte boolean results; the cast is the same
-# conversion for either).
+# 'bool' and 'G' ... each type can be converted to the other"); MSVC accepted it and converted the literal to G: its
+# code tests the result byte directly (`cmp byte [eax], 0; je`, hkgpmesh 0x00e11e10; the bool conversion of the G
+# operand instead adds `setne al; test al, al`, measured under MSVC 2008). COND1 writes that conversion:
+# `c ? G(false) : x.f(a)`. Only where the other operand is the literal `true` / `false`, the G operand ends in a
+# call of a name the unit declares returning G with as many parameters as the call has arguments, and every
+# declaration of that name with that many parameters returns a class with an `operator bool()`, exactly one of them
+# with a bool constructor (hkgpmesh.cpp: GateE10, and S_e1ce10_Bool without one).
 
 COND1_CLASS = re.compile(r'\b(?:struct|class)\s+([A-Za-z_]\w*)\s*(?::[^{;]*)?\{')
 COND1_LIT = re.compile(r'\?\s*(false|true)\s*:(?!:)')
@@ -3769,8 +3771,8 @@ def _cond1_operand_end(text, i):
     return len(text)
 
 def r_conditional_bool_gates(path, text, stats):
-    """COND1: `c ? false : x.f(a)` with f returning a class G convertible both ways with bool -> `c ? false :
-    (bool)(x.f(a))` (see above)."""
+    """COND1: `c ? false : x.f(a)` with f returning a class G convertible both ways with bool -> `c ? G(false) :
+    x.f(a)`, the conversion MSVC chose (see above)."""
     if '?' not in text or 'operator bool' not in text and '#include' not in text: return text
     if not COND1_LIT.search(text): return text
     unit = '\n'.join(t for _, t in _closure(path, text)) if '#include' in text else COMMENT.sub(' ', text)
@@ -3799,8 +3801,9 @@ def r_conditional_bool_gates(path, text, stats):
         if call is None: continue
         args = x[call.end():len(x) - 1]
         r = rets.get((call.group(1), _cond1_arity(args)), set())
-        if not r & gates or not r <= booly: continue
-        out.append(text[pos:a]); out.append('(bool)(' + x + ')'); pos = a + len(x)
+        if len(r & gates) != 1 or not r <= booly: continue
+        g = next(iter(r & gates))
+        out.append(text[pos:m.start(1)]); out.append('%s(%s)' % (g, m.group(1))); pos = m.end(1)
         stats['COND1'] += 1
     if not out: return text
     out.append(text[pos:])
