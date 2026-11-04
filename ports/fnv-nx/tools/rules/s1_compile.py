@@ -992,6 +992,25 @@ FALL_END = re.compile(r'(?:\breturn\b[^;]*;|\bthrow\b[^;]*;|__builtin_trap\s*\(\
                       r'\b(?:abort|exit|_exit|ExitProcess|ExitThread|terminate|_CxxThrowException|__CxxThrowException|'
                       r'FUN_00ec7894)\s*\([^;]*\)\s*;)\s*$')
 
+def _last_statement(body):
+    """The last statement at the top level of a function body (after the last `;` or `}` that closes one)."""
+    depth, last, q, i = 0, 0, None, 0
+    while i < len(body):
+        c = body[i]
+        if q:
+            if c == '\\': i += 1
+            elif c == q: q = None
+        elif c in '"\'': q = c
+        elif c in '({[': depth += 1
+        elif c in ')]': depth -= 1
+        elif c == '}':
+            depth -= 1
+            if depth == 0: last = i + 1
+        elif c == ';' and depth == 0 and i + 1 < len(body.rstrip()):
+            last = i + 1
+        i += 1
+    return body[last:].strip()
+
 def r_falloff_traps(path, text, stats):
     """FALL1: `__builtin_trap()` at the end of non-void functions that do not end in a return (see above)."""
     if '{' not in text: return text
@@ -1034,7 +1053,9 @@ def r_falloff_traps(path, text, stats):
         if not re.search(r'[A-Za-z_]', ret): continue
         if re.search(r'\\[ \t]*\n', text[o:c]): continue          # inside a #define (continued lines)
         body = COMMENT.sub(' ', text[o + 1:c]).rstrip()
-        if body and FALL_END.search(body): continue        # (an empty body falls off too: `virtual T* V0() {}`)
+        # the last top-level statement must be the return (`if (x) return 1;` at the end still falls off);
+        # an empty body falls off too (`virtual T* V0() {}`)
+        if body and FALL_END.match(_last_statement(body)): continue
         edits.append((c, ' __builtin_trap(); /* fnv-nx FALL1 */ '))
         stats['FALL1'] += 1
     if not edits: return text
@@ -1121,7 +1142,9 @@ PLACEMENT_USE = re.compile(r'(?<![\w.>])(?:::\s*)?new\s*\((?!\s*\))')
 def r_placement_include(path, text, stats):
     """NEW4: a file that uses placement new (`new (p) T`) without a declaration of it gets <new> (or fnvnx_new.h where
     it carries its own MSVC std::exception) on top. MSVC declared the placement form through its own headers."""
-    if 'new' not in text or not PLACEMENT_USE.search(text): return text
+    if 'new' not in text: return text
+    if not any(not re.search(r'\boperator\s*$', text[max(0, m.start() - 20):m.start()])
+               for m in PLACEMENT_USE.finditer(text)): return text      # only operator new(n) calls
     if re.search(r'#\s*include\s*[<"](?:new|fnvnx_new\.h)[>"]', text) or re.search(r'operator\s+new\s*\([^;{})]*,\s*void\s*\*', text):
         return text
     stats['NEW4'] += 1
