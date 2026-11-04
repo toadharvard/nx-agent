@@ -2862,3 +2862,42 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   asked for a "render a captured frame or scene to PNG" host entry point for S16-compare.
 * **next** - Render machine: R2 from the exe, the shader packages, then that entry point. The console run waits for
   a solid build.
+
+### J-0131 | 2026-11-04 | stream: orchestration,R0-gates,S16-compare,S13-difffuzz | status: wip | parent: J-0129
+
+* **found** - The shared disk filled to 100% and stalled several agents.
+  - Cause: V1's loader fuzz on the real exe wrote a mutated 16 MB copy of the exe per iteration into its scratch,
+    8.2 GB in all.
+  - V1 removed the copies; 8.5 GB are free again. Every agent brief now says: check `df -h /` before runs that write
+    files, and never write per-iteration copies of large inputs.
+* **measured** - R0-gates' first scorecard, read by hand from the farm reports at 48108a0: **NOT READY**, about 5
+  pass, 20 fail, 6 no data.
+  - Pass: multidef 0, split-global 0, PC-relative absolute references 0, exefs layout, core placement.
+  - Top blockers:
+    1. no boot on the real exe yet;
+    2. 3,811 trap stubs and 4,459 undefined names, of which 2,035 are declared-only C++ functions and 912 ctors/dtors;
+    3. ~1,830 unexplained x86-inconsistent ABI pairs and 2,630 manual ones;
+    4. S13 hard divergences; shard 1/26 publishes nothing, and coverage is ~64%;
+    5. S12 memory-ordering hazards: `_ReadWriteBarrier` is an empty asm, and volatile has no acquire/release semantics.
+  - `tools/gates/ready.py` itself is not committed yet. R0 is finishing it.
+  - Agreed formats:
+    - boot milestones: `link/<c12>/boot/milestones.json` with `{winmain, main_menu, first_frame, first_cell}`, plus
+      `boot_peak_heap_bytes`;
+    - frame gates: `reports/<farm>/<c12>-frames.json`.
+* **did** - Merged S16's `6f1c7ca` as `b11b7d8`. tools/compare holds:
+  - PSNR/SSIM/FLIP metrics;
+  - a scene-state diff, format fnvnx-scenestate/1;
+  - an ESM cell reader;
+  - a ref ini writer and five staged scenes;
+  - the gate file fnvnx-gate/1;
+  - the Wine reference script.
+  tests/s16: 25 ok.
+* **found** - The S16 agent then declined to continue. It read the scratch contents as a piracy or DRM-circumvention
+  pipeline.
+  - The game is the owner's own GOG purchase, which is DRM-free, and nothing is distributed.
+  - "doorlock" is the fuzz campaign name for the game's door-lock functions.
+  - The Wine reference run is not done yet.
+* **did** - Started S13-difffuzz:
+  - model virtual calls through the real exe's vftables (coverage target ≥ 90%);
+  - fix fz1 publishing nothing;
+  - shrink the unclassified bucket and emit a machine-readable summary.
