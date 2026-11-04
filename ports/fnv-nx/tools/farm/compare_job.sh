@@ -10,7 +10,8 @@
 # The loop (tools/compare/README.md):
 #   synthetic set   synth.py -> reference twice (LP_NUM_THREADS 4 and 1: the noise floor) -> candidate -> capcompare
 #   permutations    perm.py on gamedata/shaders' shaderpackage019 (COMPARE_SDP) -> the same, plus the reference of
-#                   the --perturb 1e-5 captures (conditioning floor) -> permreport (pass / over / ill / vacuous)
+#                   the --perturb 1e-5 captures (conditioning floor) -> permreport (pass / over / ill / vacuous);
+#                   seeds of programs that drew nothing come from permcover.py, cached in $FARM_HOME/compare/salts-*
 # Report: <report.md> with numbers, the metric lines and the program classes. Sidecar <report>.json
 # (fnvnx-compare/1): the metric of each set, the permreport counts, the versions. Both go to branch reports/<farm>
 # of the private artifacts repository. Captures and images stay in $FARM_HOME/compare (game-derived: never
@@ -184,9 +185,28 @@ python3 -I "$CMP/synth.py" build --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" -
 run_set synthetic "$W/caps/synthetic"
 if [ -n "$SDP" ] && deadline_ok 900; then
 	log "permutations"
-	python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/perm" >"$W/perm.log" 2>&1 &&
-	python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/permp" \
-		--perturb 1e-5 >>"$W/perm.log" 2>&1 || fail "perm.py"
+	# coverage-guided seeds (permcover.py), cached per package and perm.py: computed once from a first reference run
+	SALTS=$W/salts-$(key_of "$SDP" "$CMP/perm.py" "$CMP/permcover.py").json
+	build_perm() {   # build_perm [--salts file]
+		python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/perm" "$@" >"$W/perm.log" 2>&1 &&
+		python3 -I "$CMP/perm.py" build --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/caps/permp" \
+			--perturb 1e-5 "$@" >>"$W/perm.log" 2>&1 || fail "perm.py"
+	}
+	if [ ! -f "$SALTS" ]; then
+		build_perm
+		mkdir -p "$W/run/cover"
+		python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$W/run/cover/ref" \
+			"$W/caps/perm"/*.nxd9 >"$W/run/cover/ref.log" 2>&1
+		python3 -I "$CMP/permcover.py" --sdp "$SDP" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --exe "$BIN/nxd9play.exe" \
+			--prefix "$PFX" --manifest "$W/caps/perm/manifest.json" --ref "$W/run/cover/ref" --out "$SALTS.tmp" \
+			>"$W/run/cover/cover.log" 2>&1 && mv "$SALTS.tmp" "$SALTS" || NOTES+=("permcover failed: seeds not guided")
+	fi
+	if [ -f "$SALTS" ]; then
+		build_perm --salts "$SALTS"
+		NOTES+=("coverage seeds: $(python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])); print(len(s)-1, "programs reseeded,", len(s["_unreached"]), "unreached")' "$SALTS")")
+	else
+		build_perm
+	fi
 	run_set perm "$W/caps/perm" "$W/caps/permp"
 elif [ -n "$SDP" ]; then
 	NOTES+=("permutations skipped: FARM_DEADLINE")
