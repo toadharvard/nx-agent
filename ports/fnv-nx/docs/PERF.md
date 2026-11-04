@@ -253,11 +253,78 @@ threads and the loading screen stay on cores 0-2.
 |---|---|---|
 | AI linear task threads (`iNumHWThreads` > 1, two at > 2) | **likely safe**: the default on every PC (the engine forces >= 2) | `iNumHWThreads=3` (what GetSystemInfo gives; two linear threads), **after** the placement fix; until then 2 |
 | AI task threads (inferred `bUseThreadedAI`) | **known-crashy on PC (hearsay)**: community guides report instability with `bUseThreadedAI=1` in FO3/FNV; off on PC, on on 360 | `bUseThreadedAI=0`; revisit with hardware traces |
-| Rendering Task Thread 2 (MT render setting) | **needs work**: 360 path, off on PC (untested there), and needs the `fs:[0x2c]` TLS fix | 0 |
-| Havok workers (`iNumThreads:HAVOK`) | **needs work**: verify whether the pool is used and how many threads it starts on 3 cores | 1 (engine default) |
-| threaded morpher / particles / blood / temp effects (names hearsay) | **likely safe**: PC defaults on | 1 |
+| Rendering Task Thread 2 (`bMTRendering:Display`, 0x011c710c, named from the owner's exe) | **unsafe on the PC code, needs port work (6.8)**: every accumulator is built with one batch renderer, so the worker shares main's and indexes a NULL second one | 0 (ini.cpp leaves it out of the Switch defaults) |
+| Havok workers (`iNumThreads:HAVOK`, `iSimType:HAVOK` 0x011cc2e8) | **needs work (6.9)**: the multithreaded step is in the code (`bhkWorld::StepSimulation` 0x00c6ae70 -> stepMultithreaded over hkJobQueue + hkCpuJobThreadPool) and is selected by **`iSimType=4`** (FUN_00c661d0 maps 0/1/4 -> discrete/continuous/multithreaded, anything else, 3 included, -> continuous); the pool is created in the unreconstructed EnsureObjectsCreated | iSimType 1 (engine default, continuous) |
+| threaded morpher / particles / temp effects (`bUseThreadedMorpher` 0x011ded20, `bUseThreadedParticleSystem` 0x011deaec, `bUseThreadedTempEffects` 0x011decbc; named from the exe) | **unverified (6.9)**: PC defaults on, but their readers are not reconstructed and the AI-linear hand-off reads plain cross-thread fields | 1 (ini.cpp port default, = the PC default ini); not counted in the as-built scenario |
 | tasklets, background loading | **likely safe**: PC defaults | engine/ini defaults |
 | `bUseMultibounds` (hearsay name; culling) | likely safe, saves render work | 1 |
+
+### 6.8 `bMTRendering` on the PC code (S15-threads, read from the decomp)
+
+With the setting on, `TaskThreadManager::StartRenderingTaskThread` (0x00ba3720) starts the worker 0x00ba3190. It takes
+records 1..23 (`DAT_012000e4`, filled by 0x00ba3390, stage semaphores 0x00ba30f0 / 0x00ba3130):
+* water reflections (1-16): signalled and waited at once, so they do not overlap other work;
+* the shadow lights (17-20): culled while main goes on to the main scene;
+* half of the main scene (21, `leftList2`): culled while main culls `rightList4` and `commonList3` into the **same**
+  accumulator (main.cpp ~12531-12780).
+
+The accumulator is designed for two writers. `RenderBound` and `AccumulateRenderPasses` pick the batch renderer
+from the TLS slot `0x2bc`, which the worker sets to the record's index. On PC, though, every accumulator is built
+with count 1: main's `(99, 1, 759)` at `FUN_0086c160` (staging blk_00860000_od.cpp:4212), the shadow pool at
+bsshadermanager.cpp:4321, and water at teswater.cpp:9026 / 11475. The ctor (bsshaderaccumulator.cpp:4277) then
+makes no second renderer. So with the setting on:
+* `AccumulateRenderPasses` (0x00b63f90) indexes `m_apkRenderers[1]` without a modulo, which is NULL: the worker
+  crashes;
+* `RenderBound` (`% 1`) sends both threads into batch renderer 0. Its group lists, pass map, active-pass list and
+  bucket free lists are unlocked (bsbatchrenderer.cpp ~1786-1862, 2791-2896; only the node pool takes `g_011c5f80`).
+
+The current-accumulator globals are shared too:
+* `DAT_011f95ec` is swapped with a non-atomic compare/DecRef/store/IncRef (bsshadermanager.cpp:359), so two threads
+  can free a live accumulator;
+* `DAT_011f4748+8` is written from both threads (bsshaderutil.cpp:205);
+* BSFadeNode culling registers through that global, not through its culler (bsfadenode.cpp:1028-1060).
+
+Shadow records re-cull scene objects that main culls too, so the fade-node and object-flag updates race there as
+well.
+
+**Verdict: not an ini switch.** `mt_cull` needs port code:
+1. accumulators with two batch renderers while MT is on (the ctor's count argument at the construction sites above);
+2. per-thread current-accumulator globals (`DAT_011f95ec`, `DAT_011f4748`), or the worker's culler carrying them;
+3. fade-node registration through the culler's accumulator;
+4. the shadow-light / main overlap checked for the light-map edits main makes meanwhile (`FUN_00b5d300`,
+   shadowscenenode.cpp ~10835).
+
+Then mtqemu on the real culling units (not the `stages` model) and a race checker run. The lever stays out of the
+as-built scenario, and its moves (cull 70-90 %) are too high for what the split does (the main scene is halved; the
+shadow lights move whole).
+
+### 6.9 Threaded effects and Havok MT (S15-threads, read from the decomp)
+
+**Threaded effects.** No reader of the three settings is reconstructed (only the initializers,
+global_object_initializers.cpp:8621-8627). The parts of the hand-off that are reconstructed:
+* The cell scene-graph pass (`TES::FUN_00453550`) runs on the AI linear threads (`FUN_008c7bd0` / `FUN_008c7f50`,
+  only when `iNumHWThreads` > 1). It queues controller updates (task 6, `UpdateControllersRecursive`).
+* Main joins with `0x008c7990` (a counting-semaphore wait) and then drains the packed queue itself (main.cpp
+  ~9077-9082). So the queued controller updates come **back to main**; what leaves main is the downward pass.
+* The ordering goes through semaphores and events (ordered in our build). Several cross-thread fields are plain,
+  though, and are ordered on ARM only by those waits:
+  - `aiCurrent[]` (ailineartaskthreadmanager.cpp:449 / 263-298);
+  - `m_uiTaskFlags` and `m_pTaskQueueProcessor` (taskqueueinterface.cpp:294-299);
+  - the bools `DAT_011dfa18/19`;
+  - the queue's `m_uiLockState` (body not reconstructed).
+
+  A litmus/mtqemu case of this protocol comes before the lever counts.
+
+**Havok.** The multithreaded simulation is present:
+* `bhkWorld::StepSimulation` (0x00c6ae70, hkpworld.cpp ~1377-1405) runs the stepMultithreaded shape on the world's
+  hkJobQueue and hkCpuJobThreadPool when the world's type is 3.
+* The job queue uses critical sections and semaphores (hkjobqueue.cpp), which are ordered.
+* The world's type comes from `iSimType:HAVOK` through `FUN_00c661d0`, which maps **4** to 3. A plain 3 gives
+  continuous.
+* The pool is created in `EnsureObjectsCreated` (not reconstructed; nothing calls the ctor 0x00d2d110 in the
+  decomp).
+
+Next: confirm that path builds and links in the port, then run it under mtqemu with `iSimType=4`.
 
 ### 6.5 Memory ordering: what x86 gave for free
 
@@ -402,7 +469,7 @@ Instruction mix of fresh8 (2.43 M static instructions) **[M]**: loads 22.2 %, st
 | `fs:[0x2c]` TLS unification | correctness first, enables MT rendering | **done** (S5 `31cdca3`) | S4 |
 | release stores for the RecursiveSpinLock (6.5) | correctness on AArch64 | out-of-line Unlock **done** (override); 43 inline sites need an S1 rule | S15, S1 |
 | inline Interlocked* in game units (6.7) | the call/return and 1-2 instructions per operation; +8.8 static instructions per site | **done** (fnvnx_win32.h) | S15 |
-| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | per-site argument | S12, S15 |
+| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | **done** (S12 `52cb478`, `ORDER_REFCOUNT=weak` by default; mtqemu litmus `ref` race-checks it); B9 confirms on an A57 | S12, S15 |
 
 ## 9. What needs hardware, and the first on-device benchmark set
 
@@ -528,7 +595,7 @@ Model items (M instructions per frame, exterior, native renderer; [E] unless mar
 | renderer submission worker (P6n: Frame::Finish + deko3d recording) | render worker (core 1) | **3.36-5.43 [M]** | `render_f2f4`, `instancing` |
 | tasklets, IO, audio | mask 0b110 (0b1110 with core 3) | 1-3 | `core3` |
 
-Main thread total **23.8 M (13.2-34.4)** as placed today. It was 19.7 M (11.3-28.1) before the render machine's
+Main thread total **22.9 M (13.1-33.2)** as built today (placement + `barrier_relax`; 23.8 M before S12's refcount rule was counted). It was 19.7 M (11.3-28.1) before the render machine's
 measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked barrier item.
 
 ### 11.3 The plan, ranked by main-thread time moved
@@ -540,7 +607,7 @@ measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked 
 | 3 | render machine F2-F4 (`render_f2f4`) | 1.4 M | proposed (RENDER_PERF.md 10) | no |
 | 4 | Havok worker pool (`havok_workers`) | 1.4 M | not traced whether bhkWorld uses the MT simulation | yes |
 | 5 | threaded morpher/particles/blood (`threaded_anim`) | 0.9 M | PC defaults on (hearsay names) | no (PC path) |
-| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | per-site argument (S12) | B9 |
+| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | **in the build** (S12 `52cb478`, ORDER_REFCOUNT=weak) | B9 |
 | 7 | NEON per-object math (`neon_math`) | 0.9 M | proposed (S15) | no |
 | 8 | instancing / sorted packets in the native renderer | 1.0 M main, 1.3 M worker | S6n plan | no (the render machine measures) |
 | 9 | core 3 for background roles | frees 1-3 M on cores 1-2 | S5 opt-in, off by default | yes: what the system runs on core 3 |
@@ -551,7 +618,7 @@ lo-hi range; level by the mid case):
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
-| placed (no lever) | 23.8 (13.2-34.4) | 29.1 (12.9-56.3) / 36.4 | **fail** | 16.6 (7.4-32.2) / 20.8 | stretch_60 |
+| placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.2 | **fail** | 16.1 (7.3-31.0) / 20.1 | stretch_60 |
 | plan45 (mt_cull, havok_workers, threaded_anim) | 17.2 (8.5-27.0) | 21.1 (8.4-44.1) / 26.4 | pass_30 | 12.1 (7.1-25.2) / 15.1 | stretch_60 |
 | plan45b (plan45 + render_f2f4, barrier_relax, neon_math) | 14.1 (6.7-23.5) | 17.3 (7.1-38.5) / 21.7 | **pass_45** | 9.9 (7.1-22.0) / 12.4 | stretch_60 |
 | plan60 (plan45b + instancing, core 3) | 12.9 (5.9-22.1) | 15.9 (7.1-36.1) / 19.8 | stretch_60 | 9.7 (7.1-20.6) / 12.1 | stretch_60 |
@@ -626,10 +693,41 @@ stock clock (plan45b):
 | 3 | renderer, main side | render machine F2-F4 (sort fixed cost, bind elimination) | 1.75 (1.0-2.5) | 2.1 / 1.2 | S6n, P6n | no |
 | 4 | Havok | Havok's multithreaded simulation on the worker pool (trace bhkWorld first) | 1.55 (0.6-2.5) | 1.9 / 1.1 | S15 | yes |
 | 5 | animation | `threaded_anim` (PC defaults) + NEON Slerp / FromRotationMatrix | 1.15 (0.5-1.8) | 1.4 / 0.8 | S15 | no |
-| 6 | Interlocked barriers | inlined (done); next: no barrier on refcount increments | 0.85 (0.1-1.6) | 1.0 / 0.6 | S12, S15 | B9 |
+| - | Interlocked barriers | inlined and refcounts relaxed (**done**, `barrier_relax` is in the build: `built_levers`, the queue leaves it out) | 0.85 (0.1-1.6) | 1.0 / 0.6 | S12, S15 | B9 |
 | 7 | scene graph update | NEON overrides of NiMatrix3 product, NiBound::Update, transform compose; GOT movz/movk pass | 0.6 (0.3-0.9) | 0.7 / 0.4 | S15, S2 | no |
 | - | boot | an index for S3's code-pointer scan (212 M of 243 M) | boot only | 0.26 s / 0.15 s | S3 | no |
 
 Next for S15, in queue order among what needs no hardware: rows 5 and 7 (NEON overrides of the per-object math,
 first Slerp, NiBound::Update and the matrix product: override rows like `spinlock_0040fba0.c`, checked by S13's
 harness against the oracle) and row 6's per-site argument with S12.
+
+### 11.6 Per-instruction cost of the hot functions (stream S15-simd)
+
+**Metric** (`tools/perf/hotspot_metric.py`): cycles per frame of the top-20 rows of `hotspot_functions` in
+`budget_model.json` at 1.02 GHz: A64 instructions per call (dyncount [M]) x calls per frame [E] / IPC 0.8, or an A57
+model's cycles per call (`per_call_cycles`, P0-perfmodel) once one exists. The calls stay estimates until frameprof
+profiles frames, so the metric moves with the per-call cost, which is what this stream changes. Every commit states
+`metric: <before> -> <after>`.
+
+**Method.** A hot function is replaced at its address by a native override (`tools/link/overrides/`, a row of
+`overrides.tsv`, bound by `fnvlink.py resolve --override` like the spin lock's). The override does the decomp's
+arithmetic operation by operation, in the same order and precision (float stays float, double stays double, sums in
+the decomp's order, no fused multiply-add: `build.sh` compiles overrides with `-ffp-contract=off -frounding-math`
+like compile.sh). Only independent per-component operations share a NEON instruction, which is bit-identical lane
+by lane. In-unit callees are inlined into the override, so the frame, the call and the reloads go too. Two checks per
+override:
+
+* `tests/s15/simd/run.py`: the override against a scalar reference in the decomp's order, bit for bit (any NaN
+  matches any NaN: with two NaN operands the payload depends on operand order, which GCC commutes freely), on
+  random, unit-length and edge inputs, aliasing included, under qemu-aarch64; and the ILP32 object builds;
+* `tools/perf/override_ab.py <source>:<addr> --override <c> --native <sym>`: the same fuzzed cases of S13's harness
+  on the link and on a copy whose unit object binds the function to the override: A64 instructions per call, and
+  agreement with the MSVC oracle, which must not drop.
+
+| function | override | A64 per call before -> after [M] | oracle agreement | metric (M cycles/frame) |
+|---|---|---|---|---|
+| NiQuaternion::Slerp 0x00a6e330 (+ 0x00a6dc30, 0x00a4ff00 inlined) | `slerp_00a6e330.c` | 134 -> 88 | 9/16 -> 9/16 | 7.745 -> 7.430 |
+
+(Link 0bd144db1464, tree t/0bd144db1464, oracle msvc/pristine/87eb9373a0bb, 8 seeds x zero/random background.
+The agreement count is the same before and after; the per-case outputs are checked bit for bit by run.py.)
+The override inlines a copy of 0x00a4ff00 and 0x00a6dc30. An override or patch of either must update it too.

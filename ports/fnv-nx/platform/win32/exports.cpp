@@ -2,8 +2,9 @@
  *
  * The authoritative name of every IAT slot of FalloutNV.exe is in the exe's own import directory (the decomp
  * names some slots inconsistently, docs/RUNTIME.md). The loader/link step reads that directory and asks
- * fnvnx_win32_lookup_export(dll, name) for each slot; NULL means "not provided by S4" (D3D9/D3DX/Bink -> S6,
- * DirectInput/DirectSound/XInput/vorbisfile -> S7). */
+ * fnvnx_win32_lookup_export(dll, name) for each slot; NULL means "not provided" (d3d9 -> the device's module,
+ * DirectInput/DirectSound/XInput/vorbisfile -> S7's registered modules). D3DX (render/nine/d3dx) is listed here by
+ * weak reference. */
 #include "w32.h"
 
 extern "C" {
@@ -30,6 +31,17 @@ void *SteamFriends(void);
 void *SteamUtils(void);
 void *SteamApps(void);
 void *SteamUserStats(void);
+/* bink.cpp */
+void *BinkOpen(const char *, unsigned);
+void BinkClose(void *);
+int BinkDoFrame(void *);
+void BinkNextFrame(void *);
+int BinkWait(void *);
+int BinkPause(void *, int);
+int BinkCopyToBufferRect(void *, void *, int, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned,
+                         unsigned);
+void *BinkOpenDirectSound(unsigned long);
+int BinkSetSoundSystem(void *, unsigned long);
 /* window.cpp, not in the shim headers */
 int GetWindowTextA(HWND, LPSTR, int);
 int GetClassNameA(HWND, LPSTR, int);
@@ -37,6 +49,33 @@ BOOL EnumDisplayDevicesA(LPCSTR, DWORD, void *, DWORD);
 BOOL InitCommonControlsEx(const void *);
 void *ImageList_LoadImageA(HINSTANCE, LPCSTR, int, int, DWORD, UINT, UINT);
 BOOL ImageList_Destroy(void *);
+}
+
+/* d3dx9_38.dll: render/nine/d3dx, linked into both guests (toolchain/game/build.sh D3D9=null, render/nine/game
+ * D3D9=external). Weak references: a build without it (the host tests) links, and those slots stay NULL. */
+#define FNVNX_D3DX_EXPORTS(X)                                                                                 \
+    X(D3DXAssembleShader) X(D3DXAssembleShaderFromFileA) X(D3DXCompileShader) X(D3DXCompileShaderFromFileA)  \
+    X(D3DXCreateBuffer) X(D3DXCreateCubeTextureFromFileInMemory) X(D3DXCreateCubeTextureFromFileInMemoryEx)   \
+    X(D3DXCreateTextureFromFileInMemory) X(D3DXCreateTextureFromFileInMemoryEx)                              \
+    X(D3DXCreateVolumeTextureFromFileInMemory) X(D3DXCreateVolumeTextureFromFileInMemoryEx)                  \
+    X(D3DXFindShaderComment) X(D3DXGetImageInfoFromFileInMemory) X(D3DXGetPixelShaderProfile)                \
+    X(D3DXGetShaderConstantTable) X(D3DXGetShaderConstantTableEx) X(D3DXGetShaderSize) X(D3DXGetShaderVersion) \
+    X(D3DXGetVertexShaderProfile) X(D3DXLoadSurfaceFromMemory) X(D3DXLoadSurfaceFromSurface) X(D3DXMatrixInverse) \
+    X(D3DXMatrixLookAtLH) X(D3DXMatrixMultiply) X(D3DXMatrixMultiplyTranspose) X(D3DXMatrixOrthoOffCenterLH)  \
+    X(D3DXMatrixPerspectiveFovLH) X(D3DXMatrixRotationYawPitchRoll) X(D3DXMatrixTranspose) X(D3DXPlaneNormalize) \
+    X(D3DXPlaneTransform) X(D3DXVec3Normalize) X(D3DXVec3TransformCoord) X(D3DXVec3TransformNormal)           \
+    X(D3DXVec4Transform)
+extern "C" {
+#define FNVNX_D3DX_DECL(f) void f(void) __attribute__((weak));
+FNVNX_D3DX_EXPORTS(FNVNX_D3DX_DECL)
+#undef FNVNX_D3DX_DECL
+}
+
+/* D3DXSaveTextureToFileA: the exe imports it for the developer screenshot path; render/nine/d3dx does not write
+ * image files. A weak fallback that fails (D3DERR_INVALIDCALL) as for an unwritable file; d3dx may override it. */
+extern "C" __attribute__((weak)) HRESULT D3DXSaveTextureToFileA(const char *, int, void *, const void *)
+{
+    return (HRESULT)0x8876086Cu;
 }
 
 namespace {
@@ -106,6 +145,15 @@ const exp g_exports[] = {
     E("steam_api", SteamAPI_RunCallbacks), E("steam_api", SteamAPI_RegisterCallback),
     E("steam_api", SteamAPI_UnregisterCallback), E("steam_api", SteamUser), E("steam_api", SteamFriends),
     E("steam_api", SteamUtils), E("steam_api", SteamApps), E("steam_api", SteamUserStats),
+#define FNVNX_D3DX_ENTRY(f) E("d3dx9_38", f),
+    FNVNX_D3DX_EXPORTS(FNVNX_D3DX_ENTRY)
+#undef FNVNX_D3DX_ENTRY
+    E("d3dx9_38", D3DXSaveTextureToFileA),
+    /* binkw32: the IAT's stdcall decorations, and the plain names for GetProcAddress */
+#define B(f, bytes) { "binkw32", "_" #f "@" #bytes, (void *)&f }, E("binkw32", f)
+    B(BinkOpen, 8), B(BinkClose, 4), B(BinkDoFrame, 4), B(BinkNextFrame, 4), B(BinkWait, 4), B(BinkPause, 8),
+    B(BinkCopyToBufferRect, 44), B(BinkOpenDirectSound, 4), B(BinkSetSoundSystem, 8),
+#undef B
 };
 #undef E
 #undef K
@@ -130,8 +178,15 @@ extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
     if (!name)
         return NULL;
     for (const exp &e : g_exports)
-        if (!strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
+        if (e.fn && !strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
             return e.fn;
     /* not an S4 export: modules registered at run time (S7's dsound/dinput8/xinput/vorbisfile) */
     return dll ? fnvnx_registered_module_export(dll, name) : NULL;
+}
+
+extern "C" void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal)
+{
+    if (ordinal == FNVNX_IMPORT_BY_NAME)
+        return fnvnx_win32_lookup_export(dll, name);
+    return NULL;
 }

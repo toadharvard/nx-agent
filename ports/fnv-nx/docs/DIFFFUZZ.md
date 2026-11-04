@@ -168,6 +168,28 @@ tail jumps and in-function switch tables (relocated with the oracle code) are fu
 aedcf24: targets / functions with a native object 64.4 % -> 98.4 % (21 functions with unresolved relocations
 remain); of 110 newly fuzzed functions 106 have a verdict (16 hard, 6 soft, 19 oracle gap).
 
+**Vtable pairs (`vtmodel.py pairs`).** A kind-V pair is short when the native vtable has fewer slots than the exe's
+vftable (an exact Itanium pair has as many, or one more with a virtual destructor); the harness's copy always
+carries spare `__s13_vtpad` slots up to the exe's count + 2, which J-0145 counted as short (1,082 of 1,628).
+Link c0d6c71516f6: primary 1,870 paired, short 1,380, exact 449, longer 41; secondary 515: short 330. Of the 1,380
+short primary pairs, the RTTI class's own `_ZTV` is defined in no linked object for 765, also short for 122,
+already the row's vtable for 103, long enough for 31 (e.g. MagicItemObject: row `_ZTV12FUN_00402b40` with 1 slot,
+`_ZTV15MagicItemObject` 99 of 97), no RTTI name 359. Pairing to the static class's `_ZTV` alone therefore closes
+~2 %; the padding stays (a call through it is `vptr-unpaired`) until S2c's link gives those classes complete
+vtables. Verdicts are unchanged (the count is only reported). Test: `tests/s13/test_vtpairs.py`.
+
+**S1b renames (J-0141, harness still difffuzz-13).** `patches/units_renames.tsv` rows of the units whose prepared
+source carries an S1b patch (`config.units_renames`, fnvlink's `load_renames`; `FNVNX_UNITS_RENAMES=<tsv|none>`)
+apply on top of the tree's units.json (`engine.apply_renames`): a `def` row gives the patched definition its new
+MSVC name, which places the arguments on both machines (0x00eacd00 `bool __stdcall f(void*)`, made a member that
+passes ecx on: `this:P/4, p0:P/4` on the oracle too), and a `ref` row is the patched caller's own declaration of
+a callee (`caller_conv`: canned results by declaration). Prepare's POST hook already rewrites the farm trees'
+units.json (all 239 `def` rows of the 254 patched units of tree efb9808e7d542f00), so this matters for a tree
+prepared without it or a local `FNVNX_TREE`, and for the `ref` rows. **Cache:** a unit's applicable rows go into
+its functions' keys (`fnkeys.py`), so only those units are fuzzed again: 9,669 of 68,667 functions (254 units)
+on that tree, no HARNESS bump; a later change of a unit's rows refreshes that unit only. 0x00eacd00 and 0x00a89b00
+(S1b's two XINC1 call-args artefacts) are ok on link c0d6c71516f6. Test: `tests/s13/test_renames.py`.
+
 **difffuzz-12 (J-0138).** The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
 names libcalls.EQUIV maps to them) return a fresh heap block (`world.alloc_result`, HEAP + 2 MiB + 4 KiB k), never
 the canned 0: GCC drops the null test after a throwing new that MSVC keeps (S13b `new-null`, 178 farm records). A
@@ -206,7 +228,8 @@ planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that a
 ## Cause refinement and verdict policy (`causes.py`, S13b)
 
 `report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
-rules on the saved record alone (no replay; a probe's definite cause is never overridden):
+rules on the saved record alone (no replay; a probe's definite cause is never overridden; `oracle-vcall`, a tag of
+the runner and a fault probe rather than a decision, is split too, `causes.HINT_REFINABLE`):
 
 | record shape | cause | class |
 |---|---|---|
@@ -228,17 +251,46 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 | `no-native-entry` | `no-native-entry` | artifact |
 | oracle-only data fault in the AArch64 private range | `oracle-native-address` | artifact (a native address leaked to the x86 machine) |
 | oracle-only data fault | `oracle-fault` | triage |
+| oracle-only fault (`oracle-fault`, or an `oracle-vcall` error) at a garbage address in the x86 private range 0x0e000000 | `oracle-private-address` | artifact (the native machine maps that range as background) |
+| ... a dword access at 0xfffffffd..0xffffffff (a near-null pointer minus a few bytes, wrapped past 4 GiB) | `ilp32-pointer` | by-design |
+| ... and the native function calls a function its own object defines as a bare `ret` (decomp stub, empty destructor) | `native-empty-callee` | real-bug S1 (the exe's work there is skipped natively) |
+| `oracle-vcall` call-target (`vcall: unplanted`): the native trace passes a `__s13_vtpad_` slot | `vptr-unpaired` | real-bug S2c, soft (classify.py tests `unplanted` first) |
+| ... the oracle calls a garbage word in the AArch64 stub range, the native trace names that word (word - 0x08000000, or `name:<hex>`) | `vcall-stub-alias` | artifact (one call, two spellings) |
+| ... the native calls a C++ name nothing defines or binds, no vptr planted | `native-undefined` | real-bug S1 |
+| ... neither target is code on either machine (not .text, an import, a named stub or the AArch64 private range) | `vcall-garbage` | artifact (an object with no vftable: invalid input) |
+| ... anything else (the native calls an exe function directly while the oracle reads unplanted memory; oracle-only faults near an indirect call or at an unmapped pc) | `oracle-vcall` | artifact (kept) |
 | call-target: native calls a named stub `name:_Z...` | `native-undefined` | real-bug S1/S2c (fallback without the link's providers) |
 | call-target: oracle calls an import, native jumps to the IAT slot address | `import-slot-called` | real-bug S2c |
 | call-target: the native function never names the oracle's callee (from its object) | `native-inlined` | triage |
 | one side's store covers bytes the other leaves | `store-width` / `x86-only-store` / `native-only-store` | triage |
 | native calls a prefix of the oracle's calls / the oracle's calls and more | `native-early-exit` / `native-extra-calls` | triage |
+| only for records that would stay `unclassified`: one side has the block a game allocator returned (`world.alloc_result(j)`), the other the canned result of a later call `m > j` (argument, result or stored word) | `ctor-this` | artifact (the constructor run on the block returns this; its canned result is random) |
+| pointer argument: the oracle's is the canned eax of an earlier intercepted call, the native's is in its own stack frame | `canned-this` | artifact (a callee returning its result/this pointer: MSVC aggregate return, `operator=`; canned eax is random) |
+| `this`/pointer argument `d` bytes below the first buffer on the oracle side (pinned-pool range) and the buffer on the native side, the native object has a `_ZThn<d>_` thunk for the function or a direct callee | `thunk-binding` | real-bug S2c (`__fnv_<addr>` bound to the GCC primary entry, not the secondary-base thunk the MSVC entry corresponds to); without the thunk `layout-offset` |
+| call argument (I32/F32/F64) the native passes equal to the canned result of the call just before, the oracle another value | `native-stale-result` | real-bug S1b (an argument the native caller never set: its declaration of the callee differs) |
+| native `fault:x` in the AArch64 private range, oracle fine, case background `rand` | `native-wild-private` | artifact (a random code pointer: x86 intercepts it as a wild call, AArch64 executes its private range) |
+| first differing store: only bytes where the oracle has `0x08` and the native `0x00` | `stub-normalized` | artifact (arm64emu `_codeptr` rewrites any stored word in `0x08000000..0x09000000`, data included) |
+| stored / returned word that is one of the planted garbage words (`world.garbage_words`): both / native / oracle | `uninit-both` / `uninit-arm` / `uninit-x86` | artifact / real-bug S1b / by-design |
+| native 0 where the oracle has a value; the native function or a direct callee in its unit is `mov w0, #0; ret` | `native-zero-stub` | real-bug S1 (a placeholder body) |
+| call flow, the native function's own body is `ret` / return-a-constant (or it calls such a decomp-local `..FUN_<X>..` stand-in for an original X another object defines) and the oracle makes calls | `native-empty-body` | real-bug S1 |
+| the oracle's first missing call is CRT `_atexit` (0x00ec658f), the native function names no `fnvnx_xc_atexit` / `atexit` | `dyninit-no-atexit` | real-bug S10 (soft: the destructor is lost at exit only) |
+| `??_G` / `??_E` called with flags bit 0 clear; the native (D0) makes the oracle's calls plus deallocator calls only | `deleting-dtor-flags` | by-design |
+| the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | by-design (MSVC: callee destroys, Itanium: caller) |
+| call-target: the native calls an image-window (data) address where the oracle calls a function | `native-calls-data` | real-bug S1 (virtual slot past a decomp class's shorter vtable) |
+| call-target: oracle an unnamed CRT entry (addrmap E, x87 `_CI*`) or `f`, native the libm (float) function; `sprintf` vs `__sprintf_chk`; `atof` vs `strtod` | `libc-variant` | artifact (libcalls.X86 / FAMILY lack the pair) |
+| the oracle's missing callee X is defined by the native function's own object and called by it (runs natively, intercepted on x86) | `oracle-callee-unloaded` | artifact (X not in the oracle's code set); never over an unbound name |
+| the oracle frees (free / delete / Deallocate), the native goes straight on to the oracle's next call (or returns) and reaches no deallocator through its own object | `native-missing-free` | real-bug S1 |
+| call-target: native indirect call to a non-code address where the oracle calls a .text function | `native-vcall-oracle-direct` | triage |
 
 With `summary --effects <difffuzz.py effects output>`, a record still in triage is refined by its first effect:
 `width` -> `field-width` (real-bug S1), an image vftable stored where the native stores its own `_ZTV` address
 point -> `vptr-unpaired` (S2c), a native named stub stored or passed as data -> `native-stub-data` (S2c). A first differing store made only by the oracle at a pc
 outside the function (a callee the oracle runs, the native calls out of line and the harness intercepts) ->
-`oracle-callee-store` (artifact). A triage record in a function that calls a C++ name neither its object defines nor
+`oracle-callee-store` (artifact), only with evidence of the interception: the pc lies in a function of the address
+map (`causes.function_at`) that the native calls out of line through `__fnv_<addr>` or its link name and that its own
+object does not define (the unit's own functions run natively). Never for `native-inlined`, `native-early-exit` or
+`x86-only-store` (`causes.NOT_INTERCEPTED`: the native never made the call or ran the callee's code itself; V1
+tests/v1/test_s13b_callee_store.py C1-C3); without the object or the map the record stays in triage. A triage record in a function that calls a C++ name neither its object defines nor
 the address map binds -> `after-native-undefined` (real-bug S1: the native side got a canned result).
 
 `causes.POLICY` gives every cause a class (by-design, artifact, real-bug, triage), an owner and a reason;
@@ -249,7 +301,7 @@ five example reproducers, plus `functions_by_class` (each diverging function by 
 for R0. `causes.py merge <reports/fz<k> .md | causes.json>... --out all.json` adds the shards up
 (classes from this checkout's policy). Input layout (any campaign or `fuzz/cache/<k>of<N>` checkout): `results.jsonl`
 (address, source, status; only `ok` rows count), `div/<addr>-<n>.json` (divergence, hint, case), optional
-`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. Test: `tests/s13/test_causes.py`.
+`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`; they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
 
 ## Lockstep (`lockstep.py`, D14)
 

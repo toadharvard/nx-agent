@@ -27,6 +27,29 @@ Tool: `tools/equiv/equiv.py` (`tools/equiv/README.md`: compiler setup, installer
 Every pristine unit that compiles has every one of its recipe functions in its object at exactly the recipe size
 (68,456 functions): the oracle builds what the decomp claims.
 
+## Unexplained differences (S11's metric)
+
+`tools/equiv/explain.py` matches every differing function and every no-build unit of the eq1..eq6 shard reports
+(`explain.py --git <artifacts clone>`, or the report files) against the explanation classes in
+`tools/equiv/explained.tsv` and S1b's by-design table (docs/PATCHES.md). What no class covers is the metric; the
+target is 0. A class names the mechanism and where it is documented here; a row matches by kind, attributed rule,
+unit, address or first error.
+
+At `0685791` (all six shards): 1,068 differing functions and 78 no-build units, of which **32 functions and 28 units
+are unexplained**.
+
+| class | functions | units | |
+|---|---:|---:|---|
+| EH-ONLY | 777 | | identical with `/EHs-c-` on both sides |
+| CRT-WRAPPER | 159 | | DECL1 / sdk retargets: the CRT function where the exe calls the game's forwarding wrapper |
+| PLACEMENT-NULLCHECK | 58 | | CTOR1 by design |
+| EXTERN-RELOAD | 25 | | STATIC1 |
+| S1B-BYDESIGN | 12 | | PATCHES.md |
+| ANON1-DECORATION, STD1-FABSF, GLOBAL-NEW, DECOMP-BUGFIX | 5 | | rule rows below |
+| LIBSTDCXX-STD-ABS, SDK-FULL-NAMES, PERMISSIVE-CONVERSION, MSVC-FLOAT-MATH | | 43 | Not comparable (below) |
+| MSVC-OPAQUE-ENUM | | 7 | ENUM1 |
+| unexplained | 32 | 28 | |
+
 ## Verdicts per rule
 
 Leave-one-out attribution (method below). `eh` / `retarget` / `code`: kinds of the differing functions the rule
@@ -137,7 +160,7 @@ above (round 8).
 | `SSE1` `SSE2` `SSE3` `SSE4` | platform | the decomp's copies of MSVC's vector types / intrinsic prototypes give way to sse2neon's | - |
 | `DECL1` | neutral (claim) | the platform header declares the same CRT / Win32 function | the real MSVC CRT / SDK headers |
 | `GAME1` | neutral | renames a unit's own Win32-named game declaration and its call sites; the address binding is unchanged | `fnvnx_game_X` bound like the decomp's `X` |
-| `NEW1` | neutral | `unsigned int` is `size_t` on x86 (same type, same decoration) | as is |
+| `NEW1` | neutral | `unsigned int` / plain `unsigned` is `size_t` on x86 (same type, same decoration) | as is |
 | `UNIT1` | neutral | renames local types of tesdatahandler (same layout) | as is |
 | `KEEP1` | neutral | `__attribute__((used))`: emission only, no code meaning | `FNVNX_KEEP` empty: inert by construction |
 | `IFX1` | neutral (claim) | static resolution of `__if_exists`; MSVC evaluates the original itself | as is (strongest check) |
@@ -161,11 +184,16 @@ above (round 8).
 | `NEW3` | neutral | deallocation functions are implicitly `noexcept` (C++11) | `noexcept` empty |
 | `TYPEID1` | neutral | adds `<typeinfo>` only | real `<typeinfo>` |
 | `SPEC1` | neutral | early `template<>` declarations of member specializations | declarations only |
-| `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address | as is |
+| `DUPINT1` | neutral (claim) | keeps one of two integer-only-different prototypes bound to one address; DUPINT1-RET (S1-refs): also when the return types differ, if every mention of the name is a call whose value is discarded and the differing parameters are 32-bit integers | as is |
 | `RREF1` | neutral | `fnvnx_lvalue(...)` around an argument passed to a non-const reference parameter (every declaration the unit sees; for an unqualified call in a member function, the declarations of the nearest class that declares the name, RREF1-CLASS) that is not a plain lvalue | the temporary MSVC bound, same lifetime |
 | `RREF2` | neutral | `fnvnx_lvalue(T(args))` as the operand of a member operator whose every declaration with a T parameter takes a non-const `T&` (S1-refs) | the temporary MSVC bound, same lifetime |
 | `ADDR1` | neutral | `&_mm_f(args)` -> `&fnvnx_lvalue(_mm_f(args))` as the operand of a unary `&` (MSVC's address of a class rvalue, C4238) | the same temporary's address, same lifetime |
 | `LANE1` | platform | `&((T*)&(v))`, SSE1's lane array with its address taken (`(&v.m128_f32)[0]`), -> `((T(*)[sizeof(v) / sizeof(T)])&(v))` | MSVC's `&v.m128_f32`: same address and array type; SSE1 is target only |
+| `STD2` | neutral | a file-scope definition `R std::f(...)` whose recipe symbol is `?f@std@@...` (guardpackage.cpp's `double std::abs(float)`, 0x00408840) -> `R fnvnx_std_f(...)`; a POST hook renames the recipe symbol to `?fnvnx_std_f@@...` (S1-refs) | same body and signature, only the decorated name differs; callers bind the address; the Fingerprinter takes the renamed definition from the prepared recipe |
+| `COND1` | neutral | `c ? false : x.f(a)` (or `? true :`) where f returns a class with `G(bool)` and `operator bool()` and every same-arity declaration of f returns a bool-convertible class -> `c ? G(false) : x.f(a)` (hkgpmesh.cpp, S1-refs) | GCC finds both conversions and refuses; MSVC converted the literal to G (its code tests the result byte directly; a `(bool)` cast on the G operand measured different: `setne`/`test`) |
+| `RSTR1` | neutral | a function-local `T* __restrict v` passed by name to a parameter the unit declares `const X&` -> `fnvnx_unrestrict(v)` (hkpsavecontactpointsutil.cpp, S1-refs) | `#define fnvnx_unrestrict(x) (x)` under MSVC (fnvnx_equiv_fi.h): the original text; under GCC the same object as an unqualified lvalue, so the reference binds the local as MSVC's did |
+| `NEW5` | neutral | a base-less class with a virtual destructor whose only scalar `operator delete` is the placement form `(void*, void*)` gets `FNVNX_GLOBAL_DELETE` first in its body: under GCC `static void operator delete(void*)` forwarding to `::operator delete`, which MSVC 2008's scalar deleting destructor called (0x00d979a0: a one-argument cdecl call, 31 bytes); GCC otherwise rejects the deleting destructor (S1-refs) | `FNVNX_GLOBAL_DELETE` empty (tools/equiv/msvc/fnvnx_equiv_fi.h): the decomp's class unchanged |
+| `NSCALL1` | neutral | an unqualified call, inside namespace N, of N's own C++ prototype of a CRT / Win32 name (`strcpy_s`, `_stricmp`, ... DECL1 keeps it) -> `N::name(`, where the unit's units.json binds that name only in N and no class of the unit declares a member of that name; `<math.h>` names excluded (S1-refs) | the function MSVC called: on MSVC only N::name was declared; on the target a class-type argument brought the shim's ::name in by argument-dependent lookup |
 | `TPL1` | neutral | `this->` in front of the members of a dependent base that a class template's member functions use by plain name | the members MSVC's (one-phase) lookup found |
 | `TPL2` | neutral | declares a namespace's function templates before the class templates that call them (MSVC's late lookup found them) | declarations only |
 | `MATH1` | neutral | drops the decomp's copies of MSVC `<math.h>` C++ overloads; the real header defines them | real `<math.h>` |
@@ -180,6 +208,7 @@ above (round 8).
 | `INIT1` | platform | a static object whose dynamic initializer the exe has and the decomp lacks: one `static` NiMainSDM (constructor 0x00a8a5f0) in staging/blk_00a80000_o2.cpp | the unit gets a dynamic initializer MSVC's object of the decomp has not; the functions are unchanged |
 | `CSX2` | neutral | 4 bytes behind a generated-layout `_RTL_CRITICAL_SECTION` member whose class asserts it as 28 bytes (NiCriticalSection, RecursiveLock and their holders) | the offsets the pristine MSVC build and the byte-matched code have (J-0067) |
 | `STAND1` | platform | removes an untagged definition whose MSVC name the unit binds to the address of a tagged definition in the same unit (a free function keeps its declaration) | the call reaches the tagged function, as in the binary; an optimizing MSVC build may have inlined the stand-in |
+| `STAND2` | platform | STAND1 for an address another unit's tagged definition provides, only for a non-inline, non-static definition in a unit compiled without /O1, /O2, /Ox, /Ob2 | MSVC never inlined the stand-in there, so its code called the name, which the link took to the other unit's function |
 | `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer | MSVC's unsigned compare of the address gives the same result |
 | `INC1` | neutral | a quoted `#include` that names, up to case, a file in the including directory is spelled as that file (`"Actor.h"` -> `"actor.h"`) | the header MSVC opened (directory of the includer first, names without case) |
 | `ANON2` | platform | a member with a constructor / destructor / copy assignment in an anonymous struct of an anonymous union becomes raw storage of its size and alignment, its uses `(*(T*)(x.m))` | same bytes and calls; MSVC never ran those functions for a union member either |
@@ -205,6 +234,61 @@ above (round 8).
 | `FALL1` | platform | `__builtin_trap()` at fall-off ends of non-void functions | GCC only |
 | `ASM1` `ASM2` `ASM4` | platform | x87 / rdtsc / cpuid asm -> portable helpers (docs/ASM.md has their own checks) | - |
 | `NATIVE1` | platform | units leave the build (native renderer, D6) | - |
+
+## Evaluation order: ORDER-OBJECT and ORDER-OPERATOR (for S12)
+
+`tools/equiv/order_check.py` compiles `tests/s11/order/order.cpp` (27 cases, ours) with MSVC 2008 SP1 and RTM in the
+decomp's flag sets (`/O2`, `/Od /Oy-`, `/O2 /Ob1`), runs it under Wine, and compares the logged order with the
+build's GCC (AArch64 ILP32, compile.sh's semantics flags, the fnvnx_order plugin as compile.sh loads it) under
+qemu-aarch64. The MSVC results are recorded in `tests/s11/order/order.msvc`, so `order_check.py <scratch> --gcc`
+needs no Wine (S12's machines); `--msvc --record` measures them again; `--strict` fails on a `differs` case.
+
+Measured at the integration head of this note (plugin `args=rtl`):
+
+| case | MSVC 2008 (all 5 configurations unless noted) | GCC build | verdict |
+|---|---|---|---|
+| `obj()->m(a())`, `(*obj()).m(a())`, `ref().m(a())` | `ao`: arguments right to left, then the object | `oa` | differs |
+| `obj()->m(a(), b())`, `ref()(a(), b())` (member operator()) | `bao` | `oba` | differs |
+| `obj()->next()->m(a())` | `aon`: the argument before the whole object chain | `ona` | differs |
+| `obj()->vm(a())` (virtual) | `oa`: the object first | `oa` | same |
+| `obj()->sm(a())` (static member through an object) | `oa` | `oa` | same |
+| `(obj()->*pmf())(a())` | `aom` at /O2, `amo` at /Od | `oma` | msvc-varies |
+| member `<<`, `>>`, `[]`, `+`, `==` (`ref() OP a()`) | `ao` | `oa` | differs |
+| member `=`, `+=` | `ao` | `ao` (C++17: right operand first) | same |
+| free `y << a()` | `ao` (operands are arguments: right to left) | `oa` (C++17 fixes `<<` left to right) | differs |
+| free `y + a()`, `a() - y`, `y += a()` | `ao`, `oa`, `ao` | same | same |
+| built-in `*p() += a()` | `pa` | `ap` (C++17) | differs |
+| built-in `*p() = a()`, `arr()[i()] = b()` | `pa` / `abp` at /O2, `ap` / `bpa` at /Od | `ap`, `bpa` | msvc-varies |
+| built-in `a() + b()`, `a() << b()`, `a() * b() - c()` | left to right | same | same |
+| `x.m(a(), b())` (calibration, ORDER-ARGS) | `ba` | `ba` | same |
+
+So MSVC 2008 treats `this` of a non-virtual member call, and the left operand of a member operator, as the last
+argument: evaluated after every argument (it is passed in ecx, after the pushes). A virtual call evaluates the object
+first (it needs the vptr). A free operator's operands are ordinary arguments, right to left. `-fstrong-eval-order=some`
+or `=none` fix none of the member cases (the plugin keeps `this` first) and `=none` breaks member `=` / `+=`. The
+fix belongs in the plugin (S12): a non-virtual member call (also through an operator, also with
+`CALL_EXPR_ORDERED_ARGS`) evaluates `this` after its arguments; a free operator call with ordered arguments (`<<`,
+`>>`) gets the right-to-left chain too; built-in compound assignment evaluates its left operand first. The
+`msvc-varies` shapes are unspecified in the exe as well (the order follows the optimizer), so only the per-site x86
+code can decide them. `order_check.py --gcc --strict` is the acceptance test for that change
+(`--strict-variant NAME` checks a candidate variant instead of the build).
+
+**S12's switches** (`fnvnx_order object=last|first`, `operator=rtl|cpp17`, S12 branch `8def1d8`). Whenever the plugin
+source has them, order_check.py also measures the variants `object-last` and `object-last-rtl`. Cases that differ
+from an order every MSVC configuration agrees on:
+
+| GCC variant | differ | cases |
+|---|---:|---|
+| build (defaults) | 13 | the 5 non-virtual ORDER-OBJECT cases, 7 ORDER-OPERATOR (member `<<` `>>` `[]` `+` `==` `()`, free `<<`), built-in `+=` |
+| `object=last` | 6 | `obj-virtual`, member `<<` `>>` `[]`, free `<<`, built-in `+=` |
+| `object=last operator=rtl` | 2 | `obj-virtual` (MSVC: object first, `oa`; the variant gives `ao`), built-in `*p() += a()` (MSVC `pa`, GCC `ap`) |
+
+So the build needs `object=last` for non-virtual calls only (a virtual call keeps the object first, as `first` does),
+`operator=rtl`, and the left operand first for built-in compound assignment. S12's own `tests/s12/order/evalorder.cpp`
+(11 cases) prints the same text in all five MSVC configurations (`order_check.py <scratch> --msvc-stdout
+evalorder.cpp evalorder.msvc.expect`); it matches neither of S12's expectations: `member`, `member2`, `retslot`,
+`shl`, `shr`, `index` are those of `object=last operator=rtl`, while `virtual` / `virtual2` (`ga:`, `gyx:`: the object
+first) are those of the defaults.
 
 ## Class layouts (238 units, `/d1reportAllClassLayout`)
 

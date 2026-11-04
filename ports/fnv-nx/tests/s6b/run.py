@@ -40,8 +40,8 @@ def main():
     ap.add_argument("--v6n-bin", default=os.path.join(ROOT, "build/v6n/bin"))
     ap.add_argument("--no-exec", action="store_true")
     a = ap.parse_args()
-    asm, tool, unit = (os.path.join(a.build, x) for x in ("s6b_asm", "sdp2dksh", "s6b_unit"))
-    for t in (asm, tool, unit):
+    asm, tool, unit, cent = (os.path.join(a.build, x) for x in ("s6b_asm", "sdp2dksh", "s6b_unit", "s6b_centroid"))
+    for t in (asm, tool, unit, cent):
         if not os.path.exists(t):
             sys.exit("missing %s: run render/shaders/build.sh --tests" % t)
     os.makedirs(a.out, exist_ok=True)
@@ -49,6 +49,9 @@ def main():
     u = subprocess.run([unit], capture_output=True, text=True)
     print(u.stdout.strip())
     unit_ok = u.returncode == 0
+    u = subprocess.run([cent], capture_output=True, text=True)       # centroid on handwritten tokens
+    print(u.stdout.strip())
+    unit_ok = unit_ok and u.returncode == 0
 
     tests = parse_corpus(os.path.join(HERE, "shaders.s6b"))
     packs = {"vs": [], "ps": []}
