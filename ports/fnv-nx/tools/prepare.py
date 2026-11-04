@@ -363,6 +363,7 @@ CRT_HEADERS = {
     '<math.h>': 'fabs fabsf sqrt sqrtf sin sinf cos cosf tan tanf asin asinf acos acosf atan atanf atan2 atan2f exp '
                 'expf log logf log10 log10f pow powf floor floorf ceil ceilf fmod fmodf modf frexp ldexp',
     '<ctype.h>': 'toupper tolower isspace isdigit isalpha isalnum isupper islower',
+    '<wchar.h>': 'wmemcmp wmemcpy wmemmove wmemset wmemchr wcslen',
     '': '_alloca _ReadWriteBarrier _ReadBarrier _WriteBarrier _CxxThrowException operator_delete_sized '
           '_operator_delete_sized',   # in the force-included fnvnx_compat.h
 }
@@ -636,6 +637,44 @@ def r_platform_protos(path, text, stats):
     out.append(text[pos:])
     return ''.join('#include %s /* fnv-nx DECL1 */\n' % h for h in top) + ''.join(out)
 
+# ---- DECL1-TYPEDEF: the decomp's own typedefs of C library types that the target defines differently
+#
+# A unit that carries its own <stdio.h> (`typedef _iobuf FILE;`, `typedef __int64 fpos_t;`) clashes with the target's
+# FILE (glibc's struct _IO_FILE) and fpos_t (a struct). Under MSVC FILE is _iobuf: the typedef goes and every FILE of
+# the unit is spelled _iobuf, so DECL1 then sees its stdio prototypes as the _iobuf functions of fnvnx_iobuf.h (S4b).
+# MSVC's fpos_t is __int64: the unit's typedef and its uses get the name fnvnx_msvc_fpos_t (the same type).
+CRT_TYPEDEF_FILE = re.compile(r'^[ \t]*typedef[ \t]+(?:struct[ \t]+)?_iobuf[ \t]+FILE[ \t]*;', re.M)
+CRT_TYPEDEF_FPOS = re.compile(r'^[ \t]*typedef[ \t]+(?:__int64|long[ \t]+long)[ \t]+fpos_t[ \t]*;', re.M)
+CRT_CODE_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)', re.S)
+
+def _rename_code_word(text, old, new):
+    """`old` -> `new` as a whole word outside comments and literals, not as a member (`.old`, `->old`)."""
+    masked = CRT_CODE_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+    out, pos, n = [], 0, 0
+    for m in re.finditer(r'(?<![\w.>])%s\b' % re.escape(old), masked):
+        out.append(text[pos:m.start()]); out.append(new); pos = m.end(); n += 1
+    out.append(text[pos:])
+    return ''.join(out), n
+
+def r_crt_typedefs(path, text, stats):
+    """DECL1-TYPEDEF: the unit's own FILE / fpos_t typedefs give way to the MSVC types they name (see above)."""
+    if 'FILE' in text:
+        m = CRT_TYPEDEF_FILE.search(text)
+        if m and not prepare_in_scope(text, m.start()):
+            text = text[:m.start()] + '/* fnv-nx DECL1-TYPEDEF: FILE is _iobuf */' + text[m.end():]
+            text, n = _rename_code_word(text, 'FILE', '_iobuf')
+            stats['DECL1-TYPEDEF'] += 1 + n
+    if 'fpos_t' in text:
+        m = CRT_TYPEDEF_FPOS.search(text)
+        if m and not prepare_in_scope(text, m.start()):
+            text, n = _rename_code_word(text, 'fpos_t', 'fnvnx_msvc_fpos_t')
+            stats['DECL1-TYPEDEF'] += n
+    return text
+
+def prepare_in_scope(text, pos):
+    """pos is inside a class, function or other non-namespace brace block."""
+    return any(k not in ('namespace', 'extern') for k, _ in scope_chain(scope_spans(text), pos))
+
 NEWDEL_PARAMS = re.compile(r'(\boperator\s+(?:new|delete)(?:\s*\[\s*\])?\s*\()([^;{}()]*)(\))')
 
 def r_newdel_size(path, text, stats):
@@ -802,7 +841,7 @@ def r_game_bound_names(path, text, stats):
     return text
 
 RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members, r_sse_qualified, r_game_bound_names,
-         r_platform_protos, r_newdel_size]
+         r_crt_typedefs, r_platform_protos, r_newdel_size]
 
 # ---------------------------------------------------------------------------------------------------------- driver
 
