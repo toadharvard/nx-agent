@@ -12,6 +12,7 @@ it as host; the MSVC decoration filter; bind.tsv / synth.tsv round trip through 
 """
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'link'))
 import bodies   # noqa: E402
 import fnvlink  # noqa: E402
 import sigs     # noqa: E402
+import vtables  # noqa: E402
 
 UNITS = {'units': [
     {'source': 'src/a.cpp', 'functions': [
@@ -171,6 +173,37 @@ class T(unittest.TestCase):
             src = f.read()
         self.assertIn('bodies.load_synth(out)', src)
         self.assertIn('bodies.load_bind(out)', src)
+
+    def test_vcall_line_and_stub(self):
+        it = self.itanium
+        line = bodies.vcall_line(3, it('_ZN3Qux5FrobbEv'))
+        self.assertIn('__fnvnx_bd::sel<::Qux>::m(&::Qux::Frobb)', line)
+        self.assertIn('__asm__("__fnvnx_bdpm_3")', line)
+        self.assertIsNone(bodies.vcall_line(0, it('_ZN3BazC1ERKS_')))      # constructors are never virtual
+        s = bodies.emit_vcalls({'__fnvnx_bdvc_00000001': ('_ZN3Qux5FrobbEv', 8, 0),
+                                '__fnvnx_bdvc_00000002': ('_ZN3Qux5FrobbEv', 20000, 4)})
+        self.assertIn('    ldr w16, [x16, #8]', s)
+        self.assertIn('    add w0, w0, w17', s)
+        self.assertIn('    ldr w16, [x16, x17]', s)
+
+    @unittest.skipUnless(shutil.which(vtables.CXX), 'needs the aarch64 cross compiler')
+    def test_vcall_probe(self):
+        """GCC's pointer-to-member constant: slot offsets; a non-virtual member is refused."""
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'src'))
+            os.makedirs(os.path.join(d, 'include'))
+            with open(os.path.join(d, 'src', 'v.cpp'), 'w') as f:
+                f.write('struct A { virtual int a0(int); virtual int a1(int); int na(int); };\n'
+                        'struct B { virtual float b0() const; };\n'
+                        'struct C : A, B { virtual float b0() const; virtual void c2(char const *); };\n')
+            names = ['_ZN1A2a1Ei', '_ZN1A2naEi', '_ZNK1C2b0Ev', '_ZN1C2c2EPKc']
+            dem = fnvlink.batch_demangle(fnvlink.CXXFILT, names)
+            it = (lambda n: sigs.parse_itanium(n, dem[n]))
+            got, why = bodies.probe_vcalls(d, d, 'src/v.cpp', names, it)
+        self.assertEqual(got['_ZN1A2a1Ei'], (4, 0))
+        self.assertEqual(got['_ZNK1C2b0Ev'], (8, 0))     # an overrider of a secondary base's function: also in
+        self.assertEqual(got['_ZN1C2c2EPKc'], (12, 0))   # the primary vtable (Itanium), so no this adjustment
+        self.assertEqual(why['_ZN1A2naEi'], 'not virtual')
 
 
 if __name__ == '__main__':
