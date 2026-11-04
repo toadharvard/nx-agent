@@ -3197,3 +3197,15 @@ The owner moves the work to another session or account (quota). Resume with docs
   - S2d `bfc3a1b`: the exe-addr class, 389 names bound from the exe rel32 calls. Still missing: 1,219, of which 331 exist in the exe only inline (gaps for S3). The link needs FNVNX_EXE.
   - Render machine `443daf3`: hotspot top-10 on the synthetic mix. Handheld 720p fails at 1.05 of the 45 fps budget, GPU-bound at 23.3 ms. The top two items are the lit pass (32.7 %) and image space + UI (31.8 %), both dominated by the runtime shader epilogue; S6n is on them. The renderer CPU top item is SortPackets at 3.74 ms (65,536-bucket radix).
 * **next** - Wire FNVNX_EXE into link_job via job_gamedata. P6n needs the prepared/pristine objects (private repo `c/<c12>/*of4`, `msvc/pristine/87eb9373a0bb`) to count the engine D3D9 path.
+
+### J-0145 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0144
+
+* **found** - Shards fz1, 2, 4, 7, 8, 10, 11, 12, 19 and 22 never published a 26-shard report. The farm session kills its runner after 2 h, and single functions ran without a bound (004b6220 took 2,896 s).
+* **did** - Merged the four S13 commits.
+  - `3c54f8a` difffuzz-12: the runner exports FARM_DEADLINE; each emulator run is capped at 2 s of wall clock and each function at fuzz.fn_limit; the game allocators return heap blocks (new-null); the other machine's private range is mapped as background memory.
+  - `c171ea6`: fuzz_job takes the exe through job_gamedata.
+  - `f328bd1` difffuzz-13: virtual calls go through the exe's vftables, paired by kind V; short native vtables are padded (vptr-unpaired).
+  - `08f8122`: fnvnx-fuzz-summary/1, written as <head12>-fuzz.json.
+* **measured** - Fuzzable targets as a share of functions with a native object: shard 26 64.4 -> 98.4 %, shard 1 68.9 -> 99.3 %.
+  - Of the paired primary vftables, 1,082 of 1,628 have a native vtable shorter than the exe's. S2c should pair each with the static class's own _ZTV.
+* **next** - The farms re-fuzz everything on difffuzz-13.
