@@ -131,7 +131,9 @@ if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
   python3 "$HERE/toolchain/order/keys_merge.py" --list "$OUT/.keys/files.list" > "$OUT/order.keys.tmp"
   # replaced only when it changes: its mtime decides which objects are stale (compile_one)
   if cmp -s "$OUT/order.keys.tmp" "$OUT/order.keys"; then rm "$OUT/order.keys.tmp"; else mv "$OUT/order.keys.tmp" "$OUT/order.keys"; fi
-  echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)"
+  # stderr under --print-flags: stdout is the flag list there (layout.game_flags parses it)
+  if [ "$PRINT_FLAGS" = 1 ]; then echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)" >&2
+  else echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)"; fi
 elif [ "$ORDER_KEYS" != unit ] && [ ! -f "$ORDER_KEYS" ]; then
   echo "compile.sh: ORDER_KEYS=$ORDER_KEYS does not exist (unset it to compute the list, or use tools/farm/keys_job.sh)" >&2
   exit 2
