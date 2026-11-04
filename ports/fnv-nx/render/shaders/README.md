@@ -100,6 +100,32 @@ All in the `glsldk` profile (other MojoShader profiles unchanged); unit + execut
   nouveau's `dnz` multiply flag through uam, not expressible in GLSL). GLSL compilers may reassociate
   (`a*M + a*M` -> `a*(M+M)`), which the bytecode does not: visible only with FLT_MAX-sized values.
 
+## fp16 (Maxwell HADD2/HMUL2/HFMA2) through uam: investigated, not implemented
+
+Requested by S6n for the lit and image-space families. Findings on the pinned uam (`5a5afc2`):
+
+* The path is GLSL IR -> `st_glsl_to_tgsi` -> TGSI -> nv50_ir (`nv50_ir_from_tgsi`) -> GM107 emitter. There is no
+  NIR in uam's Mesa snapshot, and no `lower_precision` pass (Mesa 20.1's GLSL IR pass that turns mediump into
+  float16): `mediump` is parsed and dropped. `GL_EXT_shader_explicit_arithmetic_types_float16` is not in the
+  parser. TGSI has no 16-bit float type (only the `precise` bit).
+* nv50_ir has `TYPE_F16` only for conversions and loads/stores; it is a scalar IR with no packed-half2 values.
+  The GM107 emitter has no HADD2/HMUL2/HFMA2/HSETP2 encoder (neither has upstream nouveau: NVK's NAK, a separate
+  Rust NIR compiler, is the only Mesa backend with packed fp16, and it needs NIR).
+* Needed, cheapest route (keep TGSI): (1) a per-instruction half flag from GLSL IR precision through
+  `st_glsl_to_tgsi` and ureg; (2) `nv50_ir_from_tgsi` building F16 ops with F2F at the boundaries (inputs, UBO
+  loads, outputs and texture results stay F32); (3) a pass pairing independent scalar F16 ops into one half2 op
+  (the 2x rate exists only for pairs) with H0/H1 operand selects, plus RA of 16-bit halves of a GPR (only 64-bit
+  split/merge exists today); (4) SM53 encoders for HADD2/HMUL2/HFMA2/HSETP2 and packed F2F, scheduling info
+  included. A NIR route is strictly larger (import NIR + glsl_to_nir + nv50_ir_from_nir into the snapshot, and
+  steps 3-4 remain).
+* Validation: there is no Maxwell disassembler (nvdisasm/envydis) or console here, so encodings and results could
+  only be checked by bit patterns, not run. Estimate 2-4 weeks of compiler work at high risk, for a gain limited to
+  ALU-bound shaders (conversions eat part of it; texture- and bandwidth-bound passes gain nothing).
+* Decision: not tractable in this stream now. Cheaper levers for S6n first: half-float render targets and
+  `packHalf2x16` storage for bandwidth, and P6n's per-family profile to show whether lit / image-space are ALU
+  bound at all. If they are, the TGSI route above is the plan, starting with an HFMA2 encoder test against
+  bit patterns confirmed on hardware.
+
 ## Known gaps
 
 * MojoShader GLSL does not implement `texreg2rgb`, `texdp3tex`, `texdp3`, `texm3x2depth` (ps_1_2/1_3);
