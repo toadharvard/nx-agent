@@ -1121,12 +1121,17 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for a in rebind:
             rebind[a] = vmap[a][:2]
         # the slots of virtual functions defined nowhere: the native definition at the exe slot's address
+        slot_over = {}   # (object, vtable group, word index) -> target, where one symbol's vtables disagree
         fill = exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges)
+                             canon_it, out, bridges, slot_over)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
         byclass['vslot-exe'] += fill.get('bound_refs', 0)
+        # primary vtables shorter than the exe's: an extended strong copy (the exe's remaining slots)
+        ext = exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over)
+        for k_, n_ in ext.items():
+            vstats['exe-copy-' + k_] = n_
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
     # FUN_00404950's, ...): the map can give one native vtable; every class's own is listed, so a native vptr store
     # can be traced back to its image vftable (S13's vtable-store comparison)
@@ -1534,17 +1539,19 @@ def flags_param(ds):
 def emit_flag_stub(name, target, flags):
     return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
                       '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
-                      '    mov w1, #%d' % flags, '    b %s' % target, '    .size %s, .-%s' % (name, name)]) + '\n'
+                      '    mov w1, #%d' % flags, '    b %s' % target, '    .size %s, .-%s' % (name, name),
+                      '    .text']) + '\n'   # the bridges after it assume .text
 
 
 def emit_gdel_stub(name, d0, d1):
     return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
                       '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
-                      '    tbz w1, #0, 1f', '    b %s' % d0, '1:  b %s' % d1, '    .size %s, .-%s' % (name, name)]) + '\n'
+                      '    tbz w1, #0, 1f', '    b %s' % d0, '1:  b %s' % d1, '    .size %s, .-%s' % (name, name),
+                      '    .text']) + '\n'
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
-                  stubs=None):
+                  stubs=None, overrides=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -1657,9 +1664,35 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     st['bound_' + how.replace(' ', '_')] += 1
                     rows.append((os.path.basename(u.obj), u.source, un, '%08x' % a, tgt, how, why,
                                  ' '.join('%s+%d:%d' % (x[0], x[1], x[2]) for x in us)))
+                    for x in us if overrides is not None else ():
+                        # another vtable of the object holds another address there (a derived class's override
+                        # the decomp does not declare): that slot gets its own word in the copy
+                        b_ = next(iter(x[4])) if len(x[4]) == 1 else None
+                        t2 = target_for(un, b_)[0] if b_ is not None and b_ != a else None
+                        if t2:
+                            overrides[(u.obj, x[0], x[1] // 4 + x[2])] = t2
+                            st['per_slot_uses'] += 1
+                            rows.append((os.path.basename(u.obj), u.source, un, '%08x' % b_, t2,
+                                         'per slot (another address than the declaring class\'s)', '',
+                                         '%s+%d:%d' % (x[0], x[1], x[2])))
                     continue
             else:
                 a = None
+            if why.startswith('vtables disagree') and overrides is not None:
+                # one target per slot: exe_vtable_copies writes a strong copy of the kept vtable with these words
+                left = []
+                for x in us:
+                    tgt_ = target_for(un, next(iter(x[4])))[0] if len(x[4]) == 1 else None
+                    if tgt_:
+                        overrides[(u.obj, x[0], x[1] // 4 + x[2])] = tgt_
+                        st['per_slot_uses'] += 1
+                        rows.append((os.path.basename(u.obj), u.source, un, '%08x' % next(iter(x[4])), tgt_,
+                                     'per slot (vtables disagree)', '', '%s+%d:%d' % (x[0], x[1], x[2])))
+                    else:
+                        left.append(x)
+                us = left
+                if not us:
+                    continue
             st['left_' + why.split(' (')[0].replace(' ', '_').replace(':', '').replace('\'', '')] += 1
             for x in us or [(None, 0, -1, -1, set(), False)]:
                 gaps.append((os.path.basename(u.obj), u.source, un, x[0] or '', str(x[2]), str(x[3]),
@@ -1702,6 +1735,129 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     with open(os.path.join(out, 'slot_gaps.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#object\tunit\tslot symbol\tvtable\tslot\texe slot\texe addresses\twhy still a trap\n')
         for r in gaps:
+            f.write('\t'.join(r) + '\n')
+    return st
+
+
+VTEXT_OBJ = 'zz_bridges.o'   # the extended vtables live in bridges.S (apply assembles it into this object)
+XTRAP = 'exe 0x%08x'
+
+
+def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None):
+    """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
+    kept object has them (its slot symbols renamed as resolve renames them in that object), then exe slot j for every
+    j past the native slots (the minus-one rule): `__fnv_<a>` where the address map has a plain native definition,
+    the deleting-destructor stub for a `??_G`, else a trap stub reporting the exe address. The copy is a strong
+    global definition of the same `_ZTV<C>` in bridges.S, so it wins over the GCC copies (weak COMDAT, every one of
+    the 1,389 on link 31971038913d); out/vtext.tsv names the object the words came from, which apply's typeinfo
+    pairing takes as the vtable's object. Only single-vtable groups (no secondary vtable whose address point would
+    move) whose words are plain or ABS32 relocations against global symbols. Callers reach the extra slots through
+    their own class's declaration, as the image vftable word would take them. The same copy carries the per-slot
+    targets of exe_slot_fill (slot_over: one symbol whose vtables in an object disagree on the exe address), for the
+    kept copy of the group (the first in link order), secondary vtables included. Returns the counts."""
+    st = collections.Counter()
+    by_obj = {u.obj: u for u in have}
+    want = collections.defaultdict(list)    # (z, path) -> [exe vftable]
+    for v, (z, ap, path, note) in vmap.items():
+        if v in exev and note.startswith('primary') and ap == 8:
+            want[(z, path)].append(v)
+    over = collections.defaultdict(dict)    # (z, kept path) -> {word index: target}
+    for (path, z, i), t in (slot_over or {}).items():
+        if rtti.where.get(z) and rtti.where[z][0].path == path:
+            over[(z, path)][i] = t
+        else:
+            st['per-slot-not-the-kept-copy'] += 1
+    for key in over:
+        want.setdefault(key, [])
+    rows = []
+    objs = {}
+    for (z, path), vs in sorted(want.items()):
+        u = by_obj.get(path)
+        if u is None:
+            continue
+        if path not in objs:
+            objs[path] = vtables.Obj(path)
+        o = objs[path]
+        if z not in o.defs:
+            continue
+        ents = o.ents(z)
+        pts = vtables.address_points(ents)
+        n = vtables.slots_at(ents, 8)
+        ren = per_obj.get(u.source) or {}
+        names = [ren.get(e.sym, e.sym) if e.sym else None for e in ents]
+        ov = over.get((z, path), {})
+        se = names[2:2 + n]
+        d = exevft.dtor_pos(se, [e.word for e in ents[2:2 + n]])
+        nm = n - 1 if d is not None else n
+        slots = max((exev[v].slots for v in vs), key=len) if vs else []
+        if any(exev[v].slots != slots[:len(exev[v].slots)] for v in vs):
+            st['skipped-exe-vftables-disagree'] += 1
+            slots = []
+        extend = len(slots) > nm
+        if extend:
+            st['short'] += 1
+        if extend and len(pts) != 1:
+            st['skipped-secondary-vtables'] += 1
+            extend = False
+        if not extend and not ov:
+            continue
+        if o.bind(z) != 'weak':   # a key function's unit: its strong copy would be a second definition
+            st['skipped-strong'] += 1
+            continue
+        for i, t in ov.items():
+            names[i] = t
+        bad = None
+        for e, nmz in zip(ents, names):
+            if e.sym is None:
+                continue
+            if e.sym.startswith(('.reloc', '.section:')):
+                bad = 'relocation %s' % e.sym.split(':')[0]
+                break
+            i = o.defs.get(e.sym)
+            if nmz == e.sym and i is not None and o.syms[i][4] == 0:   # a local definition: not reachable from here
+                bad = 'local symbol'
+                break
+        if bad:
+            st['skipped-' + bad.replace(' ', '-')] += 1
+            continue
+        words = ['    .word %s' % ('%s%+d' % (nmz, e.addend) if e.addend else nmz) if e.sym else
+                 '    .word 0x%x' % e.word for e, nmz in zip(ents, names)]
+        extra = []
+        for j in (range(nm, len(slots)) if extend else ()):
+            a = slots[j]
+            nd = native.get(a)
+            var = sigs.itanium_variant(nd['sym'].name) if nd else None
+            if nd is not None and var is None:
+                t = ADDR_SYM % a
+                st['slots-native'] += 1
+            elif nd is not None and var == 'D0' and nd['variants'].get('D1') is not None:
+                t = GDEL_SYM % a
+                bridges.setdefault(t, emit_gdel_stub(t, ADDR_SYM % a, ADDR_SYM % a + (
+                    '' if nd['variants']['D1'] is nd['sym'] else '_D1')))
+                st['slots-deleting-destructor'] += 1
+            else:
+                t = TRAP_SYM % int(hashlib.sha1((XTRAP % a).encode()).hexdigest()[:8], 16)
+                traps.setdefault(t, (XTRAP % a + (' (not compiled)' if nd is None else ' (%s)' % var), (z, 2 + j)))
+                st['slots-trap'] += 1
+            extra.append('    .word %s' % t)
+        # the primary vtable is the whole group: the extra slots go at its end
+        lines = ['// %s from the exe vftable(s) %s: %d native slots + %d, %d slots per use (S2c-vt)' % (
+                     z, ' '.join('%08x' % v for v in sorted(vs)), n, len(extra), len(ov)),
+                 '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3', '    .globl %s' % z,
+                 '    .type %s, %%object' % z, '%s:' % z] + words + extra + ['    .size %s, .-%s' % (z, z), '    .text']
+        bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
+        st['extended' if extra else 'copied-per-slot'] += 1
+        st['slots-added'] += len(extra)
+        st['slots-per-use'] += len(ov)
+        for v, (z_, ap_, path_, note_) in list(vmap.items()):
+            if z_ == z:
+                vmap[v] = (z_, ap_, VTEXT_OBJ, note_ + (', extended from the exe (+%d slots)' % len(extra) if extra
+                                                        else ', slots per use from the exe'))
+        rows.append((z, os.path.basename(path), str(n), str(len(extra)), ' '.join('%08x' % v for v in sorted(vs)),
+                     str(len(ov))))
+    with open(os.path.join(out, 'vtext.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#vtable\tobject the words came from\tnative slots\tslots added\texe vftables\tslots per use\n')
+        for r in rows:
             f.write('\t'.join(r) + '\n')
     return st
 
@@ -2630,7 +2786,14 @@ def apply(out, fixed):
     print('own data pointers to rebound variables retargeted: %d relocations in %d objects; code references '
           'through a local symbol left (want 0, compile.sh -fPIC): %d in %d objects' % (retargeted, retarget_objs,
                                                                                       left, left_objs))
-    rows, cnt = pair_typeinfo(fixed)
+    vtext = {}
+    vt_path = os.path.join(out, 'vtext.tsv')
+    if os.path.exists(vt_path):   # S2c-vt: extended vtables (bridges.S) stand for the object their words came from
+        for line in open(vt_path, encoding='utf-8', errors='surrogateescape'):
+            f_ = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f_) >= 2:
+                vtext[f_[0][4:]] = f_[1]
+    rows, cnt = pair_typeinfo(fixed, vtext)
     with open(os.path.join(out, 'typeinfo_pairs.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#class\tkept typeinfo object (the vtable\'s)\tthe copy the linker would keep first\tcopies of '
                 'another view turned into references\n')
@@ -2648,7 +2811,7 @@ def kept_def(defs):
     return next((d for d in defs if d[1]), defs[0])
 
 
-def pair_typeinfo(fixed):
+def pair_typeinfo(fixed, vtext=None):
     """Make each class's kept typeinfo describe the layout its kept vtable was built for (V1 defect C4, round 3).
     Units reconstruct one class with different bases; vtable and typeinfo are separate weak COMDAT groups (_ZTV<C>,
     _ZTI<C>) and the linker keeps the first copy of each in link order independently, so the kept vtable's
@@ -2680,6 +2843,8 @@ def pair_typeinfo(fixed):
         if not vdefs:
             continue
         kv = kept_def(vdefs)[0]
+        if vtext and cls in vtext and kv == VTEXT_OBJ:
+            kv = vtext[cls]
         own = dict(tdefs)
         if kv not in own:
             cnt['vtable object defines no typeinfo'] += 1
