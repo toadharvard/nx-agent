@@ -4,7 +4,7 @@ content).
 
     python3 -I tests/s2d/test_bodies.py          # needs llvm-undname(-18) and c++filt
 
-Checks: a name bound by address through a class shell (`X_shell`, `X_<addr8>`) and through another namespace; a C2
+Checks: a name bound by address through a class shell (`X_shell`) and through another namespace; a C2
 bound to the complete-object definition; two addresses -> missing (ambiguous); a D1 whose only address is a deleting
 destructor (addrmap G) is never bound there; special members -> `= default` lines (template class -> missing);
 pristine bodies: `ret` / `mov eax, ecx; ret 4` -> msvc-empty, a real body -> msvc-inline with the unit that emitted
@@ -12,6 +12,7 @@ it as host; the MSVC decoration filter; bind.tsv / synth.tsv round trip through 
 """
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -21,23 +22,32 @@ sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'link'))
 import bodies   # noqa: E402
 import fnvlink  # noqa: E402
 import sigs     # noqa: E402
+import vtables  # noqa: E402
 
 UNITS = {'units': [
     {'source': 'src/a.cpp', 'functions': [
         {'symbol': '?Get@Foo_shell@@QAEHH@Z', 'address': '00401000'},         # int Foo_shell::Get(int)
-        {'symbol': '??0Bar_00a1b2c3@@QAE@XZ', 'address': '00402000'},         # Bar_00a1b2c3::Bar_00a1b2c3()
+        {'symbol': '??0Bar_shell@@QAE@XZ', 'address': '00402000'},           # Bar_shell::Bar_shell()
         {'symbol': '?Run@A@ns1@@QAEXXZ', 'address': '00403000'},              # ns1::A::Run()
         {'symbol': '?Run@A@ns2@@QAEXXZ', 'address': '00403100'},              # ns2::A::Run()
-        {'symbol': '?Step@B@ns1@@QAEXH@Z', 'address': '00403200'}],           # ns1::B::Step(int)
+        {'symbol': '?Step@B@ns1@@QAEXH@Z', 'address': '00403200'},            # ns1::B::Step(int)
+        {'symbol': '?Ping@Foo@@QAEXXZ', 'address': '00403300'},               # Foo::Ping()
+        {'symbol': '?Pong@Foo@fnv_00402000@@QAEXXZ', 'address': '00403400'},  # fnv_00402000::Foo::Pong()
+        {'symbol': '?Init@FUN_00401ac0@@QAEXXZ', 'address': '00403500'}],     # FUN_00401ac0::Init()
      'symbols': {'??1Zap@@QAE@XZ': '00404000'}},                              # Zap::~Zap() at a G address
     {'source': 'src/b.cpp', 'functions': [], 'symbols': {}},
 ]}
-ADDRMAP = {0x00401000: 'F', 0x00402000: 'C', 0x00403000: 'F', 0x00403100: 'F', 0x00403200: 'F', 0x00404000: 'G'}
+ADDRMAP = {0x00401000: 'F', 0x00402000: 'C', 0x00403000: 'F', 0x00403100: 'F', 0x00403200: 'F', 0x00404000: 'G',
+           0x00403300: 'F', 0x00403400: 'F', 0x00403500: 'F'}
 REFS = [  # source, Itanium name, class
     ('src/b.cpp', '_ZN3Foo3GetEi', 'unresolved'),
     ('src/b.cpp', '_ZN3BarC2Ev', 'unresolved-ctor-dtor'),
     ('src/b.cpp', '_ZN3ns31A3RunEv', 'unresolved'),
     ('src/b.cpp', '_ZN3ns31B4StepEi', 'unresolved'),
+    ('src/b.cpp', '_ZN12fnv_004010003Foo4PingEv', 'unresolved'),      # a unit copy -> the global class
+    ('src/b.cpp', '_ZN12fnv_004011113Foo4PongEv', 'unresolved'),      # never another unit's copy
+    ('src/b.cpp', '_ZN3Foo4PongEv', 'unresolved'),                    # nor a global name -> a unit's copy
+    ('src/b.cpp', '_ZN12FUN_00402b404InitEv', 'unresolved'),          # FUN_<addr> classes are not shells
     ('src/b.cpp', '_ZN3ZapD1Ev', 'ctor-dtor-trap'),
     ('src/b.cpp', '_ZN3BazC1ERKS_', 'unresolved-ctor-dtor'),
     ('src/b.cpp', '_ZN3BazaSERKS_', 'unresolved'),
@@ -93,7 +103,7 @@ class T(unittest.TestCase):
 
     def test_trapped_rows(self):
         self.assertNotIn('_ZN3Bad5SlotsEv', self.rows)
-        self.assertEqual(len(self.rows), 12)
+        self.assertEqual(len(self.rows), 16)
 
     def test_addr_shell(self):
         r = self.rows['_ZN3Foo3GetEi']
@@ -103,11 +113,13 @@ class T(unittest.TestCase):
         self.assertIn('C2 bound to the complete-object definition', r.note)
 
     def test_addr_namespace(self):
-        r = self.rows['_ZN3ns31B4StepEi']
-        self.assertEqual((r.cls, r.target), ('addr', '__fnv_00403200'))
-        r = self.rows['_ZN3ns31A3RunEv']
-        self.assertEqual(r.cls, 'missing')
-        self.assertIn('00403000,00403100', r.note)
+        # other namespaces or classes of the same name are other classes (SaveManager::String, ExtraSave::String)
+        self.assertEqual(self.rows['_ZN3ns31B4StepEi'].cls, 'missing')
+        self.assertEqual(self.rows['_ZN3ns31A3RunEv'].cls, 'missing')
+        r = self.rows['_ZN12fnv_004010003Foo4PingEv']
+        self.assertEqual((r.cls, r.target), ('addr', '__fnv_00403300'))
+        for n in ('_ZN12fnv_004011113Foo4PongEv', '_ZN3Foo4PongEv', '_ZN12FUN_00402b404InitEv'):
+            self.assertEqual(self.rows[n].cls, 'missing', n)
 
     def test_never_a_deleting_dtor(self):
         r = self.rows['_ZN3ZapD1Ev']
@@ -137,6 +149,11 @@ class T(unittest.TestCase):
         self.assertEqual(self.plain.classify('_ZN5ClockC1Ev', {'src/b.cpp'}).cls, 'special-default')
         self.assertEqual(self.plain.classify('_ZN5Clock4TockEv', {'src/b.cpp'}).cls, 'missing')
 
+    def test_norm(self):
+        self.assertEqual(bodies.norm('NiNode_shell'), 'NiNode')
+        for n in ('NiNode_00a1b2c3', 'FUN_00402b40', 'S_0066ba30', 'DAT_01011234', 'thunk_FUN_00401000', 'Ab_00401000'):
+            self.assertEqual(bodies.norm(n), n)
+
     def test_x86_empty(self):
         for code, want in ((b'\xc3', True), (b'\xc2\x08\x00', True), (b'\x8b\xc1\xc3', True),
                            (b'\x89\xc8\xc2\x04\x00', True), (b'\x33\xc0\xc3', False), (b'', False),
@@ -158,19 +175,50 @@ class T(unittest.TestCase):
 
     def test_run_and_hook(self):
         rows = bodies.run(self.out, os.path.dirname(self.units_json), units_json=self.units_json, synth=False)
-        self.assertEqual(len(rows), 12)
+        self.assertEqual(len(rows), 16)
         bind = bodies.load_bind(self.out)
         self.assertEqual(bind, {'_ZN3Foo3GetEi': ('body-addr', '__fnv_00401000'),
                                 '_ZN3BarC2Ev': ('body-addr', '__fnv_00402000'),
-                                '_ZN3ns31B4StepEi': ('body-addr', '__fnv_00403200')})
+                                '_ZN12fnv_004010003Foo4PingEv': ('body-addr', '__fnv_00403300')})
         self.assertEqual(bodies.load_synth(self.out), [])
         with open(os.path.join(self.out, 'bodies', 'stats.txt')) as f:
             stats = f.read()
-        self.assertIn('names still undefined after resolve: 12', stats)
+        self.assertIn('names still undefined after resolve: 16', stats)
         with open(fnvlink.__file__) as f:   # the resolve hook reads both files
             src = f.read()
         self.assertIn('bodies.load_synth(out)', src)
         self.assertIn('bodies.load_bind(out)', src)
+
+    def test_vcall_line_and_stub(self):
+        it = self.itanium
+        line = bodies.vcall_line(3, it('_ZN3Qux5FrobbEv'))
+        self.assertIn('__fnvnx_bd::sel<::Qux>::m(&::Qux::Frobb)', line)
+        self.assertIn('__asm__("__fnvnx_bdpm_3")', line)
+        self.assertIsNone(bodies.vcall_line(0, it('_ZN3BazC1ERKS_')))      # constructors are never virtual
+        s = bodies.emit_vcalls({'__fnvnx_bdvc_00000001': ('_ZN3Qux5FrobbEv', 8, 0),
+                                '__fnvnx_bdvc_00000002': ('_ZN3Qux5FrobbEv', 20000, 4)})
+        self.assertIn('    ldr w16, [x16, #8]', s)
+        self.assertIn('    add w0, w0, w17', s)
+        self.assertIn('    ldr w16, [x16, x17]', s)
+
+    @unittest.skipUnless(shutil.which(vtables.CXX), 'needs the aarch64 cross compiler')
+    def test_vcall_probe(self):
+        """GCC's pointer-to-member constant: slot offsets; a non-virtual member is refused."""
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'src'))
+            os.makedirs(os.path.join(d, 'include'))
+            with open(os.path.join(d, 'src', 'v.cpp'), 'w') as f:
+                f.write('struct A { virtual int a0(int); virtual int a1(int); int na(int); };\n'
+                        'struct B { virtual float b0() const; };\n'
+                        'struct C : A, B { virtual float b0() const; virtual void c2(char const *); };\n')
+            names = ['_ZN1A2a1Ei', '_ZN1A2naEi', '_ZNK1C2b0Ev', '_ZN1C2c2EPKc']
+            dem = fnvlink.batch_demangle(fnvlink.CXXFILT, names)
+            it = (lambda n: sigs.parse_itanium(n, dem[n]))
+            got, why = bodies.probe_vcalls(d, d, 'src/v.cpp', names, it)
+        self.assertEqual(got['_ZN1A2a1Ei'], (4, 0))
+        self.assertEqual(got['_ZNK1C2b0Ev'], (8, 0))     # an overrider of a secondary base's function: also in
+        self.assertEqual(got['_ZN1C2c2EPKc'], (12, 0))   # the primary vtable (Itanium), so no this adjustment
+        self.assertEqual(why['_ZN1A2naEi'], 'not virtual')
 
 
 if __name__ == '__main__':
