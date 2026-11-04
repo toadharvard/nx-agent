@@ -565,6 +565,12 @@ check('STATIC1 gives namespace statics bound by their plain name C linkage (imag
        'extern "C" { extern const char s_szName[] = "x"; }', 'extern "C" { extern H* g_pInst; }',
        'extern "C" { L s_kList; }', 'H* g_pInst;\nnamespace fnv_1', 'void f() { s_fSpinTime = 1; }'])
 
+# ---- VA2
+got = run(s1.r_va_enum_args, 'enum Index : int { A };\nvoid f(va_list args) {\n    Index d = va_arg(args, Index);\n'
+          '    const char* n = va_arg(args, const char*);\n    int i = va_arg(args, int);\n}\n')
+check('VA2 reads an enum through ... as the int it was passed as', got,
+      ['Index d = (Index)va_arg(args, int);', 'va_arg(args, const char*)', 'int i = va_arg(args, int);'])
+
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])

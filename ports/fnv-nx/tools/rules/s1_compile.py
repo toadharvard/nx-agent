@@ -2751,6 +2751,40 @@ def bind_stand_in_names(out_root, stats, files=None):
 
 POST = [bind_stand_in_names]
 
+# ---------------------------------------------------------------------------------------------------------- VA2
+#
+# `va_arg(ap, Index)` with an enum type: an enum argument passed through `...` is promoted to its underlying type,
+# so in C++ the va_arg of the enum itself is undefined and GCC compiles it to a trap ("is promoted to 'int' when
+# passed through '...'; if this code is reached, the program will abort"; S1b: RegisterActorValue 0x0066efe0).
+# MSVC read the int the caller pushed. VA2 reads that int and converts it: `(Index)va_arg(ap, int)`.
+
+VA_ARG = re.compile(r'\bva_arg\s*\(\s*([A-Za-z_]\w*)\s*,\s*((?:[A-Za-z_]\w*::)*([A-Za-z_]\w*))\s*\)')
+ENUM_NAME = re.compile(r'\benum\s+(?:class\s+|struct\s+)?([A-Za-z_]\w*)\s*(?::[^;{]*)?[;{]')
+_ENUM_NAMES = None
+
+def _enum_names(path):
+    global _ENUM_NAMES
+    if _ENUM_NAMES is not None: return _ENUM_NAMES
+    names, root = set(), _roots(path)
+    for d in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(root, d)):
+            for f in fs:
+                if not f.endswith(('.h', '.cpp', '.inl', '.hpp', '.c')): continue
+                with open(os.path.join(dp, f), encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+                if 'enum' in t: names.update(ENUM_NAME.findall(t))
+    _ENUM_NAMES = names
+    return names
+
+def r_va_enum_args(path, text, stats):
+    """VA2: `va_arg(ap, E)` with an enum E -> `(E)va_arg(ap, int)` (see above)."""
+    if 'va_arg' not in text: return text
+    local = set(ENUM_NAME.findall(text))
+    def sub(m):
+        if m.group(3) not in local and m.group(3) not in _enum_names(path): return m.group(0)
+        stats['VA2'] += 1
+        return '(%s)va_arg(%s, int)' % (m.group(2), m.group(1))
+    return VA_ARG.sub(sub, text)
+
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -2775,5 +2809,5 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_interfaces, r_msvc_tokens, r_std_struct, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_class_alignment]
