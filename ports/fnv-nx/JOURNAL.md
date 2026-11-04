@@ -2514,3 +2514,44 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **found** - Two harness items for the next HARNESS bump: the oracle needs an x86 `_byteswap_ulong` builtin (6
   divergences), and folded `dynamic_cast` (4). For S2c: NiFixedString's `operator const char*` stays an unbound name
   in bsfacegenmanager 00650ea0, while the oracle calls 0x00a5ff10. In the game build it would hit a trap stub.
+
+### J-0115 | 2026-11-04 | stream: S1b-patches,S5-toolchain | status: wip | parent: J-0109,J-0112
+
+* **measured** - S1b classified `pop-mismatch` on link/9844d8dd0fa4.
+  - 3,128 rows fold into 2,138 pairs: 990 callees, 1,204 calling functions. Both sides' MSVC code is byte-exact, so
+    the callee's `ret n` is the truth.
+
+  | class | pairs |
+  |---|---:|
+  | reference pushes fewer than the callee pops | 1,050 |
+  | reference pushes more | 763 |
+  | reference callee-pops, definition cdecl | 191 |
+  | reference cdecl, definition callee-pops | 74 |
+  | hidden result on one side only | 60 |
+
+  - Only the 1,050 "fewer" pairs are real native bugs: the callee reads an argument register nobody set.
+  - Per caller: 611 balance out (the decomp gave pushed words to the wrong one of the function's own calls, which a
+    mechanical fix per family solves), 356 net fewer (need reading), 237 net more.
+  - Top family: `buf->GetChangeFlags(flag)` is really `buf->GetChangeFlags().Test(flag)`, 102 pairs in 27 files.
+* **did** - S1b `75a24f7` pilot (bgsencounterzone.cpp: MSVC identical, GCC clean) and `c29fd27`, a PATCHES.md
+  by-design table that S11's gate can key on. S11's 10 S1b functions are all on it.
+  - FTOI2 makes the FTOL1 helper and casts redundant but harmless. The operand restoration at 17 sites stays.
+  - FUN_005accb0's 7 callers need no patch: x86 passes 8 words and the extractor is variadic, so that one is a fuzzer
+    input artefact.
+  - test_patches: 570 sites.
+* **did** - S5 `931f611`: platform and runtime static constructors run before every game unit's.
+  - Clocks are at priority 101, registrations at 103, boot_banner at 110.
+  - The ctype table is constexpr, and the ini cache is lazy.
+  - guest.ld places crtbegin, libstdc++ and newlib first.
+  - `init_order.py` fails the link on a bad order. On f13 the old guest fails the check and the relinked one passes;
+    both boots are unchanged.
+* **did** - S5 `33c0b1b` (owner request):
+  - **Core 3 opt-in:** NPDM cores 0..3. `sdmc:/fnvnx/fnvnx.ini` has `core3=` (default 0) and `boost_loading=`
+    (default 1). The placement table gets a `mask3` column and the roles io/audio/tasklet/loading. Under the opt-in,
+    game/io/audio/tasklet use cores 1-3; main, the render worker, the AI linear threads and loading stay on 0-2.
+  - **CPU boost:** `appletSetCpuBoostMode(FastLoad)` while the LoadingMenuThread renders, off during its infinite
+    waits and at exit. Never driven by IO, because FastLoad also drops the GPU to its minimum.
+  - Neither has run on hardware.
+* **found** - The link farms lag: the newest published link is still 9844d8d (republished 09:50 with old scripts).
+  S5's farm checks (4b/4c) and the frontier move from S1's heap slots, VLIT1 and S2c's mapping wait for the first
+  link from a head ≥ 68fcbe0.
