@@ -377,6 +377,11 @@ class Q4 { int a; public: int get() const { return a; } };
         check(got == [None, 'read', 'push', 'pass', None, 'read', 'pass', 'pass', 'read', 'push'],
               'incoming ecx use by code: %s' % got)
         check(code.entry_use(0x402000, takes) is None, 'no code: unknown')
+        # V1 R4-1 (repro_ecx_push_arg.py): without declarations, the caller's cleanup after the call (`pop ecx`,
+        # `add esp, 4`) gives the callee's argument bytes: a pushed argument vs MSVC's reserved word
+        code3 = vslots.Code(types.SimpleNamespace(units=units), tmp)
+        got3 = [code3.entry_use(0x401000 + 16 * k, lambda n, slot=False: takes(n))['ecx'] for k in (6, 9)]
+        check(got3 == ['pass', 'push'], 'argument bytes from the cleanup after the call: %s' % got3)
         code2 = vslots.Code(types.SimpleNamespace(units=units), tmp)
         code2.renamed = {0x401000}          # an S1b-renamed definition: its patched declaration decides
         check(code2.entry_use(0x401000, lambda n, slot=False: {'ecx'})['ecx'] == 'pass', 'renamed: by declaration')

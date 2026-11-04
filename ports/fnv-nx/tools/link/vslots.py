@@ -850,8 +850,9 @@ class Code:
         (only pushed to a stack word that is overwritten or never read: MSVC reserves a local with `push ecx`);
         None (never used). The stack is followed by depth: a pushed incoming register is a slot; writes through
         [esp+k] / [ebp+m] overwrite it, reads read it, `pop` restores it, and at a call it is an argument when it
-        lies within the callee's stack argument bytes (arg_bytes(symbol) -> (bytes, popped by the callee), else the
-        bytes pushed since the previous call). Every path from the entry is followed, both ways at a conditional
+        lies within the callee's stack argument bytes (arg_bytes(symbol) -> (bytes, popped by the callee); else the
+        callee's own `ret N`; else the caller's cleanup right after the call, `add esp, N` or pops into eax / ecx /
+        edx; else the bytes pushed since the previous call). Every path from the entry is followed, both ways at a conditional
         branch; a switch through the function's own jump table goes to every label its relocations name. Calls
         write ecx and edx; `xor r, r`, `sub r, r`, `or r, -1`, `and r, 0` write without reading. need(names), when
         given, is called once per function with the relocation targets (to demangle them in one go)."""
@@ -969,6 +970,30 @@ class Code:
                         slot_call = op is not None and op.type == X.X86_OP_MEM
                         nb, pops = (arg_bytes(target, slot_call) if (arg_bytes and direct and target) else None) \
                             or (None, None)
+                        if nb is None and direct and target is not None and not slot_call:
+                            # no declaration: the callee's own `ret N` (callee-pop), else the caller's cleanup
+                            # right after the call (`add esp, N`, `pop` into a scratch register: V1 R4-1)
+                            ta_ = unit_names.get(target, self._names.get(target))
+                            rb_ = self.ret_bytes(ta_) if ta_ is not None else None
+                            if rb_:
+                                nb, pops = rb_, rb_
+                        if nb is None and m == 'call':
+                            q_, cl_ = nxt[pc], 0
+                            while q_ is not None and q_ in ins:
+                                y_ = ins[q_]
+                                if y_.mnemonic == 'add' and len(y_.operands) == 2 and \
+                                        y_.operands[0].type == X.X86_OP_REG and y_.operands[0].reg == X.X86_REG_ESP and \
+                                        y_.operands[1].type == X.X86_OP_IMM:
+                                    cl_ += y_.operands[1].imm
+                                    break
+                                if y_.mnemonic == 'pop' and y_.operands and y_.operands[0].type == X.X86_OP_REG and \
+                                        y_.operands[0].reg in (X.X86_REG_EAX, X.X86_REG_ECX, X.X86_REG_EDX):
+                                    cl_ += 4
+                                    q_ = nxt[q_]
+                                    continue
+                                break
+                            if cl_:
+                                nb, pops = cl_, 0
                         if direct and target is not None:
                             t = callee_takes(target, slot_call)
                             for r in live:
