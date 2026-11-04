@@ -1,0 +1,28 @@
+{
+ "format": "fnvnx-scenes/1",
+ "comment": "The fixed scene set of S16-compare. Each scene is reached from the main menu by console commands only (wine_ref.sh splits the commands at each wait:<seconds> into s16_<id>_<k>.txt and types `bat s16_<id>_<k>`, sleeping between them; our guest runs the same lines through its console). Positions come from each cell's own COC marker, so nothing here depends on the player's save. class: deterministic scenes must match the reference within the thresholds; stochastic ones (AI, combat, particles) are judged against the reference's own run-to-run spread.",
+ "plugins": ["FalloutNV.esm"],
+ "ini": "tools/compare/ref_ini.py (1280x720 windowed, FOV 75, no audio, no threaded AI, no vsync)",
+ "common_pre": ["tgm", "set timescale to 1"],
+ "common_post": ["tm"],
+ "state": ["player.getpos x", "player.getpos y", "player.getpos z", "player.getangle x", "player.getangle z",
+           "show gamehour", "show timescale", "player.getincell {cell}"],
+ "scenes": [
+  {"id": "menu", "title": "main menu", "menu": 1, "frames": 3, "class": "deterministic", "cmds": []},
+  {"id": "docmitchell", "title": "Doc Mitchell's house at start", "cell": "GSDocMitchellHouse", "frames": 3,
+   "class": "deterministic",
+   "cmds": ["coc GSDocMitchellHouse", "wait:20", "tai", "tcai", "set gamehour to 9", "player.setangle x 0", "player.setangle z 90"]},
+  {"id": "goodsprings", "title": "Goodsprings exterior, noon, clear", "cell": "Goodsprings", "world": "WastelandNV",
+   "frames": 3, "class": "deterministic",
+   "cmds": ["coc Goodsprings", "wait:20", "tai", "tcai", "fw 000FFC88", "set gamehour to 12", "player.setangle x 0",
+            "player.setangle z 45", "fov 75"]},
+  {"id": "saloon", "title": "Prospector Saloon interior", "cell": "GSProspectorSaloonInterior", "frames": 3,
+   "class": "deterministic",
+   "cmds": ["coc GSProspectorSaloonInterior", "wait:20", "tai", "tcai", "set gamehour to 20", "player.setangle x 0",
+            "player.setangle z 180"]},
+  {"id": "quarry", "title": "Quarry Junction (deathclaws, combat)", "cell": "QuarryJunction", "world": "WastelandNV",
+   "frames": 3, "class": "stochastic",
+   "cmds": ["coc QuarryJunction", "wait:10", "fw 000FFC88", "set gamehour to 15", "player.setangle x 0",
+            "player.setangle z 0", "wait:20", "tai"]}
+ ]
+}
