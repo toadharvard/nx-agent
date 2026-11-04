@@ -62,6 +62,8 @@ def reclassify(rec):
     if cause != 'local-static' and _custom_cc(rec):
         return 'x86-custom-cc'
     if cause not in (None, 'unclassified', 'call-flow', 'signedness?'):
+        if _causes is not None and cause in _causes.HINT_REFINABLE:
+            return _causes.refine(rec, cause)   # oracle-vcall: a tag, split by the record (causes._rule_vcall)
         return cause
     try:
         import check_rebind

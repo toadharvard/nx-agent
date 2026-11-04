@@ -389,8 +389,85 @@ def test_cli_effects():
         check('field-width' in c and 'unclassified' not in c, 'CLI summary applies --effects (%s)' % sorted(c))
 
 
+def test_vcall_split():
+    """oracle-vcall (the runner's vcall='unplanted' tag, classify's fault probe) and oracle-fault split by the record."""
+    def vc(x, a, vptrs=None, trace=None):
+        r = rec(dict(kind='call-target', index=0, x86=x, arm=a, x86_trace=[x], arm_trace=trace or [a],
+                     vcall='unplanted'), 'oracle-vcall')
+        if vptrs:
+            r['case'] = dict(vptrs=vptrs)
+        return causes.refine(r, 'oracle-vcall')
+
+    check(vc('c3a10b55', '5e0f7a21') == 'vcall-garbage', 'both call garbage words: vcall-garbage')
+    check(vc('03000a10', 'd1e2f3a4') == 'vcall-garbage', 'a buffer address and a wild word: vcall-garbage')
+    check(vc('c3a10b55', '00456780') == 'oracle-vcall', 'native calls an exe text address: kept')
+    check(vc('08c41233', '00c41233') == 'vcall-stub-alias', 'garbage word in the code-stub range: stub alias')
+    check(vc('093a5b17', 'name:93a5b17') == 'vcall-stub-alias', 'garbage word in the named-stub range: stub alias')
+    check(vc('093a5b17', 'name:93a5b18') == 'oracle-vcall', 'another named stub is not an alias')
+    check(vc('c3a10b55', 'name:__s13_vtpad_01012340_7', {'03000000': '01012340'}) == 'vptr-unpaired',
+          'a call through a vtable padding slot: vptr-unpaired')
+    check(vc('c3a10b55', '00456780', trace=['name:__s13_vtpad_01012340_7', '00456780']) == 'vptr-unpaired',
+          'a padding slot earlier in the native trace: vptr-unpaired')
+    check(vc('c3a10b55', 'name:_ZN3Foo3BarEv') == 'native-undefined', 'an unbound C++ name, no vptr: undefined')
+    check(vc('c3a10b55', 'name:_ZN3Foo3BarEv', {'03000000': '01012340'}) == 'oracle-vcall',
+          'a C++ name reached with a planted vptr (a vtable slot) is kept')
+
+    def err(x, cause='oracle-vcall', addr='00401000'):
+        return causes.refine(rec(dict(kind='error', x86=x, arm=None), cause, addr), cause)
+
+    check(err('fault:r:0e0a1b2c') == 'oracle-private-address', 'oracle reads its own private range')
+    check(err('fault:x:0e0a1b2c') == 'oracle-private-address', 'oracle executes its own private range')
+    check(err('fault:w:0e0a1b20', 'unclassified') == 'oracle-private-address', 'oracle-fault in the private range')
+    check(err('fault:r:fffffffe', 'unclassified') == 'ilp32-pointer', 'dword read across 4 GiB: ilp32-pointer')
+    check(err('fault:r:00000010', 'unclassified') == 'oracle-fault', 'near-null oracle read stays oracle-fault')
+    check(err('fault:x:00000000') == 'oracle-vcall', 'oracle executes at null: kept')
+    check(causes.refine(rec(dict(kind='error', x86='fault:r:0e0a1b2c', arm='fault:r:00000004'), 'oracle-vcall'),
+                        'oracle-vcall') == 'oracle-vcall', 'both machines fault: no oracle-only rule')
+    import report
+    r = rec(dict(kind='call-target', index=0, x86='c3a10b55', arm='5e0f7a21', vcall='unplanted'), 'oracle-vcall')
+    check(report.reclassify(r) == 'vcall-garbage', 'report.reclassify hands oracle-vcall to the split')
+    check(report.reclassify(rec(dict(kind='return', x86=w(1), arm=w(2)), 'uninit-both')) == 'uninit-both',
+          'report.reclassify still keeps other probe causes')
+
+    # objects: an empty local callee (a bare ret) and a C++ name the object defines
+    saved_cache, saved_env = dict(causes._OBJ_CACHE), os.environ.get('FNVNX_CAUSES_OBJ')
+    saved_map = (causes._VFT, causes._LINKSYM, set(causes._BOUND))
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            os.environ['FNVNX_CAUSES_OBJ'] = d
+            path = os.path.join(d, 'src_t.cpp.o')
+            causes._OBJ_CACHE[path] = {0x00401000: {'_ZN4Stub3RunEv', '__fnv_00402000'},
+                                       0x00403000: {'__fnv_00402000', '_ZN3Foo3BarEv'},
+                                       '_defined': {'_ZN4Stub3RunEv', '_ZN3Foo3BarEv', '__fnv_00401000'},
+                                       '_empty': {'_ZN4Stub3RunEv'}}
+            causes._VFT, causes._LINKSYM = set(), {0x00402000: '__fnv_00402000'}
+            check(causes.empty_callees('src/t.cpp', 0x00401000) == ['_ZN4Stub3RunEv'], 'empty callee found')
+            check(err('fault:r:00000010', 'unclassified') == 'native-empty-callee',
+                  'oracle-fault where the native calls an empty stub: native-empty-callee')
+            check(err('fault:x:00000000') == 'native-empty-callee', 'oracle-vcall fault likewise')
+            check(err('fault:r:00000010', 'unclassified', '00403000') == 'oracle-fault', 'no empty callee: kept')
+            r = rec(dict(kind='call-target', index=0, x86='c3a10b55', arm='name:_ZN3Foo3BarEv', vcall='unplanted'),
+                    'oracle-vcall', '00403000')
+            check(causes.refine(r, 'oracle-vcall') == 'oracle-vcall', 'a name the object defines is not undefined')
+            r['divergence']['arm'] = 'name:_ZN3Foo3BazEv'
+            check(causes.refine(r, 'oracle-vcall') == 'native-undefined', 'a name nothing defines or binds')
+    finally:
+        causes._OBJ_CACHE.clear(); causes._OBJ_CACHE.update(saved_cache)
+        causes._VFT, causes._LINKSYM = saved_map[0], saved_map[1]
+        causes._BOUND.clear(); causes._BOUND.update(saved_map[2])
+        if saved_env is None:
+            os.environ.pop('FNVNX_CAUSES_OBJ', None)
+        else:
+            os.environ['FNVNX_CAUSES_OBJ'] = saved_env
+    for c in ('vcall-garbage', 'vcall-stub-alias', 'oracle-private-address', 'native-empty-callee'):
+        check(c in causes.POLICY, 'policy has %s' % c)
+    check(causes.policy('native-empty-callee')[:2] == ('real-bug', 'S1') and
+          causes.policy('vcall-garbage')[:2] == ('artifact', 'S13'), 'vcall split classes')
+
+
 if __name__ == '__main__':
     test_rules()
+    test_vcall_split()
     test_policy()
     test_summary()
     test_object_reader()
