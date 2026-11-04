@@ -39,7 +39,7 @@ replaced that process.
 | `sdmc:/switch/fnv/FalloutNV.exe`, `Data/` | the player's game, as in a PC install (C:\FalloutNV) | player |
 | `sdmc:/switch/fnv/user/` | profile: My Games/FalloutNV (INIs, Saves), AppData/Local/FalloutNV | game |
 | `sdmc:/switch/fnv/{launcher,host,crash}.log` | what the owner sends back | launcher, host |
-| `sdmc:/switch/fnv/fnvnx.ini`, `shaders.nvc0cache`, `override.txt` | options, Nine's shader cache, the marker | owner, host, launcher |
+| `sdmc:/switch/fnv/fnvnx.ini`, `nxgpu.log`, `override.txt` | options, the native renderer's log, the marker | owner, renderer, launcher |
 
 `os_fs_case_insensitive()` probes the card once (guest.nso against GUEST.NSO) instead of assuming FAT case folding.
 On a case-sensitive card, path.cpp resolves each component against the directory.
@@ -62,7 +62,7 @@ goes to nx-agent. The full report has a `## Package` table with every check, and
 | 3 | SVCs, services, instructions | check_svc.py | guest: no svc; host/launcher: svcs in the application set, services in the application set; nothing traps at EL0 (cntvct_el0 included) |
 | 4 | threads | check_threads.py | NPDM ranges; placement.h over every input stays on cores 0-2 (0-3 opted in) with priorities 0x1C..0x3B; literal threadCreate sites |
 | 5 | filesystem | check_fs.py | one layout everywhere, roots and mounts, the case probe, tests/s4's layout cases, the package tree |
-| 6 | GPU integration | check_gpu.py | the package has a GPU backend; default window, present, 720p (1080p docked via VI or the operation mode); cache/log paths; nothing desktop-only |
+| 6 | GPU integration (native renderer only, owner decision) | check_gpu.py | the packaged host is the native deko3d one without libnx's console; nxgpu_init checks every object it creates; default window, acquire/present, 720p (VI scales docked) or the operation mode; pools fit NXGPU_HOST_HEAP_MIB; log path inside the layout; nothing desktop-only |
 | 7 | platform | check_platform.py | HID (4 pads, handheld, keyboard/mouse/touch, vibration), audren, applet pump, every exit path cleans up, crash log; host_device_test.c run under qemu |
 | 8 | owner checklist | check_checklist.py | NRO_CHECKLIST.md is one page and matches the launcher's files and messages |
 
@@ -84,5 +84,5 @@ and the qemu-run host_device test. Self-tests: `test_check_nro.py`, `test_check_
 - **Layout split.** The host read sdmc:/switch/fnv while the guest read sdmc:/fnvnx/game and os_horizon.c
   sdmc:/fnv-nx. There is now one layout, and Data/ sits next to FalloutNV.exe.
 - **Memory.** The heap region (2 GiB), not the ~3.2 GiB pool, is the limit, and GPU memory is process heap. That
-  leaves 1,491 MiB of guest heap with a 512 MiB GPU host. The emulator maps a 64 MiB guest heap, so it cannot measure
+  leaves 1,491 MiB of guest heap with the native renderer's 512 MiB host heap (its pools: 249 MiB). The emulator maps a 64 MiB guest heap, so it cannot measure
   a boot to the first cell yet.
