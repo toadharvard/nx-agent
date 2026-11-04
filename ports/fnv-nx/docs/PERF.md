@@ -370,7 +370,50 @@ All at the exe's default settings (D20 revised: no settings presets). Costs are 
 | current-accumulator globals | DAT_011f95ec (FUN_00b54ac0's non-atomic DecRef/IncRef swap), DAT_011f4748+8 (FUN_004dc540) | any two culling passes on different accumulators at once | blocks overlapping the shadow, water and interface records with main (so they stay inline under MT1) | per-thread copies (a TLS slot like 0x2bc), or the culling process carrying its accumulator to BSFadeNode and the batch renderer |
 | BSBatchRenderer node pool lock | g_011c5f80 (RecursiveSpinLock, bsbatchrenderer.cpp ~1767) | every group/pass node allocation of every accumulator | small while one thread registers; contended under MT1's split | per-renderer pools |
 | Havok objects keyed on the stepping thread | CreateObjects 0x00cbf540 (m_iThirdValue = GetCurrentThreadId) | the pool and job queue are rebuilt whenever a different thread steps the world | none if one thread always steps; a rebuild per frame if the step moves between threads | always step from the same thread (the Havok MT1 patch must keep one stepping thread) |
+| world render races the cell update | main's render 0x0086ff70 (cull in 0x00873200) runs between the AI signal 0x86ec87 and the join; AI thread 1 steps Havok and runs the cell downward pass meanwhile (6.11) | the cull reads transforms and bounds that thread 1 writes | an MT1 event "downward pass done" before the cull adds a wait: the cull cannot start until the step + downward pass end | culling last frame's transforms (a frame of latency, as some engines do), or a pass that copies the cull-relevant bounds at the end of the downward pass |
 | platform: one wait lock | platform/win32/sync.cpp `w32_wait_lock` (every event, semaphore, mutex wait and signal) | all Win32 waitable objects | small at dozens-hundreds of hand-offs a frame (6.3); a hot spot if Havok's job queue signals per job | per-object locks (S4's layer) |
+
+### 6.11 Havok and animation in the frame (S15-threads, read from the exe and the decomp)
+
+**Where they run.** On the default path both are already off main. WinMain sets iNumHWThreads (0x011c3ea4) from
+`GetSystemInfo` (3 on the Switch), so it is > 1:
+* NPC animation `ProcessLists::FUN_0096cda0` (-> vtable 0x350 0x008885a0 -> `AnimData::UpdateAnimationForRef`
+  0x004939d0, fanned over the tasklet pool with bTaskletActorAnimMovementUpdates 0x011f126c, default 1) runs on AI
+  linear thread 0 (ailineartaskthreadmanager.cpp:678 single thread, :908 two).
+* The cell update `TES::FUN_00453550` (tes.cpp:4220) runs on AI linear thread 1, after thread 0's event 4
+  (ailineartaskthreadmanager.cpp:804; :700 single thread). It holds lock 0x011c3d84 and does wind, the Havok step
+  (exterior: `UpdateCellGrid` 0x004ba9a0 -> 0x00554780 -> slot 49 on `g_011ca0d8`; interior: 0x00551890 on the
+  cell's world; one world per frame) and the cell's `UpdateDownwardPass` (rigid bodies -> NiNodes).
+* Main runs `FUN_00453550` only when iNumHWThreads == 1 (main.cpp:2447).
+
+**What stays on main:**
+* the player's movement, animation and face animation (0x009466d0 -> `FUN_008885e0`, 0x008d3550), before the AI
+  signal 0x86ec87;
+* after the join 0x008c7990, the Havok consumers in `FUN_009781d0` (processlists.cpp:8546-8589: foot IK / ragdoll
+  impulses `FUN_00ca2ad0` / `FUN_00ca1410`, projectiles `Update3D` 0x009b17a0, muzzle flashes);
+* the packed task-6 drain `FUN_0087a790` (main.cpp:3364: queued `UpdateControllersRecursive`) and the queued attaches
+  `FUN_00552570`.
+
+The model now has havok / animation (main remainders: 0.3-1.5, 0.5-1.8 M) and havok_ai / animation_ai (on the AI
+linear threads: 1.7-3.5, 1.5-2.2 M), where it had 2-5 and 2-4 M on main. As built, the worst frame at 1020 MHz moves
+from 33.7 to 26.9 ms; this is a correction of the model, not a code change.
+
+**Levers that follow:**
+* Havok has no main lever. iSimType=4 (6.9) spreads the step over the pool, which shortens AI thread 1's critical
+  section, not main.
+* Animation: drain task 6 on the AI thread before the join (`threaded_anim`, MT1; its queue lock `m_uiLockState` and
+  the attaches to be checked), 40-60 % of the main remainder.
+
+**A race inherited from the PC code.** Main runs the whole world render `FUN_0086ff70` (main.cpp:9069; cull in
+`MainView` 0x00873200) between the AI signal and the join, with no wait on the normal path (the only event wait is
+the menu branch's 0x007058e0 -> 0x00713c70). So main culls while AI thread 1 steps Havok and writes world transforms
+and bounds in the downward pass. On x86 this is a data race the TSO model made benign enough. On the A57 a reader
+can see a transform half-written (an NiTransform is 13 floats).
+* Fix (MT1): AI thread 1 signals a new "downward pass done" event right after `FUN_00453550` (:804/:700), and main
+  waits on it at the top of `FUN_008706b0` (main.cpp:13732), before the cull.
+* What still overlaps: main's UI/HUD, temp effects 0x009746c0, sky `FUN_004537c0`, effect roots `FUN_00c50610` and
+  pathing `FUN_006ebc50` (about 10-25 % of main).
+* This costs main time: the wait the race hid. The serial cull-after-step order is the real code limit (6.10).
 
 ### 6.5 Memory ordering: what x86 gave for free
 
@@ -666,16 +709,15 @@ lo-hi range; every plan includes the built levers (`placed`'s); level by the mid
 
 | scenario | main M | 1020 MHz frame / worst ms | level | 1785 MHz frame / worst ms | level |
 |---|---:|---|---|---|---|
-| placed (as built: placement + barrier_relax) | 22.9 (13.1-33.2) | 28.1 (12.8-54.2) / 35.1 | fail | 16.1 (7.3-31.0) / 20.1 | pass_45 |
-| plan45 (mt_cull, havok_workers, threaded_anim) | 19.1 (10.0-29.6) | 23.5 (9.8-48.3) / 29.3 | pass_30 | 13.4 (7.1-27.6) / 16.8 | pass_45 |
-| plan45b (plan45 + render_f2f4, neon_math) | 16.9 (8.3-27.4) | 20.7 (8.1-44.8) / 25.9 | pass_30 | 11.8 (7.1-25.6) / 14.8 | target_60 |
-| plan60 (plan45b + instancing, core 3) | 15.5 (7.4-25.8) | 19.1 (7.3-42.1) / 23.8 | pass_30 | 10.9 (7.1-24.1) / 13.6 | target_60 |
+| placed (as built: placement + barrier_relax) | 17.6 (2.6-31.9) | 21.5 (5.5-52.1) / 26.9 | pass_30 | 12.3 (5.5-29.8) / 15.4 | target_60 |
+| plan45 (mt_cull, havok_workers, threaded_anim) | 15.6 (3.4-29.1) | 19.1 (5.5-47.6) / 23.9 | pass_30 | 10.9 (5.5-27.2) / 13.7 | target_60 |
+| plan45b (plan45 + render_f2f4, neon_math) | 13.9 (2.2-27.4) | 17.0 (5.5-44.7) / 21.2 | pass_45 | 9.7 (5.5-25.6) / 12.1 | target_60 |
+| plan60 (plan45b + instancing, core 3) | 12.7 (1.4-25.9) | 15.5 (5.5-42.4) / 19.4 | pass_45 | 8.9 (5.5-24.2) / 11.1 | target_60 |
 
 Reading it (owner's target J-0150: 60 fps stable, worst frame <= 16.7 ms at 1.02 GHz): **that needs the main thread
 under ~10.9 M mean** (`budget_mean_minsn.1020.target_60`, at the 1.25 worst-frame factor and IPC 0.8). No plan
-reaches it: with mt_cull at its MT1 size (half the main-scene pass) plan60 (15.5 M) lands at a 23.8 ms worst frame,
-about 4.6 M short, and every plan is pass_30 at 1020 MHz. The as-built mid case (22.9 M) misses even 30 fps there.
-At 1785 MHz plan45b meets the target. Every verdict is still `uncertain`
+reaches it: with Havok and NPC animation on the AI linear threads (6.11, as the PC default path runs them) plan60
+(12.7 M) lands at a 19.4 ms worst frame. As built: 26.9 ms. Every verdict is still `uncertain`
 (2.6x spread of work, 1.7x of IPC).
 The two measurements that close it stay frameprof on a real frame and B1 (IPC) on hardware.
 
