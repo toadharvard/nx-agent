@@ -2597,3 +2597,47 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **measured** - On link/9a0243c7eabe the audits take 372 s; the slow ones are c2-bridges (about 150 s) and c5-pic
   (about 90 s). c2-bridges: 99 pass, 4 skipped, 0 fail. A full job takes about 41 min, so this adds about 6 min.
   R4-1..R4-3 are still open at 40b2cb5.
+
+### J-0119 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0108,J-0109,J-0111,J-0112,J-0114
+
+* **did** - S2c `1aeaa9b`: every V entry's `__fnv_<addr>` is now its native address point.
+  - `DAT_<hex>` stores and offset (secondary) vptr stores are recognised.
+  - On f13's objects, 1,101 of 1,860 hand-stored vtables are bound and 425 requested for synthesis. 334 have no
+    candidate: 235 are shells no unit names as a constructor or destructor (S1, or the exe's RTTI), and 99 have no
+    usable storing address.
+* **did** - Two V1 defects fixed:
+  - R4-1 (`05bcc99`): without a declaration, argument bytes come from `ret N` or the caller's cleanup.
+  - R4-2 (`25bcace`): `__declspec(noreturn)` and `__attribute__` C declarations are read.
+* **did** - Two items from S1b:
+  - `8b5e40a`: casts through function-pointer typedefs and aliases count (58 names in 43 units).
+  - `a9fbc1b`: a non-POD's fastcall hidden result is in ecx, checked with MSVC 2008, so 0x006eac70 is consistent. V1's
+    `F1-8-nonpod-hidden` case models the buffer on the stack and should follow.
+* **measured** - S2c classified the 3,762 undefined C++ names at 9844d8d (table in docs/LINK.md):
+
+  | cause | names | owner |
+  |---|---:|---|
+  | member functions declared only (252 templates, 67 refcount) | 1,713 | S1 |
+  | destructors declared only | 747 | S1 |
+  | constructors declared only | 126 | S1 |
+  | a class's own operator new/delete | 501 | fixed by rule |
+  | extern-text | 210 | pending code |
+  | a body exists but no unit emits it | ~180 | S2c next |
+  | free functions declared only | 119 | S1 |
+  | special names (typeinfo, vtables, thunks) | 137 | synthesis or S1 key functions |
+  | data declared only | 36 | S1 |
+  | C++ runtime | 30 | S4 |
+  | class-shape cases | 2 | |
+
+* **did** - S2c `c412227`: three rules for undefined names.
+  - A class's own operator new/delete go to the game allocator (501).
+  - Unit-local namespaced class copies (`fnv_XXXXXXXX::`) are looked up without the namespace, else bound to the global
+    definition (~110). This covers S13's NiFixedString case.
+  - Unique loose parameter matches bind (13).
+  - About 600 fewer undefined names are expected; the next farm link will show.
+* **found** - Three answers to other streams:
+  - 00505010 (S13): the link has the V pairing (`010266e4 V _ZTV14TESCombatStyle`, offset 8). The fuzzer has to apply
+    V entries with their address-point offset.
+  - DECL1 retargets (S11): keep the CRT binding. Nothing on the Switch hooks the wrappers.
+  - R4-3: designed, not implemented. resolve asks the probe for "base typeinfo as unit U sees it", vtables.py
+    synthesizes it, and apply retargets to it. It needs probe changes, so it can only be measured on the farm.
+* **verified** - All 7 link suites pass.
