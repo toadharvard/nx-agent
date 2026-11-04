@@ -185,9 +185,9 @@ kernel32	TlsGetValue	device	platform/win32/thread.cpp	host threads (thread_creat
 kernel32	TlsSetValue	device	platform/win32/thread.cpp	host threads (thread_create/priority/cpu, placement.h)	
 kernel32	TryEnterCriticalSection	device	platform/win32/sync.cpp	guest futex words + host wait_on_address	
 kernel32	UnhandledExceptionFilter	logic	platform/win32/crt_kernel32.cpp	en-US/1252 tables; std handles to the host log	
-kernel32	VirtualAlloc	open	platform/win32/memory.cpp	guest heap (newlib over the host heap)	MEM_RESERVE takes backed heap memory for the whole range and fails for a fixed address (os_vm_reserve hint)
-kernel32	VirtualFree	open	platform/win32/memory.cpp	guest heap (newlib over the host heap)	MEM_DECOMMIT only zeroes: nothing goes back to the system
-kernel32	VirtualQuery	open	platform/win32/memory.cpp	guest heap (newlib over the host heap)	reports the guest-heap reservations only
+kernel32	VirtualAlloc	device	platform/win32/memory.cpp	host VM service: virtmem reservation (fixed address honoured), commit maps zeroed heap blocks (svcMapMemory)	toolchain/host/host_vm.inc (FNVNX_PLAT_VM_*); an older host / the emulator: guest-heap fallback; tests: backends host_vm_test.c (qemu)
+kernel32	VirtualFree	device	platform/win32/memory.cpp	host VM service: decommit unmaps and frees whole extents, zeroes parts; release unmaps all	toolchain/host/host_vm.inc (FNVNX_PLAT_VM_*); an older host / the emulator: guest-heap fallback; tests: backends host_vm_test.c (qemu)
+kernel32	VirtualQuery	device	platform/win32/memory.cpp	the reservation table of memory.cpp (what VirtualAlloc made)	toolchain/host/host_vm.inc (FNVNX_PLAT_VM_*); an older host / the emulator: guest-heap fallback; tests: backends host_vm_test.c (qemu)
 kernel32	WaitForMultipleObjects	device	platform/win32/sync.cpp	guest futex words + host wait_on_address	
 kernel32	WaitForSingleObject	device	platform/win32/sync.cpp	guest futex words + host wait_on_address	
 kernel32	WideCharToMultiByte	logic	platform/win32/crt_kernel32.cpp	en-US/1252 tables; std handles to the host log	
