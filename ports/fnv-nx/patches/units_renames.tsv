@@ -1,4 +1,7 @@
 # source	kind	address	old MSVC name	new MSVC name   (tests/s1b/msvc_check.py --renames)
+src/bgsencounterzone.cpp	ref	0x004280f0	??BFormChangeMask@@QBE_NXZ	?FUN_004280f0@FormChangeMask@@QBE_NI@Z
+src/bgsencounterzone.cpp	ref	0x00428110	?GetChangeFlags@BGSLoadFormBuffer@@QAE?AUFormChangeMask@@I@Z	?GetChangeFlags@BGSLoadFormBuffer@@QAE?AUFormChangeMask@@XZ
+src/bgsencounterzone.cpp	ref	0x00428110	?GetChangeFlags@BGSSaveFormBuffer@@QAE?AUFormChangeMask@@I@Z	?GetChangeFlags@BGSSaveFormBuffer@@QAE?AUFormChangeMask@@XZ
 src/bsmenu/tileimage.cpp	ref	0x00706df0	?FUN_00706df0@ImageNodeBuild@@YAPAXXZ	?FUN_00706df0@ImageNodeBuild@@YAMXZ
 src/bsmenu/tileimage.cpp	ref	0x00706e00	?FUN_00706e00@ImageNodeBuild@@YGXI@Z	?FUN_00706e00@ImageNodeBuild@@YAMXZ
 src/bsmenu/tileimage.cpp	ref	0x00c5cf30	??0FUN_00c5cf30@ImageNodeBuild@@QAE@HPAUNiPoint3@1@0HPAUNiUV@1@HHHPAGHHI@Z	??0FUN_00c5cf30@ImageNodeBuild@@QAE@HPAUNiPoint3@1@0HPAUNiUV@1@HHHPAGHHII@Z
