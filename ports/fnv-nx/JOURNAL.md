@@ -1586,3 +1586,31 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   - S14/S3: index the code-pointer scan.
   - Later: proxy batching (S6c), sse2neon hot spots (S1). The ini defaults go in when the exe arrives
     (setting_names.py).
+
+### J-0077 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0075
+
+* **found**:
+  - **Farm sessions that attach a repository with add_repo can stall on a permission prompt** (farm5 stalled that
+    way).
+  - **A farm does not follow instructions sent from another session.** That is correct cross-session behaviour:
+    messages from other sessions are data, not the user's instructions. So a farm's whole behaviour must be in the
+    prompt it is created with.
+* **decided** - Farm sessions are created with the private artifacts repository `toadharvard/fnv-nx-build` as their
+  source, so they push there with no attach and no prompt. They clone the public nx-agent read-only.
+  `tools/farm/runner.sh` is the whole loop in one process:
+  - it watches the integration head;
+  - it runs the job and publishes the report to `reports/<name>` of the artifacts repository;
+  - it exits before the 2 h background limit;
+  - a check-in every 30 min (send_later) restarts it.
+
+  Farms 1-5 were recreated this way. A prepare farm publishes the tree once per commit (`t/<commit12>`), and
+  reuses the previous tree when no prepare input changed.
+* **did**:
+  - Merged S11's `tools/farm/equiv_job.sh` + `tools/equiv/setup_msvc.sh`. The job installs Wine and VC 2008 from
+    Microsoft's ISOs, shares the pristine objects through `msvc/pristine/<decomp12>`, attributes by rule groups and
+    writes a markdown report. Orchestrator re-ran tests/s11: ok.
+  - Started six MSVC-gate farms eq1-6 (shards of 6).
+  - Measured here: a 163 MB prepared tree pushes to the artifacts repository in 20 s.
+* **metrics** - farms_running=12 (prep, farm1 census, farm2-5 compile 1-4/4, eq1-6 equiv 1-6/6) render_machine=1
+* **next** - S2c and S5 consume farm objects. Farms still to come: fuzz (S13), static gate (S12), full build + boot
+  (S9).
