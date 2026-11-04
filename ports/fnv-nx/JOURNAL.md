@@ -2946,3 +2946,20 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
     `claude/fnv-s4-runtime`.
   - Also queued for cloud containers: S12-ordering, S2d-link-bodies, S13b-fuzz-causes.
   - The owner decides which farms to pause; the proposal is st1-st4, then fuzz 26 -> 18 shards.
+
+### J-0134 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0133
+
+* **decided (owner: "pick what is best")** - Free cloud slots by pausing the four static-scan farms st1-st4 and keep
+  all 26 fuzz shards.
+  - The static results are already in (R0, J-0131), and the open classes need one whole-program fix, not more scans.
+  - Fuzzing is needed again as soon as the next link and S13's vftable modelling land.
+* **did** - Disabled the hourly check-ins of st1-st4 (not deleted, so they can be re-enabled) and archived the four
+  sessions; they can be unarchived.
+* **did** - Started four new cloud streams. Each pushes to its own branch and reports to the orchestrator, which
+  merges.
+  | stream | branch | goal |
+  |---|---|---|
+  | S4-runtime | claude/fnv-s4-runtime | 603 runtime names, 40 imports: D3DX math/textures/shaders, mmio, Bink |
+  | S12-ordering | claude/fnv-s12-ordering | x86 ordering on AArch64: volatile acquire/release, `_ReadWriteBarrier`, TLS unification; litmus tests under qemu |
+  | S2d-bodies | claude/fnv-s2d-bodies | 2,035 declared-only C++ functions and 912 ctors/dtors: bind by address, synthesize, or report |
+  | S13b-causes | claude/fnv-s13b-causes | classify the unclassified bucket, separate artifacts from real bugs, fix bool-repr/signedness/division/nan-bits |
