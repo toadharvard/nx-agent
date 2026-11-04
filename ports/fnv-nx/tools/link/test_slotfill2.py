@@ -123,6 +123,11 @@ def main():
           'the definition\'s own name keeps the primary entry')
     check(not slotfill2.other_class_entry(p5('_ZN3CVB4FUN_Ei'), p5('_ZN7CVShell3getEi')),
           'another function name: not decided here')
+    dm6 = {'_ZA': 'BSSimpleList<Actor*>::RemoveAll()', '_ZI': 'BSSimpleList<InventoryStackRecord*>::RemoveAll()',
+           '_ZG': 'GO::GO(int)', '_ZH': 'FUN_x::FUN_x(int)'}
+    check(slotfill2.own_instantiation('_ZA', '_ZI', {'_ZA'}, dm6.get), 'class F: its own instantiation by name')
+    check(not slotfill2.own_instantiation('_ZA', '_ZI', set(), dm6.get), 'class F: not defined anywhere -> address')
+    check(not slotfill2.own_instantiation('_ZG', '_ZH', {'_ZG'}, dm6.get), 'class F: shells keep the address')
     shift_test()
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

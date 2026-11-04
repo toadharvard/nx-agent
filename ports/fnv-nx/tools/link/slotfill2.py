@@ -444,3 +444,21 @@ def other_class_entry(isig, dsig):
     q, dq = isig.qual or [], dsig.qual or []
     return (not isig.variant and not dsig.variant and len(q) > 1 and len(dq) > 1 and q[-1] == dq[-1]
             and q[:-1] != dq[:-1])
+
+
+def _strip_templates(d):
+    prev = None
+    while prev != d:
+        prev, d = d, re.sub(r'<[^<>]*>', '<>', d)
+    return d
+
+
+def own_instantiation(un, dname, defined, demangled):
+    """Class F (S1-refs): MSVC folds identical instantiations onto one address (BSSimpleList<Actor *>::RemoveAll and
+    BSSimpleList<InventoryStackRecord *>::RemoveAll at 0x00470470), and the address map holds one native for it.
+    A reference to another instantiation of the same template member than that native, whose own instantiation
+    some object defines, keeps its name: the linker binds it to its own instantiation."""
+    if un == dname or un not in defined:
+        return False
+    a, b = demangled(un) or '', demangled(dname) or ''
+    return '<' in a + b and a != b and _strip_templates(a) == _strip_templates(b)

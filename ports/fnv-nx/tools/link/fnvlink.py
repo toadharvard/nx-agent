@@ -733,6 +733,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     stats['iat_calls'] += 1
                 elif ak == 'data':
                     cls = 'data'; target = ADDR_SYM % addr; used_addr.add(addr)
+                elif addr in native and slotfill2.own_instantiation(un, native[addr]['sym'].name, anydef,
+                                                                     lambda n_: it[n_]):
+                    # S2c-vt2 class F: another instantiation of the folded template member, defined by its own name
+                    cls, target = 'native', None
+                    stats['fold_own_instantiation'] += 1
                 elif addr in native:
                     cls = 'code'
                     bound[u.source].add(addr)
