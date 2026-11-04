@@ -60,6 +60,7 @@ static struct {
     int lastSlot;
 
     DkMemBlock mem[MAX_MEMBLOCKS + 1];
+    DkGpuAddr memAddr[MAX_MEMBLOCKS + 1];   /* cached dkMemBlockGetGpuAddr (record looks it up per bind) */
     uint32_t nMem;
     uint32_t imageHead;
 
@@ -154,7 +155,7 @@ static int is_depth(uint32_t f) {
 }
 
 static DkGpuAddr mem_addr(uint32_t id, uint32_t off) {
-    return id && id <= g.nMem ? dkMemBlockGetGpuAddr(g.mem[id]) + off : DK_GPU_ADDR_INVALID;
+    return id && id <= g.nMem ? g.memAddr[id] + off : DK_GPU_ADDR_INVALID;
 }
 static DkCompareOp dk_cmp(uint32_t c) { return (DkCompareOp)((c & 7) + 1); }      /* NxCompare + 1 */
 static DkStencilOp dk_sop(uint32_t o) {
@@ -289,6 +290,7 @@ static u64 api_mem_create(u64 descAddr) {
     if (!b) return 0;
     uint32_t id = ++g.nMem;
     g.mem[id] = b;
+    g.memAddr[id] = dkMemBlockGetGpuAddr(b);
     return id;
 }
 
@@ -460,6 +462,9 @@ static void record(DkCmdBuf cb, const NxSubmit* s, NxFrameStats* st) {
     const uint32_t* end = w + s->words;
     uint16_t cur[BK_COUNT] = {0};
     uint32_t curState = 0;
+    /* uniform buffers bound in this command list, per stage and slot: a bind of the same range is skipped */
+    DkGpuAddr uboAddr[2][4] = {{0}};
+    uint32_t uboSize[2][4] = {{0}};
     int slot = -1;
     PassState ps;
     memset(&ps, 0, sizeof ps);
@@ -546,8 +551,13 @@ static void record(DkCmdBuf cb, const NxSubmit* s, NxFrameStats* st) {
         case NxOp_BindUbo: {
             if (argc < 5) break;
             DkGpuAddr ad = mem_addr(a[2], a[3]);
-            if (a[0] & 1) dkCmdBufBindUniformBuffer(cb, DkStage_Vertex, a[1], ad, a[4]);
-            if (a[0] & 2) dkCmdBufBindUniformBuffer(cb, DkStage_Fragment, a[1], ad, a[4]);
+            const uint32_t sl = a[1] & 3;
+            if ((a[0] & 1) && (uboAddr[0][sl] != ad || uboSize[0][sl] != a[4] || a[1] > 3)) {
+                dkCmdBufBindUniformBuffer(cb, DkStage_Vertex, a[1], ad, a[4]); uboAddr[0][sl] = ad; uboSize[0][sl] = a[4];
+            }
+            if ((a[0] & 2) && (uboAddr[1][sl] != ad || uboSize[1][sl] != a[4] || a[1] > 3)) {
+                dkCmdBufBindUniformBuffer(cb, DkStage_Fragment, a[1], ad, a[4]); uboAddr[1][sl] = ad; uboSize[1][sl] = a[4];
+            }
             break;
         }
         case NxOp_BindVtx: if (argc >= 3) dkCmdBufBindVtxBuffer(cb, 0, mem_addr(a[0], a[1]), a[2]); break;

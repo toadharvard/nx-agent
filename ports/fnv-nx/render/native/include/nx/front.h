@@ -41,6 +41,7 @@ public:
     // Returns the CPU pointer, writes the block offset; 0 when the region is full.
     void* Alloc(uint32_t size, uint32_t align, uint32_t* offset);
     uint32_t block() const { return block_; }
+    const uint8_t* cpu() const { return cpu_; }
     uint32_t used() const { return head_ - regionStart_; }
     uint32_t region_size() const { return region_; }
 private:
@@ -172,6 +173,9 @@ public:
     enum { kClearPrim = 0xFF };
     // The D3D9 epilogue block for a packet (sets p->epi); 0 when the ring is full.
     NxEpilogue* Epilogue(Packet* p);
+    // The draw's epilogue block with these contents: reuses the last one written this frame when it is equal (so
+    // consecutive draws with the same fog / alpha test share one block and one bind).
+    void SetEpilogue(Packet* p, const NxEpilogue& e);
     // Engine pass id + family of a draw packet: encoded as NxOp_Marker (NX_MARKER_PASS) before the first draw of each
     // run of draws with the same tag in a pass. family 0 = untagged.
     void Tag(const Packet* p, uint16_t enginePass, uint16_t family);
@@ -186,6 +190,7 @@ private:
     Backend* be_ = nullptr;
     Ring ubo_;
     uint32_t uboSize_ = 0, frame_ = 0, dropped_ = 0;
+    uint32_t lastEpi_ = 0;                                       // 1 + ring offset of the last SetEpilogue block
     PassDesc passes_[kMaxPasses];
     uint32_t passUbo_[kMaxPasses], passUboSize_[kMaxPasses];
     uint32_t nPasses_ = 0, nPackets_ = 0, nTex_ = 0, nDyn_ = 0, stateBinds_ = 0;
