@@ -231,21 +231,72 @@ int n1_selftest(Backend* be, char* log, uint32_t loglen, int* checks) {
     // frame 2 through the engine-facing override stubs (the engine's `this` is opaque, never dereferenced)
     engine::NiDX9Renderer* eng = (engine::NiDX9Renderer*)(void*)&kGroupKey;
     engine::NiDX9RenderState* ers = (engine::NiDX9RenderState*)(void*)&kGroupKey;
-    ers->SetRenderState(RS_ALPHABLENDENABLE, 1, true);
+    ers->SetRenderState(RS_ALPHABLENDENABLE, 1, 0, 0);
     t.Check(r.state().GetRenderState(RS_ALPHABLENDENABLE) == 1 && ers->GetRenderState(RS_ALPHABLENDENABLE) == 1,
             "stub: SetRenderState reaches the StateTracker");
-    ers->RestoreRenderState(RS_ALPHABLENDENABLE);
-    t.Check(ers->GetRenderState(RS_ALPHABLENDENABLE) == 0, "stub: RestoreRenderState");
+    ers->SetAlphaBlendEnable(0, 0, 0);
+    t.Check(ers->GetRenderState(RS_ALPHABLENDENABLE) == 0, "stub: SetAlphaBlendEnable");
+    ers->SetRenderState(28, 0, 0, 1);    // FOGENABLE 0, locked
+    ers->SetRenderState(28, 1, 0, 0);    // ignored while locked
+    t.Check(ers->GetRenderState(28) == 0, "stub: a locked render state ignores later sets");
+    ers->SetBlendFunc(5, 6, 0, 0);
+    t.Check(ers->GetRenderState(19) == 5 && ers->GetRenderState(20) == 6, "stub: SetBlendFunc");
+    ers->SetSamplerState(0, 5, 1, 0);    // MAGFILTER POINT
+    t.Check(ers->GetSamplerState(0, 5) == 1, "stub: Set/GetSamplerState");
+
+    // synthetic engine geometry (interop layout of engine_stubs.h) in an arena; embedded pointers are offsets
+    static uint8_t arena[2048] __attribute__((aligned(16)));
+    memset(arena, 0, sizeof arena);
+    engine::SetGuestBase((uintptr_t)arena);
+    auto put32 = [&](uint32_t o, uint32_t v) { memcpy(arena + o, &v, 4); };
+    auto put16 = [&](uint32_t o, uint16_t v) { memcpy(arena + o, &v, 2); };
+    auto putf = [&](uint32_t o, const float* f, int n) { memcpy(arena + o, f, 4 * n); };
+    auto geometry = [&](uint32_t geo, uint32_t data, uint32_t verts, float x0, float y0, float x1, float y1, const float* col) {
+        const float rot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}, one = 1;
+        putf(geo + 0x68, rot, 9); putf(geo + 0x68 + 48, &one, 1);
+        put32(geo + 0xB8, data);
+        put16(data + 0x08, 4); put32(data + 0x20, verts); put32(data + 0x28, verts + 48); put16(data + 0x40, 2);
+        const float pos[12] = {x0, y0, 0.5f, x1, y0, 0.5f, x0, y1, 0.5f, x1, y1, 0.5f};
+        putf(verts, pos, 12);
+        for (int i = 0; i < 4; i++) putf(verts + 48 + 16 * i, col, 4);
+    };
+    const float magenta[4] = {1, 0, 1, 1}, cyan[4] = {0, 1, 1, 1};
+    geometry(64, 512, 640, 0.0f, 0.5f, 0.25f, 0.65f, magenta);                 // NiTriShape: a triangle list
+    put32(512 + 0x44, 6); put32(512 + 0x48, 800);
+    const uint16_t list[6] = {0, 1, 2, 2, 1, 3};
+    memcpy(arena + 800, list, sizeof list);
+    geometry(1024, 1280, 1400, 0.25f, 0.75f, 0.5f, 1.0f, cyan);                 // NiTriStrips: one strip
+    put16(1280 + 0x44, 1); put32(1280 + 0x48, 1600); put32(1280 + 0x4C, 1616);
+    const uint16_t len = 4, strip[4] = {0, 1, 2, 3};
+    memcpy(arena + 1600, &len, 2); memcpy(arena + 1616, strip, sizeof strip);
+    geometry(1700, 0, 0, 0, 0, 0, 0, cyan);                                    // no model data: skipped
+    Renderer::GeomView gv;
+    t.Check(engine::ReadGeometry(arena + 64, &gv) && gv.indices && gv.indexCount == 6 && gv.vertices == 4,
+            "interop: NiTriShapeData read as a list");
+    t.Check(engine::ReadGeometry(arena + 1024, &gv) && !gv.indices && gv.stripCount == 1 && gv.stripLengths[0] == 4,
+            "interop: NiTriStripsData read as strips");
     t.Check(eng->Do_BeginFrame(), "stub: BeginFrame");
     r.SetBackgroundColor(0, 0, 1, 1);
     t.Check(eng->Do_BeginUsingRenderTargetGroup(nullptr, Renderer::CLEAR_ALL), "stub: BeginUsingRenderTargetGroup");
     r.SetBackgroundColor(1, 1, 0, 1);
     eng->Do_ClearBuffer(&quarter, Renderer::CLEAR_BACKBUFFER);
+    eng->Do_SetScreenSpaceCameraData(nullptr);
+    const uint32_t skipped0 = engine::SkippedGeometry(), draws0 = r.geometryDraws();
+    eng->Do_RenderGeometry(arena + 64);
+    eng->Do_RenderGeometry(arena + 1024);
+    eng->Do_RenderGeometry(arena + 1700);
+    t.Check(r.geometryDraws() == draws0 + 2 && engine::SkippedGeometry() == skipped0 + 1, "stub: RenderGeometry 2 drawn, 1 skipped");
     t.Check(eng->Do_EndUsingRenderTargetGroup() && eng->Do_EndFrame() && eng->Do_DisplayFrame(), "stub: End + Display");
     t.Check(be->Readback(rb), "readback back buffer (frame 2)");
     p = px(10, 70); q = px(100, 10);
     t.Check(p[2] == 255 && p[0] == 0 && q[0] == 255 && q[1] == 255 && q[2] == 0, "stub frame: clear + partial clear",
             p[2], q[1]);
+    p = px(10, 55); q = px(40, 85);
+    t.Check(p[0] == 255 && p[1] == 0 && p[2] == 255, "geometry: triangle-list shape (magenta)", p[0], p[1]);
+    t.Check(q[0] == 0 && q[1] == 255 && q[2] == 255, "geometry: strip shape (cyan)", q[0], q[1]);
+    p = px(10, 63); q = px(31, 55);   // y1 = 0.65 * 96 = 62.4 -> rows 48..62; x1 = 32
+    const uint8_t* q2 = px(32, 55);
+    t.Check(p[0] == 0 && q[0] == 255 && q2[0] == 0, "geometry: shape edges (row 63 and column 32 outside)", p[0], q2[0]);
     *checks = t.checks;
     return t.fails;
 }

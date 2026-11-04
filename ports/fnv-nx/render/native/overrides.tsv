@@ -3,36 +3,40 @@
 # Columns (tab-separated): address <TAB> our symbol <TAB> ABI / notes
 #   address: hex function address, or vslot:<MSVC vftable symbol>:<slot index> for a virtual whose implementation
 #            address the image vftable holds (R1b: the linker reads the slot and treats the row as that address).
-# Rows marked "N1-pending" are planned (docs: render/native/N1_PLAN.md) and skipped by the linker. Every other row's
+# Rows marked "N1-pending" are planned (docs: render/native/N1_PLAN.md) and skipped by the linker. "vft=<class>:<slot>"
+# in the notes names the image vftable slot that holds the address (read from the user's exe by
+# tools/exe_vftables.py into the gitignored vftables.tsv; tests/s6n/test_overrides.py checks it when that exists). Every other row's
 # symbol is defined in libnxrender.a (render/native/n1/build.sh; n1/engine_stubs.cpp), checked by
 #   python3 -I tests/s6n/test_overrides.py <libnxrender.a>
 # Link (native build only, after NATIVE1 drops render/native/drop_units.txt):
 #   python3 tools/link/fnvlink.py resolve <units.json> <objects.tsv> <out> \
 #       --override render/native/overrides.tsv --override-lib <n1 out>/libnxrender.a [--msvc-objs <dir>]
 #
-# ---- NiDX9Renderer: implementation addresses (R2 fallback: no MSVC object emits ??_7NiDX9Renderer@@6B@, see
-# REQUESTS.md R2). Identified from the decomp bodies; signatures = the decomp definitions at these addresses.
-00e74f40	_ZN2nx6engine13NiDX9Renderer13Do_BeginFrameEv	thiscall(this) -> bool; device-lost check + BeginScene = Do_BeginFrame
-00e69660	_ZN2nx6engine13NiDX9Renderer11Do_EndFrameEv	thiscall(this) -> bool; EndScene if in a scene = Do_EndFrame
-00e7ccd0	_ZN2nx6engine13NiDX9Renderer15Do_DisplayFrameEv	thiscall(this) -> bool; Present only = Do_DisplayFrame
-00e6f310	_ZN2nx6engine13NiDX9Renderer14Do_ClearBufferEPNS_7NiRectFEm	thiscall(this, NiRectF* rect, unsigned mode); = Do_ClearBuffer (vslot 98)
-00e6eea0	_ZN2nx6engine13NiDX9Renderer30Do_BeginUsingRenderTargetGroupEPKvm	thiscall(this, NiRenderTargetGroup*, unsigned clear) -> bool; logs "NiDX9Renderer::BeginUsingRenderTargetGroup"
-# ---- NiDX9Renderer virtuals with no implementation address yet (need the image vftable, REQUESTS.md R2) ----
-vslot:??_7NiDX9Renderer@@6B@:99	_ZN2nx6engine13NiDX9Renderer16Do_SetCameraDataEPKNS_9NiPoint3fES4_S4_S4_PKNS_10NiFrustumFEPKNS_7NiRectFE	thiscall(this, loc, dir, up, right, const NiFrustum*, const NiRect<float>* port); slot from 0x004e9c90; N1-pending (R2: vftable)
-vslot:??_7NiDX9Renderer@@6B@:100	_ZN2nx6engine13NiDX9Renderer27Do_SetScreenSpaceCameraDataEPKNS_7NiRectFE	thiscall(this, const NiRect<float>* port); slot from 0x004a0dd0; N1-pending (R2: vftable)
-vslot:??_7NiDX9Renderer@@6B@:102	_ZN2nx6engine13NiDX9Renderer28Do_EndUsingRenderTargetGroupEv	thiscall(this) -> bool; inferred slot; N1-pending (R2: vftable)
-vslot:??_7NiDX9Renderer@@6B@:107	_ZN2nx8Renderer14Do_RenderShapeEPv	thiscall(this, NiTriShape*); slot from 0x00a745c0; N1-pending (geometry path, N2)
-vslot:??_7NiDX9Renderer@@6B@:108	_ZN2nx8Renderer18Do_RenderTristripsEPv	thiscall(this, NiTriStrips*); slot from 0x00a71d30; N1-pending (geometry path, N2)
-# NiDX9RenderState: forwarders exist (nx::engine::NiDX9RenderState in engine_stubs.cpp) but the engine reaches the
-# state cache only through virtuals of an unidentified vftable (R2), so no rows yet.
-# ---- TileShader (menus): the render-time half (property/material code stays) ----
-00bca760	_ZN2nx10TileFamily14ApplyToRendererEPv	thiscall(PassShader*, RenderPassArg*): selects the tile VS/PS pair by pass + geometry flags -> tile family packet; N1-pending
-00bca980	_ZN2nx10TileFamily12UpdateMaterialEPKv	thiscall(TileShaderS*, const NiPropertyState*): tint, TexScroll, scissor rect, stencil flags -> NxTileDraw + DynRec; N1-pending
-00bcaff0	_ZN2nx10TileFamily18CreateConstantMapsEv	thiscall: no-op (no NiD3DShaderConstantMap in the native path); N1-pending
-00bca0d0	_ZN2nx10TileFamily19CreateVertexShadersEv	thiscall: binds the native tile VS variants (shaders/tile.vert.glsl) instead of compiling tile.v.hlsl; N1-pending
-00bca240	_ZN2nx10TileFamily18CreatePixelShadersEv	thiscall: binds the native tile PS variants instead of compiling tile.p.hlsl; N1-pending
-# ---- BSShaderNoLighting ----
-00bc9a50	_ZN2nx13NoLightFamily17PrepareShaderPassEPKv	thiscall(BSShaderNoLighting*, const NiPropertyState*): TEX/VC/FALLOFF variant + NxNoLightDraw; N1-pending
-00bc5c40	_ZN2nx13NoLightFamily18InitializeShaderDataEv	thiscall: native variants instead of NoLighting.v/p.hlsl; N1-pending
-# ---- image space: menu background ----
+# ---- NiDX9Renderer (NiRenderer protected virtuals; slots from the image vftable, REQUESTS.md R2) ----
+00e74f40	_ZN2nx6engine13NiDX9Renderer13Do_BeginFrameEv	thiscall(this) -> bool; Do_BeginFrame; vft=NiDX9Renderer:95
+00e69660	_ZN2nx6engine13NiDX9Renderer11Do_EndFrameEv	thiscall(this) -> bool; Do_EndFrame (submits + presents); vft=NiDX9Renderer:96
+00e7ccd0	_ZN2nx6engine13NiDX9Renderer15Do_DisplayFrameEv	thiscall(this) -> bool; the Present the frame loop calls (presented by Do_EndFrame already); slot 97 Do_DisplayFrame (deferred releases) stays the engine's
+00e6f310	_ZN2nx6engine13NiDX9Renderer14Do_ClearBufferEPNS_7NiRectFEm	thiscall(this, NiRectF* rect, unsigned mode); Do_ClearBuffer; vft=NiDX9Renderer:98
+00e6c780	_ZN2nx6engine13NiDX9Renderer16Do_SetCameraDataEPKNS_9NiPoint3fES4_S4_S4_PKNS_10NiFrustumFEPKNS_7NiRectFE	thiscall(this, loc, dir, up, right, const NiFrustum*, const NiRect<float>* port); Do_SetCameraData; vft=NiDX9Renderer:99
+00e6cf40	_ZN2nx6engine13NiDX9Renderer27Do_SetScreenSpaceCameraDataEPKNS_7NiRectFE	thiscall(this, const NiRect<float>* port); Do_SetScreenSpaceCameraData; vft=NiDX9Renderer:100
+00e6eea0	_ZN2nx6engine13NiDX9Renderer30Do_BeginUsingRenderTargetGroupEPKvm	thiscall(this, NiRenderTargetGroup*, unsigned clear) -> bool; vft=NiDX9Renderer:101
+00e74dc0	_ZN2nx6engine13NiDX9Renderer28Do_EndUsingRenderTargetGroupEv	thiscall(this) -> bool; vft=NiDX9Renderer:102
+00e744b0	_ZN2nx6engine13NiDX9Renderer17Do_RenderGeometryEPKv	thiscall(this, NiGeometry*); Do_RenderShape and Do_RenderTristrips share it; vft=NiDX9Renderer:107 vft=NiDX9Renderer:108
+# ---- NiDX9RenderState (record-only state cache -> nx::StateTracker) ----
+00e88780	_ZN2nx6engine16NiDX9RenderState14SetRenderStateEmmmh	thiscall(this, state, value, unused, u8 lock); vft=NiDX9RenderState:26
+00e88860	_ZN2nx6engine16NiDX9RenderState14GetRenderStateEm	thiscall(this, state) -> value; vft=NiDX9RenderState:27
+00e887d0	_ZN2nx6engine16NiDX9RenderState12SetBlendFuncEmmmm	thiscall(this, src, dst, unused, unused): SRCBLEND, DESTBLEND; vft=NiDX9RenderState:23
+00e88830	_ZN2nx6engine16NiDX9RenderState19SetAlphaBlendEnableEmmm	thiscall(this, enable, unused, unused): ALPHABLENDENABLE; vft=NiDX9RenderState:24
+00e88930	_ZN2nx6engine16NiDX9RenderState15SetSamplerStateEmmmm	thiscall(this, stage, type, value, unused); vft=NiDX9RenderState:48
+00e88980	_ZN2nx6engine16NiDX9RenderState15GetSamplerStateEmm	thiscall(this, stage, type) -> value; vft=NiDX9RenderState:49
+# ---- TileShader / BSShaderNoLighting: no HLSL compile or constant maps natively (Do_RenderGeometry draws the tile family) ----
+00bca0d0	_ZN2nx6engine10TileShader19CreateVertexShadersEv	thiscall: no-op; vft=TileShader:80
+00bca240	_ZN2nx6engine10TileShader18CreatePixelShadersEv	thiscall: no-op; vft=TileShader:81
+00bcaff0	_ZN2nx6engine10TileShader18CreateConstantMapsEv	thiscall: no-op; vft=TileShader:71
+00bc5c40	_ZN2nx6engine18BSShaderNoLighting20InitializeShaderDataEv	thiscall: no-op (BSShaderNoLighting::InitializeShaderData)
+# not reached on the native path (the engine shader pipeline is replaced by Do_RenderGeometry): kept planned ----
+00bca760	_ZN2nx10TileFamily14ApplyToRendererEPv	thiscall(PassShader*, RenderPassArg*); vft=TileShader:30; N1-pending (unreached)
+00bca980	_ZN2nx10TileFamily12UpdateMaterialEPKv	thiscall(TileShaderS*, const NiPropertyState*); vft=TileShader:31; N1-pending (unreached)
+00bc9a50	_ZN2nx13NoLightFamily17PrepareShaderPassEPKv	thiscall(BSShaderNoLighting*, const NiPropertyState*); N1-pending (unreached)
+# ---- image space: menu background (needs the image-space path, N1b) ----
 00c04730	_ZN2nx9ImageSpace12MenuBgSetupEPvS1_	thiscall(ImageSpaceEffectMenuBackground*, ImageSpaceManager*, ImageSpaceEffectParam*); N1-pending

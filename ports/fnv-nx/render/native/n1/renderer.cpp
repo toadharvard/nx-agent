@@ -1,5 +1,7 @@
 // fnv-nx native renderer, N1: nx::Renderer and nx::StateTracker. See renderer.h.
 #include "renderer.h"
+#include "nx/families.h"
+#include "nx_shaders.h"
 #include <string.h>
 #include <new>
 
@@ -125,6 +127,7 @@ bool Renderer::Init(Backend* be, uint32_t w, uint32_t h, uint32_t backbuffer, ui
     g_renderer = this;
     be_ = be;
     if (!frame_.Init(be, 8u << 20, 512)) return false;
+    if (!geomRing_.Init(be, 8u << 20)) return false;
     state_.Reset();
     nGroups_ = 0;
     groups_[nGroups_++] = {nullptr, backbuffer, depth, w, h};
@@ -170,6 +173,7 @@ void Renderer::OpenPass(uint32_t clearMode) {
 bool Renderer::Do_BeginFrame() {
     if (inFrame_) return false;
     frame_.Begin(frameNo_);
+    geomRing_.BeginFrame(frameNo_);
     inFrame_ = true;
     cur_ = nullptr; passOpen_ = false; pass_ = -1;
     return true;
@@ -276,4 +280,112 @@ bool Renderer::Render(const Draw& d) {
     return true;
 }
 
+// ---- N1 geometry path ------------------------------------------------------------------------------------------
+static uint16_t BlobShader(Backend* be, const char* name, uint32_t stage) {
+    int i = nx_shader_find(name, stage);
+    if (i < 0) return 0;
+    NxShaderDesc d;
+    memset(&d, 0, sizeof d);
+    d.stage = stage; d.dksh = FNVNX_ADDR_(nx_shader_blobs[i].dksh); d.dksh_size = nx_shader_blobs[i].dksh_size;
+    d.glsl = FNVNX_ADDR_(nx_shader_blobs[i].glsl); d.glsl_size = nx_shader_blobs[i].glsl_size;
+    return (uint16_t)be->ShaderCreate(d);
+}
+
+namespace {
+struct GeomVtx { float x, y, z, u, v; uint32_t rgba; };
+inline uint32_t Rgba8(const float* c) {
+    uint32_t o = 0;
+    for (int i = 0; i < 4; i++) {
+        float v = c[i] < 0 ? 0 : c[i] > 1 ? 1 : c[i];
+        o |= (uint32_t)(v * 255.0f + 0.5f) << (8 * i);
+    }
+    return o;
+}
+inline void Mul(const float* a, const float* b, float* o) {   // column-major o = a * b
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++) {
+            float s = 0;
+            for (int k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+            o[c * 4 + r] = s;
+        }
+}
+}  // namespace
+
+bool Renderer::RenderGeometry(const GeomView& g) {
+    if (!inFrame_ || !g.vertices || !g.pos || g.vertices > 65535) return false;
+    if (!geomVs_) {
+        geomVs_ = BlobShader(be_, "tile_vc", NxStage_Vertex);
+        geomPs_ = BlobShader(be_, "tile_vc", NxStage_Fragment);
+        NxVtxLayout ll;
+        memset(&ll, 0, sizeof ll);
+        ll.count = 3; ll.stride = sizeof(GeomVtx);
+        ll.attr[0].offset = 0; ll.attr[0].type = NxAttr_Float32; ll.attr[0].components = 3;
+        ll.attr[1].offset = 12; ll.attr[1].type = NxAttr_Float32; ll.attr[1].components = 2;
+        ll.attr[2].offset = 20; ll.attr[2].type = NxAttr_Unorm8; ll.attr[2].components = 4;
+        geomLayout_ = sc_.Layout(ll);
+        static const uint32_t kWhite = 0xFFFFFFFFu;
+        NxImageDesc td;
+        memset(&td, 0, sizeof td);
+        td.width = 1; td.height = 1; td.format = NxFmt_BGRA8; td.data = FNVNX_ADDR_(&kWhite); td.data_size = 4;
+        white_ = be_->ImageCreate(td);
+        if (!geomVs_ || !geomPs_ || !geomLayout_ || !white_) return false;
+    }
+    // triangle list (strips: alternate winding, degenerate triangles dropped)
+    uint32_t nIdx = g.indices ? g.indexCount - g.indexCount % 3 : 0;
+    if (!g.indices && g.strips && g.stripLengths)
+        for (uint32_t s = 0; s < g.stripCount; s++) nIdx += g.stripLengths[s] > 2 ? 3u * (g.stripLengths[s] - 2u) : 0u;
+    if (!nIdx) return false;
+    uint32_t vOff, iOff;
+    GeomVtx* v = (GeomVtx*)geomRing_.Alloc(g.vertices * sizeof(GeomVtx), 16, &vOff);
+    uint16_t* ix = (uint16_t*)geomRing_.Alloc(nIdx * 2, 16, &iOff);
+    if (!v || !ix) return false;
+    static const float kOne[4] = {1, 1, 1, 1};
+    for (uint32_t i = 0; i < g.vertices; i++) {
+        v[i].x = g.pos[3 * i]; v[i].y = g.pos[3 * i + 1]; v[i].z = g.pos[3 * i + 2];
+        v[i].u = g.uv ? g.uv[2 * i] : 0; v[i].v = g.uv ? g.uv[2 * i + 1] : 0;
+        v[i].rgba = Rgba8(g.color ? g.color + 4 * i : kOne);
+    }
+    uint32_t n = 0;
+    if (g.indices) {
+        for (uint32_t i = 0; i < nIdx; i++) ix[n++] = g.indices[i] < g.vertices ? g.indices[i] : 0;
+    } else {
+        const uint16_t* s = g.strips;
+        for (uint32_t k = 0; k < g.stripCount; s += g.stripLengths[k], k++)
+            for (uint32_t t = 0; t + 2 < g.stripLengths[k]; t++) {
+                uint16_t a = s[t], b = s[t + 1], c = s[t + 2];
+                if (a == b || b == c || a == c || a >= g.vertices || b >= g.vertices || c >= g.vertices) continue;
+                if (t & 1) { uint16_t x = a; a = b; b = x; }
+                ix[n++] = a; ix[n++] = b; ix[n++] = c;
+            }
+        if (!n) return false;
+    }
+    float world[16];
+    memset(world, 0, sizeof world);
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) world[c * 4 + r] = g.rot[r * 3 + c] * g.scale;
+        world[12 + r] = g.trans[r];
+    }
+    world[15] = 1;
+    NxTileDraw u;
+    memset(&u, 0, sizeof u);
+    float vp[16];
+    Mul(proj_, view_, vp);
+    Mul(vp, world, u.wvp);
+    memcpy(u.tint, g.tint, 16);
+    const bool untextured = state_.Texture(0) == 0;
+    static const NxD3D9Texture kWhiteKind = {21, 0, 0, 0, 0};   // D3DFMT_A8R8G8B8 2D
+    if (untextured) state_.SetTexture(0, white_, kWhiteKind);
+    Draw d;
+    memset(&d, 0, sizeof d);
+    d.vs = geomVs_; d.ps = geomPs_; d.layout = geomLayout_; d.prim = NxPrim_Triangles;
+    d.vtxBlock = geomRing_.block(); d.vtxOffset = vOff; d.vtxSize = g.vertices * sizeof(GeomVtx);
+    d.idxBlock = geomRing_.block(); d.idxOffset = iOff; d.idxSize = n * 2; d.idxType = 0;
+    d.count = n; d.textures = 1; d.ubo = &u; d.uboSize = sizeof u;
+    bool ok = Render(d);
+    if (untextured) state_.SetTexture(0, 0, kWhiteKind);
+    if (ok) geomDraws_++;
+    return ok;
+}
+
 } // namespace nx
+

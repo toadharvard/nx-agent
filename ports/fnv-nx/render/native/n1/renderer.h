@@ -33,6 +33,7 @@ public:
     void RestoreSamplerState(uint32_t stage, uint32_t type);
     // The texture bound to a stage: image id (0 = none), its D3DFORMAT and kind, for the sampler translation.
     void SetTexture(uint32_t stage, uint32_t image, const NxD3D9Texture& kind);
+    uint32_t Texture(uint32_t stage) const { return stage < kStages ? image_[stage] : 0; }
     void SetPixelShaderVersion(uint32_t v) { psVersion_ = v; dirty_ = true; }
     // Translates what is recorded (only when something changed). viewport/scissor in D3D9 pixels.
     struct Resolved {
@@ -108,6 +109,26 @@ public:
     void SetEnginePass(uint16_t enginePass, uint16_t family) { curPass_ = enginePass; curFamily_ = family; }
     bool Render(const Draw& d);
 
+    // N1 geometry path (Do_RenderShape / Do_RenderTristrips): an engine NiTriShape / NiTriStrips described
+    // engine-independently (n1/engine_stubs.cpp reads the engine objects). Drawn with the tile family (tile_vc):
+    // position x world x camera, vertex colour (white without), uv set 0, the stage-0 texture of the state tracker
+    // (a white texel without), tint; strips become a triangle list. Geometry goes into a per-frame vertex ring.
+    struct GeomView {
+        float rot[9], trans[3], scale;   // NiTransform: world = rot * (scale * p) + trans (rot row-major)
+        uint32_t vertices;
+        const float* pos;                // 3 floats per vertex
+        const float* color;              // 4 floats per vertex (NiColorA) or 0
+        const float* uv;                 // 2 floats per vertex (set 0) or 0
+        const uint16_t* indices;         // triangle list (indexCount = 3 x triangles), or
+        uint32_t indexCount;
+        const uint16_t* stripLengths;    // strips: stripCount lengths, then the concatenated strip lists
+        const uint16_t* strips;
+        uint32_t stripCount;
+        float tint[4];
+    };
+    bool RenderGeometry(const GeomView& g);
+    uint32_t geometryDraws() const { return geomDraws_; }
+
     StateTracker& state() { return state_; }
     StateCache& cache() { return sc_; }
     Frame& frame() { return frame_; }
@@ -126,6 +147,9 @@ private:
     void OpenPass(uint32_t clearMode);
     Backend* be_ = nullptr;
     uint16_t curPass_ = 0, curFamily_ = 0;
+    Ring geomRing_;
+    uint32_t white_ = 0, geomDraws_ = 0;
+    uint16_t geomVs_ = 0, geomPs_ = 0, geomLayout_ = 0;
     StateCache sc_;
     Frame frame_;
     StateTracker state_;

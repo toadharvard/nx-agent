@@ -32,6 +32,30 @@ class Overrides(unittest.TestCase):
             if isinstance(key, int):
                 self.assertIn(key, defs, "%08x has no decomp definition" % key)
 
+    def test_vftable_slots_match_the_exe(self):
+        """Rows naming vft=<class>:<slot> hold the address the image vftable has there (needs the gitignored
+        render/native/vftables.tsv from tools/exe_vftables.py; skipped without it)."""
+        import re
+        p = os.path.join(ROOT, "render", "native", "vftables.tsv")
+        if not os.path.exists(p):
+            self.skipTest("no render/native/vftables.tsv (needs the user's exe)")
+        vft = {}
+        with open(p) as fh:
+            for l in fh:
+                if not l.startswith("#"):
+                    f = l.rstrip("\n").split("\t")
+                    vft[(f[0], int(f[1]))] = int(f[2], 16)
+        n = 0
+        with open(TABLE) as fh:
+            for line in fh:
+                f = line.rstrip("\n").split("\t")
+                if line.startswith("#") or len(f) < 3:
+                    continue
+                for cls, slot in re.findall(r"vft=(\w+):(\d+)", f[2]):
+                    self.assertEqual(vft.get(("??_7%s@@6B@" % cls, int(slot))), int(f[0], 16), line)
+                    n += 1
+        self.assertGreaterEqual(n, 20)
+
     def test_no_duplicate_keys(self):
         keys = [r[0] for r in self.rows]
         self.assertEqual(len(keys), len(set(keys)))
