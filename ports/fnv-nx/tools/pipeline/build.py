@@ -2319,7 +2319,11 @@ class Package(Stage):
         if b.sh(['bash', os.path.join(ROOT, 'tests', 'nx1', 'ref_tools.sh'), ref], r['log'], timeout=300):
             r.note('tests/nx1/ref_tools.sh failed: check 1 runs without the switch-tools round trip')
             ref_bin = None
-        nro_rc = b.sh(['bash', os.path.join(ROOT, 'toolchain', 'nro', 'build.sh'), nd], r['log'],
+        # the commit this package is built from: the NRO's NACP version and the stage record carry it, and
+        # full_job.sh's publish_nro refuses to label any other package nro/<commit12> (V1 NX1 P1)
+        r['port_commit'] = b.head
+        nro_rc = b.sh(['bash', os.path.join(ROOT, 'toolchain', 'nro', 'build.sh'), nd] + ([b.head[:12]] if b.head else []),
+                      r['log'],
                       env=b.env({'NX1_REF_BIN': ref_bin}), timeout=600)
         nro = os.path.join(nd, 'fnv.nro')
         if nro_rc or not os.path.isfile(nro):
