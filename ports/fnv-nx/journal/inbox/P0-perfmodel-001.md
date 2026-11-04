@@ -21,6 +21,14 @@
   - PERF.md 11.4's per-frame function rows now have an A57 price: coverage of the main thread's 23.8 M per frame
     **0 % -> 26 %** (6.2 M), 6.4-9.7 ms at 1.02 GHz against 7.6 ms at IPC 0.8. Math leaves run at IPC 1.1-2.6,
     refcounts and the per-object cull below 0.8.
+  - S15-simd's metric (hotspot_metric.py) with A57 per_call_cycles for its 9 rows (funcmodel.py --budget-model,
+    overrides priced on their own code): 7.88 M cycles per frame, against 6.09 M at IPC 0.8. The Slerp override is
+    latency-bound (CPI 2.05-2.66), and NiBound's ld3 override prices 16-49 cycles against the decomp's 20-39. The
+    values went to S15-simd as proposals; budget_model.json is its file.
+  - 3-core frame model (mtmodel.py, PERF.md 12.7): placement masks, fork/join critical path, wake latency, A57 CPI
+    for 5 of 11 items. 1020 MHz mid frame: placed 28.5 ms (frame_budget 25.2), plan45 21.6 (17.2; main waits
+    1.8 ms at the joins), plan45b 18.7 (15.4). x1.25 worst gives 23.3 ms, above 22.2 for 45 fps stable. At
+    1785 MHz plan45b is 10.7 ms.
 * **limits** - The error bar covers the parts one at a time. Composition in compiled game code is not yet checked
   against hardware (read +-20-30 %). Not priced: the `dmb ish` store-buffer drain (the inlined InterlockedIncrement
   prices 13 cycles with or without a store in flight), contention between cores, the shared L2.
@@ -33,6 +41,5 @@
   about 10 minutes.
 * **tests** - tests/s15/test_a57model.py (dataflow, simulator, funcmodel, calibration limits check <= 6 %, fit <= 2 %):
   0 failed. tests/s15/test_perf.py: 0 failed. No rules touched.
-* **next** - The 3-core schedule and lock model (mtqemu's placement and sync, per-core frame time). Then a mixed
-  benchmark with a published A57 score for the composition error. Then the `dmb` drain and an ASIMD latency
-  override table. Frames under uctrace.py once the boot passes WinMain.
+* **next** - A mixed benchmark with a published A57 score, for the composition error. Then the `dmb` drain. Then
+  lock contention from measured hand-off counts. Frames under uctrace.py once the boot passes WinMain.
