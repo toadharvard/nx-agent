@@ -88,6 +88,7 @@ def main():
     ap.add_argument('--rules', default=str(config.WORK / 'rules.json'))
     ap.add_argument('--bridges', default=str(config.WORK / 'bridges.json'))
     ap.add_argument('--out', default=str(config.WORK / 'report'))
+    ap.add_argument('--recheck-tag', default='', help='use <dir>/recheck_<tag>.jsonl (a replay on other objects)')
     a = ap.parse_args()
     rules = json.load(open(a.rules))['functions'] if os.path.exists(a.rules) else {}
     bridges = json.load(open(a.bridges)) if os.path.exists(a.bridges) else {}
@@ -97,7 +98,7 @@ def main():
             r = json.loads(line)
             results[r['address']] = r
         gone, now = set(), {}
-        rp = os.path.join(d, 'recheck.jsonl')
+        rp = os.path.join(d, 'recheck%s.jsonl' % ('_' + a.recheck_tag if a.recheck_tag else ''))
         if os.path.exists(rp):
             for line in open(rp):
                 x = json.loads(line)

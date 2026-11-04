@@ -67,7 +67,7 @@ def cmd_recheck(a):
     (still / gone / error) with the current divergence."""
     import glob
     uc = _cache()
-    out = open(os.path.join(a.dir, 'recheck.jsonl'), 'w')
+    out = open(os.path.join(a.dir, 'recheck%s.jsonl' % ('_' + a.tag if a.tag else '')), 'w')
     for p in sorted(glob.glob(os.path.join(a.dir, 'div', '*.json'))):
         d = json.load(open(p))
         try:
@@ -97,7 +97,8 @@ def main():
     p.add_argument('--resume', action='store_true'); p.add_argument('--tag', default='run'); p.set_defaults(fn=cmd_fuzz)
     p = sub.add_parser('repro'); p.add_argument('file'); p.add_argument('--trace', action='store_true')
     p.set_defaults(fn=cmd_repro)
-    p = sub.add_parser('recheck'); p.add_argument('dir'); p.set_defaults(fn=cmd_recheck)
+    p = sub.add_parser('recheck'); p.add_argument('dir'); p.add_argument('--tag', default='')
+    p.set_defaults(fn=cmd_recheck)
     p = sub.add_parser('lockstep'); p.add_argument('addr'); p.add_argument('--source', default=None)
     p.add_argument('--bg', default='zero'); p.add_argument('--out', default=str(config.WORK / 'lockstep'))
     p.add_argument('--max-steps', type=int, default=2000000); p.add_argument('--depth', type=int, default=64)

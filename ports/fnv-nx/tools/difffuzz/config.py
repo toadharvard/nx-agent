@@ -13,6 +13,15 @@ Environment variables (defaults are the developer VM's scratch layout):
 import os
 from pathlib import Path
 
+# FNVNX_DFPROFILE: a file of KEY=VALUE lines (`#` comments) giving defaults for the variables above, so one object
+# set (e.g. a link run of S2c) is selected by one setting
+if os.environ.get('FNVNX_DFPROFILE'):
+    for _line in open(os.environ['FNVNX_DFPROFILE']):
+        _line = _line.strip()
+        if _line and not _line.startswith('#') and '=' in _line:
+            _k, _v = _line.split('=', 1)
+            os.environ.setdefault(_k.replace('export ', '').strip(), _v.strip())
+
 SCR = Path('/tmp/claude-0/-home-user-nx-agent/9349aed9-849c-5755-9ca4-b338a8b8ed63/scratchpad')
 HERE = Path(__file__).resolve().parent
 PORT = HERE.parent.parent
