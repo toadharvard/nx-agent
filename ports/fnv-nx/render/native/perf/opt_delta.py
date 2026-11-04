@@ -74,6 +74,9 @@ def seg(r):
 real = emu_count.count("{w}/b/native_drv.nso", "{w}/streams/mix_hi.nxd3d", "{w}/emu/real", False, 2, 4 * k + 1, "{w}/b/native_drv.elf")
 dry = emu_count.count("{w}/b/native_drv.nso", "{w}/streams/mix_hi.nxd3d", "{w}/emu/dry", True, 2)
 (rb, rf), (db, df) = seg(real), seg(dry)
+fif3 = emu_count.count("{w}/b/native_drv.nso", "{w}/streams/mix_hi.nxd3d", "{w}/emu/fif3", False, 3)
+import re
+failed3 = int(re.search(r"failed (\\d+)", fif3["result"]).group(1)) // gen_stream.FRAMES
 dk = count.run("{w}/dk/dkrec.elf", "{w}/out/mix_hi.nxcap", "{w}/b/n1/shaders", True)
 g = json.load(open("{w}/out/gpu.json"))
 gpu = {{}}
@@ -82,7 +85,7 @@ for s in g["scenes"]["mix_hi"]:
         gpu["%s_eff_%.1f" % (s["config"], s["efficiency"])] = s["frame_ms"]
 prof = [(f, n) for f, n in real.get("profile", {{}}).items() if f != "main"][:15]
 print(json.dumps({{"commit": "{sha}", "result": real["result"], "main": rb - db, "render_front": rf - df,
-                  "render_backend": dk["record"], "backend_draws": dk["last_frame"]["draws"], "gpu_ms": gpu,
+                  "render_backend": dk["record"], "failed_draws_per_frame_at_3_in_flight": failed3, "backend_draws": dk["last_frame"]["draws"], "gpu_ms": gpu,
                   "top_front": prof, "top_backend": list((dk.get("profile_last_frame") or {{}}).items())[:10]}}))
 '''
     snap = json.loads(sh([sys.executable, "-I", "-c", code], env=env).strip().splitlines()[-1])
@@ -97,6 +100,8 @@ def entry(sha, name, before, after):
             "cpu_instr_delta_render": (after["render_front"] + after["render_backend"]) - (before["render_front"] + before["render_backend"]),
             "gpu_ms_docked_720p": [g(before, "docked_720p"), g(after, "docked_720p")],
             "gpu_ms_handheld_720p": [g(before, "handheld_720p"), g(after, "handheld_720p")],
+            "failed_draws_at_3_frames_in_flight": [before.get("failed_draws_per_frame_at_3_in_flight"),
+                                                   after.get("failed_draws_per_frame_at_3_in_flight")],
             "before": before, "after": after}
 
 
