@@ -21,29 +21,30 @@ is never committed (`build/` is git-ignored).
 
 ```sh
 cd ports/fnv-nx
-make FNVNX_TC=/opt/fnvnx-a64 DEVKITPRO=/opt/fnvnx-dkp          # checkouts go to ext/ via tools/fetch.sh
+make BOOT=1                                                    # a fresh machine: everything from pinned sources
+make FNVNX_TC=/opt/fnvnx-a64 DEVKITPRO=/opt/fnvnx-dkp          # reuse a toolchain; checkouts go to ext/
 make FNVNX_TC=... DEVKITPRO=... EXT=/path/to/ext               # reuse existing pinned checkouts (read only)
 make ... PROGRAM_ID=01xxxxxxxxxxxxxx                           # title whose exefs the build overrides
 make ... NINE=1                                                # Gallium Nine in the host module
-make ... BOOT=1                                                # also the emulated boot + boot frontier
+make ... BOOT=1 PRISTINE_OBJS=<S11 pristine objects>           # the boot on S14's synthesized data image
 cat build/report.md
 ```
 
-The full run S2c and S5 drove by hand (J-0056, J-0057), as one command, on a shared machine:
+The full run S2c and S5 drove by hand (J-0056, J-0057), as one command, on the dev machine (its toolchain, its
+seeds; the extern-text list and Ogg Vorbis are made by the pipeline):
 
 ```sh
 nice -n 19 make EXT=$S/ext FNVNX_TC=$S/s5/tc/fnvnx-a64 DEVKITPRO=$S/s5/dkp VORBIS=$S/s5/vorbis/prefix \
-    EXTERN_TEXT=$S/s4/addr_ids.txt LINK_SEED=$S/s2c/latest/out JOBS=2 BOOT=1 [BOOT_IMAGE=$S/s5/synth/synth.exe]
+    LINK_SEED=$S/s2c/latest/out JOBS=2 BOOT=1 [PRISTINE_OBJS=$S/s11/obj/pristine]
 ```
 
 Run it from a checkout (or worktree) at the commit to build: the tree is prepared from that commit and every later
 stage checks it. `UNITS=<list>` restricts census and compile (and so the link and guest) to a few units for a quick
-check of the pipeline itself (see "Subset run").
+check of the pipeline itself (see "Subset run"). See "A fresh machine" for what the stages fetch and build.
 
 `DEVKITPRO` alone is enough when `$DEVKITPRO/devkitA64` points at the fnvnx-a64 prefix (as
-`toolchain/devkita64/setup.sh` makes it). To build the toolchain itself, pass `TC_DL=<dir with the binutils, gcc
-and newlib tarballs>` and have `buildscripts` and `devkita64-rules` in `EXT` (docs/TOOLCHAIN.md §3, about 45 min).
-The output prefix is `build/toolchain/prefix`, and the DEVKITPRO tree is `build/toolchain/dkp`.
+`toolchain/devkita64/setup.sh` makes it). Without either, the toolchain stage builds both (`TC_DL=auto`, about an
+hour on 4 cores; docs/TOOLCHAIN.md §3) into `build/toolchain/prefix` and `build/toolchain/dkp`.
 
 Other goals: `make <stage>` runs that stage and every stage it needs. Several stage goals are one run
 (`make link tests`). `make report` re-renders the report, `make status` prints the stage table, `make help` lists
@@ -54,7 +55,7 @@ the variables, `make clean` removes `build/`, and `make clean-<stage>` removes o
 | stage | output | what runs | needs |
 |---|---|---|---|
 | `fetch` | `build/fetch/pins.tsv` | Checks that `fnv_decomp`, `sse2neon` and `libnx` are at the commits `tools/fetch.sh` pins. It reads the checkouts' HEAD files and never runs git on them. Without `EXT`, it runs `tools/fetch.sh ext/` when a pin is missing. | - |
-| `toolchain` | `build/toolchain/{tools.tsv,toolchain.env}` | Validates fnvnx-a64 (version, the ILP32 multilib with libc/libsysbase/libm/libgcc/libstdc++/libsupc++), DEVKITPRO (libnx, switch.specs, packers) and the host tools each later stage uses. It chooses the game compiler. It builds the toolchain when `TC_DL` is given. | - |
+| `toolchain` | `build/toolchain/{tools.tsv,toolchain.env}` (+ `cross/`, `prefix/`, `dkp/`, `vorbis/` when it makes them) | Provides what is not given, then validates fnvnx-a64 (version, the ILP32 multilib with libc/libsysbase/libm/libgcc/libstdc++/libsupc++), DEVKITPRO (libnx, switch.specs, packers) and the host tools each later stage uses, and chooses the game compiler. Provides: the AArch64 cross tools (`CROSS=auto`: the system's when they are the pinned Ubuntu build, else `toolchain/cross/setup.sh` unpacks the pinned packages, no root); fnvnx-a64 and the DEVKITPRO tree with the pinned libnx (`TC_DL=auto`: `toolchain/sources.sh` fetches the pinned tarballs and devkitPro checkouts, then `toolchain/gcc/build.sh` and `toolchain/devkita64/setup.sh`, ~1 h on 4 cores, rebuilt only when those scripts change); Ogg Vorbis (`VORBIS=auto`: `toolchain/vorbis/build.sh`). Given `FNVNX_TC` / `DEVKITPRO` / `CROSS_BIN` / a `VORBIS` prefix are used as they are and never modified. | fetch (soft) |
 | `prepare` | `build/prepare/{tree/,prepared_from.txt,prepared_from.json}` | `tools/prepare.py <decomp> build/prepare/staging`, then a sync into `tree/` that keeps unchanged files, mtimes included. The compile step then sees only real changes. Also writes `prepare_stats.tsv`, `changed.txt` (A/M/D) and the provenance record: the commit of ports/fnv-nx (first line of `prepared_from.txt`, the format of S2c's driver), the decomp commit, uncommitted changes to the prepare inputs. Reruns when the head or any prepare input changes (`tools/prepare.py`, `tools/rules/`, `patches/`, `shim/include/fnvnx_win32.h`, `render/native/drop_units.txt`). `PREPARED=<tree>` adopts a tree another run prepared (read only) with the provenance its `prepared_from.txt` states. | fetch |
 | `census` | `build/census/` | `tools/census.sh` (`-fsyntax-only` of every unit, or of the `UNITS` list) with the game compiler. `CENSUS=0` skips it. | prepare |
 | `compile` | `build/compile/{obj/,objects.tsv,failed.tsv}` | `tools/link/compile.sh` (its flag set: `-O2 -fPIC`, J-0034's MSVC semantics, `-Werror=return-type`) with `CXX="<game compiler> -MD"`, the `UNITS` list or every unit. Objects a restart left truncated are deleted first (S2c's objcheck); an object is deleted when a header in its `.o.d` changed, since compile.sh checks only the unit's own source. Units that fail are listed with their first error in `failed.tsv` and excluded from the link. If the compiler, `OPT`, compile.sh, its `FLAGS=(...)` array or the tree's path changes, every object is rebuilt (the flag text is in the cache key and in the report). | prepare |
@@ -140,6 +141,40 @@ progress lines of all runs.
   identical, the stages after it stay cached (their fingerprints hold the upstream output ids, which are
   content-based) and take the new tree's provenance: their outputs are exactly what this commit gives.
 
+## A fresh machine
+
+`make BOOT=1` needs nothing but this repository and an Ubuntu 24.04 host with `git python3 make curl jq dpkg-deb
+gcc g++ llvm-18` (llvm-undname), `qemu-user` for the S2 tests, `libgmp-dev libmpfr-dev libmpc-dev texinfo bison
+flex` to build fnvnx-a64, and the Python modules `unicorn` and `pyelftools`. Everything else the full run uses is
+made from pinned sources by the pipeline:
+
+| input | made by | pinned by |
+|---|---|---|
+| decomp, sse2neon, libnx checkouts | `tools/fetch.sh` (fetch stage, without `EXT`) | commits in `tools/fetch.sh` |
+| AArch64 cross tools (S2c's `s2c/xtc`: Ubuntu's `g++-13-aarch64-linux-gnu` unpacked by hand, the rest from the installed packages) | `toolchain/cross/setup.sh` (toolchain stage, `CROSS=auto` when the host's are not the pinned build) | `toolchain/cross/packages.tsv`: package, version, pool path, SHA-256 (archive.ubuntu.com, or a snapshot.ubuntu.com date) |
+| fnvnx-a64 + DEVKITPRO with libnx | `toolchain/sources.sh`, `toolchain/gcc/build.sh`, `toolchain/devkita64/setup.sh` (toolchain stage, `TC_DL=auto`) | tarball SHA-256s and devkitPro commits in `toolchain/sources.sh` |
+| Ogg Vorbis | `toolchain/vorbis/build.sh` (`VORBIS=auto`) | git tags and commits in the script |
+| the extern-text list (S4's `addr_ids.txt`) | `tools/pipeline/extern_text.py` (link stage, `EXTERN_TEXT=auto`) | the tree's `units.json`; byte-identical to S4's file for the f11/f12 tree and for the pristine decomp |
+| boot data image | S14's `loader/synth/synth_image.py` (boot stage, `BOOT_IMAGE=auto`) when `PRISTINE_OBJS` is given, else the all-zero image | the pristine decomp's `units.json` + S11's MSVC objects |
+
+Still machine-specific (not made by the pipeline):
+
+* **S11's MSVC 2008 objects of the pristine decomp** (`PRISTINE_OBJS`, `MSVC_OBJS`): Visual C++ 2008 Express from
+  Microsoft's ISOs, unpacked as the decomp README describes, under Wine (`tools/equiv/README.md`). Only S14's
+  synthesized data image needs them in the full run (and S2b's `--msvc-objs`, which f11/f12 did not use); without
+  them the boot runs on the all-zero data image, as S5's "zero" boots did.
+* The host packages above (`tools/farm/full_job.sh` installs them with `FARM_APT=1`). Some test suites need more:
+  `s6b` / `s6d` / `nine-gate` cmake, meson, ninja and network clones of MojoShader / Mesa; suites whose tools are
+  missing are `skip`, which makes the tests stage `warn`.
+* Network access to archive.ubuntu.com (or snapshot.ubuntu.com), ftp.gnu.org (or mirrors.kernel.org),
+  sourceware.org and github.com (decomp, sse2neon, libnx, devkitPro, Xiph). Everything fetched is checked
+  against a pinned commit or SHA-256.
+* Disk: about 1 GB for the toolchain (fnvnx-a64 0.4 GB, cross packages 0.23 GB, libnx, tarballs), several GB
+  more while GCC builds (its build tree is removed afterwards), and 1-2 GB per full build.
+* The player's game files (the real data image, assets): never on these machines.
+
+`tools/farm/full_job.sh <commit> <report.md>` is the farm job for this (`tools/farm/README.md`).
+
 ## The hand flow and the pipeline
 
 What the hand-driven runs did (S2c's `full.sh` for f11/f12, S5's `game4.sh`, `emu4.sh`, `frontier5.sh`), what the
@@ -172,9 +207,8 @@ Still different (by design, or left for later):
 * S5 boots twice per guest (zero image, synthesized image); the pipeline boots once per build (`BOOT_IMAGE`).
 * `JOBS` is one value for every stage (S2c compiled and probed with 2, S5 linked with 3).
 * `-MD` in the compile `CXX` (dependency files, no effect on the objects).
-* `--extern-text`: the hand flow passes `$S/s4/addr_ids.txt`, an address list S4 made with scratch scripts; no
-  committed tool produces it, so `make` needs `EXTERN_TEXT=` to match (the link stage notes when it is missing;
-  f12 had 787 `extern-text` references). Owner: S4.
+* `--extern-text`: the hand flow passes `$S/s4/addr_ids.txt`, made by S4's scratch scripts; the link stage now
+  makes the same file from the tree (`EXTERN_TEXT=auto`, byte-identical for the f11/f12 tree).
 * The seeded `layouts.tsv` and `vtables/` of the hand flow are not reused: a cold probe in a new `build/` costs
   more than S2c's seeded runs, but every layout is measured on the current tree.
 * Not run in full since this alignment: the pipeline's own prepare of the whole tree, the full compile and link
@@ -227,7 +261,8 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `EXT` | (empty: `ext/` via fetch.sh) | Directory holding the pinned checkouts (`fnv_decomp`, `sse2neon`, `libnx`; optional `buildscripts`, `devkita64-rules`). It is only read. |
 | `ALLOW_UNPINNED` | 0 | 1: a checkout at another commit is a warning, not a failure. |
 | `FNVNX_TC`, `DEVKITPRO` | | Existing toolchain prefix and DEVKITPRO tree (reused, never modified). |
-| `TC_DL` | | Builds the toolchain from these tarballs when no prefix is given. |
+| `TC_DL` | auto | Without `FNVNX_TC` / `DEVKITPRO`: `auto` fetches the pinned sources (`toolchain/sources.sh`) and builds fnvnx-a64 and the DEVKITPRO tree in `build/toolchain/`; a directory takes the tarballs from there; `none` never builds. |
+| `CROSS` | auto | AArch64 cross tools: `auto` = the host's when they are the pinned build (`toolchain/cross/packages.tsv`), else the pinned packages unpacked into `build/toolchain/cross`; `pinned` = always those; `system` = whatever is on PATH (a mismatch warns). |
 | `GAME_CXX` | standin | Compiler of the decomp units. `standin` = `aarch64-linux-gnu-g++` (glibc headers; every link, guest and boot measured so far was built with it). `tc` = fnvnx-a64 `aarch64-none-elf-g++` (newlib headers, the ones the guest links against; not yet run end to end). `auto` = `tc` when the toolchain stage found it. Any other value is used as the command. |
 | `CROSS_BIN` | | Directory put first on PATH for the `aarch64-linux-gnu-*` tools (S2c's private driver copy `s2c/xtc/bin`, made when another agent's package install removed the system ones). |
 | `OPT` | -O2 | compile.sh `$OPT`. |
@@ -236,15 +271,17 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `FORCE_STALE` | 0 | 1: consume inputs prepared from another commit than the head (recorded, `warn`). |
 | `PORT_COMMIT` | | The commit of a ports/fnv-nx copy without git metadata. In a checkout it must equal HEAD. |
 | `CENSUS` | 1 | 0 skips the census. |
-| `OVERRIDE`, `EXTERN_TEXT` | | fnvlink resolve `--override` / `--extern-text` files (the hand flow passes S4's `addr_ids.txt`). |
+| `OVERRIDE` | | fnvlink resolve `--override` file. |
+| `EXTERN_TEXT` | auto | fnvlink resolve `--extern-text`: `auto` = made from the tree's `units.json` (`tools/pipeline/extern_text.py`, S4's `addr_ids.txt`), `none` = off, or a file. |
 | `MSVC_OBJS` | | fnvlink resolve `--msvc-objs` (S11's pristine MSVC objects, S2b's vtable slots). Not used by f11/f12. |
 | `UNITS_RENAMES` | | fnvlink resolve `--units-renames`; empty: fnvlink's default (`patches/units_renames.tsv`), `none`: off. |
 | `LINK_SEED` | | fnvlink out dir of an earlier run; its demangle cache seeds a new `build/link/out/`. |
 | `GUEST_LINK` | auto | `auto`: S5's `toolchain/game/build.sh` when present, else the adapter. `adapter` forces the adapter. Any other value is a script with the same CLI. |
 | `GAME_NEW` | runtime | toolchain/game/build.sh `GAME_NEW`: `runtime` (the game objects' global new/delete weakened, malloc stand-ins) or `game`. |
-| `VORBIS` | | ILP32 libogg/libvorbis prefix, passed to S5's guest link script. |
+| `VORBIS` | auto | ILP32 libogg/libvorbis for S5's guest link script: `auto` = built by the toolchain stage, `none` = without, or a prefix. |
 | `BOOT` | 0 | 1: the `boot` stage runs with `all` (it always runs when named: `make boot`). |
-| `BOOT_IMAGE` | | Data image for the emulated boot (`sdmc:/fnvnx/game/FalloutNV.exe`), e.g. S14's synthesized exe. |
+| `BOOT_IMAGE` | auto | Data image for the emulated boot (`sdmc:/fnvnx/game/FalloutNV.exe`): `auto` = S14's synthesized image when `PRISTINE_OBJS` is given, else none; `none` = the all-zero image; or an exe file. |
+| `PRISTINE_OBJS` | | S11's MSVC 2008 objects of the pristine decomp (`u<index>.obj`) for the synthesized image. |
 | `BOOT_CENSUS` | | Census `units.tsv` the frontier takes the current compile status from (default: this build's census). |
 | `NINE` | 0 | 0: no D3D9 backend in the host. The guest links D3D9 as `null` (S5's null device when its script is used; the adapter links none). 1: the `nine` stage, the Nine host link and the guest proxy (`D3D9=external`). |
 | `NINE_SRC` | | Directory with `mesa/` and `libdrm_nouveau/` checkouts. They are copied instead of cloned. |
