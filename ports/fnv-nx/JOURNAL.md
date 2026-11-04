@@ -835,3 +835,34 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
   link_traps=7602 link_tls_refs=373
 * **next** - S2b MSVC vftable slots to replace traps (`FNVNX_MSVC_OBJS`); implicit ctor/dtor emission (1,442); S1b
   XINC1 in the object set; V1 + S13 verification (D14).
+
+### J-0043 | 2026-11-04 | stream: S13-difffuzz | status: wip | parent: J-0035,J-0041
+
+* **did** - `tools/difffuzz/` (`docs/DIFFFUZZ.md`): per-function differential fuzzing. Oracle = S11's MSVC 2008
+  pristine objects at original addresses (relocations via units.json, literals pinned at image addresses) under
+  Unicorn x86-32; candidate = our AArch64 ILP32 objects linked by address (fnvlink) under Unicorn AArch64; shared
+  world; unit-closed execution; outgoing calls intercepted by original address with identical canned returns; CRT and
+  x86-only helpers with real semantics; comparison of call targets, call arguments, return values (float tolerance
+  classes), data writes, callee-saved registers, vtable stores as image vftables (D7); coverage-guided mutation,
+  minimiser, root-cause probes, `recheck`, per-stream report, `lockstep` mode (one trial). Static scans
+  `check_rebind.py`, `check_statics.py`, `check_falloff.py`. Self-test with a planted char-signedness bug passes.
+* **found** - 2,163 functions, 283,882 executions. Hard bugs found by the oracle:
+  (1) **split-global** (S2): a same-object reference resolves to `.bss+off`, so rebinding an image variable misses
+  its own unit - that unit and its static initializer use a private copy (e.g. `GetRTTI` returns the native
+  `ms_kRTTI`, not 0x011c7d74 -> NiRTTI compares across units break); 73 variables / 448 relocations.
+  (2) **unit-static image variables** (S1/S2): 460 `static` variables in 35 objects keep private copies (e.g.
+  fadermanager `s_faders`, MSVC 0x011d8828).
+  (3) **missing return** (S1): GCC drops the epilogue of a non-void function without `return`; 5 functions run into
+  the next one (e.g. PathingLocation::HasValidTriangle 004ff7e0).
+  (4) **inline copies** that differ from the function at their address (decomp duplicates GCC inlines).
+  (5) **sized delete** `_ZdlPvm` bound to the platform instead of the game's 0x00aa1460.
+  (6) **GAME1 incomplete**: S2 resolve does not map `fnvnx_game_*` renames (4 references unresolved; 16 functions
+  regressed vs the old binding) and prepare.py does not apply `patches/units_renames.tsv`.
+  XINC1 removes the site call-argument divergences (2/2 comparable). No bridge or callee-saved breaks so far.
+  Soft: ILP32 wrap of out-of-range indices (32), bool bytes other than 0/1 (11), x87 NaN bits (5), divide by zero
+  (2), float->int off by one (2).
+* **metrics** - df_functions=2163 df_execs=283882 df_hard=43 df_soft=50 df_split_global_vars=73
+  df_unit_static_vars=460 df_falloff=5 df_game1_unresolved=4
+* **next** - fixes: S2 (fnvnx_game_ mapping, retarget section-relative refs of rebound variables in apply, sized
+  delete -> 0x00aa1460), S1 (apply units_renames.tsv, drop `static` from image-address variables, `-Werror=return-type`
+  census + rule, inline shadows); then S13 recheck, bridge campaign, lockstep on static initializers.
