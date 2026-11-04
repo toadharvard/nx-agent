@@ -32,7 +32,7 @@ binutils 2.45.1, newlib 4.6.0, multilibs lp64/pic/ilp32/ilp32-pic), libnx (ext/l
 | N1 renderer core | `n1/renderer.{h,cpp}` (nx::Renderer frame/target/camera virtuals, nx::StateTracker), `n1/selftest.cpp`, `n1/build.sh` -> `libnxrender.a` (ILP32) | `make -C tests/s6n n1`; `n1/build.sh <o>` + `make -C tests/s6n n1emu N1OUT=<o>` | 76 checks, 0 failed on GL and as the ILP32 guest (incl. a synthetic textured menu through the stubs: D3DX texture overrides, tile tint, material alpha, alpha property blend/test, menu background); `n1/engine_stubs.cpp` in libnxrender.a |
 | environment | `env.sh` | rebuilt here | ok |
 
-| N1 groundwork / wiring | `N1_PLAN.md`, `overrides.tsv` (26 active address rows: renderer, geometry, state cache incl. textures, D3DX texture creation, shader construction; 4 N1-pending: unreached TileShader/NoLighting pass code, MenuBg until the image-space dispatch), `tools/exe_vftables.py` (R2 from the user's exe, output gitignored), `REQUESTS.md` (R1-R3 done) | `python3 -I tests/s6n/test_overrides.py <o>/libnxrender.a`; `python3 -I tests/s6n/test_requests.py` | overrides 4 OK; requests 3 OK (with the local dump) |
+| N1 groundwork / wiring | `N1_PLAN.md`, `overrides.tsv` (24 active address rows: renderer, geometry, state cache incl. textures, D3DX texture creation, shader construction; 4 N1-pending: unreached TileShader/NoLighting pass code, MenuBg until the image-space dispatch), `tools/exe_vftables.py` (R2 from the user's exe, output gitignored), `REQUESTS.md` (R1-R3 done) | `python3 -I tests/s6n/test_overrides.py <o>/libnxrender.a`; `python3 -I tests/s6n/test_requests.py` | overrides 4 OK; requests 3 OK (with the local dump) |
 
 Commands:
 
