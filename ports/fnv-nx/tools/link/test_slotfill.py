@@ -28,6 +28,8 @@ rest; its exe vftable holds the same bodies. Checks:
 * Vk::k(int), whose body the decomp defines as `int __stdcall kbody(int)` (the x86 model: the slot's int is the
   stack argument both read), goes through a bridge that moves it from x1 to x0;
 * Vk::kz, whose exe body is `xor eax, eax; ret` and which no unit compiles, gets the native stub `return 0`;
+* Vk::kp, whose exe slot is the CRT's `_purecall` (a provider row of S4's crt_symbols.tsv), binds to the
+  platform's `_purecall`;
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
   (c: the abi gap).
 """
@@ -58,7 +60,7 @@ struct Vd { virtual int g(); virtual ~Vd(); int z; };      // key function g; ~V
 struct Gd { virtual ~Gd(); int w; };
 struct Vp { virtual int h(); virtual void v00(); int u; }; // v00: a placeholder for the exe's ??_G
 struct Sh { virtual int p() { return 5; } int s; };         // a shell: its exe vftable has two slots more
-struct Vk { virtual int kk(); virtual int k(int); virtual int kz(); int t; };  // k: stdcall kbody(int); kz: return 0
+struct Vk { virtual int kk(); virtual int k(int); virtual int kz(); virtual int kp(); int t; };  // k: stdcall kbody(int); kz: return 0
 int kbody(int);
 '''
 SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nint Der::a() { return 2; }\n'
@@ -109,7 +111,7 @@ def build_exe(rd, where):
     where['Vp'] = vft('.?AVVp@@', chd(['.?AVVp@@']), [0x401090, 0x401098])
     # Sh: p, then Shell::impl's address and an address no compiled unit defines
     where['Sh'] = vft('.?AVSh@@', chd(['.?AVSh@@']), [0x4010b0, 0x401020, 0x401060])
-    where['Vk'] = vft('.?AVVk@@', chd(['.?AVVk@@']), [0x4010c0, 0x4010c8, 0x4010d0])
+    where['Vk'] = vft('.?AVVk@@', chd(['.?AVVk@@']), [0x4010c0, 0x4010c8, 0x4010d0, 0x4010e0])   # kp: _purecall
     rd.words(0)
 
 
@@ -150,11 +152,13 @@ def main():
         with open(os.path.join(t, 'objects.tsv'), 'w') as f:
             for rel in SRC:
                 f.write('%s\t%s\tok\n' % (rel, objs[rel]))
+        crt = os.path.join(t, 'crt_symbols.tsv')   # S4's table: the exe's _purecall has a platform provider
+        open(crt, 'w').write('0x004010e0\tcrt\t_purecall\tn\t0\t0\tplatform/crt: _purecall\n')
         res = {}
         for name, exe_arg in (('none', 'none'), ('exe', exe)):
             out, fixed = os.path.join(t, 'out-' + name), os.path.join(t, name, 'fixed')
             run([sys.executable, FNVLINK, 'resolve', os.path.join(t, 'units.json'), os.path.join(t, 'objects.tsv'),
-                 out, '--crt-symbols', 'none', '--imports', 'none', '--exe', exe_arg])
+                 out, '--crt-symbols', crt, '--imports', 'none', '--exe', exe_arg])
             run([sys.executable, FNVLINK, 'apply', out, fixed])
             chk = run([sys.executable, FNVLINK, 'check', out, fixed])
             refs = {}
@@ -205,6 +209,9 @@ def main():
         check(rz is not None and rz[5] == '__fnvnx_vconst_004010d0' and
               '__fnvnx_vconst_004010d0:\n    mov w0, #0\n    ret' in bridges_,
               'kz (the exe\'s `xor eax, eax; ret`, compiled nowhere) -> a native `return 0` stub: %s' % (rz,))
+        rp = refs.get('_ZN2Vk2kpEv')
+        check(rp is not None and rp[2] == 'vslot-exe' and rp[5] == '_purecall',
+              'kp (the exe slot is _purecall, a CRT provider) -> the platform\'s _purecall: %s' % (rp,))
         rk = refs.get('_ZN2Vk1kEi')
         check(rk is not None and rk[2] == 'vslot-exe' and rk[5].startswith('__fnvnx_br_004010c8_') and
               ('%s:\n    mov x0, x1\n    b __fnv_004010c8' % rk[5]) in bridges_,
@@ -233,8 +240,8 @@ def main():
               'vtmetric: 7 trap slots left (Sh\'s extension holds one), 2 with a native at the exe slot, no short '
               'primary (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
-        check(st0['trap-slots'] == 15 and st0['trap-native-at-exe'] == 10 and st0['primary-shorter'] == 1,
-              'vtmetric without the fill: 15 / 10, Sh short (%s)'
+        check(st0['trap-slots'] == 16 and st0['trap-native-at-exe'] == 11 and st0['primary-shorter'] == 1,
+              'vtmetric without the fill: 16 / 11, Sh short (%s)'
               % dict(st0))
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

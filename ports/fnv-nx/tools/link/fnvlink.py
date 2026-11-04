@@ -1129,14 +1129,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over, exe_path)
+                             canon_it, out, bridges, slot_over, exe_path, providers)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
         byclass['vslot-exe'] += fill.get('bound_refs', 0)
         # primary vtables shorter than the exe's: an extended strong copy (the exe's remaining slots)
         ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
-                                exe_path)
+                                exe_path, providers)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
@@ -1581,7 +1581,7 @@ def emit_gdel_stub(name, d0, d1):
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
-                  stubs=None, overrides=None, exe_path=None):
+                  stubs=None, overrides=None, exe_path=None, providers=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -1607,11 +1607,14 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     zmap[(z, p)].add(v)
     trap_set = set(traps)
     rows, gaps, changed = [], [], {}
+    addr_of = {}   # (source, symbol) -> the exe address it was bound to (refs.tsv)
     stubs = {} if stubs is None else stubs   # flag / deleting-destructor stubs -> their asm (bridges.S)
 
     def target_for(un, a):
         nd = native.get(a)
         isig = itanium(un)
+        if nd is None and a in (providers or {}) and not isig.variant:
+            return providers[a][0], 'provider (%s)' % providers[a][1]   # S4's CRT entry: _purecall's slots
         if nd is None:
             c = exevft.leaf_constant(exe_path, a) if exe_path and not isig.variant else None
             if c is not None:   # a trivial x86 leaf no unit compiles: its exact native form
@@ -1711,6 +1714,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 tgt, why = target_for(un, a)
                 if tgt:
                     changed.setdefault(u, {})[un] = tgt
+                    addr_of[(u.source, un)] = a
                     st['bound_symbols'] += 1
                     st['bound_' + how.replace(' ', '_')] += 1
                     rows.append((os.path.basename(u.obj), u.source, un, '%08x' % a, tgt, how, why,
@@ -1761,15 +1765,15 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
         src_of = {u.source: (u.host or u.source) for u in changed}
         hosts = collections.defaultdict(dict)
         for s_, m in by_src.items():
-            hosts[src_of[s_]].update(m)
+            hosts[src_of[s_]].update({un_: (t_, addr_of[(s_, un_)]) for un_, t_ in m.items()})
         path = os.path.join(out, 'refs.tsv')
         with open(path, encoding='utf-8', errors='surrogateescape') as fi, \
                 open(path + '.tmp', 'w', encoding='utf-8', errors='surrogateescape') as fo:
             for line in fi:
                 f = line.split('\t')
                 if len(f) >= 7 and f[2] == 'vslot-unresolved' and f[1] in hosts.get(f[0], {}):
-                    t = hosts[f[0]][f[1]]
-                    f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', re.search(r'_([0-9a-f]{8})', t).group(1), t
+                    t, a_ = hosts[f[0]][f[1]]
+                    f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', '%08x' % a_, t
                     line = '\t'.join(f)
                     bound_refs += 1
                 fo.write(line)
@@ -1794,7 +1798,8 @@ VTEXT_OBJ = 'zz_bridges.o'   # the extended vtables live in bridges.S (apply ass
 XTRAP = 'exe 0x%08x'
 
 
-def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None):
+def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
+                      providers=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
     kept object has them (its slot symbols renamed as resolve renames them in that object), then exe slot j for every
     j past the native slots (the minus-one rule): `__fnv_<a>` where the address map has a plain native definition,
@@ -1888,6 +1893,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 bridges.setdefault(t, emit_gdel_stub(t, ADDR_SYM % a, ADDR_SYM % a + (
                     '' if nd['variants']['D1'] is nd['sym'] else '_D1')))
                 st['slots-deleting-destructor'] += 1
+            elif nd is None and a in (providers or {}):
+                t = providers[a][0]
+                st['slots-provider'] += 1
             elif nd is None and exe_path and exevft.leaf_constant(exe_path, a) is not None:
                 t = CONST_SYM % a
                 bridges.setdefault(t, emit_const_stub(t, exevft.leaf_constant(exe_path, a)))

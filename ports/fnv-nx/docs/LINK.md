@@ -609,6 +609,9 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   flags (`FUN_00c2a090(unsigned int)`), GCC's D0 / D1 go through `__fnvnx_vflag_<a>_1` / `_0` (w1 = flags, then
   `b __fnv_<a>`); a placeholder slot (`virtual void v00();`) where the exe has a native `??_G` goes through
   `__fnvnx_vgdel_<a>` (bit 0 of the caller's flags picks D0 or D1, as the kind-G adapter does).
+* An exe slot address with a provider in S4's `crt_symbols.tsv` (or an import thunk) binds to the provider:
+  MSVC's `_purecall` at 0x00ec60fa (the pure virtual slots of 670 exe vftable slots) -> platform/crt's
+  `_purecall`, the same fatal "pure virtual function call".
 * An exe slot address that no compiled unit defines but whose x86 body is a constant leaf (`ret`, `ret N`,
   `xor eax, eax` / `mov al|eax, imm`, then a return: `exevft.leaf_constant`) gets its exact native form,
   `__fnvnx_vconst_<a>` (`mov w0, #imm; ret`). MSVC folds identical functions, so one body stands in many slots:
