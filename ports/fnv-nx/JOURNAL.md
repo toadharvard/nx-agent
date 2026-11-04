@@ -1230,3 +1230,28 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **found** - Every tree compiled before this entry resolved those 41 includes to a different header than MSVC did,
   f13 (from 0420d45) included. The next fresh run (f14) is the first with MSVC's headers there.
 * **next** - S1: census c20 on this head; the S5 initializer items (J-0062). S2c: f14 from this head after f13.
+
+### J-0064 | 2026-11-04 | stream: S0-arch | status: wip | parent: J-0018,J-0061
+
+* **decided** - (user) Performance is the main risk, so two things start now:
+  - the native deko3d renderer (S6n), in parallel with Nine (D6). Nine stays on the critical path to first pixels
+    and is the correctness reference.
+  - a performance stream (S15-perf).
+  Bottleneck hypothesis (estimates, to be measured): the main thread on the A57 at 1.02 GHz. A Switch core is
+  roughly 2-3x slower than a 2010 desktop core; the GPU and RAM are not the limit. Draw submission through
+  proxy -> Nine -> nouveau is estimated at 10-20 us per draw against ~1,500-3,500 draws per frame, and the 30 fps
+  budget is 33 ms. The reference point is the Xbox 360 version (3 in-order cores at 3.2 GHz, ~30 fps), whose
+  threading paths are believed to sit behind ini settings in the PC exe.
+* **did** - Opened three streams:
+  - S15-perf: console threading audit, our own overhead (-fPIC GOT, semantics flags, bridges, sse2neon, missing
+    -mtune in compile.sh), a per-frame instruction budget tool for S5's emulator, proxy/Nine per-call cost,
+    docs/PERF.md.
+  - S6n round N0: front/backend split (deko3d for Switch plus a host GL 4.5 reference backend on llvmpipe); one GLSL
+    source for DKSH and GL; D3D9 state translation as one pure function covering the known D3D9 -> modern traps;
+    standalone sorted/instanced test.
+  - V6n-render, the independent verifier (D14): a static enumeration of every (shader class, pass, permutation,
+    vertex format, state set) the engine can emit, which defines "all situations"; a Nine-on-softpipe oracle;
+    render-state differential fuzzing; a shader parity harness that waits for the player's shaderpackage*.sdp;
+    a scene-level and on-device plan in docs/RENDER_VERIFY.md.
+* **next** - Merge each with its verification. Parity against the original shaders needs the player's
+  Data/Shaders/shaderpackage*.sdp.
