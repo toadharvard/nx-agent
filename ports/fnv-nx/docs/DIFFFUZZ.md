@@ -168,6 +168,16 @@ tail jumps and in-function switch tables (relocated with the oracle code) are fu
 aedcf24: targets / functions with a native object 64.4 % -> 98.4 % (21 functions with unresolved relocations
 remain); of 110 newly fuzzed functions 106 have a verdict (16 hard, 6 soft, 19 oracle gap).
 
+**Vtable pairs (`vtmodel.py pairs`).** A kind-V pair is short when the native vtable has fewer slots than the exe's
+vftable (an exact Itanium pair has as many, or one more with a virtual destructor); the harness's copy always
+carries spare `__s13_vtpad` slots up to the exe's count + 2, which J-0145 counted as short (1,082 of 1,628).
+Link c0d6c71516f6: primary 1,870 paired, short 1,380, exact 449, longer 41; secondary 515: short 330. Of the 1,380
+short primary pairs, the RTTI class's own `_ZTV` is defined in no linked object for 765, also short for 122,
+already the row's vtable for 103, long enough for 31 (e.g. MagicItemObject: row `_ZTV12FUN_00402b40` with 1 slot,
+`_ZTV15MagicItemObject` 99 of 97), no RTTI name 359. Pairing to the static class's `_ZTV` alone therefore closes
+~2 %; the padding stays (a call through it is `vptr-unpaired`) until S2c's link gives those classes complete
+vtables. Verdicts are unchanged (the count is only reported). Test: `tests/s13/test_vtpairs.py`.
+
 **S1b renames (J-0141, harness still difffuzz-13).** `patches/units_renames.tsv` rows of the units whose prepared
 source carries an S1b patch (`config.units_renames`, fnvlink's `load_renames`; `FNVNX_UNITS_RENAMES=<tsv|none>`)
 apply on top of the tree's units.json (`engine.apply_renames`): a `def` row gives the patched definition its new
