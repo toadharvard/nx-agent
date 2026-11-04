@@ -3,8 +3,9 @@
  * See include/fnvnx/hostapi.h and docs/TOOLCHAIN.md.
  *
  * It also reports the process layout (address space type, regions, where our own image is, whether the
- * reserved original-image range 0x00400000..0x02100000 is free) on the console and in sdmc:/fnvnx/host.log,
- * which is what the hardware test reads back.
+ * reserved original-image range 0x00400000..0x02100000 is free) on the console and in sdmc:/switch/fnv/host.log,
+ * which is what the hardware test reads back. Device integration (launcher override, applet pump, crash log, start
+ * refusals): host_device.inc. Paths: fnvnx/sdlayout.h.
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -15,6 +16,7 @@
 #include <switch.h>
 
 #include "fnvnx/hostapi.h"
+#include "fnvnx/sdlayout.h"
 #include "../../startup/host/fnvnx_reserve.h"   /* S10: window reservation + relaunch (relative: callers need no -I) */
 
 /* S10's reserve.c + reserve_nx.c are linked into the game host; referenced weakly so a host built without
@@ -45,8 +47,8 @@ uint64_t fnvnx_guest_link_base = FNVNX_GUEST_LINK_BASE;
 #define FNVNX_RESERVED_END   0x02100000ull
 #define FNVNX_WINDOW_START   0x00fdf000ull
 #define FNVNX_SMALL_MAP_END  0x40000000ull
-#define FNVNX_LOG_DIR        "sdmc:/fnvnx"
-#define FNVNX_LOG_PATH       FNVNX_LOG_DIR "/host.log"
+#define FNVNX_LOG_DIR        FNVNX_SD_DIR
+#define FNVNX_LOG_PATH       FNVNX_SD_HOST_LOG
 
 /* Host heap for libnx/newlib (services, console, file buffers, the guest file while loading); the rest of
  * the heap region goes to the guest. Weak so a host build can change the split. Multiple of 2 MiB. */
@@ -54,7 +56,7 @@ __attribute__((weak)) size_t fnvnx_host_heap_size = 64ull << 20;
 /* Seconds the host waits for + after the guest returns before it exits on its own (automated tests). */
 __attribute__((weak)) unsigned fnvnx_host_linger_s = 30;
 /* Where the guest module is read from. */
-__attribute__((weak)) const char *fnvnx_guest_path = "sdmc:/fnvnx/guest.nso";
+__attribute__((weak)) const char *fnvnx_guest_path = FNVNX_SD_GUEST;
 
 static u64 g_guest_heap_base, g_guest_heap_size;
 static FILE *g_log;
@@ -119,30 +121,34 @@ static void logf_(const char *fmt, ...) {
 
 static void log_line(const char *line) { logf_("%s\n", line); }
 
+#include "host_device.inc"
+
 /* ---- host API implementations (LP64; every parameter and result is u64) -------------------------------- */
 static u64 h_output_debug_string(u64 str, u64 len) { return svcOutputDebugString((const char *)str, len); }
 static u64 h_sleep_ns(u64 ns) { svcSleepThread((s64)ns); return 0; }
 static u64 h_exit(u64 code) {
     logf_("fnvnx host: guest called exit(%d)\n", (int)code);
-    appletSetCpuBoostMode(ApmCpuBoostMode_Normal);   /* never leave the console boosted */
+    pump_stop();
+    cleanup_for_exit("the game called exit");
     if (g_log) fclose(g_log);
     consoleExit(NULL);
     exit((int)code);
 }
 static u64 h_console_write(u64 buf, u64 len) { out((const char *)buf, len); return len; }
 static u64 h_console_flush(void) { consoleUpdate(NULL); return 0; }
-static u64 h_main_loop(void) { return appletMainLoop() ? 1 : 0; }
+/* the pump thread owns appletMainLoop while it runs (host_device.inc) */
+static u64 h_main_loop(void) { return g_pump_run ? (g_pump_alive ? 1 : 0) : (appletMainLoop() ? 1 : 0); }
 static u64 h_buttons_down(void) { padUpdate(&g_pad); return padGetButtonsDown(&g_pad); }
 static u64 h_system_tick(void) { return armGetSystemTick(); }
 static u64 h_system_tick_freq(void) { return armGetSystemTickFreq(); }
 
-/* ---- platform config: sdmc:/fnvnx/fnvnx.ini, `key=value` lines (# or ; starts a comment); the build defaults
+/* ---- platform config: sdmc:/switch/fnv/fnvnx.ini, `key=value` lines (# or ; starts a comment); the build defaults
  * apply when the file or a key is missing. Read once at startup, logged. */
 #ifndef FNVNX_BOOST_LOADING_DEFAULT
 #define FNVNX_BOOST_LOADING_DEFAULT 1
 #endif
 #include "placement.h"   /* FNVNX_CORE3_DEFAULT */
-#define FNVNX_CONFIG_PATH FNVNX_LOG_DIR "/fnvnx.ini"
+#define FNVNX_CONFIG_PATH FNVNX_SD_CONFIG
 static struct {
     int core3;           /* placement.h: background roles may use core 3 */
     int boost_loading;   /* CPU boost (ApmCpuBoostMode_FastLoad) while the loading screen runs */
@@ -408,8 +414,17 @@ int main(int argc, char **argv) {
     consoleInit(NULL);
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&g_pad);
+    mkdir("sdmc:/switch", 0777);
     mkdir(FNVNX_LOG_DIR, 0777);
     g_log = fopen(FNVNX_LOG_PATH, "w");
+    crash_handler_arm(0, 0);
+    if (device_preflight() != 0) {
+        remove_launcher_override();
+        svcSleepThread(8000000000ll);
+        if (g_log) fclose(g_log);
+        consoleExit(NULL);
+        return 1;
+    }
 
     if (fnvnx_reserve_late && fnvnx_reserve_late(log_line) != 0) {   /* relaunches by itself on a collision */
         logf_("fnvnx host: STOP: the fixed address windows are unusable (see above)\n");
@@ -419,6 +434,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (!fnvnx_reserve_late) logf_("fnvnx host: built without startup/host/reserve*.c: windows NOT reserved\n");
+    remove_launcher_override();   /* past S10's only relaunch point: the console is back as it was */
     report_layout();
     load_config();
     fnvnx_host_register_ext(FNVNX_EXT_PLATFORM, platform_ext);
@@ -428,6 +444,8 @@ int main(int argc, char **argv) {
         rc = 0xF00000FFu;
     } else {
         logf_("fnvnx host: guest %s mapped at %#010lx, %#lx bytes\n", fnvnx_guest_path, gbase, gsize);
+        crash_handler_arm(gbase, gsize);
+        pump_start();
         g_api = (FnvnxHostApi){
             .magic = FNVNX_HOSTAPI_MAGIC, .version = FNVNX_HOSTAPI_VERSION, .size = sizeof(FnvnxHostApi),
             .guest_base = gbase, .guest_size = gsize,
@@ -443,6 +461,7 @@ int main(int argc, char **argv) {
         logf_("fnvnx host: guest returned %#lx\n", rc);
     }
 
+    pump_stop();
     set_cpu_boost(0);   /* never leave the console boosted */
     logf_("fnvnx host: press + to exit (auto exit in %u s)\n", fnvnx_host_linger_s);
     u64 deadline = armGetSystemTick() + (u64)fnvnx_host_linger_s * armGetSystemTickFreq();
@@ -452,7 +471,7 @@ int main(int argc, char **argv) {
         consoleUpdate(NULL);
         svcSleepThread(16000000);
     }
-    logf_("fnvnx host: exit\n");
+    cleanup_for_exit("the game returned");
     if (g_log) fclose(g_log);
     consoleExit(NULL);
     return (int)(rc & 0xFF);

@@ -1,5 +1,6 @@
 /* register.cpp - hooks S7's DLL replacements into the runtime (S4):
- *   modules  dsound, dinput8, xinput1_3 (also xinput1_4/9_1_0 aliases), vorbisfile  -> LoadLibrary/GetProcAddress
+ *   modules  dsound, dinput8, xinput1_3 (also xinput1_4/9_1_0 aliases), vorbisfile (also libvorbisfile,
+ *            the IAT's name)  -> LoadLibrary/GetProcAddress
  *   COM      CLSID_DirectSound8, CLSID_DirectSound, CLSID_DirectInput8              -> CoCreateInstance
  *   IAT      fnvnx_audio_input_lookup_export(dll, name) for the loader's import resolution (the S4 export
  *            table, fnvnx_win32_lookup_export, does not consult registered modules; see AUDIO_INPUT.md).
@@ -102,6 +103,7 @@ extern "C" void fnvnx_audio_input_register(void)
     fnvnx_register_module("xinput1_4.dll", r_xinput);
     fnvnx_register_module("xinput9_1_0.dll", r_xinput);
     fnvnx_register_module("vorbisfile.dll", r_vorbisfile);
+    fnvnx_register_module("libvorbisfile.dll", r_vorbisfile);   /* the exe's IAT spelling */
     fnvnx_register_com_class(&CLSID_DirectSound8, fnvnx_dsound_com_factory);
     fnvnx_register_com_class(&CLSID_DirectSound, fnvnx_dsound_com_factory);
     fnvnx_register_com_class(&CLSID_DirectInput8, fnvnx_dinput_com_factory);

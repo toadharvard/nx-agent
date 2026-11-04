@@ -40,11 +40,17 @@ A plain store in unit B to a field that unit A hands to InterlockedCompareExchan
 (x86: every store is a release). B cannot see that from its own text, so the ordering needs the whole program:
 
 * **Discovery.** `-fplugin-arg-fnvnx_order-discover=<file>` writes the unit's keys: its Interlocked operands (also
-  through forwarders, resolved after the whole unit is parsed) and its polled fields and globals, as
-  `field Class::member` / `var name`, sorted. It runs at PLUGIN_FINISH, so it works under `-fsyntax-only`.
+  through forwarders, and through a local pointer set from `&obj.m`) and its polled fields and globals, as
+  `field Class::member` / `var name`, sorted. It also writes the facts another unit completes: `fwd <fn> <i>` (a
+  public or inline function that hands its parameter i to Interlocked*), `pcall` (passes a parameter on) and
+  `call <fn> <i> <key>` (binds a field to a parameter of a function defined elsewhere). It runs at PLUGIN_FINISH,
+  so it works under `-fsyntax-only`.
+* **Merge.** `toolchain/order/keys_merge.py` resolves forwarders over all units to a fixed point (a forwarder defined
+  in unit A and called in unit B makes B's operand a key) and writes the `field` / `var` lines.
 * **The list.** `tools/link/compile.sh` has `ORDER_KEYS=${ORDER_KEYS:-<obj dir>/order.keys}` and keeps that file
   current itself: a syntax-only discovery pass over **all** units of units.json, not only the units it is asked to
-  compile, cached per unit in `<obj dir>/.keys/` (invalidated by the plugin, the shim headers and the flags). So a
+  compile, cached per unit in `<obj dir>/.keys/`: a unit is discovered again when it, or any header it includes (its
+  `.d` file from the last discovery), is newer, and every unit when the plugin, the shim headers or the flags change. So a
   shard, or a one-unit compile, sees the same list as the full build. The file is replaced only when its content
   changes; objects older than it are rebuilt. A missing `ORDER_KEYS=<file>` is an error, never a silent fallback.
   `ORDER_KEYS=unit` (in-unit discovery only) is for A/B runs and quick checks, never a build that runs. `KEYS_ONLY=1`
@@ -57,6 +63,11 @@ A plain store in unit B to a field that unit A hands to InterlockedCompareExchan
 * **Matching.** By record name and member name (`Class::member`, unqualified) and by variable name, as the gate's
   `atomic.keys`, which the plugin also reads. A name shared by two records or two statics orders both: over-ordering
   costs a few `ldar`/`stlr`, it does not change meaning. Members of unnamed records are ordered only in-unit.
+* **Record copies.** A load or store of a whole record (or array of records) that contains a keyed field, such as
+  `*p = *n` over a polled flag, keeps its plain access with fences (`dmb ish` before the store, `dmb ishld` after
+  the load), like a packed field.
+* **Not covered:** a store through a pointer alias (`int *q = &w->done; *q = 1`) and a poll without a loop
+  condition (`for (;;) { if (g) break; Sleep(0); }`); V1's K8 / K9 notes.
 * **Cost of the pass:** about 0.6 CPU seconds per unit, a census of the tree without code generation.
 
 Modes for A/B measurements only (compile.sh `ORDER_MODE=off|tso`, `ORDER_ARGS=ltr`); `off` also selects the

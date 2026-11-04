@@ -82,7 +82,28 @@ check((m['unexplained_functions'], m['unexplained_units']) == (1, 1), 'metric 1 
 text = ex.render(fns, units, listing=True)
 check('unexplained: 1 functions, 1 no-build units (of 5 functions, 3 units)' in text and '## Explained' in text,
       'report text')
+# retargets by their relocation pairs (## Retargets): every pair must be a known wrapper, whatever the rule
+RT = (REPORT + """
+## Retargets (unit, address, pristine binding>prepared binding of each relocation that moved)
+
+```
+src/b.cpp  0x00402010  0x00406d30>_strcpy_s,0x0043b9d0>?strchr@@YAPADPADH@Z
+src/x.cpp  0x00405000  0x00406d30>_strcpy_s,0x00999999>_other
+```
+""").replace('src/s1b.cpp  0x00403000  code  (interaction)', 'src/x.cpp  0x00405000  retarget  DECL1')
 real = ex.load_table()
+fns2, _ = ex.explain([ex.merge_reports.parse(RT, 'rt.md')], real, set())
+c2 = {(f['unit'], f['addr']): f['cls'] for f in fns2}
+check(c2[('src/b.cpp', '0x00402010')] == 'CRT-WRAPPER', 'an interaction retarget whose pairs are all wrappers')
+check(c2[('src/x.cpp', '0x00405000')] is None, 'one unknown pair leaves a DECL1 retarget unexplained')
+sys.path.insert(0, str(PORT / 'tools/equiv'))
+import equiv
+check(equiv.literal_bytes(b'\0') == equiv.literal_bytes(b'\0\0\0') == b'\0' and
+      equiv.literal_bytes(b'ab\0\0') == b'ab\0', 'literal digest ignores the zero padding before the next symbol')
+check(equiv.retarget_pairs([[4, 'a', '0x00406d30', '_strcpy_s', None], [9, 'a', '0x00406d30', '_strcpy_s', None],
+                            [12, 'f', '0x0043b9d0', 'g', equiv.hexa_local]]) == '0x00406d30>_strcpy_s,0x0043b9d0>g',
+      'retarget pairs: distinct, sorted, a local definition by name')
+
 check(all(x['reason'] and x['cls'].upper() == x['cls'] for x in real), 'explained.tsv: every row has a class and a reason')
 print('explain: %d failed' % len(fails))
 sys.exit(1 if fails else 0)
