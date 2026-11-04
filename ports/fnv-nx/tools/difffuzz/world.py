@@ -198,6 +198,24 @@ def garbage32(seed, k):
     return random.Random((seed * 7919 + k * 104729) & 0xffffffff).getrandbits(32)
 
 
+def ref_result(k):
+    """The canned result of the k-th intercepted call when the callee returns a reference: a valid, non-null
+    address (heap; its bytes are the world's), the same on both machines. A null reference made the oracle fault
+    where MSVC dereferenced the result at once and GCC only after a test (about 160 farm functions)."""
+    return HEAP + 0x1000 * (k % 0x200) + 0x40
+
+
+def canned_kind(convs):
+    """('ref' | 'bool' | None) for an intercepted call's result, from the callee's definition and the calling
+    unit's declaration of it (a callee defined char / int that the caller treats as bool: MSVC tests al, GCC bit 0)."""
+    rets = [c.ret for c in convs if c is not None and c.ret is not None]
+    if any(getattr(r, 'is_ref', False) for r in rets):
+        return 'ref'
+    if any(r.is_bool for r in rets):
+        return 'bool'
+    return None
+
+
 def result_bytes(case, k, n):
     """The canned result of the k-th intercepted call when it is returned through memory (or a register pair
     wider than eax:edx): the case's canned bytes, extended with garbage words; the same on both machines."""

@@ -255,7 +255,10 @@ class X86Engine:
         pop, kind = info if info else (0, 'int')
         eax = world.u32(rb, 0)
         cv = self._callee_conv(address)
-        if cv is not None and cv.ret is not None and cv.ret.is_bool:
+        ck = world.canned_kind((cv, self._callee_conv(address, caller=True)))
+        if ck == 'ref':
+            eax = world.ref_result(k)
+        elif ck == 'bool':
             eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)
         if cv is not None and cv.hidden and cv.ret is not None:
             p = self._sret_of(cv, r.calls[-1])
@@ -286,8 +289,8 @@ class X86Engine:
         """Execution reached memory that holds no code: an indirect call through a planted pointer."""
         self._on_block(uc, address, size, user)
 
-    def _callee_conv(self, address):
-        f = getattr(self.callee_info, 'conv', None)
+    def _callee_conv(self, address, caller=False):
+        f = getattr(self.callee_info, 'caller_conv' if caller else 'conv', None)
         try:
             return f(address) if f else None
         except Exception:  # noqa: BLE001

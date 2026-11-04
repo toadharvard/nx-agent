@@ -143,6 +143,12 @@ causes `msvc-inlined` (oracle gap: the native calls X out of line where the orac
 next call being one X makes), `runtime-equiv` (oracle gap, records from before difffuzz-8) and `array-new-check`
 (soft: GCC checks new[]'s count, MSVC 2008 does not).
 
+**Canned results by declaration (difffuzz-9).** An intercepted call's canned result follows both the callee's
+definition and the calling unit's declaration of it: a reference result (`T&`) is a valid non-null heap address
+(`world.ref_result`), a bool result (either declaration) is 0/1. The bytes an intercepted callee pops are read from
+its oracle code (`ret N`) when known, not from its declaration (a declaration with a parameter too many or too few
+left the oracle's esp off by 4: `fault:x:00000000`).
+
 **Native runtime state (difffuzz-8).** The AArch64 machine has a zeroed thread-local block at `tpidr_el0`
 (0x0b900000, private, not compared): the platform's `thread_local` state read as `[tpidr_el0 + off]` faulted at
 small addresses before. A native indirect call through the value of an IAT slot (pinned to the x86 import stub)

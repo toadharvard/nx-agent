@@ -55,6 +55,7 @@ class Arm64Engine:
         self.vtables = vtables or {}
         self.callee_conv = None          # original address -> Conv of the callee definition (set by runner.Pair)
         self.iat_names = {}              # IAT slot -> import name (set by runner.Pair)
+        self.caller_conv = None          # original address -> Conv of the calling unit's declaration (runner.Pair)
         self.imports = {}                # x86 import stub index -> (name, stdcall bytes) (set by runner.Pair)
         self.world = world_obj
         self.image = image
@@ -333,7 +334,16 @@ class Arm64Engine:
                 cv = self.callee_conv(target)
             except Exception:  # noqa: BLE001
                 cv = None
-        if cv is not None and cv.ret is not None and cv.ret.is_bool:
+        ccv = None
+        if self.caller_conv is not None and target is not None and target >= 0:
+            try:
+                ccv = self.caller_conv(target)
+            except Exception:  # noqa: BLE001
+                ccv = None
+        ck = world.canned_kind((cv, ccv))
+        if ck == 'ref':
+            x0 = world.ref_result(k)
+        elif ck == 'bool':
             x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1
         uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
