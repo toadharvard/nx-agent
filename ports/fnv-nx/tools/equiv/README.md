@@ -27,9 +27,13 @@ own, it is created on first use).
 | `VS2008ExpressENUX1397868.iso` (938,108,928 bytes) | `632318ef0df5bad58fcb99852bd251243610e7a4d84213c45b4f693605a13ead` |
 
 On another machine `tools/equiv/setup_msvc.sh <dest>` does all of this (apt, download, checksum, unpack, signature
-check, Wine prefix) and prints the three variables; `tools/farm/equiv_job.sh` runs the whole gate for one shard of
-units and publishes the pristine objects to the private artifacts repository (`msvc/pristine/<decomp12>`: `obj/`
-and `meta.json`; the job fingerprints the objects itself, `rows.jsonl` there is optional).
+check, Wine prefix) and prints the three variables. The download resumes (`curl -C -`) across cut transfers and runs
+until size and SHA-256 match (`tests/s11/test_download.py` checks this against a local server that cuts every
+response). `tools/farm/equiv_job.sh` runs the whole gate for one shard of units. It takes the unpacked compilers from
+the private artifacts repository (branch `toolchain/msvc9`, 54 MB packed) when a farm has published them, and
+otherwise publishes them after unpacking; setup_msvc.sh checks Microsoft's signatures and runs both cl.exe either
+way. The job also publishes the pristine objects (`msvc/pristine/<decomp12>`: `obj/` and `meta.json`; it
+fingerprints the objects itself, so `rows.jsonl` there is optional).
 
 ## One unit to a COFF object (the decomp's own wrapper and flags)
 

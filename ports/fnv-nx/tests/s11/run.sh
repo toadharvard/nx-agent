@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # run.sh - S11 tests (tools/equiv): no compiler needed for the first part.
-#   tests/s11/run.sh            rule classification, allow-list prepare on a synthetic tree, resolver/layout parsing
+#   tests/s11/run.sh            rule classification, allow-list prepare on a synthetic tree, resolver/layout parsing,
+#                               merge_reports, setup_msvc.sh's resuming download (local server that cuts transfers)
 #   DECOMP=<fnv_decomp> FNV_MSVC9_ROOT=... FNV_MSVC9_PREFIX=... tests/s11/run.sh
 #                               also builds two decomp units under MSVC 2008 (pristine vs neutral rules) and expects
 #                               them identical (tools/equiv/README.md: compiler setup)
@@ -10,6 +11,7 @@ EQ="$ROOT/tools/equiv/equiv.py"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 
 python3 "$HERE/test_equiv.py" "$EQ" "$OUT"
+mkdir -p "$OUT/dl"; python3 "$HERE/test_download.py" "$ROOT/tools/equiv/setup_msvc.sh" "$OUT/dl"
 
 if [ -n "${DECOMP:-}" ] && [ -n "${FNV_MSVC9_ROOT:-}" ]; then
     # src/bgsimpactdataset.cpp (unit 3) and src/fallout/ai/actor_magic.cpp (unit 255): KEEP1, DECL1 (SDK injected,

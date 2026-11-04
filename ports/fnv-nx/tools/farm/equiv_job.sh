@@ -3,9 +3,14 @@
 #
 #   tools/farm/equiv_job.sh <commit> <k> <N> <report.md>
 #   tools/farm/equiv_job.sh --seed-pristine <obj dir> <rows.jsonl>      publish an existing full pristine build
+#   tools/farm/equiv_job.sh --toolchain                                  step 1 only (install / fetch / publish)
 #
-# 1. Installs Wine and Visual C++ 2008 SP1 / RTM from Microsoft's ISOs (tools/equiv/setup_msvc.sh) into
-#    $FARM_HOME/msvc9, once.
+# 1. Installs Wine and Visual C++ 2008 SP1 / RTM into $FARM_HOME/msvc9 (tools/equiv/setup_msvc.sh), once. The unpacked
+#    compilers (msvc/sp1, msvc/rtm: VC + SDK v6.0A, 440 MB, 54 MB packed) come from branch `toolchain/msvc9` of
+#    the private artifacts repository when a farm has published it there; otherwise setup_msvc.sh downloads
+#    Microsoft's ISOs (resumed, SHA-256 checked) and unpacks them, and this farm publishes the tree. Either way
+#    setup_msvc.sh checks Microsoft's signatures on cl.exe / c1xx.dll / c2.dll and runs both cl.exe under Wine before
+#    anything is used or published.
 # 2. Pristine MSVC objects of the decomp, published to the private artifacts repository toadharvard/fnv-nx-build:
 #    branch `msvc/pristine/<decomp12>` holds every unit (obj/u<i>.obj, meta.json, rows.jsonl optional); S13 reuses it.
 #    When it is missing, this shard's pristine units are built and published as `msvc/pristine-part/<decomp12>/<k>of<N>`;
@@ -20,9 +25,10 @@
 # 4. Writes <report.md>: unit and function counts, functions by kind (EH-only, retarget, code), the per-rule table,
 #    the differing functions (unit, address, kind, rule) and the units that no longer compile (first error).
 #
-# Needs: Ubuntu 24.04 with root (apt: wine, wine32:i386, p7zip-full, cabextract, msitools), git, python3, curl, about
-# 6 GB of disk; the artifacts repository attached to the session with push. MSVC binaries, prepared trees and objects
-# stay in $FARM_HOME / the private repository; the report holds numbers, unit names, addresses, short diagnostics.
+# Needs: Ubuntu 24.04 with root (apt: wine, wine32:i386, p7zip-full, cabextract, msitools, osslsigncode), git,
+# python3, curl, about 6 GB of disk; the artifacts repository attached to the session with push. MSVC binaries,
+# prepared trees and objects stay in $FARM_HOME / the private repository; the report holds numbers, unit names,
+# addresses, short diagnostics.
 # Environment: FARM_HOME (~/fnvnx-farm), JOBS (nproc), NICE (10), EQUIV_RULES, ARTIFACTS ($FARM_HOME/artifacts-equiv);
 # EQUIV_PRISTINE_DIR=<dir with obj/u<i>.obj> uses a local pristine build and touches no artifacts.
 set -euo pipefail
@@ -42,7 +48,9 @@ artifacts() {   # refs are fetched one by one: the repository also holds every l
 publish() {  # <dir> <branch> <message>: commit the dir's content as the branch's next commit (no checkout), push
   local dir=$1 br=$2 msg=$3 idx parent tree commit
   idx=$(mktemp); rm -f "$idx"
-  GIT_INDEX_FILE=$idx git --git-dir="$ARTIFACTS/.git" --work-tree="$dir" -C "$dir" add -A .
+  # -f: a global excludes file must not drop *.obj / *.lib; no line-ending conversion of the SDK headers
+  GIT_INDEX_FILE=$idx git --git-dir="$ARTIFACTS/.git" --work-tree="$dir" -C "$dir" -c core.autocrlf=false \
+    -c core.safecrlf=false add -A -f .
   tree=$(GIT_INDEX_FILE=$idx git -C "$ARTIFACTS" write-tree); rm -f "$idx"
   parent=(); git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$br:refs/remotes/origin/$br" 2>/dev/null \
     && parent=(-p "refs/remotes/origin/$br")
@@ -59,6 +67,39 @@ meta() {  # <decomp dir> <msvc dir> <ok> <units>
     "$(git -C "$1" rev-parse HEAD)" "$(sha256sum "$2/sp1/VC/bin/cl.exe" | cut -c1-16)" \
     "$(sha256sum "$2/rtm/VC/bin/cl.exe" | cut -c1-16)" "$4" "$3"
 }
+
+TC=$FARM_HOME/msvc9/msvc
+compilers() {  # <port dir>: step 1; exports FNV_MSVC9_ROOT, FNV_MSVC9_RTM_ROOT, FNV_MSVC9_PREFIX
+  local ref envline n
+  if [ -z "${EQUIV_PRISTINE_DIR:-}" ] && ! { [ -f "$TC/sp1/VC/bin/cl.exe" ] && [ -f "$TC/rtm/VC/bin/cl.exe" ]; }; then
+    artifacts
+    if ref=$(fetch_ref toolchain/msvc9 || fetch_ref toolchain/msvc9); then
+      rm -rf "$TC" "$TC.part"; mkdir -p "$TC.part"
+      git -C "$ARTIFACTS" archive "$ref" | tar -x -C "$TC.part" && mv "$TC.part" "$TC" \
+        && touch "$FARM_HOME/msvc9/toolchain.remote"
+    fi
+  fi
+  envline=$(bash "$1/tools/equiv/setup_msvc.sh" "$FARM_HOME/msvc9" | tail -1)
+  eval "$envline"
+  export FNV_MSVC9_ROOT FNV_MSVC9_RTM_ROOT FNV_MSVC9_PREFIX WINEDEBUG=-all
+  if [ -z "${EQUIV_PRISTINE_DIR:-}" ] && [ ! -f "$FARM_HOME/msvc9/toolchain.remote" ]; then
+    artifacts
+    if ! remote_has toolchain/msvc9; then
+      n=$(find "$TC" -type f ! -name meta.json | wc -l)
+      printf '{"cl_sp1": "15.00.30729.01", "cl_rtm": "15.00.21022.08", "cl_sp1_sha256": "%s", "cl_rtm_sha256": "%s", "files": %s, "from": "VS2008ExpressWithSP1ENUX1504728.iso, VS2008ExpressENUX1397868.iso (download.microsoft.com; SHA-256 in tools/equiv/setup_msvc.sh)"}\n' \
+        "$(sha256sum "$TC/sp1/VC/bin/cl.exe" | cut -c1-16)" "$(sha256sum "$TC/rtm/VC/bin/cl.exe" | cut -c1-16)" "$n" > "$TC/meta.json"
+      if publish "$TC" toolchain/msvc9 "Visual C++ 2008 Express SP1 + RTM and SDK v6.0A, unpacked by setup_msvc.sh ($n files)"; then
+        touch "$FARM_HOME/msvc9/toolchain.remote"
+      fi
+    else
+      touch "$FARM_HOME/msvc9/toolchain.remote"
+    fi
+  fi
+}
+
+if [ "${1:-}" = --toolchain ]; then
+  compilers "$REPO/ports/fnv-nx"; echo "toolchain: $FNV_MSVC9_ROOT $FNV_MSVC9_RTM_ROOT"; exit 0
+fi
 
 if [ "${1:-}" = --seed-pristine ]; then
   artifacts
@@ -85,8 +126,7 @@ D12=$(git -C "$DECOMP" rev-parse HEAD | cut -c1-12)
 t0=$(date +%s)
 
 # 1. compilers
-eval "$(bash "$P/tools/equiv/setup_msvc.sh" "$FARM_HOME/msvc9" | tail -1)"
-export FNV_MSVC9_ROOT FNV_MSVC9_RTM_ROOT FNV_MSVC9_PREFIX WINEDEBUG=-all
+compilers "$P"
 EQ=(nice -n "$NICE" python3 "$P/tools/equiv/equiv.py")
 
 # 2. pristine objects of this shard
