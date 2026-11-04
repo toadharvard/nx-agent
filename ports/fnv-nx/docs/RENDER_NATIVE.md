@@ -561,6 +561,55 @@ skin-to-bone transforms, the bones' world transforms from NiSkinInstance's bone 
 Next: reading NiSkinInstance / NiSkinData / NiSkinPartition from engine objects into palettes and partition draws
 (Do_RenderGeometry's skinned branch, now skipped and counted), and the remaining families' SKIN variants.
 
+### 4.5 d9 families: hand-written programs on the engine's D3D9 interface (stream render-lit)
+
+The families of §4 take typed blocks (`nx/families.h`); the engine's lit passes, however, arrive as D3D9 programs
+with their constants in registers (an NXD9 capture, or the engine's NiD3D constant maps on the console). A **d9
+family** is hand-written GLSL that takes exactly those inputs - `vec4 c[256]` by register (UBO 0), the glsldk driver
+UBO 2 (`d9_epilogue.glsl`: alpha test, fixed-function fog), samplers by register, attributes by fnvnx_dk usage
+location (`render/shaders/include/fnvnx_dk_layout.h`) - so it replaces the translated program of a draw one for one,
+with no change to the engine side. Every variant is a package shader (`shaders/d9_*.glsl`, built by `build.py`
+into DKSH with uam: no compile at run time on the console); the translated program (`Family::Translated`) still
+draws everything a d9 family does not recognise.
+
+**Recognition by interface** (`capture/d3d9_families.{h,cpp}`). `nx_d9_classify` reads the program's shader model,
+its constant table (CTAB: names, register sets, registers, counts) and its `dcl` declarations; no program name, hash
+or game file is used or stored. A draw goes native when the vertex and pixel programs classify into one family and
+variant (`nx_d9_pair`). The registers the families read are fixed: the classifier requires each constant at the
+register the family reads (one register map in all 16 of the player's packages, measured).
+
+| family | vertex program interface | pixel program interface | variants | model |
+|---|---|---|---|---|
+| `d9_adts` (SLS ADTS10: SLS2020/2022/2025, SLS2029-2036) | vs_2_0; ModelViewProj c0, FogParam c14, FogColor c15, [EyePosition c16], fvars0 c17, LightData c25 x (1 + NPT); position, tangent, binormal, normal, uv0, colour0 | ps_2_x; AmbientColor c1, EmittanceColor c2, PSLightColor c3 x (1 + NPT), PSLightPosition c19 x NPT, Toggles c27, BaseMap s0, NormalMap s1; t0.. = 3 + NPT (4 + 2 NPT with specular) | `p2s` (2 points, specular), `p3`, `p5` | tangent-space normal map; directional + point lights (attenuation 1 - (d/r)^2, active count fvars0.z / EmittanceColor.w); specular clamp(N.H)^power x gloss, faded where N.L <= 0.2; ambient, vertex colour and fog toggles; the shader's alpha cut-off |
+| `d9_envmap` (SLS2050/2057) | vs_2_0; ModelViewProj c0, ObjToCubeSpace c8 x3, FogParam c14 | ps_2_x; AmbientColor c1, EnvToggles c27, NormalMap s0, EnvironmentCubeMap s1 (cube), CustomEnvMask s3 | 1 | cube reflection of the eye vector about the normal-mapped normal (tilt x 0.1), mask from the normal map's alpha or the custom mask, x (1 - fog) |
+| `d9_fogpass` (SLS1017/1030) | vs_2_0; ModelViewProj c0, FogParam c14, FogColor c15; position only | ps_2_x, no constants, only `mov oC0, v0` | 1 | colour = fog colour, alpha = fog factor |
+
+The SKIN* vertex programs have the ADTS constant table and inputs too, but other outputs; they never pair with an
+ADTS pixel program of the same light count and specular bit, so they stay translated.
+
+**Checks** (local: the captures, packages and images derive from the player's game):
+
+* `render/verify/shaders/d9_parity.py` renders each capture with `nx_render --families none` (all translated) and
+  `--families all`, reads the float colour target after every draw (`--per-draw --raw`) and compares every draw a
+  d9 family drew: max abs error and pixels off by more than 2/255 and 1e-3 relative, plus the pixels the draw wrote
+  (a check on draws that write nothing says nothing; `--force-visible` turns depth, stencil, blending and culling
+  off in both runs). It prints the METRIC: lit draws (pixel program SLS*/SM3*/SKIN*/HAIR* by the local index) on
+  the native path / all lit draws.
+* `render/verify/shaders/d9_synth.py` writes a synthetic NXD9 per package: each (vertex, pixel) pair on a
+  full-screen grid with random constants (light counts 0 .. 1 + NPT and fractional, translucent and opaque, all
+  toggles, fog), random frames (unit and not) and textures, into an A16B16G16R16F target.
+
+| input (2026-11-04) | lit draws native | adts | envmap | fogpass |
+|---|---|---|---|---|
+| docmitchell_13000 (3 frames) | 27 / 27 (was 0 / 27) | 21 draws, 2.97 M px written, max 1.5e-5, 0 bad | 3 draws, 0 px written (off-screen) | 3 draws, 0 px written (off-screen) |
+| menu_11640 | 0 / 0 (no lit draws) | | | |
+| synthetic, package 012, 4 seeds | 40 / 40 | 24 draws, max 4.9e-4, 0 bad | 8 draws, max 7.6e-6, 0 bad | 8 draws, max 4.9e-4, 0 bad |
+| synthetic, package 019, 8 seeds | 80 / 80 | 48 draws, max 9.8e-4, 0 bad | 16 draws, max 6.1e-5, 0 bad | 16 draws, max 4.9e-4, 0 bad |
+
+The residual is one fp16 ULP of the target (9.8e-4 between 1 and 2). Not covered yet: the Lighting30 (SM3, ps_3_0)
+programs of package 019 (skin, hair, eyes, parallax, shadowed lights), which the Wine captures do not use (the game
+picked package 012 there), and the console's engine path (the same programs reach it through NiD3D constant maps).
+
 ## 5. Recommendation
 
 **Native renderer, hybrid on the shader side; drop the D3D9 emulation layer as the main path.**

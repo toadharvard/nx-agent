@@ -2,7 +2,8 @@
 // on the GL reference backend to PNG (docs/RENDER_NATIVE.md §8). Used by S16-compare for reference comparisons.
 //
 //   nx_render nxcap <file.nxcap> -o <dir> [--per-draw] [--until-draw N] [--frame F]
-//   nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--per-draw] [--until-draw N] [--frame F]
+//   nx_render d3d9  <file.nxd9>  -o <dir> [--shaders <dir>] [--per-draw] [--raw] [--until-draw N] [--frame F]
+//                [--families all|none] [--draw-log <file>] [--force-visible]
 //   nx_render scene <name|all>   -o <dir> [--per-draw] [--until-draw N]
 //
 // Output names (stable): f<frame %05u>.png per present (nxcap: SUBM with present; d3d9: PRES; scene: f00000.png
@@ -42,6 +43,20 @@ bool Png(const char* name, uint32_t image) {
     g_images++;
     return true;
 }
+bool g_raw = false;              // --raw: also f<frame>_d<draw>.f32 (u32 w, h, then w x h x RGBA float)
+std::vector<float> g_fpx;
+void Raw(const char* name, uint32_t image) {
+    uint32_t w, h;
+    if (g_fpx.empty()) g_fpx.resize(4096u * 4096u * 4u);
+    if (nxgl_read_rgba32f(image, &w, &h, g_fpx.data(), g_fpx.size() * sizeof(float))) return;
+    char p[2048];
+    snprintf(p, sizeof p, "%s/%s", g_out, name);
+    FILE* f = fopen(p, "wb");
+    if (!f) { fprintf(stderr, "nx_render: cannot write %s\n", p); exit(2); }
+    uint32_t hd[2] = {w, h};
+    bool ok = fwrite(hd, 4, 2, f) == 2 && fwrite(g_fpx.data(), 16, (size_t)w * h, f) == (size_t)w * h;
+    if (fclose(f) || !ok) { fprintf(stderr, "nx_render: cannot write %s\n", p); exit(2); }
+}
 bool FrameSelected() { return g_onlyFrame < 0 || (long)g_frame == g_onlyFrame; }
 int DrawHook(void*, uint32_t draw, uint32_t color) {
     if (!FrameSelected()) return 0;
@@ -50,6 +65,7 @@ int DrawHook(void*, uint32_t draw, uint32_t color) {
         if (g_scene) snprintf(n, sizeof n, "%s_d%05u.png", g_scene, draw);
         else snprintf(n, sizeof n, "f%05u_d%05u.png", g_frame, draw);
         Png(n, color);
+        if (g_raw && !g_scene) { snprintf(n, sizeof n, "f%05u_d%05u.f32", g_frame, draw); Raw(n, color); }
     }
     return g_until >= 0 && (long)draw >= g_until;
 }
@@ -91,7 +107,7 @@ void Summary(const char* text) {
 }
 int Usage() {
     fprintf(stderr, "usage: nx_render nxcap <file.nxcap> | d3d9 <file.nxd9> | scene <name|all>  -o <dir> "
-                    "[--shaders <dir>] [--per-draw] [--until-draw N] [--frame F]\n");
+                    "[--shaders <dir>] [--per-draw] [--raw] [--until-draw N] [--frame F] [--families all|none] [--draw-log <file>] [--force-visible]\n");
     return 2;
 }
 } // namespace
@@ -105,6 +121,20 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--per-draw")) g_perDraw = true;
         else if (!strcmp(argv[i], "--until-draw") && i + 1 < argc) g_until = atol(argv[++i]);
         else if (!strcmp(argv[i], "--frame") && i + 1 < argc) g_onlyFrame = atol(argv[++i]);
+        else if (!strcmp(argv[i], "--raw")) g_raw = true;
+        else if (!strcmp(argv[i], "--force-visible")) nx_d3d9_set_force_visible(1);
+        else if (!strcmp(argv[i], "--families") && i + 1 < argc) {
+            // d3d9: hand-written d9 families on (all, default) or off (none: every program translated)
+            const char* v = argv[++i];
+            if (!strcmp(v, "none")) nx_d3d9_set_families(0);
+            else if (!strcmp(v, "all")) nx_d3d9_set_families(~0u);
+            else return Usage();
+        }
+        else if (!strcmp(argv[i], "--draw-log") && i + 1 < argc) {
+            FILE* f = fopen(argv[++i], "w");
+            if (!f) { perror(argv[i]); return 2; }
+            nx_d3d9_set_draw_log(f);
+        }
         else return Usage();
     }
     if (!g_out) return Usage();
@@ -130,8 +160,8 @@ int main(int argc, char** argv) {
         g_frame = 0; nxgl_set_draw_hook(DrawHook, nullptr);
         NxD9Stats st;
         if (nx_d3d9_run(api, d.data(), d.size(), shaders, H::P, nullptr, &st, err, sizeof err)) { fprintf(stderr, "nx_render: %s\n", err); return 1; }
-        snprintf(sum, sizeof sum, "nx_render d3d9: frames %u, draws %u, skipped %u, clears %u, programs %u, textures %u, images %u%s%s\n",
-                 st.frames, st.draws, st.skipped, st.clears, st.shaders, st.textures, g_images,
+        snprintf(sum, sizeof sum, "nx_render d3d9: frames %u, draws %u, skipped %u, clears %u, programs %u, textures %u, images %u, native %u%s%s\n",
+                 st.frames, st.draws, st.skipped, st.clears, st.shaders, st.textures, g_images, st.nativeDraws,
                  st.skipped ? "; first skip: " : "", st.firstSkip);
         rc = st.skipped ? 3 : 0;
     } else if (!strcmp(mode, "scene")) {

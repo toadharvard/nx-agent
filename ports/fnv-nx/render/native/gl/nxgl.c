@@ -638,6 +638,29 @@ int nxgl_read_rgba8(uint32_t image, uint32_t* w, uint32_t* h, uint8_t* dst, size
     return 0;
 }
 
+int nxgl_read_rgba32f(uint32_t image, uint32_t* w, uint32_t* h, float* dst, size_t cap) {
+    uint32_t id = image ? image : g.swapImage;
+    if (!id || id > g.nImg) return -1;
+    if (g.img[id].isView) id = g.img[id].base;
+    Image* im = &g.img[id];
+    if (im->isDepth) return -1;
+    *w = im->w; *h = im->h;
+    if ((size_t)im->w * im->h * 4 * sizeof(float) > cap) return -1;
+    GLint prev = 0;
+    p_glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev);
+    if (!g.readFbo) p_glGenFramebuffers(1, &g.readFbo);
+    p_glBindFramebuffer(GL_READ_FRAMEBUFFER, g.readFbo);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    p_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, im->tex, 0);
+    p_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    p_glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    p_glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    p_glReadPixels(0, 0, (GLsizei)im->w, (GLsizei)im->h, GL_RGBA, GL_FLOAT, dst);
+    p_glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev);
+    return 0;
+}
+
 /* ---- replay ------------------------------------------------------------------------------------------------- */
 static GLenum glprim(uint32_t p) {
     static const GLenum t[6] = {GL_TRIANGLES, GL_TRIANGLE_STRIP, GL_LINES, GL_LINE_STRIP, GL_POINTS, GL_TRIANGLE_FAN};
