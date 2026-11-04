@@ -84,6 +84,9 @@ g init -q "$T/gd"; (cd "$T/gd" && g checkout -q -b gamedata/exe && cp "$T/fake.e
 export FARM_EXE_SHA256; FARM_EXE_SHA256=$(sha256sum "$T/fake.exe" | cut -d' ' -f1)
 export ARTIFACTS=$T/artifacts FARM_HOME=$T/farm FARM_SRC=$SRC FARM_EXT=$T/ext FARM_TREE=$T/tree FARM_OBJS=$T/objs/objects.tsv
 export FARM_V1=0 FARM_APT=0 FARM_TREE_WAIT=0 FARM_OBJ_WAIT=0 JOBS=1
+# the mock toolchain's prefix: full_job.sh then skips the fnvnx-a64 build-host check (makeinfo bison flex), which a
+# development host need not pass (the test failed on hosts without flex, not on the publish)
+export FNVNX_TC=/nonexistent
 mkdir -p "$FARM_EXT" "$FARM_TREE/build" "$T/objs"; echo '{}' > "$FARM_TREE/build/units.json"; : > "$FARM_OBJS"
 BD=$FARM_HOME/full/build
 

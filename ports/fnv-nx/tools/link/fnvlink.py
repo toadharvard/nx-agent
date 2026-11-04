@@ -766,11 +766,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 pair_classes[c] += 1
                             if v.kind != 'same':
                                 # aggregates by value: ask the layout probe, then decide on bytes (abi2)
-                                for sg, unit in ((rs, u.source), (ds, nd['unit'])):
+                                # synthesized vtable / body objects (`<host>#vtables`) have the host unit's types
+                                for sg, unit in ((rs, u.host or u.source), (ds, nd['unit'])):
                                     for c in [c for _, c in abi.params_of(sg)] + [abi.ret_class(sg)]:
                                         if c.startswith('AGG:') and '{anon}' not in c:
                                             probe_req.add((unit, abi2.agg_name(c)))
-                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.source: layouts.get((x, t)),
+                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.host or u.source: layouts.get((x, t)),
                                                   lambda t, x=nd['unit']: layouts.get((x, t)), ecx_unused=ecx_dead)
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
                                         not (v.kind == 'bridge' and 'narrow-extend' in v.classes) and \

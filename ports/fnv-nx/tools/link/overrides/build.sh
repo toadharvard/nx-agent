@@ -13,7 +13,7 @@ CC=${CC:-aarch64-linux-gnu-gcc}
 while IFS=$'\t' read -r addr sym src sig; do
   case "$addr" in ''|'#'*) continue ;; esac
   obj="$OUT/${src%.*}.o"
-  $CC -mabi=ilp32 -O2 -fPIC -U_FORTIFY_SOURCE -std=gnu11 -Wall -c "$HERE/$src" -o "$obj"
+  $CC -mabi=ilp32 -O2 -fPIC -U_FORTIFY_SOURCE -std=gnu11 -Wall -ffp-contract=off -frounding-math -c "$HERE/$src" -o "$obj"
   printf '%s\t%s\t%s\t%s\n' "$addr" "$sym" "$obj" "$sig" >> "$OUT/override.tsv"
 done < "$HERE/overrides.tsv"
 echo "overrides: $(grep -c . "$OUT/override.tsv" || true) -> $OUT/override.tsv"

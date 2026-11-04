@@ -210,6 +210,31 @@ class/struct/union/enum tags, which Itanium names do not.
   signed on MSVC and now in GCC too with J-0034's `-fsigned-char`; `uxtb`/`uxth` for `bool`, unsigned types,
   `wchar_t`), class `narrow-extend`. The byte-level re-decision (below) keeps these bridges.
 
+* **Variadic pairs** (`abi.varargs_check`, S2c-abi). AArch64 Linux passes anonymous arguments in the next registers
+  and stack slots exactly like named ones (AAPCS64; Apple's variant differs), and va_arg walks them in that order, so
+  most pairs with a `...` side need no bridge:
+  * variadic reference, fixed definition: fine when the definition reads only what the reference names. That is the
+    bulk of the class: the retail exe compiled its debug loggers to `return 0` (0x005b5e40 `Warning`, 0x0040fbe0,
+    0x00a29680, 0x00c3c220), defined `f(void)`. A definition parameter in the reference's anonymous part has a type
+    only the call site knows: `manual` (a native variadic replacement in `tools/link/overrides/`, like 0x00703c00);
+  * fixed reference, variadic definition (0x005accb0's extractor, 0x005e58f0 ApplyPerkModifiers): the reference's
+    parameters behind the definition's named ones must be integers, pointers or doubles (a fixed float is 4 bytes,
+    a variadic caller would have promoted it), start at the definition's anonymous x86 offset and leave the same
+    AArch64 register counts. A `char`/`short`/`bool` there is extended in place (`narrow-extend`);
+  * both variadic: the named parts are compared like fixed ones and the anonymous parts must start at the same
+    place;
+  * definition parameters in the reference's anonymous part, when the reference names nothing (`int f(...)`, the
+    decomp's unprototyped declaration) or the definition is variadic too (0x00406d00 `(char *, ...)` against
+    `(char *, int, const char *, ...)`): 32-bit integers and pointers only. x86 worked, so the call site pushed a
+    4-byte word there, which is never a float (a variadic caller promotes it to double); its integer or pointer
+    takes the register the definition reads. A fixed definition behind named reference parameters is a decompiled
+    stack walk (0x00703c00): `manual`;
+  * a callee-pop side (stdcall/thiscall/fastcall) with stack arguments against a variadic (cdecl) one moved esp on
+    x86: `manual`.
+  Pairs decided this way carry the class `varargs-tail`. Test: `test_varargs.py` (verdicts, and the `same` and
+  bridged pairs executed under qemu-aarch64). On link/c0d6c71516f6 (replayed with `abireplay.py`) 1,011 of 1,310
+  varargs rows are bound directly (1,005) or bridged (6); 210 of the 298 left are the logger 0x00703c00 (override).
+
 **Callee-pop bytes** (V1 round 3): a cdecl caller removes what it pushed, any other caller leaves that to the
 callee, and a stdcall / thiscall / fastcall callee pops its own stack arguments (MSVC's hidden result pointer
 included). When the bytes the definition pops differ from the bytes the reference's caller expects it to pop, x86
@@ -336,7 +361,7 @@ over the decomp definition at that address. For S6n's `render/native/overrides.t
   signature differs on purpose).
 
 The port's own replacements live in `tools/link/overrides/`: `overrides.tsv` (address, symbol, source, signature)
-and `build.sh <out dir>`, which compiles them for the game target and writes the table `--override` reads. First
+and `build.sh <out dir>`, which compiles them for the game target and writes the table `--override` reads. The pipeline's link stage does that by default (`OVERRIDE=auto`, S2c-abi); before, farm links ran without them and the 0x00703c00 references stayed `manual` (219 rows on link/c0d6c71516f6). First
 entry: **0x00703c00, the console logger** - the decomp defines it as `void (const char *text, const char *context)`
 handing `&context` on as x86 stack varargs; `fnvnx_log_00703c00(const char *fmt, ...)` formats with `vsnprintf`
 under the original's conditions (UI root and key flag, then an active console or `FUN_005b6f70`) and prints through

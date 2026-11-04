@@ -612,6 +612,38 @@ check('STAND1 drops the stand-ins of tagged addresses', got,
        'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b); /* fnv-nx STAND1 */', '/* fnv-nx STAND1: V::Make is'],
       ['__declspec(noinline) V*\n/*', 'FUN_00632ec0::FUN_00632ec0()\n{}'])
 
+# ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_od, _o2 = ['/MT', '/Od', '/Oy-', '/GS'], ['/MT', '/O2', '/GS']
+_syms = {'?Clear@G@@QAEX_N@Z': '0x00845000', '?Reset@G@@QAEXXZ': '0x00644000', '?Free@@YAHH@Z': '0x00845100',
+         '?Keep@@YAHH@Z': '0x00845100', '?Loc@@YAHH@Z': '0x00845100', '?Vir@G@@UAEXXZ': '0x00845200',
+         '?Mine@G@@QAEXXZ': '0x00644100', '?Two@G@@QAEXH@Z': '0x00845000', '?Two@G@@QAEXM@Z': '0x00644100'}
+_json.dump({'units': [
+    {'source': 'src/staging/u.cpp', 'flags': _od, 'symbols': _syms,
+     'functions': [{'address': '0x00644000'}, {'address': '0x00644100'}]},
+    {'source': 'src/staging/o2.cpp', 'flags': _o2, 'symbols': _syms, 'functions': []},
+    {'source': 'src/staging/other.cpp', 'flags': _od, 'symbols': {},
+     'functions': [{'address': '0x00845000'}, {'address': '0x00845100'}, {'address': '0x00845200'}]}]},
+    open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_STAND2_SRC = ('struct G\n{\n    int* p;\n    void Clear(bool);\n    void Reset();\n    virtual void Vir();\n    void Mine();\n'
+               '    void Two(int);\n    void Two(float);\n};\nvoid G::Clear(bool b)\n{\n    delete[] p;\n}\n'
+               'int Free(int a)\n{\n    return a;\n}\ninline int Keep(int a)\n{\n    return a;\n}\n'
+               'static int Loc(int a)\n{\n    return a;\n}\nvoid G::Vir()\n{\n}\nvoid G::Mine()\n{\n}\n'
+               'void G::Two(int)\n{\n}\n// @fnv 0x00644000\nvoid G::Reset()\n{\n    p = 0;\n    Clear(true);\n}\n')
+_saved = s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+got = run(s1.r_stand_in_definitions_elsewhere, _STAND2_SRC, os.path.join(_s, 'src', 'staging', 'u.cpp'))
+got_o2 = run(s1.r_stand_in_definitions_elsewhere, _STAND2_SRC, os.path.join(_s, 'src', 'staging', 'o2.cpp'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('STAND2 drops a stand-in of an address another unit defines (/Od)', got,
+      ['/* fnv-nx STAND2: G::Clear is the function at the tagged address */\n', 'int Free(int a); /* fnv-nx STAND2 */',
+       'inline int Keep(int a)\n{', 'static int Loc(int a)\n{', 'void G::Vir()\n{', 'void G::Mine()\n{',
+       'void G::Two(int)\n{', 'void G::Reset()\n{\n    p = 0;\n    Clear(true);'],
+      ['delete[] p'])
+check('STAND2 leaves units MSVC compiled with auto-inlining', got_o2, ['delete[] p', 'int Free(int a)\n{'], ['STAND2'])
+check('STAND2 keeps the line count', 'lines %d' % got.count('\n'), ['lines %d' % _STAND2_SRC.count('\n')])
+
 # ---- STR1 uses the declaration in scope
 got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(&str_01082ab8); }\nnamespace N {\n'
           'extern char str_01082ab8;\nvoid h() { g(&str_01082ab8); }\n}\nextern "C" char str_a0000000[], str_b0000000[],\n'
@@ -908,6 +940,62 @@ check('LANE1 address of the lane array',
       ['((float(*)[sizeof(s.v) / sizeof(float)])&(s.v))'], ['&((float*)&(s.v))'])
 check('LANE1 a lane\'s address stays',
       run(s1.r_lane_array_address, 'void f(S s) { g(&((float*)&(s.v))[1]); }\n'), ['&((float*)&(s.v))[1]'], ['(*)['])
+
+# ---- S1-refs: STD2 (a unit's own `std::` definition renamed, with its recipe symbol)
+import json as _json
+_s2 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s2, 'build')); os.makedirs(os.path.join(_s2, 'src'))
+_json.dump({'units': [{'source': 'src/g.cpp', 'functions': [
+    {'address': '0x00401000', 'symbol': '?abs@std@@YANM@Z', 'size': 20},
+    {'address': '0x00401020', 'symbol': '?f@@YAHH@Z', 'size': 8}], 'symbols': {}},
+    {'source': 'src/h.cpp', 'functions': [{'address': '0x00401040', 'symbol': '?g@@YAHH@Z', 'size': 8}],
+     'symbols': {'?abs@std@@YANM@Z': '0x00401000'}}]}, open(os.path.join(_s2, 'build', 'units.json'), 'w'))
+s1._STD2_FNS = None; s1.STD2_RENAMES.clear()
+_g = ('// @fnv 0x00401000\nFNVNX_KEEP double std::abs(float value)\n{\n    return value < 0 ? -value : value;\n}\n'
+      '// @fnv 0x00401020\nint f(int x) { return (int)std::abs((float)x); }\n')
+_o = run(s1.r_std_definitions, _g, os.path.join(_s2, 'src', 'g.cpp'))
+check('STD2 file-scope std:: definition the recipe decorates in std -> fnvnx_std_',
+      _o, ['FNVNX_KEEP double fnvnx_std_abs(float value)', 'return (int)std::abs((float)x);'], ['double std::abs'])
+check('STD2 a unit whose recipe has no std:: definition is untouched',
+      run(s1.r_std_definitions, _g.replace('0x00401000', '0x00401060'), os.path.join(_s2, 'src', 'h.cpp')),
+      ['double std::abs(float value)'], ['fnvnx_std_'])
+check('STD2 a member definition in a class scope is not at file scope',
+      run(s1.r_std_definitions, 'struct S {\n// @fnv 0x00401000\ndouble std::abs(float v) { return v; }\n};\n',
+          os.path.join(_s2, 'src', 'g.cpp')), [], ['fnvnx_std_'])
+s1.rename_std_definitions(_s2, Counter())
+_u = _json.load(open(os.path.join(_s2, 'build', 'units.json')))['units']
+check('STD2 POST hook renames the definition\'s recipe symbol only', _json.dumps(_u),
+      ['"?fnvnx_std_abs@@YANM@Z"', '"?f@@YAHH@Z"', '"?abs@std@@YANM@Z": "0x00401000"'])
+_shutil.rmtree(_s2, ignore_errors=True)
+
+# ---- S1-refs: COND1 (`c ? false : f()` with f returning a class convertible both ways with bool), RSTR1
+_G = ('struct Gate { char v; Gate() {} Gate(bool b) : v(b) {} operator bool() const { return v != 0; } };\n'
+      'struct Only { char v; operator bool() const { return v != 0; } };\n'
+      'struct N { Gate test(float e) const; int other(float e) const; Only probe(float e) const; };\n')
+check('COND1 the gate operand of `? false :` gets the bool conversion',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->test(0.5f)) g(); }\n'),
+      ['!n ? false : (bool)(n->test(0.5f))) g();'])
+check('COND1 a call returning int stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->other(0.5f)) g(); }\n'),
+      [], ['(bool)('])
+check('COND1 a class without a bool constructor (no ambiguity) stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->probe(0.5f)) g(); }\n'),
+      [], ['(bool)('])
+check('COND1 an operand that does not end in the call stays',
+      run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { int x = !n ? false : n->test(0.5f) + 1; }\n'),
+      [], ['(bool)('])
+_R = ('template <class T> struct Arr { void AddBack(const T& v); void Set(int i, T* p); };\n'
+      'struct S { int a; };\n')
+check('RSTR1 restrict local passed to a const T& parameter',
+      run(s1.r_restrict_reference_args, _R + 'void f(Arr<S*>* o) {\n    S* __restrict c = new S();\n'
+          '    o->AddBack(c);\n    o->Set(0, c);\n}\n'),
+      ['o->AddBack(fnvnx_unrestrict(c));', 'o->Set(0, c);'])
+check('RSTR1 a plain local stays',
+      run(s1.r_restrict_reference_args, _R + 'void f(Arr<S*>* o) {\n    S* __restrict d = 0;\n    S* c = 0;\n'
+          '    o->AddBack(c);\n}\n'), [], ['fnvnx_unrestrict'])
+check('RSTR1 a use outside the declaring function stays',
+      run(s1.r_restrict_reference_args, _R + 'void f() { S* __restrict c = 0; }\nvoid h(Arr<S*>* o, S* c) '
+          '{ o->AddBack(c); }\n'), [], ['fnvnx_unrestrict'])
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)

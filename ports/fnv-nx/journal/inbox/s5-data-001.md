@@ -70,4 +70,5 @@ onto the integration branch.
      masters-loaded (queue 3: BSA open and read, ESM parse).
   2. Measure profile.cpp directly on the farm's next guest build (full1). Expected: 11 file faults.
   3. renderer-init: wait for S5-boot's D3D9.DLL fix, or boot a guest linked with D3D9=null, to reach archive-list.
-  4. V1's new W9/W10/W13 (stlr, ldaxr/stlxr stores; integration e9e1981).
+  4. V1's new W9/W10/W13 (stlr, ldaxr/stlxr stores; integration e9e1981) pass on this branch as well, so there is
+     nothing to do there.

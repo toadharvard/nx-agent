@@ -27,8 +27,11 @@ unsigned fnvnx_first_run_profile(void);
 void fnvnx_audio_input_register(void);
 void fnvnx_d3d9_register(void) __attribute__((weak));   /* D3D9=external: d3d9.dll module (render/nine) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
+void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal);
 int __fnv_0086a850(unsigned, unsigned, unsigned, unsigned) __attribute__((weak));   /* WinMain */
 }
+
+static_assert(FNVNX_BY_NAME == 0xffffffffu, "platform/include/fnvnx_win32_ext.h FNVNX_IMPORT_BY_NAME");
 
 static char k_exe[300];   /* os_game_dir() + /FalloutNV.exe (C:\FalloutNV\FalloutNV.exe), set by load_image */
 
@@ -125,7 +128,9 @@ static void os_log(void *, const char *m) { printf("  loader: %s\n", m); }
 
 static unsigned g_unresolved_imports;
 static uint32_t resolve_import(void *, const char *dll, const char *name, uint32_t ordinal, unsigned) {
-    uint32_t v = ordinal == FNVNX_BY_NAME && name ? (uint32_t)(uintptr_t)fnvnx_win32_lookup_export(dll, name) : 0;
+    /* by name or by ordinal (platform/win32/exports.cpp: WSOCK32, XINPUT1_3, DSOUND ordinal tables) */
+    uint32_t v = ordinal == FNVNX_BY_NAME && !name ? 0
+               : (uint32_t)(uintptr_t)fnvnx_win32_lookup_import(dll, name, ordinal);
     if (!v && ++g_unresolved_imports <= 64) {
         if (name) printf("fnvnx boot: import %s!%s: no export\n", dll, name);
         else printf("fnvnx boot: import %s!#%" PRIu32 ": no export\n", dll, ordinal);

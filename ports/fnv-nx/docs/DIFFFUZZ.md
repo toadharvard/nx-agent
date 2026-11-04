@@ -168,6 +168,28 @@ tail jumps and in-function switch tables (relocated with the oracle code) are fu
 aedcf24: targets / functions with a native object 64.4 % -> 98.4 % (21 functions with unresolved relocations
 remain); of 110 newly fuzzed functions 106 have a verdict (16 hard, 6 soft, 19 oracle gap).
 
+**Vtable pairs (`vtmodel.py pairs`).** A kind-V pair is short when the native vtable has fewer slots than the exe's
+vftable (an exact Itanium pair has as many, or one more with a virtual destructor); the harness's copy always
+carries spare `__s13_vtpad` slots up to the exe's count + 2, which J-0145 counted as short (1,082 of 1,628).
+Link c0d6c71516f6: primary 1,870 paired, short 1,380, exact 449, longer 41; secondary 515: short 330. Of the 1,380
+short primary pairs, the RTTI class's own `_ZTV` is defined in no linked object for 765, also short for 122,
+already the row's vtable for 103, long enough for 31 (e.g. MagicItemObject: row `_ZTV12FUN_00402b40` with 1 slot,
+`_ZTV15MagicItemObject` 99 of 97), no RTTI name 359. Pairing to the static class's `_ZTV` alone therefore closes
+~2 %; the padding stays (a call through it is `vptr-unpaired`) until S2c's link gives those classes complete
+vtables. Verdicts are unchanged (the count is only reported). Test: `tests/s13/test_vtpairs.py`.
+
+**S1b renames (J-0141, harness still difffuzz-13).** `patches/units_renames.tsv` rows of the units whose prepared
+source carries an S1b patch (`config.units_renames`, fnvlink's `load_renames`; `FNVNX_UNITS_RENAMES=<tsv|none>`)
+apply on top of the tree's units.json (`engine.apply_renames`): a `def` row gives the patched definition its new
+MSVC name, which places the arguments on both machines (0x00eacd00 `bool __stdcall f(void*)`, made a member that
+passes ecx on: `this:P/4, p0:P/4` on the oracle too), and a `ref` row is the patched caller's own declaration of
+a callee (`caller_conv`: canned results by declaration). Prepare's POST hook already rewrites the farm trees'
+units.json (all 239 `def` rows of the 254 patched units of tree efb9808e7d542f00), so this matters for a tree
+prepared without it or a local `FNVNX_TREE`, and for the `ref` rows. **Cache:** a unit's applicable rows go into
+its functions' keys (`fnkeys.py`), so only those units are fuzzed again: 9,669 of 68,667 functions (254 units)
+on that tree, no HARNESS bump; a later change of a unit's rows refreshes that unit only. 0x00eacd00 and 0x00a89b00
+(S1b's two XINC1 call-args artefacts) are ok on link c0d6c71516f6. Test: `tests/s13/test_renames.py`.
+
 **difffuzz-12 (J-0138).** The game allocators (operator new 0x00401000, 0x00aa3e40, 0x00aa13e0, and the native
 names libcalls.EQUIV maps to them) return a fresh heap block (`world.alloc_result`, HEAP + 2 MiB + 4 KiB k), never
 the canned 0: GCC drops the null test after a throwing new that MSVC keeps (S13b `new-null`, 178 farm records). A
@@ -238,7 +260,11 @@ With `summary --effects <difffuzz.py effects output>`, a record still in triage 
 `width` -> `field-width` (real-bug S1), an image vftable stored where the native stores its own `_ZTV` address
 point -> `vptr-unpaired` (S2c), a native named stub stored or passed as data -> `native-stub-data` (S2c). A first differing store made only by the oracle at a pc
 outside the function (a callee the oracle runs, the native calls out of line and the harness intercepts) ->
-`oracle-callee-store` (artifact). A triage record in a function that calls a C++ name neither its object defines nor
+`oracle-callee-store` (artifact), only with evidence of the interception: the pc lies in a function of the address
+map (`causes.function_at`) that the native calls out of line through `__fnv_<addr>` or its link name and that its own
+object does not define (the unit's own functions run natively). Never for `native-inlined`, `native-early-exit` or
+`x86-only-store` (`causes.NOT_INTERCEPTED`: the native never made the call or ran the callee's code itself; V1
+tests/v1/test_s13b_callee_store.py C1-C3); without the object or the map the record stays in triage. A triage record in a function that calls a C++ name neither its object defines nor
 the address map binds -> `after-native-undefined` (real-bug S1: the native side got a canned result).
 
 `causes.POLICY` gives every cause a class (by-design, artifact, real-bug, triage), an owner and a reason;
@@ -249,7 +275,7 @@ five example reproducers, plus `functions_by_class` (each diverging function by 
 for R0. `causes.py merge <reports/fz<k> .md | causes.json>... --out all.json` adds the shards up
 (classes from this checkout's policy). Input layout (any campaign or `fuzz/cache/<k>of<N>` checkout): `results.jsonl`
 (address, source, status; only `ok` rows count), `div/<addr>-<n>.json` (divergence, hint, case), optional
-`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. Test: `tests/s13/test_causes.py`.
+`recheck[_<tag>].jsonl`. `causes.py explain <div.json>...` prints hint, refined cause and class. `causes.py handoffs <dirs> --out-dir d [--effects e.jsonl]` writes the owners' lists, one row per counted divergence (owner, cause, address, unit, reproducer `fuzz/cache/<k>of<N>:div/<file>`, first effect): `handoffs_<owner>.tsv` (real-bug), `triage_<owner>.tsv`, `harness_<owner>.tsv` (artifacts with an owner) and `index.tsv`; they go to the private repository, never here. The object rules need pyelftools: without it the summary's `native_objects.reader` is `unavailable` and a warning is printed. Test: `tests/s13/test_causes.py`.
 
 ## Lockstep (`lockstep.py`, D14)
 

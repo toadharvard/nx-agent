@@ -18,6 +18,14 @@
  "abi_explained_classes": [
   "pop-mismatch"
  ],
+ "_abi_verdicts_doc": "S1b's tests/s1b/pop/abiclass.py verdicts that explain an x86-inconsistent pair (J-0141): patched (the caller is an S1b site at the head that the link did not have yet: the next link drops the row) and benign-* (no native effect: extra words ignored, words never read, no call, only who pops differs). Tables: the gates job's --abiclass dir, else link/<c12>/out/abiclass.tsv",
+ "abi_explained_verdicts": [
+  "patched",
+  "benign-more",
+  "benign-unread",
+  "benign-nocall",
+  "benign-conv"
+ ],
  "static_closed": {
   "_doc": "a non-benign S12 class counts as closed only while its fix is present in this checkout (file + regex)",
   "F2S": {
@@ -60,6 +68,8 @@
   "path": "causes_all.json"
  },
  "fuzz_min_coverage": 0.9,
+ "_player_exe_doc": "boot.real_exe: gamedata/exe/FalloutNV.exe.sha256 must have a line for FalloutNV.exe with this sha256, GOG 1.4.0.525(a), as job_gamedata pins it (J-0135); the boot image hash in meta.json must equal it",
+ "player_exe_sha256": "89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe",
  "boot_milestones": [
   "winmain",
   "renderer_init",
@@ -67,6 +77,12 @@
   "first_frame",
   "first_cell"
  ],
+ "frames": {
+  "_doc": "S16 gate file (fnvnx-gate/1): the candidate kinds that are the port's own frames; nine-replay, unknown and the reference are not",
+  "candidate_kinds": [
+   "port"
+  ]
+ },
  "perf": {
   "_doc": "frame-rate levels set by the owner (J-0132): below 30 fps fails; 45 fps stable is the target (worst frame); 60 fps is the stretch, even if unstable (median frame). Each frame gate is evaluated at every clock; only clocks with required=true count for the verdict, the others are reported as informative",
   "ipc": 0.8,
@@ -124,5 +140,16 @@
     ]
    }
   ]
+ },
+ "scorecard": {
+  "_doc": "the honest scorecard's frame rows (ready.py scorecard()): the orchestrator's target for the whole project, 60 fps at 720p handheld at the 1.02 GHz retail clock. The gates keep J-0132's levels (perf.fps); these rows show the gap to this target",
+  "frame_fps": 60,
+  "frame_clock": "stock",
+  "gpu_config": "handheld_720p"
+ },
+ "fuzz_s13_metric": {
+  "_doc": "tools/difffuzz/metric.py as the scorecard's S13 row; trusted=false shows its value as no-data (set it to true once S13 fixes V1's findings)",
+  "trusted": false,
+  "why": "V1 refuted metric.py (M1-M3: a missing, FAILED-only or deadline-pending shard lowers the metric)"
  }
 }
