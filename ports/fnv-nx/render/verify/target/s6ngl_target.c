@@ -209,6 +209,14 @@ static int s_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int l
     for (int l = 0; l < levels; l++) total += v6n_level_bytes(fmt, w >> l > 0 ? w >> l : 1, h >> l > 0 ? h >> l : 1);
     uint8_t* buf = malloc(total), *p = buf;
     for (int l = 0; l < levels; l++) { int n = v6n_level_bytes(fmt, w >> l > 0 ? w >> l : 1, h >> l > 0 ? h >> l : 1); memcpy(p, data[l], n); p += n; }
+    if (fi.flags & NXFMT_CONVERT) {   /* nx/state.h: NXFMT_CONVERT texels go through nx_d3d9_convert() */
+        uint32_t cap = nx_d3d9_converted_size(fmt, w, h, levels, 1);
+        uint8_t* conv = malloc(cap ? cap : 1);
+        uint32_t got = nx_d3d9_convert(fmt, w, h, levels, 1, buf, (uint32_t)total, conv, cap);
+        free(buf);
+        if (!got) { free(conv); return 0; }
+        buf = conv; total = got;
+    }
     NxImageDesc d; memset(&d, 0, sizeof d);
     d.width = (uint16_t)w; d.height = (uint16_t)h; d.format = fi.format; d.mips = (uint8_t)levels;
     d.swizzle = NXIMG_SWIZZLE(fi.swizzle[0], fi.swizzle[1], fi.swizzle[2], fi.swizzle[3]);

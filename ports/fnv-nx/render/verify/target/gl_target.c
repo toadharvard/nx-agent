@@ -365,6 +365,24 @@ static int g_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int l
     if (M("l8_swizzle") && fmt == 50) { x->fi.swizzle[1] = NxSwz_0; x->fi.swizzle[2] = NxSwz_0; }
     if (M("a8_swizzle") && fmt == 28) { x->fi.swizzle[0] = x->fi.swizzle[1] = x->fi.swizzle[2] = NxSwz_1; }
     if (M("a8l8_swizzle") && fmt == 51) { x->fi.swizzle[1] = NxSwz_G; x->fi.swizzle[2] = NxSwz_0; x->fi.swizzle[3] = NxSwz_1; }
+    /* contract (nx/state.h NXFMT_CONVERT): such texels go through nx_d3d9_convert() before the upload */
+    const uint8_t* lev[16]; uint8_t* conv = NULL;
+    for (int l = 0; l < levels && l < 16; l++) lev[l] = data[l];
+    if (x->fi.flags & NXFMT_CONVERT) {
+        uint32_t srcn = 0;
+        for (int l = 0; l < levels; l++) srcn += v6n_level_bytes(fmt, w >> l > 0 ? w >> l : 1, h >> l > 0 ? h >> l : 1);
+        uint8_t* src = malloc(srcn), *p = src;
+        for (int l = 0; l < levels; l++) { int n = v6n_level_bytes(fmt, w >> l > 0 ? w >> l : 1, h >> l > 0 ? h >> l : 1); memcpy(p, data[l], n); p += n; }
+        uint32_t cap = nx_d3d9_converted_size(fmt, w, h, levels, 1);
+        conv = malloc(cap ? cap : 1);
+        uint32_t got = nx_d3d9_convert(fmt, w, h, levels, 1, src, srcn, conv, cap);
+        free(src);
+        if (!got) { free(conv); return 0; }
+        uint32_t bpp = got / 1;  (void)bpp;
+        uint8_t* q = conv;   /* converted levels are tightly packed in the native format */
+        int nbpp = x->fi.bytes;
+        for (int l = 0; l < levels; l++) { lev[l] = q; q += (size_t)(w >> l > 0 ? w >> l : 1) * (h >> l > 0 ? h >> l : 1) * nbpp; }
+    }
     GlFmt g = gl_fmt(x->fi.format);
     if (M("a4r4g4b4_order") && x->fi.format == NxFmt_A4R4G4B4) g.fmt = GL_RGBA, g.type = GL_UNSIGNED_SHORT_4_4_4_4_REV;
     if (!g.ifmt) return 0;
@@ -374,9 +392,10 @@ static int g_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int l
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     for (int l = 0; l < levels; l++) {
         int lw = w >> l > 0 ? w >> l : 1, lh = h >> l > 0 ? h >> l : 1;
-        if (g.compressed) glCompressedTexSubImage2D(GL_TEXTURE_2D, l, 0, 0, lw, lh, g.ifmt, v6n_level_bytes(fmt, lw, lh), data[l]);
-        else glTexSubImage2D(GL_TEXTURE_2D, l, 0, 0, lw, lh, g.fmt, g.type, data[l]);
+        if (g.compressed) glCompressedTexSubImage2D(GL_TEXTURE_2D, l, 0, 0, lw, lh, g.ifmt, v6n_level_bytes(fmt, lw, lh), lev[l]);
+        else glTexSubImage2D(GL_TEXTURE_2D, l, 0, 0, lw, lh, g.fmt, g.type, lev[l]);
     }
+    free(conv);
     GLint sw[4]; for (int i = 0; i < 4; i++) sw[i] = gl_swz(x->fi.swizzle[i]);
     glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, sw);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);

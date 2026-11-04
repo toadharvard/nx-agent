@@ -84,7 +84,7 @@ FORMATS = ['A8R8G8B8', 'X8R8G8B8', 'R5G6B5', 'X1R5G5B5', 'A1R5G5B5', 'A4R4G4B4',
            'DXT1', 'DXT2', 'DXT3', 'DXT4', 'DXT5', 'ATI1', 'ATI2']
 
 # V8U8 seed 23: seed 22 has a -128 texel next to the border, which softpipe decodes as -128/127 (oracle quirk O2)
-BORDER_DEFECT = {'A8', 'L8', 'L16', 'A8L8', 'A2R10G10B10', 'ATI1'}
+BORDER_DEFECT = set()   # was A8 L8 L16 A8L8 A2R10G10B10 ATI1 until S6n fixed defect border_swizzle (17077d6)
 FLOATRT = {'V8U8', 'R16F', 'G16R16F', 'A16B16G16R16F', 'R32F', 'G32R32F', 'A32B32G32R32F'}
 
 def main():
