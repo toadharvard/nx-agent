@@ -888,3 +888,25 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - guest_mib=19 game_undefined=8224 xc_called=17191 static_init_traps=3687 boot_reached=WinMain hw_tests=0
 * **next** - the boot frontier is untranslated code: compile the units owning the addresses WinMain and the setting
   constructors hit (S1), name the remaining IAT slots, initialise the memory manager as the CRT start did.
+
+### J-0045 | 2026-11-04 | stream: S2c-vtables | status: wip | parent: J-0042,J-0043
+
+* **did** - S13's link findings fixed: `apply` retargets relocations that reach a rebound image variable through a
+  local/section symbol to the rebound symbol (`elfsyms.retarget_local_relocs`, `objcopy/<obj>.rebind`); GAME1
+  `fnvnx_game_<name>` looked up as the unit's own `<name>`; C++-decorated imports `__imp_?X@@...` parsed through
+  their inner declaration (undname leaves them alone); GCC's global new/delete bound to the game's allocator by the
+  units' MSVC names (unsized delete -> 0x00401030, sized forms -> 0x00aa1460, `_Znwm` -> 0x00401000); `resolve
+  --units-renames` applies S1b's `patches/units_renames.tsv` to units carrying the XINC1 marker. f3 objects relinked
+  (runs f4, f5).
+* **found** - 852 relocations in 114 objects had bypassed the rebinding (check_rebind 638 -> 0); `GetRTTI`
+  0x0049bb10 now returns 0x011c7d74. GAME1 on a 53-unit subset with today's rules: all 5 references bind as their unit
+  says (GetCurrentThreadId -> 0x00830470; memorymanager Enter/Leave -> the Interlocked slots; one Sleep -> spin lock
+  0x008691b0; another -> SetEvent's slot 0x00fdf0d0, as the pristine object calls). 2,044 new/delete references to the
+  game allocator, none to the platform. Trial link f5: 8,709 undefined (4,859 `__fnv_`, 1,570 C++ unresolved, 1,442
+  implicit ctor/dtor, ...), 0 multiple definitions; imports bound 1,345/1,389.
+* **decided** - renames only for patched units; new/delete by the unit's own MSVC binding, else the majority.
+* **metrics** - link_trial_undefined=8709 link_trial_multidef=0 link_split_global_relocs=0 link_newdel_refs=2044
+  link_imports_bound=1345/1389 link_game1_resolved=5/5
+* **next** - full recompile with today's rules (GAME1, XINC1, compat.h) + link (~1.5 h at 2 workers); S13 recheck of
+  split-global, GAME1, sized-delete divergences; confirm 0x00401030 and 0x00aa1460 free into one heap; implicit
+  ctor/dtor emission (1,442).
