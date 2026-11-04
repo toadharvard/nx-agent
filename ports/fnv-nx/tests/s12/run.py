@@ -175,9 +175,10 @@ def pipeline(scratch):
 
 def build_flags():
     """BUILD_FLAGS is exactly compile.sh's flag set; census.sh has all of it but the syntax-only exemptions"""
-    def script(name):
-        return subprocess.run(['bash', '-c', '. "%s/flags.sh"; script_flags "%s"' % (STATIC, os.path.join(PORT, name))],
-                              capture_output=True, text=True, check=True).stdout.split()
+    def script(name):  # -ffile-prefix-map only rewrites recorded paths (tools/farm/): not a semantics flag
+        return [f for f in subprocess.run(['bash', '-c', '. "%s/flags.sh"; script_flags "%s"' % (STATIC, os.path.join(PORT, name))],
+                                          capture_output=True, text=True, check=True).stdout.split()
+                if not f.startswith('-ffile-prefix-map')]
     want = set(bash_array('BUILD_FLAGS'))
     check(want == set(script('tools/link/compile.sh')), 'flags.sh BUILD_FLAGS == compile.sh flags (%s)' % sorted(
         want ^ set(script('tools/link/compile.sh'))))
