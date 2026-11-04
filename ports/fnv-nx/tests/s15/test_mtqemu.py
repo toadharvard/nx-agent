@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CASES = ('parallel', 'cs', 'stages', 'spin-decomp', 'spin-override', 'unsync', 'detach', 'placement', 'ilk-count', 'ilk-refs',
+CASES = ('parallel', 'cs', 'stages', 'spin-decomp', 'spin-override', 'unsync', 'detach', 'placement', 'ilk-count', 'ilk-refs', 'ilk-cost',
          'litmus-order', 'litmus-plain')
 OPTIONAL = ('litmus-order', 'litmus-plain')   # skipped where the fnvnx_order plugin does not build
 RUNS = 3

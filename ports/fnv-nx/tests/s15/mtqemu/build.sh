@@ -33,6 +33,8 @@ cc "$ROOT/tools/link/overrides/spinlock_0040fba0.c" "${TSAN[@]}"
 cxx "$HERE/mt_test.cpp" "${TSAN[@]}"
 # the inlined Interlocked* of fnvnx_win32.h, as game units get them (ilk-count, ilk-refs)
 cxx "$HERE/ilk_mt.cpp" "${TSAN[@]}" -Wno-tsan
+# B9: the cost of one Interlocked operation (ilk-cost), uninstrumented
+cxx "$HERE/ilk_cost.cpp"
 # and without the sanitizer (TSan turns atomics into calls), only for test_mtqemu.py's code check: not linked
 $CXX "${GXX[@]}" "${G[@]}" -c "$HERE/ilk_mt.cpp" -o "$OUT/ilk_mt_codegen.o"
 # S12's litmus test (tests/s12/order/litmus.cpp) twice: with the fnvnx_order plugin (the build's semantics) and

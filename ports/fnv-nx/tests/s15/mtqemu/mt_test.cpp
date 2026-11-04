@@ -23,6 +23,8 @@
  *                   sched_getaffinity (qemu-user passes it to the host kernel). Priorities are advisory under CFS:
  *                   only that the calls succeed is checked.
  *   ilk-count, ilk-refs   the inlined Interlocked* of fnvnx_win32.h (ilk_mt.cpp)
+ *   ilk-cost        benchmark B9 (ilk_cost.cpp, uninstrumented): ns per Interlocked operation, plain / LL-SC / inline /
+ *                   call / with a store in flight / shared by 2 threads; checks only the counts
  *   litmus-order    S12's litmus test (tests/s12/order/litmus.cpp via litmus_mt.cpp) built with the fnvnx_order
  *                   plugin: no bad outcome; mp2, lock and ref without a race. mp1's scratch store after the release is
  *                   a value race by design (either value is accepted), so its races are printed, not judged. ref is
@@ -350,6 +352,7 @@ void litmus_begin(void);
 int litmus_main_order(void);
 int litmus_main_plain(void);
 void ilk_tests(void);
+void ilk_cost(void);
 }
 struct LitRow { unsigned rounds, bad, races; };
 static bool lit_row(const char *out, const char *test, LitRow *r)
@@ -404,6 +407,7 @@ extern "C" int mtq_main(void)
     t_detach();
     t_placement();
     ilk_tests();
+    ilk_cost();
     t_litmus("litmus-order", litmus_main_order, true);
     t_litmus("litmus-plain", litmus_main_plain, false);
     printf("mtq: done, %d failed\n", g_fail);

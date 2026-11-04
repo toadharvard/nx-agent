@@ -123,7 +123,7 @@ struct SpinLock {
 };
 static SpinLock g_lock;
 static int g_counter;
-enum { LOCK_ITERS = 20000 };
+enum { LOCK_ITERS = LITMUS_ROUNDS };
 
 static inline long cas(volatile long *p, long x, long c) {   // InterlockedCompareExchange (full barrier on x86)
   return __sync_val_compare_and_swap(p, c, x);
