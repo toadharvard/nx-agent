@@ -3,6 +3,7 @@
 // the check results to sdmc:/fnvnx/n0/out/results.txt; then shows the last scene for a few seconds.
 // Compare on a PC: tests/s6n/scenes.py --compare <copied out dir> --tol N
 #include "scenes.h"
+#include "../capture/capture.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -14,6 +15,8 @@ int main() {
     FILE* res = fopen("sdmc:/fnvnx/n0/out/results.txt", "w");
     nx::Backend* be = nx::GpuBackend(nullptr);
     if (!be) { if (res) { fputs("GpuBackend: no answer from the nxgpu host module\n", res); fclose(res); } return 3; }
+    static nx::CaptureBackend cap;   // the command streams, for host replay (capture/replay_gl)
+    if (cap.Open(be, fopen("sdmc:/fnvnx/n0/out/n0.nxcap", "wb"))) be = &cap;
     static n0::Ctx c;
     char err[256];
     if (!n0::Init(c, be, err, sizeof err)) { if (res) { fprintf(res, "init: %s\n", err); fclose(res); } return 4; }

@@ -33,7 +33,7 @@ $(OUT)/test_d3d9_state_cxxcheck: $(NATIVE)/front/d3d9_state.h $(NATIVE)/include/
 # ---- N0 scenes on the GL reference backend ------------------------------------------------------------------------
 CXX ?= g++
 SHOUT := $(OUT)/shaders
-SCENE_SRC := $(NATIVE)/n0/scenes.cpp $(NATIVE)/n0/run_gl.cpp $(NATIVE)/front/front.cpp
+SCENE_SRC := $(NATIVE)/n0/scenes.cpp $(NATIVE)/n0/run_gl.cpp $(NATIVE)/front/front.cpp $(NATIVE)/capture/capture.cpp
 SCENE_CSRC := $(NATIVE)/front/d3d9_state.c $(NATIVE)/front/gpu_dispatch.c $(NATIVE)/gl/nxgl.c $(SHOUT)/nx_shaders.c
 SCENE_DEPS := $(wildcard $(NATIVE)/n0/*.h $(NATIVE)/include/nx/*.h $(NATIVE)/front/*.h $(NATIVE)/gl/*.h)
 
@@ -44,11 +44,12 @@ $(OUT)/run_gl: $(SCENE_SRC) $(SCENE_CSRC) $(SCENE_DEPS)
 	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fno-exceptions -fno-rtti $(CPPFLAGS) -I$(SHOUT) -c $(NATIVE)/front/front.cpp -o $(OUT)/front.o
 	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fno-exceptions -fno-rtti $(CPPFLAGS) -I$(SHOUT) -c $(NATIVE)/n0/scenes.cpp -o $(OUT)/scenes.o
 	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fno-exceptions -fno-rtti $(CPPFLAGS) -I$(SHOUT) -c $(NATIVE)/n0/run_gl.cpp -o $(OUT)/run_gl.o
+	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror -fno-exceptions -fno-rtti $(CPPFLAGS) -c $(NATIVE)/capture/capture.cpp -o $(OUT)/capture.o
 	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -I$(SHOUT) -c $(NATIVE)/gl/nxgl.c -o $(OUT)/nxgl.o
 	$(CC) -std=c11 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -c $(NATIVE)/front/gpu_dispatch.c -o $(OUT)/gpu_dispatch.o
 	$(CC) -std=c11 -O1 -g -Wall -Wextra $(CPPFLAGS) -c $(NATIVE)/front/d3d9_state.c -o $(OUT)/d3d9_state_s.o
 	$(CC) -std=c11 -O1 -I$(SHOUT) -c $(SHOUT)/nx_shaders.c -o $(OUT)/nx_shaders.o
-	$(CXX) -o $@ $(OUT)/front.o $(OUT)/scenes.o $(OUT)/run_gl.o $(OUT)/nxgl.o $(OUT)/gpu_dispatch.o $(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
+	$(CXX) -o $@ $(OUT)/front.o $(OUT)/scenes.o $(OUT)/run_gl.o $(OUT)/capture.o $(OUT)/nxgl.o $(OUT)/gpu_dispatch.o $(OUT)/d3d9_state_s.o $(OUT)/nx_shaders.o -lEGL -lm
 
 scenes: $(OUT)/run_gl
 	python3 scenes.py --bin $(OUT)/run_gl --out $(OUT)/scenes
@@ -61,8 +62,21 @@ $(OUT)/libnxgl.so: $(NATIVE)/gl/nxgl.c $(NATIVE)/front/gpu_dispatch.c $(SCENE_DE
 	$(CC) -std=c11 -O1 -g -fPIC -shared $(CPPFLAGS) -o $@ $(NATIVE)/gl/nxgl.c $(NATIVE)/front/gpu_dispatch.c -lEGL
 
 # needs: pip install unicorn; GUEST=<switch/build.sh out>/guest/guest.nso
-emu: $(OUT)/libnxgl.so
+emu: $(OUT)/libnxgl.so $(OUT)/replay_gl
 	python3 emu_n0.py $(GUEST) $(OUT)/libnxgl.so $(OUT)/emu
 	python3 scenes.py --compare $(OUT)/emu/fnvnx/n0/out
+	$(OUT)/replay_gl $(OUT)/emu/fnvnx/n0/out/n0.nxcap
 
 .PHONY: emu
+
+# ---- capture + replay: run the scenes with CaptureBackend on GL, replay the file on a fresh GL context ----------
+$(OUT)/replay_gl: $(NATIVE)/capture/replay.cpp $(NATIVE)/capture/replay_gl.cpp $(NATIVE)/capture/replay.h $(OUT)/run_gl
+	$(CXX) -std=c++17 -O1 -g -Wall -Wextra -Werror $(CPPFLAGS) -o $@ $(NATIVE)/capture/replay.cpp $(NATIVE)/capture/replay_gl.cpp \
+		$(OUT)/nxgl.o $(OUT)/gpu_dispatch.o -lEGL
+
+capture: $(OUT)/run_gl $(OUT)/replay_gl
+	@mkdir -p $(OUT)/cap
+	$(OUT)/run_gl $(OUT)/cap --capture $(OUT)/cap/n0.nxcap
+	$(OUT)/replay_gl $(OUT)/cap/n0.nxcap $(OUT)/cap
+
+.PHONY: capture

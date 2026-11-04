@@ -25,6 +25,7 @@ GXX="$GF -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics"
 $CXX $GA $GXX -c "$N/front/front.cpp" -o "$OUT/guest/front.o"
 $CXX $GA $GXX -c "$N/n0/scenes.cpp" -o "$OUT/guest/scenes.o"
 $CXX $GA $GXX -c "$N/n0/guest_main.cpp" -o "$OUT/guest/guest_main.o"
+$CXX $GA $GXX -c "$N/capture/capture.cpp" -o "$OUT/guest/capture.o"
 $CC $GA $GF -std=gnu11 -c "$N/front/d3d9_state.c" -o "$OUT/guest/d3d9_state.o"
 $CC $GA $GF -std=gnu11 -c "$OUT/shaders/nx_shaders.c" -o "$OUT/guest/nx_shaders.o"
 $CXX $GA -specs="$TC/guest/guest_pie.specs" "$OUT/rt/crt0.o" "$OUT"/guest/*.o -L"$OUT/rt" \

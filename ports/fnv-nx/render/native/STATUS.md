@@ -26,6 +26,7 @@ binutils 2.45.1, newlib 4.6.0, multilibs lp64/pic/ilp32/ilp32-pic), libnx (ext/l
 | deko3d backend v2 | `host/nxgpu.{h,c}`, `host/nxgpu_host.c` (ext module 10) | compiles + links | not run on hardware |
 | N0 for the Switch | `n0/guest_main.cpp`, `switch/build.sh` | builds exefs.nsp + guest.nso | not run on hardware |
 | ILP32 guest under emulation | `tests/s6n/emu_n0.py` (S5 emu host + ext module 10 -> GL backend) | `make -C tests/s6n emu GUEST=...` | 31500 checks pass, 13/13 images bit-identical to the goldens |
+| capture + host replay | `capture/capture.{h,cpp}` (front side, guest and host), `capture/replay.{h,cpp}`, `capture/replay_gl.cpp` | `make -C tests/s6n capture`; guest capture via `make ... emu` | 13 frames replayed, 13/13 readbacks identical (host and ILP32 guest captures); the console guest writes `sdmc:/fnvnx/n0/out/n0.nxcap` |
 | environment | `env.sh` | rebuilt here | ok |
 
 | N1 groundwork | `N1_PLAN.md` (entry points, slots with evidence, families), `overrides.tsv` (19 rows, all N1-pending), `REQUESTS.md` (R1 --override table + vslot rows, R2 vftable dump, R3 NATIVE1) | `python3 -I tests/s6n/test_requests.py` | 3 tests, failing until R1-R3 are done (by design) |
