@@ -175,11 +175,16 @@ def main():
         check(exevft.msvc_name('.?AVMulti@@') == '??_7Multi@@6B@', 'msvc_name of a plain class')
         leaf = os.path.join(tmp, 'Leaf.exe')
         code = {T(1): b'\x33\xc0\xc3', T(2): b'\xb0\x01\xc2\x04\x00', T(3): b'\xb8\x78\x56\x34\x12\xc3',
-                T(4): b'\xc2\x08\x00', T(5): b'\x56\x8b\xf1\xc3', T(6): b'\x32\xc0\xc3'}
+                T(4): b'\xc2\x08\x00', T(5): b'\x56\x8b\xf1\xc3', T(6): b'\x32\xc0\xc3',
+                T(8): b'\x55\x8b\xec\x51\x89\x4d\xfc\x8b\xe5\x5d\xc3',               # /Od: an empty thiscall
+                T(9): b'\x55\x8b\xec\x51\x89\x4d\xfc\xb0\x01\x8b\xe5\x5d\xc2\x04\x00',  # /Od: return true
+                T(10): b'\x55\x8b\xec\x51\x89\x4d\xfc\x5d\xc3',                      # pop ebp without mov esp
+                T(11): b'\x55\x8b\xec\x33\xc0\x5d\xc3'}                                # frame, return 0
         make_pe(leaf, lambda rd: None, code)
-        got_l = [exevft.leaf_constant(leaf, T(k)) for k in range(1, 8)]
-        check(got_l == [0, 1, 0x12345678, 'void', None, 0, None],
-              'leaf_constant: xor eax / mov al + ret 4 / mov eax / ret 8 / not a leaf / xor al / int3: %s' % got_l)
+        got_l = [exevft.leaf_constant(leaf, T(k)) for k in range(1, 12)]
+        check(got_l == [0, 1, 0x12345678, 'void', None, 0, None, 'void', 1, None, 0],
+              'leaf_constant: xor eax / mov al + ret 4 / mov eax / ret 8 / not a leaf / xor al / int3 / /Od empty / '
+              '/Od true / a broken frame / frame + xor: %s' % got_l)
         und = shutil.which('llvm-undname') or shutil.which('llvm-undname-18')
         if und:
             r = subprocess.run([und], input='??_7?$Tmpl@H@@6B@\n', capture_output=True, text=True)

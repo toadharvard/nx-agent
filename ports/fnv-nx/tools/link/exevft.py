@@ -186,8 +186,9 @@ def _text(path):
 
 def leaf_constant(path, addr):
     """What the x86 function at addr does, when it is a constant leaf: 'void' (`ret`, `ret N`), or the 32-bit value
-    it leaves in eax/al (`xor eax, eax` / `xor al, al` / `mov al, imm8` / `mov eax, imm32`, then `ret` or `ret N`);
-    else None. MSVC folds identical functions, so one such body (0x00e7cd40 `return 0;`) stands in many vtable
+    it leaves in eax/al (`xor eax, eax` / `xor al, al` / `mov al, imm8` / `mov eax, imm32`, then `ret` or `ret N`),
+    bare or inside an /Od frame (`push ebp; mov ebp, esp` [+ the spilled ecx], then `mov esp, ebp; pop ebp`); else
+    None. MSVC folds identical functions, so one such body (0x00e7cd40 `return 0;`) stands in many vtable
     slots. al-only forms leave eax's upper bytes undefined on x86; the native stub returns the zero-extended byte,
     which every bool / char reader of the result sees the same."""
     pe, data = _text(path)
@@ -198,16 +199,34 @@ def leaf_constant(path, addr):
         return None
     if off is None:
         return None
-    b = data[off:off + 16]
+
+    b = data[off:off + 32]
 
     def ret_at(i):
         return b[i:i + 1] == b'\xc3' or (b[i:i + 1] == b'\xc2' and b[i + 2:i + 3] == b'\x00')
-    if ret_at(0):
-        return 'void'
-    if b[:2] in (b'\x33\xc0', b'\x31\xc0', b'\x32\xc0', b'\x30\xc0') and ret_at(2):
-        return 0
-    if b[:1] == b'\xb0' and ret_at(2):
-        return b[1]
-    if b[:1] == b'\xb8' and ret_at(5):
-        return int.from_bytes(b[1:5], 'little')
+
+    def value_then(i, tail):
+        """(value, length) of an eax/al constant at i followed by tail(i + length), else None."""
+        if tail(i):
+            return 'void', 0
+        if b[i:i + 2] in (b'\x33\xc0', b'\x31\xc0', b'\x32\xc0', b'\x30\xc0') and tail(i + 2):
+            return 0, 2
+        if b[i:i + 1] == b'\xb0' and tail(i + 2):
+            return b[i + 1], 2
+        if b[i:i + 1] == b'\xb8' and tail(i + 5):
+            return int.from_bytes(b[i + 1:i + 5], 'little'), 5
+        return None
+    got = value_then(0, ret_at)
+    if got is not None:
+        return got[0]
+    # /Od frames (the decomp's debug-built units): push ebp; mov ebp, esp; [push ecx; mov [ebp-4], ecx | sub esp, 4;
+    # mov [ebp-4], ecx]; <constant>; mov esp, ebp; pop ebp; ret / ret N  (or pop ebp right after the prologue)
+    for pro in (b'\x55\x8b\xec\x51\x89\x4d\xfc', b'\x55\x8b\xec\x83\xec\x04\x89\x4d\xfc', b'\x55\x8b\xec'):
+        if b.startswith(pro):
+            n = len(pro)
+            # a prologue that moved esp needs `mov esp, ebp` before `pop ebp`
+            for epi in ((b'\x8b\xe5\x5d', b'\x5d') if pro == b'\x55\x8b\xec' else (b'\x8b\xe5\x5d',)):
+                got = value_then(n, lambda i, e=epi: b[i:i + len(e)] == e and ret_at(i + len(e)))
+                if got is not None:
+                    return got[0]
     return None
