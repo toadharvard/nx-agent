@@ -1526,6 +1526,16 @@ def slot_abi(isig, ds):
     return 'same' if len(dloc) == len(sloc) else 'the slot passes more'
 
 
+def slot_msvc_sig(isig, ds):
+    """The MSVC declaration a call through a vtable slot (Itanium isig, a virtual member) stands for: a __thiscall
+    member with the slot's parameters; its result as the definition's (the Itanium name has none)."""
+    r = sigs.Sig('func', isig.text)
+    r.qual, r.params, r.raw_params = list(isig.qual), list(isig.params or []), list(isig.raw_params or [])
+    r.cv, r.cc, r.member, r.static, r.virtual = '', 'thiscall', True, False, True
+    r.ret, r.raw_ret = ds.ret, ds.raw_ret
+    return r
+
+
 FLAG_SYM = '__fnvnx_vflag_%08x_%d'   # GCC destructor slot -> a decomp (this, flags) function at the exe slot
 GDEL_SYM = '__fnvnx_vgdel_%08x'      # placeholder slot -> the exe's ??_G (native D0 / D1 by the caller's flags)
 
@@ -1619,6 +1629,22 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             return None, 'no declaration to compare'
         how = slot_abi(isig, ds)
         if how not in ('same', 'the slot passes more') and not how.startswith('the definition reads more'):
+            # the x86 model: the slot is a thiscall member with the slot's parameters; a decomp stand-in that MSVC
+            # reached the same way (`FUN_00a89af0(int)` for a LinkObject(NiStream &) slot: the int is the stack
+            # argument) gets a bridge with the register moves
+            v = abi.compare(slot_msvc_sig(isig, ds), ds)
+            if v.kind == 'same':   # the link's ABI model passes them alike (as for every other reference)
+                return ADDR_SYM % a, 'abi model: same (%s)' % ','.join(v.classes or ['-'])
+            # as resolve does for every reference: a pop mismatch alone (the decomp's cdecl / stdcall stand-in for
+            # MSVC's thiscall code: the callee pops what the caller pushed) still reads the arguments both declare
+            pop_only = v.kind == 'x86-inconsistent' and 'pop-mismatch' in v.classes and not {
+                'this-not-passed', 'size-differs', 'cast-conflict', 'result-pointer-not-passed', 'ecx-not-passed',
+                'aggregate-param'} & set(v.classes)
+            if (v.kind == 'bridge' or pop_only) and v.moves and all(
+                    d_[0] in ('x', 'v') and s_[0] in ('x', 'v') for d_, s_, _, _ in v.moves):
+                bn = abi.bridge_name(a, 'vslot ' + un)
+                stubs.setdefault(bn, (ADDR_SYM % a, v, 'vtable slot %s' % un, nd['msvc']))
+                return bn, 'bridge (%s)' % ','.join(v.classes or ['moves'])
             return None, 'abi: ' + how
         return ADDR_SYM % a, how
 

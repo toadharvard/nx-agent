@@ -600,7 +600,11 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   first pointer parameter, a free definition without parameters reads nothing). A definition that reads more
   arguments than the slot declares is bound and listed: callers reach a slot through their own class's
   declaration, and the decomp's shells declare placeholders (`FUN_00aa7400`: `virtual void v2();` for
-  `ZeroOverheadHeap::Allocate(unsigned, unsigned)`, the boot's first trap). A destructor slot binds to a
+  `ZeroOverheadHeap::Allocate(unsigned, unsigned)`, the boot's first trap). Otherwise the link's x86 model decides
+  (`abi.compare` of a thiscall member with the slot's parameters against the definition, `slot_msvc_sig`): same ->
+  direct, register moves -> an ABI bridge (`__fnvnx_br_<a>_<hash>`; a pop mismatch alone is accepted as resolve
+  accepts it: the decomp's cdecl / stdcall stand-in for MSVC's thiscall code), anything else stays a gap. A
+  destructor slot binds to a
   destructor variant at the address; where the decomp defines the exe's `??_G` as a plain function taking the
   flags (`FUN_00c2a090(unsigned int)`), GCC's D0 / D1 go through `__fnvnx_vflag_<a>_1` / `_0` (w1 = flags, then
   `b __fnv_<a>`); a placeholder slot (`virtual void v00();`) where the exe has a native `??_G` goes through

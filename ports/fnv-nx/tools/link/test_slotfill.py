@@ -6,8 +6,8 @@ hand-written classes and a synthetic exe (test_exevft.make_pe), no game content.
 
 Vb has a virtual destructor and the virtuals a, b, c, d, f, e; only a (and the destructor) is defined under its own
 name. The exe's vftable of Vb holds, after the deleting destructor and a: b's body, which the decomp defines as
-Shell::impl() (compiled, same arguments); c's body, Shell::impl2(float) (its argument arrives in another register
-file than c(int) passes it); f's body, Shell::impl3(int, int) (reads more arguments than the placeholder f()
+Shell::impl() (compiled, same arguments); c's body, Shell::impl2(Agg) (an aggregate by value where c(int)
+passes an int: no bridge); f's body, Shell::impl3(int, int) (reads more arguments than the placeholder f()
 declares: callers reach the slot through their own declarations, so it is bound and listed); d's body at an address no compiled unit defines; and no slot for e. Der : Vb overrides a and inherits the
 rest; its exe vftable holds the same bodies. Checks:
 * b is bound to the native definition at the exe slot's address (`__fnv_00401020`, class vslot-exe) in both
@@ -25,6 +25,8 @@ rest; its exe vftable holds the same bodies. Checks:
   link has no second definition;
 * Der's exe vftable holds another body for b (Shell::impl4, an override the decomp does not declare): b's symbol
   follows the declaring class Vb, and Der's slot gets its own word in a strong copy of Der's vtable;
+* Vk::k(int), whose body the decomp defines as `int __stdcall kbody(int)` (the x86 model: the slot's int is the
+  stack argument both read), goes through a bridge that moves it from x1 to x0;
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
   (c: the abi gap).
 """
@@ -46,21 +48,25 @@ CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
 FAILS = []
 
 HEADER = r'''#pragma once
+struct Agg { int a, b, c, d, e; };
 struct Vb { virtual ~Vb(); virtual int a(); virtual int b(); virtual int c(int); virtual int d(); virtual int f();
             virtual int e(); int x; };
 struct Der : Vb { int a() override; };
-struct Shell { int impl(); int impl2(float); int impl3(int, int); void *del(unsigned); int impl4(); int y; };
+struct Shell { int impl(); int impl2(Agg); int impl3(int, int); void *del(unsigned); int impl4(); int y; };
 struct Vd { virtual int g(); virtual ~Vd(); int z; };      // key function g; ~Vd defined nowhere
 struct Gd { virtual ~Gd(); int w; };
 struct Vp { virtual int h(); virtual void v00(); int u; }; // v00: a placeholder for the exe's ??_G
 struct Sh { virtual int p() { return 5; } int s; };         // a shell: its exe vftable has two slots more
+struct Vk { virtual int kk(); virtual int k(int); int t; };  // k's body: the decomp's stdcall kbody(int)
+int kbody(int);
 '''
 SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nint Der::a() { return 2; }\n'
-                    'int Shell::impl() { return y; }\nint Shell::impl2(float p) { return (int)p; }\n'
+                    'int Shell::impl() { return y; }\nint Shell::impl2(Agg p) { return p.e; }\n'
                     'int Shell::impl3(int p, int q) { return p + q; }\nint Shell::impl4() { return -y; }\n'
                     'void *Shell::del(unsigned f) { return f ? this : 0; }\nint Vd::g() { return 3; }\n'
                     'Gd::~Gd() {}\nint Vp::h() { return 4; }\nVd *mk_vd() { return new Vd; }\n'
                     'Gd *mk_gd() { return new Gd; }\nVp *mk_vp() { return new Vp; }\nSh *mk_sh() { return new Sh; }\n'
+                    'int Vk::kk() { return 6; }\nint kbody(int q) { return q + 1; }\nVk *mk_vk() { return new Vk; }\n'
                     'Vb *mk_vb() { return new Vb; }\nDer *mk_der() { return new Der; }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
@@ -81,7 +87,7 @@ def run(cmd, **kw):
 
 def build_exe(rd, where):
     td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0')
-          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@')}
+          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@')}
 
     def chd(names):
         bs = [rd.words(td[n], 0, 0, 0xffffffff, 0, 0x40, 0) for n in names]
@@ -102,11 +108,13 @@ def build_exe(rd, where):
     where['Vp'] = vft('.?AVVp@@', chd(['.?AVVp@@']), [0x401090, 0x401098])
     # Sh: p, then Shell::impl's address and an address no compiled unit defines
     where['Sh'] = vft('.?AVSh@@', chd(['.?AVSh@@']), [0x4010b0, 0x401020, 0x401060])
+    where['Vk'] = vft('.?AVVk@@', chd(['.?AVVk@@']), [0x4010c0, 0x4010c8])
     rd.words(0)
 
 
 def main():
     with tempfile.TemporaryDirectory() as t:
+        t = os.environ.get("FNVNX_TEST_KEEP") or t
         exe = os.path.join(t, 'Synthetic.exe')
         where = {}
         test_exevft.make_pe(exe, lambda rd: build_exe(rd, where))
@@ -124,13 +132,14 @@ def main():
         units = {'units': [
             {'source': 'src/a.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
                 F(0x401000, '??1Vb@@UAE@XZ'), F(0x401008, '??_GVb@@UAEPAXI@Z'), F(0x401010, '?a@Vb@@UAEHXZ'),
-                F(0x401020, '?impl@Shell@@QAEHXZ'), F(0x401030, '?impl2@Shell@@QAEHM@Z'), F(0x401038, '?impl3@Shell@@QAEHHH@Z'),
+                F(0x401020, '?impl@Shell@@QAEHXZ'), F(0x401030, '?impl2@Shell@@QAEHUAgg@@@Z'), F(0x401038, '?impl3@Shell@@QAEHHH@Z'),
                 F(0x401040, '?a@Der@@UAEHXZ'), F(0x401070, '?mk_vb@@YAPAUVb@@XZ'), F(0x401078, '?mk_der@@YAPAUDer@@XZ'),
                 F(0x401080, '?g@Vd@@UAEHXZ'), F(0x401088, '?del@Shell@@QAEPAXI@Z'), F(0x401090, '?h@Vp@@UAEHXZ'),
-                F(0x401098, '??_GGd@@UAEPAXI@Z'), F(0x4010a0, '??1Gd@@UAE@XZ'), F(0x401028, '?impl4@Shell@@QAEHXZ')],
+                F(0x401098, '??_GGd@@UAEPAXI@Z'), F(0x4010a0, '??1Gd@@UAE@XZ'), F(0x401028, '?impl4@Shell@@QAEHXZ'),
+                F(0x4010c0, '?kk@Vk@@UAEHXZ'), F(0x4010c8, '?kbody@@YGHH@Z')],
              'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
                          '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp'],
-                         '??_7Sh@@6B@': '0x%08x' % where['Sh']}},
+                         '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk']}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
                 F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {}},
         ]}
@@ -165,7 +174,8 @@ def main():
         why = {}
         for g in gaps:
             why.setdefault(g[2], set()).add(g[7].split(' (')[0])
-        check(why.get('_ZN2Vb1cEi') == {'abi: argument 1 differs'}, 'c: abi gap %s' % why.get('_ZN2Vb1cEi'))
+        check(why.get('_ZN2Vb1cEi') == {'abi: aggregate or varargs argument 1 differs'}, 'c: abi gap %s'
+              % why.get('_ZN2Vb1cEi'))
         check(why.get('_ZN2Vb1dEv') == {'not compiled'}, 'd: not compiled %s' % why.get('_ZN2Vb1dEv'))
         check(why.get('_ZN2Vb1eEv') == {'past the exe vftable\'s slots'}, 'e: past the slots %s' % why.get('_ZN2Vb1eEv'))
         fill = [l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'slot_fill.tsv')) if not l.startswith('#')]
@@ -189,6 +199,10 @@ def main():
             r = refs.get(n)
             check(r is not None and r[2] == 'vslot-exe' and r[5] == want, '%s -> %s: %s' % (n, want, r))
         bridges_ = open(os.path.join(out, 'bridges.S')).read()
+        rk = refs.get('_ZN2Vk1kEi')
+        check(rk is not None and rk[2] == 'vslot-exe' and rk[5].startswith('__fnvnx_br_004010c8_') and
+              ('%s:\n    mov x0, x1\n    b __fnv_004010c8' % rk[5]) in bridges_,
+              'k (a stdcall stand-in taking the slot\'s int) through a bridge x0 <- x1: %s' % (rk,))
         check('__fnvnx_vflag_00401088_1:\n    mov w1, #1\n    b __fnv_00401088' in bridges_ and
               '__fnvnx_vgdel_00401098:\n    tbz w1, #0, 1f\n    b __fnv_00401098\n1:  b __fnv_00401098_D1' in bridges_,
               'flag and deleting-destructor stubs in bridges.S')
@@ -213,8 +227,8 @@ def main():
               'vtmetric: 7 trap slots left (Sh\'s extension holds one), 2 with a native at the exe slot, no short '
               'primary (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
-        check(st0['trap-slots'] == 13 and st0['trap-native-at-exe'] == 9 and st0['primary-shorter'] == 1,
-              'vtmetric without the fill: 13 / 9, Sh short (%s)'
+        check(st0['trap-slots'] == 14 and st0['trap-native-at-exe'] == 10 and st0['primary-shorter'] == 1,
+              'vtmetric without the fill: 14 / 10, Sh short (%s)'
               % dict(st0))
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
