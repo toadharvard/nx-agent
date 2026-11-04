@@ -53,7 +53,22 @@ assert old in s, 'sp_setup.c changed: update the V6n span fix'
 open(sys.argv[2], 'w').write('#line 1 "sp_setup.c"\n' + s.replace(old, new))
 PY
 $CC $CF $NINE_DEFS $MESA_INC -I"$M/src/gallium/drivers/softpipe" -c "$OUT/sp_setup_d3d9.c" -o "$OUT/sp_setup_d3d9.o"
-$CC -o "$OUT/v6n_nine" "$OUT/scene.o" "$OUT/nine_target.o" "${OBJ[@]}" "$OUT/sp_setup_d3d9.o" "${NINELIBS[@]}"
+# second fix (oracle bug O5): softpipe applies the blend factors before MIN/MAX; D3D9 (and GL, gallium's contract,
+# NV hardware) ignore them: MIN/MAX of the unscaled source and destination.
+python3 -I - "$M/src/gallium/drivers/softpipe/sp_quad_blend.c" "$OUT/sp_quad_blend_d3d9.c" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+n = 0
+for c in ('[0]', '[1]', '[2]', '[3]'):
+    for f in ('MIN', 'MAX'):
+        old = 'VEC4_%s(quadColor%s, source%s, blend_dest%s);' % (f, c, c, c)
+        n += s.count(old)
+        s = s.replace(old, 'VEC4_%s(quadColor%s, quadColor%s, dest%s); /* V6n: factors ignored */' % (f, c, c, c))
+assert n == 8, 'sp_quad_blend.c changed: update the V6n MIN/MAX fix (%d)' % n
+open(sys.argv[2], 'w').write('#line 1 "sp_quad_blend.c"\n' + s)
+PY
+$CC $CF $NINE_DEFS $MESA_INC -I"$M/src/gallium/drivers/softpipe" -c "$OUT/sp_quad_blend_d3d9.c" -o "$OUT/sp_quad_blend_d3d9.o"
+$CC -o "$OUT/v6n_nine" "$OUT/scene.o" "$OUT/nine_target.o" "${OBJ[@]}" "$OUT/sp_setup_d3d9.o" "$OUT/sp_quad_blend_d3d9.o" "${NINELIBS[@]}"
 echo "built $OUT/v6n_nine $OUT/v6n_nine_stock"
 
 # v6n_gl: scene runner on GL 4.5 (llvmpipe, EGL surfaceless) driven by S6n's translator

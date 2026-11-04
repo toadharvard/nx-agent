@@ -48,6 +48,11 @@ typedef struct V6nOps {
     void (*projection)(V6nTarget*, const float m[16]);     /* D3DTS_PROJECTION, row-major D3DMATRIX */
     int (*draw)(V6nTarget*, uint32_t prim, uint32_t count, int rhw, const V6nVertex* v, int nverts);
     int (*readback)(V6nTarget*, V6nReadback* out);           /* fills out; buffers owned by the target */
+    /* programmable pixel shader (NULL bytecode = back to fixed function): D3D9 token stream, and the GLSL that
+     * S6b's translator (sdp2dksh --glsl, layout contract render/shaders/include/fnvnx_dk_layout.h) made of it.
+     * A target uses the one it can execute; returns 0 if it cannot. */
+    int (*pixel_shader)(V6nTarget*, const uint32_t* bytecode, int ntokens, const char* glsl);
+    void (*ps_const)(V6nTarget*, uint32_t reg, const float v[4]);   /* SetPixelShaderConstantF */
 } V6nOps;
 
 extern const V6nOps v6n_target_ops;   /* each executable links exactly one implementation */

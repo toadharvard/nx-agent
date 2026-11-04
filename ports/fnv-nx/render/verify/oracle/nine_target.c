@@ -178,5 +178,14 @@ static int n_readback(V6nTarget* t, V6nReadback* out) {
     *out = *r;
     return 1;
 }
+static int n_ps(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
+    (void)n; (void)glsl;
+    IDirect3DPixelShader9* ps = NULL;
+    if (bc && FAILED(IDirect3DDevice9_CreatePixelShader(t->dev, (const DWORD*)bc, &ps))) return 0;
+    IDirect3DDevice9_SetPixelShader(t->dev, ps);
+    if (ps) IDirect3DPixelShader9_Release(ps);   /* the device keeps its reference */
+    return 1;
+}
+static void n_psc(V6nTarget* t, uint32_t reg, const float v[4]) { IDirect3DDevice9_SetPixelShaderConstantF(t->dev, reg, v, 1); }
 const V6nOps v6n_target_ops = {"nine-softpipe", n_begin, n_end, n_clear, n_rs, n_samp, n_tss, n_tex, n_notex, n_vp,
-                               n_scissor, n_proj, n_draw, n_readback};
+                               n_scissor, n_proj, n_draw, n_readback, n_ps, n_psc};

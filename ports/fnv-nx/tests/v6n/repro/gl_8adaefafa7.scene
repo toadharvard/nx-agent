@@ -1,0 +1,16 @@
+# UNCLASSIFIED (V6n FF model + llvmpipe vs Nine-softpipe, not an S6n claim): isolated pixels with bilinear filtering or ZB_USEW/NOTEQUAL at the clear depth; kept as fuzz corpus
+# fuzz.py reproducer: target gl, seed 5, case c00519
+# colour: 12 px over tolerance (max |d| 255), first (10,14) ref [0.0, 0.0, 0.0, 0.0] test [0.0, 0.0, 0.0, 255.0]
+size 16 16
+rt A8R8G8B8
+ds D24S8
+clear 7 0xff000000 0.5 0x42
+tex 0 DXT1 4 4 1 hash 114
+rs ZENABLE 2
+rs ZFUNC CMP_NOTEQUAL
+mode rhw
+v 10 14 0.5 1 0xffffffff 0x00000000 0 0
+v 19 14 0.5 1 0xffffffff 0x00000000 0 0
+v 10 19 0.5 1 0xffffffff 0x00000000 0 0
+v 19 19 0.5 1 0xffffffff 0x00000000 0 0
+draw TRIANGLESTRIP 2

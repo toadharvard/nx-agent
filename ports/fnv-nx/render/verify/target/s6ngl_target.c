@@ -79,7 +79,7 @@ static const char* FS_BODY =
     "  for (int s = 0; s < 2; s++) {\n"
     "    if (st[s].x == 1) break;\n"
     "    vec3 c = sat(st[s].x, op(st[s].x, arg(st[s].y, s), arg(st[s].z, s), arg(st[s].w, s), s)).rgb;\n"
-    "    float a = stb[s].x == 1 ? CUR.a : sat(stb[s].x, op(stb[s].x, arg(stb[s].y, s), arg(stb[s].z, s), arg(stb[s].w, s), s)).a;\n"
+    "    float a = st[s].x == 24 ? c.r : stb[s].x == 1 ? CUR.a : sat(stb[s].x, op(stb[s].x, arg(stb[s].y, s), arg(stb[s].z, s), arg(stb[s].w, s), s)).a;\n"
     "    CUR = vec4(c, a);\n"
     "  }\n"
     "  if (flags.y != 0) CUR.rgb += S.rgb;\n"
@@ -191,6 +191,10 @@ static void s_end(V6nTarget* t) {
     free(t->block); free(t->rb.color); free(t);
 }
 static void s_clear(V6nTarget* t, uint32_t flags, uint32_t color, float z, uint32_t s) {
+    /* D3D9 (Nine device9.c user_assert): ZBUFFER without a depth surface, or STENCIL without a stencil format,
+     * make the whole Clear D3DERR_INVALIDCALL: nothing is cleared */
+    if ((flags & 2) && !t->dsf) return;
+    if ((flags & 4) && !(t->dsf && (nx_d3d9_format(t->dsf).flags & NXFMT_STENCIL))) return;
     int full = t->vp.X == 0 && t->vp.Y == 0 && (int)t->vp.Width >= t->w && (int)t->vp.Height >= t->h;
     if (t->rs[174] && (t->sc.left > 0 || t->sc.top > 0 || t->sc.right < t->w || t->sc.bottom < t->h)) full = 0;
     if (!full) { fprintf(stderr, "s6n-gl: Clear of a sub-rectangle has no S6n op (BeginPass clears the target)\n"); t->err = 1; return; }
@@ -249,6 +253,7 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     for (int i = 0; i < 4; i++) { ds[4 + 2 * i] = (uint32_t)st.w[i]; ds[5 + 2 * i] = (uint32_t)(st.w[i] >> 32); }
     if (!rhw || 1) emit(t, NxOp_DefineState, ds, 12);
     emit(t, NxOp_BindState, &id, 1);
+    if (rhw) { dyn.viewport.x = 0.5f; dyn.viewport.y = 0.5f; dyn.viewport.w = (float)t->w; dyn.viewport.h = (float)t->h; }
     uint32_t vpw[6] = {fb(dyn.viewport.x), fb(dyn.viewport.y), fb(dyn.viewport.w), fb(dyn.viewport.h),
                        fb(rhw ? 0.0f : dyn.viewport.minZ), fb(rhw ? 1.0f : dyn.viewport.maxZ)};
     emit(t, NxOp_Viewport, vpw, 6);
@@ -259,7 +264,8 @@ static int s_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     uint32_t db[3] = {fb(dyn.depthBiasUnits), fb(dyn.depthBiasSlope), 0};
     emit(t, NxOp_DepthBias, db, 3);
     struct { float vp[4]; float proj[16]; int32_t mode[4]; float fogp[4]; } vu;
-    vu.vp[0] = (float)t->vp.X; vu.vp[1] = (float)t->vp.Y; vu.vp[2] = (float)t->vp.Width; vu.vp[3] = (float)t->vp.Height;
+    vu.vp[0] = rhw ? 0.0f : (float)t->vp.X; vu.vp[1] = rhw ? 0.0f : (float)t->vp.Y;
+    vu.vp[2] = rhw ? (float)t->w : (float)t->vp.Width; vu.vp[3] = rhw ? (float)t->h : (float)t->vp.Height;
     memcpy(vu.proj, t->proj, sizeof vu.proj);
     int fogmode = (sb >> NXSB_FOG) & 7;
     vu.mode[0] = rhw; vu.mode[1] = (!rhw && t->rs[28] && fogmode == NxFog_Vertex && t->rs[140] <= 3) ? (int)t->rs[140] : 0;
@@ -318,4 +324,4 @@ static int s_readback(V6nTarget* t, V6nReadback* out) {
     return 1;
 }
 const V6nOps v6n_target_ops = {"s6n-nxgl", s_begin, s_end, s_clear, s_rs, s_samp, s_tss, s_tex, s_notex, s_vp,
-                               s_scissor, s_proj, s_draw, s_readback};
+                               s_scissor, s_proj, s_draw, s_readback, NULL, NULL};   /* no PS path yet */

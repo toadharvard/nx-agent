@@ -27,6 +27,8 @@
 #include <math.h>
 #include "v6n_target.h"
 #include "names.h"
+#include <unistd.h>
+#include <sys/wait.h>
 
 static uint32_t parse_val(const char* s, int* ok) {
     char* e; *ok = 1;
@@ -146,6 +148,26 @@ static int run_scene(const V6nOps* ops, const char* path, const char* outdir, in
             BEGIN(); ops->viewport(t, (uint32_t)atoi(a[1]), (uint32_t)atoi(a[2]), (uint32_t)atoi(a[3]), (uint32_t)atoi(a[4]), strtof(a[5], NULL), strtof(a[6], NULL));
         } else if (!strcmp(a[0], "scissor") && n == 5) { BEGIN(); ops->scissor(t, atoi(a[1]), atoi(a[2]), atoi(a[3]), atoi(a[4])); }
         else if (!strcmp(a[0], "proj") && n == 17) { BEGIN(); float m[16]; for (int i = 0; i < 16; i++) m[i] = strtof(a[1 + i], NULL); ops->projection(t, m); }
+        else if (!strcmp(a[0], "ps") && (n == 2 || n == 3)) {
+            /* ps BYTECODE_FILE [GLSL_FILE] | ps NONE ; relative paths are relative to the scene file */
+            BEGIN();
+            if (!strcmp(a[1], "NONE")) { if (!ops->pixel_shader || !ops->pixel_shader(t, NULL, 0, NULL)) FAIL("ps NONE"); continue; }
+            char p1[1024], p2[1024]; const char* sl = strrchr(path, '/');
+            int dl = sl ? (int)(sl - path + 1) : 0;
+            snprintf(p1, sizeof p1, "%s%.*s%s", a[1][0] == '/' ? "" : "", a[1][0] == '/' ? 0 : dl, path, a[1]);
+            FILE* bf = fopen(p1, "rb"); if (!bf) FAIL("cannot open %s", p1);
+            static uint32_t tok[65536]; int nt = (int)fread(tok, 4, 65536, bf); fclose(bf);
+            static char glsl[1 << 20]; glsl[0] = 0;
+            if (n == 3) {
+                snprintf(p2, sizeof p2, "%.*s%s", a[2][0] == '/' ? 0 : dl, path, a[2]);
+                FILE* gf = fopen(p2, "rb"); if (!gf) FAIL("cannot open %s", p2);
+                size_t k = fread(glsl, 1, sizeof glsl - 1, gf); glsl[k] = 0; fclose(gf);
+            }
+            if (!ops->pixel_shader || !ops->pixel_shader(t, tok, nt, n == 3 ? glsl : NULL)) FAIL("pixel shader not supported by %s", ops->name);
+        } else if (!strcmp(a[0], "psc") && n == 6) {
+            BEGIN(); float v[4]; for (int k = 0; k < 4; k++) v[k] = strtof(a[2 + k], NULL);
+            if (ops->ps_const) ops->ps_const(t, (uint32_t)atoi(a[1]), v);
+        }
         else if (!strcmp(a[0], "mode") && n == 2) rhw = !strcmp(a[1], "rhw");
         else if (!strcmp(a[0], "v") && n == 9) {
             if (nv == MAXV) FAIL("too many vertices");
@@ -183,7 +205,14 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "-o") && i + 1 < argc) { outdir = argv[++i]; continue; }
         if (!strcmp(argv[i], "-q")) { quiet = 1; continue; }
         n++;
-        if (!run_scene(&v6n_target_ops, argv[i], outdir, quiet)) bad++;
+        /* one child per scene: a crash in a driver (softpipe has a few) costs that scene only */
+        fflush(stdout); fflush(stderr);
+        pid_t pid = fork();
+        if (pid == 0) _exit(run_scene(&v6n_target_ops, argv[i], outdir, quiet) ? 0 : 1);
+        int st = 0;
+        waitpid(pid, &st, 0);
+        if (WIFSIGNALED(st)) { fprintf(stderr, "%s: CRASH signal %d in %s\n", argv[i], WTERMSIG(st), v6n_target_ops.name); bad++; }
+        else if (!WIFEXITED(st) || WEXITSTATUS(st)) bad++;
     }
     if (!n) { fprintf(stderr, "usage: %s [-o OUTDIR] [-q] SCENE...\n", argv[0]); return 2; }
     return bad ? 1 : 0;

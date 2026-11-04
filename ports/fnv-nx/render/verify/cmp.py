@@ -8,8 +8,11 @@
 #   colour, 5/6-bit (R5G6B5): <= 1 step of the channel
 #   colour, float targets  : |ref - test| <= 1e-3 * max(1, |ref|)  (relative, absolute near 0); NaN == NaN
 #   stencil                : exact
-#   depth                  : D24/D16 integer within DEPTH_TOL = 1 LSB (softpipe truncates z * (2^n - 1) to an integer,
-#                            llvmpipe rounds; both are inside D3D9's precision, any larger gap is a real error);
+#   depth                  : D24 within 8 LSB (2^-21 = 4.8e-7), D16 within 2 LSB (3.1e-5): both rasterizers set up the
+#                            depth plane and interpolate z in float32 in a different order and convert differently
+#                            (softpipe truncates, llvmpipe rounds). Measured over the fuzz corpus: constant depth
+#                            1 LSB, sloped depth up to 6 LSB (D24) / 2 LSB (D16). Every depth trap (half-z, bias
+#                            scale, viewport MinZ/MaxZ, write masks) moves depth by >= 2^16 LSB;
 #                            D32F within 2 ulp
 # Exit 0 = match, 1 = mismatch (summary on stdout), 2 = unreadable/incompatible.
 import sys, struct
@@ -17,7 +20,7 @@ import numpy as np
 
 COLOR_TOL_8 = 2.0
 FLOAT_REL = 1e-3
-DEPTH_TOL = 1
+DEPTH_TOL = {16: 2, 24: 8}
 
 def load(path):
     with open(path, 'rb') as f:
@@ -57,7 +60,7 @@ def compare(a, b):
             fa, fb = a['d'].view(np.float32).astype(np.float64), b['d'].view(np.float32).astype(np.float64)
             badd = np.abs(fa - fb) > 2 * np.spacing(np.abs(fa).astype(np.float32)).astype(np.float64)
         else:
-            badd = np.abs(a['d'].astype(np.int64) - b['d'].astype(np.int64)) > DEPTH_TOL
+            badd = np.abs(a['d'].astype(np.int64) - b['d'].astype(np.int64)) > DEPTH_TOL[16 if a['ds'] in (70, 80) else 24]
         if badd.any():
             ys, xs = np.nonzero(badd)
             out.append('depth: %d px differ, first (%d,%d) ref %d test %d' % (badd.sum(), xs[0], ys[0], a['d'][ys[0], xs[0]], b['d'][ys[0], xs[0]]))

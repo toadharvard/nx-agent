@@ -99,6 +99,30 @@ static const char* VS =
     "  gl_Position.y *= uYSign;\n"
     "  vDiff = aDiff; vDiffF = aDiff; vSpec = aSpec; vSpecF = aSpec; vUV = aUV;\n"
     "}\n";
+/* VS for programmable pixel shaders: S6b's layout contract (fnvnx_dk_varying_location): COLOR0/1 at 0/1,
+ * TEXCOORD0 at 2 as (u, v, 0, 1), fog factor at 18 */
+static const char* VS2 =
+    "#version 450 core\n"
+    "layout(location=0) in vec4 aPos; layout(location=1) in vec4 aDiff; layout(location=2) in vec4 aSpec;\n"
+    "layout(location=3) in vec2 aUV;\n"
+    "uniform int uRhw; uniform vec4 uVp; uniform mat4 uProj; uniform int uVFog; uniform vec3 uFogP; uniform float uYSign;\n"
+    "layout(location=0) out vec4 oD0; layout(location=1) out vec4 oD1; layout(location=2) out vec4 oT0;\n"
+    "layout(location=18) out vec4 oFog;\n"
+    "void main() {\n"
+    "  float f;\n"
+    "  if (uRhw != 0) {\n"
+    "    float w = 1.0 / aPos.w;\n"
+    "    vec2 ndc = vec2((aPos.x - uVp.x) * 2.0 / uVp.z - 1.0, 1.0 - (aPos.y - uVp.y) * 2.0 / uVp.w);\n"
+    "    gl_Position = vec4(ndc * w, aPos.z * w, w); f = aSpec.a;\n"
+    "  } else {\n"
+    "    gl_Position = uProj * vec4(aPos.xyz, 1.0); float z = abs(aPos.z);\n"
+    "    if (uVFog == 1) f = exp2(-(z * uFogP.z) * 1.442695);\n"
+    "    else if (uVFog == 2) { float d = z * uFogP.z; f = exp2(-(d * d) * 1.442695); }\n"
+    "    else if (uVFog == 3) f = clamp((uFogP.x - z) * uFogP.y, 0.0, 1.0); else f = aSpec.a;\n"
+    "  }\n"
+    "  gl_Position.y *= uYSign;\n"
+    "  oD0 = aDiff; oD1 = aSpec; oT0 = vec4(aUV, 0.0, 1.0); oFog = vec4(f);\n"
+    "}\n";
 static const char* FS =
     "#version 450 core\n"
     "in vec4 vDiff; flat in vec4 vDiffF; in vec4 vSpec; flat in vec4 vSpecF; in vec2 vUV; in float vFog;\n"
@@ -143,7 +167,7 @@ static const char* FS =
     "  for (int s = 0; s < 2; s++) {\n"
     "    if (uStage[s].x == 1) break;\n"
     "    vec3 c = sat(uStage[s].x, op(uStage[s].x, arg(uStage[s].y, s), arg(uStage[s].z, s), arg(uStage[s].w, s), s)).rgb;\n"
-    "    float a = uStageB[s].x == 1 ? CUR.a :\n"
+    "    float a = uStage[s].x == 24 ? c.r : uStageB[s].x == 1 ? CUR.a :\n"
     "      sat(uStageB[s].x, op(uStageB[s].x, arg(uStageB[s].y, s), arg(uStageB[s].z, s), arg(uStageB[s].w, s), s)).a;\n"
     "    CUR = vec4(c, a);\n"
     "  }\n"
@@ -195,6 +219,9 @@ static int gl_init(char* err, int errlen) {
 
 /* ---- target state --------------------------------------------------------------------------------------------------- */
 typedef struct { GLuint tex; uint32_t fmt; NxFormatInfo fi; GLenum ifmt, ifmt_srgb; GLuint view_srgb; int levels; } Tex;
+typedef struct { GLuint prog; uint32_t hash; } PsProg;
+static PsProg g_ps[64]; static int g_nps; static GLuint g_vs2, g_ubo[2];
+static uint32_t fnv1a(const char* s) { uint32_t h = 2166136261u; while (*s) h = (h ^ (uint8_t)*s++) * 16777619u; return h; }
 struct V6nTarget {
     int w, h; uint32_t rtf, dsf;
     GLuint fbo, rt, rt_srgb, ds; GLenum rt_ifmt; int rt_has_srgb;
@@ -206,6 +233,7 @@ struct V6nTarget {
     NxD3D9Viewport vp; NxD3D9Rect sc;
     float proj[16];
     V6nReadback rb;
+    GLuint ps; uint32_t ps_version; float psc[256][4];
 };
 
 static GLenum gl_cmp(uint32_t c) { return GL_NEVER + c; }   /* NxCompare = GL order */
@@ -323,6 +351,10 @@ static void bind_rt(V6nTarget* t, int srgb) {
     if (use) glEnable(GL_FRAMEBUFFER_SRGB); else glDisable(GL_FRAMEBUFFER_SRGB);
 }
 static void g_clear(V6nTarget* t, uint32_t flags, uint32_t color, float z, uint32_t s) {
+    /* D3D9 (Nine device9.c user_assert): ZBUFFER without a depth surface, or STENCIL without a stencil format,
+     * make the whole Clear D3DERR_INVALIDCALL: nothing is cleared */
+    if ((flags & 2) && !t->dsf) return;
+    if ((flags & 4) && !(t->dsf && (nx_d3d9_format(t->dsf).flags & NXFMT_STENCIL))) return;
     /* Nine's clear: rect = viewport (intersected with the scissor when enabled); masks and write enables ignored;
      * the colour goes through the sRGB view when SRGBWRITEENABLE. */
     bind_rt(t, t->rs[194] != 0);
@@ -455,23 +487,28 @@ static GLenum gl_prim(uint32_t p) {
 static uint32_t vcount(uint32_t p, uint32_t n) {
     switch (p) { case 1: return n; case 2: return 2 * n; case 3: return n + 1; case 4: return 3 * n; default: return n + 2; }
 }
-#define U(n) glGetUniformLocation(g_prog, n)
+#define U(n) glGetUniformLocation(t->ps ? t->ps : g_prog, n)
 
 static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6nVertex* v, int nv) {
     uint32_t nvert = vcount(prim, count);
     if ((int)nvert > nv) return 0;
     NxD3D9Input in; memset(&in, 0, sizeof in);
-    in.rs = t->rs; in.ps_version = 0; in.depth_format = t->dsf; in.viewport = t->vp; in.scissor = t->sc;
+    in.rs = t->rs; in.ps_version = t->ps ? t->ps_version : 0; in.depth_format = t->dsf; in.viewport = t->vp; in.scissor = t->sc;
     NxRenderState st; NxDynamicState dyn; uint32_t sb;
     nx_d3d9_translate(&in, &st, &dyn, &sb);
     uint64_t w0 = st.w[0], w1 = st.w[1], w2 = st.w[2];
     bind_rt(t, NXRS_GET(w2, NXRS_R_SRGB, 1));
-    glUseProgram(g_prog);
+    GLuint prog = t->ps ? t->ps : g_prog;
+    glUseProgram(prog);
     glBindVertexArray(g_vao); glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(V6nVertex) * nvert, v, GL_STREAM_DRAW);
     /* viewport + depth range */
     NxViewport vp = dyn.viewport;
     if (M("no_half_pixel")) { vp.x -= 0.5f; vp.y -= 0.5f; }
+    /* pretransformed (RHW) vertices: Nine's window-space position path applies no viewport transform and no
+     * viewport clip, so the FF model maps them over the whole target (RENDER_VERIFY.md §5, ambiguity A1) */
+    if (rhw) { vp.x = 0.5f; vp.y = 0.5f; vp.w = (float)t->w; vp.h = (float)t->h;
+               if (M("no_half_pixel")) { vp.x -= 0.5f; vp.y -= 0.5f; } }
     glViewportIndexedf(0, vp.x, vp.y, vp.w, vp.h);   /* GL row y = image row y (VS negates y) */
     if (rhw && !M("rhw_viewport_z")) glDepthRangeIndexed(0, 0.0, 1.0); else glDepthRangeIndexed(0, vp.minZ, vp.maxZ);
     /* blend */
@@ -528,7 +565,8 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     glProvokingVertex(M("provoking_last") ? GL_LAST_VERTEX_CONVENTION : GL_FIRST_VERTEX_CONVENTION);
     /* shader uniforms */
     glUniform1i(U("uRhw"), rhw);
-    glUniform4f(U("uVp"), (float)t->vp.X, (float)t->vp.Y, (float)t->vp.Width, (float)t->vp.Height);
+    if (rhw) glUniform4f(U("uVp"), 0.0f, 0.0f, (float)t->w, (float)t->h);
+    else glUniform4f(U("uVp"), (float)t->vp.X, (float)t->vp.Y, (float)t->vp.Width, (float)t->vp.Height);
     glUniformMatrix4fv(U("uProj"), 1, GL_FALSE, t->proj);
     glUniform1i(U("uFlat"), NXRS_GET(w2, NXRS_R_FLAT, 1));
     int fogmode = (sb >> NXSB_FOG) & 7;
@@ -558,6 +596,22 @@ static int g_draw(V6nTarget* t, uint32_t prim, uint32_t count, int rhw, const V6
     glUniform4iv(U("uStage"), 2, &stage[0][0]); glUniform4iv(U("uStageB"), 2, &stageb[0][0]);
     glUniform4fv(U("uConst"), 2, &cst[0][0]);
     glUniform1i(U("uTex0"), 0); glUniform1i(U("uTex1"), 1);
+    if (t->ps) {   /* layout contract UBO 0 (c#) and UBO 2 (driver: fog, alpha test) */
+        glUniform1f(U("uYSign"), M("upper_left_origin") ? 1.0f : -1.0f);
+        if (!g_ubo[0]) glGenBuffers(2, g_ubo);
+        glBindBuffer(GL_UNIFORM_BUFFER, g_ubo[0]); glBufferData(GL_UNIFORM_BUFFER, sizeof t->psc, t->psc, GL_STREAM_DRAW);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, g_ubo[0]);
+        struct { float fogcolor[4], fog[4]; int32_t alpha[4]; float alpharef[4], texbem[16][4]; } drv;
+        memset(&drv, 0, sizeof drv);
+        memcpy(drv.fogcolor, dyn.fogColor, 16);
+        int fm = (sb >> NXSB_FOG) & 7;   /* NxFog -> layout: 0 off, 1 vertex, 2 exp, 3 exp2, 4 linear */
+        drv.fog[0] = fm == NxFog_Vertex ? 1.0f : fm == NxFog_Exp ? 2.0f : fm == NxFog_Exp2 ? 3.0f : fm == NxFog_Linear ? 4.0f : 0.0f;
+        memcpy(&drv.fog[1], &t->rs[36], 4); memcpy(&drv.fog[2], &t->rs[37], 4); memcpy(&drv.fog[3], &t->rs[38], 4);
+        drv.alpha[0] = ((sb >> NXSB_ALPHATEST) & 1) ? (int)((sb >> NXSB_ALPHAFUNC) & 7) + 1 : 0;
+        drv.alpharef[0] = dyn.alphaRef;
+        glBindBuffer(GL_UNIFORM_BUFFER, g_ubo[1]); glBufferData(GL_UNIFORM_BUFFER, sizeof drv, &drv, GL_STREAM_DRAW);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 2, g_ubo[1]);
+    }
     glDrawArrays(gl_prim(prim), 0, nvert);
     return glGetError() == GL_NO_ERROR;
 }
@@ -612,6 +666,22 @@ static int g_readback(V6nTarget* t, V6nReadback* out) {
     *out = *r;
     return glGetError() == GL_NO_ERROR;
 }
+static int g_psh(V6nTarget* t, const uint32_t* bc, int n, const char* glsl) {
+    if (!bc) { t->ps = 0; return 1; }
+    if (!glsl || n < 1) return 0;
+    t->ps_version = bc[0] & 0xFFFF;
+    uint32_t h = fnv1a(glsl);
+    for (int i = 0; i < g_nps; i++) if (g_ps[i].hash == h) { t->ps = g_ps[i].prog; return 1; }
+    if (!g_vs2) g_vs2 = compile(GL_VERTEX_SHADER, VS2);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, glsl);
+    GLuint p = glCreateProgram(); glAttachShader(p, g_vs2); glAttachShader(p, fs); glLinkProgram(p);
+    GLint ok; glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok) { char log[2048]; glGetProgramInfoLog(p, sizeof log, NULL, log); fprintf(stderr, "link: %s\n", log); return 0; }
+    if (g_nps < 64) { g_ps[g_nps].prog = p; g_ps[g_nps].hash = h; g_nps++; }
+    t->ps = p;
+    return 1;
+}
+static void g_psc(V6nTarget* t, uint32_t reg, const float v[4]) { if (reg < 256) memcpy(t->psc[reg], v, 16); }
 const V6nOps v6n_target_ops = {"gl45-llvmpipe+s6n", g_begin, g_end, g_clear, g_rs, g_samp, g_tss, g_tex, g_notex, g_vp,
-                               g_scissor, g_proj, g_draw, g_readback};
+                               g_scissor, g_proj, g_draw, g_readback, g_psh, g_psc};
 const char* const* v6n_gl_mutants(void) { return MUTANTS; }
