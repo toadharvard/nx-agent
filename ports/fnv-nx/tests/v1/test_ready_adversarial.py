@@ -170,4 +170,35 @@ def r12(w):
 
 
 case('R12 summary.txt overrides milestones.json', r12, must_not_pass('boot.first_cell'))
+
+
+# Round 2 (after R0's fix of R1-R12): contradicting evidence, unmerged work
+# R13: no image hash; meta.json says the boot ran on the synthesized image, milestones.json says "player exe"
+def r13(w):
+    w.edit_json('link/%s/meta.json' % C, lambda d: (d.pop('boot_image_sha256'), d.__setitem__('boot_image', 'synthesized')))
+
+
+case('R13 image labels disagree, no hash', r13, must_not_pass('boot.real_exe'))
+
+
+# R14: a try farm (an agent's unmerged head, tools/farm/push_wip.sh) publishes an all-pass S16 gate file, newer than
+# the s16 farm's: ready.py's other gates skip reports/try<k>of<N> ("try farms run unmerged work")
+def r14(w):
+    frames(w, {'commit': C, 'scenes': [{'name': 'main_menu', 'metric': 'ssim', 'value': 0.2, 'threshold': 0.98,
+                                        'pass': False}]})
+    w.write('reports/try1of4/%s-frames.json' % C, {'commit': C, 'scenes': [
+        {'name': 'main_menu', 'metric': 'ssim', 'value': 0.99, 'threshold': 0.98, 'pass': True}]},
+        published=1900000000)
+
+
+case('R14 all-pass frames from a try farm (unmerged work)', r14, must_not_pass('frames.compare'))
+
+
+# R15: two lines for FalloutNV.exe in the checksum file, another exe's first (the pinned hash second)
+def r15(w):
+    w.write('gamedata/exe/FalloutNV.exe.sha256', 'cd' * 32 + '  FalloutNV.exe\n' + 'ab' * 32 + '  FalloutNV.exe\n')
+    w.edit_json('link/%s/meta.json' % C, lambda d: d.__setitem__('boot_image_sha256', 'ab' * 32))
+
+
+case('R15 checksum file names FalloutNV.exe twice, differently', r15, must_not_pass('boot.real_exe'))
 sys.exit(FAIL)
