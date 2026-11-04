@@ -162,6 +162,12 @@ template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribu
 #define FNVNX_MSVC_BASE_END(...) typename fnvnx_int_of_align<alignof(__VA_ARGS__)>::type : 0;
 #endif
 
+/* prepare.py rule NEW5: first member of a class whose only scalar operator delete is the placement form; its deleting
+ * destructor frees through the global ::operator delete(void*), the function MSVC 2008 called there. */
+#ifdef __cplusplus
+#define FNVNX_GLOBAL_DELETE static void operator delete(void *fnvnx_p) noexcept { ::operator delete(fnvnx_p); }
+#endif
+
 /* SAL annotations (sal.h) used without an include in pasted CRT prototypes */
 #define _In_
 #define _In_opt_

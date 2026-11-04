@@ -86,6 +86,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <map>
 #include <fstream>
 
 int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is MIT (LICENSE), which is compatible
@@ -171,11 +172,35 @@ static bool keyed(tree t) {
   return false;
 }
 
+// a record (or array of records) with a keyed field somewhere inside: a copy of the whole object stores that field
+// too (`*p = *n` over a polled flag), so it is fenced like any ordered access that ldar/stlr cannot do
+static bool field_keyed(tree f) {
+  if (interlocked_decls.count(f) || poll_decls.count(f)) return true;
+  return DECL_NAME(f) && key_fields.count(record_name(f) + "::" + IDENTIFIER_POINTER(DECL_NAME(f)));
+}
+static bool type_keyed(tree ty, int depth = 0) {
+  static std::map<tree, bool> memo;
+  if (!ty || depth > 8) return false;
+  ty = TYPE_MAIN_VARIANT(ty);
+  if (TREE_CODE(ty) == ARRAY_TYPE) return type_keyed(TREE_TYPE(ty), depth + 1);
+  if (!RECORD_OR_UNION_TYPE_P(ty)) return false;
+  auto it = memo.find(ty);
+  if (it != memo.end()) return it->second;
+  memo[ty] = false;   // recursion guard
+  bool k = false;
+  for (tree f = TYPE_FIELDS(ty); f && !k; f = DECL_CHAIN(f))
+    if (TREE_CODE(f) == FIELD_DECL) k = field_keyed(f) || type_keyed(TREE_TYPE(f), depth + 1);
+  memo[ty] = k;
+  return k;
+}
+
 static bool shared_ordered(tree t) {
   if (!t || !is_memory_ref(t)) return false;
   if (local_unshared(get_base_address(t))) return false;
   if (mode == MODE_TSO) return true;
-  return TREE_THIS_VOLATILE(t) || TYPE_VOLATILE(TREE_TYPE(t)) || keyed(t);
+  if (TREE_THIS_VOLATILE(t) || TYPE_VOLATILE(TREE_TYPE(t)) || keyed(t)) return true;
+  return AGGREGATE_TYPE_P(TREE_TYPE(t)) && !(key_fields.empty() && interlocked_decls.empty() && poll_decls.empty()) &&
+         type_keyed(TREE_TYPE(t));
 }
 
 // a naturally aligned scalar of 1/2/4/8 bytes that ldar/stlr can access: the size index 0..3, or -1
@@ -497,9 +522,22 @@ static int parm_index(tree fndecl, tree parm) {
 
 // What a pointer argument designates: a field (`&obj.m`, `&p->m[2]`, or `obj.m` bound to a reference parameter), a
 // variable (`&g`), or a parameter of the current function (`p`, `&*r` for a reference r); NULL_TREE otherwise.
+static bool local_pointer(tree a) {
+  return a && TREE_CODE(a) == VAR_DECL && !TREE_STATIC(a) && !DECL_EXTERNAL(a) && POINTER_TYPE_P(TREE_TYPE(a));
+}
+
+// local pointers of the function being walked: what they were set to (`long *p = &o->m;`, `p = q` from a parameter)
+static std::map<tree, std::vector<tree>> local_addr;
+static std::map<tree, int> local_parm;
+struct local_use { tree local; tree callee; int arg; };   // callee NULL_TREE: handed to Interlocked*
+static std::vector<local_use> local_uses;
+static tree operand_local;   // set by operand_of when the argument is such a local pointer
+
 static tree operand_of(tree a, int *parm) {
   *parm = -1;
+  operand_local = NULL_TREE;
   while (CONVERT_EXPR_P(a) || TREE_CODE(a) == NON_LVALUE_EXPR || TREE_CODE(a) == VIEW_CONVERT_EXPR) a = TREE_OPERAND(a, 0);
+  if (local_pointer(a)) { operand_local = a; return NULL_TREE; }
   if (TREE_CODE(a) == PARM_DECL && current_fn) {
     if (POINTER_TYPE_P(TREE_TYPE(a))) *parm = parm_index(current_fn, a);
     return NULL_TREE;
@@ -527,6 +565,7 @@ static void note_interlocked(tree call) {
     tree d = operand_of(CALL_EXPR_ARG(call, 0), &parm);
     if (d) interlocked_decls.insert(d);
     else if (parm >= 0) forwarders.insert(std::make_pair(current_fn, parm));
+    else if (operand_local) local_uses.push_back({operand_local, NULL_TREE, 0});
     return;
   }
   // any other direct call: remember which fields / variables / own parameters it binds to which argument, in case
@@ -539,7 +578,39 @@ static void note_interlocked(tree call) {
     tree d = operand_of(a, &parm);
     if (d) decl_calls.push_back({fn, i, d});
     else if (parm >= 0) param_calls.push_back({current_fn, parm, fn, i});
+    else if (operand_local) local_uses.push_back({operand_local, fn, i});
   }
+}
+
+// `p = &o->m` / `long *p = &o->m;` / `p = param` for a local pointer p
+static void note_local_set(tree lhs, tree rhs) {
+  if (!local_pointer(lhs) || !rhs) return;
+  int parm;
+  tree d = operand_of(rhs, &parm);
+  if (d) local_addr[lhs].push_back(d);
+  else if (parm >= 0) local_parm[lhs] = parm;
+  else if (operand_local && operand_local != lhs) {   // p = q: q's targets
+    for (tree x : local_addr[operand_local]) local_addr[lhs].push_back(x);
+    auto it = local_parm.find(operand_local);
+    if (it != local_parm.end()) local_parm[lhs] = it->second;
+  }
+}
+
+static void resolve_locals() {
+  for (const local_use &u : local_uses) {
+    for (tree d : local_addr[u.local]) {
+      if (!u.callee) interlocked_decls.insert(d);
+      else decl_calls.push_back({u.callee, u.arg, d});
+    }
+    auto it = local_parm.find(u.local);
+    if (it != local_parm.end()) {
+      if (!u.callee) forwarders.insert(std::make_pair(current_fn, it->second));
+      else param_calls.push_back({current_fn, it->second, u.callee, u.arg});
+    }
+  }
+  local_addr.clear();
+  local_parm.clear();
+  local_uses.clear();
 }
 
 static void resolve_forwarders() {
@@ -643,22 +714,46 @@ static void poll_contexts(tree t) {
 
 // ---- discover=<file>: this unit's keys, for the whole-program key list (toolchain/order/keys.sh)
 
-static void key_line(std::set<std::string> &out, tree d) {
-  if (!DECL_NAME(d)) return;
+static std::string key_of(tree d) {
+  if (!DECL_NAME(d)) return "";
   const char *n = IDENTIFIER_POINTER(DECL_NAME(d));
   if (TREE_CODE(d) == FIELD_DECL) {
     std::string r = record_name(d);
-    if (!r.empty() && !IDENTIFIER_ANON_P(DECL_NAME(d))) out.insert("field " + r + "::" + n);
+    if (!r.empty() && !IDENTIFIER_ANON_P(DECL_NAME(d))) return "field " + r + "::" + n;
   } else if (TREE_CODE(d) == VAR_DECL && (TREE_STATIC(d) || DECL_EXTERNAL(d)) && !DECL_THREAD_LOCAL_P(d)) {
-    out.insert(std::string("var ") + n);
+    return std::string("var ") + n;
   }
+  return "";
+}
+static void key_line(std::set<std::string> &out, tree d) {
+  std::string k = key_of(d);
+  if (!k.empty()) out.insert(k);
+}
+static std::string fn_id(tree fn) {
+  return fn && DECL_ASSEMBLER_NAME(fn) ? IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn)) : "";
 }
 
+// Besides the unit's own keys, the facts another unit may complete (toolchain/order/keys_merge.py resolves them
+// over the whole program): a forwarder defined here and called elsewhere, a call here to a forwarder defined
+// elsewhere.  fwd <fn> <i>            fn hands (the pointee of) parameter i to Interlocked*
+//         pcall <f> <j> <g> <i>     f passes its parameter j to g's parameter i
+//         call <g> <i> <key>        a call of g binds <key> (field ... / var ...) to parameter i
 static void write_discovered() {
   if (!forwarders_resolved) resolve_forwarders();
   std::set<std::string> lines;
   for (tree d : interlocked_decls) key_line(lines, d);
   for (tree d : poll_decls) key_line(lines, d);
+  for (const auto &f : forwarders)
+    if (TREE_PUBLIC(f.first) || DECL_COMDAT(f.first)) lines.insert("fwd " + fn_id(f.first) + " " + std::to_string(f.second));
+  for (const param_call &c : param_calls)
+    if (!forwarders.count(std::make_pair(c.callee, c.arg)) && (TREE_PUBLIC(c.callee) || DECL_COMDAT(c.callee)))
+      lines.insert("pcall " + fn_id(c.caller) + " " + std::to_string(c.caller_parm) + " " + fn_id(c.callee) + " " +
+                   std::to_string(c.arg));
+  for (const decl_call &c : decl_calls) {
+    if (forwarders.count(std::make_pair(c.callee, c.arg)) || !(TREE_PUBLIC(c.callee) || DECL_COMDAT(c.callee))) continue;
+    std::string k = key_of(c.decl);
+    if (!k.empty()) lines.insert("call " + fn_id(c.callee) + " " + std::to_string(c.arg) + " " + k);
+  }
   std::ofstream out(discover_path, std::ios::trunc);
   if (!out) { error("%<fnvnx_order%>: cannot write %s", discover_path); return; }
   for (const std::string &l : lines) out << l << "\n";
@@ -741,6 +836,9 @@ static void refcount_contexts(tree t) {
 static tree order_args_walk(tree *tp, int *, void *) {
   refcount_contexts(*tp);
   poll_contexts(*tp);
+  if (TREE_CODE(*tp) == MODIFY_EXPR || TREE_CODE(*tp) == INIT_EXPR) note_local_set(TREE_OPERAND(*tp, 0), TREE_OPERAND(*tp, 1));
+  else if (TREE_CODE(*tp) == DECL_EXPR && TREE_CODE(DECL_EXPR_DECL(*tp)) == VAR_DECL)
+    note_local_set(DECL_EXPR_DECL(*tp), DECL_INITIAL(DECL_EXPR_DECL(*tp)));
   if (TREE_CODE(*tp) == CALL_EXPR) {
     note_interlocked(*tp);
     if (interlocked_kind(*tp)) ilk_full++;
@@ -761,6 +859,7 @@ static void pre_genericize(void *gcc_data, void *) {
   if (in_system_header_at(DECL_SOURCE_LOCATION(fndecl))) return;
   current_fn = fndecl;
   walk_tree_without_duplicates(&DECL_SAVED_TREE(fndecl), order_args_walk, NULL);
+  resolve_locals();
   current_fn = NULL_TREE;
 }
 

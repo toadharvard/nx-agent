@@ -204,7 +204,12 @@ _d = tempfile.mkdtemp()
 os.makedirs(os.path.join(_d, 'src'))
 with open(os.path.join(_d, 'src', 'b.h'), 'w') as _h: _h.write(DTOR1_HEAD)
 _unit = os.path.join(_d, 'src', 'b.cpp')
-check('DTOR1 needs code after the includes', run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n', _unit), (), ['DTOR1'])
+check('DTOR1 an include-only unit (a header unit): the declarations after its includes',
+      run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n// end', _unit),
+      ['// end\ntemplate <> NiPointer<Qa>::~NiPointer(); /* fnv-nx DTOR1 */'], ['NiPointer<Ra>::~'])
+check('DTOR1 an include-only unit with nothing to declare: unchanged',
+      run(s1.r_incomplete_pointee_dtors, '#include "none.h"', os.path.join(_d, 'src', 'e.cpp')) == '#include "none.h"' and 'x' or '',
+      ['x'])
 got = run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n// k\nvoid B::k() {}\n', _unit)
 check('DTOR1 declares the destructor for a pointee never completed at file scope', got,
       ['template <> NiPointer<Qa>::~NiPointer(); /* fnv-nx DTOR1 */'], ['NiPointer<Ra>::~', 'NiPointer<Sa>::~'])
@@ -972,18 +977,18 @@ _shutil.rmtree(_s2, ignore_errors=True)
 _G = ('struct Gate { char v; Gate() {} Gate(bool b) : v(b) {} operator bool() const { return v != 0; } };\n'
       'struct Only { char v; operator bool() const { return v != 0; } };\n'
       'struct N { Gate test(float e) const; int other(float e) const; Only probe(float e) const; };\n')
-check('COND1 the gate operand of `? false :` gets the bool conversion',
+check('COND1 the literal of `? false :` becomes the gate class (MSVC\'s conversion)',
       run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->test(0.5f)) g(); }\n'),
-      ['!n ? false : (bool)(n->test(0.5f))) g();'])
+      ['!n ? Gate(false) : n->test(0.5f)) g();'])
 check('COND1 a call returning int stays',
       run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->other(0.5f)) g(); }\n'),
-      [], ['(bool)('])
+      [], ['Gate(false)', 'Gate(true)'])
 check('COND1 a class without a bool constructor (no ambiguity) stays',
       run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { if (!n ? false : n->probe(0.5f)) g(); }\n'),
-      [], ['(bool)('])
+      [], ['Gate(false)', 'Gate(true)'])
 check('COND1 an operand that does not end in the call stays',
       run(s1.r_conditional_bool_gates, _G + 'void f(N* n) { int x = !n ? false : n->test(0.5f) + 1; }\n'),
-      [], ['(bool)('])
+      [], ['Gate(false)', 'Gate(true)'])
 _R = ('template <class T> struct Arr { void AddBack(const T& v); void Set(int i, T* p); };\n'
       'struct S { int a; };\n')
 check('RSTR1 restrict local passed to a const T& parameter',
@@ -996,6 +1001,117 @@ check('RSTR1 a plain local stays',
 check('RSTR1 a use outside the declaring function stays',
       run(s1.r_restrict_reference_args, _R + 'void f() { S* __restrict c = 0; }\nvoid h(Arr<S*>* o, S* c) '
           '{ o->AddBack(c); }\n'), [], ['fnvnx_unrestrict'])
+# ---- S1-refs: NEW1 plain `unsigned`, NEW5 (placement-only operator delete)
+check('NEW1 plain unsigned size parameter -> size_t, unsigned long / short kept',
+      prepare.r_newdel_size('x.cpp', 'static void operator delete[](void* p, unsigned);\n'
+                            'static void* operator new(unsigned n);\nvoid* operator new(unsigned long n, unsigned short k);\n'
+                            'void* operator new(unsigned n, unsigned& total);\n', Counter()),
+      ['operator delete[](void* p, size_t)', 'operator new(size_t n)', 'operator new(unsigned long n, unsigned short k)',
+       'operator new(size_t n, unsigned& total)'])
+_n5 = ('struct Pm\n{\n    virtual ~Pm();\n    int m;\n    static void operator delete(void*, void*);\n'
+       '    static void* operator new(size_t n);\n};\nstruct Pd : Pm\n{\n    int k;\n};\n'
+       'class Pc\n{\n    int h;\npublic:\n    virtual ~Pc() {}\n    static void* operator new(size_t, void* p) { return p; }\n'
+       '    static void operator delete(void*, void*) {}\n};\n')
+_o5 = run(s1.r_placement_only_delete, _n5)
+check('NEW5 placement-only delete + virtual dtor: global delete member',
+      _o5, ['struct Pm\n{ FNVNX_GLOBAL_DELETE /* fnv-nx NEW5 */\n',
+            'class Pc\n{ public: FNVNX_GLOBAL_DELETE private: /* fnv-nx NEW5 */\n    int h;'], ['struct Pd : Pm\n{ F'])
+check('NEW5 keeps the line count', str(_o5.count('\n') == _n5.count('\n')), ['True'])
+check('NEW5 a usual delete next to the placement form: unchanged',
+      run(s1.r_placement_only_delete, _n5.replace('static void operator delete(void*, void*);',
+                                                  'static void operator delete(void*, void*);\n    static void operator delete(void* p);')
+          .replace('class Pc', 'class Pc2 : Pm')), [], ['FNVNX_GLOBAL_DELETE'])
+check('NEW5 no virtual destructor, or a base class: unchanged',
+      run(s1.r_placement_only_delete, 'struct Q\n{\n    ~Q();\n    static void operator delete(void*, void*);\n};\n'
+          'struct R : B\n{\n    virtual ~R();\n    static void operator delete(void*, void*);\n};\n'), [], ['FNVNX_GLOBAL_DELETE'])
+check('NEW5 a placement form with another second parameter: unchanged',
+      run(s1.r_placement_only_delete, 'struct Q\n{\n    virtual ~Q();\n    static void operator delete(void*, int, int);\n};\n'),
+      [], ['FNVNX_GLOBAL_DELETE'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _c5 = os.path.join(tempfile.mkdtemp(), 'n5.cpp')
+    _m5 = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_GLOBAL_DELETE ')]          # the shim's own definition of the macro
+    open(_c5, 'w').write('#include <stddef.h>\n' + ''.join(_m5) + _o5 +
+                         'Pm::~Pm() {}\nvoid f(Pd* d, Pc* c) { delete d; delete c; }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror', _c5],
+                         capture_output=True, text=True)
+    check('NEW5 output compiles (derived class too)', _r.stderr or 'ok', ['ok'])
+# ---- S1-refs agent C: TPL1 out-of-class members of a header's class template, SPEC1 through a typedef name,
+# RCAST1 in comments
+_c = tempfile.mkdtemp()
+os.makedirs(os.path.join(_c, 'src'))
+with open(os.path.join(_c, 'src', 'pb.h'), 'w') as _h:
+    _h.write('template <class A, class T> class LBase\n{\n  public:\n    T* m_pFirst;\n    unsigned int m_uiCount;\n};\n'
+             'template <class A, class T> class PList : public LBase<A, T>\n{\n  public:\n    int m_iOwn;\n'
+             '    T Pop();\n};\n')
+got = run(s1.r_dependent_base_members, '#include "pb.h"\ntemplate <class A, class T>\n// note\nKEEPX T PList<A, T>::Pop()\n'
+          '{\n    T* m_uiCount2 = m_pFirst;\n    m_iOwn = 0;\n    --m_uiCount;\n    return *m_uiCount2;\n}\n',
+          os.path.join(_c, 'src', 'pl.h'))
+check('TPL1 out-of-class member of a class template from an included header', got,
+      ['T* m_uiCount2 = this->m_pFirst;', '    --this->m_uiCount;', '    m_iOwn = 0;'], ['this->m_iOwn'])
+check('TPL1 out-of-class explicit specialization of a header\'s template: untouched',
+      run(s1.r_dependent_base_members, '#include "pb.h"\ntemplate <>\nint PList<char, int>::Pop()\n{\n    --m_uiCount;\n'
+          '    return 0;\n}\n', os.path.join(_c, 'src', 'pm.h')), (), ['this->'])
+check('TPL1 out-of-class member, the template\'s own parameter shadows nothing: params untouched',
+      run(s1.r_dependent_base_members, '#include "pb.h"\ntemplate <class A, class m_pFirst>\nint PList<A, m_pFirst>::Pop()\n'
+          '{\n    return m_uiCount + sizeof(m_pFirst);\n}\n', os.path.join(_c, 'src', 'pn.h')),
+      ['return this->m_uiCount + sizeof(m_pFirst);'], ['this->m_pFirst'])
+_sp = os.path.join(_c, 'src', 'gamebryo2.2', 'corelibs', 'nimain', 'nitset.inl')
+got = run(s1.r_specialization_decls, 'class Item;\ntemplate <class T> class Ref\n{\n};\n'
+          'template <class T> class Alloc\n{\n};\ntemplate <class T, class B>\nclass Bag\n{\npublic:\n    void Put(const T& v);\n'
+          '    void Grow(unsigned int n);\n};\n\ntypedef Bag<Ref<Item>,\n            Alloc<Ref<Item> > >\n    ItemBag;\n\n'
+          'template <>\n// @x\nFNVNX_KEEP void ItemBag::Put(const Ref<Item>& v)\n{\n    Grow(2);\n}\n\n'
+          'void ItemBag::Grow(unsigned int n)\n{\n}\n', _sp)
+check('SPEC1 a member defined through a typedef name of the specialization', got,
+      ['};\ntemplate <> void Bag<Ref<Item>, Alloc<Ref<Item> >>::Put(const Ref<Item>& v) FNVNX_KEEP; /* fnv-nx SPEC1 */ '
+       'template <> void Bag<Ref<Item>, Alloc<Ref<Item> >>::Grow(unsigned int n); /* fnv-nx SPEC1 */'])
+check('SPEC1 a typedef of a template the file does not define: nothing',
+      run(s1.r_specialization_decls, '#include <x.h>\ntypedef Bag<int, int> IB;\nvoid IB::Grow(unsigned int n)\n{\n}\n', _sp),
+      (), ['SPEC1'])
+check('RCAST1 a reference cast spelled in a comment: untouched',
+      run(s1.r_ref_cast_temporaries, 'class P\n{\n    // bool __cdecl P::*(const P&)\n    P();\n    /* (Q&)\n    f(); */\n};\n'),
+      ['    P();\n', '    f(); */'], ['fnvnx_lvalue'])
+check('RCAST1 `//` inside a string literal does not hide the cast after it',
+      run(s1.r_ref_cast_temporaries, 'g("a//b", (const M&)h(n));\n'), ['(const M&)fnvnx_lvalue(h(n))'])
+_shutil.rmtree(_c, ignore_errors=True)
+# ---- S1-refs: NSCALL1 (a namespace's own prototype of a CRT name, called unqualified) and DUPINT1-RET (units.json)
+_s3 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s3, 'build')); os.makedirs(os.path.join(_s3, 'src'))
+_json.dump({'units': [
+    {'source': 'src/n.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00401100'}},
+    {'source': 'src/g.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00401100',
+                                        '?strcpy_s@@YAHPADIPBD@Z': '0x00401100'}},
+    {'source': 'src/d.cpp', 'symbols': {'_Fmt': '0x00401200', '?Fmt@@YAPADPADIPBDZZ': '0x00401200',
+                                        '_Pick': '0x00401300', '?Pick@@YAHPAXE@Z': '0x00401300'}}]},
+           open(os.path.join(_s3, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+_n = ('namespace ns1 {\nint strcpy_s(char* d, unsigned int n, const char* s);\n'
+      'struct Name { operator const char*() const; };\n'
+      'void f(char* b, const Name& k)\n{\n    strcpy_s(b, 260, k);\n    if (!strcpy_s(b, 4, "abc")) return;\n'
+      '    // strcpy_s(b, 1, k) in a comment\n}\n}\n')
+check('NSCALL1 unqualified calls of N\'s own CRT prototype -> N::name',
+      run(s1.r_namespace_crt_calls, _n, os.path.join(_s3, 'src', 'n.cpp')),
+      ['ns1::strcpy_s(b, 260, k);', '!ns1::strcpy_s(b, 4, "abc")', 'int strcpy_s(char* d',
+       '// strcpy_s(b, 1, k) in a comment'], ['ns1::ns1::'])
+check('NSCALL1 the unit also binds the global spelling: untouched',
+      run(s1.r_namespace_crt_calls, _n, os.path.join(_s3, 'src', 'g.cpp')), [], ['ns1::strcpy_s'])
+check('NSCALL1 a class member of that name: untouched',
+      run(s1.r_namespace_crt_calls, _n.replace('struct Name {', 'struct Name { int strcpy_s(char*, int);'),
+          os.path.join(_s3, 'src', 'n.cpp')), [], ['ns1::strcpy_s'])
+_d = ('extern "C" int __cdecl Fmt(char* b, int n, const char* f, ...);\n'
+      'char* __cdecl Fmt(char* d, unsigned int n, const char* f, ...);\n'
+      'void g(char* b, size_t n)\n{\n    Fmt(b, n + 1, "%d", 1);\n    if (n) Fmt(b, n, "x"); else Fmt(b, 2, "y");\n}\n')
+check('DUPINT1-RET other return type, results unused: later prototype dropped',
+      run(s1.r_duplicate_int_overloads, _d, os.path.join(_s3, 'src', 'd.cpp')),
+      ['extern "C" int __cdecl Fmt(char* b, int n', '/* fnv-nx DUPINT1 */'], ['char* __cdecl Fmt'])
+check('DUPINT1-RET a call uses the result: untouched',
+      run(s1.r_duplicate_int_overloads, _d.replace('    Fmt(b, n + 1', '    char* p = Fmt(b, n + 1'),
+          os.path.join(_s3, 'src', 'd.cpp')), ['char* __cdecl Fmt'], ['fnv-nx DUPINT1'])
+check('DUPINT1-RET a narrower integer parameter: untouched',
+      run(s1.r_duplicate_int_overloads, 'extern "C" void Pick(void* p, int n);\nint Pick(void* p, unsigned char n);\n'
+          'void h(void* p) { Pick(p, 1); }\n', os.path.join(_s3, 'src', 'd.cpp')), ['int Pick('], ['fnv-nx DUPINT1'])
+s1._UNIT_SYMBOLS = _saved
+_shutil.rmtree(_s3, ignore_errors=True)
 
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)

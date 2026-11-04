@@ -228,7 +228,8 @@ planted, e.g. a vtable slot of a fuzzed object) is an intercepted call of that a
 ## Cause refinement and verdict policy (`causes.py`, S13b)
 
 `report.reclassify` hands what the probes left at `unclassified`, `call-flow` or `signedness?` to `causes.refine`,
-rules on the saved record alone (no replay; a probe's definite cause is never overridden):
+rules on the saved record alone (no replay; a probe's definite cause is never overridden; `oracle-vcall`, a tag of
+the runner and a fault probe rather than a decision, is split too, `causes.HINT_REFINABLE`):
 
 | record shape | cause | class |
 |---|---|---|
@@ -250,11 +251,36 @@ rules on the saved record alone (no replay; a probe's definite cause is never ov
 | `no-native-entry` | `no-native-entry` | artifact |
 | oracle-only data fault in the AArch64 private range | `oracle-native-address` | artifact (a native address leaked to the x86 machine) |
 | oracle-only data fault | `oracle-fault` | triage |
+| oracle-only fault (`oracle-fault`, or an `oracle-vcall` error) at a garbage address in the x86 private range 0x0e000000 | `oracle-private-address` | artifact (the native machine maps that range as background) |
+| ... a dword access at 0xfffffffd..0xffffffff (a near-null pointer minus a few bytes, wrapped past 4 GiB) | `ilp32-pointer` | by-design |
+| ... and the native function calls a function its own object defines as a bare `ret` (decomp stub, empty destructor) | `native-empty-callee` | real-bug S1 (the exe's work there is skipped natively) |
+| `oracle-vcall` call-target (`vcall: unplanted`): the native trace passes a `__s13_vtpad_` slot | `vptr-unpaired` | real-bug S2c, soft (classify.py tests `unplanted` first) |
+| ... the oracle calls a garbage word in the AArch64 stub range, the native trace names that word (word - 0x08000000, or `name:<hex>`) | `vcall-stub-alias` | artifact (one call, two spellings) |
+| ... the native calls a C++ name nothing defines or binds, no vptr planted | `native-undefined` | real-bug S1 |
+| ... neither target is code on either machine (not .text, an import, a named stub or the AArch64 private range) | `vcall-garbage` | artifact (an object with no vftable: invalid input) |
+| ... anything else (the native calls an exe function directly while the oracle reads unplanted memory; oracle-only faults near an indirect call or at an unmapped pc) | `oracle-vcall` | artifact (kept) |
 | call-target: native calls a named stub `name:_Z...` | `native-undefined` | real-bug S1/S2c (fallback without the link's providers) |
 | call-target: oracle calls an import, native jumps to the IAT slot address | `import-slot-called` | real-bug S2c |
 | call-target: the native function never names the oracle's callee (from its object) | `native-inlined` | triage |
 | one side's store covers bytes the other leaves | `store-width` / `x86-only-store` / `native-only-store` | triage |
 | native calls a prefix of the oracle's calls / the oracle's calls and more | `native-early-exit` / `native-extra-calls` | triage |
+| only for records that would stay `unclassified`: one side has the block a game allocator returned (`world.alloc_result(j)`), the other the canned result of a later call `m > j` (argument, result or stored word) | `ctor-this` | artifact (the constructor run on the block returns this; its canned result is random) |
+| pointer argument: the oracle's is the canned eax of an earlier intercepted call, the native's is in its own stack frame | `canned-this` | artifact (a callee returning its result/this pointer: MSVC aggregate return, `operator=`; canned eax is random) |
+| `this`/pointer argument `d` bytes below the first buffer on the oracle side (pinned-pool range) and the buffer on the native side, the native object has a `_ZThn<d>_` thunk for the function or a direct callee | `thunk-binding` | real-bug S2c (`__fnv_<addr>` bound to the GCC primary entry, not the secondary-base thunk the MSVC entry corresponds to); without the thunk `layout-offset` |
+| call argument (I32/F32/F64) the native passes equal to the canned result of the call just before, the oracle another value | `native-stale-result` | real-bug S1b (an argument the native caller never set: its declaration of the callee differs) |
+| native `fault:x` in the AArch64 private range, oracle fine, case background `rand` | `native-wild-private` | artifact (a random code pointer: x86 intercepts it as a wild call, AArch64 executes its private range) |
+| first differing store: only bytes where the oracle has `0x08` and the native `0x00` | `stub-normalized` | artifact (arm64emu `_codeptr` rewrites any stored word in `0x08000000..0x09000000`, data included) |
+| stored / returned word that is one of the planted garbage words (`world.garbage_words`): both / native / oracle | `uninit-both` / `uninit-arm` / `uninit-x86` | artifact / real-bug S1b / by-design |
+| native 0 where the oracle has a value; the native function or a direct callee in its unit is `mov w0, #0; ret` | `native-zero-stub` | real-bug S1 (a placeholder body) |
+| call flow, the native function's own body is `ret` / return-a-constant (or it calls such a decomp-local `..FUN_<X>..` stand-in for an original X another object defines) and the oracle makes calls | `native-empty-body` | real-bug S1 |
+| the oracle's first missing call is CRT `_atexit` (0x00ec658f), the native function names no `fnvnx_xc_atexit` / `atexit` | `dyninit-no-atexit` | real-bug S10 (soft: the destructor is lost at exit only) |
+| `??_G` / `??_E` called with flags bit 0 clear; the native (D0) makes the oracle's calls plus deallocator calls only | `deleting-dtor-flags` | by-design |
+| the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | by-design (MSVC: callee destroys, Itanium: caller) |
+| call-target: the native calls an image-window (data) address where the oracle calls a function | `native-calls-data` | real-bug S1 (virtual slot past a decomp class's shorter vtable) |
+| call-target: oracle an unnamed CRT entry (addrmap E, x87 `_CI*`) or `f`, native the libm (float) function; `sprintf` vs `__sprintf_chk`; `atof` vs `strtod` | `libc-variant` | artifact (libcalls.X86 / FAMILY lack the pair) |
+| the oracle's missing callee X is defined by the native function's own object and called by it (runs natively, intercepted on x86) | `oracle-callee-unloaded` | artifact (X not in the oracle's code set); never over an unbound name |
+| the oracle frees (free / delete / Deallocate), the native goes straight on to the oracle's next call (or returns) and reaches no deallocator through its own object | `native-missing-free` | real-bug S1 |
+| call-target: native indirect call to a non-code address where the oracle calls a .text function | `native-vcall-oracle-direct` | triage |
 
 With `summary --effects <difffuzz.py effects output>`, a record still in triage is refined by its first effect:
 `width` -> `field-width` (real-bug S1), an image vftable stored where the native stores its own `_ZTV` address

@@ -77,15 +77,15 @@
    "id": "pass_45",
    "fps": 45,
    "ms": 22.2,
-   "kind": "goal",
-   "note": "45 fps stable: worst frame 22.2 ms (main target, J-0132)"
+   "kind": "info",
+   "note": "45 fps on the worst frame (22.2 ms): informational since J-0150"
   },
   {
-   "id": "stretch_60",
+   "id": "target_60",
    "fps": 60,
    "ms": 16.7,
-   "kind": "stretch",
-   "note": "60 fps, may be unstable (J-0132)"
+   "kind": "goal",
+   "note": "60 fps stable: worst frame 16.7 ms at the 1.02 GHz stock clock (the owner's target, J-0150)"
   }
  ],
  "items": [
@@ -256,7 +256,7 @@
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "off on PC; needs the fs:[0x2c] TLS fix (done, S5 31cdca3) and the stage protocol (mtqemu 'stages' ok); setting 0x011c710c (PERF.md 6.4)"
+   "status": "bMTRendering:Display (0x011c710c) is unsafe on the PC code: accumulators are built with one batch renderer, the worker indexes a NULL second one and shares main's; current-accumulator globals shared (PERF.md 6.8). Needs port code; TLS fix done (S5 31cdca3), stage protocol modelled (mtqemu stages)"
   },
   {
    "id": "havok_workers",
@@ -270,7 +270,7 @@
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "not traced whether bhkWorld uses the MT simulation (PERF.md 6.4)"
+   "status": "MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the pool is made in the unreconstructed EnsureObjectsCreated (PERF.md 6.9)"
   },
   {
    "id": "threaded_anim",
@@ -284,7 +284,7 @@
    "to": "ai-linear",
    "basis": "E",
    "needs_hardware": false,
-   "status": "PC default on (hearsay names); runs on the AI linear threads"
+   "status": "bUseThreaded* named from the exe (defaults 0, PC ini 1; ini.cpp sets 1); readers not reconstructed; queued controller updates return to main after the 0x008c7990 join, plain cross-thread fields in the hand-off (PERF.md 6.9): not counted until an mtqemu case of the protocol passes"
   },
   {
    "id": "instancing",
@@ -343,7 +343,7 @@
    },
    "basis": "E",
    "needs_hardware": true,
-   "status": "needs S12's per-site argument and the B9 measurement"
+   "status": "in the build: S12 52cb478 ORDER_REFCOUNT=weak is compile.sh's default (ORDERING.md Refcounts; sample 110 increments relaxed, 220 decrements release, 201 sites full); race-checked by mtqemu litmus-order ref; B9 on an A57 confirms the stall saving"
   },
   {
    "id": "neon_math",
@@ -366,8 +366,8 @@
  "scenarios": [
   {
    "id": "placed",
-   "name": "placement as implemented, no lever",
-   "levers": []
+   "name": "as built: the placement plus the levers that are in the build (barrier_relax)",
+   "levers": ["barrier_relax"]
   },
   {
    "id": "plan45",
@@ -614,7 +614,8 @@
    "needs_hardware": false
   },
   "interlocked barriers": {
-   "fix": "inlined (done, fnvnx_win32.h); next: a per-site argument to drop the barrier of refcount increments (an increment publishes nothing), about half of the stalls",
+   "fix": "inlined and refcounts relaxed (done: S12 52cb478, ORDER_REFCOUNT=weak, lever barrier_relax in the build); the 201 sites kept full stay x86-ordered",
+   "done": true,
    "gain_main_minsn": [
     0.1,
     1.6
