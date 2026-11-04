@@ -160,7 +160,7 @@ class UnitCache:
         """{native name: original address} of the link's provider rows (addrmap kind F, `provider: ...`): the CRT
         and library functions the port implements natively (free, _invalid_parameter_noinfo, fnvnx_rt_dynamic_cast)."""
         if getattr(self, '_prov', None) is None:
-            self._prov = {}
+            self._prov, self._prov_rows = {}, []
             p = config.LINK / 'out/addrmap.tsv'
             if p.exists():
                 for line in open(p, encoding='utf-8', errors='replace'):
@@ -168,6 +168,7 @@ class UnitCache:
                     if len(f) > 5 and f[1] == 'F' and f[5].startswith('provider:') and f[2]:
                         try:
                             self._prov.setdefault(f[2], int(f[0], 16))
+                            self._prov_rows.append((f[2], int(f[0], 16)))
                         except ValueError:
                             pass
         return self._prov
@@ -463,7 +464,22 @@ class UnitCache:
         xu = self.x86_unit(source, orig_addr)
         return next(self._pin[i] for i, x in self._x86.items() if x is xu)
 
+    def crt_builtins(self):
+        """CRT addresses the link gives a native provider whose name is a harness builtin (memmove at 0x00ec7230,
+        ...): the oracle runs them as that builtin too, untraced, as the native code does. Added to libcalls.X86."""
+        if not getattr(self, '_crt_done', False):
+            self._crt_done = True
+            int_names = {'memcpy', 'memmove', 'memset', 'memcmp', 'strlen', 'wcslen', 'strcmp', 'stricmp', 'strncmp',
+                         'strnicmp', 'strcpy', 'strcat', 'strncpy', 'strchr', 'strrchr', 'strstr', 'tolower',
+                         'toupper', 'bswap'}
+            self.providers()
+            for name, addr in self._prov_rows:       # every address of a name (memmove: 0x00ec44d0, 0x00ec7230)
+                b = libcalls.A64.get(name)
+                if b in int_names and addr not in libcalls.X86:
+                    libcalls.X86[addr] = b
+
     def pair(self, source, orig_addr):
+        self.crt_builtins()
         t = self.target(source, orig_addr)
         pin = dict(self.iat_pins())
         pin.update(getattr(t, 'extra_pinned', {}))

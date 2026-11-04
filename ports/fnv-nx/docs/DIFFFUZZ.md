@@ -149,6 +149,14 @@ definition and the calling unit's declaration of it: a reference result (`T&`) i
 its oracle code (`ret N`) when known, not from its declaration (a declaration with a parameter too many or too few
 left the oracle's esp off by 4: `fault:x:00000000`).
 
+**difffuzz-11.** CRT addresses the link gives a provider whose name is a harness builtin (every address of the
+name: memmove 0x00ec44d0 and 0x00ec7230, ...) run as that builtin on the oracle, untraced like the native call.
+Adaptive follow also answers a call-count divergence: the first oracle callee the native run never calls was inlined
+natively and is loaded. Report causes: `native-undefined` (hard, S1 / S2c: the native code calls a name the link
+binds to nothing, e.g. a declared-only destructor `_ZN15Entry2_00832010D1Ev` or `NiPointer<NiGeometry>::operator
+NiGeometry*`), `vptr-unpaired` (soft, S2c: the oracle stores an image vftable, the native an address point of its
+own vtable that no kind-V row pairs, decomp-local class names such as `Primary_504570`, `FUN_00591200_cls`).
+
 **difffuzz-10.** `_byteswap_ulong` (0x00ec3bad) and `__RTDynamicCast` (0x00ec43fb) run as builtins on the oracle,
 `fnvnx_byteswap_ulong` / `fnvnx_rt_dynamic_cast` / `__dynamic_cast` natively (a cast succeeds: the object
 pointer; GCC folds the casts whose type it knows). Call arguments the caller did not push are not compared: the
