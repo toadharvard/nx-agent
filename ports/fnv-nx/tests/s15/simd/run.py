@@ -31,6 +31,7 @@ KERNELS = {
     'quat_from_matrix': ('quat_from_matrix_00a6df40.c', 'fnvnx_quat_from_matrix_00a6df40'),
     'sphere_plane': ('sphere_plane_004b6100.c', 'fnvnx_sphere_plane_004b6100'),
     'cull_worker': ('cull_worker_00a694e0.c', 'fnvnx_cull_worker_00a694e0'),
+    'xform': ('update_world_loc_00a68bf0.c', 'fnvnx_update_world_loc_00a68bf0'),
 }
 
 
