@@ -966,3 +966,14 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - frontier_keys=138 frontier_hits=3697 frontier_units=41 iat_named=22 pcrel_abs_relocs=200
 * **next** - S1 compiles the frontier units in order; S1 rule dropping unannotated global new/delete; S2 apply turns
   PC-relative refs to absolute symbols into GOT/movz-movk; then the relocatable guest again.
+
+### J-0049 | 2026-11-04 | stream: S1-compile | status: wip | parent: J-0046 | supersedes: J-0046
+
+* **found** - (S1b) FALL1 trapped every XC1-generated `extern "C" void __fnvnx_dyninit_/dynexit_` function (10,957
+  of its 12,003 edits): `FALL_SKIP_RET` consumed a bare `extern ` before trying `extern "C"`, so the return type read
+  `"C" void` and failed the void test - every static initializer would have trapped at boot.
+* **did** - Fixed in `tools/rules/s1_compile.py` (99dc30e): linkage spec stripped first; storage/function
+  specifiers removed before the void test. Full prepare: FALL1 now 363 files / 885 edits, 0 traps in
+  `src/generated/` (XC1 6,265 + XC1x 4,253 unchanged).
+* **metrics** - fall1_files=363 fall1_edits=885 fall1_generated=0
+* **next** - S1 adds a regression test; S1b replaces traps where MSVC's code shows a returned value.
