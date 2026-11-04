@@ -927,3 +927,42 @@ A new stream is opened by an entry with `status: open` in that stream, stating i
 * **metrics** - census_units=2978 census_clean=2749 census_errors=1673
 * **next** - S2: rebind STATIC1's external copies (now one strong definition per including object) to their image
   address; S1b: replace FALL1 traps where the x86 code shows a returned value; full recompile + link; S13 recheck.
+
+### J-0047 | 2026-11-04 | stream: S2b-vslots | status: wip | parent: J-0036,J-0042,J-0045
+
+* **did** - `tools/link/vslots.py`: i386 COFF reader for the pristine MSVC 2008 objects (vftables with COL, adjustor
+  thunks), views joined by image address, GCC vtable groups paired with the MSVC vftable of the same vfptr (D1+D0 vs
+  one deleting dtor, MSVC's reversed overload groups per introducing class); `fnvlink.py resolve --msvc-objs`: slot
+  symbols and implicit D1/D2 bound to the native definition at the slot's address where known, else
+  `__fnvnx_vslot_<vftable>_<k>` stubs that tail-call through the loader-rewritten image vftable word (trap on an
+  unrewritten x86 word); `vslots.py validate`; `test_vslots.py` (MSVC under Wine + GCC, stubs under qemu). Merge
+  conflict with S2c's GAME1/new-delete code in fnvlink.py resolved by the orchestrator (both kept); link tests pass
+  (need `SSE2NEON` set: the layout probe includes sse2neon).
+* **found** - units.json names few virtual bodies: 1,980 of 13,795 image slots get a static target. On J-0042's
+  inputs vslot-unresolved 16,401 -> 7,296 (traps 7,602 -> 4,797), 8,996 refs via 7,260 image-slot stubs, 189 static.
+  Remaining: 6,251 refs of classes no MSVC object emits a vftable for, 1,022 of views without an image address.
+  Validation: 1,587 strict name bindings agree, 75 differ (missed overrides: the slot calls the base function);
+  197/199 static targets pop the declared bytes; 74/74 known call sites agree. fnvlink's loose arity tier binds
+  overloads wrongly (14 cases, now replaced for slot symbols).
+* **metrics** - vslot_unresolved=7296 vslot_traps=4797 vslot_image_refs=8996 vslot_static_refs=189 vslot_check_differs=75
+
+### J-0048 | 2026-11-04 | stream: S5-toolchain | status: wip | parent: J-0044
+
+* **did** - Boot frontier: per-key trap statistics in boot.cpp, printed by the emulator; `tests/s5/frontier.py` maps
+  every hit to its original address, defining units, link compile status and S1's census (S1's priority list). 22 IAT
+  slots the decomp names only via `DAT_` named in `platform/win32/imports.tsv` (SHGetFolderPathA, comctl32, user32,
+  winmm mmio, ...), GetFileSizeEx; CoCreateGuid listed as ole32 although the slot sits in the kernel32 run (verify on
+  the exe). `boot.cpp construct_memory_manager()` stands in for the missing initializer. Guest pinned to its link base
+  when PC-relative relocations to absolute image symbols exist (header bit 1, `elf2nso --pin`).
+* **found** - S14 image: 138 untranslated keys / 3,697 hits in 41 units (34 failed to compile); boot passes
+  GetSaveDirectory now and stops at WinMain+0x1cc on untranslated 0x00af3020 (`blk_00ae0000_od.cpp`, 13 errors). WinMain
+  path units: blk_00c20000_od (WPARAM typedef), blk_004a0000_od (operator new(sizetype, char*)), MSVC
+  StandardLibrarySingletonObject ctor, blk_00ae0000_od. Top hit counts: actormover (1,786), nitarray_h_unit (1,000),
+  nicontrollermanager (329). Memory manager: only InitHolder 0x00aa2020 writes the heap pointer 0x011f6080, called from
+  the MemoryManager ctor 0x00aa3880 which **no decompiled code calls** -> an initializer missing from the decomp; its
+  unit blk_00aa0000_od_ob1_variant fails (9 errors), FormHeap_Allocate's middlehighprocess.cpp fails (7). 200
+  PC-relative relocations to absolute `__fnv_` symbols in 87 objects are right only at the link address (S2 apply).
+  None of the 4 global new/delete definitions in game objects carries `// @fnv` (not original code).
+* **metrics** - frontier_keys=138 frontier_hits=3697 frontier_units=41 iat_named=22 pcrel_abs_relocs=200
+* **next** - S1 compiles the frontier units in order; S1 rule dropping unannotated global new/delete; S2 apply turns
+  PC-relative refs to absolute symbols into GOT/movz-movk; then the relocatable guest again.
