@@ -274,7 +274,7 @@ bool Renderer::Render(const Draw& d) {
     // compile-time epilogue permutation for this draw's alpha test / fog
     uint16_t ps = d.ps;
     bool needEpi = true;
-    if (d.ps && !EpiKnown(d.ps)) LearnEpilogueVariants(d.ps);
+    if (d.ps) EpiIndex(d.ps);   // learns litBase_ on a shader's first use
     // lit family: static light permutation (directional first, points padded to 1/2/4/8 with zero-colour lights)
     int litDir = -1, litPoints = 0, litPad = 0;
     if (permutations_ && d.ps && d.ubo && d.uboSize >= sizeof(NxLitDraw) && (d.ps == litBase_[0] || d.ps == litBase_[1])) {
@@ -292,14 +292,13 @@ bool Renderer::Render(const Draw& d) {
         }
     }
     const uint16_t epiBase = ps;
-    if (ps != d.ps && !EpiKnown(ps)) LearnEpilogueVariants(ps);
-    for (uint32_t i = 0; i < nEpi_; i++)
-        if (epi_[i].base == epiBase) {
-            const bool at = (r.shaderBits >> NXSB_ALPHATEST) & 1, fog = ((r.shaderBits >> NXSB_FOG) & 7) != 0;
-            const uint16_t v = !at && !fog ? epi_[i].e0 : at && !fog ? epi_[i].ea : !at && fog ? epi_[i].ef : 0;
-            if (v) { ps = v; needEpi = at || fog; }
-            break;
-        }
+    const int ei = epiBase ? EpiIndex(epiBase) : -1;
+    if (ei >= 0) {
+        const EpiSet& es = epi_[ei];
+        const bool at = (r.shaderBits >> NXSB_ALPHATEST) & 1, fog = ((r.shaderBits >> NXSB_FOG) & 7) != 0;
+        const uint16_t v = !at && !fog ? es.e0 : at && !fog ? es.ea : !at && fog ? es.ef : 0;
+        if (v) { ps = v; needEpi = at || fog; }
+    }
     lastPs_ = ps;
     uint16_t st = sc_.State(d.vs, ps, d.layout, r.rs);
     Packet* p = frame_.Emit();
@@ -313,8 +312,9 @@ bool Renderer::Render(const Draw& d) {
     p->first = d.first; p->count = d.count; p->baseVertex = d.baseVertex; p->prim = d.prim; p->instances = 1;
     void* u = frame_.Constants(&p->uboOffset);
     if (!u) return false;
-    memset(u, 0, 512);
-    if (d.ubo) memcpy(u, d.ubo, d.uboSize > 512 ? 512 : d.uboSize);
+    const uint32_t used = d.ubo ? (d.uboSize > 512 ? 512 : d.uboSize) : 0;
+    if (used) memcpy(u, d.ubo, used);
+    memset((uint8_t*)u + used, 0, 512 - used);   // the rest of the slice reads as zero
     if (litDir >= 0) {   // the permutation's light order: [directional], points..., zero-colour padding
         NxLitDraw* lu = (NxLitDraw*)u;
         const NxLitDraw* L = (const NxLitDraw*)d.ubo;
@@ -350,6 +350,20 @@ static uint16_t BlobShader(Backend* be, const char* name, uint32_t stage) {
     return (uint16_t)be->ShaderCreate(d);
 }
 
+int Renderer::EpiIndex(uint16_t ps) {
+    if (ps < kEpiIds) {   // one table read per draw (P6n: the list scans below cost ~200 instructions per draw)
+        if (!epiOf_[ps]) { LearnEpilogueVariants(ps); if (!epiOf_[ps]) epiOf_[ps] = 1; }
+        return (int)epiOf_[ps] - 2;
+    }
+    if (!EpiKnown(ps)) LearnEpilogueVariants(ps);
+    for (uint32_t i = 0; i < nEpi_; i++) if (epi_[i].base == ps) return (int)i;
+    return -1;
+}
+
+void Renderer::NoteEpi(uint16_t ps, int index) {
+    if (ps < kEpiIds) epiOf_[ps] = (uint8_t)(index < 0 ? 1 : index + 2);
+}
+
 bool Renderer::EpiKnown(uint16_t ps) const {
     for (uint32_t i = 0; i < nEpi_; i++) if (epi_[i].base == ps) return true;
     for (uint32_t i = 0; i < nNoEpi_; i++) if (noEpi_[i] == ps) return true;
@@ -369,8 +383,8 @@ void Renderer::LearnEpilogueVariants(uint16_t ps) {
         snprintf(n, sizeof n, "%s__ea", nx_shader_blobs[blob].name); e.ea = BlobShader(be_, n, NxStage_Fragment);
         snprintf(n, sizeof n, "%s__ef", nx_shader_blobs[blob].name); e.ef = BlobShader(be_, n, NxStage_Fragment);
     }
-    if (e.e0 || e.ea || e.ef) epi_[nEpi_++] = e;
-    else if (nNoEpi_ < sizeof noEpi_ / sizeof noEpi_[0]) noEpi_[nNoEpi_++] = ps;
+    if (e.e0 || e.ea || e.ef) { NoteEpi(ps, (int)nEpi_); epi_[nEpi_++] = e; }
+    else { NoteEpi(ps, -1); if (ps >= kEpiIds && nNoEpi_ < sizeof noEpi_ / sizeof noEpi_[0]) noEpi_[nNoEpi_++] = ps; }
     if (blob >= 0 && !strcmp(nx_shader_blobs[blob].name, "lit")) litBase_[0] = ps;
     if (blob >= 0 && !strcmp(nx_shader_blobs[blob].name, "lit_spec")) litBase_[1] = ps;
 }
@@ -397,7 +411,7 @@ uint16_t Renderer::FragmentShader(const char* name) {
     snprintf(n, sizeof n, "%s__e0", name); e.e0 = BlobShader(be_, n, NxStage_Fragment);
     snprintf(n, sizeof n, "%s__ea", name); e.ea = BlobShader(be_, n, NxStage_Fragment);
     snprintf(n, sizeof n, "%s__ef", name); e.ef = BlobShader(be_, n, NxStage_Fragment);
-    if (e.e0 || e.ea || e.ef) epi_[nEpi_++] = e;
+    if (e.e0 || e.ea || e.ef) { NoteEpi(base, (int)nEpi_); epi_[nEpi_++] = e; }
     return base;
 }
 

@@ -196,6 +196,11 @@ private:
     uint16_t LitPermutation(int spec, int dir, int pointsIdx);
     bool EpiKnown(uint16_t ps) const;
     void LearnEpilogueVariants(uint16_t ps);
+    int EpiIndex(uint16_t ps);                       // epi_ index of a fragment shader's permutations, -1: none
+    void NoteEpi(uint16_t ps, int index);
+    // fragment shader id -> 0 not looked up yet, 1 no permutations, 2 + epi_ index (ids >= kEpiIds: the lists above)
+    enum { kEpiIds = 4096 };
+    uint8_t epiOf_[kEpiIds] = {};
     Ring geomRing_;
     uint32_t white_ = 0, geomDraws_ = 0;
     uint16_t geomVsScroll_ = 0, geomVsPlain_ = 0, geomVsPlainScroll_ = 0, geomPsPlain_ = 0, geomPsAlphaMap_ = 0;
