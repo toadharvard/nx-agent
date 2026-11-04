@@ -1266,7 +1266,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         # the exe's RTTI decides the class of each image vftable: its own class's native vtable at the COL offset
         # replaces a pairing by decomp names or hand-stored vptrs with another class (shells with fewer slots,
         # another real class), and maps vftables no unit names (exe_vftables.tsv)
-        exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out)
+        exe_alt = collections.defaultdict(list)   # exe vftable -> the native vtables the pairing displaced
+        exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, exe_alt)
         for a in rebind:
             rebind[a] = vmap[a][:2]
         # the slots of virtual functions defined nowhere: the native definition at the exe slot's address
@@ -1285,7 +1286,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         byclass['vslot-exe'] += fill.get('bound_refs', 0)
         # primary vtables shorter than the exe's: an extended strong copy (the exe's remaining slots)
         ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
-                                exe_path, providers)
+                                exe_path, providers, exe_alt)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
@@ -1632,7 +1633,7 @@ def exe_requests(exe_cls, have_cls, units, msvc, canon_msvc, compiled):
     return out
 
 
-def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out):
+def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, alt=None):
     """Pair each image vftable of the exe with its own class's native vtable (the address point whose
     offset-to-top is minus the COL offset). It replaces the pairing by decomp names or hand-stored vptrs when that
     names another class, unless the own vtable is shorter than both the current one and the exe's slot count (a
@@ -1657,8 +1658,12 @@ def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out):
             how = 'same'
         elif cur and own[2] < curn and own[2] < ne:
             how = 'kept: the class\'s own vtable is shorter'
+            if alt is not None:
+                alt[v].append((own[0], own[1], rtti.where[own[0]][0].path, kind))
         else:
             how = 'added' if cur is None else 'replaced'
+            if alt is not None and cur is not None:   # the shell the units construct keeps being used natively
+                alt[v].append((cur[0], cur[1], cur[2], 'primary' if cur[3].startswith('primary') else kind))
             vmap[v] = (own[0], own[1], rtti.where[own[0]][0].path, '%s, the exe\'s RTTI class %s%s%s' % (
                 kind, text, ' at +%d' % off if off else '', ', synthesized' if rtti.where[own[0]][1] else ''))
         vstats['exe-%s-%s' % (kind, how.split(':')[0].replace(' ', '-').replace('\'', ''))] += 1
@@ -1823,14 +1828,42 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
         if z not in ott_cache:
             ott_cache[z] = dict(vtables.address_points(rtti.ents(z) or []))
         return ott_cache[z].get(p, 0)
+    prim_by_td = {}
+    for v_, e_ in exev.items():
+        if e_.td and e_.off == 0 and v_ in exe_cls:
+            prim_by_td.setdefault(e_.td, exe_cls[v_][0])
+
+    def base_dtor_pos(vs, n):
+        """Position of GCC's D1/D0 pair in the native vtable of the RTTI primary base of the exe vftables vs, when
+        the native vtable at hand has exactly one slot more than each of them; else None."""
+        got = set()
+        for v_ in vs:
+            e_ = exev[v_]
+            if not e_.td or len(e_.bases) < 2 or n != len(e_.slots) + 1:
+                return None
+            bcls = prim_by_td.get(e_.bases[1][0]) if e_.bases[1][1] == 0 else None
+            zb = sorted(by_cls.get(bcls, [])) if bcls else []
+            if not zb:
+                return None
+            ents_ = rtti.ents(zb[0]) or []
+            pts_ = vtables.address_points(ents_)
+            if not pts_:
+                return None
+            nb = vtables.slots_at(ents_, pts_[0][0])
+            sb = ents_[pts_[0][0] // 4:pts_[0][0] // 4 + nb]
+            got.add(exevft.dtor_pos([x.sym for x in sb], [x.word for x in sb]))
+        return got.pop() if len(got) == 1 else None
     rows, gaps, changed = [], [], {}
     addr_of = {}   # (source, symbol) -> the exe address it was bound to (refs.tsv)
     stubs = {} if stubs is None else stubs   # flag / deleting-destructor stubs -> their asm (bridges.S)
     itanium = slotfill2.enum_params(itanium, slotfill2.msvc_enums(out), st)   # S2c-vt2
 
-    def target_for(un, a, otts=None, depth=0):
+    def target_for(un, a, otts=None, depth=0, var=None):
         nd = native.get(a)
         isig = itanium(un)
+        if var:   # a placeholder slot at the base's destructor pair: bound as that variant (base_dtor_pos)
+            isig = copy.copy(isig)
+            isig.variant = var
         th = exevft.thunk(exe_path, a) if nd is None and exe_path and depth < 2 and a not in (providers or {}) else None
         if th is not None:
             # an MSVC thunk no unit compiles: its target's binding, with `this -= n` when the native vtable's
@@ -1838,7 +1871,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             n, t = th
             if n and (not otts or any(-o != n for o in otts)):
                 return None, 'thunk: adjustment %d, the native vtable\'s offsets %s' % (n, sorted(set(otts or [])))
-            inner, why_ = target_for(un, t, None, depth + 1)
+            inner, why_ = target_for(un, t, None, depth + 1, var)
             if inner is None or not n:
                 return inner, 'thunk -> ' + why_
             name = ADJ_SYM % a
@@ -1928,11 +1961,19 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 names = [e.sym for e in se]
                 d = exevft.dtor_pos(names, [e.word for e in se])
                 vs = zmap.get((z, p), set())
+                pd = None
+                if d is None and vs:
+                    # a shell declaring placeholders where its RTTI base has a virtual destructor (FUN_00aa8410 v0-v2
+                    # for OEI::IO::IO_Thread : BSThread): one slot more than the exe, so callers reach it through
+                    # the base's layout, GCC's D1/D0 pair at the base's position
+                    pd = base_dtor_pos(vs, len(se))
+                    d = pd
                 for k, e in enumerate(se):
                     if e.sym in tr:
                         j = exevft.exe_slot_index(k, d)
+                        pv = ('D1' if k == pd else 'D0' if k == pd + 1 else None) if pd is not None else None
                         uses[e.sym].append((z, p, k, j, {exev[v].slots[j] for v in vs if j < len(exev[v].slots)},
-                                            bool(vs)))
+                                            bool(vs), pv))
         for un in sorted(tr):
             us = uses.get(un, [])
             st['symbols'] += 1
@@ -1952,9 +1993,11 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     addrs, how = mine, 'declaring class'
                 else:
                     why = 'vtables disagree (%s)' % ' '.join('%08x' % a for a in sorted(addrs))
+            pvs = {x[6] for x in us}
+            uvar = pvs.pop() if len(pvs) == 1 else None
             if how:
                 a = next(iter(addrs))
-                tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]])
+                tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]], 0, uvar)
                 if tgt:
                     changed.setdefault(u, {})[un] = tgt
                     addr_of[(u.source, un)] = a
@@ -1966,7 +2009,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                         # another vtable of the object holds another address there (a derived class's override
                         # the decomp does not declare): that slot gets its own word in the copy
                         b_ = next(iter(x[4])) if len(x[4]) == 1 else None
-                        t2 = target_for(un, b_, [ott_of(x[0], x[1])])[0] if b_ is not None and b_ != a else None
+                        t2 = target_for(un, b_, [ott_of(x[0], x[1])], 0, x[6])[0] if b_ is not None and b_ != a else None
                         if t2:
                             overrides[(u.obj, x[0], x[1] // 4 + x[2])] = t2
                             st['per_slot_uses'] += 1
@@ -1980,7 +2023,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 # one target per slot: exe_vtable_copies writes a strong copy of the kept vtable with these words
                 left = []
                 for x in us:
-                    tgt_ = target_for(un, next(iter(x[4])), [ott_of(x[0], x[1])])[0] if len(x[4]) == 1 else None
+                    tgt_ = target_for(un, next(iter(x[4])), [ott_of(x[0], x[1])], 0, x[6])[0] if len(x[4]) == 1 else None
                     if tgt_:
                         overrides[(u.obj, x[0], x[1] // 4 + x[2])] = tgt_
                         st['per_slot_uses'] += 1
@@ -1992,7 +2035,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 if not us:
                     continue
             st['left_' + why.split(' (')[0].replace(' ', '_').replace(':', '').replace('\'', '')] += 1
-            for x in us or [(None, 0, -1, -1, set(), False)]:
+            for x in us or [(None, 0, -1, -1, set(), False, None)]:
                 gaps.append((os.path.basename(u.obj), u.source, un, x[0] or '', str(x[2]), str(x[3]),
                              ' '.join('%08x' % b for b in sorted(x[4])), why))
     # apply the renames: the .redefine files and refs.tsv rows of the objects that changed
@@ -2042,7 +2085,7 @@ XTRAP = 'exe 0x%08x'
 
 
 def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
-                      providers=None):
+                      providers=None, alt=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
     kept object has them (its slot symbols renamed as resolve renames them in that object), then exe slot j for every
     j past the native slots (the minus-one rule): `__fnv_<a>` where the address map has a plain native definition,
@@ -2062,6 +2105,13 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         # into an unnamed neighbour, so it only fills slots the native vtable has (exe_slot_fill)
         if v in exev and exev[v].td and note.startswith('primary') and ap == 8:
             want[(z, path)].append(v)
+    # the native vtables exe_pair displaced from a V row (the shell a unit's constructor stores: FUN_004de530 for
+    # INIPrefSettingCollection, 0x01022744): objects built natively still carry them, so they get the exe's slots too
+    for v, zs in (alt or {}).items():
+        for z, ap, path, kind in zs:
+            if v in exev and exev[v].td and kind == 'primary' and ap == 8 and v not in want.get((z, path), []):
+                want[(z, path)].append(v)
+                st['displaced-vtables'] += 1
     over = collections.defaultdict(dict)    # (z, kept path) -> {word index: target}
     for (path, z, i), t in (slot_over or {}).items():
         if rtti.where.get(z) and rtti.where[z][0].path == path:
