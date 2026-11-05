@@ -16,7 +16,8 @@
 #       $FARM_HOME/sweep/<head12>/<k>of<N> survives the runner's 2 h passes; the next pass goes on where this one
 #       stopped (FARM_DEADLINE).
 #   (d) results: programs.tsv, scenes/<scene>.json, shard.json and summary.md, pushed by this job to the artifacts
-#       repository's branch reports/sweep/<head12>/<k>of<N>. Raw .nxd9 (xz) only for one representative cell per
+#       repository's branch reports/sweep/<head12>/<k>of<N>. Raw .nxd9 (xz; over 99 MB split into 95 MB .partNN) only
+#       for one representative cell per
 #       unique program set (sorted VS+PS hashes). Everything is game-derived: private repository only.
 # <report.md> (published by runner.sh to reports/<farm>) is this shard's summary.md. Aggregate across shards with
 # tools/compare/sweep_report.py.
@@ -170,7 +171,11 @@ EOF
 	# one raw capture per unique program set (sorted VS+PS hashes)
 	local set; set=$(python3 -I -c 'import json,sys,hashlib; j=json.load(open(sys.argv[1])); p=j["stats"]["capture"]["programs"]; print(hashlib.sha256((",".join(p["vs"])+";"+",".join(p["ps"])).encode()).hexdigest()[:16])' "$S/scenes/$id.json" 2>/dev/null)
 	if [ -n "$set" ] && ! grep -q "	$set$" "$S/rawsets.tsv" 2>/dev/null; then
-		xz -T2 -6 -c "$c/$id.nxd9" >"$S/raw/$id.nxd9.xz" && echo -e "$id\t$set" >>"$S/rawsets.tsv"
+		# GitHub refuses files over 100 MB: a bigger .xz goes as 95 MB parts (cat <id>.nxd9.xz.part* > <id>.nxd9.xz)
+		xz -T2 -6 -c "$c/$id.nxd9" >"$S/raw/$id.nxd9.xz" && echo -e "$id\t$set" >>"$S/rawsets.tsv" &&
+		if [ "$(stat -c %s "$S/raw/$id.nxd9.xz")" -gt 99000000 ]; then
+			split -b 95m -d -a 2 "$S/raw/$id.nxd9.xz" "$S/raw/$id.nxd9.xz.part" && rm -f "$S/raw/$id.nxd9.xz"
+		fi
 	fi
 	echo -e "$id\t$([ $st = 0 ] && echo ok || echo stats-failed)\t$(( $(date +%s) - t0 ))" >>"$S/done.tsv"
 	rm -rf "$c"
@@ -187,7 +192,7 @@ publish() {   # results to reports/sweep/<head12>/<k>of<N> of the artifacts repo
 	local b=reports/sweep/$H12/${K}of$N pub=$FARM_HOME/sweep/pub
 	rm -rf "$pub"; mkdir -p "$pub/scenes" "$pub/raw" "$pub/perm"
 	cp -f "$S"/summary.md "$S"/shard.json "$S"/programs.tsv "$S"/done.tsv "$S"/cells.tsv "$pub/" 2>/dev/null
-	cp -f "$S"/rawsets.tsv "$pub/" 2>/dev/null; cp -f "$S"/scenes/*.json "$pub/scenes/" 2>/dev/null; cp -f "$S"/raw/*.xz "$pub/raw/" 2>/dev/null
+	cp -f "$S"/rawsets.tsv "$pub/" 2>/dev/null; cp -f "$S"/scenes/*.json "$pub/scenes/" 2>/dev/null; cp -f "$S"/raw/*.xz* "$pub/raw/" 2>/dev/null
 	local v; for v in "$S"/perm/*/; do v=$(basename "$v"); mkdir -p "$pub/perm/$v"
 		cp -f "$S/perm/$v/rep/permreport.json" "$pub/perm/$v/permreport.json" 2>/dev/null
 		cp -f "$S/perm/$v/rep_fam/permreport.json" "$pub/perm/$v/permreport_families.json" 2>/dev/null; done
