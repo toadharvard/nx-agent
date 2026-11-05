@@ -174,6 +174,57 @@ class DrawGate(unittest.TestCase):
             self.assertEqual(g['first_divergence_by_class'], {'skipped': 1})
 
 
+class SweepPieces(unittest.TestCase):
+    """nxd9trim (last K complete frames, state carried), sweep_report (programs/shard summaries)"""
+    def test_trim(self):
+        with tempfile.TemporaryDirectory() as t:
+            w = nxd9io.Writer(f'{t}/j.nxd9')
+            w.u32('DEV ', 64, 48, 21, 0)
+            for fr in range(5):
+                w.u32('RS  ', 22, fr)                                   # state of every frame is kept
+                w.rec('CLR ', struct.pack('<IIfII', 1, fr, 1.0, 0, 0))   # pixel records only for the kept frames
+                w.rec('DRWI', struct.pack('<IiIIII', 4, 0, 0, 3, 0, 1))
+                w.rec('PRES')
+            w.u32('RS  ', 7, 1); w.rec('DRWI', struct.pack('<IiIIII', 4, 0, 0, 3, 0, 1))   # incomplete frame: dropped
+            w.close()
+            r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'nxd9trim.py'), f'{t}/j.nxd9', f'{t}/o.nxd9',
+                                '--frames', '3'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            recs = [(tg, bytes(p)) for tg, p in nxd9io.records(f'{t}/o.nxd9')]
+            self.assertEqual(sum(1 for tg, _ in recs if tg == 'PRES'), 3)
+            self.assertEqual(sum(1 for tg, _ in recs if tg == 'DRWI'), 3)
+            self.assertEqual([struct.unpack('<2I', p)[1] for tg, p in recs if tg == 'RS  '], [0, 1, 2, 3, 4])
+            self.assertEqual([struct.unpack_from('<2I', p)[1] for tg, p in recs if tg == 'CLR '], [2, 3, 4])
+            r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'nxd9trim.py'), f'{t}/j.nxd9', f'{t}/o2.nxd9',
+                                '--frames', '6'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1)
+
+    def test_shard_summary(self):
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(f'{t}/s/scenes')
+            open(f'{t}/s/programs.tsv', 'w').write('name\thash\tstage\tmodel\tworst_translated\tworst_families\tmaxwell\tgprs\ttex\tns_per_pixel\n'
+                                                  'A.pso\taaaa\tpixel\tps_3_0\tpass\tpass\t40\t8\t2\t0.4\n'
+                                                  'B.pso\tbbbb\tpixel\tps_3_0\tover\tpass\t90\t20\t4\t0.9\n')
+            json.dump({'capture': 'c1', 'stats': {'frame': {'draws': 10, 'passes': 2}, 'capture': {'programs': {'vs': [], 'ps': ['aaaa']}}},
+                       'paths': {'translated': {'frames_over': 1, 'draws_pass_frame': 4,
+                                                'first_divergence': {'class': 'state', 'draw': 4, 'ps_names': ['A.pso']}}},
+                       'gpu': {'frame_ms': 2.5, 'by_family_ms': {'A': 2.5}}, 'ref': {'frame_ms': [30.0]}},
+                      open(f'{t}/s/scenes/c1.json', 'w'))
+            open(f'{t}/s/done.tsv', 'w').write('c1\tok\t100\nc2\ttimeout\t1200\n')
+            r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'sweep_report.py'), 'shard', '--shard-dir', f'{t}/s',
+                                '--head', 'f' * 40, '--k', '1', '--n', '2', '--out', f'{t}/o.json', '--md', f'{t}/o.md'],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.load(open(f'{t}/o.json'))
+            self.assertEqual((o['programs_checked'], o['draws'], o['draws_pass']), (2, 10, 4))
+            self.assertEqual(o['program_classes_translated'], {'pass': 1, 'over': 1})
+            self.assertEqual(o['first_divergence_by_scenes'], {'state': 1})
+            self.assertEqual(o['first_divergence_by_draws'], {'state': 6})
+            self.assertEqual(o['scene_status'], {'ok': 1, 'timeout': 1})
+            self.assertEqual([p['name'] for p in o['failing_programs']], ['B.pso'])
+            self.assertEqual(o['top_programs_ns_per_pixel'][0]['name'], 'B.pso')
+
+
 class WineRefMirror(unittest.TestCase):
     def test_base_load_order_only(self):
         """the Data mirror leaves out .nam files, masters outside scenes.json's plugins and their BSAs (a .nam loads
@@ -230,6 +281,20 @@ class Perm(unittest.TestCase):
                 s = nxd9io.stat(f'{t}/a/{c}.nxd9')
                 self.assertEqual(s['frames'], len(m['captures'][c]))
                 self.assertNotEqual(open(f'{t}/a/{c}.nxd9', 'rb').read(), open(f'{t}/p/{c}.nxd9', 'rb').read())
+            # parameter sets change the capture; shards partition the programs
+            run = lambda out, *x: subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'perm.py'), 'build', '--sdp',
+                                                  f'{t}/own.sdp', '--asm', f'{b}/s6b_asm', '--sdp2dksh', f'{b}/sdp2dksh',
+                                                  '--out', f'{t}/{out}', *x], capture_output=True, text=True)
+            for v in ('zero', 'large', 'dxt', 'atest', 'fog'):
+                r = run('v_' + v, '--variant', v)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertNotEqual(open(f'{t}/v_{v}/perm_000.nxd9', 'rb').read(), open(f'{t}/a/perm_000.nxd9', 'rb').read(), v)
+            got = []
+            for k in (1, 2, 3):
+                self.assertEqual(run(f's{k}', '--shard', f'{k}/3').returncode, 0)
+                got += [e['hash'] for v in json.load(open(f'{t}/s{k}/manifest.json'))['captures'].values() for e in v]
+            allh = [e['hash'] for v in m['captures'].values() for e in v]
+            self.assertEqual(sorted(got), sorted(allh))
 
 
 @unittest.skipUnless(os.environ.get('S16_E2E'), 'S16_E2E=<bin dir> runs the Wine loop')
