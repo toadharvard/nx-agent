@@ -35,7 +35,7 @@ CMP=$P/tools/compare
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
 W=$FARM_HOME/compare                 # shared tool caches with compare_job.sh (shader tools, nxd9play, nx_render, prefix)
 H12=${COMMIT:0:12}
-S=$FARM_HOME/sweep/$H12/${K}of$N; mkdir -p "$S/scenes" "$S/raw" "$S/perm" "$(dirname "$REPORT")"
+S=$FARM_HOME/sweep/$H12/${K}of$N; mkdir -p "$W" "$S/scenes" "$S/raw" "$S/perm" "$(dirname "$REPORT")"
 T0=$(date +%s)
 log() { echo "$(date -u +%FT%TZ) sweep_job[$K/$N]: $*"; }
 NOTES=()
