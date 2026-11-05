@@ -109,8 +109,7 @@ shot() {  # shot <png>: the X root window (the game runs windowed at exactly the
 
 gfocus() {  # the game's window gets the keyboard focus again (a cell load can leave it elsewhere; no window manager)
 	local w; w=$(xdotool search --onlyvisible --name 'Fallout' 2>/dev/null | tail -1)
-	[ -n "$w" ] && { xdotool windowactivate "$w" 2>/dev/null; xdotool windowfocus --sync "$w" 2>/dev/null
-		xdotool mousemove --window "$w" 4 4 click 1 2>/dev/null; sleep 0.3; }   # DirectInput re-acquires on a click
+	[ -n "$w" ] && xdotool windowfocus --sync "$w" 2>/dev/null   # (no click: a mouse move turns the camera)
 	return 0
 }
 
@@ -141,19 +140,20 @@ cmd_run() {
 	sleep "$boot"
 	shot "$out/boot.png"
 	if [ "$menu" != 1 ]; then
-		# the console is opened once and closed once: a coc's cell load swallows a closing keypress, after which
-		# every later toggle would be inverted (seen: the console left open over the frames, the later chunks not run).
-		# It stays open through a load, so each chunk is typed into the open console.
+		# one open / type / close per chunk, except that a chunk which loads a cell (coc, cow) is not closed: the load
+		# closes the console itself, and a closing keypress after it would reopen it over the frames (S16_DEBUG=1 shots).
+		local k w dbg=0 c
 		gfocus; xdotool key --delay 200 grave; sleep 1
-		local k w
-		for k in "scof s16_console_$scene.txt"; do xdotool type --delay 60 "$k"; sleep 0.5; xdotool key Return; sleep 1; done
-		local dbg=0
+		xdotool type --delay 60 "scof s16_console_$scene.txt"; sleep 0.5; xdotool key Return; sleep 1
+		xdotool key --delay 200 grave; sleep 1
 		while read -r k w; do
-			gfocus; xdotool type --delay 60 "bat s16_${scene}_$k"; sleep 0.5; xdotool key Return; sleep "$w"
-			[ "${S16_DEBUG:-0}" = 1 ] && { shot "$out/dbg_$((dbg++))_after_chunk_$k.png"; }
+			gfocus; xdotool key --delay 200 grave; sleep 1
+			xdotool type --delay 60 "bat s16_${scene}_$k"; sleep 0.5; xdotool key Return; sleep 1
+			c=0; grep -qiE '^\s*(coc|cow|centeroncell|centeronworld)\b' "$g/s16_${scene}_$k.txt" 2>/dev/null && c=1
+			[ "$c" = 0 ] && { xdotool key --delay 200 grave; sleep 1; }
+			sleep "$w"
+			[ "${S16_DEBUG:-0}" = 1 ] && shot "$out/dbg_$((dbg++))_after_chunk_$k.png"
 		done <<<"$plan"
-		gfocus; xdotool key --delay 200 grave; sleep 1
-		[ "${S16_DEBUG:-0}" = 1 ] && { shot "$out/dbg_$((dbg++))_closed.png"; gfocus; xdotool key --delay 200 grave; sleep 2; shot "$out/dbg_$((dbg++))_toggled_again.png"; gfocus; xdotool key --delay 200 grave; sleep 2; }
 		sleep "$settle"
 	fi
 	local i
