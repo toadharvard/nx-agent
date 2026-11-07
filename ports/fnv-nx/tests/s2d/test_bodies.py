@@ -802,5 +802,56 @@ class Sigs(unittest.TestCase):
             self.assertTrue({k for t, k in a.keys() if t == 'exact'} & {k for t, k in b.keys() if t == 'exact'}, m)
 
 
+class LinkShape(unittest.TestCase):
+    """R2 recon2-005: a name units.json maps to an address defined under another MSVC shape (synthetic names)."""
+
+    def setUp(self):
+        self.ms_names = ['??BHandle@@QBEPAUObj@@XZ',      # Obj* Handle::operator Obj*() const (thiscall)
+                         '?FUN_00501000@@YIHPAH@Z',       # int __fastcall FUN_00501000(int*)
+                         '?Get@Handle@@QAEPAUObj@@H@Z',   # Obj* Handle::Get(int) (thiscall, one stack word)
+                         '??RFunctor@@QAEXPAX@Z',         # void Functor::operator()(void*)
+                         '??_EBox@@QAEPAXI@Z',            # Box::`vector deleting dtor'(unsigned)
+                         '?f@@YAP6AXXZH@Z']               # void (*f(int))(void)
+        self.dm = fnvlink.batch_demangle(fnvlink.UNDNAME, self.ms_names)
+        self.di = fnvlink.batch_demangle(fnvlink.CXXFILT, ['_ZN7FunctorclEPv', '_ZN3Box12__vecDelDtorEj',
+                                                           '_ZN3Box7__otherEj'])
+
+    def ms(self, n):
+        return sigs.parse_msvc(n, self.dm[n])
+
+    def it(self, n):
+        return sigs.parse_itanium(n, self.di[n])
+
+    def test_register_compatible_shapes_are_same(self):
+        """thiscall `this` in ecx against a fastcall first argument in ecx: x0 on AArch64 on both sides, an integer
+        or pointer result in eax / x0 -> no bridge; a reference that also pushes a stack word stays x86-inconsistent."""
+        import abi
+        d = self.ms('?FUN_00501000@@YIHPAH@Z')
+        self.assertEqual(abi.compare(self.ms('??BHandle@@QBEPAUObj@@XZ'), d).kind, 'same')
+        v = abi.compare(self.ms('?Get@Handle@@QAEPAUObj@@H@Z'), d)
+        self.assertEqual(v.kind, 'x86-inconsistent')
+        self.assertIn('pop-mismatch', v.classes)
+
+    def test_call_operator_parses(self):
+        """`X::operator()` ends in ')' and is not a function returning a function pointer: it parses and pairs."""
+        m, i = self.ms('??RFunctor@@QAEXPAX@Z'), self.it('_ZN7FunctorclEPv')
+        self.assertEqual((m.kind, m.qual, m.params, m.cc), ('func', ['Functor', 'operator()'], ['void *'], 'thiscall'))
+        self.assertTrue({k for t, k in m.keys() if t == 'exact'} & {k for t, k in i.keys() if t == 'exact'})
+        self.assertNotEqual(self.ms('?f@@YAP6AXXZH@Z').kind, 'func')
+
+    def test_vec_del_dtor_member_binds_to_vdd(self):
+        """A decomp member named `__vecDelDtor` is MSVC's `??_E`: classify_ref finds its address in the unit; another
+        member name of the class does not."""
+        idx = fnvlink.KeyIndex()
+        idx.add(self.ms('??_EBox@@QAEPAXI@Z'), 0x00502000)
+        r = fnvlink.classify_ref('_ZN3Box12__vecDelDtorEj', self.it('_ZN3Box12__vecDelDtorEj'), idx,
+                                 fnvlink.KeyIndex(), fnvlink.KeyIndex(), set(), self.ms)
+        self.assertEqual(r[:3], ('addr', 'unit/exact', 0x00502000))
+        self.assertEqual(r[4], '??_EBox@@QAEPAXI@Z')
+        r = fnvlink.classify_ref('_ZN3Box7__otherEj', self.it('_ZN3Box7__otherEj'), idx,
+                                 fnvlink.KeyIndex(), fnvlink.KeyIndex(), set(), self.ms)
+        self.assertEqual(r[0], 'unresolved')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -2803,6 +2803,15 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
         return ('native' if un in anydef else 'special-unresolved'), None, None, None, isig.special
     tier, hit = idx.lookup(isig)
     scope = 'unit'
+    if not hit and isig.kind == 'func' and isig.qual and isig.qual[-1] == '__vecDelDtor' and len(isig.qual) > 1:
+        # MSVC compiles a decomp member named `__vecDelDtor` as the class's vector deleting destructor (`??_E`,
+        # thiscall (this, flags) -> void*): GCC's member of that name takes (this in x0, flags in w1) the same way
+        # (R2 recon2-005: Date::__vecDelDtor and 9 more stayed trap stubs). The pair is then compared as usual.
+        vd = copy.copy(isig)
+        vd.qual = isig.qual[:-1] + ['{vdd}']
+        tier, hit = idx.lookup(vd)
+        if hit and tier not in ('exact', 'l1', 'l2'):
+            tier, hit = None, {}
     if not hit:
         for g, name in ((gdef, 'gdef'), (gref, 'gref')):
             t, h = g.lookup(isig)
