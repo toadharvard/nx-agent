@@ -100,6 +100,24 @@ setup() {
 }
 
 # ---- (b) programs ---------------------------------------------------------------------------------------------------
+# cond <variant> <dir> <rep> <cand> <gate>: the conditioning check of the programs that are over (S16 decision, EPS
+# 1e-5): their captures again with every float input perturbed, rendered by the reference only; permreport.py then
+# calls a program ill when the candidate's differing pixels lie where the perturbed reference moved
+cond() {
+	local v=$1 o=$2 rep=$3 cand=$4 gate=$5
+	python3 -I -c "import json,sys;r=json.load(open(sys.argv[1]));print(''.join(x['hash']+'\n' for x in r['rows'] if x['class']=='over'),end='')" \
+		"$o/$rep/permreport.json" >"$o/$rep.over.txt" 2>/dev/null || return 0
+	[ -s "$o/$rep.over.txt" ] || return 0
+	if [ ! -f "$W/sweep-pcaps/$v/manifest.json" ] || ! cmp -s "$o/$rep.over.txt" "$W/sweep-pcaps/$v/over.txt"; then
+		rm -rf "$W/sweep-pcaps/$v" "$o/pref"
+		python3 -I "$CMP/perm.py" build "${sdps[@]}" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/sweep-pcaps/$v" \
+			--variant "$v" --programs "$o/$rep.over.txt" --perturb 1e-5 >"$o/pperm.log" 2>&1 || return 0
+		cp "$o/$rep.over.txt" "$W/sweep-pcaps/$v/over.txt"
+		python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/pref" "$W/sweep-pcaps/$v"/*.nxd9 >"$o/pref.log" 2>&1
+	fi
+	python3 -I "$CMP/permreport.py" --manifest "$W/sweep-caps/manifest.json" --gate "$o/$gate/capgate.json" --ref "$o/ref" \
+		--out "$o/$rep" --cand "$o/$cand" --pref "$o/pref" --pmanifest "$W/sweep-pcaps/$v/manifest.json" >/dev/null 2>&1
+}
 programs() {
 	local v sdps=() f
 	for f in "$SDPDIR"/shaderpackage*.sdp; do sdps+=(--sdp "$f"); done
@@ -117,8 +135,10 @@ programs() {
 		[ "$FAMILIES" = 1 ] && python3 -I "$CMP/capcompare.py" --ref "$o/ref" --cand "$o/fam" --out "$o/gate_fam" >/dev/null 2>&1
 		python3 -I "$CMP/permreport.py" --manifest "$W/sweep-caps/manifest.json" --gate "$o/gate/capgate.json" --ref "$o/ref" --out "$o/rep" >/dev/null 2>&1
 		[ "$FAMILIES" = 1 ] && python3 -I "$CMP/permreport.py" --manifest "$W/sweep-caps/manifest.json" --gate "$o/gate_fam/capgate.json" --ref "$o/ref" --out "$o/rep_fam" >/dev/null 2>&1
+		cond "$v" "$o" rep cand gate
+		[ "$FAMILIES" = 1 ] && cond "$v" "$o" rep_fam fam gate_fam
 		cp "$W/sweep-caps/manifest.json" "$o/manifest.json"
-		rm -rf "$o/ref" "$o/cand" "$o/fam" "$W/sweep-caps"       # images: not kept
+		rm -rf "$o/ref" "$o/cand" "$o/fam" "$o/pref" "$W/sweep-caps" "$W/sweep-pcaps"   # images: not kept
 	done
 	python3 -I "$CMP/sweep_report.py" programs --shard-dir "$S" --shaders "$SHD" ${UAM:+--uam "$UAM"} --out "$S/programs.tsv" \
 		>"$S/programs.log" 2>&1 || NOTES+=("programs.tsv failed (log $S/programs.log)")
