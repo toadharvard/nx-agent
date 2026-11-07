@@ -870,9 +870,18 @@ def r_win32_call_args(path, text, stats):
     names = [n for n in sigs if n in text]
     if not names: return text
     # names the file still declares itself (C++ prototypes kept in a namespace) resolve to those: leave them
-    names = [n for n in names if not re.search(r'[\w\*&>]\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
+    # (a call statement `return CallNextHookEx(...);` is not a prototype: CALL1-RET)
+    names = [n for n in names if not re.search(r'[\w\*&>](?<!\breturn)(?<!\belse)(?<!\bcase)(?<!\bthrow)(?<!\bdo)'
+                                               r'\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
     if not names: return text
-    call = re.compile(r'(?<![\w.>:~])(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
+    # N::name( where namespace N only has DECL1's `using ::name;` is the platform function too (CALL1-NS:
+    # blk_00860000's InstalledPathDetail::RegOpenKeyExA)
+    aliased = {}
+    for am in re.finditer(r'\bnamespace\s+(\w+)\s*\{', text):
+        body = text[am.end():prepare.match_brace(text, am.end() - 1)]
+        for n in re.findall(r'\busing\s+::\s*(\w+)\s*;', body):
+            aliased.setdefault(n, set()).add(am.group(1))
+    call = re.compile(r'(?<![\w.>:~])((?:\w+\s*::\s*)?)(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
     bodies = []                                      # outermost function bodies, in order
     for o, c, k, _ in prepare.scope_spans(text):
         if k == 'function' and not (bodies and o < bodies[-1][1]): bodies.append((o, c))
@@ -880,6 +889,8 @@ def r_win32_call_args(path, text, stats):
     out, pos, bi = [], 0, 0
     for m in call.finditer(text):
         if m.start() < pos: continue
+        q = re.sub(r'\s*::\s*$', '', m.group(1))
+        if q and q not in aliased.get(m.group(2), ()): continue
         while bi < len(bodies) and bodies[bi][1] < m.start(): bi += 1
         if bi == len(bodies) or not bodies[bi][0] < m.start(): continue
         before = text[max(0, m.start() - 40):m.start()].rstrip()
@@ -887,9 +898,9 @@ def r_win32_call_args(path, text, stats):
         if prev and prev.group(1) not in ('return', 'case', 'else', 'do'): continue   # a declaration
         close = _call_end(text, m.end() - 1)
         args = _split_args(text[m.end():close - 1])
-        types = sigs[m.group(1)]
+        types = sigs[m.group(2)]
         if len(args) != len(types): continue
-        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(1), ())
+        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(2), ())
         new = []
         for i, (a, t) in enumerate(zip(args, types)):
             if t is None or not a.strip(): new.append(a); continue
@@ -2115,7 +2126,25 @@ def r_math_overloads(path, text, stats):
         have, pos = have or not in_ns, end
         stats['MATH1'] += 1
     out.append(text[pos:])
-    return ''.join(out)
+    text = ''.join(out)
+    return math_own_statics(text, stats) if have else text
+
+# MATH1-OWN: where MATH1 puts <math.h> in place of a copy, a `static` definition the file keeps of a C math function
+# (`static __forceinline float sqrtf(float x) { return (float)sqrt(x); }`, hkpboxboxcollisiondetection_rtm_variant)
+# now meets <math.h>'s extern "C" declaration of the same name: MSVC refuses it (C2375), GCC takes it only under
+# -fpermissive and then calls the C library function instead of the unit's own body. The definition and the file's
+# calls of it are renamed fnvnx_own_<name>: the unit's own function, on both compilers. One file in the tree today.
+
+MATH_OWN_STATIC = re.compile(r'^[ \t]*static\s+(?:(?:inline|__inline|__forceinline)\s+)*(?:float|double|long\s+double)\s+'
+                             r'(?:__cdecl\s+)?(%s)\s*\([^;{}()]*\)\s*\{' % '|'.join(sorted(
+                                 n for n in prepare.CRT_HEADERS['<math.h>'].split() if re.match(r'^[a-z]\w*$', n))), re.M)
+
+def math_own_statics(text, stats):
+    names = sorted(set(MATH_OWN_STATIC.findall(text)))
+    for n in names:
+        text = re.sub(r'(?<![\w.>:~])%s(?=\s*\()' % n, 'fnvnx_own_' + n, text)
+        stats['MATH1-OWN'] += 1
+    return text
 
 # ---------------------------------------------------------------------------------------------------------- SPEC2
 
