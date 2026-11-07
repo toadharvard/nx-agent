@@ -67,7 +67,7 @@ def _scope_name(kind, head):
     return head.split()[-1] if head.split() else None
 
 
-SKIP_HEAD = re.compile(r'\b(?:virtual|static|operator|return|else|case|new|delete|throw|typedef|friend)\b')
+SKIP_HEAD = re.compile(r'\b(?:virtual|operator|return|else|case|new|delete|throw|typedef|friend)\b')
 
 
 TEMPLATE_HEAD = re.compile(r'template\s*<')
@@ -103,7 +103,7 @@ def r_stand_in_class_bodies(path, text, stats):
         name, head = m.group(3), m.group(2) or ''
         if name in s1_compile.NOT_FUNCTIONS or name in s1_compile.CXX_KEYWORDS or SKIP_HEAD.search(head):
             continue
-        if re.search(r'\b(?:virtual|static|operator)\b', text[max(0, m.start() - 80):m.start()].split('\n')[-1]):
+        if re.search(r'\b(?:virtual|operator)\b', text[max(0, m.start() - 80):m.start()].split('\n')[-1]):
             continue
         before = text[max(0, m.start() - 400):m.start()]
         if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before):
