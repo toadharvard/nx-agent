@@ -23,7 +23,9 @@ while :; do
           notes=$(git diff --diff-filter=A --name-only "origin/$I...origin/$b" -- ports/fnv-nx/journal/inbox/ 2>/dev/null)
           out=$(bash "$H/adopt.sh" "origin/$b" 2>&1); rc=$?
           echo "$(date -u +%FT%TZ) $b rc=$rc $(echo "$out" | head -1)" >> "$ST/log"
-          [ $rc = 3 ] && wake+=("conflict: $b"$'\n'"$out")
+          if [ $rc = 3 ]; then key=$(echo "$out" | grep LEFT | sort | md5sum | cut -c1-12); cf="$ST/conflict_${b//\//_}"
+            [ "$(cat "$cf" 2>/dev/null)" = "$key" ] || { echo "$key" > "$cf"; wake+=("conflict: $b"$'\n'"$out"); }
+          else rm -f "$ST/conflict_${b//\//_}"; fi
           for n in $notes; do git show "origin/$b:$n" 2>/dev/null | grep -q 'START' && wake+=("START in $b:$n"); done;;
       esac
     done
