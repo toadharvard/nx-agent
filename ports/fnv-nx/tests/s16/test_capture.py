@@ -224,6 +224,26 @@ class SweepPieces(unittest.TestCase):
             self.assertEqual([p['name'] for p in o['failing_programs']], ['B.pso'])
             self.assertEqual(o['top_programs_ns_per_pixel'][0]['name'], 'B.pso')
 
+    def test_program_class_over_sets(self):
+        """a program's class over its parameter sets: over if any set is over, else pass if any set passed; a set
+        that drew nothing (vacuous) never outranks a pass of another set; vacuous only when no set drew anything"""
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(f'{t}/s/scenes')
+            open(f'{t}/s/programs.tsv', 'w').write(
+                'name\thash\tstage\tmodel\tatest:translated\tbase:translated\tworst_translated\tworst_families\n'
+                'A.pso\taaaa\tpixel\tps_3_0\tvacuous\tpass\tvacuous\t\n'
+                'B.vso\tbbbb\tvertex\tvs_2_0\tvacuous\tvacuous\tvacuous\t\n'
+                'C.pso\tcccc\tpixel\tps_2_1\tvacuous\tover\tover\t\n'
+                'D.pso\tdddd\tpixel\tps_2_1\till\tpass\till\t\n')
+            r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'sweep_report.py'), 'shard', '--shard-dir', f'{t}/s',
+                                '--head', 'f' * 40, '--k', '1', '--n', '1', '--out', f'{t}/o.json', '--md', f'{t}/o.md'],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.load(open(f'{t}/o.json'))
+            self.assertEqual(o['program_classes_translated'], {'pass': 2, 'vacuous': 1, 'over': 1})
+            self.assertEqual(o['programs_vacuous_in_some_set'], 2)
+            self.assertEqual([p['name'] for p in o['failing_programs']], ['C.pso'])
+
 
 class WineRefMirror(unittest.TestCase):
     def test_base_load_order_only(self):

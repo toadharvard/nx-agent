@@ -452,6 +452,42 @@ class Exe(unittest.TestCase):
             got = bodies.exe_call_targets(d, 0, unit, {'?g@@YAXXZ', '?k@@YAXXZ'}, exe)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}, '?k@@YAXXZ': {K: 1}})
 
+    def test_exe_dtor_as_function(self):
+        """A destructor the exe calls out of line at a function the decomp spells FUN_<addr>(T*) binds there
+        (natively both take the object in x0) instead of `= default`; one with two parameters does not."""
+        import struct
+        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'               # call ??1Short; call ??1Long; ret
+        obj = coff({'?f@@YAXXZ': (f, {1: '??1Short@@QAE@XZ', 6: '??1Long@@QAE@XZ'})},
+                   ['??1Short@@QAE@XZ', '??1Long@@QAE@XZ'])
+        F, G, H = 0x401000, 0x401080, 0x4010c0
+        text = bytearray(0x100)
+        text[0:len(f)] = f
+        struct.pack_into('<i', text, 1, G - (F + 5))
+        struct.pack_into('<i', text, 6, H - (F + 10))
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '?f@@YAXXZ', 'address': '%x' % F},
+            {'symbol': '?FUN_00401080@@YIXPAX@Z', 'address': '%x' % G},          # void __fastcall (void*)
+            {'symbol': '?FUN_004010c0@@YAXPAXH@Z', 'address': '%x' % H}]}]}     # void __cdecl (void*, int)
+        rows = [bodies.Row('_ZN5ShortD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
+                bodies.Row('_ZN4LongD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp')]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as fo:
+                json.dump(units_j, fo)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
+            it.need([r.name for r in rows])
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F', H: 'F'},
+                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms)
+        got = {r.name: r for r in got}
+        self.assertEqual((got['_ZN5ShortD1Ev'].cls, got['_ZN5ShortD1Ev'].target), ('exe-addr', '__fnv_00401080'))
+        self.assertEqual(got['_ZN4LongD1Ev'].cls, 'special-default')
+
+
     def test_exe_address_taken(self):
         """A DIR32 in a placed function (push offset ?g) gives the target from the exe's word, minus the addend."""
         import struct

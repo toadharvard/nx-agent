@@ -81,3 +81,28 @@ void fnv_standin_00406d50(char *dst, uint32_t size, const char *src) {
     }
     dst[n + i] = 0;
 }
+
+/* 0x00aa78a0 MemoryHeap::MemoryHeap(reserve, commit, name, flag), now the D20 reconstruction (fnv-nx-build
+ * recon/bscore_memoryheap, all bytes equal on x86). Natively its vptr is _ZTVN12fnv_00aa78a010MemoryHeapE, which
+ * the link builds by D22's minus-one rule: GCC's D1/D0 at slots 0/1, exe slot k at k+1 (GetName at 2, Allocate at 3).
+ * The memory manager dispatches on its heaps through call-only placeholder declarations in the exe's slot order
+ * (HeapStandIn::Allocate slot 2, FNV_Heap release slot 3, FUN_00aa45a0_vt::v4 ContainsBlock slot 4), so every
+ * MemoryManager::Allocate returned the heap's name (0x010824fc) and every free ran on a wrong block (S10 fault,
+ * J-0155). The exe's body, with the exe's vptr (its vftable 0x010a28fc, whose slots S3's code-pointer pass made
+ * natives in the exe's order): AbstractHeap base 0x00aa8ca0(this, reserve, commit, name, 0x10000), vptr, flag at
+ * +0x20f0, initialized (+0x20f1) = 0, InitializeSlots 0x00aa8dd0. Fix: the D22 counterpart for call-only
+ * declarations (S1-refs; tests/s5/callonly_vt.py lists them). */
+extern void *fnv_abstractheap_base(void *self, uint32_t reserve, uint32_t commit, const char *name, uint32_t page)
+    __asm__("__fnv_00aa8ca0");
+extern void fnv_heap_initialize_slots(void *self) __asm__("__fnv_00aa8dd0");
+void *fnv_standin_00aa78a0(void *self, uint32_t reserve, uint32_t commit, const char *name, _Bool flag)
+    __asm__("_ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb");
+void *fnv_standin_00aa78a0(void *self, uint32_t reserve, uint32_t commit, const char *name, _Bool flag) {
+    unsigned char *p = self;
+    fnv_abstractheap_base(self, reserve, commit, name, 0x10000);
+    *(volatile uint32_t *)p = 0x010a28fcu;
+    p[0x20f0] = flag;
+    p[0x20f1] = 0;
+    fnv_heap_initialize_slots(self);
+    return self;
+}

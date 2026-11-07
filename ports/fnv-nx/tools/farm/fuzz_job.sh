@@ -318,23 +318,24 @@ export FNVNX_DECOMP=$DECOMP FNVNX_X86OBJ=$ORACLE/obj FNVNX_TREE=$TREE FNVNX_A64O
 export FNVNX_DFWORK=$RUN/work FNVNX_DFA64=$RUN/a64 SSE2NEON=$EXT/sse2neon
 unset FNVNX_DFPROFILE
 mkdir -p "$RUN/work"
-# FUZZ_SETUP_ONLY=<file> (tools/farm/audit_job.sh): stop here, with every input in place, and write them as a harness
-# profile (FNVNX_DFPROFILE format, KEY=VALUE) plus the python and the link it names; no fuzzing, no report, no push.
-if [ -n "${FUZZ_SETUP_ONLY:-}" ]; then
-  { for v in FNVNX_EXE FNVNX_DECOMP FNVNX_X86OBJ FNVNX_TREE FNVNX_A64OBJ FNVNX_DFLINK FNVNX_DFWORK FNVNX_DFA64 SSE2NEON; do
-      echo "$v=${!v}"; done
-    echo "FNVNX_AUDIT_PY=$PY"; echo "FNVNX_AUDIT_LINK=$NOTE_LINK"; echo "FNVNX_AUDIT_SRC=$P"; } > "$FUZZ_SETUP_ONLY"
-  exit 0
-fi
-t1=$(date +%s)
-
-# --- targets: catalog (per decomp commit), modelled functions with both objects, this shard ------------------------
+# --- the catalog (per decomp commit; fnkeys.py and the audit cache read it too) -------------------------------------
 CAT=$FARM_HOME/catalog-$D12.jsonl
 CATV=$(sed -n 's/^CATALOG_VERSION = \([0-9]*\)/\1/p' "$DF/catalog.py")
 if [ ! -s "$CAT" ] || ! head -1 "$CAT" | grep -q "\"cv\": $CATV[,}]"; then
   log "catalog"
   (cd "$DF" && nice $PY catalog.py --out "$CAT.tmp" > "$RUN/catalog.log" 2>&1) && mv "$CAT.tmp" "$CAT"
 fi
+# FUZZ_SETUP_ONLY=<file> (tools/farm/audit_job.sh): stop here, with every input in place, and write them as a harness
+# profile (FNVNX_DFPROFILE format, KEY=VALUE) plus the python and the link it names; no fuzzing, no report, no push.
+if [ -n "${FUZZ_SETUP_ONLY:-}" ]; then
+  { for v in FNVNX_EXE FNVNX_DECOMP FNVNX_X86OBJ FNVNX_TREE FNVNX_A64OBJ FNVNX_DFLINK FNVNX_DFWORK FNVNX_DFA64 SSE2NEON; do
+      echo "$v=${!v}"; done
+    echo "FNVNX_AUDIT_PY=$PY"; echo "FNVNX_AUDIT_LINK=$NOTE_LINK"; echo "FNVNX_AUDIT_SRC=$P"; echo "FNVNX_AUDIT_CATALOG=$CAT"; } > "$FUZZ_SETUP_ONLY"
+  exit 0
+fi
+t1=$(date +%s)
+
+# --- targets: modelled functions with both objects, this shard (the catalog is made above) ---------------------------
 (cd "$DF" && $PY - "$CAT" "$K" "$N" "${FUZZ_LIMIT:-0}" "$RUN/targets.jsonl" "$RUN/targets.json" <<'EOF'
 import json, sys, zlib
 import config, vtmodel
