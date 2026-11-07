@@ -22,6 +22,12 @@ through Init, where the exe's 0x00a0ac80 builds a list: `??0` bound there); a he
 (blk_00c80000_o2.cpp's BSSimpleListC9A<..>::Remove, 0x00631620), when the unit defines none of them. The class name
 comes from its head, past a base clause (`struct D : public B`).
 
+Also (s2d crt-import): in the decomp's unit copies of the MSVC STL (`namespace fnv_<a> { namespace std`), members of
+class templates and of classes nested in them, and constructors with an initializer list, under the same symbol
+gate (`_stl_copy_edits`): MSVC called `basic_ofstream(const char*, int, int)` (0x00acdc90), `basic_filebuf::close`
+(0x00acfb90) and `basic_ostream::sentry::sentry` out of line, where GCC inlined the decomp's partial model of them
+and referenced members it never defines (`basic_filebuf::open`, `_Init`, `basic_streambuf::_Lock`).
+
 HARN1 - the decomp's harness-only code gets internal linkage.
 
 The decomp keeps byte-matching harnesses next to the matched code: convention callers that exist only so MSVC emits
@@ -136,6 +142,7 @@ def r_stand_in_class_bodies(path, text, stats):
         decl = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', decl)
         nl = '\n' * (text.count('\n', m.start(), c) - decl.count('\n'))   # line numbers stay
         edits.append((m.start(), c, decl + '; /* fnv-nx STAND5: bound to the address MSVC called */' + nl))
+    edits += _stl_copy_edits(path, text, syms, tagged, own_names, spans or prepare.scope_spans(text))
     if not edits:
         return text
     out, pos = [], 0
@@ -146,6 +153,104 @@ def r_stand_in_class_bodies(path, text, stats):
         stats['STAND5'] += 1
     out.append(text[pos:])
     return ''.join(out)
+
+
+# STAND5 for the decomp's unit copies of the MSVC STL (`namespace fnv_<a> { namespace std { ... } }`)
+UNIT_NS_HEAD = re.compile(r'^fnv_[0-9a-f]{8}$')
+STL_NS = ('std', 'stdext')
+INCLASS_HEAD = re.compile(r'^([ \t]*)((?:(?:__declspec\s*\(\s*\w+\s*\)|[\w:<>,\*&]+)[ \t\*&]+)*?)([A-Za-z_]\w*)\s*\(',
+                          re.M)
+
+
+def _close_paren(text, i):
+    """Index of the ')' matching text[i] == '(', or -1."""
+    d = 0
+    for j in range(i, min(len(text), i + 4000)):
+        c = text[j]
+        if c == '(':
+            d += 1
+        elif c == ')':
+            d -= 1
+            if d == 0:
+                return j
+        elif c in ';{}' and d:
+            return -1
+    return -1
+
+
+def _stl_copy_edits(path, text, syms, tagged, own_names, spans):
+    """STAND5's edits for members of the decomp's unit-local copies of MSVC STL classes, where its general gates are
+    narrower: a member of a class template or of a class nested in one (`basic_ofstream<C, T>::basic_ofstream`,
+    `basic_ostream<C, T>::sentry::sentry`, `basic_filebuf<C, T>::close`), and a constructor with an initializer list.
+    The unit's symbols name such a member under the copy's MSVC name (`??0?$basic_ofstream@...@std@fnv_00ac9790@@...`)
+    only because MSVC called it out of line there: the body is the library's (VC9 STL, instantiated in the exe once),
+    and GCC inlining the decomp's partial model of it references members the model declares and never defines
+    (`basic_filebuf::open`, `_Init`, `_Endwrite`, `basic_streambuf::_Lock`: the bodycause `crt-import` class). Gates:
+    the class chain is inside `namespace fnv_<a> { namespace std` (or stdext); untagged; not virtual, a destructor or
+    an operator; every symbol of the member's MSVC name (any instantiation) binds an address some unit's `functions`
+    define, none tagged here, and this unit defines none of those names itself."""
+    if not syms:
+        return []
+    every = s1_compile._all_unit_functions(path)
+    edits = []
+    for m in INCLASS_HEAD.finditer(text):
+        name, head = m.group(3), m.group(2) or ''
+        if name in s1_compile.NOT_FUNCTIONS or name in s1_compile.CXX_KEYWORDS or SKIP_HEAD.search(head):
+            continue
+        if re.search(r'\b(?:virtual|operator)\b', text[max(0, m.start() - 80):m.start()].split('\n')[-1]):
+            continue
+        close = _close_paren(text, m.end() - 1)
+        if close < 0:
+            continue
+        rest = re.match(r'\s*((?:const\s*)?)(\{|:)', text[close + 1:close + 400])
+        if not rest:
+            continue
+        o = close + 1 + rest.end() - 1
+        if rest.group(2) == ':':   # an initializer list: the body opens at the first `{` outside parentheses
+            d, o = 0, -1
+            for j in range(close + 1 + rest.end(), min(len(text), close + 4000)):
+                c = text[j]
+                if c == '(':
+                    d += 1
+                elif c == ')':
+                    d -= 1
+                elif c == ';' and not d:
+                    break
+                elif c == '{' and not d:
+                    o = j
+                    break
+            if o < 0:
+                continue
+        before = text[max(0, m.start() - 400):m.start()]
+        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before):
+            continue
+        chain = prepare.scope_chain(spans, m.start())
+        if not chain or chain[-1][0] != 'class' or any(k not in ('namespace', 'class') for k, _ in chain):
+            continue
+        names = [_scope_name(k, h) for k, h in chain]
+        if None in names:
+            continue
+        nss = [n for (k, _), n in zip(chain, names) if k == 'namespace']
+        if not any(UNIT_NS_HEAD.match(a) and b in STL_NS for a, b in zip(nss, nss[1:])):
+            continue
+        templ = [k == 'class' and TEMPLATE_HEAD.match(h.strip()) is not None for k, h in chain]
+        ctor = name == names[-1]
+        if not (any(templ) or (ctor and rest.group(2) == ':')):
+            continue   # the general STAND5 above handles the rest
+        comps = ''.join((r'\?\$' + re.escape(n) + r'@.+?@') if t else re.escape(n) + '@'
+                        for n, t in reversed(list(zip(names, templ))))
+        rx = re.compile('^' + (r'\?\?0' if ctor else r'\?' + re.escape(name) + '@') + comps + '@')
+        bound = [int(a, 16) for k, a in syms.items() if rx.match(k)]
+        if not bound or not all(a in every and a not in tagged for a in bound):
+            continue
+        if any(rx.match(n) for n in own_names):
+            continue
+        c = prepare.match_brace(text, o)
+        decl = (text[m.start():close + 1] + (' const' if rest.group(1).strip() else '')).rstrip()
+        decl = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', decl)
+        nl = '\n' * (text.count('\n', m.start(), c) - decl.count('\n'))   # line numbers stay
+        edits.append((m.start(), c, decl + '; /* fnv-nx STAND5: bound to the address MSVC called */' + nl))
+    return edits
 
 
 # ---------------------------------------------------------------------------------------------------------- HARN1
