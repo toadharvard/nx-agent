@@ -38,9 +38,10 @@ def classify(t):
     t = ' '.join(re.sub(r'\b(?:__ptr64|__ptr32|__restrict|__unaligned)\b', ' ', t).split())
     if t.endswith(('*', '&')) or re.search(r'\*(?:\s*(?:const|volatile))*\s*$', t):
         return 'P'
-    if re.search(r'\(\s*(?:__\w+\s+)?[\w:<>, ]*::\*\s*\)\s*\(', t):
+    # a source declaration's spelling may name the parameter and drop the blank: `bool(__cdecl* handler)(char *)`
+    if re.search(r'\(\s*(?:__\w+\s+)?[\w:<>, ]*::\*\s*\w*\s*\)\s*\(', t):
         return 'MP'  # pointer to member function: 2 words in Itanium
-    if re.search(r'\(\s*(?:__\w+\s+)?\*', t) or re.search(r'\(\s*(?:__\w+\s+)?&', t):
+    if re.search(r'\(\s*(?:__\w+\s*)?\*', t) or re.search(r'\(\s*(?:__\w+\s*)?&', t):
         return 'P'  # function pointer / reference to array
     t = re.sub(r'\s*\b(?:const|volatile)\b\s*', ' ', t).strip()
     if t.startswith('enum '):

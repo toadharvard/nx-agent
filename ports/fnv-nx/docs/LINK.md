@@ -455,6 +455,42 @@ temporaries (x86 saw a bitwise copy too); ownership stays with the caller. `test
 register-result conversion, pointer vs non-trivial holder, fastcall edx dummy with stack arguments) under
 qemu-aarch64 against C++ definitions, with layouts from the real probe.
 
+**abi-manual pairs (D24 option a).** A `manual` pair with an aggregate or result-pointer class (sret-explicit,
+ret-aggregate, aggregate-param) that abi2 cannot plan stays unbound (trap stub, cause `abi-manual`, the reason in the
+abi.tsv notes as `abi2: ...` and in the stats as `abi_manual_why:*`). What used to keep pairs there, and now binds:
+* layouts the probe could not name: a C name's declaration read from source loses its namespace
+  (`CopyFromSource(FUN_00cc83b0_Class *, RefBlockArgument)` inside `namespace fnv_00cc83b0`). The probe takes the one
+  namespace GCC names ("did you mean `ns::T`"; several candidates get "suggested alternatives" and stay unknown) for
+  the type, its first component (`PacketMask::Bits`) or a template and its arguments (`Ref<SolverInfo>`), and spells
+  a class that a function of the same name hides as `struct ::T` (`FUN_0040c0e0`). Unnameable rows carry the rule
+  `pod2+ns`; older ones are probed again. `abi2.lookup` also takes a unit's unique (or identical) `ns::T` row for a
+  bare `T`.
+* untagged named parameter types (`?:WPARAM`, a typedef the C-name reader did not expand, or a nested enum): measured
+  by the probe like aggregates, parameters only and from 4 bytes (a narrower scalar was widened by the x86 caller,
+  AArch64 leaves the upper bits unspecified), never in a fastcall register (an enum goes in ecx/edx, a struct on the
+  stack). An untagged result stays manual: whether MSVC returns it through a buffer depends on its being a class.
+* function pointers spelled with a parameter name and no blank (`bool(__cdecl* handler)(char *)`): `P` (abi.py).
+* a variadic side: compared on its named part. When that is `same`, the pair is `same` (the anonymous arguments are
+  where the named ones would be); one that needs a bridge stays manual (the bridge would move the anonymous
+  arguments it does not know).
+* a void reference against a definition that returns an aggregate through MSVC's hidden buffer: two readings. The
+  reference passes the buffer itself (`void f(unsigned char *out, ...)`, sret-explicit) when every definition byte
+  comes from the reference that way; otherwise, when it is clean, the declaration lost the result and the arguments
+  are matched without the buffer (`result-discarded`: R2's `void P133List::InsertAt(OutIter, P133Camera *const &)`
+  against 0x00b156b0; read with the buffer the callee writes through the iterator's first word, and c4fbea9's
+  pop-mismatch rule bridged it that way). A memory result (x8) gets a scratch buffer in the bridge's frame (no tail
+  call), a register result is not read.
+
+`test_bridges.py` runs these under qemu-aarch64 too (free function's hidden result against a static member's out
+pointer, 16-byte ints result against an HFA, an 8-byte struct against two ints, a typedef'd struct against four ints,
+void references against a hidden memory result, member and free, and against an explicit out pointer) and checks the
+probe's respelling; `test_abimanual.py` the reasons, `abi2.lookup` and the function-pointer spellings. Offline, on
+link 9f865b0a's inputs with the branch's sigs (abi.tsv's manual pairs and the newly paired ones, the missing layouts
+probed on a prepared tree), abi-manual pairs went 16 -> 2 (aggregate-param 12 -> 1, ret-aggregate 4 -> 1,
+sret-explicit 1 -> 0). Left: `std::_Vector_const_iterator<El, std::allocator<El>>` (0x00abfa90), a MSVC STL type the
+definition's unit does not declare under libstdc++, and `NavMeshPtr` (0x00464fc0 called through a cast), an
+untagged result.
+
 ## Vtables (`vtables.py`, kind `V`, D7)
 
 Objects only ever hold Itanium vptrs (DATAIMAGE.md D7); an image vftable address stands for the Itanium address
