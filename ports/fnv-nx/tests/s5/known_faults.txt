@@ -12,6 +12,13 @@ exe-vtables         # stand-in for S2c's link-time slot fill (emu_guest.py --exe
                     # misaligned vtables are left); a virtual call past a native vtable's end continues at the exe
                     # slot's native; GOT entries of absolute aliases (aliases.ld `sym + 8`) are relocated. Remove
                     # when S2c fills the slots, sizes native vtables to the exe's and aliases.ld has SANE_EXPR
+image-vptr-minus-one ^\.\?AV\?\$NiT  # hand-stored image vptrs (hand_vptrs.tsv class 'image': no native
+                      # vtable bound to the exe vftable) of the classes whose RTTI name matches get a D22 minus-one
+                      # copy (D1/D0 thunks to exe slot 0, then exe slot k at k+1): the Gamebryo NiT* containers,
+                      # dispatched through their declared hierarchies (virtual destructor first). The creator map's
+                      # NiTStringTemplateMap::SetAt ran an output function as IsKeysEqual. Applied to all 785 such
+                      # vftables it is worse (1 -> 3,461 skips: call-only stand-ins such as TMapStandIn dispatch in
+                      # the exe's order). Remove when D22 covers call-only declarations and hand vptrs (S1-refs/S2c)
 ctor-returns-this   # every constructor native (address map kind C) returns this: an MSVC constructor is called as a
                     # function (0x00aa20b0: value = p->FUN_00aa2200(); the OSGlobals and NiGlobalStringTable
                     # constructors before), and an Itanium constructor returns nothing (S2c: C bridges return this)
@@ -45,6 +52,11 @@ _ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool wit
                       # reservation here) is freed through NiFree before Gamebryo's allocator exists, which skipped
                       # boot_banner (MemoryManager's constructor) once the game's heaps are used; the exe destroys it
                       # and calls MemoryManager::Deallocate (standins.c; S1)
+_ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb standin  # 0x00aa78a0 MemoryHeap's constructor (D20 recon) stores its native
+                      # vptr, laid out by D22 (D1/D0 at 0/1); the memory manager's call-only heap declarations use
+                      # the exe's slots, so Allocate returned the heap's name and frees hit wrong blocks (J-0155 S10
+                      # fault). standins.c stores the exe's vptr 0x010a28fc as the exe does (S1-refs: D22 for
+                      # call-only declarations, tests/s5/callonly_vt.py)
 _Z12FUN_00406d50z standin  # 0x00406d50 strcat_s(dst, size, src), declared `(...)` and defined nowhere: WinMain's INI paths
                       # stayed empty, FalloutPrefs.ini was never read, sD3DDevice was "" and the device check sent the
                       # game to the launcher (ShellExecute, WinMain returns 0) (standins.c; S1-refs)

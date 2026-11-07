@@ -82,6 +82,22 @@ def _old_uninit_both(rec):
     return (rec.get('hint') or {}).get('cause') == 'uninit-both'
 
 
+def _old_bool_repr(rec):
+    return (rec.get('hint') or {}).get('cause') == 'bool-repr'
+
+
+def _old_signedness(rec):
+    return (rec.get('hint') or {}).get('cause') == 'signedness'
+
+
+def _interlocked_slow(f):
+    return 'fnvnx_interlocked_slow' in f.nrefs
+
+
+def _crt_malloc(f):
+    return 0x00ecd1c7 in f.ocalls
+
+
 def _indirect(f):
     return f.oindirect
 
@@ -114,8 +130,21 @@ CHANGES = [
     Change('d18-uninit', 'cached divergences classified uninit-both (both machines read garbage): the case runs once '
            'more with the same (zero) garbage on both machines, and when they then agree there is no record',
            recheck=_old_uninit_both),
+    Change('d19-bool', 'cached divergences classified bool-repr: the probe now counts an input byte only when the '
+           'oracle reads exactly that byte with a 1-byte access (a byte of a planted pointer or integer that removes '
+           'the divergence when set to 1 is not a bool); the record gets the cause of the next probe',
+           recheck=_old_bool_repr),
+    Change('d20-sign', 'cached divergences classified signedness: the probe now clears the top bit of an input byte '
+           'in memory only when the oracle read it as the top byte of a 1- or 2-byte access (char/short widening), '
+           'not a byte of a word it read whole', recheck=_old_signedness),
+    Change('d20-ilk', 'functions whose native code calls fnvnx_interlocked_slow (the misaligned path of the shim\'s '
+           'inline Interlocked*, sync.cpp): it runs as the Interlocked function it performs, not as a traced call '
+           '(the oracle\'s lock-prefixed instruction is none)', selects=_interlocked_slow),
+    Change('d20-malloc', 'functions whose oracle code calls the CRT malloc (0x00ecd1c7): it returns a fresh heap block '
+           'like the game allocators (world.ALLOCATORS) and pairs with operator new / MemoryManager::Allocate by '
+           'family (libcalls.FAMILY)', selects=_crt_malloc),
 ]
-SCOPED = 'd18'
+SCOPED = 'd20'
 
 
 def harness_tag():

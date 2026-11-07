@@ -202,6 +202,17 @@ agents queue the next item instead of waiting, and verify their own change with 
   only when it matches and is not slower.
 - Link/boot/runtime: whole classes (all .inl bodies, all short vtables, all services of a DLL), not trap by trap.
 
+### D23. Zero trap stubs: the recon fleet and fuzz-equivalent acceptance (owner, 2026-11-07)
+
+- Owner target: the guest image has 0 trap stubs. Every function the decomp lacks gets a native body.
+- Bodies the decomp lacks are reconstructed against the exe by the recon fleet (R1..R10), sharded by unit
+  (sha1(unit) mod 10), each worker on its own fnv-nx-build branches `recon/<unit>` (D20: private, exe-derived).
+- Acceptance, in order: (a) build_and_match all bytes equal (D20); (b) when MSVC byte parity is not reachable in
+  reasonable effort, fuzz-equivalence against the x86 oracle (tools/difffuzz, every seed and the probes clean, no
+  hard or soft divergence) - recorded as `"accept": "fuzz"` in recon.json with the fuzz record. (b) is never used
+  for a function whose byte match only fails on a known rule class; that class is fixed instead.
+- S2-bodies owns the list (tools/link/bodycause.py on the newest link) and every non-recon trap class.
+
 ### D22. Virtual destructor slots against MSVC vftables (orchestrator)
 
 - MSVC has one deleting-destructor slot (??_G(flags)); GCC has two (D1, D0). The link maps them by the minus-one

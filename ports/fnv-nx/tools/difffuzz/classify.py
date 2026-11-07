@@ -299,10 +299,26 @@ def hint(pair, target, case, div, fn, max_steps):
             return h
     # bool representation probe: a byte that is neither 0 nor 1 read as bool (MSVC tests the whole byte, GCC may
     # test bit 0 only): set each such input byte to 1
+    # S1-rules: only a byte the MSVC code reads by itself (a 1-byte access at that address, no wider access over it)
+    # is a bool; a byte of a pointer or integer word that removes the divergence when set to 1 is not (before:
+    # ~80 % of bool-repr records were such bytes, mostly the 0x03 top byte of a planted pointer)
+    reads = {}
+    if pair is not None and any(x > 1 for b in case.mem.values() for x in b):
+        world.BYTE_READS = reads
+        try:
+            pair.run(case, max_steps)
+        finally:
+            world.BYTE_READS = None
+        h['_runs'] += 1
+
+    def byte_read(addr):
+        if reads.get(addr) != {1}:
+            return False
+        return not any(s > k for k in (1, 2, 3, 4, 5, 6, 7) for s in reads.get(addr - k, ()))
     bhits = []
     for a, b in list(case.mem.items()):
         for i, x in enumerate(b):
-            if x > 1 and len(bhits) < 4 and h['_runs'] < 30:
+            if x > 1 and len(bhits) < 4 and h['_runs'] < 30 and byte_read(a + i):
                 trial = case.copy()
                 nb = bytearray(b); nb[i] = 1; trial.mem[a] = bytes(nb)
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
@@ -311,10 +327,17 @@ def hint(pair, target, case, div, fn, max_steps):
     if bhits:
         h['cause'] = 'bool-repr'; h['bytes'] = bhits; return h
     # signedness probe: clear the top bit of each input byte >= 0x80
+    # S1-rules (d19-sign): in memory only the top byte of a narrow read counts (a char read by itself, or the high
+    # byte of a 2-byte read), as for bool-repr; a byte of a pointer or integer word is not widened (before: 434 of
+    # 461 memory hits on 8b233f99 were bytes inside a word read whole)
+    def narrow_top(addr):
+        cover = [(k, s) for k in range(8) for s in reads.get(addr - k, ()) if s > k]
+        return bool(cover) and all(s <= 2 for _, s in cover) and \
+            any((k, s) in ((0, 1), (1, 2)) for k, s in cover)
     hits = []
     for a, b in list(case.mem.items()):
         for i, x in enumerate(b):
-            if x >= 0x80 and len(hits) < 4 and h['_runs'] < 40:
+            if x >= 0x80 and len(hits) < 4 and h['_runs'] < 40 and narrow_top(a + i):
                 trial = case.copy()
                 nb = bytearray(b); nb[i] &= 0x7f; trial.mem[a] = bytes(nb)
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1

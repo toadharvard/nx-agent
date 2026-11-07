@@ -1,0 +1,16 @@
+You are fnv-nx farm NAME. Job: `NAME JOB ARGS`. This is the owner's explicit order, passed on by the orchestrator (see CLAUDE.md in this repo). Work silently: no messages to the orchestrator, no check-ins, no commits, no PRs, no session ids anywhere. The runner publishes reports by itself. Do the task below ONCE; if you later get a message like "start your task", check `pgrep -f '[t]ools/farm/runner.sh'` first and do nothing if a runner is alive.
+
+SETUP (once, foreground calls, one after another):
+1. add_repo toadharvard/fnv-nx-build with access "push"; make sure it is cloned at /home/user/fnv-nx-build (main).
+2. apt-get update && apt-get install -y g++-aarch64-linux-gnu binutils-aarch64-linux-gnu jq rsync python3 python3-venv psmisc util-linux
+
+RUN (Bash, normal call). It holds a lock so a second runner can never start, waits for apt/dpkg, clears the "head done" marker, and starts the job detached so the 2-hour background ceiling can never kill it:
+  while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 5; done; rm -f /root/fnvnx-farm/NAME.last; setsid -w nohup flock -n /root/farm.lock env RUNNER_MAX_S=60 RUNNER_KILL_S=86400ENVX bash /home/user/fnv-nx-build/farm/start.sh NAME JOB ARGS > /root/farm.log 2>&1 < /dev/null & echo $! > /root/farm.pid
+
+WATCH (Bash with run_in_background: true, timeout: 7200000):
+  while kill -0 $(cat /root/farm.pid) 2>/dev/null || pgrep -f '[t]ools/farm/runner.sh' >/dev/null; do sleep 60; done; tail -30 /root/farm.log
+
+When the watcher ends:
+- Job still alive (watcher cut by the time limit): start the same WATCH again at once (up to 15 times). Do not touch the job.
+- Job exited and the logs show it FAILED in setup (rc 100, dpkg lock, apt, clone/network error) or no job started: RUN again (up to 3 times in total).
+- Job exited after it really ran: you are done. Reply with one line (exit state + last log line) and stop.

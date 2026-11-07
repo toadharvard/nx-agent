@@ -205,7 +205,20 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     tx = [c.target for c in rx.calls]
     ta = [c.target for c in ra.calls]
     fam = libcalls.FAMILY
+    # D21 (coverage first): a by-design or harness-made difference does not end the comparison; the first one is
+    # kept and returned only when nothing hard follows (`soft`)
+    soft = None
+    swapped = set()
     for i in range(min(len(tx), len(ta))):
+        if i in swapped:
+            continue
+        if tx[i] != ta[i] and i + 1 < min(len(tx), len(ta)) and tx[i] == ta[i + 1] and tx[i + 1] == ta[i]:
+            # two adjacent calls in swapped order: C++ leaves the evaluation order of operands open (call-order)
+            if soft is None:
+                soft = dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]), x86_next=_hex(tx[i + 1]),
+                            arm_next=_hex(ta[i + 1]), soft=True, call_order=True)
+            swapped.add(i + 1)
+            continue
         if tx[i] != ta[i] and vcalls is not None and tx[i] >= 0 and tx[i] not in vcalls[0] and \
                 tx[i] not in vcalls[1] and (ta[i] < 0 or ta[i] not in vcalls[0]):
             # the oracle called through memory the case did not plant (an object's vptr or a function pointer
@@ -250,8 +263,17 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
                 skip = set(skip) | {v.label for v in cv.vals if v.label != 'this'}
             d = compare_args(cv, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                              garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr)
+            if d and (i in swapped or i + 1 in swapped):
+                # a swapped pair: the calls at i and i + 1 are different callees on the two machines, so compare
+                # each oracle call with the native call of the same callee
+                cx2, ca2 = rx.calls[i], ra.calls[i + 1 if i + 1 in swapped else i - 1]
+                d = compare_args(cv, cx2, ca2, readers[0] if readers else None, readers[1] if readers else None,
+                                 skip, garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr)
             if d:
                 d.update(kind='call-args', index=i, target=_hex(cx.target), callee=cv.name)
+                if d.get('soft'):
+                    soft = soft or d
+                    continue
                 return d
     if (getattr(conv, 'name', '') or '').startswith(('??_G', '??_E')):
         # MSVC's deleting destructor returns this, the Itanium D0 it stands for returns nothing (by design,
@@ -279,7 +301,7 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             (rx.ret[0] & 1) == (ra.ret[0] & 1):
         # the same truth value: a native bool returned from memory that held a byte other than 0/1 (GCC assumes
         # stored bools are 0/1; the MSVC code normalises)
-        return dict(kind='return', x86=rx.ret.hex(), arm=ra.ret.hex(), soft=True, bool_repr=True)
+        soft = soft or dict(kind='return', x86=rx.ret.hex(), arm=ra.ret.hex(), soft=True, bool_repr=True)
     elif rx.ret != ra.ret:
         d = dict(kind='return', x86=(rx.ret or b'').hex(), arm=(ra.ret or b'').hex())
         if conv.ret is not None and conv.ret.cls in ('F32', 'F64') and rx.ret and ra.ret:
@@ -287,8 +309,12 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             if rx.ret_ext is not None:
                 d['float']['x87'] = repr(x86emu.ext_to_double(rx.ret_ext))
             if d['float'].get('note'):
-                return None
-        return d
+                d = None
+            elif d['float'].get('tolerant'):
+                soft = soft or dict(d, soft=True)          # within the float tolerance: by design, go on
+                d = None
+        if d is not None:
+            return d
     wx, wa = world.effective(rx.writes, w), world.effective(ra.writes, w)
     for k_ in ignore:                       # bytes neither machine's behaviour is judged by (local static guards)
         wx.pop(k_, None)
@@ -304,7 +330,9 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
         if local_statics and all(k in local_statics and k not in wa for k in diff):
             # MSVC keeps a function-local static (and its guard) in the image; GCC keeps its own copy in the unit's
             # .bss (not compared). Not a divergence of the function itself; reported for the static-state audit.
-            return dict(kind='local-static', soft=True, addr='%08x' % diff[0], ndiff=len(diff))
+            soft = soft or dict(kind='local-static', soft=True, addr='%08x' % diff[0], ndiff=len(diff))
+            diff = []
+    if wx != wa and diff:
         first = diff[0]
         d = dict(kind='mem-write', addr='%08x' % first, ndiff=len(diff),
                  x86=bytes(wx.get(k, 0) for k in range(first & ~3, (first & ~3) + 8)).hex(),
@@ -321,7 +349,7 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
         return d
     if not rx.saved_ok or not ra.saved_ok:
         return dict(kind='callee-saved', x86=rx.saved_ok, arm=ra.saved_ok)
-    return None
+    return soft
 
 
 def _read(uc, w, a, n):
