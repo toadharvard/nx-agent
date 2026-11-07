@@ -363,6 +363,68 @@ def load_requests(path):
     return out
 
 
+RTTI_PREFIX = (('_ZTV', 'vtable for '), ('_ZTI', 'typeinfo for '), ('_ZTT', 'VTT for '))
+
+
+def bodies_requests(out, demangle=None):
+    """The vtables, typeinfo and VTTs only the bodies step's objects (out/bodies/synth.tsv, `#bodies`) reference:
+    resolve's requests (write_vtable_requests) scan the compiled objects only, and bodies runs after `fnvlink
+    vtables`, so a class whose `_ZTV` / `_ZTI` / `_ZTT` only a synthesized body names was never asked for (s2d-010:
+    `vtable for Tail87b0`, `typeinfo for ios_baseB610`). Adds a request per such class to vtable_requests.tsv, with
+    the bodies object's host unit as its host (why `bodies-ref`). Names that rtti_defined.txt or an existing
+    vtables/ object defines are not asked for. Returns the number of requests added or extended."""
+    import elfsyms
+    import sigs
+    synth = []
+    path = os.path.join(out, 'bodies', 'synth.tsv')
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 2 and os.path.exists(f[1]):
+                synth.append((f[0], f[1]))
+    if not synth:
+        return 0
+    dpath = os.path.join(out, 'rtti_defined.txt')
+    defined = set(open(dpath, encoding='utf-8', errors='surrogateescape').read().split()) if os.path.exists(dpath) \
+        else set()
+    for _, o in load_synth(out):
+        defined.update(s.name for s in elfsyms.symbols(o) if s.shndx and s.bind != 'local')
+    want = collections.defaultdict(list)   # name -> [host units]
+    for h, o in synth:
+        for s_ in elfsyms.symbols(o):
+            if not s_.shndx and s_.name.startswith(tuple(p_ for p_, _ in RTTI_PREFIX)) and s_.name not in defined:
+                if h not in want[s_.name]:
+                    want[s_.name].append(h)
+    if not want:
+        return 0
+    if demangle is None:
+        def demangle(names):
+            r = subprocess.run(['c++filt'], input='\n'.join(names) + '\n', capture_output=True, text=True)
+            return dict(zip(names, r.stdout.split('\n')))
+    names = sorted(want)
+    dem = demangle(names)
+    reqs = load_requests(os.path.join(out, 'vtable_requests.tsv'))
+    n = 0
+    for name in names:
+        d = dem.get(name)
+        pre = next((t for p_, t in RTTI_PREFIX if name.startswith(p_)), None)
+        if not d or not pre or not d.startswith(pre):
+            continue
+        text = d[len(pre):]
+        cls = sigs.parse_itanium(name, d).name
+        sp = spelling(text, sigs.canon_type, sigs.split_qual)
+        if not cls or not sp:
+            continue
+        new = cls not in reqs
+        e = reqs.setdefault(cls, (sp, set(), []))
+        e[1].add('bodies-ref')
+        hosts = [h for h in want[name] if h not in e[2]]
+        e[2].extend(hosts)
+        n += bool(new or hosts)
+    write_requests(os.path.join(out, 'vtable_requests.tsv'), reqs)
+    return n
+
+
 def spelling(text, canon_type, split_qual):
     """C++ type-id for a demangled class name ('class Foo<class Bar *>' or 'ns::Foo<Bar*>'), None if it cannot be
     named from outside (anonymous namespace, local class)."""

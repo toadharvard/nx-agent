@@ -134,6 +134,17 @@ def load_native(addrmap_tsv):
     return nat
 
 
+def load_native_names(addrmap_tsv):
+    """addrmap.tsv -> {address: native Itanium symbol} of the F addresses (Classifier.dtor_as_fun)."""
+    res = {}
+    if os.path.exists(addrmap_tsv):
+        for line in open(addrmap_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 4 and f[1] == 'F' and f[3].startswith('_Z'):
+                res[int(f[0], 16)] = f[3]
+    return res
+
+
 def load_providers(addrmap_tsv):
     """addrmap.tsv -> {address: provider} of the F addresses S4's runtime implements (note `provider: <name>`):
     the platform's own definition of the exe function at that address (platform/crt/crt_symbols.tsv)."""
@@ -164,7 +175,11 @@ def relaxed_keys(sig):
     """(tier, key) strict -> loose for a parsed function name: class shells stripped (`X_shell`); then
     a unit-local copy of a class (`fnv_00650ea0::NiFixedString`, resolve's ns binding) keyed as the global class
     (key 'g'), which a name without unit namespaces also gives, so two units' copies never pair with each other.
-    Parameters at sigs level 2 (cv and long/int spellings ignored)."""
+    Parameters at sigs level 2 (cv and long/int spellings ignored).
+    Last tier, `unit-targ`: a class template instantiated over a unit-local copy (`NiPointer<fnv_009dfa00::
+    ActorPathingMessageQueue>`) keyed as the instantiation over the global class, the same ns binding one level
+    down. Only for lookups: Classifier.by_address takes it only where the layout probe gives the class and its
+    template arguments one size in the referencing and the defining units (targ_layout_ok)."""
     if sig.kind != 'func' or sig.params is None or not sig.qual:
         return []
     p2 = tuple(sigs.canon_param(p, 2) for p in sig.params)
@@ -177,13 +192,52 @@ def relaxed_keys(sig):
         keys.append(('global', ('g', scope, last, p2)))      # what a unit-local copy of this class looks for
     elif su:
         keys.append(('unit-ns', ('g', su, UNIT_NS_ANY.sub('', last), pu)))
+    st = tuple(UNIT_NS_ANY.sub('', q) for q in su)
+    if st and st != su:
+        keys.append(('unit-targ', ('g', st, UNIT_NS_ANY.sub('', last), pu)))
     return keys
 
 
 def def_keys(sig):
     """The relaxed keys a definition (or a name standing for one) is indexed under: not a unit-local copy's
     global key (a global reference never binds to one unit's copy)."""
-    return [(t, k) for t, k in relaxed_keys(sig) if t != 'unit-ns']
+    return [(t, k) for t, k in relaxed_keys(sig) if t not in ('unit-ns', 'unit-targ')]
+
+
+def targ_types(qual):
+    """Class-like type names inside the template arguments of a qualified name's scope, outermost first
+    (`NiPointer<fnv_009dfa00::A>` -> ['NiPointer<fnv_009dfa00::A>', 'fnv_009dfa00::A'])."""
+    out = []
+    for q in qual[:-1]:
+        if '<' not in q:
+            continue
+        out.append(q)
+        i = q.find('<')
+        for a in sigs.split_top(q[i + 1:q.rfind('>')]):
+            a = a.strip().rstrip('*&').strip()
+            a = re.sub(r'^(?:const|volatile)\s+|\s+(?:const|volatile)$', '', a)
+            if a and not re.match(r'^-?\d+$', a) and not SCALARS.match(a):
+                out.append(a)
+    return out
+
+
+def targ_layout_ok(layouts, ref_units, ref_qual, def_units):
+    """The class of a `unit-targ` pair and each class-like template argument: where the layout probe sizes the
+    referencing unit's spelling and the defining unit's global spelling, they agree. A type the probe does not
+    size in either unit is no evidence against the pair (NiPointer<T> holds a T* either way); the class itself
+    must be sized in both."""
+    if not layouts or not def_units:
+        return False
+    for k, t in enumerate(targ_types(ref_qual)):
+        t = sigs.canon_type(t)
+        g = UNIT_NS_ANY.sub('', t)
+        ref = set().union(*(layouts.get((u, t), set()) for u in ref_units))
+        dfn = set().union(*(layouts.get((u, g), set()) for u in def_units))
+        if k == 0 and not (ref and dfn):
+            return False
+        if ref and dfn and ref != dfn:
+            return False
+    return True
 
 
 def special_of(isig):
@@ -367,15 +421,20 @@ class Classifier:
     """units: fnvlink.load_units(); native: load_native(); msvc(name) / itanium(name) -> sigs.Sig;
     bodies: {MSVC name: (unit index, x86 bytes)} or None (no pristine objects); unit_names: [source] by index."""
 
-    def __init__(self, units, native, msvc, itanium, bodies=None, unit_names=()):
+    def __init__(self, units, native, msvc, itanium, bodies=None, unit_names=(), layouts=None, native_names=None):
         self.native, self.itanium, self.bodies, self.unit_names = native, itanium, bodies, list(unit_names)
+        self.layouts = layouts   # load_type_sizes(): the unit-targ tier is taken only with it
+        self.native_names = native_names or {}   # load_native_names(): F definitions standing for a destructor
+        self.msvc = msvc
         self.idx = collections.defaultdict(lambda: collections.defaultdict(set))   # key -> {addr: {msvc names}}
+        self.addr_units = collections.defaultdict(set)   # addr -> units naming an indexed MSVC name there
         for u in units.values():
             for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
                 if a in native and n.startswith('?'):
                     m = msvc(n)
                     for _, k in def_keys(m):
                         self.idx[k][a].add(n)
+                    self.addr_units[a].add(u.source)
         self.fidx = collections.defaultdict(lambda: collections.defaultdict(set))  # fold key -> {addr: {names}}
         for u in units.values():
             for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
@@ -389,18 +448,37 @@ class Classifier:
             for _, k in [('exact', kk) for t, kk in m.keys() if t in ('exact', 'l1', 'l2')] + def_keys(m):
                 self.bidx[k].add(n)
 
-    def by_address(self, isig):
+    def by_address(self, isig, units_=()):
         want = VARIANT_KIND.get(isig.variant, 'F') if isig.variant else 'F'
         if isig.variant == 'D0':
             return None
         for tier, k in relaxed_keys(isig):
-            cands = {a: ns for a, ns in self.idx.get(k, {}).items() if self.native.get(a) == want}
+            cands = {a: ns for a, ns in self.idx.get(k, {}).items()
+                     if self.native.get(a) == want or self.dtor_as_fun(isig, a, ns)}
+            if tier == 'unit-targ':   # the global instantiation, only with one layout on both sides
+                cands = {a: ns for a, ns in cands.items()
+                         if targ_layout_ok(self.layouts, units_, isig.qual, self.addr_units.get(a))}
             if len(cands) == 1:
                 (a, ns), = cands.items()
                 return tier, a, sorted(ns)[0]
             if len(cands) > 1:
                 return 'ambiguous', None, ','.join('%08x' % a for a in sorted(cands)[:6])
         return None
+
+    def dtor_as_fun(self, isig, a, ns):
+        """A D1/D2 whose address units.json names with this destructor (an MSVC `??1` there) while the native build
+        defines a function at it, the decomp's spelling `FUN_<a>(T*)` or a member `C::FUN_<a>()`: natively both
+        take x0 = the object, as exe_pass's this-only rule (shape_ok) accepts for exe-addr."""
+        if isig.variant not in ('D1', 'D2') or isig.params or self.native.get(a) != 'F' or a not in self.native_names:
+            return False
+        if not any(self.msvc(n).variant == 'dtor' for n in ns):
+            return False
+        d = self.itanium(self.native_names[a])
+        if d.kind != 'func' or d.params is None or d.variant:
+            return False
+        dp = [p for p in d.params if p != '...']
+        member = len(d.qual) >= 2 and not UNIT_NS.match(d.qual[-2])
+        return (not dp and member) or (len(dp) == 1 and dp[0].rstrip().endswith('*'))
 
     def by_fold(self, isig):
         """(address, folded MSVC names) when the instantiations of this template member over pointer arguments
@@ -433,7 +511,7 @@ class Classifier:
         us = ','.join(sorted(units_))
         if isig.kind != 'func':
             return Row(name, 'missing', None, None, us, 'not a function (%s)' % isig.kind, None)
-        hit = self.by_address(isig)
+        hit = self.by_address(isig, units_)
         amb = None
         if hit and hit[0] != 'ambiguous':
             tier, a, mn = hit
@@ -535,17 +613,31 @@ def load_defmissing(refs_tsv):
     return dict(out)
 
 
+# the deallocation function MSVC's ??_G calls, chosen as its lookup does: the class's (or a base's) one-parameter
+# operator delete, else its sized usual one with sizeof(C), else the global one. Never a delete-expression: with a
+# virtual destructor that dispatches to D0, which natively is this very ??_G stub's slot (or emitted nowhere: a
+# class whose destructor has no body, R6's Havok viewers at 0x00ddeff0)
+GDEL_HELPER = ('namespace __fnvnx_gd { '
+               'template <class T> auto del(T *p, int) -> decltype(T::operator delete((void *)p), void()) '
+               '{ T::operator delete((void *)p); } '
+               'template <class T> auto del(T *p, long) -> decltype(T::operator delete((void *)p, sizeof(T)), void()) '
+               '{ T::operator delete((void *)p, sizeof(T)); } '
+               'template <class T> void del(T *p, ...) { ::operator delete((void *)p); } }')
+
+
 def gdel_line(addr, msig):
     """A scalar deleting destructor `??_GC@@...(unsigned int)` the decomp places but GCC has no counterpart of:
-    `__fnv_<addr>(C *, unsigned)` destroys, and deletes on bit 0, as MSVC's does. None for a class it cannot name."""
+    `__fnv_<addr>(C *, unsigned)` destroys (C's own destructor, non-virtually), then on bit 0 frees with the
+    deallocation function MSVC's ??_G calls (GDEL_HELPER, compiled before the lines). None for a class it cannot
+    name."""
     if msig is None or msig.kind != 'func' or len(msig.qual) < 2:
         return None
     scope = msig.qual[:-1]
     if any('<' in p or '{' in p or '`' in p or "'" in p or '(' in p for p in scope):
         return None
     c = '::' + '::'.join(scope)
-    return ('extern "C" void *%s(%s *p, unsigned int f) { if (f & 1) delete p; else p->%s::~%s(); return p; }'
-            % (ADDR_SYM % addr, c, c, scope[-1]))
+    return ('extern "C" void *%s(%s *p, unsigned int f) { p->%s::~%s(); if (f & 1) __fnvnx_gd::del(p, 0); '
+            'return p; }' % (ADDR_SYM % addr, c, c, scope[-1]))
 
 
 def addr_host(tree, work, host, items, msvc, itanium_of_defs):
@@ -564,10 +656,10 @@ def addr_host(tree, work, host, items, msvc, itanium_of_defs):
     got, failed = {}, {}
     objs = []
     if lines:
-        its = [(k, 'gd', ln) for k, (a, ln) in enumerate(lines)]
+        its = [(len(lines), 'gdhelper', GDEL_HELPER)] + [(k, 'gd', ln) for k, (a, ln) in enumerate(lines)]
         obj, alive = vtables.compile_probe(tree, work, host, its, 'bdg', ('-ffunction-sections', '-fdata-sections'),
                                            prelude='', game=True)
-        ok = {lines[k][0] for k, _, _ in alive} if obj else set()
+        ok = {lines[k][0] for k, _, _ in alive if k < len(lines)} if obj else set()
         if obj:
             clean = os.path.join(work, host.replace('/', '_') + '.bdgs.o')
             if vtables.strip_init(obj.path, clean):
@@ -754,6 +846,18 @@ def load_layouts(out):
             f = line.rstrip('\n').split('\t')
             if not line.startswith('#') and len(f) >= 3 and f[2].isdigit():
                 res[(f[0], sigs.split_qual(f[1])[-1] if f[1] else f[1])].add(int(f[2]))
+    return res
+
+
+def load_type_sizes(out):
+    """out/layouts.tsv -> {(unit, canonical full type spelling): {sizes}} (targ_layout_ok)."""
+    res = collections.defaultdict(set)
+    path = os.path.join(out, 'layouts.tsv')
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 3 and f[2].isdigit():
+                res[(f[0], sigs.canon_type(f[1]))].add(int(f[2]))
     return res
 
 
@@ -1344,21 +1448,36 @@ def load_cnames(refs_tsv):
     return dict(out)
 
 
-def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data):
+def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data, members=None, msvc=None, placed_refs=None):
     """`exe-data`: a placeholder variable the decomp declares and nothing defines or binds (`extern A11MM g_a11mm;`,
     `extern int (__stdcall* LocalIncrement)(void*);`) whose MSVC name (`?g_a11mm@@3UA11MM@@A`: a variable, or `_name`)
     the pristine objects' placed code takes the address of: the exe's word at every such site (exe_call_targets,
     loose: variant units' other stack layouts and the ??_G a vftable slot holds are placed too) gives one image
     data address (is_data). Bound there like any image variable; a function pointer standing for an import gets its
     IAT slot (the same binding as `g_pfnInterlockedIncrement`). Function placeholders (REL32 calls) never bind:
-    a value source the decomp invented has no exe address. -> [Row]"""
+    a value source the decomp invented has no exe address.
+    members: {Itanium name: (canonical qual, units)} of declared-only C++ variables (a static data member
+    `Pt3::ms_kFirstPoint`, a unit namespace's `fnv_00ec15e0::g_movieHeap`), matched to the MSVC data names
+    (`?ms_kFirstPoint@Pt3@@2U1@B`, storage class 2/3) whose parsed qualified name is the same (msvc(name) -> Sig);
+    bound the same way.
+    placed_refs: a set, filled with the names (of cnames and members) that a function units.json places, or a
+    same-object function it reaches (MSVC inlined it there), references in its pristine code, bytes matching or
+    not: the exe has that variable, at an address and with an initial value
+    the pass may not have found. decl-data never gives such a variable zeros (no evidence of the exe's value).
+    -> [Row]"""
     import vslots
-    if not cnames:
+    members = members or {}
+    if not cnames and not members:
         return []
     pats = {n: re.compile(r'^(?:\?%s@@3|_%s$)' % (re.escape(n), re.escape(n))) for n in cnames}
     first = {}
     for n in cnames:
         first.setdefault(n[:1], []).append(n)
+    mlast = collections.defaultdict(list)   # '?<last component>@' -> member names
+    for n, (q, _) in members.items():
+        mlast['?%s@' % q[-1]].append(n)
+    cnames = dict(cnames)
+    cnames.update({n: us for n, (_, us) in members.items()})
     by_obj = collections.defaultdict(set)
     of = {}
     for i in range(len(udata)):
@@ -1378,6 +1497,37 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data):
                 if pats[n].match(nm):
                     by_obj[i].add(nm)
                     of[nm] = n
+            if msvc is not None and nm.startswith('?') and '@' in nm:
+                for n in mlast.get(nm[:nm.index('@') + 1], ()):
+                    sg = msvc(nm)
+                    if sg.kind == 'data' and tuple(sg.qual) == tuple(members[n][0]):
+                        by_obj[i].add(nm)
+                        of[nm] = n
+    if placed_refs is not None:   # referenced by code the exe has (a placed function's relocations)
+        for i, ms_ in sorted(by_obj.items()):
+            try:
+                c = vslots.Coff(os.path.join(msvc_objs, 'u%d.obj' % i))
+            except Exception:
+                continue
+            body = {}   # defined function -> names its code references
+            for fname, si in c.defs.items():
+                sy = c.syms[si]
+                if sy.secnum <= 0 or sy.storage not in (2, 3) or not c.secs[sy.secnum].flags & IMAGE_SCN_CNT_CODE:
+                    continue
+                ends = [v for v, _ in c.symbols_in(sy.secnum) if v > sy.value]
+                end = min(ends) if ends else len(c.section_bytes(sy.secnum))
+                body[fname] = {sn for off, (sn, _) in c.relocs(sy.secnum).items() if sy.value <= off < end}
+            # placed functions and what they reach in the object (MSVC inlined those callees into exe code)
+            todo = [f['symbol'] for f in udata[i].get('functions', ()) if f['symbol'] in body]
+            reached = set()
+            while todo:
+                f_ = todo.pop()
+                if f_ in reached:
+                    continue
+                reached.add(f_)
+                todo += [x for x in body[f_] if x in body and x not in reached]
+            for f_ in reached:
+                placed_refs.update(of[x] for x in body[f_] & ms_)
     exe = Pe(exe_path)
     seen = collections.defaultdict(collections.Counter)
     via = {}
@@ -1395,6 +1545,31 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data):
         rows.append(Row(n, 'exe-data', a, ADDR_SYM % a, ','.join(sorted(cnames[n])),
                         '%s at %d site(s) in the exe' % (via[n], nsite), None))
     return rows
+
+
+EXE_VAR_NOTE = 'placed exe code references it, its exe address was not found: no zeros without evidence'
+
+
+def pristine_data_names(objdir, nunits, lasts):
+    """Undefined external `?<last>@...` names in the pristine objects, for every <last> in lasts (the MSVC names
+    exe_data_pass may match to a declared-only C++ variable; demangled once, before the pass)."""
+    import vslots
+    out = set()
+    pre = {'?%s@' % x for x in lasts}
+    for i in range(nunits):
+        p = os.path.join(objdir, 'u%d.obj' % i)
+        if not os.path.exists(p):
+            continue
+        try:
+            c = vslots.Coff(p)
+        except Exception:
+            continue
+        for sy in c.syms.values():
+            nm = sy.name
+            if sy.secnum == 0 and sy.storage == 2 and nm.startswith('?') and '@' in nm and \
+                    nm[:nm.index('@') + 1] in pre:
+                out.add(nm)
+    return out
 
 
 GDEL_SYM = '__fnvnx_bdgd_%08x'
@@ -1517,28 +1692,43 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         if n not in msig:
             msig[n] = sigs.parse_msvc(n, ms[n])
         return msig[n]
-    cl = Classifier(units, native, msvc, itanium, bodies, unit_names)
+    cl = Classifier(units, native, msvc, itanium, bodies, unit_names, load_type_sizes(out),
+                    load_native_names(os.path.join(out, 'addrmap.tsv')))
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
 
+    exe_vars = set()   # variables placed exe code references whose address exe-data did not find
     if msvc_objs and exe_path:
         rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
                         load_providers(os.path.join(out, 'addrmap.tsv')))
         # placeholder variables the exe's code addresses: bound to that image address (before decl-data)
         have_ = {r.name for r in rows}
-        rows += [r for r in exe_data_pass({n: us for n, us in load_cnames(os.path.join(out, 'refs.tsv')).items()
-                                           if n not in have_}, exe_path, msvc_objs,
-                                          json.load(open(units_json))['units'], fnvlink.is_data_addr)
-                 if r.name not in have_]
+        # declared-only C++ variables (static data members, unit namespaces' globals) the same way, before decl-data
+        mem = {r.name: (tuple(itanium(r.name).qual), set(r.units.split(','))) for r in rows
+               if r.cls == 'missing' and r.note.startswith('not a function') and r.units and itanium(r.name).qual}
+        if mem:
+            ms.need(pristine_data_names(msvc_objs, len(unit_names), {q[-1] for q, _ in mem.values()}))
+        got_ = exe_data_pass({n: us for n, us in load_cnames(os.path.join(out, 'refs.tsv')).items()
+                              if n not in have_}, exe_path, msvc_objs, json.load(open(units_json))['units'],
+                             fnvlink.is_data_addr, mem, msvc, exe_vars)
+        bym_ = {r.name: r for r in got_ if r.name in mem}
+        rows = [bym_[r.name] if r.name in bym_ else r for r in rows]
+        rows += [r for r in got_ if r.name not in have_]
+        exe_vars -= {r.name for r in got_}
     if synth:   # its stubs are emitted with the synthesized objects
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
         # variables declared and defined nowhere, without an exe address: a typed zero definition (decl-data)
-        rows = [r._replace(cls='decl-data', host=sorted(r.units.split(','))[0],
+        # never for a variable code the exe has references (exe_vars): its address and initial value are the exe's,
+        # not found here, so zeros would hide a gap; it stays missing (a visible data trap)
+        rows = [r._replace(note=r.note + '; %s' % EXE_VAR_NOTE) if r.name in exe_vars and r.cls == 'missing' else
+                r._replace(cls='decl-data', host=sorted(r.units.split(','))[0],
                            note='zero-initialized definition of the declared variable (no exe address)')
                 if r.cls == 'missing' and r.note.startswith('not a function') and r.units and
                 data_line(itanium(r.name).qual) else r for r in rows]
         have_ = {r.name for r in rows}
         for n, us in sorted(load_cdata(os.path.join(out, 'refs.tsv')).items()):
+            if n in exe_vars:   # stays unresolved (a data trap), as without decl-data
+                continue
             if n not in have_ and data_line([n]):
                 rows.append(Row(n, 'decl-data', None, None, ','.join(sorted(us)),
                                 'zero-initialized definition of the declared variable (no exe address)', sorted(us)[0]))
@@ -1775,3 +1965,10 @@ def main(argv):
     run(pos[0], pos[1], msvc_objs=opts.get('msvc-objs'), names_txt=opts.get('names'), units_json=opts.get('units'),
         jobs=int(opts.get('jobs', os.cpu_count() or 4)), synth=not opts.get('no-synth'),
         exe_path=opts.get('exe') or os.environ.get('FNVNX_EXE'))
+    # the vtables / typeinfo only the synthesized bodies name: requested, then the synthesis runs again (its probe
+    # cache keeps the earlier classes), so resolve 2 links them like the others (s2d-010)
+    import vtables
+    n = vtables.bodies_requests(pos[0])
+    print('bodies: %d vtable / typeinfo requests from the synthesized bodies' % n, file=sys.stderr)
+    if n and not os.environ.get('FNVNX_NO_VTABLES'):
+        vtables.run(pos[0], pos[1], int(opts.get('jobs', os.cpu_count() or 4)))

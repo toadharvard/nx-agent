@@ -54,7 +54,7 @@ import xexit    # noqa: E402  (S2c-abi: native stand-ins of the exe's exit thunk
 import slotfill2  # noqa: E402  (S2c-vt2: slot fill rules)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
-DATA_END = 0x0200c612
+DATA_END = 0x014089e4            # end of the image: .reloc 0x01340000 + 0xc89e4 (FalloutNV.exe 1.4.0.525)
 UNDNAME = os.environ.get('UNDNAME') or next((p for p in ('llvm-undname-18', 'llvm-undname')
                                              if any(os.access(os.path.join(d, p), os.X_OK)
                                                     for d in os.environ.get('PATH', '').split(':'))), 'llvm-undname')
@@ -321,6 +321,15 @@ def kind_of_addr(a):
 
 def is_data_addr(a):
     return kind_of_addr(a) == 'data'
+
+
+IMAGE_FIRST = 0x00401000   # the exe's first section (.text); nothing the decomp names lives below it
+
+
+def in_image(a):
+    """An address the exe maps (first section .. DATA_END + a page, kind_of_addr's range): a units.json value
+    outside it (0x0, 0x14, 0x65 for three `g_target_*` anchors) is not where anything lives."""
+    return IMAGE_FIRST <= a < DATA_END + 0x1000
 
 
 def body_data_addr(body_bind, un):
@@ -813,6 +822,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 # S2d exe-data: a placeholder variable at the image address the exe's code uses for it; bound like
                 # any address (data, an IAT slot GCC calls, TLS)
                 cls, tier, addr, target = 'addr', 'body/exe-data', body_data_addr(body_bind, un), None
+            if addr is not None and cls == 'addr' and not in_image(addr):
+                # S2d (R6 recon6-007): a units.json "address" outside the image (`?g_target_00d53c90@@3HA` at
+                # 0x00000065: a value the recipe recorded, not where the variable lives) is no evidence: the name
+                # stays unresolved, a visible trap, never `__fnv_00000065`
+                cls, tier, note = 'unresolved', 'not-in-image/' + (tier or ''), '%08x is outside the image' % addr
+                addr = None
+                stats['refs_not_in_image'] += 1
             if addr is not None and cls == 'addr':
                 ak = kind_of_addr(addr)
                 if ak == 'data' and un in tls_undef:   # thread-local: native TLS in the image's .tls layout
