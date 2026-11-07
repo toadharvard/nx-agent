@@ -266,6 +266,28 @@ the pointer, it is not a bool). The probe now first runs the case once with `wor
 read of planted memory with its size) and tries only bytes the oracle read with a 1-byte access and no wider access
 over them. Other records go on to the next probes. d19-bool rechecks every cached bool-repr verdict once. Test:
 `tests/s13/test_boolrepr.py`.
+Measured on 8b233f99 (link 9f865b0a4037, all 8 shards): bool-repr 1,424 -> 290 cumulative, hard 6,314 -> 7,212.
+bool-repr is soft, so the records that left it count as hard now; they were hidden before. Most of them landed in
+signedness (53 -> 252), x86-only-store, store-width and native-stub-data.
+
+**d20-sign (S1-rules, SCOPED = d20).** The signedness probe had the same flaw: on 8b233f99, 434 of its 461
+memory hits were bytes inside a word the oracle read whole. A memory byte now counts only when the oracle read it
+as the top byte of a narrow access: a 1-byte read of it, or a 2-byte read whose high byte it is, and no wider
+access over it. Argument bytes are probed as before. d20-sign rechecks every cached signedness verdict once. Test:
+`tests/s13/test_boolrepr.py`.
+
+**d20-ilk (S1-rules).** The shim's inline Interlocked* (fnvnx_win32.h) calls `fnvnx_interlocked_slow(op, p, a,
+b)` for a misaligned operand. The fuzzer often plants misaligned pointers. The oracle's `lock` instruction is not a
+call, but the native slow path was traced as one: 767 cached call-flow records on 8b233f99 had
+`name:fnvnx_interlocked_slow` in the native trace. arm64emu now runs it as the Interlocked function `op` names
+(libcalls.INTERLOCKED_SLOW_OPS). d20-ilk selects the functions whose native code names it. Test:
+`tests/s13/test_ilkslow.py`.
+
+**d20-malloc (S1-rules).** MSVC units that call the CRT malloc (0x00ecd1c7) got a canned garbage result for it,
+while the native's operator new / MemoryManager::Allocate got a fresh heap block (world.ALLOCATORS). malloc was
+also missing from the `new` family, although free is in `delete`. On 8b233f99, about 160 live call-flow records had
+malloc in the oracle against new / Allocate / a constructor natively. malloc is now an allocator and in the `new`
+family. d20-malloc selects the functions whose oracle code calls it. Test: `tests/s13/test_crtmalloc.py`.
 
 **difffuzz-19: a full refresh (HARNESS = difffuzz-19, orchestrator-approved in S1-fuzzB-002).** S1-fuzzB's untyped
 float results (`x86emu.x87_result_use`), its CRT_MATH builtins and engine's preference for a decorated spelling

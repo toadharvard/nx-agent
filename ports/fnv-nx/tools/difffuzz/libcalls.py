@@ -107,7 +107,8 @@ def noreturn_a64(name):
 # traced calls compared by family: the oracle calls the allocator or the CRT directly where the native code calls
 # the game's operator new / delete (MSVC inlined the operator; MemoryManager::Allocate 0x00aa3e40, CRT free
 # 0x00ecd291); the arguments are not compared
-FAMILY = {0x00401000: 'new', 0x00aa3e40: 'new', 0x00401030: 'delete', 0x00aa1460: 'delete', 0x00ecd291: 'delete'}
+FAMILY = {0x00401000: 'new', 0x00aa3e40: 'new', 0x00ecd1c7: 'new', 0x00401030: 'delete', 0x00aa1460: 'delete',
+          0x00ecd291: 'delete'}   # 0x00ecd1c7 CRT malloc (S1-rules d20-malloc)
 
 
 class Mem:
@@ -367,6 +368,12 @@ def import_name(decorated):
 
 IMPORT_BUILTINS = {'InterlockedIncrement', 'InterlockedDecrement', 'InterlockedExchange', 'InterlockedCompareExchange',
                    'InterlockedExchangeAdd'}
+
+
+# fnvnx_interlocked_slow(op, p, a, b) (platform/win32/sync.cpp): op -> the Interlocked function it performs; a is
+# the value / exchange, b the comparand, as run_import's a[1] / a[2]
+INTERLOCKED_SLOW_OPS = {0: 'InterlockedIncrement', 1: 'InterlockedDecrement', 2: 'InterlockedExchange',
+                        3: 'InterlockedExchangeAdd', 4: 'InterlockedCompareExchange'}
 
 
 def run_import(name, m, a):

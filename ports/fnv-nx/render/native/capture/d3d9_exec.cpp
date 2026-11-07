@@ -369,6 +369,8 @@ public:
         if (el.empty()) { Skip("no usable vertex elements"); return true; }
         if (nv > kMaxVerts) { Skip("vertex count over the limit"); return true; }
         uint32_t vOff, iOff = 0;
+        if (!Reserve((uint64_t)nv * stride + (indexed ? (uint64_t)verts * 4 : 0) + 4096 * 2 + 512 * 2 + 64 + 320, 4096))
+            return false;
         float* out = (float*)Alloc(nv * stride, &vOff);
         if (!out) return Fail("frame arena full (128 MiB)");
         for (uint32_t i = 0; i < nv; i++)
@@ -472,6 +474,29 @@ public:
         if (g_drawLog)
             fprintf(g_drawLog, "%u\t%u\t%u\t%08x%08x\t%08x%08x\t%s\t%s\n", frameNo, st->draws - 1, backendDraw++,
                     vi->second.hi, vi->second.lo, pi->second.hi, pi->second.lo, nx_d9_family_name(family), fam ? fam : "-");
+        return true;
+    }
+
+    // The frame's vertex/constant data lives in the arena and its commands in `words` until the frame is submitted.
+    // A frame that needs more than either holds is submitted in parts: the commands so far go to the backend and
+    // complete (submit is synchronous to WaitFrame), then both are reused. The pass is reopened with its contents
+    // kept (BeginPass loads; clears are separate ops), and state ids stay defined in the backend. Called before a
+    // draw allocates anything, so no draw straddles a flush.
+    bool Reserve(uint64_t bytes, uint32_t words_) {
+        const uint64_t slack = 16 * 256;   // Alloc's 256-byte alignment, per allocation of a draw
+        if (bytes + slack > kArena) return Fail("draw larger than the frame arena (128 MiB)");
+        if (((uint64_t)arenaHead + 255) / 256 * 256 + bytes + slack <= kArena && enc.size() + words_ + 64 <= words.size())
+            return true;
+        if (passOpen) enc.Op(NxOp_EndPass, 0);
+        enc.Op(NxOp_End, 0);
+        if (enc.overflow()) return Fail("command stream overflow");
+        NxSubmit s; memset(&s, 0, sizeof s);
+        s.stream = (uint64_t)(uintptr_t)enc.data(); s.words = enc.size(); s.frame = frameNo; s.present = 0;
+        be->Submit(s);
+        be->WaitFrame(frameNo);
+        st->flushes++;
+        enc.Reset(words.data(), (uint32_t)words.size());
+        passOpen = false; arenaHead = 0;
         return true;
     }
 

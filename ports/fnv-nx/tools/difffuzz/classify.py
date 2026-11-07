@@ -327,10 +327,17 @@ def hint(pair, target, case, div, fn, max_steps):
     if bhits:
         h['cause'] = 'bool-repr'; h['bytes'] = bhits; return h
     # signedness probe: clear the top bit of each input byte >= 0x80
+    # S1-rules (d19-sign): in memory only the top byte of a narrow read counts (a char read by itself, or the high
+    # byte of a 2-byte read), as for bool-repr; a byte of a pointer or integer word is not widened (before: 434 of
+    # 461 memory hits on 8b233f99 were bytes inside a word read whole)
+    def narrow_top(addr):
+        cover = [(k, s) for k in range(8) for s in reads.get(addr - k, ()) if s > k]
+        return bool(cover) and all(s <= 2 for _, s in cover) and \
+            any((k, s) in ((0, 1), (1, 2)) for k, s in cover)
     hits = []
     for a, b in list(case.mem.items()):
         for i, x in enumerate(b):
-            if x >= 0x80 and len(hits) < 4 and h['_runs'] < 40:
+            if x >= 0x80 and len(hits) < 4 and h['_runs'] < 40 and narrow_top(a + i):
                 trial = case.copy()
                 nb = bytearray(b); nb[i] &= 0x7f; trial.mem[a] = bytes(nb)
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1

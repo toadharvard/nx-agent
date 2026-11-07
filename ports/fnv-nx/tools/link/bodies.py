@@ -14,6 +14,11 @@ in this order (first that applies):
    whose other pointer instantiations units.json places at one address the native build defines, at least two of
    them there: MSVC's linker folded their identical code (the body does not depend on the pointee), so this
    instantiation's code is that body too. Bound to `__fnv_<addr>`; C2/D2 to the complete-object definition.
+1c. `exe-sret` (after exe-addr's checks) - the exe calls one address whose definition takes one more pointer
+   parameter first (after `this`) where the reference returns a class by value: MSVC's hidden return pointer, which
+   the decomp writes out (`FUN_0045bb20_cls::ApplyScaled(target*, float)` for 53 vector `operator*(float)`).
+   An adapter in the referencing unit calls the address with a local's address and returns it
+   (`sret_line`: the type from the declaration by decltype, trivially copyable and destructible types only).
 1b. `exe-addr` (`--exe`, the player's FalloutNV.exe) - the referencing unit's pristine object calls the MSVC name:
    every pristine object's calls of it (REL32 in functions placed by units.json, or at the address a placed
    function's call reaches, bytes checked against the exe; a DIR32 there, the address taken, counts the same)
@@ -45,6 +50,13 @@ in this order (first that applies):
    C::f() {...}` in a .cpp) or in the class body of a copy of C: that unit is compiled again with
    `-fkeep-inline-functions` like msvc-inline and only the wanted symbol is kept (its own name, or the one the
    relaxed key pairs, as for msvc-inline). A host that does not emit it leaves the name `missing`.
+5c. `addr-host` - an exe address refs.tsv binds references to (`code-defmissing`) whose placing unit's object
+   defines nothing there: a `??_G` scalar deleting destructor (no GCC counterpart: `gdel_line` defines
+   `__fnv_<addr>(C *, unsigned)` in the placing unit), or an inline body GCC did not emit (the unit compiled with
+   -fkeep-inline-functions; the one emitted symbol the MSVC name's relaxed key pairs; `__fnv_<addr>: b` to it).
+5a. `thunk` - a this-adjusting thunk (`_ZTh<off>_f`, `_ZTv<off>_n<vcall>_f`) refs.tsv leaves undefined
+   (`special-unresolved`): GCC emits thunks only with f's definition, and f is bound by address or synthesized.
+   A weak AArch64 thunk adjusts w0 (and adds the vcall offset from the vtable) and tail-calls f by name.
 5b. `crt-rule` - a runtime member the C++ library defines by its contract, not by the decomp: the MSVC STL's
    throwers `C::_Xlen()` / `C::_Xran()` / `C::_Xinvalid_argument()` of the decomp's string and vector copies (a stub
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
@@ -110,6 +122,18 @@ def load_native(addrmap_tsv):
             if len(f) >= 2 and f[1] in ('F', 'C', 'X', 'G'):
                 nat[int(f[0], 16)] = f[1]
     return nat
+
+
+def load_providers(addrmap_tsv):
+    """addrmap.tsv -> {address: provider} of the F addresses S4's runtime implements (note `provider: <name>`):
+    the platform's own definition of the exe function at that address (platform/crt/crt_symbols.tsv)."""
+    res = {}
+    if os.path.exists(addrmap_tsv):
+        for line in open(addrmap_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 6 and f[1] == 'F' and f[5].startswith('provider: '):
+                res[int(f[0], 16)] = f[5][len('provider: '):].strip()
+    return res
 
 
 # ---------------------------------------------------------------------------------------------------- keys
@@ -189,6 +213,36 @@ def default_line(kind, isig):
             'dtor': '%s::~%s() = default;' % (sp, base),
             'd0': '%s::~%s() = default;' % (sp, base),
             'assign': '%s &%s::operator=(const %s &) = default;' % (sp, sp, sp)}[kind]
+
+
+SCALARS = re.compile(r'^(?:(?:un)?signed |const |volatile )*(?:void|bool|char|short|int|long|long long|__int64|'
+                     r'float|double|long double|wchar_t|unsigned|signed)$')
+
+
+def sret_line(isig, addr, this):
+    """Adapter for `exe-sret`: the exe's function at addr takes the result's address as its first parameter
+    after `this` (MSVC's hidden return pointer, written out by the decomp); GCC's caller wants the result by value.
+    The result type comes from the declaration itself (decltype of a call); the exe builds it in raw storage, so it
+    must be trivially copyable and destructible (a constructor of its own is fine: the exe's code runs it)."""
+    if isig.kind != 'func' or isig.params is None or isig.raw_params is None or len(isig.qual) < 1:
+        return None
+    if any('<' in p or '{' in p or '`' in p or "'" in p or '(' in p for p in isig.qual):
+        return None
+    if this and len(isig.qual) < 2:
+        return None
+    q = '::' + '::'.join(isig.qual)
+    ps = list(isig.raw_params)
+    args = ', '.join('a%d' % k for k in range(len(ps)))
+    decl = ', '.join('%s a%d' % (p, k) for k, p in enumerate(ps))
+    call = ('this->%s(%s)' % (isig.qual[-1], args)) if this else '%s(%s)' % (q, args)
+    xs = (['const volatile void*'] if this else []) + ['void*'] + ps
+    sym = '__fnvnx_sr_%08x_%s' % (addr, hashlib.sha1(isig.text.encode('utf-8', 'surrogateescape')).hexdigest()[:8])
+    return ('auto %s(%s)%s -> decltype(%s) { typedef decltype(%s) R; '
+            'static_assert(__is_trivially_copyable(R) && __has_trivial_destructor(R), "sret"); '
+            'extern void %s(%s) __asm__("%s"); alignas(R) unsigned char r[sizeof(R)]; %s(%sr%s); '
+            'return *reinterpret_cast<R *>(r); }'
+            % (q, decl, (' ' + isig.cv) if isig.cv else '', call, call, sym, ', '.join(xs), ADDR_SYM % addr,
+               sym, 'this, ' if this else '', (', ' + args) if args else ''))
 
 
 # ---------------------------------------------------------------------------------------------------- x86 bodies
@@ -433,6 +487,158 @@ def emit_crt(rows, itanium):
     return '\n'.join(out) + '\n'
 
 
+# ---------------------------------------------------------------------------------------------------- addr-host
+
+def load_defmissing(refs_tsv):
+    """Addresses refs.tsv binds references to (`code-defmissing`: units.json places a function there, but its unit's
+    object defines nothing at it) -> {address: set(referencing units)}."""
+    out = collections.defaultdict(set)
+    if refs_tsv and os.path.exists(refs_tsv):
+        for line in open(refs_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if len(f) >= 5 and f[2] == 'code-defmissing' and f[4]:
+                out[int(f[4], 16)].add(f[0].split('#')[0])
+    return dict(out)
+
+
+def gdel_line(addr, msig):
+    """A scalar deleting destructor `??_GC@@...(unsigned int)` the decomp places but GCC has no counterpart of:
+    `__fnv_<addr>(C *, unsigned)` destroys, and deletes on bit 0, as MSVC's does. None for a class it cannot name."""
+    if msig is None or msig.kind != 'func' or len(msig.qual) < 2:
+        return None
+    scope = msig.qual[:-1]
+    if any('<' in p or '{' in p or '`' in p or "'" in p or '(' in p for p in scope):
+        return None
+    c = '::' + '::'.join(scope)
+    return ('extern "C" void *%s(%s *p, unsigned int f) { if (f & 1) delete p; else p->%s::~%s(); return p; }'
+            % (ADDR_SYM % addr, c, c, scope[-1]))
+
+
+def addr_host(tree, work, host, items, msvc, itanium_of_defs):
+    """items: [(address, MSVC symbol units.json places there)] of one placing unit. ??_G: gdel_line; others: the
+    unit compiled with -fkeep-inline-functions, the emitted symbol whose relaxed key pairs the MSVC name (exactly
+    one) kept, and `__fnv_<addr>: b <symbol>`. -> (object or None, {address: target}, {address: why failed})."""
+    import vtables
+    lines, plain = [], []
+    for a, m in items:
+        if m.startswith('??_G'):
+            ln = gdel_line(a, msvc(m))
+            if ln:
+                lines.append((a, ln))
+                continue
+        plain.append((a, m))
+    got, failed = {}, {}
+    objs = []
+    if lines:
+        its = [(k, 'gd', ln) for k, (a, ln) in enumerate(lines)]
+        obj, alive = vtables.compile_probe(tree, work, host, its, 'bdg', ('-ffunction-sections', '-fdata-sections'),
+                                           prelude='', game=True)
+        ok = {lines[k][0] for k, _, _ in alive} if obj else set()
+        if obj:
+            clean = os.path.join(work, host.replace('/', '_') + '.bdgs.o')
+            if vtables.strip_init(obj.path, clean):
+                r = vtables.gc_weaken(clean, {ADDR_SYM % a for a in ok}, os.path.join(work, host.replace('/', '_') + '.bdg.x'))
+                if r:
+                    objs.append(r[0])
+                    got.update({a: ADDR_SYM % a for a in ok if ADDR_SYM % a in r[1]})
+        for a, _ in lines:
+            if a not in got:
+                failed[a] = 'deleting destructor line refused'
+    if plain:
+        its = [(0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}')]
+        obj, _ = vtables.compile_probe(tree, work, host, its, 'bda',
+                                       ('-ffunction-sections', '-fdata-sections', '-fkeep-inline-functions'),
+                                       prelude='', game=True)
+        clean = os.path.join(work, host.replace('/', '_') + '.bdas.o')
+        if obj is None or not vtables.strip_init(obj.path, clean):
+            failed.update({a: 'host does not compile' for a, _ in plain})
+        else:
+            o = vtables.Obj(clean)
+            defined = sorted(n for n in o.defs if o.bind(n) != 'local' and n.startswith('_Z'))
+            byk = collections.defaultdict(set)
+            for n, isg in zip(defined, itanium_of_defs(defined)):
+                for _, k in def_keys(isg):
+                    byk[k].add(n)
+            want = {}
+            for a, m in plain:
+                cands = set()
+                for _, k in def_keys(msvc(m)):
+                    cands |= byk.get(k, set())
+                if len(cands) == 1:
+                    want[a] = next(iter(cands))
+                else:
+                    failed[a] = 'emitted %d symbols for %s' % (len(cands), m)
+            r = vtables.gc_weaken(clean, set(want.values()), os.path.join(work, host.replace('/', '_') + '.bda.x')) \
+                if want else None
+            if r:
+                objs.append(r[0])
+                for a, n in want.items():
+                    if n in r[1]:
+                        got[a] = n
+                    else:
+                        failed[a] = 'not kept'
+            else:
+                failed.update({a: 'not emitted' for a in want})
+    return objs, got, failed
+
+
+def emit_addr_stubs(targets):
+    """`__fnv_<addr>: b <symbol>` (weak) for the addr-host bodies that are not themselves named __fnv_<addr>."""
+    out = ['// GENERATED by tools/link/bodies.py: exe addresses bound to the body their placing unit emits', '    .text']
+    for i, (a, n) in enumerate(sorted(targets.items())):
+        if n == ADDR_SYM % a:
+            continue
+        q = '"%s"' % (ADDR_SYM % a)
+        out += ['    .section .text.fnvnx_bd_addr.%d,"ax",%%progbits' % i, '    .p2align 2', '    .weak ' + q,
+                '    .type %s, %%function' % q, q + ':', '    b "%s"' % n, '    .size %s, .-%s' % (q, q)]
+    return '\n'.join(out) + '\n'
+
+
+# ---------------------------------------------------------------------------------------------------- thunks
+
+THUNK = re.compile(r'^_ZT(?:h(n?)(\d+)|v(n?)(\d+)_n(\d+))_(.+)$')
+
+
+def thunk_parts(name):
+    """`_ZTh[n]<off>_<enc>` / `_ZTv[n]<off>_n<vcall>_<enc>` -> (this adjustment, vcall offset or None, target
+    `_Z<enc>`), else None. Virtual thunks: `this += off`, then `this += *(*this - vcall)` (ILP32: 4-byte entries)."""
+    m = THUNK.match(name)
+    if not m:
+        return None
+    if m.group(2) is not None:
+        return (-int(m.group(2)) if m.group(1) else int(m.group(2))), None, '_Z' + m.group(6)
+    return (-int(m.group(4)) if m.group(3) else int(m.group(4))), int(m.group(5)), '_Z' + m.group(6)
+
+
+def load_thunks(refs_tsv):
+    """Thunk names refs.tsv leaves undefined (`special-unresolved:*thunk*`) -> {name: set(referencing units)}."""
+    out = collections.defaultdict(set)
+    if refs_tsv and os.path.exists(refs_tsv):
+        for line in open(refs_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if len(f) >= 3 and f[2].startswith('special-unresolved') and 'thunk' in f[2] and thunk_parts(f[1]):
+                out[f[1]].add(f[0].split('#')[0])
+    return dict(out)
+
+
+def emit_thunks(names):
+    """AArch64 (ILP32) thunks, weak: adjust w0, then tail-call the target, which resolve binds like any name."""
+    out = ['// GENERATED by tools/link/bodies.py: this-adjusting thunks of functions no unit emits them with',
+           '    .text']
+    for i, n in enumerate(sorted(names)):
+        off, vcall, target = thunk_parts(n)
+        q = '"%s"' % n
+        out += ['    .section .text.fnvnx_bd_thunk.%d,"ax",%%progbits' % i, '    .p2align 2', '    .weak ' + q,
+                '    .type %s, %%function' % q, q + ':']
+        if off:
+            out += ['    %s w0, w0, #%d' % ('sub' if off < 0 else 'add', abs(off))]
+        if vcall is not None:
+            out += ['    ldr w16, [x0]', '    sub w16, w16, #%d' % vcall, '    ldr w16, [x16]',
+                    '    add w0, w0, w16']
+        out += ['    b "%s"' % target, '    .size %s, .-%s' % (q, q)]
+    return '\n'.join(out) + '\n'
+
+
 # ---------------------------------------------------------------------------------------------------- synthesis
 
 def emit_empty(rows):
@@ -453,7 +659,10 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
     items, failed = [], {}
     if not inline:
         for k, r in enumerate(sorted(rows, key=lambda r: r.name)):
-            line = default_line(special_of(itanium(r.name)), itanium(r.name))
+            if r.cls == 'exe-sret':
+                line = sret_line(itanium(r.name), r.addr, r.note.startswith('sret this'))
+            else:
+                line = default_line(special_of(itanium(r.name)), itanium(r.name))
             if line in {it[2] for it in items}:
                 continue
             items.append((k, 'bd', line))
@@ -779,6 +988,96 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
     return out
 
 
+# ---------------------------------------------------------------------------------------------------- call alignment
+
+ALIGN_SKIP = ('__imp_', '__security', '__chkstk', '__alloca', '__EH', '__CxxFrame', '__ftol', '__alldiv',
+              '__allmul', '__aulldiv', '__allshl', '__allshr', '__aullshr', '__allrem', '__aullrem', '__SEH',
+              '_memcpy', '_memset', '__RTC')
+ALIGN_MIN_RATIO = 0.5
+ALIGN_MAX_BYTES = 0x4000
+
+
+def object_call_seqs(objdir, i):
+    """u<i>.obj -> {code symbol: [REL32 callee names in offset order]}."""
+    import vslots
+    p = os.path.join(objdir, 'u%d.obj' % i)
+    if not os.path.exists(p):
+        return {}
+    c = vslots.Coff(p)
+    funcs = {}
+    for name, si in c.defs.items():
+        sy = c.syms[si]
+        if sy.secnum > 0 and c.secs[sy.secnum].flags & IMAGE_SCN_CNT_CODE and sy.storage in (2, 3):
+            ends = [v for v, _ in c.symbols_in(sy.secnum) if v > sy.value]
+            end = min(ends) if ends else len(c.section_bytes(sy.secnum))
+            funcs[name] = [sn for off, (sn, typ) in sorted(c.relocs(sy.secnum).items())
+                           if sy.value <= off < end and typ == 0x14]
+    return funcs
+
+
+def align_targets(objdir, udata, exe, wanted):
+    """`exe-addr` by call order, for names whose every caller the exe has only inlined. For each function P that
+    units.json places, its pristine call sequence (REL32 callees in order; a callee defined in the same object and
+    placed nowhere is expanded in place, as MSVC inlined it, up to 4 levels) is aligned with the exe's direct
+    call/jmp targets in P's range (capstone; the range ends at the next placed function). Callees with an
+    address are the anchors; in a replaced run of equal length on both sides, each callee without an address
+    takes the exe target at its position. Held out on link 9f865b0a: 9,040 addresses right, 6 wrong.
+    -> {msvc name in wanted: {address: votes}}."""
+    import bisect
+    import difflib
+    import capstone
+    addr_of, size_of = {}, {}
+    for u in udata:
+        for f in u['functions']:
+            a = int(f['address'], 16)
+            for n in [f['symbol']] + list(f.get('fold_aliases', [])):
+                addr_of.setdefault(n, a)
+                size_of.setdefault(n, f.get('size'))
+        for n, a in (u.get('symbols') or {}).items():
+            addr_of.setdefault(n, int(a, 16))
+    starts = sorted({int(f['address'], 16) for u in udata for f in u['functions']})
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    out = collections.defaultdict(collections.Counter)
+
+    def expand(funcs, n, depth=0):
+        seq = []
+        for x in funcs[n]:
+            if x in funcs and x not in addr_of and depth < 4 and x != n:
+                seq += expand(funcs, x, depth + 1)
+            else:
+                seq.append(x)
+        return seq
+    for i in range(len(udata)):
+        funcs = object_call_seqs(objdir, i)
+        for p_ in funcs:
+            if p_ not in addr_of:
+                continue
+            seq = expand(funcs, p_)
+            if not any(x in wanted for x in seq):
+                continue
+            a = addr_of[p_]
+            size = size_of.get(p_)
+            if not size:
+                j = bisect.bisect_right(starts, a)
+                size = min(starts[j] - a, ALIGN_MAX_BYTES) if j < len(starts) else None
+            code = exe.read(a, size) if size else None
+            if not code:
+                continue
+            es = [int(ins.op_str, 16) for ins in md.disasm(code, a)
+                  if ins.mnemonic in ('call', 'jmp') and ins.size == 5 and ins.op_str.startswith('0x')
+                  and not a <= int(ins.op_str, 16) < a + size]
+            ptok = [addr_of.get(x, 'U:' + x) for x in seq]
+            sm = difflib.SequenceMatcher(None, ptok, es, autojunk=False)
+            if not es or sm.ratio() < ALIGN_MIN_RATIO:
+                continue
+            for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                if tag == 'replace' and i2 - i1 == j2 - j1:
+                    for t, e in zip(ptok[i1:i2], es[j1:j2]):
+                        if isinstance(t, str) and t[2:] in wanted and not t[2:].startswith(ALIGN_SKIP):
+                            out[t[2:]][e] += 1
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------- run
 
 def load_bind(out):
@@ -805,7 +1104,7 @@ def load_synth(out):
     return res
 
 
-def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms):
+def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None):
     """`exe-addr`: a name still missing (or about to get a synthesized special member) whose MSVC counterpart the
     referencing unit's pristine object calls: bound to the address the exe's call at that site reaches, when every
     site agrees and the native build defines it with the right kind."""
@@ -846,6 +1145,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
         rs = msvc(ref)
         if rs.kind != 'func' or rs.params is None:
             return False
+        if this_only and a in (providers or {}):
+            return True   # S4's runtime implements the exe's function there, taking the object (void *self)
         member = bool(rs.member)
         rparams = [p_ for p_ in rs.params if p_ != '...']
         for n_ in def_names.get(a, ()):
@@ -859,6 +1160,27 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
                 return True   # the decomp spells the destructor as FUN_<addr>(T*): natively both take x0 = object
         return False
     seen = collections.defaultdict(collections.Counter)   # Itanium name -> {address: sites}
+    aligned_names = set()
+
+    def sret_ok(ref, a):
+        """The reference returns a class by value and the definition at a takes one more parameter, a pointer,
+        first (after this): MSVC's hidden return pointer as the decomp writes it."""
+        rs = msvc(ref)
+        if rs.kind != 'func' or rs.params is None or not rs.ret:
+            return False
+        ret = rs.ret.strip()
+        if ret.endswith(('*', '&')) or SCALARS.match(ret) or ret.startswith('enum '):
+            return False
+        rparams = [p_ for p_ in rs.params if p_ != '...']
+        for n_ in def_names.get(a, ()):
+            d_ = msvc(n_) if n_.startswith('?') else None
+            if d_ is None or d_.kind != 'func' or d_.params is None:
+                continue
+            dparams = [p_ for p_ in d_.params if p_ != '...']
+            if len(dparams) == len(rparams) + 1 and dparams[0].rstrip().endswith('*') and \
+                    bool(d_.member and not d_.static) == bool(rs.member and not rs.static):   # this or none
+                return True
+        return False
     via = {}
     by_m = collections.defaultdict(set)   # MSVC name -> Itanium names it stands for
     for mp in pairs.values():
@@ -871,6 +1193,16 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             for n in by_m[m_]:
                 seen[n].update(tg)
                 via.setdefault(n, m_)
+    try:   # names whose callers the exe has only inlined: the address at their position in the call order
+        aligned = align_targets(msvc_objs, udata, exe, set(by_m))
+    except ImportError:   # capstone missing: the call-order evidence is skipped
+        aligned = {}
+    for m_, tg in aligned.items():
+        for n in by_m[m_]:
+            if n not in seen:   # a byte-checked call site wins; the alignment fills only names without one
+                seen[n].update(tg)
+                via.setdefault(n, m_)
+                aligned_names.add(n)
     out = []
     for r in rows:
         tg = seen.get(r.name)
@@ -887,6 +1219,15 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
         if isg.variant in ('C1', 'C2', 'D1', 'D2') and native.get(a) == 'F' and \
                 shape_ok(via[r.name], a, this_only=this_only):
             want = 'F'   # the decomp defines the constructor/destructor's address as a function (FUN_...)
+        if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a, this_only=this_only) and \
+                sret_ok(via[r.name], a) and r.units and \
+                sret_line(isg, a, bool(msvc(via[r.name]).member) and not msvc(via[r.name]).static):
+            this = bool(msvc(via[r.name]).member) and not msvc(via[r.name]).static
+            out.append(r._replace(cls='exe-sret', addr=a, target=None, host=sorted(r.units.split(','))[0],
+                                  note='sret %s: %s called at %d site(s) in the exe, %s' % (
+                                      'this' if this else 'static', via[r.name], nsite,
+                                      ' / '.join(sorted(def_names.get(a, ()))[:1]))))
+            continue
         if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a, this_only=this_only):
             out.append(r._replace(note=r.note + '; exe calls %08x (signature shape differs: %s)' % (
                 a, ' / '.join(sorted(def_names.get(a, ()))[:2]))))
@@ -896,7 +1237,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
                 a, 'native kind %s' % native[a] if a in native else 'not compiled natively')))
             continue
         out.append(r._replace(cls='exe-addr', addr=a, target=ADDR_SYM % a, host=None,
-                              note='%s called at %d site(s) in the exe' % (via[r.name], nsite) +
+                              note='%s %s %d site(s) in the exe' % (via[r.name], 'aligned by call order at'
+                                                                    if r.name in aligned_names else 'called at', nsite) +
                               (' (%s bound to the complete-object definition)' % isg.variant
                                if isg.variant in ('C2', 'D2') else '')))
     return out
@@ -1026,7 +1368,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
 
     if msvc_objs and exe_path:
-        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms)
+        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
+                        load_providers(os.path.join(out, 'addrmap.tsv')))
     if synth:   # its stubs are emitted with the synthesized objects
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
@@ -1039,7 +1382,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         layout.game_flags(tree, work)   # compile.sh --print-flags (plugins built) once, before the threads; no fallback
         by_host = collections.defaultdict(lambda: collections.defaultdict(list))
         for r in rows:
-            if r.cls in ('special-default', 'msvc-inline') and r.host:
+            if r.cls in ('special-default', 'msvc-inline', 'exe-sret') and r.host:
                 by_host[r.host][r.cls == 'msvc-inline'].append(r)
         jobs_ = [(h, inl, rs) for h, d in sorted(by_host.items()) for inl, rs in sorted(d.items())]
 
@@ -1139,6 +1482,60 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 synth_rows.append((sorted(gd[0].units.split(','))[0] if gd[0].units else unit_names[0], o_path, len(gd)))
             else:
                 failed.update({r.name: 'synth-failed (as)' for r in gd})
+        # exe addresses callers are bound to whose placing unit emits nothing there (code-defmissing)
+        dm = load_defmissing(os.path.join(out, 'refs.tsv'))
+        placed_at = {}
+        for u_ in json.load(open(units_json))['units']:
+            for f_ in u_['functions']:
+                a_ = int(f_['address'], 16)
+                if a_ in dm and a_ not in placed_at:
+                    placed_at[a_] = (u_['source'], f_['symbol'])
+        ms.need({m_ for _, m_ in placed_at.values()})
+        aby = collections.defaultdict(list)
+        for a_, (h_, m_) in placed_at.items():
+            aby[h_].append((a_, m_))
+
+        def ita_defs(names):
+            it.need(names)
+            return [itanium(n) for n in names]
+
+        def aone(job):
+            h, items = job
+            try:
+                return h, items, addr_host(tree, work, h, sorted(items), msvc, ita_defs)
+            except Exception as e:
+                return h, items, ([], {}, {a: 'addr-host failed (%r)' % e for a, _ in items})
+        atargets = {}
+        with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+            for h, items, (objs, got, fail) in ex.map(aone, sorted(aby.items())):
+                for k_, p_ in enumerate(objs):
+                    dst = os.path.join(bdir, 'zz_bd_%s_a%d.o' % (h.replace('/', '_'), k_))
+                    os.replace(p_, dst)
+                    synth_rows.append((h, dst, len(got)))
+                atargets.update(got)
+                for a_, m_ in items:
+                    rows.append(Row(ADDR_SYM % a_, 'addr-host' if a_ in got else 'missing', a_, got.get(a_),
+                                    ','.join(sorted(dm[a_])), ('%s in %s' % (m_, h)) if a_ in got else
+                                    'addr-host: %s (%s in %s)' % (fail.get(a_, '?'), m_, h), h))
+        if atargets:
+            s_path, o_path = os.path.join(bdir, 'addr.S'), os.path.join(bdir, 'zz_bd_addr.o')
+            open(s_path, 'w', encoding='utf-8', errors='surrogateescape').write(emit_addr_stubs(atargets))
+            as_ = os.environ.get('AS', 'aarch64-linux-gnu-as')
+            if subprocess.run([as_, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True).returncode == 0:
+                synth_rows.append((unit_names[0], o_path, len(atargets)))
+        thunks = load_thunks(os.path.join(out, 'refs.tsv'))
+        if thunks:
+            s_path, o_path = os.path.join(bdir, 'thunks.S'), os.path.join(bdir, 'zz_bd_thunks.o')
+            open(s_path, 'w', encoding='utf-8', errors='surrogateescape').write(emit_thunks(thunks))
+            as_ = os.environ.get('AS', 'aarch64-linux-gnu-as')
+            if subprocess.run([as_, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True).returncode == 0:
+                host_ = sorted(next(iter(thunks.values())) or [unit_names[0]])[0]
+                synth_rows.append((host_, o_path, len(thunks)))
+                for n, us in sorted(thunks.items()):
+                    off, vcall, target = thunk_parts(n)
+                    rows.append(Row(n, 'thunk', None, target, ','.join(sorted(us)),
+                                    'this %+d%s -> %s' % (off, ', vcall -%d' % vcall if vcall is not None else '',
+                                                          target), None))
         crt = [r for r in rows if r.cls == 'crt-rule']
         if crt:
             s_path, o_path = os.path.join(bdir, 'crt.S'), os.path.join(bdir, 'zz_bd_crt.o')
@@ -1183,7 +1580,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
               for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'tree-inline',
-                        'special-default', 'crt-rule', 'missing')]
+                        'exe-sret', 'thunk', 'addr-host', 'special-default', 'crt-rule', 'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))

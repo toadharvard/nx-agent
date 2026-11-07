@@ -5,6 +5,7 @@
 #   python3 -I render/verify/shaders/vsscenes.py [--tools DIR] [--work DIR] [--mutant NAME] [--target gl|s6ngl]
 #           [--src DIR] [--only NAME]   other shader/scene directory (tests/v6n/defects/shaders), one scene NAME.scene.in
 import os, sys, glob, subprocess, shutil
+os.environ.setdefault('FNVNX_NUMERICS', 'nine')   # the oracle is Gallium Nine: its numerics at 0 (sdp2dksh --numerics)
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 a = sys.argv[1:]
 tools = os.environ.get('FNVNX_SHADERS_BUILD', os.path.join(ROOT, 'render/shaders/build/host'))
