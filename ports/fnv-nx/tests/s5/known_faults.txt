@@ -19,6 +19,10 @@ image-vptr-minus-one ^\.\?AV\?\$NiT  # hand-stored image vptrs (hand_vptrs.tsv c
                       # NiTStringTemplateMap::SetAt ran an output function as IsKeysEqual. Applied to all 785 such
                       # vftables it is worse (1 -> 3,461 skips: call-only stand-ins such as TMapStandIn dispatch in
                       # the exe's order). Remove when D22 covers call-only declarations and hand vptrs (S1-refs/S2c)
+rebind-colliding    # a global free function FUN_<X> defined by an unrelated body (the decomp's "unrelated noinline
+                    # helper under this tag") takes the by-name references meant for X: the display modes' bits per
+                    # pixel came from a DXT block-size helper (0 for X8R8G8B8), so renderer init rejected every mode.
+                    # Each such definition branches to the address's native (S2c: resolve these by address)
 ctor-returns-this   # every constructor native (address map kind C) returns this: an MSVC constructor is called as a
                     # function (0x00aa20b0: value = p->FUN_00aa2200(); the OSGlobals and NiGlobalStringTable
                     # constructors before), and an Itanium constructor returns nothing (S2c: C bridges return this)
@@ -57,11 +61,26 @@ _ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb standin  # 0x00aa78a0 MemoryHeap's constr
                       # the exe's slots, so Allocate returned the heap's name and frees hit wrong blocks (J-0155 S10
                       # fault). standins.c stores the exe's vptr 0x010a28fc as the exe does (S1-refs: D22 for
                       # call-only declarations, tests/s5/callonly_vt.py)
+_ZN13HashTableBase14InsertOrUpdateEjj standin  # 0x00b57ea0: HashTableBase is a call-only declaration in the
+                      # exe's slot order (Reserved0 at 0); its boot receivers are native D22 maps (D1/D0 at 0/1), so
+                      # BucketIndex ran D0. standins.c dispatches exe slot k at k+1 (S1-refs: D22 for call-only)
 _Z12FUN_00406d50z standin  # 0x00406d50 strcat_s(dst, size, src), declared `(...)` and defined nowhere: WinMain's INI paths
                       # stayed empty, FalloutPrefs.ini was never read, sD3DDevice was "" and the device check sent the
                       # game to the launcher (ShellExecute, WinMain returns 0) (standins.c; S1-refs)
-before-winmain 0x00e91e30 0x0126f104  # NiDX9Renderer's static-data object (exe initializer 0x00fc72d0: this = 0x0126f104,
-                      # jmp 0x00e91e30) has no native dyninit: one of the startup runner's "missing natives" (537 on
-                      # 06857911f5ab). Without it AddLibrary never registers 0x00e91dc0, NiInit never adds the five
-                      # display formats to 0x0126f0f8, the adapter lists no modes and renderer init fails ("Your display
-                      # doesn't support the selected resolution"). Class: exe initializers without a native (S1-refs)
+# Initializers of the exe's __xc table that have no native (S10's IMAGE mode counts them missing and goes on; 537 on
+# link 06857911f5ab, the decomp's undecompiled gaps of .text$yc). Four are a bare `mov ecx, <object>; jmp <ctor>`;
+# their constructors have natives, so each is called here once before WinMain with the object as this (S1/S2d: a
+# native for the initializer, or a link-time synthesis of this thunk shape). 0x00fc72d0 is the critical one:
+# NiDX9Renderer's static-data-manager object, whose constructor registers the library Init 0x00e91dc0 with NiInit.
+# Without it the D3D format list 0x0126f0f8 stays empty, the adapter reports no display modes, and renderer init
+# fails ("Your display doesn't support the selected resolution").
+before-winmain _ZN17FUN_00e91e30_This12FUN_00e91e30Ev 0x0126f104      # 0x00fc72d0: NiDX9Renderer SDM (0x0126f104)
+before-winmain _ZN18FUN_00a8a5f0_class12FUN_00a8a5f0Ev 0x011f4414    # 0x00fb56c0
+before-winmain _ZN13NiPixelFormatC1Ev 0x011f4600                     # 0x00fb5860
+before-winmain _ZN7NiPlaneC1Ev 0x011f9604                            # 0x00fb97d0
+0x00e93e70            # (S5-boot: with image-vptr-minus-one RegisterCreator no longer faults; kept as a net)
+                      # NiD3DShaderProgramFactory::RegisterCreator, from NiDX9Renderer's library Init 0x00e91dc0 (NiInit):
+                      # the decomp binds its map's SetAt to another instantiation, 0x00a642a0 (the exe calls 0x00e93d80;
+                      # reports/s5-traps: S1-refs), whose slots 2/3 on this map's vtable run FUN_00e93470 with SetAt's
+                      # arguments: strlen(0). The creators are the D3D shader-program loaders; the native renderer's
+                      # translated path identifies programs by the hooked device instead
