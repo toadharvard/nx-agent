@@ -200,6 +200,25 @@ fi
 t1=$(date +%s)
 
 # 3. prepared tree, shard build, comparison
+# the object cache (T1-fastbench, tools/equiv/unitcache.py): a unit whose prepared source, included headers, flags and
+# compiler are unchanged is not compiled again (head build, EH-off builds, attribution's leave-out builds); it lives on
+# branch equiv/cache/<k>of<N> (this shard its only writer). EQUIV_CACHE=0 compiles everything; EQUIV_CACHE_PUBLISH=0
+# keeps it local (quick_job.sh).
+EC=$FARM_HOME/equivcache-${K}of$N; EC_BEFORE=
+if [ "${EQUIV_CACHE:-1}" = 1 ]; then
+  step cache-fetch "$LOGS/equivcache.log"
+  if [ ! -d "$EC/m" ] && [ -z "${EQUIV_PRISTINE_DIR:-}" ]; then
+    artifacts; mkdir -p "$EC"
+    if ref=$(fetch_ref "equiv/cache/${K}of$N"); then git -C "$ARTIFACTS" archive "$ref" | tar -x -C "$EC"
+    else   # a new shard count (quick_job.sh runs 1 of 1): seeded from every other shard's cache (content-keyed, no clash)
+      for b in $(git -C "$ARTIFACTS" ls-remote origin 'refs/heads/equiv/cache/*' | awk '{print $2}' | sed 's|^refs/heads/||'); do
+        ref=$(fetch_ref "$b") && git -C "$ARTIFACTS" archive "$ref" | tar -x -C "$EC" || true
+      done
+    fi
+  fi
+  mkdir -p "$EC"; export FNVNX_EQUIV_CACHE=$EC
+  EC_BEFORE=$(python3 "$P/tools/equiv/unitcache.py" stat "$EC" 2>/dev/null || true)
+fi
 for d in "$FARM_HOME"/equiv-*; do
   if [ -d "$d" ] && [ "${d##*/equiv-}" != "$C12" ]; then rm -rf "$d/tree"; fi
 done
@@ -230,6 +249,17 @@ step attribute "$WK/attr.log"
   --failed --hier --default-groups --units "$SHARD" --workdir "$WK" --jobs "$JOBS" > "$STEP_LOG" 2>&1
 t3=$(date +%s)
 
+t3c=$(date +%s); EC_NOTE=
+if [ -n "${FNVNX_EQUIV_CACHE:-}" ]; then
+  step cache-publish "$LOGS/equivcache.log"
+  python3 "$P/tools/equiv/unitcache.py" prune "$EC" >> "$STEP_LOG" 2>&1 || true
+  EC_AFTER=$(python3 "$P/tools/equiv/unitcache.py" stat "$EC" 2>/dev/null || true)
+  EC_NOTE="object cache: $EC_BEFORE -> $EC_AFTER"
+  if [ "$EC_AFTER" != "$EC_BEFORE" ] && [ -z "${EQUIV_PRISTINE_DIR:-}" ] && [ "${EQUIV_CACHE_PUBLISH:-1}" = 1 ]; then
+    publish "$EC" "equiv/cache/${K}of$N" "equiv object cache $C12 shard $K/$N: $EC_AFTER" >> "$STEP_LOG" 2>&1 || true
+  fi
+fi
+
 # 4. report
 step report "$WK/report.log"
 mkdir -p "$(dirname "$REPORT")"
@@ -240,6 +270,7 @@ mkdir -p "$(dirname "$REPORT")"
   echo "## Run"
   echo
   echo "- commit $COMMIT, fnv_decomp $D12, rules \`$RULES\`, shard $K/$N (${#MINE[@]} units), jobs $JOBS"
-  echo "- pristine objects $((t1-t0))s, prepare + build + compare $((t2-t1))s, EH-off + attribution $((t3-t2))s"
+  echo "- pristine objects $((t1-t0))s, prepare + build + compare $((t2-t1))s, EH-off + attribution $((t3-t2))s, cache publish $((t3c-t3))s"
+  [ -z "$EC_NOTE" ] || echo "- $EC_NOTE"
 } >> "$REPORT"
 echo "equiv $C12 shard $K/$N: $(sed -n 3p "$REPORT")"

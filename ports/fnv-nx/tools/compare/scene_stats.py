@@ -4,7 +4,7 @@ against the reference, the first divergent draw and its class, and GPU ms on the
 
     scene_stats.py <capture.nxd9> --exe <nxd9play.exe> --prefix <wine prefix> --nx-render <nx_render>
                    --shaders <dir: sdp2dksh -o D --glsl over every package (.glsl, .dksh, .json)> --sdp-dir <packages>
-                   --out <json> [--work <dir>] [--frame F] [--perm <permreport.json>] [--uam <uam>] [--no-bisect]
+                   --out <json> [--work <dir>] [--frame F] [--perm <permreport.json>] [--uam <uam>] [--no-bisect] [--ref-cache <dir>]
 
 Parts of the JSON:
   stats     per capture (all frames) and for the stats frame F (default: the last): draws, triangles, vertices,
@@ -34,6 +34,8 @@ from capcompare import THRESHOLDS, judge
 from drawgate import compare_small, family, VALUE_RS, VALUE_SS
 
 FORMAT = 'fnvnx-scenestats/1'
+REF_FORMAT = 'ref/1'   # the reference replay call (run_ref's arguments, cov.tsv): bump when it changes; part of
+                       # the capture cache key (sweep_job.sh), so cached --ref-cache dirs are not reused across it
 PRIM_TRIS = {1: lambda n: 0, 2: lambda n: 0, 3: lambda n: 0, 4: lambda n: n, 5: lambda n: n, 6: lambda n: n}
 FMT_BPP64 = {113, 116, 36, 115}
 GPU = {'clock_mhz': 384.0, 'lanes': 256, 'tmu': 16, 'rop': 16, 'tex_cost': 1.5}
@@ -302,6 +304,8 @@ def main():
     ap.add_argument('--work'); ap.add_argument('--frame', type=int); ap.add_argument('--perm')
     ap.add_argument('--uam'); ap.add_argument('--no-bisect', action='store_true')
     ap.add_argument('--timeout', type=int, default=1500)
+    ap.add_argument('--ref-cache', help='a directory for the reference replay (frames, frames.tsv, cov.tsv, rc): used '
+                    'as is when it holds one, else filled (capstore.py keeps it next to the capture)')
     a = ap.parse_args()
     t0 = time.time()
     cap = os.path.abspath(a.capture)
@@ -319,12 +323,20 @@ def main():
     out = {'format': FORMAT, 'capture': name, 'frames': len(frames), 'stats_frame': F, 'size': list(dev[:2]),
            'stats': stats_of(frames, names, F)}
     # reference: final frames, coverage of frame F, frame times
-    rd = os.path.join(work, 'ref')
-    shutil.rmtree(rd, ignore_errors=True)
-    rc = run_ref(cap, a, rd, ['--frame', str(F), '--draw-stats', wine_path(os.path.join(work, 'cov.tsv'))])
+    rbase = os.path.abspath(a.ref_cache) if a.ref_cache else work
+    rd, covp, rcp = os.path.join(rbase, 'ref'), os.path.join(rbase, 'cov.tsv'), os.path.join(rbase, 'rc')
+    if a.ref_cache and os.path.isfile(rcp) and os.path.isdir(rd):
+        rc = int(open(rcp).read().strip() or 1)      # cached: the capture, nxd9play and F are in the cache key
+        out['ref_cached'] = True
+    else:
+        os.makedirs(rbase, exist_ok=True)
+        shutil.rmtree(rd, ignore_errors=True)
+        rc = run_ref(cap, a, rd, ['--frame', str(F), '--draw-stats', wine_path(covp)])
+        if a.ref_cache:
+            open(rcp, 'w').write(f'{rc}\n')
     cov = {}
-    if os.path.isfile(os.path.join(work, 'cov.tsv')):
-        for line in open(os.path.join(work, 'cov.tsv')):
+    if os.path.isfile(covp):
+        for line in open(covp):
             f = line.split('\t')
             if len(f) >= 6 and int(f[0]) == F:
                 cov[int(f[1])] = int(f[5])
