@@ -94,6 +94,10 @@ def _interlocked_slow(f):
     return 'fnvnx_interlocked_slow' in f.nrefs
 
 
+def _crt_malloc(f):
+    return 0x00ecd1c7 in f.ocalls
+
+
 def _indirect(f):
     return f.oindirect
 
@@ -136,6 +140,9 @@ CHANGES = [
     Change('d20-ilk', 'functions whose native code calls fnvnx_interlocked_slow (the misaligned path of the shim\'s '
            'inline Interlocked*, sync.cpp): it runs as the Interlocked function it performs, not as a traced call '
            '(the oracle\'s lock-prefixed instruction is none)', selects=_interlocked_slow),
+    Change('d20-malloc', 'functions whose oracle code calls the CRT malloc (0x00ecd1c7): it returns a fresh heap block '
+           'like the game allocators (world.ALLOCATORS) and pairs with operator new / MemoryManager::Allocate by '
+           'family (libcalls.FAMILY)', selects=_crt_malloc),
 ]
 SCOPED = 'd20'
 

@@ -107,7 +107,8 @@ def noreturn_a64(name):
 # traced calls compared by family: the oracle calls the allocator or the CRT directly where the native code calls
 # the game's operator new / delete (MSVC inlined the operator; MemoryManager::Allocate 0x00aa3e40, CRT free
 # 0x00ecd291); the arguments are not compared
-FAMILY = {0x00401000: 'new', 0x00aa3e40: 'new', 0x00401030: 'delete', 0x00aa1460: 'delete', 0x00ecd291: 'delete'}
+FAMILY = {0x00401000: 'new', 0x00aa3e40: 'new', 0x00ecd1c7: 'new', 0x00401030: 'delete', 0x00aa1460: 'delete',
+          0x00ecd291: 'delete'}   # 0x00ecd1c7 CRT malloc (S1-rules d20-malloc)
 
 
 class Mem:
