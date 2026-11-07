@@ -151,3 +151,15 @@ rendered from them, compared with the unperturbed reference, shows which frames 
 image moves when the inputs move by float rounding (V6n's SENS idea). A candidate difference on such a frame is not
 evidence of a defect. On shaderpackage019, one frame (SM3016) is ill-conditioned, and the candidate matches the
 reference exactly there.
+
+## Reference capture cache (T1-fastbench)
+
+The cell sweep (`tools/farm/sweep_job.sh`) spent ~90 % of each cell booting the original under Wine to capture a
+reference that only changes when the exe, the game data or the capture harness does. `capstore.py` keeps the trimmed,
+normalized capture of every scene plus its reference replay (`scene_stats.py --ref-cache`), keyed by those inputs
+(`capture_key.tsv` in each shard's directory, `KEY` in the store), and checked per scene against the scene's JSON
+hash. Large payloads (textures, vertex and index uploads) are stored once by content: on 4 real cells, 1,012 MB of
+captures took 81 MB (4 MB of xz skeletons, 77 MB of shared blobs), unpacked and sha256-checked in ~5 s per scene.
+The store lives on fnv-nx-build branches `capture/<key>/<k>of<N>` (private: game-derived) and on each farm in
+`$FARM_HOME/capture/<key>`. `SWEEP_CAPTURE=auto` (default) replays cached scenes and captures the rest; a changed key
+input makes a new key, and the next sweep of all shards is the full capture run that populates it.
