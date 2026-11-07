@@ -215,7 +215,8 @@ class Arm64Engine:
         saved = [uc.reg_read(XR[i]) for i in range(19, 30)] + [uc.reg_read(A.UC_ARM64_REG_SP)]
         hs = uc.hook_add(UC_HOOK_BLOCK, self._on_stub, user_data=(case, r), begin=STUB_LO, end=STUB_HI - 1)
         hwild = [uc.hook_add(UC_HOOK_BLOCK, self._on_wild, user_data=(case, r), begin=lo, end=hi - 1)
-                 for lo, hi in tuple(world.WILD_A64) + tuple(self.holes())]
+                 for lo, hi in sorted(set(world.WILD_A64) | set(self.holes()))]
+        # (world.A64_HOLES is in both lists: hooked twice, a wild call there was traced twice; F2 d21-holes)
         hc = uc.hook_add(UC_HOOK_BLOCK, self._on_cov, user_data=r, begin=a64image.A64_BASE,
                          end=max(self.image.end, a64image.A64_BASE + 4) - 1)
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
@@ -375,6 +376,11 @@ class Arm64Engine:
 
     def _on_stub(self, uc, address, size, user, wild=False):
         case, r = user
+        if not wild and any(lo <= address < hi for lo, hi in self.holes()):
+            # a hole of the stub range is background memory, not a stub: _on_wild (hooked on the holes too) traces
+            # the call once, by its raw address as the oracle does. Both hooks traced it before (F2 d21-holes: a
+            # garbage call there was `name:<hex>` + `<hex>` natively, one call on x86: vcall-stub-alias / call-flow)
+            return
         if wild:
             target, name = address, None
             if libcalls.IMPORT_BASE <= address < libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16:
