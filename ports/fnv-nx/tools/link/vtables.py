@@ -411,13 +411,40 @@ template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T));
 }
 '''
 NS = '__fnvnx_vt::'
+PROBE_VERSION = 2   # cache.json entries: 2 HEAD_BARE
+# The same helpers without a standard header (GCC's builtins: __direct_bases, __bases, __is_convertible; typeid
+# needs std::type_info declared only). For host units that do not compile after <typeinfo> / <type_traits>: units
+# with their own std::exception / std::bad_alloc copies (redefinition), or with a `using namespace std` swap that
+# <type_traits> makes ambiguous (link 9f865b0a: blk_00640000_od, blk_00ac0000_od_ob1_variant,
+# blk_00b00000_od_ob1_variant, blk_00e00000_o2, frondengine_ob1_variant).
+HEAD_BARE = r'''namespace std { class type_info; }
+namespace __fnvnx_vt {
+template <class... T> struct tl {};
+template <class C> struct dbh { typedef tl<__direct_bases(C)...> type; };
+template <class C> struct abh { typedef tl<__bases(C)...> type; };
+template <int I, class L> struct nth { typedef void type; };
+template <int I, class H, class... T> struct nth<I, tl<H, T...>> : nth<I - 1, tl<T...>> {};
+template <class H, class... T> struct nth<0, tl<H, T...>> { typedef H type; };
+template <class L> struct len { static const unsigned value = 0; };
+template <class... T> struct len<tl<T...>> { static const unsigned value = sizeof...(T); };
+template <class C> using db = typename dbh<C>::type;
+template <class C> using ab = typename abh<C>::type;
+template <class C, int I> using dbase = typename nth<I, db<C>>::type;
+template <class C, int I> using abase = typename nth<I, ab<C>>::type;
+template <class T> auto dealloc(void *p, int) -> decltype(T::operator delete(p), void()) { T::operator delete(p); }
+template <class T> auto dealloc(void *p, long) -> decltype(T::operator delete(p, sizeof(T)), void())
+{ T::operator delete(p, sizeof(T)); }
+template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T)); }
+}
+'''
 
 
-def probe_items(k, t, phase, nd=0, na=0):
+def probe_items(k, t, phase, nd=0, na=0, bare=False):
     """Source lines (one item each) for class number k spelled t. Phase 1: counts and flags (info), the class's own
     typeinfo symbol (self), the derived class with a key function (vt). Phase 2 (nd direct, na direct or indirect
     bases from phase 1): per direct base its typeid, offset and public-ness; per base its typeid and offset (a
-    virtual base has no constant offset: the variable lands in .bss, initialized at run time)."""
+    virtual base has no constant offset: the variable lands in .bss, initialized at run time). bare: the HEAD_BARE
+    helpers."""
     if phase == 1:
         return [('info', 'extern "C" const unsigned __fnvnx_vti_%d[5] = {__is_polymorphic(%s), __is_final(%s), '
                  '%slen<%sdb<%s>>::value, %slen<%sab<%s>>::value, sizeof(%s)};' % (k, t, t, NS, NS, t, NS, NS, t, t)),
@@ -427,9 +454,10 @@ def probe_items(k, t, phase, nd=0, na=0):
     items = []
     for i in range(nd):
         b = '%sdbase<%s, %d>' % (NS, t, i)
+        conv = ('__is_convertible(%s *, %s *)' if bare else 'std::is_convertible<%s *, %s *>::value') % (t, b)
         items.append(('db%d' % i, 'extern "C" const void *const __fnvnx_vtb_%d_%d = &typeid(%s); extern "C" const '
                       'unsigned __fnvnx_vto_%d_%d[2] = {(unsigned)(unsigned long)(const %s *)(const %s *)4096, '
-                      'std::is_convertible<%s *, %s *>::value};' % (k, i, b, k, i, b, t, t, b)))
+                      '%s};' % (k, i, b, k, i, b, t, conv)))
     for j in range(na):
         b = '%sabase<%s, %d>' % (NS, t, j)
         items.append(('ab%d' % j, 'extern "C" const void *const __fnvnx_vta_%d_%d = &typeid(%s);' % (k, j, b)))
@@ -438,11 +466,12 @@ def probe_items(k, t, phase, nd=0, na=0):
     return items
 
 
-def compile_probe(tree, workdir, unit, items, tag, extra=(), prelude=None, game=False):
+def compile_probe(tree, workdir, unit, items, tag, extra=(), prelude=None, game=False, why=None):
     """items: [(class k, item name, line)]. Drops the items GCC reports errors in (probe lines named by an error
     or by its 'required from' notes; an 'info' failure drops the whole class) and recompiles. game: the object is
     linked into the game (emitted slot functions, synthesized bodies), so it compiles with compile.sh's own flags
-    (layout.game_flags) plus extra; else with the probe flags (layout.flags at -O0: only read).
+    (layout.game_flags) plus extra; else with the probe flags (layout.flags at -O0: only read). why (a dict):
+    why['unit'] is set when the unit itself does not compile here (an error outside the items).
     -> (Obj or None, surviving items)."""
     base = unit.replace('/', '_') + '.' + tag
     src, obj = os.path.join(workdir, base + '.cpp'), os.path.join(workdir, base + '.o')
@@ -482,6 +511,8 @@ def compile_probe(tree, workdir, unit, items, tag, extra=(), prelude=None, game=
         bad = {int(n) - first for n in re.findall(r'%s:(\d+):\d+:' % re.escape(os.path.basename(src)), r.stderr)}
         bad = {b for b in bad if 0 <= b < len(alive)}
         if not bad:     # an error outside the items: the unit itself does not compile here
+            if why is not None:
+                why['unit'] = True
             return None, []
         badinfo = {alive[b][0] for b in bad if alive[b][1] == 'info'}
         alive = [it for i, it in enumerate(alive) if i not in bad and it[0] not in badinfo]
@@ -506,39 +537,60 @@ def _ptr(obj, name):
 def probe_host(tree, workdir, unit, classes):
     """classes: [(k, spelling)] -> {k: probe result} for the classes the unit can name. A result holds the class's
     mangled encoding (enc), flags, and when available the derived class's vtable group (vt_ents, made with the
-    derived class V<k>: vt_k) and the direct bases (bases: [(typeinfo symbol, offset or None, virtual, public)])."""
+    derived class V<k>: vt_k) and the direct bases (bases: [(typeinfo symbol, offset or None, virtual, public)]).
+    A host unit that does not compile after HEAD's standard headers is probed again with HEAD_BARE (bare: True in
+    its results)."""
     res = {}
+    bare, why = False, {}
     obj, alive = compile_probe(tree, workdir, unit,
-                               [(k, nm, line) for k, t in classes for nm, line in probe_items(k, t, 1)], 'vt1')
-    if obj is None:
-        return res
-    have = collections.defaultdict(set)
-    for k, nm, _ in alive:
-        have[k].add(nm)
-    for k, t in classes:
-        info = _words(obj, '__fnvnx_vti_%d' % k, 5) if 'info' in have[k] else None
-        if not isinstance(info, list) or len(info) < 5:
-            continue
-        r = res[k] = dict(spelling=t, polymorphic=bool(info[0]), final=bool(info[1]), ndirect=info[2], nall=info[3],
-                          size=info[4], enc=None, vt_k=k)
-        if not r['ndirect'] and not r['nall']:   # a root class: nothing to probe in phase 2
-            r['bases'], r['all_bases'], r['virtual_any'] = [], [], False
-        me = _ptr(obj, '__fnvnx_vtc_%d' % k) if 'self' in have[k] else None
-        if me and me.startswith('_ZTI'):
-            r['enc'] = me[4:]
+                               [(k, nm, line) for k, t in classes for nm, line in probe_items(k, t, 1)], 'vt1',
+                               why=why)
+    if obj is None and why.get('unit'):
+        bare = True
+        obj, alive = compile_probe(tree, workdir, unit, [(k, nm, line) for k, t in classes
+                                                         for nm, line in probe_items(k, t, 1, bare=True)],
+                                   'vt1b', prelude=HEAD_BARE)
+    prelude = HEAD_BARE if bare else None
+    sfx = 'b' if bare else ''
+
+    def phase1(obj, alive, classes):
+        have = collections.defaultdict(set)
+        for k, nm, _ in alive:
+            have[k].add(nm)
+        for k, t in classes:
+            info = _words(obj, '__fnvnx_vti_%d' % k, 5) if 'info' in have[k] else None
+            if not isinstance(info, list) or len(info) < 5:
+                continue
+            r = res[k] = dict(spelling=t, polymorphic=bool(info[0]), final=bool(info[1]), ndirect=info[2],
+                              nall=info[3], size=info[4], enc=None, vt_k=k)
+            if bare:
+                r['bare'] = True
+            if not r['ndirect'] and not r['nall']:   # a root class: nothing to probe in phase 2
+                r['bases'], r['all_bases'], r['virtual_any'] = [], [], False
+            me = _ptr(obj, '__fnvnx_vtc_%d' % k) if 'self' in have[k] else None
+            if me and me.startswith('_ZTI'):
+                r['enc'] = me[4:]
+            if 'vt' in have[k]:
+                derived_vt(obj, k, r)
+
+    def derived_vt(obj, k, r):
         dn = 'V%d' % k
         d = 'N10__fnvnx_vt%d%sE' % (len(dn), dn)
-        if 'vt' in have[k] and '_ZTV' + d in obj.defs:
+        if '_ZTV' + d in obj.defs:
             r['vt_ents'] = obj.ents('_ZTV' + d)
             r['virtual_bases'] = '_ZTT' + d in obj.defs
             dti = obj.ents('_ZTI' + d) if '_ZTI' + d in obj.defs else []
             if not r['enc'] and len(dti) >= 3 and dti[2].sym and dti[2].sym.startswith('_ZTI'):
                 r['enc'] = dti[2].sym[4:]
+    if obj is not None:
+        phase1(obj, alive, classes)
+    elif bare:   # the unit does not compile here at all
+        return res
     items = [(k, nm, line) for k, t in classes if k in res and res[k]['ndirect'] + res[k]['nall'] <= 64
-             for nm, line in probe_items(k, t, 2, res[k]['ndirect'], res[k]['nall'])]
+             for nm, line in probe_items(k, t, 2, res[k]['ndirect'], res[k]['nall'], bare=bare)]
     if not items:
         return res
-    obj2, alive2 = compile_probe(tree, workdir, unit, items, 'vt2')
+    obj2, alive2 = compile_probe(tree, workdir, unit, items, 'vt2' + sfx, prelude=prelude)
     if obj2 is None:
         return res
     have2 = collections.defaultdict(set)
@@ -705,7 +757,7 @@ def slot_wants(items, defined, used=None):
     return want
 
 
-def extract_host(tree, workdir, unit, classes, want):
+def extract_host(tree, workdir, unit, classes, want, bare=False):
     """Emit the inline functions and implicit destructors the synthesized vtables of a host unit need, from GCC.
 
     classes: [(k, spelling, enc)] of the classes synthesized on this host; want: the slot symbols nobody defines.
@@ -714,13 +766,15 @@ def extract_host(tree, workdir, unit, classes, want):
     with it); a deleting destructor still missing is emulated (D1, then the class's or the global sized operator
     delete) under its mangled name. `ld -r --gc-sections` keeps what the wanted symbols reach (static initializers
     removed first, so they are no roots); every global definition is weakened: a copy of a definition of the host
-    unit loses to the real one, COMDAT copies dedupe. -> (path of the object or None, {wanted symbols defined})."""
+    unit loses to the real one, COMDAT copies dedupe. bare: the unit was probed with HEAD_BARE (it does not compile
+    after HEAD). -> (path of the object or None, {wanted symbols defined})."""
     base = unit.replace('/', '_')
+    prelude, sfx = (HEAD_BARE, 'b') if bare else (None, '')
     items = []
     for k, sp, enc in classes:
         items.append((k, 'dtor', 'namespace __fnvnx_vt { typedef %s E%d; extern "C" void __fnvnx_vte_%d(E%d *p) '
                       '{ p->E%d::~E%d(); } }' % (sp, k, k, k, k, k)))
-    obj3, alive3 = compile_probe(tree, workdir, unit, items, 'vt3', EMIT_FLAGS, game=True)
+    obj3, alive3 = compile_probe(tree, workdir, unit, items, 'vt3' + sfx, EMIT_FLAGS, prelude=prelude, game=True)
     if obj3 is None:
         return None, set()
     have = {n for n in obj3.defs if obj3.bind(n) != 'local'}
@@ -737,7 +791,7 @@ def extract_host(tree, workdir, unit, classes, want):
         return None, set()
     inputs.append(clean)
     if items4:
-        obj4, _ = compile_probe(tree, workdir, unit, items4, 'vt4', game=True)
+        obj4, _ = compile_probe(tree, workdir, unit, items4, 'vt4' + sfx, prelude=prelude, game=True)
         clean4 = os.path.join(workdir, base + '.vt4s.o')
         if obj4 is not None and strip_init(obj4.path, clean4):
             have |= {n for n in obj4.defs if n.startswith('_Z') and obj4.bind(n) != 'local'}
@@ -833,6 +887,13 @@ def decode(d):
     return r
 
 
+def stale_entry(got, n):
+    """A cache.json entry of an older probe version that the current probe_host would answer differently: a class
+    it did not name (HEAD_BARE)."""
+    vals = [v for i, v in got.items() if not i.startswith('_')]
+    return len(vals) != n
+
+
 def run(out, tree, jobs=4):
     """The synthesis step: vtable_requests.tsv + rtti_defined.txt (written by resolve) -> out/vtables/ (synth.tsv,
     classes.tsv, stats.txt, one .vt.S / zz_vt_*.o per host unit). Probe results are cached per host unit (source
@@ -864,16 +925,18 @@ def run(out, tree, jobs=4):
         src = os.path.join(tree, h)
         key = hashlib.sha1(('%s|%s|%s' % (h, layout.unit_key(tree, h),
                                           '|'.join(sp for _, sp, _ in cls))).encode()).hexdigest()
-        if key in cache:
-            got = cache[key]
-            return key, {cls[int(i)][0]: decode(v) for i, v in got.items()}, got
+        got = cache.get(key)
+        # an older probe's entry (PROBE_VERSION) is used only if it named every class and none of them is one the
+        # newer steps would take further (stale_entry)
+        if got is not None and (got.get('_v', 1) >= PROBE_VERSION or not stale_entry(got, len(cls))):
+            return key, {cls[int(i)][0]: decode(v) for i, v in got.items() if not i.startswith('_')}, got
         try:
             res = probe_host(tree, work, h, [(k, sp) for k, sp, _ in cls])
         except Exception as e:   # one host must not stop the step
             print('vtables: probe of %s failed: %r' % (h, e), flush=True)
             res = {}
         pos = {k: i for i, (k, _, _) in enumerate(cls)}
-        return key, res, {str(pos[k]): encode(v) for k, v in res.items()}
+        return key, res, dict({str(pos[k]): encode(v) for k, v in res.items()}, _v=PROBE_VERSION)
 
     while todo and rounds < 8:
         rounds += 1
@@ -996,6 +1059,7 @@ def run(out, tree, jobs=4):
 
     # ---- the slot functions no object defines: inline virtuals and implicit destructors, emitted from the host
     spell = {r['enc']: r['spelling'] for _, r in results.values()}
+    bare_hosts = {h for h, r in results.values() if r.get('bare')}   # probed with HEAD_BARE
     # slot functions are emitted only for classes whose vtable a compiled object references (the others back an
     # address-map entry only: their slots trap, resolve binds them like the virtuals defined nowhere)
     used = {r['enc'] for c, (_, r) in results.items() if 'vtable-ref' in reqs.get(c, (None, set(), []))[1]}
@@ -1017,12 +1081,12 @@ def run(out, tree, jobs=4):
         key = hashlib.sha1(('emit5|%s|%s|%s|%s|%s' % (layout.game_flags_id(tree, work) + ' ' + ' '.join(EMIT_FLAGS), h,
                                                 layout.unit_key(tree, h),
                                                 ' '.join(sorted(want)), '|'.join(sp for _, sp, _ in classes))
-                            ).encode()).hexdigest()
+                            + ('|bare' if h in bare_hosts else '')).encode()).hexdigest()
         got = xcache.get(key)
         if got and (got[0] is None or os.path.exists(got[0])):
             return h, got[0], want, set(got[1]), key
         try:
-            path, roots = extract_host(tree, work, h, classes, want)
+            path, roots = extract_host(tree, work, h, classes, want, h in bare_hosts)
         except Exception as e:   # one host must not stop the step
             print('vtables: emitting the slot functions of %s failed: %r' % (h, e), flush=True)
             path, roots = None, set()

@@ -74,6 +74,16 @@ SRC = {
                  'KeyImp *mk_ki() { return new KeyImp; }\nKeyDel *mk_kd() { return new KeyDel; }\n'
                  'KeyOut *mk_ko() { return new KeyOut; }\n',
 }
+# Unit e: the classes link 9f865b0a left as zero blocks. It carries its own std::exception (the decomp's staging
+# units do), so it does not compile after HEAD's <typeinfo>: probed with HEAD_BARE.
+EHEADER = r'''#pragma once
+namespace std { class exception { public: exception(const char *m) : msg(m) {} virtual ~exception() {}
+    virtual const char *what() const { return msg; } const char *msg; }; }
+struct ExcE : std::exception { ExcE(const char *m) : std::exception(m), code(1) {} virtual ~ExcE(); int code; };
+'''
+SRC['src/e.cpp'] = ('#include "e.h"\n'
+                    'int catch_e(void (*f)()) { try { f(); } catch (ExcE &e) { return e.code; } return 0; }\n')
+EORACLE = '#define FNVNX_ORACLE\n#include "e.h"\nExcE::~ExcE() {}\n'
 ORACLE = '#include "h.h"\nint Key::k() { return 9; }\nint Root::r() { return 0; }\nInl *mk_inl() { return new Inl; }\n' \
          'struct AbsX : Abs2 { int pure() override { return 1; } int g2() override { return 2; } };\n' \
          'AbsX *mk_absx() { return new AbsX; }\n'
@@ -106,9 +116,13 @@ UNITS = {'units': [
      'symbols': {VFT[a][0]: '0x%08x' % a for a in (0x01000300, 0x01000320, 0x01000340, 0x01000360, 0x01000380)}},
     {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: KeyOut's destructor
         F(0x401500, '??1KeyOut@@UAE@XZ')], 'symbols': {}},
+    {'source': 'src/e.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
+        F(0x401610, '?catch_e@@YAHP6AXXZ@Z')], 'symbols': {}},
 ]}
 MANGLED = {'Multi': '5Multi', 'Base1': '5Base1', 'Base2': '5Base2', 'Key': '3Key', 'Inl': '3Inl', 'Abs2': '4Abs2',
            'Root': '4Root', 'KeyImp': '6KeyImp', 'KeyDel': '6KeyDel', 'KeyOut': '6KeyOut'}
+# unit e: the names GCC emits for these classes with their key functions (EORACLE) == the synthesized ones
+E_NAMES = ['_ZTI4ExcE', '_ZTV4ExcE']
 
 ok = True
 
@@ -182,6 +196,7 @@ def main():
         tree = os.path.join(t, 'tree')
         os.makedirs(os.path.join(tree, 'include'), exist_ok=True)
         open(os.path.join(tree, 'include', 'h.h'), 'w').write(HEADER)
+        open(os.path.join(tree, 'include', 'e.h'), 'w').write(EHEADER)
         fl = [f if f != '-O2' else '-O1' for f in layout.flags(tree)] + ['-fno-inline']
         objs = {}
         for rel, text in SRC.items():
@@ -195,6 +210,9 @@ def main():
         dump = os.path.join(t, 'classes.txt')
         run([CXX, *[f if f != '-O2' else '-O0' for f in layout.flags(tree)], '-fdump-lang-class=' + dump, oracle_src,
              '-o', oracle_obj], cwd=tree)
+        eoracle_src, eoracle_obj = os.path.join(t, 'eoracle.cpp'), os.path.join(t, 'eoracle.o')
+        open(eoracle_src, 'w').write(EORACLE)
+        run([CXX, *[f if f != '-O2' else '-O0' for f in layout.flags(tree)], eoracle_src, '-o', eoracle_obj], cwd=tree)
         json.dump(UNITS, open(os.path.join(t, 'units.json'), 'w'))
         with open(os.path.join(t, 'objects.tsv'), 'w') as f:
             for rel in SRC:
@@ -225,6 +243,14 @@ def main():
                     got, want = synth[n].ents(n), oracle.ents(n)
                     check(got == want, '%s differs from GCC:\n  got  %s\n  want %s' % (n, got, want))
         check('_ZTS3Key' in synth and '_ZTV5Multi' not in synth, 'typeinfo names synthesized, emitted vtables not')
+        # unit e (HEAD_BARE)
+        eoracle = vtables.Obj(eoracle_obj)
+        for n in E_NAMES:
+            if check(n in synth, '%s synthesized' % n) and check(n in eoracle.defs, '%s in the oracle' % n):
+                got, want = synth[n].ents(n), eoracle.ents(n)
+                check(got == want, '%s differs from GCC:\n  got  %s\n  want %s' % (n, got, want))
+        for n in ('_ZN4ExcED1Ev',):   # defined nowhere: never taken from the probe
+            check(n not in synth, '%s not defined by the synthesized objects' % n)
         # S2c-vt item 5: emitted slot functions are game code, compiled with compile.sh's own flags (--print-flags)
         gf = layout.game_flags(tree, os.path.join(out, 'vtables', 'probe'))
         check(any(f.endswith('fnvnx_ftoi.so') for f in gf) and any(f.endswith('fnvnx_order.so') for f in gf) and

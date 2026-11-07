@@ -528,6 +528,14 @@ A base typeinfo no object defines is probed in the next round. Classes with virt
 construction vtables, virtual thunks) and anonymous-namespace classes are not synthesized. Errors in the probe drop
 only the items GCC names (or the class), and the class moves to its next host.
 
+Retries on one host (link 9f865b0a: 78 trap stubs of D23's `special-unresolved:typeinfo-for` / `vtable-for` /
+`VTT-for`, all with a 4 KiB zero block standing in):
+* *Units that do not compile after the probe's standard headers* (their own `std::exception` / `std::bad_alloc`,
+  or a `using namespace std` swap that `<type_traits>` makes ambiguous: blk_00640000_od, blk_00ac0000_od_ob1_variant,
+  blk_00b00000_od_ob1_variant, blk_00e00000_o2, frondengine_ob1_variant): probed again with `HEAD_BARE`, the same
+  helpers from GCC's builtins (`__direct_bases`, `__bases`, `__is_convertible`) and a declared `std::type_info`,
+  no header. The emitted slot functions of such a host use it too.
+
 Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the compiled objects): weak `_ZTV`, `_ZTI`,
 `_ZTS` for names no compiled object defines, and the non-virtual thunks (`_ZTh[n]<k>_f`: `sub`/`add w0`, tail call
 `b f`) no object defines (GCC emits a thunk next to each out-of-line definition, so few are needed). The second
