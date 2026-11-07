@@ -357,3 +357,11 @@ extern "C" LPSTR lstrcpyA(LPSTR d, LPCSTR s) { return d && s ? strcpy(d, s) : NU
 extern "C" LPSTR lstrcatA(LPSTR d, LPCSTR s) { return d && s ? strcat(d, s) : NULL; }
 extern "C" int lstrlenA(LPCSTR s) { return s ? (int)strlen(s) : 0; }
 extern "C" int lstrcmpiA(LPCSTR a, LPCSTR b) { int c = w32_stricmp(a ? a : "", b ? b : ""); return c < 0 ? -1 : c > 0; }
+
+/* the game build's toolchain/game/boot.cpp reads unmapped image constants from the exe; elsewhere p as it is */
+extern "C" __attribute__((weak)) const void *fnvnx_image_const(const void *p, uint32_t n, void *buf)
+{
+    (void)n;
+    (void)buf;
+    return p;
+}

@@ -22,7 +22,14 @@
 
 namespace {
 
-bool guid_eq(const GUID &a, const GUID &b) { return !memcmp(&a, &b, sizeof(GUID)); }
+/* both sides through fnvnx_image_const: the game's DIOBJECTDATAFORMAT tables (c_dfDIKeyboard, c_dfDIMouse in its
+ * .data) point at GUIDs MSVC placed in the exe's .text, which the port does not map (a stub boot faulted here) */
+bool guid_eq(const GUID &a, const GUID &b)
+{
+    GUID ta, tb;
+    const void *pa = fnvnx_image_const(&a, sizeof(GUID), &ta), *pb = fnvnx_image_const(&b, sizeof(GUID), &tb);
+    return !memcmp(pa, pb, sizeof(GUID));
+}
 const GUID IID_IUnknown_ = {0x00000000, 0x0000, 0x0000, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
 const GUID GUID_Product_Kbd = {0x6f1d2b61, 0xd5a0, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
 const GUID GUID_Product_Mouse = {0x6f1d2b60, 0xd5a0, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
