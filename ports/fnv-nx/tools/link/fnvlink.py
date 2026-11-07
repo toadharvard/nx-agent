@@ -319,6 +319,17 @@ def kind_of_addr(a):
     return 'data' if DATA_START <= a < DATA_END + 0x1000 else ('text' if a < DATA_START else 'other')
 
 
+def is_data_addr(a):
+    return kind_of_addr(a) == 'data'
+
+
+def body_data_addr(body_bind, un):
+    """S2d `exe-data` (bodies.py): the image address bodies/bind.tsv gives a placeholder variable, else None."""
+    cls, target = body_bind.get(un, ('', ''))
+    m = re.match(r'^__fnv_([0-9a-f]{8})$', target or '')
+    return int(m.group(1), 16) if cls == 'body-exe-data' and m else None
+
+
 def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None, override_lib=None,
             units_renames=None, exe=None):
     """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
@@ -783,6 +794,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
                 cls, tier, addr, target, note = vsb.classify(u.host or u.source, u.obj, un, isig, native, def_at,
                                                              (cls, tier, addr, target, note))
+            if cls == 'unresolved' and body_data_addr(body_bind, un) is not None:
+                # S2d exe-data: a placeholder variable at the image address the exe's code uses for it; bound like
+                # any address (data, an IAT slot GCC calls, TLS)
+                cls, tier, addr, target = 'addr', 'body/exe-data', body_data_addr(body_bind, un), None
             if addr is not None and cls == 'addr':
                 ak = kind_of_addr(addr)
                 if ak == 'data' and un in tls_undef:   # thread-local: native TLS in the image's .tls layout
@@ -970,7 +985,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     code = abi2.emit(bn, target, v.plan, 'ref: %s | def: %s'
                                                      % (ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     if code is None:
-                                        cls = 'code-manual'
+                                        cls = 'code-manual' if not abi_manual_trap(v) else 'abi-manual'
+                                        target = None if cls == 'abi-manual' else target
                                     else:
                                         bridges.setdefault(bn, code)
                                         target = bn
@@ -980,6 +996,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     bridges.setdefault(bn, (target, v, ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     target = bn
                                     cls = 'code-bridge'
+                                elif v.kind == 'manual' and abi_manual_trap(v):
+                                    # D24: nothing binds across an aggregate / result-pointer difference without a
+                                    # bridge; the reference stays a trap stub (cause abi-manual in the D23 list)
+                                    cls, target = 'abi-manual', None
+                                    stats['abi_manual_unbound'] += 1
                                 elif v.kind == 'manual':
                                     cls = 'code-manual'
                             elif v.notes:
@@ -1804,6 +1825,17 @@ def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, alt=None):
                 'slots\toutcome\tnative slots now\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
+
+
+ABI_MANUAL_TRAP = ('sret-explicit', 'ret-aggregate', 'aggregate-param')
+
+
+def abi_manual_trap(v):
+    """A `manual` pair that differs in how an aggregate or the result pointer is passed (sret-explicit, ret-aggregate,
+    aggregate-param): with no bridge (abi2 has no layout plan) the reference is left unbound, so it stays a trap stub
+    and is listed (cause abi-manual) instead of binding across the difference (orchestrator, D24). Varargs-only
+    manual pairs keep their direct binding: AArch64 passes variadic arguments where it passes named ones."""
+    return any(c in ABI_MANUAL_TRAP for c in v.classes)
 
 
 def slot_abi(isig, ds):
