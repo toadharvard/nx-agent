@@ -71,7 +71,7 @@ from (a tree prepared before a rules change silently lacks it: f10's tree predat
 | `__fnvnx_br_<addr8>_<hash8>` | ABI bridge for one (address, reference declaration); hash of the MSVC reference name. |
 | `out/objcopy/<obj>.redefine` | `old new` per line (the objcopy `--redefine-syms` format): undefined Itanium name -> address symbol or bridge. |
 | `out/objcopy/<obj>.args` | objcopy options for the object (`--add-symbol`, `--localize-symbol`, `--weaken-symbol`, `--redefine-sym`). |
-| `out/objcopy/<obj>.undefine` | Definitions `apply` turns into undefined references before renaming (import thunks: their name then follows the `.redefine` mapping to the import). |
+| `out/objcopy/<obj>.undefine` | Definitions `apply` turns into undefined references before renaming (import thunks: their name then follows the `.redefine` mapping to the import; a global `FUN_<addr>` defined by an unrelated body, i.e. not the native at `<addr>` (`out/colliding.tsv`, S5 class 2): its name follows the mapping to `__fnv_<addr>`, and other objects' by-name references bind by address too, never to the helper). |
 | `out/objcopy/<obj>.rebind` | Address (and TLS slot) symbols of the variables the object defines at image addresses: `apply` points the object's own data pointers to them at these symbols (split globals, below). |
 | `out/aliases.ld` | Linker script: absolute data address symbols, aliases of COMDAT definitions. |
 | `out/refs.tsv` | Every (object, undefined symbol): class, tier, address, target, matched MSVC declaration. |
@@ -455,6 +455,42 @@ temporaries (x86 saw a bitwise copy too); ownership stays with the caller. `test
 register-result conversion, pointer vs non-trivial holder, fastcall edx dummy with stack arguments) under
 qemu-aarch64 against C++ definitions, with layouts from the real probe.
 
+**abi-manual pairs (D24 option a).** A `manual` pair with an aggregate or result-pointer class (sret-explicit,
+ret-aggregate, aggregate-param) that abi2 cannot plan stays unbound (trap stub, cause `abi-manual`, the reason in the
+abi.tsv notes as `abi2: ...` and in the stats as `abi_manual_why:*`). What used to keep pairs there, and now binds:
+* layouts the probe could not name: a C name's declaration read from source loses its namespace
+  (`CopyFromSource(FUN_00cc83b0_Class *, RefBlockArgument)` inside `namespace fnv_00cc83b0`). The probe takes the one
+  namespace GCC names ("did you mean `ns::T`"; several candidates get "suggested alternatives" and stay unknown) for
+  the type, its first component (`PacketMask::Bits`) or a template and its arguments (`Ref<SolverInfo>`), and spells
+  a class that a function of the same name hides as `struct ::T` (`FUN_0040c0e0`). Unnameable rows carry the rule
+  `pod2+ns`; older ones are probed again. `abi2.lookup` also takes a unit's unique (or identical) `ns::T` row for a
+  bare `T`.
+* untagged named parameter types (`?:WPARAM`, a typedef the C-name reader did not expand, or a nested enum): measured
+  by the probe like aggregates, parameters only and from 4 bytes (a narrower scalar was widened by the x86 caller,
+  AArch64 leaves the upper bits unspecified), never in a fastcall register (an enum goes in ecx/edx, a struct on the
+  stack). An untagged result stays manual: whether MSVC returns it through a buffer depends on its being a class.
+* function pointers spelled with a parameter name and no blank (`bool(__cdecl* handler)(char *)`): `P` (abi.py).
+* a variadic side: compared on its named part. When that is `same`, the pair is `same` (the anonymous arguments are
+  where the named ones would be); one that needs a bridge stays manual (the bridge would move the anonymous
+  arguments it does not know).
+* a void reference against a definition that returns an aggregate through MSVC's hidden buffer: two readings. The
+  reference passes the buffer itself (`void f(unsigned char *out, ...)`, sret-explicit) when every definition byte
+  comes from the reference that way; otherwise, when it is clean, the declaration lost the result and the arguments
+  are matched without the buffer (`result-discarded`: R2's `void P133List::InsertAt(OutIter, P133Camera *const &)`
+  against 0x00b156b0; read with the buffer the callee writes through the iterator's first word, and c4fbea9's
+  pop-mismatch rule bridged it that way). A memory result (x8) gets a scratch buffer in the bridge's frame (no tail
+  call), a register result is not read.
+
+`test_bridges.py` runs these under qemu-aarch64 too (free function's hidden result against a static member's out
+pointer, 16-byte ints result against an HFA, an 8-byte struct against two ints, a typedef'd struct against four ints,
+void references against a hidden memory result, member and free, and against an explicit out pointer) and checks the
+probe's respelling; `test_abimanual.py` the reasons, `abi2.lookup` and the function-pointer spellings. Offline, on
+link 9f865b0a's inputs with the branch's sigs (abi.tsv's manual pairs and the newly paired ones, the missing layouts
+probed on a prepared tree), abi-manual pairs went 16 -> 2 (aggregate-param 12 -> 1, ret-aggregate 4 -> 1,
+sret-explicit 1 -> 0). Left: `std::_Vector_const_iterator<El, std::allocator<El>>` (0x00abfa90), a MSVC STL type the
+definition's unit does not declare under libstdc++, and `NavMeshPtr` (0x00464fc0 called through a cast), an
+untagged result.
+
 ## Vtables (`vtables.py`, kind `V`, D7)
 
 Objects only ever hold Itanium vptrs (DATAIMAGE.md D7); an image vftable address stands for the Itanium address
@@ -649,6 +685,12 @@ decomp names or hand-stored vptrs that names another class, unless the own vtabl
 partial declaration), and adds V rows for vftables no unit names. `exe_vftables.tsv`: per exe vftable the class,
 its native vtable, the pairing before and the outcome. Classes with no native vtable are requested for synthesis
 (`vtable_requests.tsv`, why `exe-rtti`; hosts: units naming the address, then units naming a member).
+Before it, `ctor_store_pairs` (S5 class 3) pairs each constructor-named vtable (`_ZTV<n>FUN_<ctor>`, a placeholder
+class) that no unit pairs: the exe's constructor at `<ctor>` (a native `??0` definition) names its vftable, the last
+`mov dword ptr [reg], imm32` of an RTTI primary vftable start before its first `ret` (`exevft.ctor_vftable`,
+capstone). A free vftable gets the shell in the map; one with a vtable already takes it as a displaced vtable, so
+the slot fill and the extended copies (below) reach it either way. `ctor_vftables.tsv`: each candidate and outcome.
+On link 9f865b0a's inputs: 390 pairs (7 new V rows, 383 displaced), 319 of them shorter than the exe's vftable.
 
 **Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's

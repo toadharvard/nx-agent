@@ -8,6 +8,18 @@
  */
 #ifndef FNVNX_EQUIV_COMPAT_H
 #define FNVNX_EQUIV_COMPAT_H
+/* CRT-NOCPPOVL: the target CRT has no C++ template overloads of the secure functions (strcpy_s(char (&)[N], src),
+ * strcat_s, sprintf_s, ...); MSVC 2008 declares them in C++ unless this is 0. A unit that keeps its own template of
+ * that form next to DECL1's `using ::strcat_s;` (archive.cpp's fnv_00afad00) was ambiguous under MSVC only. */
+/* CRT-NOSAL: the target CRT has no SAL annotations. With attribute SAL (MSVC's default since VC8) sal.h brings in
+ * codeanalysis/sourceannotations.h, whose namespace vc_attributes a unit's own copy of it then defines twice
+ * (hkpspherecapsuleagent_rtm_variant). Annotations generate no code (SAL1's verdict). */
+#ifndef _USE_ATTRIBUTES_FOR_SAL
+#define _USE_ATTRIBUTES_FOR_SAL 0
+#endif
+#ifndef _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES
+#define _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES 0
+#endif
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,6 +37,14 @@ void __cdecl _operator_delete_sized(void *, unsigned int);
  * decomp's own `void operator delete(void*, unsigned int);`. MSVC 2008 has no implicit one. */
 void __cdecl operator delete(void *, unsigned int);
 void __cdecl operator delete[](void *, unsigned int);
+/* ... and the usual unsized forms, also implicit on the target and in MSVC: declared beside the sized ones so that
+ * an explicit `operator delete[](p)` still finds them (a declared overload hides MSVC's implicit one;
+ * tesland_od_variant_decl_variant, C2660) */
+void __cdecl operator delete(void *);
+void __cdecl operator delete[](void *);
 #endif
 /* _CxxThrowException and _ThrowInfo: predefined by the MSVC C++ front end (nothing to declare) */
+/* ENUM1-FWD: fnvnx_compat.h's `: int` base of an opaque enum declaration; MSVC 2008 has no opaque declarations, its
+ * forward declaration `enum X;` (the decomp's own spelling) declares the same int-based type */
+#define FNVNX_ENUM_INT
 #endif

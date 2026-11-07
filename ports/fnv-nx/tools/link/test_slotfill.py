@@ -36,6 +36,10 @@ rest; its exe vftable holds the same bodies. Checks:
   (`sub ecx, 8; jmp M::s2body`) and the native vtable's offset-to-top is -8, gets `sub w0, w0, #8; b __fnv_<a>`;
 * a reference that uses the result of the constructor at 0x00401130 (MSVC returns this) binds to a stub that calls
   the C1 and returns this, and the address map's C row names that stub (S5 s5-002 item 4);
+* a call bound by address to that adjustor thunk, which units.json places (`?s2@M@@W7AEHXZ`) and GCC never emits,
+  binds to a stub at the address, `sub w0, w0, #8; b __fnv_<M::s2body>`, which the address map's F row names (R6);
+* a call bound to ??_GNv, the scalar deleting destructor of a class whose destructor is not virtual (GCC emits no
+  D0), binds to a stub: Nv's D1, then the global operator delete when flags bit 0 is set (R6);
 * Dd's D1, defined nowhere (MSVC folded ~Dd into ??_GDd, which the unit binds to a (this, flags) function), is
   `??_G(this, 0)` through the flag stub (S1-refs-004);
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
@@ -75,7 +79,11 @@ struct Ct { Ct(); int v; };                          // an MSVC constructor retu
 struct CtShell { void *FUN_00401130(); };             // a unit that calls it for its result
 struct S1 { virtual int s1(); int a; };
 struct S2 { virtual int s2(); int b; };          // s2 defined nowhere
-struct M : S1, S2 { int s1() override; int s2body(); int c; };   // the exe's M overrides s2 (as M::s2body)  // k: stdcall kbody(int); kz: return 0
+struct M : S1, S2 { int s1() override; int s2body(); int c; };
+struct ThkUse { int FUN_00401110(); };   // a unit calling the exe's adjustor thunk 0x401110 by address
+struct Nv { ~Nv(); int q; };                       // not virtual: GCC emits no D0, MSVC a ??_G at 0x401160
+struct NvUse { void *FUN_00401160(unsigned); };   // a unit calling that ??_G by address
+void game_free(void *);   // the exe's M overrides s2 (as M::s2body)  // k: stdcall kbody(int); kz: return 0
 int kbody(int);
 '''
 SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nint Der::a() { return 2; }\n'
@@ -90,7 +98,10 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'M *mk_m() { return new M; }\n'
                     'Ct::Ct() { v = 7; }\nvoid *use_ct(CtShell *p) { return p->FUN_00401130(); }\n'
                     'void *Dd::FUN_00401140(unsigned f) { return f ? this : 0; }\nvoid del_dd(Dd *p) { delete p; }\n'
-                    'Vb *mk_vb() { return new Vb; }\nDer *mk_der() { return new Der; }\n'}
+                    'Vb *mk_vb() { return new Vb; }\nDer *mk_der() { return new Der; }\n'
+                    'int call_thk(ThkUse *p) { return p->FUN_00401110(); }\n'
+                    'Nv::~Nv() { q = 0; }\nvoid game_free(void *p) { g_q = p != 0; }\n'
+                    'void *call_nv(NvUse *p) { return p->FUN_00401160(1); }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
 
@@ -171,12 +182,17 @@ def main():
                 F(0x4010c0, '?kk@Vk@@UAEHXZ'), F(0x4010c8, '?kbody@@YGHH@Z'), F(0x4010f0, '?qbody@@YAXH@Z'),
                 F(0x401120, '?s1@M@@UAEHXZ'), F(0x401100, '?s2body@M@@QAEHXZ'), F(0x401128, '?s1@S1@@UAEHXZ'),
                 F(0x401130, '??0Ct@@QAE@XZ'), F(0x401138, '?use_ct@@YAPAXPAUCtShell@@@Z'),
-                F(0x401140, '?FUN_00401140@Dd@@QAEPAXI@Z'), F(0x401148, '?del_dd@@YAXPAUDd@@@Z')],
+                F(0x401140, '?FUN_00401140@Dd@@QAEPAXI@Z'), F(0x401148, '?del_dd@@YAXPAUDd@@@Z'),
+                F(0x401110, '?s2@M@@W7AEHXZ'), F(0x401150, '?call_thk@@YAHPAUThkUse@@@Z'),
+                F(0x401160, '??_GNv@@QAEPAXI@Z'), F(0x401170, '?game_free@@YAXPAX@Z'),
+                F(0x401178, '?call_nv@@YAPAXPAUNvUse@@@Z')],
              'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
                          '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp'],
                          '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk'],
                          '??_7M@@6BS1@@@': '0x%08x' % where['M'], '??_7M@@6BS2@@@': '0x%08x' % where['M2'],
-                         '?FUN_00401130@CtShell@@QAEPAXXZ': '0x00401130', '??_GDd@@QAEPAXI@Z': '0x00401140'}},
+                         '?FUN_00401130@CtShell@@QAEPAXXZ': '0x00401130', '??_GDd@@QAEPAXI@Z': '0x00401140',
+                         '?FUN_00401110@ThkUse@@QAEHXZ': '0x00401110', '?FUN_00401160@NvUse@@QAEPAXI@Z': '0x00401160',
+                         '??3@YAXPAX@Z': '0x00401170'}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
                 F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {}},
         ]}
@@ -254,6 +270,23 @@ def main():
               '__fnvnx_vadj_00401110:\n    sub w0, w0, #8\n    b __fnv_00401100' in bridges_,
               'S2::s2 in M\'s secondary vtable: the exe\'s adjustor thunk (sub ecx, 8; jmp M::s2body) -> '
               'sub w0, w0, #8; b __fnv_00401100: %s' % (rs2,))
+        rt = refs.get('_ZN6ThkUse12FUN_00401110Ev')
+        trow = {l.split('\t')[0]: l.split('\t') for l in open(os.path.join(out, 'addrmap.tsv'))
+                if not l.startswith('#')}.get('00401110', [''] * 6)
+        check(rt is not None and rt[2] == 'code-adjthunk' and rt[5] == '__fnv_00401110' and
+              '__fnv_00401110:\n    sub w0, w0, #8\n    b __fnv_00401100' in bridges_ and trow[1] == 'F' and
+              trow[2] == '__fnv_00401110' and '__fnv_00401110' not in chk,
+              'a call bound to the placed adjustor thunk 0x401110 (M::s2 `W7`, no GCC counterpart) -> its stub '
+              'sub w0, w0, #8; b __fnv_00401100, an F row, defined in the trial link: %s %s' % (rt, trow))
+        rn = refs.get('_ZN5NvUse12FUN_00401160Ej')
+        check(rn is not None and rn[2] == 'code-sddstub' and rn[5] == '__fnv_00401160' and
+              '__fnv_00401160:\n    stp x29, x30, [sp, #-32]!' in bridges_ and
+              '    bl _ZN2NvD1Ev\n    tbz w20, #0, 1f\n    mov w0, w19\n    bl __fnv_00401170\n' in bridges_ and
+              '__fnv_00401160' not in chk,
+              'a call bound to the non-virtual ??_GNv (no GCC D0) -> a stub: D1, then the global delete if flags & 1: '
+              '%s' % (rn,))
+        rt0 = res['none'][2].get('_ZN6ThkUse12FUN_00401110Ev')
+        check(rt0 is not None and rt0[2] == 'code-defmissing', 'without the exe: code-defmissing %s' % (rt0,))
         rc = refs.get('_ZN7CtShell12FUN_00401130Ev')
         check(rc is not None and rc[5] == '__fnvnx_cthis_00401130' and
               '__fnvnx_cthis_00401130:\n    stp x29, x30, [sp, #-32]!\n    mov x29, sp\n    str x0, [sp, #16]\n'

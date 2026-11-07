@@ -339,7 +339,7 @@ index e456c07..878d552 100644
      if ((len+2) >= bufsize)
          fail(ctx, "BUG: internal buffer is too small");
 diff --git a/profiles/mojoshader_profile_glsl.c b/profiles/mojoshader_profile_glsl.c
-index 319e3cb..61c64cd 100644
+index 319e3cb..3bbda0c 100644
 --- a/profiles/mojoshader_profile_glsl.c
 +++ b/profiles/mojoshader_profile_glsl.c
 @@ -27,6 +27,63 @@ static inline const char *get_GLSL_register_string(Context *ctx,
@@ -1245,24 +1245,38 @@ index 319e3cb..61c64cd 100644
      char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
      char code[128];
      make_GLSL_destarg_assign(ctx, code, sizeof (code), "log2(%s)", src0);
-@@ -1429,6 +2025,16 @@ void emit_GLSL_LIT_helper(Context *ctx)
-     output_line(ctx,       "retval.z = pow(src.y, power);"); ctx->indent--;
-     output_line(ctx,     "}"); ctx->indent--;
-     output_line(ctx,   "}");
+@@ -1419,6 +2015,19 @@ void emit_GLSL_LIT_helper(Context *ctx)
+     ctx->glsl_generated_lit_helper = 1;
+ 
+     push_output(ctx, &ctx->helpers);
 +#if SUPPORT_PROFILE_GLSLDK
-+    // fnv-nx: lit with a zero exponent is implementation-defined in practice:
-+    //  WineD3D (the S16 reference) gives z = 0 for w == 0, Nine (TGSI LIT)
-+    //  pow(y, 0) = 1. See dk_numerics_helpers.
-+    if (support_glsldk(ctx)) {
-+        output_line(ctx,   "#ifndef DK_NUMERICS_NINE");
-+        output_line(ctx,   "if (src.w == 0.0) retval.z = 0.0;");
-+        output_line(ctx,   "#endif");
-+    }
++    // fnv-nx: lit's z where D3D9's pseudo-code and the implementations part
++    //  (x == 0, y <= 0 with a negative exponent, a zero exponent): by default
++    //  WineD3D's (the S16 reference; wine 9 shader_glsl_lit), with
++    //  DK_NUMERICS_NINE the pseudo-code below (as Nine's TGSI LIT).
++    //  See dk_numerics_helpers.
++    if (support_glsldk(ctx))
++    {
++        output_line(ctx, "#ifndef DK_NUMERICS_NINE");
++        output_line(ctx, "vec4 LIT(const vec4 src) { return vec4(1.0, max(src.x, 0.0), src.w == 0.0 ? 0.0 : pow(max(0.0, src.y) * step(0.0, src.x), clamp(src.w, -128.0, 128.0)), 1.0); }");
++        output_line(ctx, "#else");
++    } // if
 +#endif
+     output_line(ctx, "vec4 LIT(const vec4 src)");
+     output_line(ctx, "{"); ctx->indent++;
+     output_line(ctx,   "float power = clamp(src.w, -%s, %s);",maxp,maxp);
+@@ -1431,6 +2040,10 @@ void emit_GLSL_LIT_helper(Context *ctx)
+     output_line(ctx,   "}");
      output_line(ctx,   "return retval;"); ctx->indent--;
      output_line(ctx, "}");
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx))
++        output_line(ctx, "#endif");
++#endif
      output_blank_line(ctx);
-@@ -1577,6 +2183,17 @@ void emit_GLSL_LOOP(Context *ctx)
+     pop_output(ctx);
+ } // emit_GLSL_LIT_helper
+@@ -1577,6 +2190,17 @@ void emit_GLSL_LOOP(Context *ctx)
      assert(ctx->source_args[0].regnum == 0);  // in case they add aL1 someday.
      output_line(ctx, "{");
      ctx->indent++;
@@ -1280,7 +1294,7 @@ index 319e3cb..61c64cd 100644
      output_line(ctx, "const int aLend = %s.x + %s.y;", var, var);
      output_line(ctx, "for (int aL = %s.y; aL < aLend; aL += %s.z) {", var, var);
      ctx->indent++;
-@@ -1587,6 +2204,10 @@ void emit_GLSL_RET(Context *ctx)
+@@ -1587,6 +2211,10 @@ void emit_GLSL_RET(Context *ctx)
      // thankfully, the MSDN specs say a RET _has_ to end a function...no
      //  early returns. So if you hit one, you know you can safely close
      //  a high-level function.
@@ -1291,7 +1305,7 @@ index 319e3cb..61c64cd 100644
      ctx->indent--;
      output_line(ctx, "}");
      output_blank_line(ctx);
-@@ -1668,6 +2289,20 @@ void emit_GLSL_ABS(Context *ctx)
+@@ -1668,6 +2296,20 @@ void emit_GLSL_ABS(Context *ctx)
  
  void emit_GLSL_NRM(Context *ctx)
  {
@@ -1312,7 +1326,7 @@ index 319e3cb..61c64cd 100644
      char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
      char code[128];
      make_GLSL_destarg_assign(ctx, code, sizeof (code), "normalize(%s)", src0);
-@@ -1801,7 +2436,23 @@ void emit_GLSL_DEFI(Context *ctx)
+@@ -1801,11 +2443,36 @@ void emit_GLSL_DEFI(Context *ctx)
      pop_output(ctx);
  } // emit_GLSL_DEFI
  
@@ -1337,7 +1351,20 @@ index 319e3cb..61c64cd 100644
  
  void emit_GLSL_TEXKILL(Context *ctx)
  {
-@@ -1854,8 +2505,25 @@ void emit_GLSL_TEXLD(Context *ctx)
+     char dst[64]; get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
++#if SUPPORT_PROFILE_GLSLDK
++    // fnv-nx: ps_2_0 and later test all four components (WineD3D, and Nine's
++    //  KILL_IF); only ps_1_x's texkill looks at the texcoord's xyz.
++    if (support_glsldk(ctx) && shader_version_atleast(ctx, 2, 0))
++    {
++        output_line(ctx, "if (any(lessThan(%s, vec4(0.0)))) discard;", dst);
++        return;
++    } // if
++#endif
+     output_line(ctx, "if (any(lessThan(%s.xyz, vec3(0.0)))) discard;", dst);
+ } // emit_GLSL_TEXKILL
+ 
+@@ -1854,8 +2521,25 @@ void emit_GLSL_TEXLD(Context *ctx)
  
      else if (!shader_version_atleast(ctx, 2, 0))
      {
@@ -1365,7 +1392,7 @@ index 319e3cb..61c64cd 100644
          return;
      } // else if
  
-@@ -2202,6 +2870,19 @@ void emit_GLSL_TEXM3X3VSPEC(Context *ctx)
+@@ -2202,6 +2886,19 @@ void emit_GLSL_TEXM3X3VSPEC(Context *ctx)
  
  void emit_GLSL_EXPP(Context *ctx)
  {

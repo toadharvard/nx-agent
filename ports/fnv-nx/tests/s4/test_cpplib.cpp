@@ -152,13 +152,28 @@ TEST(cpplib_locinfo_and_ctype)
     li._Months.init("");
     li._Oldlocname.init("");
     li._Newlocname.init("");
-    fnvnx_locinfo_ctor(&li, "C");
+    /* the name comes as a VC9 std::string by reference (inline buffer below 16, heap pointer from 16) */
+    string name;
+    name.init("C");
+    fnvnx_locinfo_ctor(&li, &name);
     CHECK_STR(li._Oldlocname.c_str(), "C");
     CHECK_STR(li._Newlocname.c_str(), "C");
-    fnvnx_locinfo_ctor(&li, "German_Germany.1252");
+    char longname[] = "German_Germany.1252"; /* 19 characters: heap storage */
+    string hs;
+    hs._Alval = 0;
+    hs._Bx._Ptr = longname;
+    hs._Mysize = strlen(longname);
+    hs._Myres = 31;
+    fnvnx_locinfo_ctor(&li, &hs);
     CHECK_STR(li._Newlocname.c_str(), "*"); /* setlocale would fail: only "C" exists */
     CHECK_EQ(li._Newlocname._Mysize, 1u);
-    fnvnx_locinfo_ctor(&li, "");
+    name.init("");
+    fnvnx_locinfo_ctor(&li, &name);
+    CHECK_STR(li._Newlocname.c_str(), "C");
+    char heapc[16] = "C"; /* "C" held on the heap (a string that once grew) reads the same */
+    hs._Bx._Ptr = heapc;
+    hs._Mysize = 1;
+    fnvnx_locinfo_ctor(&li, &hs);
     CHECK_STR(li._Newlocname.c_str(), "C");
     char heap[32];
     li._Newlocname._Myres = 31; /* a string with heap storage keeps it */

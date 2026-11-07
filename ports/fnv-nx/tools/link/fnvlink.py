@@ -91,6 +91,34 @@ def inside_function(a):
     starts, ends = FUNC_SPANS
     j = bisect.bisect_right(starts, a) - 1
     return j >= 0 and starts[j] < a < ends[j]
+
+
+def colliding_fun_defs(objsyms, native, itanium, shadowed=None):
+    """Global free functions named FUN_<a> whose definition is not the native at a: the decomp keeps an unrelated
+    helper under that tag (S5 s5-003 class 2: FUN_00e7acb0, bits per pixel, defined by a DXT block-size helper).
+    A by-name reference would reach the helper, so every reference binds by address (__fnv_<a>), never by name:
+    the defining objects' own definitions become references (apply's .undefine), the other objects' references
+    are bound by address in classify. -> ({name: a}, {source: {name}}). Never a name that is the native of some
+    address (its body is placed: a weak alias may name it), nor a decomp definition an override shadows (its name
+    already follows the override)."""
+    natnames = set()
+    for nd in list(native.values()) + list((shadowed or {}).values()):
+        natnames.add(nd['sym'].name)
+        natnames.update(v.name for v in nd['variants'].values())
+    addr_of, srcs = {}, collections.defaultdict(set)
+    for src, syms in objsyms.items():
+        for s in syms:
+            if not s.shndx or s.bind not in ('global', 'weak') or s.type != 'func' or s.name in natnames:
+                continue
+            q = itanium(s.name).qual if s.name.startswith('_Z') else [s.name]
+            m = ADDR_IN_NAME.match(q[-1]) if q and len(q) == 1 else None
+            if not m or not m.group(0).startswith('FUN_'):
+                continue
+            a = int(m.group(1), 16)
+            if a in native:
+                addr_of[s.name] = a
+                srcs[src].add(s.name)
+    return addr_of, srcs
 # prepare rule GAME1 (D13): a Win32-looking name a unit binds to game code is spelled fnvnx_game_<name>; the unit's
 # recipe still names it <name>, so the lookup strips the prefix (the unit's binding decides: game code or an IAT slot)
 GAME_PREFIX = 'fnvnx_game_'
@@ -289,6 +317,17 @@ class KeyIndex:
 
 def kind_of_addr(a):
     return 'data' if DATA_START <= a < DATA_END + 0x1000 else ('text' if a < DATA_START else 'other')
+
+
+def is_data_addr(a):
+    return kind_of_addr(a) == 'data'
+
+
+def body_data_addr(body_bind, un):
+    """S2d `exe-data` (bodies.py): the image address bodies/bind.tsv gives a placeholder variable, else None."""
+    cls, target = body_bind.get(un, ('', ''))
+    m = re.match(r'^__fnv_([0-9a-f]{8})$', target or '')
+    return int(m.group(1), 16) if cls == 'body-exe-data' and m else None
 
 
 def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None, override_lib=None,
@@ -528,6 +567,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
+    lay_of = abi2.lookup(layouts)   # unit -> type -> Layout, with the unit's unique `ns::type` for a bare name
     probe_req = set()
     vacall_req = set()   # (unit, undefined symbol) of variadic references whose call sites decide (vacall.py)
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
@@ -578,6 +618,33 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             thunk_undef[src][name] = sym
         del native[a]
     stats['import_thunks'] = len(thunks)
+    # S5 s5-003 class 2: a global FUN_<a> defined by an unrelated body binds by address everywhere, the defining
+    # objects' own references too (undefined there, then renamed, like an import thunk's)
+    colliding, colliding_srcs = colliding_fun_defs(objsyms, native, itanium, shadowed)
+    for src, names_ in colliding_srcs.items():
+        for name in names_:
+            thunk_undef[src].setdefault(name, ADDR_SYM % colliding[name])
+    stats['colliding_fun_names'] = len(colliding)
+    stats['colliding_fun_defs'] = sum(len(v) for v in colliding_srcs.values())
+    # R6 class 1: the MSVC adjustor thunks units.json places (`?f@C@@W<n>AE..`), which GCC never emits: a stub at
+    # the address does what the exe's `sub ecx, n; jmp f` does (this -= n, then f's native entry)
+    adj_rows = adjustor_thunks(def_at, native, exevft.exe_path(None if exe in (None, '') else exe)
+                               if exe != 'none' else None, providers)
+    for a_, (n_, t_) in sorted(adj_rows.items()):
+        bridges.setdefault(ADDR_SYM % a_, emit_adj_stub(ADDR_SYM % a_, adj_target(native, t_), n_))
+    stats['adjustor_thunk_stubs'] = len(adj_rows)
+    # R6 class 4: a non-virtual class's ??_G (scalar deleting destructor) units.json places: GCC emits no D0 for a
+    # non-virtual destructor, so callers bound there trapped. A stub does what MSVC's ??_G does: D1 (the unit's own,
+    # else the address its ??1 is bound to), then the global operator delete when flags bit 0 is set; returns this
+    gdel_rows = nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_votes, providers)
+    for a_, (d1_, del_) in sorted(gdel_rows.items()):
+        bridges.setdefault(ADDR_SYM % a_, emit_sdd_stub(ADDR_SYM % a_, d1_, del_))
+    stats['nonvirtual_deldtor_stubs'] = len(gdel_rows)
+    with open(os.path.join(out, 'colliding.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#name\taddress\tnative\tdefining objects (definitions turned into references to __fnv_<address>)\n')
+        for name, a in sorted(colliding.items()):
+            f.write('%s\t%08x\t%s\t%s\n' % (name, a, native[a]['sym'].name,
+                                            ' '.join(sorted(s for s, n_ in colliding_srcs.items() if name in n_))))
     bound = collections.defaultdict(set)  # unit -> addresses its object references by address
     # destructors GCC calls where MSVC did not (MSVC destroys through a deleting destructor ??_G/??_E at an address;
     # its identical-code folding gives classes with the same destructor one ??_G): a class sharing a deleting
@@ -700,6 +767,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 stats['newdel_refs'] += 1
             else:
                 cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident)
+                if cls == 'native' and un in colliding:   # S5 class 2: never the unrelated body by name
+                    cls, tier, addr = 'addr', 'name-addr/colliding', colliding[un]
+                    stats['colliding_refs_by_address'] += 1
                 if tier == 'gref/ident':
                     stats['ident_' + cls] += 1
                 if cls == 'unresolved' and isig.qual and UNIT_NS.match(isig.qual[0]) and it[un]:
@@ -719,7 +789,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 if it[n_]:
                                     native_text.setdefault(it[n_], n_)
                         g_ = native_text.get(st_)
-                        if g_:
+                        if g_ in colliding:   # S5 class 2: the unrelated body's name is undefined after apply
+                            cls, tier, addr = 'addr', 'ns/colliding', colliding[g_]
+                            stats['colliding_refs_by_address'] += 1
+                        elif g_:
                             cls, tier, target = 'ns-alias', 'ns/native', g_
                             stats['unit_ns_aliased'] += 1
                 gname_ = member_newdel_global(isig) if cls == 'unresolved' else None
@@ -736,6 +809,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
                 cls, tier, addr, target, note = vsb.classify(u.host or u.source, u.obj, un, isig, native, def_at,
                                                              (cls, tier, addr, target, note))
+            if cls == 'unresolved' and body_data_addr(body_bind, un) is not None:
+                # S2d exe-data: a placeholder variable at the image address the exe's code uses for it; bound like
+                # any address (data, an IAT slot GCC calls, TLS)
+                cls, tier, addr, target = 'addr', 'body/exe-data', body_data_addr(body_bind, un), None
             if addr is not None and cls == 'addr':
                 ak = kind_of_addr(addr)
                 if ak == 'data' and un in tls_undef:   # thread-local: native TLS in the image's .tls layout
@@ -885,12 +962,20 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                             if v.kind != 'same':
                                 # aggregates by value: ask the layout probe, then decide on bytes (abi2)
                                 # synthesized vtable / body objects (`<host>#vtables`) have the host unit's types
+                                # (and untagged named parameter types: typedefs, nested enums - abi2.probe_name)
                                 for sg, unit in ((rs, u.host or u.source), (ds, nd['unit'])):
                                     for c in [c for _, c in abi.params_of(sg)] + [abi.ret_class(sg)]:
-                                        if c.startswith('AGG:') and '{anon}' not in c:
-                                            probe_req.add((unit, abi2.agg_name(c)))
-                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.host or u.source: layouts.get((x, t)),
-                                                  lambda t, x=nd['unit']: layouts.get((x, t)), ecx_unused=ecx_dead)
+                                        pn_ = abi2.probe_name(c)
+                                        if pn_ and '{anon}' not in c:
+                                            probe_req.add((unit, pn_))
+                                why2 = []
+                                p2 = None if nd['unit'] is None else abi2.compare(
+                                    rs, ds, lay_of(u.host or u.source), lay_of(nd['unit']), ecx_unused=ecx_dead,
+                                    why=why2)
+                                if nd['unit'] is None:
+                                    why2.append('definition outside the units (no layouts)')
+                                if p2 is None and v.kind == 'manual':
+                                    v.notes = v.notes + ['abi2: ' + w for w in why2]
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
                                         not (v.kind == 'bridge' and 'narrow-extend' in v.classes) and \
                                         'cast-conflict' not in v.classes:
@@ -923,7 +1008,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     code = abi2.emit(bn, target, v.plan, 'ref: %s | def: %s'
                                                      % (ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     if code is None:
-                                        cls = 'code-manual'
+                                        cls = 'code-manual' if not abi_manual_trap(v) else 'abi-manual'
+                                        target = None if cls == 'abi-manual' else target
+                                        if cls == 'abi-manual':
+                                            stats['abi_manual_unbound'] += 1
+                                            stats['abi_manual_why:bridge frame over 4 KiB'] += 1
                                     else:
                                         bridges.setdefault(bn, code)
                                         target = bn
@@ -933,12 +1022,24 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     bridges.setdefault(bn, (target, v, ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     target = bn
                                     cls = 'code-bridge'
+                                elif v.kind == 'manual' and abi_manual_trap(v):
+                                    # D24: nothing binds across an aggregate / result-pointer difference without a
+                                    # bridge; the reference stays a trap stub (cause abi-manual in the D23 list)
+                                    cls, target = 'abi-manual', None
+                                    stats['abi_manual_unbound'] += 1
+                                    stats['abi_manual_why:' + abi_manual_why(why2)] += 1
                                 elif v.kind == 'manual':
                                     cls = 'code-manual'
                             elif v.notes:
                                 pass
                 elif ak == 'text' and addr in providers:   # CRT/library code S4 implements, import thunks
                     cls = 'provider'; target = providers[addr][0]
+                elif ak == 'text' and addr in adj_rows:   # an MSVC adjustor thunk: its stub (adjustor_thunks)
+                    cls = 'code-adjthunk'; target = ADDR_SYM % addr
+                    stats['adjustor_thunk_refs'] += 1
+                elif ak == 'text' and addr in gdel_rows:   # a non-virtual ??_G: its stub (nonvirtual_deldtors)
+                    cls = 'code-sddstub'; target = ADDR_SYM % addr
+                    stats['nonvirtual_deldtor_refs'] += 1
                 elif ak == 'text' and addr in def_at:
                     du = def_at[addr][0]
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
@@ -1285,6 +1386,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         # replaces a pairing by decomp names or hand-stored vptrs with another class (shells with fewer slots,
         # another real class), and maps vftables no unit names (exe_vftables.tsv)
         exe_alt = collections.defaultdict(list)   # exe vftable -> the native vtables the pairing displaced
+        # S5 class 3: constructor-named vtables (_ZTV<n>FUN_<ctor>) no unit pairs, by the vftable their exe
+        # constructor stores; a vftable another native vtable already stands for takes them as displaced ones
+        ctor_pairs = ctor_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out)
         exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, exe_alt)
         for a in rebind:
             rebind[a] = vmap[a][:2]
@@ -1297,7 +1401,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over, exe_path, providers)
+                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
@@ -1386,12 +1490,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             extern_text.pop(a, None)
         else:
             extern_text.setdefault(a, set())
-    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows)
+    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows,
+                                          adj_rows, gdel_rows)
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
-                                         'code-defmissing', 'extern-text', 'text-addr', 'text-callback', 'import',
-                                         'provider', 'tls'))
+                                         'code-defmissing', 'code-adjthunk', 'code-sddstub', 'extern-text', 'text-addr',
+                                         'text-callback',
+                                         'import', 'provider', 'tls'))
     with open(os.path.join(out, 'extern_text.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a in sorted(extern_text):
             f.write('%08x\t%s\n' % (a, ' '.join(sorted(extern_text[a]))))
@@ -1449,6 +1555,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               'import references bound by IAT slot (imports.tsv + exports.cpp): %d of %d'
               % (stats['imports_bound'], byclass['import']),
               'import thunks bound to their import instead of the compiled decomp body: %d' % stats['import_thunks'],
+              'global FUN_<addr> names defined by an unrelated body (colliding.tsv): %d names, %d definitions made '
+              'references, %d other objects\' references bound by address' % (
+                  stats['colliding_fun_names'], stats['colliding_fun_defs'], stats['colliding_refs_by_address']),
               'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
               'data references bound by identifier only (another scope or decorated type): %d; identifiers at several '
               'addresses (left ambiguous): %d' % (stats['ident_addr'], stats['ident_ambiguous']),
@@ -1653,6 +1762,58 @@ def exe_requests(exe_cls, have_cls, units, msvc, canon_msvc, compiled):
     return out
 
 
+CTOR_VT = re.compile(r'_ZTV\d+FUN_([0-9a-f]{8})')
+
+
+def ctor_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out):
+    """S5 class 3 (s5-003): a placeholder class named after its constructor (`_ZTV<n>FUN_<ctor>`) that no unit pairs
+    with an image vftable keeps the slots the decomp declared (NiDX9Renderer's FUN_00e754a0: one slot, called at
+    slot 54). The exe's constructor at <ctor> - an address the address map defines natively under an MSVC
+    constructor name (`??0`) - names its vftable: the last `mov dword ptr [reg], imm32` of an RTTI primary
+    vftable start (exevft.ctor_vftable). A vftable no native vtable stands for yet is paired in vmap; one that
+    already has its vtable takes the shell as a displaced one (alt, as exe_pair does), so exe_vtable_copies extends
+    it with the exe's slots either way. ctor_vftables.tsv lists each candidate with the outcome.
+    -> {(group, address point): {exe vftable}} for exe_slot_fill."""
+    bound = {e[0] for e in vmap.values()}
+    starts = {w for w, e in exev.items() if e.td and e.off == 0}
+    rows, got = [], collections.defaultdict(set)
+    for z in sorted(rtti.where):
+        m = CTOR_VT.fullmatch(z)
+        if not m:
+            continue
+        a = int(m.group(1), 16)
+        nd = native.get(a)
+        v = None
+        pts = [p for p, ott in vtables.address_points(rtti.ents(z) or []) if ott == 0]
+        if z in bound:
+            how = 'bound'
+        elif nd is None or not (nd.get('msvc') or '').startswith('??0'):
+            how = 'no native constructor at the address'
+        elif not pts:
+            how = 'no primary address point'
+        else:
+            v = exevft.ctor_vftable(exe_path, a, starts)
+            if v is None:
+                how = 'no vftable store'
+            elif v not in vmap:
+                vmap[v] = (z, pts[0], rtti.where[z][0].path, 'primary, the vftable its exe constructor %08x stores'
+                           % a)
+                how = 'paired'
+            else:
+                if all(e[:2] != (z, pts[0]) for e in alt.get(v, ())):
+                    alt[v].append((z, pts[0], rtti.where[z][0].path, 'primary'))
+                how = 'paired as displaced (%s)' % vmap[v][0]
+            if v is not None:
+                got[(z, pts[0])].add(v)
+        vstats['ctor-vt-' + how.split(' (')[0].replace(' ', '-')] += 1
+        rows.append((z, '%08x' % a, '' if v is None else '%08x' % v, how))
+    with open(os.path.join(out, 'ctor_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#native vtable\tconstructor\texe vftable it stores\toutcome\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    return got
+
+
 def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, alt=None):
     """Pair each image vftable of the exe with its own class's native vtable (the address point whose
     offset-to-top is minus the COL offset). It replaces the pairing by decomp names or hand-stored vptrs when that
@@ -1699,6 +1860,27 @@ def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, alt=None):
                 'slots\toutcome\tnative slots now\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
+
+
+ABI_MANUAL_TRAP = ('sret-explicit', 'ret-aggregate', 'aggregate-param')
+
+
+def abi_manual_trap(v):
+    """A `manual` pair that differs in how an aggregate or the result pointer is passed (sret-explicit, ret-aggregate,
+    aggregate-param): with no bridge (abi2 has no layout plan) the reference is left unbound, so it stays a trap stub
+    and is listed (cause abi-manual) instead of binding across the difference (orchestrator, D24). Varargs-only
+    manual pairs keep their direct binding: AArch64 passes variadic arguments where it passes named ones."""
+    return any(c in ABI_MANUAL_TRAP for c in v.classes)
+
+
+def abi_manual_why(why):
+    """Reason bucket of an abi-manual pair (abi2.compare's why list) for the stats."""
+    w = why[0] if why else 'unknown'
+    if w.startswith('no layout: '):
+        kinds = {c.split(':', 1)[0] + (' result' if c.endswith(' result') else '')
+                 for c in w[len('no layout: '):].split('; ')}
+        return 'no layout (%s)' % ','.join(sorted(kinds))
+    return w.split(':', 1)[0] if w.startswith('variadic') else w
 
 
 def slot_abi(isig, ds):
@@ -1773,6 +1955,93 @@ def emit_adj_stub(name, target, n):
                       '    b %s' % target, '    .size %s, .-%s' % (name, name), '    .text']) + '\n'
 
 
+def adjustor_thunks(def_at, native, exe_path, providers=None):
+    """{address: (n, target)} of the .text addresses units.json places with no native definition whose exe code is
+    an MSVC adjustor thunk (exevft.thunk: `sub ecx, n; jmp`, `add ecx, n; jmp`, through at most two more plain or
+    adjusting thunks) into an address the native build defines; n != 0. GCC has no counterpart of these (its
+    `_ZThn` thunks are vtable-only), so callers bound to the address got a trap stub (code-defmissing)."""
+    out = {}
+    if not exe_path:
+        return out
+    for a in sorted(def_at):
+        if a in native or a in (providers or {}) or kind_of_addr(a) != 'text':
+            continue
+        n, t = 0, a
+        for _ in range(3):
+            th = exevft.thunk(exe_path, t)
+            if th is None:
+                break
+            n, t = n + th[0], th[1]
+            if t in native:
+                if n:
+                    out[a] = (n, t)
+                break
+    return out
+
+
+def nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_votes, providers=None):
+    """{address: (D1 symbol, operator delete symbol)} of the scalar deleting destructors (`??_GC@@QAE...`, C's
+    destructor not virtual) units.json places with no native definition: GCC emits no D0 for them. D1 is the placing
+    unit's own native D1/D2 of C (a global or COMDAT definition), else the native at the address the unit binds
+    `??1C@@...` to; the delete is the address most units bind the global `??3@YAXPAX@Z` to (native or a provider).
+    A class some unit names a member operator delete of (`??3C@@`), or without a D1 or delete, is left out."""
+    out = {}
+    dv = newdel_votes.get('??3@YAXPAX@Z')
+    da = dv.most_common(1)[0][0] if dv else None
+    dl = ADDR_SYM % da if da in native else ((providers or {}).get(da) or (None,))[0]
+    if dl is None:
+        return out
+    member_del = set()
+    for u in units.values():
+        for n in list(u.refs) + [n for _, n in u.defs]:
+            if n.startswith('??3') and not n.startswith('??3@'):
+                q = msvc(n).qual or []
+                member_del.add(tuple(sigs.canon_qual(q[:-1])))
+    for a, (u, n) in sorted(def_at.items()):
+        if a in native or a in (providers or {}) or not n.startswith('??_G') or kind_of_addr(a) != 'text':
+            continue
+        m = msvc(n)
+        if m.kind != 'func' or m.variant != 'sdd' or m.virtual or not m.qual or len(m.qual) < 2:
+            continue
+        cq = tuple(sigs.canon_qual(m.qual[:-1]))
+        if cq in member_del:
+            continue
+        d1 = None
+        for s in sorted(objsyms.get(u.source, ()), key=lambda x: x.name):
+            if s.shndx and s.type == 'func' and s.bind in ('global', 'weak') and s.name.startswith('_Z'):
+                g = itanium(s.name)
+                if g.variant in ('D1', 'D2') and tuple(sigs.canon_qual(g.qual[:-1])) == cq:
+                    d1 = s.name
+                    break
+        if d1 is None:
+            for rn, ra in sorted(u.refs.items()):
+                rm = msvc(rn) if rn.startswith('??1') else None
+                if rm is not None and rm.variant == 'dtor' and tuple(sigs.canon_qual(rm.qual[:-1])) == cq and \
+                        ra in native and sigs.itanium_variant(native[ra]['sym'].name) != 'D0':
+                    d1 = ADDR_SYM % ra
+                    break
+        if d1 is not None:
+            out[a] = (d1, dl)
+    return out
+
+
+def emit_sdd_stub(name, d1, dl):
+    """MSVC's scalar deleting destructor `void *C::??_G(unsigned flags)`: d1(this); if (flags & 1) dl(this);
+    return this."""
+    body = ['    stp x29, x30, [sp, #-32]!', '    mov x29, sp', '    stp x19, x20, [sp, #16]', '    mov w19, w0',
+            '    mov w20, w1', '    bl %s' % d1, '    tbz w20, #0, 1f', '    mov w0, w19', '    bl %s' % dl,
+            '1:  mov w0, w19', '    ldp x19, x20, [sp, #16]', '    ldp x29, x30, [sp], #32', '    ret']
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name] + body +
+                     ['    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
+def adj_target(native, t):
+    """What an adjustor thunk into t branches to: t's MSVC entry when MSVC enters t with this at a secondary base
+    (thisadj.py: the thunk hands over the MSVC `this`), else t's native definition."""
+    return MSVC_ENTRY_SYM % t if native[t].get('msvc_entry') else ADDR_SYM % t
+
+
 def emit_const_stub(name, value):
     """`return value;` (or `return;` for 'void'): the exact native form of the exe's constant leaf."""
     body = ['    ret'] if value == 'void' else (
@@ -1806,6 +2075,51 @@ def emit_flag_stub(name, target, flags):
                       '    .text']) + '\n'   # the bridges after it assume .text
 
 
+FREE_SYM = '__fnvnx_vfree_%08x'   # exe slot -> a decomp free function: `this` dropped / edx inserted
+FREE_SLOT = re.compile(r'^\?FUN_[0-9a-f]{8}@@Y([AGI])')   # a global FUN_<a> and its MSVC convention (cdecl, stdcall, fastcall)
+
+
+def free_slot(a, nd, bridges, st):
+    """S5's class 1 (s5-003): the decomp declares the exe's slot function as a global non-member (`__stdcall
+    FUN_00e8b490(int *, int, int)`: its MSVC body ignores ecx), so a virtual call, which passes `this` in x0, hands
+    it every argument one register early. Such a slot gets a bridge by the definition's MSVC convention: cdecl /
+    stdcall drop `this` (x1..x7 -> x0..x6), fastcall (ecx = this, edx undefined on the x86 call, then the stack)
+    inserts edx as 0 (x1..x6 -> x2..x7). Returns the bridge symbol, or None for any other definition."""
+    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'_Z\d+FUN_[0-9a-f]{8}', nd['sym'].name):
+        return None
+    m = FREE_SLOT.match(nd.get('msvc') or '')
+    if not m:
+        return None
+    mode = 'edx' if m.group(1) == 'I' else 'drop'
+    name = FREE_SYM % a
+    if name not in bridges:
+        if mode == 'drop':
+            body = ['    mov x%d, x%d' % (r, r + 1) for r in range(7)]
+        else:
+            body = ['    mov x%d, x%d' % (r, r - 1) for r in range(7, 1, -1)] + ['    mov w1, #0']
+        bridges[name] = '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2',
+                                   '    .globl %s' % name, '    .hidden %s' % name, '    .type %s, %%function' % name,
+                                   '%s:' % name] + body + ['    b %s' % (ADDR_SYM % a),
+                                   '    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+    st['free-slot-' + mode] += 1
+    return name
+
+
+def flags0_slot(isig, nd, ds, exe_path, a):
+    """A placeholder slot (`virtual void v00();`, no parameters, not a destructor variant) filled with the exe's
+    deleting destructor whose native definition reads the flags (`??_G` / `??_E` or a decomp `FUN_<a>(unsigned)`
+    with the exe's ??_G code shape, exevft.deleting_dtor; R1's adjustor recon bodies): a native call through the
+    slot leaves w1 undefined, and bit 0 set frees the object. The slot gets a stub passing flags 0 (destroy only).
+    Temporary: D26 (b) declares `virtual ~C()` for the placeholder (s2d-008/009)."""
+    if isig.variant or sigs.itanium_variant(nd['sym'].name) or isig.raw_params is None:
+        return False
+    if [p for p in isig.raw_params if p != 'void']:
+        return False
+    if (nd.get('msvc') or '').startswith(('??_G', '??_E')):   # adjustor thunks too (`[thunk]:` ... `adjustor{4}'`)
+        return True
+    return flags_param(ds) and bool(exe_path and exevft.deleting_dtor(exe_path, a))
+
+
 def emit_gdel_stub(name, d0, d1):
     return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
                       '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
@@ -1814,7 +2128,7 @@ def emit_gdel_stub(name, d0, d1):
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
-                  stubs=None, overrides=None, exe_path=None, providers=None):
+                  stubs=None, overrides=None, exe_path=None, providers=None, also=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -1827,12 +2141,15 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     declaration (the decomp's shells declare placeholders, `virtual void v2();`), and slot_fill.tsv lists them.
     Rewrites the objects' .redefine files and refs.tsv rows it changes, drops trap stubs no object uses any more, and
     writes slot_fill.tsv (one row per (object, symbol)) and slot_gaps.tsv (trap slots left, with the reason).
+    also: {(group, address point): {exe vftable}} the native vtable stands for besides vmap (ctor_store_pairs).
     Returns the counts."""
     st = collections.Counter()
     zmap = collections.defaultdict(set)   # (native vtable group, address point) -> exe vftable addresses
     for v, e in vmap.items():
         if v in exev:
             zmap[(e[0], e[1])].add(v)
+    for k_, vs_ in (also or {}).items():
+        zmap[k_] |= {v for v in vs_ if v in exev}
     own = collections.defaultdict(set)    # the same from the exe's RTTI: the class's own vftable at that offset
     for v, (cls, _, off, _) in exe_cls.items():
         for z in by_cls.get(cls, []):
@@ -1931,6 +2248,14 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             if vs is None:
                 return None, 'no %s at the address' % isig.variant
             return ADDR_SYM % a + ('' if vs is nd['sym'] else '_' + isig.variant), 'dtor'
+        fr = free_slot(a, nd, stubs, st) if not isig.variant else None
+        if fr is not None:
+            return fr, 'free function: %s' % fr
+        if flags0_slot(isig, nd, ds, exe_path, a):
+            name = FLAG_SYM % (a, 0)
+            stubs.setdefault(name, emit_flag_stub(name, ADDR_SYM % a, 0))
+            st['flags0-placeholder-slots'] += 1
+            return name, 'flags stub (0): deleting destructor in a placeholder slot'
         if ds is None or ds.kind != 'func' or ds.raw_params is None or isig.raw_params is None:
             return None, 'no declaration to compare'
         how = slot_abi(isig, ds)
@@ -2206,7 +2531,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
             a = slots[j]
             nd = native.get(a)
             var = sigs.itanium_variant(nd['sym'].name) if nd else None
-            if nd is not None and var is None:
+            if nd is not None and var is None and free_slot(a, nd, bridges, st):
+                t = FREE_SYM % a
+            elif nd is not None and var is None:
                 t = ADDR_SYM % a
                 st['slots-native'] += 1
             elif nd is not None and var == 'D0' and nd['variants'].get('D1') is not None:
@@ -2640,6 +2967,15 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
         return ('native' if un in anydef else 'special-unresolved'), None, None, None, isig.special
     tier, hit = idx.lookup(isig)
     scope = 'unit'
+    if not hit and isig.kind == 'func' and isig.qual and isig.qual[-1] == '__vecDelDtor' and len(isig.qual) > 1:
+        # MSVC compiles a decomp member named `__vecDelDtor` as the class's vector deleting destructor (`??_E`,
+        # thiscall (this, flags) -> void*): GCC's member of that name takes (this in x0, flags in w1) the same way
+        # (R2 recon2-005: Date::__vecDelDtor and 9 more stayed trap stubs). The pair is then compared as usual.
+        vd = copy.copy(isig)
+        vd.qual = isig.qual[:-1] + ['{vdd}']
+        tier, hit = idx.lookup(vd)
+        if hit and tier not in ('exact', 'l1', 'l2'):
+            tier, hit = None, {}
     if not hit:
         for g, name in ((gdef, 'gdef'), (gref, 'gref')):
             t, h = g.lookup(isig)
@@ -3073,12 +3409,15 @@ def emit_traps(traps):
 
 # ---------------------------------------------------------------------------------------------------- address map
 
-def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, providers=None, cthis=()):
+def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, providers=None, cthis=(), adj=None,
+                  sdd=None):
     """addrmap.tsv / addrmap.c (docs/LINK.md, 'Address map'): code addresses the native build defines (F C X G),
     image vftables (V: the Itanium vtable address point of the same class, primary or secondary, compiled or
     synthesized), referenced .text addresses no unit defines (E: native NULL, the loader traps them), and per G
     entry its D1/D0 pair (fnvnx_addrmap_deldtors). vtables: {address: (vtable symbol, address-point offset, object
     path, note)}; providers: {address: (platform symbol, provider)} (F entries naming the platform symbol).
+    adj: {address: (n, target)} of adjustor_thunks, sdd: {address: (D1, delete)} of nonvirtual_deldtors (F entries
+    naming their stub in bridges.S).
     -> (Counter of kinds, number of G entries with a D1)."""
     rows = []   # address, kind, link_symbol, native_symbol, object, note, offset, d1_symbol, d1_native
     for a in sorted(native):
@@ -3118,6 +3457,12 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, pr
     for a, (zname, off, obj, note) in sorted((vtables or {}).items()):
         if a not in native:
             rows.append((a, 'V', zname, zname, os.path.basename(obj), note, str(off), '', ''))
+    for a, (n, t) in sorted((adj or {}).items()):   # an MSVC adjustor thunk: its stub in bridges.S
+        rows.append((a, 'F', ADDR_SYM % a, ADDR_SYM % a, VTEXT_OBJ, 'msvc adjustor thunk: this -= %d, then %08x'
+                     % (n, t), '', '', ''))
+    for a, (d1, dl) in sorted((sdd or {}).items()):   # a non-virtual ??_G: its stub (takes the flags)
+        rows.append((a, 'F', ADDR_SYM % a, ADDR_SYM % a, VTEXT_OBJ, 'msvc ??_G of a non-virtual destructor: %s, '
+                     'then %s if flags & 1' % (d1, dl), '', '', ''))
     for a, (sym, text) in sorted((providers or {}).items()):
         if a not in native:   # CRT/library code the platform implements: the provider symbol itself
             rows.append((a, 'F', sym, sym, '', 'provider: ' + text, '', '', ''))
