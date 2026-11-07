@@ -567,6 +567,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
+    lay_of = abi2.lookup(layouts)   # unit -> type -> Layout, with the unit's unique `ns::type` for a bare name
     probe_req = set()
     vacall_req = set()   # (unit, undefined symbol) of variadic references whose call sites decide (vacall.py)
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
@@ -961,12 +962,20 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                             if v.kind != 'same':
                                 # aggregates by value: ask the layout probe, then decide on bytes (abi2)
                                 # synthesized vtable / body objects (`<host>#vtables`) have the host unit's types
+                                # (and untagged named parameter types: typedefs, nested enums - abi2.probe_name)
                                 for sg, unit in ((rs, u.host or u.source), (ds, nd['unit'])):
                                     for c in [c for _, c in abi.params_of(sg)] + [abi.ret_class(sg)]:
-                                        if c.startswith('AGG:') and '{anon}' not in c:
-                                            probe_req.add((unit, abi2.agg_name(c)))
-                                p2 = None if nd['unit'] is None else abi2.compare(rs, ds, lambda t, x=u.host or u.source: layouts.get((x, t)),
-                                                  lambda t, x=nd['unit']: layouts.get((x, t)), ecx_unused=ecx_dead)
+                                        pn_ = abi2.probe_name(c)
+                                        if pn_ and '{anon}' not in c:
+                                            probe_req.add((unit, pn_))
+                                why2 = []
+                                p2 = None if nd['unit'] is None else abi2.compare(
+                                    rs, ds, lay_of(u.host or u.source), lay_of(nd['unit']), ecx_unused=ecx_dead,
+                                    why=why2)
+                                if nd['unit'] is None:
+                                    why2.append('definition outside the units (no layouts)')
+                                if p2 is None and v.kind == 'manual':
+                                    v.notes = v.notes + ['abi2: ' + w for w in why2]
                                 if p2 is not None and (v.kind != 'bridge' or p2.kind != 'bridge') and \
                                         not (v.kind == 'bridge' and 'narrow-extend' in v.classes) and \
                                         'cast-conflict' not in v.classes:
@@ -1001,6 +1010,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     if code is None:
                                         cls = 'code-manual' if not abi_manual_trap(v) else 'abi-manual'
                                         target = None if cls == 'abi-manual' else target
+                                        if cls == 'abi-manual':
+                                            stats['abi_manual_unbound'] += 1
+                                            stats['abi_manual_why:bridge frame over 4 KiB'] += 1
                                     else:
                                         bridges.setdefault(bn, code)
                                         target = bn
@@ -1015,6 +1027,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     # bridge; the reference stays a trap stub (cause abi-manual in the D23 list)
                                     cls, target = 'abi-manual', None
                                     stats['abi_manual_unbound'] += 1
+                                    stats['abi_manual_why:' + abi_manual_why(why2)] += 1
                                 elif v.kind == 'manual':
                                     cls = 'code-manual'
                             elif v.notes:
@@ -1858,6 +1871,16 @@ def abi_manual_trap(v):
     and is listed (cause abi-manual) instead of binding across the difference (orchestrator, D24). Varargs-only
     manual pairs keep their direct binding: AArch64 passes variadic arguments where it passes named ones."""
     return any(c in ABI_MANUAL_TRAP for c in v.classes)
+
+
+def abi_manual_why(why):
+    """Reason bucket of an abi-manual pair (abi2.compare's why list) for the stats."""
+    w = why[0] if why else 'unknown'
+    if w.startswith('no layout: '):
+        kinds = {c.split(':', 1)[0] + (' result' if c.endswith(' result') else '')
+                 for c in w[len('no layout: '):].split('; ')}
+        return 'no layout (%s)' % ','.join(sorted(kinds))
+    return w.split(':', 1)[0] if w.startswith('variadic') else w
 
 
 def slot_abi(isig, ds):
