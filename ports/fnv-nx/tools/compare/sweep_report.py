@@ -19,7 +19,10 @@ import argparse, collections, glob, json, os, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'render', 'native', 'perf'))
-CLASS_ORDER = ['over', 'ill', 'vacuous', 'pass']   # worst first
+# a program's class over its parameter sets: over if any set is over (a defect candidate), else pass if any set
+# passed (that set exercised it), else ill (no set gave evidence), else vacuous (no set drew anything: never
+# exercised). A set where it drew nothing is no evidence either way, so it does not outrank a pass of another set.
+CLASS_ORDER = ['over', 'pass', 'ill', 'vacuous']
 CLOCK_HZ, LANES, TMU, TEX_COST = 384e6, 256, 16, 1.5
 
 
@@ -43,7 +46,7 @@ def programs(a):
     variants = sorted({k.split(':')[0] for e in rows.values() for k in e['classes']})
     with open(a.out, 'w') as f:
         f.write('\t'.join(['name', 'hash', 'stage', 'model'] + [f'{v}:{c}' for v in variants for c in ('translated', 'families')]
-                          + ['worst_translated', 'worst_families', 'maxwell', 'gprs', 'tex', 'ns_per_pixel']) + '\n')
+                          + ['worst_translated', 'worst_families', 'vacuous_sets', 'maxwell', 'gprs', 'tex', 'ns_per_pixel']) + '\n')
         for h, e in sorted(rows.items(), key=lambda x: x[1]['name']):
             mx = gp = tx = ns = ''
             dk = os.path.join(a.shaders, h + '.dksh')
@@ -61,7 +64,8 @@ def programs(a):
             cols = [e['classes'].get(f'{v}:{c}', '') for v in variants for c in ('translated', 'families')]
             wt = worst([e['classes'].get(f'{v}:translated') for v in variants])
             wf = worst([e['classes'].get(f'{v}:families') for v in variants])
-            f.write('\t'.join(map(str, [e['name'], h, e['stage'], e['model']] + cols + [wt, wf, mx, gp, tx, ns])) + '\n')
+            nv = sum(1 for v in variants if e['classes'].get(f'{v}:translated') == 'vacuous')
+            f.write('\t'.join(map(str, [e['name'], h, e['stage'], e['model']] + cols + [wt, wf, nv, mx, gp, tx, ns])) + '\n')
     print(f'programs: {len(rows)} rows, variants {variants}')
     return 0
 
@@ -102,7 +106,19 @@ def scene_row(j):
             'ref_frame_ms': ((j.get('ref') or {}).get('frame_ms') or [None])[-1]}
 
 
+def reclass(p):
+    """recompute the worst columns from the per-set columns (tables written before the CLASS_ORDER fix ranked a set
+    with nothing drawn above a pass of another set)"""
+    for col in ('translated', 'families'):
+        cs = [v for k, v in p.items() if k.endswith(':' + col)]
+        if cs:
+            p['worst_' + col] = worst(cs)
+    p.setdefault('vacuous_sets', str(sum(1 for k, v in p.items() if k.endswith(':translated') and v == 'vacuous')))
+    return p
+
+
 def summarize(progs, scenes, done, all_hashes=None, title=''):
+    progs = [reclass(dict(p)) for p in progs]
     n_prog = len(progs)
     cls_prog = collections.Counter(p.get('worst_translated') or 'none' for p in progs)
     cls_prog_f = collections.Counter(p.get('worst_families') or 'none' for p in progs)
@@ -131,7 +147,8 @@ def summarize(progs, scenes, done, all_hashes=None, title=''):
     by_name = {p['hash']: p['name'] for p in progs}
     top_progs = sorted([p for p in progs if p.get('ns_per_pixel') not in ('', None)],
                        key=lambda p: -float(p['ns_per_pixel']))[:20]
-    out = {'title': title, 'programs_checked': n_prog, 'programs_total': len(all_hashes) if all_hashes else None,
+    vac_some = sum(1 for p in progs if (p.get('vacuous_sets') or '0') != '0' and p.get('worst_translated') != 'vacuous')
+    out = {'title': title, 'programs_checked': n_prog, 'programs_vacuous_in_some_set': vac_some, 'programs_total': len(all_hashes) if all_hashes else None,
            'program_classes_translated': dict(cls_prog), 'program_classes_families': dict(cls_prog_f),
            'scenes_done': len(done), 'scenes_measured': len(sr),
            'scene_status': dict(collections.Counter(d[1] for d in done if len(d) > 1)),
@@ -154,6 +171,7 @@ def md(o):
          '## Failure classes', '',
          f"- programs (translated, worst over the parameter sets): {o['program_classes_translated']}",
          f"- programs (--families all): {o['program_classes_families']}",
+         f"- programs exercised by some set but drawing nothing in another: {o.get('programs_vacuous_in_some_set')}",
          f"- scenes by the class of the first divergence: {o['first_divergence_by_scenes']}",
          f"- draws from the first divergence on, by its class: {o['first_divergence_by_draws']}", '',
          '## Failing programs', ''] + [f"- {p['name']} `{p['hash']}`: translated {p['worst_translated']}, families {p['worst_families']}"
