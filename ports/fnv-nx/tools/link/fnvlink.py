@@ -340,6 +340,26 @@ def body_data_addr(body_bind, un):
     return int(m.group(1), 16) if cls == 'body-exe-data' and m else None
 
 
+def reset_synth(out):
+    """Before the first resolve of a link run: drop the previous run's synthesized objects from what resolve loads -
+    out/bodies/ (bodies.py's objects, synth.tsv and bind.tsv; nothing there is a cache) and vtables/synth.tsv (the
+    probe cache, vtables/cache.json, stays). build/link/out persists between runs, so resolve 1 used to load them:
+    names only those stale objects defined counted as native, so this run's bodies / vtables step skipped them and
+    rewrote its lists without them, and resolve 2 left them undefined. Consecutive runs alternated (links 0540aff0
+    and d1ed15e7: 497 constructors / destructors native -> unresolved, 85 zz_vt and 37 zz_bd objects). Returns what
+    was removed."""
+    gone = []
+    b = os.path.join(out, 'bodies')
+    if os.path.isdir(b):
+        shutil.rmtree(b)
+        gone.append('bodies/')
+    v = os.path.join(out, 'vtables', 'synth.tsv')
+    if os.path.exists(v):
+        os.remove(v)
+        gone.append('vtables/synth.tsv')
+    return gone
+
+
 def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None, override_lib=None,
             units_renames=None, exe=None):
     """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
