@@ -1315,6 +1315,11 @@ check('FINL1 body-less declarations of functions the unit does not define lose _
 check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)',
       _o, ['__forceinline int get(int i) const;', '__forceinline int put(int i);',
            'static __forceinline void d(X* x, int n, Pod);'])
+check('FINL1 a class template\'s member defined out of class keeps it (the class, not the template parameter)',
+      run(s1.r_forceinline_declarations,
+          'template <class K, class E>\nclass DU\n{\n\tpublic:\n\t\tstatic __forceinline void __cdecl up(K& k, E& e);\n};\n'
+          'template <class K, class E>\nvoid __cdecl DU<K, E>::up(K& k, E& e)\n{\n}\n'),
+      ['static __forceinline void __cdecl up(K& k, E& e);'], ['FINL1'])
 check('FINL1 headers are left alone',
       run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 
