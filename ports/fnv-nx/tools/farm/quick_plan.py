@@ -18,6 +18,7 @@ checks is the plan. A path no class names selects everything (unknown means unsa
            (after build, on its build directory; the original's runs are cached)
   mem      the memory lane (mem_job.sh): mem.py's tests, then this head's guest relinked with the recorder and run
            under qemu-aarch64; the peak against the 3.2 GiB budget, failures, top sites (after build)
+  boottrace the boot's function-boundary trace against the cached Wine reference (boottrace_job.sh; with build)
   threads  D25 #7's report lane (threads_job.sh): the race checker's and the watchdog's tests, then this head's
            guest relinked with the watchdog and run under qemu-aarch64 (after build, on its build directory)
 The caches make each selected check cost what changed; the plan only skips checks that nothing can affect.
@@ -32,7 +33,7 @@ cells.tsv lines when the index holds them, else (id) alone.
 """
 import argparse, json, os, re, subprocess, sys
 
-ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames', 'mem', 'scenario')
+ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames', 'mem', 'scenario', 'boottrace')
 # (regex on the path relative to ports/fnv-nx/, checks); first match wins
 CLASSES = [
     (r'^(docs/|journal/|JOURNAL\.md$|README\.md$|reports/)', ()),
@@ -47,6 +48,7 @@ CLASSES = [
     (r'^tests/', ()),                                 # tests run by the streams and V1, not by a check here
     (r'^render/shaders/', ('programs', 'replay', 'build')),
     (r'^render/', ('replay', 'build')),               # the guest links the native renderer (LINK_OVERRIDES=render)
+    (r'^tools/compare/(wine_ref\.sh|ref_ini\.py)$', ('replay', 'boottrace')),   # both references' Wine prefix
     (r'^tools/compare/', ('replay',)),                # the harness; a change to a capture-key input makes a new key
     (r'^tools/equiv/', ('equiv',)),
     (r'^tools/difffuzz/', ('fuzz', 'audit')),         # the audit runs on the fuzz harness and its keys
@@ -60,6 +62,8 @@ CLASSES = [
     (r'^tools/farm/scenario_job', ('scenario',)),
     (r'^tools/scenario/', ('scenario',)),
     (r'^tools/farm/threads_job', ('threads',)),
+    (r'^tools/farm/boottrace_job', ('boottrace',)),
+    (r'^tools/lockstep/', ('boottrace',)),            # the Wine tracer: a new reference key
     (r'^tools/farm/frames_job', ('frames',)),
     (r'^tools/farm/mem_job', ('mem',)),
     (r'^tools/threads/report\.py$', ('threads', 'frames', 'mem')),   # frames.py and mem.py import its Symbols
@@ -124,6 +128,10 @@ def plan(paths):
             if re.search(rx, p):
                 full.append('%s: %s' % (p, w))
     # fuzz, audit and the boot need the link of this head; equiv only the prepared tree (build's prepare step)
+    # every change that rebuilds the guest can move the boot's first divergence
+    if checks.get('build'):
+        checks['boottrace'] = True
+        why.setdefault('boottrace', []).append('(the guest is rebuilt)')
     if checks.get('fuzz') or checks.get('audit'):
         checks['build'] = True
         why.setdefault('build', []).append('(fuzz/audit need this head\'s link)')
