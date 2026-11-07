@@ -25,10 +25,21 @@ extern "C" {
 #endif
 void *__cdecl _alloca(unsigned int);                  /* malloc.h; an intrinsic */
 #pragma intrinsic(_alloca)
+#ifdef FNVNX_EQUIV_INTRIN   /* equiv.py's retry for a unit that includes <intrin.h> inside a namespace: here first,
+                             * so that one (#pragma once) adds nothing and every call finds these */
+#ifdef __cplusplus
+}
+#endif
+#include <intrin.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+#else
 void _ReadWriteBarrier(void);                         /* intrin.h; compiler barriers, intrinsics */
 void _ReadBarrier(void);
 void _WriteBarrier(void);
 #pragma intrinsic(_ReadWriteBarrier, _ReadBarrier, _WriteBarrier)
+#endif
 void __cdecl operator_delete_sized(void *, unsigned int);   /* the decomp's spelling (engine functions) */
 void __cdecl _operator_delete_sized(void *, unsigned int);
 #ifdef __cplusplus
