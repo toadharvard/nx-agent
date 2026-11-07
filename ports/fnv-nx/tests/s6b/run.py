@@ -130,7 +130,8 @@ def run_exec(asm, tool, out, v6n_bin):
         sdp = os.path.join(work, n + ".sdp"); ext = ".vso" if f.endswith(".vsa") else ".pso"
         subprocess.run([tool, "--pack", sdp, n + ext + "=" + b], check=True, capture_output=True)
         od = os.path.join(work, n + "_t"); os.makedirs(od)
-        subprocess.run([tool, "-o", od, "--glsl", sdp], check=True, capture_output=True)
+        # the oracle is Gallium Nine (v6n_nine): its numerics at 0
+        subprocess.run([tool, "-o", od, "--glsl", "--numerics", "nine", sdp], check=True, capture_output=True)
         g = glob.glob(os.path.join(od, "*.glsl"))
         if not g:
             print("exec: %s does not translate" % n); return False

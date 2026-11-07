@@ -34,7 +34,11 @@ enum {
      * test, __ef = fog; the runtime shader covers both. */
     FNVNX_SHADER_EPI_STATIC = 1u << 2,
     FNVNX_SHADER_EPI_ALPHA  = 1u << 3,
-    FNVNX_SHADER_EPI_FOG    = 1u << 4
+    FNVNX_SHADER_EPI_FOG    = 1u << 4,
+    /* D3D9's implementation-defined numerics (rcp/rsq/log of 0, nrm of a zero vector): WineD3D's IEEE results by
+     * default (the original under Wine, the reference of the S16 sweeps); with this flag Gallium Nine's clamped
+     * ones (V6n's oracle, softpipe). The GLSL carries both behind DK_NUMERICS_NINE; the flag defines it. */
+    FNVNX_SHADER_NUMERICS_NINE = 1u << 5
 };
 
 typedef struct fnvnx_shader_opts {
