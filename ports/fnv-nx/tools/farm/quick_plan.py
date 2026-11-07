@@ -54,6 +54,7 @@ CLASSES = [
     (r'^tools/farm/threads_job', ('threads',)),
     (r'^tools/farm/boottrace_job', ('boottrace',)),
     (r'^tools/lockstep/', ('boottrace',)),            # the Wine tracer: a new reference key
+    (r'^tools/compare/(wine_ref\.sh|ref_ini\.py)$', ('replay', 'boottrace')),   # both references' Wine prefix
     (r'^tools/farm/frames_job', ('frames',)),
     (r'^tools/threads/report\.py$', ('threads', 'frames')),   # frames.py imports its Symbols
     (r'^tools/threads/', ('threads',)),

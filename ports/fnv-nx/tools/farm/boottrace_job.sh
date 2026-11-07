@@ -83,7 +83,8 @@ eval "$(sed -n '/^data_key() {/,/^}/p' "$HERE/sweep_job.sh")"     # the game dat
 SECS=${BOOTTRACE_WINE_S:-300}
 {
 	grep -o '^TRACE_FORMAT = "[^"]*"' "$BT"
-	cat "$P/tools/lockstep/fnvtrace.c" "$P/tools/lockstep/wine_trace.sh" "$P/tools/lockstep/build.sh" 2>/dev/null | sha256sum | cut -c1-16
+	cat "$P/tools/lockstep/fnvtrace.c" "$P/tools/lockstep/wine_trace.sh" "$P/tools/lockstep/build.sh" \
+		"$P/tools/compare/wine_ref.sh" "$P/tools/compare/ref_ini.py" 2>/dev/null | sha256sum | cut -c1-16   # + the prefix and ini
 	sha256sum "$GAME/FalloutNV.exe" | cut -c1-64; data_key; sha256sum "$W/list.txt" | cut -c1-64
 	echo "seconds $SECS"; wine --version 2>/dev/null
 } >"$W/refkey.txt"
