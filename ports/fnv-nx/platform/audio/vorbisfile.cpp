@@ -13,6 +13,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+
+/* the platform lane (platform/win32/platstat.cpp; fnvnx_win32_ext.h is not included in C here) */
+extern "C" volatile int fnvnx_plat_on;
+extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail);
+#define PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
 
 #ifdef FNVNX_HAVE_VORBIS
 #include <vorbis/vorbisfile.h>
@@ -66,6 +72,11 @@ int fnvnx_ov_open_callbacks(void *datasource, void *vf, const char *initial, lon
     c.tell_func = cb.tell_func;
     int r = ov_open_callbacks(datasource, f, initial, ibytes, c);
     if (r) {
+        if (fnvnx_plat_on) {   /* the platform lane: 3 = decode (platstat.cpp) */
+            char d[24];
+            snprintf(d, sizeof d, "ov %d", r);
+            fnvnx_plat_note(3, "ov_open_callbacks", PLAT_RA, d);
+        }
         free(f);   /* on failure libvorbisfile has already cleared f; the caller must not ov_clear */
         return r;
     }
@@ -74,6 +85,8 @@ int fnvnx_ov_open_callbacks(void *datasource, void *vf, const char *initial, lon
     return 0;
 #else
     (void)datasource; (void)initial; (void)ibytes; (void)cb;
+    if (fnvnx_plat_on)   /* a build without libvorbis: every music file fails here */
+        fnvnx_plat_note(3, "ov_open_callbacks", PLAT_RA, "no libvorbis");
     return FNVNX_OV_ENOTVORBIS;
 #endif
 }

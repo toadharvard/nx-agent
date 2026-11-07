@@ -101,6 +101,24 @@ int fnvnx_mem_enter(unsigned caller);             /* a stand-in records its own 
 void fnvnx_mem_leave(int entered);
 int fnvnx_mem_inside(void);
 unsigned fnvnx_mem_caller(unsigned fallback);
+/* Platform lane (platform/win32/platstat.cpp, D25 #3 #4 #6; tools/perf/PLAT.md): calls to unimplemented and no-op
+ * entries, failed file opens, audio decode failures and unmapped inputs, counted per (class, name, caller, detail),
+ * "plat: ..." lines to the sink (default os_debug_print). Off (one load per report site) until started. */
+enum { FNVNX_PLAT_UNIMPL = 0, FNVNX_PLAT_NOOP, FNVNX_PLAT_OPEN, FNVNX_PLAT_DECODE, FNVNX_PLAT_INPUT, FNVNX_PLAT_NCLASS };
+typedef void (*fnvnx_plat_sink)(const char *line);
+extern volatile int fnvnx_plat_on;
+void fnvnx_plat_start(fnvnx_plat_sink sink);
+void fnvnx_plat_autostart(void);                  /* from a static constructor (tools/perf/plat_autostart.c) */
+void fnvnx_plat_stop(void);
+void fnvnx_plat_flush(void);                      /* counts and summary (ExitProcess calls it) */
+void fnvnx_plat_counts(unsigned long long distinct[5], unsigned long long calls[5]);
+void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail);
+/* win: the Windows path as the game gave it; host: what the mapper made of it (NULL if it failed); api: the entry */
+void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
+#define FNVNX_PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
+/* in a stand-in's body: a call to a missing function / to a documented no-op (named by the enclosing function) */
+#define FNVNX_UNIMPL() (fnvnx_plat_on ? fnvnx_plat_note(FNVNX_PLAT_UNIMPL, __PRETTY_FUNCTION__, FNVNX_PLAT_RA, 0) : (void)0)
+#define FNVNX_NOOP() (fnvnx_plat_on ? fnvnx_plat_note(FNVNX_PLAT_NOOP, __PRETTY_FUNCTION__, FNVNX_PLAT_RA, 0) : (void)0)
 /* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
 typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);

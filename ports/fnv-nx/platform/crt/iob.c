@@ -20,6 +20,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* the platform lane (platform/win32/platstat.cpp; fnvnx_win32_ext.h is not included in C here) */
+extern volatile int fnvnx_plat_on;
+void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
+#define PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
+
 #include "../os/os.h"
 
 unsigned long fnvnx_path_map(const char *win, char *host, size_t n); /* win32/path.cpp */
@@ -93,14 +98,17 @@ static int is_text_mode(int oflag)
 }
 
 /* opens the host file and claims a descriptor >= 3 */
-static int fd_open(const char *path, int oflag)
+static int fd_open(const char *path, int oflag, unsigned caller)
 {
     int acc = oflag & 3;
     if (!path || acc == 3)
         return fail(EINVAL);
     char host[HOST_MAX];
-    if (fnvnx_path_map(path, host, sizeof host))
+    if (fnvnx_path_map(path, host, sizeof host)) {
+        if (fnvnx_plat_on)
+            fnvnx_plat_open_failed(path, NULL, ENOENT, caller, "_open");
         return fail(ENOENT);
+    }
     int of = 0;
     if (acc == FNVNX_O_RDONLY || acc == FNVNX_O_RDWR)
         of |= OS_O_READ;
@@ -117,8 +125,11 @@ static int fd_open(const char *path, int oflag)
     if (os_stat(host, &st) == 0 && st.is_dir)
         return fail(EACCES);
     int os = os_file_open(host, of);
-    if (os < 0)
+    if (os < 0) {
+        if (fnvnx_plat_on)
+            fnvnx_plat_open_failed(path, host, (unsigned)os_errno(os), caller, "_open");
         return fail(os_errno(os));
+    }
     os_lock(&g_fd_lock);
     int fd = 3;
     while (fd < MAX_FD && (g_fd[fd].flags & FD_OPEN))
@@ -194,7 +205,7 @@ static size_t lf_to_crlf(const unsigned char *in, size_t n, unsigned char *out)
 int fnvnx_open(const char *path, int oflag, int pmode)
 {
     (void)pmode;
-    return fd_open(path, oflag);
+    return fd_open(path, oflag, PLAT_RA);
 }
 
 int fnvnx_sopen(const char *path, int oflag, int shflag, int pmode)
@@ -748,7 +759,7 @@ struct _iobuf *fnvnx_iob_fsopen(const char *path, const char *mode, int shflag)
         errno = EINVAL;
         return NULL;
     }
-    int fd = fd_open(path, oflag);
+    int fd = fd_open(path, oflag, PLAT_RA);
     if (fd < 0)
         return NULL;
     struct _iobuf *f = stream_new(fd, iobflag);

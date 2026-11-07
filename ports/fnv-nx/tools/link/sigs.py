@@ -302,7 +302,9 @@ def parse_msvc(mangled, dem):
     qual = post[:popen].strip()
     # an operator ends in '*' too: operator*, operator*=, operator->*, a conversion operator 'operator T *'
     op = (split_qual_conv(qual) or [''])[-1].startswith('operator')
-    if (qual.endswith('*') and not op) or qual.endswith(')'):  # function returning a function pointer: unsupported
+    # a function returning a function pointer is unsupported; `X::operator()` ends in ')' too and is a plain name
+    # (R2 recon2-005: `??RFUN_006592f0@@QAEXPAX@Z` parsed `special`, its references stayed trap stubs)
+    if (qual.endswith('*') and not op) or (qual.endswith(')') and not re.search(r'(?:^|::)operator\(\)$', qual)):
         sig.kind = 'special'; return sig
     sig.qual = canon_qual(split_qual_conv(qual))
     sig.raw_params = _parse_params(post[popen + 1:pclose])

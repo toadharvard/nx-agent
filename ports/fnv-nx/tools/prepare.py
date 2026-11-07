@@ -611,6 +611,9 @@ def r_platform_protos(path, text, stats):
         elif name in IOBUF_NAMES and '_iobuf' in m.group(0):
             hdr = IOBUF_MACRO.get(name, '"fnvnx_iobuf.h"')
             if name in IOBUF_MACRO: stats['DECL1-FOPEN'] += 1
+        elif name == 'abs' and spaces == ['namespace std']:
+            hdr = '"fnvnx_cmath/std_abs.h"'           # DECL1-STDABS (the header says why)
+            stats['DECL1-STDABS'] += 1
         else:
             hdr = PLATFORM[name]
         if not is_op:

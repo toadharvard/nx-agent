@@ -146,6 +146,9 @@ check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', 
 
 got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
 check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
+got = prepare.r_platform_protos('/x/src/v.cpp', 'int g();\nnamespace std {\nfloat abs(float);\n}\nfloat h(float x) { return std::abs(x); }\n', Counter())
+check('DECL1-STDABS a std::abs prototype becomes fnvnx_cmath/std_abs.h', got,
+      ['#include "fnvnx_cmath/std_abs.h" /* fnv-nx DECL1 */', 'std::abs(x)'], ['float abs(float);', '<stdlib.h>'])
 
 # ---- STL2: units with the real container headers use the VC9-layout shim
 _stl2 = ('// std::string in a comment\n#include <string>\n#include <vector>\nnamespace std {\ntemplate <> class allocator<E>\n'
@@ -399,7 +402,7 @@ got = run(s1.r_opaque_enums, 'enum DIALOGUE_TYPE;\nenum DIALOGUE_TYPE\n{\n    A 
           os.path.join(_e, 'src', 'b.cpp'))
 s1._OPAQUE_NAMES = None
 check('ENUM1 opaque enum gets int as its base, and so does its definition', got,
-      ['enum DIALOGUE_TYPE : int;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE : int;', 'enum Other { B };'])
+      ['enum DIALOGUE_TYPE FNVNX_ENUM_INT;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE FNVNX_ENUM_INT;', 'enum Other { B };'])
 s1._OPAQUE_NAMES = None
 check('ENUM1 a definition int cannot hold keeps its form',
       run(s1.r_opaque_enums, 'enum WIDE { W = 0x80000000 };\n', os.path.join(_e, 'src', 'c.cpp')), ['enum WIDE { W'])
@@ -1312,6 +1315,11 @@ check('FINL1 body-less declarations of functions the unit does not define lose _
 check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)',
       _o, ['__forceinline int get(int i) const;', '__forceinline int put(int i);',
            'static __forceinline void d(X* x, int n, Pod);'])
+check('FINL1 a class template\'s member defined out of class keeps it (the class, not the template parameter)',
+      run(s1.r_forceinline_declarations,
+          'template <class K, class E>\nclass DU\n{\n\tpublic:\n\t\tstatic __forceinline void __cdecl up(K& k, E& e);\n};\n'
+          'template <class K, class E>\nvoid __cdecl DU<K, E>::up(K& k, E& e)\n{\n}\n'),
+      ['static __forceinline void __cdecl up(K& k, E& e);'], ['FINL1'])
 check('FINL1 headers are left alone',
       run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 

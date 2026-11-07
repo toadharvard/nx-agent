@@ -2934,14 +2934,16 @@ def _fits_int(body):
     return True
 
 def r_opaque_enums(path, text, stats):
-    """ENUM1: `enum X;` -> `enum X : int;`, and `enum X {` -> `enum X : int {` for those names (see above)."""
+    """ENUM1: `enum X;` -> `enum X FNVNX_ENUM_INT;`, and `enum X {` -> `enum X : int {` for those names (see above).
+    FNVNX_ENUM_INT is `: int` (fnvnx_compat.h); in the S11 gate it is empty: MSVC 2008 has no opaque declaration,
+    and its own forward declaration `enum X;` is the same type, underlying int (ENUM1-FWD)."""
     if 'enum' not in text: return text
     names = _opaque_enum_names(path)
     if not names: return text
     def decl(m):
         if m.group(2) not in names: return m.group(0)
         stats['ENUM1'] += 1
-        return m.group(1) + ' : int' + m.group(3)
+        return m.group(1) + ' FNVNX_ENUM_INT' + m.group(3)
     def defn(m):
         if m.group(1) not in names: return m.group(0)
         if not _fits_int(text[m.end():text.find('}', m.end())]): return m.group(0)   # int cannot hold it: as it was
@@ -4773,7 +4775,10 @@ def r_forceinline_declarations(path, text, stats):
         cls, body = None, ''
         if inner is not None:
             if inner[2] != 'class': continue                         # a declaration inside a function or namespace
-            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', inner[3] or '')
+            head = re.sub(r'\btemplate\s*<[^{};]*?>\s*(?=(?:class|struct|union)\b)', ' ', inner[3] or '')
+            # the class's own name, not a template parameter's (`template <class KEYD3, ...> class DispatchUtilD3`:
+            # hkpbvtreeagent, hkgpmesh lost the keyword on members their units define out of class)
+            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', head)
             if not hm: continue
             cls, body = hm.group(1), text[inner[0]:inner[1]]
             if name.lstrip('~') != name and name[1:] != cls: continue

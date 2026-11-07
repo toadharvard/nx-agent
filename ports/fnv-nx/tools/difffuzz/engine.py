@@ -8,6 +8,7 @@ from the calling unit's own declaration of that address.
 """
 import collections
 import json
+import os
 import re
 
 import config
@@ -76,6 +77,8 @@ class UnitCache:
     def __init__(self, linkdir, workdir, unit_closed=True):
         self.linkdir, self.workdir, self.unit_closed = linkdir, workdir, unit_closed
         self.units = json.load(open(config.DECOMP / 'build/units.json'))['units']
+        if config.ORACLE == 'exe':      # the prepared tree's extents: REC1's recon functions are there, not in pristine
+            self.units = json.load(open(config.TREE / 'build/units.json'))['units']
         self.by_source = {}             # source -> [(index, unit)] (a source can be listed with two flag sets)
         self.def_at = {}
         for i, u in enumerate(self.units):
@@ -107,7 +110,11 @@ class UnitCache:
             entries = [e for e in entries if any(int(f['address'], 16) == addr for f in e[1]['functions'])] or entries
         i, u = entries[0]
         if i not in self._x86:
-            img = coffobj.UnitImage(coffobj.Coff(config.X86OBJ / ('u%d.obj' % i)), u)
+            if config.ORACLE == 'exe':
+                import exeimage
+                img = exeimage.ExeImage(exeimage.load_pe(config.EXE, not os.environ.get('FNVNX_EXE_ANY')), u)
+            else:
+                img = coffobj.UnitImage(coffobj.Coff(config.X86OBJ / ('u%d.obj' % i)), u)
             self._x86[i] = img
             self._pin[i] = img.literal_bytes()
         return self._x86[i]

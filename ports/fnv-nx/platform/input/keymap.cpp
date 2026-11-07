@@ -5,6 +5,12 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+
+/* the platform lane (platform/win32/platstat.cpp; fnvnx_win32_ext.h is not included in C here) */
+extern "C" volatile int fnvnx_plat_on;
+extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail);
+#define PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
 
 extern "C" uint8_t fnvnx_hid_usage_to_dik(uint8_t u)
 {
@@ -76,6 +82,11 @@ extern "C" uint8_t fnvnx_hid_usage_to_dik(uint8_t u)
     case 229: return DIK_RSHIFT;
     case 230: return DIK_RMENU;
     case 231: return DIK_RWIN;
+    }
+    if (fnvnx_plat_on && u > 3) {   /* 0..3: no key / rollover errors. The platform lane: 4 = input (platstat.cpp) */
+        char d[24];
+        snprintf(d, sizeof d, "hid usage %u", (unsigned)u);
+        fnvnx_plat_note(4, "fnvnx_hid_usage_to_dik", 0, d);
     }
     return 0;
 }

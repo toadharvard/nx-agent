@@ -9,6 +9,9 @@ static void null_mode(D3DDISPLAYMODE *m) { m->Width = 1280; m->Height = 720; m->
 /* the adapter's modes: a PC adapter's usual list, so the INI's iSize (the engine's default 640x480 until the
  * INI is read) has one; the desktop mode above is the handheld panel, 1920x1080 the docked output */
 static const uint16_t null_modes[][2] = {{640, 480}, {800, 600}, {1024, 768}, {1280, 720}, {1280, 1024}, {1920, 1080}};
+/* The modes are reported for X8R8G8B8 only, as D3D9 reports a display format's own modes: the renderer builds its mode
+ * list per queried format (0x00e7b7d0), and modes returned for every format gave one duplicate entry per format (the
+ * lockstep trace's first divergence against WineD3D, S5-boot). */
 #define NULL_MODES (sizeof null_modes / sizeof null_modes[0])
 static void null_enum_mode(UINT i, D3DDISPLAYMODE *m) { null_mode(m); m->Width = null_modes[i][0]; m->Height = null_modes[i][1]; }
 static void null_caps(D3DCAPS9 *c) {
@@ -632,16 +635,12 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterIdentifier(UINT Adapter, DW
     if (pIdentifier) { memset(pIdentifier, 0, sizeof *pIdentifier); strcpy(pIdentifier->Driver, "fnvnx-null"); strcpy(pIdentifier->Description, "fnv-nx null D3D9 device"); pIdentifier->VendorId = 0x10de; pIdentifier->DeviceId = 0x0391; } return S_OK;
 }
 UINT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format) {
-    (void)Adapter;
-    (void)Format;
-    return NULL_MODES;
+    return Adapter == 0 && Format == D3DFMT_X8R8G8B8 ? (UINT)NULL_MODES : 0;   /* modes of the asked format only */
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9::EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) {
-    (void)Adapter;
-    (void)Format;
-    (void)Mode;
-    (void)pMode;
-    if (Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;
+    if (Adapter != 0 || Format != D3DFMT_X8R8G8B8 || Mode >= NULL_MODES) return D3DERR_INVALIDCALL;
+    if (pMode) null_enum_mode(Mode, pMode);
+    return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterDisplayMode(UINT Adapter, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
@@ -2029,16 +2028,12 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterIdentifier(UINT Adapter, 
     if (pIdentifier) { memset(pIdentifier, 0, sizeof *pIdentifier); strcpy(pIdentifier->Driver, "fnvnx-null"); strcpy(pIdentifier->Description, "fnv-nx null D3D9 device"); pIdentifier->VendorId = 0x10de; pIdentifier->DeviceId = 0x0391; } return S_OK;
 }
 UINT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format) {
-    (void)Adapter;
-    (void)Format;
-    return NULL_MODES;
+    return Adapter == 0 && Format == D3DFMT_X8R8G8B8 ? (UINT)NULL_MODES : 0;   /* modes of the asked format only */
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) {
-    (void)Adapter;
-    (void)Format;
-    (void)Mode;
-    (void)pMode;
-    if (Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;
+    if (Adapter != 0 || Format != D3DFMT_X8R8G8B8 || Mode >= NULL_MODES) return D3DERR_INVALIDCALL;
+    if (pMode) null_enum_mode(Mode, pMode);
+    return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterDisplayMode(UINT Adapter, D3DDISPLAYMODE* pMode) {
     (void)Adapter;

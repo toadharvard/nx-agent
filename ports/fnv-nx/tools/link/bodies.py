@@ -24,6 +24,12 @@ in this order (first that applies):
    function's call reaches, bytes checked against the exe; a DIR32 there, the address taken, counts the same)
    give one native address of the right kind and shape
    (`exe_pass`). Checked before the synthesized classes: an address beats `= default`.
+1d. `exe-data` (`--exe`) - a decomp placeholder variable (an unmangled name refs.tsv leaves `unresolved`:
+   `extern A11MM g_a11mm;`, a function pointer standing for an import `extern int (__stdcall* LocalIncrement)(void*)`)
+   whose MSVC name the pristine objects' placed code addresses (DIR32): the exe's word at every site gives one image
+   data address (exe_data_pass; variant units' other stack layouts and vftable-slot ??_G functions are placed by
+   shape, `same_shape`). resolve binds it there like any image variable (an IAT slot for an import's pointer).
+   Before decl-data: a typed zero copy of the game's memory manager is wrong where the image's is meant.
 2. `msvc-empty` - a pristine MSVC object (`<dir>/u<index>.obj`, S11) defines the function (COMDAT code) and its x86
    body is only `ret` / `ret N` / `mov eax, ecx; ret[ N]` (a constructor returning this): an AArch64 `ret` stub
    under the Itanium name.
@@ -931,6 +937,28 @@ class Pe:
                 at = self.data.find(lit, at + 1, end)
         return hits[0] if hits else None
 
+    def matches(self, va, body, masked):
+        """True when the exe's bytes at va equal body outside the offsets in masked."""
+        img = self.read(va, len(body))
+        return img is not None and all(img[j] == body[j] for j in range(len(body)) if j not in masked)
+
+    def vftable_words(self, unit, nmax=64):
+        """The code addresses in the image vftables a unit's recipe names (`??_7C@@6B@` in units.json symbols): each
+        vftable's words in order, up to the first word outside the code sections."""
+        import struct
+        out = []
+        for n, a in sorted((unit.get('symbols') or {}).items()):
+            if not n.startswith('??_7'):
+                continue
+            va = int(a, 16)
+            for k in range(nmax):
+                w = self.read(va + 4 * k, 4)
+                w = struct.unpack('<I', w)[0] if w else None
+                if w is None or not any(cv <= w < cv + rs for cv, _, rs in self.code):
+                    break
+                out.append(w)
+        return sorted(set(out))
+
     def read(self, va, n):
         for start, size, roff, rsize in self.secs:
             if start <= va and va + n <= start + min(size, rsize):
@@ -938,10 +966,28 @@ class Pe:
         return None
 
 
+FUNCLET = ('__catch$', '__unwindfunclet$', '__ehhandler$')   # MSVC labels inside a function's own section
 SEARCH_MIN = 16   # bytes: shorter bodies (a jmp thunk, `mov eax, [ecx]; ret`) occur too often to place by content
 
 
-def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
+def same_shape(body, img):
+    """True when two x86 bodies are the same instruction stream up to constants: as many instructions, each with
+    the same mnemonic, size and operands once every number is blanked (stack offsets and immediates may differ, the
+    registers and addressing forms may not). A body the decoder cannot read through to its end is not."""
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+
+    def shape(code):
+        out, n = [], 0
+        for ins in md.disasm(bytes(code), 0):
+            out.append((ins.mnemonic, ins.size, re.sub(r'\b(?:0x[0-9a-f]+|\d+)\b', '#', ins.op_str)))
+            n += ins.size
+        return out if n == len(code) else None
+    a, b = shape(body), shape(img)
+    return a is not None and a == b
+
+
+def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     """Original addresses the pristine object of unit i calls the MSVC names in wanted at. Functions are placed
     by units.json, then by following REL32 calls from placed functions (a COMDAT units.json does not list, such as
     `NiPointer<T>::operator=`, at the address the exe's call reaches); a function counts as placed only where its
@@ -950,6 +996,10 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
     exe's word does. search: a function that references a wanted name and was not placed (inlined into its callers
     in the exe, or reached at an address holding other code) is placed where its bytes, relocations masked, occur
     exactly once in the exe's code (at least SEARCH_MIN bytes: a standalone copy units.json does not list).
+    loose (exe-data only): a function whose bytes differ from the exe's counts as placed when it is the same
+    instruction stream up to constants (same_shape: a variant unit's other stack layout); a word at a relocation
+    sits in the same instruction there. A function's catch funclets (`__catch$f$0`, labels in its section) are then
+    part of its body.
     -> {msvc name: {target address: number of sites}}."""
     import struct
     import vslots
@@ -961,13 +1011,14 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
     for name, si in c.defs.items():
         sy = c.syms[si]
         if sy.secnum > 0 and c.secs[sy.secnum].flags & IMAGE_SCN_CNT_CODE and sy.storage in (2, 3):
-            ends = [v for v, _ in c.symbols_in(sy.secnum) if v > sy.value]
+            ends = [v for v, n_ in c.symbols_in(sy.secnum) if v > sy.value and not (loose and n_.startswith(FUNCLET))]
             data = c.section_bytes(sy.secnum)
             funcs[name] = (sy.secnum, sy.value, data[sy.value:min(ends) if ends else len(data)])
     todo = [(f['symbol'], int(f['address'], 16)) for f in unit['functions'] if f['symbol'] in funcs]
     placed = {}
     out = collections.defaultdict(collections.Counter)
     searched = set()
+    slot_words = None
     while True:
         if not todo and search:   # standalone copies of the unplaced functions that reference a wanted name
             for fname, (sec, start, body) in sorted(funcs.items()):
@@ -977,7 +1028,13 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
                 if not any(sn in wanted and typ in (0x06, 0x14) for sn, typ in rel.values()):
                     continue
                 searched.add(fname)
-                a = exe.find_unique(body, {j for k in rel for j in range(k, min(k + 4, len(body)))})
+                masked = {j for k in rel for j in range(k, min(k + 4, len(body)))}
+                a = exe.find_unique(body, masked)
+                if a is None and loose:   # a virtual function (??_G): the slot of a vftable the unit names
+                    if slot_words is None:
+                        slot_words = exe.vftable_words(unit)
+                    at_ = [w for w in slot_words if exe.matches(w, body, masked)]
+                    a = at_[0] if len(at_) == 1 else None
                 if a is not None:
                     todo.append((fname, a))
         if not todo:
@@ -994,7 +1051,7 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
         for k in rel:
             for j in range(k, min(k + 4, len(body))):
                 mask[j] = fixed[j] = 0
-        if bytes(mask) != bytes(fixed):
+        if bytes(mask) != bytes(fixed) and not (loose and same_shape(body, img)):
             continue   # not the exe's code byte for byte here: none of its sites is trusted
         placed[fname] = a
         for k, (sn, typ) in rel.items():
@@ -1274,6 +1331,72 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
     return out
 
 
+def load_cnames(refs_tsv):
+    """Every unmangled name refs.tsv leaves `unresolved` (a decomp placeholder: C function, variable or function
+    pointer) -> {name: set(referencing units)}."""
+    out = collections.defaultdict(set)
+    if refs_tsv and os.path.exists(refs_tsv):
+        for line in open(refs_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if len(f) >= 3 and f[2] == 'unresolved' and re.match(r'^[A-Za-z_]\w*$', f[1]) and \
+                    not f[1].startswith(('_Z', '__')):
+                out[f[1]].add(f[0].split('#')[0])
+    return dict(out)
+
+
+def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data):
+    """`exe-data`: a placeholder variable the decomp declares and nothing defines or binds (`extern A11MM g_a11mm;`,
+    `extern int (__stdcall* LocalIncrement)(void*);`) whose MSVC name (`?g_a11mm@@3UA11MM@@A`: a variable, or `_name`)
+    the pristine objects' placed code takes the address of: the exe's word at every such site (exe_call_targets,
+    loose: variant units' other stack layouts and the ??_G a vftable slot holds are placed too) gives one image
+    data address (is_data). Bound there like any image variable; a function pointer standing for an import gets its
+    IAT slot (the same binding as `g_pfnInterlockedIncrement`). Function placeholders (REL32 calls) never bind:
+    a value source the decomp invented has no exe address. -> [Row]"""
+    import vslots
+    if not cnames:
+        return []
+    pats = {n: re.compile(r'^(?:\?%s@@3|_%s$)' % (re.escape(n), re.escape(n))) for n in cnames}
+    first = {}
+    for n in cnames:
+        first.setdefault(n[:1], []).append(n)
+    by_obj = collections.defaultdict(set)
+    of = {}
+    for i in range(len(udata)):
+        p = os.path.join(msvc_objs, 'u%d.obj' % i)
+        if not os.path.exists(p):
+            continue
+        try:
+            c = vslots.Coff(p)
+        except Exception:   # a damaged object must not stop the step
+            continue
+        for sy in c.syms.values():
+            if sy.secnum != 0 or sy.storage != 2:
+                continue
+            nm = sy.name
+            key = nm[1:2] if nm[:1] in '?_' else ''
+            for n in first.get(key, ()):
+                if pats[n].match(nm):
+                    by_obj[i].add(nm)
+                    of[nm] = n
+    exe = Pe(exe_path)
+    seen = collections.defaultdict(collections.Counter)
+    via = {}
+    for i, ms_ in sorted(by_obj.items()):
+        for m_, tg in exe_call_targets(msvc_objs, i, udata[i], ms_, exe, search=True, loose=True).items():
+            seen[of[m_]].update(tg)
+            via.setdefault(of[m_], m_)
+    rows = []
+    for n, tg in sorted(seen.items()):
+        if len(tg) != 1:
+            continue
+        (a, nsite), = tg.items()
+        if not is_data(a):
+            continue
+        rows.append(Row(n, 'exe-data', a, ADDR_SYM % a, ','.join(sorted(cnames[n])),
+                        '%s at %d site(s) in the exe' % (via[n], nsite), None))
+    return rows
+
+
 GDEL_SYM = '__fnvnx_bdgd_%08x'
 
 
@@ -1400,6 +1523,12 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     if msvc_objs and exe_path:
         rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
                         load_providers(os.path.join(out, 'addrmap.tsv')))
+        # placeholder variables the exe's code addresses: bound to that image address (before decl-data)
+        have_ = {r.name for r in rows}
+        rows += [r for r in exe_data_pass({n: us for n, us in load_cnames(os.path.join(out, 'refs.tsv')).items()
+                                           if n not in have_}, exe_path, msvc_objs,
+                                          json.load(open(units_json))['units'], fnvlink.is_data_addr)
+                 if r.name not in have_]
     if synth:   # its stubs are emitted with the synthesized objects
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
@@ -1609,7 +1738,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     with open(os.path.join(bdir, 'bind.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\tclass\ttarget\n')
         for r in rows:
-            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel', 'template-fold'):
+            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel', 'template-fold', 'exe-data'):
                 f.write('%s\t%s\t%s\n' % (r.name, r.cls, r.target))
     with open(os.path.join(bdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#host_unit\tobject\tnames\n')
@@ -1619,8 +1748,9 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'tree-inline',
-                        'exe-sret', 'thunk', 'addr-host', 'decl-data', 'special-default', 'crt-rule', 'missing')]
+              for k in ('addr', 'template-fold', 'exe-addr', 'exe-data', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline',
+                        'tree-inline', 'exe-sret', 'thunk', 'addr-host', 'decl-data', 'special-default', 'crt-rule',
+                        'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))
