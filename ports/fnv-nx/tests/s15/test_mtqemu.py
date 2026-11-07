@@ -18,7 +18,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = ('parallel', 'cs', 'stages', 'spin-decomp', 'spin-override', 'unsync', 'detach', 'placement', 'ilk-count', 'ilk-refs', 'ilk-cost',
-         'litmus-order', 'litmus-plain')
+         'litmus-order', 'litmus-plain', 'race-pairs', 'wg-clean', 'wg-deadlock', 'wg-hang', 'frames', 'feed')
 OPTIONAL = ('litmus-order', 'litmus-plain')   # skipped where the fnvnx_order plugin does not build
 RUNS = 3
 TIMEOUT = 120
@@ -40,6 +40,31 @@ def parse(text):
         res[m.group(1)] = (m.group(2) != 'FAIL', m.group(3)) if m.group(2) != 'skip' or m.group(1) in OPTIONAL \
             else (False, 'skipped')
     return res
+
+
+def check_reports(out, text, fails):
+    """D25 #7: tools/threads/report.py maps race-pairs' race to the writer/reader pair and wg-deadlock's cycle to the
+    two thread functions (the watchdog records the call site through hb.c's wraps), by function start address."""
+    log, rep = os.path.join(out, 'run.log'), os.path.join(out, 'threads.md')
+    open(log, 'w').write(text)
+    r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', '..', 'tools', 'threads', 'report.py'), log,
+                        '--elf', os.path.join(out, 'guest.elf'), '--out', rep], capture_output=True, text=True)
+    if r.returncode:
+        fails.append('report.py: rc %d %s' % (r.returncode, r.stderr.strip()[-200:]))
+        return
+    import json
+    j = json.load(open(rep[:-3] + '.json'))
+    nm = subprocess.run(['aarch64-linux-gnu-nm', os.path.join(out, 'guest.elf')], capture_output=True, text=True).stdout
+    addr = {l.split()[2]: '0x%08x' % int(l.split()[0], 16) for l in nm.splitlines() if len(l.split()) == 3}
+    want = sorted([addr.get('mtq_pair_writer'), addr.get('mtq_pair_reader')])
+    pairs = [sorted([p['a'], p['b']]) for p in j['function_pair_list']]
+    print(f'threads report: function pairs {pairs}, cycles {j["cycles"]}, long waits {j["long_waits"]}')
+    if want not in pairs:
+        fails.append(f'report.py: race-pairs pair {want} not among {pairs}')
+    wg = sorted([addr.get('_ZL4wg_aPv'), addr.get('_ZL4wg_bPv')])
+    cyc = [sorted(e['func'] for e in c) for c in j['cycle_list']]
+    if wg not in cyc:
+        fails.append(f'report.py: the deadlock cycle is not in wg_a/wg_b {wg}: {cyc}')
 
 
 def main():
@@ -86,6 +111,7 @@ def main():
                 print(f'run {i + 1}: parallel {"ok" if res["parallel"][0] else "FAIL"} {res["parallel"][1]}')
                 parallel_ok |= res['parallel'][0]
             if i == 0:
+                check_reports(out, text, fails)
                 for c in CASES[1:]:
                     if c in res:
                         print(f'run 1: {c} {"ok" if res[c][0] else "FAIL"} {res[c][1]}')

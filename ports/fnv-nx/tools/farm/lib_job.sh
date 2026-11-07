@@ -40,7 +40,7 @@ job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and
 			|| { echo "FARM_SRC=$SRC is not at $COMMIT"; exit 1; }
 	else
 		SRC=$FARM_HOME/src-${COMMIT:0:12}
-		if [ ! -d "$SRC" ]; then git -C "$repo" worktree add --detach "$SRC" "$COMMIT" >/dev/null; fi
+		bash "$(dirname "${BASH_SOURCE[0]}")/worktree.sh" "$repo" "$SRC" "$COMMIT" >/dev/null
 	fi
 	P=$SRC/ports/fnv-nx
 	COMMIT=$(git -C "$SRC" rev-parse HEAD)
@@ -60,8 +60,9 @@ COMPILE_INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv
 objects_commit() {  # the newest ancestor of COMMIT (itself included) whose N compile shards all exist and whose
 	                # compile inputs equal COMMIT's -> its full hash, or nothing
 	local n=$1 have c
-	have=$(git -C "$ARTIFACTS" ls-remote origin "refs/heads/c/*" 2>/dev/null \
-		| sed -n "s|.*refs/heads/c/\([0-9a-f]\{12\}\)/[0-9]*of$n\$|\1|p" | sort | uniq -c | awk -v n="$n" '$1 == n {print $2}')
+	local pfx=${OBJ_PREFIX:-c}   # cr: the RACE=1 objects (compile_job.sh RACE=1)
+	have=$(git -C "$ARTIFACTS" ls-remote origin "refs/heads/$pfx/*" 2>/dev/null \
+		| sed -n "s|.*refs/heads/$pfx/\([0-9a-f]\{12\}\)/[0-9]*of$n\$|\1|p" | sort | uniq -c | awk -v n="$n" '$1 == n {print $2}')
 	[ -n "$have" ] || return 0
 	for c in $(git -C "$SRC" rev-list --max-count="${FARM_OBJ_DEPTH:-300}" "$COMMIT"); do
 		if grep -qx "${c:0:12}" <<<"$have"; then
@@ -101,10 +102,10 @@ job_inputs() {   # job_inputs <dir>: the prepare farm's tree of COMMIT and the c
 		if [ -n "$OBJ_COMMIT" ] && bash "$P/tools/farm/fetch_objs.sh" "$OBJ_COMMIT" "$n" "$d/obj-${OBJ_COMMIT:0:12}" "$TREE" \
 				> "$d/fetch_objs.log" 2>&1; then
 			OBJS=$d/obj-${OBJ_COMMIT:0:12}/objects.tsv
-			NOTE_OBJS="compile farms, c/${OBJ_COMMIT:0:12}/*of$n (objects of ${OBJ_COMMIT:0:12}$([ "$OBJ_COMMIT" = "$COMMIT" ] \
+			NOTE_OBJS="compile farms, ${OBJ_PREFIX:-c}/${OBJ_COMMIT:0:12}/*of$n (objects of ${OBJ_COMMIT:0:12}$([ "$OBJ_COMMIT" = "$COMMIT" ] \
 				&& echo ", this commit" || echo ", an ancestor with the same compile inputs"); tree hash checked): $(tail -1 "$d/fetch_objs.log")"
 		else
-			NOTE_OBJS="no compile shards c/<commit12>/*of$n of this commit or of an ancestor with the same compile inputs (see fetch_objs.log)"
+			NOTE_OBJS="no compile shards ${OBJ_PREFIX:-c}/<commit12>/*of$n of this commit or of an ancestor with the same compile inputs (see fetch_objs.log)"
 			OBJ_COMMIT=""; rm -rf "$d"/obj-*
 		fi
 	fi

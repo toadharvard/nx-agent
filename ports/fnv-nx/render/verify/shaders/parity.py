@@ -87,6 +87,9 @@ def driver_vs(asm, sdp2, work):
     return out
 
 def main():
+    # the oracle is Gallium Nine: its numerics at 0 (sdp2dksh --numerics); set here, not at import: perm.py imports
+    # these modules and must keep the default (WineD3D)
+    os.environ.setdefault('FNVNX_NUMERICS', 'nine')
     a = sys.argv[1:]
     tools = os.environ.get('FNVNX_SHADERS_BUILD', os.path.join(ROOT, 'render/shaders/build/host'))
     bindir = os.path.join(ROOT, 'build/v6n/bin'); work = os.path.join(ROOT, 'build/v6n/parity')

@@ -135,7 +135,7 @@ COMMIT=${1:?commit}; K=${2:?k}; N=${3:?N}; REPORT=${4:?report.md}
 C12=${COMMIT:0:12}
 SRC=$FARM_HOME/src-$C12
 step checkout "$LOGS/checkout.log"
-if [ ! -d "$SRC" ]; then git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" > "$STEP_LOG" 2>&1; fi
+bash "$(dirname "$0")/worktree.sh" "$REPO" "$SRC" "$COMMIT" > "$STEP_LOG" 2>&1
 P=$SRC/ports/fnv-nx
 step fetch "$LOGS/fetch.log"
 bash "$P/tools/fetch.sh" "$EXT" > "$STEP_LOG" 2>&1
@@ -220,7 +220,8 @@ if [ "${EQUIV_CACHE:-1}" = 1 ]; then
   EC_BEFORE=$(python3 "$P/tools/equiv/unitcache.py" stat "$EC" 2>/dev/null || true)
 fi
 for d in "$FARM_HOME"/equiv-*; do
-  if [ -d "$d" ] && [ "${d##*/equiv-}" != "$C12" ]; then rm -rf "$d/tree"; fi
+  # older heads: drop the tree and every shard's objects and attribution work dirs (the reports and rows stay)
+  if [ -d "$d" ] && [ "${d##*/equiv-}" != "$C12" ]; then rm -rf "$d/tree" "$d"/*-of-*/obj "$d"/*-of-*/fnvnx-equiv-attr-*; fi
 done
 W=$FARM_HOME/equiv-$C12; WK=$W/$K-of-$N; mkdir -p "$WK"
 step prepare "$W/prepare.log"
@@ -245,6 +246,7 @@ step eh-off "$WK/eh.log"
 "${EQ[@]}" build "$DECOMP" "$W/tree" --out "$WK/eh_head.jsonl" --units "$WK/differ.json" --eh-off --jobs "$JOBS" >> "$STEP_LOG" 2>&1
 # attribution by rule
 step attribute "$WK/attr.log"
+rm -rf "$WK"/fnvnx-equiv-attr-*      # a killed earlier run's work dir (one hard-linked tree per worker, --jobs at most)
 "${EQ[@]}" attribute "$DECOMP" "$W/tree" "$WK/base.jsonl" "$WK/head.jsonl" --rules "$RULES" --out "$WK/attr.jsonl" \
   --failed --hier --default-groups --units "$SHARD" --workdir "$WK" --jobs "$JOBS" > "$STEP_LOG" 2>&1
 t3=$(date +%s)

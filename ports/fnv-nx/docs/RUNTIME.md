@@ -336,7 +336,7 @@ static-object destructors that the source registers explicitly with `atexit`; `0
 | `0x00ec3599` | cpplib | std::locale::facet::_Facet_Register | n | 1 | 1 | next: MSVC C++ library internal |
 | `0x00ec35d7` | cpplib | libcpmt void(void*) - unidentified (_Locinfo_dtor?) | u | 1 | 2 | next: MSVC C++ library internal |
 | `0x00ec36a6` | cpplib | libcpmt int() - unidentified (locale::_Getgloballocale?) | u | 2 | 2 | next: MSVC C++ library internal |
-| `0x00ec3740` | cpplib | std::_Locinfo::_Locinfo_ctor(_Locinfo*, const char*) | i | 1 | 2 | next: MSVC C++ library internal |
+| `0x00ec3740` | cpplib | std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&) | i | 1 | 2 | next: MSVC C++ library internal |
 | `0x00ec379c` | cpplib | _Tolower(int, const _Ctypevec*) | i | 1 | 2 | next: MSVC C++ library internal |
 | `0x00ec38a9` | cpplib | _Getctype() | i | 1 | 1 | next: MSVC C++ library internal |
 | `0x00ec3909` | cpplib | _Toupper(int, const _Ctypevec*) | i | 1 | 2 | next: MSVC C++ library internal |
@@ -773,7 +773,7 @@ and VC9's library layout. `conf.`: h high, m medium, l low.
 | `0x00ec3599` | `locale::facet::_Facet_Register` | (named) | h | `fnvnx_facet_register` |
 | `0x00ec35d7` | `_Locinfo::_Locinfo_dtor(_Locinfo*)` | body of `~_Locinfo` before the 4 string members | h | `fnvnx_locinfo_dtor` |
 | `0x00ec36a6` | `locale::_Init()` | `locale()`: `_Ptr = _Init()` in `ios_base::_Init` | h | `fnvnx_locale_init` |
-| `0x00ec3740` | `_Locinfo::_Locinfo_ctor` | (inferred by S4) | h | `fnvnx_locinfo_ctor` |
+| `0x00ec3740` | `_Locinfo::_Locinfo_ctor(this, const string&)` | (inferred by S4; the string argument: R2, the byte-matched 0x00ad3ca0) | h | `fnvnx_locinfo_ctor` |
 | `0x00ec379c` / `0x00ec3909` | `_Tolower` / `_Toupper(int, const _Ctypevec*)` | `ctype<char>::do_tolower/upper` with `this+8` | h | `fnvnx_tolower_ctype` / `fnvnx_toupper_ctype` |
 | `0x00ec38a9` | `_Getctype()` | returns a 16-byte `_Ctypevec` by value | h | `fnvnx_getctype` |
 | `0x00ec3a75` | `basic_ostream<char>(streambuf*, bool)` + MSVC's vbase flag | the libcpmt standard ostream at 0x0126fc10 (filebuf at 0x0126fbc0, 0x50 bytes before), args (sb, 0, 1); its dtor 0x00ace2d0 reads the vbptr | m | `fnvnx_ostream_ctor` |

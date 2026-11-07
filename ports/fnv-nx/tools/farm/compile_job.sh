@@ -18,6 +18,10 @@
 #   meta.json            commit, decomp commit, shard, compiler, flags, counts, tree hash
 # Every shard compiles with the same whole-program ordering keys: keys_job.sh's k/<commit12> (KEYS_WAIT, default
 # 1800 s), or the same list computed here when it does not come (KEYS_SRC=local skips the wait).
+# RACE=1 (D25 #7, tools/threads/README.md): the race-checker build (tools/link/compile.sh -fsanitize=thread). Its
+# objects live apart: $FARM_HOME/obj-race-<k>-of-<N>, branches shard-race-<k>of<N> and cr/<commit12>/<k>of<N> (never
+# c/...: consumers of the normal objects must not get instrumented ones); RACE is part of the flags key; meta.json
+# says "race": 1. Consumers: OBJ_PREFIX=cr tools/farm/fetch_objs.sh, tools/farm/race_job.sh.
 # Needs: git, python3, jq, rsync, g++-aarch64-linux-gnu; the artifacts repository attached to the session (push).
 # Objects are derived from the decomp. They go only to that private repository, never to nx-agent, which is public.
 set -euo pipefail
@@ -27,12 +31,14 @@ FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
 ARTIFACTS=${ARTIFACTS:-$FARM_HOME/artifacts}
 JOBS=${JOBS:-$(nproc)}
 C12=${COMMIT:0:12}
+RACE=${RACE:-0}; export RACE; RS=""; PFX=c
+if [ "$RACE" = 1 ]; then RS=-race; PFX=cr; fi
 EXT=$FARM_HOME/ext
 WORK=$FARM_HOME/compile-$C12
 mkdir -p "$FARM_HOME"
 
 SRC=$FARM_HOME/src-$C12
-if [ ! -d "$SRC" ]; then git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" >/dev/null; fi
+bash "$(dirname "$0")/worktree.sh" "$REPO" "$SRC" "$COMMIT" >/dev/null
 P=$SRC/ports/fnv-nx
 bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 
@@ -63,7 +69,7 @@ for line in sys.stdin:
 # Incremental: a persistent copy of the tree that only changed files touch (rsync -c), and persistent objects.
 # compile.sh rebuilds a unit whose source is newer than its object. A change to anything that is not a unit
 # source (headers, units.json), to the flags (compile.sh, shim, sse2neon) or to the compiler rebuilds the shard.
-PT=$FARM_HOME/tree; OBJ=$FARM_HOME/obj-$K-of-$N; mkdir -p "$PT" "$OBJ"
+PT=$FARM_HOME/tree; OBJ=$FARM_HOME/obj$RS-$K-of-$N; mkdir -p "$PT" "$OBJ"
 # compile.sh loads the FTOI2 and fnvnx_order plugins (toolchain/ftoi, toolchain/order): its headers come with gcc-13-plugin-dev-aarch64-linux-gnu, and
 # the host g++ builds it. A root farm installs them when missing.
 if [ ! -f "$(aarch64-linux-gnu-g++ -print-file-name=plugin)/include/gcc-plugin.h" ] || ! command -v g++ >/dev/null; then
@@ -98,7 +104,7 @@ fi
 # replaced only when it changes (compile.sh treats objects older than the list as stale)
 cmp -s "$WORK/order.keys" "$KEYS" || cp "$WORK/order.keys" "$KEYS"
 FLAGS_HASH=$( (cat "$P/tools/link/compile.sh" "$P/toolchain/ftoi/fnvnx_ftoi.cc" "$P/toolchain/order/fnvnx_order.cc" "$KEYS"; find "$P/shim/include" -type f -print0 | LC_ALL=C sort -z | xargs -0 cat; \
-  git -C "$EXT/sse2neon" rev-parse HEAD; aarch64-linux-gnu-g++ --version | head -1) | sha256sum | cut -c1-16)
+  git -C "$EXT/sse2neon" rev-parse HEAD; aarch64-linux-gnu-g++ --version | head -1; echo "RACE=$RACE") | sha256sum | cut -c1-16)
 grep -v '/$' "$WORK/changed.txt" | grep -vxF -f "$WORK/shard.list" | grep -v '^src/.*\.\(cpp\|c\)$' > "$WORK/changed_other.txt" || true
 if [ -s "$WORK/changed_other.txt" ] || [ "$(cat "$OBJ/.flags" 2>/dev/null)" != "$FLAGS_HASH" ]; then
   rm -f "$OBJ"/*.o "$OBJ"/*.log; echo "$FLAGS_HASH" > "$OBJ/.flags"; FULL=1
@@ -109,7 +115,7 @@ ok=$(grep -c $'\tok$' "$OBJ/objects.tsv" || true); fail=$(grep -c $'\tfail$' "$O
 
 # Publish.
 if [ ! -d "$ARTIFACTS/.git" ]; then git clone -q https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"; fi
-B=shard-${K}of${N}
+B=shard$RS-${K}of${N}
 cd "$ARTIFACTS"
 if git fetch -q origin "+refs/heads/$B:refs/remotes/origin/$B" 2>/dev/null; then git checkout -q -B "$B" "origin/$B"
 elif git rev-parse -q --verify "refs/heads/$B" >/dev/null; then git checkout -q "$B"
@@ -125,22 +131,22 @@ DECOMP_COMMIT=$(git -C "$EXT/fnv_decomp" rev-parse HEAD)
 CXXV=$(aarch64-linux-gnu-g++ --version | head -1)
 cat > meta.json <<EOF
 {"commit": "$COMMIT", "decomp_commit": "$DECOMP_COMMIT", "shard": $K, "shards": $N, "tree_hash": "$TREE_HASH",
- "compiler": "$CXXV", "ok": $ok, "fail": $fail, "order_keys": "$got_keys", "order_keys_sha": "$(sha256sum < "$KEYS" | cut -c1-16)",
+ "compiler": "$CXXV", "race": $RACE, "ok": $ok, "fail": $fail, "order_keys": "$got_keys", "order_keys_sha": "$(sha256sum < "$KEYS" | cut -c1-16)",
  "prepare_s": $((t1-t0)), "compile_s": $((t2-t1)), "jobs": $JOBS, "full_rebuild": $FULL,
  "changed_files": $(grep -vc '/$' "$WORK/changed.txt" || true)}
 EOF
 git add -A obj objects.tsv meta.json
 git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 shard $K/$N: $ok ok, $fail failed" || true
 for i in 1 2 3; do  # one ref per push: the proxy drops combined pushes now and then
-  git push -q -f origin "$B" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/c/$C12/${K}of${N}" 2>/dev/null && break
+  git push -q -f origin "$B" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/$PFX/$C12/${K}of${N}" 2>/dev/null && break
   sleep $((i * 5))
 done
-git ls-remote origin "refs/heads/c/$C12/${K}of${N}" | grep -q . || { echo "publish failed" >&2; exit 1; }
+git ls-remote origin "refs/heads/$PFX/$C12/${K}of${N}" | grep -q . || { echo "publish failed" >&2; exit 1; }
 cd - >/dev/null
 
 if [ -n "$REPORT" ]; then
   mkdir -p "$(dirname "$REPORT")"
-  printf '# compile %s shard %s/%s\n\n- ok %s, failed %s\n- prepare %ss, compile %ss, jobs %s\n- tree hash %s\n- branch c/%s/%sof%s in toadharvard/fnv-nx-build\n' \
-    "$C12" "$K" "$N" "$ok" "$fail" "$((t1-t0))" "$((t2-t1))" "$JOBS" "$TREE_HASH" "$C12" "$K" "$N" > "$REPORT"
+  printf '# compile %s shard %s/%s%s\n\n- ok %s, failed %s\n- prepare %ss, compile %ss, jobs %s\n- tree hash %s\n- branch %s/%s/%sof%s in toadharvard/fnv-nx-build\n' \
+    "$C12" "$K" "$N" "$([ "$RACE" = 1 ] && echo ' (RACE=1)')" "$ok" "$fail" "$((t1-t0))" "$((t2-t1))" "$JOBS" "$TREE_HASH" "$PFX" "$C12" "$K" "$N" > "$REPORT"
 fi
 echo "shard $K/$N: $ok ok, $fail failed"

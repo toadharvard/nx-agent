@@ -17,6 +17,9 @@ ini-read       data   ini-read
 # the game's D3D9 device exists: IDirect3D9::CreateDevice of the null device (toolchain/game/null_d3d9.cpp) or of
 # the Nine proxy (render/nine, class Px<interface>)
 renderer-init  call   re:^_ZN\d+(Null_I|Px)Direct3D9(Ex)?\d+CreateDevice(Ex)?E
+# ... or, in the native-render build (LINK_OVERRIDES=render; tests/s5/native_render.py), nx::Renderer came up with it
+# (toolchain/game/native_device.cpp from the device's CreateDevice)
+renderer-init  call   re:^_ZN2nx8Renderer4InitEPNS_7BackendEjjjj$
 # the archives: a file call on one of SArchiveList's archives, then every one of them opened
 archive-list   data   archive-list
 bsa-opened     data   bsa-opened
@@ -29,6 +32,9 @@ main-menu      call   0x007cb330
 main-menu      store  0x011daac0
 # a frame went to the screen: Present of the device or of a swap chain (null device or Nine proxy)
 first-frame    call   re:^_ZN\d+(Null_I|Px)Direct3D(Device|SwapChain)9(Ex)?\d+Present(Ex)?E
+# ... or the native renderer ended a frame (Do_EndFrame submits it with present; the engine's Present 0x00e7ccd0 is
+# replaced and never reaches the device)
+first-frame    call   re:^_ZN2nx8Renderer11Do_EndFrameEv$
 # the player is in a cell: g_thePlayer (units.json 0x011dea3c) -> TESObjectREFR::parentCell (+0x40, the decomp's
 # TESObjectREFR layout in tesobjectrefr.cpp)
 first-cell     store  *0x011dea3c+0x40

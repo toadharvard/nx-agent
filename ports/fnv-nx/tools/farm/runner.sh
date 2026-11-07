@@ -16,7 +16,8 @@
 # Warm farms (T1-fastbench; tools/farm/quick_job.sh):
 #   RUNNER_PERSIST=1   no exit after RUNNER_MAX_S, and FARM_DEADLINE is set per job (start + RUNNER_JOB_S, default
 #                      7200) instead of once per process; start it detached from the session's 2 h background limit
-#                      (setsid nohup ... &), and let the check-in start it again when it is gone
+#                      (setsid -w nohup ... &: -w, or under a shell with job control setsid forks and $! is a
+#                      parent that exits at once), and let the check-in start it again when it is gone
 #   RUNNER_POLL_S=<s>  seconds between looks at the integration head (default 60)
 #   RUNNER_CLAIM=<tag> farms sharing a tag split the heads: before a job, a farm pushes the branch
 #                      quick/claim/<tag>/<head12> of the artifacts repository with a commit of its own; a farm whose push
@@ -42,6 +43,7 @@ mkdir -p "$FARM_HOME"; LOG=$FARM_HOME/$NAME.log; LAST=$FARM_HOME/$NAME.last
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$LOG"; }
 exec 9>"$FARM_HOME/$NAME.lock"
 if ! flock -n 9; then log "runner $NAME is already running (lock $FARM_HOME/$NAME.lock): this start exits"; exit 0; fi
+echo $$ > "$FARM_HOME/$NAME.pid"   # the runner itself (a watcher's kill -0 target; the lock says it is alive)
 # qk<k> (the warm quick farms): persistent, a 20 s poll, claims shared under the tag "quick" (env still overrides)
 if [[ "$NAME" =~ ^qk[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}" "${RUNNER_CLAIM:=quick}"; fi
 PERSIST=${RUNNER_PERSIST:-0}; POLL=${RUNNER_POLL_S:-60}; CLAIM=${RUNNER_CLAIM:-}

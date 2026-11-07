@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -454,22 +455,25 @@ class Exe(unittest.TestCase):
 
     def test_exe_dtor_as_function(self):
         """A destructor the exe calls out of line at a function the decomp spells FUN_<addr>(T*) binds there
-        (natively both take the object in x0) instead of `= default`; one with two parameters does not."""
+        (natively both take the object in x0) instead of `= default`, as does one at an S4 provider's address; one with
+        two parameters does not."""
         import struct
-        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'               # call ??1Short; call ??1Long; ret
-        obj = coff({'?f@@YAXXZ': (f, {1: '??1Short@@QAE@XZ', 6: '??1Long@@QAE@XZ'})},
-                   ['??1Short@@QAE@XZ', '??1Long@@QAE@XZ'])
-        F, G, H = 0x401000, 0x401080, 0x4010c0
+        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xe8\0\0\0\0\xc3'   # call ??1Short; call ??1Long; call ??1Lock; ret
+        obj = coff({'?f@@YAXXZ': (f, {1: '??1Short@@QAE@XZ', 6: '??1Long@@QAE@XZ', 11: '??1Lock@@QAE@XZ'})},
+                   ['??1Short@@QAE@XZ', '??1Long@@QAE@XZ', '??1Lock@@QAE@XZ'])
+        F, G, H, P = 0x401000, 0x401080, 0x4010c0, 0x4010e0
         text = bytearray(0x100)
         text[0:len(f)] = f
         struct.pack_into('<i', text, 1, G - (F + 5))
         struct.pack_into('<i', text, 6, H - (F + 10))
+        struct.pack_into('<i', text, 11, P - (F + 15))                # an S4 provider implements P
         units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
             {'symbol': '?f@@YAXXZ', 'address': '%x' % F},
             {'symbol': '?FUN_00401080@@YIXPAX@Z', 'address': '%x' % G},          # void __fastcall (void*)
             {'symbol': '?FUN_004010c0@@YAXPAXH@Z', 'address': '%x' % H}]}]}     # void __cdecl (void*, int)
         rows = [bodies.Row('_ZN5ShortD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
-                bodies.Row('_ZN4LongD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp')]
+                bodies.Row('_ZN4LongD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
+                bodies.Row('_ZN4LockD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp')]
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
                 fo.write(obj)
@@ -481,11 +485,93 @@ class Exe(unittest.TestCase):
             ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
             it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
             it.need([r.name for r in rows])
-            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F', H: 'F'},
-                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms)
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F', H: 'F', P: 'F'},
+                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms,
+                                  {P: 'fnvnx_lock_dtor'})
         got = {r.name: r for r in got}
         self.assertEqual((got['_ZN5ShortD1Ev'].cls, got['_ZN5ShortD1Ev'].target), ('exe-addr', '__fnv_00401080'))
         self.assertEqual(got['_ZN4LongD1Ev'].cls, 'special-default')
+        self.assertEqual((got['_ZN4LockD1Ev'].cls, got['_ZN4LockD1Ev'].target), ('exe-addr', '__fnv_004010e0'))
+
+
+    def test_align_targets(self):
+        """Call-order alignment: P (placed) calls the unplaced helper C, which MSVC inlined in the exe, then K
+        (placed). C calls M, which no placed function calls: the exe's P calls M's address where C's call stood."""
+        import struct
+        p = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'                 # call ?C; call ?K; ret
+        c_ = b'\xe8\0\0\0\0\xc3'                                  # call ?M; ret
+        obj = coff({'?P@@YAXXZ': (p, {1: '?C@@YAXXZ', 6: '?K@@YAXXZ'}), '?C@@YAXXZ': (c_, {1: '?M@@YAXXZ'})},
+                   ['?K@@YAXXZ', '?M@@YAXXZ'])
+        P, K, M, Q = 0x401000, 0x401080, 0x4010c0, 0x401100
+        text = bytearray(0x200)
+        ins = b'\x90\x90\xe8\0\0\0\0\x90\xe8\0\0\0\0\xc3'      # the exe's P: C inlined (with M's call)
+        text[0:len(ins)] = ins
+        struct.pack_into('<i', text, 3, M - (P + 7))
+        struct.pack_into('<i', text, 9, K - (P + 13))
+        udata = [{'source': 'src/a.cpp', 'functions': [{'symbol': '?P@@YAXXZ', 'address': '%x' % P},
+                                                       {'symbol': '?Q@@YAXXZ', 'address': '%x' % Q},
+                                                       {'symbol': '?K@@YAXXZ', 'address': '%x' % K}],
+                  'symbols': {}}]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            exe = bodies.Pe(os.path.join(d, 'x.exe'))
+            got = bodies.align_targets(d, udata, exe, {'?M@@YAXXZ'})
+            self.assertEqual({k: dict(v) for k, v in got.items()}, {'?M@@YAXXZ': {M: 1}})
+            struct.pack_into('<i', text, 9, 0x401140 - (P + 13))         # the anchor K no longer matches
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            got = bodies.align_targets(d, udata, bodies.Pe(os.path.join(d, 'x.exe')), {'?M@@YAXXZ'})
+            self.assertEqual(dict(got), {})
+
+
+    def test_exe_sret(self):
+        """The exe calls X::Scale(V*, float) where MSVC called V V::operator*(float) const: the hidden return
+        pointer written out. -> exe-sret, and the adapter line compiles to the wanted symbol (V trivially copyable and destructible only)."""
+        import struct
+        f = b'\xe8\0\0\0\0\xc3'
+        obj = coff({'?f@@YAXXZ': (f, {1: '??DV@@QBE?AU0@M@Z'})}, ['??DV@@QBE?AU0@M@Z'])
+        F, G = 0x401000, 0x401080
+        text = bytearray(0x100)
+        text[0:len(f)] = f
+        struct.pack_into('<i', text, 1, G - (F + 5))
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '?f@@YAXXZ', 'address': '%x' % F},
+            {'symbol': '?Scale@X@@QAEXPAUV@@M@Z', 'address': '%x' % G}]}]}     # void X::Scale(V*, float)
+        rows = [bodies.Row('_ZNK1VmlEf', 'missing', None, None, 'src/a.cpp', 'no definition', None)]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as fo:
+                json.dump(units_j, fo)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
+            it.need([r.name for r in rows])
+            itan = (lambda n: sigs.parse_itanium(n, it[n]))
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F'},
+                                  itan, lambda n: sigs.parse_msvc(n, ms[n]), ms)
+            r = got[0]
+            self.assertEqual((r.cls, r.addr, r.host), ('exe-sret', G, 'src/a.cpp'))
+            self.assertTrue(r.note.startswith('sret this'))
+            line = bodies.sret_line(itan(r.name), G, True)
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                for v, ok in (('struct V { float x, y, z; V operator*(float) const; };', True),
+                              ('struct V { V(); float x, y, z; V operator*(float) const; };', True),
+                              ('struct V { ~V(); float x, y, z; V operator*(float) const; };', False)):
+                    src = os.path.join(d, 's.cpp')
+                    open(src, 'w').write(v + '\n' + line + '\n')
+                    p = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 's.o')], capture_output=True, text=True)
+                    self.assertEqual(p.returncode == 0, ok, p.stderr[-400:])
+                    if ok:
+                        nm = subprocess.run(['nm', os.path.join(d, 's.o')], capture_output=True, text=True).stdout
+                        self.assertIn('T _ZNK1VmlEf', nm)
+                        self.assertIn('U __fnv_00401080', nm)
 
 
     def test_exe_address_taken(self):
@@ -530,6 +616,76 @@ class Exe(unittest.TestCase):
             self.assertEqual(dict(bodies.exe_call_targets(*args)), {})
             got = bodies.exe_call_targets(*args, search=True)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}})
+
+    def test_exe_data(self):
+        """exe-data: a placeholder variable's address taken in placed code (mov ecx, offset ?g_mm) binds to the exe's
+        word there; a variant body with another stack offset is placed by shape (loose), a ??_G by the vftable slot
+        the unit's recipe names; a C function placeholder called from placed code (REL32) and a variable whose sites
+        disagree do not bind."""
+        import struct
+        f = b'\x55\x8b\xec\x8b\x45\x08\xb9\0\0\0\0\x50\xe8\0\0\0\0\x5d\xc3'   # mov eax,[ebp+8]; mov ecx, offset g_mm
+        v = bytearray(f)
+        v[5] = 0x0c                                               # the exe's copy: mov eax, [ebp+0xc]
+        gd = b'\x56\x8b\xf1\xb9\0\0\0\0\xe8\0\0\0\0\x8b\xc6\x5e\xc2\x04\x00'      # ??_G: mov ecx, offset g_mm2
+        st = b'\x55\x8b\xec\xe8\0\0\0\0\x50\xe8\0\0\0\0\x5d\xc3'                # call _stub_a; push eax; call
+        two = b'\x55\x8b\xec\xa1\0\0\0\0\x5d\xc3' + b'\x90' * 8              # mov eax, [g_two]
+        obj = coff({'?f@@YAXXZ': (bytes(v), {7: ('?g_mm@@3UMM@@A', 0x06), 13: '?Free@MM@@QAEXPAX@Z'}),
+                    '??_GC@@UAEPAXI@Z': (gd, {4: ('?g_mm2@@3UMM@@A', 0x06), 9: '?Free@MM@@QAEXPAX@Z'}),
+                    '?s@@YAXXZ': (st, {4: '_stub_a', 10: '?Free@MM@@QAEXPAX@Z'}),
+                    '?t@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)}), '?t2@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)})},
+                   ['?g_mm@@3UMM@@A', '?g_mm2@@3UMM@@A', '?Free@MM@@QAEXPAX@Z', '_stub_a', '?g_two@@3HA'])
+        F, GD, S, T, T2, VFT, FREE, STUB = 0x401000, 0x401040, 0x401080, 0x4010c0, 0x4010e0, 0x401100, 0x401140, 0x401180
+        MM, TWO = 0x5f6238, 0x5f7000
+        text = bytearray(b'\xcc' * 0x200)
+        text[0:len(f)] = f
+        struct.pack_into('<I', text, 7, MM)
+        struct.pack_into('<i', text, 13, FREE - (F + 17))
+        for at in (0x40, 0x1c0):   # the second copy (another class's ??_G): the content search finds two
+            text[at:at + len(gd)] = gd
+            struct.pack_into('<I', text, at + 4, MM)
+            struct.pack_into('<i', text, at + 9, FREE - (0x401000 + at + 13))
+        self.assertIsNone(bodies.Pe.find_unique(types.SimpleNamespace(code=[(0x401000, 0, 0x200)], data=bytes(text)),
+                                                gd, set(range(4, 8)) | set(range(9, 13))))
+        text[0x80:0x80 + len(st)] = st
+        struct.pack_into('<i', text, 0x84, STUB - (S + 8))
+        struct.pack_into('<i', text, 0x8a, FREE - (S + 14))
+        for at, word in ((0xc0, TWO), (0xe0, TWO + 4)):
+            text[at:at + len(two)] = two
+            struct.pack_into('<I', text, at + 4, word)
+        struct.pack_into('<II', text, 0x100, GD, F)           # the image vftable of C: ??_G, then another slot
+        text[0x140] = text[0x180] = 0xc3
+        udata = [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '?f@@YAXXZ', 'address': '%x' % F}, {'symbol': '?s@@YAXXZ', 'address': '%x' % S},
+            {'symbol': '?t@@YAXXZ', 'address': '%x' % T}, {'symbol': '?t2@@YAXXZ', 'address': '%x' % T2}],
+            'symbols': {'??_7C@@6B@': '%x' % VFT}}]
+        self.assertTrue(bodies.same_shape(bytes(v), f))
+        self.assertFalse(bodies.same_shape(b'\x8b\x45\x08\xc3', b'\x8b\x4d\x08\xc3'))   # another register
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            exe = bodies.Pe(os.path.join(d, 'x.exe'))
+            strict = bodies.exe_call_targets(d, 0, udata[0], {'?g_mm@@3UMM@@A'}, exe, search=True)
+            self.assertEqual(dict(strict), {})                        # bytes differ: not placed without loose
+            cn = {'g_mm': {'src/b.cpp'}, 'g_mm2': {'src/b.cpp'}, 'stub_a': {'src/b.cpp'}, 'g_two': {'src/b.cpp'}}
+            rows = bodies.exe_data_pass(cn, os.path.join(d, 'x.exe'), d, udata, lambda a: a >= 0x500000)
+        self.assertEqual({(r.name, r.cls, r.addr, r.target) for r in rows},
+                         {('g_mm', 'exe-data', MM, '__fnv_005f6238'), ('g_mm2', 'exe-data', MM, '__fnv_005f6238')})
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\tg_mm\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp#bodies1\tg_sink_00401000\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\t_ZN1A1fEv\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\tg_ok\tdata\tunit/cname\t005f0000\t__fnv_005f0000\t\n')
+            self.assertEqual(bodies.load_cnames(refs), {'g_mm': {'src/a.cpp'}, 'g_sink_00401000': {'src/a.cpp'}})
+        bind = {'g_mm': ('body-exe-data', '__fnv_005f6238'), '_ZN1A1fEv': ('body-addr', '__fnv_00401000')}
+        self.assertEqual(fnvlink.body_data_addr(bind, 'g_mm'), MM)
+        self.assertIsNone(fnvlink.body_data_addr(bind, '_ZN1A1fEv'))
+        self.assertIsNone(fnvlink.body_data_addr(bind, 'g_none'))
+        with open(fnvlink.__file__) as fo:   # resolve binds it like an address (data, IAT slot, TLS)
+            self.assertIn("cls, tier, addr, target = 'addr', 'body/exe-data', body_data_addr(body_bind, un), None",
+                          fo.read())
 
     def test_crt_rule(self):
         """The MSVC STL throwers of the decomp's copies throw through libstdc++; a class placement delete is a
@@ -617,6 +773,155 @@ class Fold(unittest.TestCase):
                 self.assertEqual((r.cls, r.target), ('template-fold', '__fnv_' + a), n)
             else:
                 self.assertNotEqual(r.cls, 'template-fold', n)
+
+
+
+class Thunks(unittest.TestCase):
+    def test_thunks(self):
+        """Thunk names parse to (this adjustment, vcall offset, target); refs.tsv's undefined thunks load; the stubs
+        assemble (ILP32) and branch to the target by name."""
+        self.assertEqual(bodies.thunk_parts('_ZThn24_N3Own3FunEv'), (-24, None, '_ZN3Own3FunEv'))
+        self.assertEqual(bodies.thunk_parts('_ZTh8_N1A1gEv'), (8, None, '_ZN1A1gEv'))
+        self.assertEqual(bodies.thunk_parts('_ZTv0_n12_N1A1fEv'), (0, 12, '_ZN1A1fEv'))
+        self.assertIsNone(bodies.thunk_parts('_ZN1A1fEv'))
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\t_ZThn24_N3Own3FunEv\tspecial-unresolved:non-virtual-thunk-to\t\t\t\t\n'
+                                  'src/b.cpp#x\t_ZTv0_n12_N1A1fEv\tspecial-unresolved:virtual-thunk-to\t\t\t\t\n'
+                                  'src/a.cpp\t_ZTV1A\tspecial-unresolved:vtable-for\t\t\t\t\n')
+            got = bodies.load_thunks(refs)
+            self.assertEqual(got, {'_ZThn24_N3Own3FunEv': {'src/a.cpp'}, '_ZTv0_n12_N1A1fEv': {'src/b.cpp'}})
+            asm = bodies.emit_thunks(got)
+            self.assertIn('    sub w0, w0, #24\n    b "_ZN3Own3FunEv"', asm)
+            as_ = shutil.which('aarch64-linux-gnu-as')
+            if as_:
+                open(os.path.join(d, 't.S'), 'w').write(asm)
+                r = subprocess.run([as_, '-mabi=ilp32', os.path.join(d, 't.S'), '-o', os.path.join(d, 't.o')],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+
+
+class AddrHost(unittest.TestCase):
+    def test_gdel_line_and_stubs(self):
+        """code-defmissing rows load by address; a ??_G line destroys / deletes like MSVC's and compiles to
+        __fnv_<addr>; a template class is refused; the stub branches to the emitted symbol."""
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\t_ZN1X1fEi\tcode-defmissing\tunit/exact\t004459e0\t__fnv_004459e0\t?f@X@@QAEHH@Z\n'
+                                  'src/b.cpp#bd\t_ZN1Y1fEi\tcode-defmissing\tunit/exact\t004459e0\t__fnv_004459e0\t\n'
+                                  'src/a.cpp\t_ZN1Z1fEv\tcode\tunit/exact\t00401000\t__fnv_00401000\t\n')
+            self.assertEqual(bodies.load_defmissing(refs), {0x004459e0: {'src/a.cpp', 'src/b.cpp'}})
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            names = ['??_GRec@@QAEPAXI@Z', '??_G?$L@H@@QAEPAXI@Z']
+            ms.need(names)
+            line = bodies.gdel_line(0x004459e0, sigs.parse_msvc(names[0], ms[names[0]]))
+            self.assertIn('extern "C" void *__fnv_004459e0(::Rec *p, unsigned int f)', line)
+            self.assertIn('if (f & 1) delete p; else p->::Rec::~Rec();', line)
+            self.assertIsNone(bodies.gdel_line(0x00401000, sigs.parse_msvc(names[1], ms[names[1]])))
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                src = os.path.join(d, 'g.cpp')
+                open(src, 'w').write('struct Rec { int k; ~Rec(); };\n' + line + '\n')
+                r = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 'g.o')], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-400:])
+                nm = subprocess.run(['nm', os.path.join(d, 'g.o')], capture_output=True, text=True).stdout
+                self.assertIn('T __fnv_004459e0', nm)
+            asm = bodies.emit_addr_stubs({0x0046ffd0: '_ZNK7NiPoint2mlEf', 0x004459e0: '__fnv_004459e0'})
+            self.assertIn('"__fnv_0046ffd0":\n    b "_ZNK7NiPoint2mlEf"', asm)
+            self.assertNotIn('"__fnv_004459e0":', asm)
+
+
+
+class DeclData(unittest.TestCase):
+    def test_data_line(self):
+        """A global, a namespace or class member get a typed zero definition; a template member does not;
+        refs.tsv's unresolved C names load except address-named ones and mangled names."""
+        self.assertEqual(bodies.data_line(['g_count']), 'decltype(g_count) g_count {};')
+        self.assertEqual(bodies.data_line(['C', 's_n']), 'decltype(C::s_n) C::s_n {};')
+        self.assertIsNone(bodies.data_line(['L<int>', 's_n']))
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\twblk_u\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\tFUN_00401000\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\t_ZN1A1fEv\tunresolved\t\t\t\t\n'
+                                  'src/b.cpp\twblk_u\tunresolved\t\t\t\t\n')
+            self.assertEqual(bodies.load_cdata(refs), {'wblk_u': {'src/a.cpp', 'src/b.cpp'}})
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                src = os.path.join(d, 'd.cpp')
+                open(src, 'w').write('extern float wblk_u[4]; struct C { static int s_n; };\n' +
+                                     bodies.data_line(['wblk_u']) + '\n' + bodies.data_line(['C', 's_n']) + '\n')
+                r = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 'd.o')], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-400:])
+                nm = subprocess.run(['nm', '-S', os.path.join(d, 'd.o')], capture_output=True, text=True).stdout
+                self.assertRegex(nm, r'00000010 B wblk_u')
+
+
+
+class Sigs(unittest.TestCase):
+    def test_conversion_to_pointer_and_unary_star(self):
+        """MSVC and Itanium spellings of a conversion operator to a namespaced pointer type and of a unary operator*
+        give the same exact key (R6: 82 names left unresolved on link 9f865b0a)."""
+        pairs = [('??BSpherePtr@fnv_009614b0@@QBEPAUSphere@1@XZ', '_ZNK12fnv_009614b09SpherePtrcvPNS_6SphereEEv'),
+                 ('??DMatView@@QAEAAMXZ', '_ZN7MatViewdeEv')]
+        ms = fnvlink.batch_demangle(fnvlink.UNDNAME, [m for m, _ in pairs])
+        it = fnvlink.batch_demangle(fnvlink.CXXFILT, [i for _, i in pairs])
+        for m, i in pairs:
+            a, b = sigs.parse_msvc(m, ms[m]), sigs.parse_itanium(i, it[i])
+            self.assertEqual((a.kind, b.kind), ('func', 'func'), m)
+            self.assertTrue({k for t, k in a.keys() if t == 'exact'} & {k for t, k in b.keys() if t == 'exact'}, m)
+
+
+class LinkShape(unittest.TestCase):
+    """R2 recon2-005: a name units.json maps to an address defined under another MSVC shape (synthetic names)."""
+
+    def setUp(self):
+        self.ms_names = ['??BHandle@@QBEPAUObj@@XZ',      # Obj* Handle::operator Obj*() const (thiscall)
+                         '?FUN_00501000@@YIHPAH@Z',       # int __fastcall FUN_00501000(int*)
+                         '?Get@Handle@@QAEPAUObj@@H@Z',   # Obj* Handle::Get(int) (thiscall, one stack word)
+                         '??RFunctor@@QAEXPAX@Z',         # void Functor::operator()(void*)
+                         '??_EBox@@QAEPAXI@Z',            # Box::`vector deleting dtor'(unsigned)
+                         '?f@@YAP6AXXZH@Z']               # void (*f(int))(void)
+        self.dm = fnvlink.batch_demangle(fnvlink.UNDNAME, self.ms_names)
+        self.di = fnvlink.batch_demangle(fnvlink.CXXFILT, ['_ZN7FunctorclEPv', '_ZN3Box12__vecDelDtorEj',
+                                                           '_ZN3Box7__otherEj'])
+
+    def ms(self, n):
+        return sigs.parse_msvc(n, self.dm[n])
+
+    def it(self, n):
+        return sigs.parse_itanium(n, self.di[n])
+
+    def test_register_compatible_shapes_are_same(self):
+        """thiscall `this` in ecx against a fastcall first argument in ecx: x0 on AArch64 on both sides, an integer
+        or pointer result in eax / x0 -> no bridge; a reference that also pushes a stack word stays x86-inconsistent."""
+        import abi
+        d = self.ms('?FUN_00501000@@YIHPAH@Z')
+        self.assertEqual(abi.compare(self.ms('??BHandle@@QBEPAUObj@@XZ'), d).kind, 'same')
+        v = abi.compare(self.ms('?Get@Handle@@QAEPAUObj@@H@Z'), d)
+        self.assertEqual(v.kind, 'x86-inconsistent')
+        self.assertIn('pop-mismatch', v.classes)
+
+    def test_call_operator_parses(self):
+        """`X::operator()` ends in ')' and is not a function returning a function pointer: it parses and pairs."""
+        m, i = self.ms('??RFunctor@@QAEXPAX@Z'), self.it('_ZN7FunctorclEPv')
+        self.assertEqual((m.kind, m.qual, m.params, m.cc), ('func', ['Functor', 'operator()'], ['void *'], 'thiscall'))
+        self.assertTrue({k for t, k in m.keys() if t == 'exact'} & {k for t, k in i.keys() if t == 'exact'})
+        self.assertNotEqual(self.ms('?f@@YAP6AXXZH@Z').kind, 'func')
+
+    def test_vec_del_dtor_member_binds_to_vdd(self):
+        """A decomp member named `__vecDelDtor` is MSVC's `??_E`: classify_ref finds its address in the unit; another
+        member name of the class does not."""
+        idx = fnvlink.KeyIndex()
+        idx.add(self.ms('??_EBox@@QAEPAXI@Z'), 0x00502000)
+        r = fnvlink.classify_ref('_ZN3Box12__vecDelDtorEj', self.it('_ZN3Box12__vecDelDtorEj'), idx,
+                                 fnvlink.KeyIndex(), fnvlink.KeyIndex(), set(), self.ms)
+        self.assertEqual(r[:3], ('addr', 'unit/exact', 0x00502000))
+        self.assertEqual(r[4], '??_EBox@@QAEPAXI@Z')
+        r = fnvlink.classify_ref('_ZN3Box7__otherEj', self.it('_ZN3Box7__otherEj'), idx,
+                                 fnvlink.KeyIndex(), fnvlink.KeyIndex(), set(), self.ms)
+        self.assertEqual(r[0], 'unresolved')
 
 
 if __name__ == '__main__':

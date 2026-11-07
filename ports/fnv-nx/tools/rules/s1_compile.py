@@ -108,7 +108,7 @@ def r_if_exists(path, text, stats):
     """IFX1: resolve __if_exists / __if_not_exists statically (see above); the kept body replaces the construct,
     line breaks are preserved."""
     if '__if_' not in text: return text
-    root, pos = _roots(path), 0
+    root, pos, sse = _roots(path), 0, False
     while True:
         m = IFX_HEAD.search(text, pos)
         if not m: break
@@ -118,6 +118,9 @@ def r_if_exists(path, text, stats):
         class_view = '\n'.join(p[0] for p in parts)
         name_view = '\n'.join(p[1] for p in parts)
         keep = _exists(m.group(2), class_view, name_view, sys_headers) != bool(m.group(1))
+        # IFX1-SSE: a declaration dropped because the target's sse2neon has the name: say where it comes from
+        sse = sse or (bool(m.group(1)) and not keep and re.match(r'\s*(?:__m128[id]?|__m64|_mm_\w+|_MM_\w+)\s*$',
+                                                                  m.group(2)) is not None)
         head, body = text[m.start():m.end()], text[m.end():end - 1]
         nl = lambda s: '\n' * s.count('\n')
         if keep:
@@ -127,6 +130,9 @@ def r_if_exists(path, text, stats):
         text = text[:m.start()] + repl + text[end:]
         pos = m.start() + 1
         stats['IFX1'] += 1
+    if sse:
+        stats['IFX1-SSE'] += 1
+        text = '#include "fnvnx_target_sse.h" /* fnv-nx IFX1 */\n' + text
     return text
 
 # ---------------------------------------------------------------------------------------------------------- SAL1
@@ -2934,14 +2940,16 @@ def _fits_int(body):
     return True
 
 def r_opaque_enums(path, text, stats):
-    """ENUM1: `enum X;` -> `enum X : int;`, and `enum X {` -> `enum X : int {` for those names (see above)."""
+    """ENUM1: `enum X;` -> `enum X FNVNX_ENUM_INT;`, and `enum X {` -> `enum X : int {` for those names (see above).
+    FNVNX_ENUM_INT is `: int` (fnvnx_compat.h); in the S11 gate it is empty: MSVC 2008 has no opaque declaration,
+    and its own forward declaration `enum X;` is the same type, underlying int (ENUM1-FWD)."""
     if 'enum' not in text: return text
     names = _opaque_enum_names(path)
     if not names: return text
     def decl(m):
         if m.group(2) not in names: return m.group(0)
         stats['ENUM1'] += 1
-        return m.group(1) + ' : int' + m.group(3)
+        return m.group(1) + ' FNVNX_ENUM_INT' + m.group(3)
     def defn(m):
         if m.group(1) not in names: return m.group(0)
         if not _fits_int(text[m.end():text.find('}', m.end())]): return m.group(0)   # int cannot hold it: as it was
@@ -3388,6 +3396,45 @@ def _all_unit_functions(path):
         _ALL_FUNCTIONS = set().union(*(fs for _, fs in _UNIT_INFO.values())) if _UNIT_INFO else set()
     return _ALL_FUNCTIONS
 
+# The tag of a definition: `// @fnv 0x<a>` above its head, with only blank, comment and preprocessor lines (the
+# unit's `#pragma optimize`) and type declarations in between: `template <class T> struct L;`, or a whole
+# `template <> struct M<void*> { static void __cdecl F(void**); };` (one level of nested braces). The head may span
+# lines (a return type over two lines, `static void __declspec(noinline)` above the name): STAND_DEF matches from its
+# last line. Seen as untagged, a tagged definition whose own name the unit binds to its address was dropped as its own
+# stand-in (R6: 0x004ab230 BipedAnim::GetBoneNode, 0x0087ce70, 0x00660400, 0x00a8a200; R1: 0x0046ffd0).
+STAND_TAG = re.compile(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n')
+STAND_GAP_ITEM = re.compile(r'\s+|//[^\n]*|/\*.*?\*/|#[^\n]*|(?:template\s*<[^;{}]*>\s*)?(?:struct|class|union|enum)\s+'
+                            r'[\w:<>, \t*]+?\s*(?::[^;{}]*)?(?:;|\{(?:[^{}]|\{[^{}]*\})*\}\s*;)', re.S)
+
+def _stand_head(text, at, lines=3):
+    """Start of the line where the head of the definition matched at `at` begins: up to `lines` lines above, while
+    the line above is part of a declaration (not blank, a comment, a preprocessor line or the end of a statement)."""
+    start = text.rfind('\n', 0, at) + 1
+    for _ in range(lines):
+        if start == 0: break
+        ls = text.rfind('\n', 0, start - 1) + 1
+        prev = text[ls:start].strip()
+        if not prev or prev.startswith(('#', '//', '/*')) or prev.endswith((';', '}', '{', '*/')): break
+        start = ls
+    return start
+
+def _stand_gap_only(gap):
+    """gap holds only what may sit between a tag and its definition (STAND_GAP_ITEM)."""
+    i = 0
+    while i < len(gap):
+        m = STAND_GAP_ITEM.match(gap, i)
+        if not m or m.end() == i: return False
+        i = m.end()
+    return True
+
+def _stand_tagged(text, at):
+    """The definition whose head STAND_DEF matched at `at` carries its own `@fnv` tag (see above)."""
+    for h in sorted({_stand_head(text, at), text.rfind('\n', 0, at) + 1, at}):
+        window = text[max(0, h - 2000):h]
+        tags = list(STAND_TAG.finditer(window))
+        if tags and _stand_gap_only(window[tags[-1].end():]): return True
+    return False
+
 def r_stand_in_definitions(path, text, stats):
     """STAND1: drop untagged definitions bound to the address of a tagged definition in the same unit (see above)."""
     return _stand_ins(path, text, stats, 'STAND1')
@@ -3413,8 +3460,7 @@ def _stand_ins(path, text, stats, which):
         parts = q.split('::')
         if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS: continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', m.group(1) or ''): continue
-        before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
         if any(k != 'namespace' for k, _ in chain): continue
@@ -3470,6 +3516,17 @@ def _stand_ins(path, text, stats, which):
 # call is a call of the decorated name that the link binds. Same gates as STAND1 (an address tagged in the unit) or
 # STAND2 (an address only other units define, in a unit without /O1 /O2 /Ox /Ob2), for an untagged free function at
 # namespace scope; not inline, not a template, not overloaded in the unit (one definition of the name).
+#
+# An overload is converted too when every spelling of the name binds one address that the unit tags and the unit
+# has no other `static` declaration of the name (R6 class 5): hkpworldoperationutil.cpp tags its static
+# FindItemForThreshold at 0x00cb3d10 and defines a second static FindItemForThreshold(S00cb5100_World*, ...) that
+# calls `pick`, which MSVC called as 0x00cb3d10 too (both spellings bound there). Such an overload's head may carry
+# `__declspec(noinline)` (STAND4_DEF); a single static noinline definition stays (S5's register-allocation
+# stand-ins).
+
+STAND4_DEF = re.compile(r'^[ \t]*((?:(?:__declspec\s*\(\s*\w+\s*\)|[\w:<>,\*&]+)[ \t\*&]+)*?)'
+                        r'((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
+                        r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?::[^;{}]*)?\{', re.M)
 
 def r_static_stand_ins(path, text, stats):
     """STAND4: a static free stand-in bound to a decompiled address becomes an extern declaration (above)."""
@@ -3481,18 +3538,24 @@ def r_static_stand_ins(path, text, stats):
     elsewhere = set() if info is None or set(info[0]) & STAND2_INLINING_FLAGS else _all_unit_functions(path) - info[1]
     spans, edits, names = None, [], collections.Counter()
     defs = []
-    for m in STAND_DEF.finditer(text):
+    names0 = collections.Counter()   # the definitions STAND_DEF sees (heads without __declspec)
+    for m in STAND4_DEF.finditer(text):
         q = re.sub(r'\s+', '', m.group(2))
         if '::' in q or q in NOT_FUNCTIONS or q in CXX_KEYWORDS: continue
         names[q] += 1
+        names0[q] += '__declspec' not in (m.group(1) or '')
         defs.append((m, q))
     for m, name in defs:
         lead = m.group(1) or ''
-        if names[name] != 1 or not re.search(r'\bstatic\b', lead): continue
+        if not re.search(r'\bstatic\b', lead): continue
+        single = names0[name] == 1 and '__declspec' not in lead   # the rule as it was
+        overload = not single and names[name] != 1
+        if not single and not overload: continue   # S5's single static noinline stand-ins: not this rule's
+        if overload and re.search(r'(?m)^[ \t]*static\s+[^;{}()]*\b%s\s*\([^;{}]*\)\s*;' % re.escape(name), text): continue
         if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
         before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
@@ -3502,7 +3565,7 @@ def r_static_stand_ins(path, text, stats):
         prefix = '?' + '@'.join([name] + list(reversed(ns))) + '@@'
         bound = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
         if not bound or len(bound) != 1: continue
-        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged)): continue
+        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged and single)): continue
         o = m.end() - 1
         c = prepare.match_brace(text, o)
         start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
@@ -3626,7 +3689,7 @@ def r_inline_stand_ins(path, text, stats):
         if re.match(r'\s*(?:return|else|case|new|delete|throw|goto)\b', lead): continue
         if re.search(r'\b(?:virtual|static|template|__forceinline|FNV_FORCEINLINE|constexpr)\b', lead): continue
         before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
@@ -4773,7 +4836,11 @@ def r_forceinline_declarations(path, text, stats):
         cls, body = None, ''
         if inner is not None:
             if inner[2] != 'class': continue                         # a declaration inside a function or namespace
-            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', inner[3] or '')
+            head = re.sub(r'\btemplate\s*<[^{};]*?>\s*(?=(?:class|struct|union)\b)', ' ', inner[3] or '')
+            # the class's own name, not a template parameter's (`template <class KEYD3, ...> class DispatchUtilD3`:
+            # hkpbvtreeagent, hkgpmesh lost the keyword on members their units define out of class)
+            # `struct __declspec(align(16)) BigSolver`: the declspec's own parentheses nest (hkgpmesh 0x00e1f4e0)
+            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)', head)
             if not hm: continue
             cls, body = hm.group(1), text[inner[0]:inner[1]]
             if name.lstrip('~') != name and name[1:] != cls: continue
@@ -4854,10 +4921,16 @@ def r_vfptr_empty_base(path, text, stats):
 # private artifacts repository (fnv-nx-build branch recon/<unit>), never here. REC1 applies what a prepare run is
 # given: FNVNX_RECON names a directory holding recon.json files (one per recon, in subdirectories or at its top):
 #   {"format": "fnvnx-recon/1", "unit": <source>, "decomp_commit": <sha>, "append": <file next to recon.json>,
-#    "functions": [{address, symbol, size}], "symbols": {decorated name: address}}
+#    "functions": [{address, symbol, size}], "symbols": {decorated name: address},
+#    "replace": [{"old": <exact text>, "new": <text>}]}
 # The text rule appends the body to its unit; the POST hook add_recon_definitions adds the functions and symbols to
 # the prepared build/units.json. A recon whose decomp_commit is not the checkout's, or whose addresses a unit already
 # defines, is skipped (REC1-STALE / REC1-DUP). Without FNVNX_RECON (or with no recon in it) REC1 does nothing.
+# REC1-REPL (orchestrator, R1): `replace` edits code the unit already has, where an appended body cannot help (a
+# filler the unit's own calls bind to, a declaration whose arguments sit on the wrong call, an in-class body that is
+# not the exe's). Each pair is applied in order, before the append, to the text the rule receives; every `old` must
+# occur exactly once there, else the prepare fails (RuntimeError naming the recon and the pair): a recon written
+# for other text must never half-apply.
 
 def _recon_entries(path):
     """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
@@ -4886,7 +4959,9 @@ def _recon_entries(path):
             r = json.load(open(f))
         except (OSError, ValueError):
             continue
-        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not r.get('append'): continue
+        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not (r.get('append') or r.get('symbols')
+                                                                             or r.get('replace')):
+            continue   # a recon with only `symbols` binds names to the exe's functions and adds no body
         if head and r.get('decomp_commit') and r['decomp_commit'] != head:
             r['_skip'] = 'REC1-STALE'
         elif any(fn.get('address') in defined for fn in r.get('functions', [])):
@@ -4906,10 +4981,21 @@ def r_recon_bodies(path, text, stats):
         if r['unit'] != src: continue
         if r.get('_skip'):
             stats[r['_skip']] += 1; continue
-        body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
-        text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
-        if not text.endswith('\n'): text += '\n'
-        stats['REC1'] += len(r.get('functions', []))
+        for k, e in enumerate(r.get('replace') or []):
+            old, new = e.get('old'), e.get('new')
+            if not isinstance(old, str) or not old or not isinstance(new, str):
+                raise RuntimeError('REC1-REPL: %s: replace[%d] needs a non-empty "old" and a "new" string' % (d, k))
+            c = text.count(old)
+            if c != 1:
+                raise RuntimeError('REC1-REPL: %s (%s): replace[%d] "old" occurs %d times, not once: %r'
+                                   % (d, src, k, c, old[:120]))
+            text = text.replace(old, new)
+            stats['REC1-REPL'] += 1
+        if r.get('append'):
+            body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
+            text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
+            if not text.endswith('\n'): text += '\n'
+            stats['REC1'] += len(r.get('functions', []))
         r['_applied'] = True
     return text
 
@@ -4921,7 +5007,7 @@ def add_recon_definitions(out_root, stats, files=None):
     p = os.path.join(out_root, 'build', 'units.json')
     if not os.path.exists(p): return
     data = json.load(open(p))
-    n = 0
+    n = m = 0
     for r, _ in _RECON:
         if not r.get('_applied'): continue
         for u in data['units']:
@@ -4931,9 +5017,12 @@ def add_recon_definitions(out_root, stats, files=None):
                 if fn['address'] not in have:
                     u['functions'].append(dict(fn)); n += 1
             for k, v in r.get('symbols', {}).items():
-                u.setdefault('symbols', {}).setdefault(k, v)
-    if n:
+                if k not in u.setdefault('symbols', {}):
+                    u['symbols'][k] = v; m += 1
+    if n or m:   # symbols persist on their own: a recon may only bind names to the exe's functions (R1: the Havok
+        # agents DCD6A0Agent1..9, compared by address in FUN_00dcd4d0, must bind to the exe and get no body)
         stats['REC1-DEF'] += n
+        stats['REC1-SYM'] += m
         json.dump(data, open(p, 'w'))
         if files is not None: files['REC1-DEF'] += 1
 

@@ -11,8 +11,9 @@ fixed-width, the scan is exact for code and conservative for data placed in text
            and hbloader's grant "all" (the kernel or sm refuse them to an application on retail, or they are a bug);
   insn     nothing that traps at EL0 on Horizon: hvc, smc, eret, hlt, wfi, msr DAIF*/SPSel and other PSTATE writes,
            SYS ops except dc zva/cvac/cvau/civac/cvap and ic ivau, system registers except nzcv, fpcr, fpsr,
-           tpidr_el0, tpidrro_el0 (read), dczid_el0, cntfrq_el0 and cntpct_el0 (read). cntvct_el0 and ctr_el0 are
-           refused too: Mesosphere does not open them to EL0 (CNTKCTL_EL1.EL0VCTEN, SCTLR_EL1.UCT);
+           tpidr_el0, tpidrro_el0 (read), dczid_el0, cntfrq_el0, cntpct_el0 and ctr_el0 (read: Mesosphere's
+           SCTLR_EL1 0x34D5D92D sets UCT, bit 15, kern_init_loader.cpp). cntvct_el0 is refused: Mesosphere does not
+           open it to EL0 (CNTKCTL_EL1.EL0VCTEN);
            brk is counted (trap stubs), not refused: it ends in the crash handler with a log;
            nothing newer than ARMv8.0 (the A57 implements ARMv8.0 + CRC + crypto only): LSE atomics (ldadd/cas/swp...),
            LOR, RCpc (ldapr/ldapur), RDM, FP16 arithmetic (scalar and vector; fcvt to/from half is v8.0), DotProd,
@@ -102,6 +103,9 @@ SYSREG_OK = {
     (3, 3, 4, 2, 0): "nzcv", (3, 3, 4, 4, 0): "fpcr", (3, 3, 4, 4, 1): "fpsr", (3, 3, 13, 0, 2): "tpidr_el0",
     (3, 3, 13, 0, 3): "tpidrro_el0", (3, 3, 0, 0, 7): "dczid_el0", (3, 3, 14, 0, 0): "cntfrq_el0",
     (3, 3, 14, 0, 1): "cntpct_el0",
+    # ctr_el0 (read): Mesosphere's SCTLR_EL1 = 0x34D5D92D (kernel_ldr/source/kern_init_loader.cpp SctlrValue) has UCT
+    # (bit 15) set, so EL0 reads of CTR_EL0 do not trap; libnx's armDCacheFlush (deko3d's flushes) reads it
+    (3, 3, 0, 0, 1): "ctr_el0",
 }
 SYSREG_NAMES = {(3, 3, 14, 0, 2): "cntvct_el0", (3, 3, 0, 0, 1): "ctr_el0", (3, 0, 0, 0, 0): "midr_el1",
                 (3, 0, 0, 0, 5): "mpidr_el1", (3, 3, 4, 2, 1): "daif", (3, 0, 4, 2, 2): "currentel"}
@@ -187,7 +191,7 @@ def classify(w: int):
             return None if k in SYS_OK and L == 0 else ("bad", f"sys {k}")
         k = (op0, op1, crn, crm, op2)     # mrs / msr register
         if k in SYSREG_OK:
-            if k in ((3, 3, 13, 0, 3), (3, 3, 0, 0, 7), (3, 3, 14, 0, 0), (3, 3, 14, 0, 1)) and L == 0:
+            if k in ((3, 3, 13, 0, 3), (3, 3, 0, 0, 7), (3, 3, 14, 0, 0), (3, 3, 14, 0, 1), (3, 3, 0, 0, 1)) and L == 0:
                 return ("bad", f"msr {SYSREG_OK[k]} (read-only at EL0)")
             return None
         return ("bad", ("mrs " if L else "msr ") + SYSREG_NAMES.get(k, f"s{op0}_{op1}_c{crn}_c{crm}_{op2}"))

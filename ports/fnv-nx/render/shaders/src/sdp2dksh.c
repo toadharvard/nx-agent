@@ -112,11 +112,13 @@ static void ctab_one(const char *pkg, const char *name, const void *bc, size_t n
 
 static int usage(void)
 {
-    fprintf(stderr, "usage: sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] [--variants] PACKAGE.sdp...\n"
+    fprintf(stderr, "usage: sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] [--variants] [--numerics wined3d|nine] PACKAGE.sdp...\n"
                     "       sdp2dksh [-o DIR] [--glsl] --blob FILE...\n"
                     "       sdp2dksh --list PACKAGE.sdp\n"
                     "       sdp2dksh --ctab [--blob] FILE...\n"
-                    "       sdp2dksh --pack OUT.sdp NAME=FILE...\n");
+                    "       sdp2dksh --pack OUT.sdp NAME=FILE...\n"
+                    "--numerics: D3D9's implementation-defined rcp/rsq/log/nrm at 0 as WineD3D (default) or Gallium Nine\n"
+                    "            (V6n's oracle); FNVNX_NUMERICS=nine in the environment selects nine too\n");
     return 2;
 }
 
@@ -144,7 +146,7 @@ static int do_pack(int argc, char **argv)
 int main(int argc, char **argv)
 {
     ctx_t c = { ".", 0, 0, NULL, NULL, 0, 0, 0, 0, NULL, 0, 0 };
-    int blob = 0, list = 0, ctab = 0, vars = 0, i = 1;
+    int blob = 0, list = 0, ctab = 0, vars = 0, numerics_set = 0, i = 1;
     for (; i < argc && argv[i][0] == '-'; i++) {
         if (!strcmp(argv[i], "-o") && i + 1 < argc) c.dir = argv[++i];
         else if (!strcmp(argv[i], "--glsl")) c.flags |= FNVNX_SHADER_KEEP_GLSL;
@@ -155,8 +157,17 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--list")) list = 1;
         else if (!strcmp(argv[i], "--ctab")) list = ctab = 1;
         else if (!strcmp(argv[i], "--pack")) return do_pack(argc - i - 1, argv + i + 1);
+        else if (!strcmp(argv[i], "--numerics") && i + 1 < argc) {
+            const char *m = argv[++i];
+            if (!strcmp(m, "nine")) c.flags |= FNVNX_SHADER_NUMERICS_NINE;
+            else if (!strcmp(m, "wined3d")) c.flags &= ~FNVNX_SHADER_NUMERICS_NINE;
+            else return usage();
+            numerics_set = 1;
+        }
         else return usage();
     }
+    if (!numerics_set && getenv("FNVNX_NUMERICS") && !strcmp(getenv("FNVNX_NUMERICS"), "nine"))
+        c.flags |= FNVNX_SHADER_NUMERICS_NINE;
     if (i >= argc) return usage();
     if (ctab) printf("package\tname\thash\tconstant\tset\treg\tcount\tclass\ttype\trows\tcolumns\telements\n");
     if (!list) {

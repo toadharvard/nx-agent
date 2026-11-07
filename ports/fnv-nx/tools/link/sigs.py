@@ -92,6 +92,19 @@ def split_qual(s):
     return [p.strip() for p in out if p.strip()]
 
 
+CONV_OP = re.compile(r'(?:^|::)\s*operator (?!new\b|delete\b)(?=[A-Za-z_])')
+
+
+def split_qual_conv(qual):
+    """split_qual for a conversion operator too: 'A::B::operator struct N::T *' -> ['A', 'B', 'operator N::T*'] (the
+    target type is one component, canonical, so MSVC and Itanium spell it the same)."""
+    m = CONV_OP.search(qual)
+    if not m:
+        return split_qual(qual)
+    at = qual.index('operator', m.start())
+    return split_qual(qual[:at].rstrip(':').strip()) + ['operator ' + canon_type(qual[at + len('operator '):])]
+
+
 def matching_open(s, close_at):
     depth = 0
     for i in range(close_at, -1, -1):
@@ -288,10 +301,12 @@ def parse_msvc(mangled, dem):
     pclose = matching_close(post, popen)
     qual = post[:popen].strip()
     # an operator ends in '*' too: operator*, operator*=, operator->*, a conversion operator 'operator T *'
-    op = (split_qual(qual) or [''])[-1].startswith('operator')
-    if (qual.endswith('*') and not op) or qual.endswith(')'):  # function returning a function pointer: unsupported
+    op = (split_qual_conv(qual) or [''])[-1].startswith('operator')
+    # a function returning a function pointer is unsupported; `X::operator()` ends in ')' too and is a plain name
+    # (R2 recon2-005: `??RFUN_006592f0@@QAEXPAX@Z` parsed `special`, its references stayed trap stubs)
+    if (qual.endswith('*') and not op) or (qual.endswith(')') and not re.search(r'(?:^|::)operator\(\)$', qual)):
         sig.kind = 'special'; return sig
-    sig.qual = canon_qual(split_qual(qual))
+    sig.qual = canon_qual(split_qual_conv(qual))
     sig.raw_params = _parse_params(post[popen + 1:pclose])
     sig.params = sig.raw_params
     tail = post[pclose + 1:]
@@ -345,6 +360,9 @@ ABI_TAG = re.compile(r'\[abi:[^\]]*\]')
 CTOR_VARIANT = re.compile(r'(C[1-5]|D[0-5])(?=E|I|B)')
 
 
+ITANIUM_INT_LITERAL = re.compile(r'L[abcdhijlmstwxy]n?\d+E')
+
+
 def itanium_variant(mangled):
     """Constructor/destructor variant of an Itanium name ('C1', 'C2', 'D0', 'D1', 'D2') or None (heuristic: the last
     C<n>/D<n> token followed by E, I or B, not inside a <length><identifier> source name)."""
@@ -358,6 +376,10 @@ def itanium_variant(mangled):
             while j < n and mangled[j].isdigit():
                 j += 1
             i = j + int(mangled[i:j])
+            continue
+        lit = ITANIUM_INT_LITERAL.match(mangled, i) if c == 'L' else None
+        if lit:  # <expr-primary> ::= L <builtin type> <number> E (`Lj1024E`): the number is no <length>
+            i = lit.end()
             continue
         if c in 'CD' and i + 2 < n and mangled[i + 1] in '012345' and mangled[i + 2] in 'EIB':
             best = mangled[i:i + 2]
@@ -402,7 +424,7 @@ def parse_itanium(mangled, dem):
     qual = head[cut:].strip() if cut else head.strip()
     if not qual or qual.startswith(('*', '&')):
         qual = head.strip(); cut = 0
-    sig.qual = canon_qual(split_qual(qual))
+    sig.qual = canon_qual(split_qual_conv(qual))
     sig.params = _parse_params(s[popen + 1:pclose])
     sig.raw_params = sig.params
     sig.cv = ' '.join(w for w in ('const', 'volatile') if re.search(r'\b%s\b' % w, tail.group(1)))

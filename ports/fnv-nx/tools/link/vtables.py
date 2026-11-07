@@ -838,6 +838,7 @@ def run(out, tree, jobs=4):
     print('vtables: %d classes requested' % len(reqs), flush=True)
     todo = {c: (sp, hosts) for c, (sp, why, hosts) in reqs.items() if sp and hosts}
     results = {}          # class -> (host, probe result)
+    fallback = {}         # class -> (host, non-polymorphic probe result) while a polymorphic view is looked for
     tried = collections.defaultdict(set)
     cache_path = os.path.join(vdir, 'cache.json')
     try:
@@ -887,6 +888,13 @@ def run(out, tree, jobs=4):
                 for k, _, c in cls:
                     r = res.get(k)
                     if r is not None and r.get('enc'):
+                        if not r.get('polymorphic') and 'vtable-ref' in reqs.get(c, (None, set(), []))[1] and \
+                                any(x not in tried[c] for x in todo[c][1]):
+                            # a unit references C's vtable, but this host's copy of C has no virtuals (a forward
+                            # shell): only a typeinfo would come out. Another host's view is tried first; this
+                            # result stays the fallback (link 9f865b0a: InventoryMenu, MapMenu, BGSBodyPart, ...)
+                            fallback.setdefault(c, (h, r))
+                            continue
                         results.setdefault(c, (h, r))
         todo = {c: v for c, v in todo.items() if c not in results}
         json.dump({**cache, **newcache}, open(cache_path + '.tmp', 'w'))   # an interrupted run resumes from here
@@ -903,6 +911,10 @@ def run(out, tree, jobs=4):
                 cname = 'base:' + n
                 if sp and cname not in results and cname not in todo:
                     todo[cname] = (sp, [h])
+    for c, hr in fallback.items():   # no host had a polymorphic view: the typeinfo at least
+        if c not in results:
+            results[c] = hr
+            stats['vtable-ref with no polymorphic view'] += 1
     json.dump(newcache, open(cache_path + '.tmp', 'w'))
     os.replace(cache_path + '.tmp', cache_path)
 

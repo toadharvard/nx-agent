@@ -11,6 +11,17 @@
 #       boot; publishes link/<c12>), then fuzz_job.sh 1 of 1 (verdict cache: only changed function keys; FUZZ_MAX_S,
 #       default 600) and audit_job.sh 1 of 1 (row cache: only changed keys; AUDIT_BUDGET, default 300)
 #    B  equiv: equiv_job.sh 1 of 1 (object cache: only units whose source, headers, flags or compiler changed)
+#    D  after lane A's build, beside its fuzz and audit: threads_job.sh (D25 #7: the race checker's and the watchdog's tests, then the guest just built relinked
+#       with the watchdog and run under qemu-aarch64 for THREADS_TIMEOUT, default 180 s here; tools/threads/README.md)
+#       and frames_job.sh (per-thread CPU and frame pacing: the guest under linhost --profile for FRAMES_TIMEOUT,
+#       default 180 s here; tools/perf/FRAMES.md) and mem_job.sh (the memory lane: the guest relinked with the
+#       recorder for MEM_TIMEOUT, default 180 s here; the peak against 3.2 GiB; tools/perf/MEM.md)
+#       and plat_job.sh (R4's platform lane, PLAT_TIMEOUT default 180 s here; tools/perf/PLAT.md)
+#       and scenario_job.sh (S18, D25's targets on scripted scenarios: QUICK_SCENARIOS, default "boot-menu saveload",
+#       on this build's link and guest, EMU_TIMEOUT 900 s each; the original's runs come from its reference cache)
+#       and boottrace_job.sh (T1: the guest's function-boundary trace against the cached Wine reference trace of the
+#       same list, S5-boot's tests/s5/boot_trace.py; gate: the first divergence does not move earlier than at the
+#       verified head). A failed build skips lane D (its checks would run an older guest).
 #    C  replay: sweep_job.sh 1 of 1 with SWEEP_CAPTURE=replay on the capture store's cover scenes (quick_plan.py
 #       cover: the fewest scenes that hold every program; QUICK_CELLS, default 12), programs too when the plan says
 #       so (SWEEP_PROGRAMS=1); the full replay of all 1,155 scenes stays on the sweep farms (36 shards, replay only)
@@ -31,6 +42,10 @@ T0=$(date +%s)
 # the warm farms keep their caches local: three machines must not write one 1-of-1 branch (they are seeded from the
 # sharded farms' branches; their own results stay on the machine). Reports still go to reports/<farm>.
 export FUZZ_PUBLISH=${FUZZ_PUBLISH:-0} AUDIT_PUBLISH=${AUDIT_PUBLISH:-0} EQUIV_CACHE_PUBLISH=${EQUIV_CACHE_PUBLISH:-0}
+# lane A builds in full_job's persistent build directory (incremental): it does not wait for the prepare/compile
+# farms' tree and objects (full_job's default is 300 s each, a third of the budget idle); one look, then local. V1's
+# link audits keep running, with a smaller budget (its slow audits are skipped and marked so).
+export FARM_TREE_WAIT=${FARM_TREE_WAIT:-0} FARM_OBJ_WAIT=${FARM_OBJ_WAIT:-0} V1_BUDGET=${V1_BUDGET:-600}
 log() { echo "$(date -u +%FT%TZ) quick_job: $*"; }
 
 # ---- 1. plan --------------------------------------------------------------------------------------------------------
@@ -40,7 +55,7 @@ if [ -n "$BASE" ] && git -C "$REPO" cat-file -e "$BASE^{commit}" 2>/dev/null && 
 	python3 -I "$HERE/quick_plan.py" plan "$REPO" "$BASE" "$COMMIT" --out "$R/plan.json" || BASE=""
 fi
 if [ -z "$BASE" ] || [ ! -s "$R/plan.json" ]; then
-	printf '{"files": null, "checks": {"build": true, "equiv": true, "fuzz": true, "audit": true, "replay": true, "programs": false}, "why": {"all": ["no verified head"]}, "full": [], "base": null}\n' >"$R/plan.json"
+	printf '{"files": null, "checks": {"build": true, "equiv": true, "fuzz": true, "audit": true, "replay": true, "programs": false, "threads": true, "frames": true, "mem": true, "scenario": true, "boottrace": true, "plat": true}, "why": {"all": ["no verified head"]}, "full": [], "base": null}\n' >"$R/plan.json"
 fi
 if [ -n "${QUICK_CHECKS:-}" ]; then
 	python3 -I - "$R/plan.json" "$QUICK_CHECKS" <<'EOF'
@@ -54,6 +69,9 @@ on() { python3 -I -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])
 log "plan: base ${BASE:0:12} -> $C12: $(python3 -I -c 'import json,sys; p=json.load(open(sys.argv[1])); print(",".join(c for c,v in p["checks"].items() if v) or "nothing")' "$R/plan.json")"
 
 # ---- 2. lanes -------------------------------------------------------------------------------------------------------
+# the head's worktree once, before the lanes: every sub-job of this head uses $FARM_HOME/src-<c12> (worktree.sh locks
+# the add as well; qk2 on ed380ec7 lost build, fuzz and audit to two jobs adding it at the same moment)
+bash "$HERE/worktree.sh" "$REPO" "$FARM_HOME/src-$C12" "$COMMIT" >/dev/null 2>&1 || log "worktree src-$C12 failed (the jobs try again)"
 run() {   # run <check> <cmd...>: time, exit status, report path, in $R/<check>.{rc,s,md,log}
 	local c=$1 t=$(date +%s) rc; shift
 	log "start $c"
@@ -65,11 +83,34 @@ run() {   # run <check> <cmd...>: time, exit status, report path, in $R/<check>.
 skip() { echo "$2" >"$R/$1.skip"; }
 lane_a() {
 	if on build; then run build bash "$J/full_job.sh" "$COMMIT"; else skip build "not affected"; fi
+	if [ -f "$R/build.rc" ] && [ "$(cat "$R/build.rc")" != 0 ]; then   # lane D would run an older build's guest
+		for c in threads frames mem plat scenario boottrace; do skip $c "the build failed"; done
+	else lane_d & fi   # the emulator lanes need this build; they run beside fuzz and audit
 	if on fuzz; then
 		FUZZ_MAX_S=${FUZZ_MAX_S:-600} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
 	else skip fuzz "not affected"; fi
 	if on audit; then AUDIT_BUDGET=${AUDIT_BUDGET:-300} run audit bash "$J/audit_job.sh" "$COMMIT" 1 1
 	else skip audit "not affected"; fi
+	wait
+}
+lane_d() {   # D: the emulator lanes on lane A's build, one after another (each runs a multi-threaded qemu)
+	if on threads; then THREADS_TIMEOUT=${THREADS_TIMEOUT:-180} run threads bash "$J/threads_job.sh" "$COMMIT"
+	else skip threads "not affected"; fi
+	if on frames; then FRAMES_TIMEOUT=${FRAMES_TIMEOUT:-180} run frames bash "$J/frames_job.sh" "$COMMIT"
+	else skip frames "not affected"; fi
+	if on mem; then MEM_TIMEOUT=${MEM_TIMEOUT:-180} run mem bash "$J/mem_job.sh" "$COMMIT"
+	else skip mem "not affected"; fi
+	if on plat; then PLAT_TIMEOUT=${PLAT_TIMEOUT:-180} run plat bash "$J/plat_job.sh" "$COMMIT"
+	else skip plat "not affected"; fi
+	if on scenario; then
+		local fb=$FARM_HOME/full/build ld="" gd=""
+		[ -d "$fb/link/out" ] && ld=$fb/link
+		[ -f "$fb/guest/guest.nso" ] && gd=$fb/guest
+		SCENARIOS=${QUICK_SCENARIOS:-boot-menu saveload} EMU_TIMEOUT=${SCENARIO_EMU_TIMEOUT:-900} SCENARIO_PUBLISH=0 \
+			SCENARIO_LINK_DIR=$ld SCENARIO_GUEST_DIR=$gd run scenario bash "$J/scenario_job.sh" "$COMMIT"
+	else skip scenario "not affected"; fi
+	if on boottrace; then BOOTTRACE_BUILD=$FARM_HOME/full/build run boottrace bash "$J/boottrace_job.sh" "$COMMIT"
+	else skip boottrace "not affected"; fi
 }
 lane_b() { if on equiv; then run equiv bash "$J/equiv_job.sh" "$COMMIT" 1 1; else skip equiv "not affected"; fi; }
 lane_c() {
@@ -111,7 +152,7 @@ def headline(md):
             return l[:160].replace('|', '/')
     return ''
 rows, ok = [], True
-for c in ('build', 'equiv', 'fuzz', 'audit', 'replay'):
+for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'plat', 'scenario', 'boottrace'):
     sk, rc = rd(c + '.skip'), rd(c + '.rc')
     if sk is not None:
         rows.append((c, 'skipped: ' + sk, '-', '-', ''))
@@ -138,7 +179,7 @@ for r in rows:
 o.write('\n## why\n\n')
 for c, ps in sorted(plan.get('why', {}).items()):
     o.write('- %s: %s\n' % (c, ', '.join(ps[:8]) + (' ...' if len(ps) > 8 else '')))
-for c in ('build', 'equiv', 'fuzz', 'audit', 'replay'):
+for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'plat', 'scenario', 'boottrace'):
     md = rd(c + '.md')
     if md:
         o.write('\n## %s\n\n' % c + '\n'.join(md.splitlines()[:25]) + '\n')
@@ -149,6 +190,9 @@ json.dump({'schema': 'fnvnx-quick/1', 'commit': commit, 'base': base or None, 's
 sys.exit(0 if ok and not full else 4)
 EOF
 st=$?
-if [ "$st" = 0 ]; then echo "$COMMIT" >"$Q/verified"; log "verified $C12 ($((T1 - T0)) s)"; fi
+if [ "$st" = 0 ]; then echo "$COMMIT" >"$Q/verified"
+	# the boot trace's first divergence becomes the bar for the next head (boottrace_job.sh: "not earlier")
+	cand=$FARM_HOME/boottrace/$C12/boottrace.candidate; [ -f "$cand" ] && cp "$cand" "$Q/boottrace.base"
+	log "verified $C12 ($((T1 - T0)) s)"; fi
 echo "$REPORT"
 exit 0

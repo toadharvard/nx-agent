@@ -38,10 +38,17 @@
 #                   farm boots it)
 #   PY              the Python with unicorn (default python3)
 #   VORBIS          the libvorbis prefix for build.sh; JOBS, SSE2NEON, DEVKITPRO passed to build.sh
+#   FARM_NATIVE_RENDER  a dir with tests/s5/native_render_inject.sh's outputs (nxrender_inject.o, libnxgl.so): every
+#                   boot runs on the native renderer's engine path (tests/s5/native_render.py --native-render --gpu,
+#                   the stand-in for a LINK_OVERRIDES=render link), its frames as PNG in <out dir>/frames_<boot>/
 #   FARM_GAME       a game install (FalloutNV.exe, Data/, Fallout_default.ini), mounted in place at the guest's
 #                   sdmc:/switch/fnv (emu_guest.py --game, tests/s5/datapath.py); its FalloutNV.exe is the default image.
 #                   Without it the image alone is copied to sdmc:/switch/fnv. Never inside the repository.
 #   EMU_EXTRA       extra emu_guest.py arguments for every boot (word-split; e.g. --trace-fn ... --trace-out ...)
+#   EMU_PY          the emulator script (default tests/s5/emu_guest.py; S18: tools/scenario/emu_scenario.py, a wrapper
+#                   that takes the same arguments plus its own --scenario ...)
+#   FARM_PROFILE    a profile dir (Documents/..., AppData/...; tools/lockstep/profile.py) copied to the guest's
+#                   sdmc:/switch/fnv/user before each boot, so the first-run profile is not made (lockstep: same inputs)
 #   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
@@ -177,12 +184,19 @@ if [ -n "$IMAGE" ] && [ -z "$GAME" ]; then   # with FARM_GAME the install's own 
     GAMEFILES+=(--file "switch/fnv/$b=$f" --file "fnvnx/game/$b=$f")
   done
 fi
+EMU=("${EMU_PY:-$HERE/emu_guest.py}"); NR=${FARM_NATIVE_RENDER:-}
+[ -n "$NR" ] && EMU=("$HERE/native_render.py" --native-render "$NR/nxrender_inject.o" --gpu "$NR/libnxgl.so")
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
   log "boot $tag"
   local rc=0 root=$OUT/sdmc-$tag
+  local NR_ARGS=()
+  [ -n "$NR" ] && NR_ARGS=(--frames "$OUT/frames_$tag")
   rm -rf "$root"; mkdir -p "$root"
-  timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
+  if [ -n "${FARM_PROFILE:-}" ]; then   # the player's profile (tools/lockstep/profile.py): the guest's user dir
+    mkdir -p "$root/switch/fnv/user" && cp -a "$FARM_PROFILE"/. "$root/switch/fnv/user/"
+  fi
+  timeout "$EMU_TIMEOUT" nice "$PY" -I "${EMU[@]}" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" "${NR_ARGS[@]}" \
     --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" "${GAMEFILES[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" ${EMU_EXTRA:-} \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
@@ -230,6 +244,7 @@ done
     grep -h "^milestone	" "$L" | cut -f2-4 | tr '\t' ' ' | sed 's/^/game milestone /' || true
     grep -h "^data-counts	" "$L" | tr '\t' ' ' || true
     grep -h "^file-fault	" "$L" | head -10 | tr '\t' ' ' || true
+    grep -h "^native-render	\|^gpu	\|^gpu-frame	\|native-render: \|fnvnx native renderer: " "$L" | tr '\t' ' ' | head -20 || true
     if [ -f "$OUT/frontier_$tag.txt" ]; then echo; echo "### frontier ($tag boot)"; head -12 "$OUT/frontier_$tag.txt"; fi
   done
 } > "$SUM"
