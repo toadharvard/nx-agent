@@ -45,4 +45,6 @@ ok "fresh farm fetches the reference, no divergence: PASS" '[ "$(v)" = PASS ] &&
 echo 'tracer v2' >"$Q/tools/lockstep/fnvtrace.c"; run 100
 ok "tracer change: new key, computed again" '[ "$(wc -l <"$T/reflog")" = 2 ]'
 ok "and the old base does not apply" 'grep -q "recorded" "$T/r.md"'
+S16_W=1920 run 100
+ok "an env input (S16_W) makes a new key" '[ "$(wc -l <"$T/reflog")" = 3 ]'
 [ $fails = 0 ] && echo "test_boottrace: all ok" || { echo "test_boottrace: $fails failed"; cat "$T/run.log"; exit 1; }

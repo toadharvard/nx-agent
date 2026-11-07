@@ -84,7 +84,11 @@ SECS=${BOOTTRACE_WINE_S:-300}
 {
 	grep -o '^TRACE_FORMAT = "[^"]*"' "$BT"
 	cat "$P/tools/lockstep/fnvtrace.c" "$P/tools/lockstep/wine_trace.sh" "$P/tools/lockstep/build.sh" \
-		"$P/tools/compare/wine_ref.sh" "$P/tools/compare/ref_ini.py" 2>/dev/null | sha256sum | cut -c1-16   # + the prefix and ini
+		"$P/tools/compare/wine_ref.sh" "$P/tools/compare/ref_ini.py" "$P/tools/compare/scenes.json" 2>/dev/null \
+		| sha256sum | cut -c1-16   # + the prefix, its ini and the plugins list (S5-boot)
+	# the environment that shapes the run: the adapter, the screen/ini size, the tracer's limits (empty: defaults)
+	echo "env S16_PCI_DEVICE=${S16_PCI_DEVICE:-} S16_W=${S16_W:-} S16_H=${S16_H:-} FNVTRACE_SNAP=${FNVTRACE_SNAP:-} FNVTRACE_DEREF=${FNVTRACE_DEREF:-} FNVTRACE_MAX=${FNVTRACE_MAX:-}"
+	# data_key hashes every file of the install: the exe, its DLLs, Fallout_default.ini and Data/
 	sha256sum "$GAME/FalloutNV.exe" | cut -c1-64; data_key; sha256sum "$W/list.txt" | cut -c1-64
 	echo "seconds $SECS"; wine --version 2>/dev/null
 } >"$W/refkey.txt"
