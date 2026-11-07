@@ -43,7 +43,7 @@
 #define SendInput fnvnx_sdk_SendInput
 #define RegCreateKeyExA fnvnx_sdk_RegCreateKeyExA
 #define CoCreateInstance fnvnx_sdk_CoCreateInstance
-#include <windows.h>
+#include "fnvnx_equiv_sdk_windows.h"  /* the SDK's <windows.h> (generated; msvc/windows.h stands in for it) */
 #undef _ULARGE_INTEGER
 #undef CreateEventA
 #undef CreateMutexA
@@ -92,7 +92,7 @@ __declspec(dllimport) LSTATUS WINAPI RegCreateKeyExA(HKEY, LPCSTR, DWORD, LPSTR,
 __declspec(dllimport) HRESULT WINAPI CoCreateInstance(const GUID *, void *, DWORD, const GUID *, LPVOID *);
 }
 #else
-#include <windows.h>
+#include "fnvnx_equiv_sdk_windows.h"  /* the SDK's <windows.h> (generated; msvc/windows.h stands in for it) */
 #endif
 
 #ifdef __cplusplus

@@ -46,7 +46,7 @@ import sys
 IMAGE_LO, IMAGE_HI = 0x00400000, 0x02100000
 # The log format and tracer semantics of both sides; part of any cache key of a reference trace (T1: with the exe,
 # the game data, the function list and tools/lockstep/fnvtrace.c). Bump it when a line shape or what is logged changes.
-TRACE_FORMAT = "fnvtrace-1"
+TRACE_FORMAT = "fnvtrace-2"   # 2: both sides boot with tools/lockstep/profile.py's profile
 
 
 # ---- the logs ------------------------------------------------------------------------------------------------------
@@ -266,6 +266,8 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
         conv = msvc_conv(units.get(cg.orig))
         if units and conv:
             pairs = list(zip(a64_logical(cg, conv), x86_logical(cw, conv)))[:6]
+        elif NO_PARAMS.search(cg.name):   # a free function without parameters: its registers are leftovers
+            pairs = []
         else:   # no convention: x0 is the receiver (ecx) or the first stack argument; differing from both counts
             why_e = same(cg.regs[0], cw.regs[0], cg.deref.get("x0"), cw.deref.get("ecx"))
             why_s = same(cg.regs[0], cw.regs[2], cg.deref.get("x0"), cw.deref.get("s0"))
@@ -281,6 +283,8 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
         void = msvc_void(dec) if dec else cg.ret == cg.regs[0]
         if cg.ret is not None and cw.ret is not None and not void:
             why = same(cg.ret, cw.ret)
+            if why and cg.ret in (0, 1) and (cw.ret & 0xFF) == cg.ret:   # a bool: MSVC sets al only
+                why = None
             if why:
                 add("return", cg, cw, why)
         if cw.writes and cg.writes:
@@ -379,6 +383,7 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
             "end": "divergence" if divs else "no divergence"}
 
 
+NO_PARAMS = re.compile(r"^_Z\d+\w+?v$")   # free function, no parameters (Itanium: ...v)
 RUNTIME_CALLER = re.compile(r"^(_Znw|_Zna|_Zdl|_Zda|operator new|operator delete)")
 NOOP_IF_ARG1_NULL = {0x00aa4060, 0x00401030}   # MemoryManager::Deallocate(mm, NULL), FormHeap_Free(NULL)
 

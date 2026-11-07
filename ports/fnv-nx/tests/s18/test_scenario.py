@@ -236,7 +236,9 @@ def t_report(tmp):
     summ = {"stop": {"reason": "STOPPED: scenario complete"}, "stubbed_faults": 2, "initializers_skipped": 1,
             "peak_heap_bytes": 500 << 20, "milestone": "first-cell",
             "file_faults": [{"call": "open", "path": "switch/fnv/Custom.ini", "errno": 2},
-                            {"call": "open", "path": "switch/fnv/Data/Missing.bsa", "errno": 2}],
+                            {"call": "open", "path": "switch/fnv/Data/Missing.bsa", "errno": 2},
+                            {"call": "remove", "path": "switch/fnv/Warnings.txt", "errno": "ENOENT"},
+                            {"call": "stat", "path": "switch/fnv/X.txt", "errno": "ENOENT"}],
             "scenario": {"steps_done": len(plan["steps"]), "complete": True, "marks": [{"name": "in-cell"}],
                          "gate_timeouts": [{"step": 3, "what": "Saves/x", "seconds": 5}],
                          "root": os.path.join(g, "kept"),
@@ -257,20 +259,22 @@ def t_report(tmp):
     json.dump({"first": {"kind": "return", "function": "FUN_1"}, "divergences": [{}, {}], "end": "divergence"}, open(cmp_, "w"))
     thr = os.path.join(tmp, "rep", "threads.json")
     json.dump({"schema": "fnvnx-threads/1", "races": 1, "cycles": 0, "long_waits": 2}, open(thr, "w"))
-    nro = os.path.join(tmp, "rep", "nro.md")
-    open(nro, "w").write("- [x] done\n- [ ] open one\n- [ ] open two\n")
-    r = scenario.report(plan, g, w, cmp_, thr, nro)
+    nx1 = os.path.join(tmp, "rep", "nx1.json")
+    json.dump({"schema": "fnvnx-nx1/1", "open": 2, "checks": [{"n": 1, "check": "nro", "status": "pass"},
+               {"n": 2, "check": "memory", "status": "fail"}, {"n": 6, "check": "gpu", "status": "open"}]}, open(nx1, "w"))
+    r = scenario.report(plan, g, w, cmp_, thr, nx1)
     T = r["targets"]
     want = {"1": 3, "2": 2, "3": 2, "4": 1, "5": 1, "6": 1, "7": 4, "8": 0, "9": 1, "10": 1, "11": 2, "12": 1}
     got = {k: T[k]["count"] for k in want}
     check("report: every target measured", r["measured"] == 12, str({k: T[k]["measured"] for k in T}))
     check("report: counts", got == want, f"{got} != {want}")
+    check("report: existence probes counted apart", T["4"]["detail"]["probes"] == 2)
     check("report: scenario's own unknown command is not a game error", T["10"]["detail"]["scenario_command_errors"])
     md = scenario.report_md(r)
     check("report md: no game text", "SCRIPTS" not in md and "Missing.bsa" not in md and "12/12" in md, md[:400])
     rp = os.path.join(tmp, "rep", "r.json")
     json.dump(r, open(rp, "w"))
-    empty = scenario.report(plan, os.path.join(tmp, "nothing"), nro=nro)
+    empty = scenario.report(plan, os.path.join(tmp, "nothing"), nx1=nx1)
     m = scenario.metric([r, empty])
     check("metric: targets measured in any scenario", m["measured"] == 12 and m["targets"][1]["measured_in"] == 1, str(m["measured"]))
     check("metric: sum over the scenarios", m["sum"] == sum(want.values()) + 2, str(m["sum"]))
@@ -311,6 +315,22 @@ def t_job_syntax():
     check("farm_boot.sh takes EMU_PY", "${EMU_PY:-$HERE/emu_guest.py}" in fb)
 
 
+def t_job_dry(tmp):
+    """scenario_job.sh with nothing to run on (no game, no link, no Wine): the plumbing still gives a report"""
+    home, game, rep = (os.path.join(tmp, "job", n) for n in ("home", "game", "out/r.md"))
+    os.makedirs(game)
+    env = dict(os.environ, FARM_HOME=home, FARM_GAME=game, FARM_APT="0", ARTIFACTS=os.path.join(tmp, "job", "noart"),
+               SCENARIOS="boot-menu saveload", SCENARIO_WINE="0", SCENARIO_PUBLISH="0")
+    r = subprocess.run(["bash", os.path.join(P, "tools", "farm", "scenario_job.sh"), "0" * 40, rep], env=env,
+                       capture_output=True, text=True, timeout=300)
+    md = open(rep).read() if os.path.isfile(rep) else ""
+    check("job dry: exit 0 and a report", r.returncode == 0 and md.startswith("# scenarios"), r.stderr[-500:])
+    check("job dry: both scenarios reported", "## scenario boot-menu" in md and "## scenario saveload" in md, md[:600])
+    check("job dry: metric line (nothing ran: nothing measured)", "S18 metric: 0/12" in md, md[:300])
+    side = rep[:-3] + ".json"
+    check("job dry: metric sidecar", os.path.isfile(side) and json.load(open(side))["schema"] == "fnvnx-scenario-metric/1")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="s18-")
     try:
@@ -323,6 +343,7 @@ def main():
         t_report(tmp)
         t_drive_wine(tmp)
         t_job_syntax()
+        t_job_dry(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"tests/s18: {len(FAILS)} failed" + (": " + ", ".join(FAILS) if FAILS else ""))
