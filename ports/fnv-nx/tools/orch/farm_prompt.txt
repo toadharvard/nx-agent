@@ -5,10 +5,10 @@ SETUP (once, foreground calls, one after another):
 2. apt-get update && apt-get install -y g++-aarch64-linux-gnu binutils-aarch64-linux-gnu jq rsync python3 python3-venv psmisc util-linux
 
 RUN (Bash, normal call). It holds a lock so a second runner can never start, waits for apt/dpkg, clears the "head done" marker, and starts the job detached so the 2-hour background ceiling can never kill it:
-  while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 5; done; rm -f /root/fnvnx-farm/NAME.last; setsid nohup flock -n /root/farm.lock env RUNNER_MAX_S=60 RUNNER_KILL_S=86400ENVX bash /home/user/fnv-nx-build/farm/start.sh NAME JOB ARGS > /root/farm.log 2>&1 < /dev/null & echo $! > /root/farm.pid
+  while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 5; done; rm -f /root/fnvnx-farm/NAME.last; setsid -w nohup flock -n /root/farm.lock env RUNNER_MAX_S=60 RUNNER_KILL_S=86400ENVX bash /home/user/fnv-nx-build/farm/start.sh NAME JOB ARGS > /root/farm.log 2>&1 < /dev/null & echo $! > /root/farm.pid
 
 WATCH (Bash with run_in_background: true, timeout: 7200000):
-  while kill -0 $(cat /root/farm.pid) 2>/dev/null; do sleep 60; done; tail -30 /root/farm.log
+  while kill -0 $(cat /root/farm.pid) 2>/dev/null || pgrep -f '[t]ools/farm/runner.sh' >/dev/null; do sleep 60; done; tail -30 /root/farm.log
 
 When the watcher ends:
 - Job still alive (watcher cut by the time limit): start the same WATCH again at once (up to 15 times). Do not touch the job.
