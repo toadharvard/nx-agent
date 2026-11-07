@@ -51,8 +51,9 @@ def main():
             h = classify.hint(p, t, c, div, fn, 200000) if div else {}
             check(div is not None and h.get('cause') == 'uninit-both' and h.get('uniform') == want,
                   'uninit-both, uniform garbage -> %s (%s)' % (want, h))
-    check(fnkeys.CHANGES[-1].recheck({'hint': {'cause': 'uninit-both'}}) and
-          not fnkeys.CHANGES[-1].recheck({'hint': {'cause': 'uninit-arm'}}), 'd18-uninit rechecks old uninit-both')
+    d18 = [c for c in fnkeys.CHANGES if c.tag == 'd18-uninit'][0]
+    check(d18.recheck({'hint': {'cause': 'uninit-both'}}) and
+          not d18.recheck({'hint': {'cause': 'uninit-arm'}}), 'd18-uninit rechecks old uninit-both')
     print('%d failures' % len(FAIL))
     return 1 if FAIL else 0
 

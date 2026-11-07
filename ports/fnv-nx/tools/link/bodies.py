@@ -14,6 +14,11 @@ in this order (first that applies):
    whose other pointer instantiations units.json places at one address the native build defines, at least two of
    them there: MSVC's linker folded their identical code (the body does not depend on the pointee), so this
    instantiation's code is that body too. Bound to `__fnv_<addr>`; C2/D2 to the complete-object definition.
+1c. `exe-sret` (after exe-addr's checks) - the exe calls one address whose definition takes one more pointer
+   parameter first (after `this`) where the reference returns a class by value: MSVC's hidden return pointer, which
+   the decomp writes out (`FUN_0045bb20_cls::ApplyScaled(target*, float)` for 53 vector `operator*(float)`).
+   An adapter in the referencing unit calls the address with a local's address and returns it
+   (`sret_line`: the type from the declaration by decltype, trivially copyable and destructible types only).
 1b. `exe-addr` (`--exe`, the player's FalloutNV.exe) - the referencing unit's pristine object calls the MSVC name:
    every pristine object's calls of it (REL32 in functions placed by units.json, or at the address a placed
    function's call reaches, bytes checked against the exe; a DIR32 there, the address taken, counts the same)
@@ -41,6 +46,10 @@ in this order (first that applies):
    without a body. Synthesized as the out-of-line `= default` definition in the referencing unit (the implicit
    member's semantics: bases and members constructed / copied / destroyed, D0/D1/D2 all emitted). Not a decomp
    body: listed as such, and the MSVC code is the reference where a site misbehaves.
+4c. `tree-inline` - (after vcall) the tree has the body inline in a unit's own source, out of line (`inline
+   C::f() {...}` in a .cpp) or in the class body of a copy of C: that unit is compiled again with
+   `-fkeep-inline-functions` like msvc-inline and only the wanted symbol is kept (its own name, or the one the
+   relaxed key pairs, as for msvc-inline). A host that does not emit it leaves the name `missing`.
 5b. `crt-rule` - a runtime member the C++ library defines by its contract, not by the decomp: the MSVC STL's
    throwers `C::_Xlen()` / `C::_Xran()` / `C::_Xinvalid_argument()` of the decomp's string and vector copies (a stub
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
@@ -106,6 +115,18 @@ def load_native(addrmap_tsv):
             if len(f) >= 2 and f[1] in ('F', 'C', 'X', 'G'):
                 nat[int(f[0], 16)] = f[1]
     return nat
+
+
+def load_providers(addrmap_tsv):
+    """addrmap.tsv -> {address: provider} of the F addresses S4's runtime implements (note `provider: <name>`):
+    the platform's own definition of the exe function at that address (platform/crt/crt_symbols.tsv)."""
+    res = {}
+    if os.path.exists(addrmap_tsv):
+        for line in open(addrmap_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 6 and f[1] == 'F' and f[5].startswith('provider: '):
+                res[int(f[0], 16)] = f[5][len('provider: '):].strip()
+    return res
 
 
 # ---------------------------------------------------------------------------------------------------- keys
@@ -185,6 +206,36 @@ def default_line(kind, isig):
             'dtor': '%s::~%s() = default;' % (sp, base),
             'd0': '%s::~%s() = default;' % (sp, base),
             'assign': '%s &%s::operator=(const %s &) = default;' % (sp, sp, sp)}[kind]
+
+
+SCALARS = re.compile(r'^(?:(?:un)?signed |const |volatile )*(?:void|bool|char|short|int|long|long long|__int64|'
+                     r'float|double|long double|wchar_t|unsigned|signed)$')
+
+
+def sret_line(isig, addr, this):
+    """Adapter for `exe-sret`: the exe's function at addr takes the result's address as its first parameter
+    after `this` (MSVC's hidden return pointer, written out by the decomp); GCC's caller wants the result by value.
+    The result type comes from the declaration itself (decltype of a call); the exe builds it in raw storage, so it
+    must be trivially copyable and destructible (a constructor of its own is fine: the exe's code runs it)."""
+    if isig.kind != 'func' or isig.params is None or isig.raw_params is None or len(isig.qual) < 1:
+        return None
+    if any('<' in p or '{' in p or '`' in p or "'" in p or '(' in p for p in isig.qual):
+        return None
+    if this and len(isig.qual) < 2:
+        return None
+    q = '::' + '::'.join(isig.qual)
+    ps = list(isig.raw_params)
+    args = ', '.join('a%d' % k for k in range(len(ps)))
+    decl = ', '.join('%s a%d' % (p, k) for k, p in enumerate(ps))
+    call = ('this->%s(%s)' % (isig.qual[-1], args)) if this else '%s(%s)' % (q, args)
+    xs = (['const volatile void*'] if this else []) + ['void*'] + ps
+    sym = '__fnvnx_sr_%08x_%s' % (addr, hashlib.sha1(isig.text.encode('utf-8', 'surrogateescape')).hexdigest()[:8])
+    return ('auto %s(%s)%s -> decltype(%s) { typedef decltype(%s) R; '
+            'static_assert(__is_trivially_copyable(R) && __has_trivial_destructor(R), "sret"); '
+            'extern void %s(%s) __asm__("%s"); alignas(R) unsigned char r[sizeof(R)]; %s(%sr%s); '
+            'return *reinterpret_cast<R *>(r); }'
+            % (q, decl, (' ' + isig.cv) if isig.cv else '', call, call, sym, ', '.join(xs), ADDR_SYM % addr,
+               sym, 'this, ' if this else '', (', ' + args) if args else ''))
 
 
 # ---------------------------------------------------------------------------------------------------- x86 bodies
@@ -449,7 +500,10 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
     items, failed = [], {}
     if not inline:
         for k, r in enumerate(sorted(rows, key=lambda r: r.name)):
-            line = default_line(special_of(itanium(r.name)), itanium(r.name))
+            if r.cls == 'exe-sret':
+                line = sret_line(itanium(r.name), r.addr, r.note.startswith('sret this'))
+            else:
+                line = default_line(special_of(itanium(r.name)), itanium(r.name))
             if line in {it[2] for it in items}:
                 continue
             items.append((k, 'bd', line))
@@ -492,6 +546,48 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
     for n in want - roots:
         failed[n] = 'synth-failed (%s)' % ('not emitted by the host' if inline else 'GCC refused the = default')
     return path, roots, failed
+
+
+# ---------------------------------------------------------------------------------------------------- tree-inline
+
+def load_layouts(out):
+    """out/layouts.tsv -> {(unit, last type component): {sizes}} (the layout probe's sizes per unit)."""
+    res = collections.defaultdict(set)
+    path = os.path.join(out, 'layouts.tsv')
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 3 and f[2].isdigit():
+                res[(f[0], sigs.split_qual(f[1])[-1] if f[1] else f[1])].add(int(f[2]))
+    return res
+
+
+def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
+    """{name: host unit} for missing names whose body the tree has inline (out of line `inline C::f(`, or in a
+    class body of C) in a unit's own source (.cpp in units.json). A referencing unit is preferred, then the first
+    in order. Only the host's emitted symbol under the wanted name (or the one its relaxed key pairs) is kept."""
+    import bodycause
+    keys = {}
+    for r in rows:
+        k = bodycause.key_of(itanium(r.name))
+        if k and k[0]:
+            keys[r.name] = (k[0], k[1])
+    if not keys:
+        return {}
+    found = bodycause.tree_bodies(tree, set(keys.values()))
+    out = {}
+    for r in rows:
+        k = keys.get(r.name)
+        if not k:
+            continue
+        hosts = sorted({f for f, where in found.get(k, ()) if where.startswith('live') and f in unit_sources})
+        if layouts:   # the class must have the referencing units' size in the host where the probe knows both
+            ref = set().union(*(layouts.get((u, k[0]), set()) for u in r.units.split(',')))
+            hosts = [h for h in hosts if not (ref and layouts.get((h, k[0])) and layouts[(h, k[0])] != ref)]
+        if hosts:
+            refs = [h for h in hosts if h in r.units.split(',')]
+            out[r.name] = (refs or hosts)[0]
+    return out
 
 
 # ---------------------------------------------------------------------------------------------------- vcalls
@@ -733,6 +829,96 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
     return out
 
 
+# ---------------------------------------------------------------------------------------------------- call alignment
+
+ALIGN_SKIP = ('__imp_', '__security', '__chkstk', '__alloca', '__EH', '__CxxFrame', '__ftol', '__alldiv',
+              '__allmul', '__aulldiv', '__allshl', '__allshr', '__aullshr', '__allrem', '__aullrem', '__SEH',
+              '_memcpy', '_memset', '__RTC')
+ALIGN_MIN_RATIO = 0.5
+ALIGN_MAX_BYTES = 0x4000
+
+
+def object_call_seqs(objdir, i):
+    """u<i>.obj -> {code symbol: [REL32 callee names in offset order]}."""
+    import vslots
+    p = os.path.join(objdir, 'u%d.obj' % i)
+    if not os.path.exists(p):
+        return {}
+    c = vslots.Coff(p)
+    funcs = {}
+    for name, si in c.defs.items():
+        sy = c.syms[si]
+        if sy.secnum > 0 and c.secs[sy.secnum].flags & IMAGE_SCN_CNT_CODE and sy.storage in (2, 3):
+            ends = [v for v, _ in c.symbols_in(sy.secnum) if v > sy.value]
+            end = min(ends) if ends else len(c.section_bytes(sy.secnum))
+            funcs[name] = [sn for off, (sn, typ) in sorted(c.relocs(sy.secnum).items())
+                           if sy.value <= off < end and typ == 0x14]
+    return funcs
+
+
+def align_targets(objdir, udata, exe, wanted):
+    """`exe-addr` by call order, for names whose every caller the exe has only inlined. For each function P that
+    units.json places, its pristine call sequence (REL32 callees in order; a callee defined in the same object and
+    placed nowhere is expanded in place, as MSVC inlined it, up to 4 levels) is aligned with the exe's direct
+    call/jmp targets in P's range (capstone; the range ends at the next placed function). Callees with an
+    address are the anchors; in a replaced run of equal length on both sides, each callee without an address
+    takes the exe target at its position. Held out on link 9f865b0a: 9,040 addresses right, 6 wrong.
+    -> {msvc name in wanted: {address: votes}}."""
+    import bisect
+    import difflib
+    import capstone
+    addr_of, size_of = {}, {}
+    for u in udata:
+        for f in u['functions']:
+            a = int(f['address'], 16)
+            for n in [f['symbol']] + list(f.get('fold_aliases', [])):
+                addr_of.setdefault(n, a)
+                size_of.setdefault(n, f.get('size'))
+        for n, a in (u.get('symbols') or {}).items():
+            addr_of.setdefault(n, int(a, 16))
+    starts = sorted({int(f['address'], 16) for u in udata for f in u['functions']})
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    out = collections.defaultdict(collections.Counter)
+
+    def expand(funcs, n, depth=0):
+        seq = []
+        for x in funcs[n]:
+            if x in funcs and x not in addr_of and depth < 4 and x != n:
+                seq += expand(funcs, x, depth + 1)
+            else:
+                seq.append(x)
+        return seq
+    for i in range(len(udata)):
+        funcs = object_call_seqs(objdir, i)
+        for p_ in funcs:
+            if p_ not in addr_of:
+                continue
+            seq = expand(funcs, p_)
+            if not any(x in wanted for x in seq):
+                continue
+            a = addr_of[p_]
+            size = size_of.get(p_)
+            if not size:
+                j = bisect.bisect_right(starts, a)
+                size = min(starts[j] - a, ALIGN_MAX_BYTES) if j < len(starts) else None
+            code = exe.read(a, size) if size else None
+            if not code:
+                continue
+            es = [int(ins.op_str, 16) for ins in md.disasm(code, a)
+                  if ins.mnemonic in ('call', 'jmp') and ins.size == 5 and ins.op_str.startswith('0x')
+                  and not a <= int(ins.op_str, 16) < a + size]
+            ptok = [addr_of.get(x, 'U:' + x) for x in seq]
+            sm = difflib.SequenceMatcher(None, ptok, es, autojunk=False)
+            if not es or sm.ratio() < ALIGN_MIN_RATIO:
+                continue
+            for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                if tag == 'replace' and i2 - i1 == j2 - j1:
+                    for t, e in zip(ptok[i1:i2], es[j1:j2]):
+                        if isinstance(t, str) and t[2:] in wanted and not t[2:].startswith(ALIGN_SKIP):
+                            out[t[2:]][e] += 1
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------- run
 
 def load_bind(out):
@@ -759,7 +945,7 @@ def load_synth(out):
     return res
 
 
-def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms):
+def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None):
     """`exe-addr`: a name still missing (or about to get a synthesized special member) whose MSVC counterpart the
     referencing unit's pristine object calls: bound to the address the exe's call at that site reaches, when every
     site agrees and the native build defines it with the right kind."""
@@ -793,13 +979,15 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             def_names[int(f_['address'], 16)].add(f_['symbol'])
     ms.need({n_ for ns_ in def_names.values() for n_ in ns_ if n_.startswith('?')})
 
-    def shape_ok(ref, a):
+    def shape_ok(ref, a, this_only=False):
         """The MSVC definition at a and the pristine reference ref: as many parameters, both member functions or
         both not, the same calling convention (no ABI bridge is made for these bindings; resolve compares only the
         names it binds itself)."""
         rs = msvc(ref)
         if rs.kind != 'func' or rs.params is None:
             return False
+        if this_only and a in (providers or {}):
+            return True   # S4's runtime implements the exe's function there, taking the object (void *self)
         member = bool(rs.member)
         rparams = [p_ for p_ in rs.params if p_ != '...']
         for n_ in def_names.get(a, ()):
@@ -809,8 +997,31 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             dparams = [p_ for p_ in d_.params if p_ != '...']
             if len(dparams) == len(rparams) and bool(d_.member) == member and d_.cc == rs.cc:
                 return True
+            if this_only and not d_.member and len(dparams) == 1 and dparams[0].rstrip().endswith('*'):
+                return True   # the decomp spells the destructor as FUN_<addr>(T*): natively both take x0 = object
         return False
     seen = collections.defaultdict(collections.Counter)   # Itanium name -> {address: sites}
+    aligned_names = set()
+
+    def sret_ok(ref, a):
+        """The reference returns a class by value and the definition at a takes one more parameter, a pointer,
+        first (after this): MSVC's hidden return pointer as the decomp writes it."""
+        rs = msvc(ref)
+        if rs.kind != 'func' or rs.params is None or not rs.ret:
+            return False
+        ret = rs.ret.strip()
+        if ret.endswith(('*', '&')) or SCALARS.match(ret) or ret.startswith('enum '):
+            return False
+        rparams = [p_ for p_ in rs.params if p_ != '...']
+        for n_ in def_names.get(a, ()):
+            d_ = msvc(n_) if n_.startswith('?') else None
+            if d_ is None or d_.kind != 'func' or d_.params is None:
+                continue
+            dparams = [p_ for p_ in d_.params if p_ != '...']
+            if len(dparams) == len(rparams) + 1 and dparams[0].rstrip().endswith('*') and \
+                    bool(d_.member and not d_.static) == bool(rs.member and not rs.static):   # this or none
+                return True
+        return False
     via = {}
     by_m = collections.defaultdict(set)   # MSVC name -> Itanium names it stands for
     for mp in pairs.values():
@@ -823,6 +1034,16 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             for n in by_m[m_]:
                 seen[n].update(tg)
                 via.setdefault(n, m_)
+    try:   # names whose callers the exe has only inlined: the address at their position in the call order
+        aligned = align_targets(msvc_objs, udata, exe, set(by_m))
+    except ImportError:   # capstone missing: the call-order evidence is skipped
+        aligned = {}
+    for m_, tg in aligned.items():
+        for n in by_m[m_]:
+            if n not in seen:   # a byte-checked call site wins; the alignment fills only names without one
+                seen[n].update(tg)
+                via.setdefault(n, m_)
+                aligned_names.add(n)
     out = []
     for r in rows:
         tg = seen.get(r.name)
@@ -835,9 +1056,20 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             out.append(r._replace(note=r.note + '; exe calls %s' % ','.join('%08x' % a for a in sorted(tg)[:4])))
             continue
         (a, nsite), = tg.items()
-        if isg.variant in ('C1', 'C2', 'D1', 'D2') and native.get(a) == 'F' and shape_ok(via[r.name], a):
-            want = 'F'   # the decomp defines the constructor/destructor's address as a member function (FUN_...)
-        if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a):
+        this_only = bool(isg.variant) and not isg.params and bool(msvc(via[r.name]).member)
+        if isg.variant in ('C1', 'C2', 'D1', 'D2') and native.get(a) == 'F' and \
+                shape_ok(via[r.name], a, this_only=this_only):
+            want = 'F'   # the decomp defines the constructor/destructor's address as a function (FUN_...)
+        if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a, this_only=this_only) and \
+                sret_ok(via[r.name], a) and r.units and \
+                sret_line(isg, a, bool(msvc(via[r.name]).member) and not msvc(via[r.name]).static):
+            this = bool(msvc(via[r.name]).member) and not msvc(via[r.name]).static
+            out.append(r._replace(cls='exe-sret', addr=a, target=None, host=sorted(r.units.split(','))[0],
+                                  note='sret %s: %s called at %d site(s) in the exe, %s' % (
+                                      'this' if this else 'static', via[r.name], nsite,
+                                      ' / '.join(sorted(def_names.get(a, ()))[:1]))))
+            continue
+        if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a, this_only=this_only):
             out.append(r._replace(note=r.note + '; exe calls %08x (signature shape differs: %s)' % (
                 a, ' / '.join(sorted(def_names.get(a, ()))[:2]))))
             continue
@@ -846,7 +1078,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
                 a, 'native kind %s' % native[a] if a in native else 'not compiled natively')))
             continue
         out.append(r._replace(cls='exe-addr', addr=a, target=ADDR_SYM % a, host=None,
-                              note='%s called at %d site(s) in the exe' % (via[r.name], nsite) +
+                              note='%s %s %d site(s) in the exe' % (via[r.name], 'aligned by call order at'
+                                                                    if r.name in aligned_names else 'called at', nsite) +
                               (' (%s bound to the complete-object definition)' % isg.variant
                                if isg.variant in ('C2', 'D2') else '')))
     return out
@@ -976,7 +1209,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
 
     if msvc_objs and exe_path:
-        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms)
+        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
+                        load_providers(os.path.join(out, 'addrmap.tsv')))
     if synth:   # its stubs are emitted with the synthesized objects
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
@@ -989,7 +1223,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         layout.game_flags(tree, work)   # compile.sh --print-flags (plugins built) once, before the threads; no fallback
         by_host = collections.defaultdict(lambda: collections.defaultdict(list))
         for r in rows:
-            if r.cls in ('special-default', 'msvc-inline') and r.host:
+            if r.cls in ('special-default', 'msvc-inline', 'exe-sret') and r.host:
                 by_host[r.host][r.cls == 'msvc-inline'].append(r)
         jobs_ = [(h, inl, rs) for h, d in sorted(by_host.items()) for inl, rs in sorted(d.items())]
 
@@ -1052,6 +1286,34 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 rows = [r._replace(cls='vcall', target=vtargets[r.name][0],
                                    note='slot byte %d, this +%d' % vtargets[r.name][1:]) if r.name in vtargets
                         else r for r in rows]
+        # bodies the decomp writes inline in another unit's source (`inline C::f() {...}`, an in-class body of a
+        # copy of C): that unit hosts them, compiled with -fkeep-inline-functions like msvc-inline
+        vdone = set(vtargets) | set(failed) | set(vnotes)
+        rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
+        tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
+        tby = collections.defaultdict(list)
+        for r in rest:
+            if r.name in tin:
+                tby[tin[r.name]].append(r)
+
+        def tone(job):
+            h, rs = job
+            try:
+                return h, synth_host(tree, work, h, rs, itanium, True)
+            except Exception as e:
+                return h, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
+        tdone = {}
+        with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+            for h, (path, roots, fail) in ex.map(tone, sorted(tby.items())):
+                if path:
+                    dst = os.path.join(bdir, 'zz_bd_%s_t.o' % h.replace('/', '_'))
+                    os.replace(path, dst)
+                    synth_rows.append((h, dst, len(roots)))
+                    tdone.update({n: h for n in roots})
+                for n, why in fail.items():
+                    vnotes[n] = 'tree-inline in %s: %s' % (h, why)
+        rows = [r._replace(cls='tree-inline', host=tdone[r.name], note='inline body in ' + tdone[r.name])
+                if r.name in tdone else r for r in rows]
         gd = [r for r in rows if r.cls == 'gdel']
         if gd:
             s_path, o_path = os.path.join(bdir, 'gdel.S'), os.path.join(bdir, 'zz_bd_gdel.o')
@@ -1104,8 +1366,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default',
-                        'crt-rule', 'missing')]
+              for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'tree-inline',
+                        'exe-sret', 'special-default', 'crt-rule', 'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))

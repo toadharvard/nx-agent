@@ -15,16 +15,25 @@
 #       model). A hang is cut by SWEEP_CELL_TIMEOUT_S (default 1200). Cells are resumable: done.tsv in
 #       $FARM_HOME/sweep/<head12>/<k>of<N> survives the runner's 2 h passes; the next pass goes on where this one
 #       stopped (FARM_DEADLINE).
+#   (c) the reference capture cache (T1-fastbench, tools/compare/capstore.py): the trimmed normalized capture of each
+#       scene and its reference replay (nxd9play under Wine) depend only on the capture key - the exe, the game data,
+#       d9cap/nxd9play, the capture harness (wine_ref.sh, ref_ini, nxd9trim/norm/io, replay.py, the capstore and scene_stats'
+#       REF_FORMAT versions, CAPTURE_V below, Wine, settle/journal settings) - and per scene on its scene JSON. The store is
+#       $FARM_HOME/capture/<key>, the union of the artifacts repository's branches capture/<key>/<k>of<N> (fetched at
+#       setup). SWEEP_CAPTURE=auto (default): a cached scene is only replayed (no boot: ~40 s instead of ~370 s), an
+#       uncached one is booted, captured, packed into the store and its shard branch republished; replay: cached
+#       scenes only (the rest "uncached"); capture: boot every scene and refresh the store. Any key input changing
+#       means a new key: that is the rule for a full capture run (one farm pass of all shards populates it).
 #   (d) results: programs.tsv, scenes/<scene>.json, shard.json and summary.md, pushed by this job to the artifacts
-#       repository's branch reports/sweep/<head12>/<k>of<N>. Raw .nxd9 (xz; over 99 MB split into 95 MB .partNN) only
-#       for one representative cell per
-#       unique program set (sorted VS+PS hashes). Everything is game-derived: private repository only.
+#       repository's branch reports/sweep/<head12>/<k>of<N>; with SWEEP_RAW=1 also raw .nxd9 (xz; over 99 MB split
+#       into 95 MB .partNN) for one representative cell per unique program set (sorted VS+PS hashes; superseded by
+#       the capture store, so off by default). Everything is game-derived: private repository only.
 # <report.md> (published by runner.sh to reports/<farm>) is this shard's summary.md. Aggregate across shards with
 # tools/compare/sweep_report.py.
 #
 # Needs: root for the first setup (as compare_job.sh, plus xdotool, x11-apps, imagemagick, xz-utils); ARTIFACTS (a
 # clone of fnv-nx-build with push). Env: SWEEP_VARIANTS, SWEEP_CELLS=0 (programs only), SWEEP_PROGRAMS=0 (cells only),
-# SWEEP_CELL_TIMEOUT_S, SWEEP_MAX_CELLS (per pass), SWEEP_CELL_LIST (a cells.tsv instead of the shard's), SWEEP_GAME
+# SWEEP_CELL_TIMEOUT_S, SWEEP_MAX_CELLS (per pass), SWEEP_CAPTURE (auto|replay|capture), SWEEP_RAW, SWEEP_CELL_LIST (a cells.tsv instead of the shard's), SWEEP_GAME
 # (an existing install instead of $FARM_HOME/game), COMPARE_CAND_REF (candidate nx_render; default HEAD, the nx_render
 # of this commit). The cells need the exe's DLLs in the install (GalaxyWrp, binkw32, libvorbisfile and theirs); without
 # them each cell ends "no-start". Exit 0 with any verdict; 1 when setup failed.
@@ -97,6 +106,58 @@ setup() {
 	local usage; usage=$("$NXR/nx_render" 2>&1 || true)
 	FAMILIES=1; grep -q -- '--families' <<<"$usage" || { FAMILIES=0; NOTES+=("this nx_render has no --families: that column is not measured"); }
 	NOTES+=("candidate nx_render at ${CAND:0:12}; reference nxd9play $(basename "$BIN"); shaders $(basename "$SHD")")
+	[ "${SWEEP_CELLS:-1}" = 0 ] || cap_setup
+}
+
+# ---- (c) the reference capture cache ----------------------------------------------------------------------------------
+CAP_MODE=${SWEEP_CAPTURE:-auto}
+CAPTURE_V=1   # bump when cell_one's capture recipe changes (the scene JSON transform, the trim/norm calls)
+data_key() {  # the install's content (exe dir and Data/), hashed once per change of its branch heads / file list
+	local stamp k
+	stamp=$( { cat "$GAME/.gamedata_heads" 2>/dev/null; (cd "$GAME" && find . -path ./.gamedata_items -prune -o -type f \
+		! -name .content_key -printf '%P %s %T@\n' | sort); } | sha256sum | cut -c1-16)
+	if [ -f "$GAME/.content_key" ] && [ "$(head -1 "$GAME/.content_key")" = "$stamp" ]; then sed -n 2p "$GAME/.content_key"; return; fi
+	k=$(cd "$GAME" && find . -path ./.gamedata_items -prune -o -type f ! -name .content_key ! -name .gamedata_heads -print0 |
+		sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+	printf '%s\n%s\n' "$stamp" "$k" >"$GAME/.content_key"; echo "$k"
+}
+cap_key_inputs() {
+	printf 'capture\t%s\n' "$CAPTURE_V"
+	printf 'exe\t%s\n' "$(sha256sum "$GAME/FalloutNV.exe" | cut -c1-64)"
+	printf 'data\t%s\n' "$(data_key)"
+	printf 'd3d9\t%s\n' "$(basename "$BIN")"   # nxd9play.exe and d9cap's d3d9.dll (one build key)
+	printf 'harness\t%s\n' "$(key_of "$CMP/wine_ref.sh" "$CMP/nxd9trim.py" "$CMP/nxd9norm.py" "$CMP/nxd9io.py" "$CMP/replay.py" "$CMP/ref_ini.py")"
+	printf 'store\t%s\n' "$(grep -o "^FORMAT = '[^']*'" "$CMP/capstore.py")"
+	printf 'ref\t%s\n' "$(grep -o "^REF_FORMAT = '[^']*'" "$CMP/scene_stats.py")"
+	printf 'wine\t%s\n' "$(wine --version 2>/dev/null)"
+	printf 'pci\t00000193\nsettle\t%s\njournal_mb\t%s\nframes\t3\n' "${S16_SETTLE_S:-30}" "${SWEEP_JOURNAL_MB:-6000}"
+}
+cap_setup() {
+	cap_key_inputs >"$S/capture_key.tsv"
+	CKEY=$(sha256sum "$S/capture_key.tsv" | cut -c1-16)
+	CAPS=$FARM_HOME/capture/$CKEY; mkdir -p "$CAPS/.heads"; cp "$S/capture_key.tsv" "$CAPS/KEY"
+	local url g=$FARM_HOME/capture/git h r n=0 t0; url=$(git -C "$ARTIFACTS" remote get-url origin); t0=$(date +%s)
+	[ -d "$g" ] || git init -q --bare "$g"
+	while read -r h r; do
+		[ -n "$r" ] || continue
+		[ "$(cat "$CAPS/.heads/${r##*/}" 2>/dev/null)" = "$h" ] && continue
+		git -C "$g" fetch -q --depth 1 "$url" "$r" && git -C "$g" archive FETCH_HEAD | tar -x -C "$CAPS" &&
+			echo "$h" >"$CAPS/.heads/${r##*/}" && n=$((n + 1))
+	done < <(git ls-remote "$url" "refs/heads/capture/$CKEY/*" 2>/dev/null)
+	NOTES+=("capture cache $CKEY ($CAP_MODE): $(ls "$CAPS/index" 2>/dev/null | grep -c '\.tsv$') scenes cached, $n branch(es) fetched in $(( $(date +%s) - t0 )) s")
+}
+cap_publish() {   # this shard's scenes of the store (scenes, their blobs and references) to capture/<key>/<k>of<N>
+	[ -s "$S/packed.tsv" ] || return 0
+	local b=capture/$CKEY/${K}of$N g=$FARM_HOME/capture/pub.git
+	rm -rf "$g"; mkdir -p "$g"
+	cut -f1 "$S/cells.tsv" | xargs python3 -I "$CMP/capstore.py" export "$CAPS" "$g" >"$S/cap_export.log" 2>&1 || { NOTES+=("capture export failed"); return 0; }
+	git -C "$g" init -q && git -C "$g" add -A &&
+		git -C "$g" -c user.name="fnvnx farm" -c user.email=farm@invalid commit -qm "capture $CKEY ${K}of$N: $(ls "$g/index" | grep -c '\.tsv$') scenes
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" &&
+		git -C "$g" push -q -f "$(git -C "$ARTIFACTS" remote get-url origin)" "HEAD:refs/heads/$b" 2>"$S/cap_push.log" &&
+		NOTES+=("published $b ($(wc -l <"$S/packed.tsv") newly captured)") || NOTES+=("publish to $b failed (log $S/cap_push.log)")
+	rm -rf "$g"
 }
 
 # ---- (b) programs ---------------------------------------------------------------------------------------------------
@@ -170,26 +231,47 @@ base['scenes'] = [cells.scene(cell, kind, sid.endswith('_night'))]
 base['common_post'] = []   # no `tm`: run in the open console it leaves the console layer on screen (the HUD stays: both sides draw it)
 json.dump(base, open(sys.argv[2], 'w'))
 EOF
-	local t0=$(date +%s)
+	local t0=$(date +%s) shash mode=capture
+	shash=$(sha256sum "$c/scenes.json" | cut -c1-16)
+	if [ "$CAP_MODE" != capture ] && python3 -I "$CMP/capstore.py" has "$CAPS" "$id" --scene-hash "$shash" &&
+		python3 -I "$CMP/capstore.py" unpack "$CAPS" "$id" "$c/$id.nxd9" >"$c/unpack.log" 2>&1; then
+		mode=replay
+	elif [ "$CAP_MODE" = replay ]; then
+		echo -e "$id\tuncached\t0\treplay" >>"$S/done.tsv"; rm -rf "$c"; return
+	else
+		cell_capture "$id" "$c" "$shash" "$t0" "$kind" "$cell" || return
+	fi
+	cell_stats "$id" "$c" "$t0" "$mode"
+}
+cell_capture() {   # cell_capture <id> <dir> <scene hash> <t0> <kind> <cell>: boot under Wine, d9cap, trim, norm, pack
+	local id=$1 c=$2 shash=$3 t0=$4 kind=$5 cell=$6 st
 	S16_PCI_DEVICE=00000193 S16_SCENES=$c/scenes.json S16_D9CAP=$BIN/d3d9.dll S16_STOP_AFTER_FRAMES=1 S16_CAPTURE='Z:'"${c//\//\\}"'\journal.nxd9' \
 	S16_CAPTURE_FRAMES=0- S16_CAPTURE_MAX_MB=${SWEEP_JOURNAL_MB:-6000} S16_SETTLE_S=${S16_SETTLE_S:-30} \
 		timeout -k 30 "${SWEEP_CELL_TIMEOUT_S:-1200}" bash "$CMP/wine_ref.sh" run "$CELLW" "$id" "$c/run" >"$c/run.log" 2>&1
 	st=$?
 	(WINEPREFIX=$CELLW/pfx wineserver -k 2>/dev/null) || true
-	if [ "$st" = 124 ] || [ "$st" = 137 ]; then echo -e "$id\ttimeout\t$(( $(date +%s) - t0 ))" >>"$S/done.tsv"; rm -rf "$c"; return; fi
+	if [ "$st" = 124 ] || [ "$st" = 137 ]; then echo -e "$id\ttimeout\t$(( $(date +%s) - t0 ))\tcapture" >>"$S/done.tsv"; rm -rf "$c"; return 1; fi
 	if ! python3 -I "$CMP/nxd9trim.py" "$c/journal.nxd9" "$c/trim.nxd9" --frames 3 >"$c/trim.log" 2>&1; then
 		local why=no-capture; [ -f "$c/journal.nxd9" ] || why=no-start   # no journal: the game never created a device
-		echo -e "$id\t$why\t$(( $(date +%s) - t0 ))" >>"$S/done.tsv"; rm -rf "$c"; return
+		echo -e "$id\t$why\t$(( $(date +%s) - t0 ))\tcapture" >>"$S/done.tsv"; rm -rf "$c"; return 1
 	fi
 	rm -f "$c/journal.nxd9"
 	python3 -I "$CMP/nxd9norm.py" "$c/trim.nxd9" "$c/$id.nxd9" >/dev/null 2>&1 || cp "$c/trim.nxd9" "$c/$id.nxd9"
 	rm -f "$c/trim.nxd9"
+	if python3 -I "$CMP/capstore.py" pack "$CAPS" "$id" "$c/$id.nxd9" --meta "scene=$shash" --meta "head=$H12" \
+		--meta "cell=$(printf '%s\t%s\t%s\t' "$id" "$kind" "$cell")" >>"$S/capstore.log" 2>&1; then
+		echo "$id" >>"$S/packed.tsv"
+	else NOTES+=("capstore pack $id failed (log $S/capstore.log)"); fi
+}
+cell_stats() {   # cell_stats <id> <dir> <t0> <mode>: scene_stats on <dir>/<id>.nxd9 (reference replay from the store's cache)
+	local id=$1 c=$2 t0=$3 mode=$4 st
 	python3 -I "$CMP/scene_stats.py" "$c/$id.nxd9" --exe "$BIN/nxd9play.exe" --prefix "$PFX" --nx-render "$NXR/nx_render" \
 		--shaders "$SHD" --sdp-dir "$SDPDIR" --out "$S/scenes/$id.json" --work "$c/work" ${UAM:+--uam "$UAM"} \
-		${SWEEP_PERM:+--perm "$SWEEP_PERM"} >"$c/stats.log" 2>&1
+		${SWEEP_PERM:+--perm "$SWEEP_PERM"} --ref-cache "$CAPS/ref/$id" >"$c/stats.log" 2>&1
 	st=$?
-	# one raw capture per unique program set (sorted VS+PS hashes)
-	local set; set=$(python3 -I -c 'import json,sys,hashlib; j=json.load(open(sys.argv[1])); p=j["stats"]["capture"]["programs"]; print(hashlib.sha256((",".join(p["vs"])+";"+",".join(p["ps"])).encode()).hexdigest()[:16])' "$S/scenes/$id.json" 2>/dev/null)
+	# with SWEEP_RAW=1: one raw capture per unique program set (sorted VS+PS hashes)
+	local set=""
+	[ "${SWEEP_RAW:-0}" = 1 ] && set=$(python3 -I -c 'import json,sys,hashlib; j=json.load(open(sys.argv[1])); p=j["stats"]["capture"]["programs"]; print(hashlib.sha256((",".join(p["vs"])+";"+",".join(p["ps"])).encode()).hexdigest()[:16])' "$S/scenes/$id.json" 2>/dev/null)
 	if [ -n "$set" ] && ! grep -q "	$set$" "$S/rawsets.tsv" 2>/dev/null; then
 		# GitHub refuses files over 100 MB: a bigger .xz goes as 95 MB parts (cat <id>.nxd9.xz.part* > <id>.nxd9.xz)
 		xz -T2 -6 -c "$c/$id.nxd9" >"$S/raw/$id.nxd9.xz" && echo -e "$id\t$set" >>"$S/rawsets.tsv" &&
@@ -197,7 +279,7 @@ EOF
 			split -b 95m -d -a 2 "$S/raw/$id.nxd9.xz" "$S/raw/$id.nxd9.xz.part" && rm -f "$S/raw/$id.nxd9.xz"
 		fi
 	fi
-	echo -e "$id\t$([ $st = 0 ] && echo ok || echo stats-failed)\t$(( $(date +%s) - t0 ))" >>"$S/done.tsv"
+	echo -e "$id\t$([ $st = 0 ] && echo ok || echo stats-failed)\t$(( $(date +%s) - t0 ))\t$mode" >>"$S/done.tsv"
 	rm -rf "$c"
 }
 
@@ -239,6 +321,7 @@ game_ok() {   # the exe's own DLLs next to it (the published install may hold on
 	return 0
 }
 [ "${SWEEP_CELLS:-1}" = 0 ] || { game_ok && cells; }
+[ -n "${CKEY:-}" ] && cap_publish
 summary
 publish
 summary

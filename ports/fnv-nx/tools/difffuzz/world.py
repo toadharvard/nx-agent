@@ -204,6 +204,11 @@ class World:
 # runs a case once that way to tell "both read garbage, otherwise equal" from a real difference
 UNIFORM = False
 
+# S1-rules: with BYTE_READS set to a dict, x86emu.run records every read of the case's planted memory as
+# {address: set of access sizes}; classify.py's bool-repr probe counts a byte only when the MSVC code read exactly
+# that byte with a 1-byte access (a bool), not when it is part of a pointer or integer word
+BYTE_READS = None
+
 
 def stack_fill(seed, n):
     if UNIFORM:
@@ -259,7 +264,8 @@ def ref_result(k):
 # the game's allocators (operator new, MemoryManager::Allocate, the heap's Allocate; their native names map to these
 # addresses through libcalls.EQUIV / the address stubs): they never return null, and GCC drops the null test after a
 # throwing new that MSVC 2008 keeps, so a canned 0 made the native code construct at 0 (S13b new-null, J-0137)
-ALLOCATORS = {0x00401000, 0x00aa3e40, 0x00aa13e0}
+# S1-rules d20-malloc: the CRT's malloc (0x00ecd1c7) too, which MSVC units call where the native calls operator new
+ALLOCATORS = {0x00401000, 0x00aa3e40, 0x00aa13e0, 0x00ecd1c7}
 ALLOC_BASE = HEAP + 0x200000         # above the reference results (ref_result: HEAP + 0..0x1ff pages)
 
 
