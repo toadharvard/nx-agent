@@ -1673,7 +1673,12 @@ def _unit_symbols(path):
         root, uj = prepare._units_json(path)
         if uj:
             for u in json.load(open(uj))['units']:
-                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = u.get('symbols', {})
+                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = dict(u.get('symbols', {}))
+            # BIND1's rows (a POST hook on units.json): the source rules see the bindings the link will have
+            for src, name, addr in BIND1_REFS + sorted(VLIT1_BINDS):
+                k = os.path.normpath(os.path.join(root, src))
+                if k in _UNIT_SYMBOLS:
+                    _UNIT_SYMBOLS[k].setdefault(name, addr)
     return _UNIT_SYMBOLS.get(os.path.normpath(os.path.abspath(path)))
 
 def _param_type(p):
@@ -4054,6 +4059,10 @@ BIND1_REFS = [
     # * OutlinedEntry's constructor 0x00aaec10 (`assign(rhs, 0, entryNpos)`): `mov edx, [0x010173f0]; push edx` at
     #   0x00aaec6f, the .rdata word 0xffffffff (npos) other units bind as DAT_010173f0.
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?entryNpos@@3IA', '0x010173f0'),
+    # * Vector12::length_error (blk_00ac0000_od_ob1_variant.cpp, a static in-class stand-in throwing with the
+    #   placeholder vector_error_message): the exe's ReserveItems 0x0065cfd0 calls 0x0065f640 (ThrowVectorTooLong,
+    #   which pushes the exe's own message) at 0x0065d00e, where the pristine object calls this name
+    ('src/staging/blk_00ac0000_od_ob1_variant.cpp', '?length_error@Vector12@@SAXXZ', '0x0065f640'),
 ]
 
 def bind_units_data(data, stats, refs=BIND1_REFS):

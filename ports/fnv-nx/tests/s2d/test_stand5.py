@@ -7,7 +7,8 @@ An in-class body whose MSVC name the unit's symbols bind to an address another u
 declaration, and so do a constructor without an initializer list, a `__declspec(noinline)` member of a class with a
 base, and a `__declspec(noinline)` member of a class template whose instantiations are all bound elsewhere (R6
 class 5); one bound to this unit's own address, a tagged one, a virtual one, a constructor with an initializer
-list, a template member without noinline and an unbound one keep their bodies.
+list, a template member without noinline and an unbound one keep their bodies. A static member (a thrower
+stand-in such as `_Xlen`) is converted like any other member.
 """
 import collections
 import json
@@ -56,6 +57,10 @@ struct List
     {
         return k * 2;
     }
+    static void Xlen()
+    {
+        throw 1;
+    }
 };
 struct Tail : public List
 {
@@ -94,6 +99,7 @@ class Stand5(unittest.TestCase):
                  'symbols': {'?Add@List@@QAEPAXABUItem@@@Z': '0x00405000', '?Own@List@@QAEHH@Z': '0x00401200',
                              '?Tagged@List@@QAEHH@Z': '0x00405100', '?Virt@List@@UAEHH@Z': '0x00405200',
                              '??0List@@QAE@XZ': '0x00405300', '??0List@@QAE@H@Z': '0x00405300',
+                             '?Xlen@List@@SAXXZ': '0x00405200',
                              '?AddTail@Tail@@QAEXABUItem@@@Z': '0x00405000',
                              '?Remove@?$SList@H@@QAEXABH@Z': '0x00405100', '?Count@?$SList@H@@QAEHXZ': '0x00405100'}},
                 {'source': 'src/b.cpp', 'flags': ['/O2'], 'functions': [
@@ -106,12 +112,13 @@ class Stand5(unittest.TestCase):
             open(path, 'w').write(SRC)
             st = collections.Counter()
             out = s2_bodies.r_stand_in_class_bodies(path, SRC, st)
-        self.assertEqual(st['STAND5'], 4)
+        self.assertEqual(st['STAND5'], 5)
         for decl in ('void* Add(const Item& p); /* fnv-nx STAND5', 'List(); /* fnv-nx STAND5',
                      '__declspec(noinline) void AddTail(const Item& p); /* fnv-nx STAND5',
-                     '__declspec(noinline) void Remove(const T& k); /* fnv-nx STAND5'):
+                     '__declspec(noinline) void Remove(const T& k); /* fnv-nx STAND5',
+                     'static void Xlen(); /* fnv-nx STAND5'):
             self.assertIn(decl, out)
-        for gone in ('Item* i = NewItem();', 'm_head = 0;', 'm_head = NewItem();', 'm_next = 0;'):
+        for gone in ('Item* i = NewItem();', 'm_head = 0;', 'm_head = NewItem();', 'm_next = 0;', 'throw 1;'):
             self.assertNotIn(gone, out)
         for keep in ('return k;', 'return k + 1;', 'm_head += k;', 'return k * 2;', 'return 7;'):
             self.assertIn(keep, out)
