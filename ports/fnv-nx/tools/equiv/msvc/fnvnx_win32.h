@@ -95,6 +95,9 @@ __declspec(dllimport) DWORD WINAPI FormatMessageA(DWORD, LPCVOID, DWORD, DWORD, 
 __declspec(dllimport) UINT WINAPI SendInput(UINT, void *, int);
 __declspec(dllimport) LSTATUS WINAPI RegCreateKeyExA(HKEY, LPCSTR, DWORD, LPSTR, DWORD, REGSAM, void *, PHKEY, LPDWORD);
 __declspec(dllimport) HRESULT WINAPI CoCreateInstance(const GUID *, void *, DWORD, const GUID *, LPVOID *);
+/* declared by the target shim, by the SDK only in winternl.h (not part of <windows.h>): ntdll's import with the
+ * shim's parameter types (blk_00ee0000_o2's SEH unwinder) */
+__declspec(dllimport) void WINAPI RtlUnwind(PVOID, PVOID, PVOID, PVOID);
 }
 #else
 #include "fnvnx_equiv_sdkhide.h"     /* SDK-HIDE: SDK names the target shim never declares, renamed (generated) */
