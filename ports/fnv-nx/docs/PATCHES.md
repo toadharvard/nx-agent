@@ -298,6 +298,7 @@ these rows as expected; any other S1b difference is a regression.
 | XINC1 | `src/gamebryo2.2/corelibs/niparticle/nipsysmodifierctlr.cpp` | 0x00c315b0 | one register choice after the member call (`ebx` for `eax`), same value |
 | XINC1 | `src/havok/common/internal/collide/tree/aabbtree/hkaabbtree.cpp` | 0x00d9be50 | one `push` scheduled later, same values |
 | XINC1 | `src/staging/blk_00ba0000_o2.cpp` | 0x00bb7f90 | `enabledData` read again (3 bytes) for the DynamicCast member call |
+| XINC1 | `src/fallout/ai/actor.cpp` | 0x0089d900 | `xinc1_pop_gen.s1b`: the KillSoundHandle89D9* argument moves from KillView::FUN_005d43c0 (exe: `ret`, pops nothing) to the ExtraList calls on its result (0x00418a00, 0x004189c0, 0x0041a540, 0x0041a3e0: `ret 4`, verified in the exe), as the exe's stack use has it; the decorations of those calls change and the push belongs to the call that pops it (EQ, checked against FalloutNV.exe) |
 | XINC1 | `src/staging/blk_00c80000_o2.cpp` | 0x00c90030 | pattern (d): the copy reads the sum through `lea` instead of operator+'s returned pointer (the same buffer) |
 | RET1 | `src/bssystemutilities/console/bsdlcsystemutility_console.cpp` | 0x00af28f0 | `xor eax,eax` for the 0 that was already in eax |
 | RET1 | `src/bsshader/bsdistanttreeshader.cpp` | 0x00bb62b0 | `lea eax,[edx-0x237]` for the `a - 0x237` the switch arithmetic left in eax |
