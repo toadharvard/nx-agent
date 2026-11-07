@@ -376,6 +376,7 @@ class UnitCache:
         m = self.vt_model()
         if m is None:
             return
+        t.exe_vfts = m.exe.vft.keys()        # every RTTI vftable of the exe (runner: destructor vptr words)
         import vtmodel
         cands = {}
         for lab, cls in vtmodel.arg_classes(cv).items():
