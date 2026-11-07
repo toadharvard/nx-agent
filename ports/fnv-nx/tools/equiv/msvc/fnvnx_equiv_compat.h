@@ -44,6 +44,13 @@ void __cdecl operator delete(void *);
 void __cdecl operator delete[](void *);
 #endif
 /* _CxxThrowException and _ThrowInfo: predefined by the MSVC C++ front end (nothing to declare) */
+/* ANON2-ALIGN: ANON2 (platform) declares a union member as raw storage, `alignas(T) unsigned char m[sizeof(T)]`.
+ * MSVC 2008 has no alignas, and its __declspec(align) takes only a literal (`__alignof(T)` is refused), so the gate
+ * reads it without the alignment. A layout that the alignment changed would show as a code difference; in the two
+ * ANON2 units (extradatalist, nipoint3interpolator) none does: what differs there is declared classes only. */
+#ifndef alignas
+#define alignas(T)
+#endif
 /* ENUM1-FWD: fnvnx_compat.h's `: int` base of an opaque enum declaration; MSVC 2008 has no opaque declarations, its
  * forward declaration `enum X;` (the decomp's own spelling) declares the same int-based type */
 #define FNVNX_ENUM_INT
