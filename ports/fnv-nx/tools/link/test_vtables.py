@@ -76,18 +76,26 @@ SRC = {
 }
 # Unit e: the classes link 9f865b0a left as zero blocks. It carries its own std::exception (the decomp's staging
 # units do), so it does not compile after HEAD's <typeinfo>: probed with HEAD_BARE. FUN_e1 is hidden by a function of
-# the same name (elaborated name).
+# the same name (elaborated name); PlDel has only a placement operator delete (the derived probe class declares
+# one).
 EHEADER = r'''#pragma once
 namespace std { class exception { public: exception(const char *m) : msg(m) {} virtual ~exception() {}
     virtual const char *what() const { return msg; } const char *msg; }; }
 struct ExcE : std::exception { ExcE(const char *m) : std::exception(m), code(1) {} virtual ~ExcE(); int code; };
 void FUN_e1();
 struct FUN_e1 { virtual ~FUN_e1(); virtual int v() { return 2; } int a; };
+struct PlDel : FUN_e1 { virtual ~PlDel(); static void *operator new(__SIZE_TYPE__, void *p) { return p; }
+    static void operator delete(void *, void *) {}
+#ifdef FNVNX_ORACLE
+    static void operator delete(void *);   /* GCC defines ~PlDel only with a usual one: same vtable words */
+#endif
+};
 '''
 SRC['src/e.cpp'] = ('#include "e.h"\nvoid FUN_e1() {}\n'
                     'int catch_e(void (*f)()) { try { f(); } catch (ExcE &e) { return e.code; } return 0; }\n'
-                    'struct FUN_e1 *mk_e1() { return new struct FUN_e1; }\n')
-EORACLE = '#define FNVNX_ORACLE\n#include "e.h"\nExcE::~ExcE() {}\nFUN_e1::~FUN_e1() {}\n'
+                    'struct FUN_e1 *mk_e1() { return new struct FUN_e1; }\n'
+                    'PlDel *mk_pl(void *p) { return new (p) PlDel; }\n')
+EORACLE = '#define FNVNX_ORACLE\n#include "e.h"\nExcE::~ExcE() {}\nFUN_e1::~FUN_e1() {}\nPlDel::~PlDel() {}\n'
 ORACLE = '#include "h.h"\nint Key::k() { return 9; }\nint Root::r() { return 0; }\nInl *mk_inl() { return new Inl; }\n' \
          'struct AbsX : Abs2 { int pure() override { return 1; } int g2() override { return 2; } };\n' \
          'AbsX *mk_absx() { return new AbsX; }\n'
@@ -126,7 +134,7 @@ UNITS = {'units': [
 MANGLED = {'Multi': '5Multi', 'Base1': '5Base1', 'Base2': '5Base2', 'Key': '3Key', 'Inl': '3Inl', 'Abs2': '4Abs2',
            'Root': '4Root', 'KeyImp': '6KeyImp', 'KeyDel': '6KeyDel', 'KeyOut': '6KeyOut'}
 # unit e: the names GCC emits for these classes with their key functions (EORACLE) == the synthesized ones
-E_NAMES = ['_ZTI4ExcE', '_ZTV4ExcE', '_ZTV6FUN_e1', '_ZTI6FUN_e1']
+E_NAMES = ['_ZTI4ExcE', '_ZTV4ExcE', '_ZTV6FUN_e1', '_ZTI6FUN_e1', '_ZTV5PlDel', '_ZTI5PlDel']
 
 ok = True
 
@@ -247,7 +255,7 @@ def main():
                     got, want = synth[n].ents(n), oracle.ents(n)
                     check(got == want, '%s differs from GCC:\n  got  %s\n  want %s' % (n, got, want))
         check('_ZTS3Key' in synth and '_ZTV5Multi' not in synth, 'typeinfo names synthesized, emitted vtables not')
-        # unit e (HEAD_BARE, elaborated name)
+        # unit e (HEAD_BARE, elaborated name, placement-only delete)
         eoracle = vtables.Obj(eoracle_obj)
         for n in E_NAMES:
             if check(n in synth, '%s synthesized' % n) and check(n in eoracle.defs, '%s in the oracle' % n):

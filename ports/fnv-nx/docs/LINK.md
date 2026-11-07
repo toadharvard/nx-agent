@@ -537,6 +537,8 @@ Retries on one host (link 9f865b0a: 78 trap stubs of D23's `special-unresolved:t
   no header. The emitted slot functions of such a host use it too.
 * *A class hidden by a function of the same name* (`void FUN_00405310(); struct FUN_00405310 {...};`, the decomp's
   constructor/destructor shells): probed again by its elaborated name `struct ::C`, through a typedef.
+* *A class whose scope has only a placement `operator delete`* (V<k>'s implicit deleting destructor finds no usual
+  one): V<k> declares its own; only V<k>'s D0, which is renamed to C's, would call it.
 
 Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the compiled objects): weak `_ZTV`, `_ZTI`,
 `_ZTS` for names no compiled object defines, and the non-virtual thunks (`_ZTh[n]<k>_f`: `sub`/`add w0`, tail call

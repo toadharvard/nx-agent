@@ -411,7 +411,7 @@ template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T));
 }
 '''
 NS = '__fnvnx_vt::'
-PROBE_VERSION = 3   # cache.json entries: 2 HEAD_BARE, 3 elaborated names
+PROBE_VERSION = 4   # cache.json entries: 2 HEAD_BARE, 3 elaborated names, 4 placement delete
 # The same helpers without a standard header (GCC's builtins: __direct_bases, __bases, __is_convertible; typeid
 # needs std::type_info declared only). For host units that do not compile after <typeinfo> / <type_traits>: units
 # with their own std::exception / std::bad_alloc copies (redefinition), or with a `using namespace std` swap that
@@ -609,6 +609,22 @@ def probe_host(tree, workdir, unit, classes):
         if obj_e is not None:
             phase1(obj_e, alive_e, retry)
     classes = [(k, res[k]['spelling']) for k, _ in classes if k in res]
+    # a polymorphic class whose derived probe class does not compile because C's scope has no usual operator delete
+    # (only a placement form: V<k>'s implicit deleting destructor finds none, "no suitable operator delete"): V<k>
+    # declares its own. Only V<k>'s D0 calls it, and D0 is renamed to C's in the synthesized group.
+    nodel = [(k, t) for k, t in classes if res[k]['polymorphic'] and not res[k]['final'] and 'vt_ents' not in res[k]]
+    if nodel:
+        items = []
+        for k, t in nodel:
+            pre = probe_items(k, t, 1, bare=bare)[:1] if t.startswith(ELAB) else []
+            tt = '::__fnvnx_vt::T%d' % k if pre else t
+            items += [(k, nm, line) for nm, line in pre + [
+                ('vtd', 'namespace __fnvnx_vt { struct V%d : %s { virtual void __fnvnx_key(); static void operator '
+                 'delete(void *); }; void V%d::__fnvnx_key() {} }' % (k, tt, k))]]
+        obj_d, alive_d = compile_probe(tree, workdir, unit, items, 'vt1d' + sfx, prelude=prelude)
+        if obj_d is not None:
+            for k in {k for k, nm, _ in alive_d if nm == 'vtd'}:
+                derived_vt(obj_d, k, res[k])
     items = [(k, nm, line) for k, t in classes if k in res and res[k]['ndirect'] + res[k]['nall'] <= 64
              for nm, line in probe_items(k, t, 2, res[k]['ndirect'], res[k]['nall'], bare=bare)]
     if not items:
@@ -912,9 +928,10 @@ def decode(d):
 
 def stale_entry(got, n):
     """A cache.json entry of an older probe version that the current probe_host would answer differently: a class
-    it did not name (HEAD_BARE, elaborated names)."""
+    it did not name (HEAD_BARE, elaborated names), a polymorphic class without the derived class's vtable
+    (placement-only operator delete)."""
     vals = [v for i, v in got.items() if not i.startswith('_')]
-    return len(vals) != n
+    return len(vals) != n or any(v.get('polymorphic') and not v.get('final') and 'vt_ents' not in v for v in vals)
 
 
 def run(out, tree, jobs=4):
