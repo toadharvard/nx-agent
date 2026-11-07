@@ -57,6 +57,9 @@ _ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb standin  # 0x00aa78a0 MemoryHeap's constr
                       # the exe's slots, so Allocate returned the heap's name and frees hit wrong blocks (J-0155 S10
                       # fault). standins.c stores the exe's vptr 0x010a28fc as the exe does (S1-refs: D22 for
                       # call-only declarations, tests/s5/callonly_vt.py)
+_ZN13HashTableBase14InsertOrUpdateEjj standin  # 0x00b57ea0: HashTableBase is a call-only declaration in the
+                      # exe's slot order (Reserved0 at 0); its boot receivers are native D22 maps (D1/D0 at 0/1), so
+                      # BucketIndex ran D0. standins.c dispatches exe slot k at k+1 (S1-refs: D22 for call-only)
 _Z12FUN_00406d50z standin  # 0x00406d50 strcat_s(dst, size, src), declared `(...)` and defined nowhere: WinMain's INI paths
                       # stayed empty, FalloutPrefs.ini was never read, sD3DDevice was "" and the device check sent the
                       # game to the launcher (ShellExecute, WinMain returns 0) (standins.c; S1-refs)

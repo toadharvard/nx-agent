@@ -794,6 +794,7 @@ class Emu:
     # Applied once at __libc_init_array, after the guest's self-relocation and before any initializer.
     def install_exe_vtables(self, addrmap, exe, elf):
         import subprocess
+        self.addrmap_path = addrmap
         sys.path.insert(0, os.path.join(HERE, "..", "..", "loader", "tools"))
         import fnvnx_pe
         img = fnvnx_pe.Image(fnvnx_pe.PE(open(exe, "rb").read()))
@@ -929,7 +930,7 @@ class Emu:
 
     # -- --trace-fn: function-boundary trace (the guest side of the lockstep trace, tests/s5/boot_trace.py). One TSV
     # line per event, written as it happens (a fault keeps everything before it):
-    #   call <seq> <tid> <depth> <name> <orig|-> <x0..x7> <sp> <lr>
+    #   call <seq> <tid> <depth> <name> <orig|-> <x0..x7> <sp> <lr> <caller symbol>
     #   arg  <seq> x<k> <hex>                          (the first <deref> bytes behind each readable x0..x7)
     #   ret  <seq> <tid> <depth> <name> <x0>
     #   w    <seq> <tid> <addr> <size> <value> <pc>      (with writes: stores of a traced callee outside its stack)
@@ -998,15 +999,8 @@ class Emu:
                 seq, _sp, _lr, label = fr.pop()
                 out.write(f"ret\t{seq}\t{t}\t{len(fr)}\t{label}\t{uc.reg_read(X0):#x}\n")
                 state["live"] -= 1
-                h = state["ret_hooks"].get(addr)
-                if h:
-                    h[1] -= 1
-                    if h[1] == 0:
-                        uc.hook_del(h[0])
-                        del state["ret_hooks"][addr]
-            if writes and state["live"] == 0 and state["whook"] is not None:
-                uc.hook_del(state["whook"])
-                state["whook"] = None
+            # hooks stay installed (adding or deleting one flushes unicorn's translation cache): one return hook per
+            # call site, and the write hook ignores stores while no traced call is live
 
         def on_call(uc, addr, size, _):
             if state["n"] >= limit:
@@ -1018,7 +1012,8 @@ class Emu:
             sp, lr = uc.reg_read(UC_ARM64_REG_SP), uc.reg_read(UC_ARM64_REG_LR)
             fr = state["frames"].setdefault(t, [])
             regs = "\t".join(f"{uc.reg_read(X0 + k) & 0xffffffffffffffff:#x}" for k in range(8))
-            out.write(f"call\t{seq}\t{t}\t{len(fr)}\t{label}\t{orig}\t{regs}\t{sp:#x}\t{lr:#x}\n")
+            caller = self.sym(lr).split("+")[0].replace("\t", " ")
+            out.write(f"call\t{seq}\t{t}\t{len(fr)}\t{label}\t{orig}\t{regs}\t{sp:#x}\t{lr:#x}\t{caller}\n")
             if deref:
                 for k in range(8):
                     v = uc.reg_read(X0 + k) & 0xffffffff
@@ -1031,11 +1026,8 @@ class Emu:
                     out.write(f"arg\t{seq}\tx{k}\t{b.hex()}\n")
             fr.append((seq, sp, lr, label))
             state["live"] += 1
-            h = state["ret_hooks"].get(lr)
-            if h:
-                h[1] += 1
-            else:
-                state["ret_hooks"][lr] = [uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr), 1]
+            if lr not in state["ret_hooks"]:
+                state["ret_hooks"][lr] = uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
             if writes and state["whook"] is None:
                 state["whook"] = uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
         if len(targets) <= 256:
@@ -1118,6 +1110,7 @@ class Emu:
         self.extend_short_vtables(uc, objs, V, img, F, rt, st)
         if getattr(self, "image_minus_one", False):
             self.image_vptr_minus_one(uc, img, F, V, rt, st)
+        self.vslot_thisless(uc, objs, V, rt, st)
         self.exe_vt_stats = dict(st)
         print("   exe-vtables: %d bound vtables (%d aligned with the exe's, %d with a destructor pair, %d left: "
               "their native slots disagree with the exe's): %d of %d trap slots filled from the exe's vftable"
@@ -1213,6 +1206,70 @@ class Emu:
               "moved to the copies: %d GOT entries, %d data words, %d adrp/add pairs"
               % (st["vtables extended"], st["slots added"], st["slots added as null"], st["GOT entries redirected"],
                  st["data words redirected"], st["adrp/add redirected"]))
+
+    VT_TL_BASE, VT_TL_SIZE = 0x0E800000, 0x00100000   # thunks dropping `this` for free functions in vtable slots
+
+    def vslot_thisless(self, uc, objs, V, rt, st):
+        """A vtable slot (the link's fill, the extended or minus-one copies) that holds a native free function in the
+        global namespace (_Z<digits>...: the decomp declares the exe's slot function as a non-member, e.g. __stdcall
+        FUN_00e8b490(int*, int, int), since its MSVC body ignores ecx) is called as a virtual with `this` in x0, so
+        every argument arrives one register early (HashTableBase's Initialize wrote the node's fields into the
+        table). Each such slot gets a thunk that drops `this`: x1..x7 -> x0..x6, then the function. A stand-in for
+        S2c's slot fill (a bridge for non-member slot functions)."""
+        conv = {}   # FUN_xxxxxxxx -> MSVC calling convention letter of its free declaration (the link's msvc.tsv)
+        mt = os.path.join(os.path.dirname(getattr(self, "addrmap_path", "") or "."), "cache", "msvc.tsv")
+        if os.path.isfile(mt):
+            for line in open(mt, errors="replace"):
+                m = re.match(r"\?(FUN_[0-9a-f]{8})@@Y([AGI])", line)
+                if m:
+                    conv.setdefault(m.group(1), m.group(2))
+        free = {}   # runtime address -> 'drop' (stdcall/cdecl: no this) | 'edx' (fastcall: self, edx, ...)
+        for name, la in getattr(self, "code_syms", {}).items():
+            m = re.match(r"_Z\d+(FUN_[0-9a-f]{8})", name)
+            if not m or conv.get(m.group(1)) is None:
+                continue
+            free[(la - self.link_base + self.base if self.relocatable else la) & 0xFFFFFFFF] = \
+                "edx" if conv[m.group(1)] == "I" else "drop"
+        if not free:
+            if not conv:
+                print("   exe-vtables: no msvc.tsv beside the address map: free functions in vtable slots left as they are")
+            return
+        ranges = []
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            ranges.append((rt(a + off) & 0xFFFFFFFF, rt(a + size) & 0xFFFFFFFF))
+        for lo, hi, _sym in getattr(self, "vt_ext_copies", []):
+            ranges.append((lo, hi))
+        for at, (_vt, _slots, end) in getattr(self, "vt_bound", {}).items():
+            if getattr(self, "VT_M1_BASE", 0) <= at < self.VT_M1_BASE + self.VT_M1_SIZE:
+                ranges.append((at, end))
+        uc.mem_map(self.VT_TL_BASE, self.VT_TL_SIZE, UC_PROT_READ | UC_PROT_EXEC)
+        cat, thunks = self.VT_TL_BASE, {}
+        for lo, hi in ranges:
+            n = (hi - lo) // 4
+            if n <= 0:
+                continue
+            words = struct.unpack(f"<{n}I", bytes(uc.mem_read(lo, 4 * n)))
+            for i, w in enumerate(words):
+                if w not in free:
+                    continue
+                if w not in thunks:
+                    if cat + 48 > self.VT_TL_BASE + self.VT_TL_SIZE:
+                        st["thisless region full"] += 1
+                        continue
+                    mov = lambda d, r: struct.pack("<I", 0xAA0003E0 | (r << 16) | d)   # orr xd, xzr, xr
+                    if free[w] == "drop":   # x1..x7 -> x0..x6
+                        code = b"".join(mov(r, r + 1) for r in range(7))
+                    else:                    # fastcall (self, edx, ...): x1..x6 -> x2..x7, x1 = 0
+                        code = b"".join(mov(r, r - 1) for r in range(7, 1, -1)) + mov(1, 31)
+                    code += struct.pack("<IIQ", 0x58000050, 0xD61F0200, w)   # ldr x16, #8; br x16; .quad target
+                    uc.mem_write(cat, code)
+                    thunks[w] = cat
+                    cat += (len(code) + 15) & ~15
+                uc.mem_write(lo + 4 * i, struct.pack("<I", thunks[w]))
+                st["thisless slots " + free[w]] += 1
+        print("   exe-vtables: vtable slots holding a free function: %d stdcall/cdecl (this dropped), %d fastcall "
+              "(edx inserted); %d thunks" % (st["thisless slots drop"], st["thisless slots edx"], len(thunks)))
 
     VT_M1_BASE, VT_M1_SIZE = 0x0E400000, 0x00400000   # minus-one copies of image vftables (data, then thunks)
 
