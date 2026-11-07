@@ -304,3 +304,6 @@ CRT-WRAPPER	fn	retarget	*	src/unmapped/nitpointerlistbase\.cpp	0x004edb60	*	pair
 PLACEMENT-NULLCHECK	fn	code	CTOR1	src/unmapped/threadsafestructures\.cpp	0x00906160	*	CTOR1 by design: <new>'s throw() placement form null-checks this (and at /Od calls it out of line); attributed to CTOR1 by leave-out at 0685791
 PLACEMENT-NULLCHECK	fn	code	*	src/staging/blk_006e0000_od\.cpp	0x006ee100	*	CTOR1 placement null check (read at c1039e7 when the unit first compiled under MSVC)
 PLACEMENT-NULLCHECK	fn	code	*	src/staging/blk_00aa0000_od_ob1_variant\.cpp	0x00ab2e70	*	CTOR1 placement-new null check of a std::vector<char> constructed in place (read at c1039e7 when the unit first compiled)
+CRT-INLINE	fn	code	*	src/fallout/ai/combat/beamprojectile\.cpp	0x009b8b10	*	DECL1-STDABS: the exe's out-of-line std::abs(float) (0x00408840 -> 0x00408860, (float)fabs((double)x)) where the prepared side inlines the standard one (CRT fabs); rounding to float commutes with abs: the same value
+CRT-INLINE	fn	code	*	src/fallout_shared/teswater\.cpp	0x0049e390	*	DECL1-STDABS as beamprojectile 0x009b8b10, plus fld b; fsubr a for fld a; fsub b (exact)
+CRT-INLINE	fn	code	*	src/fallout_shared/teswater\.cpp	0x004e6a80	*	DECL1-STDABS as beamprojectile 0x009b8b10, plus fld b; fsubr a for fld a; fsub b (exact)

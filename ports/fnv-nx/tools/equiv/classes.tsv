@@ -1,0 +1,27 @@
+# declared explanation classes of the MSVC equivalence gate (tools/equiv/explain.py; docs/EQUIVALENCE.md, D24)
+# A class listed here is a DECLARED difference: its functions do not count against "0 wrong functions" (D24), for the
+# reason given. A class of explained.tsv that is not listed here is OPEN: its code functions count, and so does every
+# no-build unit (the prepared side compares nothing there; a no-build class is never declared).
+# declared: platform (the target's platform differs from the PC's on purpose: CRT, link, allocator), compiler (MSVC
+# 2008's code generation of an equivalent spelling; measured, the target compiler does not see it), by-design (a
+# deliberate fix, PATCHES.md / a rule verdict).
+# class	declared	reason
+EH-ONLY	compiler	identical when both sides build with /EHs-c-: MSVC's EH frames and unwind states only; the target has its own EH model
+EH-ONLY+EXTERN-RELOAD	platform	EH frame only, plus one reload of an image-bound const (C++ linkage, LINK1): the same value
+CRT-WRAPPER	platform	the CRT function where the exe calls the game's forwarding wrapper of it (the relocation pairs are checked)
+CRT-INLINE	platform	MSVC header's inline C++ overload where the exe calls the game's out-of-line copy of it (std::abs(float) 0x00408840 -> 0x00408860 = (float)fabs((double)x)); the same value for every input
+CRT-BINDING	platform	the CRT function bound where the decomp's namespace copy of it was (memset, free through its import slot): the same operation
+CRT-INTRINSIC	compiler	MSVC's inline form of a CRT call (constant-size memcpy -> rep movsd) with the CRT's declaration
+DECORATION	platform	the same function under another MSVC decoration (ANON1 names an unnamed return struct): the link binds by address
+EXTERN-RELOAD	platform	link by address (D20) needs image-bound variables with external linkage (STATIC1): MSVC reloads one after a call where an internal static stayed in a register; the same value: the variable was internal in the original, so only this unit's code writes it
+PLACEMENT-NULLCHECK	compiler	MSVC 2008 null-checks the result of every new-expression before the constructor, also for an allocation function without throw() (measured, docs/EQUIVALENCE.md "Stream EQ"); GCC -O2 emits no check: the target code is the explicit constructor call's
+GLOBAL-NEW	platform	new[] reaches the global operator new[] (ALLOC1 removes the unit's MemoryManager copy on the target; the global one forwards to MemoryManager)
+S1B-BYDESIGN	by-design	S1b's deliberate fixes (docs/PATCHES.md, by-design table)
+DECOMP-BUGFIX	by-design	a deliberate decomp-bug fix (UNIT1 verdict: the stack object passed to std::exception grows 8 -> 12 bytes)
+PTR1-UNSIGNED-ZERO	compiler	a function address compared with 0: MSVC emits `ja` for the unsigned compare and `jne` for the != spelling; CF is 0 there, the same branch
+X87-SCHEDULE	compiler	x87 operands commuted (IEEE add / multiply commute), jumps shifted
+X87-EXCESS-PRECISION	compiler	MSVC 2008 x87 keeps a float in extended precision on one spelling only; AArch64 has none (FLT_EVAL_METHOD 0), so the target rounds where the exe did
+SSE-SCHEDULE	compiler	an exact SSE operation with its operands through another register
+BLOCK-ORDER	compiler	the same multiset of instructions with the blocks in another order (MSVC merges GOTO2's cloned tails again)
+INLINE-DECISION	compiler	MSVC /Ob1 inlines a unit's own inline function once the spelling around it changes: the same bodies
+STL-CHECK-MACRO	compiler	MSVC's own _SCL_SECURE_VALIDATE in place of the decomp's copy: a dead `xor ecx,ecx; jne` after each _invalid_parameter_noinfo call

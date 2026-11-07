@@ -129,5 +129,15 @@ check(equiv.retarget_pairs([[4, 'a', '0x00406d30', '_strcpy_s', None], [9, 'a', 
       'retarget pairs: distinct, sorted, a local definition by name')
 
 check(all(x['reason'] and x['cls'].upper() == x['cls'] for x in real), 'explained.tsv: every row has a class and a reason')
+# D24: declared classes (classes.tsv); open = code functions outside them + every no-build unit
+decl = ex.load_classes()
+known = {x['cls'] for x in real} | {'S1B-BYDESIGN'}
+check(decl and set(decl) <= known, 'classes.tsv: every declared class is a class of explained.tsv: %s' % sorted(set(decl) - known))
+nb_classes = {x['cls'] for x in real if x['what'] == 'unit'}
+check(not set(decl) & nb_classes, 'classes.tsv: no no-build class is declared: %s' % sorted(set(decl) & nb_classes))
+fns3 = [dict(kind='code', cls='EXTERN-RELOAD'), dict(kind='code', cls=None), dict(kind='code', cls='NEWCLASS'),
+        dict(kind='eh', cls=None), dict(kind='retarget', cls='CRT-WRAPPER')]
+m3 = ex.metric(fns3, [dict(cls='MSVC-OPAQUE-ENUM'), dict(cls=None)], reports=[r, two], declared=decl)
+check(m3['open_code'] == 2 and m3['open'] == 4, 'open: undeclared / unexplained code functions + every no-build unit (%s)' % m3)
 print('explain: %d failed' % len(fails))
 sys.exit(1 if fails else 0)
