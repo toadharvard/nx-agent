@@ -27,4 +27,7 @@ void __cdecl operator delete(void *, unsigned int);
 void __cdecl operator delete[](void *, unsigned int);
 #endif
 /* _CxxThrowException and _ThrowInfo: predefined by the MSVC C++ front end (nothing to declare) */
+/* ENUM1-FWD: fnvnx_compat.h's `: int` base of an opaque enum declaration; MSVC 2008 has no opaque declarations, its
+ * forward declaration `enum X;` (the decomp's own spelling) declares the same int-based type */
+#define FNVNX_ENUM_INT
 #endif

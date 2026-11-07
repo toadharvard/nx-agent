@@ -146,6 +146,9 @@ check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', 
 
 got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
 check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
+got = prepare.r_platform_protos('/x/src/v.cpp', 'int g();\nnamespace std {\nfloat abs(float);\n}\nfloat h(float x) { return std::abs(x); }\n', Counter())
+check('DECL1-STDABS a std::abs prototype becomes fnvnx_cmath/std_abs.h', got,
+      ['#include "fnvnx_cmath/std_abs.h" /* fnv-nx DECL1 */', 'std::abs(x)'], ['float abs(float);', '<stdlib.h>'])
 
 # ---- STL2: units with the real container headers use the VC9-layout shim
 _stl2 = ('// std::string in a comment\n#include <string>\n#include <vector>\nnamespace std {\ntemplate <> class allocator<E>\n'
@@ -399,7 +402,7 @@ got = run(s1.r_opaque_enums, 'enum DIALOGUE_TYPE;\nenum DIALOGUE_TYPE\n{\n    A 
           os.path.join(_e, 'src', 'b.cpp'))
 s1._OPAQUE_NAMES = None
 check('ENUM1 opaque enum gets int as its base, and so does its definition', got,
-      ['enum DIALOGUE_TYPE : int;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE : int;', 'enum Other { B };'])
+      ['enum DIALOGUE_TYPE FNVNX_ENUM_INT;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE FNVNX_ENUM_INT;', 'enum Other { B };'])
 s1._OPAQUE_NAMES = None
 check('ENUM1 a definition int cannot hold keeps its form',
       run(s1.r_opaque_enums, 'enum WIDE { W = 0x80000000 };\n', os.path.join(_e, 'src', 'c.cpp')), ['enum WIDE { W'])
