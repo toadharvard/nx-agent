@@ -22,7 +22,10 @@ Sources (the number each row shows):
                            #1 the fault groups of <h>-faults.json (fnvnx-faults/1, tools/report/faults.py: new /
                            known / fixed in the note); #3 unimpl, #4 open, #6 decode + input of <h>-plat.json (fnvnx-plat/1); #7 the metric of
                            <h>-threads.json (fnvnx-threads-job/1); #8 failed allocations + 1 if the peak is over the
-                           budget, <h>-mem.json (fnvnx-mem/1); #12 frames over the budget, <h>-frames.json
+                           budget, <h>-mem.json (fnvnx-mem/1); #10 the metric of <h>-scripterr.json
+                           (fnvnx-scripterr/1: distinct (form, kind, caller) groups not in the original's run;
+                           or the same object under "scripterr" in <h>-scenario.json, where S18's job embeds it);
+                           #12 frames over the budget, <h>-frames.json
                            (fnvnx-frames/1; only with a calibrated --scale). The lane's number is shown beside the
                            scenario's when both exist.
 Writes <out> and <out>.json (fnvnx-zero/1). Numbers and our own names only. Exit 0.
@@ -147,12 +150,17 @@ def scenario_target(n):
     return f
 
 
-def lane(job, schema, pick, why):
+def lane(job, schema, pick, why, embedded_in=None):
     def f(R, h):
         ps = R.get(h, job, 'json')
+        j = load(ps[0]) or {} if ps else {}
+        if not ps and embedded_in:   # a lane that runs inside another job: its object under the job's sidecar
+            ps = R.get(h, embedded_in, 'json')
+            j = (load(ps[0]) or {}).get(job) or {} if ps else {}
+            if not j:
+                return None
         if not ps:
             return None
-        j = load(ps[0]) or {}
         inner = j.get('report') if schema == 'fnvnx-threads-job/1' else j
         if j.get('schema') != schema or inner is None:
             return (None, ps[:1], 'no %s data' % job)
@@ -170,6 +178,8 @@ LANES = {
     7: lane('threads', 'fnvnx-threads-job/1', lambda j: j.get('metric'), 'threads lane: races + cycles + long waits'),
     8: lane('mem', 'fnvnx-mem/1', lambda j: j.get('fails', 0) + (1 if j.get('over_budget') else 0) if j.get('runs')
             else None, 'mem lane: failures + over budget'),
+    10: lane('scripterr', 'fnvnx-scripterr/1', lambda j: j.get('metric'),
+             lambda j: 'scripterr lane: groups not in the original (%s in it)' % j.get('in_original'), 'scenario'),
     12: lane('frames', 'fnvnx-frames/1', lambda j: (j.get('device_ms') or {}).get('over_budget'),
              'frames lane: frames over budget (calibrated)'),
 }

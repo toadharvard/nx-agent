@@ -46,7 +46,11 @@
  *     the first time (the per-thread CPU timers of --profile, at --profile-hz, run for this even without --profile), a
  *     hook milestone reached, or a --feed step done. After S seconds without any, linhost prints
  *     "linhost: hang: no progress for S s (last: <what> at <ms> ms)", one "linhost: hang thread <tid> pc .. lr .. frames .."
- *     line per thread (each thread interrupted by SIGURG walks its own frame chain), writes the profile and exits 4. */
+ *     line per thread (each thread interrupted by SIGURG walks its own frame chain), writes the profile and exits 4;
+ *   - --calls FILE: the call watcher (D25 #10, tools/report/scripterr.py; FILE from tools/perf/callwatch.py resolve):
+ *     "call 0xADDR NAME [label=xN | label=*xN+OFF]..." lines; every entry of such a function prints
+ *     "linhost: call NAME caller 0x<lr> label 0x<value> ..." (argument registers, or the 32-bit word they point to;
+ *     values only, never strings; the first 5000 calls), and every exit path a "linhost: calls NAME n <count>" line. */
 #include <stdint.h>
 #include <stddef.h>
 
@@ -567,13 +571,19 @@ static void on_prof(int sig, void *info, void *ucv) {
     p->busy = 0;
 }
 /* --feed's hooks (milestones) and --frame share the trampolines (patch_site) */
-#define HOOK_MAX 64
+#define HOOK_MAX 128
 static const char *g_hook_name[HOOK_MAX];
 static volatile int g_hook_hit[HOOK_MAX];
 static u64 g_hook_at[HOOK_MAX];
 static int g_hook_frame[HOOK_MAX];   /* the same function is a --frame too: one site does both */
+/* --calls: a hook that logs its arguments; specs: register, deref (read the u32 at reg + off), label */
+typedef struct { const char *label; uint8_t reg, deref; uint32_t off; } CallSpec;
+static uint8_t g_hook_call[HOOK_MAX], g_hook_nspec[HOOK_MAX];
+static CallSpec g_hook_spec[HOOK_MAX][4];
+static volatile u64 g_hook_count[HOOK_MAX];
+static volatile u64 g_call_lines;
 static void hook_mark(uint32_t id);
-__attribute__((used)) void linhost_hook_hit(uint32_t id);
+__attribute__((used)) void linhost_hook_hit(uint32_t id, const u64 *regs);
 static void linhost_prof_frame(void) {
     if (g_prof_fd < 0) return;
     ProfBuf *p = prof_mine(gettid_());
@@ -583,9 +593,34 @@ static void linhost_prof_frame(void) {
     prof_rec(p, 'f', now_ns(), k, 0);
     p->busy = 0;
 }
-__attribute__((used)) void linhost_hook_hit(uint32_t id) {
+static int readable(u64 a);
+/* regs: the stub's save area: x0..x7 at [0..7], x8, the continuation, x29, x30 (the caller's return address) */
+static void call_log(uint32_t id, const u64 *regs) {
+    __atomic_add_fetch(&g_hook_count[id], 1, __ATOMIC_RELAXED);
+    if (__atomic_add_fetch(&g_call_lines, 1, __ATOMIC_RELAXED) > 5000) return;
+    char line[400];
+    int o = 0;
+    #define CAPP(s) do { const char *s_ = (s); while (*s_ && o < (int)sizeof line - 2) line[o++] = *s_++; } while (0)
+    #define CHEX(v) do { u64 v_ = (v); char h_[19]; int n_ = 0; char t_[16]; do t_[n_++] = "0123456789abcdef"[v_ & 15]; while (v_ >>= 4); h_[0] = '0'; h_[1] = 'x'; int k_ = 2; while (n_) h_[k_++] = t_[--n_]; h_[k_] = 0; CAPP(h_); } while (0)
+    CAPP("linhost: call "); CAPP(g_hook_name[id]); CAPP(" caller "); CHEX(regs[11]);
+    for (int k = 0; k < g_hook_nspec[id]; k++) {
+        const CallSpec *c = &g_hook_spec[id][k];
+        u64 v = c->reg <= 8 ? regs[c->reg] : 0;
+        CAPP(" "); CAPP(c->label); CAPP(" ");
+        if (c->deref) {
+            u64 a = (v & 0xFFFFFFFFull) + c->off;
+            if (readable(a) && !(a & 3)) { CHEX(*(volatile uint32_t *)(uintptr_t)a); } else CAPP("unreadable");
+        } else CHEX(v & 0xFFFFFFFFull);
+    }
+    line[o++] = '\n';
+    sc(SYS_write, 2, (long)line, o, 0, 0, 0);
+    #undef CAPP
+    #undef CHEX
+}
+__attribute__((used)) void linhost_hook_hit(uint32_t id, const u64 *regs) {
     if (id == 0xFFFFu) { linhost_prof_frame(); return; }
     if (id < HOOK_MAX && g_hook_frame[id]) linhost_prof_frame();
+    if (id < HOOK_MAX && g_hook_call[id]) { call_log(id, regs); return; }
     hook_mark(id);
     feed_tick();   /* a milestone may end the plan: at once, not at the next host call */
 }
@@ -625,7 +660,17 @@ static void prof_thread_end(void) {
     p->busy = 0;
     __atomic_store_n(&p->tid, 0, __ATOMIC_RELEASE);   /* the slot is free (an ended thread's timer never fires) */
 }
+static volatile int g_calls_said;
+static void calls_summary(void) {
+    if (__atomic_exchange_n(&g_calls_said, 1, __ATOMIC_ACQ_REL)) return;
+    for (int i = 0; i < HOOK_MAX; i++)
+        if (g_hook_call[i]) {
+            puts_(2, "linhost: calls "); puts_(2, g_hook_name[i]); puts_(2, " n ");
+            put_dec(2, g_hook_count[i]); puts_(2, "\n");
+        }
+}
 static void prof_flush_all(void) {
+    calls_summary();
     if (g_prof_fd < 0) return;
     for (int i = 0; i < PROF_SLOTS; i++) if (g_prof[i].tid > 0) prof_flush(&g_prof[i]);
 }
@@ -650,7 +695,7 @@ __asm__(".text\n.global linhost_frame_stub\nlinhost_frame_stub:\n"
         "  stp x0, x1, [sp]\n  stp x2, x3, [sp, #16]\n  stp x4, x5, [sp, #32]\n  stp x6, x7, [sp, #48]\n"
         "  stp x8, x16, [sp, #64]\n  stp x29, x30, [sp, #80]\n"
         "  stp q0, q1, [sp, #96]\n  stp q2, q3, [sp, #128]\n  stp q4, q5, [sp, #160]\n  stp q6, q7, [sp, #192]\n"
-        "  mov w0, w15\n  bl linhost_hook_hit\n"
+        "  mov w0, w15\n  mov x1, sp\n  bl linhost_hook_hit\n"
         "  ldp q0, q1, [sp, #96]\n  ldp q2, q3, [sp, #128]\n  ldp q4, q5, [sp, #160]\n  ldp q6, q7, [sp, #192]\n"
         "  ldp x0, x1, [sp]\n  ldp x2, x3, [sp, #16]\n  ldp x4, x5, [sp, #32]\n  ldp x6, x7, [sp, #48]\n"
         "  ldp x8, x16, [sp, #64]\n  ldp x29, x30, [sp, #80]\n"
@@ -1160,6 +1205,51 @@ static u64 h_input_poll(u64 buf, u64 cap) {
     return n;
 }
 
+/* ---- --calls FILE ("call 0xADDR NAME label=xN|label=*xN+OFF ...", tools/perf/callwatch.py resolve) */
+static void calls_load(const char *path, u64 *hook_addr) {
+    long fd = sc(SYS_openat, AT_FDCWD, (long)path, 0, 0, 0, 0);
+    if (fd < 0) die("--calls: cannot open the file");
+    u64 cap = 1 << 18;
+    char *b = anon(cap + 1);
+    long n = 0, r;
+    while (n < (long)cap && (r = sc(SYS_read, fd, (long)(b + n), (long)cap - n, 0, 0, 0)) > 0) n += r;
+    sc(SYS_close, fd, 0, 0, 0, 0, 0);
+    b[n] = 0;
+    int calls = 0;
+    for (char *p = b; *p;) {
+        char *e = p;
+        while (*e && *e != '\n') e++;
+        int more = *e != 0;
+        *e = 0;
+        char *q = p;
+        p = more ? e + 1 : e;
+        char *op = feed_tok(&q);
+        if (!streq(op, "call")) continue;
+        if (g_nhooks == HOOK_MAX) die("--calls: too many hooks");
+        int id = g_nhooks++;
+        hook_addr[id] = h_ext_hex(feed_tok(&q));
+        g_hook_name[id] = feed_tok(&q);
+        g_hook_call[id] = 1;
+        for (char *t; *(t = feed_tok(&q)) && g_hook_nspec[id] < 4;) {
+            char *eq = t;
+            while (*eq && *eq != '=') eq++;
+            if (!*eq) continue;
+            *eq++ = 0;
+            CallSpec *c = &g_hook_spec[id][g_hook_nspec[id]];
+            c->label = t;
+            c->deref = *eq == '*';
+            if (c->deref) eq++;
+            if (*eq != 'x') continue;
+            c->reg = (uint8_t)feed_dec(eq + 1);
+            while (*eq && *eq != '+') eq++;
+            c->off = *eq == '+' ? (uint32_t)h_ext_hex(eq + 1) : 0;
+            if (c->reg <= 8) g_hook_nspec[id]++;
+        }
+        calls++;
+    }
+    puts_(2, "linhost: --calls: "); put_dec(2, (u64)calls); puts_(2, " functions watched\n");
+}
+
 /* ---- --progress-timeout: the monitor thread and the per-thread dump */
 static int g_main_tid;
 static volatile int g_dump_ack;
@@ -1242,7 +1332,7 @@ __attribute__((used)) long hmain(long *sp) {
     const char *guest = 0;
     int skip_init = 0;
     u64 heap_mib = 64;
-    const char *prof_path = 0, *frames[16], *feed_path = 0;
+    const char *prof_path = 0, *frames[16], *feed_path = 0, *calls_path = 0;
     int nframes = 0;
     for (long i = 1; i < argc; i++) {
         if (streq(argv[i], "--root") && i + 1 < argc) g_root = argv[++i];
@@ -1255,10 +1345,11 @@ __attribute__((used)) long hmain(long *sp) {
         else if (streq(argv[i], "--frame") && i + 1 < argc && nframes < 16) frames[nframes++] = argv[++i];
         else if (streq(argv[i], "--feed") && i + 1 < argc) feed_path = argv[++i];
         else if (streq(argv[i], "--progress-timeout") && i + 1 < argc) g_progress_s = parse_u(argv[++i]);
+        else if (streq(argv[i], "--calls") && i + 1 < argc) calls_path = argv[++i];
         else if (!guest && argv[i][0] != '-') guest = argv[i];
-        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] [--feed FILE] [--progress-timeout S] guest.elf");
+        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] [--feed FILE] [--progress-timeout S] [--calls FILE] guest.elf");
     }
-    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] [--feed FILE] [--progress-timeout S] guest.elf");
+    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] [--feed FILE] [--progress-timeout S] [--calls FILE] guest.elf");
     if (g_expect) {
         g_expect_len = slen(g_expect);
         if (!g_expect_len || g_expect_len >= sizeof g_win / 2) die("--expect: 1..255 bytes");
@@ -1301,14 +1392,15 @@ __attribute__((used)) long hmain(long *sp) {
     }
     if (g_collect && !skip_init) die("--collect-traps needs --skip-faulting-init (the trap symbols are found there)");
     if (skip_init) install_guards(fd);
-    if (nframes || feed_path) {   /* the hook trampolines: one page above the guards' page */
+    if (nframes || feed_path || calls_path) {   /* the hook trampolines: one page above the guards' page */
         u64 page = ((g_hi + 0xFFFF) & ~0xFFFFull) + 0x10000;
         if (map_at(page, 0x10000, 7)) die("--frame/--feed: no room for the trampolines");
         g_hook_page = (uint32_t *)(uintptr_t)page;
     }
-    if (feed_path) {
+    if (feed_path || calls_path) {
         static u64 hook_addr[HOOK_MAX];
-        feed_load(feed_path, hook_addr);
+        if (feed_path) feed_load(feed_path, hook_addr);
+        if (calls_path) calls_load(calls_path, hook_addr);
         install_hooks(hook_addr, g_nhooks);
     }
     if (nframes) install_frames(fd, frames, nframes);
