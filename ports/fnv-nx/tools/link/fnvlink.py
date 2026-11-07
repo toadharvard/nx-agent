@@ -1830,6 +1830,36 @@ def emit_flag_stub(name, target, flags):
                       '    .text']) + '\n'   # the bridges after it assume .text
 
 
+FREE_SYM = '__fnvnx_vfree_%08x'   # exe slot -> a decomp free function: `this` dropped / edx inserted
+FREE_SLOT = re.compile(r'^\?FUN_[0-9a-f]{8}@@Y([AGI])')   # a global FUN_<a> and its MSVC convention (cdecl, stdcall, fastcall)
+
+
+def free_slot(a, nd, bridges, st):
+    """S5's class 1 (s5-003): the decomp declares the exe's slot function as a global non-member (`__stdcall
+    FUN_00e8b490(int *, int, int)`: its MSVC body ignores ecx), so a virtual call, which passes `this` in x0, hands
+    it every argument one register early. Such a slot gets a bridge by the definition's MSVC convention: cdecl /
+    stdcall drop `this` (x1..x7 -> x0..x6), fastcall (ecx = this, edx undefined on the x86 call, then the stack)
+    inserts edx as 0 (x1..x6 -> x2..x7). Returns the bridge symbol, or None for any other definition."""
+    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'_Z\d+FUN_[0-9a-f]{8}', nd['sym'].name):
+        return None
+    m = FREE_SLOT.match(nd.get('msvc') or '')
+    if not m:
+        return None
+    mode = 'edx' if m.group(1) == 'I' else 'drop'
+    name = FREE_SYM % a
+    if name not in bridges:
+        if mode == 'drop':
+            body = ['    mov x%d, x%d' % (r, r + 1) for r in range(7)]
+        else:
+            body = ['    mov x%d, x%d' % (r, r - 1) for r in range(7, 1, -1)] + ['    mov w1, #0']
+        bridges[name] = '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2',
+                                   '    .globl %s' % name, '    .hidden %s' % name, '    .type %s, %%function' % name,
+                                   '%s:' % name] + body + ['    b %s' % (ADDR_SYM % a),
+                                   '    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+    st['free-slot-' + mode] += 1
+    return name
+
+
 def emit_gdel_stub(name, d0, d1):
     return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
                       '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
@@ -1955,6 +1985,9 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             if vs is None:
                 return None, 'no %s at the address' % isig.variant
             return ADDR_SYM % a + ('' if vs is nd['sym'] else '_' + isig.variant), 'dtor'
+        fr = free_slot(a, nd, stubs, st) if not isig.variant else None
+        if fr is not None:
+            return fr, 'free function: %s' % fr
         if ds is None or ds.kind != 'func' or ds.raw_params is None or isig.raw_params is None:
             return None, 'no declaration to compare'
         how = slot_abi(isig, ds)
@@ -2135,7 +2168,9 @@ def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where):
     constant leaf, else a trap stub reporting the exe address (traps[t] = (text, where)). Counts go to st."""
     nd = native.get(a)
     var = sigs.itanium_variant(nd['sym'].name) if nd else None
-    if nd is not None and var is None:
+    if nd is not None and var is None and free_slot(a, nd, bridges, st):
+        t = FREE_SYM % a   # a decomp free function (S5 class 1): this dropped / edx inserted
+    elif nd is not None and var is None:
         t = ADDR_SYM % a
         st['slots-native'] += 1
     elif nd is not None and var == 'D0' and nd['variants'].get('D1') is not None:
