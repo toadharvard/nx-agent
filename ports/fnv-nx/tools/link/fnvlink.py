@@ -340,6 +340,17 @@ def body_data_addr(body_bind, un):
     return int(m.group(1), 16) if cls == 'body-exe-data' and m else None
 
 
+ADDR_NAME = re.compile(r'^__fnv_[0-9a-f]{8}$')
+
+
+def provider_or_addr(a, native, providers):
+    """The symbol generated code (exit thunks, stubs) calls for exe address a: `__fnv_<a>` where the native build
+    defines a, else S4's provider when crt_symbols.tsv has one, else `__fnv_<a>` (a visible trap) (R4 recon4-014)."""
+    if a not in native and a in (providers or {}):
+        return providers[a][0]
+    return ADDR_SYM % a
+
+
 def reset_synth(out):
     """Before the first resolve of a link run: drop the previous run's synthesized objects from what resolve loads -
     out/bodies/ (bodies.py's objects, synth.tsv and bind.tsv; nothing there is a cache) and vtables/synth.tsv (the
@@ -1092,7 +1103,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     if sh_ is not None and (sh_[0] != 'thiscall' or sh_[2] in native):
                         cls, target = 'text-callback', XEXIT_SYM % addr
                         if target not in bridges:
-                            bridges[target] = xexit.emit(target, sh_, lambda a_: ADDR_SYM % a_)
+                            bridges[target] = xexit.emit(target, sh_, lambda a_: provider_or_addr(a_, native, providers))
                             used_addr.update([sh_[1], sh_[2]] if sh_[0] == 'thiscall' else [sh_[1]])
                         stats['xexit_' + sh_[0]] += 1
                     else:
@@ -1120,6 +1131,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             elif cls == 'import' and addr in import_syms:   # IAT slot: the slot's api, not the decomp's spelling
                 target = import_syms[addr]
                 stats['imports_bound'] += 1
+            if cls == 'unresolved' and ADDR_NAME.match(un) and int(un[6:], 16) in providers and \
+                    int(un[6:], 16) not in native:
+                # a reference spelled `__fnv_<a>` (recon / decomp text naming the address) where S4 provides a: the
+                # provider, as for every other reference to a (R4 recon4-014)
+                addr = int(un[6:], 16)
+                cls, target = 'provider', providers[addr][0]
+                stats['addr_name_provider'] += 1
             if cls == 'unresolved' and un in vslots:
                 cls = 'vslot-unresolved'
             elif cls == 'unresolved' and isig.variant:
