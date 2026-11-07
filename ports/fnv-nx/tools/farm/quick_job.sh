@@ -106,6 +106,16 @@ lane_a() {
 	if [ -f "$R/build.rc" ] && [ "$(cat "$R/build.rc")" != 0 ]; then   # lane D would run an older build's guest
 		for c in threads frames mem plat scenario boottrace; do skip $c "the build failed"; done
 	else lane_d & fi   # the emulator lanes need this build; they run beside fuzz and audit
+	# fuzz and audit on this head's own prepared tree and link (full_job's build directory): no prepare farm has to
+	# publish t/<c12> for a quick farm (qk1 on 2e000047: "no prepared tree for the link commit", both not run)
+	local fb=$FARM_HOME/full/build tr
+	tr=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("artifacts",{}).get("tree") or "")' \
+		"$fb/prepare/stage.json" 2>/dev/null)
+	case "$tr" in ""|/*) ;; *) tr=$P/$tr ;; esac
+	[ -n "$tr" ] && [ -f "$tr/build/units.json" ] || tr=$fb/prepare/tree
+	if [ -f "$R/build.rc" ] && [ "$(cat "$R/build.rc")" = 0 ] && [ -f "$tr/build/units.json" ] && [ -d "$fb/link/fixed" ]; then
+		export FUZZ_TREE=$tr FUZZ_LINK_DIR=$fb/link FUZZ_LINK_COMMIT=$COMMIT
+	fi
 	if on fuzz; then
 		FUZZ_MAX_S=${FUZZ_MAX_S:-600} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
 	else skip fuzz "not affected"; fi
