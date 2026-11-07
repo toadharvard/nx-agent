@@ -812,6 +812,7 @@ class Emu:
                 F[int(f[0], 16)] = self.code_syms[f[2]]
             elif len(f) > 6 and f[1] == "V" and f[2] in objs:
                 V.append((int(f[0], 16), f[2], int(f[6] or 0)))
+        V += self.ctor_store_pairs(img, objs, V, addrmap)
         self.exe_vt = (img, objs, F, V)
         self.got = None
         out = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", elf], capture_output=True, text=True).stdout
@@ -1486,6 +1487,46 @@ class Emu:
             return
         self.pre_calls = None
         uc.context_restore(self.pre_ctx)
+
+    def ctor_store_pairs(self, img, objs, V, addrmap):
+        """Native vtables of placeholder classes named after their constructor (_ZTV<n>FUN_<ctor>) that the address
+        map does not bind to an exe vftable stay as short as the decomp declared them (NiDX9Renderer's constructor
+        class FUN_00e754a0: one slot, called at slot 54 through a call-only declaration). The exe's constructor
+        names the vftable it stores: the last `mov dword ptr [reg], imm32` (C7 00..07 imm32) before its first ret
+        whose imm32 is a vftable. Those pairs join the bound vtables (filled, extended, references moved). A
+        stand-in for S2c's binder (pair by the constructor's vptr store)."""
+        bound_syms = {sym for _vt, sym, _off in V}
+        ctors = set()
+        for line in open(addrmap):
+            f = line.rstrip("\n").split("\t")
+            if len(f) > 3 and f[1] == "C":
+                ctors.add(int(f[0], 16))
+        pairs = []
+        for sym in objs:
+            m = re.fullmatch(r"_ZTV\d+FUN_([0-9a-f]{8})", sym)
+            if not m or sym in bound_syms:
+                continue
+            ctor = int(m.group(1), 16)
+            if ctor not in ctors:
+                continue
+            try:
+                code = img.pe.read_rva(ctor - img.pe.image_base, 0x400)   # Image maps the data sections only
+            except Exception:
+                code = None
+            if not code:
+                continue
+            last = None
+            for k in range(len(code) - 6):
+                if code[k] in (0xC3, 0xC2) and k > 0 and code[k - 1] in (0x5E, 0x5F, 0x5B, 0x5D, 0xC9, 0x8B, 0x59):
+                    break
+                if code[k] == 0xC7 and code[k + 1] in (0x00, 0x01, 0x02, 0x03, 0x06, 0x07):
+                    imm = struct.unpack_from("<I", code, k + 2)[0]
+                    if 0x00fdf000 <= imm < 0x01200000 and self.is_exe_vftable(img, imm):
+                        last = imm
+            if last is not None:
+                pairs.append((last, sym, 8))
+        print(f"   exe-vtables: {len(pairs)} constructor-named native vtables paired by their constructor's vptr store")
+        return pairs
 
     def install_rebind_colliding(self, addrmap, elf):
         """table option rebind-colliding: a global free function named FUN_<X> whose definition is not the address
