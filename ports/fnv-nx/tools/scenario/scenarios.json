@@ -77,10 +77,11 @@
      "do": "press",
      "keys": [
       "Down",
+      "Down",
       "Return"
      ],
      "gap": 1.0,
-     "comment": "no saves: New is the first entry"
+     "comment": "the menu lists Continue first even with no save: Down highlights Continue, Down again New (seen on the original under Wine)"
     },
     {
      "do": "wait",
