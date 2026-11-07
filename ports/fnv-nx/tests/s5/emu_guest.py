@@ -78,7 +78,7 @@ _PLACEMENT = None
 
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
 STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
-TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one")
+TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding")
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one",)   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
 
@@ -1487,6 +1487,48 @@ class Emu:
         self.pre_calls = None
         uc.context_restore(self.pre_ctx)
 
+    def install_rebind_colliding(self, addrmap, elf):
+        """table option rebind-colliding: a global free function named FUN_<X> whose definition is not the address
+        map's native for X (the decomp keeps an unrelated helper under that name; "the served context contains an
+        unrelated noinline helper under this tag") takes every by-name reference, so those callers run the wrong
+        body: the display-mode list's bits per pixel came from a DXT block-size helper (0 for X8R8G8B8) and renderer
+        init rejected every mode. Each such definition's entry branches to the address's native. A stand-in for
+        S2c's resolver (bind such references by address)."""
+        import subprocess
+        out = subprocess.run(["aarch64-linux-gnu-nm", "--defined-only", elf], capture_output=True, text=True).stdout
+        glob, anyaddr = {}, {}
+        for line in out.splitlines():
+            f = line.split()
+            if len(f) == 3:
+                a = int(f[0], 16)
+                anyaddr.setdefault(f[2], a)
+                if f[1] in "TW":
+                    glob[f[2]] = a
+        bound = {}
+        for line in open(addrmap):
+            f = line.rstrip("\n").split("\t")
+            if len(f) > 3 and f[1] in ("F", "X", "C") and f[3]:
+                bound.setdefault(f[0], f[3])
+        rt = (lambda v: v - self.link_base + self.base) if self.relocatable else (lambda v: v)
+        done = []
+        for name, a in glob.items():
+            m = re.match(r"_Z\d+FUN_([0-9a-f]{8})", name)
+            if not m:
+                continue
+            b = bound.get(m.group(1))
+            if not b or b == name:
+                continue
+            ta = glob.get(b, anyaddr.get(b))
+            if ta is None or ta == a:
+                continue
+            disp = (ta - a) >> 2
+            if not -(1 << 25) <= disp < (1 << 25):
+                continue
+            self.uc.mem_write(rt(a), struct.pack("<I", 0x14000000 | (disp & 0x3FFFFFF)))
+            done.append(name)
+        print(f"   rebind-colliding: {len(done)} global FUN_<addr> definitions that are not the address's native now "
+              f"branch to it" + (f" (e.g. {', '.join(sorted(done)[:3])})" if done else ""))
+
     def on_stub_entry(self, uc, addr, size, data):
         if data[1].startswith("use-malloc:x") and "malloc" in self.code_syms:   # replaced on every call
             self.replaced = getattr(self, "replaced", {})
@@ -2130,6 +2172,8 @@ def main(argv):
     emu.miles = getattr(emu, "miles", {})
     if a.stub_faults and a.addrmap and "ctor-returns-this" in fault_table_options(a.stub_faults):
         emu.install_ctor_this(a.addrmap, a.elf)
+    if a.stub_faults and a.addrmap and "rebind-colliding" in fault_table_options(a.stub_faults):
+        emu.install_rebind_colliding(a.addrmap, a.elf)
     emu.collect_traps = a.collect_traps
     for obj in a.inject:
         emu.install_inject(obj, a.elf)

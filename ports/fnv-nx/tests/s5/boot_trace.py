@@ -208,15 +208,21 @@ def cstring(b):
 
 
 def same(a, b, da=None, db=None):
-    """None: equal or not comparable; else a short reason"""
+    """None: equal or not comparable; else a short reason. Exact only where a value means the same on both
+    machines: two small integers, two image addresses, or an integer against a pointer; otherwise (heap, stack,
+    the guest's own rodata against an image literal) by the C strings behind them when both sides dumped one."""
+    sa_, sb_ = a < 0x10000, b < 0x10000
     ia, ib = IMAGE_LO <= a < IMAGE_HI, IMAGE_LO <= b < IMAGE_HI
-    if a < 0x10000 or b < 0x10000 or ia or ib:
-        if a != b and not (ia and ib and False):
-            return f"{a:#x} != {b:#x}"
-        return None
-    sa, sb = cstring(da), cstring(db)
-    if sa is not None and sb is not None and sa != sb:
-        return f"string {sa[:40]!r} != {sb[:40]!r}"
+    if sa_ or sb_:
+        return None if a == b else f"{a:#x} != {b:#x}"
+    if ia and ib and a != b:
+        s1, s2 = cstring(da), cstring(db)
+        if s1 is not None and s1 == s2:
+            return None
+        return f"{a:#x} != {b:#x}"
+    s1, s2 = cstring(da), cstring(db)
+    if s1 is not None and s2 is not None and s1 != s2:
+        return f"string {s1[:40]!r} != {s2[:40]!r}"
     return None
 
 
@@ -229,9 +235,11 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
     st = {"matched": 0}
     divs = []
 
-    def runtime(c):   # the guest's runtime calls game functions the exe never calls from there (operator
-        # new/delete on behalf of the platform layer and libstdc++, callers without an original address)
-        return bool(c.caller) and (RUNTIME_CALLER.match(c.caller) is not None or "[orig" not in c.caller)
+    def runtime(c):   # the guest's runtime calls game functions the exe never calls from there: operator
+        # new/delete on behalf of the platform layer and libstdc++, and platform code (no original address) inside
+        # a traced game call; a top-level entry (WinMain from fnvnx_guest_main, the initializer runner) stays
+        return bool(c.caller) and (RUNTIME_CALLER.match(c.caller) is not None
+                                   or ("[orig" not in c.caller and c.parent is not None))
 
     def noop(c):      # delete of NULL: GCC calls it, MSVC tests first
         return c.regs[0] == 0 or (c.orig in NOOP_IF_ARG1_NULL and c.regs[1] == 0)
@@ -344,10 +352,18 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
             level(gkids(cg.kids), cw.kids)
             i += 1
             j += 1
+        rest_g = [c for c in g[i:] if not noop(c)]
         for c in g[i:]:
             inlined[("guest-only (after)", c.name)] += 1
         for c in w[j:]:
             inlined[("wine-only (after)", c.name)] += 1
+        if rest_g and j < len(w):   # the level ends differently on the two sides
+            add("control", rest_g[0], w[j], f"the level ends differently: guest {rest_g[0].name} "
+                                            f"({rest_g[0].orig:#010x}) and {len(rest_g) - 1} more, the exe "
+                                            f"{w[j].name} ({w[j].orig:#010x}) and {len(w) - j - 1} more")
+        elif j < len(w) and g:   # the exe made calls here that the guest did not
+            add("fewer calls", g[-1], w[j], f"after {g[-1].name} the exe calls {w[j].name} ({w[j].orig:#010x}) "
+                                           f"and {len(w) - j - 1} more; the guest none")
 
     sys.setrecursionlimit(max(10000, sys.getrecursionlimit()))
     groots = gkids([c for c in guest if c.parent is None])
