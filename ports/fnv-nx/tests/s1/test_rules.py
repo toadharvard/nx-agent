@@ -1387,6 +1387,52 @@ s1.add_recon_definitions(os.path.join(_rc, 'dec'), _st)
 _ru = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
 check('REC1 symbols-only recon: bindings persist, no body', _json.dumps(_ru) + _ro3 + str(dict(_st)),
       ['"?Agent1@@YAXXZ": "0x00dcd6a0"', "'REC1-SYM': 1"], ['fnv-nx REC1: reconstructed'])
+# REC1-REPL: `replace` pairs edit the unit's own text, in order, before the append; each `old` exactly once
+_kp = os.path.join(_rc, 'dec', 'src', 'k.cpp')
+_ku = {'units': [{'source': 'src/k.cpp', 'functions': [], 'symbols': {}}]}
+def _krecon(name, rec, body=None):
+    os.makedirs(os.path.join(_rc, 'recon', name))
+    rec = dict({'format': 'fnvnx-recon/1', 'unit': 'src/k.cpp'}, **rec)
+    _json.dump(rec, open(os.path.join(_rc, 'recon', name, 'recon.json'), 'w'))
+    if body is not None:
+        open(os.path.join(_rc, 'recon', name, 'body.cpp'), 'w').write(body)
+    prepare.__dict__['_fnvnx_recon'] = None
+_ktext = 'void g();\nvoid f() { g(); }\n'
+_json.dump(_ku, open(os.path.join(_rc, 'dec', 'build', 'units.json'), 'w'))
+os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', 'k1')
+_krecon('k1', {'append': 'body.cpp', 'symbols': {'?h@@YAXXZ': '0x00402000'},
+               'replace': [{'old': 'void f() { g(); }', 'new': 'void f() { h(); }'},
+                           {'old': 'void g();', 'new': 'void g();\nvoid h();'}]},
+        '/* appended */ void f2() { g(); }\n')
+_st = Counter()
+_ko = s1.r_recon_bodies(_kp, _ktext, _st)
+check('REC1-REPL the pairs apply in order, then the body is appended',
+      _ko + str(dict(_st)), ['void g();\nvoid h();\nvoid f() { h(); }', 'fnv-nx REC1', '/* appended */ void f2() { g(); }',
+                             "'REC1-REPL': 2"], ['void f() { g(); }'])
+check('REC1-REPL applied before the append: the appended body is not edited',
+      _ko[_ko.index('fnv-nx REC1'):], ['void f2() { g(); }'], ['h()'])
+s1.add_recon_definitions(os.path.join(_rc, 'dec'), _st)
+_ku2 = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
+check('REC1-REPL with symbols: REC1-SYM still persists the binding', _json.dumps(_ku2) + str(dict(_st)),
+      ['"?h@@YAXXZ": "0x00402000"', "'REC1-SYM': 1"])
+def _kfails(name, rec, text):
+    os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', name)
+    _krecon(name, rec)
+    try:
+        s1.r_recon_bodies(_kp, text, Counter())
+    except RuntimeError as e:
+        return 'raised: ' + str(e)
+    return 'no error'
+check('REC1-REPL an old that occurs twice fails the prepare',
+      _kfails('k2', {'replace': [{'old': 'g()', 'new': 'h()'}]}, 'void a() { g(); }\nvoid b() { g(); }\n'),
+      ['raised: REC1-REPL', 'occurs 2 times'])
+check('REC1-REPL a missing old fails the prepare',
+      _kfails('k3', {'replace': [{'old': 'void q();', 'new': 'void r();'}]}, _ktext), ['raised: REC1-REPL', 'occurs 0 times'])
+check('REC1-REPL an old found only in the appended body fails (replace runs before the append)',
+      _kfails('k4', {'append': 'body.cpp', 'replace': [{'old': 'void f2()', 'new': 'void f3()'}]}, _ktext),
+      ['raised: REC1-REPL', 'occurs 0 times'])
+check('REC1-REPL a replace-only recon is a recon (no body, no symbols)',
+      _kfails('k5', {'replace': [{'old': 'void q();', 'new': 'x'}]}, _ktext), ['raised: REC1-REPL'])
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)

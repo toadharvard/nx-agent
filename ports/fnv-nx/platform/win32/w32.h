@@ -40,6 +40,8 @@ struct w32_thread {
     int boost;                     /* the loading-screen thread: CPU boost while it runs (OS_THREAD_BOOST) */
     int wg_slot;                   /* slot + 1 in the watchdog's thread table; 0: not registered */
     uint32_t wg_caller;            /* set by an interposer (hb.c's wraps) around the call: the game's call site */
+    uint32_t mem_caller;           /* the memory lane (memtrack.cpp): the allocating stand-in's caller */
+    int mem_inside;                /* > 0: inside a stand-in that records its own allocation */
     struct w32_wait_rec wait;
 };
 struct w32_thread *w32_self(void);
@@ -86,6 +88,10 @@ void w32_wg_obj_begin(struct w32_thread *t, struct w32_obj *const *objs, DWORD n
 void w32_wg_end(struct w32_thread *t);
 void w32_wg_forget(struct w32_thread *t);          /* the thread's block is about to be freed */
 DWORD w32_wg_mutex_owner_locked(struct w32_obj *o); /* sync.cpp: owner tid of a W32_MUTEX, 0 if free */
+
+/* ---- memory lane (memtrack.cpp; off unless fnvnx_mem_start / fnvnx_mem_autostart) */
+extern volatile int w32_mem_on;
+FARPROC w32_mem_hook_proc(const char *name, FARPROC f);   /* GetProcAddress: Direct3DCreate9 behind the recorder */
 
 /* ---- paths (path.cpp) */
 #define W32_PATH_MAX 1024

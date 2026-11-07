@@ -252,6 +252,10 @@ then S15); 9. save/load round-trip differences (S18-scenarios); 10. game-script 
   reasonable effort, fuzz-equivalence against the x86 oracle (tools/difffuzz, every seed and the probes clean, no
   hard or soft divergence) - recorded as `"accept": "fuzz"` in recon.json with the fuzz record. (b) is never used
   for a function whose byte match only fails on a known rule class; that class is fixed instead.
+  (c) a body with no out-of-line exe copy (the exe only has it inlined) is written from the inlined code and
+  recorded as `"accept": "inline"` with the exe call sites it was read from. It closes the trap. It is confirmed when
+  fuzz of the containing exe functions shows no new hard divergence; a divergence reopens it as a D24 false
+  interpretation (orchestrator, from R6).
 - S2-bodies owns the list (tools/link/bodycause.py on the newest link) and every non-recon trap class.
 
 ### D22. Virtual destructor slots against MSVC vftables (orchestrator)
