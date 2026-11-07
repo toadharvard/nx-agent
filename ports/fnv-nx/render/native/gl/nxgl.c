@@ -127,7 +127,8 @@ static struct {
     GLuint readFbo;
     uint32_t swapImage;    /* image id used for "colour 0" */
     uint32_t passColor;    /* colour image of the current pass (resolved, never 0) */
-    uint32_t frameDraws;   /* draws replayed in the current submit */
+    uint32_t frameDraws;   /* draws replayed in the current frame (over every submit of that frame) */
+    uint64_t drawsFrame;   /* the frame frameDraws counts: frame number + 1, 0 = none yet */
     int skipDraws;         /* the draw hook asked to stop drawing */
     char err[2048];
     /* replay state */
@@ -829,7 +830,9 @@ static uint64_t api_submit(uint64_t a) {
     NxFrameStats st;
     memset(&st, 0, sizeof st);
     st.frame = s->frame; st.cmd_words = s->words;
-    g.frameDraws = 0;
+    /* a frame can come in several submits (a front end flushing mid-frame when its per-frame memory is full):
+     * the draw index the hook sees runs over the whole frame */
+    if (g.drawsFrame != (uint64_t)s->frame + 1) { g.frameDraws = 0; g.drawsFrame = (uint64_t)s->frame + 1; }
     replay(s, &st);
     p_glFinish();
     clock_gettime(CLOCK_MONOTONIC, &t1);
