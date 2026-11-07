@@ -41,7 +41,16 @@
  *     clock: press (key events, the ups half a gap later; input_poll hands them out as FNVNX_EV_KEY), wait, until
  *     (a hook milestone: the feed's "hook 0xADDR NAME" function was entered; a file under --root, case-insensitive, at any depth; or only
  *     the timeout, for a milestone linhost cannot see) and mark. Every step is logged as "linhost: scenario ...";
- *     after the last one linhost prints "linhost: scenario complete", writes the profile and exits 0. */
+ *     after the last one linhost prints "linhost: scenario complete", writes the profile and exits 0;
+ *   - --progress-timeout S: the hang detector (D25 #7 / #1 on long farm runs). Progress is a guest code page sampled for
+ *     the first time (the per-thread CPU timers of --profile, at --profile-hz, run for this even without --profile), a
+ *     hook milestone reached, or a --feed step done. After S seconds without any, linhost prints
+ *     "linhost: hang: no progress for S s (last: <what> at <ms> ms)", one "linhost: hang thread <tid> pc .. lr .. frames .."
+ *     line per thread (each thread interrupted by SIGURG walks its own frame chain), writes the profile and exits 4;
+ *   - --calls FILE: the call watcher (D25 #10, tools/report/scripterr.py; FILE from tools/perf/callwatch.py resolve):
+ *     "call 0xADDR NAME [label=xN | label=*xN+OFF]..." lines; every entry of such a function prints
+ *     "linhost: call NAME caller 0x<lr> label 0x<value> ..." (argument registers, or the 32-bit word they point to;
+ *     values only, never strings; the first 5000 calls), and every exit path a "linhost: calls NAME n <count>" line. */
 #include <stdint.h>
 #include <stddef.h>
 
@@ -501,6 +510,11 @@ static long g_prof_fd = -1;
 static u64 g_prof_hz = 1000;
 static volatile uint32_t g_frames;
 static int g_prof_lock;
+/* --progress-timeout: the last progress and what it was */
+static u64 g_progress_ns, g_progress_s;
+static const char *volatile g_progress_what = "start";
+static uint8_t g_pages[1 << 17];   /* 1 bit per 4 KiB guest code page: 4 GiB */
+static void progress(const char *what) { __atomic_store_n(&g_progress_ns, now_ns(), __ATOMIC_RELAXED); g_progress_what = what; }
 static void prof_write(const char *b, int n) {   /* one writer at a time: lines stay whole */
     while (__atomic_exchange_n(&g_prof_lock, 1, __ATOMIC_ACQUIRE)) sc(SYS_sched_yield, 0, 0, 0, 0, 0, 0);
     for (int o = 0; o < n;) { long r = sc(SYS_write, g_prof_fd, (long)(b + o), n - o, 0, 0, 0); if (r <= 0) break; o += (int)r; }
@@ -533,6 +547,15 @@ static void prof_rec(ProfBuf *p, char c, u64 t, u64 x, int hex) {
 static volatile uint32_t g_prof_dropped;
 static void on_prof(int sig, void *info, void *ucv) {
     (void)sig;
+    if (g_progress_s) {   /* a code page sampled for the first time is progress */
+        u64 pc = *(u64 *)((unsigned char *)ucv + 440);
+        if (pc < (1ull << 32)) {
+            uint32_t pg = (uint32_t)(pc >> 12);
+            uint8_t bit = (uint8_t)(1u << (pg & 7));
+            if (!(__atomic_fetch_or(&g_pages[pg >> 3], bit, __ATOMIC_RELAXED) & bit)) progress("new code");
+        }
+    }
+    if (g_prof_fd < 0) return;
     ProfBuf *p = prof_mine(gettid_());
     int over = *(int *)((unsigned char *)info + 20);   /* siginfo _timer.si_overrun: expirations merged into this one */
     if (over < 0 || over > 100000) over = 0;
@@ -548,13 +571,19 @@ static void on_prof(int sig, void *info, void *ucv) {
     p->busy = 0;
 }
 /* --feed's hooks (milestones) and --frame share the trampolines (patch_site) */
-#define HOOK_MAX 64
+#define HOOK_MAX 128
 static const char *g_hook_name[HOOK_MAX];
 static volatile int g_hook_hit[HOOK_MAX];
 static u64 g_hook_at[HOOK_MAX];
 static int g_hook_frame[HOOK_MAX];   /* the same function is a --frame too: one site does both */
+/* --calls: a hook that logs its arguments; specs: register, deref (read the u32 at reg + off), label */
+typedef struct { const char *label; uint8_t reg, deref; uint32_t off; } CallSpec;
+static uint8_t g_hook_call[HOOK_MAX], g_hook_nspec[HOOK_MAX];
+static CallSpec g_hook_spec[HOOK_MAX][4];
+static volatile u64 g_hook_count[HOOK_MAX];
+static volatile u64 g_call_lines;
 static void hook_mark(uint32_t id);
-__attribute__((used)) void linhost_hook_hit(uint32_t id);
+__attribute__((used)) void linhost_hook_hit(uint32_t id, const u64 *regs);
 static void linhost_prof_frame(void) {
     if (g_prof_fd < 0) return;
     ProfBuf *p = prof_mine(gettid_());
@@ -564,24 +593,51 @@ static void linhost_prof_frame(void) {
     prof_rec(p, 'f', now_ns(), k, 0);
     p->busy = 0;
 }
-__attribute__((used)) void linhost_hook_hit(uint32_t id) {
+static int readable(u64 a);
+/* regs: the stub's save area: x0..x7 at [0..7], x8, the continuation, x29, x30 (the caller's return address) */
+static void call_log(uint32_t id, const u64 *regs) {
+    __atomic_add_fetch(&g_hook_count[id], 1, __ATOMIC_RELAXED);
+    if (__atomic_add_fetch(&g_call_lines, 1, __ATOMIC_RELAXED) > 5000) return;
+    char line[400];
+    int o = 0;
+    #define CAPP(s) do { const char *s_ = (s); while (*s_ && o < (int)sizeof line - 2) line[o++] = *s_++; } while (0)
+    #define CHEX(v) do { u64 v_ = (v); char h_[19]; int n_ = 0; char t_[16]; do t_[n_++] = "0123456789abcdef"[v_ & 15]; while (v_ >>= 4); h_[0] = '0'; h_[1] = 'x'; int k_ = 2; while (n_) h_[k_++] = t_[--n_]; h_[k_] = 0; CAPP(h_); } while (0)
+    CAPP("linhost: call "); CAPP(g_hook_name[id]); CAPP(" caller "); CHEX(regs[11]);
+    for (int k = 0; k < g_hook_nspec[id]; k++) {
+        const CallSpec *c = &g_hook_spec[id][k];
+        u64 v = c->reg <= 8 ? regs[c->reg] : 0;
+        CAPP(" "); CAPP(c->label); CAPP(" ");
+        if (c->deref) {
+            u64 a = (v & 0xFFFFFFFFull) + c->off;
+            if (readable(a) && !(a & 3)) { CHEX(*(volatile uint32_t *)(uintptr_t)a); } else CAPP("unreadable");
+        } else CHEX(v & 0xFFFFFFFFull);
+    }
+    line[o++] = '\n';
+    sc(SYS_write, 2, (long)line, o, 0, 0, 0);
+    #undef CAPP
+    #undef CHEX
+}
+__attribute__((used)) void linhost_hook_hit(uint32_t id, const u64 *regs) {
     if (id == 0xFFFFu) { linhost_prof_frame(); return; }
     if (id < HOOK_MAX && g_hook_frame[id]) linhost_prof_frame();
+    if (id < HOOK_MAX && g_hook_call[id]) { call_log(id, regs); return; }
     hook_mark(id);
     feed_tick();   /* a milestone may end the plan: at once, not at the next host call */
 }
 static void prof_thread_begin(int slot, uint32_t mask) {
-    if (g_prof_fd < 0) return;
+    if (g_prof_fd < 0 && !g_progress_s) return;
     int tid = gettid_();
     ProfBuf *p = 0;
     for (int i = 0; i < PROF_SLOTS && !p; i++)
         if (__atomic_compare_exchange_n(&g_prof[i].tid, &(int){0}, tid, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) p = &g_prof[i];
     if (!p) return;
     p->n = 0;
-    p->busy = 1;
-    prof_rec(p, 't', (u64)slot, mask, 0);   /* t <tid> <slot> <mask> */
-    prof_flush(p);
-    p->busy = 0;
+    if (g_prof_fd >= 0) {
+        p->busy = 1;
+        prof_rec(p, 't', (u64)slot, mask, 0);   /* t <tid> <slot> <mask> */
+        prof_flush(p);
+        p->busy = 0;
+    }
     /* struct sigevent: value, signo, notify, tid (SIGEV_THREAD_ID = 4) */
     struct { u64 value; int signo, notify, tid; int pad[11]; } ev = { 0, 27 /* SIGPROF */, 4, tid, {0} };
     int timer = 0;
@@ -595,16 +651,26 @@ static void prof_thread_begin(int slot, uint32_t mask) {
     sc(110 /* timer_settime */, timer, 0, (long)it, 0, 0, 0);
 }
 static void prof_thread_end(void) {
-    if (g_prof_fd < 0) return;
+    if (g_prof_fd < 0 && !g_progress_s) return;
     ProfBuf *p = prof_mine(gettid_());
     if (!p) return;
     if (p->timer >= 0) sc(111 /* timer_delete */, p->timer, 0, 0, 0, 0, 0);
     p->busy = 1;
-    prof_flush(p);
+    if (g_prof_fd >= 0) prof_flush(p);
     p->busy = 0;
     __atomic_store_n(&p->tid, 0, __ATOMIC_RELEASE);   /* the slot is free (an ended thread's timer never fires) */
 }
+static volatile int g_calls_said;
+static void calls_summary(void) {
+    if (__atomic_exchange_n(&g_calls_said, 1, __ATOMIC_ACQ_REL)) return;
+    for (int i = 0; i < HOOK_MAX; i++)
+        if (g_hook_call[i]) {
+            puts_(2, "linhost: calls "); puts_(2, g_hook_name[i]); puts_(2, " n ");
+            put_dec(2, g_hook_count[i]); puts_(2, "\n");
+        }
+}
 static void prof_flush_all(void) {
+    calls_summary();
     if (g_prof_fd < 0) return;
     for (int i = 0; i < PROF_SLOTS; i++) if (g_prof[i].tid > 0) prof_flush(&g_prof[i]);
 }
@@ -629,7 +695,7 @@ __asm__(".text\n.global linhost_frame_stub\nlinhost_frame_stub:\n"
         "  stp x0, x1, [sp]\n  stp x2, x3, [sp, #16]\n  stp x4, x5, [sp, #32]\n  stp x6, x7, [sp, #48]\n"
         "  stp x8, x16, [sp, #64]\n  stp x29, x30, [sp, #80]\n"
         "  stp q0, q1, [sp, #96]\n  stp q2, q3, [sp, #128]\n  stp q4, q5, [sp, #160]\n  stp q6, q7, [sp, #192]\n"
-        "  mov w0, w15\n  bl linhost_hook_hit\n"
+        "  mov w0, w15\n  mov x1, sp\n  bl linhost_hook_hit\n"
         "  ldp q0, q1, [sp, #96]\n  ldp q2, q3, [sp, #128]\n  ldp q4, q5, [sp, #160]\n  ldp q6, q7, [sp, #192]\n"
         "  ldp x0, x1, [sp]\n  ldp x2, x3, [sp, #16]\n  ldp x4, x5, [sp, #32]\n  ldp x6, x7, [sp, #48]\n"
         "  ldp x8, x16, [sp, #64]\n  ldp x29, x30, [sp, #80]\n"
@@ -911,7 +977,7 @@ typedef struct { char op; int ref; u64 ns; const char *str; int nk; uint16_t usa
 static FeedStep *g_feed;
 static int g_nfeed, g_fk = -1;
 static u64 g_ft_step, g_ft0;
-static int g_feed_lock, g_feed_done;
+static int g_feed_lock, g_feed_done, g_feed_seen = -1;
 static struct { u64 due; uint16_t usage; uint8_t down; } g_fq[512];
 static unsigned g_fq_head, g_fq_tail;
 static u64 g_feed_sent;
@@ -932,7 +998,9 @@ static char *feed_tok(char **p) {   /* next space-separated token; the rest of t
     if (**p) *(*p)++ = 0;
     return t;
 }
-static void hook_mark(uint32_t id) { if (id < HOOK_MAX) __atomic_store_n(&g_hook_hit[id], 1, __ATOMIC_RELEASE); }
+static void hook_mark(uint32_t id) {
+    if (id < HOOK_MAX && !__atomic_exchange_n(&g_hook_hit[id], 1, __ATOMIC_ACQ_REL)) progress("milestone");
+}
 static void feed_log(const char *what, const char *a, u64 n) {
     puts_(2, "linhost: scenario "); puts_(2, what);
     if (a) { puts_(2, " "); puts_(2, a); }
@@ -1106,6 +1174,7 @@ static void feed_tick(void) {
         if (st->op == 'm') { feed_log("mark", st->str, 0); g_fk++; continue; }
         g_fk++;
     }
+    if (g_fk != g_feed_seen) { g_feed_seen = g_fk; progress("scenario step"); }
     int end = g_fk >= g_nfeed && g_fq_head == g_fq_tail;
     __atomic_store_n(&g_feed_lock, 0, __ATOMIC_RELEASE);
     if (end && !__atomic_exchange_n(&g_feed_done, 1, __ATOMIC_ACQ_REL)) {
@@ -1136,6 +1205,123 @@ static u64 h_input_poll(u64 buf, u64 cap) {
     return n;
 }
 
+/* ---- --calls FILE ("call 0xADDR NAME label=xN|label=*xN+OFF ...", tools/perf/callwatch.py resolve) */
+static void calls_load(const char *path, u64 *hook_addr) {
+    long fd = sc(SYS_openat, AT_FDCWD, (long)path, 0, 0, 0, 0);
+    if (fd < 0) die("--calls: cannot open the file");
+    u64 cap = 1 << 18;
+    char *b = anon(cap + 1);
+    long n = 0, r;
+    while (n < (long)cap && (r = sc(SYS_read, fd, (long)(b + n), (long)cap - n, 0, 0, 0)) > 0) n += r;
+    sc(SYS_close, fd, 0, 0, 0, 0, 0);
+    b[n] = 0;
+    int calls = 0;
+    for (char *p = b; *p;) {
+        char *e = p;
+        while (*e && *e != '\n') e++;
+        int more = *e != 0;
+        *e = 0;
+        char *q = p;
+        p = more ? e + 1 : e;
+        char *op = feed_tok(&q);
+        if (!streq(op, "call")) continue;
+        if (g_nhooks == HOOK_MAX) die("--calls: too many hooks");
+        int id = g_nhooks++;
+        hook_addr[id] = h_ext_hex(feed_tok(&q));
+        g_hook_name[id] = feed_tok(&q);
+        g_hook_call[id] = 1;
+        for (char *t; *(t = feed_tok(&q)) && g_hook_nspec[id] < 4;) {
+            char *eq = t;
+            while (*eq && *eq != '=') eq++;
+            if (!*eq) continue;
+            *eq++ = 0;
+            CallSpec *c = &g_hook_spec[id][g_hook_nspec[id]];
+            c->label = t;
+            c->deref = *eq == '*';
+            if (c->deref) eq++;
+            if (*eq != 'x') continue;
+            c->reg = (uint8_t)feed_dec(eq + 1);
+            while (*eq && *eq != '+') eq++;
+            c->off = *eq == '+' ? (uint32_t)h_ext_hex(eq + 1) : 0;
+            if (c->reg <= 8) g_hook_nspec[id]++;
+        }
+        calls++;
+    }
+    puts_(2, "linhost: --calls: "); put_dec(2, (u64)calls); puts_(2, " functions watched\n");
+}
+
+/* ---- --progress-timeout: the monitor thread and the per-thread dump */
+static int g_main_tid;
+static volatile int g_dump_ack;
+static void on_dump(int sig, void *info, void *ucv) {   /* SIGURG: this thread's stack */
+    (void)sig; (void)info;
+    unsigned char *uc = ucv;
+    u64 *x = (u64 *)(uc + 184), pc = *(u64 *)(uc + 440);
+    char line[600];
+    int o = 0;
+    #define LAPP(s) do { const char *s_ = (s); while (*s_ && o < (int)sizeof line - 2) line[o++] = *s_++; } while (0)
+    #define LHEX(v) do { char h_[19]; u64 v_ = (v); h_[0] = '0'; h_[1] = 'x'; for (int i_ = 0; i_ < 16; i_++) h_[2 + i_] = "0123456789abcdef"[(v_ >> (60 - 4 * i_)) & 15]; h_[18] = 0; LAPP(h_); } while (0)
+    char tid[16]; int t = gettid_(), n = 0; char r[12];
+    do r[n++] = (char)('0' + t % 10); while (t /= 10);
+    int k = 0; while (n) tid[k++] = r[--n]; tid[k] = 0;
+    LAPP("linhost: hang thread "); LAPP(tid); LAPP(" pc "); LHEX(pc); LAPP(" lr "); LHEX(x[30]); LAPP(" frames");
+    u64 fp = x[29];
+    for (int i = 0; i < 16 && readable(fp) && !(fp & 7); i++) {
+        u64 *f = (u64 *)(uintptr_t)fp;
+        LAPP(" "); LHEX(f[1]);
+        if (f[0] <= fp) break;
+        fp = f[0];
+    }
+    line[o++] = '\n';
+    sc(SYS_write, 2, (long)line, o, 0, 0, 0);
+    #undef LAPP
+    #undef LHEX
+    __atomic_add_fetch(&g_dump_ack, 1, __ATOMIC_RELEASE);
+}
+static void dump_one(long pid, int tid) {
+    int before = __atomic_load_n(&g_dump_ack, __ATOMIC_ACQUIRE);
+    if (sc(131 /* tgkill */, pid, tid, 23 /* SIGURG */, 0, 0, 0) < 0) return;
+    for (int i = 0; i < 40 && __atomic_load_n(&g_dump_ack, __ATOMIC_ACQUIRE) == before; i++) {
+        struct ts t = { 0, 10000000 };
+        sc(SYS_nanosleep, (long)&t, 0, 0, 0, 0, 0);
+    }
+}
+static unsigned char g_mon_stack[64 * 1024] __attribute__((aligned(16)));
+static void monitor_main(void *arg) {
+    (void)arg;
+    for (;;) {
+        struct ts t = { 1, 0 };
+        sc(SYS_nanosleep, (long)&t, 0, 0, 0, 0, 0);
+        u64 now = now_ns(), last = __atomic_load_n(&g_progress_ns, __ATOMIC_RELAXED);
+        if (now - last < g_progress_s * 1000000000ull) continue;
+        puts_(2, "\nlinhost: hang: no progress for "); put_dec(2, g_progress_s); puts_(2, " s (last: ");
+        puts_(2, g_progress_what); puts_(2, " at "); put_dec(2, (last - g_t0) / 1000000ull); puts_(2, " ms)\n");
+        long pid = sc(172 /* getpid */, 0, 0, 0, 0, 0, 0);
+        dump_one(pid, g_main_tid);
+        for (int i = 0; i < MAXT; i++)
+            if (g_t[i].started && g_t[i].ktid && __atomic_load_n(&g_t[i].tid, __ATOMIC_ACQUIRE) != 0)
+                dump_one(pid, g_t[i].ktid);
+        feed_incomplete();
+        prof_flush_all();
+        sc(SYS_exit_group, 4, 0, 0, 0, 0, 0);
+    }
+}
+static void start_monitor(void) {
+    struct { u64 handler, flags, restorer, mask; } sa = {
+        (u64)(uintptr_t)on_dump, 4 /* SA_SIGINFO */ | 0x10000000 /* SA_RESTART */ | 0x04000000 /* SA_RESTORER */,
+        (u64)(uintptr_t)linhost_sigreturn, 0 };
+    sc(SYS_rt_sigaction, 23, (long)&sa, 0, 8, 0, 0);
+    if (g_prof_fd < 0) {   /* the CPU timers' handler, without a profile file */
+        struct { u64 handler, flags, restorer, mask; } sp = {
+            (u64)(uintptr_t)on_prof, 4 | 0x10000000 | 0x04000000, (u64)(uintptr_t)linhost_sigreturn, 0 };
+        sc(SYS_rt_sigaction, 27, (long)&sp, 0, 8, 0, 0);
+    }
+    progress("start");
+    unsigned long fl = 0x100 | 0x200 | 0x400 | 0x800 | 0x10000 | 0x40000;   /* VM FS FILES SIGHAND THREAD SYSVSEM */
+    if (linhost_clone(fl, g_mon_stack + sizeof g_mon_stack, 0, 0, 0, monitor_main, 0) < 0)
+        die("--progress-timeout: no monitor thread");
+}
+
 static u64 parse_u(const char *s) { u64 v = 0; while (*s >= '0' && *s <= '9') v = v * 10 + (u64)(*s++ - '0'); return v; }
 
 __attribute__((used)) long hmain(long *sp);
@@ -1146,7 +1332,7 @@ __attribute__((used)) long hmain(long *sp) {
     const char *guest = 0;
     int skip_init = 0;
     u64 heap_mib = 64;
-    const char *prof_path = 0, *frames[16], *feed_path = 0;
+    const char *prof_path = 0, *frames[16], *feed_path = 0, *calls_path = 0;
     int nframes = 0;
     for (long i = 1; i < argc; i++) {
         if (streq(argv[i], "--root") && i + 1 < argc) g_root = argv[++i];
@@ -1158,10 +1344,12 @@ __attribute__((used)) long hmain(long *sp) {
         else if (streq(argv[i], "--profile-hz") && i + 1 < argc) g_prof_hz = parse_u(argv[++i]);
         else if (streq(argv[i], "--frame") && i + 1 < argc && nframes < 16) frames[nframes++] = argv[++i];
         else if (streq(argv[i], "--feed") && i + 1 < argc) feed_path = argv[++i];
+        else if (streq(argv[i], "--progress-timeout") && i + 1 < argc) g_progress_s = parse_u(argv[++i]);
+        else if (streq(argv[i], "--calls") && i + 1 < argc) calls_path = argv[++i];
         else if (!guest && argv[i][0] != '-') guest = argv[i];
-        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] [--feed FILE] guest.elf");
+        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] [--feed FILE] [--progress-timeout S] [--calls FILE] guest.elf");
     }
-    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] [--feed FILE] guest.elf");
+    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] [--feed FILE] [--progress-timeout S] [--calls FILE] guest.elf");
     if (g_expect) {
         g_expect_len = slen(g_expect);
         if (!g_expect_len || g_expect_len >= sizeof g_win / 2) die("--expect: 1..255 bytes");
@@ -1204,14 +1392,15 @@ __attribute__((used)) long hmain(long *sp) {
     }
     if (g_collect && !skip_init) die("--collect-traps needs --skip-faulting-init (the trap symbols are found there)");
     if (skip_init) install_guards(fd);
-    if (nframes || feed_path) {   /* the hook trampolines: one page above the guards' page */
+    if (nframes || feed_path || calls_path) {   /* the hook trampolines: one page above the guards' page */
         u64 page = ((g_hi + 0xFFFF) & ~0xFFFFull) + 0x10000;
         if (map_at(page, 0x10000, 7)) die("--frame/--feed: no room for the trampolines");
         g_hook_page = (uint32_t *)(uintptr_t)page;
     }
-    if (feed_path) {
+    if (feed_path || calls_path) {
         static u64 hook_addr[HOOK_MAX];
-        feed_load(feed_path, hook_addr);
+        if (feed_path) feed_load(feed_path, hook_addr);
+        if (calls_path) calls_load(calls_path, hook_addr);
         install_hooks(hook_addr, g_nhooks);
     }
     if (nframes) install_frames(fd, frames, nframes);
@@ -1223,6 +1412,8 @@ __attribute__((used)) long hmain(long *sp) {
     install_fault_handler();
     set_affinity(0, 0x1);   /* the main thread: placement row "main", core 0 */
     g_t_entry = now_ns();
+    g_main_tid = gettid_();
+    if (g_progress_s) start_monitor();
     prof_thread_begin(-1, 0x1);   /* the main thread: slot -1 */
     u64 r = ((u64 (*)(u64))(uintptr_t)entry)((u64)(uintptr_t)&g_api);
     prof_flush_all();

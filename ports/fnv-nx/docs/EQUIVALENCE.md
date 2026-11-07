@@ -190,6 +190,14 @@ remain are listed by first error in journal/inbox/eq-001.md):
   SDK and missed the shim's looser parameter types. The stand-in reaches the SDK's own header through a generated
   absolute include (gen_dir: fnvnx_equiv_sdk_windows.h). Pristine units get the SDK's header unchanged.
 
+* **SDK-HIDE** (generated `fnvnx_equiv_sdkhide.h` / `fnvnx_equiv_sdkunhide.h`, equiv.py `sdk_only_names`). The
+  stand-in reads `<windows.h>` with every SDK function, typedef name, tag and enumerator the target shim never
+  names in code renamed to `fnvnx_sdk_<name>`, then undefines the macros. The renaming skips names the CRT's C
+  headers use, SDK macro names, C++ keywords and `__` names. The target has no such declaration, so a prepared
+  unit cannot rely on one, and the decomp's own types and functions of those names (struct Arc, DragObject,
+  typedef PCH, winioctl / winnt copies) no longer collide. This made 4 more units compile (2 identical, 2 with
+  retargets only), and 150 random units build identically with and without the list.
+
 CTOR1 was measured too, and nothing changed: MSVC 2008 null-checks the result of every new-expression before the
 constructor, even for an allocation function without `throw()` (a tagged placement form: the same `test ecx,ecx`
 at /O2, and an out-of-line call at /Od). So no spelling of in-place construction compiles like the explicit call
