@@ -19,6 +19,7 @@
 #                      (setsid -w nohup ... &: -w, or under a shell with job control setsid forks and $! is a
 #                      parent that exits at once), and let the check-in start it again when it is gone
 #   RUNNER_POLL_S=<s>  seconds between looks at the integration head (default 60)
+#   RUNNER_MIN_GAP_S=<s> at least this long between two job starts (a light job hosted beside other work: `zero`)
 #   RUNNER_CLAIM=<tag> farms sharing a tag split the heads: before a job, a farm pushes the branch
 #                      quick/claim/<tag>/<head12> of the artifacts repository with a commit of its own; a farm whose push
 #                      is refused (another holds it) skips that head. Several warm farms thus verify consecutive heads
@@ -47,6 +48,8 @@ echo $$ > "$FARM_HOME/$NAME.pid"   # the runner itself (a watcher's kill -0 targ
 # qk<k> (the warm quick farms): persistent, a 20 s poll, claims shared under the tag "quick" (env still overrides)
 if [[ "$NAME" =~ ^qk[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}" "${RUNNER_CLAIM:=quick}"; fi
 PERSIST=${RUNNER_PERSIST:-0}; POLL=${RUNNER_POLL_S:-60}; CLAIM=${RUNNER_CLAIM:-}
+GAP=${RUNNER_MIN_GAP_S:-0}; LAST_START=0   # RUNNER_MIN_GAP_S: at least this many seconds between two job starts (a light
+                                           # job hosted beside other work, e.g. `zero` on a busy integration branch)
 claim() {  # claim <head>: true when this farm now holds quick/claim/<tag>/<head12> (or claims are off)
   [ -n "$CLAIM" ] || return 0
   local b=quick/claim/$CLAIM/${1:0:12} g=$FARM_HOME/claim.git c
@@ -117,9 +120,11 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
       age=$(( $(date +%s) - $(stat -c %Y "$LAST" 2>/dev/null || echo 0) ))
       if [ "$REPEAT" -le 0 ] || [ "$age" -lt "$REPEAT" ]; then sleep "$POLL"; continue; fi
     fi
+    if [ "$GAP" -gt 0 ] && [ $(( $(date +%s) - LAST_START )) -lt "$GAP" ]; then sleep "$POLL"; continue; fi
     if ! claim "$H"; then echo "$H" > "$LAST"; sleep "$POLL"; continue; fi
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
   fi
+  LAST_START=$(date +%s)
   [ "$PERSIST" = 1 ] && export FARM_DEADLINE=$(( $(date +%s) + ${RUNNER_JOB_S:-7200} - 300 ))
   H12=${H:0:12}; R=$FARM_HOME/out/$TAG$H12-$JOB.md; mkdir -p "$FARM_HOME/out"; rm -f "${R%.md}.json"
   J=$NX/ports/fnv-nx/tools/farm
