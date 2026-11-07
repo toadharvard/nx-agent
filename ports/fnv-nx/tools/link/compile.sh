@@ -78,6 +78,10 @@ if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
 # For A/B measurements only (tools/perf/unit_ab.sh, docs/PERF.md 11.8), never for a build that runs; unset = no
 # change.
 if [ -n "${AB_FLAGS:-}" ]; then read -r -a _ab <<< "$AB_FLAGS"; FLAGS+=("${_ab[@]}"); fi
+# RACE=1 (D25 #7, tools/threads/README.md): the race-checker build. -fsanitize=thread only inserts __tsan_* calls
+# (hb.c is their runtime, linked by tools/pipeline/guest_link.py RACE=1); the code is otherwise the same build. Its
+# own object directory: objects with and without it never mix (the flag is in the cache key like every flag).
+if [ "${RACE:-0}" = 1 ]; then FLAGS+=(-fsanitize=thread -Wno-tsan); fi
 # ORDER_KEYS: the whole program's key list (docs/ORDERING.md "Whole-program keys"): every field and global that some
 # unit hands to Interlocked* (directly or through a forwarder) or polls in a wait-only loop. Their plain accesses are
 # ordered in every unit, not only in the unit that calls Interlocked on them (ATOMIC-PLAIN-STORE, the writer side of

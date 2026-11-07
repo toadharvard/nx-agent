@@ -15,6 +15,18 @@ struct w32_waiter {
     os_cond_t cond;
 };
 struct w32_obj;
+/* the thread's current blocking wait, for the wait-graph watchdog (waitgraph.cpp); written by the thread itself */
+#define W32_WG_MAXOBJ 8
+struct w32_wait_rec {
+    volatile uint32_t seq;         /* odd while the thread writes the record; bumped per wait */
+    int kind;                      /* 0 none, W32_WG_CS, W32_WG_OBJ */
+    uint32_t pc;                   /* return address of the Win32 call (a guest code address) */
+    uint32_t ms;                   /* the wait's timeout (INFINITE for none) */
+    uint64_t t0;                   /* os_monotonic_ns() at the start */
+    int all, n;                    /* WaitForMultipleObjects' bWaitAll and count (n <= W32_WG_MAXOBJ recorded) */
+    void *obj[W32_WG_MAXOBJ];      /* W32_WG_CS: the CRITICAL_SECTION; W32_WG_OBJ: struct w32_obj * */
+};
+enum { W32_WG_CS = 1, W32_WG_OBJ = 2 };
 struct w32_thread {
     DWORD tid;
     DWORD last_error;
@@ -26,6 +38,9 @@ struct w32_thread {
     struct w32_waiter waiter;
     char name[32];
     int boost;                     /* the loading-screen thread: CPU boost while it runs (OS_THREAD_BOOST) */
+    int wg_slot;                   /* slot + 1 in the watchdog's thread table; 0: not registered */
+    uint32_t wg_caller;            /* set by an interposer (hb.c's wraps) around the call: the game's call site */
+    struct w32_wait_rec wait;
 };
 struct w32_thread *w32_self(void);
 
@@ -61,6 +76,16 @@ void w32_obj_signal_locked(struct w32_obj *o);     /* wake waiters of o; caller 
 #define W32_PSEUDO_PROCESS ((HANDLE)(LONG_PTR)-1)
 struct w32_thread_obj;
 int w32_thread_signaled(struct w32_obj *o);
+DWORD w32_thread_obj_tid(struct w32_obj *o);       /* the thread id of a W32_THREAD object */
+
+/* ---- wait-graph watchdog (waitgraph.cpp; off unless fnvnx_waitgraph_start was called) */
+extern volatile int w32_wg_on;
+void w32_wg_prepare(struct w32_thread *t);        /* before w32_wg_obj_begin, outside w32_wait_lock */
+void w32_wg_cs_begin(struct w32_thread *t, LPCRITICAL_SECTION cs, uint32_t pc);
+void w32_wg_obj_begin(struct w32_thread *t, struct w32_obj *const *objs, DWORD n, BOOL all, DWORD ms, uint32_t pc);
+void w32_wg_end(struct w32_thread *t);
+void w32_wg_forget(struct w32_thread *t);          /* the thread's block is about to be freed */
+DWORD w32_wg_mutex_owner_locked(struct w32_obj *o); /* sync.cpp: owner tid of a W32_MUTEX, 0 if free */
 
 /* ---- paths (path.cpp) */
 #define W32_PATH_MAX 1024
