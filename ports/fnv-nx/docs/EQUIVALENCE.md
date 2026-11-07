@@ -35,6 +35,13 @@ Every pristine unit that compiles has every one of its recipe functions in its o
 target is 0. A class names the mechanism and where it is documented here; a row matches by kind, attributed rule,
 unit, address or first error.
 
+**Declared classes (D24; stream EQ).** `tools/equiv/classes.tsv` lists the explanation classes that are
+*declared*: platform (the target platform differs on purpose: CRT, link by address, allocator), compiler (MSVC
+2008's code generation of an equivalent spelling, measured) or by-design (a deliberate fix). Each has a reason. A
+class not listed is open. explain.py prints `open (D24): N = code functions not in a declared class + no-build
+units`, which is the EQ stream's metric (its target is 0). A no-build unit always counts, because nothing in it is
+compared. At 2e000047 / 06f45fbb: 65 = 2 (the FINL1 pair) + 63.
+
 At `0685791` (all six shards): 1,068 differing functions and 78 no-build units, of which **32 functions and 28 units
 are unexplained**.
 
