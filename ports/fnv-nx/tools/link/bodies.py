@@ -55,7 +55,13 @@ in this order (first that applies):
 4c. `tree-inline` - (after vcall) the tree has the body inline in a unit's own source, out of line (`inline
    C::f() {...}` in a .cpp) or in the class body of a copy of C: that unit is compiled again with
    `-fkeep-inline-functions` like msvc-inline and only the wanted symbol is kept (its own name, or the one the
-   relaxed key pairs, as for msvc-inline). A host that does not emit it leaves the name `missing`.
+   relaxed key pairs, as for msvc-inline). A host that does not emit it leaves the name `missing`. Across copies of
+   a class (s2d not-compiled): the emitted member of another copy (copy_key: unit namespaces removed, parameters and
+   cv exact) is renamed to the wanted name when the layout probe (LayoutGate) gives both classes and their
+   class-like parameters one size; names MSVC calls out of line (the vcall check's pristine reference) and
+   constructors / destructors are taken too, always through the gate; up to three hosts are tried.
+1e. `copy-addr` (after exe-addr) - a member of a class copy whose same member of another copy (copy_key) units.json
+   places at one address the native build defines, with one layout on both sides (LayoutGate): `__fnv_<addr>`.
 5c. `addr-host` - an exe address refs.tsv binds references to (`code-defmissing`) whose placing unit's object
    defines nothing there: a `??_G` scalar deleting destructor (no GCC counterpart: `gdel_line` defines
    `__fnv_<addr>(C *, unsigned)` in the placing unit), or an inline body GCC did not emit (the unit compiled with
@@ -435,6 +441,18 @@ class Classifier:
                     for _, k in def_keys(m):
                         self.idx[k][a].add(n)
                     self.addr_units[a].add(u.source)
+        # copy key -> {addr: {MSVC names of a unit-local class copy}}, and the units naming each (by_copy)
+        self.cidx = collections.defaultdict(lambda: collections.defaultdict(set))
+        self.cunits = collections.defaultdict(set)
+        for u in units.values():
+            for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
+                if a in native and n.startswith('?') and 'fnv_' in n:
+                    m = msvc(n)
+                    if m.kind == 'func' and any(UNIT_NS.match(q) for q in m.qual):
+                        k = copy_key(m, variant=False)
+                        if k:
+                            self.cidx[k][a].add(n)
+                            self.cunits[n].add(u.source)
         self.fidx = collections.defaultdict(lambda: collections.defaultdict(set))  # fold key -> {addr: {names}}
         for u in units.values():
             for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
@@ -464,6 +482,21 @@ class Classifier:
             if len(cands) > 1:
                 return 'ambiguous', None, ','.join('%08x' % a for a in sorted(cands)[:6])
         return None
+
+    def by_copy(self, isig):
+        """(address, MSVC name, units naming it) when another unit-local copy of the member's class has the same
+        member (copy_key) at exactly one address the native build defines with the right kind, else None. The
+        layout gate is the caller's (copy_addr_pass)."""
+        k = copy_key(isig, variant=False)
+        if not k or isig.variant == 'D0':
+            return None
+        want = VARIANT_KIND.get(isig.variant, 'F') if isig.variant else 'F'
+        cands = {a: ns for a, ns in self.cidx.get(k, {}).items() if self.native.get(a) == want}
+        if len(cands) != 1:
+            return None
+        (a, ns), = cands.items()
+        n = sorted(ns)[0]
+        return a, n, self.cunits[n]
 
     def dtor_as_fun(self, isig, a, ns):
         """A D1/D2 whose address units.json names with this destructor (an MSVC `??1` there) while the native build
@@ -777,11 +810,27 @@ def emit_empty(rows):
     return '\n'.join(out) + '\n'
 
 
-def synth_host(tree, work, host, rows, itanium, inline=False):
+def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=()):
     """Compile the host unit again with the `= default` lines (special-default) or with -fkeep-inline-functions
-    (msvc-inline); keep only the wanted symbols. -> (object path or None, {names defined}, {name: why failed})."""
+    (msvc-inline); keep only the wanted symbols. -> (object path or None, {names defined}, {name: why failed}).
+    gate (inline): a LayoutGate. With it, an emitted member of another copy of the wanted name's class (copy_key:
+    the same member, parameters and cv once unit namespaces are removed) is renamed to the wanted name when it is the
+    only such symbol and the gate gives both classes (and their class-like parameters) one size. Names in strict
+    (tree-inline's own pairings across units: copies, constructors and destructors, names MSVC calls out of line)
+    pass the gate for every pairing, also a body the host emits under the wanted name itself when the host is not a
+    referencing unit."""
     import vtables
     want = {r.name for r in rows}
+    ref_units = {r.name: [u for u in r.units.split(',') if u] for r in rows}
+    gnotes = {}
+
+    def gate_ok(w, emitted):
+        if gate is None:
+            return False
+        ok, why = gate.same(ref_units.get(w) or [host], copy_types(itanium(w)), host, copy_types(itanium(emitted)))
+        if not ok:
+            gnotes[w] = why
+        return ok
     items, failed = [], {}
     if not inline:
         for k, r in enumerate(sorted(rows, key=lambda r: r.name)):
@@ -815,23 +864,46 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
             if n.startswith('_Z') and n not in want:
                 for _, k in def_keys(itanium(n)):
                     byk[k].add(n)
-        for w in want - defined:
+        cbyk = collections.defaultdict(set)   # copy keys of the emitted names (gate given)
+        if gate is not None:
+            for n in defined:
+                if n.startswith('_Z') and n not in want:
+                    k = copy_key(itanium(n))
+                    if k:
+                        cbyk[k].add(n)
+        for w in sorted(want & defined & set(strict)):
+            if host not in ref_units.get(w, ()) and not gate_ok(w, w):
+                want.discard(w)
+                failed[w] = 'synth-failed (copy pair gate: %s)' % gnotes.get(w, '?')
+        for w in sorted(want - defined):
+            done = False
             for _, k in relaxed_keys(itanium(w)):
                 if len(byk.get(k, ())) == 1:
-                    renames[next(iter(byk[k]))] = w
+                    e = next(iter(byk[k]))
+                    if e not in renames and (w not in strict or gate_ok(w, e)):
+                        renames[e] = w
+                        done = True
                     break
+            if not done and gate is not None:
+                k = copy_key(itanium(w))
+                e = next(iter(cbyk[k])) if k and len(cbyk.get(k, ())) == 1 else None
+                if e and e not in renames and gate_ok(w, e):
+                    renames[e] = w
         if renames:
             ren = base + 'r.o'
             args = ['--redefine-sym=%s=%s' % kv for kv in sorted(renames.items())]
             if subprocess.run([vtables.OBJCOPY, *args, clean, ren], capture_output=True).returncode == 0:
                 clean = ren
                 defined = (defined - set(renames)) | set(renames.values())
-    got = vtables.gc_weaken(clean, want & defined, base + '.x')
+    got = vtables.gc_weaken(clean, want & defined, base + '.x') if want & defined else None
     if not got:
-        return None, set(), {n: 'synth-failed (not emitted)' for n in want}
+        failed.update({n: 'synth-failed (not emitted%s)' % ('; copy pair gate: ' + gnotes[n] if n in gnotes else '')
+                       for n in want})
+        return None, set(), failed
     path, roots = got
     for n in want - roots:
-        failed[n] = 'synth-failed (%s)' % ('not emitted by the host' if inline else 'GCC refused the = default')
+        failed[n] = 'synth-failed (%s)' % ('not emitted by the host' if inline else 'GCC refused the = default') + \
+            ('; copy pair gate: ' + gnotes[n] if n in gnotes else '')
     return path, roots, failed
 
 
@@ -873,25 +945,135 @@ def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
             keys[r.name] = (k[0], k[1])
     if not keys:
         return {}
-    found = bodycause.tree_bodies(tree, set(keys.values()))
+    search = {}   # tree_bodies spells a constructor / destructor by the class's own name
+    for n, (c, m) in keys.items():
+        search[n] = (c, c if m == '{ctor}' else '~' + c if m == '{dtor}' else m)
+    found = bodycause.tree_bodies(tree, set(search.values()))
     out = {}
     for r in rows:
         k = keys.get(r.name)
         if not k:
             continue
-        hosts = sorted({f for f, where in found.get(k, ()) if where.startswith('live') and f in unit_sources})
+        hosts = sorted({f for f, where in found.get(search[r.name], ()) if where.startswith('live') and
+                        f in unit_sources})
         if layouts:   # the class must have the referencing units' size in the host where the probe knows both
             ref = set().union(*(layouts.get((u, k[0]), set()) for u in r.units.split(',')))
             hosts = [h for h in hosts if not (ref and layouts.get((h, k[0])) and layouts[(h, k[0])] != ref)]
         if hosts:
             refs = [h for h in hosts if h in r.units.split(',')]
-            out[r.name] = (refs or hosts)[0]
+            out[r.name] = refs + [h for h in hosts if h not in refs]
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------- copy pairs
+
+def copy_key(sig, variant=True):
+    """The key the copies of one class share: the qualified name and the parameter types with every unit namespace
+    (`fnv_<a>::`) removed, parameters at sigs level 0 (exact spellings), the member's cv and (variant) the Itanium
+    ctor/dtor variant kept. The decomp's unit-local copies of a class (`fnv_00ad47f0::std::basic_ostream`,
+    `fnv_00ac9790::std::basic_ostream`) and the global class get one key; another class, overload or cv does not."""
+    if sig is None or sig.kind != 'func' or sig.params is None or len(sig.qual) < 2:
+        return None
+    qual = tuple(UNIT_NS_ANY.sub('', sigs.canon_type(q)) for q in sig.qual if not UNIT_NS.match(q))
+    if len(qual) < 2:
+        return None
+    params = tuple(UNIT_NS_ANY.sub('', sigs.canon_param(p, 0)) for p in sig.params)
+    return (qual, params, sig.cv or '', (sig.variant or '') if variant else '')
+
+
+def copy_types(sig):
+    """The spellings the copy-pair layout gate compares, in order: the member's class, then each class-like
+    parameter type (cv, `*` and `&` stripped; scalars and function types left out)."""
+    qual = [sigs.canon_type(q) for q in sig.qual[:-1]]
+    out = ['::'.join(qual)]
+    for p in sig.params or ():
+        t = sigs.canon_param(p, 0)
+        while True:
+            t2 = re.sub(r'^(?:const|volatile)\s+|\s*(?:const|volatile)$|\s*[\*&]$', '', t).strip()
+            if t2 == t:
+                break
+            t = t2
+        if t and t != '...' and '(' not in t and not SCALARS.match(t) and not re.match(r'^-?\d+$', t):
+            out.append(t)
+    return out
+
+
+class LayoutGate:
+    """Sizes of types in units for the copy pairs (copy-addr, tree-inline across copies): out/layouts.tsv's rows,
+    else the layout probe (layout.probe_unit in work, cached per (unit, type); thread-safe, one probe per unit at a
+    time). same(): every type of the pair is sized in each referencing unit (at most max_units of them) and in the
+    defining unit, with one size on both sides. A type the probe cannot name is no evidence: the pair fails."""
+
+    def __init__(self, tree, work, known=None, max_units=8):
+        import threading
+        self.tree, self.work, self.known, self.max_units = tree, work, known or {}, max_units
+        self.cache, self.lock = {}, threading.Lock()
+        self.ulocks = collections.defaultdict(threading.Lock)
+
+    def sizes(self, unit, types):
+        """{type: size or None}."""
+        res, need = {}, []
+        for t in types:
+            k = (unit, sigs.canon_type(t))
+            kn = {s for s in self.known.get(k, ()) if s >= 0}
+            if len(kn) == 1:
+                res[t] = next(iter(kn))
+            elif k in self.cache:
+                res[t] = self.cache[k]
+            elif t not in need:
+                need.append(t)
+        if need:
+            import layout
+            with self.lock:
+                ul = self.ulocks[unit]
+            with ul:
+                got = layout.probe_unit(self.tree, self.work, unit, need)
+            for t in need:
+                lay = got.get(t)
+                self.cache[(unit, sigs.canon_type(t))] = res[t] = lay.size if lay and lay.size >= 0 else None
+        return res
+
+    def same(self, ref_units, ref_types, def_unit, def_types):
+        """-> (ok, note)."""
+        if len(ref_types) != len(def_types) or not ref_units or not def_unit:
+            return False, 'no layout pair'
+        d = self.sizes(def_unit, def_types)
+        refs = sorted(ref_units)[:self.max_units]
+        for u in refs:
+            s = self.sizes(u, ref_types)
+            for rt, dt in zip(ref_types, def_types):
+                if s.get(rt) is None or d.get(dt) is None:
+                    return False, 'layout probe does not size %s' % (rt if s.get(rt) is None else dt)
+                if s[rt] != d[dt]:
+                    return False, 'sizes differ: %s %d in %s, %s %d in %s' % (rt, s[rt], u, dt, d[dt], def_unit)
+        return True, 'sizes %s' % ','.join(str(d[t]) for t in def_types)
+
+
+def copy_addr_pass(rows, cl, itanium, gate):
+    """`copy-addr`: a missing member of a class copy (or of the global class) whose same member of another copy
+    units.json places at one address the native build defines (Classifier.by_copy), with one layout on both sides
+    (LayoutGate: the class and its class-like parameters, in the referencing units and in a unit naming the other
+    copy's MSVC name). Bound to `__fnv_<addr>`."""
+    out = []
+    for r in rows:
+        isig = itanium(r.name)
+        hit = cl.by_copy(isig) if r.cls == 'missing' and r.units and isig.kind == 'func' else None
+        if hit:
+            a, mn, dunits = hit
+            ok, why = gate.same(r.units.split(','), copy_types(isig), sorted(dunits)[0], copy_types(cl.msvc(mn)))
+            if ok:
+                r = Row(r.name, 'copy-addr', a, ADDR_SYM % a, r.units, 'via %s in %s (%s)' %
+                        (mn, sorted(dunits)[0], why), None)
+            else:
+                r = r._replace(note=r.note + '; copy-addr %08x: %s' % (a, why))
+        out.append(r)
     return out
 
 
 # ---------------------------------------------------------------------------------------------------- vcalls
 
 VCALL_SYM = '__fnvnx_bdvc_%08x'
+VCALL_DIRECT = 'MSVC calls it directly (pristine reference)'   # not a vcall: a real non-virtual call
 VCALL_HEAD = ('namespace __fnvnx_bd { template <class C, class... A> struct sel { '
               'template <class R> static constexpr auto m(R (C::*p)(A...)) { return p; } '
               'template <class R> static constexpr auto c(R (C::*p)(A...) const) { return p; } }; }')
@@ -1714,7 +1896,12 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         rows = [bym_[r.name] if r.name in bym_ else r for r in rows]
         rows += [r for r in got_ if r.name not in have_]
         exe_vars -= {r.name for r in got_}
+    gate = None
     if synth:   # its stubs are emitted with the synthesized objects
+        # a member of another copy of the class at an exe address, one layout on both sides (layout probe)
+        os.makedirs(os.path.join(bdir, 'work'), exist_ok=True)
+        gate = LayoutGate(tree, os.path.join(bdir, 'work'), load_type_sizes(out))
+        rows = copy_addr_pass(rows, cl, itanium, gate)
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
         # variables declared and defined nowhere, without an exe address: a typed zero definition (decl-data)
@@ -1774,7 +1961,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 for u_ in r.units.split(','):
                     if any(keys & {k for _, k in relaxed_keys(msvc(m_))} for i_ in idx_of.get(u_, ())
                            for m_ in ext[i_]):
-                        failed[n] = 'MSVC calls it directly (pristine reference)'
+                        failed[n] = VCALL_DIRECT
                         del cand[n]
                         break
         vby = collections.defaultdict(list)
@@ -1806,30 +1993,45 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                         else r for r in rows]
         # bodies the decomp writes inline in another unit's source (`inline C::f() {...}`, an in-class body of a
         # copy of C): that unit hosts them, compiled with -fkeep-inline-functions like msvc-inline
-        vdone = set(vtargets) | set(failed) | set(vnotes)
+        # a name MSVC calls out of line (the vcall check's pristine reference) is no vcall, but the decomp's inline
+        # body is still its body: tree-inline takes it, gated like a copy pair (strict)
+        direct = {n for n, why in failed.items() if why == VCALL_DIRECT}
+        vdone = set(vtargets) | (set(failed) - direct) | set(vnotes)
         rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
         tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
-        tby = collections.defaultdict(list)
-        for r in rest:
-            if r.name in tin:
-                tby[tin[r.name]].append(r)
+        # tree-inline's pairings across units pass the layout gate: names MSVC calls directly, constructors and
+        # destructors (found since the search spells them by the class name), and every copy-key rename
+        strict = direct | {n for n in tin if itanium(n).variant}
 
         def tone(job):
-            h, rs = job
+            h, rs, k = job
             try:
-                return h, synth_host(tree, work, h, rs, itanium, True)
+                return h, k, synth_host(tree, work, h, rs, itanium, True, gate=gate, strict=strict)
             except Exception as e:
-                return h, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
+                return h, k, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
         tdone = {}
-        with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
-            for h, (path, roots, fail) in ex.map(tone, sorted(tby.items())):
-                if path:
-                    dst = os.path.join(bdir, 'zz_bd_%s_t.o' % h.replace('/', '_'))
-                    os.replace(path, dst)
-                    synth_rows.append((h, dst, len(roots)))
-                    tdone.update({n: h for n in roots})
-                for n, why in fail.items():
-                    vnotes[n] = 'tree-inline in %s: %s' % (h, why)
+        for round_ in range(3):   # a host that does not pair a name: the next host with a body of the class
+            tby = collections.defaultdict(list)
+            for r in rest:
+                hs = tin.get(r.name, [])
+                if r.name not in tdone and round_ < len(hs) and (round_ == 0 or r.name in strict):
+                    tby[hs[round_]].append(r)
+            if not tby:
+                break
+            with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+                for h, k, (path, roots, fail) in ex.map(tone, [(h, rs, round_) for h, rs in sorted(tby.items())]):
+                    if path:
+                        dst = os.path.join(bdir, 'zz_bd_%s_t%s.o' % (h.replace('/', '_'), str(k) if k else ''))
+                        os.replace(path, dst)
+                        synth_rows.append((h, dst, len(roots)))
+                        tdone.update({n: h for n in roots})
+                    for n, why in fail.items():
+                        if n not in tdone:
+                            vnotes[n] = (vnotes[n] + '; ' if n in vnotes and k else '') + \
+                                'tree-inline in %s: %s' % (h, why)
+        for n in tdone:
+            failed.pop(n, None)
+            vnotes.pop(n, None)
         rows = [r._replace(cls='tree-inline', host=tdone[r.name], note='inline body in ' + tdone[r.name])
                 if r.name in tdone else r for r in rows]
         gd = [r for r in rows if r.cls == 'gdel']
@@ -1928,7 +2130,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     with open(os.path.join(bdir, 'bind.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\tclass\ttarget\n')
         for r in rows:
-            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel', 'template-fold', 'exe-data'):
+            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel', 'template-fold', 'exe-data', 'copy-addr'):
                 f.write('%s\t%s\t%s\n' % (r.name, r.cls, r.target))
     with open(os.path.join(bdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#host_unit\tobject\tnames\n')
@@ -1938,8 +2140,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'template-fold', 'exe-addr', 'exe-data', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline',
-                        'tree-inline', 'exe-sret', 'thunk', 'addr-host', 'decl-data', 'special-default', 'crt-rule',
+              for k in ('addr', 'template-fold', 'exe-addr', 'copy-addr', 'exe-data', 'gdel', 'vcall', 'msvc-empty',
+                        'msvc-inline', 'tree-inline', 'exe-sret', 'thunk', 'addr-host', 'decl-data', 'special-default', 'crt-rule',
                         'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
