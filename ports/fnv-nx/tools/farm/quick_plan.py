@@ -14,6 +14,8 @@ checks is the plan. A path no class names selects everything (unknown means unsa
   programs the shader-program sweep (sweep_job.sh's perm.py part), when the translator changed
   frames   the per-thread CPU and frame-pacing lane (frames_job.sh): the profiler's tests, then this head's guest under
            linhost --profile, frames cut at the D3D9 Present (after build, on its build directory)
+  mem      the memory lane (mem_job.sh): mem.py's tests, then this head's guest relinked with the recorder and run
+           under qemu-aarch64; the peak against the 3.2 GiB budget, failures, top sites (after build)
   threads  D25 #7's report lane (threads_job.sh): the race checker's and the watchdog's tests, then this head's
            guest relinked with the watchdog and run under qemu-aarch64 (after build, on its build directory)
 The caches make each selected check cost what changed; the plan only skips checks that nothing can affect.
@@ -28,16 +30,17 @@ cells.tsv lines when the index holds them, else (id) alone.
 """
 import argparse, json, os, re, subprocess, sys
 
-ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames')
+ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames', 'mem')
 # (regex on the path relative to ports/fnv-nx/, checks); first match wins
 CLASSES = [
     (r'^(docs/|journal/|JOURNAL\.md$|README\.md$|reports/)', ()),
     (r'^tools/farm/(quick_plan\.py|README\.md)$', ()),
     (r'^tests/s6n/', ('replay', 'build')),            # nx_render's build
     (r'^tests/s5/', ('build',)),                      # the boot scripts
-    (r'^tests/s15/mtqemu/', ('threads', 'frames')),  # the race checker, linhost (the profiler), boot_game.sh
+    (r'^tests/s15/mtqemu/', ('threads', 'frames', 'mem')),  # the race checker, linhost (the profiler), boot_game.sh
     (r'^tests/s15/(test_mtqemu|test_threads_report)\.py$', ('threads',)),
     (r'^tests/s15/test_frames\.py$', ('frames',)),
+    (r'^tests/s15/test_mem_report\.py$', ('mem',)),
     (r'^tests/', ()),                                 # tests run by the streams and V1, not by a check here
     (r'^render/shaders/', ('programs', 'replay', 'build')),
     (r'^render/', ('replay', 'build')),               # the guest links the native renderer (LINK_OVERRIDES=render)
@@ -45,6 +48,7 @@ CLASSES = [
     (r'^tools/equiv/', ('equiv',)),
     (r'^tools/difffuzz/', ('fuzz', 'audit')),         # the audit runs on the fuzz harness and its keys
     (r'^tools/perf/(frames\.py|FRAMES\.md)$', ('frames',)),
+    (r'^tools/perf/(mem\.py|mem_wrap\.c|mem_autostart\.c|MEM\.md)$', ('mem',)),
     (r'^tools/perf/', ('audit',)),
     (r'^tools/farm/(sweep_job|capstore)', ('replay',)),
     (r'^tools/farm/(equiv_job)', ('equiv',)),
@@ -52,7 +56,9 @@ CLASSES = [
     (r'^tools/farm/(audit_job)', ('audit',)),
     (r'^tools/farm/threads_job', ('threads',)),
     (r'^tools/farm/frames_job', ('frames',)),
-    (r'^tools/threads/report\.py$', ('threads', 'frames')),   # frames.py imports its Symbols
+    (r'^tools/farm/mem_job', ('mem',)),
+    (r'^tools/threads/report\.py$', ('threads', 'frames', 'mem')),   # frames.py and mem.py import its Symbols
+    (r'^tools/threads/variant\.sh$', ('threads', 'mem')),
     (r'^tools/threads/', ('threads',)),
     (r'^tools/farm/', ('build',)),                    # link/full/compile jobs and their library
 ]

@@ -83,6 +83,24 @@ void fnvnx_waitgraph_set_caller(unsigned pc);
 /* prints what the thread checkers have so far: the race checker's pairs (hb_dump, when linked) and the watchdog's
  * summary (when on). ExitProcess calls it; the scanner every FNVNX_THREADS_DUMP_S seconds (default 10). */
 void fnvnx_threads_flush(void);              /* "wg: summary cycles N long-waits N scans N threads N" */
+/* Memory lane (platform/win32/memtrack.cpp, D25 #8; tools/perf/MEM.md): live bytes by kind (0 heap, 1 virtual,
+ * 2 gpu), the peak, failed allocations and allocation sites by caller address, "mem: ..." lines to the sink (default
+ * os_debug_print). Off (one load on the allocation paths) until started. */
+typedef void (*fnvnx_mem_sink)(const char *line);
+void fnvnx_mem_start(unsigned period_ms, fnvnx_mem_sink sink);
+void fnvnx_mem_autostart(unsigned period_ms);     /* from a static constructor (tools/perf/mem_autostart.c) */
+void fnvnx_mem_stop(void);                        /* recording off, the sampler stopped; counts stay */
+void fnvnx_mem_flush(void);                       /* peak, sites, summary (ExitProcess calls it) */
+void fnvnx_mem_counts(unsigned long long live[3], unsigned long long *peak, unsigned long long *fails);
+/* for the allocator stand-ins and tools/perf/mem_wrap.c */
+void fnvnx_mem_note(int kind, const void *p, size_t n, unsigned caller);
+void fnvnx_mem_forget(int kind, const void *p);   /* kind -1: whatever kind p was recorded as */
+void fnvnx_mem_delta(int kind, long long bytes, unsigned caller);
+void fnvnx_mem_fail(int kind, size_t n, unsigned caller);
+int fnvnx_mem_enter(unsigned caller);             /* a stand-in records its own allocation: the wrapped malloc skips */
+void fnvnx_mem_leave(int entered);
+int fnvnx_mem_inside(void);
+unsigned fnvnx_mem_caller(unsigned fallback);
 /* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
 typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
