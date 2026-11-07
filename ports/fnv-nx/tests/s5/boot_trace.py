@@ -4,6 +4,8 @@ guest in the emulator (emu_guest.py --trace-fn), same function list, same game f
 first divergence at a function boundary and writes real arguments per function for fuzz seeding.
 
     boot_trace.py fnlist  --addrmap TSV [--units JSON] [--only REGEX] [--max N] > list.txt
+    boot_trace.py ref     <game dir> <function list> <out.tsv> [--seconds S] [--work DIR]
+    boot_trace.py diff    <ref.tsv> <guest.tsv> [--units JSON] [--json OUT]      exit 0: no divergence, 1: one
     boot_trace.py compare GUEST.tsv WINE.tsv [--units JSON] [--resync N] [--json OUT] [--context K]
     boot_trace.py seeds   WINE.tsv [--units JSON] --out seeds.jsonl [--per-fn N]
 
@@ -42,6 +44,9 @@ import re
 import sys
 
 IMAGE_LO, IMAGE_HI = 0x00400000, 0x02100000
+# The log format and tracer semantics of both sides; part of any cache key of a reference trace (T1: with the exe,
+# the game data, the function list and tools/lockstep/fnvtrace.c). Bump it when a line shape or what is logged changes.
+TRACE_FORMAT = "fnvtrace-1"
 
 
 # ---- the logs ------------------------------------------------------------------------------------------------------
@@ -422,6 +427,7 @@ def cmd_compare(a):
                                "orig": f"{d['guest'].orig:08x}"} for d in r["divergences"]]
         if f:
             out["first"] = {"kind": f["kind"], "detail": f["detail"], "function": f["guest"].name,
+                            "guest_seq": f["guest"].seq, "ref_seq": f["wine"].seq, "format": TRACE_FORMAT,
                             "orig": f"{f['guest'].orig:08x}",
                             "guest_path": [fmt_call(c, "guest") for c in path(f["guest"])],
                             "exe_path": [fmt_call(c, "wine") for c in path(f["wine"])]}
@@ -480,6 +486,37 @@ def cmd_fnlist(a):
     return 0
 
 
+def cmd_ref(a):
+    """the reference trace alone: tools/lockstep/wine_trace.sh (its output depends only on the exe, the game data,
+    the list and the harness, so it can be cached)"""
+    import os
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    tool = os.path.join(here, "..", "..", "tools", "lockstep", "wine_trace.sh")
+    work = a.work or os.path.join(os.path.dirname(os.path.abspath(a.out)), "wine_work")
+    r = subprocess.run(["bash", tool, a.game, work, a.list, a.out, str(a.seconds)])
+    if r.returncode or not os.path.exists(a.out):
+        print(f"ref: wine_trace.sh exit {r.returncode}", file=sys.stderr)
+        return 2
+    print(f"ref: {TRACE_FORMAT} -> {a.out}")
+    return 0
+
+
+def cmd_diff(a):
+    """compare with the reference first; exit 1 on a divergence, with its seq, function and field"""
+    a.guest, a.wine = a.guest_tsv, a.ref_tsv
+    a.resync, a.context = 64, 8
+    out = a.json
+    cmd_compare(a)
+    if out:
+        r = json.load(open(out))
+        return 1 if r.get("first") else 0
+    _, g_order = read_log(a.guest, "guest")
+    _, w_order = read_log(a.wine, "wine")
+    r = compare(main_thread(g_order), main_thread(w_order), load_units(a.units))
+    return 1 if r["first"] else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -491,6 +528,19 @@ def main(argv=None):
     p.add_argument("--context", type=int, default=8)
     p.add_argument("--json")
     p.set_defaults(fn=cmd_compare)
+    p = sub.add_parser("ref")
+    p.add_argument("game")
+    p.add_argument("list")
+    p.add_argument("out")
+    p.add_argument("--seconds", type=int, default=300)
+    p.add_argument("--work")
+    p.set_defaults(fn=cmd_ref)
+    p = sub.add_parser("diff")
+    p.add_argument("ref_tsv")
+    p.add_argument("guest_tsv")
+    p.add_argument("--units")
+    p.add_argument("--json")
+    p.set_defaults(fn=cmd_diff)
     p = sub.add_parser("seeds")
     p.add_argument("wine")
     p.add_argument("--units")

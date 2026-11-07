@@ -80,5 +80,16 @@ class Lockstep(unittest.TestCase):
         self.assertEqual(r["matched"], 2)
 
 
+class Diff(unittest.TestCase):
+    def test_exit_codes(self):
+        d = tempfile.mkdtemp()
+        g, w = os.path.join(d, "g.tsv"), os.path.join(d, "w.tsv")
+        open(g, "w").write(guest_line(1, 0, "A", "00401000", [0x01082504]))
+        open(w, "w").write(wine_line(1, 0, "A", "00401000", 0x01082504, []))
+        self.assertEqual(bt.main(["diff", w, g]), 0)
+        open(w, "w").write(wine_line(1, 0, "A", "00401000", 0x010824fc, [0x010824fc]))
+        self.assertEqual(bt.main(["diff", w, g, "--json", os.path.join(d, "o.json")]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
