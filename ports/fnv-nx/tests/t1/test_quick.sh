@@ -23,6 +23,8 @@ assert on(['tools/perf/frames.py'])[0] == ['frames'] and on(['tests/s15/test_fra
 assert on(['tools/perf/mem.py'])[0] == ['mem'] and on(['tools/threads/variant.sh'])[0] == ['mem', 'threads']
 assert on(['tools/threads/report.py'])[0] == ['frames', 'mem', 'threads'] and on(['tools/threads/README.md'])[0] == ['threads']
 assert 'threads' in on(['platform/win32/waitgraph.cpp'])[0]
+assert on(['tools/scenario/scenario.py'])[0] == ['scenario'] and on(['tests/s18/test_scenario.py'])[0] == []
+assert 'scenario' in on(['tests/s5/emu_guest.py'])[0] and 'scenario' in on(['platform/win32/file.cpp'])[0]
 print('plan ok')
 PY
 ok "plan classes" 'grep -q "plan ok" "$T/plan.txt"'
@@ -40,7 +42,7 @@ git -C "$G" -c user.name=t -c user.email=t@t commit -q --allow-empty -m base; B=
 echo x >"$G/ports/fnv-nx/render/a.cpp"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m r; H1=$(git -C "$G" rev-parse HEAD)
 echo y >"$G/ports/fnv-nx/toolchain/t.sh"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m t; H2=$(git -C "$G" rev-parse HEAD)
 mkdir -p "$G/ports/fnv-nx/tools/farm" "$T/jobs"; cp "$P/tools/farm/quick_job.sh" "$P/tools/farm/quick_plan.py" "$G/ports/fnv-nx/tools/farm/"
-for j in full fuzz audit equiv sweep threads frames mem; do
+for j in full fuzz audit equiv sweep threads frames mem scenario; do
 	printf '#!/bin/sh\necho "$(date +%%s) %s" >> %s/order\nsleep 1\neval "out=\\${$#}"; printf "# %s\\n\\n- %s ok\\n" > "$out"\nexit ${RC_%s:-0}\n' "$j" "$T" "$j" "$j" "$j" >"$T/jobs/${j}_job.sh"
 done
 mkdir -p "$T/home/capture/k1"; cp -r "$T/store/index" "$T/home/capture/k1/"
