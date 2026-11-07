@@ -75,3 +75,16 @@ export, failed opens (path hash, class, error, ci, calls), decode failures, unma
   `plat` covers plat.py, plat_autostart.c, PLAT.md, plat_job.sh, test_plat_report.py, variant.sh,
   tools/threads/report.py and tests/s15/mtqemu.
 - platform/ changes select every check, as before.
+
+## The original's baseline (failed opens, #4)
+
+Some opens fail on a stock PC install too (a relative `Plugins.txt` in the game folder: the real one is under
+AppData). They are counted against the port only when the original does not fail them:
+
+1. The Wine run of the same scenario (tools/scenario/wine_scenario.sh) gets a trace list with the line
+   `kernel32!CreateFileA` (tools/lockstep/fnvtrace.dll resolves `dll!Export` lines) and `FNVTRACE_DEREF=256`.
+2. `tools/perf/plat_wine.py <wine.tsv> --out original_opens.json`: the game's own CreateFileA calls (return address in
+   the exe image) that returned INVALID_HANDLE_VALUE, keyed like platstat.cpp (path class + FNV-1a of the path), no
+   path text (fnvnx-plat-original/1).
+3. `tools/perf/plat.py <logs> --original original_opens.json`: an open failing on both sides (same class and hash) is
+   listed as `also fails in the original`, left out of the metric; `metric_all` keeps it. No hand-written list.
