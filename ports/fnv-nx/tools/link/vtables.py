@@ -411,7 +411,7 @@ template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T));
 }
 '''
 NS = '__fnvnx_vt::'
-PROBE_VERSION = 2   # cache.json entries: 2 HEAD_BARE
+PROBE_VERSION = 3   # cache.json entries: 2 HEAD_BARE, 3 elaborated names
 # The same helpers without a standard header (GCC's builtins: __direct_bases, __bases, __is_convertible; typeid
 # needs std::type_info declared only). For host units that do not compile after <typeinfo> / <type_traits>: units
 # with their own std::exception / std::bad_alloc copies (redefinition), or with a `using namespace std` swap that
@@ -437,21 +437,34 @@ template <class T> auto dealloc(void *p, long) -> decltype(T::operator delete(p,
 template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T)); }
 }
 '''
+ELAB = 'struct '   # spelling prefix: an elaborated name (the class is hidden by a function of the same name)
+
+
+def elaborated(t):
+    """The elaborated spelling of a class whose plain name a function of the same name hides (`void
+    FUN_00405310(); struct FUN_00405310 { virtual ~FUN_00405310(); };`, the decomp's shells of a constructor or
+    destructor address): `struct ::X` looks up class names only. None if t is one already."""
+    return None if t.startswith(ELAB) else ELAB + t
 
 
 def probe_items(k, t, phase, nd=0, na=0, bare=False):
     """Source lines (one item each) for class number k spelled t. Phase 1: counts and flags (info), the class's own
     typeinfo symbol (self), the derived class with a key function (vt). Phase 2 (nd direct, na direct or indirect
     bases from phase 1): per direct base its typeid, offset and public-ness; per base its typeid and offset (a
-    virtual base has no constant offset: the variable lands in .bss, initialized at run time). bare: the HEAD_BARE
-    helpers."""
+    virtual base has no constant offset: the variable lands in .bss, initialized at run time). An elaborated t
+    (`struct ::X`) is named through a typedef (ty), which a base-specifier needs; bare: the HEAD_BARE helpers."""
+    pre = []
+    if t.startswith(ELAB):
+        pre = [('ty' if phase == 1 else 'ty2', 'namespace __fnvnx_vt { typedef %s T%d; }' % (t, k))]
+        t = '::__fnvnx_vt::T%d' % k
     if phase == 1:
         return [('info', 'extern "C" const unsigned __fnvnx_vti_%d[5] = {__is_polymorphic(%s), __is_final(%s), '
                  '%slen<%sdb<%s>>::value, %slen<%sab<%s>>::value, sizeof(%s)};' % (k, t, t, NS, NS, t, NS, NS, t, t)),
                 ('self', 'extern "C" const void *const __fnvnx_vtc_%d = &typeid(%s);' % (k, t)),
                 ('vt', 'namespace __fnvnx_vt { struct V%d : %s { virtual void __fnvnx_key(); }; '
-                 'void V%d::__fnvnx_key() {} }' % (k, t, k))]
-    items = []
+                 'void V%d::__fnvnx_key() {} }' % (k, t, k))] if not pre else \
+            pre + [(nm, line) for nm, line in probe_items(k, t, 1, bare=bare)]
+    items = list(pre)
     for i in range(nd):
         b = '%sdbase<%s, %d>' % (NS, t, i)
         conv = ('__is_convertible(%s *, %s *)' if bare else 'std::is_convertible<%s *, %s *>::value') % (t, b)
@@ -539,7 +552,8 @@ def probe_host(tree, workdir, unit, classes):
     mangled encoding (enc), flags, and when available the derived class's vtable group (vt_ents, made with the
     derived class V<k>: vt_k) and the direct bases (bases: [(typeinfo symbol, offset or None, virtual, public)]).
     A host unit that does not compile after HEAD's standard headers is probed again with HEAD_BARE (bare: True in
-    its results)."""
+    its results); a class whose plain name does not compile is probed again by its elaborated name (the spelling in
+    its result)."""
     res = {}
     bare, why = False, {}
     obj, alive = compile_probe(tree, workdir, unit,
@@ -586,6 +600,15 @@ def probe_host(tree, workdir, unit, classes):
         phase1(obj, alive, classes)
     elif bare:   # the unit does not compile here at all
         return res
+    # a class the plain name does not reach: its elaborated name (a function of the same name hides it)
+    retry = [(k, elaborated(t)) for k, t in classes if k not in res and elaborated(t)]
+    if retry:
+        obj_e, alive_e = compile_probe(tree, workdir, unit, [(k, nm, line) for k, t in retry
+                                                             for nm, line in probe_items(k, t, 1, bare=bare)],
+                                       'vt1e' + sfx, prelude=prelude)
+        if obj_e is not None:
+            phase1(obj_e, alive_e, retry)
+    classes = [(k, res[k]['spelling']) for k, _ in classes if k in res]
     items = [(k, nm, line) for k, t in classes if k in res and res[k]['ndirect'] + res[k]['nall'] <= 64
              for nm, line in probe_items(k, t, 2, res[k]['ndirect'], res[k]['nall'], bare=bare)]
     if not items:
@@ -889,7 +912,7 @@ def decode(d):
 
 def stale_entry(got, n):
     """A cache.json entry of an older probe version that the current probe_host would answer differently: a class
-    it did not name (HEAD_BARE)."""
+    it did not name (HEAD_BARE, elaborated names)."""
     vals = [v for i, v in got.items() if not i.startswith('_')]
     return len(vals) != n
 

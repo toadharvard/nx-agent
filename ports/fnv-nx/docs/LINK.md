@@ -535,6 +535,8 @@ Retries on one host (link 9f865b0a: 78 trap stubs of D23's `special-unresolved:t
   blk_00b00000_od_ob1_variant, blk_00e00000_o2, frondengine_ob1_variant): probed again with `HEAD_BARE`, the same
   helpers from GCC's builtins (`__direct_bases`, `__bases`, `__is_convertible`) and a declared `std::type_info`,
   no header. The emitted slot functions of such a host use it too.
+* *A class hidden by a function of the same name* (`void FUN_00405310(); struct FUN_00405310 {...};`, the decomp's
+  constructor/destructor shells): probed again by its elaborated name `struct ::C`, through a typedef.
 
 Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the compiled objects): weak `_ZTV`, `_ZTI`,
 `_ZTS` for names no compiled object defines, and the non-virtual thunks (`_ZTh[n]<k>_f`: `sub`/`add w0`, tail call
