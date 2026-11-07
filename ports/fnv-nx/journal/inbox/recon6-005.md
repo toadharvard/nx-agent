@@ -1,7 +1,7 @@
 ### J-XXXX | 2026-11-07 | stream: R6-recon (claude/fnv-recon6) | status: wip | parent: J-0156
 
 * **shard 6** - 140 of 158 rows closed (122 of the 132 trap stubs), in 21 more fnv-nx-build `recon/<unit>` branches.
-  R6 now has 46 recon branches in all.
+  R6 now has 43 recon branches in all.
   - Every recon passes the whole-unit MSVC 9 match against the exe and the native aarch64 compile.
   - Bindings were checked by hand against the exe call site, and each is an fnvlink `exact` key.
   - Mechanisms: bindings about 100; bodies at new exe addresses 11; alias bodies 8; inline bodies 37.
