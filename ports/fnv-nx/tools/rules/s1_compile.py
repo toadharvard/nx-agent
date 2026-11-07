@@ -4886,7 +4886,8 @@ def _recon_entries(path):
             r = json.load(open(f))
         except (OSError, ValueError):
             continue
-        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not r.get('append'): continue
+        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not (r.get('append') or r.get('symbols')):
+            continue   # a recon with only `symbols` binds names to the exe's functions and adds no body
         if head and r.get('decomp_commit') and r['decomp_commit'] != head:
             r['_skip'] = 'REC1-STALE'
         elif any(fn.get('address') in defined for fn in r.get('functions', [])):
@@ -4906,10 +4907,11 @@ def r_recon_bodies(path, text, stats):
         if r['unit'] != src: continue
         if r.get('_skip'):
             stats[r['_skip']] += 1; continue
-        body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
-        text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
-        if not text.endswith('\n'): text += '\n'
-        stats['REC1'] += len(r.get('functions', []))
+        if r.get('append'):
+            body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
+            text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
+            if not text.endswith('\n'): text += '\n'
+            stats['REC1'] += len(r.get('functions', []))
         r['_applied'] = True
     return text
 
@@ -4921,7 +4923,7 @@ def add_recon_definitions(out_root, stats, files=None):
     p = os.path.join(out_root, 'build', 'units.json')
     if not os.path.exists(p): return
     data = json.load(open(p))
-    n = 0
+    n = m = 0
     for r, _ in _RECON:
         if not r.get('_applied'): continue
         for u in data['units']:
@@ -4931,9 +4933,12 @@ def add_recon_definitions(out_root, stats, files=None):
                 if fn['address'] not in have:
                     u['functions'].append(dict(fn)); n += 1
             for k, v in r.get('symbols', {}).items():
-                u.setdefault('symbols', {}).setdefault(k, v)
-    if n:
+                if k not in u.setdefault('symbols', {}):
+                    u['symbols'][k] = v; m += 1
+    if n or m:   # symbols persist on their own: a recon may only bind names to the exe's functions (R1: the Havok
+        # agents DCD6A0Agent1..9, compared by address in FUN_00dcd4d0, must bind to the exe and get no body)
         stats['REC1-DEF'] += n
+        stats['REC1-SYM'] += m
         json.dump(data, open(p, 'w'))
         if files is not None: files['REC1-DEF'] += 1
 

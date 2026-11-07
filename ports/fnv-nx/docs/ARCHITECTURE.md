@@ -202,6 +202,47 @@ agents queue the next item instead of waiting, and verify their own change with 
   only when it matches and is not slower.
 - Link/boot/runtime: whole classes (all .inl bodies, all short vtables, all services of a DLL), not trap by trap.
 
+### D26. One virtual-slot order: minus-one everywhere (orchestrator, 2026-11-07, from S5-boot s5-003)
+
+Natively every polymorphic object is dispatched in one order, D22's minus-one layout (D1/D0 at slots 0/1, exe slot k
+at k+1). S5 measured that the boot gets worse when only one of the three paths is converted: 4,275 -> 1 skipped
+initializers with a bridge, 1 -> 3,461 with only the image vftables converted. So the three land together in one
+integration merge, and none of them is merged alone:
+(a) D22 for paired classes (S1-rules);
+(b) a `virtual ~X()` for the slot-0 placeholder of every call-only declaration. `tests/s5/callonly_vt.py` lists
+11,947 of them in 1,826 files (S1-rules);
+(c) a minus-one native vtable for every hand-stored image vftable, hand_vptrs 'image', 785 referenced (S2-bodies,
+tools/link).
+Until then S5's standins.c bridge stays. The acceptance test is S5's stub boot: skipped initializers do not go up,
+and fuzz hard does not go up.
+
+### D25. The zero targets that make the game work (owner, 2026-11-07)
+
+On top of D24, each measured on scripted scenarios in emulation (boot -> menu -> new game -> cell -> save/load):
+1. faults on the scenario path (S5-boot); 2. lockstep divergences against the original under Wine (S5-boot, S18);
+3. unimplemented platform calls hit (Win32, D3D9, audio, input, Bink, GalaxyWrp stand-ins; S4-platform);
+4. failed file opens (BSA, ESM, saves, ini, path case; S4-platform); 5. skipped draws and unsupported D3D9 states in
+the guest's own frames (S16, S17); 6. audio decode and input mapping failures (S4-platform); 7. races, deadlocks,
+hangs (S15-threads, once the menu is reached); 8. allocation failures and memory over the Switch budget (S5-boot,
+then S15); 9. save/load round-trip differences (S18-scenarios); 10. game-script errors on the scripted playthrough
+(S18-scenarios); 11. open NRO_CHECKLIST.md items (S2-bodies, S4-platform); 12. frames over 16.7 ms - after coverage
+(D21; S15-perf).
+
+### D24. Four zero targets (owner, 2026-11-07)
+
+- 0 missing functions (no trap stubs): R1..R10 recon fleet + S2-bodies (D23).
+- 0 link errors (undefined symbols, unbound vtable slots, data traps): S2-bodies.
+- 0 wrong functions: no hard or soft fuzz divergence and no MSVC-equivalence code difference that is not a declared
+  platform class. Owners by cause group: S1-rules (coordinator; harness/oracle causes, signedness, bool, the class
+  split and the shard reports), F1 (call-flow, allocator family, native-extra/early-exit/inlined), F2 (vptr,
+  virtual calls, ctor/dtor order, vtable layout), F3 (memory: uninit-*, store-width, x86-only-store, ilp32-pointer,
+  null reads, callee-saved), F4 (floating point: nan-bits, x87-precision, division, float), EQ (equivalence: the
+  120 code-difference functions and the units the prepared side cannot compile).
+- 0 wrong shaders: every program passes on every parameter set that exercises it and none stays vacuous; every
+  scene matches; S16 (failing programs, scenes, draws) and S17 (coverage of the vacuous programs).
+- A fix is a class mechanism (rule, generator, harness) measured by the farms; one-off edits only where no class
+  exists.
+
 ### D23. Zero trap stubs: the recon fleet and fuzz-equivalent acceptance (owner, 2026-11-07)
 
 - Owner target: the guest image has 0 trap stubs. Every function the decomp lacks gets a native body.
@@ -211,6 +252,10 @@ agents queue the next item instead of waiting, and verify their own change with 
   reasonable effort, fuzz-equivalence against the x86 oracle (tools/difffuzz, every seed and the probes clean, no
   hard or soft divergence) - recorded as `"accept": "fuzz"` in recon.json with the fuzz record. (b) is never used
   for a function whose byte match only fails on a known rule class; that class is fixed instead.
+  (c) a body with no out-of-line exe copy (the exe only has it inlined) is written from the inlined code and
+  recorded as `"accept": "inline"` with the exe call sites it was read from. It closes the trap. It is confirmed when
+  fuzz of the containing exe functions shows no new hard divergence; a divergence reopens it as a D24 false
+  interpretation (orchestrator, from R6).
 - S2-bodies owns the list (tools/link/bodycause.py on the newest link) and every non-recon trap class.
 
 ### D22. Virtual destructor slots against MSVC vftables (orchestrator)

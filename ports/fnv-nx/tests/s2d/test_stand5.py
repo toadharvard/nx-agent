@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""tests/s2d - STAND5 (tools/rules/s2_bodies.py) on a hand-written unit (no decomp content).
+
+    python3 -I tests/s2d/test_stand5.py
+
+An in-class body whose MSVC name the unit's symbols bind to an address another unit defines becomes a
+declaration; one bound to this unit's own address, a tagged one, a virtual one, a constructor and an unbound one
+keep their bodies.
+"""
+import collections
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools'))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'rules'))
+import s2_bodies   # noqa: E402
+
+SRC = '''struct Item { int v; };
+struct List
+{
+    Item* m_head;
+    Item* NewItem();
+    void* Add(const Item& p)
+    {
+        Item* i = NewItem();
+        return i;
+    }
+    int Own(int k)
+    {
+        return k;
+    }
+    // @fnv 0x00402000
+    int Tagged(int k)
+    {
+        return k + 1;
+    }
+    virtual int Virt(int k)
+    {
+        return k;
+    }
+    List()
+    {
+        m_head = 0;
+    }
+    int Free(int k)
+    {
+        return k * 2;
+    }
+};
+void Use(List& l, Item& i) { l.Add(i); }
+'''
+
+
+class Stand5(unittest.TestCase):
+    def test_rule(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'build'))
+            os.makedirs(os.path.join(d, 'src'))
+            units = {'units': [
+                {'source': 'src/a.cpp', 'flags': ['/Od'], 'functions': [{'symbol': '?Use@@YAXAAUList@@AAUItem@@@Z',
+                                                                         'address': '0x00401100'},
+                                                                        {'symbol': '?Own@List@@QAEHH@Z',
+                                                                         'address': '0x00401200'}],
+                 'symbols': {'?Add@List@@QAEPAXABUItem@@@Z': '0x00405000', '?Own@List@@QAEHH@Z': '0x00401200',
+                             '?Tagged@List@@QAEHH@Z': '0x00405100', '?Virt@List@@UAEHH@Z': '0x00405200',
+                             '??0List@@QAE@XZ': '0x00405300'}},
+                {'source': 'src/b.cpp', 'flags': ['/O2'], 'functions': [
+                    {'symbol': '?Add@Arr@@QAEPAXABUItem@@@Z', 'address': '0x00405000'},
+                    {'symbol': '?F@@YAXXZ', 'address': '0x00405100'},
+                    {'symbol': '?G@@YAXXZ', 'address': '0x00405200'},
+                    {'symbol': '?H@@YAXXZ', 'address': '0x00405300'}], 'symbols': {}}]}
+            json.dump(units, open(os.path.join(d, 'build', 'units.json'), 'w'))
+            path = os.path.join(d, 'src', 'a.cpp')
+            open(path, 'w').write(SRC)
+            st = collections.Counter()
+            out = s2_bodies.r_stand_in_class_bodies(path, SRC, st)
+        self.assertEqual(st['STAND5'], 1)
+        self.assertIn('void* Add(const Item& p); /* fnv-nx STAND5', out)
+        self.assertNotIn('Item* i = NewItem();', out)
+        for keep in ('return k;', 'return k + 1;', 'm_head = 0;', 'return k * 2;'):
+            self.assertIn(keep, out)
+        self.assertEqual(out.count('\n'), SRC.count('\n'))   # line numbers stay
+
+
+if __name__ == '__main__':
+    unittest.main()
