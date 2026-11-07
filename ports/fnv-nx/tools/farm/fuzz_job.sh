@@ -186,7 +186,7 @@ log "link: $NOTE_LINK"
 
 # --- the link commit's sources, the decomp, Python modules ---------------------------------------------------------
 SRC=$FARM_HOME/src-$L12
-[ -d "$SRC" ] || git -C "$REPO" worktree add --detach "$SRC" "$LCOMMIT" >/dev/null
+bash "$(dirname "$0")/worktree.sh" "$REPO" "$SRC" "$LCOMMIT" >/dev/null
 P=$SRC/ports/fnv-nx
 bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 DECOMP=$EXT/fnv_decomp
