@@ -42,6 +42,8 @@
 #                   sdmc:/switch/fnv (emu_guest.py --game, tests/s5/datapath.py); its FalloutNV.exe is the default image.
 #                   Without it the image alone is copied to sdmc:/switch/fnv. Never inside the repository.
 #   EMU_EXTRA       extra emu_guest.py arguments for every boot (word-split; e.g. --trace-fn ... --trace-out ...)
+#   EMU_PY          the emulator script (default tests/s5/emu_guest.py; S18: tools/scenario/emu_scenario.py, a wrapper
+#                   that takes the same arguments plus its own --scenario ...)
 #   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
@@ -182,7 +184,7 @@ boot() {   # boot <tag> [extra emu_guest.py args]
   log "boot $tag"
   local rc=0 root=$OUT/sdmc-$tag
   rm -rf "$root"; mkdir -p "$root"
-  timeout "$EMU_TIMEOUT" nice "$PY" -I "$HERE/emu_guest.py" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
+  timeout "$EMU_TIMEOUT" nice "$PY" -I "${EMU_PY:-$HERE/emu_guest.py}" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" \
     --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" "${GAMEFILES[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" ${EMU_EXTRA:-} \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
