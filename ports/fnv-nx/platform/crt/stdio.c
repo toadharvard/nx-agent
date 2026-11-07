@@ -11,6 +11,11 @@
 #include <string.h>
 #include <sys/types.h>
 
+/* the platform lane (platform/win32/platstat.cpp; fnvnx_win32_ext.h is not included in C here) */
+extern volatile int fnvnx_plat_on;
+void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
+#define PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
+
 #include "../os/os.h"
 
 /* from win32 (C++ side; fnvnx_win32.h is C++-only, so the prototypes are repeated here) */
@@ -63,10 +68,16 @@ static void clean_mode(const char *in, char *out)
 FILE *fnvnx_fopen(const char *path, const char *mode)
 {
     char host[HOST_MAX], m[8];
-    if (!map(path, host) || !mode)
+    if (!map(path, host) || !mode) {
+        if (fnvnx_plat_on && path)
+            fnvnx_plat_open_failed(path, NULL, (unsigned)errno, PLAT_RA, "fopen");
         return NULL;
+    }
     clean_mode(mode, m);
-    return fopen(host, m);
+    FILE *f = fopen(host, m);
+    if (!f && fnvnx_plat_on)
+        fnvnx_plat_open_failed(path, host, (unsigned)errno, PLAT_RA, "fopen");
+    return f;
 }
 
 errno_t fnvnx_fopen_s(FILE **f, const char *path, const char *mode)

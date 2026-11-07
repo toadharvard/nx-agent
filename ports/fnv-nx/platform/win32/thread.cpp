@@ -175,6 +175,7 @@ extern "C" unsigned long __readfsdword(unsigned long off)
         if (off >= 0xE10 && off < 0xE10 + 64 * 4 && !(off & 3))  /* TlsSlots[64] */
             return (unsigned long)(uintptr_t)t->tls[(off - 0xE10) / 4];
         w32_log("__readfsdword(0x%lx): unsupported TEB offset, returning 0", off);
+        FNVNX_UNIMPL();
         return 0;
     }
 }

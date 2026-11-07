@@ -18,10 +18,11 @@ assert on(['tools/rules/r.py'])[0] == list(q.ALL) and True or True
 assert sorted(on(['tools/rules/r.py'])[0]) == sorted(q.ALL)
 assert on(['toolchain/gcc/build.sh'])[1], 'full'
 assert on(['tests/s13/x.py'])[0] == []
-assert on(['tests/s15/mtqemu/hb.c'])[0] == ['frames', 'mem', 'threads'] and on(['tests/s15/test_perf.py'])[0] == []
+assert on(['tools/perf/plat.py'])[0] == ['plat'] and on(['tests/s15/test_plat_report.py'])[0] == ['plat']
+assert on(['tests/s15/mtqemu/hb.c'])[0] == ['frames', 'mem', 'plat', 'threads'] and on(['tests/s15/test_perf.py'])[0] == []
 assert on(['tools/perf/frames.py'])[0] == ['frames'] and on(['tests/s15/test_frames.py'])[0] == ['frames']
-assert on(['tools/perf/mem.py'])[0] == ['mem'] and on(['tools/threads/variant.sh'])[0] == ['mem', 'threads']
-assert on(['tools/threads/report.py'])[0] == ['frames', 'mem', 'threads'] and on(['tools/threads/README.md'])[0] == ['threads']
+assert on(['tools/perf/mem.py'])[0] == ['mem'] and on(['tools/threads/variant.sh'])[0] == ['mem', 'plat', 'threads']
+assert on(['tools/threads/report.py'])[0] == ['frames', 'mem', 'plat', 'threads'] and on(['tools/threads/README.md'])[0] == ['threads']
 assert 'threads' in on(['platform/win32/waitgraph.cpp'])[0]
 print('plan ok')
 PY
@@ -40,7 +41,7 @@ git -C "$G" -c user.name=t -c user.email=t@t commit -q --allow-empty -m base; B=
 echo x >"$G/ports/fnv-nx/render/a.cpp"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m r; H1=$(git -C "$G" rev-parse HEAD)
 echo y >"$G/ports/fnv-nx/toolchain/t.sh"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m t; H2=$(git -C "$G" rev-parse HEAD)
 mkdir -p "$G/ports/fnv-nx/tools/farm" "$T/jobs"; cp "$P/tools/farm/quick_job.sh" "$P/tools/farm/quick_plan.py" "$G/ports/fnv-nx/tools/farm/"
-for j in full fuzz audit equiv sweep threads frames mem; do
+for j in full fuzz audit equiv sweep threads frames mem plat; do
 	printf '#!/bin/sh\necho "$(date +%%s) %s" >> %s/order\nsleep 1\neval "out=\\${$#}"; printf "# %s\\n\\n- %s ok\\n" > "$out"\nexit ${RC_%s:-0}\n' "$j" "$T" "$j" "$j" "$j" >"$T/jobs/${j}_job.sh"
 done
 mkdir -p "$T/home/capture/k1"; cp -r "$T/store/index" "$T/home/capture/k1/"
@@ -56,7 +57,10 @@ ok "base was the verified head" 'grep -q "base: ${H1:0:12}" "$T/q-$H2.md"'
 ok "not verified" '[ "$(cat "$T/home/quick/verified")" = "$H1" ]'
 rm -f "$T/home/quick/verified"; : >"$T/order"; RC_equiv=1 run_q "$H2"
 ok "no base: every check" 'grep -q "no verified head" "$T/q-$H2.md" && grep -q "^| fuzz | ran" "$T/q-$H2.md"'
-ok "lanes in parallel" '[ $(( $(sort -n "$T/order" | tail -1 | cut -d" " -f1) - $(sort -n "$T/order" | head -1 | cut -d" " -f1) )) -le 4 ]'
+# the lanes start together: the first job of A (full), B (equiv) and C (sweep) within 2 s; lane D starts after A's build
+st() { awk -v j="$1" '$2 == j {print $1; exit}' "$T/order"; }
+ok "lanes in parallel" '[ -n "$(st full)" ] && [ -n "$(st equiv)" ] && [ -n "$(st sweep)" ] && [ $(( $(printf "%s\n" "$(st full)" "$(st equiv)" "$(st sweep)" | sort -n | tail -1) - $(printf "%s\n" "$(st full)" "$(st equiv)" "$(st sweep)" | sort -n | head -1) )) -le 2 ]'
+ok "lane D after the build" '[ -n "$(st threads)" ] && [ "$(st threads)" -ge $(( $(st full) + 1 )) ]'
 # a version-constant bump of one cache: full run needed, with the values
 mkdir -p "$G/ports/fnv-nx/tools/difffuzz"; echo "HARNESS = 'difffuzz-19'" >"$G/ports/fnv-nx/tools/difffuzz/fnkeys.py"
 git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m k1; K1=$(git -C "$G" rev-parse HEAD)
