@@ -49,6 +49,7 @@ def main():
         put(root, 'f1', H[0] + '-fuzz.json', {'format': 'fnvnx-fuzz-summary/1', 'shard': 1, 'shards': 2, 'hard': {'functions': 30}})
         put(root, 'f2', H[0] + '-fuzz.json', {'format': 'fnvnx-fuzz-summary/1', 'shard': 2, 'shards': 2, 'hard': {'functions': 12}})
         put(root, 'sc1', H[0] + '-scenario.json', scen({1: 4, 2: None, 3: None, 4: 2, 9: 0, 12: None}))
+        put(root, 'flt', H[0] + '-faults.json', {'schema': 'fnvnx-faults/1', 'total_groups': 6, 'new': 1, 'known': 5, 'fixed': 2})
         put(root, 'qk1', H[0] + '-plat.json', {'schema': 'fnvnx-plat/1', 'parts': {'unimpl': 7, 'open': 3, 'decode': 1, 'input': 2}})
         # head b: older full, fuzz (one shard), sweep shards, scenario, threads lane
         put(root, 'full1', H[1] + '-full.md', full_md('1,050', '1,300', '6'))
@@ -77,6 +78,8 @@ def main():
         ok('shaders: from b, stale; distinct failing + vacuous', row['shaders']['value'] == 2 + 4 and row['shaders']['stale']
            and row['shaders']['head'] == H[1], row['shaders'])
         ok('#1 scenario, delta vs b', row['#1']['value'] == 4 and row['#1']['delta'] == -5)
+        ok('#1 faults lane beside it, with new/known/fixed', row['#1']['lane']['value'] == 6 and
+           'new 1, known 5, fixed 2' in row['#1']['lane']['note'], row['#1'])
         ok('#3 not measured by scenarios: the plat lane, delta vs c', row['#3']['value'] == 7 and row['#3']['delta'] == -2,
            row['#3'])
         ok('#4 scenario measured: scenario number, lane beside it', row['#4']['value'] == 2 and row['#4']['lane']['value'] == 3)
