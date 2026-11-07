@@ -27,6 +27,7 @@ assert 'threads' in on(['platform/win32/waitgraph.cpp'])[0]
 assert on(['tools/scenario/scenario.py'])[0] == ['scenario'] and on(['tests/s18/test_scenario.py'])[0] == []
 assert 'scenario' in on(['tests/s5/emu_guest.py'])[0] and 'scenario' in on(['platform/win32/file.cpp'])[0]
 assert on(['tools/perf/plat.py'])[0] == ['plat'] and on(['tools/perf/linfeed.py'])[0] == ['frames']
+assert on(['tests/s15/test_plat_report.py'])[0] == ['plat']
 assert on(['tools/threads/variant.sh'])[0] == ['mem', 'plat', 'threads']
 print('plan ok')
 PY
@@ -63,8 +64,10 @@ rm -f "$T/home/quick/verified"; : >"$T/order"; RC_equiv=1 run_q "$H2"
 ok "no base: every check" 'grep -q "no verified head" "$T/q-$H2.md" && grep -q "^| fuzz | ran" "$T/q-$H2.md"'
 ok "lane D starts after the build, beside fuzz" 'f=$(awk "/ full\$/{print \$1}" "$T/order"); d=$(awk "/ threads\$/{print \$1}" "$T/order"); z=$(awk "/ fuzz\$/{print \$1}" "$T/order"); [ "$d" -ge $((f + 1)) ] && [ $((d - z)) -le 1 ] && [ $((z - d)) -le 1 ]'
 ok "boottrace ran" 'grep -q " boottrace$" "$T/order" && grep -q "^| boottrace | ran" "$T/q-$H2.md"'
-# build 1 s, then lane D: six 1 s stand-ins in series (serial lanes would take ~13 s)
-ok "lanes in parallel" '[ $(( $(sort -n "$T/order" | tail -1 | cut -d" " -f1) - $(sort -n "$T/order" | head -1 | cut -d" " -f1) )) -le 8 ]'
+# the lanes start together: the first job of A (full), B (equiv) and C (sweep) within 2 s; lane D starts after A's build
+st() { awk -v j="$1" '$2 == j {print $1; exit}' "$T/order"; }
+ok "lanes in parallel" '[ -n "$(st full)" ] && [ -n "$(st equiv)" ] && [ -n "$(st sweep)" ] && [ $(( $(printf "%s\n" "$(st full)" "$(st equiv)" "$(st sweep)" | sort -n | tail -1) - $(printf "%s\n" "$(st full)" "$(st equiv)" "$(st sweep)" | sort -n | head -1) )) -le 2 ]'
+ok "lane D after the build" '[ -n "$(st threads)" ] && [ "$(st threads)" -ge $(( $(st full) + 1 )) ]'
 # a version-constant bump of one cache: full run needed, with the values
 mkdir -p "$G/ports/fnv-nx/tools/difffuzz"; echo "HARNESS = 'difffuzz-19'" >"$G/ports/fnv-nx/tools/difffuzz/fnkeys.py"
 git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m k1; K1=$(git -C "$G" rev-parse HEAD)
