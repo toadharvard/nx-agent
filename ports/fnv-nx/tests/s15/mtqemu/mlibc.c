@@ -52,6 +52,13 @@ int strncmp(const char *a, const char *b, size_t n) {
     return 0;
 }
 char *strncpy(char *d, const char *s, size_t n) { size_t i = 0; for (; i < n && s[i]; i++) d[i] = s[i]; for (; i < n; i++) d[i] = 0; return d; }
+char *strchr(const char *s, int c) { for (;; s++) { if (*s == (char)c) return (char *)s; if (!*s) return 0; } }
+char *strrchr(const char *s, int c) { const char *r = 0; for (;; s++) { if (*s == (char)c) r = s; if (!*s) return (char *)r; } }
+char *strstr(const char *h, const char *n) {   /* platform/win32/platstat.cpp */
+    if (!*n) return (char *)h;
+    for (; *h; h++) { size_t i = 0; while (n[i] && h[i] == n[i]) i++; if (!n[i]) return (char *)h; }
+    return 0;
+}
 char *strdup(const char *s) { size_t n = strlen(s) + 1; char *p = malloc(n); if (p) memcpy(p, s, n); return p; }
 
 /* ---- formatting: %[0][width][l|ll|z]{d,i,u,x,p,s,c,%} */
