@@ -36,6 +36,14 @@ WORD_X86 = bytes.fromhex('8b442404' '8b00' 'c1e818' 'c3')
 WORD_A64 = '\tldr w0, [x0]\n\tlsr w0, w0, #24\n\tand w0, w0, #1\n\tret\n'
 
 
+# int f(short*): mov eax, [esp+4]; movsx eax, word [eax]; ret     (the native zero-extends)
+SHORT_X86 = bytes.fromhex('8b442404' '0fbf00' 'c3')
+SHORT_A64 = '\tldrh w0, [x0]\n\tret\n'
+# int f(int*): mov eax, [esp+4]; mov eax, [eax]; movzx ecx, al; shr eax, 31; ret   (the native returns 0)
+TOPBIT_X86 = bytes.fromhex('8b442404' '8b00' '0fb6c8' 'c1e81f' 'c3')
+TOPBIT_A64 = '\tmov w0, #0\n\tret\n'
+
+
 def hint(sym, oracle, body, mem):
     cv = conv.Conv(sym, 'test')
     fn = dict(code=oracle, address=0x00401000)
@@ -54,10 +62,19 @@ def main():
     div, h = hint('?f@@YAHPAH@Z', WORD_X86, WORD_A64, bytes([0, 0, 0, 3]))
     check(div is not None and h.get('cause') != 'bool-repr',
           'the top byte of a word read whole: not bool-repr (%s)' % h)
+    div, h = hint('?f@@YAHPAF@Z', SHORT_X86, SHORT_A64, bytes([0, 0x80, 0, 0]))
+    check(div is not None and h.get('cause') == 'signedness' and h.get('bytes') == ['%08x' % (MEM + 1)],
+          'the high byte of a short MSVC sign-extends: signedness, not bool-repr (%s)' % h)
+    div, h = hint('?f@@YAHPAH@Z', TOPBIT_X86, TOPBIT_A64, bytes([0, 0, 0, 0x80]))
+    check(div is not None and h.get('cause') != 'signedness',
+          'the top byte of a word read whole: not signedness (%s)' % h)
+    sg = [c for c in fnkeys.CHANGES if c.tag == 'd20-sign']
+    check(len(sg) == 1 and sg[0].recheck({'hint': {'cause': 'signedness'}}) and
+          not sg[0].recheck({'hint': {'cause': 'signedness?'}}), 'd20-sign rechecks old signedness records')
     ch = [c for c in fnkeys.CHANGES if c.tag == 'd19-bool']
     check(len(ch) == 1 and ch[0].recheck({'hint': {'cause': 'bool-repr'}}) and
-          not ch[0].recheck({'hint': {'cause': 'nan-bits'}}) and fnkeys.SCOPED == 'd19',
-          'd19-bool rechecks old bool-repr records; SCOPED d19')
+          not ch[0].recheck({'hint': {'cause': 'nan-bits'}}) and fnkeys.SCOPED == 'd20',
+          'd19-bool rechecks old bool-repr records; SCOPED d20')
     print('%d failures' % len(FAIL))
     return 1 if FAIL else 0
 

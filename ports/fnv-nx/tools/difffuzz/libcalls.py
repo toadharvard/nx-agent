@@ -369,6 +369,12 @@ IMPORT_BUILTINS = {'InterlockedIncrement', 'InterlockedDecrement', 'InterlockedE
                    'InterlockedExchangeAdd'}
 
 
+# fnvnx_interlocked_slow(op, p, a, b) (platform/win32/sync.cpp): op -> the Interlocked function it performs; a is
+# the value / exchange, b the comparand, as run_import's a[1] / a[2]
+INTERLOCKED_SLOW_OPS = {0: 'InterlockedIncrement', 1: 'InterlockedDecrement', 2: 'InterlockedExchange',
+                        3: 'InterlockedExchangeAdd', 4: 'InterlockedCompareExchange'}
+
+
 def run_import(name, m, a):
     """The Interlocked family on a 32-bit word (single-threaded: plain read-modify-write)."""
     p = a[0] & 0xffffffff

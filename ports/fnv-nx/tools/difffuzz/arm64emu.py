@@ -456,6 +456,16 @@ class Arm64Engine:
         uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
 
     def _builtin(self, uc, name, target, r):
+        if name == 'fnvnx_interlocked_slow':
+            # S1-rules: the misaligned path of the shim's inline Interlocked* (fnvnx_win32.h; sync.cpp's split lock).
+            # The oracle's lock-prefixed instruction is not a call either: run it as that Interlocked function
+            op = uc.reg_read(XR[0]) & 0xffffffff
+            fn = libcalls.INTERLOCKED_SLOW_OPS.get(op, 'InterlockedCompareExchange')
+            args = [uc.reg_read(XR[i]) & 0xffffffff for i in (1, 2, 3)]
+            v = libcalls.run_import(fn, libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
+            uc.reg_write(XR[0], v & 0xffffffff)
+            uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+            return True
         if name and libcalls.import_name(name)[0] in libcalls.IMPORT_BUILTINS:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
             v = libcalls.run_import(libcalls.import_name(name)[0], libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
