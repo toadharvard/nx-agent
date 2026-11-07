@@ -32,7 +32,7 @@ import elf2nso  # noqa: E402
 sys.path.insert(0, HERE)
 import datapath  # noqa: E402
 
-from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, UC_PROT_EXEC, \
+from unicorn import UC_ARCH_ARM64, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, UC_PROT_EXEC, \
     UC_PROT_READ, UC_PROT_WRITE, Uc, UcError  # noqa: E402
 from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, \
@@ -78,13 +78,23 @@ _PLACEMENT = None
 
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
 STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
-TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this")   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
+TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one")
+TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one",)   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
 
 def fault_table_options(path):
     """the TABLE_OPTIONS lines of a --stub-faults table"""
     return {line.split("#", 1)[0].split()[0] for line in open(path)
             if line.split("#", 1)[0].split() and line.split("#", 1)[0].split()[0] in TABLE_OPTIONS}
+
+
+def fault_table_option_arg(path, name):
+    """the word after a TABLE_OPTIONS line's name (None when the line has none or is absent)"""
+    for line in open(path):
+        f = line.split("#", 1)[0].split()
+        if f and f[0] == name:
+            return f[1] if len(f) > 1 else None
+    return None
 
 
 def parse_fault_table(path):
@@ -96,7 +106,7 @@ def parse_fault_table(path):
         if not f:
             continue
         if f[0] in TABLE_OPTIONS:
-            if len(f) != 1:
+            if len(f) != 1 and not (f[0] in TABLE_OPTIONS_WITH_ARG and len(f) == 2):
                 raise ValueError(f"{path}:{k}: {f[0]} takes no arguments")
             continue
         if f[0] == "before-winmain":   # before-winmain <function> [x0]
@@ -920,10 +930,11 @@ class Emu:
     # -- --trace-fn: function-boundary trace (the guest side of the lockstep trace, tests/s5/boot_trace.py). One TSV
     # line per event, written as it happens (a fault keeps everything before it):
     #   call <seq> <tid> <depth> <name> <orig|-> <x0..x7> <sp> <lr>
+    #   arg  <seq> x<k> <hex>                          (the first <deref> bytes behind each readable x0..x7)
     #   ret  <seq> <tid> <depth> <name> <x0>
     #   w    <seq> <tid> <addr> <size> <value> <pc>      (with writes: stores of a traced callee outside its stack)
     # <seq> pairs a ret and its writes with their call. Names are symbols, 0xORIG (__fnv_<orig>) or re:REGEX.
-    def install_trace_fn(self, specs, path, writes=False, limit=1_000_000):
+    def install_trace_fn(self, specs, path, writes=False, limit=1_000_000, deref=32):
         names = {}
         for a, ns in zip(self.sym_addrs, self.sym_names):
             for n in ns:
@@ -937,13 +948,21 @@ class Emu:
                 if s.startswith("re:"):
                     rx = re.compile(s[3:])
                     hits = [n for n in names if rx.search(n) and not n.startswith("__fnvnx_vtrap_")]
+                elif s.startswith("@"):   # @FILE: one entry per line (0xORIG or a name; '#' comments)
+                    hits = []
+                    for ln in open(s[1:]):
+                        ln = ln.split("#")[0].strip().split()
+                        if ln:
+                            w = ln[0]
+                            hits.append(f"__fnv_{int(w, 16):08x}" if re.fullmatch(r"(0x)?[0-9a-fA-F]{6,8}", w) else w)
                 elif re.fullmatch(r"0x[0-9a-fA-F]+", s):
                     hits = [f"__fnv_{int(s, 16):08x}"]
                 else:
                     hits = [s]
                 for n in hits:
                     if n not in names:
-                        print(f"   trace-fn: {n}: no such symbol")
+                        if not spec.startswith("@"):
+                            print(f"   trace-fn: {n}: no such symbol")
                         continue
                     la = names[n]
                     rt = la - self.link_base + self.base if self.relocatable else la
@@ -1000,6 +1019,16 @@ class Emu:
             fr = state["frames"].setdefault(t, [])
             regs = "\t".join(f"{uc.reg_read(X0 + k) & 0xffffffffffffffff:#x}" for k in range(8))
             out.write(f"call\t{seq}\t{t}\t{len(fr)}\t{label}\t{orig}\t{regs}\t{sp:#x}\t{lr:#x}\n")
+            if deref:
+                for k in range(8):
+                    v = uc.reg_read(X0 + k) & 0xffffffff
+                    if v < 0x10000:
+                        continue
+                    try:
+                        b = bytes(uc.mem_read(v, deref))
+                    except UcError:
+                        continue
+                    out.write(f"arg\t{seq}\tx{k}\t{b.hex()}\n")
             fr.append((seq, sp, lr, label))
             state["live"] += 1
             h = state["ret_hooks"].get(lr)
@@ -1009,8 +1038,16 @@ class Emu:
                 state["ret_hooks"][lr] = [uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr), 1]
             if writes and state["whook"] is None:
                 state["whook"] = uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
-        for rt in targets:
-            self.uc.hook_add(UC_HOOK_CODE, on_call, begin=rt, end=rt)
+        if len(targets) <= 256:
+            for rt in targets:
+                self.uc.hook_add(UC_HOOK_CODE, on_call, begin=rt, end=rt)
+        else:   # many functions: one block hook over the guest's text (a function entry starts a block)
+            lo, hi = min(targets), max(targets)
+
+            def on_block(uc, addr, size, _):
+                if addr in targets:
+                    on_call(uc, addr, size, _)
+            self.uc.hook_add(UC_HOOK_BLOCK, on_block, begin=lo, end=hi)
 
     def watch_lines(self):
         return [f"watch\t#{k}\t{a:#010x}\t{n}\t{v:#x}\tpc {self.sym(pc)}\tlr {self.sym(lr)}"
@@ -1079,6 +1116,8 @@ class Emu:
                 uc.mem_write(rt(a + off + 4 * k), struct.pack("<I", rt(nat) & 0xFFFFFFFF))
             st["filled"] += len(fills)
         self.extend_short_vtables(uc, objs, V, img, F, rt, st)
+        if getattr(self, "image_minus_one", False):
+            self.image_vptr_minus_one(uc, img, F, V, rt, st)
         self.exe_vt_stats = dict(st)
         print("   exe-vtables: %d bound vtables (%d aligned with the exe's, %d with a destructor pair, %d left: "
               "their native slots disagree with the exe's): %d of %d trap slots filled from the exe's vftable"
@@ -1174,6 +1213,89 @@ class Emu:
               "moved to the copies: %d GOT entries, %d data words, %d adrp/add pairs"
               % (st["vtables extended"], st["slots added"], st["slots added as null"], st["GOT entries redirected"],
                  st["data words redirected"], st["adrp/add redirected"]))
+
+    VT_M1_BASE, VT_M1_SIZE = 0x0E400000, 0x00400000   # minus-one copies of image vftables (data, then thunks)
+
+    @staticmethod
+    def is_exe_vftable(img, a):
+        """a is the start of an MSVC vftable in the image: [a-4] is a complete object locator (signature 0, type
+        descriptor and class hierarchy descriptor inside the image) and slot 0 is code"""
+        try:
+            col = img.read32(a - 4)
+            if img.read32(col) != 0:
+                return False
+            td, chd = img.read32(col + 12), img.read32(col + 16)
+            img.read32(td), img.read32(chd)
+            return 0x00401000 <= img.read32(a) < 0x00fdf000
+        except Exception:
+            return False
+
+    def image_vptr_minus_one(self, uc, img, F, V, rt, st):
+        """table option image-vptr-minus-one: the guest's references to an exe vftable that no native vtable is bound
+        to (a hand-written vptr store `p[0] = &DAT_<vftable>`, through the GOT entry of the absolute alias
+        __fnv_<vftable>; hand_vptrs.tsv class 'image') get a copy laid out by D22's minus-one rule, the layout every
+        properly declared native caller uses: slot 0 a D1 thunk (exe slot 0, the scalar deleting destructor, with
+        flags 0), slot 1 a D0 thunk (flags 1), slot k+1 the native of exe slot k. Without it such an object is
+        dispatched one slot short by those callers (NiD3DShaderProgramFactory's creator map: SetAt's IsKeysEqual
+        ran an output function). A stand-in for S1 (hand_vptrs: declare the class's virtuals so the link binds it)
+        or S2c (emit such minus-one tables at link time)."""
+        if not self.got:
+            return
+        bound = {exe_vt for exe_vt, _sym, _off in V}
+        g, n = self.got
+        got_words = struct.unpack(f"<{n // 4}I", bytes(uc.mem_read(rt(g), n)))
+        cand = sorted({w for w in got_words if 0x00fdf000 <= w < 0x01200000 and w not in bound
+                       and self.is_exe_vftable(img, w)})
+        rx = re.compile(self.image_minus_one_rx) if getattr(self, "image_minus_one_rx", None) else None
+        if rx:   # only the classes whose RTTI name matches: the families dispatched through declared hierarchies
+            def rtti(vt):
+                r = img.string(img.read32(img.read32(vt - 4) + 12) + 8, 512)
+                return r[0].decode("latin-1") if r else ""
+            names = {vt: rtti(vt) for vt in cand}
+            st["m1 not matching"] = sum(1 for vt in cand if not rx.search(names[vt]))
+            cand = [vt for vt in cand if rx.search(names[vt])]
+        if not cand:
+            return
+        data_lo, code_lo = self.VT_M1_BASE, self.VT_M1_BASE + self.VT_M1_SIZE // 2
+        uc.mem_map(self.VT_M1_BASE, self.VT_M1_SIZE // 2, UC_PROT_READ | UC_PROT_WRITE)
+        uc.mem_map(code_lo, self.VT_M1_SIZE // 2, UC_PROT_READ | UC_PROT_EXEC)
+        at, cat, moved = data_lo, code_lo, {}
+
+        def thunk(target, flags):   # mov w1, #flags; ldr x16, #8; br x16; .quad target
+            nonlocal cat
+            code = struct.pack("<IIIQ", 0x52800001 | (flags << 5), 0x58000050, 0xD61F0200, target)
+            uc.mem_write(cat, code)
+            cat += len(code)
+            return cat - len(code)
+        for vt in cand:
+            exe_slots = img.vtable_slots(vt)
+            if not exe_slots:
+                continue
+            d0 = F.get(exe_slots[0])
+            words = [thunk(rt(d0) & 0xFFFFFFFF, 0) if d0 else 0, thunk(rt(d0) & 0xFFFFFFFF, 1) if d0 else 0]
+            for k in range(1, len(exe_slots)):
+                nat = F.get(exe_slots[k])
+                words.append(rt(nat) & 0xFFFFFFFF if nat is not None else 0)
+                st["m1 slots null" if nat is None else "m1 slots"] += 1
+            blob = struct.pack(f"<{len(words)}I", *words)
+            if at + len(blob) > code_lo or cat + 64 > self.VT_M1_BASE + self.VT_M1_SIZE:
+                st["m1 not copied (region full)"] += 1
+                continue
+            uc.mem_write(at, blob)
+            moved[vt] = at
+            self.vt_bound[at] = (vt, exe_slots, at + len(blob))
+            st["m1 vtables"] += 1
+            st["m1 no dtor native"] += 0 if d0 else 1
+            at = (at + len(blob) + 7) & ~7
+        for i, w in enumerate(got_words):
+            if w in moved:
+                uc.mem_write(rt(g) + 4 * i, struct.pack("<I", moved[w]))
+                st["m1 GOT entries"] += 1
+        self.vt_m1 = moved
+        print("   image-vptr-minus-one: %d unbound image vftables referenced by the guest get minus-one copies (%d "
+              "slots, %d null, %d without a slot-0 native; %d left by the class filter %s); %d GOT entries moved"
+              % (st["m1 vtables"], st["m1 slots"], st["m1 slots null"], st["m1 no dtor native"],
+                 st["m1 not matching"], getattr(self, "image_minus_one_rx", None), st["m1 GOT entries"]))
 
     def collect_trap(self):
         """--collect-traps (collect-all boot, as linhost --collect-traps): at fnvnx_vslot_trap (virtual function
@@ -1891,6 +2013,7 @@ def main(argv):
     ap.add_argument("--trace-out", metavar="TSV", help="where --trace-fn writes (default trace_fn.tsv)")
     ap.add_argument("--trace-writes", action="store_true", help="--trace-fn also logs the callees' memory writes")
     ap.add_argument("--trace-max", type=int, default=1_000_000, help="--trace-fn: at most this many calls")
+    ap.add_argument("--trace-deref", type=int, default=32, help="--trace-fn: bytes dumped behind each pointer argument")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
@@ -1919,6 +2042,9 @@ def main(argv):
                 print("   exe-vtables: off (needs --addrmap and the exe as --file)")
             else:
                 emu.install_exe_vtables(a.addrmap, exe[0], a.elf)
+                emu.image_minus_one = bool(a.stub_faults) and "image-vptr-minus-one" in fault_table_options(a.stub_faults)
+                emu.image_minus_one_rx = fault_table_option_arg(a.stub_faults, "image-vptr-minus-one") \
+                    if emu.image_minus_one else None
         if a.milestones and a.milestones != "none":
             emu.install_milestones(a.milestones)
     emu.miles = getattr(emu, "miles", {})
@@ -1937,7 +2063,8 @@ def main(argv):
         addr, _, n = spec.partition(":")
         emu.install_watch(int(addr, 0), int(n, 0) if n else 4)
     if a.trace_fn:
-        emu.install_trace_fn(a.trace_fn, a.trace_out or "trace_fn.tsv", writes=a.trace_writes, limit=a.trace_max)
+        emu.install_trace_fn(a.trace_fn, a.trace_out or "trace_fn.tsv", writes=a.trace_writes, limit=a.trace_max,
+                           deref=a.trace_deref)
 
     def write_summary(stop, rc=None):
         if a.summary_json:
