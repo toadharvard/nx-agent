@@ -49,6 +49,7 @@ def main():
         put(root, 'f1', H[0] + '-fuzz.json', {'format': 'fnvnx-fuzz-summary/1', 'shard': 1, 'shards': 2, 'hard': {'functions': 30}})
         put(root, 'f2', H[0] + '-fuzz.json', {'format': 'fnvnx-fuzz-summary/1', 'shard': 2, 'shards': 2, 'hard': {'functions': 12}})
         put(root, 'sc1', H[0] + '-scenario.json', scen({1: 4, 2: None, 3: None, 4: 2, 9: 0, 12: None}))
+        put(root, 'sc2', H[0] + '-scripterr.json', {'schema': 'fnvnx-scripterr/1', 'metric': 3, 'in_original': 4})
         put(root, 'flt', H[0] + '-faults.json', {'schema': 'fnvnx-faults/1', 'total_groups': 6, 'new': 1, 'known': 5, 'fixed': 2})
         put(root, 'qk1', H[0] + '-plat.json', {'schema': 'fnvnx-plat/1', 'parts': {'unimpl': 7, 'open': 3, 'decode': 1, 'input': 2}})
         # head b: older full, fuzz (one shard), sweep shards, scenario, threads lane
@@ -56,7 +57,9 @@ def main():
         put(root, 'f1', H[1] + '-fuzz.json', {'format': 'fnvnx-fuzz-summary/1', 'shard': 1, 'shards': 2, 'hard': {'functions': 40}})
         put(root, 's1', H[1] + '-sweep.json', {'failing_programs': [{'hash': 'p1'}, {'hash': 'p2'}], 'programs_vacuous_in_some_set': 3})
         put(root, 's2', H[1] + '-sweep.json', {'failing_programs': [{'hash': 'p2'}], 'programs_vacuous_in_some_set': 1})
-        put(root, 'sc1', H[1] + '-scenario.json', scen({1: 9, 4: 2}))
+        sb = scen({1: 9, 4: 2})
+        sb['scripterr'] = {'schema': 'fnvnx-scripterr/1', 'metric': 5, 'in_original': 1}
+        put(root, 'sc1', H[1] + '-scenario.json', sb)
         put(root, 'qk1', H[1] + '-threads.json', {'schema': 'fnvnx-threads-job/1', 'metric': 5, 'report': {'races': 5}})
         # head c: plat only
         put(root, 'qk1', H[2] + '-plat.json', {'schema': 'fnvnx-plat/1', 'parts': {'unimpl': 9, 'open': 3, 'decode': 0, 'input': 0}})
@@ -86,6 +89,8 @@ def main():
         ok('#7 from the threads lane at b (stale)', row['#7']['value'] == 5 and row['#7']['stale'])
         ok('#9 zero counts as measured', row['#9']['value'] == 0)
         ok('#12 unmeasured', row['#12']['value'] is None)
+        ok('#10 from the scripterr lane', row['#10']['value'] == 3 and 'in it' in row['#10']['note'], row['#10'])
+        ok('#10 embedded in the scenario sidecar at b: the delta', row['#10']['delta'] == -2, row['#10'])
         md = open(out).read()
         ok('md table', '| D24 | trap stubs | 1010 | -50 (vs bbbbbbbbbbbb) |' in md and '(stale)' in md, md[:600])
     print('test_zero_targets: %d failed' % len(fails))
