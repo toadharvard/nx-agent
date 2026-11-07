@@ -249,9 +249,9 @@ source files naming them.
 | `0x0065de40` | body_unnamed | `unsigned int __thiscall FUN_0065d4e0_Pool::Alloc(unsigned int)` | 1 | 188 |
 | `0x008d0430` | body_named | `class PatrolActorPackageData * __thiscall LowProcess::GetCurrentPackageData(void)` | 6 | 227 |
 | `0x009fea2a` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009fead6` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009feae8` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009febd8` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
+| `0x009fead6` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
+| `0x009feae8` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
+| `0x009febd8` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
 | `0x00aa1750` | body_named | `unsigned int __thiscall NiFile::FileRead(void *, unsigned int)` | 3 | 4 |
 | `0x00aa1810` | body_unnamed | `unsigned int __thiscall FUN_00aff950_shell::FUN_00aa1810(void *, unsigned int)` | 2 | 2 |
 | `0x00aa7830` | body_named | `__thiscall fnv_00b044a0::BVecQ::~BVecQ(void)` | 12 | 23 |
