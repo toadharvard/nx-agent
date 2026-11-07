@@ -21,8 +21,9 @@ Automated items (id: what; the tool or the rule):
   exefs          fnv-exefs.nsp: PFS0 main + main.npdm, NPDM fields, both NSOs (tests/s5/check_package.py)
   sd.layout      the SD tree: the sdlayout.h files, only FNVNX_SD_PORT_NAMES under switch/fnv, nothing else on the
                  card, no player files (tests/nx1/check_fs.py --sd; --s4 adds its tests/s4 runtime cases)
-  paths.policy   data and save path policy in the shipped images: every "sdmc:/..." literal inside FNVNX_SD_DIR or
-                 Atmosphere's contents folder (templates "sdmc:/%..." are listed), no system save-data mount
+  paths.policy   data and save path policy in the shipped images: every "sdmc:/..." path token inside FNVNX_SD_DIR or
+                 Atmosphere's contents folder, or one of their parents (sdmc:/switch, sdmc:/atmosphere: the launcher
+                 checks them); templates "sdmc:/%..." are listed; no system save-data mount
                  ("save:/"): saves and INIs live on the SD card under user/
   memory.budget  the packaged NPDM: 32BitNoReserved (2 GiB heap region) inside the ~3.2 GiB application pool;
                  FNVNX_MIN_APP_MEMORY between the heap region and the pool; host heap (largest backend) + host image
@@ -76,6 +77,8 @@ SMALL_MAP = 1024 * MIB
 PRIO = (0x1C, 0x3B)
 ROMFS_OK = {'shaders.nxsp'}
 GAME_FILE = re.compile(r'(?i)\.(esm|esp|bsa|exe|sdp)$|^translated\.(nxsp|json)$|\.(glsl|vert|frag)$')
+PARENTS = {'sdmc:/', 'sdmc:/switch', 'sdmc:/switch/', 'sdmc:/atmosphere', 'sdmc:/atmosphere/',
+           'sdmc:/atmosphere/contents', 'sdmc:/atmosphere/contents/'}
 DEBUG_NAMES = (b'.debug_info\0', b'.debug_line\0', b'.debug_abbrev\0', b'.symtab\0', b'.strtab\0')
 
 MANUAL = [
@@ -289,9 +292,11 @@ def check_all(pk, s4=False):
     if imgs:
         bad, tmpl, saves = [], set(), []
         for nm, b in imgs.items():
-            for m in re.finditer(rb'sdmc:/[\x20-\x7e]*', b):
-                s = m.group(0).decode()
+            for m in re.finditer(rb'sdmc:/[\x21-\x7e]*', b):   # the path token: up to a space or a NUL
+                s = m.group(0).decode().rstrip('.,;:\'")')
                 if s.startswith(sd_dir + '/') or s == sd_dir or s.startswith('sdmc:/atmosphere/contents/'):
+                    continue
+                if s in PARENTS:   # the launcher checks or creates them (Atmosphere present, /switch exists)
                     continue
                 if re.match(r'sdmc:/(%|$)', s):
                     tmpl.add(s)
