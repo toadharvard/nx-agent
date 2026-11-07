@@ -112,6 +112,18 @@ def load_native(addrmap_tsv):
     return nat
 
 
+def load_providers(addrmap_tsv):
+    """addrmap.tsv -> {address: provider} of the F addresses S4's runtime implements (note `provider: <name>`):
+    the platform's own definition of the exe function at that address (platform/crt/crt_symbols.tsv)."""
+    res = {}
+    if os.path.exists(addrmap_tsv):
+        for line in open(addrmap_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 6 and f[1] == 'F' and f[5].startswith('provider: '):
+                res[int(f[0], 16)] = f[5][len('provider: '):].strip()
+    return res
+
+
 # ---------------------------------------------------------------------------------------------------- keys
 
 GHIDRA = re.compile(r'^(?:[A-Z]{1,4}|thunk_FUN|switchD|caseD|Unk|unk|fnv|vf|v|s|f)$')   # FUN_<addr8>, DAT_, S_, ...
@@ -805,7 +817,7 @@ def load_synth(out):
     return res
 
 
-def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms):
+def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None):
     """`exe-addr`: a name still missing (or about to get a synthesized special member) whose MSVC counterpart the
     referencing unit's pristine object calls: bound to the address the exe's call at that site reaches, when every
     site agrees and the native build defines it with the right kind."""
@@ -846,6 +858,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
         rs = msvc(ref)
         if rs.kind != 'func' or rs.params is None:
             return False
+        if this_only and a in (providers or {}):
+            return True   # S4's runtime implements the exe's function there, taking the object (void *self)
         member = bool(rs.member)
         rparams = [p_ for p_ in rs.params if p_ != '...']
         for n_ in def_names.get(a, ()):
@@ -1026,7 +1040,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
 
     if msvc_objs and exe_path:
-        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms)
+        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
+                        load_providers(os.path.join(out, 'addrmap.tsv')))
     if synth:   # its stubs are emitted with the synthesized objects
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects

@@ -454,22 +454,25 @@ class Exe(unittest.TestCase):
 
     def test_exe_dtor_as_function(self):
         """A destructor the exe calls out of line at a function the decomp spells FUN_<addr>(T*) binds there
-        (natively both take the object in x0) instead of `= default`; one with two parameters does not."""
+        (natively both take the object in x0) instead of `= default`, as does one at an S4 provider's address; one with
+        two parameters does not."""
         import struct
-        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'               # call ??1Short; call ??1Long; ret
-        obj = coff({'?f@@YAXXZ': (f, {1: '??1Short@@QAE@XZ', 6: '??1Long@@QAE@XZ'})},
-                   ['??1Short@@QAE@XZ', '??1Long@@QAE@XZ'])
-        F, G, H = 0x401000, 0x401080, 0x4010c0
+        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xe8\0\0\0\0\xc3'   # call ??1Short; call ??1Long; call ??1Lock; ret
+        obj = coff({'?f@@YAXXZ': (f, {1: '??1Short@@QAE@XZ', 6: '??1Long@@QAE@XZ', 11: '??1Lock@@QAE@XZ'})},
+                   ['??1Short@@QAE@XZ', '??1Long@@QAE@XZ', '??1Lock@@QAE@XZ'])
+        F, G, H, P = 0x401000, 0x401080, 0x4010c0, 0x4010e0
         text = bytearray(0x100)
         text[0:len(f)] = f
         struct.pack_into('<i', text, 1, G - (F + 5))
         struct.pack_into('<i', text, 6, H - (F + 10))
+        struct.pack_into('<i', text, 11, P - (F + 15))                # an S4 provider implements P
         units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
             {'symbol': '?f@@YAXXZ', 'address': '%x' % F},
             {'symbol': '?FUN_00401080@@YIXPAX@Z', 'address': '%x' % G},          # void __fastcall (void*)
             {'symbol': '?FUN_004010c0@@YAXPAXH@Z', 'address': '%x' % H}]}]}     # void __cdecl (void*, int)
         rows = [bodies.Row('_ZN5ShortD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
-                bodies.Row('_ZN4LongD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp')]
+                bodies.Row('_ZN4LongD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
+                bodies.Row('_ZN4LockD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp')]
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
                 fo.write(obj)
@@ -481,11 +484,13 @@ class Exe(unittest.TestCase):
             ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
             it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
             it.need([r.name for r in rows])
-            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F', H: 'F'},
-                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms)
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F', H: 'F', P: 'F'},
+                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms,
+                                  {P: 'fnvnx_lock_dtor'})
         got = {r.name: r for r in got}
         self.assertEqual((got['_ZN5ShortD1Ev'].cls, got['_ZN5ShortD1Ev'].target), ('exe-addr', '__fnv_00401080'))
         self.assertEqual(got['_ZN4LongD1Ev'].cls, 'special-default')
+        self.assertEqual((got['_ZN4LockD1Ev'].cls, got['_ZN4LockD1Ev'].target), ('exe-addr', '__fnv_004010e0'))
 
 
     def test_exe_address_taken(self):
