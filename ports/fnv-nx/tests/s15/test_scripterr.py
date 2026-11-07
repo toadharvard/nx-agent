@@ -75,6 +75,10 @@ def synthetic(d):
     ok('synthetic: the original baseline subtracted', j and j['metric'] == 2 and j['in_original'] == 2, j and j['metric'])
     r, j, md = se(d, ['nothing\n'])
     ok('synthetic: no data, exit 3', r.returncode == 3)
+    r, j, md = se(d, ['   callwatch: 2 functions watched\nemu: done\n'])
+    ok('synthetic: watcher ran, no calls: measured 0, exit 0', r.returncode == 0 and j['metric'] == 0, r.returncode)
+    r, j, md = se(d, ['   callwatch: 0 functions watched\n'])
+    ok('synthetic: nothing watched: exit 3', r.returncode == 3)
 
 
 class UC:

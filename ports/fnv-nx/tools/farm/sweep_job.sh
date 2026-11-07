@@ -85,7 +85,7 @@ setup() {
 	NXR=$W/nx_render-${CAND:0:12}
 	if [ ! -x "$NXR/nx_render" ]; then
 		local src=$W/src-${CAND:0:12}
-		[ -d "$src" ] || git -C "$P" worktree add -q --detach "$src" "$CAND" || fail "worktree"
+		bash "$P/tools/farm/worktree.sh" "$P" "$src" "$CAND" || fail "worktree"
 		make -C "$src/ports/fnv-nx/tests/s6n" OUT="$NXR" "$NXR/nx_render" >"$W/nx_render-${CAND:0:12}.log" 2>&1 || fail "nx_render"
 		git -C "$P" worktree remove --force "$src" 2>/dev/null || rm -rf "$src"
 	fi

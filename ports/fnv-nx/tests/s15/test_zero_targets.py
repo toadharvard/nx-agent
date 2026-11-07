@@ -51,6 +51,8 @@ def main():
         put(root, 'sc1', H[0] + '-scenario.json', scen({1: 4, 2: None, 3: None, 4: 2, 9: 0, 12: None}))
         put(root, 'sc2', H[0] + '-scripterr.json', {'schema': 'fnvnx-scripterr/1', 'metric': 3, 'in_original': 4})
         put(root, 'flt', H[0] + '-faults.json', {'schema': 'fnvnx-faults/1', 'total_groups': 6, 'new': 1, 'known': 5, 'fixed': 2})
+        put(root, 'full1', H[0] + '-nrocheck.json', {'schema': 'fnvnx-nrocheck/1', 'metric': 2, 'fail': 1, 'open': 1,
+                                                     'automated': 16, 'manual': 11})
         put(root, 'qk1', H[0] + '-plat.json', {'schema': 'fnvnx-plat/1', 'parts': {'unimpl': 7, 'open': 3, 'decode': 1, 'input': 2}})
         # head b: older full, fuzz (one shard), sweep shards, scenario, threads lane
         put(root, 'full1', H[1] + '-full.md', full_md('1,050', '1,300', '6'))
@@ -60,6 +62,8 @@ def main():
         sb = scen({1: 9, 4: 2})
         sb['scripterr'] = {'schema': 'fnvnx-scripterr/1', 'metric': 5, 'in_original': 1}
         put(root, 'sc1', H[1] + '-scenario.json', sb)
+        put(root, 'full1', H[1] + '-full.json', {'schema': 'x', 'nrocheck': {'schema': 'fnvnx-nrocheck/1', 'metric': 5,
+                                                                         'fail': 3, 'open': 2, 'automated': 16}})
         put(root, 'qk1', H[1] + '-threads.json', {'schema': 'fnvnx-threads-job/1', 'metric': 5, 'report': {'races': 5}})
         # head c: plat only
         put(root, 'qk1', H[2] + '-plat.json', {'schema': 'fnvnx-plat/1', 'parts': {'unimpl': 9, 'open': 3, 'decode': 0, 'input': 0}})
@@ -91,6 +95,8 @@ def main():
         ok('#12 unmeasured', row['#12']['value'] is None)
         ok('#10 from the scripterr lane', row['#10']['value'] == 3 and 'in it' in row['#10']['note'], row['#10'])
         ok('#10 embedded in the scenario sidecar at b: the delta', row['#10']['delta'] == -2, row['#10'])
+        ok('#11 from the nrocheck lane, embedded in full.json at b: the delta', row['#11']['value'] == 2 and
+           row['#11']['delta'] == -3 and 'manual 11' in row['#11']['note'], row['#11'])
         md = open(out).read()
         ok('md table', '| D24 | trap stubs | 1010 | -50 (vs bbbbbbbbbbbb) |' in md and '(stale)' in md, md[:600])
     print('test_zero_targets: %d failed' % len(fails))
