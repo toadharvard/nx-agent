@@ -1332,6 +1332,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         # replaces a pairing by decomp names or hand-stored vptrs with another class (shells with fewer slots,
         # another real class), and maps vftables no unit names (exe_vftables.tsv)
         exe_alt = collections.defaultdict(list)   # exe vftable -> the native vtables the pairing displaced
+        # S5 class 3: constructor-named vtables (_ZTV<n>FUN_<ctor>) no unit pairs, by the vftable their exe
+        # constructor stores; a vftable another native vtable already stands for takes them as displaced ones
+        ctor_pairs = ctor_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out)
         exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, exe_alt)
         for a in rebind:
             rebind[a] = vmap[a][:2]
@@ -1344,7 +1347,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over, exe_path, providers)
+                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
@@ -1703,6 +1706,58 @@ def exe_requests(exe_cls, have_cls, units, msvc, canon_msvc, compiled):
     return out
 
 
+CTOR_VT = re.compile(r'_ZTV\d+FUN_([0-9a-f]{8})')
+
+
+def ctor_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out):
+    """S5 class 3 (s5-003): a placeholder class named after its constructor (`_ZTV<n>FUN_<ctor>`) that no unit pairs
+    with an image vftable keeps the slots the decomp declared (NiDX9Renderer's FUN_00e754a0: one slot, called at
+    slot 54). The exe's constructor at <ctor> - an address the address map defines natively under an MSVC
+    constructor name (`??0`) - names its vftable: the last `mov dword ptr [reg], imm32` of an RTTI primary
+    vftable start (exevft.ctor_vftable). A vftable no native vtable stands for yet is paired in vmap; one that
+    already has its vtable takes the shell as a displaced one (alt, as exe_pair does), so exe_vtable_copies extends
+    it with the exe's slots either way. ctor_vftables.tsv lists each candidate with the outcome.
+    -> {(group, address point): {exe vftable}} for exe_slot_fill."""
+    bound = {e[0] for e in vmap.values()}
+    starts = {w for w, e in exev.items() if e.td and e.off == 0}
+    rows, got = [], collections.defaultdict(set)
+    for z in sorted(rtti.where):
+        m = CTOR_VT.fullmatch(z)
+        if not m:
+            continue
+        a = int(m.group(1), 16)
+        nd = native.get(a)
+        v = None
+        pts = [p for p, ott in vtables.address_points(rtti.ents(z) or []) if ott == 0]
+        if z in bound:
+            how = 'bound'
+        elif nd is None or not (nd.get('msvc') or '').startswith('??0'):
+            how = 'no native constructor at the address'
+        elif not pts:
+            how = 'no primary address point'
+        else:
+            v = exevft.ctor_vftable(exe_path, a, starts)
+            if v is None:
+                how = 'no vftable store'
+            elif v not in vmap:
+                vmap[v] = (z, pts[0], rtti.where[z][0].path, 'primary, the vftable its exe constructor %08x stores'
+                           % a)
+                how = 'paired'
+            else:
+                if all(e[:2] != (z, pts[0]) for e in alt.get(v, ())):
+                    alt[v].append((z, pts[0], rtti.where[z][0].path, 'primary'))
+                how = 'paired as displaced (%s)' % vmap[v][0]
+            if v is not None:
+                got[(z, pts[0])].add(v)
+        vstats['ctor-vt-' + how.split(' (')[0].replace(' ', '-')] += 1
+        rows.append((z, '%08x' % a, '' if v is None else '%08x' % v, how))
+    with open(os.path.join(out, 'ctor_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#native vtable\tconstructor\texe vftable it stores\toutcome\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    return got
+
+
 def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, alt=None):
     """Pair each image vftable of the exe with its own class's native vtable (the address point whose
     offset-to-top is minus the COL offset). It replaces the pairing by decomp names or hand-stored vptrs when that
@@ -1909,7 +1964,7 @@ def emit_gdel_stub(name, d0, d1):
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
-                  stubs=None, overrides=None, exe_path=None, providers=None):
+                  stubs=None, overrides=None, exe_path=None, providers=None, also=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -1922,12 +1977,15 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     declaration (the decomp's shells declare placeholders, `virtual void v2();`), and slot_fill.tsv lists them.
     Rewrites the objects' .redefine files and refs.tsv rows it changes, drops trap stubs no object uses any more, and
     writes slot_fill.tsv (one row per (object, symbol)) and slot_gaps.tsv (trap slots left, with the reason).
+    also: {(group, address point): {exe vftable}} the native vtable stands for besides vmap (ctor_store_pairs).
     Returns the counts."""
     st = collections.Counter()
     zmap = collections.defaultdict(set)   # (native vtable group, address point) -> exe vftable addresses
     for v, e in vmap.items():
         if v in exev:
             zmap[(e[0], e[1])].add(v)
+    for k_, vs_ in (also or {}).items():
+        zmap[k_] |= {v for v in vs_ if v in exev}
     own = collections.defaultdict(set)    # the same from the exe's RTTI: the class's own vftable at that offset
     for v, (cls, _, off, _) in exe_cls.items():
         for z in by_cls.get(cls, []):

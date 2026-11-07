@@ -649,6 +649,12 @@ decomp names or hand-stored vptrs that names another class, unless the own vtabl
 partial declaration), and adds V rows for vftables no unit names. `exe_vftables.tsv`: per exe vftable the class,
 its native vtable, the pairing before and the outcome. Classes with no native vtable are requested for synthesis
 (`vtable_requests.tsv`, why `exe-rtti`; hosts: units naming the address, then units naming a member).
+Before it, `ctor_store_pairs` (S5 class 3) pairs each constructor-named vtable (`_ZTV<n>FUN_<ctor>`, a placeholder
+class) that no unit pairs: the exe's constructor at `<ctor>` (a native `??0` definition) names its vftable, the last
+`mov dword ptr [reg], imm32` of an RTTI primary vftable start before its first `ret` (`exevft.ctor_vftable`,
+capstone). A free vftable gets the shell in the map; one with a vtable already takes it as a displaced vtable, so
+the slot fill and the extended copies (below) reach it either way. `ctor_vftables.tsv`: each candidate and outcome.
+On link 9f865b0a's inputs: 390 pairs (7 new V rows, 383 displaced), 319 of them shorter than the exe's vftable.
 
 **Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's

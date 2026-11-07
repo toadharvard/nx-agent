@@ -278,3 +278,47 @@ def thunk(path, addr):
     if b[:1] == b'\xe9':
         return 0, rel(0)
     return None
+
+
+# ---- the vftable an exe constructor stores (S2c, S5 class 3: constructor-named vtables)
+
+CTOR_SPAN = 0x400   # bytes decoded from a constructor's entry (S5's stand-in reads the same span)
+_CS = {}
+
+
+def ctor_vftable(path, addr, starts):
+    """The vftable the x86 constructor at addr names: the immediate of its last `mov dword ptr [reg], imm32` (a base
+    register only: no index, no displacement, no segment - the vptr of the object the register holds) whose value is
+    in starts (vftable starts, e.g. scan()'s), decoded with capstone from addr up to its first `ret` / `ret N` (at
+    most CTOR_SPAN bytes). An inlined base constructor stores its own vftable first, so the last store is the most
+    derived class's. None without capstone, outside the image's sections, or when there is no such store."""
+    try:
+        import capstone
+        from capstone import x86 as cx
+    except ImportError:
+        return None
+    pe, data = _text(path)
+    off, n = None, CTOR_SPAN
+    while off is None and n >= 16:   # a constructor near its section's end
+        try:
+            off = pe.rva_to_off(addr - pe.image_base, n)
+        except Exception:
+            off = None
+        if off is None:
+            n //= 2
+    if off is None:
+        return None
+    if 'md' not in _CS:
+        _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        _CS['md'].detail = True
+    last = None
+    for ins in _CS['md'].disasm(data[off:off + n], addr):
+        if ins.id == cx.X86_INS_RET:
+            break
+        if ins.id != cx.X86_INS_MOV or len(ins.operands) != 2:
+            continue
+        dst, src = ins.operands
+        if dst.type == cx.X86_OP_MEM and dst.size == 4 and src.type == cx.X86_OP_IMM and dst.mem.base and \
+                not dst.mem.index and not dst.mem.disp and not dst.mem.segment and (src.imm & 0xffffffff) in starts:
+            last = src.imm & 0xffffffff
+    return last
