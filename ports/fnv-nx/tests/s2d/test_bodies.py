@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -615,6 +616,76 @@ class Exe(unittest.TestCase):
             self.assertEqual(dict(bodies.exe_call_targets(*args)), {})
             got = bodies.exe_call_targets(*args, search=True)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}})
+
+    def test_exe_data(self):
+        """exe-data: a placeholder variable's address taken in placed code (mov ecx, offset ?g_mm) binds to the exe's
+        word there; a variant body with another stack offset is placed by shape (loose), a ??_G by the vftable slot
+        the unit's recipe names; a C function placeholder called from placed code (REL32) and a variable whose sites
+        disagree do not bind."""
+        import struct
+        f = b'\x55\x8b\xec\x8b\x45\x08\xb9\0\0\0\0\x50\xe8\0\0\0\0\x5d\xc3'   # mov eax,[ebp+8]; mov ecx, offset g_mm
+        v = bytearray(f)
+        v[5] = 0x0c                                               # the exe's copy: mov eax, [ebp+0xc]
+        gd = b'\x56\x8b\xf1\xb9\0\0\0\0\xe8\0\0\0\0\x8b\xc6\x5e\xc2\x04\x00'      # ??_G: mov ecx, offset g_mm2
+        st = b'\x55\x8b\xec\xe8\0\0\0\0\x50\xe8\0\0\0\0\x5d\xc3'                # call _stub_a; push eax; call
+        two = b'\x55\x8b\xec\xa1\0\0\0\0\x5d\xc3' + b'\x90' * 8              # mov eax, [g_two]
+        obj = coff({'?f@@YAXXZ': (bytes(v), {7: ('?g_mm@@3UMM@@A', 0x06), 13: '?Free@MM@@QAEXPAX@Z'}),
+                    '??_GC@@UAEPAXI@Z': (gd, {4: ('?g_mm2@@3UMM@@A', 0x06), 9: '?Free@MM@@QAEXPAX@Z'}),
+                    '?s@@YAXXZ': (st, {4: '_stub_a', 10: '?Free@MM@@QAEXPAX@Z'}),
+                    '?t@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)}), '?t2@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)})},
+                   ['?g_mm@@3UMM@@A', '?g_mm2@@3UMM@@A', '?Free@MM@@QAEXPAX@Z', '_stub_a', '?g_two@@3HA'])
+        F, GD, S, T, T2, VFT, FREE, STUB = 0x401000, 0x401040, 0x401080, 0x4010c0, 0x4010e0, 0x401100, 0x401140, 0x401180
+        MM, TWO = 0x5f6238, 0x5f7000
+        text = bytearray(b'\xcc' * 0x200)
+        text[0:len(f)] = f
+        struct.pack_into('<I', text, 7, MM)
+        struct.pack_into('<i', text, 13, FREE - (F + 17))
+        for at in (0x40, 0x1c0):   # the second copy (another class's ??_G): the content search finds two
+            text[at:at + len(gd)] = gd
+            struct.pack_into('<I', text, at + 4, MM)
+            struct.pack_into('<i', text, at + 9, FREE - (0x401000 + at + 13))
+        self.assertIsNone(bodies.Pe.find_unique(types.SimpleNamespace(code=[(0x401000, 0, 0x200)], data=bytes(text)),
+                                                gd, set(range(4, 8)) | set(range(9, 13))))
+        text[0x80:0x80 + len(st)] = st
+        struct.pack_into('<i', text, 0x84, STUB - (S + 8))
+        struct.pack_into('<i', text, 0x8a, FREE - (S + 14))
+        for at, word in ((0xc0, TWO), (0xe0, TWO + 4)):
+            text[at:at + len(two)] = two
+            struct.pack_into('<I', text, at + 4, word)
+        struct.pack_into('<II', text, 0x100, GD, F)           # the image vftable of C: ??_G, then another slot
+        text[0x140] = text[0x180] = 0xc3
+        udata = [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '?f@@YAXXZ', 'address': '%x' % F}, {'symbol': '?s@@YAXXZ', 'address': '%x' % S},
+            {'symbol': '?t@@YAXXZ', 'address': '%x' % T}, {'symbol': '?t2@@YAXXZ', 'address': '%x' % T2}],
+            'symbols': {'??_7C@@6B@': '%x' % VFT}}]
+        self.assertTrue(bodies.same_shape(bytes(v), f))
+        self.assertFalse(bodies.same_shape(b'\x8b\x45\x08\xc3', b'\x8b\x4d\x08\xc3'))   # another register
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            exe = bodies.Pe(os.path.join(d, 'x.exe'))
+            strict = bodies.exe_call_targets(d, 0, udata[0], {'?g_mm@@3UMM@@A'}, exe, search=True)
+            self.assertEqual(dict(strict), {})                        # bytes differ: not placed without loose
+            cn = {'g_mm': {'src/b.cpp'}, 'g_mm2': {'src/b.cpp'}, 'stub_a': {'src/b.cpp'}, 'g_two': {'src/b.cpp'}}
+            rows = bodies.exe_data_pass(cn, os.path.join(d, 'x.exe'), d, udata, lambda a: a >= 0x500000)
+        self.assertEqual({(r.name, r.cls, r.addr, r.target) for r in rows},
+                         {('g_mm', 'exe-data', MM, '__fnv_005f6238'), ('g_mm2', 'exe-data', MM, '__fnv_005f6238')})
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\tg_mm\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp#bodies1\tg_sink_00401000\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\t_ZN1A1fEv\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\tg_ok\tdata\tunit/cname\t005f0000\t__fnv_005f0000\t\n')
+            self.assertEqual(bodies.load_cnames(refs), {'g_mm': {'src/a.cpp'}, 'g_sink_00401000': {'src/a.cpp'}})
+        bind = {'g_mm': ('body-exe-data', '__fnv_005f6238'), '_ZN1A1fEv': ('body-addr', '__fnv_00401000')}
+        self.assertEqual(fnvlink.body_data_addr(bind, 'g_mm'), MM)
+        self.assertIsNone(fnvlink.body_data_addr(bind, '_ZN1A1fEv'))
+        self.assertIsNone(fnvlink.body_data_addr(bind, 'g_none'))
+        with open(fnvlink.__file__) as fo:   # resolve binds it like an address (data, IAT slot, TLS)
+            self.assertIn("cls, tier, addr, target = 'addr', 'body/exe-data', body_data_addr(body_bind, un), None",
+                          fo.read())
 
     def test_crt_rule(self):
         """The MSVC STL throwers of the decomp's copies throw through libstdc++; a class placement delete is a
