@@ -41,6 +41,10 @@ in this order (first that applies):
    without a body. Synthesized as the out-of-line `= default` definition in the referencing unit (the implicit
    member's semantics: bases and members constructed / copied / destroyed, D0/D1/D2 all emitted). Not a decomp
    body: listed as such, and the MSVC code is the reference where a site misbehaves.
+4c. `tree-inline` - (after vcall) the tree has the body inline in a unit's own source, out of line (`inline
+   C::f() {...}` in a .cpp) or in the class body of a copy of C: that unit is compiled again with
+   `-fkeep-inline-functions` like msvc-inline and only the wanted symbol is kept (its own name, or the one the
+   relaxed key pairs, as for msvc-inline). A host that does not emit it leaves the name `missing`.
 5b. `crt-rule` - a runtime member the C++ library defines by its contract, not by the decomp: the MSVC STL's
    throwers `C::_Xlen()` / `C::_Xran()` / `C::_Xinvalid_argument()` of the decomp's string and vector copies (a stub
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
@@ -494,6 +498,48 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
     return path, roots, failed
 
 
+# ---------------------------------------------------------------------------------------------------- tree-inline
+
+def load_layouts(out):
+    """out/layouts.tsv -> {(unit, last type component): {sizes}} (the layout probe's sizes per unit)."""
+    res = collections.defaultdict(set)
+    path = os.path.join(out, 'layouts.tsv')
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 3 and f[2].isdigit():
+                res[(f[0], sigs.split_qual(f[1])[-1] if f[1] else f[1])].add(int(f[2]))
+    return res
+
+
+def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
+    """{name: host unit} for missing names whose body the tree has inline (out of line `inline C::f(`, or in a
+    class body of C) in a unit's own source (.cpp in units.json). A referencing unit is preferred, then the first
+    in order. Only the host's emitted symbol under the wanted name (or the one its relaxed key pairs) is kept."""
+    import bodycause
+    keys = {}
+    for r in rows:
+        k = bodycause.key_of(itanium(r.name))
+        if k and k[0]:
+            keys[r.name] = (k[0], k[1])
+    if not keys:
+        return {}
+    found = bodycause.tree_bodies(tree, set(keys.values()))
+    out = {}
+    for r in rows:
+        k = keys.get(r.name)
+        if not k:
+            continue
+        hosts = sorted({f for f, where in found.get(k, ()) if where.startswith('live') and f in unit_sources})
+        if layouts:   # the class must have the referencing units' size in the host where the probe knows both
+            ref = set().union(*(layouts.get((u, k[0]), set()) for u in r.units.split(',')))
+            hosts = [h for h in hosts if not (ref and layouts.get((h, k[0])) and layouts[(h, k[0])] != ref)]
+        if hosts:
+            refs = [h for h in hosts if h in r.units.split(',')]
+            out[r.name] = (refs or hosts)[0]
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------- vcalls
 
 VCALL_SYM = '__fnvnx_bdvc_%08x'
@@ -793,7 +839,7 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             def_names[int(f_['address'], 16)].add(f_['symbol'])
     ms.need({n_ for ns_ in def_names.values() for n_ in ns_ if n_.startswith('?')})
 
-    def shape_ok(ref, a):
+    def shape_ok(ref, a, this_only=False):
         """The MSVC definition at a and the pristine reference ref: as many parameters, both member functions or
         both not, the same calling convention (no ABI bridge is made for these bindings; resolve compares only the
         names it binds itself)."""
@@ -809,6 +855,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             dparams = [p_ for p_ in d_.params if p_ != '...']
             if len(dparams) == len(rparams) and bool(d_.member) == member and d_.cc == rs.cc:
                 return True
+            if this_only and not d_.member and len(dparams) == 1 and dparams[0].rstrip().endswith('*'):
+                return True   # the decomp spells the destructor as FUN_<addr>(T*): natively both take x0 = object
         return False
     seen = collections.defaultdict(collections.Counter)   # Itanium name -> {address: sites}
     via = {}
@@ -835,9 +883,11 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             out.append(r._replace(note=r.note + '; exe calls %s' % ','.join('%08x' % a for a in sorted(tg)[:4])))
             continue
         (a, nsite), = tg.items()
-        if isg.variant in ('C1', 'C2', 'D1', 'D2') and native.get(a) == 'F' and shape_ok(via[r.name], a):
-            want = 'F'   # the decomp defines the constructor/destructor's address as a member function (FUN_...)
-        if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a):
+        this_only = bool(isg.variant) and not isg.params and bool(msvc(via[r.name]).member)
+        if isg.variant in ('C1', 'C2', 'D1', 'D2') and native.get(a) == 'F' and \
+                shape_ok(via[r.name], a, this_only=this_only):
+            want = 'F'   # the decomp defines the constructor/destructor's address as a function (FUN_...)
+        if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a, this_only=this_only):
             out.append(r._replace(note=r.note + '; exe calls %08x (signature shape differs: %s)' % (
                 a, ' / '.join(sorted(def_names.get(a, ()))[:2]))))
             continue
@@ -1052,6 +1102,34 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 rows = [r._replace(cls='vcall', target=vtargets[r.name][0],
                                    note='slot byte %d, this +%d' % vtargets[r.name][1:]) if r.name in vtargets
                         else r for r in rows]
+        # bodies the decomp writes inline in another unit's source (`inline C::f() {...}`, an in-class body of a
+        # copy of C): that unit hosts them, compiled with -fkeep-inline-functions like msvc-inline
+        vdone = set(vtargets) | set(failed) | set(vnotes)
+        rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
+        tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
+        tby = collections.defaultdict(list)
+        for r in rest:
+            if r.name in tin:
+                tby[tin[r.name]].append(r)
+
+        def tone(job):
+            h, rs = job
+            try:
+                return h, synth_host(tree, work, h, rs, itanium, True)
+            except Exception as e:
+                return h, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
+        tdone = {}
+        with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+            for h, (path, roots, fail) in ex.map(tone, sorted(tby.items())):
+                if path:
+                    dst = os.path.join(bdir, 'zz_bd_%s_t.o' % h.replace('/', '_'))
+                    os.replace(path, dst)
+                    synth_rows.append((h, dst, len(roots)))
+                    tdone.update({n: h for n in roots})
+                for n, why in fail.items():
+                    vnotes[n] = 'tree-inline in %s: %s' % (h, why)
+        rows = [r._replace(cls='tree-inline', host=tdone[r.name], note='inline body in ' + tdone[r.name])
+                if r.name in tdone else r for r in rows]
         gd = [r for r in rows if r.cls == 'gdel']
         if gd:
             s_path, o_path = os.path.join(bdir, 'gdel.S'), os.path.join(bdir, 'zz_bd_gdel.o')
@@ -1104,8 +1182,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default',
-                        'crt-rule', 'missing')]
+              for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'tree-inline',
+                        'special-default', 'crt-rule', 'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))
