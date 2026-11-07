@@ -25,7 +25,9 @@ Sources (the number each row shows):
                            budget, <h>-mem.json (fnvnx-mem/1); #10 the metric of <h>-scripterr.json
                            (fnvnx-scripterr/1: distinct (form, kind, caller) groups not in the original's run;
                            or the same object under "scripterr" in <h>-scenario.json, where S18's job embeds it);
-                           #12 frames over the budget, <h>-frames.json
+                           #11 the metric of <h>-nrocheck.json (fnvnx-nrocheck/1, tools/report/nro_check.py:
+                           automated NRO_CHECKLIST.md items failing or open; or "nrocheck" in <h>-full.json, where
+                           full_job's package step embeds it); #12 frames over the budget, <h>-frames.json
                            (fnvnx-frames/1; only with a calibrated --scale). The lane's number is shown beside the
                            scenario's when both exist.
 Writes <out> and <out>.json (fnvnx-zero/1). Numbers and our own names only. Exit 0.
@@ -180,6 +182,9 @@ LANES = {
             else None, 'mem lane: failures + over budget'),
     10: lane('scripterr', 'fnvnx-scripterr/1', lambda j: j.get('metric'),
              lambda j: 'scripterr lane: groups not in the original (%s in it)' % j.get('in_original'), 'scenario'),
+    11: lane('nrocheck', 'fnvnx-nrocheck/1', lambda j: j.get('metric'),
+             lambda j: 'nrocheck lane: automated checklist items fail %s, open %s of %s; manual %s' % (
+                 j.get('fail'), j.get('open'), j.get('automated'), j.get('manual')), 'full'),
     12: lane('frames', 'fnvnx-frames/1', lambda j: (j.get('device_ms') or {}).get('over_budget'),
              'frames lane: frames over budget (calibrated)'),
 }
