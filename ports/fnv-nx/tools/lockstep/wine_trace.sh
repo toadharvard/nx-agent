@@ -7,7 +7,8 @@
 #
 # <function list>: tests/s5/boot_trace.py fnlist output. The game runs for [seconds] (default 120; WINE_TRACE_S)
 # with no input, then the prefix is killed. FNVTRACE_SNAP / FNVTRACE_DEREF / FNVTRACE_MAX pass through. Nothing of
-# the game is copied: the two tracer files go beside the mirror's symlinks. Needs wine (32-bit), xvfb,
+# the game is copied: the two tracer files go beside the mirror's symlinks. The player profile is profile.py's (the
+# port's first-run profile; WINE_TRACE_PROFILE=ref keeps wine_ref.sh's ref_ini.py files). Needs wine (32-bit), xvfb,
 # i686-w64-mingw32-gcc (tools/lockstep/build.sh).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -21,6 +22,17 @@ log() { echo "$(date -u +%FT%TZ) wine_trace: $*"; }
 "$HERE/build.sh" "$WORK/tracer" > "$WORK/build.log" 2>&1 || { log "tracer build failed (see $WORK/build.log)"; exit 1; }
 G=$WORK/pfx/drive_c/FNV
 cp -f "$WORK/tracer/fnvtrace.exe" "$WORK/tracer/fnvtrace.dll" "$G/"
+# the same first-run profile as the guest's (tools/lockstep/profile.py, the port's profile.cpp), replacing wine_ref's
+# ref_ini.py files: only sD3DDevice differs (each side's own adapter). WINE_TRACE_PROFILE=ref keeps ref_ini.py's.
+if [ "${WINE_TRACE_PROFILE:-port}" = port ]; then
+	case "${S16_PCI_DEVICE:-000006cd}" in 000006cd) DEV="NVIDIA GeForce GTX 470" ;; 00000193) DEV="NVIDIA GeForce 8800 GTS" ;;
+		*) DEV=${S16_D3D_DEVICE:?S16_D3D_DEVICE}; DEV=${DEV//\"/} ;; esac
+	U=$WORK/pfx/drive_c/users/$(id -un)
+	rm -rf "$WORK/profile"
+	python3 -I "$HERE/profile.py" "$GAME/Fallout_default.ini" "$WORK/profile" --device "$DEV" > "$WORK/profile.log" 2>&1 ||
+		{ log "profile.py failed (see $WORK/profile.log)"; exit 1; }
+	mkdir -p "$U"; cp -a "$WORK/profile"/. "$U/"
+fi
 export WINEPREFIX=$WORK/pfx WINEARCH=win32 WINEDEBUG=${WINEDEBUG:--all}
 export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d"
 export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe

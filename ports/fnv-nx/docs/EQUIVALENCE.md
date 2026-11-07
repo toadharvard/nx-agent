@@ -164,6 +164,38 @@ differ: MSVC opens 194 headers GCC does not (`mobileobject.h` 24 units, `NiPoint
 opens 78 that MSVC does not (`include/MobileObject.h` and similar canonical copies). This is what INC1 claims, so the
 remaining question is code, which the gate answers.
 
+## Stream EQ: prepared-side no-build units (06f45fbb / 2e000047 reports, local gate)
+
+The newest reports had 64 units the prepared side could not compile, so nothing in them was compared. Four
+mechanisms close 41 of the 63 local ones (`equiv.py build` of those units on a tree with these rules; the 22 that
+remain are listed by first error in journal/inbox/eq-001.md):
+
+* **DECL1-STDABS** (26 units, LIBSTDCXX-STD-ABS). The decomp declares `namespace std { float abs(float); }` itself
+  (49 sites) and binds it to the game's out-of-line copy of MSVC's `abs(float)` (0x00408840 -> 0x00408860,
+  `(float)fabs((double)x)` through the CRT's fabs). DECL1 drops the declaration for libstdc++'s. It now includes
+  `fnvnx_cmath/std_abs.h`, which on the target is `<stdlib.h>`, the header it included before (the target is
+  unchanged). Its MSVC branch declares what libstdc++'s `<stdlib.h>` does, std::abs for int, long, float, double and
+  long double plus the global using-declaration, without `<math.h>`'s global float overloads. The out-of-line call
+  against the inline standard abs is then a CRT-INLINE difference (3 functions locally): same value for every
+  input.
+* **ENUM1-FWD** (10 units, MSVC-OPAQUE-ENUM). ENUM1 writes an opaque declaration as `enum X FNVNX_ENUM_INT;`.
+  fnvnx_compat.h defines the macro as `: int`, and fnvnx_equiv_compat.h defines it empty: MSVC 2008 has no opaque
+  declaration, and its forward declaration `enum X;` (the decomp's own) names the same int-based type, also after
+  the definition (tessaveloadgame's MEM_CONTEXT).
+* **SDK-LEAN** (compile_unit). A prepared unit that the full `<windows.h>` breaks is built again with
+  WIN32_LEAN_AND_MEAN, which leaves out winioctl, rpc and ole, closer to the target shim's subset (RequestLocation).
+  Head, /EHs-c- and leave-out builds make the same choice.
+* **SDK-WINDOWS** (tools/equiv/msvc/windows.h). A prepared unit that includes `<windows.h>` itself gets the
+  fnvnx_win32.h stand-in, as on the target, where the shim's windows.h is fnvnx_win32.h. Before, it got the plain
+  SDK and missed the shim's looser parameter types. The stand-in reaches the SDK's own header through a generated
+  absolute include (gen_dir: fnvnx_equiv_sdk_windows.h). Pristine units get the SDK's header unchanged.
+
+CTOR1 was measured too, and nothing changed: MSVC 2008 null-checks the result of every new-expression before the
+constructor, even for an allocation function without `throw()` (a tagged placement form: the same `test ecx,ecx`
+at /O2, and an out-of-line call at /Od). So no spelling of in-place construction compiles like the explicit call
+under MSVC. GCC -O2 emits no check for the standard placement form. PLACEMENT-NULLCHECK is therefore a
+compiler-model class: the target code is the explicit call's.
+
 ## Classification
 
 Rules of S1 round 8 (`RREF1` ... `SPEC2`, after `8fff58b`) are classified (orchestrator, J-0058). Their gate is
@@ -239,6 +271,7 @@ above (round 8).
 | `STAND2` | platform | STAND1 for an address another unit's tagged definition provides, only for a non-inline, non-static definition in a unit compiled without /O1, /O2, /Ox, /Ob2 | MSVC never inlined the stand-in there, so its code called the name, which the link took to the other unit's function |
 | `STAND3` | platform | in an /Od unit without /Ob1, /Ob2, /O1, /O2, /Ox, removes the body of an untagged in-class definition, or of an out-of-class or free one marked inline, whose MSVC name the unit binds to one address that some unit decompiles (declarations stay) | MSVC inlines nothing there, so the binary calls that address at every site; the call now reaches it too (the link binds the name, tier unit/exact) |
 | `STAND4` | platform | STAND1 / STAND2 for an untagged `static` free stand-in at namespace scope (not inline, template or overloaded) whose MSVC name the unit binds to one decompiled address: the definition becomes an extern declaration and the unit's other declarations of the name lose `static` | MSVC decorates a static free function like an extern one and its /Od code called that name, which the recipe binds to the exe function; GCC inlined the stand-in's body |
+| `STAND5` | platform | STAND2 for a member function body inside its class (not virtual, not a constructor, destructor or operator, untagged) whose MSVC name, in every spelling the unit's `symbols` hold, binds an address another unit defines and this unit does not: the body becomes its declaration (tools/rules/s2_bodies.py) | MSVC called that name out of line, and the link binds it to the exe function; GCC would inline the local body, which references names no exe function has |
 | `PTR1` | neutral | `f > 0` / `p > 0` -> `!= 0` and `<= 0` -> `== 0` for a function name or a local pointer; not for `*p` of a `T* p` (PTR1-DEREF: `*type <= 0` of an `int* type` is a signed compare, bhkrigidbody 0x00c8cce0's caller 0x00c8dd10 got `je` for `jle`; now identical, with blk_00a20000_o2 0x00a29fe0) | MSVC's unsigned compare of the address gives the same result |
 | `INC1` | neutral | a quoted `#include` that names, up to case, a file in the including directory is spelled as that file (`"Actor.h"` -> `"actor.h"`) | the header MSVC opened (directory of the includer first, names without case) |
 | `ANON2` | platform | a member with a constructor / destructor / copy assignment in an anonymous struct of an anonymous union becomes raw storage of its size and alignment, its uses `(*(T*)(x.m))` | same bytes and calls; MSVC never ran those functions for a union member either |
@@ -260,7 +293,7 @@ above (round 8).
 | `TAIL1` | layout | GCC must not reuse a base's tail padding; MSVC never does | zero-width bit-field, as on the target |
 | `EBO1` | layout | `char fnvnx_msvc_ebo;` first in a class with exactly two direct bases that are both empty in the unit (and data of its own): MSVC gives only the first empty base a zero size, so the members start at 1. 8 sites (FUN_00c612b0_Class x6, FUN_00c64de0, FUN_00c5da70); the exe allocates 0x14, 0x1c, 0xe0 for them (0x00c61510, 0x00c652c0, 0x00c5e4d0), GCC gave 0x13, 0x18, 0xdf | MSVC's layout of the class itself (not applied on the MSVC side) |
 | `EBO2` | layout | `FNVNX_EBO2` (GCC: `char fnvnx_ebo2[0];`, MSVC: nothing) first in an empty base B (no bases, data or virtuals; used only as a base, `B*`, `B&`, `B::`) whose derived classes all have it as their only base, one of them introducing its own vfptr: MSVC places B after the vfptr (+4), the Itanium ABI at 0 under the vptr; members and sizes are unchanged. effectitemlist.cpp `EffectItemList : BSSimpleList_Standin` (exe passes this+4 to IsEmpty 0x008256d0; pristine unit = exe byte for byte), S13b layout-offset (S1-refs) | MSVC's layout of the class, not applied on the MSVC side |
-| `REC1` | neutral | D20: bodies of functions the decomp lacks, from the private fnv-nx-build `recon/<unit>` branches (FNVNX_RECON), appended to their unit with their recipe entries and bindings (POST hook); each is accepted only with build_and_match = all bytes equal against the exe (recon/bscore_memoryheap: MemoryHeap 0x00aa78a0 / 0x00aa7930, 19 / 19 functions, 1,246 / 1,246 bytes). Nothing without FNVNX_RECON (S1-refs) | new functions; the unit's other functions are unchanged |
+| `REC1` | neutral | D20: bodies of functions the decomp lacks, from the private fnv-nx-build `recon/<unit>` branches (FNVNX_RECON), appended to their unit with their recipe entries and bindings (POST hook); each is accepted only with build_and_match = all bytes equal against the exe (recon/bscore_memoryheap: MemoryHeap 0x00aa78a0 / 0x00aa7930, 19 / 19 functions, 1,246 / 1,246 bytes). REC1-REPL: a recon's `replace` pairs (exact text, each `old` exactly once or the prepare fails) edit the unit's own code before the append, where a body cannot help (a filler the unit's calls bind to, arguments on the wrong call); under MSVC the unit stays all bytes equal. Nothing without FNVNX_RECON (S1-refs) | new functions; replace edits keep every recipe function's MSVC bytes (build_and_match all equal) REC1-REPL: a recon's `replace` pairs (exact text, each once, applied before the append) are part of the same accepted recon and gated with it; a pair that does not apply fails the prepare |
 | `HUNIT1` | neutral | a header unit whose recipe lists class-template members it only references through a null pointer (nitarray_h_unit.cpp: NiTArray<ActorCombatGroup*, ...>::SetAt 0x0096ae90, SetAtGrow 0x00470000, SetSize 0x0096ad30) gets explicit instantiation definitions of exactly those members: GCC at -O2 inlined the references and emitted none (S5-boot: 1,238 trap hits); `used` cannot help because the class is instantiated before the members' definitions (S1-refs) | MSVC emitted those COMDATs already; the instantiations name the same members |
 | `XC2` | platform | XC1's form for a hand-written dynamic initializer XC1 does not see (it rewrites generated/ only): nipoint3_console.cpp `gNiPoint3StartupDst = gNiPoint3StartupSrc` (??__E at 0x00a62110, called by InitializeGameSystems) -> `extern` object (bound to its image address 0x011f4600) + `extern "C" __fnvnx_dyninit_00a62110` doing the copy (S1-refs) | as XC1: target only |
 | `EBO3` | layout | `FNVNX_EBO2` first in an empty base E (no bases, data or virtuals; used only as a base, `E*`, `E&`, `E::`; never a virtual base) that follows a base with data defined in the same .cpp: MSVC places E after the bases before it (`struct Node : NodeBase0, NodeBase16 {}`: E at +0x10, size 16), the Itanium ABI at 0; members and sizes are unchanged. bgszonetargetlistener.cpp 0x0061ff30 (exe passes node+0x10 to 0x006207a0; pristine unit = exe), S13b layout-offset (S1-layout) | MSVC's layout of the class, not applied on the MSVC side |
