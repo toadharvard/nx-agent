@@ -71,7 +71,7 @@ from (a tree prepared before a rules change silently lacks it: f10's tree predat
 | `__fnvnx_br_<addr8>_<hash8>` | ABI bridge for one (address, reference declaration); hash of the MSVC reference name. |
 | `out/objcopy/<obj>.redefine` | `old new` per line (the objcopy `--redefine-syms` format): undefined Itanium name -> address symbol or bridge. |
 | `out/objcopy/<obj>.args` | objcopy options for the object (`--add-symbol`, `--localize-symbol`, `--weaken-symbol`, `--redefine-sym`). |
-| `out/objcopy/<obj>.undefine` | Definitions `apply` turns into undefined references before renaming (import thunks: their name then follows the `.redefine` mapping to the import). |
+| `out/objcopy/<obj>.undefine` | Definitions `apply` turns into undefined references before renaming (import thunks: their name then follows the `.redefine` mapping to the import; a global `FUN_<addr>` defined by an unrelated body, i.e. not the native at `<addr>` (`out/colliding.tsv`, S5 class 2): its name follows the mapping to `__fnv_<addr>`, and other objects' by-name references bind by address too, never to the helper). |
 | `out/objcopy/<obj>.rebind` | Address (and TLS slot) symbols of the variables the object defines at image addresses: `apply` points the object's own data pointers to them at these symbols (split globals, below). |
 | `out/aliases.ld` | Linker script: absolute data address symbols, aliases of COMDAT definitions. |
 | `out/refs.tsv` | Every (object, undefined symbol): class, tier, address, target, matched MSVC declaration. |
@@ -649,6 +649,12 @@ decomp names or hand-stored vptrs that names another class, unless the own vtabl
 partial declaration), and adds V rows for vftables no unit names. `exe_vftables.tsv`: per exe vftable the class,
 its native vtable, the pairing before and the outcome. Classes with no native vtable are requested for synthesis
 (`vtable_requests.tsv`, why `exe-rtti`; hosts: units naming the address, then units naming a member).
+Before it, `ctor_store_pairs` (S5 class 3) pairs each constructor-named vtable (`_ZTV<n>FUN_<ctor>`, a placeholder
+class) that no unit pairs: the exe's constructor at `<ctor>` (a native `??0` definition) names its vftable, the last
+`mov dword ptr [reg], imm32` of an RTTI primary vftable start before its first `ret` (`exevft.ctor_vftable`,
+capstone). A free vftable gets the shell in the map; one with a vtable already takes it as a displaced vtable, so
+the slot fill and the extended copies (below) reach it either way. `ctor_vftables.tsv`: each candidate and outcome.
+On link 9f865b0a's inputs: 390 pairs (7 new V rows, 383 displaced), 319 of them shorter than the exe's vftable.
 
 **Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's

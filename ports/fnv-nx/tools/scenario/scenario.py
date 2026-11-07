@@ -37,7 +37,8 @@ The report (fnvnx-scenario/1) has one entry per D25 target, each {measured, coun
    2 lockstep          tests/s5/boot_trace.py compare --json: the divergences (first one named)
    3 stand-ins         platform stand-in hits: "[fnvnx] ... not available / unsupported / ignored / no such module /
                        stand-in" lines (distinct), plus trap stubs reached ("defined nowhere")
-   4 failed opens      the summary's file faults (distinct call+path) minus tools/scenario/optional_files.txt
+   4 failed opens      the summary's file faults (distinct call+path) minus existence probes (stat/remove of a
+                       missing path, mkdir of an existing one: counted apart) and tools/scenario/optional_files.txt
    5 draws/states      "[fnvnx] ... skipped draw / unsupported ... state" lines of the guest's device
    6 audio/input       scenario keys the platform keymap cannot map + audio decode failure lines
    7 threads           tools/threads report (races + cycles + long waits) + gate timeouts (hangs on the path)
@@ -390,6 +391,13 @@ def roundtrip(plan, root, savediff):
     return SD.compare(a, b)
 
 
+def is_probe(f):
+    """a file call that asks whether something exists rather than opening it: stat / remove / rmdir of a missing
+    path, mkdir of one that exists (the game deletes its old debug logs at start, checks for optional files)"""
+    c, e = f.get("call"), str(f.get("errno"))
+    return (c in ("stat", "remove", "rmdir") and e in ("ENOENT", "2")) or (c == "mkdir" and e in ("EEXIST", "17"))
+
+
 def report(plan, gdir, wdir=None, compare=None, threads=None, nx1=None, optional=OPTIONAL, budget=BUDGET,
            frames_report=None):
     summ, log, con, root = guest_inputs(gdir, plan)
@@ -424,9 +432,12 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nx1=None, optional
     # 4 failed opens
     opt = [re.compile(re.split(r"\s+#", l.strip())[0], re.I) for l in (read(optional) or "").splitlines()
            if l.strip() and not l.lstrip().startswith("#")]
-    ff = [f for f in (summ or {}).get("file_faults", []) if not any(r.search(f.get("path", "")) for r in opt)]
-    put(4, ran, len({(f.get("call"), f.get("path", "").lower()) for f in ff}),
-        faults=[f"{f.get('call')} {f.get('path')} errno {f.get('errno')}" for f in ff[:50]])
+    allf = (summ or {}).get("file_faults", [])
+    probe = [f for f in allf if is_probe(f)]
+    ff = [f for f in allf if not is_probe(f) and not any(r.search(f.get("path", "")) for r in opt)]
+    put(4, ran, len({(f.get("call"), f.get("path", "").lower()) for f in ff}), probes=len(probe),
+        faults=[f"{f.get('call')} {f.get('path')} errno {f.get('errno')}" for f in ff[:50]],
+        probe_list=[f"{f.get('call')} {f.get('path')}" for f in probe[:50]])
     # 5 draws / states
     dr = sorted({l for l in fl if DRAW_RE.search(l)})
     put(5, ran, len(dr), lines=dr[:30])

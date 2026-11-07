@@ -256,6 +256,9 @@ then S15); 9. save/load round-trip differences (S18-scenarios); 10. game-script 
   recorded as `"accept": "inline"` with the exe call sites it was read from. It closes the trap. It is confirmed when
   fuzz of the containing exe functions shows no new hard divergence; a divergence reopens it as a D24 false
   interpretation (orchestrator, from R6).
+  (d) `"accept": "binding"`: symbols only, no new code, where the exe calls code a unit already defines or S4
+  provides (R1/R2). A body that matches neither (a) nor (c) is never published: it stays `fnvnx-recon-pending/1`
+  (REC1 skips it) until fuzz accepts it as (b).
 - S2-bodies owns the list (tools/link/bodycause.py on the newest link) and every non-recon trap class.
 
 ### D22. Virtual destructor slots against MSVC vftables (orchestrator)
