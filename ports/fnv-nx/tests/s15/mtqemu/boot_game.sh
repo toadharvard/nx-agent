@@ -6,7 +6,8 @@
 #   FalloutNV.exe: the owner's exe; symlinked to <work>/sdmc/fnvnx/game/FalloutNV.exe (sdmc:/ is <work>/sdmc)
 #   work dir:      outside the repository: linhost, the sdmc root and boot.log go there
 # Env: TIMEOUT (seconds, default 300), EXPECT (default the WinMain line), QEMU (default qemu-aarch64; empty: native),
-#      HEAP_MIB (default 64, as emu_guest.py). Exit 0 when the line was reached.
+#      HEAP_MIB (default 64, as emu_guest.py), LINHOST_ARGS (more linhost options, e.g. tools/farm/frames_job.sh's
+#      --profile FILE --frame SYM). Exit 0 when the line was reached.
 #      GAMEDATA_DIR: when the exe is the owner's (sha256) and has no Data/ beside it, tools/gamedata_fetch.sh assembles
 #      the real install there from the private repository (default $HOME/fnvnx-gamedata; cached) and the boot uses it.
 #      GAMEDATA=0 turns that off.
@@ -50,6 +51,7 @@ done
 run=("$WORK/build/linhost" --root "$WORK/sdmc" --skip-faulting-init --heap "$HEAP_MIB")
 [ -n "$EXPECT" ] && run+=(--expect "$EXPECT")
 [ "$COLLECT" = 1 ] && run+=(--collect-traps)
+if [ -n "${LINHOST_ARGS:-}" ]; then read -r -a _la <<< "$LINHOST_ARGS"; run+=("${_la[@]}"); fi
 run+=("$ELF")
 [ -n "$QEMU" ] && run=("$QEMU" -R 0xC0000000 "${run[@]}")
 echo "boot_game: ${run[*]}"
