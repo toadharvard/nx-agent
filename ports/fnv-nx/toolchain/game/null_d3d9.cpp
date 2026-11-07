@@ -6,6 +6,11 @@
 #include <d3d9.h>
 
 static void null_mode(D3DDISPLAYMODE *m) { m->Width = 1280; m->Height = 720; m->RefreshRate = 60; m->Format = D3DFMT_X8R8G8B8; }
+/* the adapter's modes: a PC adapter's usual list, so the INI's iSize (the engine's default 640x480 until the
+ * INI is read) has one; the desktop mode above is the handheld panel, 1920x1080 the docked output */
+static const uint16_t null_modes[][2] = {{640, 480}, {800, 600}, {1024, 768}, {1280, 720}, {1280, 1024}, {1920, 1080}};
+#define NULL_MODES (sizeof null_modes / sizeof null_modes[0])
+static void null_enum_mode(UINT i, D3DDISPLAYMODE *m) { null_mode(m); m->Width = null_modes[i][0]; m->Height = null_modes[i][1]; }
 static void null_caps(D3DCAPS9 *c) {
     memset(c, 0, sizeof *c);
     c->DeviceType = D3DDEVTYPE_HAL; c->MaxTextureWidth = c->MaxTextureHeight = 4096; c->MaxVolumeExtent = 256;
@@ -30,6 +35,8 @@ struct NullBase {
     void *scratch() { if (!buf) { size_t n = size ? size : (size_t)pitch() * (h ? h : 256) * (d ? d : 1); if (n < 4096) n = 4096; buf = calloc(1, n); } return buf; }
     virtual ~NullBase() { free(buf); }
 };
+
+extern "C" HRESULT fnvnx_d3d9_device_created(const void *present_params, void *device) __attribute__((weak));
 
 struct Null_IDirect3D9;
 struct Null_IDirect3DVolume9;
@@ -622,14 +629,14 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterIdentifier(UINT Adapter, DW
 UINT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format) {
     (void)Adapter;
     (void)Format;
-    return 1;
+    return NULL_MODES;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9::EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
     (void)Format;
     (void)Mode;
     (void)pMode;
-    if (pMode) null_mode(pMode); return Mode == 0 ? S_OK : D3DERR_INVALIDCALL;
+    if (Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterDisplayMode(UINT Adapter, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
@@ -695,6 +702,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9::CreateDevice(UINT Adapter, D3DDEVTYPE
     (void)pPresentationParameters;
     (void)ppReturnedDeviceInterface;
     if (ppReturnedDeviceInterface) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppReturnedDeviceInterface = o; }
+    if (ppReturnedDeviceInterface && *ppReturnedDeviceInterface && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(pPresentationParameters, *ppReturnedDeviceInterface);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolume9::GetDevice(struct IDirect3DDevice9** ppDevice) {
@@ -1999,14 +2007,14 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterIdentifier(UINT Adapter, 
 UINT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format) {
     (void)Adapter;
     (void)Format;
-    return 1;
+    return NULL_MODES;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
     (void)Format;
     (void)Mode;
     (void)pMode;
-    if (pMode) null_mode(pMode); return Mode == 0 ? S_OK : D3DERR_INVALIDCALL;
+    if (Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterDisplayMode(UINT Adapter, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
@@ -2072,6 +2080,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::CreateDevice(UINT Adapter, D3DDEVTY
     (void)pPresentationParameters;
     (void)ppReturnedDeviceInterface;
     if (ppReturnedDeviceInterface) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppReturnedDeviceInterface = o; }
+    if (ppReturnedDeviceInterface && *ppReturnedDeviceInterface && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(pPresentationParameters, *ppReturnedDeviceInterface);
     return S_OK;
 }
 UINT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterModeCountEx(UINT adapter_idx, const D3DDISPLAYMODEFILTER * filter) {
@@ -2101,6 +2110,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::CreateDeviceEx(UINT adapter_idx, D3
     (void)mode;
     (void)device;
     if (device) { auto *o = new Null_IDirect3DDevice9Ex(); o->inherit(this);  *device = o; }
+    if (device && *device && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(parameters, *device);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterLUID(UINT adapter_idx, LUID * luid) {

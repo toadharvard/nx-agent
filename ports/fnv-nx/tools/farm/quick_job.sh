@@ -11,10 +11,11 @@
 #       boot; publishes link/<c12>), then fuzz_job.sh 1 of 1 (verdict cache: only changed function keys; FUZZ_MAX_S,
 #       default 600) and audit_job.sh 1 of 1 (row cache: only changed keys; AUDIT_BUDGET, default 300)
 #    B  equiv: equiv_job.sh 1 of 1 (object cache: only units whose source, headers, flags or compiler changed)
-#       then threads_job.sh (D25 #7: the race checker's and the watchdog's tests, then the guest just built relinked
+#    D  after lane A's build, beside its fuzz and audit: threads_job.sh (D25 #7: the race checker's and the watchdog's tests, then the guest just built relinked
 #       with the watchdog and run under qemu-aarch64 for THREADS_TIMEOUT, default 180 s here; tools/threads/README.md)
 #       and frames_job.sh (per-thread CPU and frame pacing: the guest under linhost --profile for FRAMES_TIMEOUT,
-#       default 180 s here; tools/perf/FRAMES.md)
+#       default 180 s here; tools/perf/FRAMES.md) and mem_job.sh (the memory lane: the guest relinked with the
+#       recorder for MEM_TIMEOUT, default 180 s here; the peak against 3.2 GiB; tools/perf/MEM.md)
 #       and scenario_job.sh (S18, D25's targets on scripted scenarios: QUICK_SCENARIOS, default "boot-menu saveload",
 #       on this build's link and guest, EMU_TIMEOUT 900 s each; the original's runs come from its reference cache)
 #    C  replay: sweep_job.sh 1 of 1 with SWEEP_CAPTURE=replay on the capture store's cover scenes (quick_plan.py
@@ -50,7 +51,7 @@ if [ -n "$BASE" ] && git -C "$REPO" cat-file -e "$BASE^{commit}" 2>/dev/null && 
 	python3 -I "$HERE/quick_plan.py" plan "$REPO" "$BASE" "$COMMIT" --out "$R/plan.json" || BASE=""
 fi
 if [ -z "$BASE" ] || [ ! -s "$R/plan.json" ]; then
-	printf '{"files": null, "checks": {"build": true, "equiv": true, "fuzz": true, "audit": true, "replay": true, "programs": false, "threads": true, "frames": true, "scenario": true}, "why": {"all": ["no verified head"]}, "full": [], "base": null}\n' >"$R/plan.json"
+	printf '{"files": null, "checks": {"build": true, "equiv": true, "fuzz": true, "audit": true, "replay": true, "programs": false, "threads": true, "frames": true, "mem": true, "scenario": true}, "why": {"all": ["no verified head"]}, "full": [], "base": null}\n' >"$R/plan.json"
 fi
 if [ -n "${QUICK_CHECKS:-}" ]; then
 	python3 -I - "$R/plan.json" "$QUICK_CHECKS" <<'EOF'
@@ -75,10 +76,21 @@ run() {   # run <check> <cmd...>: time, exit status, report path, in $R/<check>.
 skip() { echo "$2" >"$R/$1.skip"; }
 lane_a() {
 	if on build; then run build bash "$J/full_job.sh" "$COMMIT"; else skip build "not affected"; fi
+	lane_d &   # the emulator lanes need this build; they run beside fuzz and audit
+	if on fuzz; then
+		FUZZ_MAX_S=${FUZZ_MAX_S:-600} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
+	else skip fuzz "not affected"; fi
+	if on audit; then AUDIT_BUDGET=${AUDIT_BUDGET:-300} run audit bash "$J/audit_job.sh" "$COMMIT" 1 1
+	else skip audit "not affected"; fi
+	wait
+}
+lane_d() {   # D: the emulator lanes on lane A's build, one after another (each runs a multi-threaded qemu)
 	if on threads; then THREADS_TIMEOUT=${THREADS_TIMEOUT:-180} run threads bash "$J/threads_job.sh" "$COMMIT"
 	else skip threads "not affected"; fi
 	if on frames; then FRAMES_TIMEOUT=${FRAMES_TIMEOUT:-180} run frames bash "$J/frames_job.sh" "$COMMIT"
 	else skip frames "not affected"; fi
+	if on mem; then MEM_TIMEOUT=${MEM_TIMEOUT:-180} run mem bash "$J/mem_job.sh" "$COMMIT"
+	else skip mem "not affected"; fi
 	if on scenario; then
 		local fb=$FARM_HOME/full/build ld="" gd=""
 		[ -d "$fb/link/out" ] && ld=$fb/link
@@ -86,11 +98,6 @@ lane_a() {
 		SCENARIOS=${QUICK_SCENARIOS:-boot-menu saveload} EMU_TIMEOUT=${SCENARIO_EMU_TIMEOUT:-900} SCENARIO_PUBLISH=0 \
 			SCENARIO_LINK_DIR=$ld SCENARIO_GUEST_DIR=$gd run scenario bash "$J/scenario_job.sh" "$COMMIT"
 	else skip scenario "not affected"; fi
-	if on fuzz; then
-		FUZZ_MAX_S=${FUZZ_MAX_S:-600} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
-	else skip fuzz "not affected"; fi
-	if on audit; then AUDIT_BUDGET=${AUDIT_BUDGET:-300} run audit bash "$J/audit_job.sh" "$COMMIT" 1 1
-	else skip audit "not affected"; fi
 }
 lane_b() { if on equiv; then run equiv bash "$J/equiv_job.sh" "$COMMIT" 1 1; else skip equiv "not affected"; fi; }
 lane_c() {
@@ -132,7 +139,7 @@ def headline(md):
             return l[:160].replace('|', '/')
     return ''
 rows, ok = [], True
-for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'scenario'):
+for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'scenario'):
     sk, rc = rd(c + '.skip'), rd(c + '.rc')
     if sk is not None:
         rows.append((c, 'skipped: ' + sk, '-', '-', ''))
@@ -159,7 +166,7 @@ for r in rows:
 o.write('\n## why\n\n')
 for c, ps in sorted(plan.get('why', {}).items()):
     o.write('- %s: %s\n' % (c, ', '.join(ps[:8]) + (' ...' if len(ps) > 8 else '')))
-for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'scenario'):
+for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'scenario'):
     md = rd(c + '.md')
     if md:
         o.write('\n## %s\n\n' % c + '\n'.join(md.splitlines()[:25]) + '\n')
