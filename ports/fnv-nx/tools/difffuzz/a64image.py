@@ -31,7 +31,7 @@ CODE_STUB = 0x08000000        # + original code address (0x00400000..0x00fdf000)
 NAMED_STUB = 0x09000000       # + 16 * k
 NAMED_STUB_MAX = 0x00800000 // 16
 STACK_GUARD = 0x0b800000      # page holding the stack protector canary (mapped by the AArch64 engine)
-LINK_VERSION = 5              # bump when the stub/alias rules change (invalidates cached unit images)
+LINK_VERSION = 6              # 6: S2d's vcall stubs (zz_bd_vcall.o) linked like the bridges; bump when the stub/alias rules change (invalidates cached unit images)
 ADDR_SYM = re.compile(r'^__fnv_([0-9a-f]{8})(?:_(C[0-9]|D[0-9]))?$')
 LAYOUT = """
 SECTIONS {
@@ -156,16 +156,19 @@ def _build_many(sources, linkdir, workdir, name):
             raise FileNotFoundError(obj)
         units.append(obj)
     bridges = os.path.join(fixed, 'zz_bridges.o')
+    # S2d's devirtualized-call stubs (__fnvnx_bdvc_*: load the slot from the object's vptr, tail call), shared by
+    # every unit whose direct call of a virtual resolve redirected; they reference nothing else
+    vcall = os.path.join(fixed, 'zz_bd_vcall.o')
     os.makedirs(workdir, exist_ok=True)
     base = os.path.join(workdir, name)
     elf, meta = base + '.elf', base + '.stubs.json'
-    srcs = units + [bridges, os.path.join(linkdir, 'out', 'aliases.ld')]
+    srcs = units + [bridges, vcall, os.path.join(linkdir, 'out', 'aliases.ld')]
     if os.path.exists(elf) and os.path.exists(meta) and all(os.path.getmtime(elf) >= os.path.getmtime(s)
                                                             for s in srcs if os.path.exists(s)):
         m = json.load(open(meta))
         if m.get('version') == LINK_VERSION and m.get('sources') == sorted(sources):
             return Image(elf, {int(k): v for k, v in m['stubs'].items()}, m['info'])
-    objs = units + ([bridges] if os.path.exists(bridges) else []) + [helpers_object(workdir)]
+    objs = units + [o for o in (bridges, vcall) if os.path.exists(o)] + [helpers_object(workdir)]
     defined, undef, weak = set(), set(), set()
     for o in objs:
         for s in elfsyms.symbols(o):

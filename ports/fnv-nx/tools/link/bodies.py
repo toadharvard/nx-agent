@@ -10,6 +10,10 @@ in this order (first that applies):
 1. `addr` - the same function at an original address under another name: the Itanium name, with class shells
    (`X_shell`) and then namespaces relaxed, matches MSVC names of exactly one address the native build
    defines (`addrmap.tsv` F/C/X; never a G: a deleting destructor is not a D1). Bound to `__fnv_<addr>`.
+1a. `template-fold` - a member of a class template over pointer arguments (`BSSimpleList<TESPackage*>::~BSSimpleList`)
+   whose other pointer instantiations units.json places at one address the native build defines, at least two of
+   them there: MSVC's linker folded their identical code (the body does not depend on the pointee), so this
+   instantiation's code is that body too. Bound to `__fnv_<addr>`; C2/D2 to the complete-object definition.
 1b. `exe-addr` (`--exe`, the player's FalloutNV.exe) - the referencing unit's pristine object calls the MSVC name:
    every pristine object's calls of it (REL32 in functions placed by units.json, or at the address a placed
    function's call reaches, bytes checked against the exe; a DIR32 there, the address taken, counts the same)
@@ -28,11 +32,20 @@ in this order (first that applies):
    pointer-to-member constant `&C::f` (ARM-style Itanium ABI: vtable byte offset, 2 * this adjustment + 1) and
    a stub `__fnvnx_bdvc_<hash>` adjusts `this`, loads the slot from the object's vptr and tail-calls it. Not
    when the unit's pristine object references the MSVC name itself: a qualified call `B::f()`.
+4b. `gdel` - a D1 (or a D2 of a class without virtual bases) that would be missing or `= default`, whose class has
+   one scalar deleting destructor ??_G at an address the native build defines as a member function taking
+   (unsigned int flags): MSVC folded the destructor's body into ??_G and calls that. A stub calls it with flags 0
+   (destroy, do not free). After `exe-addr`: an address of the destructor itself wins.
 5. `special-default` - a constructor without parameters, a copy constructor, a destructor or a copy assignment of
    a class (not a template) that no pristine object defines: MSVC inlined it everywhere, and the decomp declares it
    without a body. Synthesized as the out-of-line `= default` definition in the referencing unit (the implicit
    member's semantics: bases and members constructed / copied / destroyed, D0/D1/D2 all emitted). Not a decomp
    body: listed as such, and the MSVC code is the reference where a site misbehaves.
+5b. `crt-rule` - a runtime member the C++ library defines by its contract, not by the decomp: the MSVC STL's
+   throwers `C::_Xlen()` / `C::_Xran()` / `C::_Xinvalid_argument()` of the decomp's string and vector copies (a stub
+   that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
+   placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing).
+   After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
 
 A synthesized item GCC refuses (member without default constructor, private base, ...) falls back to `missing`
@@ -41,7 +54,7 @@ with the reason `synth-failed`.
 Output (`out/bodies/`, local: derived from the decomp, never committed): `bodies.tsv` (name, class, address,
 target, referencing units, note), `bind.tsv` (name -> address symbol, read by the next `resolve`), `stats.txt`,
 `synth.tsv` (host unit, object: linked by the next `resolve` as extra objects of the host, like
-`vtables/synth.tsv`), `<unit>.bd.o`, `zz_bd_empty.o`.
+`vtables/synth.tsv`), `<unit>.bd.o`, `zz_bd_empty.o`, `zz_bd_crt.o`.
 """
 import collections
 import concurrent.futures
@@ -238,6 +251,23 @@ def tokens_for(isig):
 
 # ---------------------------------------------------------------------------------------------------- classify
 
+def fold_key(sig):
+    """A member of a class template whose template arguments are all pointers -> (scope, template, member,
+    arity, kind) with unit namespaces and shells relaxed; else None. The key of template-fold."""
+    if sig is None or sig.kind != 'func' or sig.params is None or len(sig.qual) < 2:
+        return None
+    cls = sig.qual[-2]
+    i = cls.find('<')
+    if i <= 0 or not cls.endswith('>'):
+        return None
+    args = [a.strip() for a in sigs.split_top(cls[i + 1:-1])]
+    if not args or not all(a.endswith('*') for a in args):
+        return None
+    scope = tuple(norm(q) for q in sig.qual[:-2] if not UNIT_NS.match(q))
+    last = re.sub(r'<.*$', '', sig.qual[-1]) if not sig.qual[-1].startswith('operator') else sig.qual[-1]
+    return (scope, norm(cls[:i]), last, len(sig.params), len(args))
+
+
 Row = collections.namedtuple('Row', 'name cls addr target units note host')
 
 
@@ -254,6 +284,13 @@ class Classifier:
                     m = msvc(n)
                     for _, k in def_keys(m):
                         self.idx[k][a].add(n)
+        self.fidx = collections.defaultdict(lambda: collections.defaultdict(set))  # fold key -> {addr: {names}}
+        for u in units.values():
+            for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
+                if a in native and n.startswith('?') and '?$' in n:
+                    k = fold_key(msvc(n))
+                    if k:
+                        self.fidx[k][a].add(n)
         self.bidx = collections.defaultdict(set)   # key -> {msvc names with a pristine body}
         for n in bodies or {}:
             m = msvc(n)
@@ -271,6 +308,21 @@ class Classifier:
                 return tier, a, sorted(ns)[0]
             if len(cands) > 1:
                 return 'ambiguous', None, ','.join('%08x' % a for a in sorted(cands)[:6])
+        return None
+
+    def by_fold(self, isig):
+        """(address, folded MSVC names) when the instantiations of this template member over pointer arguments
+        that units.json places all share one address the native build defines, with at least two of them there
+        (MSVC folded identical code: the body does not depend on the pointee), else None."""
+        k = fold_key(isig)
+        if not k or isig.variant == 'D0':
+            return None
+        want = VARIANT_KIND.get(isig.variant, 'F') if isig.variant else 'F'
+        cands = {a: ns for a, ns in self.fidx.get(k, {}).items() if self.native.get(a) == want}
+        if len(cands) == 1:
+            (a, ns), = cands.items()
+            if len(ns) >= 2:
+                return a, sorted(ns)
         return None
 
     def msvc_body(self, isig):
@@ -305,6 +357,11 @@ class Classifier:
             if x86_empty(code) and isig.variant != 'D0':
                 return Row(name, 'msvc-empty', None, None, us, '%s in u%d (%d bytes)' % (mn, ui, len(code)), host)
             return Row(name, 'msvc-inline', None, None, us, '%s in u%d (%d bytes)' % (mn, ui, len(code)), host)
+        fold = self.by_fold(isig)
+        if fold:
+            a, ns = fold
+            return Row(name, 'template-fold', a, ADDR_SYM % a, us, 'folded with %d instantiations, e.g. %s' %
+                       (len(ns), ns[0]), None)
         sk = special_of(isig)
         if sk and default_line(sk, isig):
             host = sorted(units_)[0] if units_ else None
@@ -317,6 +374,59 @@ class Classifier:
         elif sk:
             why.append('special member without a referencing unit')
         return Row(name, 'missing', None, None, us, '; '.join(why) or 'no definition, address or body', None)
+
+
+# ---------------------------------------------------------------------------------------------------- runtime rules
+
+CRT_THROW = {'_Xlen': ('_ZSt20__throw_length_errorPKc', '%s too long'),
+             '_Xran': ('_ZSt20__throw_out_of_rangePKc', 'invalid %s position'),
+             '_Xinvalid_argument': ('_ZSt24__throw_invalid_argumentPKc', 'invalid %s argument')}
+
+
+def crt_rule(isig):
+    """('throw', libstdc++ thrower, message) / ('ret', None, None) for a name crt-rule defines, else None."""
+    if isig.kind != 'func' or len(isig.qual) < 2 or isig.params is None:
+        return None
+    last = isig.qual[-1]
+    if last in CRT_THROW and not isig.params:
+        fn, msg = CRT_THROW[last]
+        what = 'vector<T>' if re.search(r'(?i)vector', isig.qual[-2]) else 'string'
+        return ('throw', fn, msg % what)
+    if last == 'operator delete' and len(isig.params) == 2 and \
+            all(sigs.canon_param(p, 2) == 'void*' for p in isig.params):
+        return ('ret', None, None)
+    return None
+
+
+def crt_pass(rows, itanium):
+    """missing rows a runtime rule defines -> crt-rule."""
+    out = []
+    for r in rows:
+        k = crt_rule(itanium(r.name)) if r.cls == 'missing' else None
+        if k:
+            r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
+                           else 'placement delete: ret')
+        out.append(r)
+    return out
+
+
+def emit_crt(rows, itanium):
+    """AArch64 stubs (weak) for the crt-rule names: x0 = the message, tail call the libstdc++ thrower; or ret."""
+    out = ['// GENERATED by tools/link/bodies.py: runtime members defined by the C++ library contract', '    .text']
+    for i, r in enumerate(sorted(rows, key=lambda r: r.name)):
+        q = '"%s"' % r.name
+        kind, fn, msg = crt_rule(itanium(r.name))
+        out += ['    .section .text.fnvnx_bd_crt.%d,"ax",%%progbits' % i, '    .p2align 2', '    .weak ' + q,
+                '    .type %s, %%function' % q, q + ':']
+        if kind == 'ret':
+            out += ['    ret']
+        else:
+            out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]
+        out += ['    .size %s, .-%s' % (q, q)]
+        if kind == 'throw':
+            out += ['    .section .rodata.fnvnx_bd_crt,"aMS",%progbits,1', '.Lcrtmsg%d:' % i,
+                    '    .asciz "%s"' % msg]
+    return '\n'.join(out) + '\n'
 
 
 # ---------------------------------------------------------------------------------------------------- synthesis
@@ -508,14 +618,32 @@ class Pe:
                 self.code.append((self.base + va, roff, rsize))
 
     def find_unique(self, body, masked):
-        """The one address in a code section whose bytes equal body outside the offsets in masked, else None."""
-        pat = re.compile(b''.join(b'.' if j in masked else re.escape(body[j:j + 1]) for j in range(len(body))), re.S)
+        """The one address in a code section whose bytes equal body outside the offsets in masked, else None.
+        Candidates come from a literal search of body's longest unmasked run, then each is compared in full."""
+        runs, run = [], None   # the unmasked runs [a, b)
+        for j in range(len(body) + 1):
+            if j < len(body) and j not in masked:
+                run = j if run is None else run
+            elif run is not None:
+                runs.append((run, j))
+                run = None
+        if not runs:
+            return None
+        lo, hi = max(runs, key=lambda r: r[1] - r[0])
+        if hi - lo < 4:
+            return None
+        lit = body[lo:hi]
         hits = []
         for va, roff, rsize in self.code:
-            for m in pat.finditer(self.data, roff, roff + rsize):
-                hits.append(va + m.start() - roff)
-                if len(hits) > 1:
-                    return None
+            end = roff + rsize
+            at = self.data.find(lit, roff + lo, end)
+            while at >= 0:
+                start = at - lo
+                if start + len(body) <= end and all(self.data[start + a:start + b] == body[a:b] for a, b in runs):
+                    hits.append(va + start - roff)
+                    if len(hits) > 1:
+                        return None
+                at = self.data.find(lit, at + 1, end)
         return hits[0] if hits else None
 
     def read(self, va, n):
@@ -640,7 +768,7 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
     idx_of = collections.defaultdict(list)
     for i_, n_ in enumerate(unit_names):
         idx_of[n_].append(i_)
-    cand = [r for r in rows if r.cls in ('missing', 'special-default') and r.units]
+    cand = [r for r in rows if r.cls in ('missing', 'special-default', 'template-fold') and r.units]
     need = {i_ for r in cand for u_ in r.units.split(',') for i_ in idx_of.get(u_, ())}
     ext = {i_: pristine_externs(msvc_objs, i_) for i_ in need}
     ms.need({n_ for e_ in ext.values() for n_ in e_})
@@ -724,6 +852,90 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
     return out
 
 
+GDEL_SYM = '__fnvnx_bdgd_%08x'
+
+
+def vtt_name(name):
+    """_ZTT of the class of an Itanium D1/D2 name (its VTT: the class has virtual bases), None if not simply nested."""
+    m = re.match(r'^_ZN((?:\d+[A-Za-z_]\w*)+)D[12]Ev$', name)
+    if not m:
+        return None
+    parts = re.findall(r'(\d+)', m.group(1))
+    return '_ZTT' + (m.group(1) if len(parts) == 1 else 'N%sE' % m.group(1))
+
+
+def gdel_pass(rows, units, native, itanium, msvc, ms, known=()):
+    """`gdel`: a D1 (a D2 too when the class has no virtual bases: no _ZTT of it in known) still missing or about to
+    get `= default`, whose class has one scalar deleting destructor ??_G at an address the native build defines as a
+    member function (this, unsigned int flags): MSVC folded the destructor's body into ??_G, which is
+    `this->~C(); if (flags & 1) delete this; return this`. Bound to a stub that calls it with flags 0 (destroy, do
+    not free)."""
+    gaddr = collections.defaultdict(set)   # ??_G name -> addresses
+    names_at = collections.defaultdict(set)
+    for u in units.values():
+        for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
+            if a in native:
+                names_at[a].add(n)
+                if n.startswith('??_G'):
+                    gaddr[n].add(a)
+    ms.need(set(gaddr) | {n for ns in names_at.values() for n in ns if n.startswith('?')})
+    bycls = collections.defaultdict(set)
+    for n, a_ in gaddr.items():
+        m = re.search(r"(?:__thiscall )?(\S+)::`scalar deleting dtor'", ms[n] or '')
+        if m:
+            bycls[sigs.canon_type(m.group(1))] |= a_
+
+    def flags_member(a):
+        for n in names_at.get(a, ()):
+            if n.startswith('?') and not n.startswith('??_'):
+                d = msvc(n)
+                if d.kind == 'func' and d.member and d.params is not None and len(d.params) == 1 and \
+                        re.match(r'^(unsigned )?int$', d.params[0]):
+                    return n
+        return None
+    known = set(known)
+    out = []
+    for r in rows:
+        isg = itanium(r.name)
+        if r.cls not in ('missing', 'special-default') or isg.variant not in ('D1', 'D2'):
+            out.append(r)
+            continue
+        if isg.variant == 'D2' and (vtt_name(r.name) is None or vtt_name(r.name) in known):
+            out.append(r)
+            continue
+        cands = bycls.get('::'.join(isg.qual[:-1]), set())
+        a = next(iter(cands)) if len(cands) == 1 else None
+        fm = flags_member(a) if a is not None and native.get(a) == 'F' else None
+        if fm is None:
+            out.append(r)
+            continue
+        out.append(r._replace(cls='gdel', addr=a, target=GDEL_SYM % a, host=None,
+                              note='??_G at %08x (%s) with flags 0; was %s' % (a, fm, r.cls)))
+    return out
+
+
+def allms_itanium(out):
+    """The VTT names (_ZTT...) any unit references (refs.tsv): their classes have virtual bases."""
+    path = os.path.join(out, 'refs.tsv')
+    got = set()
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.split('\t', 2)
+            if len(f) > 1 and f[1].startswith('_ZTT'):
+                got.add(f[1])
+    return got
+
+
+def emit_gdel(addrs):
+    """AArch64 ILP32 stubs: w1 = 0 (flags: do not free), tail call of the ??_G's native definition."""
+    out = ['// GENERATED by tools/link/bodies.py: D1/D2 bound to the scalar deleting destructor with flags 0', '.text']
+    for a in sorted(addrs):
+        sym = GDEL_SYM % a
+        out += ['.globl %s' % sym, '.type %s, %%function' % sym, '.p2align 2', '%s:' % sym,
+                '    mov w1, #0', '    b %s' % (ADDR_SYM % a), '.size %s, .-%s' % (sym, sym)]
+    return '\n'.join(out) + '\n'
+
+
 def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synth=True, exe_path=None):
     import fnvlink
     units_json = units_json or os.path.join(tree, 'build', 'units.json')
@@ -765,6 +977,9 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
 
     if msvc_objs and exe_path:
         rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms)
+    if synth:   # its stubs are emitted with the synthesized objects
+        rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
+        rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
 
     synth_rows, failed, vnotes = [], {}, {}
     if synth:
@@ -837,6 +1052,25 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 rows = [r._replace(cls='vcall', target=vtargets[r.name][0],
                                    note='slot byte %d, this +%d' % vtargets[r.name][1:]) if r.name in vtargets
                         else r for r in rows]
+        gd = [r for r in rows if r.cls == 'gdel']
+        if gd:
+            s_path, o_path = os.path.join(bdir, 'gdel.S'), os.path.join(bdir, 'zz_bd_gdel.o')
+            open(s_path, 'w').write(emit_gdel({r.addr for r in gd}))
+            as_ = os.environ.get('AS', 'aarch64-linux-gnu-as')
+            if subprocess.run([as_, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True).returncode == 0:
+                synth_rows.append((sorted(gd[0].units.split(','))[0] if gd[0].units else unit_names[0], o_path, len(gd)))
+            else:
+                failed.update({r.name: 'synth-failed (as)' for r in gd})
+        crt = [r for r in rows if r.cls == 'crt-rule']
+        if crt:
+            s_path, o_path = os.path.join(bdir, 'crt.S'), os.path.join(bdir, 'zz_bd_crt.o')
+            open(s_path, 'w', encoding='utf-8', errors='surrogateescape').write(emit_crt(crt, itanium))
+            as_ = os.environ.get('AS', 'aarch64-linux-gnu-as')
+            if subprocess.run([as_, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True).returncode == 0:
+                synth_rows.append((sorted(crt[0].units.split(','))[0] if crt[0].units else unit_names[0],
+                                   o_path, len(crt)))
+            else:
+                failed.update({r.name: 'synth-failed (as)' for r in crt})
         empty = [r for r in rows if r.cls == 'msvc-empty']
         if empty:
             s_path, o_path = os.path.join(bdir, 'empty.S'), os.path.join(bdir, 'zz_bd_empty.o')
@@ -860,7 +1094,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     with open(os.path.join(bdir, 'bind.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\tclass\ttarget\n')
         for r in rows:
-            if r.cls in ('addr', 'exe-addr', 'vcall'):
+            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel', 'template-fold'):
                 f.write('%s\t%s\t%s\n' % (r.name, r.cls, r.target))
     with open(os.path.join(bdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#host_unit\tobject\tnames\n')
@@ -870,7 +1104,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'exe-addr', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default', 'missing')]
+              for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default',
+                        'crt-rule', 'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))

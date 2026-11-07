@@ -1855,7 +1855,7 @@ class Link(Stage):
                 r.note('bodies exited %d; resolve 2 uses what it left' % brc)
             elif os.path.exists(bst):
                 for line in open(bst):
-                    mm = re.match(r'(addr|exe-addr|vcall|msvc-empty|msvc-inline|special-default|missing)\s+(\d+)', line)
+                    mm = re.match(r'(addr|exe-addr|gdel|vcall|msvc-empty|msvc-inline|special-default|missing)\s+(\d+)', line)
                     if mm:
                         r.metric('link_bodies_' + mm.group(1).replace('-', '_'), int(mm.group(2)))
         # ---- end S2d
