@@ -86,6 +86,14 @@ def _old_bool_repr(rec):
     return (rec.get('hint') or {}).get('cause') == 'bool-repr'
 
 
+def _old_signedness(rec):
+    return (rec.get('hint') or {}).get('cause') == 'signedness'
+
+
+def _interlocked_slow(f):
+    return 'fnvnx_interlocked_slow' in f.nrefs
+
+
 def _indirect(f):
     return f.oindirect
 
@@ -122,8 +130,14 @@ CHANGES = [
            'oracle reads exactly that byte with a 1-byte access (a byte of a planted pointer or integer that removes '
            'the divergence when set to 1 is not a bool); the record gets the cause of the next probe',
            recheck=_old_bool_repr),
+    Change('d20-sign', 'cached divergences classified signedness: the probe now clears the top bit of an input byte '
+           'in memory only when the oracle read it as the top byte of a 1- or 2-byte access (char/short widening), '
+           'not a byte of a word it read whole', recheck=_old_signedness),
+    Change('d20-ilk', 'functions whose native code calls fnvnx_interlocked_slow (the misaligned path of the shim\'s '
+           'inline Interlocked*, sync.cpp): it runs as the Interlocked function it performs, not as a traced call '
+           '(the oracle\'s lock-prefixed instruction is none)', selects=_interlocked_slow),
 ]
-SCOPED = 'd19'
+SCOPED = 'd20'
 
 
 def harness_tag():
