@@ -14,6 +14,8 @@ checks is the plan. A path no class names selects everything (unknown means unsa
   programs the shader-program sweep (sweep_job.sh's perm.py part), when the translator changed
   frames   the per-thread CPU and frame-pacing lane (frames_job.sh): the profiler's tests, then this head's guest under
            linhost --profile, frames cut at the D3D9 Present (after build, on its build directory)
+  scenario S18's scenario bench (scenario_job.sh): D25's 12 targets on scripted scenarios, on this head's guest
+           (after build, on its build directory; the original's runs are cached)
   threads  D25 #7's report lane (threads_job.sh): the race checker's and the watchdog's tests, then this head's
            guest relinked with the watchdog and run under qemu-aarch64 (after build, on its build directory)
 The caches make each selected check cost what changed; the plan only skips checks that nothing can affect.
@@ -28,13 +30,14 @@ cells.tsv lines when the index holds them, else (id) alone.
 """
 import argparse, json, os, re, subprocess, sys
 
-ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames')
+ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames', 'scenario')
 # (regex on the path relative to ports/fnv-nx/, checks); first match wins
 CLASSES = [
     (r'^(docs/|journal/|JOURNAL\.md$|README\.md$|reports/)', ()),
     (r'^tools/farm/(quick_plan\.py|README\.md)$', ()),
     (r'^tests/s6n/', ('replay', 'build')),            # nx_render's build
-    (r'^tests/s5/', ('build',)),                      # the boot scripts
+    (r'^tests/s5/', ('build', 'scenario')),          # the boot scripts (the scenario guest side runs on them)
+    (r'^tests/s18/', ()),                             # the bench's own tests (V1, the stream)
     (r'^tests/s15/mtqemu/', ('threads', 'frames')),  # the race checker, linhost (the profiler), boot_game.sh
     (r'^tests/s15/(test_mtqemu|test_threads_report)\.py$', ('threads',)),
     (r'^tests/s15/test_frames\.py$', ('frames',)),
@@ -50,6 +53,8 @@ CLASSES = [
     (r'^tools/farm/(equiv_job)', ('equiv',)),
     (r'^tools/farm/(fuzz_job)', ('fuzz', 'audit')),
     (r'^tools/farm/(audit_job)', ('audit',)),
+    (r'^tools/farm/scenario_job', ('scenario',)),
+    (r'^tools/scenario/', ('scenario',)),
     (r'^tools/farm/threads_job', ('threads',)),
     (r'^tools/farm/frames_job', ('frames',)),
     (r'^tools/threads/report\.py$', ('threads', 'frames')),   # frames.py imports its Symbols
