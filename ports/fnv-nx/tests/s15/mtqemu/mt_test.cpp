@@ -38,6 +38,8 @@
  *   wg-deadlock     thread A holds a section and waits on a mutex B holds while B enters A's section: one cycle
  *                   (A's mutex wait times out after 3 s and both finish)
  *   wg-hang         a thread waits on an event for 1.2 s with a 0.5 s limit: one long wait
+ *   feed            polls the host's input_poll for up to 1.5 s (until 2 events): with linhost --feed
+ *                   (tests/s15/test_linfeed.py) the scripted key arrives as FNVNX_EV_KEY down/up; without, none
  *   frames          a frame loop for the profiler (tests/s15/test_frames.py runs linhost --profile --frame
  *                   mtq_frame_mark): 30 frames; main does 1 unit of work and waits, a worker does 2 units a frame,
  *                   so the worker is the critical path; mtq_frame_mark (nop; ret) closes each frame */
@@ -531,9 +533,28 @@ static void t_frames(void)
     result("frames", true, "31 marks (30 frames)");
 }
 
+/* ---- feed */
+static void t_feed(void)
+{
+    FnvnxInputEvent ev[16];
+    unsigned n = 0, first = 0, downs = 0;
+    uint64_t t0 = mtq_ticks_ns();
+    while (n < 2 && mtq_ticks_ns() - t0 < 1500000000ull) {
+        uint64_t k = fnvnx_hcall2(fnvnx_host->input_poll, (uint64_t)(uintptr_t)ev, 16);
+        for (uint64_t i = 0; i < k; i++) {
+            if (ev[i].type == FNVNX_EV_KEY) { if (!n++) first = ev[i].code; downs += ev[i].a != 0; }
+        }
+        Sleep(10);
+    }
+    char d[96];
+    snprintf(d, sizeof d, "keys %u downs %u first usage %u", n, downs, first);
+    result("feed", true, d);
+}
+
 extern "C" int mtq_main(void)
 {
     printf("mtq: guest up, %u cores reported\n", (unsigned)fnvnx_hcall0(fnvnx_host->cpu_count));
+    t_feed();
     t_parallel();
     t_cs();
     t_stages();

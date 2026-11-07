@@ -14,6 +14,7 @@ HBINK BinkOpen(const char *name, unsigned flags)
 {
     (void)name;
     (void)flags;
+    FNVNX_UNIMPL();   /* no movie player: every Bink movie is skipped (the platform lane, platstat.cpp) */
     SetLastError(ERROR_FILE_NOT_FOUND);
     return NULL;
 }
