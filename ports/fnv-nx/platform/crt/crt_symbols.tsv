@@ -145,7 +145,7 @@
 0x00ec89e9	crt	isalnum	n	1	1	libc: isalnum
 0x00ec8a19	crt	strncmp	n	11	17	libc: strncmp
 0x00ec8d08	crt	strtol	n	3	5	libc: strtol
-0x00ec8d33	crt	_itoa	i	2	3	platform/crt: _itoa
+0x00ec8d33	crt	strtoul	i	2	3	libc: strtoul
 0x00ec8d5f	crt	strncpy_s	n	13	25	platform/crt: strncpy_s
 0x00ec8feb	crt	_strlwr_s	n	2	2	platform/crt: _strlwr_s
 0x00ec9010	crt	atan	n	2	9	libc: atan
