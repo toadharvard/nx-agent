@@ -5,18 +5,19 @@
 #   tools/farm/fetch_objs.sh <commit> <N> <obj dir> [prepared tree]
 #
 # With a prepared tree, its tree_hash.sh must equal every shard's meta.json tree_hash (the same tree), otherwise the
-# script fails. $ARTIFACTS: a clone of toadharvard/fnv-nx-build (default /home/user/fnv-nx-build).
+# script fails. $ARTIFACTS: a clone of toadharvard/fnv-nx-build (default /home/user/fnv-nx-build). OBJ_PREFIX=cr: the
+# RACE=1 objects (compile_job.sh RACE=1, branches cr/<commit12>/<k>of<N>); default c.
 set -euo pipefail
 COMMIT=${1:?commit}; N=${2:?N}; OUT=$(mkdir -p "${3:?obj dir}" && cd "$3" && pwd); TREE=${4:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ARTIFACTS=${ARTIFACTS:-/home/user/fnv-nx-build}
-C12=${COMMIT:0:12}
+C12=${COMMIT:0:12}; PFX=${OBJ_PREFIX:-c}
 [ -d "$ARTIFACTS/.git" ] || git clone -q https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"
 want=""; [ -n "$TREE" ] && want=$(bash "$HERE/tree_hash.sh" "$TREE")
 : > "$OUT/objects.tsv"
 for k in $(seq 1 "$N"); do
-  tag="refs/remotes/origin/c/$C12/${k}of${N}"
-  git -C "$ARTIFACTS" fetch -q origin "+refs/heads/c/$C12/${k}of${N}:$tag" || { echo "missing c/$C12/${k}of${N}" >&2; exit 1; }
+  tag="refs/remotes/origin/$PFX/$C12/${k}of${N}"
+  git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$PFX/$C12/${k}of${N}:$tag" || { echo "missing $PFX/$C12/${k}of${N}" >&2; exit 1; }
   meta=$(git -C "$ARTIFACTS" show "$tag:meta.json")
   got=$(python3 -c 'import json,sys; m=json.loads(sys.argv[1]); print(m["commit"], m["tree_hash"])' "$meta")
   [ "${got%% *}" = "$COMMIT" ] || { echo "$tag: commit ${got%% *} != $COMMIT" >&2; exit 1; }

@@ -202,6 +202,20 @@ agents queue the next item instead of waiting, and verify their own change with 
   only when it matches and is not slower.
 - Link/boot/runtime: whole classes (all .inl bodies, all short vtables, all services of a DLL), not trap by trap.
 
+### D26. One virtual-slot order: minus-one everywhere (orchestrator, 2026-11-07, from S5-boot s5-003)
+
+Natively every polymorphic object is dispatched in one order, D22's minus-one layout (D1/D0 at slots 0/1, exe slot k
+at k+1). S5 measured that the boot gets worse when only one of the three paths is converted: 4,275 -> 1 skipped
+initializers with a bridge, 1 -> 3,461 with only the image vftables converted. So the three land together in one
+integration merge, and none of them is merged alone:
+(a) D22 for paired classes (S1-rules);
+(b) a `virtual ~X()` for the slot-0 placeholder of every call-only declaration. `tests/s5/callonly_vt.py` lists
+11,947 of them in 1,826 files (S1-rules);
+(c) a minus-one native vtable for every hand-stored image vftable, hand_vptrs 'image', 785 referenced (S2-bodies,
+tools/link).
+Until then S5's standins.c bridge stays. The acceptance test is S5's stub boot: skipped initializers do not go up,
+and fuzz hard does not go up.
+
 ### D25. The zero targets that make the game work (owner, 2026-11-07)
 
 On top of D24, each measured on scripted scenarios in emulation (boot -> menu -> new game -> cell -> save/load):
@@ -238,6 +252,10 @@ then S15); 9. save/load round-trip differences (S18-scenarios); 10. game-script 
   reasonable effort, fuzz-equivalence against the x86 oracle (tools/difffuzz, every seed and the probes clean, no
   hard or soft divergence) - recorded as `"accept": "fuzz"` in recon.json with the fuzz record. (b) is never used
   for a function whose byte match only fails on a known rule class; that class is fixed instead.
+  (c) a body with no out-of-line exe copy (the exe only has it inlined) is written from the inlined code and
+  recorded as `"accept": "inline"` with the exe call sites it was read from. It closes the trap. It is confirmed when
+  fuzz of the containing exe functions shows no new hard divergence; a divergence reopens it as a D24 false
+  interpretation (orchestrator, from R6).
 - S2-bodies owns the list (tools/link/bodycause.py on the newest link) and every non-recon trap class.
 
 ### D22. Virtual destructor slots against MSVC vftables (orchestrator)

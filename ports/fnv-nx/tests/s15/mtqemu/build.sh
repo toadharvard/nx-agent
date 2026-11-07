@@ -23,7 +23,7 @@ objs=()
 cc() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CC -std=gnu11 "${G[@]}" "$@" -c "$shift_src" -o "$o"; objs+=("$o"); }
 cxx() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CXX "${GXX[@]}" "${G[@]}" "$@" -c "$shift_src" -o "$o"; objs+=("$o"); }
 
-for f in sync thread handles; do cxx "$ROOT/platform/win32/$f.cpp"; done
+for f in sync thread handles waitgraph; do cxx "$ROOT/platform/win32/$f.cpp"; done
 cxx "$HERE/w32_std_stub.cpp" -I"$ROOT/platform/win32"   # w32_is_std_handle (crt_kernel32.cpp), for handles.cpp
 cc "$ROOT/toolchain/guest/os_guest.c"
 cc "$ROOT/toolchain/guest/threads.c" -Wno-missing-field-initializers

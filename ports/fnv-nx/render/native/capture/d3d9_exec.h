@@ -16,6 +16,7 @@ struct NxD9Stats {
     uint32_t nativeDraws;       // draws (executed or skipped after the shader lookup) whose VS and PS are both native, or
                                 // executed with a d9 family (d3d9_families.h, nx_d3d9_set_families)
     uint32_t familyDraws[8];    // executed draws by NxD9Family (0 = not a d9 family)
+    uint32_t flushes;           // mid-frame submits (a frame over the arena or the command buffer, Reserve)
 };
 
 // Hand-written d9 families (d3d9_families.h): bit f enables NxD9Family f (default: none - every program translated,

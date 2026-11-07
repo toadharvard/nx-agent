@@ -1,7 +1,8 @@
 """bodycause.py - why a `missing` name of bodies.py has no body (stream S2-bodies; docs/LINK.md, "Declared-only
 functions").
 
-    python3 -I tools/link/bodycause.py OUT TREE OBJDIR [--traps TRAPS.txt] [-o OUT/bodies/causes.tsv]
+    python3 -I tools/link/bodycause.py OUT TREE OBJDIR [--traps TRAPS.txt] [--closed NAMES ...] [--counts NOTE.md]
+                                       [-o OUT/bodies/causes.tsv]
 
 OUT is a link's out/ (reads out/bodies/bodies.tsv), TREE the prepared tree it was linked from (build/units.json,
 src/, include/), OBJDIR the linked objects (`fixed/*.o` of a link publish: every definition the link had). TRAPS is
@@ -25,11 +26,28 @@ Every `missing` row gets exactly one cause, first that applies:
    objects call it out of line, so the original had it out of line too, at an exe address no placed caller
    reaches), `exe-shape` (the exe calls an address whose definition has another shape), `other`.
 
-Output: causes.tsv (name, demangled, cause, detail, evidence, trap, units), and a summary on stdout. Derived from
+With --traps, trap stubs bodies.py never classifies are listed too, from out/refs.tsv: `extern-text` (an exe
+address the native build references but no unit compiles), `thunk` (a this-adjusting thunk of a function defined
+nowhere), `runtime` / `import` / other refs classes as they are. --closed: files of names (one per line, or a JSON
+list) that rules not yet in this link close (measured offline); they are left out.
+
+`code-defmissing` (`__fnv_<addr>` stubs: callers bound to an address units.json places whose unit emits no
+body; home = the placing unit), `platform` (TLS / runtime data names). `fun-addr`: an unresolved C placeholder named after an exe address (`FUN_<addr>`). Every row gets an owner
+(D23): `recon` (no-body, extern-text, fun-addr: the fleet reconstructs them against the exe) or
+`s2-bodies` (every other class), and a shard: sha1(unit) mod 10 of the unit the body belongs in (extern-text: the
+unit units.json places the address in, else the unit of the placed function before it; otherwise the first
+referencing unit). --counts writes a note with the
+counts per cause, owner and shard, so each recon worker checks its share.
+
+Output: causes.tsv (name, demangled, cause, detail, evidence, trap, units, owner, shard, home unit), and a summary
+on stdout. Derived from
 the decomp: it stays in the container or the private repository, never in nx-agent.
 """
 import argparse
+import bisect
 import collections
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -243,51 +261,150 @@ def classify(rows, objidx, tbodies, units):
     return out
 
 
+def shard_of(unit):
+    return int(hashlib.sha1(unit.encode('utf-8', 'surrogateescape')).hexdigest(), 16) % 10 if unit else ''
+
+
+def load_closed(paths):
+    names = set()
+    for p in paths or ():
+        text = open(p, encoding='utf-8', errors='surrogateescape').read()
+        if text.lstrip().startswith('['):
+            names |= set(json.loads(text))
+        elif text.lstrip().startswith('{'):
+            names |= set(json.loads(text))
+        else:
+            names |= {l.split('\t')[0].strip() for l in text.splitlines() if l.strip() and not l.startswith('#')}
+    return names
+
+
+def other_traps(out, traps, have, tree):
+    """Trap names bodies.py never classified: their refs.tsv class (first row), the address, the unit placing it."""
+    place = {}
+    uj = os.path.join(tree, 'build', 'units.json')
+    if os.path.exists(uj):
+        for u in json.load(open(uj))['units']:
+            for f in u.get('functions', ()):
+                place.setdefault(int(f['address'], 16), u['source'])
+    starts = sorted(place)
+    rows, seen = [], set()
+    refs = os.path.join(out, 'refs.tsv')
+    want = traps - have
+    if os.path.exists(refs):
+        with open(refs, encoding='utf-8', errors='surrogateescape') as fh:
+            for line in fh:
+                f = line.rstrip('\n').split('\t')
+                if len(f) < 5 or f[1] not in want or f[1] in seen:
+                    continue
+                seen.add(f[1])
+                cls = f[2]
+                cause = ('extern-text' if cls == 'extern-text' else
+                         'thunk' if cls.startswith('special-unresolved') and 'thunk' in cls else cls)
+                a = int(f[4], 16) if f[4] else None
+                m = re.match(r'^(?:FUN|sub|thunk_FUN)_([0-9a-fA-F]{8})$', f[1])
+                if a is None and m and cls == 'unresolved':   # a decomp placeholder named after its exe address
+                    a, cause = int(m.group(1), 16), 'fun-addr'
+                home = ''
+                if a is not None:   # not placed by any unit: the unit of the placed function before it
+                    j = bisect.bisect_right(starts, a) - 1
+                    home = place.get(a) or (place[starts[j]] if j >= 0 else '')
+                rows.append({'name': f[1], 'units': f[0].split('#')[0], 'cause': cause,
+                             'detail': cls + (' %s' % f[3] if len(f) > 3 and f[3] else ''),
+                             'evidence': '%08x' % a if a is not None else '', 'home': home})
+    for n in sorted(want - seen):
+        m = re.match(r'^__fnv_([0-9a-f]{8})$', n)
+        if m:   # callers bound to the address (code-defmissing): the placing unit emits no body there
+            a = int(m.group(1), 16)
+            rows.append({'name': n, 'units': '', 'cause': 'code-defmissing', 'detail': 'placed by units.json, '
+                         'no native body at the address', 'evidence': m.group(1), 'home': place.get(a, '')})
+            continue
+        rows.append({'name': n, 'units': '', 'cause': 'platform' if n.startswith(('__fnvnx_', 'g_fake_')) else
+                     'unreferenced', 'detail': 'no refs.tsv row (platform TLS / runtime data)', 'evidence': '',
+                     'home': ''})
+    for r, d in zip(rows, demangle([r['name'] for r in rows])):
+        r['dem'] = d
+    return rows
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('out')
     ap.add_argument('tree')
     ap.add_argument('objdir')
     ap.add_argument('--traps')
+    ap.add_argument('--closed', nargs='*')
+    ap.add_argument('--counts')
     ap.add_argument('-o', '--output')
     a = ap.parse_args(argv)
+    closed = load_closed(a.closed)
     rows = []
-    for line in open(os.path.join(a.out, 'bodies', 'bodies.tsv'), encoding='utf-8', errors='surrogateescape'):
-        if line.startswith('#'):
-            continue
-        f = line.rstrip('\n').split('\t') + [''] * 7
-        if f[1] == 'missing':
-            rows.append({'name': f[0], 'units': f[4], 'note': f[5]})
+    with open(os.path.join(a.out, 'bodies', 'bodies.tsv'), encoding='utf-8', errors='surrogateescape') as fh:
+        for line in fh:
+            if line.startswith('#'):
+                continue
+            f = line.rstrip('\n').split('\t') + [''] * 7
+            if f[1] == 'missing':
+                rows.append({'name': f[0], 'units': f[4], 'note': f[5]})
     for r, d in zip(rows, demangle([r['name'] for r in rows])):
         r['dem'] = d
         r['sig'] = sigs.parse_itanium(r['name'], d) if r['name'].startswith('_Z') else None
     traps = set()
     if a.traps:
-        traps = {l.strip() for l in open(a.traps, encoding='utf-8', errors='surrogateescape') if l.strip()}
+        with open(a.traps, encoding='utf-8', errors='surrogateescape') as fh:
+            traps = {l.strip() for l in fh if l.strip()}
     units = set()
     uj = os.path.join(a.tree, 'build', 'units.json')
     if os.path.exists(uj):
-        import json
-        units = {u['source'] for u in json.load(open(uj))['units']}
+        with open(uj) as fh:
+            units = {u['source'] for u in json.load(fh)['units']}
     wanted = {(k[0], k[1]) for k in (key_of(r['sig']) for r in rows) if k and k[0]}
     objidx = object_defs(a.objdir)
     tbodies = tree_bodies(a.tree, wanted)
     res = classify(rows, objidx, tbodies, units)
+    for r in res:
+        r['home'] = sorted(r['units'].split(','))[0] if r['units'] else ''
+    if traps:
+        res += other_traps(a.out, traps, {r['name'] for r in res}, a.tree)
+    res = [r for r in res if r['name'] not in closed]
+    for r in res:
+        r['owner'] = 'recon' if r['cause'] in ('no-body', 'extern-text', 'fun-addr', 'code-defmissing') else 's2-bodies'
+        r['shard'] = shard_of(r['home'])
     dst = a.output or os.path.join(a.out, 'bodies', 'causes.tsv')
     with open(dst, 'w', encoding='utf-8', errors='surrogateescape') as fh:
-        fh.write('#name\tdemangled\tcause\tdetail\tevidence\ttrap\tunits\n')
+        fh.write('#name\tdemangled\tcause\tdetail\tevidence\ttrap\tunits\towner\tshard\thome unit\n')
         for r in res:
             fh.write('\t'.join([r['name'], r['dem'], r['cause'], r['detail'], r['evidence'],
-                                '1' if r['name'] in traps else ('0' if traps else ''), r['units']]) + '\n')
-    tot = collections.Counter((r['cause'], r['detail']) for r in res)
-    trp = collections.Counter((r['cause'], r['detail']) for r in res if r['name'] in traps)
-    print('missing: %d (trap stubs %s)' % (len(res), sum(trp.values()) if traps else '-'))
-    for c in CAUSES:
+                                '1' if r['name'] in traps else ('0' if traps else ''), r['units'], r['owner'],
+                                str(r['shard']), r['home']]) + '\n')
+    tot = collections.Counter((r['cause'], r['detail'] if r['cause'] in CAUSES else '') for r in res)
+    trp = collections.Counter((r['cause'], r['detail'] if r['cause'] in CAUSES else '') for r in res
+                              if r['name'] in traps)
+    lines = ['names: %d (trap stubs %s); closed offline and left out: %d' % (
+        len(res), sum(trp.values()) if traps else '-', len(closed))]
+    for c in sorted({k for k, _ in tot}, key=lambda c: (c not in CAUSES, CAUSES.index(c) if c in CAUSES else 0, c)):
         n = sum(v for (k, _), v in tot.items() if k == c)
-        print('%-14s %5d  trap %5s' % (c, n, sum(v for (k, _), v in trp.items() if k == c) if traps else '-'))
+        lines.append('%-14s %5d  trap %5s' % (c, n, sum(v for (k, _), v in trp.items() if k == c) if traps else '-'))
         for (k, d), v in sorted(tot.items(), key=lambda x: -x[1]):
-            if k == c:
-                print('  %-60s %5d  trap %5s' % (d, v, trp.get((k, d), 0) if traps else '-'))
+            if k == c and d:
+                lines.append('  %-60s %5d  trap %5s' % (d, v, trp.get((k, d), 0) if traps else '-'))
+    print('\n'.join(lines))
+    if a.counts:
+        own = collections.Counter(r['owner'] for r in res if not traps or r['name'] in traps)
+        sh = collections.Counter((r['shard'], r['cause']) for r in res if r['owner'] == 'recon'
+                                 and (not traps or r['name'] in traps))
+        with open(a.counts, 'w') as fh:
+            fh.write('# Trap-stub list counts\n\n```\n%s\n```\n\n' % '\n'.join(lines))
+            fh.write('| owner | trap stubs |\n|---|---|\n')
+            for k, v in sorted(own.items()):
+                fh.write('| %s | %d |\n' % (k, v))
+            fh.write('\n| recon shard (sha1(home unit) mod 10) | no-body | extern-text + fun-addr + code-defmissing | total |\n|---|---|---|---|\n')
+            for k in range(10):
+                nb = sh.get((k, 'no-body'), 0)
+                et = sh.get((k, 'extern-text'), 0) + sh.get((k, 'fun-addr'), 0) + sh.get((k, 'code-defmissing'), 0)
+                fh.write('| R%d (shard %d) | %d | %d | %d |\n' % (k + 1, k, nb, et, nb + et))
+            nh = sum(v for (k, _), v in sh.items() if k == '')
+            if nh:
+                fh.write('| no home unit | %d | | |\n' % nh)
     print('wrote', dst)
 
 

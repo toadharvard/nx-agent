@@ -110,6 +110,47 @@ class EquivCache(unittest.TestCase):
         self.eq._CACHES.clear()
         self.build(t1); self.assertEqual(self.runs(), 4)
 
+    def test_variant_keeps_head_entry(self):
+        # attribute's leave-out builds have the head build's command line; they must not replace its manifest
+        t1 = self.tree('tree1', {'src/a.cpp': '#include "h.h"\n', 'include/h.h': 'int h;\n'})
+        self.build(t1); self.assertEqual(self.runs(), 1)
+        (t1 / 'include/h.h').write_text('int h_without_rule;\n')
+        self.build(t1, variant='leave-out:EXC1'); self.assertEqual(self.runs(), 2)
+        (t1 / 'include/h.h').write_text('int h;\n')
+        self.build(t1); self.assertEqual(self.runs(), 2)                 # the head entry is still there
+        (t1 / 'include/h.h').write_text('int h_without_rule;\n')
+        self.build(t1, variant='leave-out:EXC1'); self.assertEqual(self.runs(), 2)
+
+    def test_worker_trees_bounded_and_restored(self):
+        import gzip, threading
+        from concurrent.futures import ThreadPoolExecutor
+        base = self.tree('base', {'src/a.cpp': 'int a;\n', 'include/h.h': 'int h;\n'})
+        work = self.t / 'work'; work.mkdir()
+        alt = work / 'h.h.gz'
+        with gzip.open(alt, 'wt') as f:
+            f.write('int h_variant;\n')
+        trees = self.eq.WorkerTrees(base, work)
+        seen = []
+
+        def job(i):
+            mine, tree = trees.slot()
+            with trees.swapped(tree, {'include/h.h': alt}):
+                seen.append((tree / 'include/h.h').read_text())
+                self.assertEqual((base / 'include/h.h').read_text(), 'int h;\n')   # never written through
+            self.assertEqual(os.stat(tree / 'include/h.h').st_ino, os.stat(base / 'include/h.h').st_ino)
+            return str(tree)
+        with ThreadPoolExecutor(3) as pool:
+            used = set(pool.map(job, range(40)))
+        self.assertLessEqual(len(used), 3)
+        self.assertEqual(len(list(work.glob('w*'))), len(used))
+        self.assertEqual(set(seen), {'int h_variant;\n'})
+        # a failure inside the swap still links the original back
+        mine, tree = trees.slot()
+        with self.assertRaises(RuntimeError):
+            with trees.swapped(tree, {'include/h.h': alt}):
+                raise RuntimeError
+        self.assertEqual((tree / 'include/h.h').read_text(), 'int h;\n')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,416 @@
+{
+ "format": "fnvnx-scenarios/1",
+ "comment": "S18's scripted scenarios (D25). Each runs on the original under Wine (tools/scenario/wine_scenario.sh, the sweep's wine_ref.sh prefix and ini) and on the guest in the emulator (tools/scenario/emu_scenario.py over tests/s5/emu_guest.py), with the same input: keys named as xdotool names them (tools/scenario/keys.py), console lines typed key by key. scenario.py compile expands the macros (console, save, load, quest, state) to four primitive steps both drivers run: press, wait, until, mark. 'until' gates on a boot milestone (guest; the Wine side waits wine_s seconds instead) or on a file appearing (both sides). Cell and quest editor ids are checked against FalloutNV.esm by scenario.py validate before a farm run; quests are named by their in-game title and resolved to the editor id and the stage list from the ESM, so nothing here depends on a guessed id.",
+ "plugins": [
+  "FalloutNV.esm"
+ ],
+ "defaults": {
+  "menu_timeout": 3600,
+  "menu_wine_s": 150,
+  "cell_timeout": 3600,
+  "cell_wine_s": 60,
+  "save_timeout": 1200,
+  "key_gap": 0.25,
+  "console_log": "user\\s18_console.txt"
+ },
+ "state": [
+  "player.getpos x",
+  "player.getpos y",
+  "player.getpos z",
+  "show gamehour",
+  "player.getincell {cell}"
+ ],
+ "scenarios": [
+  {
+   "id": "boot-menu",
+   "title": "boot to the main menu",
+   "steps": [
+    {
+     "do": "until",
+     "milestone": "main-menu",
+     "timeout": "menu_timeout",
+     "wine_s": "menu_wine_s"
+    },
+    {
+     "do": "wait",
+     "s": 10
+    },
+    {
+     "do": "mark",
+     "name": "main-menu"
+    },
+    {
+     "do": "console",
+     "lines": [
+      "scof {console_log}"
+     ]
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "mark",
+     "name": "console-open"
+    }
+   ]
+  },
+  {
+   "id": "newgame",
+   "title": "new game through character creation to Goodsprings",
+   "steps": [
+    {
+     "do": "until",
+     "milestone": "main-menu",
+     "timeout": "menu_timeout",
+     "wine_s": "menu_wine_s"
+    },
+    {
+     "do": "wait",
+     "s": 10
+    },
+    {
+     "do": "mark",
+     "name": "main-menu"
+    },
+    {
+     "do": "press",
+     "keys": [
+      "Down",
+      "Return"
+     ],
+     "gap": 1.0,
+     "comment": "no saves: New is the first entry"
+    },
+    {
+     "do": "wait",
+     "s": 10
+    },
+    {
+     "do": "press",
+     "keys": [
+      "Escape"
+     ],
+     "comment": "skip the intro movie if one plays"
+    },
+    {
+     "do": "until",
+     "milestone": "first-cell",
+     "timeout": "cell_timeout",
+     "wine_s": 120
+    },
+    {
+     "do": "wait",
+     "s": 20
+    },
+    {
+     "do": "mark",
+     "name": "doc-mitchell"
+    },
+    {
+     "do": "console",
+     "lines": [
+      "scof {console_log}",
+      "tgm"
+     ]
+    },
+    {
+     "do": "comment",
+     "text": "character creation: the game's own menus, opened the way the intro opens them"
+    },
+    {
+     "do": "console",
+     "lines": [
+      "showracemenu"
+     ]
+    },
+    {
+     "do": "wait",
+     "s": 10
+    },
+    {
+     "do": "press",
+     "keys": [
+      "Return"
+     ],
+     "gap": 1.0,
+     "repeat": 3
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "console",
+     "lines": [
+      "shownamemenu"
+     ]
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "type",
+     "text": "Courier"
+    },
+    {
+     "do": "press",
+     "keys": [
+      "Return"
+     ]
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "console",
+     "lines": [
+      "showspecialbookmenu"
+     ]
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "press",
+     "keys": [
+      "Return"
+     ],
+     "gap": 1.0,
+     "repeat": 3
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "console",
+     "lines": [
+      "showtagskillsmenu"
+     ]
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "press",
+     "keys": [
+      "Return"
+     ],
+     "gap": 1.0,
+     "repeat": 3
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "mark",
+     "name": "character-created"
+    },
+    {
+     "do": "state",
+     "cell": "GSDocMitchellHouse"
+    },
+    {
+     "do": "console",
+     "lines": [
+      "coc Goodsprings"
+     ],
+     "cell": "Goodsprings"
+    },
+    {
+     "do": "wait",
+     "s": "cell_wine_s"
+    },
+    {
+     "do": "mark",
+     "name": "goodsprings"
+    },
+    {
+     "do": "state",
+     "cell": "Goodsprings"
+    }
+   ]
+  },
+  {
+   "id": "cells",
+   "title": "coc into a set of cells",
+   "steps": [
+    {
+     "do": "until",
+     "milestone": "main-menu",
+     "timeout": "menu_timeout",
+     "wine_s": "menu_wine_s"
+    },
+    {
+     "do": "wait",
+     "s": 10
+    },
+    {
+     "do": "console",
+     "lines": [
+      "scof {console_log}"
+     ]
+    },
+    {
+     "do": "cells",
+     "cells": [
+      "GSDocMitchellHouse",
+      "GSProspectorSaloonInterior",
+      "Goodsprings",
+      "QuarryJunction"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "saveload",
+   "title": "save, leave the world, load, save again (round trip)",
+   "steps": [
+    {
+     "do": "until",
+     "milestone": "main-menu",
+     "timeout": "menu_timeout",
+     "wine_s": "menu_wine_s"
+    },
+    {
+     "do": "wait",
+     "s": 10
+    },
+    {
+     "do": "console",
+     "lines": [
+      "scof {console_log}"
+     ]
+    },
+    {
+     "do": "console",
+     "lines": [
+      "coc GSProspectorSaloonInterior"
+     ],
+     "cell": "GSProspectorSaloonInterior"
+    },
+    {
+     "do": "wait",
+     "s": "cell_wine_s"
+    },
+    {
+     "do": "console",
+     "lines": [
+      "tai",
+      "tcai",
+      "set timescale to 0"
+     ]
+    },
+    {
+     "do": "mark",
+     "name": "in-cell"
+    },
+    {
+     "do": "save",
+     "name": "s18_rt_a"
+    },
+    {
+     "do": "mark",
+     "name": "saved-a"
+    },
+    {
+     "do": "comment",
+     "text": "load from inside the game: the world is torn down to the menu state and rebuilt from the file"
+    },
+    {
+     "do": "load",
+     "name": "s18_rt_a"
+    },
+    {
+     "do": "wait",
+     "s": "cell_wine_s"
+    },
+    {
+     "do": "mark",
+     "name": "loaded-a"
+    },
+    {
+     "do": "console",
+     "lines": [
+      "tai",
+      "tcai",
+      "set timescale to 0"
+     ]
+    },
+    {
+     "do": "save",
+     "name": "s18_rt_b"
+    },
+    {
+     "do": "mark",
+     "name": "saved-b"
+    },
+    {
+     "do": "state",
+     "cell": "GSProspectorSaloonInterior"
+    }
+   ],
+   "roundtrip": [
+    "s18_rt_a",
+    "s18_rt_b"
+   ]
+  },
+  {
+   "id": "quest",
+   "title": "a scripted quest sequence (stage scripts of the Goodsprings opening quest)",
+   "steps": [
+    {
+     "do": "until",
+     "milestone": "main-menu",
+     "timeout": "menu_timeout",
+     "wine_s": "menu_wine_s"
+    },
+    {
+     "do": "wait",
+     "s": 10
+    },
+    {
+     "do": "console",
+     "lines": [
+      "scof {console_log}"
+     ]
+    },
+    {
+     "do": "console",
+     "lines": [
+      "coc GSDocMitchellHouse"
+     ],
+     "cell": "GSDocMitchellHouse"
+    },
+    {
+     "do": "wait",
+     "s": "cell_wine_s"
+    },
+    {
+     "do": "mark",
+     "name": "in-cell"
+    },
+    {
+     "do": "quest",
+     "title": "Ain't That a Kick in the Head",
+     "stages": 6,
+     "wait": 5
+    },
+    {
+     "do": "mark",
+     "name": "stages-set"
+    },
+    {
+     "do": "state",
+     "cell": "GSDocMitchellHouse"
+    }
+   ]
+  }
+ ]
+}
