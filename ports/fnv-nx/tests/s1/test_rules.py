@@ -1401,6 +1401,71 @@ check('XC2 the copy-initialization becomes extern + __fnvnx_dyninit_<addr>', _x2
 check('XC2 other units untouched', run(s1.r_handwritten_dyninit, 'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
       '/nonexistent/src/x.cpp'), [], ['XC2'])
 
+# ---- S1-layout: EBO3 (an empty base after a base with data goes after it, as in MSVC)
+_E3 = ('struct NodeBase0\n{\n    int a, b, c, d;\n};\nstruct NodeBase16\n{\n    NodeBase16* Next(NodeBase16* p);\n};\n'
+       'struct Node : NodeBase0, NodeBase16\n{\n};\nstruct Node2 : NodeBase0, NodeBase16\n{\n    int x;\n};\n'
+       'void f(Node* n) { static_cast<NodeBase16*>(n)->Next(0); }\n')
+_e3o = run(s1.r_later_empty_base, _E3)
+check('EBO3 FNVNX_EBO2 first in an empty base that follows a base with data', _e3o,
+      ['struct NodeBase16\n{ FNVNX_EBO2 /* fnv-nx EBO3 */\n'], ['struct NodeBase0\n{ FNVNX'])
+check('EBO3 an empty base used as an object is left alone',
+      run(s1.r_later_empty_base, _E3 + 'NodeBase16 g_e;\n'), [], ['FNVNX_EBO2'])
+check('EBO3 the empty base first (or after a base of another file): nothing',
+      run(s1.r_later_empty_base, _E3.replace('NodeBase0, NodeBase16', 'NodeBase16, NodeBase0')), [], ['FNVNX_EBO2'])
+check('EBO3 a virtual base: nothing',
+      run(s1.r_later_empty_base, _E3.replace('Node : NodeBase0, NodeBase16', 'Node : NodeBase0, virtual NodeBase16')),
+      [], ['FNVNX_EBO2'])
+check('EBO3 headers are left alone', run(s1.r_later_empty_base, _E3, '/nonexistent/src/x.h'), [], ['FNVNX_EBO2'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _c3 = os.path.join(tempfile.mkdtemp(), 'e3.cpp')
+    _m3 = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_EBO2 ')]
+    # MSVC 2008 (/d1reportSingleClassLayout): Node size 16 with NodeBase16 at 16; Node2 size 20, x at 16
+    open(_c3, 'w').write('#include <stddef.h>\n' + ''.join(_m3) + _e3o +
+                         'static Node g_n;\nstatic_assert(sizeof(Node) == 16, "size");\n'
+                         'static_assert(sizeof(Node2) == 20 && offsetof(Node2, x) == 16, "node2");\n'
+                         'int off() { return (int)((char*)(NodeBase16*)&g_n - (char*)&g_n); }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', _c3],
+                         capture_output=True, text=True)
+    check('EBO3 output: the empty base at +16, after the base with data; sizes as MSVC (ILP32)',
+          _r.stderr or _r.stdout, ['mov\tw0, 16'], ['error'])
+
+# ---- S1-layout: IDTOR1 (an implicit destructor the recipe binds is declared, so GCC calls it by name)
+_i1 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_i1, 'src')); os.makedirs(os.path.join(_i1, 'build'))
+_json.dump({'units': [
+    {'source': 'src/u.cpp', 'flags': ['/MT', '/Od'], 'symbols': {
+        '??1List@ns@@QAE@XZ': '0x0046ffb0', '??1Own@@QAE@XZ': '0x0046ffb0', '??1Virt@@UAE@XZ': '0x0046ffb0',
+        '??1Far@@QAE@XZ': '0x00999999', '??1Inner@Outer@@QAE@XZ': '0x0046ffb0'},
+     'functions': [{'address': '0x0046ffb0', 'symbol': '??1Lst@@QAE@XZ', 'size': 4}]}]},
+           open(os.path.join(_i1, 'build', 'units.json'), 'w'))
+_I1 = ('struct ListX\n{\n    ~ListX();\n};\nnamespace ns {\nstruct List\n{\n    int dummy;\n    void RemoveAll();\n'
+       '    ListX m_uiX;\n};\nstruct Holder\n{\n    List m_kNode;\n    ~Holder();\n};\n'
+       'Holder::~Holder() { m_kNode.RemoveAll(); }\n}\n'
+       'struct Own\n{\n    ListX x;\n    ~Own();\n};\n'
+       'struct Far\n{\n    ListX x;\n};\n'
+       'class Outer\n{\n    class Inner\n    {\n        ListX x;\n    };\n};\n'
+       'template <class T> struct List2\n{\n    ListX x;\n};\n')
+_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+_i1o = run(s1.r_implicit_bound_destructors, _I1, os.path.join(_i1, 'src', 'u.cpp'))
+_i1h = run(s1.r_implicit_bound_destructors, _I1, os.path.join(_i1, 'src', 'u.h'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('IDTOR1 a class whose implicit destructor the recipe binds (in a namespace, nested) declares it', _i1o,
+      ['    ListX m_uiX;\n FNVNX_IDTOR1(List) /* fnv-nx IDTOR1 0x0046ffb0 */\n};',
+       '        ListX x;\n     FNVNX_IDTOR1(Inner) /* fnv-nx IDTOR1 0x0046ffb0 */\n};'])
+check('IDTOR1 a declared destructor, an undecompiled address, a template, the holder: nothing', _i1o, [],
+      ['FNVNX_IDTOR1(Own)', 'FNVNX_IDTOR1(Far)', 'FNVNX_IDTOR1(List2)', 'FNVNX_IDTOR1(Holder)', 'FNVNX_IDTOR1(ListX)'])
+check('IDTOR1 headers are left alone', _i1h, [], ['FNVNX_IDTOR1'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _cI = os.path.join(tempfile.mkdtemp(), 'i1.cpp')
+    _mI = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_IDTOR1')]
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x',
+                          'c++', '-'], input=''.join(_mI) + _i1o, capture_output=True, text=True)
+    check('IDTOR1 output: ~Holder calls ns::List::~List by name, not ListX::~ListX at +4 (ILP32)',
+          _r.stderr or _r.stdout, ['\t_ZN2ns4ListD1Ev\n'], ['error', '_ZN5ListXD1Ev'])
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
