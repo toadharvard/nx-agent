@@ -54,7 +54,7 @@ import xexit    # noqa: E402  (S2c-abi: native stand-ins of the exe's exit thunk
 import slotfill2  # noqa: E402  (S2c-vt2: slot fill rules)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
-DATA_END = 0x0200c612
+DATA_END = 0x014089e4            # end of the image: .reloc 0x01340000 + 0xc89e4 (FalloutNV.exe 1.4.0.525)
 UNDNAME = os.environ.get('UNDNAME') or next((p for p in ('llvm-undname-18', 'llvm-undname')
                                              if any(os.access(os.path.join(d, p), os.X_OK)
                                                     for d in os.environ.get('PATH', '').split(':'))), 'llvm-undname')
