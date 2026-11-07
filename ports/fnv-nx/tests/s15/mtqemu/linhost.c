@@ -25,7 +25,16 @@
  *     trampoline that records the callee-saved registers; a SIGSEGV/SIGBUS/SIGILL/SIGTRAP/SIGFPE below it resumes
  *     after the call with 0, as the emulator does. A fault with no guard prints pc, lr and the frame chain;
  *   - --expect: the process ends (exit 0) once the guest's console or debug output contains TEXT, and says after
- *     how long; a guest that returns first exits 3. */
+ *     how long; a guest that returns first exits 3;
+ *   - --profile FILE [--profile-hz N] [--frame SYM]...: the per-thread CPU profiler (tools/perf/frames.py, D25 #12).
+ *     Every thread (main and each clone) gets a timer on its own CPU-time clock (timer_create
+ *     CLOCK_THREAD_CPUTIME_ID, SIGEV_THREAD_ID, SIGPROF, N Hz, default 1000): each tick records the interrupted pc.
+ *     Each --frame function's entry is patched into a branch to a trampoline that records a frame mark and runs
+ *     the displaced instruction (it must not be PC-relative). Records, one text line each, buffered per thread:
+ *       p <hz> <t0 ns>          header        t <tid> <slot> <mask>    a thread starts
+ *       s <tid> <t ns> <pc>     a CPU sample  f <tid> <t ns> <frame#>  a frame mark (entry of a --frame function)
+ *     t is CLOCK_MONOTONIC; a sample stands for 1/hz s of that thread's CPU time (emulated: relative, not device
+ *     time). Buffers are written when full, when a thread ends and at every exit of linhost. */
 #include <stdint.h>
 #include <stddef.h>
 
@@ -62,7 +71,8 @@ static void put_hex(int fd, u64 v) {
     b[18] = 0;
     puts_(fd, b);
 }
-static void die(const char *m) { puts_(2, "linhost: "); puts_(2, m); puts_(2, "\n"); sc(SYS_exit_group, 127, 0, 0, 0, 0, 0); }
+static void prof_flush_all(void);
+static void die(const char *m) { puts_(2, "linhost: "); puts_(2, m); puts_(2, "\n"); prof_flush_all(); sc(SYS_exit_group, 127, 0, 0, 0, 0, 0); }
 void *memset(void *d, int c, size_t n) { unsigned char *p = d; while (n--) *p++ = (unsigned char)c; return d; }
 void *memcpy(void *d, const void *s, size_t n) { unsigned char *p = d; const unsigned char *q = s; while (n--) *p++ = *q++; return d; }
 
@@ -104,10 +114,16 @@ static void set_affinity(long tid, uint32_t mask) {
     sc(SYS_sched_setaffinity, tid, sizeof m, (long)&m, 0, 0, 0);
 }
 
+static void prof_thread_begin(int slot, uint32_t mask);
+static void prof_thread_end(void);
+static void prof_flush_all(void);
+
 static void thread_main(void *p) {
     HThread *h = p;
     set_affinity(0, h->mask);
+    prof_thread_begin((int)(h - g_t), h->mask);
     ((u64 (*)(u64))h->entry)(h->arg);
+    prof_thread_end();
     /* freed before its end (CloseHandle of a running thread, or its own last reference): the slot and its stack
      * are reused only after the kernel cleared tid at exit (h_thread_create) */
     if (__atomic_fetch_or(&h->state, HT_FINISHED, __ATOMIC_ACQ_REL) & HT_DETACHED)
@@ -227,6 +243,7 @@ static void expect_feed(const char *s, u64 n) {
                 put_dec(2, (t1 - g_t0) / 1000000); puts_(2, " ms (guest entry after ");
                 put_dec(2, (t1 - g_t_entry) / 1000000); puts_(2, " ms), initializers skipped after a fault: ");
                 put_dec(2, g_skipped); puts_(2, "\n");
+                prof_flush_all();
                 sc(SYS_exit_group, 0, 0, 0, 0, 0, 0);
             }
         }
@@ -245,7 +262,7 @@ static u64 h_console_write(u64 s, u64 n) {
     expect_feed((const char *)(uintptr_t)s, n);
     return r;
 }
-static u64 h_exit(u64 code) { sc(SYS_exit_group, (long)code, 0, 0, 0, 0, 0); return 0; }
+static u64 h_exit(u64 code) { prof_flush_all(); sc(SYS_exit_group, (long)code, 0, 0, 0, 0, 0); return 0; }
 static u64 h_sleep_ns(u64 ns) { struct ts t = { (long)(ns / 1000000000ull), (long)(ns % 1000000000ull) }; sc(SYS_nanosleep, (long)&t, 0, 0, 0, 0, 0); return 0; }
 static u64 h_zero(void) { return 0; }
 static u64 h_one(void) { return 1; }
@@ -465,6 +482,135 @@ __asm__(".text\n.global linhost_sigreturn\nlinhost_sigreturn:\n  mov x8, #139\n 
 
 static int readable(u64 a) { return a >= 0x10000 && a < 0xC0000000ull; }   /* no probing: only the range check */
 
+/* ---- --profile: per-thread CPU samples and frame marks (see the header) */
+#define PROF_SLOTS (MAXT + 1)   /* clone slots 0..63, the main thread last */
+#define PROF_BUF 4096
+typedef struct { volatile int tid; volatile int busy; int n, timer; char b[PROF_BUF]; } ProfBuf;
+static ProfBuf g_prof[PROF_SLOTS];
+static long g_prof_fd = -1;
+static u64 g_prof_hz = 1000;
+static volatile uint32_t g_frames;
+static int g_prof_lock;
+static void prof_write(const char *b, int n) {   /* one writer at a time: lines stay whole */
+    while (__atomic_exchange_n(&g_prof_lock, 1, __ATOMIC_ACQUIRE)) sc(SYS_sched_yield, 0, 0, 0, 0, 0, 0);
+    for (int o = 0; o < n;) { long r = sc(SYS_write, g_prof_fd, (long)(b + o), n - o, 0, 0, 0); if (r <= 0) break; o += (int)r; }
+    __atomic_store_n(&g_prof_lock, 0, __ATOMIC_RELEASE);
+}
+static ProfBuf *prof_mine(int tid) {
+    for (int i = 0; i < PROF_SLOTS; i++) if (g_prof[i].tid == tid) return &g_prof[i];
+    return 0;
+}
+static void prof_hex(ProfBuf *p, u64 v) {
+    char t[16]; int n = 0;
+    do t[n++] = "0123456789abcdef"[v & 15]; while (v >>= 4);
+    while (n) p->b[p->n++] = t[--n];
+}
+static void prof_dec(ProfBuf *p, u64 v) {
+    char t[20]; int n = 0;
+    do t[n++] = (char)('0' + v % 10); while (v /= 10);
+    while (n) p->b[p->n++] = t[--n];
+}
+static void prof_flush(ProfBuf *p) { if (p->n) { prof_write(p->b, p->n); p->n = 0; } }
+/* one record: c tid t x (x in hex for 's', decimal otherwise) */
+static void prof_rec(ProfBuf *p, char c, u64 t, u64 x, int hex) {
+    if (p->n > PROF_BUF - 64) prof_flush(p);
+    p->b[p->n++] = c; p->b[p->n++] = ' ';
+    prof_dec(p, (u64)p->tid); p->b[p->n++] = ' ';
+    prof_dec(p, t); p->b[p->n++] = ' ';
+    if (hex) { p->b[p->n++] = '0'; p->b[p->n++] = 'x'; prof_hex(p, x); } else prof_dec(p, x);
+    p->b[p->n++] = '\n';
+}
+static volatile uint32_t g_prof_dropped;
+static void on_prof(int sig, void *info, void *ucv) {
+    (void)sig;
+    ProfBuf *p = prof_mine(gettid_());
+    int over = *(int *)((unsigned char *)info + 20);   /* siginfo _timer.si_overrun: expirations merged into this one */
+    if (over < 0 || over > 100000) over = 0;
+    if (!p || p->busy) { __atomic_add_fetch(&g_prof_dropped, 1u + (uint32_t)over, __ATOMIC_RELAXED); return; }
+    p->busy = 1;
+    prof_rec(p, 's', now_ns(), *(u64 *)((unsigned char *)ucv + 440), 1);
+    if (over) {   /* "s tid t pc w": this sample stands for 1 + overrun ticks */
+        p->n--;
+        p->b[p->n++] = ' ';
+        prof_dec(p, 1u + (u64)over);
+        p->b[p->n++] = '\n';
+    }
+    p->busy = 0;
+}
+__attribute__((used)) void linhost_prof_frame(void);
+__attribute__((used)) void linhost_prof_frame(void) {
+    ProfBuf *p = prof_mine(gettid_());
+    uint32_t k = __atomic_add_fetch(&g_frames, 1, __ATOMIC_RELAXED);
+    if (!p) return;
+    p->busy = 1;
+    prof_rec(p, 'f', now_ns(), k, 0);
+    p->busy = 0;
+}
+static void prof_thread_begin(int slot, uint32_t mask) {
+    if (g_prof_fd < 0) return;
+    int tid = gettid_();
+    ProfBuf *p = 0;
+    for (int i = 0; i < PROF_SLOTS && !p; i++)
+        if (__atomic_compare_exchange_n(&g_prof[i].tid, &(int){0}, tid, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) p = &g_prof[i];
+    if (!p) return;
+    p->n = 0;
+    p->busy = 1;
+    prof_rec(p, 't', (u64)slot, mask, 0);   /* t <tid> <slot> <mask> */
+    prof_flush(p);
+    p->busy = 0;
+    /* struct sigevent: value, signo, notify, tid (SIGEV_THREAD_ID = 4) */
+    struct { u64 value; int signo, notify, tid; int pad[11]; } ev = { 0, 27 /* SIGPROF */, 4, tid, {0} };
+    int timer = 0;
+    long r = sc(107 /* timer_create */, 3 /* CLOCK_THREAD_CPUTIME_ID */, (long)&ev, (long)&timer, 0, 0, 0);
+    /* qemu-user keeps 32 timers: a thread's is deleted at its end (prof_thread_end), so 32 may run at once */
+    if (r < 0) { p->timer = -1; puts_(2, "linhost: --profile: timer_create failed "); put_dec(2, (u64)-r); puts_(2, "\n"); return; }
+    p->timer = timer;
+    u64 ns = 1000000000ull / g_prof_hz;
+    struct ts it[2] = { { (long)(ns / 1000000000ull), (long)(ns % 1000000000ull) },
+                        { (long)(ns / 1000000000ull), (long)(ns % 1000000000ull) } };
+    sc(110 /* timer_settime */, timer, 0, (long)it, 0, 0, 0);
+}
+static void prof_thread_end(void) {
+    if (g_prof_fd < 0) return;
+    ProfBuf *p = prof_mine(gettid_());
+    if (!p) return;
+    if (p->timer >= 0) sc(111 /* timer_delete */, p->timer, 0, 0, 0, 0, 0);
+    p->busy = 1;
+    prof_flush(p);
+    p->busy = 0;
+    __atomic_store_n(&p->tid, 0, __ATOMIC_RELEASE);   /* the slot is free (an ended thread's timer never fires) */
+}
+static void prof_flush_all(void) {
+    if (g_prof_fd < 0) return;
+    for (int i = 0; i < PROF_SLOTS; i++) if (g_prof[i].tid > 0) prof_flush(&g_prof[i]);
+}
+static void prof_open(const char *path) {
+    g_prof_fd = sc(SYS_openat, AT_FDCWD, (long)path, 0x1 | 0x40 | 0x200 | 0x400 /* WRONLY CREAT TRUNC APPEND */, 0644, 0, 0);
+    if (g_prof_fd < 0) die("--profile: cannot create the file");
+    char h[64]; ProfBuf tmp; tmp.n = 0; tmp.tid = 0;
+    tmp.b[tmp.n++] = 'p'; tmp.b[tmp.n++] = ' '; prof_dec(&tmp, g_prof_hz); tmp.b[tmp.n++] = ' ';
+    prof_dec(&tmp, now_ns()); tmp.b[tmp.n++] = '\n';
+    memcpy(h, tmp.b, (size_t)tmp.n);
+    prof_write(h, tmp.n);
+    struct { u64 handler, flags, restorer, mask; } sa = {
+        (u64)(uintptr_t)on_prof, 4 /* SA_SIGINFO */ | 0x10000000 /* SA_RESTART */ | 0x04000000 /* SA_RESTORER */,
+        (u64)(uintptr_t)linhost_sigreturn, 0 };
+    sc(SYS_rt_sigaction, 27, (long)&sa, 0, 8, 0, 0);
+}
+/* the frame hook: saves what is live at a function entry (x0-x8, q0-q7, x29/x30, the continuation in x16), records
+ * the mark, restores, continues at the displaced instruction (x16) */
+void linhost_frame_stub(void);
+__asm__(".text\n.global linhost_frame_stub\nlinhost_frame_stub:\n"
+        "  sub sp, sp, #224\n"
+        "  stp x0, x1, [sp]\n  stp x2, x3, [sp, #16]\n  stp x4, x5, [sp, #32]\n  stp x6, x7, [sp, #48]\n"
+        "  stp x8, x16, [sp, #64]\n  stp x29, x30, [sp, #80]\n"
+        "  stp q0, q1, [sp, #96]\n  stp q2, q3, [sp, #128]\n  stp q4, q5, [sp, #160]\n  stp q6, q7, [sp, #192]\n"
+        "  bl linhost_prof_frame\n"
+        "  ldp q0, q1, [sp, #96]\n  ldp q2, q3, [sp, #128]\n  ldp q4, q5, [sp, #160]\n  ldp q6, q7, [sp, #192]\n"
+        "  ldp x0, x1, [sp]\n  ldp x2, x3, [sp, #16]\n  ldp x4, x5, [sp, #32]\n  ldp x6, x7, [sp, #48]\n"
+        "  ldp x8, x16, [sp, #64]\n  ldp x29, x30, [sp, #80]\n"
+        "  add sp, sp, #224\n  br x16\n");
+
 /* ---- --collect-traps (S5's collect-all boot): a virtual function defined nowhere (fnvnx_vslot_trap) or a
  * constructor/destructor defined nowhere (fnvnx_special_trap) returns to its caller instead of stopping the boot:
  * 0, or this (x0 as it came) for a constructor/destructor. Each distinct (kind, caller, text) is printed once as
@@ -527,6 +673,7 @@ static void on_fault(int sig, void *info, void *ucv) {
         fp = f[0];
     }
     puts_(2, "\nlinhost: initializers skipped after a fault: "); put_dec(2, g_skipped); puts_(2, "\n");
+    prof_flush_all();
     sc(SYS_exit_group, 128 + sig, 0, 0, 0, 0, 0);
 }
 static void install_fault_handler(void) {
@@ -643,6 +790,68 @@ static void install_guards(long fd) {
     puts_(2, "linhost: guarding "); put_dec(2, sites); puts_(2, " indirect call sites of the initializer runners\n");
 }
 
+/* --frame: patch each named function's first instruction into a branch to a per-site trampoline (one page above the
+ * guards' page): ldr x16, =continuation; ldr x17, =linhost_frame_stub; br x17; <displaced>; b <function + 4> */
+static void sync_icache(u64 a, u64 n) {   /* no libgcc: dc cvau / ic ivau per 64-byte line */
+    for (u64 x = a & ~63ull; x < a + n; x += 64) __asm__ volatile("dc cvau, %0" :: "r"(x) : "memory");
+    __asm__ volatile("dsb ish" ::: "memory");
+    for (u64 x = a & ~63ull; x < a + n; x += 64) __asm__ volatile("ic ivau, %0" :: "r"(x) : "memory");
+    __asm__ volatile("dsb ish\n isb" ::: "memory");
+}
+static int pcrel(uint32_t w) {
+    return (w & 0x1F000000u) == 0x10000000u || (w & 0x7C000000u) == 0x14000000u || (w & 0xFF000010u) == 0x54000000u ||
+           (w & 0x7E000000u) == 0x34000000u || (w & 0x7E000000u) == 0x36000000u || (w & 0x3B000000u) == 0x18000000u;
+}
+static void install_frames(long fd, const char *const *names, int nnames) {
+    E32 e;
+    sc(SYS_pread64, fd, (long)&e, sizeof e, 0, 0, 0);
+    S32 *sh = anon((u64)e.shnum * sizeof(S32));
+    sc(SYS_pread64, fd, (long)sh, (long)e.shnum * sizeof(S32), e.shoff, 0, 0);
+    S32 *symtab = 0;
+    for (unsigned i = 0; i < e.shnum; i++) if (sh[i].type == 2) symtab = &sh[i];
+    if (!symtab) die("--frame: the guest has no .symtab");
+    S32 *strtab = &sh[symtab->link];
+    Y32 *sym = anon(symtab->size);
+    char *str = anon(strtab->size + 1);
+    sc(SYS_pread64, fd, (long)sym, symtab->size, symtab->offset, 0, 0);
+    sc(SYS_pread64, fd, (long)str, strtab->size, strtab->offset, 0, 0);
+    u64 page = ((g_hi + 0xFFFF) & ~0xFFFFull) + 0x10000;
+    if (map_at(page, 0x10000, 7)) die("--frame: no room for the trampolines");
+    uint32_t *t = (uint32_t *)(uintptr_t)page;
+    int sites = 0;
+    for (unsigned k = 0, nsym = symtab->size / sizeof(Y32); k < nsym; k++) {
+        if ((sym[k].info & 0xF) != 2 || !sym[k].shndx) continue;
+        int hit = 0;
+        for (int r = 0; r < nnames; r++) hit |= streq(str + sym[k].name, names[r]);
+        if (!hit) continue;
+        uint32_t *w = (uint32_t *)(uintptr_t)(sym[k].value & ~3u);
+        if (pcrel(*w)) { puts_(2, "linhost: --frame: "); puts_(2, str + sym[k].name);
+                         puts_(2, " starts with a PC-relative instruction: not patched\n"); continue; }
+        if (sites == 0x10000 / 40) die("--frame: too many functions");
+        uint32_t *tk = t + sites * 10;  /* 40 bytes: 6 instructions, then the two literals at +24 and +32 */
+        tk[0] = 0x580000D0u;            /* ldr x16, tk+24 */
+        tk[1] = 0x580000F1u;            /* ldr x17, tk+32 */
+        tk[2] = 0xD61F0220u;            /* br x17 */
+        tk[3] = *w;                     /* the displaced instruction */
+        long back = ((long)(uintptr_t)(w + 1) - (long)(uintptr_t)(tk + 4)) / 4;
+        long go = ((long)(uintptr_t)tk - (long)(uintptr_t)w) / 4;
+        if (back >= (1 << 25) || back < -(1 << 25) || go >= (1 << 25) || go < -(1 << 25)) die("--frame: out of b range");
+        tk[4] = 0x14000000u | ((uint32_t)back & 0x3FFFFFFu);   /* b function + 4 */
+        tk[5] = 0xD503201Fu;
+        *(u64 *)(tk + 6) = (u64)(uintptr_t)(tk + 3);
+        *(u64 *)(tk + 8) = (u64)(uintptr_t)linhost_frame_stub;
+        *w = 0x14000000u | ((uint32_t)go & 0x3FFFFFFu);          /* b tk */
+        sync_icache((u64)(uintptr_t)w, 4);
+        sites++;
+        puts_(2, "linhost: --frame: "); puts_(2, str + sym[k].name); puts_(2, " at "); put_hex(2, sym[k].value); puts_(2, "\n");
+    }
+    sync_icache((u64)(uintptr_t)t, (u64)sites * 40);
+    if (!sites) puts_(2, "linhost: --frame: no named function found: no frame marks\n");
+    sc(SYS_munmap, (long)sym, symtab->size, 0, 0, 0, 0);
+    sc(SYS_munmap, (long)str, strtab->size + 1, 0, 0, 0, 0);
+    sc(SYS_munmap, (long)sh, (long)e.shnum * sizeof(S32), 0, 0, 0, 0);
+}
+
 static u64 parse_u(const char *s) { u64 v = 0; while (*s >= '0' && *s <= '9') v = v * 10 + (u64)(*s++ - '0'); return v; }
 
 __attribute__((used)) long hmain(long *sp);
@@ -653,16 +862,21 @@ __attribute__((used)) long hmain(long *sp) {
     const char *guest = 0;
     int skip_init = 0;
     u64 heap_mib = 64;
+    const char *prof_path = 0, *frames[16];
+    int nframes = 0;
     for (long i = 1; i < argc; i++) {
         if (streq(argv[i], "--root") && i + 1 < argc) g_root = argv[++i];
         else if (streq(argv[i], "--expect") && i + 1 < argc) g_expect = argv[++i];
         else if (streq(argv[i], "--heap") && i + 1 < argc) heap_mib = parse_u(argv[++i]);
         else if (streq(argv[i], "--skip-faulting-init")) skip_init = 1;
         else if (streq(argv[i], "--collect-traps")) g_collect = 1;
+        else if (streq(argv[i], "--profile") && i + 1 < argc) prof_path = argv[++i];
+        else if (streq(argv[i], "--profile-hz") && i + 1 < argc) g_prof_hz = parse_u(argv[++i]);
+        else if (streq(argv[i], "--frame") && i + 1 < argc && nframes < 16) frames[nframes++] = argv[++i];
         else if (!guest && argv[i][0] != '-') guest = argv[i];
-        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] guest.elf");
+        else die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] guest.elf");
     }
-    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] guest.elf");
+    if (!guest) die("usage: linhost [--root DIR] [--expect TEXT] [--skip-faulting-init] [--collect-traps] [--heap MiB] [--profile FILE [--profile-hz N] [--frame SYM]...] guest.elf");
     if (g_expect) {
         g_expect_len = slen(g_expect);
         if (!g_expect_len || g_expect_len >= sizeof g_win / 2) die("--expect: 1..255 bytes");
@@ -705,11 +919,18 @@ __attribute__((used)) long hmain(long *sp) {
     }
     if (g_collect && !skip_init) die("--collect-traps needs --skip-faulting-init (the trap symbols are found there)");
     if (skip_init) install_guards(fd);
+    if (nframes) install_frames(fd, frames, nframes);
+    if (prof_path) {
+        if (!g_prof_hz || g_prof_hz > 100000) die("--profile-hz: 1..100000");
+        prof_open(prof_path);
+    }
     sc(SYS_close, fd, 0, 0, 0, 0, 0);
     install_fault_handler();
     set_affinity(0, 0x1);   /* the main thread: placement row "main", core 0 */
     g_t_entry = now_ns();
+    prof_thread_begin(-1, 0x1);   /* the main thread: slot -1 */
     u64 r = ((u64 (*)(u64))(uintptr_t)entry)((u64)(uintptr_t)&g_api);
+    prof_flush_all();
     if (g_expect) {
         puts_(2, "\nlinhost: the guest returned "); put_hex(2, r); puts_(2, " before \""); puts_(2, g_expect);
         puts_(2, "\"\n");

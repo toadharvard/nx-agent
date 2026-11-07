@@ -37,7 +37,10 @@
  *   wg-clean        the wait-graph watchdog (platform/win32/waitgraph.cpp) on: the cs workload reports nothing
  *   wg-deadlock     thread A holds a section and waits on a mutex B holds while B enters A's section: one cycle
  *                   (A's mutex wait times out after 3 s and both finish)
- *   wg-hang         a thread waits on an event for 1.2 s with a 0.5 s limit: one long wait */
+ *   wg-hang         a thread waits on an event for 1.2 s with a 0.5 s limit: one long wait
+ *   frames          a frame loop for the profiler (tests/s15/test_frames.py runs linhost --profile --frame
+ *                   mtq_frame_mark): 30 frames; main does 1 unit of work and waits, a worker does 2 units a frame,
+ *                   so the worker is the critical path; mtq_frame_mark (nop; ret) closes each frame */
 #include "fnvnx_win32_ext.h"
 #include "fnvnx/hostapi.h"
 
@@ -492,6 +495,42 @@ static void t_waitgraph(void)
     fnvnx_waitgraph_summary();
 }
 
+/* ---- frames */
+extern "C" void mtq_frame_mark(int k);
+__asm__(".text\n.global mtq_frame_mark\n.type mtq_frame_mark, %function\nmtq_frame_mark:\n  nop\n  ret\n"
+        ".size mtq_frame_mark, 8\n");
+static HANDLE g_fr_go, g_fr_done;
+static volatile int g_fr_stop;
+static const uint64_t FR_WORK = 8000000;   /* ~20 ms of main work under qemu: 20+ samples a frame at 1 kHz */
+__attribute__((noinline)) static uint64_t fr_worker_work(void) { return mtq_spin(2 * FR_WORK); }
+__attribute__((noinline)) static uint64_t fr_main_work(void) { return mtq_spin(FR_WORK); }
+static DWORD fr_worker(LPVOID)
+{
+    for (;;) {
+        WaitForSingleObject(g_fr_go, INFINITE);
+        if (g_fr_stop) return 0;
+        g_sink = fr_worker_work();
+        SetEvent(g_fr_done);
+    }
+}
+static void t_frames(void)
+{
+    g_fr_go = CreateEventA(NULL, FALSE, FALSE, NULL);
+    g_fr_done = CreateEventA(NULL, FALSE, FALSE, NULL);
+    HANDLE w = CreateThread(NULL, 0, fr_worker, NULL, 0, NULL);
+    for (int k = 0; k < 31; k++) {
+        mtq_frame_mark(k);
+        SetEvent(g_fr_go);
+        g_sink = fr_main_work();
+        WaitForSingleObject(g_fr_done, INFINITE);
+    }
+    g_fr_stop = 1;
+    SetEvent(g_fr_go);
+    WaitForSingleObject(w, INFINITE);
+    CloseHandle(w);
+    result("frames", true, "31 marks (30 frames)");
+}
+
 extern "C" int mtq_main(void)
 {
     printf("mtq: guest up, %u cores reported\n", (unsigned)fnvnx_hcall0(fnvnx_host->cpu_count));
@@ -509,6 +548,7 @@ extern "C" int mtq_main(void)
     t_litmus("litmus-plain", litmus_main_plain, false);
     t_race_pairs();
     t_waitgraph();
+    t_frames();
     printf("mtq: done, %d failed\n", g_fail);
     return g_fail;
 }
