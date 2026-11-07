@@ -1,0 +1,8 @@
+# Files the original also looks for and does without (regexes over the guest's SD path, case-insensitive).
+# A failed open of a path matched here is not a D25 #4 failure. Each line says why it is optional.
+custom\.ini$                  # the player's own overrides; absent on a clean install
+fallout\.ini$                 # read before the profile is made (first run), then made from Fallout_default.ini
+falloutprefs\.ini$            # the same
+/saves/                       # the save directory before the first save
+\.(bik|nam)$                  # intro movies are off (ref_ini.py); .nam files are left out of the mirror on purpose
+renderinfo\.txt$              # written, not read
