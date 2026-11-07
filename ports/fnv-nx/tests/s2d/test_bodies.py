@@ -730,5 +730,36 @@ class Thunks(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, r.stderr)
 
 
+
+class AddrHost(unittest.TestCase):
+    def test_gdel_line_and_stubs(self):
+        """code-defmissing rows load by address; a ??_G line destroys / deletes like MSVC's and compiles to
+        __fnv_<addr>; a template class is refused; the stub branches to the emitted symbol."""
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\t_ZN1X1fEi\tcode-defmissing\tunit/exact\t004459e0\t__fnv_004459e0\t?f@X@@QAEHH@Z\n'
+                                  'src/b.cpp#bd\t_ZN1Y1fEi\tcode-defmissing\tunit/exact\t004459e0\t__fnv_004459e0\t\n'
+                                  'src/a.cpp\t_ZN1Z1fEv\tcode\tunit/exact\t00401000\t__fnv_00401000\t\n')
+            self.assertEqual(bodies.load_defmissing(refs), {0x004459e0: {'src/a.cpp', 'src/b.cpp'}})
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            names = ['??_GRec@@QAEPAXI@Z', '??_G?$L@H@@QAEPAXI@Z']
+            ms.need(names)
+            line = bodies.gdel_line(0x004459e0, sigs.parse_msvc(names[0], ms[names[0]]))
+            self.assertIn('extern "C" void *__fnv_004459e0(::Rec *p, unsigned int f)', line)
+            self.assertIn('if (f & 1) delete p; else p->::Rec::~Rec();', line)
+            self.assertIsNone(bodies.gdel_line(0x00401000, sigs.parse_msvc(names[1], ms[names[1]])))
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                src = os.path.join(d, 'g.cpp')
+                open(src, 'w').write('struct Rec { int k; ~Rec(); };\n' + line + '\n')
+                r = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 'g.o')], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-400:])
+                nm = subprocess.run(['nm', os.path.join(d, 'g.o')], capture_output=True, text=True).stdout
+                self.assertIn('T __fnv_004459e0', nm)
+            asm = bodies.emit_addr_stubs({0x0046ffd0: '_ZNK7NiPoint2mlEf', 0x004459e0: '__fnv_004459e0'})
+            self.assertIn('"__fnv_0046ffd0":\n    b "_ZNK7NiPoint2mlEf"', asm)
+            self.assertNotIn('"__fnv_004459e0":', asm)
+
+
 if __name__ == '__main__':
     unittest.main()
