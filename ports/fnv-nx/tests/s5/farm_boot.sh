@@ -49,6 +49,7 @@
 #                   that takes the same arguments plus its own --scenario ...)
 #   FARM_PROFILE    a profile dir (Documents/..., AppData/...; tools/lockstep/profile.py) copied to the guest's
 #                   sdmc:/switch/fnv/user before each boot, so the first-run profile is not made (lockstep: same inputs)
+#   FARM_FAULTS     the stub boot's fault table (default tests/s5/known_faults.txt)
 #   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
@@ -213,7 +214,7 @@ for tag in $BOOTS; do
   case "$tag" in
     raw) boot raw ;;
     slots) boot slots --exe-vtables "${INJECT[@]}" ;;
-    stub) boot stub --stub-faults "$HERE/known_faults.txt" "${INJECT[@]}" ;;
+    stub) boot stub --stub-faults "${FARM_FAULTS:-$HERE/known_faults.txt}" "${INJECT[@]}" ;;
     *) echo "farm_boot: unknown boot '$tag' (FARM_BOOTS: raw slots stub)" >&2; exit 1 ;;
   esac
 done
