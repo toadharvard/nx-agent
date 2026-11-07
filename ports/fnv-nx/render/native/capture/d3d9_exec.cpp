@@ -45,15 +45,18 @@ float Half(uint16_t h) {
     float v = e == 0 ? ldexpf((float)m, -24) : e == 31 ? INFINITY : ldexpf((float)(m | 1024), (int)e - 25);
     return s ? -v : v;
 }
+static const float kUnorm8 = 1.0f / 255.0f;
 // one D3DVERTEXELEMENT9 value -> 4 floats (D3D9 defaults for missing components: 0, 0, 0, 1)
 void Decode(uint8_t t, const uint8_t* p, float o[4]) {
     o[0] = o[1] = o[2] = 0; o[3] = 1;
     switch (t) {
     case 0: case 1: case 2: case 3: for (int i = 0; i <= t; i++) memcpy(&o[i], p + 4 * i, 4); break;
-    case 4: o[0] = p[2] / 255.0f; o[1] = p[1] / 255.0f; o[2] = p[0] / 255.0f; o[3] = p[3] / 255.0f; break;   // D3DCOLOR
+    // 8-bit UNORM as a GPU vertex fetch converts it, c * fl(1/255) (llvmpipe's lp_build_unsigned_norm_to_float, the
+    // reference's path; c / 255 differs by 1 ulp for 126 of the 256 values, S16 large sweep)
+    case 4: o[0] = p[2] * kUnorm8; o[1] = p[1] * kUnorm8; o[2] = p[0] * kUnorm8; o[3] = p[3] * kUnorm8; break;   // D3DCOLOR
     case 5: for (int i = 0; i < 4; i++) o[i] = p[i]; break;                                               // UBYTE4
     case 6: case 7: for (int i = 0; i < (t == 6 ? 2 : 4); i++) { int16_t v; memcpy(&v, p + 2 * i, 2); o[i] = v; } break;
-    case 8: for (int i = 0; i < 4; i++) o[i] = p[i] / 255.0f; break;                                      // UBYTE4N
+    case 8: for (int i = 0; i < 4; i++) o[i] = p[i] * kUnorm8; break;                                     // UBYTE4N
     case 9: case 10: for (int i = 0; i < (t == 9 ? 2 : 4); i++) { int16_t v; memcpy(&v, p + 2 * i, 2); o[i] = fmaxf(v / 32767.0f, -1.0f); } break;
     case 11: case 12: for (int i = 0; i < (t == 11 ? 2 : 4); i++) { uint16_t v; memcpy(&v, p + 2 * i, 2); o[i] = v / 65535.0f; } break;
     case 15: case 16: for (int i = 0; i < (t == 15 ? 2 : 4); i++) { uint16_t v; memcpy(&v, p + 2 * i, 2); o[i] = Half(v); } break;
