@@ -201,12 +201,23 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'bool-repr'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
+    if div.get('vptr_store'):
+        # only a destructor's vptr resets differ (runner.dtor_vptr_bytes, F2 d21-dtorvptr): by design
+        h['cause'] = 'vptr-store'; return h
     if k in ('call-target', 'call-count') and any(str(x).startswith('name:__s13_vtpad_')
                                                   for x in [div.get('arm')] + list(div.get('arm_trace') or [])):
         # the native call went through a slot past the native vtable the link pairs with the planted vftable
         # (vtmodel.py padding): a pairing gap of S2c, not this function's behaviour; tested
         # before `unplanted`, which would file it as oracle-vcall (S13b)
         h['cause'] = 'vptr-unpaired'; return h
+    if k == 'call-count' and any(s.get('shift') == -1 for s in div.get('vslot') or []):
+        # the native's extra call is planted slot k, the oracle ran slot k+1 (unit code) for real (Pair.vslots_run)
+        h['cause'] = 'vslot-shift'; return h
+    if k == 'call-target' and div.get('vcall') == 'planted' and div.get('arm_vcall') == 'planted':
+        # both machines called a slot of the planted vftable, different slots (runner.Pair.vslots): the native
+        # numbers this class's slots otherwise; one lower is D26 (b)'s call-only placeholder declaration (F2)
+        sh = any(s.get('shift') == -1 for s in div.get('vslot') or [])
+        h['cause'] = 'vslot-shift' if sh else 'vslot-differs'; return h
     if k == 'call-target' and div.get('vcall') == 'unplanted':
         # an indirect call through memory the case did not plant (an object's vptr the fuzzer filled with bytes):
         # each machine reads its own slot layout (Itanium has two destructor slots), not a port divergence

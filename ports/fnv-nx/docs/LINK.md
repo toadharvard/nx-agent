@@ -716,6 +716,22 @@ class) that no unit pairs: the exe's constructor at `<ctor>` (a native `??0` def
 capstone). A free vftable gets the shell in the map; one with a vtable already takes it as a displaced vtable, so
 the slot fill and the extended copies (below) reach it either way. `ctor_vftables.tsv`: each candidate and outcome.
 On link 9f865b0a's inputs: 390 pairs (7 new V rows, 383 displaced), 319 of them shorter than the exe's vftable.
+After `exe_pair`, `member_store_pairs` (link class 4, s5-003 round 2) does the same for the vptrs a constructor
+stores at a displacement: its members' (the renderer's RendererMap<N> at +0x610.., one-slot placeholders called at
+slot 1) and its secondary bases'. The exe constructor's last `mov dword ptr [reg+d], imm32` of an RTTI vftable per
+offset d (0 < d < 0x100000, not through esp / ebp, before the first `ret`: `exevft.ctor_member_vftables`) is paired
+with the native vtable its compiled `??0` stores at the same offset (`membervt.vptr_stores`: capstone over the
+AArch64 code, `this` through copies and `this + c`, GOT and ADRP/ADD vtable addresses, the last store per offset,
+or the class of the constructor called with `this + d`; a call clobbers x0..x18). The decomp's layouts are the
+exe's (D11), so offsets compare as they are. A primary vtable takes a free vftable in the map or joins it as a
+displaced vtable (extended by `exe_vtable_copies`); a secondary one stands for it in the slot fill only. Named
+exclusions (`membervt.RULES`), never anonymous skips: `shader-factory-global-constant-map`, NiShaderFactory's (and
+so NiD3DShaderFactory's) `NiTFixedStringMap<NiGlobalConstantEntry*>` at +0x8, whose extension makes WinMain's INI
+load (0x005e0200) loop in GetPrivateProfileIntA (S5). `member_vftables.tsv`: per (constructor, offset) the exe
+classes, base or member, the native vtable, both slot counts and the outcome. On link 9f865b0a's inputs: 651
+offsets in 245 constructors (83 members, 568 secondary bases); 388 already paired (252 by the map, 136 hand-stored
+image vftables), 206 new (19 displaced primaries, 187 secondaries for the slot fill), 1 excluded; 14 member vtables
+shorter than the exe's (the 6 RendererMaps: 1 slot for 7).
 
 **Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's

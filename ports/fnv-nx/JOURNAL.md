@@ -3525,3 +3525,23 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
     29), then the 1,142 missing classified by cause.
   - after these: fuzz rule classes (bool-repr, call-flow, vptr-unpaired, native-early-exit, uninit), audit pending,
     shaders 232 over / 596 vacuous, then the frame profile in emulation and the D21 performance levers.
+
+### J-0157 | 2026-11-07 | stream: orchestration | status: active | parent: J-0156
+
+* **first farm numbers on a current head** (full1, integration d1ed15e7 of 21:19, 73 min, make exit 0; vs 0540aff0)
+  - prepare 118 rules; census 2,977 / 2,978 clean (1 failing); compile 2,977 objects.
+  - link: 86.2 % of references by address (85.5), 9,510 bridges (8,822); trial-link undefined 2,566 (2,077).
+  - guest trap stubs 1,843 (1,424). The rise is cxx_ctor_dtor 130 -> 644; vtable/typeinfo 135 -> 114. Part of it
+    is the honesty rule (abi-manual pairs left unbound, c4fbea9). The ctor/dtor jump is under investigation
+    (S2-bodies-2), and the commit that caused it is reverted or fixed if it is not evidence-backed.
+  - boot: raw boot still faults in HeapFreeBlock (3,475 skipped; S5's standins bridge is not in the farm boot).
+    Stub boot: winmain, ini-read, **archive-list** (first time on a farm), renderer-init not reached.
+  - package: fnv.nro 743 KiB, check_package exit 0, NX1 open 4.
+* **not yet in this head**: HARN1, GC1, BIND1, STAND6, vtables 78 -> 0, abi2 bridges, D26 (wip/d26 on try1of1).
+* **decisions since J-0156**: D26 (one virtual-slot order, three parts land together); D23 (c) inline, (d) binding,
+  unmatched bodies stay pending; session cap 50 (owner); D17 kept (no heavy jobs in stream containers, owner);
+  T1 owns quick_job / quick_plan / test_quick / full_job; autoadopt skips *-wip branches.
+* **D25** (S18 boot-menu, cec2a7ee): 9 / 12 measured, sum 12; the guest's WinMain returns early, while the original
+  reaches the menu under Wine.
+* **D24 open false interpretations** (EQ): 65 at the farms (184 raw), ~10 locally. **Wrong shaders** (S16,
+  local): 0 projected, waiting for the farm sweep.
