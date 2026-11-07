@@ -14,6 +14,7 @@ checks is the plan. A path no class names selects everything (unknown means unsa
   programs the shader-program sweep (sweep_job.sh's perm.py part), when the translator changed
   frames   the per-thread CPU and frame-pacing lane (frames_job.sh): the profiler's tests, then this head's guest under
            linhost --profile, frames cut at the D3D9 Present (after build, on its build directory)
+  boottrace the boot's function-boundary trace against the cached Wine reference (boottrace_job.sh; with build)
   threads  D25 #7's report lane (threads_job.sh): the race checker's and the watchdog's tests, then this head's
            guest relinked with the watchdog and run under qemu-aarch64 (after build, on its build directory)
 The caches make each selected check cost what changed; the plan only skips checks that nothing can affect.
@@ -28,7 +29,7 @@ cells.tsv lines when the index holds them, else (id) alone.
 """
 import argparse, json, os, re, subprocess, sys
 
-ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames')
+ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames', 'boottrace')
 # (regex on the path relative to ports/fnv-nx/, checks); first match wins
 CLASSES = [
     (r'^(docs/|journal/|JOURNAL\.md$|README\.md$|reports/)', ()),
@@ -51,6 +52,8 @@ CLASSES = [
     (r'^tools/farm/(fuzz_job)', ('fuzz', 'audit')),
     (r'^tools/farm/(audit_job)', ('audit',)),
     (r'^tools/farm/threads_job', ('threads',)),
+    (r'^tools/farm/boottrace_job', ('boottrace',)),
+    (r'^tools/lockstep/', ('boottrace',)),            # the Wine tracer: a new reference key
     (r'^tools/farm/frames_job', ('frames',)),
     (r'^tools/threads/report\.py$', ('threads', 'frames')),   # frames.py imports its Symbols
     (r'^tools/threads/', ('threads',)),
@@ -113,6 +116,10 @@ def plan(paths):
             if re.search(rx, p):
                 full.append('%s: %s' % (p, w))
     # fuzz, audit and the boot need the link of this head; equiv only the prepared tree (build's prepare step)
+    # every change that rebuilds the guest can move the boot's first divergence
+    if checks.get('build'):
+        checks['boottrace'] = True
+        why.setdefault('boottrace', []).append('(the guest is rebuilt)')
     if checks.get('fuzz') or checks.get('audit'):
         checks['build'] = True
         why.setdefault('build', []).append('(fuzz/audit need this head\'s link)')
