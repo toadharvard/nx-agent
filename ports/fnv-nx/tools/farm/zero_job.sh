@@ -9,6 +9,9 @@
 # Reads every reports/* branch of the artifacts repository ($ARTIFACTS, a checkout of toadharvard/fnv-nx-build, as
 # for every runner job; ZERO_REPORTS=<dir> instead: one subdirectory per farm) and the integration branch's history
 # (the checkout this script runs from; ZERO_HEADS=<file> instead, newest first). Numbers and our own names only.
+# First the fault classifier (tools/farm/faults_job.sh: the head's published boot logs, new / known / fixed against the
+# previous head this farm classified) into <c12>-faults.md / .json beside the table, so one farm covers both; its
+# sidecar feeds the table's #1 row (ZERO_FAULTS=0 skips it).
 # Exit 0 when the table is written.
 set -uo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
@@ -31,6 +34,14 @@ if [ -z "$RD" ]; then
 		git -C "$ARTIFACTS" archive "refs/remotes/origin/reports/$farm" | tar -x -C "$RD/$farm" 2>/dev/null && n=$((n + 1))
 	done
 	log "reports: $n farms"
+fi
+if [ "${ZERO_FAULTS:-1}" != 0 ]; then
+	FR=${REPORT%-zero.md}; FR=${FR%.md}-faults.md
+	bash "$HERE/faults_job.sh" "$COMMIT" "$FR" > "$W/faults.log" 2>&1 || log "faults_job.sh exited $?"
+	if [ -f "${FR%.md}.json" ]; then   # this head's classification, as if a farm had published it
+		mkdir -p "$RD/zero-faults" && cp "${FR%.md}.json" "$RD/zero-faults/$C12-faults.json"
+	fi
+	log "faults: $(sed -n 3p "$FR" 2>/dev/null | cut -c1-160)"
 fi
 HEADS=${ZERO_HEADS:-$W/heads.txt}
 if [ -z "${ZERO_HEADS:-}" ]; then
