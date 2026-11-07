@@ -16,7 +16,9 @@
 #      (default 300) or until THREADS_EXPECT appears (default: none, the whole time: the checkers flush every 10 s).
 # 3. tools/threads/report.py: races per function pair, deadlock cycles, long waits, by address only.
 # Env: THREADS_LOGS, THREADS_ELF, THREADS_BUILD, THREADS_EXE (default $FARM_HOME/gamedata/FalloutNV.exe, the full
-# job's verified copy), THREADS_RACE, THREADS_LIMIT_MS (default 10000), THREADS_TIMEOUT, THREADS_EXPECT, THREADS_TESTS=0.
+# job's verified copy), THREADS_RACE, THREADS_LIMIT_MS (default 10000), THREADS_TIMEOUT, THREADS_EXPECT, THREADS_TESTS=0,
+# THREADS_SUPPRESS (known-benign entries, report.py --suppress; default $FARM_HOME/threads/suppress.tsv when it exists:
+# addresses of a game build, kept with the farm's data, never in the repository).
 # Exit 0 when the report is written (verdict FAIL for a race or a deadlock cycle; long waits are listed, they can be
 # a slow load; the lane's metric is races + cycles + long waits, D25 #7's zero target); 1 when a checker test failed
 # (the checkers are broken: the guest numbers mean nothing).
@@ -34,6 +36,8 @@ TEST_NOTE="not run (THREADS_TESTS=0)"; TEST_RC=0
 if [ "${THREADS_TESTS:-1}" != 0 ]; then
 	python3 -I "$P/tests/s15/test_mtqemu.py" > "$W/test_mtqemu.log" 2>&1; TEST_RC=$?
 	TEST_NOTE=$(tail -1 "$W/test_mtqemu.log")
+	python3 -I "$P/tests/s15/test_threads_report.py" > "$W/test_threads_report.log" 2>&1 || TEST_RC=1
+	TEST_NOTE="$TEST_NOTE; $(tail -1 "$W/test_threads_report.log")"
 	grep -q '^skip:' "$W/test_mtqemu.log" && TEST_NOTE="skipped: $(grep -m1 '^skip:' "$W/test_mtqemu.log")"
 	log "test_mtqemu: $TEST_NOTE (rc $TEST_RC)"
 fi
@@ -68,8 +72,13 @@ log "guest: $GUEST_NOTE"
 
 # ---- 3. report
 RJ_RC=3
+SUPP=()
+for f in ${THREADS_SUPPRESS:-$( [ -f "$FARM_HOME/threads/suppress.tsv" ] && echo "$FARM_HOME/threads/suppress.tsv" )}; do
+	SUPP+=(--suppress "$f")
+done
 if [ ${#LOGS[@]} -gt 0 ]; then
-	python3 -I "$P/tools/threads/report.py" "${LOGS[@]}" ${ELF:+--elf "$ELF"} --out "$W/threads.md" > "$W/report.log" 2>&1
+	python3 -I "$P/tools/threads/report.py" "${LOGS[@]}" ${ELF:+--elf "$ELF"} "${SUPP[@]}" --out "$W/threads.md" \
+		> "$W/report.log" 2>&1
 	RJ_RC=$?
 fi
 python3 -I - "$REPORT" "$W" "$COMMIT" "$TEST_RC" "$TEST_NOTE" "$GUEST_NOTE" "$RJ_RC" "$(( $(date +%s) - T0 ))" <<'EOF'

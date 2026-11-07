@@ -13,9 +13,21 @@ image's symbol table (nm); the report names functions by that start address only
 Writes <report.md> and <report>.json (fnvnx-threads/1: races, race_pairs, function_pairs, cycles, long_waits,
 untracked, evictions; the lane's headline). Exit 0; 3 when no log has either kind of line (the lane did not run).
 --slide: added to the image's addresses when the run loaded it elsewhere (the guest's fixed images need none).
+--suppress <file> (repeatable): known-benign entries, one per line, tab-separated, '#' starts a comment:
+    <kind>  <a>  <b>  <build>  <reason>
+  kind   write-write | write-read | read-write | race (any of the three) | long-wait
+  a, b   race: the two function start addresses, either order; long-wait: a = the caller function, b = the object
+         kind (cs, mutex, event, semaphore, thread) or *
+  build  the first 12 hex digits of the image's sha256 (the report prints it) or *: function addresses move between
+         builds, so an entry for one build does not silently hide a different function in the next
+  reason required, free text: why the pair is benign (who decided, where it is recorded)
+  Suppressed entries leave the counts and the tables; they are listed with their reason and hits, and an entry that
+  matched nothing is listed as stale. Suppression files hold addresses of a game build: they live with the farm's
+  data ($FARM_HOME/threads/suppress.tsv, or the private artifacts repository), never in this repository.
 """
 import argparse
 import bisect
+import hashlib
 import json
 import os
 import re
@@ -139,22 +151,82 @@ def parse(logs, sym):
     return seen_any, races, summary, cycles, longs, wg_summary
 
 
+RACE_KINDS = ('write-write', 'write-read', 'read-write')
+
+
+def load_suppress(paths):
+    out = []
+    for path in paths:
+        for n, line in enumerate(open(path, errors='replace'), 1):
+            line = line.split('#', 1)[0].rstrip('\n')
+            if not line.strip():
+                continue
+            c = [x.strip() for x in line.split('\t')]
+            where = '%s:%d' % (os.path.basename(path), n)
+            if len(c) < 5 or not c[4]:
+                raise SystemExit('report.py: %s: want <kind> <a> <b> <build> <reason> (tab-separated, reason '
+                                 'required)' % where)
+            kind, a, b, build, reason = c[0], c[1], c[2], c[3].lower(), '\t'.join(c[4:])
+            if kind not in RACE_KINDS + ('race', 'long-wait'):
+                raise SystemExit('report.py: %s: unknown kind %r' % (where, kind))
+            try:
+                fa_ = int(a, 16)
+                fb_ = None if kind == 'long-wait' else int(b, 16)
+            except ValueError:
+                raise SystemExit('report.py: %s: addresses are hex (0x...)' % where)
+            out.append({'where': where, 'kind': kind, 'a': fa_, 'b': b if kind == 'long-wait' else fb_,
+                        'build': build, 'reason': reason, 'hits': 0})
+    return out
+
+
+def apply_suppress(entries, build, races, longs):
+    """Moves suppressed race pairs and long waits out of races / longs; returns the suppressed rows."""
+    gone = []
+    for e in entries:
+        if e['build'] != '*' and not build.startswith(e['build']):
+            continue
+        if e['kind'] == 'long-wait':
+            for key in [k for k in longs if k[0] == e['a'] and (e['b'] == '*' or e['b'] in k[1].split('+'))]:
+                r = longs.pop(key)
+                e['hits'] += r['n']
+                gone.append(('long-wait', fa(key[0]), key[1], r['n'], e))
+            continue
+        key = tuple(sorted((e['a'], e['b'])))
+        r = races.get(key)
+        if not r:
+            continue
+        kinds = set(RACE_KINDS) if e['kind'] == 'race' else {e['kind']}
+        if not r['kinds'] <= kinds:
+            continue   # a pair with a kind the entry does not name stays reported
+        races.pop(key)
+        e['hits'] += r['races']
+        gone.append(('race', fa(key[0]), fa(key[1]), r['races'], e))
+    return gone
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('logs', nargs='+')
     ap.add_argument('--elf')
     ap.add_argument('--slide', default='0')
     ap.add_argument('--out', required=True)
+    ap.add_argument('--suppress', action='append', default=[])
     a = ap.parse_args()
     sym = Symbols(a.elf, int(a.slide, 0))
+    supp = load_suppress(a.suppress)
+    build = hashlib.sha256(open(a.elf, 'rb').read()).hexdigest()[:12] if a.elf else ''
     seen, races, hsum, cycles, longs, wsum = parse(a.logs, sym)
+    gone = apply_suppress(supp, build, races, longs)
     nraces = sum(r['races'] for r in races.values())
     npairs = sum(len(r['pcs']) for r in races.values())
     head = {'schema': 'fnvnx-threads/1', 'races': nraces, 'race_pairs': npairs, 'function_pairs': len(races),
             'cycles': len(cycles), 'long_waits': sum(r['n'] for r in longs.values()),
             'untracked': hsum.get('untracked', 0), 'evictions': hsum.get('evictions', 0),
             'read_evictions': hsum.get('read-evictions', 0), 'pairs_full': hsum.get('pairs-full', 0),
-            'symbols': len(sym.starts), 'logs': [os.path.basename(p) for p in a.logs]}
+            'symbols': len(sym.starts), 'logs': [os.path.basename(p) for p in a.logs], 'build': build or None,
+            'suppressed_races': sum(g[3] for g in gone if g[0] == 'race'),
+            'suppressed_long_waits': sum(g[3] for g in gone if g[0] == 'long-wait'),
+            'stale_suppressions': [e['where'] for e in supp if not e['hits']]}
     o = open(a.out, 'w')
     o.write('# threads report (races, deadlocks, hangs)\n\n')
     o.write('- races %d in %d function pairs (%d access pairs); deadlock cycles %d; long waits %d\n' %
@@ -167,6 +239,11 @@ def main():
         o.write('- watchdog: %s\n' % ', '.join('%s %d' % kv_ for kv_ in sorted(wsum.items())))
     if not sym.starts:
         o.write('- no symbol table: pcs are listed as they are, not as function starts\n')
+    if build:
+        o.write('- build %s (the suppression files\' build column)\n' % build)
+    if supp:
+        o.write('- suppressed: %d races, %d long waits by %d entries (%d stale)\n' %
+                (head['suppressed_races'], head['suppressed_long_waits'], len(supp), len(head['stale_suppressions'])))
     if races:
         o.write('\n## races per function pair\n\n| function A | function B | kinds | races | access pairs | sample address |\n'
                 '|---|---|---|---:|---:|---|\n')
@@ -186,6 +263,15 @@ def main():
         for (fn, kind), r in sorted(longs.items(), key=lambda kv_: -kv_[1]['max_ms']):
             o.write('| %s | %s | %d | %d | %d | %s |\n' % (fa(fn or None), kind, r['n'], r['infinite'], r['max_ms'],
                                                           fa(r['obj'])))
+    if supp:
+        o.write('\n## suppressed (known benign)\n\n| what | a | b | count | entry | reason |\n|---|---|---|---:|---|---|\n')
+        for what, x, y, n, e in gone:
+            o.write('| %s | %s | %s | %d | %s | %s |\n' % (what, x, y, n, e['where'], e['reason'].replace('|', '/')))
+        for e in supp:
+            if not e['hits']:
+                o.write('| stale (matched nothing) | %s | %s | 0 | %s | %s |\n' % (
+                    fa(e['a']), e['b'] if e['kind'] == 'long-wait' else fa(e['b']), e['where'],
+                    e['reason'].replace('|', '/')))
     o.close()
     head['function_pair_list'] = [{'a': fa(k[0] or None), 'b': fa(k[1] or None), 'kinds': sorted(r['kinds']),
                                    'races': r['races'], 'access_pairs': len(r['pcs'])} for k, r in races.items()]

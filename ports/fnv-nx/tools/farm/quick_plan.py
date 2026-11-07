@@ -33,7 +33,7 @@ CLASSES = [
     (r'^tools/farm/(quick_plan\.py|README\.md)$', ()),
     (r'^tests/s6n/', ('replay', 'build')),            # nx_render's build
     (r'^tests/s5/', ('build',)),                      # the boot scripts
-    (r'^tests/s15/(mtqemu/|test_mtqemu\.py$)', ('threads',)),   # the race checker, linhost, boot_game.sh
+    (r'^tests/s15/(mtqemu/|test_mtqemu\.py$|test_threads_report\.py$)', ('threads',)),   # the race checker, linhost, boot_game.sh
     (r'^tests/', ()),                                 # tests run by the streams and V1, not by a check here
     (r'^render/shaders/', ('programs', 'replay', 'build')),
     (r'^render/', ('replay', 'build')),               # the guest links the native renderer (LINK_OVERRIDES=render)
