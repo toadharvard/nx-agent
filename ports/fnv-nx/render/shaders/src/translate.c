@@ -72,6 +72,22 @@ int fnvnx_shader_translate(const void *bc, size_t n, const fnvnx_shader_opts *op
     char *glsl = be->emit(bc, n, &refl, r->error, sizeof r->error);
     fnvnx_frontend_release(&refl);
     if (!glsl) return 0;
+    {   /* build-time defines go right after the #version line: the static epilogue variant, the numerics */
+        char defs[160]; int k = 0;
+        if ((opts->flags & FNVNX_SHADER_EPI_STATIC) && refl.stage == FNVNX_STAGE_PIXEL && strstr(glsl, "DK_EPI_ALPHA"))
+            k += snprintf(defs + k, sizeof defs - (size_t)k, "#define DK_EPI_ALPHA %d\n#define DK_EPI_FOG %d\n",
+                          (opts->flags & FNVNX_SHADER_EPI_ALPHA) ? 1 : 0, (opts->flags & FNVNX_SHADER_EPI_FOG) ? 1 : 0);
+        if ((opts->flags & FNVNX_SHADER_NUMERICS_NINE) && strstr(glsl, "DK_NUMERICS_NINE"))
+            k += snprintf(defs + k, sizeof defs - (size_t)k, "#define DK_NUMERICS_NINE 1\n");
+        if (k > 0) {
+            char *nl = strchr(glsl, '\n');
+            size_t head = nl ? (size_t)(nl - glsl) + 1 : 0, len = strlen(glsl);
+            char *v = (char *)malloc(len + (size_t)k + 1);
+            if (!v) { free(glsl); snprintf(r->error, sizeof r->error, "out of memory"); return 0; }
+            memcpy(v, glsl, head); memcpy(v + head, defs, (size_t)k); memcpy(v + head + k, glsl + head, len - head + 1);
+            free(glsl); glsl = v;
+        }
+    }
     glsl_stats(glsl, &r->stats);
 
     if (!(opts->flags & FNVNX_SHADER_NO_DKSH)) {

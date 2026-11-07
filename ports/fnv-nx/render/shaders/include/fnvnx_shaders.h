@@ -26,7 +26,19 @@ typedef enum fnvnx_shader_stage {
 
 enum {
     FNVNX_SHADER_KEEP_GLSL = 1u << 0,  /* return the intermediate GLSL in result.glsl */
-    FNVNX_SHADER_NO_DKSH   = 1u << 1   /* stop after GLSL (no uam) */
+    FNVNX_SHADER_NO_DKSH   = 1u << 1,  /* stop after GLSL (no uam) */
+    /* Static D3D9 epilogue variant of a pixel shader (G1). Without EPI_STATIC the shader carries the runtime
+     * epilogue: alpha test and (ps < 3.0) fog, each behind a uniform branch on the driver UBO. With EPI_STATIC
+     * only the blocks named by EPI_ALPHA / EPI_FOG are compiled in; the runtime switches inside them stay, so a
+     * variant bound for a state it does not cover is still correct for that block. __e0 = neither, __ea = alpha
+     * test, __ef = fog; the runtime shader covers both. */
+    FNVNX_SHADER_EPI_STATIC = 1u << 2,
+    FNVNX_SHADER_EPI_ALPHA  = 1u << 3,
+    FNVNX_SHADER_EPI_FOG    = 1u << 4,
+    /* D3D9's implementation-defined numerics (rcp/rsq/log of 0, nrm of a zero vector): WineD3D's IEEE results by
+     * default (the original under Wine, the reference of the S16 sweeps); with this flag Gallium Nine's clamped
+     * ones (V6n's oracle, softpipe). The GLSL carries both behind DK_NUMERICS_NINE; the flag defines it. */
+    FNVNX_SHADER_NUMERICS_NINE = 1u << 5
 };
 
 typedef struct fnvnx_shader_opts {

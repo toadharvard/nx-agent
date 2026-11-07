@@ -11,6 +11,11 @@ Classes per program (one frame each):
   ill           candidate over, but the reference moves under the 1e-5 input perturbation: no evidence
   vacuous       the reference frame is the clear colour only: the program drew nothing, so the comparison proves
                 nothing (counted separately, never as a pass of coverage)
+With --pref <perturbed reference run> --pmanifest <its manifest> (perm.py --perturb 1e-5 over the programs that
+are over, rendered by the reference only), a program that is over is ill when the reference itself moves under the
+perturbation where the candidate differs: at least 90 % of the candidate's pixels off by more than 8 lie within one
+pixel of a pixel the perturbed reference moved by more than 8. Elsewhere it stays over: an unstable pixel somewhere
+else does not excuse a difference.
 Writes <out>/permreport.json (fnvnx-permreport/1: counts, per-class lists with names and hashes) and
 <out>/permreport.md. Both name the game's programs, so they stay private like the captures; the counts are public.
 Exit 0.
@@ -31,8 +36,30 @@ def drew(path, clear):
     return float((np.abs(a - np.array(clear)).max(axis=1) > 0).mean())
 
 
-def report(man, gate, cond, ref, clear):
+def over8(a, b):
+    """mask of the pixels that differ by more than 8 in any channel"""
+    x = np.asarray(Image.open(a).convert('RGB'), dtype=np.int16)
+    y = np.asarray(Image.open(b).convert('RGB'), dtype=np.int16)
+    return np.abs(x - y).max(axis=2) > 8 if x.shape == y.shape else None
+
+
+def explained(ref_png, cand_png, pref_png, share=0.9):
+    """the candidate's differing pixels lie where the perturbed reference moves (dilated by one pixel)"""
+    d, u = over8(ref_png, cand_png), over8(ref_png, pref_png)
+    if d is None or u is None or not u.any():
+        return False
+    if not d.any():
+        return True
+    du = u.copy()
+    du[1:, :] |= u[:-1, :]; du[:-1, :] |= u[1:, :]
+    u2 = du.copy()
+    u2[:, 1:] |= du[:, :-1]; u2[:, :-1] |= du[:, 1:]
+    return float((d & u2).sum()) / float(d.sum()) >= share
+
+
+def report(man, gate, cond, ref, clear, cand=None, pref=None, pman=None):
     fg, fc = frames_of(gate), frames_of(cond) if cond else {}
+    pfr = {e['hash']: (c, e['frame']) for c, lst in (pman or {}).get('captures', {}).items() for e in lst}
     rows = []
     for cap, lst in man['captures'].items():
         for e in lst:
@@ -50,6 +77,11 @@ def report(man, gate, cond, ref, clear):
                 cls = 'ill'
             else:
                 cls = 'over'
+            if cls == 'over' and f is not None and pref and cand and e['hash'] in pfr:
+                pc, pf = pfr[e['hash']]
+                pp, cp = os.path.join(pref, pc, f"f{pf}.png"), os.path.join(cand, cap, f"f{e['frame']}.png")
+                if os.path.isfile(pp) and os.path.isfile(cp) and explained(p, cp, pp):
+                    cls = 'ill'
             m = (f or {}).get('metrics', {})
             rows.append({'capture': cap, 'frame': e['frame'], 'name': e['name'], 'hash': e['hash'],
                          'stage': e['stage'], 'model': e['model'], 'class': cls, 'coverage': round(cov, 4),
@@ -84,11 +116,13 @@ def main():
     ap.add_argument('--manifest', required=True); ap.add_argument('--gate', required=True); ap.add_argument('--cond')
     ap.add_argument('--ref', required=True); ap.add_argument('--out', required=True)
     ap.add_argument('--clear', default='0xff404040')
+    ap.add_argument('--cand', help='the candidate run (with --pref)')
+    ap.add_argument('--pref', help='the reference run of the --perturb captures'); ap.add_argument('--pmanifest')
     a = ap.parse_args()
     v = int(a.clear, 16)
     clear = ((v >> 16) & 255, (v >> 8) & 255, v & 255)
     r = report(json.load(open(a.manifest)), json.load(open(a.gate)), json.load(open(a.cond)) if a.cond else None,
-               a.ref, clear)
+               a.ref, clear, a.cand, a.pref, json.load(open(a.pmanifest)) if a.pmanifest else None)
     os.makedirs(a.out, exist_ok=True)
     json.dump(r, open(os.path.join(a.out, 'permreport.json'), 'w'), indent=1)
     open(os.path.join(a.out, 'permreport.md'), 'w').write(md(r))

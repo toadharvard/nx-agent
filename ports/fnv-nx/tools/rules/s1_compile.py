@@ -3458,6 +3458,70 @@ def _stand_ins(path, text, stats, which):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- STAND4
+#
+# STAND1 / STAND2 for `static` free stand-ins (S1-layout, S13b native-empty-body). tesconditionfunctions.cpp defines
+# `static bool __cdecl InFactionConditionForPlayerCallee(...) { return false; }` untagged, and the tagged 0x0059f790
+# returns its result; the recipe binds `?InFactionConditionForPlayerCallee@@YA_NPAVTESObjectREFR@@PAX1AAN@Z` to
+# 0x0059f630 (GetInFaction, tagged in the same unit). MSVC decorates a static free function like an extern one and
+# its /Od code calls it by that name, so the exe runs 0x0059f630; GCC inlines `return false` (fuzz: the native makes
+# no call). STAND1/2 leave static ones alone because an internal name cannot be rebound. STAND4 replaces the
+# definition by an extern declaration and drops `static` from the unit's other declarations of that name, so the
+# call is a call of the decorated name that the link binds. Same gates as STAND1 (an address tagged in the unit) or
+# STAND2 (an address only other units define, in a unit without /O1 /O2 /Ox /Ob2), for an untagged free function at
+# namespace scope; not inline, not a template, not overloaded in the unit (one definition of the name).
+
+def r_static_stand_ins(path, text, stats):
+    """STAND4: a static free stand-in bound to a decompiled address becomes an extern declaration (above)."""
+    if not path.endswith('.cpp') or '@fnv' not in text or 'static' not in text: return text
+    syms = _unit_symbols(path)
+    if not syms: return text
+    info = _unit_info(path)
+    tagged = {int(a, 16) for a in FNV_TAG_ADDR.findall(text)}
+    elsewhere = set() if info is None or set(info[0]) & STAND2_INLINING_FLAGS else _all_unit_functions(path) - info[1]
+    spans, edits, names = None, [], collections.Counter()
+    defs = []
+    for m in STAND_DEF.finditer(text):
+        q = re.sub(r'\s+', '', m.group(2))
+        if '::' in q or q in NOT_FUNCTIONS or q in CXX_KEYWORDS: continue
+        names[q] += 1
+        defs.append((m, q))
+    for m, name in defs:
+        lead = m.group(1) or ''
+        if names[name] != 1 or not re.search(r'\bstatic\b', lead): continue
+        if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
+        if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
+        before = text[max(0, m.start() - 400):m.start()]
+        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
+        if spans is None: spans = prepare.scope_spans(text)
+        chain = prepare.scope_chain(spans, m.start())
+        if any(k != 'namespace' for k, _ in chain): continue
+        ns = [h.split()[-1] for _, h in chain if h.split()[-1] != 'namespace']
+        if len(ns) != sum(1 for _ in chain): continue                     # an anonymous namespace
+        prefix = '?' + '@'.join([name] + list(reversed(ns))) + '@@'
+        bound = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
+        if not bound or len(bound) != 1: continue
+        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged)): continue
+        o = m.end() - 1
+        c = prepare.match_brace(text, o)
+        start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
+        nl = '\n' * text.count('\n', start, c)
+        head = re.sub(r'\bstatic\s+', '', text[start:o].rstrip(), count=1)
+        edits.append((start, c, head + '; /* fnv-nx STAND4 0x%08x */' % next(iter(bound)) + nl[head.count('\n'):]))
+        # the other declarations of the name lose `static` too (a first static declaration keeps the name internal)
+        for d in re.finditer(r'(?m)^([ \t]*)static\s+(?=[^;{}()]*\b%s\s*\([^;{}]*\)\s*;)' % re.escape(name), text):
+            if d.start() < start or d.start() >= c:
+                edits.append((d.start(), d.end(), d.group(1)))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(r); pos = b
+    out.append(text[pos:])
+    stats['STAND4'] += sum(1 for e in edits if 'STAND4' in e[2])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- STAND3
 #
 # STAND2 for inline stand-ins (S1-fuzzA). The decomp writes small helpers as in-class bodies (modelloader.cpp
@@ -4175,7 +4239,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
@@ -4933,8 +4997,126 @@ def r_handwritten_dyninit(path, text, stats):
             stats['XC2'] += 1
     return text
 
+# ---------------------------------------------------------------------------------------------------------- EBO3
+#
+# An empty base that is not the first base (S1-layout, S13b layout-offset). In `struct Node : NodeBase0, NodeBase16
+# {}` with NodeBase0 four ints and NodeBase16 empty, MSVC 2008 puts NodeBase16 after NodeBase0, at +0x10
+# (/d1reportSingleClassLayout: sizeof(Node) 16, the base at 16), the Itanium ABI at 0. bgszonetargetlistener.cpp
+# 0x0061ff30 calls NodeBase16's method bound to the exe (0x006207a0) with node+0x10 on x86 and node+0 natively; the
+# pristine unit matches the exe. EBO3 writes FNVNX_EBO2 first in that base's body (GCC: a zero-length array, so the
+# base is not empty, still 0 bytes, and goes after the bases before it; empty under MSVC). Only where the base E is
+# defined in the .cpp without bases, data or virtual functions, it follows a base of the same class that is defined
+# in the file and not empty (two empty bases are EBO1's), no class has E as a virtual base, and E is never used as an object (EBO2's
+# test: its name only as a base, in `E*` / `E&`, `E::`, or in its own body), so the zero size changes nothing else.
+
+def r_later_empty_base(path, text, stats):
+    """EBO3: FNVNX_EBO2 in an empty base that follows a non-empty base: after the bases before it, as MSVC (above)."""
+    if ',' not in text or ':' not in text or not path.endswith('.cpp'): return text
+    defs, uses = {}, collections.defaultdict(list)
+    for m in EBO_CLASS.finditer(text):
+        defs.setdefault(m.group(1), []).append(m)
+        if m.group(2):
+            bs = [re.sub(r'^(?:(?:public|protected|private|virtual)\s+)+', '', b).strip() for b in _split_bases(m.group(2))]
+            for i, b in enumerate(bs): uses[b].append((m, i, bs))
+    def empty(b):
+        if not re.match(r'^[A-Za-z_]\w*$', b) or len(defs.get(b, ())) != 1: return None
+        bd = defs[b][0]
+        if bd.group(2): return None
+        bo = bd.end() - 1
+        bc = prepare.match_brace(text, bo)
+        if 'FNVNX_EBO2' in text[bo:bc]: return None
+        return (bd, bo, bc) if _ebo_empty_class(text, bo, bc) else None
+    edits = []
+    for b, us in sorted(uses.items()):
+        e = empty(b)
+        if e is None: continue
+        bd, bo, bc = e
+        if any(re.search(r'\bvirtual\b', m.group(2)) for m, _, _ in us): continue
+        if not any(i > 0 and any(len(defs.get(x, ())) == 1 and empty(x) is None for x in bs[:i]) for m, i, bs in us):
+            continue                                                      # no earlier base of the file that has data
+        heads = {mm.start() for mm, _, _ in us} | {bd.start()}
+        bad = False
+        for u in re.finditer(r'(?<![\w~:])%s\b' % re.escape(b), text):
+            if bo < u.start() < bc: continue
+            pre = text[max(0, u.start() - 40):u.start()]
+            if any(h <= u.start() < h + 400 and text.find('{', h) > u.start() for h in heads): continue
+            if FNVNX_EBO2_USE.match(text, u.end()): continue
+            if re.search(r'(?:class|struct)\s+$', pre): continue
+            bad = True; break
+        if bad: continue
+        edits.append(bo + 1)
+    if not edits: return text
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + ' FNVNX_EBO2 /* fnv-nx EBO3 */' + text[at:]
+    stats['EBO3'] += len(edits)
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- IDTOR1
+#
+# An implicit destructor the recipe binds (S1-layout, S13b layout-offset). A class C that declares no destructor but
+# has a member with one gets an implicit, non-trivial `C::~C`. MSVC 2008 emits it as a COMDAT and calls it by name;
+# the recipe binds that name to the exe function the call went to (extradataobjects.cpp `struct List_009e03e0 { int
+# dummy; void RemoveAll(); ListX m_uiX; }`: `??1List_009e03e0@fnv_00434dc0@@QAE@XZ` -> 0x0046ffb0, BSSimpleList's
+# destructor, which receives the list at this+0xc; build_and_match: 293 / 293 functions). GCC defines the implicit
+# destructor itself, inline, from the decomp's placeholder members: it destroys `m_uiX` at this+0x10 (the exe passes
+# this+0xc to 0x0046ffb0, the native this+0x10 to `ListX::~ListX`), so the exe's destructor never runs. IDTOR1
+# writes FNVNX_IDTOR1(C) at the end of C's body: under GCC `public: ~C();` (body-less), so GCC calls C's D1 by name
+# and the link binds it to the exe's address, as for MSVC; empty under MSVC, whose implicit destructor already is that
+# call (a real declaration there would renumber the unit's $SG string literals the recipe binds). Only: a .cpp; C defined once at namespace or class scope (no template, no local class, no
+# anonymous namespace) that declares no `~C` in its body; the unit binds `??1C@<scopes>@@QAE@XZ` (the
+# non-virtual form: a virtual one would be an implicit override's vtable slot) to one address some unit decompiles.
+
+def r_implicit_bound_destructors(path, text, stats):
+    """IDTOR1: declare `~C();` in a class whose implicit destructor the recipe binds to a decompiled address (above)."""
+    if not path.endswith('.cpp') or 'struct' not in text and 'class' not in text: return text
+    syms = _unit_symbols(path)
+    if not syms or not any(k.startswith('??1') and k.endswith('@@QAE@XZ') for k in syms): return text
+    decompiled = _all_unit_functions(path)
+    spans = prepare.scope_spans(text)
+    cands, seen = [], collections.Counter()
+    for o, c, k, h in spans:
+        if k != 'class': continue
+        bare = prepare.HEAD_DECOR.sub(' ', h).strip()
+        if re.match(r'\s*template\b', bare) or re.search(r'\btemplate\s*<', bare): continue
+        cm = re.match(r'(?:typedef\s+)?(?:class|struct)\s+([A-Za-z_]\w*)\s*(?::(?!:)|$)', bare)
+        if not cm: continue
+        chain = prepare.scope_chain(spans, o)
+        scope, ok = [], True
+        for kk, hh in chain:
+            if kk == 'namespace':
+                n = hh.split()[-1]
+                if n == 'namespace': ok = False; break                   # anonymous namespace
+                scope.append(n)
+            elif kk == 'class':
+                hb = prepare.HEAD_DECOR.sub(' ', hh).strip()
+                if re.search(r'\btemplate\b', hb): ok = False; break
+                hm = re.match(r'(?:typedef\s+)?(?:class|struct|union)\s+([A-Za-z_]\w*)', hb)
+                if not hm: ok = False; break
+                scope.append(hm.group(1))
+            else:
+                ok = False; break
+        if not ok: continue
+        name = cm.group(1)
+        key = '??1' + '@'.join([name] + list(reversed(scope))) + '@@QAE@XZ'
+        seen[key] += 1
+        cands.append((key, name, o, c, bare.startswith('class') or bare.startswith('typedef class')))
+    edits = []
+    for key, name, o, c, is_class in cands:
+        if seen[key] != 1 or key not in syms: continue
+        try: a = int(syms[key], 16)
+        except ValueError: continue
+        if a not in decompiled: continue
+        if re.search(r'~\s*%s\s*\(' % re.escape(name), text[o:c]): continue   # a destructor of its own
+        edits.append((c, ' FNVNX_IDTOR1(%s) /* fnv-nx IDTOR1 0x%08x */\n' % (name, a)))
+    if not edits: return text
+    for at, ins in sorted(edits, reverse=True):
+        text = text[:at] + ins + text[at:]
+    stats['IDTOR1'] += len(edits)
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
-              r_header_unit_instantiations, r_handwritten_dyninit]
+              r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
+              r_implicit_bound_destructors]
 RULES += REFS_RULES

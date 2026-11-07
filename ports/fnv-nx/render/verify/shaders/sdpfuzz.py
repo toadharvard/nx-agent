@@ -265,6 +265,9 @@ def merge(out, works):
     return 0
 
 def main():
+    # the oracle is Gallium Nine: its numerics at 0 (sdp2dksh --numerics); set here, not at import: perm.py imports
+    # these modules and must keep the default (WineD3D)
+    os.environ.setdefault('FNVNX_NUMERICS', 'nine')
     a = sys.argv[1:]
     if a and a[0] == '--merge': return merge(a[1], a[2:])
     tools = os.environ.get('FNVNX_SHADERS_BUILD', os.path.join(ROOT, 'render/shaders/build/host'))

@@ -59,7 +59,7 @@
 0x00ec30e8	cpplib	std::_Xout_of_range ("invalid string position") [_Xran]	n	4	6	fnvnx_xout_of_range
 0x00ec31b3	cpplib	std::ios_base::_Addstd(ios_base*) [basic_ios::init with _Isstd]	i	1	2	fnvnx_ios_base_addstd
 0x00ec3205	cpplib	std::ios_base::_Ios_base_dtor	n	4	4	fnvnx_ios_base_dtor
-0x00ec3241	cpplib	std::uncaught_exception	n	1	1	libstdc++: std::uncaught_exception
+0x00ec3241	cpplib	std::uncaught_exception	n	1	1	fnvnx_uncaught_exception (eh.cpp: std::uncaught_exceptions() > 0)
 0x00ec3246	cpplib	std::_Mutex::_Mutex() [basic_streambuf::_Mylock]	i	1	1	fnvnx_mutex_ctor
 0x00ec3260	cpplib	std::_Mutex::~_Mutex() [~basic_streambuf, member at +4]	i	1	2	fnvnx_mutex_dtor
 0x00ec3277	cpplib	std::_Mutex::_Lock() [_Sentry_base ctor: rdbuf()->_Lock()]	i	1	2	fnvnx_mutex_lock
@@ -127,6 +127,7 @@
 0x00ec79c4	cpplib	std::bad_cast::bad_cast(const char*)	n	1	1	fnvnx_bad_cast_ctor
 0x00ec7c56	crt	_invalid_parameter_noinfo	n	38	42	platform/crt: _invalid_parameter_noinfo
 0x00ec7c66	crt	memcpy_s	n	6	16	platform/crt: memcpy_s
+0x00ec7c6b	crt	memcpy_s, past its hot-patch prologue (8b ff 55 8b ec at 0x00ec7c66; the decomp binds this address, the exe never calls it)	n	7	7	platform/crt: memcpy_s
 0x00ec7ce3	crt	memmove_s	n	13	24	platform/crt: memmove_s
 0x00ec7d40	crt	abs	n	20	82	libc: abs
 0x00ec7d50	crt	clock	i	1	1	fnvnx_clock
@@ -184,7 +185,7 @@
 0x00ecad86	crt	wcstombs_s	i	1	1	platform/crt: wcstombs_s
 0x00ecada6	crt	srand	n	4	5	fnvnx_srand
 0x00ecadb8	crt	rand	n	30	36	fnvnx_rand
-0x00ecadda	crt	_time64	n	6	11	_time64
+0x00ecadda	crt	_time64	n	6	11	platform/crt: _time64
 0x00ecae30	crt	exp	n	2	9	libc: exp
 0x00ecae6c	helper	_CIexp	n	4	0	implicit: libm call (explicit arg-less calls need a rule)
 0x00ecaebb	helper	`eh vector copy constructor iterator'	i	1	2	fnvnx_eh_vector_copy_ctor
@@ -227,7 +228,7 @@
 0x00ecdd16	crt	_gcvt	n	3	3	platform/crt: _gcvt
 0x00ecddf1	crt	_vsnprintf	i	2	3	platform/crt: _vsnprintf
 0x00ecdf2d	crt	strtod	i	2	4	libc: strtod
-0x00ecdf44	crt	__iob_func	i	1	1	__iob_func (fnvnx_iob[3], MSVC _iobuf layout)
+0x00ecdf44	crt	__iob_func	i	1	1	platform/crt: __iob_func (fnvnx_iob[3], MSVC _iobuf layout)
 0x00ece104	helper	_except_handler3	n	1	0	none: SEH not reproduced
 0x00ece23e	crt	_mbstok (_tcstok under _MBCS): movie list tokenizer	i	1	1	fnvnx_mbstok
 0x00ee6d44	thunk	ws2_32 closesocket	i	1	2	fnvnx_ws2_* (see imports.tsv)

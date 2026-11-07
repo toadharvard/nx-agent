@@ -58,6 +58,22 @@ def main():
     rx.ret = ra.ret = None
     d = runner.compare(cv, rx, ra, w, vcalls=({0x00401000}, set()))
     check(d is None, 'vcall-stub-alias: the same raw word on both machines is the same call (%s)' % d)
+    # D21: a by-design difference does not end the comparison
+    def res(targets, ret=None, writes=None):
+        a, b = x86emu.Result(), arm64emu.Result()
+        a.calls = [x86emu.Call(t, [0, 0], 0) for t in targets[0]]
+        b.calls = [arm64emu.Call(t, [0] * 8, [0] * 8, 0) for t in targets[1]]
+        a.ret = b.ret = ret
+        a.writes, b.writes = dict((writes or ({}, {}))[0]), dict((writes or ({}, {}))[1])
+        return a, b
+    vc = ({0x00401000, 0x00402000, 0x00403000}, set())
+    rx, ra = res(([0x00402000, 0x00403000], [0x00403000, 0x00402000]))
+    d = runner.compare(cv, rx, ra, w, vcalls=vc)
+    check(d is not None and d.get('soft') and d.get('call_order'), 'a swapped pair alone: soft call-order (%s)' % d)
+    rx, ra = res(([0x00402000, 0x00403000], [0x00403000, 0x00402000]), writes=({0x01000000: 1}, {0x01000000: 2}))
+    d = runner.compare(cv, rx, ra, w, vcalls=vc)
+    check(d is not None and d['kind'] == 'mem-write' and not d.get('soft'),
+          'a swapped pair, then a different store: the store is reported (%s)' % (d and d['kind']))
     # dynamic evidence: a divergence carries the unit functions the native entered
     sys.path.insert(0, HERE)
     from test_d14 import build_image

@@ -13,6 +13,7 @@ it as host; the MSVC decoration filter; bind.tsv / synth.tsv round trip through 
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -256,6 +257,115 @@ class T(unittest.TestCase):
         ik = {k for t, k in i.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.relaxed_keys(i)}
         self.assertTrue(mk & ik)
 
+    def test_star_operators_pair(self):
+        """operator* / operator*= end in '*' as well: they parse and pair (the matrix and vector products of
+        NiTransform::operator*); a function returning a function pointer still does not parse as a function."""
+        cases = [('??DM@@QBE?AV0@ABV0@@Z', '_ZNK1MmlERKS_'), ('??XM@@QAEAAV0@M@Z', '_ZN1MmLEf')]
+        dm = fnvlink.batch_demangle(fnvlink.UNDNAME, [m for m, _ in cases] + ['?f@@YAP6AXXZH@Z'])
+        di = fnvlink.batch_demangle(fnvlink.CXXFILT, [i for _, i in cases])
+        for ms, it in cases:
+            m, i = sigs.parse_msvc(ms, dm[ms]), sigs.parse_itanium(it, di[it])
+            self.assertEqual(m.kind, 'func', ms)
+            mk = {k for t, k in m.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.def_keys(m)}
+            ik = {k for t, k in i.keys() if t in ('exact', 'l1', 'l2')} | {k for _, k in bodies.relaxed_keys(i)}
+            self.assertTrue(mk & ik, ms)
+        self.assertNotEqual(sigs.parse_msvc('?f@@YAP6AXXZH@Z', dm['?f@@YAP6AXXZH@Z']).kind, 'func')
+
+    @unittest.skipUnless(shutil.which('aarch64-linux-gnu-as') and shutil.which('aarch64-linux-gnu-ld'),
+                         'needs the aarch64 binutils')
+    def test_fuzz_image_links_vcall_stubs(self):
+        """The fuzz harness's unit image (difffuzz/a64image) links fixed/zz_bd_vcall.o like zz_bridges.o: a call
+        of a __fnvnx_bdvc_ stub is not left as a named stub (S1-refs' native-undefined rows)."""
+        import subprocess
+        sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'difffuzz'))
+        import a64image
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'fixed'))
+            os.makedirs(os.path.join(d, 'out'))
+            open(os.path.join(d, 'out', 'aliases.ld'), 'w').close()
+            for name, src in (('src_u.cpp.o', '.text\n.globl f\nf: b __fnvnx_bdvc_00000001\n'),
+                              ('zz_bd_vcall.o', '.text\n.globl __fnvnx_bdvc_00000001\n.type __fnvnx_bdvc_00000001,'
+                                                '%function\n__fnvnx_bdvc_00000001: ret\n')):
+                sp = os.path.join(d, name + '.s')
+                open(sp, 'w').write(src)
+                subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', sp, '-o', os.path.join(d, 'fixed', name)],
+                               check=True)
+            img = a64image.build_many(['src/u.cpp'], d, os.path.join(d, 'w'), 'u')
+        self.assertFalse([n for n in img.stubs.values() if n.startswith('__fnvnx_bdvc_')])
+
+    def test_gdel_pass(self):
+        """gdel: a D1 bound to its class's ??_G when the native build defines that address as a member function
+        taking (unsigned int); a D2 only without virtual bases (no _ZTT of the class known); no member of that
+        shape at the address -> unchanged."""
+        units = {'units': [{'source': 'src/g.cpp', 'functions': [
+            {'symbol': '??_GDel@@UAEPAXI@Z', 'address': '00405000'},
+            {'symbol': '?Kill@FUN_00405000@@QAEPAXI@Z', 'address': '00405000'},
+            {'symbol': '??_GVb@@UAEPAXI@Z', 'address': '00406000'},
+            {'symbol': '?Kill@FUN_00406000@@QAEPAXI@Z', 'address': '00406000'},
+            {'symbol': '??_GOdd@@UAEPAXI@Z', 'address': '00407000'},
+            {'symbol': '?Run@FUN_00407000@@QAEXXZ', 'address': '00407000'}], 'symbols': {}}]}
+        native = {0x00405000: 'F', 0x00406000: 'F', 0x00407000: 'F'}
+        names = ['_ZN3DelD1Ev', '_ZN3DelD2Ev', '_ZN2VbD2Ev', '_ZN2VbD1Ev', '_ZN3OddD1Ev']
+        with tempfile.TemporaryDirectory() as d:
+            uj = os.path.join(d, 'units.json')
+            json.dump(units, open(uj, 'w'))
+            u = fnvlink.load_units(uj)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'msvc.tsv'), fnvlink.UNDNAME)
+            msvc, itanium = tables({f['symbol'] for f in units['units'][0]['functions']}, names)
+            rows = [bodies.Row(n, 'special-default', None, None, 'src/g.cpp', 'dtor', 'src/g.cpp') for n in names]
+            got = {r.name: r for r in bodies.gdel_pass(rows, u, native, itanium, msvc, ms, known={'_ZTT2Vb'})}
+        self.assertEqual((got['_ZN3DelD1Ev'].cls, got['_ZN3DelD1Ev'].target), ('gdel', '__fnvnx_bdgd_00405000'))
+        self.assertEqual(got['_ZN3DelD2Ev'].cls, 'gdel')
+        self.assertEqual(got['_ZN2VbD2Ev'].cls, 'special-default')     # virtual bases: D2 is not ??_G
+        self.assertEqual(got['_ZN2VbD1Ev'].cls, 'gdel')
+        self.assertEqual(got['_ZN3OddD1Ev'].cls, 'special-default')    # no (unsigned int) member at the address
+        self.assertEqual(bodies.vtt_name('_ZN2ns3FooD2Ev'), '_ZTTN2ns3FooE')
+
+    @unittest.skipUnless(shutil.which('qemu-aarch64') and shutil.which('aarch64-linux-gnu-gcc'),
+                         'needs qemu-aarch64 and the aarch64 cross compiler')
+    def test_gdel_stub_qemu(self):
+        """The gdel stub under qemu: the ??_G stand-in sees the same this and flags 0, whatever w1 held (the
+        stub's code is the same under LP64, which qemu-user runs)."""
+        import subprocess
+        c = r"""
+#include <stdio.h>
+void *seen_this; unsigned seen_flags = 99;
+void *__fnv_00405000(void *self, unsigned flags) { seen_this = self; seen_flags = flags; return self; }
+void __fnvnx_bdgd_00405000(void *self);
+void call(void *p, unsigned junk);
+int main(void) { int obj; call(&obj, 1); printf("%d %u\n", seen_this == (void *)&obj, seen_flags); return 0; }
+"""
+        asm = bodies.emit_gdel({0x00405000}) + '.globl call\ncall: b __fnvnx_bdgd_00405000\n'   # w1 = 1 on entry
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, 'm.c'), 'w').write(c)
+            open(os.path.join(d, 's.S'), 'w').write(asm)
+            subprocess.run(['aarch64-linux-gnu-gcc', '-static', '-O1', os.path.join(d, 'm.c'), os.path.join(d, 's.S'),
+                            '-o', os.path.join(d, 'm')], check=True)
+            r = subprocess.run(['qemu-aarch64', os.path.join(d, 'm')], capture_output=True, text=True, check=True)
+        self.assertEqual(r.stdout.strip(), '1 0')
+
+    @unittest.skipUnless(shutil.which(vtables.CXX), 'needs the aarch64 cross compiler')
+    def test_print_flags_stdout_is_flags_only(self):
+        """compile.sh --print-flags (layout.game_flags: the flags of every synthesized body) prints flags only on
+        stdout. The order-keys line went there too, every game-flags compile failed, and the bodies step lost
+        special-default and msvc-inline (1,329 names 'host does not compile')."""
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            tree, work = os.path.join(d, 'tree'), os.path.join(d, 'work')
+            os.makedirs(os.path.join(tree, 'src'))
+            os.makedirs(os.path.join(tree, 'build'))
+            os.makedirs(os.path.join(tree, 'include'))
+            open(os.path.join(tree, 'src', 'a.cpp'), 'w').write('struct S { volatile int v; }; int f(S *s) { return s->v; }\n')
+            json.dump({'units': [{'source': 'src/a.cpp', 'functions': [], 'symbols': {}}]},
+                      open(os.path.join(tree, 'build', 'units.json'), 'w'))
+            r = subprocess.run(['bash', os.path.join(HERE, '..', '..', 'tools', 'link', 'compile.sh'), '--print-flags',
+                                tree, work], capture_output=True, text=True, timeout=900)
+        self.assertEqual(r.returncode, 0, r.stderr[-500:])
+        lines = r.stdout.split('\n')[:-1]
+        self.assertIn('-c', lines)
+        bad = [x for i, x in enumerate(lines) if not x.startswith('-') and not (i and lines[i - 1] == '-include')]
+        self.assertEqual(bad, [])
+
 def coff(funcs, externs, data=None):
     """Minimal i386 COFF: one COMDAT code section per function {name: (bytes, {offset: callee})}; data: the same
     for read-only data sections (a vftable: DIR32 words)."""
@@ -342,6 +452,127 @@ class Exe(unittest.TestCase):
             got = bodies.exe_call_targets(d, 0, unit, {'?g@@YAXXZ', '?k@@YAXXZ'}, exe)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}, '?k@@YAXXZ': {K: 1}})
 
+    def test_exe_dtor_as_function(self):
+        """A destructor the exe calls out of line at a function the decomp spells FUN_<addr>(T*) binds there
+        (natively both take the object in x0) instead of `= default`, as does one at an S4 provider's address; one with
+        two parameters does not."""
+        import struct
+        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xe8\0\0\0\0\xc3'   # call ??1Short; call ??1Long; call ??1Lock; ret
+        obj = coff({'?f@@YAXXZ': (f, {1: '??1Short@@QAE@XZ', 6: '??1Long@@QAE@XZ', 11: '??1Lock@@QAE@XZ'})},
+                   ['??1Short@@QAE@XZ', '??1Long@@QAE@XZ', '??1Lock@@QAE@XZ'])
+        F, G, H, P = 0x401000, 0x401080, 0x4010c0, 0x4010e0
+        text = bytearray(0x100)
+        text[0:len(f)] = f
+        struct.pack_into('<i', text, 1, G - (F + 5))
+        struct.pack_into('<i', text, 6, H - (F + 10))
+        struct.pack_into('<i', text, 11, P - (F + 15))                # an S4 provider implements P
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '?f@@YAXXZ', 'address': '%x' % F},
+            {'symbol': '?FUN_00401080@@YIXPAX@Z', 'address': '%x' % G},          # void __fastcall (void*)
+            {'symbol': '?FUN_004010c0@@YAXPAXH@Z', 'address': '%x' % H}]}]}     # void __cdecl (void*, int)
+        rows = [bodies.Row('_ZN5ShortD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
+                bodies.Row('_ZN4LongD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
+                bodies.Row('_ZN4LockD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp')]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as fo:
+                json.dump(units_j, fo)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
+            it.need([r.name for r in rows])
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F', H: 'F', P: 'F'},
+                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms,
+                                  {P: 'fnvnx_lock_dtor'})
+        got = {r.name: r for r in got}
+        self.assertEqual((got['_ZN5ShortD1Ev'].cls, got['_ZN5ShortD1Ev'].target), ('exe-addr', '__fnv_00401080'))
+        self.assertEqual(got['_ZN4LongD1Ev'].cls, 'special-default')
+        self.assertEqual((got['_ZN4LockD1Ev'].cls, got['_ZN4LockD1Ev'].target), ('exe-addr', '__fnv_004010e0'))
+
+
+    def test_align_targets(self):
+        """Call-order alignment: P (placed) calls the unplaced helper C, which MSVC inlined in the exe, then K
+        (placed). C calls M, which no placed function calls: the exe's P calls M's address where C's call stood."""
+        import struct
+        p = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'                 # call ?C; call ?K; ret
+        c_ = b'\xe8\0\0\0\0\xc3'                                  # call ?M; ret
+        obj = coff({'?P@@YAXXZ': (p, {1: '?C@@YAXXZ', 6: '?K@@YAXXZ'}), '?C@@YAXXZ': (c_, {1: '?M@@YAXXZ'})},
+                   ['?K@@YAXXZ', '?M@@YAXXZ'])
+        P, K, M, Q = 0x401000, 0x401080, 0x4010c0, 0x401100
+        text = bytearray(0x200)
+        ins = b'\x90\x90\xe8\0\0\0\0\x90\xe8\0\0\0\0\xc3'      # the exe's P: C inlined (with M's call)
+        text[0:len(ins)] = ins
+        struct.pack_into('<i', text, 3, M - (P + 7))
+        struct.pack_into('<i', text, 9, K - (P + 13))
+        udata = [{'source': 'src/a.cpp', 'functions': [{'symbol': '?P@@YAXXZ', 'address': '%x' % P},
+                                                       {'symbol': '?Q@@YAXXZ', 'address': '%x' % Q},
+                                                       {'symbol': '?K@@YAXXZ', 'address': '%x' % K}],
+                  'symbols': {}}]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            exe = bodies.Pe(os.path.join(d, 'x.exe'))
+            got = bodies.align_targets(d, udata, exe, {'?M@@YAXXZ'})
+            self.assertEqual({k: dict(v) for k, v in got.items()}, {'?M@@YAXXZ': {M: 1}})
+            struct.pack_into('<i', text, 9, 0x401140 - (P + 13))         # the anchor K no longer matches
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            got = bodies.align_targets(d, udata, bodies.Pe(os.path.join(d, 'x.exe')), {'?M@@YAXXZ'})
+            self.assertEqual(dict(got), {})
+
+
+    def test_exe_sret(self):
+        """The exe calls X::Scale(V*, float) where MSVC called V V::operator*(float) const: the hidden return
+        pointer written out. -> exe-sret, and the adapter line compiles to the wanted symbol (V trivially copyable and destructible only)."""
+        import struct
+        f = b'\xe8\0\0\0\0\xc3'
+        obj = coff({'?f@@YAXXZ': (f, {1: '??DV@@QBE?AU0@M@Z'})}, ['??DV@@QBE?AU0@M@Z'])
+        F, G = 0x401000, 0x401080
+        text = bytearray(0x100)
+        text[0:len(f)] = f
+        struct.pack_into('<i', text, 1, G - (F + 5))
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '?f@@YAXXZ', 'address': '%x' % F},
+            {'symbol': '?Scale@X@@QAEXPAUV@@M@Z', 'address': '%x' % G}]}]}     # void X::Scale(V*, float)
+        rows = [bodies.Row('_ZNK1VmlEf', 'missing', None, None, 'src/a.cpp', 'no definition', None)]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as fo:
+                json.dump(units_j, fo)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
+            it.need([r.name for r in rows])
+            itan = (lambda n: sigs.parse_itanium(n, it[n]))
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F'},
+                                  itan, lambda n: sigs.parse_msvc(n, ms[n]), ms)
+            r = got[0]
+            self.assertEqual((r.cls, r.addr, r.host), ('exe-sret', G, 'src/a.cpp'))
+            self.assertTrue(r.note.startswith('sret this'))
+            line = bodies.sret_line(itan(r.name), G, True)
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                for v, ok in (('struct V { float x, y, z; V operator*(float) const; };', True),
+                              ('struct V { V(); float x, y, z; V operator*(float) const; };', True),
+                              ('struct V { ~V(); float x, y, z; V operator*(float) const; };', False)):
+                    src = os.path.join(d, 's.cpp')
+                    open(src, 'w').write(v + '\n' + line + '\n')
+                    p = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 's.o')], capture_output=True, text=True)
+                    self.assertEqual(p.returncode == 0, ok, p.stderr[-400:])
+                    if ok:
+                        nm = subprocess.run(['nm', os.path.join(d, 's.o')], capture_output=True, text=True).stdout
+                        self.assertIn('T _ZNK1VmlEf', nm)
+                        self.assertIn('U __fnv_00401080', nm)
+
+
     def test_exe_address_taken(self):
         """A DIR32 in a placed function (push offset ?g) gives the target from the exe's word, minus the addend."""
         import struct
@@ -385,6 +616,43 @@ class Exe(unittest.TestCase):
             got = bodies.exe_call_targets(*args, search=True)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}})
 
+    def test_crt_rule(self):
+        """The MSVC STL throwers of the decomp's copies throw through libstdc++; a class placement delete is a
+        ret; anything else (another member, a delete with one parameter) is not a crt-rule name."""
+        def k(n, d):
+            return bodies.crt_rule(sigs.parse_itanium(n, d))
+        self.assertEqual(k('_ZN10StringBase5_XlenEv', 'StringBase::_Xlen()'),
+                         ('throw', '_ZSt20__throw_length_errorPKc', 'string too long'))
+        self.assertEqual(k('_ZNK6Vector5_XranEv', 'Vector::_Xran() const'),
+                         ('throw', '_ZSt20__throw_out_of_rangePKc', 'invalid vector<T> position'))
+        self.assertEqual(k('_ZN4Obj8dlEPvS0_', 'Obj8::operator delete(void*, void*)'), ('ret', None, None))
+        self.assertIsNone(k('_ZN4Obj8dlEPv', 'Obj8::operator delete(void*)'))
+        self.assertIsNone(k('_ZN10StringBase4TidyEv', 'StringBase::Tidy()'))
+        self.assertIsNone(k('_Z5_Xlenv', '_Xlen()'))            # not a member: no class contract
+        rows = [bodies.Row('_ZN10StringBase5_XlenEv', 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row('_ZN4Obj8dlEPvS0_', 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row('_ZN3Foo3GetEv', 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row('_ZN3Bar5_XlenEv', 'exe-addr', 0x401000, '__fnv_00401000', 'src/a.cpp', '', None)]
+        dem = {'_ZN10StringBase5_XlenEv': 'StringBase::_Xlen()', '_ZN4Obj8dlEPvS0_': 'Obj8::operator delete(void*, void*)',
+               '_ZN3Foo3GetEv': 'Foo::Get()', '_ZN3Bar5_XlenEv': 'Bar::_Xlen()'}
+
+        def it(n):
+            return sigs.parse_itanium(n, dem[n])
+        got = bodies.crt_pass(rows, it)
+        self.assertEqual([r.cls for r in got], ['crt-rule', 'crt-rule', 'missing', 'exe-addr'])
+        asm = bodies.emit_crt([r for r in got if r.cls == 'crt-rule'], it)
+        self.assertIn('    b _ZSt20__throw_length_errorPKc', asm)
+        self.assertIn('.asciz "string too long"', asm)
+        self.assertIn('"_ZN4Obj8dlEPvS0_":\n    ret', asm)
+        as_ = shutil.which('aarch64-linux-gnu-as')
+        if as_:
+            with tempfile.TemporaryDirectory() as d:
+                open(os.path.join(d, 'c.S'), 'w').write(asm)
+                r = subprocess.run([as_, '-mabi=ilp32', os.path.join(d, 'c.S'), '-o', os.path.join(d, 'c.o')],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+
     def test_code_only_externs(self):
         """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take
         it); one a code section names is."""
@@ -395,6 +663,143 @@ class Exe(unittest.TestCase):
                 fo.write(obj)
             self.assertEqual(bodies.pristine_externs(d, 0), {'?g@@YAXXZ', '?v@A@@UAEXXZ'})
             self.assertEqual(bodies.pristine_externs(d, 0, code_only=True), {'?g@@YAXXZ'})
+
+
+
+class Fold(unittest.TestCase):
+    """template-fold: pointer instantiations of a template member that units.json places at one native address
+    (two or more there) bind a new pointer instantiation to it; one instantiation alone, two addresses, or a
+    non-pointer argument do not."""
+
+    def test_fold(self):
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '??1?$List@PAD@@QAE@XZ', 'address': '00405000'},               # List<char*>::~List()
+            {'symbol': '??1?$List@PAH@@QAE@XZ', 'address': '00405000'},               # List<int*>::~List()
+            {'symbol': '?Add@?$List@PAD@@QAEXAAPAD@Z', 'address': '00405100'},         # List<char*>::Add(char*&)
+            {'symbol': '?Add@?$List@PAH@@QAEXAAPAH@Z', 'address': '00405100'},
+            {'symbol': '?Get@?$List@PAD@@QAEPADXZ', 'address': '00405200'},            # one instantiation only
+            {'symbol': '?Pop@?$List@PAD@@QAEXXZ', 'address': '00405300'},              # two addresses
+            {'symbol': '?Pop@?$List@PAH@@QAEXXZ', 'address': '00405310'}],
+            'symbols': {}}]}
+        native = {0x00405000: 'X', 0x00405100: 'F', 0x00405200: 'F', 0x00405300: 'F', 0x00405310: 'F'}
+        want = {'_ZN4ListIP3FooED1Ev': ('00405000', 'D1'),       # List<Foo*>::~List()
+                '_ZN4ListIP3FooED2Ev': ('00405000', 'D2'),
+                '_ZN4ListIP3FooE3AddERS1_': ('00405100', None),  # List<Foo*>::Add(Foo*&)
+                '_ZN4ListIP3FooE3GetEv': (None, None),
+                '_ZN4ListIP3FooE3PopEv': (None, None),
+                '_ZN4ListIiED1Ev': (None, None)}                 # List<int>: not a pointer argument
+        with tempfile.TemporaryDirectory() as d:
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as f:
+                json.dump(units_j, f)
+            units = fnvlink.load_units(uj)
+        allms = {n for u in units.values() for n in list(u.refs) + [n for _, n in u.defs]}
+        msvc, itanium = tables(allms, want)
+        cl = bodies.Classifier(units, native, msvc, itanium, None, ['src/a.cpp'])
+        for n, (a, _) in want.items():
+            r = cl.classify(n, {'src/b.cpp'})
+            if a:
+                self.assertEqual((r.cls, r.target), ('template-fold', '__fnv_' + a), n)
+            else:
+                self.assertNotEqual(r.cls, 'template-fold', n)
+
+
+
+class Thunks(unittest.TestCase):
+    def test_thunks(self):
+        """Thunk names parse to (this adjustment, vcall offset, target); refs.tsv's undefined thunks load; the stubs
+        assemble (ILP32) and branch to the target by name."""
+        self.assertEqual(bodies.thunk_parts('_ZThn24_N3Own3FunEv'), (-24, None, '_ZN3Own3FunEv'))
+        self.assertEqual(bodies.thunk_parts('_ZTh8_N1A1gEv'), (8, None, '_ZN1A1gEv'))
+        self.assertEqual(bodies.thunk_parts('_ZTv0_n12_N1A1fEv'), (0, 12, '_ZN1A1fEv'))
+        self.assertIsNone(bodies.thunk_parts('_ZN1A1fEv'))
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\t_ZThn24_N3Own3FunEv\tspecial-unresolved:non-virtual-thunk-to\t\t\t\t\n'
+                                  'src/b.cpp#x\t_ZTv0_n12_N1A1fEv\tspecial-unresolved:virtual-thunk-to\t\t\t\t\n'
+                                  'src/a.cpp\t_ZTV1A\tspecial-unresolved:vtable-for\t\t\t\t\n')
+            got = bodies.load_thunks(refs)
+            self.assertEqual(got, {'_ZThn24_N3Own3FunEv': {'src/a.cpp'}, '_ZTv0_n12_N1A1fEv': {'src/b.cpp'}})
+            asm = bodies.emit_thunks(got)
+            self.assertIn('    sub w0, w0, #24\n    b "_ZN3Own3FunEv"', asm)
+            as_ = shutil.which('aarch64-linux-gnu-as')
+            if as_:
+                open(os.path.join(d, 't.S'), 'w').write(asm)
+                r = subprocess.run([as_, '-mabi=ilp32', os.path.join(d, 't.S'), '-o', os.path.join(d, 't.o')],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+
+
+class AddrHost(unittest.TestCase):
+    def test_gdel_line_and_stubs(self):
+        """code-defmissing rows load by address; a ??_G line destroys / deletes like MSVC's and compiles to
+        __fnv_<addr>; a template class is refused; the stub branches to the emitted symbol."""
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\t_ZN1X1fEi\tcode-defmissing\tunit/exact\t004459e0\t__fnv_004459e0\t?f@X@@QAEHH@Z\n'
+                                  'src/b.cpp#bd\t_ZN1Y1fEi\tcode-defmissing\tunit/exact\t004459e0\t__fnv_004459e0\t\n'
+                                  'src/a.cpp\t_ZN1Z1fEv\tcode\tunit/exact\t00401000\t__fnv_00401000\t\n')
+            self.assertEqual(bodies.load_defmissing(refs), {0x004459e0: {'src/a.cpp', 'src/b.cpp'}})
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            names = ['??_GRec@@QAEPAXI@Z', '??_G?$L@H@@QAEPAXI@Z']
+            ms.need(names)
+            line = bodies.gdel_line(0x004459e0, sigs.parse_msvc(names[0], ms[names[0]]))
+            self.assertIn('extern "C" void *__fnv_004459e0(::Rec *p, unsigned int f)', line)
+            self.assertIn('if (f & 1) delete p; else p->::Rec::~Rec();', line)
+            self.assertIsNone(bodies.gdel_line(0x00401000, sigs.parse_msvc(names[1], ms[names[1]])))
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                src = os.path.join(d, 'g.cpp')
+                open(src, 'w').write('struct Rec { int k; ~Rec(); };\n' + line + '\n')
+                r = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 'g.o')], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-400:])
+                nm = subprocess.run(['nm', os.path.join(d, 'g.o')], capture_output=True, text=True).stdout
+                self.assertIn('T __fnv_004459e0', nm)
+            asm = bodies.emit_addr_stubs({0x0046ffd0: '_ZNK7NiPoint2mlEf', 0x004459e0: '__fnv_004459e0'})
+            self.assertIn('"__fnv_0046ffd0":\n    b "_ZNK7NiPoint2mlEf"', asm)
+            self.assertNotIn('"__fnv_004459e0":', asm)
+
+
+
+class DeclData(unittest.TestCase):
+    def test_data_line(self):
+        """A global, a namespace or class member get a typed zero definition; a template member does not;
+        refs.tsv's unresolved C names load except address-named ones and mangled names."""
+        self.assertEqual(bodies.data_line(['g_count']), 'decltype(g_count) g_count {};')
+        self.assertEqual(bodies.data_line(['C', 's_n']), 'decltype(C::s_n) C::s_n {};')
+        self.assertIsNone(bodies.data_line(['L<int>', 's_n']))
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\twblk_u\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\tFUN_00401000\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\t_ZN1A1fEv\tunresolved\t\t\t\t\n'
+                                  'src/b.cpp\twblk_u\tunresolved\t\t\t\t\n')
+            self.assertEqual(bodies.load_cdata(refs), {'wblk_u': {'src/a.cpp', 'src/b.cpp'}})
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                src = os.path.join(d, 'd.cpp')
+                open(src, 'w').write('extern float wblk_u[4]; struct C { static int s_n; };\n' +
+                                     bodies.data_line(['wblk_u']) + '\n' + bodies.data_line(['C', 's_n']) + '\n')
+                r = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 'd.o')], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-400:])
+                nm = subprocess.run(['nm', '-S', os.path.join(d, 'd.o')], capture_output=True, text=True).stdout
+                self.assertRegex(nm, r'00000010 B wblk_u')
+
+
+
+class Sigs(unittest.TestCase):
+    def test_conversion_to_pointer_and_unary_star(self):
+        """MSVC and Itanium spellings of a conversion operator to a namespaced pointer type and of a unary operator*
+        give the same exact key (R6: 82 names left unresolved on link 9f865b0a)."""
+        pairs = [('??BSpherePtr@fnv_009614b0@@QBEPAUSphere@1@XZ', '_ZNK12fnv_009614b09SpherePtrcvPNS_6SphereEEv'),
+                 ('??DMatView@@QAEAAMXZ', '_ZN7MatViewdeEv')]
+        ms = fnvlink.batch_demangle(fnvlink.UNDNAME, [m for m, _ in pairs])
+        it = fnvlink.batch_demangle(fnvlink.CXXFILT, [i for _, i in pairs])
+        for m, i in pairs:
+            a, b = sigs.parse_msvc(m, ms[m]), sigs.parse_itanium(i, it[i])
+            self.assertEqual((a.kind, b.kind), ('func', 'func'), m)
+            self.assertTrue({k for t, k in a.keys() if t == 'exact'} & {k for t, k in b.keys() if t == 'exact'}, m)
 
 
 if __name__ == '__main__':

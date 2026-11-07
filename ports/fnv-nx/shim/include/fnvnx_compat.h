@@ -174,6 +174,9 @@ struct fnvnx_new_tag {};
 /* EBO2: first in an empty base whose derived class introduces a vfptr: not empty (MSVC puts it after the vfptr),
  * still 0 bytes */
 #define FNVNX_EBO2 char fnvnx_ebo2[0];
+/* IDTOR1: a body-less destructor declaration for a class whose implicit destructor the recipe binds (GCC calls the
+ * bound D1 by name instead of defining it inline); MSVC's implicit one already compiles to that call */
+#define FNVNX_IDTOR1(cls) public: ~cls();
 #endif
 
 /* SAL annotations (sal.h) used without an include in pasted CRT prototypes */

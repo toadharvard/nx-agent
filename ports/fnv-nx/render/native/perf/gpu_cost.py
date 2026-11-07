@@ -28,13 +28,17 @@ TEX_COST = 1.5              # TMU cycles per texture instruction (bilinear 1, tr
 EFF = (1.0, 0.6)            # SM issue efficiency (ALU and TMU): 1.0 = peak (lo estimate), 0.6 = latency/occupancy bound (hi)
 GPU = {"name": "Tegra X1 GM20B", "sm": 2, "lanes": 256, "tmu": 16, "rop": 16, "dram_gbs": 25.6, "dram_eff": 0.6,
        "clocks_mhz": {"docked": 768.0, "handheld": 384.0, "handheld_boost": 460.8}}
-# Presets (RENDER_NATIVE.md §9.3), dynamic resolution OFF: the gate configs are docked_720p and handheld_720p.
+# Configs, dynamic resolution OFF: the gate configs are docked_720p and handheld_720p. No settings presets (D20,
+# owner): every config runs the exe's own defaults, read from the Setting initialisers of FalloutNV.exe 1.4.0.525
+# (iShadowMapResolution:Display 256, iWaterReflectWidth / Height:Water 512 x 512, iActorShadowCountExt 2 +
+# bDoCanopyShadowPass 1 = 3 shadow maps outdoors). The RENDER_NATIVE.md §9.3 handheld preset (3 x 512, 256²) is gone.
 # shadow: maps x size; refl: water reflection size. The *_dynres configs are informational (scene scaled).
+EXE_SHADOW, EXE_REFL = (3, 256), (512, 512)
 PRESETS = {
-    "docked_720p":    dict(clock="docked", w=1280, h=720, shadow=(3, 1024), refl=(512, 512), gate=True),
-    "handheld_720p":  dict(clock="handheld", w=1280, h=720, shadow=(3, 512), refl=(256, 256), gate=True),
-    "docked_1080p":   dict(clock="docked", w=1920, h=1080, shadow=(3, 1024), refl=(512, 512), gate=False),
-    "handheld_540p_dynres": dict(clock="handheld", w=960, h=540, shadow=(3, 512), refl=(256, 256), gate=False),
+    "docked_720p":    dict(clock="docked", w=1280, h=720, shadow=EXE_SHADOW, refl=EXE_REFL, gate=True),
+    "handheld_720p":  dict(clock="handheld", w=1280, h=720, shadow=EXE_SHADOW, refl=EXE_REFL, gate=True),
+    "docked_1080p":   dict(clock="docked", w=1920, h=1080, shadow=EXE_SHADOW, refl=EXE_REFL, gate=False),
+    "handheld_540p_dynres": dict(clock="handheld", w=960, h=540, shadow=EXE_SHADOW, refl=EXE_REFL, gate=False),
 }
 # Render-target formats per target kind and their bytes per pixel. FNV's HDR path renders the scene into an fp16
 # target (A16B16G16R16F) and runs the image-space chain on fp16 targets; S6n changes these here (or in
@@ -191,12 +195,58 @@ REAL_MAP = {
     "grass": ("GRASS vso", "STLEAF pso"), "actors": ("SKIN vso", "SKIN pso"), "sky": ("SKY vso", "SKY pso"),
     "particles": ("PAR vso", "PARTICLE pso"), "imagespace_ui": ("ISBLUR vso", "IS pso"),
 }
+# lod was ("DISTLOD vso", "SM pso") until G1: the class key strips trailing digits, so "SM" became the SM3 lighting
+# programs (SM3000-SM3049, up to 8,283 Maxwell instructions) once they translated; LOD binds DISTLOD2001.pso.
+# The image-space chain of the real game, pass by pass, from S5-data's capture docmitchell_13000 (frame 1; FNV's HDR
+# path at the default settings, 1280x720): (program, width, height, target format, blend). "full" = the config's
+# scene size. The programs are named by their bytecode hash in the package the game bound and costed with the
+# package-019 program of the same name. The UI pass is not in that frame: HUD_UI (TILE1000.pso, blended over
+# HUD_COVERAGE of the screen) is an assumption, not a measurement.
+REAL_IMAGESPACE = [
+    ("ISCOPY.pso", 640, 256, "RGBA16F", False), ("ISCOPY.pso", 256, 256, "RGBA16F", False),
+    ("ISHDRDOWN4.pso", 64, 64, "RGBA16F", False), ("ISHDRDOWN4.pso", 16, 16, "RGBA16F", False),
+    ("ISHDRDOWN4.pso", 4, 4, "RGBA16F", False), ("ISHDRDS4ADAPT.pso", 1, 1, "RGBA16F", False),
+    ("ISBPBLUR13.pso", 256, 256, "RGBA16F", False), ("ISBLUR13.pso", 256, 256, "RGBA16F", False),
+    ("ISHDRBLENDINSHADERCIN.pso", "full", "full", "RGBA8", False),
+]
+HUD_UI, HUD_COVERAGE = ("TILE1000.pso", "RGBA8", True), 0.10
+
+
+EPI_TAGS = ("__e0", "__ea", "__ef")
+
+
+def real_ps(tab, cls, mix):
+    """draw-weighted pixel-shader cost of a real class under the family's (alpha test, fog) mix: the static
+    epilogue variant the D3D state selects (__e0 / __ea / __ef, the runtime program when both), as for the
+    native permutations; the runtime program alone when the translation has no variants"""
+    if "real:" + cls + "__e0" not in tab:
+        return tab["real:" + cls]
+    mix = mix or {(0, 0): 1}
+    tot = sum(mix.values())
+    sh = {}
+    for (at, fog), n in mix.items():
+        t = "__e0" if not at and not fog else "__ea" if at and not fog else "__ef" if fog and not at else ""
+        sh["real:" + cls + t] = sh.get("real:" + cls + t, 0) + n / tot
+    acc = {"alu_slots": 0.0, "tex": 0.0, "maxwell_dyn": 0.0}
+    for k, w in sh.items():
+        for x in acc:
+            acc[x] += tab[k][x] * w
+    return acc
 
 
 def real_table(sdir):
     """class -> averaged stats from sdp2dksh's index.tsv + reflection JSON (only programs that translated)"""
     import collections
     acc = collections.defaultdict(lambda: [0, 0.0, 0.0, 0.0])
+    # static epilogue variants (sdp2dksh --variants): hash -> {tag: (instr, gprs)}; a pixel shader without an
+    # epilogue has none and costs its base program in every variant
+    var = collections.defaultdict(dict)
+    vp = os.path.join(sdir, "variants.tsv")
+    if os.path.exists(vp):
+        for line in open(vp):
+            f = line.rstrip("\n").split("\t")
+            if f[0] != "hash" and len(f) >= 5 and f[2] == "ok":
+                var[f[0]][f[1]] = (int(f[3]), int(f[4]))
     for line in open(os.path.join(sdir, "index.tsv")):
         f = line.rstrip("\n").split("\t")
         if f[0] == "hash" or len(f) < 9 or f[4] != "ok":
@@ -210,12 +260,17 @@ def real_table(sdir):
         keys = [base + " " + ext]
         if ext == "pso" and name.startswith("IS"):
             keys.append("IS pso")
+        keys.append("=" + f[2])         # the program itself (REAL_IMAGESPACE)
         for k in keys:
             a = acc[k]; a[0] += 1; a[1] += int(f[7]); a[2] += int(f[8]); a[3] += tex
+            if var and ext == "pso":
+                for t in EPI_TAGS:
+                    ins, gp = var[f[0]].get(t, (int(f[7]), int(f[8])))
+                    a = acc[k + t]; a[0] += 1; a[1] += ins; a[2] += gp; a[3] += tex
     tab = {}
     for k, (n, ins, gprs, tex) in acc.items():
         d = ins / n
-        tab["real:" + k] = {"programs": n, "maxwell_static": round(d, 1), "maxwell_dyn": round(d, 1), "alu_slots": round(d, 1),
+        tab["real:" + k.lstrip("=")] = {"programs": n, "maxwell_static": round(d, 1), "maxwell_dyn": round(d, 1), "alu_slots": round(d, 1),
                             "fp16_dyn": 0, "gprs": round(gprs / n, 1), "tex": round(tex / n, 2)}
     return tab
 
@@ -327,6 +382,30 @@ def bytes_per_px(m, fmts):
     return colour + depth
 
 
+def pass_cost(ps, px, fmt, blend, hz, eff):
+    """(seconds, DRAM bytes, bound) of one full-screen-quad pass of px pixels into a fmt colour target"""
+    alu = ps["alu_slots"] / GPU["lanes"] / eff
+    texc = ps["tex"] * TEX_COST / GPU["tmu"] / eff
+    rop = (2.0 if FORMAT_BYTES[fmt] >= 8 else 1.0) / GPU["rop"]
+    c = [alu, texc, rop]
+    b = px * (FORMAT_BYTES[fmt] * (2 if blend else 1) + ps["tex"] * TEX_BYTES)
+    return px * max(c) / hz, b, ["alu", "tex", "rop"][c.index(max(c))]
+
+
+def real_imagespace(tab, p, hz, eff):
+    """the captured image-space chain (REAL_IMAGESPACE) + the assumed HUD pass, each pass costed on its own"""
+    t, b, rows = 0.0, 0.0, []
+    for prog, w, h, fmt, blend in REAL_IMAGESPACE + [(HUD_UI[0], "hud", "hud", HUD_UI[1], HUD_UI[2])]:
+        px = p["w"] * p["h"] * (HUD_COVERAGE if w == "hud" else 1.0) if w in ("full", "hud") else w * h
+        ps = tab.get("real:" + prog + "__e0", tab["real:" + prog])   # captured: alpha test and fog off
+        s_, b_, bound = pass_cost(ps, px, fmt, blend, hz, eff)
+        t += s_; b += b_
+        rows.append([prog, round(px), fmt, bound, round(s_ * 1e3, 3)])
+    return {"draws": len(rows), "pixels": round(sum(r[1] for r in rows)), "bound": "pass list", "frag_ms": round(t * 1e3, 3),
+            "vertex_ms": 0.0, "ms": round(t * 1e3, 3), "dram_mb": round(b / 1e6, 2), "vs": "ISBLUR vso", "ps": "REAL_IMAGESPACE",
+            "ps_mix": None, "ps_alu_slots": None, "target_format": "per pass", "passes": rows}
+
+
 def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
     p = PRESETS[name]
     epi = epi or {}
@@ -337,10 +416,14 @@ def scene(tab, mix_draws, name, eff=1.0, fmts=None, shader_map=None, epi=None):
         draws = mix_draws.get(fam, m.get("draws", (0, 0))[1])
         bound = None
         if shader_map:
-            vs, ps = tab["real:" + shader_map[fam][0]], tab["real:" + shader_map[fam][1]]
+            vs, ps = tab["real:" + shader_map[fam][0]], real_ps(tab, shader_map[fam][1], epi.get(fam, {}))
         else:
             bound = bound_shaders(tab, m, epi.get(fam, {}))
             vs, ps = tab[m["vs"]], mix_stats(tab, bound)
+        if shader_map and fam == "imagespace_ui":
+            fams[fam] = real_imagespace(tab, p, hz, eff)
+            total_s += fams[fam]["ms"] / 1e3; dram += fams[fam]["dram_mb"] * 1e6
+            continue
         mix = epi.get(fam, {})
         at_share = sum(n for (a, _f), n in mix.items() if a) / max(1, sum(mix.values()))
         px = target_px(m, p) * m["coverage"] * shaded_layers(m, at_share)
@@ -401,6 +484,7 @@ def main():
            "lit_permutation": LIT_PERMUTATION, "stand_in": STAND_IN, "early_z": EARLY_Z, "depth_buckets": DEPTH_BUCKETS,
            "epilogue_mix_hi": {f: {"at%d_fog%d" % k: n for k, n in v.items()} for f, v in epis["hi"].items()},
            "real_map": REAL_MAP if real_tab else None,
+           "real_imagespace": REAL_IMAGESPACE if real_tab else None, "hud": [HUD_UI, HUD_COVERAGE] if real_tab else None,
            "real019_translator": (open(os.path.join(real, "translator.sha256")).read().strip()
                                   if real and os.path.exists(os.path.join(real, "translator.sha256")) else None)},
            "shaders": tab, "scenes": scenes}
