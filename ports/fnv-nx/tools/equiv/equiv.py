@@ -91,6 +91,7 @@ CLASSES = {
     'STAND1': 'platform',       # drops untagged stand-ins bound to a tagged definition's address (one function per address)
     'STAND2': 'platform',       # STAND1 for an address another unit defines, in units MSVC compiled without auto-inlining
     'STAND3': 'platform',       # STAND2 for in-class / inline stand-ins, in /Od units without /Ob1 (MSVC inlines nothing)
+    'STAND5': 'platform',       # STAND2 for an in-class member body whose MSVC name the unit binds to another unit's address
     'STAND4': 'platform',       # STAND1/2 for a static free stand-in: the definition becomes an extern declaration of the bound name
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
     'INC1': 'neutral',          # quoted include spelled as the including directory's file (MSVC: no case)
@@ -124,7 +125,9 @@ CLASSES = {
     'NSCALL1': 'neutral',       # unqualified call of N's own CRT-named prototype (bound only in N) -> N::name(
     'FINL1': 'neutral',         # __forceinline dropped from a body-less declaration the unit never defines (an ordinary call)
     'EBO2': 'layout',          # FNVNX_EBO2 (empty under MSVC): an empty base of a class introducing a vfptr goes after the vptr
-    'REC1': 'neutral',         # D20: reconstructed bodies from fnv-nx-build recon/ appended (new functions; nothing else changes)
+    'REC1': 'neutral',         # D20: reconstructed bodies from fnv-nx-build recon/ appended (new functions); REC1-REPL: a recon's
+                               # exact-text replace pairs, applied before the append (part of REC1; each pair is the recon's
+                               # accepted edit, gated with it)
     'HUNIT1': 'neutral',       # explicit instantiations of the template members a header unit's recipe lists (MSVC emitted them)
     'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
