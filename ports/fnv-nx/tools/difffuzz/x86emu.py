@@ -14,7 +14,7 @@ known (callee_pop), else none (cdecl).
 import bisect
 import struct
 
-from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE,
+from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ,
                      UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
 from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, UC_X86_REG_EDX, UC_X86_REG_ECX,
                                UC_X86_REG_EBX, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_GDTR,
@@ -225,6 +225,12 @@ class X86Engine:
                  for lo, hi in world.WILD_X86]
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
                for lo, hi in world.COMPARED]
+        hrd = []
+        if world.BYTE_READS is not None:
+            for a, b in case.mem.items():
+                lo = int(a, 16) if isinstance(a, str) else a
+                hrd.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_read, user_data=world.BYTE_READS, begin=lo,
+                                       end=lo + max(1, len(b)) - 1))
         start = start if start is not None else next(iter(self.text_funcs))
         esp0 = uc.reg_read(UC_X86_REG_ESP)
         self._fault = None
@@ -238,6 +244,8 @@ class X86Engine:
             for h in hwild:
                 uc.hook_del(h)
             for h in hws:
+                uc.hook_del(h)
+            for h in hrd:
                 uc.hook_del(h)
         eip = uc.reg_read(UC_X86_REG_EIP)
         if r.error is None and self._fault:
@@ -279,6 +287,9 @@ class X86Engine:
         uc.mem_write(esp + 4, bytes(frame))
         uc.mem_write(esp, struct.pack('<I', ret_stub))
         uc.reg_write(UC_X86_REG_ESP, esp)
+
+    def _on_read(self, uc, access, address, size, value, log):
+        log.setdefault(address, set()).add(size)
 
     def _on_write(self, uc, access, address, size, value, r):
         for i in range(size):

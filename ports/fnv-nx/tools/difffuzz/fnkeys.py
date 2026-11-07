@@ -82,6 +82,10 @@ def _old_uninit_both(rec):
     return (rec.get('hint') or {}).get('cause') == 'uninit-both'
 
 
+def _old_bool_repr(rec):
+    return (rec.get('hint') or {}).get('cause') == 'bool-repr'
+
+
 def _indirect(f):
     return f.oindirect
 
@@ -114,8 +118,12 @@ CHANGES = [
     Change('d18-uninit', 'cached divergences classified uninit-both (both machines read garbage): the case runs once '
            'more with the same (zero) garbage on both machines, and when they then agree there is no record',
            recheck=_old_uninit_both),
+    Change('d19-bool', 'cached divergences classified bool-repr: the probe now counts an input byte only when the '
+           'oracle reads exactly that byte with a 1-byte access (a byte of a planted pointer or integer that removes '
+           'the divergence when set to 1 is not a bool); the record gets the cause of the next probe',
+           recheck=_old_bool_repr),
 ]
-SCOPED = 'd18'
+SCOPED = 'd19'
 
 
 def harness_tag():
