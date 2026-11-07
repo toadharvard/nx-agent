@@ -81,4 +81,17 @@ python3 -I "$P/tools/farm/quick_plan.py" plan "$G" "$K2" "$K3" --out "$T/kp2.jso
 ok "same HARNESS: no full run" 'python3 -c "import json,sys; assert not json.load(open(sys.argv[1]))[\"full\"]" "$T/kp2.json"'
 rm -f "$T/home/quick/verified"; RC_full=1 run_q "$H1"
 ok "failed build: lane D skipped" 'grep -q "^| threads | skipped: the build failed" "$T/q-$H1.md" && grep -q "^| boottrace | skipped: the build failed" "$T/q-$H1.md"'
+# the base is the last finished head; a check that failed there is planned again whatever the diff
+rm -rf "$T/home/quick"
+mkdir -p "$G/ports/fnv-nx/docs"; echo a >"$G/ports/fnv-nx/docs/a.md"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m d1; D1=$(git -C "$G" rev-parse HEAD)
+echo b >"$G/ports/fnv-nx/docs/a.md"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m d2; D2=$(git -C "$G" rev-parse HEAD)
+echo c >"$G/ports/fnv-nx/docs/a.md"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m d3; D3=$(git -C "$G" rev-parse HEAD)
+RC_equiv=1 run_q "$D1"
+ok "first run: every check, equiv fails" 'grep -q "^| equiv | ran | 1 " "$T/q-$D1.md"'
+run_q "$D2"
+ok "docs-only next head: base is the failed head" 'grep -q "base: ${D1:0:12}" "$T/q-$D2.md"'
+ok "and equiv runs again (not a pass before)" 'grep -q "^| equiv | ran | 0 " "$T/q-$D2.md" && grep -q "not a pass here before" "$T/q-$D2.md"'
+ok "passing checks stay skipped" 'grep -q "^| fuzz | skipped: not affected" "$T/q-$D2.md"'
+run_q "$D3"
+ok "all passed: a docs-only head runs nothing" '! grep -q "| ran |" "$T/q-$D3.md"'
 [ $fails = 0 ] && echo "test_quick: all ok" || { echo "test_quick: $fails failed"; exit 1; }

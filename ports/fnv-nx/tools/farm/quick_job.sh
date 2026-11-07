@@ -6,6 +6,8 @@
 #
 # 1. plan   tools/farm/quick_plan.py: the files changed since the last verified head ($FARM_HOME/quick/verified, or
 #           QUICK_BASE) -> the checks (build, equiv, fuzz, audit, replay, programs); no verified head -> all of them.
+#           The base is the last head this farm finished ($FARM_HOME/quick/last); a check that is not a pass in
+#           $FARM_HOME/quick/status.json (failed, or never ran here) is planned again whatever the diff.
 # 2. lanes, in parallel (4 CPUs):
 #    A  build: full_job.sh (prepare, compile and link incremental in its persistent build directory; guest; emulated
 #       boot; publishes link/<c12>), then fuzz_job.sh 1 of 1 (verdict cache: only changed function keys; FUZZ_MAX_S,
@@ -49,13 +51,31 @@ export FARM_TREE_WAIT=${FARM_TREE_WAIT:-0} FARM_OBJ_WAIT=${FARM_OBJ_WAIT:-0} V1_
 log() { echo "$(date -u +%FT%TZ) quick_job: $*"; }
 
 # ---- 1. plan --------------------------------------------------------------------------------------------------------
-BASE=${QUICK_BASE:-$(cat "$Q/verified" 2>/dev/null || true)}
+# the base is the last head this farm finished, whatever its verdict ($Q/last); every check whose last result here is
+# not a pass ($Q/status.json: per check, updated by the checks that ran) is planned again whatever the diff, so one
+# failing check neither hides itself nor sends every later head back to "every check" (qk2: a cold run with a failure)
+BASE=${QUICK_BASE:-$(cat "$Q/last" 2>/dev/null || cat "$Q/verified" 2>/dev/null || true)}
 git -C "$REPO" cat-file -e "$COMMIT^{commit}" 2>/dev/null || git -C "$REPO" fetch -q origin "$COMMIT" 2>/dev/null || true
 if [ -n "$BASE" ] && git -C "$REPO" cat-file -e "$BASE^{commit}" 2>/dev/null && [ "$BASE" != "$COMMIT" ]; then
 	python3 -I "$HERE/quick_plan.py" plan "$REPO" "$BASE" "$COMMIT" --out "$R/plan.json" || BASE=""
 fi
 if [ -z "$BASE" ] || [ ! -s "$R/plan.json" ]; then
 	printf '{"files": null, "checks": {"build": true, "equiv": true, "fuzz": true, "audit": true, "replay": true, "programs": false, "threads": true, "frames": true, "mem": true, "scenario": true, "boottrace": true, "plat": true}, "why": {"all": ["no verified head"]}, "full": [], "base": null}\n' >"$R/plan.json"
+fi
+if [ -f "$Q/status.json" ] && [ -n "$BASE" ]; then
+	python3 -I - "$R/plan.json" "$Q/status.json" <<'PY'
+import json, sys
+p, st = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+for c in p['checks']:
+    if c == 'programs':          # only when the translator changed (replay carries the sweep's state)
+        continue
+    if st.get(c) != 'pass' and not p['checks'][c]:
+        p['checks'][c] = True
+        p.setdefault('why', {}).setdefault(c, []).append('(not a pass here before: %s)' % (st.get(c) or 'never ran'))
+if any(p['checks'].get(c) for c in ('fuzz', 'audit', 'threads', 'frames', 'mem', 'plat', 'scenario', 'boottrace')):
+    p['checks']['build'] = True   # their inputs: this head's link / build directory
+json.dump(p, open(sys.argv[1], 'w'), indent=1)
+PY
 fi
 if [ -n "${QUICK_CHECKS:-}" ]; then
 	python3 -I - "$R/plan.json" "$QUICK_CHECKS" <<'EOF'
@@ -190,6 +210,19 @@ json.dump({'schema': 'fnvnx-quick/1', 'commit': commit, 'base': base or None, 's
 sys.exit(0 if ok and not full else 4)
 EOF
 st=$?
+# the next base and each check's standing (a check that did not run keeps the one it had)
+echo "$COMMIT" >"$Q/last"
+python3 -I - "${REPORT%.md}.json" "$Q/status.json" <<'PY'
+import json, os, sys
+r = json.load(open(sys.argv[1]))
+st = json.load(open(sys.argv[2])) if os.path.isfile(sys.argv[2]) else {}
+for c, v in r['checks'].items():
+    if v['run'] == 'ran':
+        st[c] = 'pass' if v['rc'] == '0' else 'fail rc %s at %s' % (v['rc'], r['commit'][:12])
+    elif not v['run'].startswith('skipped: not affected'):
+        st[c] = '%s at %s' % (v['run'], r['commit'][:12])      # the build failed, no store yet, lane skipped
+json.dump(st, open(sys.argv[2], 'w'), indent=1)
+PY
 if [ "$st" = 0 ]; then echo "$COMMIT" >"$Q/verified"
 	# the boot trace's first divergence becomes the bar for the next head (boottrace_job.sh: "not earlier")
 	cand=$FARM_HOME/boottrace/$C12/boottrace.candidate; [ -f "$cand" ] && cp "$cand" "$Q/boottrace.base"
