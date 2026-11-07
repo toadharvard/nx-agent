@@ -164,6 +164,38 @@ differ: MSVC opens 194 headers GCC does not (`mobileobject.h` 24 units, `NiPoint
 opens 78 that MSVC does not (`include/MobileObject.h` and similar canonical copies). This is what INC1 claims, so the
 remaining question is code, which the gate answers.
 
+## Stream EQ: prepared-side no-build units (06f45fbb / 2e000047 reports, local gate)
+
+The newest reports had 64 units the prepared side could not compile, so nothing in them was compared. Four
+mechanisms close 41 of the 63 local ones (`equiv.py build` of those units on a tree with these rules; the 22 that
+remain are listed by first error in journal/inbox/eq-001.md):
+
+* **DECL1-STDABS** (26 units, LIBSTDCXX-STD-ABS). The decomp declares `namespace std { float abs(float); }` itself
+  (49 sites) and binds it to the game's out-of-line copy of MSVC's `abs(float)` (0x00408840 -> 0x00408860,
+  `(float)fabs((double)x)` through the CRT's fabs). DECL1 drops the declaration for libstdc++'s. It now includes
+  `fnvnx_cmath/std_abs.h`, which on the target is `<stdlib.h>`, the header it included before (the target is
+  unchanged). Its MSVC branch declares what libstdc++'s `<stdlib.h>` does, std::abs for int, long, float, double and
+  long double plus the global using-declaration, without `<math.h>`'s global float overloads. The out-of-line call
+  against the inline standard abs is then a CRT-INLINE difference (3 functions locally): same value for every
+  input.
+* **ENUM1-FWD** (10 units, MSVC-OPAQUE-ENUM). ENUM1 writes an opaque declaration as `enum X FNVNX_ENUM_INT;`.
+  fnvnx_compat.h defines the macro as `: int`, and fnvnx_equiv_compat.h defines it empty: MSVC 2008 has no opaque
+  declaration, and its forward declaration `enum X;` (the decomp's own) names the same int-based type, also after
+  the definition (tessaveloadgame's MEM_CONTEXT).
+* **SDK-LEAN** (compile_unit). A prepared unit that the full `<windows.h>` breaks is built again with
+  WIN32_LEAN_AND_MEAN, which leaves out winioctl, rpc and ole, closer to the target shim's subset (RequestLocation).
+  Head, /EHs-c- and leave-out builds make the same choice.
+* **SDK-WINDOWS** (tools/equiv/msvc/windows.h). A prepared unit that includes `<windows.h>` itself gets the
+  fnvnx_win32.h stand-in, as on the target, where the shim's windows.h is fnvnx_win32.h. Before, it got the plain
+  SDK and missed the shim's looser parameter types. The stand-in reaches the SDK's own header through a generated
+  absolute include (gen_dir: fnvnx_equiv_sdk_windows.h). Pristine units get the SDK's header unchanged.
+
+CTOR1 was measured too, and nothing changed: MSVC 2008 null-checks the result of every new-expression before the
+constructor, even for an allocation function without `throw()` (a tagged placement form: the same `test ecx,ecx`
+at /O2, and an out-of-line call at /Od). So no spelling of in-place construction compiles like the explicit call
+under MSVC. GCC -O2 emits no check for the standard placement form. PLACEMENT-NULLCHECK is therefore a
+compiler-model class: the target code is the explicit call's.
+
 ## Classification
 
 Rules of S1 round 8 (`RREF1` ... `SPEC2`, after `8fff58b`) are classified (orchestrator, J-0058). Their gate is
