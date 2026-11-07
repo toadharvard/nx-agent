@@ -244,6 +244,36 @@ class SweepPieces(unittest.TestCase):
             self.assertEqual(o['programs_vacuous_in_some_set'], 2)
             self.assertEqual([p['name'] for p in o['failing_programs']], ['C.pso'])
 
+    def test_permreport_conditioning(self):
+        """--pref: an over program is ill only when its differing pixels lie where the perturbed reference moved"""
+        from PIL import Image
+        def png(path, a):
+            os.makedirs(os.path.dirname(path), exist_ok=True); Image.fromarray(a.astype(np.uint8), 'RGB').save(path)
+        with tempfile.TemporaryDirectory() as t:
+            base = np.full((16, 16, 3), 100); hot = base.copy(); hot[3, 4] = 255; hot[10, 10] = 0
+            far = base.copy(); far[12, 2] = 255
+            for side, imgs in (('ref', (base, base)), ('cand', (hot, hot))):
+                for i, a in enumerate(imgs):
+                    png(f'{t}/{side}/perm_000/f0000{i}.png', a)
+            moved = base.copy(); moved[3, 5] = 0; moved[9, 10] = 0        # moves next to both differing pixels
+            png(f'{t}/pref/perm_000/f00000.png', moved)
+            png(f'{t}/pref/perm_000/f00001.png', far)                     # moves elsewhere only
+            man = {'package': 'p', 'captures': {'perm_000': [
+                {'frame': '00000', 'name': 'A.pso', 'hash': 'aaaa', 'stage': 'pixel', 'model': 'ps_3_0'},
+                {'frame': '00001', 'name': 'B.pso', 'hash': 'bbbb', 'stage': 'pixel', 'model': 'ps_3_0'}]}}
+            pman = {'captures': {'perm_000': [{'frame': '00000', 'hash': 'aaaa'}, {'frame': '00001', 'hash': 'bbbb'}]}}
+            json.dump(man, open(f'{t}/m.json', 'w')); json.dump(pman, open(f'{t}/pm.json', 'w'))
+            json.dump({'captures': [{'capture': 'perm_000', 'frames': [{'frame': '00000', 'pass': False, 'metrics': {}},
+                                                                        {'frame': '00001', 'pass': False, 'metrics': {}}]}]},
+                      open(f'{t}/g.json', 'w'))
+            r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'permreport.py'), '--manifest', f'{t}/m.json',
+                                '--gate', f'{t}/g.json', '--ref', f'{t}/ref', '--out', f'{t}/o', '--clear', '0xff000000',
+                                '--cand', f'{t}/cand', '--pref', f'{t}/pref', '--pmanifest', f'{t}/pm.json'],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            rows = {x['name']: x['class'] for x in json.load(open(f'{t}/o/permreport.json'))['rows']}
+            self.assertEqual(rows, {'A.pso': 'ill', 'B.pso': 'over'})
+
 
 class WineRefMirror(unittest.TestCase):
     def test_base_load_order_only(self):
