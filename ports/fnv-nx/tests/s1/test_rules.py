@@ -744,6 +744,43 @@ check('STAND1 drops the stand-ins of tagged addresses', got,
        'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b); /* fnv-nx STAND1 */', '/* fnv-nx STAND1: V::Make is'],
       ['__declspec(noinline) V*\n/*', 'FUN_00632ec0::FUN_00632ec0()\n{}'])
 
+# STAND1 keeps a tagged definition whose own name the unit binds to its address, with pragmas, a type declaration
+# or a whole type between the tag and the head, or a head over two lines (R6 0x004ab230, 0x0087ce70, 0x00660400, 0x00a8a200;
+# R1 0x0046ffd0); an untagged stand-in after such a tagged function still goes
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {
+    '?Get@Bip@@QAEPAHH@Z': '0x00401000', '?Map@@YAPAU?$M@H@@XZ': '0x00401010', '?Next@@YAPAU?$L@H@@PAU1@@Z': '0x00401020',
+    '?Set@Cls@@QAEXXZ': '0x00401030', '?Stand@Cls@@QAEXXZ': '0x00401030', '?Pool@@YAXXZ': '0x00401060'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          '// @fnv 0x00401000\n#pragma optimize("", off)\n#pragma optimize("y", off)\nint* Bip::Get(int i)\n{\n    return p + i;\n}\n'
+          '#pragma optimize("", on)\n// @fnv 0x00401010\nM<int>* __cdecl\n    Map()\n{\n    return &g;\n}\n'
+          '// @fnv 0x00401020\ntemplate <class T> struct L;\nL<int>* Next(L<int>* a)\n{\n    return a->n;\n}\n'
+          '// @fnv 0x00401030\ntemplate <> struct A<void*>\n{\n    static void __cdecl Free(void**);\n};\n'
+          'void __thiscall Cls::Set()\n{\n    *(int*)this = 1;\n}\nvoid Cls::Stand()\n{\n}\n'
+          '// @fnv 0x00401060\ntemplate <class T> struct P\n{\n    struct E\n    {\n        E* next;\n    };\n    static E* ms;\n};\n'
+          'void Pool()\n{\n    pooled = 1;\n}\n',
+          os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {
+    '?Find@@YAPAUA@@PAU1@H@Z': '0x00401040', '?Find@@YAPAUB@@PAU1@H@Z': '0x00401040',
+    '?Pick@@YAHH@Z': '0x00401050', '?Pick@@YAHN@Z': '0x00401050'}}]}, open(os.path.join(_s, 'build', 'units.json'), 'w'))
+got4 = run(s1.r_static_stand_ins,
+           '// @fnv 0x00401040\nstatic __declspec(noinline) A* Find(A* a, int n)\n{\n    return a + n;\n}\n'
+           'static __declspec(noinline) B* Find(B* b,\n                                    int n)\n{\n    return b->pick(n);\n}\n'
+           '// @fnv 0x00401050\nstatic int Pick(int k)\n{\n    return k;\n}\nstatic int Pick(double d);\n'
+           'static int Pick(double d)\n{\n    return 2;\n}\n', os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND4 an untagged static overload of a tagged address becomes an extern declaration (R6 0x00cb3d10)', got4,
+      ['__declspec(noinline) B* Find(B* b,\n                                    int n); /* fnv-nx STAND4 0x00401040 */',
+       'return a + n;', 'return 2;', 'static int Pick(double d);'], ['b->pick(n)'])
+check('STAND1 keeps tagged definitions behind pragmas, declarations, a type or a two-line head', got,
+      ['return p + i;', 'return &g;', 'return a->n;', '*(int*)this = 1;', 'pooled = 1;',
+       '/* fnv-nx STAND1: Cls::Stand is the function at the tagged address */'], ['fnv-nx STAND1: Bip', 'Map();'])
+
 # ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
 _s = tempfile.mkdtemp()
 os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
