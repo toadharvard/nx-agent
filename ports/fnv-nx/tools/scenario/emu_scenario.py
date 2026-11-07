@@ -25,6 +25,7 @@ and with --frames the instructions between frames (Present calls) of the main th
 --scenario-out DIR: a seed tree DIR/seed (profile inis, plugins.txt: scenario.py seed) is copied onto the SD root
 first (--root, or DIR/sd without one), and the scenario's own files (s18_*: saves, the scof log) are copied to
 DIR/kept when the summary is written - farm_boot.sh deletes its root after the boot. The summary's root is DIR/kept.
+SCENARIO_PROGRESS_S (default 600; 0 off): tools/perf/emu_progress.py's hang detector, when that file exists.
 
 Our own code; it reads emu_guest's state only through the names emu_guest defines.
 """
@@ -299,6 +300,13 @@ def main(argv):
             shutil.copytree(seed, root, dirs_exist_ok=True)
     import emu_guest as eg   # noqa: E402  (tests/s5, or SCENARIO_EMU_DIR)
     install(eg, plan, out, ours["frames"])
+    # R4's hang detector (tools/perf/emu_progress.py): no milestone, new function or console line for
+    # SCENARIO_PROGRESS_S wall seconds ends the run as "hang: ..." with a stack per thread (0 turns it off)
+    prog = float(os.environ.get("SCENARIO_PROGRESS_S", 600))
+    if prog > 0 and os.path.isfile(os.path.join(P, "tools", "perf", "emu_progress.py")):
+        sys.path.insert(0, os.path.join(P, "tools", "perf"))
+        import emu_progress   # noqa: E402
+        emu_progress.install(eg, prog)
     return eg.main(rest)
 
 

@@ -412,7 +412,7 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nx1=None, optional
 
     # 1 faults
     stubbed = len(re.findall(r"^stubbed-fault", log or "", re.M)) or (summ or {}).get("stubbed_faults", 0)
-    fault_end = bool(re.search(r"fault|invalid memory|out of instruction budget|host stand-in error|deadlock", stop, re.I))
+    fault_end = bool(re.search(r"fault|invalid memory|out of instruction budget|host stand-in error|deadlock|hang", stop, re.I))
     skipped = (summ or {}).get("initializers_skipped", 0) or 0
     put(1, ran, int(fault_end) + int(stubbed) + int(skipped), stop=stop[:300], stubbed_faults=stubbed,
         initializers_skipped=skipped)
