@@ -196,5 +196,28 @@ NRO_RC=0
 if [ $INPUTS = 1 ]; then publish_nro "$F/build" || NRO_RC=$?; else NOTE_NRO="not published (no tree or no objects)"; fi
 echo "- device package: $NOTE_NRO" >> "$REPORT"
 log "device package: $NOTE_NRO"
+# 6b. D25 #11: docs/NRO_CHECKLIST.md as checks on this package (tools/report/nro_check.py). On the build directory,
+# so the guest ELF and this boot's summary make memory.peak measurable; --commit makes a package left by an earlier
+# commit fail `provenance`. The table goes into the report, fnvnx-nrocheck/1 into the report's sidecar under
+# "nrocheck" (zero_targets.py #11 reads <h>-full.json; runner.sh publishes the sidecar). Seconds; never fails the job.
+# step-6b-begin
+rm -f "$F/nrocheck.md" "$F/nrocheck.json"
+if [ -d "$F/build/package/sd" ]; then
+	python3 -I "$P/tools/report/nro_check.py" "$F/build" --commit "$COMMIT" --out "$F/nrocheck.md" > /dev/null 2>&1 \
+		|| log "nro_check.py exited $?"
+	# (if, not `[ -f ] &&`: the block must end with status 0 under set -e whatever the checker left)
+	if [ -f "$F/nrocheck.md" ]; then { echo; sed '1s/^# /## /' "$F/nrocheck.md"; } >> "$REPORT"; fi
+	if [ -f "$F/nrocheck.json" ]; then python3 -I - "$F/nrocheck.json" "${REPORT%.md}.json" <<'PY' || log "nrocheck sidecar merge failed"
+import json, sys
+try:
+    d = json.load(open(sys.argv[2]))
+except (OSError, ValueError):
+    d = {}
+d['nrocheck'] = json.load(open(sys.argv[1]))
+json.dump(d, open(sys.argv[2], 'w'), indent=1)
+PY
+	fi
+fi
+# step-6b-end
 echo "$REPORT"
 [ "$NRO_RC" -ne 2 ] || { echo "full_job.sh: publishing nro/$C12 failed" >&2; exit 3; }
