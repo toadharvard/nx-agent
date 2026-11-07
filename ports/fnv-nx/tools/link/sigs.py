@@ -92,6 +92,19 @@ def split_qual(s):
     return [p.strip() for p in out if p.strip()]
 
 
+CONV_OP = re.compile(r'(?:^|::)\s*operator (?!new\b|delete\b)(?=[A-Za-z_])')
+
+
+def split_qual_conv(qual):
+    """split_qual for a conversion operator too: 'A::B::operator struct N::T *' -> ['A', 'B', 'operator N::T*'] (the
+    target type is one component, canonical, so MSVC and Itanium spell it the same)."""
+    m = CONV_OP.search(qual)
+    if not m:
+        return split_qual(qual)
+    at = qual.index('operator', m.start())
+    return split_qual(qual[:at].rstrip(':').strip()) + ['operator ' + canon_type(qual[at + len('operator '):])]
+
+
 def matching_open(s, close_at):
     depth = 0
     for i in range(close_at, -1, -1):
@@ -288,10 +301,10 @@ def parse_msvc(mangled, dem):
     pclose = matching_close(post, popen)
     qual = post[:popen].strip()
     # an operator ends in '*' too: operator*, operator*=, operator->*, a conversion operator 'operator T *'
-    op = (split_qual(qual) or [''])[-1].startswith('operator')
+    op = (split_qual_conv(qual) or [''])[-1].startswith('operator')
     if (qual.endswith('*') and not op) or qual.endswith(')'):  # function returning a function pointer: unsupported
         sig.kind = 'special'; return sig
-    sig.qual = canon_qual(split_qual(qual))
+    sig.qual = canon_qual(split_qual_conv(qual))
     sig.raw_params = _parse_params(post[popen + 1:pclose])
     sig.params = sig.raw_params
     tail = post[pclose + 1:]
@@ -402,7 +415,7 @@ def parse_itanium(mangled, dem):
     qual = head[cut:].strip() if cut else head.strip()
     if not qual or qual.startswith(('*', '&')):
         qual = head.strip(); cut = 0
-    sig.qual = canon_qual(split_qual(qual))
+    sig.qual = canon_qual(split_qual_conv(qual))
     sig.params = _parse_params(s[popen + 1:pclose])
     sig.raw_params = sig.params
     sig.cv = ' '.join(w for w in ('const', 'volatile') if re.search(r'\b%s\b' % w, tail.group(1)))

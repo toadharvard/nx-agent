@@ -787,5 +787,20 @@ class DeclData(unittest.TestCase):
                 self.assertRegex(nm, r'00000010 B wblk_u')
 
 
+
+class Sigs(unittest.TestCase):
+    def test_conversion_to_pointer_and_unary_star(self):
+        """MSVC and Itanium spellings of a conversion operator to a namespaced pointer type and of a unary operator*
+        give the same exact key (R6: 82 names left unresolved on link 9f865b0a)."""
+        pairs = [('??BSpherePtr@fnv_009614b0@@QBEPAUSphere@1@XZ', '_ZNK12fnv_009614b09SpherePtrcvPNS_6SphereEEv'),
+                 ('??DMatView@@QAEAAMXZ', '_ZN7MatViewdeEv')]
+        ms = fnvlink.batch_demangle(fnvlink.UNDNAME, [m for m, _ in pairs])
+        it = fnvlink.batch_demangle(fnvlink.CXXFILT, [i for _, i in pairs])
+        for m, i in pairs:
+            a, b = sigs.parse_msvc(m, ms[m]), sigs.parse_itanium(i, it[i])
+            self.assertEqual((a.kind, b.kind), ('func', 'func'), m)
+            self.assertTrue({k for t, k in a.keys() if t == 'exact'} & {k for t, k in b.keys() if t == 'exact'}, m)
+
+
 if __name__ == '__main__':
     unittest.main()
