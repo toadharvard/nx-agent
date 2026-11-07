@@ -552,9 +552,51 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     if layout:      # /w: no diagnostics interleaved with the report (no effect on code)
         args += ['/d1reportAllClassLayout', '/w']
     args += ['/I' + str(tree / 'include'), str(tree / unit['source']), '/Fo' + str(obj)]
+    cache = obj_cache(decomp, tree)
+    if cache:       # FNVNX_EQUIV_CACHE (tools/equiv/unitcache.py): the same inputs compiled before
+        inc = [a[2:] for a in args if a.startswith('/I')] + [str((tree / unit['source']).parent)]
+        key_args = [a for a in args if not a.startswith('/Fo')] + ['compiler=' + unit['compiler']]
+        text = cache.lookup(unit['source'], key_args, inc, obj)
+        if text is not None:
+            return True, text
+        args = args[:-1] + ['/showIncludes', args[-1]]
     r = subprocess.run(args, cwd=tree, capture_output=True, text=True, errors='replace')
     ok = r.returncode == 0 and obj.exists()
-    return ok, r.stdout + r.stderr
+    text = r.stdout + r.stderr
+    if cache:
+        if ok:
+            text = cache.store(unit['source'], key_args, inc, tree / unit['source'], text, obj)
+        else:
+            text = '\n'.join(l for l in text.splitlines() if not l.strip().startswith('Note: including file:'))
+    return ok, text
+
+
+_CACHES = {}
+
+
+def obj_cache(decomp, tree):
+    """unitcache.Cache for this tree when FNVNX_EQUIV_CACHE is set (one per tree and process), else None"""
+    if not os.environ.get('FNVNX_EQUIV_CACHE'):
+        return None
+    k = str(tree)
+    with _CACHE_LOCK:
+        return _CACHES[k] if k in _CACHES else _new_cache(decomp, tree, k)
+
+
+_CACHE_LOCK = threading.Lock()
+
+
+def _new_cache(decomp, tree, k):
+    import importlib.util
+    import unitcache
+    spec = importlib.util.spec_from_file_location('fnvnx_msvc_wrapper', str(Path(decomp, 'tools/msvc.py')))
+    msvc = importlib.util.module_from_spec(spec); spec.loader.exec_module(msvc)
+    _CACHES[k] = unitcache.Cache(os.environ['FNVNX_EQUIV_CACHE'], [('<tree>', str(Path(tree).resolve())),
+                                 ('<decomp>', str(Path(decomp).resolve())), ('<port>', str(HERE.parent.parent)),
+                                 ('<cmath>', str(cmath_dir())), ('<gen>', str(gen_dir()))],   # cmath: per port path
+                                 [str(msvc.compiler_root(c) / 'VC/bin' / f) for c in ('sp1', 'rtm')
+                                  if os.environ.get(msvc.ROOTS[c]) for f in ('cl.exe', 'c1.dll', 'c1xx.dll', 'c2.dll')])
+    return _CACHES[k]
 
 
 def shard_of(source, n):
