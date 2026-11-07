@@ -108,7 +108,7 @@ def r_if_exists(path, text, stats):
     """IFX1: resolve __if_exists / __if_not_exists statically (see above); the kept body replaces the construct,
     line breaks are preserved."""
     if '__if_' not in text: return text
-    root, pos = _roots(path), 0
+    root, pos, sse = _roots(path), 0, False
     while True:
         m = IFX_HEAD.search(text, pos)
         if not m: break
@@ -118,6 +118,9 @@ def r_if_exists(path, text, stats):
         class_view = '\n'.join(p[0] for p in parts)
         name_view = '\n'.join(p[1] for p in parts)
         keep = _exists(m.group(2), class_view, name_view, sys_headers) != bool(m.group(1))
+        # IFX1-SSE: a declaration dropped because the target's sse2neon has the name: say where it comes from
+        sse = sse or (bool(m.group(1)) and not keep and re.match(r'\s*(?:__m128[id]?|__m64|_mm_\w+|_MM_\w+)\s*$',
+                                                                  m.group(2)) is not None)
         head, body = text[m.start():m.end()], text[m.end():end - 1]
         nl = lambda s: '\n' * s.count('\n')
         if keep:
@@ -127,6 +130,9 @@ def r_if_exists(path, text, stats):
         text = text[:m.start()] + repl + text[end:]
         pos = m.start() + 1
         stats['IFX1'] += 1
+    if sse:
+        stats['IFX1-SSE'] += 1
+        text = '#include "fnvnx_target_sse.h" /* fnv-nx IFX1 */\n' + text
     return text
 
 # ---------------------------------------------------------------------------------------------------------- SAL1
@@ -4778,7 +4784,8 @@ def r_forceinline_declarations(path, text, stats):
             head = re.sub(r'\btemplate\s*<[^{};]*?>\s*(?=(?:class|struct|union)\b)', ' ', inner[3] or '')
             # the class's own name, not a template parameter's (`template <class KEYD3, ...> class DispatchUtilD3`:
             # hkpbvtreeagent, hkgpmesh lost the keyword on members their units define out of class)
-            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', head)
+            # `struct __declspec(align(16)) BigSolver`: the declspec's own parentheses nest (hkgpmesh 0x00e1f4e0)
+            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)', head)
             if not hm: continue
             cls, body = hm.group(1), text[inner[0]:inner[1]]
             if name.lstrip('~') != name and name[1:] != cls: continue

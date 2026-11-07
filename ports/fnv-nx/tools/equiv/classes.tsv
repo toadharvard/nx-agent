@@ -25,3 +25,4 @@ SSE-SCHEDULE	compiler	an exact SSE operation with its operands through another r
 BLOCK-ORDER	compiler	the same multiset of instructions with the blocks in another order (MSVC merges GOTO2's cloned tails again)
 INLINE-DECISION	compiler	MSVC /Ob1 inlines a unit's own inline function once the spelling around it changes: the same bodies
 STL-CHECK-MACRO	compiler	MSVC's own _SCL_SECURE_VALIDATE in place of the decomp's copy: a dead `xor ecx,ecx; jne` after each _invalid_parameter_noinfo call
+IFX1-SSE	platform	the target's SSE intrinsics are sse2neon's (every unit; IFX1 drops the decomp's own __if_not_exists prototypes for them); under MSVC they are its <emmintrin.h>: the same intrinsics, another frame layout around the __m128 locals

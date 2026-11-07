@@ -203,6 +203,13 @@ check('MATH1 in a namespace of its own: the overload stays',
       run(s1.r_math_overloads, 'namespace N {\ninline float fabs(float f)\n{\n    return f < 0 ? -f : f;\n}\n}\n'),
       ['return f < 0 ? -f : f;'], ['MATH1'])
 
+# ---- IFX1-SSE: a dropped `__if_not_exists(_mm_*)` prototype gets fnvnx_target_sse.h (MSVC's intrinsics in the gate)
+_ix = run(s1.r_if_exists, 'extern "C" {\n__if_not_exists(_mm_mul_ps)\n{\n    __m128 _mm_mul_ps(__m128 a, __m128 b);\n}\n}\n')
+check('IFX1-SSE a dropped SSE prototype includes fnvnx_target_sse.h', _ix,
+      ['#include "fnvnx_target_sse.h" /* fnv-nx IFX1 */'], ['_mm_mul_ps(__m128 a'])
+check('IFX1-SSE a kept body includes nothing',
+      run(s1.r_if_exists, '__if_not_exists(MyOwnThing)\n{\n    int MyOwnThing;\n}\n'), ['int MyOwnThing;'], ['fnvnx_target_sse'])
+
 # ---- CTOR1
 check('CTOR1 explicit constructor call of a template class',
       run(s1.r_ctor_calls, 'void f() { ((std::vector<char>*)this)->std::vector<char>::vector(); }\n'),
@@ -1320,6 +1327,11 @@ check('FINL1 a class template\'s member defined out of class keeps it (the class
           'template <class K, class E>\nclass DU\n{\n\tpublic:\n\t\tstatic __forceinline void __cdecl up(K& k, E& e);\n};\n'
           'template <class K, class E>\nvoid __cdecl DU<K, E>::up(K& k, E& e)\n{\n}\n'),
       ['static __forceinline void __cdecl up(K& k, E& e);'], ['FINL1'])
+check('FINL1 a class named after a nested __declspec(align(16)) keeps it on its defined constructor',
+      run(s1.r_forceinline_declarations,
+          'struct __declspec(align(16)) BS : R {\n    __declspec(nothrow) __forceinline BS() ;\n};\n'
+          '    __declspec(nothrow) BS::BS()  {\n    }\n'),
+      ['__declspec(nothrow) __forceinline BS() ;'], ['FINL1'])
 check('FINL1 headers are left alone',
       run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 
