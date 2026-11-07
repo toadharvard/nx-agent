@@ -12,6 +12,8 @@ checks is the plan. A path no class names selects everything (unknown means unsa
   audit    the overhead audit (audit_job.sh 1 of 1; the row cache re-measures only changed keys)
   replay   the cell sweep on cached reference captures (sweep_job.sh, SWEEP_CAPTURE=replay, the cover scenes)
   programs the shader-program sweep (sweep_job.sh's perm.py part), when the translator changed
+  threads  D25 #7's report lane (threads_job.sh): the race checker's and the watchdog's tests, then this head's
+           guest relinked with the watchdog and run under qemu-aarch64 (after build, on its build directory)
 The caches make each selected check cost what changed; the plan only skips checks that nothing can affect.
 A plan with "full" set needs the full farm run: a key that every cached result of a check depends on changed - the
 toolchain or the pins (FULL), a version constant (KEYS: difffuzz HARNESS, AUDIT_HARNESS, unitcache CACHE_V, the
@@ -24,13 +26,14 @@ cells.tsv lines when the index holds them, else (id) alone.
 """
 import argparse, json, os, re, subprocess, sys
 
-ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs')
+ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads')
 # (regex on the path relative to ports/fnv-nx/, checks); first match wins
 CLASSES = [
     (r'^(docs/|journal/|JOURNAL\.md$|README\.md$|reports/)', ()),
     (r'^tools/farm/(quick_plan\.py|README\.md)$', ()),
     (r'^tests/s6n/', ('replay', 'build')),            # nx_render's build
     (r'^tests/s5/', ('build',)),                      # the boot scripts
+    (r'^tests/s15/(mtqemu/|test_mtqemu\.py$)', ('threads',)),   # the race checker, linhost, boot_game.sh
     (r'^tests/', ()),                                 # tests run by the streams and V1, not by a check here
     (r'^render/shaders/', ('programs', 'replay', 'build')),
     (r'^render/', ('replay', 'build')),               # the guest links the native renderer (LINK_OVERRIDES=render)
@@ -42,6 +45,8 @@ CLASSES = [
     (r'^tools/farm/(equiv_job)', ('equiv',)),
     (r'^tools/farm/(fuzz_job)', ('fuzz', 'audit')),
     (r'^tools/farm/(audit_job)', ('audit',)),
+    (r'^tools/farm/threads_job', ('threads',)),
+    (r'^tools/threads/', ('threads',)),
     (r'^tools/farm/', ('build',)),                    # link/full/compile jobs and their library
 ]
 # a change here invalidates every cached result of a check: quick_job runs it all (a full run on one machine is slow:

@@ -31,7 +31,13 @@
  *                   S12's refcount protocol under the plugin's refcount=weak (relaxed increment, release decrement,
  *                   acquire fence on the path to 0): hb.c models the fence, so a missing acquire shows as a race.
  *   litmus-plain    the same without the plugin: the checker must report races in mp2 and lock (their volatile
- *                   hand-offs are plain accesses for GCC). */
+ *                   hand-offs are plain accesses for GCC).
+ *   race-pairs      D25 #7: a writer and a reader function race on one word; hb_dump prints the "hb-race" pair lines
+ *                   that tools/threads/race_pairs.py groups per function pair (test_mtqemu.py checks the mapping)
+ *   wg-clean        the wait-graph watchdog (platform/win32/waitgraph.cpp) on: the cs workload reports nothing
+ *   wg-deadlock     thread A holds a section and waits on a mutex B holds while B enters A's section: one cycle
+ *                   (A's mutex wait times out after 3 s and both finish)
+ *   wg-hang         a thread waits on an event for 1.2 s with a 0.5 s limit: one long wait */
 #include "fnvnx_win32_ext.h"
 #include "fnvnx/hostapi.h"
 
@@ -395,6 +401,97 @@ static void t_litmus(const char *name, int (*fn)(void), bool order)
         result(name, m2.races > 0 && lk.races > 0, d);
 }
 
+/* ---- race-pairs */
+extern "C" void hb_dump(void);
+static int g_pair_word;
+static volatile int g_pair_sink;
+extern "C" __attribute__((noinline)) void mtq_pair_writer(void) { for (int i = 0; i < 50; i++) g_pair_word = i; }
+extern "C" __attribute__((noinline)) void mtq_pair_reader(void) { for (int i = 0; i < 50; i++) g_pair_sink = g_pair_word; }
+static DWORD pair_w(LPVOID) { mtq_pair_writer(); return 0; }
+static DWORD pair_r(LPVOID) { mtq_pair_reader(); return 0; }
+static void t_race_pairs(void)
+{
+    hb_reset();
+    HANDLE h[2] = {CreateThread(NULL, 0, pair_w, NULL, 0, NULL), CreateThread(NULL, 0, pair_r, NULL, 0, NULL)};
+    WaitForMultipleObjects(2, h, TRUE, INFINITE);
+    for (int i = 0; i < 2; i++) CloseHandle(h[i]);
+    hb_dump();
+    char d[64];
+    snprintf(d, sizeof d, "races %u (want > 0)", hb_races());
+    result("race-pairs", hb_races() > 0, d);
+}
+
+/* ---- wait-graph watchdog */
+static void wg_sink(const char *line) { printf("%s\n", line); }
+static CRITICAL_SECTION g_wg_cs;
+static HANDLE g_wg_mutex, g_wg_ev_a, g_wg_ev_b, g_wg_hang;
+static DWORD g_wg_a_rc;
+static DWORD wg_a(LPVOID)
+{
+    EnterCriticalSection(&g_wg_cs);
+    WaitForSingleObject(g_wg_ev_b, INFINITE);         /* B holds the mutex */
+    SetEvent(g_wg_ev_a);
+    g_wg_a_rc = WaitForSingleObject(g_wg_mutex, 3000); /* A -> mutex -> B */
+    LeaveCriticalSection(&g_wg_cs);
+    return 0;
+}
+static DWORD wg_b(LPVOID)
+{
+    WaitForSingleObject(g_wg_mutex, INFINITE);
+    SetEvent(g_wg_ev_b);
+    WaitForSingleObject(g_wg_ev_a, INFINITE);
+    Sleep(50);
+    EnterCriticalSection(&g_wg_cs);                    /* B -> section -> A */
+    LeaveCriticalSection(&g_wg_cs);
+    ReleaseMutex(g_wg_mutex);
+    return 0;
+}
+static DWORD wg_hang(LPVOID) { WaitForSingleObject(g_wg_hang, INFINITE); return 0; }
+static void t_waitgraph(void)
+{
+    unsigned c0, l0, c1, l1, c2, l2, c3, l3, sc;
+    fnvnx_waitgraph_start(1500, 100, wg_sink);
+    /* clean: contention without a cycle, no wait near the limit */
+    hb_reset();
+    g_count = 0;
+    HANDLE h[4];
+    for (int i = 0; i < 4; i++) h[i] = CreateThread(NULL, 0, cs_thread, NULL, 0, NULL);
+    WaitForMultipleObjects(4, h, TRUE, INFINITE);
+    for (int i = 0; i < 4; i++) CloseHandle(h[i]);
+    Sleep(300);
+    fnvnx_waitgraph_counts(&c0, &l0, &sc);
+    char d[128];
+    snprintf(d, sizeof d, "cycles %u long-waits %u (want 0, 0), %u scans", c0, l0, sc);
+    result("wg-clean", c0 == 0 && l0 == 0 && sc > 0, d);
+    /* deadlock */
+    InitializeCriticalSection(&g_wg_cs);
+    g_wg_mutex = CreateMutexA(NULL, FALSE, NULL);
+    g_wg_ev_a = CreateEventA(NULL, TRUE, FALSE, NULL);
+    g_wg_ev_b = CreateEventA(NULL, TRUE, FALSE, NULL);
+    HANDLE t[2] = {CreateThread(NULL, 0, wg_a, NULL, 0, NULL), CreateThread(NULL, 0, wg_b, NULL, 0, NULL)};
+    WaitForMultipleObjects(2, t, TRUE, INFINITE);
+    for (int i = 0; i < 2; i++) CloseHandle(t[i]);
+    fnvnx_waitgraph_counts(&c1, &l1, &sc);
+    snprintf(d, sizeof d, "cycles %u (want 1), A's mutex wait rc %u (want 0x102), long-waits %u", c1 - c0,
+             (unsigned)g_wg_a_rc, l1 - l0);
+    result("wg-deadlock", c1 - c0 == 1 && g_wg_a_rc == WAIT_TIMEOUT, d);
+    /* hang: a wait over the limit */
+    fnvnx_waitgraph_stop();
+    fnvnx_waitgraph_start(500, 100, wg_sink);
+    fnvnx_waitgraph_counts(&c2, &l2, &sc);
+    g_wg_hang = CreateEventA(NULL, TRUE, FALSE, NULL);
+    HANDLE th = CreateThread(NULL, 0, wg_hang, NULL, 0, NULL);
+    Sleep(1200);
+    SetEvent(g_wg_hang);
+    WaitForSingleObject(th, INFINITE);
+    CloseHandle(th);
+    fnvnx_waitgraph_stop();
+    fnvnx_waitgraph_counts(&c3, &l3, &sc);
+    snprintf(d, sizeof d, "long-waits %u (want 1), cycles %u (want 0)", l3 - l2, c3 - c2);
+    result("wg-hang", l3 - l2 == 1 && c3 == c2, d);
+    fnvnx_waitgraph_summary();
+}
+
 extern "C" int mtq_main(void)
 {
     printf("mtq: guest up, %u cores reported\n", (unsigned)fnvnx_hcall0(fnvnx_host->cpu_count));
@@ -410,6 +507,8 @@ extern "C" int mtq_main(void)
     ilk_cost();
     t_litmus("litmus-order", litmus_main_order, true);
     t_litmus("litmus-plain", litmus_main_plain, false);
+    t_race_pairs();
+    t_waitgraph();
     printf("mtq: done, %d failed\n", g_fail);
     return g_fail;
 }

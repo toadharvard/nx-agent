@@ -277,6 +277,7 @@ extern "C" LPWSTR *CommandLineToArgvW(LPCWSTR cmd, int *argc)
 extern "C" void ExitProcess(UINT code)
 {
     w32_log("ExitProcess(%u)", (unsigned)code);
+    fnvnx_threads_flush();   /* the race checker's pairs and the watchdog's summary, when they are on */
     os_exit_process((int)code);
 }
 
