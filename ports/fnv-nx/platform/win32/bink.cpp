@@ -14,7 +14,11 @@ HBINK BinkOpen(const char *name, unsigned flags)
 {
     (void)name;
     (void)flags;
-    FNVNX_UNIMPL();   /* no movie player: every Bink movie is skipped (the platform lane, platstat.cpp) */
+    /* a documented skip, not a missing implementation (the platform lane counts it as noop, D25 #3 leaves it out):
+     * NULL is what a missing .bik gives on the PC, and every call site of the exe's BinkOpen slot null-tests the
+     * handle before use (V1 BINK-1, tests/v1/test_s2c_s4_batch.py), so the intro and menu movies are skipped. No
+     * decoder (owner decision). */
+    FNVNX_NOOP();
     SetLastError(ERROR_FILE_NOT_FOUND);
     return NULL;
 }
