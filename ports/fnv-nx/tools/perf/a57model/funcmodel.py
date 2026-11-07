@@ -91,7 +91,9 @@ def blocks_of(il):
     return out
 
 
-def price_funcs(elf, specs, mca, mca1=None):
+def price_funcs(elf, specs, mca, mca1=None, mcat=None):
+    """mcat: an MCA(metric='rthroughput'): adds cpi_tput, the chain-free steady bound (independent calls overlap;
+    PERF.md 11.9). The chained 'cpi' feeds each pass's results into the next and overstates latency-bound code (V1 S2)."""
     syms = cost.Symbols([elf])
     img = Image(elf)
     res = []
@@ -110,6 +112,7 @@ def price_funcs(elf, specs, mca, mca1=None):
         meta.append((spec, name, lo, il, bl, key))
     cyc = mca.cycles(regions)
     once = mca1.cycles({k: v for k, v in regions.items() if 'b' not in k}) if mca1 else {}
+    tput = mcat.cycles({k: v for k, v in regions.items() if 'b' not in k}) if mcat else {}
     for spec, name, lo, il, bl, key in meta:
         n = len(cost.mca_text(il))
         whole = cyc.get(key)
@@ -125,6 +128,7 @@ def price_funcs(elf, specs, mca, mca1=None):
                     'cycles_pass': whole, 'cycles_once': once.get(key),
                     'cpi': round(whole / n, 3) if whole and n else None,
                     'cpi_once': round(once[key] / n, 3) if once.get(key) and n else None,
+                    'cpi_tput': round(tput[key] / n, 3) if tput.get(key) and n else None,
                     'cpi_lo': round(cpis[0][0], 3) if cpis else None, 'cpi_hi': round(cpis[-1][0], 3) if cpis else None})
     return res
 

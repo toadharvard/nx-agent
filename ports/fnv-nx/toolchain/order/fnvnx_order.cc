@@ -116,7 +116,7 @@ static bool object_last = false;                         // object=first (defaul
 static bool object_msvc = false;                         // object=msvc: MSVC 2008's table (tests/s11/order/order.msvc)
 static bool assign_msvc = false;                         // assign=cpp17 (default) | msvc: built-in compound assignment
 static bool operator_rtl = false;                        // operator=cpp17 (default) | rtl: ORDER-OPERATOR
-static unsigned long calls_object_last, calls_operator;
+static unsigned long calls_object_last, calls_operator, calls_prvalue_virtual, calls_fnptr;
 static bool refcount_weak = true;
 static tree refcount_inc_fn, refcount_dec_fn;            // fnvnx_win32.h helpers, seen at their PRE_GENERICIZE
 static unsigned long ilk_inc_weak, ilk_dec_weak, ilk_full;
@@ -577,7 +577,9 @@ static void finish(void *, void *) {
            (unsigned long)forwarders.size(), polls_plain);
   if (verbose && (object_last || operator_rtl))
     inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu calls with the object after the arguments, "
-           "%lu overloaded operators right to left", calls_object_last, calls_operator);
+           "%lu overloaded operators right to left, %lu prvalue virtual calls with the object first, "
+           "%lu calls through a computed pointer with the arguments first",
+           calls_object_last, calls_operator, calls_prvalue_virtual, calls_fnptr);
 }
 
 // ---- argument order (args=rtl)
@@ -609,7 +611,15 @@ static int object_kind(tree call, tree fn) {
   if (TREE_CODE(call) == AGGR_INIT_EXPR && AGGR_INIT_VIA_CTOR_P(call)) return 0;
   if (TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL) {
     tree d = TREE_OPERAND(fn, 0);
-    return DECL_CONSTRUCTOR_P(d) || DECL_DESTRUCTOR_P(d) ? 0 : 1;
+    if (DECL_CONSTRUCTOR_P(d) || DECL_DESTRUCTOR_P(d)) return 0;
+    // `make().f(a())` with f virtual: the front end calls a prvalue's virtual function directly (it knows the
+    // type), MSVC 2008 still treats it as a virtual call and evaluates the object first (V2's P1)
+    if (object_msvc && DECL_VIRTUAL_P(d) && TREE_CODE(call) == CALL_EXPR) {
+      tree o = *arg_slot(call, 0);
+      while (CONVERT_EXPR_P(o) || TREE_CODE(o) == NON_LVALUE_EXPR) o = TREE_OPERAND(o, 0);
+      if (TREE_CODE(o) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(o, 0)) == TARGET_EXPR) { calls_prvalue_virtual++; return 0; }
+    }
+    return 1;
   }
   if (TREE_CODE(fn) == OBJ_TYPE_REF) return object_msvc ? 0 : 2;
   return object_msvc && TREE_CODE(call) == CALL_EXPR ? 3 : 0;
@@ -641,6 +651,15 @@ static void reorder_call(tree call) {
   }
   if (fntype && TREE_CODE(fntype) == METHOD_TYPE) first = 1;
   int okind = first ? object_kind(call, fn) : 0;
+  // `fp()(a())`: a call through a computed function pointer evaluates its arguments before the callee expression
+  // under MSVC 2008 (V2's P2): the argument chain goes in front of the callee (an indirect call anyway)
+  bool fnptr = false;
+  if (!first && object_msvc && TREE_CODE(call) == CALL_EXPR && fn && TREE_SIDE_EFFECTS(fn) &&
+      !(TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL) && TREE_CODE(fn) != OBJ_TYPE_REF &&
+      fntype && TREE_CODE(fntype) == FUNCTION_TYPE) {
+    okind = 3;
+    fnptr = true;
+  }
   int effects = 0, live = 0;
   for (int i = first; i < n; i++) {
     tree a = *arg_slot(call, i);
@@ -694,6 +713,7 @@ static void reorder_call(tree call) {
     calls_operator++;
   }
   if (okind) calls_object_last++;
+  if (fnptr) calls_fnptr++;
   calls_reordered++;
 }
 

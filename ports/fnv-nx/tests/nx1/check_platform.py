@@ -9,7 +9,8 @@
   audio    audren: initialised, the renderer started, closed again, the pump on the audio role;
   applet   the applet pump (host_device.inc) starts with the guest, h_main_loop defers to it, its hook covers focus,
            resume, operation mode (docked 1080p / handheld 720p) and exit requests;
-  exit     every way out runs cleanup_for_exit (boost off, override removed, log flushed): the guest's exit(), the
+  exit     the pump takes appletLockExit (without it AM force-terminates on Close software and sends no exit request),
+           every way out runs cleanup_for_exit, which releases it (boost off, override removed, log flushed): the guest's exit(), the
            guest returning, a system exit request (then exit(0), so libnx ends with ISelfController::Exit), a refused
            start; svcExitProcess only in the crash handler. The process then returns to the HOME menu: hbmenu
            lives in hbloader's process, which the game process replaced (docs/NRO.md);
@@ -37,7 +38,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(ROOT, "toolchain", "tools"))
+import npdmtool  # noqa: E402
 from check_fs import strip_comments  # noqa: E402
+from check_gpu import cexpr  # noqa: E402
 from check_nro import Checks  # noqa: E402
 
 APP_MEMORY_BLOCKS = 20000   # Mesosphere kern_kernel.hpp ApplicationMemoryBlockSlabHeapSize
@@ -83,6 +87,11 @@ def check(run: bool) -> Checks:
     hook = body(dev, "applet_hook")
     for k in ("OnFocusState", "OnResume", "OnOperationMode", "OnExitRequest"):
         c.ok(f"applet.hook.{k}", f"AppletHookType_{k}" in hook, f"the applet hook ignores {k}")
+    ps = body(dev, "pump_start")
+    c.ok("exit.lock", "appletLockExit" in ps, "nothing calls appletLockExit: AM force-terminates the process on Close "
+         "software and the exit request (cleanup, exit(0)) never runs (V1 NX1-EXIT-P1)")
+    c.ok("exit.unlock", "appletUnlockExit" in body(dev, "cleanup_for_exit"),
+         "cleanup_for_exit does not appletUnlockExit before the process ends (libnx applet.h)")
     pump = body(dev, "pump_main")
     c.ok("exit.request", "cleanup_for_exit" in pump and "exit(0)" in pump and "svcExitProcess" not in pump,
          "the exit request path does not clean up and exit()")
@@ -120,13 +129,30 @@ def check(run: bool) -> Checks:
          "reservations must be stack-region address space with svcMapMemory commits (the 32-bit space's map target)")
     # kernel memory blocks: a 32-bit process has no private system resource (ldr: system_resource_size needs a 39-bit
     # space), so every mapping draws on Mesosphere's shared application slab (20,000 blocks)
-    ext = re.search(r'#define\s+FNVNX_VM_EXTENTS\s+(\d+)', vm)
+    # The bound is the define's whole value as C evaluates it (check 6's cexpr: hex, suffixes, other defines, operators;
+    # V1 VM-2: a decimal-only regex read 0x2000 as 0); a value it cannot evaluate fails, never counts as small.
+    defs = {}
+    for m in re.finditer(r'^[ \t]*#[ \t]*define[ \t]+([A-Z_][A-Z0-9_]*)[ \t]+([^\n]*)', strip_comments(vm), re.M):
+        v = cexpr(m.group(2).strip(), defs)
+        if v is not None:
+            defs[m.group(1)] = v
+    extents = defs.get("FNVNX_VM_EXTENTS")
     npdm = json.load(open(os.path.join(ROOT, "toolchain", "npdm", "fnvnx-app.json")))
-    srs = int(str(npdm.get("system_resource_size", "0")), 0)
-    worst = (int(ext.group(1)) if ext else 1 << 30) * 4 + 4000
-    c.ok("s4.vm_blocks", srs > 0 or worst <= APP_MEMORY_BLOCKS,
+    try:
+        srs = int(str(npdm.get("system_resource_size", "0")), 0)
+    except ValueError:
+        srs = 0
+    # ldr honours system_resource_size only in a 39-bit space (V1 VM-3): in a 32-bit one (the game's
+    # 32bit_no_reserved, D8) it is no private slab, so the shared application slab is still the bound
+    ast = npdm.get("address_space_type", "")
+    own_slab = srs > 0 and (ast if isinstance(ast, int) else npdmtool.ADDRESS_SPACES.get(str(ast))) == 3   # 64Bit39
+    worst = extents * 4 + 4000 if extents is not None else None
+    c.ok("s4.vm_blocks", own_slab or (worst is not None and worst <= APP_MEMORY_BLOCKS),
+         "FNVNX_VM_EXTENTS cannot be evaluated (host_vm.inc)" if worst is None else
          f"VirtualAlloc extents up to {worst} kernel memory blocks (4 per extent + 4,000) > the application slab's "
-         f"{APP_MEMORY_BLOCKS}: lower FNVNX_VM_EXTENTS or merge commits")
+         f"{APP_MEMORY_BLOCKS}: lower FNVNX_VM_EXTENTS or merge commits"
+         + (" (system_resource_size does not help a 32-bit address space: ldr gives it no system resource)"
+            if srs > 0 else ""))
     msg = src("toolchain/host/host_message.inc")
     c.ok("s4.message_applet", "errorApplicationCreate" in msg and "errorApplicationShow" in msg,
          "MessageBoxA does not go through the error applet")

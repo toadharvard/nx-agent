@@ -444,6 +444,7 @@ int main(int argc, char **argv) {
     }
     if (!fnvnx_reserve_late) logf_("fnvnx host: built without startup/host/reserve*.c: windows NOT reserved\n");
     remove_launcher_override();   /* past S10's only relaunch point: the console is back as it was */
+    mount_shader_pack();
     report_layout();
     load_config();
     fnvnx_host_register_ext(FNVNX_EXT_PLATFORM, platform_ext);

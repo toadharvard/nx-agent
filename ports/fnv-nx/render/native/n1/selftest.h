@@ -4,4 +4,7 @@
 #define FNVNX_N1_SELFTEST_H
 #include "renderer.h"
 int n1_selftest(nx::Backend* be, char* log, uint32_t loglen, int* checks);
+// The engine-path world frame (selftest_world.cpp); appends to log at *at, adds to *checks, returns failures. Also
+// writes one info line with the frame's DrawStats.
+int n1_selftest_world(nx::Backend* be, nx::Renderer& r, uint32_t back, char* log, uint32_t cap, uint32_t* at, int* checks);
 #endif

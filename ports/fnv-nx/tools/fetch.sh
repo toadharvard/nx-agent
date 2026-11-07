@@ -17,3 +17,4 @@ pin() {  # name url commit
 pin fnv_decomp https://github.com/momusdigital/fnv_decomp 87eb9373a0bb7c9a38070be4f00c3bcb615d928d
 pin sse2neon   https://github.com/DLTcollab/sse2neon      2272251cc3ad9cba8b8c47c4065811cfb396b802
 pin libnx      https://github.com/switchbrew/libnx        b156b4774fb2df7b93402169509266da7547fc4c
+pin minimp3   https://github.com/lieff/minimp3           ea99364f61c14656440e8d77e9c233ccf3124633   # CC0: platform/audio/dshow.cpp

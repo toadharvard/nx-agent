@@ -3439,3 +3439,89 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - The R0 regression detector is merged: trend per head, regressions with their commit ranges, and stale passes no
     longer count.
   - Scorecard: 1 pass / 17 fail / 11 no-data / 4 stale.
+
+### J-0153 | 2026-11-04 | stream: orchestration | status: wip | parent: J-0152
+
+* **decided (owner)** - No settings presets (D20 revised): 60 fps at the exe's default settings, met in code (port
+  overhead, threading, algorithms). S15-simd audits the port's own overhead, by class and in M per frame.
+* **decided** - D20: bodies the decomp lacks may be reconstructed against the exe (byte match required). They live
+  on fnv-nx-build `recon/<unit>` only; nx-agent holds only the rule that applies them.
+* **landed** - LINK_OVERRIDES=auto: every full build links the native renderer. uam is built at its pin in the farms.
+  S5-boot gets past the memory manager to WinMain; the ini files are on gamedata/exe. S5-data publishes Data/ for
+  the main menu. NX1 closes V1's 7 device-check refutations. S12's P1/P2 are fixed (3 -> 0). S13b's cause audit:
+  692 functions move from artifact to real-bug or triage.
+* **allocation (owner)** - Closed work is put to sleep, and the critical path is parallelized.
+  - Archived: S11, S12, S1-STL, S2c-abi; farms keys1, try1of4, cmp1, perf1, eq4-eq6 (equivalence at 3/6 shards).
+  - Finishing their last merge: R0, P0, S1-fuzzB.
+  - New streams: S2c-vt2 (general slot fill), S1-layout (layout-offset, native-empty-body), render-lit,
+    render-land, G1-gpu (GPU 27.2 -> 16.7 ms), S15-scene (scene graph in parallel).
+  - New farms: full4 and full5, so a fresh NRO comes out more often.
+  - Every new stream starts from docs/STREAM_START.md.
+
+| metric | value |
+|---|---|
+| census errors | 0 / 2978 |
+| link undefined / trap stubs | 4279 / 2315 (last full1 link 06857911f5ab, before the S2c/S4/S5 merges) |
+| runtime traps up to the boot's stop | 2 names + 123 IAT slots -> 0 |
+| slot fill (trial link) | 1,295 -> 880 |
+| ABI open pairs (S1b) | 1,001 -> 867 |
+| fuzz (S13b) | 2,018 -> 2,927 functions with verdicts; artifact 2,321 -> 1,629 |
+| order divergences (S12) | 3 -> 0 |
+| boot | WinMain; stub boot initializer skips 767 -> 1; known_faults 22 -> 10 |
+| native render | UI only; Doc Mitchell frame black (S16 bisecting) |
+| CPU worst frame (model, defaults) | 34.3 ms placed; plan60 23.4 ms |
+| GPU real019 | 27.22 ms handheld |
+| gates1 | 1 pass / 17 fail / 11 no-data / 4 stale (last scorecard) |
+
+### J-0154 | 2026-11-04 | stream: orchestration | status: paused | parent: J-0153
+
+* **paused (owner)** - Every agent is paused to save quota; the project is not shelved. Integration head at the
+  pause: fa5b9c50 plus this entry. Every scheduled check-in is disabled (orchestrator, farms, stream reminders). Every
+  stream was told to push its unfinished work as a WIP commit to its own branch and stop.
+* **build** - The full-build farms full1-full5 run one last build of the head (full_job builds the head itself since
+  438f7c11; XCGEN_EXE since 84aaa80a) and publish link/<c12>, nro/<c12> and reports/full*. They do not restart.
+* **not adopted at the pause** (each stream merges integration on resume): G1-gpu, S1-layout, S13, S15-scene,
+  S2d-bodies, S5-menu.
+* **decisions this round** - D20 (default settings = Fallout_default.ini; no presets; recon/ in the private repo),
+  D21 (coverage first, then optimization), D22 (virtual ~C() for placeholder first virtuals paired with an exe
+  deleting destructor). The farms may stop an outdated runner (owner order); every Bash is allowed in settings.
+* **state** - Render: the general path passes the scene check on menu (98 dB) and docmitchell (83 dB), 0 skipped;
+  R4 was the image exhaustion in d3d9_exec (render-land). Native families: lit 27/27, post 27/27, grass, leaves,
+  particles, decals ready behind Translated. GPU real019 22.06 ms (G1). CPU plan60 16.57 ms in the model
+  (S15-scene). Boot: WinMain -> renderer init blocked by NiTMap slot order (D22). Fuzz: 8 shards (fz1-fz8).
+* **resume order** - full farms' reports first; then D22 (S1-refs, S2c-vt), the collect-all boot on the new guest
+  (S5-boot, S5-menu), the unadopted branches above, SM3 captures (S5-data), per-program references (S16).
+
+### J-0155 | 2026-11-05 | stream: orchestration | status: stopped | parent: J-0154
+
+* **stopped (owner)** - Every agent and farm is stopped; no scheduled check-in is enabled. Streams keep their
+  pushed branches (heads in J-0154 replies); full1-full5 are idle with their toolchains.
+* **first current guest** - 9f865b0a4037 (full4/full5): provenance PASS, census 2978/2978, trial link 2,345
+  undefined, guest.nso 14.7 MiB with 1,691 trap stubs, nro/9f865b0a4037 and link/9f865b0a4037 published. Boot:
+  WinMain, then a write fault in the game heap (HeapFreeBlock::RemoveFromFreeList <- AbstractHeap, S10 initializer
+  0x00fc7a50); 3,473 initializers then fault in FUN_00aa1070. First item on resume: S5-boot + S1-refs (heap
+  stand-in, MemoryHeap recon, global new/delete).
+* **shader sweep** (S16 sweep_job, all 16 packages, 7 parameter sets, reports/sweep/74a18a60420e/*of36): 1,809
+  programs - 981 pass, 232 over, 596 vacuous. Next: sweep_report.py classes (the zero-constant rcp/rsq case first);
+  the cell sweep (1,190 scenes, ~3.6 h per shard of 36) is not run yet.
+* **fuzz** - fz1-fz3 of 8 ran on the night queue; fz4-fz8, equivalence and audit are not run.
+
+### J-0156 | 2026-11-07 | stream: orchestration | status: active | parent: J-0155
+
+* **night pass results** (all on 06f45fbb, script farms on Haiku): fuzz 8/8 shards, 67,847 of 68,456 functions with a
+  verdict, ~10 % hard divergences (about half harness/representation classes); equivalence 6/6, 79 % of units
+  byte-identical, 120 functions with real code differences of 60,715; cell sweep 36/36, 1,139 of 1,155 scenes pass,
+  96.8 % of draws, GPU model median 10.0 ms, p99 18.5 ms, 10 scenes over 16.7 ms (SLS, HDR blend, SKY families);
+  overhead audit 24/26 shards (19, 26 rerun after 9e723b48), A64/x86 0.75x, bridges 1.0 %, 19k functions pending.
+* **lesson** - every check recomputes from scratch; the cell sweep re-boots the original under Wine for references
+  that never change. A nudged pending session can run its prompt twice: farm RUN is now flock-guarded.
+* **plan (owner: make the bench fast, then close coverage; targets unchanged)**
+  - T1-fastbench: reference capture cache + replay-only sweep; keyed caches for audit and equivalence; quick_job.sh
+    (diff -> affected units/functions -> incremental link, equiv, fuzz, audit, replay, boot; one report, <= 20 min);
+    3 warm farms on the integration head; full runs only when a cache key changes.
+  - S5-boot: the heap fault after WinMain, then the lockstep trace (original under Wine vs guest in the emulator,
+    first divergence at a function boundary) and real-argument capture for fuzz seeding.
+  - S2-bodies: the missing bodies by class, by script (special-default 1,359, vcall 927, exe-addr 198, msvc-inline
+    29), then the 1,142 missing classified by cause.
+  - after these: fuzz rule classes (bool-repr, call-flow, vptr-unpaired, native-early-exit, uninit), audit pending,
+    shaders 232 over / 596 vacuous, then the frame profile in emulation and the D21 performance levers.

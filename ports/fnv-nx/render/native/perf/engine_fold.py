@@ -92,8 +92,7 @@ def fold(rep, base, lo=None, hi=None, meta=None):
                                 "native = front + deko3d recording + the kept engine part; nouveau still excluded")
     s = rep["summary"]
     s["frame_budget"] = {"target_fps": 60, "ms": FRAME_BUDGET_MS, "config": "handheld_720p",
-                         "rule": "owner: 60 fps for the whole frame at 720p handheld; the gate reads "
-                                 "targets_budget_fraction['60']"}
+                         "rule": "owner: 60 fps for the whole frame at 720p handheld. The whole-frame gate is perf.budget (tools/gates/ready.py budget_gate): docs/PERF_budget.json, scenario placed, verdict target_60 on the worst frame (S15's frame model, which reads this report for the renderer rows). targets_budget_fraction is the renderer's share only; perf.render judges it against its share of the frame (render_perf.max_budget_fraction)"}
     d_hi, d_lo = rep["frame"]["mix_hi"]["draws"], rep["frame"]["mix_lo"]["draws"]
     pdu = s["per_draw_us"]
     nine_hi = nine["with_engine_a64_instr"]["mix_hi"] / d_hi; nine_lo = nine["with_engine_a64_instr"]["mix_lo"] / d_lo
@@ -163,12 +162,16 @@ def rehotspot(rep):
         h["cpu_by_function"] = sorted([r for r in h["cpu_by_function"] if r.get("kind") != "cpu_engine_function"]
                                       + kept_rows, key=lambda r: -r["ms"])[:30]
     cpu = [r for r in h["cpu_by_function"]][:20]
-    gpu = [dict(r, config="handheld_720p") for r in h.get("gpu_by_pass/mix_hi/handheld_720p", [])]
+    # GPU rows: real019 (the game's own programs, translated) is the metric; the native mix_hi row is a lower bound
+    # with stand-in shaders and ranks only when real019 was not built
+    gkey = "gpu_by_pass/real019_mix_hi/handheld_720p" if "gpu_by_pass/real019_mix_hi/handheld_720p" in h else \
+        "gpu_by_pass/mix_hi/handheld_720p"
+    gpu = [dict(r, config="handheld_720p", scene=gkey.split("/")[1]) for r in h.get(gkey, [])]
     top = sorted(cpu + gpu, key=lambda r: -r["ms"])
     h["top10"] = top[:10]
     h["frame_budget_ms"] = FRAME_BUDGET_MS
     h["rows_rule"] = ("every row: thread = the resource it runs on (main, render: CPU threads at IPC 0.6, 1.02 GHz; "
-                      "GPU: model at handheld 720p, efficiency 0.6); share_of_16_7ms = ms / 16.7 (the 60 fps frame). "
+                      "GPU: model at handheld 720p, efficiency 0.6, ranked on real019 = the game's programs translated; stand_in marks native rows costed with a stand-in shader); share_of_16_7ms = ms / 16.7 (the 60 fps frame). "
                       "Threads and the GPU run in parallel: shares of different threads do not add up. "
                       "engine_d3d9_path_by_function rows marked 'Nine fallback only' are not on the native path; "
                       "on the native path only the kept engine part runs, on main")

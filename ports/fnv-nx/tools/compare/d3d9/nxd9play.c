@@ -3,7 +3,17 @@
  * llvmpipe: the reference side of every frame comparison. Its outputs are named like nx_render's, so the same
  * comparison reads both:
  *
- *   nxd9play.exe <file.nxd9> -o <dir> [--per-draw] [--until-draw N] [--frame F]
+ *   nxd9play.exe <file.nxd9> -o <dir> [--per-draw] [--until-draw N] [--frame F] [--frames A-B]
+ *
+ *   --per-draw-at a,b,... is --per-draw for those draws only (of the --frame frame): a bisection's probes.
+ *   --draw-stats <tsv> writes, for each draw of the frames --frame selects (all without it): frame, draw, render
+ *   target 0's width, height and D3DFORMAT, and the number of its pixels the draw changed (-1 when the target cannot
+ *   be read back): the reference's coverage, for the GPU model. <dir>/frames.tsv gives each frame's execution time
+ *   in ms (QueryPerformanceCounter, Present to Present; a record of the reference only, never a metric; with
+ *   --per-draw or --draw-stats it includes their read-backs).
+ *   --frames A-B writes f<frame>.png only for frames A..B (A- to the end, A alone: that frame); every frame is still
+ *   executed. --frame F only restricts --per-draw and --until-draw: it does not limit the PNGs (a long journal
+ *   writes one PNG per frame without --frames).
  *
  *   <dir>/f<frame %05u>.png          the back buffer at each PRES
  *   <dir>/f<frame>_d<draw %05u>.png  --per-draw: render target 0 after each draw (every draw counts: nothing is skipped)
@@ -117,6 +127,11 @@ static IDirect3D9 *d3d; static IDirect3DDevice9 *dev; static HWND hwnd;
 static IDirect3DSurface9 *backbuf, *autods;
 static uint32_t W, H, frame_no, draw_no, in_scene;
 static const char *outdir; static int per_draw; static long until_draw = -1, only_frame = -1;
+static long png_first = 0, png_last = -1;
+static char *per_draw_at;          /* --per-draw-at a,b,...: dump only these draws of the --frame frame (a bisection's probes) */
+static FILE *draw_stats;            /* --draw-stats <tsv>: pixels each draw changes on render target 0 (frames per --frame) */
+static FILE *frame_times;           /* <dir>/frames.tsv: frame, ms (execution of the frame's records, PNG writes excluded) */
+static LARGE_INTEGER qpf, t_frame0; static double png_ms;   /* --frames A-B: write f<frame>.png only for A..B (B -1: to the end) */
 static unsigned long n_draws, n_failed_calls, n_records, n_unknown, n_ext;
 static char first_err[256];
 
@@ -169,6 +184,15 @@ static void scene_on(void) { if (!in_scene) { note(IDirect3DDevice9_BeginScene(d
 static void scene_off(void) { if (in_scene) { note(IDirect3DDevice9_EndScene(dev), "EndScene"); in_scene = 0; } }
 
 /* read a render-target surface back as RGBA8 and write it as PNG */
+static float half_to_float(uint16_t h) {
+    uint32_t sgn = (uint32_t)(h >> 15) << 31, e = h >> 10 & 31, m = h & 1023, u;
+    if (e == 0) {
+        if (m == 0) u = sgn;
+        else { e = 113; while (!(m & 1024)) { m <<= 1; e--; } u = sgn | e << 23 | (m & 1023) << 13; }
+    } else if (e == 31) u = sgn | 0x7f800000u | m << 13;
+    else u = sgn | (e + 112) << 23 | m << 13;
+    float f; memcpy(&f, &u, 4); return f;
+}
 static void dump_surface(IDirect3DSurface9 *s, const char *path) {
     D3DSURFACE_DESC d; IDirect3DSurface9 *sys = NULL; D3DLOCKED_RECT lr;
     if (!s || FAILED(IDirect3DSurface9_GetDesc(s, &d))) return;
@@ -196,6 +220,8 @@ static void dump_surface(IDirect3DSurface9 *s, const char *path) {
                     float c[4] = {0, 0, 0, 1};
                     if (d.Format == D3DFMT_A32B32G32R32F) memcpy(c, r + 16 * x, 16);
                     else if (d.Format == D3DFMT_R32F) c[0] = c[1] = c[2] = ((const float *)r)[x];
+                    else if (d.Format == D3DFMT_A16B16G16R16F) { for (int k = 0; k < 4; k++) c[k] = half_to_float(((const uint16_t *)r)[4 * x + k]); }
+                    else if (d.Format == D3DFMT_R16F) c[0] = c[1] = c[2] = half_to_float(((const uint16_t *)r)[x]);
                     for (int k = 0; k < 4; k++) { float v = c[k] < 0 ? 0 : c[k] > 1 ? 1 : c[k]; o[k] = (uint8_t)(v * 255.0f + 0.5f); }
                 }
                 }
@@ -236,13 +262,63 @@ static int create_device(uint32_t w, uint32_t h, uint32_t bfmt, uint32_t dfmt) {
 static uint32_t U(const uint8_t *p, size_t i) { uint32_t v; memcpy(&v, p + 4 * i, 4); return v; }
 static float F(const uint8_t *p, size_t i) { float v; memcpy(&v, p + 4 * i, 4); return v; }
 
+static uint32_t fmt_bpp(uint32_t f) {
+    switch (f) { case D3DFMT_A16B16G16R16F: case D3DFMT_A16B16G16R16: case D3DFMT_G32R32F: return 8;
+                 case D3DFMT_A32B32G32R32F: return 16; case D3DFMT_R16F: case D3DFMT_R5G6B5: case D3DFMT_A1R5G5B5:
+                 case D3DFMT_X1R5G5B5: case D3DFMT_A4R4G4B4: case D3DFMT_L16: case D3DFMT_A8L8: return 2;
+                 case D3DFMT_L8: case D3DFMT_A8: return 1; default: return 4; }
+}
+/* the bytes of render target 0, rows packed; NULL when it cannot be read back */
+static uint8_t *rt_bytes(uint32_t *w, uint32_t *h, uint32_t *fmt) {
+    IDirect3DSurface9 *rt = NULL, *sys = NULL; D3DSURFACE_DESC d; D3DLOCKED_RECT lr; uint8_t *out = NULL;
+    if (FAILED(IDirect3DDevice9_GetRenderTarget(dev, 0, &rt))) return NULL;
+    if (SUCCEEDED(IDirect3DSurface9_GetDesc(rt, &d)) &&
+        SUCCEEDED(IDirect3DDevice9_CreateOffscreenPlainSurface(dev, d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, NULL))) {
+        if (SUCCEEDED(IDirect3DDevice9_GetRenderTargetData(dev, rt, sys)) &&
+            SUCCEEDED(IDirect3DSurface9_LockRect(sys, &lr, NULL, D3DLOCK_READONLY))) {
+            uint32_t bpp = fmt_bpp(d.Format), row = d.Width * bpp;
+            out = malloc((size_t)row * d.Height);
+            if (out) for (uint32_t y = 0; y < d.Height; y++) memcpy(out + (size_t)y * row, (const uint8_t *)lr.pBits + (size_t)y * lr.Pitch, row);
+            IDirect3DSurface9_UnlockRect(sys);
+            *w = d.Width; *h = d.Height; *fmt = d.Format;
+        }
+        IDirect3DSurface9_Release(sys);
+    }
+    IDirect3DSurface9_Release(rt);
+    return out;
+}
+static uint8_t *pre_rt; static uint32_t pre_w, pre_h, pre_fmt;
+static int stats_frame(void);
+static void before_draw(void) {
+    free(pre_rt); pre_rt = NULL;
+    if (draw_stats && stats_frame()) { scene_off(); pre_rt = rt_bytes(&pre_w, &pre_h, &pre_fmt); }
+}
+static void draw_stat(void) {
+    if (!draw_stats || !stats_frame()) return;
+    uint32_t w = 0, h = 0, f = 0; long changed = -1;
+    scene_off();
+    uint8_t *post = rt_bytes(&w, &h, &f);
+    if (post && pre_rt && w == pre_w && h == pre_h && f == pre_fmt) {
+        uint32_t bpp = fmt_bpp(f); changed = 0;
+        for (size_t i = 0; i < (size_t)w * h; i++) changed += memcmp(post + i * bpp, pre_rt + i * bpp, bpp) != 0;
+    }
+    fprintf(draw_stats, "%u\t%u\t%u\t%u\t%u\t%ld\n", frame_no, draw_no, w, h, f, changed);
+    free(post); free(pre_rt); pre_rt = NULL;
+}
 static int frame_selected(void) { return only_frame < 0 || (long)frame_no == only_frame; }
 
 static int draw_allowed(void) {
     return !(until_draw >= 0 && frame_selected() && (long)draw_no > until_draw);
 }
+static int stats_frame(void) { return only_frame < 0 || (long)frame_no == only_frame; }
+static int probe_draw(void) {
+    if (!per_draw_at) return 1;
+    char key[16]; snprintf(key, sizeof key, ",%u,", draw_no);
+    return strstr(per_draw_at, key) != NULL;
+}
 static void after_draw(void) {
-    if (per_draw && frame_selected()) {
+    draw_stat();
+    if (per_draw && frame_selected() && probe_draw()) {
         IDirect3DSurface9 *rt = NULL; char p[1024];
         if (SUCCEEDED(IDirect3DDevice9_GetRenderTarget(dev, 0, &rt))) {
             snprintf(p, sizeof p, "%s/f%05u_d%05u.png", outdir, frame_no, draw_no);
@@ -457,21 +533,27 @@ static int record(uint32_t tag, const uint8_t *p, uint32_t n) {
     }
     case TAG('D', 'R', 'A', 'W'):
         if (n < 12) return fail("DRAW");
+        before_draw();
         if (draw_allowed()) { scene_on(); note(IDirect3DDevice9_DrawPrimitive(dev, U(p, 0), U(p, 1), U(p, 2)), "DrawPrimitive"); }
         after_draw();
         return 1;
     case TAG('D', 'R', 'W', 'I'):
         if (n < 24) return fail("DRWI");
+        before_draw();
         if (draw_allowed()) { scene_on(); note(IDirect3DDevice9_DrawIndexedPrimitive(dev, U(p, 0), (INT)U(p, 1), U(p, 2), U(p, 3), U(p, 4), U(p, 5)), "DrawIndexedPrimitive"); }
         after_draw();
         return 1;
     case TAG('P', 'R', 'E', 'S'): {
         char path[1024];
         scene_off();
-        snprintf(path, sizeof path, "%s/f%05u.png", outdir, frame_no);
-        dump_surface(backbuf, path);
+        { LARGE_INTEGER t; QueryPerformanceCounter(&t);
+          if (frame_times) fprintf(frame_times, "%u\t%.3f\n", frame_no, (t.QuadPart - t_frame0.QuadPart) * 1000.0 / qpf.QuadPart - png_ms); }
+        if ((long)frame_no >= png_first && (png_last < 0 || (long)frame_no <= png_last)) {
+            snprintf(path, sizeof path, "%s/f%05u.png", outdir, frame_no);
+            dump_surface(backbuf, path);
+        }
         note(IDirect3DDevice9_Present(dev, NULL, NULL, NULL, NULL), "Present");
-        frame_no++; draw_no = 0;
+        frame_no++; draw_no = 0; png_ms = 0; QueryPerformanceCounter(&t_frame0);
         return 1;
     }
     default:
@@ -487,12 +569,26 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--per-draw")) per_draw = 1;
         else if (!strcmp(argv[i], "--until-draw") && i + 1 < argc) until_draw = atol(argv[++i]);
         else if (!strcmp(argv[i], "--frame") && i + 1 < argc) only_frame = atol(argv[++i]);
+        else if (!strcmp(argv[i], "--per-draw-at") && i + 1 < argc) {
+            size_t n = strlen(argv[++i]); per_draw_at = malloc(n + 3); per_draw = 1;
+            per_draw_at[0] = ','; memcpy(per_draw_at + 1, argv[i], n); per_draw_at[n + 1] = ','; per_draw_at[n + 2] = 0;
+        }
+        else if (!strcmp(argv[i], "--draw-stats") && i + 1 < argc) {
+            draw_stats = fopen(argv[++i], "w");
+            if (!draw_stats) { fprintf(stderr, "nxd9play: cannot write %s\n", argv[i]); return 2; }
+        }
+        else if (!strcmp(argv[i], "--frames") && i + 1 < argc) {
+            char *e; png_first = strtol(argv[++i], &e, 10);
+            png_last = *e == '-' && e[1] ? strtol(e + 1, NULL, 10) : (*e == '-' ? -1 : png_first);
+        }
         else if (!in && argv[i][0] != '-') in = argv[i];
         else { in = NULL; break; }
     }
     if (!in || !outdir) { fprintf(stderr, "usage: nxd9play <file.nxd9> -o <dir> [--per-draw] [--until-draw N] [--frame F]\n"); return 2; }
     CreateDirectoryA(outdir, NULL);
     crc_init();
+    QueryPerformanceFrequency(&qpf); QueryPerformanceCounter(&t_frame0);
+    { char fp[1024]; snprintf(fp, sizeof fp, "%s/frames.tsv", outdir ? outdir : "."); frame_times = fopen(fp, "w"); }
     FILE *f = fopen(in, "rb");
     if (!f) { fprintf(stderr, "nxd9play: cannot open %s\n", in); return 2; }
     uint8_t hdr[8];
@@ -519,6 +615,8 @@ int main(int argc, char **argv) {
     snprintf(line, sizeof line, "nxd9play: frames %u draws %lu records %lu unknown %lu ext %lu failed_calls %lu%s%s",
              frame_no, n_draws, n_records, n_unknown, n_ext, n_failed_calls, first_err[0] ? " first_failure " : "", first_err);
     puts(line);
+    if (frame_times) fclose(frame_times);
+    if (draw_stats) fclose(draw_stats);
     char sp[1024]; snprintf(sp, sizeof sp, "%s/summary.txt", outdir);
     FILE *s = fopen(sp, "w");
     if (s) { fprintf(s, "%s\n", line); fclose(s); }

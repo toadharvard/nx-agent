@@ -164,27 +164,55 @@
   },
   {
    "id": "animation",
-   "name": "animation (controller managers, blending, skinning palettes)",
+   "name": "animation on main: the player (FUN_008885e0, FaceActor::UpdateFaceAnimation) and the packed task-6 drain after the AI join (FUN_0087a790, main.cpp:3364: queued UpdateControllersRecursive)",
    "role": "main",
    "minsn": [
-    2,
-    4
+    0.5,
+    1.8
    ],
    "basis": "E",
    "phase": "scene graph",
-   "subsystem": "animation"
+   "subsystem": "animation",
+   "note": "PERF.md 6.11: NPC animation (ProcessLists::FUN_0096cda0 -> AnimData::UpdateAnimationForRef, tasklets) and the cell downward pass run on AI linear thread 0 / 1"
   },
   {
    "id": "havok",
-   "name": "Havok step + character controllers",
+   "name": "Havok on main: the consumers after the AI join (foot IK / ragdoll impulses FUN_00ca2ad0 / FUN_00ca1410, projectiles Update3D 0x009b17a0, muzzle flashes; processlists.cpp:8546-8589) and the player's controller input",
    "role": "main",
    "minsn": [
-    2,
-    5
+    0.3,
+    1.5
    ],
    "basis": "E",
    "phase": "havok",
-   "subsystem": "havok"
+   "subsystem": "havok",
+   "note": "PERF.md 6.11: with iNumHWThreads > 1 (WinMain sets it from GetSystemInfo: 3) the step itself (bhkWorld::StepSimulation via TES::FUN_00453550) runs on AI linear thread 1 (ailineartaskthreadmanager.cpp:804); main steps only when iNumHWThreads == 1 (main.cpp:2447)"
+  },
+  {
+   "id": "animation_ai",
+   "name": "NPC animation and the cell downward pass on the AI linear threads (FUN_0096cda0, TESObjectCELL::FUN_00551890)",
+   "role": "ai-linear",
+   "minsn": [
+    1.5,
+    2.2
+   ],
+   "basis": "E",
+   "phase": "scene graph",
+   "subsystem": "animation",
+   "ai2_path": 1.0
+  },
+  {
+   "id": "havok_ai",
+   "name": "Havok step on AI linear thread 1 (TES::FUN_00453550 -> bhkWorld::StepSimulation, one world per frame)",
+   "role": "ai-linear",
+   "minsn": [
+    1.7,
+    3.5
+   ],
+   "basis": "E",
+   "phase": "havok",
+   "subsystem": "havok",
+   "ai2_path": 1.0
   },
   {
    "id": "game_logic",
@@ -212,7 +240,8 @@
     "ai-linear-1": 0.5,
     "ai-linear-2": 0.5
    },
-   "subsystem": "ai"
+   "subsystem": "ai",
+   "ai2_path": 0.5
   },
   {
    "id": "background",
@@ -262,30 +291,25 @@
   {
    "id": "havok_workers",
    "name": "Havok multithreaded simulation on the Havok worker pool (iNumThreads:HAVOK > 1)",
-   "moves": {
-    "havok": [
-     0.3,
-     0.5
-    ]
-   },
+   "moves": {},
    "to": "game",
    "basis": "E",
    "needs_hardware": true,
-   "status": "MT step present (bhkWorld::StepSimulation 0x00c6ae70: hkJobQueue + hkCpuJobThreadPool); selected by iSimType:HAVOK=4 (FUN_00c661d0; 3 maps to continuous); the whole chain (EnsureObjectsCreated 0x00cbf6b0, CreateObjects, pool ctor 0x00d2d110, dispatcher, InitHookTable and its handlers) has native code at link 06857911f5ab, both vtables complete; the run waits for a booted frame (PERF.md 6.9)"
+   "status": "with iNumHWThreads > 1 the step already runs on AI linear thread 1 (PERF.md 6.11); the MT simulation (iSimType=4, linked natively, 6.9) spreads it over the pool, which relieves that thread's core, not main: no main lever (P0 mtmodel's per-core schedule shows the effect)"
   },
   {
    "id": "threaded_anim",
-   "name": "threaded morpher/particles/blood through the packed task queue (bUseThreaded* PC defaults)",
+   "name": "the packed task-6 drain (queued controller updates) on the AI thread before the join instead of on main after it (MT1)",
    "moves": {
     "animation": [
-     0.2,
-     0.4
+     0.4,
+     0.6
     ]
    },
    "to": "ai-linear",
    "basis": "E",
    "needs_hardware": false,
-   "status": "bUseThreaded* named from the exe (defaults 0, PC ini 1; ini.cpp sets 1); readers not reconstructed; queued controller updates return to main after the 0x008c7990 join, plain cross-thread fields in the hand-off (PERF.md 6.9): not counted until an mtqemu case of the protocol passes"
+   "status": "proposed MT1: FUN_0087a790 (main.cpp:3364) moves before 0x008c7990's join; its queue lock m_uiLockState and the attaches FUN_00552570 to check (PERF.md 6.11)"
   },
   {
    "id": "instancing",
@@ -362,6 +386,21 @@
    "basis": "E",
    "needs_hardware": false,
    "status": "proposed (S15), override rows like spinlock_0040fba0"
+  },
+  {
+   "id": "havok_mt",
+   "name": "Havok's multithreaded simulation (iSimType=4, iNumThreads:HAVOK 2): the step's job-parallel part on the Havok pool instead of AI linear thread 2 alone",
+   "moves": {
+    "havok_ai": [
+     0.3,
+     0.45
+    ]
+   },
+   "from": "ai-linear",
+   "to": "game",
+   "basis": "E",
+   "needs_hardware": true,
+   "status": "linked natively (PERF.md 6.9); iSimType=4 selects it (FUN_00c661d0); the step must stay on one thread (CreateObjects keys the pool on the stepping thread id, 6.10); off until mtqemu past WinMain"
   }
  ],
  "scenarios": [
@@ -378,7 +417,8 @@
    "levers": [
     "mt_cull",
     "havok_workers",
-    "threaded_anim"
+    "threaded_anim",
+    "havok_mt"
    ]
   },
   {
@@ -390,7 +430,8 @@
     "threaded_anim",
     "render_f2f4",
     "barrier_relax",
-    "neon_math"
+    "neon_math",
+    "havok_mt"
    ]
   },
   {
@@ -404,7 +445,8 @@
     "barrier_relax",
     "neon_math",
     "instancing",
-    "core3"
+    "core3",
+    "havok_mt"
    ]
   }
  ],
@@ -425,17 +467,17 @@
    ],
    "calls_note": "objects whose world transform is recomputed per exterior frame [E]",
    "per_call_note": "with the override fnvnx_update_world_loc_00a68bf0 (S15-simd; NiTransform compose 0x0062c250, products 0x0043f8d0 / 0x004b4500 / 0x004a3760 / 0x00439e90 inlined): 13-14 on the copy paths, 47 + ~3 for a full compose [M] (override_ab.py, link 0bd144db1464, agreement 11 -> 12 of 16). Before: copy paths 12-14, the compose path 23 + a call to an operator* the link leaves unresolved (>100 counted from the parts); the earlier 45-75 also wrongly took the NiMatrix3 transpose product 0x00a588a0 as part of it",
-   "per_call_cycles": [
-    11.5,
-    59.6
-   ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
    "before": {
     "per_call_insn": [
      13,
      100
     ],
     "note": "decomp: copy paths 12-14 [M]; compose 23 + operator* (> 100 counted from the parts, the link leaves it unresolved) [M, lower bound]"
+   },
+   "cpi": {
+    "lo": 0.59,
+    "hi": 1.13,
+    "note": "A57 CPI of the code that runs, llvm-mca cortex-a57: lo = Block RThroughput (independent calls overlap: the chain-free steady bound), hi = one call (iterations=1); cycles per call = per_call_insn lo x cpi.lo .. hi x cpi.hi (PERF.md 11.9, V1 S2/P1); the UpdateWorldLoc override (0.59/1.09) with UpdateWorldData (0.33/1.80)"
    }
   },
   {
@@ -454,11 +496,11 @@
    ],
    "calls_note": "two per updated object [E]",
    "per_call_note": "46 A64 instructions on link 0bd144db1464 (dyncount); the NEON override (19 instructions) was dropped by S15-simd: 16 / 49 cycles against the decomp's 18 / 42 in the A57 model (PERF.md 11.6)",
-   "per_call_cycles": [
-    18.1,
-    42.0
-   ],
-   "per_call_cycles_note": "decomp object, funcmodel.py: 46 x 0.393 (steady) / 0.913 (one call)"
+   "cpi": {
+    "lo": 0.38,
+    "hi": 0.91,
+    "note": "A57 CPI of the code that runs, llvm-mca cortex-a57: lo = Block RThroughput (independent calls overlap: the chain-free steady bound), hi = one call (iterations=1); cycles per call = per_call_insn lo x cpi.lo .. hi x cpi.hi (PERF.md 11.9, V1 S2/P1); the decomp object"
+   }
   },
   {
    "id": "fn_node_update",
@@ -476,11 +518,11 @@
    ],
    "calls_note": "nodes updated per frame [E]",
    "per_call_note": "19 exclusive for 0x00a5e0b0 [M]; 0x00a5dd70 had no clean case, its loop is estimated",
-   "per_call_cycles": [
-    18.7,
-    87.6
-   ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "cpi": {
+    "lo": 0.4,
+    "hi": 1.4,
+    "note": "A57 CPI of the code that runs, llvm-mca cortex-a57: lo = Block RThroughput (independent calls overlap: the chain-free steady bound), hi = one call (iterations=1); cycles per call = per_call_insn lo x cpi.lo .. hi x cpi.hi (PERF.md 11.9, V1 S2/P1); 0x00a5e0b0 tput 0.40, 0x00a5dd70 one call 1.40"
+   }
   },
   {
    "id": "fn_cull_test",
@@ -498,17 +540,17 @@
    ],
    "calls_note": "object tests over the main, 3 shadow and the reflection passes [E]",
    "per_call_note": "before S15-simd: 12 [M] + 4-6 active planes x (bound getter 0x0043d450 7 + classification 0x004b6100 38 [M] + loop ~8) = 224-330 (the earlier 50-90 assumed 40-80 for all plane tests); with the overrides fnvnx_cull_worker_00a694e0 (six planes in NEON lanes, getter and classification inlined) 49 (rejected) - 67 (passes): static path counts of the override; the harness reaches only the early exit (12 -> 10 [M]); the classification alone 38 -> 19 [M]; V1 (S15-simd PL1 notes): the classification override is 19 behind the plane, 21 in front or straddling (inside 49-67); the decomp before is 306-433 at 4-6 active planes, not 224-330 (understated)",
-   "per_call_cycles": [
-    52.4,
-    148.0
-   ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
    "before": {
     "per_call_insn": [
      306,
      433
     ],
     "note": "decomp: worker 0x00a694e0 + 4-6 active planes x (getter + classification + loop), V1 tests/v1/test_s15simd_decomp.py [M]"
+   },
+   "cpi": {
+    "lo": 0.54,
+    "hi": 2.21,
+    "note": "A57 CPI of the code that runs, llvm-mca cortex-a57: lo = Block RThroughput (independent calls overlap: the chain-free steady bound), hi = one call (iterations=1); cycles per call = per_call_insn lo x cpi.lo .. hi x cpi.hi (PERF.md 11.9, V1 S2/P1); the culling worker override (classification inlined)"
    }
   },
   {
@@ -527,17 +569,17 @@
    ],
    "calls_note": "10-40 animated actors x 60-80 bones x 1-3 sequences [E]",
    "per_call_note": "NEON override fnvnx_slerp_00a6e330 (tools/link/overrides, S15-simd): 134 -> 88 A64 instructions per call incl. the weight 0x00a6dc30 and the normalisation 0x00a4ff00 (override_ab.py on link 0bd144db1464, 16 cases, oracle agreement 9 -> 9)",
-   "per_call_cycles": [
-    180.6,
-    233.6
-   ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
    "before": {
     "per_call_insn": [
      134,
      134
     ],
     "note": "decomp: Slerp + weight 0x00a6dc30 + normalisation 0x00a4ff00, override_ab.py on link 0bd144db1464 [M]"
+   },
+   "cpi": {
+    "lo": 0.39,
+    "hi": 2.65,
+    "note": "A57 CPI of the code that runs, llvm-mca cortex-a57: lo = Block RThroughput (independent calls overlap: the chain-free steady bound), hi = one call (iterations=1); cycles per call = per_call_insn lo x cpi.lo .. hi x cpi.hi (PERF.md 11.9, V1 S2/P1); the override"
    }
   },
   {
@@ -546,8 +588,8 @@
    "subsystem": "animation",
    "role": "main",
    "per_call_insn": [
-    34,
-    77
+    39,
+    89
    ],
    "per_call_basis": "M",
    "calls": [
@@ -555,18 +597,11 @@
     3000
    ],
    "calls_note": "[E]",
-   "per_call_note": "override fnvnx_quat_from_matrix_00a6df40 (S15-simd): per path, 34 (trace > 0) to 77 (largest-diagonal path) A64 instructions (V1, tests/v1/test_s15simd_decomp.py); the harness median 89 -> 77 is the slow path; 103 was an older link",
-   "per_call_cycles": [
-    26.3,
-    99.7
-   ],
-   "per_call_cycles_note": "funcmodel.py on the override: lo = 34 x 0.773 (steady), hi = 77 x 1.295 (one call)",
-   "before": {
-    "per_call_insn": [
-     39,
-     89
-    ],
-    "note": "decomp: trace > 0 path ~39 (static path count of the link object), largest-diagonal path 89 (dyncount) [M]"
+   "per_call_note": "the decomp: trace > 0 path ~39 (static path count), largest-diagonal path 89 (dyncount); the override (34 / 77) is dropped: +10 % cycles on the slow path at the mid of the new bounds",
+   "cpi": {
+    "lo": 0.56,
+    "hi": 0.97,
+    "note": "A57 CPI of the code that runs, llvm-mca cortex-a57: lo = Block RThroughput (independent calls overlap: the chain-free steady bound), hi = one call (iterations=1); cycles per call = per_call_insn lo x cpi.lo .. hi x cpi.hi (PERF.md 11.9, V1 S2/P1); the decomp object (the override row is dropped, PERF.md 11.6)"
    }
   },
   {
@@ -585,11 +620,11 @@
    ],
    "calls_note": "geometry passes registered per frame (1.2-1.6 per draw) [E]",
    "per_call_note": "42 + 12 A64 instructions on link 0bd144db1464 (dyncount, 15 and 8 clean cases; 1.11x and 0.48x the x86 counts); 70 + 12 (1.84x) on an older link. An override measured 42 -> 44 (S15-simd, dropped): the common path is frame setup",
-   "per_call_cycles": [
-    67.8,
-    165.1
-   ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)"
+   "cpi": {
+    "lo": 0.408,
+    "hi": 2.06,
+    "note": "A57 CPI of the code that runs, llvm-mca cortex-a57: lo = Block RThroughput (independent calls overlap: the chain-free steady bound), hi = one call (iterations=1); cycles per call = per_call_insn lo x cpi.lo .. hi x cpi.hi (PERF.md 11.9, V1 S2/P1); 0x00b9a090 0.43/2.38, 0x00b98ae0 0.33/0.94, weighted 42:12"
+   }
   },
   {
    "id": "fn_gsk",
@@ -607,17 +642,17 @@
    ],
    "calls_note": "convex pair queries per step: character controller casts, contact points [E]",
    "per_call_note": "292 + 119 + 73 + 95 = 579 A64 instructions exclusive on link 0bd144db1464 [M] (600 on an older link); fnvnx_sse_fast.h (S15-simd, unit_ab.sh, oracle agreement unchanged): two-source _mm_shuffle_ps -> 571, scalar _mm_rsqrt_ss / _mm_add_ss / _mm_set_ss / _mm_load_ss -> 275 + 114 + 70 + 80 = 539",
-   "per_call_cycles": [
-    635.6,
-    826.5
-   ],
-   "per_call_cycles_note": "A57 model (P0-perfmodel, tools/perf/a57model/funcmodel.py, llvm-mca -mcpu=cortex-a57): per_call_insn x [steady CPI, one-call CPI] of the code that runs (overrides priced on their own objects); static, L1-resident, callees excluded, dmb drain not priced (PERF.md 12.2)",
    "before": {
     "per_call_insn": [
      579,
      579
     ],
     "note": "decomp with sse2neon unchanged: 292 + 119 + 73 + 95 (dyncount, link 0bd144db1464) [M]"
+   },
+   "cpi": {
+    "lo": 0.562,
+    "hi": 1.404,
+    "note": "A57 CPI of the code that runs, llvm-mca cortex-a57: lo = Block RThroughput (independent calls overlap: the chain-free steady bound), hi = one call (iterations=1); cycles per call = per_call_insn lo x cpi.lo .. hi x cpi.hi (PERF.md 11.9, V1 S2/P1); insn-weighted over 0x00da8fb0/8390/8500/8820 (shim build)"
    }
   },
   {
@@ -648,10 +683,11 @@
    "fix": "mt_cull via MT1 (patches/mt1_cull.s1b): the main-scene split on Rendering Task Thread 2, half of that pass off main; off by default until its checks pass (PERF.md 6.8)",
    "gain_main_minsn": [
     0.3,
-    1.575
+    1.414
    ],
    "owner": "S15/S5",
-   "needs_hardware": true
+   "needs_hardware": true,
+   "gain_note": "the mt_cull lever (MT1) moves 15-35 % of the cull: lo 0.15 x 2.00, hi 0.35 x 4.04 M, the cull item (3.54-11.36) plus S15-simd's override correction (lo (49-306) x 6,000, hi (67-433) x 20,000); was 0.7 x 2 .. 0.9 x 4.5"
   },
   "scene-graph update": {
    "fix": "NEON overrides of the per-object math (NiMatrix3 product, NiBound::Update, transform compose: tools/link/overrides rows like the spin lock's) and the GOT movz/movk pass",
@@ -681,19 +717,19 @@
    "needs_hardware": false
   },
   "havok": {
-   "fix": "havok_workers: Havok's multithreaded simulation on the worker pool (trace bhkWorld first)",
+   "fix": "none on main: the step is on AI linear thread 1 already (PERF.md 6.11); iSimType=4 relieves that core",
    "gain_main_minsn": [
-    0.6,
-    2.5
+    0,
+    0
    ],
    "owner": "S15",
    "needs_hardware": true
   },
   "animation": {
-   "fix": "threaded_anim (PC defaults) and a NEON Slerp / FromRotationMatrix override",
+   "fix": "MT1: drain packed task 6 on the AI thread before the join (threaded_anim); NEON Slerp",
    "gain_main_minsn": [
-    0.5,
-    1.8
+    0.2,
+    1.08
    ],
    "owner": "S15",
    "needs_hardware": false
@@ -752,6 +788,114 @@
    ],
    "owner": "S3",
    "needs_hardware": false
+  }
+ },
+ "content": {
+  "note": "content lever (S15-simd, PERF.md 11.7; tools/perf/content_presets.py): Switch INI presets of existing settings only. base = FalloutNV.exe 1.4.0.525's own defaults, read from the settings' static initializers [M]; the work items are taken to describe a frame at base [E: to verify with frameprof per preset]. Shares and the scaling rules are estimates [E].",
+  "shares": {
+   "note": "draw sources and their mid counts per Mojave exterior frame from RENDER_NATIVE.md 3.7 (code-path estimates at uGrids 5 and 2-4 shadow lights, i.e. the exe defaults); items taken as 10 % of the static-object draws [E]; each source scales with the setting that governs it, the rest is constant",
+   "draws": {
+    "objects": 1044,
+    "items": 116,
+    "land": 125,
+    "distant_lod": 150,
+    "trees": 300,
+    "grass": 200,
+    "actors": 125,
+    "shadows": 200,
+    "water": 200,
+    "particles": 100,
+    "image_space_ui": 40
+   },
+   "scales_with": {
+    "objects": "objects",
+    "items": "items",
+    "land": "loaded",
+    "distant_lod": "const",
+    "trees": "const",
+    "grass": "grass",
+    "actors": "actors",
+    "shadows": "shadow",
+    "water": "const",
+    "particles": "const",
+    "image_space_ui": "const"
+   },
+   "cull_sources": [
+    "objects",
+    "items",
+    "land",
+    "trees",
+    "grass",
+    "actors",
+    "particles"
+   ],
+   "grass_shadow_actor_equiv": 2.0,
+   "cull_traversal": 0.3,
+   "scene_loaded": 0.5
+  },
+  "presets": {
+   "base": {
+    "uGridsToLoad": 5,
+    "fLODFadeOutMultObjects": 5.0,
+    "fLODFadeOutMultItems": 3.0,
+    "fLODFadeOutMultActors": 6.0,
+    "iActorShadowCountExt": 2,
+    "iActorShadowCountInt": 2,
+    "bShadowsOnGrass": 0,
+    "iMinGrassSize": 80,
+    "fGrassMaxStartFadeDistance": 7000.0,
+    "iMaxDecalsPerFrame": 10,
+    "iMaxSkinDecalsPerFrame": 3,
+    "note": "D20 default settings: Fallout_default.ini as shipped (gamedata/exe, ini.sha256), the exe's values only where the ini is silent; differs from the exe defaults in fLODFadeOutMultActors 6 (exe 2.5) and iActorShadowCountInt 2 (exe 4)"
+   },
+   "switch_a": {
+    "fLODFadeOutMultObjects": 4.0,
+    "fLODFadeOutMultItems": 2.0,
+    "fLODFadeOutMultActors": 2.0,
+    "iActorShadowCountExt": 1,
+    "iActorShadowCountInt": 2,
+    "iMinGrassSize": 120,
+    "fGrassMaxStartFadeDistance": 4000.0,
+    "iMaxDecalsPerFrame": 5,
+    "iMaxSkinDecalsPerFrame": 2
+   },
+   "switch_b": {
+    "fLODFadeOutMultObjects": 3.0,
+    "fLODFadeOutMultItems": 1.5,
+    "fLODFadeOutMultActors": 1.5,
+    "iActorShadowCountExt": 0,
+    "iActorShadowCountInt": 1,
+    "iMinGrassSize": 160,
+    "fGrassMaxStartFadeDistance": 2500.0,
+    "iMaxDecalsPerFrame": 3,
+    "iMaxSkinDecalsPerFrame": 1
+   },
+   "switch_b_g3": {
+    "uGridsToLoad": 3,
+    "fLODFadeOutMultObjects": 3.0,
+    "fLODFadeOutMultItems": 1.5,
+    "fLODFadeOutMultActors": 1.5,
+    "iActorShadowCountExt": 0,
+    "iActorShadowCountInt": 1,
+    "iMinGrassSize": 160,
+    "fGrassMaxStartFadeDistance": 2500.0,
+    "iMaxDecalsPerFrame": 3,
+    "iMaxSkinDecalsPerFrame": 1,
+    "risk": "uGridsToLoad below 5 is known to break scripted events and AI packages that expect loaded cells; listed to show the bound, not as a proposal"
+   },
+   "exe_defaults": {
+    "uGridsToLoad": 5,
+    "fLODFadeOutMultObjects": 5.0,
+    "fLODFadeOutMultItems": 3.0,
+    "fLODFadeOutMultActors": 2.5,
+    "iActorShadowCountExt": 2,
+    "iActorShadowCountInt": 4,
+    "bShadowsOnGrass": 0,
+    "iMinGrassSize": 80,
+    "fGrassMaxStartFadeDistance": 7000.0,
+    "iMaxDecalsPerFrame": 10,
+    "iMaxSkinDecalsPerFrame": 3
+   }
   }
  }
 }

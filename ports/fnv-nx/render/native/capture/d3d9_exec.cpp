@@ -3,6 +3,8 @@
 #include "d3d9cap.h"
 #include "nx/front.h"
 #include "d3d9_state.h"
+#include "d3d9_families.h"
+#include "nx_shaders.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -21,11 +23,17 @@ float F(const uint8_t* p, uint32_t i) { float v; memcpy(&v, p + 4 * i, 4); retur
 uint32_t FB(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 
 struct Tex { uint32_t image = 0, format = 0, w = 0, h = 0, levels = 1, flags = 0; bool cube = false;
+             bool dirty = false;   // contents changed since image was made: a new image at the next draw that binds it
              vector<vector<uint8_t>> data; };   // cube: each level holds its six faces (D3DCUBEMAP_FACES order)
 struct Surf { uint32_t kind = 0, format = 0, w = 0, h = 0, tex = 0, image = 0; };
 struct Buf { vector<uint8_t> data; uint32_t format = 0; };
 struct Elem { uint16_t stream, offset; uint8_t type, method, usage, index; };
-struct Shader { uint32_t version = 0; string glsl; };
+struct Shader { uint32_t version = 0; string glsl; bool native = false;   // native: hand-written GLSL (--native)
+                NxD9Class cls = {NxD9_None, 0, 0, 0}; uint32_t lo = 0, hi = 0; };   // cls: d9 family (--families)
+
+uint32_t g_families = 1u;   // NxD9Family bits; only None (translated) until D21 step 1 holds (CLAIMS.md)
+bool g_forceVisible = false;
+FILE* g_drawLog = nullptr;
 
 // D3DDECLTYPE -> float component count (0 = unsupported)
 int Comps(uint8_t t) {
@@ -94,7 +102,7 @@ vector<Decl> Decls(const string& s) {
 
 class Exec {
 public:
-    const NxGpuApi* api; nx::Backend* be; const char* shaderDir;
+    const NxGpuApi* api; nx::Backend* be; const char* shaderDir; const char* nativeDir = nullptr;
     void (*onPresent)(void*, uint32_t, uint32_t); void* user;
     NxD9Stats* st; char* err; size_t errlen;
 
@@ -110,7 +118,7 @@ public:
     nx::StateCache cache; nx::Encoder enc; vector<uint32_t> words;
     uint8_t* arena = nullptr; uint32_t arenaBlock = 0, arenaHead = 0; enum { kArena = 128u << 20 };
     std::map<std::string, uint32_t> samplers;
-    bool passOpen = false; uint32_t passColor = 0, passDepth = 0, frameNo = 0;
+    bool passOpen = false; uint32_t passColor = 0, passDepth = 0, frameNo = 0, backendDraw = 0;
 
     // Input limits (docs/RENDER_NATIVE.md 8.3): NXD9 is outside input, so every size is checked in 64 bits against
     // its record and against these bounds before anything is allocated or copied.
@@ -179,17 +187,26 @@ public:
         return be->ImageCreate(d);
     }
 
-    bool LoadGlsl(Shader& s, uint32_t lo, uint32_t hi) {
-        if (!s.glsl.empty()) return true;
-        if (!shaderDir) return false;
+    static bool ReadFile(const char* dir, uint32_t lo, uint32_t hi, string& out) {
         char p[1024];
-        snprintf(p, sizeof p, "%s/%08x%08x.glsl", shaderDir, hi, lo);
+        snprintf(p, sizeof p, "%s/%08x%08x.glsl", dir, hi, lo);
         FILE* f = fopen(p, "rb");
         if (!f) return false;
-        char buf[65536]; size_t n;
-        while ((n = fread(buf, 1, sizeof buf, f)) > 0) s.glsl.append(buf, n);
+        string t; char buf[65536]; size_t n;
+        while ((n = fread(buf, 1, sizeof buf, f)) > 0) t.append(buf, n);
         fclose(f);
+        out.swap(t);
         return true;
+    }
+
+    // --native <dir>: <hash>.glsl there is our hand-written shader for that original and replaces its translation
+    // (render/native/shaders/native.tsv, laid out by render/native/tools/native_dir.py). Else the record's GLSL,
+    // else --shaders <dir>.
+    bool LoadGlsl(Shader& s, uint32_t lo, uint32_t hi) {
+        if (nativeDir && ReadFile(nativeDir, lo, hi, s.glsl)) { s.native = true; st->nativeShaders++; return true; }
+        if (!s.glsl.empty()) return true;
+        if (!shaderDir) return false;
+        return ReadFile(shaderDir, lo, hi, s.glsl);
     }
 
     void BeginPassIfNeeded() {
@@ -283,8 +300,18 @@ public:
         auto di = decls.find(curDecl);
         if (vi == vsh.end() || pi == psh.end()) { Skip("unknown shader id"); return true; }
         if (di == decls.end()) { Skip("no vertex declaration (FVF)"); return true; }
+        if (vi->second.native && pi->second.native) st->nativeDraws++;
         auto bi = vb.find(strmVB);
         if (bi == vb.end() || !strmStride) { Skip("no stream 0"); return true; }
+        // textures whose contents changed since their image was made get a new image now (TEXU / TEXC are lazy)
+        for (int s = 0; s < 16; s++) {
+            auto ti = stex[s] ? tex.find(stex[s]) : tex.end();
+            if (ti == tex.end() || !ti->second.dirty) continue;
+            Tex& t = ti->second;
+            t.dirty = false;
+            t.image = MakeImage(t.format, t.w, t.h, t.levels, 0, &t.data, t.cube);
+            if (!t.image) { Skip("texture image not created (format, or NX_MAX_IMAGES reached)"); return true; }
+        }
         // attributes: stream-0 elements with a fnvnx_dk location, up to 8, all converted to 4 floats
         vector<const Elem*> el;
         vector<int> locToAttr(16, -1);
@@ -311,14 +338,21 @@ public:
         auto ak = std::make_pair(curVS * 65599u + curPS, curDecl);
         auto pr = programs.find(key);
         auto am = attrMaps.find(ak);
+        // a hand-written d9 family when both programs are one of its variants (d3d9_families.h), else translated
+        const char* fam = (g_families >> vi->second.cls.family) & 1 ? nx_d9_pair(vi->second.cls, pi->second.cls) : nullptr;
+        int fvs = fam ? nx_shader_find(fam, 0) : -1, fps = fam ? nx_shader_find(fam, 1) : -1;
+        if (fvs < 0 || fps < 0) fam = nullptr;
+        const string vsrc = fam ? string((const char*)nx_shader_blobs[fvs].glsl, nx_shader_blobs[fvs].glsl_size) : vi->second.glsl;
+        const string psrc = fam ? string((const char*)nx_shader_blobs[fps].glsl, nx_shader_blobs[fps].glsl_size) : pi->second.glsl;
+        const NxD9Family family = fam ? vi->second.cls.family : NxD9_None;
         if (pr == programs.end() || am == attrMaps.end() || am->second != locToAttr) {
-            string v = SpecialiseVS(vi->second.glsl, pi->second.glsl, locToAttr);
+            string v = SpecialiseVS(vsrc, psrc, locToAttr);
             NxShaderDesc d; memset(&d, 0, sizeof d);
             d.stage = NxStage_Vertex; d.glsl = (uint64_t)(uintptr_t)v.c_str(); d.glsl_size = (uint32_t)v.size();
             uint16_t vsId = (uint16_t)be->ShaderCreate(d);
             uint16_t psId = pr != programs.end() ? pr->second.second : 0;
             if (!psId) {
-                d.stage = NxStage_Fragment; d.glsl = (uint64_t)(uintptr_t)pi->second.glsl.c_str(); d.glsl_size = (uint32_t)pi->second.glsl.size();
+                d.stage = NxStage_Fragment; d.glsl = (uint64_t)(uintptr_t)psrc.c_str(); d.glsl_size = (uint32_t)psrc.size();
                 psId = (uint16_t)be->ShaderCreate(d);
             }
             if (!vsId || !psId) { Skip("shader compile failed"); return true; }
@@ -364,7 +398,12 @@ public:
         // state
         BeginPassIfNeeded();
         NxD3D9Input in; memset(&in, 0, sizeof in);
-        in.rs = rs; in.ps_version = psh[curPS].version ? psh[curPS].version : 0x0200; in.depth_format = DepthFormat();
+        uint32_t vis[NXD3D_RS_COUNT];
+        if (g_forceVisible) {   // verification only: every draw writes its colour (no depth, stencil, blend, cull)
+            memcpy(vis, rs, sizeof vis);
+            vis[7] = 0; vis[52] = 0; vis[27] = 0; vis[22] = 1;   // ZENABLE, STENCILENABLE, ALPHABLENDENABLE, CULLMODE NONE
+        }
+        in.rs = g_forceVisible ? vis : rs; in.ps_version = psh[curPS].version ? psh[curPS].version : 0x0200; in.depth_format = DepthFormat();
         in.viewport = vp; in.scissor = sc;
         NxRenderState rsw; NxDynamicState dyn; uint32_t bits;
         nx_d3d9_translate(&in, &rsw, &dyn, &bits);
@@ -428,6 +467,11 @@ public:
         } else {
             a = enc.Op(NxOp_Draw, 5); a[0] = kPrim[prim]; a[1] = verts; a[2] = 1; a[3] = 0; a[4] = 0;
         }
+        st->familyDraws[family]++;
+        if (family != NxD9_None && !(vi->second.native && pi->second.native)) st->nativeDraws++;
+        if (g_drawLog)
+            fprintf(g_drawLog, "%u\t%u\t%u\t%08x%08x\t%08x%08x\t%s\t%s\n", frameNo, st->draws - 1, backendDraw++,
+                    vi->second.hi, vi->second.lo, pi->second.hi, pi->second.lo, nx_d9_family_name(family), fam ? fam : "-");
         return true;
     }
 
@@ -443,7 +487,7 @@ public:
         st->frames++;
         frameNo++;
         enc.Reset(words.data(), (uint32_t)words.size());
-        passOpen = false; arenaHead = 0;
+        passOpen = false; arenaHead = 0; backendDraw = 0;
         return true;
     }
 
@@ -493,7 +537,9 @@ public:
                 if (t.w != t.h) return Fail("TEX: cube texture not square");
                 for (auto& l : t.data) if (l.size() % 6) return Fail("TEX: cube level bytes not six faces");
             }
-            t.image = MakeImage(t.format, t.w, t.h, rt ? 1 : t.levels, rt ? NxImg_RenderTarget : 0, rt ? nullptr : &t.data, t.cube);
+            // render targets now; sampled textures when a draw first binds them (their TEXU/TEXC usually follow)
+            if (rt) t.image = MakeImage(t.format, t.w, t.h, 1, NxImg_RenderTarget, nullptr, t.cube);
+            else t.dirty = true;
             st->textures++;
             tex[U(p, 0)] = t;
             break;
@@ -507,8 +553,10 @@ public:
             if (!Charge(b)) return Fail("TEXU: input exceeds the resident limit");
             if (it->second.cube && b % 6) return Fail("TEXU: cube level bytes not six faces");
             it->second.data[U(p, 1)].assign(p + 12, p + 12 + b);
-            // images are immutable in NxGpuApi: a new image with the new contents
-            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, it->second.cube);
+            // images are immutable in NxGpuApi and never freed (NX_MAX_IMAGES): the new image is made when a draw binds
+            // the texture, so a texture filled level by level (d9cap: TEX with empty levels, then one TEXU per level)
+            // costs one image, not one per level (Prepare)
+            it->second.dirty = true;
             break;
         }
         case kD9TexCube: {   // one face of one level of a cube texture (LockRect on a cube face)
@@ -518,10 +566,15 @@ public:
             if (16 + (uint64_t)b > n) return Fail("TEXC");
             if (it == tex.end() || !it->second.cube || face >= 6 || level >= it->second.data.size()) break;
             vector<uint8_t>& l = it->second.data[level];
-            const size_t fb = l.size() / 6;
-            if (b != fb) return Fail("TEXC: face bytes differ from the level's");
-            memcpy(l.data() + face * fb, p + 16, b);
-            it->second.image = MakeImage(it->second.format, it->second.w, it->second.h, it->second.levels, 0, &it->second.data, true);
+            // a cube created without contents (levels of 0 bytes) is filled face by face: the first TEXC of a level
+            // sizes it to six faces of this size
+            if (l.size() != 6 * (size_t)b) {
+                if (!l.empty()) return Fail("TEXC: face bytes differ from the level's");
+                if (!Charge(6ull * b)) return Fail("TEXC: input exceeds the resident limit");
+                l.assign(6 * (size_t)b, 0);
+            }
+            memcpy(l.data() + face * (size_t)b, p + 16, b);
+            it->second.dirty = true;   // as TEXU: the image is made when a draw binds it
             break;
         }
         case kD9Surface: {
@@ -582,6 +635,8 @@ public:
                 char h[32]; snprintf(h, sizeof h, "%08x%08x", U(p, 2), U(p, 1));
                 return Fail("no GLSL for shader %s (in the record or --shaders <dir>/<hash>.glsl)", h);
             }
+            s.cls = nx_d9_classify(p + 16, bc);
+            s.lo = U(p, 1); s.hi = U(p, 2);
             (tag == kD9VShader ? vsh : psh)[U(p, 0)] = s;
             break;
         }
@@ -640,13 +695,19 @@ public:
 
 } // namespace
 
+void nx_d3d9_set_families(uint32_t mask) { g_families = mask | 1u; }
+void nx_d3d9_set_draw_log(FILE* log) { g_drawLog = log; }
+void nx_d3d9_set_force_visible(int on) { g_forceVisible = on != 0; }
+static const char* g_nativeDir = nullptr;
+void nx_d3d9_native_dir(const char* dir) { g_nativeDir = dir; }
+
 int nx_d3d9_run(const NxGpuApi* api, const uint8_t* data, size_t size, const char* shaderDir,
                 void (*onPresent)(void*, uint32_t, uint32_t), void* user, NxD9Stats* stats, char* err, size_t errlen) {
     static NxD9Stats local;
     if (!stats) stats = &local;
     memset(stats, 0, sizeof *stats);
     Exec* x = new Exec();
-    x->api = api; x->be = nx::GpuBackend(api); x->shaderDir = shaderDir; x->onPresent = onPresent; x->user = user;
+    x->api = api; x->be = nx::GpuBackend(api); x->shaderDir = shaderDir; x->nativeDir = g_nativeDir; x->onPresent = onPresent; x->user = user;
     x->st = stats; x->err = err; x->errlen = errlen;
     if (err && errlen) err[0] = 0;
     int rc = x->be && x->Run(data, size) ? 0 : -1;

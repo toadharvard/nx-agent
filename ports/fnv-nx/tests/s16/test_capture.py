@@ -117,6 +117,129 @@ class CapGate(unittest.TestCase):
             self.assertEqual(y['status'], 'unstable')
 
 
+class DrawGate(unittest.TestCase):
+    """drawgate.py on hand-made per-draw runs: verdicts, skipped/unaligned draws, and the first-divergence class"""
+    def capture(self, path, fmts):
+        w = nxd9io.Writer(path)
+        w.u32('DEV ', 64, 48, 21, 0)
+        for i, f in enumerate(fmts, 1):
+            w.rec('TEX ', struct.pack('<6I', i, f, 4, 4, 1, 0) + struct.pack('<I', 0))
+        for fr in range(2):
+            for i in range(len(fmts)):
+                w.u32('RS  ', 22, 1 if i < 2 else 3)        # draw 2 of each frame uses a CULLMODE no pass has
+                w.u32('STEX', 0, i + 1)
+                w.rec('DRWI', struct.pack('<IiIIII', 4, 0, 0, 3, 0, 1))
+            w.rec('PRES')
+        w.close()
+
+    def run_gate(self, t, cand_bad=(), skip=None, fmts=(21, 21, 21)):
+        os.makedirs(f'{t}/caps')
+        self.capture(f'{t}/caps/c.nxd9', list(fmts))
+        for side in ('ref', 'cand'):
+            for fr in range(2):
+                for d in range(len(fmts)):
+                    a = frame(100 * fr + d)
+                    if side == 'cand' and (fr, d) in cand_bad:
+                        a[..., :3] = 255 - a[..., :3]
+                    if side == 'cand' and skip and (fr, d) >= skip:
+                        continue
+                    save(a, f'{t}/{side}/c/f{fr:05d}_d{d:05d}.png')
+        if skip:
+            open(f'{t}/cand/c/summary.txt', 'w').write(f'nx_render d3d9: skipped 1; first skip: frame {skip[0]} draw {skip[1]}: x')
+        p = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'drawgate.py'), '--set',
+                            f'game={t}/caps:{t}/ref:{t}/cand', '--out', f'{t}/out'], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return json.load(open(f'{t}/out/drawgate.json'))
+
+    def test_all_pass(self):
+        with tempfile.TemporaryDirectory() as t:
+            g = self.run_gate(t)
+            self.assertEqual((g['draws'], g['pass'], g['fail'], g['skipped']), (6, 6, 0, 0))
+            self.assertEqual(g['first_divergences'], [])
+
+    def test_classes(self):
+        with tempfile.TemporaryDirectory() as t:
+            g = self.run_gate(t, cand_bad={(0, 1), (0, 2), (1, 2)})
+            self.assertEqual((g['pass'], g['fail']), (3, 3))
+            f = {(x['frame'], x['draw']): x['class'] for x in g['first_divergences']}
+            self.assertEqual(f, {(0, 1): 'constants', (1, 2): 'state'})   # one first divergence per frame
+        with tempfile.TemporaryDirectory() as t:
+            g = self.run_gate(t, cand_bad={(0, 0), (1, 0)}, fmts=(0x31545844, 21, 21))
+            self.assertEqual([x['class'] for x in g['first_divergences']], ['format', 'format'])
+
+    def test_skipped_draws_misalign(self):
+        with tempfile.TemporaryDirectory() as t:
+            g = self.run_gate(t, skip=(1, 1))
+            self.assertEqual((g['pass'], g['skipped']), (4, 2))
+            self.assertEqual(g['first_divergence_by_class'], {'skipped': 1})
+
+
+class SweepPieces(unittest.TestCase):
+    """nxd9trim (last K complete frames, state carried), sweep_report (programs/shard summaries)"""
+    def test_trim(self):
+        with tempfile.TemporaryDirectory() as t:
+            w = nxd9io.Writer(f'{t}/j.nxd9')
+            w.u32('DEV ', 64, 48, 21, 0)
+            for fr in range(5):
+                w.u32('RS  ', 22, fr)                                   # state of every frame is kept
+                w.rec('CLR ', struct.pack('<IIfII', 1, fr, 1.0, 0, 0))   # pixel records only for the kept frames
+                w.rec('DRWI', struct.pack('<IiIIII', 4, 0, 0, 3, 0, 1))
+                w.rec('PRES')
+            w.u32('RS  ', 7, 1); w.rec('DRWI', struct.pack('<IiIIII', 4, 0, 0, 3, 0, 1))   # incomplete frame: dropped
+            w.close()
+            r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'nxd9trim.py'), f'{t}/j.nxd9', f'{t}/o.nxd9',
+                                '--frames', '3'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            recs = [(tg, bytes(p)) for tg, p in nxd9io.records(f'{t}/o.nxd9')]
+            self.assertEqual(sum(1 for tg, _ in recs if tg == 'PRES'), 3)
+            self.assertEqual(sum(1 for tg, _ in recs if tg == 'DRWI'), 3)
+            self.assertEqual([struct.unpack('<2I', p)[1] for tg, p in recs if tg == 'RS  '], [0, 1, 2, 3, 4])
+            self.assertEqual([struct.unpack_from('<2I', p)[1] for tg, p in recs if tg == 'CLR '], [2, 3, 4])
+            r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'nxd9trim.py'), f'{t}/j.nxd9', f'{t}/o2.nxd9',
+                                '--frames', '6'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1)
+
+    def test_shard_summary(self):
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(f'{t}/s/scenes')
+            open(f'{t}/s/programs.tsv', 'w').write('name\thash\tstage\tmodel\tworst_translated\tworst_families\tmaxwell\tgprs\ttex\tns_per_pixel\n'
+                                                  'A.pso\taaaa\tpixel\tps_3_0\tpass\tpass\t40\t8\t2\t0.4\n'
+                                                  'B.pso\tbbbb\tpixel\tps_3_0\tover\tpass\t90\t20\t4\t0.9\n')
+            json.dump({'capture': 'c1', 'stats': {'frame': {'draws': 10, 'passes': 2}, 'capture': {'programs': {'vs': [], 'ps': ['aaaa']}}},
+                       'paths': {'translated': {'frames_over': 1, 'draws_pass_frame': 4,
+                                                'first_divergence': {'class': 'state', 'draw': 4, 'ps_names': ['A.pso']}}},
+                       'gpu': {'frame_ms': 2.5, 'by_family_ms': {'A': 2.5}}, 'ref': {'frame_ms': [30.0]}},
+                      open(f'{t}/s/scenes/c1.json', 'w'))
+            open(f'{t}/s/done.tsv', 'w').write('c1\tok\t100\nc2\ttimeout\t1200\n')
+            r = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'sweep_report.py'), 'shard', '--shard-dir', f'{t}/s',
+                                '--head', 'f' * 40, '--k', '1', '--n', '2', '--out', f'{t}/o.json', '--md', f'{t}/o.md'],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.load(open(f'{t}/o.json'))
+            self.assertEqual((o['programs_checked'], o['draws'], o['draws_pass']), (2, 10, 4))
+            self.assertEqual(o['program_classes_translated'], {'pass': 1, 'over': 1})
+            self.assertEqual(o['first_divergence_by_scenes'], {'state': 1})
+            self.assertEqual(o['first_divergence_by_draws'], {'state': 6})
+            self.assertEqual(o['scene_status'], {'ok': 1, 'timeout': 1})
+            self.assertEqual([p['name'] for p in o['failing_programs']], ['B.pso'])
+            self.assertEqual(o['top_programs_ns_per_pixel'][0]['name'], 'B.pso')
+
+
+class WineRefMirror(unittest.TestCase):
+    def test_base_load_order_only(self):
+        """the Data mirror leaves out .nam files, masters outside scenes.json's plugins and their BSAs (a .nam loads
+        its add-on even when plugins.txt leaves it out); the base game's BSAs stay"""
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(f'{t}/game/Data')
+            for n in ('FalloutNV.esm', 'DeadMoney.esm', 'CaravanPack.esm', 'CaravanPack.nam', 'DEADMONEY.NAM',
+                      'Fallout - Textures.bsa', 'Update.bsa', 'DeadMoney - Main.bsa', 'CaravanPack - Main.bsa'):
+                open(f'{t}/game/Data/{n}', 'w').close()
+            r = subprocess.run(['bash', os.path.join(TOOLS, 'wine_ref.sh'), 'mirror', f'{t}/game', f'{t}/m'],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(sorted(os.listdir(f'{t}/m/Data')), ['Fallout - Textures.bsa', 'FalloutNV.esm', 'Update.bsa'])
+
+
 class Synth(unittest.TestCase):
     def test_list(self):
         p = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'synth.py'), 'list'], capture_output=True, text=True)
@@ -158,6 +281,20 @@ class Perm(unittest.TestCase):
                 s = nxd9io.stat(f'{t}/a/{c}.nxd9')
                 self.assertEqual(s['frames'], len(m['captures'][c]))
                 self.assertNotEqual(open(f'{t}/a/{c}.nxd9', 'rb').read(), open(f'{t}/p/{c}.nxd9', 'rb').read())
+            # parameter sets change the capture; shards partition the programs
+            run = lambda out, *x: subprocess.run([sys.executable, '-I', os.path.join(TOOLS, 'perm.py'), 'build', '--sdp',
+                                                  f'{t}/own.sdp', '--asm', f'{b}/s6b_asm', '--sdp2dksh', f'{b}/sdp2dksh',
+                                                  '--out', f'{t}/{out}', *x], capture_output=True, text=True)
+            for v in ('zero', 'large', 'dxt', 'atest', 'fog'):
+                r = run('v_' + v, '--variant', v)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertNotEqual(open(f'{t}/v_{v}/perm_000.nxd9', 'rb').read(), open(f'{t}/a/perm_000.nxd9', 'rb').read(), v)
+            got = []
+            for k in (1, 2, 3):
+                self.assertEqual(run(f's{k}', '--shard', f'{k}/3').returncode, 0)
+                got += [e['hash'] for v in json.load(open(f'{t}/s{k}/manifest.json'))['captures'].values() for e in v]
+            allh = [e['hash'] for v in m['captures'].values() for e in v]
+            self.assertEqual(sorted(got), sorted(allh))
 
 
 @unittest.skipUnless(os.environ.get('S16_E2E'), 'S16_E2E=<bin dir> runs the Wine loop')
@@ -180,6 +317,12 @@ class EndToEnd(unittest.TestCase):
                    f'{t}/cand', '--out', f'{t}/gate')
             g = json.load(open(f'{t}/gate/capgate.json'))
             self.assertEqual(g['summary']['metric']['floor_max_abs'], 0, 'the Wine reference must repeat itself')
+            # --frames limits the PNGs (a long journal otherwise writes one per frame), every frame still runs
+            r = py(os.path.join(TOOLS, 'replay.py'), 'ref', '--exe', f'{b}/nxd9play.exe', '--prefix', f'{b}/pfx',
+                   '--out', f'{t}/only1', os.path.join(t, 'syn', 'texture.nxd9'), '--', '--frames', '1')
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(sorted(f for f in os.listdir(f'{t}/only1/texture') if f.endswith('.png')), ['f00001.png'])
+            self.assertEqual(open(f'{t}/only1/texture/f00001.png', 'rb').read(), open(f'{t}/ref1/texture/f00001.png', 'rb').read())
 
 
 if __name__ == '__main__':

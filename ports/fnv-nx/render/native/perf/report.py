@@ -170,7 +170,8 @@ def build_hotspots(raw, prof, dk, gpu):
             fams = s["families"]
             out["gpu_by_pass/" + key] = sorted((row("gpu_pass", f, v["ms"], bound=v["bound"], pixels=v["pixels"],
                                                     frag_ms=v["frag_ms"], vertex_ms=v["vertex_ms"], dram_mb=v["dram_mb"],
-                                                    target_format=v.get("target_format"))
+                                                    target_format=v.get("target_format"), stand_in=v.get("stand_in", False),
+                                                    shader_source=v.get("shader_source"))
                                                 for f, v in fams.items()), key=lambda r: -r["ms"])
             prog = {}
             for f, v in fams.items():
@@ -274,13 +275,19 @@ def build_report(spec, raw, prof, ovf, dk, work):
     # efficiency 0.6), and the frame = max(CPU at 1.02 GHz, GPU) per gate config (the CPU clock is 1.02 GHz both
     # docked and handheld). > 1.0 = over budget.
     cpu_worst = {str(g): max(hi["ms"][str(g)]["main"]["hi"], hi["ms"][str(g)]["render"]["hi"]) for g in CLOCKS_GHZ}
-    gpu_gate = {cfg: gpu_sum["mix_hi"][cfg]["eff_0.6"] for cfg in GATE_CONFIGS}
+    # the GPU metric is real019 (the game's own programs, translated) when it was built; the synthetic native row costs
+    # several families with stand-in shaders and is a lower bound (gpu_*_native_lower_bound)
+    gpu_metric = "real019_mix_hi" if "real019_mix_hi" in gpu_sum else "mix_hi"
+    gpu_gate = {cfg: gpu_sum[gpu_metric][cfg]["eff_0.6"] for cfg in GATE_CONFIGS}
+    gpu_native = {cfg: gpu_sum["mix_hi"][cfg]["eff_0.6"] for cfg in GATE_CONFIGS}
     budget_fraction = {}
     for t, b in TARGETS_MS.items():
         e = {g: round(v / b, 3) for g, v in cpu_worst.items()}
         for cfg, v in gpu_gate.items():
             e["gpu_" + cfg] = round(v / b, 3)
             e["frame_" + cfg] = round(max(cpu_worst["1.02"], v) / b, 3)
+            e["gpu_" + cfg + "_native_lower_bound"] = round(gpu_native[cfg] / b, 3)
+        e["gpu_metric"] = gpu_metric
         budget_fraction[t] = e
     for t, b in TARGETS_MS.items():
         for cfg in GATE_CONFIGS:

@@ -219,7 +219,7 @@ static int gl_init(char* err, int errlen) {
 }
 
 /* ---- target state --------------------------------------------------------------------------------------------------- */
-typedef struct { GLuint tex; uint32_t fmt; NxFormatInfo fi; GLenum ifmt, ifmt_srgb; GLuint view_srgb; int levels; } Tex;
+typedef struct { GLuint tex; uint32_t fmt; NxFormatInfo fi; GLenum ifmt, ifmt_srgb; GLuint view_srgb; int levels; GLenum target; } Tex;
 typedef struct { GLuint prog; uint32_t hash; } PsProg;
 static PsProg g_ps[64]; static int g_nps; static GLuint g_vs2, g_ubo[2];
 static uint32_t fnv1a(const char* s) { uint32_t h = 2166136261u; while (*s) h = (h ^ (uint8_t)*s++) * 16777619u; return h; }
@@ -473,6 +473,30 @@ static int g_tex(V6nTarget* t, uint32_t stage, uint32_t fmt, int w, int h, int l
         glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, sw);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
     }
+    x->target = GL_TEXTURE_2D;
+    t->has_tex[stage] = 1;
+    return glGetError() == GL_NO_ERROR;
+}
+/* cube texture: plain formats only (no NXFMT_CONVERT, no sRGB view). D3D9 face order and texel layout equal GL's
+ * (GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, row 0 first), as wined3d uploads them. */
+static int g_texcube(V6nTarget* t, uint32_t stage, uint32_t fmt, int size, const uint8_t* const* faces) {
+    if (stage > 7) return 0;
+    Tex* x = &t->tex[stage];
+    if (t->has_tex[stage]) { glDeleteTextures(1, &x->tex); if (x->view_srgb) glDeleteTextures(1, &x->view_srgb); }
+    memset(x, 0, sizeof *x); t->has_tex[stage] = 0;
+    x->fmt = fmt; x->fi = nx_d3d9_format(fmt); x->levels = 1;
+    if (!x->fi.format || (x->fi.flags & NXFMT_CONVERT)) return 0;
+    GlFmt g = gl_fmt(x->fi.format);
+    if (!g.ifmt || g.compressed) return 0;
+    x->ifmt = g.ifmt;
+    glGenTextures(1, &x->tex); glBindTexture(GL_TEXTURE_CUBE_MAP, x->tex);
+    glTexStorage2D(GL_TEXTURE_CUBE_MAP, 1, g.ifmt, size, size);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    for (int f = 0; f < 6; f++) glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, 0, 0, size, size, g.fmt, g.type, faces[f]);
+    GLint sw[4]; for (int i = 0; i < 4; i++) sw[i] = gl_swz(x->fi.swizzle[i]);
+    glTexParameteriv(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_SWIZZLE_RGBA, sw);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, 0);
+    x->target = GL_TEXTURE_CUBE_MAP;
     t->has_tex[stage] = 1;
     return glGetError() == GL_NO_ERROR;
 }
@@ -511,7 +535,7 @@ static void apply_sampler(V6nTarget* t, int s) {
     if (M("border_argb")) b = (b >> 8) | (b << 24);
     float bc[4] = {(b & 0xFF) / 255.0f, ((b >> 8) & 0xFF) / 255.0f, ((b >> 16) & 0xFF) / 255.0f, ((b >> 24) & 0xFF) / 255.0f};
     glSamplerParameterfv(smp, GL_TEXTURE_BORDER_COLOR, bc);
-    glBindTexture(GL_TEXTURE_2D, (ss.filter & NXSMP_SRGB) && x->view_srgb ? x->view_srgb : x->tex);
+    glBindTexture(x->target, (ss.filter & NXSMP_SRGB) && x->view_srgb ? x->view_srgb : x->tex);
     glBindSampler(s, smp);
 }
 
@@ -805,5 +829,5 @@ static int g_drawg(V6nTarget* t, uint32_t prim, uint32_t count, int ne, const ui
     return r;
 }
 const V6nOps v6n_target_ops = {"gl45-llvmpipe+s6n", g_begin, g_end, g_clear, g_rs, g_samp, g_tss, g_tex, g_notex, g_vp,
-                               g_scissor, g_proj, g_draw, g_readback, g_psh, g_psc, g_vsh, g_vsc, g_drawidx, g_drawg};
+                               g_scissor, g_proj, g_draw, g_readback, g_psh, g_psc, g_vsh, g_vsc, g_drawidx, g_drawg, g_texcube};
 const char* const* v6n_gl_mutants(void) { return MUTANTS; }
