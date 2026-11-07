@@ -13,6 +13,7 @@ it as host; the MSVC decoration filter; bind.tsv / synth.tsv round trip through 
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -493,6 +494,43 @@ class Exe(unittest.TestCase):
             self.assertEqual(dict(bodies.exe_call_targets(*args)), {})
             got = bodies.exe_call_targets(*args, search=True)
         self.assertEqual({k: dict(v) for k, v in got.items()}, {'?g@@YAXXZ': {G: 1}})
+
+    def test_crt_rule(self):
+        """The MSVC STL throwers of the decomp's copies throw through libstdc++; a class placement delete is a
+        ret; anything else (another member, a delete with one parameter) is not a crt-rule name."""
+        def k(n, d):
+            return bodies.crt_rule(sigs.parse_itanium(n, d))
+        self.assertEqual(k('_ZN10StringBase5_XlenEv', 'StringBase::_Xlen()'),
+                         ('throw', '_ZSt20__throw_length_errorPKc', 'string too long'))
+        self.assertEqual(k('_ZNK6Vector5_XranEv', 'Vector::_Xran() const'),
+                         ('throw', '_ZSt20__throw_out_of_rangePKc', 'invalid vector<T> position'))
+        self.assertEqual(k('_ZN4Obj8dlEPvS0_', 'Obj8::operator delete(void*, void*)'), ('ret', None, None))
+        self.assertIsNone(k('_ZN4Obj8dlEPv', 'Obj8::operator delete(void*)'))
+        self.assertIsNone(k('_ZN10StringBase4TidyEv', 'StringBase::Tidy()'))
+        self.assertIsNone(k('_Z5_Xlenv', '_Xlen()'))            # not a member: no class contract
+        rows = [bodies.Row('_ZN10StringBase5_XlenEv', 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row('_ZN4Obj8dlEPvS0_', 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row('_ZN3Foo3GetEv', 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row('_ZN3Bar5_XlenEv', 'exe-addr', 0x401000, '__fnv_00401000', 'src/a.cpp', '', None)]
+        dem = {'_ZN10StringBase5_XlenEv': 'StringBase::_Xlen()', '_ZN4Obj8dlEPvS0_': 'Obj8::operator delete(void*, void*)',
+               '_ZN3Foo3GetEv': 'Foo::Get()', '_ZN3Bar5_XlenEv': 'Bar::_Xlen()'}
+
+        def it(n):
+            return sigs.parse_itanium(n, dem[n])
+        got = bodies.crt_pass(rows, it)
+        self.assertEqual([r.cls for r in got], ['crt-rule', 'crt-rule', 'missing', 'exe-addr'])
+        asm = bodies.emit_crt([r for r in got if r.cls == 'crt-rule'], it)
+        self.assertIn('    b _ZSt20__throw_length_errorPKc', asm)
+        self.assertIn('.asciz "string too long"', asm)
+        self.assertIn('"_ZN4Obj8dlEPvS0_":\n    ret', asm)
+        as_ = shutil.which('aarch64-linux-gnu-as')
+        if as_:
+            with tempfile.TemporaryDirectory() as d:
+                open(os.path.join(d, 'c.S'), 'w').write(asm)
+                r = subprocess.run([as_, '-mabi=ilp32', os.path.join(d, 'c.S'), '-o', os.path.join(d, 'c.o')],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
 
     def test_code_only_externs(self):
         """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take

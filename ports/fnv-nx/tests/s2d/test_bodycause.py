@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""tests/s2d - cause classes of `missing` names (tools/link/bodycause.py) on a hand-written tree and objects (no
+decomp content).
+
+    python3 -I tests/s2d/test_bodycause.py       # needs c++filt, nm and aarch64-linux-gnu-g++ or g++
+
+Checks one name per cause: crt-import (std::, _Xran), data, name-mismatch (an object defines the member with
+another parameter spelling), not-compiled (a body in a source that is not a unit; a body under #if 0; an in-class
+body), no-body (template-special, msvc-direct, other).
+"""
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'link'))
+import bodycause  # noqa: E402
+
+GXX = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+
+ROWS = [  # Itanium name, note
+    ('_ZNSt6vectorIiSaIiEE5_TidyEv', 'no definition, address or body'),
+    ('_ZN10StringBase5_XranEv', 'no definition, address or body'),
+    ('_ZN3Foo6kCountE', 'not a function (data)'),
+    ('_ZN3Foo3SetEj', 'no definition, address or body'),          # Foo::Set(unsigned) - objects have Set(int)
+    ('_ZN3Bar4LoadEv', 'no definition, address or body'),         # body in src/extra.cpp, not a unit
+    ('_ZN3Baz4DropEv', 'no definition, address or body'),         # body under #if 0
+    ('_ZN3Qux3TopEv', 'no definition, address or body'),          # in-class body in a header copy
+    ('_ZN4ListIiED1Ev', 'special member of a template or unnamed class'),
+    ('_ZN4Zork4PokeEv', 'MSVC calls it directly (pristine reference); was missing: no definition, address or body'),
+    ('_Z8LonelyFnv', 'no definition, address or body'),
+]
+EXPECT = {
+    '_ZNSt6vectorIiSaIiEE5_TidyEv': ('crt-import', 'std scope'),
+    '_ZN10StringBase5_XranEv': ('crt-import', 'MSVC STL thrower _Xran'),
+    '_ZN3Foo6kCountE': ('data', None),
+    '_ZN3Foo3SetEj': ('name-mismatch', None),
+    '_ZN3Bar4LoadEv': ('not-compiled', 'in a source that is not a unit'),
+    '_ZN3Baz4DropEv': ('not-compiled', 'under #if 0'),
+    '_ZN3Qux3TopEv': ('not-compiled', 'in a class copy or overload the referencing unit does not emit'),
+    '_ZN4ListIiED1Ev': ('no-body', 'template-special'),
+    '_ZN4Zork4PokeEv': ('no-body', 'msvc-direct'),
+    '_Z8LonelyFnv': ('no-body', 'other'),
+}
+
+
+@unittest.skipUnless(GXX and shutil.which('c++filt') and shutil.which('nm'), 'needs g++, c++filt and nm')
+class Causes(unittest.TestCase):
+    def test_classes(self):
+        with tempfile.TemporaryDirectory() as d:
+            tree, out, objs = (os.path.join(d, x) for x in ('tree', 'out', 'objs'))
+            for p in ('tree/src', 'tree/include', 'tree/build', 'out/bodies', 'objs'):
+                os.makedirs(os.path.join(d, p))
+            open(os.path.join(tree, 'build', 'units.json'), 'w').write('{"units": [{"source": "src/a.cpp"}]}')
+            open(os.path.join(tree, 'src', 'a.cpp'), 'w').write(
+                'struct Foo { void Set(int); };\nvoid Foo::Set(int) {}\n'
+                '#if 0\nstruct Baz { void Drop(); };\nvoid Baz::Drop() { }\n#endif\n')
+            open(os.path.join(tree, 'src', 'extra.cpp'), 'w').write('void Bar::Load()\n{\n}\n')
+            open(os.path.join(tree, 'include', 'q.h'), 'w').write(
+                'class Qux\n{\n  public:\n    int Top() { return 1; }\n    void Down();\n};\n')
+            subprocess.run([GXX, '-c', '-x', 'c++', '-', '-o', os.path.join(objs, 'a.o')], check=True,
+                           input='struct Foo { void Set(int); };\nvoid Foo::Set(int) {}\n', text=True)
+            with open(os.path.join(out, 'bodies', 'bodies.tsv'), 'w') as f:
+                f.write('#name\tclass\taddress\ttarget\tunits\tnote\thost\n')
+                for n, note in ROWS:
+                    f.write('%s\tmissing\t\t\tsrc/b.cpp\t%s\t\n' % (n, note))
+                f.write('_ZN3Foo3GetEv\tvcall\t\t\tsrc/b.cpp\tslot\t\n')
+            traps = os.path.join(d, 'traps.txt')
+            open(traps, 'w').write('_ZN3Foo3SetEj\n_Z8LonelyFnv\n')
+            dst = os.path.join(d, 'causes.tsv')
+            bodycause.main([out, tree, objs, '--traps', traps, '-o', dst])
+            got = {}
+            for line in open(dst):
+                if not line.startswith('#'):
+                    f = line.rstrip('\n').split('\t')
+                    got[f[0]] = (f[2], f[3], f[5])
+        self.assertEqual(set(got), set(EXPECT))
+        for n, (cause, detail) in EXPECT.items():
+            self.assertEqual(got[n][0], cause, n)
+            if detail is not None:
+                self.assertEqual(got[n][1], detail, n)
+        self.assertEqual(got['_ZN3Foo3SetEj'][2], '1')
+        self.assertEqual(got['_ZN3Bar4LoadEv'][2], '0')
+
+
+if __name__ == '__main__':
+    unittest.main()

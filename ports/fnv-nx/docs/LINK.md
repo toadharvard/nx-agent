@@ -1097,6 +1097,7 @@ guest link turns into trap stubs; `vslot-unresolved` stays S2c's). Every name ge
 | `msvc-empty` | a pristine object defines it (code COMDAT) as `ret`, `ret N` or `mov eax, ecx; ret[ N]` | weak AArch64 `ret` stub (`zz_bd_empty.o`) |
 | `msvc-inline` | a pristine object `u<i>.obj` defines a real body: unit *i*'s source has it | unit *i* compiled again with `-fkeep-inline-functions`, only the wanted symbols kept (`vtables.gc_weaken`); a body under a shell's name renamed when the relaxed key pairs one symbol |
 | `special-default` | default / copy constructor, destructor, copy assignment of a non-template class, no pristine body | out-of-line `= default` in the referencing unit (the implicit member's semantics; not a decomp body) |
+| `crt-rule` | a runtime member the C++ library defines by contract, after the address classes: the MSVC STL throwers `C::_Xlen()` / `_Xran()` / `_Xinvalid_argument()` of the decomp's string and vector copies, a class placement delete `C::operator delete(void*, void*)` | weak stubs (`zz_bd_crt.o`): the message in x0 and a tail call of libstdc++'s `std::__throw_length_error` / `__throw_out_of_range` / `__throw_invalid_argument`, as MSVC threw; placement delete `ret` |
 | `missing` | the rest, and synthesized items GCC refuses (`synth-failed`); the note says why (`not virtual`, `MSVC calls it directly`, ...) | listed with the referencing units for the real-exe path (S3) |
 
 Output in `out/bodies/` (local): `bodies.tsv`, `bind.tsv`, `synth.tsv` (objects the next resolve links as extra
@@ -1104,6 +1105,14 @@ objects of their host unit, like `vtables/synth.tsv`), `stats.txt`. The resolve 
 `fnvlink.py` (`# ---- S2d`); without a `bodies/` directory resolve is unchanged. The synthesis and vcall probes compile
 the host unit with no prelude (`vtables.compile_probe(prelude='')`): `<typeinfo>` before a unit that defines its own
 `std::exception` does not compile. Tests: `tests/s2d/test_bodies.py`.
+
+Why a `missing` name has no body: `tools/link/bodycause.py <link out/> <tree> <link fixed/> [--traps names]` gives
+each one cause, first that applies: `crt-import` (std/stdext scope, `_X*`, operator new/delete, CRT C names),
+`data`, `name-mismatch` (an object of the link defines the same member, shells and unit namespaces relaxed, same
+arity, under another decoration), `not-compiled` (the tree has a body: out of line or in class, under `#if 0`, in a
+source that is no unit, or in a class copy the referencing unit does not emit), `no-body` (the decomp has none:
+`template-special`, `msvc-direct`, `exe-shape`, `other`). `--traps` weighs each class by the names the guest binds to
+trap stubs. Output `causes.tsv` (agent-only). Test: `tests/s2d/test_bodycause.py`.
 
 The farm link gets the exe from `link_job.sh` (`job_gamedata` -> `FNVNX_EXE`); the link stage's fingerprint holds its
 sha256. On link c0d6c71516f6 (relink of its out/): 4,425 undefined without bodies, 2,474 with. The 1,002 names left
