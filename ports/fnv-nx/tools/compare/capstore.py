@@ -12,7 +12,7 @@ stored once per cache key, deduplicated across scenes, so the sweep replays them
 Layout of <store> (one directory; the farm job publishes it to fnv-nx-build branches capture/<key>/<k>of<N>, and a
 consumer checks every shard branch of the key out into one directory: the files never collide):
     KEY                       the key's inputs (one `name<TAB>value` per line); written by the job
-    index/<id>.tsv            sha256 and size of the whole capture, scene hash, meta (one `k<TAB>v` per line)
+    index/<id>.tsv            sha256 and size of the whole capture, its VS / PS program hashes, scene hash, meta
     index/<id>.blobs          the blob hashes the scene uses (for export)
     scenes/<id>.nxs.xz        the capture with every large payload replaced by a BLOB record (xz -6)
     blobs/<hh>/<hash>.xz      one payload tail per file (sha256[:32] of the bytes after the payload's first 32)
@@ -48,7 +48,7 @@ def write_atomic(path, data):
 def pack(store, sid, cap, meta):
     sk = lzma.LZMACompressor(preset=6)
     whole = hashlib.sha256()
-    parts, size, nblob, nnew, newbytes, used = [], 8, 0, 0, 0, {}
+    parts, size, nblob, nnew, newbytes, used, progs = [], 8, 0, 0, 0, {}, {'VSH ': set(), 'PSH ': set()}
     with open(cap, 'rb') as f:
         magic = f.read(8)
     whole.update(magic)
@@ -59,6 +59,9 @@ def pack(store, sid, cap, meta):
         pad = b'\0' * ((-ln) % 4)
         whole.update(rec); whole.update(p); whole.update(pad)
         size += 8 + ln + len(pad)
+        if t in progs and ln >= 12:     # the program's hash (fnv1a64 of its bytecode, as scene_stats names it)
+            _, lo, hi = struct.unpack_from('<3I', p)
+            progs[t].add('%016x' % (lo | hi << 32))
         if ln >= MIN:
             tail = p[HEAD:]
             h = hashlib.sha256(tail).hexdigest()[:32]
@@ -75,7 +78,8 @@ def pack(store, sid, cap, meta):
     write_atomic(os.path.join(store, 'scenes', sid + '.nxs.xz'), b''.join(parts))
     shutil.rmtree(os.path.join(store, 'ref', sid), ignore_errors=True)    # a new capture: its old reference is void
     write_atomic(os.path.join(store, 'index', sid + '.blobs'), ''.join(h + '\n' for h in used).encode())
-    lines = [('format', FORMAT), ('sha256', whole.hexdigest()), ('size', str(size)), ('blobs', str(nblob))] + \
+    lines = [('format', FORMAT), ('sha256', whole.hexdigest()), ('size', str(size)), ('blobs', str(nblob)),
+             ('vs', ','.join(sorted(progs['VSH ']))), ('ps', ','.join(sorted(progs['PSH '])))] + \
         sorted(meta.items())
     write_atomic(os.path.join(store, 'index', sid + '.tsv'), ''.join(f'{k}\t{v}\n' for k, v in lines).encode())
     return {'size': size, 'blobs': nblob, 'new_blobs': nnew, 'new_bytes': newbytes}

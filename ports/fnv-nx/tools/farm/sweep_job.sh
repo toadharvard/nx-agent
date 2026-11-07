@@ -219,12 +219,12 @@ EOF
 	elif [ "$CAP_MODE" = replay ]; then
 		echo -e "$id\tuncached\t0\treplay" >>"$S/done.tsv"; rm -rf "$c"; return
 	else
-		cell_capture "$id" "$c" "$shash" "$t0" || return
+		cell_capture "$id" "$c" "$shash" "$t0" "$kind" "$cell" || return
 	fi
 	cell_stats "$id" "$c" "$t0" "$mode"
 }
-cell_capture() {   # cell_capture <id> <dir> <scene hash> <t0>: boot under Wine, d9cap, trim, norm, pack into the store
-	local id=$1 c=$2 shash=$3 t0=$4 st
+cell_capture() {   # cell_capture <id> <dir> <scene hash> <t0> <kind> <cell>: boot under Wine, d9cap, trim, norm, pack
+	local id=$1 c=$2 shash=$3 t0=$4 kind=$5 cell=$6 st
 	S16_PCI_DEVICE=00000193 S16_SCENES=$c/scenes.json S16_D9CAP=$BIN/d3d9.dll S16_STOP_AFTER_FRAMES=1 S16_CAPTURE='Z:'"${c//\//\\}"'\journal.nxd9' \
 	S16_CAPTURE_FRAMES=0- S16_CAPTURE_MAX_MB=${SWEEP_JOURNAL_MB:-6000} S16_SETTLE_S=${S16_SETTLE_S:-30} \
 		timeout -k 30 "${SWEEP_CELL_TIMEOUT_S:-1200}" bash "$CMP/wine_ref.sh" run "$CELLW" "$id" "$c/run" >"$c/run.log" 2>&1
@@ -238,7 +238,8 @@ cell_capture() {   # cell_capture <id> <dir> <scene hash> <t0>: boot under Wine,
 	rm -f "$c/journal.nxd9"
 	python3 -I "$CMP/nxd9norm.py" "$c/trim.nxd9" "$c/$id.nxd9" >/dev/null 2>&1 || cp "$c/trim.nxd9" "$c/$id.nxd9"
 	rm -f "$c/trim.nxd9"
-	if python3 -I "$CMP/capstore.py" pack "$CAPS" "$id" "$c/$id.nxd9" --meta "scene=$shash" --meta "head=$H12" >>"$S/capstore.log" 2>&1; then
+	if python3 -I "$CMP/capstore.py" pack "$CAPS" "$id" "$c/$id.nxd9" --meta "scene=$shash" --meta "head=$H12" \
+		--meta "cell=$(printf '%s\t%s\t%s\t' "$id" "$kind" "$cell")" >>"$S/capstore.log" 2>&1; then
 		echo "$id" >>"$S/packed.tsv"
 	else NOTES+=("capstore pack $id failed (log $S/capstore.log)"); fi
 }
