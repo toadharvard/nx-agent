@@ -4775,7 +4775,10 @@ def r_forceinline_declarations(path, text, stats):
         cls, body = None, ''
         if inner is not None:
             if inner[2] != 'class': continue                         # a declaration inside a function or namespace
-            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', inner[3] or '')
+            head = re.sub(r'\btemplate\s*<[^{};]*?>\s*(?=(?:class|struct|union)\b)', ' ', inner[3] or '')
+            # the class's own name, not a template parameter's (`template <class KEYD3, ...> class DispatchUtilD3`:
+            # hkpbvtreeagent, hkgpmesh lost the keyword on members their units define out of class)
+            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', head)
             if not hm: continue
             cls, body = hm.group(1), text[inner[0]:inner[1]]
             if name.lstrip('~') != name and name[1:] != cls: continue
