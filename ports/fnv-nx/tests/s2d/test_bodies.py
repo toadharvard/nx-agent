@@ -861,6 +861,87 @@ class UnitTarg(unittest.TestCase):
                          ['Ptr<fnv_00401000::Item*,4>', 'fnv_00401000::Item'])
 
 
+class CopyPairs(unittest.TestCase):
+    """copy-addr / copy_key / LayoutGate (s2d crt-import, not-compiled): a member of one unit-local copy of a class
+    binds to the address units.json gives the same member of another copy, only with one layout on both sides."""
+
+    class Gate:
+        def __init__(self, sizes):
+            self.sizes_ = sizes
+
+        def same(self, ref_units, ref_types, def_unit, def_types):
+            for u in ref_units:
+                for rt, dt in zip(ref_types, def_types):
+                    a, b = self.sizes_.get((u, rt)), self.sizes_.get((def_unit, dt))
+                    if a is None or b is None or a != b:
+                        return False, 'no'
+            return True, 'sizes'
+
+    def test_copy_addr(self):
+        units_j = {'units': [
+            {'source': 'src/def.cpp', 'functions': [
+                {'symbol': '?Flush@?$Os@D@std@fnv_00a00010@@QAEAAV123@XZ', 'address': '00405000'},
+                {'symbol': '?Put@?$Os@D@std@fnv_00a00010@@QAEAAV123@D@Z', 'address': '00405100'},
+                {'symbol': '?Put@?$Os@D@std@fnv_00a00030@@QAEAAV123@D@Z', 'address': '00405200'}],
+             'symbols': {}},
+            {'source': 'src/ref.cpp', 'functions': [], 'symbols': {}}]}
+        native = {0x00405000: 'F', 0x00405100: 'F', 0x00405200: 'F'}
+        with tempfile.TemporaryDirectory() as d:
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as f:
+                json.dump(units_j, f)
+            units = fnvlink.load_units(uj)
+        flush, put, other = ('_ZN12fnv_00a000203std2OsIcE5FlushEv', '_ZN12fnv_00a000203std2OsIcE3PutEc',
+                             '_ZN12fnv_00a000203std2OsIcE5FlushEi')
+        allms = {n for u in units.values() for _, n in u.defs}
+        msvc, itanium = tables(allms, {flush, put, other})
+        cl = bodies.Classifier(units, native, msvc, itanium, None, ['src/def.cpp', 'src/ref.cpp'])
+        self.assertEqual(bodies.copy_key(itanium(flush), variant=False),
+                         bodies.copy_key(msvc('?Flush@?$Os@D@std@fnv_00a00010@@QAEAAV123@XZ'), variant=False))
+        self.assertEqual(cl.by_copy(itanium(flush))[0], 0x00405000)
+        self.assertIsNone(cl.by_copy(itanium(put)))      # two copies at two addresses
+        self.assertIsNone(cl.by_copy(itanium(other)))    # another overload
+        self.assertEqual(bodies.copy_types(itanium(put)), ['fnv_00a00020::std::Os<char>'])
+        rows = [bodies.Row(n, 'missing', None, None, 'src/ref.cpp', 'x', None) for n in (flush, put)]
+        same = self.Gate({('src/ref.cpp', 'fnv_00a00020::std::Os<char>'): 56,
+                          ('src/def.cpp', 'fnv_00a00010::std::Os<char>'): 56})
+        got = {r.name: r for r in bodies.copy_addr_pass(rows, cl, itanium, same)}
+        self.assertEqual((got[flush].cls, got[flush].target), ('copy-addr', '__fnv_00405000'))
+        self.assertEqual(got[put].cls, 'missing')
+        differ = self.Gate({('src/ref.cpp', 'fnv_00a00020::std::Os<char>'): 1,
+                            ('src/def.cpp', 'fnv_00a00010::std::Os<char>'): 56})
+        r = bodies.copy_addr_pass(rows[:1], cl, itanium, differ)[0]
+        self.assertEqual(r.cls, 'missing')
+        self.assertIn('copy-addr 00405000', r.note)
+
+    def test_tree_inline_copy_rename(self):
+        """A global name whose body is in a unit copy of its class: renamed from the copy's emitted symbol when the
+        gate gives both one size; refused (stays missing) when the sizes differ."""
+        src = ('struct Mm { int a; void Free(void *); };\n'
+               'namespace fnv_00a1cb80 { struct Mm { int a; void Free(void *p) { a = (int)(long)p; } }; }\n'
+               'namespace fnv_00a1cb80 { void use(Mm *m) { m->Free(0); } }\n')
+        want = '_ZN2Mm4FreeEPv'
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'src'))
+            os.makedirs(os.path.join(d, 'include'))
+            with open(os.path.join(d, 'src', 'm.cpp'), 'w') as f:
+                f.write(src)
+            dem = {}
+
+            def it(n):
+                if n not in dem:
+                    dem.update(fnvlink.batch_demangle(fnvlink.CXXFILT, [n]))
+                return sigs.parse_itanium(n, dem[n])
+            rows = [bodies.Row(want, 'missing', None, None, 'src/r.cpp', '', None)]
+            ok = self.Gate({('src/r.cpp', 'Mm'): 4, ('src/m.cpp', 'fnv_00a1cb80::Mm'): 4})
+            path, roots, failed = bodies.synth_host(d, d, 'src/m.cpp', rows, it, True, gate=ok)
+            self.assertEqual((roots, failed), ({want}, {}))
+            no = self.Gate({('src/r.cpp', 'Mm'): 1, ('src/m.cpp', 'fnv_00a1cb80::Mm'): 4})
+            path, roots, failed = bodies.synth_host(d, d, 'src/m.cpp', rows, it, True, gate=no)
+            self.assertEqual(roots, set())
+            self.assertIn(want, failed)
+
+
 class Thunks(unittest.TestCase):
     def test_thunks(self):
         """Thunk names parse to (this adjustment, vcall offset, target); refs.tsv's undefined thunks load; the stubs
