@@ -970,7 +970,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     code = abi2.emit(bn, target, v.plan, 'ref: %s | def: %s'
                                                      % (ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     if code is None:
-                                        cls = 'code-manual'
+                                        cls = 'code-manual' if not abi_manual_trap(v) else 'abi-manual'
+                                        target = None if cls == 'abi-manual' else target
                                     else:
                                         bridges.setdefault(bn, code)
                                         target = bn
@@ -980,6 +981,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     bridges.setdefault(bn, (target, v, ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     target = bn
                                     cls = 'code-bridge'
+                                elif v.kind == 'manual' and abi_manual_trap(v):
+                                    # D24: nothing binds across an aggregate / result-pointer difference without a
+                                    # bridge; the reference stays a trap stub (cause abi-manual in the D23 list)
+                                    cls, target = 'abi-manual', None
+                                    stats['abi_manual_unbound'] += 1
                                 elif v.kind == 'manual':
                                     cls = 'code-manual'
                             elif v.notes:
@@ -1804,6 +1810,17 @@ def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, alt=None):
                 'slots\toutcome\tnative slots now\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
+
+
+ABI_MANUAL_TRAP = ('sret-explicit', 'ret-aggregate', 'aggregate-param')
+
+
+def abi_manual_trap(v):
+    """A `manual` pair that differs in how an aggregate or the result pointer is passed (sret-explicit, ret-aggregate,
+    aggregate-param): with no bridge (abi2 has no layout plan) the reference is left unbound, so it stays a trap stub
+    and is listed (cause abi-manual) instead of binding across the difference (orchestrator, D24). Varargs-only
+    manual pairs keep their direct binding: AArch64 passes variadic arguments where it passes named ones."""
+    return any(c in ABI_MANUAL_TRAP for c in v.classes)
 
 
 def slot_abi(isig, ds):
