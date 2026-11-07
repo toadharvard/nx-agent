@@ -134,6 +134,17 @@ def load_native(addrmap_tsv):
     return nat
 
 
+def load_native_names(addrmap_tsv):
+    """addrmap.tsv -> {address: native Itanium symbol} of the F addresses (Classifier.dtor_as_fun)."""
+    res = {}
+    if os.path.exists(addrmap_tsv):
+        for line in open(addrmap_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 4 and f[1] == 'F' and f[3].startswith('_Z'):
+                res[int(f[0], 16)] = f[3]
+    return res
+
+
 def load_providers(addrmap_tsv):
     """addrmap.tsv -> {address: provider} of the F addresses S4's runtime implements (note `provider: <name>`):
     the platform's own definition of the exe function at that address (platform/crt/crt_symbols.tsv)."""
@@ -164,7 +175,11 @@ def relaxed_keys(sig):
     """(tier, key) strict -> loose for a parsed function name: class shells stripped (`X_shell`); then
     a unit-local copy of a class (`fnv_00650ea0::NiFixedString`, resolve's ns binding) keyed as the global class
     (key 'g'), which a name without unit namespaces also gives, so two units' copies never pair with each other.
-    Parameters at sigs level 2 (cv and long/int spellings ignored)."""
+    Parameters at sigs level 2 (cv and long/int spellings ignored).
+    Last tier, `unit-targ`: a class template instantiated over a unit-local copy (`NiPointer<fnv_009dfa00::
+    ActorPathingMessageQueue>`) keyed as the instantiation over the global class, the same ns binding one level
+    down. Only for lookups: Classifier.by_address takes it only where the layout probe gives the class and its
+    template arguments one size in the referencing and the defining units (targ_layout_ok)."""
     if sig.kind != 'func' or sig.params is None or not sig.qual:
         return []
     p2 = tuple(sigs.canon_param(p, 2) for p in sig.params)
@@ -177,13 +192,52 @@ def relaxed_keys(sig):
         keys.append(('global', ('g', scope, last, p2)))      # what a unit-local copy of this class looks for
     elif su:
         keys.append(('unit-ns', ('g', su, UNIT_NS_ANY.sub('', last), pu)))
+    st = tuple(UNIT_NS_ANY.sub('', q) for q in su)
+    if st and st != su:
+        keys.append(('unit-targ', ('g', st, UNIT_NS_ANY.sub('', last), pu)))
     return keys
 
 
 def def_keys(sig):
     """The relaxed keys a definition (or a name standing for one) is indexed under: not a unit-local copy's
     global key (a global reference never binds to one unit's copy)."""
-    return [(t, k) for t, k in relaxed_keys(sig) if t != 'unit-ns']
+    return [(t, k) for t, k in relaxed_keys(sig) if t not in ('unit-ns', 'unit-targ')]
+
+
+def targ_types(qual):
+    """Class-like type names inside the template arguments of a qualified name's scope, outermost first
+    (`NiPointer<fnv_009dfa00::A>` -> ['NiPointer<fnv_009dfa00::A>', 'fnv_009dfa00::A'])."""
+    out = []
+    for q in qual[:-1]:
+        if '<' not in q:
+            continue
+        out.append(q)
+        i = q.find('<')
+        for a in sigs.split_top(q[i + 1:q.rfind('>')]):
+            a = a.strip().rstrip('*&').strip()
+            a = re.sub(r'^(?:const|volatile)\s+|\s+(?:const|volatile)$', '', a)
+            if a and not re.match(r'^-?\d+$', a) and not SCALARS.match(a):
+                out.append(a)
+    return out
+
+
+def targ_layout_ok(layouts, ref_units, ref_qual, def_units):
+    """The class of a `unit-targ` pair and each class-like template argument: where the layout probe sizes the
+    referencing unit's spelling and the defining unit's global spelling, they agree. A type the probe does not
+    size in either unit is no evidence against the pair (NiPointer<T> holds a T* either way); the class itself
+    must be sized in both."""
+    if not layouts or not def_units:
+        return False
+    for k, t in enumerate(targ_types(ref_qual)):
+        t = sigs.canon_type(t)
+        g = UNIT_NS_ANY.sub('', t)
+        ref = set().union(*(layouts.get((u, t), set()) for u in ref_units))
+        dfn = set().union(*(layouts.get((u, g), set()) for u in def_units))
+        if k == 0 and not (ref and dfn):
+            return False
+        if ref and dfn and ref != dfn:
+            return False
+    return True
 
 
 def special_of(isig):
@@ -367,15 +421,20 @@ class Classifier:
     """units: fnvlink.load_units(); native: load_native(); msvc(name) / itanium(name) -> sigs.Sig;
     bodies: {MSVC name: (unit index, x86 bytes)} or None (no pristine objects); unit_names: [source] by index."""
 
-    def __init__(self, units, native, msvc, itanium, bodies=None, unit_names=()):
+    def __init__(self, units, native, msvc, itanium, bodies=None, unit_names=(), layouts=None, native_names=None):
         self.native, self.itanium, self.bodies, self.unit_names = native, itanium, bodies, list(unit_names)
+        self.layouts = layouts   # load_type_sizes(): the unit-targ tier is taken only with it
+        self.native_names = native_names or {}   # load_native_names(): F definitions standing for a destructor
+        self.msvc = msvc
         self.idx = collections.defaultdict(lambda: collections.defaultdict(set))   # key -> {addr: {msvc names}}
+        self.addr_units = collections.defaultdict(set)   # addr -> units naming an indexed MSVC name there
         for u in units.values():
             for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
                 if a in native and n.startswith('?'):
                     m = msvc(n)
                     for _, k in def_keys(m):
                         self.idx[k][a].add(n)
+                    self.addr_units[a].add(u.source)
         self.fidx = collections.defaultdict(lambda: collections.defaultdict(set))  # fold key -> {addr: {names}}
         for u in units.values():
             for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
@@ -389,18 +448,37 @@ class Classifier:
             for _, k in [('exact', kk) for t, kk in m.keys() if t in ('exact', 'l1', 'l2')] + def_keys(m):
                 self.bidx[k].add(n)
 
-    def by_address(self, isig):
+    def by_address(self, isig, units_=()):
         want = VARIANT_KIND.get(isig.variant, 'F') if isig.variant else 'F'
         if isig.variant == 'D0':
             return None
         for tier, k in relaxed_keys(isig):
-            cands = {a: ns for a, ns in self.idx.get(k, {}).items() if self.native.get(a) == want}
+            cands = {a: ns for a, ns in self.idx.get(k, {}).items()
+                     if self.native.get(a) == want or self.dtor_as_fun(isig, a, ns)}
+            if tier == 'unit-targ':   # the global instantiation, only with one layout on both sides
+                cands = {a: ns for a, ns in cands.items()
+                         if targ_layout_ok(self.layouts, units_, isig.qual, self.addr_units.get(a))}
             if len(cands) == 1:
                 (a, ns), = cands.items()
                 return tier, a, sorted(ns)[0]
             if len(cands) > 1:
                 return 'ambiguous', None, ','.join('%08x' % a for a in sorted(cands)[:6])
         return None
+
+    def dtor_as_fun(self, isig, a, ns):
+        """A D1/D2 whose address units.json names with this destructor (an MSVC `??1` there) while the native build
+        defines a function at it, the decomp's spelling `FUN_<a>(T*)` or a member `C::FUN_<a>()`: natively both
+        take x0 = the object, as exe_pass's this-only rule (shape_ok) accepts for exe-addr."""
+        if isig.variant not in ('D1', 'D2') or isig.params or self.native.get(a) != 'F' or a not in self.native_names:
+            return False
+        if not any(self.msvc(n).variant == 'dtor' for n in ns):
+            return False
+        d = self.itanium(self.native_names[a])
+        if d.kind != 'func' or d.params is None or d.variant:
+            return False
+        dp = [p for p in d.params if p != '...']
+        member = len(d.qual) >= 2 and not UNIT_NS.match(d.qual[-2])
+        return (not dp and member) or (len(dp) == 1 and dp[0].rstrip().endswith('*'))
 
     def by_fold(self, isig):
         """(address, folded MSVC names) when the instantiations of this template member over pointer arguments
@@ -433,7 +511,7 @@ class Classifier:
         us = ','.join(sorted(units_))
         if isig.kind != 'func':
             return Row(name, 'missing', None, None, us, 'not a function (%s)' % isig.kind, None)
-        hit = self.by_address(isig)
+        hit = self.by_address(isig, units_)
         amb = None
         if hit and hit[0] != 'ambiguous':
             tier, a, mn = hit
@@ -754,6 +832,18 @@ def load_layouts(out):
             f = line.rstrip('\n').split('\t')
             if not line.startswith('#') and len(f) >= 3 and f[2].isdigit():
                 res[(f[0], sigs.split_qual(f[1])[-1] if f[1] else f[1])].add(int(f[2]))
+    return res
+
+
+def load_type_sizes(out):
+    """out/layouts.tsv -> {(unit, canonical full type spelling): {sizes}} (targ_layout_ok)."""
+    res = collections.defaultdict(set)
+    path = os.path.join(out, 'layouts.tsv')
+    if os.path.exists(path):
+        for line in open(path, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if not line.startswith('#') and len(f) >= 3 and f[2].isdigit():
+                res[(f[0], sigs.canon_type(f[1]))].add(int(f[2]))
     return res
 
 
@@ -1517,7 +1607,8 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         if n not in msig:
             msig[n] = sigs.parse_msvc(n, ms[n])
         return msig[n]
-    cl = Classifier(units, native, msvc, itanium, bodies, unit_names)
+    cl = Classifier(units, native, msvc, itanium, bodies, unit_names, load_type_sizes(out),
+                    load_native_names(os.path.join(out, 'addrmap.tsv')))
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
 
     if msvc_objs and exe_path:

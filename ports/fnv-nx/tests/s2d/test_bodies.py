@@ -775,6 +775,59 @@ class Fold(unittest.TestCase):
                 self.assertNotEqual(r.cls, 'template-fold', n)
 
 
+class UnitTarg(unittest.TestCase):
+    def test_unit_targ(self):
+        """A template member instantiated over a unit-local copy of a class (`Ptr<fnv_00401000::Item>`) binds to the
+        global instantiation's address only where the layout probe gives the class one size in both units (and no
+        template argument two sizes); a D1 also binds where the native build spells that address FUN_<a>(T*) or
+        C::FUN_<a>(). Definitions are never indexed under the relaxed key (a unit copy of the template)."""
+        units_j = {'units': [
+            {'source': 'src/def.cpp', 'functions': [
+                {'symbol': '??1?$Ptr@VItem@@@@QAE@XZ', 'address': '00406000'},             # Ptr<Item>::~Ptr()
+                {'symbol': '?Get@?$Ptr@VItem@@@@QBEPAVItem@@XZ', 'address': '00406100'},  # Ptr<Item>::Get()
+                {'symbol': '??1?$Ptr@VOther@@@@QAE@XZ', 'address': '00406200'},            # Ptr<Other>::~Ptr()
+                {'symbol': '??1?$Ptr@VNode@fnv_00402222@@@@QAE@XZ', 'address': '00406300'}], 'symbols': {}},
+            {'source': 'src/ref.cpp', 'functions': [], 'symbols': {}}]}
+        native = {0x00406000: 'F', 0x00406100: 'F', 0x00406200: 'F', 0x00406300: 'X'}
+        native_names = {0x00406000: '_Z12FUN_00406000PPc', 0x00406100: '_ZNK3PtrI4ItemE3GetEv',
+                        0x00406200: '_Z12FUN_00406200ii'}
+        layouts = {('src/ref.cpp', 'Ptr<fnv_00401000::Item>'): {4}, ('src/def.cpp', 'Ptr<Item>'): {4},
+                   ('src/ref.cpp', 'fnv_00401000::Item'): {8}, ('src/def.cpp', 'Item'): {8},
+                   ('src/ref.cpp', 'Ptr<fnv_00401000::Other>'): {4}, ('src/def.cpp', 'Ptr<Other>'): {4},
+                   ('src/ref.cpp', 'Ptr<fnv_00401000::Big>'): {4}, ('src/def.cpp', 'Ptr<Big>'): {4},
+                   ('src/ref.cpp', 'fnv_00401000::Big'): {12}, ('src/def.cpp', 'Big'): {16}}
+        units_j['units'][0]['functions'].append({'symbol': '??1?$Ptr@VBig@@@@QAE@XZ', 'address': '00406000'})
+        want = {'_ZN3PtrIN12fnv_004010004ItemEED1Ev': '00406000',    # D1 at FUN_00406000(char**): this only
+                '_ZNK3PtrIN12fnv_004010004ItemEE3GetEv': '00406100',  # a member at an F address
+                '_ZN3PtrIN12fnv_004010005OtherEED1Ev': None,           # FUN_00406200(int, int): not this only
+                '_ZN3PtrIN12fnv_004010003BigEED1Ev': None,             # the argument has two sizes
+                '_ZN3PtrIN12fnv_004010004NodeEED1Ev': None,            # no layout evidence (unsized)
+                '_ZN3PtrI4NodeED1Ev': None}                            # never another unit's copy
+        with tempfile.TemporaryDirectory() as d:
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as f:
+                json.dump(units_j, f)
+            units = fnvlink.load_units(uj)
+        allms = {n for u in units.values() for n in list(u.refs) + [n for _, n in u.defs]}
+        msvc, itanium = tables(allms, set(want) | set(native_names.values()))
+        cl = bodies.Classifier(units, native, msvc, itanium, None, ['src/def.cpp', 'src/ref.cpp'], layouts,
+                               native_names)
+        for n, a in want.items():
+            r = cl.classify(n, {'src/ref.cpp'})
+            if a:
+                self.assertEqual((r.cls, r.target), ('addr', '__fnv_' + a), n)
+                self.assertIn('via unit-targ', r.note, n)
+            else:
+                self.assertNotEqual(r.cls, 'addr', n)
+        # without the layout probe the tier binds nothing
+        bare = bodies.Classifier(units, native, msvc, itanium, None, ['src/def.cpp', 'src/ref.cpp'], None,
+                                 native_names)
+        self.assertNotEqual(bare.classify('_ZNK3PtrIN12fnv_004010004ItemEE3GetEv', {'src/ref.cpp'}).cls, 'addr')
+        self.assertEqual([t for t, _ in bodies.def_keys(msvc('??1?$Ptr@VNode@fnv_00402222@@@@QAE@XZ'))],
+                         ['shell', 'global'])
+        self.assertEqual(bodies.targ_types(['Ptr<fnv_00401000::Item*,4>', '{dtor}']),
+                         ['Ptr<fnv_00401000::Item*,4>', 'fnv_00401000::Item'])
+
 
 class Thunks(unittest.TestCase):
     def test_thunks(self):
