@@ -3388,6 +3388,45 @@ def _all_unit_functions(path):
         _ALL_FUNCTIONS = set().union(*(fs for _, fs in _UNIT_INFO.values())) if _UNIT_INFO else set()
     return _ALL_FUNCTIONS
 
+# The tag of a definition: `// @fnv 0x<a>` above its head, with only blank, comment and preprocessor lines (the
+# unit's `#pragma optimize`) and type declarations in between: `template <class T> struct L;`, or a whole
+# `template <> struct M<void*> { static void __cdecl F(void**); };` (one level of nested braces). The head may span
+# lines (a return type over two lines, `static void __declspec(noinline)` above the name): STAND_DEF matches from its
+# last line. Seen as untagged, a tagged definition whose own name the unit binds to its address was dropped as its own
+# stand-in (R6: 0x004ab230 BipedAnim::GetBoneNode, 0x0087ce70, 0x00660400, 0x00a8a200; R1: 0x0046ffd0).
+STAND_TAG = re.compile(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n')
+STAND_GAP_ITEM = re.compile(r'\s+|//[^\n]*|/\*.*?\*/|#[^\n]*|(?:template\s*<[^;{}]*>\s*)?(?:struct|class|union|enum)\s+'
+                            r'[\w:<>, \t*]+?\s*(?::[^;{}]*)?(?:;|\{(?:[^{}]|\{[^{}]*\})*\}\s*;)', re.S)
+
+def _stand_head(text, at, lines=3):
+    """Start of the line where the head of the definition matched at `at` begins: up to `lines` lines above, while
+    the line above is part of a declaration (not blank, a comment, a preprocessor line or the end of a statement)."""
+    start = text.rfind('\n', 0, at) + 1
+    for _ in range(lines):
+        if start == 0: break
+        ls = text.rfind('\n', 0, start - 1) + 1
+        prev = text[ls:start].strip()
+        if not prev or prev.startswith(('#', '//', '/*')) or prev.endswith((';', '}', '{', '*/')): break
+        start = ls
+    return start
+
+def _stand_gap_only(gap):
+    """gap holds only what may sit between a tag and its definition (STAND_GAP_ITEM)."""
+    i = 0
+    while i < len(gap):
+        m = STAND_GAP_ITEM.match(gap, i)
+        if not m or m.end() == i: return False
+        i = m.end()
+    return True
+
+def _stand_tagged(text, at):
+    """The definition whose head STAND_DEF matched at `at` carries its own `@fnv` tag (see above)."""
+    for h in sorted({_stand_head(text, at), text.rfind('\n', 0, at) + 1, at}):
+        window = text[max(0, h - 2000):h]
+        tags = list(STAND_TAG.finditer(window))
+        if tags and _stand_gap_only(window[tags[-1].end():]): return True
+    return False
+
 def r_stand_in_definitions(path, text, stats):
     """STAND1: drop untagged definitions bound to the address of a tagged definition in the same unit (see above)."""
     return _stand_ins(path, text, stats, 'STAND1')
@@ -3413,8 +3452,7 @@ def _stand_ins(path, text, stats, which):
         parts = q.split('::')
         if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS: continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', m.group(1) or ''): continue
-        before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
         if any(k != 'namespace' for k, _ in chain): continue
@@ -3492,7 +3530,7 @@ def r_static_stand_ins(path, text, stats):
         if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
         before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
@@ -3626,7 +3664,7 @@ def r_inline_stand_ins(path, text, stats):
         if re.match(r'\s*(?:return|else|case|new|delete|throw|goto)\b', lead): continue
         if re.search(r'\b(?:virtual|static|template|__forceinline|FNV_FORCEINLINE|constexpr)\b', lead): continue
         before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
