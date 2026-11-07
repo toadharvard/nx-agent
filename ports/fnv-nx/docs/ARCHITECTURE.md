@@ -202,6 +202,21 @@ agents queue the next item instead of waiting, and verify their own change with 
   only when it matches and is not slower.
 - Link/boot/runtime: whole classes (all .inl bodies, all short vtables, all services of a DLL), not trap by trap.
 
+### D24. Four zero targets (owner, 2026-11-07)
+
+- 0 missing functions (no trap stubs): R1..R10 recon fleet + S2-bodies (D23).
+- 0 link errors (undefined symbols, unbound vtable slots, data traps): S2-bodies.
+- 0 wrong functions: no hard or soft fuzz divergence and no MSVC-equivalence code difference that is not a declared
+  platform class. Owners by cause group: S1-rules (coordinator; harness/oracle causes, signedness, bool, the class
+  split and the shard reports), F1 (call-flow, allocator family, native-extra/early-exit/inlined), F2 (vptr,
+  virtual calls, ctor/dtor order, vtable layout), F3 (memory: uninit-*, store-width, x86-only-store, ilp32-pointer,
+  null reads, callee-saved), F4 (floating point: nan-bits, x87-precision, division, float), EQ (equivalence: the
+  120 code-difference functions and the units the prepared side cannot compile).
+- 0 wrong shaders: every program passes on every parameter set that exercises it and none stays vacuous; every
+  scene matches; S16 (failing programs, scenes, draws) and S17 (coverage of the vacuous programs).
+- A fix is a class mechanism (rule, generator, harness) measured by the farms; one-off edits only where no class
+  exists.
+
 ### D23. Zero trap stubs: the recon fleet and fuzz-equivalent acceptance (owner, 2026-11-07)
 
 - Owner target: the guest image has 0 trap stubs. Every function the decomp lacks gets a native body.
