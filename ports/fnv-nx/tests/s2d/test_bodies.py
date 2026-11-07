@@ -898,20 +898,37 @@ class AddrHost(unittest.TestCase):
                                   'src/a.cpp\t_ZN1Z1fEv\tcode\tunit/exact\t00401000\t__fnv_00401000\t\n')
             self.assertEqual(bodies.load_defmissing(refs), {0x004459e0: {'src/a.cpp', 'src/b.cpp'}})
             ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
-            names = ['??_GRec@@QAEPAXI@Z', '??_G?$L@H@@QAEPAXI@Z']
+            names = ['??_GRec@@QAEPAXI@Z', '??_G?$L@H@@QAEPAXI@Z', '??_GV@@UAEPAXI@Z']
             ms.need(names)
             line = bodies.gdel_line(0x004459e0, sigs.parse_msvc(names[0], ms[names[0]]))
             self.assertIn('extern "C" void *__fnv_004459e0(::Rec *p, unsigned int f)', line)
-            self.assertIn('if (f & 1) delete p; else p->::Rec::~Rec();', line)
+            self.assertIn('p->::Rec::~Rec(); if (f & 1) __fnvnx_gd::del(p, 0);', line)
+            self.assertNotIn('delete p', line)   # never a virtual delete-expression
             self.assertIsNone(bodies.gdel_line(0x00401000, sigs.parse_msvc(names[1], ms[names[1]])))
             gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
             if gxx:
                 src = os.path.join(d, 'g.cpp')
-                open(src, 'w').write('struct Rec { int k; ~Rec(); };\n' + line + '\n')
-                r = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 'g.o')], capture_output=True, text=True)
+                open(src, 'w').write('struct Rec { int k; ~Rec(); };\n' + bodies.GDEL_HELPER + '\n' + line + '\n')
+                r = subprocess.run([gxx, '-std=gnu++17', '-c', src, '-o', os.path.join(d, 'g.o')],
+                                   capture_output=True, text=True)
                 self.assertEqual(r.returncode, 0, r.stderr[-400:])
                 nm = subprocess.run(['nm', os.path.join(d, 'g.o')], capture_output=True, text=True).stdout
                 self.assertIn('T __fnv_004459e0', nm)
+                self.assertIn('U _ZdlPv', nm)                      # no class delete: the global one
+                # R6 0x00ddeff0: a virtual destructor and the class's own sized operator delete: called directly
+                # with sizeof(C) after the non-virtual destructor, never through the vtable (D0)
+                lv = bodies.gdel_line(0x00ddeff0, sigs.parse_msvc(names[2], ms[names[2]]))
+                open(src, 'w').write('typedef __SIZE_TYPE__ size_t; void release(void *, size_t);\n'
+                                     'struct V { int a[21]; virtual ~V(); void operator delete(void *p, size_t n) '
+                                     '{ release(p, n); } };\n' + bodies.GDEL_HELPER + '\n' + lv + '\n')
+                r = subprocess.run([gxx, '-std=gnu++17', '-O1', '-c', src, '-o', os.path.join(d, 'v.o')],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-400:])
+                nm = subprocess.run(['nm', os.path.join(d, 'v.o')], capture_output=True, text=True).stdout
+                self.assertIn('release', nm)                       # the class's delete (inlined), not ::delete
+                self.assertNotIn('_ZdlPv', nm)
+                self.assertIn('U _ZN1VD1Ev', nm)                   # the destructor itself, not D0
+                self.assertNotIn('D0Ev', nm)
             asm = bodies.emit_addr_stubs({0x0046ffd0: '_ZNK7NiPoint2mlEf', 0x004459e0: '__fnv_004459e0'})
             self.assertIn('"__fnv_0046ffd0":\n    b "_ZNK7NiPoint2mlEf"', asm)
             self.assertNotIn('"__fnv_004459e0":', asm)

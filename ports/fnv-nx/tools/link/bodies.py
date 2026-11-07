@@ -613,17 +613,31 @@ def load_defmissing(refs_tsv):
     return dict(out)
 
 
+# the deallocation function MSVC's ??_G calls, chosen as its lookup does: the class's (or a base's) one-parameter
+# operator delete, else its sized usual one with sizeof(C), else the global one. Never a delete-expression: with a
+# virtual destructor that dispatches to D0, which natively is this very ??_G stub's slot (or emitted nowhere: a
+# class whose destructor has no body, R6's Havok viewers at 0x00ddeff0)
+GDEL_HELPER = ('namespace __fnvnx_gd { '
+               'template <class T> auto del(T *p, int) -> decltype(T::operator delete((void *)p), void()) '
+               '{ T::operator delete((void *)p); } '
+               'template <class T> auto del(T *p, long) -> decltype(T::operator delete((void *)p, sizeof(T)), void()) '
+               '{ T::operator delete((void *)p, sizeof(T)); } '
+               'template <class T> void del(T *p, ...) { ::operator delete((void *)p); } }')
+
+
 def gdel_line(addr, msig):
     """A scalar deleting destructor `??_GC@@...(unsigned int)` the decomp places but GCC has no counterpart of:
-    `__fnv_<addr>(C *, unsigned)` destroys, and deletes on bit 0, as MSVC's does. None for a class it cannot name."""
+    `__fnv_<addr>(C *, unsigned)` destroys (C's own destructor, non-virtually), then on bit 0 frees with the
+    deallocation function MSVC's ??_G calls (GDEL_HELPER, compiled before the lines). None for a class it cannot
+    name."""
     if msig is None or msig.kind != 'func' or len(msig.qual) < 2:
         return None
     scope = msig.qual[:-1]
     if any('<' in p or '{' in p or '`' in p or "'" in p or '(' in p for p in scope):
         return None
     c = '::' + '::'.join(scope)
-    return ('extern "C" void *%s(%s *p, unsigned int f) { if (f & 1) delete p; else p->%s::~%s(); return p; }'
-            % (ADDR_SYM % addr, c, c, scope[-1]))
+    return ('extern "C" void *%s(%s *p, unsigned int f) { p->%s::~%s(); if (f & 1) __fnvnx_gd::del(p, 0); '
+            'return p; }' % (ADDR_SYM % addr, c, c, scope[-1]))
 
 
 def addr_host(tree, work, host, items, msvc, itanium_of_defs):
@@ -642,10 +656,10 @@ def addr_host(tree, work, host, items, msvc, itanium_of_defs):
     got, failed = {}, {}
     objs = []
     if lines:
-        its = [(k, 'gd', ln) for k, (a, ln) in enumerate(lines)]
+        its = [(len(lines), 'gdhelper', GDEL_HELPER)] + [(k, 'gd', ln) for k, (a, ln) in enumerate(lines)]
         obj, alive = vtables.compile_probe(tree, work, host, its, 'bdg', ('-ffunction-sections', '-fdata-sections'),
                                            prelude='', game=True)
-        ok = {lines[k][0] for k, _, _ in alive} if obj else set()
+        ok = {lines[k][0] for k, _, _ in alive if k < len(lines)} if obj else set()
         if obj:
             clean = os.path.join(work, host.replace('/', '_') + '.bdgs.o')
             if vtables.strip_init(obj.path, clean):
