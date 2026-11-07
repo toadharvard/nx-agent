@@ -11,6 +11,7 @@ every frame to its program (name, hash, stage, model) and lists the programs tha
 --perturb EPS writes the same captures with every float input (constants, vertex floats) scaled by 1 + EPS * u: the
 reference rendered from them against the unperturbed reference is the conditioning floor (S16 decision: EPS 1e-5,
 as V6n's SENS test). A frame whose reference moves under it is ill-conditioned; its difference is not a defect.
+--perturb-seed K draws another perturbation (default 0); permreport.py takes several draws (README, conditioning).
 --programs restricts the set to the hashes or names in a file (one per line): the coverage-guided subset, e.g. the
 permutations a real frame used (coverage.py).
 
@@ -314,13 +315,13 @@ def place_points(j, glsl, vsc, pr):
             vsc[c['reg']], vsc[by['Max' + n[3:]]['reg']] = lo, hi
 
 
-def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=None, variant='base'):
+def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=None, variant='base', pseed=0):
     VARIANT['v'] = VARIANTS[variant]
-    PERTURB['eps'], PERTURB['rng'] = perturb, random.Random(0x5160)
+    PERTURB['eps'], PERTURB['rng'] = perturb, random.Random(0x5160 + pseed)
     os.makedirs(out, exist_ok=True)
     tex = make_textures()
     sdps = sdp if isinstance(sdp, list) else [sdp]
-    man = {'format': FORMAT, 'package': ','.join(os.path.basename(x) for x in sdps), 'size': size, 'perturb': perturb, 'variant': variant,
+    man = {'format': FORMAT, 'package': ','.join(os.path.basename(x) for x in sdps), 'size': size, 'perturb': perturb, 'perturb_seed': pseed, 'variant': variant,
            'captures': {}, 'skipped': []}
     from sdpfuzz import extract, combo_ps
     progs = {}
@@ -398,6 +399,7 @@ def main():
     ap.add_argument('--variant', default='base', choices=sorted(VARIANTS), help='parameter set (VARIANTS)')
     ap.add_argument('--salts', help='JSON {hash: salt}: another seed for those programs (permcover.py)')
     ap.add_argument('--perturb', type=float, default=0.0, help='scale every float input by 1 + eps * u (conditioning run)')
+    ap.add_argument('--perturb-seed', type=int, default=0, help='another draw of the perturbation (0: the default one)')
     a = ap.parse_args()
     only = set(a.only.split(',')) if a.only else None
     if a.programs:
@@ -405,7 +407,7 @@ def main():
     if a.shard:
         SHARD['k'], SHARD['n'] = map(int, a.shard.split('/'))
     m = build(a.sdp, a.asm, a.sdp2dksh, a.out, a.per_capture, a.size, only, a.perturb,
-              json.load(open(a.salts)) if a.salts else None, a.variant)
+              json.load(open(a.salts)) if a.salts else None, a.variant, a.perturb_seed)
     print(f"perm: {m['programs']} programs in {len(m['captures'])} captures, {len(m['skipped'])} skipped")
     return 0
 
