@@ -166,6 +166,11 @@ int main(int argc, char** argv) {
         snprintf(sum, sizeof sum, "nx_render d3d9: frames %u, draws %u, skipped %u, clears %u, programs %u, textures %u, images %u%s%s\n",
                  st.frames, st.draws, st.skipped, st.clears, st.shaders, st.textures, g_images,
                  st.skipped ? "; first skip: " : "", st.firstSkip);
+        if (st.flushes) {          // frames submitted in parts (the per-frame arena or command buffer was full)
+            size_t l = strlen(sum);
+            if (l && sum[l - 1] == '\n') sum[--l] = 0;
+            snprintf(sum + l, sizeof sum - l, "; mid-frame flushes %u\n", st.flushes);
+        }
         uint32_t fam = 0;
         for (int f = 1; f < 8; f++) fam += st.familyDraws[f];
         if (nativeDir || fam) {    // native path: shaders and draws that ran our hand-written GLSL instead of the translation

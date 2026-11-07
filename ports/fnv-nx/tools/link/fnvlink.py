@@ -80,6 +80,17 @@ DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup n
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
 GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit'}
 ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
+FUNC_SPANS = ([], [])   # sorted starts and their ends of units.json functions with a size (set by resolve)
+
+
+def inside_function(a):
+    """True when a lies strictly inside a function units.json places (start < a < start + size): not a function
+    start, so a FUN_<a> name cannot name one (R1: FnvString::FUN_0044aa30 / FUN_0044ab60 inside ResizeBuffer
+    0x0044aa10)."""
+    import bisect
+    starts, ends = FUNC_SPANS
+    j = bisect.bisect_right(starts, a) - 1
+    return j >= 0 and starts[j] < a < ends[j]
 # prepare rule GAME1 (D13): a Win32-looking name a unit binds to game code is spelled fnvnx_game_<name>; the unit's
 # recipe still names it <name>, so the lookup strips the prefix (the unit's binding decides: game code or an IAT slot)
 GAME_PREFIX = 'fnvnx_game_'
@@ -291,6 +302,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     tree = os.path.dirname(os.path.dirname(os.path.abspath(units_json)))   # <tree>/build/units.json
     renames = load_renames(UNITS_RENAMES if units_renames is None else units_renames, tree)
     units = load_units(units_json, renames, pre_stats)
+    spans = sorted({(a, a + sz) for u in units.values() for a, sz in u.sizes.items() if sz})
+    FUNC_SPANS[0][:] = [a for a, _ in spans]
+    FUNC_SPANS[1][:] = [e for _, e in spans]
     for line in open(objects_tsv):
         f = line.rstrip('\n').split('\t')
         if len(f) >= 3 and f[2] == 'ok' and f[0] in units:
@@ -2638,7 +2652,9 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
         if un in anydef:
             return 'native', None, None, None, None
         m = ADDR_IN_NAME.match(isig.qual[-1]) if isig.qual else None
-        if m:  # Ghidra-style name carrying its address: right for 99.6 % of the names units.json binds (LINK.md)
+        if m and not (m.group(0).startswith('FUN_') and inside_function(int(m.group(1), 16))):
+            # Ghidra-style name carrying its address: right for 99.6 % of the names units.json binds (LINK.md);
+            # never an address inside another placed function (not a function start)
             return 'addr', 'name-addr', int(m.group(1), 16), None, None
         if ident is not None and isig.kind in ('data', 'cname') and isig.qual and ident.get(isig.qual[-1]):
             a_ = ident[isig.qual[-1]]

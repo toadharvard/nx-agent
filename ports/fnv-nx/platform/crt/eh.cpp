@@ -22,6 +22,7 @@
 #include "fnvnx_msvc_cpp.h"
 
 #include <cxxabi.h>
+#include <exception>
 #include <ios>
 #include <stdexcept>
 #include <string>
@@ -307,3 +308,7 @@ extern "C" void fnvnx_cxx_throw_exception(void *obj, void *throw_info)
         os_debug_print("[fnvnx] _CxxThrowException: unknown ThrowInfo, only catch (...) will see this exception");
     throw fnvnx_msvc_exception{ obj, throw_info };
 }
+
+/* std::uncaught_exception() of MSVC's libcpmt (0x00ec3241, crt_symbols.tsv): the game's throws are GCC throws
+ * (_CxxThrowException above), so the Itanium count of exceptions in flight is the answer. */
+extern "C" bool fnvnx_uncaught_exception(void) { return std::uncaught_exceptions() > 0; }

@@ -73,6 +73,11 @@ case "${D3D9:-null}" in
 	external) ;;
 	*) echo "D3D9 must be null or external"; exit 1 ;;
 esac
+# LINK_OVERRIDES=render (libnxrender.a in EXTRA_OBJS): native_device.cpp starts nx::Renderer when the null device's
+# CreateDevice succeeds (the weak hook fnvnx_d3d9_device_created; without it the replaced entry points draw nothing)
+case " ${EXTRA_OBJS:-} " in
+	*libnxrender.a\ *) SRCS+=("$TC/game/native_device.cpp") ;;
+esac
 SRCS+=("$ROOT"/loader/src/*.c)
 # S10 startup: initializer runner and the MSVC onexit table, plus the generated table (as objects: xc.c
 # references the table weakly, an archive member would not be pulled)
@@ -100,6 +105,7 @@ for f in "${SRCS[@]}"; do
 		*/audio/vorbisfile.cpp) extra="$VFLAGS" ;;
 		*/loader/src/*) extra="-I$ROOT/loader/include -I$ROOT/loader/src" ;;
 		*/game/boot.cpp) extra="-I$ROOT/loader/include" ;;
+		*/game/native_device.cpp) extra="-I$ROOT/render/native/include -I$ROOT/render/native/front -I$ROOT/render/native/n1 -fno-exceptions -fno-rtti -fno-threadsafe-statics" ;;
 		*/game/null_d3d9.cpp) extra="-USTDMETHODCALLTYPE -include $ROOT/shim/include/fnvnx_compat.h -I$SSE2NEON -fms-extensions -fpermissive" ;;
 		*/render/nine/d3dx/*) extra="-USTDMETHODCALLTYPE -include $ROOT/shim/include/fnvnx_compat.h -I$SSE2NEON -fno-exceptions -fno-rtti -fno-threadsafe-statics" ;;
 	esac
