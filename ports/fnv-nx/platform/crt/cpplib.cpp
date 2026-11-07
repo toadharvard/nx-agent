@@ -275,10 +275,13 @@ extern "C" void fnvnx_cpplib_facet_tidy(void)
     }
 }
 
-/* ---- _Locinfo: the port's C library locale is always "C" */
-extern "C" void fnvnx_locinfo_ctor(void *self, const char *locname)
+/* ---- _Locinfo: the port's C library locale is always "C".
+ * _Locinfo_ctor(_Locinfo *, const string &): the exe passes the locale name as a VC9 std::string by reference (R2:
+ * the byte-matched 0x00ad3ca0 does), so the name is read through its c_str() (inline when _Myres < 16, else heap). */
+extern "C" void fnvnx_locinfo_ctor(void *self, const void *locname_str)
 {
     locinfo *p = (locinfo *)self;
+    const char *locname = locname_str ? ((const string *)locname_str)->c_str() : nullptr;
     p->_Oldlocname.assign_short("C");
     const char *n = "*"; /* setlocale failed */
     if (locname && (!*locname || !strcmp(locname, "C")))
