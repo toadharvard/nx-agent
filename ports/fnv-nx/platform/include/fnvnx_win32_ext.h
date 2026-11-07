@@ -124,6 +124,11 @@ typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
 /* Win32 export table: implementation of a DLL import by name (for IAT slots resolved from the exe) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
+/* A constant of the player's exe that the loader left unmapped (MSVC put some .rdata-like constants, e.g.
+ * dinput8.lib's GUID_XAxis..GUID_Key, into .text; the port maps the image's data sections only): its bytes, read
+ * from the exe file into buf (n bytes), else p itself (a mapped address, or no image). toolchain/game/boot.cpp
+ * defines it; the weak default in platform/win32/module.cpp returns p. */
+const void *fnvnx_image_const(const void *p, uint32_t n, void *buf);
 /* An import slot of the exe, as the loader hands it over: by name (ordinal == FNVNX_IMPORT_BY_NAME, the loader's
  * FNVNX_BY_NAME) or by ordinal (name NULL). NULL: no export (the slot stays 0). */
 #define FNVNX_IMPORT_BY_NAME 0xffffffffu
