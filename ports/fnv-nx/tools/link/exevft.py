@@ -232,6 +232,28 @@ def leaf_constant(path, addr):
     return None
 
 
+_FLAGS_TEST = re.compile(
+    rb'\xf6\x44\x24[\x04-\x20]\x01|\xf6\x45\x08\x01|\xf6[\xc0-\xc7]\x01|\xa8\x01|\x8b\x45\x08\x83\xe0\x01|'
+    rb'\x8b\x44\x24[\x04-\x20]\x83\xe0\x01')
+
+
+def deleting_dtor(path, addr):
+    """True when the x86 function at addr has the shape of MSVC's deleting destructor `??_G(flags)`: it returns
+    with `ret 4` (thiscall, one stack argument) and tests bit 0 of that argument before (`test byte [esp+n], 1`,
+    `test r8, 1`, `test al, 1`, or the /Od `mov eax, [ebp+8]; and eax, 1`). On link 9f865b0a it recognises 121 of
+    the address map's 132 kind-G addresses; used for exe slot 0 only (D26 c), where the prior is high."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return False
+    if off is None:
+        return False
+    b = data[off:off + 0x400]
+    i = b.find(b'\xc2\x04\x00')
+    return i > 0 and _FLAGS_TEST.search(b[:i]) is not None
+
+
 def thunk(path, addr):
     """(adjustment, target) of an MSVC thunk at addr: `sub ecx, imm8|imm32; jmp rel32` (an adjustor thunk of a
     secondary vftable: this -= imm), `add ecx, imm8; jmp rel32` (this += imm: a negative adjustment) or a plain
