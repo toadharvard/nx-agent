@@ -54,12 +54,14 @@ bytecode --> front end (frontend.c) --> reflection JSON / CTAB    <- stable
   driver UBO; `def` constants used with relative addressing become GLSL `const` arrays (uam rejects
   default-block uniforms).
 * **Numerics** (D3D9 leaves them implementation-defined): `rcp`/`rsq`/`log` of 0, `nrm` of a zero vector and
-  `lit` with a zero exponent follow WineD3D (wine 9's GLSL: IEEE infinities, `nrm(0)` = the source, `lit` z = 0
-  for w = 0), the reference of the S16 sweeps, which render the original game under Wine; this is the default
+  `lit` where D3D9's pseudo-code and the implementations part follow WineD3D (wine 9's GLSL: IEEE infinities,
+  `nrm(0)` = the source, `lit` z = `w == 0 ? 0 : pow(max(0, y) * step(0, x), clamp(w, -128, 128))`), the reference of the S16 sweeps, which render the original game under Wine; this is the default
   and what the game ships. `--numerics nine` (or `FNVNX_NUMERICS=nine`; flag `FNVNX_SHADER_NUMERICS_NINE`)
   selects Gallium Nine's clamped results instead, for V6n's oracle (`v6n_nine` on softpipe): the s6b exec
   scenes and `render/verify/shaders/{parity,sdpfuzz,vsscenes}.py` set it. Both bodies are in the GLSL behind
-  `#ifdef DK_NUMERICS_NINE`. Measured on the sweep's failing programs (S16, sweep 74a18a60420e, local replay): zero
+  `#ifdef DK_NUMERICS_NINE`. Relative constant reads of a shader that defs float constants see the def'd values
+  (`dk_relc`), as WineD3D and Nine load them into the constant file; `texkill` tests xyzw from ps_2_0 on (xyz in
+  ps_1_x), as both do. Measured on the sweep's failing programs (S16, sweep 74a18a60420e, local replay): zero
   set 171 over -> 0, atest 28 -> 1, neg 5 -> 1, large 43 -> 38, no program newly over in any set.
 
 ## API (`include/fnvnx_shaders.h`)
