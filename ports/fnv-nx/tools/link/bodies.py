@@ -1434,21 +1434,36 @@ def load_cnames(refs_tsv):
     return dict(out)
 
 
-def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data):
+def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data, members=None, msvc=None, placed_refs=None):
     """`exe-data`: a placeholder variable the decomp declares and nothing defines or binds (`extern A11MM g_a11mm;`,
     `extern int (__stdcall* LocalIncrement)(void*);`) whose MSVC name (`?g_a11mm@@3UA11MM@@A`: a variable, or `_name`)
     the pristine objects' placed code takes the address of: the exe's word at every such site (exe_call_targets,
     loose: variant units' other stack layouts and the ??_G a vftable slot holds are placed too) gives one image
     data address (is_data). Bound there like any image variable; a function pointer standing for an import gets its
     IAT slot (the same binding as `g_pfnInterlockedIncrement`). Function placeholders (REL32 calls) never bind:
-    a value source the decomp invented has no exe address. -> [Row]"""
+    a value source the decomp invented has no exe address.
+    members: {Itanium name: (canonical qual, units)} of declared-only C++ variables (a static data member
+    `Pt3::ms_kFirstPoint`, a unit namespace's `fnv_00ec15e0::g_movieHeap`), matched to the MSVC data names
+    (`?ms_kFirstPoint@Pt3@@2U1@B`, storage class 2/3) whose parsed qualified name is the same (msvc(name) -> Sig);
+    bound the same way.
+    placed_refs: a set, filled with the names (of cnames and members) that a function units.json places, or a
+    same-object function it reaches (MSVC inlined it there), references in its pristine code, bytes matching or
+    not: the exe has that variable, at an address and with an initial value
+    the pass may not have found. decl-data never gives such a variable zeros (no evidence of the exe's value).
+    -> [Row]"""
     import vslots
-    if not cnames:
+    members = members or {}
+    if not cnames and not members:
         return []
     pats = {n: re.compile(r'^(?:\?%s@@3|_%s$)' % (re.escape(n), re.escape(n))) for n in cnames}
     first = {}
     for n in cnames:
         first.setdefault(n[:1], []).append(n)
+    mlast = collections.defaultdict(list)   # '?<last component>@' -> member names
+    for n, (q, _) in members.items():
+        mlast['?%s@' % q[-1]].append(n)
+    cnames = dict(cnames)
+    cnames.update({n: us for n, (_, us) in members.items()})
     by_obj = collections.defaultdict(set)
     of = {}
     for i in range(len(udata)):
@@ -1468,6 +1483,37 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data):
                 if pats[n].match(nm):
                     by_obj[i].add(nm)
                     of[nm] = n
+            if msvc is not None and nm.startswith('?') and '@' in nm:
+                for n in mlast.get(nm[:nm.index('@') + 1], ()):
+                    sg = msvc(nm)
+                    if sg.kind == 'data' and tuple(sg.qual) == tuple(members[n][0]):
+                        by_obj[i].add(nm)
+                        of[nm] = n
+    if placed_refs is not None:   # referenced by code the exe has (a placed function's relocations)
+        for i, ms_ in sorted(by_obj.items()):
+            try:
+                c = vslots.Coff(os.path.join(msvc_objs, 'u%d.obj' % i))
+            except Exception:
+                continue
+            body = {}   # defined function -> names its code references
+            for fname, si in c.defs.items():
+                sy = c.syms[si]
+                if sy.secnum <= 0 or sy.storage not in (2, 3) or not c.secs[sy.secnum].flags & IMAGE_SCN_CNT_CODE:
+                    continue
+                ends = [v for v, _ in c.symbols_in(sy.secnum) if v > sy.value]
+                end = min(ends) if ends else len(c.section_bytes(sy.secnum))
+                body[fname] = {sn for off, (sn, _) in c.relocs(sy.secnum).items() if sy.value <= off < end}
+            # placed functions and what they reach in the object (MSVC inlined those callees into exe code)
+            todo = [f['symbol'] for f in udata[i].get('functions', ()) if f['symbol'] in body]
+            reached = set()
+            while todo:
+                f_ = todo.pop()
+                if f_ in reached:
+                    continue
+                reached.add(f_)
+                todo += [x for x in body[f_] if x in body and x not in reached]
+            for f_ in reached:
+                placed_refs.update(of[x] for x in body[f_] & ms_)
     exe = Pe(exe_path)
     seen = collections.defaultdict(collections.Counter)
     via = {}
@@ -1485,6 +1531,31 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data):
         rows.append(Row(n, 'exe-data', a, ADDR_SYM % a, ','.join(sorted(cnames[n])),
                         '%s at %d site(s) in the exe' % (via[n], nsite), None))
     return rows
+
+
+EXE_VAR_NOTE = 'placed exe code references it, its exe address was not found: no zeros without evidence'
+
+
+def pristine_data_names(objdir, nunits, lasts):
+    """Undefined external `?<last>@...` names in the pristine objects, for every <last> in lasts (the MSVC names
+    exe_data_pass may match to a declared-only C++ variable; demangled once, before the pass)."""
+    import vslots
+    out = set()
+    pre = {'?%s@' % x for x in lasts}
+    for i in range(nunits):
+        p = os.path.join(objdir, 'u%d.obj' % i)
+        if not os.path.exists(p):
+            continue
+        try:
+            c = vslots.Coff(p)
+        except Exception:
+            continue
+        for sy in c.syms.values():
+            nm = sy.name
+            if sy.secnum == 0 and sy.storage == 2 and nm.startswith('?') and '@' in nm and \
+                    nm[:nm.index('@') + 1] in pre:
+                out.add(nm)
+    return out
 
 
 GDEL_SYM = '__fnvnx_bdgd_%08x'
@@ -1611,25 +1682,39 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                     load_native_names(os.path.join(out, 'addrmap.tsv')))
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
 
+    exe_vars = set()   # variables placed exe code references whose address exe-data did not find
     if msvc_objs and exe_path:
         rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
                         load_providers(os.path.join(out, 'addrmap.tsv')))
         # placeholder variables the exe's code addresses: bound to that image address (before decl-data)
         have_ = {r.name for r in rows}
-        rows += [r for r in exe_data_pass({n: us for n, us in load_cnames(os.path.join(out, 'refs.tsv')).items()
-                                           if n not in have_}, exe_path, msvc_objs,
-                                          json.load(open(units_json))['units'], fnvlink.is_data_addr)
-                 if r.name not in have_]
+        # declared-only C++ variables (static data members, unit namespaces' globals) the same way, before decl-data
+        mem = {r.name: (tuple(itanium(r.name).qual), set(r.units.split(','))) for r in rows
+               if r.cls == 'missing' and r.note.startswith('not a function') and r.units and itanium(r.name).qual}
+        if mem:
+            ms.need(pristine_data_names(msvc_objs, len(unit_names), {q[-1] for q, _ in mem.values()}))
+        got_ = exe_data_pass({n: us for n, us in load_cnames(os.path.join(out, 'refs.tsv')).items()
+                              if n not in have_}, exe_path, msvc_objs, json.load(open(units_json))['units'],
+                             fnvlink.is_data_addr, mem, msvc, exe_vars)
+        bym_ = {r.name: r for r in got_ if r.name in mem}
+        rows = [bym_[r.name] if r.name in bym_ else r for r in rows]
+        rows += [r for r in got_ if r.name not in have_]
+        exe_vars -= {r.name for r in got_}
     if synth:   # its stubs are emitted with the synthesized objects
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
         # variables declared and defined nowhere, without an exe address: a typed zero definition (decl-data)
-        rows = [r._replace(cls='decl-data', host=sorted(r.units.split(','))[0],
+        # never for a variable code the exe has references (exe_vars): its address and initial value are the exe's,
+        # not found here, so zeros would hide a gap; it stays missing (a visible data trap)
+        rows = [r._replace(note=r.note + '; %s' % EXE_VAR_NOTE) if r.name in exe_vars and r.cls == 'missing' else
+                r._replace(cls='decl-data', host=sorted(r.units.split(','))[0],
                            note='zero-initialized definition of the declared variable (no exe address)')
                 if r.cls == 'missing' and r.note.startswith('not a function') and r.units and
                 data_line(itanium(r.name).qual) else r for r in rows]
         have_ = {r.name for r in rows}
         for n, us in sorted(load_cdata(os.path.join(out, 'refs.tsv')).items()):
+            if n in exe_vars:   # stays unresolved (a data trap), as without decl-data
+                continue
             if n not in have_ and data_line([n]):
                 rows.append(Row(n, 'decl-data', None, None, ','.join(sorted(us)),
                                 'zero-initialized definition of the declared variable (no exe address)', sorted(us)[0]))

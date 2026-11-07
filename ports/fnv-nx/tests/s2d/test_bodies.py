@@ -632,8 +632,10 @@ class Exe(unittest.TestCase):
         obj = coff({'?f@@YAXXZ': (bytes(v), {7: ('?g_mm@@3UMM@@A', 0x06), 13: '?Free@MM@@QAEXPAX@Z'}),
                     '??_GC@@UAEPAXI@Z': (gd, {4: ('?g_mm2@@3UMM@@A', 0x06), 9: '?Free@MM@@QAEXPAX@Z'}),
                     '?s@@YAXXZ': (st, {4: '_stub_a', 10: '?Free@MM@@QAEXPAX@Z'}),
-                    '?t@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)}), '?t2@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)})},
-                   ['?g_mm@@3UMM@@A', '?g_mm2@@3UMM@@A', '?Free@MM@@QAEXPAX@Z', '_stub_a', '?g_two@@3HA'])
+                    '?t@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)}), '?t2@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)}),
+                    '?t3@@YAXXZ': (two, {4: ('?ms_k@Pt@@2U1@B', 0x06)})},
+                   ['?g_mm@@3UMM@@A', '?g_mm2@@3UMM@@A', '?Free@MM@@QAEXPAX@Z', '_stub_a', '?g_two@@3HA',
+                    '?ms_k@Pt@@2U1@B'])
         F, GD, S, T, T2, VFT, FREE, STUB = 0x401000, 0x401040, 0x401080, 0x4010c0, 0x4010e0, 0x401100, 0x401140, 0x401180
         MM, TWO = 0x5f6238, 0x5f7000
         text = bytearray(b'\xcc' * 0x200)
@@ -654,9 +656,13 @@ class Exe(unittest.TestCase):
             struct.pack_into('<I', text, at + 4, word)
         struct.pack_into('<II', text, 0x100, GD, F)           # the image vftable of C: ??_G, then another slot
         text[0x140] = text[0x180] = 0xc3
+        T3, PTK = 0x4011a0, 0x5f8000   # a static data member's address taken (mov eax, [Pt::ms_k])
+        text[0x1a0:0x1a0 + len(two)] = two
+        struct.pack_into('<I', text, 0x1a4, PTK)
         udata = [{'source': 'src/a.cpp', 'functions': [
             {'symbol': '?f@@YAXXZ', 'address': '%x' % F}, {'symbol': '?s@@YAXXZ', 'address': '%x' % S},
-            {'symbol': '?t@@YAXXZ', 'address': '%x' % T}, {'symbol': '?t2@@YAXXZ', 'address': '%x' % T2}],
+            {'symbol': '?t@@YAXXZ', 'address': '%x' % T}, {'symbol': '?t2@@YAXXZ', 'address': '%x' % T2},
+            {'symbol': '?t3@@YAXXZ', 'address': '%x' % T3}],
             'symbols': {'??_7C@@6B@': '%x' % VFT}}]
         self.assertTrue(bodies.same_shape(bytes(v), f))
         self.assertFalse(bodies.same_shape(b'\x8b\x45\x08\xc3', b'\x8b\x4d\x08\xc3'))   # another register
@@ -669,9 +675,21 @@ class Exe(unittest.TestCase):
             strict = bodies.exe_call_targets(d, 0, udata[0], {'?g_mm@@3UMM@@A'}, exe, search=True)
             self.assertEqual(dict(strict), {})                        # bytes differ: not placed without loose
             cn = {'g_mm': {'src/b.cpp'}, 'g_mm2': {'src/b.cpp'}, 'stub_a': {'src/b.cpp'}, 'g_two': {'src/b.cpp'}}
-            rows = bodies.exe_data_pass(cn, os.path.join(d, 'x.exe'), d, udata, lambda a: a >= 0x500000)
+            pr = set()
+            rows = bodies.exe_data_pass(cn, os.path.join(d, 'x.exe'), d, udata, lambda a: a >= 0x500000,
+                                        placed_refs=pr)
+            # placed code references g_two (its sites disagree): decl-data must never give it zeros
+            self.assertIn('g_two', pr)
+            self.assertIn('g_mm', pr)
+            # declared-only C++ variables: matched by the parsed qualified name of the MSVC data name
+            msvc, _ = tables({'?ms_k@Pt@@2U1@B', '?g_two@@3HA'}, set())
+            mem = {'_ZN2Pt4ms_kE': (('Pt', 'ms_k'), {'src/b.cpp'}), '_ZN2Rt4ms_kE': (('Rt', 'ms_k'), {'src/b.cpp'})}
+            mrows = bodies.exe_data_pass({}, os.path.join(d, 'x.exe'), d, udata, lambda a: a >= 0x500000, mem, msvc)
+            self.assertEqual(bodies.pristine_data_names(d, 1, {'ms_k', 'zz'}), {'?ms_k@Pt@@2U1@B'})
         self.assertEqual({(r.name, r.cls, r.addr, r.target) for r in rows},
                          {('g_mm', 'exe-data', MM, '__fnv_005f6238'), ('g_mm2', 'exe-data', MM, '__fnv_005f6238')})
+        self.assertEqual({(r.name, r.cls, r.addr, r.target, r.units) for r in mrows},
+                         {('_ZN2Pt4ms_kE', 'exe-data', PTK, '__fnv_005f8000', 'src/b.cpp')})
         with tempfile.TemporaryDirectory() as d:
             refs = os.path.join(d, 'refs.tsv')
             open(refs, 'w').write('src/a.cpp\tg_mm\tunresolved\t\t\t\t\n'
@@ -773,6 +791,20 @@ class Fold(unittest.TestCase):
                 self.assertEqual((r.cls, r.target), ('template-fold', '__fnv_' + a), n)
             else:
                 self.assertNotEqual(r.cls, 'template-fold', n)
+
+
+class NotInImage(unittest.TestCase):
+    def test_not_in_image(self):
+        """A units.json address outside the image (0x0, 0x14, 0x65: values, not addresses) binds nothing: resolve
+        leaves the reference unresolved (a trap stub), never `__fnv_00000065`."""
+        for a in (0x0, 0x14, 0x65, 0x400fff):
+            self.assertFalse(fnvlink.in_image(a), hex(a))
+        for a in (0x401000, 0x00e9ecc0, 0x011f6238, 0x01272000):
+            self.assertTrue(fnvlink.in_image(a), hex(a))
+        with open(fnvlink.__file__) as fo:
+            src = fo.read()
+        self.assertIn("if addr is not None and cls == 'addr' and not in_image(addr):", src)
+        self.assertLess(src.index("and not in_image(addr):"), src.index("ak = kind_of_addr(addr)"))
 
 
 class UnitTarg(unittest.TestCase):
