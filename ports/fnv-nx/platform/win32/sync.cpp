@@ -66,13 +66,21 @@ static bool cs_spin_acquire(LPCRITICAL_SECTION cs)
 
 extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
 {
-    DWORD me = w32_self()->tid;
+    struct w32_thread *self = w32_self();
+    DWORD me = self->tid;
     if (__atomic_load_n(&cs->OwningThread, __ATOMIC_RELAXED) == tid_handle(me)) {
         cs->RecursionCount++;
         return;
     }
-    if (!os_trylock(cs_lock(cs)) && !cs_spin_acquire(cs))
-        os_lock(cs_lock(cs));
+    if (!os_trylock(cs_lock(cs)) && !cs_spin_acquire(cs)) {
+        if (__builtin_expect(w32_wg_on, 0)) {   /* the wait-graph watchdog (waitgraph.cpp) */
+            w32_wg_cs_begin(self, cs, (uint32_t)(uintptr_t)__builtin_return_address(0));
+            os_lock(cs_lock(cs));
+            w32_wg_end(self);
+        } else {
+            os_lock(cs_lock(cs));
+        }
+    }
     __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_RELAXED);
     cs->RecursionCount = 1;
     cs->LockCount = 0;
@@ -331,6 +339,12 @@ extern "C" BOOL ResetEvent(HANDLE h)
     return TRUE;
 }
 
+DWORD w32_wg_mutex_owner_locked(struct w32_obj *o)
+{
+    struct w32_mutex *m = (struct w32_mutex *)o;
+    return m->count > 0 ? m->owner : 0;
+}
+
 extern "C" BOOL ReleaseMutex(HANDLE h)
 {
     struct w32_mutex *m = (struct w32_mutex *)w32_obj_get(h, W32_MUTEX);
@@ -396,23 +410,29 @@ static void acquire(struct w32_obj *o, DWORD me)
     }
 }
 
-static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms);
+static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t pc);
 
 /* The loading-screen thread (OS_THREAD_BOOST) waits without a timeout only when the loading screen is done
- * (LoadingMenuThread::ThreadProc parks on its semaphore): the CPU boost is off for such a wait. */
-extern "C" DWORD WaitForMultipleObjects(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
+ * (LoadingMenuThread::ThreadProc parks on its semaphore): the CPU boost is off for such a wait.
+ * pc: the game's call site, for the wait-graph watchdog. */
+static DWORD wait_entry(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t pc)
 {
     struct w32_thread *self = w32_self();
     int unboost = self->boost && W32_DW(ms) == INFINITE;
     if (unboost)
         os_cpu_boost(0);
-    DWORD r = wait_multiple(n, hs, all, ms);
+    DWORD r = wait_multiple(n, hs, all, ms, pc);
     if (unboost)
         os_cpu_boost(1);
     return r;
 }
 
-static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
+extern "C" DWORD WaitForMultipleObjects(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
+{
+    return wait_entry(n, hs, all, ms, (uint32_t)(uintptr_t)__builtin_return_address(0));
+}
+
+static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t pc)
 {
     n = W32_DW(n);
     ms = W32_DW(ms);
@@ -434,6 +454,9 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
     }
     uint64_t deadline = ms == INFINITE ? 0 : os_monotonic_ns() + (uint64_t)ms * 1000000ull;
     DWORD res = WAIT_TIMEOUT;
+    int wg = __builtin_expect(w32_wg_on, 0) && ms != 0, recorded = 0;
+    if (wg)
+        w32_wg_prepare(self);
     os_lock(&w32_wait_lock);
     for (;;) {
         if (all) {
@@ -463,6 +486,10 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
                 break;
             left = deadline - now;
         }
+        if (wg && !recorded) {   /* recorded and cleared under w32_wait_lock while objs[] are referenced */
+            w32_wg_obj_begin(self, objs, n, all, ms, pc);
+            recorded = 1;
+        }
         for (DWORD i = 0; i < n; i++) {
             links[i].t = self;
             links[i].next = objs[i]->waiters.next;
@@ -476,10 +503,15 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms)
             links[i].next->prev = links[i].prev;
         }
     }
+    if (recorded)
+        w32_wg_end(self);
     os_unlock(&w32_wait_lock);
     for (DWORD i = 0; i < n; i++)
         w32_obj_unref(objs[i]);
     return res;
 }
 
-extern "C" DWORD WaitForSingleObject(HANDLE h, DWORD ms) { return WaitForMultipleObjects(1, &h, FALSE, ms); }
+extern "C" DWORD WaitForSingleObject(HANDLE h, DWORD ms)
+{
+    return wait_entry(1, &h, FALSE, ms, (uint32_t)(uintptr_t)__builtin_return_address(0));
+}

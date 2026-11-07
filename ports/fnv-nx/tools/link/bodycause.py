@@ -31,7 +31,8 @@ address the native build references but no unit compiles), `thunk` (a this-adjus
 nowhere), `runtime` / `import` / other refs classes as they are. --closed: files of names (one per line, or a JSON
 list) that rules not yet in this link close (measured offline); they are left out.
 
-`fun-addr`: an unresolved C placeholder named after an exe address (`FUN_<addr>`). Every row gets an owner
+`code-defmissing` (`__fnv_<addr>` stubs: callers bound to an address units.json places whose unit emits no
+body; home = the placing unit), `platform` (TLS / runtime data names). `fun-addr`: an unresolved C placeholder named after an exe address (`FUN_<addr>`). Every row gets an owner
 (D23): `recon` (no-body, extern-text, fun-addr: the fleet reconstructs them against the exe) or
 `s2-bodies` (every other class), and a shard: sha1(unit) mod 10 of the unit the body belongs in (extern-text: the
 unit units.json places the address in, else the unit of the placed function before it; otherwise the first
@@ -311,8 +312,15 @@ def other_traps(out, traps, have, tree):
                              'detail': cls + (' %s' % f[3] if len(f) > 3 and f[3] else ''),
                              'evidence': '%08x' % a if a is not None else '', 'home': home})
     for n in sorted(want - seen):
-        rows.append({'name': n, 'units': '', 'cause': 'unreferenced', 'detail': 'no refs.tsv row (synthesized '
-                     'object or platform)', 'evidence': '', 'home': ''})
+        m = re.match(r'^__fnv_([0-9a-f]{8})$', n)
+        if m:   # callers bound to the address (code-defmissing): the placing unit emits no body there
+            a = int(m.group(1), 16)
+            rows.append({'name': n, 'units': '', 'cause': 'code-defmissing', 'detail': 'placed by units.json, '
+                         'no native body at the address', 'evidence': m.group(1), 'home': place.get(a, '')})
+            continue
+        rows.append({'name': n, 'units': '', 'cause': 'platform' if n.startswith(('__fnvnx_', 'g_fake_')) else
+                     'unreferenced', 'detail': 'no refs.tsv row (platform TLS / runtime data)', 'evidence': '',
+                     'home': ''})
     for r, d in zip(rows, demangle([r['name'] for r in rows])):
         r['dem'] = d
     return rows
@@ -359,7 +367,7 @@ def main(argv=None):
         res += other_traps(a.out, traps, {r['name'] for r in res}, a.tree)
     res = [r for r in res if r['name'] not in closed]
     for r in res:
-        r['owner'] = 'recon' if r['cause'] in ('no-body', 'extern-text', 'fun-addr') else 's2-bodies'
+        r['owner'] = 'recon' if r['cause'] in ('no-body', 'extern-text', 'fun-addr', 'code-defmissing') else 's2-bodies'
         r['shard'] = shard_of(r['home'])
     dst = a.output or os.path.join(a.out, 'bodies', 'causes.tsv')
     with open(dst, 'w', encoding='utf-8', errors='surrogateescape') as fh:
@@ -389,9 +397,10 @@ def main(argv=None):
             fh.write('| owner | trap stubs |\n|---|---|\n')
             for k, v in sorted(own.items()):
                 fh.write('| %s | %d |\n' % (k, v))
-            fh.write('\n| recon shard (sha1(home unit) mod 10) | no-body | extern-text + fun-addr | total |\n|---|---|---|---|\n')
+            fh.write('\n| recon shard (sha1(home unit) mod 10) | no-body | extern-text + fun-addr + code-defmissing | total |\n|---|---|---|---|\n')
             for k in range(10):
-                nb, et = sh.get((k, 'no-body'), 0), sh.get((k, 'extern-text'), 0) + sh.get((k, 'fun-addr'), 0)
+                nb = sh.get((k, 'no-body'), 0)
+                et = sh.get((k, 'extern-text'), 0) + sh.get((k, 'fun-addr'), 0) + sh.get((k, 'code-defmissing'), 0)
                 fh.write('| R%d (shard %d) | %d | %d | %d |\n' % (k + 1, k, nb, et, nb + et))
             nh = sum(v for (k, _), v in sh.items() if k == '')
             if nh:
