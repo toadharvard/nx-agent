@@ -11,7 +11,7 @@
   "cell_wine_s": 60,
   "save_timeout": 1200,
   "key_gap": 0.25,
-  "console_log": "user\\s18_console.txt"
+  "console_log": "s18_console.txt"
  },
  "state": [
   "player.getpos x",
@@ -42,7 +42,7 @@
     {
      "do": "console",
      "lines": [
-      "scof {console_log}"
+      "scof \"{console_log}\""
      ]
     },
     {
@@ -77,10 +77,11 @@
      "do": "press",
      "keys": [
       "Down",
+      "Down",
       "Return"
      ],
      "gap": 1.0,
-     "comment": "no saves: New is the first entry"
+     "comment": "the menu lists Continue first even with no save: Down highlights Continue, Down again New (seen on the original under Wine)"
     },
     {
      "do": "wait",
@@ -110,7 +111,7 @@
     {
      "do": "console",
      "lines": [
-      "scof {console_log}",
+      "scof \"{console_log}\"",
       "tgm"
      ]
     },
@@ -254,7 +255,7 @@
     {
      "do": "console",
      "lines": [
-      "scof {console_log}"
+      "scof \"{console_log}\""
      ]
     },
     {
@@ -285,7 +286,7 @@
     {
      "do": "console",
      "lines": [
-      "scof {console_log}"
+      "scof \"{console_log}\""
      ]
     },
     {
@@ -378,7 +379,7 @@
     {
      "do": "console",
      "lines": [
-      "scof {console_log}"
+      "scof \"{console_log}\""
      ]
     },
     {

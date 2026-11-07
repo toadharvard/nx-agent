@@ -22,7 +22,7 @@ WORK=$FARM_HOME/prepare-$C12
 mkdir -p "$FARM_HOME"
 
 SRC=$FARM_HOME/src-$C12
-if [ ! -d "$SRC" ]; then git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" >/dev/null; fi
+bash "$(dirname "$0")/worktree.sh" "$REPO" "$SRC" "$COMMIT" >/dev/null
 P=$SRC/ports/fnv-nx
 bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 

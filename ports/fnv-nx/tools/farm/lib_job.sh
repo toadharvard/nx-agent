@@ -40,7 +40,7 @@ job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and
 			|| { echo "FARM_SRC=$SRC is not at $COMMIT"; exit 1; }
 	else
 		SRC=$FARM_HOME/src-${COMMIT:0:12}
-		if [ ! -d "$SRC" ]; then git -C "$repo" worktree add --detach "$SRC" "$COMMIT" >/dev/null; fi
+		bash "$(dirname "${BASH_SOURCE[0]}")/worktree.sh" "$repo" "$SRC" "$COMMIT" >/dev/null
 	fi
 	P=$SRC/ports/fnv-nx
 	COMMIT=$(git -C "$SRC" rev-parse HEAD)
