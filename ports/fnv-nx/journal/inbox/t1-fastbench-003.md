@@ -46,7 +46,7 @@
   1. Populate the caches. The sweep is item 1's pass: `SWEEP_PROGRAMS=0` sw1..sw36 `sweep <k> 36`. Audit au1..au26
      and equivalence eq1..eq6 run as before, so their caches fill.
   2. Three warm farms, each with tools/orch/farm_prompt.txt: NAME=qk1, qk2, qk3; JOB=quick; ARGS empty;
-     ENVX=` FARM_APT=1`. That is: `setsid nohup flock -n /root/farm.lock env RUNNER_MAX_S=60 RUNNER_KILL_S=86400
+     ENVX=` FARM_APT=1`. That is: `setsid -w nohup flock -n /root/farm.lock env RUNNER_MAX_S=60 RUNNER_KILL_S=86400
      FARM_APT=1 bash /home/user/fnv-nx-build/farm/start.sh qk<k> quick`. The qk name makes the runner persistent
      despite RUNNER_MAX_S=60.
      - The first run on each qk farm sets up everything: Wine + MSVC, the toolchain (~1 h, from

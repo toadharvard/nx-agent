@@ -80,7 +80,8 @@ Rules for every job:
 `bash /home/user/fnv-nx-build/farm/start.sh qk<k> quick`. A `qk<k>` name makes the runner persistent (no exit after
 `RUNNER_MAX_S`; `FARM_DEADLINE` per job), poll every 20 s, and claim each head on branch `quick/claim/quick/<c12>`
 before running it, so the three verify consecutive heads in parallel; a farm restarted mid-job takes its own claim
-again. Start it detached (`setsid nohup bash .../start.sh qk1 quick >~/qk1.out 2>&1 &`) so the session's 2 h
+again. Start it detached (`setsid -w nohup bash .../start.sh qk1 quick >~/qk1.out 2>&1 &`; without `-w` a shell with job
+control makes setsid fork, and `$!` names a parent that exits at once: the sw1 "rc 0 after start" of 2026-11-07) so the session's 2 h
 background limit does not stop it. Every runner holds `$FARM_HOME/<name>.lock`, so the hourly check-in can simply
 run the start command again: a second start exits at once. The quick farms keep their caches local
 (`FUZZ_PUBLISH=0 AUDIT_PUBLISH=0 EQUIV_CACHE_PUBLISH=0`); they are seeded from the sharded farms' cache branches.
