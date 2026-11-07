@@ -26,6 +26,7 @@ and with --frames the instructions between frames (Present calls) of the main th
 first (--root, or DIR/sd without one), and the scenario's own files (s18_*: saves, the scof log) are copied to
 DIR/kept when the summary is written - farm_boot.sh deletes its root after the boot. The summary's root is DIR/kept.
 SCENARIO_PROGRESS_S (default 600; 0 off): tools/perf/emu_progress.py's hang detector, when that file exists.
+SCENARIO_CALLWATCH=<config>: tools/perf/callwatch.py on the game's script-error entry points (private config).
 
 Our own code; it reads emu_guest's state only through the names emu_guest defines.
 """
@@ -307,6 +308,13 @@ def main(argv):
         sys.path.insert(0, os.path.join(P, "tools", "perf"))
         import emu_progress   # noqa: E402
         emu_progress.install(eg, prog)
+    # R4's call watcher (tools/perf/callwatch.py, D25 #10): the game's script / console error entry points from a
+    # private config (game knowledge: never in this repository), logged as "emu: call <kind> caller ... form 0x..."
+    cw = os.environ.get("SCENARIO_CALLWATCH", "")
+    if cw and os.path.isfile(cw) and os.path.isfile(os.path.join(P, "tools", "perf", "callwatch.py")):
+        sys.path.insert(0, os.path.join(P, "tools", "perf"))
+        import callwatch   # noqa: E402
+        callwatch.install(eg, cw)
     return eg.main(rest)
 
 

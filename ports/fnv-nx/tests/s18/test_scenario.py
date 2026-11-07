@@ -274,6 +274,11 @@ def t_report(tmp):
     check("report md: no game text", "SCRIPTS" not in md and "Missing.bsa" not in md and "12/12" in md, md[:400])
     rp = os.path.join(tmp, "rep", "r.json")
     json.dump(r, open(rp, "w"))
+    se = os.path.join(tmp, "rep", "scripterr.json")
+    json.dump({"schema": "fnvnx-scripterr/1", "metric": 4, "distinct": 6, "in_original": 2, "groups": []}, open(se, "w"))
+    r2 = scenario.report(plan, g, w, cmp_, thr, nx1, scripterr=se)
+    check("report: scripterr.py's metric is #10", r2["targets"]["10"]["count"] == 4 and
+          r2["targets"]["10"]["detail"]["source"] == "scripterr.py", str(r2["targets"]["10"]))
     empty = scenario.report(plan, os.path.join(tmp, "nothing"), nx1=nx1)
     m = scenario.metric([r, empty])
     check("metric: targets measured in any scenario", m["measured"] == 12 and m["targets"][1]["measured_in"] == 1, str(m["measured"]))
