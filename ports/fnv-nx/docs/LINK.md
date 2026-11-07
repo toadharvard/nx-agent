@@ -548,6 +548,10 @@ Retries on one host (link 9f865b0a: 78 trap stubs of D23's `special-unresolved:t
   typeinfo or construction vtable names it gets only its typeinfo. Virtual thunks no object defines
   (`_ZTv<fixed>_<vcall>_f`) are generated: `this += fixed`, `this += *(vptr + vcall)`, tail call. A class whose key
   function its unit defines keeps its reason.
+* *What the emitted slot functions name* (`close_emitted`): their code can catch or throw a class whose key
+  function is defined nowhere, or keep a COMDAT typeinfo or vtable that names a base's typeinfo or a virtual thunk.
+  Such a typeinfo is probed on the same host (typeinfo only, the C++ runtime's `std::` classes excepted), thunks
+  are generated, and both are linked into the host's object, round after round for the bases they name.
 
 Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the compiled objects): weak `_ZTV`, `_ZTI`,
 `_ZTS` for names no compiled object defines, and the non-virtual thunks (`_ZTh[n]<k>_f`: `sub`/`add w0`, tail call

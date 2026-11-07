@@ -101,6 +101,9 @@ struct AmbP { virtual void p(); int b; };
 struct AmbD : AmbP, AmbH, AmbS { void h(int *) override; int d; };   /* direct base AmbH repeated: ambiguous */
 struct VB : virtual VT { virtual ~VB() {} int b; };   /* only inline virtuals: its typeinfo comes out where used */
 struct VC : VB { VC(); virtual ~VC(); int c; };
+struct ThrowB { virtual ~ThrowB(); int b; };   /* key function defined nowhere */
+struct ThrowE : ThrowB { };   /* inline-only: its typeinfo comes out with the code that catches it, naming ThrowB's */
+struct EmitT { virtual ~EmitT(); virtual int th() { try { FUN_e1(); } catch (ThrowE &) { return 1; } return 0; } };
 '''
 SRC['src/e.cpp'] = ('#include "e.h"\nvoid FUN_e1() {}\nVT::~VT() {}\nVI::~VI() {}\n'
                     'int catch_e(void (*f)()) { try { f(); } catch (ExcE &e) { return e.code; } return 0; }\n'
@@ -108,9 +111,10 @@ SRC['src/e.cpp'] = ('#include "e.h"\nvoid FUN_e1() {}\nVT::~VT() {}\nVI::~VI() {
                     'PlDel *mk_pl(void *p) { return new (p) PlDel; }\nVS *mk_vs() { return new VS; }\n'
                     'VK *mk_vk() { return new VK; }\nvoid AmbH::h(int *) {}\nvoid AmbP::p() {}\n'
                     'int catch_amb(void (*f)()) { try { f(); } catch (AmbD &e) { return e.d; } return 0; }\n'
-                    'VC::VC() {}\n')
+                    'VC::VC() {}\nEmitT *mk_et() { return new EmitT; }\n')
 EORACLE = '#define FNVNX_ORACLE\n#include "e.h"\nExcE::~ExcE() {}\nFUN_e1::~FUN_e1() {}\nPlDel::~PlDel() {}\n' \
-          'VS::~VS() {}\nconst int &VK::kc(int &r) const { return r; }\nvoid AmbD::h(int *) {}\nVC::~VC() {}\n'
+          'VS::~VS() {}\nconst int &VK::kc(int &r) const { return r; }\nvoid AmbD::h(int *) {}\nVC::~VC() {}\n' \
+          'ThrowB::~ThrowB() {}\n'
 ORACLE = '#include "h.h"\nint Key::k() { return 9; }\nint Root::r() { return 0; }\nInl *mk_inl() { return new Inl; }\n' \
          'struct AbsX : Abs2 { int pure() override { return 1; } int g2() override { return 2; } };\n' \
          'AbsX *mk_absx() { return new AbsX; }\n'
@@ -151,7 +155,7 @@ MANGLED = {'Multi': '5Multi', 'Base1': '5Base1', 'Base2': '5Base2', 'Key': '3Key
 # unit e: the names GCC emits for these classes with their key functions (EORACLE) == the synthesized ones
 E_NAMES = ['_ZTI4ExcE', '_ZTV4ExcE', '_ZTV6FUN_e1', '_ZTI6FUN_e1', '_ZTV5PlDel', '_ZTI5PlDel', '_ZTV2VS', '_ZTT2VS',
            '_ZTC2VS0_2VI', '_ZTI2VS', '_ZTV2VK', '_ZTT2VK', '_ZTI2VK', '_ZTV4AmbD', '_ZTI4AmbD', '_ZTV2VC', '_ZTT2VC',
-           '_ZTC2VC0_2VB', '_ZTI2VC', '_ZTI2VB']
+           '_ZTC2VC0_2VB', '_ZTI2VC', '_ZTI2VB', '_ZTI6ThrowB']
 
 ok = True
 
@@ -285,6 +289,8 @@ def main():
         for n in ('_ZN2VSD1Ev', '_ZN6FUN_e1D1Ev', '_ZN4ExcED1Ev'):   # defined nowhere: never taken from the probe
             check(n not in synth, '%s not defined by the synthesized objects' % n)
         check('_ZTV2VB' not in synth, 'VB (a base named by VC\'s typeinfo): its typeinfo only')
+        # EmitT::th, emitted from unit e, catches ThrowE: ThrowE's COMDAT typeinfo names ThrowB's (close_emitted)
+        check('_ZN5EmitT2thEv' in synth and '_ZTI6ThrowE' in synth, 'EmitT::th emitted with ThrowE\'s typeinfo')
         # S2c-vt item 5: emitted slot functions are game code, compiled with compile.sh's own flags (--print-flags)
         gf = layout.game_flags(tree, os.path.join(out, 'vtables', 'probe'))
         check(any(f.endswith('fnvnx_ftoi.so') for f in gf) and any(f.endswith('fnvnx_order.so') for f in gf) and

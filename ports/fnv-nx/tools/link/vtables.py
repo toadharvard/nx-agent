@@ -1043,6 +1043,82 @@ def decode(d):
     return r
 
 
+def close_emitted(tree, work, objs, defined, stats, rounds=4):
+    """The typeinfo and thunks the emitted slot functions name and no object defines: their code throws or catches
+    classes whose key function is defined nowhere, or keeps a COMDAT typeinfo or vtable (of an inline-only class)
+    that names a base's typeinfo or a virtual thunk GCC emits only next to an out-of-line destructor. Without this
+    each would be a new undefined name (link 9f865b0a's hosts that compile only with HEAD_BARE emit such code).
+    Per host object: thunks generated (emit_thunk), each typeinfo probed on that host (key_group's own copy, else
+    synth_typeinfo; none for the C++ runtime's std:: classes), assembled and linked into the object; repeated for
+    the bases those name. objs: [(host unit, object path)]."""
+    import sigs
+    have = set(defined)
+    for _, path in objs:
+        if os.path.exists(path):
+            o = Obj(path)
+            have |= {n for n in o.defs if o.bind(n) != 'local'}
+    k0 = 1 << 20     # probe class numbers apart from the run's own
+    for _ in range(rounds):
+        need = collections.defaultdict(set)
+        for h, path in objs:
+            if os.path.exists(path):
+                for nm, value, size, typ, bind, shndx in Obj(path).syms:
+                    if nm and not shndx and nm.startswith(('_ZTI', '_ZTv', '_ZTh')) and nm not in have and \
+                            '__cxxabiv1' not in nm and not nm.startswith(('_ZTISt', '_ZTIN9__gnu_cxx')):
+                        need[path, h].add(nm)
+        if not need:
+            return
+        for (path, h), names in sorted(need.items()):
+            text, made = [], set()
+            for n in sorted(x for x in names if not x.startswith('_ZTI')):
+                code = emit_thunk(n)
+                if code:
+                    text.append(code); made.add(n); stats['thunks the emitted code names, generated'] += 1
+            tis = sorted(x for x in names if x.startswith('_ZTI'))
+            dem = demangle(tis)
+            cls = []
+            for n in tis:
+                d = dem.get(n, '')
+                sp = spelling(d[len('typeinfo for '):], sigs.canon_type, sigs.split_qual) \
+                    if d.startswith('typeinfo for ') else None
+                if sp and not sp.startswith(tuple('::' + p for p in ('std::', '__gnu_cxx::', '__cxxabiv1::'))):
+                    cls.append((k0, sp, n))
+                    k0 += 1
+            res = probe_host(tree, work, h, [(k, sp) for k, sp, _ in cls]) if cls else {}
+            for k, sp, n in cls:
+                r = res.get(k)
+                if r is None or r.get('enc') != n[4:]:
+                    stats['typeinfo the emitted code names, not synthesized'] += 1
+                    continue
+                grp = r.get('key_group') or {}
+                if n in grp:
+                    text.append(emit_data(n, grp[n]))
+                else:
+                    ti, _ = synth_typeinfo(r)
+                    if ti is None:
+                        stats['typeinfo the emitted code names, not synthesized'] += 1
+                        continue
+                    text.append(emit_data(n, typeinfo_ents(n[4:], ti)))
+                if '_ZTS' + n[4:] not in have:
+                    text.append(emit_string('_ZTS' + n[4:], n[4:]))
+                made.add(n)
+                stats['typeinfo the emitted code names, synthesized'] += 1
+            have |= names   # tried once: a name that cannot be made is not probed again
+            if not made:
+                continue
+            stem = os.path.join(work, os.path.basename(path)[:-2])
+            s_path, x_o, tmp = stem + '.x.S', stem + '.x.o', stem + '.x.tmp'
+            open(s_path, 'w').write('\n'.join(text) + '\n')
+            r1 = subprocess.run([AS, '-mabi=ilp32', s_path, '-o', x_o], capture_output=True, text=True)
+            r2 = r1.returncode == 0 and subprocess.run([LD, '-m', 'aarch64linux32', '-r', '-o', tmp, path, x_o],
+                                                       capture_output=True, text=True)
+            if r1.returncode or r2.returncode:
+                print('vtables: closing %s failed: %s' % (path, (r1.stderr or r2.stderr)[:500]), flush=True)
+                continue
+            os.replace(tmp, path)
+            have |= made | {'_ZTS' + n[4:] for n in made if n.startswith('_ZTI')}
+
+
 def stale_entry(got, n):
     """A cache.json entry of an older probe version that the current probe_host would answer differently: a class
     it did not name (HEAD_BARE, elaborated names), a polymorphic class without the derived class's vtable
@@ -1305,6 +1381,7 @@ def run(out, tree, jobs=4):
         shutil.copyfile(vt_o, o_path)
     json.dump(newx, open(xcache_path + '.tmp', 'w'))
     os.replace(xcache_path + '.tmp', xcache_path)
+    close_emitted(tree, work, [(h, o_path) for h, _, o_path, _ in built], defined, stats)
     stats['slot functions no object defines'] = len(wanted_all)
     stats['slot functions emitted from the host units'] = len(emitted_all & wanted_all)
     with open(os.path.join(vdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
