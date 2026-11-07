@@ -20,7 +20,8 @@ while :; do
       case "$r" in
         refs/heads/wip/*) wake+=("wip moved: $r");;
         refs/heads/claude/*) b=${r#refs/heads/}
-          notes=$(git diff --diff-filter=A --name-only "origin/$I...origin/$b" -- ports/fnv-nx/journal/inbox/ 2>/dev/null)
+          notes=$(comm -13 <(git ls-tree -r --name-only "origin/$I" -- ports/fnv-nx/journal/inbox/ | sort) \
+                           <(git ls-tree -r --name-only "origin/$b" -- ports/fnv-nx/journal/inbox/ | sort))
           out=$(bash "$H/adopt.sh" "origin/$b" 2>&1); rc=$?
           echo "$(date -u +%FT%TZ) $b rc=$rc $(echo "$out" | head -1)" >> "$ST/log"
           if [ $rc = 3 ]; then key=$(echo "$out" | grep LEFT | sort | md5sum | cut -c1-12); cf="$ST/conflict_${b//\//_}"
