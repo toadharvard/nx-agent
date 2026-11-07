@@ -324,4 +324,88 @@ def r_harness_internal(path, text, stats):
     return ''.join(out)
 
 
-RULES = [r_stand_in_class_bodies, r_harness_internal]
+# ---------------------------------------------------------------------------------------------------------- STAND6
+#
+# STAND2 for a stand-in marked `__declspec(noinline)`, in any unit. STAND2 leaves units compiled with /O1 /O2 /Ox
+# /Ob2 alone because MSVC may have inlined the stand-in there, so the exe may run its body. A noinline definition
+# MSVC never inlined: its callers called the name, and the matcher bound that name to the address another unit
+# decompiles (units.json `symbols`). blk_00c60000_od_o2_nood_variant_rtm_variant.cpp (/O2) defines
+# `__declspec(noinline) P064Quad* bhkWorldObject::FUN_00560e10()` untagged, a probe over `probe_vectors` (declared,
+# defined nowhere); the unit binds its MSVC name to 0x00560e10, whose code (a getter through 0x004ae750 and
+# 0x00560e50) tesobjectrefr.cpp decompiles. GCC compiled the probe body and the link bound its call there, so the
+# guest ran the probe and read a zero placeholder for `probe_vectors`.
+#
+# Gates: an out-of-class member or free definition at namespace scope whose head has `__declspec(noinline)`;
+# untagged; not virtual in the unit (the native vtable stays as it is), not inline / static / a template; every
+# spelling of its MSVC name in the unit's symbols binds an address another unit defines and this unit does not. A
+# member's definition goes (its in-class declaration stays); a free function keeps a declaration. Line numbers stay.
+
+NOINLINE_DEF = re.compile(r'^([ \t]*)((?:[\w:<>,\*&]+[ \t\*&]+)*?)__declspec\s*\(\s*noinline\s*\)[ \t]+'
+                          r'((?:[\w:<>,\*&]+[ \t\*&]+)*?)((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
+                          r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?\{', re.M)
+
+
+def r_noinline_stand_ins(path, text, stats):
+    """STAND6: an untagged noinline definition bound to an address another unit defines (see above)."""
+    if not path.endswith('.cpp') or 'noinline' not in text:
+        return text
+    syms = s1_compile._unit_symbols(path)
+    info = s1_compile._unit_info(path)
+    if not syms or info is None:
+        return text
+    elsewhere = s1_compile._all_unit_functions(path) - info[1]
+    tagged = {int(a, 16) for a in s1_compile.FNV_TAG_ADDR.findall(text)}
+    masked = s1_compile._mask_code(text)
+    spans, edits = None, []
+    for m in NOINLINE_DEF.finditer(text):
+        if masked[m.end() - 1] != '{':
+            continue
+        head = (m.group(2) or '') + ' ' + (m.group(3) or '')
+        if re.search(r'\b(?:inline|__inline|__forceinline|static|virtual|template|friend|FNVNX_KEEP|return|else)\b',
+                     head):
+            continue
+        q = re.sub(r'\s+', '', m.group(4))
+        parts = q.split('::')
+        name = parts[-1]
+        if name in s1_compile.NOT_FUNCTIONS or name in s1_compile.CXX_KEYWORDS or name.startswith('~'):
+            continue
+        if len(parts) >= 2 and name == parts[-2]:
+            continue                                      # constructors: STAND2's business
+        line0 = text.rfind('\n', 0, m.start(2)) + 1
+        before = text[max(0, line0 - 400):line0]
+        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before) or \
+                re.search(r'template\s*<[^;{}]*>\s*$', before):
+            continue
+        if spans is None:
+            spans = prepare.scope_spans(text)
+        chain = prepare.scope_chain(spans, m.start(4))
+        if any(k != 'namespace' for k, _ in chain):
+            continue
+        ns = [h.split()[-1] for _, h in chain if h.split()[-1] != 'namespace']
+        prefix = '?' + '@'.join([name] + list(reversed(parts[:-1])) + list(reversed(ns))) + '@@'
+        bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
+        if not bound or not all(a in elsewhere and a not in tagged for a in bound):
+            continue
+        if re.search(r'\bvirtual\b[^;{}]*[\s\*&]%s\s*\(' % re.escape(name), text):
+            continue
+        o = m.end() - 1
+        c = prepare.match_brace(text, o)
+        nl = '\n' * text.count('\n', m.start(), c)
+        if len(parts) == 1:
+            decl = text[m.start():o].rstrip()
+            edits.append((m.start(), c, decl + '; /* fnv-nx STAND6 */' + nl[decl.count('\n'):]))
+        else:
+            edits.append((m.start(), c, '/* fnv-nx STAND6: %s is the function at the bound address */%s' % (q, nl)))
+    if not edits:
+        return text
+    out, pos = [], 0
+    for a, b, r in sorted(edits):
+        if a < pos:
+            continue
+        out.append(text[pos:a]); out.append(r); pos = b
+        stats['STAND6'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+
+RULES = [r_stand_in_class_bodies, r_harness_internal, r_noinline_stand_ins]
