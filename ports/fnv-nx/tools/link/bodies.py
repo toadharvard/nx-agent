@@ -54,6 +54,10 @@ in this order (first that applies):
    defines nothing there: a `??_G` scalar deleting destructor (no GCC counterpart: `gdel_line` defines
    `__fnv_<addr>(C *, unsigned)` in the placing unit), or an inline body GCC did not emit (the unit compiled with
    -fkeep-inline-functions; the one emitted symbol the MSVC name's relaxed key pairs; `__fnv_<addr>: b` to it).
+5d. `decl-data` - a variable the units declare and nothing defines, with no exe address (a static member
+   `not a function`, or an unmangled name refs.tsv leaves `unresolved`: a decomp placeholder global): its
+   zero-initialized definition with the declared type in the first referencing unit (data_line). What the guest
+   link's 4 KiB data stub stood for, now sized and typed; a function or an untyped name falls back to missing.
 5a. `thunk` - a this-adjusting thunk (`_ZTh<off>_f`, `_ZTv<off>_n<vcall>_f`) refs.tsv leaves undefined
    (`special-unresolved`): GCC emits thunks only with f's definition, and f is bound by address or synthesized.
    A weak AArch64 thunk adjusts w0 (and adds the vcall offset from the vtable) and tail-calls f by name.
@@ -213,6 +217,30 @@ def default_line(kind, isig):
             'dtor': '%s::~%s() = default;' % (sp, base),
             'd0': '%s::~%s() = default;' % (sp, base),
             'assign': '%s &%s::operator=(const %s &) = default;' % (sp, sp, sp)}[kind]
+
+
+def data_line(qual):
+    """`decl-data`: a variable the units declare and nothing defines, with no exe address: its definition,
+    zero-initialized, with the declared type (`decltype(N::x) N::x {};`; a global unqualified). None for a name
+    it cannot spell (template, anonymous); GCC refuses a function, an array of unknown bound, a type without a
+    default value, and the line falls back to `missing`."""
+    if not qual or any('<' in p or '{' in p or '`' in p or "'" in p or '(' in p or ' ' in p for p in qual):
+        return None
+    q = '::'.join(qual)
+    return 'decltype(%s) %s {};' % (q, q)
+
+
+def load_cdata(refs_tsv):
+    """Unmangled names refs.tsv leaves `unresolved` (C or namespace-scope variables, decomp placeholders) that are
+    not named after an address -> {name: set(referencing units)}."""
+    out = collections.defaultdict(set)
+    if refs_tsv and os.path.exists(refs_tsv):
+        for line in open(refs_tsv, encoding='utf-8', errors='surrogateescape'):
+            f = line.rstrip('\n').split('\t')
+            if len(f) >= 3 and f[2] == 'unresolved' and not f[1].startswith(('_Z', '__', '.', '$')) and \
+                    re.match(r'^[A-Za-z_]\w*$', f[1]) and not re.search(r'[0-9a-fA-F]{8}$', f[1]):
+                out[f[1]].add(f[0].split('#')[0])
+    return dict(out)
 
 
 SCALARS = re.compile(r'^(?:(?:un)?signed |const |volatile )*(?:void|bool|char|short|int|long|long long|__int64|'
@@ -661,6 +689,8 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
         for k, r in enumerate(sorted(rows, key=lambda r: r.name)):
             if r.cls == 'exe-sret':
                 line = sret_line(itanium(r.name), r.addr, r.note.startswith('sret this'))
+            elif r.cls == 'decl-data':
+                line = data_line(itanium(r.name).qual)
             else:
                 line = default_line(special_of(itanium(r.name)), itanium(r.name))
             if line in {it[2] for it in items}:
@@ -1373,6 +1403,16 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     if synth:   # its stubs are emitted with the synthesized objects
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
+        # variables declared and defined nowhere, without an exe address: a typed zero definition (decl-data)
+        rows = [r._replace(cls='decl-data', host=sorted(r.units.split(','))[0],
+                           note='zero-initialized definition of the declared variable (no exe address)')
+                if r.cls == 'missing' and r.note.startswith('not a function') and r.units and
+                data_line(itanium(r.name).qual) else r for r in rows]
+        have_ = {r.name for r in rows}
+        for n, us in sorted(load_cdata(os.path.join(out, 'refs.tsv')).items()):
+            if n not in have_ and data_line([n]):
+                rows.append(Row(n, 'decl-data', None, None, ','.join(sorted(us)),
+                                'zero-initialized definition of the declared variable (no exe address)', sorted(us)[0]))
 
     synth_rows, failed, vnotes = [], {}, {}
     if synth:
@@ -1382,7 +1422,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         layout.game_flags(tree, work)   # compile.sh --print-flags (plugins built) once, before the threads; no fallback
         by_host = collections.defaultdict(lambda: collections.defaultdict(list))
         for r in rows:
-            if r.cls in ('special-default', 'msvc-inline', 'exe-sret') and r.host:
+            if r.cls in ('special-default', 'msvc-inline', 'exe-sret', 'decl-data') and r.host:
                 by_host[r.host][r.cls == 'msvc-inline'].append(r)
         jobs_ = [(h, inl, rs) for h, d in sorted(by_host.items()) for inl, rs in sorted(d.items())]
 
@@ -1580,7 +1620,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
               for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'tree-inline',
-                        'exe-sret', 'thunk', 'addr-host', 'special-default', 'crt-rule', 'missing')]
+                        'exe-sret', 'thunk', 'addr-host', 'decl-data', 'special-default', 'crt-rule', 'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))

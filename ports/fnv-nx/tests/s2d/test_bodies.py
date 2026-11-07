@@ -761,5 +761,31 @@ class AddrHost(unittest.TestCase):
             self.assertNotIn('"__fnv_004459e0":', asm)
 
 
+
+class DeclData(unittest.TestCase):
+    def test_data_line(self):
+        """A global, a namespace or class member get a typed zero definition; a template member does not;
+        refs.tsv's unresolved C names load except address-named ones and mangled names."""
+        self.assertEqual(bodies.data_line(['g_count']), 'decltype(g_count) g_count {};')
+        self.assertEqual(bodies.data_line(['C', 's_n']), 'decltype(C::s_n) C::s_n {};')
+        self.assertIsNone(bodies.data_line(['L<int>', 's_n']))
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\twblk_u\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\tFUN_00401000\tunresolved\t\t\t\t\n'
+                                  'src/a.cpp\t_ZN1A1fEv\tunresolved\t\t\t\t\n'
+                                  'src/b.cpp\twblk_u\tunresolved\t\t\t\t\n')
+            self.assertEqual(bodies.load_cdata(refs), {'wblk_u': {'src/a.cpp', 'src/b.cpp'}})
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                src = os.path.join(d, 'd.cpp')
+                open(src, 'w').write('extern float wblk_u[4]; struct C { static int s_n; };\n' +
+                                     bodies.data_line(['wblk_u']) + '\n' + bodies.data_line(['C', 's_n']) + '\n')
+                r = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 'd.o')], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-400:])
+                nm = subprocess.run(['nm', '-S', os.path.join(d, 'd.o')], capture_output=True, text=True).stdout
+                self.assertRegex(nm, r'00000010 B wblk_u')
+
+
 if __name__ == '__main__':
     unittest.main()
