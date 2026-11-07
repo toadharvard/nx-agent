@@ -62,6 +62,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -300,6 +301,16 @@ def drive_wine(plan, profile, progress, xdo="xdotool", sleep=time.sleep, now=tim
         if w:
             subprocess.run([xdo, "windowfocus", "--sync", w[-1]], capture_output=True)
 
+    def shot(k, name):
+        """the screen at a mark (SCENARIO_SHOTS dir; xwd and convert; game-derived: private results only)"""
+        d = os.environ.get("SCENARIO_SHOTS")
+        if not d or not shutil.which("xwd") or not shutil.which("convert"):
+            return
+        os.makedirs(d, exist_ok=True)
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+        subprocess.run(f"xwd -root -silent | convert xwd:- -alpha off png24:{d}/{k:04d}_{safe}.png", shell=True,
+                       capture_output=True)
+
     for k, st in enumerate(plan["steps"]):
         op = st["op"]
         if op == "press":
@@ -322,6 +333,7 @@ def drive_wine(plan, profile, progress, xdo="xdotool", sleep=time.sleep, now=tim
                     sleep(2)
         elif op == "mark":
             rec["marks"].append({"name": st["name"], "step": k, "t_s": round(now() - t0, 1)})
+            shot(k, st["name"])
         rec["steps_done"] = k + 1
         if op == "mark":
             save()

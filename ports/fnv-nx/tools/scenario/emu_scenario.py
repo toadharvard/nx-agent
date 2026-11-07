@@ -146,7 +146,7 @@ def find_file(root, rel):
     return None
 
 
-def install(eg, plan, out_dir, frames):
+def install(eg, plan, out_dir, frames, game_dir=None):
     """patch emu_guest.Emu: the input feed, the step checks, the summary"""
     Emu = eg.Emu
     drv = Driver(plan)
@@ -239,6 +239,12 @@ def install(eg, plan, out_dir, frames):
                     rel = os.path.relpath(os.path.join(d, f), root)
                     os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
                     shutil.copy2(os.path.join(d, f), os.path.join(dst, rel))
+        # the game's own directory (--game, mounted at sdmc:/switch/fnv): the console's scof file lands at its top
+        if game_dir and os.path.isdir(game_dir):
+            for f in os.listdir(game_dir):
+                if f.lower().startswith("s18_") and os.path.isfile(os.path.join(game_dir, f)):
+                    os.makedirs(os.path.join(dst, "switch", "fnv"), exist_ok=True)
+                    shutil.copy2(os.path.join(game_dir, f), os.path.join(dst, "switch", "fnv", f))
         os.makedirs(dst, exist_ok=True)
         return dst
 
@@ -299,8 +305,13 @@ def main(argv):
         seed = os.path.join(out, "seed")
         if os.path.isdir(seed):
             shutil.copytree(seed, root, dirs_exist_ok=True)
+    game = next((rest[i + 1] for i, a in enumerate(rest[:-1]) if a == "--game"), None)
+    if game and os.path.isdir(game):   # an earlier run's files at the game's top level must not count for this one
+        for f in os.listdir(game):
+            if f.lower().startswith("s18_") and os.path.isfile(os.path.join(game, f)):
+                os.remove(os.path.join(game, f))
     import emu_guest as eg   # noqa: E402  (tests/s5, or SCENARIO_EMU_DIR)
-    install(eg, plan, out, ours["frames"])
+    install(eg, plan, out, ours["frames"], game)
     # R4's hang detector (tools/perf/emu_progress.py): no milestone, new function or console line for
     # SCENARIO_PROGRESS_S wall seconds ends the run as "hang: ..." with a stack per thread (0 turns it off)
     prog = float(os.environ.get("SCENARIO_PROGRESS_S", 600))

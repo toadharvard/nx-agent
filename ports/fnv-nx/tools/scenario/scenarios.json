@@ -11,7 +11,7 @@
   "cell_wine_s": 60,
   "save_timeout": 1200,
   "key_gap": 0.25,
-  "console_log": "user\\s18_console.txt"
+  "console_log": "s18_console.txt"
  },
  "state": [
   "player.getpos x",

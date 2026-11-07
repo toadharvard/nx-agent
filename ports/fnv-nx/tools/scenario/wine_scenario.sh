@@ -8,7 +8,8 @@
 #
 # <out dir> gets: progress.json (steps, marks, gate timeouts), console.txt (the plan's scof log), profile/Saves/
 # (the scenario's saves: s18_*), wine.log, and with a trace list wine.tsv. The prefix is reused between scenarios
-# (setup is idempotent); the scenario's own saves are removed before each run, so every run starts from no save.
+# (setup is idempotent); shots/<k>_<mark>.png: the screen at each mark (xwd + convert, when installed); the
+# scenario's own saves are removed before each run, so every run starts from no save.
 # Everything under <out dir> is game-derived: it goes to the private artifacts repository, never into nx-agent.
 # Needs: wine (32-bit), xvfb, xdotool; i686-w64-mingw32-gcc for the tracer. Env: SCENARIO_DISPLAY (default :79),
 # SCENARIO_WINE_TAIL_S (seconds after the plan, default 5), FNVTRACE_SNAP / FNVTRACE_DEREF / FNVTRACE_MAX.
@@ -24,9 +25,9 @@ export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d"
 export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 G=$WORK/pfx/drive_c/FNV
 DOCS="$WORK/pfx/drive_c/users/$(id -un)/Documents/My Games/FalloutNV"
-mkdir -p "$G/user" "$DOCS/Saves"
+mkdir -p "$DOCS/Saves"
 LOGREL=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["console_log"].replace("\\","/"))' "$PLAN")
-rm -f "$G/$LOGREL" "$DOCS"/Saves/s18_*
+rm -f "$G/$LOGREL" "$DOCS"/Saves/s18_*; rm -rf "$OUT/shots"
 EXE=(FalloutNV.exe)
 if [ -n "$LIST" ]; then
 	if [ -x "$P/tools/lockstep/build.sh" ] && "$P/tools/lockstep/build.sh" "$WORK/tracer" > "$OUT/tracer_build.log" 2>&1; then
@@ -45,7 +46,7 @@ XPID=$!; export DISPLAY=$DISP; sleep 2
 T0=$(date +%s)
 (cd "$G" && exec wine "${EXE[@]}" > "$OUT/wine.log" 2>&1) &
 WPID=$!
-python3 -I "$HERE/scenario.py" drive-wine "$PLAN" "$DOCS" "$OUT/progress.json" > "$OUT/drive.log" 2>&1
+SCENARIO_SHOTS=$OUT/shots python3 -I "$HERE/scenario.py" drive-wine "$PLAN" "$DOCS" "$OUT/progress.json" > "$OUT/drive.log" 2>&1
 sleep "${SCENARIO_WINE_TAIL_S:-5}"
 ALIVE=1; kill -0 "$WPID" 2> /dev/null || ALIVE=0
 wineserver -k 2> /dev/null; sleep 2; kill "$XPID" 2> /dev/null
