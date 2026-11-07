@@ -3,8 +3,8 @@
 
     callonly_vt.py <src dir> [--list FILE] [--json FILE]
 
-A *call-only dispatch declaration* is a struct/class that declares virtual functions, defines none of them (no
-in-class body, no out-of-class `Name::fn(` definition anywhere in the tree), has no base class and no virtual
+A *call-only dispatch declaration* is a struct/class that declares virtual functions, defines none of its virtuals
+(no in-class body, no out-of-class `Name::virtual(` definition anywhere in the tree; other members may be defined), has no base class and no virtual
 destructor, and whose first virtual is a placeholder (v0, vf0, Unk_00, FNV_...Unknown0, ...). Code uses such a struct
 only to dispatch on an object whose real class it does not name, by the exe's slot numbers: slot k = exe slot k.
 
@@ -21,7 +21,7 @@ import os
 import re
 import sys
 
-PLACEHOLDER = re.compile(r"^(?:v|vf|vfn|vt|vfunc|virt|virtual|slot|func|fn|unk|unknown|Unk_?|Unknown|Func|Virtual|"
+PLACEHOLDER = re.compile(r"^(?:v|vf|vfn|vt|vfunc|virt|virtual|slot|func|fn|unk|unknown|Unk_?|Unknown|Func|Virtual|Reserved|reserved|pad|Pad|"
                          r"Slot|V|F)_?0+$|^\w*?Unknown_?0*$|^\w*_v0$|^v0_\w*$|^vfunc0\w*$|^Unk(?:nown)?0+\w*$",
                          re.IGNORECASE)
 HEAD = re.compile(r"\b(struct|class)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)\s*(final\s*)?(:[^{;]*)?\{")
@@ -59,10 +59,10 @@ def scan(src):
             texts[p] = strip_comments(open(p, encoding="utf-8", errors="replace").read())
         except OSError:
             continue
-    defined = set()   # names with an out-of-class member definition somewhere: Name::fn( ... ) {
+    defined = set()   # (class, member) with an out-of-class definition somewhere: Name::fn( ... ) {
     for t in texts.values():
-        for m in re.finditer(r"\b([A-Za-z_]\w*)::~?[A-Za-z_]\w*\s*\([^;{)]*\)\s*(?:const\s*)?\{", t):
-            defined.add(m.group(1))
+        for m in re.finditer(r"\b([A-Za-z_]\w*)::(~?[A-Za-z_]\w*)\s*\([^;{)]*\)\s*(?:const\s*)?\{", t):
+            defined.add((m.group(1), m.group(2)))
     decls = []
     for p, t in texts.items():
         for m in HEAD.finditer(t):
@@ -89,7 +89,7 @@ def scan(src):
             decls.append({"file": os.path.relpath(p, src), "line": line, "name": name, "bases": (bases or "").strip(),
                           "virtuals": [v[0] for v in virts], "inline_body": any(v[2] for v in virts),
                           "pure": all(v[1] for v in virts), "dtor": any(v[0].startswith("~") for v in virts),
-                          "defined": name in defined})
+                          "defined": any((name, v[0]) in defined for v in virts)})
     return decls
 
 
