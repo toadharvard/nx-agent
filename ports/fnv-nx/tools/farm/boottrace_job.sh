@@ -9,17 +9,19 @@
 # list       the boot list: list.txt of the newest trace/<link12> branch of the artifacts repository (S5-boot's
 #            boot_trace_job.sh, whose discovery drops hot functions), or BOOTTRACE_LIST=<file>; none -> not run
 # reference  boot_trace.py ref (tools/lockstep/wine_trace.sh, fnvtrace.dll) for BOOTTRACE_WINE_S (default 300) s,
-#            cached: key = sha256 of TRACE_FORMAT, tools/lockstep/{fnvtrace.c,wine_trace.sh,build.sh}, the exe, the game
-#            data's content key (sweep_job.sh's data_key), the list, the seconds, Wine's version. Local copy
+#            cached: key = sha256 of TRACE_FORMAT, tools/lockstep/{fnvtrace.c,wine_trace.sh,build.sh,profile.py},
+#            tools/compare/{wine_ref.sh,ref_ini.py,scenes.json}, the env S16_PCI_DEVICE S16_W S16_H FNVTRACE_SNAP
+#            FNVTRACE_DEREF FNVTRACE_MAX WINE_TRACE_PROFILE, the exe and its whole install (sweep_job.sh's data_key),
+#            the list, the seconds, Wine's version (S5-boot's list of what ref's output depends on). Local copy
 #            $FARM_HOME/tracecache/<key>/ref.tsv; shared on branch tracecache/<key> (ref.tsv.xz; private: exe-derived).
 #            A miss costs one Wine run; every later head on that list reuses it.
-# guest      tests/s5/farm_boot.sh FARM_BOOTS=stub on BOOTTRACE_BUILD (default $FARM_HOME/full/build: link/ and
-#            guest/ of this head) with emu_guest --trace-fn @list, EMU_TIMEOUT=BOOTTRACE_EMU_S (default 600)
+# guest      tests/s5/farm_boot.sh FARM_BOOTS=stub, FARM_PROFILE = profile.py's profile (the reference's), on
+#            BOOTTRACE_BUILD (default $FARM_HOME/full/build: link/ and guest/ of this head) with emu_guest --trace-fn @list, EMU_TIMEOUT=BOOTTRACE_EMU_S (default 600)
 # diff       boot_trace.py diff (the tree's units.json for the conventions when the build has one): the first
 #            divergence (kind, function, guest_seq). Verdict PASS when there is none or it is not earlier (guest_seq)
 #            than the one recorded at the last verified head ($FARM_HOME/quick/boottrace.base, written by quick_job.sh
-#            on a pass), FAIL when it moved earlier. The two sides do not yet share one ini profile (S5-boot: renderer
-#            init differs), so "no regression" is the gate, not "no divergence".
+#            on a pass), FAIL when it moved earlier. Since fnvtrace-2 both sides boot with one profile; the gate stays
+#            "no regression" until the boot traces clean, so a head is never failed for a divergence it did not cause.
 # Writes <report.md> and <report>.json (fnvnx-boottrace/1). Exit 0 with any verdict, 1 when the lane could not run.
 set -uo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
@@ -83,11 +85,11 @@ eval "$(sed -n '/^data_key() {/,/^}/p' "$HERE/sweep_job.sh")"     # the game dat
 SECS=${BOOTTRACE_WINE_S:-300}
 {
 	grep -o '^TRACE_FORMAT = "[^"]*"' "$BT"
-	cat "$P/tools/lockstep/fnvtrace.c" "$P/tools/lockstep/wine_trace.sh" "$P/tools/lockstep/build.sh" \
+	cat "$P/tools/lockstep/fnvtrace.c" "$P/tools/lockstep/wine_trace.sh" "$P/tools/lockstep/build.sh" "$P/tools/lockstep/profile.py" \
 		"$P/tools/compare/wine_ref.sh" "$P/tools/compare/ref_ini.py" "$P/tools/compare/scenes.json" 2>/dev/null \
 		| sha256sum | cut -c1-16   # + the prefix, its ini and the plugins list (S5-boot)
 	# the environment that shapes the run: the adapter, the screen/ini size, the tracer's limits (empty: defaults)
-	echo "env S16_PCI_DEVICE=${S16_PCI_DEVICE:-} S16_W=${S16_W:-} S16_H=${S16_H:-} FNVTRACE_SNAP=${FNVTRACE_SNAP:-} FNVTRACE_DEREF=${FNVTRACE_DEREF:-} FNVTRACE_MAX=${FNVTRACE_MAX:-}"
+	echo "env S16_PCI_DEVICE=${S16_PCI_DEVICE:-} S16_W=${S16_W:-} S16_H=${S16_H:-} FNVTRACE_SNAP=${FNVTRACE_SNAP:-} FNVTRACE_DEREF=${FNVTRACE_DEREF:-} FNVTRACE_MAX=${FNVTRACE_MAX:-} WINE_TRACE_PROFILE=${WINE_TRACE_PROFILE:-}"
 	# data_key hashes every file of the install: the exe, its DLLs, Fallout_default.ini and Data/
 	sha256sum "$GAME/FalloutNV.exe" | cut -c1-64; data_key; sha256sum "$W/list.txt" | cut -c1-64
 	echo "seconds $SECS"; wine --version 2>/dev/null
@@ -115,10 +117,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git -C "$pub" push -
 	fi
 else NOTES+=("reference: tracecache/$KEY (local)"); fi
 
-# ---- the guest on the same list
-t=$(date +%s)
+# ---- the guest on the same list, with the same profile as the reference (fnvtrace-2: tools/lockstep/profile.py)
+t=$(date +%s); PROF=""
+if [ -f "$P/tools/lockstep/profile.py" ] && [ -f "$GAME/Fallout_default.ini" ] && python3 -I "$P/tools/lockstep/profile.py" \
+		"$GAME/Fallout_default.ini" "$W/profile" --device "fnv-nx null D3D9 device" >"$W/profile.log" 2>&1; then
+	PROF=$W/profile; NOTES+=("guest profile: tools/lockstep/profile.py (the reference's)")
+else NOTES+=("guest profile: the guest's own (no tools/lockstep/profile.py or Fallout_default.ini)"); fi
 UNITS=""; for u in "$BUILD/prepare/tree/build/units.json" "$BUILD/tree/build/units.json"; do [ -f "$u" ] && { UNITS=$u; break; }; done
-FARM_BOOTS=stub FARM_GAME=$GAME EMU_TIMEOUT=${BOOTTRACE_EMU_S:-600} FARM_LINK_DIR=$BUILD/link FARM_GUEST_DIR=$BUILD/guest \
+FARM_PROFILE="$PROF" FARM_BOOTS=stub FARM_GAME=$GAME EMU_TIMEOUT=${BOOTTRACE_EMU_S:-600} FARM_LINK_DIR=$BUILD/link FARM_GUEST_DIR=$BUILD/guest \
 	FARM_UNITS="$UNITS" EMU_EXTRA="--trace-fn @$W/list.txt --trace-out $W/guest.tsv" \
 	bash "$S5/farm_boot.sh" "$C12" "$W/boot" >"$W/boot.log" 2>&1
 NOTES+=("guest: $(grep -c '^call' "$W/guest.tsv" 2>/dev/null || echo 0) calls in $(( $(date +%s) - t )) s; $(grep -m1 'STOPPED' "$W/boot/emu_stub.log" 2>/dev/null | cut -c1-120)")
