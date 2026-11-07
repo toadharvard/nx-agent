@@ -7,8 +7,8 @@
   | | names |
   |---|---:|
   | CRT provider rows (766ecfb: memcpy_s past its prologue, _time64, std::uncaught_exception) | 31 |
-  | bodies, all bytes equal under MSVC 9 (accept a) | 28 |
-  | aliases (recon.json symbols: the name is an exe function another unit places) | 2 + 3 in the units below |
+  | bodies, all bytes equal under MSVC 9 (accept a) | 25 |
+  | aliases (recon.json symbols: the name is an exe function another unit places) | 5 |
   | appended without a byte match, accept pending fuzz (counted as open) | 6 |
   | code-defmissing, left to S2-bodies' addr-host at the next link (bodies exist in the decomp) | 5 |
   | in progress (2 workers: the largest unit and 10 small units) | the rest |
@@ -20,7 +20,7 @@
   same without them), REC1 + the game's GCC flags compile the unit, and every shard name of the unit is then
   defined or no longer referenced (aliases stay undefined and bind by address).
 
-* **finding: every matched body is an exe function another unit already places** (0 of 28 at a new address). The
+* **finding: every matched body is an exe function another unit already places** (0 of 25 at a new address). The
   missing names are mostly the decomp's renamed copies of VC9 STL and Gamebryo helpers (vector/_Tidy/_Ufill/
   _Insert_n, NiTPointerList, NiPoint3::SqrLength, basic_string::_Copy) whose single exe copy, folded across
   instantiations, a unit places under another class name. Method: compile the body with the unit's flags, then a
