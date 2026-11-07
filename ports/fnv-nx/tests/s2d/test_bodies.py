@@ -526,6 +526,53 @@ class Exe(unittest.TestCase):
             self.assertEqual(dict(got), {})
 
 
+    def test_exe_sret(self):
+        """The exe calls X::Scale(V*, float) where MSVC called V V::operator*(float) const: the hidden return
+        pointer written out. -> exe-sret, and the adapter line compiles to the wanted symbol (V trivially copyable and destructible only)."""
+        import struct
+        f = b'\xe8\0\0\0\0\xc3'
+        obj = coff({'?f@@YAXXZ': (f, {1: '??DV@@QBE?AU0@M@Z'})}, ['??DV@@QBE?AU0@M@Z'])
+        F, G = 0x401000, 0x401080
+        text = bytearray(0x100)
+        text[0:len(f)] = f
+        struct.pack_into('<i', text, 1, G - (F + 5))
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '?f@@YAXXZ', 'address': '%x' % F},
+            {'symbol': '?Scale@X@@QAEXPAUV@@M@Z', 'address': '%x' % G}]}]}     # void X::Scale(V*, float)
+        rows = [bodies.Row('_ZNK1VmlEf', 'missing', None, None, 'src/a.cpp', 'no definition', None)]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as fo:
+                json.dump(units_j, fo)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
+            it.need([r.name for r in rows])
+            itan = (lambda n: sigs.parse_itanium(n, it[n]))
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F'},
+                                  itan, lambda n: sigs.parse_msvc(n, ms[n]), ms)
+            r = got[0]
+            self.assertEqual((r.cls, r.addr, r.host), ('exe-sret', G, 'src/a.cpp'))
+            self.assertTrue(r.note.startswith('sret this'))
+            line = bodies.sret_line(itan(r.name), G, True)
+            gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
+            if gxx:
+                for v, ok in (('struct V { float x, y, z; V operator*(float) const; };', True),
+                              ('struct V { V(); float x, y, z; V operator*(float) const; };', True),
+                              ('struct V { ~V(); float x, y, z; V operator*(float) const; };', False)):
+                    src = os.path.join(d, 's.cpp')
+                    open(src, 'w').write(v + '\n' + line + '\n')
+                    p = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 's.o')], capture_output=True, text=True)
+                    self.assertEqual(p.returncode == 0, ok, p.stderr[-400:])
+                    if ok:
+                        nm = subprocess.run(['nm', os.path.join(d, 's.o')], capture_output=True, text=True).stdout
+                        self.assertIn('T _ZNK1VmlEf', nm)
+                        self.assertIn('U __fnv_00401080', nm)
+
+
     def test_exe_address_taken(self):
         """A DIR32 in a placed function (push offset ?g) gives the target from the exe's word, minus the addend."""
         import struct
