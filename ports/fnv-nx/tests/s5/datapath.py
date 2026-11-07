@@ -94,10 +94,16 @@ class DataPath:
         # without --game: an install laid out on the card itself (<root>/switch/fnv, as boot_game.sh and S5-boot's
         # farm boots make it), else <root>/fnvnx/game, where --file fnvnx/game/... and switch/fnv/... both land
         sw = os.path.join(root, "switch", "fnv")
-        self.root, self.game = root, game or (sw if os.path.isdir(sw) else os.path.join(root, "fnvnx", "game"))
+        # (an install: something there besides the port's own entries, which this class itself may have made)
+        inst = os.path.isdir(sw) and any(not (n.lower() in PORT_NAMES or n.lower().startswith(PORT_PREFIXES))
+                                         for n in os.listdir(sw))
+        self.root, self.game = root, game or (sw if inst else os.path.join(root, "fnvnx", "game"))
         if game:   # the card's own side of the mount points: the port's entries (user/, logs) are made under them
             for m in GAME_MOUNTS:
                 os.makedirs(os.path.join(root, *m.split("/")), exist_ok=True)
+        else:      # the device always has sdmc:/switch/fnv (fnv.nro lives there): without it every mkdir of the
+            # profile (user/, drive_c/) failed with ENOENT on the farm boots (--file only), and so did its files
+            os.makedirs(sw, exist_ok=True)
         self.listing = {}
         self.faults = {}                 # (call, errno name, sd path) -> count
         self.fd_path = {}                # fd -> (sd path lower-case, host path)
