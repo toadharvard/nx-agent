@@ -31,6 +31,11 @@ void __cdecl _operator_delete_sized(void *, unsigned int);
  * decomp's own `void operator delete(void*, unsigned int);`. MSVC 2008 has no implicit one. */
 void __cdecl operator delete(void *, unsigned int);
 void __cdecl operator delete[](void *, unsigned int);
+/* ... and the usual unsized forms, also implicit on the target and in MSVC: declared beside the sized ones so that
+ * an explicit `operator delete[](p)` still finds them (a declared overload hides MSVC's implicit one;
+ * tesland_od_variant_decl_variant, C2660) */
+void __cdecl operator delete(void *);
+void __cdecl operator delete[](void *);
 #endif
 /* _CxxThrowException and _ThrowInfo: predefined by the MSVC C++ front end (nothing to declare) */
 /* ENUM1-FWD: fnvnx_compat.h's `: int` base of an opaque enum declaration; MSVC 2008 has no opaque declarations, its
