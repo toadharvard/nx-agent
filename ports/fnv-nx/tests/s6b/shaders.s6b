@@ -389,13 +389,16 @@ mul oC0, r0, r1.x
 === vs20_relc_outside
 // P5: c[a0.x + n] past the end of the CTAB array that holds n's neighbours (instance data read
 // as 3 vec4 while the CTAB declares 2), with def'd constants around it: the dk UBO by register,
-// def values overlaid, out of range = 0
+// def values overlaid, out of range = 0. Reads that start inside the array take the same path: the shader
+// defs float constants, and a0 can reach them from inside too (D3D9 relative reads see the def'd values)
 // ctab: WorldViewProj float 0 4 matrix_rows float 4 4
 // ctab: InstanceData float 18 2 vector float 1 4
 // expect: vs_dk_relc(20 + vs_a0.x)
+// expect: vs_dk_relc(18 + vs_a0.x)
+// expect: vs_dk_relc(19 + vs_a0.x)
 // expect: if (i == 21) return uintBitsToFloat(uvec4(0x3f800000u, 0x00000000u, 0x40000000u, 0xbf800000u));
 // expect: return (uint(i) < 256u) ? vs_uniforms_vec4[i] : vec4(0.0);
-// expect: vs_uniforms_vec4[ARRAYBASE_18 + vs_a0.x]
+// expect-not: vs_uniforms_vec4[ARRAYBASE_18 + vs_a0.x]
 vs_2_0
 def c16, 0.0, 0.5, 1.0, 3.0
 def c21, 1.0, 0.0, 2.0, -1.0

@@ -1,5 +1,5 @@
 diff --git a/mojoshader.c b/mojoshader.c
-index 486d7e0..3a9eb49 100644
+index 486d7e0..dcc289d 100644
 --- a/mojoshader.c
 +++ b/mojoshader.c
 @@ -334,6 +334,9 @@ static const struct { const char *from; const char *to; } profileMap[] =
@@ -93,7 +93,28 @@ index 486d7e0..3a9eb49 100644
  } // parse_destination_token
  
  
-@@ -744,13 +788,28 @@ static int parse_source_token(Context *ctx, SourceArgInfo *info)
+@@ -629,6 +673,20 @@ static int adjust_swizzle(const Context *ctx, const RegisterType regtype,
+ } // adjust_swizzle
+ 
+ 
++
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: the shader defs float constants (DEF comes before any instruction,
++//  so every def is known when an instruction's relative read is parsed).
++static int dk_has_float_defs(const Context *ctx)
++{
++    const ConstantsList *c;
++    for (c = ctx->constants; c != NULL; c = c->next)
++        if (c->constant.type == MOJOSHADER_UNIFORM_FLOAT)
++            return 1;
++    return 0;
++} // dk_has_float_defs
++#endif
++
+ static int parse_source_token(Context *ctx, SourceArgInfo *info)
+ {
+     int retval = 1;
+@@ -744,13 +802,28 @@ static int parse_source_token(Context *ctx, SourceArgInfo *info)
  
          if (info->regtype == REG_TYPE_INPUT)
          {
@@ -123,7 +144,7 @@ index 486d7e0..3a9eb49 100644
              if (!ctx->ignores_ctab)
              {
                  if (!ctx->ctab.have_ctab)  // hard to do efficiently without!
-@@ -768,6 +827,19 @@ static int parse_source_token(Context *ctx, SourceArgInfo *info)
+@@ -768,8 +841,36 @@ static int parse_source_token(Context *ctx, SourceArgInfo *info)
                              break;  // match!
                      } // for
  
@@ -142,8 +163,25 @@ index 486d7e0..3a9eb49 100644
 +#endif
                      if (var == NULL)
                          fail(ctx, "relative addressing of indeterminate array");
++#if SUPPORT_PROFILE_GLSLDK
++                    else if (support_glsldk(ctx) && !var->constant && dk_has_float_defs(ctx))
++                    {
++                        // fnv-nx: c[a0 + n] inside a CTAB array of a shader
++                        //  that defs float constants: a0 can reach a def'd
++                        //  register past the array, and D3D9 relative reads
++                        //  see the def'd values (WineD3D and Nine load them
++                        //  into the constant file). By register, with the
++                        //  overlay, as outside every array.
++                        var->used = 1;
++                        ctx->glsldk_rel_const = 1;
++                        info->relative_array = NULL;
++                        set_used_register(ctx, info->relative_regtype, info->relative_regnum, 0);
++                    } // else if
++#endif
                      else
-@@ -1975,6 +2047,8 @@ static void state_TEXLD(Context *ctx)
+                     {
+                         var->used = 1;
+@@ -1975,6 +2076,8 @@ static void state_TEXLD(Context *ctx)
      else if (shader_version_atleast(ctx, 1, 4))
      {
          // !!! FIXME: checks for ps_1_4 version here...
@@ -152,7 +190,7 @@ index 486d7e0..3a9eb49 100644
      } // else if
  
      else
-@@ -2085,6 +2159,27 @@ static int parse_instruction_token(Context *ctx)
+@@ -2085,6 +2188,27 @@ static int parse_instruction_token(Context *ctx)
      ctx->instruction_controls = controls;
      ctx->predicated = predicated;
  
