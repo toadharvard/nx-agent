@@ -185,6 +185,21 @@ def main():
         check(got_l == [0, 1, 0x12345678, 'void', None, 0, None, 'void', 1, None, 0],
               'leaf_constant: xor eax / mov al + ret 4 / mov eax / ret 8 / not a leaf / xor al / int3 / /Od empty / '
               '/Od true / a broken frame / frame + xor: %s' % got_l)
+        # adjustor thunks: this in ecx, or on the stack (a stdcall/cdecl member: R6 0x009fdd10)
+        thk = os.path.join(tmp, 'Thunks.exe')
+
+        def jmp(at, to, i):
+            return b'\xe9' + struct.pack('<i', to - (at + i + 5))
+        tc = {T(1): b'\x83\xe9\x08' + jmp(T(1), T(9), 3),                      # sub ecx, 8; jmp
+              T(2): b'\x83\x6c\x24\x04\x14' + jmp(T(2), T(9), 5),              # sub dword [esp+4], 0x14; jmp
+              T(3): b'\x83\x44\x24\x04\x0c' + jmp(T(3), T(9), 5),              # add dword [esp+4], 0x0c; jmp
+              T(4): b'\x81\x6c\x24\x04\x00\x01\x00\x00' + jmp(T(4), T(9), 8),  # sub dword [esp+4], 0x100; jmp
+              T(5): b'\x83\x6c\x24\x08\x14' + jmp(T(5), T(9), 5),              # [esp+8]: not this, no thunk
+              T(9): b'\xc3'}
+        make_pe(thk, lambda rd: None, tc)
+        got_t = [exevft.thunk(thk, T(k)) for k in range(1, 6)]
+        check(got_t == [(8, T(9)), (0x14, T(9)), (-0x0c, T(9)), (0x100, T(9)), None],
+              'thunk: sub ecx / sub [esp+4] imm8 / add [esp+4] / sub [esp+4] imm32 / [esp+8] is no thunk: %s' % got_t)
         und = shutil.which('llvm-undname') or shutil.which('llvm-undname-18')
         if und:
             r = subprocess.run([und], input='??_7?$Tmpl@H@@6B@\n', capture_output=True, text=True)

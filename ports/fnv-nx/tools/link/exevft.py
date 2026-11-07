@@ -275,6 +275,14 @@ def thunk(path, addr):
         return -b[2], rel(3)
     if b[:2] == b'\x81\xe9' and b[6:7] == b'\xe9':
         return int.from_bytes(b[2:6], 'little'), rel(6)
+    # this passed on the stack (a stdcall/cdecl member, R6 0x009fdd10): `sub|add dword ptr [esp+4], imm8|imm32;
+    # jmp`. Natively that first argument is in w0/x0 like ecx's this, so the adjustment is the same
+    if b[:4] == b'\x83\x6c\x24\x04' and b[5:6] == b'\xe9':
+        return b[4], rel(5)
+    if b[:4] == b'\x83\x44\x24\x04' and b[5:6] == b'\xe9':
+        return -b[4], rel(5)
+    if b[:4] == b'\x81\x6c\x24\x04' and b[8:9] == b'\xe9':
+        return int.from_bytes(b[4:8], 'little'), rel(8)
     if b[:1] == b'\xe9':
         return 0, rel(0)
     return None
