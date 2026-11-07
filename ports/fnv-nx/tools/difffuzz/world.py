@@ -264,7 +264,8 @@ def ref_result(k):
 # the game's allocators (operator new, MemoryManager::Allocate, the heap's Allocate; their native names map to these
 # addresses through libcalls.EQUIV / the address stubs): they never return null, and GCC drops the null test after a
 # throwing new that MSVC 2008 keeps, so a canned 0 made the native code construct at 0 (S13b new-null, J-0137)
-ALLOCATORS = {0x00401000, 0x00aa3e40, 0x00aa13e0}
+# S1-rules d20-malloc: the CRT's malloc (0x00ecd1c7) too, which MSVC units call where the native calls operator new
+ALLOCATORS = {0x00401000, 0x00aa3e40, 0x00aa13e0, 0x00ecd1c7}
 ALLOC_BASE = HEAP + 0x200000         # above the reference results (ref_result: HEAP + 0..0x1ff pages)
 
 
