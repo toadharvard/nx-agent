@@ -687,7 +687,8 @@ class Emu:
         self.data_syms = {}
         for line in out.splitlines():
             f = line.split()
-            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats"):
+            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats",
+                                                                 "fnvnx_plat_on"):
                 self.data_syms[f[2]] = int(f[0], 16)
             if len(f) == 3 and f[1] in "tTwW":
                 a = int(f[0], 16)
@@ -2299,11 +2300,23 @@ def main(argv):
     ap.add_argument("--trace-writes", action="store_true", help="--trace-fn also logs the callees' memory writes")
     ap.add_argument("--trace-max", type=int, default=1_000_000, help="--trace-fn: at most this many calls")
     ap.add_argument("--trace-deref", type=int, default=32, help="--trace-fn: bytes dumped behind each pointer argument")
+    ap.add_argument("--plat", action="store_true",
+                    help="the platform lane's recorder on from the start (platform/win32/platstat.cpp's fnvnx_plat_on "
+                         "= 1 before the guest runs; its .bss is never cleared): 'plat: ...' lines for tools/perf/plat.py "
+                         "without relinking (needs --elf)")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
     root = a.root or tempfile.mkdtemp(prefix="fnvnx-emu-")
     sd = datapath.DataPath(root, a.game)
+    # the card holds the guest itself, as on the device (sdlayout.h FNVNX_SD_GUEST): os_fs_case_insensitive() probes
+    # it against GUEST.NSO, and without it the probe was a file fault of every boot
+    card_guest = os.path.join(root, "switch", "fnv", "guest.nso")
+    if os.path.isdir(os.path.dirname(card_guest)) and not os.path.lexists(card_guest):
+        try:
+            os.symlink(os.path.abspath(a.nso), card_guest)
+        except OSError:
+            shutil.copyfile(a.nso, card_guest)
     for spec in a.file:
         name, _, src = spec.partition("=")
         dst = sd.resolve("/" + name.lstrip("/"))   # the guest's view: fnvnx/game and switch/fnv are the game dir
@@ -2399,6 +2412,14 @@ def main(argv):
         print(f"STOPPED: {why}")
         write_summary(f"STOPPED: {why}")
         return 1
+    if a.plat:
+        pa = getattr(emu, "data_syms", {}).get("fnvnx_plat_on")
+        if pa is None:
+            print("   plat: off (no fnvnx_plat_on in the ELF: a guest without platstat.cpp, or no --elf)")
+        else:
+            pa = pa - emu.link_base + emu.base if emu.relocatable else pa
+            emu.uc.mem_write(pa, struct.pack("<I", 1))
+            print("   plat: recorder on (fnvnx_plat_on at %#x)" % pa)
     try:
         rc = emu.run()
     except SystemExit as e:

@@ -25,6 +25,8 @@ and with --frames the instructions between frames (Present calls) of the main th
 --scenario-out DIR: a seed tree DIR/seed (profile inis, plugins.txt: scenario.py seed) is copied onto the SD root
 first (--root, or DIR/sd without one), and the scenario's own files (s18_*: saves, the scof log) are copied to
 DIR/kept when the summary is written - farm_boot.sh deletes its root after the boot. The summary's root is DIR/kept.
+SCENARIO_PROGRESS_S (default 600; 0 off): tools/perf/emu_progress.py's hang detector, when that file exists.
+SCENARIO_CALLWATCH=<config>: tools/perf/callwatch.py on the game's script-error entry points (private config).
 
 Our own code; it reads emu_guest's state only through the names emu_guest defines.
 """
@@ -144,7 +146,7 @@ def find_file(root, rel):
     return None
 
 
-def install(eg, plan, out_dir, frames):
+def install(eg, plan, out_dir, frames, game_dir=None):
     """patch emu_guest.Emu: the input feed, the step checks, the summary"""
     Emu = eg.Emu
     drv = Driver(plan)
@@ -237,6 +239,12 @@ def install(eg, plan, out_dir, frames):
                     rel = os.path.relpath(os.path.join(d, f), root)
                     os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
                     shutil.copy2(os.path.join(d, f), os.path.join(dst, rel))
+        # the game's own directory (--game, mounted at sdmc:/switch/fnv): the console's scof file lands at its top
+        if game_dir and os.path.isdir(game_dir):
+            for f in os.listdir(game_dir):
+                if f.lower().startswith("s18_") and os.path.isfile(os.path.join(game_dir, f)):
+                    os.makedirs(os.path.join(dst, "switch", "fnv"), exist_ok=True)
+                    shutil.copy2(os.path.join(game_dir, f), os.path.join(dst, "switch", "fnv", f))
         os.makedirs(dst, exist_ok=True)
         return dst
 
@@ -297,8 +305,27 @@ def main(argv):
         seed = os.path.join(out, "seed")
         if os.path.isdir(seed):
             shutil.copytree(seed, root, dirs_exist_ok=True)
+    game = next((rest[i + 1] for i, a in enumerate(rest[:-1]) if a == "--game"), None)
+    if game and os.path.isdir(game):   # an earlier run's files at the game's top level must not count for this one
+        for f in os.listdir(game):
+            if f.lower().startswith("s18_") and os.path.isfile(os.path.join(game, f)):
+                os.remove(os.path.join(game, f))
     import emu_guest as eg   # noqa: E402  (tests/s5, or SCENARIO_EMU_DIR)
-    install(eg, plan, out, ours["frames"])
+    install(eg, plan, out, ours["frames"], game)
+    # R4's hang detector (tools/perf/emu_progress.py): no milestone, new function or console line for
+    # SCENARIO_PROGRESS_S wall seconds ends the run as "hang: ..." with a stack per thread (0 turns it off)
+    prog = float(os.environ.get("SCENARIO_PROGRESS_S", 600))
+    if prog > 0 and os.path.isfile(os.path.join(P, "tools", "perf", "emu_progress.py")):
+        sys.path.insert(0, os.path.join(P, "tools", "perf"))
+        import emu_progress   # noqa: E402
+        emu_progress.install(eg, prog)
+    # R4's call watcher (tools/perf/callwatch.py, D25 #10): the game's script / console error entry points from a
+    # private config (game knowledge: never in this repository), logged as "emu: call <kind> caller ... form 0x..."
+    cw = os.environ.get("SCENARIO_CALLWATCH", "")
+    if cw and os.path.isfile(cw) and os.path.isfile(os.path.join(P, "tools", "perf", "callwatch.py")):
+        sys.path.insert(0, os.path.join(P, "tools", "perf"))
+        import callwatch   # noqa: E402
+        callwatch.install(eg, cw)
     return eg.main(rest)
 
 

@@ -238,29 +238,35 @@ extern "C" HRESULT CoCreateGuid(GUID *g)
 /* ---- ws2_32: offline (orchestrator policy): every network call fails with WSAENETDOWN; byte-order and address
  * formatting helpers are plain functions */
 #define WSAENETDOWN_ 10050
-extern "C" int fnvnx_ws2_WSAStartup(WORD ver, void *data) { W32_UNUSED(ver); W32_UNUSED(data); return WSAENETDOWN_; }
+extern "C" int fnvnx_ws2_WSAStartup(WORD ver, void *data) { W32_UNUSED(ver); W32_UNUSED(data); FNVNX_NOOP(); return WSAENETDOWN_; }
 extern "C" int fnvnx_ws2_WSACleanup(void) { return 0; }
 extern "C" int fnvnx_ws2_WSAGetLastError(void) { return WSAENETDOWN_; }
-extern "C" UINT_PTR fnvnx_ws2_socket(int af, int type, int proto) { W32_UNUSED(af); W32_UNUSED(type); W32_UNUSED(proto); return ~(UINT_PTR)0; }
+extern "C" UINT_PTR fnvnx_ws2_socket(int af, int type, int proto) { W32_UNUSED(af); W32_UNUSED(type); W32_UNUSED(proto); FNVNX_NOOP(); return ~(UINT_PTR)0; }
 extern "C" int fnvnx_ws2_closesocket(UINT_PTR s) { W32_UNUSED(s); return -1; }   /* no socket was ever made */
 extern "C" int fnvnx_ws2_fail(void) { return -1; } /* bind, listen, accept, connect, send, recv, setsockopt, ioctlsocket, WSAAsyncSelect */
 extern "C" unsigned short fnvnx_ws2_htons(unsigned short v) { return (unsigned short)((v >> 8) | (v << 8)); }
 extern "C" unsigned short fnvnx_ws2_ntohs(unsigned short v) { return (unsigned short)((v >> 8) | (v << 8)); }
 extern "C" unsigned long fnvnx_ws2_inet_addr(const char *s) { W32_UNUSED(s); return 0xFFFFFFFFul; }
 extern "C" char *fnvnx_ws2_inet_ntoa(unsigned long a) { W32_UNUSED(a); static char b[] = "0.0.0.0"; return b; }
-extern "C" void *fnvnx_ws2_gethostbyname(const char *n) { W32_UNUSED(n); return NULL; }
+extern "C" void *fnvnx_ws2_gethostbyname(const char *n) { W32_UNUSED(n); FNVNX_NOOP(); return NULL; }
 extern "C" int fnvnx_ws2_gethostname(char *b, int n) { if (b && n > 0) b[0] = 0; return -1; }
 extern "C" int fnvnx_ws2_fdisset(UINT_PTR s, void *set) { W32_UNUSED(s); W32_UNUSED(set); return 0; }   /* __WSAFDIsSet: select never succeeds */
 
+/* ---- NVAPI: no nvapi.dll on the Switch. The exe's NvAPI_* entry points are `jmp [slot]` thunks into the
+ * table nvapi_QueryInterface fills at run time (0x009fead6, 0x009feae8, 0x009febd8; crt_symbols.tsv class thunk);
+ * with the library absent each returns NVAPI_API_NOT_INITIALIZED (-4) and the renderer takes its non-NVIDIA path
+ * (R2 recon2-002, R6 recon6-007). Any arguments, nothing written. */
+extern "C" int fnvnx_nvapi_not_initialized(void) { FNVNX_NOOP(); return -4; }
+
 /* ---- steam_api: no-op success (see the top) */
-extern "C" bool SteamAPI_Init(void) { return true; }
+extern "C" bool SteamAPI_Init(void) { FNVNX_NOOP(); return true; }   /* the platform lane: documented no-ops */
 extern "C" bool SteamAPI_IsSteamRunning(void) { return true; }
 extern "C" void SteamAPI_Shutdown(void) {}
 extern "C" void SteamAPI_RunCallbacks(void) {}
 extern "C" void SteamAPI_RegisterCallback(void *cb, int id) { W32_UNUSED(cb); W32_UNUSED(id); }
 extern "C" void SteamAPI_UnregisterCallback(void *cb) { W32_UNUSED(cb); }
-extern "C" void *SteamUser(void) { return NULL; }
-extern "C" void *SteamFriends(void) { return NULL; }
-extern "C" void *SteamUtils(void) { return NULL; }
-extern "C" void *SteamApps(void) { return NULL; }
-extern "C" void *SteamUserStats(void) { return NULL; }
+extern "C" void *SteamUser(void) { FNVNX_NOOP(); return NULL; }
+extern "C" void *SteamFriends(void) { FNVNX_NOOP(); return NULL; }
+extern "C" void *SteamUtils(void) { FNVNX_NOOP(); return NULL; }
+extern "C" void *SteamApps(void) { FNVNX_NOOP(); return NULL; }
+extern "C" void *SteamUserStats(void) { FNVNX_NOOP(); return NULL; }

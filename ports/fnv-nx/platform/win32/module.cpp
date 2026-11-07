@@ -281,6 +281,7 @@ extern "C" void ExitProcess(UINT code)
     w32_log("ExitProcess(%u)", (unsigned)code);
     fnvnx_threads_flush();   /* the race checker's pairs and the watchdog's summary, when they are on */
     fnvnx_mem_flush();       /* the memory lane's peak, sites and summary, when it is on */
+    fnvnx_plat_flush();      /* the platform lane's counts and summary, when it is on */
     os_exit_process((int)code);
 }
 
@@ -296,6 +297,7 @@ extern "C" void DebugBreak(void)
 {
     /* without a debugger this would kill the process with a breakpoint exception; log and continue */
     w32_log("DebugBreak() ignored");
+    FNVNX_NOOP();
 }
 
 extern "C" BOOL IsBadCodePtr(FARPROC p) { return p == NULL; }
@@ -355,3 +357,11 @@ extern "C" LPSTR lstrcpyA(LPSTR d, LPCSTR s) { return d && s ? strcpy(d, s) : NU
 extern "C" LPSTR lstrcatA(LPSTR d, LPCSTR s) { return d && s ? strcat(d, s) : NULL; }
 extern "C" int lstrlenA(LPCSTR s) { return s ? (int)strlen(s) : 0; }
 extern "C" int lstrcmpiA(LPCSTR a, LPCSTR b) { int c = w32_stricmp(a ? a : "", b ? b : ""); return c < 0 ? -1 : c > 0; }
+
+/* the game build's toolchain/game/boot.cpp reads unmapped image constants from the exe; elsewhere p as it is */
+extern "C" __attribute__((weak)) const void *fnvnx_image_const(const void *p, uint32_t n, void *buf)
+{
+    (void)n;
+    (void)buf;
+    return p;
+}

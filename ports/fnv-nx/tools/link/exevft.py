@@ -232,6 +232,28 @@ def leaf_constant(path, addr):
     return None
 
 
+_FLAGS_TEST = re.compile(
+    rb'\xf6\x44\x24[\x04-\x20]\x01|\xf6\x45\x08\x01|\xf6[\xc0-\xc7]\x01|\xa8\x01|\x8b\x45\x08\x83\xe0\x01|'
+    rb'\x8b\x44\x24[\x04-\x20]\x83\xe0\x01')
+
+
+def deleting_dtor(path, addr):
+    """True when the x86 function at addr has the shape of MSVC's deleting destructor `??_G(flags)`: it returns
+    with `ret 4` (thiscall, one stack argument) and tests bit 0 of that argument before (`test byte [esp+n], 1`,
+    `test r8, 1`, `test al, 1`, or the /Od `mov eax, [ebp+8]; and eax, 1`). On link 9f865b0a it recognises 121 of
+    the address map's 132 kind-G addresses; used for exe slot 0 only (D26 c), where the prior is high."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return False
+    if off is None:
+        return False
+    b = data[off:off + 0x400]
+    i = b.find(b'\xc2\x04\x00')
+    return i > 0 and _FLAGS_TEST.search(b[:i]) is not None
+
+
 def thunk(path, addr):
     """(adjustment, target) of an MSVC thunk at addr: `sub ecx, imm8|imm32; jmp rel32` (an adjustor thunk of a
     secondary vftable: this -= imm), `add ecx, imm8; jmp rel32` (this += imm: a negative adjustment) or a plain
@@ -256,3 +278,47 @@ def thunk(path, addr):
     if b[:1] == b'\xe9':
         return 0, rel(0)
     return None
+
+
+# ---- the vftable an exe constructor stores (S2c, S5 class 3: constructor-named vtables)
+
+CTOR_SPAN = 0x400   # bytes decoded from a constructor's entry (S5's stand-in reads the same span)
+_CS = {}
+
+
+def ctor_vftable(path, addr, starts):
+    """The vftable the x86 constructor at addr names: the immediate of its last `mov dword ptr [reg], imm32` (a base
+    register only: no index, no displacement, no segment - the vptr of the object the register holds) whose value is
+    in starts (vftable starts, e.g. scan()'s), decoded with capstone from addr up to its first `ret` / `ret N` (at
+    most CTOR_SPAN bytes). An inlined base constructor stores its own vftable first, so the last store is the most
+    derived class's. None without capstone, outside the image's sections, or when there is no such store."""
+    try:
+        import capstone
+        from capstone import x86 as cx
+    except ImportError:
+        return None
+    pe, data = _text(path)
+    off, n = None, CTOR_SPAN
+    while off is None and n >= 16:   # a constructor near its section's end
+        try:
+            off = pe.rva_to_off(addr - pe.image_base, n)
+        except Exception:
+            off = None
+        if off is None:
+            n //= 2
+    if off is None:
+        return None
+    if 'md' not in _CS:
+        _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        _CS['md'].detail = True
+    last = None
+    for ins in _CS['md'].disasm(data[off:off + n], addr):
+        if ins.id == cx.X86_INS_RET:
+            break
+        if ins.id != cx.X86_INS_MOV or len(ins.operands) != 2:
+            continue
+        dst, src = ins.operands
+        if dst.type == cx.X86_OP_MEM and dst.size == 4 and src.type == cx.X86_OP_IMM and dst.mem.base and \
+                not dst.mem.index and not dst.mem.disp and not dst.mem.segment and (src.imm & 0xffffffff) in starts:
+            last = src.imm & 0xffffffff
+    return last

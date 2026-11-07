@@ -2,7 +2,14 @@
 // process's nx::Renderer / nx::StateTracker. Built into libnxrender.a, for the native build (NATIVE1) only.
 // When nx::Renderer is not initialised yet the stubs do nothing and report failure.
 #include "engine_stubs.h"
+#include "plat_mark.h"
 #include <string.h>
+
+// A draw the engine asked for and the native renderer did not perform (D25 #5): counted in the renderer's stats and
+// marked for the platform lane (plat_mark.h), named by its reason (nx::SkipName), detail the pass id or effect.
+// A macro, so the mark's caller is the game's return address.
+#define NX_SKIP(stats, why, detail) do { (stats).skipped[(why)]++; g_skipped++; \
+    NX_PLAT_UNSUPPORTED(nx::SkipName(why), (detail)); } while (0)
 
 namespace nx {
 namespace engine {
@@ -71,7 +78,7 @@ static bool HasNativeDraw(PassRoute r) { return r == Route_Tile || r == Route_Le
 
 void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
     Renderer* r = R();
-    if (!r) { g_skipped++; return; }
+    if (!r) { g_skipped++; NX_PLAT_UNSUPPORTED(nx::SkipName(Skip_NoRenderer), 0); return; }
     DrawStats& st = r->stats();
     st.engineDraws++;
     uint16_t passId = 0;
@@ -83,25 +90,24 @@ void NiDX9Renderer::Do_RenderGeometry(const void* geometry) {
         const uint8_t* geo = (const uint8_t*)geometry;
         uint32_t skin = 0;
         if (geo) memcpy(&skin, geo + 0xBC, 4);
-        st.skipped[skin ? Skip_Skinned : Skip_Unreadable]++;
-        g_skipped++;
+        NX_SKIP(st, skin ? Skip_Skinned : Skip_Unreadable, passId);
         return;
     }
     switch (pi.route) {
     case Route_Tile: case Route_Legacy:
-        if (!r->RenderGeometry(g)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
+        if (!r->RenderGeometry(g)) { NX_SKIP(st, Skip_Submit, passId); return; }
         st.native[pi.route]++;
         return;
     default: {
-        if (!r->translatedStore()) { st.skipped[Skip_NoFamily]++; g_skipped++; return; }
+        if (!r->translatedStore()) { NX_SKIP(st, Skip_NoFamily, passId); return; }
         int vs = -1, ps = -1;
         const uint8_t* pass = nullptr;
         const DrawSkip why = TranslatedPrograms(geometry, &vs, &ps, &pass);
-        if (why) { st.skipped[why]++; g_skipped++; return; }
-        if (!r->TranslatedLoadable(vs) || !r->TranslatedLoadable(ps)) { st.skipped[Skip_NoDksh]++; g_skipped++; return; }
+        if (why) { NX_SKIP(st, why, passId); return; }
+        if (!r->TranslatedLoadable(vs) || !r->TranslatedLoadable(ps)) { NX_SKIP(st, Skip_NoDksh, passId); return; }
         static TranslatedConstants c;
         const uint32_t unmapped = TranslatedConstantsFor(geometry, pass, g, &c);
-        if (!r->RenderTranslated(g, vs, ps, c, passId)) { st.skipped[Skip_Submit]++; g_skipped++; return; }
+        if (!r->RenderTranslated(g, vs, ps, c, passId)) { NX_SKIP(st, Skip_Submit, passId); return; }
         st.translated++;
         if (unmapped) st.translatedPartial++;
         return;
@@ -370,21 +376,21 @@ void ImageSpaceManager::RenderEffect(int32_t effect, void*, void* src, void* dst
     const uint8_t* list = r && effect >= 0 ? GP(U32(self, 0x08)) : nullptr;
     const uint8_t* fx = list ? GP(U32(list, 4 * (uint32_t)effect)) : nullptr;
     if (r) r->stats().engineDraws++;
-    if (!fx || effect != kEffectMenuBg) { g_isSkipped++; if (r) r->stats().skipped[Skip_ImageSpace]++; return; }
+    if (!fx || effect != kEffectMenuBg) { g_isSkipped++; if (r) r->stats().skipped[Skip_ImageSpace]++; NX_PLAT_UNSUPPORTED(nx::SkipName(Skip_ImageSpace), (uint32_t)effect); return; }
     uint32_t scene = 0, w = 0, h = 0;
-    if (!r->GroupColor(src, &scene, &w, &h)) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; return; }
+    if (!r->GroupColor(src, &scene, &w, &h)) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; NX_PLAT_UNSUPPORTED(nx::SkipName(Skip_ImageSpace), (uint32_t)effect); return; }
     NativeTexture* tone = nullptr;
     if (const uint8_t* ist = GP(U32(fx, 0x58)))
         if (const uint8_t* tex = GP(U32(ist, 4))) tone = FindNativeTexture(GP(U32(tex, 0x24)), 0x80);
     float blend; memcpy(&blend, fx + 0x5C, 4);
-    if (!tone) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; return; }
+    if (!tone) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; NX_PLAT_UNSUPPORTED(nx::SkipName(Skip_ImageSpace), (uint32_t)effect); return; }
     static const float kLuma[3] = {0.299f, 0.587f, 0.114f};   // Rec. 601 (the effect's vertex constant)
     const bool switchTarget = dst != nullptr;
-    if (switchTarget && !r->Do_BeginUsingRenderTargetGroup(dst, 0)) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; return; }
+    if (switchTarget && !r->Do_BeginUsingRenderTargetGroup(dst, 0)) { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; NX_PLAT_UNSUPPORTED(nx::SkipName(Skip_ImageSpace), (uint32_t)effect); return; }
     bool ok = r->RenderMenuBackground(scene, 21, w, h, tone->image, tone->d3dfmt, kLuma, blend, 1.0f);
     if (switchTarget) r->Do_EndUsingRenderTargetGroup();
     if (ok) { g_isNative++; r->stats().native[Route_ImageSpace]++; }
-    else { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; }
+    else { g_isSkipped++; r->stats().skipped[Skip_ImageSpace]++; NX_PLAT_UNSUPPORTED(nx::SkipName(Skip_ImageSpace), (uint32_t)effect); }
 }
 
 } // namespace engine

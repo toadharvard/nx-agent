@@ -299,6 +299,59 @@ class Synth(unittest.TestCase):
             self.assertIn(n, names)
 
 
+class PermPoints(unittest.TestCase):
+    """perm.place_points: the world-space points a VS takes from constants land inside the clip volume (the S16
+    'vacuous 9'), and only those registers change"""
+    J = {'hash': '00000000000000ab', 'stage': 'vertex', 'model': 'vs_2_0',
+         'inputs': [{'usage': 'POSITION', 'index': 0}, {'usage': 'TEXCOORD', 'index': 1}],
+         'ctab': [{'name': 'ModelViewProj', 'set': 'float', 'class': 'matrix_rows', 'reg': 0, 'rows': 4, 'count': 4},
+                  {'name': 'Bones', 'set': 'float', 'class': 'vector', 'reg': 30, 'count': 6}]}
+    G = 'ivec4 vs_a0; vs_r1 = vs_dk_relc(20 + vs_a0.x); vs_r2 = vs_dk_relc(30 + vs_a0.x);'
+
+    def job(self, extra, glsl=None):
+        import copy, random, perm
+        j = copy.deepcopy(self.J)
+        j['ctab'] += extra
+        return perm.vs_job(j, random.Random(7), self.G if glsl is None else glsl)
+
+    def test_instance_array(self):
+        e0, s0, v0, i0, c0 = self.job([])
+        inst = [{'name': 'InstanceData', 'set': 'float', 'class': 'vector', 'reg': 20, 'count': 2}]
+        e1, s1, v1, i1, c1 = self.job(inst)
+        self.assertEqual((e0, s0, v0, i0), (e1, s1, v1, i1))      # the main stream is untouched
+        self.assertEqual({k: v for k, v in c0.items() if k not in (20, 21)}, {k: v for k, v in c1.items() if k not in (20, 21)})
+        for k in (20, 21):
+            x, y, z, w = c1[k]
+            self.assertTrue(0.4 <= abs(x) <= 0.6 and 0.4 <= abs(y) <= 0.6 and 0.9 <= z <= 0.99 and w == 100.0, c1[k])
+        self.assertEqual(self.job(inst, 'vs_r1 = vs_c20;')[4][20], self.job([], 'vs_r1 = vs_c20;')[4][20])   # not read relatively
+        self.assertEqual(self.job(inst)[4], c1)                    # deterministic
+        multi = 'vs_r1 = vs_dk_relc(20 + vs_a0.x); vs_r2 = vs_dk_relc(21 + vs_a0.x);'   # two vectors per instance
+        self.assertEqual(self.job(inst, multi)[4], self.job([], multi)[4])
+
+    def test_segment_index(self):
+        """a Segment* array: the COLOR input is the point index, FLOAT4 by grid row over [0, count)"""
+        import copy, random, struct, perm
+        j = copy.deepcopy(self.J)
+        j['inputs'] = [{'usage': 'POSITION', 'index': 0}, {'usage': 'COLOR', 'index': 1}]
+        j['ctab'].append({'name': 'SegmentData', 'set': 'float', 'class': 'vector', 'reg': 20, 'count': 2})
+        elems, stride, verts, idx, vsc = perm.vs_job(j, random.Random(7), self.G)
+        self.assertEqual([e[2] for e in elems], [perm.FLOAT4, perm.FLOAT4])
+        rows = [struct.unpack_from('<f', verts, gi * stride + 16)[0] for gi in range(9)]
+        self.assertEqual(rows, [struct.unpack('<f', struct.pack('<f', (g // 3) * 0.999))[0] for g in range(9)])
+        j['ctab'].pop()   # no segment array: COLOR stays D3DCOLOR, and the main stream is the same
+        e0 = perm.vs_job(j, random.Random(7), self.G)
+        self.assertEqual([e[2] for e in e0[0]], [perm.FLOAT4, perm.D3DCOLOR])
+        self.assertEqual(e0[2][:16], verts[:16])
+
+    def test_box(self):
+        box = [{'name': 'MinPos', 'set': 'float', 'class': 'vector', 'reg': 10, 'count': 1},
+               {'name': 'MaxPos', 'set': 'float', 'class': 'vector', 'reg': 11, 'count': 1}]
+        c0, c1 = self.job([])[4], self.job(box)[4]
+        lo, hi = c1[10], c1[11]
+        self.assertTrue(all(a < b for a, b in zip(lo[:3], hi[:3])) and lo[2] >= 0.5 and hi[2] <= 1.5, (lo, hi))
+        self.assertEqual({k: v for k, v in c0.items() if k not in (10, 11)}, {k: v for k, v in c1.items() if k not in (10, 11)})
+
+
 @unittest.skipUnless(os.environ.get('S16_E2E'), 'S16_E2E=<bin dir> (s6b_asm, sdp2dksh) builds a package')
 class Perm(unittest.TestCase):
     def test_own_package(self):
