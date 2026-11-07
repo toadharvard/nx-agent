@@ -38,9 +38,9 @@
 0x00823c04	mid_data	$LN85	n	1	1	none: data symbol / bogus address
 0x008d0430	body_named	class PatrolActorPackageData * __thiscall LowProcess::GetCurrentPackageData(void)	n	6	227	needs body (decompile)
 0x009fea2a	body_unnamed	NVAPI-like GPU query (renderer.cpp), likely static NVIDIA lib	i	1	1	needs body (decompile)
-0x009fead6	body_unnamed	NVAPI-like GPU query (renderer.cpp), likely static NVIDIA lib	i	1	1	needs body (decompile)
-0x009feae8	body_unnamed	NVAPI-like GPU query (renderer.cpp), likely static NVIDIA lib	i	1	1	needs body (decompile)
-0x009febd8	body_unnamed	NVAPI-like GPU query (renderer.cpp), likely static NVIDIA lib	i	1	1	needs body (decompile)
+0x009fead6	thunk	NVAPI entry (jmp [nvapi_QueryInterface slot], fnv_004da670::FUN_009fead6(int, int*))	i	1	1	fnvnx_nvapi_not_initialized
+0x009feae8	thunk	NVAPI entry (jmp [nvapi_QueryInterface slot], fnv_004da670::FUN_009feae8(int*, unsigned*))	i	1	1	fnvnx_nvapi_not_initialized
+0x009febd8	thunk	NVAPI entry (jmp [nvapi_QueryInterface slot], fnv_004da670::FUN_009febd8(void*, int*))	i	1	1	fnvnx_nvapi_not_initialized
 0x00a00000	mid_data	?FUN_00a00000@@3DA ?g_011c59e0_arg1@@3QBDB ?g_011c5a4c_arg1@@3QBDB ?g_011c5c80_a	n	2	3	none: data symbol / bogus address
 0x00aa1750	body_named	unsigned int __thiscall NiFile::FileRead(void *, unsigned int)	n	3	4	needs body (decompile)
 0x00aa1810	body_unnamed	unsigned int __thiscall FUN_00aff950_shell::FUN_00aa1810(void *, unsigned int)	n	2	2	needs body (decompile)
