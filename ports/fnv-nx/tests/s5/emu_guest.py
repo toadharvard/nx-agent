@@ -917,6 +917,101 @@ class Emu:
             self.watch_log.append((self.watch_n, a, n, value & (1 << 8 * n) - 1, pc, lr))
         self.uc.hook_add(UC_HOOK_MEM_WRITE, on_write, begin=addr, end=addr + size - 1)
 
+    # -- --trace-fn: function-boundary trace (the guest side of the lockstep trace, tests/s5/boot_trace.py). One TSV
+    # line per event, written as it happens (a fault keeps everything before it):
+    #   call <seq> <tid> <depth> <name> <orig|-> <x0..x7> <sp> <lr>
+    #   ret  <seq> <tid> <depth> <name> <x0>
+    #   w    <seq> <tid> <addr> <size> <value> <pc>      (with writes: stores of a traced callee outside its stack)
+    # <seq> pairs a ret and its writes with their call. Names are symbols, 0xORIG (__fnv_<orig>) or re:REGEX.
+    def install_trace_fn(self, specs, path, writes=False, limit=1_000_000):
+        names = {}
+        for a, ns in zip(self.sym_addrs, self.sym_names):
+            for n in ns:
+                names.setdefault(n, a)
+        targets = {}
+        for spec in specs:
+            for s in spec.split(","):
+                s = s.strip()
+                if not s:
+                    continue
+                if s.startswith("re:"):
+                    rx = re.compile(s[3:])
+                    hits = [n for n in names if rx.search(n) and not n.startswith("__fnvnx_vtrap_")]
+                elif re.fullmatch(r"0x[0-9a-fA-F]+", s):
+                    hits = [f"__fnv_{int(s, 16):08x}"]
+                else:
+                    hits = [s]
+                for n in hits:
+                    if n not in names:
+                        print(f"   trace-fn: {n}: no such symbol")
+                        continue
+                    la = names[n]
+                    rt = la - self.link_base + self.base if self.relocatable else la
+                    label = next((m for m in self.sym_names[self._bisect(self.sym_addrs, la) - 1]
+                                  if not m.startswith("__fnv_")), n)
+                    orig = next((m[6:14] for m in self.sym_names[self._bisect(self.sym_addrs, la) - 1]
+                                 if re.fullmatch(r"__fnv_[0-9a-f]{8}", m)), "-")
+                    targets[rt] = (label, orig)
+        X0 = UC_ARM64_REG_X0   # X0..X28 are consecutive in unicorn
+        out = open(path, "w", buffering=1)
+        self.trace_out = out
+        state = {"seq": 0, "n": 0, "frames": {}, "ret_hooks": {}, "whook": None, "live": 0}
+        print(f"   trace-fn: {len(targets)} functions -> {path}{' (with writes)' if writes else ''}")
+
+        def tid():
+            return self.cur.tid if self.cur is not None else 0
+
+        def on_write(uc, access, a, n, value, _):
+            fr = state["frames"].get(tid())
+            if not fr:
+                return
+            seq, sp0 = fr[-1][0], fr[-1][1]
+            if sp0 - 0x100000 <= a < sp0:   # the callee's own frame
+                return
+            out.write(f"w\t{seq}\t{tid()}\t{a:#010x}\t{n}\t{value & (1 << 8 * n) - 1:#x}\t"
+                      f"{uc.reg_read(UC_ARM64_REG_PC):#x}\n")
+
+        def on_ret(uc, addr, size, _):
+            t = tid()
+            fr = state["frames"].get(t)
+            sp = uc.reg_read(UC_ARM64_REG_SP)
+            while fr and fr[-1][2] == addr and fr[-1][1] <= sp:
+                seq, _sp, _lr, label = fr.pop()
+                out.write(f"ret\t{seq}\t{t}\t{len(fr)}\t{label}\t{uc.reg_read(X0):#x}\n")
+                state["live"] -= 1
+                h = state["ret_hooks"].get(addr)
+                if h:
+                    h[1] -= 1
+                    if h[1] == 0:
+                        uc.hook_del(h[0])
+                        del state["ret_hooks"][addr]
+            if writes and state["live"] == 0 and state["whook"] is not None:
+                uc.hook_del(state["whook"])
+                state["whook"] = None
+
+        def on_call(uc, addr, size, _):
+            if state["n"] >= limit:
+                return
+            state["n"] += 1
+            label, orig = targets[addr]
+            state["seq"] += 1
+            seq, t = state["seq"], tid()
+            sp, lr = uc.reg_read(UC_ARM64_REG_SP), uc.reg_read(UC_ARM64_REG_LR)
+            fr = state["frames"].setdefault(t, [])
+            regs = "\t".join(f"{uc.reg_read(X0 + k) & 0xffffffffffffffff:#x}" for k in range(8))
+            out.write(f"call\t{seq}\t{t}\t{len(fr)}\t{label}\t{orig}\t{regs}\t{sp:#x}\t{lr:#x}\n")
+            fr.append((seq, sp, lr, label))
+            state["live"] += 1
+            h = state["ret_hooks"].get(lr)
+            if h:
+                h[1] += 1
+            else:
+                state["ret_hooks"][lr] = [uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr), 1]
+            if writes and state["whook"] is None:
+                state["whook"] = uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
+        for rt in targets:
+            self.uc.hook_add(UC_HOOK_CODE, on_call, begin=rt, end=rt)
+
     def watch_lines(self):
         return [f"watch\t#{k}\t{a:#010x}\t{n}\t{v:#x}\tpc {self.sym(pc)}\tlr {self.sym(lr)}"
                 for k, a, n, v, pc, lr in getattr(self, "watch_log", ())]
@@ -1790,6 +1885,12 @@ def main(argv):
                     help="collect-all boot: vslot/constructor traps return to their caller and are listed once each")
     ap.add_argument("--watch", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
+    ap.add_argument("--trace-fn", action="append", default=[], metavar="NAMES",
+                    help="function-boundary trace: symbols, 0xORIG or re:REGEX, comma-separated (args, return; "
+                    "install_trace_fn)")
+    ap.add_argument("--trace-out", metavar="TSV", help="where --trace-fn writes (default trace_fn.tsv)")
+    ap.add_argument("--trace-writes", action="store_true", help="--trace-fn also logs the callees' memory writes")
+    ap.add_argument("--trace-max", type=int, default=1_000_000, help="--trace-fn: at most this many calls")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
@@ -1835,6 +1936,8 @@ def main(argv):
     for spec in a.watch:
         addr, _, n = spec.partition(":")
         emu.install_watch(int(addr, 0), int(n, 0) if n else 4)
+    if a.trace_fn:
+        emu.install_trace_fn(a.trace_fn, a.trace_out or "trace_fn.tsv", writes=a.trace_writes, limit=a.trace_max)
 
     def write_summary(stop, rc=None):
         if a.summary_json:
