@@ -87,6 +87,16 @@ class Obj:
     def bind(self, name):
         return {0: 'local', 1: 'global', 2: 'weak'}.get(self.syms[self.defs[name]][4], '?')
 
+    def unused_undefs(self):
+        """Undefined symbols no relocation of the object uses (left by `ld -r --gc-sections`: the sections that
+        referenced them are gone, the symbol table entry stays)."""
+        used = set()
+        for hdrs in self._rela.values():
+            for s in hdrs:
+                for k in range(s[5] // 12):
+                    used.add(struct.unpack_from('<I', self.data, s[4] + k * 12 + 4)[0] >> 8)
+        return sorted({nm for i, (nm, _, _, _, _, shndx) in enumerate(self.syms) if nm and shndx == 0 and i not in used})
+
     def section_of(self, name):
         return self.secnames[self.syms[self.defs[name]][5]]
 
@@ -798,7 +808,10 @@ def gc_weaken(path, want, stem):
         return None
     x = Obj(xo)
     argf = stem + '.weaken'
-    open(argf, 'w').write('\n'.join('--weaken-symbol=' + n for n in sorted(x.defs) if x.bind(n) == 'global') + '\n')
+    # GC1: an undefined symbol only the discarded sections used is no reference; left in the symbol table, the link
+    # would count it as one and bind a trap stub to it (the code that named it does not exist in the guest or the exe)
+    open(argf, 'w').write('\n'.join(['--weaken-symbol=' + n for n in sorted(x.defs) if x.bind(n) == 'global'] +
+                                    ['--strip-symbol=' + n for n in x.unused_undefs()]) + '\n')
     if subprocess.run([OBJCOPY, '@' + argf, xo, wo], capture_output=True).returncode:
         return None
     return wo, set(roots)
