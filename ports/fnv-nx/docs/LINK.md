@@ -524,9 +524,8 @@ classes alike, C need not be constructible). The typeinfo is built from `std::tr
 `__direct_bases`): per base its `type_info` symbol (`typeid`), offset (the folded constant `(B *)(C *)4096`, minus
 4096) and public-ness (`std::is_convertible<C *, B *>`); repeated bases in `std::tr2::bases<C>` set
 `__non_diamond_repeat_mask`; GCC's choice of `__class` / `__si` (one public non-virtual base at offset 0) / `__vmi`.
-A base typeinfo no object defines is probed in the next round. Classes with virtual bases (no constant offset; VTT,
-construction vtables, virtual thunks) and anonymous-namespace classes are not synthesized. Errors in the probe drop
-only the items GCC names (or the class), and the class moves to its next host.
+A base typeinfo no object defines is probed in the next round. Anonymous-namespace classes are not synthesized.
+Errors in the probe drop only the items GCC names (or the class), and the class moves to its next host.
 
 Retries on one host (link 9f865b0a: 78 trap stubs of D23's `special-unresolved:typeinfo-for` / `vtable-for` /
 `VTT-for`, all with a 4 KiB zero block standing in):
@@ -539,6 +538,16 @@ Retries on one host (link 9f865b0a: 78 trap stubs of D23's `special-unresolved:t
   constructor/destructor shells): probed again by its elaborated name `struct ::C`, through a typedef.
 * *A class whose scope has only a placement `operator delete`* (V<k>'s implicit deleting destructor finds no usual
   one): V<k> declares its own; only V<k>'s D0, which is renamed to C's, would call it.
+* *Classes the derived class cannot stand for* - virtual bases (the VTT and construction vtables of V<k> are not
+  C's) or a direct base repeated in the hierarchy (the cast that gives its offset is ambiguous): the key function
+  is defined in a probe of the host, `::C::~C() {}` and, for the virtual functions C declares, `auto ::C::f(T)
+  const -> decltype(((const ::C *)0)->f(dv<T>())) {}`, so GCC emits C's own vtable group, `_ZTT`, `_ZTC` (hidden)
+  and `_ZTI` (`key_group`). A class with only inline virtuals (no key function) gets its complete destructor
+  called by qualified name and its `typeid` taken there, so the same data comes out as COMDAT copies. Only the data
+  is taken; the functions keep their real names (bound like any slot). A base probed only because another class's
+  typeinfo or construction vtable names it gets only its typeinfo. Virtual thunks no object defines
+  (`_ZTv<fixed>_<vcall>_f`) are generated: `this += fixed`, `this += *(vptr + vcall)`, tail call. A class whose key
+  function its unit defines keeps its reason.
 
 Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the compiled objects): weak `_ZTV`, `_ZTI`,
 `_ZTS` for names no compiled object defines, and the non-virtual thunks (`_ZTh[n]<k>_f`: `sub`/`add w0`, tail call

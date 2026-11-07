@@ -77,7 +77,8 @@ SRC = {
 # Unit e: the classes link 9f865b0a left as zero blocks. It carries its own std::exception (the decomp's staging
 # units do), so it does not compile after HEAD's <typeinfo>: probed with HEAD_BARE. FUN_e1 is hidden by a function of
 # the same name (elaborated name); PlDel has only a placement operator delete (the derived probe class declares
-# one).
+# one); VS has a virtual base, its destructor is the key function and is defined nowhere (vtable group, VTT and
+# construction vtable from GCC with the destructor defined in the probe; virtual thunks generated).
 EHEADER = r'''#pragma once
 namespace std { class exception { public: exception(const char *m) : msg(m) {} virtual ~exception() {}
     virtual const char *what() const { return msg; } const char *msg; }; }
@@ -90,12 +91,26 @@ struct PlDel : FUN_e1 { virtual ~PlDel(); static void *operator new(__SIZE_TYPE_
     static void operator delete(void *);   /* GCC defines ~PlDel only with a usual one: same vtable words */
 #endif
 };
+struct VT { virtual ~VT(); virtual int t() { return 3; } int x; };
+struct VI : virtual VT { virtual ~VI(); int t() override { return 4; } int i; };
+struct VS : VI { virtual ~VS(); int s; };
+struct VK : virtual VT { virtual const int &kc(int &) const; int k; };   /* key function kc, implicit destructor */
+struct AmbH { virtual void h(int *); int a; };
+struct AmbS : AmbH { int s; };
+struct AmbP { virtual void p(); int b; };
+struct AmbD : AmbP, AmbH, AmbS { void h(int *) override; int d; };   /* direct base AmbH repeated: ambiguous */
+struct VB : virtual VT { virtual ~VB() {} int b; };   /* only inline virtuals: its typeinfo comes out where used */
+struct VC : VB { VC(); virtual ~VC(); int c; };
 '''
-SRC['src/e.cpp'] = ('#include "e.h"\nvoid FUN_e1() {}\n'
+SRC['src/e.cpp'] = ('#include "e.h"\nvoid FUN_e1() {}\nVT::~VT() {}\nVI::~VI() {}\n'
                     'int catch_e(void (*f)()) { try { f(); } catch (ExcE &e) { return e.code; } return 0; }\n'
                     'struct FUN_e1 *mk_e1() { return new struct FUN_e1; }\n'
-                    'PlDel *mk_pl(void *p) { return new (p) PlDel; }\n')
-EORACLE = '#define FNVNX_ORACLE\n#include "e.h"\nExcE::~ExcE() {}\nFUN_e1::~FUN_e1() {}\nPlDel::~PlDel() {}\n'
+                    'PlDel *mk_pl(void *p) { return new (p) PlDel; }\nVS *mk_vs() { return new VS; }\n'
+                    'VK *mk_vk() { return new VK; }\nvoid AmbH::h(int *) {}\nvoid AmbP::p() {}\n'
+                    'int catch_amb(void (*f)()) { try { f(); } catch (AmbD &e) { return e.d; } return 0; }\n'
+                    'VC::VC() {}\n')
+EORACLE = '#define FNVNX_ORACLE\n#include "e.h"\nExcE::~ExcE() {}\nFUN_e1::~FUN_e1() {}\nPlDel::~PlDel() {}\n' \
+          'VS::~VS() {}\nconst int &VK::kc(int &r) const { return r; }\nvoid AmbD::h(int *) {}\nVC::~VC() {}\n'
 ORACLE = '#include "h.h"\nint Key::k() { return 9; }\nint Root::r() { return 0; }\nInl *mk_inl() { return new Inl; }\n' \
          'struct AbsX : Abs2 { int pure() override { return 1; } int g2() override { return 2; } };\n' \
          'AbsX *mk_absx() { return new AbsX; }\n'
@@ -134,7 +149,9 @@ UNITS = {'units': [
 MANGLED = {'Multi': '5Multi', 'Base1': '5Base1', 'Base2': '5Base2', 'Key': '3Key', 'Inl': '3Inl', 'Abs2': '4Abs2',
            'Root': '4Root', 'KeyImp': '6KeyImp', 'KeyDel': '6KeyDel', 'KeyOut': '6KeyOut'}
 # unit e: the names GCC emits for these classes with their key functions (EORACLE) == the synthesized ones
-E_NAMES = ['_ZTI4ExcE', '_ZTV4ExcE', '_ZTV6FUN_e1', '_ZTI6FUN_e1', '_ZTV5PlDel', '_ZTI5PlDel']
+E_NAMES = ['_ZTI4ExcE', '_ZTV4ExcE', '_ZTV6FUN_e1', '_ZTI6FUN_e1', '_ZTV5PlDel', '_ZTI5PlDel', '_ZTV2VS', '_ZTT2VS',
+           '_ZTC2VS0_2VI', '_ZTI2VS', '_ZTV2VK', '_ZTT2VK', '_ZTI2VK', '_ZTV4AmbD', '_ZTI4AmbD', '_ZTV2VC', '_ZTT2VC',
+           '_ZTC2VC0_2VB', '_ZTI2VC', '_ZTI2VB']
 
 ok = True
 
@@ -255,14 +272,19 @@ def main():
                     got, want = synth[n].ents(n), oracle.ents(n)
                     check(got == want, '%s differs from GCC:\n  got  %s\n  want %s' % (n, got, want))
         check('_ZTS3Key' in synth and '_ZTV5Multi' not in synth, 'typeinfo names synthesized, emitted vtables not')
-        # unit e (HEAD_BARE, elaborated name, placement-only delete)
+        # unit e (HEAD_BARE, elaborated name, placement-only delete, virtual base with the key destructor)
         eoracle = vtables.Obj(eoracle_obj)
         for n in E_NAMES:
             if check(n in synth, '%s synthesized' % n) and check(n in eoracle.defs, '%s in the oracle' % n):
                 got, want = synth[n].ents(n), eoracle.ents(n)
                 check(got == want, '%s differs from GCC:\n  got  %s\n  want %s' % (n, got, want))
-        for n in ('_ZN6FUN_e1D1Ev', '_ZN4ExcED1Ev'):   # defined nowhere: never taken from the probe
+        check('_ZTC2VS0_2VI' not in synth or synth['_ZTC2VS0_2VI'].syms[synth['_ZTC2VS0_2VI'].defs['_ZTC2VS0_2VI']]
+              [4] == 2, 'construction vtable weak')
+        for n in ('_ZTv0_n12_N2VSD1Ev', '_ZTv0_n12_N2VSD0Ev'):
+            check(n in synth, 'virtual thunk %s generated' % n)
+        for n in ('_ZN2VSD1Ev', '_ZN6FUN_e1D1Ev', '_ZN4ExcED1Ev'):   # defined nowhere: never taken from the probe
             check(n not in synth, '%s not defined by the synthesized objects' % n)
+        check('_ZTV2VB' not in synth, 'VB (a base named by VC\'s typeinfo): its typeinfo only')
         # S2c-vt item 5: emitted slot functions are game code, compiled with compile.sh's own flags (--print-flags)
         gf = layout.game_flags(tree, os.path.join(out, 'vtables', 'probe'))
         check(any(f.endswith('fnvnx_ftoi.so') for f in gf) and any(f.endswith('fnvnx_order.so') for f in gf) and
@@ -368,12 +390,19 @@ def main():
         # generated thunks (for thunks no object emits): this adjustment of the 32-bit this, then the tail call
         src, obj = os.path.join(t, 'th.S'), os.path.join(t, 'th.o')
         open(src, 'w').write(''.join(vtables.emit_thunk(n) for n in ('_ZThn8_N1C1fEv', '_ZThn70000_N1C1gEv',
-                                                                     '_ZTh4_N1C1hEv')))
+                                                                     '_ZTh4_N1C1hEv', '_ZTv0_n12_N1C1kEv',
+                                                                     '_ZTvn8_n16_N1C1mEv')))
+        check(vtables.emit_thunk('_ZTv0_n1024_N1C1kEv') is None, 'virtual thunk out of range: none')
         run([vtables.AS, '-mabi=ilp32', src, '-o', obj])
         dis = run([OBJDUMP, '-dr', '--no-show-raw-insn', obj])
         for pat in (r'<_ZThn8_N1C1fEv>:\n.*sub\tw0, w0, #0x8\n.*\tb\t.*\n.*R_AARCH64_P32_JUMP26\t_ZN1C1fEv',
                     r'<_ZThn70000_N1C1gEv>:\n.*mov\tw16, #0x1170.*\n.*movk\tw16, #0x1, lsl #16\n.*sub\tw0, w0, w16\n'
-                    r'.*\tb\t.*\n.*_ZN1C1gEv', r'<_ZTh4_N1C1hEv>:\n.*add\tw0, w0, #0x4\n'):
+                    r'.*\tb\t.*\n.*_ZN1C1gEv', r'<_ZTh4_N1C1hEv>:\n.*add\tw0, w0, #0x4\n',
+                    # virtual thunks: this += *(vptr + vcall offset), after the fixed adjustment
+                    r'<_ZTv0_n12_N1C1kEv>:\n.*mov\tw0, w0\n.*ldr\tw16, \[x0\]\n.*ldur\tw17, \[x16, #-12\]\n'
+                    r'.*add\tw0, w0, w17\n.*\tb\t.*\n.*R_AARCH64_P32_JUMP26\t_ZN1C1kEv',
+                    r'<_ZTvn8_n16_N1C1mEv>:\n.*mov\tw0, w0\n.*sub\tw0, w0, #0x8\n.*ldr\tw16, \[x0\]\n'
+                    r'.*ldur\tw17, \[x16, #-16\]\n'):
             check(re.search(pat, dis) is not None, 'generated thunk %s:\n%s' % (pat, dis))
         print('V rows %d, G rows %d, deldtors %d, undefined after link: %s'
               % (sum(r[1] == 'V' for r in rows.values()), sum(r[1] == 'G' for r in rows.values()), dn, sorted(undef)))

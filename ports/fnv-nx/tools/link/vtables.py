@@ -16,11 +16,12 @@ makes GCC itself lay the vtable out: `struct V<k> : C { virtual void __fnvnx_key
 defined, so V<k>'s vtable group is emitted. It is C's group plus the key slot (last of the primary vtable), with V<k>'s
 implicit destructor (D1/D0 and their this-adjusting thunks) and typeinfo in place of C's: removing the key slot and
 renaming those gives C's group exactly as GCC would emit it. The typeinfo comes from `std::tr2::direct_bases` (base
-`type_info` symbols via `typeid`, offsets as folded `(B *)(C *)4096` constants, public = convertible); classes with
-virtual bases are not synthesized. Output per host unit: `out/vtables/<unit>.vt.S` (weak `_ZTV`/`_ZTI`/`_ZTS` and
-non-virtual thunks, only for names no compiled object defines) assembled to `zz_vt_<unit>.o`; `synth.tsv` lists
-them and the next `resolve` links them as extra objects of their host unit (their slot references are bound by
-address like every other reference).
+`type_info` symbols via `typeid`, offsets as folded `(B *)(C *)4096` constants, public = convertible). Classes the
+derived class cannot stand for (virtual bases: VTT and construction vtables; a repeated, ambiguous direct base) take
+GCC's own data instead, made with their key function defined in a probe (`key_group`). Output per host unit:
+`out/vtables/<unit>.vt.S` (weak `_ZTV`/`_ZTI`/`_ZTS` and thunks, only for names no compiled object defines)
+assembled to `zz_vt_<unit>.o`; `synth.tsv` lists them and the next `resolve` links them as extra objects of their
+host unit (their slot references are bound by address like every other reference).
 """
 import collections
 import concurrent.futures
@@ -411,7 +412,7 @@ template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T));
 }
 '''
 NS = '__fnvnx_vt::'
-PROBE_VERSION = 4   # cache.json entries: 2 HEAD_BARE, 3 elaborated names, 4 placement delete
+PROBE_VERSION = 5   # cache.json entries: 2 HEAD_BARE, 3 elaborated names, 4 placement delete, 5 key_group
 # The same helpers without a standard header (GCC's builtins: __direct_bases, __bases, __is_convertible; typeid
 # needs std::type_info declared only). For host units that do not compile after <typeinfo> / <type_traits>: units
 # with their own std::exception / std::bad_alloc copies (redefinition), or with a `using namespace std` swap that
@@ -437,6 +438,7 @@ template <class T> auto dealloc(void *p, long) -> decltype(T::operator delete(p,
 template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T)); }
 }
 '''
+KEY_HEAD = 'namespace __fnvnx_vt { template <class T> T dv(); }\n'   # key_items: an argument of type T
 ELAB = 'struct '   # spelling prefix: an elaborated name (the class is hidden by a function of the same name)
 
 
@@ -547,7 +549,7 @@ def _ptr(obj, name):
     return e[0].sym if e else None
 
 
-def probe_host(tree, workdir, unit, classes):
+def _probe_host(tree, workdir, unit, classes):
     """classes: [(k, spelling)] -> {k: probe result} for the classes the unit can name. A result holds the class's
     mangled encoding (enc), flags, and when available the derived class's vtable group (vt_ents, made with the
     derived class V<k>: vt_k) and the direct bases (bases: [(typeinfo symbol, offset or None, virtual, public)]).
@@ -658,6 +660,87 @@ def probe_host(tree, workdir, unit, classes):
     return res
 
 
+def key_group(obj, enc):
+    """The data GCC emits with a class's key function: its vtable group, VTT, construction vtables and typeinfo
+    (`_ZTV`/`_ZTT`/`_ZTC`/`_ZTI` of enc) as {symbol: [Ent]}; None without the vtable group or with a word that
+    names a symbol local to the object."""
+    pre = '_ZTC' + enc
+    names = sorted(n for n in obj.defs if n in ('_ZTV' + enc, '_ZTT' + enc, '_ZTI' + enc) or
+                   (n.startswith(pre) and n[len(pre):len(pre) + 1].isdigit()))
+    if '_ZTV' + enc not in names:
+        return None
+    out = {}
+    for n in names:
+        if obj.is_bss(n):
+            return None
+        ents = obj.ents(n)
+        if any(e.sym and e.sym.startswith(('.section:', '.reloc')) for e in ents):
+            return None
+        out[n] = ents
+    return out
+
+
+def key_items(k, spelling, cands, dem):
+    """Probe lines defining the candidate key functions of class k: its destructor (kd) and the virtual functions
+    its vtable names as its own and no object defines (kv<i>), each with an empty body and its declared return type
+    taken back from the call (`auto ::C::f(int *) const -> decltype(((const ::C *)0)->f(dv<int *>())) {}`). A line
+    that names no such member does not compile and is dropped. A class without a key function (only inline
+    virtuals: GCC emits its data wherever it is used) gets it used (kx): its complete destructor called by
+    qualified name and its typeid, so the vtable group, VTT and typeinfo come out as COMDAT copies."""
+    import sigs
+    plain = spelling[len(ELAB):] if spelling.startswith(ELAB) else spelling
+    items = [(k, 'kd', '%s::~%s() {}' % (plain, plain.rsplit('::', 1)[-1])),
+             (k, 'kx', 'namespace __fnvnx_vt { typedef %s X%d; extern "C" void __fnvnx_vtx_%d(X%d *p) '
+              '{ p->X%d::~X%d(); } extern "C" const void *const __fnvnx_vty_%d = &typeid(X%d); }'
+              % (spelling, k, k, k, k, k, k, k))]
+    for i, sym in enumerate(cands):
+        s = sigs.parse_itanium(sym, dem.get(sym))
+        if s.kind != 'func' or not s.qual or s.variant or any(
+                x in (dem.get(sym) or '') for x in ('{', '`', "'", 'anonymous', '...')):
+            continue
+        name, ps = s.qual[-1], s.raw_params or []
+        cv = ' const' if 'const' in (s.cv or '') else ''
+        args = ', '.join('::__fnvnx_vt::dv<%s>()' % p for p in ps)
+        items.append((k, 'kv%d' % i, 'auto %s::%s(%s)%s -> decltype(((%s%s *)0)->%s(%s)) {}' % (
+            plain, name, ', '.join(ps), cv, 'const ' if cv else '', plain, name, args)))
+    return items
+
+
+def probe_host(tree, workdir, unit, classes):
+    """_probe_host, then for the polymorphic classes a derived probe class cannot stand for - virtual bases (VTT,
+    construction vtables) or a direct base that cannot be named (a base repeated in the hierarchy: the cast to it is
+    ambiguous) - GCC's own data, with the key function defined in the probe unit. Its candidates (key_items): the
+    destructor (the key function of the decomp's stream and file classes, e.g. Stream87b0, FUN_00acdc90) and the
+    virtual functions the class declares and no object defines. Each gets an empty definition, so GCC emits the
+    class's own vtable group, VTT, construction vtables and typeinfo (key_group: data only; the functions and their
+    thunks are never taken: the slots keep naming the real ones, bound like any slot); a class without a key
+    function gives the same data as COMDAT copies once it is used there (key_items: kx). A class whose key function
+    its unit defines keeps its reason."""
+    res = _probe_host(tree, workdir, unit, classes)
+    need = [(k, r) for k, r in sorted(res.items()) if r['polymorphic'] and r.get('enc') and not r['final']
+            and '<' not in r['spelling'] and (r.get('virtual_bases') or r.get('virtual_any') or 'bases' not in r)]
+    if not need:
+        return res
+    bare = any(r.get('bare') for _, r in need)
+    cands = {}
+    for k, r in need:
+        cpre = class_prefix(r['enc'])
+        cands[k] = sorted({e.sym for e in r.get('vt_ents') or [] if e.sym and
+                           (e.sym.startswith('_Z' + cpre) or e.sym.startswith('_ZNK' + cpre[1:])) and
+                           not re.search(r'D[012]Ev$', e.sym)})
+    dem = demangle(s for c in cands.values() for s in c)
+    items = [(k2, nm, line) for k, r in need
+             for k2, nm, line in key_items(k, r['spelling'], cands[k], dem)]
+    obj, alive = compile_probe(tree, workdir, unit, items, 'vtk' + ('b' if bare else ''),
+                               prelude=(HEAD_BARE if bare else HEAD) + KEY_HEAD)
+    if obj is not None:
+        for k in sorted({k for k, _, _ in alive}):
+            grp = key_group(obj, res[k]['enc'])
+            if grp:
+                res[k]['key_group'] = grp
+    return res
+
+
 # ---------------------------------------------------------------------------------------------------- synthesis
 
 def synth_vtable(r):
@@ -727,9 +810,10 @@ def typeinfo_ents(enc, ti):
     return out
 
 
-def emit_data(sym, ents):
-    lines = ['    .section .data.rel.ro.%s,"aw"' % sym, '    .p2align 2', '    .weak %s' % sym,
-             '    .type %s, %%object' % sym, '    .size %s, %d' % (sym, 4 * len(ents)), '%s:' % sym]
+def emit_data(sym, ents, hidden=False):
+    lines = ['    .section .data.rel.ro.%s,"aw"' % sym, '    .p2align 2', '    .weak %s' % sym] + \
+        (['    .hidden %s' % sym] if hidden else []) + \
+        ['    .type %s, %%object' % sym, '    .size %s, %d' % (sym, 4 * len(ents)), '%s:' % sym]
     for e in ents:
         if e.sym is None:
             lines.append('    .word 0x%08x' % e.word)
@@ -746,8 +830,34 @@ def emit_string(sym, text):
 THUNK = re.compile(r'^_ZTh(n?)(\d+)_(.+)$')
 
 
+VTHUNK = re.compile(r'^_ZTv(n?)(\d+)_(n?)(\d+)_(.+)$')
+
+
+def emit_vthunk(sym):
+    """Virtual this-adjusting thunk _ZTv<fixed>_<vcall>_<function> (Itanium 3.3.3, a destructor or override reached
+    through a virtual base's vtable): this += fixed, then this += the vcall offset stored at vptr + vcall (a 32-bit
+    word in ILP32), tail-call the function. None for offsets outside one instruction's range."""
+    m = VTHUNK.match(sym)
+    if not m:
+        return None
+    fixed = -int(m.group(2)) if m.group(1) else int(m.group(2))
+    voff = -int(m.group(4)) if m.group(3) else int(m.group(4))
+    if abs(fixed) >= 4096 or not -256 <= voff <= 255 or voff % 4:
+        return None
+    body = ['    mov w0, w0']   # the ILP32 this, zero-extended for the address
+    if fixed:
+        body.append('    %s w0, w0, #%d' % ('add' if fixed > 0 else 'sub', abs(fixed)))
+    body += ['    ldr w16, [x0]', '    ldur w17, [x16, #%d]' % voff, '    add w0, w0, w17']
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % sym, '    .p2align 2', '    .weak %s' % sym,
+                      '    .type %s, %%function' % sym, '%s:' % sym] + body +
+                     ['    b _Z%s' % m.group(5), '    .size %s, .-%s' % (sym, sym)]) + '\n'
+
+
 def emit_thunk(sym):
-    """Non-virtual this-adjusting thunk _ZTh[n]<k>_<function>: adjust w0 (the ILP32 this), tail-call the function."""
+    """Non-virtual this-adjusting thunk _ZTh[n]<k>_<function>: adjust w0 (the ILP32 this), tail-call the function.
+    A virtual thunk (_ZTv) goes to emit_vthunk."""
+    if sym.startswith('_ZTv'):
+        return emit_vthunk(sym)
     m = THUNK.match(sym)
     if not m:
         return None
@@ -791,6 +901,9 @@ def slot_wants(items, defined, used=None):
             m = THUNK.match(s)
             if m:
                 s = '_Z' + m.group(3)
+            m = VTHUNK.match(s)
+            if m:
+                s = '_Z' + m.group(5)
             if not s.startswith('_ZT') and s not in defined:
                 want.add(s)
     return want
@@ -914,6 +1027,8 @@ def encode(r):
     d = dict(r)
     if d.get('vt_ents') is not None:
         d['vt_ents'] = [list(e) for e in d['vt_ents']]
+    if d.get('key_group') is not None:
+        d['key_group'] = {n: [list(e) for e in ents] for n, ents in d['key_group'].items()}
     return d
 
 
@@ -921,6 +1036,8 @@ def decode(d):
     r = dict(d)
     if r.get('vt_ents') is not None:
         r['vt_ents'] = [Ent(*e) for e in r['vt_ents']]
+    if r.get('key_group') is not None:
+        r['key_group'] = {n: [Ent(*e) for e in ents] for n, ents in r['key_group'].items()}
     if r.get('bases') is not None:
         r['bases'] = [tuple(b) for b in r['bases']]
     return r
@@ -929,9 +1046,13 @@ def decode(d):
 def stale_entry(got, n):
     """A cache.json entry of an older probe version that the current probe_host would answer differently: a class
     it did not name (HEAD_BARE, elaborated names), a polymorphic class without the derived class's vtable
-    (placement-only operator delete)."""
+    (placement-only operator delete), one the key function's data stands for (virtual bases, bases not named)."""
     vals = [v for i, v in got.items() if not i.startswith('_')]
-    return len(vals) != n or any(v.get('polymorphic') and not v.get('final') and 'vt_ents' not in v for v in vals)
+    return len(vals) != n or any(
+        v.get('polymorphic') and not v.get('final') and (
+            'vt_ents' not in v or
+            (v.get('enc') and '<' not in v.get('spelling', '') and
+             (v.get('virtual_bases') or v.get('virtual_any') or 'bases' not in v))) for v in vals)
 
 
 def run(out, tree, jobs=4):
@@ -967,7 +1088,7 @@ def run(out, tree, jobs=4):
                                           '|'.join(sp for _, sp, _ in cls))).encode()).hexdigest()
         got = cache.get(key)
         # an older probe's entry (PROBE_VERSION) is used only if it named every class and none of them is one the
-        # newer steps would take further (stale_entry)
+        # newer steps would take further (the key function's data: virtual bases, bases it could not name)
         if got is not None and (got.get('_v', 1) >= PROBE_VERSION or not stale_entry(got, len(cls))):
             return key, {cls[int(i)][0]: decode(v) for i, v in got.items() if not i.startswith('_')}, got
         try:
@@ -1017,8 +1138,11 @@ def run(out, tree, jobs=4):
         os.replace(cache_path + '.tmp', cache_path)
         # base typeinfos no object defines: probe them too, on the host unit that named them
         have_enc = {r['enc'] for _, r in results.values()}
-        want = {(b[0], h) for h, r in results.values() for b in r.get('bases') or []
-                if b[0] and b[0].startswith('_ZTI') and b[0] not in defined and b[0][4:] not in have_enc}
+        bnames = [(b[0], h) for h, r in results.values() for b in r.get('bases') or []]
+        bnames += [(e.sym, h) for h, r in results.values() for ents in (r.get('key_group') or {}).values()
+                   for e in ents if e.sym]   # GCC's own typeinfo and construction vtables name the bases' typeinfo
+        want = {(n, h) for n, h in bnames
+                if n and n.startswith('_ZTI') and n not in defined and n[4:] not in have_enc}
         dem = demangle(n for n, _ in want)
         for n, h in sorted(want):
             d = dem.get(n, '')
@@ -1043,6 +1167,26 @@ def run(out, tree, jobs=4):
             continue
         done_enc.add(enc)
         what, own_vt = [], False
+        grp = r.get('key_group')
+        if grp and r['polymorphic']:
+            # GCC's own group, VTT and construction vtables, made with the key function defined in the probe
+            # (probe_host: virtual bases, or a base the probe cannot name); the typeinfo stays with the vtable, as for
+            # the synthesized ones. A base probed for its typeinfo only (another class's typeinfo or construction
+            # vtable names it) gets only that: its vtable is no request
+            if '_ZTV' + enc not in defined and not c.startswith('base:'):
+                per_host[h].append(('vt', enc, grp['_ZTV' + enc]))
+                what.append('vtable group (key function)')
+                stats['vtable groups from the key function'] += 1
+                for n in sorted(grp):
+                    if n != '_ZTV' + enc and (n not in defined or n == '_ZTI' + enc):
+                        per_host[h].append(('raw', enc, (n, grp[n])))
+                        what.append(n[:4])
+            elif '_ZTI' + enc not in defined and '_ZTI' + enc in grp:
+                per_host[h].append(('raw', enc, ('_ZTI' + enc, grp['_ZTI' + enc])))
+                what.append('typeinfo (key function)')
+                stats['typeinfos from the key function'] += 1
+            rows.append((c, h, enc, '; '.join(what) or 'nothing missing'))
+            continue
         if r['polymorphic'] and '_ZTV' + enc not in defined:
             vt, why = synth_vtable(r)
             if vt is not None:
@@ -1076,7 +1220,16 @@ def run(out, tree, jobs=4):
         for kind, enc, data in items:
             if kind == 'vt':
                 text.append(emit_data('_ZTV' + enc, data))
-                thunks.update(e.sym for e in data if e.sym and e.sym.startswith('_ZTh') and e.sym not in defined)
+                thunks.update(e.sym for e in data if e.sym and e.sym.startswith(('_ZTh', '_ZTv'))
+                              and e.sym not in defined)
+            elif kind == 'raw':   # a key_group word list under its own name (VTT, construction vtable, typeinfo)
+                n, ents = data
+                # GCC emits construction vtables hidden: only this class's VTT names them
+                text.append(emit_data(n, ents, hidden=n.startswith('_ZTC')))
+                thunks.update(e.sym for e in ents if e.sym and e.sym.startswith(('_ZTh', '_ZTv'))
+                              and e.sym not in defined)
+                if n.startswith('_ZTI') and '_ZTS' + n[4:] not in defined:
+                    text.append(emit_string('_ZTS' + n[4:], n[4:]))
             else:
                 text.append(emit_data('_ZTI' + enc, typeinfo_ents(enc, data)))
                 if '_ZTS' + enc not in defined:
