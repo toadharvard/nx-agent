@@ -704,5 +704,31 @@ class Fold(unittest.TestCase):
                 self.assertNotEqual(r.cls, 'template-fold', n)
 
 
+
+class Thunks(unittest.TestCase):
+    def test_thunks(self):
+        """Thunk names parse to (this adjustment, vcall offset, target); refs.tsv's undefined thunks load; the stubs
+        assemble (ILP32) and branch to the target by name."""
+        self.assertEqual(bodies.thunk_parts('_ZThn24_N3Own3FunEv'), (-24, None, '_ZN3Own3FunEv'))
+        self.assertEqual(bodies.thunk_parts('_ZTh8_N1A1gEv'), (8, None, '_ZN1A1gEv'))
+        self.assertEqual(bodies.thunk_parts('_ZTv0_n12_N1A1fEv'), (0, 12, '_ZN1A1fEv'))
+        self.assertIsNone(bodies.thunk_parts('_ZN1A1fEv'))
+        with tempfile.TemporaryDirectory() as d:
+            refs = os.path.join(d, 'refs.tsv')
+            open(refs, 'w').write('src/a.cpp\t_ZThn24_N3Own3FunEv\tspecial-unresolved:non-virtual-thunk-to\t\t\t\t\n'
+                                  'src/b.cpp#x\t_ZTv0_n12_N1A1fEv\tspecial-unresolved:virtual-thunk-to\t\t\t\t\n'
+                                  'src/a.cpp\t_ZTV1A\tspecial-unresolved:vtable-for\t\t\t\t\n')
+            got = bodies.load_thunks(refs)
+            self.assertEqual(got, {'_ZThn24_N3Own3FunEv': {'src/a.cpp'}, '_ZTv0_n12_N1A1fEv': {'src/b.cpp'}})
+            asm = bodies.emit_thunks(got)
+            self.assertIn('    sub w0, w0, #24\n    b "_ZN3Own3FunEv"', asm)
+            as_ = shutil.which('aarch64-linux-gnu-as')
+            if as_:
+                open(os.path.join(d, 't.S'), 'w').write(asm)
+                r = subprocess.run([as_, '-mabi=ilp32', os.path.join(d, 't.S'), '-o', os.path.join(d, 't.o')],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()
