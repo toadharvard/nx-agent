@@ -105,7 +105,7 @@ buffers/window/heap, float words), the globals the oracle references, canned cal
 basic blocks of both machines; new coverage joins the corpus. Each divergence kind is minimised (overlays dropped, bytes
 zeroed, zero background) and probed: `division`, `ilp32-pointer`, `uninit-x86`/`uninit-arm` (result depends on
 garbage: stack fill, non-argument registers), `float->int`, `x87-precision`/`float`, `bool-repr` (a byte other than
-0/1 read as bool), `signedness` (clearing a top bit removes the divergence), `split-global`, `vptr-store`,
+0/1 that the oracle reads by itself, a 1-byte access, read as bool), `signedness` (clearing a top bit removes the divergence), `split-global`, `vptr-store`,
 `call-flow`. Saved as `<campaign>/div/<addr>-<n>.json` with the minimal case; `difffuzz.py repro [--trace] <file>`
 replays it with both instruction traces. Results are one line per function in `<campaign>/results.jsonl`, written when
 the function is done: `--resume` continues after a restart.
@@ -259,6 +259,14 @@ the divergence that remains and the record stays uninit-both. Random sample of 4
 c0d6c71516f6): 17 agree, 18 still differ, 4 gone, 1 call-flow; 8 of the agreeing functions fuzzed again: all 8 with no
 divergence. d18-uninit rechecks every cached uninit-both verdict once. Test: `tests/s13/test_d18.py`.
 
+**d19-bool (S1-rules, SCOPED = d19).** The bool-repr probe set each input byte above 1 to 1 and called the record
+bool-repr when the divergence went away. In shard 4 of 06f45fbb, 128 of the 161 bool-repr records had their hit byte
+inside a word with other nonzero bytes, mostly the 0x03 top byte of a planted pointer (0x030000ec -> 0x010000ec moves
+the pointer, it is not a bool). The probe now first runs the case once with `world.BYTE_READS` (x86emu records each
+read of planted memory with its size) and tries only bytes the oracle read with a 1-byte access and no wider access
+over them. Other records go on to the next probes. d19-bool rechecks every cached bool-repr verdict once. Test:
+`tests/s13/test_boolrepr.py`.
+
 **difffuzz-19: a full refresh (HARNESS = difffuzz-19, orchestrator-approved in S1-fuzzB-002).** S1-fuzzB's untyped
 float results (`x86emu.x87_result_use`), its CRT_MATH builtins and engine's preference for a decorated spelling
 change verdicts that no key reflects, so every key changes once; the scoped rows d14..d18 are folded into it (their
@@ -305,6 +313,14 @@ evidence in the record or a replay, else the record goes on to the other probes:
 - `call-order`, `bool-repr`, `uninit-*` and `array-new-check` rest on the record (two adjacent calls swapped in
   both traces; a replay; the native's own overflow throw), `msvc-inlined` on the oracle code (adaptive follow loads
   the callee whenever its oracle code exists; what stays is the case without it).
+**Coverage first (owner rule D21).** `runner.compare` no longer ends at a by-design or harness-made difference: it
+keeps the first one (`soft`), goes on with the rest of the function (calls, arguments, result, stores, callee-saved
+registers) and returns a hard difference found later, else the soft one. Covered: two adjacent calls in swapped
+order (call-order; their arguments compared crosswise), NaN-on-both call arguments (nan-bits), a bool result with the
+same truth value (bool-repr), a float result within the tolerance, stores only to function-local statics
+(local-static); earlier: the deleting-destructor flags and result (d14), unplanted oracle calls (d15), trailing frees
+of by-value aggregates and stub-range garbage calls (audit). Test: `tests/s13/test_audit.py`.
+
 Dynamic evidence for causes.py: every divergence carries `arm_entered`, the original addresses of the unit's
 functions whose native entry the run executed (up to 64; S13b's oracle-callee-unloaded can rest on it instead of a
 traced call the callee makes).

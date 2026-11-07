@@ -204,6 +204,11 @@ class World:
 # runs a case once that way to tell "both read garbage, otherwise equal" from a real difference
 UNIFORM = False
 
+# S1-rules: with BYTE_READS set to a dict, x86emu.run records every read of the case's planted memory as
+# {address: set of access sizes}; classify.py's bool-repr probe counts a byte only when the MSVC code read exactly
+# that byte with a 1-byte access (a bool), not when it is part of a pointer or integer word
+BYTE_READS = None
+
 
 def stack_fill(seed, n):
     if UNIFORM:

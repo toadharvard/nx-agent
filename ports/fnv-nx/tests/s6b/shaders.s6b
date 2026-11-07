@@ -494,7 +494,7 @@ mov o1, c0
 // P3/P4/6: Nine's D3D9 numerics on a driver without MUL_ZERO_WINS (softpipe):
 // log/logp = max(-FLT_MAX, log2|x|), rcp clamped to +-FLT_MAX/2, rsq to FLT_MAX, nrm 3-component with
 // rsq clamped (nrm(0) = 0), min/max as a < b ? a : b
-// expect: float dk_log(float x) { float a = abs(x); if (a == 0.0) return -dk_FLT_MAX; float t = log2(a);
+// expect: float dk_log(float x) { float a = abs(x); float t = log2(a); return mix(t, -dk_FLT_MAX, a == 0.0 || -dk_FLT_MAX > t); }
 // expect: const float dk_FLT_MAX = uintBitsToFloat(0x7f7fffffu);
 // expect: const float dk_FLT_HALF = uintBitsToFloat(0x7effffffu);
 // expect: vs_r0.x = (dk_log(vs_c0.x));

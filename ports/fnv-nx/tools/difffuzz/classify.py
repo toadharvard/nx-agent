@@ -299,10 +299,26 @@ def hint(pair, target, case, div, fn, max_steps):
             return h
     # bool representation probe: a byte that is neither 0 nor 1 read as bool (MSVC tests the whole byte, GCC may
     # test bit 0 only): set each such input byte to 1
+    # S1-rules: only a byte the MSVC code reads by itself (a 1-byte access at that address, no wider access over it)
+    # is a bool; a byte of a pointer or integer word that removes the divergence when set to 1 is not (before:
+    # ~80 % of bool-repr records were such bytes, mostly the 0x03 top byte of a planted pointer)
+    reads = {}
+    if pair is not None and any(x > 1 for b in case.mem.values() for x in b):
+        world.BYTE_READS = reads
+        try:
+            pair.run(case, max_steps)
+        finally:
+            world.BYTE_READS = None
+        h['_runs'] += 1
+
+    def byte_read(addr):
+        if reads.get(addr) != {1}:
+            return False
+        return not any(s > k for k in (1, 2, 3, 4, 5, 6, 7) for s in reads.get(addr - k, ()))
     bhits = []
     for a, b in list(case.mem.items()):
         for i, x in enumerate(b):
-            if x > 1 and len(bhits) < 4 and h['_runs'] < 30:
+            if x > 1 and len(bhits) < 4 and h['_runs'] < 30 and byte_read(a + i):
                 trial = case.copy()
                 nb = bytearray(b); nb[i] = 1; trial.mem[a] = bytes(nb)
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1

@@ -45,6 +45,11 @@ _ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool wit
                       # reservation here) is freed through NiFree before Gamebryo's allocator exists, which skipped
                       # boot_banner (MemoryManager's constructor) once the game's heaps are used; the exe destroys it
                       # and calls MemoryManager::Deallocate (standins.c; S1)
+_ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb standin  # 0x00aa78a0 MemoryHeap's constructor (D20 recon) stores its native
+                      # vptr, laid out by D22 (D1/D0 at 0/1); the memory manager's call-only heap declarations use
+                      # the exe's slots, so Allocate returned the heap's name and frees hit wrong blocks (J-0155 S10
+                      # fault). standins.c stores the exe's vptr 0x010a28fc as the exe does (S1-refs: D22 for
+                      # call-only declarations, tests/s5/callonly_vt.py)
 _Z12FUN_00406d50z standin  # 0x00406d50 strcat_s(dst, size, src), declared `(...)` and defined nowhere: WinMain's INI paths
                       # stayed empty, FalloutPrefs.ini was never read, sD3DDevice was "" and the device check sent the
                       # game to the launcher (ShellExecute, WinMain returns 0) (standins.c; S1-refs)
