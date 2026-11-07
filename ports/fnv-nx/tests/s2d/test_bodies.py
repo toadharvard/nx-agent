@@ -544,5 +544,44 @@ class Exe(unittest.TestCase):
             self.assertEqual(bodies.pristine_externs(d, 0, code_only=True), {'?g@@YAXXZ'})
 
 
+
+class Fold(unittest.TestCase):
+    """template-fold: pointer instantiations of a template member that units.json places at one native address
+    (two or more there) bind a new pointer instantiation to it; one instantiation alone, two addresses, or a
+    non-pointer argument do not."""
+
+    def test_fold(self):
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
+            {'symbol': '??1?$List@PAD@@QAE@XZ', 'address': '00405000'},               # List<char*>::~List()
+            {'symbol': '??1?$List@PAH@@QAE@XZ', 'address': '00405000'},               # List<int*>::~List()
+            {'symbol': '?Add@?$List@PAD@@QAEXAAPAD@Z', 'address': '00405100'},         # List<char*>::Add(char*&)
+            {'symbol': '?Add@?$List@PAH@@QAEXAAPAH@Z', 'address': '00405100'},
+            {'symbol': '?Get@?$List@PAD@@QAEPADXZ', 'address': '00405200'},            # one instantiation only
+            {'symbol': '?Pop@?$List@PAD@@QAEXXZ', 'address': '00405300'},              # two addresses
+            {'symbol': '?Pop@?$List@PAH@@QAEXXZ', 'address': '00405310'}],
+            'symbols': {}}]}
+        native = {0x00405000: 'X', 0x00405100: 'F', 0x00405200: 'F', 0x00405300: 'F', 0x00405310: 'F'}
+        want = {'_ZN4ListIP3FooED1Ev': ('00405000', 'D1'),       # List<Foo*>::~List()
+                '_ZN4ListIP3FooED2Ev': ('00405000', 'D2'),
+                '_ZN4ListIP3FooE3AddERS1_': ('00405100', None),  # List<Foo*>::Add(Foo*&)
+                '_ZN4ListIP3FooE3GetEv': (None, None),
+                '_ZN4ListIP3FooE3PopEv': (None, None),
+                '_ZN4ListIiED1Ev': (None, None)}                 # List<int>: not a pointer argument
+        with tempfile.TemporaryDirectory() as d:
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as f:
+                json.dump(units_j, f)
+            units = fnvlink.load_units(uj)
+        allms = {n for u in units.values() for n in list(u.refs) + [n for _, n in u.defs]}
+        msvc, itanium = tables(allms, want)
+        cl = bodies.Classifier(units, native, msvc, itanium, None, ['src/a.cpp'])
+        for n, (a, _) in want.items():
+            r = cl.classify(n, {'src/b.cpp'})
+            if a:
+                self.assertEqual((r.cls, r.target), ('template-fold', '__fnv_' + a), n)
+            else:
+                self.assertNotEqual(r.cls, 'template-fold', n)
+
+
 if __name__ == '__main__':
     unittest.main()

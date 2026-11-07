@@ -10,6 +10,10 @@ in this order (first that applies):
 1. `addr` - the same function at an original address under another name: the Itanium name, with class shells
    (`X_shell`) and then namespaces relaxed, matches MSVC names of exactly one address the native build
    defines (`addrmap.tsv` F/C/X; never a G: a deleting destructor is not a D1). Bound to `__fnv_<addr>`.
+1a. `template-fold` - a member of a class template over pointer arguments (`BSSimpleList<TESPackage*>::~BSSimpleList`)
+   whose other pointer instantiations units.json places at one address the native build defines, at least two of
+   them there: MSVC's linker folded their identical code (the body does not depend on the pointee), so this
+   instantiation's code is that body too. Bound to `__fnv_<addr>`; C2/D2 to the complete-object definition.
 1b. `exe-addr` (`--exe`, the player's FalloutNV.exe) - the referencing unit's pristine object calls the MSVC name:
    every pristine object's calls of it (REL32 in functions placed by units.json, or at the address a placed
    function's call reaches, bytes checked against the exe; a DIR32 there, the address taken, counts the same)
@@ -247,6 +251,23 @@ def tokens_for(isig):
 
 # ---------------------------------------------------------------------------------------------------- classify
 
+def fold_key(sig):
+    """A member of a class template whose template arguments are all pointers -> (scope, template, member,
+    arity, kind) with unit namespaces and shells relaxed; else None. The key of template-fold."""
+    if sig is None or sig.kind != 'func' or sig.params is None or len(sig.qual) < 2:
+        return None
+    cls = sig.qual[-2]
+    i = cls.find('<')
+    if i <= 0 or not cls.endswith('>'):
+        return None
+    args = [a.strip() for a in sigs.split_top(cls[i + 1:-1])]
+    if not args or not all(a.endswith('*') for a in args):
+        return None
+    scope = tuple(norm(q) for q in sig.qual[:-2] if not UNIT_NS.match(q))
+    last = re.sub(r'<.*$', '', sig.qual[-1]) if not sig.qual[-1].startswith('operator') else sig.qual[-1]
+    return (scope, norm(cls[:i]), last, len(sig.params), len(args))
+
+
 Row = collections.namedtuple('Row', 'name cls addr target units note host')
 
 
@@ -263,6 +284,13 @@ class Classifier:
                     m = msvc(n)
                     for _, k in def_keys(m):
                         self.idx[k][a].add(n)
+        self.fidx = collections.defaultdict(lambda: collections.defaultdict(set))  # fold key -> {addr: {names}}
+        for u in units.values():
+            for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
+                if a in native and n.startswith('?') and '?$' in n:
+                    k = fold_key(msvc(n))
+                    if k:
+                        self.fidx[k][a].add(n)
         self.bidx = collections.defaultdict(set)   # key -> {msvc names with a pristine body}
         for n in bodies or {}:
             m = msvc(n)
@@ -280,6 +308,21 @@ class Classifier:
                 return tier, a, sorted(ns)[0]
             if len(cands) > 1:
                 return 'ambiguous', None, ','.join('%08x' % a for a in sorted(cands)[:6])
+        return None
+
+    def by_fold(self, isig):
+        """(address, folded MSVC names) when the instantiations of this template member over pointer arguments
+        that units.json places all share one address the native build defines, with at least two of them there
+        (MSVC folded identical code: the body does not depend on the pointee), else None."""
+        k = fold_key(isig)
+        if not k or isig.variant == 'D0':
+            return None
+        want = VARIANT_KIND.get(isig.variant, 'F') if isig.variant else 'F'
+        cands = {a: ns for a, ns in self.fidx.get(k, {}).items() if self.native.get(a) == want}
+        if len(cands) == 1:
+            (a, ns), = cands.items()
+            if len(ns) >= 2:
+                return a, sorted(ns)
         return None
 
     def msvc_body(self, isig):
@@ -314,6 +357,11 @@ class Classifier:
             if x86_empty(code) and isig.variant != 'D0':
                 return Row(name, 'msvc-empty', None, None, us, '%s in u%d (%d bytes)' % (mn, ui, len(code)), host)
             return Row(name, 'msvc-inline', None, None, us, '%s in u%d (%d bytes)' % (mn, ui, len(code)), host)
+        fold = self.by_fold(isig)
+        if fold:
+            a, ns = fold
+            return Row(name, 'template-fold', a, ADDR_SYM % a, us, 'folded with %d instantiations, e.g. %s' %
+                       (len(ns), ns[0]), None)
         sk = special_of(isig)
         if sk and default_line(sk, isig):
             host = sorted(units_)[0] if units_ else None
@@ -720,7 +768,7 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
     idx_of = collections.defaultdict(list)
     for i_, n_ in enumerate(unit_names):
         idx_of[n_].append(i_)
-    cand = [r for r in rows if r.cls in ('missing', 'special-default') and r.units]
+    cand = [r for r in rows if r.cls in ('missing', 'special-default', 'template-fold') and r.units]
     need = {i_ for r in cand for u_ in r.units.split(',') for i_ in idx_of.get(u_, ())}
     ext = {i_: pristine_externs(msvc_objs, i_) for i_ in need}
     ms.need({n_ for e_ in ext.values() for n_ in e_})
@@ -1046,7 +1094,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     with open(os.path.join(bdir, 'bind.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\tclass\ttarget\n')
         for r in rows:
-            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel'):
+            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel', 'template-fold'):
                 f.write('%s\t%s\t%s\n' % (r.name, r.cls, r.target))
     with open(os.path.join(bdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#host_unit\tobject\tnames\n')
@@ -1056,7 +1104,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default',
+              for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'special-default',
                         'crt-rule', 'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
