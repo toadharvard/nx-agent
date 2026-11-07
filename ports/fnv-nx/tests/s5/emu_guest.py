@@ -2182,6 +2182,14 @@ def main(argv):
     a = ap.parse_args(argv)
     root = a.root or tempfile.mkdtemp(prefix="fnvnx-emu-")
     sd = datapath.DataPath(root, a.game)
+    # the card holds the guest itself, as on the device (sdlayout.h FNVNX_SD_GUEST): os_fs_case_insensitive() probes
+    # it against GUEST.NSO, and without it the probe was a file fault of every boot
+    card_guest = os.path.join(root, "switch", "fnv", "guest.nso")
+    if os.path.isdir(os.path.dirname(card_guest)) and not os.path.lexists(card_guest):
+        try:
+            os.symlink(os.path.abspath(a.nso), card_guest)
+        except OSError:
+            shutil.copyfile(a.nso, card_guest)
     for spec in a.file:
         name, _, src = spec.partition("=")
         dst = sd.resolve("/" + name.lstrip("/"))   # the guest's view: fnvnx/game and switch/fnv are the game dir

@@ -360,6 +360,9 @@ ABI_TAG = re.compile(r'\[abi:[^\]]*\]')
 CTOR_VARIANT = re.compile(r'(C[1-5]|D[0-5])(?=E|I|B)')
 
 
+ITANIUM_INT_LITERAL = re.compile(r'L[abcdhijlmstwxy]n?\d+E')
+
+
 def itanium_variant(mangled):
     """Constructor/destructor variant of an Itanium name ('C1', 'C2', 'D0', 'D1', 'D2') or None (heuristic: the last
     C<n>/D<n> token followed by E, I or B, not inside a <length><identifier> source name)."""
@@ -373,6 +376,10 @@ def itanium_variant(mangled):
             while j < n and mangled[j].isdigit():
                 j += 1
             i = j + int(mangled[i:j])
+            continue
+        lit = ITANIUM_INT_LITERAL.match(mangled, i) if c == 'L' else None
+        if lit:  # <expr-primary> ::= L <builtin type> <number> E (`Lj1024E`): the number is no <length>
+            i = lit.end()
             continue
         if c in 'CD' and i + 2 < n and mangled[i + 1] in '012345' and mangled[i + 2] in 'EIB':
             best = mangled[i:i + 2]

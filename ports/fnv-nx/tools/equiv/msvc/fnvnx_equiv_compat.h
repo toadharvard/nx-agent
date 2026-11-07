@@ -8,6 +8,12 @@
  */
 #ifndef FNVNX_EQUIV_COMPAT_H
 #define FNVNX_EQUIV_COMPAT_H
+/* CRT-NOCPPOVL: the target CRT has no C++ template overloads of the secure functions (strcpy_s(char (&)[N], src),
+ * strcat_s, sprintf_s, ...); MSVC 2008 declares them in C++ unless this is 0. A unit that keeps its own template of
+ * that form next to DECL1's `using ::strcat_s;` (archive.cpp's fnv_00afad00) was ambiguous under MSVC only. */
+#ifndef _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES
+#define _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES 0
+#endif
 #ifdef __cplusplus
 extern "C" {
 #endif

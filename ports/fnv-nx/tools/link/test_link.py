@@ -62,6 +62,10 @@ def main():
         check(got == tier and list(hit) == [0x401000], '%s ~ %s: tier %s (want %s)' % (m, i, got, tier))
     check(sigs.itanium_variant('_ZN3FooC2Ev') == 'C2', 'ctor variant')
     check(sigs.itanium_variant('_ZN3C1E3fooEv') is None, 'no variant in a source name')
+    # an integer template argument (`L<type><n>E`) is no <length><identifier>: the C1/D2 after it still counts
+    check(sigs.itanium_variant('_ZN3ArrIP1TLj1024EEC1Ev') == 'C1', 'ctor variant after an integer template arg')
+    check(sigs.itanium_variant('_ZN3ArrI1TLin3EED2Ev') == 'D2', 'dtor variant after a negative template arg')
+    check(sigs.itanium_variant('_ZN3ArrILj7EE3C1EEv') is None, 'a source name after an integer template arg')
 
     # ABI: definition __fastcall f(Foo*, int edx_dummy, int), reference __thiscall Foo::f(int)
     names = ['?f@@YIHPAVFoo@@HH@Z', '?f@Foo@@QAEHH@Z', '?g@@YAXHM@Z', '?g@@YAXHH@Z', '?h@Foo@@QAEHXZ',
