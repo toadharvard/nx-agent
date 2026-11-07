@@ -1806,6 +1806,21 @@ def emit_flag_stub(name, target, flags):
                       '    .text']) + '\n'   # the bridges after it assume .text
 
 
+def flags0_slot(isig, nd, ds, exe_path, a):
+    """A placeholder slot (`virtual void v00();`, no parameters, not a destructor variant) filled with the exe's
+    deleting destructor whose native definition reads the flags (`??_G` / `??_E` or a decomp `FUN_<a>(unsigned)`
+    with the exe's ??_G code shape, exevft.deleting_dtor; R1's adjustor recon bodies): a native call through the
+    slot leaves w1 undefined, and bit 0 set frees the object. The slot gets a stub passing flags 0 (destroy only).
+    Temporary: D26 (b) declares `virtual ~C()` for the placeholder (s2d-008/009)."""
+    if isig.variant or sigs.itanium_variant(nd['sym'].name) or isig.raw_params is None:
+        return False
+    if [p for p in isig.raw_params if p != 'void']:
+        return False
+    if (nd.get('msvc') or '').startswith(('??_G', '??_E')):   # adjustor thunks too (`[thunk]:` ... `adjustor{4}'`)
+        return True
+    return flags_param(ds) and bool(exe_path and exevft.deleting_dtor(exe_path, a))
+
+
 def emit_gdel_stub(name, d0, d1):
     return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
                       '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
@@ -1931,6 +1946,11 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             if vs is None:
                 return None, 'no %s at the address' % isig.variant
             return ADDR_SYM % a + ('' if vs is nd['sym'] else '_' + isig.variant), 'dtor'
+        if flags0_slot(isig, nd, ds, exe_path, a):
+            name = FLAG_SYM % (a, 0)
+            stubs.setdefault(name, emit_flag_stub(name, ADDR_SYM % a, 0))
+            st['flags0-placeholder-slots'] += 1
+            return name, 'flags stub (0): deleting destructor in a placeholder slot'
         if ds is None or ds.kind != 'func' or ds.raw_params is None or isig.raw_params is None:
             return None, 'no declaration to compare'
         how = slot_abi(isig, ds)
