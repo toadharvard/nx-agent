@@ -12,7 +12,9 @@ so a unit is compiled again only when its prepared source, a header it includes,
 or the compiler change; a header added anywhere on the include path changes every key (shadowing is then possible).
 The fingerprint rows are always recomputed from the object (equiv.py's Fingerprinter), so changes to the
 fingerprinting itself need no key. Layout:
-    m/<sha1(source, command line, salt)>.json   the last compile of that unit and variant: {"key", "deps"}
+    m/<sha1(source, command line, salt[, variant])>.json   the last compile of that unit and variant: {"key", "deps"}
+                                                (variant: attribute's leave-out builds, one manifest per candidate,
+                                                so they never replace the unit's head build)
     o/<key>.obj, o/<key>.txt                    the object and the compiler's text (showIncludes lines removed)
 On a farm the directory is a checkout of fnv-nx-build's equiv/cache/<k>of<N> (tools/farm/equiv_job.sh).
 
@@ -95,13 +97,14 @@ class Cache:
             hs.append('%s=%s' % (d, h))
         return hashlib.sha256('\n'.join([self.salt, cmd, names] + hs).encode()).hexdigest()[:32]
 
-    def _manifest(self, source, cmd):
-        return self.root / 'm' / (hashlib.sha1(('%s|%s|%s' % (source, cmd, self.salt)).encode()).hexdigest() + '.json')
+    def _manifest(self, source, cmd, variant=''):
+        ident = '%s|%s|%s' % (source, cmd, self.salt) + ('|' + variant if variant else '')
+        return self.root / 'm' / (hashlib.sha1(ident.encode()).hexdigest() + '.json')
 
-    def lookup(self, source, args, inc_dirs, obj):
+    def lookup(self, source, args, inc_dirs, obj, variant=''):
         """-> the compiler's text when <obj> was written from the cache, else None"""
         cmd, names = self._ident(args, inc_dirs)
-        m = self._manifest(source, cmd)
+        m = self._manifest(source, cmd, variant)
         try:
             j = json.loads(m.read_text())
         except (OSError, ValueError):
@@ -117,7 +120,7 @@ class Cache:
         t = self.root / 'o' / ('%s.txt' % k)
         return t.read_text(errors='replace') if t.is_file() else ''
 
-    def store(self, source, args, inc_dirs, src_path, text, obj):
+    def store(self, source, args, inc_dirs, src_path, text, obj, variant=''):
         """record a successful compile; returns the text without the showIncludes lines"""
         deps, rest = [self.norm(os.path.abspath(src_path))], []
         for line in text.splitlines():
@@ -136,7 +139,7 @@ class Cache:
         tmp = od / ('%s.obj.tmp%d' % (k, os.getpid()))
         shutil.copyfile(obj, tmp); os.replace(tmp, od / ('%s.obj' % k))
         (od / ('%s.txt' % k)).write_text(text)
-        m = self._manifest(source, cmd); m.parent.mkdir(parents=True, exist_ok=True)
+        m = self._manifest(source, cmd, variant); m.parent.mkdir(parents=True, exist_ok=True)
         tmp = m.with_suffix('.tmp%d' % os.getpid())
         tmp.write_text(json.dumps({'key': k, 'source': source, 'deps': deps}) + '\n'); os.replace(tmp, m)
         return text

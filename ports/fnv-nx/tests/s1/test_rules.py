@@ -1376,6 +1376,17 @@ prepare.__dict__['_fnvnx_recon'] = None
 _st = Counter()
 _ro2 = s1.r_recon_bodies(_hp, 'void f() {}\n', _st)
 check('REC1 an address the recipe already defines: skipped (REC1-DUP)', _ro2 + str(dict(_st)), ['REC1-DUP'], ['H::H()'])
+# a recon with only `symbols` (names bound to the exe's functions, no body): the bindings persist (R1, Havok agents)
+os.makedirs(os.path.join(_rc, 'recon', 'r2'))
+_json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/h.cpp', 'symbols': {'?Agent1@@YAXXZ': '0x00dcd6a0'}},
+           open(os.path.join(_rc, 'recon', 'r2', 'recon.json'), 'w'))
+prepare.__dict__['_fnvnx_recon'] = None
+_st = Counter()
+_ro3 = s1.r_recon_bodies(_hp, 'void f() {}\n', _st)
+s1.add_recon_definitions(os.path.join(_rc, 'dec'), _st)
+_ru = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
+check('REC1 symbols-only recon: bindings persist, no body', _json.dumps(_ru) + _ro3 + str(dict(_st)),
+      ['"?Agent1@@YAXXZ": "0x00dcd6a0"', "'REC1-SYM': 1"], ['fnv-nx REC1: reconstructed'])
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)
