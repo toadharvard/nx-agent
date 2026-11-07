@@ -4,7 +4,8 @@
 # runs exactly once), a farm re-taking its own claim, reports published.   bash tests/t1/test_runner_warm.sh
 set -uo pipefail
 P=$(cd "$(dirname "$0")/../.." && pwd); T=$(mktemp -d)
-cleanup() { pkill -f "$T/" 2>/dev/null; sleep 0.5; rm -rf "$T"; }; trap cleanup EXIT
+PIDS=()   # the persistent test runners: killed by pid (their command line does not hold $T)
+cleanup() { for p in "${PIDS[@]}"; do pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; done; sleep 0.5; rm -rf "$T"; }; trap cleanup EXIT
 fails=0; ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 B=claude/port-nsw-un6t9s
 git init -q --bare "$T/public.git"; git init -q --bare "$T/art.git"
@@ -18,13 +19,13 @@ J
 commit() { echo "$1" >"$T/w/f"; git -C "$T/w" add -A; git -C "$T/w" -c user.name=t -c user.email=t@t commit -qm "$1"; git -C "$T/w" push -q origin "HEAD:refs/heads/$B" 2>/dev/null; }
 commit h1
 export RUNNER_PUBLIC=$T/public.git RUNLOG=$T/runs.log RUNNER_PERSIST=1 RUNNER_POLL_S=1 RUNNER_CLAIM=t RUNNER_MAX_S=1
-start() { FARM_HOME=$T/$1 ARTIFACTS=$T/art bash "$P/tools/farm/runner.sh" "$1" echo >"$T/$1.out" 2>&1 & }
+start() { FARM_HOME=$T/$1 ARTIFACTS=$T/art bash "$P/tools/farm/runner.sh" "$1" echo >"$T/$1.out" 2>&1 & PIDS+=($!); }
 start qa; sleep 2
 FARM_HOME=$T/qa ARTIFACTS=$T/art bash "$P/tools/farm/runner.sh" qa echo >"$T/qa2.out" 2>&1
 ok "second start of the same farm exits" 'grep -q "already running" "$T/qa2.out"'
 start qb
 sleep 4; commit h2; sleep 1.5; commit h3; sleep 9
-ok "persist: still running after RUNNER_MAX_S" 'pgrep -f "$T/qa" >/dev/null || pgrep -f "runner.sh qa" >/dev/null'
+ok "persist: still running after RUNNER_MAX_S" 'kill -0 "${PIDS[0]}" 2>/dev/null'
 n=$(wc -l <"$T/runs.log"); u=$(cut -d" " -f2 "$T/runs.log" | sort -u | wc -l)
 ok "every head ran exactly once (runs $n, heads $u)" '[ "$n" = "$u" ] && [ "$u" -ge 2 ]'
 ok "both farms worked" '[ "$(cut -d" " -f1 "$T/runs.log" | sort -u | wc -l)" = 2 ]'
