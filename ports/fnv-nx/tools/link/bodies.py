@@ -1775,3 +1775,10 @@ def main(argv):
     run(pos[0], pos[1], msvc_objs=opts.get('msvc-objs'), names_txt=opts.get('names'), units_json=opts.get('units'),
         jobs=int(opts.get('jobs', os.cpu_count() or 4)), synth=not opts.get('no-synth'),
         exe_path=opts.get('exe') or os.environ.get('FNVNX_EXE'))
+    # the vtables / typeinfo only the synthesized bodies name: requested, then the synthesis runs again (its probe
+    # cache keeps the earlier classes), so resolve 2 links them like the others (s2d-010)
+    import vtables
+    n = vtables.bodies_requests(pos[0])
+    print('bodies: %d vtable / typeinfo requests from the synthesized bodies' % n, file=sys.stderr)
+    if n and not os.environ.get('FNVNX_NO_VTABLES'):
+        vtables.run(pos[0], pos[1], int(opts.get('jobs', os.cpu_count() or 4)))
