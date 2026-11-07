@@ -2,6 +2,9 @@
 
     catalog.py [--out catalog.jsonl] [--units i,j,...]
 
+With FNVNX_ORACLE=exe the functions are the prepared tree's (FNVNX_TREE build/units.json, REC1's recon functions
+included) and their bytes the exe's (exeimage.py); unit indices are the prepared tree's.
+
 One JSON line per function: unit index, source, address, size, symbol, direct call targets (relocated, outside the
 function), indirect calls, tail jumps out of the function, x87 / SSE instruction counts, fs: use (SEH frame),
 unresolved relocations. The campaign uses it to pick leaf functions first.
@@ -59,17 +62,22 @@ def main():
     ap.add_argument('--out', default=str(config.WORK / 'catalog.jsonl'))
     ap.add_argument('--units', default='')
     a = ap.parse_args()
-    units = json.load(open(config.DECOMP / 'build/units.json'))['units']
+    exe = config.ORACLE == 'exe'   # exeimage.py: the prepared tree's extents (recon functions included), exe bytes
+    units = json.load(open((config.TREE if exe else config.DECOMP) / 'build/units.json'))['units']
     sel = [int(x) for x in a.units.split(',')] if a.units else range(len(units))
+    if exe:
+        import os
+        import exeimage
+        pe = exeimage.load_pe(config.EXE, not os.environ.get('FNVNX_EXE_ANY'))
     config.WORK.mkdir(parents=True, exist_ok=True)
     with open(a.out, 'w') as out:
         for i in sel:
             u = units[i]
             p = config.X86OBJ / ('u%d.obj' % i)
-            if not p.exists():
+            if not exe and not p.exists():
                 continue
             try:
-                img = coffobj.UnitImage(coffobj.Coff(p), u)
+                img = exeimage.ExeImage(pe, u) if exe else coffobj.UnitImage(coffobj.Coff(p), u)
             except Exception as e:  # noqa: BLE001
                 print('unit %d: %s' % (i, e), file=sys.stderr)
                 continue
