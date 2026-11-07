@@ -493,6 +493,39 @@ class Exe(unittest.TestCase):
         self.assertEqual((got['_ZN4LockD1Ev'].cls, got['_ZN4LockD1Ev'].target), ('exe-addr', '__fnv_004010e0'))
 
 
+    def test_align_targets(self):
+        """Call-order alignment: P (placed) calls the unplaced helper C, which MSVC inlined in the exe, then K
+        (placed). C calls M, which no placed function calls: the exe's P calls M's address where C's call stood."""
+        import struct
+        p = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'                 # call ?C; call ?K; ret
+        c_ = b'\xe8\0\0\0\0\xc3'                                  # call ?M; ret
+        obj = coff({'?P@@YAXXZ': (p, {1: '?C@@YAXXZ', 6: '?K@@YAXXZ'}), '?C@@YAXXZ': (c_, {1: '?M@@YAXXZ'})},
+                   ['?K@@YAXXZ', '?M@@YAXXZ'])
+        P, K, M, Q = 0x401000, 0x401080, 0x4010c0, 0x401100
+        text = bytearray(0x200)
+        ins = b'\x90\x90\xe8\0\0\0\0\x90\xe8\0\0\0\0\xc3'      # the exe's P: C inlined (with M's call)
+        text[0:len(ins)] = ins
+        struct.pack_into('<i', text, 3, M - (P + 7))
+        struct.pack_into('<i', text, 9, K - (P + 13))
+        udata = [{'source': 'src/a.cpp', 'functions': [{'symbol': '?P@@YAXXZ', 'address': '%x' % P},
+                                                       {'symbol': '?Q@@YAXXZ', 'address': '%x' % Q},
+                                                       {'symbol': '?K@@YAXXZ', 'address': '%x' % K}],
+                  'symbols': {}}]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            exe = bodies.Pe(os.path.join(d, 'x.exe'))
+            got = bodies.align_targets(d, udata, exe, {'?M@@YAXXZ'})
+            self.assertEqual({k: dict(v) for k, v in got.items()}, {'?M@@YAXXZ': {M: 1}})
+            struct.pack_into('<i', text, 9, 0x401140 - (P + 13))         # the anchor K no longer matches
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            got = bodies.align_targets(d, udata, bodies.Pe(os.path.join(d, 'x.exe')), {'?M@@YAXXZ'})
+            self.assertEqual(dict(got), {})
+
+
     def test_exe_address_taken(self):
         """A DIR32 in a placed function (push offset ?g) gives the target from the exe's word, minus the addend."""
         import struct

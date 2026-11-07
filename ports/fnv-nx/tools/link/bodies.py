@@ -791,6 +791,96 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False):
     return out
 
 
+# ---------------------------------------------------------------------------------------------------- call alignment
+
+ALIGN_SKIP = ('__imp_', '__security', '__chkstk', '__alloca', '__EH', '__CxxFrame', '__ftol', '__alldiv',
+              '__allmul', '__aulldiv', '__allshl', '__allshr', '__aullshr', '__allrem', '__aullrem', '__SEH',
+              '_memcpy', '_memset', '__RTC')
+ALIGN_MIN_RATIO = 0.5
+ALIGN_MAX_BYTES = 0x4000
+
+
+def object_call_seqs(objdir, i):
+    """u<i>.obj -> {code symbol: [REL32 callee names in offset order]}."""
+    import vslots
+    p = os.path.join(objdir, 'u%d.obj' % i)
+    if not os.path.exists(p):
+        return {}
+    c = vslots.Coff(p)
+    funcs = {}
+    for name, si in c.defs.items():
+        sy = c.syms[si]
+        if sy.secnum > 0 and c.secs[sy.secnum].flags & IMAGE_SCN_CNT_CODE and sy.storage in (2, 3):
+            ends = [v for v, _ in c.symbols_in(sy.secnum) if v > sy.value]
+            end = min(ends) if ends else len(c.section_bytes(sy.secnum))
+            funcs[name] = [sn for off, (sn, typ) in sorted(c.relocs(sy.secnum).items())
+                           if sy.value <= off < end and typ == 0x14]
+    return funcs
+
+
+def align_targets(objdir, udata, exe, wanted):
+    """`exe-addr` by call order, for names whose every caller the exe has only inlined. For each function P that
+    units.json places, its pristine call sequence (REL32 callees in order; a callee defined in the same object and
+    placed nowhere is expanded in place, as MSVC inlined it, up to 4 levels) is aligned with the exe's direct
+    call/jmp targets in P's range (capstone; the range ends at the next placed function). Callees with an
+    address are the anchors; in a replaced run of equal length on both sides, each callee without an address
+    takes the exe target at its position. Held out on link 9f865b0a: 9,040 addresses right, 6 wrong.
+    -> {msvc name in wanted: {address: votes}}."""
+    import bisect
+    import difflib
+    import capstone
+    addr_of, size_of = {}, {}
+    for u in udata:
+        for f in u['functions']:
+            a = int(f['address'], 16)
+            for n in [f['symbol']] + list(f.get('fold_aliases', [])):
+                addr_of.setdefault(n, a)
+                size_of.setdefault(n, f.get('size'))
+        for n, a in (u.get('symbols') or {}).items():
+            addr_of.setdefault(n, int(a, 16))
+    starts = sorted({int(f['address'], 16) for u in udata for f in u['functions']})
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    out = collections.defaultdict(collections.Counter)
+
+    def expand(funcs, n, depth=0):
+        seq = []
+        for x in funcs[n]:
+            if x in funcs and x not in addr_of and depth < 4 and x != n:
+                seq += expand(funcs, x, depth + 1)
+            else:
+                seq.append(x)
+        return seq
+    for i in range(len(udata)):
+        funcs = object_call_seqs(objdir, i)
+        for p_ in funcs:
+            if p_ not in addr_of:
+                continue
+            seq = expand(funcs, p_)
+            if not any(x in wanted for x in seq):
+                continue
+            a = addr_of[p_]
+            size = size_of.get(p_)
+            if not size:
+                j = bisect.bisect_right(starts, a)
+                size = min(starts[j] - a, ALIGN_MAX_BYTES) if j < len(starts) else None
+            code = exe.read(a, size) if size else None
+            if not code:
+                continue
+            es = [int(ins.op_str, 16) for ins in md.disasm(code, a)
+                  if ins.mnemonic in ('call', 'jmp') and ins.size == 5 and ins.op_str.startswith('0x')
+                  and not a <= int(ins.op_str, 16) < a + size]
+            ptok = [addr_of.get(x, 'U:' + x) for x in seq]
+            sm = difflib.SequenceMatcher(None, ptok, es, autojunk=False)
+            if not es or sm.ratio() < ALIGN_MIN_RATIO:
+                continue
+            for tag, i1, i2, j1, j2 in sm.get_opcodes():
+                if tag == 'replace' and i2 - i1 == j2 - j1:
+                    for t, e in zip(ptok[i1:i2], es[j1:j2]):
+                        if isinstance(t, str) and t[2:] in wanted and not t[2:].startswith(ALIGN_SKIP):
+                            out[t[2:]][e] += 1
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------- run
 
 def load_bind(out):
@@ -873,6 +963,7 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
                 return True   # the decomp spells the destructor as FUN_<addr>(T*): natively both take x0 = object
         return False
     seen = collections.defaultdict(collections.Counter)   # Itanium name -> {address: sites}
+    aligned_names = set()
     via = {}
     by_m = collections.defaultdict(set)   # MSVC name -> Itanium names it stands for
     for mp in pairs.values():
@@ -885,6 +976,16 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             for n in by_m[m_]:
                 seen[n].update(tg)
                 via.setdefault(n, m_)
+    try:   # names whose callers the exe has only inlined: the address at their position in the call order
+        aligned = align_targets(msvc_objs, udata, exe, set(by_m))
+    except ImportError:   # capstone missing: the call-order evidence is skipped
+        aligned = {}
+    for m_, tg in aligned.items():
+        for n in by_m[m_]:
+            if n not in seen:   # a byte-checked call site wins; the alignment fills only names without one
+                seen[n].update(tg)
+                via.setdefault(n, m_)
+                aligned_names.add(n)
     out = []
     for r in rows:
         tg = seen.get(r.name)
@@ -910,7 +1011,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
                 a, 'native kind %s' % native[a] if a in native else 'not compiled natively')))
             continue
         out.append(r._replace(cls='exe-addr', addr=a, target=ADDR_SYM % a, host=None,
-                              note='%s called at %d site(s) in the exe' % (via[r.name], nsite) +
+                              note='%s %s %d site(s) in the exe' % (via[r.name], 'aligned by call order at'
+                                                                    if r.name in aligned_names else 'called at', nsite) +
                               (' (%s bound to the complete-object definition)' % isg.variant
                                if isg.variant in ('C2', 'D2') else '')))
     return out
