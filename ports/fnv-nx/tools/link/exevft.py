@@ -294,12 +294,10 @@ CTOR_SPAN = 0x400   # bytes decoded from a constructor's entry (S5's stand-in re
 _CS = {}
 
 
-def ctor_vftable(path, addr, starts):
-    """The vftable the x86 constructor at addr names: the immediate of its last `mov dword ptr [reg], imm32` (a base
-    register only: no index, no displacement, no segment - the vptr of the object the register holds) whose value is
-    in starts (vftable starts, e.g. scan()'s), decoded with capstone from addr up to its first `ret` / `ret N` (at
-    most CTOR_SPAN bytes). An inlined base constructor stores its own vftable first, so the last store is the most
-    derived class's. None without capstone, outside the image's sections, or when there is no such store."""
+def _ctor_stores(path, addr):
+    """The `mov dword ptr [reg+d], imm32` of the x86 function at addr up to its first `ret` / `ret N` (at most
+    CTOR_SPAN bytes), decoded with capstone: [(d, base register name, imm)] in order, for a base register only (no
+    index, no segment). None without capstone or outside the image's sections."""
     try:
         import capstone
         from capstone import x86 as cx
@@ -319,14 +317,43 @@ def ctor_vftable(path, addr, starts):
     if 'md' not in _CS:
         _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
         _CS['md'].detail = True
-    last = None
-    for ins in _CS['md'].disasm(data[off:off + n], addr):
+    md, got = _CS['md'], []
+    for ins in md.disasm(data[off:off + n], addr):
         if ins.id == cx.X86_INS_RET:
             break
         if ins.id != cx.X86_INS_MOV or len(ins.operands) != 2:
             continue
         dst, src = ins.operands
         if dst.type == cx.X86_OP_MEM and dst.size == 4 and src.type == cx.X86_OP_IMM and dst.mem.base and \
-                not dst.mem.index and not dst.mem.disp and not dst.mem.segment and (src.imm & 0xffffffff) in starts:
-            last = src.imm & 0xffffffff
+                not dst.mem.index and not dst.mem.segment:
+            got.append((dst.mem.disp, md.reg_name(dst.mem.base), src.imm & 0xffffffff))
+    return got
+
+
+def ctor_vftable(path, addr, starts):
+    """The vftable the x86 constructor at addr names: the immediate of its last `mov dword ptr [reg], imm32` (a base
+    register only: no index, no displacement, no segment - the vptr of the object the register holds) whose value is
+    in starts (vftable starts, e.g. scan()'s), decoded with capstone from addr up to its first `ret` / `ret N` (at
+    most CTOR_SPAN bytes). An inlined base constructor stores its own vftable first, so the last store is the most
+    derived class's. None without capstone, outside the image's sections, or when there is no such store."""
+    last = None
+    for d, _, v in _ctor_stores(path, addr) or ():
+        if not d and v in starts:
+            last = v
     return last
+
+
+MEMBER_MAX = 0x100000   # S5's bound on a member's offset (emu_guest install_member_vtables)
+
+
+def ctor_member_vftables(path, addr, vftables):
+    """The vftables the x86 constructor at addr stores at a displacement: {d: the immediate of the last
+    `mov dword ptr [reg+d], imm32` with 0 < d < MEMBER_MAX whose value is in vftables}, the vptrs of its member
+    objects and secondary bases (the renderer's RendererMap<N> members at +0x610.., s5-003 round 2). The base
+    register is the object's (esp / ebp bases are the frame's, not counted). Same decoding as ctor_vftable; {}
+    without capstone or outside the image."""
+    got = {}
+    for d, base, v in _ctor_stores(path, addr) or ():
+        if 0 < d < MEMBER_MAX and base not in ('esp', 'ebp') and v in vftables:
+            got[d] = v
+    return got
