@@ -3491,3 +3491,37 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   (S15-scene). Boot: WinMain -> renderer init blocked by NiTMap slot order (D22). Fuzz: 8 shards (fz1-fz8).
 * **resume order** - full farms' reports first; then D22 (S1-refs, S2c-vt), the collect-all boot on the new guest
   (S5-boot, S5-menu), the unadopted branches above, SM3 captures (S5-data), per-program references (S16).
+
+### J-0155 | 2026-11-05 | stream: orchestration | status: stopped | parent: J-0154
+
+* **stopped (owner)** - Every agent and farm is stopped; no scheduled check-in is enabled. Streams keep their
+  pushed branches (heads in J-0154 replies); full1-full5 are idle with their toolchains.
+* **first current guest** - 9f865b0a4037 (full4/full5): provenance PASS, census 2978/2978, trial link 2,345
+  undefined, guest.nso 14.7 MiB with 1,691 trap stubs, nro/9f865b0a4037 and link/9f865b0a4037 published. Boot:
+  WinMain, then a write fault in the game heap (HeapFreeBlock::RemoveFromFreeList <- AbstractHeap, S10 initializer
+  0x00fc7a50); 3,473 initializers then fault in FUN_00aa1070. First item on resume: S5-boot + S1-refs (heap
+  stand-in, MemoryHeap recon, global new/delete).
+* **shader sweep** (S16 sweep_job, all 16 packages, 7 parameter sets, reports/sweep/74a18a60420e/*of36): 1,809
+  programs - 981 pass, 232 over, 596 vacuous. Next: sweep_report.py classes (the zero-constant rcp/rsq case first);
+  the cell sweep (1,190 scenes, ~3.6 h per shard of 36) is not run yet.
+* **fuzz** - fz1-fz3 of 8 ran on the night queue; fz4-fz8, equivalence and audit are not run.
+
+### J-0156 | 2026-11-07 | stream: orchestration | status: active | parent: J-0155
+
+* **night pass results** (all on 06f45fbb, script farms on Haiku): fuzz 8/8 shards, 67,847 of 68,456 functions with a
+  verdict, ~10 % hard divergences (about half harness/representation classes); equivalence 6/6, 79 % of units
+  byte-identical, 120 functions with real code differences of 60,715; cell sweep 36/36, 1,139 of 1,155 scenes pass,
+  96.8 % of draws, GPU model median 10.0 ms, p99 18.5 ms, 10 scenes over 16.7 ms (SLS, HDR blend, SKY families);
+  overhead audit 24/26 shards (19, 26 rerun after 9e723b48), A64/x86 0.75x, bridges 1.0 %, 19k functions pending.
+* **lesson** - every check recomputes from scratch; the cell sweep re-boots the original under Wine for references
+  that never change. A nudged pending session can run its prompt twice: farm RUN is now flock-guarded.
+* **plan (owner: make the bench fast, then close coverage; targets unchanged)**
+  - T1-fastbench: reference capture cache + replay-only sweep; keyed caches for audit and equivalence; quick_job.sh
+    (diff -> affected units/functions -> incremental link, equiv, fuzz, audit, replay, boot; one report, <= 20 min);
+    3 warm farms on the integration head; full runs only when a cache key changes.
+  - S5-boot: the heap fault after WinMain, then the lockstep trace (original under Wine vs guest in the emulator,
+    first divergence at a function boundary) and real-argument capture for fuzz seeding.
+  - S2-bodies: the missing bodies by class, by script (special-default 1,359, vcall 927, exe-addr 198, msvc-inline
+    29), then the 1,142 missing classified by cause.
+  - after these: fuzz rule classes (bool-repr, call-flow, vptr-unpaired, native-early-exit, uninit), audit pending,
+    shaders 232 over / 596 vacuous, then the frame profile in emulation and the D21 performance levers.

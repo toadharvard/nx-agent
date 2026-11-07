@@ -530,7 +530,7 @@ index 319e3cb..c16565f 100644
      #if SUPPORT_PROFILE_GLSLES3
      else if (strcmp(profilestr, MOJOSHADER_PROFILE_GLSLES3) == 0)
      {
-@@ -591,6 +750,98 @@ void emit_GLSL_start(Context *ctx, const char *profilestr)
+@@ -591,6 +750,102 @@ void emit_GLSL_start(Context *ctx, const char *profilestr)
      ctx->indent++;
  } // emit_GLSL_start
  
@@ -590,27 +590,30 @@ index 319e3cb..c16565f 100644
 +             reglist_find(&ctx->used_registers, REG_TYPE_COLOROUT, 0))
 +    {
 +        // D3D9 alpha test and (ps < 3.0) fixed-function fog, uniform branches.
++        //  The compare is branch-free: the outcome of a against ref is one bit
++        //  (1 less, 2 equal, 4 greater, 8 unordered), and D3DCMP_NEVER..ALWAYS
++        //  (1-8) select a nibble of 0xF6D43210 as the set of passing outcomes
++        //  (NOTEQUAL and ALWAYS pass a NaN alpha, like a != r and the default);
++        //  other values pass. A switch here costs ~47 more Maxwell instructions.
++        //  Each block sits in a preprocessor guard: libfnvnx_shaders compiles static
++        //  variants (FNVNX_SHADER_EPI_*) by defining DK_EPI_ALPHA / DK_EPI_FOG to 0 or 1.
++        output_line(ctx, "#if !defined(DK_EPI_ALPHA) || DK_EPI_ALPHA");
 +        output_line(ctx, "if (ps_drv_alpha.x != 0) {");
 +        ctx->indent++;
-+        output_line(ctx, "float dk_a = ps_oC0.a; float dk_r = ps_drv_alpharef.x; bool dk_pass;");
-+        output_line(ctx, "switch (ps_drv_alpha.x) {");
-+        output_line(ctx, "case 1: dk_pass = false; break;");
-+        output_line(ctx, "case 2: dk_pass = dk_a < dk_r; break;");
-+        output_line(ctx, "case 3: dk_pass = dk_a == dk_r; break;");
-+        output_line(ctx, "case 4: dk_pass = dk_a <= dk_r; break;");
-+        output_line(ctx, "case 5: dk_pass = dk_a > dk_r; break;");
-+        output_line(ctx, "case 6: dk_pass = dk_a != dk_r; break;");
-+        output_line(ctx, "case 7: dk_pass = dk_a >= dk_r; break;");
-+        output_line(ctx, "default: dk_pass = true; break;");
-+        output_line(ctx, "}");
++        output_line(ctx, "float dk_a = ps_oC0.a; float dk_r = ps_drv_alpharef.x; uint dk_k = uint(ps_drv_alpha.x - 1);");
++        output_line(ctx, "uint dk_m = mix(15u, (0xF6D43210u >> (4u * (dk_k & 7u))) & 15u, dk_k < 8u);");
++        output_line(ctx, "uint dk_c = mix(mix(mix(8u, 4u, dk_a > dk_r), 2u, dk_a == dk_r), 1u, dk_a < dk_r);");
++        output_line(ctx, "bool dk_pass = (dk_m & dk_c) != 0u;");
 +        output_line(ctx, "if (!dk_pass) discard;");
 +        ctx->indent--;
 +        output_line(ctx, "}");
++        output_line(ctx, "#endif");
 +        if (!shader_version_atleast(ctx, 3, 0))
 +        {
 +            push_output(ctx, &ctx->globals);
 +            output_line(ctx, "layout(location = 18) in highp vec4 dk_fog_in;");
 +            pop_output(ctx);
++            output_line(ctx, "#if !defined(DK_EPI_FOG) || DK_EPI_FOG");
 +            output_line(ctx, "if (ps_drv_fog.x != 0.0) {");
 +            ctx->indent++;
 +            output_line(ctx, "float dk_d = gl_FragCoord.z; float dk_f;");
@@ -621,6 +624,7 @@ index 319e3cb..c16565f 100644
 +            output_line(ctx, "ps_oC0.rgb = mix(ps_drv_fogcolor.rgb, ps_oC0.rgb, clamp(dk_f, 0.0, 1.0));");
 +            ctx->indent--;
 +            output_line(ctx, "}");
++            output_line(ctx, "#endif");
 +        } // if
 +    } // else if
 +} // dk_epilogue
@@ -1034,7 +1038,7 @@ index 319e3cb..c16565f 100644
      make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s", src0);
      output_line(ctx, "%s", code);
  } // emit_GLSL_MOV
-@@ -1275,8 +1737,55 @@ void emit_GLSL_MUL(Context *ctx)
+@@ -1275,8 +1737,57 @@ void emit_GLSL_MUL(Context *ctx)
      output_line(ctx, "%s", code);
  } // emit_GLSL_MUL
  
@@ -1057,10 +1061,12 @@ index 319e3cb..c16565f 100644
 +    output_line(ctx, "const float dk_FLT_HALF = uintBitsToFloat(0x7effffffu);");
 +    // Zero is tested explicitly: GPUs and llvmpipe evaluate inversesqrt(0) /
 +    //  log2(0) through approximations whose result at 0 is not always +-inf.
-+    output_line(ctx, "float dk_log(float x) { float a = abs(x); if (a == 0.0) return -dk_FLT_MAX; float t = log2(a); return (-dk_FLT_MAX > t) ? -dk_FLT_MAX : t; }");
-+    output_line(ctx, "float dk_rcp(float x) { if (x == 0.0) return ((floatBitsToUint(x) & 0x80000000u) != 0u) ? -dk_FLT_HALF : dk_FLT_HALF; float t = 1.0 / x; t = (dk_FLT_HALF < t) ? dk_FLT_HALF : t; return (-dk_FLT_HALF > t) ? -dk_FLT_HALF : t; }");
-+    output_line(ctx, "float dk_rsq(float x) { float a = abs(x); if (a == 0.0) return dk_FLT_MAX; float t = inversesqrt(a); return (dk_FLT_MAX < t) ? dk_FLT_MAX : t; }");
-+    output_line(ctx, "float dk_nrm(vec3 v) { float d = dot(v, v); if (d == 0.0) return dk_FLT_MAX; float t = inversesqrt(d); return (dk_FLT_MAX < t) ? dk_FLT_MAX : t; }");
++    //  Every test is a mix(a, b, bool) select (TGSI UCMP), not an if or ?:, which
++    //  Mesa's GLSL front end lowers to UIF blocks (branch + sync on Maxwell).
++    output_line(ctx, "float dk_log(float x) { float a = abs(x); float t = log2(a); return mix(t, -dk_FLT_MAX, a == 0.0 || -dk_FLT_MAX > t); }");
++    output_line(ctx, "float dk_rcp(float x) { float t = 1.0 / x; t = mix(t, dk_FLT_HALF, dk_FLT_HALF < t); t = mix(t, -dk_FLT_HALF, -dk_FLT_HALF > t); return mix(t, uintBitsToFloat((floatBitsToUint(x) & 0x80000000u) | 0x7effffffu), x == 0.0); }");
++    output_line(ctx, "float dk_rsq(float x) { float a = abs(x); float t = inversesqrt(a); return mix(t, dk_FLT_MAX, a == 0.0 || dk_FLT_MAX < t); }");
++    output_line(ctx, "float dk_nrm(vec3 v) { float d = dot(v, v); float t = inversesqrt(d); return mix(t, dk_FLT_MAX, d == 0.0 || dk_FLT_MAX < t); }");
 +    output_blank_line(ctx);
 +    pop_output(ctx);
 +} // dk_numerics_helpers

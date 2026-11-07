@@ -1,7 +1,7 @@
 /*
  * sdp2dksh - thin CLI over libfnvnx_shaders.
  *
- *   sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] PACKAGE.sdp...   translate every entry
+ *   sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] [--variants] PACKAGE.sdp...   translate every entry
  *   sdp2dksh [-o DIR] [--glsl] --blob FILE...                         translate raw bytecode files
  *   sdp2dksh --list PACKAGE.sdp                                       list entries
  *   sdp2dksh --ctab [--blob] FILE...                                  dump constant tables (TSV)
@@ -9,6 +9,8 @@
  *
  * Output per unique bytecode (deduplicated by hash): DIR/<hash>.dksh, DIR/<hash>.json
  * (reflection), DIR/<hash>.glsl with --glsl; DIR/index.tsv lists every entry with its stats.
+ * --variants: also the static epilogue variants of every pixel shader that has an epilogue,
+ * DIR/<hash>__e0.dksh / __ea.dksh / __ef.dksh (FNVNX_SHADER_EPI_*), listed in DIR/variants.tsv.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +37,7 @@ static int spit(const char *path, const void *p, size_t n)
     return (fclose(f) == 0 && ok) ? 0 : -1;
 }
 
-typedef struct { const char *dir; uint32_t flags; int strict; FILE *index; int total, ok, fail, dup;
+typedef struct { const char *dir; uint32_t flags; int strict; FILE *index, *variants; int total, ok, fail, dup;
                  uint64_t *seen; size_t nseen, capseen; } ctx_t;
 
 static int seen(ctx_t *c, uint64_t h)
@@ -47,6 +49,29 @@ static int seen(ctx_t *c, uint64_t h)
     }
     c->seen[c->nseen++] = h;
     return 0;
+}
+
+/* the static epilogue variants of one pixel shader; none when its GLSL has no epilogue guard */
+static void variants(ctx_t *c, uint64_t h, const void *bc, size_t n)
+{
+    static const struct { const char *tag; uint32_t f; } v[] = {
+        { "__e0", 0 }, { "__ea", FNVNX_SHADER_EPI_ALPHA }, { "__ef", FNVNX_SHADER_EPI_FOG } };
+    fnvnx_shader_opts g = { FNVNX_SHADER_KEEP_GLSL | FNVNX_SHADER_NO_DKSH, NULL };
+    fnvnx_shader_result r;
+    fnvnx_shader_translate(bc, n, &g, &r);
+    int has = r.ok && r.glsl && strstr(r.glsl, "DK_EPI_ALPHA");
+    fnvnx_shader_result_free(&r);
+    if (!has) return;
+    for (size_t i = 0; i < sizeof v / sizeof v[0]; i++) {
+        fnvnx_shader_opts o = { (c->flags & ~FNVNX_SHADER_NO_DKSH) | FNVNX_SHADER_EPI_STATIC | v[i].f, NULL };
+        fnvnx_shader_translate(bc, n, &o, &r);
+        char path[4096];
+        if (r.dksh) { snprintf(path, sizeof path, "%s/%016llx%s.dksh", c->dir, (unsigned long long)h, v[i].tag); spit(path, r.dksh, r.dksh_size); }
+        if (r.glsl) { snprintf(path, sizeof path, "%s/%016llx%s.glsl", c->dir, (unsigned long long)h, v[i].tag); spit(path, r.glsl, strlen(r.glsl)); }
+        fprintf(c->variants, "%016llx\t%s\t%s\t%u\t%u\t%u\t%s\n", (unsigned long long)h, v[i].tag, r.ok ? "ok" : "fail",
+                r.stats.dk_instructions, r.stats.dk_gprs, r.stats.dk_code_size, r.ok ? "" : r.error);
+        fnvnx_shader_result_free(&r);
+    }
 }
 
 static void one(ctx_t *c, const char *pkg, const char *name, const void *bc, size_t n)
@@ -63,6 +88,7 @@ static void one(ctx_t *c, const char *pkg, const char *name, const void *bc, siz
         if (r.reflection_json) { snprintf(path, sizeof path, "%s/%016llx.json", c->dir, (unsigned long long)h); spit(path, r.reflection_json, strlen(r.reflection_json)); }
         if (r.glsl) { snprintf(path, sizeof path, "%s/%016llx.glsl", c->dir, (unsigned long long)h); spit(path, r.glsl, strlen(r.glsl)); }
     } else c->dup++;
+    if (!dup && c->variants && r.ok && r.stage == FNVNX_STAGE_PIXEL) variants(c, h, bc, n);
     if (r.ok) c->ok++; else { c->fail++; fprintf(stderr, "FAIL %s:%s: %s\n", pkg, name, r.error); }
     fprintf(c->index, "%016llx\t%s\t%s\t%s_%d_%d\t%s\t%u\t%u\t%u\t%u\t%u\t%s\n", (unsigned long long)h, pkg, name,
             r.stage == FNVNX_STAGE_VERTEX ? "vs" : r.stage == FNVNX_STAGE_PIXEL ? "ps" : "??", r.major, r.minor,
@@ -86,7 +112,7 @@ static void ctab_one(const char *pkg, const char *name, const void *bc, size_t n
 
 static int usage(void)
 {
-    fprintf(stderr, "usage: sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] PACKAGE.sdp...\n"
+    fprintf(stderr, "usage: sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] [--variants] PACKAGE.sdp...\n"
                     "       sdp2dksh [-o DIR] [--glsl] --blob FILE...\n"
                     "       sdp2dksh --list PACKAGE.sdp\n"
                     "       sdp2dksh --ctab [--blob] FILE...\n"
@@ -117,13 +143,14 @@ static int do_pack(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-    ctx_t c = { ".", 0, 0, NULL, 0, 0, 0, 0, NULL, 0, 0 };
-    int blob = 0, list = 0, ctab = 0, i = 1;
+    ctx_t c = { ".", 0, 0, NULL, NULL, 0, 0, 0, 0, NULL, 0, 0 };
+    int blob = 0, list = 0, ctab = 0, vars = 0, i = 1;
     for (; i < argc && argv[i][0] == '-'; i++) {
         if (!strcmp(argv[i], "-o") && i + 1 < argc) c.dir = argv[++i];
         else if (!strcmp(argv[i], "--glsl")) c.flags |= FNVNX_SHADER_KEEP_GLSL;
         else if (!strcmp(argv[i], "--no-dksh")) c.flags |= FNVNX_SHADER_NO_DKSH;
         else if (!strcmp(argv[i], "--strict")) c.strict = 1;
+        else if (!strcmp(argv[i], "--variants")) vars = 1;
         else if (!strcmp(argv[i], "--blob")) blob = 1;
         else if (!strcmp(argv[i], "--list")) list = 1;
         else if (!strcmp(argv[i], "--ctab")) list = ctab = 1;
@@ -137,6 +164,12 @@ int main(int argc, char **argv)
         c.index = fopen(p, "w");
         if (!c.index) { fprintf(stderr, "cannot write %s\n", p); return 1; }
         fprintf(c.index, "hash\tpackage\tname\tmodel\tstatus\td3d_instr\tglsl_stmts\tdk_instr\tdk_gprs\tdk_code\terror\n");
+        if (vars) {
+            snprintf(p, sizeof p, "%s/variants.tsv", c.dir);
+            c.variants = fopen(p, "w");
+            if (!c.variants) { fprintf(stderr, "cannot write %s\n", p); return 1; }
+            fprintf(c.variants, "hash\tvariant\tstatus\tdk_instr\tdk_gprs\tdk_code\terror\n");
+        }
     }
     int bad = 0;
     for (; i < argc; i++) {
@@ -155,6 +188,7 @@ int main(int argc, char **argv)
         fnvnx_sdp_free(&sdp);
         free(buf);
     }
+    if (c.variants) fclose(c.variants);
     if (c.index) {
         fclose(c.index);
         printf("sdp2dksh: %d shaders, %d ok, %d failed, %d duplicates\n", c.total, c.ok, c.fail, c.dup);

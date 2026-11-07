@@ -72,6 +72,18 @@ int fnvnx_shader_translate(const void *bc, size_t n, const fnvnx_shader_opts *op
     char *glsl = be->emit(bc, n, &refl, r->error, sizeof r->error);
     fnvnx_frontend_release(&refl);
     if (!glsl) return 0;
+    if ((opts->flags & FNVNX_SHADER_EPI_STATIC) && refl.stage == FNVNX_STAGE_PIXEL && strstr(glsl, "DK_EPI_ALPHA")) {
+        /* static epilogue variant: the defines go right after the #version line */
+        char *nl = strchr(glsl, '\n');
+        size_t head = nl ? (size_t)(nl - glsl) + 1 : 0, len = strlen(glsl);
+        char defs[96];
+        int k = snprintf(defs, sizeof defs, "#define DK_EPI_ALPHA %d\n#define DK_EPI_FOG %d\n",
+                         (opts->flags & FNVNX_SHADER_EPI_ALPHA) ? 1 : 0, (opts->flags & FNVNX_SHADER_EPI_FOG) ? 1 : 0);
+        char *v = (char *)malloc(len + (size_t)k + 1);
+        if (!v) { free(glsl); snprintf(r->error, sizeof r->error, "out of memory"); return 0; }
+        memcpy(v, glsl, head); memcpy(v + head, defs, (size_t)k); memcpy(v + head + k, glsl + head, len - head + 1);
+        free(glsl); glsl = v;
+    }
     glsl_stats(glsl, &r->stats);
 
     if (!(opts->flags & FNVNX_SHADER_NO_DKSH)) {

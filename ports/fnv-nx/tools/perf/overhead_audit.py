@@ -92,7 +92,8 @@ def main():
         try:
             BRIDGE[:] = bridge_range(uc.arm_image(source))
             rs = dyncount.run_target(uc, source, addr, a.seeds, a.max_steps)
-        except Exception as e:  # noqa: BLE001 - one function must not stop the audit
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - one function must not stop the audit (funcmodel and the
+            # harness raise SystemExit for a missing function)
             rows.append(dict(source=source, addr=addr, sym=sym, note='setup: %r' % e))
             continue
         good = [r for r in rs if not r.get('err') and r.get('x86') and r.get('a64')]
@@ -108,7 +109,7 @@ def main():
             if elf:
                 pr = funcmodel.price_funcs(elf, ['0x%08x' % addr], mca, mca1)[0]
                 cpi, cpi1 = pr.get('cpi'), pr.get('cpi_once')
-        except Exception as e:  # noqa: BLE001
+        except (Exception, SystemExit):  # noqa: BLE001 - funcmodel: SystemExit 'no function for ...' (shard 26/26)
             pass
         cyc = y * (cpi + cpi1) / 2 if cpi and cpi1 else None
         rows.append(dict(source=source, addr=addr, sym=sym, x86=x, a64=y, br=yb, cpi=cpi, cpi1=cpi1, cyc=cyc,
