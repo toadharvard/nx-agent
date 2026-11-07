@@ -150,6 +150,8 @@ def main():
         bad('svc in the guest', 'imports', guest_extra=struct.pack('<I', 0xD4000001 | (0x26 << 5)))
         bad('path outside the layout', 'paths.policy', guest_extra=b'sdmc:/fnvnx/game/Data\0')
         bad('save-data mount', 'paths.policy', guest_extra=b'save:/FalloutNV\0')
+        _r, _j, it2, _m = check(make(t, elf, guest_extra=b'sdmc:/atmosphere missing: needs Atmosphere\0sdmc:/switch\0'))
+        ok('parents and a message after the path pass', it2['paths.policy']['status'] == 'pass', it2['paths.policy'])
         bad('DWARF in an image', 'strip.release', guest_extra=b'.debug_info\0')
         bad('ELF on the card', 'strip.release', sd_elf=True)
         bad('stray file on the card', 'sd.layout', stray='switch/fnv/Data/FalloutNV.esm')
