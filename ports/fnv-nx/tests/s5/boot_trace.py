@@ -10,11 +10,12 @@ first divergence at a function boundary and writes real arguments per function f
 fnlist: the functions both sides trace, one '<hex address> <name>' per line: every native the address map binds
 (kind F, X, C) - optionally only names matching --only - minus compiler helpers and CRT (no native, kind E).
 
-compare: both logs are reduced to the call tree of the main thread (the thread of the first logged call) in order:
-call (original address), its arguments, its return value, and its writes to the objects it was given. The two
-call streams are walked in lockstep by original address. A call present on one side only (GCC inlined what MSVC
-called, or a stand-in skipped a body) is skipped when the other side's call is found within --resync calls ahead
-(counted per function: 'inlined'); otherwise that is a control divergence and the walk stops. For each matched
+compare: both logs are reduced to the call tree of the main thread (the thread of the first logged call): call
+(original address), its arguments, its return value, its writes to the objects it was given, its children. The
+two trees are walked in lockstep, level by level: the children of each matched pair are aligned by original
+address. A call present on one side only (GCC inlined what MSVC called, a stand-in skipped a body) is skipped
+when the two sides meet again within --resync calls (counted per function); both sides skipping calls there is
+a control divergence, and no meeting point ends that level. For each matched
 pair the values are compared where they mean the same on both machines:
   - image addresses (0x00400000..0x02100000: code, vftables, globals) and small integers (< 0x10000) must be equal;
   - other values (heap and stack pointers, which differ by construction) are compared by what they point to when
@@ -221,92 +222,140 @@ def same(a, b, da=None, db=None):
 
 # ---- compare -------------------------------------------------------------------------------------------------------
 def compare(guest, wine, units, resync=64, context=8, limit=20):
-    """lockstep walk; returns counts and the divergences in order (the first is the report's)"""
-    # the guest's own runtime calls game functions the exe never calls from there: operator new/delete
-    # (global_new.cpp -> MemoryManager) on behalf of the platform layer and libstdc++, and any caller without an
-    # original address (platform code); they are left out of the stream
-    def runtime(c):
-        return bool(c.caller) and (RUNTIME_CALLER.match(c.caller) is not None or "[orig" not in c.caller)
-    g = [c for c in guest if c.orig is not None and not runtime(c)]
-    w = wine
-    i = j = 0
+    """lockstep walk of the two call trees, level by level: the children of each matched pair are aligned by
+    original address (resync at the nearest common call within `resync`), compared, and walked into. Returns
+    counts and the divergences in pre-order (the first is the report's)."""
     inlined = collections.Counter()
-    matched = 0
+    st = {"matched": 0}
     divs = []
+
+    def runtime(c):   # the guest's runtime calls game functions the exe never calls from there (operator
+        # new/delete on behalf of the platform layer and libstdc++, callers without an original address)
+        return bool(c.caller) and (RUNTIME_CALLER.match(c.caller) is not None or "[orig" not in c.caller)
+
+    def noop(c):      # delete of NULL: GCC calls it, MSVC tests first
+        return c.regs[0] == 0 or (c.orig in NOOP_IF_ARG1_NULL and c.regs[1] == 0)
+
+    def gkids(cs):    # the guest's calls at this level: runtime calls spliced out, their children kept
+        out = []
+        for c in cs:
+            if c.orig is None or runtime(c):
+                out.extend(gkids(c.kids))
+            else:
+                out.append(c)
+        return out
 
     def add(kind, cg, cw, detail):
         if len(divs) < limit:
             divs.append({"kind": kind, "guest": cg, "wine": cw, "detail": detail})
 
-    def noop(c):   # a guest call with null receiver/first argument (delete of NULL: GCC calls, MSVC tests first)
-        return c.regs[0] == 0 or (c.orig in NOOP_IF_ARG1_NULL and c.regs[1] == 0)
-    while i < len(g) and j < len(w):
-        cg, cw = g[i], w[j]
-        if cg.orig != cw.orig:
-            # resync at the nearest common call (smallest di + dj): one-sided calls are inlining or extra calls
-            best = None
-            for d in range(1, resync + 1):
-                for di in range(0, d + 1):
-                    dj = d - di
-                    if i + di < len(g) and j + dj < len(w) and g[i + di].orig == w[j + dj].orig:
-                        best = (di, dj)
-                        break
-                if best:
-                    break
-            if best is None:
-                add("control", cg, cw, f"no common call within {resync}: guest {cg.name} ({cg.orig:#010x}), "
-                                       f"the exe {cw.name} ({cw.orig:#010x})")
-                break
-            di, dj = best
-            g_only = [c for c in g[i:i + di] if not noop(c)]
-            for c in g[i:i + di]:
-                inlined[("guest-only" if c in g_only else "guest-noop", c.name)] += 1
-            for c in w[j:j + dj]:
-                inlined[("wine-only", c.name)] += 1
-            if g_only and dj:   # both sides made calls the other did not: the paths differ here
-                add("control", g_only[0], w[j], f"guest calls {g_only[0].name} ({g_only[0].orig:#010x}) x{len(g_only)}"
-                                                f", the exe {w[j].name} ({w[j].orig:#010x}) x{dj}")
-            i, j = i + di, j + dj
-            continue
-        matched += 1
+    def values(cg, cw):
         conv = msvc_conv(units.get(cg.orig))
         if units and conv:
-            la, lb = a64_logical(cg, conv), x86_logical(cw, conv)
-            pairs = list(zip(la, lb))[:6]
-        else:
-            pairs = [(("x0", cg.regs[0], "x0"), ("ecx|s0", cw.regs[0] if cw.regs[0] else cw.regs[2],
-                                                  "ecx" if cw.regs[0] else "s0"))]
-        for (lab, va, sa), (_lab2, vb, sb) in pairs:
+            pairs = list(zip(a64_logical(cg, conv), x86_logical(cw, conv)))[:6]
+        else:   # no convention: x0 is the receiver (ecx) or the first stack argument; differing from both counts
+            why_e = same(cg.regs[0], cw.regs[0], cg.deref.get("x0"), cw.deref.get("ecx"))
+            why_s = same(cg.regs[0], cw.regs[2], cg.deref.get("x0"), cw.deref.get("s0"))
+            if why_e and why_s:
+                add("arg x0", cg, cw, f"{why_s} (and != ecx {cw.regs[0]:#x})")
+            pairs = []
+        for (lab, va, sa), (_l, vb, sb) in pairs:
             why = same(va, vb, cg.deref.get(sa), cw.deref.get(sb))
             if why:
                 add(f"arg {lab}", cg, cw, why)
                 break
         dec = units.get(cg.orig)
-        void = msvc_void(dec) if dec else cg.ret == cg.regs[0]   # without a decorated name: x0 untouched
+        void = msvc_void(dec) if dec else cg.ret == cg.regs[0]
         if cg.ret is not None and cw.ret is not None and not void:
             why = same(cg.ret, cw.ret)
             if why:
                 add("return", cg, cw, why)
         if cw.writes and cg.writes:
-            recv_w = "ecx" if cw.regs[0] else "s0"
-            base_g = cg.regs[0]
-            gw = {}
-            for key, val in cg.writes.items():
-                if key[0] == "abs" and base_g <= key[1] < base_g + 256:
-                    gw[key[1] - base_g] = val
-            for (slot, off), new in sorted(cw.writes.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-                if slot != recv_w or off not in gw:
-                    continue
-                size, v = gw[off]
-                why = same(v & 0xFFFFFFFF, int.from_bytes(new, "little")) if size == 4 else None
-                if why:
-                    add(f"write this+{off:#x}", cg, cw, why)
-                    break
-        i += 1
-        j += 1
-    end = "guest ended" if i >= len(g) else ("wine ended" if j >= len(w) else "no resync")
-    return {"matched": matched, "guest_calls": len(g), "wine_calls": len(w), "inlined": inlined,
-            "first": divs[0] if divs else None, "divergences": divs, "end": end}
+            recv_w, base_g = ("ecx" if cw.regs[0] else "s0"), cg.regs[0]
+            gw = {k[1] - base_g: v for k, v in cg.writes.items() if k[0] == "abs" and base_g <= k[1] < base_g + 256}
+            for (slot, off), new in sorted(cw.writes.items()):
+                if slot == recv_w and off in gw and gw[off][0] == 4:
+                    why = same(gw[off][1] & 0xFFFFFFFF, int.from_bytes(new, "little"))
+                    if why:
+                        add(f"write this+{off:#x}", cg, cw, why)
+                        break
+
+    def level(g, w):
+        """align one level: anchors first (functions called at most 4 times on each side, the same number of
+        times, paired in order and kept only while both positions increase), then the windowed walk between them"""
+        if len(g) > resync and len(w) > resync:
+            cg_, cw_ = collections.Counter(c.orig for c in g), collections.Counter(c.orig for c in w)
+            rare = {o for o, n in cg_.items() if n <= 4 and cw_.get(o) == n}
+            if rare:
+                pos_g = collections.defaultdict(list)
+                for k, c in enumerate(g):
+                    if c.orig in rare:
+                        pos_g[c.orig].append(k)
+                seen = collections.Counter()
+                anchors, last = [], -1
+                for k, c in enumerate(w):
+                    if c.orig in rare:
+                        gi = pos_g[c.orig][seen[c.orig]]
+                        seen[c.orig] += 1
+                        if gi > last:
+                            anchors.append((gi, k))
+                            last = gi
+                if anchors:
+                    pi = pj = 0
+                    for gi, wj in anchors:
+                        walk(g[pi:gi], w[pj:wj])
+                        walk(g[gi:gi + 1], w[wj:wj + 1])
+                        pi, pj = gi + 1, wj + 1
+                    walk(g[pi:], w[pj:])
+                    return
+        walk(g, w)
+
+    def walk(g, w):
+        i = j = 0
+        while i < len(g) and j < len(w):
+            cg, cw = g[i], w[j]
+            if cg.orig != cw.orig:
+                best = None
+                for d in range(1, resync + 1):
+                    for di in range(d + 1):
+                        dj = d - di
+                        if i + di < len(g) and j + dj < len(w) and g[i + di].orig == w[j + dj].orig:
+                            best = (di, dj)
+                            break
+                    if best:
+                        break
+                if best is None:
+                    add("control", cg, cw, f"no common call within {resync}: guest {cg.name} ({cg.orig:#010x}), "
+                                           f"the exe {cw.name} ({cw.orig:#010x})")
+                    return
+                di, dj = best
+                g_only = [c for c in g[i:i + di] if not noop(c)]
+                for c in g[i:i + di]:
+                    inlined[("guest-only" if c in g_only else "guest-noop", c.name)] += 1
+                for c in w[j:j + dj]:
+                    inlined[("wine-only", c.name)] += 1
+                if g_only and dj:
+                    add("control", g_only[0], w[j], f"guest calls {g_only[0].name} ({g_only[0].orig:#010x}) "
+                                                    f"x{len(g_only)}, the exe {w[j].name} ({w[j].orig:#010x}) x{dj}")
+                i, j = i + di, j + dj
+                continue
+            st["matched"] += 1
+            values(cg, cw)
+            level(gkids(cg.kids), cw.kids)
+            i += 1
+            j += 1
+        for c in g[i:]:
+            inlined[("guest-only (after)", c.name)] += 1
+        for c in w[j:]:
+            inlined[("wine-only (after)", c.name)] += 1
+
+    sys.setrecursionlimit(max(10000, sys.getrecursionlimit()))
+    groots = gkids([c for c in guest if c.parent is None])
+    wroots = [c for c in wine if c.parent is None]
+    level(groots, wroots)
+    return {"matched": st["matched"], "guest_calls": sum(1 for c in guest if c.orig is not None),
+            "wine_calls": len(wine), "inlined": inlined, "first": divs[0] if divs else None, "divergences": divs,
+            "end": "divergence" if divs else "no divergence"}
 
 
 RUNTIME_CALLER = re.compile(r"^(_Znw|_Zna|_Zdl|_Zda|operator new|operator delete)")

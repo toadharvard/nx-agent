@@ -1005,6 +1005,10 @@ class Emu:
         def on_call(uc, addr, size, _):
             if state["n"] >= limit:
                 return
+            if uc.reg_read(UC_ARM64_REG_LR) == addr:   # a stand-in call returning into this entry (before-winmain)
+                return
+            if uc.reg_read(UC_ARM64_REG_PC) != addr:   # another hook on this entry redirected it (pre-calls, stubs)
+                return
             state["n"] += 1
             label, orig = targets[addr]
             state["seq"] += 1
@@ -1967,7 +1971,24 @@ class Emu:
         uc.reg_write(UC_ARM64_REG_TPIDR_EL0, 0xDEAD0000)
         main.ctx, main.resume_pc, main.state, main.result = uc.context_save(), self.base, "ready", HOST_PAGE
         budget = getattr(self, "budget", 400_000_000)
+        import signal
+        self.stop_signal = None
+
+        def on_signal(sig, _frame):   # SIGTERM (timeout) or SIGALRM (--wall-seconds): end the run with its report
+            self.stop_signal = signal.Signals(sig).name
+            try:
+                uc.emu_stop()
+            except UcError:
+                pass
+        for sig in (signal.SIGTERM, signal.SIGALRM):
+            signal.signal(sig, on_signal)
+        if getattr(self, "wall_seconds", 0):
+            signal.alarm(int(self.wall_seconds))
         while self.exit_code is None:
+            if self.stop_signal:
+                self.trace(f"stopped by {self.stop_signal}")
+                raise SystemExit(f"run stopped by {self.stop_signal} (wall-clock limit) in thread "
+                                 f"{self.cur.tid if self.cur else '?'} at {self.sym(uc.reg_read(UC_ARM64_REG_PC))}")
             t = self.pick()
             if t is None:
                 states = {x.tid: (x.state, x.wait) for x in self.threads.values() if x.state != "done"}
@@ -2064,6 +2085,8 @@ def main(argv):
                     help="collect-all boot: vslot/constructor traps return to their caller and are listed once each")
     ap.add_argument("--watch", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
+    ap.add_argument("--wall-seconds", type=int, default=0,
+                    help="end the run after this many seconds with the usual report (SIGTERM does the same)")
     ap.add_argument("--trace-fn", action="append", default=[], metavar="NAMES",
                     help="function-boundary trace: symbols, 0xORIG or re:REGEX, comma-separated (args, return; "
                     "install_trace_fn)")
@@ -2119,6 +2142,7 @@ def main(argv):
     for spec in a.watch:
         addr, _, n = spec.partition(":")
         emu.install_watch(int(addr, 0), int(n, 0) if n else 4)
+    emu.wall_seconds = a.wall_seconds
     if a.trace_fn:
         emu.install_trace_fn(a.trace_fn, a.trace_out or "trace_fn.tsv", writes=a.trace_writes, limit=a.trace_max,
                            deref=a.trace_deref)
