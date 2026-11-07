@@ -1,5 +1,6 @@
 /* fnv-nx native renderer: D3D9 state -> native state translator. See d3d9_state.h for the rules. */
 #include "d3d9_state.h"
+#include "plat_mark.h"
 #include <string.h>
 
 /* D3D9 numeric constants (d3d9types.h). */
@@ -38,9 +39,22 @@ enum { TEXF_NONE = 0, TEXF_POINT = 1, TEXF_ANISOTROPIC = 3 };
 static float asfloat(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 
 /* ---- enum tables (Nine nine_pipe.h) ---------------------------------------------------------------------------- */
-static uint32_t cmp(uint32_t d) { return d >= 1 && d <= 8 ? d - 1 : NxCmp_Never; }          /* NEVER_ZERO=0 too */
-static uint32_t sop(uint32_t d) { return d >= 1 && d <= 8 ? d - 1 : NxSop_Zero; }
-static uint32_t bop(uint32_t d) { return d >= 1 && d <= 5 ? d - 1 : NxBop_Add; }
+/* a value outside D3D9's range is marked unsupported (plat_mark.h); 0, the zero-initialised state, is not */
+static uint32_t cmp(uint32_t d) {                                                             /* NEVER_ZERO=0 too */
+    if (d >= 1 && d <= 8) return d - 1;
+    if (d) NX_PLAT_UNSUPPORTED("D3DCMPFUNC", d);
+    return NxCmp_Never;
+}
+static uint32_t sop(uint32_t d) {
+    if (d >= 1 && d <= 8) return d - 1;
+    if (d) NX_PLAT_UNSUPPORTED("D3DSTENCILOP", d);
+    return NxSop_Zero;
+}
+static uint32_t bop(uint32_t d) {
+    if (d >= 1 && d <= 5) return d - 1;
+    if (d) NX_PLAT_UNSUPPORTED("D3DBLENDOP", d);
+    return NxBop_Add;
+}
 
 static uint32_t bf_common(uint32_t b) {
     switch (b) {
@@ -52,7 +66,7 @@ static uint32_t bf_common(uint32_t b) {
     case 11: return NxBf_SrcAlphaSat;  case 12: return NxBf_SrcAlpha;      /* BOTHSRCALPHA */
     case 13: return NxBf_InvSrcAlpha;  /* BOTHINVSRCALPHA */
     case 14: return NxBf_ConstColor;   case 15: return NxBf_InvConstColor;
-    default: return NxBf_Zero;
+    default: if (b) NX_PLAT_UNSUPPORTED("D3DBLEND", b); return NxBf_Zero;
     }
 }
 static uint32_t bf_color(uint32_t b) {
@@ -151,7 +165,7 @@ uint32_t nx_d3d9_shader_bits(const uint32_t* rs, uint32_t ps_version) {
         case 1: m = NxFog_Exp; break;
         case 2: m = NxFog_Exp2; break;
         case 3: m = NxFog_Linear; break;
-        default: m = NxFog_Vertex; break;
+        default: if (rs[RS_FOGTABLEMODE]) NX_PLAT_UNSUPPORTED("D3DRS_FOGTABLEMODE", rs[RS_FOGTABLEMODE]); m = NxFog_Vertex; break;
         }
         b |= m << NXSB_FOG;
     }
@@ -233,7 +247,7 @@ static uint32_t wrap(uint32_t a) {
     case 3: return NxWrap_Clamp;
     case 4: return NxWrap_Border;
     case 5: return NxWrap_MirrorOnce;
-    default: return NxWrap_Clamp;
+    default: if (a) NX_PLAT_UNSUPPORTED("D3DTEXTUREADDRESS", a); return NxWrap_Clamp;
     }
 }
 
@@ -321,7 +335,7 @@ NxFormatInfo nx_d3d9_format(uint32_t d) {
     case NXD3D_FOURCC('I', 'N', 'T', 'Z'): F_(NxFmt_Z24S8, S_(R, R, R, R), ZS, 4);
     case NXD3D_FOURCC('D', 'F', '2', '4'): F_(NxFmt_Z24X8, S_(R, 0, 0, 1), Z, 4);
     case NXD3D_FOURCC('D', 'F', '1', '6'): F_(NxFmt_Z16, S_(R, 0, 0, 1), Z, 2);
-    default: F_(NxFmt_None, S_(R, G, B, A), 0, 0);
+    default: if (d) NX_PLAT_UNSUPPORTED("D3DFORMAT", d); F_(NxFmt_None, S_(R, G, B, A), 0, 0);
     }
 }
 
@@ -441,7 +455,7 @@ uint32_t nx_d3d9_convert(uint32_t d3dfmt, uint32_t w, uint32_t h, uint32_t mips,
             s += 4; d += 4;
             break;
         }
-        default: return 0;
+        default: NX_PLAT_UNSUPPORTED("D3DFORMAT conversion", d3dfmt); return 0;
         }
     }
     return need;
