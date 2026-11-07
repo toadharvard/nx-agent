@@ -18,7 +18,7 @@ Sources:
       through --patterns): groups present there (by form and kind) are listed as `also in the original` and left out
       of the metric.
 Metric: distinct (form, kind, caller) groups not in the baseline. Writes <out> and <out>.json (fnvnx-scripterr/1).
-Exit 0; 3 when no log has a call-watcher line and no pattern matched.
+Exit 0; 3 when no log shows a watcher ("N functions watched", N > 0), a call-watcher line or a pattern match.
 """
 import argparse
 import json
@@ -32,6 +32,7 @@ from faults import Elf  # noqa: E402  (function keys: orig:XXXXXXXX / native nam
 
 CALL = re.compile(r'(linhost|emu): call (\S+) caller (\S+)((?: \w+ (?:0x[0-9a-f]+|unreadable))*)\s*$')
 CALLS = re.compile(r'(linhost|emu): calls (\S+) n (\d+)')
+WATCHED = re.compile(r'(?:callwatch|linhost: --calls): ([1-9]\d*) functions watched')
 HEX8 = re.compile(r'\b([0-9A-Fa-f]{8})\b')
 
 
@@ -69,6 +70,9 @@ def main():
                                                              'source': 'call'})
                 g['count'] += 1
                 logged[kind] = logged.get(kind, 0) + 1
+                continue
+            if WATCHED.search(line):   # a watcher ran: no call lines then means none happened (a measured 0)
+                seen = True
                 continue
             m = CALLS.search(line)
             if m:
