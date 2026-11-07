@@ -14,6 +14,11 @@ in this order (first that applies):
    whose other pointer instantiations units.json places at one address the native build defines, at least two of
    them there: MSVC's linker folded their identical code (the body does not depend on the pointee), so this
    instantiation's code is that body too. Bound to `__fnv_<addr>`; C2/D2 to the complete-object definition.
+1c. `exe-sret` (after exe-addr's checks) - the exe calls one address whose definition takes one more pointer
+   parameter first (after `this`) where the reference returns a class by value: MSVC's hidden return pointer, which
+   the decomp writes out (`FUN_0045bb20_cls::ApplyScaled(target*, float)` for 53 vector `operator*(float)`).
+   An adapter in the referencing unit calls the address with a local's address and returns it
+   (`sret_line`: the type from the declaration by decltype, trivially copyable and destructible types only).
 1b. `exe-addr` (`--exe`, the player's FalloutNV.exe) - the referencing unit's pristine object calls the MSVC name:
    every pristine object's calls of it (REL32 in functions placed by units.json, or at the address a placed
    function's call reaches, bytes checked against the exe; a DIR32 there, the address taken, counts the same)
@@ -201,6 +206,36 @@ def default_line(kind, isig):
             'dtor': '%s::~%s() = default;' % (sp, base),
             'd0': '%s::~%s() = default;' % (sp, base),
             'assign': '%s &%s::operator=(const %s &) = default;' % (sp, sp, sp)}[kind]
+
+
+SCALARS = re.compile(r'^(?:(?:un)?signed |const |volatile )*(?:void|bool|char|short|int|long|long long|__int64|'
+                     r'float|double|long double|wchar_t|unsigned|signed)$')
+
+
+def sret_line(isig, addr, this):
+    """Adapter for `exe-sret`: the exe's function at addr takes the result's address as its first parameter
+    after `this` (MSVC's hidden return pointer, written out by the decomp); GCC's caller wants the result by value.
+    The result type comes from the declaration itself (decltype of a call); the exe builds it in raw storage, so it
+    must be trivially copyable and destructible (a constructor of its own is fine: the exe's code runs it)."""
+    if isig.kind != 'func' or isig.params is None or isig.raw_params is None or len(isig.qual) < 1:
+        return None
+    if any('<' in p or '{' in p or '`' in p or "'" in p or '(' in p for p in isig.qual):
+        return None
+    if this and len(isig.qual) < 2:
+        return None
+    q = '::' + '::'.join(isig.qual)
+    ps = list(isig.raw_params)
+    args = ', '.join('a%d' % k for k in range(len(ps)))
+    decl = ', '.join('%s a%d' % (p, k) for k, p in enumerate(ps))
+    call = ('this->%s(%s)' % (isig.qual[-1], args)) if this else '%s(%s)' % (q, args)
+    xs = (['const volatile void*'] if this else []) + ['void*'] + ps
+    sym = '__fnvnx_sr_%08x_%s' % (addr, hashlib.sha1(isig.text.encode('utf-8', 'surrogateescape')).hexdigest()[:8])
+    return ('auto %s(%s)%s -> decltype(%s) { typedef decltype(%s) R; '
+            'static_assert(__is_trivially_copyable(R) && __has_trivial_destructor(R), "sret"); '
+            'extern void %s(%s) __asm__("%s"); alignas(R) unsigned char r[sizeof(R)]; %s(%sr%s); '
+            'return *reinterpret_cast<R *>(r); }'
+            % (q, decl, (' ' + isig.cv) if isig.cv else '', call, call, sym, ', '.join(xs), ADDR_SYM % addr,
+               sym, 'this, ' if this else '', (', ' + args) if args else ''))
 
 
 # ---------------------------------------------------------------------------------------------------- x86 bodies
@@ -465,7 +500,10 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
     items, failed = [], {}
     if not inline:
         for k, r in enumerate(sorted(rows, key=lambda r: r.name)):
-            line = default_line(special_of(itanium(r.name)), itanium(r.name))
+            if r.cls == 'exe-sret':
+                line = sret_line(itanium(r.name), r.addr, r.note.startswith('sret this'))
+            else:
+                line = default_line(special_of(itanium(r.name)), itanium(r.name))
             if line in {it[2] for it in items}:
                 continue
             items.append((k, 'bd', line))
@@ -964,6 +1002,26 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
         return False
     seen = collections.defaultdict(collections.Counter)   # Itanium name -> {address: sites}
     aligned_names = set()
+
+    def sret_ok(ref, a):
+        """The reference returns a class by value and the definition at a takes one more parameter, a pointer,
+        first (after this): MSVC's hidden return pointer as the decomp writes it."""
+        rs = msvc(ref)
+        if rs.kind != 'func' or rs.params is None or not rs.ret:
+            return False
+        ret = rs.ret.strip()
+        if ret.endswith(('*', '&')) or SCALARS.match(ret) or ret.startswith('enum '):
+            return False
+        rparams = [p_ for p_ in rs.params if p_ != '...']
+        for n_ in def_names.get(a, ()):
+            d_ = msvc(n_) if n_.startswith('?') else None
+            if d_ is None or d_.kind != 'func' or d_.params is None:
+                continue
+            dparams = [p_ for p_ in d_.params if p_ != '...']
+            if len(dparams) == len(rparams) + 1 and dparams[0].rstrip().endswith('*') and \
+                    bool(d_.member and not d_.static) == bool(rs.member and not rs.static):   # this or none
+                return True
+        return False
     via = {}
     by_m = collections.defaultdict(set)   # MSVC name -> Itanium names it stands for
     for mp in pairs.values():
@@ -1002,6 +1060,15 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
         if isg.variant in ('C1', 'C2', 'D1', 'D2') and native.get(a) == 'F' and \
                 shape_ok(via[r.name], a, this_only=this_only):
             want = 'F'   # the decomp defines the constructor/destructor's address as a function (FUN_...)
+        if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a, this_only=this_only) and \
+                sret_ok(via[r.name], a) and r.units and \
+                sret_line(isg, a, bool(msvc(via[r.name]).member) and not msvc(via[r.name]).static):
+            this = bool(msvc(via[r.name]).member) and not msvc(via[r.name]).static
+            out.append(r._replace(cls='exe-sret', addr=a, target=None, host=sorted(r.units.split(','))[0],
+                                  note='sret %s: %s called at %d site(s) in the exe, %s' % (
+                                      'this' if this else 'static', via[r.name], nsite,
+                                      ' / '.join(sorted(def_names.get(a, ()))[:1]))))
+            continue
         if native.get(a) == want and want == 'F' and not shape_ok(via[r.name], a, this_only=this_only):
             out.append(r._replace(note=r.note + '; exe calls %08x (signature shape differs: %s)' % (
                 a, ' / '.join(sorted(def_names.get(a, ()))[:2]))))
@@ -1156,7 +1223,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         layout.game_flags(tree, work)   # compile.sh --print-flags (plugins built) once, before the threads; no fallback
         by_host = collections.defaultdict(lambda: collections.defaultdict(list))
         for r in rows:
-            if r.cls in ('special-default', 'msvc-inline') and r.host:
+            if r.cls in ('special-default', 'msvc-inline', 'exe-sret') and r.host:
                 by_host[r.host][r.cls == 'msvc-inline'].append(r)
         jobs_ = [(h, inl, rs) for h, d in sorted(by_host.items()) for inl, rs in sorted(d.items())]
 
@@ -1300,7 +1367,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
               for k in ('addr', 'template-fold', 'exe-addr', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline', 'tree-inline',
-                        'special-default', 'crt-rule', 'missing')]
+                        'exe-sret', 'special-default', 'crt-rule', 'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))
