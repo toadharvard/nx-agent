@@ -1477,6 +1477,90 @@ if _shutil.which('aarch64-linux-gnu-g++'):
     check('IDTOR1 output: ~Holder calls ns::List::~List by name, not ListX::~ListX at +4 (ILP32)',
           _r.stderr or _r.stdout, ['\t_ZN2ns4ListD1Ev\n'], ['error', '_ZN5ListXD1Ev'])
 
+# ---- S1-refs: D22 (a listed class's slot-0 placeholder virtual becomes its virtual destructor under GCC)
+_d2 = tempfile.mkdtemp()
+_json.dump({'format': 'fnvnx-d22/1', 'classes': [{'class': 'N::Map', 'members': ['v0']}, {'class': 'Tbl<>', 'members': ['Unk_00']}]},
+           open(os.path.join(_d2, 'd22.json'), 'w'))
+os.environ['FNVNX_D22'] = os.path.join(_d2, 'd22.json')
+prepare.__dict__['_fnvnx_d22'] = None
+_D = ('namespace N {\nstruct Map\n{\n    virtual void v0();\n    virtual int Find(int k);\n    int m_count;\n};\n'
+      'struct Derived : public Map\n{\n    virtual void v0();\n    virtual int Find(int k);\n    virtual void Extra();\n};\n}\n'
+      'template <class T> class Tbl\n{\npublic:\n    FNVNX_KEEP virtual void Unk_00() {}\n    virtual T Get();\n};\n')
+_d22 = run(s1.r_vtable_dtor_slot, _D)
+check('D22 placeholder -> FNVNX_D22(C, original)', _d22,
+      ['FNVNX_D22(Map, virtual void v0();) /* fnv-nx D22 */', 'FNVNX_D22(Tbl, FNVNX_KEEP virtual void Unk_00() {})'])
+check('D22 a derived re-declaration is dropped under GCC', _d22,
+      ['FNVNX_D22_DROP(virtual void v0();) /* fnv-nx D22 */', '    virtual void Extra();'])
+check('D22 a called placeholder is left alone',
+      run(s1.r_vtable_dtor_slot, _D + 'void f(N::Map* m) { m->v0(); }\n'), [], ['FNVNX_D22(Map'])
+check('D22 a placeholder defined outside the class is left alone',
+      run(s1.r_vtable_dtor_slot, _D + 'void N::Map::v0() { m_count = 0; }\n'), [], ['FNVNX_D22(Map'])
+check('D22 a class that declares a destructor is left alone',
+      run(s1.r_vtable_dtor_slot, _D.replace('    int m_count;', '    ~Map();\n    int m_count;')), [], ['FNVNX_D22(Map'])
+check('D22 an unlisted class or member is left alone',
+      run(s1.r_vtable_dtor_slot, _D.replace('namespace N', 'namespace M').replace('Unk_00', 'Unk_01') +
+          'int M::Map::Find(int k) { return k; }\n'), [], ['FNVNX_D22'])    # (defines a virtual: not call-only, D26 b)
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _cD = os.path.join(_d2, 'd22.cpp')
+    _mD = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_D22')]
+    open(_cD, 'w').write('#define FNVNX_KEEP\n' + ''.join(_mD) + _d22 +
+                         'int slot(N::Derived* d) { return d->Find(3); }\nvoid kill(N::Map* m) { delete m; }\n')
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', _cD],
+                         capture_output=True, text=True)
+    # Find: exe slot 1 -> GCC slot 2 (D1, D0 first): ILP32 vtable entries are 4 bytes, so offset 8
+    check('D22 output: Find at GCC slot 2 (D1/D0 at 0/1), delete through slot 1', _r.stderr or _r.stdout,
+          [', 8]', ', 4]'], ['error'])
+os.environ.pop('FNVNX_D22', None)
+prepare.__dict__['_fnvnx_d22'] = None
+_shutil.rmtree(_d2, ignore_errors=True)
+
+
+# ---- S1-rules: D26 (b) a call-only placeholder declaration takes FNVNX_D22 without a list
+_save_d22 = os.environ.pop('FNVNX_D22', None); _save_rc = os.environ.pop('FNVNX_RECON', None)
+prepare.__dict__['_fnvnx_d22'] = None
+_CO = ('struct HeapStandIn\n{\n    virtual void v0();\n    virtual void v1();\n    virtual void* Allocate(unsigned n);\n};\n'
+       'void* f(HeapStandIn* h) { return h->Allocate(4); }\n')
+_coo = run(s1.r_vtable_dtor_slot, _CO)
+check('D26 call-only: the slot-0 placeholder becomes FNVNX_D22 (no list)', _coo,
+      ['FNVNX_D22(HeapStandIn, virtual void v0();) /* fnv-nx D22 */', 'virtual void v1();'])
+check('D26 call-only: one virtual only, a defined virtual, a base, a called placeholder, a derived class: nothing',
+      run(s1.r_vtable_dtor_slot, 'struct A\n{\n    virtual void v0();\n};\n') +
+      run(s1.r_vtable_dtor_slot, _CO + 'void HeapStandIn::v1() {}\n') +
+      run(s1.r_vtable_dtor_slot, _CO.replace('struct HeapStandIn\n', 'struct HeapStandIn : B\n')) +
+      run(s1.r_vtable_dtor_slot, _CO + 'void g(HeapStandIn* h) { h->v0(); }\n') +
+      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v1() {}\n};\n'),
+      [], ['FNVNX_D22'])
+check('D26 call-only: a derived class that defines none of its virtuals does not block it',
+      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    virtual void v1();\n};\n'),
+      ['FNVNX_D22(HeapStandIn, virtual void v0();)'])
+_cc = run(s1.r_vtable_dtor_slot, _CO.replace('virtual void v0();', 'virtual void* v0(unsigned int);') +
+          'void g(HeapStandIn* h) { h->v0(1); }\nstruct Other\n{\n    void* Get();\n};\n')
+check('D26 call-only: a statement call of the slot-0 placeholder becomes FNVNX_D22_CALL', _cc,
+      ['FNVNX_D22(HeapStandIn, virtual void* v0(unsigned int);)', 'FNVNX_D22_CALL(h, v0, 1); /* fnv-nx D22 */'])
+check('D26 call-only: another class with a virtual of that name not converted: neither is rewritten',
+      run(s1.r_vtable_dtor_slot, _CO.replace('virtual void v0();', 'virtual void* v0(unsigned int);') +
+          'void g(HeapStandIn* h) { h->v0(1); }\nstruct Other\n{\n    virtual void* v0(unsigned int);\n    int x;\n};\n'
+          'void* Other::v0(unsigned int) { return 0; }\n'), [], ['FNVNX_D22'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _mD2 = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+            if l.startswith(('#define FNVNX_D22', 'template <class T> inline void fnvnx_d22_vdtor'))]
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x', 'c++',
+                          '-'], input=''.join(_mD2) + _cc, capture_output=True, text=True)
+    check('D26 call-only output: h->v0(1) deletes through slot 1 (D0, +4)', _r.stderr or _r.stdout, [', 4]'], ['error'])
+check('D26 call-only: a named first virtual is not a placeholder',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'GetName()')), [], ['FNVNX_D22'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _mD = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h')) if l.startswith('#define FNVNX_D22')]
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x', 'c++',
+                          '-'], input=''.join(_mD) + _coo, capture_output=True, text=True)
+    # D1/D0 at slots 0/1 (4 bytes each, ILP32), v1 at 2, Allocate at exe slot 2 -> native slot 3: offset 12
+    check('D26 call-only output: Allocate (exe slot 2) is called at native slot 3, +12 (ILP32)', _r.stderr or _r.stdout,
+          ['[x2, 12]'], ['error'])
+if _save_d22 is not None: os.environ['FNVNX_D22'] = _save_d22
+if _save_rc is not None: os.environ['FNVNX_RECON'] = _save_rc
+prepare.__dict__['_fnvnx_d22'] = None
+
 # ---- determinism: every rule, run under two PYTHONHASHSEED values, gives the same text (set / dict order must not
 # reach the output: tree hashes and incremental compiles depend on it)
 _DET = r'''
