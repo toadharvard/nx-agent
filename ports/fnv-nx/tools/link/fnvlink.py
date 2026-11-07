@@ -625,6 +625,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             thunk_undef[src].setdefault(name, ADDR_SYM % colliding[name])
     stats['colliding_fun_names'] = len(colliding)
     stats['colliding_fun_defs'] = sum(len(v) for v in colliding_srcs.values())
+    # R6 class 1: the MSVC adjustor thunks units.json places (`?f@C@@W<n>AE..`), which GCC never emits: a stub at
+    # the address does what the exe's `sub ecx, n; jmp f` does (this -= n, then f's native entry)
+    adj_rows = adjustor_thunks(def_at, native, exevft.exe_path(None if exe in (None, '') else exe)
+                               if exe != 'none' else None, providers)
+    for a_, (n_, t_) in sorted(adj_rows.items()):
+        bridges.setdefault(ADDR_SYM % a_, emit_adj_stub(ADDR_SYM % a_, adj_target(native, t_), n_))
+    stats['adjustor_thunk_stubs'] = len(adj_rows)
     with open(os.path.join(out, 'colliding.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\taddress\tnative\tdefining objects (definitions turned into references to __fnv_<address>)\n')
         for name, a in sorted(colliding.items()):
@@ -1007,6 +1014,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 pass
                 elif ak == 'text' and addr in providers:   # CRT/library code S4 implements, import thunks
                     cls = 'provider'; target = providers[addr][0]
+                elif ak == 'text' and addr in adj_rows:   # an MSVC adjustor thunk: its stub (adjustor_thunks)
+                    cls = 'code-adjthunk'; target = ADDR_SYM % addr
+                    stats['adjustor_thunk_refs'] += 1
                 elif ak == 'text' and addr in def_at:
                     du = def_at[addr][0]
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
@@ -1457,12 +1467,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             extern_text.pop(a, None)
         else:
             extern_text.setdefault(a, set())
-    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows)
+    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows,
+                                          adj_rows)
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
-                                         'code-defmissing', 'extern-text', 'text-addr', 'text-callback', 'import',
-                                         'provider', 'tls'))
+                                         'code-defmissing', 'code-adjthunk', 'extern-text', 'text-addr', 'text-callback',
+                                         'import', 'provider', 'tls'))
     with open(os.path.join(out, 'extern_text.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a in sorted(extern_text):
             f.write('%08x\t%s\n' % (a, ' '.join(sorted(extern_text[a]))))
@@ -1908,6 +1919,36 @@ def emit_adj_stub(name, target, n):
     return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
                       '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name, op,
                       '    b %s' % target, '    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
+def adjustor_thunks(def_at, native, exe_path, providers=None):
+    """{address: (n, target)} of the .text addresses units.json places with no native definition whose exe code is
+    an MSVC adjustor thunk (exevft.thunk: `sub ecx, n; jmp`, `add ecx, n; jmp`, through at most two more plain or
+    adjusting thunks) into an address the native build defines; n != 0. GCC has no counterpart of these (its
+    `_ZThn` thunks are vtable-only), so callers bound to the address got a trap stub (code-defmissing)."""
+    out = {}
+    if not exe_path:
+        return out
+    for a in sorted(def_at):
+        if a in native or a in (providers or {}) or kind_of_addr(a) != 'text':
+            continue
+        n, t = 0, a
+        for _ in range(3):
+            th = exevft.thunk(exe_path, t)
+            if th is None:
+                break
+            n, t = n + th[0], th[1]
+            if t in native:
+                if n:
+                    out[a] = (n, t)
+                break
+    return out
+
+
+def adj_target(native, t):
+    """What an adjustor thunk into t branches to: t's MSVC entry when MSVC enters t with this at a secondary base
+    (thisadj.py: the thunk hands over the MSVC `this`), else t's native definition."""
+    return MSVC_ENTRY_SYM % t if native[t].get('msvc_entry') else ADDR_SYM % t
 
 
 def emit_const_stub(name, value):
@@ -3277,12 +3318,13 @@ def emit_traps(traps):
 
 # ---------------------------------------------------------------------------------------------------- address map
 
-def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, providers=None, cthis=()):
+def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, providers=None, cthis=(), adj=None):
     """addrmap.tsv / addrmap.c (docs/LINK.md, 'Address map'): code addresses the native build defines (F C X G),
     image vftables (V: the Itanium vtable address point of the same class, primary or secondary, compiled or
     synthesized), referenced .text addresses no unit defines (E: native NULL, the loader traps them), and per G
     entry its D1/D0 pair (fnvnx_addrmap_deldtors). vtables: {address: (vtable symbol, address-point offset, object
     path, note)}; providers: {address: (platform symbol, provider)} (F entries naming the platform symbol).
+    adj: {address: (n, target)} of adjustor_thunks (F entries naming their stub in bridges.S).
     -> (Counter of kinds, number of G entries with a D1)."""
     rows = []   # address, kind, link_symbol, native_symbol, object, note, offset, d1_symbol, d1_native
     for a in sorted(native):
@@ -3322,6 +3364,9 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, pr
     for a, (zname, off, obj, note) in sorted((vtables or {}).items()):
         if a not in native:
             rows.append((a, 'V', zname, zname, os.path.basename(obj), note, str(off), '', ''))
+    for a, (n, t) in sorted((adj or {}).items()):   # an MSVC adjustor thunk: its stub in bridges.S
+        rows.append((a, 'F', ADDR_SYM % a, ADDR_SYM % a, VTEXT_OBJ, 'msvc adjustor thunk: this -= %d, then %08x'
+                     % (n, t), '', '', ''))
     for a, (sym, text) in sorted((providers or {}).items()):
         if a not in native:   # CRT/library code the platform implements: the provider symbol itself
             rows.append((a, 'F', sym, sym, '', 'provider: ' + text, '', '', ''))
