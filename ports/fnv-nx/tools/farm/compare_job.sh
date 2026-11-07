@@ -89,7 +89,7 @@ build_candidate() {   # nx_render from the candidate commit, in its own worktree
 	NXR=$W/nx_render-$C12
 	if [ ! -x "$NXR/nx_render" ]; then
 		src=$W/src-$C12
-		[ -d "$src" ] || git -C "$P" worktree add -q --detach "$src" "$CAND" || fail "worktree $C12"
+		bash "$P/tools/farm/worktree.sh" "$P" "$src" "$CAND" || fail "worktree $C12"
 		make -C "$src/ports/fnv-nx/tests/s6n" OUT="$NXR" "$NXR/nx_render" >"$W/nx_render-$C12.log" 2>&1 ||
 			fail "nx_render at $C12 (log $W/nx_render-$C12.log)"
 		git -C "$P" worktree remove --force "$src" 2>/dev/null || rm -rf "$src"

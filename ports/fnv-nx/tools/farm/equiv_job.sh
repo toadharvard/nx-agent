@@ -135,7 +135,7 @@ COMMIT=${1:?commit}; K=${2:?k}; N=${3:?N}; REPORT=${4:?report.md}
 C12=${COMMIT:0:12}
 SRC=$FARM_HOME/src-$C12
 step checkout "$LOGS/checkout.log"
-if [ ! -d "$SRC" ]; then git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" > "$STEP_LOG" 2>&1; fi
+bash "$(dirname "$0")/worktree.sh" "$REPO" "$SRC" "$COMMIT" > "$STEP_LOG" 2>&1
 P=$SRC/ports/fnv-nx
 step fetch "$LOGS/fetch.log"
 bash "$P/tools/fetch.sh" "$EXT" > "$STEP_LOG" 2>&1

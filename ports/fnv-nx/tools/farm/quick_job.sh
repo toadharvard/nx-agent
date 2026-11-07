@@ -69,6 +69,9 @@ on() { python3 -I -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])
 log "plan: base ${BASE:0:12} -> $C12: $(python3 -I -c 'import json,sys; p=json.load(open(sys.argv[1])); print(",".join(c for c,v in p["checks"].items() if v) or "nothing")' "$R/plan.json")"
 
 # ---- 2. lanes -------------------------------------------------------------------------------------------------------
+# the head's worktree once, before the lanes: every sub-job of this head uses $FARM_HOME/src-<c12> (worktree.sh locks
+# the add as well; qk2 on ed380ec7 lost build, fuzz and audit to two jobs adding it at the same moment)
+bash "$HERE/worktree.sh" "$REPO" "$FARM_HOME/src-$C12" "$COMMIT" >/dev/null 2>&1 || log "worktree src-$C12 failed (the jobs try again)"
 run() {   # run <check> <cmd...>: time, exit status, report path, in $R/<check>.{rc,s,md,log}
 	local c=$1 t=$(date +%s) rc; shift
 	log "start $c"
