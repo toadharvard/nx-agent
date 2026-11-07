@@ -4,7 +4,9 @@
 #   tools/farm/recon_fuzz_job.sh <commit> <recon branches> <report.md>
 #
 # <recon branches>: comma-separated recon branches of the private artifacts repository (`recon/<unit>` or `<unit>`),
-# or `all` (every recon/* branch). Runner job `recon_fuzz` (`START: <farm> recon_fuzz <branches>`).
+# `all` (every recon/* branch), or `queue`: the recon fleet's fuzz queue (branch recon-notes/fuzz-queue,
+# fuzz-queue.tsv, R2's fuzzqueue.py): each row's exe_addresses are fuzzed with the native bodies linked (D23 (c)
+# confirmation of inline bodies; recon_fuzz.py queue). Runner job `recon_fuzz` (`START: <farm> recon_fuzz <branches>`).
 #
 # The default fuzz oracle (fuzz_job.sh) is the pristine decomp compiled with MSVC 2008, which has no code for a
 # function the decomp lacks. This job runs tools/difffuzz with FNVNX_ORACLE=exe (tools/difffuzz/exeimage.py): the
@@ -51,16 +53,23 @@ PY=${FNVNX_AUDIT_PY:-python3}
 export FNVNX_ORACLE=exe FNVNX_DFWORK=$RUN/work FNVNX_DFA64=$RUN/a64
 mkdir -p "$RUN/work"
 
-# 2. the recon branches
+# 2. the recon branches (or the fuzz queue)
 [ -d "$ARTIFACTS/.git" ] || git clone -q --no-checkout "$ARTIFACTS_URL" "$ARTIFACTS"
 RD=$RUN/recon; rm -rf "$RD"; mkdir -p "$RD"
-if [ "$BRANCHES" = all ]; then
+QUEUE=""
+if [ "$BRANCHES" = queue ]; then
+  git -C "$ARTIFACTS" fetch -q origin "+refs/heads/recon-notes/fuzz-queue:refs/remotes/origin/recon-notes/fuzz-queue" \
+    || fail_report 3 "no branch recon-notes/fuzz-queue"
+  git -C "$ARTIFACTS" show refs/remotes/origin/recon-notes/fuzz-queue:fuzz-queue.tsv > "$RUN/fuzz-queue.tsv"
+  QUEUE=$RUN/fuzz-queue.tsv; BL=()
+  log "fuzz queue: $(($(wc -l < "$QUEUE") - 1)) rows"
+elif [ "$BRANCHES" = all ]; then
   mapfile -t BL < <(git -C "$ARTIFACTS" ls-remote origin 'refs/heads/recon/*' | awk '{print $2}' | sed 's|^refs/heads/||')
 else
   IFS=, read -r -a BL <<< "$BRANCHES"
 fi
 n=0
-for b in "${BL[@]}"; do
+for b in "${BL[@]+"${BL[@]}"}"; do
   b=${b#refs/heads/}; b=recon/${b#recon/}
   if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$b:refs/remotes/origin/$b" 2>/dev/null; then
     mkdir -p "$RD/${b#recon/}"; git -C "$ARTIFACTS" archive "refs/remotes/origin/$b" | tar -x -C "$RD/${b#recon/}"
@@ -72,6 +81,9 @@ done
 log "$n of ${#BL[@]} recon branches fetched"
 
 # 3. exe-oracle catalog of the recons' units (prepared tree indices), targets, campaign
+if [ -n "$QUEUE" ]; then
+  UNITS=$(cd "$DF" && $PY recon_fuzz.py queue-units "$QUEUE")
+else
 UNITS=$(cd "$DF" && $PY - "$RD" <<'EOF'
 import json, sys
 from pathlib import Path
@@ -89,13 +101,18 @@ for rj in Path(sys.argv[1]).rglob('recon.json'):
 print(','.join(map(str, sorted(want))))
 EOF
 )
+fi
 log "units: ${UNITS:-none}"
 : > "$RUN/catalog.jsonl"
 if [ -n "$UNITS" ]; then
   (cd "$DF" && $PY catalog.py --out "$RUN/catalog.jsonl" --units "$UNITS") > "$RUN/catalog.log" 2>&1 \
     || fail_report 1 "catalog (exe oracle) failed: $(tail -1 "$RUN/catalog.log")"
 fi
-(cd "$DF" && $PY recon_fuzz.py targets "$RD" "$RUN/catalog.jsonl" "$RUN/targets.jsonl" "$RUN/plan.json") | tee "$RUN/targets.log"
+if [ -n "$QUEUE" ]; then
+  (cd "$DF" && $PY recon_fuzz.py queue "$QUEUE" "$RUN/catalog.jsonl" "$RUN/targets.jsonl" "$RUN/plan.json") | tee "$RUN/targets.log"
+else
+  (cd "$DF" && $PY recon_fuzz.py targets "$RD" "$RUN/catalog.jsonl" "$RUN/targets.jsonl" "$RUN/plan.json") | tee "$RUN/targets.log"
+fi
 rm -rf "$RUN/camp"; mkdir -p "$RUN/camp"
 if [ -s "$RUN/targets.jsonl" ]; then
   log "fuzz: $(wc -l < "$RUN/targets.jsonl") functions, $ITERS executions / ${TIME}s each, $JOBS jobs"
@@ -106,7 +123,8 @@ fi
 # 4. report
 (cd "$DF" && $PY recon_fuzz.py report "$RUN/plan.json" "$RUN/camp" "$RUN/body.md" "${REPORT%.md}.json")
 { echo "# recon_fuzz $C12 (exe oracle)"; echo
-  echo "- recon branches: $BRANCHES (${#BL[@]}, $n fetched)"
+  if [ -n "$QUEUE" ]; then echo "- the fuzz queue (recon-notes/fuzz-queue, $(($(wc -l < "$QUEUE") - 1)) rows)"
+  else echo "- recon branches: $BRANCHES (${#BL[@]}, $n fetched)"; fi
   echo "- native side: $(grep -m1 '^FNVNX_AUDIT_LINK=' "$RUN/profile" | cut -d= -f2-)"
   echo "- oracle: the player's FalloutNV.exe image (tools/difffuzz/exeimage.py), $ITERS executions / ${TIME}s per function"
   cat "$RUN/body.md"; } > "$REPORT"
