@@ -19,7 +19,8 @@ Sources (the number each row shows):
                            vacuous in some parameter set, over the shards seen
   D25 #1..#12              <h>-scenario.json (fnvnx-scenario-metric/1, S18): the target's count when measured in
                            at least one scenario; otherwise the lane that measures it, when its report exists:
-                           #3 unimpl, #4 open, #6 decode + input of <h>-plat.json (fnvnx-plat/1); #7 the metric of
+                           #1 the fault groups of <h>-faults.json (fnvnx-faults/1, tools/report/faults.py: new /
+                           known / fixed in the note); #3 unimpl, #4 open, #6 decode + input of <h>-plat.json (fnvnx-plat/1); #7 the metric of
                            <h>-threads.json (fnvnx-threads-job/1); #8 failed allocations + 1 if the peak is over the
                            budget, <h>-mem.json (fnvnx-mem/1); #12 frames over the budget, <h>-frames.json
                            (fnvnx-frames/1; only with a calibrated --scale). The lane's number is shown beside the
@@ -156,11 +157,13 @@ def lane(job, schema, pick, why):
         if j.get('schema') != schema or inner is None:
             return (None, ps[:1], 'no %s data' % job)
         v = pick(j)
-        return (v, ps[:1], why if v is not None else 'not measured')
+        return (v, ps[:1], (why(j) if callable(why) else why) if v is not None else 'not measured')
     return f
 
 
 LANES = {
+    1: lane('faults', 'fnvnx-faults/1', lambda j: j.get('total_groups'),
+            lambda j: 'faults lane: groups (new %s, known %s, fixed %s)' % (j.get('new'), j.get('known'), j.get('fixed'))),
     3: lane('plat', 'fnvnx-plat/1', lambda j: j['parts']['unimpl'], 'plat lane: unimplemented entries'),
     4: lane('plat', 'fnvnx-plat/1', lambda j: j['parts']['open'], 'plat lane: failed opens'),
     6: lane('plat', 'fnvnx-plat/1', lambda j: j['parts']['decode'] + j['parts']['input'], 'plat lane: decode + input'),
