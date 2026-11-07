@@ -75,3 +75,73 @@ address. In a race build, hb.c's wraps hand the game's own call site through `fn
   platform/, tests/s15/mtqemu, tools/threads and threads_job.sh changes.
 - **S18:** the scenario job builds its guest with variant.sh, runs its scenarios, and hands the run logs in:
   `THREADS_LOGS="<log>..." THREADS_ELF=<guest> tools/farm/threads_job.sh <commit> <report.md>`.
+
+## Reading the report
+
+The lane writes `threads.md` (and `threads.json`, fnvnx-threads/1). Read it top down.
+
+1. **Headline.**
+   - The first line gives races, function pairs, deadlock cycles and long waits.
+   - `race checker:` and `watchdog:` give the checkers' own counters.
+   - The no-coverage case: `checks 0` in a RACE run means the game objects were not compiled with RACE=1, so the
+     race count says nothing.
+   - Undercounting: non-zero `untracked`, `evictions`, `read-evictions` or `pairs-full` means races may be missing.
+     They never invent one.
+   - `build` is the image's sha256 prefix, for the suppression file.
+2. **Races per function pair.**
+   - One row per unordered pair of function start addresses: the kinds seen, how many races, how many distinct
+     access pairs (pc pairs), and one sample data address.
+   - Look up a function with `aarch64-none-elf-addr2line -f -e <guest.elf> <address>` in the container. The report
+     itself never carries names.
+   - `?` means the earlier access is unknown: its reader was replaced, or the granule was evicted.
+   - Order of work: write-write first (lost updates), then write-read (stale or torn reads), then read-write.
+   - Many access pairs in one function pair usually means a structure shared without a lock, not a single field.
+3. **Deadlock cycles.**
+   - Each cycle lists its threads in order. Each thread waits on an object (cs / mutex / thread, its address) in a
+     caller function, and the object is owned by the next thread.
+   - Only owned objects make cycles, so every cycle is a real lock-order or join-order bug for that run.
+   - Fix by ordering the locks, or with a timeout plus a retry the game already has.
+4. **Long waits per caller.**
+   - Waits older than the limit (THREADS_LIMIT_MS, default 10 s), grouped by caller function and object kind.
+   - "without timeout" counts the INFINITE ones.
+   - An event or semaphore that nobody signals shows up here: the watchdog cannot see who should signal it.
+   - Some long waits are expected: an idle worker parked on its event, a loading thread between loads. Suppress
+     those, with a reason.
+5. **Suppressed.** Every entry that applied, with its count and reason, then the stale entries that matched
+   nothing. A stale entry usually means a new build moved the functions: renew it or delete it.
+
+`threads_job.sh`'s verdict line:
+
+| verdict | meaning |
+|---|---|
+| FAIL | an unsuppressed race or cycle remains |
+| PASS | no race and no cycle remains; long waits are listed but do not fail the run |
+| no guest data | the guest did not run |
+| FAIL (checker tests) | the checkers' own tests failed, so the numbers mean nothing |
+
+The metric is races + cycles + long waits, after suppression.
+
+## Suppressing known-benign entries
+
+`report.py --suppress <file>` (repeatable). threads_job.sh passes `THREADS_SUPPRESS`, or
+`$FARM_HOME/threads/suppress.tsv` when that file exists. The format is tab-separated, and `#` starts a comment:
+
+    # kind      a           b           build         reason
+    race        0x0012a3c0  0x0012b100  3f9c2a1e77d0  frame counter read for the HUD only; torn value harmless (S15, J-...)
+    long-wait   0x00456780  event       *             task worker parks on its queue event between frames
+
+| column | meaning |
+|---|---|
+| kind | `write-write`, `write-read`, `read-write`, `race` (any of the three), or `long-wait` |
+| a, b | for a race, the two function start addresses, in either order; for a long wait, `a` is the caller function and `b` is the object kind (`cs`, `mutex`, `event`, `semaphore`, `thread`) or `*` |
+| build | the report's `build` value, or `*` |
+| reason | required: why the entry is benign and where that was decided |
+
+- **Kinds are a filter.** An entry hides a pair only when every kind seen on the pair is one the entry names. A
+  write-write showing up on a pair suppressed as `write-read` is reported again.
+- **Pin the build.** Function addresses change between builds, so prefer a build-pinned entry. A `*` entry can
+  hide a different function after a relink; use it only for addresses that do not move (fixed-image code).
+- **Where the file lives.** A suppression file holds addresses of a game build, which ARCHITECTURE.md (Legal) treats
+  as decomp-derived. It lives with the farm's data or on the private artifacts repository, never in this
+  repository. tests/s15/test_threads_report.py checks the format on synthetic addresses.
+- **Cycles are never suppressed.**
