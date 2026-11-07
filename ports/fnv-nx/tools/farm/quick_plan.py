@@ -48,7 +48,7 @@ CLASSES = [
     (r'^tests/', ()),                                 # tests run by the streams and V1, not by a check here
     (r'^render/shaders/', ('programs', 'replay', 'build')),
     (r'^render/', ('replay', 'build')),               # the guest links the native renderer (LINK_OVERRIDES=render)
-    (r'^tools/compare/(wine_ref\.sh|ref_ini\.py)$', ('replay', 'boottrace')),   # both references' Wine prefix
+    (r'^tools/compare/(wine_ref\.sh|ref_ini\.py|scenes\.json)$', ('replay', 'boottrace')),   # both references' Wine prefix
     (r'^tools/compare/', ('replay',)),                # the harness; a change to a capture-key input makes a new key
     (r'^tools/equiv/', ('equiv',)),
     (r'^tools/difffuzz/', ('fuzz', 'audit')),         # the audit runs on the fuzz harness and its keys
