@@ -21,6 +21,7 @@ headers the rules include: the real SDK / CRT) and `/FI fnvnx_equiv_fi.h` (MSVC 
 on both sides. Object files go to a temporary folder and are deleted; results hold addresses and digests only.
 """
 import argparse
+import contextlib
 import gzip
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -544,7 +545,9 @@ def cmd_layouts(a):
                                units=v['units']) for k, v in changed.items()}), indent=0) + '\n')
 
 
-def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lean=False):
+def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lean=False, variant=''):
+    """variant: names a leave-out build (attribute) in the object cache, so it keeps its own manifest and does not
+    replace the unit's head build there"""
     args = [sys.executable, str(Path(decomp, 'tools/msvc.py').resolve()), '--compiler', unit['compiler'], '/c', '/nologo']
     flags = unit['flags']
     if eh_off:      # the same unit without C++ exception handling: separates EH-only differences from the rest
@@ -559,7 +562,7 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     if cache:       # FNVNX_EQUIV_CACHE (tools/equiv/unitcache.py): the same inputs compiled before
         inc = [a[2:] for a in args if a.startswith('/I')] + [str((tree / unit['source']).parent)]
         key_args = [a for a in args if not a.startswith('/Fo')] + ['compiler=' + unit['compiler']]
-        text = cache.lookup(unit['source'], key_args, inc, obj)
+        text = cache.lookup(unit['source'], key_args, inc, obj, variant)
         if text is not None:
             return True, text
         args = args[:-1] + ['/showIncludes', args[-1]]
@@ -568,7 +571,7 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     text = r.stdout + r.stderr
     if cache:
         if ok:
-            text = cache.store(unit['source'], key_args, inc, tree / unit['source'], text, obj)
+            text = cache.store(unit['source'], key_args, inc, tree / unit['source'], text, obj, variant)
         else:
             text = '\n'.join(l for l in text.splitlines() if not l.strip().startswith('Note: including file:'))
     return ok, text
@@ -928,6 +931,48 @@ def overlay_tree(base, out, decomp, files, rules):
     return changed
 
 
+class WorkerTrees:
+    """Hard-linked copies of tree `base` under `work`, one per worker thread, made once and reused: a leave-out build
+    swaps its files in (gzip files, as attribute's cache writes them) and links the originals back afterwards, so an
+    attribution holds at most --jobs trees (b727d428: one tree per unit and candidate filled the farm's disk)."""
+
+    def __init__(self, base, work):
+        self.base, self.work = Path(base), Path(work)
+        self.local, self.lock, self.n, self.stamp = threading.local(), threading.Lock(), 0, 10 ** 9
+
+    def slot(self):
+        if not hasattr(self.local, 'tree'):
+            with self.lock:
+                self.n += 1
+                mine = self.work / ('w%d' % self.n)
+            mine.mkdir(parents=True)
+            subprocess.run(['cp', '-al', str(self.base), str(mine / 'tree')], check=True)
+            self.local.mine, self.local.tree = mine, mine / 'tree'
+        return self.local.mine, self.local.tree
+
+    @contextlib.contextmanager
+    def swapped(self, tree, touched):
+        put = []
+        try:
+            for f, p in touched.items():
+                dst = tree / f
+                dst.unlink()                      # never write through a hard link into `base`
+                put.append(f)
+                with gzip.open(p, 'rb') as src, open(dst, 'wb') as h:
+                    shutil.copyfileobj(src, h)
+                with self.lock:                   # a unique mtime: unitcache memoizes hashes by (path, size, mtime)
+                    self.stamp += 1
+                    t = self.stamp
+                os.utime(dst, ns=(t, t))
+            yield
+        finally:
+            for f in put:
+                dst = tree / f
+                if dst.exists():
+                    dst.unlink()
+                os.link(self.base / f, dst)
+
+
 def cmd_attribute(a):
     """For every unit that differs between A (pristine) and B (prepared with SPEC), and with --failed every unit that
     B does not compile: rebuild it with SPEC minus one rule (and minus each --group), for each rule that edits a file
@@ -981,13 +1026,15 @@ def cmd_attribute(a):
         text = prepared_text(a.decomp, f, rules)
         path = None
         if text != (base / f).read_text(encoding='utf-8', errors='surrogateescape'):
-            path = work / 'cache' / rid / f
+            path = work / 'cache' / rid / (f + '.gz')     # compressed: the cache spans every rule x header of the shard
             path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, 'w', encoding='utf-8', errors='surrogateescape') as h:
+            with gzip.open(path, 'wt', encoding='utf-8', errors='surrogateescape', compresslevel=3) as h:
                 h.write(text)
         with lock:
             edits[key] = path
         return path
+
+    trees = WorkerTrees(base, work)
 
     def one(item):
         i, c = item
@@ -996,7 +1043,7 @@ def cmd_attribute(a):
                    if f.endswith(('.cpp', '.h', '.hpp', '.inl', '.c')) and f.startswith(('src/', 'include/'))]
         row = dict(unit=i, source=unit['source'], status=c['status'], differ=c.get('differ', []),
                    eh_differs=c.get('eh_differs', False), by_rule={})
-        mine = work / ('u%d' % i)
+        mine, tree = trees.slot()
         try:
             queue = list(cands)
             while queue:
@@ -1007,16 +1054,9 @@ def cmd_attribute(a):
                 touched = {f: p for f, p in touched.items() if p}
                 if not touched:
                     continue
-                tree = mine / 'tree'
-                if tree.exists():
-                    shutil.rmtree(tree)
-                mine.mkdir(parents=True, exist_ok=True)
-                subprocess.run(['cp', '-al', str(base), str(tree)], check=True)
-                for f, p in touched.items():
-                    (tree / f).unlink()
-                    shutil.copyfile(p, tree / f)
                 obj = mine / 'u.obj'
-                ok, text = compile_unit(a.decomp, tree, unit, obj, False)
+                with trees.swapped(tree, touched):
+                    ok, text = compile_unit(a.decomp, tree, unit, obj, False, variant='leave-out:' + rid)
                 if not ok:
                     row['by_rule'][rid] = dict(compiles=False, files=len(touched),
                                                error='%s %s: %s' % first_error(text))
@@ -1033,7 +1073,8 @@ def cmd_attribute(a):
                 if a.hier and len(ids) > 1 and (fixed or row['by_rule'][rid]['eh_fixed'] or c['status'] != 'differs'):
                     queue += [(r, {r}) for r in sorted(ids)]
         finally:
-            shutil.rmtree(mine, ignore_errors=True)
+            for p in mine.glob('u.obj'):
+                p.unlink()
         with lock:
             with open(out, 'a') as f:
                 f.write(json.dumps(row) + '\n')

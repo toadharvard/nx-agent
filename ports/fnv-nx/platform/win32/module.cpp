@@ -100,6 +100,8 @@ extern "C" FARPROC GetProcAddress(HMODULE h, LPCSTR proc)
         struct builtin_module *m = (struct builtin_module *)h;
         if (m >= g_modules && m < g_modules + g_nmodules)
             f = m->resolve(proc);
+        if (f && w32_mem_on)
+            f = w32_mem_hook_proc(proc, f);   /* the memory lane: D3D9 resources (memtrack.cpp) */
     }
     if (!f)
         SetLastError(ERROR_PROC_NOT_FOUND);
@@ -277,6 +279,8 @@ extern "C" LPWSTR *CommandLineToArgvW(LPCWSTR cmd, int *argc)
 extern "C" void ExitProcess(UINT code)
 {
     w32_log("ExitProcess(%u)", (unsigned)code);
+    fnvnx_threads_flush();   /* the race checker's pairs and the watchdog's summary, when they are on */
+    fnvnx_mem_flush();       /* the memory lane's peak, sites and summary, when it is on */
     os_exit_process((int)code);
 }
 
