@@ -623,21 +623,31 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     gethostname) is built again with WIN32_LEAN_AND_MEAN, nearer the target shim's subset; every caller (head,
     /EHs-c-, leave-out builds) makes the same choice, so their objects stay comparable."""
     ok, text = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant)
-    if not ok and not lean and not plain and (tree / 'equiv_rules.txt').exists():
-        ok2, text2 = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, True, variant)
-        if ok2:
-            return ok2, text2
+    if not ok and not plain and (tree / 'equiv_rules.txt').exists():
+        # STANDIN-RETRY: a stand-in variant chosen by the first error (the same choice for every caller)
+        extra = [d for pat, d in STANDIN_RETRIES if re.search(pat, text)]
+        tries = ([(lean, extra)] if extra else []) + ([(True, extra)] if not lean else [])
+        for ln, ex in tries:
+            ok2, text2 = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, ln, variant, ex)
+            if ok2:
+                return ok2, text2
     return ok, text
 
 
-def _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant):
+# STANDIN-RETRY: (first-error pattern, /D of a gate stand-in variant). A unit that forward-declares the SDK's own
+# `union _ULARGE_INTEGER;` meets the stand-in's class of that name (other units declare `class _ULARGE_INTEGER;`).
+STANDIN_RETRIES = [(r"'_ULARGE_INTEGER' : 'union' type redefinition", '/DFNVNX_EQUIV_ULARGE_UNION=1')]
+
+
+def _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant, extra=()):
     args = [sys.executable, str(Path(decomp, 'tools/msvc.py').resolve()), '--compiler', unit['compiler'], '/c', '/nologo']
     flags = unit['flags']
     if eh_off:      # the same unit without C++ exception handling: separates EH-only differences from the rest
         flags = [f for f in flags if not f.upper().startswith('/EH')] + ['/EHs-c-']
     args += flags + ([] if plain else ['/I' + str(SHIM), '/I' + str(gen_dir()), '/FI', str(FORCE_INCLUDE)])
     if not plain and (tree / 'equiv_rules.txt').exists():      # a tree from `equiv.py prepare`
-        args += ['/I' + str(cmath_dir()), '/FI', str(COMPAT_INCLUDE)] + (['/DFNVNX_EQUIV_LEAN=1'] if lean else [])
+        args += ['/I' + str(cmath_dir()), '/FI', str(COMPAT_INCLUDE)] + (['/DFNVNX_EQUIV_LEAN=1'] if lean else []) \
+            + list(extra)
     if layout:      # /w: no diagnostics interleaved with the report (no effect on code)
         args += ['/d1reportAllClassLayout', '/w']
     args += ['/I' + str(tree / 'include'), str(tree / unit['source']), '/Fo' + str(obj)]

@@ -17,7 +17,8 @@
  *  - the decomp forward-declares `class _ULARGE_INTEGER;`, the SDK's type is `union _ULARGE_INTEGER`: GCC accepts
  *    the key mismatch (-fpermissive) and the shim's union is that type; MSVC rejects it (C2011) and decorates the
  *    key, so here the SDK's union keeps its typedef names under another tag and _ULARGE_INTEGER is a class with the
- *    SDK union's members and layout;
+ *    SDK union's members and layout; a unit that forward-declares the SDK's own key (`union _ULARGE_INTEGER;`,
+ *    tesform) is built again with FNVNX_EQUIV_ULARGE_UNION, which keeps the SDK's union (equiv.py STANDIN-RETRY);
  *  - object-like SDK macros the shim does not define (winerror.h's ERROR_* codes, `small`, `hyper`, `Yield`,
  *    `_FILETIME_`) are undefined again: the decomp defines enumerators and types of those names;
  *  - SDK-HIDE: every SDK function and typedef name the target shim never names (equiv.py sdk_only_names) is read
@@ -35,7 +36,9 @@
  * that collide with the decomp's own names. WIN32_LEAN_AND_MEAN leaves those headers out. */
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef FNVNX_EQUIV_ULARGE_UNION
 #define _ULARGE_INTEGER fnvnx_sdk_ULARGE_INTEGER
+#endif
 #define CreateEventA fnvnx_sdk_CreateEventA
 #define CreateMutexA fnvnx_sdk_CreateMutexA
 #define CreateSemaphoreA fnvnx_sdk_CreateSemaphoreA
@@ -75,6 +78,7 @@
  * the decomp's own prototypes of those names. */
 #undef _tolower
 #undef _toupper
+#ifndef FNVNX_EQUIV_ULARGE_UNION
 class _ULARGE_INTEGER
 {
   public:
@@ -84,6 +88,8 @@ class _ULARGE_INTEGER
         ULONGLONG QuadPart;
     };
 };
+#endif  /* FNVNX_EQUIV_ULARGE_UNION (equiv.py's retry for a unit that declares `union _ULARGE_INTEGER;`): the SDK's
+         * union under its own tag, the key that unit uses */
 extern "C" {
 __declspec(dllimport) HANDLE WINAPI CreateEventA(void *, BOOL, BOOL, LPCSTR);
 __declspec(dllimport) HANDLE WINAPI CreateMutexA(void *, BOOL, LPCSTR);
