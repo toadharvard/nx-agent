@@ -3508,6 +3508,17 @@ def _stand_ins(path, text, stats, which):
 # call is a call of the decorated name that the link binds. Same gates as STAND1 (an address tagged in the unit) or
 # STAND2 (an address only other units define, in a unit without /O1 /O2 /Ox /Ob2), for an untagged free function at
 # namespace scope; not inline, not a template, not overloaded in the unit (one definition of the name).
+#
+# An overload is converted too when every spelling of the name binds one address that the unit tags and the unit
+# has no other `static` declaration of the name (R6 class 5): hkpworldoperationutil.cpp tags its static
+# FindItemForThreshold at 0x00cb3d10 and defines a second static FindItemForThreshold(S00cb5100_World*, ...) that
+# calls `pick`, which MSVC called as 0x00cb3d10 too (both spellings bound there). Such an overload's head may carry
+# `__declspec(noinline)` (STAND4_DEF); a single static noinline definition stays (S5's register-allocation
+# stand-ins).
+
+STAND4_DEF = re.compile(r'^[ \t]*((?:(?:__declspec\s*\(\s*\w+\s*\)|[\w:<>,\*&]+)[ \t\*&]+)*?)'
+                        r'((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
+                        r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?::[^;{}]*)?\{', re.M)
 
 def r_static_stand_ins(path, text, stats):
     """STAND4: a static free stand-in bound to a decompiled address becomes an extern declaration (above)."""
@@ -3519,14 +3530,20 @@ def r_static_stand_ins(path, text, stats):
     elsewhere = set() if info is None or set(info[0]) & STAND2_INLINING_FLAGS else _all_unit_functions(path) - info[1]
     spans, edits, names = None, [], collections.Counter()
     defs = []
-    for m in STAND_DEF.finditer(text):
+    names0 = collections.Counter()   # the definitions STAND_DEF sees (heads without __declspec)
+    for m in STAND4_DEF.finditer(text):
         q = re.sub(r'\s+', '', m.group(2))
         if '::' in q or q in NOT_FUNCTIONS or q in CXX_KEYWORDS: continue
         names[q] += 1
+        names0[q] += '__declspec' not in (m.group(1) or '')
         defs.append((m, q))
     for m, name in defs:
         lead = m.group(1) or ''
-        if names[name] != 1 or not re.search(r'\bstatic\b', lead): continue
+        if not re.search(r'\bstatic\b', lead): continue
+        single = names0[name] == 1 and '__declspec' not in lead   # the rule as it was
+        overload = not single and names[name] != 1
+        if not single and not overload: continue   # S5's single static noinline stand-ins: not this rule's
+        if overload and re.search(r'(?m)^[ \t]*static\s+[^;{}()]*\b%s\s*\([^;{}]*\)\s*;' % re.escape(name), text): continue
         if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
         before = text[max(0, m.start() - 400):m.start()]
@@ -3540,7 +3557,7 @@ def r_static_stand_ins(path, text, stats):
         prefix = '?' + '@'.join([name] + list(reversed(ns))) + '@@'
         bound = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
         if not bound or len(bound) != 1: continue
-        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged)): continue
+        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged and single)): continue
         o = m.end() - 1
         c = prepare.match_brace(text, o)
         start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())

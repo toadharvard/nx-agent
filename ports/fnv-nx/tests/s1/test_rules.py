@@ -754,6 +754,19 @@ got = run(s1.r_stand_in_definitions,
           'void Pool()\n{\n    pooled = 1;\n}\n',
           os.path.join(_s, 'src', 'staging', 'u.cpp'))
 s1._UNIT_SYMBOLS = _saved
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {
+    '?Find@@YAPAUA@@PAU1@H@Z': '0x00401040', '?Find@@YAPAUB@@PAU1@H@Z': '0x00401040',
+    '?Pick@@YAHH@Z': '0x00401050', '?Pick@@YAHN@Z': '0x00401050'}}]}, open(os.path.join(_s, 'build', 'units.json'), 'w'))
+got4 = run(s1.r_static_stand_ins,
+           '// @fnv 0x00401040\nstatic __declspec(noinline) A* Find(A* a, int n)\n{\n    return a + n;\n}\n'
+           'static __declspec(noinline) B* Find(B* b,\n                                    int n)\n{\n    return b->pick(n);\n}\n'
+           '// @fnv 0x00401050\nstatic int Pick(int k)\n{\n    return k;\n}\nstatic int Pick(double d);\n'
+           'static int Pick(double d)\n{\n    return 2;\n}\n', os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND4 an untagged static overload of a tagged address becomes an extern declaration (R6 0x00cb3d10)', got4,
+      ['__declspec(noinline) B* Find(B* b,\n                                    int n); /* fnv-nx STAND4 0x00401040 */',
+       'return a + n;', 'return 2;', 'static int Pick(double d);'], ['b->pick(n)'])
 check('STAND1 keeps tagged definitions behind pragmas, declarations, a type or a two-line head', got,
       ['return p + i;', 'return &g;', 'return a->n;', '*(int*)this = 1;', 'pooled = 1;',
        '/* fnv-nx STAND1: Cls::Stand is the function at the tagged address */'], ['fnv-nx STAND1: Bip', 'Map();'])
