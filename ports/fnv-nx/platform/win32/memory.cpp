@@ -17,7 +17,18 @@ struct region {
     size_t size;
     DWORD protect;
     uint8_t *committed; /* one byte per page */
+    unsigned caller;    /* the memory lane (memtrack.cpp): the VirtualAlloc call that reserved it */
 };
+#define MEM_RA ((unsigned)(uintptr_t)__builtin_return_address(0))
+enum { MEMK_HEAP = 0, MEMK_VIRTUAL = 1 };
+
+static size_t committed_pages(struct region *r, uintptr_t a, size_t n)
+{
+    size_t c = 0;
+    for (size_t p = (a - r->base) / PAGE, last = (a + n - 1 - r->base) / PAGE; p <= last; p++)
+        c += r->committed[p];
+    return c;
+}
 static struct region g_regions[MAX_REGIONS];
 static int g_nregions;
 static os_lock_t g_vm_lock;
@@ -44,6 +55,8 @@ static int commit_range(struct region *r, uintptr_t a, size_t n)
         if (os_vm_commit((void *)(r->base + p * PAGE), (q - p) * PAGE))
             return -1;
         memset(r->committed + p, 1, q - p);
+        if (w32_mem_on)
+            fnvnx_mem_delta(MEMK_VIRTUAL, (long long)((q - p) * PAGE), r->caller);
         p = q;
     }
     return 0;
@@ -56,6 +69,7 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
         SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
     }
+    unsigned caller = MEM_RA;
     os_lock(&g_vm_lock);
     LPVOID res = NULL;
     uintptr_t a = (uintptr_t)addr;
@@ -83,6 +97,7 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
         r->base = (uintptr_t)p;
         r->size = rsz;
         r->protect = protect;
+        r->caller = caller;
         r->committed = (uint8_t *)calloc(rsz / PAGE, 1);
         if (!r->committed) {
             os_vm_release(p, rsz);
@@ -113,6 +128,8 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
     }
 out:
     os_unlock(&g_vm_lock);
+    if (!res && w32_mem_on && GetLastError() == ERROR_NOT_ENOUGH_MEMORY)
+        fnvnx_mem_fail(MEMK_VIRTUAL, size, caller);
     return res;
 }
 
@@ -129,6 +146,8 @@ extern "C" BOOL VirtualFree(LPVOID addr, SIZE_T size, DWORD type)
         if (size || a != r->base) {
             SetLastError(ERROR_INVALID_PARAMETER);
         } else {
+            if (w32_mem_on)
+                fnvnx_mem_delta(MEMK_VIRTUAL, -(long long)(committed_pages(r, r->base, r->size) * PAGE), r->caller);
             os_vm_release((void *)r->base, r->size);
             free(r->committed);
             *r = g_regions[--g_nregions];
@@ -142,6 +161,8 @@ extern "C" BOOL VirtualFree(LPVOID addr, SIZE_T size, DWORD type)
         } else if (pa + n > r->base + r->size) {
             SetLastError(ERROR_INVALID_PARAMETER);
         } else {
+            if (w32_mem_on)
+                fnvnx_mem_delta(MEMK_VIRTUAL, -(long long)(committed_pages(r, pa, n) * PAGE), r->caller);
             os_vm_decommit((void *)pa, n);
             memset(r->committed + (pa - r->base) / PAGE, 0, n / PAGE);
             ok = TRUE;
@@ -202,7 +223,12 @@ extern "C" BOOL HeapDestroy(HANDLE h) { W32_UNUSED(h); return TRUE; }
 extern "C" LPVOID HeapAlloc(HANDLE h, DWORD flags, SIZE_T n)
 {
     W32_UNUSED(h);
+    int in = fnvnx_mem_enter(MEM_RA);   /* the memory lane: recorded here, by the game's call site */
     void *p = (W32_DW(flags) & HEAP_ZERO_MEMORY) ? calloc(1, n ? n : 1) : malloc(n ? n : 1);
+    if (in) {
+        if (p) fnvnx_mem_note(MEMK_HEAP, p, n, MEM_RA); else fnvnx_mem_fail(MEMK_HEAP, n, MEM_RA);
+        fnvnx_mem_leave(in);
+    }
     if (!p)
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return p;
@@ -214,7 +240,14 @@ extern "C" LPVOID HeapReAlloc(HANDLE h, DWORD flags, LPVOID p, SIZE_T n)
     if (W32_DW(flags) & HEAP_REALLOC_IN_PLACE_ONLY)
         return usable(p) >= n ? p : NULL;
     size_t old = (W32_DW(flags) & HEAP_ZERO_MEMORY) ? usable(p) : 0;
+    int in = fnvnx_mem_enter(MEM_RA);
+    if (in)   /* before: once realloc freed p, another thread may get the address (a failed realloc leaves p untracked) */
+        fnvnx_mem_forget(MEMK_HEAP, p);
     void *q = realloc(p, n ? n : 1);
+    if (in) {
+        if (q) fnvnx_mem_note(MEMK_HEAP, q, n, MEM_RA); else fnvnx_mem_fail(MEMK_HEAP, n, MEM_RA);
+        fnvnx_mem_leave(in);
+    }
     if (q && n > old && (W32_DW(flags) & HEAP_ZERO_MEMORY))
         memset((char *)q + old, 0, n - old);
     if (!q)
@@ -226,7 +259,11 @@ extern "C" BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p)
 {
     W32_UNUSED(h);
     W32_UNUSED(flags);
+    int in = fnvnx_mem_enter(MEM_RA);
+    if (in)
+        fnvnx_mem_forget(MEMK_HEAP, p);
     free(p);
+    fnvnx_mem_leave(in);
     return TRUE;
 }
 
@@ -239,12 +276,22 @@ extern "C" SIZE_T HeapSize(HANDLE h, DWORD flags, LPCVOID p)
 
 extern "C" HANDLE LocalAlloc(UINT flags, SIZE_T n)
 {
-    return (HANDLE)((flags & 0x40 /* LMEM_ZEROINIT */) ? calloc(1, n ? n : 1) : malloc(n ? n : 1));
+    int in = fnvnx_mem_enter(MEM_RA);
+    void *p = (flags & 0x40 /* LMEM_ZEROINIT */) ? calloc(1, n ? n : 1) : malloc(n ? n : 1);
+    if (in) {
+        if (p) fnvnx_mem_note(MEMK_HEAP, p, n, MEM_RA); else fnvnx_mem_fail(MEMK_HEAP, n, MEM_RA);
+        fnvnx_mem_leave(in);
+    }
+    return (HANDLE)p;
 }
 
 extern "C" HANDLE LocalFree(HANDLE h)
 {
+    int in = fnvnx_mem_enter(MEM_RA);
+    if (in)
+        fnvnx_mem_forget(MEMK_HEAP, h);
     free(h);
+    fnvnx_mem_leave(in);
     return NULL;
 }
 

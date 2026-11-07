@@ -129,7 +129,8 @@ check(sorted(f.name for f in (d / 'fnvnx_cmath').iterdir()) == names
       and all((d / 'fnvnx_cmath' / n).read_bytes() == (shim / n).read_bytes() for n in names), 'cmath copy in sync')
 for n in names:
     t = (shim / n).read_text()
-    if not ('defined(_MSC_VER)' in t and '__cdecl %s(' % n[:-2] in t):
+    fn = {'std_abs.h': 'abs'}.get(n, n[:-2])            # DECL1-STDABS: std::abs's overloads
+    if not ('defined(_MSC_VER)' in t and '__cdecl %s(' % fn in t):
         check(False, 'fnvnx_cmath/%s: no MSVC (_MSC_VER, __cdecl) declaration' % n)
 
 print('test_equiv: %d failures' % len(fails))

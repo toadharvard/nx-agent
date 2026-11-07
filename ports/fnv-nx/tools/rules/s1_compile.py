@@ -2934,14 +2934,16 @@ def _fits_int(body):
     return True
 
 def r_opaque_enums(path, text, stats):
-    """ENUM1: `enum X;` -> `enum X : int;`, and `enum X {` -> `enum X : int {` for those names (see above)."""
+    """ENUM1: `enum X;` -> `enum X FNVNX_ENUM_INT;`, and `enum X {` -> `enum X : int {` for those names (see above).
+    FNVNX_ENUM_INT is `: int` (fnvnx_compat.h); in the S11 gate it is empty: MSVC 2008 has no opaque declaration,
+    and its own forward declaration `enum X;` is the same type, underlying int (ENUM1-FWD)."""
     if 'enum' not in text: return text
     names = _opaque_enum_names(path)
     if not names: return text
     def decl(m):
         if m.group(2) not in names: return m.group(0)
         stats['ENUM1'] += 1
-        return m.group(1) + ' : int' + m.group(3)
+        return m.group(1) + ' FNVNX_ENUM_INT' + m.group(3)
     def defn(m):
         if m.group(1) not in names: return m.group(0)
         if not _fits_int(text[m.end():text.find('}', m.end())]): return m.group(0)   # int cannot hold it: as it was
@@ -4828,7 +4830,10 @@ def r_forceinline_declarations(path, text, stats):
         cls, body = None, ''
         if inner is not None:
             if inner[2] != 'class': continue                         # a declaration inside a function or namespace
-            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', inner[3] or '')
+            head = re.sub(r'\btemplate\s*<[^{};]*?>\s*(?=(?:class|struct|union)\b)', ' ', inner[3] or '')
+            # the class's own name, not a template parameter's (`template <class KEYD3, ...> class DispatchUtilD3`:
+            # hkpbvtreeagent, hkgpmesh lost the keyword on members their units define out of class)
+            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', head)
             if not hm: continue
             cls, body = hm.group(1), text[inner[0]:inner[1]]
             if name.lstrip('~') != name and name[1:] != cls: continue
@@ -4909,10 +4914,16 @@ def r_vfptr_empty_base(path, text, stats):
 # private artifacts repository (fnv-nx-build branch recon/<unit>), never here. REC1 applies what a prepare run is
 # given: FNVNX_RECON names a directory holding recon.json files (one per recon, in subdirectories or at its top):
 #   {"format": "fnvnx-recon/1", "unit": <source>, "decomp_commit": <sha>, "append": <file next to recon.json>,
-#    "functions": [{address, symbol, size}], "symbols": {decorated name: address}}
+#    "functions": [{address, symbol, size}], "symbols": {decorated name: address},
+#    "replace": [{"old": <exact text>, "new": <text>}]}
 # The text rule appends the body to its unit; the POST hook add_recon_definitions adds the functions and symbols to
 # the prepared build/units.json. A recon whose decomp_commit is not the checkout's, or whose addresses a unit already
 # defines, is skipped (REC1-STALE / REC1-DUP). Without FNVNX_RECON (or with no recon in it) REC1 does nothing.
+# REC1-REPL (orchestrator, R1): `replace` edits code the unit already has, where an appended body cannot help (a
+# filler the unit's own calls bind to, a declaration whose arguments sit on the wrong call, an in-class body that is
+# not the exe's). Each pair is applied in order, before the append, to the text the rule receives; every `old` must
+# occur exactly once there, else the prepare fails (RuntimeError naming the recon and the pair): a recon written
+# for other text must never half-apply.
 
 def _recon_entries(path):
     """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
@@ -4941,7 +4952,8 @@ def _recon_entries(path):
             r = json.load(open(f))
         except (OSError, ValueError):
             continue
-        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not (r.get('append') or r.get('symbols')):
+        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not (r.get('append') or r.get('symbols')
+                                                                             or r.get('replace')):
             continue   # a recon with only `symbols` binds names to the exe's functions and adds no body
         if head and r.get('decomp_commit') and r['decomp_commit'] != head:
             r['_skip'] = 'REC1-STALE'
@@ -4962,6 +4974,16 @@ def r_recon_bodies(path, text, stats):
         if r['unit'] != src: continue
         if r.get('_skip'):
             stats[r['_skip']] += 1; continue
+        for k, e in enumerate(r.get('replace') or []):
+            old, new = e.get('old'), e.get('new')
+            if not isinstance(old, str) or not old or not isinstance(new, str):
+                raise RuntimeError('REC1-REPL: %s: replace[%d] needs a non-empty "old" and a "new" string' % (d, k))
+            c = text.count(old)
+            if c != 1:
+                raise RuntimeError('REC1-REPL: %s (%s): replace[%d] "old" occurs %d times, not once: %r'
+                                   % (d, src, k, c, old[:120]))
+            text = text.replace(old, new)
+            stats['REC1-REPL'] += 1
         if r.get('append'):
             body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
             text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body

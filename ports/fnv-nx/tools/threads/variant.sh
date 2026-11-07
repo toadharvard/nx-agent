@@ -6,8 +6,13 @@
 #   RACE=1: tests/s15/mtqemu/hb.c (game-sized tables) and the --wrap of the Win32 sync calls. Only meaningful when the
 #           build's game objects were compiled with RACE=1 (tools/link/compile.sh: -fsanitize=thread); otherwise the
 #           checker sees no game access and says so (hb: summary ... checks 0).
+#   MEM=1:  the memory lane (tools/perf/MEM.md): tools/perf/mem_autostart.c (MEM_PERIOD_MS, default 1000) and
+#           tools/perf/mem_wrap.c with the --wrap of the C heap functions
+#   PLAT=1: the platform lane (tools/perf/PLAT.md): tools/perf/plat_autostart.c
+#   WATCHDOG=0: no autostart.c (a memory- or platform-only guest)
 # Nothing of the build directory is changed; <out>/fnvnx.elf is the lane's guest. Exit 0 / 2 (no such build) / 1.
-# Env: WG_LIMIT_MS, RACE, HB_SHADOW_LOG2 (default 20), DEVKITPRO / FNVNX_TC (default: the build's toolchain stage).
+# Env: WG_LIMIT_MS, RACE, HB_SHADOW_LOG2 (default 20), MEM, MEM_PERIOD_MS, WATCHDOG, DEVKITPRO / FNVNX_TC (default:
+# the build's toolchain stage).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); P=$(cd "$HERE/../.." && pwd)
 B=$(cd "${1:?build dir}" && pwd); OUT=$(mkdir -p "${2:?out dir}" && cd "$2" && pwd)
@@ -45,8 +50,18 @@ ARCH=(-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=
 INC=(-I"$P/tests/s15/mtqemu/include" -I"$P/toolchain/include" -I"$P/platform/include" -iquote "$P/shim/include"
      -I"$P/shim/include" -I"$P/platform/crt")
 mkdir -p "$OUT/threads"
-"$CC" "${ARCH[@]}" -O2 -g -c "$HERE/autostart.c" -DWG_LIMIT_MS="${WG_LIMIT_MS:-10000}" -o "$OUT/threads/autostart.o"
-X=("$OUT/threads/autostart.o")
+X=()
+if [ "${WATCHDOG:-1}" != 0 ]; then
+	"$CC" "${ARCH[@]}" -O2 -g -c "$HERE/autostart.c" -DWG_LIMIT_MS="${WG_LIMIT_MS:-10000}" -o "$OUT/threads/autostart.o"
+	X+=("$OUT/threads/autostart.o")
+fi
+if [ "${MEM:-0}" = 1 ]; then
+	"$CC" "${ARCH[@]}" -O2 -g -c "$P/tools/perf/mem_autostart.c" -DMEM_PERIOD_MS="${MEM_PERIOD_MS:-1000}" \
+		-o "$OUT/threads/mem_autostart.o"
+	"$CC" "${ARCH[@]}" -O2 -g -c "$P/tools/perf/mem_wrap.c" -o "$OUT/threads/mem_wrap.o"
+	X+=("$OUT/threads/mem_autostart.o" "$OUT/threads/mem_wrap.o")
+	for s in malloc calloc realloc free memalign aligned_alloc posix_memalign; do X+=("-Wl,--wrap=$s"); done
+fi
 if [ "${RACE:-0}" = 1 ]; then
 	"$CC" "${ARCH[@]}" -O2 -g -std=gnu11 "${INC[@]}" -DHB_SHADOW_LOG2="${HB_SHADOW_LOG2:-20}" -DHB_PAIRS_LOG2=14 \
 		-c "$P/tests/s15/mtqemu/hb.c" -o "$OUT/threads/hb.o"
@@ -58,13 +73,17 @@ if [ "${RACE:-0}" = 1 ]; then
 		X+=("-Wl,--wrap=$s")
 	done
 fi
+if [ "${PLAT:-0}" = 1 ]; then
+	"$CC" "${ARCH[@]}" -O2 -g -c "$P/tools/perf/plat_autostart.c" -o "$OUT/threads/plat_autostart.o"
+	X+=("$OUT/threads/plat_autostart.o")
+fi
 [ -n "$OLIB" ] && X+=("$OLIB")
 export EXTRA_OBJS="${EXTRA_OBJS:-} ${X[*]}"
 case "$SCRIPT" in
 	*/render/nine/*) argv=(bash "$SCRIPT" "$LOUT" "$FIXED" "$OUT/nine"); export GUEST_ONLY=1; [ -n "$VORBIS" ] && export VORBIS ;;
 	*) argv=(bash "$SCRIPT" "$LOUT" "$FIXED" "$OUT"); [ -n "$VORBIS" ] && argv+=("$VORBIS") ;;
 esac
-echo "variant.sh: $SCRIPT (D3D9=$D3D9 GAME_NEW=$GAME_NEW RACE=${RACE:-0} WG_LIMIT_MS=${WG_LIMIT_MS:-10000})"
+echo "variant.sh: $SCRIPT (D3D9=$D3D9 GAME_NEW=$GAME_NEW RACE=${RACE:-0} WATCHDOG=${WATCHDOG:-1} MEM=${MEM:-0} PLAT=${PLAT:-0})"
 "${argv[@]}" > "$OUT/link.log" 2>&1 || { tail -20 "$OUT/link.log" >&2; exit 1; }
 # render/nine's script leaves its products in <out>/nine/game
 [ -f "$OUT/fnvnx.elf" ] || { [ -f "$OUT/nine/game/fnvnx.elf" ] && cp "$OUT/nine/game/fnvnx.elf" "$OUT/fnvnx.elf"; }

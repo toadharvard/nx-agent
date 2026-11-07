@@ -40,6 +40,7 @@ sys.path.insert(0, str(HERE))
 import merge_reports  # noqa: E402
 
 TABLE = HERE / 'explained.tsv'
+CLASSES = HERE / 'classes.tsv'
 PATCHES = PORT / 'docs/PATCHES.md'
 FIELDS = ('cls', 'what', 'kind', 'rule', 'unit', 'addr', 'error', 'reason')
 
@@ -67,6 +68,19 @@ def load_table(path=TABLE):
             raise SystemExit('explain: %s:%d: a unit row needs a unit or a first-error pattern' % (path, n))
         rows.append(r)
     return rows
+
+
+def load_classes(path=CLASSES):
+    """{class: (declared kind, reason)} of classes.tsv: the declared classes (D24)"""
+    out = {}
+    for n, line in enumerate(Path(path).read_text().splitlines(), 1) if Path(path).exists() else ():
+        if not line.strip() or line.startswith('#'):
+            continue
+        p = [x.strip() for x in line.split('\t')]
+        if len(p) != 3 or p[1] not in ('platform', 'compiler', 'by-design') or not p[2]:
+            raise SystemExit('explain: %s:%d: want class, platform|compiler|by-design, reason' % (path, n))
+        out[p[0]] = (p[1], p[2])
+    return out
 
 
 def load_bydesign(path=PATCHES):
@@ -193,22 +207,30 @@ def shard_problems(reports):
     return out
 
 
-def metric(fns, units, reports=None):
+def metric(fns, units, reports=None, declared=None):
+    """declared: classes.tsv. `open_code` (D24, stream EQ's metric with `units`): code-kind functions whose class is
+    not declared (or that have none); every no-build unit counts, whatever its class."""
     probs = shard_problems(reports) if reports is not None else list(getattr(fns, 'shard_problems', ()))
+    declared = load_classes() if declared is None else declared
+    open_code = sum(f['kind'] == 'code' and f['cls'] not in declared for f in fns)
     return dict(functions=len(fns), units=len(units), unexplained_functions=sum(f['cls'] is None for f in fns),
-                unexplained_units=sum(u['cls'] is None for u in units), complete=not probs, shard_problems=probs)
+                unexplained_units=sum(u['cls'] is None for u in units), open_code=open_code,
+                open=open_code + len(units), complete=not probs, shard_problems=probs)
 
 
-def render(fns, units, listing=False, reports=None):
-    m = metric(fns, units, reports)
+def render(fns, units, listing=False, reports=None, declared=None):
+    declared = load_classes() if declared is None else declared
+    m = metric(fns, units, reports, declared)
     out = ['# Unexplained MSVC gate differences (tools/equiv/explain.py)', '']
     if m['shard_problems']:
         out += ['**INCOMPLETE** - the metric covers only part of the gate: ' + '; '.join(m['shard_problems']), '']
     cf = Counter(f['cls'] or '-' for f in fns)
     cu = Counter(u['cls'] or '-' for u in units)
-    out += ['| class | functions | no-build units |', '|---|---:|---:|']
+    cc = Counter(f['cls'] or '-' for f in fns if f['kind'] == 'code')
+    out += ['| class | declared | functions | code | no-build units |', '|---|---|---:|---:|---:|']
     for c in sorted(set(cf) | set(cu), key=lambda c: (c == '-', -(cf[c] + cu[c]), c)):
-        out.append('| %s | %d | %d |' % ('(unexplained)' if c == '-' else c, cf[c], cu[c]))
+        out.append('| %s | %s | %d | %d | %d |' % ('(unexplained)' if c == '-' else c,
+                                                  declared[c][0] if c in declared else 'OPEN', cf[c], cc[c], cu[c]))
     out += ['', '## Unexplained functions (unit, address, kind, rule)', '', '```']
     out += ['%s  %s  %s  %s' % (f['unit'], f['addr'], f['kind'], f['rule']) for f in fns if f['cls'] is None]
     out += ['```', '', '## Unexplained no-build units (unit, rule, first error)', '', '```']
@@ -219,7 +241,13 @@ def render(fns, units, listing=False, reports=None):
         out += ['%s  %s  %s  %s  %s' % (f['cls'], f['unit'], f['addr'], f['kind'], f['rule']) for f in fns if f['cls']]
         out += ['%s  %s  %s  %s' % (u['cls'], u['unit'], u['rule'], u['error']) for u in units if u['cls']]
         out += ['```']
-    out += ['', 'unexplained: %d functions, %d no-build units (of %d functions, %d units)%s' % (
+    out += ['', '## Open code differences (not a declared class; unit, address, class, rule)', '', '```']
+    out += ['%s  %s  %s  %s' % (f['unit'], f['addr'], f['cls'] or '-', f['rule']) for f in fns
+            if f['kind'] == 'code' and f['cls'] not in declared]
+    out += ['```']
+    out += ['', 'open (D24): %d = %d code functions not in a declared class + %d no-build units' % (
+        m['open'], m['open_code'], m['units'])]
+    out += ['unexplained: %d functions, %d no-build units (of %d functions, %d units)%s' % (
         m['unexplained_functions'], m['unexplained_units'], m['functions'], m['units'],
         '' if m['complete'] else ' INCOMPLETE: ' + '; '.join(m['shard_problems']))]
     return '\n'.join(out) + '\n'

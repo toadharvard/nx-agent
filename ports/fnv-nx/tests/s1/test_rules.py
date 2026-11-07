@@ -146,6 +146,9 @@ check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', 
 
 got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
 check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
+got = prepare.r_platform_protos('/x/src/v.cpp', 'int g();\nnamespace std {\nfloat abs(float);\n}\nfloat h(float x) { return std::abs(x); }\n', Counter())
+check('DECL1-STDABS a std::abs prototype becomes fnvnx_cmath/std_abs.h', got,
+      ['#include "fnvnx_cmath/std_abs.h" /* fnv-nx DECL1 */', 'std::abs(x)'], ['float abs(float);', '<stdlib.h>'])
 
 # ---- STL2: units with the real container headers use the VC9-layout shim
 _stl2 = ('// std::string in a comment\n#include <string>\n#include <vector>\nnamespace std {\ntemplate <> class allocator<E>\n'
@@ -399,7 +402,7 @@ got = run(s1.r_opaque_enums, 'enum DIALOGUE_TYPE;\nenum DIALOGUE_TYPE\n{\n    A 
           os.path.join(_e, 'src', 'b.cpp'))
 s1._OPAQUE_NAMES = None
 check('ENUM1 opaque enum gets int as its base, and so does its definition', got,
-      ['enum DIALOGUE_TYPE : int;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE : int;', 'enum Other { B };'])
+      ['enum DIALOGUE_TYPE FNVNX_ENUM_INT;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE FNVNX_ENUM_INT;', 'enum Other { B };'])
 s1._OPAQUE_NAMES = None
 check('ENUM1 a definition int cannot hold keeps its form',
       run(s1.r_opaque_enums, 'enum WIDE { W = 0x80000000 };\n', os.path.join(_e, 'src', 'c.cpp')), ['enum WIDE { W'])
@@ -1349,6 +1352,11 @@ check('FINL1 body-less declarations of functions the unit does not define lose _
 check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)',
       _o, ['__forceinline int get(int i) const;', '__forceinline int put(int i);',
            'static __forceinline void d(X* x, int n, Pod);'])
+check('FINL1 a class template\'s member defined out of class keeps it (the class, not the template parameter)',
+      run(s1.r_forceinline_declarations,
+          'template <class K, class E>\nclass DU\n{\n\tpublic:\n\t\tstatic __forceinline void __cdecl up(K& k, E& e);\n};\n'
+          'template <class K, class E>\nvoid __cdecl DU<K, E>::up(K& k, E& e)\n{\n}\n'),
+      ['static __forceinline void __cdecl up(K& k, E& e);'], ['FINL1'])
 check('FINL1 headers are left alone',
       run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 
@@ -1424,6 +1432,52 @@ s1.add_recon_definitions(os.path.join(_rc, 'dec'), _st)
 _ru = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
 check('REC1 symbols-only recon: bindings persist, no body', _json.dumps(_ru) + _ro3 + str(dict(_st)),
       ['"?Agent1@@YAXXZ": "0x00dcd6a0"', "'REC1-SYM': 1"], ['fnv-nx REC1: reconstructed'])
+# REC1-REPL: `replace` pairs edit the unit's own text, in order, before the append; each `old` exactly once
+_kp = os.path.join(_rc, 'dec', 'src', 'k.cpp')
+_ku = {'units': [{'source': 'src/k.cpp', 'functions': [], 'symbols': {}}]}
+def _krecon(name, rec, body=None):
+    os.makedirs(os.path.join(_rc, 'recon', name))
+    rec = dict({'format': 'fnvnx-recon/1', 'unit': 'src/k.cpp'}, **rec)
+    _json.dump(rec, open(os.path.join(_rc, 'recon', name, 'recon.json'), 'w'))
+    if body is not None:
+        open(os.path.join(_rc, 'recon', name, 'body.cpp'), 'w').write(body)
+    prepare.__dict__['_fnvnx_recon'] = None
+_ktext = 'void g();\nvoid f() { g(); }\n'
+_json.dump(_ku, open(os.path.join(_rc, 'dec', 'build', 'units.json'), 'w'))
+os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', 'k1')
+_krecon('k1', {'append': 'body.cpp', 'symbols': {'?h@@YAXXZ': '0x00402000'},
+               'replace': [{'old': 'void f() { g(); }', 'new': 'void f() { h(); }'},
+                           {'old': 'void g();', 'new': 'void g();\nvoid h();'}]},
+        '/* appended */ void f2() { g(); }\n')
+_st = Counter()
+_ko = s1.r_recon_bodies(_kp, _ktext, _st)
+check('REC1-REPL the pairs apply in order, then the body is appended',
+      _ko + str(dict(_st)), ['void g();\nvoid h();\nvoid f() { h(); }', 'fnv-nx REC1', '/* appended */ void f2() { g(); }',
+                             "'REC1-REPL': 2"], ['void f() { g(); }'])
+check('REC1-REPL applied before the append: the appended body is not edited',
+      _ko[_ko.index('fnv-nx REC1'):], ['void f2() { g(); }'], ['h()'])
+s1.add_recon_definitions(os.path.join(_rc, 'dec'), _st)
+_ku2 = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
+check('REC1-REPL with symbols: REC1-SYM still persists the binding', _json.dumps(_ku2) + str(dict(_st)),
+      ['"?h@@YAXXZ": "0x00402000"', "'REC1-SYM': 1"])
+def _kfails(name, rec, text):
+    os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', name)
+    _krecon(name, rec)
+    try:
+        s1.r_recon_bodies(_kp, text, Counter())
+    except RuntimeError as e:
+        return 'raised: ' + str(e)
+    return 'no error'
+check('REC1-REPL an old that occurs twice fails the prepare',
+      _kfails('k2', {'replace': [{'old': 'g()', 'new': 'h()'}]}, 'void a() { g(); }\nvoid b() { g(); }\n'),
+      ['raised: REC1-REPL', 'occurs 2 times'])
+check('REC1-REPL a missing old fails the prepare',
+      _kfails('k3', {'replace': [{'old': 'void q();', 'new': 'void r();'}]}, _ktext), ['raised: REC1-REPL', 'occurs 0 times'])
+check('REC1-REPL an old found only in the appended body fails (replace runs before the append)',
+      _kfails('k4', {'append': 'body.cpp', 'replace': [{'old': 'void f2()', 'new': 'void f3()'}]}, _ktext),
+      ['raised: REC1-REPL', 'occurs 0 times'])
+check('REC1-REPL a replace-only recon is a recon (no body, no symbols)',
+      _kfails('k5', {'replace': [{'old': 'void q();', 'new': 'x'}]}, _ktext), ['raised: REC1-REPL'])
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)

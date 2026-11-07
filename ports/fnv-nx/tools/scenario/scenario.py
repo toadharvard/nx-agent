@@ -12,7 +12,7 @@ guest in the emulator, one report per scenario over the zero targets of D25 (doc
                                     the Wine side's driver: xdotool on $DISPLAY, wall-clock waits, milestone gates
                                     as wine_s seconds, file gates polled under the profile dir
     scenario.py report   <plan.json> --guest DIR [--wine DIR] [--compare compare.json] [--threads threads.json]
-                         [--nro docs/NRO_CHECKLIST.md] [--optional tools/scenario/optional_files.txt]
+                         [--nx1 nx1.json] [--optional tools/scenario/optional_files.txt]
                          --out report.json [--md report.md]
     scenario.py metric   <report.json>...   [--md OUT]        D25 targets measured (of 12) and the sum of counts
 
@@ -37,16 +37,21 @@ The report (fnvnx-scenario/1) has one entry per D25 target, each {measured, coun
    2 lockstep          tests/s5/boot_trace.py compare --json: the divergences (first one named)
    3 stand-ins         platform stand-in hits: "[fnvnx] ... not available / unsupported / ignored / no such module /
                        stand-in" lines (distinct), plus trap stubs reached ("defined nowhere")
-   4 failed opens      the summary's file faults (distinct call+path) minus tools/scenario/optional_files.txt
+   4 failed opens      the summary's file faults (distinct call+path) minus existence probes (stat/remove of a
+                       missing path, mkdir of an existing one: counted apart) and tools/scenario/optional_files.txt
    5 draws/states      "[fnvnx] ... skipped draw / unsupported ... state" lines of the guest's device
    6 audio/input       scenario keys the platform keymap cannot map + audio decode failure lines
    7 threads           tools/threads report (races + cycles + long waits) + gate timeouts (hangs on the path)
    8 memory            allocation-failure lines + 1 when the peak heap is over the Switch budget
    9 save/load         tools/scenario/savediff.py: the guest's round-trip differences not in the original's own
-  10 script errors     script-error lines of the guest's console log (scof) not in the original's
-  11 NRO checklist     open items of docs/NRO_CHECKLIST.md
-  12 frames > 16.7 ms  frames whose main-thread instructions exceed the budget at 1.02 GHz and the PERF_budget IPC
-                       (emu_scenario.py --frames)
+  10 script errors     tools/report/scripterr.py's metric when given (--scripterr: (form, kind, caller) groups
+                       from the call watcher and the private patterns, minus the original's run); else
+                       script-error lines of the guest's console log (scof) not in the original's
+  11 NRO checklist     the device-readiness checks behind docs/NRO_CHECKLIST.md that do not pass: tests/nx1/run.py
+                       --json (fnvnx-nx1/1 "open"), run with this scenario's boot summary and guest
+  12 frames > 16.7 ms  tools/perf/frames.py's device estimate when given (--frames-report, calibrated --scale);
+                       else frames whose main-thread instructions exceed 16.7 ms at 1.02 GHz and the PERF_budget
+                       IPC (emu_scenario.py --frames)
 "measured" is false when the input it needs is absent; metric counts the measured ones (S18's METRIC) and sums the
 counts. Everything here is our own code; reports carry counts, names and original addresses only.
 """
@@ -68,7 +73,6 @@ import keys  # noqa: E402
 
 SCENARIOS = os.path.join(HERE, "scenarios.json")
 OPTIONAL = os.path.join(HERE, "optional_files.txt")
-NRO = os.path.join(P, "docs", "NRO_CHECKLIST.md")
 KEYMAP = os.path.join(P, "platform", "input", "keymap.cpp")
 BUDGET = os.path.join(P, "docs", "PERF_budget.json")
 LOADS = re.compile(r"^\s*(coc|cow|centeroncell|centeronworld|load)\b", re.I)
@@ -389,7 +393,15 @@ def roundtrip(plan, root, savediff):
     return SD.compare(a, b)
 
 
-def report(plan, gdir, wdir=None, compare=None, threads=None, nro=NRO, optional=OPTIONAL, budget=BUDGET):
+def is_probe(f):
+    """a file call that asks whether something exists rather than opening it: stat / remove / rmdir of a missing
+    path, mkdir of one that exists (the game deletes its old debug logs at start, checks for optional files)"""
+    c, e = f.get("call"), str(f.get("errno"))
+    return (c in ("stat", "remove", "rmdir") and e in ("ENOENT", "2")) or (c == "mkdir" and e in ("EEXIST", "17"))
+
+
+def report(plan, gdir, wdir=None, compare=None, threads=None, nx1=None, optional=OPTIONAL, budget=BUDGET,
+           frames_report=None, scripterr=None):
     summ, log, con, root = guest_inputs(gdir, plan)
     sc = (summ or {}).get("scenario") or {}
     stop = ((summ or {}).get("stop") or {}).get("reason", "")
@@ -402,7 +414,7 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nro=NRO, optional=
 
     # 1 faults
     stubbed = len(re.findall(r"^stubbed-fault", log or "", re.M)) or (summ or {}).get("stubbed_faults", 0)
-    fault_end = bool(re.search(r"fault|invalid memory|out of instruction budget|host stand-in error|deadlock", stop, re.I))
+    fault_end = bool(re.search(r"fault|invalid memory|out of instruction budget|host stand-in error|deadlock|hang", stop, re.I))
     skipped = (summ or {}).get("initializers_skipped", 0) or 0
     put(1, ran, int(fault_end) + int(stubbed) + int(skipped), stop=stop[:300], stubbed_faults=stubbed,
         initializers_skipped=skipped)
@@ -422,9 +434,12 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nro=NRO, optional=
     # 4 failed opens
     opt = [re.compile(re.split(r"\s+#", l.strip())[0], re.I) for l in (read(optional) or "").splitlines()
            if l.strip() and not l.lstrip().startswith("#")]
-    ff = [f for f in (summ or {}).get("file_faults", []) if not any(r.search(f.get("path", "")) for r in opt)]
-    put(4, ran, len({(f.get("call"), f.get("path", "").lower()) for f in ff}),
-        faults=[f"{f.get('call')} {f.get('path')} errno {f.get('errno')}" for f in ff[:50]])
+    allf = (summ or {}).get("file_faults", [])
+    probe = [f for f in allf if is_probe(f)]
+    ff = [f for f in allf if not is_probe(f) and not any(r.search(f.get("path", "")) for r in opt)]
+    put(4, ran, len({(f.get("call"), f.get("path", "").lower()) for f in ff}), probes=len(probe),
+        faults=[f"{f.get('call')} {f.get('path')} errno {f.get('errno')}" for f in ff[:50]],
+        probe_list=[f"{f.get('call')} {f.get('path')}" for f in probe[:50]])
     # 5 draws / states
     dr = sorted({l for l in fl if DRAW_RE.search(l)})
     put(5, ran, len(dr), lines=dr[:30])
@@ -467,7 +482,11 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nro=NRO, optional=
     wcon = None
     if wdir:
         wcon = read(os.path.join(wdir, "console.txt"))
-    if con is not None:
+    sj = jload(scripterr) if scripterr else None
+    if sj is not None and sj.get("schema") == "fnvnx-scripterr/1":   # R4's lane: (form, kind, caller) groups
+        put(10, True, int(sj.get("metric", 0)), source="scripterr.py", groups=sj.get("distinct"),
+            in_original=sj.get("in_original"))
+    elif con is not None:
         ge = {l for l in console_lines(con) if SCRIPT_RE.search(l)}
         we = {l for l in console_lines(wcon) if SCRIPT_RE.search(l)} if wcon is not None else set()
         own = {l for l in ge if re.search(r"not found", l, re.I) and re.search(r"command", l, re.I)}
@@ -476,16 +495,20 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nro=NRO, optional=
             scenario_command_errors=sorted(own)[:20], extra=extra[:40])
     else:
         put(10, False, 0, why="no guest console log (scof) - the guest did not reach the console")
-    # 11 NRO checklist
-    nt = read(nro)
-    if nt is not None:
-        open_items = re.findall(r"^\s*[-*] \[ \] (.+)$", nt, re.M)
-        put(11, True, len(open_items), open=[o[:120] for o in open_items[:40]])
+    # 11 NRO checklist: NX1's device-readiness checks (missing evidence counts as open there, never as a pass)
+    nj = jload(nx1) if nx1 else None
+    if nj is not None and nj.get("schema") == "fnvnx-nx1/1":
+        rows = nj.get("checks", [])
+        put(11, True, int(nj.get("open", 0)), checks=len(rows),
+            open=[f"{r.get('n')} {r.get('check')}: {r.get('status')}" for r in rows if r.get("status") != "pass"])
     else:
-        put(11, False, 0, why="no NRO_CHECKLIST.md")
+        put(11, False, 0, why="no tests/nx1/run.py --json for this run")
     # 12 frames
     fr = sc.get("frames") or {}
-    if fr.get("measured") and fr.get("instructions"):
+    fj = jload(frames_report) if frames_report else None
+    if fj and (fj.get("device_ms") or {}).get("over_budget") is not None:   # tools/perf/frames.py, calibrated
+        put(12, True, fj["device_ms"]["over_budget"], frames=fj.get("frames"), source="frames.py device estimate")
+    elif fr.get("measured") and fr.get("instructions"):
         ipc = 0.8
         bj = jload(budget)
         for a in (bj or {}).get("assumptions", []):
@@ -495,7 +518,7 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nro=NRO, optional=
         ins = fr["instructions"]
         over = sum(1 for n in ins if n > limit)
         put(12, True, over, frames=len(ins), limit_instructions=limit, ipc=ipc, max=max(ins),
-            median=sorted(ins)[len(ins) // 2])
+            median=sorted(ins)[len(ins) // 2], source="main-thread instructions per frame")
     else:
         put(12, False, 0, why="no frames measured (emu_scenario.py --frames, after renderer-init)")
 
@@ -567,8 +590,10 @@ def main(argv):
     a.add_argument("--width", type=int, default=1280); a.add_argument("--height", type=int, default=720)
     a = sub.add_parser("drive-wine"); a.add_argument("plan"); a.add_argument("profile"); a.add_argument("progress")
     a = sub.add_parser("report"); a.add_argument("plan"); a.add_argument("--guest", required=True)
-    a.add_argument("--wine"); a.add_argument("--compare"); a.add_argument("--threads"); a.add_argument("--nro", default=NRO)
+    a.add_argument("--wine"); a.add_argument("--compare"); a.add_argument("--threads"); a.add_argument("--nx1")
     a.add_argument("--optional", default=OPTIONAL); a.add_argument("--out", required=True); a.add_argument("--md")
+    a.add_argument("--scripterr", help="tools/report/scripterr.py's fnvnx-scripterr/1 for target 10")
+    a.add_argument("--frames-report", help="tools/perf/frames.py's fnvnx-frames/1 (with --scale) for target 12")
     a = sub.add_parser("metric"); a.add_argument("reports", nargs="+"); a.add_argument("--md"); a.add_argument("--out")
     a = ap.parse_args(argv)
     if a.cmd == "list":
@@ -596,7 +621,8 @@ def main(argv):
               f"{len(r['gate_timeouts'])} gate timeouts")
         return 0
     if a.cmd == "report":
-        r = report(json.load(open(a.plan)), a.guest, a.wine, a.compare, a.threads, a.nro, a.optional)
+        r = report(json.load(open(a.plan)), a.guest, a.wine, a.compare, a.threads, a.nx1, a.optional,
+                   frames_report=a.frames_report, scripterr=a.scripterr)
         json.dump(r, open(a.out, "w"), indent=1)
         if a.md:
             open(a.md, "w").write(report_md(r))

@@ -560,3 +560,22 @@ pointee (the native literal has another address): reported under `unclassified`.
 Indirect calls (vtable calls through fuzzed objects) are not modelled yet (functions with indirect calls are left
 out); callee side effects through pointer arguments are not
 modelled (canned results only); x87 transcendental helpers beyond the d14-math set are intercepted, not executed.
+
+## Exe-image oracle (FNVNX_ORACLE=exe; D23 b)
+
+A function the decomp lacks has no pristine MSVC object, so the default oracle cannot run it. With `FNVNX_ORACLE=exe`
+(`tools/difffuzz/exeimage.py`) the x86 side runs the function's bytes straight from the player's FalloutNV.exe
+(`FNVNX_EXE`, sha256 pinned), at its address, under the same emulator, seeds, probes and comparison. Extents come
+from the prepared tree's build/units.json (`FNVNX_TREE`), where REC1 appended the recon functions, and
+`catalog.py` and `engine.UnitCache` use that table in this mode. The bytes are final, so nothing is relocated.
+Relocation records for the harness's own uses (seeds from referenced data, callee discovery, preload) are recovered
+from the image: DIR32 from its base-relocation table, REL32 for each `call` / `jmp` rel32 out of the function
+(capstone). Read-only targets are pinned on both machines (up to 4 KiB each), writable ones seed the fuzzer.
+Check: on 1,493 decomp functions of 150 random units, the image's code equals the MSVC-object oracle's relocated
+code. The only differences are the 64 functions whose string-literal operands the COFF oracle moves into its
+synthetic pool (0x2f0xxxxx); in the image they are the real .rdata addresses. Every relocation the COFF side
+resolves to an image address is recovered.
+`tools/farm/recon_fuzz_job.sh <commit> <recon branches|all>` (runner job `recon_fuzz`) fuzzes the recons'
+functions this way against `<commit>`'s link and reports per function clean / hard / soft / not run, and per recon
+`fuzz-clean` (the fnvnx-recon-fuzz/1 record that recon.json's `"accept": "fuzz"` cites; `recon_fuzz.py`). Tests:
+tests/s13/test_exe_oracle.py (a synthetic PE32).

@@ -20,6 +20,9 @@
  *    SDK union's members and layout;
  *  - object-like SDK macros the shim does not define (winerror.h's ERROR_* codes, `small`, `hyper`, `Yield`,
  *    `_FILETIME_`) are undefined again: the decomp defines enumerators and types of those names;
+ *  - SDK-HIDE: every SDK function and typedef name the target shim never names (equiv.py sdk_only_names) is read
+ *    under another name (fnvnx_sdk_<name>): the decomp's own types and functions of those names (struct Arc,
+ *    DragObject, typedef PCH, gethostname) do not collide with them, as they do not on the target;
  *  - FNVNX_CS28 (rule CS28).
  */
 #ifndef FNVNX_EQUIV_WIN32_H
@@ -43,7 +46,9 @@
 #define SendInput fnvnx_sdk_SendInput
 #define RegCreateKeyExA fnvnx_sdk_RegCreateKeyExA
 #define CoCreateInstance fnvnx_sdk_CoCreateInstance
-#include <windows.h>
+#include "fnvnx_equiv_sdkhide.h"     /* SDK-HIDE: SDK names the target shim never declares, renamed (generated) */
+#include "fnvnx_equiv_sdk_windows.h"  /* the SDK's <windows.h> (generated; msvc/windows.h stands in for it) */
+#include "fnvnx_equiv_sdkunhide.h"
 #undef _ULARGE_INTEGER
 #undef CreateEventA
 #undef CreateMutexA
@@ -92,7 +97,9 @@ __declspec(dllimport) LSTATUS WINAPI RegCreateKeyExA(HKEY, LPCSTR, DWORD, LPSTR,
 __declspec(dllimport) HRESULT WINAPI CoCreateInstance(const GUID *, void *, DWORD, const GUID *, LPVOID *);
 }
 #else
-#include <windows.h>
+#include "fnvnx_equiv_sdkhide.h"     /* SDK-HIDE: SDK names the target shim never declares, renamed (generated) */
+#include "fnvnx_equiv_sdk_windows.h"  /* the SDK's <windows.h> (generated; msvc/windows.h stands in for it) */
+#include "fnvnx_equiv_sdkunhide.h"
 #endif
 
 #ifdef __cplusplus
