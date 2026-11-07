@@ -632,6 +632,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     for a_, (n_, t_) in sorted(adj_rows.items()):
         bridges.setdefault(ADDR_SYM % a_, emit_adj_stub(ADDR_SYM % a_, adj_target(native, t_), n_))
     stats['adjustor_thunk_stubs'] = len(adj_rows)
+    # R6 class 4: a non-virtual class's ??_G (scalar deleting destructor) units.json places: GCC emits no D0 for a
+    # non-virtual destructor, so callers bound there trapped. A stub does what MSVC's ??_G does: D1 (the unit's own,
+    # else the address its ??1 is bound to), then the global operator delete when flags bit 0 is set; returns this
+    gdel_rows = nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_votes, providers)
+    for a_, (d1_, del_) in sorted(gdel_rows.items()):
+        bridges.setdefault(ADDR_SYM % a_, emit_sdd_stub(ADDR_SYM % a_, d1_, del_))
+    stats['nonvirtual_deldtor_stubs'] = len(gdel_rows)
     with open(os.path.join(out, 'colliding.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\taddress\tnative\tdefining objects (definitions turned into references to __fnv_<address>)\n')
         for name, a in sorted(colliding.items()):
@@ -1017,6 +1024,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 elif ak == 'text' and addr in adj_rows:   # an MSVC adjustor thunk: its stub (adjustor_thunks)
                     cls = 'code-adjthunk'; target = ADDR_SYM % addr
                     stats['adjustor_thunk_refs'] += 1
+                elif ak == 'text' and addr in gdel_rows:   # a non-virtual ??_G: its stub (nonvirtual_deldtors)
+                    cls = 'code-sddstub'; target = ADDR_SYM % addr
+                    stats['nonvirtual_deldtor_refs'] += 1
                 elif ak == 'text' and addr in def_at:
                     du = def_at[addr][0]
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
@@ -1468,11 +1478,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         else:
             extern_text.setdefault(a, set())
     amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows,
-                                          adj_rows)
+                                          adj_rows, gdel_rows)
 
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
-                                         'code-defmissing', 'code-adjthunk', 'extern-text', 'text-addr', 'text-callback',
+                                         'code-defmissing', 'code-adjthunk', 'code-sddstub', 'extern-text', 'text-addr',
+                                         'text-callback',
                                          'import', 'provider', 'tls'))
     with open(os.path.join(out, 'extern_text.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         for a in sorted(extern_text):
@@ -1943,6 +1954,63 @@ def adjustor_thunks(def_at, native, exe_path, providers=None):
                     out[a] = (n, t)
                 break
     return out
+
+
+def nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_votes, providers=None):
+    """{address: (D1 symbol, operator delete symbol)} of the scalar deleting destructors (`??_GC@@QAE...`, C's
+    destructor not virtual) units.json places with no native definition: GCC emits no D0 for them. D1 is the placing
+    unit's own native D1/D2 of C (a global or COMDAT definition), else the native at the address the unit binds
+    `??1C@@...` to; the delete is the address most units bind the global `??3@YAXPAX@Z` to (native or a provider).
+    A class some unit names a member operator delete of (`??3C@@`), or without a D1 or delete, is left out."""
+    out = {}
+    dv = newdel_votes.get('??3@YAXPAX@Z')
+    da = dv.most_common(1)[0][0] if dv else None
+    dl = ADDR_SYM % da if da in native else ((providers or {}).get(da) or (None,))[0]
+    if dl is None:
+        return out
+    member_del = set()
+    for u in units.values():
+        for n in list(u.refs) + [n for _, n in u.defs]:
+            if n.startswith('??3') and not n.startswith('??3@'):
+                q = msvc(n).qual or []
+                member_del.add(tuple(sigs.canon_qual(q[:-1])))
+    for a, (u, n) in sorted(def_at.items()):
+        if a in native or a in (providers or {}) or not n.startswith('??_G') or kind_of_addr(a) != 'text':
+            continue
+        m = msvc(n)
+        if m.kind != 'func' or m.variant != 'sdd' or m.virtual or not m.qual or len(m.qual) < 2:
+            continue
+        cq = tuple(sigs.canon_qual(m.qual[:-1]))
+        if cq in member_del:
+            continue
+        d1 = None
+        for s in sorted(objsyms.get(u.source, ()), key=lambda x: x.name):
+            if s.shndx and s.type == 'func' and s.bind in ('global', 'weak') and s.name.startswith('_Z'):
+                g = itanium(s.name)
+                if g.variant in ('D1', 'D2') and tuple(sigs.canon_qual(g.qual[:-1])) == cq:
+                    d1 = s.name
+                    break
+        if d1 is None:
+            for rn, ra in sorted(u.refs.items()):
+                rm = msvc(rn) if rn.startswith('??1') else None
+                if rm is not None and rm.variant == 'dtor' and tuple(sigs.canon_qual(rm.qual[:-1])) == cq and \
+                        ra in native and sigs.itanium_variant(native[ra]['sym'].name) != 'D0':
+                    d1 = ADDR_SYM % ra
+                    break
+        if d1 is not None:
+            out[a] = (d1, dl)
+    return out
+
+
+def emit_sdd_stub(name, d1, dl):
+    """MSVC's scalar deleting destructor `void *C::??_G(unsigned flags)`: d1(this); if (flags & 1) dl(this);
+    return this."""
+    body = ['    stp x29, x30, [sp, #-32]!', '    mov x29, sp', '    stp x19, x20, [sp, #16]', '    mov w19, w0',
+            '    mov w20, w1', '    bl %s' % d1, '    tbz w20, #0, 1f', '    mov w0, w19', '    bl %s' % dl,
+            '1:  mov w0, w19', '    ldp x19, x20, [sp, #16]', '    ldp x29, x30, [sp], #32', '    ret']
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name] + body +
+                     ['    .size %s, .-%s' % (name, name), '    .text']) + '\n'
 
 
 def adj_target(native, t):
@@ -3318,13 +3386,15 @@ def emit_traps(traps):
 
 # ---------------------------------------------------------------------------------------------------- address map
 
-def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, providers=None, cthis=(), adj=None):
+def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, providers=None, cthis=(), adj=None,
+                  sdd=None):
     """addrmap.tsv / addrmap.c (docs/LINK.md, 'Address map'): code addresses the native build defines (F C X G),
     image vftables (V: the Itanium vtable address point of the same class, primary or secondary, compiled or
     synthesized), referenced .text addresses no unit defines (E: native NULL, the loader traps them), and per G
     entry its D1/D0 pair (fnvnx_addrmap_deldtors). vtables: {address: (vtable symbol, address-point offset, object
     path, note)}; providers: {address: (platform symbol, provider)} (F entries naming the platform symbol).
-    adj: {address: (n, target)} of adjustor_thunks (F entries naming their stub in bridges.S).
+    adj: {address: (n, target)} of adjustor_thunks, sdd: {address: (D1, delete)} of nonvirtual_deldtors (F entries
+    naming their stub in bridges.S).
     -> (Counter of kinds, number of G entries with a D1)."""
     rows = []   # address, kind, link_symbol, native_symbol, object, note, offset, d1_symbol, d1_native
     for a in sorted(native):
@@ -3367,6 +3437,9 @@ def write_addrmap(out, native, def_at, units, vtables=None, extern_text=None, pr
     for a, (n, t) in sorted((adj or {}).items()):   # an MSVC adjustor thunk: its stub in bridges.S
         rows.append((a, 'F', ADDR_SYM % a, ADDR_SYM % a, VTEXT_OBJ, 'msvc adjustor thunk: this -= %d, then %08x'
                      % (n, t), '', '', ''))
+    for a, (d1, dl) in sorted((sdd or {}).items()):   # a non-virtual ??_G: its stub (takes the flags)
+        rows.append((a, 'F', ADDR_SYM % a, ADDR_SYM % a, VTEXT_OBJ, 'msvc ??_G of a non-virtual destructor: %s, '
+                     'then %s if flags & 1' % (d1, dl), '', '', ''))
     for a, (sym, text) in sorted((providers or {}).items()):
         if a not in native:   # CRT/library code the platform implements: the provider symbol itself
             rows.append((a, 'F', sym, sym, '', 'provider: ' + text, '', '', ''))
