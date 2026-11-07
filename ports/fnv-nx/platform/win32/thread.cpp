@@ -28,6 +28,7 @@ static void self_release(void)
     struct w32_thread *t = (struct w32_thread *)os_tls_get();
     if (!t)
         return;
+    w32_wg_forget(t);
     os_tls_set(NULL);
     free(t->tls_ext);
     if (!t->implicit_tls_borrowed)
@@ -200,6 +201,7 @@ struct w32_thread_obj {
 };
 
 int w32_thread_signaled(struct w32_obj *o) { return ((struct w32_thread_obj *)o)->done; }
+DWORD w32_thread_obj_tid(struct w32_obj *o) { return ((struct w32_thread_obj *)o)->tid; }
 
 static void thread_destroy(struct w32_obj *o)
 {

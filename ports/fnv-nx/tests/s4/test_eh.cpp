@@ -299,3 +299,29 @@ TEST(eh_rethrow)
     }
     CHECK(inner != NULL && inner == outer); /* the same exception object */
 }
+
+/* std::uncaught_exception (0x00ec3241): true only while a game exception unwinds, e.g. in a destructor */
+extern "C" bool fnvnx_uncaught_exception(void);
+namespace {
+struct UnwindProbe {
+    bool *seen;
+    ~UnwindProbe() { *seen = fnvnx_uncaught_exception(); }
+};
+}
+TEST(eh_uncaught_exception)
+{
+    CHECK(!fnvnx_uncaught_exception());
+    static const int ti_site = 0;
+    fnvnx_eh_register_type<GameError>(&ti_site);
+    bool during = false, in_handler = true;
+    try {
+        UnwindProbe p{ &during };
+        GameError e(7, "unwind");
+        fnvnx_cxx_throw_exception(&e, (void *)&ti_site);
+    } catch (GameBase &) {
+        in_handler = fnvnx_uncaught_exception();
+    }
+    CHECK(during);
+    CHECK(!in_handler);
+    CHECK(!fnvnx_uncaught_exception());
+}

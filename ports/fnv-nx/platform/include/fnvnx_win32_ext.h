@@ -62,6 +62,27 @@ unsigned fnvnx_first_run_profile(void);
 void fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */
 void **fnvnx_tls_array(void);                    /* what fs:[0x2c] returns */
+/* Wait-graph watchdog (platform/win32/waitgraph.cpp, D25 #7): every blocking wait on a critical section, event,
+ * mutex, semaphore or thread is recorded; a scan builds the wait-for graph (waiter -> owner: a section's and a mutex's
+ * owner, a thread handle's thread) and reports deadlock cycles and waits longer than limit_ms, by thread id, object
+ * address and caller address only. start: a scanner thread every period_ms (0: no thread, call scan yourself). Off
+ * (a single load on the slow paths) until started. Lines go to the sink (default os_debug_print), all "wg: ..." */
+typedef void (*fnvnx_waitgraph_sink)(const char *line);
+void fnvnx_waitgraph_start(unsigned limit_ms, unsigned period_ms, fnvnx_waitgraph_sink sink);
+void fnvnx_waitgraph_scan(void);
+void fnvnx_waitgraph_stop(void);
+/* from a static constructor (tools/threads/autostart.c): recording on now, the scanner (1 s, the default sink) at the
+ * first blocking wait */
+void fnvnx_waitgraph_autostart(unsigned limit_ms);                 /* stops the scanner thread; recording stays on */
+/* counts so far: cycles (each distinct cycle once), long waits (each wait once), scans */
+void fnvnx_waitgraph_counts(unsigned *cycles, unsigned *long_waits, unsigned *scans);
+void fnvnx_waitgraph_summary(void);
+/* an interposer around EnterCriticalSection / WaitFor* (the race checker's --wrap) names the real call site: set it
+ * before the call, 0 after; the watchdog records it instead of the interposer's own address */
+void fnvnx_waitgraph_set_caller(unsigned pc);
+/* prints what the thread checkers have so far: the race checker's pairs (hb_dump, when linked) and the watchdog's
+ * summary (when on). ExitProcess calls it; the scanner every FNVNX_THREADS_DUMP_S seconds (default 10). */
+void fnvnx_threads_flush(void);              /* "wg: summary cycles N long-waits N scans N threads N" */
 /* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
 typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);

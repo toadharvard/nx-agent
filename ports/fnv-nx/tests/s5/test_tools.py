@@ -452,12 +452,27 @@ class MilestoneTest(unittest.TestCase):
                                  "masters-loaded", "main-menu", "first-frame", "first-cell"])
         self.assertIn(("winmain", "call", "0x0086a850"), rows)
         self.assertIn(("first-cell", "store", "*0x011dea3c+0x40"), rows)
-        rx = dict((n, re.compile(t[3:])) for n, k, t in rows if t.startswith("re:"))
+        rxs = {}
+        for n, k, t in rows:
+            if t.startswith("re:"):
+                rxs.setdefault(n, []).append(re.compile(t[3:]))
+
+        class Any:   # a milestone is reached by any of its lines
+            def __init__(self, l):
+                self.l = l
+
+            def search(self, s):
+                return any(r.search(s) for r in self.l)
+        rx = {n: Any(l) for n, l in rxs.items()}
         self.assertTrue(rx["renderer-init"].search("_ZN15Null_IDirect3D912CreateDeviceEj10_D3DDEVTYPE"))
         self.assertTrue(rx["renderer-init"].search("_ZN11PxDirect3D912CreateDeviceEj10_D3DDEVTYPE"))
         self.assertTrue(rx["first-frame"].search("_ZN21Null_IDirect3DDevice97PresentEPK7tagRECT"))
         self.assertTrue(rx["first-frame"].search("_ZN24Null_IDirect3DSwapChain97PresentEPK7tagRECT"))
         self.assertFalse(rx["first-frame"].search("_ZN14E7CCD0Renderer12PresentFrameEv"))
+        # the native-render build (tests/s5/native_render.py): nx::Renderer::Init, nx::Renderer::Do_EndFrame
+        self.assertTrue(rx["renderer-init"].search("_ZN2nx8Renderer4InitEPNS_7BackendEjjjj"))
+        self.assertTrue(rx["first-frame"].search("_ZN2nx8Renderer11Do_EndFrameEv"))
+        self.assertFalse(rx["first-frame"].search("_ZN2nx6engine13NiDX9Renderer11Do_EndFrameEv"))
         with tempfile.TemporaryDirectory() as t:
             p = os.path.join(t, "m.txt")
             for bad in ("x call\n", "x jump 0x1\n", "x store 0x1+\n", "X call 0x1\n", "x call re:(\n"):
