@@ -13,7 +13,10 @@ checks is the plan. A path no class names selects everything (unknown means unsa
   replay   the cell sweep on cached reference captures (sweep_job.sh, SWEEP_CAPTURE=replay, the cover scenes)
   programs the shader-program sweep (sweep_job.sh's perm.py part), when the translator changed
 The caches make each selected check cost what changed; the plan only skips checks that nothing can affect.
-A plan with "full" set needs the full farm run: a key that every cached result depends on changed (FULL rules).
+A plan with "full" set needs the full farm run: a key that every cached result of a check depends on changed - the
+toolchain or the pins (FULL), a version constant (KEYS: difffuzz HARNESS, AUDIT_HARNESS, unitcache CACHE_V, the
+capture store's FORMAT / REF_FORMAT / CAPTURE_V) or a capture-key input (CAPTURE_INPUTS). quick_job still runs the
+selected checks; the sharded farms refill the cold cache (the rule for when a full run is needed).
 
 cover: a greedy set cover of the VS and PS program hashes in the capture store's index (capstore.py), most new
 programs first, ties by the smaller capture; the rows are cells.tsv-shaped (id, kind, cell, world) from the store's
@@ -47,6 +50,34 @@ FULL = [
     (r'^toolchain/', 'the toolchain (every object, the guest and the boot)'),
     (r'^tools/fetch\.sh$', 'the pinned decomp, sse2neon, libnx (every key)'),
 ]
+# version constants that are part of every key of one cache: a different value between base and head means that
+# cache is cold (the sharded farms refill it: the rule for a full run of that check)
+KEYS = [
+    ('tools/difffuzz/fnkeys.py', r"^HARNESS = '([^']*)'", 'fuzz and audit: difffuzz HARNESS'),
+    ('tools/perf/overhead_audit.py', r"^AUDIT_HARNESS = '([^']*)'", 'audit: AUDIT_HARNESS'),
+    ('tools/equiv/unitcache.py', r"^CACHE_V = '([^']*)'", 'equivalence: unitcache CACHE_V'),
+    ('tools/compare/capstore.py', r"^FORMAT = '([^']*)'", 'capture store: FORMAT (a new capture key)'),
+    ('tools/compare/scene_stats.py', r"^REF_FORMAT = '([^']*)'", 'capture store: REF_FORMAT (a new capture key)'),
+    ('tools/farm/sweep_job.sh', r"^CAPTURE_V=(\S+)", 'capture store: CAPTURE_V (a new capture key)'),
+]
+CAPTURE_INPUTS = r'^tools/compare/(wine_ref\.sh|nxd9trim\.py|nxd9norm\.py|nxd9io\.py|replay\.py|ref_ini\.py|d3d9/)'
+
+
+def key_bumps(repo, base, head, paths):
+    out = []
+    for f, rx, what in KEYS:
+        if f not in paths:
+            continue
+        vals = []
+        for c in (base, head):
+            r = subprocess.run(['git', '-C', repo, 'show', '%s:ports/fnv-nx/%s' % (c, f)], capture_output=True, text=True)
+            m = re.search(rx, r.stdout, re.M) if r.returncode == 0 else None
+            vals.append(m.group(1) if m else None)
+        if vals[0] != vals[1]:
+            out.append('%s: %s -> %s (%s)' % (f, vals[0], vals[1], what))
+    out += ['%s: a capture key input (a new capture/<key>: one capture pass of the 36 sweep shards)' % p
+            for p in paths if re.search(CAPTURE_INPUTS, p)]
+    return out
 
 
 def changed(repo, base, head):
@@ -105,7 +136,9 @@ def main():
     p = sub.add_parser('cover'); p.add_argument('store'); p.add_argument('--max', type=int, default=0); p.add_argument('--out')
     a = ap.parse_args()
     if a.cmd == 'plan':
-        r = plan(changed(a.repo, a.base, a.head))
+        paths = changed(a.repo, a.base, a.head)
+        r = plan(paths)
+        r['full'] += key_bumps(a.repo, a.base, a.head, paths)
         r.update(base=a.base, head=a.head)
         s = json.dumps(r, indent=1)
         open(a.out, 'w').write(s + '\n') if a.out else print(s)

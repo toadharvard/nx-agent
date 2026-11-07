@@ -52,4 +52,15 @@ ok "not verified" '[ "$(cat "$T/home/quick/verified")" = "$H1" ]'
 rm -f "$T/home/quick/verified"; : >"$T/order"; RC_equiv=1 run_q "$H2"
 ok "no base: every check" 'grep -q "no verified head" "$T/q-$H2.md" && grep -q "^| fuzz | ran" "$T/q-$H2.md"'
 ok "lanes in parallel" '[ $(( $(sort -n "$T/order" | tail -1 | cut -d" " -f1) - $(sort -n "$T/order" | head -1 | cut -d" " -f1) )) -le 4 ]'
+# a version-constant bump of one cache: full run needed, with the values
+mkdir -p "$G/ports/fnv-nx/tools/difffuzz"; echo "HARNESS = 'difffuzz-19'" >"$G/ports/fnv-nx/tools/difffuzz/fnkeys.py"
+git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m k1; K1=$(git -C "$G" rev-parse HEAD)
+echo "HARNESS = 'difffuzz-20'" >"$G/ports/fnv-nx/tools/difffuzz/fnkeys.py"
+git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m k2; K2=$(git -C "$G" rev-parse HEAD)
+python3 -I "$P/tools/farm/quick_plan.py" plan "$G" "$K1" "$K2" --out "$T/kp.json"
+ok "HARNESS bump: full, fuzz + audit" 'python3 -c "import json,sys; p=json.load(open(sys.argv[1])); assert \"difffuzz-19 -> difffuzz-20\" in p[\"full\"][0] and p[\"checks\"][\"fuzz\"]" "$T/kp.json"'
+echo "# x" >>"$G/ports/fnv-nx/tools/difffuzz/fnkeys.py"
+git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m k3; K3=$(git -C "$G" rev-parse HEAD)
+python3 -I "$P/tools/farm/quick_plan.py" plan "$G" "$K2" "$K3" --out "$T/kp2.json"
+ok "same HARNESS: no full run" 'python3 -c "import json,sys; assert not json.load(open(sys.argv[1]))[\"full\"]" "$T/kp2.json"'
 [ $fails = 0 ] && echo "test_quick: all ok" || { echo "test_quick: $fails failed"; exit 1; }

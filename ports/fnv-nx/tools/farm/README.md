@@ -75,3 +75,20 @@ Rules for every job:
   and Microsoft binaries are never committed (the repository is public).
 * A job must be runnable by someone who knows nothing about it, so its script installs or fetches what it needs,
   or says what it needs in its header.
+
+**Warm quick farms (T1-fastbench).** Three farms `qk1`-`qk3` run `quick_job.sh` on every new integration head:
+`bash /home/user/fnv-nx-build/farm/start.sh qk<k> quick`. A `qk<k>` name makes the runner persistent (no exit after
+`RUNNER_MAX_S`; `FARM_DEADLINE` per job), poll every 20 s, and claim each head on branch `quick/claim/quick/<c12>`
+before running it, so the three verify consecutive heads in parallel; a farm restarted mid-job takes its own claim
+again. Start it detached (`setsid nohup bash .../start.sh qk1 quick >~/qk1.out 2>&1 &`) so the session's 2 h
+background limit does not stop it. Every runner holds `$FARM_HOME/<name>.lock`, so the hourly check-in can simply
+run the start command again: a second start exits at once. The quick farms keep their caches local
+(`FUZZ_PUBLISH=0 AUDIT_PUBLISH=0 EQUIV_CACHE_PUBLISH=0`); they are seeded from the sharded farms' cache branches.
+
+**When a full run is needed.** quick_job's report says `FULL RUN NEEDED` when a key that every cached result of a
+check depends on changes. Those keys are the toolchain and the pins (`tools/fetch.sh`), difffuzz `HARNESS` (fuzz +
+audit), `AUDIT_HARNESS`, unitcache `CACHE_V` or the compiler (equivalence), and a capture-key input: capstore
+`FORMAT`, scene_stats `REF_FORMAT`, sweep_job `CAPTURE_V`, wine_ref, the trim/norm/io tools, replay.py, ref_ini,
+d3d9/. The orchestrator then starts that check's sharded farms (`fz<k>`, `au<k>`, `eq<k>`, `sw<k>`). For a new
+capture key, that means one populating pass of the 36 sweep shards. Every other change is incremental: quick_job
+on one warm machine is the whole verification.

@@ -13,13 +13,24 @@
 # A job may leave a machine-readable sidecar next to its report, <report>.json (e.g. <c12>-gates.json); the runner
 # publishes it with the report, in the same commit. RUNNER_REPEAT_S=<s>: also run the job again on the same head once
 # the last run is that old (the gates job reads reports that arrive without a new head; default 0, only new heads).
+# Warm farms (T1-fastbench; tools/farm/quick_job.sh):
+#   RUNNER_PERSIST=1   no exit after RUNNER_MAX_S, and FARM_DEADLINE is set per job (start + RUNNER_JOB_S, default
+#                      7200) instead of once per process; start it detached from the session's 2 h background limit
+#                      (setsid nohup ... &), and let the check-in start it again when it is gone
+#   RUNNER_POLL_S=<s>  seconds between looks at the integration head (default 60)
+#   RUNNER_CLAIM=<tag> farms sharing a tag split the heads: before a job, a farm pushes the branch
+#                      quick/claim/<tag>/<head12> of the artifacts repository with a commit of its own; a farm whose push
+#                      is refused (another holds it) skips that head. Several warm farms thus verify consecutive heads
+#                      in parallel instead of the same one.
+# Every runner holds the lock $FARM_HOME/<name>.lock (flock) for its lifetime: a second start of the same farm (a
+# nudged session that runs its prompt twice, a check-in while it runs) exits at once.
 # Needs: git, python3, jq, rsync, g++-aarch64-linux-gnu; this session's checkout of toadharvard/fnv-nx-build (push),
 # found at $ARTIFACTS (default: the checkout this script runs from, else /home/user/fnv-nx-build).
 set -uo pipefail
 NAME=${1:?name}; JOB=${2:?job}; shift 2
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}; export FARM_HOME
 BRANCH=${INTEGRATION_BRANCH:-claude/port-nsw-un6t9s}
-PUBLIC=https://github.com/toadharvard/nx-agent
+PUBLIC=${RUNNER_PUBLIC:-https://github.com/toadharvard/nx-agent}   # RUNNER_PUBLIC: tests
 NX=$FARM_HOME/nx-agent
 MAX=${RUNNER_MAX_S:-6600}
 REPEAT=${RUNNER_REPEAT_S:-0}
@@ -29,6 +40,22 @@ fi
 export ARTIFACTS=${ARTIFACTS:?no checkout of toadharvard/fnv-nx-build}
 mkdir -p "$FARM_HOME"; LOG=$FARM_HOME/$NAME.log; LAST=$FARM_HOME/$NAME.last
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$LOG"; }
+exec 9>"$FARM_HOME/$NAME.lock"
+if ! flock -n 9; then log "runner $NAME is already running (lock $FARM_HOME/$NAME.lock): this start exits"; exit 0; fi
+# qk<k> (the warm quick farms): persistent, a 20 s poll, claims shared under the tag "quick" (env still overrides)
+if [[ "$NAME" =~ ^qk[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}" "${RUNNER_CLAIM:=quick}"; fi
+PERSIST=${RUNNER_PERSIST:-0}; POLL=${RUNNER_POLL_S:-60}; CLAIM=${RUNNER_CLAIM:-}
+claim() {  # claim <head>: true when this farm now holds quick/claim/<tag>/<head12> (or claims are off)
+  [ -n "$CLAIM" ] || return 0
+  local b=quick/claim/$CLAIM/${1:0:12} g=$FARM_HOME/claim.git c
+  [ -d "$g" ] || git init -q --bare "$g"
+  # the same commit for the same farm and head (fixed dates): a farm restarted mid-job takes its own claim again
+  c=$(GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' git -C "$g" -c user.name=fnv-nx-farm \
+      -c user.email=farm@invalid commit-tree "$(git -C "$g" mktree </dev/null)" -m "$NAME claims $1") || return 0
+  # a new branch: the first push creates it; every later one is not a fast-forward of it and is refused (no -f)
+  if git -C "$g" push -q "$(git -C "$ARTIFACTS" remote get-url origin)" "$c:refs/heads/$b" 2>/dev/null; then return 0; fi
+  log "head ${1:0:12} is claimed by another farm of $CLAIM: skipped"; return 1
+}
 [ -d "$NX/.git" ] || git clone -q --filter=blob:none "$PUBLIC" "$NX"
 
 publish_report() {  # publish_report <file.md>: commit it and its <file>.json sidecar, if any, to reports/<NAME>
@@ -66,7 +93,7 @@ next_wip() {  # prints "<sha> <branch>" of a wip branch of this farm that has no
     echo "$sha $b"; break
   done
 }
-t_end=$(( $(date +%s) + MAX ))
+t_end=$(( $(date +%s) + MAX )); [ "$PERSIST" = 1 ] && t_end=$(( $(date +%s) + 10 ** 9 ))
 # The session's background Bash kills this process (and the job under it) $RUNNER_KILL_S seconds (default 7200, the
 # 2 h background limit) after it starts: a job that has not published by then publishes nothing, ever, if each pass
 # takes that long (fz1, J-0138). FARM_DEADLINE (epoch seconds, 5 min before the kill) tells the job when it must
@@ -86,10 +113,12 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     if [ "$H" = "$(cat "$LAST" 2>/dev/null)" ]; then
       # the same head: again only with RUNNER_REPEAT_S, once the last run is that old
       age=$(( $(date +%s) - $(stat -c %Y "$LAST" 2>/dev/null || echo 0) ))
-      if [ "$REPEAT" -le 0 ] || [ "$age" -lt "$REPEAT" ]; then sleep 60; continue; fi
+      if [ "$REPEAT" -le 0 ] || [ "$age" -lt "$REPEAT" ]; then sleep "$POLL"; continue; fi
     fi
+    if ! claim "$H"; then echo "$H" > "$LAST"; sleep "$POLL"; continue; fi
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
   fi
+  [ "$PERSIST" = 1 ] && export FARM_DEADLINE=$(( $(date +%s) + ${RUNNER_JOB_S:-7200} - 300 ))
   H12=${H:0:12}; R=$FARM_HOME/out/$TAG$H12-$JOB.md; mkdir -p "$FARM_HOME/out"; rm -f "${R%.md}.json"
   J=$NX/ports/fnv-nx/tools/farm
   rm -f "${R%.md}.json"     # a sidecar is this run's or none

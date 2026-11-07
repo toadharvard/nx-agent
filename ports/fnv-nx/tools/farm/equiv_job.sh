@@ -202,7 +202,8 @@ t1=$(date +%s)
 # 3. prepared tree, shard build, comparison
 # the object cache (T1-fastbench, tools/equiv/unitcache.py): a unit whose prepared source, included headers, flags and
 # compiler are unchanged is not compiled again (head build, EH-off builds, attribution's leave-out builds); it lives on
-# branch equiv/cache/<k>of<N> (this shard its only writer). EQUIV_CACHE=0 compiles everything.
+# branch equiv/cache/<k>of<N> (this shard its only writer). EQUIV_CACHE=0 compiles everything; EQUIV_CACHE_PUBLISH=0
+# keeps it local (quick_job.sh).
 EC=$FARM_HOME/equivcache-${K}of$N; EC_BEFORE=
 if [ "${EQUIV_CACHE:-1}" = 1 ]; then
   step cache-fetch "$LOGS/equivcache.log"
@@ -254,7 +255,7 @@ if [ -n "${FNVNX_EQUIV_CACHE:-}" ]; then
   python3 "$P/tools/equiv/unitcache.py" prune "$EC" >> "$STEP_LOG" 2>&1 || true
   EC_AFTER=$(python3 "$P/tools/equiv/unitcache.py" stat "$EC" 2>/dev/null || true)
   EC_NOTE="object cache: $EC_BEFORE -> $EC_AFTER"
-  if [ "$EC_AFTER" != "$EC_BEFORE" ] && [ -z "${EQUIV_PRISTINE_DIR:-}" ]; then
+  if [ "$EC_AFTER" != "$EC_BEFORE" ] && [ -z "${EQUIV_PRISTINE_DIR:-}" ] && [ "${EQUIV_CACHE_PUBLISH:-1}" = 1 ]; then
     publish "$EC" "equiv/cache/${K}of$N" "equiv object cache $C12 shard $K/$N: $EC_AFTER" >> "$STEP_LOG" 2>&1 || true
   fi
 fi

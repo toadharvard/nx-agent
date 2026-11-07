@@ -11,7 +11,8 @@
 # $AUDIT_BUDGET seconds (default 5400) after its start; the rest are listed as pending.
 # Incremental (T1-fastbench): a function's row is reused while its audit key (overhead_audit.py: AUDIT_HARNESS, seeds,
 # llvm-mca, the function's difffuzz key) is unchanged. Every shard reads the union of the artifacts repository's
-# branches audit/cache/* and writes its new rows to audit/cache/<k>of<N> (its only writer); AUDIT_CACHE=0 measures all.
+# branches audit/cache/* and writes its new rows to audit/cache/<k>of<N> (its only writer); AUDIT_CACHE=0 measures all,
+# AUDIT_PUBLISH=0 keeps the new rows local (quick_job.sh: three warm farms must not share one writer branch).
 # Output: <report.md> (totals of the shard, the 30 functions with the most A57 cycles over x86 instructions) and
 # <report.md>.json (fnvnx-overhead-audit/1); the per-function TSV stays in $FARM_HOME (decomp-derived names: counts,
 # addresses and unit names only go into the report).
@@ -47,7 +48,7 @@ t0=$(date +%s)
 FNVNX_DFPROFILE=$RUN/profile.env nice "$PY" "$HERE/../perf/overhead_audit.py" --units "${AUDIT_UNITS:-.}" \
   --shard "$K/$N" --seeds "${AUDIT_SEEDS:-4}" --deadline "${AUDIT_BUDGET:-5400}" --tsv "$RUN/audit.tsv" \
   --summary "$REPORT.json" "${CACHE_ARGS[@]}" > "$RUN/audit.log" 2>&1 || true
-if [ ${#CACHE_ARGS[@]} -gt 0 ] && ! cmp -s "$RUN/rows.jsonl" "$MINE"; then   # publish this shard's rows
+if [ ${#CACHE_ARGS[@]} -gt 0 ] && [ "${AUDIT_PUBLISH:-1}" = 1 ] && ! cmp -s "$RUN/rows.jsonl" "$MINE"; then   # publish this shard's rows
   g=$AC/pub; rm -rf "$g"; mkdir -p "$g"; cp "$RUN/rows.jsonl" "$g/rows.jsonl"
   git -C "$g" init -q && git -C "$g" add rows.jsonl &&
     git -C "$g" -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "audit cache $AB at ${COMMIT:0:12}: $(wc -l <"$g/rows.jsonl") rows

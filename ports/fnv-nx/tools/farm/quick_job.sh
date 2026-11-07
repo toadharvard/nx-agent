@@ -28,6 +28,9 @@ J=${QUICK_JOBS:-$HERE}   # the sub-jobs (tests: stand-ins)
 C12=${COMMIT:0:12}; Q=$FARM_HOME/quick; R=$Q/$C12; rm -rf "$R"; mkdir -p "$R" "$(dirname "$REPORT")"
 REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 T0=$(date +%s)
+# the warm farms keep their caches local: three machines must not write one 1-of-1 branch (they are seeded from the
+# sharded farms' branches; their own results stay on the machine). Reports still go to reports/<farm>.
+export FUZZ_PUBLISH=${FUZZ_PUBLISH:-0} AUDIT_PUBLISH=${AUDIT_PUBLISH:-0} EQUIV_CACHE_PUBLISH=${EQUIV_CACHE_PUBLISH:-0}
 log() { echo "$(date -u +%FT%TZ) quick_job: $*"; }
 
 # ---- 1. plan --------------------------------------------------------------------------------------------------------
