@@ -18,6 +18,9 @@
 #       recorder for MEM_TIMEOUT, default 180 s here; the peak against 3.2 GiB; tools/perf/MEM.md)
 #       and scenario_job.sh (S18, D25's targets on scripted scenarios: QUICK_SCENARIOS, default "boot-menu saveload",
 #       on this build's link and guest, EMU_TIMEOUT 900 s each; the original's runs come from its reference cache)
+#       and boottrace_job.sh (T1: the guest's function-boundary trace against the cached Wine reference trace of the
+#       same list, S5-boot's tests/s5/boot_trace.py; gate: the first divergence does not move earlier than at the
+#       verified head). A failed build skips lane D (its checks would run an older guest).
 #    C  replay: sweep_job.sh 1 of 1 with SWEEP_CAPTURE=replay on the capture store's cover scenes (quick_plan.py
 #       cover: the fewest scenes that hold every program; QUICK_CELLS, default 12), programs too when the plan says
 #       so (SWEEP_PROGRAMS=1); the full replay of all 1,155 scenes stays on the sweep farms (36 shards, replay only)
@@ -51,7 +54,7 @@ if [ -n "$BASE" ] && git -C "$REPO" cat-file -e "$BASE^{commit}" 2>/dev/null && 
 	python3 -I "$HERE/quick_plan.py" plan "$REPO" "$BASE" "$COMMIT" --out "$R/plan.json" || BASE=""
 fi
 if [ -z "$BASE" ] || [ ! -s "$R/plan.json" ]; then
-	printf '{"files": null, "checks": {"build": true, "equiv": true, "fuzz": true, "audit": true, "replay": true, "programs": false, "threads": true, "frames": true, "mem": true, "scenario": true}, "why": {"all": ["no verified head"]}, "full": [], "base": null}\n' >"$R/plan.json"
+	printf '{"files": null, "checks": {"build": true, "equiv": true, "fuzz": true, "audit": true, "replay": true, "programs": false, "threads": true, "frames": true, "mem": true, "scenario": true, "boottrace": true}, "why": {"all": ["no verified head"]}, "full": [], "base": null}\n' >"$R/plan.json"
 fi
 if [ -n "${QUICK_CHECKS:-}" ]; then
 	python3 -I - "$R/plan.json" "$QUICK_CHECKS" <<'EOF'
@@ -76,7 +79,9 @@ run() {   # run <check> <cmd...>: time, exit status, report path, in $R/<check>.
 skip() { echo "$2" >"$R/$1.skip"; }
 lane_a() {
 	if on build; then run build bash "$J/full_job.sh" "$COMMIT"; else skip build "not affected"; fi
-	lane_d &   # the emulator lanes need this build; they run beside fuzz and audit
+	if [ -f "$R/build.rc" ] && [ "$(cat "$R/build.rc")" != 0 ]; then   # lane D would run an older build's guest
+		for c in threads frames mem scenario boottrace; do skip $c "the build failed"; done
+	else lane_d & fi   # the emulator lanes need this build; they run beside fuzz and audit
 	if on fuzz; then
 		FUZZ_MAX_S=${FUZZ_MAX_S:-600} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
 	else skip fuzz "not affected"; fi
@@ -98,6 +103,8 @@ lane_d() {   # D: the emulator lanes on lane A's build, one after another (each 
 		SCENARIOS=${QUICK_SCENARIOS:-boot-menu saveload} EMU_TIMEOUT=${SCENARIO_EMU_TIMEOUT:-900} SCENARIO_PUBLISH=0 \
 			SCENARIO_LINK_DIR=$ld SCENARIO_GUEST_DIR=$gd run scenario bash "$J/scenario_job.sh" "$COMMIT"
 	else skip scenario "not affected"; fi
+	if on boottrace; then BOOTTRACE_BUILD=$FARM_HOME/full/build run boottrace bash "$J/boottrace_job.sh" "$COMMIT"
+	else skip boottrace "not affected"; fi
 }
 lane_b() { if on equiv; then run equiv bash "$J/equiv_job.sh" "$COMMIT" 1 1; else skip equiv "not affected"; fi; }
 lane_c() {
@@ -139,7 +146,7 @@ def headline(md):
             return l[:160].replace('|', '/')
     return ''
 rows, ok = [], True
-for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'scenario'):
+for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'scenario', 'boottrace'):
     sk, rc = rd(c + '.skip'), rd(c + '.rc')
     if sk is not None:
         rows.append((c, 'skipped: ' + sk, '-', '-', ''))
@@ -166,7 +173,7 @@ for r in rows:
 o.write('\n## why\n\n')
 for c, ps in sorted(plan.get('why', {}).items()):
     o.write('- %s: %s\n' % (c, ', '.join(ps[:8]) + (' ...' if len(ps) > 8 else '')))
-for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'scenario'):
+for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'scenario', 'boottrace'):
     md = rd(c + '.md')
     if md:
         o.write('\n## %s\n\n' % c + '\n'.join(md.splitlines()[:25]) + '\n')
@@ -177,6 +184,9 @@ json.dump({'schema': 'fnvnx-quick/1', 'commit': commit, 'base': base or None, 's
 sys.exit(0 if ok and not full else 4)
 EOF
 st=$?
-if [ "$st" = 0 ]; then echo "$COMMIT" >"$Q/verified"; log "verified $C12 ($((T1 - T0)) s)"; fi
+if [ "$st" = 0 ]; then echo "$COMMIT" >"$Q/verified"
+	# the boot trace's first divergence becomes the bar for the next head (boottrace_job.sh: "not earlier")
+	cand=$FARM_HOME/boottrace/$C12/boottrace.candidate; [ -f "$cand" ] && cp "$cand" "$Q/boottrace.base"
+	log "verified $C12 ($((T1 - T0)) s)"; fi
 echo "$REPORT"
 exit 0
