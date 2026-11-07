@@ -86,5 +86,36 @@ class Causes(unittest.TestCase):
         self.assertEqual(got['_ZN3Bar4LoadEv'][2], '0')
 
 
+A64 = shutil.which('aarch64-linux-gnu-g++')
+
+
+@unittest.skipUnless(A64 and shutil.which('readelf') and shutil.which('nm'), 'needs aarch64-linux-gnu-g++, readelf, nm')
+class Placeholders(unittest.TestCase):
+    def test_reach(self):
+        """`unresolved` C placeholders: called -> function, else variable; live when reachable from a placed
+        `__fnv_` definition, a data table or another object's reference, harness-only when only an unreferenced
+        convention caller uses it (a synthesized zz_ object's bare undefined name is no reference)."""
+        a = ('extern "C" int stub_a(void); extern int g_h, g_live, g_tab, g_b; extern "C" int f_live(int);\n'
+             'int stub_caller() { return stub_a() + g_h; }\n'
+             'extern "C" int __fnv_00401000(int x) { return f_live(x) + g_live; }\n'
+             'static int __attribute__((noinline)) viatab() { return g_tab; }\nint (*tab[])() = { viatab };\n'
+             'int from_b() { return g_b; }\n')
+        with tempfile.TemporaryDirectory() as d:
+            for name, src in (('src_a.cpp.o', a), ('src_b.cpp.o', 'int from_b();\nint user() { return from_b(); }\n')):
+                subprocess.run([A64, '-mabi=ilp32', '-O1', '-c', '-x', 'c++', '-', '-o', os.path.join(d, name)],
+                               check=True, input=src, text=True)
+            subprocess.run([A64, '-mabi=ilp32', '-c', '-x', 'assembler', '-', '-o',
+                            os.path.join(d, 'zz_bd_src_a.cpp.o')], check=True, input='.globl _Z11stub_callerv\n',
+                           text=True)
+            rows = [{'name': n, 'units': 'src/a.cpp', 'cause': 'unresolved', 'detail': 'unresolved'}
+                    for n in ('stub_a', 'g_h', 'f_live', 'g_live', 'g_tab', 'g_b')]
+            rows.append({'name': '_ZN1A1fEv', 'units': 'src/a.cpp', 'cause': 'unresolved', 'detail': 'unresolved'})
+            bodycause.placeholder_details(rows, d)
+        self.assertEqual({r['name']: r['detail'] for r in rows},
+                         {'stub_a': 'c function harness-only', 'g_h': 'c variable harness-only',
+                          'f_live': 'c function live', 'g_live': 'c variable live', 'g_tab': 'c variable live',
+                          'g_b': 'c variable live', '_ZN1A1fEv': 'unresolved'})
+
+
 if __name__ == '__main__':
     unittest.main()

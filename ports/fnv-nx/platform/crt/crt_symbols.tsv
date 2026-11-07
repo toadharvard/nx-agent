@@ -73,7 +73,7 @@
 0x00ec3599	cpplib	std::locale::facet::_Facet_Register	n	1	1	fnvnx_facet_register
 0x00ec35d7	cpplib	std::_Locinfo::_Locinfo_dtor(_Locinfo*) [~_Locinfo]	i	1	2	fnvnx_locinfo_dtor
 0x00ec36a6	cpplib	std::locale::_Init() [locale::locale()]	i	2	2	fnvnx_locale_init
-0x00ec3740	cpplib	std::_Locinfo::_Locinfo_ctor(_Locinfo*, const char*)	i	1	2	fnvnx_locinfo_ctor
+0x00ec3740	cpplib	std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)	i	1	2	fnvnx_locinfo_ctor
 0x00ec379c	cpplib	_Tolower(int, const _Ctypevec*)	i	1	2	fnvnx_tolower_ctype
 0x00ec38a9	cpplib	_Getctype()	i	1	1	fnvnx_getctype
 0x00ec3909	cpplib	_Toupper(int, const _Ctypevec*)	i	1	2	fnvnx_toupper_ctype

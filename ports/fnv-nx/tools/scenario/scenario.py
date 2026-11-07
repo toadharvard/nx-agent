@@ -44,7 +44,9 @@ The report (fnvnx-scenario/1) has one entry per D25 target, each {measured, coun
    7 threads           tools/threads report (races + cycles + long waits) + gate timeouts (hangs on the path)
    8 memory            allocation-failure lines + 1 when the peak heap is over the Switch budget
    9 save/load         tools/scenario/savediff.py: the guest's round-trip differences not in the original's own
-  10 script errors     script-error lines of the guest's console log (scof) not in the original's
+  10 script errors     tools/report/scripterr.py's metric when given (--scripterr: (form, kind, caller) groups
+                       from the call watcher and the private patterns, minus the original's run); else
+                       script-error lines of the guest's console log (scof) not in the original's
   11 NRO checklist     the device-readiness checks behind docs/NRO_CHECKLIST.md that do not pass: tests/nx1/run.py
                        --json (fnvnx-nx1/1 "open"), run with this scenario's boot summary and guest
   12 frames > 16.7 ms  tools/perf/frames.py's device estimate when given (--frames-report, calibrated --scale);
@@ -399,7 +401,7 @@ def is_probe(f):
 
 
 def report(plan, gdir, wdir=None, compare=None, threads=None, nx1=None, optional=OPTIONAL, budget=BUDGET,
-           frames_report=None):
+           frames_report=None, scripterr=None):
     summ, log, con, root = guest_inputs(gdir, plan)
     sc = (summ or {}).get("scenario") or {}
     stop = ((summ or {}).get("stop") or {}).get("reason", "")
@@ -412,7 +414,7 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nx1=None, optional
 
     # 1 faults
     stubbed = len(re.findall(r"^stubbed-fault", log or "", re.M)) or (summ or {}).get("stubbed_faults", 0)
-    fault_end = bool(re.search(r"fault|invalid memory|out of instruction budget|host stand-in error|deadlock", stop, re.I))
+    fault_end = bool(re.search(r"fault|invalid memory|out of instruction budget|host stand-in error|deadlock|hang", stop, re.I))
     skipped = (summ or {}).get("initializers_skipped", 0) or 0
     put(1, ran, int(fault_end) + int(stubbed) + int(skipped), stop=stop[:300], stubbed_faults=stubbed,
         initializers_skipped=skipped)
@@ -480,7 +482,11 @@ def report(plan, gdir, wdir=None, compare=None, threads=None, nx1=None, optional
     wcon = None
     if wdir:
         wcon = read(os.path.join(wdir, "console.txt"))
-    if con is not None:
+    sj = jload(scripterr) if scripterr else None
+    if sj is not None and sj.get("schema") == "fnvnx-scripterr/1":   # R4's lane: (form, kind, caller) groups
+        put(10, True, int(sj.get("metric", 0)), source="scripterr.py", groups=sj.get("distinct"),
+            in_original=sj.get("in_original"))
+    elif con is not None:
         ge = {l for l in console_lines(con) if SCRIPT_RE.search(l)}
         we = {l for l in console_lines(wcon) if SCRIPT_RE.search(l)} if wcon is not None else set()
         own = {l for l in ge if re.search(r"not found", l, re.I) and re.search(r"command", l, re.I)}
@@ -586,6 +592,7 @@ def main(argv):
     a = sub.add_parser("report"); a.add_argument("plan"); a.add_argument("--guest", required=True)
     a.add_argument("--wine"); a.add_argument("--compare"); a.add_argument("--threads"); a.add_argument("--nx1")
     a.add_argument("--optional", default=OPTIONAL); a.add_argument("--out", required=True); a.add_argument("--md")
+    a.add_argument("--scripterr", help="tools/report/scripterr.py's fnvnx-scripterr/1 for target 10")
     a.add_argument("--frames-report", help="tools/perf/frames.py's fnvnx-frames/1 (with --scale) for target 12")
     a = sub.add_parser("metric"); a.add_argument("reports", nargs="+"); a.add_argument("--md"); a.add_argument("--out")
     a = ap.parse_args(argv)
@@ -615,7 +622,7 @@ def main(argv):
         return 0
     if a.cmd == "report":
         r = report(json.load(open(a.plan)), a.guest, a.wine, a.compare, a.threads, a.nx1, a.optional,
-                   frames_report=a.frames_report)
+                   frames_report=a.frames_report, scripterr=a.scripterr)
         json.dump(r, open(a.out, "w"), indent=1)
         if a.md:
             open(a.md, "w").write(report_md(r))

@@ -18,25 +18,34 @@ mkdir -p "$OUT/Data"; OUT=$(cd "$OUT" && pwd)
 if top=$(git -C "$OUT" rev-parse --show-toplevel 2>/dev/null); then
   echo "gamedata_fetch: $OUT is inside the git checkout $top; game data must stay out of git" >&2; exit 2
 fi
-heads=$(git ls-remote "$URL" refs/heads/gamedata/exe 'refs/heads/gamedata/data/*' | sort; echo "items: $*")
+# The proxy cuts long transfers now and then ("Connection reset by peer", "RPC failed": sw36, 2026-11-07, on the
+# 1.6 GB Voices1 item): every remote call is retried with backoff (GAMEDATA_TRIES, default 5: 2, 4, 8, 16 s).
+retry() { local i=1 n=${GAMEDATA_TRIES:-5}; while :; do "$@" && return 0; [ $i -ge $n ] && return 1
+  echo "gamedata_fetch: retry $i of $((n - 1)) in $((2 ** i)) s: ${*: -1}" >&2; sleep $((2 ** i)); i=$((i + 1)); done; }
+lsr() { git ls-remote "$URL" "$@" > "$TMPL" && [ -s "$TMPL" ]; }
+TMPL=$(mktemp "${TMPDIR:-/tmp}/gamedata-ls.XXXXXX")
+retry lsr refs/heads/gamedata/exe 'refs/heads/gamedata/data/*' || { echo "gamedata_fetch: ls-remote $URL failed" >&2; rm -f "$TMPL"; exit 1; }
+heads=$(sort "$TMPL"; echo "items: $*")
 if [ -f "$OUT/.gamedata_heads" ] && [ "$(cat "$OUT/.gamedata_heads")" = "$heads" ] && [ -f "$OUT/FalloutNV.exe" ]; then
   echo "gamedata_fetch: $OUT up to date"; exit 0
 fi
 rm -f "$OUT/.gamedata_heads"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/gamedata-fetch.XXXXXX")
-trap 'rm -rf "$TMP"' EXIT
-git -C "$TMP" init -q
-fetch() { git -C "$TMP" fetch -q --depth 1 "$URL" "refs/heads/$1" && git -C "$TMP" rev-parse FETCH_HEAD; }
+trap 'rm -rf "$TMP" "$TMPL"' EXIT
+# one fresh repository per item ($G, replaced by the next fetch): the items' objects (6.5 GB in all) never pile up
+G=$TMP/repo
+fetch1() { rm -rf "$G"; git init -q "$G" && git -C "$G" fetch -q --depth 1 "$URL" "refs/heads/$1"; }
+fetch() { retry fetch1 "$1" && git -C "$G" rev-parse FETCH_HEAD; }
 
 # the exe and the INIs (gamedata/exe)
 c=$(fetch gamedata/exe) || { echo "gamedata_fetch: no gamedata/exe" >&2; exit 1; }
-git -C "$TMP" archive "$c" | tar -x -C "$OUT"
+git -C "$G" archive "$c" | tar -x -C "$OUT"
 echo "gamedata_fetch: gamedata/exe -> $(cd "$OUT" && ls | grep -v '^Data$' | tr '\n' ' ')"
 
 if [ $# -gt 0 ]; then
   slugs=(); for i in "$@"; do slugs+=("${i// /_}"); done
 else
-  mapfile -t slugs < <(git ls-remote "$URL" 'refs/heads/gamedata/data/*' | sed 's|.*refs/heads/gamedata/data/||')
+  mapfile -t slugs < <(grep 'refs/heads/gamedata/data/' "$TMPL" | sed 's|.*refs/heads/gamedata/data/||')
 fi
 bad=0
 mkdir -p "$OUT/.gamedata_items"
@@ -48,7 +57,7 @@ for slug in "${slugs[@]}"; do
   fi
   rm -f "$OUT/.gamedata_items/$slug"
   c=$(fetch "gamedata/data/$slug") || { echo "gamedata_fetch: no branch gamedata/data/$slug" >&2; bad=1; continue; }
-  d=$TMP/$slug; mkdir -p "$d"; git -C "$TMP" archive "$c" | tar -x -C "$d"
+  d=$TMP/$slug; mkdir -p "$d"; git -C "$G" archive "$c" | tar -x -C "$d"; rm -rf "$G"
   name=$(awk -F'\t' '$1=="name"{print $2}' "$d/MANIFEST.tsv"); kind=$(awk -F'\t' '$1=="kind"{print $2}' "$d/MANIFEST.tsv")
   want=$(awk -F'\t' '$1=="sha256"{print $2}' "$d/MANIFEST.tsv")
   while IFS=$'\t' read -r tag f size sum; do
