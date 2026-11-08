@@ -124,7 +124,7 @@ def _recon_text(path):
 RECON_KEYS = {   # what in a recon's text means it covers the STL body of that key (GCC or MSVC spellings)
     '_Allocate': r'_Allocate', '_Destroy': r'_Destroy', 'fill': r'\bfill\s*[<(]|St4fill|\?\?\$fill@',
     'swap': r'\bswap\s*[<(]|St4swap|\?\?\$swap@', '_Xlen': r'_Xlen', 'setstate': r'setstate',
-    'init': r'\binit\s*\(|4initE|\?init@', 'facet': r'UseFacet|widen',
+    'init': r'\binit\s*\(|4initE|\?init@', 'facet': r'UseFacet', 'widen': r'\bwiden\s*\(|5widenE|\?widen@',
     'open': r'\bopen\s*\(|4openE|\?open@',
     'vector()': r'\bvector\s*\(\s*\)\s*[:{]|vectorI\w*EC[12]Ev|\?\?0\?\$vector@',
     '~vector()': r'~vector\s*\(|vectorI\w*ED[012]Ev|\?\?1\?\$vector@',
@@ -295,11 +295,15 @@ def r_stl_stream_bodies(path, text, stats):
             fac, fn, loc = mf.group(2), mf.group(3), mf.group(4)
             ms = re.search(r'template\s*<\s*class\s+(\w+)\s*>\s*struct\s+%s\s*\{\s*\1\s+widen\s*\(\s*char\s*\)\s*const\s*;'
                            r'\s*\}\s*;' % fac, text[a:b])
-            if ms and not re.search(r'\b%s\s*\([^;)]*\)\s*\{' % fn, text) and not _covered(rt, 'facet', stats):
+            if not ms:
+                continue
+            # the facet and its widen are separate: a recon may bind the one (R2: CsvUseFacet<char> -> the exe's
+            # use_facet<ctype<char>>) and leave the other to STL2
+            if not re.search(r'\b%s\s*\([^;)]*\)\s*\{' % fn, text) and not _covered(rt, 'facet', stats):
                 adds.append('template <class _E> const %s<_E>& %s(const %s&)\n{\n    static const %s<_E> _Facet = %s<_E>();\n'
-                            '    return _Facet;\n}\n'
-                            'template <class _E> _E %s<_E>::widen(char _C) const\n{\n    return (_E)_C;\n}\n'
-                            % (fac, fn, loc, fac, fac, fac))
+                            '    return _Facet;\n}\n' % (fac, fn, loc, fac, fac))
+            if not re.search(r'%s\s*<[^>]*>\s*::\s*widen\s*\(' % fac, text) and not _covered(rt, 'widen', stats):
+                adds.append('template <class _E> _E %s<_E>::widen(char _C) const\n{\n    return (_E)_C;\n}\n' % fac)
     m, body = _class_body(text, blocks, r'template\s*<\s*class\s+\w+\s*,\s*class\s+\w+\s*>\s*class\s+basic_ifstream\s*:[^{;]*\{')
     mo = re.search(r'\b(\w+)\s*\*\s*open\s*\(\s*const\s+char\s*\*\s*,\s*int\s*,\s*int\s*\)\s*;', body) if m else None
     if mo and re.search(r'\b%s\s+filebuf\s*;' % mo.group(1), body) and \

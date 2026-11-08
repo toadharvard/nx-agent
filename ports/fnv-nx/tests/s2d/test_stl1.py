@@ -164,7 +164,7 @@ def main():
                     ok('after: none undefined', not hits, hits)
     st = collections.Counter()
     out2 = s4_stl.r_stl_stream_bodies('src/t2.cpp', UNIT2, st)
-    ok('STL2: six bodies (the facet with its widen)', st['STL2'] == 6, (st, out2[len(UNIT2):]))
+    ok('STL2: seven bodies', st['STL2'] == 7, (st, out2[len(UNIT2):]))
     ok('STL2: vector fields all zeroed', 'auxiliary(0), allocatorAuxiliary(0), first(0), last(0), end(0)' in out2,
        out2[len(UNIT2):])
     ok('STL2: a second run adds nothing', s4_stl.r_stl_stream_bodies('src/t2.cpp', out2, collections.Counter()) == out2)
@@ -197,7 +197,7 @@ def main():
         try:
             st = collections.Counter()
             o = s4_stl.r_stl_stream_bodies('/x/src/t2.cpp', UNIT2, st)
-            ok('recon covers setstate and ~vector: STL2 leaves both', st['STL2'] == 4 and st['STL-RECON'] == 2 and
+            ok('recon covers setstate and ~vector: STL2 leaves both', st['STL2'] == 5 and st['STL-RECON'] == 2 and
                'ios_base::setstate' not in o[len(UNIT2):] and '~vector' not in o[len(UNIT2):], (st, o[len(UNIT2):]))
             st = collections.Counter()
             o = s4_stl.r_stl_helper_bodies('/x/src/t.cpp', UNIT, st)
@@ -210,6 +210,22 @@ def main():
                 os.environ.pop('FNVNX_RECON', None)
             else:
                 os.environ['FNVNX_RECON'] = old
+    # a recon binding the facet only (R2's csvusefacet_char): STL2 keeps widen
+    with tempfile.TemporaryDirectory() as rd:
+        os.makedirs(os.path.join(rd, 'r1'))
+        json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/t2.cpp',
+                   'symbols': {'??$XUseFacet@D@std@@YAABU?$XCtype@D@0@ABULoc@@@Z': '0x00ad38d0'}},
+                  open(os.path.join(rd, 'r1', 'recon.json'), 'w'))
+        os.environ['FNVNX_RECON'] = rd
+        s4_stl._RECON_CACHE.clear()
+        try:
+            st = collections.Counter()
+            o = s4_stl.r_stl_stream_bodies('/x/src/t2.cpp', UNIT2, st)[len(UNIT2):]
+            ok('facet bound by a recon: STL2 leaves the facet, keeps widen',
+               'XUseFacet(const Loc&)' not in o and 'XCtype<_E>::widen' in o and st['STL-RECON'] == 1, (st, o))
+        finally:
+            os.environ.pop('FNVNX_RECON', None)
+            s4_stl._RECON_CACHE.clear()
     # a name the unit's units.json symbols bind: left to the binding (nested std@fnv_ copies do not count)
     with tempfile.TemporaryDirectory() as ur:
         os.makedirs(os.path.join(ur, 'build'))
@@ -220,7 +236,7 @@ def main():
                   open(os.path.join(ur, 'build', 'units.json'), 'w'))
         st = collections.Counter()
         o = s4_stl.r_stl_stream_bodies(os.path.join(ur, 'src', 't2.cpp'), UNIT2, st)
-        ok('bound ctor left to the binding, nested setstate ignored', st['STL-BOUND'] == 1 and st['STL2'] == 5 and
+        ok('bound ctor left to the binding, nested setstate ignored', st['STL-BOUND'] == 1 and st['STL2'] == 6 and
            '::vector()' not in o[len(UNIT2):] and 'ios_base::setstate' in o[len(UNIT2):], (st, o[len(UNIT2):]))
     print('test_stl1: %d failed' % fails)
     return 1 if fails else 0
