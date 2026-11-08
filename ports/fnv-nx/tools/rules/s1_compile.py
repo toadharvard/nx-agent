@@ -5827,9 +5827,21 @@ def _d22_dtor_slots():
         except (OSError, ValueError): continue
         if d.get('format') != 'fnvnx-d22/1': continue
         for r in d.get('dtor_slots', ()):
-            if isinstance(r.get('slot'), int) and r['slot'] > 0: st[r['class'].split('::')[-1]] = r['slot']
+            if not (isinstance(r.get('slot'), int) and r['slot'] > 0): continue
+            # a row with `file` (a tree path, e.g. src/fallout/ai/actor.cpp: a call-only shell named after its function,
+            # whose receivers seamcheck knows) applies to that file only, and wins over a class-wide row
+            st[(r['class'].split('::')[-1], r.get('file') or '')] = r['slot']
     prepare.__dict__['_fnvnx_d22_slots'] = st
     return st
+
+def _d22_dtor_slot(path, name):
+    """the dtor_slots slot of class `name` in the file `path` (a per-file row first), or None"""
+    st = _d22_dtor_slots()
+    if not st: return None
+    p = path.replace('\\', '/')
+    for (n, f), k in st.items():
+        if n == name and f and p.endswith('/' + f.lstrip('/')): return k
+    return st.get((name, ''))
 
 def _d22_bases(bases):
     out = []
@@ -6005,13 +6017,12 @@ def r_vtable_dtor_slot(path, text, stats):
             for m in calls[ph]: nc = nc[:m.start(2)] + ' ' * (m.end() - m.start(2)) + nc[m.end():]
             masked_nc[ph] = nc
         return calls[ph]
-    slots = _d22_dtor_slots()
     for c in classes:
         key = c['qual'][-1] + '<>' if c['template'] else '::'.join(c['qual'])
         if c['first'] and _d22_com(masked, c):
             if key in lst or (not c['bases'] and len(c['virtuals']) >= 2): stats['D22-COM'] += 1
             continue
-        k = slots.get(c['qual'][-1])
+        k = _d22_dtor_slot(path, c['qual'][-1])
         if not k and c['first'] and _rawvt_exe_order().get(c['qual'][-1], set()) & D22_EXE_ORDER_REASONS:
             # D22-EXEORDER (S2-bodies seamcheck V3 / V4): the link keeps this class's table in exe order, so its
             # callers keep the exe's numbering
@@ -6252,7 +6263,7 @@ def r_raw_vtable_slots(path, text, stats):
         if owner is None: stats['RAWVT1-FREE'] += 1; continue
         if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
             stats['RAWVT1-COM'] += 1; continue
-        K = _d22_dtor_slots().get(owner, 0)       # D22-SLOTK: the pair sits at K (TESForm family: 4)
+        K = _d22_dtor_slot(path, owner) or 0      # D22-SLOTK: the pair sits at K (TESForm family: 4)
         if k == K: stats['RAWVT1-SLOT0'] += 1; continue
         if k < K: stats['RAWVT1-BELOWK'] += 1; continue
         if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
