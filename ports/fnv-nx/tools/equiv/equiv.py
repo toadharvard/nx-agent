@@ -64,6 +64,7 @@ CLASSES = {
     'COM1': 'neutral',          # renames a unit's own IUnknown copy (types only; the decomp's vtable slots kept)
     'SPEC1': 'neutral',         # early template<> declarations
     'STATIC1': 'neutral',       # internal -> external linkage of image-bound variables (MSVC may inline less)
+    'VFTBL1': 'neutral',        # the decomp's stand-in table for an exe vftable becomes a declaration (`&name` is the same symbol)
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
     'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
@@ -159,7 +160,7 @@ DEFAULT_GROUPS = {
     'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2 NSCALL1',
     'newdel': 'NEW1 NEW2 NEW3 NEW4 NEW5 CTOR1',
     'EXC1': 'EXC1',
-    'link': 'LINK1 STATIC1 BIND1',
+    'link': 'LINK1 STATIC1 VFTBL1 BIND1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
     'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
     'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 COND1 RSTR1 FINL1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
