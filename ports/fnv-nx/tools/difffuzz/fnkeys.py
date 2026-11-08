@@ -52,7 +52,9 @@ import config
 # slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. Float class: x87_result_use follows
 # a jmp to the shared epilogue and knows fidiv / fist / fcomi / ftst / fsqrt consumers, overlapping pinned literals let
 # the exe bytes (when available) replace the union, and a float difference runs the garbage / bool / x87 control-word (24-bit) / x87-range / callee
-# float width probes before it stays `float`.
+# float width probes before it stays `float`. Flow rows (EQ): float libm wrappers (ceilf / floorf ..) are untraced
+# builtins with a float argument, the secondary-base entry `__fnvnx_msvc_<addr>` comes from aliases.ld, and a temporary's
+# destructor before a throw the exe makes after its _CxxThrowException is throw-temp-dtor.
 # The signedness probe clears an argument byte only when the oracle can
 # widen it (not a float sign or a whole-read int), and an uninit-arm that vanishes once the unwritten stack words of
 # buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first

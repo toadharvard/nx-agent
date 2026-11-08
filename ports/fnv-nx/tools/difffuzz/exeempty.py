@@ -147,6 +147,33 @@ def _insns(addr, limit):
     return out
 
 
+_AFTER = {}
+
+
+def calls_after_noreturn(fn, noreturn, n=8):
+    """(difffuzz-20, flow) The direct call targets the exe function at `fn` makes within the next `n` instructions
+    after a `call <noreturn>` (e.g. _CxxThrowException 0x00ec7894): MSVC emits the full-expression cleanup of a throw
+    (the destructor of the temporary the exception was built from) right after the call, in code that never runs
+    (the unwind map runs it), where GCC destroys the temporary before it calls __cxa_throw. A set of ints; empty
+    without the exe."""
+    key = (fn, noreturn, n)
+    if key not in _AFTER:
+        out = set()
+        try:
+            ins = _insns(fn, 1500)
+            for i, x in enumerate(ins):
+                if x.mnemonic == 'call' and x.op_str.startswith('0x') and int(x.op_str, 16) == noreturn:
+                    for y in ins[i + 1:i + 1 + n]:
+                        if y.mnemonic in ('ret', 'int3', 'jmp'):
+                            break
+                        if y.mnemonic == 'call' and y.op_str.startswith('0x'):
+                            out.add(int(y.op_str, 16))
+        except Exception:  # noqa: BLE001
+            pass
+        _AFTER[key] = out
+    return _AFTER[key]
+
+
 def deleting_wrapper(addr):
     if addr not in _WRAP:
         try:
