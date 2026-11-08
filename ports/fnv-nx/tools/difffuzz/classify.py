@@ -372,7 +372,8 @@ def x87_probes(pair, case, div, max_steps, h):
             world.X87_CLAMP, world.X87_CW = None, 0x027f
         if ok and rec['n']:
             h['cause'] = 'x87-range'
-            h['x87_range'] = {'range': kind, 'clamped': rec['n'], 'after': '%08x' % rec['addr']}
+            h['x87_range'] = {'range': kind, 'clamped': rec['n'], 'over': rec.get('over', 0), 'under': rec.get('under', 0),
+                              'after': '%08x' % rec['addr']}
             return True
 def arg_narrow_top(target, fn, lab, i):
     """(difffuzz-20, sign-args) May byte i of argument `lab` be widened by the oracle code? Only the top byte of a

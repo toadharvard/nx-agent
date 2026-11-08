@@ -259,7 +259,7 @@ class X86Engine:
                                        end=hi - 1))
         hfp = None
         if world.X87_CLAMP is not None:
-            world.X87_CLAMP.update(n=0, addr=None)
+            world.X87_CLAMP.update(n=0, addr=None, over=0, under=0)
             hfp = uc.hook_add(UC_HOOK_CODE, self._on_fp_clamp, user_data=world.X87_CLAMP, begin=world.TEXT[0],
                               end=world.TEXT[1] - 1)
         start = start if start is not None else next(iter(self.text_funcs))
@@ -339,8 +339,10 @@ class X86Engine:
             e = ex - 16383
             if e >= hi:
                 uc.reg_write(UC_X86_REG_FP0 + i, (0x8000000000000000, (se & 0x8000) | 0x7fff))
+                rec['over'] = rec.get('over', 0) + 1
             elif e < lo:
                 uc.reg_write(UC_X86_REG_FP0 + i, (0, se & 0x8000))
+                rec['under'] = rec.get('under', 0) + 1
             else:
                 continue
             rec['n'] += 1
