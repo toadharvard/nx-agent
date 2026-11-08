@@ -5697,8 +5697,12 @@ def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     for u in re.finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), rest):
         # an unqualified call reaches cls's member only from a member of cls or of a class deriving from it (S5-boot:
         # actor.cpp's CVShell::FUN_008805f0 calls its own base CVB's `v0(p)`; NiTMap_S's `v0` stayed unconverted)
-        if reach is not None and not re.search(r'(?:->|\.|::)\s*$', rest[max(0, u.start() - 8):u.start()]) \
-                and not reach(u.start()):
+        qualified = re.search(r'(?:->|\.|::)\s*$', rest[max(0, u.start() - 8):u.start()])
+        if reach is not None and not qualified and not reach(u.start()):
+            continue
+        # a qualified call whose receiver's type resolves to a class outside the family (extradatalist.cpp:
+        # `((Ref_0041b2a0*)ref)->sub.v0()`, sub a Sub_0041b2a0, held back AX's v0)
+        if reach is not None and qualified and getattr(reach, 'recv', None) and reach.recv(u.start()) is False:
             continue
         return False
     return True
@@ -5728,8 +5732,33 @@ def d22_reach(masked, classes):
             for a, z, nm in owners:
                 if a < pos < z: return nm in fam
             return False
+        def recv(pos):
+            # the receiver of `...(->|.)ph(` at pos: True / False when its type resolves, None when unknown
+            t = _d22_receiver_type(masked, pos, by_name)
+            return None if t is None else t in fam
+        f.recv = recv
         return f
+    by_name = collections.defaultdict(list)
+    for c in classes: by_name[c['qual'][-1]].append(c)
     return reach
+
+D22_CAST_RECV = re.compile(r'\(\s*\(\s*(?:const\s+)?([A-Za-z_]\w*)\s*\*\s*\)\s*[A-Za-z_]\w*\s*\)\s*->\s*'
+                           r'(?:([A-Za-z_]\w*)\s*(->|\.)\s*)?$')
+
+def _d22_receiver_type(masked, pos, by_name):
+    """type name of the receiver of the call at pos for `((T*)x)->ph(` (T) and `((T*)x)->m.ph(` / `->m->ph(` (the
+    declared type of T's member m, when T is defined in the file once); None otherwise"""
+    m = D22_CAST_RECV.search(masked[max(0, pos - 200):pos])
+    if not m: return None
+    t, mem, op = m.group(1), m.group(2), m.group(3)
+    if not mem: return t
+    cs = by_name.get(t, ())
+    if len(cs) != 1: return None
+    body = masked[cs[0]['open'] + 1:cs[0]['close']]
+    d = re.search(r'(?:^|[;{}\n])\s*(?:struct\s+|class\s+)?([A-Za-z_]\w*)\s*(\*?)\s*%s\s*(?:\[[^\]]*\])?\s*;' % re.escape(mem),
+                  body)
+    if not d or (op == '->') != bool(d.group(2)): return None
+    return d.group(1)
 
 def _d22_files():
     files = []
