@@ -56,6 +56,7 @@ def msvc_flags(tree):
             '-include', os.path.join(HERE, 'layoutgate_msvc', 'fnvnx_lg_msvc_types.h'),
             '-DSSE2NEON_H', '-DFNVNX_SSE2NEON_H', '-DFNVNX_MMX_H',
             '-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
+            '-include', os.path.join(HERE, 'layoutgate_msvc', 'fnvnx_lg_msvc_post.h'),   # the shim's fillers off
             '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + sse, '-I' + os.path.join(tree, 'include'),
             '-Xclang', '-fdump-record-layouts-complete']
 
