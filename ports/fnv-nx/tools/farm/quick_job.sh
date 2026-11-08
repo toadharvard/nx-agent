@@ -20,7 +20,8 @@
 #       recorder for MEM_TIMEOUT, default 180 s here; the peak against 3.2 GiB; tools/perf/MEM.md)
 #       and plat_job.sh (R4's platform lane, PLAT_TIMEOUT default 180 s here; tools/perf/PLAT.md)
 #       and scenario_job.sh (S18, D25's targets on scripted scenarios: QUICK_SCENARIOS, default "boot-menu saveload",
-#       on this build's link and guest, EMU_TIMEOUT 900 s each; the original's runs come from its reference cache)
+#       on this build's link and guest, EMU_TIMEOUT 900 s each, linhost 180 s without progress and 600 s in all;
+#       the original's runs come from its reference cache)
 #       and boottrace_job.sh (T1: the guest's function-boundary trace against the cached Wine reference trace of the
 #       same list, S5-boot's tests/s5/boot_trace.py; gate: the first divergence does not move earlier than at the
 #       verified head). A failed build skips lane D (its checks would run an older guest).
@@ -164,6 +165,9 @@ lane_d() {   # D: the emulator lanes on lane A's build, one after another (each 
 		local fb=$FARM_HOME/full/build ld="" gd=""
 		[ -d "$fb/link/out" ] && ld=$fb/link
 		[ -f "$fb/guest/guest.nso" ] && gd=$fb/guest
+		# linhost (D25 #12): 180 s without progress ends a scenario here (the farm default 600 s: on aec30808 both
+		# scenarios stopped early and waited it out, 3,057 s for the check), 600 s in all
+		SCENARIO_PROGRESS_S=${SCENARIO_PROGRESS_S:-180} SCENARIO_LINHOST_S=${SCENARIO_LINHOST_S:-600} \
 		SCENARIOS=${QUICK_SCENARIOS:-boot-menu saveload} EMU_TIMEOUT=${SCENARIO_EMU_TIMEOUT:-900} SCENARIO_PUBLISH=0 \
 			SCENARIO_LINK_DIR=$ld SCENARIO_GUEST_DIR=$gd run scenario bash "$J/scenario_job.sh" "$COMMIT"
 	else skip scenario "not affected"; fi
