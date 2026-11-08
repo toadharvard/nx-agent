@@ -32,3 +32,15 @@ Measured on fnv-nx-build link/97deacd38aec (out/refs.tsv, abi.tsv, addrmap.tsv);
     the reference means, and with which convention? They are listed in abi.tsv at the next link.
 * **tests** - tools/link: all 20 pass. New: test_nameaddr_abi, test_retbool, test_tls_block. test_bindings has the
   import case. test_vacall skips (no gcc plugin headers).
+
+* **The 27 flagged rows, decided** (orchestrator 08:22; ledger per pair in the private scratchpad, from the exe's
+  entry and ret bytes plus the decomp source).
+  - 14 distinct pairs.
+    - same 5: an enum parameter the Itanium synth cannot see; free functions in a namespace the heuristic took for a
+      class.
+    - bridge 2 (0x00b5ade0): the definition is a __fastcall with an unused edx. resolve now prefers the definition's
+      own MSVC declaration, so abi's edx-dummy bridge applies. test_nameaddr_abi covers it.
+    - R2 20, recon-shaped:
+      - 7 rows: reference declarations that drop the arguments or the `this` the exe's ret shows;
+      - 13 rows: definitions that model by-value iterators and structs differently from their references.
+  - 5 + 2 + 20 = 27.

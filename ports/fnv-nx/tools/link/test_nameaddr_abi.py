@@ -43,6 +43,15 @@ def main():
         rs, ds = fnvlink.name_addr_sigs(sigs.parse_itanium(r, d[r]), sigs.parse_itanium(f, d[f]))
         ok('%s -> %s: %s' % (d[r], d[f], want), rs is not None and verdict(rs, ds) == want,
            rs and verdict(rs, ds))
+    # with the definition's MSVC declaration (resolve uses it when it has one): a member reference against a
+    # __fastcall definition with an unused edx gets abi's edx-dummy bridge
+    ms = fnvlink.batch_demangle(fnvlink.UNDNAME, ['?FUN_00405000@@YIXPAUArr@@HI_N@Z'])
+    dm = sigs.parse_msvc('?FUN_00405000@@YIXPAUArr@@HI_N@Z', ms['?FUN_00405000@@YIXPAUArr@@HI_N@Z'])
+    rn = '_ZN3Arr12FUN_00405000Ejb'
+    rs, _ = fnvlink.name_addr_sigs(sigs.parse_itanium(rn, fnvlink.batch_demangle(fnvlink.CXXFILT, [rn])[rn]), dm)
+    v = abi.compare(rs, dm)
+    ok('member -> __fastcall(T *, int edx, ...) with the MSVC definition: the edx-dummy bridge',
+       v.kind == 'bridge' and 'edx-dummy' in v.classes, (v.kind, v.classes, v.moves))
     rs, ds = fnvlink.name_addr_sigs(sigs.parse_itanium('_ZN1B12FUN_00402000Ev', d['_ZN1B12FUN_00402000Ev']),
                                     sigs.parse_itanium('_ZN1B12FUN_00402000Ev', d['_ZN1B12FUN_00402000Ev']))
     ok('a class scope is a thiscall member, a fnv_ scope is not',

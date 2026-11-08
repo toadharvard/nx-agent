@@ -839,6 +839,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                         # (name_addr_sigs: the same convention rules for both), then the ordinary verdict: a bridge
                         # where the shapes differ and abi can map them, else flagged code-manual
                         rs_, ds_ = name_addr_sigs(isig, itanium(nd['sym'].name))
+                        dm_ = msvc(defdecl) if defdecl else None
+                        if rs_ is not None and dm_ is not None and dm_.kind == 'func' and dm_.raw_params is not None:
+                            # the definition's own MSVC declaration carries its real convention (a __fastcall with an
+                            # unused edx: 0x00b5ade0); only the reference side is guessed
+                            ds_ = dm_
                         if rs_ is not None:
                             v_ = abi.compare(rs_, ds_)
                             # the conventions are guessed (Itanium has none): equal native argument shapes are the
