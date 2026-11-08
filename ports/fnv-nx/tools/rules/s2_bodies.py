@@ -615,8 +615,15 @@ def r_noinline_stand_ins(path, text, stats):
 # header it includes, the class found by its enclosing namespaces and classes): D without the moved parameters, R
 # with them (their spelling from D's declaration); an `operator bool` receiver becomes `bool FUN_<R>(x..) const`. A
 # declaration that already exists (an S1b patch's) is not added twice; an overload of the same arity with other
-# parameter types, a virtual, static, inline-defined or defaulted declaration, or a class body found 0 or 2+ times
-# leave the family alone. The POST hook adds the new decorated reference names to the unit's units.json `symbols`
+# parameter types, a virtual, static or defaulted declaration, an inline-defined donor, or a class body found 0 or 2+
+# times leave the family alone. An inline-defined RECEIVER is allowed when it is an untagged stand-in (W25: a
+# unit-local copy's `__forceinline operator bool() const { return m_flags != 0; }`, fnv_005807a0): the exe's receiver
+# is the function the unit's symbols bind that MSVC name to (R's address, its `ret N` popping the moved words, the same
+# gates as for a declared-only receiver), and the stand-in's body would compute `flags != 0` on a register nobody set.
+# The new overload is declared without a body (and without inline / __forceinline), so the moved call reaches the exe
+# function through the new decorated name the link binds; the stand-in stays for the calls POP2 leaves alone (STAND3,
+# 5 and 6 skip operators, forceinline and non-/Od units, so none of them touches it; a body with its own `@fnv` tag is a
+# decompiled function and stays skipped). The POST hook adds the new decorated reference names to the unit's units.json `symbols`
 # (D's name without the moved parameter codes, R's with them), so the link compares and binds them like the
 # decomp's own. Line numbers stay. Families left alone are counted (POP2-SKIP-<why>) and listed with their reason
 # in <tree>/build/pop2_skipped.tsv, the sites done in <tree>/build/pop2_sites.tsv (derived, local only).
@@ -978,6 +985,26 @@ def _pop_class_bodies(text, scopes):
     return out
 
 
+_POP_INLINE_RET = re.compile(r'\b(?:__forceinline|FNV_FORCEINLINE|__inline|inline)\b')
+
+
+def _pop_plain_ret(ret):
+    """A stand-in's return type as a declaration-only overload spells it: no comments, no inline specifier."""
+    ret = re.sub(r'//[^\n]*|/\*.*?\*/', ' ', ret, flags=re.S)
+    return re.sub(r'\s+', ' ', _POP_INLINE_RET.sub('', ret)).strip()
+
+
+def _pop_inline_stand_in(t, d):
+    """True when the receiver declaration d (popgen member_decls row of the class text t) is an untagged in-class body
+    and nothing else is wrong with it: a unit-local copy's stand-in for the exe function the unit's symbols bind the
+    receiver's MSVC name to (`__forceinline operator bool() const { return m_flags != 0; }`). The overload POP2
+    adds is declared without a body, so the call reaches the exe function through the new name; the stand-in stays
+    for the calls POP2 leaves alone. A body with its own `// @fnv` tag is a decompiled function and stays skipped."""
+    if set(d['bad']) - {'inline body', 'no ;'} or 'inline body' not in d['bad']:
+        return False
+    return '@fnv' not in d['ret']          # the member's head text holds the comment lines above it
+
+
 def _pop_decl_ops(site, files, texts, why):
     """The declarations a site's family needs: [(file, class body, insert position or None when the overload is
     already declared, name, parameter types, declaration)], or None (the reason counted in why)."""
@@ -994,6 +1021,8 @@ def _pop_decl_ops(site, files, texts, why):
             name = 'operator bool' if site['fam'][2] == 'bool' and role == 'R' else (
                 site['fam'][0] if role == 'D' else site['fam'][3])
             md = [x for x in pg.member_decls(t, body, name) if pg.arity(x['params']) == len(r.fn.params)]
+            if role == 'R' and len(md) == 1 and _pop_inline_stand_in(t, md[0]):
+                md[0] = dict(md[0], bad=[], ret=_pop_plain_ret(md[0]['ret']))
             if len(md) != 1 or md[0]['bad']:
                 why['%s declaration %s' % (role, ','.join(md[0]['bad']) if len(md) == 1 else
                                            '%d candidates' % len(md))] += 1
