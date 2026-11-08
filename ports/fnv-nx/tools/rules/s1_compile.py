@@ -6080,8 +6080,15 @@ def r_vtable_dtor_slot(path, text, stats):
             kind, k = cl
             if kind != 'minus-one' or k < 0:
                 stats['D22-CL-KEEP'] += 1; continue
-            if len(c['virtuals']) <= k or (c['dtor'] and not c.get('dtor_decl')):
-                stats['D22-CL-HELD'] += 1; continue
+            if len(c['virtuals']) <= k:
+                # the declaration ends before the exe's destructor slot: its slots are the exe's already (k' < k
+                # stays in a minus-one table at k)
+                stats['D22-CL-BELOW'] += 1; continue
+            if c['dtor'] and not c.get('dtor_decl'):
+                vd = next((i for i, v in enumerate(c['virtuals']) if (v[2] or '').startswith('~')), None)
+                # a declared virtual destructor: right where the exe has its deleting destructor, else a layout
+                # difference of the class definition (S2-bodies' DBUG1 side), counted
+                stats['D22-CL-ASIS' if vd == k else 'D22-CL-DTORPOS'] += 1; continue
             t = c['virtuals'][k]
             ck = dict(c, first=t)
             blockers = [o for o in classes if o['bases'] and c['qual'][-1] in _d22_bases(o['bases'])
