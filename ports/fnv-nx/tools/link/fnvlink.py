@@ -1587,16 +1587,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         if os.environ.get('FNVNX_D26C', '1') != '0':
             # D26 (c): the image vftables that would stay at their image address - hand-stored (hand_vptr_stores)
             # or an RTTI vftable referenced as data - get a minus-one native copy (minus_one_copies)
-            vmo_c = {}
-            for a, sites in hand.items():
-                if a not in vmap and a in used_addr:
-                    off = collections.Counter(o_ for _, _, _, o_ in sites).most_common(1)[0][0]
-                    vmo_c[a] = -exev[a].off if a in exev and exev[a].td else -off
-                    vstats['vmo-hand-stored'] += 1
-            for a, e_ in exev.items():
-                if e_.td and a not in vmap and a in used_addr and a not in vmo_c:
-                    vmo_c[a] = -e_.off
-                    vstats['vmo-rtti-referenced'] += 1
+            vmo_c, vst_c = vmo_candidates(exev, vmap, hand, used_addr,
+                                          os.environ.get('FNVNX_D26C_ALL', '1') != '0')
+            for k_, n_ in vst_c.items():
+                vstats[k_] += n_
             miss = [a for a in vmo_c if a not in exev_all]
             if miss:
                 exev_all.update(exevft.plain_vftables(exe_path, miss, set(exev_all) | set(vmap) | set(vmo_c) |
@@ -1687,7 +1681,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             extern_text.pop(a, None)
         else:
             extern_text.setdefault(a, set())
-    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, dict(vmap, **vmo_vrows(vmo, vmap, exev_all)),
+    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, {**vmap, **vmo_vrows(vmo, vmap, exev_all)},
                                           extern_text, providers, cthis_rows, adj_rows, gdel_rows)
 
     _phase('address map')
@@ -3025,11 +3019,38 @@ VTEXT_OBJ = 'zz_bridges.o'   # the extended vtables live in bridges.S (apply ass
 XTRAP = 'exe 0x%08x'
 
 
-def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where):
+VADJ_SYM = '__fnvnx_vadj_%08x'   # W19: a secondary vftable's adjustor-thunk slot, the same this-adjustment natively
+VADJD_SYM = '__fnvnx_vadjd_%08x_%d'   # ... for a destructor slot (0: D1, 1: D0)
+
+
+def vmo_adjustor(a, off, native, exe_path, plain=True):
+    """(n, f) when the exe code at a is an MSVC adjustor thunk (exevft.thunk, through at most two more plain or
+    adjusting thunks) that subtracts exactly `off`, the COL offset of the secondary vftable it sits in, and lands on
+    an address f the native build defines: the thunk's x86 immediate then is the native offset-to-top the copy
+    carries, so the stub's adjustment agrees with what a GCC `_ZThn` thunk in that slot would do. A different
+    immediate (virtual bases, a deeper chain) or an undefined target: None, and the slot is a trap. plain: the
+    target must be no Itanium constructor / destructor variant (a destructor slot passes plain=False)."""
+    n, t = 0, a
+    for _ in range(3):
+        th = exevft.thunk(exe_path, t)
+        if th is None:
+            return None
+        n, t = n + th[0], th[1]
+        if t in native:
+            if plain and sigs.itanium_variant(native[t]['sym'].name) is not None:
+                return None   # a constructor / destructor variant: the slot is no plain member function
+            return (n, t) if n and n == off else None
+    return None
+
+
+def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where, off=None):
     """The native word for exe vftable slot address a in a copy made from the exe (exe_vtable_copies' extra slots,
     minus_one_copies' slots): `__fnv_<a>` where the address map has a plain native definition, the
     deleting-destructor stub for a `??_G`, S4's provider, the target of a plain `jmp f` thunk, the exact form of a
-    constant leaf, else a trap stub reporting the exe address (traps[t] = (text, where)). Counts go to st."""
+    constant leaf, else a trap stub reporting the exe address (traps[t] = (text, where)). Counts go to st.
+    off: the COL offset of the exe vftable the slot sits in (a secondary vftable's copy): an MSVC adjustor thunk
+    (`sub ecx, n; jmp f`, vmo_adjustor) whose n is exactly that offset gets a stub doing the same this-adjustment
+    in front of f's native entry; any other adjustor thunk stays a trap (never a guessed adjustment)."""
     nd = native.get(a)
     var = sigs.itanium_variant(nd['sym'].name) if nd else None
     if nd is not None and var is None and free_slot(a, nd, bridges, st):
@@ -3050,6 +3071,11 @@ def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where):
             sigs.itanium_variant(native[exevft.thunk(exe_path, a)[1]]['sym'].name) is None:
         t = ADDR_SYM % exevft.thunk(exe_path, a)[1]   # a primary vtable: only `jmp f` (no adjustment)
         st['slots-jump-thunk'] += 1
+    elif nd is None and off and exe_path and vmo_adjustor(a, off, native, exe_path) is not None:
+        n_, f_ = vmo_adjustor(a, off, native, exe_path)
+        t = VADJ_SYM % a
+        bridges.setdefault(t, emit_adj_stub(t, adj_target(native, f_), n_))
+        st['slots-adjustor-thunk'] += 1
     elif nd is None and exe_path and exevft.leaf_constant(exe_path, a) is not None:
         t = CONST_SYM % a
         bridges.setdefault(t, emit_const_stub(t, exevft.leaf_constant(exe_path, a)))
@@ -3234,6 +3260,26 @@ def vmo_vrows(vmo, vmap, exev):
     return rows
 
 
+def vmo_candidates(exev, vmap, hand, used_addr, every=True):
+    """D26 (c): {image vftable: offset-to-top} of the vftables that get a minus-one copy, and counts. Those a unit
+    stores by hand (hand: {address: [(unit, class, _, offset)]}) while no V row covers them, when referenced as data;
+    and (W19) every RTTI exe vftable no V row stands for, referenced as data or not (every=False: only the
+    referenced ones, as before): a vftable no unit mentions is still the vptr an exe constructor stores into an
+    object native code then calls through, and an unpaired vftable is a hole in vtmetric. The offset-to-top is
+    the exe's COL offset negated, else the store's offset."""
+    vmo_c, st = {}, collections.Counter()
+    for a, sites in hand.items():
+        if a not in vmap and a in used_addr:
+            off = collections.Counter(o_ for _, _, _, o_ in sites).most_common(1)[0][0]
+            vmo_c[a] = -exev[a].off if a in exev and exev[a].td else -off
+            st['vmo-hand-stored'] += 1
+    for a, e_ in exev.items():
+        if e_.td and a not in vmap and (every or a in used_addr) and a not in vmo_c:
+            vmo_c[a] = -e_.off
+            st['vmo-rtti-referenced' if a in used_addr else 'vmo-rtti-unreferenced'] += 1
+    return vmo_c, st
+
+
 def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, traps, out):
     """D26 (c): every image vftable whose data symbol would stay at the image address (stored by hand into an
     object's vptr, no native vtable mapped: hand_vptrs 'image') gets a strong native copy `__fnvnx_vmo_<V>` in
@@ -3253,12 +3299,25 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
         slots = list(e.slots)
         n_trap = st['slots-trap']
         pair = vmo_dtor_slots(slots[0], native, msvc, bridges, traps, st, (name, 2), exe_path)
+        adj0 = None
+        if pair is None and e.td and e.off and exe_path:
+            adj0 = vmo_adjustor(slots[0], e.off, native, exe_path, plain=False)
+        if adj0 is not None:   # a secondary vftable's destructor slot: `sub ecx, off; jmp ??_G` into the primary's
+            inner = vmo_dtor_slots(adj0[1], native, msvc, bridges, traps, st, (name, 2), exe_path)
+            if inner is not None:
+                for fl, w_ in enumerate(inner):
+                    sn = VADJD_SYM % (slots[0], fl)
+                    bridges.setdefault(sn, emit_adj_stub(sn, w_, adj0[0]))
+                pair = (VADJD_SYM % (slots[0], 0), VADJD_SYM % (slots[0], 1))
+                st['slot0-adjustor-dtor'] += 1
         if pair is None:
             d1 = TRAP_SYM % int(hashlib.sha1((XTRAP % slots[0] + ' D1').encode()).hexdigest()[:8], 16)
             traps.setdefault(d1, (XTRAP % slots[0] + ' (D1 at an exe slot 0 that is not a destructor)', (name, 2)))
             st['slot0-not-a-destructor'] += 1
-            pair = (d1, exe_slot_target(slots[0], native, providers, exe_path, bridges, traps, st, (name, 3)))
-        words = list(pair) + [exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (name, 3 + k))
+            pair = (d1, exe_slot_target(slots[0], native, providers, exe_path, bridges, traps, st, (name, 3),
+                                        e.off if e.td else None))
+        words = list(pair) + [exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (name, 3 + k),
+                                                        e.off if e.td else None)
                               for k, a in enumerate(slots[1:], 1)]
         ott = cands[v]
         lines = ['// %s: exe vftable %08x in the minus-one order, %d exe slots (D26 c)' % (name, v, len(slots)),

@@ -36,6 +36,52 @@ def nat(name, msvc=None, variants=None):
     return dict(unit='u.cpp', sym=s, variants=variants or {}, tier='def', msvc=msvc)
 
 
+def w19(native, out):
+    """W19: every RTTI exe vftable no V row stands for gets a copy (referenced as data or not); a secondary vftable's
+    adjustor-thunk slots keep the exe's this-adjustment only where it is the COL offset."""
+    exev = {
+        0x01010000: exevft.Vft('.?AVA@@', 0, [], [0x00401000]),     # primary, unreferenced
+        0x01010500: exevft.Vft('.?AVB@@', 8, [], [0x00409000, 0x00409010, 0x00409020, 0x00409030, 0x00409040]),
+        0x01010600: exevft.Vft('.?AVC@@', 0, [], [0x00401300, 0x00409050]),   # a primary: no adjusting thunk
+        0x01010700: exevft.Vft('.?AVD@@', 8, [], [0x00401300]),                 # already has a V row
+    }
+    used = {0x01010600}
+    old = fnvlink.vmo_candidates(exev, {0x01010700: ('x', 8, 'o', 'primary')}, {}, used, every=False)
+    new = fnvlink.vmo_candidates(exev, {0x01010700: ('x', 8, 'o', 'primary')}, {}, used, every=True)
+    check(set(old[0]) == {0x01010600}, 'head: only the vftable referenced as data is a candidate')
+    check(new[0] == {0x01010000: 0, 0x01010500: -8, 0x01010600: 0},
+          'W19: every RTTI vftable without a V row is a candidate, offset-to-top from its COL (a paired one is not)')
+    check(new[1]['vmo-rtti-unreferenced'] == 2 and new[1]['vmo-rtti-referenced'] == 1, 'the unreferenced are counted')
+    thunks = {0x00409000: (8, 0x00401000), 0x00409010: (8, 0x00401100), 0x00409020: (4, 0x00401300),
+              0x00409030: (8, 0x0040ffff), 0x00409040: (4, 0x00409041), 0x00409041: (2, 0x00401100),
+              0x00409050: (8, 0x00401100)}
+    saved = exevft.thunk, exevft.leaf_constant, exevft.deleting_dtor
+    exevft.thunk = lambda p, a: thunks.get(a)
+    exevft.leaf_constant = lambda p, a: None
+    exevft.deleting_dtor = lambda p, a: False
+    try:
+        bridges, traps = {}, {}
+        got, st = fnvlink.minus_one_copies(new[0], exev, native, {}, 'exe', lambda n: None, bridges, traps, out)
+    finally:
+        exevft.thunk, exevft.leaf_constant, exevft.deleting_dtor = saved
+    check(set(got) == set(new[0]), 'W19: a copy for the unreferenced primary and the secondary')
+    b = [l.split('.word ')[1] for l in bridges['zzvmo_01010500'].split('\n') if '.word ' in l]
+    check(b[0] == '0xfffffff8', 'the secondary copy carries the COL offset as offset-to-top')
+    check(b[2:4] == ['__fnvnx_vadjd_00409000_0', '__fnvnx_vadjd_00409000_1'],
+          'a destructor slot behind `sub ecx, 8; jmp ??_G`: adjusting D1/D0 stubs')
+    check('sub w0, w0, #8' in bridges['__fnvnx_vadjd_00409000_1'] and 'b __fnv_00401000\n' in
+          bridges['__fnvnx_vadjd_00409000_1'], 'the D0 stub subtracts the offset, then enters the deleting destructor')
+    check('b __fnv_00401000_D1' in bridges['__fnvnx_vadjd_00409000_0'], 'and the D1 stub enters the complete destructor')
+    check(b[4] == '__fnvnx_vadj_00409010' and 'sub w0, w0, #8' in bridges['__fnvnx_vadj_00409010'] and
+          'b __fnv_00401100' in bridges['__fnvnx_vadj_00409010'], 'a plain member behind an adjustor thunk by the COL offset')
+    check(b[5] in traps and b[5].startswith('__fnvnx_vtrap_'), 'a thunk by another immediate than the offset is a trap')
+    check(b[6] in traps, 'a thunk into a function no native build defines is a trap')
+    check(b[7] in traps, 'a chain whose sum is not the offset is a trap')
+    c = [l.split('.word ')[1] for l in bridges['zzvmo_01010600'].split('\n') if '.word ' in l]
+    check(c[4] in traps, 'a primary vftable never adjusts: an adjusting thunk there is a trap')
+    check(st['slots-adjustor-thunk'] == 1 and st['slot0-adjustor-dtor'] == 1, 'the adjusted slots are counted')
+
+
 def main():
     d0, d1 = sym('_ZN1AD0Ev'), sym('_ZN1AD1Ev')
     native = {
@@ -86,6 +132,7 @@ def main():
           'addrmap.tsv carries the V rows')
     check('__fnvnx_vmo_01010000 + 8' in open(os.path.join(amd, 'addrmap.c')).read(), 'addrmap.c points at the address point')
     shutil.rmtree(amd)
+    w19(native, out)
     asm = shutil.which('aarch64-linux-gnu-as')
     if asm:
         src = os.path.join(out, 'b.S')

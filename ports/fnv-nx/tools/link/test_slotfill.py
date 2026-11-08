@@ -354,9 +354,11 @@ def main():
         check(nb[5] not in bridges and refs['_ZN2Vb1cEi'][5] in bridges, 'b\'s trap stub dropped, c\'s kept')
         check('__fnv_00401020' not in chk, 'trial link: __fnv_00401020 defined')
         st = vtmetric.measure(_link_dir(t, out, fixed), exe)
-        check(st['trap-slots'] == 7 and st['trap-native-at-exe'] == 2 and st['primary-shorter'] == 0,
-              'vtmetric: 7 trap slots left (Sh\'s extension holds one), 2 with a native at the exe slot, no short '
-              'primary (%s)' % dict(st))
+        # W19: the fixture's unreferenced RTTI vftable 0x00fdf38c (exe slot 0 not a destructor, one slot) now has a
+        # minus-one copy and a V row: its D1 and its slot 0 are traps (one with a native at the exe slot), +2
+        check(st['trap-slots'] == 9 and st['trap-native-at-exe'] == 3 and st['primary-shorter'] == 0,
+              'vtmetric: 9 trap slots left (Sh\'s extension holds one, the unreferenced vftable\'s copy two), 3 with a '
+              'native at the exe slot, no short primary (%s)' % dict(st))
         check(st['slot-mismatch'] == 0 and st['slot-compared'] >= 1,
               'vtmetric: no native slot differs from the exe\'s function (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
