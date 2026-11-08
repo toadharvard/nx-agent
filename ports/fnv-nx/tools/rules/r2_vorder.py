@@ -95,7 +95,7 @@ def scan_tree(root):
     return found
 
 
-def post_check(out_root, stats, files):
+def vorder_post_check(out_root, stats, files):
     """VORDER1-LEFT: fail prepare when same-name virtuals are still out of slot order (FNVNX_VORDER_LAX=1: count only)."""
     left = scan_tree(out_root)
     stats['VORDER1-LEFT'] += len(left)
@@ -108,7 +108,7 @@ def post_check(out_root, stats, files):
 
 
 RULES = [r_virtual_overload_order]
-POST = [post_check]
+POST = [vorder_post_check]
 
 if __name__ == '__main__':
     rows = scan_tree(sys.argv[1])
