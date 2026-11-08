@@ -289,6 +289,32 @@ also missing from the `new` family, although free is in `delete`. On 8b233f99, a
 malloc in the oracle against new / Allocate / a constructor natively. malloc is now an allocator and in the `new`
 family. d20-malloc selects the functions whose oracle code calls it. Test: `tests/s13/test_crtmalloc.py`.
 
+**d21-f3mem (F3, the memory class; SCOPED = d21).** Four harness artifacts behind cached hard verdicts of
+native-null-read, callee-saved, store-width / x86-only-store, native-stub-data and float, found by replaying a random
+sample of 30 reproducers per cause on link 0540aff0d154 and reading the traces:
+- *builtins mapped the null page.* `libcalls.Mem` mapped any page a CRT builtin touched, so the oracle's
+  `memcpy(dst, NULL, 8)` (0x00401460) or `InterlockedDecrement((long*)0x84)` read zeros where GCC's inlined load or
+  the shim's `ldxr` faulted (00433b70, 00bb0de0). The real CRT faults there too. A builtin's access now raises
+  `libcalls.Fault` where the machine's own load or store would (`x86emu/arm64emu._bmem`: a page mapped already or
+  `world.mappable`), and the run ends with that fault on that machine;
+- *a lost callee-saved register did not trigger pop learning.* An intercepted call of unknown convention (wild or
+  unplanted) that pops its arguments, in an `ebp` frame: `mov esp, ebp` repairs esp, so nothing faulted, but the
+  `pop esi/edi/ebx` before it read the argument words (callee-saved x86=False arm=True; 0070f4e0, 00d55bd0).
+  `runner.Pair.run` now also learns the pops when the oracle's run is clean except `saved_ok`, and a learnt
+  combination must keep the callee-saved registers too (it need not repair an esp difference the run already had);
+- *the code-stub rewrite took data for code.* `arm64emu._codeptr` turned any stored word in [0x08000000,
+  0x09000000) into its original address, so a canned result 0x0805ddf1 that both machines stored became 0x0005ddf1
+  natively (store-width / x86-only-store with an 0x08 top byte: the InitializeRuntimeCallbackStatus* family). Only
+  a stub the image binds (`__fnv_<X>` in its symbols) is rewritten now;
+- *canned results pointed into a private range.* A canned eax / x0 word in 0x08000000..0x0c000000 (the native
+  image, its stubs) or 0x0e000000..0x0e100000 (the oracle's stub pages) read the native image's own bytes on the
+  native machine and background on the oracle (00ad7ab0: a float field through such a pointer). `Case.ret_bytes`
+  flips bit 30 of such a word (`world.canned_out_of_private`, mirrored in `causes._ret_bytes`), the same on both
+  machines.
+d21-f3mem rechecks the cached divergences these can explain differently (`fnkeys._f3_mem`: one machine faulted,
+callee-saved, a differing word in the code-stub range, a canned result word in a private range).
+Test: `tests/s13/test_f3mem.py` (each of the four fails on the harness before it).
+
 **d21: virtual calls and vtables (F2, SCOPED = d21).** A random sample of 240 cached records of the F2 causes
 (40 each of vptr-unpaired, vcall-garbage, vcall-stub-alias, deleting-dtor-flags, deleting-dtor-ret, oracle-vcall)
 replayed on link 0540aff0d154: 134 still diverge, none of the five triage causes under its own name any more. Three

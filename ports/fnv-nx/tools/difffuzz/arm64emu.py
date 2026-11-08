@@ -120,6 +120,11 @@ class Arm64Engine:
         for p in range(world.page_of(addr), addr + size, PAGE):
             self._map(p)
 
+    def _bmem(self, uc, r):
+        """Memory for a builtin: faults where this machine's own load or store would (libcalls.Fault)."""
+        return libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes,
+                            check=lambda p, a: p in self.mapped or self._mappable(a) or libcalls.uc_mapped(uc, a))
+
     def _on_unmapped(self, uc, access, address, size, value, data):
         if access == 21 and libcalls.IMPORT_BASE <= address < libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16:
             # an import called through the value of its IAT slot (pinned to the x86 import stub): a wild call
@@ -301,7 +306,14 @@ class Arm64Engine:
         """A native code address stored as data stands for its original address (S3 maps image code pointers to
         native ones): a code stub (unlinked callee) or a native entry of the image."""
         if a64image.CODE_STUB <= v < a64image.NAMED_STUB:
-            return v - a64image.CODE_STUB
+            # only a stub the image binds (`__fnv_<X>` = CODE_STUB + X): any other word there is data both machines
+            # hold, e.g. a canned call result, and stays as it is (F3: 0x0805ddf1 stored by both, the native's
+            # rewritten to 0x0005ddf1: store-width / stub-normalized)
+            st = getattr(self, '_code_stubs', None)
+            if st is None:
+                st = self._code_stubs = {a for a in getattr(self.image, 'syms', {}).values()
+                                         if a64image.CODE_STUB <= a < a64image.NAMED_STUB}
+            return v - a64image.CODE_STUB if v in st else v
         return self.image.entries.get(v, v)
 
     def _norm_bytes(self, b):
@@ -396,8 +408,11 @@ class Arm64Engine:
             # an import called through its IAT slot (S2's IAT binding): the import, as on x86
             name = self.iat_names[target]
             target = libcalls.import_id(name)
-        if self._builtin(uc, name, target, r):
-            return
+        try:
+            if self._builtin(uc, name, target, r):
+                return
+        except libcalls.Fault as e:              # the real libc function faults there too (libcalls.Mem.check)
+            self._fault = e.args[0]; uc.emu_stop(); return
         if name == '__stack_chk_fail':
             self._fault = 'stack-protector'; uc.emu_stop(); return
         k = len(r.calls)
@@ -468,13 +483,13 @@ class Arm64Engine:
             op = uc.reg_read(XR[0]) & 0xffffffff
             fn = libcalls.INTERLOCKED_SLOW_OPS.get(op, 'InterlockedCompareExchange')
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in (1, 2, 3)]
-            v = libcalls.run_import(fn, libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
+            v = libcalls.run_import(fn, self._bmem(uc, r), args)
             uc.reg_write(XR[0], v & 0xffffffff)
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
             return True
         if name and libcalls.import_name(name)[0] in libcalls.IMPORT_BUILTINS:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
-            v = libcalls.run_import(libcalls.import_name(name)[0], libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
+            v = libcalls.run_import(libcalls.import_name(name)[0], self._bmem(uc, r), args)
             uc.reg_write(XR[0], v & 0xffffffff)
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
             return True
@@ -490,7 +505,7 @@ class Arm64Engine:
             f = bname.endswith('f')
             x = struct.unpack('<f' if f else '<d', (v & (2 ** (32 if f else 64) - 1)).to_bytes(4 if f else 8, 'little'))[0]
             s, c = libcalls.run_float('sin', x), libcalls.run_float('cos', x)
-            m = libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes)
+            m = self._bmem(uc, r)
             m.write(uc.reg_read(XR[0]) & 0xffffffff, struct.pack('<f' if f else '<d', s))
             m.write(uc.reg_read(XR[1]) & 0xffffffff, struct.pack('<f' if f else '<d', c))
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
@@ -513,7 +528,7 @@ class Arm64Engine:
         else:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
             try:
-                v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
+                v = libcalls.run(bname, self._bmem(uc, r), args)
             except libcalls.TooLong:
                 self._fault = 'fault:libcall-length'; uc.emu_stop(); return True
             uc.reg_write(XR[0], v & 0xffffffff)
