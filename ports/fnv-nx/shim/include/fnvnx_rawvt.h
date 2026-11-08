@@ -2,7 +2,8 @@
  * prepare rules cannot decide (no classlayout row, not resolved at the exe's call site or by a runtime log) is
  * decided at run time. The link places every native minus-one vtable (GCC's D1/D0 pair at slots 0/1 where MSVC has
  * ??_G at 0: classlayout's minus-one classes, the image vftables' minus-one copies) in section .data.rel.ro.fnvnx_m1
- * and defines __fnvnx_m1_start / __fnvnx_m1_end around it (S2). A vptr inside it takes slot k + 1; any other table -
+ * and defines __fnvnx_m1_start / __fnvnx_m1_end around it (S2; the TESForm family's K = 4 tables in a second range,
+ * __fnvnx_m1k4_*, where only k > 4 shifts). A vptr inside it takes slot k + 1; any other table -
  * COM, an SDK object, an exe table of the image - slot k. The bounds are weak: without them (0 / 0) nothing shifts.
  * Included only by the units RAWVT1-DYN rewrites (never force-included). Under MSVC the index is k. */
 #ifndef FNVNX_RAWVT_H
@@ -15,15 +16,20 @@ extern "C" {
 #endif
 extern char __fnvnx_m1_start[] __attribute__((weak, visibility("hidden")));
 extern char __fnvnx_m1_end[] __attribute__((weak, visibility("hidden")));
+/* the minus-one tables whose pair sits at exe slot 4 (D22-SLOTK: the TESForm family): only slots after 4 shift */
+extern char __fnvnx_m1k4_start[] __attribute__((weak, visibility("hidden")));
+extern char __fnvnx_m1k4_end[] __attribute__((weak, visibility("hidden")));
 #ifdef __cplusplus
 }
 #endif
-static inline unsigned fnvnx_rawvt_m1(const void *vp)
+static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
 {
-    return (unsigned)((unsigned long)vp - (unsigned long)__fnvnx_m1_start <
-                      (unsigned long)__fnvnx_m1_end - (unsigned long)__fnvnx_m1_start);
+    if ((unsigned long)vp - (unsigned long)__fnvnx_m1_start < (unsigned long)__fnvnx_m1_end - (unsigned long)__fnvnx_m1_start)
+        return 1;
+    return k > 4 && (unsigned long)vp - (unsigned long)__fnvnx_m1k4_start <
+                    (unsigned long)__fnvnx_m1k4_end - (unsigned long)__fnvnx_m1k4_start;
 }
 /* the indexed expression keeps its type: (vp)[k + 0/1] */
-#define FNVNX_RAWVT_DYN(vp, k) (vp)[(k) + fnvnx_rawvt_m1((const void *)(vp))]
+#define FNVNX_RAWVT_DYN(vp, k) (vp)[(k) + fnvnx_rawvt_m1((const void *)(vp), (unsigned)(k))]
 #endif
 #endif
