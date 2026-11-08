@@ -23,6 +23,15 @@
 #   red    the link stage failed: the report shows its error and the first traceback of its log
 #   error  this job could not check (no base, the toolchain or an earlier stage failed): the gate does not hold
 # Exit 0 when the verdict is written (red included); 1 only when no report could be made.
+# FAST mode (LINKCHECK_FAST=1, runner job `fastlink`: tools/farm/fastlink_job.sh; orchestrator: the link in ~10 min
+# instead of bl1/full's 55-73, for S5 to boot): the base is the newest published t/<c12> on the head's history whose
+# prepare inputs (fetch_tree.sh's list) and recon set (recon.sh RECON_ID) are the head's, so the tree is the one the
+# head's prepare would make; it is synced into the same path (fetch_tree.sh: only the changed files are rewritten,
+# the caches stay warm). After a PASS on such a tree: `make guest`, link/<c12> and link-head published at once
+# (lib_job.sh publish_link; FARM_PUBLISH=always, the tree's provenance is t/<base>), then S5's stub boot
+# (tests/s5/farm_boot.sh FARM_BOOTS=stub, FNVNX_STUB_NULLDEV=1, EMU_TIMEOUT FASTLINK_EMU_TIMEOUT, default 300) and its
+# milestones line. No warm==cold check, no lockstep. A head whose link tools and tree were done already gets that
+# run's verdict and link at once. No matching published tree: the link check only (not published), said.
 # Env: LINKCHECK_REBASE_H, LINKCHECK_REBASE=1, LINKCHECK_TREE_WAIT (s, default 120), JOBS, LINKCACHE=0, UNITCACHE=0.
 set -euo pipefail
 unset FNVNX_STUB_NULLDEV BUDGET SLICE_MS EMU_BUDGET EMU_SLICE_MS
@@ -44,6 +53,7 @@ F=$FARM_HOME/linkcheck; B=$F/build; mkdir -p "$F/keys"
 T0=$(date +%s); ST=$T0; STEPS=()
 step() { local n; n=$(date +%s); STEPS+=("$1	$((n - ST))"); ST=$n; }
 VERDICT=error; WHY=""; BASE_NOTE="-"; COLD=0; SAME=""; LKEY="-"
+FAST=${LINKCHECK_FAST:-0}; export FAST_NOTES=""   # FAST: the guest, publish and boot lines of the report
 
 # the link tools' key (tools/farm/link_key.sh: the paths build.py link_tool_inputs hashes, and build.py)
 link_key() { bash "$HERE/link_key.sh" "$@"; }
@@ -69,6 +79,10 @@ for s in ('prepare', 'compile', 'link'):
         continue
     stages.append({'stage': s, 'status': st.get('status'), 'ran': st.get('ran'), 'seconds': st.get('seconds'),
                    'summary': (st.get('summary') or st.get('error') or '')[:160]})
+fast = [n for n in (os.environ.get('FAST_NOTES') or '').split('\x1f') if n]
+if fast:
+    k = L.index('- base: %s' % base)
+    L[k + 1:k + 1] = fast
 if stages and not same:
     L += ['| stage | status | run | seconds | summary |', '|---|---|---|---:|---|']
     for s in stages:
@@ -83,7 +97,7 @@ if os.path.isfile(detail) and os.path.getsize(detail):
     L += ['```', open(detail, errors='replace').read().rstrip('\n'), '```', '']
 open(rep, 'w').write('\n'.join(L))
 json.dump({'format': 'fnvnx-linkcheck/1', 'commit': commit, 'verdict': verdict, 'why': why, 'link_key': key,
-           'same_as': same or None, 'compile_all': os.environ.get('COMPILE_ALL') or None, 'seconds': int(total), 'cold': cold == '1', 'stages': stages},
+           'same_as': same or None, 'compile_all': os.environ.get('COMPILE_ALL') or None, 'fast': fast or None, 'seconds': int(total), 'cold': cold == '1', 'stages': stages},
           open(side, 'w'), indent=1)
 EOF
 	log "linkcheck $C12: $VERDICT${WHY:+ ($WHY)}"
@@ -117,8 +131,10 @@ fi
 echo "$COMMIT" > "$F/last_head"
 export COMPILE_ALL
 
-# a key checked already: its verdict, at once (a head that changed no link tool costs seconds)
-if [ -f "$F/keys/$LKEY" ] && [ "${LINKCHECK_AGAIN:-0}" != 1 ]; then
+fast_note() { FAST_NOTES+="$*"$'\x1f'; export FAST_NOTES; }
+# a key checked already: its verdict, at once (a head that changed no link tool costs seconds); FAST checks after the
+# base is chosen (its key names the tree too)
+if [ "$FAST" != 1 ] && [ -f "$F/keys/$LKEY" ] && [ "${LINKCHECK_AGAIN:-0}" != 1 ]; then
 	read -r SAME VERDICT < "$F/keys/$LKEY"
 	WHY="the link tools are those of ${SAME:0:12}"
 	write_report; exit 0
@@ -170,6 +186,40 @@ if [ ! -f "$BT/build/units.json" ] || [ ! -f "$F/base/prepared_from.txt" ] || [ 
 			tail -5 "$F/fetch_tree.log" > "$F/detail.txt" 2> /dev/null || true; write_report; exit 0
 		fi
 		log "base: kept (the new one could not be fetched)"
+	fi
+fi
+# FAST: the newest published tree with the head's prepare inputs and recon set, synced into the base path
+TREE_OK=0
+if [ "$FAST" = 1 ]; then
+	# shellcheck source=recon.sh
+	. "$HERE/recon.sh"; fetch_recon "$ARTIFACTS" "$F/recon" > /dev/null 2>&1 || true
+	PREP_IN=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh ports/fnv-nx/render/native/drop_units.txt)
+	have=$(git -C "$ARTIFACTS" ls-remote origin 'refs/heads/t/*' 2> /dev/null | sed -n 's|.*refs/heads/t/\([0-9a-f]\{12\}\)$|\1|p')
+	mt=""
+	for c in $(git -C "$SRC" rev-list --max-count="${LINKCHECK_TREE_DEPTH:-400}" "$COMMIT"); do
+		grep -qx "${c:0:12}" <<<"$have" || continue
+		git -C "$SRC" diff --quiet "$c" "$COMMIT" -- "${PREP_IN[@]}" && mt=$c
+		break   # the newest published tree only: an older one with the same inputs would have an older recon set
+	done
+	if [ -n "$mt" ] && [ "$mt" = "$(cat "$F/base/commit" 2>/dev/null)" ] && [ "$(cat "$F/base/recon" 2>/dev/null)" = "${RECON_ID:-}" ]; then
+		TREE_OK=1
+	elif [ -n "$mt" ] && FETCH_TREE_RECON=${RECON_ID:-} bash "$P/tools/farm/fetch_tree.sh" "$mt" "$BT" "${LINKCHECK_TREE_WAIT:-120}" > "$F/fetch_tree.log" 2>&1; then
+		echo "$mt" > "$F/base/commit"; echo "${RECON_ID:-}" > "$F/base/recon"
+		dc=$(git -C "$ARTIFACTS" show "refs/remotes/origin/t/${mt:0:12}:meta.json" 2> /dev/null \
+			| python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("decomp_commit") or "")' 2> /dev/null || true)
+		{ echo "$mt"; [ -n "$dc" ] && echo "decomp $dc"; echo "published for $mt"; } > "$F/base/prepared_from.txt"
+		TREE_OK=1; log "base: t/${mt:0:12} synced (the head's prepare inputs and recon set)"
+	fi
+	if [ "$TREE_OK" = 1 ]; then
+		fast_note "- tree: t/${mt:0:12}, the head's prepare inputs and recon set (${RECON_ID:-no recon}): this head's tree"
+	else
+		fast_note "- not published: no published tree has this head's prepare inputs and recon set yet${mt:+ (t/${mt:0:12}: another recon set)} (the newest t/<c12> on its history: $(git -C "$SRC" rev-list --max-count=400 "$COMMIT" | while read -r c; do grep -qx "${c:0:12}" <<<"$have" && { echo "${c:0:12}"; break; }; done)); the link check only"
+	fi
+	FKEY=$LKEY-$(cat "$F/base/commit" 2>/dev/null | cut -c1-12)-$TREE_OK
+	if [ -f "$F/keys-fast/$FKEY" ] && [ "${LINKCHECK_AGAIN:-0}" != 1 ]; then
+		read -r SAME VERDICT < "$F/keys-fast/$FKEY"
+		WHY="the link tools and the tree are those of ${SAME:0:12} (its link: link/${SAME:0:12})"
+		BASE_NOTE="t/$(cut -c1-12 "$F/base/commit")"; write_report; exit 0
 	fi
 fi
 BASE_C=$(cat "$F/base/commit")
@@ -227,5 +277,49 @@ print('\n'.join(l[:300] for l in out))
 EOF
 fi
 [ "$VERDICT" = error ] || echo "$COMMIT $VERDICT" > "$F/keys/$LKEY"
+
+if [ "$FAST" = 1 ] && [ "$VERDICT" = pass ] && [ "$TREE_OK" = 1 ]; then
+	# shellcheck disable=SC2086
+	make -C "$P" guest BUILD_DIR="$B" EXT="$EXT" JOBS="$JOBS" TESTS=none "${ARGS[@]}" ${LINKCHECK_MAKE_ARGS:-} \
+		> "$F/make-guest.log" 2>&1 || true
+	step "make guest"
+	if stage_ok "$B" guest; then
+		fast_note "- guest: $(python3 -I -c 'import json,sys; print((json.load(open(sys.argv[1])).get("summary") or "")[:200])' "$B/guest/stage.json" 2>/dev/null)"
+		# link/<c12> and link-head at once (S5 boots from them); a link/<c12> that exists (a full farm's) stays
+		if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/link/$C12" > /dev/null 2>&1; then
+			NOTE_PUB="link/$C12 exists already (not replaced)"
+		else
+			NOTE_TREE="t/$(cut -c1-12 "$F/base/commit"), the head's prepare inputs and recon set (fastlink)"
+			NOTE_OBJS="compiled from that tree on this fastlink machine"; OBJ_COMMIT=""; NOTE_PUB=""
+			write_report    # publish_link copies the report
+			FARM_PUBLISH=always publish_link "$B" || NOTE_PUB="publishing link/$C12 FAILED"
+		fi
+		fast_note "- link published: $NOTE_PUB"
+		step publish
+		# S5's stub boot of that guest, as bootloop_job.sh boots it (no warm==cold check, no lockstep)
+		SD=$F/stub; rm -rf "$SD"; mkdir -p "$SD"
+		FNVNX_STUB_NULLDEV=1 FARM_LINK_DIR=$B/link FARM_GUEST_DIR=$B/guest FARM_BOOTS=stub \
+			FARM_UNITS="$B/prepare/tree/build/units.json" EMU_TIMEOUT="${FASTLINK_EMU_TIMEOUT:-300}" \
+			bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$SD" ${GAME_EXE:+"$GAME_EXE"} > "$F/stub_boot.log" 2>&1 \
+			|| log "farm_boot.sh (stub boot) exited $?"
+		fast_note "$(python3 -I - "$SD/boot_summary_stub.json" "${FASTLINK_EMU_TIMEOUT:-300}" <<'EOF'
+import json, sys
+try:
+    bs = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    print('- stub boot: no summary (see fastlink stub_boot.log)'); sys.exit(0)
+ms = bs.get('milestones') or []
+stop = bs.get('stop') or {}
+print('- stub boot: game milestones %d/%d; last reached: %s; FNVNX_STUB_NULLDEV=1, EMU_TIMEOUT %s s; stop: %s' % (
+    sum(1 for m in ms if m.get('reached')), len(ms), bs.get('milestone') or 'none', sys.argv[2],
+    str(stop.get('reason') or '-')[:200]))
+EOF
+)"
+		step "stub boot"
+	else
+		fast_note "- guest: the guest stage did not end ok/warn (see $F/make-guest.log): not published"
+	fi
+fi
+[ "$FAST" = 1 ] && [ "$VERDICT" != error ] && { mkdir -p "$F/keys-fast"; echo "$COMMIT $VERDICT" > "$F/keys-fast/$FKEY"; }
 write_report
 exit 0

@@ -79,7 +79,7 @@ if [[ "$NAME" =~ ^qk[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=
 # bl<k> (the bootloop farms, bootloop_job.sh): persistent, a 20 s poll (each takes the newest head when it is free)
 if [[ "$NAME" =~ ^bl[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}"; fi
 # linkcheck (linkcheck_job.sh, the head's link tools on a fixed base): persistent, a 20 s poll
-if [ "$JOB" = linkcheck ]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}"; fi
+if [ "$JOB" = linkcheck ] || [ "$JOB" = fastlink ]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}"; fi
 PERSIST=${RUNNER_PERSIST:-0}; POLL=${RUNNER_POLL_S:-60}; CLAIM=${RUNNER_CLAIM:-}
 GAP=${RUNNER_MIN_GAP_S:-0}; LAST_START=0   # RUNNER_MIN_GAP_S: at least this many seconds between two job starts (a light
                                            # job hosted beside other work, e.g. `zero` on a busy integration branch)
@@ -109,9 +109,9 @@ gate() {   # gate <head>: true when the job may run on it
   while :; do
     v=""
     if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/reports/linkcheck:$ref" 2>/dev/null; then
-      for f in $(git -C "$ARTIFACTS" grep -l "\"link_key\": \"$key\"" "$ref" -- '*-linkcheck.json' 2>/dev/null | sed "s|^$ref:||"); do
+      for f in $(git -C "$ARTIFACTS" grep -l "\"link_key\": \"$key\"" "$ref" -- '*-linkcheck.json' '*-fastlink.json' 2>/dev/null | sed "s|^$ref:||"); do
         case "$(git -C "$ARTIFACTS" show "$ref:$f" | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("verdict",""))' 2>/dev/null)" in
-          red) v="red ${f%-linkcheck.json}"; break ;;
+          red) v="red ${f%.json}"; break ;;
           pass) v=pass ;;
           error) [ -n "$v" ] || v=error ;;
         esac
@@ -227,7 +227,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     if ! gate "$H"; then
       R=$FARM_HOME/out/${H:0:12}-$JOB.md; mkdir -p "$FARM_HOME/out"
       { echo "# $JOB ${H:0:12} skipped: linkcheck RED"; echo
-        echo "- the head's link tools crashed on the linkcheck farm (reports/linkcheck/$GATE_RED-linkcheck.md): not built here"; } > "$R"
+        echo "- the head's link tools crashed on the linkcheck farm (reports/linkcheck/$GATE_RED.md): not built here"; } > "$R"
       publish_report "$R"; echo "$H" > "$LAST"; sleep "$POLL"; continue
     fi
   fi
