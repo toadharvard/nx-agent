@@ -391,11 +391,15 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     if wx != wa:
         keys = sorted(set(wx) | set(wa))
         diff = [k for k in keys if wx.get(k) != wa.get(k)]
-        if local_statics and all(k in local_statics and k not in wa for k in diff):
+        stat = [k for k in diff if k in local_statics and k not in wa] if local_statics else []
+        if stat:
             # MSVC keeps a function-local static (and its guard) in the image; GCC keeps its own copy in the unit's
             # .bss (not compared). Not a divergence of the function itself; reported for the static-state audit.
-            soft = soft or dict(kind='local-static', soft=True, addr='%08x' % diff[0], ndiff=len(diff))
-            diff = []
+            # (difffuzz-20, local-static-mixed) Only those bytes leave the diff: a record that also differs elsewhere
+            # kept them and read as a mem-write at the static (0x00c206b0: x86 stores fMaxAngle and its guard, so
+            # every probe rerun of the real difference, the x87 range probe included, still saw the static bytes).
+            soft = soft or dict(kind='local-static', soft=True, addr='%08x' % stat[0], ndiff=len(stat))
+            diff = [k for k in diff if k not in stat]
     if wx != wa and diff and readers:
         lit = literal_store_words(diff, wx, wa, readers, w)
         if lit:
@@ -433,13 +437,25 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             # (R4 flow) or sets an hkArray capacity word to 0x80000000 (DONT_DEALLOCATE_FLAG, `mov [esi+0x4c],
             # 0x80000000` at 0x00d08f80): the same dead store of a destroyed member, constant bytes only
             d['x86_const_only'] = True
-        # float stores: compare the aligned words as floats
-        if all(k in wx and k in wa for k in range(first & ~3, (first & ~3) + 4)):
-            bx = bytes(wx[k] for k in range(first & ~3, (first & ~3) + 4))
-            ba = bytes(wa[k] for k in range(first & ~3, (first & ~3) + 4))
+        # float stores: compare the aligned words as floats. (difffuzz-20, float-store-raw) From the machines' raw
+        # stores: the effective maps above drop a byte that equals the world's initial byte, so a one-ulp store whose
+        # low byte is the initial 0x00 (0x00c206b0 .. 0x006e9830: 0xc2248200 against 0xc2248201) had a hole in its
+        # word and was never compared as a float
+        if all(k in rx.writes and k in ra.writes for k in range(first & ~3, (first & ~3) + 4)):
+            bx = bytes(rx.writes[k] for k in range(first & ~3, (first & ~3) + 4))
+            ba = bytes(ra.writes[k] for k in range(first & ~3, (first & ~3) + 4))
             fv = float_verdict(4, bx, ba)
             if fv.get('tolerant') and abs(struct.unpack('<f', bx)[0]) > 1e-30:
                 d['float_word'] = fv
+        # (difffuzz-20, zero-sign) a word that is -0.0 on one machine and +0.0 on the other, both machines having
+        # stored it (the effective maps above hold the sign byte only): the classifier reruns the x87 probes on it
+        w0 = first & ~3
+        if all(k in rx.writes and k in ra.writes for k in range(w0, w0 + 4)):
+            zx = bytes(rx.writes[k] for k in range(w0, w0 + 4))
+            za = bytes(ra.writes[k] for k in range(w0, w0 + 4))
+            if zx != za and not (int.from_bytes(zx, 'little') & 0x7fffffff) and \
+                    not (int.from_bytes(za, 'little') & 0x7fffffff):
+                d['zero_sign'] = True
         return d
     if not rx.saved_ok or not ra.saved_ok:
         return dict(kind='callee-saved', x86=rx.saved_ok, arm=ra.saved_ok)
