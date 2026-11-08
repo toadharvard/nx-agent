@@ -33,12 +33,26 @@ static struct region g_regions[MAX_REGIONS];
 static int g_nregions;
 static os_lock_t g_vm_lock;
 
+/* g_regions is sorted by base (regions never overlap): a binary search. The game commits its pools one page per
+ * VirtualAlloc call (MemoryPool::CommitPage, ~340,000 calls to the main menu), so a linear scan of hundreds of
+ * regions per call cost seconds of emulation (S5's profile: 358,223 calls, 26 s). */
+static int region_index(uintptr_t a)   /* the first region whose base is above a */
+{
+    int lo = 0, hi = g_nregions;
+    while (lo < hi) {
+        int m = (lo + hi) / 2;
+        if (g_regions[m].base <= a)
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    return lo;
+}
+
 static struct region *region_of(uintptr_t a)
 {
-    for (int i = 0; i < g_nregions; i++)
-        if (a >= g_regions[i].base && a < g_regions[i].base + g_regions[i].size)
-            return &g_regions[i];
-    return NULL;
+    int i = region_index(a) - 1;
+    return i >= 0 && a < g_regions[i].base + g_regions[i].size ? &g_regions[i] : NULL;
 }
 
 static int commit_range(struct region *r, uintptr_t a, size_t n)
@@ -93,17 +107,20 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
             SetLastError(a ? ERROR_INVALID_ADDRESS : ERROR_NOT_ENOUGH_MEMORY);
             goto out;
         }
-        r = &g_regions[g_nregions];
-        r->base = (uintptr_t)p;
-        r->size = rsz;
-        r->protect = protect;
-        r->caller = caller;
-        r->committed = (uint8_t *)calloc(rsz / PAGE, 1);
-        if (!r->committed) {
+        uint8_t *pages = (uint8_t *)calloc(rsz / PAGE, 1);
+        if (!pages) {
             os_vm_release(p, rsz);
             SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             goto out;
         }
+        int at = region_index((uintptr_t)p);   /* keep g_regions sorted */
+        memmove(&g_regions[at + 1], &g_regions[at], (size_t)(g_nregions - at) * sizeof g_regions[0]);
+        r = &g_regions[at];
+        r->base = (uintptr_t)p;
+        r->size = rsz;
+        r->protect = protect;
+        r->caller = caller;
+        r->committed = pages;
         g_nregions++;
         a = (uintptr_t)p + (a ? a - base : 0);
         if (type & MEM_COMMIT) {
@@ -150,7 +167,9 @@ extern "C" BOOL VirtualFree(LPVOID addr, SIZE_T size, DWORD type)
                 fnvnx_mem_delta(MEMK_VIRTUAL, -(long long)(committed_pages(r, r->base, r->size) * PAGE), r->caller);
             os_vm_release((void *)r->base, r->size);
             free(r->committed);
-            *r = g_regions[--g_nregions];
+            int at = (int)(r - g_regions);
+            memmove(r, r + 1, (size_t)(g_nregions - at - 1) * sizeof g_regions[0]);
+            g_nregions--;
             ok = TRUE;
         }
     } else if (type & MEM_DECOMMIT) {
@@ -237,6 +256,10 @@ extern "C" LPVOID HeapAlloc(HANDLE h, DWORD flags, SIZE_T n)
 extern "C" LPVOID HeapReAlloc(HANDLE h, DWORD flags, LPVOID p, SIZE_T n)
 {
     W32_UNUSED(h);
+    if (!p) {   /* unlike realloc, a NULL block is an error */
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
     if (W32_DW(flags) & HEAP_REALLOC_IN_PLACE_ONLY)
         return usable(p) >= n ? p : NULL;
     size_t old = (W32_DW(flags) & HEAP_ZERO_MEMORY) ? usable(p) : 0;
@@ -259,6 +282,8 @@ extern "C" BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p)
 {
     W32_UNUSED(h);
     W32_UNUSED(flags);
+    if (!p)
+        return TRUE;
     int in = fnvnx_mem_enter(MEM_RA);
     if (in)
         fnvnx_mem_forget(MEMK_HEAP, p);
@@ -295,7 +320,15 @@ extern "C" HANDLE LocalFree(HANDLE h)
     return NULL;
 }
 
-/* ---- status */
+/* ---- status
+ * The page-file fields are Windows' commit limit: RAM plus the page file (a system-managed one is about RAM's
+ * size), so their free part is free RAM plus the free page file, far above free RAM. The heap's constructor
+ * 0x00aa3880 shows a message box and exits when ullAvailPageFile < 512 MB (the only threshold the exe checks:
+ * GlobalMemoryStatus at 0x00aa9879 only logs); with free RAM there the device would trip it as the process grows.
+ * Here: total = 2 x RAM, free = free RAM + RAM. */
+static uint64_t pagefile_total(uint64_t t) { return 2 * t; }
+static uint64_t pagefile_avail(uint64_t t, uint64_t a) { return a + t; }
+
 extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
 {
     uint64_t t, a;
@@ -306,8 +339,8 @@ extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
     ms->dwMemoryLoad = t ? (DWORD)(100 - a * 100 / t) : 0;
     ms->dwTotalPhys = t > cap ? cap : (SIZE_T)t;
     ms->dwAvailPhys = a > cap ? cap : (SIZE_T)a;
-    ms->dwTotalPageFile = ms->dwTotalPhys;
-    ms->dwAvailPageFile = ms->dwAvailPhys;
+    ms->dwTotalPageFile = pagefile_total(t) > cap ? cap : (SIZE_T)pagefile_total(t);
+    ms->dwAvailPageFile = pagefile_avail(t, a) > cap ? cap : (SIZE_T)pagefile_avail(t, a);
     ms->dwTotalVirtual = (SIZE_T)0x7FFE0000u;
     ms->dwAvailVirtual = ms->dwAvailPhys < ms->dwTotalVirtual ? ms->dwAvailPhys : ms->dwTotalVirtual;
 }
@@ -320,8 +353,8 @@ extern "C" BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX ms)
     ms->dwMemoryLoad = t ? (DWORD)(100 - a * 100 / t) : 0;
     ms->ullTotalPhys = t;
     ms->ullAvailPhys = a;
-    ms->ullTotalPageFile = t;
-    ms->ullAvailPageFile = a;
+    ms->ullTotalPageFile = pagefile_total(t);
+    ms->ullAvailPageFile = pagefile_avail(t, a);
     ms->ullTotalVirtual = 0x7FFE0000ull;
     ms->ullAvailVirtual = a < 0x7FFE0000ull ? a : 0x7FFE0000ull;
     ms->ullAvailExtendedVirtual = 0;

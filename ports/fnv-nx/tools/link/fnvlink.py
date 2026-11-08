@@ -76,6 +76,8 @@ TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -
 TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
 MSVC_ENTRY_SYM = '__fnvnx_msvc_%08x'   # MSVC's entry of an override that takes `this` at a secondary base: the thunk
 XEXIT_SYM = '__fnvnx_xexit_%08x'   # native stand-in of an exe exit thunk a unit registers by address (xexit.py)
+ANCHOR_SYM = '__fnvnx_anchor_%08x'     # a value anchor: absolute symbol whose value is the constant (W28)
+ANCHOR_NAME = re.compile(r'(?:_value_anchor$|^g_target_[0-9a-f]{8}$)')
 TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing defines: absolute, the x86 value
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
@@ -565,6 +567,17 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             native[a] = dict(unit=u.source, sym=pick, variants=variants, tier=tier, msvc=n)
             def_stats['matched-' + tier] += 1
 
+    # ---- W48 (R2, vtgate 4264bfd7): a `??_G` / `??_E` recipe name no object defines, whose unit defines the
+    # function at that address under the decomp's own name (`FUN_00e22500_cls::FUN_00e22500(unsigned char)`,
+    # `FUN_00431980(void *, unsigned)`): bound through the unit's `// @fnv 0x<a>` tag (tag_flags_defs)
+    bound = {nd['sym'].name for nd in native.values()}
+    for a, (u, n, pick) in sorted(tag_flags_defs(real, native, objsyms, msvc, itanium, tree, def_stats).items()):
+        if pick.name in bound:
+            def_stats['tag-flags-bound-elsewhere'] += 1; continue
+        bound.add(pick.name)
+        native[a] = dict(unit=u.source, sym=pick, variants={}, tier='tag-flags', msvc=n)
+        def_stats['matched-tag-flags'] += 1
+
     # ---- startup natives (docs/STARTUP.md, prepare rule XC1): extern "C" __fnvnx_dyninit_<addr> / _dynexit_<addr>
     # stand for the ??__E / ??__F at <addr>, which MSVC names only as specials
     for u in sorted(real, key=lambda x: x.source):
@@ -685,6 +698,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     hints = collections.defaultdict(dict)    # source -> {vtable slot name: address} another unit's reference gave it
     chints = collections.defaultdict(dict)   # W20 (a): source -> {slot name: address} the unit's recipe gave, and its code calls
     used_addr = set()
+    anchor_vals = set()   # W28: units.json values of the value anchors (absolute symbols in aliases.ld)
     data_defs, tls_defs, tls_addrs = [], [], set()
     text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
     label_cache = {}
@@ -801,7 +815,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for var_ in ('D1', 'D2'):
             if nd_['variants'].get(var_) is not None and sigs.itanium_variant(nd_['sym'].name) == 'D0':
                 return g_, (ADDR_SYM % g_) + ('' if nd_['variants'][var_] is nd_['sym'] else '_' + var_)
-        if sigs.itanium_variant(nd_['sym'].name) is None and flags_param(msvc(nd_['msvc']) if nd_['msvc'] else None):
+        if sigs.itanium_variant(nd_['sym'].name) is None and (
+                nd_.get('tier') == 'tag-flags' or flags_param(msvc(nd_['msvc']) if nd_['msvc'] else None)):
             name_ = FLAG_SYM % (g_, 0)
             bridges.setdefault(name_, emit_flag_stub(name_, ADDR_SYM % g_, 0))
             return g_, name_
@@ -870,8 +885,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     ecx_use = msvc_code_use(units_json, ms, msvc, renames)
     for u in have:
         idx = KeyIndex()
+        uident = collections.defaultdict(set)   # ident over this unit's own symbols (classify_ref)
         for n, a in u.refs.items():
-            idx.add(msvc(n), a)
+            m_ = msvc(n)
+            idx.add(m_, a)
+            if m_.kind in ('data', 'cname') and m_.qual and m_.special is None and DATA_START <= a < DATA_END:
+                uident[m_.qual[-1]].add(a)
         for a, n in u.defs:
             idx.add(msvc(n), a)
         # variables this object defines at a data address: the data image holds the same object (docs/LINK.md)
@@ -898,12 +917,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls, tier, addr, target, note = 'addr', 'game/newdel', na, None, nm
                 stats['newdel_refs'] += 1
             else:
-                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident)
+                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident, uident)
                 if cls == 'native' and un in colliding:   # S5 class 2: never the unrelated body by name
                     cls, tier, addr = 'addr', 'name-addr/colliding', colliding[un]
                     stats['colliding_refs_by_address'] += 1
-                if tier == 'gref/ident':
+                if tier in ('gref/ident', 'unit/ident'):
                     stats['ident_' + cls] += 1
+                if tier == 'unit/ident':
+                    stats['ident_unit'] += 1
                 if cls == 'unresolved' and isig.qual and it[un] and (UNIT_NS.match(isig.qual[0]) or
                                                                      ptr_targ_copy(isig, it[un])):
                     # a unit-local namespaced copy of a class (`fnv_00650ea0::NiFixedString`, S13 J-0114): bound like
@@ -911,7 +932,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     # definition of the global name
                     st_ = UNIT_NS_ANY.sub('', it[un])
                     ts_ = sigs.parse_itanium(un, st_)
-                    r_ = classify_ref('', ts_, idx, gdef, gref, set(), msvc, ident) if ts_.qual else None
+                    r_ = classify_ref('', ts_, idx, gdef, gref, set(), msvc, ident, uident) if ts_.qual else None
                     if r_ and r_[0] not in ('unresolved', 'runtime'):
                         cls, tier, addr, target, note = r_[0], 'ns/' + (r_[1] or ''), r_[2], r_[3], r_[4]
                         stats['unit_ns_bound'] += 1
@@ -962,7 +983,17 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 # S2d (R6 recon6-007): a units.json "address" outside the image (`?g_target_00d53c90@@3HA` at
                 # 0x00000065: a value the recipe recorded, not where the variable lives) is no evidence: the name
                 # stays unresolved, a visible trap, never `__fnv_00000065`
-                cls, tier, note = 'unresolved', 'not-in-image/' + (tier or ''), '%08x is outside the image' % addr
+                if isig.kind in ('data', 'cname') and isig.qual and ANCHOR_NAME.search(isig.qual[-1]):
+                    # W28 (top-down 26 / 90): a value anchor. The decomp spells a constant leaf (`mov eax, 4; ret`)
+                    # as `(int)&g_..._value_anchor + 4` so VC9 keeps the 6-byte shape; the units.json "address" IS the
+                    # constant (exe 0x00e9ecc0: b8 04.. -> anchor 0; 0x00d53c90: b8 65.. -> g_target at 0x65). An
+                    # absolute symbol of that value (aliases.ld) makes the native body return the exe's constant.
+                    cls, tier, target = 'data', 'anchor/' + (tier or ''), ANCHOR_SYM % addr
+                    note = 'absolute %#x (value anchor)' % addr
+                    anchor_vals.add(addr)
+                    stats['value_anchor_refs'] += 1
+                else:
+                    cls, tier, note = 'unresolved', 'not-in-image/' + (tier or ''), '%08x is outside the image' % addr
                 addr = None
                 stats['refs_not_in_image'] += 1
             if cls == 'import' and addr is not None and addr not in import_syms and addr not in iat and \
@@ -1224,6 +1255,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     bridges.setdefault(bn, (target, v, ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     target = bn
                                     cls = 'code-bridge'
+                                elif v.kind == 'manual' and abi_manual_trap(v) and \
+                                        ('%08x' % addr, un) in abi_layout_equal():
+                                    # proved layout-equal (tools/link/abi_layout_equal.tsv): the direct binding stays
+                                    stats['abi_layout_equal'] += 1
                                 elif v.kind == 'manual' and abi_manual_trap(v):
                                     # D24: nothing binds across an aggregate / result-pointer difference without a
                                     # bridge; the reference stays a trap stub (cause abi-manual in the D23 list)
@@ -1660,6 +1695,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for k_, vs_ in member_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out,
                                           {u.source: u.obj for u in have}).items():
             ctor_pairs.setdefault(k_, set()).update(vs_)
+        # W47: the shells no pass paired, by the vptr stores of any function bound to an exe address (factories,
+        # stand-in constructors without a `??0` name, inlined decomp constructors): bound_store_pairs
+        for k_, vs_ in bound_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out,
+                                         {u.source: u.obj for u in have}, ctor_pairs).items():
+            ctor_pairs.setdefault(k_, set()).update(vs_)
         for a in rebind:
             rebind[a] = vmap[a][:2]
         # the slots of virtual functions defined nowhere: the native definition at the exe slot's address
@@ -1670,21 +1710,30 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         exev_all.update(exevft.plain_vftables(exe_path, [v for v in vmap if v not in exev],
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
+        global VTFILL_ITANIUM
+        VTFILL_ITANIUM = itanium   # vtfill_hold_abi: slot_abi on the held slots
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound, hints, chints)
+                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound, hints, chints,
+                             lay_of=lay_of, probe_req=probe_req)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
         byclass['vslot-exe'] += fill.get('bound_refs', 0)
         # primary vtables shorter than the exe's: an extended strong copy (the exe's remaining slots)
         d22_listed, d22_files = load_d22_list(os.environ.get('FNVNX_RECON'))
+        d22_applied = load_d22_applied(os.path.dirname(os.path.dirname(os.path.abspath(units_json)))) \
+            if units_json else set()
+        vstats['d22-applied-vftables'] = len(d22_applied)
+        d22_listed = set(d22_listed) | d22_applied
         ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
                                 exe_path, providers, exe_alt, msvc, d22_listed,
-                                lambda c_: code_refs([u.obj for u in have], c_))
+                                lambda c_: code_refs([u.obj for u in have], c_), unbound=unbound,
+                                defined_fn=lambda c_: code_defs([u.obj for u in have], c_))
         vstats['d22-list-files'] = d22_files
         vstats['d22-list-vftables'] = len(d22_listed)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
+        vstats['exe-order-shell-names'] = add_unit_shell_names(out, units_json, exe_path)
         for a in rebind:   # S2c-vt2: shifted secondary groups moved their address points (slotfill2.shifted)
             rebind[a] = vmap[a][:2]
         if os.environ.get('FNVNX_D26C', '1') != '0':
@@ -1698,7 +1747,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if miss:
                 exev_all.update(exevft.plain_vftables(exe_path, miss, set(exev_all) | set(vmap) | set(vmo_c) |
                                                       {a_ for (_, a_) in vnames}))
-            vmo, vst = minus_one_copies(vmo_c, exev_all, native, providers, exe_path, msvc, bridges, traps, out)
+            lay_ = None
+            if os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0' and os.path.isfile(os.path.join(out, 'classlayout.tsv')):
+                import classlayout as _cl
+                lay_ = _cl.load_layout(os.path.join(out, 'classlayout.tsv'))
+            vmo, vst = minus_one_copies(vmo_c, exev_all, native, providers, exe_path, msvc, bridges, traps, out, lay_)
             for k_, n_ in vst.items():
                 vstats['vmo-' + k_] = n_
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
@@ -1739,6 +1792,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 stats['vtable_data_refs_minus_one_copy'] += 1
             else:
                 f.write('%s = 0x%08x;\n' % (ADDR_SYM % a, a))
+        for a in sorted(anchor_vals):
+            f.write('%s = 0x%08x;\n' % (ANCHOR_SYM % a, a))
         for line in sorted(set(alias_lines)):
             f.write(line + '\n')
 
@@ -1855,7 +1910,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                   stats['colliding_fun_names'], stats['colliding_fun_defs'], stats['colliding_refs_by_address']),
               'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
               'data references bound by identifier only (another scope or decorated type): %d; identifiers at several '
-              'addresses (left ambiguous): %d' % (stats['ident_addr'], stats['ident_ambiguous']),
+              'addresses (left ambiguous): %d, of the bound ones by the unit\'s own name: %d'
+              % (stats['ident_addr'], stats['ident_ambiguous'], stats['ident_unit']),
               'ecx-not-passed / this-not-passed pairs judged on the definition\'s MSVC code (--msvc-code/-objs): ecx '
               'unused, bridged: %d; used, flagged: %d; no code: %d' % (stats['ecx_code_unused'],
                                                                       stats['ecx_code_used'], stats['ecx_code_unknown']),
@@ -1918,6 +1974,79 @@ FUNC_HDR = re.compile(r'^[^\n;{}#]*?\b((?:\w+\s*::\s*)*\w+)\s*::\s*~?\w+\s*\([^;
 # InitLargePrimitiveArray after FUN_00404920's constructor was credited to FUN_00404920)
 FREE_HDR = re.compile(r'^(?![ \t]|//)(?![^\n;{}#(]*::)[^\n;{}#(]*?\b(?!(?:if|for|while|switch|catch|return)\b)\w+\s*'
                       r'\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
+
+
+TAG_HEAD = re.compile(r'//\s*@fnv\s+0x([0-9a-fA-F]+)[^\n]*\n((?:[ \t]*(?://[^\n]*)?\n)*)([^\n(;{}]*)\(')
+TAG_NAME = re.compile(r'((?:\w+\s*::\s*)*~?\w+)\s*$')
+
+
+def tag_names(text):
+    """`// @fnv 0x<a>` tags of a unit text -> {address: [qualified name of the function defined after the tag]}:
+    the head before the first `(` of the next non-blank, non-comment line (`FNVNX_KEEP T *C::f(` -> `C::f`)."""
+    out = collections.defaultdict(list)
+    for m in TAG_HEAD.finditer(text):
+        n = TAG_NAME.search(m.group(3))
+        out[int(m.group(1), 16)].append(re.sub(r'\s+', '', n.group(1)) if n else None)
+    return out
+
+
+def flags_like(isig, cls):
+    """An Itanium definition shaped like a deleting destructor of class qual `cls`: a member of cls with one integer
+    parameter (the flags), or a free function (pointer, integer). cls is empty when undname gives no qualified name
+    (a class local to a function: `??_GFUN_0048ef40_shell@?1??FUN_0048ef60@@...`): the free shape only."""
+    ps = [abi.classify(p) for p in (isig.raw_params or []) if p != 'void']
+    ints = ('I8', 'I16', 'I32')
+    if cls and isig.qual[:-1] == cls:
+        return len(ps) == 1 and ps[0] in ints
+    return len(isig.qual) == 1 and len(ps) == 2 and ps[0] == 'P' and ps[1] in ints
+
+
+def tag_flags_defs(real, native, objsyms, msvc, itanium, tree, stats):
+    """W48 (R2, vtgate 4264bfd7, exe 0x00e22500 / 00431980 / 0048ef60 / 00e00910): units.json binds address a to
+    the MSVC deleting destructor `??_GC@@UAEPAXI@Z` (or `??_E`), no object defines C's D0, and the unit's source
+    defines the code at a as a plain function: `// @fnv 0x00e22500` before `C *C::FUN_00e22500(unsigned char)`, or
+    a free `void FUN_00431980(void *, unsigned)`. The definition the tag names, when the unit tags a exactly once
+    and defines exactly one function of that name with the flags shape (flags_like), is the native definition at a
+    (its msvc stays the ??_G name: vmo_dtor_slots / exe_slot_fill make D1 / D0 from it with the flags stubs).
+    Returns {a: (unit, msvc name, elf sym)}. stats: tag-flags-* (no-tag: no body at all, a D0 to synthesize)."""
+    want = collections.defaultdict(list)
+    for u in real:
+        for a, n in u.defs:
+            if a not in native and n.startswith(('??_G', '??_E')):   # undname: a local class's ??_G has no variant
+                want[u].append((a, n))
+    out = {}
+    for u in sorted(want, key=lambda x: x.source):
+        path = os.path.join(tree or '', u.source)
+        if not tree or not os.path.exists(path):
+            stats['tag-flags-no-source'] += len(want[u]); continue
+        tags = tag_names(open(path, encoding='utf-8', errors='surrogateescape').read())
+        funcs = collections.defaultdict(list)
+        for s in objsyms.get(u.source, ()):
+            if s.shndx != 0 and s.type == 'func' and s.bind in ('global', 'weak') and \
+                    not s.name.endswith('.localalias') and s.name.startswith('_Z'):
+                funcs[tuple(itanium(s.name).qual)].append(s)
+        for a, n in want[u]:
+            if a in out:
+                continue
+            names = tags.get(a, [])
+            if not names:
+                stats['tag-flags-no-tag'] += 1; log('tag-flags: no @fnv tag for %08x (%s)' % (a, n)); continue
+            if len(names) != 1 or names[0] is None:
+                stats['tag-flags-several-tags'] += 1; continue
+            cands = {s.name: s for s in funcs.get(tuple(names[0].split('::')), ())
+                     if not itanium(s.name).variant}
+            cls = msvc(n).qual[:-1]
+            shaped = [s for nm, s in sorted(cands.items()) if flags_like(itanium(nm), cls)]
+            if not cands:   # a constructor's spelling at the ??_G (`C::C()`, R2's 00cc7e50 / 0041c660): no body
+                q_ = names[0].split('::')
+                stats['tag-flags-not-defined' + ('-ctor' if len(q_) > 1 and q_[-1] == q_[-2] else '')] += 1
+                continue
+            if len(shaped) != 1:
+                stats['tag-flags-not-flags-shape' if not shaped else 'tag-flags-ambiguous'] += 1
+                log('tag-flags: %08x %s: %s' % (a, names[0], 'not flags-shaped' if not shaped else 'ambiguous'))
+                continue
+            out[a] = (u, n, shaped[0])
+    return out
 
 
 def no_candidate_why(sites, ctor_classes):
@@ -2255,6 +2384,140 @@ def store_seq_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out, obj_of
     return got
 
 
+def _prefix_ok(exev, vs):
+    """The exe vftables vs agree slot by slot (each one's slots a prefix of the others')."""
+    vs = sorted(vs)
+    return all(exev[a].slots[:len(exev[b].slots)] == exev[b].slots[:len(exev[a].slots)]
+               for i, a in enumerate(vs) for b in vs[i + 1:])
+
+
+def bound_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out, obj_of, taken=()):
+    """W47: shell vtables by the stores of any bound function. A decomp stand-in's vtable that no pass paired (no
+    `??_7` name, not `_ZTV<n>FUN_<ctor>`, no `??0` / `??1` at the function storing it: `_ZTV12FUN_0050adf0`, the
+    `CreateObject` / `Clone` factories of the staging blocks) is still stored into objects by natively compiled code:
+    a function F that the address map binds to exe address X materialises `_ZTV<z>+8` and stores it at [xN] (this,
+    the result of `operator new`, or a copy; membervt.vt_store_seq, which also takes in the stores of the decomp's
+    own out-of-line constructors F calls that no exe address binds - the exe inlined them). The exe function at X
+    stores its vftables at [reg] (exevft.vptr_store_seq). The two lists are paired by position:
+      * as many stores on both sides: one pair per position;
+      * one native vtable and one exe vftable, each stored one or more times: that pair;
+      * else a constructor (`??0`) pairs its last stores, a destructor (`??1`, `??_G`, `??_E`) its first; any other
+        function pairs nothing (`counts differ`).
+    A vtable is paired only when every function agrees on its vftable, or on vftables that agree slot by slot (one a
+    prefix of the other); else it is a conflict and stays unpaired. A vtable another pass paired (vmap, alt, taken)
+    is left. A free vftable takes the vtable in vmap; one that has a vtable takes it as a displaced one (alt), so
+    exe_vtable_copies (VTFILL) writes it as transform(exe table) either way, and never over a strong definition.
+    bound_vftables.tsv: one row per (function, pair) with the outcome. FNVNX_BSTORE=0 turns the pass off.
+    -> {(group, address point): {exe vftable}} for exe_slot_fill."""
+    got = collections.defaultdict(set)
+    if os.environ.get('FNVNX_BSTORE', '1') == '0':
+        return got
+    bound = {e[0] for e in vmap.values()} | {x[0] for zs in alt.values() for x in zs} | {k[0] for k in taken}
+    starts = {w for w, e in exev.items() if e.td and e.off == 0}
+    names = set()
+    for nd in native.values():
+        names.add(nd['sym'].name)
+        names.update(s.name for s in (nd.get('variants') or {}).values())
+    prim = {}
+
+    def primary(z):
+        if z not in prim:
+            prim[z] = {p for p, ott in vtables.address_points(rtti.ents(z) or []) if ott == 0} if z in rtti.where \
+                else set()
+        return prim[z]
+    objs, cand = {}, []
+    for a in sorted(native):
+        nd = native[a]
+        path = obj_of.get(nd.get('unit'))
+        if not path:
+            continue
+        if path not in objs:
+            objs.clear()   # natives are sorted by address, mostly unit by unit: keep one object
+            try:
+                objs[path] = vtables.Obj(path)
+            except (OSError, ValueError):
+                objs[path] = None
+        o = objs[path]
+        sym = nd['sym'].name
+        if o is None or sym not in o.defs:
+            continue
+        _, value, size, typ, _, shndx = o.syms[o.defs[sym]]
+        if typ != 2 or shndx >= len(o.secs):
+            continue
+        def local_ctor(c):   # the decomp's own out-of-line constructor, in this object, bound to no exe address
+            return c not in names and c in o.defs and bool(membervt.CTOR_NAME.fullmatch(c))
+        if not any(value <= off < value + size and (o.syms[r[0]][0].startswith('_ZTV') or local_ctor(o.syms[r[0]][0]))
+                   for off, r in o.rel(shndx).items()):
+            continue   # names no vtable and calls no such constructor (most functions): the cheap test first
+        memo, depth = {}, [0]
+
+        def expand(c):
+            if not local_ctor(c) or depth[0] > 2:
+                return None
+            if c not in memo:
+                memo[c] = []
+                depth[0] += 1
+                memo[c] = membervt.vt_store_seq(o, c, expand)
+                depth[0] -= 1
+            return memo[c]
+        ns = [(z, ap) for z, ap in membervt.vt_store_seq(o, sym, expand) if ap in primary(z)]
+        if not any(z not in bound for z, _ in ns):
+            continue
+        exs = exevft.vptr_store_seq(exe_path, a, starts)
+        kind = seq_kind(a, nd)
+        if not exs:
+            vstats['bstore-vt-no-exe-store'] += 1
+            rows_ = [(z, '%08x' % a, kind or '-', '%d/0' % len(ns), '', 'no exe store') for z, _ in ns if z not in bound]
+            cand.append((a, kind, ns, exs, [], rows_))
+            continue
+        if len(ns) == len(exs):
+            pairs = list(zip(ns, exs))
+        elif len(set(ns)) == 1 and len(set(exs)) == 1:
+            pairs = [(ns[0], exs[0])]
+        elif kind == 'ctor':
+            pairs = [(ns[-1], exs[-1])]
+        elif kind == 'dtor':
+            pairs = [(ns[0], exs[0])]
+        else:
+            pairs = []
+            vstats['bstore-vt-counts-differ'] += 1
+        cand.append((a, kind, ns, exs, pairs, [] if pairs else [
+            (z, '%08x' % a, kind or '-', '%d/%d' % (len(ns), len(exs)), '', 'counts differ')
+            for z, _ in ns if z not in bound]))
+    claim = collections.defaultdict(lambda: collections.defaultdict(list))
+    for a, kind, ns, exs, pairs, _ in cand:
+        for (z, ap), v in pairs:
+            if z not in bound:
+                claim[(z, ap)][v].append(a)
+    rows = []
+    for a, kind, ns, exs, pairs, extra in cand:
+        rows += extra
+        for (z, ap), v in pairs:
+            if z in bound and (z, ap) not in claim:
+                how = 'bound'
+            elif len(claim[(z, ap)]) > 1 and not _prefix_ok(exev, claim[(z, ap)]):
+                how = 'conflict: %s' % ' '.join('%08x' % x for x in sorted(claim[(z, ap)]))
+            elif v in vmap and vmap[v][:2] == (z, ap) or any(x[:2] == (z, ap) for x in alt.get(v, ())):
+                how = 'same'
+            elif v not in vmap:
+                vmap[v] = (z, ap, rtti.where[z][0].path, 'primary, the vftable the exe function %08x stores in the '
+                           'same position as the native one (bound stores)' % a)
+                how = 'paired'
+                got[(z, ap)].add(v)
+            else:
+                alt[v].append((z, ap, rtti.where[z][0].path, 'primary'))
+                how = 'paired as displaced (%s)' % vmap[v][0]
+                got[(z, ap)].add(v)
+            vstats['bstore-vt-' + how.split(' (')[0].split(':')[0].replace(' ', '-')] += 1
+            rows.append((z, '%08x' % a, kind or '-', '%d/%d' % (len(ns), len(exs)), '%08x' % v, how))
+    vstats['bstore-vt-tables'] = len(got)
+    with open(os.path.join(out, 'bound_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#native vtable\tfunction\tkind\tnative/exe stores\texe vftable\toutcome\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    return got
+
+
 BOUND_CALLEE = re.compile(r'__fnv(?:nx_cthis)?_([0-9a-f]{8})(?:_C[12])?')
 
 
@@ -2438,6 +2701,24 @@ def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, alt=None):
 ABI_MANUAL_TRAP = ('sret-explicit', 'ret-aggregate', 'aggregate-param')
 
 
+_ABI_LAYOUT_EQUAL = None
+
+
+def abi_layout_equal(path=None):
+    """{(address %08x, reference symbol)} of tools/link/abi_layout_equal.tsv: manual pairs proved layout-equal"""
+    global _ABI_LAYOUT_EQUAL
+    if _ABI_LAYOUT_EQUAL is None or path:
+        p = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'abi_layout_equal.tsv')
+        s = set()
+        if os.path.isfile(p):
+            for line in open(p):
+                f = line.rstrip('\n').split('\t')
+                if len(f) >= 2 and not line.startswith('#') and re.fullmatch(r'[0-9a-f]{8}', f[0]):
+                    s.add((f[0], f[1]))
+        _ABI_LAYOUT_EQUAL = s
+    return _ABI_LAYOUT_EQUAL
+
+
 def abi_manual_trap(v):
     """A `manual` pair that differs in how an aggregate or the result pointer is passed (sret-explicit, ret-aggregate,
     aggregate-param): with no bridge (abi2 has no layout plan) the reference is left unbound, so it stays a trap stub
@@ -2561,6 +2842,42 @@ def emit_cthis_stub(name, target):
 
 CONST_SYM = '__fnvnx_vconst_%08x'   # a trivial x86 leaf (exevft.leaf_constant) no unit compiles
 ADJ_SYM = '__fnvnx_vadj_%08x'       # an MSVC adjustor thunk no unit compiles: this -= n, then its target
+
+
+def load_vtbind(top=None, path=None):
+    """R4's VTFILL binding file (fnvnx-vtbind/1, fnv-nx-build recon/vtbind bind.tsv): {exe address: (kind, symbol,
+    target, n)}; kind `fn` (the native of the exe function) or `adj` (an MSVC adjustor thunk: this -= n, then target).
+    From FNVNX_VTBIND, else any bind.tsv with that header under FNVNX_RECON; {} without one."""
+    files = []
+    path = path or os.environ.get('FNVNX_VTBIND')
+    top = top or os.environ.get('FNVNX_RECON')
+    if path and os.path.isfile(path):
+        files = [path]
+    elif top and os.path.isdir(top):
+        files = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(top) for f in fs if f in ('bind.tsv', 'bindings.tsv'))
+    out = {}
+    for f in files:
+        try:
+            lines = open(f).read().split('\n')
+        except OSError:
+            continue
+        if not lines or not lines[0].startswith(('# fnvnx-vtbind/1', '# fnvnx-vtgate-r4-bindings/1')):
+            continue
+        r4 = lines[0].startswith('# fnvnx-vtgate-r4-bindings/1')   # exe_addr, native_symbol, kind, target, n
+        for line in lines[1:]:
+            if not line or line.startswith('#'):
+                continue
+            p = line.split('\t')
+            if len(p) < 5:
+                continue
+            try:
+                if r4:
+                    out[int(p[0], 16)] = (p[2], p[1], p[3], int(p[4] or 0))
+                else:
+                    out[int(p[0], 16)] = (p[1], p[2], p[3], int(p[4] or 0))
+            except ValueError:
+                continue
+    return out
 
 
 def emit_adj_stub(name, target, n):
@@ -2702,7 +3019,7 @@ def deleting_native(nd, msvc):
     if sigs.itanium_variant(nd['sym'].name) == 'D0':
         return True
     n = nd.get('msvc') or ''
-    return n.startswith(('??_G', '??_E')) or flags_param(msvc(n) if n else None)
+    return n.startswith(('??_G', '??_E')) or nd.get('tier') == 'tag-flags' or flags_param(msvc(n) if n else None)
 
 
 def global_delete(newdel_votes, native, providers):
@@ -2784,12 +3101,18 @@ def free_slot(a, nd, bridges, st):
     it every argument one register early. Such a slot gets a bridge by the definition's MSVC convention: cdecl /
     stdcall drop `this` (x1..x7 -> x0..x6), fastcall (ecx = this, edx undefined on the x86 call, then the stack)
     inserts edx as 0 (x1..x6 -> x2..x7). Returns the bridge symbol, or None for any other definition."""
-    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'_Z\d+FUN_[0-9a-f]{8}', nd['sym'].name):
+    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
         return None
     m = FREE_SLOT.match(nd.get('msvc') or '')
-    if not m:
-        return None
-    mode = 'edx' if m.group(1) == 'I' else 'drop'
+    if m:
+        mode = 'edx' if m.group(1) == 'I' else 'drop'
+    else:
+        # R2 (vtgate 4264bfd7): an extern "C" stand-in, `@FUN_<a>@N` (fastcall: edx inserted) or `_FUN_<a>@N` /
+        # `_FUN_<a>` (stdcall / cdecl: this dropped), whose native name is the plain C name (00c73170, 00d2dd50)
+        mc = re.match(r'^([@_])(FUN_[0-9a-f]{8})(?:@\d+)?$', nd.get('msvc') or '')
+        if not mc or nd['sym'].name != mc.group(2):
+            return None
+        mode = 'edx' if mc.group(1) == '@' else 'drop'
     name = FREE_SYM % a
     if name not in bridges:
         if mode == 'drop':
@@ -2819,6 +3142,18 @@ def flags0_slot(isig, nd, ds, exe_path, a):
     return flags_param(ds) and bool(exe_path and exevft.deleting_dtor(exe_path, a))
 
 
+GSYN_SYM = '__fnvnx_vgsyn_%08x'   # a synthesised D0 for an exe ??_G no unit compiles: its destructor, then delete
+
+
+def emit_gsyn_stub(name, dtor):
+    """D0 = `dtor(this); operator delete(this); return this` (ILP32: pointers in w registers)."""
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
+                      '    stp x29, x30, [sp, #-32]!', '    mov x29, sp', '    str x19, [sp, #16]', '    mov w19, w0',
+                      '    bl %s' % dtor, '    mov w0, w19', '    bl _ZdlPv', '    mov w0, w19', '    ldr x19, [sp, #16]',
+                      '    ldp x29, x30, [sp], #32', '    ret', '    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
 def emit_gdel_stub(name, d0, d1):
     return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
                       '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
@@ -2840,7 +3175,8 @@ def rewrite_refs(path, by_src, addr_of, rebound=()):
         for line in fi:
             f = line.split('\t')
             if len(f) >= 7 and (f[2] in ('vslot-unresolved', 'extern-text', 'import') or
-                                (f[2] == 'code' and (f[0], f[1]) in rebound)) and f[1] in rows.get(f[0], {}):
+                                (f[2] in ('code', 'unresolved') and (f[0], f[1]) in rebound)) and \
+                    f[1] in rows.get(f[0], {}):
                 t, a_ = rows[f[0]][f[1]]
                 nx += f[2] != 'vslot-unresolved'
                 f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', '%08x' % a_, t
@@ -2851,9 +3187,34 @@ def rewrite_refs(path, by_src, addr_of, rebound=()):
     return n, nx
 
 
+def bodies_slot_renames(have, changed, addr_of, per_obj, rebound, undefined):
+    """W28: for each synthesized body object (`<host>#bodies<n>`) the names it leaves undefined that the slot fill bound in
+    the host's objects (`changed`: {unit: {symbol: target}}, addr_of {(source, symbol): exe address}) get the same
+    target. Adds to changed / addr_of / rebound; returns the number of names. undefined(unit) -> its undefined names."""
+    by_host = collections.defaultdict(dict)   # host source -> {symbol: (target, exe address)}
+    for u, m in changed.items():
+        for un_, t_ in m.items():
+            by_host[u.host or u.source.split('#')[0]].setdefault(un_, (t_, addr_of[(u.source, un_)]))
+    n = 0
+    for u in have:
+        if '#bodies' not in u.source:
+            continue
+        got_ = by_host.get(u.host or '')
+        if not got_:
+            continue
+        ren_ = per_obj.get(u.source) or {}
+        for name in undefined(u):
+            if name in got_ and name not in ren_:
+                changed.setdefault(u, {})[name] = got_[name][0]
+                addr_of[(u.source, name)] = got_[name][1]
+                rebound.add((u.source, name))
+                n += 1
+    return n
+
+
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
                   stubs=None, overrides=None, exe_path=None, providers=None, also=None, unbound=None, hints=None,
-                  call_hints=None):
+                  call_hints=None, lay_of=None, probe_req=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -2877,6 +3238,9 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     vtables of the object disagree or the exe's function cannot be bound, the name keeps its address (`hint_kept_*`).
     The hint rule also holds for a name the unit's own recipe binds (refs.tsv tier unit/*) that the object never calls
     (W20 (b): the name is only a slot).
+    A hint symbol serves the vtables of a class and of the classes derived from it (the decomp does not declare their
+    overrides), and ends at one address: each vtable whose exe vftables hold another single function in that slot gets
+    its own word in the copy (`hint_slot_over`; W32), whether the symbol was rebound, agreed or kept.
     call_hints: {source: {name: address}} (W20 (a)) vtable-slot names the unit's recipe binds (tier unit/*) that the
     object also calls directly: the address is right for those calls and the symbol keeps it. Each vtable slot that
     names the symbol where the exe vftables of that use agree on another function gets that function as a per-slot
@@ -2976,7 +3340,8 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
         dsym = nd['sym'].name
         dvar = sigs.itanium_variant(dsym)
         ds = msvc(nd['msvc']) if nd.get('msvc') else None
-        if isig.variant and isig.variant.startswith('D') and dvar is None and flags_param(ds):
+        if isig.variant and isig.variant.startswith('D') and dvar is None and (
+                flags_param(ds) or nd.get('tier') == 'tag-flags'):   # W48: tag_flags_defs checked the shape
             # GCC's D1/D0 where the decomp defines the exe's ??_G as a plain function taking the flags
             # (`FUN_00c2a090(unsigned int)`): a stub passes them, 1 for D0 (delete), 0 for D1/D2
             fl = 1 if isig.variant == 'D0' else 0
@@ -3034,7 +3399,36 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 bn = abi.bridge_name(a, 'vslot ' + un)
                 stubs.setdefault(bn, (ADDR_SYM % a, v, 'vtable slot %s' % un, nd['msvc']))
                 return bn, 'bridge (%s)' % ','.join(v.classes or ['moves'])
-            return None, 'abi: ' + how
+            why2 = []
+            if lay_of is not None and nd['unit'] is not None:
+                # aggregates by value: decide on bytes (abi2), as for code references. target_for does not know the
+                # unit that compiles the vtable, so both sides use the definition's unit nd['unit']. The slot as
+                # declared first; the placeholder padding above (the definition's extra arguments) only after that
+                s0 = slot_msvc_sig(isig, ds)
+                cands = [s0] + ([ss] if ss.raw_params != s0.raw_params else [])
+                for sg in cands + [ds]:
+                    for c in [c for _, c in abi.params_of(sg)] + [abi.ret_class(sg)]:
+                        pn_ = abi2.probe_name(c)
+                        if pn_ and '{anon}' not in c and probe_req is not None:
+                            probe_req.add((nd['unit'], pn_))
+                for sg in cands:
+                    w_ = []
+                    p2 = abi2.compare(sg, ds, lay_of(nd['unit']), lay_of(nd['unit']), why=w_)
+                    if p2 is not None and p2.kind == 'same':
+                        return ADDR_SYM % a, 'abi2: same'
+                    if p2 is not None and p2.kind == 'bridge':
+                        bn = abi.bridge_name(a, 'vslot ' + un)
+                        code = abi2.emit(bn, ADDR_SYM % a, p2, 'vtable slot %s | def: %s' % (un, nd['msvc']))
+                        if code is not None:
+                            stubs.setdefault(bn, code)
+                            st['vslot-abi2-bridge'] += 1
+                            return bn, 'abi2 bridge (%s)' % ','.join(p2.classes or ['moves'])
+                        w_.append('bridge frame over 4 KiB')
+                    elif p2 is not None:
+                        w_.append(p2.kind + (' (' + ','.join(p2.classes + p2.notes) + ')' if p2.classes or p2.notes
+                                             else ''))
+                    why2.extend(w for w in w_ if w not in why2)
+            return None, 'abi: ' + how + ('; abi2: ' + '; '.join(why2) if why2 else '')
         return ADDR_SYM % a, how
 
     target_for = slotfill2.secondary_entry(target_for, native, ADDR_SYM, MSVC_ENTRY_SYM, st)   # S2c-vt2
@@ -3120,22 +3514,41 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             if un in hn:
                 st['hint_symbols'] += 1
                 a = next(iter(addrs)) if how else None
+                final = hs[un]   # the address the symbol ends at: the exe's when it is rebound, else the name's own
                 if a is None:
                     st['hint_kept_' + why.split(' (')[0].replace(' ', '_').replace('\'', '')] += 1
-                    continue
-                if a == hs[un]:
+                elif a == hs[un]:
                     st['hint_agrees'] += 1
-                    continue
-                tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]], 0, uvar)
-                if not tgt:
-                    st['hint_kept_exe_function_not_bindable'] += 1
-                    continue
-                changed.setdefault(u, {})[un] = tgt
-                addr_of[(u.source, un)] = a
-                rebound.add((u.source, un))
-                st['hint_rebound'] += 1
-                rows.append((os.path.basename(u.obj), u.source, un, '%08x' % a, tgt, 'exe vftable over the name\'s address '
-                             '%08x' % hs[un], why, ' '.join('%s+%d:%d' % (x[0], x[1], x[2]) for x in us)))
+                else:
+                    tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]], 0, uvar)
+                    if not tgt:
+                        st['hint_kept_exe_function_not_bindable'] += 1
+                    else:
+                        changed.setdefault(u, {})[un] = tgt
+                        addr_of[(u.source, un)] = a
+                        rebound.add((u.source, un))
+                        final = a
+                        st['hint_rebound'] += 1
+                        rows.append((os.path.basename(u.obj), u.source, un, '%08x' % a, tgt, 'exe vftable over the '
+                                     'name\'s address %08x' % hs[un], why, ' '.join('%s+%d:%d' % (x[0], x[1], x[2])
+                                                                                  for x in us)))
+                for x in us if overrides is not None else ():
+                    # W32: one symbol serves the vtables of a class and of the classes derived from it, whose
+                    # overrides the decomp does not declare (NiTexture::Clone is NiObject's name in the shell's
+                    # vtable); the symbol ends at one address, a vtable whose exe vftables hold another function in
+                    # that slot gets its own word in the copy, as for a chint use or a trap-filled symbol
+                    b_ = next(iter(x[4])) if len(x[4]) == 1 else None
+                    if b_ is None or b_ == final:
+                        continue
+                    t2, why2 = target_for(un, b_, [ott_of(x[0], x[1])], 0, x[6])
+                    if not t2:
+                        st['hint_slot_kept_exe_function_not_bindable'] += 1
+                        continue
+                    overrides[(u.obj, x[0], x[1] // 4 + x[2])] = t2
+                    st['hint_slot_over'] += 1
+                    rows.append((os.path.basename(u.obj), u.source, un, '%08x' % b_, t2,
+                                 'per slot (exe vftable; the name ends at %08x)' % final, why2,
+                                 '%s+%d:%d' % (x[0], x[1], x[2])))
                 continue
             if how:
                 a = next(iter(addrs))
@@ -3182,6 +3595,12 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             for x in us or [(None, 0, -1, -1, set(), False, None)]:
                 gaps.append((os.path.basename(u.obj), u.source, un, x[0] or '', str(x[2]), str(x[3]),
                              ' '.join('%08x' % b for b in sorted(x[4])), why))
+    # W28 (top-down 38, 42-43, 49-50, 98-99, 107): a synthesized body object of the host (`<host>#bodies<n>`: the
+    # `_ZThn` adjustor thunks bodies.py emits) calls the slot function by name, and no vtable of that object names it, so
+    # the fill above never saw it: the name stayed undefined (a trap) while the host's vtables got the exe's function.
+    # The thunk adjusts `this` and calls the same function the slot holds: it takes the host's binding.
+    st['bodies_slot_bound'] += bodies_slot_renames(have, changed, addr_of, per_obj, rebound,
+                                                   lambda u: [x.name for x in elfsyms.symbols(u.obj) if x.shndx == 0])
     # apply the renames: the .redefine files and refs.tsv rows of the objects that changed
     bound_refs = bound_refs_x = 0
     by_src = {u.source: m for u, m in changed.items()}
@@ -3324,15 +3743,37 @@ ITANIUM_MEMBER = re.compile(r'^_ZN(\d+)')
 
 
 def itanium_member(sym):
-    """The unqualified member name of a plain `_ZN<len><Class><len><member>...` symbol, else None."""
-    m = ITANIUM_MEMBER.match(sym or '')
+    """The unqualified member name of a plain `_ZN[K]<len><Class>...<len><member>...` symbol (its last name component of
+    the nested name, template arguments skipped), else None."""
+    m = re.match(r'_ZNK?', sym or '')
     if not m:
         return None
-    i = m.end() + int(m.group(1))
-    m2 = re.compile(r'(\d+)').match(sym, i)
-    if not m2:
-        return None
-    return sym[m2.end():m2.end() + int(m2.group(1))]
+    i, last, depth = m.end(), None, 0
+    while i < len(sym):
+        c = sym[i]
+        if c.isdigit():
+            j = i
+            while j < len(sym) and sym[j].isdigit():
+                j += 1
+            n = int(sym[i:j])
+            if j + n > len(sym):
+                return last
+            if depth == 0:
+                last = sym[j:j + n]
+            i = j + n
+        elif c == 'I':
+            depth += 1
+            i += 1
+        elif c == 'E':
+            if depth == 0:
+                break
+            depth -= 1
+            i += 1
+        elif depth == 0:
+            break   # the parameter encoding (or a ctor / dtor code) after the nested name
+        else:
+            i += 1
+    return last
 
 
 def load_d22_list(top):
@@ -3358,24 +3799,83 @@ def load_d22_list(top):
     return got, n
 
 
-def d26_minus_one_reason(z, v, raw_names, d, listed, called):
-    """Why the table z (exe vftable v, slot symbols raw_names, destructor pair position d) is a minus-one table though
-    it holds no D1/D0 pair, or None:
-      'd22-list'             v is a vftable of a class in S1's D22 list (load_d22_list), and no code names slot 0
-                             (D22-USED leaves the placeholder, and its callers number the slots as the exe does);
-    A table with a pair is minus-one already; one with no evidence stays in the exe's order, which is what callers
-    compiled against a dtor-less declaration use. called: symbols referenced from code (not vtables) by any object."""
+def load_d22_applied(tree):
+    """The exe vftables of the classes prepare's D22 actually converted: build/d22_applied.tsv of the prepared tree
+    (S1-rules' POST hook; columns file, class, member, kind, vftables). Rows of kind `listed` carry the vftables; a
+    call-only row names none. Empty without the file."""
+    got = set()
+    p = os.path.join(tree or '', 'build', 'd22_applied.tsv')
+    if not tree or not os.path.exists(p):
+        return got
+    for line in open(p, encoding='utf-8', errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if len(f) < 5 or line.startswith('#') or f[0] == 'file':
+            continue
+        for w in re.split(r'[ ,]+', f[4].strip()):
+            if re.fullmatch(r'(?:0x)?[0-9a-fA-F]{6,8}', w):
+                got.add(int(w, 16))
+    return got
+
+
+# the reasons a pair-less table stays in the exe's slot order (out/exe_order_classes.tsv); every other reason is minus-one
+EXE_ORDER_REASONS = ('com', 'd22-used', 'defined-slot0', 'exe-order-no-evidence', 'd26-slot0-not-a-destructor',
+                     'multi-vtable')
+COM_SLOT = re.compile(r'(?:QueryInterface|AddRef|Release)')
+COM_CLASS = re.compile(r'^_ZTV(?:\d+)?I(?:Unknown|D3D\w*|Direct\w*|DXGI\w*|XAudio\w*|MM\w*|Dispatch)')
+
+
+def is_com(z, raw_names):
+    """A COM / IUnknown interface: an `IUnknown`-family class name, or QueryInterface / AddRef / Release among the first
+    three slots (their callers number the slots as the exe does: slot 0 is not a destructor)."""
+    if COM_CLASS.match(z or ''):
+        return True
+    for nm in (raw_names or ())[:3]:
+        mem = itanium_member(nm)
+        if mem and COM_SLOT.fullmatch(mem):
+            return True
+    return False
+
+
+def d26_classify(z, v, raw_names, d, listed, called, defined=(), slot0_deldtor=False):
+    """Why the table z (exe vftable v, slot symbols raw_names, destructor pair position d) is minus-one or stays in the
+    exe's order, though it holds no D1/D0 pair, as (reason). D26 (docs/ARCHITECTURE.md): natively every polymorphic object
+    is dispatched minus-one; D26 (b) gives every call-only declaration's slot-0 placeholder a `virtual ~X()`, so its
+    callers number the slots minus-one whichever vftable they reach (S1 / S2 contract of 2026-11-08: every pair-less table
+    is minus-one but those whose slot 0 code names or defines). Minus-one reasons:
+      'd22-list'      v is a vftable of a class in S1's D22 list (d22.json) or of one prepare converted
+                      (build/d22_applied.tsv), whatever slot 0 is;
+      'd26-callonly'  slot 0 is a placeholder name (D26B_PLACEHOLDER) no body defines;
+      'd26-undefined' slot 0 has no body in any object (undefined, a trap or placeholder under any name);
+      'd26-defined-deldtor' slot 0 is a defined native function and exe slot 0 is a deleting destructor
+                      (slot0_deldtor: exevft.deleting_dtor, the exe-verified rule of D26; orchestrator 2026-11-08 11:49):
+                      D1 / D0 become the flags stubs into the named function (vmo_dtor_slots). FNVNX_D26DS=0 opts out.
+    Exe-order reasons (EXE_ORDER_REASONS):
+      'com'           a COM interface;
+      'd22-used'      some code names slot 0 (the callers number the slots as the exe does);
+      'defined-slot0' slot 0 is a defined native function (BSNiAllocator::Destroy) that is no deleting destructor in the
+                      exe, and v has no list evidence.
+    None: the table has a pair (d). called / defined: slot-0 symbols code references / a .text body defines."""
     if d is not None:
         return None
     s0 = raw_names[0] if raw_names else None
+    if is_com(z, raw_names):
+        return 'com'
     if s0 and s0 in (called or ()):
-        return None
+        return 'd22-used'
     if v in listed:
         return 'd22-list'
-    # A call-only placeholder name alone is no evidence: prepare's D22 / D26 (b) converts only the classes of S1's
-    # list (FNVNX_RECON d22.json; without it D22 does nothing), so an unlisted placeholder class's callers number
-    # the slots as the exe does. Shifting its table would break them.
-    return None
+    if s0 and s0 in (defined or ()):
+        if slot0_deldtor and os.environ.get('FNVNX_D26DS', '1') != '0':
+            return 'd26-defined-deldtor'
+        return 'defined-slot0'
+    mem = itanium_member(s0)
+    return 'd26-callonly' if mem and D26B_PLACEHOLDER.match(mem) else 'd26-undefined'
+
+
+def d26_minus_one_reason(z, v, raw_names, d, listed, called, defined=(), slot0_deldtor=False):
+    """d26_classify's reason when the table is a minus-one one, else None (a pair, or an exe-order reason)."""
+    r = d26_classify(z, v, raw_names, d, listed, called, defined, slot0_deldtor)
+    return None if r is None or r in EXE_ORDER_REASONS else r
 
 
 def code_refs(objpaths, cands):
@@ -3397,8 +3897,279 @@ def code_refs(objpaths, cands):
 
 
 
+A64_RET = bytes.fromhex('c0035fd6')   # `ret`
+
+
+def code_defs(objpaths, cands):
+    """Symbols of cands that some object defines with a body (a symbol in a .text section): the slot-0 functions code
+    defines directly. A placeholder no object defines, a trap, or an empty body (a bare `ret`) is not one."""
+    hit = set()
+    for p in objpaths:
+        try:
+            o = vtables.Obj(p)
+        except (OSError, ValueError):
+            continue
+        for nm in cands:
+            i = o.defs.get(nm)
+            if i is not None and o.secnames[o.syms[i][5]].startswith('.text'):
+                _, value, size, _, _, shndx = o.syms[i]
+                sec = o.secs[shndx]
+                if size == len(A64_RET) and o.data[sec[4] + value: sec[4] + value + size] == A64_RET:
+                    continue   # `virtual void v00() {}` of a stand-in class (NiAVObject in tes.cpp): a placeholder, not a body
+                hit.add(nm)
+    return hit
+
+
+def class_names(z):
+    """Simple class name of a `_ZTV<enc>` symbol (the last name component), else None."""
+    return itanium_member('_ZN' + z[5:] if z.startswith('_ZTVN') else '_ZN' + z[4:] + 'X')
+
+
+VTFILL_REAL = ('__fnvnx_vtrap_', '.reloc', '.section:')
+GCC_THUNK_DTOR = re.compile(r'^_ZThn\d+_.*D([01])Ev$')
+
+
+VTFILL_HOLD = set()   # {(vtable symbol, slot index)}: load_vtfill_holds
+VTFILL_ITANIUM = None   # the link's Itanium signature parser (main sets it); vtfill_hold_abi demangles alone else
+
+
+def vtfill_hold_abi(raw, x, native, msvc):
+    """R4/S1: how a call through a held slot (raw: the object's own Itanium slot symbol) reaches the exe override x's
+    native definition (its MSVC declaration): fnvlink.slot_abi's answer, or None when either signature is missing."""
+    nd = native.get(x)
+    if not raw or not raw.startswith('_Z') or not nd or not nd.get('msvc'):
+        return None
+    ds = msvc(nd['msvc'])
+    if ds is None or ds.kind != 'func' or ds.raw_params is None:
+        return None
+    if VTFILL_ITANIUM is not None:
+        isig = VTFILL_ITANIUM(raw)
+    else:
+        try:
+            dem = subprocess.run([CXXFILT, raw], capture_output=True, text=True).stdout.strip()
+        except OSError:
+            return None
+        isig = sigs.parse_itanium(raw, dem)
+    if isig is None or isig.raw_params is None:
+        return None
+    return slot_abi(isig, ds)
+
+
+def load_vtfill_holds(top=None):
+    """R4's overrides.tsv (fnvnx-vtbind-override/1, fnv-nx-build recon/vtbind) rows whose abi column starts with
+    `abi-check`: {(table, slot)} VTFILL keeps as compiled unless slot_abi finds the call reaches the override
+    unchanged (vtfill_hold_abi). The other rows need nothing: VTFILL writes the exe
+    override's native in every slot it fills."""
+    top = top or os.environ.get('FNVNX_RECON')
+    out = set()
+    if not top or not os.path.isdir(top):
+        return out
+    for dp, _, fs in os.walk(top):
+        if 'overrides.tsv' not in fs:
+            continue
+        try:
+            lines = open(os.path.join(dp, 'overrides.tsv')).read().split('\n')
+        except OSError:
+            continue
+        if not lines or not lines[0].startswith('# fnvnx-vtbind-override/1'):
+            continue
+        for line in lines[1:]:
+            p = line.split('\t')
+            if len(p) >= 7 and not line.startswith('#') and p[6].startswith('abi-check'):
+                try:
+                    out.add((p[0], int(p[2])))
+                except ValueError:
+                    pass
+    return out
+
+
+def vtfill_block(expv, cur, z, base, off, native, providers, exe_path, msvc, bridges, traps, st, vtbind=None,
+                 raw=None):
+    """VTFILL's words of one vtable of a group (classlayout.expected's list expv) -> [native symbol]. base: the word
+    index of the vtable's address point in the group (2 for the primary), for the trap reports. cur: the vtable's
+    words as the object has them (renamed); raw: the same words before resolve's renames (the Itanium slot symbols
+    vtfill_hold_abi compares). off (VTFILL2): the COL offset of a secondary exe vftable, else None.
+    D1 / D0 at a ('dtor', a) pair: the primary's vmo_dtor_slots (uncompiled ??_G included, W45); in a secondary
+    vtable a GCC this-adjusting `_ZThn<off>_...D1Ev` / `D0Ev` pair the object already has there stays, else the exe's
+    adjustor (`sub ecx, off; jmp ??_G`, vmo_adjustor) gets `__fnvnx_vadjd_<a>_<0|1>` stubs, the same this-adjustment
+    in front of the ??_G's pair (as minus_one_copies). Every other slot: exe_slot_target (off: an adjustor thunk of
+    exactly off becomes `__fnvnx_vadj_<a>`), and in a secondary vtable an address MSVC compiled with `this` at that
+    base (the address map's msvc_entry, d = off) binds to `__fnvnx_msvc_<a>`, the alias of GCC's `_ZThn` thunk
+    (slotfill2.secondary_entry's rule). Where that is only a trap, R4's binding (vtbind: {exe address: (kind, symbol,
+    target, n)}, load_vtbind) names the slot's native or adjustor; else a real word cur has at the index stays."""
+    msvc = msvc or (lambda n_: None)
+    sfx = '2' if off else ''
+    fill, i = [], 0
+    while i < len(expv):
+        x = expv[i]
+        if isinstance(x, tuple):
+            pair = None
+            if off:
+                c0, c1 = (cur[i] if i < len(cur) else None), (cur[i + 1] if i + 1 < len(cur) else None)
+                m0, m1 = GCC_THUNK_DTOR.match(c0 or ''), GCC_THUNK_DTOR.match(c1 or '')
+                if m0 and m1 and m0.group(1) == '1' and m1.group(1) == '0':
+                    pair = (c0, c1)
+                    st['vtfill2-dtor-gcc-thunks'] += 1
+                if pair is None and exe_path:
+                    adj = vmo_adjustor(x[1], off, native, exe_path, plain=False)
+                    inner = vmo_dtor_slots(adj[1], native, msvc, bridges, traps, st, (z, base + i), exe_path,
+                                           uncompiled=True, providers=providers) if adj else None
+                    if inner:
+                        for fl, w_ in enumerate(inner):
+                            sn = VADJD_SYM % (x[1], fl)
+                            bridges.setdefault(sn, emit_adj_stub(sn, w_, adj[0]))
+                        pair = (VADJD_SYM % (x[1], 0), VADJD_SYM % (x[1], 1))
+                        st['vtfill2-dtor-adjustor'] += 1
+                if pair is None and x[1] in (providers or {}):   # _purecall: S4's provider, no this to adjust
+                    pair = vmo_dtor_slots(x[1], native, msvc, bridges, traps, st, (z, base + i), exe_path,
+                                          uncompiled=True, providers=providers)
+            else:
+                pair = vmo_dtor_slots(x[1], native, msvc, bridges, traps, st, (z, base + i), exe_path, uncompiled=True,
+                                      providers=providers)
+            if pair:
+                fill += list(pair)
+            else:
+                fill += [exe_slot_target(x[1], native, providers, exe_path, bridges, traps, st, (z, base + i),
+                                         off=off)] * 2
+                st['vtfill%s-dtor-no-stub' % sfx] += 1
+            i += 2
+            continue
+        t = exe_slot_target(x, native, providers, exe_path, bridges, traps, st, (z, base + i), off=off)
+        nd = native.get(x) if off else None
+        if nd and t == ADDR_SYM % x and nd.get('msvc_entry') and nd['msvc_entry'][1] == off:
+            t = MSVC_ENTRY_SYM % x
+            st['vtfill2-msvc-entry'] += 1
+        if t.startswith('__fnvnx_vtrap_') and x in (vtbind or {}):
+            kb, sb, tb, nb = vtbind[x]
+            kb = {'function': 'fn', 'adjthunk': 'adj', 'deldtor': 'fn'}.get(kb, kb)   # R4's two files
+            if kb == 'adj' and tb:
+                t = ADJ_SYM % x
+                bridges.setdefault(t, emit_adj_stub(t, tb, nb))
+                st['vtfill%s-vtbind-adj' % sfx] += 1
+            elif kb == 'fn' and sb:
+                t = sb
+                st['vtfill%s-vtbind-fn' % sfx] += 1
+        how = None
+        if (z, i) in VTFILL_HOLD and i < len(cur) and cur[i] and t != cur[i] and raw and i < len(raw) and \
+                os.environ.get('FNVNX_ABIREL', '1') != '0':
+            how = vtfill_hold_abi(raw[i], x, native, msvc)
+        if how in ('same', 'the slot passes more'):
+            # S1's rule (slot_abi): every argument the definition reads arrives where it reads it, in the same
+            # register file, so the exe's override is written (vtfill-abi-released)
+            st['vtfill%s-abi-released' % sfx] += 1
+        elif (z, i) in VTFILL_HOLD and i < len(cur) and cur[i] and t != cur[i]:
+            # R4 (recon/vtbind overrides.tsv, abi-check): the exe's derived override and the slot's declaration take
+            # other parameters; writing the override would pass the callers' arguments to the wrong shape, so the
+            # compiled word stays until the class is declared right (listed: vtfill-abi-hold)
+            t = cur[i]
+            st['vtfill%s-abi-hold' % sfx] += 1
+        elif t.startswith('__fnvnx_vtrap_') and i < len(cur) and cur[i] and not cur[i].startswith(VTFILL_REAL):
+            t = cur[i]
+            st['vtfill%s-kept' % sfx] += 1
+        elif t.startswith('__fnvnx_vtrap_'):
+            st['vtfill%s-trap' % sfx] += 1
+        fill.append(t)
+        i += 1
+    return fill
+
+
+def vtfill2_group(z, path, vs, ents, names, pts, n, fill, ov, xs, o, vmap, exev, lay, native, providers, exe_path,
+                  msvc, bridges, traps, st, out, have, vtbind=None):
+    """VTFILL2 (W46): the words of a group with secondary bases, every vtable transform(its exe vftable). fill: the
+    primary's VTFILL words (vtfill_block). Each secondary vtable (address point ap, offset-to-top -d) whose V rows
+    (vmap: this group's object, ap) name agreeing RTTI exe vftables at COL offset d with a classlayout row gets
+    vtfill_block of that row (off = d); without a V row (a displaced copy), the one exe vftable of the primary's RTTI
+    class at COL offset d stands for it (vtfill2-secondary-by-offset); a vtable without either keeps the object's
+    words (with exe_vtable_copies' per-use words ov / xs). Offset-to-top and typeinfo words stay. Lengths: a vtable
+    whose exe list is shorter keeps its remaining native words; a longer last vtable grows at the group's end; a
+    longer primary or secondary before the last grows in place, every later address point moving down
+    (slotfill2.shift_steps: one (from, delta) step per vtable that grows, vtshift.tsv for apply's patches), or, when
+    an object referencing the group cannot be patched, every such vtable is cut at its native length
+    (vtfill2-primary-short / vtfill2-secondary-short). -> (word lines, shift steps or None, secondary vtables
+    filled), or None to leave the group to the builder (a kept word that is a relocation or a local symbol)."""
+    wn = list(names)
+    for i, t in ov.items():
+        wn[i] = t
+    for i, a_ in xs.items():
+        wn[i] = exe_slot_target(a_, native, providers, exe_path, bridges, traps, st, (z, i), off=None)
+    keep = set(range(len(ents)))
+    for k in range(min(n, len(fill))):
+        wn[2 + k] = fill[k]
+        keep.discard(2 + k)
+    inserts = [(8 + 4 * n, fill[n:], 'primary')] if len(fill) > n else []   # (group byte offset, words, which)
+    tail_extra = []
+    nsec = 0
+    last_ap = pts[-1][0]
+    for ap, ott in pts[1:]:
+        ns = vtables.slots_at(ents, ap)
+        vs2 = sorted(v for v, (z_, ap_, path_, note_) in vmap.items()
+                     if z_ == z and ap_ == ap and path_ == path and v in exev and exev[v].td and v in lay)
+        if not vs2:   # no V row (a displaced copy): the class's one exe vftable at this COL offset
+            tds = {exev[v].td for v in vs if v in exev}
+            vs2 = [v for v, e in exev.items() if e.td and e.td in tds and e.off == -ott and v in lay] \
+                if len(tds) == 1 and ott else []
+            if len(vs2) != 1:
+                st['vtfill2-secondary-no-exe'] += 1
+                continue
+            st['vtfill2-secondary-by-offset'] += 1
+        vv = max(vs2, key=lambda v: len(exev[v].slots))
+        sl = exev[vv].slots
+        dec = {(lay[v]['kind'], lay[v]['dtor_slot']) for v in vs2}
+        offs = {exev[v].off for v in vs2}
+        if any(exev[v].slots != sl[:len(exev[v].slots)] for v in vs2) or len(dec) != 1:
+            st['vtfill2-secondary-disagree'] += 1
+            continue
+        d_ = offs.pop() if len(offs) == 1 else None
+        if not d_ or -ott != d_:
+            st['vtfill2-secondary-offset-differs'] += 1
+            continue
+        import classlayout as _cl
+        kind_, k_ = next(iter(dec))
+        expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), _cl.real_slots(exe_path, vv, sl) if exe_path else sl)
+        b = ap // 4
+        f2 = vtfill_block(expv, wn[b:b + ns], z, b, d_, native, providers, exe_path, msvc, bridges, traps, st,
+                          vtbind, raw=[e.sym for e in ents[b:b + ns]])
+        for k in range(min(ns, len(f2))):
+            wn[b + k] = f2[k]
+            keep.discard(b + k)
+        if len(f2) > ns and ap == last_ap:
+            tail_extra = f2[ns:]
+            st['vtfill2-last-extended'] += 1
+        elif len(f2) > ns:   # before the next vtable's (offset-to-top, typeinfo) pair
+            inserts.append((ap + 4 * ns, f2[ns:], 'secondary'))
+        nsec += 1
+        st['vtfill2-secondary-' + kind_] += 1
+        st['vtfill2-secondary-slots'] += min(ns, len(f2)) + (len(tail_extra) if ap == last_ap else 0)
+    for i in sorted(keep):
+        e = ents[i]
+        if e.sym is None:
+            continue
+        if e.sym.startswith(('.reloc', '.section:')):
+            st['vtfill2-skipped-relocation'] += 1
+            return None
+        j = o.defs.get(e.sym)
+        if wn[i] == e.sym and j is not None and o.syms[j][4] == 0:
+            st['vtfill2-skipped-local-symbol'] += 1
+            return None
+    words = ['    .word %s' % ('%s%+d' % (w, e.addend) if (e.addend and i in keep) else w) if e.sym or i not in keep
+             else '    .word 0x%x' % e.word for i, (e, w) in enumerate(zip(ents, wn))]
+    words += ['    .word %s' % w for w in tail_extra]
+    shift = None
+    if inserts:
+        plan = [(at, 4 * len(ws)) for at, ws, _ in inserts]
+        shift = slotfill2.shift_steps(z, plan, out, have, st)
+        for _, ws, which in inserts:
+            st['vtfill2-%s-%s' % (which, 'shifted' if shift else 'short')] += 1
+            st['vtfill2-%s-%s-slots' % (which, 'shifted' if shift else 'short')] += len(ws)
+        if shift:
+            slotfill2.record_shift(z, plan, out)
+            for at, ws, _ in sorted(inserts, key=lambda x: x[0], reverse=True):
+                words[at // 4:at // 4] = ['    .word %s' % w for w in ws]
+    return words, shift, nsec
+
+
 def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
-                      providers=None, alt=None, msvc=None, listed=None, called_fn=None):
+                      providers=None, alt=None, msvc=None, listed=None, called_fn=None, unbound=None, defined_fn=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
     kept object has them (its slot symbols renamed as resolve renames them in that object), then exe slot j for every
     j past the native slots (the minus-one rule): `__fnv_<a>` where the address map has a plain native definition,
@@ -3409,16 +4180,31 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     move) whose words are plain or ABS32 relocations against global symbols. Callers reach the extra slots through
     their own class's declaration, as the image vftable word would take them. The same copy carries the per-slot
     targets of exe_slot_fill (slot_over: one symbol whose vtables in an object disagree on the exe address), for the
-    kept copy of the group (the first in link order), secondary vtables included. Returns the counts."""
+    kept copy of the group (the first in link order), secondary vtables included. A word that still names a symbol
+    the unit leaves undefined (unbound: extern-text addresses nothing defines, the exe slot fill left it: BaseFormComponent's
+    Init / CopyFromBase / CompareWithBase, whose recipe addresses lie inside FUN_00402d30) takes the exe slot's word
+    (exe_slot_target: S4's `_purecall` where the exe slot is the CRT's pure virtual, `__fnv_<a>` of a native
+    definition, else a trap stub reporting the exe address) when the exe vftables the group stands for agree on it
+    (`xt-slots`). Returns the counts."""
     st = collections.Counter()
     slotfill2.shift_reset(out)   # S2c-vt2: no shifted secondary groups yet (vtshift.tsv)
     by_obj = {u.obj: u for u in have}
     want = collections.defaultdict(list)    # (z, path) -> [exe vftable]
+    vt_on = bool(exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0' and
+                 os.environ.get('FNVNX_VTFILL', '1') != '0' and os.environ.get('FNVNX_VTFILL2', '1') != '0')
+    vt_only, vt_main = set(), set()   # (z, path) of a `secondary ... at +0` V row / of a primary one
     for v, (z, ap, path, note) in vmap.items():
         # only vftables with RTTI: their end is the next COL pointer; a plain one (exevft.plain_vftables) may run on
         # into an unnamed neighbour, so it only fills slots the native vtable has (exe_slot_fill)
         if v in exev and exev[v].td and note.startswith('primary') and ap == 8:
             want[(z, path)].append(v)
+            vt_main.add((z, path))
+        elif v in exev and exev[v].td and exev[v].off == 0 and ap == 8 and vt_on:
+            # W46: the exe's primary vftable on the native group's primary vtable, which the V row calls `secondary
+            # {for X} at +0` (X is the native primary base: TESWorldSpace's _ZTV12FUN_00582e30, 0x0103195c). VTFILL
+            # only: the builder's other rules keep their tables (vt_only)
+            want[(z, path)].append(v)
+            vt_only.add((z, path))
     # the native vtables exe_pair displaced from a V row (the shell a unit's constructor stores: FUN_004de530 for
     # INIPrefSettingCollection, 0x01022744): objects built natively still carry them, so they get the exe's slots too
     for v, zs in (alt or {}).items():
@@ -3431,8 +4217,30 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     st['displaced-vtables-disagree'] += 1
                     continue
                 want[(z, path)].append(v)
+                vt_main.add((z, path))
                 st['displaced-vtables'] += 1
-    called = set()
+    # a group whose V rows are all secondary vtables of one RTTI class C (TESActorBase's FUN_005f75e0, AlchemyItem's
+    # FUN_00402d50: the primary's own V row names another native table): its primary stands for C's primary exe
+    # vftable too, so VTFILL decides and fills it (W46's 837 undecided slots on 4264bfd7). FNVNX_VTPRIM=0 turns it off.
+    if vt_on and os.environ.get('FNVNX_VTPRIM', '1') != '0':
+        sec_td = collections.defaultdict(set)
+        for v, (z, ap, path, note) in vmap.items():
+            if v in exev and exev[v].td and exev[v].off and ap != 8:
+                sec_td[(z, path)].add(exev[v].td)
+        prim_of = collections.defaultdict(list)
+        for v, e in exev.items():
+            if e.td and e.off == 0:
+                prim_of[e.td].append(v)
+        for key, tds in sec_td.items():
+            if key in want or len(tds) != 1:
+                continue
+            ps = prim_of.get(next(iter(tds)), [])
+            if len(ps) == 1:
+                want[key].append(ps[0])
+                vt_only.add(key)
+                st['vtfill-primary-by-class'] += 1
+    called, defined = set(), set()
+    exe_order = []   # (table, exe vftables, reason): the pair-less tables that stay in the exe's slot order
     if called_fn is not None:   # W30: slot 0 placeholders some code names (D22-USED): one pass over the objects
         c0 = set()
         for (z, path) in want:
@@ -3442,6 +4250,24 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 if len(e_) > 2 and e_[2].sym:
                     c0.add(e_[2].sym)
         called = called_fn(c0)
+        defined = defined_fn(c0) if defined_fn is not None else set()
+    fam = family_prefixes(want, by_obj, exev, exe_path) if exe_path else {}
+    # classlayout (orchestrator 2026-11-08 12:10): the exe's own decision per RTTI vftable, the one prepare reads too;
+    # the heuristics below (d26_classify, family_dtor_pos) remain only for tables it does not decide
+    vtbind = load_vtbind()   # R4's address -> native / adjustor binding for VTFILL's otherwise-trap slots
+    st['vtbind-rows'] = len(vtbind)
+    VTFILL_HOLD.clear()
+    VTFILL_HOLD.update(load_vtfill_holds())
+    if VTFILL_HOLD:
+        st['vtbind-hold-rows'] = len(VTFILL_HOLD)
+    lay = {}
+    if exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0':
+        import classlayout
+        lrows = classlayout.build(exe_path, exev)
+        lay = {r['vftable']: r for r in lrows}
+        if out and os.path.isdir(out):
+            classlayout.write_layout(lrows, os.path.join(out, 'classlayout.tsv'))
+        st['classlayout-rows'] = len(lrows)
     over = collections.defaultdict(dict)    # (z, kept path) -> {word index: target}
     for (path, z, i), t in (slot_over or {}).items():
         if rtti.where.get(z) and rtti.where[z][0].path == path:
@@ -3450,6 +4276,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
             st['per-slot-not-the-kept-copy'] += 1
     for key in over:
         want.setdefault(key, [])
+    vt_only -= vt_main | set(over)
+    if vt_only:
+        st['vtfill2-primary-at-0-rows'] = len(vt_only)
     rows = []
     objs = {}
     for (z, path), vs in sorted(want.items()):
@@ -3466,7 +4295,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         n = vtables.slots_at(ents, 8)
         ren = per_obj.get(u.source) or {}
         names = [ren.get(e.sym, e.sym) if e.sym else None for e in ents]
-        ov = over.get((z, path), {})
+        ov = dict(over.get((z, path), {}))
         se = names[2:2 + n]
         # the pair is looked for on the object's own symbols: after resolve's renames D1 and D0 can both be one
         # native body (FUN_00404da0 for ~SettingPointerMap), which hid the pair and lost exe slot 1 (S5 round 5)
@@ -3476,39 +4305,167 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         if any(exev[v].slots != slots[:len(exev[v].slots)] for v in vs):
             st['skipped-exe-vftables-disagree'] += 1
             slots = []
-        extend = len(slots) > nm
+        only_ = (z, path) in vt_only
+        extend = len(slots) > nm and not only_
         if extend:
             st['short'] += 1
         # `delete p` reaches Itanium slot 1: a table in the exe's slot order holds DeleteThis there (d0_slot_fix)
         d0w = d0_slot_fix(z, n, d, names[2:2 + n], slots, native, msvc or (lambda n_: None), bridges, traps, st,
-                          exe_path) if slots else None
+                          exe_path) if slots and not only_ else None
         if d0w:
             st['d0slot-candidates'] += 1
         # W30: a table without a pair that its callers number minus-one (d26_minus_one_reason) is rebuilt whole in D26's
         # layout: offset-to-top, typeinfo, D1, D0 (exe slot 0), then exe slot k at native k + 1
         m1 = None
-        if slots and len(pts) == 1 and d is None and os.environ.get('FNVNX_D26T', '1') != '0':
-            m1 = d26_minus_one_reason(z, max(vs), [e.sym for e in ents[2:2 + n]], d, listed or (), called)
+        dp = 0
+        cl_done = False
+        if slots and not only_ and len(pts) == 1 and d is None and lay and os.environ.get('FNVNX_D26T', '1') != '0':
+            dec = {(lay[v]['kind'], lay[v]['dtor_slot']) for v in vs if v in lay}
+            if len(dec) == 1:
+                kind_, k_ = dec.pop()
+                cl_done = True
+                raw_ = [e.sym for e in ents[2:2 + n]]
+                if kind_ == 'minus-one' and is_com(z, raw_):
+                    kind_ = 'com'   # IUnknown's slots by name (the hierarchy descriptor may not name IUnknown)
+                elif kind_ == 'minus-one' and 0 <= k_ < len(raw_) and raw_[k_] and raw_[k_] in (called or ()):
+                    kind_ = 'd22-used'   # code names the destructor slot: prepare keeps the declaration (D22-USED)
+                if kind_ == 'minus-one' and 0 <= k_ < len(slots):
+                    pair1 = vmo_dtor_slots(slots[k_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + k_),
+                                           exe_path, uncompiled=True, providers=providers)
+                    if pair1:
+                        m1, dp = 'classlayout', k_
+                        st['classlayout-minus-one'] += 1
+                        st['classlayout-minus-one-at-%d' % min(k_, 5)] += 1
+                    else:
+                        st['classlayout-no-dtor-stub'] += 1
+                        exe_order.append((z, vs, 'classlayout-no-dtor-stub', path))
+                else:
+                    st['classlayout-' + kind_] += 1
+                    exe_order.append((z, vs, 'classlayout-' + kind_, path))
+            elif dec:
+                st['classlayout-disagree'] += 1
+            else:
+                st['classlayout-fallback'] += 1
+        if cl_done:
+            pass
+        elif slots and not only_ and len(pts) == 1 and d is None and os.environ.get('FNVNX_D26T', '1') != '0':
+            s0n = ents[2].sym if n else None
+            dd = bool(exe_path and s0n and s0n in (defined or ()) and exevft.deleting_dtor(exe_path, slots[0]))
+            why = d26_classify(z, max(vs), [e.sym for e in ents[2:2 + n]], d, listed or (), called, defined, dd)
+            m1 = None if why in EXE_ORDER_REASONS else why
             if not m1:
+                st['exe-order-' + why] += 1
                 st['exe-order-no-evidence'] += 1
                 st['exe-order-no-evidence-BSNiAllocator'] += 'BSNiAllocator' in z
+                exe_order.append((z, vs, why, path))
             if m1:
-                pair1 = vmo_dtor_slots(slots[0], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2), exe_path)
+                pair1 = vmo_dtor_slots(slots[0], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2), exe_path,
+                                       uncompiled=True, providers=providers)
                 if pair1 is None:
                     st['d26-slot0-not-a-destructor'] += 1
+                    exe_order.append((z, vs, 'd26-slot0-not-a-destructor', path))
                     m1 = None
+        elif slots and not only_ and len(pts) != 1 and d is None:
+            exe_order.append((z, vs, 'multi-vtable', path))
+            st['exe-order-multi-vtable'] += 1
+        # V2 (seams triage, link 5fd996a4): the Actor / Projectile / TESForm family has four placeholder slots before the
+        # deleting destructor (exe slot 4), so a pair-less table of it is minus-one from slot 4 (family_dtor_pos)
+        if not cl_done and slots and not only_ and len(pts) == 1 and d is None and not m1 and fam and os.environ.get('FNVNX_D26F', '1') != '0' \
+                and os.environ.get('FNVNX_D26T', '1') != '0' and not is_com(z, [e.sym for e in ents[2:2 + n]]):
+            dp_ = family_dtor_pos(slots, fam)
+            pair1 = vmo_dtor_slots(slots[dp_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + dp_),
+                                   exe_path, uncompiled=True, providers=providers) if dp_ else None
+            if pair1:
+                m1, dp = 'd26-family-dtor', dp_
+                gone = [x for x in exe_order if x[0] == z]
+                for x in gone:
+                    st['exe-order-' + x[2]] -= 1
+                    if x[2] in EXE_ORDER_REASONS[:-1]:
+                        st['exe-order-no-evidence'] -= 1
+                        st['exe-order-no-evidence-BSNiAllocator'] -= 'BSNiAllocator' in z
+                exe_order[:] = [x for x in exe_order if x[0] != z]
+        xs = {}   # word index -> exe slot word, for the symbols the unit leaves undefined (see the docstring)
+        xt_ = (unbound or {}).get(u.source) or ()
+        for k_ in range(n if slots and xt_ else 0):
+            e_ = ents[2 + k_]
+            if e_.sym and e_.sym in xt_ and e_.sym not in ren and e_.sym.startswith('_ZN') and (2 + k_) not in ov \
+                    and sigs.itanium_variant(e_.sym) is None:
+                j_ = exevft.exe_slot_index(k_, d)
+                if j_ < len(slots):
+                    xs[2 + k_] = slots[j_]
         shift = slotfill2.shift_plan(z, pts, n, nm, slots, out, have, st) if extend and len(pts) != 1 else None
         if extend and len(pts) != 1 and not shift:   # S2c-vt2: shifted secondary groups (slotfill2.shift_plan)
             st['skipped-secondary-vtables'] += 1
             extend = False
-        if not extend and not ov and not d0w and not m1:
+        # VTFILL (orchestrator 2026-11-08 12:22): write the table as the gate expects it, transform(exe table) from
+        # classlayout's decision, slot by slot: D1 / D0 at the exe's deleting-destructor slot, exe_slot_target of every
+        # other exe slot (its native body, S4's _purecall, a flags / deleting stub); where that is only a trap and the
+        # native table has a real word at the same index, the native word stays (listed: vtfill-kept). Never over a
+        # strong (key function) definition. FNVNX_VTFILL=0 turns it off. A group with secondary bases is VTFILL2
+        # (vtfill2_group; FNVNX_VTFILL2=0 keeps the builder's result for it: vtfill-skipped-secondary).
+        if slots and lay and os.environ.get('FNVNX_VTFILL', '1') != '0':
+            dec_ = {(lay[v]['kind'], lay[v]['dtor_slot']) for v in vs if v in lay}
+            if len(dec_) == 1 and len(pts) != 1 and os.environ.get('FNVNX_VTFILL2', '1') == '0':
+                st['vtfill-skipped-secondary'] += 1
+            elif len(dec_) == 1:
+                kind_, k_ = next(iter(dec_))
+                raw_ = [e.sym for e in ents[2:2 + n]]
+                if kind_ == 'minus-one' and (is_com(z, raw_) or (0 <= k_ < len(raw_) and raw_[k_] and
+                                                                 raw_[k_] in (called or ()))):
+                    kind_ = 'exe-order'   # as prepare: COM by its slot names, a destructor slot named by code
+                if o.bind(z) != 'weak':
+                    st['vtfill-skipped-strong'] += 1
+                else:
+                    import classlayout as _cl
+                    vv_ = max(vs, key=lambda v: len(exev[v].slots))
+                    sl_ = _cl.real_slots(exe_path, vv_, slots) if exe_path else slots   # no words past the table
+                    expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), sl_)
+                    fill = vtfill_block(expv, names[2:2 + n], z, 2, None, native, providers, exe_path, msvc, bridges,
+                                        traps, st, vtbind, raw=[e.sym for e in ents[2:2 + n]])
+                    head_ = ['    .word 0x%x' % ents[0].word if not ents[0].sym else '    .word %s' % ents[0].sym,
+                             '    .word %s' % ents[1].sym if ents[1].sym else '    .word 0x%x' % ents[1].word]
+                    g2 = None
+                    if len(pts) != 1:
+                        g2 = vtfill2_group(z, path, vs, ents, names, pts, n, fill, ov, xs, o, vmap, exev, lay,
+                                           native, providers, exe_path, msvc, bridges, traps, st, out, have, vtbind)
+                    if len(pts) == 1 or g2 is not None:
+                        words_, shift2, nsec = (head_ + ['    .word %s' % w_ for w_ in fill], None, 0) if g2 is None \
+                            else g2
+                        lines = ['// %s from the exe vftable(s) %s: VTFILL%s, %s%s, %d slots (classlayout)' % (
+                                     z, ' '.join('%08x' % v for v in sorted(vs)), '2 (%d secondary)' % nsec if g2 else '',
+                                     kind_, ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill)),
+                                 '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3',
+                                 '    .globl %s' % z, '    .type %s, %%object' % z, '%s:' % z] + words_ + \
+                                ['    .size %s, .-%s' % (z, z), '    .text']
+                        bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
+                        st['vtfill-tables'] += 1
+                        st['vtfill-tables-' + kind_] += 1
+                        st['vtfill-slots'] += len(fill)
+                        if g2 is not None:
+                            st['vtfill2-tables'] += 1
+                        for v, (z_, ap_, path_, note_) in list(vmap.items()):
+                            if z_ == z:
+                                vmap[v] = (z_, slotfill2.shifted(ap_, shift2), VTEXT_OBJ,
+                                           note_ + ', VTFILL%s from the exe (%s)' % ('2' if g2 else '', kind_))
+                        rows.append((z, os.path.basename(path), str(n), str(max(0, len(fill) - n)),
+                                     ' '.join('%08x' % v for v in sorted(vs)), '0'))
+                        continue
+        if only_:   # W46: a table want holds for VTFILL only, which did not write it
+            st['vtfill2-only-not-written'] += 1
+            continue
+        if not extend and not ov and not d0w and not m1 and not xs:
             continue
         if o.bind(z) != 'weak':   # a key function's unit: its strong copy would be a second definition
             st['skipped-strong'] += 1
+            if m1:
+                exe_order.append((z, vs, 'skipped-strong', path))
             st['d0slot-skipped-strong'] += bool(d0w)
             continue
         for i, t in ov.items():
             names[i] = t
+        for i, a_ in xs.items():
+            names[i] = exe_slot_target(a_, native, providers, exe_path, bridges, traps, st, (z, i), off=None)
+            st['xt-slots'] += 1
         bad = None
         for e, nmz in zip(ents, names):
             if e.sym is None:
@@ -3522,15 +4479,20 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 break
         if bad:
             st['skipped-' + bad.replace(' ', '-')] += 1
+            if m1:
+                exe_order.append((z, vs, 'skipped-' + bad.replace(' ', '-'), path))
             st['d0slot-skipped'] += bool(d0w)
             continue
         words = ['    .word %s' % ('%s%+d' % (nmz, e.addend) if e.addend else nmz) if e.sym else
                  '    .word 0x%x' % e.word for e, nmz in zip(ents, names)]
         extra = []
         if m1:
-            words = words[:2] + ['    .word %s' % w_ for w_ in pair1] + \
+            words = words[:2] + \
+                    ['    .word %s' % exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (z, 2 + k))
+                     for k, a in enumerate(slots[:dp])] + \
+                    ['    .word %s' % w_ for w_ in pair1] + \
                     ['    .word %s' % exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (z, 3 + k))
-                     for k, a in enumerate(slots[1:], 1)]
+                     for k, a in enumerate(slots[dp + 1:], dp + 1)]
             extend, d0w, ov, shift = False, None, {}, None
             st['d26-minus-one'] += 1
             st['d26-minus-one-BSNiAllocator'] += 'BSNiAllocator' in z
@@ -3562,28 +4524,166 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 vmap[v] = (z_, slotfill2.shifted(ap_, shift), VTEXT_OBJ, note_ + (', extended from the exe (+%d slots)' % len(extra) if extra
                                                         else ', slots per use from the exe'))
         rows.append((z, os.path.basename(path), str(n), str(len(extra)), ' '.join('%08x' % v for v in sorted(vs)),
-                     str(len(ov))))
+                     str(len(ov) + len(xs))))
     with open(os.path.join(out, 'vtext.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#vtable\tobject the words came from\tnative slots\tslots added\texe vftables\tslots per use\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
+    write_exe_order(out, exe_order, exev, alt)
+    st['exe-order-tables'] = len({z for z, _, _, _ in exe_order})
     return st
+
+
+def write_exe_order(out, exe_order, exev, alt=None):
+    """out/exe_order_classes.tsv: the tables the link keeps in the exe's slot order (class, vftable, reason, native vtable
+    symbol), for S1's RAWVT1 (FNVNX_EXE_ORDER): its callers number the slots as the exe does. One row per simple class
+    name a native object uses for the table: the native vtable's class, the exe's RTTI class, and the classes of the
+    other native vtables paired with the same exe vftable (shells such as FUN_005e0830 for an INI collection)."""
+    rows = set()
+    for z, vs, why, _ in exe_order:
+        for v in vs:
+            names = [(class_names(z), z)]
+            e = exev.get(v)
+            if e is not None and e.td:
+                names.append((e.td[4:].rstrip('@').split('@')[0], z))
+            for z2, _ap, _p, _k in (alt or {}).get(v, ()):
+                names.append((class_names(z2), z2))
+            for cn, zz in names:
+                if cn:
+                    rows.add((cn, '%08x' % v, why, zz))
+    with open(os.path.join(out, 'exe_order_classes.tsv'), 'w', encoding='utf-8') as f:
+        f.write('#class\tvftable\treason\tnative vtable symbol\n')
+        for r in sorted(rows):
+            f.write('\t'.join(r) + '\n')
+
+
+def add_unit_shell_names(out, units_json, exe_path=None):
+    """Add to out/exe_order_classes.tsv the class names units.json gives the same exe vftables (S1-rules' RAWVT1
+    matches the class that owns the member doing `(*(void***)this)[k]`, often a decomp shell): a `??_7<C>...@@6B@`
+    symbol at a listed vftable, and a constructor `??0<C>@...` whose x86 code stores a listed vftable last
+    (exevft.ctor_vftable). Each row keeps the vftable's reason; the native vtable column says `units.json`.
+    Returns the number of rows added."""
+    p = os.path.join(out, 'exe_order_classes.tsv')
+    if not units_json or not os.path.exists(p) or not os.path.exists(units_json):
+        return 0
+    rows, reason = set(), {}
+    for line in open(p, encoding='utf-8'):
+        if line.startswith('#'):
+            continue
+        f = line.rstrip('\n').split('\t')
+        if len(f) >= 4:
+            rows.add(tuple(f[:4]))
+            reason.setdefault(int(f[1], 16), f[2])
+    if not reason:
+        return 0
+    data = json.load(open(units_json))
+    add = set()
+    for u in data.get('units', ()):
+        for n, a in (u.get('symbols') or {}).items():
+            m = re.match(r'\?\?_7([A-Za-z_]\w*)@', n)
+            v = int(a, 16) if isinstance(a, str) else None
+            if m and v in reason:
+                add.add((m.group(1), '%08x' % v, reason[v], 'units.json'))
+        for fn in (u.get('functions') or ()):
+            m = re.match(r'\?\?0([A-Za-z_]\w*)@', fn.get('symbol', ''))
+            if not m or not exe_path:
+                continue
+            try:
+                v = exevft.ctor_vftable(exe_path, int(fn['address'], 16), set(reason))
+            except Exception:
+                v = None
+            if v in reason:
+                add.add((m.group(1), '%08x' % v, reason[v], 'units.json'))
+    new = add - rows
+    if new:
+        with open(p, 'w', encoding='utf-8') as f:
+            f.write('#class\tvftable\treason\tnative vtable symbol\n')
+            for r in sorted(rows | new):
+                f.write('\t'.join(r) + '\n')
+    return len(new)
 
 
 VMO_SYM = '__fnvnx_vmo_%08x'   # D26 (c): minus-one native copy of an image vftable that stays at its image address
 
 
-def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None):
+def family_prefixes(want, by_obj, exev, exe_path):
+    """{exe slots before the destructor: its slot} of the tables that already have a D1/D0 pair at a slot past 0 whose
+    exe slot is a deleting destructor: the evidence that a family's placeholders come before its destructor (TESForm,
+    Actor, Projectile: exe slots 0..3 = nullsub, nullsub, ..., destructor at 4). Other tables of the same exe prefix
+    are minus-one from that slot (family_dtor_pos)."""
+    fam = {}
+    objs = {}
+    for (z, path), vs in want.items():
+        if path not in by_obj:
+            continue
+        try:
+            if path not in objs:
+                if len(objs) > 64:
+                    objs.clear()
+                objs[path] = vtables.Obj(path)
+            o = objs[path]
+            if z not in o.defs:
+                continue
+            ents = o.ents(z)
+            n = vtables.slots_at(ents, 8)
+            d = exevft.dtor_pos([e.sym for e in ents[2:2 + n]], [e.word for e in ents[2:2 + n]])
+        except (OSError, ValueError):
+            continue
+        if not d:
+            continue
+        for v in vs:
+            sl = exev[v].slots if v in exev else None
+            if sl is not None and len(sl) > d and exevft.deleting_dtor(exe_path, sl[d]):
+                fam[tuple(sl[:d])] = d
+    return fam
+
+
+def family_dtor_pos(slots, fam):
+    """The destructor slot (> 0) of a pair-less table whose exe slots before it are a family's placeholders, else None."""
+    for pre, d in fam.items():
+        if len(slots) > d and tuple(slots[:d]) == pre:
+            return d
+    return None
+
+
+def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None, uncompiled=False, providers=None):
     """D1 and D0 (native slots 0 and 1) for exe slot 0 at a0 when it is the deleting destructor: the address map's
     Itanium pair (kind G), or flags stubs into a decomp definition of the `??_G` (its declaration takes the flags, its
     MSVC name is `??_G`/`??_E`, or the exe's code has the shape: exevft.deleting_dtor); None when exe slot 0 is not
-    a destructor."""
+    a destructor. uncompiled (W45, the W30 / family rebuilds): a `??_G` no unit compiles (no native definition) whose
+    exe code has the exact `??_G` shape (exevft.deleting_dtor_callee: call ~C, flags test, call delete, ret 4; the
+    looser exevft.deleting_dtor can match a later function's `ret 4`) still gives the pair, as two traps reporting
+    the exe address, so the
+    table is rebuilt minus-one and exe slot k lands at k + 1 for its minus-one callers (FUN_00aa7400's 0x00aa77e0:
+    the exe-order table ran Deallocate where MemoryManager FUN_00aa3e40 calls Allocate). FNVNX_D26U=0 turns it off."""
+    if native.get(a0) is None and providers and a0 in providers:
+        # an abstract class's destructor slot holds the CRT's pure virtual (_purecall, S4's provider): D1 and D0 are
+        # that provider, not traps (R2, vtgate 4264bfd7: AGListItem 0/1, AA74C0Base 1, the vmo copies 0106c934 ...)
+        st['slot0-dtor-provider'] += 1
+        return providers[a0][0], providers[a0][0]
     nd = native.get(a0)
     if nd is None and a0 in HK_SDD:   # W22: the Havok sized-free ??_G's stand-in, through the flags stubs
         for fl in (0, 1):
             bridges.setdefault(FLAG_SYM % (a0, fl), emit_flag_stub(FLAG_SYM % (a0, fl), ADDR_SYM % a0, fl))
         st['slot0-hk-sdd'] += 1
         return FLAG_SYM % (a0, 0), FLAG_SYM % (a0, 1)
+    if nd is None and uncompiled and exe_path and os.environ.get('FNVNX_D26U', '1') != '0' and \
+            exevft.deleting_dtor_callee(exe_path, a0) is not None:
+        x_ = exevft.deleting_dtor_callee(exe_path, a0)
+        if native.get(x_) is not None and os.environ.get('FNVNX_GSYN', '1') != '0':
+            # W48's 32 bodiless ??_G (bhkFixedConstraint 00cc7e50, ExtraEditorID 0041c660): the ??_G is MSVC's plain
+            # `call X; test flags; delete`, and X (the destructor) has a native: D1 = X, D0 = X then operator delete
+            t = GSYN_SYM % a0
+            bridges.setdefault(t, emit_gsyn_stub(t, ADDR_SYM % x_))
+            st['slot0-dtor-synth'] += 1
+            return ADDR_SYM % x_, t
+        pair = []
+        for v_ in ('D1', 'D0'):
+            t = TRAP_SYM % int(hashlib.sha1((XTRAP % a0 + ' ' + v_).encode()).hexdigest()[:8], 16)
+            traps.setdefault(t, (XTRAP % a0 + ' (%s of a deleting destructor not compiled)' % v_, where))
+            pair.append(t)
+        st['slot0-dtor-not-compiled'] += 1
+        return tuple(pair)
     if nd is None:
         return None
     var = sigs.itanium_variant(nd['sym'].name)
@@ -3642,16 +4742,20 @@ def vmo_candidates(exev, vmap, hand, used_addr, every=True):
     return vmo_c, st
 
 
-def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, traps, out):
+def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, traps, out, lay=None):
     """D26 (c): every image vftable whose data symbol would stay at the image address (stored by hand into an
     object's vptr, no native vtable mapped: hand_vptrs 'image') gets a strong native copy `__fnvnx_vmo_<V>` in
     D22's minus-one order: offset-to-top (from the exe's COL, else the store's offset), typeinfo 0, D1/D0 for the
     exe's deleting destructor at slot 0 (vmo_dtor_slots; a trap for D1 and exe slot 0 at slot 1 when slot 0 is
     not a destructor), then exe slot k at native slot k + 1 (exe_slot_target). resolve binds `__fnv_<V>` to the
     copy's address point, so every hand store, comparison and read of V becomes native. cands: {V: offset-to-top}.
-    Returns ({V: copy symbol}, counts); out/vmo.tsv lists every copy."""
+    Returns ({V: copy symbol}, counts); out/vmo.tsv lists every copy.
+    lay (W46, classlayout rows {V: row}): a V whose row is exe-order / com, or minus-one at k > 0, is copied as
+    transform(exe) instead (vtfill_block: exe slot i at native i, D1 / D0 at k; hkThreadMemory 0x010cacd0, exe-order:
+    the minus-one copy moved its slot 3). FNVNX_VMOCL=0 turns it off."""
     st = collections.Counter()
     got, rows = {}, []
+    vtb_ = None   # R4's binding file, read once when a copy follows classlayout
     for v in sorted(cands):
         e = exev.get(v)
         if e is None or not e.slots:
@@ -3660,29 +4764,44 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
         name = VMO_SYM % v
         slots = list(e.slots)
         n_trap = st['slots-trap']
-        pair = vmo_dtor_slots(slots[0], native, msvc, bridges, traps, st, (name, 2), exe_path)
+        row = (lay or {}).get(v) if os.environ.get('FNVNX_VMOCL', '1') != '0' else None
+        if row is not None and (row['kind'] in ('exe-order', 'com') or
+                                (row['kind'] == 'minus-one' and 0 < row['dtor_slot'] < len(slots))):
+            import classlayout as _cl
+            if vtb_ is None:
+                vtb_ = load_vtbind()
+            words = vtfill_block(_cl.expected(row, slots), [], name, 2, e.off if e.td and e.off else None, native,
+                                 providers, exe_path, msvc, bridges, traps, st, vtb_)
+            st['classlayout-' + row['kind']] += 1
+        else:
+            words = None
+        pair = None if words is not None else \
+            vmo_dtor_slots(slots[0], native, msvc, bridges, traps, st, (name, 2), exe_path, providers=providers)
         adj0 = None
-        if pair is None and e.td and e.off and exe_path:
+        if words is None and pair is None and e.td and e.off and exe_path:
             adj0 = vmo_adjustor(slots[0], e.off, native, exe_path, plain=False)
         if adj0 is not None:   # a secondary vftable's destructor slot: `sub ecx, off; jmp ??_G` into the primary's
-            inner = vmo_dtor_slots(adj0[1], native, msvc, bridges, traps, st, (name, 2), exe_path)
+            inner = vmo_dtor_slots(adj0[1], native, msvc, bridges, traps, st, (name, 2), exe_path, providers=providers)
             if inner is not None:
                 for fl, w_ in enumerate(inner):
                     sn = VADJD_SYM % (slots[0], fl)
                     bridges.setdefault(sn, emit_adj_stub(sn, w_, adj0[0]))
                 pair = (VADJD_SYM % (slots[0], 0), VADJD_SYM % (slots[0], 1))
                 st['slot0-adjustor-dtor'] += 1
-        if pair is None:
+        if words is None and pair is None:
             d1 = TRAP_SYM % int(hashlib.sha1((XTRAP % slots[0] + ' D1').encode()).hexdigest()[:8], 16)
             traps.setdefault(d1, (XTRAP % slots[0] + ' (D1 at an exe slot 0 that is not a destructor)', (name, 2)))
             st['slot0-not-a-destructor'] += 1
             pair = (d1, exe_slot_target(slots[0], native, providers, exe_path, bridges, traps, st, (name, 3),
                                         e.off if e.td else None))
-        words = list(pair) + [exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (name, 3 + k),
-                                                        e.off if e.td else None)
-                              for k, a in enumerate(slots[1:], 1)]
+        if words is None:
+            words = list(pair) + [exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (name, 3 + k),
+                                                  e.off if e.td else None)
+                                  for k, a in enumerate(slots[1:], 1)]
         ott = cands[v]
-        lines = ['// %s: exe vftable %08x in the minus-one order, %d exe slots (D26 c)' % (name, v, len(slots)),
+        lines = ['// %s: exe vftable %08x in the %s order, %d exe slots (D26 c)' % (
+                     name, v, 'classlayout %s' % row['kind'] if row is not None and pair is None else 'minus-one',
+                     len(slots)),
                  '    .section .data.rel.ro.fnvnx_vmo.%08x,"aw"' % v, '    .p2align 3', '    .globl %s' % name,
                  '    .hidden %s' % name, '    .type %s, %%object' % name, '%s:' % name,
                  '    .word 0x%x' % (ott & 0xffffffff), '    .word 0'] + ['    .word %s' % w for w in words] + \
@@ -3803,7 +4922,7 @@ def load_imports(imports_tsv, exports):
     if imports_tsv and os.path.exists(imports_tsv):
         for line in open(imports_tsv, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
-            if line.startswith('#') or len(f) < 3 or not re.match(r'^0x[0-9a-fA-F]+$', f[0]):
+            if line.startswith('#') or len(f) < 3 or not re.match(r'^0x[0-9a-fA-F]+$', f[0]) or not_iat_row(f):
                 continue
             sym = exports.get((f[1].lower(), f[2]))
             if sym:
@@ -3817,9 +4936,17 @@ def load_iat(imports_tsv):
     if imports_tsv and os.path.exists(imports_tsv):
         for line in open(imports_tsv, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
-            if not line.startswith('#') and len(f) >= 3 and re.match(r'^0x[0-9a-fA-F]+$', f[0]) and IDENT.match(f[2]):
+            if not line.startswith('#') and len(f) >= 3 and re.match(r'^0x[0-9a-fA-F]+$', f[0]) and IDENT.match(f[2]) \
+                    and not not_iat_row(f):
                 out[int(f[0], 16)] = (f[1].lower(), f[2])
     return out
+
+
+def not_iat_row(f):
+    """An imports.tsv row S4 keeps only to record a decomp mislabel: dll `(not an IAT slot)` (0x010c4cec, the
+    `__imp_` name the recipe put on slot 2 of the image vftable 0x010c4ce4). It is no IAT slot and no import, so the
+    reference goes on to vftable_import (the exe word at the slot decides), never to an import named after it."""
+    return f[1].strip().startswith('(')
 
 
 def has_branch(obj, sym):
@@ -4179,11 +5306,14 @@ def decomp_std(un, isig):
     return bool(first) and first.group(0) not in STD_IDS[0]
 
 
-def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
+def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None, uident=None):
     """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller).
     ident: {data identifier: image addresses} - the last resort for a data reference (S5): the same identifier in
     another scope (the decomp's per-function namespaces) or with another decorated type (an array declared where
-    MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise."""
+    MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise. uident: the same map
+    over the referencing unit's own symbols only: an identifier at several image addresses binds to the one of
+    them the unit itself names (`unit/ident`; W44: font.cpp's FontTextManager::pInstance, whose unit names only
+    `?pInstance@FontManager@@2PAV1@A` = 0x011f33f8 among 0x011ccb78 / 0x011d8ce8 / 0x011f33f8)."""
     if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)) and not decomp_std(un, isig):
         return 'runtime', None, None, None, None
     if isig.kind == 'special':
@@ -4219,6 +5349,9 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
             a_ = ident[isig.qual[-1]]
             if len(a_) == 1:
                 return 'addr', 'gref/ident', next(iter(a_)), None, None
+            own = (uident or {}).get(isig.qual[-1], set()) & a_
+            if len(own) == 1:
+                return 'addr', 'unit/ident', next(iter(own)), None, None
             return 'ambiguous', 'gref/ident', None, None, ' '.join('%08x' % x for x in sorted(a_))
         return 'unresolved', None, None, None, None
     addrs = sorted(hit)

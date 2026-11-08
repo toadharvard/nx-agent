@@ -375,16 +375,16 @@ def main():
             check('_Z8helper_cv' not in j.defs and any(s[0] == '_Z8helper_cv' and s[5] == 0 for s in j.syms),
                   'helper_c stays a reference in the emitted object')
         # KeyImp/KeyDel: GCC's own D0 (-fkeep-inline-functions; KeyDel's operator delete body inlined: the
-        # unsized ::operator delete it calls, never the global sized one); KeyOut (destructor defined in a unit
-        # that does not compile): the emulated D0 calls D1, bound by address, then the sized global delete
-        for c, dealloc in (('KeyImp', ('_ZdlPvm',)), ('KeyDel', ('_ZN6KeyDeldlEPv', '_ZdlPv')),
-                           ('KeyOut', ('_ZdlPvm',))):
+        # unsized ::operator delete it calls); every global delete is the unsized one (-fno-sized-deallocation, W41); KeyOut (destructor defined in a unit
+        # that does not compile): the emulated D0 calls D1, bound by address, then the unsized global delete
+        for c, dealloc in (('KeyImp', ('_ZdlPv',)), ('KeyDel', ('_ZN6KeyDeldlEPv', '_ZdlPv')),
+                           ('KeyOut', ('_ZdlPv',))):
             d0 = '_ZN%sD0Ev' % MANGLED[c]
             if check(d0 in synth, '%s emitted' % d0):
                 sdis = run([OBJDUMP, '-dr', '--no-show-raw-insn', synth[d0].path])
                 body = re.search(r'<%s>:\n(.*?)(?:\n\n|\Z)' % re.escape(d0), sdis, re.S)
                 calls = re.findall(r'R_AARCH64_P32_(?:CALL|JUMP)26\t(\S+)', body.group(1)) if body else []
-                # D1 (or, inlined, the base destructor it calls), then the class's or the global sized delete
+                # D1 (or, inlined, the base destructor it calls), then the class's or the global unsized delete
                 check(len(calls) == 2 and calls[0] in ('_ZN%sD1Ev' % MANGLED[c], '_ZN5Base1D2Ev') and calls[1] in dealloc,
                       '%s destroys, then calls %s: %s' % (d0, dealloc, calls))
         th = elf.sym.get('_ZThn8_N3Inl2g2Ev')

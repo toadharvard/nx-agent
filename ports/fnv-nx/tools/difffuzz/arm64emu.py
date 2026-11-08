@@ -12,6 +12,7 @@ starting there is a call: x0..x7, v0..v7 and x8 are recorded, x0/v0 get the cann
 for an indirect result), caller-saved registers get garbage, and execution resumes at LR. Bridges (tools/link
 `__fnvnx_br_*`) are real code in the image and run before the stub, so the stub sees the definition's convention.
 """
+import os
 import struct
 
 from unicorn import (Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE,
@@ -35,6 +36,20 @@ BRK = struct.pack('<I', 0xd4200000)
 # access there is the native using a data symbol the link left unbound (native-stub-data). Everything else in the
 # stub range, the code-stub region CODE_STUB + X included, is background as on the oracle (F3b)
 STUB_SLOT = 16
+_MSVC_ALIASES = {}
+
+
+def _msvc_aliases():
+    """{`__fnvnx_msvc_<addr>`: the _ZThn thunk it names} of the link's aliases.ld (empty without the link)."""
+    if not _MSVC_ALIASES:
+        try:
+            import config
+            _MSVC_ALIASES.update({k: v for k, v in a64image.load_aliases(
+                os.path.join(str(config.LINK), 'out', 'aliases.ld'))[1].items() if k.startswith('__fnvnx_msvc_')})
+        except Exception:  # noqa: BLE001
+            pass
+        _MSVC_ALIASES.setdefault('', None)
+    return _MSVC_ALIASES
 
 
 class Call:
@@ -254,7 +269,14 @@ class Arm64Engine:
     def entry(self, orig_addr):
         # an override of a secondary base's virtual: MSVC enters it with `this` at that base, so the native entry is
         # the link's __fnvnx_msvc_<addr> (GCC's _ZThn<d>_ thunk), not __fnv_<addr> (S2c thisadj, difffuzz-19)
-        t = self.image.syms.get('__fnvnx_msvc_%08x' % orig_addr)
+        name = '__fnvnx_msvc_%08x' % orig_addr
+        t = self.image.syms.get(name)
+        if t is None:
+            # (difffuzz-20, flow) the unit's image only has the aliases its own code references; the link's
+            # aliases.ld binds every such entry (0x0093ac20 = _ZThn164_N15PlayerCharacter13GetActorValue...: 11 farm
+            # rows entered the primary body with the secondary-base `this` MSVC passes)
+            tgt = _msvc_aliases().get(name)
+            t = self.image.syms.get(tgt) if tgt else None
         if t is not None:
             return t
         return next((n for n, o in self.image.entries.items() if o == orig_addr), None)
@@ -434,6 +456,8 @@ class Arm64Engine:
     def _on_private_read(self, uc, access, address, size, value, r):
         if any(na <= address < na + n for na, _, n in getattr(self, 'static_pairs', ())):
             return                      # a paired local static: compared at the oracle's address instead
+        if any(na <= address < na + n for na, n in getattr(self, 'static_nguards', ())):
+            return                      # its guard: both machines start at zero (difffuzz-20, static-guard)
         r.private_reads += 1
         if len(r.private_addrs) < 32:
             r.private_addrs.add(address)

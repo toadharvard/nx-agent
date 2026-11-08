@@ -47,7 +47,7 @@ Layout = collections.namedtuple('Layout', 'size align trivial empty cls pod', de
 
 
 SEMANTICS = ['-frounding-math', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks',
-             '-ffp-contract=off']   # compile.sh's MSVC-like semantics (J-0034): probes and emitted host code too
+             '-fno-sized-deallocation', '-fno-lifetime-dse', '-ffp-contract=off']   # compile.sh's MSVC-like semantics (J-0034): probes and emitted host code too
 PIC = ['-fPIC']   # compile.sh's GOT addressing of defined variables: emitted code
 POD_RULE = 'pod2'   # layouts.tsv column 10: the POD predicate the row was probed with (pod2: V1's, J-0147)
 # a type the probe could not name is written with this rule: it was also tried under the namespace the compiler

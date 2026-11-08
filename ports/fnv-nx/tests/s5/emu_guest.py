@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "toolchain", "tools"))
 import elf2nso  # noqa: E402
 sys.path.insert(0, HERE)
 import datapath  # noqa: E402
+from emu_sanitize import SanitizeMixin  # noqa: E402
 
 from unicorn import UC_ARCH_ARM64, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, UC_PROT_EXEC, \
     UC_PROT_READ, UC_PROT_WRITE, Uc, UcError  # noqa: E402
@@ -84,6 +85,18 @@ TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "re
                  "repair-lost-slot-one", "exe-slot-one-d0")
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
+
+
+def hook_at(uc, addr, cb, user_data=None):
+    """a code hook at one address added while the emulation runs (a return address, a loop head): unicorn only checks
+    hooks when it translates a block, so a block already translated there would never call it. Drop that block so it
+    is translated again with the hook (emu_sanitize's return hooks missed most returns before this)."""
+    h = uc.hook_add(UC_HOOK_CODE, cb, user_data=user_data, begin=addr, end=addr)
+    try:
+        uc.ctl_remove_cache(addr, addr + 4)
+    except (AttributeError, UcError):
+        pass
+    return h
 
 def fault_table_options(path):
     """the TABLE_OPTIONS lines of a --stub-faults table"""
@@ -269,7 +282,7 @@ class Thread:
         self.resume_pc = None
 
 
-class Emu:
+class Emu(SanitizeMixin):
     def __init__(self, nso_path, root, verbose=False, load_base=None, game=None):
         with open(nso_path, "rb") as f:
             info = elf2nso.parse_nso(f.read())
@@ -350,6 +363,8 @@ class Emu:
         return STACKS_TOP - STACK_SIZE * (tid - 1) - 0x100
 
     def on_bad(self, uc, access, addr, size, value, _):
+        if getattr(self, "img", None) is not None:   # --image-check: label the fault, the handling is unchanged
+            self.image_fault(access, addr, uc.reg_read(UC_ARM64_REG_PC), uc.reg_read(UC_ARM64_REG_LR))
         print(f"  invalid memory access type={access} addr={addr:#x} size={size} pc={uc.reg_read(UC_ARM64_REG_PC):#x}"
               f" thread={self.cur.tid if self.cur else '?'}")
         return False
@@ -1156,7 +1171,7 @@ class Emu:
             fr.append((seq, sp, lr, label))
             state["live"] += 1
             if lr not in state["ret_hooks"]:
-                state["ret_hooks"][lr] = uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
+                state["ret_hooks"][lr] = hook_at(uc, lr, on_ret)
             if writes and state["whook"] is None:
                 state["whook"] = uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
         if len(targets) <= 256:
@@ -1836,7 +1851,7 @@ class Emu:
             pend.setdefault((self.cur.tid if self.cur else 0, lr), []).append((uc.reg_read(UC_ARM64_REG_X0) & 0xFFFFFFFF, m))
             if lr not in ret_hooks:
                 ret_hooks.add(lr)
-                uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
+                hook_at(uc, lr, on_ret)
         for a, m in members.items():
             uc.hook_add(UC_HOOK_CODE, on_entry, user_data=m, begin=a, end=a)
         self.member_vt_stats = st
@@ -1901,14 +1916,14 @@ class Emu:
             self.ret_this[tid] = st
             if ("this", lr) not in self.stub_returns:
                 self.stub_returns.add(("this", lr))
-                uc.hook_add(UC_HOOK_CODE, self.on_this_return, begin=lr, end=lr)
+                hook_at(uc, lr, self.on_this_return)
             return
         st = [g for g in self.stub_guards.get(tid, []) if g[0] >= sp]   # drop guards left by an unwind
         st.append((sp, uc.context_save(), lr, data[0], data[1]))
         self.stub_guards[tid] = st
         if lr not in self.stub_returns:   # the guard ends when its call returns (also after a tail call)
             self.stub_returns.add(lr)
-            uc.hook_add(UC_HOOK_CODE, self.on_stub_return, begin=lr, end=lr)
+            hook_at(uc, lr, self.on_stub_return)
 
     def alloc_near(self, size):
         """an RWX block after the guest image and the --inject objects, in branch range of the guest's code"""
@@ -2358,7 +2373,7 @@ class Emu:
         pend = self.__dict__.setdefault("mile_ret_pending", {})
         if ret not in pend:
             pend[ret] = []
-            self.uc.hook_add(UC_HOOK_CODE, self.on_mile_ret, user_data=ret, begin=ret, end=ret)
+            hook_at(self.uc, ret, self.on_mile_ret, ret)
         pend[ret].append((cond, sp, tid, addr))
 
     def on_mile_ret(self, uc, addr, size, ret):
@@ -2772,6 +2787,12 @@ def main(argv):
                     help="discovery mode, measurement only: up to N faults outside initializers are recorded and the "
                          "faulting function returns 0 to its caller (a bad call is skipped), so one run lists every "
                          "blocker on the boot path ('discovered' lines)")
+    ap.add_argument("--alloc-check", action="store_true",
+                    help="measurement only: allocator sanitizer (emu_sanitize.py): mismatched family, double free, "
+                         "unknown or non-heap block frees ('alloc-check' lines)")
+    ap.add_argument("--image-check", action="store_true",
+                    help="measurement only: classify faults at exe image addresses (code used as data, unrelocated "
+                         "code pointers, RVAs as addresses; 'image-check' lines; needs the exe, --addrmap adds natives)")
     ap.add_argument("--stub-nulldev", action="store_true",
                     help="stub boots only (farm_boot.sh with FNVNX_STUB_NULLDEV=1): toolchain/game/native_device.cpp's "
                          "fnvnx_stub_nulldev = 1 at __libc_init_array, so CreateDevice succeeds on the null device "
@@ -2846,6 +2867,21 @@ def main(argv):
         addr, _, n = spec.partition(":")
         emu.install_watch(int(addr, 0), int(n, 0) if n else 4)
     emu.wall_seconds = a.wall_seconds
+    if a.alloc_check:
+        if getattr(emu, "code_syms", None):
+            emu.install_alloc_check()
+        else:
+            print("   alloc-check: off (needs --elf)")
+    if a.image_check:
+        exe = [src for name, _, src in (f.partition("=") for f in a.file) if name.lower().endswith(".exe")]
+        exe += [p for p in [emu.dp.resolve("/switch/fnv/FalloutNV.exe")] if not exe and os.path.isfile(p)]
+        exe += [p for p in (os.path.join(root, d, "FalloutNV.exe") for d in ("switch/fnv", "fnvnx/game"))
+                if not exe and os.path.exists(p)]
+        if exe:
+            emu.install_image_check(exe[0], a.addrmap)
+            print(f"   image-check: on ({exe[0]})")
+        else:
+            print("   image-check: off (needs the exe as --file or in the game install)")
     emu.discover_max, emu.discovered = a.discover, []
     if a.trace_fn:
         emu.install_trace_fn(a.trace_fn, a.trace_out or "trace_fn.tsv", writes=a.trace_writes, limit=a.trace_max,
@@ -2886,7 +2922,7 @@ def main(argv):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.trap_table() + peeks() + emu.placements()
+        for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.alloc_lines() + emu.image_lines() + emu.trap_table() + peeks() + emu.placements()
                      + emu.milestone_lines() + emu.dp.lines()
                      + emu.vt_past_lines() + emu.watch_lines()):
             print(line)
@@ -2959,7 +2995,7 @@ def main(argv):
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
-    for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.trap_table() + peeks() + emu.placements()
+    for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.alloc_lines() + emu.image_lines() + emu.trap_table() + peeks() + emu.placements()
                  + emu.milestone_lines() + emu.dp.lines()
                  + emu.vt_past_lines() + emu.watch_lines()):
         print(line)

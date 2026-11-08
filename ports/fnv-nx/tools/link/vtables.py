@@ -473,15 +473,15 @@ template <class C> using db = typename std::tr2::direct_bases<C>::type;
 template <class C> using ab = typename std::tr2::bases<C>::type;
 template <class C, int I> using dbase = typename nth<I, db<C>>::type;
 template <class C, int I> using abase = typename nth<I, ab<C>>::type;
-// the deallocation of a deleting destructor: class operator delete (unsized first), else the global sized one
+// the deallocation of a deleting destructor: class operator delete (unsized first), else the global unsized one (MSVC 2008 has no sized delete: -fno-sized-deallocation)
 template <class T> auto dealloc(void *p, int) -> decltype(T::operator delete(p), void()) { T::operator delete(p); }
 template <class T> auto dealloc(void *p, long) -> decltype(T::operator delete(p, sizeof(T)), void())
 { T::operator delete(p, sizeof(T)); }
-template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T)); }
+template <class T> void dealloc(void *p, ...) { ::operator delete(p); }
 }
 '''
 NS = '__fnvnx_vt::'
-PROBE_VERSION = 5   # cache.json entries: 2 HEAD_BARE, 3 elaborated names, 4 placement delete, 5 key_group
+PROBE_VERSION = 6   # cache.json entries: 2 HEAD_BARE, 3 elaborated names, 4 placement delete, 5 key_group, 6 private dtor
 # The same helpers without a standard header (GCC's builtins: __direct_bases, __bases, __is_convertible; typeid
 # needs std::type_info declared only). For host units that do not compile after <typeinfo> / <type_traits>: units
 # with their own std::exception / std::bad_alloc copies (redefinition), or with a `using namespace std` swap that
@@ -504,7 +504,7 @@ template <class C, int I> using abase = typename nth<I, ab<C>>::type;
 template <class T> auto dealloc(void *p, int) -> decltype(T::operator delete(p), void()) { T::operator delete(p); }
 template <class T> auto dealloc(void *p, long) -> decltype(T::operator delete(p, sizeof(T)), void())
 { T::operator delete(p, sizeof(T)); }
-template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T)); }
+template <class T> void dealloc(void *p, ...) { ::operator delete(p); }
 }
 '''
 KEY_HEAD = 'namespace __fnvnx_vt { template <class T> T dv(); }\n'   # key_items: an argument of type T
@@ -787,7 +787,8 @@ def probe_host(tree, workdir, unit, classes):
     its unit defines keeps its reason."""
     res = _probe_host(tree, workdir, unit, classes)
     need = [(k, r) for k, r in sorted(res.items()) if r['polymorphic'] and r.get('enc') and not r['final']
-            and '<' not in r['spelling'] and (r.get('virtual_bases') or r.get('virtual_any') or 'bases' not in r)]
+            and '<' not in r['spelling'] and (r.get('virtual_bases') or r.get('virtual_any') or 'bases' not in r
+                                              or 'vt_ents' not in r)]
     if not need:
         return res
     bare = any(r.get('bare') for _, r in need)
@@ -807,6 +808,20 @@ def probe_host(tree, workdir, unit, classes):
             grp = key_group(obj, res[k]['enc'])
             if grp:
                 res[k]['key_group'] = grp
+    # a class whose destructor is private: kx (the destructor called from outside) is an error, and GCC's note on the
+    # declaration drops the kd line with it. Those classes again without kx; the key function still defines the data
+    # (hkpBroadphaseViewer, FUN_00d6a940: a derived probe class cannot be formed over its private destructor)
+    lost = {k for k, nm, _ in items if nm == 'kd'} - {k for k, nm, _ in alive if nm == 'kd'}
+    lost = {k for k in lost if not res[k].get('key_group')}
+    if lost:
+        items2 = [it for it in items if it[0] in lost and it[1] != 'kx']
+        obj2, alive2 = compile_probe(tree, workdir, unit, items2, 'vtk2' + ('b' if bare else ''),
+                                     prelude=(HEAD_BARE if bare else HEAD) + KEY_HEAD)
+        if obj2 is not None:
+            for k in sorted({k for k, _, _ in alive2}):
+                grp = key_group(obj2, res[k]['enc'])
+                if grp:
+                    res[k]['key_group'] = grp
     return res
 
 
@@ -984,7 +999,7 @@ def extract_host(tree, workdir, unit, classes, want, bare=False):
     classes: [(k, spelling, enc)] of the classes synthesized on this host; want: the slot symbols nobody defines.
     The host unit is compiled again with -fkeep-inline-functions and, per class, a qualified destructor call (so the
     implicit destructor D1/D2 is defined; for a class without key function its vtable, D0 and inline virtuals come
-    with it); a deleting destructor still missing is emulated (D1, then the class's or the global sized operator
+    with it); a deleting destructor still missing is emulated (D1, then the class's or the global unsized operator
     delete) under its mangled name. `ld -r --gc-sections` keeps what the wanted symbols reach (static initializers
     removed first, so they are no roots); every global definition is weakened: a copy of a definition of the host
     unit loses to the real one, COMDAT copies dedupe. bare: the unit was probed with HEAD_BARE (it does not compile

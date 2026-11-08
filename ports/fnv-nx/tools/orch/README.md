@@ -47,3 +47,8 @@ These come from the owner and bind every orchestrator session, including one tha
     area. T1 owns tools/farm/ratchet.py.
 12. **Fix forward, no rollbacks.** A regression is fixed forward by its owner, ahead of other work. Reverting needs the
     owner's explicit approval (owner, 2026-11-08: "Не надо ниче роллбекать"; "Какой откат? Ты же фикс написал").
+13. **Layout changes are checked whole, against the exe, before merge.** A change to the ABI, the vtables or the
+    compile flags gets the full static check first: the all-tables gate (every RTTI vftable, native ==
+    transform(exe)), not only call-site samples and boots. Compile-flag changes go in together, so that one full
+    recompile covers them, and each gets a sample compile of about 50 units first. Workers run on Sonnet; Opus only
+    reviews. Owner, 2026-11-08: "Хули мы не можем взять и запихнуть правильную таблицу"; "сонеты, не опусы".

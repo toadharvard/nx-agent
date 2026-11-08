@@ -126,3 +126,26 @@ WEAK void __fnv_00ec79a1(void *self) { fnvnx_exception_dtor(self); }
 /* R2 recon2-015: exception::what() const (vftable slot 1 of std::exception; units with their own exception copy
    reference it, no unit places it) */
 WEAK const char *__fnv_00ec79b7(const void *self) { return fnvnx_exception_what(self); }
+
+/* x23 (vtgate, wB): the MSVC scalar deleting destructors of the CRT classes, vtable slot 0 of their exe vftables.
+   thiscall (this, flags), ret 4, returns this: run the destructor, then free the object when flags & 1 - the exe
+   calls 0x00401030 (FormHeap_Free, the same function `operator delete` reaches; the weak __fnv_00401030 above).
+   fnvlink's slot fill turns a native (this, flags) function at the slot address into the D1/D0 entries. */
+static void fnvnx_deleting_free(void *self, unsigned flags)
+{
+    if ((flags & 1) && self && __fnv_00401030)
+        __fnv_00401030(self);
+}
+/* std::exception (vftable 0x010f1fa4): ~exception only */
+WEAK void *__fnv_00ec7a8a(void *self, unsigned flags) { __fnv_00ec79a1(self); fnvnx_deleting_free(self, flags); return self; }
+/* std::bad_cast (0x010f1fc4), std::bad_typeid (0x010f1fd0, also __non_rtti_object's slot 0), std::bad_exception
+   (0x010f20a8): each stores its own vptr, then runs ~exception (0x00ec79a1) - the vptr is not used natively */
+WEAK void *__fnv_00ec7aab(void *self, unsigned flags) { __fnv_00ec79a1(self); fnvnx_deleting_free(self, flags); return self; }
+WEAK void *__fnv_00ec7ad2(void *self, unsigned flags) { __fnv_00ec79a1(self); fnvnx_deleting_free(self, flags); return self; }
+WEAK void *__fnv_00ece2fb(void *self, unsigned flags) { __fnv_00ec79a1(self); fnvnx_deleting_free(self, flags); return self; }
+/* std::_Locimp (0x010f1ed8, destructor 0x00ec3648) and type_info (0x010f1ee0, destructor 0x00ec409b): no destructor
+   provider exists. The native objects own nothing the exe destructors release (cpplib.cpp's one immortal _Locimp has
+   no facet vector and refcount -1; type_info objects are static descriptors with no cached undecorated name), so
+   only the flags & 1 free remains. */
+WEAK void *__fnv_00ec3685(void *self, unsigned flags) { fnvnx_deleting_free(self, flags); return self; }
+WEAK void *__fnv_00ec40ab(void *self, unsigned flags) { fnvnx_deleting_free(self, flags); return self; }

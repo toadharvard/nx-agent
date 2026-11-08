@@ -393,6 +393,30 @@ def object_undefs(objdir):
     return out
 
 
+def local_calls(lines):
+    """(caller, callee) pairs of the direct `bl` / `b` instructions of `objdump -dr --no-show-raw-insn` output that
+    have no relocation: the branch was resolved inside the section, its target is the `<symbol+off>` objdump prints.
+    A branch followed by a relocation line is a reference to the relocation's symbol (the printed target is 0)."""
+    cur, pend, out = None, None, []
+    for line in lines:
+        m = re.match(r'^[0-9a-f]+ <([^>]+)>:\s*$', line)
+        if m:
+            cur, pend = m.group(1), None
+            continue
+        if re.match(r'^\s+[0-9a-f]+: R_AARCH64', line):
+            pend = None   # the instruction above was relocated
+            continue
+        if pend:
+            out.append(pend)
+            pend = None
+        m = re.match(r'^\s+[0-9a-f]+:\s+(?:bl|b)\s+[0-9a-f]+ <([^>+]+)(?:\+0x[0-9a-f]+)?>\s*$', line)
+        if m and cur:
+            pend = (cur, m.group(1))
+    if pend:
+        out.append(pend)
+    return out
+
+
 def placeholder_uses(obj, names, undefs):
     """How one GCC object uses the C placeholders in names -> {name: (shape, reach)}. shape: `function` when a
     CALL26/JUMP26 names it, else `variable`. reach: `live` when a function that references it is reachable in the
@@ -444,6 +468,11 @@ def placeholder_uses(obj, names, undefs):
                 roots.add(tgt)
             continue
         edges[at(secs.get(sec), int(f[0], 16)) or '?' + nm].add(tgt)
+    for src_, dst_ in local_calls(_run('aarch64-linux-gnu-objdump', '-dr', '--no-show-raw-insn', obj).splitlines()):
+        # W28: a call to a function of the same section carries no relocation (the assembler resolved it), so the
+        # reloc scan above never saw it: `__fnv_00e04d30` calls its file-static `E04D30Finish` that way, and the
+        # variable E04D30Finish stores to (g_E04D30Last) was labelled harness-only while a root reaches it
+        edges[canon.get(src_, src_)].add(canon.get(dst_, dst_))
     for nm, b in binds.items():
         if nm.startswith('__fnv') or (b in ('GLOBAL', 'WEAK') and nm in undefs):
             roots.add(canon.get(nm, nm))

@@ -136,6 +136,101 @@ def vptr_stores(obj, name, is_ctor=None, order=None):
     return got
 
 
+def vt_store_seq(obj, name, expand=None):
+    """W47: the vtables the function `name` of obj stores at displacement 0 of any object, in code order: stores of
+    a vtable address (the same register model as vptr_stores) through `[xN]` / `[xN, #0]` (`str`, `stur`, 32-bit
+    `stp`'s first register), whatever xN holds - `this`, the result of `operator new` (a factory: `new` and an inlined
+    constructor) or a copy. This is the native side of exevft.vptr_store_seq, which reads the exe's
+    `mov dword ptr [reg], imm32` with any base register. A call `bl C` adds expand(C)'s list in its place (expand:
+    callee symbol -> list or None; the caller passes the stores of the decomp's own out-of-line constructors that no
+    exe address binds, which the exe inlined). The whole symbol is read in address order; a return or a tail call
+    ends what the registers hold, not the scan. A vtable stored twice in a row counts once.
+    -> [(vtable symbol, byte offset in the group)], [] when the symbol is not a defined function or capstone is
+    missing."""
+    try:
+        from capstone import arm64 as ca
+    except ImportError:
+        return []
+    i = obj.defs.get(name)
+    if i is None:
+        return []
+    _, value, size, typ, _, shndx = obj.syms[i]
+    if typ != 2 or not size or shndx >= len(obj.secs):
+        return []
+    sec = obj.secs[shndx]
+    code = obj.data[sec[4] + value:sec[4] + value + size]
+    rel = obj.rel(shndx)
+    cs = _cs()
+    seq = []
+
+    def put(ev):
+        if ev and (not seq or seq[-1] != ev):
+            seq.append(ev)
+
+    def rsym(off):
+        r = rel.get(off)
+        if r is None:
+            return None, None, 0
+        t = obj.syms[r[0]]
+        return (t[0] if t[3] != 3 else None), r[1], r[2]
+    st = {}
+    for ins in cs.disasm(code, value):
+        sym, rt, add = rsym(ins.address)
+        mn, ops = ins.mnemonic, ins.operands
+        if mn in ('bl', 'blr'):
+            if mn == 'bl' and rt == R_CALL26 and sym and expand is not None:
+                for ev in expand(sym) or ():
+                    put(ev)
+            for r in list(st):
+                if isinstance(r, int) and r <= 18:
+                    del st[r]
+            continue
+        if mn in ('ret', 'br') or (mn == 'b' and rt == R_JUMP26):
+            st = {}
+            continue
+        if mn in ('str', 'stur') and len(ops) == 2 and ops[1].type == ca.ARM64_OP_MEM and \
+                (cs.reg_name(ops[0].reg) or '').startswith('w') and not ops[1].mem.index:
+            s = st.get(_reg(cs, ops[0].reg))
+            if s and s[0] == 'vt' and not ops[1].mem.disp and _reg(cs, ops[1].mem.base) != 'sp':
+                put((s[1], s[2]))
+            if ins.writeback:
+                st.pop(_reg(cs, ops[1].mem.base), None)
+            continue
+        if mn == 'stp' and len(ops) == 3 and ops[2].type == ca.ARM64_OP_MEM and \
+                (cs.reg_name(ops[0].reg) or '').startswith('w'):
+            s = st.get(_reg(cs, ops[0].reg))
+            if s and s[0] == 'vt' and not ops[2].mem.disp and _reg(cs, ops[2].mem.base) != 'sp':
+                put((s[1], s[2]))
+            if ins.writeback:
+                st.pop(_reg(cs, ops[2].mem.base), None)
+            continue
+        new = None
+        dst = _reg(cs, ops[0].reg) if ops and ops[0].type == ca.ARM64_OP_REG else None
+        if mn == 'adrp' and rt in (R_GOT_PAGE, R_ADR_PG) and sym:
+            new = ('page', sym, add if rt == R_ADR_PG else None)
+        elif mn == 'ldr' and rt == R_GOT_LO12 and sym and len(ops) == 2 and ops[1].type == ca.ARM64_OP_MEM:
+            p = st.get(_reg(cs, ops[1].mem.base))
+            if p and p[0] == 'page' and p[1] == sym and p[2] is None:
+                new = ('vt', sym, 0)
+        elif mn == 'mov' and len(ops) == 2 and ops[1].type == ca.ARM64_OP_REG:
+            new = st.get(_reg(cs, ops[1].reg))
+        elif mn in ('add', 'sub') and len(ops) == 3 and ops[1].type == ca.ARM64_OP_REG and \
+                ops[2].type == ca.ARM64_OP_IMM:
+            src, k = st.get(_reg(cs, ops[1].reg)), ops[2].imm
+            if ops[2].shift.type == ca.ARM64_SFT_LSL:
+                k <<= ops[2].shift.value
+            k = -k if mn == 'sub' else k
+            if rt == R_ADD_LO12 and sym and src and src[0] == 'page' and src[1] == sym and src[2] is not None:
+                new = ('vt', sym, add)
+            elif src and src[0] == 'vt' and rt is None:
+                new = ('vt', src[1], src[2] + k)
+        for r in {_reg(cs, r) for r in ins.regs_access()[1]}:
+            st.pop(r, None)
+        if dst is not None and new is not None:
+            st[dst] = new
+    return seq
+
+
 _CTOR = re.compile(r'C[12]E')
 
 
