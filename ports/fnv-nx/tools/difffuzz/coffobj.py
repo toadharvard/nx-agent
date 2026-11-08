@@ -349,7 +349,41 @@ class UnitImage:
                         blob = blob[:min(nxt) - s['value']] if nxt else blob
                         blob = self._relocated(sec, s['value'], blob[:4096], base)
                     out[base] = bytes(blob)
+        self._exe_constants(out)
         return exe_literals(out)
+
+    def _exe_constants(self, out):
+        """(uncls2, difffuzz-20) A data symbol the object holds in a writable section (`float _INVALID_FLOAT` in
+        .data of the decomp's object) that the exe keeps in read-only data: nothing pinned its bytes, the oracle read
+        zeros where the exe's code reads the constant (0x00a3c6d0: a compare against -FLT_MAX, which the native
+        folds). The exe's bytes of the symbol's extent are pinned. With no exe image nothing changes."""
+        exe = exe_image()
+        sec_of = getattr(exe, 'section_of', None)
+        if exe is None or sec_of is None:
+            return
+        for f in self.funcs.values():
+            for rel, kind, t, name in f['relocs']:
+                if t is None or kind != DIR32 or name not in self.mappings:
+                    continue
+                if any(a <= t < a + len(b) for a, b in out.items()):
+                    continue
+                for s in self.coff.by_name.get(name, []):
+                    if s['section'] <= 0:
+                        continue
+                    sec = self.coff.sections[s['section']]
+                    if sec['flags'] & IMAGE_SCN_CNT_CODE or not sec['flags'] & IMAGE_SCN_MEM_WRITE or \
+                            sec['flags'] & IMAGE_SCN_CNT_UNINIT:
+                        continue
+                    es = sec_of(t)
+                    if es is None or es[2] & (0x20 | 0x80000000 | 0x80):    # exe code / writable / uninitialised
+                        continue
+                    nxt = [x['value'] for x in self.coff.symbols.values()
+                           if x['section'] == s['section'] and x['value'] > s['value']]
+                    ext = min(nxt) - s['value'] if nxt else len(sec['data']) - s['value']
+                    n = min(ext if ext > 0 else 4, 4096, es[0] + es[1] - t)
+                    if n > 0:
+                        out[t] = bytes(exe.read(t, n))
+                    break
 
     def writable_initial(self):
         """{original address: bytes}: initial values of writable data the unit defines at mapped addresses (a seed

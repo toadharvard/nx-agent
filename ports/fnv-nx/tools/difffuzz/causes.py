@@ -94,6 +94,18 @@ POLICY = {
                                                 'the exe never holds'),
     'float->int':     ('by-design', 'S12', False, 'out-of-range float->int (UB in C++); the FTOI2 plugin gives '
                                                   'MSVC semantics where the build loads it'),
+    'vptr-bytes':     ('artifact', 'S13', False, 'the code reads a byte or part of a planted vptr word as data: the exe '
+                                                 'vftable address on the oracle, the Itanium address point natively '
+                                                 '(D7); equal once the oracle holds the native word too'),
+    'vptr-pool':      ('artifact', 'S13', False, 'the oracle stores the synthetic pool address of its object\'s unnamed '
+                                                 'vftable section where the native stores the image vftable that begins '
+                                                 'with the same function address (the pool copy of the table)'),
+    'x87-trig-inf':   ('artifact', 'S13', False, 'fsin / fcos / fsincos / fptan of an infinity: the oracle emulator '
+                                                 'leaves the infinity in st0 where the x87 gives the indefinite NaN '
+                                                 '(Intel SDM, #IA masked); equal once the probe applies it'),
+    'ptrdiff-unaligned': ('by-design', '-', False, 'a pointer difference that is not a multiple of the element size: '
+                                                   'GCC folds (end - begin) / size * size to end - begin, MSVC keeps '
+                                                   'the division (UB in C++); equal with 4-aligned arguments'),
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
