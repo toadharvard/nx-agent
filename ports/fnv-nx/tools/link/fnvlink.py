@@ -76,6 +76,8 @@ TRAP_SYM = '__fnvnx_vtrap_%08x'   # slot of a virtual function defined nowhere -
 TLS_SYM = '__fnvnx_tls_%08x'      # thread-local variable at an image .tls address: slot of the native TLS block
 MSVC_ENTRY_SYM = '__fnvnx_msvc_%08x'   # MSVC's entry of an override that takes `this` at a secondary base: the thunk
 XEXIT_SYM = '__fnvnx_xexit_%08x'   # native stand-in of an exe exit thunk a unit registers by address (xexit.py)
+ANCHOR_SYM = '__fnvnx_anchor_%08x'     # a value anchor: absolute symbol whose value is the constant (W28)
+ANCHOR_NAME = re.compile(r'(?:_value_anchor$|^g_target_[0-9a-f]{8}$)')
 TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing defines: absolute, the x86 value
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
@@ -685,6 +687,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     hints = collections.defaultdict(dict)    # source -> {vtable slot name: address} another unit's reference gave it
     chints = collections.defaultdict(dict)   # W20 (a): source -> {slot name: address} the unit's recipe gave, and its code calls
     used_addr = set()
+    anchor_vals = set()   # W28: units.json values of the value anchors (absolute symbols in aliases.ld)
     data_defs, tls_defs, tls_addrs = [], [], set()
     text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
     label_cache = {}
@@ -962,7 +965,17 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 # S2d (R6 recon6-007): a units.json "address" outside the image (`?g_target_00d53c90@@3HA` at
                 # 0x00000065: a value the recipe recorded, not where the variable lives) is no evidence: the name
                 # stays unresolved, a visible trap, never `__fnv_00000065`
-                cls, tier, note = 'unresolved', 'not-in-image/' + (tier or ''), '%08x is outside the image' % addr
+                if isig.kind in ('data', 'cname') and isig.qual and ANCHOR_NAME.search(isig.qual[-1]):
+                    # W28 (top-down 26 / 90): a value anchor. The decomp spells a constant leaf (`mov eax, 4; ret`)
+                    # as `(int)&g_..._value_anchor + 4` so VC9 keeps the 6-byte shape; the units.json "address" IS the
+                    # constant (exe 0x00e9ecc0: b8 04.. -> anchor 0; 0x00d53c90: b8 65.. -> g_target at 0x65). An
+                    # absolute symbol of that value (aliases.ld) makes the native body return the exe's constant.
+                    cls, tier, target = 'data', 'anchor/' + (tier or ''), ANCHOR_SYM % addr
+                    note = 'absolute %#x (value anchor)' % addr
+                    anchor_vals.add(addr)
+                    stats['value_anchor_refs'] += 1
+                else:
+                    cls, tier, note = 'unresolved', 'not-in-image/' + (tier or ''), '%08x is outside the image' % addr
                 addr = None
                 stats['refs_not_in_image'] += 1
             if cls == 'import' and addr is not None and addr not in import_syms and addr not in iat and \
@@ -1700,6 +1713,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 stats['vtable_data_refs_minus_one_copy'] += 1
             else:
                 f.write('%s = 0x%08x;\n' % (ADDR_SYM % a, a))
+        for a in sorted(anchor_vals):
+            f.write('%s = 0x%08x;\n' % (ANCHOR_SYM % a, a))
         for line in sorted(set(alias_lines)):
             f.write(line + '\n')
 
@@ -2801,7 +2816,8 @@ def rewrite_refs(path, by_src, addr_of, rebound=()):
         for line in fi:
             f = line.split('\t')
             if len(f) >= 7 and (f[2] in ('vslot-unresolved', 'extern-text', 'import') or
-                                (f[2] == 'code' and (f[0], f[1]) in rebound)) and f[1] in rows.get(f[0], {}):
+                                (f[2] in ('code', 'unresolved') and (f[0], f[1]) in rebound)) and \
+                    f[1] in rows.get(f[0], {}):
                 t, a_ = rows[f[0]][f[1]]
                 nx += f[2] != 'vslot-unresolved'
                 f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', '%08x' % a_, t
@@ -2810,6 +2826,31 @@ def rewrite_refs(path, by_src, addr_of, rebound=()):
             fo.write(line)
     os.replace(path + '.tmp', path)
     return n, nx
+
+
+def bodies_slot_renames(have, changed, addr_of, per_obj, rebound, undefined):
+    """W28: for each synthesized body object (`<host>#bodies<n>`) the names it leaves undefined that the slot fill bound in
+    the host's objects (`changed`: {unit: {symbol: target}}, addr_of {(source, symbol): exe address}) get the same
+    target. Adds to changed / addr_of / rebound; returns the number of names. undefined(unit) -> its undefined names."""
+    by_host = collections.defaultdict(dict)   # host source -> {symbol: (target, exe address)}
+    for u, m in changed.items():
+        for un_, t_ in m.items():
+            by_host[u.host or u.source.split('#')[0]].setdefault(un_, (t_, addr_of[(u.source, un_)]))
+    n = 0
+    for u in have:
+        if '#bodies' not in u.source:
+            continue
+        got_ = by_host.get(u.host or '')
+        if not got_:
+            continue
+        ren_ = per_obj.get(u.source) or {}
+        for name in undefined(u):
+            if name in got_ and name not in ren_:
+                changed.setdefault(u, {})[name] = got_[name][0]
+                addr_of[(u.source, name)] = got_[name][1]
+                rebound.add((u.source, name))
+                n += 1
+    return n
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
@@ -3143,6 +3184,12 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             for x in us or [(None, 0, -1, -1, set(), False, None)]:
                 gaps.append((os.path.basename(u.obj), u.source, un, x[0] or '', str(x[2]), str(x[3]),
                              ' '.join('%08x' % b for b in sorted(x[4])), why))
+    # W28 (top-down 38, 42-43, 49-50, 98-99, 107): a synthesized body object of the host (`<host>#bodies<n>`: the
+    # `_ZThn` adjustor thunks bodies.py emits) calls the slot function by name, and no vtable of that object names it, so
+    # the fill above never saw it: the name stayed undefined (a trap) while the host's vtables got the exe's function.
+    # The thunk adjusts `this` and calls the same function the slot holds: it takes the host's binding.
+    st['bodies_slot_bound'] += bodies_slot_renames(have, changed, addr_of, per_obj, rebound,
+                                                   lambda u: [x.name for x in elfsyms.symbols(u.obj) if x.shndx == 0])
     # apply the renames: the .redefine files and refs.tsv rows of the objects that changed
     bound_refs = bound_refs_x = 0
     by_src = {u.source: m for u, m in changed.items()}
