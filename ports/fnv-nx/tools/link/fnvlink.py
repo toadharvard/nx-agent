@@ -4050,7 +4050,7 @@ def load_imports(imports_tsv, exports):
     if imports_tsv and os.path.exists(imports_tsv):
         for line in open(imports_tsv, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
-            if line.startswith('#') or len(f) < 3 or not re.match(r'^0x[0-9a-fA-F]+$', f[0]):
+            if line.startswith('#') or len(f) < 3 or not re.match(r'^0x[0-9a-fA-F]+$', f[0]) or not_iat_row(f):
                 continue
             sym = exports.get((f[1].lower(), f[2]))
             if sym:
@@ -4064,9 +4064,17 @@ def load_iat(imports_tsv):
     if imports_tsv and os.path.exists(imports_tsv):
         for line in open(imports_tsv, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
-            if not line.startswith('#') and len(f) >= 3 and re.match(r'^0x[0-9a-fA-F]+$', f[0]) and IDENT.match(f[2]):
+            if not line.startswith('#') and len(f) >= 3 and re.match(r'^0x[0-9a-fA-F]+$', f[0]) and IDENT.match(f[2]) \
+                    and not not_iat_row(f):
                 out[int(f[0], 16)] = (f[1].lower(), f[2])
     return out
+
+
+def not_iat_row(f):
+    """An imports.tsv row S4 keeps only to record a decomp mislabel: dll `(not an IAT slot)` (0x010c4cec, the
+    `__imp_` name the recipe put on slot 2 of the image vftable 0x010c4ce4). It is no IAT slot and no import, so the
+    reference goes on to vftable_import (the exe word at the slot decides), never to an import named after it."""
+    return f[1].strip().startswith('(')
 
 
 def has_branch(obj, sym):
