@@ -32,7 +32,7 @@ CODE_STUB = 0x08000000        # + original code address (0x00400000..0x00fdf000)
 NAMED_STUB = 0x09000000       # + 16 * k
 NAMED_STUB_MAX = 0x00800000 // 16
 STACK_GUARD = 0x0b800000      # page holding the stack protector canary (mapped by the AArch64 engine)
-LINK_VERSION = 8              # 8: C++ names another object of the link defines are linked in (provider_objects); 6: S2d's vcall stubs (zz_bd_vcall.o) linked like the bridges; bump when the stub/alias rules change (invalidates cached unit images)
+LINK_VERSION = 9              # 9: an __fnv_<addr> alias never resolves to a provider-only definition; 8: C++ names another object of the link defines are linked in (provider_objects); 6: S2d's vcall stubs (zz_bd_vcall.o) linked like the bridges; bump when the stub/alias rules change (invalidates cached unit images)
 ADDR_SYM = re.compile(r'^__fnv_([0-9a-f]{8})(?:_(C[0-9]|D[0-9]))?$')
 LAYOUT = """
 SECTIONS {
@@ -228,7 +228,7 @@ def build_many(sources, linkdir, workdir, name):
         return _build_many(sources, linkdir, workdir, name)
 
 
-def alias_lines(weak, undef, defined, absolute, alias):
+def alias_lines(weak, undef, defined, absolute, alias, own=None):
     """Linker-script lines for one image (adds what they define to `defined`): weak image variables and undefined
     names at their absolute original addresses, undefined names aliased to a defined symbol, and every
     __fnvnx_msvc_<addr> whose target the image defines."""
@@ -242,7 +242,9 @@ def alias_lines(weak, undef, defined, absolute, alias):
         if n in absolute:
             lines.append('%s = 0x%08x;' % (n, absolute[n]))
             defined.add(n)
-        elif n in alias and alias[n] in defined:
+        elif n in alias and alias[n] in defined and not (own is not None and ADDR_SYM.match(n) and alias[n] not in own):
+            # (EQ review) an original-address name stays a code stub when only a provider object defines its target:
+            # the oracle intercepts that exe function, so the native must not run another unit's body untraced
             lines.append('%s = %s;' % (n, alias[n]))
             defined.add(n)
     # (R2, farm baseline 588863: 0x0040e3c0) the link's __fnvnx_msvc_<addr> entry of an override on a secondary base
@@ -277,6 +279,7 @@ def _build_many(sources, linkdir, workdir, name):
         if m.get('version') == LINK_VERSION and m.get('sources') == sorted(sources):
             return Image(elf, {int(k): v for k, v in m['stubs'].items()}, m['info'])
     objs = units + [o for o in (bridges, vcall) if os.path.exists(o)] + [helpers_object(workdir)]
+    own = _symbol_sets(objs)[0]                 # defined before the providers: the unit, bridges, helpers
     objs = add_providers(units, objs, fixed, workdir)
     defined, undef, weak = set(), set(), set()
     for o in objs:
@@ -290,7 +293,7 @@ def _build_many(sources, linkdir, workdir, name):
                 if s.bind == 'weak':
                     weak.add(s.name)
     absolute, alias = load_aliases(os.path.join(linkdir, 'out', 'aliases.ld'))
-    lines = alias_lines(weak, undef, defined, absolute, alias)
+    lines = alias_lines(weak, undef, defined, absolute, alias, own)
     stubs, k = {}, 0
     info = dict(code_stubs=0, named_stubs=0, data_abs=0)
     for n in sorted(undef - defined):
