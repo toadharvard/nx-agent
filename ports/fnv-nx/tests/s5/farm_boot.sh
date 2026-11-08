@@ -38,7 +38,8 @@
 #                   farm boots it)
 #   PY              the Python with unicorn (default python3)
 #   VORBIS          the libvorbis prefix for build.sh; JOBS, SSE2NEON, DEVKITPRO passed to build.sh
-#   FARM_NATIVE_RENDER  a dir with tests/s5/native_render_inject.sh's outputs (nxrender_inject.o, libnxgl.so): every
+#   FARM_NATIVE_RENDER  1: build those inputs here (cached in $FARM_HOME/native_render-<key>; needs root for the
+#                   cross compiler on first use), or a dir with tests/s5/native_render_inject.sh's outputs (nxrender_inject.o, libnxgl.so): every
 #                   boot runs on the native renderer's engine path (tests/s5/native_render.py --native-render --gpu,
 #                   the stand-in for a LINK_OVERRIDES=render link), its frames as PNG in <out dir>/frames_<boot>/
 #   FARM_GAME       a game install (FalloutNV.exe, Data/, Fallout_default.ini), mounted in place at the guest's
@@ -191,6 +192,22 @@ if [ -n "$IMAGE" ] && [ -z "$GAME" ]; then   # with FARM_GAME the install's own 
   done
 fi
 EMU=("${EMU_PY:-$HERE/emu_guest.py}"); NR=${FARM_NATIVE_RENDER:-}
+if [ "$NR" = 1 ]; then
+  # build the native renderer's inputs here (tests/s5/native_render_inject.sh: the ILP32 object and the headless GL
+  # backend libnxgl.so, EGL surfaceless on Mesa), cached by the hash of their sources; under a minute when it builds
+  local_key=$( { cat "$HERE/native_render_inject.sh" "$HERE/menu_standins.c" "$ROOT/toolchain/game/native_device.cpp" \
+    "$ROOT/toolchain/game/null_d3d9.cpp" "$ROOT/tests/s6n/Makefile"; find "$ROOT/render/native" -type f \( -name '*.c' -o \
+    -name '*.cpp' -o -name '*.h' -o -name '*.glsl' -o -name '*.py' -o -name '*.sh' \) | sort | xargs cat; } 2>/dev/null | sha256sum | cut -c1-16)
+  NR=$FARM_HOME/native_render-$local_key
+  if [ ! -f "$NR/nxrender_inject.o" ] || [ ! -f "$NR/libnxgl.so" ]; then
+    command -v aarch64-linux-gnu-g++ >/dev/null || { [ "$(id -u)" = 0 ] && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+      g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libegl-dev >/dev/null 2>&1; }
+    [ -d "${SSE2NEON:-$ROOT/ext/sse2neon}" ] || bash "$ROOT/tools/fetch.sh" >/dev/null 2>&1 || true
+    log "native renderer inputs -> $NR"
+    bash "$HERE/native_render_inject.sh" "$NR" > "$OUT/native_render_inject.log" 2>&1 \
+      || { log "FARM_NATIVE_RENDER=1: native_render_inject.sh failed (log $OUT/native_render_inject.log)"; exit 1; }
+  fi
+fi
 [ -n "$NR" ] && EMU=("$HERE/native_render.py" --native-render "$NR/nxrender_inject.o" --gpu "$NR/libnxgl.so")
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
