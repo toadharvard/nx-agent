@@ -117,7 +117,9 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     git -C "$NX" fetch -q "$(git -C "$ARTIFACTS" remote get-url origin)" "+refs/heads/$WB:refs/remotes/wip/${WB#wip/}" || { sleep 60; continue; }
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "origin/$BRANCH" || { sleep 60; continue; }
     TAG="${WB//\//_}-"
+    export FARM_WIP_BRANCH=$WB   # the job's publishes: link/<c12> only, never link-head (lib_job.sh publish_link)
   else
+    unset FARM_WIP_BRANCH
     H=$(git ls-remote "$PUBLIC" "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
     if [ -z "$H" ]; then sleep 60; continue; fi
     if [ "$H" = "$(cat "$LAST" 2>/dev/null)" ]; then
