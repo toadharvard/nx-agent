@@ -284,6 +284,21 @@ def native_tables(link, exev=None, names=None):
     return out
 
 
+def _asciiish(a):
+    b = a.to_bytes(4, 'little')
+    return sum(32 <= x < 127 for x in b) >= 2 and all(x == 0 or 32 <= x < 127 for x in b)
+
+
+def exe_len(slots, known):
+    """The exe slots up to the table's real end: the scan runs to the next COL pointer, so a table followed by
+    strings reads them as .text words (R2 / R4: 00700074, 00504942 'tp', 'IBP'). Stop at the first word that is no
+    function the address map knows and looks like ASCII."""
+    for i, a in enumerate(slots):
+        if a not in known and _asciiish(a):
+            return slots[:i]
+    return slots
+
+
 DTOR_RX = re.compile(r'D[012]Ev$|_D[012]$')
 _alias = {}
 
@@ -308,6 +323,7 @@ def gate(link, exe, layout, exev):
     """-> (summary Counter, [bad slot rows])."""
     import vtables
     names = native_names(link)
+    known = set(names.values())
     tabs = native_tables(link, exev, names)
     st = collections.Counter()
     bad = []
@@ -335,15 +351,19 @@ def gate(link, exe, layout, exev):
             st['ungated-unreadable'] += 1
             continue
         st['gated'] += 1
-        exp = expected(row, exev[va].slots)
+        sl_ = exe_len(exev[va].slots, known)
+        if len(sl_) < len(exev[va].slots):
+            st['exe-slots-past-end'] += len(exev[va].slots) - len(sl_)
+        exp = expected(row, sl_)
         nb = len(bad)
         tab_bad = 0
         for j, want in enumerate(exp):
             if j >= len(nat):
-                bad.append((va, row['cls'], row['kind'], j, '', '', 'short'))
+                wa_ = want[1] if isinstance(want, tuple) else want
+                bad.append((va, row['cls'], row['kind'], j, '', '%08x' % wa_, 'short'))   # one row per missing slot
                 st['slot-short'] += 1
                 tab_bad += 1
-                break
+                continue
             sym = nat[j].sym
             a, cat = sym_addr(sym, names)
             wa = want[1] if isinstance(want, tuple) else want
