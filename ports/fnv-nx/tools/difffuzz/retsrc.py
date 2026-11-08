@@ -397,19 +397,106 @@ def _reads(addr, depth):
     return (ecx_read, frozenset(args), every)
 
 
+_EDX = {}
+
+
+def edx_unread(addr, depth=2):
+    """(difffuzz-20, flow) True when the exe code at addr never reads the edx it is entered with (the tree declares a
+    `__fastcall` free function with an unnamed `void *` second parameter, the link's `edx-dummy` bridge class: 587
+    entries; 0x00ba3390's edx is a placeholder, MSVC's callers leave whatever edx held). Every path is followed to its
+    `ret`; a jump out of the function while edx is live counts as a read, a call does not (it clobbers edx); a partial write (dl, dx) keeps edx live. False when it may be read, None without the exe / when the walk
+    cannot follow the code."""
+    key = (addr, depth)
+    if key not in _EDX:
+        try:
+            _EDX[key] = _edx_unread(addr, depth)
+        except Exception:  # noqa: BLE001
+            _EDX[key] = None
+    return _EDX[key]
+
+
+def _edx_unread(addr, depth):
+    pe = _pe()
+    if pe is None:
+        return None
+    import capstone
+    s = pe.section_of(addr)
+    if s is None or not s[2] & 0x20000000:
+        return None
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    base, data = s[0], s[3]
+    seen, work, steps = set(), [(addr, True)], 0
+    while work:
+        a, live = work.pop()
+        while True:
+            if (a, live) in seen:
+                break
+            seen.add((a, live))
+            steps += 1
+            if steps > BYTE_STEPS:
+                return None
+            off = a - base
+            i = next(iter(md.disasm(bytes(data[off:off + 16]), a, 1)), None)
+            if i is None:
+                _EDX['why'] = ('nodis', hex(a))
+                return None
+            m, ops, nxt = i.mnemonic, i.operands, a + i.size
+            if m in ('ret', 'retn'):
+                break
+            if m == 'call':
+                # a call does not read the incoming edx: MSVC sets up a callee's registers itself (a callee that
+                # reads edx gets it set by the caller, never forwarded unchanged from the entry; a forwarding thunk
+                # ends in a jmp, below)
+                live = False
+                a = nxt
+                continue
+            if m == 'jmp':
+                if ops[0].type == capstone.x86.X86_OP_IMM and s[0] <= ops[0].imm < s[0] + s[1] and \
+                        addr <= ops[0].imm < addr + 0x1000:
+                    a = ops[0].imm
+                    continue
+                if live:
+                    return False
+                break
+            read, write = i.regs_access()
+            rn = {i.reg_name(r) for r in read}
+            wn = {i.reg_name(r) for r in write}
+            if m in ('xor', 'sub', 'sbb') and len(ops) == 2 and ops[0].type == ops[1].type == capstone.x86.X86_OP_REG \
+                    and ops[0].reg == ops[1].reg:
+                rn = set()
+            if live and rn & {'edx', 'dx', 'dl', 'dh'}:
+                return False
+            if m.startswith('j'):
+                if ops[0].type != capstone.x86.X86_OP_IMM:
+                    _EDX['why'] = ('jccind', hex(a))
+                    return None
+                work.append((ops[0].imm, live))
+                a = nxt
+                continue
+            if live and wn & {'dx', 'dl', 'dh'}:
+                return False                      # a partial write keeps the incoming upper bits
+            if 'edx' in wn:
+                live = False
+            a = nxt
+    return True
+
+
 def unread_labels(cv, addr):
     """The labels of cv's parameters that the exe code at addr cannot read: `this` / a first parameter in ecx when the
     code never reads ecx at entry, a stack parameter whose word it never reads. Empty without the exe or when the
     code does not say."""
     r = input_reads(addr)
-    if r is None:
-        return set()
-    ecx, args, every = r
     out = set()
+    if r is None:
+        r = (True, frozenset(), True)         # the stack words and ecx are not known; edx is judged on its own
+    ecx, args, every = r
     for lab, space, off, size in getattr(cv, 'x86_declared', cv.x86):
         if lab == 'sret':
             continue
-        if space == 'ecx' and not ecx:
+        if space == 'edx' and edx_unread(addr):
+            out.add(lab)
+        elif space == 'ecx' and not ecx:
             out.add(lab)
         elif space == 'stk' and not every and all(w not in args for w in range(off // 4, (off + max(size, 1) + 3) // 4)):
             out.add(lab)
