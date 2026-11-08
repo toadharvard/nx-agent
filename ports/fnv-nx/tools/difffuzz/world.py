@@ -277,6 +277,11 @@ GARBAGE_XOR = 0
 # filled or left them; classify.py's stub-outparam probe reruns an uninit-arm case that way
 STUB_OUT = False
 
+# difffuzz-20 (args class, cpuid-env): when set to {'seen': [], 'perturb': bool}, the oracle's `cpuid` instructions are
+# recorded (address in 'seen') and, with 'perturb', answered with other values than Unicorn's host model gives;
+# classify.py's cpuid probe uses the pair to show which stored bytes depend on the CPU
+CPUID = None
+
 
 def stack_fill(seed, n):
     if UNIFORM:
