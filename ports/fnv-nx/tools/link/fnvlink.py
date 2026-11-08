@@ -1694,7 +1694,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound, hints, chints)
+                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound, hints, chints,
+                             lay_of=lay_of, probe_req=probe_req)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
@@ -2967,7 +2968,7 @@ def bodies_slot_renames(have, changed, addr_of, per_obj, rebound, undefined):
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
                   stubs=None, overrides=None, exe_path=None, providers=None, also=None, unbound=None, hints=None,
-                  call_hints=None):
+                  call_hints=None, lay_of=None, probe_req=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -3151,7 +3152,36 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 bn = abi.bridge_name(a, 'vslot ' + un)
                 stubs.setdefault(bn, (ADDR_SYM % a, v, 'vtable slot %s' % un, nd['msvc']))
                 return bn, 'bridge (%s)' % ','.join(v.classes or ['moves'])
-            return None, 'abi: ' + how
+            why2 = []
+            if lay_of is not None and nd['unit'] is not None:
+                # aggregates by value: decide on bytes (abi2), as for code references. target_for does not know the
+                # unit that compiles the vtable, so both sides use the definition's unit nd['unit']. The slot as
+                # declared first; the placeholder padding above (the definition's extra arguments) only after that
+                s0 = slot_msvc_sig(isig, ds)
+                cands = [s0] + ([ss] if ss.raw_params != s0.raw_params else [])
+                for sg in cands + [ds]:
+                    for c in [c for _, c in abi.params_of(sg)] + [abi.ret_class(sg)]:
+                        pn_ = abi2.probe_name(c)
+                        if pn_ and '{anon}' not in c and probe_req is not None:
+                            probe_req.add((nd['unit'], pn_))
+                for sg in cands:
+                    w_ = []
+                    p2 = abi2.compare(sg, ds, lay_of(nd['unit']), lay_of(nd['unit']), why=w_)
+                    if p2 is not None and p2.kind == 'same':
+                        return ADDR_SYM % a, 'abi2: same'
+                    if p2 is not None and p2.kind == 'bridge':
+                        bn = abi.bridge_name(a, 'vslot ' + un)
+                        code = abi2.emit(bn, ADDR_SYM % a, p2, 'vtable slot %s | def: %s' % (un, nd['msvc']))
+                        if code is not None:
+                            stubs.setdefault(bn, code)
+                            st['vslot-abi2-bridge'] += 1
+                            return bn, 'abi2 bridge (%s)' % ','.join(p2.classes or ['moves'])
+                        w_.append('bridge frame over 4 KiB')
+                    elif p2 is not None:
+                        w_.append(p2.kind + (' (' + ','.join(p2.classes + p2.notes) + ')' if p2.classes or p2.notes
+                                             else ''))
+                    why2.extend(w for w in w_ if w not in why2)
+            return None, 'abi: ' + how + ('; abi2: ' + '; '.join(why2) if why2 else '')
         return ADDR_SYM % a, how
 
     target_for = slotfill2.secondary_entry(target_for, native, ADDR_SYM, MSVC_ENTRY_SYM, st)   # S2c-vt2
