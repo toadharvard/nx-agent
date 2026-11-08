@@ -29,4 +29,14 @@ ok "compiled again from the cache: the same objects, the failing unit's error re
 echo 'int K = 8;' > "$T/tree/include/k.h"; touch "$T/tree/src/a.cpp"
 cc FNVNX_UNIT_OBJCACHE=$T/cache
 ok "a changed header: a miss, a new object" '! cmp -s "$T/plain/src_a.cpp.o" "$T/out/src_a.cpp.o" && [ "$(find "$T/cache/r" -name "*.o" | wc -l)" = 3 ]'
+# the dependency file the pipeline asks for (build.py: CXX="g++ -MD", it reads <unit>.o.d for its mtime checks): written
+# on a miss and on a hit, naming the headers (link/ef092d51de92: the cache wrote none, every cached object looked
+# current forever and S1's RAWVT1-MEM never reached the link)
+rm -rf "$T/out" "$T/cache2"
+CXX="aarch64-linux-gnu-g++ -MD" cc FNVNX_UNIT_OBJCACHE=$T/cache2
+ok "a miss: <unit>.o.d written where gcc -MD puts it, naming the header" 'grep -q "include/k.h" "$T/out/src_a.cpp.o.d" && grep -q "src/a.cpp" "$T/out/src_a.cpp.o.d"'
+rm -f "$T/out"/*.o "$T/out"/*.o.d "$T/out"/*.ok
+CXX="aarch64-linux-gnu-g++ -MD" cc FNVNX_UNIT_OBJCACHE=$T/cache2
+ok "a hit: <unit>.o.d written from the recorded dependencies (the header too)" 'grep -q "include/k.h" "$T/out/src_a.cpp.o.d" && grep -q "src/a.cpp" "$T/out/src_a.cpp.o.d"'
+ok "build.py: a unit with no dependency file is compiled again, never kept" 'grep -q "if deps is None or any((mtime(p) is None or mtime(p) > ot) for p in deps):" "$P/tools/pipeline/build.py"'
 [ $fails = 0 ] && echo "test_unit_objcache: all ok" || { tail -n 20 "$T/cc.log"; echo "test_unit_objcache: $fails failed"; exit 1; }

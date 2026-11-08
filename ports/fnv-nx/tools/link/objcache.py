@@ -270,6 +270,17 @@ def _paths(root, mk):
     return (os.path.join(root, 'm', mk[:2], mk + '.json'),)
 
 
+def got_deps(root, mk, rk):
+    """The file dependencies (no directory entries) recorded with result rk of manifest mk."""
+    try:
+        for v in json.load(open(_paths(root, mk)[0])):
+            if v.get('r') == rk:
+                return [(p, h) for p, h in v['deps'] if not p.endswith('/')]
+    except (OSError, ValueError, KeyError):
+        pass
+    return []
+
+
 def lookup(root, mk):
     mp, = _paths(root, mk)
     try:
@@ -331,6 +342,33 @@ def store(root, mk, deps, rc, err, obj, skip_dir=None):
     return True
 
 
+def caller_depfile(flags, obj, cwd):
+    """The dependency file the caller asked gcc for (-MD / -MMD), or None: -MF's value, else gcc's default, the -o name
+    with its last suffix replaced by .d (build.py's CXX='g++ -MD' with -o x.o.tmp: x.o.d)."""
+    if '-MD' not in flags and '-MMD' not in flags:
+        return None
+    p = None
+    for i, t in enumerate(flags):
+        if t == '-MF' and i + 1 < len(flags):
+            p = flags[i + 1]
+        elif t.startswith('-MF') and len(t) > 3:
+            p = t[3:]
+    if p is None:
+        p = os.path.splitext(obj)[0] + '.d'
+    return p if os.path.isabs(p) else os.path.join(cwd, p)
+
+
+def write_depfile(path, target, deps):
+    """A make rule `target: deps` as gcc -MD writes it (spaces escaped), for a hit: the caller's mtime checks
+    (build.py's compile stage reads <unit>.o.d) see the dependencies as if the compiler had run (T1: without it every
+    cached object looked up to date forever, and link/ef092d51de92 kept objects from before S1's RAWVT1-MEM)."""
+    esc = lambda p: p.replace(' ', '\\ ')
+    tmp = '%s.%d.%d.tmp' % (path, os.getpid(), threading.get_ident())
+    with open(tmp, 'w', errors='surrogateescape') as f:
+        f.write('%s: %s\n' % (esc(target), ' \\\n '.join(esc(d) for d in deps)))
+    os.replace(tmp, path)
+
+
 def compile(cxx, flags, src, obj, cwd, timeout=None):
     """Run `cxx *flags src -o obj` in cwd, or give back the cached result of the same compile.
     -> (returncode, stderr text). The object is at obj when the returncode is 0 (and absent otherwise).
@@ -357,8 +395,14 @@ def compile(cxx, flags, src, obj, cwd, timeout=None):
             empty = True
         if empty:
             got = None    # an empty cached object (a store cut short): compile again (layoutgate af034f14, sw30)
+    want_d = caller_depfile(flags, obj, cwd)
     if got is not None and not verify:
         rk, rp, meta = got
+        if want_d:
+            try:
+                write_depfile(want_d, obj, [p for p, _ in got_deps(root, mk, rk)] or [src])
+            except OSError:
+                pass
         if meta['rc'] == 0:
             tmp = obj + '.cache.tmp'
             shutil.copyfile(rp + '.o', tmp)
@@ -418,6 +462,11 @@ def compile(cxx, flags, src, obj, cwd, timeout=None):
             with _lock:
                 STATS['store_errors'] += 1
             print('objcache: store failed: %r' % e, file=sys.stderr, flush=True)
+    if want_d and os.path.exists(dfile):
+        try:
+            shutil.copyfile(dfile, want_d)   # what gcc wrote, where the caller asked for it
+        except OSError:
+            pass
     try:
         os.remove(dfile)
     except OSError:

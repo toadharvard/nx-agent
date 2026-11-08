@@ -1473,7 +1473,9 @@ class Compile(Stage):
             if os.path.isfile(o):
                 deps = parse_depfile(base + '.o.d')
                 ot = os.stat(o).st_mtime_ns
-                if deps is not None and any((mtime(p) is None or mtime(p) > ot) for p in deps):
+                # no dependency file: not known to be up to date, so compiled again (T1: the unit cache's objects had
+                # none, so every one looked current and link/ef092d51de92 kept objects from before S1's RAWVT1-MEM)
+                if deps is None or any((mtime(p) is None or mtime(p) > ot) for p in deps):
                     os.remove(o)
                     stale += 1
                 else:
