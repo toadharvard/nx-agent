@@ -39,7 +39,14 @@
   - What the exe does: 0x00e04f80 at e04fb9..e04fd0 reads vtable slot 5 (+0x14) and makes a thiscall with (owner, name).
   - Before the recon, the native code read 8 bytes at offset 40 of a 4-byte-slot table.
   - With the recon, GCC calls through FNVNX_D26_SLOT(5): the compiled code reads [vt, #24]. MSVC keeps the original.
-  - It is the only pointer-to-member field in the tree. The 6 other PMF typedefs are locals.
+* **memfnptr fix 2**, recon/s1_nitexturecodec_conv_fn (ef1b1008):
+  - The site: Conv's decodeA / decodeB are pointers to member functions, so sizeof(Conv) is 24 natively and 16 under
+    MSVC.
+  - The exe embeds a Conv at +0x780 of its caller's object: 0x00a7a2c8 lea ecx,[ebx+0x780] / call 0x00a8be70.
+  - With the recon, GCC uses plain function pointers that take `this`, assigned through captureless lambdas.
+    sizeof(Conv) is 16 natively (static_assert in a test compile).
+  - The other pointer-to-member typedefs in the tree are a local (hkpwheelconstraintdata), unused
+    (navmeshobstaclemanager), or already fixed by XINC1 (computersmenu).
 * **START (farms)**: please run `layoutgate` again on a head that has 6c9a8ee0 and VFPAD1. The whole-tree report
   cf66957439a9 predates the filler fix, TAIL1-PACK and the new causes.
 * Next: vfpad-src classes (per-class base recons), and the remaining whole-tree causes from the new report.
