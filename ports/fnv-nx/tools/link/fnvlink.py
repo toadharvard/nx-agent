@@ -2996,6 +2996,18 @@ def flags0_slot(isig, nd, ds, exe_path, a):
     return flags_param(ds) and bool(exe_path and exevft.deleting_dtor(exe_path, a))
 
 
+GSYN_SYM = '__fnvnx_vgsyn_%08x'   # a synthesised D0 for an exe ??_G no unit compiles: its destructor, then delete
+
+
+def emit_gsyn_stub(name, dtor):
+    """D0 = `dtor(this); operator delete(this); return this` (ILP32: pointers in w registers)."""
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
+                      '    stp x29, x30, [sp, #-32]!', '    mov x29, sp', '    str x19, [sp, #16]', '    mov w19, w0',
+                      '    bl %s' % dtor, '    mov w0, w19', '    bl _ZdlPv', '    mov w0, w19', '    ldr x19, [sp, #16]',
+                      '    ldp x29, x30, [sp], #32', '    ret', '    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
 def emit_gdel_stub(name, d0, d1):
     return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
                       '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
@@ -4219,6 +4231,14 @@ def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None, u
         return FLAG_SYM % (a0, 0), FLAG_SYM % (a0, 1)
     if nd is None and uncompiled and exe_path and os.environ.get('FNVNX_D26U', '1') != '0' and \
             exevft.deleting_dtor_callee(exe_path, a0) is not None:
+        x_ = exevft.deleting_dtor_callee(exe_path, a0)
+        if native.get(x_) is not None and os.environ.get('FNVNX_GSYN', '1') != '0':
+            # W48's 32 bodiless ??_G (bhkFixedConstraint 00cc7e50, ExtraEditorID 0041c660): the ??_G is MSVC's plain
+            # `call X; test flags; delete`, and X (the destructor) has a native: D1 = X, D0 = X then operator delete
+            t = GSYN_SYM % a0
+            bridges.setdefault(t, emit_gsyn_stub(t, ADDR_SYM % x_))
+            st['slot0-dtor-synth'] += 1
+            return ADDR_SYM % x_, t
         pair = []
         for v_ in ('D1', 'D0'):
             t = TRAP_SYM % int(hashlib.sha1((XTRAP % a0 + ' ' + v_).encode()).hexdigest()[:8], 16)
