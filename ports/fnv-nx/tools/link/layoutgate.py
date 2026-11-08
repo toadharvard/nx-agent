@@ -47,12 +47,41 @@ Rec = collections.namedtuple('Rec', 'name size align fields bases vptr packed')
 # fields: [(offset or None for a bitfield, name, type)]; bases: [(offset, name, kind)]
 
 
+_SYSDIRS = None
+
+
+def native_system_dirs():
+    """the native compiler's C++ and C system include dirs (not GCC's own builtin headers: clang has its own), for the
+    MSVC side as -idirafter: the msvc target has no headers of its own, and a missing <string.h> / <cstddef> is a fatal
+    error after which clang stops instantiating templates (a template base dropped out of every record using it)"""
+    global _SYSDIRS
+    if _SYSDIRS is None:
+        dirs = []                     # published whole: the gate's threads read _SYSDIRS concurrently
+        try:
+            r = subprocess.run([layout.CXX, '-mabi=ilp32', '-xc++', '-E', '-v', '-'], input='', capture_output=True,
+                               text=True, timeout=60)
+            txt = r.stderr.split('#include <...> search starts here:')[1].split('End of search list.')[0]
+            for d in txt.split():
+                d = os.path.normpath(d)
+                if re.search(r'/gcc(?:-cross)?/[^/]+/\d+/include$', d):
+                    continue
+                dirs += ['-idirafter', d]
+        except (OSError, IndexError, subprocess.TimeoutExpired):
+            pass
+        _SYSDIRS = dirs
+    return _SYSDIRS
+
+
 def msvc_flags(tree):
     sse = os.environ.get('SSE2NEON') or os.path.join(PORT, 'ext', 'sse2neon')
     return ['--target=i686-pc-windows-msvc', '-std=gnu++17', '-fsyntax-only', '-fms-extensions', '-fshort-wchar',
             '-fsigned-char', '-U_MSC_VER', '-U_WIN32', '-U_WIN64', '-U_M_IX86', '-U_M_IX86_FP',
             '-fms-compatibility-version=0',   # the native compile's branches: no Windows target macros
             '-D__aarch64__', '-D__ILP32__',
+            # fnvnx_compat.h's sized operator delete block includes <cstddef>, which the msvc target lacks: the fatal
+            # error stops clang instantiating templates, and a template base dropped out of its derived records
+            # (frondengine _Vector_val 4 bytes instead of 12)
+            '-D__cpp_sized_deallocation=201309L',
             '-Wno-everything', '-ferror-limit=0',
             # the SIMD types as MSVC defines them (__m64 8/8, __m128 16/16, ...): the shim's SSE headers are
             # sse2neon (AArch64) and stay out by their guards; their function bodies do not affect records
@@ -61,7 +90,7 @@ def msvc_flags(tree):
             '-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
             '-include', os.path.join(HERE, 'layoutgate_msvc', 'fnvnx_lg_msvc_post.h'),   # the shim's fillers off
             '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + sse, '-I' + os.path.join(tree, 'include'),
-            '-Xclang', '-fdump-record-layouts-complete']
+            '-Xclang', '-fdump-record-layouts-complete'] + native_system_dirs()
 
 
 _LINE = re.compile(r'^\s*(\d+)(?::(\d+-\d+|-))?\s*\|( *)(.*)$')
