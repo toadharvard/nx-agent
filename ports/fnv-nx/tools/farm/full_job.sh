@@ -27,6 +27,7 @@
 # Needs: link_job.sh's, plus g++; for fnvnx-a64: libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex; python
 # unicorn; for TESTS=all also qemu-user, cmake, meson, ninja-build. FARM_APT=1 installs them (root).
 set -euo pipefail
+unset FNVNX_STUB_NULLDEV   # the stub boot (4b) sets it for itself only; never the raw boot or the product (S5 a3b368ed)
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../../.." && pwd)
@@ -182,6 +183,7 @@ fi
 # 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
 # known faults (docs/TOOLCHAIN.md section 18), so the frontier beyond them is published next to the raw boot's
 # (boot/stub/). tests/s5/farm_boot.sh FARM_BOOTS=stub on the pipeline's build directory; under a minute.
+# step-4b-begin
 STUB=$F/build/boot/stub
 rm -rf "$STUB"
 if [ $INPUTS = 1 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
@@ -189,12 +191,18 @@ if [ $INPUTS = 1 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso
 	IMG=${GAME_EXE:-$F/build/boot/synth/synth.exe}; [ -f "$IMG" ] || IMG=""
 	# EMU_EXTRA=--plat (R4, recon4-013): the platform lane's data (unimplemented calls, failed opens, decode and input
 	# failures) from every full job's boot path
+	# FNVNX_STUB_NULLDEV=1 (S5 a3b368ed): CreateDevice succeeds on the null device in a logged measurement mode, so
+	# the stub boot's frontier goes past the renderer. This boot only, never the raw boot or the product;
+	# FULL_STUB_NULLDEV=0 runs it without. boot/stub/nulldev records the value (the report and the ratchet name it).
+	NULLDEV=${FULL_STUB_NULLDEV:-1}; mkdir -p "$STUB"; echo "$NULLDEV" > "$STUB/nulldev"
+	FNVNX_STUB_NULLDEV=$NULLDEV \
 	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub EMU_EXTRA="${FULL_EMU_EXTRA:---plat}" \
 		FARM_UNITS="${TREE:+$TREE/build/units.json}" PY="${PY:-python3}" EMU_TIMEOUT="${EMU_TIMEOUT:-3000}" \
 		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" $IMG > "$F/stub_boot-$C12.log" 2>&1 \
 		|| log "farm_boot.sh (stub boot) exited $?"
 	ls -1t "$F"/stub_boot-*.log | tail -n +6 | xargs -r rm -f
 fi
+# step-4b-end
 # 4c. S5's work list of hand-stored image vptrs (tests/s5/hand_vptrs.py): each vptr store of an image vftable
 # address in the prepared tree, how this link binds it and the rule that fixes it, boot-hit addresses first;
 # published as boot/hand_vptrs*.tsv. About a minute.
