@@ -73,8 +73,8 @@ def main():
           not sg[0].recheck({'hint': {'cause': 'signedness?'}}), 'd20-sign rechecks old signedness records')
     ch = [c for c in fnkeys.CHANGES if c.tag == 'd19-bool']
     check(len(ch) == 1 and ch[0].recheck({'hint': {'cause': 'bool-repr'}}) and
-          not ch[0].recheck({'hint': {'cause': 'nan-bits'}}) and fnkeys.SCOPED == 'd20',
-          'd19-bool rechecks old bool-repr records; SCOPED d20')
+          not ch[0].recheck({'hint': {'cause': 'nan-bits'}}) and fnkeys.SCOPED >= 'd20',
+          'd19-bool rechecks old bool-repr records; SCOPED d20 or later')
     print('%d failures' % len(FAIL))
     return 1 if FAIL else 0
 

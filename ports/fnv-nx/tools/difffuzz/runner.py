@@ -397,7 +397,8 @@ class Pair:
             if self.deadline is not None and time.time() > self.deadline:
                 raise FunctionTimeout()
             rx, ra, d = self._run(case, max_steps)
-            if rx.error and rx.error.startswith('fault:') and not (ra.error or '').startswith('fault:'):
+            if not (ra.error or '').startswith('fault:') and \
+                    ((rx.error or '').startswith('fault:') or self._derailed(rx)):
                 got = self._learn_pop(case, max_steps, rx)
                 if got is not None:
                     rx, ra, d = got
@@ -443,10 +444,31 @@ class Pair:
         for x in reversed(ins[:i] if i is not None else []):
             if x.mnemonic == 'push':
                 n += 1
+            elif x.mnemonic.startswith('j') and x.mnemonic != 'jmp':
+                # a conditional branch between the pushes and the call (00e899a0: the arguments, then a switch
+                # on a type field, then `call edx`): walk on. Only an upper bound is needed (_learn_pop tries
+                # every count below it and keeps the one that runs clean)
+                continue
             elif x.mnemonic in ('call', 'ret', 'jmp', 'pop', 'leave') or x.mnemonic.startswith(('j', 'loop')) or \
                     (x.op_str.startswith('esp,') and x.mnemonic in ('add', 'sub', 'mov', 'lea', 'and')):
                 break
         return min(n, 8)
+
+    def _derailed(self, rx):
+        """The oracle ran on after an intercepted call of unknown convention with its stack off, without faulting
+        (F1-callflow): the `ret` that should leave the caller popped an argument word instead, and the word was
+        a planted pointer or a canned result, so execution reached unmapped or planted memory, which the x86 engine
+        intercepts as one more wild call (another, and another, until the epilogue stub). Shape: an intercepted
+        call with pop_unknown, then a call that returns outside the loaded oracle code, or the target returns with
+        an unbalanced esp. Without this, the extra wild calls read as native-early-exit."""
+        calls = rx.calls
+        k = next((i for i, c in enumerate(calls) if getattr(c, 'pop_unknown', False)), None)
+        if k is None:
+            return False
+        if rx.esp_ok is False:
+            return True
+        return any(getattr(c, 'ret_to', None) is not None and not self.xe._in_loaded(c.ret_to)
+                   for c in calls[k + 1:])
 
     def _learn_pop(self, case, max_steps, rx):
         """The oracle faulted after an intercepted call whose callee pops an unknown number of bytes (a call through
@@ -458,23 +480,36 @@ class Pair:
         the loaded oracle code (a wrong count returns to an argument word, which then reads as a wild call).
         Learned per call site for every later case. -> (rx, ra, d) of the clean run, or None."""
         import itertools
-        sites = []
+        sites, cdecl = [], set()
         for c in rx.calls:
             ra_ = getattr(c, 'ret_to', None)
             if not getattr(c, 'pop_unknown', False) or ra_ is None or ra_ in sites or ra_ in self.pops_tried:
                 continue
+            if not self.xe._in_loaded(ra_):
+                continue                                    # a return to an argument word: a symptom, not a site
             try:
-                after = bytes(self.xe.uc.mem_read(ra_, 2))
+                after = bytes(self.xe.uc.mem_read(ra_, 8))
             except Exception:  # noqa: BLE001
                 after = b''
             if after[:2] in (b'\x83\xc4', b'\x81\xc4') or after[:1] == b'\x59':
-                continue                                    # the caller cleans up: cdecl, nothing popped
+                # the caller adjusts esp right after: cdecl cleanup, nothing popped; unless the adjustment is the
+                # frame's own `add esp, N` going straight to the epilogue (pops, `ret`): then a stdcall callee
+                # is as likely (a COM call through a vtable: 00b7c7b0's `call eax; add esp, 0x20; ret 4`), and
+                # 0 is tried first, the pushes after it
+                n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 0
+                rest = after[n:].lstrip(b'\x5b\x5d\x5e\x5f')
+                if not n or rest[:1] not in (b'\xc2', b'\xc3'):
+                    continue
+                cdecl.add(ra_)
             sites.append(ra_)
         sites = sites[:3]
         if not sites:
             return None
         self.pops_tried.update(sites)
-        cands = [[4 * n for n in range(self._pushes_before(a), 0, -1)] + [0] for a in sites]
+        # no push in the straight line before the call (the arguments pushed before a branch, 00e899a0): any count
+        # up to 6 words, each checked by clean()
+        cands = [([0] if a in cdecl else []) + [4 * n for n in range(self._pushes_before(a) or 6, 0, -1)] +
+                 ([] if a in cdecl else [0]) for a in sites]
 
         def clean(got):
             x = got[0]

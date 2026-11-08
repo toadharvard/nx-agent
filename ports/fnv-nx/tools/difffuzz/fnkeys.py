@@ -102,6 +102,10 @@ def _indirect(f):
     return f.oindirect
 
 
+def _old_callflow(rec):
+    return (rec.get('divergence') or {}).get('kind') in ('call-count', 'call-target')
+
+
 def _statics(f):
     return f.ostatic or any(isinstance(n, str) and n.startswith(('_ZZ', '_ZGVZ')) for n in f.nrefs)
 
@@ -143,8 +147,15 @@ CHANGES = [
     Change('d20-malloc', 'functions whose oracle code calls the CRT malloc (0x00ecd1c7): it returns a fresh heap block '
            'like the game allocators (world.ALLOCATORS) and pairs with operator new / MemoryManager::Allocate by '
            'family (libcalls.FAMILY)', selects=_crt_malloc),
+    Change('d24-pop', 'functions whose oracle code (or a same-unit function it runs) makes indirect calls, IAT calls '
+           'included: an intercepted callee of unknown convention whose wrong pop sent the oracle on into argument '
+           'words without a fault (wild calls) is learned too; every IAT slot is named by its import library '
+           'spelling and pops its stdcall bytes (the decomp\'s C++ spellings of an import popped 0); and cached '
+           'call-count / call-target records, for callers of the exe\'s `jmp [__imp_X]` thunks (the import\'s bytes, '
+           'or unknown and learned, instead of the placeholder definition\'s 0)', selects=_indirect,
+           recheck=_old_callflow),
 ]
-SCOPED = 'd20'
+SCOPED = 'd24'
 
 
 def harness_tag():

@@ -19,6 +19,37 @@ import runner
 import libcalls
 
 STUB_ADDR = re.compile(r'^__fnv(?:nx_br)?_([0-9a-f]{8})')
+_C_DECORATED = re.compile(r'^__imp__([A-Za-z_]\w*)@(\d+)$')
+
+
+def import_identity(counts, spellings):
+    """(name, stdcall bytes) of one IAT slot from every `__imp_` spelling units.json gives it (F1-callflow).
+
+    The decomp declares many imports itself as C++ functions (`__imp_?FreeLibrary@@YG...`, or a placeholder
+    `__imp_?IMP_fdf0a8@fnv_004da670@@YG...`) beside the import library's C spelling (`__imp__FreeLibrary@4`). The
+    most common spelling used to win, and a C++ spelling carries no `@N`: the stub popped 0 bytes for a stdcall
+    import, esp stayed off by its arguments, and the oracle's `ret` went to an argument word (wild calls after the
+    import, read as native-early-exit). Now: the name is the most common C spelling (the export), else the C++
+    identifier without `?`; the stack bytes come from a C spelling's `@N` (the chosen name's first), else from a
+    `__stdcall` C++ spelling's parameters (conv.py), else 0 (cdecl, or nothing known)."""
+    c = [(nm, n) for nm, n in counts.items() if not nm[0].startswith('?')]
+    if c:
+        (name, pop), _ = max(c, key=lambda x: (x[1], x[0][1] > 0, x[0][0]))
+    else:
+        (name, pop), _ = max(counts.items(), key=lambda x: (x[1], x[0][0]))
+        name = name.lstrip('?')
+    if pop:
+        return name, pop
+    dec = [(m.group(1), int(m.group(2))) for m in (_C_DECORATED.match(s) for s, _ in spellings) if m]
+    for nm, n in sorted(dec, key=lambda x: x[0] != name):
+        return name, n                         # an explicit `@N`, the chosen name's first (`@0` included)
+    for s, src in spellings:
+        if s.startswith('__imp_?') and '@@YG' in s:
+            try:
+                return name, convmod.Conv(s[len('__imp_'):], src).pop
+            except Exception:  # noqa: BLE001 - a parameter type conv.py cannot place: nothing known
+                continue
+    return name, 0
 MSVC_VFT = re.compile(r'^\?\?_7((?:[A-Za-z_]\w*@)+)@6B@$')
 
 
@@ -180,6 +211,20 @@ class UnitCache:
                         pops.add(int(ins.op_str, 0) if ins.op_str else 0)
                 if len(pops) == 1:
                     got = pops.pop()
+                elif not pops and f['code'][:2] == b'\xff\x25':
+                    # an import thunk `jmp dword ptr [__imp_X]` (no ret of its own; F1-callflow: the decomp
+                    # defines the exe's D3DX thunks as `void FUN_00ee6df2(void)` placeholders, whose cdecl
+                    # declaration popped 0 for a stdcall import): the import's own stack bytes
+                    self.import_stubs()
+                    for _rel, _kind, tg, _x in f.get('relocs', ()):
+                        if tg in self._iat:
+                            got = self._imports[(self._iat[tg] - libcalls.IMPORT_BASE) // 16][1]
+                            break
+                    else:
+                        # a slot units.json names only as data (`?g_D3DXVec3TransformNormal@@3P6AXXZA`): no import
+                        # stub, no stack bytes; the declaration's are not evidence either. callee_info answers
+                        # None: the pop is unknown and runner.Pair._learn_pop finds it from the run
+                        self.__dict__.setdefault('_thunk_unknown', set()).add(addr)
         cache[addr] = got
         return got
 
@@ -265,6 +310,8 @@ class UnitCache:
         def info(addr):
             cv = conv_of(addr)
             pop = self.oracle_ret_pop(addr)
+            if addr in getattr(self, '_thunk_unknown', ()):
+                return None
             if cv is None:
                 return (pop, 'int') if pop is not None else None
             kind = 'int'
@@ -408,18 +455,20 @@ class UnitCache:
         common); the slots are pinned to x86 import stubs (iat_pins)."""
         if self._imports is None:
             names = collections.defaultdict(collections.Counter)
+            spell = collections.defaultdict(list)          # slot -> [(decorated spelling, unit source)]
             for u in self.units:
                 for n, a in u['symbols'].items():
                     if n.startswith('__imp_'):
                         ad = int(a, 16)
                         if 0x00fdf000 <= ad < 0x00fe0000:
                             names[ad][libcalls.import_name(n)] += 1
+                            spell[ad].append((n, u['source']))
             self._iat = {}
             self._imports = {}
             for k, ad in enumerate(sorted(names)):
                 if k >= libcalls.IMPORT_MAX:
                     break
-                nm = names[ad].most_common(1)[0][0]
+                nm = import_identity(names[ad], spell[ad])
                 self._imports[k] = nm
                 self._iat[ad] = libcalls.IMPORT_BASE + 16 * k
                 runner.IMPORTS[libcalls.import_id(nm[0])] = nm[0]
