@@ -1028,9 +1028,11 @@ at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus
   `_ZTV26FUN_00aa2230_BSNiAllocator` ran the wrong slot (the heap's Allocate ran an empty slot returning `this`). A table
   is now rebuilt whole as a strong copy in D26's layout (D1/D0 from exe slot 0 by `vmo_dtor_slots`, exe slot k at k + 1 by
   `exe_slot_target`, free-function slots through the `__fnvnx_vfree_` this-drop thunks) only on evidence: the exe vftable
-  is in S1's D22 list (`d22.json` under FNVNX_RECON, `load_d22_list`): the classes prepare's D22 / D26 (b) converted,
-  so their callers are minus-one. A placeholder name alone is no evidence (an unlisted class is not converted and its
-  callers keep the exe's order), and no code may name slot 0 (D22-USED keeps the exe order). Tables with no evidence are
+  is in S1's D22 list (`d22.json` under FNVNX_RECON) or prepare's applied list (`build/d22_applied.tsv`), or slot 0 is
+  a call-only placeholder (D26 (b) gives every call-only declaration `virtual ~X()`, so its callers are minus-one:
+  the S1-rules / S2-bodies contract of 2026-11-08, D26 "minus-one everywhere"). Excluded: a slot 0 that code names
+  (D22-USED keeps the exe order), and a defined, named slot 0 (BSNiAllocator::Destroy) with no list evidence. Tables
+  with no evidence are
   counted as `exe-order-no-evidence`. A caller in the exe's order for the same class (BSNiAllocator's InitHolder
   0x00aa2020 loads offset 28) disagrees with a shifted table: S1 converts it first or together.
 

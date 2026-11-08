@@ -76,11 +76,11 @@ def main():
              '_ZTV5Plain': (t0.asm_group(tmp, 'd', '_ZTV5Plain', ['_ZN5Plain7DestroyEj', '__fnv_00401010', '__fnv_00401020']),
                             V['D']),
              '_ZTV4Pair': (t0.asm_group(tmp, 'e', '_ZTV4Pair', ['_ZN4PairD1Ev', '_ZN4PairD0Ev', '__fnv_00401010', '__fnv_00401020']), V['E'])}
-        st, br, traps = run(tmp, exe, g, exev, native, listed={V['A'], V['B']}, called={'_ZN4Used3v00Ev'})
+        st, br, traps = run(tmp, exe, g, exev, native, listed={V['B']}, called={'_ZN4Used3v00Ev'})
         w = words(br, '_ZTV3Foo')
         check(w[:2] == ['0x0', '_ZTI3Foo'] and w[2:] == ['__fnv_00401000_D1', '__fnv_00401000', '__fnv_00401010',
                                                          '__fnv_00401020'],
-              'D22-listed placeholder v00 (no pair): offset-to-top, typeinfo, D1, D0, then exe slot k at k + 1: %s' % w)
+              'call-only placeholder v00 (no pair, D26 rule): offset-to-top, typeinfo, D1, D0, then exe slot k at k + 1: %s' % w)
         w = words(br, zb)
         check(w[2:4] == ['__fnv_00401000_D1', '__fnv_00401000'] and w[4] == '__fnvnx_vfree_00401200' and
               w[5] == '__fnv_00401020' and w[6] == '__fnvnx_vfree_00401200',
@@ -90,12 +90,13 @@ def main():
         check('zzvtext__ZTV4Used' not in br, 'a placeholder called by name stays in the exe order')
         check('zzvtext__ZTV5Plain' not in br, 'a named slot 0 with no evidence stays as it is (no copy)')
         check('zzvtext__ZTV4Pair' not in br, 'a table with a pair is left alone')
-        check(st['d26-minus-one'] == 2 and st['d26-minus-one-d22-list'] == 2 and
-              st['d26-minus-one-callonly-placeholder'] == 0 and st['exe-order-no-evidence'] == 2
+        check(st['d26-minus-one'] == 2 and st['d26-minus-one-d22-list'] == 1 and
+              st['d26-minus-one-d26-callonly'] == 1 and st['exe-order-no-evidence'] == 2
               and st['d26-minus-one-BSNiAllocator'] == 1, 'counted: %s' % dict(st))
-        # an unlisted placeholder class: prepare did not convert it, so its callers number the slots as the exe does
-        _, bu, _ = run(tmp, exe, g, exev, native, listed={V['B']}, called={'_ZN4Used3v00Ev'})
-        check('zzvtext__ZTV3Foo' not in bu, 'a placeholder class not in the D22 list stays in the exe order')
+        # a named slot 0 with no list evidence (BSNiAllocator::Destroy unlisted) stays in the exe's order
+        _, bu, _ = run(tmp, exe, g, exev, native, listed=set(), called={'_ZN4Used3v00Ev'})
+        check('zzvtext__' + zb not in bu and 'zzvtext__ZTV3Foo' in bu,
+              'unlisted: the named slot 0 stays in exe order, the call-only placeholder is still minus-one')
         os.environ['FNVNX_D26T'] = '0'
         try:
             _, br0, _ = run(tmp, exe, g, exev, native, listed={V['B']})
@@ -122,6 +123,12 @@ def main():
             '{"format":"fnvnx-d22/1","classes":[{"class":"BSNiAllocator","members":["Destroy"],"vftables":["010a2528"]}]}')
         lst, n = fnvlink.load_d22_list(d)
         check(lst == {0x010a2528} and n == 1 and fnvlink.load_d22_list(None) == (set(), 0), 'load_d22_list reads d22.json')
+        tr = os.path.join(tmp, 'tree'); os.makedirs(os.path.join(tr, 'build'), exist_ok=True)
+        open(os.path.join(tr, 'build', 'd22_applied.tsv'), 'w').write(
+            'file\tclass\tmember\tkind\tvftables\n' 'a.cpp\tBSNiAllocator\tDestroy\tlisted\t010a2528\n'
+            'b.cpp\tFoo\tv00\tcallonly\t\n')
+        check(fnvlink.load_d22_applied(tr) == {0x010a2528} and fnvlink.load_d22_applied(None) == set(),
+              'load_d22_applied reads the listed rows of build/d22_applied.tsv')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('%d failed' % len(FAILS))

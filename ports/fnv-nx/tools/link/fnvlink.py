@@ -1652,6 +1652,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         byclass['vslot-exe'] += fill.get('bound_refs', 0)
         # primary vtables shorter than the exe's: an extended strong copy (the exe's remaining slots)
         d22_listed, d22_files = load_d22_list(os.environ.get('FNVNX_RECON'))
+        d22_applied = load_d22_applied(os.path.dirname(os.path.dirname(os.path.abspath(units_json)))) \
+            if units_json else set()
+        vstats['d22-applied-vftables'] = len(d22_applied)
+        d22_listed = set(d22_listed) | d22_applied
         ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
                                 exe_path, providers, exe_alt, msvc, d22_listed,
                                 lambda c_: code_refs([u.obj for u in have], c_))
@@ -3388,13 +3392,36 @@ def load_d22_list(top):
     return got, n
 
 
+def load_d22_applied(tree):
+    """The exe vftables of the classes prepare's D22 actually converted: build/d22_applied.tsv of the prepared tree
+    (S1-rules' POST hook; columns file, class, member, kind, vftables). Rows of kind `listed` carry the vftables; a
+    call-only row names none. Empty without the file."""
+    got = set()
+    p = os.path.join(tree or '', 'build', 'd22_applied.tsv')
+    if not tree or not os.path.exists(p):
+        return got
+    for line in open(p, encoding='utf-8', errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if len(f) < 5 or line.startswith('#') or f[0] == 'file':
+            continue
+        for w in re.split(r'[ ,]+', f[4].strip()):
+            if re.fullmatch(r'(?:0x)?[0-9a-fA-F]{6,8}', w):
+                got.add(int(w, 16))
+    return got
+
+
 def d26_minus_one_reason(z, v, raw_names, d, listed, called):
     """Why the table z (exe vftable v, slot symbols raw_names, destructor pair position d) is a minus-one table though
-    it holds no D1/D0 pair, or None:
-      'd22-list'             v is a vftable of a class in S1's D22 list (load_d22_list), and no code names slot 0
-                             (D22-USED leaves the placeholder, and its callers number the slots as the exe does);
-    A table with a pair is minus-one already; one with no evidence stays in the exe's order, which is what callers
-    compiled against a dtor-less declaration use. called: symbols referenced from code (not vtables) by any object."""
+    it holds no D1/D0 pair, or None. D26 (docs/ARCHITECTURE.md): natively every polymorphic object is dispatched
+    minus-one; D26 (b) gives every call-only declaration's slot-0 placeholder a `virtual ~X()`, so its callers number
+    the slots minus-one whichever vftable they reach:
+      'd22-list'      v is a vftable of a class in S1's D22 list (d22.json) or of a class prepare converted
+                      (build/d22_applied.tsv), whatever slot 0 is called;
+      'd26-callonly'  slot 0 is a call-only placeholder (D26B_PLACEHOLDER) no code names (S1-rules / S2-bodies contract
+                      of 2026-11-08: every pair-less table is minus-one but those whose slot 0 code names).
+    None: slot 0 is named by code (D22-USED keeps the placeholder, its callers number the slots as the exe does), or it
+    is a defined, named function (BSNiAllocator::Destroy) with no list evidence. called: symbols referenced from code
+    (not vtables) by any object."""
     if d is not None:
         return None
     s0 = raw_names[0] if raw_names else None
@@ -3402,9 +3429,9 @@ def d26_minus_one_reason(z, v, raw_names, d, listed, called):
         return None
     if v in listed:
         return 'd22-list'
-    # A call-only placeholder name alone is no evidence: prepare's D22 / D26 (b) converts only the classes of S1's
-    # list (FNVNX_RECON d22.json; without it D22 does nothing), so an unlisted placeholder class's callers number
-    # the slots as the exe does. Shifting its table would break them.
+    mem = itanium_member(s0)
+    if mem and D26B_PLACEHOLDER.match(mem):
+        return 'd26-callonly'
     return None
 
 
