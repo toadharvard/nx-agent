@@ -76,6 +76,32 @@ def _leaf_writes(sec, md, addr, limit=40):
     return None
 
 
+_PRES = {}
+
+
+def preserved(addr):
+    """(difffuzz-20, eq-rest) The caller-saved registers (ecx, edx) a callee leaves as it found them: the exe's
+    function at addr is a straight-line leaf that writes neither (MSVC's whole-program optimiser keeps a value in edx
+    over `call 0x00d3ab60`, which writes only eax and cl). The harness gives an intercepted call garbage in ecx and
+    edx; for such a callee they stay what the caller held. Empty when the callee is no such leaf or no exe is given."""
+    if addr not in _PRES:
+        got = set()
+        try:
+            pe = _pe()
+            s = pe.section_of(addr) if pe is not None else None
+            if s is not None and s[2] & 0x20000000:
+                import capstone
+                md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+                md.detail = True
+                wr = _leaf_writes(s, md, addr)
+                if wr is not None:
+                    got = {'ecx', 'edx'} - wr
+        except Exception:  # noqa: BLE001
+            got = set()
+        _PRES[addr] = got
+    return _PRES[addr]
+
+
 def _callee_pop(sec, md, addr, limit=400):
     """N of the first `ret N` in the straight-line code from addr (0 for a plain `ret`), None when a jump or an
     indirect transfer comes first (a thunk: the target's pop) or no `ret` shows within `limit` instructions."""
