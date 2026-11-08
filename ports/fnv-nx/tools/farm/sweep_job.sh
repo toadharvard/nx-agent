@@ -47,10 +47,10 @@ H12=${COMMIT:0:12}
 S=$FARM_HOME/sweep/$H12/${K}of$N; mkdir -p "$W" "$S/scenes" "$S/raw" "$S/perm" "$(dirname "$REPORT")"
 T0=$(date +%s)
 log() { echo "$(date -u +%FT%TZ) sweep_job[$K/$N]: $*"; }
-NOTES=()
+NOTES=(); FAIL_WHY=""
 deadline_ok() { [ -z "${FARM_DEADLINE:-}" ] || [ "$(date +%s)" -lt $(( FARM_DEADLINE - ${1:-300} )) ]; }
 key_of() { cat "$@" 2>/dev/null | sha256sum | cut -c1-16; }
-fail() { NOTES+=("FAILED: $*"); log "FAILED: $*"; summary; exit 1; }
+fail() { NOTES+=("FAILED: $*"); FAIL_WHY="$*"; log "FAILED: $*"; summary; exit 1; }
 
 # ---- setup: the same tools as compare_job.sh (its caches in $FARM_HOME/compare) ----------------------------------
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
@@ -293,8 +293,8 @@ cell_stats() {   # cell_stats <id> <dir> <t0> <mode>: scene_stats on <dir>/<id>.
 # ---- (d) summary and publish ----------------------------------------------------------------------------------------
 summary() {
 	python3 -I "$CMP/sweep_report.py" shard --shard-dir "$S" --head "$COMMIT" --k "$K" --n "$N" --cand "${CAND:-}" \
-		--notes "$(printf '%s\n' "${NOTES[@]}")" --out "$S/shard.json" --md "$S/summary.md" >/dev/null 2>&1 ||
-		printf '# sweep %s %s/%s\n\nsummary failed\n\n%s\n' "$H12" "$K" "$N" "$(printf -- '- %s\n' "${NOTES[@]}")" >"$S/summary.md"
+		--notes "$(printf '%s\n' "${NOTES[@]}")" ${FAIL_WHY:+--error "setup failed: $FAIL_WHY"} --out "$S/shard.json" --md "$S/summary.md" >/dev/null 2>&1 ||
+		printf '# sweep %s %s/%s\n\n- FAIL: summary failed%s\n\n%s\n' "$H12" "$K" "$N" "${FAIL_WHY:+ (setup failed: $FAIL_WHY)}" "$(printf -- '- %s\n' "${NOTES[@]}")" >"$S/summary.md"
 	cp "$S/summary.md" "$REPORT"; [ -f "$S/shard.json" ] && cp "$S/shard.json" "${REPORT%.md}.json"
 }
 publish() {   # results to reports/sweep/<head12>/<k>of<N> of the artifacts repository (images never; raw only as listed)
