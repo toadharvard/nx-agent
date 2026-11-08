@@ -33,6 +33,7 @@
 #
 # Needs: root for the first setup (as compare_job.sh, plus xdotool, x11-apps, imagemagick, xz-utils); ARTIFACTS (a
 # clone of fnv-nx-build with push). Env: SWEEP_VARIANTS, SWEEP_CELLS=0 (programs only), SWEEP_PROGRAMS=0 (cells only),
+# SWEEP_MIN_FREE_GB (free disk on $FARM_HOME to start, default 10), SWEEP_CELL_FREE_GB (before each cell, default 5),
 # SWEEP_CELL_TIMEOUT_S, SWEEP_MAX_CELLS (per pass), SWEEP_CAPTURE (auto|replay|capture), SWEEP_RAW, SWEEP_CELL_LIST (a cells.tsv instead of the shard's), SWEEP_GAME
 # (an existing install instead of $FARM_HOME/game), COMPARE_CAND_REF (candidate nx_render; default HEAD, the nx_render
 # of this commit). The cells need the exe's DLLs in the install (GalaxyWrp, binkw32, libvorbisfile and theirs); without
@@ -47,14 +48,45 @@ H12=${COMMIT:0:12}
 S=$FARM_HOME/sweep/$H12/${K}of$N; mkdir -p "$W" "$S/scenes" "$S/raw" "$S/perm" "$(dirname "$REPORT")"
 T0=$(date +%s)
 log() { echo "$(date -u +%FT%TZ) sweep_job[$K/$N]: $*"; }
-NOTES=()
+NOTES=(); FAIL_WHY=""
 deadline_ok() { [ -z "${FARM_DEADLINE:-}" ] || [ "$(date +%s)" -lt $(( FARM_DEADLINE - ${1:-300} )) ]; }
 key_of() { cat "$@" 2>/dev/null | sha256sum | cut -c1-16; }
-fail() { NOTES+=("FAILED: $*"); log "FAILED: $*"; summary; exit 1; }
+fail() { NOTES+=("FAILED: $*"); FAIL_WHY="$*"; log "FAILED: $*"; summary; exit 1; }
+
+# ---- disk: this job cleans up after itself and refuses to start (or to go on) without room ------------------------
+# A cell replay holds one scene's capture, its reference and candidate frames and the per-draw images of the bisect
+# (a few GB at worst); the capture store holds this shard's scenes only (cap_setup). Work left by earlier heads or
+# capture keys is removed first: two farms filled their disks with it (sw1, sw31, 2026-11-08: a 21 GB store, every
+# shard's scenes fetched by every shard).
+free_gb() { df -Pk "${1:-$FARM_HOME}" 2>/dev/null | awk 'NR == 2 { printf "%d", $4 / 1048576 }'; }
+prune_work() {   # other heads' sweep dirs, a crashed run's scratch, capture keys other than $1 (when given)
+	local d n=0
+	for d in "$FARM_HOME"/sweep/*/; do
+		d=${d%/}; case "$(basename "$d")" in "$H12"|wine|'*') ;; *) [ -d "$d" ] && rm -rf "$d" && n=$((n + 1)) ;; esac
+	done
+	rm -rf "$FARM_HOME/sweep/cell" "$W/sweep-caps" "$W/sweep-pcaps" "$FARM_HOME/capture/git" "$FARM_HOME/capture/tmp" 2>/dev/null
+	if [ -n "${1:-}" ]; then
+		for d in "$FARM_HOME"/capture/*/; do
+			d=${d%/}; [ -d "$d" ] || continue
+			[ "$(basename "$d")" = "$1" ] || { rm -rf "$d"; n=$((n + 1)); }
+		done
+	fi
+	[ "$n" -gt 0 ] && NOTES+=("disk: removed $n stale work dir(s) of earlier heads or capture keys")
+	return 0
+}
+need_space() {   # need_space <GB> <what>: return 1, with a FAILED note, when the farm's disk has less free
+	local have; have=$(free_gb); [ -n "$have" ] || return 0
+	[ "$have" -ge "$1" ] && return 0
+	NOTES+=("FAILED: disk: ${have} GB free on $FARM_HOME, ${2} needs ${1} GB (SWEEP_MIN_FREE_GB / SWEEP_CELL_FREE_GB)")
+	log "disk: ${have} GB free, $2 needs $1 GB"
+	return 1
+}
 
 # ---- setup: the same tools as compare_job.sh (its caches in $FARM_HOME/compare) ----------------------------------
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 setup() {
+	prune_work
+	need_space "${SWEEP_MIN_FREE_GB:-10}" "the sweep" || fail "disk: $(free_gb) GB free on $FARM_HOME, need ${SWEEP_MIN_FREE_GB:-10} GB"
 	local need=""
 	for c in wine Xvfb xdotool xwd convert xz i686-w64-mingw32-gcc cmake ninja meson bison flex g++; do command -v "$c" >/dev/null || need="$need $c"; done
 	dpkg -s libgl1-mesa-dri:i386 >/dev/null 2>&1 || need="$need mesa-i386"
@@ -135,16 +167,25 @@ cap_key_inputs() {
 cap_setup() {
 	cap_key_inputs >"$S/capture_key.tsv"
 	CKEY=$(sha256sum "$S/capture_key.tsv" | cut -c1-16)
+	prune_work "$CKEY"
 	CAPS=$FARM_HOME/capture/$CKEY; mkdir -p "$CAPS/.heads"; cp "$S/capture_key.tsv" "$CAPS/KEY"
-	local url g=$FARM_HOME/capture/git h r n=0 t0; url=$(git -C "$ARTIFACTS" remote get-url origin); t0=$(date +%s)
-	[ -d "$g" ] || git init -q --bare "$g"
+	# only the scenes of this shard's cell list are kept: each published shard branch is fetched into a scratch bare
+	# repository and a scratch store, this shard's scenes are exported (hard links) into $CAPS, and the scratch goes
+	# again before the next branch, so the disk holds one branch at a time and never the whole store
+	local url g=$FARM_HOME/capture/git tmp=$FARM_HOME/capture/tmp h r n=0 t0 ids; url=$(git -C "$ARTIFACTS" remote get-url origin); t0=$(date +%s)
+	cell_list || { NOTES+=("capture cache: no cell list (cells.py failed)"); return 0; }
+	ids=$(cut -f1 "$S/cells.tsv" | tr '\n' ' '); [ -n "${ids// /}" ] || return 0
 	while read -r h r; do
 		[ -n "$r" ] || continue
 		[ "$(cat "$CAPS/.heads/${r##*/}" 2>/dev/null)" = "$h" ] && continue
-		git -C "$g" fetch -q --depth 1 "$url" "$r" && git -C "$g" archive FETCH_HEAD | tar -x -C "$CAPS" &&
+		rm -rf "$g" "$tmp"; git init -q --bare "$g"; mkdir -p "$tmp"
+		# shellcheck disable=SC2086
+		git -C "$g" fetch -q --depth 1 "$url" "$r" && git -C "$g" archive FETCH_HEAD | tar -x -C "$tmp" &&
+			python3 -I "$CMP/capstore.py" export "$tmp" "$CAPS" $ids >>"$S/cap_fetch.log" 2>&1 &&
 			echo "$h" >"$CAPS/.heads/${r##*/}" && n=$((n + 1))
+		rm -rf "$g" "$tmp"
 	done < <(git ls-remote "$url" "refs/heads/capture/$CKEY/*" 2>/dev/null)
-	NOTES+=("capture cache $CKEY ($CAP_MODE): $(ls "$CAPS/index" 2>/dev/null | grep -c '\.tsv$') scenes cached, $n branch(es) fetched in $(( $(date +%s) - t0 )) s")
+	NOTES+=("capture cache $CKEY ($CAP_MODE): $(ls "$CAPS/index" 2>/dev/null | grep -c '\.tsv$') of this shard's scenes cached, $n branch(es) read in $(( $(date +%s) - t0 )) s; $(du -sh "$CAPS" 2>/dev/null | cut -f1) on disk")
 }
 cap_publish() {   # this shard's scenes of the store (scenes, their blobs and references) to capture/<key>/<k>of<N>
 	[ -s "$S/packed.tsv" ] || return 0
@@ -213,15 +254,20 @@ programs() {
 }
 
 # ---- (a) cells ------------------------------------------------------------------------------------------------------
-cells() {
+cell_list() {   # this shard's cells to $S/cells.tsv (once)
+	[ -s "$S/cells.tsv" ] && return 0
 	if [ -n "${SWEEP_CELL_LIST:-}" ]; then cp "$SWEEP_CELL_LIST" "$S/cells.tsv"   # a fixed list (tests: 3 named cells)
-	else python3 -I "$CMP/cells.py" list "$GAME/Data/FalloutNV.esm" --shard "$K/$N" >"$S/cells.tsv" || { NOTES+=("cells.py failed"); return 0; }; fi
+	else python3 -I "$CMP/cells.py" list "$GAME/Data/FalloutNV.esm" --shard "$K/$N" >"$S/cells.tsv" || { rm -f "$S/cells.tsv"; return 1; }; fi
+}
+cells() {
+	cell_list || { NOTES+=("cells.py failed"); return 0; }
 	touch "$S/done.tsv"
 	local id kind cell world n=0
 	while IFS=$'\t' read -r id kind cell world; do
 		grep -q "^$id"$'\t' "$S/done.tsv" && continue
 		deadline_ok 1500 || { NOTES+=("cells: FARM_DEADLINE, $(wc -l <"$S/done.tsv") of $(wc -l <"$S/cells.tsv") done"); return 0; }
 		[ -n "${SWEEP_MAX_CELLS:-}" ] && [ "$n" -ge "$SWEEP_MAX_CELLS" ] && { NOTES+=("cells: SWEEP_MAX_CELLS reached"); return 0; }
+		need_space "${SWEEP_CELL_FREE_GB:-5}" "cell $id" || { NOTES+=("cells: stopped for disk, $(wc -l <"$S/done.tsv") of $(wc -l <"$S/cells.tsv") done"); return 0; }
 		n=$((n + 1)); log "cell $id ($kind)"
 		cell_one "$id" "$kind" "$cell"
 	done <"$S/cells.tsv"
@@ -293,8 +339,8 @@ cell_stats() {   # cell_stats <id> <dir> <t0> <mode>: scene_stats on <dir>/<id>.
 # ---- (d) summary and publish ----------------------------------------------------------------------------------------
 summary() {
 	python3 -I "$CMP/sweep_report.py" shard --shard-dir "$S" --head "$COMMIT" --k "$K" --n "$N" --cand "${CAND:-}" \
-		--notes "$(printf '%s\n' "${NOTES[@]}")" --out "$S/shard.json" --md "$S/summary.md" >/dev/null 2>&1 ||
-		printf '# sweep %s %s/%s\n\nsummary failed\n\n%s\n' "$H12" "$K" "$N" "$(printf -- '- %s\n' "${NOTES[@]}")" >"$S/summary.md"
+		--notes "$(printf '%s\n' "${NOTES[@]}")" ${FAIL_WHY:+--error "setup failed: $FAIL_WHY"} --out "$S/shard.json" --md "$S/summary.md" >/dev/null 2>&1 ||
+		printf '# sweep %s %s/%s\n\n- FAIL: summary failed%s\n\n%s\n' "$H12" "$K" "$N" "${FAIL_WHY:+ (setup failed: $FAIL_WHY)}" "$(printf -- '- %s\n' "${NOTES[@]}")" >"$S/summary.md"
 	cp "$S/summary.md" "$REPORT"; [ -f "$S/shard.json" ] && cp "$S/shard.json" "${REPORT%.md}.json"
 }
 publish() {   # results to reports/sweep/<head12>/<k>of<N> of the artifacts repository (images never; raw only as listed)

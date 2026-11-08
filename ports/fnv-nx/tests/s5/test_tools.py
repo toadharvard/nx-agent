@@ -18,6 +18,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -448,8 +449,8 @@ class MilestoneTest(unittest.TestCase):
         import emu_guest
         rows = emu_guest.parse_milestones(emu_guest.MILESTONES)
         names = list(dict.fromkeys(n for n, _, _ in rows))
-        self.assertEqual(names, ["winmain", "ini-read", "renderer-init", "archive-list", "bsa-opened", "esm-header",
-                                 "masters-loaded", "main-menu", "first-frame", "first-cell"])
+        self.assertEqual(names, ["winmain", "ini-read", "archive-list", "bsa-opened", "renderer-init", "esm-header",
+                                 "masters-loaded", "main-menu", "first-frame", "first-cell"])   # S18's order
         self.assertIn(("winmain", "call", "0x0086a850"), rows)
         self.assertIn(("first-cell", "store", "*0x011dea3c+0x40"), rows)
         rxs = {}
@@ -475,11 +476,238 @@ class MilestoneTest(unittest.TestCase):
         self.assertFalse(rx["first-frame"].search("_ZN2nx6engine13NiDX9Renderer11Do_EndFrameEv"))
         with tempfile.TemporaryDirectory() as t:
             p = os.path.join(t, "m.txt")
-            for bad in ("x call\n", "x jump 0x1\n", "x store 0x1+\n", "X call 0x1\n", "x call re:(\n"):
+            for bad in ("x call\n", "x jump 0x1\n", "x store 0x1+\n", "X call 0x1\n", "x call re:(\n", "x all\n",
+                        "x all jump 0x1\n", "x any call 0x1\n"):
                 with open(p, "w") as f:
                     f.write(bad)
                 with self.assertRaises((ValueError, re.error)):
                     emu_guest.parse_milestones(p)
+
+    def test_callok_needs_success(self):
+        """'callok F' is reached when F returns 0 to its caller, not when F starts: the native-render hook fails
+        CreateDevice without a GPU backend (D3DERR_NOTAVAILABLE), and that boot has no renderer"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc
+        from unicorn.arm64_const import UC_ARM64_REG_SP
+        rows = emu_guest.parse_milestones(emu_guest.MILESTONES)
+        self.assertEqual({k for n, k, _ in rows if n == "renderer-init"}, {"callok", "calltrue", "ret", "call"})
+        for ret, reached in ((0, True), (0x8876086A, False)):
+            e = emu_guest.Emu.__new__(emu_guest.Emu)
+            e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+            e.calls, e.cur, e.miles = 0, None, {}
+            e.code_syms = {"_ZN15Null_IDirect3D912CreateDeviceEj": 0x1100}
+            e.code_addr = lambda n, e=e: e.code_syms.get(n)
+            e.sym = lambda a: "x %#x" % a
+            uc.mem_map(0x1000, 0x1000)
+            uc.mem_map(0x8000, 0x1000)   # stack
+            # 0x1000: bl 0x1100; nop    0x1100: movz w0,#lo; movk w0,#hi,lsl 16; ret
+            uc.mem_write(0x1000, struct.pack("<2I", 0x94000040, 0xD503201F))
+            uc.mem_write(0x1100, struct.pack("<3I", 0x52800000 | ((ret & 0xFFFF) << 5),
+                                             0x72A00000 | ((ret >> 16) << 5), 0xD65F03C0))
+            uc.reg_write(UC_ARM64_REG_SP, 0x8800)
+            with tempfile.TemporaryDirectory() as t:
+                p = os.path.join(t, "m.txt")
+                with open(p, "w") as f:
+                    f.write("renderer-init callok re:CreateDevice\n")
+                e.install_milestones(p)
+            uc.emu_start(0x1000, 0x1008)
+            self.assertEqual("renderer-init" in e.miles, reached, hex(ret))
+
+    # -- prerequisites and compound markers (small Unicorn snippets: functions that only `ret`)
+    FN = {"0x00000001": 0x1100, "0x00000002": 0x1200, "0x00000003": 0x1300}
+
+    def mile_emu(self, table, syms=None, fns=None):
+        """an Emu with `table` (milestones.txt text) installed; every address of fns (original address -> where) and
+        every symbol of syms is a `ret` stub; call(addr) runs `bl addr` as the thread tid"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc
+        from unicorn.arm64_const import UC_ARM64_REG_SP
+        fns, syms = dict(fns or self.FN), dict(syms or {})
+        e = emu_guest.Emu.__new__(emu_guest.Emu)
+        e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        e.calls, e.cur, e.miles, e.code_syms = 0, None, {}, syms
+        e.code_addr = lambda n: fns.get(n, syms.get(n))
+        e.sym = lambda a: "x %#x" % a
+        uc.mem_map(0x1000, 0x2000)
+        uc.mem_map(0x8000, 0x1000)
+        uc.mem_map(0x01100000, 0x1000)   # data window
+        uc.mem_map(0x20000000, 0x1000)   # heap
+        for a in list(fns.values()) + list(syms.values()):
+            uc.mem_write(a, struct.pack("<I", 0xD65F03C0))
+        uc.reg_write(UC_ARM64_REG_SP, 0x8800)
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "m.txt")
+            with open(p, "w") as f:
+                f.write(table)
+            import contextlib
+            import io
+            with contextlib.redirect_stdout(io.StringIO()):
+                e.install_milestones(p)
+
+        stub = [0x2000]
+
+        def call(addr, tid=1):
+            e.cur = None if tid == 1 else types.SimpleNamespace(tid=tid)
+            at = stub[0]   # a stub of its own each time: Unicorn keeps translated blocks of code written before
+            stub[0] += 0x10
+            uc.mem_write(at, struct.pack("<3I", 0x94000000 | (((addr - at) >> 2) & 0x3FFFFFF), 0xD503201F,
+                                         0xD503201F))
+            uc.emu_start(at, at + 8)
+        e.call = call
+        return e
+
+    def test_out_of_order_is_recorded_not_counted(self):
+        e = self.mile_emu("a call 0x00000001\nb call 0x00000002\nc call 0x00000003\n")
+        e.call(0x1200)   # b before a
+        self.assertEqual(list(e.miles), [])
+        self.assertEqual(list(e.mile_ooo), ["b"])
+        self.assertEqual(e.mile_ooo["b"]["missing"], ["a"])
+        self.assertEqual(e.milestone_lines()[1].split("\t")[:3], ["milestone", "b", "out-of-order"])
+        self.assertIn("missing: a", e.milestone_lines()[1])
+        s = e.milestone_summary()
+        self.assertEqual((s["reached"], s["of"], s["milestone"]), (0, 3, None))
+        self.assertEqual([(o["name"], o["missing"]) for o in s["out_of_order"]], [("b", ["a"])])
+        self.assertEqual([m["reached"] for m in s["milestones"]], [False, False, False])
+        e.call(0x1300)   # c: missing a and b
+        self.assertEqual(e.mile_ooo["c"]["missing"], ["a", "b"])
+        e.call(0x1100)   # a arrives: b does not count retroactively
+        self.assertEqual(list(e.miles), ["a"])
+        self.assertNotIn("b", e.miles)
+        s = e.milestone_summary()
+        self.assertEqual((s["reached"], s["milestone"]), (1, "a"))
+        self.assertEqual([o["name"] for o in s["out_of_order"]], ["b", "c"])
+        e.call(0x1200)   # a new hit of b does
+        self.assertEqual(list(e.miles), ["a", "b"])
+        self.assertTrue(e.miles["b"]["was_out_of_order"])
+        self.assertEqual(list(e.mile_ooo), ["c"])
+        self.assertEqual(e.milestone_summary()["milestone"], "b")
+        self.assertEqual(e.milestone_lines()[2].split("\t")[:3], ["milestone", "c", "out-of-order"])
+
+    def test_all_compound_needs_every_part(self):
+        e = self.mile_emu("m all call 0x00000001\nm all call 0x00000002\nm all ret 0x00000003\n")
+        e.call(0x1100)
+        e.call(0x1100)
+        self.assertEqual(list(e.miles), [])
+        e.call(0x1200)
+        self.assertEqual(list(e.miles), [])   # the ret part is still missing
+        e.call(0x1300)
+        self.assertEqual(list(e.miles), ["m"])
+        # a plain line next to a compound is another way; groups with different ids are separate
+        e = self.mile_emu("m all:x call 0x00000001\nm all:x call 0x00000002\nm all:y call 0x00000003\n")
+        e.call(0x1100)
+        e.call(0x1300)
+        self.assertEqual(list(e.miles), ["m"])   # the group y alone
+        e = self.mile_emu("m all call 0x00000001\nm all call 0x00000002\nm call 0x00000003\n")
+        e.call(0x1300)
+        self.assertEqual(list(e.miles), ["m"])
+
+    def test_seq_compound_keeps_the_order(self):
+        e = self.mile_emu("m seq call 0x00000001\nm seq call 0x00000002\n")
+        e.call(0x1200)   # second part first: does not count
+        e.call(0x1100)
+        self.assertEqual(list(e.miles), [])
+        e.call(0x1200)
+        self.assertEqual(list(e.miles), ["m"])
+
+    def table_part(self, *names):
+        """the lines of milestones.txt of the given milestones, as a table of their own (no prerequisites)"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        keep = []
+        for line in _read(emu_guest.MILESTONES).decode().splitlines():
+            f = line.split("#", 1)[0].split()
+            if f and f[0] in names:
+                keep.append(line)
+        return "\n".join(keep) + "\n"
+
+    def test_first_frame_needs_the_loop_entered_on_the_main_thread(self):
+        present = "_ZN21Null_IDirect3DDevice97PresentEPK7tagRECT"
+        e = self.mile_emu(self.table_part("first-frame"), syms={present: 0x1400},
+                          fns={"0x00851d90": 0x1100})
+        e.call(0x1400)                  # a Present before the main loop was entered (the loading screen thread)
+        self.assertEqual(list(e.miles), [])
+        e.call(0x1100, tid=2)           # the loop head on another thread: no
+        e.call(0x1400)
+        self.assertEqual(list(e.miles), [])
+        e.call(0x1100)                  # ProcessQueuedSaveLoad entered on the main thread ...
+        e.call(0x1400, tid=5)           # ... a Present of another thread
+        self.assertEqual(list(e.miles), [])
+        e.call(0x1400)                  # ... then the main thread's Present
+        self.assertEqual(list(e.miles), ["first-frame"])
+        # the native renderer's end of frame counts the same way
+        e = self.mile_emu(self.table_part("first-frame"), syms={"_ZN2nx8Renderer11Do_EndFrameEv": 0x1400},
+                          fns={"0x00851d90": 0x1100})
+        e.call(0x1400)
+        self.assertEqual(list(e.miles), [])
+        e.call(0x1100)
+        e.call(0x1400)
+        self.assertEqual(list(e.miles), ["first-frame"])
+
+    def test_first_cell_needs_the_store_and_a_later_frame(self):
+        fns = {"0x00852d20": 0x1100, "0x0086ff70": 0x1200, "0x00950290": 0x1300}
+        e = self.mile_emu(self.table_part("first-cell"), fns=fns)
+        uc = e.uc
+        from unicorn.arm64_const import UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
+        uc.mem_write(0x1900, struct.pack("<3I", 0xB9000001, 0xB9004043, 0xD503201F))   # str w1,[x0]; str w3,[x2,#64]
+        player = 0x011dea3c
+        uc.mem_map(0x011de000, 0x1000)
+
+        def store(ptr=0x20000000, cell=0x1234):
+            for r, v in ((UC_ARM64_REG_X0, player), (UC_ARM64_REG_X1, ptr), (UC_ARM64_REG_X2, ptr),
+                         (UC_ARM64_REG_X3, cell)):
+                uc.reg_write(r, v)
+            uc.emu_start(0x1900, 0x1908)
+        # the pointer stored with the cell already set (the old 'already set' shortcut): not enough
+        uc.mem_write(0x20000040, struct.pack("<I", 0x1234))
+        e.call(0x1100)                  # LoadCellReferences
+        uc.reg_write(UC_ARM64_REG_X0, player)
+        uc.reg_write(UC_ARM64_REG_X1, 0x20000000)
+        uc.emu_start(0x1900, 0x1904)
+        e.call(0x1200)
+        e.call(0x1300)
+        self.assertEqual(list(e.miles), [])
+        store()                         # the parentCell store
+        e.call(0x1300)                  # UpdateCameraMode in the same frame: no
+        self.assertEqual(list(e.miles), [])
+        e.call(0x1200)                  # the next frame counted ...
+        self.assertEqual(list(e.miles), [])
+        e.call(0x1300)                  # ... and UpdateCameraMode in it
+        self.assertEqual(list(e.miles), ["first-cell"])
+
+    def test_discover_unwinds_frame(self):
+        """--discover: a fault inside a function with a GCC frame returns 0 to its caller with the caller's
+        callee-saved registers restored (x19), and a call through a null pointer is skipped at its call site"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc, UcError
+        from unicorn.arm64_const import UC_ARM64_REG_PC, UC_ARM64_REG_SP, UC_ARM64_REG_X0, UC_ARM64_REG_X19
+        e = emu_guest.Emu.__new__(emu_guest.Emu)
+        e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        e.cur, e.miles, e.discovered, e.discover_max = None, {}, [], 10
+        e.base = e.link_base = 0x1000
+        e.size, e.relocatable = 0x1000, False
+        e.sym_addrs, e.sym_names, e.code_syms = [0x1000, 0x1100], [["caller"], ["callee"]], {}
+        import bisect
+        e._bisect = bisect.bisect_right
+        uc.mem_map(0x1000, 0x1000)
+        uc.mem_map(0x8000, 0x1000)
+        # caller: mov x19,#7; mov x0,#99; bl callee; mov x1,x19; nop ...  (0x1010: after the call)
+        uc.mem_write(0x1000, struct.pack("<5I", 0xD28000F3, 0xD2800C60, 0x9400003E, 0xAA1303E1, 0xD503201F))
+        # callee: stp x29,x30,[sp,#-32]!; mov x29,sp; stp x19,x20,[sp,#16]; mov x19,#5; ldr w0,[xzr? -> x9=0]
+        uc.mem_write(0x1100, struct.pack("<6I", 0xA9BE7BFD, 0x910003FD, 0xA90153F3, 0xD28000B3, 0xD2800009,
+                                         0xB9400120))
+        uc.reg_write(UC_ARM64_REG_SP, 0x8800)
+        try:
+            uc.emu_start(0x1000, 0x1014)
+            self.fail("no fault")
+        except UcError as err:
+            self.assertTrue(e.discover_fault(1, str(err)))
+        self.assertEqual(uc.reg_read(UC_ARM64_REG_PC), 0x100C)
+        self.assertEqual((uc.reg_read(UC_ARM64_REG_X19), uc.reg_read(UC_ARM64_REG_X0), uc.reg_read(UC_ARM64_REG_SP)),
+                         (7, 0, 0x8800))
+        self.assertEqual(e.discovered[0][0], "callee")
 
     def test_stored_word(self):
         sys.path.insert(0, HERE)
@@ -662,6 +890,110 @@ class HandVptrsTest(unittest.TestCase):
             self.assertEqual(rows[""][2], "literal")
             self.assertNotIn("01011300", rows)
             self.assertNotIn("00401234", rows)
+
+
+class SanitizeTest(unittest.TestCase):
+    """emu_sanitize.py (emu_guest.py --alloc-check, --image-check): small Unicorn code tests"""
+    PTR = 0x40000010
+    CODE, MARK, STK = 0x10000, 0x11000, 0x20000
+    # movz w0,#0x4000,lsl 16 ; movk w0,#0x10 ; ret   /   ret
+    ALLOC = [0x52A80000, 0x72800200, 0xD65F03C0]
+    RET = [0xD65F03C0]
+
+    def emu(self, syms):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc
+        e = emu_guest.Emu.__new__(emu_guest.Emu)
+        e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        uc.mem_map(self.CODE, 0x2000)
+        uc.mem_map(self.STK, 0x1000)
+        e.cur, e.relocatable, e.base, e.link_base, e.heap = None, False, 0, 0, 0x40000000
+        e.sym = lambda a: "%#x f_%x+0x0" % (a, a)
+        e.code_syms = {}
+        for i, (name, words) in enumerate(syms.items()):
+            at = self.CODE + 0x100 * i
+            uc.mem_write(at, b"".join(struct.pack("<I", w) for w in words))
+            e.code_syms[name] = at
+        uc.mem_write(self.MARK, struct.pack("<I", 0xD503201F) * 4)   # nop; the call returns here
+        return e
+
+    def call(self, e, name, x0=0):
+        from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_SP, UC_ARM64_REG_X0, UC_ARM64_REG_X29
+        uc = e.uc
+        uc.reg_write(UC_ARM64_REG_X0, x0)
+        uc.reg_write(UC_ARM64_REG_X29, 0)
+        uc.reg_write(UC_ARM64_REG_SP, self.STK + 0x800)
+        uc.reg_write(UC_ARM64_REG_LR, self.MARK)
+        uc.emu_start(e.code_syms[name], self.MARK + 4)
+        return uc.reg_read(UC_ARM64_REG_X0)
+
+    def alloc_emu(self):
+        e = self.emu({"malloc": self.ALLOC, "free": self.RET, "_ZdlPv": self.RET})
+        e.install_alloc_check()
+        self.assertEqual(self.call(e, "malloc", 16), self.PTR)
+        return e
+
+    def test_mismatched_free(self):
+        e = self.alloc_emu()
+        self.call(e, "_ZdlPv", self.PTR)   # malloc'd, freed by operator delete
+        row = e.alloc_lines()[0].split("\t")
+        self.assertEqual(row[:5], ["alloc-check", "mismatch", "new:_ZdlPv", "libc:malloc", "0x40000010"])
+        self.assertEqual(e.alloc_lines()[1].split("\t")[:3], ["alloc-check-summary", "1", "mismatch"])
+        self.call(e, "free", 0)   # a null free is fine
+        self.assertEqual(len([l for l in e.alloc_lines() if l.startswith("alloc-check\t")]), 1)
+
+    def test_double_free_and_unknown(self):
+        e = self.alloc_emu()
+        self.call(e, "free", self.PTR)
+        self.assertEqual([l for l in e.alloc_lines() if l.startswith("alloc-check\t")], [])
+        self.call(e, "free", self.PTR)
+        self.call(e, "free", 0x40000999)   # in the heap, never allocated
+        self.call(e, "free", 0x1234)       # not in the heap
+        kinds = [l.split("\t")[1] for l in e.alloc_lines() if l.startswith("alloc-check\t")]
+        self.assertEqual(kinds, ["double-free", "unknown-block", "non-heap"])
+        self.assertIn("first freed by libc:free", e.alloc_lines()[0])
+
+    def test_nested_alloc_keeps_outer_family(self):
+        # operator new calls malloc by bl: the block belongs to new
+        from unicorn.arm64_const import UC_ARM64_REG_LR
+        e = self.emu({"_Znwm": [0xA9BF7BFD, 0x94000000 | 0x3FC0, 0xA8C17BFD, 0xD65F03C0],   # stp x29,x30,[sp,-16]!; bl +0xFF00 (patched); ldp; ret
+                      "malloc": self.ALLOC, "_ZdlPv": self.RET})
+        disp = (e.code_syms["malloc"] - (e.code_syms["_Znwm"] + 4)) >> 2
+        e.uc.mem_write(e.code_syms["_Znwm"] + 4, struct.pack("<I", 0x94000000 | disp & 0x3FFFFFF))
+        e.install_alloc_check()
+        self.assertEqual(self.call(e, "_Znwm", 8), self.PTR)
+        self.call(e, "_ZdlPv", self.PTR)
+        self.assertEqual([l for l in e.alloc_lines() if l.startswith("alloc-check\t")], [])
+
+    def image_emu(self):
+        e = self.emu({})
+        e.set_image_ranges(0x400000, 0x1200000, [(".text", 0x401000, 0x900000, True), (".rdata", 0x900000, 0xA00000, False),
+                                                  (".data", 0xA00000, 0x1200000, False)], {0x401234: "_Z3foov"})
+        e.uc.hook_add(__import__("unicorn").UC_HOOK_MEM_INVALID, e.on_bad)
+        return e
+
+    def fault(self, e, word, x1):
+        from unicorn import UcError
+        from unicorn.arm64_const import UC_ARM64_REG_X1
+        e.uc.mem_write(self.CODE, struct.pack("<I", word))
+        e.uc.reg_write(UC_ARM64_REG_X1, x1)
+        with self.assertRaises(UcError):
+            e.uc.emu_start(self.CODE, self.CODE + 4)
+
+    def test_image_check_classifies(self):
+        e = self.image_emu()
+        self.fault(e, 0xD63F0020, 0x401234)   # blr x1: an unrelocated code pointer
+        self.fault(e, 0xD63F0020, 0x3000)     # blr x1: an RVA (0x3000 + 0x400000 is .text)
+        self.fault(e, 0xB9400022, 0x500000)   # ldr w2,[x1]: code read as data
+        self.fault(e, 0xB9000022, 0x500000)   # str w2,[x1]
+        self.fault(e, 0xB9400022, 0x400800)   # the headers: no section
+        self.fault(e, 0xB9400022, 0x7000000)  # beyond the image: not the image's
+        rows = [l.split("\t") for l in e.image_lines() if l.startswith("image-check\t")]
+        self.assertEqual([r[1] for r in rows], ["fetch-text", "rva-as-address", "code-read", "code-write", "no-section"])
+        self.assertEqual(rows[0][2:4], ["0x00401234", ".text"])
+        self.assertEqual(rows[0][-1], "native=_Z3foov")
+        self.assertEqual(rows[1][2], "0x00003000")
 
 
 if __name__ == "__main__":

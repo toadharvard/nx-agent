@@ -81,6 +81,13 @@ void LoadTranslatedPack(nx::Renderer* r) {
 }
 }
 
+// Stub boots only: the emulator (tests/s5/emu_guest.py --stub-nulldev, farm_boot.sh with FNVNX_STUB_NULLDEV=1) sets
+// this to 1 before the constructors run. Then a CreateDevice without a GPU backend succeeds on the null device alone,
+// so the engine goes on past its renderer init headless (the replaced entry points draw nothing) and the boot frontier
+// beyond it can be measured. Nothing in the product sets it: there the hook fails as described above.
+extern "C" volatile uint32_t fnvnx_stub_nulldev;
+volatile uint32_t fnvnx_stub_nulldev = 0;
+
 extern "C" int32_t fnvnx_d3d9_device_created(const void* present_params, void* device) {
     if (nx::Renderer::Get()) {   // a second CreateDevice (device reset, a retry): keep the renderer, hook the device
         if (device) nx::engine::HookD3DDevice(device);
@@ -94,6 +101,11 @@ extern "C" int32_t fnvnx_d3d9_device_created(const void* present_params, void* d
     nx::Backend* be = nx::GpuBackend(nullptr);
     if (!be) {
         printf("fnvnx native renderer: no nxgpu backend (host module 10 did not answer)\n");
+        if (fnvnx_stub_nulldev) {
+            printf("fnvnx native renderer: STUB BOOT (fnvnx_stub_nulldev): CreateDevice succeeds on the null device "
+                   "without a renderer - nothing is drawn, a measurement mode, never the product\n");
+            return kS_OK;   // the device is not hooked: its methods must not reach a renderer that does not exist
+        }
         return kD3DERR_NOTAVAILABLE;
     }
     NxImageDesc rt = {};

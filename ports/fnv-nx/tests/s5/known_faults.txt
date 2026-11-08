@@ -12,7 +12,7 @@ exe-vtables         # stand-in for S2c's link-time slot fill (emu_guest.py --exe
                     # misaligned vtables are left); a virtual call past a native vtable's end continues at the exe
                     # slot's native; GOT entries of absolute aliases (aliases.ld `sym + 8`) are relocated. Remove
                     # when S2c fills the slots, sizes native vtables to the exe's and aliases.ld has SANE_EXPR
-image-vptr-minus-one ^\.\?AV\?\$NiT  # hand-stored image vptrs (hand_vptrs.tsv class 'image': no native
+image-vptr-minus-one  # hand-stored image vptrs (hand_vptrs.tsv class 'image': no native
                       # vtable bound to the exe vftable) of the classes whose RTTI name matches get a D22 minus-one
                       # copy (D1/D0 thunks to exe slot 0, then exe slot k at k+1): the Gamebryo NiT* containers,
                       # dispatched through their declared hierarchies (virtual destructor first). The creator map's
@@ -39,6 +39,11 @@ ctor-returns-this   # every constructor native (address map kind C) returns this
                       # Open tail-calls its slot 6 = 0. Returns false: the INI file did not open. On the player's exe
                       # it still faults: the tail call lands on _ZTIN12fnv_004d907012FUN_004d9070E (guest rodata), a
                       # slot read past the end of a native vtable (S2c, as 0x00a70b40)
+_ZN12FUN_005e08304OpenEPKcb standin  # 0x005e0830 Open: exe slot 6 through native offset 24, which the minus-one INI collection table
+                      # makes exe slot 5 (IniCollection::FUN_00c44280(IniSetting*) with the bool: null setting, four faults,
+                      # 0x005e0200 returned 0, no fallout.ini read). standins.c picks the slot by vftable kind (S1-rules: D26 (b))
+_ZN11C5E0200File12FUN_005e0200EPKc standin  # 0x005e0200: its +32/+40 calls are minus-one, but the registry collection's table
+                      # (0x01082ed8) is in the exe's order, 10 slots: slot 10 read 0. Same stand-in file, same cause
 0x00aa64d0            # RunThreadProc of the Serialized IO Thread (FUN_00aa7eb0): it tail-calls slot 2 of the IO thread's
                       # vtable _ZTV12FUN_00aa8410, BSThread::v2, a virtual defined nowhere (vslot trap; S1/S2). The
                       # thread ends at once
@@ -58,6 +63,10 @@ _Z12FUN_00c3c460v standin  # 0x00c3c460 (WinMain, via 0x00c3bd30): the decomp's 
                       # leaves MessageHandler::pHandler without a vptr; once the heaps work (MemoryHeap stand-in,
                       # heap_standin.c) the first AbstractHeap commit logs through it (slot 5 of a zeroed object).
                       # standins.c does what the exe does: new(8), MessageHandler 0x00c3bcf0(this, false) (S1)
+__fnvnx_cthis_00aa3880 standin  # boot.cpp's early MemoryManager construction: the game's initializer 0x00fb66a0
+                      # (xc slot 7) constructs it again; with the VM service the second run clears the live pool
+                      # tables and frees a pool block through CRT free (30 skips). standins.c skips the early run
+                      # (S5: delete construct_memory_manager from boot.cpp)
 _ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool without memory (no fixed-hint
                       # reservation here) is freed through NiFree before Gamebryo's allocator exists, which skipped
                       # boot_banner (MemoryManager's constructor) once the game's heaps are used; the exe destroys it
@@ -67,9 +76,29 @@ _ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb standin  # 0x00aa78a0 MemoryHeap's constr
                       # the exe's slots, so Allocate returned the heap's name and frees hit wrong blocks (J-0155 S10
                       # fault). standins.c stores the exe's vptr 0x010a28fc as the exe does (S1-refs: D22 for
                       # call-only declarations, tests/s5/callonly_vt.py)
-_ZN13HashTableBase14InsertOrUpdateEjj standin  # 0x00b57ea0: HashTableBase is a call-only declaration in the
-                      # exe's slot order (Reserved0 at 0); its boot receivers are native D22 maps (D1/D0 at 0/1), so
-                      # BucketIndex ran D0. standins.c dispatches exe slot k at k+1 (S1-refs: D22 for call-only)
+_ZN12FUN_00aa7400C1Ejj standin  # 0x00aa7400 the memory manager's second heap (classes 0/3/9): its _ZTV12FUN_00aa7400 is in
+                      # the exe's slot order (the class declares v00, not a destructor, for slot 0), the manager's HeapStandIn
+                      # calls are minus-one (D26 b), so Allocate ran the empty exe slot 3 and returned the heap itself
+                      # (boot_banner fault, 4,550 skips). standins.c stores a minus-one table (S1-rules: virtual
+                      # ~FUN_00aa7400(); S2-bodies: D22 layout for a defined class)
+_ZN26FUN_00aa2230_BSNiAllocatorC1Ev standin  # 0x00aa2230 BSNiAllocator: defined with `virtual m_virtual0()` for slot 0, so its
+                      # table is in the exe's order while NiAllocator callers are minus-one (D26 b): NiMalloc ran Free on
+                      # a stack block (554 skips in _free_r). standins.c stores a minus-one table (S1-rules: virtual dtor)
+_ZN12fnv_00632ec012FUN_00632ec0C1Ev standin  # 0x00632ec0 the Setting registry (vftable 0x0104e6ac): the Setting initializers
+                      # call it through a call-only class with a named slot 0 (Reset), which D26 (b) does not rewrite, so
+                      # Register ran D0 and deleted it. standins.c gives it a table with slot 1 = Register (S1-rules)
+_ZN10S_0045d22012FUN_0045d220Ev standin  # 0x0045d220 the other Setting registry (vftable 0x01018508), the same
+_ZN18FUN_00869f00_shell12FUN_00869f00Ejj standin  # 0x00869f00: its array's Allocate is called through a call-only class with a
+                      # named slot 0 (extradatalist.cpp AX), native slot 1 = D0: the static object was freed (initializers
+                      # 0x00fa1fc0/0x00fa1fe0). standins.c: slot 1 = slot 2 in its table (S1-rules: widen D26 (b))
+InitHolder standin  # 0x00aa2020 Gamebryo's allocator holder: the native body calls the allocator's native slot 7 (an
+                      # exe-order call-only declaration that D26 (b) does not shift) on BSNiAllocator's minus-one table, so
+                      # it ran exe slot 6 and faulted in _malloc_usable_size_r right after WinMain started (link
+                      # 3f7a6c35e923). standins.c calls exe slot 7 at native 8 (S1-rules: named slot-0 declarations)
+_ZN8NiTMap_S9RemoveKeyEj standin  # 0x00405430: NiTMap_S is a call-only declaration in the exe's slot order (v0 at 0,
+                      # KeyToHashIndex 1); its receiver (TESForm's map 0x011c54c0, exe vftable 0x0101ca78) is the native
+                      # NiTPointerMap with D1/D0 at 0/1, so slot 1 ran D0 and the bucket index faulted: the last skipped
+                      # initializer, 0x00f4ad10. standins.c dispatches exe slot k at k+1 (S1-rules: D26 (b))
 _Z12FUN_00406d50z standin  # 0x00406d50 strcat_s(dst, size, src), declared `(...)` and defined nowhere: WinMain's INI paths
                       # stayed empty, FalloutPrefs.ini was never read, sD3DDevice was "" and the device check sent the
                       # game to the launcher (ShellExecute, WinMain returns 0) (standins.c; S1-refs)

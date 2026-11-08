@@ -184,11 +184,19 @@ struct fnvnx_new_tag {};
 /* D22: a listed class's slot-0 placeholder virtual becomes its virtual destructor (GCC's D1/D0 where MSVC's ??_G
  * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
 #define FNVNX_D22(C, ...) virtual ~C();
+#define FNVNX_D22I(C, ...) virtual ~C() {}
 #define FNVNX_D22_DROP(...)
 /* D26: a call of a converted slot-0 placeholder (MSVC: the deleting destructor ??_G(flags)) is a virtual destructor
  * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
 template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (flags & 1) delete p; else p->~T(); }
 #define FNVNX_D22_CALL(p, m, ...) fnvnx_d22_vdtor((p), (__VA_ARGS__))
+/* DBUG1 (V1): a hand-indexed `vtbl[k]` of an exe slot k past the receiver class's D1/D0 pair (slot 0 for most classes, 4 for
+ * the TESForm / Actor family) is native slot k + 1 (D26 minus-one); MSVC keeps k. Use it only past the pair. */
+#define FNVNX_VSLOT(k) ((k) + 1)
+/* RAWVT1 (D26): a raw exe slot index on `this`; native vtables are minus-one */
+#define FNVNX_D26_SLOT(k) ((k) + 1)
+/* EMPTY1: a declared-only empty-string object is the temporary T("") the exe builds */
+#define FNVNX_EMPTY1(T, name) T("")
 /* DTORB1: a destructor stand-in calls the address the recipe binds its ??1 to (the link's __fnv_<a>), the
  * original body unreachable */
 #define FNVNX_DTORB_BEGIN(a) { extern void fnvnx_dtorb_##a(void*) __asm__("__fnv_" #a); fnvnx_dtorb_##a((void*)this); } if (0) {

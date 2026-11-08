@@ -3,7 +3,7 @@
 # parallel, skipped checks are reported with their reason, the verified head moves only on a pass, a toolchain change
 # says "full run needed". Synthetic only (a scratch git repository).   bash tests/t1/test_quick.sh
 set -uo pipefail
-P=$(cd "$(dirname "$0")/../.." && pwd); T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+P=$(cd "$(dirname "$0")/../.." && pwd); T=${KEEP_T:-$(mktemp -d)}; [ -n "${KEEP_T:-}" ] || trap 'rm -rf "$T"' EXIT
 fails=0; ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # plan classes
 python3 -I - "$P/tools/farm" >"$T/plan.txt" <<'PY' || fails=$((fails + 1))
@@ -72,7 +72,7 @@ ok "pass -> verified" '[ "$(cat "$T/home/quick/verified")" = "$H1" ] && grep -q 
 ok "replay used the cover" 'grep -q "replay scenes: cover: 2 scenes" "$T/q-$H1.md"'
 ok "json sidecar" 'python3 -c "import json,sys; j=json.load(open(sys.argv[1])); assert j[\"schema\"]==\"fnvnx-quick/1\"" "$T/q-$H1.json"'
 RC_equiv=1 run_q "$H2"
-ok "toolchain change: full run needed" 'grep -q "FULL RUN NEEDED" "$T/q-$H2.md"'
+ok "toolchain change, equiv failed: FAIL, with the full run named beside it" 'grep -q "^- verdict: FAIL (equiv); a full run is needed too" "$T/q-$H2.md" && grep -q "^- full run needed: " "$T/q-$H2.md" && grep -q "^| equiv | ran | 1 .*FAILED (exit 1)" "$T/q-$H2.md"'
 ok "base was the verified head" 'grep -q "base: ${H1:0:12}" "$T/q-$H2.md"'
 ok "not verified" '[ "$(cat "$T/home/quick/verified")" = "$H1" ]'
 rm -f "$T/home/quick/verified"; : >"$T/order"; RC_equiv=1 run_q "$H2"
@@ -112,6 +112,11 @@ ok "all passed: a docs-only head runs nothing" '! grep -q "| ran |" "$T/q-$D3.md
 # full_job exits 0 with a failed prepare stage: the build is failed, fuzz/audit/lane D skipped with the reason
 rm -rf "$T/home/quick"; PREPARE_STATUS=fail run_q "$D1"
 ok "failed stage: build reported failed with its stage" 'grep -q "^| build | ran | 2 .*the build failed: prepare: fail" "$T/q-$D1.md"'
+ok "failed stage: the verdict is FAIL (build)" 'grep -q "^- verdict: FAIL (build)" "$T/q-$D1.md"'
+# qk1 89dcf1c0: a toolchain head whose build failed read "FULL RUN NEEDED"; a failed replay read "programs checked 0"
+rm -rf "$T/home/quick"; QUICK_BASE=$H1 PREPARE_STATUS=fail RC_sweep=1 run_q "$H2"
+ok "full run needed and the build failed: FAIL, not FULL RUN NEEDED" 'grep -q "^- verdict: FAIL (build, replay); a full run is needed too" "$T/q-$H2.md" && ! grep -q "verdict: FULL RUN NEEDED" "$T/q-$H2.md" && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"verdict\"].startswith(\"FAIL\")" "$T/q-$H2.json"'
+ok "a failed replay reads FAILED, not its counts" 'grep -q "^| replay | ran | 1 | [0-9]* | FAILED (exit 1): " "$T/q-$H2.md"'
 ok "failed stage: fuzz and lane D skipped" 'grep -q "^| fuzz | skipped: the build failed" "$T/q-$D1.md" && grep -q "^| threads | skipped: the build failed" "$T/q-$D1.md"'
 # a cold equiv (the MSVC shim headers): left to the eq farms, planned again on the next head; QUICK_COLD_LOCAL=1 runs it
 rm -rf "$T/home/quick"; run_q "$D3"

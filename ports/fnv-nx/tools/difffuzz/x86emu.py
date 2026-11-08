@@ -12,10 +12,12 @@ the caller. The callee's own stack cleanup (stdcall/thiscall `ret N`) is applied
 known (callee_pop), else none (cdecl).
 """
 import bisect
+import math
 import struct
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ,
-                     UC_HOOK_CODE, UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
+                     UC_HOOK_CODE, UC_HOOK_INTR, UC_HOOK_INSN, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
+from unicorn.x86_const import UC_X86_INS_CPUID, UC_X86_REG_EBX
 from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, UC_X86_REG_EDX, UC_X86_REG_ECX,
                                UC_X86_REG_EBX, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_GDTR,
                                UC_X86_REG_FS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FPCW,
@@ -74,6 +76,10 @@ def x87_result_use(uc, retaddr, fret='int', depth=0):
         skip = 2
     elif b[0] in (0x59, 0x5b, 0x5d, 0x5e, 0x5f, 0xc9):     # pop ecx/ebx/ebp/esi/edi, leave
         skip = 1
+    elif b[0] in (0x50, 0x51, 0x52):    # push eax/ecx/edx: the float slot `push ecx; fstp dword [esp]` (difffuzz-20, r5)
+        skip = 1
+    elif b[:2] == b'\x83\xec':          # sub esp, imm8: the same slot reserved by `sub esp, 4; fstp [esp]`
+        skip = 3
     if skip:
         return x87_result_use(uc, retaddr + skip, fret, depth + 1)
     if b[0] in (0xc3, 0xc2):
@@ -220,7 +226,8 @@ class X86Engine:
         for a, code in self.text_funcs.items():
             self._ensure(a, len(code))
             uc.mem_write(a, code)
-        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + world.stack_fill(case.seed, 0x1000))
+        self._fill = world.stack_fill(case.seed, 0x1000)
+        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + self._fill)
         uc.mem_write(world.SP0, bytes(world.STACK[1] - world.SP0))
         uc.mem_write(TLS_BLOCK, bytes(TLS_SIZE))
         # float epilogue: fld st0; fstp dword/qword [FRET+16] (the caller's rounding); fstp tbyte [FRET]; jmp SENTINEL
@@ -271,6 +278,7 @@ class X86Engine:
             hfp2 = None
         start = start if start is not None else next(iter(self.text_funcs))
         esp0 = uc.reg_read(UC_X86_REG_ESP)
+        self._esp0 = esp0
         # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
         hrs = uc.hook_add(UC_HOOK_MEM_WRITE, self._on_ret_slot, user_data=r, begin=esp0, end=esp0 + 3)
         hcode = []
@@ -278,6 +286,8 @@ class X86Engine:
             world.EAX_TRACK.clear()
             hcode.append(uc.hook_add(UC_HOOK_CODE, self._on_eax, user_data=world.EAX_TRACK, begin=world.TEXT[0],
                                      end=world.TEXT[1] - 1))
+        if world.CPUID is not None:
+            hcode.append(uc.hook_add(UC_HOOK_INSN, self._on_cpuid, world.CPUID, 1, 0, UC_X86_INS_CPUID))
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
@@ -422,6 +432,50 @@ class X86Engine:
         elif 'al' in names:
             trk['last'] = 1
 
+    def _zero_unwritten(self, uc, r, ptrs):
+        """STUB_OUT (R4 flow, the oracle's side of arm64emu._zero_unwritten): for each argument that points into the
+        stack, the words of the next 0x40 bytes of the function's own frame (below the return-address slot) that
+        still hold the planted fill, i.e. nothing stored to them, become 0, as the real callee would have filled
+        them. (difffuzz-20, stub-flow) The words are compared with the planted fill, as the native side does: the
+        stack stores are not in r.writes, so the earlier test zeroed the callee's pushed arguments and the locals the
+        code had initialised (0x006a0c50: the oracle then read a null it had stored a pointer over). A pointer into
+        the incoming-argument words zeroes the one dword it designates: MSVC reuses a dead parameter slot as the
+        out-parameter temporary where GCC takes a fresh local (0x00a57670: `lea ecx, [esp+0xc]` is the slot of the
+        parameter it already consumed; 0x00a3d370: the key count read into the slot of its stream argument), and
+        the arguments around it are live."""
+        esp0 = getattr(self, '_esp0', None)
+        fill = getattr(self, '_fill', None)
+        base = world.SP0 - 0x1000
+        for v in ptrs:
+            v &= 0xffffffff
+            if not (world.STACK[0] <= v < world.STACK[1]):
+                continue
+            if esp0 is not None and v > esp0:
+                try:
+                    uc.mem_write(v & ~3, bytes(4))
+                except UcError:
+                    pass
+                continue
+            end = min(v + 0x40, world.STACK[1]) if esp0 is None else min(v + 0x40, esp0)
+            for a in range(v & ~3, end & ~3, 4):
+                if esp0 is not None and a == esp0:
+                    continue
+                if fill is not None:
+                    if a < base:
+                        continue
+                    try:
+                        cur = bytes(uc.mem_read(a, 4))
+                    except UcError:
+                        break
+                    if cur != fill[a - base:a - base + 4]:
+                        continue
+                elif any((a + i) in r.writes for i in range(4)):
+                    continue
+                try:
+                    uc.mem_write(a, bytes(4))
+                except UcError:
+                    break
+
     def _on_write(self, uc, access, address, size, value, r):
         for i in range(size):
             r.writes[address + i] = (value >> (8 * i)) & 0xff
@@ -429,6 +483,8 @@ class X86Engine:
     def _on_block(self, uc, address, size, user):
         case, r = user
         if self._in_loaded(address):
+            if world.STUB_OUT and address in self.text_funcs:
+                world.scrub_dead_frames(uc, uc.reg_read(UC_X86_REG_ESP), self._fill)
             r.blocks.add(address)
             return
         esp = uc.reg_read(UC_X86_REG_ESP)
@@ -452,6 +508,19 @@ class X86Engine:
             self.followed.add(address)
             uc.reg_write(UC_X86_REG_EIP, address)
             return
+        if address in libcalls.DELETES and libcalls.delete_fold(words[0], None, None, None) == 'null':
+            # (r4 uncls) operator delete(NULL): no call (libcalls.delete_fold); cdecl, the caller pops the argument
+            r.null_deletes = getattr(r, 'null_deletes', 0) + 1
+            uc.reg_write(UC_X86_REG_ESP, esp + 4)
+            uc.reg_write(UC_X86_REG_EIP, retaddr)
+            return
+        if retaddr in world.SKIP_RETS:
+            # (r5 design) a call the exe shows to be dead (world.SKIP_RETS): not made, not traced
+            info = self.callee_info(address)
+            pop = info[0] if info else (self.pop_override.get(retaddr) or 0)
+            uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
+            uc.reg_write(UC_X86_REG_EIP, retaddr)
+            return
         k = len(r.calls)
         if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
             self._fault = 'timeout'
@@ -460,6 +529,8 @@ class X86Engine:
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
                             {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
         r.calls[-1].pushed = self._pushed(uc, retaddr, address)
+        if world.STUB_OUT:
+            self._zero_unwritten(uc, r, r.calls[-1].args)
         if address in libcalls.NORETURN_X86:
             r.noreturn = libcalls.NORETURN_X86[address]   # the call never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
@@ -499,8 +570,13 @@ class X86Engine:
                 n = next(off for l_, sp, off, sz in getattr(cv, 'x86_declared', cv.x86) if l_ == lab) // 4
                 if 2 + n < len(r.calls[-1].args):
                     eax = r.calls[-1].args[2 + n]
-        elif ck == 'ref':
+        elif ck == 'ref' or k in world.REF_CALLS:
             eax = world.ref_result(k)
+            if k in world.REF_CALLS:
+                # (r5 design) the object holds the canned bytes: what the oracle loads through the result is what
+                # the native receives in its result register (the unit declares it by value)
+                self._ensure(eax, 16)
+                uc.mem_write(eax, rb[:16])
         elif ck in ('bool', 'untyped'):
             eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)
         if cv is not None and cv.hidden and cv.ret is not None:
@@ -509,8 +585,11 @@ class X86Engine:
                 libcalls.Mem(uc, r.writes, self._ensure).write(p, world.result_bytes(case, k, cv.ret.size))
                 eax = p
         uc.reg_write(UC_X86_REG_EAX, eax)
-        uc.reg_write(UC_X86_REG_EDX, world.u32(rb, 4))
-        uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
+        keep = retsrc.preserved(address) if address >= 0 else ()    # (eq-rest) a leaf that writes neither
+        if 'edx' not in keep:
+            uc.reg_write(UC_X86_REG_EDX, world.u32(rb, 4))
+        if 'ecx' not in keep:
+            uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         if kind in ('f32', 'f64'):
             v = struct.unpack('<f', rb[:4])[0] if kind == 'f32' else struct.unpack('<d', rb[:8])[0]
             uc.mem_write(FLD_VAL, struct.pack('<d', v))
@@ -525,6 +604,20 @@ class X86Engine:
             return
         uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
         uc.reg_write(UC_X86_REG_EIP, retaddr)
+
+    @staticmethod
+    def _on_cpuid(uc, user):
+        """The oracle executes `cpuid`: recorded; with `perturb` answered by values other than the host model's
+        (every register a function of the leaf, so a second run shows what the stored bytes depend on)."""
+        user['seen'].append(uc.reg_read(UC_X86_REG_EIP))
+        mode = user.get('perturb')
+        if not mode:
+            return False
+        leaf = uc.reg_read(UC_X86_REG_EAX)
+        for n, reg in enumerate((UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX)):
+            # 'zero': a CPU that reports nothing (no feature bits); anything else: a value per leaf and register
+            uc.reg_write(reg, 0 if mode == 'zero' else (leaf * 0x9e3779b1 + 0x5bd1e995 * (n + 1)) & 0xffffffff)
+        return True
 
     def _on_wild(self, uc, address, size, user):
         """Execution reached memory that holds no code: an indirect call through a planted pointer."""
@@ -589,11 +682,15 @@ class X86Engine:
             k = len(r.calls)
             r.calls.append(Call(libcalls.import_id(name), [uc.reg_read(UC_X86_REG_ECX),
                                                            uc.reg_read(UC_X86_REG_EDX)] + words, ret))
+            if world.STUB_OUT:
+                self._zero_unwritten(uc, r, r.calls[-1].args)
             if name in libcalls.NORETURN_IMPORTS:
                 r.noreturn = name
                 uc.emu_stop()
                 return
             v = world.u32(case.ret_bytes(k), 0)
+            # an import's canned result is the raw word on both machines (S1-rules d26-imp: arm64emu._on_stub does not
+            # normalise an import's low byte either; R4 flow had normalised both, 0x00d45c50)
             uc.reg_write(UC_X86_REG_EDX, world.u32(case.ret_bytes(k), 4))
             uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)
@@ -608,8 +705,19 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_ESP, (esp + 4 - uc.reg_read(UC_X86_REG_EAX)) & 0xffffffff)
             uc.reg_write(UC_X86_REG_EIP, ret); return True
         if name in libcalls.CRT_MATH:            # cdecl double functions: doubles at [esp+4], [esp+12] -> ST0
-            xs = [struct.unpack('<d', bytes(uc.mem_read(esp + 4 + 8 * i, 8)))[0] for i in range(libcalls.CRT_MATH[name])]
-            uc.mem_write(FLD_VAL, struct.pack('<d', libcalls.crt_math(name, xs)))
+            # (difffuzz-20, flow) an `f` name is the exe's float wrapper (ceilf 0x004e4430, floorf 0x00406cc0: `fld
+            # dword [ebp + 8]`): floats at [esp+4], [esp+8], the result rounded to float, in ST0
+            fl = name.endswith('f') and name[:-1] in libcalls.CRT_MATH
+            sz = 4 if fl else 8
+            xs = [struct.unpack('<f' if fl else '<d', bytes(uc.mem_read(esp + 4 + sz * i, sz)))[0]
+                  for i in range(libcalls.CRT_MATH[name])]
+            res = libcalls.crt_math(name, xs)
+            if fl:
+                try:
+                    res = struct.unpack('<f', struct.pack('<f', res))[0]
+                except OverflowError:
+                    res = math.copysign(float('inf'), res)
+            uc.mem_write(FLD_VAL, struct.pack('<d', res))
             uc.reg_write(UC_X86_REG_EIP, FLD_STUB); return True     # fld qword [FLD_VAL]; ret (to `ret`)
         stub = libcalls.x87_stub(name, BUILTIN_SLOT)
         if stub is not None:

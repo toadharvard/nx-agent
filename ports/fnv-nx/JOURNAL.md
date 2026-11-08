@@ -3607,3 +3607,77 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   arena crash that d009f9b fixes. The atestle set (S16 4181cc5) covers the 21 set-vacuous programs. A 22-shard
   program sweep and a cells replay are running.
 * **owner rules 1-11** recorded in tools/orch/README.md, among them the regression ratchet (T1).
+
+### J-0161 | 2026-11-08 | stream: orchestration | status: active | parent: J-0160
+
+* **full1 5fd996a4** (integration with D26): compile 2,978/2,978, link 85.7 % by address, 14,011 bridges,
+  trial-link undefined 607 -> 519, **guest trap stubs 155 -> 69**. R2's per-row table of the 155 rows on the
+  wip/d26 link: 45 fixed at head, 23 in flight, 77 in progress, 10 blocked, all owned; open 111 -> 97 by 10:20.
+* **boot, honest milestones** (S5): the renderer-init milestone now needs CreateDevice to return S_OK. Pre-D26
+  97deacd: 3/10 (winmain, ini-read, renderer-init on the null device), then InitRenderer +0x434, which D26
+  fixes. D26 line: 1/10 (winmain, 0 skipped initializers after the memory-manager stand-ins). The next blockers
+  are the INI loader faulting in IniCollection::FUN_00c44280 (S5, EQ fuzz) and D26 (b) shifting a D3D9 COM
+  interface (S1: exclude IUnknown-derived classes). D26 stays (owner: fix forward, no rollbacks, rule 12).
+* **emulator speed**: emu_start(count=) hooks every instruction (~9 MIPS); time slices (S5 2d1afaeb) take the
+  pre-D26 boot to renderer-init in 46 s instead of more than 540 s in the INI read.
+* **boot effort**: a discovery mode that records every fault and continues (S5); the blocker rows go to their
+  owners ahead of all other work; bootloop bl1 (T1) for warm per-head boots; full2 halves the time to the
+  next link; 12 equiv shards (eqs1..12) replace the 3 h single-shard eqa.
+* **shaders**: 1,809/1,809 programs pass, 0 vacuous in every set (atestle); the scene replay moved to sw31.
+* **MSVC gate**: open D24 0 and 0 unexplained at 9a303226 (EQ).
+* **owner rules 2, 11, 12** recorded: a full per-agent status in every message, the regression ratchet (T1,
+  96ebc537), fix forward.
+
+### J-0162 | 2026-11-08 | stream: orchestration | status: active | parent: J-0161
+
+* **link 4264bfd7** (the last link, 10:51): guest trap stubs 69 -> 67, undefined 512. Boot 2/10. S5's discovery
+  run stops at the D3D9 adapter-mode loop (FUN_00e7b7d0): the COM table is shifted by one, so the mode count
+  comes from EnumAdapterModes. This is D26 (b); S1 2018b38 fixes it, and it is in integration from ea3772a0 on.
+  The SLSO static freed through D0 (InitializeGlobal) is closed by S1 dd9fc1f7 (D22-CALLONLY).
+* **adoption is file-level**: adopt.sh takes the files 3-way and commits them itself. Stream SHAs are never
+  ancestors of integration, so a link is checked against the added lines (git grep), not with merge-base. At
+  ea3772a0: COM 2018b38, W38 58908ae7 and dd9fc1f7 are in, W41 is 8/29. From 2320d887 on: all of them.
+* **next links**: bl1 (sw36) on ea3772a0, after capstone was installed (the first iteration failed in the link
+  with ModuleNotFoundError; T1 f1ecb98e installs and checks the pins at setup). Then the first link >= b78b94df
+  carries W41 (-fno-sized-deallocation, a full recompile, expected), S1's 8 trap rows (EMPTY1 and 4 recon/*
+  bodies, which farms pick up through recon.sh), RAWVT1, D22-SLOTK and R2's VORDER1.
+* **VCALL triage** (S2 with 4 workers on the 336 trace-coc boot functions): the tool fixes alone take 5fd996a4
+  from 1,444 to 1,258 mismatches (6d6d888a, 71b0de06, abded97c). About 495 sites went to S1 and 66 to R2. R2
+  findings:
+  - BaseProcess.h declares 9 same-name virtual overloads in MSVC's reversed order. VORDER1 (r2_vorder.py,
+    e56dc832) sorts them for GCC and fails prepare on any descent left (0 at head).
+  - D22_CALLONLY_PLACEHOLDER misses slot-0 placeholders named `s_000`/`a_000`/`r0`, so those classes call one
+    slot low (N92Procedure 6 calls, Ref_00932b70 4 calls). R2 widens it, keeping only classes whose exe slot 0
+    is a deleting dtor (+927 candidates, including NiRenderer).
+* **false interpretations** (EQ): fuzz shards 1/3/5 at 588863 have 1,248 hard rows in 1,107 functions. Five
+  Sonnet workers classify them by mechanism: vtable 213, flow 337, memory 277, undefined/fault 222, rest 199.
+  Boot path 10 functions: StartMenu was a harness artifact (9f996270); teswater 004eaa00 is open.
+* **build** (T1): stable link worktree (cache hits across heads), toolchain hostcache, orphan farm locks taken
+  over, and a prepare memo (71/110 rules memoizable, off until it equals a cold tree). The ratchet ledger has
+  been live since about 11:06. The bt1 lockstep vs Wine gives 50 divergences with both caller chains, early in
+  memory-pool setup, and the guest ends in a thread-1 deadlock.
+* **orchestration**: autoadopt survives container restarts (SessionStart hook, deepen, retry on rc=1). Streams
+  message only for blocker rows, measurements and blocking questions (token budget).
+
+### J-0163 | 2026-11-08 | stream: orchestration | status: active | parent: J-0162
+
+* **link 8111f58a** (full1, integration at 10:38: COM 2018b38 and dd9fc1f7, without W38 and W41). The farm's
+  boot without stand-ins: 0/10, 4,551 initializers fault in MemoryManagerStandIn::FUN_00aa3e40. That is not a
+  vtable: the "table" 0x063b8d58 is the pool-name strings, so it is a body or field fault (S2 W45, open). S5's
+  boot with stand-ins and game data on sw13: **4/10** (winmain, ini-read, archive-list, bsa-opened). The D3D9 COM
+  loop now passes. Next stop: renderer-init, where NiDX9Renderer's table _ZTV12FUN_00e754a0 lost exe slot 1, so
+  the minus-one calls in FUN_00e7d6b0 hit the slot after their target (null device +0x8c4). The table is correct
+  at head (W38 d26-undefined, classlayout).
+* **all-tables gate** (S2, classlayout.py af16c17a, gate cb79ffed). Every RTTI vftable of the exe (3,269, 2,678
+  primary) gets one decision: 2,835 minus-one, 419 exe-order, 15 COM. Every native copy is compared with
+  transform(exe) slot by slot. Baseline 8111f58a: 1,470 of 3,269 exe vftables have a bad native table (1,744
+  tables, 15,678 slots). On 4264bfd7 (primary copies only): 1,233 tables, 7,624 slots (shift 5,804, short 720,
+  wrong 589, trap 290, pure 183, null 38). The link builds RTTI tables from classlayout first (dca867b6), and
+  S1's prepare decl rule reads the same file (92099e4). The residual goes to R4 (short, null) and R2 (trap,
+  pure), with Sonnet workers. Target: 0, counted on every link.
+* **flags**: -fno-lifetime-dse joins the MSVC-semantics set (R2 eeb66b6d: GCC dropped the vptr store after an
+  explicit dtor call, 254 sites). It shares W41's full recompile.
+* **traps** (R2, 4264bfd7): 67, 22 open (S2 and S1 stand-ins), 45 fixes in flight, R2 open 0.
+* **orchestration**: owner rule 13 (layout changes checked whole against the exe before merge, flags batched,
+  Sonnet workers). S2-bodies had been rc=3 since 11:42 (fnvnx_compat.h, fnvnx_equiv_fi.h), so D26DS and
+  classlayout were not in integration. S2 is resolving it.

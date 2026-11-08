@@ -89,6 +89,11 @@ POLICY = {
     'call-order':     ('by-design', '-', False, 'two adjacent calls swapped: C++ leaves operand evaluation order open'),
     'vptr-store':     ('by-design', '-', False, 'a dead vptr store GCC drops (D7: objects hold Itanium vptrs); in a '
                                                 'destructor MSVC resets the vptr to the base vftable, GCC does not'),
+    'cpuid-env':      ('by-design', '-', False, 'the oracle stores / returns what `cpuid` answered (it is shown: the '
+                                                'bytes change when the oracle\'s cpuid answers change); AArch64 has '
+                                                'no CPUID and the port answers with the fixed values of '
+                                                'shim/include/fnvnx_asm.h (docs/ASM.md), a CPU-defined result on '
+                                                'the exe too'),
     'array-new-check': ('by-design', '-', False, 'GCC checks new[]\'s count for overflow, MSVC 2008 does not'),
     'ilp32-pointer':  ('by-design', '-', False, 'an address computed past 4 GiB (wraparound on x86): needs a pointer '
                                                 'the exe never holds'),
@@ -103,14 +108,52 @@ POLICY = {
     'x87-trig-inf':   ('artifact', 'S13', False, 'fsin / fcos / fsincos / fptan of an infinity: the oracle emulator '
                                                  'leaves the infinity in st0 where the x87 gives the indefinite NaN '
                                                  '(Intel SDM, #IA masked); equal once the probe applies it'),
+    'canned-alias':   ('artifact', 'S13', False, 'a canned callee result points into the argument buffers, so the '
+                                                 'function writes the object through two names; the machines order '
+                                                 'those stores differently (no allocation returns the caller\'s own '
+                                                 'object); equal with the results moved to the heap'),
     'ptrdiff-unaligned': ('by-design', '-', False, 'a pointer difference that is not a multiple of the element size: '
-                                                   'GCC folds (end - begin) / size * size to end - begin, MSVC keeps '
-                                                   'the division (UB in C++); equal with 4-aligned arguments'),
+                                                   'GCC divides exactly (or folds (end - begin) / size * size), MSVC '
+                                                   'keeps the idiv (UB in C++); equal with 4-aligned arguments or, '
+                                                   'for `sub; cdq; idiv K` in the exe, with the subtrahend word '
+                                                   'rounded to a multiple of K (r5design.ptrdiff_probe)'),
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
+    'dead-result':    ('by-design', '-', False, 'the target\'s integer / pointer result is read by no caller in the exe '
+                                                '(every call is followed by a write of eax, or by a bare return of '
+                                                'a wrapper whose callers do the same; the address is never taken): '
+                                                'eax at the return is scratch (r5design.result_dead)'),
+    'dead-init-call': ('by-design', '-', False, 'MSVC /Od calls a constructor that only stores through this into a '
+                                                'frame object whose every byte the caller then overwrites before any '
+                                                'read; GCC drops the dead initialisation (r5design.dead_init_site)'),
+    'local-index-range': ('by-design', '-', False, 'a variable index into a local array leaves the frame (it writes '
+                                                   'the caller\'s arguments, or wraps): the result moves with each '
+                                                   'compiler\'s frame layout; equal for every index inside the frame '
+                                                   '(r5design.frame_index_probe)'),
+    'canned-null-deref': ('artifact', 'S13', False, 'the oracle\'s wild indirect call got a canned 0 and the next '
+                                                    'instruction loads through eax; the native\'s declaration returns a '
+                                                    'reference, which the harness answers with a valid object; equal '
+                                                    'with that object on both machines (r5design.deref_after_call)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
     'partial-return': ('by-design', '-', False, 'the oracle returns a byte / short in al / ax and the rest of eax is '
                                                 'what it held; the declared int result differs only there'),
+    'split-delete':   ('by-design', '-', False, 'MSVC calls the exe\'s scalar deleting destructor F(p, 1), which frees p '
+                                                'itself (exeempty.deleting_wrapper: it tests bit 0 of its argument '
+                                                'and then calls the deallocator); GCC calls the destructor, F(p, 0), '
+                                                'and a separate operator delete of the same p. The pair is the one '
+                                                'call; the arguments and the stores are compared'),
+    'call-order-unproven': ('triage', 'S13b', True, 'two adjacent calls are swapped and the exe does not show them to be '
+                                                    'the arguments of one call (exeempty.arg_blocks): a reordering of '
+                                                    'statements is a divergence, not an evaluation order'),
+    'call-order-args': ('triage', 'S13b', True, 'the calls are in another order on the two machines (eval-order) and the '
+                                                'comparison after pairing them by callee still differs; the canned '
+                                                'results are numbered by call index, so a reordered callee got '
+                                                'another value and the arguments it feeds differ for that reason: '
+                                                'not decided'),
+    'null-delete':    ('by-design', '-', False, 'a call of operator delete (0x00401030, the sized 0x00aa1460) with a '
+                                                'null pointer, which returns at once in the exe (0x00aa4060 `cmp '
+                                                '[ebp+8], 0; jne`, 0x00aa1460 `test eax, eax; je`); GCC drops a '
+                                                'delete of a pointer it knows is null'),
     'oracle-empty-call': ('by-design', '-', False, 'the oracle calls an exe function whose body is proven to do '
                                                    'nothing (push ebp; mov ebp, esp; pop ebp; ret, exeempty.py: no '
                                                    'store, no call, no register but ebp/esp written) and GCC drops '
@@ -118,6 +161,12 @@ POLICY = {
     'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
                                               'buffer and destroys the local, GCC constructs it there (copy '
                                               'elision, allowed by C++), F1b'),
+    'dtor-split-delete': ('by-design', '-', False, 'the oracle calls a scalar deleting destructor wrapper (exe: `and '
+                                                   'eax, 1; je`, then a call of operator delete / Deallocate) and '
+                                                   'goes on; the native calls the same exe function through its D1 '
+                                                   'binding with flags 0 and frees with its own operator delete '
+                                                   'call. Same destructor body, same heap (libcalls: delete 0x401030 '
+                                                   'and sized delete 0x00aa1460 both reach MemoryManager::Deallocate)'),
     'nrvo-elision':   ('by-design', '-', False, 'one machine passes the hidden result buffer of the function as the object a '
                                                 'callee works on, the other a local of its own frame (named return '
                                                 'value optimisation on one side only; allowed by C++). The result '
@@ -275,7 +324,8 @@ POLICY = {
                                                   'with an implicit constructor (zero, then the constructor), MSVC '
                                                   '2008 runs the constructor only'),
     'dtor-dead-store': ('by-design', '-', False, 'the oracle only zeroes bytes of the object a destructor (or a scalar '
-                                                 'deleting destructor wrapper) destroys: MSVC /Od keeps `m_p = 0` '
+                                                 'deleting destructor wrapper) destroys (or stores the empty-array '
+                                                 'marker 0x80000000 there): MSVC /Od keeps `m_p = 0` '
                                                  'after a release, GCC drops stores to an object whose lifetime ends'),
     'store-width':    ('triage', 'S13b', True, 'the same bytes stored with another width: one side writes bytes '
                                                'the other leaves (a bool/char vs dword member, a padded struct copy)'),
@@ -318,6 +368,12 @@ POLICY = {
     'oracle-callee-unloaded': ('artifact', 'S13', False, 'the oracle intercepts X (canned result) while the native '
                                                          'object defines X and runs its body: X is not in the '
                                                          'oracle\'s code set (unit membership / follow gap)'),
+    'throw-temp-dtor': ('by-design', '-', False, 'the native calls the destructor of a temporary right before the throw '
+                                                'the oracle ends the run at: GCC destroys the temporaries of a throw '
+                                                'expression before __cxa_throw, MSVC emits the same call after '
+                                                '_CxxThrowException (never run, the unwind map does it); the exe has '
+                                                'that call within a few instructions after the throw '
+                                                '(exeempty.calls_after_noreturn)'),
     'dyninit-no-atexit': ('real-bug', 'S10', False, 'the dynamic initializer registers the object\'s destructor '
                                                     'with atexit in the exe; the native initializer does not '
                                                     '(no fnvnx_xc_atexit): the destructor never runs at exit'),
@@ -615,7 +671,7 @@ def _rule_mem_write(d, rec=None):
             return 'thunk-binding'      # the function's own `_ZThn<d>_` thunk: the oracle enters with the secondary base
         if d.get('arm_zero_only') and oa == n and _zero_init_region(d, rec):
             return 'native-zero-init'
-        if d.get('x86_zero_only') and ox == n and _dtor_this_region(d, rec):
+        if (d.get('x86_zero_only') or d.get('x86_const_only')) and ox == n and _dtor_this_region(d, rec):
             return 'dtor-dead-store'
     if len(bx) >= 4 and len(ba) >= 4:
         if ww and all(_nan_generated(x, a) for x, a in ww):
@@ -664,7 +720,7 @@ def _this_buffer(rec):
         return BUFS[0] if isinstance(rec.get('case'), dict) else None
 
 
-_DTOR_SYM = re.compile(r'^\?\?(1|_G|_E)|[QU]AEPAX(I|_N)@Z$|D[012]Ev$')
+_DTOR_SYM = re.compile(r'^\?\?(1|_G|_E)|^\?Destructor@|[QU]AEPAX(I|H|_N)@Z$|D[012]Ev$')
 
 
 def _dtor_this_region(d, rec):
@@ -723,8 +779,52 @@ def _rule_empty_call(d):
     return 'oracle-empty-call' if sx == sa and len(sx) < len(tx) else None
 
 
+def _is_deleting_wrapper(addr):
+    """The exe function at `addr` is a scalar deleting destructor wrapper: a flags test (`and r, 1`, then a branch) and a
+    call of a deallocator (operator delete 0x00401030 / sized delete 0x00aa1460 / Deallocate 0x00aa4060) within its
+    first 0x30 bytes. None without the exe."""
+    import retsrc
+    pe = retsrc._pe()
+    if pe is None or addr is None or addr < 0:
+        return None
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    try:
+        code = pe.read(addr, 0x30)
+    except Exception:  # noqa: BLE001
+        return None
+    flag = False
+    for i in md.disasm(code, addr):
+        if i.mnemonic == 'and' and i.op_str.endswith(', 1'):
+            flag = True
+        elif i.mnemonic == 'call' and flag:
+            try:
+                return int(i.op_str, 16) in DEALLOCATORS
+            except ValueError:
+                return False
+        elif i.mnemonic == 'ret':
+            break
+    return False
+
+
+def _rule_dtor_split(d):
+    """dtor-split-delete: the traces agree up to a call of a scalar deleting destructor wrapper, the native then
+    frees with a deallocator of its own and goes on with the oracle's next call."""
+    tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    i = d.get('index')
+    if d.get('kind') != 'call-target' or not isinstance(tx, list) or not isinstance(ta, list) or not isinstance(i, int):
+        return None
+    if i < 1 or i >= len(ta) or tx[:i] != ta[:i] or d.get('arm_next') != d.get('x86'):
+        return None
+    if _hex(d.get('arm')) not in DEALLOCATORS or not _is_deleting_wrapper(_hex(ta[i - 1])):
+        return None
+    return 'dtor-split-delete'
+
+
 def _rule_calls(d, rec=None):
     tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if _rule_dtor_split(d):
+        return 'dtor-split-delete'
     if d.get('kind') == 'call-target':
         x, a = str(d.get('x86') or ''), str(d.get('arm') or '')
         if a.startswith('name:_Z'):
@@ -1341,6 +1441,8 @@ def _libc_variant(x, a):
         return m is not None and n in (m, m + 'f')
     if base is not None and base == m:
         return True                                     # sprintf vs __sprintf_chk (_FORTIFY_SOURCE)
+    if n.startswith('__isoc23_') and n[9:] == m:
+        return True                                     # strtoul vs glibc's C23 redirect __isoc23_strtoul
     if m in MATH and n == m + 'f':
         return True                                     # atan vs atanf
     return (m, n) in LIBC_PAIRS
@@ -1400,6 +1502,13 @@ def _rule_callflow(d, rec):
     if x is not None and not ta and me is not None and _empty_body(me[0]):
         return 'native-empty-body'
     xa = _hex(x)
+    if k == 'call-target' and xa == 0x00ec7894 and a is not None and d.get('arm_next') == x and \
+            _hex(a) is not None:
+        # (difffuzz-20, flow) the native's one extra call before the throw is the destructor of a temporary the exe
+        # calls right after its _CxxThrowException 0x00ec7894 (dead code, run by the unwind map)
+        import exeempty
+        if _hex(a) in exeempty.calls_after_noreturn(addr, xa):
+            return 'throw-temp-dtor'
     if xa == ATEXIT:
         cs = native_callees(src, addr)
         if cs is not None and not cs & ATEXIT_NAMES:
@@ -1425,6 +1534,13 @@ def _rule_callflow(d, rec):
                 others |= native_reaches(src, n) or set()   # what another unit-local callee could have called
         if (k == 'call-target' and '__fnv_%08x' % xa in cs
                 and native_ran(src, '__fnv_%08x' % xa, seen, exclude=cs | others)):
+            return 'oracle-callee-unloaded'
+        # (EQ, farm baseline 588863: 0x007d1bb0 StartMenu) runner's dynamic evidence: the native executed X's own
+        # __fnv_<X> entry block in this run (arm_entered) and its call here is the oracle's next one, so the one
+        # difference is the oracle's traced call of X, which the native ran untraced in its unit. A leaf X makes no
+        # traced call, so native_ran has nothing to go on; an early exit before X never enters it (V1 U1)
+        if (k == 'call-target' and '__fnv_%08x' % xa in cs and '%08x' % xa in (d.get('arm_entered') or ())
+                and a is not None and d.get('x86_next') == a):
             return 'oracle-callee-unloaded'
     # a decomp-local stand-in for an original function defined elsewhere, with an empty body: tied to the divergence
     # when the oracle calls that original where the native diverges, or when the native stops early

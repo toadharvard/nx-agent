@@ -3734,8 +3734,11 @@ def r_static_stand_ins(path, text, stats):
                 edits.append((d.start(), d.end(), d.group(1)))
     if not edits: return text
     out, pos = [], 0
+    keep = os.environ.get('FNVNX_RECON') and 'STAND4' in ''.join(e[2] for e in edits)
+    spans4 = prepare.__dict__.setdefault('_fnvnx_stand4_spans', {}).setdefault(os.path.abspath(path), []) if keep else None
     for a, b, r in sorted(edits):
         if a < pos: continue
+        if spans4 is not None and 'STAND4' in r: spans4.append((r, text[a:b]))   # REC1 matches on the text before this
         out.append(text[pos:a]); out.append(r); pos = b
     out.append(text[pos:])
     stats['STAND4'] += sum(1 for e in edits if 'STAND4' in e[2])
@@ -4220,6 +4223,14 @@ BIND1_REFS = [
     #   placeholder vector_error_message): the exe's ReserveItems 0x0065cfd0 calls 0x0065f640 (ThrowVectorTooLong,
     #   which pushes the exe's own message) at 0x0065d00e, where the pristine object calls this name
     ('src/staging/blk_00ac0000_od_ob1_variant.cpp', '?length_error@Vector12@@SAXXZ', '0x0065f640'),
+    # * W28 (top-down 44): MMAlloc::Allocate (blk_00aa0000_od_ob1_variant.cpp, exe 0x00aa3e40) reads the small-pool
+    #   table `if (n <= 0x3fc) pool = smallPools[n >> 2]`: the exe has `cmp [ebp+8], 0x3fc; shr edx, 2;
+    #   mov eax, [edx*4 + 0x011f67b8]` at 0x00aa3ee8 (and 0x00aa498b). The unit's pristine object relocates it (DIR32) in
+    #   a COMDAT function the exe compiled with GetHeapIndex inlined, so exe-data's byte match never finds the site.
+    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?smallPools@fnv_00aafc80@@3PAPAUDeallocPool@1@A', '0x011f67b8'),
+    # * W28 (top-down 109): LNode_af5480::AddTail (src/bssystem/archive.cpp; exe 0x00afcc10): `push 8;
+    #   mov ecx, 0x011f6238; call 0x00aa3e40` at 0x00afcc5c: the memory manager, as for g_memoryManager6b3c0.
+    ('src/bssystem/archive.cpp', '?g_memoryManager_af5480@fnv_00af5480@@3UMemoryManager_af5480@1@A', '0x011f6238'),
 ]
 
 def bind_units_data(data, stats, refs=BIND1_REFS):
@@ -4315,6 +4326,95 @@ def _vlit_index(path):
             sg.setdefault(os.path.normpath(os.path.join(root, u['source'])), set()).update(s)
     _VLIT = (defs, sg)
     return _VLIT
+
+# VLIT2: VLIT1 by the exe's vftables (S1-rules, from S2-bodies: TESObjectARMA's constructor 0x00511f60 stores its
+# secondary vptr at +0x68 as `" rH"`, the bytes of 0x00487220, slot 0 of 0x0102a28c; the unit has many literals, so
+# VLIT1 left it to VLIT1-LIST and the store could not reach the minus-one copy). The table is exe-derived and
+# private: tools/rules/_vlit_vftables.py writes vlit.json (fnvnx-vlit/1: slot 0 -> [(vftable, COL offset)], vftable ->
+# RTTI class) to fnv-nx-build recon/vlit_vftables, read from FNVNX_RECON (or the file FNVNX_VLIT). For each 1-3
+# character literal stored with `=` (also through a `(void*)` / `(const char*)` cast) whose bytes read as a decompiled
+# function's address: the store offset comes from the left side (`(char*)this + N`, else 0 when it stores through
+# `this`). The literal becomes `(char*)&DAT_<V>` when exactly one vftable V has that slot 0 at that offset. When
+# several have it, V is the one whose class is the class of the other vftables (`DAT_<hex>`) the same function stores.
+# Without the table VLIT1 is unchanged; the stores VLIT2 cannot decide are VLIT2-LIST.
+VLIT_STORE2 = re.compile(r'(=\s*)((?:\((?:const\s+)?(?:void|char)\s*\*\s*\)\s*)?)"([^"\\\n]{1,3})"(\s*;)')
+VLIT_THIS_OFF = re.compile(r'\bthis\s*\)?\s*\+\s*(0[xX][0-9a-fA-F]+|\d+)')
+
+def _vlit_table():
+    st = prepare.__dict__.get('_fnvnx_vlit')
+    if st is not None: return st
+    import json
+    files = []
+    if os.environ.get('FNVNX_VLIT') and os.path.isfile(os.environ['FNVNX_VLIT']): files.append(os.environ['FNVNX_VLIT'])
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'vlit.json') for dp, _, ns in os.walk(top) if 'vlit.json' in ns)
+    st = {}
+    for f in files:
+        try: d = json.load(open(f))
+        except (OSError, ValueError): continue
+        if d.get('format') == 'fnvnx-vlit/1':
+            st = d; break
+    prepare.__dict__['_fnvnx_vlit'] = st
+    return st
+
+def _vlit_exe_stores(path, text, stats, defs):
+    """VLIT2 (above): [(match, vftable address)] for the stores the exe's vftables decide"""
+    tab = _vlit_table()
+    if not tab: return []
+    out, spans = [], None
+    for m in VLIT_STORE2.finditer(text):
+        a = int.from_bytes((m.group(3).encode('latin-1', 'replace') + b'\0' * 4)[:4], 'little')
+        if not 0x00401000 <= a < 0x00fde578 or a not in defs: continue
+        ls = max(text.rfind(';', 0, m.start()), text.rfind('{', 0, m.start()), text.rfind('}', 0, m.start())) + 1
+        lv = text[ls:m.start()]
+        om = VLIT_THIS_OFF.search(lv)
+        off = int(om.group(1), 0) if om else (0 if re.search(r'\bthis\b', lv) else None)
+        cands = [c for c in tab.get('slot0', {}).get('%08x' % a, ()) if off is None or c[1] == off]
+        if len(cands) > 1:
+            if spans is None: spans = prepare.scope_map(text)
+            outer = [sp for sp in spans if sp[0] < m.start() < sp[1] and sp[2] not in ('namespace', 'extern')]
+            body = text[outer[0][0]:outer[0][1]] if outer else ''
+            cls = {tab.get('class', {}).get(h.lower()) for h in re.findall(r'\bDAT_([0-9a-fA-F]{8})\b', body)} - {None}
+            cands = [c for c in cands if tab.get('class', {}).get(c[0]) in cls]
+        if len(cands) != 1:
+            stats['VLIT2-LIST'] += 1; continue
+        out.append((m, int(cands[0][0], 16)))
+    return out
+
+def _vlit_apply(path, text, stats, hits):
+    """VLIT2's edits: each literal -> `(char*)&DAT_<V>` (its cast kept), `extern "C" char DAT_<V>;` in front of the
+    outermost function or class around its first store, a binding row for the link (VLIT1_BINDS). All positions are
+    in the original text; the edits apply from the end."""
+    root, _ = prepare._units_json(path)
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    spans = prepare.scope_map(masked)
+    edits, first = [], {}
+    for m, v in hits:
+        name = 'DAT_%08x' % v
+        edits.append((m.start(), m.end(), '%s%s(char*)&fnvnx_vlit_%08x%s /* fnv-nx VLIT2: "%s" */' % (
+            m.group(1), m.group(2), v, m.group(4), m.group(3).replace('*/', '* /'))))
+        first[name] = min(first.get(name, m.start()), m.start())
+        stats['VLIT2'] += 1
+        if root: VLIT1_BINDS.add((os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/'), '_' + name,
+                                  '0x%08x' % v))
+    for name, pos in first.items():
+        # its own identifier for the symbol DAT_<V> (asm label): the file may declare DAT_<V> itself, with another
+        # type or in another scope (blk_004c0000_od.cpp `int DAT_01020944`)
+        outer = [sp for sp in spans if sp[0] < pos < sp[1] and sp[2] not in ('namespace', 'extern')]
+        at = _decl_start(masked, outer[0][0]) if outer else 0
+        edits.append((at, at, 'extern "C" char fnvnx_vlit_%s __asm__("%s"); /* fnv-nx VLIT2 */ ' % (name[4:], name)))
+    for a, b, r in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+        text = text[:a] + r + text[b:]
+    return text
+
+def r_vptr_literals_exe(path, text, stats):
+    """VLIT2: a 1-3 character string literal stored as a vptr -> the exe vftable with that slot 0 at the store's
+    offset (vlit.json; see above). Runs before VLIT1, which sees only what is left."""
+    if '"' not in text or not _vlit_table(): return text
+    defs, _ = _vlit_index(path)
+    hits = _vlit_exe_stores(path, text, stats, defs)
+    return _vlit_apply(path, text, stats, hits) if hits else text
 
 def r_vptr_literals(path, text, stats):
     """VLIT1: a 1-3 character string literal stored as a vptr -> the vftable address the unit binds it to (see
@@ -4476,7 +4576,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
@@ -5227,6 +5327,15 @@ def _recon_reject(r, d, src, bad, stats):
         msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
     sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its rows stay trap stubs\n' % (src, d, msg))
 
+def _rec1_unstand4(path, text):
+    """text with every STAND4 rewrite put back to the definition it replaced (None when STAND4 rewrote nothing here)."""
+    spans = prepare.__dict__.get('_fnvnx_stand4_spans', {}).get(os.path.abspath(path))
+    if not spans: return None
+    out = text
+    for marker, orig in spans:
+        if out.count(marker) == 1: out = out.replace(marker, orig)
+    return out if out != text else None
+
 def r_recon_bodies(path, text, stats):
     """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
     if not os.environ.get('FNVNX_RECON') or not path.endswith(('.cpp', '.c')): return text
@@ -5245,6 +5354,15 @@ def r_recon_bodies(path, text, stats):
             if not isinstance(old, str) or not old or not isinstance(new, str):
                 bad = (k, -1, 'needs a non-empty "old" and a "new" string'); break
             c = edited.count(old)
+            if c == 0:
+                # REC1 x STAND4: a recon is written against the decomp text, and STAND4 (which runs before REC1) turned a
+                # lone static stand-in into an extern declaration. Match on the text before STAND4 (its marker put back
+                # to the original definition), apply the pair there, and let STAND4 convert what is left of it.
+                un = _rec1_unstand4(path, edited)
+                if un is not None and un.count(old) == 1:
+                    edited = un.replace(old, new)
+                    edited = r_static_stand_ins(path, edited, stats)
+                    continue
             if c != 1:
                 bad = (k, c, old[:120]); break
             edited = edited.replace(old, new)
@@ -5553,10 +5671,18 @@ def d22_classes(text, masked=None):
         nested = [(o2, c2) for o2, c2, _, _ in spans if o < o2 < c]
         def own_depth(pos):
             return not any(o2 < pos < c2 for o2, c2 in nested)
-        virtuals, dtor = [], False
+        virtuals, dtor, dtor_decl = [], False, None
         name = m.group(2)
         for dm in re.finditer(r'~\s*%s\s*\(' % re.escape(name), masked[o:c]):
-            if own_depth(o + dm.start()): dtor = True; break
+            if own_depth(o + dm.start()):
+                if dtor: dtor_decl = None; break
+                dtor = True
+                # a body-less, non-virtual `~C();` alone on its line (D26 (b): it gives way to `virtual ~C()`)
+                ls = masked.rfind('\n', 0, o + dm.start()) + 1
+                le = masked.find('\n', o + dm.start())
+                le = c if le < 0 or le > c else le
+                if re.match(r'^[ \t]*~\s*%s\s*\(\s*(?:void\s*)?\)\s*;[ \t]*$' % re.escape(name), masked[ls:le]):
+                    dtor_decl = (ls + len(masked[ls:le]) - len(masked[ls:le].lstrip()), le)
         skip_to = o + 1
         for vm in D22_VIRTUAL.finditer(masked, o + 1, c):
             if vm.start() < skip_to or not own_depth(vm.start()): continue
@@ -5579,11 +5705,11 @@ def d22_classes(text, masked=None):
             virtuals.append((start, end, re.sub(r'\s+', '', mm.group(1)) if mm else None, text[start:end]))
             skip_to = end
         out.append(dict(qual=qual + [name], open=o, close=c, head=hs, bases=(m.group(3) or '')[1:].strip(),
-                        template=bool(D22_TEMPLATE.search(masked[max(0, hs - 300):hs])), dtor=dtor,
+                        template=bool(D22_TEMPLATE.search(masked[max(0, hs - 300):hs])), dtor=dtor, dtor_decl=dtor_decl,
                         first=virtuals[0] if virtuals else None, virtuals=virtuals, kind=m.group(1)))
     return out
 
-def d22_placeholder(masked, cls, decl, ignore=()):
+def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     """the virtual declaration decl = (start, end, member, text) of class cls is a placeholder in this file: no
     definition outside the class, an inline body of one statement at most, and no other use of its name followed by
     `(` (a call or another declaration)"""
@@ -5597,19 +5723,86 @@ def d22_placeholder(masked, cls, decl, ignore=()):
     for a, b in ignore:                         # other classes' virtual declarations of the same name
         if (a, b) != (start, end): rest = rest[:a] + ' ' * (b - a) + rest[b:]
     if re.search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), rest): return False
-    if re.search(r'(?<![\w~])%s\s*\(' % re.escape(member), rest): return False
+    for u in re.finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), rest):
+        # an unqualified call reaches cls's member only from a member of cls or of a class deriving from it (S5-boot:
+        # actor.cpp's CVShell::FUN_008805f0 calls its own base CVB's `v0(p)`; NiTMap_S's `v0` stayed unconverted)
+        qualified = re.search(r'(?:->|\.|::)\s*$', rest[max(0, u.start() - 8):u.start()])
+        if reach is not None and not qualified and not reach(u.start()):
+            continue
+        # a qualified call whose receiver's type resolves to a class outside the family (extradatalist.cpp:
+        # `((Ref_0041b2a0*)ref)->sub.v0()`, sub a Sub_0041b2a0, held back AX's v0)
+        if reach is not None and qualified and getattr(reach, 'recv', None) and reach.recv(u.start()) is False:
+            continue
+        return False
     return True
+
+D22_MEMBER_DEF = re.compile(r'(?<![\w~:])([A-Za-z_]\w*)\s*(?:<[^;{}()]*>\s*)?::\s*~?\s*[A-Za-z_]\w*\s*\([^;{}]*\)[^;{}]*\{')
+
+def d22_reach(masked, classes):
+    """reach(cls) -> callable(pos): could an unqualified call at pos name a member of class cls? Only inside a
+    member of cls or of a class of the file deriving from it (an inline body in the class, or an out-of-class
+    `Y::f(...) { }` definition); not in a free function or another class's member."""
+    owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
+    for m in D22_MEMBER_DEF.finditer(masked):
+        b = m.end() - 1
+        try: e = prepare.match_brace(masked, b)
+        except Exception: e = None
+        if e: owners.append((b, e, m.group(1)))
+    owners.sort(key=lambda t: t[0] - t[1])          # innermost (shortest) span first
+    derived = collections.defaultdict(set)
+    for c in classes:
+        for b in _d22_bases(c['bases']): derived[b.replace('<>', '')].add(c['qual'][-1])
+    def reach(cls):
+        fam, todo = {cls}, [cls]
+        while todo:
+            for d in derived.get(todo.pop(), ()):
+                if d not in fam: fam.add(d); todo.append(d)
+        def f(pos):
+            for a, z, nm in owners:
+                if a < pos < z: return nm in fam
+            return False
+        def recv(pos):
+            # the receiver of `...(->|.)ph(` at pos: True / False when its type resolves, None when unknown
+            t = _d22_receiver_type(masked, pos, by_name)
+            return None if t is None else t in fam
+        f.recv = recv
+        return f
+    by_name = collections.defaultdict(list)
+    for c in classes: by_name[c['qual'][-1]].append(c)
+    return reach
+
+D22_CAST_RECV = re.compile(r'\(\s*\(\s*(?:const\s+)?([A-Za-z_]\w*)\s*\*\s*\)\s*[A-Za-z_]\w*\s*\)\s*->\s*'
+                           r'(?:([A-Za-z_]\w*)\s*(->|\.)\s*)?$')
+
+def _d22_receiver_type(masked, pos, by_name):
+    """type name of the receiver of the call at pos for `((T*)x)->ph(` (T) and `((T*)x)->m.ph(` / `->m->ph(` (the
+    declared type of T's member m, when T is defined in the file once); None otherwise"""
+    m = D22_CAST_RECV.search(masked[max(0, pos - 200):pos])
+    if not m: return None
+    t, mem, op = m.group(1), m.group(2), m.group(3)
+    if not mem: return t
+    cs = by_name.get(t, ())
+    if len(cs) != 1: return None
+    body = masked[cs[0]['open'] + 1:cs[0]['close']]
+    d = re.search(r'(?:^|[;{}\n])\s*(?:struct\s+|class\s+)?([A-Za-z_]\w*)\s*(\*?)\s*%s\s*(?:\[[^\]]*\])?\s*;' % re.escape(mem),
+                  body)
+    if not d or (op == '->') != bool(d.group(2)): return None
+    return d.group(1)
+
+def _d22_files():
+    files = []
+    if os.environ.get('FNVNX_D22') and os.path.isfile(os.environ['FNVNX_D22']): files.append(os.environ['FNVNX_D22'])
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'd22.json') for dp, _, ns in os.walk(top) if 'd22.json' in ns)
+    return files
 
 def _d22_list():
     """{class key: set(members)} from every d22.json under FNVNX_RECON (or the file FNVNX_D22); cached on prepare
     (equiv.py loads the stream modules twice)"""
     st = prepare.__dict__.get('_fnvnx_d22')
     if st is not None: return st
-    files = []
-    if os.environ.get('FNVNX_D22') and os.path.isfile(os.environ['FNVNX_D22']): files.append(os.environ['FNVNX_D22'])
-    top = os.environ.get('FNVNX_RECON')
-    if top and os.path.isdir(top):
-        files += sorted(os.path.join(dp, 'd22.json') for dp, _, ns in os.walk(top) if 'd22.json' in ns)
+    files = _d22_files()
     st = collections.defaultdict(set)
     import json
     for f in files:
@@ -5620,6 +5813,75 @@ def _d22_list():
             st[c['class']].update(c.get('members', ()))
     prepare.__dict__['_fnvnx_d22'] = st
     return st
+
+def _d22_dtor_slots():
+    """{class simple name: k} - classes whose exe vftable holds the deleting destructor at slot k > 0 (slot 0 is a
+    trivial function: the TESForm family, k = 4, S2-bodies vtmetric 3f7a6c35). From the `dtor_slots` rows of every
+    d22.json (FNVNX_D22 / FNVNX_RECON; tools/rules/_d22_classes.py --dtor-slots). Cached on prepare."""
+    st = prepare.__dict__.get('_fnvnx_d22_slots')
+    if st is not None: return st
+    import json
+    st = {}
+    for f in _d22_files():
+        try: d = json.load(open(f))
+        except (OSError, ValueError): continue
+        if d.get('format') != 'fnvnx-d22/1': continue
+        for r in d.get('dtor_slots', ()):
+            if not (isinstance(r.get('slot'), int) and r['slot'] > 0): continue
+            # a row with `file` (a tree path, e.g. src/fallout/ai/actor.cpp: a call-only shell named after its function,
+            # whose receivers seamcheck knows) applies to that file only, and wins over a class-wide row
+            st[(r['class'].split('::')[-1], r.get('file') or '')] = r['slot']
+    prepare.__dict__['_fnvnx_d22_slots'] = st
+    return st
+
+def _classlayout():
+    """{(simple name, file or ''): (kind, dtor_slot)} from S2's classlayout.tsv (tools/link/classlayout.py: one row per
+    RTTI class of the exe, `# fnvnx-classlayout/1`; columns class, vftable, kind minus-one / exe-order / com, dtor_slot,
+    reason, file, qualified), from FNVNX_CLASSLAYOUT or any classlayout.tsv under FNVNX_RECON. Rows of one key that
+    disagree make that key undecided (left to the heuristics). Cached on prepare."""
+    got = prepare.__dict__.get('_fnvnx_classlayout')
+    if got is not None: return got
+    files = [os.environ['FNVNX_CLASSLAYOUT']] if os.environ.get('FNVNX_CLASSLAYOUT') else []
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'classlayout.tsv') for dp, _, ns in os.walk(top) if 'classlayout.tsv' in ns)
+    rows = collections.defaultdict(set)
+    for f in files:
+        try: lines = open(f).read().splitlines()
+        except OSError: continue
+        if not lines or not lines[0].startswith('# fnvnx-classlayout/1'): continue
+        for line in lines[1:]:
+            if not line.strip() or line.startswith('#'): continue
+            fs = line.split('\t') + [''] * 9
+            if fs[0] == 'class': continue
+            # a secondary vftable's row (COL offset > 0: reason or evidence `secondary...`) does not decide the class:
+            # the primary does (S2-bodies)
+            if fs[4].strip().startswith('secondary') or fs[7].strip().startswith('secondary'): continue
+            try: k = int(fs[3])
+            except ValueError: continue
+            if fs[2] not in ('minus-one', 'exe-order', 'com'): continue
+            rows[(fs[0].strip().split('::')[-1], fs[5].strip().lstrip('/'))].add((fs[2], k))
+    got = {key: next(iter(v)) for key, v in rows.items() if len(v) == 1}
+    prepare.__dict__['_fnvnx_classlayout'] = got
+    return got
+
+def _classlayout_row(path, name):
+    """the classlayout decision (kind, dtor_slot) for class `name` in file `path`: a file row first, or None"""
+    cl = _classlayout()
+    if not cl: return None
+    p = path.replace('\\', '/')
+    for (n, f), v in cl.items():
+        if n == name and f and p.endswith('/' + f): return v
+    return cl.get((name, ''))
+
+def _d22_dtor_slot(path, name):
+    """the dtor_slots slot of class `name` in the file `path` (a per-file row first), or None"""
+    st = _d22_dtor_slots()
+    if not st: return None
+    p = path.replace('\\', '/')
+    for (n, f), k in st.items():
+        if n == name and f and p.endswith('/' + f.lstrip('/')): return k
+    return st.get((name, ''))
 
 def _d22_bases(bases):
     out = []
@@ -5636,15 +5898,79 @@ def _d22_bases(bases):
 # vtable and implicit destructor would need the undefined `~C`); under D26 every native receiver has D1/D0 at slots 0/1 (D22, the image vftables' minus-one copies),
 # so the declaration needs `virtual ~C()` where its slot-0 placeholder is. A placeholder called by name stays
 # (D22-USED: slot 0 is the deleting destructor, whose call needs another form).
+# An unqualified call `ph(` counts as a use only inside a member of the class or of a class of the file deriving from
+# it (actor.cpp's CVShell::FUN_008805f0 calls its own CVB's `v0(p)`, which held NiTMap_S back). A class that declares
+# only a body-less, non-virtual `~C();` (no definition in the file, none called or defined by a header's includers)
+# is call-only as well; its `~C();` goes under GCC, FNVNX_D22_DROP (D22-DTOR: modelloader_activator_declarations.h's
+# BGSOpenCloseForm, whose tesobjectdoor_decls.h copy D26 already converts).
 D22_CALLONLY_PLACEHOLDER = re.compile(
     r"^(?:v|vf|vfn|vt|vfunc|virt|virtual|slot|func|fn|unk|unknown|Unk_?|Unknown|Func|Virtual|Reserved|reserved|pad|Pad|"
     r"Slot|V|F)_?0+$|^\w*?Unknown_?0*$|^\w*_v0$|^v0_\w*$|^vfunc0\w*$|^Unk(?:nown)?0+\w*$", re.IGNORECASE)
 
-def _d22_callonly(masked, c):
-    """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above)"""
-    if c['bases'] or c['dtor'] or not c['first'] or len(c['virtuals']) < 2: return False
-    if not c['first'][2] or not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]): return False
-    if any('{' in masked[v[0]:v[1]] for v in c['virtuals']): return False
+D22_EMPTY_BODY = re.compile(r'\{\s*(?:return\s+(?:[-+]?(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*|true|false|0\.0f?|nullptr|NULL)\s*;\s*)?\}\s*$')
+
+# COM interfaces (S5-boot, link 3f7a6c35e923: the adapter-mode list ctor 0x00e7bc90 dispatched on the IDirect3D9 at
+# [vptr+108] / [vptr+72] where the exe reads +104 / +68, so EnumAdapterModes ran GetAdapterDisplayMode): an
+# IUnknown-shaped vtable has QueryInterface / AddRef / Release at slots 0..2 and no destructor slot, whatever its
+# receiver, and the native D3D / DInput / DSound objects keep that ABI. D22 / D26 leave alone a class with a
+# `__stdcall` virtual (MSVC's C++ virtuals are __thiscall; COM methods are __stdcall: STDMETHOD, WINAPI, ...) or one
+# returning HRESULT / taking REFIID, a
+# virtual QueryInterface / AddRef / Release, or an SDK interface name (IUnknown, IDirect*, IDXGI*, IXAudio*, ...).
+# Counted D22-COM.
+D22_COM_CONV = re.compile(r'\b(?:__stdcall|_stdcall|STDMETHOD\w*|STDMETHODCALLTYPE|WINAPI|CALLBACK|APIENTRY|PASCAL|'
+                          r'__RPC_\w+|NTAPI|HRESULT|REFIID)\b')
+D22_COM_MEMBER = {'QueryInterface', 'AddRef', 'Release'}
+D22_COM_NAME = re.compile(r'^(?:I(?:Unknown|Direct\w*|DXGI\w*|XAudio\w*|D3D\w*|DInput\w*|DSound\w*|Dispatch|ClassFactory|'
+                          r'Stream|Storage|Persist\w*|Moniker|EnumVARIANT|MMDevice\w*|Audio\w*|KsPropertySet|'
+                          r'Wbem\w*|XACT\w*|Xact\w*)|LPDIRECT\w*|LPUNKNOWN)$')
+
+def _d22_com(masked, c):
+    """class c is (or stands for) a COM interface: see above"""
+    if D22_COM_NAME.match(c['qual'][-1]): return True
+    for v in c['virtuals']:
+        if v[2] in D22_COM_MEMBER or D22_COM_CONV.search(masked[v[0]:v[1]]): return True
+    return False
+
+def _d22_numbered(c):
+    """the class's first virtuals are a numbered sequence of one prefix: `P_00, P_01` (InitHolder's FUN_00aa2020_Impl),
+    `_v01, _v02` (bstexturepalette.cpp's NiTexture_VF), `d000, d001` (RefV), or byte offsets `v000, v004, v008`;
+    step 1 from 0 or 1, or step 4 from 0, and a third virtual continues it when there is one (EQ G1)"""
+    ns = [v[2] or '' for v in c['virtuals'][:3]]
+    ms = [re.match(r'^([A-Za-z_]\w*?)(\d+)$', n) for n in ns]
+    if len(ms) < 2 or not (ms[0] and ms[1]): return False
+    if len(ms) > 2 and not (ms[2] and ms[2].group(1) == ms[0].group(1)): ms = ms[:2]   # a named third virtual
+    if len({m.group(1) for m in ms}) != 1: return False
+    xs = [int(m.group(2)) for m in ms]
+    step = xs[1] - xs[0]
+    if not ((step == 1 and xs[0] in (0, 1)) or (step == 4 and xs[0] == 0)): return False
+    return len(xs) < 3 or xs[2] - xs[1] == step
+
+def _d22_callonly(masked, c, unit=True, named_ok=False):
+    """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above); named_ok: the
+    slot is known from the exe (D22-SLOTK), so its member's name is not tested"""
+    if c['bases'] or not c['first'] or len(c['virtuals']) < 2: return False
+    if c['dtor'] and not c.get('dtor_decl'): return False
+    if c['dtor'] and re.search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~\s*%s\s*\(' % ((re.escape(c['qual'][-1]),) * 2),
+                               masked):
+        return False                                     # `~C();` defined in the file: a real destructor
+    if not c['first'][2]: return False
+    if not named_ok and not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]) and not _d22_numbered(c):
+        return False
+    # an empty inline body (`virtual void f00() {}`) or one that only returns a constant (`{ return 0; }`) is a
+    # placeholder too, not a definition (EQ, link 0540aff0: tesobjectrefr.cpp's FUN_00567f40_class, 19 such slots;
+    # S2-bodies' PHSLOT1 makes the empty ones declarations as well)
+    if any('{' in masked[v[0]:v[1]] and not (unit and D22_EMPTY_BODY.search(masked[v[0]:v[1]])) for v in c['virtuals']):
+        return False                                     # (a header's includers could build the class: .cpp only)
+    if any('{' in masked[v[0]:v[1]] for v in c['virtuals']):
+        # with inline bodies GCC can build the class (its vtable from those bodies); once `virtual ~C()` is the key
+        # function nothing defines, a construction would need it. Only a class the file never uses as an object:
+        # its name only as `C*`, `C&`, `C::`, in its own body or after `struct` / `class`
+        nm = c['qual'][-1]
+        for u in re.finditer(r'(?<![\w~:])%s\b' % re.escape(nm), masked):
+            if c['open'] < u.start() < c['close']: continue
+            if re.match(r'\s*(?:\*|&|::)', masked[u.end():u.end() + 4]): continue
+            if re.search(r'(?:struct|class)\s+$', masked[max(0, u.start() - 12):u.start()]): continue
+            return False
     name = c['qual'][-1]
     members = {v[2] for v in c['virtuals'] if v[2]}
     for m in re.finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), masked):
@@ -5730,6 +6056,9 @@ def r_vtable_dtor_slot(path, text, stats):
         for v in c['virtuals']:
             if v[2]: vdecls[v[2]].append((v[0], v[1]))
     calls, masked_nc, needs = {}, {}, collections.defaultdict(list)
+    reach = d22_reach(masked, classes)
+    dtor_drops = {}                             # first-virtual start -> span of the class's `~C();` (dropped)
+    applied = {}                                # edit start -> (class key, member, kind): build/d22_applied.tsv
     def statement_calls(ph):
         # `EXPR->ph(flags);` as a statement: the deleting-destructor call D26 turns into FNVNX_D22_CALL
         if ph not in calls:
@@ -5741,27 +6070,95 @@ def r_vtable_dtor_slot(path, text, stats):
         return calls[ph]
     for c in classes:
         key = c['qual'][-1] + '<>' if c['template'] else '::'.join(c['qual'])
-        callonly = key not in lst and _d22_callonly(masked, c) and \
-            not any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
-                    for o in classes if o['bases'])
+        if c['first'] and _d22_com(masked, c):
+            if key in lst or (not c['bases'] and len(c['virtuals']) >= 2): stats['D22-COM'] += 1
+            continue
+        cl = _classlayout_row(path, c['qual'][-1]) if c['first'] and not c['bases'] else None
+        if cl is not None:
+            # D22-CL: the exe decides (S2's classlayout.tsv, orchestrator 2026-11-08): exe-order / com keep the
+            # declaration as it is; minus-one puts `virtual ~C()` at the exe's deleting-destructor slot k
+            kind, k = cl
+            if kind != 'minus-one' or k < 0:
+                stats['D22-CL-KEEP'] += 1; continue
+            if len(c['virtuals']) <= k or (c['dtor'] and not c.get('dtor_decl')):
+                stats['D22-CL-HELD'] += 1; continue
+            t = c['virtuals'][k]
+            ck = dict(c, first=t)
+            blockers = [o for o in classes if o['bases'] and c['qual'][-1] in _d22_bases(o['bases'])
+                        and not _d22_defines_none(masked, o)]
+            if any(v[2] == t[2] for o in blockers for v in o['virtuals']) or _d22_extern_use(path, t[2]) or \
+                    not _d22_callonly(masked, ck, path.endswith(('.cpp', '.c', '.cxx', '.cc')), named_ok=True) or \
+                    not d22_placeholder(masked, c['qual'][-1], t, vdecls[t[2]], reach(c['qual'][-1])):
+                stats['D22-CL-HELD'] += 1; continue
+            edits.append((t[0], t[1], '%s(%s, %s)' % ('FNVNX_D22I' if blockers else 'FNVNX_D22', c['qual'][-1], t[3])))
+            applied[t[0]] = (key, t[2], 'classlayout-slot%d' % k)
+            if c['dtor'] and c.get('dtor_decl'): dtor_drops[t[0]] = c['dtor_decl']
+            done[c['qual'][-1] + ('<>' if c['template'] else '')] = t[2]
+            stats['D22-CL'] += 1
+            continue
+        k = _d22_dtor_slot(path, c['qual'][-1])
+        if not k and c['first'] and _rawvt_exe_order().get(c['qual'][-1], set()) & D22_EXE_ORDER_REASONS:
+            # D22-EXEORDER (S2-bodies seamcheck V3 / V4): the link keeps this class's table in exe order, so its
+            # callers keep the exe's numbering
+            stats['D22-EXEORDER'] += 1; continue
+        if k and c['first'] and not c['bases']:
+            # D22-SLOTK: the exe's deleting destructor is at slot k (slot 0 a trivial function: the TESForm family,
+            # k = 4): the k-th virtual, not the first, becomes `virtual ~C()`; nothing at slot 0
+            if len(c['virtuals']) <= k or c['dtor']:
+                stats['D22-SLOTK-HELD'] += 1; continue
+            t = c['virtuals'][k]
+            ck = dict(c, first=t)
+            if not _d22_callonly(masked, ck, path.endswith(('.cpp', '.c', '.cxx', '.cc')), named_ok=True) or \
+                    any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
+                        for o in classes if o['bases']) or _d22_extern_use(path, t[2]) or \
+                    not d22_placeholder(masked, c['qual'][-1], t, vdecls[t[2]], reach(c['qual'][-1])):
+                stats['D22-SLOTK-HELD'] += 1; continue
+            edits.append((t[0], t[1], 'FNVNX_D22(%s, %s)' % (c['qual'][-1], t[3])))
+            applied[t[0]] = (key, t[2], 'slot%d' % k)
+            done[c['qual'][-1] + ('<>' if c['template'] else '')] = t[2]
+            stats['D22-SLOTK'] += 1
+            continue
+        callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc')))
+        inline_dtor = False
+        if callonly:
+            blockers = [o for o in classes if o['bases'] and c['qual'][-1] in _d22_bases(o['bases'])
+                        and not _d22_defines_none(masked, o)]
+            if blockers:
+                # D22-INLINE (S2-bodies seamcheck V4: TerrainBase in hkpphysicssystem.cpp): a derived class of the file
+                # defines members, so its destructor would call the base's undefined `~C`. When no such class declares
+                # the placeholder member itself, the base takes an inline empty `virtual ~C() {}` under GCC
+                # (FNVNX_D22I): the derived destructors call it, the slots stay minus-one.
+                ph0 = c['first'][2]
+                if any(v[2] == ph0 for o in blockers for v in o['virtuals']) or \
+                        re.search(r'(?<![\w~])%s\s*\(' % re.escape(ph0),
+                                  ''.join(masked[o['open']:o['close']] for o in blockers)):
+                    callonly = False
+                else:
+                    inline_dtor = True
         if not callonly:
             if key not in lst or not c['first']: continue
             if c['bases'] or c['dtor'] or c['first'][2] not in lst[key]: continue
-        if _d22_extern_use(path, c['first'][2]):
+        if _d22_extern_use(path, c['first'][2]) or \
+                (callonly and c['dtor'] and _d22_extern_use(path, '~' + c['qual'][-1])):
             stats['D22-EXTERN'] += 1; continue
-        if not d22_placeholder(masked, c['qual'][-1], c['first'], vdecls[c['first'][2]]):
+        rc = reach(c['qual'][-1])
+        if not d22_placeholder(masked, c['qual'][-1], c['first'], vdecls[c['first'][2]], rc):
             ph = c['first'][2]
             if not (callonly and statement_calls(ph) and
-                    d22_placeholder(masked_nc[ph], c['qual'][-1], c['first'], vdecls[ph])):
+                    d22_placeholder(masked_nc[ph], c['qual'][-1], c['first'], vdecls[ph], rc)):
                 stats['D22-USED'] += 1; continue
             needs[ph].append(len(edits))
-        edits.append((c['first'][0], c['first'][1], 'FNVNX_D22(%s, %s)' % (c['qual'][-1], c['first'][3])))
+        edits.append((c['first'][0], c['first'][1], '%s(%s, %s)' % ('FNVNX_D22I' if inline_dtor else 'FNVNX_D22',
+                                                                       c['qual'][-1], c['first'][3])))
+        applied[c['first'][0]] = (key, c['first'][2], 'callonly' if callonly else 'listed')
+        if inline_dtor: stats['D22-INLINE'] += 1
+        if callonly and c['dtor']: dtor_drops[c['first'][0]] = c['dtor_decl']
         done[c['qual'][-1] + ('<>' if c['template'] else '')] = c['first'][2]
         stats['D22-CALLONLY' if callonly else 'D22'] += 1
     drop = set()
     for ph, idx in needs.items():
         # the calls are rewritten only when every class of the file that declares a virtual `ph` has it converted
-        conv = {edits[i][0] for i in range(len(edits)) if edits[i][2].startswith('FNVNX_D22(')}
+        conv = {edits[i][0] for i in range(len(edits)) if edits[i][2].startswith(('FNVNX_D22(', 'FNVNX_D22I('))}
         if all(v[0] in conv for cc in classes for v in cc['virtuals'] if v[2] == ph):
             for m in calls[ph]:
                 edits.append((m.start(2), m.end(), 'FNVNX_D22_CALL(%s, %s, %s);' % (text[m.start(2):m.end(2)], ph,
@@ -5772,10 +6169,16 @@ def r_vtable_dtor_slot(path, text, stats):
             stats['D22-USED'] += len(idx)
     if drop:
         for i in drop:
-            nm = re.match(r'FNVNX_D22\((\w+),', edits[i][2]).group(1)
+            nm = re.match(r'FNVNX_D22I?\((\w+),', edits[i][2]).group(1)
             done.pop(nm, None); done.pop(nm + '<>', None)
             stats['D22-CALLONLY'] -= 1
         edits = [e for i, e in enumerate(edits) if i not in drop]
+    for e in list(edits):
+        # D22-DTOR: the class's own body-less `~C();` goes under GCC (`virtual ~C()` declares it now)
+        if e[0] in dtor_drops and e[2].startswith(('FNVNX_D22(', 'FNVNX_D22I(')):
+            a, b = dtor_drops[e[0]]
+            edits.append((a, b, 'FNVNX_D22_DROP(%s)' % text[a:b]))
+            stats['D22-DTOR'] += 1
     here = {c['qual'][-1] + ('<>' if c['template'] else '') for c in classes}
     for k, ms in lst.items():                   # listed classes defined in another file (a header)
         sk = k.split('::')[-1]
@@ -5784,7 +6187,7 @@ def r_vtable_dtor_slot(path, text, stats):
     while changed:                              # derived classes, through chains of derivation in the file
         changed = False
         for c in classes:
-            if not c['bases'] or not c['virtuals']: continue
+            if not c['bases'] or not c['virtuals'] or _d22_com(masked, c): continue
             mine = c['qual'][-1] + ('<>' if c['template'] else '')
             for b in _d22_bases(c['bases']):
                 mem = done.get(b)
@@ -5793,18 +6196,211 @@ def r_vtable_dtor_slot(path, text, stats):
                     if v[2] != mem or any(e[0] == v[0] for e in edits): continue
                     if _d22_extern_use(path, v[2]):
                         stats['D22-EXTERN'] += 1; continue
-                    if not d22_placeholder(masked, c['qual'][-1], v, vdecls[v[2]]):
+                    if not d22_placeholder(masked, c['qual'][-1], v, vdecls[v[2]], reach(c['qual'][-1])):
                         stats['D22-USED'] += 1; continue
                     edits.append((v[0], v[1], 'FNVNX_D22_DROP(%s)' % v[3]))
+                    applied[v[0]] = ('::'.join(c['qual']) + ('<>' if c['template'] else ''), v[2], 'derived:' + b)
                     stats['D22-DERIVED'] += 1
                     if mine not in done: done[mine] = mem; changed = True
     if not edits: return text
     out, pos = [], 0
+    rec = prepare.__dict__.setdefault('_fnvnx_d22_applied', [])
+    i = path.replace('\\', '/').rfind('/src/')
+    rel = path.replace('\\', '/')[i + 1:] if i >= 0 else os.path.basename(path)
     for a, b, rep in sorted(edits):
         if a < pos: continue
+        if a in applied and rep.startswith(('FNVNX_D22(', 'FNVNX_D22I(', 'FNVNX_D22_DROP(')):
+            rec.append((rel,) + applied[a])
         out.append(text[pos:a]); out.append(rep + ' /* fnv-nx D22 */'); pos = b
     out.append(text[pos:])
     return ''.join(out)
+
+def d22_write_applied(out_root, stats, files):
+    """<out>/build/d22_applied.tsv: every class the D22 / D26 rule converted, as prepare decided (S2-bodies: the link
+    rebuilds minus-one tables from it instead of re-deriving the decisions from the objects). Columns: file (tree
+    path), class (qualified; T<> for a template), member (the slot-0 placeholder, or the dropped re-declaration),
+    kind (listed = d22.json, callonly = D26 (b), derived:<base> = a dropped re-declaration), vftables (d22.json's,
+    for a listed class; empty otherwise: a call-only declaration names no exe vftable). Names and addresses only."""
+    rows = prepare.__dict__.get('_fnvnx_d22_applied') or []
+    lst = {}
+    import json
+    for f in _d22_files():
+        try: d = json.load(open(f))
+        except (OSError, ValueError): continue
+        for c in d.get('classes', ()): lst.setdefault(c['class'], set()).update(c.get('vftables', ()))
+    os.makedirs(os.path.join(out_root, 'build'), exist_ok=True)
+    with open(os.path.join(out_root, 'build', 'd22_applied.tsv'), 'w') as f:
+        f.write('# fnvnx-d22-applied/1\tfile\tclass\tmember\tkind\tvftables\n')
+        for r in sorted(set(rows)):
+            vt = ','.join(sorted(lst.get(r[1], ()))) if r[3] == 'listed' else ''
+            if _classlayout() and not r[3].startswith(('classlayout', 'derived')):
+                r = r[:3] + ('fallback:' + r[3],)              # decided without an exe row (orchestrator: listed)
+            f.write('%s\t%s\t%s\t%s\t%s\n' % (r + (vt,)))
+    stats['D22-APPLIED'] += 0
+
+POST.append(d22_write_applied)
+
+# ---------------------------------------------------------------------------------------------------------- VSPLIT1
+#
+# A virtual declaration with several declarators, `virtual void v000(), v004(), v008();` (EQ, farm baseline 588863:
+# lowprocess.cpp's ActorX v000..v228, nilookatinterpolator.cpp's NiAVObjectPalette v0..v34, bsbatchrenderer,
+# testerrainlodmanager: 52 sites in 23 files). D22 / D26 took the whole list for one virtual: FNVNX_D22 dropped every
+# placeholder of it under GCC (0x0090f670 read [x2, #8] where the exe reads [edx + 0x22c]), and the virtual counts that
+# D22-SLOTK and the call-only gates use were off. VSPLIT1 writes one declaration per declarator, each with the same
+# decl-specifiers (`virtual void v000(); virtual void v004(); ...`): the same declarations in C++, so the same objects
+# under MSVC. Only declarators without an initializer or body (a declarator list ends with `;`), at any class depth.
+VSPLIT1_HEAD = re.compile(r'\bvirtual\b')
+
+def _vsplit_top(s, ch):
+    """indices of ch at parenthesis / bracket / angle depth 0 of s"""
+    out, d = [], 0
+    for i, c in enumerate(s):
+        if c in '([<': d += 1
+        elif c in ')]>': d -= 1
+        elif c == ch and d == 0: out.append(i)
+    return out
+
+def r_split_virtual_declarators(path, text, stats):
+    """VSPLIT1: `virtual T a(), b();` -> `virtual T a(); virtual T b();` (see above)."""
+    if 'virtual' not in text or '),' not in text.replace(' ', ''): return text
+    masked = d22_mask(text)
+    edits = []
+    for m in VSPLIT1_HEAD.finditer(masked):
+        end = masked.find(';', m.start())
+        if end < 0: continue
+        stmt = masked[m.start():end]
+        if '{' in stmt or '}' in stmt or '=' in stmt: continue
+        cuts = _vsplit_top(stmt, ',')
+        if not cuts: continue
+        first = stmt[:cuts[0]]
+        # the decl-specifiers: everything before the first declarator's name (`virtual void `, `virtual int `); a
+        # declarator keeps its own `*` / `&`
+        dm = re.match(r'(virtual\s+(?:[\w:<>]+\s*(?:<[^;{}()]*>\s*)?[\s\*&]+)+?)(~?[A-Za-z_]\w*)\s*\(', first)
+        if not dm: continue
+        spec = re.sub(r'[\s\*&]+$', '', text[m.start():m.start() + len(dm.group(1))]) + ' '
+        parts = [stmt[a:b] for a, b in zip([0] + [c + 1 for c in cuts], cuts + [len(stmt)])]
+        if not all(re.match(r'\s*[\*&]*\s*~?[A-Za-z_]\w*\s*\(', q) for q in parts[1:]): continue
+        src = text[m.start():end + 1]
+        for c in reversed(cuts):                    # each top-level comma -> `; <decl-specifiers>`; line breaks stay
+            src = src[:c] + '; ' + spec + src[c + 1:].lstrip(' \t')
+        edits.append((m.start(), end + 1, src))
+        stats['VSPLIT1'] += len(parts) - 1
+    if not edits: return text
+    for a, b, rep in sorted(edits, reverse=True):
+        text = text[:a] + rep + text[b:]
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- EMPTY1
+#
+# A placeholder object for an empty string (R2's trap list, rank 32: fnv_00b2d2e0::TagEmpty). The decomp writes the
+# `sys == false` arm of the runtime-error constructor FUN_00b09480 (treeengine units) as `extern const TagText TagEmpty;`,
+# defined nowhere: the native link has no data at that name (a trap). The exe's 0x00b09480 builds that arm from the
+# empty literal at 0x01011584 through 0x0044a4c0 (TagText's constructor), a temporary like the other arm. EMPTY1
+# writes a use of such a name as `FNVNX_EMPTY1(T, Name)`: `T("")` under GCC, the original name under MSVC
+# (fnvnx_equiv_fi.h), only where the file declares `extern const T Name;` (Name ends with `Empty`), never defines
+# it, and declares `T(const char*)` in T.
+EMPTY1_DECL = re.compile(r'^[ \t]*extern[ \t]+const[ \t]+([A-Za-z_]\w*)[ \t]+([A-Za-z_]\w*Empty)[ \t]*;', re.M)
+
+def r_empty_string_objects(path, text, stats):
+    """EMPTY1: a declared-only empty-string object -> FNVNX_EMPTY1(T, Name) (see above)."""
+    if 'Empty' not in text: return text
+    masked = d22_mask(text)
+    for m in list(EMPTY1_DECL.finditer(masked)):
+        t, nm = m.group(1), m.group(2)
+        if re.search(r'(?<![\w:])(?:const\s+)?%s\s+(?:\w+::)*%s\s*(?:\(|=|\{)' % (re.escape(t), re.escape(nm)), masked):
+            continue                                            # defined in the file
+        cls = [c for c in d22_classes(text, masked) if c['qual'][-1] == t]
+        if len(cls) != 1 or not re.search(r'(?<![\w~])%s\s*\(\s*const\s+char\s*\*\s*\w*\s*\)' % re.escape(t),
+                                          masked[cls[0]['open']:cls[0]['close']]):
+            continue
+        uses = [u for u in re.finditer(r'(?<![\w:.>])%s\b' % re.escape(nm), masked) if not (m.start() <= u.start() < m.end())]
+        for u in reversed(uses):
+            text = text[:u.start()] + 'FNVNX_EMPTY1(%s, %s)' % (t, nm) + text[u.end():]
+        stats['EMPTY1'] += len(uses)
+        masked = d22_mask(text)
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- RAWVT1
+#
+# D26 (S5-boot, link 3f7a6c35e923): every native C++ vtable is minus-one (GCC's D1 / D0 at slots 0 / 1 where MSVC
+# has ??_G at 0; the link rebuilds pair-less tables as minus-one copies, orchestrator decision 2026-11-08). The
+# decomp also dispatches by a raw exe slot number, `((F)(*reinterpret_cast<void***>(this))[k])(this, ...)`, which no
+# declaration carries: FUN_005e0830::Open (0x005e0830) called the INI collection's exe slot 6 (Open) at native
+# offset 24, ran slot 5 with the bool as the setting pointer, and fallout.ini was never read. RAWVT1 writes such an
+# index on `this` as FNVNX_D26_SLOT(k): k + 1 under GCC, k under MSVC (tools/equiv/msvc/fnvnx_equiv_fi.h).
+# Only where:
+# - the receiver is `this` (the object of the enclosing member function: a C++ object of the game);
+# - the enclosing class is not COM-shaped (D22-COM: a __stdcall / HRESULT virtual, QueryInterface / AddRef /
+#   Release, an SDK interface name; COM vtables have no destructor slot), as far as the file defines it;
+# - k > 0 (slot 0 is the deleting destructor: a call of it needs FNVNX_D22_CALL's form; counted RAWVT1-SLOT0);
+# - a class whose exe deleting destructor is at slot K > 0 (D22-SLOTK, the TESForm family) shifts only k > K
+#   (k < K: RAWVT1-BELOWK, k = K: RAWVT1-SLOT0);
+# - the class is not one whose table the link keeps in exe order (S2-bodies' exe_order_classes.tsv, read from
+#   FNVNX_EXE_ORDER or under FNVNX_RECON; RAWVT1-EXEORDER).
+RAWVT1_RX = re.compile(r'(\(\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*this\s*\)|'
+                       r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*this)\s*\)\s*\[\s*)([0-9]+|0[xX][0-9a-fA-F]+)(\s*\])')
+
+def _rawvt_exe_order():
+    """{class simple name} whose native table the link keeps in exe order (S2-bodies' out/exe_order_classes.tsv:
+    class, vftable, reason), from FNVNX_EXE_ORDER or any exe_order_classes.tsv under FNVNX_RECON; cached on prepare"""
+    got = prepare.__dict__.get('_fnvnx_exe_order')
+    if got is not None: return got
+    files = [os.environ['FNVNX_EXE_ORDER']] if os.environ.get('FNVNX_EXE_ORDER') else []
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'exe_order_classes.tsv') for dp, _, ns in os.walk(top) if 'exe_order_classes.tsv' in ns)
+    got = {}
+    for f in files:
+        try:
+            for line in open(f):
+                if line.startswith('#') or not line.strip(): continue
+                fs = line.rstrip('\n').split('\t')
+                if fs[0] in ('class',): continue                      # a header row
+                got.setdefault(fs[0].strip().split('::')[-1], set()).add(fs[2].strip() if len(fs) > 2 else '')
+        except OSError: continue
+    prepare.__dict__['_fnvnx_exe_order'] = got
+    return got
+
+# reasons of exe_order_classes.tsv for which a declaration of that class must keep the exe's slot numbers (D22 / D26
+# do not convert it): the link keeps the table in exe order because slot 0 is a defined function (BSNiAllocator::
+# Destroy, TESLeveledList, ListBox<>, Tile3D...) or is not a destructor at all
+D22_EXE_ORDER_REASONS = {'defined-slot0', 'd26-slot0-not-a-destructor', 'd22-used', 'com'}
+
+def r_raw_vtable_slots(path, text, stats):
+    """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above)."""
+    if 'this' not in text or '***' not in text.replace(' ', ''): return text
+    masked = d22_mask(text)
+    hits = [m for m in RAWVT1_RX.finditer(masked)]
+    if not hits: return text
+    classes = d22_classes(text, masked)
+    owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
+    for m in D22_MEMBER_DEF.finditer(masked):
+        b = m.end() - 1
+        try: e = prepare.match_brace(masked, b)
+        except Exception: e = None
+        if e: owners.append((b, e, m.group(1)))
+    owners.sort(key=lambda t: t[0] - t[1])
+    by_name = collections.defaultdict(list)
+    for c in classes: by_name[c['qual'][-1]].append(c)
+    edits = []
+    for m in hits:
+        k = int(m.group(2), 0)
+        owner = next((nm for a, z, nm in owners if a < m.start() < z), None)
+        if owner is None: stats['RAWVT1-FREE'] += 1; continue
+        if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
+            stats['RAWVT1-COM'] += 1; continue
+        cl = _classlayout_row(path, owner)
+        if cl is not None and (cl[0] != 'minus-one' or cl[1] < 0):
+            stats['RAWVT1-CL-KEEP'] += 1; continue
+        K = cl[1] if cl is not None else (_d22_dtor_slot(path, owner) or 0)   # D22-SLOTK: the pair sits at K
+        if k == K: stats['RAWVT1-SLOT0'] += 1; continue
+        if k < K: stats['RAWVT1-BELOWK'] += 1; continue
+        if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
+        edits.append((m.start(2), m.end(2), 'FNVNX_D26_SLOT(%s)' % text[m.start(2):m.end(2)]))
+    for a, b, rep in sorted(edits, reverse=True):
+        text = text[:a] + rep + text[b:]
+    stats['RAWVT1'] += len(edits)
+    return text
 
 # ---------------------------------------------------------------------------------------------------------- PHSLOT1
 #
@@ -5909,9 +6505,60 @@ def r_bound_dtor_stand_ins(path, text, stats):
     stats['DTORB1'] += len(edits)
     return text
 
+# ---------------------------------------------------------------------------------------------------------- STAND7
+#
+# An out-of-class template member body that is a stand-in (S1-rules, from EQ: link 0540aff0d154 call-flow 00b2b910).
+# treeengine_ob1_variant.cpp defines `template <...> inline basic_string<...>& basic_string<...>::assign(const
+# basic_string&, unsigned, unsigned) { ... if (_Roff == 0x7f3f3f3f) {...; _Tidy(...)} ... }` only to reproduce the
+# frame MSVC /Ob1 reserves before it rolls the expansion back to a call. The unit binds
+# `?assign@?$basic_string@...` to 0x0044a580, the exe's assign, which another unit decompiles. GCC inlined the stand-in
+# and called _Tidy (0x0044a730) where the exe calls 0x0044a580 with the real arguments. STAND5 covers in-class bodies;
+# this one is out of class. STAND7 puts such a definition under `#ifdef _MSC_VER`: MSVC keeps its byte-match body, and
+# GCC sees only the class's declaration and calls the bound name, which the link binds to the exe's function. Only
+# where:
+# - the definition is `inline`, in an /Od /Ob1 unit (MSVC expanded it, then rolled the expansion back to the call the
+#   recipe records), and the unit binds exactly one decorated name of the member (`?m@?$C@`), to an address that is
+#   not tagged in the file and that another unit defines;
+# - no `@fnv` tag sits right above the definition.
+STAND7_DEF = re.compile(r'(?m)^[ \t]*template\s*<[^;{}]*>\s*(?:inline\s+)?[^;{}()]*?\b([A-Za-z_]\w*)\s*<[^;{}()]*>\s*::\s*'
+                        r'([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:const\s*)?\{')
+
+def r_template_member_stand_ins(path, text, stats):
+    """STAND7: an out-of-class template member stand-in whose MSVC name the unit binds elsewhere -> MSVC-only (above)."""
+    if not path.endswith('.cpp') or 'template' not in text: return text
+    syms = _unit_symbols(path)
+    info = _unit_info(path)
+    if not syms or info is None: return text
+    tagged = {int(a, 16) for a in FNV_TAG_ADDR.findall(text)}
+    elsewhere = None
+    edits = []
+    for m in STAND7_DEF.finditer(text):
+        cls, mem = m.group(1), m.group(2)
+        names = [k for k in syms if k.startswith('?%s@?$%s@' % (mem, cls))]
+        bound = {int(syms[k], 16) for k in names}
+        if not bound or bound & tagged: continue
+        # the evidence of a stand-in: an `inline` body in an /Od /Ob1 unit (/Ob1 expands inline functions), which MSVC
+        # still called out of line (the recipe binds the name); one instantiation (another one the unit uses would
+        # lose its definition under GCC)
+        if not re.search(r'\binline\b', m.group(0)) or not {'/Od', '/Ob1'} <= set(info[0]) or len(names) != 1:
+            stats['STAND7-GATE'] += 1; continue
+        if elsewhere is None: elsewhere = _all_unit_functions(path) - info[1]
+        if not bound <= elsewhere:
+            stats['STAND7-ADDR'] += 1; continue
+        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*\s*$', text[max(0, m.start() - 300):m.start()]):
+            continue
+        c = prepare.match_brace(text, m.end() - 1)
+        edits.append((m.start(), c))
+    if not edits: return text
+    for a, c in sorted(edits, reverse=True):
+        text = text[:a] + '#ifdef _MSC_VER /* fnv-nx STAND7 */\n' + text[a:c] + '\n#endif\n' + text[c:]
+    stats['STAND7'] += len(edits)
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins]
+              r_implicit_bound_destructors, r_split_virtual_declarators, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
+              r_template_member_stand_ins, r_raw_vtable_slots, r_empty_string_objects]
 RULES += REFS_RULES

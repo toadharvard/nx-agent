@@ -40,6 +40,7 @@ Our own code; it reads logs and names only addresses.
 import argparse
 import collections
 import json
+import os
 import re
 import sys
 
@@ -237,10 +238,13 @@ def same(a, b, da=None, db=None):
 
 
 # ---- compare -------------------------------------------------------------------------------------------------------
-def compare(guest, wine, units, resync=64, context=8, limit=20):
+def compare(guest, wine, units, resync=64, context=8, limit=50):
     """lockstep walk of the two call trees, level by level: the children of each matched pair are aligned by
     original address (resync at the nearest common call within `resync`), compared, and walked into. Returns
-    counts and the divergences in pre-order (the first is the report's)."""
+    counts and the divergences in pre-order (the first is the report's). Divergences (T1, owner: the seams as a
+    list, function by function): a value that differs (arg, return, write), a call that differs ("control"), calls
+    the exe makes that the guest does not ("missing": a run of them at one place is one item) and calls the guest
+    makes that the exe does not ("extra"), the first `limit` of them."""
     inlined = collections.Counter()
     st = {"matched": 0}
     divs = []
@@ -264,6 +268,8 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
         return out
 
     def add(kind, cg, cw, detail):
+        """cg / cw: the guest's and the exe's call where it shows (for missing / extra calls: the next common call
+        on the other side, so both caller chains are the place)"""
         if len(divs) < limit:
             divs.append({"kind": kind, "guest": cg, "wine": cw, "detail": detail})
 
@@ -347,9 +353,30 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
                     if best:
                         break
                 if best is None:
+                    # T1: a wider resync (the nearest common call within WIDE on both sides, by original address),
+                    # so one control divergence does not end the level: the calls after it are compared too
+                    pos = {}
+                    for k in range(j, min(len(w), j + WIDE)):
+                        pos.setdefault(w[k].orig, k)
+                    for di in range(min(len(g) - i, WIDE)):
+                        k = pos.get(g[i + di].orig)
+                        if k is not None and (best is None or di + (k - j) < sum(best)):
+                            best = (di, k - j)
+                        if best is not None and di >= sum(best):
+                            break
                     add("control", cg, cw, f"no common call within {resync}: guest {cg.name} ({cg.orig:#010x}), "
-                                           f"the exe {cw.name} ({cw.orig:#010x})")
-                    return
+                                           f"the exe {cw.name} ({cw.orig:#010x})"
+                        + (f"; resynced {best[0]} guest and {best[1]} exe calls on" if best else
+                           f"; none within {WIDE} either"))
+                    if best is None:
+                        return
+                    di, dj = best
+                    for c in g[i:i + di]:
+                        inlined[("guest-only", c.name)] += 1
+                    for c in w[j:j + dj]:
+                        inlined[("wine-only", c.name)] += 1
+                    i, j = i + di, j + dj
+                    continue
                 di, dj = best
                 g_only = [c for c in g[i:i + di] if not noop(c)]
                 for c in g[i:i + di]:
@@ -359,6 +386,16 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
                 if g_only and dj:
                     add("control", g_only[0], w[j], f"guest calls {g_only[0].name} ({g_only[0].orig:#010x}) "
                                                     f"x{len(g_only)}, the exe {w[j].name} ({w[j].orig:#010x}) x{dj}")
+                elif dj:      # the exe calls these here, the guest goes on with the next common call
+                    names = collections.Counter(c.name for c in w[j:j + dj])
+                    add("missing", g[i + di], w[j], f"the exe calls {w[j].name} ({w[j].orig:#010x})"
+                        + (f" and {dj - 1} more ({', '.join('%s x%d' % kv for kv in names.most_common(3))})" if dj > 1 else "")
+                        + f" before {g[i + di].name}; the guest does not")
+                elif g_only:  # the guest calls these here, the exe does not
+                    add("extra", g_only[0], w[j],
+                        f"the guest calls {g_only[0].name} ({g_only[0].orig:#010x})"
+                        + (f" and {len(g_only) - 1} more" if len(g_only) > 1 else "") + f" before {w[j].name}; "
+                        "the exe does not")
                 i, j = i + di, j + dj
                 continue
             st["matched"] += 1
@@ -376,18 +413,23 @@ def compare(guest, wine, units, resync=64, context=8, limit=20):
                                             f"({rest_g[0].orig:#010x}) and {len(rest_g) - 1} more, the exe "
                                             f"{w[j].name} ({w[j].orig:#010x}) and {len(w) - j - 1} more")
         elif j < len(w) and g:   # the exe made calls here that the guest did not
-            add("fewer calls", g[-1], w[j], f"after {g[-1].name} the exe calls {w[j].name} ({w[j].orig:#010x}) "
+            add("missing", g[-1], w[j], f"after {g[-1].name} the exe calls {w[j].name} ({w[j].orig:#010x}) "
                                            f"and {len(w) - j - 1} more; the guest none")
 
     sys.setrecursionlimit(max(10000, sys.getrecursionlimit()))
     groots = gkids([c for c in guest if c.parent is None])
     wroots = [c for c in wine if c.parent is None]
     level(groots, wroots)
+    # the first divergence (the report's headline, cmd_diff's exit) is the first value or control difference; calls
+    # one side makes and the other does not (GCC inlines what MSVC calls) are listed with the others, not first
+    first = next((d for d in divs if d["kind"] not in ("missing", "extra")), None)
     return {"matched": st["matched"], "guest_calls": sum(1 for c in guest if c.orig is not None),
-            "wine_calls": len(wine), "inlined": inlined, "first": divs[0] if divs else None, "divergences": divs,
-            "end": "divergence" if divs else "no divergence"}
+            "wine_calls": len(wine), "inlined": inlined, "first": first, "divergences": divs,
+            "end": "divergence" if first else ("calls missing or extra only" if divs else
+                   ("nothing to compare: no guest call of these functions" if not groots else "no divergence"))}
 
 
+WIDE = 2048    # the wider resync after a control divergence (calls per side)
 NO_PARAMS = re.compile(r"^_Z\d+\w+?v$")   # free function, no parameters (Itanium: ...v)
 RUNTIME_CALLER = re.compile(r"^(_Znw|_Zna|_Zdl|_Zda|operator new|operator delete)")
 NOOP_IF_ARG1_NULL = {0x00aa4060, 0x00401030}   # MemoryManager::Deallocate(mm, NULL), FormHeap_Free(NULL)
@@ -409,11 +451,24 @@ def fmt_call(c, side):
 
 
 def cmd_compare(a):
+    # T1: a side with no trace is an error that names it, not a traceback (bt1 0e2a4b160f9e: the guest wrote none)
+    for side, tp in (("guest", a.guest), ("wine", a.wine)):
+        if not os.path.isfile(tp) or os.path.getsize(tp) == 0:
+            print(f"compare: no {side} trace ({tp} {'is empty' if os.path.isfile(tp) else 'does not exist'})",
+                  file=sys.stderr)
+            return 2
     _, g_order = read_log(a.guest, "guest")
     _, w_order = read_log(a.wine, "wine")
+    if getattr(a, "only_list", None):
+        # the functions of one reference's list only (T1: one guest trace on the union of several references'
+        # lists, compared with each); main_thread nests by depth, so leaving calls out keeps the nesting
+        keep = {int(l.split()[0], 16) for l in open(a.only_list) if l.strip() and not l.startswith("#")
+                and re.fullmatch(r"[0-9a-fA-F]{6,8}", l.split()[0])}
+        g_order = [c for c in g_order if c.orig in keep]
+        w_order = [c for c in w_order if c.orig in keep or c.api]
     g, w = main_thread(g_order), main_thread(w_order)
     units = load_units(a.units)
-    r = compare(g, w, units, a.resync, a.context)
+    r = compare(g, w, units, a.resync, a.context, limit=a.max_div)
     print(f"lockstep: guest {r['guest_calls']} calls, exe {r['wine_calls']} calls (main thread), {r['matched']} "
           f"matched in order; ended: {r['end']}")
     top = r["inlined"].most_common(15)
@@ -426,15 +481,28 @@ def cmd_compare(a):
         print(f"FIRST DIVERGENCE: {f['kind']} in {f['guest'].name}: {f['detail']}")
         print("  guest path: " + " > ".join(fmt_call(c, 'guest') for c in path(f['guest'])[-a.context:]))
         print("  exe path:   " + " > ".join(fmt_call(c, 'wine') for c in path(f['wine'])[-a.context:]))
-        for d in r["divergences"][1:]:
-            print(f"  then: {d['kind']} in {d['guest'].name}: {d['detail']}")
+    elif not r["guest_calls"]:
+        print("nothing compared: the guest trace has no call of these functions")
     else:
         print("no divergence in the matched calls")
+    if r["divergences"]:
+        n = len(r["divergences"])
+        print(f"DIVERGENCES (the first {n}{'; --max-div for more' if n >= a.max_div else ''}), each with both "
+              f"caller chains (the last {a.context} calls):")
+        for k, d in enumerate(r["divergences"], 1):
+            print(f"{k:3d}. {d['kind']} in {d['guest'].name} (guest #{d['guest'].seq}, exe #{d['wine'].seq}): {d['detail']}")
+            print("       guest: " + " > ".join(fmt_call(c, 'guest') for c in path(d['guest'])[-a.context:]))
+            print("       exe:   " + " > ".join(fmt_call(c, 'wine') for c in path(d['wine'])[-a.context:]))
+        kinds = collections.Counter(d["kind"].split()[0] for d in r["divergences"])
+        print("  by kind: " + ", ".join("%s %d" % kv for kv in kinds.most_common()))
     if a.json:
         out = {k: v for k, v in r.items() if k not in ("first", "inlined", "divergences")}
         out["inlined"] = [[s, n, c] for (s, n), c in r["inlined"].most_common()]
         out["divergences"] = [{"kind": d["kind"], "detail": d["detail"], "function": d["guest"].name,
-                               "orig": f"{d['guest'].orig:08x}"} for d in r["divergences"]]
+                               "orig": f"{d['guest'].orig:08x}", "guest_seq": d["guest"].seq,
+                               "ref_seq": d["wine"].seq, "exe_function": d["wine"].name,
+                               "guest_path": [fmt_call(c, "guest") for c in path(d["guest"])],
+                               "exe_path": [fmt_call(c, "wine") for c in path(d["wine"])]} for d in r["divergences"]]
         if f:
             out["first"] = {"kind": f["kind"], "detail": f["detail"], "function": f["guest"].name,
                             "guest_seq": f["guest"].seq, "ref_seq": f["wine"].seq, "format": TRACE_FORMAT,
@@ -516,8 +584,11 @@ def cmd_diff(a):
     """compare with the reference first; exit 1 on a divergence, with its seq, function and field"""
     a.guest, a.wine = a.guest_tsv, a.ref_tsv
     a.resync, a.context = 64, 8
+    a.max_div = getattr(a, "max_div", 50)
     out = a.json
-    cmd_compare(a)
+    rc = cmd_compare(a)
+    if rc:
+        return rc
     if out:
         r = json.load(open(out))
         return 1 if r.get("first") else 0
@@ -536,6 +607,8 @@ def main(argv=None):
     p.add_argument("--units")
     p.add_argument("--resync", type=int, default=64)
     p.add_argument("--context", type=int, default=8)
+    p.add_argument("--max-div", type=int, default=50, help="report the first N divergences (default 50)")
+    p.add_argument("--only-list", help="compare only the functions of this list (fnlist format <hex> <name>)")
     p.add_argument("--json")
     p.set_defaults(fn=cmd_compare)
     p = sub.add_parser("ref")

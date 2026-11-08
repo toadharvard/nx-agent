@@ -126,7 +126,7 @@ def load(path, cache):
 # ---- GCC vtable slot k -> exe vftable slot j (the slot fill, docs/LINK.md "Vftables from the player's exe")
 
 D1_SLOT = re.compile(r'(D[12]Ev$|_D[12]$|_d1$)')
-D0_SLOT = re.compile(r'(D0Ev$|_d0$)')
+D0_SLOT = re.compile(r'(D0Ev$|_D0$|_d0$)')
 
 
 def dtor_pos(names, words=None):
@@ -137,11 +137,25 @@ def dtor_pos(names, words=None):
         a, b = names[i], names[i + 1]
         if a and b and D1_SLOT.search(a) and D0_SLOT.search(b):
             return i
+        # a flags-stub pair into one decomp ??_G (`__fnvnx_vflag_<a>_0` / `_1`): what the binding makes of D1 / D0, so
+        # a table that already has it (Character at slots 4 / 5) is not taken for pair-less (V2, seams triage)
+        if a and b and a.startswith('__fnvnx_vflag_') and a.endswith('_0') and b == a[:-1] + '1':
+            return i
     if words is not None:
         for i in range(len(names) - 1):
             if names[i] is None and names[i + 1] is None and words[i] == 0 and words[i + 1] == 0:
                 return i
     return None
+
+
+def slot_one_is_d0(s0, s1):
+    """The native slots 0 / 1 (symbols as the object has them after resolve's renames) already are a destructor pair:
+    D1 / D0 names, a flags-stub pair (`__fnvnx_vflag_<a>_0` / `_1`), a deleting stub, or one body bound to both."""
+    if not s1:
+        return False
+    return bool(D0_SLOT.search(s1) or s1.endswith('_D0') or s1.startswith(('__fnvnx_d0del_', '__fnvnx_vgdel_')) or
+                (s0 and s0 == s1) or (s0 and s1.endswith('_1') and s1[:-1] == s0[:-1] and s0.endswith('_0') and
+                                      '__fnvnx_vflag' in s0))
 
 
 def exe_slot_index(k, d):
@@ -274,6 +288,66 @@ def deleting_dtor(path, addr):
     b = data[off:off + 0x400]
     i = b.find(b'\xc2\x04\x00')
     return i > 0 and _FLAGS_TEST.search(b[:i]) is not None
+
+
+def deleting_dtor_callee(path, addr):
+    """The destroy body an MSVC scalar deleting destructor `??_G` calls: the x86 function at addr returns with `ret 4`
+    and is exactly `call X; test flags, 1 (or and eax, 1); [je]; call <operator delete>` (two direct calls, the first
+    before the flags test, none after it but the delete; no int3 before the ret). -> X, else None (also without capstone, outside the image,
+    or when the shape is any other: a body inlined into the ??_G, an indirect call, more than two calls). The
+    decomp's `~C` at X is C's complete destructor; the identical-code folding that gives many classes one ??_G gives
+    them this X."""
+    try:
+        import capstone
+        from capstone import x86 as cx
+    except ImportError:
+        return None
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    if 'md' not in _CS:
+        _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        _CS['md'].detail = True
+    calls, tested, ret4 = [], False, False
+    for ins in _CS['md'].disasm(data[off:off + 0x100], addr):
+        if ins.id == cx.X86_INS_INT3:
+            return None
+        if ins.id == cx.X86_INS_RET:
+            ret4 = len(ins.operands) == 1 and ins.operands[0].imm == 4
+            break
+        if ins.id == cx.X86_INS_CALL:
+            if ins.operands[0].type != cx.X86_OP_IMM:
+                return None
+            calls.append((ins.operands[0].imm & 0xffffffff, tested))
+        elif ins.id == cx.X86_INS_TEST or (ins.id == cx.X86_INS_AND and ins.operands[-1].type == cx.X86_OP_IMM and
+                                           ins.operands[-1].imm == 1):
+            tested = True
+    if not ret4 or len(calls) != 2 or calls[0][1] or not calls[1][1]:
+        return None
+    return calls[0][0]
+
+
+_DELETE_THIS = re.compile(
+    rb'(?:\x85\xc9[\x74\x75][\x01-\x7f])?\x8b\x01(?:\x8b\x10\x6a\x01\xff\xd2|\x6a\x01\xff\x10)(?:\xc3|\xc2\x00\x00)')
+
+
+def delete_this(path, addr):
+    """True when the x86 function at addr is `void DeleteThis() { delete this; }` as MSVC compiles it: [`test ecx, ecx;
+    jz`] `mov eax, [ecx]; [mov edx, [eax];] push 1; call [eax] | edx; ret`, i.e. exactly a call of vftable slot 0 (the
+    scalar deleting destructor) with flags 1 and nothing else. Natively that function is one `delete this`, which GCC
+    dispatches through the Itanium D0 slot (native slot 1): a native vtable in the exe's slot order that holds this
+    function in slot 1 sends `delete this` back into it, a loop (S5 round 6, link 97deacd38aec). The exe is the
+    evidence: only a function with this exact body counts, never its name or position."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return False
+    return off is not None and _DELETE_THIS.match(data[off:off + 16]) is not None
 
 
 def thunk(path, addr):

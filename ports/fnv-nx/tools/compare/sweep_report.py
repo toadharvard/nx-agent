@@ -164,10 +164,12 @@ def summarize(progs, scenes, done, all_hashes=None, title=''):
 
 
 def md(o):
-    L = [f"# {o['title']}", '',
+    # T1: a failed shard never reads as counts of 0 (qk1 89dcf1c0's replay: rc 1, "metric: programs checked 0")
+    head = [f"- FAIL: {o['error']}", '', 'metric: not measured (the job failed)'] if o.get('error') else [
          f"metric: programs checked {o['programs_checked']}" + (f"/{o['programs_total']}" if o['programs_total'] else '')
          + f"; classes (translated) {o['program_classes_translated']}; scenes {o['scenes_measured']} measured "
-         f"({o['scene_status']}); draws {o['draws_pass']}/{o['draws']} pass", '',
+         f"({o['scene_status']}); draws {o['draws_pass']}/{o['draws']} pass"]
+    L = [f"# {o['title']}", ''] + head + ['',
          '## Failure classes', '',
          f"- programs (translated, worst over the parameter sets): {o['program_classes_translated']}",
          f"- programs (--families all): {o['program_classes_families']}",
@@ -201,6 +203,7 @@ def main():
     ap.add_argument('--shard-dir'); ap.add_argument('--shaders'); ap.add_argument('--uam'); ap.add_argument('--out')
     ap.add_argument('--md'); ap.add_argument('--head', default=''); ap.add_argument('--k'); ap.add_argument('--n')
     ap.add_argument('--cand', default=''); ap.add_argument('--notes', default='')
+    ap.add_argument('--error', default='', help='shard: the job failed (setup); the report says so instead of counts')
     ap.add_argument('--dirs', nargs='*', default=[]); ap.add_argument('--all-programs')
     a = ap.parse_args()
     if a.cmd == 'programs':
@@ -209,6 +212,8 @@ def main():
         progs, scenes, done = load_shard(a.shard_dir)
         o, _ = summarize(progs, scenes, done, title=f'sweep {a.head[:12]} shard {a.k}/{a.n} (candidate nx_render {a.cand[:12]})')
         o.update(head=a.head, k=a.k, n=a.n, candidate=a.cand, notes=[n for n in a.notes.splitlines() if n])
+        if a.error:
+            o['error'] = a.error
     else:
         progs, scenes, done = [], [], []
         for d in a.dirs:

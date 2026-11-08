@@ -253,7 +253,7 @@ def headline(md):
         if l and not l.startswith('|') and not l.startswith('#'):
             return l[:160].replace('|', '/')
     return ''
-rows, ok = [], True
+rows, ok, failed = [], True, []
 for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'plat', 'scenario', 'boottrace'):
     sk, rc = rd(c + '.skip'), rd(c + '.rc')
     if sk is not None:
@@ -262,9 +262,16 @@ for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem
         rows.append((c, 'not run (lane skipped)', '-', '-', ''))
     else:
         ok &= rc == '0'
-        rows.append((c, 'ran', rc, rd(c + '.s') or '?', rd(c + '.why') or headline(rd(c + '.md'))))
+        hl = rd(c + '.why') or headline(rd(c + '.md'))
+        if rc != '0':        # a failed check never reads as its counts (qk1 89dcf1c0's replay: rc 1, "programs checked 0")
+            failed.append(c)
+            hl = 'FAILED (exit %s): %s' % (rc, hl.replace('FAIL: ', '', 1) if hl.startswith('FAIL: ') else hl)
+        rows.append((c, 'ran', rc, rd(c + '.s') or '?', hl))
 full = plan.get('full') or []
-verdict = 'FULL RUN NEEDED' if full else ('PASS (every selected check exited 0)' if ok else 'FAIL')
+# T1: a failed check is a FAIL whatever else the plan says (qk1 89dcf1c0: build rc 2, the verdict read "FULL RUN
+# NEEDED"); a full run needed is named beside it
+verdict = ('FAIL (%s)' % ', '.join(failed) + ('; a full run is needed too' if full else '')) if not ok else \
+    ('FULL RUN NEEDED' if full else 'PASS (every selected check exited 0)')
 o = open(out, 'w')
 o.write('# quick %s\n\n' % commit[:12])
 o.write('- verdict: %s\n- wall clock: %d s (%.1f min) on one machine\n' % (verdict, secs, secs / 60))

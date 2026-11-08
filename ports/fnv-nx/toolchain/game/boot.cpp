@@ -386,9 +386,20 @@ static void *addrmap_native(uint32_t orig, const char *kinds) {
     return nullptr;
 }
 
+/* the generated wrapper of the game's initializer 0x00fb66a0 (mkxcgen), weak: null in a guest without it */
+extern "C" void __fnvnx_dyninit_00fb66a0(void) __attribute__((weak));
 static void construct_memory_manager(void) {
     const uint32_t ctor = 0x00aa3880u, self = 0x011f6238u;
     if (!g_image_mapped) return;   /* trace mode: no IAT, the constructor calls GlobalMemoryStatusEx */
+    /* The game's own initializer for it (0x00fb66a0, __xc slot 7, ahead of the Setting initializers) has a native
+     * now: it constructs the manager in its place. Constructing it here as well ran the constructor twice; the second
+     * run clears the pool tables (0x00aa6840) after the first run's pools exist, so their blocks fall through to the
+     * CRT free and corrupt the C heap (S5, with working VirtualAlloc reservations: the emulator's VM service, and
+     * the console's host_vm). Construct it here only when that initializer has no native. */
+    if (&__fnvnx_dyninit_00fb66a0) {
+        printf("fnvnx boot: memory manager: the game's initializer 0x00fb66a0 constructs it\n");
+        return;
+    }
     void *fn = addrmap_native(ctor, "FC");
     if (!fn) {
         printf("fnvnx boot: memory manager: constructor %#010" PRIx32 " has no native definition, game heap not "

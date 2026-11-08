@@ -116,12 +116,20 @@ def inst_key_of(sig):
     last = UNIT_NS_IN.sub('', qual[-1])
     cls = norm(UNIT_NS_IN.sub('', sigs.canon_type(qual[-2]))) if len(qual) >= 2 else None
     # the enclosing scope stays: a unit's `fnv_<a>::LengthError` is no `vector_count_release::LengthError`
-    return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]))
+    # a deleting destructor (D0) is no other decoration of the complete / base one (D1 / D2), nor a constructor of
+    # another variant group: only C1/C2 and D1/D2 pair
+    grp = {'D0': 'D0', 'D1': 'D', 'D2': 'D', 'C1': 'C', 'C2': 'C'}.get(sig.variant or '', '')
+    return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]), grp)
+
+
+UNIT_STD = re.compile(r'^fnv_[0-9a-f]{8}::(?:std|stdext)::')
 
 
 def is_crt(sig, dem):
     if CRT_SCOPE.match(dem):
-        return 'std scope'
+        # a unit's own copy of a std class (`fnv_<a>::std::basic_string`) is decomp-declared: classify() weighs it
+        # by the checks below first and keeps this class for the copies nothing in the tree or the objects defines
+        return None if UNIT_STD.match(dem) else 'std scope'
     if sig is not None and sig.qual:
         last = sig.qual[-1]
         if CRT_MEMBER.match(last):
@@ -279,6 +287,8 @@ def classify(rows, objidx, tbodies, units):
                 else:
                     detail = 'in a class copy or overload the referencing unit does not emit'
                 cause, ev = 'not-compiled', ' '.join(sorted({'%s(%s)' % h for h in hits})[:3])
+        if cause is None and UNIT_STD.match(dem):
+            cause, detail = 'crt-import', 'std scope (unit copy, no body in the tree)'
         if cause is None:
             cause = 'no-body'
             if 'template or unnamed' in note:
@@ -383,6 +393,30 @@ def object_undefs(objdir):
     return out
 
 
+def local_calls(lines):
+    """(caller, callee) pairs of the direct `bl` / `b` instructions of `objdump -dr --no-show-raw-insn` output that
+    have no relocation: the branch was resolved inside the section, its target is the `<symbol+off>` objdump prints.
+    A branch followed by a relocation line is a reference to the relocation's symbol (the printed target is 0)."""
+    cur, pend, out = None, None, []
+    for line in lines:
+        m = re.match(r'^[0-9a-f]+ <([^>]+)>:\s*$', line)
+        if m:
+            cur, pend = m.group(1), None
+            continue
+        if re.match(r'^\s+[0-9a-f]+: R_AARCH64', line):
+            pend = None   # the instruction above was relocated
+            continue
+        if pend:
+            out.append(pend)
+            pend = None
+        m = re.match(r'^\s+[0-9a-f]+:\s+(?:bl|b)\s+[0-9a-f]+ <([^>+]+)(?:\+0x[0-9a-f]+)?>\s*$', line)
+        if m and cur:
+            pend = (cur, m.group(1))
+    if pend:
+        out.append(pend)
+    return out
+
+
 def placeholder_uses(obj, names, undefs):
     """How one GCC object uses the C placeholders in names -> {name: (shape, reach)}. shape: `function` when a
     CALL26/JUMP26 names it, else `variable`. reach: `live` when a function that references it is reachable in the
@@ -434,6 +468,11 @@ def placeholder_uses(obj, names, undefs):
                 roots.add(tgt)
             continue
         edges[at(secs.get(sec), int(f[0], 16)) or '?' + nm].add(tgt)
+    for src_, dst_ in local_calls(_run('aarch64-linux-gnu-objdump', '-dr', '--no-show-raw-insn', obj).splitlines()):
+        # W28: a call to a function of the same section carries no relocation (the assembler resolved it), so the
+        # reloc scan above never saw it: `__fnv_00e04d30` calls its file-static `E04D30Finish` that way, and the
+        # variable E04D30Finish stores to (g_E04D30Last) was labelled harness-only while a root reaches it
+        edges[canon.get(src_, src_)].add(canon.get(dst_, dst_))
     for nm, b in binds.items():
         if nm.startswith('__fnv') or (b in ('GLOBAL', 'WEAK') and nm in undefs):
             roots.add(canon.get(nm, nm))

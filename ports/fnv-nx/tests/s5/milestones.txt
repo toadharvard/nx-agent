@@ -1,12 +1,34 @@
 # Boot milestones of the emulated boot (tests/s5/emu_guest.py --milestones, the default): how far the game got.
-# One line per way to reach a milestone; several lines with one name mean any of them. The names in their first-line
-# order are the order of the boot; the summary's "milestone" is the last one in that order that was reached.
-#   <name> call 0xORIG       the function at that original address starts (its native definition)
-#   <name> call re:REGEX     a native function whose ELF symbol matches starts (the D3D9 device: null or Nine proxy)
-#   <name> store 0xADDR      a non-zero word is stored at that data-window address
-#   <name> store *0xADDR+N   a non-zero word is stored at (the pointer at ADDR) + N
-#   <name> data WHAT         a game-data step seen in the host file calls (tests/s5/datapath.py: ini-read,
-#                            archive-list, bsa-opened, esm-header, masters-loaded); needs the game files (--game)
+# The order of the names (first-line order below) is the boot's order, S18's trace of the original (docs/ORIGINAL_BOOT.md):
+#   winmain < ini-read < archive-list < bsa-opened < renderer-init < esm-header < masters-loaded < main-menu
+#   < first-frame < first-cell
+# A milestone COUNTS only when every milestone before it is already reached. A hit earlier than that is recorded and
+# printed ("milestone: X hit out of order (missing: Y)", "out-of-order" in the milestone_lines and the summary's
+# "out_of_order"), but it is not reached and not "last reached"; when the missing ones arrive later it does not count
+# retroactively, only a new hit of it does (data milestones fire once: they never recover).
+#
+# One line per way to reach a milestone; several plain lines with one name mean any of them:
+#   <name> call 0xORIG         the function at that original address starts (its native definition)
+#   <name> call re:REGEX       a native function whose ELF symbol matches starts (the D3D9 device: null or Nine proxy)
+#   <name> callok F            F (0xORIG or re:REGEX) returns 0 (an HRESULT S_OK) to its caller
+#   <name> calltrue F          F returns true (w0's low byte non-zero)
+#   <name> ret F               F returns (any value); same thread and stack pointer as the call
+#   <name> store 0xADDR        a non-zero word is stored at that data-window address
+#   <name> store *0xADDR+N     a non-zero word is stored at (the pointer at ADDR) + N. The word is not looked at
+#                              before the pointer is stored: only a store counts (no 'already set' shortcut)
+#   <name> data WHAT           a game-data step seen in the host file calls (tests/s5/datapath.py: ini-read,
+#                              archive-list, bsa-opened, esm-header, masters-loaded); needs the game files (--game)
+# A trailing word 'main-thread' on a call/callok/calltrue/ret/store line: it counts only on the main thread (tid 1).
+#
+# Compound markers: lines of one name with the keyword all or seq after the name are the parts of ONE way (a plain
+# line is another way, as before):
+#   <name> all <kind> <target> [main-thread]   every `all` part must have happened, in any order
+#   <name> seq <kind> <target> [main-thread]   the `seq` parts must happen in file order: a part counts only once the
+#                                              parts above it have (this is the 'after:' relation)
+# A name may have several compounds: give each an id, `all:a`, `seq:native`; parts with the same keyword and id go
+# together (no id: one group of that keyword). When the compound is complete the milestone is hit; its parts keep being
+# watched, so a later hit (a new event after the prerequisites arrived) can still count.
+#
 # The addresses are the decomp's (units.json) and the player's FalloutNV.exe 1.4.0.525's; each comment says how it is
 # known. Reproduce the RTTI ones with the exe: the type descriptor .?AVC@@, its complete-object locator, the vftable
 # that names the locator, and the function in .text that stores that vftable.
@@ -14,27 +36,49 @@
 winmain        call   0x0086a850   # WinMain (units.json, the decomp's entry; boot.cpp calls it)
 # the game read its INI (Fallout_default.ini / Fallout.ini / FalloutPrefs.ini, ReadFile through platform/win32)
 ini-read       data   ini-read
-# the game's D3D9 device exists: IDirect3D9::CreateDevice of the null device (toolchain/game/null_d3d9.cpp) or of
-# the Nine proxy (render/nine, class Px<interface>)
-renderer-init  call   re:^_ZN\d+(Null_I|Px)Direct3D9(Ex)?\d+CreateDevice(Ex)?E
-# ... or, in the native-render build (LINK_OVERRIDES=render; tests/s5/native_render.py), nx::Renderer came up with it
-# (toolchain/game/native_device.cpp from the device's CreateDevice)
-renderer-init  call   re:^_ZN2nx8Renderer4InitEPNS_7BackendEjjjj$
-# the archives: a file call on one of SArchiveList's archives, then every one of them opened
+# the archives (the original opens them right after the INI, before the renderer): a file call on one of SArchiveList's
+# archives, then every one of them opened (Update.bsa is not in the set: it opens later, after the ESM)
 archive-list   data   archive-list
 bsa-opened     data   bsa-opened
-# FalloutNV.esm: its TES4 header read at offset 0, then every master (FalloutNV.esm, plugins.txt's .esm) read to its end
+# the renderer is up (S18: right after the archives). All three: the D3D9 device exists (IDirect3D9::CreateDevice of
+# the null device, toolchain/game/null_d3d9.cpp, or of the Nine proxy, render/nine, class Px<interface>, returned
+# S_OK; reaching the call is not enough: the native-render hook, toolchain/game/native_device.cpp, fails it without a
+# GPU backend), the engine's 0x00e72e60 InitRenderer returned, and 0x00e81940 NiD3DShaderInterface::
+# InitializeShaderRenderer was entered (exe addresses of S18's trace)
+renderer-init  all    callok re:^_ZN\d+(Null_I|Px)Direct3D9(Ex)?\d+CreateDevice(Ex)?E
+renderer-init  all    ret    0x00e72e60
+renderer-init  all    call   0x00e81940
+# ... or, in the native-render build (LINK_OVERRIDES=render; tests/s5/native_render.py), nx::Renderer came up with it
+# (toolchain/game/native_device.cpp from the device's CreateDevice); the engine's init steps are then the same
+renderer-init  all:native calltrue re:^_ZN2nx8Renderer4InitEPNS_7BackendEjjjj$
+renderer-init  all:native ret     0x00e72e60
+renderer-init  all:native call    0x00e81940
+# FalloutNV.esm: its TES4 header read at offset 0
 esm-header     data   esm-header
-masters-loaded data   masters-loaded
-# the start menu exists: the StartMenu constructor (it stores the exe's StartMenu vftable 0x01076d1c, RTTI
-# .?AVStartMenu@@), or the StartMenu singleton the decomp binds at 0x011daac0 (DAT_011daac0 : StartMenu*)
-main-menu      call   0x007cb330
-main-menu      store  0x011daac0
-# a frame went to the screen: Present of the device or of a swap chain (null device or Nine proxy)
-first-frame    call   re:^_ZN\d+(Null_I|Px)Direct3D(Device|SwapChain)9(Ex)?\d+Present(Ex)?E
+# the data load is done: 0x0046fb50 TESDataHandler::MarkGameSettingsLoaded entered and returned (S18: the last
+# one-shot of the load), and >= 99 % of every master's bytes were read (datapath.py byte-range coverage)
+masters-loaded all    ret    0x0046fb50
+masters-loaded all    data   masters-loaded
+# the start menu is built (S18; the StartMenu ctor 0x007cb330 is not in the trace): 0x007cbaf0 StartMenuInit returned,
+# 0x007cc5d0 ListBox<StartMenu::Option*>::AddItem called (39 times in the original), and the one-shot 0x007160b0
+# FUN_007160b0(InterfaceManager*) entered
+main-menu      all    ret    0x007cbaf0
+main-menu      all    call   0x007cc5d0
+main-menu      all    call   0x007160b0
+# a frame went to the screen from the main loop: the first Present of the device or of a swap chain (null device or
+# Nine proxy) on the main thread, after 0x00851d90 BGSSaveLoadManager::ProcessQueuedSaveLoad (heads every frame) was
+# entered on the main thread. (The loading screen thread presents earlier, during the load: another thread.)
+first-frame    seq:d3d call   0x00851d90 main-thread
+first-frame    seq:d3d call   re:^_ZN\d+(Null_I|Px)Direct3D(Device|SwapChain)9(Ex)?\d+Present(Ex)?E main-thread
 # ... or the native renderer ended a frame (Do_EndFrame submits it with present; the engine's Present 0x00e7ccd0 is
 # replaced and never reaches the device)
-first-frame    call   re:^_ZN2nx8Renderer11Do_EndFrameEv$
-# the player is in a cell: g_thePlayer (units.json 0x011dea3c) -> TESObjectREFR::parentCell (+0x40, the decomp's
-# TESObjectREFR layout in tesobjectrefr.cpp)
-first-cell     store  *0x011dea3c+0x40
+first-frame    seq:native call 0x00851d90 main-thread
+first-frame    seq:native call re:^_ZN2nx8Renderer11Do_EndFrameEv$ main-thread
+# the player is in a cell: 0x00852d20 BGSSaveLoadReferencesMap::LoadCellReferences entered; then g_thePlayer (units.json
+# 0x011dea3c) -> TESObjectREFR::parentCell (+0x40, the decomp's TESObjectREFR layout in tesobjectrefr.cpp) stored;
+# then a later frame (0x0086ff70 Main86 frame counter called again) and the in-cell 0x00950290
+# PlayerCharacter::UpdateCameraMode in it
+first-cell     seq    call   0x00852d20
+first-cell     seq    store  *0x011dea3c+0x40
+first-cell     seq    call   0x0086ff70
+first-cell     seq    call   0x00950290

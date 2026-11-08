@@ -619,6 +619,28 @@ virtual functions declared but defined nowhere (and without an address) their mi
 `vslot-unresolved`, and resolve binds such slots, in GCC's vtables and synthesized ones, to trap stubs (above)
 instead of leaving the link undefined.
 
+### classlayout: one exe decision per RTTI vftable (orchestrator 2026-11-08)
+
+`tools/link/classlayout.py` decides every RTTI vftable of the exe in one pass (`out/classlayout.tsv`, format
+fnvnx-classlayout/1; the same file, published on fnv-nx-build `recon/classlayout`, is what S1's prepare reads):
+
+- `com`: IUnknown (or a COM-named class) in the hierarchy descriptor; exe order.
+- `minus-one` at k: the first exe slot with MSVC's deleting-destructor shape (exevft.deleting_dtor, through adjustor
+  thunks). MSVC places it where the class declares its virtual destructor, and GCC places D1 / D0 at the same spot, so
+  native slots 0..k-1 = exe 0..k-1, D1 / D0 at k / k+1, exe slot i > k at native i + 1 (k = 4 for the TESForm family).
+- `exe-order`: no deleting destructor.
+
+`exe_vtable_copies` takes this decision first for a pair-less primary table. Two cases stay in exe order whatever it
+says, as prepare does: a COM class by its slot names, and a destructor slot that code calls by name (`d22-used`).
+d26_classify, family_dtor_pos and D26DS remain only as fallbacks for tables classlayout does not decide (stat
+`classlayout-fallback`). `FNVNX_CLASSLAYOUT=0` restores the heuristics alone, and `FNVNX_D26T=0` still turns every
+rebuild off. Stats: `classlayout-minus-one(-at-k)`, `classlayout-exe-order`, `classlayout-com`, `classlayout-d22-used`,
+`classlayout-no-dtor-stub`, `classlayout-disagree`.
+
+The gate: `classlayout.py <exe> -o <dir>/classlayout.tsv --link <link root>` checks every native table against
+transform(exe table) slot by slot (classgate.tsv, causes shift / wrong / trap / pure / null / short; unmapped names
+are reported apart). The number of mismatching tables is driven to 0, like traps: 1,233 of 3,269 on 4264bfd7.
+
 ## Vtable slots through the MSVC vftables (`vslots.py`, D12)
 
 `resolve --msvc-objs <dir>` (or `FNVNX_MSVC_OBJS`): `<dir>/u<index>.obj` are the pristine decomp's units compiled
@@ -796,7 +818,12 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   wins over GCC's weak COMDAT copies. It holds the kept copy's words with resolve's renames for that object, the
   per-slot words above, and, for a primary vtable shorter than the exe's (a single-vtable group: no secondary
   address point moves), the exe's remaining slots: `__fnv_<a>`, the deleting-destructor stub for a `??_G`, else a
-  trap stub naming the exe address. Groups that hold a local or non-ABS32 relocation, or a strong (key-function)
+  trap stub naming the exe address. A word that still names a symbol its unit leaves undefined (extern-text
+  addresses nothing defines: `BaseFormComponent::Init` / `CopyFromBase` / `CompareWithBase`, whose recipe addresses
+  0x00402d40/60/70 lie inside FUN_00402d30) takes the exe slot's word the same way (`xt-slots`): `_purecall` where
+  the exe slot is the CRT's pure virtual (only BaseFormComponent's own vftable 0x01011d68 is: every derived class's
+  vftable holds real functions there), `__fnv_<a>` of a native definition, else a trap stub for the exe address;
+  only where the exe vftables the group stands for agree. Groups that hold a local or non-ABS32 relocation, or a strong (key-function)
   definition, are not copied. The V rows name zz_bridges.o; `vtext.tsv` names the object the words came from,
   which apply's typeinfo pairing takes as the vtable's object.
 * Outputs: `slot_fill.tsv` (object, symbol, address, target, how chosen, ABI verdict, the uses), `slot_gaps.tsv`
@@ -814,7 +841,13 @@ resolve bound only through another unit's reference to the same name (gref / gde
 a *different* function there, TESForm::IsQuestItem at 0x0046f070 where the exe's TESForm slot 37 is 0x00401190) is a
 hint: when no code of the object calls the name, exe_slot_fill replaces the address with the exe vftable's function
 at the slot (`hint_rebound`; slot_fill.tsv row `exe vftable over the name's address`) and keeps it where the exe has
-none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+none or the function cannot be bound (`hint_kept_*`). W20 extends this to names the unit's own recipe binds (tier
+`unit/*`), by what the object's code does with the name: never called (class b, 24 of 208 holder x symbol items on link
+0540aff0d154, all of them the unit's own definitions nothing calls) is a hint like the above; called directly (class a,
+183 items: `Base::f()` from an override, whose exe call site reaches the bound address in the pristine object) keeps the
+symbol at its address for the call and gives each vtable slot that names it, where the exe vftables of that use agree,
+the exe's function as a per-slot override (`chint_slot_over`; slot_fill.tsv row `per slot (exe vftable; the name stays
+at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
 `test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
 
 ## Platform, imports, thread-locals and hand-written vptrs
@@ -1003,6 +1036,49 @@ none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (s
   it. On link 9f865b0a's inputs (offline) it makes 831 copies: 615 hand-stored + 239 RTTI-referenced candidates,
   minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
   slots.
+
+  **A D0 in native slot 1 of a table in the exe's slot order** (W23, `d0_slot_fix` in `exe_vtable_copies`;
+  `FNVNX_D0SLOT=0` turns it off). A native `delete p` through a declaration with a virtual destructor calls Itanium
+  slot 1. A native vtable with no D1/D0 pair (the decomp declares a placeholder `virtual void BaseVirtual();` where
+  the exe has the ??_G; `_ZTV12FUN_00e754a0`, ctor 0x00e754a0, which GraphicsRenderer also declares with a virtual
+  destructor) is built or extended in the exe's order, so slot 1 holds exe slot 1. When that is
+  `DeleteThis() { delete this; }` (`exevft.delete_this`: the exe's bytes, a call of vftable slot 0 with flags 1) the
+  native `delete this` goes through slot 1 again, forever (S5 round 6, link 97deacd38aec). Slot 1 becomes the D0 of
+  exe slot 0 (`vmo_dtor_slots`: the Itanium D0, or the flags-1 stub), which is what DeleteThis does in the exe.
+  Nothing else moves: a full shift to D26's order would break every caller compiled against the same table in the exe's
+  order (the call-only placeholders, e.g. the renderer's slot 54), which D26 (a)/(b) convert in S1-rules, not here.
+  vtmetric's `slot-one-delete-this` counts the tables still in that shape (96 on link 0540aff0; the fix's target is 0).
+
+  **Minus-one tables without a pair** (W30, `d26_minus_one_reason` in `exe_vtable_copies`; `FNVNX_D26T=0` turns it off).
+  A table made from the exe vftable with no D1/D0 (the probe's synthesis, an extended copy) used to stay in the exe's
+  order, while callers compiled against D26 (b)'s `virtual ~C()` dispatch minus-one: `_ZTV12FUN_00aa7400` and
+  `_ZTV26FUN_00aa2230_BSNiAllocator` ran the wrong slot (the heap's Allocate ran an empty slot returning `this`). A table
+  is now rebuilt whole as a strong copy in D26's layout (D1/D0 from exe slot 0 by `vmo_dtor_slots`, exe slot k at k + 1 by
+  `exe_slot_target`, free-function slots through the `__fnvnx_vfree_` this-drop thunks) only on evidence: the exe vftable
+  is in S1's D22 list (`d22.json` under FNVNX_RECON) or prepare's applied list (`build/d22_applied.tsv`), or slot 0 is
+  a call-only placeholder (D26 (b) gives every call-only declaration `virtual ~X()`, so its callers are minus-one:
+  the S1-rules / S2-bodies contract of 2026-11-08, D26 "minus-one everywhere"). Excluded: a slot 0 that code names
+  (D22-USED keeps the exe order), and a defined, named slot 0 (BSNiAllocator::Destroy) with no list evidence. Tables
+  with no evidence are
+  counted as `exe-order-no-evidence`. A caller in the exe's order for the same class (BSNiAllocator's InitHolder
+  0x00aa2020 loads offset 28) disagrees with a shifted table: S1 converts it first or together.
+  An exe slot 0 that is a `??_G` no unit compiles (no native definition, the exact shape of
+  exevft.deleting_dtor_callee) still gives the pair, as two traps for the exe address (W45, `slot0-dtor-not-compiled`,
+  `FNVNX_D26U=0` turns it off). Before, such a table counted as `d26-slot0-not-a-destructor` and stayed in the exe's
+  order, so `_ZTV12FUN_00aa7400` (ZeroOverheadHeap, `??_G` 0x00aa77e0) ran Deallocate where MemoryManager FUN_00aa3e40
+  calls Allocate (minus-one slot 3). Deallocate returned `this`, the pool constructor wrote its name over the heap's
+  vptr, and 4,551 initializers faulted at "vslot 3 of 0x063b8d58" (link 8111f58a).
+
+  **A family whose destructor is not exe slot 0** (V2, seams triage of link 5fd996a4; `family_dtor_pos`,
+  `FNVNX_D26F=0` turns it off). TESForm, the Actor / Projectile / TESActorBase family and their descendants have four
+  placeholder slots (exe 0..3: two nullsubs, 0x485340, 0x4853e0) before the deleting destructor at exe slot 4, so the
+  tables with a real pair (Actor, Character, PlayerCharacter, GrenadeProjectile) have D1/D0 at native 4/5 and exe slot k
+  at k + 1 after it. A pair-less table of the same exe prefix (Creature, MagicProjectile, TESActorBase, ...) stayed in
+  the exe's order (`d26-slot0-not-a-destructor`, or `d22-used` / `defined-slot0` from a nullsub name), so every
+  `Actor` caller's slot k + 1 reached the wrong slot (about 240 vcall sites, delta +1). The evidence is a table with a
+  pair at slot d whose exe slot d is a deleting destructor (`family_prefixes`: the exe slots before it are the family's
+  prefix); a pair-less table with that prefix and a deleting destructor at the same slot is rebuilt like W30's, with the
+  pair at d (`d26-family-dtor`). Not covered: multi-vtable groups (FlameProjectile, Character: `multi-vtable`).
 
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
@@ -1250,6 +1326,22 @@ arity, under another decoration), `not-compiled` (the tree has a body: out of li
 source that is no unit, or in a class copy the referencing unit does not emit), `no-body` (the decomp has none:
 `template-special`, `msvc-direct`, `exe-shape`, `other`). `--traps` weighs each class by the names the guest binds to
 trap stubs. Output `causes.tsv` (agent-only). Test: `tests/s2d/test_bodycause.py`.
+
+**Names defined only as a GCC clone (decision, W44 on W37's fix).** `name-mismatch` with the detail `defined only as a
+GCC clone`: the only definition is a local `.isra.0` / `.constprop.0`. The case in link 4264bfd7 (rows 52 / 53,
+`fnvnx_vc9::string::assign(const char*)` and `assign(const string&, unsigned, unsigned)`): projectedshadow_ob1_variant.cpp
+declares both as explicit specializations (`template <> ... assign(...);`, MSVC's out-of-line library instance) and
+nothing defines them, so the unit references the plain names; every other unit instantiates the in-class template
+body implicitly, and where GCC keeps a call out of line it keeps only its IPA clone (internal, its own signature). An
+alias is impossible (the clone's parameters differ). Options measured on leafinfo_ob1_variant.cpp and
+tesobject_ob1_nogf_variant.cpp: per-unit `-fno-ipa-sra -fno-ipa-cp-clone` does make GCC emit the plain names (weak),
+at +184 bytes (+2.1 %) and +372 bytes (+9.2 %) of `.text` in those units, and it rests on GCC still choosing an
+out-of-line call there (another tree, another inlining decision, and the name is gone again) while it changes code
+generation for every function of the unit. `noipa` / `noclone` on the member would need a change to the shim header,
+seen by every unit. Chosen: bodies.py's inst tier for members (W37, `member_inst_line` / `member_inst_hosts`): one
+explicit instantiation `template decltype(...) C<A>::m(P);` in a host unit that reaches the body and declares no such
+specialization. It always emits the plain (weak) name, costs only that one function's code, and no other unit's code
+changes. No compile flag was added.
 
 The farm link gets the exe from `link_job.sh` (`job_gamedata` -> `FNVNX_EXE`); the link stage's fingerprint holds its
 sha256. On link c0d6c71516f6 (relink of its out/): 4,425 undefined without bodies, 2,474 with. The 1,002 names left

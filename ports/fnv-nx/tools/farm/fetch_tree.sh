@@ -23,13 +23,28 @@ REPO=${REPO:-$(cd "$HERE/../../../.." && pwd)}
 INPUTS=(ports/fnv-nx/tools/prepare.py ports/fnv-nx/tools/rules ports/fnv-nx/patches ports/fnv-nx/shim ports/fnv-nx/tools/fetch.sh ports/fnv-nx/render/native/drop_units.txt)
 end=$(( $(date +%s) + WAIT ))
 ref=""
+# FETCH_TREE_RECON=<id> (lib_job.sh job_inputs: the recon set this job prepares with, recon.sh's RECON_ID): a tree
+# prepared with another recon set is not this commit's tree today (T1: link 8111f58a's tree was prepared at 10:44,
+# before recon/ctor_719c00_registries_w1 and recon/d22_vtable_dtor existed). t/<commit12> with another recon fails
+# at once (it will not change); the rolling tree with another recon is not taken. Unset: not checked (fuzz_job.sh
+# takes the tree its link was made on, whatever the recon).
+recon_ok() {   # recon_ok <ref>: the tree's meta.json recon matches FETCH_TREE_RECON (or it is not checked)
+  [ -n "${FETCH_TREE_RECON+x}" ] || return 0
+  local r
+  r=$(git -C "$ARTIFACTS" show "$1:meta.json" 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("recon") or "")' 2>/dev/null)
+  [ "$r" = "$FETCH_TREE_RECON" ]
+}
 while [ -z "$ref" ]; do
   if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/t/$C12:refs/remotes/origin/t/$C12" 2>/dev/null; then
+    if ! recon_ok refs/remotes/origin/t/$C12; then
+      echo "t/$C12 was prepared with another recon set than this job's ($FETCH_TREE_RECON): not used" >&2; exit 1
+    fi
     ref=refs/remotes/origin/t/$C12; break
   fi
   if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/tree:refs/remotes/origin/tree" 2>/dev/null; then
     P=$(git -C "$ARTIFACTS" show refs/remotes/origin/tree:meta.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')
-    if git -C "$REPO" cat-file -e "$P^{commit}" 2>/dev/null && git -C "$REPO" diff --quiet "$P" "$COMMIT" -- "${INPUTS[@]}" 2>/dev/null; then
+    if git -C "$REPO" cat-file -e "$P^{commit}" 2>/dev/null && git -C "$REPO" diff --quiet "$P" "$COMMIT" -- "${INPUTS[@]}" 2>/dev/null \
+        && recon_ok refs/remotes/origin/tree; then
       ref=refs/remotes/origin/tree; SAME_AS=$P; break
     fi
   fi
