@@ -122,6 +122,12 @@ POLICY = {
     'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
                                               'buffer and destroys the local, GCC constructs it there (copy '
                                               'elision, allowed by C++), F1b'),
+    'dtor-split-delete': ('by-design', '-', False, 'the oracle calls a scalar deleting destructor wrapper (exe: `and '
+                                                   'eax, 1; je`, then a call of operator delete / Deallocate) and '
+                                                   'goes on; the native calls the same exe function through its D1 '
+                                                   'binding with flags 0 and frees with its own operator delete '
+                                                   'call. Same destructor body, same heap (libcalls: delete 0x401030 '
+                                                   'and sized delete 0x00aa1460 both reach MemoryManager::Deallocate)'),
     'nrvo-elision':   ('by-design', '-', False, 'one machine passes the hidden result buffer of the function as the object a '
                                                 'callee works on, the other a local of its own frame (named return '
                                                 'value optimisation on one side only; allowed by C++). The result '
@@ -619,7 +625,7 @@ def _rule_mem_write(d, rec=None):
             return 'thunk-binding'      # the function's own `_ZThn<d>_` thunk: the oracle enters with the secondary base
         if d.get('arm_zero_only') and oa == n and _zero_init_region(d, rec):
             return 'native-zero-init'
-        if d.get('x86_zero_only') and ox == n and _dtor_this_region(d, rec):
+        if (d.get('x86_zero_only') or d.get('x86_const_only')) and ox == n and _dtor_this_region(d, rec):
             return 'dtor-dead-store'
     if len(bx) >= 4 and len(ba) >= 4:
         if ww and all(_nan_generated(x, a) for x, a in ww):
@@ -668,7 +674,7 @@ def _this_buffer(rec):
         return BUFS[0] if isinstance(rec.get('case'), dict) else None
 
 
-_DTOR_SYM = re.compile(r'^\?\?(1|_G|_E)|[QU]AEPAX(I|_N)@Z$|D[012]Ev$')
+_DTOR_SYM = re.compile(r'^\?\?(1|_G|_E)|^\?Destructor@|[QU]AEPAX(I|H|_N)@Z$|D[012]Ev$')
 
 
 def _dtor_this_region(d, rec):
@@ -727,8 +733,52 @@ def _rule_empty_call(d):
     return 'oracle-empty-call' if sx == sa and len(sx) < len(tx) else None
 
 
+def _is_deleting_wrapper(addr):
+    """The exe function at `addr` is a scalar deleting destructor wrapper: a flags test (`and r, 1`, then a branch) and a
+    call of a deallocator (operator delete 0x00401030 / sized delete 0x00aa1460 / Deallocate 0x00aa4060) within its
+    first 0x30 bytes. None without the exe."""
+    import retsrc
+    pe = retsrc._pe()
+    if pe is None or addr is None or addr < 0:
+        return None
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    try:
+        code = pe.read(addr, 0x30)
+    except Exception:  # noqa: BLE001
+        return None
+    flag = False
+    for i in md.disasm(code, addr):
+        if i.mnemonic == 'and' and i.op_str.endswith(', 1'):
+            flag = True
+        elif i.mnemonic == 'call' and flag:
+            try:
+                return int(i.op_str, 16) in DEALLOCATORS
+            except ValueError:
+                return False
+        elif i.mnemonic == 'ret':
+            break
+    return False
+
+
+def _rule_dtor_split(d):
+    """dtor-split-delete: the traces agree up to a call of a scalar deleting destructor wrapper, the native then
+    frees with a deallocator of its own and goes on with the oracle's next call."""
+    tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    i = d.get('index')
+    if d.get('kind') != 'call-target' or not isinstance(tx, list) or not isinstance(ta, list) or not isinstance(i, int):
+        return None
+    if i < 1 or i >= len(ta) or tx[:i] != ta[:i] or d.get('arm_next') != d.get('x86'):
+        return None
+    if _hex(d.get('arm')) not in DEALLOCATORS or not _is_deleting_wrapper(_hex(ta[i - 1])):
+        return None
+    return 'dtor-split-delete'
+
+
 def _rule_calls(d, rec=None):
     tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if _rule_dtor_split(d):
+        return 'dtor-split-delete'
     if d.get('kind') == 'call-target':
         x, a = str(d.get('x86') or ''), str(d.get('arm') or '')
         if a.startswith('name:_Z'):

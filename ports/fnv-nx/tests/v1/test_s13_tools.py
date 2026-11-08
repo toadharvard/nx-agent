@@ -12,6 +12,8 @@ names, vtable words, tree hashes and hand-written shader tokens); nothing from t
   V2  61fd136  note: native_slots counts a following secondary's vcall/vbase offset words as slots of the vtable
   R1  545e0c5  a def row of unit A changes the callee convention a caller unit B uses, but B's key is not refreshed
   R2  545e0c5  a changed row refreshes its unit's keys; an unrelated unit's key is unchanged; a ref row stays local
+               (fixed by fnkeys' callee-renames: a caller's key covers its callees' def rows, from the catalog's
+               call edges; the case gives B that edge and checks the unrelated unit C)
   F1  a01a297  the link records tree hash H; only t/<L12> exists, with another hash: the fallback wait takes it
   F2  a01a297  note: a link whose meta.json records no tree hash takes the objects commit's tree unchecked
   F3  a01a297  control: the recorded tree's commit, hash matching, is taken without waiting
@@ -266,12 +268,14 @@ def fresh_config(tree, tsv):
     return importlib.reload(config)
 
 
-def fnkeys_for(config, fnkeys, targets, rows_file):
-    """fnkeys.main on synthetic targets with a stub Native (same native hash per function in both runs)."""
+def fnkeys_for(config, fnkeys, targets, rows_file, calls=None):
+    """fnkeys.main on synthetic targets with a stub Native (same native hash per function in both runs). calls:
+    {address: [callee addresses]}, the catalog's call edges (the oracle code's direct calls)."""
     tdir = tempfile.mkdtemp(dir=WORK)
     tp, cp, op = (os.path.join(tdir, x) for x in ('t.jsonl', 'c.jsonl', 'k.json'))
     open(tp, 'w').write(''.join(json.dumps(dict(address=a, source=s)) + '\n' for a, s in targets))
-    open(cp, 'w').write(''.join(json.dumps(dict(address=a, ohash='o' + a)) + '\n' for a, _ in targets))
+    open(cp, 'w').write(''.join(json.dumps(dict(address=a, source=s, ohash='o' + a, calls=(calls or {}).get(a, [])))
+                                + '\n' for a, s in targets))
 
     class Nat:
         def __init__(self, _):
@@ -324,10 +328,13 @@ def case_r():
     cb, ca = before.conv(0x00402000), after.conv(0x00402000)
     changed = (cb is not None and ca is not None and cb.describe() != ca.describe()) or before(0x00402000) != after(
         0x00402000)
-    targets = [('00402000', 'src/a.cpp'), ('00405000', 'src/b.cpp')]
-    k0 = fnkeys_for(fresh_config(tree, 'none'), fnkeys, targets, None)
-    k1 = fnkeys_for(fresh_config(tree, tsv1), fnkeys, targets, None)
-    k2 = fnkeys_for(fresh_config(tree, tsv2), fnkeys, targets, None)
+    # B's 0x00405000 calls A's 0x00402000 (the catalog's call edge: the oracle code's `call 0x00402000`); C's
+    # 0x00406000 calls nothing of A's
+    targets = [('00402000', 'src/a.cpp'), ('00405000', 'src/b.cpp'), ('00406000', 'src/c.cpp')]
+    calls = {'00405000': ['00402000']}
+    k0 = fnkeys_for(fresh_config(tree, 'none'), fnkeys, targets, None, calls)
+    k1 = fnkeys_for(fresh_config(tree, tsv1), fnkeys, targets, None, calls)
+    k2 = fnkeys_for(fresh_config(tree, tsv2), fnkeys, targets, None, calls)
     if changed and k0.get('00405000') == k1.get('00405000'):
         defect('R1', 'unit B (no rows) calls A\'s 0x00402000: its callee convention there goes %s -> %s with A\'s def '
                      'row (call-args compare, canned kind), but B\'s key stays %s: B keeps a verdict made under the '
@@ -336,8 +343,11 @@ def case_r():
     else:
         ok('R1', 'callers of a renamed definition: convention changed %s, key %s -> %s' % (
             changed, k0.get('00405000'), k1.get('00405000')))
-    expect('R2', k0['00402000'] != k1['00402000'] != k2['00402000'] and k0['00405000'] == k1['00405000'] ==
-           k2['00405000'], 'A\'s key changes with each change of its rows; B\'s never (%s / %s / %s)' % (
+    # R2: A's key changes with each change of its rows; a unit that does not call A (C) never; B, which calls A's
+    # 0x00402000, follows A's def row (R1) but not A's ref row (tsv2 adds only a ref row of A: the same def rows)
+    expect('R2', k0['00402000'] != k1['00402000'] != k2['00402000'] and k0['00406000'] == k1['00406000'] ==
+           k2['00406000'] and k1['00405000'] == k2['00405000'],
+           'A\'s key changes with each change of its rows; C\'s never; B\'s not for A\'s ref row (%s / %s / %s)' % (
                k0['00402000'], k1['00402000'], k2['00402000']))
     ref = engine.apply_renames({}, fresh_config(tree, tsv2).units_renames())
     ub = uc_with(fresh_config(tree, tsv2).units_renames())

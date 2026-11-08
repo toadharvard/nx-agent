@@ -271,6 +271,7 @@ class X86Engine:
             hfp2 = None
         start = start if start is not None else next(iter(self.text_funcs))
         esp0 = uc.reg_read(UC_X86_REG_ESP)
+        self._esp0 = esp0
         # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
         hrs = uc.hook_add(UC_HOOK_MEM_WRITE, self._on_ret_slot, user_data=r, begin=esp0, end=esp0 + 3)
         hcode = []
@@ -422,6 +423,27 @@ class X86Engine:
         elif 'al' in names:
             trk['last'] = 1
 
+    def _zero_unwritten(self, uc, r, ptrs):
+        """STUB_OUT (R4 flow, the oracle's side of arm64emu._zero_unwritten): for each argument that points into the
+        stack, the words of the next 0x40 bytes that the oracle code has not stored to (and that are not the
+        return-address slot) become 0, as the real callee would have filled them. MSVC reuses a dead parameter slot
+        as the out-parameter temporary where GCC takes a fresh local (0x00a57670: `lea ecx, [esp+0xc]` is the
+        slot of the parameter it already consumed)."""
+        esp0 = getattr(self, '_esp0', None)
+        for v in ptrs:
+            v &= 0xffffffff
+            if not (world.STACK[0] <= v < world.STACK[1]):
+                continue
+            for a in range(v & ~3, min(v + 0x40, world.STACK[1]) & ~3, 4):
+                if esp0 is not None and a == esp0:
+                    continue
+                if any((a + i) in r.writes for i in range(4)):
+                    continue
+                try:
+                    uc.mem_write(a, bytes(4))
+                except UcError:
+                    break
+
     def _on_write(self, uc, access, address, size, value, r):
         for i in range(size):
             r.writes[address + i] = (value >> (8 * i)) & 0xff
@@ -460,6 +482,8 @@ class X86Engine:
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
                             {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
         r.calls[-1].pushed = self._pushed(uc, retaddr, address)
+        if world.STUB_OUT:
+            self._zero_unwritten(uc, r, r.calls[-1].args)
         if address in libcalls.NORETURN_X86:
             r.noreturn = libcalls.NORETURN_X86[address]   # the call never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
@@ -589,11 +613,17 @@ class X86Engine:
             k = len(r.calls)
             r.calls.append(Call(libcalls.import_id(name), [uc.reg_read(UC_X86_REG_ECX),
                                                            uc.reg_read(UC_X86_REG_EDX)] + words, ret))
+            if world.STUB_OUT:
+                self._zero_unwritten(uc, r, r.calls[-1].args)
             if name in libcalls.NORETURN_IMPORTS:
                 r.noreturn = name
                 uc.emu_stop()
                 return
             v = world.u32(case.ret_bytes(k), 0)
+            # (R4 flow) an import has no declaration here, so the native's canned result is the untyped one (arm64emu
+            # _on_stub: the low byte is 0/1, a call site may test it as a bool). The same byte here: 0x00d45c50 read
+            # TlsGetValue's 0x030020f4 on the oracle and 0x03002000 natively, and stored through two stream pointers
+            v = (v & ~0xff) | (case.ret_bytes(k)[0] & 1)
             uc.reg_write(UC_X86_REG_EDX, world.u32(case.ret_bytes(k), 4))
             uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)

@@ -229,7 +229,7 @@ def _nrvo_copy(xcalls, ta, sret, convs):
     # a copy constructor under some name of the callee, a destructor under some name of the other (one address can
     # carry several classes' names in a unit, 0x004037d0 has two destructor spellings); the argument flow below ties
     # them together
-    ok = any(re.match(r'^\?\?0[^@]+(?:@[^@]+)*@@QAE@ABV0@@Z$', n) for n in names(cc.target)) and \
+    ok = any(re.match(r'^\?\?0[^@]+(?:@[^@]+)*@@QAE@AB[UV]0@@Z$', n) for n in names(cc.target)) and \
         any(n.startswith('??1') for n in names(dd.target))
     if not ok:
         return None
@@ -429,6 +429,14 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             d['arm_zero_only'] = True      # the native only zeroes bytes the oracle leaves (value-initialisation)
         if diff and all(k not in wa and wx.get(k) == 0 for k in diff):
             d['x86_zero_only'] = True      # the oracle only zeroes bytes the native leaves (a dead store in a dtor)
+        elif diff and all(k not in wa and (wx.get(k) == 0 or (wx.get(k) == 0x80 and k % 4 == 3 and
+                                                             all((wx[k - i] if k - i in wx else
+                                                                  w.page(world.page_of(k - i))[k - i - world.page_of(k - i)]) == 0
+                                                                 for i in (1, 2, 3))))
+                          for k in diff):
+            # (R4 flow) or sets an hkArray capacity word to 0x80000000 (DONT_DEALLOCATE_FLAG, `mov [esi+0x4c],
+            # 0x80000000` at 0x00d08f80): the same dead store of a destroyed member, constant bytes only
+            d['x86_const_only'] = True
         # float stores: compare the aligned words as floats. (difffuzz-20, float-store-raw) From the machines' raw
         # stores: the effective maps above drop a byte that equals the world's initial byte, so a one-ulp store whose
         # low byte is the initial 0x00 (0x00c206b0 .. 0x006e9830: 0xc2248200 against 0xc2248201) had a hole in its
