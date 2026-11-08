@@ -1636,6 +1636,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # _ZTV7StandIn is some other unit's class); such a store keeps its image vftable (D26 (c) copy, transform(exe))
     # unless the exe's own RTTI class has that name (FNVNX_HANDAMB=0: the name decides as before)
     amb_hand = hand_ambiguous_names(hand, exev)
+    # the same rule for the class constructed at the storing address (R4 15:33: SpawnedSub's stand-in ctors at
+    # 004385f0 / 00438660 / 00631750 store three different image vftables, none of them a SpawnedSub)
+    amb_cc = hand_ambiguous_names({a: [(unit, cc, fa, off) for unit, _, fa, off in sites if fa is not None
+                                       for cc in ctor_classes(fa)] for a, sites in hand.items()}, exev)
     for a, sites in sorted(hand.items()):
         how = 'named vftable' if a in vmap else None
         if a not in vmap:
@@ -1660,6 +1664,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             for unit, _, fa, off in sites:
                 for cc in (ctor_classes(fa) if fa is not None else {}):
                     want_.add(cc)
+                    if (a, cc, off) in amb_cc:
+                        vstats['hand-written-ambiguous-ctor-class'] += 1
+                        continue
                     for z in sorted(by_cls.get(cc, [])):
                         ents = rtti.ents(z) or []
                         pts = [p for p, ott in vtables.address_points(ents) if ott == -off]
