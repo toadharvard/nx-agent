@@ -225,9 +225,43 @@ for d in "$FARM_HOME"/equiv-*; do
 done
 W=$FARM_HOME/equiv-$C12; WK=$W/$K-of-$N; mkdir -p "$WK"
 step prepare "$W/prepare.log"
+# T1: the prepare runs in one stable directory ($FARM_HOME/eqprep/tree) under tools/pipeline/traced.py, which records
+# every file it read and directory it listed; the next head keeps that tree when all of them, the decomp's head and
+# the tree's own content are unchanged (an equal prepare, ~10 min, was run for every head), and W/tree is a hard-link
+# copy of it (nothing writes into a tree after its prepare: the attribution's workers unlink before they write).
+# EQUIV_PREPARE_REUSE=0 prepares every time.
+# eqprep-begin
+eqp_id() {   # the content id of a tree: paths and sha256 of every file
+  python3 -I -c 'import hashlib, os, sys
+h = hashlib.sha256()
+for dp, dn, fn in sorted(os.walk(sys.argv[1])):
+    dn.sort()
+    for n in sorted(fn):
+        p = os.path.join(dp, n)
+        h.update(os.path.relpath(p, sys.argv[1]).encode("utf-8", "surrogateescape") + b"\0" + hashlib.sha256(open(p, "rb").read()).digest())
+print(h.hexdigest())' "$1"
+}
 if [ ! -f "$W/tree.done" ]; then
-  rm -rf "$W/tree"; "${EQ[@]}" prepare "$DECOMP" "$W/tree" --rules "$RULES" > "$STEP_LOG" 2>&1; touch "$W/tree.done"
+  rm -rf "$W/tree"
+  PT=$FARM_HOME/eqprep/tree; PD=$FARM_HOME/eqprep/deps.json; mkdir -p "$FARM_HOME/eqprep"
+  dh=$(git -C "$DECOMP" rev-parse HEAD 2>/dev/null || echo none)
+  PARGS=("$P/tools/equiv/equiv.py" prepare "$DECOMP" "$PT" --rules "$RULES")
+  if [ "${EQUIV_PREPARE_REUSE:-1}" = 1 ] && [ -f "$PT.id" ] && [ "$(cat "$PT.decomp" 2>/dev/null)" = "$dh" ] &&
+     python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import traced; sys.exit(0 if traced.check(sys.argv[2], sys.argv[3:]) else 1)' \
+       "$P/tools/pipeline" "$PD" "${PARGS[@]}" && [ "$(eqp_id "$PT")" = "$(cat "$PT.id")" ]; then
+    echo "prepare: the tree of the last head kept (every input unchanged)" > "$STEP_LOG"
+  else
+    rm -rf "$PT" "$PT.id" "$PT.decomp" "$PD"
+    if nice -n "$NICE" python3 -I "$P/tools/pipeline/traced.py" "$PD" --exclude "$PT" -- "${PARGS[@]}" > "$STEP_LOG" 2>&1; then
+      eqp_id "$PT" > "$PT.id"; echo "$dh" > "$PT.decomp"
+    else
+      rm -f "$PD" "$PT.id" "$PT.decomp"   # a failed prepare is never kept, and fails the job as before (set -e)
+      false
+    fi
+  fi
+  cp -al "$PT" "$W/tree"; touch "$W/tree.done"
 fi
+# eqprep-end
 # the pristine rows from the objects (a published branch may carry no rows.jsonl; a unit without an object failed)
 step refp "$WK/refp.log"
 "${EQ[@]}" refp "$DECOMP" - "$PR/obj" --units "$SHARD" --out "$WK/base.jsonl" > "$STEP_LOG" 2>&1
