@@ -6837,6 +6837,74 @@ def _rawvt_recv(path, masked, owners, stats, text=None):
     return out
 
 
+# ---------------------------------------------------------------------------------------------------------- VTM1
+#
+# S5-boot (link 0829588572d1, an endless loop in the heap ctor dyninit): bsgamedatasystemutility.cpp's
+# FUN_00af39e0_shell::CallVirtualMethod2 (0x00af39e0) calls `reinterpret_cast<Obj*>(this)->vt->f2(this)`, exe
+# [edx+8] = slot 2 (0x00af3a00), through `struct VTable { void* f0; void* f1; void(__thiscall* f2)(void*); }`; the
+# object's native table (_ZTV12FUN_00af3980) is minus-one, so native +8 is CallVirtualMethod2 itself. A struct that
+# models an exe vftable (every member a pointer, at least two, the first named f0 / fn0 / vf0 / vfunc00 / v0 /
+# slot0 / ..., or the struct named *vt* / *vtable* / *vtbl* with numbered members) gets FNVNX_VTM1_PAD (fnvnx_vtm.h:
+# one pointer under GCC) after the entry of the destructor slot K: K from a classlayout class named in the struct's
+# name (the longest), else 0; none when that class is not minus-one, or when the struct is COM-shaped (__stdcall,
+# HRESULT, QueryInterface / AddRef / Release) (VTM1-COM / VTM1-KEEP).
+VTM1_STRUCT = re.compile(r'\bstruct\s+([A-Za-z_]\w*)\s*\{([^{}]*)\}')
+VTM1_FIRST = re.compile(r'^(?:f|fn|vf|vfn|vfunc|v|slot|func|pfn|m_pfn)_?0+$', re.I)
+
+
+def _vtm1_members(body):
+    """[(end offset of the declaration's `;` in body, member name)] when every declaration is a pointer, else None"""
+    out = []
+    for m in re.finditer(r'[^;]*;', body):
+        d = m.group(0).strip().rstrip(';').strip()
+        if not d or d.startswith('//'): continue
+        fp = re.search(r'\(\s*(?:__\w+\s*)?\*\s*(?:const\s*)?([A-Za-z_]\w*)\s*\)\s*\(', d)
+        if fp: out.append((m.end(), fp.group(1))); continue
+        vp = re.fullmatch(r'(?:const\s+)?[\w:<>]+\s*\*+\s*(?:const\s*)?([A-Za-z_]\w*)', d, re.S)
+        if vp: out.append((m.end(), vp.group(1))); continue
+        return None
+    return out
+
+
+def r_vtable_model_pad(path, text, stats):
+    """VTM1: a struct modelling an exe vftable gets FNVNX_VTM1_PAD after its destructor slot's entry (see above)."""
+    if 'struct' not in text: return text
+    edits = []
+    cl = _classlayout()
+    names = sorted({n for (n, f) in cl if len(n) >= 4}, key=len, reverse=True) if cl else []
+    for m in VTM1_STRUCT.finditer(text):
+        name, body = m.group(1), m.group(2)
+        if 'FNVNX_VTM1_PAD' in body: continue
+        mem = _vtm1_members(body)
+        if not mem or len(mem) < 2: continue
+        # the struct's name says it is a vftable (VTable / Vtbl / _vt / vftable); a D3D / device model stays (COM)
+        if not re.search(r'(?:v(?:table|tbl|ftable)|_vt$|^vt$|(?<=[a-z0-9])Vt$|_VT$)', name, re.I): continue
+        if re.search(r'D3D|Device|Direct|Dx', name): stats['VTM1-COM'] += 1; continue
+        if not (VTM1_FIRST.match(mem[0][1]) or re.search(r'\d', mem[0][1])): continue
+        if D22_COM_CONV.search(body) or any(n in D22_COM_MEMBER for _, n in mem):
+            stats['VTM1-COM'] += 1; continue
+        if re.search(r'\b%s\b[^;(){}]*=\s*\{' % re.escape(name), text):
+            stats['VTM1-INIT'] += 1; continue           # a table defined with a positional initializer: data, not a model
+        K = 0
+        owner = next((n for n in names if n in name), None)
+        if owner:
+            row = _classlayout_row(path, owner)
+            if row and (row[0] != 'minus-one' or row[1] < 0): stats['VTM1-KEEP'] += 1; continue
+            if row: K = row[1]
+        if K >= len(mem) - 1: continue
+        at = m.start(2) + mem[K][0]
+        edits.append(at)
+        stats['VTM1'] += 1
+    if not edits: return text
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + ' FNVNX_VTM1_PAD /* fnv-nx VTM1 */' + text[at:]
+    if 'fnvnx_vtm.h' not in text:
+        text = '#include "fnvnx_vtm.h" /* fnv-nx VTM1 */\n' + text
+    return text
+
+RULES.insert(RULES.index(r_vfptr_pad) + 1, r_vtable_model_pad)
+
+
 def r_raw_vtable_slots(path, text, stats):
     """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above); RAWVT1-MEM: the same on the vptr
     modelled as a data member."""
