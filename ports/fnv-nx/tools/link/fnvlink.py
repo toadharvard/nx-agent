@@ -2489,6 +2489,29 @@ def emit_gdel_stub(name, d0, d1):
                       '    .text']) + '\n'
 
 
+def rewrite_refs(path, by_src, addr_of):
+    """exe_slot_fill's refs.tsv rewrite: the rows (vslot-unresolved, extern-text, import) of the symbols a unit's slot
+    fill bound become `vslot-exe` with the target and the exe address. by_src: {source: {symbol: target}};
+    addr_of: {(source, symbol): exe address}. refs.tsv names a synthesized vtable / body object by its own source
+    (`<unit>#vtables`, `<unit>#bodies<n>`), so its rows are matched under that name, never under its host unit's (the
+    compiled object's). Returns (rows rewritten, of them not vslot-unresolved)."""
+    rows = {s_: {un_: (t_, addr_of[(s_, un_)]) for un_, t_ in m.items()} for s_, m in by_src.items()}
+    n = nx = 0
+    with open(path, encoding='utf-8', errors='surrogateescape') as fi, \
+            open(path + '.tmp', 'w', encoding='utf-8', errors='surrogateescape') as fo:
+        for line in fi:
+            f = line.split('\t')
+            if len(f) >= 7 and f[2] in ('vslot-unresolved', 'extern-text', 'import') and f[1] in rows.get(f[0], {}):
+                t, a_ = rows[f[0]][f[1]]
+                nx += f[2] != 'vslot-unresolved'
+                f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', '%08x' % a_, t
+                line = '\t'.join(f)
+                n += 1
+            fo.write(line)
+    os.replace(path + '.tmp', path)
+    return n, nx
+
+
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
                   stubs=None, overrides=None, exe_path=None, providers=None, also=None, unbound=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
@@ -2762,24 +2785,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             for old, new in sorted(per_obj[u.source].items()):
                 f.write('%s %s\n' % (old, new))
     if by_src:
-        src_of = {u.source: (u.host or u.source) for u in changed}
-        hosts = collections.defaultdict(dict)
-        for s_, m in by_src.items():
-            hosts[src_of[s_]].update({un_: (t_, addr_of[(s_, un_)]) for un_, t_ in m.items()})
-        path = os.path.join(out, 'refs.tsv')
-        with open(path, encoding='utf-8', errors='surrogateescape') as fi, \
-                open(path + '.tmp', 'w', encoding='utf-8', errors='surrogateescape') as fo:
-            for line in fi:
-                f = line.split('\t')
-                if len(f) >= 7 and f[2] in ('vslot-unresolved', 'extern-text', 'import') and \
-                        f[1] in hosts.get(f[0], {}):
-                    t, a_ = hosts[f[0]][f[1]]
-                    bound_refs_x += f[2] != 'vslot-unresolved'
-                    f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', '%08x' % a_, t
-                    line = '\t'.join(f)
-                    bound_refs += 1
-                fo.write(line)
-        os.replace(path + '.tmp', path)
+        bound_refs, bound_refs_x = rewrite_refs(os.path.join(out, 'refs.tsv'), by_src, addr_of)
     used = {t for m in per_obj.values() for t in m.values()}
     for t in [t for t in traps if t not in used]:
         del traps[t]
