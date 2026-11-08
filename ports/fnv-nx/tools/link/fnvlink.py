@@ -2623,15 +2623,16 @@ def load_vtbind(top=None, path=None):
     if path and os.path.isfile(path):
         files = [path]
     elif top and os.path.isdir(top):
-        files = sorted(os.path.join(dp, 'bind.tsv') for dp, _, fs in os.walk(top) if 'bind.tsv' in fs)
+        files = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(top) for f in fs if f in ('bind.tsv', 'bindings.tsv'))
     out = {}
     for f in files:
         try:
             lines = open(f).read().split('\n')
         except OSError:
             continue
-        if not lines or not lines[0].startswith('# fnvnx-vtbind/1'):
+        if not lines or not lines[0].startswith(('# fnvnx-vtbind/1', '# fnvnx-vtgate-r4-bindings/1')):
             continue
+        r4 = lines[0].startswith('# fnvnx-vtgate-r4-bindings/1')   # exe_addr, native_symbol, kind, target, n
         for line in lines[1:]:
             if not line or line.startswith('#'):
                 continue
@@ -2639,7 +2640,10 @@ def load_vtbind(top=None, path=None):
             if len(p) < 5:
                 continue
             try:
-                out[int(p[0], 16)] = (p[1], p[2], p[3], int(p[4] or 0))
+                if r4:
+                    out[int(p[0], 16)] = (p[2], p[1], p[3], int(p[4] or 0))
+                else:
+                    out[int(p[0], 16)] = (p[1], p[2], p[3], int(p[4] or 0))
             except ValueError:
                 continue
     return out
@@ -3858,7 +3862,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     st['vtfill-skipped-strong'] += 1
                 else:
                     import classlayout as _cl
-                    expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), slots)
+                    vv_ = max(vs, key=lambda v: len(exev[v].slots))
+                    sl_ = _cl.real_slots(exe_path, vv_, slots) if exe_path else slots   # no words past the table
+                    expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), sl_)
                     fill, i_, pair_ = [], 0, None
                     cur = names[2:2 + n]
                     while i_ < len(expv):
@@ -3877,6 +3883,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                         t_ = exe_slot_target(x_, native, providers, exe_path, bridges, traps, st, (z, 2 + i_))
                         if t_.startswith('__fnvnx_vtrap_') and x_ in vtbind:
                             kb_, sb_, tb_, nb_ = vtbind[x_]
+                            kb_ = {'function': 'fn', 'adjthunk': 'adj', 'deldtor': 'fn'}.get(kb_, kb_)   # R4's two files
                             if kb_ == 'adj' and tb_:
                                 t_ = ADJ_SYM % x_
                                 bridges.setdefault(t_, emit_adj_stub(t_, tb_, nb_))

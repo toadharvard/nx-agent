@@ -289,6 +289,35 @@ def _asciiish(a):
     return sum(32 <= x < 127 for x in b) >= 2 and all(x == 0 or 32 <= x < 127 for x in b)
 
 
+_RELOCS = {}
+
+
+def exe_relocs(exe):
+    """The exe's base-relocation targets (VAs whose word the loader relocates): a vftable slot always has one."""
+    if exe not in _RELOCS:
+        try:
+            import fnvnx_pe
+            pe = exevft._text(exe)[0]
+            img = fnvnx_pe.Image(pe)
+            img.load_relocs()
+            _RELOCS[exe] = set(img.relocs)
+        except Exception:
+            _RELOCS[exe] = None
+    return _RELOCS[exe]
+
+
+def real_slots(exe, va, slots):
+    """The exe slots of the vftable at va up to the first word without a base relocation (R4: 010cb798's word 4 =
+    0x00500000 is data past the table's end, not ASCII); all slots when the relocations cannot be read."""
+    rel = exe_relocs(exe) if exe else None
+    if not rel:
+        return slots
+    for i in range(len(slots)):
+        if va + 4 * i not in rel:
+            return slots[:i]
+    return slots
+
+
 def exe_len(slots, known):
     """The exe slots up to the table's real end: the scan runs to the next COL pointer, so a table followed by
     strings reads them as .text words (R2 / R4: 00700074, 00504942 'tp', 'IBP'). Stop at the first word that is no
@@ -351,7 +380,7 @@ def gate(link, exe, layout, exev):
             st['ungated-unreadable'] += 1
             continue
         st['gated'] += 1
-        sl_ = exe_len(exev[va].slots, known)
+        sl_ = exe_len(real_slots(exe, va, exev[va].slots), known)
         if len(sl_) < len(exev[va].slots):
             st['exe-slots-past-end'] += len(exev[va].slots) - len(sl_)
         exp = expected(row, sl_)
