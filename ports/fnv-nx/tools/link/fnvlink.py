@@ -638,6 +638,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     pair_classes = collections.Counter()
     extern_text = collections.defaultdict(set)
     per_obj = {}
+    unbound = collections.defaultdict(set)   # source -> names left undefined (extern-text, import without a symbol)
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
     text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
@@ -1183,6 +1184,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     traps[target] = (un, vtables.slot_of(u.obj, un))
             if target and target != un:
                 renames[un] = target
+            if cls in ('extern-text', 'import') and not target:
+                unbound[u.source].add(un)
             byclass[cls] += 1
             refs_out.write('%s\t%s\t%s\t%s\t%s\t%s\t%s\n' % (u.source, un, cls, tier or '', '%08x' % addr if addr
                            is not None else '', target or '', note or ''))
@@ -1469,7 +1472,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs)
+                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
@@ -2328,7 +2331,7 @@ def emit_gdel_stub(name, d0, d1):
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
-                  stubs=None, overrides=None, exe_path=None, providers=None, also=None):
+                  stubs=None, overrides=None, exe_path=None, providers=None, also=None, unbound=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -2342,6 +2345,10 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     Rewrites the objects' .redefine files and refs.tsv rows it changes, drops trap stubs no object uses any more, and
     writes slot_fill.tsv (one row per (object, symbol)) and slot_gaps.tsv (trap slots left, with the reason).
     also: {(group, address point): {exe vftable}} the native vtable stands for besides vmap (ctor_store_pairs).
+    unbound: {source: names} the unit leaves undefined without a trap (extern-text addresses nothing defines,
+    imports no symbol answers): when such a name is a slot of a vtable of the object whose exe vftable holds a
+    function at that slot (a `_purecall` entry is S4's provider), it is bound like a trap slot (BaseFormComponent's
+    four pure virtuals, whose units.json addresses lie inside other functions). Not in any vtable: left as it was.
     Returns the counts."""
     st = collections.Counter()
     zmap = collections.defaultdict(set)   # (native vtable group, address point) -> exe vftable addresses
@@ -2494,7 +2501,8 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     for u in have:
         ren = per_obj.get(u.source) or {}
         tr = {un for un, t in ren.items() if t in trap_set}
-        if not tr:
+        xt = {un for un in (unbound or {}).get(u.source, ()) if un not in ren and un.startswith('_ZN')}
+        if not tr and not xt:
             continue
         o = vtables.Obj(u.obj)
         uses = collections.defaultdict(list)   # un -> [(z, p, k, j, {exe addresses})]
@@ -2514,12 +2522,12 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     pd = base_dtor_pos(vs, len(se))
                     d = pd
                 for k, e in enumerate(se):
-                    if e.sym in tr:
+                    if e.sym in tr or e.sym in xt:
                         j = exevft.exe_slot_index(k, d)
                         pv = ('D1' if k == pd else 'D0' if k == pd + 1 else None) if pd is not None else None
                         uses[e.sym].append((z, p, k, j, {exev[v].slots[j] for v in vs if j < len(exev[v].slots)},
                                             bool(vs), pv))
-        for un in sorted(tr):
+        for un in sorted(tr | {x for x in xt if x in uses}):
             us = uses.get(un, [])
             st['symbols'] += 1
             addrs = set().union(*(x[4] for x in us)) if us else set()
@@ -2579,12 +2587,14 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 us = left
                 if not us:
                     continue
+            if un in xt and un not in tr:   # not a trap slot: it was undefined before, it stays so (D23's list)
+                continue
             st['left_' + why.split(' (')[0].replace(' ', '_').replace(':', '').replace('\'', '')] += 1
             for x in us or [(None, 0, -1, -1, set(), False, None)]:
                 gaps.append((os.path.basename(u.obj), u.source, un, x[0] or '', str(x[2]), str(x[3]),
                              ' '.join('%08x' % b for b in sorted(x[4])), why))
     # apply the renames: the .redefine files and refs.tsv rows of the objects that changed
-    bound_refs = 0
+    bound_refs = bound_refs_x = 0
     by_src = {u.source: m for u, m in changed.items()}
     for u, m in changed.items():
         per_obj[u.source].update(m)
@@ -2602,8 +2612,10 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                 open(path + '.tmp', 'w', encoding='utf-8', errors='surrogateescape') as fo:
             for line in fi:
                 f = line.split('\t')
-                if len(f) >= 7 and f[2] == 'vslot-unresolved' and f[1] in hosts.get(f[0], {}):
+                if len(f) >= 7 and f[2] in ('vslot-unresolved', 'extern-text', 'import') and \
+                        f[1] in hosts.get(f[0], {}):
                     t, a_ = hosts[f[0]][f[1]]
+                    bound_refs_x += f[2] != 'vslot-unresolved'
                     f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', '%08x' % a_, t
                     line = '\t'.join(f)
                     bound_refs += 1
@@ -2613,7 +2625,8 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     for t in [t for t in traps if t not in used]:
         del traps[t]
         st['trap_stubs_dropped'] += 1
-    st['bound_refs'] = bound_refs
+    st['bound_refs'] = bound_refs - bound_refs_x
+    st['bound_refs_extern_text'] = bound_refs_x
     with open(os.path.join(out, 'slot_fill.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#object\tunit\tslot symbol\texe address\ttarget\tchosen by\tabi\tuses (vtable+address point:slot)\n')
         for r in rows:
