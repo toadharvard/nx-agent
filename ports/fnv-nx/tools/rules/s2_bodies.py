@@ -1241,6 +1241,13 @@ THIS2_SITES = {
     0x00e14b30: 0x00e230f0, 0x00bc31f0: 0x00a576c0, 0x00bc3450: 0x00a576c0, 0x00bc3700: 0x00a576c0,
     0x00e5c5b0: 0x00e5c540, 0x00e5c5d0: 0x00e5c540, 0x00e5c5f0: 0x00e5c540, 0x00e5c610: 0x00e5c540,
     0x00e5c630: 0x00e5c540, 0x00e5c650: 0x00e5c540, 0x00e5c670: 0x00e5c540, 0x00e5c690: 0x00e5c540,
+    # W12 (EQ fuzz 0540aff0d154, this-not-passed rows missing from the first scan): a re-scan of the exe for every
+    # direct call of a callee the link references both as a free `__stdcall` and as a thiscall member, from a caller
+    # whose unit makes the free reference, with ecx untouched and no call or branch between the caller's entry and
+    # that call, and the caller calling it once (capstone: no instruction before the call writes ecx).
+    0x00c2a960: 0x00c32f60, 0x00a3ed90: 0x00aa0ac0, 0x00a40360: 0x00aa0ab0, 0x00a87520: 0x00a71d10,
+    0x00b70270: 0x00c9a420, 0x00c8c3d0: 0x00c84ec0, 0x00cb9d80: 0x00a89af0, 0x00cc1610: 0x00a89af0,
+    0x00cd2f10: 0x00c84ec0, 0x00e07c50: 0x00e06b20, 0x00e07ca0: 0x00e06b20,
 }
 THIS2_NOTE = '/* fnv-nx THIS2: the caller passes its ecx */ '
 

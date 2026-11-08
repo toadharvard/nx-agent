@@ -807,7 +807,14 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
 **Metric** (`vtmetric.py <link dir> <exe>`, read-only on a published link or a build's link stage): over the V rows,
 trap slots split by whether the address map has a native at the exe slot's address, primary vftables whose native
 vtable is shorter than the exe's (the destructor pair counted once), and mispairings (the native class is another
-RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+RTTI class of the exe). S2d-vslot adds `slot-mismatch` (native slot k + 1 against exe slot k by address through the
+map, exe slots 0 and 1 and unplaced slots not compared; `--rows` lists them) and `unpaired-<primary|secondary>-<why>`
+(exe vftables with RTTI that no V row stands for, by the class's row in vtables/classes.tsv). A vtable-slot name that
+resolve bound only through another unit's reference to the same name (gref / gdef tier: units.json puts the call of
+a *different* function there, TESForm::IsQuestItem at 0x0046f070 where the exe's TESForm slot 37 is 0x00401190) is a
+hint: when no code of the object calls the name, exe_slot_fill replaces the address with the exe vftable's function
+at the slot (`hint_rebound`; slot_fill.tsv row `exe vftable over the name's address`) and keeps it where the exe has
+none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
 `test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
 
 ## Platform, imports, thread-locals and hand-written vptrs

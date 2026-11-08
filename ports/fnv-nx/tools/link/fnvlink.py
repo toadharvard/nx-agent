@@ -675,6 +675,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     exe_slots = exevft.slot_index(exevft.load(exe_path_, os.path.join(out, 'cache', 'exe_vftables.json'))) \
         if exe_path_ else {}
     unbound = collections.defaultdict(set)   # source -> names left undefined (extern-text, import without a symbol)
+    hints = collections.defaultdict(dict)    # source -> {vtable slot name: address} another unit's reference gave it
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
     text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
@@ -1250,6 +1251,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 target = TRAP_SYM % int(hashlib.sha1(un.encode('utf-8', 'surrogateescape')).hexdigest()[:8], 16)
                 if target not in traps:
                     traps[target] = (un, vtables.slot_of(u.obj, un))
+            if cls == 'code' and addr is not None and un in vslots and (tier or '').startswith(('gref/', 'gdef/')) \
+                    and un not in called_syms(u):
+                # S2d-vslot: only a vtable of this object names the symbol, and the address is another unit's idea of
+                # the name (units.json lists the call there, perhaps of a different class's function the decomp
+                # called by this name: TESForm::IsQuestItem is 0x0046f070 in hudmainmenu.cpp, the exe's TESForm slot 37
+                # holds 0x00401190). The exe vftable decides in exe_slot_fill; the name stays where it has none.
+                hints[u.source][un] = addr
             if target and target != un:
                 renames[un] = target
             if cls in ('extern-text', 'import') and not target:
@@ -1553,7 +1561,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound)
+                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound, hints)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
@@ -2659,19 +2667,21 @@ def emit_gdel_stub(name, d0, d1):
                       '    .text']) + '\n'
 
 
-def rewrite_refs(path, by_src, addr_of):
+def rewrite_refs(path, by_src, addr_of, rebound=()):
     """exe_slot_fill's refs.tsv rewrite: the rows (vslot-unresolved, extern-text, import) of the symbols a unit's slot
     fill bound become `vslot-exe` with the target and the exe address. by_src: {source: {symbol: target}};
     addr_of: {(source, symbol): exe address}. refs.tsv names a synthesized vtable / body object by its own source
     (`<unit>#vtables`, `<unit>#bodies<n>`), so its rows are matched under that name, never under its host unit's (the
-    compiled object's). Returns (rows rewritten, of them not vslot-unresolved)."""
+    compiled object's). rebound: {(source, symbol)} whose `code` rows (a name another unit's reference bound,
+    exe_slot_fill's hints) are rewritten too. Returns (rows rewritten, of them not vslot-unresolved)."""
     rows = {s_: {un_: (t_, addr_of[(s_, un_)]) for un_, t_ in m.items()} for s_, m in by_src.items()}
     n = nx = 0
     with open(path, encoding='utf-8', errors='surrogateescape') as fi, \
             open(path + '.tmp', 'w', encoding='utf-8', errors='surrogateescape') as fo:
         for line in fi:
             f = line.split('\t')
-            if len(f) >= 7 and f[2] in ('vslot-unresolved', 'extern-text', 'import') and f[1] in rows.get(f[0], {}):
+            if len(f) >= 7 and (f[2] in ('vslot-unresolved', 'extern-text', 'import') or
+                                (f[2] == 'code' and (f[0], f[1]) in rebound)) and f[1] in rows.get(f[0], {}):
                 t, a_ = rows[f[0]][f[1]]
                 nx += f[2] != 'vslot-unresolved'
                 f[2], f[3], f[4], f[5] = 'vslot-exe', 'exe-slot', '%08x' % a_, t
@@ -2683,7 +2693,7 @@ def rewrite_refs(path, by_src, addr_of):
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
-                  stubs=None, overrides=None, exe_path=None, providers=None, also=None, unbound=None):
+                  stubs=None, overrides=None, exe_path=None, providers=None, also=None, unbound=None, hints=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -2701,6 +2711,10 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     imports no symbol answers): when such a name is a slot of a vtable of the object whose exe vftable holds a
     function at that slot (a `_purecall` entry is S4's provider), it is bound like a trap slot (BaseFormComponent's
     four pure virtuals, whose units.json addresses lie inside other functions). Not in any vtable: left as it was.
+    hints: {source: {name: address}} (S2d-vslot) vtable-slot names that resolve bound by another unit's reference to
+    the same name (gref / gdef tier) and that no code of the object calls: the exe vftable's function at the slot
+    replaces the address when the two differ and the fill can bind it (`hint_rebound`); where the exe has none, the
+    vtables of the object disagree or the exe's function cannot be bound, the name keeps its address (`hint_kept_*`).
     Returns the counts."""
     st = collections.Counter()
     zmap = collections.defaultdict(set)   # (native vtable group, address point) -> exe vftable addresses
@@ -2750,6 +2764,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             got.add(exevft.dtor_pos([x.sym for x in sb], [x.word for x in sb]))
         return got.pop() if len(got) == 1 else None
     rows, gaps, changed = [], [], {}
+    rebound = set()   # (source, symbol) of the hints the exe vftable overrode
     addr_of = {}   # (source, symbol) -> the exe address it was bound to (refs.tsv)
     stubs = {} if stubs is None else stubs   # flag / deleting-destructor stubs -> their asm (bridges.S)
     itanium = slotfill2.enum_params(itanium, slotfill2.msvc_enums(out), st)   # S2c-vt2
@@ -2854,7 +2869,9 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
         ren = per_obj.get(u.source) or {}
         tr = {un for un, t in ren.items() if t in trap_set}
         xt = {un for un in (unbound or {}).get(u.source, ()) if un not in ren and un.startswith('_ZN')}
-        if not tr and not xt:
+        hs = (hints or {}).get(u.source, {})
+        hn = {un for un in hs if str(ren.get(un, '')).startswith('__fnv_')} - tr
+        if not tr and not xt and not hn:
             continue
         o = vtables.Obj(u.obj)
         uses = collections.defaultdict(list)   # un -> [(z, p, k, j, {exe addresses})]
@@ -2874,12 +2891,12 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     pd = base_dtor_pos(vs, len(se))
                     d = pd
                 for k, e in enumerate(se):
-                    if e.sym in tr or e.sym in xt:
+                    if e.sym in tr or e.sym in xt or e.sym in hn:
                         j = exevft.exe_slot_index(k, d)
                         pv = ('D1' if k == pd else 'D0' if k == pd + 1 else None) if pd is not None else None
                         uses[e.sym].append((z, p, k, j, {exev[v].slots[j] for v in vs if j < len(exev[v].slots)},
                                             bool(vs), pv))
-        for un in sorted(tr | {x for x in xt if x in uses}):
+        for un in sorted(tr | {x for x in xt | hn if x in uses}):
             us = uses.get(un, [])
             st['symbols'] += 1
             addrs = set().union(*(x[4] for x in us)) if us else set()
@@ -2900,6 +2917,26 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     why = 'vtables disagree (%s)' % ' '.join('%08x' % a for a in sorted(addrs))
             pvs = {x[6] for x in us}
             uvar = pvs.pop() if len(pvs) == 1 else None
+            if un in hn:
+                st['hint_symbols'] += 1
+                a = next(iter(addrs)) if how else None
+                if a is None:
+                    st['hint_kept_' + why.split(' (')[0].replace(' ', '_').replace('\'', '')] += 1
+                    continue
+                if a == hs[un]:
+                    st['hint_agrees'] += 1
+                    continue
+                tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]], 0, uvar)
+                if not tgt:
+                    st['hint_kept_exe_function_not_bindable'] += 1
+                    continue
+                changed.setdefault(u, {})[un] = tgt
+                addr_of[(u.source, un)] = a
+                rebound.add((u.source, un))
+                st['hint_rebound'] += 1
+                rows.append((os.path.basename(u.obj), u.source, un, '%08x' % a, tgt, 'exe vftable over the name\'s address '
+                             '%08x' % hs[un], why, ' '.join('%s+%d:%d' % (x[0], x[1], x[2]) for x in us)))
+                continue
             if how:
                 a = next(iter(addrs))
                 tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]], 0, uvar)
@@ -2955,7 +2992,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             for old, new in sorted(per_obj[u.source].items()):
                 f.write('%s %s\n' % (old, new))
     if by_src:
-        bound_refs, bound_refs_x = rewrite_refs(os.path.join(out, 'refs.tsv'), by_src, addr_of)
+        bound_refs, bound_refs_x = rewrite_refs(os.path.join(out, 'refs.tsv'), by_src, addr_of, rebound)
     used = {t for m in per_obj.values() for t in m.values()}
     for t in [t for t in traps if t not in used]:
         del traps[t]
