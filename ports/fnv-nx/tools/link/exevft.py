@@ -518,3 +518,135 @@ def ctor_member_vftables(path, addr, vftables):
         if 0 < d < MEMBER_MAX and base not in ('esp', 'ebp') and v in vftables:
             got[d] = v
     return got
+
+
+# ---- MSVC vftable getters (Havok class registry): `...; mov dword ptr [esp+k], <V>; call <base ctor>; mov eax, [esp]; ret`
+
+GETTER_MAX = 40   # instructions read from the entry to the first ret
+
+
+_GETTER_CALLEE = {}
+
+
+def _getter_in(code, base, vftables, callee=None):
+    """The vftable a getter returns, from the x86 bytes `code` at address `base`: V, or None. Walks the instructions
+    to the first `ret` (at most GETTER_MAX; any branch or jump gives up) tracking esp as a displacement from the
+    function's frame base: push -4, pop +4, sub/add esp imm, `and esp, imm` (a new base: the words so far are
+    forgotten), a `call rel32` (the callee pops what was pushed since the previous call or the start: thiscall /
+    stdcall), `mov dword ptr [esp+k], imm32` (records the word at cur+k), `mov eax, dword ptr [esp+k]` /
+    `mov eax, imm32` / `xor eax, eax` (the result). At the ret the result is returned if it is in vftables.
+    callee(target) -> (bytes the callee pops or None, whether it preserves eax) or None: the callee's own `ret n`
+    (a saved register pushed before the arguments is not an argument: 0x00dfd800's `push esi`) and the CRT's
+    __security_check_cookie, which keeps eax (0x00d2c8a0's EH-frame getter)."""
+    try:
+        import capstone
+        from capstone import x86 as cx
+    except ImportError:
+        return None
+    if 'md' not in _CS:
+        _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        _CS['md'].detail = True
+    md = _CS['md']
+    reg = md.reg_name
+    cur, pushed, words, eax, esp_ok = 0, 0, {}, None, True
+    n = 0
+    for ins in md.disasm(code, base):
+        n += 1
+        if n > GETTER_MAX:
+            return None
+        mn, ops = ins.mnemonic, ins.operands
+        if mn in ('ret', 'retn'):
+            return eax if eax in vftables else None
+        if mn != 'call' and (ins.group(cx.X86_GRP_JUMP) or ins.group(cx.X86_GRP_BRANCH_RELATIVE)):
+            return None
+        if mn == 'call':
+            if not (ops and ops[0].type == cx.X86_OP_IMM):
+                return None
+            info = callee(ops[0].imm & 0xffffffff) if callee else None
+            pops = info[0] if info and info[0] is not None else 4 * pushed
+            cur += pops
+            pushed = max(0, pushed - pops // 4)
+            if not (info and info[1]):
+                eax = None   # eax is the callee's result
+        elif mn == 'push':
+            cur -= 4
+            pushed += 1
+            if ops[0].type == cx.X86_OP_IMM:
+                words[cur] = ops[0].imm & 0xffffffff
+            elif ops[0].type == cx.X86_OP_REG and reg(ops[0].reg) == 'eax' and eax is not None:
+                words[cur] = eax
+            else:
+                words.pop(cur, None)
+        elif mn == 'pop':
+            if ops[0].type == cx.X86_OP_REG and reg(ops[0].reg) == 'eax':
+                eax = words.get(cur)
+            cur += 4
+            pushed = max(0, pushed - 1)
+        elif mn in ('sub', 'add', 'and') and ops[0].type == cx.X86_OP_REG and reg(ops[0].reg) == 'esp':
+            if ops[1].type != cx.X86_OP_IMM:
+                return None
+            if mn == 'and':
+                cur, pushed, words, esp_ok = 0, 0, {}, True
+            elif mn == 'sub':
+                cur -= ops[1].imm
+            else:
+                cur += ops[1].imm
+        elif mn == 'mov' and ops[0].type == cx.X86_OP_REG and reg(ops[0].reg) == 'esp':
+            esp_ok = False   # mov esp, ebp (the epilogue): nothing after it is read through esp
+        elif mn == 'mov' and ops[0].type == cx.X86_OP_MEM and ops[0].mem.base and reg(ops[0].mem.base) == 'esp' \
+                and not ops[0].mem.index and ops[0].size == 4:
+            if not esp_ok:
+                return None
+            k = cur + ops[0].mem.disp
+            if ops[1].type == cx.X86_OP_IMM:
+                words[k] = ops[1].imm & 0xffffffff
+            else:
+                words.pop(k, None)
+        elif mn == 'mov' and ops[0].type == cx.X86_OP_REG and reg(ops[0].reg) == 'eax':
+            if ops[1].type == cx.X86_OP_IMM:
+                eax = ops[1].imm & 0xffffffff
+            elif ops[1].type == cx.X86_OP_MEM and ops[1].mem.base and reg(ops[1].mem.base) == 'esp' and \
+                    not ops[1].mem.index and ops[1].size == 4 and esp_ok:
+                eax = words.get(cur + ops[1].mem.disp)
+            else:
+                eax = None
+        elif mn == 'xor' and len(ops) == 2 and ops[0].type == ops[1].type == cx.X86_OP_REG and \
+                ops[0].reg == ops[1].reg:
+            if reg(ops[0].reg) == 'eax':
+                eax = 0
+        elif ops and ops[0].type == cx.X86_OP_REG and reg(ops[0].reg) in ('eax', 'ax', 'al', 'ah') and \
+                mn not in ('cmp', 'test'):
+            eax = None   # any other write to eax
+    return None
+
+
+def vtable_getter(path, addr, vftables):
+    """The image vftable V the x86 function at addr returns (an MSVC vftable getter: it builds a local object with
+    the base constructor and hands back the vftable it stored in it), or None. See _getter_in."""
+    pe, data = _text(path)
+    off, n = None, 256
+    while off is None and n >= 16:
+        try:
+            off = pe.rva_to_off(addr - pe.image_base, n)
+        except Exception:
+            off = None
+        if off is None:
+            n //= 2
+    if off is None:
+        return None
+
+    def callee(t):
+        if t not in _GETTER_CALLEE:
+            info = None
+            try:
+                o = pe.rva_to_off(t - pe.image_base, 128)
+            except Exception:
+                o = None
+            if o is not None:
+                b = data[o:o + 128]
+                r = _first_ret(b, t)
+                # __security_check_cookie: `cmp ecx, [__security_cookie]; jne ...; rep ret` keeps eax
+                info = (r[1] if r and r[1] is not None else None, b[:2] == b'\x3b\x0d')
+            _GETTER_CALLEE[t] = info
+        return _GETTER_CALLEE[t]
+    return _getter_in(data[off:off + n], addr, vftables, callee)
