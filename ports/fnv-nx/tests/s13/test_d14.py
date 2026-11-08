@@ -160,7 +160,9 @@ def test_keys():
         os.makedirs(os.path.join(d, 'div'))
         rows = {'00401000': dict(address='00401000', status='ok', key='k1'),
                 '00401100': dict(address='00401100', status='ok', key='k2', changes=[c.tag for c in fnkeys.CHANGES]),
-                '00401200': dict(address='00401200', status='ok', key='k3')}
+                # (d27-eqbase rechecks every hard record a row has not seen it for: this one has, so only the
+                # d14-vslot recheck of 00401000 is under test)
+                '00401200': dict(address='00401200', status='ok', key='k3', changes=['d27-eqbase'])}
         fuzzcache.save_rows(d, rows)
         for a in rows:
             json.dump(dict(divergence=dict(kind='error', x86=None, arm='exc:7@0a045d54')),

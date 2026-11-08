@@ -126,6 +126,43 @@ def main():
         check(exevft.deleting_dtor(pe_, 0x401000), 'FNVNX_DELDTOR_STRICT=0: the old byte search (the false positive)')
     finally:
         del os.environ['FNVNX_DELDTOR_STRICT']
+    # R2: the Havok ??_G frees through its router; the destroy call before the flags test is still the D1's body
+    def rel(src, dst):
+        return (dst - (src + 5) & 0xffffffff).to_bytes(4, 'little')
+    G, X, R = 0x401100, 0x401000, 0x401080
+    hk = (b'\x56\x8b\xf1\xe8' + rel(G + 3, X) + b'\xf6\x44\x24\x08\x01\x74\x0a\xe8' + rel(G + 15, R) +
+          b'\x8b\x10\x56\xff\x52\x08\x8b\xc6\x5e\xc2\x04\x00')
+    pe2 = os.path.join(_tf.mkdtemp(), 'h.exe')
+    tx.make_pe(pe2, lambda rd: None, {X: b'\xc3', R: b'\xc3', G: hk})
+    check(exevft.deleting_dtor(pe2, G) and exevft.deleting_dtor_callee(pe2, G) is None and
+          exevft.deleting_dtor_destroy(pe2, G) == X, 'deleting_dtor_destroy: call ~X; test; router free -> X')
+    check(exevft.deleting_dtor_destroy(pe2, X) is None, 'deleting_dtor_destroy: not a ??_G -> None')
+    import collections as _c
+    import elfsyms
+    d0 = elfsyms.Sym('_ZN1HD0Ev', 0, 0, 'func', 'global', 1, '.text', False)
+    xd = elfsyms.Sym('_ZN1H7DestroyEv', 0, 0, 'func', 'global', 1, '.text', False)
+    nat2 = {G: dict(unit='h.cpp', sym=d0, variants={'D0': d0}, tier='def', msvc=None),
+            X: dict(unit='h.cpp', sym=xd, variants={}, tier='def', msvc=None)}
+    st2 = _c.Counter()
+    pair = fnvlink.vmo_dtor_slots(G, nat2, lambda n_: None, {}, {}, st2, ('_ZTV1H', 2), pe2)
+    check(pair == ('__fnv_00401000', '__fnv_00401100') and st2['slot0-d0-destroy'] == 1,
+          'vmo_dtor_slots: a native D0 alone pairs with the ??_G\'s destroy body as D1: %s' % (pair,))
+    os.environ['FNVNX_D0DESTROY'] = '0'
+    try:
+        check(fnvlink.vmo_dtor_slots(G, nat2, lambda n_: None, {}, {}, _c.Counter(), ('_ZTV1H', 2), pe2) is None,
+              'FNVNX_D0DESTROY=0: as before (no pair)')
+    finally:
+        del os.environ['FNVNX_D0DESTROY']
+    # D22-USED counts a placeholder slot code calls by name, never a real destructor (link 0e8b2eb8's HighProcess shell)
+    NP = fnvlink.named_placeholder
+    called = {'_ZN12FUN_008d98e0D1Ev', '_ZN3Foo3v00Ev'}
+    check(not NP('_ZN12FUN_008d98e0D1Ev', called) and NP('_ZN3Foo3v00Ev', called) and not NP('_ZN3Foo3v00Ev', set())
+          and not NP(None, called), 'named_placeholder: a called D1 is no placeholder; a called v00 is')
+    os.environ['FNVNX_D22DTOR'] = '0'
+    try:
+        check(NP('_ZN12FUN_008d98e0D1Ev', called), 'FNVNX_D22DTOR=0: a called D1 counts as before')
+    finally:
+        del os.environ['FNVNX_D22DTOR']
     # hand_ambiguous_names: a stand-in name whose stores write several image vftables does not pick a native vtable
     V = exevft.Vft
     hand = {0x10a1458: [('u1.cpp', 'StandIn', 0x401000, 0)], 0x1070660: [('u2.cpp', 'StandIn', 0x402000, 0)],

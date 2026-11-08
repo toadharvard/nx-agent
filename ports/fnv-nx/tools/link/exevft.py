@@ -360,6 +360,42 @@ def deleting_dtor_callee(path, addr):
     return calls[0][0]
 
 
+def deleting_dtor_destroy(path, addr):
+    """The destroy body of a deleting destructor whatever its free looks like (R2, 2026-11-08: the Havok ??_G at
+    0x00d68740 is `call ~X 0x00d68350; test flags; ...; call router; call [vtbl+8]` - deleting_dtor_callee wants a plain
+    `call operator delete` and gives None): when deleting_dtor(addr) holds and the code before the flags test makes
+    exactly one call, a direct one, that call's target X. A D1 never frees, so X alone is its body. -> X or None."""
+    if not deleting_dtor(path, addr):
+        return None
+    try:
+        import capstone
+        from capstone import x86 as cx
+    except ImportError:
+        return None
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    if 'md' not in _CS:
+        _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        _CS['md'].detail = True
+    calls = []
+    for ins in _CS['md'].disasm(data[off:off + 0x100], addr):
+        if ins.id in (cx.X86_INS_INT3, cx.X86_INS_RET):
+            return None
+        if ins.id == cx.X86_INS_CALL:
+            if ins.operands[0].type != cx.X86_OP_IMM:
+                return None
+            calls.append(ins.operands[0].imm & 0xffffffff)
+        elif ins.id == cx.X86_INS_TEST or (ins.id == cx.X86_INS_AND and ins.operands[-1].type == cx.X86_OP_IMM and
+                                           ins.operands[-1].imm == 1):
+            return calls[0] if len(calls) == 1 else None
+    return None
+
+
 _DELETE_THIS = re.compile(
     rb'(?:\x85\xc9[\x74\x75][\x01-\x7f])?\x8b\x01(?:\x8b\x10\x6a\x01\xff\xd2|\x6a\x01\xff\x10)(?:\xc3|\xc2\x00\x00)')
 
