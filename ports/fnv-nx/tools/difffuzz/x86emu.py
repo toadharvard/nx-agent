@@ -75,6 +75,10 @@ def x87_result_use(uc, retaddr, fret='int', depth=0):
         skip = 2
     elif b[0] in (0x59, 0x5b, 0x5d, 0x5e, 0x5f, 0xc9):     # pop ecx/ebx/ebp/esi/edi, leave
         skip = 1
+    elif b[0] in (0x50, 0x51, 0x52):    # push eax/ecx/edx: the float slot `push ecx; fstp dword [esp]` (difffuzz-20, r5)
+        skip = 1
+    elif b[:2] == b'\x83\xec':          # sub esp, imm8: the same slot reserved by `sub esp, 4; fstp [esp]`
+        skip = 3
     if skip:
         return x87_result_use(uc, retaddr + skip, fret, depth + 1)
     if b[0] in (0xc3, 0xc2):
@@ -509,6 +513,13 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_ESP, esp + 4)
             uc.reg_write(UC_X86_REG_EIP, retaddr)
             return
+        if retaddr in world.SKIP_RETS:
+            # (r5 design) a call the exe shows to be dead (world.SKIP_RETS): not made, not traced
+            info = self.callee_info(address)
+            pop = info[0] if info else (self.pop_override.get(retaddr) or 0)
+            uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
+            uc.reg_write(UC_X86_REG_EIP, retaddr)
+            return
         k = len(r.calls)
         if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
             self._fault = 'timeout'
@@ -558,8 +569,13 @@ class X86Engine:
                 n = next(off for l_, sp, off, sz in getattr(cv, 'x86_declared', cv.x86) if l_ == lab) // 4
                 if 2 + n < len(r.calls[-1].args):
                     eax = r.calls[-1].args[2 + n]
-        elif ck == 'ref':
+        elif ck == 'ref' or k in world.REF_CALLS:
             eax = world.ref_result(k)
+            if k in world.REF_CALLS:
+                # (r5 design) the object holds the canned bytes: what the oracle loads through the result is what
+                # the native receives in its result register (the unit declares it by value)
+                self._ensure(eax, 16)
+                uc.mem_write(eax, rb[:16])
         elif ck in ('bool', 'untyped'):
             eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)
         if cv is not None and cv.hidden and cv.ret is not None:
@@ -669,10 +685,8 @@ class X86Engine:
                 uc.emu_stop()
                 return
             v = world.u32(case.ret_bytes(k), 0)
-            # (R4 flow) an import has no declaration here, so the native's canned result is the untyped one (arm64emu
-            # _on_stub: the low byte is 0/1, a call site may test it as a bool). The same byte here: 0x00d45c50 read
-            # TlsGetValue's 0x030020f4 on the oracle and 0x03002000 natively, and stored through two stream pointers
-            v = (v & ~0xff) | (case.ret_bytes(k)[0] & 1)
+            # an import's canned result is the raw word on both machines (S1-rules d26-imp: arm64emu._on_stub does not
+            # normalise an import's low byte either; R4 flow had normalised both, 0x00d45c50)
             uc.reg_write(UC_X86_REG_EDX, world.u32(case.ret_bytes(k), 4))
             uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)

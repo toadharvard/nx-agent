@@ -268,6 +268,59 @@ def _one_block(rets, start, limit):
     return None
 
 
+# ------------------------------------------------------------- r5 design: a destructor that leaves the vptr to its base
+_DEFER = {}
+
+
+def dtor_defers_vptr(addr):
+    """(r5 design, dtor-base-vptr) True when the exe shows that the destructor at `addr` (or the destructor a scalar
+    deleting wrapper at `addr` calls first) never stores a vftable into its object itself and ends by calling a
+    function that does: the last direct call of the body is a base-class destructor whose first instructions store
+    an image vftable (RTTI-checked) at offset 0 of `this`. The final vptr of the object is that base's vftable on
+    the exe whatever the harness does to the call, so a machine that left the word alone (the call is intercepted
+    with a canned result) and one that stored an address point of its own agree only if that base destructor is
+    what sets it. False without the exe."""
+    if addr not in _DEFER:
+        try:
+            _DEFER[addr] = _defers(addr, 0)
+        except Exception:  # noqa: BLE001
+            _DEFER[addr] = False
+    return _DEFER[addr]
+
+
+def _vftable_store_at0(ins):
+    import capstone
+    ops = ins.operands
+    if ins.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == capstone.x86.X86_OP_MEM and ops[0].size == 4 and \
+            ops[0].mem.disp == 0 and ops[0].mem.index == 0 and ops[0].mem.base != 0 and \
+            ops[1].type == capstone.x86.X86_OP_IMM:
+        return vftable_class(ops[1].imm & 0xffffffff) is not None
+    return False
+
+
+def _defers(addr, depth):
+    import capstone
+    body = []
+    for n in _insns(addr, 90):
+        if n.mnemonic in ('ret', 'retn') or n.mnemonic == 'int3':
+            break
+        body.append(n)
+    if not body:
+        return False
+    calls = [n for n in body if n.mnemonic == 'call' and n.operands[0].type == capstone.x86.X86_OP_IMM]
+    if depth == 0 and deleting_wrapper(addr) and calls:
+        return _defers(calls[0].operands[0].imm, 1)           # the wrapper's first call is the destructor
+    if any(_vftable_store_at0(n) for n in body):
+        return False                                           # it stores a vftable itself
+    if not calls:
+        return False
+    base = calls[-1].operands[0].imm
+    # nothing is called after the base destructor but the epilogue, and its body begins by storing a vftable
+    after = body[body.index(calls[-1]) + 1:]
+    if any(n.mnemonic == 'call' for n in after):
+        return False
+    return any(_vftable_store_at0(n) for n in _insns(base, 24) if n.mnemonic not in ('ret', 'retn'))
+
 # ---------------------------------------------------------------- r5 order: one full expression, read from the exe
 #
 # arg_blocks above proves the narrow shape (results pushed or moved, the calls in a run). MSVC /Od also evaluates the
