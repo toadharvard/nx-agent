@@ -434,6 +434,8 @@ class Arm64Engine:
     def _on_private_read(self, uc, access, address, size, value, r):
         if any(na <= address < na + n for na, _, n in getattr(self, 'static_pairs', ())):
             return                      # a paired local static: compared at the oracle's address instead
+        if any(na <= address < na + n for na, n in getattr(self, 'static_nguards', ())):
+            return                      # its guard: both machines start at zero (difffuzz-20, static-guard)
         r.private_reads += 1
         if len(r.private_addrs) < 32:
             r.private_addrs.add(address)
