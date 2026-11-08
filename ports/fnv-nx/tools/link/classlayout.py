@@ -375,12 +375,40 @@ def gate(link, exe, layout, exev):
     return st, bad
 
 
+def native_of(link):
+    """{exe address: native symbol} from the addrmap's F / C / X / G rows (the Itanium name where it has one)."""
+    m = {}
+    for line in open(os.path.join(link, 'out', 'addrmap.tsv')):
+        p = line.rstrip('\n').split('\t')
+        if len(p) > 3 and p[1] in ('F', 'C', 'X', 'G'):
+            try:
+                m.setdefault(int(p[0], 16), p[3] or p[2])
+            except ValueError:
+                pass
+    return m
+
+
+def write_report(path, bad, link, boot=None):
+    """reports/vtgate/<link>.tsv (orchestrator 12:24): one row per disagreeing slot with the expected native name."""
+    nat = native_of(link)
+    with open(path, 'w') as f:
+        f.write('# fnvnx-vtgate/1\n# table\tclass\texe_vftable\tslot\texe_function\texpected_native\tactual\tkind\tboot\tsource\n')
+        for va, cls, kind_, j, sym, want, cause, z, src in bad:
+            wa = int(want, 16) if want else None
+            exp = ('D1/D0 of ' + (nat.get(wa) or '__fnv_%08x' % wa)) if wa is not None and kind_ == 'minus-one' and \
+                False else (nat.get(wa) or ('__fnv_%08x' % wa if wa is not None else ''))
+            f.write('\t'.join([z, cls, '%08x' % va, str(j), want or '', exp, sym, cause,
+                                '1' if (boot and wa in boot) else '0', src]) + '\n')
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('exe')
     ap.add_argument('-o', '--out', required=True, help='classlayout.tsv to write')
     ap.add_argument('--link', help='link root (out/, fixed/) for the gate')
     ap.add_argument('--gate', help='classgate.tsv to write (default: next to -o)')
+    ap.add_argument('--report', help='reports/vtgate/<link>.tsv to write (per-slot list with the expected native name)')
+    ap.add_argument('--boot', help='boot set: exe addresses, one `<addr> [name]` per line (S18 trace-coc called.txt)')
     a = ap.parse_args(argv)
     exev = exevft.scan(a.exe)
     rows = build(a.exe, exev)
@@ -401,6 +429,14 @@ def main(argv=None):
                     '\tnative_table\tsource\n')
             for r in bad:
                 f.write('%08x\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n' % r)
+        if a.report:
+            boot = set()
+            if a.boot:
+                for line in open(a.boot):
+                    t = line.split()
+                    if t and re.fullmatch(r'[0-9a-fA-F]{8}', t[0]):
+                        boot.add(int(t[0], 16))
+            write_report(a.report, bad, a.link, boot)
         print('classgate: tables %d, gated %d, ok %d, mismatch-tables %d, mismatch-slots %d' % (
             st['tables'], st['gated'], st['ok'], st['mismatch-tables'], st['mismatch-slots']))
         for k in sorted(st):
