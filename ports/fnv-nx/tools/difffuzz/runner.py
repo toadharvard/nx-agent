@@ -563,6 +563,22 @@ class Pair:
                     # call is not an inlined X: following X ran the exe's body (`xor eax, eax`) against the stub's
                     # canned result, and the native then dereferenced that result (00477560, 009abe40: null-read)
                     return rx, ra, d
+                if d.get('arm_vcall') == 'planted' and d.get('vcall') != 'planted':
+                    # (F2b, difffuzz-20) the native called planted slot k and the oracle's call went to a function it
+                    # runs as code (no call event): slot k+1 of the same vftable. Following it turned the native's
+                    # slot into an inlined callee (0x005c12a0, 0x007aecb0: `call [edx+0x34]` natively reaches the
+                    # exe's slot 12, the oracle's slot 13 ran 0x007ac4f0 for real)
+                    vs = self.vslots_run(case, rx, ra)
+                    if vs:
+                        d['vslot'] = vs
+                        return rx, ra, d
+                if d.get('arm_vcall') != 'planted' and d.get('vcall') != 'planted':
+                    vn = self.vslot_native(case, rx, ra, d)
+                    if vn:
+                        # (F2b) the native called slot j of its copy of a planted vftable, a function the exe's slot
+                        # does not hold: a different callee on the native's vtable, not an inlined one
+                        d['vslot_native'] = vn
+                        return rx, ra, d
                 if str(d.get('arm') or '').startswith('name:__s13_vtpad_'):
                     # the native called through a padding slot of a planted vftable's native vtable (vptr-unpaired):
                     # a virtual call, not an inlined X (F1b: once the follow ran past five loads, 0x005d6d10's
@@ -649,6 +665,40 @@ class Pair:
                 out.append(dict(vft='%08x' % v, x86=ix[:8], arm=ia[:8],
                                 shift=-1 if any(j == i - 1 for i in ix for j in ia) else None))
         return out
+
+    def vslot_native(self, case, rx, ra, d):
+        """A call-target whose native callee is no slot of the exe's planted vftables but sits in the native copy of
+        one (Target.vt_mem), at the slot where the exe's vftable holds a function the oracle called or ran as code:
+        the native vtable's slot calls another function than the exe's (D26 / vtables fix class; the exe slot is
+        j - 1 against an Itanium vtable with a second destructor slot, else j). Returns {vft, native_slot, exe_slot,
+        native, exe} or None."""
+        try:
+            ta = int(d['arm'], 16)
+        except (TypeError, ValueError, KeyError):
+            return None
+        t = self.target
+        pins = getattr(t, 'vt_pins', {}) or {}
+        ran = {c.target for c in rx.calls} | set(rx.blocks)
+        for v in sorted(set(case.vptrs.values())):
+            b = pins.get(v) or b''
+            slots = list(struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4]))
+            ap = (getattr(t, 'vt_ap', {}) or {}).get(v)
+            if not slots or ap is None or ta in slots:
+                continue
+            for base, m in (getattr(t, 'vt_mem', {}) or {}).items():
+                if not base <= ap < base + len(m):
+                    continue
+                words = struct.unpack('<%dI' % ((len(m) - (ap - base)) // 4), m[ap - base:])
+                orig = getattr(t, 'stub_orig', {}) or {}
+                for j, w in enumerate(words[:len(slots) + 2]):
+                    o = orig.get(w) or (w - 0x08000000 if 0x08400000 <= w < 0x09000000 else None)
+                    if o != ta:
+                        continue
+                    ks = [k for k in (j - 1, j) if 0 <= k < len(slots) and slots[k] in ran and slots[k] != ta]
+                    if len(ks) == 1:
+                        return dict(vft='%08x' % v, native_slot=j, exe_slot=ks[0], native='%08x' % ta,
+                                    exe='%08x' % slots[ks[0]])
+        return None
 
     def vslots_run(self, case, rx, ra):
         """A call-count where the native makes more calls: its first call the oracle does not make is a planted

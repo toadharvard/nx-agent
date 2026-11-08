@@ -53,7 +53,7 @@ import config
 # a jmp to the shared epilogue and knows fidiv / fist / fcomi / ftst / fsqrt consumers, overlapping pinned literals let
 # the exe bytes (when available) replace the union, and a float difference runs the garbage / bool / x87 control-word (24-bit) / x87-range / callee
 # float width probes before it stays `float`.
-# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. The signedness probe clears an argument byte only when the oracle can
+# The signedness probe clears an argument byte only when the oracle can
 # widen it (not a float sign or a whole-read int), and an uninit-arm that vanishes once the unwritten stack words of
 # buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
 # read on a later path is a custom register, the oracle gets ST0 for a call the caller's unit declares float, and
@@ -65,6 +65,7 @@ import config
 # is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
 # placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return.
 # Native-null-read class: a native fault inside the unit's own FUN_<X> the oracle only called out follows X in the oracle, native vtable groups read background past their last slot, and a planted slot answered by a named native stub is not followed.
+# Virtual-call class (F2b): a call-target where the native called planted slot k and the oracle's call went to slot k+1, a unit function it ran as code (no call event), is vslot-shift (Pair.vslots_run on call-target too), and a native callee that sits in the native copy of a planted vftable at a slot whose exe function the oracle ran is native-vslot-differs.
 HARNESS = 'difffuzz-20'
 
 
