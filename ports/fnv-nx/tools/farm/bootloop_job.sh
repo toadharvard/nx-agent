@@ -13,7 +13,8 @@
 # by tools/farm/linkcache.sh), the guest is relinked. `make guest` runs only fetch, toolchain, prepare, compile,
 # link, guest (and nine, disabled): no census, raw boot, host, package or tests. Then tests/s5/farm_boot.sh
 # FARM_BOOTS=stub on that guest with FNVNX_STUB_NULLDEV=1 (S5 a3b368ed: CreateDevice on the null device, so the
-# frontier goes past the renderer), EMU_TIMEOUT=${BOOTLOOP_EMU_TIMEOUT:-480}.
+# frontier goes past the renderer), EMU_TIMEOUT=${BOOTLOOP_EMU_TIMEOUT:-300} (with S5's time slices, farm_boot.sh BUDGET=0
+# SLICE_MS=2000, 300 s goes about as far as 3,000 s did with an instruction count: archive-list in 46 s).
 # The first iteration on a machine compiles every unit (about an hour); the report says "cold" then.
 # Report: the stage table (seconds, cached or ran, from each stage.json), the boot's game milestones (n/10 and the
 # last reached), its stop, and the sidecar <report>.json (fnvnx-bootloop/1). Nothing is published but the report
@@ -121,7 +122,7 @@ if [ -z "$FAIL" ]; then
 	NULLDEV=${BOOTLOOP_NULLDEV:-1}; mkdir -p "$STUB"; echo "$NULLDEV" > "$STUB/nulldev"
 	FNVNX_STUB_NULLDEV=$NULLDEV FARM_LINK_DIR=$B/link FARM_GUEST_DIR=$B/guest FARM_BOOTS=stub \
 		EMU_EXTRA="${BOOTLOOP_EMU_EXTRA:-}" FARM_UNITS="$B/prepare/tree/build/units.json" \
-		EMU_TIMEOUT="${BOOTLOOP_EMU_TIMEOUT:-480}" \
+		EMU_TIMEOUT="${BOOTLOOP_EMU_TIMEOUT:-300}" \
 		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" ${GAME_EXE:+"$GAME_EXE"} > "$F/stub_boot.log" 2>&1 \
 		|| log "farm_boot.sh (stub boot) exited $?"
 	[ -f "$STUB/boot_summary_stub.json" ] || FAIL="the stub boot wrote no summary (see $F/stub_boot.log)"
@@ -135,7 +136,7 @@ fi
 
 printf '%s\n' "${STEPS[@]}" > "$F/steps.tsv"
 python3 -I - "$B" "$STUB" "$F/steps.tsv" "$REPORT" "$COMMIT" "$(( $(date +%s) - T0 ))" "${COLD:-?}" "$FAIL" \
-	"${BOOTLOOP_EMU_TIMEOUT:-480}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" "$NOTE_LINKEQ" <<'EOF'
+	"${BOOTLOOP_EMU_TIMEOUT:-300}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" "$NOTE_LINKEQ" <<'EOF'
 import json, os, sys
 B, stub, steps, report, commit, total, cold, fail, emu_s, wip, tb, linkeq = sys.argv[1:13]
 tb = int(tb)
