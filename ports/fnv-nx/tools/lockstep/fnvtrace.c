@@ -16,6 +16,12 @@
  *   FNVTRACE_SNAP  bytes snapshotted at ecx and at each pointer-looking stack argument at entry and compared at
  *                  return (default 64; 0 = off): the callee's writes to the objects it was given
  *   FNVTRACE_DEREF bytes of each pointer-looking argument dumped at entry, hex (default 32; 0 = off)
+ *   FNVTRACE_PERFN log at most this many calls of each API entry (a `dll!Export` line; default 0 = no limit);
+ *                  later calls are only counted: `count <name> <n>` lines at each power of two, every 65536 calls
+ *                  and at exit (then `end detach`: exact). A third token on the list line overrides it for that entry (0 = every call).
+ *                  API entries are not held to FNVTRACE_MAX (the lockstep's functions fill it early in the boot).
+ *   FNVTRACE_CALLER lo-hi (hex): an API entry's calls count only when the return address lies in [lo, hi) (the
+ *                  game image's calls, not Wine's own: 400000-2100000)
  * Log lines (tab-separated; the same shapes as emu_guest.py --trace-fn, so boot_trace.py reads both):
  *   call <seq> <tid> <depth> <name> <orig> <ecx> <edx> <s0..s7> <esp> <ret>
  *   arg  <seq> <slot> <hex bytes>                  (FNVTRACE_DEREF; slot ecx, edx, s0..s7)
@@ -36,7 +42,7 @@
 #define MAXDEPTH 512
 #define NSLOT 10   /* ecx, edx, s0..s7 */
 
-typedef struct { DWORD addr; BYTE orig; char name[64]; } Fn;
+typedef struct { DWORD addr; BYTE orig, api; LONG n; long cap; char name[64]; } Fn;   /* cap -1: FNVTRACE_PERFN */
 typedef struct {
     DWORD ret, esp, seq, fn;
     DWORD ptr[NSLOT];
@@ -50,6 +56,8 @@ static FILE *g_out;
 static LONG g_seq, g_calls;
 static long g_max = 1000000;
 static int g_snap = 64, g_deref = 32;
+static long g_perfn;
+static DWORD g_caller_lo, g_caller_hi;
 static DWORD g_tls = TLS_OUT_OF_INDEXES;
 static BYTE *g_trap;   /* return trap: one int3 */
 static CRITICAL_SECTION g_lock;
@@ -105,8 +113,19 @@ static void on_call(CONTEXT *c, Fn *f) {
     DWORD *sp = (DWORD *)c->Esp;
     DWORD v[NSLOT] = {c->Ecx, c->Edx};
     for (int k = 0; k < 8; k++) v[2 + k] = readable((DWORD)(sp + 1 + k), 4) ? sp[1 + k] : 0;
-    if (g_calls >= g_max || t->depth >= MAXDEPTH) return;
-    InterlockedIncrement(&g_calls);
+    long cap = f->cap >= 0 ? f->cap : g_perfn;
+    if (f->api && g_caller_hi && (sp[0] < g_caller_lo || sp[0] >= g_caller_hi)) return;
+    LONG n = InterlockedIncrement(&f->n);
+    if (f->api && cap && n > cap) {
+        if (!(n & (n - 1)) || !(n & 0xFFFF)) {
+            EnterCriticalSection(&g_lock);
+            fprintf(g_out, "count\t%s\t%ld\n", f->name, n);
+            LeaveCriticalSection(&g_lock);
+        }
+        return;
+    }
+    if ((!f->api && g_calls >= g_max) || t->depth >= MAXDEPTH) return;
+    if (!f->api) InterlockedIncrement(&g_calls);
     DWORD seq = (DWORD)InterlockedIncrement(&g_seq);
     char dump[2 * 256 + 1];
     EnterCriticalSection(&g_lock);
@@ -231,11 +250,16 @@ static void load_list(const char *path) {
             if (!g_fn) continue;
             Fn *fn = &g_fn[g_nfn++];
             fn->addr = a;
+            fn->api = 1;
+            fn->cap = -1;
             while (*end == ' ' || *end == '\t') end++;
             size_t n2 = strcspn(end, "\r\n\t ");
+            char *after = end + n2;
             if (!n2) { end = bang + 1; n2 = sn; }   /* named after the export unless a name follows */
             if (n2 >= sizeof fn->name) n2 = sizeof fn->name - 1;
             memcpy(fn->name, end, n2); fn->name[n2] = 0;
+            while (*after == ' ' || *after == '\t') after++;
+            if (*after >= '0' && *after <= '9') fn->cap = strtol(after, 0, 0);   /* per-entry FNVTRACE_PERFN */
             continue;
         }
         a = strtoul(p, &end, 16);
@@ -258,6 +282,12 @@ static void start(void) {
     if (GetEnvironmentVariableA("FNVTRACE_MAX", buf, sizeof buf)) g_max = strtol(buf, 0, 0);
     if (GetEnvironmentVariableA("FNVTRACE_SNAP", buf, sizeof buf)) g_snap = (int)strtol(buf, 0, 0) & ~3;
     if (GetEnvironmentVariableA("FNVTRACE_DEREF", buf, sizeof buf)) g_deref = (int)strtol(buf, 0, 0);
+    if (GetEnvironmentVariableA("FNVTRACE_PERFN", buf, sizeof buf)) g_perfn = strtol(buf, 0, 0);
+    if (GetEnvironmentVariableA("FNVTRACE_CALLER", buf, sizeof buf)) {
+        char *e;
+        g_caller_lo = strtoul(buf, &e, 16);
+        g_caller_hi = *e == '-' ? strtoul(e + 1, 0, 16) : 0;
+    }
     if (g_snap > 256) g_snap = 256;
     if (g_deref > 256) g_deref = 256;
     if (!GetEnvironmentVariableA("FNVTRACE_OUT", buf, sizeof buf)) strcpy(buf, "fnvtrace.tsv");
@@ -282,7 +312,12 @@ static void start(void) {
 BOOL WINAPI DllMain(HINSTANCE h, DWORD why, LPVOID r) {
     (void)h; (void)r;
     if (why == DLL_PROCESS_ATTACH) start();
-    if (why == DLL_PROCESS_DETACH && g_out) fflush(g_out);
+    if (why == DLL_PROCESS_DETACH && g_out) {
+        for (int i = 0; i < g_nfn; i++)
+            if (g_fn[i].n) fprintf(g_out, "count\t%s\t%ld\n", g_fn[i].name, g_fn[i].n);
+        fprintf(g_out, "end\tdetach\n");   /* the counts above are exact */
+        fflush(g_out);
+    }
     return TRUE;
 }
 /* the game may end with ExitProcess before DLL_PROCESS_DETACH reaches us under some loaders */
