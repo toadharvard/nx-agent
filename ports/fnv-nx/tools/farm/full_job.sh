@@ -47,7 +47,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 . "$HERE/lib_job.sh"
 t0=$(date +%s)
 
-host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools py:mako meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native); mako: uam (LINK_OVERRIDES=render)
+host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname $LINK_PY meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native); mako: uam (LINK_OVERRIDES=render)
 # NX1's package checks (tests/nx1): switch-tools elf2nro needs lz4.h, the host device test qemu-user, the libnx
 # syntax check newlib's headers. Libraries are not commands, so host_check cannot see them.
 # uam (toolchain/uam/build.sh, LINK_OVERRIDES=render without RENDER_LIB) needs the system python's mako.
