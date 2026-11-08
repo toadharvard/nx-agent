@@ -35,8 +35,8 @@ several checks share one file):
   each: depends on the receiver's class), `unknown` (no pair has both slots, or the vptr offsets differ). A
   mismatch or mixed row also says `delta` = k - j.
 
-* `--layout` - the LAYOUT check lives in `seamcheck_layout.py` (another worker); the module exposes
-  `run_layout(ctx) -> (rows, stats)` and is imported when the flag is given.
+* `--layout` - the LAYOUT check (seamlayout.py, W40): native object sizes against the exe's `new` / static / field
+  evidence, in the common columns (see run_layout). `--tree` passes a prepared tree for its layout probe.
 
 Rows (tab separated, `#` header): check, function (native symbol), exe function, exe site, native site (offset in
 the function, hex), receiver (class, or `any`), exe slot, native slot, exe target, native target, verdict, note.
@@ -871,12 +871,29 @@ def _progress(it, n, log):
 
 
 def run_layout(ctx):
+    """LAYOUT (W40, seamlayout.py): native object sizes against the exe's evidence, one row per (class, evidence) in
+    the common columns: function = class, exe_function = evidence kind (new / static / maxoff), exe_site = an example,
+    exe_slot / native_slot = exe / native size, exe_target = site count, native_target = where the native size came
+    from, note = boot flag and seamlayout's note."""
     try:
-        import seamcheck_layout
+        import seamlayout
     except ImportError:
-        ctx.log('layout: tools/link/seamcheck_layout.py not present; skipped')
+        ctx.log('layout: tools/link/seamlayout.py not present; skipped')
         return [], collections.Counter({'layout-module-missing': 1})
-    return seamcheck_layout.run_layout(ctx)
+    got = seamlayout.check_layout(ctx.link, ctx.exe, tree=getattr(ctx, 'tree', None), jobs=ctx.jobs,
+                                  topdown=getattr(ctx, 'boot', None),
+                                  shard=ctx.shard, progress=ctx.log)
+    col = {c: i for i, c in enumerate(seamlayout.COLUMNS)}
+    rows, stats = [], collections.Counter()
+    for r in got:
+        g = lambda c: r[col[c]] if c in col and col[c] < len(r) else ''
+        rows.append(('layout', g('class'), g('evidence'), g('example'), '', g('class'), g('exe_size'),
+                     g('native_size'), g('sites'), g('native_src'), g('verdict'),
+                     ('boot=%s %s' % (g('boot'), g('note'))).strip()))
+        stats['layout-%s-%s' % (g('evidence'), g('verdict'))] += 1
+        if g('boot') == '1' and g('verdict') == 'mismatch':
+            stats['layout-boot-mismatch'] += 1
+    return rows, stats
 
 
 def main(argv=None):
@@ -889,12 +906,15 @@ def main(argv=None):
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 1)
     ap.add_argument('--partial', action='store_true', help='also use the aligned part of a partly aligned function')
     ap.add_argument('--only', help='comma separated hex function addresses')
+    ap.add_argument('--tree', help='prepared source tree for the LAYOUT probe (seamlayout.py)')
+    ap.add_argument('--boot', help="boot-path functions for LAYOUT's boot column: R2's topdown.tsv, or a plain address "
+                                   "list (S18's trace-coc called set, one `<addr> [name]` per line)")
     ap.add_argument('-o', '--out', required=True)
     a = ap.parse_args(argv)
     if not (a.vcall or a.layout):
         a.vcall = True
     ctx = Ctx()
-    ctx.link, ctx.exe, ctx.jobs, ctx.partial = a.link, a.exe, a.jobs, a.partial
+    ctx.link, ctx.exe, ctx.jobs, ctx.partial, ctx.tree, ctx.boot = a.link, a.exe, a.jobs, a.partial, a.tree, a.boot
     ctx.shard = tuple(int(x) for x in a.shard.split('/')) if a.shard else None
     ctx.only = {int(x, 16) for x in a.only.split(',')} if a.only else None
     ctx.cache = os.path.join(os.path.dirname(os.path.abspath(a.out)), 'exe_vftables.json')
