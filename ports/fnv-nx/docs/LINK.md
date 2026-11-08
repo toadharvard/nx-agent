@@ -814,7 +814,13 @@ resolve bound only through another unit's reference to the same name (gref / gde
 a *different* function there, TESForm::IsQuestItem at 0x0046f070 where the exe's TESForm slot 37 is 0x00401190) is a
 hint: when no code of the object calls the name, exe_slot_fill replaces the address with the exe vftable's function
 at the slot (`hint_rebound`; slot_fill.tsv row `exe vftable over the name's address`) and keeps it where the exe has
-none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+none or the function cannot be bound (`hint_kept_*`). W20 extends this to names the unit's own recipe binds (tier
+`unit/*`), by what the object's code does with the name: never called (class b, 24 of 208 holder x symbol items on link
+0540aff0d154, all of them the unit's own definitions nothing calls) is a hint like the above; called directly (class a,
+183 items: `Base::f()` from an override, whose exe call site reaches the bound address in the pristine object) keeps the
+symbol at its address for the call and gives each vtable slot that names it, where the exe vftables of that use agree,
+the exe's function as a per-slot override (`chint_slot_over`; slot_fill.tsv row `per slot (exe vftable; the name stays
+at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
 `test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
 
 ## Platform, imports, thread-locals and hand-written vptrs

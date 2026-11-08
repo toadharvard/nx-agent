@@ -676,6 +676,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         if exe_path_ else {}
     unbound = collections.defaultdict(set)   # source -> names left undefined (extern-text, import without a symbol)
     hints = collections.defaultdict(dict)    # source -> {vtable slot name: address} another unit's reference gave it
+    chints = collections.defaultdict(dict)   # W20 (a): source -> {slot name: address} the unit's recipe gave, and its code calls
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
     text_addrs = set()   # .text addresses of variables nothing defines (`text-addr`)
@@ -1300,8 +1301,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 target = TRAP_SYM % int(hashlib.sha1(un.encode('utf-8', 'surrogateescape')).hexdigest()[:8], 16)
                 if target not in traps:
                     traps[target] = (un, vtables.slot_of(u.obj, un))
-            if cls == 'code' and addr is not None and un in vslots and (tier or '').startswith(('gref/', 'gdef/')) \
-                    and un not in called_syms(u):
+            if cls == 'code' and addr is not None and un in vslots and (tier or '').startswith('unit/') \
+                    and un in called_syms(u):
+                # W20 (a): the unit's own recipe binds the name and its code calls it directly (a qualified call of a
+                # base's virtual, `Base::f()`): the address is right for that call, so the symbol keeps it. The
+                # vtable slot that names the symbol is the exe vftable's business: exe_slot_fill gives that slot the
+                # exe's function (a per-slot override) while the symbol stays where it is.
+                chints[u.source][un] = addr
+            elif cls == 'code' and addr is not None and un in vslots and (tier or '').startswith(
+                    ('gref/', 'gdef/', 'unit/')) and un not in called_syms(u):
                 # S2d-vslot: only a vtable of this object names the symbol, and the address is another unit's idea of
                 # the name (units.json lists the call there, perhaps of a different class's function the decomp
                 # called by this name: TESForm::IsQuestItem is 0x0046f070 in hudmainmenu.cpp, the exe's TESForm slot 37
@@ -1611,7 +1619,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
-                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound, hints)
+                             canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound, hints, chints)
         for k_, n_ in fill.items():
             stats['slot_fill_' + k_] = n_
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
@@ -2737,7 +2745,8 @@ def rewrite_refs(path, by_src, addr_of, rebound=()):
 
 
 def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc, canon_it, out,
-                  stubs=None, overrides=None, exe_path=None, providers=None, also=None, unbound=None, hints=None):
+                  stubs=None, overrides=None, exe_path=None, providers=None, also=None, unbound=None, hints=None,
+                  call_hints=None):
     """S2c-vt slot fill (docs/LINK.md "Vftables from the player's exe"): a slot of a native vtable that calls a trap
     stub (its virtual function is defined nowhere) gets the native definition at the address the exe's vftable
     holds in that slot, `__fnv_<addr>`, when the address map has one. The native vtable (group z, address point p)
@@ -2759,6 +2768,14 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     the same name (gref / gdef tier) and that no code of the object calls: the exe vftable's function at the slot
     replaces the address when the two differ and the fill can bind it (`hint_rebound`); where the exe has none, the
     vtables of the object disagree or the exe's function cannot be bound, the name keeps its address (`hint_kept_*`).
+    The hint rule also holds for a name the unit's own recipe binds (refs.tsv tier unit/*) that the object never calls
+    (W20 (b): the name is only a slot).
+    call_hints: {source: {name: address}} (W20 (a)) vtable-slot names the unit's recipe binds (tier unit/*) that the
+    object also calls directly: the address is right for those calls and the symbol keeps it. Each vtable slot that
+    names the symbol where the exe vftables of that use agree on another function gets that function as a per-slot
+    override (`overrides`, the strong copy exe_vtable_copies writes), when target_for binds it with the ABI check
+    (`chint_slot_over`); a use whose exe vftables disagree, past the exe's slots or with a function that cannot be
+    bound keeps the symbol (`chint_kept_*`).
     Returns the counts."""
     st = collections.Counter()
     zmap = collections.defaultdict(set)   # (native vtable group, address point) -> exe vftable addresses
@@ -2915,7 +2932,9 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
         xt = {un for un in (unbound or {}).get(u.source, ()) if un not in ren and un.startswith('_ZN')}
         hs = (hints or {}).get(u.source, {})
         hn = {un for un in hs if str(ren.get(un, '')).startswith('__fnv_')} - tr
-        if not tr and not xt and not hn:
+        cs = (call_hints or {}).get(u.source, {}) if overrides is not None else {}
+        cn = {un for un in cs if str(ren.get(un, '')).startswith('__fnv_')} - tr - hn
+        if not tr and not xt and not hn and not cn:
             continue
         o = vtables.Obj(u.obj)
         uses = collections.defaultdict(list)   # un -> [(z, p, k, j, {exe addresses})]
@@ -2935,13 +2954,35 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
                     pd = base_dtor_pos(vs, len(se))
                     d = pd
                 for k, e in enumerate(se):
-                    if e.sym in tr or e.sym in xt or e.sym in hn:
+                    if e.sym in tr or e.sym in xt or e.sym in hn or e.sym in cn:
                         j = exevft.exe_slot_index(k, d)
                         pv = ('D1' if k == pd else 'D0' if k == pd + 1 else None) if pd is not None else None
                         uses[e.sym].append((z, p, k, j, {exev[v].slots[j] for v in vs if j < len(exev[v].slots)},
                                             bool(vs), pv))
-        for un in sorted(tr | {x for x in xt | hn if x in uses}):
+        for un in sorted(tr | {x for x in xt | hn | cn if x in uses}):
             us = uses.get(un, [])
+            if un in cn:
+                # W20 (a): the symbol stays at the address the unit's recipe gave it; each use whose exe vftables
+                # agree on another function gets that function in its own word
+                st['chint_symbols'] += 1
+                for x in us:
+                    b_ = next(iter(x[4])) if len(x[4]) == 1 else None
+                    if b_ is None:
+                        st['chint_kept_' + ('vtables_disagree' if x[4] else 'no_exe_function')] += 1
+                        continue
+                    if b_ == cs[un]:
+                        st['chint_agrees'] += 1
+                        continue
+                    t2, why2 = target_for(un, b_, [ott_of(x[0], x[1])], 0, x[6])
+                    if not t2:
+                        st['chint_kept_exe_function_not_bindable'] += 1
+                        continue
+                    overrides[(u.obj, x[0], x[1] // 4 + x[2])] = t2
+                    st['chint_slot_over'] += 1
+                    rows.append((os.path.basename(u.obj), u.source, un, '%08x' % b_, t2,
+                                 'per slot (exe vftable; the name stays at %08x, its code calls it)' % cs[un], why2,
+                                 '%s+%d:%d' % (x[0], x[1], x[2])))
+                continue
             st['symbols'] += 1
             addrs = set().union(*(x[4] for x in us)) if us else set()
             how = None
