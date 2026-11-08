@@ -6067,6 +6067,52 @@ def d22_write_applied(out_root, stats, files):
 
 POST.append(d22_write_applied)
 
+# ---------------------------------------------------------------------------------------------------------- RAWVT1
+#
+# D26 (S5-boot, link 3f7a6c35e923): every native C++ vtable is minus-one (GCC's D1 / D0 at slots 0 / 1 where MSVC
+# has ??_G at 0; the link rebuilds pair-less tables as minus-one copies, orchestrator decision 2026-11-08). The
+# decomp also dispatches by a raw exe slot number, `((F)(*reinterpret_cast<void***>(this))[k])(this, ...)`, which no
+# declaration carries: FUN_005e0830::Open (0x005e0830) called the INI collection's exe slot 6 (Open) at native
+# offset 24, ran slot 5 with the bool as the setting pointer, and fallout.ini was never read. RAWVT1 writes such an
+# index on `this` as FNVNX_D26_SLOT(k): k + 1 under GCC, k under MSVC (tools/equiv/msvc/fnvnx_equiv_fi.h).
+# Only where:
+# - the receiver is `this` (the object of the enclosing member function: a C++ object of the game);
+# - the enclosing class is not COM-shaped (D22-COM: a __stdcall / HRESULT virtual, QueryInterface / AddRef /
+#   Release, an SDK interface name; COM vtables have no destructor slot), as far as the file defines it;
+# - k > 0 (slot 0 is the deleting destructor: a call of it needs FNVNX_D22_CALL's form; counted RAWVT1-SLOT0).
+RAWVT1_RX = re.compile(r'(\(\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*this\s*\)|'
+                       r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*this)\s*\)\s*\[\s*)([0-9]+|0[xX][0-9a-fA-F]+)(\s*\])')
+
+def r_raw_vtable_slots(path, text, stats):
+    """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above)."""
+    if 'this' not in text or '***' not in text.replace(' ', ''): return text
+    masked = d22_mask(text)
+    hits = [m for m in RAWVT1_RX.finditer(masked)]
+    if not hits: return text
+    classes = d22_classes(text, masked)
+    owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
+    for m in D22_MEMBER_DEF.finditer(masked):
+        b = m.end() - 1
+        try: e = prepare.match_brace(masked, b)
+        except Exception: e = None
+        if e: owners.append((b, e, m.group(1)))
+    owners.sort(key=lambda t: t[0] - t[1])
+    by_name = collections.defaultdict(list)
+    for c in classes: by_name[c['qual'][-1]].append(c)
+    edits = []
+    for m in hits:
+        k = int(m.group(2), 0)
+        owner = next((nm for a, z, nm in owners if a < m.start() < z), None)
+        if owner is None: stats['RAWVT1-FREE'] += 1; continue
+        if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
+            stats['RAWVT1-COM'] += 1; continue
+        if k == 0: stats['RAWVT1-SLOT0'] += 1; continue
+        edits.append((m.start(2), m.end(2), 'FNVNX_D26_SLOT(%s)' % text[m.start(2):m.end(2)]))
+    for a, b, rep in sorted(edits, reverse=True):
+        text = text[:a] + rep + text[b:]
+    stats['RAWVT1'] += len(edits)
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- PHSLOT1
 #
 # The decomp's reconstructed classes (a shell standing for a class of the exe) list the exe vftable's slots as
@@ -6225,5 +6271,5 @@ REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_add
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
               r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
-              r_template_member_stand_ins]
+              r_template_member_stand_ins, r_raw_vtable_slots]
 RULES += REFS_RULES
