@@ -1911,6 +1911,16 @@ check('D26 call-only: a numbered sequence P_00, P_01 is a placeholder; P_00 with
       run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'Impl_00()').replace('v1()', 'Impl_01()')) + '|' +
       run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'Impl_00()')), ['FNVNX_D22(HeapStandIn, virtual void Impl_00();)'],
       ['FNVNX_D22(HeapStandIn, virtual void Impl_00();) /* fnv-nx D22 */\n    virtual void v1();'])
+# S5-boot (extradatalist.cpp AX): a qualified call whose receiver resolves to another class does not block it
+_RQ = _CO + ('struct Sub\n{\n    virtual int* v0();\n    virtual void s1();\n};\n'
+             'struct Ref\n{\n    virtual void r0();\n    Sub sub;\n};\n'
+             'int* g(void* r) { return ((Ref*)r)->sub.v0(); }\n')
+check('D26 call-only: `((T*)x)->m.ph()` on another class does not block it (Sub is held: its own call)',
+      run(s1.r_vtable_dtor_slot, _RQ), ['FNVNX_D22(HeapStandIn, virtual void v0();)'], ['FNVNX_D22(Sub'])
+check('D26 call-only: ... a cast to the class itself, or an unresolved receiver, does',
+      run(s1.r_vtable_dtor_slot, _RQ.replace('((Ref*)r)->sub.v0()', '(int*)0; ((HeapStandIn*)r)->v0()')) +
+      run(s1.r_vtable_dtor_slot, _RQ.replace('((Ref*)r)->sub.v0()', '((Sub*)r)->v0(), ((Ref*)r)->q.v0()')), [],
+      ['FNVNX_D22(HeapStandIn'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
