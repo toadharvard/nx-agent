@@ -89,6 +89,7 @@ import config
 # EQ rest class (tests/s13/test_eqrest.py): a pointer argument that is the address of a function-local static (the oracle's image address against the native's .bss copy), and a call-count where the oracle's static guard is set while the native's own guard runs the initializer, are local-static; entry_register_reads follows the cases of a switch jump table inside the function, so a register a case body reads (edx at 0x00e03170) is a custom register.
 # Leaf registers: an intercepted call to an exe function that is a straight-line leaf writing neither ecx nor edx leaves them as the caller held them (retsrc.preserved), as MSVC's optimiser relies on (0x00d3ab60 writes only eax and cl; 0x00d3abc0 keeps its argument in edx over the call).
 # EQ memory group (tests/s13/test_eqmem.py): a function-local static of a class type / spelled with other back-references in its name pairs with its native `_ZZ` object, the address of a paired static is the same object, and the native's own guard of a paired static is no private read.
+# EQ thunk-forward (tests/s13/test_thunkfwd.py): a native garbage word forwarded to the jump target of an exe function that is one `jmp rel32` (declared without parameters) is an artifact.
 HARNESS = 'difffuzz-20'
 
 

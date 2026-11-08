@@ -738,12 +738,31 @@ def _plant(c, a):
     c.mem[a] = b'\x01'
 
 
+def _jmp_thunk_target(fn):
+    """The jump target of an exe function that is exactly `jmp rel32` (then padding), else None."""
+    code = (fn or {}).get('code') or b''
+    if len(code) < 5 or code[0] != 0xe9 or any(b not in (0xcc, 0x90) for b in code[5:]):
+        return None
+    return ((fn['address'] + 5) + int.from_bytes(code[1:5], 'little', signed=True)) & 0xffffffff
+
+
+def _thunk_forward(div, fn):
+    """A call-args divergence on a native garbage word at the jump target of a `jmp rel32` thunk."""
+    return div.get('kind') == 'call-args' and bool(div.get('arm_garbage')) and \
+        _jmp_thunk_target(fn) == int(div.get('target') or '-1', 16)
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
     k = div['kind']
     if k == 'local-static':
         h['cause'] = 'local-static'; return h
+    if _thunk_forward(div, fn):
+        # (difffuzz-20, thunk-forward) the exe function is one `jmp rel32` (an incremental-link thunk): every argument
+        # of its callee is the thunk's own incoming one, and its declaration (`void F(void)`) names none, so the case
+        # defines none: the oracle reads zero stack words, the native forwards registers nobody set
+        h['cause'] = 'thunk-forward'; return h
     if k == 'error' and str(div.get('arm') or '').startswith('trap:'):
         # the native called a vtable slot the link filled with its trap stub (a virtual defined nowhere,
         # arm64emu.TRAPS): the native calls a name the link binds to nothing (difffuzz-14)
