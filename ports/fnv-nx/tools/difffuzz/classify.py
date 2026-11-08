@@ -45,6 +45,31 @@ BASE = {'ax': 'eax', 'al': 'eax', 'ah': 'eax', 'cx': 'ecx', 'cl': 'ecx', 'ch': '
         'dh': 'edx', 'bx': 'ebx', 'bl': 'ebx', 'bh': 'ebx', 'si': 'esi', 'di': 'edi'}
 
 
+def _register_idiom(ins):
+    """An instruction capstone lists as reading a register whose value it does not use (difffuzz-20, F1b): 'nop'
+    for MSVC's alignment padding (`lea ecx, [ecx]`, `lea ebx, [ebx+0]`, `mov edi, edi`, `xchg r, r`), the register
+    for a write that ignores the old value (`or r, -1`, `and r, 0`); None otherwise. Taking them for reads made a
+    custom register argument of a register the function only overwrites."""
+    if ins.mnemonic.startswith('nop'):
+        return 'nop'
+    ops = ins.operands
+    if len(ops) != 2 or ops[0].type != capstone.x86.X86_OP_REG:
+        return None
+    r0 = ins.reg_name(ops[0].reg)
+    if ins.mnemonic == 'lea' and ops[1].type == capstone.x86.X86_OP_MEM:
+        m = ops[1].mem
+        if m.base == ops[0].reg and m.index == 0 and m.disp == 0 and m.segment == 0:
+            return 'nop'
+        return None
+    if ins.mnemonic in ('mov', 'xchg') and ops[1].type == capstone.x86.X86_OP_REG and ops[1].reg == ops[0].reg:
+        return 'nop'
+    if ops[1].type == capstone.x86.X86_OP_IMM and ops[0].size == 4:
+        v = ops[1].imm & 0xffffffff
+        if (ins.mnemonic == 'or' and v == 0xffffffff) or (ins.mnemonic == 'and' and v == 0):
+            return BASE.get(r0, r0)
+    return None
+
+
 def entry_register_reads(fn, conv):
     """Registers the oracle function reads before writing them on its entry path (straight line up to the first
     branch), excluding those its declared convention passes (ecx/edx) and the callee-saved pushes: a register
@@ -54,9 +79,15 @@ def entry_register_reads(fn, conv):
     for ins in CSD.disasm(fn['code'], fn['address']):
         if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
             continue                  # saving a callee-saved register / reserving a slot is not a use
-        if ins.mnemonic in ('xor', 'sub') and len(ins.operands) == 2 and ins.op_str.split(', ')[0] == \
+        if ins.mnemonic in ('xor', 'sub', 'sbb') and len(ins.operands) == 2 and ins.op_str.split(', ')[0] == \
                 ins.op_str.split(', ')[-1]:
             written.add(BASE.get(ins.op_str.split(', ')[0], ins.op_str.split(', ')[0]))
+            continue
+        idiom = _register_idiom(ins)
+        if idiom == 'nop':
+            continue
+        if idiom:
+            written.add(idiom)
             continue
         try:
             rr, ww = ins.regs_access()
@@ -113,6 +144,20 @@ def _outcome(r):
 
 
 _VFT = None
+
+
+def _benign(d):
+    """No divergence, or only a by-design one (soft, or NaN payload / sign bits): what a probe trial may leave
+    (F1b: 0x00c207a0's bool byte set to 1 leaves an x87 0xffc00000 vs AArch64 0x7fc00000 store)."""
+    if d is None or d.get('soft'):
+        return True
+    if d.get('kind') in ('mem-write', 'return'):
+        try:
+            bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+        except ValueError:
+            return False
+        return len(bx) == len(ba) and len(bx) >= 4 and _nan_only(bx, ba)
+    return False
 
 
 def _nan_only(bx, ba):
@@ -199,6 +244,8 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'native-undefined'; h['trap'] = div['arm'][5:]; return h
     if div.get('bool_repr'):
         h['cause'] = 'bool-repr'; return h
+    if div.get('nrvo_copy'):
+        h['cause'] = 'nrvo-copy'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
     if div.get('vptr_store'):
@@ -333,8 +380,32 @@ def hint(pair, target, case, div, fn, max_steps):
                 trial = case.copy()
                 nb = bytearray(b); nb[i] = 1; trial.mem[a] = bytes(nb)
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
-                if d is None:
+                if _benign(d):
                     bhits.append('%08x' % (a + i))
+    if not bhits and pair is not None and case.bg != 'zero' and h['_runs'] < 30:
+        # (F1b, difffuzz-20) the same for a byte of the random background the MSVC code reads by itself (a bool
+        # global the case does not plant, a field behind a background pointer): plant 1 there (0x00adb9f0,
+        # 0x0087b7c0)
+        bg = {}
+        world.BG_READS = bg
+        try:
+            pair.run(case, max_steps)
+        finally:
+            world.BG_READS = None
+        h['_runs'] += 1
+        planted = [(a, a + len(b)) for a, b in case.mem.items()]
+        for a in sorted(bg):
+            sizes, v = bg[a]
+            if len(bhits) >= 4 or h['_runs'] >= 30:
+                break
+            if sizes != {1} or v is None or v <= 1 or any(lo <= a < hi for lo, hi in planted) or \
+                    any(s > k for k in range(1, 8) for s in bg.get(a - k, (set(),))[0]):
+                continue
+            trial = case.copy()
+            trial.mem[a] = b'\x01'
+            _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
+            if _benign(d):
+                bhits.append('%08x' % a)
     if bhits:
         h['cause'] = 'bool-repr'; h['bytes'] = bhits; return h
     # signedness probe: clear the top bit of each input byte >= 0x80

@@ -109,6 +109,7 @@ class Result:
         self.saved_ok = True     # callee-saved registers preserved
         self.noreturn = None            # the noreturn callee the run ended at (libcalls.NORETURN_X86)
         self.esp_ok = None              # the target returned with esp = entry + 4 + its own ret N
+        self.ret_smashed = False        # the target wrote its own return-address slot (a frame overrun, F1b)
 
 
 class X86Engine:
@@ -237,8 +238,15 @@ class X86Engine:
                 lo = int(a, 16) if isinstance(a, str) else a
                 hrd.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_read, user_data=world.BYTE_READS, begin=lo,
                                        end=lo + max(1, len(b)) - 1))
+        if world.BG_READS is not None:
+            for lo, hi in ((world.NULL_END, world.STACK[0]), (world.STACK[1], world.X86_PRIV[0]),
+                           (world.X86_PRIV[1], world.MAX)):
+                hrd.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_bg_read, user_data=world.BG_READS, begin=lo,
+                                       end=hi - 1))
         start = start if start is not None else next(iter(self.text_funcs))
         esp0 = uc.reg_read(UC_X86_REG_ESP)
+        # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
+        hrs = uc.hook_add(UC_HOOK_MEM_WRITE, self._on_ret_slot, user_data=r, begin=esp0, end=esp0 + 3)
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
@@ -247,6 +255,7 @@ class X86Engine:
         finally:
             uc.hook_del(hb)
             uc.hook_del(hb2)
+            uc.hook_del(hrs)
             for h in hwild:
                 uc.hook_del(h)
             for h in hws:
@@ -296,6 +305,18 @@ class X86Engine:
 
     def _on_read(self, uc, access, address, size, value, log):
         log.setdefault(address, set()).add(size)
+
+    def _on_bg_read(self, uc, access, address, size, value, log):
+        e = log.setdefault(address, [set(), None])
+        e[0].add(size)
+        if size == 1 and e[1] is None:
+            try:
+                e[1] = bytes(uc.mem_read(address, 1))[0]
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _on_ret_slot(self, uc, access, address, size, value, r):
+        r.ret_smashed = True
 
     def _on_write(self, uc, access, address, size, value, r):
         for i in range(size):
