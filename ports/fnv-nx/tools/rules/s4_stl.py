@@ -48,7 +48,8 @@ trap stubs (R2's s2d runtime list). STL2 appends, each gated on the declaration 
 
 Both rules leave a name to a recon (REC1, FNVNX_RECON) that covers it for the unit: its symbols, append or replace
 text name it (RECON_KEYS). R2's recons are matched against the exe; STL only stands in where there is none, and the
-two together would define a name twice. Counted as STL-RECON.
+two together would define a name twice. Counted as STL-RECON. Likewise a name the unit's own units.json `symbols`
+bind (top-level std only): the link takes it to the exe's function (STL-BOUND).
 """
 import re
 
@@ -130,9 +131,43 @@ RECON_KEYS = {   # what in a recon's text means it covers the STL body of that k
 }
 
 
+_BOUND_CACHE = {}
+
+
+def _bound_text(path):
+    """the MSVC names the unit's own build/units.json `symbols` bind to exe addresses, those of the top-level std only
+    (not `@std@fnv_<a>@@`, the nested copies): such a name reaches the exe's function through the link (R2: modelloader's
+    ??0?$vector@M... -> 0x00449fd0, which allocates VC9's aux), so a STL body would replace it with other state"""
+    import json
+    import os
+    d = os.path.dirname(os.path.abspath(path))
+    while d != os.path.dirname(d):
+        uj = os.path.join(d, 'build', 'units.json')
+        if os.path.exists(uj):
+            break
+        d = os.path.dirname(d)
+    else:
+        return ''
+    if uj not in _BOUND_CACHE:
+        got = {}
+        try:
+            for u in json.load(open(uj)).get('units', []):
+                s = u.get('symbols') or {}
+                names = s.keys() if isinstance(s, dict) else [x.get('symbol', '') for x in s if isinstance(x, dict)]
+                got[u.get('source')] = '\n'.join(n for n in names if '@std@fnv_' not in n)
+        except (OSError, ValueError, AttributeError):
+            pass
+        _BOUND_CACHE[uj] = got
+    return _BOUND_CACHE[uj].get(os.path.relpath(os.path.abspath(path), d).replace(os.sep, '/'), '')
+
+
 def _covered(rtext, key, stats):
-    if rtext and re.search(RECON_KEYS[key], rtext):
+    rec, bound = rtext
+    if rec and re.search(RECON_KEYS[key], rec):
         stats['STL-RECON'] += 1
+        return True
+    if bound and re.search(RECON_KEYS[key], bound):
+        stats['STL-BOUND'] += 1
         return True
     return False
 
@@ -203,7 +238,7 @@ def r_stl_helper_bodies(path, text, stats):
     blocks = _std_blocks(text)
     if not blocks:
         return text
-    adds, rt = [], _recon_text(path)
+    adds, rt = [], (_recon_text(path), _bound_text(path))
     for key, head, body in DECLS:
         if any(re.search(head, text[a:b]) for a, b in blocks) and not re.search(DEFINED[key], text) and \
                 not _covered(rt, key, stats):
@@ -243,7 +278,7 @@ def r_stl_stream_bodies(path, text, stats):
     blocks = _std_blocks(text)
     if not blocks:
         return text
-    adds, rt = [], _recon_text(path)
+    adds, rt = [], (_recon_text(path), _bound_text(path))
     m, body = _class_body(text, blocks, r'\bclass\s+ios_base\s*\{')
     if m and re.search(r'\bint\s+state\s*,\s*exceptions\b', body) and \
             re.search(r'\bvoid\s+setstate\s*\(\s*int\s*\)\s*;', body) and \

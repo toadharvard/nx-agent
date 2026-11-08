@@ -210,6 +210,18 @@ def main():
                 os.environ.pop('FNVNX_RECON', None)
             else:
                 os.environ['FNVNX_RECON'] = old
+    # a name the unit's units.json symbols bind: left to the binding (nested std@fnv_ copies do not count)
+    with tempfile.TemporaryDirectory() as ur:
+        os.makedirs(os.path.join(ur, 'build'))
+        os.makedirs(os.path.join(ur, 'src'))
+        json.dump({'units': [{'source': 'src/t2.cpp', 'symbols': {
+            '??0?$vector@MV?$allocator@M@std@@@std@@QAE@XZ': '0x00449fd0',
+            '?setstate@?$basic_ios@DU?$char_traits@D@std@fnv_00ac9790@@@std@fnv_00ac9790@@QAEXH_N@Z': '0x00400020'}}]},
+                  open(os.path.join(ur, 'build', 'units.json'), 'w'))
+        st = collections.Counter()
+        o = s4_stl.r_stl_stream_bodies(os.path.join(ur, 'src', 't2.cpp'), UNIT2, st)
+        ok('bound ctor left to the binding, nested setstate ignored', st['STL-BOUND'] == 1 and st['STL2'] == 5 and
+           '::vector()' not in o[len(UNIT2):] and 'ios_base::setstate' in o[len(UNIT2):], (st, o[len(UNIT2):]))
     print('test_stl1: %d failed' % fails)
     return 1 if fails else 0
 

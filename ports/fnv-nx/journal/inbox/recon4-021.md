@@ -8,15 +8,17 @@
     text, in GCC or MSVC spellings. Each skip is counted as STL-RECON.
   - STL only appends, so a recon's replace `old` texts still match.
 * **Measured** with R2's 18 recon branches for the three units, extracted locally:
-  - STL now leaves 16 names to the recons and adds 1 body, vector<float>::vector() in modelloader_ob1_variant, which
-    no recon covers. That body zeroes the aux pointer.
-  - I asked R2 whether the exe dtor (0x44a040) needs a real VC9 aux.
+  - STL now leaves 16 names to the recons. The 17th, vector<float>::vector() in modelloader_ob1_variant, is bound by
+    the unit's units.json symbols to 0x00449fd0, the exe ctor that allocates VC9's aux. STL now skips such names too
+    (STL-BOUND, top-level std symbols only).
+  - With the recons present, STL adds nothing to the three units. STL1/STL2 stay as the fallback for units that have
+    no recon or binding.
 * **Ledger, 26 rows:**
 
   | covered by | rows |
   |---|---|
   | R2's recons | 25 |
-  | STL | 1, the vector<float> ctor |
+  | the unit's own units.json binding | 1, the vector<float> ctor (0x00449fd0) |
 
   - The 25 recon rows: the 17 SpeedTree helpers (the 2 swaps through swap_generic), tesobject rows 1-5, the
     StandardLibrarySingletonObject ctor and dtor (slso_layout; the ctor also binds through std_exports), and
