@@ -119,6 +119,11 @@ def main():
     tx.make_pe(pe_, lambda rd: None, {0x401000: stub + gdel, 0x401040: getter + gdel, 0x401080: gdel})
     check(not exevft.deleting_dtor(pe_, 0x401000) and exevft.deleting_dtor(pe_, 0x401000 + len(stub)),
           'deleting_dtor: a ret-8 function followed by a ??_G is not one; the ??_G is')
+    # the /Od flags test in another register (BSList<BSSemaphore*>'s ??_G 0x00aa8950: mov edx, [ebp+8]; and edx, 1)
+    gdx = bytes.fromhex('558bec51894dfc8b550883e2017400e800000000c20400')
+    pe4 = os.path.join(_tf.mkdtemp(), 'x.exe')
+    tx.make_pe(pe4, lambda rd: None, {0x401000: gdx})
+    check(exevft.deleting_dtor(pe4, 0x401000), 'deleting_dtor: `mov edx, [ebp+8]; and edx, 1` is a flags test')
     check(not exevft.deleting_dtor(pe_, 0x401040) and exevft.deleting_dtor(pe_, 0x401080),
           'deleting_dtor: a getter followed by a ??_G (NiShaderInstanceDescriptor slot 0) is not one')
     os.environ['FNVNX_DELDTOR_STRICT'] = '0'
