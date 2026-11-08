@@ -176,16 +176,25 @@ lane_d() {   # D: the emulator lanes on lane A's build, one after another (each 
 	if on boottrace; then BOOTTRACE_BUILD=$FARM_HOME/full/build run boottrace bash "$J/boottrace_job.sh" "$COMMIT"
 	else skip boottrace "not affected"; fi
 }
-eq_cache_after() {   # every eq farm shard's cache (equiv/cache/*, "equiv object cache <c12> shard k/N") is of a head
-	# at or after $1: the cold run is over, a run here seeds from a warm cache
+eq_cache_after() {   # one complete set of the eq farms' cache shards (equiv/cache/kofN for k = 1..N, each "equiv object
+	# cache <c12> shard k/N") is of a head at or after $1: the cold run is over, a run here seeds from a warm cache.
+	# Any N: eqa's 1of1 (the eq farm since 06:40) counts, and the retired eq1-eq6's 1of6..6of6 do not hold it back
 	local A=${ARTIFACTS:-}; [ -n "$A" ] || { if [ -d /home/user/fnv-nx-build/.git ]; then A=/home/user/fnv-nx-build; else A=$FARM_HOME/artifacts; fi; }
-	local refs r c; refs=$(git -C "$A" ls-remote origin 'refs/heads/equiv/cache/*' 2>/dev/null | awk '{print $2}')
+	local refs r c n k bad
+	refs=$(git -C "$A" ls-remote origin 'refs/heads/equiv/cache/*' 2>/dev/null | awk '{print $2}')
 	[ -n "$refs" ] || return 1
-	for r in $refs; do
-		git -C "$A" fetch -q --depth 1 --filter=blob:none origin "+$r:refs/quick-eqc/${r#refs/heads/}" 2>/dev/null || return 1
-		c=$(git -C "$A" log -1 --format=%s "refs/quick-eqc/${r#refs/heads/}" | sed -n 's/^equiv object cache \([0-9a-f]\{12\}\) .*/\1/p')
-		[ -n "$c" ] && git -C "$REPO" merge-base --is-ancestor "$1" "$c" 2>/dev/null || return 1
+	for n in $(printf '%s\n' $refs | sed -n 's|.*/[0-9]*of\([0-9]*\)$|\1|p' | sort -un); do
+		bad=0
+		for k in $(seq 1 "$n"); do
+			r=refs/heads/equiv/cache/${k}of$n
+			printf '%s\n' $refs | grep -qx "$r" || { bad=1; break; }
+			git -C "$A" fetch -q --depth 1 --filter=blob:none origin "+$r:refs/quick-eqc/${r#refs/heads/}" 2>/dev/null || { bad=1; break; }
+			c=$(git -C "$A" log -1 --format=%s "refs/quick-eqc/${r#refs/heads/}" | sed -n 's/^equiv object cache \([0-9a-f]\{12\}\) .*/\1/p')
+			[ -n "$c" ] && git -C "$REPO" merge-base --is-ancestor "$1" "$c" 2>/dev/null || { bad=1; break; }
+		done
+		[ $bad = 0 ] && return 0
 	done
+	return 1
 }
 lane_b() {
 	if ! on equiv; then skip equiv "not affected"; return; fi
