@@ -9,7 +9,7 @@
 # (pack / ebo records placed inside other records). The prepared tree is the published one (fetch_tree.sh: branch
 # t/<c12> of the private artifacts repository, as the fuzz farms take it). Writes <report.md> (the summary in its
 # first lines; runner.sh publishes it to reports/<farm>) and pushes <c12>.tsv and <c12>.md to branch
-# reports/layoutgate of the artifacts repository. The boot set (column boot) is the home units of the newest
+# reports/layoutgate of the artifacts repository. Without a published tree it prepares one itself (step 2). The boot set (column boot) is the home units of the newest
 # s2d/list/*/topdown.tsv there plus the units of the exe functions on its call chains; without one, boot is 0.
 # Rows carry class and member names, offsets and sizes only (no source). Needs: git, python3, rsync, clang++ (installed
 # with apt-get when missing and root), g++-aarch64-linux-gnu.
@@ -35,9 +35,28 @@ bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 command -v clang++ >/dev/null || { [ "$(id -u)" = 0 ] && apt-get install -y -qq clang >/dev/null; } || true
 command -v clang++ >/dev/null || { echo "- FAIL: clang++ is missing (apt-get install clang)" > "$REPORT"; exit 1; }
 
-# 2. The published prepared tree.
+# 2. The published prepared tree, or (LAYOUTGATE_LOCAL_PREPARE=1, the default) one prepared here when t/<c12> does not
+#    appear within LAYOUTGATE_TREE_WAIT seconds (default 120): the commit's own prepare.py over the decomp its pins
+#    fetch, with the artifacts repository's recon/* set (recon.sh), as prepare_job.sh would prepare it (about 10 min).
+#    LAYOUTGATE_LOCAL_PREPARE=0 waits TREE_WAIT (default 1800) for a published tree instead.
 rm -rf "$WORK"; mkdir -p "$WORK"
-TREE_HASH=$(bash "$HERE/fetch_tree.sh" "$COMMIT" "$WORK/tree" "${TREE_WAIT:-1800}")
+TREE_HOW=published
+# shellcheck source=recon.sh
+. "$HERE/recon.sh"
+fetch_recon "$ARTIFACTS" "$WORK/recon" > /dev/null 2>&1 || true
+if [ "${LAYOUTGATE_LOCAL_PREPARE:-1}" = 1 ]; then
+  if ! TREE_HASH=$(FETCH_TREE_RECON=${RECON_ID:-} bash "$HERE/fetch_tree.sh" "$COMMIT" "$WORK/tree" \
+                   "${LAYOUTGATE_TREE_WAIT:-120}" 2> "$WORK/fetch_tree.log"); then
+    tp0=$(date +%s)
+    rm -rf "$WORK/tree"
+    python3 "$P/tools/prepare.py" "$EXT/fnv_decomp" "$WORK/tree" > "$WORK/prepare_local.log" 2>&1 \
+      || { echo "- FAIL: no published tree t/$C12, and prepare.py here failed (exit $?, prepare_local.log)" > "$REPORT"; exit 1; }
+    TREE_HASH=$(bash "$HERE/tree_hash.sh" "$WORK/tree")
+    TREE_HOW="prepared here, $(( $(date +%s) - tp0 )) s, recon ${RECON_ID:-none}"
+  fi
+else
+  TREE_HASH=$(bash "$HERE/fetch_tree.sh" "$COMMIT" "$WORK/tree" "${TREE_WAIT:-1800}")
+fi
 
 # 3. The boot set, from the newest topdown.tsv of the s2d/list/* branches (optional).
 BOOT=$WORK/boot_units.txt; : > "$BOOT"
@@ -74,7 +93,7 @@ SUM=$(cat "$WORK/$C12.tsv.summary")
   echo "# layoutgate $C12"
   echo
   echo "- $SUM"
-  echo "- commit: \`$COMMIT\`, tree $TREE_HASH, $((t1-t0)) s, jobs $JOBS, boot units $(wc -l < "$BOOT") ($(basename "${LIST:-none}"))"
+  echo "- commit: \`$COMMIT\`, tree $TREE_HASH ($TREE_HOW), $((t1-t0)) s, jobs $JOBS, boot units $(wc -l < "$BOOT") ($(basename "${LIST:-none}"))"
   echo "- MSVC side: clang $(clang++ --version | head -1 | grep -o '[0-9][0-9.]*' | head -1) i686-pc-windows-msvc record layouts"
   echo
   echo "## Rows by cause (size / field / member rows)"; echo
