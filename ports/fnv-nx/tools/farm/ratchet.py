@@ -28,6 +28,7 @@ What is measured (each from the report itself, or its sidecar; a report that doe
   sweep     passing programs of the shard (checked - failing; higher; only when programs were checked) and the
             failing programs (bad items); a shard whose setup failed (sidecar "error") measures nothing
   scenario  each D25 target measured in at least one scenario (lower), per scenario count
+  bootloop  the stub boot's game milestones (good items) and their count (higher), "(nulldev)" with FNVNX_STUB_NULLDEV=1
 Comparison: a report of a head that is an ancestor of an entry's head (an older head, reported late) is not compared
 with it. A WIP report (--wip) is compared but never advances the ledger. The ledger advances only on a check with no
 regression (owner order): improved values take this head, new items are added, a "bad" baseline shrinks to the
@@ -168,7 +169,18 @@ def x_scenario(t, side):
     return out
 
 
-EXTRACT = {'full': x_full, 'fuzz': x_fuzz, 'equiv': x_equiv, 'sweep': x_sweep, 'scenario': x_scenario}
+def x_bootloop(t, side):
+    """tools/farm/bootloop_job.sh's sidecar (fnvnx-bootloop/1): the stub boot's game milestones (good items) and how
+    many were reached (higher), apart for a boot with and without the null device"""
+    j = side or {}
+    if j.get('schema') != 'fnvnx-bootloop/1' or j.get('error') or not j.get('milestones'):
+        return []
+    pre = 'bootloop: stub boot%s milestones' % (' (nulldev)' if j.get('nulldev') == '1' else '')
+    return [M(pre, 'good', items={n: bool(r) for n, r in j['milestones']}),
+            M(pre + ' reached', 'value', j.get('reached'), 'higher')]
+
+
+EXTRACT = {'bootloop': x_bootloop, 'full': x_full, 'fuzz': x_fuzz, 'equiv': x_equiv, 'sweep': x_sweep, 'scenario': x_scenario}
 
 
 # ---- ledger ---------------------------------------------------------------------------------------------------------
