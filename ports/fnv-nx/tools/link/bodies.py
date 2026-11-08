@@ -1861,6 +1861,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     bdir = os.path.join(out, 'bodies')
     os.makedirs(bdir, exist_ok=True)
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
+    sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'))   # the parses of the last link process (T1)
     trapped = load_trapped(os.path.join(out, 'refs.tsv'), names_txt)
     native = load_native(os.path.join(out, 'addrmap.tsv'))
     units = fnvlink.load_units(units_json)

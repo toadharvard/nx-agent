@@ -1200,6 +1200,7 @@ def run(out, tree, jobs=4):
     classes.tsv, stats.txt, one .vt.S / zz_vt_*.o per host unit). Probe results are cached per host unit (source
     mtime + class list) in out/vtables/cache.json."""
     import sigs   # sibling module (fnvlink.py puts this directory on sys.path)
+    sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'))   # the parses of the last link process (T1)
     reqs = load_requests(os.path.join(out, 'vtable_requests.tsv'))
     dpath = os.path.join(out, 'rtti_defined.txt')
     defined = set(open(dpath, encoding='utf-8', errors='surrogateescape').read().split()) if os.path.exists(dpath) \

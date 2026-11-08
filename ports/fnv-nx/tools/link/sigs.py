@@ -14,6 +14,7 @@ declaration seen by GCC (object symbol) produce equal keys:
 
 Sig.keys() gives the lookup keys from strict to loose; the matcher (fnvlink.py) tries them in that order.
 """
+import os
 import re
 
 CC = ('__cdecl', '__stdcall', '__fastcall', '__thiscall', '__clrcall', '__vectorcall')
@@ -279,7 +280,7 @@ MS_SPECIAL = {"`scalar deleting dtor'": '{sdd}', "`vector deleting dtor'": '{vdd
 DATA_DECO = re.compile(r'^\?([A-Za-z_]\w*)((?:@[A-Za-z_]\w*)*)@@[0-4]')   # ?name@scope...@@<storage class>
 
 
-def parse_msvc(mangled, dem):
+def _parse_msvc(mangled, dem):
     """Parse one llvm-undname line. dem is None when undname failed."""
     if not mangled.startswith('?'):
         return parse_msvc_c(mangled)
@@ -428,7 +429,7 @@ def itanium_variant(mangled):
     return best
 
 
-def parse_itanium(mangled, dem):
+def _parse_itanium(mangled, dem):
     if not mangled.startswith('_Z'):
         sig = Sig('cname', mangled)
         sig.qual = [mangled]
@@ -472,3 +473,87 @@ def parse_itanium(mangled, dem):
     sig.ret = canon_type(head[:cut]) if cut else None
     sig.variant = itanium_variant(mangled)
     return sig
+
+
+# ---------------------------------------------------------------------------------------------------- persisted parses
+# T1 (incremental link): every link process (resolve 1, resolve 2, bodies, vtables) parsed the same ~450k names
+# again (14 s each on 31971038). persist(path) keeps the parses of one process for the next: per (kind, name,
+# demangled text) the Sig's slot values (marshal: str, int, None, lists and tuples keep their types), under the
+# sha256 of this file (any change to the parser: an empty store). A hit builds a new Sig from them each time, as a
+# parse would, so callers never share one; a Sig with a value marshal cannot hold is simply not stored.
+_P = {'path': None, 'map': None, 'used': None, 'new': 0, 'prune': False}
+_SLOTS = Sig.__slots__
+
+
+def _code_id():
+    import hashlib
+    return 'sigs-persist-2 ' + hashlib.sha256(open(os.path.abspath(__file__), 'rb').read()).hexdigest()
+
+
+def persist(path, prune=False):
+    """Use (and at exit write) the parse store at path. prune: keep only this process's entries (fnvlink resolve,
+    which parses nearly every name of the link; the other steps add to the store). Off with FNVNX_SIGS_PERSIST=0."""
+    import atexit, marshal
+    if os.environ.get('FNVNX_SIGS_PERSIST', '1') == '0' or _P['path']:
+        return
+    m = {}
+    try:
+        with open(path, 'rb') as f:
+            d = marshal.load(f)
+        if isinstance(d, dict) and d.get('id') == _code_id() and isinstance(d.get('map'), dict):
+            m = d['map']
+    except (OSError, EOFError, ValueError, TypeError):
+        m = {}
+    _P.update(path=path, map=m, used=set(), new=0, prune=prune)
+    atexit.register(_persist_save)
+
+
+def _persist_save():
+    import marshal
+    path, m, used = _P['path'], _P['map'], _P['used']
+    if not path or not (_P['new'] or (_P['prune'] and len(used) < len(m))):
+        return
+    keep = {k: m[k] for k in used if k in m} if _P['prune'] else m
+    tmp = '%s.%d.tmp' % (path, os.getpid())
+    try:
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        with open(tmp, 'wb') as f:
+            marshal.dump({'id': _code_id(), 'map': keep}, f)
+        os.replace(tmp, path)
+    except (OSError, ValueError):
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _persisted(kind, fn, mangled, dem):
+    m = _P['map']
+    if m is None:
+        return fn(mangled, dem)
+    import marshal
+    k = (kind, mangled, dem)
+    b = m.get(k)
+    _P['used'].add(k)
+    if b is not None:
+        sig = Sig.__new__(Sig)
+        for a, v in zip(_SLOTS, marshal.loads(b)):
+            setattr(sig, a, v)
+        return sig
+    sig = fn(mangled, dem)
+    try:
+        m[k] = marshal.dumps(tuple(getattr(sig, a) for a in _SLOTS))
+        _P['new'] += 1
+    except ValueError:   # a value marshal cannot hold: not stored
+        pass
+    return sig
+
+
+def parse_msvc(mangled, dem):
+    """Parse one llvm-undname line. dem is None when undname failed."""
+    return _persisted('m', _parse_msvc, mangled, dem)
+
+
+def parse_itanium(mangled, dem):
+    return _persisted('i', _parse_itanium, mangled, dem)
+
