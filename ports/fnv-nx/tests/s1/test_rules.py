@@ -1722,10 +1722,20 @@ open(os.path.join(_th, 'src', 'user.cpp'), 'w').write('void g(HeapStandIn* h) { 
 prepare.__dict__.pop('_fnvnx_d22_refs', None)
 check('D26 a header declaration: another file calling a later member does not block it (same layout everywhere)',
       run(s1.r_vtable_dtor_slot, _CO, os.path.join(_th, 'src', 'x.h')), ['FNVNX_D22(HeapStandIn'])
-open(os.path.join(_th, 'src', 'user.cpp'), 'w').write('void g(HeapStandIn* h) { h->v0(); }\n')
+open(os.path.join(_th, 'src', 'user.cpp'), 'w').write('#include "sub/X.h"\nvoid g(HeapStandIn* h) { h->v0(); }\n')
 prepare.__dict__.pop('_fnvnx_d22_refs', None)
-check('D26 a header declaration whose placeholder another file calls or defines: nothing (D22-EXTERN)',
+check('D26 a header declaration whose placeholder an including file calls or defines: nothing (D22-EXTERN)',
       run(s1.r_vtable_dtor_slot, _CO, os.path.join(_th, 'src', 'x.h')), [], ['FNVNX_D22'])
+open(os.path.join(_th, 'src', 'user.cpp'), 'w').write('#include "other.h"\nvoid g(HeapStandIn* h) { h->v0(); }\n')
+prepare.__dict__.pop('_fnvnx_d22_refs', None)
+check('D26 ... a file that does not include the header does not block it',
+      run(s1.r_vtable_dtor_slot, _CO, os.path.join(_th, 'src', 'x.h')), ['FNVNX_D22(HeapStandIn'])
+open(os.path.join(_th, 'src', 'mid.h'), 'w').write('#include "x.h"\n')
+open(os.path.join(_th, 'src', 'user.cpp'), 'w').write('#include "mid.h"\nvoid g(HeapStandIn* h) { h->v0(); }\n')
+prepare.__dict__.pop('_fnvnx_d22_refs', None)
+check('D26 ... an indirect includer blocks it',
+      run(s1.r_vtable_dtor_slot, _CO, os.path.join(_th, 'src', 'x.h')), [], ['FNVNX_D22'])
+prepare.__dict__.pop('_fnvnx_d22_refs', None)
 prepare.__dict__.pop('_fnvnx_d22_refs', None)
 check('D26 a placeholder call with a non-literal argument is not a destructor call',
       run(s1.r_vtable_dtor_slot, _CO.replace('virtual void v0();', 'virtual void* v0(void*);') +

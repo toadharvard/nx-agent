@@ -5510,32 +5510,61 @@ def _d22_defines_none(masked, c):
 D22_REF = re.compile(r'(?:::|->|\.)\s*(~?[A-Za-z_]\w*)\s*\(')
 D22_SRC_EXT = ('.cpp', '.c', '.h', '.inl', '.hpp', '.cxx', '.cc')
 
+D22_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]([^>"]+)[>"]', re.M)
+
 def _d22_tree_refs(path):
-    """{member name: {files}} of the tree that holds path: the files that define (`::m(`) or call (`->m(`, `.m(`)
-    a member of that name. A header's declaration is seen by every unit that includes it, so a D22 edit there needs
-    the name unused in every other file (try1of1 4a15e91c: `NiPosData::LoadBinary` defined in niposdata.cpp lost
-    its declaration in niposdata_local.h; bgsprojectile.cpp called TESModelVTable::Slot0). Cached per tree root."""
+    """The tree index for header edits, cached per tree root: (refs, includers) where refs = {member name: {file}}
+    of the files that define (`::m(`) or call (`->m(`, `.m(`) a member of that name, and includers(h) = the files
+    that include the header h, directly or through other headers (by lower-case basename, as the decomp's includes
+    resolve case-insensitively). A header's declaration is seen only by the units that include it."""
     root, _ = prepare._units_json(path)
     top = root or os.path.dirname(os.path.abspath(path))
     cache = prepare.__dict__.setdefault('_fnvnx_d22_refs', {})
     if top in cache: return cache[top]
     refs = collections.defaultdict(set)
+    inc_by = collections.defaultdict(set)              # included basename -> files including it
+    base_of = collections.defaultdict(set)             # basename -> files of that name
     for dp, _, fs in os.walk(os.path.join(top, 'src') if os.path.isdir(os.path.join(top, 'src')) else top):
         for f in fs:
             if not f.endswith(D22_SRC_EXT): continue
             fp = os.path.abspath(os.path.join(dp, f))
             try: s = open(fp, encoding='utf-8', errors='surrogateescape').read()
             except OSError: continue
+            base_of[f.lower()].add(fp)
             for m in D22_REF.finditer(s): refs[m.group(1)].add(fp)
-    cache[top] = refs
-    return refs
+            for m in D22_INCLUDE.finditer(s): inc_by[os.path.basename(m.group(1).replace('\\', '/')).lower()].add(fp)
+    memo = {}
+    def includers(h):
+        h = os.path.abspath(h)
+        if h in memo: return memo[h]
+        seen, todo = set(), [os.path.basename(h).lower()]
+        done_b = set()
+        while todo:
+            b = todo.pop()
+            if b in done_b: continue
+            done_b.add(b)
+            for fp in inc_by.get(b, ()):
+                if fp not in seen:
+                    seen.add(fp)
+                    if not fp.endswith(('.cpp', '.c', '.cxx', '.cc')): todo.append(os.path.basename(fp).lower())
+        memo[h] = seen
+        return seen
+    cache[top] = (refs, includers)
+    return cache[top]
 
 def _d22_extern_use(path, member):
-    """a header's member name that another file of the tree defines or calls (above); .cpp declarations are the
-    unit's own"""
+    """a header's member name that a file including the header (directly or not) defines or calls (try1of1
+    4a15e91c: `NiPosData::LoadBinary` defined in niposdata.cpp lost its declaration in niposdata_local.h;
+    bgsprojectile.cpp called TESModelVTable::Slot0); .cpp declarations are the unit's own. A file that does not
+    include the header cannot see the edit (EQ vslot-shift: teswater_work.h's TESObjectREFR was held back because
+    unrelated files call some other class's vfn_0)"""
     if path.endswith(('.cpp', '.c', '.cxx', '.cc')) or not member: return False
     me = os.path.abspath(path)
-    return any(f != me for f in _d22_tree_refs(path).get(member, ()))
+    refs, includers = _d22_tree_refs(path)
+    users = refs.get(member, ())
+    if not users: return False
+    inc = includers(me)
+    return any(f != me and f in inc for f in users)
 
 def r_vtable_dtor_slot(path, text, stats):
     """D22: `virtual ~C();` for a listed class's slot-0 placeholder under GCC (above); a derived class's
