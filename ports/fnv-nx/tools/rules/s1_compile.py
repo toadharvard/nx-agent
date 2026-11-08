@@ -6451,12 +6451,6 @@ def r_vtable_dtor_slot(path, text, stats):
         applied[c['first'][0]] = (key, c['first'][2], 'callonly' if callonly else 'listed')
         if inline_dtor: stats['D22-INLINE'] += 1
         if callonly and c['dtor']: dtor_drops[c['first'][0]] = c['dtor_decl']
-        if callonly:
-            # the slot-0 placeholder is `virtual ~C()` under GCC now: its out-of-class empty definition goes too
-            for d in _d22_out_of_class_defs(masked, c['qual'][-1]):
-                if d.group('mem') == c['first'][2]:
-                    edits.append((d.start(), d.end(), 'FNVNX_D22_DROP(%s)' % text[d.start():d.end()].strip('\n')))
-                    stats['D22-DEFDROP'] += 1
         done[c['qual'][-1] + ('<>' if c['template'] else '')] = c['first'][2]
         stats['D22-CALLONLY' if callonly else 'D22'] += 1
     drop = set()
@@ -6477,6 +6471,19 @@ def r_vtable_dtor_slot(path, text, stats):
             done.pop(nm, None); done.pop(nm + '<>', None)
             stats['D22-CALLONLY'] -= 1
         edits = [e for i, e in enumerate(edits) if i not in drop]
+    for e in list(edits):
+        # D22-DEFDROP: a converted placeholder is `virtual ~C()` under GCC now (every path: call-only, listed,
+        # classlayout); its empty out-of-class definition goes too (S5 link 17f5b96e33fe: tesobjectcell.cpp's
+        # hkpEntityListener::FUN_004f0000 and blk_00b00000_od.cpp's BSWin32TaskletManager::vf00 stayed defined)
+        cm = re.match(r'FNVNX_D22I?\((\w+), (.*)\)$', e[2], re.S)
+        if not cm: continue
+        mm = re.search(r'([A-Za-z_]\w*)\s*\(', cm.group(2))
+        if not mm: continue
+        for d in _d22_out_of_class_defs(masked, cm.group(1)):
+            if d.group('mem') == mm.group(1) and D22_EMPTY_BODY.search(d.group(0)) and \
+                    not any(x[0] == d.start() for x in edits):
+                edits.append((d.start(), d.end(), 'FNVNX_D22_DROP(%s)' % text[d.start():d.end()].strip('\n')))
+                stats['D22-DEFDROP'] += 1
     for e in list(edits):
         # D22-DTOR: the class's own body-less `~C();` goes under GCC (`virtual ~C()` declares it now)
         if e[0] in dtor_drops and e[2].startswith(('FNVNX_D22(', 'FNVNX_D22I(')):
