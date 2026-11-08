@@ -3732,7 +3732,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     kind_ = 'd22-used'   # code names the destructor slot: prepare keeps the declaration (D22-USED)
                 if kind_ == 'minus-one' and 0 <= k_ < len(slots):
                     pair1 = vmo_dtor_slots(slots[k_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + k_),
-                                           exe_path, uncompiled=True)
+                                           exe_path, uncompiled=True, providers=providers)
                     if pair1:
                         m1, dp = 'classlayout', k_
                         st['classlayout-minus-one'] += 1
@@ -3761,7 +3761,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 exe_order.append((z, vs, why, path))
             if m1:
                 pair1 = vmo_dtor_slots(slots[0], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2), exe_path,
-                                       uncompiled=True)
+                                       uncompiled=True, providers=providers)
                 if pair1 is None:
                     st['d26-slot0-not-a-destructor'] += 1
                     exe_order.append((z, vs, 'd26-slot0-not-a-destructor', path))
@@ -3775,7 +3775,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 and os.environ.get('FNVNX_D26T', '1') != '0' and not is_com(z, [e.sym for e in ents[2:2 + n]]):
             dp_ = family_dtor_pos(slots, fam)
             pair1 = vmo_dtor_slots(slots[dp_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + dp_),
-                                   exe_path, uncompiled=True) if dp_ else None
+                                   exe_path, uncompiled=True, providers=providers) if dp_ else None
             if pair1:
                 m1, dp = 'd26-family-dtor', dp_
                 gone = [x for x in exe_order if x[0] == z]
@@ -3825,7 +3825,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                         x_ = expv[i_]
                         if isinstance(x_, tuple):
                             pair_ = vmo_dtor_slots(x_[1], native, msvc or (lambda n_: None), bridges, traps, st,
-                                                   (z, 2 + i_), exe_path, uncompiled=True)
+                                                   (z, 2 + i_), exe_path, uncompiled=True, providers=providers)
                             if pair_:
                                 fill += list(pair_)
                             else:
@@ -4054,7 +4054,7 @@ def family_dtor_pos(slots, fam):
     return None
 
 
-def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None, uncompiled=False):
+def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None, uncompiled=False, providers=None):
     """D1 and D0 (native slots 0 and 1) for exe slot 0 at a0 when it is the deleting destructor: the address map's
     Itanium pair (kind G), or flags stubs into a decomp definition of the `??_G` (its declaration takes the flags, its
     MSVC name is `??_G`/`??_E`, or the exe's code has the shape: exevft.deleting_dtor); None when exe slot 0 is not
@@ -4064,6 +4064,11 @@ def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None, u
     the exe address, so the
     table is rebuilt minus-one and exe slot k lands at k + 1 for its minus-one callers (FUN_00aa7400's 0x00aa77e0:
     the exe-order table ran Deallocate where MemoryManager FUN_00aa3e40 calls Allocate). FNVNX_D26U=0 turns it off."""
+    if native.get(a0) is None and providers and a0 in providers:
+        # an abstract class's destructor slot holds the CRT's pure virtual (_purecall, S4's provider): D1 and D0 are
+        # that provider, not traps (R2, vtgate 4264bfd7: AGListItem 0/1, AA74C0Base 1, the vmo copies 0106c934 ...)
+        st['slot0-dtor-provider'] += 1
+        return providers[a0][0], providers[a0][0]
     nd = native.get(a0)
     if nd is None and a0 in HK_SDD:   # W22: the Havok sized-free ??_G's stand-in, through the flags stubs
         for fl in (0, 1):
@@ -4155,7 +4160,7 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
         name = VMO_SYM % v
         slots = list(e.slots)
         n_trap = st['slots-trap']
-        pair = vmo_dtor_slots(slots[0], native, msvc, bridges, traps, st, (name, 2), exe_path)
+        pair = vmo_dtor_slots(slots[0], native, msvc, bridges, traps, st, (name, 2), exe_path, providers=providers)
         adj0 = None
         if pair is None and e.td and e.off and exe_path:
             adj0 = vmo_adjustor(slots[0], e.off, native, exe_path, plain=False)
