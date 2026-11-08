@@ -1477,6 +1477,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             by_cls[canon_it(n)].append(n)
     rebind, hand_rows = {}, []
     vmo = {}   # D26 (c): image vftable -> its minus-one native copy (minus_one_copies)
+    exev_all = {}   # exe vftables, RTTI and plain (stays empty without the exe: no copies, no V rows)
     for a, sites in sorted(hand.items()):
         how = 'named vftable' if a in vmap else None
         if a not in vmap:
