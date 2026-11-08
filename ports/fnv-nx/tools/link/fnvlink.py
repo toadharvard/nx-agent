@@ -385,6 +385,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         _pt[0] = now
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
+    sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'), prune=True)   # the last link's parses (T1)
     pre_stats = collections.Counter()
     tree = os.path.dirname(os.path.dirname(os.path.abspath(units_json)))   # <tree>/build/units.json
     renames = load_renames(UNITS_RENAMES if units_renames is None else units_renames, tree)
