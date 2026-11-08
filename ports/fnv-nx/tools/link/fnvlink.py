@@ -1710,6 +1710,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         exev_all.update(exevft.plain_vftables(exe_path, [v for v in vmap if v not in exev],
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
+        global VTFILL_ITANIUM
+        VTFILL_ITANIUM = itanium   # vtfill_hold_abi: slot_abi on the held slots
         fill = exe_slot_fill(exev_all, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, native, itanium, msvc,
                              canon_it, out, bridges, slot_over, exe_path, providers, ctor_pairs, unbound, hints, chints,
                              lay_of=lay_of, probe_req=probe_req)
@@ -3928,68 +3930,38 @@ GCC_THUNK_DTOR = re.compile(r'^_ZThn\d+_.*D([01])Ev$')
 
 
 VTFILL_HOLD = set()   # {(vtable symbol, slot index)}: load_vtfill_holds
-VTFILL_RELEASED = set()   # abi-check rows abi_releasable lets VTFILL write (FNVNX_ABIREL=0 keeps them held)
-ABI_INT_TYPES = {'bool', 'char', 'signed char', 'unsigned char', 'short', 'short int', 'unsigned short',
-                 'unsigned short int', 'int', 'signed', 'signed int', 'unsigned', 'unsigned int', 'long', 'long int',
-                 'unsigned long', 'unsigned long int', 'long long', 'unsigned long long', 'wchar_t', 'char16_t',
-                 'char32_t', 'size_t', 'std::size_t', 'ptrdiff_t', 'int8_t', 'uint8_t', 'int16_t', 'uint16_t',
-                 'int32_t', 'uint32_t', 'int64_t', 'uint64_t', 'intptr_t', 'uintptr_t', 'std::nullptr_t'}
+VTFILL_ITANIUM = None   # the link's Itanium signature parser (main sets it); vtfill_hold_abi demangles alone else
 
 
-def abi_params(text):
-    """'(int, Foo<a, b>*, char const&)' -> ['int', 'Foo<a, b>*', 'char const&'] (top-level commas); None if no
-    parenthesised list."""
-    text = text.strip()
-    if not (text.startswith('(') and text.endswith(')')):
+def vtfill_hold_abi(raw, x, native, msvc):
+    """R4/S1: how a call through a held slot (raw: the object's own Itanium slot symbol) reaches the exe override x's
+    native definition (its MSVC declaration): fnvlink.slot_abi's answer, or None when either signature is missing."""
+    nd = native.get(x)
+    if not raw or not raw.startswith('_Z') or not nd or not nd.get('msvc'):
         return None
-    out, cur, depth = [], '', 0
-    for c in text[1:-1]:
-        if c in '<([':
-            depth += 1
-        elif c in '>)]':
-            depth -= 1
-        if c == ',' and depth == 0:
-            out.append(cur.strip())
-            cur = ''
-        else:
-            cur += c
-    if cur.strip():
-        out.append(cur.strip())
-    return [] if out == ['void'] else out
-
-
-def abi_int_class(t):
-    """AAPCS64 ILP32: one parameter passed in a general register like an integer: pointers, references, member /
-    function pointers' plain-pointer form, integral types. Floats, vectors, by-value classes and enums the name
-    cannot show stay out."""
-    t = re.sub(r'\b(const|volatile)\b', ' ', t).strip()
-    t = ' '.join(t.split())
-    if t.endswith(('*', '&')) or '(*)' in t or '(&)' in t:
-        return True
-    return t in ABI_INT_TYPES
-
-
-def abi_releasable(abi):
-    """S1's rule (orchestrator-approved) for an `abi-check: (override) vs (slot)` row: VTFILL writes the override
-    when every parameter on both sides is integer-class (by position) and the override has no more parameters
-    than the slot (the extra slot arguments are ignored registers)."""
-    m = re.match(r'abi-check:\s*(\(.*\))\s+vs\s+(\(.*\))\s*$', abi)
-    if not m:
-        return False
-    ov, sl = abi_params(m.group(1)), abi_params(m.group(2))
-    if ov is None or sl is None or len(ov) > len(sl):
-        return False
-    return all(abi_int_class(t) for t in ov + sl)
+    ds = msvc(nd['msvc'])
+    if ds is None or ds.kind != 'func' or ds.raw_params is None:
+        return None
+    if VTFILL_ITANIUM is not None:
+        isig = VTFILL_ITANIUM(raw)
+    else:
+        try:
+            dem = subprocess.run([CXXFILT, raw], capture_output=True, text=True).stdout.strip()
+        except OSError:
+            return None
+        isig = sigs.parse_itanium(raw, dem)
+    if isig is None or isig.raw_params is None:
+        return None
+    return slot_abi(isig, ds)
 
 
 def load_vtfill_holds(top=None):
     """R4's overrides.tsv (fnvnx-vtbind-override/1, fnv-nx-build recon/vtbind) rows whose abi column starts with
-    `abi-check`: {(table, slot)} VTFILL keeps as compiled, except those abi_releasable passes (VTFILL_RELEASED,
-    stat vtbind-abi-released). The other rows need nothing: VTFILL writes the exe
+    `abi-check`: {(table, slot)} VTFILL keeps as compiled unless slot_abi finds the call reaches the override
+    unchanged (vtfill_hold_abi). The other rows need nothing: VTFILL writes the exe
     override's native in every slot it fills."""
     top = top or os.environ.get('FNVNX_RECON')
     out = set()
-    VTFILL_RELEASED.clear()
     if not top or not os.path.isdir(top):
         return out
     for dp, _, fs in os.walk(top):
@@ -4005,20 +3977,18 @@ def load_vtfill_holds(top=None):
             p = line.split('\t')
             if len(p) >= 7 and not line.startswith('#') and p[6].startswith('abi-check'):
                 try:
-                    key = (p[0], int(p[2]))
+                    out.add((p[0], int(p[2])))
                 except ValueError:
-                    continue
-                if os.environ.get('FNVNX_ABIREL', '1') != '0' and abi_releasable(p[6]):
-                    VTFILL_RELEASED.add(key)
-                else:
-                    out.add(key)
+                    pass
     return out
 
 
-def vtfill_block(expv, cur, z, base, off, native, providers, exe_path, msvc, bridges, traps, st, vtbind=None):
+def vtfill_block(expv, cur, z, base, off, native, providers, exe_path, msvc, bridges, traps, st, vtbind=None,
+                 raw=None):
     """VTFILL's words of one vtable of a group (classlayout.expected's list expv) -> [native symbol]. base: the word
     index of the vtable's address point in the group (2 for the primary), for the trap reports. cur: the vtable's
-    words as the object has them (renamed). off (VTFILL2): the COL offset of a secondary exe vftable, else None.
+    words as the object has them (renamed); raw: the same words before resolve's renames (the Itanium slot symbols
+    vtfill_hold_abi compares). off (VTFILL2): the COL offset of a secondary exe vftable, else None.
     D1 / D0 at a ('dtor', a) pair: the primary's vmo_dtor_slots (uncompiled ??_G included, W45); in a secondary
     vtable a GCC this-adjusting `_ZThn<off>_...D1Ev` / `D0Ev` pair the object already has there stays, else the exe's
     adjustor (`sub ecx, off; jmp ??_G`, vmo_adjustor) gets `__fnvnx_vadjd_<a>_<0|1>` stubs, the same this-adjustment
@@ -4079,7 +4049,15 @@ def vtfill_block(expv, cur, z, base, off, native, providers, exe_path, msvc, bri
             elif kb == 'fn' and sb:
                 t = sb
                 st['vtfill%s-vtbind-fn' % sfx] += 1
-        if (z, i) in VTFILL_HOLD and i < len(cur) and cur[i] and t != cur[i]:
+        how = None
+        if (z, i) in VTFILL_HOLD and i < len(cur) and cur[i] and t != cur[i] and raw and i < len(raw) and \
+                os.environ.get('FNVNX_ABIREL', '1') != '0':
+            how = vtfill_hold_abi(raw[i], x, native, msvc)
+        if how in ('same', 'the slot passes more'):
+            # S1's rule (slot_abi): every argument the definition reads arrives where it reads it, in the same
+            # register file, so the exe's override is written (vtfill-abi-released)
+            st['vtfill%s-abi-released' % sfx] += 1
+        elif (z, i) in VTFILL_HOLD and i < len(cur) and cur[i] and t != cur[i]:
             # R4 (recon/vtbind overrides.tsv, abi-check): the exe's derived override and the slot's declaration take
             # other parameters; writing the override would pass the callers' arguments to the wrong shape, so the
             # compiled word stays until the class is declared right (listed: vtfill-abi-hold)
@@ -4150,7 +4128,7 @@ def vtfill2_group(z, path, vs, ents, names, pts, n, fill, ov, xs, o, vmap, exev,
         expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), _cl.real_slots(exe_path, vv, sl) if exe_path else sl)
         b = ap // 4
         f2 = vtfill_block(expv, wn[b:b + ns], z, b, d_, native, providers, exe_path, msvc, bridges, traps, st,
-                          vtbind)
+                          vtbind, raw=[e.sym for e in ents[b:b + ns]])
         for k in range(min(ns, len(f2))):
             wn[b + k] = f2[k]
             keep.discard(b + k)
@@ -4282,8 +4260,6 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     VTFILL_HOLD.update(load_vtfill_holds())
     if VTFILL_HOLD:
         st['vtbind-hold-rows'] = len(VTFILL_HOLD)
-    if VTFILL_RELEASED:
-        st['vtbind-abi-released'] = len(VTFILL_RELEASED)
     lay = {}
     if exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0':
         import classlayout
@@ -4445,7 +4421,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     sl_ = _cl.real_slots(exe_path, vv_, slots) if exe_path else slots   # no words past the table
                     expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), sl_)
                     fill = vtfill_block(expv, names[2:2 + n], z, 2, None, native, providers, exe_path, msvc, bridges,
-                                        traps, st, vtbind)
+                                        traps, st, vtbind, raw=[e.sym for e in ents[2:2 + n]])
                     head_ = ['    .word 0x%x' % ents[0].word if not ents[0].sym else '    .word %s' % ents[0].sym,
                              '    .word %s' % ents[1].sym if ents[1].sym else '    .word 0x%x' % ents[1].word]
                     g2 = None

@@ -67,25 +67,47 @@ def main():
         '_ZTV1A\t01010000\t5\t00401000\t_ZN1A1fEv\t__fnv_00402000\tsame-params\n'
         '_ZTV1B\t01010100\t7\t00401100\t_ZN1B1gEf\t__fnv_00402100\tabi-check: (float) vs (int)\n')
     check(fnvlink.load_vtfill_holds(d) == {('_ZTV1B', 7)}, 'load_vtfill_holds: only the abi-check rows are held')
-    # S1's release rule: integer-class parameters by position, override no longer than the slot
-    R = fnvlink.abi_releasable
-    check(R('abi-check: (int) vs (void*)') and R('abi-check: () vs (TESObjectREFR*)') and
-          R('abi-check: (int, void*, unsigned char, int, void*) vs (int, int, int, int, int)') and
-          R('abi-check: (unsigned int) vs (hkEntityD085*)') and R('abi-check: (Foo<a, b> const&) vs (int)'),
-          'abi_releasable: integer-class params, override not longer -> released')
-    check(not R('abi-check: (BaseFormComponent*) vs ()') and not R('abi-check: (void*, void*) vs (hkpWorld*)') and
-          not R('abi-check: (float) vs (int)') and not R('abi-check: (int) vs (double)') and
-          not R('abi-check: (NiPoint3) vs (int)') and not R('abi-check: (TESGrass*, Ns::Argument) vs (TESForm*, int)')
-          and not R('abi-check: odd'), 'abi_releasable: longer override, floats, by-value classes stay held')
-    with open(os.path.join(d, 'vtbind', 'overrides.tsv'), 'a') as f:
-        f.write('_ZTV1C\t01010200\t3\t00401200\t_ZN1C1hEi\t__fnv_00402200\tabi-check: (int) vs (void*)\n')
-    check(fnvlink.load_vtfill_holds(d) == {('_ZTV1B', 7)} and fnvlink.VTFILL_RELEASED == {('_ZTV1C', 3)},
-          'load_vtfill_holds: a releasable abi-check row is not held')
-    os.environ['FNVNX_ABIREL'] = '0'
+    # S1's rule through R4's slot_abi: a held slot is released when the call reaches the override unchanged
+    import sigs
+    ms = {'?f@C@@QAEXH@Z': 'public: void __thiscall C::f(int)', '?g@C@@QAEXM@Z': 'public: void __thiscall C::g(float)'}
+    m = lambda n_: sigs.parse_msvc(n_, ms[n_])
+    nat = {0x401000: dict(msvc='?f@C@@QAEXH@Z'), 0x401010: dict(msvc='?g@C@@QAEXM@Z')}
+    H = fnvlink.vtfill_hold_abi
+    check(H('_ZN1C1fEPv', 0x401000, nat, m) == 'same' and H('_ZN1C1fEii', 0x401000, nat, m) == 'the slot passes more',
+          'vtfill_hold_abi: int / pointer in a W register, a slot passing more -> releasable')
+    check(H('_ZN1C1gEi', 0x401010, nat, m).startswith('argument 1 differs') and
+          H('_ZN1C1fEv', 0x401000, nat, m).startswith('the definition reads more') and
+          H('__fnv_00401000', 0x401000, nat, m) is None, 'vtfill_hold_abi: a float, a longer definition stay held')
+    import collections
+    fnvlink.VTFILL_HOLD.clear()
+    fnvlink.VTFILL_HOLD.update({('_ZTV1C', 0), ('_ZTV1C', 1)})
     try:
-        check(fnvlink.load_vtfill_holds(d) == {('_ZTV1B', 7), ('_ZTV1C', 3)}, 'FNVNX_ABIREL=0: every abi-check held')
+        import elfsyms
+
+        def ent(n_, a_):
+            sy = elfsyms.Sym(n_, 0, 0, 'func', 'global', 1, '.text', False)
+            return dict(unit='u.cpp', sym=sy, variants={}, tier='def', msvc=nat[a_]['msvc'], msvc_entry=None)
+        full = {0x401000: ent('_ZN1C1fEi', 0x401000), 0x401010: ent('_ZN1C1gEf', 0x401010)}
+
+        def blk(env):
+            os.environ.update(env)
+            try:
+                st = collections.Counter()
+                w = fnvlink.vtfill_block([0x401000, 0x401010], ['__fnv_00402000', '__fnv_00402010'], '_ZTV1C', 2, None,
+                                         full, {}, None, m, {}, {}, st,
+                                         raw=['_ZN1C1fEPv', '_ZN1C1gEi'])
+            finally:
+                for k in env:
+                    del os.environ[k]
+            return w, st
+        w, st = blk({})
+        check(w == ['__fnv_00401000', '__fnv_00402010'] and st['vtfill-abi-released'] == 1 and
+              st['vtfill-abi-hold'] == 1, 'vtfill_block: slot 0 released (same), slot 1 held (float): %s %s' % (w, st))
+        w0, st0 = blk({'FNVNX_ABIREL': '0'})
+        check(w0 == ['__fnv_00402000', '__fnv_00402010'] and st0['vtfill-abi-hold'] == 2,
+              'FNVNX_ABIREL=0: both held')
     finally:
-        del os.environ['FNVNX_ABIREL']
+        fnvlink.VTFILL_HOLD.clear()
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 
