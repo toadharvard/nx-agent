@@ -525,13 +525,19 @@ def ctor_member_vftables(path, addr, vftables):
 GETTER_MAX = 40   # instructions read from the entry to the first ret
 
 
-def _getter_in(code, base, vftables):
+_GETTER_CALLEE = {}
+
+
+def _getter_in(code, base, vftables, callee=None):
     """The vftable a getter returns, from the x86 bytes `code` at address `base`: V, or None. Walks the instructions
     to the first `ret` (at most GETTER_MAX; any branch or jump gives up) tracking esp as a displacement from the
     function's frame base: push -4, pop +4, sub/add esp imm, `and esp, imm` (a new base: the words so far are
     forgotten), a `call rel32` (the callee pops what was pushed since the previous call or the start: thiscall /
     stdcall), `mov dword ptr [esp+k], imm32` (records the word at cur+k), `mov eax, dword ptr [esp+k]` /
-    `mov eax, imm32` / `xor eax, eax` (the result). At the ret the result is returned if it is in vftables."""
+    `mov eax, imm32` / `xor eax, eax` (the result). At the ret the result is returned if it is in vftables.
+    callee(target) -> (bytes the callee pops or None, whether it preserves eax) or None: the callee's own `ret n`
+    (a saved register pushed before the arguments is not an argument: 0x00dfd800's `push esi`) and the CRT's
+    __security_check_cookie, which keeps eax (0x00d2c8a0's EH-frame getter)."""
     try:
         import capstone
         from capstone import x86 as cx
@@ -556,8 +562,12 @@ def _getter_in(code, base, vftables):
         if mn == 'call':
             if not (ops and ops[0].type == cx.X86_OP_IMM):
                 return None
-            cur += 4 * pushed
-            pushed, eax = 0, None   # eax is the callee's result
+            info = callee(ops[0].imm & 0xffffffff) if callee else None
+            pops = info[0] if info and info[0] is not None else 4 * pushed
+            cur += pops
+            pushed = max(0, pushed - pops // 4)
+            if not (info and info[1]):
+                eax = None   # eax is the callee's result
         elif mn == 'push':
             cur -= 4
             pushed += 1
@@ -624,4 +634,19 @@ def vtable_getter(path, addr, vftables):
             n //= 2
     if off is None:
         return None
-    return _getter_in(data[off:off + n], addr, vftables)
+
+    def callee(t):
+        if t not in _GETTER_CALLEE:
+            info = None
+            try:
+                o = pe.rva_to_off(t - pe.image_base, 128)
+            except Exception:
+                o = None
+            if o is not None:
+                b = data[o:o + 128]
+                r = _first_ret(b, t)
+                # __security_check_cookie: `cmp ecx, [__security_cookie]; jne ...; rep ret` keeps eax
+                info = (r[1] if r and r[1] is not None else None, b[:2] == b'\x3b\x0d')
+            _GETTER_CALLEE[t] = info
+        return _GETTER_CALLEE[t]
+    return _getter_in(data[off:off + n], addr, vftables, callee)

@@ -2562,23 +2562,25 @@ def vtget_pick(v, n, refs, ap_of, users):
     """R4 vftable getters: which stand-in vtable Z of a getter becomes an alias of the paired native vtable N.
     v: the image vftable the getter returns; n: (native vtable, address point) vmap/rebind gives v; refs: the `_ZTV`
     symbols the native function references; ap_of(z) -> [(address point, offset-to-top)] of z's group (None when z has
-    no words); users: {vtable: {image vftables paired to it}}.
+    no words); users: {vtable: {image vftables paired to it}}; refs in code order (the last one is the returned vptr).
     -> (outcome, z, delta) where delta = ap(N) - ap(Z) when outcome is 'alias', else z / delta are None."""
-    zs = sorted({r for r in refs if not r.startswith('_ZTVN10__cxxabiv')})
+    zs = [r for r in refs if not r.startswith('_ZTVN10__cxxabiv')]
     if not zs:
         return 'native references no vtable', None, None
-    if len(zs) > 1:
-        return 'native references %d vtables' % len(zs), None, None
-    z = zs[0]
-    if z == n[0]:
+    if n[0] in zs:
         return 'already the paired vtable', None, None
+    # a vtable another image vftable is paired with is a real class's (0x00dfd800 builds a second local
+    # hkReferencedObject): not the stand-in. Of the rest, in code order, an inlined constructor sequence stores its
+    # bases first, so the returned vptr is the last one (0x00dff380: S00dfbe20_Mid, then S00dff380_Object)
+    free = [r for r in zs if not (users.get(r, set()) - {v})]
+    if not free:
+        return 'stand-in is paired to another vftable', None, None
+    z = free[-1]
     pts = ap_of(z)
     if pts is None:
         return 'stand-in has no words', None, None
     if len(pts) != 1 or pts[0][1] != 0:
         return 'stand-in has %d address points' % len(pts), None, None
-    if users.get(z, set()) - {v}:
-        return 'stand-in is paired to another vftable', None, None
     return 'alias', z, n[1] - pts[0][0]
 
 
@@ -2637,8 +2639,13 @@ def vtget_aliases(exev, vmap, rebind, rtti, native, exe_path, obj_of, vstats, ou
         if typ != 2 or shndx >= len(o.secs):
             row[4] = 'not a function'
             continue
-        refs = {o.syms[r[0]][0] for off, r in o.rel(shndx).items()
-                if value <= off < value + size and o.syms[r[0]][0].startswith('_ZTV')}
+        refs = []
+        for off, r in sorted(o.rel(shndx).items()):
+            nm_ = o.syms[r[0]][0]
+            if value <= off < value + size and nm_.startswith('_ZTV'):
+                if nm_ in refs:
+                    refs.remove(nm_)
+                refs.append(nm_)
         outcome, z, delta = vtget_pick(v, n, refs, ap_of, users)
         row[2] = z or ' '.join(sorted(refs))
         row[4] = outcome

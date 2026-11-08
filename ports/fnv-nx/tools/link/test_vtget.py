@@ -69,23 +69,43 @@ def unit_a():
     check(exevft._getter_in(b'\xc3', BASE, vf) is None, 'a bare ret gives None')
     check(exevft._getter_in(b'\xb8' + struct.pack('<I', V) + b'\xc3', BASE, vf) == V, 'mov eax, V; ret')
     check(exevft._getter_in(b'\x90' * 60 + b'\xc3', BASE, vf) is None, 'more than 40 instructions gives up')
+    # a saved register pushed before the arguments (0x00dfd800's shape): the callee's own `ret 4` says what it pops
+    call = lambda at: b'\xe8' + struct.pack('<i', 0x1000 - (at + 5))   # noqa: E731
+    pre = b'\x55\x89\xe5\x83\xe4\xf0\x83\xec\x5c\x56\x31\xf6\x56\x8d\x4c\x24\x28' + \
+        b'\xc7\x44\x24\x14' + struct.pack('<I', V)
+    code = pre + call(len(pre))
+    code += b'\x56\x8d\x4c\x24\x54'
+    code += call(len(code))
+    code += b'\x8b\x44\x24\x10\x5e\x89\xec\x5d\xc3'
+    pops4 = lambda t: (4, False)   # noqa: E731
+    check(exevft._getter_in(code, 0, vf, pops4) == V, 'saved register + two ctor calls popping 4: V')
+    check(exevft._getter_in(code, 0, vf) is None, 'without the callee info the saved register counts as an argument')
+    # the CRT cookie check after the result (0x00d2c8a0): it keeps eax
+    code = b'\xb8' + struct.pack('<I', V)
+    code += call(len(code))
+    code += b'\xc3'
+    check(exevft._getter_in(code, 0, vf, lambda t: (0, True)) == V, '__security_check_cookie keeps eax')
+    check(exevft._getter_in(code, 0, vf, lambda t: (0, False)) is None, 'any other call clobbers eax')
 
 
 def unit_b():
     aps = {'_ZTV1Z': [(8, 0)], '_ZTV1M': [(8, 0), (24, -8)], '_ZTV1Q': [(16, 0)]}
 
     def pick(refs, users=None):
-        return fnvlink.vtget_pick(V, ('_ZTV1C', 8), refs, aps.get, users or {})
+        return fnvlink.vtget_pick(V, ('_ZTV1C', 8), list(refs), aps.get, users or {})
     check(pick({'_ZTV1Z'}) == ('alias', '_ZTV1Z', 0), 'one stand-in at the same point: delta 0')
     check(pick({'_ZTV1Q'}) == ('alias', '_ZTV1Q', -8), 'another address point: delta apN - apZ')
     check(pick({'_ZTV1C'})[0] == 'already the paired vtable', 'the paired vtable itself')
-    check(pick({'_ZTV1Z', '_ZTV1Q'})[0].startswith('native references 2'), 'two stand-ins: none')
+    check(pick(['_ZTV1Q', '_ZTV1Z']) == ('alias', '_ZTV1Z', 0), 'a base then the derived stand-in: the last one (the returned vptr)')
+    check(pick(['_ZTV1Z', '_ZTV1C'])[0] == 'already the paired vtable', 'the derived one is the paired vtable: nothing')
+    check(pick(['_ZTV1Z', '_ZTV1Q'], {'_ZTV1Q': {0x1234}}) == ('alias', '_ZTV1Z', 0),
+          'a second local of a real class (paired elsewhere) after the stand-in: the stand-in')
     check(pick(set())[0] == 'native references no vtable', 'no vtable')
     check(pick({'_ZTV1M'})[0] == 'stand-in has 2 address points', 'a stand-in with two address points')
     check(pick({'_ZTV1X'})[0] == 'stand-in has no words', 'a stand-in with no words')
     check(pick({'_ZTV1Z'}, {'_ZTV1Z': {0x1234}})[0] == 'stand-in is paired to another vftable', 'paired elsewhere')
     check(pick({'_ZTV1Z'}, {'_ZTV1Z': {V}})[0] == 'alias', 'paired only to V is fine')
-    check(pick({'_ZTVN10__cxxabiv117__class_type_infoE', '_ZTV1Z'})[0] == 'alias', 'cxxabi vtables are ignored')
+    check(pick(['_ZTV1Z', '_ZTVN10__cxxabiv117__class_type_infoE'])[0] == 'alias', 'cxxabi vtables are ignored')
 
 
 HEADER = r'''#pragma once
