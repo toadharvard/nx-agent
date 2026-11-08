@@ -1354,7 +1354,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             rtti.add(vtables.Obj(u.obj), u.host is not None)
     vmap, vstats = vtables.vftable_map(vnames, rtti, canon_it)
     hand = hand_vptr_stores(os.path.dirname(os.path.dirname(os.path.abspath(units_json))), real, vnames, msvc,
-                            canon_msvc)
+                            canon_msvc, os.path.join(out, 'cache', 'hvs.marshal'))
     # the class constructed (or destroyed) at a storing function's address, by every name units.json gives it
     # (`??0X`, `??1X`, `??_GX`, `??_EX` in any unit): a decomp shell storing an image vtable is often the
     # constructor another unit names properly (S5 J-0102: 750 hand-stored vptrs had no native vtable on f13)
@@ -1729,7 +1729,70 @@ HV_CAST = re.compile(r'\(\s*(?:const\s+|unsigned\s+|signed\s+|struct\s+|class\s+
 HV_NOISE = re.compile(r'[\s&()]')
 
 
-def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
+def _hv_unit(text, names, known, near):
+    """hand_vptr_stores for one unit text: [(address, class as written or None, function index, @fnv address, offset)]
+    (a pure function of its arguments: kept per unit between link processes, _hv_cache)."""
+    got = []
+    heads = sorted([(m.start(), m.group(1)) for m in FUNC_HDR.finditer(text)] +
+                   [(m.start(), None) for m in FREE_HDR.finditer(text)], key=lambda h: h[0])
+    fnvs = [(m.start(), int(m.group(1), 16)) for m in FNV_ANNOT.finditer(text)]
+    pos = 0
+    for stmt in text.split(';'):
+        start, pos = pos, pos + len(stmt) + 1
+        if '=' not in stmt:   # HV_ASSIGN needs one (T1: most statements; the same sites)
+            continue
+        st = HV_BRACE.split(stmt)[-1]
+        spos = start + len(stmt) - len(st)   # where the statement itself begins (after the last brace)
+        m = HV_ASSIGN.match(st)
+        if not m:
+            continue
+        rhs = m.group('rhs')
+        while True:
+            r2 = HV_CAST.sub('', rhs)
+            if r2 == rhs:
+                break
+            rhs = r2
+        rhs = HV_NOISE.sub('', rhs)
+        a = names.get(rhs)
+        if a is None and DAT_NAME.match(rhs):   # a name units.json does not bind for this unit (S5 J-0109)
+            a = int(DAT_NAME.match(rhs).group(1), 16)
+            if not (kind_of_addr(a) == 'data' and near[0] <= a <= near[1]):
+                a = None
+        if a is None:
+            continue
+        lhs = m.group('lhs').strip()
+        off = 0
+        mo = DEREFN_LHS.match(lhs) or DEREFK_LHS.match(lhs)
+        if mo:
+            off = int(mo.group(1), 0) * (4 if mo.re is DEREFK_LHS else 1)
+        if not (a in known or VPTR_LHS.search(lhs) or DEREF_LHS.match(lhs) or
+                ((DEREF1_LHS.match(lhs) or (mo and off)) and near[0] <= a <= near[1])):
+            continue
+        cls, fn, hpos_ = None, -1, 0
+        for k, (hpos, hcls) in enumerate(heads):
+            if hpos > spos:
+                break
+            cls, fn, hpos_ = hcls, k, hpos
+        # the storing function's original address: its `// @fnv 0x...` annotation, the last one before the
+        # store (prepare keeps them above each definition)
+        fa = max(((p_, x) for p_, x in fnvs if p_ < spos), default=(None, None))[1]
+        got.append((a, cls, fn, fa, off))
+    return got
+
+
+def _hv_cache(path):
+    """{key: [(address, class, function index, @fnv address, offset)]} of out/cache/hvs.marshal, under this file's
+    sha256 (T1: resolve 1 and 2 and every later head scanned every unit's statements again: 11 s of resolve)."""
+    import marshal
+    code = hashlib.sha256(open(os.path.abspath(__file__), 'rb').read()).hexdigest()
+    try:
+        d = marshal.load(open(path, 'rb'))
+        return code, (d['units'] if d.get('code') == code else {})
+    except (OSError, EOFError, ValueError, TypeError, KeyError):
+        return code, {}
+
+
+def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc, cache_path=None):
     """Hand-written stores of image vftable addresses into vptrs in the unit sources: `x.vtbl = &DAT_010176f8;`,
     `*(void **)this = kVtbl_X;`, ... -> {address: [(unit, canonical class of the storing member function or
     None)]}. A store counts when the right side is (after casts and &) a name the unit binds to a data address and
@@ -1739,6 +1802,9 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
     near = (min(known) - 0x10000, max(known) + 0x10000) if known else (1, 0)
     sites = []
     out = collections.defaultdict(list)
+    code, cache = _hv_cache(cache_path) if cache_path else (None, None)
+    used = {}
+    ksig = hashlib.sha1(('%r|%r' % (sorted(known), near)).encode()).hexdigest()
     for u in real:
         path = os.path.join(tree, u.source)
         if not os.path.exists(path):
@@ -1752,50 +1818,25 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
         if not names:
             continue
         text = open(path, encoding='utf-8', errors='surrogateescape').read()
-        heads = sorted([(m.start(), m.group(1)) for m in FUNC_HDR.finditer(text)] +
-                       [(m.start(), None) for m in FREE_HDR.finditer(text)], key=lambda h: h[0])
-        fnvs = [(m.start(), int(m.group(1), 16)) for m in FNV_ANNOT.finditer(text)]
-        pos = 0
-        for stmt in text.split(';'):
-            start, pos = pos, pos + len(stmt) + 1
-            if '=' not in stmt:   # HV_ASSIGN needs one (T1: most statements; the same sites)
-                continue
-            st = HV_BRACE.split(stmt)[-1]
-            spos = start + len(stmt) - len(st)   # where the statement itself begins (after the last brace)
-            m = HV_ASSIGN.match(st)
-            if not m:
-                continue
-            rhs = m.group('rhs')
-            while True:
-                r2 = HV_CAST.sub('', rhs)
-                if r2 == rhs:
-                    break
-                rhs = r2
-            rhs = HV_NOISE.sub('', rhs)
-            a = names.get(rhs)
-            if a is None and DAT_NAME.match(rhs):   # a name units.json does not bind for this unit (S5 J-0109)
-                a = int(DAT_NAME.match(rhs).group(1), 16)
-                if not (kind_of_addr(a) == 'data' and near[0] <= a <= near[1]):
-                    a = None
-            if a is None:
-                continue
-            lhs = m.group('lhs').strip()
-            off = 0
-            mo = DEREFN_LHS.match(lhs) or DEREFK_LHS.match(lhs)
-            if mo:
-                off = int(mo.group(1), 0) * (4 if mo.re is DEREFK_LHS else 1)
-            if not (a in known or VPTR_LHS.search(lhs) or DEREF_LHS.match(lhs) or
-                    ((DEREF1_LHS.match(lhs) or (mo and off)) and near[0] <= a <= near[1])):
-                continue
-            cls, fn, hpos_ = None, -1, 0
-            for k, (hpos, hcls) in enumerate(heads):
-                if hpos > spos:
-                    break
-                cls, fn, hpos_ = hcls, k, hpos
-            # the storing function's original address: its `// @fnv 0x...` annotation, the last one before the
-            # store (prepare keeps them above each definition)
-            fa = max(((p_, x) for p_, x in fnvs if p_ < spos), default=(None, None))[1]
+        if cache is not None:
+            key = hashlib.sha1(('%s\0%s\0%r' % (ksig, text, sorted(names.items()))).encode('utf-8', 'surrogateescape')).hexdigest()
+            got = cache.get(key)
+            if got is None:
+                got = _hv_unit(text, names, known, near)
+            used[key] = got
+        else:
+            got = _hv_unit(text, names, known, near)
+        for a, cls, fn, fa, off in got:
             sites.append((a, u.source, canon_msvc(cls) if cls else None, (u.source, fn), fa, off))
+    if cache_path and cache is not None:
+        import marshal
+        try:
+            tmp = '%s.%d.tmp' % (cache_path, os.getpid())
+            with open(tmp, 'wb') as f:
+                marshal.dump({'code': code, 'units': used}, f)
+            os.replace(tmp, cache_path)
+        except (OSError, ValueError):
+            pass
     per_fn = collections.defaultdict(set)
     for a, _, _, fn, _, off in sites:
         per_fn[(fn, off)].add(a)
