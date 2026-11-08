@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'difffuzz'))
 
 import a64image   # noqa: E402
+import causes     # noqa: E402
 
 FAIL = []
 
@@ -50,6 +51,17 @@ def test_provider():
         check(glob.get('__fnv_00402000') == a64image.CODE_STUB + 0x402000,
               'the provider\'s __fnv_00402000 does not capture the unit\'s call: still the code stub (%s)'
               % hex(glob.get('__fnv_00402000', 0)))
+
+
+def test_isoc23():
+    """strtoul and glibc's C23 redirect __isoc23_strtoul are the same C function (0x005afe10)."""
+    old = causes.link_symbol
+    causes.link_symbol = lambda a: {0x00ec8d33: 'strtoul'}.get(a)
+    try:
+        check(causes._libc_variant('00ec8d33', 'name:__isoc23_strtoul'), 'strtoul vs __isoc23_strtoul')
+        check(not causes._libc_variant('00ec8d33', 'name:__isoc23_strtol'), 'another function: no')
+    finally:
+        causes.link_symbol = old
 
 
 if __name__ == '__main__':
