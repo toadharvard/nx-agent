@@ -61,6 +61,9 @@ class Result:
 
 
 class Arm64Engine:
+    _fill = None                         # the planted stack fill of the running case (world.scrub_dead_frames)
+    _fn_starts = None                    # addresses of the image's function symbols, built on first use
+
     def __init__(self, world_obj, image, stub_orig, vtables=None, vt_mem=None):
         self.vtables = vtables or {}
         self.callee_conv = None          # original address -> Conv of the callee definition (set by runner.Pair)
@@ -263,7 +266,8 @@ class Arm64Engine:
         if native is None:
             r.error = 'no-native-entry'
             return r
-        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + world.stack_fill(case.seed ^ 0xa5, 0x1000))
+        self._fill = world.stack_fill(case.seed ^ 0xa5, 0x1000)
+        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + self._fill)
         uc.mem_write(world.SP0, bytes(world.STACK[1] - world.SP0))
         for i in range(31):
             uc.reg_write(XR[i], world.garbage32(case.seed, 200 + i) | (world.garbage32(case.seed, 300 + i) << 32))
@@ -430,6 +434,11 @@ class Arm64Engine:
             r.private_addrs.add(address)
 
     def _on_cov(self, uc, address, size, r):
+        if world.STUB_OUT and self._fill is not None:
+            if self._fn_starts is None:
+                self._fn_starts = set(getattr(self.image, 'syms', {}).values())
+            if address in self._fn_starts:
+                world.scrub_dead_frames(uc, uc.reg_read(A.UC_ARM64_REG_SP), self._fill)
         r.blocks.add(address)
 
     def _on_wild(self, uc, address, size, user):

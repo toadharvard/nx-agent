@@ -154,12 +154,13 @@ def _nan(b):
 
 
 def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=None, alias=None, agg_ptrs=None,
-                 result_buf=None):
+                 result_buf=None, narrow=()):
     """First logical argument the two sides pass differently to the same callee (pointers to their own stack
     frames are equal by definition: the frames differ by design). skip: definition labels the caller does not pass
     (S2's edx dummies); gx/ga: garbage words planted on each machine - an oracle argument that is oracle garbage is
     noise (the original caller passed whatever its registers held), a native one that is native garbage while the
-    oracle's is not stays a divergence (marked arm_garbage)."""
+    oracle's is not stays a divergence (marked arm_garbage). narrow: labels whose callee reads the stack word as one
+    byte only (retsrc.byte_only_labels): only the low byte is the argument."""
     dx, da = decode_x86(cv, cx), decode_a64(cv, ca)
     soft_d = None
     pushed = getattr(cx, 'pushed', None)
@@ -169,6 +170,8 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
                 v.label in beyond:
             continue
         bx, ba = dx[v.label][:v.size], da[v.label][:v.size]
+        if v.label in narrow:
+            bx, ba = bx[:1], ba[:1]
         if v.cls == 'I8' and v.is_bool:
             bx, ba = bytes([bx[0] != 0]), bytes([ba[0] != 0])
         if bx == ba:
@@ -433,6 +436,12 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
                 un = retsrc.unread_labels(cv, cx.target)
                 if un:
                     skip = set(skip) | un
+                # (difffuzz-20, byte-arg) a stack word the callee's exe code reads only as one byte: the upper three
+                # bytes are whatever the caller's slot held (0x00b6d170 pushes a bool after a byte store into a dead
+                # slot), no part of the argument
+                narrow = retsrc.byte_only_labels(cv, cx.target)
+            else:
+                narrow = ()
             if (getattr(cv, 'name', '') or '').startswith(('??_G', '??_E')) or \
                     __import__('exeempty').deleting_wrapper(cx.target & 0xffffffff):
                 # an MSVC deleting destructor (this, flags) is the Itanium D0 / D1 natively (this only, D7): the
@@ -440,14 +449,14 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
                 skip = set(skip) | {v.label for v in cv.vals if v.label != 'this'}
             d = compare_args(cv, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                              garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                             (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret)
+                             (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret, narrow)
             if d and not d.get('soft') and cx.target >= 0:
                 ths = {l for l, sp, _o, _s in cv.x86 if sp == 'ecx' and l in skip}
                 cv2 = _thisless(cv, ths) if ths else None
                 if cv2 is not None and compare_args(
                         cv2, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                         garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                        (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret) is None:
+                        (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret, narrow) is None:
                     d = None     # the registers at the stub are the exe's layout: the unit's call went through the adapter
             if d and (i in swapped or i + 1 in swapped):
                 # a swapped pair: the calls at i and i + 1 are different callees on the two machines, so compare
@@ -694,8 +703,40 @@ class Pair:
         self.deadline = None             # time.time() after which run() raises FunctionTimeout
         self.pops = {}                   # learned `ret N` of intercepted x86 callees of unknown convention
         self.pops_tried = set()
+        self._base_code = dict(target.x86_code)      # the oracle code before any adaptive follow
 
     def run(self, case, max_steps=200000):
+        """`_run_adapted`, then (difffuzz-20, adapt-state) a second look at a call divergence found after the pair
+        adapted: the follow is learned on the case that needed it and kept for the next ones, but GCC may inline a
+        callee at one path or site and call it at another (0x00a24280: the first case ran 0x00a23d40 inline, the
+        trial with a bool byte of 1 reached the site where the native calls it). Run with the oracle code as it was
+        before the follow; when the machines then agree on every call and store, that is the result of the case."""
+        rx, ra, d = self._run_adapted(case, max_steps)
+        if d and d.get('kind') in ('call-count', 'call-target') and not d.get('soft') and self.adapted and \
+                self.adapted < 16:
+            alt = self._run_unadapted(case, max_steps)
+            if alt is not None and alt[2] is None:
+                return alt
+        return rx, ra, d
+
+    def _run_unadapted(self, case, max_steps):
+        code = self.target.x86_code
+        saved, adapted = dict(code), self.adapted
+        code.clear(); code.update(self._base_code)
+        self.adapted = 16                # no further follow while this run decides
+        self.xe = None
+        try:
+            return self._run_adapted(case, max_steps)
+        except FunctionTimeout:
+            raise
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            code.clear(); code.update(saved)
+            self.adapted = adapted
+            self.xe = None
+
+    def _run_adapted(self, case, max_steps=200000):
         """One case on both machines. Adaptive follow: when the k-th call goes to oracle function X on x86 but
         elsewhere natively and X's oracle code is available, the native side inlined X (the unit-wide preload test
         missed it because the unit calls X elsewhere): X joins the oracle code and the case runs again. (F1b,
