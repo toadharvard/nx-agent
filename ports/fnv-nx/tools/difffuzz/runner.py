@@ -240,6 +240,48 @@ def _nrvo_copy(xcalls, ta, sret, convs):
     return None
 
 
+def _perm_align(rx, ra):
+    """(r4 uncls, call-order) The native's call index for each oracle call, when the traces differ only by the order
+    MSVC and GCC evaluate the arguments of one call in (right to left against left to right), else None. All three:
+    1. every block of calls that differs is exactly reversed on the other machine (no other permutation counts);
+    2. the traces are equal before and after the differing region (the same consuming call follows on both);
+    3. in the exe, each block is a run of calls whose results (eax) are pushed or moved before the consuming call
+       (exeempty.arg_blocks, read from the return addresses of the oracle's calls).
+    A reordered pair of statements (unlock before lock, free before use) fails 3 and stays a divergence."""
+    import exeempty
+    tx, ta = [c.target for c in rx.calls], [c.target for c in ra.calls]
+    if len(tx) != len(ta) or tx == ta:
+        return None
+    lo = next(i for i, (p, q) in enumerate(zip(tx, ta)) if p != q)
+    hi = len(tx) - next(i for i, (p, q) in enumerate(zip(reversed(tx), reversed(ta))) if p != q)
+    rets = [getattr(c, 'ret_to', None) for c in rx.calls[lo:hi]]
+    if None in rets or hi - lo > 16:
+        return None
+    blocks = exeempty.arg_blocks(rets)
+    if not blocks:
+        return None
+    order = list(range(len(tx)))
+    for b0, b1 in blocks:
+        b0, b1 = b0 + lo, b1 + lo
+        if ta[b0:b1] == tx[b0:b1][::-1]:
+            order[b0:b1] = list(range(b1 - 1, b0 - 1, -1))
+        elif ta[b0:b1] != tx[b0:b1]:
+            return None
+    return order if order != list(range(len(tx))) else None
+
+
+def compare(*a, **kw):
+    """_compare, plus (r4 uncls) a mark on a hard divergence found after the calls were paired by callee instead of by
+    position (`_perm_align`): the canned results are numbered by call index, so a reordered callee got another value
+    and the arguments it feeds differ for that reason (call-order-args, not decided)."""
+    rx = a[1] if len(a) > 1 else kw['rx']
+    rx.perm_aligned = False
+    d = _compare(*a, **kw)
+    if d and not d.get('soft') and getattr(rx, 'perm_aligned', False):
+        d['after_perm'] = True
+    return d
+
+
 def _thisless(cv, labels):
     """cv with the native registers of its parameters moved down one x register, `labels` (a `this` the callee's
     exe code never reads) dropped: the layout of a call that went through a link adapter taking the member's
@@ -275,7 +317,16 @@ def _destroys_params(calls, agg_ptrs):
         for c in calls)
 
 
-def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
+def _is_arg_block(rx, i):
+    """Calls i and i + 1 of the oracle are the argument block of one call, by the exe's code (exeempty.arg_blocks:
+    each result is pushed or moved to a register before the consuming call). False when the oracle's return addresses
+    or the code do not show it."""
+    import exeempty
+    rets = [getattr(c, 'ret_to', None) for c in rx.calls[i:i + 2]]
+    return None not in rets and len(rets) == 2 and exeempty.arg_blocks(rets) == [(0, 2)]
+
+
+def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
             garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
             agg_ptrs=None):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
@@ -288,18 +339,35 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     # common prefix is what led there (difffuzz-19: a native call through a vtpad slot where the oracle called the
     # exe's slot, then faulted on the canned result, was an oracle-side error, not vptr-unpaired)
     one_error = (ex is None) != (ea is None)
+    soft = None
+    if getattr(ra, 'split_folds', 0) or getattr(rx, 'null_deletes', 0) != getattr(ra, 'null_deletes', 0):
+        # (r4 uncls) a delete GCC drops (null pointer) or folds into the deleting-destructor call (split-delete): the
+        # engines left those calls out of the traces (libcalls.delete_fold); kept as a soft note
+        soft = dict(kind='call-count', x86=len(rx.calls), arm=len(ra.calls), soft=True,
+                    split_delete=bool(getattr(ra, 'split_folds', 0)),
+                    null_delete=getattr(rx, 'null_deletes', 0) != getattr(ra, 'null_deletes', 0))
     tx = [c.target for c in rx.calls]
     ta = [c.target for c in ra.calls]
+    perm = _perm_align(rx, ra) if not one_error else None
+    if perm is not None:
+        # (r4 uncls) the same calls in another order, further apart than the adjacent swap below: pair each oracle
+        # call with the native call of the same callee (occurrence by occurrence) and compare those; by design
+        ra.calls = [ra.calls[j] for j in perm]
+        ta = [c.target for c in ra.calls]
+        rx.perm_aligned = True
+        soft = soft or dict(kind='call-count', x86=len(tx), arm=len(ta), soft=True, call_order=True, arg_order=True)
     fam = libcalls.FAMILY
     # D21 (coverage first): a by-design or harness-made difference does not end the comparison; the first one is
     # kept and returned only when nothing hard follows (`soft`)
-    soft = None
     swapped = set()
     for i in range(min(len(tx), len(ta))):
         if i in swapped:
             continue
-        if tx[i] != ta[i] and i + 1 < min(len(tx), len(ta)) and tx[i] == ta[i + 1] and tx[i + 1] == ta[i]:
-            # two adjacent calls in swapped order: C++ leaves the evaluation order of operands open (call-order)
+        pair_swapped = tx[i] != ta[i] and i + 1 < min(len(tx), len(ta)) and tx[i] == ta[i + 1] and \
+            tx[i + 1] == ta[i]
+        if pair_swapped and _is_arg_block(rx, i):
+            # two adjacent calls in swapped order, and the exe shows they are the arguments of one call (their
+            # results are pushed or moved before the consumer): C++ leaves that evaluation order open (call-order)
             if soft is None:
                 soft = dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]), x86_next=_hex(tx[i + 1]),
                             arm_next=_hex(ta[i + 1]), soft=True, call_order=True)
@@ -321,6 +389,8 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
                      x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]],
                      x86_next=_hex(tx[i + 1]) if i + 1 < len(tx) else None,
                      arm_next=_hex(ta[i + 1]) if i + 1 < len(ta) else None)
+            if pair_swapped:
+                d['call_order_unproven'] = True     # (r4 uncls) a swap the exe does not show to be an argument list
             if vcalls is not None and tx[i] >= 0 and tx[i] not in vcalls[0]:
                 d['vcall'] = 'planted' if tx[i] in vcalls[1] else 'unplanted'
             if vcalls is not None and ta[i] >= 0 and ta[i] in vcalls[1] and ta[i] not in vcalls[0]:
@@ -363,7 +433,8 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
                 un = retsrc.unread_labels(cv, cx.target)
                 if un:
                     skip = set(skip) | un
-            if (getattr(cv, 'name', '') or '').startswith(('??_G', '??_E')):
+            if (getattr(cv, 'name', '') or '').startswith(('??_G', '??_E')) or \
+                    __import__('exeempty').deleting_wrapper(cx.target & 0xffffffff):
                 # an MSVC deleting destructor (this, flags) is the Itanium D0 / D1 natively (this only, D7): the
                 # flags are the variant, not an argument
                 skip = set(skip) | {v.label for v in cv.vals if v.label != 'this'}
@@ -1172,7 +1243,12 @@ class Pair:
         name = getattr(self.target.conv, 'name', '') or ''
         if not (name.startswith(('??1', '??_G', '??_E')) or DTOR_ITANIUM.search(name)) and \
                 not self._unnamed_deleting_dtor():
-            return None
+            # (r4 uncls) a destructor under another name: the exe's scalar deleting wrapper, or a body that stores a
+            # derived class's vftable and then a base class's (exeempty.deleting_wrapper / dtor_chain)
+            import exeempty
+            a = getattr(self.target, 'orig_addr', None)
+            if a is None or not (exeempty.deleting_wrapper(a) or exeempty.dtor_chain(a)):
+                return None
         if getattr(self, '_vpw', None) is None:
             import classify
             vft = set(classify.image_vftables()) | set(getattr(self.target, 'exe_vfts', ()) or ())

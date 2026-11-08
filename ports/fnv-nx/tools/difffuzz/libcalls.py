@@ -61,6 +61,9 @@ A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp'
             'fnvnx_byteswap_ulong': 'bswap', '__builtin_bswap32': 'bswap',
             'fnvnx_rt_dynamic_cast': 'rtdyncast', '__dynamic_cast': 'rtdyncast',
             '_memcpy': 'memcpy', '_memmove': 'memmove',
+            # MSVC's rep movsd / rep movsb intrinsics, declared as functions by Havok units (platform/crt/msvc_names.c
+            # defines them out of line): the oracle executes the string instruction, there is no call (r4 uncls)
+            '__movsd': 'rep_movsd', '__movsb': 'rep_movsb',
             '_memset': 'memset', '_strlen': 'strlen', '_strcmp': 'strcmp',
             # GCC's thread-safe local statics (MSVC 2008: a plain guard bit, no call): single-threaded semantics
             '__cxa_guard_acquire': 'guard_acquire', '__cxa_guard_release': 'guard_release',
@@ -195,6 +198,16 @@ def run(name, m, a):
         raise TooLong(name)
     if name in ('memcpy', 'memmove'):
         m.write(a[0], m.read(a[1], a[2])); return a[0]
+    if name in ('rep_movsd', 'rep_movsb'):
+        # forward, element by element as the string instruction copies (an overlapping copy repeats the pattern)
+        w = 4 if name == 'rep_movsd' else 1
+        n = a[2] & 0xffffffff
+        if n * w > MAX_LEN:
+            raise TooLong(name)
+        d, s = a[0] & 0xffffffff, a[1] & 0xffffffff
+        for i in range(n):
+            m.write(d + w * i, m.read(s + w * i, w))
+        return a[0]
     if name == 'memset':
         m.write(a[0], bytes([a[1] & 0xff]) * a[2]); return a[0]
     if name == 'memcmp':
@@ -421,3 +434,24 @@ def run_import(name, m, a):
         m.write(p, struct.pack('<I', (old + a[1]) & 0xffffffff))
         return old
     raise KeyError(name)
+
+
+# (r4 uncls) calls of operator delete that are no behaviour, left out of the traces by both engines (the canned results
+# of the calls that follow are numbered by call index, so an extra call would shift them):
+DELETES = {0x00401030, 0x00aa1460}       # operator delete, sized operator delete: both return at once for null
+
+
+def delete_fold(ptr, prev_target, prev_ptr, prev_flags):
+    """None, 'null' or 'split' for a call of operator delete with pointer `ptr`.
+    null: the exe's delete of null does nothing (0x00401030 -> MemoryManager::Deallocate 0x00aa4060 `cmp [ebp+8], 0;
+        jne ..; jmp ret`; 0x00aa1460 `test eax, eax; je ret`); GCC drops a delete of a pointer it knows is null.
+    split: the previous call was the exe's scalar deleting destructor F(p, flags 0) (exeempty.deleting_wrapper) and this
+        deletes the same p: MSVC calls F(p, 1), which frees p itself, GCC the destructor and then the delete."""
+    ptr &= 0xffffffff
+    if ptr == 0:
+        return 'null'
+    if prev_target is not None and prev_ptr is not None and prev_flags == 0 and (prev_ptr & 0xffffffff) == ptr:
+        import exeempty
+        if exeempty.deleting_wrapper(prev_target & 0xffffffff):
+            return 'split'
+    return None

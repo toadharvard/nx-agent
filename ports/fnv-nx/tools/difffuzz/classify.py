@@ -578,6 +578,104 @@ def arg_narrow_top(target, fn, lab, i):
     return False
 
 
+_IN_CHAIN = False
+
+
+def _bool_chain(pair, target, case, div, fn, max_steps, h, rounds=8):
+    """(r4 uncls) bool-repr when it takes SEVERAL bytes: a function reads a bool flag, then more of them (the early
+    exit of 0x006141f0 depends on eight random-background bytes, one per branch), so no single byte removes the
+    divergence the probes above look for. Every round plants 1 in the 1-byte reads the oracle's code makes of a byte
+    above 1 (random background or planted memory) and runs again; once the machines agree, the planted set is
+    minimised (a byte whose removal leaves the agreement is left out) and returned. When a divergence remains
+    after the last round that is itself a by-design or artifact cause (the divergence the early exit hid, named by a
+    nested `hint`; h['then'] keeps its name), the earlier one was bool-repr too; anything else leaves the record
+    where it was (a real second divergence is not hidden behind the bool bytes)."""
+    global _IN_CHAIN
+    if case.bg == 'zero' and not any(x > 1 for b in case.mem.values() for x in b):
+        return []
+    cur, planted = case.copy(), []
+    d = div
+    _IN_CHAIN = True
+    try:
+        for _ in range(rounds):
+            if h['_runs'] >= 45:
+                return []
+            reads, bg = {}, {}
+            world.BYTE_READS, world.BG_READS = reads, bg
+            try:
+                pair.run(cur, max_steps)
+            finally:
+                world.BYTE_READS = world.BG_READS = None
+            h['_runs'] += 1
+            new = []
+            for a, b in cur.mem.items():
+                for i, x in enumerate(b):
+                    if x > 1 and reads.get(a + i) == {1} and \
+                            not any(s > k for k in range(1, 8) for s in reads.get(a + i - k, ())):
+                        new.append(a + i)
+            held = [(a, a + len(b)) for a, b in cur.mem.items()]
+            for a in sorted(bg):
+                sizes, v = bg[a]
+                if sizes == {1} and v is not None and v > 1 and a not in planted and \
+                        not any(lo <= a < hi for lo, hi in held) and \
+                        not any(s > k for k in range(1, 8) for s in bg.get(a - k, (set(),))[0]):
+                    new.append(a)
+            new = [a for a in new if a not in planted][:4]
+            if not new:
+                break
+            for a in new:
+                _plant(cur, a)
+                planted.append(a)
+            _, _, d = pair.run(cur, max_steps)
+            h['_runs'] += 1
+            if _benign(d):
+                break
+        if not planted:
+            return []
+        if d is not None and not _benign(d):
+            # the early exit hid another divergence: only a call-flow divergence the planted bytes cleared (the calls
+            # now agree and a later difference shows) can; it must be named by the other probes, and a soft one
+            if div.get('kind') not in ('call-target', 'call-count') or d.get('kind') in ('call-target', 'call-count'):
+                return []
+            import causes
+            sub = hint(pair, target, cur, d, fn, max_steps)
+            h['_runs'] += sub.get('_runs', 0)
+            c = sub.get('cause')
+            h['then'] = c
+            if c in (None, 'unclassified', 'call-flow', 'bool-repr') or \
+                    (c == 'uninit-both' and sub.get('uniform') != 'agree'):
+                return []
+            if causes.policy(c)[2]:
+                h['chain_cause'] = c        # a real second divergence behind the bool bytes: named, not hidden
+                return []
+        keep = list(planted)
+        for a in list(planted):
+            if d is not None and not _benign(d):
+                break                       # the remaining divergence is the nested cause's: no minimisation
+            if len(keep) <= 1 or h['_runs'] >= 55:
+                break
+            t = case.copy()
+            for b in keep:
+                if b != a:
+                    _plant(t, b)
+            _, _, dd = pair.run(t, max_steps)
+            h['_runs'] += 1
+            if _benign(dd):
+                keep.remove(a)
+        return ['%08x' % a for a in keep]
+    finally:
+        _IN_CHAIN = False
+
+
+def _plant(c, a):
+    """1 at address a of the case's memory (inside a planted block, or as a new one-byte block)."""
+    for base, b in list(c.mem.items()):
+        if base <= a < base + len(b):
+            nb = bytearray(b); nb[a - base] = 1; c.mem[base] = bytes(nb)
+            return
+    c.mem[a] = b'\x01'
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
@@ -596,6 +694,16 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'nrvo-elision'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
+    if div.get('split_delete'):
+        h['cause'] = 'split-delete'; return h
+    if div.get('call_order_unproven'):
+        h['cause'] = 'call-order-unproven'; return h
+    if div.get('after_perm'):
+        h['cause'] = 'call-order-args'; return h
+    if div.get('arg_order'):
+        h['cause'] = 'call-order'; return h
+    if div.get('null_delete'):
+        h['cause'] = 'null-delete'; return h
     if div.get('vptr_store'):
         # only a destructor's vptr resets differ (runner.dtor_vptr_bytes, F2 d21-dtorvptr): by design
         h['cause'] = 'vptr-store'; return h
@@ -837,6 +945,10 @@ def hint(pair, target, case, div, fn, max_steps):
             _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
             if _benign(d):
                 bhits.append('%08x' % a)
+    if not bhits and pair is not None and not _IN_CHAIN:
+        bhits = _bool_chain(pair, target, case, div, fn, max_steps, h)
+        if h.get('chain_cause'):
+            h['cause'] = h['chain_cause']; return h
     if bhits:
         h['cause'] = 'bool-repr'; h['bytes'] = bhits; return h
     if isfloat:
@@ -1026,7 +1138,10 @@ def _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=False):
                 ta.rets[i + 1] = ta.rets[i]
                 tb.rets[i] = tb.rets[i + 1]
                 if rerun(ta) and rerun(tb):
-                    return 'call-order'
+                    # (r4 uncls) a by-design evaluation order only when the exe shows the two calls are the
+                    # arguments of one call (their results pushed or moved before the consumer)
+                    import runner
+                    return 'call-order' if runner._is_arg_block(rx, i) else 'call-order-unproven'
         moved = canned_unaliased(base)
         if moved is not None and rerun(moved):
             return 'canned-alias'

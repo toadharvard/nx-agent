@@ -477,6 +477,12 @@ class X86Engine:
             self.followed.add(address)
             uc.reg_write(UC_X86_REG_EIP, address)
             return
+        if address in libcalls.DELETES and libcalls.delete_fold(words[0], None, None, None) == 'null':
+            # (r4 uncls) operator delete(NULL): no call (libcalls.delete_fold); cdecl, the caller pops the argument
+            r.null_deletes = getattr(r, 'null_deletes', 0) + 1
+            uc.reg_write(UC_X86_REG_ESP, esp + 4)
+            uc.reg_write(UC_X86_REG_EIP, retaddr)
+            return
         k = len(r.calls)
         if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
             self._fault = 'timeout'
