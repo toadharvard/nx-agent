@@ -1520,6 +1520,13 @@ def _rule_callflow(d, rec):
         if (k == 'call-target' and '__fnv_%08x' % xa in cs
                 and native_ran(src, '__fnv_%08x' % xa, seen, exclude=cs | others)):
             return 'oracle-callee-unloaded'
+        # (EQ, farm baseline 588863: 0x007d1bb0 StartMenu) runner's dynamic evidence: the native executed X's own
+        # __fnv_<X> entry block in this run (arm_entered) and its call here is the oracle's next one, so the one
+        # difference is the oracle's traced call of X, which the native ran untraced in its unit. A leaf X makes no
+        # traced call, so native_ran has nothing to go on; an early exit before X never enters it (V1 U1)
+        if (k == 'call-target' and '__fnv_%08x' % xa in cs and '%08x' % xa in (d.get('arm_entered') or ())
+                and a is not None and d.get('x86_next') == a):
+            return 'oracle-callee-unloaded'
     # a decomp-local stand-in for an original function defined elsewhere, with an empty body: tied to the divergence
     # when the oracle calls that original where the native diverges, or when the native stops early
     if x is not None:
