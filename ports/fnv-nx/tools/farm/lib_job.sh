@@ -246,6 +246,33 @@ print('yes' if good and (complete or mode == 'always') else 'no')
 EOF
 )
 	[ "$ok" = yes ] || { NOTE_PUB="not published: the link failed, is stale or covers a UNITS subset"; return 0; }
+	# T1 (link/ef092d51de92 carried objects from before S1's RAWVT1-MEM: the unit cache wrote no dependency files, so the
+	# compile stage kept every object): every unit's object is at least as new as its prepared source, or nothing is
+	# published under this head's name; the units are named
+	local stale_objs
+	stale_objs=$(python3 -I - "$bd" <<'EOF'
+import json, os, sys
+bd = sys.argv[1]
+rec = lambda s: json.load(open(os.path.join(bd, s, 'stage.json')))
+try:
+    tree = rec('prepare').get('artifacts', {}).get('tree') or os.path.join(bd, 'prepare', 'tree')
+    obj = os.path.join(bd, 'compile', 'obj')
+    units = sorted({u['source'] for u in json.load(open(os.path.join(tree, 'build', 'units.json')))['units']})
+except (OSError, ValueError, KeyError):
+    sys.exit(0)
+bad = []
+for u in units:
+    o = os.path.join(obj, u.replace('/', '_') + '.o')
+    s = os.path.join(tree, u)
+    if os.path.isfile(o) and os.path.isfile(s) and os.stat(o).st_mtime_ns < os.stat(s).st_mtime_ns:
+        bad.append(u)
+if bad:
+    print('%d (%s)' % (len(bad), ', '.join(bad[:5])))
+EOF
+)
+	if [ -n "$stale_objs" ]; then
+		NOTE_PUB="not published: stale objects, $stale_objs older than their prepared source"; log "publish_link: $NOTE_PUB"; return 0
+	fi
 	# The subshell runs as a plain statement so that its set -e holds (inside `if ( ... )` bash ignores it), and it
 	# refuses to touch any checkout but the artifacts worktree: a failed `cd` must never commit elsewhere.
 	local prc
