@@ -286,6 +286,47 @@ def deleting_dtor(path, addr):
     return i > 0 and _FLAGS_TEST.search(b[:i]) is not None
 
 
+def deleting_dtor_callee(path, addr):
+    """The destroy body an MSVC scalar deleting destructor `??_G` calls: the x86 function at addr returns with `ret 4`
+    and is exactly `call X; test flags, 1 (or and eax, 1); [je]; call <operator delete>` (two direct calls, the first
+    before the flags test, none after it but the delete; no int3 before the ret). -> X, else None (also without capstone, outside the image,
+    or when the shape is any other: a body inlined into the ??_G, an indirect call, more than two calls). The
+    decomp's `~C` at X is C's complete destructor; the identical-code folding that gives many classes one ??_G gives
+    them this X."""
+    try:
+        import capstone
+        from capstone import x86 as cx
+    except ImportError:
+        return None
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    if 'md' not in _CS:
+        _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        _CS['md'].detail = True
+    calls, tested, ret4 = [], False, False
+    for ins in _CS['md'].disasm(data[off:off + 0x100], addr):
+        if ins.id == cx.X86_INS_INT3:
+            return None
+        if ins.id == cx.X86_INS_RET:
+            ret4 = len(ins.operands) == 1 and ins.operands[0].imm == 4
+            break
+        if ins.id == cx.X86_INS_CALL:
+            if ins.operands[0].type != cx.X86_OP_IMM:
+                return None
+            calls.append((ins.operands[0].imm & 0xffffffff, tested))
+        elif ins.id == cx.X86_INS_TEST or (ins.id == cx.X86_INS_AND and ins.operands[-1].type == cx.X86_OP_IMM and
+                                           ins.operands[-1].imm == 1):
+            tested = True
+    if not ret4 or len(calls) != 2 or calls[0][1] or not calls[1][1]:
+        return None
+    return calls[0][0]
+
+
 _DELETE_THIS = re.compile(
     rb'(?:\x85\xc9[\x74\x75][\x01-\x7f])?\x8b\x01(?:\x8b\x10\x6a\x01\xff\xd2|\x6a\x01\xff\x10)(?:\xc3|\xc2\x00\x00)')
 

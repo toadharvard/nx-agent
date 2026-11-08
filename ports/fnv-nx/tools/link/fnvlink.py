@@ -774,10 +774,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     deldtor_cache = {}
 
-    def unit_deldtor(u_, isig_):
-        """(address, target) for an unbound D1/D2 of class C whose unit names C's scalar deleting destructor
-        (`??_GC@@...`): the native D1 at that address (a G row), or the decomp's (this, flags) function through
-        the flag stub with flags 0; else None."""
+    def unit_gdel_addrs(u_, isig_):
+        """Addresses of the `??_G` the unit names for the class of the D1/D2 isig_."""
         if u_.source not in deldtor_cache:
             m_ = {}
             for n_, a_ in list(u_.refs.items()) + [(n2, a2) for a2, n2 in u_.defs]:
@@ -787,7 +785,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                         m_.setdefault('::'.join(sigs.canon_qual(sg_.qual[:-1])), set()).add(a_)
             deldtor_cache[u_.source] = m_
         cq = '::'.join(sigs.canon_qual(isig_.qual[:-1])) if isig_.qual and len(isig_.qual) >= 2 else None
-        gs = deldtor_cache[u_.source].get(cq) or set()
+        return deldtor_cache[u_.source].get(cq) or set()
+
+    def unit_deldtor(u_, isig_):
+        """(address, target) for an unbound D1/D2 of class C whose unit names C's scalar deleting destructor
+        (`??_GC@@...`): the native D1 at that address (a G row), or the decomp's (this, flags) function through
+        the flag stub with flags 0; else None."""
+        gs = unit_gdel_addrs(u_, isig_)
         if len(gs) != 1:
             return None
         g_ = next(iter(gs))
@@ -802,6 +806,29 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             bridges.setdefault(name_, emit_flag_stub(name_, ADDR_SYM % g_, 0))
             return g_, name_
         return None
+
+    gdel_exe = []
+
+    def exe_deldtor_body(u_, isig_):
+        """(address, symbol) of the native destroy body the exe's `??_G` of the unbound D1/D2's class calls: the
+        unit names the class's ??_G at an address g that has no native definition (the decomp has no body there), and
+        exevft.deleting_dtor_callee(g) is X, an address with a native plain destructor body (not itself a deleting
+        destructor). None otherwise (no exe, no ??_G, several ??_G addresses, another shape)."""
+        if not gdel_exe:
+            gdel_exe.append(thisadj.exe_path(None if exe in (None, '', 'none') else exe) if exe != 'none' else None)
+        if not gdel_exe[0]:
+            return None
+        gs = unit_gdel_addrs(u_, isig_)
+        if len(gs) != 1:
+            return None
+        g_ = next(iter(gs))
+        if g_ in native:
+            return None
+        x_ = exevft.deleting_dtor_callee(gdel_exe[0], g_)
+        nd_ = native.get(x_) if x_ is not None else None
+        if nd_ is None or deleting_native(nd_, msvc) or sigs.itanium_variant(nd_['sym'].name) not in (None, 'D1', 'D2'):
+            return None
+        return x_, ADDR_SYM % x_
 
     def dtor_alias(sig):
         q = tuple(sig.qual[:-1])
@@ -1250,9 +1277,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls = 'vslot-unresolved'
             elif cls == 'unresolved' and isig.variant:
                 cls = 'unresolved-ctor-dtor'
-                alias = dtor_alias(isig) if isig.variant in ('D1', 'D2') else None
-                gd = unit_deldtor(u, isig) if not alias and isig.variant in ('D1', 'D2') else None
-                if alias:
+                exegd = exe_deldtor_body(u, isig) if isig.variant in ('D1', 'D2') else None
+                alias = dtor_alias(isig) if not exegd and isig.variant in ('D1', 'D2') else None
+                gd = unit_deldtor(u, isig) if not exegd and not alias and isig.variant in ('D1', 'D2') else None
+                if exegd:
+                    # W26: the unit names C's ??_G at an address no native body defines, and the exe's ??_G there is
+                    # `call X; test flags, 1; delete` with X a native plain destructor body: D1 = X. Identical-code
+                    # folding gives every class sharing the ??_G the same X, which is C's complete destructor.
+                    cls, addr, target = 'dtor-by-exe-deldtor', exegd[0], exegd[1]
+                    stats['dtor_by_exe_deldtor'] += 1
+                elif alias:
                     cls, target = 'ctor-dtor-alias', alias
                 elif gd:
                     # S1-refs (S1-refs-004): MSVC folds `~C` into its scalar deleting destructor; the unit binds ??_GC,
