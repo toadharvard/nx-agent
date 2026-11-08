@@ -263,7 +263,9 @@ CHANGES = [
     Change('d25-sg', 'functions whose oracle code (or a same-unit function it runs) refers to a string literal units.json '
            'names ($SG): the oracle object numbers its $SG literals 43 higher than units.json (S11\'s force-included '
            'header), so each was pinned and relocated at a neighbour\'s address; coffobj now maps object $SG<n> to '
-           'units.json $SG<n-d>, d found per unit by the exe\'s bytes (coffobj.sg_shift)', selects=_sg_literal),
+           'units.json $SG<n-d>, d found per unit by the exe\'s bytes (coffobj.sg_shift); and functions that refer '
+           'to read-only data units.json names: pinned tables now carry their relocations (code / data pointers, '
+           'the exe\'s word where the unit cannot place the target)', selects=_sg_literal),
 ]
 SCOPED = 'd25'
 
@@ -465,15 +467,26 @@ def facts_of(t, ocl, nrefs, oind=(), ostat=(), osg=()):
 
 
 def sg_literal_addrs():
-    """Every address units.json gives a $SG string literal (d25-sg)."""
+    """d25-sg: every address units.json gives a $SG string literal, and, when the exe loads, every units.json symbol
+    in a read-only section of the exe (the pinned read-only data whose relocations coffobj now applies)."""
     out = set()
     p = config.DECOMP / 'build' / 'units.json'
     if not p.exists():
         return out
+    ro = []
+    try:
+        import coffobj
+        exe = coffobj.exe_image()
+        if exe is not None:
+            ro = [(va, va + size) for va, size, flags, *_ in exe.sections
+                  if not flags & 0x80000000 and not flags & 0x20000020]   # not writable, not code
+    except Exception:  # noqa: BLE001
+        ro = []
     for u in json.load(open(p))['units']:
         for n, a in u['symbols'].items():
-            if n.startswith('$SG'):
-                out.add(int(a, 16))
+            v = int(a, 16)
+            if n.startswith('$SG') or any(lo <= v < hi for lo, hi in ro):
+                out.add(v)
     return out
 
 

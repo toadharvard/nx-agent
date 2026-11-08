@@ -285,6 +285,36 @@ class UnitImage:
         return dict(symbol=f['symbol'], size=size, section=s['section'], start=start, code=bytes(code),
                     relocs=relocs, unresolved=unresolved, address=a)
 
+    def _relocated(self, sec, start, blob, base=None):
+        """blob (section bytes from `start`) with its DIR32 relocations applied: a read-only table of code or data
+        pointers (a jump table, a callback table, a vftable-like array) holds 0 + addend in the object and the
+        target's address in the exe (EQ reports/eq-sg: 91 pinned words were 00000000 where the exe has code
+        addresses such as 0x00722b50, slot 0 of ??_7FUN_00722880 -> its ??_E). A target the unit cannot place takes
+        the exe's word at that address when the exe is loaded (read-only data: the exe holds the relocated value),
+        else keeps the object's bytes."""
+        out = bytearray(blob)
+        exe = exe_image() if base is not None else None
+        for off, idx, kind in sec.get('relocs', ()):
+            r = off - start
+            if kind != DIR32 or r < 0 or r + 4 > len(out):
+                continue
+            tsym = self.coff.symbols.get(idx)
+            if tsym is None:
+                continue
+            addend = struct.unpack_from('<I', out, r)[0]
+            try:
+                v = self.resolve(tsym, addend)
+            except Exception:  # noqa: BLE001
+                v = None
+            if v is None and exe is not None:
+                try:
+                    v = struct.unpack('<I', bytes(exe.read(base + r, 4)))[0]
+                except Exception:  # noqa: BLE001
+                    v = None
+            if v is not None:
+                struct.pack_into('<I', out, r, v & 0xffffffff)
+        return bytes(out)
+
     def literal_bytes(self):
         """{original address: bytes} for read-only data the unit's code refers to and the object holds:
         string literals ($SG, ??_C@), __real@/__xmm@ constants, other symbols defined in non-writable data sections
@@ -317,7 +347,7 @@ class UnitImage:
                         nxt = [x['value'] for x in self.coff.symbols.values()
                                if x['section'] == s['section'] and x['value'] > s['value']]
                         blob = blob[:min(nxt) - s['value']] if nxt else blob
-                        blob = blob[:4096]
+                        blob = self._relocated(sec, s['value'], blob[:4096], base)
                     out[base] = bytes(blob)
         return exe_literals(out)
 

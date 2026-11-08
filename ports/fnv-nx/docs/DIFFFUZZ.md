@@ -299,6 +299,13 @@ under which the most literals equal the exe's bytes at their units.json address:
 against 1 / 68 at 0, caravanmenu 205 / 205. Without the exe it takes the name delta that maps at least 90 %.
 UnitImage then maps object `$SG<n>` to units.json's `$SG<n-d>`. d25-sg selects the functions whose oracle
 closure refers to a `$SG` address (catalog data_refs). Test: `tests/s13/test_sgshift.py`.
+EQ's count after the shift (all 2,988 units): shift 0 in 2,684, +43 in 299, +1 in 4. Overlaps 37 -> 0. Of the
+literals still differing from the exe, EQ's "bin-at-str" rows (91) were read-only tables pinned without their
+relocations: listbox.cpp's `??_7FUN_00722880` held 00000000 where the exe has 0x00722b50, its slot 0 (`??_E`). The
+tables' DIR32 relocations are now applied (`UnitImage._relocated`): a target the unit places gets its address,
+else the exe's word when the exe loads. Measured on five units: listbox 10 -> 0 differing, chargenmenu 2 -> 0,
+caravanmenu 2 -> 1, startmenu 6 -> 2. d25-sg also selects functions that refer to a units.json symbol in the exe's
+read-only sections.
 
 **d21-f3mem (F3, the memory class; SCOPED = d21).** Four harness artifacts behind cached hard verdicts of
 native-null-read, callee-saved, store-width / x86-only-store, native-stub-data and float, found by replaying a random
