@@ -3671,7 +3671,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     kind_ = 'd22-used'   # code names the destructor slot: prepare keeps the declaration (D22-USED)
                 if kind_ == 'minus-one' and 0 <= k_ < len(slots):
                     pair1 = vmo_dtor_slots(slots[k_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + k_),
-                                           exe_path)
+                                           exe_path, uncompiled=True)
                     if pair1:
                         m1, dp = 'classlayout', k_
                         st['classlayout-minus-one'] += 1
@@ -3764,7 +3764,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                         x_ = expv[i_]
                         if isinstance(x_, tuple):
                             pair_ = vmo_dtor_slots(x_[1], native, msvc or (lambda n_: None), bridges, traps, st,
-                                                   (z, 2 + i_), exe_path)
+                                                   (z, 2 + i_), exe_path, uncompiled=True)
                             if pair_:
                                 fill += list(pair_)
                             else:
