@@ -1937,6 +1937,25 @@ os.environ['FNVNX_EXE_ORDER'] = os.path.join(_eo, 'exe_order_classes.tsv'); prep
 check('RAWVT1 not in a class whose table the link keeps in exe order (exe_order_classes.tsv)',
       run(s1.r_raw_vtable_slots, _RV), [], ['FNVNX_D26_SLOT'])
 del os.environ['FNVNX_EXE_ORDER']; prepare.__dict__['_fnvnx_exe_order'] = None
+# S2-bodies (vtmetric 3f7a6c35): the TESForm family's exe deleting destructor is slot 4 (slots 0 / 1 trivial)
+_sk = tempfile.mkdtemp(); os.makedirs(os.path.join(_sk, 'slots'))
+_json.dump({'format': 'fnvnx-d22/1', 'classes': [], 'dtor_slots': [{'class': 'TESWorldSpace', 'slot': 4}]},
+           open(os.path.join(_sk, 'slots', 'd22.json'), 'w'))
+os.environ['FNVNX_RECON'] = _sk; prepare.__dict__['_fnvnx_d22'] = None; prepare.__dict__['_fnvnx_d22_slots'] = None
+_WS = 'struct TESWorldSpace\n{\n' + ''.join('    virtual void v%d();\n' % i for i in range(8)) + '};\n' \
+      'void f(TESWorldSpace* w) { w->v6(); }\n'
+_wso = run(s1.r_vtable_dtor_slot, _WS)
+check('D22-SLOTK: the exe dtor slot k (4), not slot 0, becomes FNVNX_D22', _wso,
+      ['    virtual void v0();', 'FNVNX_D22(TESWorldSpace, virtual void v4();)'], ['FNVNX_D22(TESWorldSpace, virtual void v0();)'])
+check('D22-SLOTK: held when the class has k virtuals or fewer, or calls slot k by name',
+      run(s1.r_vtable_dtor_slot, 'struct TESWorldSpace\n{\n    virtual void v0();\n    virtual void v1();\n};\n') +
+      run(s1.r_vtable_dtor_slot, _WS.replace('w->v6()', 'w->v4()')), [], ['FNVNX_D22'])
+_RW = _RV.replace('Coll', 'TESWorldSpace')
+check('RAWVT1 with a dtor slot K = 4: k < 4 stays, k > 4 shifts, k = 4 held',
+      run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[2]')) + '|' + run(s1.r_raw_vtable_slots, _RW) + '|' +
+      run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[4]')),
+      ['(this))[2])', '(this))[FNVNX_D26_SLOT(6)])', '(this))[4])'])
+del os.environ['FNVNX_RECON']; prepare.__dict__['_fnvnx_d22'] = None; prepare.__dict__['_fnvnx_d22_slots'] = None
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
