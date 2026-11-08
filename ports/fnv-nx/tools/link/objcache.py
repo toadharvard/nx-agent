@@ -315,7 +315,10 @@ def store(root, mk, deps, rc, err, obj, skip_dir=None):
     rk = hashlib.sha256((mk + json.dumps(st)).encode('utf-8', 'surrogateescape')).hexdigest()
     rp = os.path.join(root, 'r', rk[:2], rk)
     if rc == 0:
-        _write(rp + '.o', open(obj, 'rb').read())
+        data = open(obj, 'rb').read()
+        if not data:
+            return False                 # an empty object with exit 0 is never cached
+        _write(rp + '.o', data)
     _write(rp + '.json', json.dumps({'rc': rc, 'err': err}), 'w')
     mp, = _paths(root, mk)
     with _lock:
@@ -347,6 +350,13 @@ def compile(cxx, flags, src, obj, cwd, timeout=None):
     except OSError:
         got, mk = None, None
     verify = os.environ.get('FNVNX_LINK_OBJCACHE_VERIFY') == '1'
+    if got is not None and got[2]['rc'] == 0:
+        try:
+            empty = os.path.getsize(got[1] + '.o') == 0
+        except OSError:
+            empty = True
+        if empty:
+            got = None    # an empty cached object (a store cut short): compile again (layoutgate af034f14, sw30)
     if got is not None and not verify:
         rk, rp, meta = got
         if meta['rc'] == 0:
