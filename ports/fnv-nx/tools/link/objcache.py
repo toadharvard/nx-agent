@@ -27,6 +27,13 @@ object (checked: the same bytes with and without it); the object is written by t
 
 Decomp-derived objects: the cache stays on the machine (or in fnv-nx-build), never in this repository.
 
+Misses are explained (T1: full1 d17625063785's link compiled 2,409 times with 1 hit): each stored compile also
+writes, under i/, the hash of every part of its key by the compile's identity (its source and object paths). A miss
+compares its key with that record and counts the first parts that changed (the summary's "misses:" list): new (this
+source and object never compiled into the cache), cc, cwd, argv, env, source, file:<path>, names:<dir> (the key),
+dep:<path>, depdir:<dir> (the same key, a dependency gcc -MD named has another hash or its directory lists other
+names).
+
     objcache.py stat [dir]
     objcache.py prune [dir] [max MB]   drop the least recently used results above max MB (default:
                                        $FNVNX_LINK_OBJCACHE_MAX_MB, else 8192)
@@ -40,6 +47,7 @@ ENV_KEYS = ('CPATH', 'C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH', 'OBJC_INCLUDE_PATH'
             'GCC_URLS', 'TERM', 'DEPENDENCIES_OUTPUT', 'SUNPRO_DEPENDENCIES')
 Result = collections.namedtuple('Result', 'returncode stderr')   # what the callers read of subprocess.run's result
 STATS = collections.Counter()
+WHY = collections.Counter()   # miss reason -> compiles (explain())
 _lock = threading.Lock()
 _fh = {}                # (path, size, mtime_ns) -> sha256
 _names = {}             # (dir, recursive) -> sha256 of the file names under it
@@ -151,20 +159,73 @@ def command_inputs(argv, cwd):
     return files, [d if os.path.isabs(d) else os.path.join(cwd, d) for d in dirs]
 
 
-def manifest_key(cxx, argv, cwd, src_text):
+def manifest_key(cxx, argv, cwd, src_text, parts=None):
+    """The manifest key; parts (a dict) gets the hash of each part of it, for a miss's explanation."""
     h = hashlib.sha256()
-    h.update(('%s\ncompiler %s\ncwd %s\n' % (CACHE_V, compiler_id(cxx), cwd)).encode())
-    h.update(json.dumps(argv).encode('utf-8', 'surrogateescape'))
+    cc = compiler_id(cxx)
+    h.update(('%s\ncompiler %s\ncwd %s\n' % (CACHE_V, cc, cwd)).encode())
+    a = json.dumps(argv).encode('utf-8', 'surrogateescape')
+    h.update(a)
     files, dirs = command_inputs(argv, cwd)
+    if parts is not None:
+        parts.update({'cc': cc, 'cwd': cwd, 'argv': hashlib.sha256(a).hexdigest(),
+                      'source': hashlib.sha256(src_text).hexdigest()})
     for p in files:
-        h.update(('\nfile %s %s' % (p, file_hash(p))).encode('utf-8', 'surrogateescape'))
+        fh = file_hash(p)
+        h.update(('\nfile %s %s' % (p, fh)).encode('utf-8', 'surrogateescape'))
+        if parts is not None:
+            parts['file:' + p] = fh
     for d in dirs:
-        h.update(('\nnames %s %s' % (d, names_hash(d, True))).encode('utf-8', 'surrogateescape'))
+        nh = names_hash(d, True)
+        h.update(('\nnames %s %s' % (d, nh)).encode('utf-8', 'surrogateescape'))
+        if parts is not None:
+            parts['names:' + d] = nh
+    env = []
     for k in ENV_KEYS:
         if k in os.environ:
+            env.append('%s=%s' % (k, os.environ[k]))
             h.update(('\nenv %s=%s' % (k, os.environ[k])).encode('utf-8', 'surrogateescape'))
+    if parts is not None:
+        parts['env'] = hashlib.sha256('\n'.join(env).encode('utf-8', 'surrogateescape')).hexdigest()
     h.update(b'\nsource\n' + src_text)
     return h.hexdigest()
+
+
+def _ident(cwd, src, obj):
+    j = lambda p: os.path.normpath(p if os.path.isabs(p) else os.path.join(cwd, p))
+    return hashlib.sha256(('%s\n%s' % (j(src), j(obj))).encode('utf-8', 'surrogateescape')).hexdigest()
+
+
+def remember(root, ident, mk, parts):
+    """i/<ident>.json: the last stored key of this compile and its parts' hashes (explain() reads it)."""
+    try:
+        _write(os.path.join(root, 'i', ident[:2], ident + '.json'), json.dumps({'mk': mk, 'parts': parts}), 'w')
+    except OSError:
+        pass
+
+
+def explain(root, ident, mk, parts):
+    """Why a compile missed -> [reasons] (see the docstring; 'new' when nothing of it was stored)."""
+    try:
+        rec = json.load(open(os.path.join(root, 'i', ident[:2], ident + '.json')))
+    except (OSError, ValueError):
+        return ['new']
+    if rec.get('mk') != mk:
+        old = rec.get('parts') or {}
+        why = [k for k in sorted(set(old) | set(parts)) if old.get(k) != parts.get(k)]
+        return why or ['key']
+    try:
+        variants = json.load(open(_paths(root, mk)[0]))
+    except (OSError, ValueError):
+        return ['result gone']
+    why = []
+    for p, h in (variants[0]['deps'] if variants else []):
+        if p.endswith('/'):
+            if names_hash(p[:-1], False) != h:
+                why.append('depdir:' + p)
+        elif file_hash(p) != h:
+            why.append('dep:' + p)
+    return why or ['result gone']
 
 
 def parse_deps(path, cwd):
@@ -277,9 +338,11 @@ def compile(cxx, flags, src, obj, cwd, timeout=None):
         r = subprocess.run([cxx, *argv], cwd=cwd, capture_output=True, text=True, errors='replace', timeout=timeout)
         return r.returncode, r.stderr
     t0 = time.time()
+    parts, ident = {}, _ident(cwd, src, obj)
     try:
         src_text = open(src if os.path.isabs(src) else os.path.join(cwd, src), 'rb').read()
-        mk = manifest_key(cxx, argv, cwd, src_text)
+        mk = manifest_key(cxx, argv, cwd, src_text, parts)
+        parts.pop('file:' + (src if os.path.isabs(src) else os.path.join(cwd, src)), None)   # it is 'source'
         got = lookup(root, mk)
     except OSError:
         got, mk = None, None
@@ -300,6 +363,15 @@ def compile(cxx, flags, src, obj, cwd, timeout=None):
             STATS['hits'] += 1
             STATS['hit_s'] += time.time() - t0
         return meta['rc'], meta['err']
+    if mk is not None and got is None:
+        try:
+            why = explain(root, ident, mk, parts)
+        except OSError:
+            why = ['?']
+        with _lock:
+            # the first three parts: a changed shared header shows up as itself, not as thousands of lines
+            for w in why[:3]:
+                WHY[w] += 1
     dfile = obj + '.objcache.d'
     if os.path.exists(obj):
         os.remove(obj)
@@ -326,6 +398,7 @@ def compile(cxx, flags, src, obj, cwd, timeout=None):
             sp = src if os.path.isabs(src) else os.path.join(cwd, src)
             skip = None if REL_QUOTED.search(src_text) else os.path.dirname(os.path.normpath(sp))
             if deps and store(root, mk, deps, r.returncode, r.stderr, obj, skip):
+                remember(root, ident, mk, parts)
                 with _lock:
                     STATS['stored'] += 1
             else:
@@ -389,7 +462,14 @@ def summary(tag=''):
     return ('objcache%s: %d compiles, %d hits (%.0f %%), %d compiled (%.1f s), %d stored%s%s' % (
         ' ' + tag if tag else '', n, s['hits'], 100.0 * s['hits'] / n if n else 0, s['misses'], s['compile_s'],
         s['stored'], ', %d verified' % s['verified'] if s['verified'] else '',
-        ', %d VERIFY MISMATCHES' % s['verify_mismatch'] if s['verify_mismatch'] else ''))
+        ', %d VERIFY MISMATCHES' % s['verify_mismatch'] if s['verify_mismatch'] else '')) + why_summary()
+
+
+def why_summary(n=6):
+    """'; misses: 700 source, 31 dep:/x/y.h, ...' (the most common reasons; a compile counts up to three)."""
+    if not WHY:
+        return ''
+    return '; misses: ' + ', '.join('%d %s' % (c, w) for w, c in WHY.most_common(n))
 
 
 def stat(root):
