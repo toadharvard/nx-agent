@@ -79,7 +79,9 @@ TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
-GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit'}
+# __errno_location: GCC's errno in a game unit; the guest's libc has none, the CRT's _errno (0x00ec85e3,
+# platform/crt/heap.c) is the same int *(void) (R2 trap loop, rank 1192)
+GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit', '__errno_location': '_errno'}
 ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
 FUNC_SPANS = ([], [])   # sorted starts and their ends of units.json functions with a size (set by resolve)
 
