@@ -1757,6 +1757,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         vstats['d22-list-vftables'] = len(d22_listed)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
+        vstats['m1-compiled-sections'] = m1_compiled_renames(have, objsyms, out, collections.Counter())
         vstats['exe-order-shell-names'] = add_unit_shell_names(out, units_json, exe_path)
         for a in rebind:   # S2c-vt2: shifted secondary groups moved their address points (slotfill2.shifted)
             rebind[a] = vmap[a][:2]
@@ -2154,6 +2155,61 @@ def _hv_cache(path):
         return code, (d['units'] if d.get('code') == code else {})
     except (OSError, EOFError, ValueError, TypeError, KeyError):
         return code, {}
+
+
+M1_SECTION = 'fnvnx_m1'   # S1 / orchestrator 2026-11-08: the minus-one tables, between __fnvnx_m1_start / _end (guest.ld)
+
+
+def m1_section(minus_one, other='fnvnx_vtext'):
+    """The .data.rel.ro.<name> prefix of a bridges.S table: minus-one tables go into the m1 range S1's runtime slot
+    rule tests a vptr against (toolchain/guest/guest.ld). FNVNX_M1=0: every table where it was."""
+    if minus_one and os.environ.get('FNVNX_M1', '1') != '0':
+        return M1_SECTION + ('.vmo' if other == 'fnvnx_vmo' else '')
+    return other
+
+
+def m1_compiled_renames(have, objsyms, out, st):
+    """The compiled vtable groups whose primary has GCC's destructor pair (D1 / D0, or the flags pair a binding
+    makes of it: exevft.dtor_pos): their section goes into the m1 range too, by an objcopy --rename-section appended
+    to the object's .args (every object that defines the group, so whichever COMDAT copy the linker keeps is in the
+    range). -> renamed sections."""
+    if os.environ.get('FNVNX_M1', '1') == '0':
+        return 0
+    n = 0
+    for u in have:
+        if not any(s_.name.startswith('_ZTV') and s_.shndx and s_.bind != 'local' for s_ in objsyms.get(u.source, ())):
+            continue
+        try:
+            o = vtables.Obj(u.obj)
+        except (OSError, ValueError):
+            continue
+        ren = []
+        for z in sorted(x for x in o.defs if x.startswith('_ZTV') and o.bind(x) != 'local'):
+            shndx = o.syms[o.defs[z]][5]
+            if shndx >= len(o.secnames):
+                continue
+            sec = o.secnames[shndx]
+            if not sec.startswith('.data.rel.ro') or M1_SECTION in sec:
+                continue
+            ents = o.ents(z) or []
+            pts = vtables.address_points(ents)
+            if not pts:
+                continue
+            ap = pts[0][0] // 4
+            nslots = vtables.slots_at(ents, pts[0][0])
+            prim = ents[ap:ap + nslots]
+            if exevft.dtor_pos([e.sym for e in prim], [e.word for e in prim]) is None:
+                continue
+            new = '.data.rel.ro.%s.%s' % (M1_SECTION, sec[len('.data.rel.ro.'):] if sec.startswith('.data.rel.ro.')
+                                          else z)
+            ren.append('--rename-section=%s=%s' % (sec, new))
+        if ren:
+            with open(os.path.join(out, 'objcopy', os.path.basename(u.obj) + '.args'), 'a', encoding='utf-8',
+                      errors='surrogateescape') as f:
+                f.write('\n'.join(sorted(set(ren))) + '\n')
+            n += len(set(ren))
+    st['m1-compiled-sections'] = n
+    return n
 
 
 def named_placeholder(sym, called):
@@ -4664,7 +4720,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                         lines = ['// %s from the exe vftable(s) %s: VTFILL%s, %s%s, %d slots (classlayout)' % (
                                      z, ' '.join('%08x' % v for v in sorted(vs)), '2 (%d secondary)' % nsec if g2 else '',
                                      kind_, ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill)),
-                                 '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3',
+                                 '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(kind_ == 'minus-one'), z),
+                                 '    .p2align 3',
                                  '    .globl %s' % z, '    .type %s, %%object' % z, '%s:' % z] + words_ + \
                                 ['    .size %s, .-%s' % (z, z), '    .text']
                         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
@@ -4743,7 +4800,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         # the primary vtable is the whole group: the extra slots go at its end
         lines = ['// %s from the exe vftable(s) %s: %d native slots + %d, %d slots per use (S2c-vt)' % (
                      z, ' '.join('%08x' % v for v in sorted(vs)), n, len(extra), len(ov)),
-                 '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3', '    .globl %s' % z,
+                 '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(bool(m1)), z), '    .p2align 3',
+                 '    .globl %s' % z,
                  '    .type %s, %%object' % z, '%s:' % z] + slotfill2.place_extra(words, extra, shift, z, out) + ['    .size %s, .-%s' % (z, z), '    .text']
         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
         st['d26-minus-one-tables' if m1 else ('extended' if extra else 'copied-per-slot')] += 1
@@ -5040,7 +5098,9 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
         lines = ['// %s: exe vftable %08x in the %s order, %d exe slots (D26 c)' % (
                      name, v, 'classlayout %s' % row['kind'] if row is not None and pair is None else 'minus-one',
                      len(slots)),
-                 '    .section .data.rel.ro.fnvnx_vmo.%08x,"aw"' % v, '    .p2align 3', '    .globl %s' % name,
+                 '    .section .data.rel.ro.%s.%08x,"aw"' % (
+                     m1_section(not (row is not None and pair is None and row['kind'] != 'minus-one'), 'fnvnx_vmo'), v),
+                 '    .p2align 3', '    .globl %s' % name,
                  '    .hidden %s' % name, '    .type %s, %%object' % name, '%s:' % name,
                  '    .word 0x%x' % (ott & 0xffffffff), '    .word 0'] + ['    .word %s' % w for w in words] + \
                 ['    .size %s, .-%s' % (name, name), '    .text']
