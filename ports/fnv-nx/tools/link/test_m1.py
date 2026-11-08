@@ -35,8 +35,9 @@ def check(cond, what):
 
 def main():
     check(fnvlink.m1_section(True) == 'fnvnx_m1' and fnvlink.m1_section(False) == 'fnvnx_vtext' and
-          fnvlink.m1_section(True, 'fnvnx_vmo') == 'fnvnx_m1.vmo' and fnvlink.m1_section(False, 'fnvnx_vmo') == 'fnvnx_vmo',
-          'm1_section: minus-one tables in the m1 range, the others where they were')
+          fnvlink.m1_section(True, 'fnvnx_vmo') == 'fnvnx_m1.vmo' and fnvlink.m1_section(False, 'fnvnx_vmo') == 'fnvnx_vmo'
+          and fnvlink.m1_section(True, k=4) == 'fnvnx_m1k4' and fnvlink.m1_section(True, k=2) == 'fnvnx_vtext',
+          'm1_section: k = 0 in m1, k = 4 in m1k4, other k and exe-order tables where they were')
     if not shutil.which(CXX):
         print('skip: no %s' % CXX)
         return 0

@@ -2160,11 +2160,13 @@ def _hv_cache(path):
 M1_SECTION = 'fnvnx_m1'   # S1 / orchestrator 2026-11-08: the minus-one tables, between __fnvnx_m1_start / _end (guest.ld)
 
 
-def m1_section(minus_one, other='fnvnx_vtext'):
-    """The .data.rel.ro.<name> prefix of a bridges.S table: minus-one tables go into the m1 range S1's runtime slot
-    rule tests a vptr against (toolchain/guest/guest.ld). FNVNX_M1=0: every table where it was."""
-    if minus_one and os.environ.get('FNVNX_M1', '1') != '0':
-        return M1_SECTION + ('.vmo' if other == 'fnvnx_vmo' else '')
+def m1_section(minus_one, other='fnvnx_vtext', k=0):
+    """The .data.rel.ro.<name> prefix of a bridges.S table: minus-one tables with the destructor pair at slot k = 0
+    go into the m1 range S1's runtime slot rule tests a vptr against, k = 4 (the TESForm family) into the m1k4 range
+    (S1 shifts those slots past 4 only), any other k stays out of both (toolchain/guest/guest.ld). FNVNX_M1=0: every
+    table where it was."""
+    if minus_one and os.environ.get('FNVNX_M1', '1') != '0' and k in (0, 4):
+        return (M1_SECTION if k == 0 else M1_SECTION + 'k4') + ('.vmo' if other == 'fnvnx_vmo' else '')
     return other
 
 
@@ -2198,9 +2200,10 @@ def m1_compiled_renames(have, objsyms, out, st):
             ap = pts[0][0] // 4
             nslots = vtables.slots_at(ents, pts[0][0])
             prim = ents[ap:ap + nslots]
-            if exevft.dtor_pos([e.sym for e in prim], [e.word for e in prim]) is None:
+            k_ = exevft.dtor_pos([e.sym for e in prim], [e.word for e in prim])
+            if k_ not in (0, 4):
                 continue
-            new = '.data.rel.ro.%s.%s' % (M1_SECTION, sec[len('.data.rel.ro.'):] if sec.startswith('.data.rel.ro.')
+            new = '.data.rel.ro.%s.%s' % (m1_section(True, k=k_), sec[len('.data.rel.ro.'):] if sec.startswith('.data.rel.ro.')
                                           else z)
             ren.append('--rename-section=%s=%s' % (sec, new))
         if ren:
@@ -4720,7 +4723,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                         lines = ['// %s from the exe vftable(s) %s: VTFILL%s, %s%s, %d slots (classlayout)' % (
                                      z, ' '.join('%08x' % v for v in sorted(vs)), '2 (%d secondary)' % nsec if g2 else '',
                                      kind_, ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill)),
-                                 '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(kind_ == 'minus-one'), z),
+                                 '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(kind_ == 'minus-one', k=k_), z),
                                  '    .p2align 3',
                                  '    .globl %s' % z, '    .type %s, %%object' % z, '%s:' % z] + words_ + \
                                 ['    .size %s, .-%s' % (z, z), '    .text']
@@ -4800,7 +4803,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         # the primary vtable is the whole group: the extra slots go at its end
         lines = ['// %s from the exe vftable(s) %s: %d native slots + %d, %d slots per use (S2c-vt)' % (
                      z, ' '.join('%08x' % v for v in sorted(vs)), n, len(extra), len(ov)),
-                 '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(bool(m1)), z), '    .p2align 3',
+                 '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(bool(m1), k=dp), z), '    .p2align 3',
                  '    .globl %s' % z,
                  '    .type %s, %%object' % z, '%s:' % z] + slotfill2.place_extra(words, extra, shift, z, out) + ['    .size %s, .-%s' % (z, z), '    .text']
         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
@@ -5099,7 +5102,9 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
                      name, v, 'classlayout %s' % row['kind'] if row is not None and pair is None else 'minus-one',
                      len(slots)),
                  '    .section .data.rel.ro.%s.%08x,"aw"' % (
-                     m1_section(not (row is not None and pair is None and row['kind'] != 'minus-one'), 'fnvnx_vmo'), v),
+                     m1_section(not (row is not None and pair is None and row['kind'] != 'minus-one'), 'fnvnx_vmo',
+                                k=row['dtor_slot'] if row is not None and pair is None and row['kind'] == 'minus-one'
+                                else 0), v),
                  '    .p2align 3', '    .globl %s' % name,
                  '    .hidden %s' % name, '    .type %s, %%object' % name, '%s:' % name,
                  '    .word 0x%x' % (ott & 0xffffffff), '    .word 0'] + ['    .word %s' % w for w in words] + \
