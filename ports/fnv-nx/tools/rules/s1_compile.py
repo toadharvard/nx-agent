@@ -6749,15 +6749,58 @@ def _rawvt_mem_called(masked, m):
     return False
 
 
+# RAWVT1-RECV (S5-boot, orchestrator: close the raw-slot class over the tree): the same index on another receiver X
+# (`X->vtbl[k]`, `X.m_ppVirtualMethodTable[k]`, `(*(void***)X)[k]`) gets FNVNX_D26_SLOT(k) when X is declared in the
+# function before it as `T* X` / `T& X` and T has a minus-one classlayout row whose destructor slot K is below k, and
+# the slot read is called. A receiver without a row (void*, the D3D / COM-like shells) is RAWVT1-RECV-AMBIG, a COM
+# name RAWVT1-RECV-COM, k <= K RAWVT1-RECV-K, an exe-order row RAWVT1-RECV-KEEP.
+RAWVT1_RECV_MEM = re.compile(r'(?<![\w.>])([A-Za-z_]\w*)\s*(?:->|\.)\s*%s\s*\[\s*([0-9]+|0[xX][0-9a-fA-F]+)\s*\]'
+                             % RAWVT1_MEMBERS)
+RAWVT1_RECV_CAST = re.compile(r'\(\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*([A-Za-z_]\w*)\s*\)|'
+                              r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*\(?\s*([A-Za-z_]\w*)\s*\)?)\s*\)\s*\[\s*'
+                              r'([0-9]+|0[xX][0-9a-fA-F]+)\s*\]')
+
+
+def _rawvt_recv(path, masked, owners, stats):
+    """[(start, end) of k] for RAWVT1-RECV (above)"""
+    out = []
+    for rx, kind in ((RAWVT1_RECV_MEM, 'mem'), (RAWVT1_RECV_CAST, 'cast')):
+        for m in rx.finditer(masked):
+            var = m.group(1) if kind == 'mem' else (m.group(1) or m.group(2))
+            if var == 'this': continue
+            ki = 2 if kind == 'mem' else 3
+            body = next((a for a, z, nm in owners if a < m.start() < z), None)
+            seg = masked[body if body is not None else max(0, m.start() - 3000):m.start()]
+            if body is not None:
+                seg = masked[max(0, masked.rfind('\n', 0, max(0, body - 300))):m.start()]   # with the parameters
+            d = None
+            for d in re.finditer(r'\b([A-Za-z_][\w:]*)\s*(?:<[^;{}()]*>)?\s*[*&]+\s*(?:const\s*)?%s\b' % re.escape(var), seg):
+                pass
+            T = d.group(1).split('::')[-1] if d else None
+            if not T or T in ('void', 'char', 'int', 'unsigned', 'const'):
+                stats['RAWVT1-RECV-AMBIG'] += 1; continue
+            if D22_COM_NAME.match(T): stats['RAWVT1-RECV-COM'] += 1; continue
+            row = _classlayout_row(path, T)
+            if row is None: stats['RAWVT1-RECV-AMBIG'] += 1; continue
+            if row[0] != 'minus-one' or row[1] < 0: stats['RAWVT1-RECV-KEEP'] += 1; continue
+            if int(m.group(ki), 0) <= row[1]: stats['RAWVT1-RECV-K'] += 1; continue
+            if T in _rawvt_exe_order(): stats['RAWVT1-RECV-KEEP'] += 1; continue
+            if not _rawvt_mem_called(masked, m): stats['RAWVT1-RECV-DATA'] += 1; continue
+            out.append((m.start(ki), m.end(ki)))
+            stats['RAWVT1-RECV'] += 1
+    return out
+
+
 def r_raw_vtable_slots(path, text, stats):
     """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above); RAWVT1-MEM: the same on the vptr
     modelled as a data member."""
-    if 'this' not in text: return text
+    pass
     if '***' not in text.replace(' ', '') and not re.search(RAWVT1_MEMBERS + r'\s*\[', text): return text
     masked = d22_mask(text)
     hits = [m for m in RAWVT1_RX.finditer(masked)]
     mem = [m for m in RAWVT1_MEM_RX.finditer(masked)]
-    if not hits and not mem: return text
+    recv_any = RAWVT1_RECV_MEM.search(masked) or RAWVT1_RECV_CAST.search(masked)
+    if not hits and not mem and not recv_any: return text
     classes = d22_classes(text, masked)
     owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
     for m in D22_MEMBER_DEF.finditer(masked):
@@ -6795,7 +6838,9 @@ def r_raw_vtable_slots(path, text, stats):
         if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
         edits.append((ka, kz, 'FNVNX_D26_SLOT(%s)' % text[ka:kz]))
         if tag != 'RAWVT1': stats[tag] += 1
-    for a, b, rep in sorted(edits, reverse=True):
+    if recv_any:
+        edits += [(a, b, 'FNVNX_D26_SLOT(%s)' % text[a:b]) for a, b in _rawvt_recv(path, masked, owners, stats)]
+    for a, b, rep in sorted(set(edits), reverse=True):
         text = text[:a] + rep + text[b:]
     stats['RAWVT1'] += len(edits)
     return text
