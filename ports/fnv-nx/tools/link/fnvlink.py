@@ -48,6 +48,7 @@ import vtables  # noqa: E402
 import vslots as msvc_vslots  # noqa: E402  (`vslots` is a local name in resolve)
 import bodies   # noqa: E402  (S2d: declared-only functions)
 import exevft   # noqa: E402  (S2c: the player's exe vftables)
+import defshapes  # noqa: E402  (W22: the exe shape of the Havok sized-free ??_G)
 import thisadj  # noqa: E402  (S2c-abi: MSVC entries of secondary-base overrides)
 import vacall   # noqa: E402  (S2c-abi: call-site argument types of variadic references)
 import xexit    # noqa: E402  (S2c-abi: native stand-ins of the exe's exit thunks)
@@ -709,8 +710,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     stats['colliding_fun_defs'] = sum(len(v) for v in colliding_srcs.values())
     # R6 class 1: the MSVC adjustor thunks units.json places (`?f@C@@W<n>AE..`), which GCC never emits: a stub at
     # the address does what the exe's `sub ecx, n; jmp f` does (this -= n, then f's native entry)
-    adj_rows = adjustor_thunks(def_at, native, exevft.exe_path(None if exe in (None, '') else exe)
-                               if exe != 'none' else None, providers)
+    exe_p_ = exevft.exe_path(None if exe in (None, '') else exe) if exe != 'none' else None
+    # W22: the Havok sized-free ??_G (defshapes `sdd-sized`) get a native stand-in when the link defines the free
+    # function (the hkostream recon); the adjustor thunks into them then bind below
+    hk_rows = hk_sdd_rows(def_at, native, exe_p_, anydef, providers, stats)
+    HK_SDD.clear()
+    HK_SDD.update(hk_rows)
+    adj_rows = adjustor_thunks(def_at, native, exe_p_, providers)
     # An object that already defines `__fnv_<a>` itself (a recon's GCC-only spelling of the thunk, REC1) keeps it:
     # a stub too was a multiple definition and failed the guest link (link 4a15e91c967a, 11 names; R2).
     own_addr_defs = {a_ for a_ in list(adj_rows) if ADDR_SYM % a_ in anydef}
@@ -729,6 +735,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     for a_, (d1_, del_) in sorted(gdel_rows.items()):
         bridges.setdefault(ADDR_SYM % a_, emit_sdd_stub(ADDR_SYM % a_, d1_, del_))
     stats['nonvirtual_deldtor_stubs'] = len(gdel_rows)
+    for a_, d_ in sorted(hk_rows.items()):
+        bridges.setdefault(ADDR_SYM % a_, emit_hk_sdd_stub(ADDR_SYM % a_, d_, HK_FREE))
+    stats['hk_sdd_stubs'] = len(hk_rows)
     with open(os.path.join(out, 'colliding.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\taddress\tnative\tdefining objects (definitions turned into references to __fnv_<address>)\n')
         for name, a in sorted(colliding.items()):
@@ -1210,6 +1219,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 elif ak == 'text' and addr in gdel_rows:   # a non-virtual ??_G: its stub (nonvirtual_deldtors)
                     cls = 'code-sddstub'; target = ADDR_SYM % addr
                     stats['nonvirtual_deldtor_refs'] += 1
+                elif ak == 'text' and addr in hk_rows:   # a Havok sized-free ??_G: its stub (hk_sdd_rows)
+                    cls = 'code-sddstub'; target = ADDR_SYM % addr
+                    stats['hk_sdd_refs'] += 1
                 elif ak == 'text' and addr in def_at:
                     du = def_at[addr][0]
                     cls = 'code-pending' if not du.obj else 'code-defmissing'
@@ -2533,7 +2545,7 @@ def adjustor_thunks(def_at, native, exe_path, providers=None):
             if th is None:
                 break
             n, t = n + th[0], th[1]
-            if t in native:
+            if t in native or t in HK_SDD:
                 if n:
                     out[a] = (n, t)
                 break
@@ -2586,6 +2598,57 @@ def nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_vo
     return out
 
 
+HK_FREE = 'fnvnx_hk_heap_block_free'   # extern "C" void (void *, int): the recon's blockFree through the router heap
+HK_SDD = {}   # W22: {??_G address: its destructor's native symbol} of the Havok sized-free ??_G with a stand-in
+
+
+def hk_d_sym(native, d):
+    """The native symbol destroying without freeing at address d: its D1 when the definition there is a D0."""
+    nd = native.get(d)
+    if nd is None:
+        return None
+    if sigs.itanium_variant(nd['sym'].name) == 'D0':
+        vs = nd['variants'].get('D1')
+        return None if vs is None else ADDR_SYM % d + ('' if vs is nd['sym'] else '_D1')
+    return ADDR_SYM % d
+
+
+def hk_sdd_rows(def_at, native, exe_path, anydef, providers, stats):
+    """{address G: destructor symbol} of the addresses units.json places with no native definition whose exe code is
+    exactly the Havok sized-free `??_G` (defshapes.sdd_sized_exact, read from the exe here) and whose destructor
+    has a native body. Gate: the link must define `fnvnx_hk_heap_block_free` (the hkostream recon); without it
+    nothing is emitted and each such address counts as hk_sdd_no_free, so the names stay traps."""
+    out = {}
+    if not exe_path:
+        return out
+    for a in sorted(def_at):
+        if a in native or a in (providers or {}) or kind_of_addr(a) != 'text' or ADDR_SYM % a in anydef:
+            continue
+        d = defshapes.sdd_sized_exact(exe_path, a)
+        if d is None:
+            continue
+        ds = hk_d_sym(native, d)
+        if ds is None:
+            stats['hk_sdd_no_destructor'] += 1
+        elif HK_FREE not in anydef:
+            stats['hk_sdd_no_free'] += 1
+        else:
+            out[a] = ds
+    return out
+
+
+def emit_hk_sdd_stub(name, d, free):
+    """MSVC's Havok `void *C::??_G(unsigned flags)`: d(this); if (flags & 1) free(this, *(uint16_t *)(this + 4));
+    return this. The size is the object's own word at +4, as the exe reads it."""
+    body = ['    stp x29, x30, [sp, #-32]!', '    mov x29, sp', '    stp x19, x20, [sp, #16]', '    mov w19, w0',
+            '    mov w20, w1', '    bl %s' % d, '    tbz w20, #0, 1f', '    mov w0, w19', '    ldrh w1, [x19, #4]',
+            '    bl %s' % free, '1:  mov w0, w19', '    ldp x19, x20, [sp, #16]', '    ldp x29, x30, [sp], #32',
+            '    ret']
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name] + body +
+                     ['    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
 D0DEL_SYM = '__fnvnx_d0del_%08x'   # D0 = the destroy-only body at the address, then operator delete
 
 
@@ -2631,7 +2694,7 @@ def emit_sdd_stub(name, d1, dl):
 def adj_target(native, t):
     """What an adjustor thunk into t branches to: t's MSVC entry when MSVC enters t with this at a secondary base
     (thisadj.py: the thunk hands over the MSVC `this`), else t's native definition."""
-    return MSVC_ENTRY_SYM % t if native[t].get('msvc_entry') else ADDR_SYM % t
+    return MSVC_ENTRY_SYM % t if native.get(t, {}).get('msvc_entry') else ADDR_SYM % t
 
 
 def emit_const_stub(name, value):
@@ -2849,6 +2912,14 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             name = ADJ_SYM % a
             stubs.setdefault(name, emit_adj_stub(name, inner, n))
             return name, 'adjustor thunk (%d) -> %s' % (n, why_)
+        if nd is None and a in HK_SDD:   # W22: the Havok sized-free ??_G's stand-in takes (this, flags)
+            if isig.variant and isig.variant.startswith('D'):
+                fl = 1 if isig.variant == 'D0' else 0
+                name = FLAG_SYM % (a, fl)
+                stubs.setdefault(name, emit_flag_stub(name, ADDR_SYM % a, fl))
+                return name, 'flags stub (%d): Havok sized-free ??_G' % fl
+            if not isig.variant:
+                return ADDR_SYM % a, 'Havok sized-free ??_G'
         if nd is None and a in (providers or {}) and not isig.variant:
             return providers[a][0], 'provider (%s)' % providers[a][1]   # S4's CRT entry: _purecall's slots
         if nd is None:
@@ -3116,8 +3187,8 @@ def vmo_adjustor(a, off, native, exe_path, plain=True):
         if th is None:
             return None
         n, t = n + th[0], th[1]
-        if t in native:
-            if plain and sigs.itanium_variant(native[t]['sym'].name) is not None:
+        if t in native or t in HK_SDD:
+            if plain and t in native and sigs.itanium_variant(native[t]['sym'].name) is not None:
                 return None   # a constructor / destructor variant: the slot is no plain member function
             return (n, t) if n and n == off else None
     return None
@@ -3143,6 +3214,9 @@ def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where, o
         bridges.setdefault(t, emit_gdel_stub(t, ADDR_SYM % a, ADDR_SYM % a + (
             '' if nd['variants']['D1'] is nd['sym'] else '_D1')))
         st['slots-deleting-destructor'] += 1
+    elif nd is None and a in HK_SDD:   # W22: a Havok sized-free ??_G in a later slot: (this, flags), as MSVC calls it
+        t = ADDR_SYM % a
+        st['slots-hk-sdd'] += 1
     elif nd is None and a in (providers or {}):
         t = providers[a][0]
         st['slots-provider'] += 1
@@ -3302,6 +3376,11 @@ def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None):
     MSVC name is `??_G`/`??_E`, or the exe's code has the shape: exevft.deleting_dtor); None when exe slot 0 is not
     a destructor."""
     nd = native.get(a0)
+    if nd is None and a0 in HK_SDD:   # W22: the Havok sized-free ??_G's stand-in, through the flags stubs
+        for fl in (0, 1):
+            bridges.setdefault(FLAG_SYM % (a0, fl), emit_flag_stub(FLAG_SYM % (a0, fl), ADDR_SYM % a0, fl))
+        st['slot0-hk-sdd'] += 1
+        return FLAG_SYM % (a0, 0), FLAG_SYM % (a0, 1)
     if nd is None:
         return None
     var = sigs.itanium_variant(nd['sym'].name)
