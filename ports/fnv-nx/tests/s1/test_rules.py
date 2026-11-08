@@ -1847,8 +1847,11 @@ check('D26 call-only: one virtual only, a defined virtual, a base, a called plac
       run(s1.r_vtable_dtor_slot, _CO + 'void HeapStandIn::v1() {}\n') +
       run(s1.r_vtable_dtor_slot, _CO.replace('struct HeapStandIn\n', 'struct HeapStandIn : B\n')) +
       run(s1.r_vtable_dtor_slot, _CO + 'void g(HeapStandIn* h) { h->v0(); }\n') +
-      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v1() {}\n};\n'),
+      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v0() {}\n};\n'),
       [], ['FNVNX_D22'])
+check('D22-INLINE: a derived class that defines other members -> the base takes FNVNX_D22I (inline empty ~C)',
+      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v1() {}\n};\n'),
+      ['FNVNX_D22I(HeapStandIn, virtual void v0();)'])
 check('D26 call-only: a derived class that defines none of its virtuals does not block it',
       run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    virtual void v1();\n};\n'),
       ['FNVNX_D22(HeapStandIn, virtual void v0();)'])
@@ -1965,6 +1968,12 @@ check('RAWVT1 with a dtor slot K = 4: k < 4 stays, k > 4 shifts, k = 4 held',
       run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[2]')) + '|' + run(s1.r_raw_vtable_slots, _RW) + '|' +
       run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[4]')),
       ['(this))[2])', '(this))[FNVNX_D26_SLOT(6)])', '(this))[4])'])
+_json.dump({'format': 'fnvnx-d22/1', 'classes': [], 'dtor_slots': [{'class': 'Shell', 'slot': 4, 'file': 'src/ai/actor.cpp'}]},
+           open(os.path.join(_sk, 'slots', 'd22.json'), 'w')); prepare.__dict__['_fnvnx_d22_slots'] = None
+_SH = _WS.replace('TESWorldSpace', 'Shell')
+check('D22-SLOTK: a per-file dtor_slots row applies in that file only',
+      run(s1.r_vtable_dtor_slot, _SH, '/t/src/ai/actor.cpp') + '|' + run(s1.r_vtable_dtor_slot, _SH, '/t/src/ai/other.cpp'),
+      ['FNVNX_D22(Shell, virtual void v4();) /* fnv-nx D22 */', '|struct Shell\n{\n    FNVNX_D22(Shell, virtual void v0();)'])
 del os.environ['FNVNX_RECON']; prepare.__dict__['_fnvnx_d22'] = None; prepare.__dict__['_fnvnx_d22_slots'] = None
 # ---- S1-rules: EMPTY1 (R2 trap rank 32: treeengine's declared-only TagEmpty is the temporary TagText(""))
 _EM = ('struct TagText\n{\n    int w;\n    TagText(const char*);\n};\nextern const TagText TagEmpty;\n'
@@ -1974,6 +1983,22 @@ check('EMPTY1 a declared-only empty-string object -> FNVNX_EMPTY1(T, name)', run
 check('EMPTY1 not when the file defines it, or T has no const char* constructor',
       run(s1.r_empty_string_objects, _EM + 'const TagText TagEmpty("");\n') +
       run(s1.r_empty_string_objects, _EM.replace('TagText(const char*);', 'TagText(int);')), [], ['FNVNX_EMPTY1'])
+_eo2 = tempfile.mkdtemp(); open(os.path.join(_eo2, 'exe_order_classes.tsv'), 'w').write(
+    'class\tvftable\treason\tsymbol\nHeapStandIn\t0101cd04\tdefined-slot0\t_ZTV1X\nOther\t01\tmulti-vtable\t_ZTV1Y\n')
+os.environ['FNVNX_EXE_ORDER'] = os.path.join(_eo2, 'exe_order_classes.tsv'); prepare.__dict__['_fnvnx_exe_order'] = None
+check('D22-EXEORDER: a class the link keeps in exe order (defined-slot0) keeps its callers\' numbering',
+      run(s1.r_vtable_dtor_slot, _CO), [], ['FNVNX_D22'])
+check('D22-EXEORDER: ... another reason (multi-vtable) does not hold a class',
+      run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'Other')), ['FNVNX_D22(Other'])
+del os.environ['FNVNX_EXE_ORDER']; prepare.__dict__['_fnvnx_exe_order'] = None
+check('D26 call-only: numbered sequences _v01/_v02, d000/d001, v000/v004/v008 are placeholders; v000/v002 is not (EQ G1)',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', '_v01()').replace('v1()', '_v02()')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'd000()').replace('v1()', 'd001()')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'w000()').replace('v1()', 'w004()').replace('void* Allocate', 'void* w008')),
+      ['FNVNX_D22(HeapStandIn, virtual void _v01();)', 'FNVNX_D22(HeapStandIn, virtual void d000();)',
+       'FNVNX_D22(HeapStandIn, virtual void w000();)'])
+check('D26 call-only: ... a step-2 sequence is not',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'w000()').replace('v1()', 'w002()')), [], ['FNVNX_D22'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
