@@ -1123,20 +1123,43 @@ def cmd_attribute(a):
     lock = threading.Lock()
     edits = {}            # (file, candidate) -> path of the file prepared without the candidate, or None if the same
 
+    # T1: FNVNX_EQUIV_REDUCED=<dir>: the prepared texts without a candidate, kept between runs. tools/farm/equiv_job.sh
+    # names the directory after the sha256 of the traced record of the full prepare (every rule, equiv.py with its
+    # groups, every decomp file it read): the same record, the same texts; another record, another directory.
+    keep_dir = os.environ.get('FNVNX_EQUIV_REDUCED')
+
     def reduced(f, rid, ids):
         key = (f, rid)
         with lock:
             if key in edits:
                 return edits[key]
-        drop = {fn.__name__ for fn in rule_functions(ids)}
-        rules = [fn for fn in full if fn.__name__ not in drop]
-        text = prepared_text(a.decomp, f, rules)
+        kp = Path(keep_dir) / rid / (f + '.gz') if keep_dir else None
+        text = None
+        if kp is not None and kp.is_file():
+            try:
+                with gzip.open(kp, 'rt', encoding='utf-8', errors='surrogateescape') as h:
+                    text = h.read()
+            except (OSError, EOFError):
+                text = None
+        if text is None:
+            drop = {fn.__name__ for fn in rule_functions(ids)}
+            rules = [fn for fn in full if fn.__name__ not in drop]
+            text = prepared_text(a.decomp, f, rules)
+            if kp is not None:
+                kp.parent.mkdir(parents=True, exist_ok=True)
+                tmp = kp.with_name(kp.name + '.tmp%d.%d' % (os.getpid(), threading.get_ident()))
+                with gzip.open(tmp, 'wt', encoding='utf-8', errors='surrogateescape', compresslevel=3) as h:
+                    h.write(text)
+                os.replace(tmp, kp)
         path = None
         if text != (base / f).read_text(encoding='utf-8', errors='surrogateescape'):
-            path = work / 'cache' / rid / (f + '.gz')     # compressed: the cache spans every rule x header of the shard
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with gzip.open(path, 'wt', encoding='utf-8', errors='surrogateescape', compresslevel=3) as h:
-                h.write(text)
+            if kp is not None:
+                path = kp                                  # the kept file is the same gzip text
+            else:
+                path = work / 'cache' / rid / (f + '.gz')  # compressed: the cache spans every rule x header of the shard
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with gzip.open(path, 'wt', encoding='utf-8', errors='surrogateescape', compresslevel=3) as h:
+                    h.write(text)
         with lock:
             edits[key] = path
         return path

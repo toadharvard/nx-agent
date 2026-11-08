@@ -53,4 +53,7 @@ FAIL_PREPARE=1 head_run gggg; rc=$?
 ok "a failing prepare: the job fails, no record kept" '[ $rc != 0 ] && [ ! -f "$T/home/eqprep/deps.json" ] && [ ! -f "$T/home/eqprep/tree.id" ]'
 head_run hhhh
 ok "after a failure: prepared again (no partial tree reused)" '[ $(runs) = 6 ] && [ ! -f "$T/home/equiv-hhhh/tree/partial" ]'
+ok "the attribution texts' directory: named by the record, exported, older ones dropped (set -e holds)" '[ -d "$T/home/eqprep/reduced" ] && [ $(ls "$T/home/eqprep/reduced" | wc -l) = 1 ] && grep -q . "$T/home/eqprep/deps.json"'
+mkdir -p "$T/home/eqprep/reduced/zzzz-old"; head_run iiii; rc=$?
+ok "a second run with its own directory there: exit 0, the old one gone" '[ $rc = 0 ] && [ ! -d "$T/home/eqprep/reduced/zzzz-old" ] && [ $(ls "$T/home/eqprep/reduced" | wc -l) = 1 ]'
 [ $fails = 0 ] && echo "test_equiv_prepare_reuse: all ok" || { cat "$T/run.log"; echo "test_equiv_prepare_reuse: $fails failed"; exit 1; }
