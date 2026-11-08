@@ -144,6 +144,17 @@ def entry_register_reads(fn, conv):
     return reads          # in first-read order: the straight-line prefix first, then the later branches
 
 
+_ESP_SLOT = __import__('re').compile(r'^(?:byte|word|dword|qword|xmmword|tbyte) ptr \[esp(?: \+ (0x[0-9a-f]+|\d+))?\]')
+
+
+def _stores_esp_slot(ins, off):
+    """ins writes the stack word at [esp + off] (its first operand, a store: fstp / fst / fistp / mov / movss ...)."""
+    if ins.mnemonic not in ('fstp', 'fst', 'fistp', 'fist', 'mov', 'movss', 'movsd', 'movq', 'movd'):
+        return False
+    m = _ESP_SLOT.match(ins.op_str.split(',')[0].strip() if ins.mnemonic.startswith('mov') else ins.op_str.strip())
+    return bool(m) and int(m.group(1) or '0', 0) == off
+
+
 def _push_is_call_arg(insns, ix, window=24):
     """(R4 flow) `push ecx` at the entry is MSVC's one-word stack reservation, unless the word is an argument of the
     next call: the pushes from it to a `call` followed by `add esp, N` number no more than N / 4, so the call's
@@ -154,6 +165,10 @@ def _push_is_call_arg(insns, ix, window=24):
         m = insns[j].mnemonic
         if m == 'push':
             pushes += 1
+        elif _stores_esp_slot(insns[j], 4 * (pushes - 1)):
+            # (R2, farm baseline 588863: 0x00706f50, 0x00b799a0, 0x00e0c700) the pushed word is overwritten before
+            # the call (`push ecx; fld ..; fstp dword ptr [esp]`): a reservation the call's float argument fills
+            return False
         elif m == 'call':
             # the cleanup may follow a few plain instructions (0x00d409b0: `mov dl, [esi+2]; mov eax, [esp+0x10]`)
             for nxt in insns[j + 1:j + 7]:
