@@ -218,7 +218,8 @@ if [ "$FAST" = 1 ]; then
 	FKEY=$LKEY-$(cat "$F/base/commit" 2>/dev/null | cut -c1-12)-$TREE_OK
 	if [ -f "$F/keys-fast/$FKEY" ] && [ "${LINKCHECK_AGAIN:-0}" != 1 ]; then
 		read -r SAME VERDICT < "$F/keys-fast/$FKEY"
-		WHY="the link tools and the tree are those of ${SAME:0:12} (its link: link/${SAME:0:12})"
+		if [ "$TREE_OK" = 1 ]; then WHY="the link tools and the tree are those of ${SAME:0:12} (its link: link/${SAME:0:12})"
+		else WHY="the link tools and the tree are those of ${SAME:0:12} (the link check only: no link published)"; fi
 		BASE_NOTE="t/$(cut -c1-12 "$F/base/commit")"; write_report; exit 0
 	fi
 fi
