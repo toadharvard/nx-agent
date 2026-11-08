@@ -1707,6 +1707,10 @@ def seed_link_out(b, r, out):
     r.metric('link_seeded', len(got))
 
 
+def objcache_on(env):
+    return env.get('FNVNX_LINK_OBJCACHE', 'default') not in ('', 'none', 'off', '0')
+
+
 class Link(Stage):
     name = 'link'
     deps = ('compile',)
@@ -1893,6 +1897,22 @@ class Link(Stage):
             r.metric('link_bypassing_relocs', int(mm.group(3)) + int(mm.group(4)))
         else:
             r.note('check_rebind.py gave no result (exit %d, %s)' % (rrc, b.rel(rb)))
+        # T1, incremental link: the compile cache's use per step (tools/link/objcache.py) and the steps' own phases
+        ltext = open(log, errors='replace').read()
+        for tag, n_, h_, cs in re.findall(r'objcache (\w+): (\d+) compiles, (\d+) hits \(\d+ %\), \d+ compiled '
+                                          r'\(([\d.]+) s\)', ltext):
+            r.metric('link_objcache_%s_compiles' % tag, int(n_))
+            r.metric('link_objcache_%s_hits' % tag, int(h_))
+            r.metric('link_objcache_%s_compile_s' % tag, float(cs))
+        for step, body in re.findall(r'^(bodies|vtables) phases: (.*)$', ltext, re.M):
+            for name, sec in re.findall(r'([\w+/ -]+?) ([\d.]+) s(?:,|$)', body):
+                r.metric('link_%s_phase_%s_s' % (step, re.sub(r'\W+', '_', name.strip())), float(sec))
+        if 'VERIFY MISMATCH' in ltext:
+            r['status'] = 'warn'
+            r.note('objcache: a cached compile differs from a fresh one (FNVNX_LINK_OBJCACHE_VERIFY=1, see the log)')
+        oc = os.path.join(ROOT, 'tools', 'link', 'objcache.py')
+        if objcache_on(env):   # least recently used results above FNVNX_LINK_OBJCACHE_MAX_MB (default 8192) go
+            b.sh([PY, '-I', oc, 'prune'], log, env=env)
         m, classes = parse_stats(os.path.join(out, 'stats.txt'))
         ctext = open(clog, errors='replace').read()
         cm, cclasses = parse_check(ctext)

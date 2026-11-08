@@ -32,8 +32,10 @@ import re
 import shutil
 import struct
 import subprocess
+import time
 
 import layout
+import objcache
 
 AS = os.environ.get('AS', 'aarch64-linux-gnu-as')
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
@@ -576,8 +578,8 @@ def compile_probe(tree, workdir, unit, items, tag, extra=(), prelude=None, game=
             return None, []
         open(src, 'w').write(head + '\n'.join(line for _, _, line in alive) + '\n')
         try:
-            r = subprocess.run([CXX, *fl, src, '-o', obj], cwd=tree, capture_output=True, text=True,
-                               errors='replace', timeout=600)
+            # objcache: the same compile of the last link gives back its status, errors and object (T1)
+            r = objcache.Result(*objcache.compile(CXX, fl, src, obj, cwd=tree, timeout=600))
         except subprocess.TimeoutExpired:
             return None, []
         if os.environ.get('FNVNX_PROBE_DEBUG'):
@@ -1209,6 +1211,7 @@ def run(out, tree, jobs=4):
         if name.endswith(('.vt.S', '.o')):
             os.remove(os.path.join(vdir, name))
     print('vtables: %d classes requested' % len(reqs), flush=True)
+    t_start = time.time()
     todo = {c: (sp, hosts) for c, (sp, why, hosts) in reqs.items() if sp and hosts}
     results = {}          # class -> (host, probe result)
     fallback = {}         # class -> (host, non-polymorphic probe result) while a polymorphic view is looked for
@@ -1296,6 +1299,7 @@ def run(out, tree, jobs=4):
     json.dump(newcache, open(cache_path + '.tmp', 'w'))
     os.replace(cache_path + '.tmp', cache_path)
 
+    t_probe = time.time()
     # ---- emit, per host unit
     per_host = collections.defaultdict(list)
     done_enc, rows = set(), []
@@ -1443,7 +1447,9 @@ def run(out, tree, jobs=4):
         shutil.copyfile(vt_o, o_path)
     json.dump(newx, open(xcache_path + '.tmp', 'w'))
     os.replace(xcache_path + '.tmp', xcache_path)
+    t_emit = time.time()
     close_emitted(tree, work, [(h, o_path) for h, _, o_path, _ in built], defined, stats)
+    t_close = time.time()
     stats['slot functions no object defines'] = len(wanted_all)
     stats['slot functions emitted from the host units'] = len(emitted_all & wanted_all)
     with open(os.path.join(vdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
@@ -1459,4 +1465,7 @@ def run(out, tree, jobs=4):
     lines += ['  %-64s %d' % kv for kv in sorted(stats.items())]
     open(os.path.join(vdir, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines), flush=True)
+    print('vtables phases: probe rounds %.1f s, emit %.1f s, close %.1f s, write %.1f s' % (
+        t_probe - t_start, t_emit - t_probe, t_close - t_emit, time.time() - t_close), flush=True)
+    print(objcache.summary('vtables'), flush=True)
     return stats
