@@ -1022,6 +1022,18 @@ at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus
   order (the call-only placeholders, e.g. the renderer's slot 54), which D26 (a)/(b) convert in S1-rules, not here.
   vtmetric's `slot-one-delete-this` counts the tables still in that shape (96 on link 0540aff0; the fix's target is 0).
 
+  **Minus-one tables without a pair** (W30, `d26_minus_one_reason` in `exe_vtable_copies`; `FNVNX_D26T=0` turns it off).
+  A table made from the exe vftable with no D1/D0 (the probe's synthesis, an extended copy) used to stay in the exe's
+  order, while callers compiled against D26 (b)'s `virtual ~C()` dispatch minus-one: `_ZTV12FUN_00aa7400` and
+  `_ZTV26FUN_00aa2230_BSNiAllocator` ran the wrong slot (the heap's Allocate ran an empty slot returning `this`). A table
+  is now rebuilt whole as a strong copy in D26's layout (D1/D0 from exe slot 0 by `vmo_dtor_slots`, exe slot k at k + 1 by
+  `exe_slot_target`, free-function slots through the `__fnvnx_vfree_` this-drop thunks) only on evidence: the exe vftable
+  is in S1's D22 list (`d22.json` under FNVNX_RECON, `load_d22_list`): the classes prepare's D22 / D26 (b) converted,
+  so their callers are minus-one. A placeholder name alone is no evidence (an unlisted class is not converted and its
+  callers keep the exe's order), and no code may name slot 0 (D22-USED keeps the exe order). Tables with no evidence are
+  counted as `exe-order-no-evidence`. A caller in the exe's order for the same class (BSNiAllocator's InitHolder
+  0x00aa2020 loads offset 28) disagrees with a shifted table: S1 converts it first or together.
+
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
 2,029 objects compiled (of 2,978 units; S1 census flags, `-O2`). 106,043 undefined (object, symbol) references:
