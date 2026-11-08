@@ -2255,8 +2255,13 @@ class Emu:
                     self.exit_code = uc.reg_read(UC_ARM64_REG_X0)
                     self.tp_after = uc.reg_read(UC_ARM64_REG_TPIDR_EL0)
                     break
-                self.trace("instruction budget exhausted")
-                raise SystemExit(f"thread {t.tid} ran out of instruction budget at {uc.reg_read(UC_ARM64_REG_PC):#x}")
+                # the budget is a time slice, not a hang detector (the wall-clock limit is): a long single-threaded
+                # phase (the INI settings load re-parses the file after each write) ends its slice and goes on
+                self.budget_slices = getattr(self, "budget_slices", 0) + 1
+                t.result = uc.reg_read(UC_ARM64_REG_X0)
+                t.ctx, t.state, t.resume_pc = uc.context_save(), "ready", uc.reg_read(UC_ARM64_REG_PC)
+                self.cur = None
+                continue
         return self.exit_code
 
 
@@ -2431,7 +2436,7 @@ def main(argv):
     out = emu.console.decode(errors="replace")
     tp_ok = getattr(emu, "tp_after", None) == 0xDEAD0000
     print(f"== guest at {emu.base:#010x} (link base {emu.link_base:#x}, {('pinned' if emu.pinned else 'relocatable') if emu.relocatable else 'fixed'}): rc={rc:#x} host_calls={emu.calls} threads={len(emu.threads)} "
-          f"switches={emu.ctx_switches} blocking_waits={emu.addr_waits} tpidr_el0 restored={tp_ok}")
+          f"switches={emu.ctx_switches} budget_slices={getattr(emu, 'budget_slices', 0)} blocking_waits={emu.addr_waits} tpidr_el0 restored={tp_ok}")
     for line in emu.debug:
         print(f"   [debug] {line}")
     if getattr(emu, "skipped", None) is not None:
