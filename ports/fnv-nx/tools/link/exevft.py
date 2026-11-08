@@ -291,9 +291,9 @@ def deleting_dtor(path, addr):
         if end is not None:
             # the function's own first return (a linear sweep, not a byte search that runs into the next function:
             # MagicCaster slot 9 0x008d0600 ends `ret 8` and the next `ret 4` was another function's): it must be
-            # `ret 4` with the flags test and a call (the delete) before it
+            # `ret 4` with the flags test before it
             i, imm, ncall = end
-            return imm == 4 and ncall > 0 and _FLAGS_TEST.search(b[:i]) is not None
+            return imm == 4 and _FLAGS_TEST.search(b[:i]) is not None
     i = b.find(b'\xc2\x04\x00')
     return i > 0 and _FLAGS_TEST.search(b[:i]) is not None
 
