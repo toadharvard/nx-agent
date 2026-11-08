@@ -54,7 +54,7 @@ import config
 # the exe bytes (when available) replace the union, and a float difference runs the garbage / bool / x87 control-word (24-bit) / x87-range / callee
 # float width probes before it stays `float`. Flow rows (EQ): float libm wrappers (ceilf / floorf ..) are untraced
 # builtins with a float argument, the secondary-base entry `__fnvnx_msvc_<addr>` comes from aliases.ld, and a temporary's
-# destructor before a throw the exe makes after its _CxxThrowException is throw-temp-dtor.
+# destructor before a throw the exe makes after its _CxxThrowException is throw-temp-dtor. Oracle-callee-unloaded also reads the base-object entries `__fnv_<Y>_C2` / `_D2` that a unit-local constructor X reaches as the traced call Y (the 71 global-object initializers calling the constructor 0x0045cfe0, whose first exe call is 0x00404920 at 0x0045d013; tests/s13/test_basector.py).
 # The signedness probe clears an argument byte only when the oracle can
 # widen it (not a float sign or a whole-read int), and an uninit-arm that vanishes once the unwritten stack words of
 # buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
@@ -90,6 +90,8 @@ import config
 # R4 uncls (EQ): `__movsd` / `__movsb` run as builtins (rep movs) and are no call, a delete of null and the delete after the destructor half of the exe's scalar deleting destructor are left out of both traces (libcalls.delete_fold: null-delete, split-delete), the same calls in another order are paired by callee (call-order, only a reversed argument block the exe shows; an adjacent swap likewise, else call-order-unproven), a destructor under another name (exeempty.deleting_wrapper / dtor_chain) gets the vptr-reset rule, and bool-repr may need several bytes (classify._bool_chain).
 # EQ rest class (tests/s13/test_eqrest.py): a pointer argument that is the address of a function-local static (the oracle's image address against the native's .bss copy), and a call-count where the oracle's static guard is set while the native's own guard runs the initializer, are local-static; entry_register_reads follows the cases of a switch jump table inside the function, so a register a case body reads (edx at 0x00e03170) is a custom register.
 # Leaf registers: an intercepted call to an exe function that is a straight-line leaf writing neither ecx nor edx leaves them as the caller held them (retsrc.preserved), as MSVC's optimiser relies on (0x00d3ab60 writes only eax and cl; 0x00d3abc0 keeps its argument in edx over the call).
+# EQ memory group (tests/s13/test_eqmem.py): a function-local static of a class type / spelled with other back-references in its name pairs with its native `_ZZ` object, the address of a paired static is the same object, and the native's own guard of a paired static is no private read.
+# EQ thunk-forward (tests/s13/test_thunkfwd.py): a native garbage word forwarded to the jump target of an exe function that is one `jmp rel32` (declared without parameters) is an artifact.
 HARNESS = 'difffuzz-20'
 
 

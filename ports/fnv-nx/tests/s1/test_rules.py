@@ -2016,6 +2016,13 @@ check('D22-CL: minus-one, slot 4: the fifth virtual', run(s1.r_vtable_dtor_slot,
 check('D22-CL: RAWVT1 leaves an exe-order class in exe order', run(s1.r_raw_vtable_slots, _RV.replace('Coll', 'HeapStandIn')),
       [], ['FNVNX_D26_SLOT'])
 del os.environ['FNVNX_CLASSLAYOUT']; prepare.__dict__['_fnvnx_classlayout'] = None
+# ---- S1-rules: HKRO1 (Havok hkReferencedObject's two base virtuals after its destructor)
+_HK = 'class hkReferencedObject\n{\npublic:\nvirtual ~hkReferencedObject(){}\nvoid removeReference()const;\n};\n'
+check('HKRO1 a destructor-only hkReferencedObject gets FNVNX_HKRO1 after its destructor',
+      run(s1.r_hk_referenced_object_slots, _HK), ['virtual ~hkReferencedObject(){} FNVNX_HKRO1 /* fnv-nx HKRO1 */'])
+check('HKRO1 not a full one, nor another class',
+      run(s1.r_hk_referenced_object_slots, _HK.replace('void removeReference', 'virtual const void* GetClassType() const;\nvoid removeReference')) +
+      run(s1.r_hk_referenced_object_slots, _HK.replace('hkReferencedObject', 'hkOther')), [], ['FNVNX_HKRO1'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')

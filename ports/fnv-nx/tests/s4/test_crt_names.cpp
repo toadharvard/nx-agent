@@ -111,3 +111,24 @@ TEST(crt_vector_ctor_and_variadic_appendpreview)
     CHECK_EQ(t_appendpreview_v(b, sizeof b, "cd"), 0);
     CHECK_STR(b, "abcd");
 }
+
+/* x23: the CRT scalar deleting destructors by exe address: (this, flags) -> this, free only when flags & 1 */
+extern "C" {
+void *__fnv_00ec7a8a(void *, unsigned);
+void *__fnv_00ec7aab(void *, unsigned);
+void *__fnv_00ec7ad2(void *, unsigned);
+void *__fnv_00ece2fb(void *, unsigned);
+void *__fnv_00ec3685(void *, unsigned);
+void *__fnv_00ec40ab(void *, unsigned);
+}
+
+TEST(crt_deleting_dtor_providers)
+{
+    void *(*const fns[])(void *, unsigned) = {__fnv_00ec7a8a, __fnv_00ec7aab, __fnv_00ec7ad2,
+                                              __fnv_00ece2fb, __fnv_00ec3685, __fnv_00ec40ab};
+    for (auto f : fns) {
+        alignas(8) char obj[16] = {0};   /* flags 0: destroy only, no heap free (no game heap is linked here) */
+        CHECK(f(obj, 0) == obj);
+        CHECK(f(obj, 1) == obj);         /* __fnv_00401030 is absent: the free is skipped, not called */
+    }
+}

@@ -47,11 +47,11 @@ class VOrder(unittest.TestCase):
             open(os.path.join(d, 'include', 'P.h'), 'w').write(HDR)
             st = Counter(); os.environ['FNVNX_VORDER_LAX'] = '1'
             try:
-                v.post_check(d, st, Counter())
+                v.vorder_post_check(d, st, Counter())
             finally:
                 del os.environ['FNVNX_VORDER_LAX']
             self.assertEqual(st['VORDER1-LEFT'], 1)
-            self.assertRaises(SystemExit, v.post_check, d, Counter(), Counter())
+            self.assertRaises(SystemExit, v.vorder_post_check, d, Counter(), Counter())
 
 
 if __name__ == '__main__':

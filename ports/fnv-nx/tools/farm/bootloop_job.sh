@@ -84,6 +84,14 @@ if [ -z "$FAIL" ]; then
 	if [ -n "$GAME_EXE" ]; then export FNVNX_EXE="$GAME_EXE"; else unset FNVNX_EXE; fi
 	export FNVNX_LINK_OBJCACHE=${FNVNX_LINK_OBJCACHE:-$FARM_HOME/linkobj}
 	[ "${LINKCACHE:-1}" = 1 ] && { bash "$HERE/linkcache.sh" seed "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true; }
+	# T1: the game units' objects through the content-addressed cache shared by the farms (compile.sh
+	# FNVNX_UNIT_OBJCACHE; branch unitobj/cache): a unit another farm compiled with the same compiler, flags, source and
+	# headers at the same paths is taken instead of compiled (a flags change costs one farm's compile, not every farm's).
+	# Seeded every job (only the files this machine lacks), published after the build. UNITCACHE=0: neither.
+	if [ "${UNITCACHE:-1}" = 1 ]; then
+		export FNVNX_UNIT_OBJCACHE=${FNVNX_UNIT_OBJCACHE:-$FARM_HOME/unitobj}
+		LINKCACHE_BRANCH=unitobj/cache LINKCACHE_SEED_MIN=1000000000 bash "$HERE/linkcache.sh" seed "$FNVNX_UNIT_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
+	else unset FNVNX_UNIT_OBJCACHE; fi
 	step inputs
 	COLD=0; [ -f "$B/compile/objects.tsv" ] || COLD=1
 	TB=$(date +%s)
@@ -239,6 +247,11 @@ if [ -z "$FAIL" ] && [ "${LINKCACHE:-1}" = 1 ] && [ "${LINKCACHE_PUBLISH:-1}" = 
 	LINKCACHE_NOTE="bootloop $C12" bash "$HERE/linkcache.sh" publish "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
 	step "cache publish"
 fi
+# the units' cache back to the artifacts repository (only when it changed; never from a WIP build)
+if [ -n "${FNVNX_UNIT_OBJCACHE:-}" ] && [ -z "${FARM_WIP_BRANCH:-}" ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ]; then
+	LINKCACHE_BRANCH=unitobj/cache LINKCACHE_PUBLISH_MB=${UNITCACHE_PUBLISH_MB:-1500} LINKCACHE_NOTE="units bootloop $C12" \
+		bash "$HERE/linkcache.sh" publish "$FNVNX_UNIT_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
+fi
 
 printf '%s\n' "${STEPS[@]}" > "$F/steps.tsv"
 python3 -I - "$B" "$STUB" "$F/steps.tsv" "$REPORT" "$COMMIT" "$(( $(date +%s) - T0 ))" "${COLD:-?}" "$FAIL" \
@@ -285,6 +298,20 @@ if fail:
     L += ['- FAIL: %s' % fail, '']
     for s_, err, tail in failed_stages:
         L += ['- the %s stage: %s' % (s_, err[:300] or 'no error recorded'), '', '```'] + [t[:300] for t in tail] + ['```', '']
+# the path this head took (orchestrator: a head that changes only the link must not prepare or compile)
+byst = {x['stage']: x for x in stages}
+comp_now = None
+cr = rd(os.path.join(B, 'compile', 'stage.json')) or {}
+if byst.get('compile', {}).get('run') == 'ran':
+    comp_now = (cr.get('metrics') or {}).get('compile_built_now')
+prep_kept = byst.get('prepare', {}).get('run') == 'cached' or byst.get('prepare', {}).get('note', '').startswith('kept')
+if prep_kept and not comp_now:
+    path = 'link-only: the tree kept, nothing compiled'
+elif prep_kept:
+    path = 'incremental: the tree kept, %s units compiled' % comp_now
+else:
+    path = 'prepare ran%s' % ('' if comp_now is None else ', %s units compiled' % comp_now)
+L += ['- path: %s; link %s s, guest %s s' % (path, byst.get('link', {}).get('seconds'), byst.get('guest', {}).get('seconds'))]
 L += ['- iteration: %d s (%.1f min; target 15 min)%s' % (total, total / 60, '; cold: the first build on this machine' if cold == '1' else ''),
       '- stub boot: game milestones %d/%d; last reached: %s; null device: %s; EMU_TIMEOUT %s s' % (
           reached, len(ms), bs.get('milestone') or 'none', {'1': 'FNVNX_STUB_NULLDEV=1', '0': 'off'}.get(nd, '-'), emu_s),
@@ -324,7 +351,7 @@ open(report, 'w').write('\n'.join(L) + '\n')
 json.dump({'schema': 'fnvnx-bootloop/1', 'commit': commit, 'seconds': total, 'cold': cold == '1', 'error': fail or None,
            'steps': {n: int(s) for n, s in st}, 'stages': stages, 'nulldev': nd or None,
            'milestones': [[m.get('name'), bool(m.get('reached'))] for m in ms], 'reached': reached, 'of': len(ms),
-           'last': bs.get('milestone'), 'linkeq': linkeq or None, 'determinism': det or None,
+           'last': bs.get('milestone'), 'linkeq': linkeq or None, 'determinism': det or None, 'path': path,
            'lockstep': dict({'note': ls_note}, refs=lsum)},
           open(report[:-3] + '.json' if report.endswith('.md') else report + '.json', 'w'), indent=1)
 EOF

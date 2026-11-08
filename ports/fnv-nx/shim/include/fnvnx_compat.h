@@ -167,6 +167,15 @@ template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribu
 #define FNVNX_MSVC_BASE_END(...) typename fnvnx_int_of_align<alignof(__VA_ARGS__)>::type : 0;
 #endif
 
+/* -fno-sized-deallocation (W41) stops GCC declaring the sized global operator delete. The decomp still calls
+ * ::operator delete(p, n) explicitly in about 45 units (MSVC 2008 declared it), so declare it here; libsupc++ defines
+ * it (forwards to operator delete(void*)). Implicit delete-expressions stay unsized, as W41 wants. */
+#if defined(__cplusplus) && !defined(__cpp_sized_deallocation)
+#include <cstddef>
+void operator delete(void *, std::size_t) noexcept;
+void operator delete[](void *, std::size_t) noexcept;
+#endif
+
 /* prepare.py rule NEW5: first member of a class whose only scalar operator delete is the placement form; its deleting
  * destructor frees through the global ::operator delete(void*), the function MSVC 2008 called there. */
 #ifdef __cplusplus
@@ -185,6 +194,8 @@ struct fnvnx_new_tag {};
  * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
 #define FNVNX_D22(C, ...) virtual ~C();
 #define FNVNX_D22I(C, ...) virtual ~C() {}
+/* HKRO1: Havok hkReferencedObject's getClassType / calcContentStatistics (exe slots 1 / 2) */
+#define FNVNX_HKRO1 virtual const void* GetClassType() const; virtual void CalcContentStatistics(void*, const void*) const;
 #define FNVNX_D22_DROP(...)
 /* D26: a call of a converted slot-0 placeholder (MSVC: the deleting destructor ??_G(flags)) is a virtual destructor
  * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */

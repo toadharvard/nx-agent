@@ -91,7 +91,7 @@ def itanium_class(m):
 
 LOCAL_STATIC = re.compile(r'^\?(?:[^@?]+@\?\d+\?\?|\$S\d+@|\$TSS\d+@)')   # ?x@?1??f@@..., ?$S1@..., ?$TSS0@...
 # ?<var>@?<n>?<decorated function>@4<type>: a function-local static (value); ?$S<n>@ / ?$TSS<n>@: MSVC's guard word
-LOCAL_VALUE = re.compile(r'^\?([^@?$][^@?]*)@\?\d+\?(\?.+)@4[^@]*@?A$')
+LOCAL_VALUE = re.compile(r'^\?([^@?$][^@?]*)@\?\d+\?(\?.+?)@4.*A$')
 LOCAL_GUARD = re.compile(r'^\?\$(?:S|TSS)\d+@\?\d+\?(\?.+)@4IA$')
 
 
@@ -485,6 +485,7 @@ class UnitCache:
         t = runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
                           statics - paired - guards)
         t.static_pairs, t.static_guards = pairs, guards
+        t.static_nguards = self._native_guards
         t.extra_pinned = dict(getattr(t, 'extra_pinned', {}) or {})
         for _, o, n in pairs:
             t.extra_pinned[o] = bytes(n)
@@ -641,24 +642,40 @@ class UnitCache:
                         rows.setdefault(n, a)
             self._static_names = (faddr, rows)
         faddr, rows = self._static_names
-        pairs, guards = [], set()
+        # (difffuzz-20, static-backref) inside a local static's name the function is decorated in its own scope, so
+        # its back-references can count differently (`SAAAV2@XZ` there, `SAAAV1@XZ` in the function's own symbol):
+        # when the exact spelling is unknown, the function whose symbol agrees with it up to the digits, if one does
+        norm = {}
+        for fs, fa_ in faddr.items():
+            norm.setdefault(re.sub(r'\d', '#', fs), set()).add(fa_)
+
+        def func_addr(fs):
+            if fs in faddr:
+                return faddr[fs]
+            c = norm.get(re.sub(r'\d', '#', fs), ())
+            return next(iter(c)) if len(c) == 1 else None
+        pairs, guards, nguards = [], set(), []
         for n, a in rows.items():
             if True:
                 g = LOCAL_GUARD.match(n)
-                if g and faddr.get(g.group(1)) in fn_names:
+                if g and func_addr(g.group(1)) in fn_names:
                     guards.update(range(int(a, 16), int(a, 16) + 4))
                     continue
                 m = LOCAL_VALUE.match(n)
                 if not m:
                     continue
                 var, func = m.group(1), m.group(2)
-                fa = faddr.get(func)
+                fa = func_addr(func)
                 for nn in fn_names.get(fa, ()):
                     base = '_ZZ' + nn[2:] + 'E' + str(len(var)) + var
                     cand = [x for x in (base, base + '_0') if x in img.syms]
                     if cand and img.sizes.get(cand[0]):
                         pairs.append((img.syms[cand[0]], int(a, 16), img.sizes[cand[0]]))
+                        gn = '_ZGV' + cand[0][2:]
+                        if gn in img.syms:      # the native's own guard of that static (its init protocol)
+                            nguards.append((img.syms[gn], img.sizes.get(gn) or 8))
                         break
+        self._native_guards = nguards
         self._static_pairs_key, self._static_pairs_val = key, (pairs, guards)
         return pairs, guards
 

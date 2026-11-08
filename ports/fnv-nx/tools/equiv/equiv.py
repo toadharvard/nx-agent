@@ -142,8 +142,11 @@ CLASSES = {
     'HUNIT1': 'neutral',       # explicit instantiations of the template members a header unit's recipe lists (MSVC emitted them)
     'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
+    'VORDER1': 'layout',        # R2: same-name virtual overloads in exe slot order (GCC lays them in declaration order, MSVC reversed)
     'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor
     'D22': 'neutral',          # FNVNX_D22 / FNVNX_D22_DROP: GCC declares the slot-0 virtual destructor, MSVC keeps the original declaration
+    'HKRO1': 'neutral',        # FNVNX_HKRO1 (empty under MSVC): hkReferencedObject's getClassType / calcContentStatistics under GCC
+    'VSPLIT1': 'neutral',      # one declaration per virtual declarator (`virtual T a(), b();` -> two): the same declarations
     'EMPTY1': 'neutral',       # FNVNX_EMPTY1(T, name) (name under MSVC): a declared-only empty-string object -> T("") under GCC
     'RAWVT1': 'neutral',       # FNVNX_D26_SLOT(k) (k under MSVC): a raw exe slot index on `this`, k + 1 for GCC's minus-one vtables
     'DTORB1': 'neutral',       # FNVNX_DTORB_BEGIN/END (empty under MSVC): a destructor stand-in calls the address its ??1 is bound to
@@ -156,7 +159,8 @@ PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names', 'POP2'
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
 POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
-              'pop_chains': 'POP2', 'this_members': 'THIS2', 'd22_write_applied': 'D22'}
+              'pop_chains': 'POP2', 'this_members': 'THIS2', 'd22_write_applied': 'D22',
+              'vorder_post_check': 'VORDER1'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
