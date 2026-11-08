@@ -893,6 +893,10 @@ def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=
             items.append((k, 'bd', line))
     else:
         items.append((0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}'))
+        for k, r in enumerate(sorted(rows, key=lambda r: r.name)):   # a class template's destructor: instantiated here
+            line = inst_line(itanium(r.name))
+            if line and line not in {it[2] for it in items}:
+                items.append((k + 1, 'inst', line))
     # emitted bodies are game code: compile.sh's own flags (layout.game_flags: code generation, FTOI2, S12 order)
     flags = ('-ffunction-sections', '-fdata-sections') + (('-fkeep-inline-functions',) if inline else ())
     obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags, prelude='',
@@ -979,6 +983,124 @@ def load_type_sizes(out):
             if not line.startswith('#') and len(f) >= 3 and f[2].isdigit():
                 res[(f[0], sigs.canon_type(f[1]))].add(int(f[2]))
     return res
+
+
+def inst_line(isig):
+    """`template C<args>::~C();` - the explicit instantiation of the destructor of a class template instantiation
+    over global types (`NiPointer<NiLight>`), None for any other name. The body is the template's own, from the
+    host's headers: what a unit sees where the pointee is complete."""
+    if isig is None or isig.kind != 'func' or isig.params or isig.variant not in ('D1', 'D2') or len(isig.qual) < 2:
+        return None
+    if isig.qual[-1] != '{dtor}' or '<' not in isig.qual[-2] or not isig.qual[-2].endswith('>'):
+        return None
+    if any(UNIT_NS.match(q) or UNIT_NS_ANY.search(q) for q in isig.qual):
+        return None   # a unit-local copy of a class: its own unit hosts it (exe-addr / copy pairs)
+    if any(c in q for q in isig.qual[:-1] for c in '`\'({'):
+        return None
+    base = isig.qual[-2][:isig.qual[-2].index('<')]
+    return 'template %s::~%s();' % ('::'.join(isig.qual[:-1]), base)
+
+
+ARG_WORDS = re.compile(r'[A-Za-z_]\w*')
+BUILTIN_WORDS = frozenset('const volatile unsigned signed int long short char bool float double void wchar_t '
+                          'struct class enum'.split())
+
+
+INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+
+
+def include_closure(tree, files):
+    """{file: set of the files it includes, itself included} for tree-relative `files`: quoted includes resolved
+    against the file's directory, include/, src/ and the tree root, else by basename; read once per file."""
+    by_base = collections.defaultdict(list)
+    for base in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(tree, base)):
+            for f in fs:
+                if f.endswith(('.h', '.inl', '.hpp')):
+                    by_base[f].append(os.path.relpath(os.path.join(dp, f), tree))
+    direct = {}
+
+    def inc(rel):
+        if rel not in direct:
+            try:
+                raw = open(os.path.join(tree, rel), encoding='utf-8', errors='replace').read()
+            except OSError:
+                raw = ''
+            res = set()
+            for m in INCLUDE.findall(raw):
+                for cand in (os.path.normpath(os.path.join(os.path.dirname(rel), m)), os.path.join('include', m),
+                             os.path.join('src', m), m):
+                    if os.path.exists(os.path.join(tree, cand)):
+                        res.add(cand)
+                        break
+                else:
+                    res.update(by_base.get(os.path.basename(m), ())[:1])
+            direct[rel] = res
+        return direct[rel]
+    out = {}
+    for f in files:
+        seen, todo = {f}, [f]
+        while todo:
+            for g in inc(todo.pop()):
+                if g not in seen:
+                    seen.add(g)
+                    todo.append(g)
+        out[f] = seen
+    return out
+
+
+def inst_hosts(tree, rows, itanium, unit_sources, found, ref_units, limit=5):
+    """{name: [host units]} for destructors of template instantiations (inst_line) whose template has a body of its
+    own in the tree (`found`: bodycause.tree_bodies for (class, ~class), live only; specializations of other
+    arguments count too, the host's compile decides). A host is a unit whose includes reach that body and a
+    definition of every class the arguments name (the pointee is complete there); the referencing units are left
+    out (they declare the destructor without a body: the pointee is incomplete there)."""
+    import bodycause
+    want, bodyfiles = {}, {}
+    for r in rows:
+        isg = itanium(r.name)
+        c = bodycause.key_of(isg)
+        if not inst_line(isg) or not c:
+            continue
+        fl = {f for f, w in found.get((c[0], '~' + c[0]), ()) if w.startswith('live')}
+        if not fl:
+            continue
+        cls = isg.qual[-2]
+        words = [w for w in dict.fromkeys(ARG_WORDS.findall(cls[cls.index('<'):])) if w not in BUILTIN_WORDS and
+                 w != c[0]]
+        want[r.name], bodyfiles[r.name] = words, fl
+    if not want:
+        return {}
+    alltok = sorted({w for ws in want.values() for w in ws}, key=len, reverse=True)
+    rdef = re.compile(r'\b(?:class|struct)\s+(%s)\b[^;{(]*\{' % '|'.join(map(re.escape, alltok))) if alltok else None
+    files = []
+    for base in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(tree, base)):
+            files += [os.path.relpath(os.path.join(dp, f), tree) for f in fs if f.endswith(('.h', '.inl', '.hpp', '.cpp'))]
+    defs = collections.defaultdict(set)     # word -> files defining a class of that name
+    for f in files:
+        try:
+            raw = open(os.path.join(tree, f), encoding='utf-8', errors='replace').read()
+        except OSError:
+            continue
+        if rdef:
+            for w in set(rdef.findall(raw)):
+                defs[w].add(f)
+    clo = include_closure(tree, sorted(unit_sources))
+    out = {}
+    for n, ws in want.items():
+        rus = set(ref_units.get(n, ()))
+        cand = []
+        for u in sorted(unit_sources):
+            if u in rus:
+                continue
+            reach = clo.get(u, {u})
+            if bodyfiles[n] & reach and all(not defs.get(w) or defs[w] & reach for w in ws) and \
+                    any(defs.get(w) for w in ws):
+                cand.append(u)
+        if cand:
+            out[n] = sorted(cand, key=lambda u: (len(clo[u]), u))[:limit]
+    return out
 
 
 def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
@@ -2074,6 +2196,16 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         vdone = set(vtargets) | (set(failed) - direct) | set(vnotes)
         rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
         tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
+        # a class template's destructor no object instantiates (the pointee is incomplete where it is referenced): the
+        # template's own body, explicitly instantiated in a unit that names the arguments (inst_hosts)
+        inst_rows = [r for r in rest if inst_line(itanium(r.name))]
+        if inst_rows:
+            import bodycause
+            want_ = {(k[0], '~' + k[0]) for k in (bodycause.key_of(itanium(r.name)) for r in inst_rows) if k and k[0]}
+            ih = inst_hosts(tree, inst_rows, itanium, set(unit_names), bodycause.tree_bodies(tree, want_),
+                            {r.name: r.units.split(',') for r in inst_rows})
+            for n_, hs_ in ih.items():
+                tin[n_] = hs_ + [h_ for h_ in tin.get(n_, []) if h_ not in hs_]
         # tree-inline's pairings across units pass the layout gate: names MSVC calls directly, constructors and
         # destructors (found since the search spells them by the class name), and every copy-key rename
         strict = direct | {n for n in tin if itanium(n).variant}
@@ -2085,7 +2217,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
             except Exception as e:
                 return h, k, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
         tdone = {}
-        for round_ in range(3):   # a host that does not pair a name: the next host with a body of the class
+        for round_ in range(5):   # a host that does not pair a name: the next host with a body of the class
             tby = collections.defaultdict(list)
             for r in rest:
                 hs = tin.get(r.name, [])
