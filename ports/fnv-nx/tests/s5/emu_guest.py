@@ -1926,6 +1926,12 @@ class Emu:
         if len(getattr(self, "discovered", ())) >= getattr(self, "discover_max", 0):
             return False
         pc = uc.reg_read(UC_ARM64_REG_PC)
+        reps = self.__dict__.setdefault("discover_reps", {})
+        reps[pc] = reps.get(pc, 0) + 1
+        if reps[pc] > 50:   # the same fault site again and again: a loop around it, the run cannot go on past it
+            if reps[pc] == 51:
+                print(f"   discover: {self.sym(pc)} faulted 50 times: a loop, discovery stops taking it")
+            return False
         lr = uc.reg_read(UC_ARM64_REG_LR)
         bad_call = pc == 0 or "fetch" in err.lower()
         if bad_call:
@@ -1973,6 +1979,15 @@ class Emu:
         # shape A: stp x29, x30, [sp, #-N]! ; mov x29, sp ; stp/str callee-saved at [sp, #k]
         # shape B: sub sp, sp, #M ; stp x29, x30, [sp, #k] ; add x29, sp, #k ; stores at [sp, #j]
         base = entry_sp = None
+        # the frame setup may follow a few early-exit instructions (cbz, mov): start the shapes at the first stp of the
+        # frame record or sub sp; a fault before it is in the function's frameless head
+        k0 = next((j for j, x in enumerate(ins) if (x.mnemonic == "stp" and x.op_str.startswith("x29, x30, [sp, #-")
+                                                    and x.op_str.endswith("]!")) or
+                   (x.mnemonic == "sub" and x.op_str.startswith("sp, sp, #"))), None)
+        if k0:
+            if pc <= ins[k0].address:
+                return self.discover_leaf(start)
+            ins = ins[k0:]
         if ins and ins[0].mnemonic == "stp" and ins[0].op_str.startswith("x29, x30, [sp, #-") and ins[0].op_str.endswith("]!"):
             n = int(ins[0].op_str.split("#-")[1].rstrip("]!"), 0)
             if pc <= ins[0].address + 4 or len(ins) < 2 or ins[1].mnemonic != "mov" or ins[1].op_str != "x29, sp":
@@ -1987,12 +2002,14 @@ class Emu:
                 k = int(ins[2].op_str.split("#")[1], 0)
                 base, entry_sp = fp - k, fp - k + m
             elif pc > ins[0].address:   # a leaf with a stack frame and no frame record
-                uc.reg_write(UC_ARM64_REG_SP, sp + m)
-                return uc.reg_read(UC_ARM64_REG_LR), "leaf returned"
+                got = self.discover_leaf(start)
+                if got is not None:
+                    uc.reg_write(UC_ARM64_REG_SP, sp + m)
+                return got
             else:
                 return None
         else:   # a leaf without a frame: x30 is the return address
-            return uc.reg_read(UC_ARM64_REG_LR), "leaf returned"
+            return self.discover_leaf(start)
         regs = {}
         for x in ins:
             if x.mnemonic not in ("stp", "str") or "[sp" not in x.op_str or x.op_str.endswith("]!"):
@@ -2011,6 +2028,16 @@ class Emu:
         uc.reg_write(UC_ARM64_REG_SP, entry_sp)
         uc.reg_write(UC_ARM64_REG_LR, ret)
         return ret, "returned 0"
+
+    def discover_leaf(self, start):
+        """return through x30 from a function without a frame record, unless x30 points back into the same function
+        (it called something itself: x30 is stale, the real return address is unknown)"""
+        lr = self.uc.reg_read(UC_ARM64_REG_LR)
+        i = self._bisect(self.sym_addrs, (lr - self.base + self.link_base) if self.relocatable else lr) - 1
+        own = self._bisect(self.sym_addrs, (start - self.base + self.link_base) if self.relocatable else start) - 1
+        if i == own:
+            return None
+        return lr, "leaf returned"
 
     def discover_summary(self):
         import collections
