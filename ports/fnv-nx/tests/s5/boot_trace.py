@@ -404,7 +404,8 @@ def compare(guest, wine, units, resync=64, context=8, limit=50):
     first = next((d for d in divs if d["kind"] not in ("missing", "extra")), None)
     return {"matched": st["matched"], "guest_calls": sum(1 for c in guest if c.orig is not None),
             "wine_calls": len(wine), "inlined": inlined, "first": first, "divergences": divs,
-            "end": "divergence" if first else ("calls missing or extra only" if divs else "no divergence")}
+            "end": "divergence" if first else ("calls missing or extra only" if divs else
+                   ("nothing to compare: no guest call of these functions" if not groots else "no divergence"))}
 
 
 NO_PARAMS = re.compile(r"^_Z\d+\w+?v$")   # free function, no parameters (Itanium: ...v)
@@ -436,6 +437,13 @@ def cmd_compare(a):
             return 2
     _, g_order = read_log(a.guest, "guest")
     _, w_order = read_log(a.wine, "wine")
+    if getattr(a, "only_list", None):
+        # the functions of one reference's list only (T1: one guest trace on the union of several references'
+        # lists, compared with each); main_thread nests by depth, so leaving calls out keeps the nesting
+        keep = {int(l.split()[0], 16) for l in open(a.only_list) if l.strip() and not l.startswith("#")
+                and re.fullmatch(r"[0-9a-fA-F]{6,8}", l.split()[0])}
+        g_order = [c for c in g_order if c.orig in keep]
+        w_order = [c for c in w_order if c.orig in keep or c.api]
     g, w = main_thread(g_order), main_thread(w_order)
     units = load_units(a.units)
     r = compare(g, w, units, a.resync, a.context, limit=a.max_div)
@@ -451,6 +459,8 @@ def cmd_compare(a):
         print(f"FIRST DIVERGENCE: {f['kind']} in {f['guest'].name}: {f['detail']}")
         print("  guest path: " + " > ".join(fmt_call(c, 'guest') for c in path(f['guest'])[-a.context:]))
         print("  exe path:   " + " > ".join(fmt_call(c, 'wine') for c in path(f['wine'])[-a.context:]))
+    elif not r["guest_calls"]:
+        print("nothing compared: the guest trace has no call of these functions")
     else:
         print("no divergence in the matched calls")
     if r["divergences"]:
@@ -576,6 +586,7 @@ def main(argv=None):
     p.add_argument("--resync", type=int, default=64)
     p.add_argument("--context", type=int, default=8)
     p.add_argument("--max-div", type=int, default=50, help="report the first N divergences (default 50)")
+    p.add_argument("--only-list", help="compare only the functions of this list (fnlist format <hex> <name>)")
     p.add_argument("--json")
     p.set_defaults(fn=cmd_compare)
     p = sub.add_parser("ref")
