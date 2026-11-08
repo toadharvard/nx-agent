@@ -379,7 +379,16 @@ class Resolver:
                     if len({int(v, 16) for v in alts}) == 1:
                         syms[n] = next(iter(alts)); how['game'] += 1
                         continue
-                for k, what in ((var_key(n), 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
+                vk = var_key(n)
+                if vk:
+                    # the other linkage of a variable the unit itself binds: LINK1 names it by variable name inside
+                    # this unit's link, so the unit's own address decides even where another unit binds the same
+                    # name elsewhere (extradatalist.cpp: DAT_011977d8 at 0x011977d0)
+                    mine = {v for k2, v in syms.items() if var_key(k2) == vk}
+                    if len({int(v, 16) for v in mine}) == 1:
+                        syms[n] = next(iter(mine)); how['linkage-unit'] += 1
+                        continue
+                for k, what in ((vk, 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
                     if k and len(self.by_key.get(k, ())) == 1:
                         syms[n] = hex(next(iter(self.by_key[k]))); how[what] += 1
                         break
