@@ -2596,6 +2596,7 @@ class Emu:
         main.ctx, main.resume_pc, main.state, main.result = uc.context_save(), self.base, "ready", HOST_PAGE
         budget = getattr(self, "budget", 0)
         slice_us = int(getattr(self, "slice_ms", 2000)) * 1000
+        mt_budget = int(getattr(self, "mt_budget", 50_000_000))   # instructions per slice while threads compete
         import signal
         self.stop_signal = None
 
@@ -2627,10 +2628,17 @@ class Emu:
             uc.reg_write(UC_ARM64_REG_X0, t.result & U64)
             t.state = "running"
             try:
-                # a time slice (timeout, a timer thread calls emu_stop): count= makes unicorn hook every
-                # instruction, about 10x slower (the INI read took more than 540 s with count=2e8, 46 s for the
-                # whole boot to past renderer-init with a timeout). count only when --budget is given explicitly.
-                uc.emu_start(t.resume_pc, RETURN_ADDR, timeout=slice_us, count=budget)
+                # Slices. count= makes unicorn hook every instruction (about 10x slower: the INI read took more than
+                # 540 s with count=2e8, the whole boot past renderer-init 46 s with a timeout), but a timer-stopped
+                # slice ends at a wall-clock-dependent instruction, so with another thread ready the switch point
+                # (and the boot) differs run to run (3 identical D26 boots: 2 stops, 1 deadlock). So: another thread
+                # ready -> an instruction count (deterministic switches); this thread alone -> a time slice (resuming
+                # the same thread is the same run wherever the stop lands).
+                others = any(x is not t and x.state == "ready" for x in self.threads.values())
+                if others or budget:
+                    uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget or mt_budget)
+                else:
+                    uc.emu_start(t.resume_pc, RETURN_ADDR, timeout=slice_us)
             except UcError as e:
                 if getattr(self, "collect_traps", False) and self.collect_trap():
                     t.result = uc.reg_read(UC_ARM64_REG_X0)
@@ -2715,7 +2723,10 @@ def main(argv):
     ap.add_argument("--budget", type=int, default=0,
                     help="instructions per scheduling slice (0, the default: none; slices are --slice-ms long. An "
                          "instruction count makes unicorn hook every instruction, about 10x slower)")
-    ap.add_argument("--slice-ms", type=int, default=2000, help="wall-clock length of a scheduling slice (ms)")
+    ap.add_argument("--slice-ms", type=int, default=2000, help="wall-clock length of a scheduling slice (ms) while "
+                    "one thread runs alone")
+    ap.add_argument("--mt-budget", type=int, default=50_000_000,
+                    help="instructions per slice while other threads are ready (deterministic switch points)")
     ap.add_argument("--core3", action="store_true", help="the host's core 3 opt-in (fnvnx.ini core3=1)")
     ap.add_argument("--no-boost", action="store_true", help="the host's boost_loading=0")
     ap.add_argument("--stub-faults", metavar="FILE", help="functions (names or 0xORIG, one per line) that return 0 "
@@ -2779,7 +2790,7 @@ def main(argv):
     emu = Emu(a.nso, root, load_base=a.load_base, game=a.game)
     if a.vm_service:
         emu.vm_service = True
-    emu.budget, emu.slice_ms = a.budget, a.slice_ms
+    emu.budget, emu.slice_ms, emu.mt_budget = a.budget, a.slice_ms, a.mt_budget
     emu.core3, emu.boost_loading = a.core3, not a.no_boost
     if a.elf:
         emu.load_symbols(a.elf)
