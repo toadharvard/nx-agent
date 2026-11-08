@@ -320,7 +320,15 @@ extern "C" HANDLE LocalFree(HANDLE h)
     return NULL;
 }
 
-/* ---- status */
+/* ---- status
+ * The page-file fields are Windows' commit limit: RAM plus the page file (a system-managed one is about RAM's
+ * size), so their free part is free RAM plus the free page file, far above free RAM. The heap's constructor
+ * 0x00aa3880 shows a message box and exits when ullAvailPageFile < 512 MB (the only threshold the exe checks:
+ * GlobalMemoryStatus at 0x00aa9879 only logs); with free RAM there the device would trip it as the process grows.
+ * Here: total = 2 x RAM, free = free RAM + RAM. */
+static uint64_t pagefile_total(uint64_t t) { return 2 * t; }
+static uint64_t pagefile_avail(uint64_t t, uint64_t a) { return a + t; }
+
 extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
 {
     uint64_t t, a;
@@ -331,8 +339,8 @@ extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
     ms->dwMemoryLoad = t ? (DWORD)(100 - a * 100 / t) : 0;
     ms->dwTotalPhys = t > cap ? cap : (SIZE_T)t;
     ms->dwAvailPhys = a > cap ? cap : (SIZE_T)a;
-    ms->dwTotalPageFile = ms->dwTotalPhys;
-    ms->dwAvailPageFile = ms->dwAvailPhys;
+    ms->dwTotalPageFile = pagefile_total(t) > cap ? cap : (SIZE_T)pagefile_total(t);
+    ms->dwAvailPageFile = pagefile_avail(t, a) > cap ? cap : (SIZE_T)pagefile_avail(t, a);
     ms->dwTotalVirtual = (SIZE_T)0x7FFE0000u;
     ms->dwAvailVirtual = ms->dwAvailPhys < ms->dwTotalVirtual ? ms->dwAvailPhys : ms->dwTotalVirtual;
 }
@@ -345,8 +353,8 @@ extern "C" BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX ms)
     ms->dwMemoryLoad = t ? (DWORD)(100 - a * 100 / t) : 0;
     ms->ullTotalPhys = t;
     ms->ullAvailPhys = a;
-    ms->ullTotalPageFile = t;
-    ms->ullAvailPageFile = a;
+    ms->ullTotalPageFile = pagefile_total(t);
+    ms->ullAvailPageFile = pagefile_avail(t, a);
     ms->ullTotalVirtual = 0x7FFE0000ull;
     ms->ullAvailVirtual = a < 0x7FFE0000ull ? a : 0x7FFE0000ull;
     ms->ullAvailExtendedVirtual = 0;

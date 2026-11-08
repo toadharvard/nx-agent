@@ -279,3 +279,23 @@ TEST(virtual_alloc_many_regions)
     printf("   virtual_alloc_many_regions: %d page commits, %.2f us each\n", commits,
            (double)(t1 - t0) / 1000.0 / commits);
 }
+
+/* the commit limit, as Windows reports it: the heap constructor 0x00aa3880 exits when ullAvailPageFile < 512 MB */
+TEST(memory_status_page_file)
+{
+    MEMORYSTATUSEX ms;
+    memset(&ms, 0xcc, sizeof ms);
+    ms.dwLength = sizeof ms;
+    CHECK(GlobalMemoryStatusEx(&ms));
+    CHECK_EQ(ms.dwLength, sizeof ms);   /* 64 on the ILP32 guest */
+    CHECK(ms.ullTotalPhys > 0 && ms.ullAvailPhys <= ms.ullTotalPhys);
+    CHECK(ms.ullTotalPageFile >= ms.ullTotalPhys && ms.ullAvailPageFile <= ms.ullTotalPageFile);
+    CHECK(ms.ullAvailPageFile >= ms.ullAvailPhys + ms.ullTotalPhys / 2);
+    CHECK(ms.ullAvailPageFile >= 0x20000000ull);   /* the game's threshold */
+    CHECK(ms.ullTotalVirtual == 0x7FFE0000ull && ms.ullAvailVirtual <= ms.ullTotalVirtual);
+    CHECK_EQ(ms.ullAvailExtendedVirtual, 0);
+    CHECK(ms.dwMemoryLoad <= 100);
+    MEMORYSTATUS m;
+    GlobalMemoryStatus(&m);
+    CHECK(m.dwTotalPageFile >= m.dwTotalPhys && m.dwAvailPageFile >= m.dwAvailPhys);
+}
