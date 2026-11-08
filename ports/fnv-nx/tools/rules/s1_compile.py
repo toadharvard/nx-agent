@@ -6668,12 +6668,70 @@ def _rawvt_exe_order():
 # Destroy, TESLeveledList, ListBox<>, Tile3D...) or is not a destructor at all
 D22_EXE_ORDER_REASONS = {'defined-slot0', 'd26-slot0-not-a-destructor', 'd22-used', 'com'}
 
+# RAWVT1-MEM (S5-boot, link af44165ab2d8: the heap ctor dyninit 00fb66a0 overflowed the stack): the decomp also models
+# the vptr as the class's first data member, `void** m_ppVirtualMethodTable;` (or vtable / vtbl / m_vtbl / m_pVtbl /
+# vptr), and indexes it on `this`: BSDiscBootSystemUtility::Initialize (0x00af3aa0) calls m_ppVirtualMethodTable[2],
+# exe slot 2 = BSSystemUtility::Destroy 0x00af3250 (exe [edx+8] at 0x00af3aaf); natively [vptr+8] is slot 2 of the
+# minus-one table, Initialize itself. The same index on such a member, bare or `this->`, inside a member function of
+# its class, or on a local initialised from `*(void***)this` / `*reinterpret_cast<void***>(this)`, gets
+# FNVNX_D26_SLOT(k) under RAWVT1's conditions. Not when the class in the file declares a virtual function (its first
+# data member is then not the vptr), the name is a local or parameter of another kind (RAWVT1-MEM-LOCAL), or the slot
+# read is not called (RAWVT1-MEM-DATA: a cast to a builtin type, no call of the variable it is stored in).
+RAWVT1_MEMBERS = r'(?:m_ppVirtualMethodTable|vtable|vtbl|m_vtbl|m_pVtbl|vptr|_vtable)'
+RAWVT1_MEM_RX = re.compile(r'(?<![\w.>:])((?:this\s*->\s*)?(%s)\s*\[\s*)([0-9]+|0[xX][0-9a-fA-F]+)(\s*\])' % RAWVT1_MEMBERS)
+RAWVT1_THIS_VPTR = re.compile(r'^\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*this\s*\)|'
+                              r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*\(?\s*this\s*\)?)\s*;')
+
+
+def _rawvt_mem_ok(masked, body_open, pos, name):
+    """True when `name` at pos is the object's vptr: not declared in the function before pos, or declared as a local
+    initialised from *(void***)this"""
+    seg = masked[body_open:pos]
+    sig_start = masked.rfind('\n', 0, body_open)
+    head = masked[max(0, sig_start - 400):body_open]
+    if re.search(r'[\w*&>\s]\b%s\s*[,)]' % re.escape(name), head[head.rfind('('):] if '(' in head else ''):
+        return False                                                       # a parameter of that name
+    d = None
+    for d in re.finditer(r'\b(?:void\s*\*\s*\*|void\s*\*\s*const\s*\*|auto|[A-Za-z_]\w*\s*\*+)\s*%s\s*(=|;|\[)'
+                         % re.escape(name), seg):
+        pass
+    if d is None:
+        return True
+    if d.group(1) != '=':
+        return False
+    return bool(RAWVT1_THIS_VPTR.match(seg[d.end():d.end() + 120]))
+
+
+_RAWVT_BUILTIN = re.compile(r'^\s*(?:(?:const|unsigned|signed|int|long|short|char|bool|float|double|void|'
+                            r'size_t|DWORD|UINT|INT|BOOL)\b\s*\**\s*)+$')
+
+
+def _rawvt_mem_called(masked, m):
+    """True when the slot read at m is called: under a cast to a function pointer or a typedef'd type (not a builtin:
+    blk_00cc0000's FUN_00cd9f10 reads `(int)m_ppVirtualMethodTable[7]`, a count behind a data pointer, exe
+    [[esi]+0x1c] * 48), or stored in a variable that the function then calls"""
+    before = masked[max(0, m.start() - 200):m.start()]
+    before = before[max(before.rfind(';'), before.rfind('{'), before.rfind('}')) + 1:]
+    c = re.search(r'(?:reinterpret_cast\s*<((?:[^<>]|<[^<>]*>)*)>|\(((?:[^()]|\([^()]*\))*)\))\s*\(?\s*$', before)
+    if c:
+        t = c.group(1) or c.group(2)
+        return '(' in t or not _RAWVT_BUILTIN.match(t)
+    v = re.search(r'([A-Za-z_]\w*)\s*=\s*$', before)
+    if v:
+        after = masked[m.end():m.end() + 600]
+        return bool(re.search(r'(?:\b%s\s*\)?\s*\(|\(\s*\([^()]*\)\s*%s\s*\)\s*\()' % (re.escape(v.group(1)), re.escape(v.group(1))), after))
+    return False
+
+
 def r_raw_vtable_slots(path, text, stats):
-    """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above)."""
-    if 'this' not in text or '***' not in text.replace(' ', ''): return text
+    """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above); RAWVT1-MEM: the same on the vptr
+    modelled as a data member."""
+    if 'this' not in text: return text
+    if '***' not in text.replace(' ', '') and not re.search(RAWVT1_MEMBERS + r'\s*\[', text): return text
     masked = d22_mask(text)
     hits = [m for m in RAWVT1_RX.finditer(masked)]
-    if not hits: return text
+    mem = [m for m in RAWVT1_MEM_RX.finditer(masked)]
+    if not hits and not mem: return text
     classes = d22_classes(text, masked)
     owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
     for m in D22_MEMBER_DEF.finditer(masked):
@@ -6685,8 +6743,19 @@ def r_raw_vtable_slots(path, text, stats):
     by_name = collections.defaultdict(list)
     for c in classes: by_name[c['qual'][-1]].append(c)
     edits = []
-    for m in hits:
-        k = int(m.group(2), 0)
+    cands = [(m, m.start(2), m.end(2), 'RAWVT1') for m in hits]
+    for m in mem:
+        own = next(((a, nm) for a, z, nm in owners if a < m.start() < z), None)
+        if own is None: stats['RAWVT1-MEM-FREE'] += 1; continue
+        if any(re.search(r'\bvirtual\b', masked[c['open']:c['close']]) for c in by_name.get(own[1], ())):
+            stats['RAWVT1-MEM-VIRT'] += 1; continue
+        if not _rawvt_mem_ok(masked, own[0], m.start(), m.group(2)):
+            stats['RAWVT1-MEM-LOCAL'] += 1; continue
+        if not _rawvt_mem_called(masked, m):
+            stats['RAWVT1-MEM-DATA'] += 1; continue
+        cands.append((m, m.start(3), m.end(3), 'RAWVT1-MEM'))
+    for m, ka, kz, tag in cands:
+        k = int(masked[ka:kz], 0)
         owner = next((nm for a, z, nm in owners if a < m.start() < z), None)
         if owner is None: stats['RAWVT1-FREE'] += 1; continue
         if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
@@ -6698,7 +6767,8 @@ def r_raw_vtable_slots(path, text, stats):
         if k == K: stats['RAWVT1-SLOT0'] += 1; continue
         if k < K: stats['RAWVT1-BELOWK'] += 1; continue
         if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
-        edits.append((m.start(2), m.end(2), 'FNVNX_D26_SLOT(%s)' % text[m.start(2):m.end(2)]))
+        edits.append((ka, kz, 'FNVNX_D26_SLOT(%s)' % text[ka:kz]))
+        if tag != 'RAWVT1': stats[tag] += 1
     for a, b, rep in sorted(edits, reverse=True):
         text = text[:a] + rep + text[b:]
     stats['RAWVT1'] += len(edits)

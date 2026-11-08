@@ -2188,5 +2188,19 @@ check('VFPAD1 puts FNVNX_VFPAD(member types) first in a no-base class with a vfp
       ['struct VS { FNVNX', 'struct VB : B { FNVNX', 'struct VN { FNVNX', 'struct hkpSphereMotionD1E4 { FNVNX',
        'struct VP4 { FNVNX', 'int*)'])
 
+# ---- S5-boot: RAWVT1-MEM (the vptr as a data member; BSDiscBootSystemUtility::Initialize recursed, link af44165ab2d8)
+_RM = ('class BSDisc\n{\n  public:\n    void** m_ppVirtualMethodTable;\n    int n;\n    void Init();\n    void Count();\n};\n'
+       'typedef void(__thiscall* DestroyFn)(BSDisc*);\n'
+       'void BSDisc::Init()\n{\n    ((DestroyFn)m_ppVirtualMethodTable[2])(this);\n}\n'
+       'void BSDisc::Count()\n{\n    int c = (int)m_ppVirtualMethodTable[7];\n    n = c;\n}\n'
+       'struct Ren { void f(); int pad; };\nvoid Ren::f()\n{\n    void** vtbl = *(void***)this;\n'
+       '    ((void (__thiscall*)(void*, int))vtbl[0x1a])(this, 1);\n}\n'
+       'struct Vv { virtual void g(); void** vtable; void h(); };\nvoid Vv::h()\n{\n    ((DestroyFn)vtable[3])(0);\n}\n')
+_rmo = run(s1.r_raw_vtable_slots, _RM)
+check('RAWVT1-MEM: a called slot of the vptr member / a local *(void***)this gets FNVNX_D26_SLOT; a data read and a '
+      'member of a class with virtuals do not',
+      _rmo, ['m_ppVirtualMethodTable[FNVNX_D26_SLOT(2)]', 'vtbl[FNVNX_D26_SLOT(0x1a)]'],
+      ['m_ppVirtualMethodTable[FNVNX_D26_SLOT(7)]', 'vtable[FNVNX_D26_SLOT(3)]'])
+
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)
