@@ -123,29 +123,58 @@ print(int(sum(v for k, v in m.items() if k.startswith("link_objcache_") and k.en
 fi
 
 # Lockstep at function granularity (owner: the seams as a list): the stub boot traces the function entries of the
-# boot trace's list (tools/farm/boot_trace_job.sh, branch trace/<link12> of the artifacts repository: list.txt and
-# the exe's Wine trace wine.tsv.xz of that list; the newest one), and tests/s5/boot_trace.py compare lists the first
-# BOOTLOOP_LOCKSTEP_N (50) divergences with both caller chains. The reference is fetched once per trace commit
-# ($F/lockref/<sha12>). No trace branch yet: no lockstep, said so. BOOTLOOP_LOCKSTEP=0: off.
-LS_EXTRA=""; LS_NOTE="off"; RF=""
-if [ -z "$FAIL" ] && [ "${BOOTLOOP_LOCKSTEP:-1}" = 1 ]; then
-	LS_NOTE="no reference: no trace/* branch in the artifacts repository yet (boot_trace_job.sh publishes them)"
-	if git -C "$ARTIFACTS" fetch -q --depth 1 origin "+refs/heads/trace/*:refs/remotes/origin/trace/*" 2>/dev/null; then
-		ref=$(git -C "$ARTIFACTS" for-each-ref --sort=-committerdate --format='%(refname:short) %(objectname)' \
-			'refs/remotes/origin/trace/' | head -1)
-		if [ -n "$ref" ]; then
-			RF=$F/lockref/${ref#* }; RF=${RF:0:$(( ${#F} + 21 ))}
-			if [ ! -f "$RF/.done" ]; then
-				rm -rf "$F/lockref"; mkdir -p "$RF"
-				git -C "$ARTIFACTS" archive "${ref#* }" list.txt wine.tsv.xz 2>/dev/null | tar -x -C "$RF" 2>/dev/null \
-					&& xz -df "$RF/wine.tsv.xz" && [ -s "$RF/list.txt" ] && [ -s "$RF/wine.tsv" ] && touch "$RF/.done"
-			fi
-			if [ -f "$RF/.done" ]; then
-				LS_EXTRA="--trace-fn @$RF/list.txt --trace-out $STUB_TRACE"
-				LS_NOTE="reference ${ref%% *} ($(grep -vc '^#' "$RF/list.txt") functions)"
-			else LS_NOTE="reference ${ref%% *} could not be read"; RF=""; fi
-		fi
+# references' lists, and tests/s5/boot_trace.py compare lists, per reference, the first BOOTLOOP_LOCKSTEP_N (50)
+# divergences with both caller chains (the guest trace filtered to that reference's list: --only-list). The exe's
+# references (Wine, tools/lockstep/fnvtrace; each fetched once per commit into $F/lockref/<name>-<sha12>):
+#   bt1   the newest trace/<link12> of tools/farm/boot_trace_job.sh: list.txt, wine.tsv.xz (the boot)
+#   coc   S18's scenario/original trace-coc: list3.txt, wine.tsv.xz (boot -> menu -> coc -> in the cell; complete)
+# BOOTLOOP_LOCKSTEP_REFS (default "bt1 coc") picks them; a reference not published yet is said so. The guest's list
+# is the union of the image functions of all lists (the API lines, kernel32!..., are the exe's only).
+# BOOTLOOP_LOCKSTEP=0: off.
+LS_EXTRA=""; LS_NOTE="off"; LS_REFS=()
+lockref() {   # lockref <name> <git ref> <list path> <trace path>: $F/lockref/<name>-<sha12> holding list.txt, wine.tsv
+	local name=$1 ref=$2 lp=$3 tp=$4 sha d
+	sha=$(git -C "$ARTIFACTS" rev-parse -q --verify "$ref^{commit}" 2>/dev/null) || return 1
+	d=$F/lockref/$name-${sha:0:12}
+	if [ ! -f "$d/.done" ]; then
+		rm -rf "$F/lockref/$name-"*; mkdir -p "$d"
+		git -C "$ARTIFACTS" show "$sha:$lp" > "$d/list.txt" 2>/dev/null && git -C "$ARTIFACTS" show "$sha:$tp" > "$d/wine.tsv.xz" 2>/dev/null \
+			&& xz -df "$d/wine.tsv.xz" && [ -s "$d/list.txt" ] && [ -s "$d/wine.tsv" ] && touch "$d/.done"
 	fi
+	[ -f "$d/.done" ] && LS_REFS+=("$name|$d|$ref")
+}
+if [ -z "$FAIL" ] && [ "${BOOTLOOP_LOCKSTEP:-1}" = 1 ]; then
+	notes=()
+	for r in ${BOOTLOOP_LOCKSTEP_REFS:-bt1 coc}; do
+		case "$r" in
+			bt1)
+				git -C "$ARTIFACTS" fetch -q --depth 1 origin "+refs/heads/trace/*:refs/remotes/origin/trace/*" 2>/dev/null || true
+				ref=$(git -C "$ARTIFACTS" for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/remotes/origin/trace/' | head -1)
+				if [ -z "$ref" ]; then notes+=("bt1: no trace/* branch yet (boot_trace_job.sh publishes them)")
+				elif ! lockref bt1 "$ref" list.txt wine.tsv.xz; then notes+=("bt1: $ref could not be read"); fi ;;
+			coc|newgame)
+				git -C "$ARTIFACTS" fetch -q --depth 1 origin "+refs/heads/scenario/original:refs/remotes/origin/scenario/original" 2>/dev/null || true
+				if ! git -C "$ARTIFACTS" rev-parse -q --verify refs/remotes/origin/scenario/original > /dev/null; then
+					notes+=("$r: no scenario/original branch yet (S18)")
+				elif ! lockref "$r" origin/scenario/original "trace-$r/list3.txt" "trace-$r/wine.tsv.xz"; then
+					notes+=("$r: scenario/original trace-$r could not be read"); fi ;;
+			*) notes+=("$r: unknown reference") ;;
+		esac
+	done
+	if [ ${#LS_REFS[@]} -gt 0 ]; then
+		UL=$F/lockref/union.txt
+		for x in "${LS_REFS[@]}"; do d=${x#*|}; cat "${d%%|*}/list.txt"; done | python3 -I -c '
+import re, sys
+seen = set()
+for l in sys.stdin:
+    f = l.split()
+    if f and re.fullmatch(r"[0-9a-fA-F]{1,8}", f[0]) and 0x400000 <= int(f[0], 16) < 0x2100000 and int(f[0], 16) not in seen:
+        seen.add(int(f[0], 16)); sys.stdout.write(l if l.endswith("\n") else l + "\n")' > "$UL"
+		LS_EXTRA="--trace-fn @$UL --trace-out $STUB_TRACE"
+		for x in "${LS_REFS[@]}"; do n=${x%%|*}; d=${x#*|}; notes+=("$n: ${x##*|} ($(grep -c '^[0-9a-fA-F]' "${d%%|*}/list.txt") functions)"); done
+		notes+=("the guest traced on $(wc -l < "$UL") functions (the lists' union)")
+	fi
+	LS_NOTE=$(printf '%s; ' "${notes[@]}"); LS_NOTE=${LS_NOTE%; }
 fi
 STUB=$F/stub; rm -rf "$STUB"
 if [ -z "$FAIL" ]; then
@@ -181,13 +210,16 @@ if [ -z "$FAIL" ] && [ "${BOOTLOOP_DETERMINISM:-1}" = 1 ] && [ -n "$EMUH" ] && [
 elif [ -f "$F/determinism-$EMUH.done" ]; then
 	NOTE_DET="passed on this machine for emu_guest.py $EMUH ($(cut -c1-120 "$F/determinism-$EMUH.done"))"
 fi
-rm -f "$F/lockstep.txt" "$F/lockstep.json"
+rm -f "$F"/lockstep-*.txt "$F"/lockstep-*.json
 if [ -n "$LS_EXTRA" ] && [ -z "$FAIL" ]; then
 	if [ -s "$STUB_TRACE" ]; then
 		U=$B/prepare/tree/build/units.json; [ -f "$U" ] || U=""
-		python3 -I "$P/tests/s5/boot_trace.py" compare "$STUB_TRACE" "$RF/wine.tsv" ${U:+--units "$U"} \
-			--max-div "${BOOTLOOP_LOCKSTEP_N:-50}" --json "$F/lockstep.json" > "$F/lockstep.txt" 2>&1 \
-			|| LS_NOTE="$LS_NOTE; boot_trace.py compare exited $? (see the block)"
+		for x in "${LS_REFS[@]}"; do
+			n=${x%%|*}; d=${x#*|}; d=${d%%|*}
+			python3 -I "$P/tests/s5/boot_trace.py" compare "$STUB_TRACE" "$d/wine.tsv" ${U:+--units "$U"} --only-list "$d/list.txt" \
+				--max-div "${BOOTLOOP_LOCKSTEP_N:-50}" --json "$F/lockstep-$n.json" > "$F/lockstep-$n.txt" 2>&1 \
+				|| LS_NOTE="$LS_NOTE; $n: boot_trace.py compare exited $? (see its block)"
+		done
 	else
 		LS_NOTE="$LS_NOTE; the stub boot wrote no function trace"
 	fi
@@ -249,26 +281,31 @@ if ms:
     L += ['', '- game milestones: %s; last reached: %s' % (
         ', '.join('%s %s' % (m.get('name'), 'yes' if m.get('reached') else 'no') for m in ms), bs.get('milestone') or 'none')]
 F = os.path.dirname(B)
-lsj = rd(os.path.join(F, 'lockstep.json')) or {}
-lst = os.path.join(F, 'lockstep.txt')
+import glob
 L += ['', '## Lockstep: the boot\'s function entries against the exe under Wine', '', '- %s' % ls_note]
-if lsj:
+lsum = {}
+for jp in sorted(glob.glob(os.path.join(F, 'lockstep-*.json'))):
+    n = os.path.basename(jp)[len('lockstep-'):-5]
+    lsj = rd(jp) or {}
     kinds = {}
     for d in lsj.get('divergences') or []:
         kinds[d['kind'].split()[0]] = kinds.get(d['kind'].split()[0], 0) + 1
-    L += ['- %s calls of the guest, %s of the exe, %s matched in order; %d divergences listed (%s); first: %s' % (
-        lsj.get('guest_calls'), lsj.get('wine_calls'), lsj.get('matched'), len(lsj.get('divergences') or []),
-        ', '.join('%s %d' % kv for kv in sorted(kinds.items(), key=lambda kv: -kv[1])) or 'none',
-        ('%s in %s' % (lsj['first']['kind'], lsj['first']['function'])) if lsj.get('first') else 'none')]
-if os.path.isfile(lst):
-    L += ['', '```'] + [l.rstrip('\n')[:400] for l in open(lst, errors='replace')][:200] + ['```']
+    lsum[n] = {'matched': lsj.get('matched'), 'divergences': len(lsj.get('divergences') or []),
+               'first': (lsj.get('first') or {}).get('function'), 'by_kind': kinds}
+    L += ['', '### against %s' % n, '',
+          '- %s calls of the guest, %s of the exe, %s matched in order; %d divergences listed (%s); first: %s' % (
+              lsj.get('guest_calls'), lsj.get('wine_calls'), lsj.get('matched'), len(lsj.get('divergences') or []),
+              ', '.join('%s %d' % kv for kv in sorted(kinds.items(), key=lambda kv: -kv[1])) or 'none',
+              ('%s in %s' % (lsj['first']['kind'], lsj['first']['function'])) if lsj.get('first') else 'none')]
+    tp = jp[:-5] + '.txt'
+    if os.path.isfile(tp):
+        L += ['', '```'] + [l.rstrip('\n')[:400] for l in open(tp, errors='replace')][:200] + ['```']
 open(report, 'w').write('\n'.join(L) + '\n')
 json.dump({'schema': 'fnvnx-bootloop/1', 'commit': commit, 'seconds': total, 'cold': cold == '1', 'error': fail or None,
            'steps': {n: int(s) for n, s in st}, 'stages': stages, 'nulldev': nd or None,
            'milestones': [[m.get('name'), bool(m.get('reached'))] for m in ms], 'reached': reached, 'of': len(ms),
            'last': bs.get('milestone'), 'linkeq': linkeq or None, 'determinism': det or None,
-           'lockstep': {'note': ls_note, 'matched': lsj.get('matched'), 'divergences': len(lsj.get('divergences') or []),
-                        'first': (lsj.get('first') or {}).get('function')} if lsj else {'note': ls_note}},
+           'lockstep': dict({'note': ls_note}, refs=lsum)},
           open(report[:-3] + '.json' if report.endswith('.md') else report + '.json', 'w'), indent=1)
 EOF
 log "bootloop $C12: $(sed -n 3p "$REPORT")"
