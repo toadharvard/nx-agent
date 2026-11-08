@@ -177,7 +177,7 @@ def expected(row, exe_slots):
 
 ADDR_RX = re.compile(r'^__fnv_([0-9a-f]{8})(?:_D[0-2])?$')
 FLAG_RX = re.compile(r'^__fnvnx_vflag[0-9a-z]*_([0-9a-f]{8})_\d+$')
-OTHER_ADDR_RX = re.compile(r'^__fnvnx_(?:vgdel|vfree|d0del|cthis|vmo)_([0-9a-f]{8})')
+OTHER_ADDR_RX = re.compile(r'^__fnvnx_(?:vgdel|vfree|d0del|cthis|vmo|vadjd?|msvc)_([0-9a-f]{8})')   # vadj / vadjd: the exe slot's adjustor; msvc: its secondary-base entry
 
 
 def native_names(link):

@@ -1739,7 +1739,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if miss:
                 exev_all.update(exevft.plain_vftables(exe_path, miss, set(exev_all) | set(vmap) | set(vmo_c) |
                                                       {a_ for (_, a_) in vnames}))
-            vmo, vst = minus_one_copies(vmo_c, exev_all, native, providers, exe_path, msvc, bridges, traps, out)
+            lay_ = None
+            if os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0' and os.path.isfile(os.path.join(out, 'classlayout.tsv')):
+                import classlayout as _cl
+                lay_ = _cl.load_layout(os.path.join(out, 'classlayout.tsv'))
+            vmo, vst = minus_one_copies(vmo_c, exev_all, native, providers, exe_path, msvc, bridges, traps, out, lay_)
             for k_, n_ in vst.items():
                 vstats['vmo-' + k_] = n_
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
@@ -3738,6 +3742,179 @@ def class_names(z):
     return itanium_member('_ZN' + z[5:] if z.startswith('_ZTVN') else '_ZN' + z[4:] + 'X')
 
 
+VTFILL_REAL = ('__fnvnx_vtrap_', '.reloc', '.section:')
+GCC_THUNK_DTOR = re.compile(r'^_ZThn\d+_.*D([01])Ev$')
+
+
+def vtfill_block(expv, cur, z, base, off, native, providers, exe_path, msvc, bridges, traps, st, vtbind=None):
+    """VTFILL's words of one vtable of a group (classlayout.expected's list expv) -> [native symbol]. base: the word
+    index of the vtable's address point in the group (2 for the primary), for the trap reports. cur: the vtable's
+    words as the object has them (renamed). off (VTFILL2): the COL offset of a secondary exe vftable, else None.
+    D1 / D0 at a ('dtor', a) pair: the primary's vmo_dtor_slots (uncompiled ??_G included, W45); in a secondary
+    vtable a GCC this-adjusting `_ZThn<off>_...D1Ev` / `D0Ev` pair the object already has there stays, else the exe's
+    adjustor (`sub ecx, off; jmp ??_G`, vmo_adjustor) gets `__fnvnx_vadjd_<a>_<0|1>` stubs, the same this-adjustment
+    in front of the ??_G's pair (as minus_one_copies). Every other slot: exe_slot_target (off: an adjustor thunk of
+    exactly off becomes `__fnvnx_vadj_<a>`), and in a secondary vtable an address MSVC compiled with `this` at that
+    base (the address map's msvc_entry, d = off) binds to `__fnvnx_msvc_<a>`, the alias of GCC's `_ZThn` thunk
+    (slotfill2.secondary_entry's rule). Where that is only a trap, R4's binding (vtbind: {exe address: (kind, symbol,
+    target, n)}, load_vtbind) names the slot's native or adjustor; else a real word cur has at the index stays."""
+    msvc = msvc or (lambda n_: None)
+    sfx = '2' if off else ''
+    fill, i = [], 0
+    while i < len(expv):
+        x = expv[i]
+        if isinstance(x, tuple):
+            pair = None
+            if off:
+                c0, c1 = (cur[i] if i < len(cur) else None), (cur[i + 1] if i + 1 < len(cur) else None)
+                m0, m1 = GCC_THUNK_DTOR.match(c0 or ''), GCC_THUNK_DTOR.match(c1 or '')
+                if m0 and m1 and m0.group(1) == '1' and m1.group(1) == '0':
+                    pair = (c0, c1)
+                    st['vtfill2-dtor-gcc-thunks'] += 1
+                if pair is None and exe_path:
+                    adj = vmo_adjustor(x[1], off, native, exe_path, plain=False)
+                    inner = vmo_dtor_slots(adj[1], native, msvc, bridges, traps, st, (z, base + i), exe_path,
+                                           uncompiled=True, providers=providers) if adj else None
+                    if inner:
+                        for fl, w_ in enumerate(inner):
+                            sn = VADJD_SYM % (x[1], fl)
+                            bridges.setdefault(sn, emit_adj_stub(sn, w_, adj[0]))
+                        pair = (VADJD_SYM % (x[1], 0), VADJD_SYM % (x[1], 1))
+                        st['vtfill2-dtor-adjustor'] += 1
+                if pair is None and x[1] in (providers or {}):   # _purecall: S4's provider, no this to adjust
+                    pair = vmo_dtor_slots(x[1], native, msvc, bridges, traps, st, (z, base + i), exe_path,
+                                          uncompiled=True, providers=providers)
+            else:
+                pair = vmo_dtor_slots(x[1], native, msvc, bridges, traps, st, (z, base + i), exe_path, uncompiled=True,
+                                      providers=providers)
+            if pair:
+                fill += list(pair)
+            else:
+                fill += [exe_slot_target(x[1], native, providers, exe_path, bridges, traps, st, (z, base + i),
+                                         off=off)] * 2
+                st['vtfill%s-dtor-no-stub' % sfx] += 1
+            i += 2
+            continue
+        t = exe_slot_target(x, native, providers, exe_path, bridges, traps, st, (z, base + i), off=off)
+        nd = native.get(x) if off else None
+        if nd and t == ADDR_SYM % x and nd.get('msvc_entry') and nd['msvc_entry'][1] == off:
+            t = MSVC_ENTRY_SYM % x
+            st['vtfill2-msvc-entry'] += 1
+        if t.startswith('__fnvnx_vtrap_') and x in (vtbind or {}):
+            kb, sb, tb, nb = vtbind[x]
+            kb = {'function': 'fn', 'adjthunk': 'adj', 'deldtor': 'fn'}.get(kb, kb)   # R4's two files
+            if kb == 'adj' and tb:
+                t = ADJ_SYM % x
+                bridges.setdefault(t, emit_adj_stub(t, tb, nb))
+                st['vtfill%s-vtbind-adj' % sfx] += 1
+            elif kb == 'fn' and sb:
+                t = sb
+                st['vtfill%s-vtbind-fn' % sfx] += 1
+        if t.startswith('__fnvnx_vtrap_') and i < len(cur) and cur[i] and not cur[i].startswith(VTFILL_REAL):
+            t = cur[i]
+            st['vtfill%s-kept' % sfx] += 1
+        elif t.startswith('__fnvnx_vtrap_'):
+            st['vtfill%s-trap' % sfx] += 1
+        fill.append(t)
+        i += 1
+    return fill
+
+
+def vtfill2_group(z, path, vs, ents, names, pts, n, fill, ov, xs, o, vmap, exev, lay, native, providers, exe_path,
+                  msvc, bridges, traps, st, out, have, vtbind=None):
+    """VTFILL2 (W46): the words of a group with secondary bases, every vtable transform(its exe vftable). fill: the
+    primary's VTFILL words (vtfill_block). Each secondary vtable (address point ap, offset-to-top -d) whose V rows
+    (vmap: this group's object, ap) name agreeing RTTI exe vftables at COL offset d with a classlayout row gets
+    vtfill_block of that row (off = d); without a V row (a displaced copy), the one exe vftable of the primary's RTTI
+    class at COL offset d stands for it (vtfill2-secondary-by-offset); a vtable without either keeps the object's
+    words (with exe_vtable_copies' per-use words ov / xs). Offset-to-top and typeinfo words stay. Lengths: a vtable
+    whose exe list is shorter keeps its remaining native words; a longer last vtable grows at the group's end; a
+    longer primary or secondary before the last grows in place, every later address point moving down
+    (slotfill2.shift_steps: one (from, delta) step per vtable that grows, vtshift.tsv for apply's patches), or, when
+    an object referencing the group cannot be patched, every such vtable is cut at its native length
+    (vtfill2-primary-short / vtfill2-secondary-short). -> (word lines, shift steps or None, secondary vtables
+    filled), or None to leave the group to the builder (a kept word that is a relocation or a local symbol)."""
+    wn = list(names)
+    for i, t in ov.items():
+        wn[i] = t
+    for i, a_ in xs.items():
+        wn[i] = exe_slot_target(a_, native, providers, exe_path, bridges, traps, st, (z, i), off=None)
+    keep = set(range(len(ents)))
+    for k in range(min(n, len(fill))):
+        wn[2 + k] = fill[k]
+        keep.discard(2 + k)
+    inserts = [(8 + 4 * n, fill[n:], 'primary')] if len(fill) > n else []   # (group byte offset, words, which)
+    tail_extra = []
+    nsec = 0
+    last_ap = pts[-1][0]
+    for ap, ott in pts[1:]:
+        ns = vtables.slots_at(ents, ap)
+        vs2 = sorted(v for v, (z_, ap_, path_, note_) in vmap.items()
+                     if z_ == z and ap_ == ap and path_ == path and v in exev and exev[v].td and v in lay)
+        if not vs2:   # no V row (a displaced copy): the class's one exe vftable at this COL offset
+            tds = {exev[v].td for v in vs if v in exev}
+            vs2 = [v for v, e in exev.items() if e.td and e.td in tds and e.off == -ott and v in lay] \
+                if len(tds) == 1 and ott else []
+            if len(vs2) != 1:
+                st['vtfill2-secondary-no-exe'] += 1
+                continue
+            st['vtfill2-secondary-by-offset'] += 1
+        vv = max(vs2, key=lambda v: len(exev[v].slots))
+        sl = exev[vv].slots
+        dec = {(lay[v]['kind'], lay[v]['dtor_slot']) for v in vs2}
+        offs = {exev[v].off for v in vs2}
+        if any(exev[v].slots != sl[:len(exev[v].slots)] for v in vs2) or len(dec) != 1:
+            st['vtfill2-secondary-disagree'] += 1
+            continue
+        d_ = offs.pop() if len(offs) == 1 else None
+        if not d_ or -ott != d_:
+            st['vtfill2-secondary-offset-differs'] += 1
+            continue
+        import classlayout as _cl
+        kind_, k_ = next(iter(dec))
+        expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), _cl.real_slots(exe_path, vv, sl) if exe_path else sl)
+        b = ap // 4
+        f2 = vtfill_block(expv, wn[b:b + ns], z, b, d_, native, providers, exe_path, msvc, bridges, traps, st,
+                          vtbind)
+        for k in range(min(ns, len(f2))):
+            wn[b + k] = f2[k]
+            keep.discard(b + k)
+        if len(f2) > ns and ap == last_ap:
+            tail_extra = f2[ns:]
+            st['vtfill2-last-extended'] += 1
+        elif len(f2) > ns:   # before the next vtable's (offset-to-top, typeinfo) pair
+            inserts.append((ap + 4 * ns, f2[ns:], 'secondary'))
+        nsec += 1
+        st['vtfill2-secondary-' + kind_] += 1
+        st['vtfill2-secondary-slots'] += min(ns, len(f2)) + (len(tail_extra) if ap == last_ap else 0)
+    for i in sorted(keep):
+        e = ents[i]
+        if e.sym is None:
+            continue
+        if e.sym.startswith(('.reloc', '.section:')):
+            st['vtfill2-skipped-relocation'] += 1
+            return None
+        j = o.defs.get(e.sym)
+        if wn[i] == e.sym and j is not None and o.syms[j][4] == 0:
+            st['vtfill2-skipped-local-symbol'] += 1
+            return None
+    words = ['    .word %s' % ('%s%+d' % (w, e.addend) if (e.addend and i in keep) else w) if e.sym or i not in keep
+             else '    .word 0x%x' % e.word for i, (e, w) in enumerate(zip(ents, wn))]
+    words += ['    .word %s' % w for w in tail_extra]
+    shift = None
+    if inserts:
+        plan = [(at, 4 * len(ws)) for at, ws, _ in inserts]
+        shift = slotfill2.shift_steps(z, plan, out, have, st)
+        for _, ws, which in inserts:
+            st['vtfill2-%s-%s' % (which, 'shifted' if shift else 'short')] += 1
+            st['vtfill2-%s-%s-slots' % (which, 'shifted' if shift else 'short')] += len(ws)
+        if shift:
+            slotfill2.record_shift(z, plan, out)
+            for at, ws, _ in sorted(inserts, key=lambda x: x[0], reverse=True):
+                words[at // 4:at // 4] = ['    .word %s' % w for w in ws]
+    return words, shift, nsec
+
+
 def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
                       providers=None, alt=None, msvc=None, listed=None, called_fn=None, unbound=None, defined_fn=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
@@ -3760,11 +3937,21 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     slotfill2.shift_reset(out)   # S2c-vt2: no shifted secondary groups yet (vtshift.tsv)
     by_obj = {u.obj: u for u in have}
     want = collections.defaultdict(list)    # (z, path) -> [exe vftable]
+    vt_on = bool(exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0' and
+                 os.environ.get('FNVNX_VTFILL', '1') != '0' and os.environ.get('FNVNX_VTFILL2', '1') != '0')
+    vt_only, vt_main = set(), set()   # (z, path) of a `secondary ... at +0` V row / of a primary one
     for v, (z, ap, path, note) in vmap.items():
         # only vftables with RTTI: their end is the next COL pointer; a plain one (exevft.plain_vftables) may run on
         # into an unnamed neighbour, so it only fills slots the native vtable has (exe_slot_fill)
         if v in exev and exev[v].td and note.startswith('primary') and ap == 8:
             want[(z, path)].append(v)
+            vt_main.add((z, path))
+        elif v in exev and exev[v].td and exev[v].off == 0 and ap == 8 and vt_on:
+            # W46: the exe's primary vftable on the native group's primary vtable, which the V row calls `secondary
+            # {for X} at +0` (X is the native primary base: TESWorldSpace's _ZTV12FUN_00582e30, 0x0103195c). VTFILL
+            # only: the builder's other rules keep their tables (vt_only)
+            want[(z, path)].append(v)
+            vt_only.add((z, path))
     # the native vtables exe_pair displaced from a V row (the shell a unit's constructor stores: FUN_004de530 for
     # INIPrefSettingCollection, 0x01022744): objects built natively still carry them, so they get the exe's slots too
     for v, zs in (alt or {}).items():
@@ -3777,6 +3964,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     st['displaced-vtables-disagree'] += 1
                     continue
                 want[(z, path)].append(v)
+                vt_main.add((z, path))
                 st['displaced-vtables'] += 1
     called, defined = set(), set()
     exe_order = []   # (table, exe vftables, reason): the pair-less tables that stay in the exe's slot order
@@ -3811,6 +3999,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
             st['per-slot-not-the-kept-copy'] += 1
     for key in over:
         want.setdefault(key, [])
+    vt_only -= vt_main | set(over)
+    if vt_only:
+        st['vtfill2-primary-at-0-rows'] = len(vt_only)
     rows = []
     objs = {}
     for (z, path), vs in sorted(want.items()):
@@ -3837,12 +4028,13 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         if any(exev[v].slots != slots[:len(exev[v].slots)] for v in vs):
             st['skipped-exe-vftables-disagree'] += 1
             slots = []
-        extend = len(slots) > nm
+        only_ = (z, path) in vt_only
+        extend = len(slots) > nm and not only_
         if extend:
             st['short'] += 1
         # `delete p` reaches Itanium slot 1: a table in the exe's slot order holds DeleteThis there (d0_slot_fix)
         d0w = d0_slot_fix(z, n, d, names[2:2 + n], slots, native, msvc or (lambda n_: None), bridges, traps, st,
-                          exe_path) if slots else None
+                          exe_path) if slots and not only_ else None
         if d0w:
             st['d0slot-candidates'] += 1
         # W30: a table without a pair that its callers number minus-one (d26_minus_one_reason) is rebuilt whole in D26's
@@ -3850,7 +4042,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         m1 = None
         dp = 0
         cl_done = False
-        if slots and len(pts) == 1 and d is None and lay and os.environ.get('FNVNX_D26T', '1') != '0':
+        if slots and not only_ and len(pts) == 1 and d is None and lay and os.environ.get('FNVNX_D26T', '1') != '0':
             dec = {(lay[v]['kind'], lay[v]['dtor_slot']) for v in vs if v in lay}
             if len(dec) == 1:
                 kind_, k_ = dec.pop()
@@ -3879,7 +4071,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 st['classlayout-fallback'] += 1
         if cl_done:
             pass
-        elif slots and len(pts) == 1 and d is None and os.environ.get('FNVNX_D26T', '1') != '0':
+        elif slots and not only_ and len(pts) == 1 and d is None and os.environ.get('FNVNX_D26T', '1') != '0':
             s0n = ents[2].sym if n else None
             dd = bool(exe_path and s0n and s0n in (defined or ()) and exevft.deleting_dtor(exe_path, slots[0]))
             why = d26_classify(z, max(vs), [e.sym for e in ents[2:2 + n]], d, listed or (), called, defined, dd)
@@ -3896,12 +4088,12 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     st['d26-slot0-not-a-destructor'] += 1
                     exe_order.append((z, vs, 'd26-slot0-not-a-destructor', path))
                     m1 = None
-        elif slots and len(pts) != 1 and d is None:
+        elif slots and not only_ and len(pts) != 1 and d is None:
             exe_order.append((z, vs, 'multi-vtable', path))
             st['exe-order-multi-vtable'] += 1
         # V2 (seams triage, link 5fd996a4): the Actor / Projectile / TESForm family has four placeholder slots before the
         # deleting destructor (exe slot 4), so a pair-less table of it is minus-one from slot 4 (family_dtor_pos)
-        if not cl_done and slots and len(pts) == 1 and d is None and not m1 and fam and os.environ.get('FNVNX_D26F', '1') != '0' \
+        if not cl_done and slots and not only_ and len(pts) == 1 and d is None and not m1 and fam and os.environ.get('FNVNX_D26F', '1') != '0' \
                 and os.environ.get('FNVNX_D26T', '1') != '0' and not is_com(z, [e.sym for e in ents[2:2 + n]]):
             dp_ = family_dtor_pos(slots, fam)
             pair1 = vmo_dtor_slots(slots[dp_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + dp_),
@@ -3931,12 +4123,12 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         # VTFILL (orchestrator 2026-11-08 12:22): write the table as the gate expects it, transform(exe table) from
         # classlayout's decision, slot by slot: D1 / D0 at the exe's deleting-destructor slot, exe_slot_target of every
         # other exe slot (its native body, S4's _purecall, a flags / deleting stub); where that is only a trap and the
-        # native table has a real word at the same index, the native word stays (listed: vtfill-kept). Single address
-        # point only (a group with secondary bases keeps the builder's result: vtfill-skipped-secondary), never over a
-        # strong (key function) definition. FNVNX_VTFILL=0 turns it off.
+        # native table has a real word at the same index, the native word stays (listed: vtfill-kept). Never over a
+        # strong (key function) definition. FNVNX_VTFILL=0 turns it off. A group with secondary bases is VTFILL2
+        # (vtfill2_group; FNVNX_VTFILL2=0 keeps the builder's result for it: vtfill-skipped-secondary).
         if slots and lay and os.environ.get('FNVNX_VTFILL', '1') != '0':
             dec_ = {(lay[v]['kind'], lay[v]['dtor_slot']) for v in vs if v in lay}
-            if len(dec_) == 1 and len(pts) != 1:
+            if len(dec_) == 1 and len(pts) != 1 and os.environ.get('FNVNX_VTFILL2', '1') == '0':
                 st['vtfill-skipped-secondary'] += 1
             elif len(dec_) == 1:
                 kind_, k_ = next(iter(dec_))
@@ -3951,58 +4143,39 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     vv_ = max(vs, key=lambda v: len(exev[v].slots))
                     sl_ = _cl.real_slots(exe_path, vv_, slots) if exe_path else slots   # no words past the table
                     expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), sl_)
-                    fill, i_, pair_ = [], 0, None
-                    cur = names[2:2 + n]
-                    while i_ < len(expv):
-                        x_ = expv[i_]
-                        if isinstance(x_, tuple):
-                            pair_ = vmo_dtor_slots(x_[1], native, msvc or (lambda n_: None), bridges, traps, st,
-                                                   (z, 2 + i_), exe_path, uncompiled=True, providers=providers)
-                            if pair_:
-                                fill += list(pair_)
-                            else:
-                                fill += [exe_slot_target(x_[1], native, providers, exe_path, bridges, traps, st,
-                                                         (z, 2 + i_))] * 2
-                                st['vtfill-dtor-no-stub'] += 1
-                            i_ += 2
-                            continue
-                        t_ = exe_slot_target(x_, native, providers, exe_path, bridges, traps, st, (z, 2 + i_))
-                        if t_.startswith('__fnvnx_vtrap_') and x_ in vtbind:
-                            kb_, sb_, tb_, nb_ = vtbind[x_]
-                            kb_ = {'function': 'fn', 'adjthunk': 'adj', 'deldtor': 'fn'}.get(kb_, kb_)   # R4's two files
-                            if kb_ == 'adj' and tb_:
-                                t_ = ADJ_SYM % x_
-                                bridges.setdefault(t_, emit_adj_stub(t_, tb_, nb_))
-                                st['vtfill-vtbind-adj'] += 1
-                            elif kb_ == 'fn' and sb_:
-                                t_ = sb_
-                                st['vtfill-vtbind-fn'] += 1
-                        if t_.startswith('__fnvnx_vtrap_') and i_ < len(cur) and cur[i_] and \
-                                not cur[i_].startswith(('__fnvnx_vtrap_', '.reloc', '.section:')):
-                            t_ = cur[i_]
-                            st['vtfill-kept'] += 1
-                        elif t_.startswith('__fnvnx_vtrap_'):
-                            st['vtfill-trap'] += 1
-                        fill.append(t_)
-                        i_ += 1
+                    fill = vtfill_block(expv, names[2:2 + n], z, 2, None, native, providers, exe_path, msvc, bridges,
+                                        traps, st, vtbind)
                     head_ = ['    .word 0x%x' % ents[0].word if not ents[0].sym else '    .word %s' % ents[0].sym,
                              '    .word %s' % ents[1].sym if ents[1].sym else '    .word 0x%x' % ents[1].word]
-                    words_ = head_ + ['    .word %s' % w_ for w_ in fill]
-                    lines = ['// %s from the exe vftable(s) %s: VTFILL, %s%s, %d slots (classlayout)' % (
-                                 z, ' '.join('%08x' % v for v in sorted(vs)), kind_,
-                                 ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill)),
-                             '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3', '    .globl %s' % z,
-                             '    .type %s, %%object' % z, '%s:' % z] + words_ + ['    .size %s, .-%s' % (z, z), '    .text']
-                    bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
-                    st['vtfill-tables'] += 1
-                    st['vtfill-tables-' + kind_] += 1
-                    st['vtfill-slots'] += len(fill)
-                    for v, (z_, ap_, path_, note_) in list(vmap.items()):
-                        if z_ == z:
-                            vmap[v] = (z_, ap_, VTEXT_OBJ, note_ + ', VTFILL from the exe (%s)' % kind_)
-                    rows.append((z, os.path.basename(path), str(n), str(max(0, len(fill) - n)),
-                                 ' '.join('%08x' % v for v in sorted(vs)), '0'))
-                    continue
+                    g2 = None
+                    if len(pts) != 1:
+                        g2 = vtfill2_group(z, path, vs, ents, names, pts, n, fill, ov, xs, o, vmap, exev, lay,
+                                           native, providers, exe_path, msvc, bridges, traps, st, out, have, vtbind)
+                    if len(pts) == 1 or g2 is not None:
+                        words_, shift2, nsec = (head_ + ['    .word %s' % w_ for w_ in fill], None, 0) if g2 is None \
+                            else g2
+                        lines = ['// %s from the exe vftable(s) %s: VTFILL%s, %s%s, %d slots (classlayout)' % (
+                                     z, ' '.join('%08x' % v for v in sorted(vs)), '2 (%d secondary)' % nsec if g2 else '',
+                                     kind_, ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill)),
+                                 '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3',
+                                 '    .globl %s' % z, '    .type %s, %%object' % z, '%s:' % z] + words_ + \
+                                ['    .size %s, .-%s' % (z, z), '    .text']
+                        bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
+                        st['vtfill-tables'] += 1
+                        st['vtfill-tables-' + kind_] += 1
+                        st['vtfill-slots'] += len(fill)
+                        if g2 is not None:
+                            st['vtfill2-tables'] += 1
+                        for v, (z_, ap_, path_, note_) in list(vmap.items()):
+                            if z_ == z:
+                                vmap[v] = (z_, slotfill2.shifted(ap_, shift2), VTEXT_OBJ,
+                                           note_ + ', VTFILL%s from the exe (%s)' % ('2' if g2 else '', kind_))
+                        rows.append((z, os.path.basename(path), str(n), str(max(0, len(fill) - n)),
+                                     ' '.join('%08x' % v for v in sorted(vs)), '0'))
+                        continue
+        if only_:   # W46: a table want holds for VTFILL only, which did not write it
+            st['vtfill2-only-not-written'] += 1
+            continue
         if not extend and not ov and not d0w and not m1 and not xs:
             continue
         if o.bind(z) != 'weak':   # a key function's unit: its strong copy would be a second definition
@@ -4284,16 +4457,20 @@ def vmo_candidates(exev, vmap, hand, used_addr, every=True):
     return vmo_c, st
 
 
-def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, traps, out):
+def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, traps, out, lay=None):
     """D26 (c): every image vftable whose data symbol would stay at the image address (stored by hand into an
     object's vptr, no native vtable mapped: hand_vptrs 'image') gets a strong native copy `__fnvnx_vmo_<V>` in
     D22's minus-one order: offset-to-top (from the exe's COL, else the store's offset), typeinfo 0, D1/D0 for the
     exe's deleting destructor at slot 0 (vmo_dtor_slots; a trap for D1 and exe slot 0 at slot 1 when slot 0 is
     not a destructor), then exe slot k at native slot k + 1 (exe_slot_target). resolve binds `__fnv_<V>` to the
     copy's address point, so every hand store, comparison and read of V becomes native. cands: {V: offset-to-top}.
-    Returns ({V: copy symbol}, counts); out/vmo.tsv lists every copy."""
+    Returns ({V: copy symbol}, counts); out/vmo.tsv lists every copy.
+    lay (W46, classlayout rows {V: row}): a V whose row is exe-order / com, or minus-one at k > 0, is copied as
+    transform(exe) instead (vtfill_block: exe slot i at native i, D1 / D0 at k; hkThreadMemory 0x010cacd0, exe-order:
+    the minus-one copy moved its slot 3). FNVNX_VMOCL=0 turns it off."""
     st = collections.Counter()
     got, rows = {}, []
+    vtb_ = None   # R4's binding file, read once when a copy follows classlayout
     for v in sorted(cands):
         e = exev.get(v)
         if e is None or not e.slots:
@@ -4302,29 +4479,44 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
         name = VMO_SYM % v
         slots = list(e.slots)
         n_trap = st['slots-trap']
-        pair = vmo_dtor_slots(slots[0], native, msvc, bridges, traps, st, (name, 2), exe_path, providers=providers)
+        row = (lay or {}).get(v) if os.environ.get('FNVNX_VMOCL', '1') != '0' else None
+        if row is not None and (row['kind'] in ('exe-order', 'com') or
+                                (row['kind'] == 'minus-one' and 0 < row['dtor_slot'] < len(slots))):
+            import classlayout as _cl
+            if vtb_ is None:
+                vtb_ = load_vtbind()
+            words = vtfill_block(_cl.expected(row, slots), [], name, 2, e.off if e.td and e.off else None, native,
+                                 providers, exe_path, msvc, bridges, traps, st, vtb_)
+            st['classlayout-' + row['kind']] += 1
+        else:
+            words = None
+        pair = None if words is not None else \
+            vmo_dtor_slots(slots[0], native, msvc, bridges, traps, st, (name, 2), exe_path, providers=providers)
         adj0 = None
-        if pair is None and e.td and e.off and exe_path:
+        if words is None and pair is None and e.td and e.off and exe_path:
             adj0 = vmo_adjustor(slots[0], e.off, native, exe_path, plain=False)
         if adj0 is not None:   # a secondary vftable's destructor slot: `sub ecx, off; jmp ??_G` into the primary's
-            inner = vmo_dtor_slots(adj0[1], native, msvc, bridges, traps, st, (name, 2), exe_path)
+            inner = vmo_dtor_slots(adj0[1], native, msvc, bridges, traps, st, (name, 2), exe_path, providers=providers)
             if inner is not None:
                 for fl, w_ in enumerate(inner):
                     sn = VADJD_SYM % (slots[0], fl)
                     bridges.setdefault(sn, emit_adj_stub(sn, w_, adj0[0]))
                 pair = (VADJD_SYM % (slots[0], 0), VADJD_SYM % (slots[0], 1))
                 st['slot0-adjustor-dtor'] += 1
-        if pair is None:
+        if words is None and pair is None:
             d1 = TRAP_SYM % int(hashlib.sha1((XTRAP % slots[0] + ' D1').encode()).hexdigest()[:8], 16)
             traps.setdefault(d1, (XTRAP % slots[0] + ' (D1 at an exe slot 0 that is not a destructor)', (name, 2)))
             st['slot0-not-a-destructor'] += 1
             pair = (d1, exe_slot_target(slots[0], native, providers, exe_path, bridges, traps, st, (name, 3),
                                         e.off if e.td else None))
-        words = list(pair) + [exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (name, 3 + k),
-                                                        e.off if e.td else None)
-                              for k, a in enumerate(slots[1:], 1)]
+        if words is None:
+            words = list(pair) + [exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (name, 3 + k),
+                                                  e.off if e.td else None)
+                                  for k, a in enumerate(slots[1:], 1)]
         ott = cands[v]
-        lines = ['// %s: exe vftable %08x in the minus-one order, %d exe slots (D26 c)' % (name, v, len(slots)),
+        lines = ['// %s: exe vftable %08x in the %s order, %d exe slots (D26 c)' % (
+                     name, v, 'classlayout %s' % row['kind'] if row is not None and pair is None else 'minus-one',
+                     len(slots)),
                  '    .section .data.rel.ro.fnvnx_vmo.%08x,"aw"' % v, '    .p2align 3', '    .globl %s' % name,
                  '    .hidden %s' % name, '    .type %s, %%object' % name, '%s:' % name,
                  '    .word 0x%x' % (ott & 0xffffffff), '    .word 0'] + ['    .word %s' % w for w in words] + \
