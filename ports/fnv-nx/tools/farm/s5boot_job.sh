@@ -9,6 +9,8 @@
 #   S5BOOT_TAG      a short name for this boot; results go to branch s5boot/<link12>-<tag> (private)
 #   S5BOOT_REPAIR   1: add the emulator-only option repair-lost-slot-one to the table (never a product fix)
 #   S5BOOT_FAULTS   extra lines for the stub-fault table, `;`-separated
+#   S5BOOT_TABLE_REV  a commit of the public repository: its tests/s5/known_faults.txt and standins.c instead of
+#                   the checkout's (a guest older than a table change, e.g. pre-D26 guests: 3c8c79b3)
 #   S5BOOT_TRACE    function names to trace, `,`-separated (emu_guest.py --trace-fn; calls and returns)
 #   S5BOOT_TRACE_MAX  at most this many trace events (default 2000000)
 #   S5BOOT_EXTRA    more emu_guest.py arguments
@@ -23,7 +25,9 @@
 # The game install comes from tools/gamedata_fetch.sh (or FARM_GAME); the profile is tools/lockstep/profile.py's,
 # with the null device's name, as on every S5 boot. <report.md> holds only the stop, the milestones, the trace frames
 # and the hit lines (names and addresses); the boot log and the trace (game-derived) go to the private branch.
-# Needs: python unicorn capstone pyelftools, aarch64-linux-gnu binutils, git; ARTIFACTS (fnv-nx-build with push).
+# Needs: git, python3 with pip; ARTIFACTS (fnv-nx-build with push). It installs unicorn/capstone/pyelftools (S5BOOT_PIPS)
+# and, as root, binutils-aarch64-linux-gnu and gcc-aarch64-linux-gnu (the stub boot compiles tests/s5's stand-ins)
+# when they are missing; without the compiler it fails instead of booting without the stand-ins.
 set -uo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 P=$(cd "$(dirname "$0")/../.." && pwd)
@@ -56,7 +60,24 @@ fail() { NOTES+=("FAILED: $*"); log "FAILED: $*"; write_report; exit 1; }
 [ -n "${ARTIFACTS:-}" ] || { [ -d /home/user/fnv-nx-build/.git ] && ARTIFACTS=/home/user/fnv-nx-build; }
 [ -n "${ARTIFACTS:-}" ] || fail "ARTIFACTS unset"
 export ARTIFACTS
-python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null || fail "python unicorn/capstone/pyelftools missing"
+# the emulator's Python packages (the same pins as fuzz_job.sh) and aarch64 binutils, installed when missing
+S5BOOT_PIPS=${S5BOOT_PIPS:-"unicorn==2.1.4 capstone==5.0.9 pyelftools==0.33"}
+if ! python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null; then
+	log "installing $S5BOOT_PIPS"
+	# shellcheck disable=SC2086
+	python3 -m pip install -q --break-system-packages $S5BOOT_PIPS > "$W/pip.log" 2>&1 ||
+		python3 -m pip install -q $S5BOOT_PIPS >> "$W/pip.log" 2>&1 || fail "pip install $S5BOOT_PIPS (log $W/pip.log)"
+	python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null || fail "unicorn/capstone/pyelftools still missing after pip"
+fi
+need_apt=""
+command -v aarch64-linux-gnu-nm > /dev/null || need_apt="$need_apt binutils-aarch64-linux-gnu"
+command -v aarch64-linux-gnu-gcc > /dev/null || need_apt="$need_apt gcc-aarch64-linux-gnu"   # the stand-ins (--inject)
+if [ -n "$need_apt" ]; then
+	[ "$(id -u)" = 0 ] || fail "missing:$need_apt (root installs them)"
+	log "installing$need_apt"
+	{ apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $need_apt; } > "$W/apt.log" 2>&1 ||
+		fail "apt-get install$need_apt (log $W/apt.log)"
+fi
 
 GAME=${FARM_GAME:-$FARM_HOME/game}
 if [ -z "${FARM_GAME:-}" ] && [ ! -f "$GAME/FalloutNV.exe" ]; then
@@ -66,7 +87,18 @@ fi
 python3 -I "$P/tools/lockstep/profile.py" "$GAME/Fallout_default.ini" "$W/profile" --device "fnv-nx null D3D9 device" \
 	> "$W/profile.log" 2>&1 || fail "profile.py (log $W/profile.log)"
 
-cp "$P/tests/s5/known_faults.txt" "$W/faults.txt"
+if [ -n "${S5BOOT_TABLE_REV:-}" ]; then   # an older guest with the stub table and stand-ins of its own time
+	R=$S5BOOT_TABLE_REV
+	git -C "$P" cat-file -e "$R^{commit}" 2> /dev/null || git -C "$P" fetch -q origin claude/fnv-s5 2> /dev/null ||
+		git -C "$P" fetch -q origin "$R" 2> /dev/null
+	git -C "$P" show "$R:ports/fnv-nx/tests/s5/known_faults.txt" > "$W/faults.txt" &&
+		git -C "$P" show "$R:ports/fnv-nx/tests/s5/standins.c" > "$W/standins.c" ||
+		fail "S5BOOT_TABLE_REV $R: known_faults.txt / standins.c not readable"
+	export FNVNX_STANDINS=$W/standins.c
+	NOTES+=("stub table and stand-ins of $R")
+else
+	cp "$P/tests/s5/known_faults.txt" "$W/faults.txt"
+fi
 [ "${S5BOOT_REPAIR:-0}" = 1 ] && echo "repair-lost-slot-one" >> "$W/faults.txt"
 [ -n "${S5BOOT_FAULTS:-}" ] && tr ';' '\n' <<< "$S5BOOT_FAULTS" >> "$W/faults.txt"
 EXTRA="${S5BOOT_EXTRA:-}"

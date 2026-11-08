@@ -615,8 +615,19 @@ def r_noinline_stand_ins(path, text, stats):
 # header it includes, the class found by its enclosing namespaces and classes): D without the moved parameters, R
 # with them (their spelling from D's declaration); an `operator bool` receiver becomes `bool FUN_<R>(x..) const`. A
 # declaration that already exists (an S1b patch's) is not added twice; an overload of the same arity with other
-# parameter types, a virtual, static, inline-defined or defaulted declaration, or a class body found 0 or 2+ times
-# leave the family alone. The POST hook adds the new decorated reference names to the unit's units.json `symbols`
+# parameter types, a virtual, static or defaulted declaration, an inline-defined donor, or a class body found 0 or 2+
+# times leave the family alone. An inline-defined RECEIVER is allowed when it is an untagged stand-in (W25: a
+# unit-local copy's `__forceinline operator bool() const { return m_flags != 0; }`, fnv_005807a0): the exe's receiver
+# is the function the unit's symbols bind that MSVC name to (R's address, its `ret N` popping the moved words, the same
+# gates as for a declared-only receiver), and the stand-in's body would compute `flags != 0` on a register nobody set.
+# The new overload is declared without a body (and without inline / __forceinline), so the moved call reaches the exe
+# function through the new decorated name the link binds; the stand-in stays for the calls POP2 leaves alone (STAND3,
+# 5 and 6 skip operators, forceinline and non-/Od units, so none of them touches it; a body with its own `@fnv` tag is a
+# decompiled function and stays skipped).
+# A call whose receiver is cast to a class written with namespaces (`((N::BGSLoadFormBuffer*)x)->GetChangeFlags(m)`,
+# `reinterpret_cast<N::C*>(x)->`, tesobjectrefr.cpp 0x00562660) names that class: its donor and its result class's
+# `operator bool` are looked up in exactly that class, where the name-hiding rule above would let a global class with
+# a member of the same name (BGSSaveFormBuffer::GetChangeFlags) hide the namespace's. The POST hook adds the new decorated reference names to the unit's units.json `symbols`
 # (D's name without the moved parameter codes, R's with them), so the link compares and binds them like the
 # decomp's own. Line numbers stay. Families left alone are counted (POP2-SKIP-<why>) and listed with their reason
 # in <tree>/build/pop2_skipped.tsv, the sites done in <tree>/build/pop2_sites.tsv (derived, local only).
@@ -788,8 +799,9 @@ def _pop_sites(text, refs, why):
                     continue
                 before = seg[:m.start()].rstrip()
                 qualified = before.endswith(('.', '->', '::'))
-                site = _pop_site(seg, o, m.start(), p, e, dn, _PopVisible(refs, vis, None if qualified else own),
-                                 pg, why, text)
+                vw = _PopVisible(refs, vis, None if qualified else own)
+                vw.cast = _pop_cast(before) if qualified else None
+                site = _pop_site(seg, o, m.start(), p, e, dn, vw, pg, why, text)
                 if site:
                     tags = list(s1_compile.FNV_TAG_ADDR.finditer(text, max(0, o - 2000), o))
                     site['caller'] = tags[-1].group(1).lower().zfill(8) if tags else '-'
@@ -803,10 +815,24 @@ class _PopVisible:
     decomp declares one `Holder` per namespace)."""
 
     def __init__(self, refs, vis, own=None):
-        self.refs, self.vis, self.own = refs, vis, own
+        self.refs, self.vis, self.own, self.cast = refs, vis, own, None
+
+    def named(self, name, scopes):
+        """The references of name in exactly the class MSVC's scopes name (innermost first), as a per-function
+        namespace the call sees allows."""
+        return [r for r in self.refs.get(name, ()) if r.fn.scopes == scopes
+                and all(sc in self.vis for sc in scopes if UNIT_NS_HEAD.match(sc))]
 
     def donor(self, name):
-        """The references an unqualified call of name in a member of class `own` can be (its own class's)."""
+        """The references an unqualified call of name in a member of class `own` can be (its own class's); for a
+        receiver cast to a written class (`((N::C*)x)->D(..)`) those of exactly that class."""
+        if self.cast:
+            cls, quals = self.cast
+            return [r for r in self.refs.get(name, ()) if r.fn.scopes[0] == cls
+                    and r.fn.scopes[1:1 + len(quals)] == quals
+                    and all(sc in self.vis for sc in r.fn.scopes[1 + len(quals):] if UNIT_NS_HEAD.match(sc))
+                    and all(UNIT_NS_HEAD.match(sc) for sc in r.fn.scopes[1 + len(quals):])
+                    and all(sc in self.vis for sc in r.fn.scopes if UNIT_NS_HEAD.match(sc))]
         rs = self.get(name)
         return [r for r in rs if r.fn.scopes[0] in self.own] if self.own else rs
 
@@ -824,6 +850,23 @@ class _PopVisible:
 
     def __contains__(self, name):
         return bool(self.get(name))
+
+
+_POP_CAST = (re.compile(r'\(\s*(?:const\s+)?((?:[A-Za-z_]\w*\s*::\s*)+)([A-Za-z_]\w*)\s*\*\s*\)\s*[\w.>-]+\s*\)\s*(?:->|\.)$'),
+             re.compile(r'(?:reinterpret_cast|static_cast)\s*<\s*(?:const\s+)?((?:[A-Za-z_]\w*\s*::\s*)+)([A-Za-z_]\w*)\s*\*\s*>'
+                        r'\s*\([^()]*\)\s*(?:->|\.)$'))
+
+
+def _pop_cast(before):
+    """(class, qualifiers innermost first) when the receiver of the call that follows `before` is a pointer cast to a
+    class written with namespaces (`((N::C*)x)->`, `reinterpret_cast<N::C*>(x)->`), else None: the written class is
+    the receiver's, whatever other classes of the name the unit has."""
+    for rx in _POP_CAST:
+        m = rx.search(before)
+        if m:
+            q = [x.strip() for x in m.group(1).split('::') if x.strip()]
+            return m.group(2), q[::-1]
+    return None
 
 
 def _pop_site(seg, base, ds, p, e, dn, refs, pg, why, text):
@@ -898,7 +941,8 @@ def _pop_site(seg, base, ds, p, e, dn, refs, pg, why, text):
                 if r.fn.ret_class is None:
                     rc = None
                     break
-                rc += [x for x in refs.get('operator bool', ()) if x.fn.scopes == r.fn.ret_class]
+                rc += [x for x in (refs.named('operator bool', r.fn.ret_class) if refs.cast else
+                                   refs.get('operator bool', ())) if x.fn.scopes == r.fn.ret_class]
             if not rc:
                 if rc is not None and any(r.fn.ret_class for r in dc):
                     why['no operator bool reference'] += 1
@@ -978,6 +1022,26 @@ def _pop_class_bodies(text, scopes):
     return out
 
 
+_POP_INLINE_RET = re.compile(r'\b(?:__forceinline|FNV_FORCEINLINE|__inline|inline)\b')
+
+
+def _pop_plain_ret(ret):
+    """A stand-in's return type as a declaration-only overload spells it: no comments, no inline specifier."""
+    ret = re.sub(r'//[^\n]*|/\*.*?\*/', ' ', ret, flags=re.S)
+    return re.sub(r'\s+', ' ', _POP_INLINE_RET.sub('', ret)).strip()
+
+
+def _pop_inline_stand_in(t, d):
+    """True when the receiver declaration d (popgen member_decls row of the class text t) is an untagged in-class body
+    and nothing else is wrong with it: a unit-local copy's stand-in for the exe function the unit's symbols bind the
+    receiver's MSVC name to (`__forceinline operator bool() const { return m_flags != 0; }`). The overload POP2
+    adds is declared without a body, so the call reaches the exe function through the new name; the stand-in stays
+    for the calls POP2 leaves alone. A body with its own `// @fnv` tag is a decompiled function and stays skipped."""
+    if set(d['bad']) - {'inline body', 'no ;'} or 'inline body' not in d['bad']:
+        return False
+    return '@fnv' not in d['ret']          # the member's head text holds the comment lines above it
+
+
 def _pop_decl_ops(site, files, texts, why):
     """The declarations a site's family needs: [(file, class body, insert position or None when the overload is
     already declared, name, parameter types, declaration)], or None (the reason counted in why)."""
@@ -994,6 +1058,8 @@ def _pop_decl_ops(site, files, texts, why):
             name = 'operator bool' if site['fam'][2] == 'bool' and role == 'R' else (
                 site['fam'][0] if role == 'D' else site['fam'][3])
             md = [x for x in pg.member_decls(t, body, name) if pg.arity(x['params']) == len(r.fn.params)]
+            if role == 'R' and len(md) == 1 and _pop_inline_stand_in(t, md[0]):
+                md[0] = dict(md[0], bad=[], ret=_pop_plain_ret(md[0]['ret']))
             if len(md) != 1 or md[0]['bad']:
                 why['%s declaration %s' % (role, ','.join(md[0]['bad']) if len(md) == 1 else
                                            '%d candidates' % len(md))] += 1
@@ -1253,10 +1319,27 @@ THIS2_NOTE = '/* fnv-nx THIS2: the caller passes its ecx */ '
 
 
 def _this2_member_name(name, fn, shell):
-    """The decorated name of free function `name` (parsed fn) as a thiscall member of `shell`, or None."""
-    if fn is None or fn.member or fn.cc != 'stdcall' or fn.name_refs or fn.scopes:
+    """The decorated name of free function `name` (parsed fn) as a thiscall member of `shell`, or None. `shell` is
+    declared in fn's own scopes (the caller's namespace, checked by _this2_site), so it enters MSVC's name
+    back-reference table right after the identifier and every later entry moves up by one: `StrArr@1@` (StrArr in
+    namespace fnv_00c2a960, table [FUN_00c32f60, fnv_00c2a960]) becomes `StrArr@2@`. A candidate is accepted only when
+    it parses to exactly the original's parameters and result (_msvcsig spells back-references out), so a digit that
+    is not a name back-reference can never slip through."""
+    if fn is None or fn.member or fn.cc != 'stdcall':
         return None
-    return '?%s@%s@@QAE%s' % (fn.ident, shell, name[fn.head_end:])
+    head = '?%s@%s@%s@QAE' % (fn.ident, shell, ''.join(x + '@' for x in fn.scopes))
+    tail = name[fn.head_end:]
+    cands = [tail]
+    if fn.name_refs:
+        cands.append(re.sub(r'(?<=[@UVT])([1-8])(?=@|[A-Za-z_])', lambda m: str(int(m.group(1)) + 1), tail))
+    for t in cands:
+        new = head + t
+        g = _msvcsig.parse(new)
+        if g is not None and g.member and g.cc == 'thiscall' and g.ident == fn.ident and \
+                g.scopes == [shell] + list(fn.scopes) and g.params == fn.params and g.ret == fn.ret and \
+                getattr(g, 'ret_class', None) == getattr(fn, 'ret_class', None):
+            return new
+    return None
 
 
 def _this2_site(text, caller, callee, u, words, why):
@@ -1307,6 +1390,9 @@ def _this2_site(text, caller, callee, u, words, why):
         why['no __stdcall prototype of the callee'] += 1
         return None
     cdecl = '%s %s(%s);' % (proto[0], rf.ident, proto[1])
+    if list((df.scopes[1:] if df.member else df.scopes) or []) != list(rf.scopes or []):
+        why['caller not in the callee reference scope'] += 1   # the shell must share the reference's scopes
+        return None
     newref = _this2_member_name(rname, rf, shell)
     if newref is None:
         why['reference name not re-encodable'] += 1
