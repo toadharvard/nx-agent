@@ -720,6 +720,8 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
             fv = float_verdict(4, bx, ba)
             if fv.get('tolerant') and abs(struct.unpack('<f', bx)[0]) > 1e-30:
                 d['float_word'] = fv
+            elif not fv.get('tolerant'):
+                d['float_store'] = True      # (bh_C) both stored the whole word and it differs beyond the tolerance: classify reruns the x87 probes on it
         # (difffuzz-20, zero-sign) a word that is -0.0 on one machine and +0.0 on the other, both machines having
         # stored it (the effective maps above hold the sign byte only): the classifier reruns the x87 probes on it
         w0 = first & ~3

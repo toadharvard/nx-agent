@@ -600,7 +600,7 @@ def x87_probes(pair, case, div, max_steps, h):
             return True
     finally:
         world.TRIG_INF = False
-    for kind, cw in (('f32', 0x007f), ('f64', 0x027f)):
+    for kind, cw in (('f32', 0x007f), ('f64', 0x027f), ('f32den', 0x027f)):
         rec = {'kind': kind}
         world.X87_CLAMP, world.X87_CW = rec, cw
         try:
@@ -967,6 +967,11 @@ def hint(pair, target, case, div, fn, max_steps):
             # (difffuzz-20, zero-sign) -0.0 against +0.0: an x87 intermediate beyond the float range keeps its sign
             # until the store rounds it (0x00c206b0: -4.5e-44 * 4.5e-44 = -2e-87, then + 0.0 stays negative); the
             # rerun that clamps such values (x87-range) is the evidence, not the equal numeric value
+            return h
+        if not fl and k == 'mem-write' and div.get('float_store') and pair is not None and 'fstp' in mn and \
+                x87_probes(pair, case, div, max_steps, h):
+            # (bh_C, 0x00f92520) a float the function stores with `fstp dword` after x87 arithmetic, off by more
+            # than the tolerance: the same rerun probes as a float result; only an agreeing rerun names the cause
             return h
         if fl:
             if fl.get('tolerant'):
