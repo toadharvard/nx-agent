@@ -97,39 +97,19 @@ extern void *fnv_abstractheap_base(void *self, uint32_t reserve, uint32_t commit
 extern void fnv_heap_initialize_slots(void *self) __asm__("__fnv_00aa8dd0");
 void *fnv_standin_00aa78a0(void *self, uint32_t reserve, uint32_t commit, const char *name, _Bool flag)
     __asm__("_ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb");
+/* D26 (b, c): the heap callers are declared with a virtual destructor now (InitializeSlots' allocator call moved from
+ * slot 12 to 13), so the object carries the link's minus-one table, not the exe's vftable: with 0x010a28fc slot 13 was
+ * exe slot 13, the allocation returned 0 and InitializeSlots exited the guest before WinMain (link 3f7a6c35e923). */
+extern const void *fnv_memoryheap_vtable[] __asm__("_ZTVN12fnv_00aa78a010MemoryHeapE")
+    __attribute__((visibility("hidden")));   /* a direct adrp/add: --inject has no GOT relocations */
 void *fnv_standin_00aa78a0(void *self, uint32_t reserve, uint32_t commit, const char *name, _Bool flag) {
     unsigned char *p = self;
     fnv_abstractheap_base(self, reserve, commit, name, 0x10000);
-    *(volatile uint32_t *)p = 0x010a28fcu;
+    *(const void *volatile *)p = &fnv_memoryheap_vtable[2];   /* the address point: after offset-to-top and RTTI */
     p[0x20f0] = flag;
     p[0x20f1] = 0;
     fnv_heap_initialize_slots(self);
     return self;
-}
-
-/* 0x00b57ea0 HashTableBase::InsertOrUpdate(key, value) (the display-mode list, ModeItemInit 0x00e7b260): the
- * decomp declares HashTableBase in the exe's slot order with a placeholder at slot 0 (Reserved0; BucketIndex 1,
- * EqualKey 2, Initialize 3, AllocateNode 5), a call-only declaration (tests/s5/callonly_vt.py). Its receivers in
- * the boot are native maps with GCC's D1/D0 pair (_ZTV10BE7B040MapIjP12BE7B040ValueE, bound to 0x010eec7c), laid
- * out by D22's minus-one rule, so BucketIndex ran D0 (ResizeHeapBlock fault). The same body, dispatching exe slot
- * k at native slot k+1 (S1-refs: `virtual ~HashTableBase()` for Reserved0, D22). */
-typedef struct HashNode { struct HashNode *next; uint32_t key, value; } HashNode;
-typedef struct { void **vptr; uint32_t size; HashNode **buckets; uint32_t count; } HashTableBase;
-#define VSLOT_M1(obj, k) (((void **)((HashTableBase *)(obj))->vptr)[(k) + 1])
-void fnv_standin_00b57ea0(HashTableBase *t, uint32_t key, uint32_t value)
-    __asm__("_ZN13HashTableBase14InsertOrUpdateEjj");
-void fnv_standin_00b57ea0(HashTableBase *t, uint32_t key, uint32_t value) {
-    uint32_t i = ((uint32_t (*)(void *, uint32_t))VSLOT_M1(t, 1))(t, key);
-    for (HashNode *n = t->buckets[i]; n; n = n->next)
-        if (((_Bool (*)(void *, uint32_t, uint32_t))VSLOT_M1(t, 2))(t, key, n->key)) {
-            n->value = value;
-            return;
-        }
-    HashNode *n = ((HashNode * (*)(void *)) VSLOT_M1(t, 5))(t);
-    ((void (*)(void *, HashNode *, uint32_t, uint32_t))VSLOT_M1(t, 3))(t, n, key, value);
-    n->next = t->buckets[i];
-    t->buckets[i] = n;
-    t->count++;
 }
 
 /* 0x00405430 NiTMap_S::RemoveKey(key) (the AllForms-style map RemoveKey that TESForm's 0x00483c70 reaches from the

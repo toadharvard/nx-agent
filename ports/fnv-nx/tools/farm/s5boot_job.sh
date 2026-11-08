@@ -23,7 +23,9 @@
 # The game install comes from tools/gamedata_fetch.sh (or FARM_GAME); the profile is tools/lockstep/profile.py's,
 # with the null device's name, as on every S5 boot. <report.md> holds only the stop, the milestones, the trace frames
 # and the hit lines (names and addresses); the boot log and the trace (game-derived) go to the private branch.
-# Needs: python unicorn capstone pyelftools, aarch64-linux-gnu binutils, git; ARTIFACTS (fnv-nx-build with push).
+# Needs: git, python3 with pip; ARTIFACTS (fnv-nx-build with push). It installs unicorn/capstone/pyelftools (S5BOOT_PIPS)
+# and, as root, binutils-aarch64-linux-gnu and gcc-aarch64-linux-gnu (the stub boot compiles tests/s5's stand-ins)
+# when they are missing; without the compiler it fails instead of booting without the stand-ins.
 set -uo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 P=$(cd "$(dirname "$0")/../.." && pwd)
@@ -56,7 +58,24 @@ fail() { NOTES+=("FAILED: $*"); log "FAILED: $*"; write_report; exit 1; }
 [ -n "${ARTIFACTS:-}" ] || { [ -d /home/user/fnv-nx-build/.git ] && ARTIFACTS=/home/user/fnv-nx-build; }
 [ -n "${ARTIFACTS:-}" ] || fail "ARTIFACTS unset"
 export ARTIFACTS
-python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null || fail "python unicorn/capstone/pyelftools missing"
+# the emulator's Python packages (the same pins as fuzz_job.sh) and aarch64 binutils, installed when missing
+S5BOOT_PIPS=${S5BOOT_PIPS:-"unicorn==2.1.4 capstone==5.0.9 pyelftools==0.33"}
+if ! python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null; then
+	log "installing $S5BOOT_PIPS"
+	# shellcheck disable=SC2086
+	python3 -m pip install -q --break-system-packages $S5BOOT_PIPS > "$W/pip.log" 2>&1 ||
+		python3 -m pip install -q $S5BOOT_PIPS >> "$W/pip.log" 2>&1 || fail "pip install $S5BOOT_PIPS (log $W/pip.log)"
+	python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null || fail "unicorn/capstone/pyelftools still missing after pip"
+fi
+need_apt=""
+command -v aarch64-linux-gnu-nm > /dev/null || need_apt="$need_apt binutils-aarch64-linux-gnu"
+command -v aarch64-linux-gnu-gcc > /dev/null || need_apt="$need_apt gcc-aarch64-linux-gnu"   # the stand-ins (--inject)
+if [ -n "$need_apt" ]; then
+	[ "$(id -u)" = 0 ] || fail "missing:$need_apt (root installs them)"
+	log "installing$need_apt"
+	{ apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $need_apt; } > "$W/apt.log" 2>&1 ||
+		fail "apt-get install$need_apt (log $W/apt.log)"
+fi
 
 GAME=${FARM_GAME:-$FARM_HOME/game}
 if [ -z "${FARM_GAME:-}" ] && [ ! -f "$GAME/FalloutNV.exe" ]; then
