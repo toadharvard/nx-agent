@@ -126,6 +126,17 @@
     },
     {
      "do": "wait",
+     "s": 3
+    },
+    {
+     "do": "press",
+     "keys": [
+      "Return"
+     ],
+     "comment": "confirm the new-game dialog (Yes is highlighted; seen on the original)"
+    },
+    {
+     "do": "wait",
      "s": 10
     },
     {
