@@ -52,7 +52,9 @@
 #   FARM_PROFILE    a profile dir (Documents/..., AppData/...; tools/lockstep/profile.py) copied to the guest's
 #                   sdmc:/switch/fnv/user before each boot, so the first-run profile is not made (lockstep: same inputs)
 #   FARM_FAULTS     the stub boot's fault table (default tests/s5/known_faults.txt)
-#   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 200000000, as
+#   EMU_TIMEOUT     seconds per boot (default 1200); SLICE_MS wall-clock ms per thread slice (default 2000);
+#                   BUDGET instructions per slice (default 0: none - an instruction count makes unicorn hook every
+#                   instruction, about 10x slower; before: default 200000000, as
 #                   S5's local boots: the timeout's SIGTERM waits for the running unicorn slice, and with 6e9 a boot
 #                   ran 22 min past its timeout)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
@@ -73,7 +75,7 @@ fi
 ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
 C12=${COMMIT:0:12}
 BOOTS=${FARM_BOOTS:-raw slots stub}
-EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-200000000}
+EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-0}; SLICE_MS=${SLICE_MS:-2000}
 NULLDEV_ARGS=(); [ "${FNVNX_STUB_NULLDEV:-0}" = 1 ] && NULLDEV_ARGS=(--stub-nulldev)
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
@@ -203,7 +205,7 @@ boot() {   # boot <tag> [extra emu_guest.py args]
     mkdir -p "$root/switch/fnv/user" && cp -a "$FARM_PROFILE"/. "$root/switch/fnv/user/"
   fi
   timeout "$EMU_TIMEOUT" nice "$PY" -I "${EMU[@]}" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" "${NR_ARGS[@]}" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" "${GAMEFILES[@]}" \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" --slice-ms "$SLICE_MS" "${IMGARG[@]}" "${GAMEFILES[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" ${EMU_EXTRA:-} \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
