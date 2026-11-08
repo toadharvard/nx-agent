@@ -45,6 +45,10 @@ trap stubs (R2's s2d runtime list). STL2 appends, each gated on the declaration 
                                    with fields `T* first; T* last; T* end;`: VC9's empty vector (every field 0; with
                                    _SECURE_SCL's aux pointer 0 the unit's iterators compare equal owners); the destructor
                                    frees first (operator delete, as VC9's allocator<T>::deallocate)
+
+Both rules leave a name to a recon (REC1, FNVNX_RECON) that covers it for the unit: its symbols, append or replace
+text name it (RECON_KEYS). R2's recons are matched against the exe; STL only stands in where there is none, and the
+two together would define a name twice. Counted as STL-RECON.
 """
 import re
 
@@ -74,6 +78,63 @@ XLEN_DECL = re.compile(r'template\s*<\s*class\s+\w+\s*,\s*class\s+\w+\s*>\s*clas
 XLEN_DEFINED = re.compile(r'vector\s*<[^>]*>\s*::\s*_Xlen\s*\(\s*\)\s*\{')
 XLEN_BODY = ('extern "C" void fnvnx_xlength_error(void) __attribute__((noreturn));\n'
              'template <class _Ty, class _Ax> void vector<_Ty, _Ax>::_Xlen()\n{\n    fnvnx_xlength_error();\n}\n')
+
+
+_RECON_CACHE = {}
+
+
+def _recon_text(path):
+    """the text of every recon FNVNX_RECON holds for this unit (REC1, tools/rules/s1_compile.py): its append file,
+    its replace `new` texts and its symbol names. A STL body whose name occurs there is left to the recon: R2's recons
+    are matched against the exe (MSVC all bytes equal, bound to the exe's function), STL's bodies only stand in where
+    no recon exists, and both together would define the name twice (REC1-DUP-DEF would then drop the recon). A stale
+    recon counts too (the trap then stays visible until the recon is refreshed, never a duplicate)."""
+    import json
+    import os
+    top = os.environ.get('FNVNX_RECON')
+    if not top or not os.path.isdir(top):
+        return ''
+    if top not in _RECON_CACHE:
+        got = []
+        for dp, _ds, ns in os.walk(top):
+            if 'recon.json' not in ns:
+                continue
+            try:
+                r = json.load(open(os.path.join(dp, 'recon.json')))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(r, dict) or r.get('format') != 'fnvnx-recon/1' or not r.get('unit'):
+                continue
+            parts = list((r.get('symbols') or {}).keys())
+            for e in r.get('replace') or []:
+                if isinstance(e, dict) and isinstance(e.get('new'), str):
+                    parts.append(e['new'])
+            if isinstance(r.get('append'), str):
+                try:
+                    parts.append(open(os.path.join(dp, r['append']), errors='replace').read())
+                except OSError:
+                    pass
+            got.append((r['unit'], '\n'.join(parts)))
+        _RECON_CACHE[top] = got
+    p = path.replace(os.sep, '/')
+    return '\n'.join(x for unit, x in _RECON_CACHE[top] if p == unit or p.endswith('/' + unit))
+
+
+RECON_KEYS = {   # what in a recon's text means it covers the STL body of that key (GCC or MSVC spellings)
+    '_Allocate': r'_Allocate', '_Destroy': r'_Destroy', 'fill': r'\bfill\s*[<(]|St4fill|\?\?\$fill@',
+    'swap': r'\bswap\s*[<(]|St4swap|\?\?\$swap@', '_Xlen': r'_Xlen', 'setstate': r'setstate',
+    'init': r'\binit\s*\(|4initE|\?init@', 'facet': r'UseFacet|widen',
+    'open': r'\bopen\s*\(|4openE|\?open@',
+    'vector()': r'\bvector\s*\(\s*\)\s*[:{]|vectorI\w*EC[12]Ev|\?\?0\?\$vector@',
+    '~vector()': r'~vector\s*\(|vectorI\w*ED[012]Ev|\?\?1\?\$vector@',
+}
+
+
+def _covered(rtext, key, stats):
+    if rtext and re.search(RECON_KEYS[key], rtext):
+        stats['STL-RECON'] += 1
+        return True
+    return False
 
 
 def _code_depths(text):
@@ -142,12 +203,13 @@ def r_stl_helper_bodies(path, text, stats):
     blocks = _std_blocks(text)
     if not blocks:
         return text
-    adds = []
+    adds, rt = [], _recon_text(path)
     for key, head, body in DECLS:
-        if any(re.search(head, text[a:b]) for a, b in blocks) and not re.search(DEFINED[key], text):
+        if any(re.search(head, text[a:b]) for a, b in blocks) and not re.search(DEFINED[key], text) and \
+                not _covered(rt, key, stats):
             adds.append(body)
             stats['STL1'] += 1
-    if _vector_declares_xlen(text, blocks) and not XLEN_DEFINED.search(text):
+    if _vector_declares_xlen(text, blocks) and not XLEN_DEFINED.search(text) and not _covered(rt, '_Xlen', stats):
         adds.append(XLEN_BODY)
         stats['STL1'] += 1
     if not adds:
@@ -181,15 +243,15 @@ def r_stl_stream_bodies(path, text, stats):
     blocks = _std_blocks(text)
     if not blocks:
         return text
-    adds = []
+    adds, rt = [], _recon_text(path)
     m, body = _class_body(text, blocks, r'\bclass\s+ios_base\s*\{')
     if m and re.search(r'\bint\s+state\s*,\s*exceptions\b', body) and \
             re.search(r'\bvoid\s+setstate\s*\(\s*int\s*\)\s*;', body) and \
-            not re.search(r'ios_base\s*::\s*setstate\s*\(', text):
+            not re.search(r'ios_base\s*::\s*setstate\s*\(', text) and not _covered(rt, 'setstate', stats):
         adds.append('void ios_base::setstate(int _S)\n{\n    if (_S != 0)\n        state = (state | _S) & 0x17;\n}\n')
     m, body = _class_body(text, blocks, r'template\s*<\s*class\s+\w+\s*,\s*class\s+\w+\s*>\s*class\s+basic_ios\s*:[^{;]*\{')
     mi = re.search(r'\bvoid\s+init\s*\(\s*(\w+)\s*\*\s*,\s*bool\s*\)\s*;', body) if m else None
-    if mi and not re.search(r'basic_ios\s*<[^>]*>\s*::\s*init\s*\(', text):
+    if mi and not re.search(r'basic_ios\s*<[^>]*>\s*::\s*init\s*\(', text) and not _covered(rt, 'init', stats):
         adds.append('template <class _E, class _Tr> void basic_ios<_E, _Tr>::init(%s* _Sb, bool _Isstd)\n'
                     '{\n    fnvnx_basic_ios_init(this, _Sb, _Isstd);\n}\n' % mi.group(1))
     for a, b in blocks:
@@ -198,7 +260,7 @@ def r_stl_stream_bodies(path, text, stats):
             fac, fn, loc = mf.group(2), mf.group(3), mf.group(4)
             ms = re.search(r'template\s*<\s*class\s+(\w+)\s*>\s*struct\s+%s\s*\{\s*\1\s+widen\s*\(\s*char\s*\)\s*const\s*;'
                            r'\s*\}\s*;' % fac, text[a:b])
-            if ms and not re.search(r'\b%s\s*\([^;)]*\)\s*\{' % fn, text):
+            if ms and not re.search(r'\b%s\s*\([^;)]*\)\s*\{' % fn, text) and not _covered(rt, 'facet', stats):
                 adds.append('template <class _E> const %s<_E>& %s(const %s&)\n{\n    static const %s<_E> _Facet = %s<_E>();\n'
                             '    return _Facet;\n}\n'
                             'template <class _E> _E %s<_E>::widen(char _C) const\n{\n    return (_E)_C;\n}\n'
@@ -206,7 +268,7 @@ def r_stl_stream_bodies(path, text, stats):
     m, body = _class_body(text, blocks, r'template\s*<\s*class\s+\w+\s*,\s*class\s+\w+\s*>\s*class\s+basic_ifstream\s*:[^{;]*\{')
     mo = re.search(r'\b(\w+)\s*\*\s*open\s*\(\s*const\s+char\s*\*\s*,\s*int\s*,\s*int\s*\)\s*;', body) if m else None
     if mo and re.search(r'\b%s\s+filebuf\s*;' % mo.group(1), body) and \
-            not re.search(r'basic_ifstream\s*<[^>]*>\s*::\s*open\s*\(', text):
+            not re.search(r'basic_ifstream\s*<[^>]*>\s*::\s*open\s*\(', text) and not _covered(rt, 'open', stats):
         fb = mo.group(1)
         mfb, fbody = _class_body(text, [(0, len(text))], r'\bclass\s+%s\s*:[^{;]*\{' % fb)   # any scope
         if mfb and re.search(r'void\s+_Init\s*\(\s*struct\s+_iobuf\s*\*', fbody) and \
@@ -233,11 +295,12 @@ def r_stl_stream_bodies(path, text, stats):
             if not (re.search(r'^\s*vector\s*\(\s*\)\s*;', vb, re.M) and re.search(r'^\s*~vector\s*\(\s*\)\s*;', vb, re.M)):
                 continue
             q = r'vector\s*<\s*%s\s*,\s*allocator\s*<\s*%s\s*>\s*>\s*::\s*' % (ty, ty)
-            if re.search(q + r'~?vector\s*\(\s*\)\s*[:{]', text):
-                continue
-            adds.append('vector<%s, allocator<%s> >::vector()\n    : %s\n{}\n' % (ty, ty, ', '.join('%s(0)' % n for n in names)) +
-                        'vector<%s, allocator<%s> >::~vector()\n{\n    if (first != 0)\n        ::operator delete(first);\n'
-                        '    first = last = end = 0;\n}\n' % (ty, ty))
+            if not re.search(q + r'vector\s*\(\s*\)\s*[:{]', text) and not _covered(rt, 'vector()', stats):
+                adds.append('vector<%s, allocator<%s> >::vector()\n    : %s\n{}\n'
+                            % (ty, ty, ', '.join('%s(0)' % n for n in names)))
+            if not re.search(q + r'~vector\s*\(\s*\)\s*[:{]', text) and not _covered(rt, '~vector()', stats):
+                adds.append('vector<%s, allocator<%s> >::~vector()\n{\n    if (first != 0)\n        ::operator delete(first);\n'
+                            '    first = last = end = 0;\n}\n' % (ty, ty))
     if not adds:
         return text
     stats['STL2'] += len(adds)
