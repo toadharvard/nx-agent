@@ -1,5 +1,7 @@
 /* fnvtrace.c - function-boundary tracer for the original FalloutNV.exe under Wine (the reference side of the
- * lockstep trace, tools/lockstep/README.md). Our own code; it names no game code, only addresses from a list.
+ * lockstep trace, tools/lockstep/README.md). Our own code; it names no game code, only addresses from a list
+ * (and `dll!Export [name]` lines: a system API entry, resolved with GetProcAddress, e.g. kernel32!CreateFileA for
+ * S4's platform baseline, tools/perf/plat_wine.py).
  *
  * Built twice with i686-w64-mingw32-gcc (build.sh):
  *   fnvtrace.dll   -DFNVTRACE_DLL: loaded into the game before its first instruction; puts int3 on every listed
@@ -211,7 +213,32 @@ static void load_list(const char *path) {
         while (*p == ' ' || *p == '\t') p++;
         if (*p == '#' || *p == '\n' || !*p) continue;
         char *end;
-        unsigned long a = strtoul(p, &end, 16);
+        unsigned long a;
+        size_t tok = strcspn(p, "\r\n\t ");
+        char *bang = memchr(p, '!', tok);
+        if (bang) {   /* dll!Export: an API entry the game calls (S4's plat baseline: kernel32!CreateFileA) */
+            char dll[64], sym[128];
+            size_t dn = (size_t)(bang - p), sn = tok - dn - 1;
+            if (!dn || dn >= sizeof dll || !sn || sn >= sizeof sym) continue;
+            memcpy(dll, p, dn); dll[dn] = 0;
+            memcpy(sym, bang + 1, sn); sym[sn] = 0;
+            HMODULE m = GetModuleHandleA(dll);
+            if (!m) m = LoadLibraryA(dll);
+            FARPROC fp = m ? GetProcAddress(m, sym) : NULL;
+            if (!fp) continue;
+            a = (unsigned long)(DWORD_PTR)fp;
+            end = p + tok;
+            if (!g_fn) continue;
+            Fn *fn = &g_fn[g_nfn++];
+            fn->addr = a;
+            while (*end == ' ' || *end == '\t') end++;
+            size_t n2 = strcspn(end, "\r\n\t ");
+            if (!n2) { end = bang + 1; n2 = sn; }   /* named after the export unless a name follows */
+            if (n2 >= sizeof fn->name) n2 = sizeof fn->name - 1;
+            memcpy(fn->name, end, n2); fn->name[n2] = 0;
+            continue;
+        }
+        a = strtoul(p, &end, 16);
         if (end == p) continue;
         Fn *fn = &g_fn[g_nfn++];
         fn->addr = a;
