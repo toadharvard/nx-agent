@@ -1248,7 +1248,14 @@ def run(out, tree, jobs=4):
 
     while todo and rounds < 8:
         rounds += 1
-        open_ = {c: [h for h in hs if h not in tried[c]][:3] for c, (_, hs) in todo.items()}
+        # a class's first host is the unit that referenced it (resolve lists referencing units first): the one most
+        # likely to see its declaration. It is probed before any other host, whatever batch it makes; the greedy choice
+        # among the next three hosts only orders the rest. With the greedy choice alone, a class whose own unit has few
+        # open classes can lose every round to larger hosts and is never probed there once the 8 rounds end
+        # (tests/s2d/test_vtreq_first_host.py). Link 97deacd38aec: stats say 8 probe rounds and 1,255 classes with no
+        # host; the cached probe batch of tesobjectclot.cpp holds its other 8 classes but not FUN_005155b0_Base144
+        open_ = {c: ([hs[0]] if hs and hs[0] not in tried[c] else [h for h in hs if h not in tried[c]][:3])
+                 for c, (_, hs) in todo.items()}
         open_ = {c: hs for c, hs in open_.items() if hs}
         assign = collections.defaultdict(list)
         while open_:   # greedy: the host unit that can take most of the open classes first
