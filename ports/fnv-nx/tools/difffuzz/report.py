@@ -220,7 +220,8 @@ def reclassify(rec):
                 _UC = engine.UnitCache(str(config.LINK), str(config.A64WORK))
             import libcalls
             nm = d['arm'][5:]
-            if nm not in _UC.providers() and nm not in libcalls.EQUIV and nm not in libcalls.A64:
+            if nm not in _UC.providers() and nm not in libcalls.EQUIV and nm not in libcalls.A64 and \
+                    not (nm.startswith('__isoc23_') and nm[9:] in _UC.providers()):
                 return 'native-undefined'    # the native code calls a name the link binds to nothing (S1 / S2c)
         except Exception:  # noqa: BLE001
             pass

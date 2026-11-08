@@ -40,7 +40,7 @@ import config
 # (x86emu.x87_result_use), CRT_MATH builtins and engine's decorated-spelling preference change verdicts no key
 # reflects, and so do the untyped canned results, the secondary-base entry and the vtpad-before-unplanted order of
 # this bump. Every key changes; the scoped CHANGES rows below stay for later partial refreshes.
-# difffuzz-20: a full refresh (orchestrator decision, EQ eq-003): the d21 / d24 harness changes (F1 pop learning on
+# difffuzz-20: unit images link in the C++ names other link objects define (a64image.add_providers). A full refresh (orchestrator decision, EQ eq-003): the d21 / d24 harness changes (F1 pop learning on
 # a derail and IAT / thunk pops, F2 destructor vptr words / stub holes / planted slots, F3 builtin faults /
 # callee-saved pop learning / bound-stub rewrite / canned results out of the private ranges) change how every
 # function is fuzzed, so no cache from before them is trusted. The d21 / d24 rows below stay for later partial
@@ -52,7 +52,9 @@ import config
 # slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. Float class: x87_result_use follows
 # a jmp to the shared epilogue and knows fidiv / fist / fcomi / ftst / fsqrt consumers, overlapping pinned literals let
 # the exe bytes (when available) replace the union, and a float difference runs the garbage / bool / x87 control-word (24-bit) / x87-range / callee
-# float width probes before it stays `float`.
+# float width probes before it stays `float`. Flow rows (EQ): float libm wrappers (ceilf / floorf ..) are untraced
+# builtins with a float argument, the secondary-base entry `__fnvnx_msvc_<addr>` comes from aliases.ld, and a temporary's
+# destructor before a throw the exe makes after its _CxxThrowException is throw-temp-dtor.
 # The signedness probe clears an argument byte only when the oracle can
 # widen it (not a float sign or a whole-read int), and an uninit-arm that vanishes once the unwritten stack words of
 # buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
