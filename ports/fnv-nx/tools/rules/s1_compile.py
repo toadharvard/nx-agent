@@ -6821,6 +6821,11 @@ def _rawvt_recv(path, masked, owners, stats, text=None):
                 if dec == 'shift' and _rawvt_mem_called(masked, m):
                     out.append((m.start(ki), m.end(ki))); stats['RAWVT1-RECV-EXE'] += 1
                 elif dec and dec.startswith('ok'): stats['RAWVT1-RECV-OK'] += 1
+                elif _rawvt_mem_called(masked, m):
+                    # RAWVT1-DYN: decided at run time by where the vptr points (fnvnx_rawvt.h)
+                    vp = (text or masked)[m.start():m.end()].rsplit('[', 1)[0].rstrip()
+                    out.append((m.start(), m.end(), 'FNVNX_RAWVT_DYN(%s, %s)' % (vp, m.group(ki))))
+                    stats['RAWVT1-DYN'] += 1
                 else: stats['RAWVT1-RECV-AMBIG'] += 1
                 continue
             if row[0] != 'minus-one' or row[1] < 0: stats['RAWVT1-RECV-KEEP'] += 1; continue
@@ -6880,7 +6885,10 @@ def r_raw_vtable_slots(path, text, stats):
         edits.append((ka, kz, 'FNVNX_D26_SLOT(%s)' % text[ka:kz]))
         if tag != 'RAWVT1': stats[tag] += 1
     if recv_any:
-        edits += [(a, b, 'FNVNX_D26_SLOT(%s)' % text[a:b]) for a, b in _rawvt_recv(path, masked, owners, stats, text)]
+        rv = _rawvt_recv(path, masked, owners, stats, text)
+        edits += [(e[0], e[1], e[2]) if len(e) == 3 else (e[0], e[1], 'FNVNX_D26_SLOT(%s)' % text[e[0]:e[1]]) for e in rv]
+        if any(len(e) == 3 for e in rv) and 'fnvnx_rawvt.h' not in text:
+            edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
     for a, b, rep in sorted(set(edits), reverse=True):
         text = text[:a] + rep + text[b:]
     stats['RAWVT1'] += len(edits)

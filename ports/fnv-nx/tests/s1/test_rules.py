@@ -2230,5 +2230,13 @@ if _save_cl is None: os.environ.pop('FNVNX_CLASSLAYOUT', None)
 else: os.environ['FNVNX_CLASSLAYOUT'] = _save_cl
 prepare.__dict__.pop('_fnvnx_classlayout', None)
 
+# ---- S5-boot: RAWVT1-DYN (an undecided receiver: the slot is chosen at run time, fnvnx_rawvt.h)
+_DY = ('typedef int(__thiscall* F)(void*);\nint f(void* raw, IDirect3DDevice9* dev)\n{\n'
+       '    int a = ((F)(*(void***)raw)[7])(raw);\n    return a + ((F)(*(void***)dev)[3])(dev);\n}\n')
+_dyo = run(s1.r_raw_vtable_slots, _DY)
+check('RAWVT1-DYN: an undecided receiver -> FNVNX_RAWVT_DYN(vptr, k) and the header; a COM name stays',
+      _dyo, ['FNVNX_RAWVT_DYN((*(void***)raw), 7)', '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */'],
+      ['FNVNX_RAWVT_DYN((*(void***)dev)'])
+
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)
