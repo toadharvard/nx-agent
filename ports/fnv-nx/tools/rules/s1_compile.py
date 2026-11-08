@@ -5891,6 +5891,20 @@ def _d22_com(masked, c):
         if v[2] in D22_COM_MEMBER or D22_COM_CONV.search(masked[v[0]:v[1]]): return True
     return False
 
+def _d22_numbered(c):
+    """the class's first virtuals are a numbered sequence of one prefix: `P_00, P_01` (InitHolder's FUN_00aa2020_Impl),
+    `_v01, _v02` (bstexturepalette.cpp's NiTexture_VF), `d000, d001` (RefV), or byte offsets `v000, v004, v008`;
+    step 1 from 0 or 1, or step 4 from 0, and a third virtual continues it when there is one (EQ G1)"""
+    ns = [v[2] or '' for v in c['virtuals'][:3]]
+    ms = [re.match(r'^([A-Za-z_]\w*?)(\d+)$', n) for n in ns]
+    if len(ms) < 2 or not (ms[0] and ms[1]): return False
+    if len(ms) > 2 and not (ms[2] and ms[2].group(1) == ms[0].group(1)): ms = ms[:2]   # a named third virtual
+    if len({m.group(1) for m in ms}) != 1: return False
+    xs = [int(m.group(2)) for m in ms]
+    step = xs[1] - xs[0]
+    if not ((step == 1 and xs[0] in (0, 1)) or (step == 4 and xs[0] == 0)): return False
+    return len(xs) < 3 or xs[2] - xs[1] == step
+
 def _d22_callonly(masked, c, unit=True, named_ok=False):
     """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above); named_ok: the
     slot is known from the exe (D22-SLOTK), so its member's name is not tested"""
@@ -5900,11 +5914,8 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
                                masked):
         return False                                     # `~C();` defined in the file: a real destructor
     if not c['first'][2]: return False
-    if not named_ok and not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]):
-        # a numbered sequence `P_00(), P_01(), ...` (InitHolder 0x00aa2020's FUN_00aa2020_Impl, S2-bodies)
-        m0 = re.match(r'^(\w*?_)0+$', c['first'][2])
-        v1 = c['virtuals'][1][2] or ''
-        if not (m0 and re.match(r'^%s0*1$' % re.escape(m0.group(1)), v1)): return False
+    if not named_ok and not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]) and not _d22_numbered(c):
+        return False
     # an empty inline body (`virtual void f00() {}`) or one that only returns a constant (`{ return 0; }`) is a
     # placeholder too, not a definition (EQ, link 0540aff0: tesobjectrefr.cpp's FUN_00567f40_class, 19 such slots;
     # S2-bodies' PHSLOT1 makes the empty ones declarations as well)
@@ -6163,6 +6174,56 @@ def d22_write_applied(out_root, stats, files):
     stats['D22-APPLIED'] += 0
 
 POST.append(d22_write_applied)
+
+# ---------------------------------------------------------------------------------------------------------- VSPLIT1
+#
+# A virtual declaration with several declarators, `virtual void v000(), v004(), v008();` (EQ, farm baseline 588863:
+# lowprocess.cpp's ActorX v000..v228, nilookatinterpolator.cpp's NiAVObjectPalette v0..v34, bsbatchrenderer,
+# testerrainlodmanager: 52 sites in 23 files). D22 / D26 took the whole list for one virtual: FNVNX_D22 dropped every
+# placeholder of it under GCC (0x0090f670 read [x2, #8] where the exe reads [edx + 0x22c]), and the virtual counts that
+# D22-SLOTK and the call-only gates use were off. VSPLIT1 writes one declaration per declarator, each with the same
+# decl-specifiers (`virtual void v000(); virtual void v004(); ...`): the same declarations in C++, so the same objects
+# under MSVC. Only declarators without an initializer or body (a declarator list ends with `;`), at any class depth.
+VSPLIT1_HEAD = re.compile(r'\bvirtual\b')
+
+def _vsplit_top(s, ch):
+    """indices of ch at parenthesis / bracket / angle depth 0 of s"""
+    out, d = [], 0
+    for i, c in enumerate(s):
+        if c in '([<': d += 1
+        elif c in ')]>': d -= 1
+        elif c == ch and d == 0: out.append(i)
+    return out
+
+def r_split_virtual_declarators(path, text, stats):
+    """VSPLIT1: `virtual T a(), b();` -> `virtual T a(); virtual T b();` (see above)."""
+    if 'virtual' not in text or '),' not in text.replace(' ', ''): return text
+    masked = d22_mask(text)
+    edits = []
+    for m in VSPLIT1_HEAD.finditer(masked):
+        end = masked.find(';', m.start())
+        if end < 0: continue
+        stmt = masked[m.start():end]
+        if '{' in stmt or '}' in stmt or '=' in stmt: continue
+        cuts = _vsplit_top(stmt, ',')
+        if not cuts: continue
+        first = stmt[:cuts[0]]
+        # the decl-specifiers: everything before the first declarator's name (`virtual void `, `virtual int `); a
+        # declarator keeps its own `*` / `&`
+        dm = re.match(r'(virtual\s+(?:[\w:<>]+\s*(?:<[^;{}()]*>\s*)?[\s\*&]+)+?)(~?[A-Za-z_]\w*)\s*\(', first)
+        if not dm: continue
+        spec = re.sub(r'[\s\*&]+$', '', text[m.start():m.start() + len(dm.group(1))]) + ' '
+        parts = [stmt[a:b] for a, b in zip([0] + [c + 1 for c in cuts], cuts + [len(stmt)])]
+        if not all(re.match(r'\s*[\*&]*\s*~?[A-Za-z_]\w*\s*\(', q) for q in parts[1:]): continue
+        src = text[m.start():end + 1]
+        for c in reversed(cuts):                    # each top-level comma -> `; <decl-specifiers>`; line breaks stay
+            src = src[:c] + '; ' + spec + src[c + 1:].lstrip(' \t')
+        edits.append((m.start(), end + 1, src))
+        stats['VSPLIT1'] += len(parts) - 1
+    if not edits: return text
+    for a, b, rep in sorted(edits, reverse=True):
+        text = text[:a] + rep + text[b:]
+    return text
 
 # ---------------------------------------------------------------------------------------------------------- EMPTY1
 #
@@ -6430,6 +6491,6 @@ REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_add
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
+              r_implicit_bound_destructors, r_split_virtual_declarators, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
               r_template_member_stand_ins, r_raw_vtable_slots, r_empty_string_objects]
 RULES += REFS_RULES
