@@ -436,6 +436,28 @@ def dtor_vptr_bytes(diff, wx, wa, is_vftable, is_native_vtable):
     return out
 
 
+_ZERO_STUB_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0),
+                     struct.pack('<II', 0x0f000400, 0xd65f03c0), struct.pack('<II', 0x2f00e400, 0xd65f03c0)}
+
+
+def zero_stubs(img):
+    """{address: name} of the functions of a native image whose whole body is `mov w0, #0; ret` or the float / double
+    zero equivalent (decomp placeholders), built once per image."""
+    got = getattr(img, '_zero_stubs', None)
+    if got is None:
+        got = {}
+        for n, a in img.syms.items():
+            if img.sizes.get(n) != 8:
+                continue
+            for base, data in img.segments:
+                if base <= a and a + 8 <= base + len(data):
+                    if data[a - base:a - base + 8] in _ZERO_STUB_BODIES:
+                        got[a] = n
+                    break
+        img._zero_stubs = got
+    return got
+
+
 def _read(uc, w, a, n):
     """Final memory of a machine, or the world's initial bytes where the machine never mapped the page."""
     try:
@@ -599,9 +621,11 @@ class Pair:
                 out.append(dict(vft='%08x' % v, x86=[k + 1 for k in ks[:8]], arm=ks[:8], shift=-1, ran=True))
         return out or None
 
-    def _pushes_before(self, retaddr):
+    def _pushes_before(self, retaddr, strict=False):
         """Pushes in the straight-line code before the call that returns to retaddr (back to the previous call,
-        branch, return or esp adjustment): an upper bound of the arguments the caller passed on the stack."""
+        branch, return or esp adjustment): an upper bound of the arguments the caller passed on the stack. With
+        strict, the count stops at a conditional branch too: the pushes of the call itself (_learn_pop tries that
+        count first)."""
         import capstone
         for a, code in self.target.x86_code.items():
             if a < retaddr <= a + len(code):
@@ -616,7 +640,7 @@ class Pair:
         for x in reversed(ins[:i] if i is not None else []):
             if x.mnemonic == 'push':
                 n += 1
-            elif x.mnemonic.startswith('j') and x.mnemonic != 'jmp':
+            elif x.mnemonic.startswith('j') and x.mnemonic != 'jmp' and not strict:
                 # a conditional branch between the pushes and the call (00e899a0: the arguments, then a switch
                 # on a type field, then `call edx`): walk on. Only an upper bound is needed (_learn_pop tries
                 # every count below it and keeps the one that runs clean)
@@ -680,8 +704,14 @@ class Pair:
         self.pops_tried.update(sites)
         # no push in the straight line before the call (the arguments pushed before a branch, 00e899a0): any count
         # up to 6 words, each checked by clean()
-        cands = [([0] if a in cdecl else []) + [4 * n for n in range(self._pushes_before(a) or 6, 0, -1)] +
-                 ([] if a in cdecl else [0]) for a in sites]
+        def counts(a):
+            # (F-uncls, difffuzz-20) the pushes right before the call first, then the walk across branches from the
+            # most down: the search is bounded (27 runs) and three sites with a branch each (0x00e68870: two
+            # `call edx` and a third) put the true counts beyond it in the descending order alone
+            top = self._pushes_before(a) or 6
+            near = min(self._pushes_before(a, strict=True), top)
+            return ([4 * near] if near else []) + [4 * n for n in range(top, 0, -1) if n != near]
+        cands = [([0] if a in cdecl else []) + counts(a) + ([] if a in cdecl else [0]) for a in sites]
 
         # a clean run that only kept callee-saved registers wrong (no fault) need not also fix an esp difference it
         # already had at the target's return (a custom convention's pop: F3, 0x00d55bd0); F1's derail (callee-saved
@@ -795,6 +825,11 @@ class Pair:
             got = sorted({o for a, o in ent.items() if a in ra.blocks})
             if got:
                 d['arm_entered'] = ['%08x' % o for o in got[:64]]
+        if d is not None:
+            zs = zero_stubs(self.target.image)
+            hit = sorted(n for a, n in zs.items() if a in ra.blocks)
+            if hit:
+                d['arm_zero_stub'] = hit[:4]       # F-uncls: the native ran a placeholder body that returns 0
         if d is not None and getattr(rx, 'ret_smashed', False):
             d['x86_frame_smash'] = True        # the oracle overran a local into its return-address slot (F1b)
         if d is not None and ra.private_reads:

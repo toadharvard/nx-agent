@@ -49,7 +49,12 @@ import config
 # padding and value-free writes are no custom-register reads, custom registers carry the parameter their calibrated
 # pairing agrees on, the adaptive follow skips a callee the native calls out of line itself and reruns after its
 # last load, the bool-repr probe covers background bytes and NaN-only remainders, a store into the oracle's return
-# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy.
+# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. F-uncls: the garbage probe compares
+# the argument a call-args divergence names and probes random-background cases with the background pinned (an
+# uninitialised out-parameter of an intercepted callee is uninit-x86), pop learning tries the pushes right before a
+# call first (three call sites over branches), an integer converted from a float expression within 4 float ulps
+# above 2^24 is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
+# placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return.
 HARNESS = 'difffuzz-20'
 
 
