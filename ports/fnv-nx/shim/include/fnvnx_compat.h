@@ -185,6 +185,8 @@ struct fnvnx_new_tag {};
  * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
 #define FNVNX_D22(C, ...) virtual ~C();
 #define FNVNX_D22I(C, ...) virtual ~C() {}
+/* HKRO1: Havok hkReferencedObject's getClassType / calcContentStatistics (exe slots 1 / 2) */
+#define FNVNX_HKRO1 virtual const void* GetClassType() const; virtual void CalcContentStatistics(void*, const void*) const;
 #define FNVNX_D22_DROP(...)
 /* D26: a call of a converted slot-0 placeholder (MSVC: the deleting destructor ??_G(flags)) is a virtual destructor
  * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */

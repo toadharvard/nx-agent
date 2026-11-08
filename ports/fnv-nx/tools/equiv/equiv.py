@@ -142,6 +142,7 @@ CLASSES = {
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
     'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor
     'D22': 'neutral',          # FNVNX_D22 / FNVNX_D22_DROP: GCC declares the slot-0 virtual destructor, MSVC keeps the original declaration
+    'HKRO1': 'neutral',        # FNVNX_HKRO1 (empty under MSVC): hkReferencedObject's getClassType / calcContentStatistics under GCC
     'VSPLIT1': 'neutral',      # one declaration per virtual declarator (`virtual T a(), b();` -> two): the same declarations
     'EMPTY1': 'neutral',       # FNVNX_EMPTY1(T, name) (name under MSVC): a declared-only empty-string object -> T("") under GCC
     'RAWVT1': 'neutral',       # FNVNX_D26_SLOT(k) (k under MSVC): a raw exe slot index on `this`, k + 1 for GCC's minus-one vtables
