@@ -20,7 +20,7 @@ GOALS := $(MAKECMDGOALS)
 $(firstword $(MAKECMDGOALS)):
 	@echo "$(GOALS) FNVNX_STUB_NULLDEV=$${FNVNX_STUB_NULLDEV-unset}" >> $(CALLS)
 	@for s in $(if $(filter guest,$(GOALS)),fetch toolchain prepare compile link guest,toolchain); do mkdir -p $(BUILD_DIR)/$$s; \
-	  st=ok; [ "$$s" = "$${FAKE_FAIL:-}" ] && st=fail; \
+	  st=ok; [ "$$s" = "$${FAKE_FAIL:-}" ] && { st=fail; printf 'fnvlink: resolve\nTypeError: the stage-own error\n' > $(BUILD_DIR)/$$s/stage.log; }; \
 	  printf '{"status": "%s", "seconds": 3.5, "metrics": {"compile_built_now": 2, "link_objcache_bodies_hits": 9, "link_objcache_bodies_misses": 1, "prepare_reused": 1}, "artifacts": {"prefix": "/x"}}\n' $$st > $(BUILD_DIR)/$$s/stage.json; done
 	@[ -z "$(filter guest,$(GOALS))" ] || { touch $(BUILD_DIR)/compile/objects.tsv; mkdir -p $(BUILD_DIR)/guest $(BUILD_DIR)/link/out; \
 	  v=nso; case "$$FNVNX_LINK_OBJCACHE" in *linkeq-cache) echo cold >> $(CALLS); [ -n "$${FAKE_DIFF:-}" ] && v=other;; esac; \
@@ -86,6 +86,7 @@ ok "sidecar fnvnx-bootloop/1" 'python3 -c "import json,sys; j=json.load(open(sys
 run second
 ok "second iteration: the same build directory, not cold, no second cold link" '[ "$(cat $T/second.rc)" = 0 ] && ! grep -q "cold:" $T/second.md && [ "$(grep -c "^cold$" $T/calls)" = 1 ] && grep -q "passed on this machine before" $T/second.md'
 run bad FAKE_FAIL=link
+ok "a failed stage: its own log tail in the report (not the job log)" 'grep -q "^- the link stage: " $T/bad.md && grep -q "^TypeError: the stage-own error" $T/bad.md'
 ok "a failed stage: exit 1, FAIL names it, no boot" '[ "$(cat $T/bad.rc)" = 1 ] && sed -n 3p $T/bad.md | grep -q "^- FAIL: the link stage did not end ok/warn" && ! grep -q "^boot " <(tail -n +$(grep -n "^guest " $T/calls | tail -1 | cut -d: -f1) $T/calls) && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"error\"]" $T/bad.json'
 python3 -I - "$P" "$T/first.md" "$T/first.json" <<'PY' > "$T/py.out" 2>&1
 import json, sys
