@@ -298,6 +298,71 @@ as RX segment code. That adds about 8-12 days and has not been studied beyond th
 
    That gives the real eligible share and fixes the numbers in sections 5 and 7.
 
+## 10. Results of steps 1 and 3 (orchestrator follow-up, 2026-11-08)
+
+### Step 1: a real exe function through the `native | x86` table (`tools/x86fallback/poc_exe.py`)
+
+What runs:
+- **G** = `AbstractHeap::FUN_00aa9d30(HeapFreeBlock*)`, 0x00aa9d30, 91 x86 instructions, taken from the pinned
+  player's FalloutNV.exe.
+- **G calls L** = `AbstractHeap::IncrementSubBucket(int)`, 0x00aa9ef0. In the table L is `native`: our AArch64
+  ILP32 build from the farm object set c/650bf103df77 (`src_bscore_abstractheap.cpp.o`). The native G's two
+  P32_JUMP26/CALL26 branches to L are resolved by the tool.
+
+Three modes, each in a fresh one-address-space world (both CPUs on the same host buffers), on the same fuzzed
+arena (objects, linked free blocks):
+- native G -> native L;
+- **mixed**: x86 G from the exe, with an `__thiscall` exit to native L (ecx -> x0, `[esp+4]` -> w1, callee pops 4,
+  eax/ecx/edx clobbered);
+- x86 G -> x86 L.
+
+| cases | equal | both fault | mixed != x86 | native != x86, div0 class | native != x86, other | x86->native exits |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2,000 | 663 | 1,210 | **0** | 127 | **0** | 663 |
+
+- **The fallback reproduced the exe in every case.**
+- The only native/x86 difference is a known class. G does `div dword ptr [this+8]`: with `this->+8 == 0`, x86
+  raises #DE, while AArch64 `udiv` gives 0 (D24 owner F4, division).
+- "Both fault" is the fuzz world (random pointers), the same on all three.
+- The fault count is not a fallback result. The difffuzz world model (`world.py` seeds) would cut it. The next
+  step is the hook inside `x86emu.py` itself, so every fuzz-set function can run this way.
+
+### Step 3: static census (`tools/x86fallback/census.py`)
+
+Inputs:
+- extents from the decomp's build/units.json (87eb9373);
+- bytes from the exe;
+- vftables = the 2,333 `??_7` addresses, vbtables = the 5 `??_8` addresses (a lower bound for virtual bases);
+- the IAT 0x00fdf000..0x00fdf4a4.
+
+What counts as what:
+- **vcall**: a call through a slot loaded from a vptr that was itself loaded from `[x]`. MSVC 2008's shape here
+  is `mov edx,[ecx]` / `mov eax,[edx+d]` / `call eax`.
+- **Unproven indirect**: every other non-IAT indirect call.
+- **Eligible now**: no vcall, no EH (fs:[0]), no vbase, no unproven indirect call.
+- **Eligible with the vcall pass**: vcalls allowed.
+
+| set | functions | vcall fns / sites | unproven indirect fns | EH (fs:[0]) fns | vbase fns | vftable-immediate fns | x87 fns | eligible now | eligible with vcall pass |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| EQ 588863 hard rows (shards 1/3/5, all row tables) | 1,107 | 503 / 2,398 | 131 | 282 | 0 | 109 | 381 | 390 (35 %) | 723 (65 %) |
+| of which the vtable-row table | 212 | 170 / 971 | 22 | 52 | 0 | 31 | 69 | 14 (7 %) | 140 (66 %) |
+| all decomp functions (base rate) | 68,657 | 10,979 / 33,147 | 3,030 | 6,404 | 3 | 4,063 | 16,237 | 52,092 (76 %) | 59,735 (87 %) |
+
+Reading:
+- Today, without the vcall pass, **a third of the false-interpretation functions** could run as x86. With the
+  pass, **two thirds** could.
+- The rest are blocked by EH frames (282) and unproven indirect calls (131). Those are the next classes (EH:
+  frames that never see a throw across the boundary could be allowed).
+- Virtual bases are negligible.
+
+The trap list (30 trap stubs, 477 undefined at d17625063785) is by name: 441 runtime, C or platform names, and
+31 C++ names. Most are not exe functions with a decomp extent, so they are not in this census. A trap whose exe
+body exists (a recon target) can be added with `--set traps=<addrfile>`.
+
+The detector is linear: no CFG, and "loaded from `[x]`" is taken as a vptr. A function-pointer table reached
+through a struct's first field counts as a vcall too. The numbers are an estimate of what the load-time pass would
+accept, not its output.
+
 ## Sources
 
 - FEX `Readme.md`, `CMakeLists.txt`, `FEXCore/include/FEXCore/Core/Context.h`, `HLE/SyscallHandler.h`,

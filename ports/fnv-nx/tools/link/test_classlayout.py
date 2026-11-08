@@ -108,6 +108,39 @@ def main():
               'FNVNX_ABIREL=0: both held')
     finally:
         fnvlink.VTFILL_HOLD.clear()
+    # deleting_dtor: the function's own first return decides (MagicCaster slot 9 0x008d0600 ends `ret 8`; the byte
+    # search found the next function's `ret 4`)
+    import test_exevft as tx
+    import tempfile as _tf
+    stub = bytes.fromhex('558bec51894dfc8be55dc20800')                             # ... ret 8
+    gdel = bytes.fromhex('f644240401568bf1740656e8000000008bc65ec20400')           # ??_G: test flags; delete; ret 4
+    getter = bytes.fromhex('b8105d1f01c3')                                        # mov eax, imm; ret
+    pe_ = os.path.join(_tf.mkdtemp(), 'd.exe')
+    tx.make_pe(pe_, lambda rd: None, {0x401000: stub + gdel, 0x401040: getter + gdel, 0x401080: gdel})
+    check(not exevft.deleting_dtor(pe_, 0x401000) and exevft.deleting_dtor(pe_, 0x401000 + len(stub)),
+          'deleting_dtor: a ret-8 function followed by a ??_G is not one; the ??_G is')
+    check(not exevft.deleting_dtor(pe_, 0x401040) and exevft.deleting_dtor(pe_, 0x401080),
+          'deleting_dtor: a getter followed by a ??_G (NiShaderInstanceDescriptor slot 0) is not one')
+    os.environ['FNVNX_DELDTOR_STRICT'] = '0'
+    try:
+        check(exevft.deleting_dtor(pe_, 0x401000), 'FNVNX_DELDTOR_STRICT=0: the old byte search (the false positive)')
+    finally:
+        del os.environ['FNVNX_DELDTOR_STRICT']
+    # hand_ambiguous_names: a stand-in name whose stores write several image vftables does not pick a native vtable
+    V = exevft.Vft
+    hand = {0x10a1458: [('u1.cpp', 'StandIn', 0x401000, 0)], 0x1070660: [('u2.cpp', 'StandIn', 0x402000, 0)],
+            0x1010000: [('u3.cpp', 'Foo', 0x403000, 0)], 0x1010100: [('u3.cpp', 'Bar', 0x403100, 0)],
+            0x1010200: [('u4.cpp', 'Bar', 0x403200, 0)]}
+    ev = {0x10a1458: V('.?AVNiFogProperty@@', 0, [], [1]), 0x1070660: V('.?AVSkyObject@@', 0, [], [1]),
+          0x1010100: V('.?AVBar@@', 0, [], [1]), 0x1010200: V('.?AVBase@@', 0, [], [1])}
+    amb = fnvlink.hand_ambiguous_names(hand, ev)
+    check(amb == {(0x10a1458, 'StandIn', 0), (0x1070660, 'StandIn', 0), (0x1010200, 'Bar', 0)},
+          'hand_ambiguous_names: StandIn x2 and Bar\'s store of Base\'s vftable; Foo and Bar\'s own stay: %s' % amb)
+    os.environ['FNVNX_HANDAMB'] = '0'
+    try:
+        check(fnvlink.hand_ambiguous_names(hand, ev) == set(), 'FNVNX_HANDAMB=0: the name decides as before')
+    finally:
+        del os.environ['FNVNX_HANDAMB']
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 

@@ -6172,10 +6172,22 @@ def _d22_extern_use(path, member):
     if path.endswith(('.cpp', '.c', '.cxx', '.cc')) or not member: return False
     me = os.path.abspath(path)
     refs, includers = _d22_tree_refs(path)
-    users = refs.get(member, ())
-    if not users: return False
     inc = includers(me)
-    return any(f != me and f in inc for f in users)
+    users = refs.get(member, ())
+    if any(f != me and f in inc for f in users): return True
+    # an unqualified call in an including file (magiccaster.cpp's members call `SpellCast(...)` of the
+    # magiccaster_match.h MagicCaster that D22-CL converted at the exe's dtor slot 9: the unit stopped compiling,
+    # full3 74a1c281). The files' texts are read once per tree (cached with the index).
+    uq = prepare.__dict__.setdefault('_fnvnx_d22_uq', {})
+    rx = re.compile(r'(?<![\w.>:~])%s\s*\(' % re.escape(member))
+    for f in inc:
+        if f == me: continue
+        t = uq.get(f)
+        if t is None:
+            try: t = uq[f] = d22_mask(open(f, encoding='utf-8', errors='surrogateescape').read())
+            except OSError: t = uq[f] = ''
+        if rx.search(t): return True
+    return False
 
 def r_vtable_dtor_slot(path, text, stats):
     """D22: `virtual ~C();` for a listed class's slot-0 placeholder under GCC (above); a derived class's

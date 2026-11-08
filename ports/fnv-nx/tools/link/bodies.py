@@ -85,7 +85,8 @@ in this order (first that applies):
    placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing), and
    the decomp's `basic_streambuf` copies' `_Lock()` / `_Unlock()` (CRT_MUTEX: `this + 4` is the std::_Mutex, S4's
    fnvnx_mutex_lock / unlock), and the facet copies' `_Register()` / static `_Register(facet*)` (CRT_FACET: S4's
-   fnvnx_facet_register, MSVC's _Facet_Register at 0x00ec3599).
+   fnvnx_facet_register, MSVC's _Facet_Register at 0x00ec3599), and NiPointer<T>'s destructor for a T no unit
+   defines (CRT_NIPTR: a tail call to NiPointer<NiRefObject>'s; the same code on the NiRefObject base at 0).
    After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
 
@@ -642,6 +643,12 @@ CRT_MUTEX = {'_Lock': 'fnvnx_mutex_lock', '_Unlock': 'fnvnx_mutex_unlock'}
 # neither. Either way the facet is the first argument (x0): a tail call.
 CRT_FACET = 'fnvnx_facet_register'
 
+# NiPointer<T>::~NiPointer() of a T the decomp only forward-declares (NiPointer<ProjectileAuxiliaryData>, inlined
+# everywhere in the exe): no unit can instantiate it. Every NiPointer<T> destructor is the same code, `if (m_pObject)
+# m_pObject->DecRefCount()` on the NiRefObject base, which Gamebryo classes hold at offset 0 (single inheritance): a
+# tail call to the NiPointer<NiRefObject> instantiation the units emit (W COMDAT). FNVNX_NIPTR=0 turns it off.
+CRT_NIPTR = '_ZN9NiPointerI11NiRefObjectED1Ev'
+
 
 def crt_rule(isig):
     """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('mutex', platform function, 'this + 4') for a
@@ -661,6 +668,10 @@ def crt_rule(isig):
     if last == '_Register' and isig.qual[-2] == 'facet' and (
             not isig.params or (len(isig.params) == 1 and re.fullmatch(r'(?:\w+::)*facet\s*\*', isig.params[0].strip()))):
         return ('facet', CRT_FACET, 'the facet')
+    if isig.qual[-1] == '{dtor}' and isig.variant in ('D1', 'D2') and not isig.params and \
+            re.fullmatch(r'NiPointer<.+>', isig.qual[-2]) and isig.qual[-2] != 'NiPointer<NiRefObject>' and \
+            len(isig.qual) == 2 and os.environ.get('FNVNX_NIPTR', '1') != '0':
+        return ('niptr', CRT_NIPTR, 'NiPointer<NiRefObject>')
     return None
 
 
@@ -673,6 +684,7 @@ def crt_pass(rows, itanium):
             r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
                            else '%s(%s): the _Mutex member at +4' % (k[1], k[2]) if k[0] == 'mutex'
                            else '%s(%s): MSVC\'s _Facet_Register' % (k[1], k[2]) if k[0] == 'facet'
+                           else 'the %s destructor (%s)' % (k[2], k[1]) if k[0] == 'niptr'
                            else 'placement delete: ret')
         out.append(r)
     return out
@@ -690,7 +702,7 @@ def emit_crt(rows, itanium):
             out += ['    ret']
         elif kind == 'mutex':
             out += ['    add x0, x0, #4', '    b ' + fn]
-        elif kind == 'facet':
+        elif kind in ('facet', 'niptr'):
             out += ['    b ' + fn]
         else:
             out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]

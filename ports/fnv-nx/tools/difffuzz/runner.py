@@ -491,6 +491,7 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
     elif perm is not None:
         # (r4 uncls) the same calls in another order, further apart than the adjacent swap below: pair each oracle
         # call with the native call of the same callee (occurrence by occurrence) and compare those; by design
+        ra.pre_perm_calls = ra.calls            # (difffuzz-20) _order_probe starts from the native's own order
         ra.calls = [ra.calls[j] for j in perm]
         ta = [c.target for c in ra.calls]
         rx.perm_aligned = True
@@ -992,6 +993,18 @@ class Pair:
         arguments included. -> (ra, divergence, world) of that run, or None."""
         if rx.error or ra.error:
             return None
+        pre = getattr(ra, 'pre_perm_calls', None)
+        if pre is not None:
+            # (difffuzz-20) compare() already paired these calls by callee (_perm_align) and reordered ra.calls in place,
+            # so the probe saw equal traces and no region: start again from the order the native made them in
+            paired, ra.calls, ra.pre_perm_calls = ra.calls, pre, None
+            try:
+                got = self._order_probe(case, rx, ra, w, placement, max_steps, cmp_)
+            finally:
+                ra.pre_perm_calls = pre
+            if got is None:
+                ra.calls = paired
+            return got
         vc = self._vcalls()
         wild = _is_wild(vc)
         tx = [c.target for c in rx.calls]

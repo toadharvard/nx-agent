@@ -133,6 +133,8 @@ def build(exe, exev=None):
     rows = []
     for va in sorted(exev):
         v = exev[va]
+        if not v.td:
+            continue   # vftables without RTTI (exevft's no-COL scan, fnvlink's exev_all): no class to decide
         kind, k, why, ev = decide(exe, v)
         if v.off:
             why = 'secondary off %d %s' % (v.off, why)   # S1's loader skips these: the class decision is the primary's

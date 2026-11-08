@@ -180,6 +180,11 @@ class X86Engine:
             return
         self.uc.mem_map(page, PAGE, prot)
         self.uc.mem_write(page, self.world.page(page))
+        if page + PAGE == world.MAX:
+            # (difffuzz-20) the last 16 bytes of the address space are `ret`s, so a block ends there: a wild call to 0xffffff80 translated a
+            # block that ran past 4 GiB, wrapped to address 0 and faulted there ('fault:x:00000000') instead of being
+            # intercepted like every other wild target
+            self.uc.mem_write(world.MAX - 16, b'\xc3' * 16)
         self.mapped.add(page)
         self.dynamic.add(page)
 

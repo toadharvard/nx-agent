@@ -40,6 +40,7 @@ PORT = layout.PORT
 COLUMNS = ['unit', 'record', 'what', 'msvc', 'native', 'cause', 'boot']
 CLANG = os.environ.get('CLANG', 'clang++')
 
+
 Rec = collections.namedtuple('Rec', 'name size align fields bases vptr packed')
 # fields: [(offset or None for a bitfield, name, type)]; bases: [(offset, name, kind)]
 
@@ -47,8 +48,14 @@ Rec = collections.namedtuple('Rec', 'name size align fields bases vptr packed')
 def msvc_flags(tree):
     sse = os.environ.get('SSE2NEON') or os.path.join(PORT, 'ext', 'sse2neon')
     return ['--target=i686-pc-windows-msvc', '-std=gnu++17', '-fsyntax-only', '-fms-extensions', '-fshort-wchar',
-            '-fsigned-char', '-U_MSC_VER', '-fms-compatibility-version=0', '-D__aarch64__', '-D__ILP32__',
-            '-Wno-everything', '-ferror-limit=0', '-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
+            '-fsigned-char', '-U_MSC_VER', '-U_WIN32', '-U_WIN64', '-U_M_IX86', '-U_M_IX86_FP',
+            '-fms-compatibility-version=0',   # the native compile's branches: no Windows target macros '-D__aarch64__', '-D__ILP32__',
+            '-Wno-everything', '-ferror-limit=0',
+            # the SIMD types as MSVC defines them (__m64 8/8, __m128 16/16, ...): the shim's SSE headers are
+            # sse2neon (AArch64) and stay out by their guards; their function bodies do not affect records
+            '-include', os.path.join(HERE, 'layoutgate_msvc', 'fnvnx_lg_msvc_types.h'),
+            '-DSSE2NEON_H', '-DFNVNX_SSE2NEON_H', '-DFNVNX_MMX_H',
+            '-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
             '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + sse, '-I' + os.path.join(tree, 'include'),
             '-Xclang', '-fdump-record-layouts-complete']
 
@@ -96,7 +103,7 @@ def parse_dump(text):
             continue
         if name.startswith(('__NS', 'fnvnx_', '__fnvnx', 'std::', '__gnu')):
             continue                                                  # the shim's and the compiler's own records
-        nat = max([layout_natural(t) for _, _, t in fields] + [1])
+        nat = max([layout_natural(t) for _, _, t in fields] + [4 if vptr is not None or bases else 1])
         out.setdefault(name, Rec(name, size, align, fields, bases, vptr, align < nat))
     return out
 
@@ -197,10 +204,13 @@ def compare(unit, rec, nat, boot):
     diffs.sort()
     rows = []
     cause = diffs[0][4] if diffs else (cause_of(rec, '') if size != rec.size else '')
+    if size == 0 and rec.size == 1:
+        cause = 'ebo'                     # a zero-size native class: the FNVNX_EBO2 filler alone (`char x[0]`)
     if size != rec.size:
         rows.append((unit, rec.name, 'size', rec.size, size, cause, boot))
     if align != rec.align:
-        rows.append((unit, rec.name, 'align', rec.align, align, cause or 'align8', boot))
+        rows.append((unit, rec.name, 'align', rec.align, align,
+                     cause or ('pack' if rec.packed or rec.align < align and size == rec.size else 'align8'), boot))
     for _, what, m, n, c in diffs:
         rows.append((unit, rec.name, what, m, n, cause, boot))
     return rows
@@ -210,15 +220,18 @@ def run_unit(tree, workdir, unit, boot):
     try:
         recs = msvc_layouts(tree, unit)
     except subprocess.TimeoutExpired:
-        return unit, [], 0, 0
+        return unit, [], 0, 0, []
     if not recs:
-        return unit, [], 0, 0
+        return unit, [], 0, 0, []
     nat = probe(tree, workdir, unit, list(recs.values()))
     rows = []
     for name, rec in recs.items():
         if name in nat:
             rows += compare(unit, rec, nat[name], boot)
-    return unit, rows, len(recs), len(nat)
+    # members, for the member check (a pack / ebo record placed inside another record)
+    members = [(unit, rec.name, off, nm, re.sub(r'^(?:const\s+|volatile\s+|struct\s+|class\s+)+', '', t).strip(), boot)
+               for rec in recs.values() for off, nm, t in rec.fields if off is not None and nm]
+    return unit, rows, len(recs), len(nat), members
 
 
 def main():
@@ -242,26 +255,40 @@ def main():
     allrows, seen, measured = [], {}, [0, 0]
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
         futs = [ex.submit(run_unit, tree, workdir, u, int(u in boot)) for u in units]
+        allmembers = []
         for f in concurrent.futures.as_completed(futs):
-            unit, rows, nm, nn = f.result()
+            unit, rows, nm, nn, mem = f.result()
             measured[0] += nm; measured[1] += nn
-            allrows += rows
-    allrows.sort()
+            allrows += rows; allmembers += mem
+    # the member check: a record whose layout differs only by its alignment under #pragma pack (pack) or by a zero
+    # native size (ebo) is harmless as a base; as a member it moves its neighbours when MSVC places it at an offset
+    # the native alignment does not allow (pack), or always (ebo: 1 byte under MSVC, 0 natively)
+    pack = {r[1]: int(r[4]) for r in allrows if r[2] == 'align' and int(r[3]) < int(r[4])}
+    ebo = {r[1] for r in allrows if r[2] == 'size' and str(r[4]) == '0'}
+    for unit, rec, off, nm, t, b in allmembers:
+        base = re.sub(r'\s*\[\d+\]$', '', t).split('::')[-1].strip()
+        if base in ebo:
+            allrows.append((unit, rec, 'member %s' % nm, off, '%s (native size 0)' % base, 'ebo-member', b))
+        elif base in pack and off % pack[base]:
+            allrows.append((unit, rec, 'member %s' % nm, off, '%s (native align %d)' % (base, pack[base]), 'pack-member', b))
+    allrows.sort(key=lambda r: tuple(str(x) for x in r))
     with open(a.out, 'w') as f:
         f.write('# fnvnx-layoutgate/1\n' + '\t'.join(COLUMNS) + '\n')
         for r in allrows:
             f.write('\t'.join(str(x) for x in r) + '\n')
     recs = collections.defaultdict(set)
     for r in allrows:
-        recs[(r[1], r[6])].add(r[2])
+        if not r[2].startswith('member'): recs[(r[1], r[6])].add(r[2])
     rb = {k[0] for k in recs if k[1] == 1}
     rr = {k[0] for k in recs if k[1] == 0} - rb
     fb = sum(1 for r in allrows if r[6] == 1 and r[2].startswith('field'))
     causes = collections.Counter(r[5] for r in allrows if r[2] == 'size' or r[2].startswith('field'))
+    mrows = [r for r in allrows if r[2].startswith('member')]
     summary = ('layoutgate: %d units, records msvc %d / probed %d; differing records %d (boot %d, rest %d), '
-               'differing field rows %d (boot %d); causes %s' %
+               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); causes %s' %
                (len(units), measured[0], measured[1], len(rb | rr), len(rb), len(rr),
-                sum(1 for r in allrows if r[2].startswith('field')), fb, dict(causes.most_common())))
+                sum(1 for r in allrows if r[2].startswith('field')), fb, len(mrows), sum(1 for r in mrows if r[6] == 1),
+                dict(causes.most_common())))
     print(summary, file=sys.stderr)
     open(a.out + '.summary', 'w').write(summary + '\n')
 
