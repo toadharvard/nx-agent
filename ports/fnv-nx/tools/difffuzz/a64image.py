@@ -15,6 +15,7 @@ import json
 import os
 import re
 import struct
+import hashlib
 import contextlib
 import fcntl
 import subprocess
@@ -31,7 +32,7 @@ CODE_STUB = 0x08000000        # + original code address (0x00400000..0x00fdf000)
 NAMED_STUB = 0x09000000       # + 16 * k
 NAMED_STUB_MAX = 0x00800000 // 16
 STACK_GUARD = 0x0b800000      # page holding the stack protector canary (mapped by the AArch64 engine)
-LINK_VERSION = 6              # 6: S2d's vcall stubs (zz_bd_vcall.o) linked like the bridges; bump when the stub/alias rules change (invalidates cached unit images)
+LINK_VERSION = 8              # 8: C++ names another object of the link defines are linked in (provider_objects); 6: S2d's vcall stubs (zz_bd_vcall.o) linked like the bridges; bump when the stub/alias rules change (invalidates cached unit images)
 ADDR_SYM = re.compile(r'^__fnv_([0-9a-f]{8})(?:_(C[0-9]|D[0-9]))?$')
 LAYOUT = """
 SECTIONS {
@@ -135,6 +136,86 @@ def helpers_object(workdir):
     return obj
 
 
+OBJCOPY = os.environ.get('OBJCOPY', 'aarch64-linux-gnu-objcopy')
+
+
+def _provider_index(fixed, workdir):
+    """{C++ function name: [link objects of `fixed` defining it]} (T / W symbols only), zz_bd_* (S2d's synthesized
+    bodies) first, then zz_vt_*, then the units' own objects. Cached in workdir, keyed by the object list."""
+    names = sorted(f for f in os.listdir(fixed) if f.endswith('.o'))
+    key = '%d:%d' % (len(names), int(max(os.path.getmtime(os.path.join(fixed, f)) for f in names)))
+    cache = os.path.join(workdir, 'provider_index.json')
+    with _locked(cache):
+        if os.path.exists(cache):
+            try:
+                c = json.load(open(cache))
+                if c.get('key') == key:
+                    return c['index']
+            except (OSError, ValueError):
+                pass
+        index = {}
+        for f in sorted(names, key=lambda n: (not n.startswith('zz_bd_'), not n.startswith('zz_vt_'), n)):
+            for sy in elfsyms.symbols(os.path.join(fixed, f)):
+                if sy.name.startswith('_Z') and sy.shndx != 0 and sy.bind != 'local' and sy.type in ('func', 'notype'):
+                    index.setdefault(sy.name, [])
+                    if f not in index[sy.name]:
+                        index[sy.name].append(f)
+        with open(cache + '.tmp', 'w') as fh:
+            json.dump(dict(key=key, index=index), fh)
+        os.replace(cache + '.tmp', cache)
+        return index
+
+
+def _provider_object(fixed, workdir, obj, wanted):
+    """`obj` of the link with every global symbol but `wanted` made local: the unit image gets the definitions it
+    lacks, while the pulled object's other symbols (its `__fnv_<X>` functions) must not capture the unit's own
+    calls, which the harness intercepts at their code stubs."""
+    tag = hashlib.sha1(('%s|%s' % (obj, ','.join(sorted(wanted)))).encode('utf-8', 'surrogateescape')).hexdigest()[:16]
+    out = os.path.join(workdir, 'prov', '%s.%s.o' % (obj[:-2][:60], tag))
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(os.path.join(fixed, obj)):
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        keep = out + '.keep'
+        with open(keep, 'w', encoding='utf-8', errors='surrogateescape') as f:
+            f.write('\n'.join(sorted(wanted)) + '\n')
+        subprocess.run([OBJCOPY, '--keep-global-symbols=' + keep, os.path.join(fixed, obj), out + '.tmp'], check=True)
+        os.replace(out + '.tmp', out)
+    return out
+
+
+def _symbol_sets(objs):
+    defined, undef = set(), set()
+    for o in objs:
+        for s in elfsyms.symbols(o):
+            if not s.name or s.type in ('section', 'file'):
+                continue
+            if s.shndx == 0:
+                undef.add(s.name)
+            elif s.bind != 'local':
+                defined.add(s.name)
+    return defined, undef
+
+
+def add_providers(units, objs, fixed, workdir, rounds=1):
+    """The units' objects leave a C++ name another object of the link
+    defines (a destructor body of zz_bd_<unit>.o, a placeholder `v07` of a class defined by another unit, a
+    template instantiation) unresolved, and the image made a trap stub of it: native-undefined for a name the game
+    link binds. Link in, for each such name, the one definition of the provider index (objects stripped to the
+    wanted names, `_provider_object`); the names those objects need in turn are looked up the same way."""
+    index = _provider_index(fixed, workdir)
+    objs = list(objs)
+    for _ in range(rounds):
+        defined, _u = _symbol_sets(objs)
+        undef = _symbol_sets(units)[1]          # the units' own references: the bridges object names far more
+        need = {}
+        for n in sorted(undef - defined):
+            if n.startswith('_Z') and n in index:
+                need.setdefault(index[n][0], set()).add(n)
+        if not need:
+            break
+        objs += [_provider_object(fixed, workdir, o, w) for o, w in sorted(need.items())]
+    return objs
+
+
 def build(source, linkdir, workdir):
     """Link the rewritten object of `source` -> Image (cached in workdir/<obj>.elf)."""
     return build_many([source], linkdir, workdir, config.obj_name(source))
@@ -196,6 +277,7 @@ def _build_many(sources, linkdir, workdir, name):
         if m.get('version') == LINK_VERSION and m.get('sources') == sorted(sources):
             return Image(elf, {int(k): v for k, v in m['stubs'].items()}, m['info'])
     objs = units + [o for o in (bridges, vcall) if os.path.exists(o)] + [helpers_object(workdir)]
+    objs = add_providers(units, objs, fixed, workdir)
     defined, undef, weak = set(), set(), set()
     for o in objs:
         for s in elfsyms.symbols(o):
