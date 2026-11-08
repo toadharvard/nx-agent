@@ -9,6 +9,8 @@
 #   S5BOOT_TAG      a short name for this boot; results go to branch s5boot/<link12>-<tag> (private)
 #   S5BOOT_REPAIR   1: add the emulator-only option repair-lost-slot-one to the table (never a product fix)
 #   S5BOOT_FAULTS   extra lines for the stub-fault table, `;`-separated
+#   S5BOOT_TABLE_REV  a commit of the public repository: its tests/s5/known_faults.txt and standins.c instead of
+#                   the checkout's (a guest older than a table change, e.g. pre-D26 guests: 3c8c79b3)
 #   S5BOOT_TRACE    function names to trace, `,`-separated (emu_guest.py --trace-fn; calls and returns)
 #   S5BOOT_TRACE_MAX  at most this many trace events (default 2000000)
 #   S5BOOT_EXTRA    more emu_guest.py arguments
@@ -85,7 +87,18 @@ fi
 python3 -I "$P/tools/lockstep/profile.py" "$GAME/Fallout_default.ini" "$W/profile" --device "fnv-nx null D3D9 device" \
 	> "$W/profile.log" 2>&1 || fail "profile.py (log $W/profile.log)"
 
-cp "$P/tests/s5/known_faults.txt" "$W/faults.txt"
+if [ -n "${S5BOOT_TABLE_REV:-}" ]; then   # an older guest with the stub table and stand-ins of its own time
+	R=$S5BOOT_TABLE_REV
+	git -C "$P" cat-file -e "$R^{commit}" 2> /dev/null || git -C "$P" fetch -q origin claude/fnv-s5 2> /dev/null ||
+		git -C "$P" fetch -q origin "$R" 2> /dev/null
+	git -C "$P" show "$R:ports/fnv-nx/tests/s5/known_faults.txt" > "$W/faults.txt" &&
+		git -C "$P" show "$R:ports/fnv-nx/tests/s5/standins.c" > "$W/standins.c" ||
+		fail "S5BOOT_TABLE_REV $R: known_faults.txt / standins.c not readable"
+	export FNVNX_STANDINS=$W/standins.c
+	NOTES+=("stub table and stand-ins of $R")
+else
+	cp "$P/tests/s5/known_faults.txt" "$W/faults.txt"
+fi
 [ "${S5BOOT_REPAIR:-0}" = 1 ] && echo "repair-lost-slot-one" >> "$W/faults.txt"
 [ -n "${S5BOOT_FAULTS:-}" ] && tr ';' '\n' <<< "$S5BOOT_FAULTS" >> "$W/faults.txt"
 EXTRA="${S5BOOT_EXTRA:-}"
