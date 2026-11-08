@@ -69,6 +69,8 @@ struct Vb { virtual ~Vb(); virtual int a(); virtual int b(); virtual int c(int);
 struct Der : Vb { int a() override; };
 struct Shell { int impl(); int impl2(Agg); int impl3(int, int); void *del(unsigned); int impl4(); int implh(); int y; };
 struct Vh { virtual int g0(); virtual int g1(); virtual int hh(); int q; };   // hh defined nowhere; another unit's reference names it
+struct Vu { virtual int u0(); virtual int u1(); virtual int hu(); int q; };   // hu defined nowhere; the unit's own recipe binds it, no code calls it
+struct Vc { inline virtual int c0(); inline virtual int c1(); inline virtual int hc(); int q; };   // hc defined nowhere; c0 calls Vc::hc() directly
 struct Vd { virtual int g(); virtual ~Vd(); int z; };      // key function g; ~Vd defined nowhere
 struct Gd { virtual ~Gd(); int w; };
 struct Vp { virtual int h(); virtual void v00(); int u; }; // v00: a placeholder for the exe's ??_G
@@ -106,6 +108,8 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'Nv::~Nv() { q = 0; }\nvoid game_free(void *p) { g_q = p != 0; }\n'
                     'void *call_nv(NvUse *p) { return p->FUN_00401160(1); }\n'
                     'Pv *mk_pv() { return new Pv; }\nvoid call_bi(Bi *p) { p->Free(0); }\n'
+                    'int Vu::u0() { return 10; }\nint Vu::u1() { return 11; }\nVu *mk_vu() { return new Vu; }\n'
+                    'inline int Vc::c0() { return Vc::hc(); }\ninline int Vc::c1() { return 12; }\nVc *mk_vc() { return new Vc; }\n'
                     'int Vh::g0() { return 8; }\nint Shell::implh() { return 9; }\nVh *mk_vh() { return new Vh; }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
@@ -126,7 +130,7 @@ def run(cmd, **kw):
 
 def build_exe(rd, where):
     td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0')
-          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@', '.?AVVh@@')}
+          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@', '.?AVVh@@', '.?AVVu@@', '.?AVVc@@')}
 
     def chd(names):
         bs = [rd.words(td[n], 0, 0, 0xffffffff, 0, 0x40, 0) for n in names]
@@ -154,6 +158,9 @@ def build_exe(rd, where):
     where['Vi'] = vft('.?AVVi@@', chd(['.?AVVi@@']), [0x4010f8, 0x4010f0])
     # Vh: g0, then Shell::implh; the units.json of another unit names `Vh::hh` as a function at Shell::impl's address
     where['Vh'] = vft('.?AVVh@@', chd(['.?AVVh@@']), [0x4011a0, 0x4011a0, 0x4011a8])
+    # Vu, Vc: u0 / c0, then Shell::implh (0x4011a8); the unit's own units.json entry names hu and hc as Shell::impl's
+    where['Vu'] = vft('.?AVVu@@', chd(['.?AVVu@@']), [0x4011c0, 0x4011d0, 0x4011a8])
+    where['Vc'] = vft('.?AVVc@@', chd(['.?AVVc@@']), [0x4011c8, 0x4011d8, 0x4011a8])
     hm = chd(['.?AUM@@'])
     where['M'] = vft('.?AUM@@', hm, [0x401120])
     col = rd.words(0, 8, 0, td['.?AUM@@'], hm)   # M's vftable {for S2} at +8: an adjustor thunk at 0x401110
@@ -199,7 +206,9 @@ def main():
                 F(0x401110, '?s2@M@@W7AEHXZ'), F(0x401150, '?call_thk@@YAHPAUThkUse@@@Z'),
                 F(0x401160, '??_GNv@@QAEPAXI@Z'), F(0x401170, '?game_free@@YAXPAX@Z'),
                 F(0x401178, '?call_nv@@YAPAXPAUNvUse@@@Z'), F(0x4011a0, '?g0@Vh@@UAEHXZ'),
-                F(0x4011a8, '?implh@Shell@@QAEHXZ')],
+                F(0x4011a8, '?implh@Shell@@QAEHXZ'), F(0x4011c0, '?u0@Vu@@UAEHXZ'),
+                F(0x4011c8, '?c0@Vc@@UAEHXZ'),
+                F(0x4011d0, '?u1@Vu@@UAEHXZ'), F(0x4011d8, '?c1@Vc@@UAEHXZ')],
              'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
                          '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp'],
                          '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk'],
@@ -208,7 +217,9 @@ def main():
                          '?FUN_00401110@ThkUse@@QAEHXZ': '0x00401110', '?FUN_00401160@NvUse@@QAEPAXI@Z': '0x00401160',
                          '??3@YAXPAX@Z': '0x00401170', '??_7Pv@@6B@': '0x%08x' % where['Pv'],
                          '?pa@Pv@@UAEHXZ': '0x004010e8', '?pb@Pv@@UAEHXZ': '0x004010ec',
-                         '__imp_?Free@Bi@@QAEXPAX@Z': '0x%08x' % where['Vi'], '??_7Vh@@6B@': '0x%08x' % where['Vh']}},
+                         '__imp_?Free@Bi@@QAEXPAX@Z': '0x%08x' % where['Vi'], '??_7Vh@@6B@': '0x%08x' % where['Vh'],
+                         '??_7Vu@@6B@': '0x%08x' % where['Vu'], '?hu@Vu@@UAEHXZ': '0x00401020',
+                         '??_7Vc@@6B@': '0x%08x' % where['Vc'], '?hc@Vc@@UAEHXZ': '0x00401020'}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
                 F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {'?hh@Vh@@QAEHXZ': '0x00401020'}},
         ]}
@@ -255,7 +266,7 @@ def main():
               fb['_ZN2Vb1bEv'][6] == 'same' and '_ZTV2Vb+8:3' in fb['_ZN2Vb1bEv'][7] and
               '_ZTV3Der+8:3' in fb['_ZN2Vb1bEv'][7], 'slot_fill.tsv: b by Vb\'s vtable, GCC slot 3 (exe slot 2): %s'
               % fill)
-        per = [r for r in fill if r[5].startswith('per slot')]
+        per = [r for r in fill if r[5].startswith('per slot') and r[2] == '_ZN2Vb1bEv']
         check(len(per) == 1 and per[0][2] == '_ZN2Vb1bEv' and per[0][4] == '__fnv_00401028' and
               per[0][7] == '_ZTV3Der+8:3', 'Der\'s slot 3 gets the exe\'s override per slot: %s' % per)
         zb_ = vtables.Obj(os.path.join(fixed, 'zz_bridges.o'))
@@ -330,6 +341,24 @@ def main():
               rh0 is not None and rh0[2] == 'code' and rh0[5] == '__fnv_00401020',
               'Vh::hh, whose name another unit binds to 0x401020 (S2d-vslot): the exe slot\'s 0x4011a8 decides, and '
               'without the exe the name keeps its address: %s / %s' % (rh, rh0))
+        ru, ru0 = refs.get('_ZN2Vu2huEv'), res['none'][2].get('_ZN2Vu2huEv')
+        check(ru is not None and ru[2] == 'vslot-exe' and ru[5] == '__fnv_004011a8' and
+              ru0 is not None and ru0[3].startswith('unit/') and ru0[2] == 'code' and ru0[5] == '__fnv_00401020',
+              'W20 (b) Vu::hu, bound by the unit\'s own recipe and called by no code: the exe slot\'s 0x4011a8 '
+              'decides, and without the exe the name keeps its address: %s / %s' % (ru, ru0))
+        rc_, rc0 = refs.get('_ZN2Vc2hcEv'), res['none'][2].get('_ZN2Vc2hcEv')
+        check(rc_ is not None and rc_[3].startswith('unit/') and rc_[2] == 'code' and rc_[5] == '__fnv_00401020' and
+              rc0 is not None and rc0[5] == '__fnv_00401020',
+              'W20 (a) Vc::hc, bound by the unit\'s own recipe and called by Vc::c0: the symbol keeps 0x401020 '
+              '(with or without the exe): %s / %s' % (rc_, rc0))
+        zbc = vtables.Obj(os.path.join(fixed, 'zz_bridges.o'))
+        ce = zbc.ents('_ZTV2Vc') if '_ZTV2Vc' in zbc.defs else []
+        check(len(ce) >= 5 and ce[4].sym == '__fnv_004011a8' and zbc.bind('_ZTV2Vc') == 'global',
+              'W20 (a) Vc\'s vtable: a strong copy whose hc slot holds the exe\'s __fnv_004011a8: %s' % (ce,))
+        cf = [r for r in fill if r[2] == '_ZN2Vc2hcEv']
+        check(len(cf) == 1 and cf[0][4] == '__fnv_004011a8' and cf[0][5].startswith('per slot (exe vftable') and
+              cf[0][7] == '_ZTV2Vc+8:2',
+              'W20 (a) slot_fill.tsv lists the per-slot target: %s' % cf)
         rk = refs.get('_ZN2Vk1kEi')
         check(rk is not None and rk[2] == 'vslot-exe' and rk[5].startswith('__fnvnx_br_004010c8_') and
               ('%s:\n    mov x0, x1\n    b __fnv_004010c8' % rk[5]) in bridges_,
@@ -362,8 +391,9 @@ def main():
         check(st['slot-mismatch'] == 0 and st['slot-compared'] >= 1,
               'vtmetric: no native slot differs from the exe\'s function (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
-        check(st0['slot-mismatch'] == 1 and st0['slot-mismatch-pairs'] == 1,
-              'vtmetric without the fill: Vh::hh (0x401020 against the exe\'s 0x4011a8) is the one mismatch (%s)' % dict(st0))
+        check(st0['slot-mismatch'] == 3 and st0['slot-mismatch-pairs'] == 1,
+              'vtmetric without the fill: Vh::hh, Vu::hu and Vc::hc (0x401020 against the exe\'s 0x4011a8) are the '
+              'mismatches (%s)' % dict(st0))
         check(st0['trap-slots'] == 19 and st0['trap-native-at-exe'] == 13 and st0['primary-shorter'] == 1,
               'vtmetric without the fill: 19 / 13, Sh short (%s)'
               % dict(st0))
