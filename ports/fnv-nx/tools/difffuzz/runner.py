@@ -1472,7 +1472,8 @@ class Pair:
             # derived class's vftable and then a base class's (exeempty.deleting_wrapper / dtor_chain)
             import exeempty
             a = getattr(self.target, 'orig_addr', None)
-            if a is None or not (exeempty.deleting_wrapper(a) or exeempty.dtor_chain(a)):
+            if a is None or not (exeempty.deleting_wrapper(a) or exeempty.dtor_chain(a) or
+                                 exeempty.dtor_via_callee(a)):
                 return None
         if getattr(self, '_vpw', None) is None:
             import classify
@@ -1568,4 +1569,14 @@ class Pair:
                 # in the unit's .bss - the local-static case, not a split global
                 if all(n.startswith(('_ZZ', '_ZGVZ')) for n in names):
                     d['arm_local_static'] = True
+        if d is not None and d.get('kind') == 'call-args' and d.get('cls') == 'P':
+            # (eq-rest, EQ review) the native data symbol its pointer argument points into: local-static needs the
+            # native's own copy of a function-local static there, not just the oracle's image address
+            try:
+                v = int.from_bytes(bytes.fromhex(d.get('arm') or ''), 'little')
+                names = self._private_names([v]) if v else set()
+                if names:
+                    d['arm_arg_syms'] = sorted(names)[:2]
+            except ValueError:
+                pass
         return rx, ra, d
