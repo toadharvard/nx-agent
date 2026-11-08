@@ -44,7 +44,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 T0=$(date +%s)
 # the warm farms keep their caches local: three machines must not write one 1-of-1 branch (they are seeded from the
 # sharded farms' branches; their own results stay on the machine). Reports still go to reports/<farm>.
-export FUZZ_PUBLISH=${FUZZ_PUBLISH:-0} AUDIT_PUBLISH=${AUDIT_PUBLISH:-0} EQUIV_CACHE_PUBLISH=${EQUIV_CACHE_PUBLISH:-0}
+export LINKCACHE_PUBLISH=${LINKCACHE_PUBLISH:-0} FUZZ_PUBLISH=${FUZZ_PUBLISH:-0} AUDIT_PUBLISH=${AUDIT_PUBLISH:-0} EQUIV_CACHE_PUBLISH=${EQUIV_CACHE_PUBLISH:-0}
 # lane A builds in full_job's persistent build directory (incremental): it does not wait for the prepare/compile
 # farms' tree and objects (full_job's default is 300 s each, a third of the budget idle); one look, then local. V1's
 # link audits keep running, with a smaller budget (its slow audits are skipped and marked so).
