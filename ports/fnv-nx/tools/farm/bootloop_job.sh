@@ -84,6 +84,14 @@ if [ -z "$FAIL" ]; then
 	if [ -n "$GAME_EXE" ]; then export FNVNX_EXE="$GAME_EXE"; else unset FNVNX_EXE; fi
 	export FNVNX_LINK_OBJCACHE=${FNVNX_LINK_OBJCACHE:-$FARM_HOME/linkobj}
 	[ "${LINKCACHE:-1}" = 1 ] && { bash "$HERE/linkcache.sh" seed "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true; }
+	# T1: the game units' objects through the content-addressed cache shared by the farms (compile.sh
+	# FNVNX_UNIT_OBJCACHE; branch unitobj/cache): a unit another farm compiled with the same compiler, flags, source and
+	# headers at the same paths is taken instead of compiled (a flags change costs one farm's compile, not every farm's).
+	# Seeded every job (only the files this machine lacks), published after the build. UNITCACHE=0: neither.
+	if [ "${UNITCACHE:-1}" = 1 ]; then
+		export FNVNX_UNIT_OBJCACHE=${FNVNX_UNIT_OBJCACHE:-$FARM_HOME/unitobj}
+		LINKCACHE_BRANCH=unitobj/cache LINKCACHE_SEED_MIN=1000000000 bash "$HERE/linkcache.sh" seed "$FNVNX_UNIT_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
+	else unset FNVNX_UNIT_OBJCACHE; fi
 	step inputs
 	COLD=0; [ -f "$B/compile/objects.tsv" ] || COLD=1
 	TB=$(date +%s)
@@ -238,6 +246,11 @@ fi
 if [ -z "$FAIL" ] && [ "${LINKCACHE:-1}" = 1 ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ] && [ -z "${FARM_WIP_BRANCH:-}" ]; then
 	LINKCACHE_NOTE="bootloop $C12" bash "$HERE/linkcache.sh" publish "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
 	step "cache publish"
+fi
+# the units' cache back to the artifacts repository (only when it changed; never from a WIP build)
+if [ -n "${FNVNX_UNIT_OBJCACHE:-}" ] && [ -z "${FARM_WIP_BRANCH:-}" ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ]; then
+	LINKCACHE_BRANCH=unitobj/cache LINKCACHE_PUBLISH_MB=${UNITCACHE_PUBLISH_MB:-1500} LINKCACHE_NOTE="units bootloop $C12" \
+		bash "$HERE/linkcache.sh" publish "$FNVNX_UNIT_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
 fi
 
 printf '%s\n' "${STEPS[@]}" > "$F/steps.tsv"
