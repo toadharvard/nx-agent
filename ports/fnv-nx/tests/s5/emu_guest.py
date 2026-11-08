@@ -955,7 +955,7 @@ class Emu:
                 typ, S, P = info & 0xFF, addr_of(info >> 8) + add, layout[h[7]] + off
                 at = P - place
                 (w,) = struct.unpack_from("<I", blob, at)
-                if typ in (20, 21):   # R_AARCH64_P32_JUMP26, _CALL26
+                if typ in (20, 21):   # R_AARCH64_P32_JUMP26, _CALL26 (26/27 are the GOT page and GOT load: not branches)
                     disp = (S - P) >> 2
                     if not -(1 << 25) <= disp < (1 << 25):
                         raise SystemExit(f"--inject {obj}: branch to {S:#x} out of range")
@@ -967,6 +967,8 @@ class Emu:
                     w = (w & 0x9F00001F) | ((pg & 3) << 29) | (((pg >> 2) & 0x7FFFF) << 5)
                 elif typ == 12:         # R_AARCH64_P32_ADD_ABS_LO12_NC
                     w = (w & 0xFFC003FF) | ((S & 0xFFF) << 10)
+                elif typ == 15:         # R_AARCH64_P32_LDST32_ABS_LO12_NC (a word load/store of a static)
+                    w = (w & 0xFFC003FF) | (((S & 0xFFF) >> 2) << 10)
                 else:
                     raise SystemExit(f"--inject {obj}: relocation type {typ} not supported")
                 struct.pack_into("<I", blob, at, w)
