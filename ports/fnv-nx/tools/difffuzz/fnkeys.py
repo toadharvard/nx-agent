@@ -141,6 +141,11 @@ def _sg_literal(f):
     return f.osg
 
 
+def _old_oracle_fault(rec):
+    d = rec.get('divergence') or {}
+    return d.get('kind') == 'error' and str(d.get('x86') or '').startswith('fault:') and d.get('arm') is None
+
+
 def _indirect(f):
     return f.oindirect
 
@@ -286,8 +291,11 @@ CHANGES = [
            'units.json $SG<n-d>, d found per unit by the exe\'s bytes (coffobj.sg_shift); and functions that refer '
            'to read-only data units.json names: pinned tables now carry their relocations (code / data pointers, '
            'the exe\'s word where the unit cannot place the target)', selects=_sg_literal),
+    Change('d26-imp', 'cached divergences where only the oracle faulted: a native call of an import gets the raw canned word as '
+           'on x86 (it was normalised as an untyped bool, 0xffffff01 against 0xffffffff for TlsGetValue, so [ret + 4] '
+           'faulted on x86 only)', recheck=_old_oracle_fault),
 ]
-SCOPED = 'd25'
+SCOPED = 'd26'
 
 
 def harness_tag():
