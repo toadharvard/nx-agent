@@ -108,6 +108,21 @@ def main():
               'FNVNX_ABIREL=0: both held')
     finally:
         fnvlink.VTFILL_HOLD.clear()
+    # hand_ambiguous_names: a stand-in name whose stores write several image vftables does not pick a native vtable
+    V = exevft.Vft
+    hand = {0x10a1458: [('u1.cpp', 'StandIn', 0x401000, 0)], 0x1070660: [('u2.cpp', 'StandIn', 0x402000, 0)],
+            0x1010000: [('u3.cpp', 'Foo', 0x403000, 0)], 0x1010100: [('u3.cpp', 'Bar', 0x403100, 0)],
+            0x1010200: [('u4.cpp', 'Bar', 0x403200, 0)]}
+    ev = {0x10a1458: V('.?AVNiFogProperty@@', 0, [], [1]), 0x1070660: V('.?AVSkyObject@@', 0, [], [1]),
+          0x1010100: V('.?AVBar@@', 0, [], [1]), 0x1010200: V('.?AVBase@@', 0, [], [1])}
+    amb = fnvlink.hand_ambiguous_names(hand, ev)
+    check(amb == {(0x10a1458, 'StandIn', 0), (0x1070660, 'StandIn', 0), (0x1010200, 'Bar', 0)},
+          'hand_ambiguous_names: StandIn x2 and Bar\'s store of Base\'s vftable; Foo and Bar\'s own stay: %s' % amb)
+    os.environ['FNVNX_HANDAMB'] = '0'
+    try:
+        check(fnvlink.hand_ambiguous_names(hand, ev) == set(), 'FNVNX_HANDAMB=0: the name decides as before')
+    finally:
+        del os.environ['FNVNX_HANDAMB']
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 

@@ -1622,10 +1622,18 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     rebind, hand_rows = {}, []
     vmo = {}   # D26 (c): image vftable -> its minus-one native copy (minus_one_copies)
     exev_all = {}   # exe vftables, RTTI and plain (stays empty without the exe: no copies, no V rows)
+    # a stand-in class name several units declare on their own (`struct StandIn`, `struct S`) whose hand stores at one
+    # offset write different image vftables: the name says nothing about which native vtable that is (the one
+    # _ZTV7StandIn is some other unit's class); such a store keeps its image vftable (D26 (c) copy, transform(exe))
+    # unless the exe's own RTTI class has that name (FNVNX_HANDAMB=0: the name decides as before)
+    amb_hand = hand_ambiguous_names(hand, exev)
     for a, sites in sorted(hand.items()):
         how = 'named vftable' if a in vmap else None
         if a not in vmap:
             for unit, cls, _, off in sites:
+                if (a, cls, off) in amb_hand:
+                    vstats['hand-written-ambiguous-name'] += 1
+                    continue
                 z = sorted(by_cls.get(cls or '', []))
                 pts = [p for p, ott in (vtables.address_points(rtti.ents(z[0]) or []) if z else []) if ott == -off]
                 if pts:
@@ -2126,6 +2134,31 @@ def _hv_cache(path):
         return code, (d['units'] if d.get('code') == code else {})
     except (OSError, EOFError, ValueError, TypeError, KeyError):
         return code, {}
+
+
+def hand_ambiguous_names(hand, exev):
+    """hand_vptr_stores' sites {a: [(unit, cls, fa, off)]} -> {(a, cls, off)} whose class name cannot pick the native
+    vtable: the name's stores at that offset write two or more image vftables (one class has one vftable per offset;
+    a stand-in name several units declare on their own, `struct StandIn`, `struct S`, does not), and the exe's RTTI
+    class of a is not that name. FNVNX_HANDAMB=0: none."""
+    if os.environ.get('FNVNX_HANDAMB', '1') == '0':
+        return set()
+    import classlayout as _cl
+    cls_addrs = collections.defaultdict(set)
+    for a, sites in hand.items():
+        for _, cls, _, off in sites:
+            if cls:
+                cls_addrs[(cls, off)].add(a)
+    out = set()
+    for a, sites in hand.items():
+        for _, cls, _, off in sites:
+            if not cls or len(cls_addrs[(cls, off)]) < 2:
+                continue
+            e = exev.get(a)
+            if e is not None and e.td and cls in _cl.simple_name(e.td):
+                continue
+            out.add((a, cls, off))
+    return out
 
 
 def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc, cache_path=None):
