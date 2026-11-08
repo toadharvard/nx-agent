@@ -1299,6 +1299,22 @@ source that is no unit, or in a class copy the referencing unit does not emit), 
 `template-special`, `msvc-direct`, `exe-shape`, `other`). `--traps` weighs each class by the names the guest binds to
 trap stubs. Output `causes.tsv` (agent-only). Test: `tests/s2d/test_bodycause.py`.
 
+**Names defined only as a GCC clone (decision, W44 on W37's fix).** `name-mismatch` with the detail `defined only as a
+GCC clone`: the only definition is a local `.isra.0` / `.constprop.0`. The case in link 4264bfd7 (rows 52 / 53,
+`fnvnx_vc9::string::assign(const char*)` and `assign(const string&, unsigned, unsigned)`): projectedshadow_ob1_variant.cpp
+declares both as explicit specializations (`template <> ... assign(...);`, MSVC's out-of-line library instance) and
+nothing defines them, so the unit references the plain names; every other unit instantiates the in-class template
+body implicitly, and where GCC keeps a call out of line it keeps only its IPA clone (internal, its own signature). An
+alias is impossible (the clone's parameters differ). Options measured on leafinfo_ob1_variant.cpp and
+tesobject_ob1_nogf_variant.cpp: per-unit `-fno-ipa-sra -fno-ipa-cp-clone` does make GCC emit the plain names (weak),
+at +184 bytes (+2.1 %) and +372 bytes (+9.2 %) of `.text` in those units, and it rests on GCC still choosing an
+out-of-line call there (another tree, another inlining decision, and the name is gone again) while it changes code
+generation for every function of the unit. `noipa` / `noclone` on the member would need a change to the shim header,
+seen by every unit. Chosen: bodies.py's inst tier for members (W37, `member_inst_line` / `member_inst_hosts`): one
+explicit instantiation `template decltype(...) C<A>::m(P);` in a host unit that reaches the body and declares no such
+specialization. It always emits the plain (weak) name, costs only that one function's code, and no other unit's code
+changes. No compile flag was added.
+
 The farm link gets the exe from `link_job.sh` (`job_gamedata` -> `FNVNX_EXE`); the link stage's fingerprint holds its
 sha256. On link c0d6c71516f6 (relink of its out/): 4,425 undefined without bodies, 2,474 with. The 1,002 names left
 `missing` are listed by gap class on the private branch `s2d/gaps/<link12>` (agent-only).

@@ -817,6 +817,16 @@ class Exe(unittest.TestCase):
         self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_lock', asm)
         self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_unlock', asm)
 
+    def test_msvc_inline_retry(self):
+        """W44 (rows 24 / 54): an msvc-inline name its host did not emit goes on to tree-inline; a host that does not
+        compile, a refused = default and a name that is no msvc-inline row do not."""
+        R = bodies.Row
+        rows = [R('a', 'msvc-inline', None, None, 'u', '', 'h'), R('b', 'msvc-inline', None, None, 'u', '', 'h'),
+                R('c', 'special-default', None, None, 'u', '', 'h'), R('d', 'msvc-inline', None, None, 'u', '', 'h')]
+        failed = {'a': 'synth-failed (not emitted by the host)', 'b': 'host does not compile',
+                  'c': 'synth-failed (not emitted by the host)'}
+        self.assertEqual(bodies.msvc_inline_retry(rows, failed), {'a'})
+
     def test_crt_rule_facet_register(self):
         """W44 (row 22): the decomp's facet copies declare the static `_Register(facet*)` or the member `_Register()`
         and define neither; MSVC's is _Facet_Register(facet) at 0x00ec3599, S4's fnvnx_facet_register. The stub

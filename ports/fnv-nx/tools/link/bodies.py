@@ -1018,6 +1018,16 @@ def inst_line(isig):
     return 'template %s::~%s();' % ('::'.join(isig.qual[:-1]), base)
 
 
+def msvc_inline_retry(rows, failed):
+    """msvc-inline names whose host compiled but emitted nothing under the wanted name: tree-inline tries them next,
+    across the copies of the class (copy_key, through the layout gate). W44: the pristine u99 object
+    (tileimage_decl_variant.cpp) defines MSVC's `basic_string<char>::erase(unsigned, unsigned)`, and that unit emits
+    it only for its own copy `fnv_00b0e730::std::basic_string`; blk_00b00000_od_ob1_variant.cpp references the
+    global `std::basic_string` copy's and `fnv_00b0f410::std::basic_string`'s, declared there and defined nowhere."""
+    return {r.name for r in rows if r.cls == 'msvc-inline' and
+            failed.get(r.name, '').startswith('synth-failed (not emitted')}
+
+
 def inst_pointees(isig):
     """Class names the template arguments of an inst_line name use only as pointees (`NiTArray<ImageSpaceEffect*,
     NiTMallocInterface<ImageSpaceEffect*>>`): never as a value, a template argument of its own or a scope. The
@@ -2335,8 +2345,9 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         # body is still its body: tree-inline takes it, gated like a copy pair (strict)
         T.mark('vcall')
         direct = {n for n, why in failed.items() if why == VCALL_DIRECT}
-        vdone = set(vtargets) | (set(failed) - direct) | set(vnotes)
-        rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
+        inl_retry = msvc_inline_retry(rows, failed)
+        vdone = set(vtargets) | (set(failed) - direct - inl_retry) | set(vnotes)
+        rest = [r for r in rows if (r.cls == 'missing' or r.name in inl_retry) and r.name not in vdone and r.units]
         tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
         # a class template's destructor no object instantiates (the pointee is incomplete where it is referenced): the
         # template's own body, explicitly instantiated in a unit that names the arguments (inst_hosts)
@@ -2350,7 +2361,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 tin[n_] = hs_ + [h_ for h_ in tin.get(n_, []) if h_ not in hs_]
         # tree-inline's pairings across units pass the layout gate: names MSVC calls directly, constructors and
         # destructors (found since the search spells them by the class name), and every copy-key rename
-        strict = direct | {n for n in tin if itanium(n).variant}
+        strict = direct | inl_retry | {n for n in tin if itanium(n).variant}
 
         def tone(job):
             h, rs, k = job
