@@ -109,8 +109,10 @@ def entry_register_reads(fn, conv):
     argument MSVC's whole-program optimisation added (a custom convention units.json does not record)."""
     passed = {sp for _, sp, _, _ in conv.x86 if sp in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi')}
     written, reads = set(), []
-    for ins in CSD.disasm(fn['code'], fn['address']):
-        if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
+    insns = list(CSD.disasm(fn['code'], fn['address']))
+    for ix, ins in enumerate(insns):
+        if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx') and \
+                not (ins.op_str == 'ecx' and _push_is_call_arg(insns, ix)):
             continue                  # saving a callee-saved register / reserving a slot is not a use
         if ins.mnemonic in ('xor', 'sub', 'sbb') and len(ins.operands) == 2 and ins.op_str.split(', ')[0] == \
                 ins.op_str.split(', ')[-1]:
@@ -142,6 +144,33 @@ def entry_register_reads(fn, conv):
     return reads          # in first-read order: the straight-line prefix first, then the later branches
 
 
+def _push_is_call_arg(insns, ix, window=24):
+    """(R4 flow) `push ecx` at the entry is MSVC's one-word stack reservation, unless the word is an argument of the
+    next call: the pushes from it to a `call` followed by `add esp, N` number no more than N / 4, so the call's
+    cleanup consumes it (0x00d409b0: `push eax; push ecx; push esi; call; add esp, 0xc` passes ecx on). A reservation
+    is followed by fewer cleanup words than pushes (or by none) and stays padding."""
+    pushes = 0
+    for j in range(ix, min(ix + window, len(insns))):
+        m = insns[j].mnemonic
+        if m == 'push':
+            pushes += 1
+        elif m == 'call':
+            # the cleanup may follow a few plain instructions (0x00d409b0: `mov dl, [esi+2]; mov eax, [esp+0x10]`)
+            for nxt in insns[j + 1:j + 7]:
+                if nxt.mnemonic == 'add' and nxt.op_str.startswith('esp, '):
+                    try:
+                        return pushes <= int(nxt.op_str.split(', ')[1], 0) // 4
+                    except ValueError:
+                        return False
+                if nxt.mnemonic in ('call', 'push', 'pop', 'ret', 'leave') or nxt.mnemonic.startswith('j'):
+                    return False
+            return False
+        elif m in ('pop', 'ret', 'jmp') or m.startswith('j') or m in ('leave',) or \
+                (m in ('sub', 'add') and insns[j].op_str.startswith('esp')):
+            return False
+    return False
+
+
 def _later_entry_reads(fn, passed, limit=20000):
     """Registers some path from the entry reads before writing it (difffuzz-20, stores class): the straight-line
     scan stops at the first branch, so a register argument first used on a later path (0x00db0e80 takes its second
@@ -160,7 +189,8 @@ def _later_entry_reads(fn, passed, limit=20000):
             steps += 1
             ins = insns[addr]
             nxt = addr + ins.size
-            if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
+            if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx') and \
+                    not (ins.op_str == 'ecx' and _push_is_call_arg(list(insns.values()), list(insns).index(addr))):
                 addr = nxt
                 continue
             if ins.mnemonic in ('xor', 'sub', 'sbb') and len(ins.operands) == 2 and \
@@ -671,6 +701,18 @@ def hint(pair, target, case, div, fn, max_steps):
                 h['_runs'] += 1
                 h['uniform'] = 'agree' if du is None else du.get('kind')
             return h
+    if k == 'call-args' and pair is not None and h['_runs'] < 40:
+        # (R4 flow, stub-outparam both ways) an argument that is an uninitialised local passed on after an
+        # intercepted call that should have filled it: the words the function never stored to are 0 on both
+        # machines (world.STUB_OUT zeroes them in the oracle too). A rerun that agrees names the cause
+        world.STUB_OUT = True
+        try:
+            _, _, d_so = pair.run(case, max_steps)
+        finally:
+            world.STUB_OUT = False
+        h['_runs'] += 1
+        if _benign(d_so):
+            h['cause'] = 'stub-outparam'; return h
     if k in ('return', 'mem-write'):
         fl = div.get('float') or div.get('float_word')
         conv_ops = {'fistp', 'fist', 'cvttss2si', 'cvttsd2si', 'cvtss2si', 'cvtsd2si', 'fisttp'}
@@ -729,6 +771,17 @@ def hint(pair, target, case, div, fn, max_steps):
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
                 if _benign(d):
                     bhits.append('%08x' % (a + i))
+    if not bhits and pair is not None and h['_runs'] < 30:
+        # (R4 flow) the same for a one-byte argument (a by-value aggregate of a single bool, `BoolArg { bool v; }`
+        # passed in dl: 0x00572a50, MSVC tests the byte, GCC bit 0): replace a byte above 1 by 1; only a rerun that
+        # agrees names the cause
+        for lab, b in list(case.args.items()):
+            if len(b) == 1 and 1 < b[0] < 0x80 and len(bhits) < 2 and h['_runs'] < 30:
+                trial = case.copy()
+                trial.args[lab] = b'\x01'
+                _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
+                if _benign(d):
+                    bhits.append('%s+0' % lab)
     if not bhits and pair is not None and case.bg != 'zero' and h['_runs'] < 30:
         # (F1b, difffuzz-20) the same for a byte of the random background the MSVC code reads by itself (a bool
         # global the case does not plant, a field behind a background pointer): plant 1 there (0x00adb9f0,
