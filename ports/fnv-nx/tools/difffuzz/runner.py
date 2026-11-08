@@ -397,7 +397,10 @@ class Pair:
             if self.deadline is not None and time.time() > self.deadline:
                 raise FunctionTimeout()
             rx, ra, d = self._run(case, max_steps)
-            if rx.error and rx.error.startswith('fault:') and not (ra.error or '').startswith('fault:'):
+            if (rx.error and rx.error.startswith('fault:') and not (ra.error or '').startswith('fault:')) or \
+                    (rx.error is None and ra.error is None and rx.saved_ok is False and ra.saved_ok):
+                # (F3) a callee-pops call popped 0 in a frame that restores esp from ebp: the oracle returns
+                # cleanly but its `pop esi/edi/ebx` read argument words (callee-saved x86=False, arm=True)
                 got = self._learn_pop(case, max_steps, rx)
                 if got is not None:
                     rx, ra, d = got
@@ -476,9 +479,14 @@ class Pair:
         self.pops_tried.update(sites)
         cands = [[4 * n for n in range(self._pushes_before(a), 0, -1)] + [0] for a in sites]
 
+        # a clean run that only kept callee-saved registers wrong (no fault) need not also fix an esp difference it
+        # already had at the target's return (a custom convention's pop: F3, 0x00d55bd0)
+        need_esp = rx.error is not None or rx.esp_ok
+
         def clean(got):
             x = got[0]
-            return not (x.error or '').startswith('fault:') and x.esp_ok and \
+            return not (x.error or '').startswith('fault:') and (x.esp_ok or not need_esp) and \
+                x.saved_ok is not False and \
                 all(self.xe._in_loaded(c.ret_to) for c in x.calls if getattr(c, 'ret_to', None) is not None)
         for combo in itertools.islice(itertools.product(*cands), 27):
             if not any(combo):

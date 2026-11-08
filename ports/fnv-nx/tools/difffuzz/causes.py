@@ -1418,12 +1418,13 @@ def _alloc_result(k):
 
 
 def _ret_bytes(case, k):
+    import world             # plain module (no emulator): the same move out of the private ranges as Case.ret_bytes
     rets = case.get('rets') or []
     if k < len(rets) and rets[k] is not None:
-        return bytes.fromhex(rets[k]).ljust(16, b'\0')
+        return world.canned_out_of_private(bytes.fromhex(rets[k]).ljust(16, b'\0'))
     import random
     r = random.Random(((case.get('seed') or 0) * 1000003 + k) & 0xffffffff)
-    return bytes(r.getrandbits(8) for _ in range(16))
+    return world.canned_out_of_private(bytes(r.getrandbits(8) for _ in range(16)))
 
 
 def _canned_word(case, v, upto=64):
