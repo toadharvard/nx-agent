@@ -2870,7 +2870,7 @@ def emit_tls(addrs):
     addrs = [x for x in addrs if x >= base]
     out += ['// native TLS block in the image .tls layout (template 0x%08x..0x%08x)' % (base, base + size),
            '    .section .tbss.__fnvnx_tls_image,"awT",%nobits', '    .p2align 4', '    .globl __fnvnx_tls_image',
-           '    .type __fnvnx_tls_image, %object', '    .size __fnvnx_tls_image, %d' % size, '__fnvnx_tls_image:',
+           '    .type __fnvnx_tls_image, %tls_object', '    .size __fnvnx_tls_image, %d' % size, '__fnvnx_tls_image:',
            '    .zero %d' % size, '    .globl __fnvnx_tls_image_orig', '    .set __fnvnx_tls_image_orig, 0x%08x' % base,
            '    .globl __fnvnx_tls_image_size', '    .set __fnvnx_tls_image_size, %d' % size]
     for a in sorted(addrs):
