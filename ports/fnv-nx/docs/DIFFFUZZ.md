@@ -350,6 +350,8 @@ runs then agreed); soft 40 -> 49 (vptr-store 46); oracle gaps 28 -> 28 (oracle-v
 indirect call through an unplanted object, each machine reading its own slot layout from fuzz bytes; uninit-both 7).
 Test: `tests/s13/test_d21.py`.
 
+**difffuzz-20: a full refresh (HARNESS = difffuzz-20, orchestrator decision on EQ's eq-003).** The d21 rows (F2: destructor vptr words, stub holes, planted slots; F3: builtin faults, callee-saved pop learning, bound-stub rewrite, canned results out of the private ranges) and d24-pop (F1: pop learning on a derail without a fault, IAT slots by import-library spelling, exe import thunks) change how every function is fuzzed, so every cache from before them is refreshed; the rows stay for later partial refreshes.
+
 **difffuzz-19: a full refresh (HARNESS = difffuzz-19, orchestrator-approved in S1-fuzzB-002).** S1-fuzzB's untyped
 float results (`x86emu.x87_result_use`), its CRT_MATH builtins and engine's preference for a decorated spelling
 change verdicts that no key reflects, so every key changes once; the scoped rows d14..d18 are folded into it (their
