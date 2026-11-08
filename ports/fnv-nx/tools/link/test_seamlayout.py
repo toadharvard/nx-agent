@@ -27,7 +27,7 @@ sys.path.insert(0, HERE)
 import seamlayout  # noqa: E402
 
 BASE = 0x00400000
-TEXT_VA, DATA_VA = 0x00401000, 0x00403000
+TEXT_VA, DATA_VA, RDATA_VA = 0x00401000, 0x00403000, 0x00404000
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
 FAILS = []
 
@@ -56,12 +56,14 @@ def make_pe(code, data_size=0x100):
     struct.pack_into('<I', opt, 56, 0x4000)
     struct.pack_into('<I', opt, 60, hdr)
     struct.pack_into('<I', opt, 92, 16)
-    coff = struct.pack('<HHIIIHH', 0x14c, 2, 0, 0, 0, len(opt), 0x102)
+    coff = struct.pack('<HHIIIHH', 0x14c, 3, 0, 0, 0, len(opt), 0x102)
     secs = struct.pack('<8sIIIIIIHHI', b'.text', len(text), TEXT_VA - BASE, len(text), hdr, 0, 0, 0, 0, 0x60000020)
     secs += struct.pack('<8sIIIIIIHHI', b'.data', data_size, DATA_VA - BASE, len(data), hdr + len(text), 0, 0, 0, 0,
                         0xc0000040)
+    secs += struct.pack('<8sIIIIIIHHI', b'.rdata', 0x100, RDATA_VA - BASE, 0x100, hdr + len(text) + len(data), 0, 0, 0, 0,
+                        0x40000040)
     head = bytes(mz) + b'PE\0\0' + coff + bytes(opt) + secs
-    return head.ljust(hdr, b'\0') + bytes(text) + data
+    return head.ljust(hdr, b'\0') + bytes(text) + data + bytes(0x100)
 
 
 def call(src, dst):
@@ -72,7 +74,7 @@ def build_code():
     """-> ({address: bytes}, {name: address})."""
     A = {'new': 0x401000, 'foo': 0x401010, 'qux': 0x401020, 'bar': 0x401030, 'gar': 0x401040, 'har': 0x401050,
          'baz': 0x401060, 'fine': 0x401070, 'other': 0x401080, 'c1': 0x401100, 'c2': 0x401140, 'c3': 0x401180,
-         'bazf': 0x401200, 'finef': 0x401220}
+         'bazf': 0x401200, 'finef': 0x401220, 'c4': 0x401300}
     code = {A['new']: b'\xc3'}
     for k in ('foo', 'qux', 'bar', 'gar', 'har', 'baz', 'fine', 'other'):
         code[A[k]] = b'\x8b\xc1\xc3'                       # mov eax, ecx; ret
@@ -100,6 +102,12 @@ def build_code():
     c += b'\xa1' + struct.pack('<I', DATA_VA + 0x60)                              # mov eax, [Har]
     c += b'\xc3'
     code[A['c3']] = c
+    # the base-class constructor inside an inlined derived constructor: a vftable address is stored at offset 0
+    c = b'\x68\x30\0\0\0'
+    c += call(A['c4'] + len(c), A['new']) + b'\x83\xc4\x04\x8b\xf0\x8b\xce'    # mov esi,eax; mov ecx,esi
+    c += call(A['c4'] + len(c), A['foo'])
+    c += b'\xc7\x06' + struct.pack('<I', RDATA_VA) + b'\xc3'                    # mov dword ptr [esi], vftable; ret
+    code[A['c4']] = c
     code[A['bazf']] = b'\x8b\x41\x40\xc3'                   # mov eax, [ecx+0x40]; ret
     code[A['finef']] = b'\x8b\x41\x04\xc3'                  # mov eax, [ecx+4]; ret
     return code, A
@@ -175,6 +183,7 @@ def main():
         r = by.get(('Foo', 'new'))
         check(r and r[3] == '32' and r[1] == str(d['Foo']) and r[2] == 'dwarf' and r[7] == 'mismatch',
               'Foo: new 0x20 against native %s: mismatch' % (r and r[1]))
+        check(by[('Foo', 'new')][5] == '1', 'Foo: the call inside an inlined derived constructor is not evidence')
         r = by.get(('ns::Qux', 'new'))
         check(r and r[3] == '16' and r[1] == '16' and r[7] == 'ok' and r[5] == '1',
               'ns::Qux: new through an ebp slot, 16 = 16: ok (the decoy new is no evidence)')

@@ -176,7 +176,9 @@ class Link:
                 except ValueError:
                     pass
         self.starts = sorted({r[0] for r in self.rows})
-        self.unit_of = {}   # addr -> a unit (src/...cpp) that references the symbol
+        self.unit_of = {}   # addr -> a unit (src/...cpp) that references a symbol resolved to it
+        self.sym_unit = {}  # (addr, native symbol) -> a unit that references it
+        self.class_objs = collections.defaultdict(list)   # class -> object files / units with code or uses of it
         pairs = collections.OrderedDict()   # (addr, native symbol) -> object (refs.tsv has no object: '')
         for addr, kind, native, obj in self.rows:
             if kind in ('F', 'C', 'X', 'G') and native.startswith('_Z'):
@@ -191,6 +193,7 @@ class Link:
                         try:
                             pairs.setdefault((int(p[4], 16), p[1]), '')
                             self.unit_of.setdefault(int(p[4], 16), p[0].split('#')[0])
+                            self.sym_unit.setdefault((int(p[4], 16), p[1]), p[0].split('#')[0])
                         except ValueError:
                             pass
         except OSError:
@@ -205,6 +208,13 @@ class Link:
             cands[addr].add(m)
             if obj:
                 self.obj_of.setdefault(addr, obj)
+                if obj not in self.class_objs[m[0]]:
+                    self.class_objs[m[0]].append(obj)
+            u = self.sym_unit.get((addr, native))
+            if u:
+                f = u.replace('/', '_') + '.o'
+                if f not in self.class_objs[m[0]]:
+                    self.class_objs[m[0]].append(f)
         self.ctors = {}
         classes = set()
         for addr, cs in cands.items():
@@ -331,6 +341,8 @@ class Scan:
         self.static_sites = []   # (site, func, data address, ctor)
         self.maxoff = {}         # class -> [max end, accesses, example function, example offset]
         self.refs = set()        # data addresses referenced by absolute operands
+        self.ro_ranges = []      # read-only data (vftables live there)
+        self.derived = 0         # constructor calls inside a derived class's inlined constructor (skipped)
 
 
 def _track_ptr(ins, k, ctors, allocators):
@@ -369,6 +381,26 @@ def _track_ptr(ins, k, ctors, allocators):
     return None
 
 
+def _vptr_store_after(ins, j, sc, obj_addr=None):
+    """True when one of the next 8 instructions after the constructor call at ins[j] stores a vftable address
+    (an immediate in read-only data) at offset 0 of the object: the call is the base-class constructor inside the
+    inlined constructor of a derived class, and the allocation size is the derived class's."""
+    for i in range(j + 1, min(j + 9, len(ins))):
+        m, o = ins[i][2], ins[i][3]
+        if m in ('ret', 'retn', 'jmp') or m == 'call':
+            return False
+        if m == 'mov':
+            ops = _split_ops(o)
+            if len(ops) == 2 and '[' in ops[0]:
+                v = _imm(ops[1])
+                mp = _mem_parse(ops[0])
+                if v is not None and mp and any(lo <= v < hi for lo, hi in sc.ro_ranges):
+                    if (mp[1] and mp[2] == 0 and not mp[3]) or (mp[1] is None and obj_addr is not None
+                                                                 and mp[2] == obj_addr):
+                        return True
+    return False
+
+
 def _scan_function(ins, fva, member_class, ctors, allocators, data_ranges, sc):
     n = len(ins)
     for k in range(n):
@@ -379,7 +411,9 @@ def _scan_function(ins, fva, member_class, ctors, allocators, data_ranges, sc):
                 size = back_size(ins, k)
                 if size:
                     hit = _track_ptr(ins, k, ctors, allocators)
-                    if hit:
+                    if hit and _vptr_store_after(ins, hit[0], sc):
+                        sc.derived += 1
+                    elif hit:
                         sc.new_sites.append((ins[k][0], fva, size, hit[1]))
             elif t in ctors:
                 for j in range(k - 1, max(k - 5, -1), -1):
@@ -388,7 +422,10 @@ def _scan_function(ins, fva, member_class, ctors, allocators, data_ranges, sc):
                         if len(ops) == 2 and ops[0] == 'ecx':
                             v = _imm(ops[1])
                             if v is not None and any(lo <= v < hi for lo, hi in data_ranges):
-                                sc.static_sites.append((ins[k][0], fva, v, t))
+                                if _vptr_store_after(ins, k, sc, v):
+                                    sc.derived += 1
+                                else:
+                                    sc.static_sites.append((ins[k][0], fva, v, t))
                             break
                     elif ins[j][2] in ('call', 'jmp', 'ret'):
                         break
@@ -461,6 +498,7 @@ def scan_exe(image, link, extra_funcs=(), allocators=DEFAULT_ALLOCATORS):
     starts = sorted(set(link.starts) | set(extra_funcs))
     data_ranges = image.writable()
     sc = Scan()
+    sc.ro_ranges = [(s[1], s[1] + s[2]) for s in image.sections if not s[5] & 0xa0000000]
     allocators = set(allocators)
     for lo, hi in image.code():
         i0 = bisect.bisect_left(starts, lo)
@@ -595,48 +633,29 @@ def tree_units(tree):
     return out
 
 
-_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*([<"])([^>"]+)[>"]', re.M)
-
-
-def trimmed_unit(tree, unit):
-    """Writes tree/probe_trim/<unit flattened> holding only the unit's #include lines (local includes made
-    absolute) and returns its path relative to the tree. The classes a unit's constructors belong to are declared in
-    its headers; the unit's own functions are what makes a full probe slow."""
-    text = open(os.path.join(tree, unit), errors='replace').read()
-    udir = os.path.dirname(os.path.join(tree, unit))
-    lines = []
-    for m in _INCLUDE.finditer(text):
-        kind, name = m.group(1), m.group(2)
-        if kind == '"':
-            for d in (udir, os.path.join(tree, 'include')):
-                if os.path.isfile(os.path.join(d, name)):
-                    name = os.path.join(d, name)
-                    break
-        lines.append('#include "%s"' % name if kind == '"' else '#include <%s>' % name)
-    rel = os.path.join('probe_trim', unit.replace(os.sep, '_'))
-    os.makedirs(os.path.join(tree, 'probe_trim'), exist_ok=True)
-    with open(os.path.join(tree, rel), 'w') as f:
-        f.write('\n'.join(lines) + '\n')
-    return rel
-
-
-def probe_classes(tree, workdir, wanted, jobs, shard=None, trim=True, on_result=None):
-    """wanted: {unit: [class, ...]} -> {class: size or -1}, by layout.probe_unit of the unit (trim: of a source
-    holding only its includes, much faster). on_result(class, size) is called as each unit finishes."""
+def probe_classes(tree, workdir, wanted, jobs, shard=None, on_result=None, solo=False):
+    """wanted: {unit: [class, ...]} -> {class: size or -1}, by layout.probe_unit of the unit (the classes of this
+    decomp are mostly defined in the .cpp that uses them, so the whole unit is compiled). on_result(class, size)
+    is called as each unit finishes."""
     import layout
     os.makedirs(workdir, exist_ok=True)
-    work = sorted(wanted)
+    work = list(wanted)   # the caller's order: the units that matter most first
     if shard:
         i, n = shard
         work = [u for u in work if zlib.crc32(u.encode()) % n == i]
     res = {}
 
     def one(unit):
+        r = {}
         try:
-            src = trimmed_unit(tree, unit) if trim else unit
-            r = layout.probe_unit(tree, workdir, src, wanted[unit])
+            src = unit
+            if solo:   # one compile per class: a failing neighbour in a batch can take a class down with it
+                for c in wanted[unit]:
+                    r.update(layout.probe_unit(tree, workdir, src, [c]))
+            else:
+                r = layout.probe_unit(tree, workdir, src, wanted[unit])
         except Exception:   # a unit that does not compile: its classes stay unknown
-            r = {}
+            pass
         return unit, r
 
     with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as ex:
@@ -650,7 +669,7 @@ def probe_classes(tree, workdir, wanted, jobs, shard=None, trim=True, on_result=
 
 
 def load_probe_cache(outdir):
-    """{class: size} of the probes so far (-1: failed); file lines are class, size, mode (trim / full)."""
+    """{class: size} of the probes so far (-1: failed); file lines are class, size, mode (full / solo)."""
     cache = {}
     if os.path.isdir(outdir):
         for f in sorted(os.listdir(outdir)):
@@ -752,38 +771,31 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
     image = Image(open(exe_path, 'rb').read())
     log('addrmap: %d rows, %d classes, %d constructors' % (len(link.rows), len(link.classes), len(link.ctors)))
     sc = scan_exe(image, link, crt_starts(), allocators)
-    log('exe: %d new sites, %d static sites, %d classes with member accesses' % (
-        len(sc.new_sites), len(sc.static_sites), len(sc.maxoff)))
+    log('exe: %d new sites, %d static sites, %d classes with member accesses; %d constructor calls skipped as the '
+        'base part of an inlined derived constructor' % (len(sc.new_sites), len(sc.static_sites), len(sc.maxoff),
+                                                          sc.derived))
     ev = evidence(sc, link, image)
     classes = sorted({c for c, _ in ev})
     # native sizes
     native = {}
     src = {}
     fixed = os.path.join(link_root, 'fixed')
-    host_obj = {}
-    class_objs = collections.defaultdict(set)   # class -> object files with code of it
-    for a, c in list(link.ctors.items()) + list(link.func_class.items()):
-        o = link.obj_of.get(a)
-        if o:
-            host_obj.setdefault(c, o)
-            class_objs[c].add(o)
-        if link.unit_of.get(a):
-            class_objs[c].add(link.unit_of[a].replace('/', '_') + '.o')
+    class_objs = link.class_objs
     by_obj = collections.defaultdict(list)
     for c in classes:
-        if host_obj.get(c):
-            by_obj[host_obj[c]].append(c)
+        for o in class_objs.get(c, [])[:3]:
+            by_obj[o].append(c)
     for obj, cs in by_obj.items():
         p = os.path.join(fixed, obj)
         if os.path.isfile(p):
             d = dwarf_sizes(p)
             for c in cs:
-                if c in d:
+                if c in d and c not in native:
                     native[c], src[c] = d[c], 'dwarf'
     lay = load_layouts(link_root)
     for c in classes:
         if c not in native and c in lay:
-            sizes = {lay[c][o] for o in class_objs[c] if o in lay[c]}
+            sizes = {lay[c][o] for o in class_objs.get(c, []) if o in lay[c]}
             if len(sizes) == 1:
                 native[c], src[c] = sizes.pop(), 'layouts.tsv'
     outdir = os.path.join(link_root, 'out')
@@ -794,11 +806,15 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
     if probe and tree:
         units = tree_units(tree)
         unit_for = {}
-        for a, c in list(link.ctors.items()) + list(link.func_class.items()):
-            u = units.get(link.obj_of.get(a)) or link.unit_of.get(a)
-            if u and os.path.isfile(os.path.join(tree, u)):
-                unit_for.setdefault(c, u)
+        for c in classes:
+            for o in class_objs.get(c, []):
+                u = units.get(o)
+                if u:
+                    unit_for[c] = u
+                    break
         prio = {c for (c, k) in ev if k in ('new', 'static')}
+        bf = boot_functions(topdown)
+        boot_classes = {c for (c, k), e in ev.items() if e['funcs'] & bf}
         name = 'seams_layout_probe.tsv' if not shard else 'seams_layout_probe.%d_of_%d.tsv' % shard
         os.makedirs(outdir, exist_ok=True)
         lock = __import__('threading').Lock()
@@ -813,19 +829,19 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
                     native[c], src[c] = s, 'probe'
             return f
 
-        # stage 1: a source of the unit's includes only, for every class; stage 2: the whole unit, for the classes
-        # with new / static evidence that stage 1 could not name (declared in the unit itself)
-        for mode, pick in (('trim', lambda c: c not in cache),
-                           ('full', lambda c: c in prio and cache.get(c, (0, ''))[1] != 'full' and c not in native
+        # stage 1: every class, one compile per unit (all its classes in one probe source); stage 2: the classes of the
+        # boot path that stage 1 lost, one compile each (a failing neighbour in a batch can take a class down with it)
+        for mode, pick in (('full', lambda c: c not in cache),
+                           ('solo', lambda c: c in boot_classes and cache.get(c, (0, ''))[1] != 'solo'
                             and (c not in cache or cache[c][0] <= 0))):
             wanted = collections.defaultdict(list)
-            for c in classes:
+            for c in sorted(classes, key=lambda c: (c not in prio, c not in boot_classes, c)):
                 if c not in native and c in unit_for and pick(c):
                     wanted[unit_for[c]].append(c)
             log('probe %s: %d classes in %d units' % (mode, sum(map(len, wanted.values())), len(wanted)))
             if wanted:
-                probe_classes(tree, os.path.join(outdir, 'seams_layout_work'), dict(wanted), jobs or os.cpu_count(),
-                              shard, trim=(mode == 'trim'), on_result=keep(mode))
+                probe_classes(tree, os.path.join(outdir, 'seams_layout_work'), wanted, jobs or os.cpu_count(),
+                              shard, on_result=keep(mode), solo=(mode == 'solo'))
         out.close()
     boots = boot_functions(topdown)
     rows = []
