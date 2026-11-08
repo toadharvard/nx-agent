@@ -649,6 +649,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     stats = collections.Counter(pre_stats)
     stats['libstdcxx_identifiers'] = len(std_identifiers(os.path.join(out, 'cache')))   # decomp_std's view
     stats['libstdcxx_symbols'] = len(std_exports(os.path.join(out, 'cache')))
+    if not stats['libstdcxx_identifiers'] and not stats['libstdcxx_symbols']:
+        # neither view of libstdc++ is known (no $CXX / nm here): every std:: name would be left to the runtime,
+        # the decomp's own std classes included (std::StandardLibrarySingletonObject, S5 round 6): say so loudly
+        stats['libstdcxx_unknown'] = 1
+        print('fnvlink: WARNING: libstdc++ identifiers and symbols unknown ($CXX=%s); decomp std:: names stay '
+              'runtime traps' % os.environ.get('CXX', 'aarch64-linux-gnu-g++'), file=sys.stderr)
     byclass = collections.Counter()
     # the game's operator new/delete for GCC's global forms: the unit's own binding of the MSVC name, else the one
     # most units use
