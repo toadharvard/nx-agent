@@ -51,4 +51,11 @@ ok "stamp change: objects removed, new stamp, said on stderr" '[ -z "$(ls "$W/ob
 echo o >"$W/obj/src_a.cpp.o"
 ( TREE=$W/tree OUT=$W/obj LIST=$W/asked.list objstamp=new; . "$W/stamp.sh"; cat "$LIST" ) >"$W/list.same" 2>/dev/null
 ok "same stamp: the list as given, objects kept" '[ "$(cat "$W/list.same")" = src/a.cpp ] && [ -f "$W/obj/src_a.cpp.o" ]'
+# under set -euo pipefail, as compile.sh runs, with the LAST unit of units.json without an object (full1 on
+# c46cd30231d9: `[ -f ] && echo` ended the loop with 1 and set -e stopped compile.sh with "exit 1" and no message)
+for u in a b; do echo o >"$W/obj/src_$u.cpp.o"; done; rm -f "$W/obj/src_c.cpp.o"; echo old >"$W/obj/.objstamp"
+( set -euo pipefail; TREE=$W/tree OUT=$W/obj LIST=$W/asked.list objstamp=new; . "$W/stamp.sh"; cat "$LIST"; echo reached ) >"$W/list.e" 2>"$W/err.e"; rc=$?
+ok "set -e, last unit without an object: the block finishes (rc $rc)" '[ $rc = 0 ] && grep -qx reached "$W/list.e"'
+ok "set -e: the work list is the units that had one plus the asked" '[ "$(grep -v reached "$W/list.e" | tr "\n" " ")" = "src/a.cpp src/b.cpp " ]'
+ok "compile.sh names the line of any set -e failure" 'grep -q "trap .*compile.sh: line \$LINENO" "$P/tools/link/compile.sh"'
 [ $fails = 0 ] && echo "test_compile_reasons: all ok" || { echo "test_compile_reasons: $fails failed"; exit 1; }
