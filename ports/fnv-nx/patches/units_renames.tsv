@@ -1400,3 +1400,5 @@ src/havok/animation/ragdoll/instance/hkaragdollinstance_gs_ehsc_nogs_noehsc_vari
 src/fallout/misc/garbagecollector.cpp	def	0x0040fc90	?QueryCurrentThread@GarbageCollector@@SAX_N@Z	?QueryCurrentThread@GarbageCollector@@SAKXZ
 src/fallout/misc/garbagecollector.cpp	ref	0x0040fc90	?QueryCurrentThread@GarbageCollector@@SAX_N@Z	?QueryCurrentThread@GarbageCollector@@SAKXZ
 src/fallout/interface/interfacemanager.cpp	ref	0x00716ae0	?GetByteAtOffset33@FUN_007e6620_Button@fnv_007e6620@@QAE_NXZ	?GetByteAtOffset33@FUN_007e6620_Button@fnv_007e6620@@QAEEXZ
+src/havok/common/serialize/data/util/hkdataobjectutil.cpp	ref	0x00dba6a0	?SetShiftedValue@DCIterator@@QAE?AU1@XZ	?SetShiftedValue@DCIterator@@QAEPAXPAX@Z
+src/havok/common/serialize/data/dict/hkdataobjectdict_ehsc_noehsc_variant.cpp	ref	0x00dba6a0	?getParent@hkDataClassX@@QBE?AV1@XZ	?getParent@hkDataClassX@@QBEPAXPAX@Z
