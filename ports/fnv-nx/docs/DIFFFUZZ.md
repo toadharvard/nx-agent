@@ -289,6 +289,17 @@ also missing from the `new` family, although free is in `delete`. On 8b233f99, a
 malloc in the oracle against new / Allocate / a constructor natively. malloc is now an allocator and in the `new`
 family. d20-malloc selects the functions whose oracle code calls it. Test: `tests/s13/test_crtmalloc.py`.
 
+**d25-sg (S1-rules, SCOPED = d25).** MSVC numbers a unit's string literals `$SG<n>` by an internal symbol
+counter. The oracle objects (msvc/pristine, built with S11's force-included header) count 43 higher in every C++
+unit than the build that wrote units.json. synth_image.py already corrected for that; coffobj did not. It looked
+object names up unshifted, so each literal was pinned and relocated at a neighbour's address. EQ measured 3,334 of
+15,143 pinned literals differing from the exe, and 37 overlapping groups (one of them five `$SG` names at
+0x01012058 in inventorychanges.cpp). `coffobj.sg_shift` finds the delta per unit. With the exe it picks the delta
+under which the most literals equal the exe's bytes at their units.json address: inventorychanges 68 / 68 at +43
+against 1 / 68 at 0, caravanmenu 205 / 205. Without the exe it takes the name delta that maps at least 90 %.
+UnitImage then maps object `$SG<n>` to units.json's `$SG<n-d>`. d25-sg selects the functions whose oracle
+closure refers to a `$SG` address (catalog data_refs). Test: `tests/s13/test_sgshift.py`.
+
 **d21-f3mem (F3, the memory class; SCOPED = d21).** Four harness artifacts behind cached hard verdicts of
 native-null-read, callee-saved, store-width / x86-only-store, native-stub-data and float, found by replaying a random
 sample of 30 reproducers per cause on link 0540aff0d154 and reading the traces:

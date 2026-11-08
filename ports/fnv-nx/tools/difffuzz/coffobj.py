@@ -11,6 +11,7 @@ Literal data the code reads from the image (string literals, `__real@`/`__xmm@` 
 itself defines at a mapped address) is recovered from the object, so the shared world can hold those bytes at their
 original addresses without the player's executable.
 """
+import collections
 import struct
 from pathlib import Path
 
@@ -122,6 +123,54 @@ class Coff:
         return c[0] if len(c) == 1 else None
 
 
+def _sg_strings(coff):
+    """{n: bytes through the terminator} of the object's numbered $SG literals"""
+    out = {}
+    for s in coff.symbols.values():
+        if s['section'] > 0 and s['name'].startswith('$SG') and s['name'][3:].isdigit():
+            b = coff.sections[s['section']]['data'][s['value']:]
+            e = b.find(b'\0')
+            out[int(s['name'][3:])] = bytes(b[:e + 1 if e >= 0 else len(b)])
+    return out
+
+
+def sg_shift(coff, unit, exe=None):
+    """S1-rules (d25-sg): MSVC numbers a unit's string literals $SG<n> by an internal symbol counter, and the oracle
+    objects (msvc/pristine, built with S11's force-included header) count 43 higher in every C++ unit than the build
+    that wrote units.json (loader/synth/synth_image.py sg_shift). Looking the object's names up unshifted pinned each
+    literal at a neighbour's address: 3,334 of 15,143 pinned literals differed from the exe, 37 overlapping groups
+    (EQ). The shift is the delta d (object = units.json + d) under which the most of the unit's literals equal the
+    exe's bytes at their units.json address; without the exe, the delta that maps the most names, accepted when it
+    maps at least 90 %. 0 when unshifted or undecided."""
+    mine = {int(k[3:]): int(v, 16) for k, v in unit.get('symbols', {}).items() if k.startswith('$SG') and k[3:].isdigit()}
+    if not mine:
+        return 0
+    have = _sg_strings(coff)
+    if not have:
+        return 0
+    deltas = collections.Counter(b - a for a in mine for b in have if abs(b - a) < 5000)
+    if not deltas:
+        return 0
+    exe = exe if exe is not None else exe_image()
+    if exe is not None:
+        def score(d):
+            n = 0
+            for k, a in mine.items():
+                b = have.get(k + d)
+                if b is None:
+                    continue
+                try:
+                    if bytes(exe.read(a, len(b))) == b:
+                        n += 1
+                except Exception:  # noqa: BLE001
+                    pass
+            return n
+        best = max([0] + [d for d, _ in deltas.most_common(8)], key=lambda d: (score(d), d == 0))
+        return best if score(best) > score(0) else 0
+    d, n = deltas.most_common(1)[0]
+    return d if d and n * 10 >= len(mine) * 9 else 0
+
+
 class UnitImage:
     """All functions of one unit placed at their original addresses.
 
@@ -132,6 +181,15 @@ class UnitImage:
     def __init__(self, coff, unit):
         self.coff, self.unit = coff, unit
         self.mappings = {k: int(v, 16) for k, v in unit['symbols'].items()}
+        self.sg_shift = sg_shift(coff, unit)
+        if self.sg_shift:
+            # the object numbers its $SG literals d higher than the build that wrote units.json (S11's force-included
+            # header): object $SG<n> is units.json's $SG<n-d>
+            sg = {k: v for k, v in self.mappings.items() if k.startswith('$SG') and k[3:].isdigit()}
+            for k in sg:
+                del self.mappings[k]
+            for k, v in sg.items():
+                self.mappings['$SG%d' % (int(k[3:]) + self.sg_shift)] = v
         self.placements = {}
         self.errors = []
         self.synthetic = {}                       # (section, value) -> (pool address, bytes)
