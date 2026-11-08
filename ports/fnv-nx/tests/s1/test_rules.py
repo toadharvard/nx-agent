@@ -744,6 +744,15 @@ check('PTR1 ordered compares of a function / pointer with 0',
           '    if (!(GetTime64 > 0)) return;\n    if (c > 0 && n > 0 && q <= 0) return;\n}\n'),
       ['!(GetTime64 != 0)', 'c != 0 && n > 0 && q == 0'])
 
+# ---- REC1-RETARGET: a placed function's recipe symbol moves to the recon's new decoration, only from the expected old
+_u = {'source': 'src/x.cpp', 'functions': [{'address': '0x008d1e50', 'symbol': '?F@S@@QAEMXZ', 'size': 31}],
+      'symbols': {'?F@S@@QAEMXZ': '0x008d1e50'}}
+_r1 = s1.recon_retarget(_u, {'address': '0x008D1E50', 'old': '?F@S@@QAEMXZ', 'new': '?F@S@@QAEPAXXZ'})
+check('REC1-RETARGET moves the placed symbol', repr((_r1, _u['functions'][0]['symbol'], sorted(_u['symbols']))),
+      ["(1, '?F@S@@QAEPAXXZ', ['?F@S@@QAEPAXXZ'])"])
+_r2 = s1.recon_retarget(_u, {'address': '0x008d1e50', 'old': '?F@S@@QAEMXZ', 'new': '?G@@'})
+check('REC1-RETARGET leaves another old symbol alone', repr((_r2, _u['functions'][0]['symbol'])), ["(0, '?F@S@@QAEPAXXZ')"])
+
 # ---- STAND1 (needs a units.json: a small tree of its own; the symbol cache is reset around it)
 import json as _json
 _s = tempfile.mkdtemp()
