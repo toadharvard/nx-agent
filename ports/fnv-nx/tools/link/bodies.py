@@ -1277,10 +1277,12 @@ def probe_vcalls(tree, work, host, names, itanium):
     if not items:
         return {}, {n: 'not a nameable member function' for n in names}
     head = os.path.join(work, 'fnvnx_bd_sel.h')   # by -include: GCC's notes naming it drop no probe line
-    if not os.path.exists(head):
-        with open(head + '.tmp', 'w') as f:
+    if not os.path.exists(head):   # probe threads race here: each writes its own temp file (one shared .tmp name
+        import threading           # made the loser's os.replace raise FileNotFoundError: 4 vcall rows of link
+        tmp = '%s.%d.%d.tmp' % (head, os.getpid(), threading.get_ident())   # 97deacd38aec, R2 trap loop)
+        with open(tmp, 'w') as f:
             f.write('#pragma once\n' + VCALL_HEAD + '\n')
-        os.replace(head + '.tmp', head)
+        os.replace(tmp, head)
     obj, alive = vtables.compile_probe(tree, work, host, items, 'bdvc', ('-include', head), prelude='')
     got, why = {}, {}
     alive_k = {k for k, _, _ in alive}
