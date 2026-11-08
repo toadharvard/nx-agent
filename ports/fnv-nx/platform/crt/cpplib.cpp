@@ -233,6 +233,15 @@ size_t g_nfacets, g_capfacets;
 } // namespace
 
 extern "C" void *fnvnx_locale_init(void) { return global_locimp(); }            /* locale::_Init */
+
+/* locale::facet::_Incref: one more reference, under the locale lock; an immortal facet ((size_t)-1) stays so */
+extern "C" void fnvnx_facet_incref(void *fp)
+{
+    facet *f = (facet *)fp;
+    lockit_guard g(LOCK_LOCALE);
+    if (f->_Refs < (size_t)-1 - 1)
+        ++f->_Refs;
+}
 extern "C" void *fnvnx_locale_getgloballocale(void) { return global_locimp(); } /* locale::_Getgloballocale */
 
 /* locale::facet::_Facet_Register: remembered so fnvnx_cpplib_facet_tidy can release them (VC9 does at exit;
