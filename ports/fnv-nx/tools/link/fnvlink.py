@@ -1467,6 +1467,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         # S5 class 3: constructor-named vtables (_ZTV<n>FUN_<ctor>) no unit pairs, by the vftable their exe
         # constructor stores; a vftable another native vtable already stands for takes them as displaced ones
         ctor_pairs = ctor_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out)
+        # S2-bodies: stand-in vtables by the vptr stores of the function bound to the exe address (store_seq_pairs)
+        def seq_ctor(name):
+            m_ = BOUND_CALLEE.fullmatch(name)
+            if m_:
+                return (native.get(int(m_.group(1), 16), {}).get('msvc') or '').startswith('??0')
+            return bool(membervt.CTOR_NAME.fullmatch(name))
+        for k_, vs_ in store_seq_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out,
+                                       {u.source: u.obj for u in have}, seq_kind, seq_ctor).items():
+            ctor_pairs.setdefault(k_, set()).update(vs_)
         exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, exe_alt)
         # S2-bodies class 4: the vtables a constructor stores in its members, by the exe constructor's [reg+d] stores
         for k_, vs_ in member_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out,
@@ -1891,6 +1900,101 @@ def ctor_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out):
         rows.append((z, '%08x' % a, '' if v is None else '%08x' % v, how))
     with open(os.path.join(out, 'ctor_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#native vtable\tconstructor\texe vftable it stores\toutcome\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    return got
+
+
+def seq_kind(a, nd):
+    """'ctor' / 'dtor' for a native definition the address map places at an exe constructor / destructor (its MSVC
+    name), else None."""
+    m = nd.get('msvc') or ''
+    return 'ctor' if m.startswith('??0') else 'dtor' if m.startswith(('??1', '??_G', '??_E')) else None
+
+
+def store_seq_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out, obj_of, kind_of, is_ctor):
+    """S2-bodies stand-in pairing (the vtables of decomp stand-in classes named after an address, or a shell:
+    `fnv_0093ad60::ActorStandIn`, `FUN_00508ee0`, `FUN_00483630_Base`, `Shell_8803a0`). A stand-in's vtable has
+    no exe vftable when no unit names one and its name is not `_ZTV<n>FUN_<ctor>`. Its object is still built by a
+    decomp function bound to an exe address, and both store vptrs: the native function (a constructor, destructor
+    or scalar deleting destructor the address map places at <a>) stores the stand-in's vtable at this+0
+    (membervt.vptr_stores, in code order), the exe function at <a> stores its RTTI vftables (exevft.vptr_store_seq).
+    Pairing by position is the evidence:
+      * constructor (`??0`): the last store of each (the most derived class; inlined bases come first), and the
+        stores before it too when both sides have as many;
+      * destructor (`??1`, `??_G`, `??_E`): the first store of each (its own class), and the rest when the counts
+        are equal.
+    A vtable another pass paired (vmap) is left; a vftable that already has a vtable takes the stand-in as a
+    displaced one (alt), as ctor_store_pairs does. A stand-in two functions pair with different vftables is not
+    paired (conflict). seq_vftables.tsv: every candidate with its outcome.
+    -> {(group, address point): {exe vftable}} for exe_slot_fill."""
+    bound = {e[0] for e in vmap.values()}
+    starts = {w for w, e in exev.items() if e.td and e.off == 0}
+    rows, got, claim = [], collections.defaultdict(set), {}
+    objs = {}
+    cand = []
+    for a in sorted(native):
+        nd = native[a]
+        kind = kind_of(a, nd)
+        path = obj_of.get(nd.get('unit')) if kind else None
+        if not path:
+            continue
+        if path not in objs:
+            objs.clear()
+            try:
+                objs[path] = vtables.Obj(path)
+            except (OSError, ValueError):
+                objs[path] = None
+        o = objs[path]
+        order = []
+        if o is not None:
+            membervt.vptr_stores(o, nd['sym'].name, is_ctor, order)
+        ns, seen = [], set()
+        for off, ev in order:
+            if off == 0 and ev[0] == 'vt' and ev[1] in rtti.where:
+                pts = [p for p, ott in vtables.address_points(rtti.ents(ev[1]) or []) if ott == 0]
+                if ev[2] in pts and (ns[-1:] != [(ev[1], ev[2])]):
+                    ns.append((ev[1], ev[2]))
+        if not ns:
+            continue
+        exs = exevft.vptr_store_seq(exe_path, a, starts)
+        if not exs:
+            vstats['seq-vt-no-exe-store'] += 1
+            continue
+        ctor = kind == 'ctor'
+        pairs = []
+        if len(ns) == len(exs):
+            pairs = list(zip(ns, exs))
+        elif ctor:
+            pairs = [(ns[-1], exs[-1])]
+        else:
+            pairs = [(ns[0], exs[0])]
+        cand.append((a, kind, ns, exs, pairs))
+    for a, kind, ns, exs, pairs in cand:
+        for (z, ap), v in pairs:
+            claim.setdefault((z, ap), {}).setdefault(v, []).append(a)
+    for a, kind, ns, exs, pairs in cand:
+        for (z, ap), v in pairs:
+            if len(claim[(z, ap)]) > 1:
+                how = 'conflict: %s' % ' '.join('%08x' % x for x in sorted(claim[(z, ap)]))
+            elif z in bound:
+                how = 'bound'
+            elif v not in vmap:
+                vmap[v] = (z, ap, rtti.where[z][0].path, 'primary, the vftable the exe %s %08x stores in the same '
+                           'position as the native one' % (kind, a))
+                bound.add(z)
+                how = 'paired'
+                got[(z, ap)].add(v)
+            else:
+                if all(e[:2] != (z, ap) for e in alt.get(v, ())):
+                    alt[v].append((z, ap, rtti.where[z][0].path, 'primary'))
+                bound.add(z)
+                how = 'paired as displaced (%s)' % vmap[v][0]
+                got[(z, ap)].add(v)
+            vstats['seq-vt-' + how.split(' (')[0].split(':')[0].replace(' ', '-')] += 1
+            rows.append((z, '%08x' % a, kind, '%d/%d' % (len(ns), len(exs)), '%08x' % v, how))
+    with open(os.path.join(out, 'seq_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#native vtable\tfunction\tkind\tnative/exe stores\texe vftable\toutcome\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
     return got

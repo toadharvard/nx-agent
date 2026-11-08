@@ -367,6 +367,18 @@ def ctor_vftable(path, addr, starts):
     return last
 
 
+def vptr_store_seq(path, addr, starts):
+    """The vftables the x86 function at addr stores in its own object (`mov dword ptr [reg], imm32` with no
+    displacement, value in starts), in code order, a vftable stored twice in a row once. A constructor lists its
+    inlined bases before its own class (derived last), a destructor its own class first. [] without capstone or
+    outside the image."""
+    seq = []
+    for d, _, v in _ctor_stores(path, addr) or ():
+        if not d and v in starts and (not seq or seq[-1] != v):
+            seq.append(v)
+    return seq
+
+
 MEMBER_MAX = 0x100000   # S5's bound on a member's offset (emu_guest install_member_vtables)
 
 
