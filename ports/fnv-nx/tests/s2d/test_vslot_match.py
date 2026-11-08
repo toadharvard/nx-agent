@@ -108,6 +108,50 @@ class Compare(unittest.TestCase):
         agree, bad = self.cmp(names, None, exe)
         self.assertEqual((agree, bad), (2, []))
 
+    def test_pair_with_a_d0_named_second_slot(self):
+        # the link binds D1 to a flag stub and leaves the class's own `D0Ev` as it was (no address behind it): the
+        # D0 name marks the pair although exevft.dtor_pos (D1 then D0 by name) does not find it
+        names = ['__fnvnx_vflag_00400000_0', '_ZN1KD0Ev', '__fnv_00400010', '__fnv_00400020', '__fnv_00400030']
+        exe = [0x400000, 0x400010, 0x400020, 0x400030]
+        agree, bad = self.cmp(names, None, exe)
+        self.assertEqual((agree, bad), (2, []))
+        # the same names where the exe really has a slot per entry: no pair agrees more
+        exe2 = [0x400000, 0x400001, 0x400010, 0x400020, 0x400030]
+        self.assertEqual(self.cmp(names, None, exe2), (3, []))
+
+    def test_pair_of_one_symbol(self):
+        # D1 and D0 bound to the one function the exe's single deleting destructor is
+        names = ['__fnv_00400000', '__fnv_00400000', '__fnv_00400010', '__fnv_00400020', '__fnv_00400030']
+        exe = [0x400000, 0x400010, 0x400020, 0x400030]
+        self.assertEqual(self.cmp(names, None, exe), (2, []))
+
+    def test_pair_alignment_still_reports_a_real_mismatch(self):
+        names = ['__fnvnx_vflag_00400000_0', '_ZN1KD0Ev', '__fnv_00400010', '__fnv_00400020', '__fnv_00400031']
+        exe = [0x400000, 0x400010, 0x400020, 0x400030]
+        agree, bad = self.cmp(names, None, exe)
+        self.assertEqual((agree, bad), (1, [(4, 3, 0x400031, 0x400030)]))
+
+    def test_flag3_pair(self):
+        sa = {}
+        self.assertEqual(vtmetric.slot_address('__fnvnx_vflag3_00404000_0', sa), 0x404000)
+        names = ['__fnvnx_vflag3_00404000_0', '__fnvnx_vflag3_00404000_1', '__fnv_00404010', '__fnv_00404020',
+                 '__fnv_00404030']
+        self.assertEqual(self.cmp(names, None, [0x404000, 0x404010, 0x404020, 0x404030]), (2, []))
+
+
+class Renames(unittest.TestCase):
+    def test_vtables_object_of_a_host(self):
+        with tempfile.NamedTemporaryFile('w', suffix='.tsv', delete=False) as f:
+            f.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n'
+                    'src/a.cpp\t_ZN1K1fEv\tcode\tunit/exact\t00401000\t__fnv_00401000\t\n'
+                    'src/a.cpp#vtables\t_ZN1KD1Ev\tvslot-unresolved\t\t\t__fnvnx_vtrap_1\t\n')
+        try:
+            r = vtmetric.read_renames(f.name)
+        finally:
+            os.unlink(f.name)
+        self.assertEqual(r['src_a.cpp.o'], {'__fnv_00401000': '_ZN1K1fEv'})
+        self.assertEqual(r['zz_vt_src_a.cpp.o'], {'__fnv_00401000': '_ZN1K1fEv', '__fnvnx_vtrap_1': '_ZN1KD1Ev'})
+
 
 class Unpaired(unittest.TestCase):
     CLASSES = {'QuantityMenu': 'typeinfo', 'TESObjectARMA': 'vtable; typeinfo',

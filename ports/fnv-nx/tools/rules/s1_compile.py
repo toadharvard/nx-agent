@@ -1567,6 +1567,104 @@ def r_image_statics(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- VFTBL1
+#
+# The decomp sometimes stands a table of its own in for an exe vftable: `static const VTable g_vtblAgent = {{(void*)
+# &AgentRelease, ...}};` for the vftable at 0x010ce838 (hkpBvTreeStreamAgent, RTTI `.?AVhkpBvTreeStreamAgent@@`), with
+# declared-only functions as the slots, and units.json binds the name to that address. The link renames the definition
+# to `__fnv_<address>` and aliases.ld assigns that symbol the native vtable's address point (hand_vptrs / vmap, else
+# the D26 (c) minus-one copy), which overrides the definition (tools/link/test_vtables.py); but the invented
+# initializer stays in the object, and the functions it names (AgentRelease, AgentFlush) are undefined names nothing
+# else references. VFTBL1 turns such a definition into a declaration, `extern const VTable g_vtblAgent;` (a namespace
+# one under C linkage like STATIC1's, where the name is bound as `_g_vtblAgent`), so that `&g_vtblAgent` is an
+# undefined reference bound by address like any other, and no initializer remains.
+# Only a name that units.json binds, at file scope, to an address in VFTBL1_SITES (exe vftables with an RTTI locator;
+# tools/rules/check_vftbl1.py checks each against the exe, and lists the units.json-bound initialised tables at other
+# exe vftables, which a new site must come from), defined with a brace initializer, and that the file
+# uses only through `&name`: a reader indexing `name.entries[k]` expects x86 slot k, and under D26 native slot k+1 is
+# exe slot k, so it is left as written. (Uninitialised `int DAT_<address>;` definitions need no rule: no initializer,
+# the link renames them the same way.)
+
+VFT_INIT = re.compile(r'^([ \t]*)(?:static\s+)?((?:const\s+|volatile\s+)*[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)'
+                      r'(?:\s*\[[^\]]*\])*)\s*=\s*\{', re.M)
+# The exe vftables (RTTI class) whose units.json-bound name the decomp defines with an initialised stand-in table
+VFTBL1_SITES = {
+    0x010ce838,   # .?AVhkpBvTreeStreamAgent@@ - g_vtblAgent, hkpbvtreestreamagent.cpp
+    0x0102e388,   # .?AVhkBaseObject@@ - g_vtblBase, hkpbvtreestreamagent.cpp
+    0x01030bf4,   # g_vtblShape, bstreenode_o2_variant.cpp
+    0x01030b0c,   # g_vtblSphereRep, bstreenode_o2_variant.cpp
+    0x01066c5c,   # g_vtblMultiSphere, bstreenode_o2_variant.cpp
+}
+_VFT_NAMES = None        # file -> {name: is it bound as a C name (`_name`)}
+
+def _exe_vftable_addrs():
+    return VFTBL1_SITES
+
+def _vftable_bound_names(path):
+    """{absolute file: {name: bound as a C name}} of data names a unit including the file binds to an exe vftable."""
+    global _VFT_NAMES
+    if _VFT_NAMES is not None: return _VFT_NAMES
+    import json
+    _VFT_NAMES = {}
+    root, uj = prepare._units_json(path)
+    if not uj: return _VFT_NAMES
+    vft = _exe_vftable_addrs()
+    inc = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+    for u in json.load(open(uj))['units']:
+        names = {}
+        for n, a in u.get('symbols', {}).items():
+            if int(a, 16) not in vft or n.startswith('??_7'): continue
+            m = DATA_NAME.match(n)
+            if m: names.setdefault(m.group(1), False)
+            elif n.startswith('_') and n[1:].isidentifier(): names[n[1:]] = True
+        if not names: continue
+        todo, seen = [os.path.normpath(os.path.join(root, u['source']))], set()
+        while todo:
+            f = todo.pop()
+            if f in seen or not os.path.isfile(f): continue
+            seen.add(f)
+            with open(f, encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+            e = _VFT_NAMES.setdefault(f, {})
+            for n, c in names.items(): e[n] = e.get(n, False) or c
+            for i in inc.findall(t):
+                for base in (os.path.dirname(f), os.path.join(root, 'include')):
+                    g = os.path.normpath(os.path.join(base, i))
+                    if os.path.isfile(g): todo.append(g); break
+    return _VFT_NAMES
+
+def r_vftable_standins(path, text, stats):
+    """VFTBL1: a table the decomp defines for a name bound to an exe vftable becomes a declaration (see above)."""
+    if '=' not in text: return text
+    names = _vftable_bound_names(path).get(os.path.normpath(os.path.abspath(path)))
+    if not names: return text
+    bare = COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
+    spans, edits = None, []
+    for m in VFT_INIT.finditer(bare):
+        name = m.group(3)
+        if name not in names: continue
+        if re.search(r'\bextern\b', bare[bare.rfind('\n', 0, m.start()) + 1:m.start(2)]): continue
+        if spans is None: spans = prepare.scope_spans(bare)
+        chain = prepare.scope_chain(spans, m.start())
+        if any(k not in ('namespace', 'extern') for k, _ in chain): continue
+        namespaced = any(k == 'namespace' for k, _ in chain)
+        if namespaced and not names[name]: continue     # not bound by its plain name: C linkage would name another symbol
+        end = _decl_end(bare, m.end() - 1)
+        if end is None or '#' in bare[m.end():end]: continue
+        # every other use of the name takes its address: `vtbl = &name;`, `(void*)&name`
+        if any(not re.search(r'&\s*$', bare[:u.start()]) for u in re.finditer(r'(?<![\w:.>])%s\b' % re.escape(name), bare)
+               if not m.start(3) <= u.start() < m.end(3)):
+            continue
+        decl = bare[m.start(2):m.end(2)].rstrip()
+        new = m.group(1) + ('extern "C" { extern %s; }' if namespaced else 'extern %s;') % decl
+        edits.append((m.start(), end + 1, new))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in edits:
+        out.append(text[pos:a]); out.append(r); pos = b
+        stats['VFTBL1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- FALL1
 #
 # Some decomp functions return a value on every path but the last: the body was reconstructed without its final
@@ -4378,7 +4476,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
@@ -5728,9 +5826,92 @@ def r_placeholder_slots(path, text, stats):
     if n: stats['PHSLOT1'] += n
     return text
 
+# ---------------------------------------------------------------------------------------------------------- DTORB1
+#
+# A destructor stand-in whose MSVC name the recipe binds to another function (S1-rules, fuzz oracle-fault). The decomp
+# tags `X::~X() {}` with the address of X's scalar deleting destructor ??_G, and the unit binds `??1X` to another
+# address A: blk_004a0000_od.cpp's `FUN_004aa1e0::~FUN_004aa1e0() {}` at 0x004aa1e0 (??_GFUN_004aa1e0), where
+# `??1FUN_004aa1e0@@UAE@XZ` is bound to 0x004aa280, `FUN_004aa280::~FUN_004aa280`, which stores the vptrs and calls
+# 0x00438af0. MSVC's ??_G calls ??1X, so the exe runs A. GCC's D0 calls X's own D1, the empty stand-in, so the native
+# skipped A (the fuzz oracle faulted inside A on the planted object; the native returned). 65 tagged destructors in
+# the decomp have such a binding, 50 of them to a function of the same unit.
+# DTORB1 gives the stand-in's body, under GCC only, a call of A through the link's address symbol `__fnv_<A>` (the
+# native definition at A, `this` in x0). The original body follows, unreachable: FNVNX_DTORB_BEGIN(A) ...
+# FNVNX_DTORB_END expands to `{ __fnv_<A>(this); } if (0) {` ... `}`. MSVC expands both to nothing, so its objects
+# are unchanged. Only where:
+# - the tag is the unit's ??_GX (or ??_EX);
+# - X is defined in the file without bases and its data members are of built-in or pointer type (GCC's D1 destroys
+#   nothing after the body);
+# - A is a function of some unit whose MSVC name takes only `this` (`...@@[QUA]AE@XZ` / `...@@[QUA]AEXXZ`).
+_DTORB_FUNCS = None
+
+def _dtorb_functions(path):
+    """{address: MSVC symbol} of every function of build/units.json (cached on prepare)."""
+    got = prepare.__dict__.get('_fnvnx_dtorb_funcs')
+    if got is not None: return got
+    import json
+    out = {}
+    root, uj = prepare._units_json(path)
+    if uj:
+        for u in json.load(open(uj))['units']:
+            for f in u.get('functions') or ():
+                out.setdefault(int(f['address'], 16), f.get('symbol') or '')
+    prepare.__dict__['_fnvnx_dtorb_funcs'] = out
+    return out
+
+DTORB_DEF = re.compile(r'//[ \t]*@fnv[ \t]+0x([0-9a-fA-F]+)[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*'
+                       r'(?:(?:FNVNX_[A-Z0-9_]+|inline|__thiscall)\s+)*((?:[A-Za-z_]\w*::)*)([A-Za-z_]\w*)::~\3\s*\(\s*(?:void)?\s*\)\s*\{')
+DTORB_THIS_ONLY = re.compile(r'@@[QUA][AE]E(?:@|X)XZ$')
+DTORB_BUILTIN = re.compile(r'^\s*(?:(?:unsigned|signed|const|volatile|static)\s+)*(?:char|short|int|long|float|double|bool|'
+                           r'void|__int64|wchar_t|DWORD|WORD|BYTE|UINT|ULONG|LONG|BOOL)\b|\*')
+
+def _dtorb_plain_class(text, name):
+    """X is defined in text once, without bases, and every data member is of built-in or pointer type"""
+    ms = list(re.finditer(r'\b(?:struct|class)\s+%s\s*(:[^{;]*)?\{' % re.escape(name), text))
+    if len(ms) != 1 or ms[0].group(1): return False
+    o = ms[0].end() - 1
+    c = prepare.match_brace(text, o) - 1                                     # the closing brace
+    body = text[o + 1:c]
+    if '{' in body: return False
+    for decl in body.split(';'):
+        d = re.sub(r'^\s*(?:public|private|protected)\s*:', '', decl.strip()).strip()
+        if not d or '(' in d or d.startswith(('typedef', 'friend', 'using', 'enum')): continue
+        if not DTORB_BUILTIN.search(d): return False
+    return True
+
+def r_bound_dtor_stand_ins(path, text, stats):
+    """DTORB1: a tagged destructor stand-in whose ??1 the unit binds elsewhere calls the bound address under GCC."""
+    if '~' not in text or '@fnv' not in text or not path.endswith('.cpp'): return text
+    syms = _unit_symbols(path)
+    if not syms: return text
+    funcs = None
+    edits = []
+    for m in DTORB_DEF.finditer(text):
+        tag, name = int(m.group(1), 16), m.group(3)
+        bound = {int(v, 16) for k, v in syms.items() if k.startswith('??1%s@' % name)}
+        if len(bound) != 1: continue
+        a = next(iter(bound))
+        if a == tag: continue
+        if funcs is None: funcs = _dtorb_functions(path)
+        if not funcs.get(tag, '').startswith(('??_G%s@' % name, '??_E%s@' % name)):
+            stats['DTORB1-NOTAG'] += 1; continue
+        if not DTORB_THIS_ONLY.search(funcs.get(a, '')):
+            stats['DTORB1-TARGET'] += 1; continue
+        if not _dtorb_plain_class(text, name):
+            stats['DTORB1-CLASS'] += 1; continue
+        o = m.end() - 1
+        c = prepare.match_brace(text, o) - 1                                 # the closing brace
+        edits.append((o + 1, c, a))
+    if not edits: return text
+    for o, c, a in sorted(edits, reverse=True):
+        text = (text[:o] + ' FNVNX_DTORB_BEGIN(%08x) /* fnv-nx DTORB1 */' % a + text[o:c] + ' FNVNX_DTORB_END '
+                + text[c:])
+    stats['DTORB1'] += len(edits)
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots]
+              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins]
 RULES += REFS_RULES

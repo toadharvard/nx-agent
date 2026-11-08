@@ -277,6 +277,25 @@ GARBAGE_XOR = 0
 # filled or left them; classify.py's stub-outparam probe reruns an uninit-arm case that way
 STUB_OUT = False
 
+# difffuzz-20 (args class, cpuid-env): when set to {'seen': [], 'perturb': bool}, the oracle's `cpuid` instructions are
+# recorded (address in 'seen') and, with 'perturb', answered with other values than Unicorn's host model gives;
+# classify.py's cpuid probe uses the pair to show which stored bytes depend on the CPU
+CPUID = None
+
+
+def scrub_dead_frames(uc, sp, fill, depth=0x600):
+    """STUB_OUT, at the entry of a function that runs for real: the stack below `sp` goes back to what the case planted
+    (the garbage fill in its top 0x1000 bytes, zeros under it). Without it a frame holds what the frames of the
+    functions called before it left there, and a local an intercepted callee should have filled reads as that residue
+    on the machine whose earlier callees were other functions (0x006a0c50: the oracle's `Handle` local held the
+    pointer a returned frame had stored, the native's the zeros). Both machines scrub the same way."""
+    base = SP0 - 0x1000
+    for a in range(max(sp - depth, STACK[0]) & ~3, sp & ~3, 4):
+        try:
+            uc.mem_write(a, fill[a - base:a - base + 4] if a >= base else bytes(4))
+        except Exception:  # noqa: BLE001
+            return
+
 
 def stack_fill(seed, n):
     if UNIFORM:

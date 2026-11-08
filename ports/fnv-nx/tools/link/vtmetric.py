@@ -16,6 +16,10 @@ pairs with a native vtable (kind `V`):
 * `secondary-full-entry` (S2c-vt2) - secondary vftable slots bound to `__fnv_<a>` where the exe slot's function is
   one MSVC enters with `this` at that secondary base (the map's entry is `__fnvnx_msvc_<a>`): `this` arrives d bytes
   off; not part of `metric`;
+* `slot-one-delete-this` (W23) - primary tables with no destructor pair whose exe slot 0 is a deleting destructor and
+  whose native slot 1 still holds exe slot 1 = `DeleteThis() { delete this; }` (exevft.delete_this): the exe's slot
+  order where Itanium's D0 belongs, a loop on any native `delete`. fnvlink's d0_slot_fix drives it to 0 (not part
+  of `metric`);
 * `mispaired-primary` / `mispaired-secondary` - vftables whose native vtable is another class than the exe's RTTI
   class, where the native class is itself an RTTI class of the exe (by name, after demangling both sides; shells
   such as `FUN_<addr>` or the decomp's local reconstructions, which name no RTTI class, are not counted).
@@ -77,8 +81,11 @@ def read_renames(path):
             continue
         f = line.rstrip('\n').split('\t')
         if len(f) >= 6 and f[5]:
+            if f[0].endswith('#vtables'):   # the synthesized vtable object of a host unit: zz_vt_<host>.o
+                out['zz_vt_' + obj_name(f[0][:-len('#vtables')])][f[5]] = f[1]
+                continue
             out[obj_name(f[0])][f[5]] = f[1]
-            out['zz_vt_' + obj_name(f[0])][f[5]] = f[1]
+            out['zz_vt_' + obj_name(f[0])].setdefault(f[5], f[1])
     return out
 
 
@@ -142,6 +149,15 @@ def measure(link, exe, rows_path=None):
         nmsvc = n - 1 if d is not None else n
         e = exev.get(v)
         per_v[v] = (z, note, n, nmsvc, e)
+        # W23: `delete p` calls Itanium slot 1. A primary table in the exe's slot order (no destructor pair) that
+        # holds exe slot 1 = `DeleteThis() { delete this; }` there loops on a native delete (S5 round 6)
+        if e is not None and e.td and ap == 8 and note.startswith('primary') and len(e.slots) >= 2 and d is None \
+                and (native.get(e.slots[0]) == 'G' or exevft.deleting_dtor(exe, e.slots[0])) \
+                and exevft.delete_this(exe, e.slots[1]) and not (n >= 2 and exevft.slot_one_is_d0(
+                    names[0], names[1])):
+            st['slot-one-delete-this'] += 1
+            rows.append(('%08x' % v, z, '1', '1', '%08x' % e.slots[1], '', names[1] if n >= 2 else '',
+                         'slot-one-delete-this'))
         znames.add(z)
         kind = 'primary' if note.startswith('primary') else 'secondary'
         st['v-%s' % kind] += 1
@@ -239,9 +255,9 @@ def measure(link, exe, rows_path=None):
 # does not place is skipped, so a trap stub never counts (trap-slots has those). Where the destructor pair is not
 # found by name (`__fnvnx_vflag_<a>_0|1` flag stubs bind a pair of exe slots as often as a destructor), the
 # alignment with the most agreeing slots decides: the exe is the evidence, not the spelling.
-FLAG_PAIR = re.compile(r'__fnvnx_vflag_[0-9a-f]{8}_([01])$')
+FLAG_PAIR = re.compile(r'__fnvnx_vflag[3c]?_[0-9a-f]{8}_([01])$')
 ADDR_NAME = re.compile(r'__fnv(?:nx_msvc)?_([0-9a-f]{8})(?:_(?:D[012]|d[01]))?$')
-ADDR_STUB = re.compile(r'__fnvnx_v(?:flag|gdel|free|const|adj)_([0-9a-f]{8})(?:_\d)?$')
+ADDR_STUB = re.compile(r'__fnvnx_v(?:flag[3c]?|gdel|free|const|adj)_([0-9a-f]{8})(?:_\d)?$')
 
 
 def read_symaddr(path):
@@ -274,6 +290,11 @@ def slot_address(name, symaddr):
 
 
 def _pair_positions(names, d):
+    """The slots a destructor pair (D1 then D0) can start at, by what the fixed object's names say: the pair given
+    (d), a flag-stub pair (_0, _1), a slot followed by a D0-named one (the link binds D1 to an address-bound name or a
+    flag stub and leaves the class's own `...D0Ev`, or `__fnv_<a>_D0`, as it was), and two adjacent slots with the
+    same symbol (D1 and D0 bound to the one function the exe's single deleting destructor is). compare_slots lets the
+    exe decide between them."""
     out = []
     if d is not None:
         out.append(d)
@@ -283,6 +304,11 @@ def _pair_positions(names, d):
             continue
         fa, fb = FLAG_PAIR.match(a), FLAG_PAIR.match(b)
         if fa and fb and fa.group(1) == '0' and fb.group(1) == '1':
+            out.append(i)
+        elif not exevft.D0_SLOT.search(a) and (exevft.D0_SLOT.search(b) or b.endswith('_D0')
+                                               or (fb and fb.group(1) == '1' and fa is None)):
+            out.append(i)
+        elif a == b:
             out.append(i)
     return out
 

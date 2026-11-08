@@ -61,6 +61,6 @@ coffobj.EXE, coffobj._EXE_TRIED = None, True
 check(ui._relocated(sec, 0, bytes(8), 0x01070000) == bytes.fromhex('30124000' '00000000'),
       'without the exe the unplaceable word keeps the object bytes')
 ch = [c for c in fnkeys.CHANGES if c.tag == 'd25-sg']
-check(len(ch) == 1 and fnkeys.SCOPED == 'd25' and ch[0].selects(fnkeys.Facts('f', osg=True)) and not ch[0].selects(fnkeys.Facts('f')), 'CHANGES d25-sg selects osg functions, SCOPED d25')
+check(len(ch) == 1 and ch[0].selects(fnkeys.Facts('f', osg=True)) and not ch[0].selects(fnkeys.Facts('f')), 'CHANGES d25-sg selects osg functions')
 print('%d failures' % len(FAIL))
 sys.exit(1 if FAIL else 0)

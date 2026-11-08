@@ -1754,6 +1754,29 @@ prepare.__dict__['_fnvnx_d22'] = None
 _shutil.rmtree(_d2, ignore_errors=True)
 
 
+# ---- S1-rules: DTORB1 (a destructor stand-in calls the address its ??1 is bound to, under GCC)
+_db = tempfile.mkdtemp(); os.makedirs(os.path.join(_db, 'src')); os.makedirs(os.path.join(_db, 'build'))
+_json.dump({'units': [{'source': 'src/u.cpp', 'symbols': {'??1S@@UAE@XZ': '0x004aa280', '??1T@@UAE@XZ': '0x004aa280'},
+                       'functions': [{'address': '0x004aa1e0', 'symbol': '??_GS@@UAEPAXI@Z', 'size': 44},
+                                     {'address': '0x004aa300', 'symbol': '??_GT@@UAEPAXI@Z', 'size': 44},
+                                     {'address': '0x004aa280', 'symbol': '??1Y@@UAE@XZ', 'size': 92}]}]},
+           open(os.path.join(_db, 'build', 'units.json'), 'w'))
+_DB = ('struct S\n{\n    virtual ~S();\n    int x;\n};\n// @fnv 0x004aa1e0\nS::~S()\n{}\n'
+       'struct M { ~M(); };\nstruct T\n{\n    virtual ~T();\n    M m;\n};\n// @fnv 0x004aa300\nT::~T()\n{}\n')
+_saved = (s1._UNIT_SYMBOLS, prepare.__dict__.get('_fnvnx_dtorb_funcs'))
+s1._UNIT_SYMBOLS = None; prepare.__dict__['_fnvnx_dtorb_funcs'] = None
+_dbo = run(s1.r_bound_dtor_stand_ins, _DB, os.path.join(_db, 'src', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved[0]; prepare.__dict__['_fnvnx_dtorb_funcs'] = _saved[1]
+check('DTORB1 the stand-in body calls the bound address under GCC', _dbo,
+      ['S::~S()\n{ FNVNX_DTORB_BEGIN(004aa280) /* fnv-nx DTORB1 */ FNVNX_DTORB_END }'])
+check('DTORB1 a class with a member that has a destructor: nothing', _dbo, [], ['T::~T()\n{ FNVNX_DTORB'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _mB = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_DTORB')]
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x', 'c++',
+                          '-'], input=''.join(_mB) + _dbo.split('struct M')[0], capture_output=True, text=True)
+    check('DTORB1 output: S::~S calls __fnv_004aa280 (ILP32)', _r.stderr or _r.stdout, ['__fnv_004aa280'], ['error'])
+
 # ---- S1-rules: D26 (b) a call-only placeholder declaration takes FNVNX_D22 without a list
 _save_d22 = os.environ.pop('FNVNX_D22', None); _save_rc = os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_d22'] = None
@@ -1871,6 +1894,33 @@ _st = Counter()
 s1.r_placeholder_slots('/nonexistent/src/x.cpp', _ph, _st)
 check('PHSLOT1 stats', str(_st['PHSLOT1']), ['2'])
 check('PHSLOT1 idempotent', run(s1.r_placeholder_slots, _ph_out), [_ph_out])
+
+# ---- VFTBL1: a table the decomp defines for a name bound to an exe vftable becomes a declaration
+_VP = os.path.normpath(os.path.abspath('/nonexistent/src/x.cpp'))
+_saved_v = s1._VFT_NAMES
+_vt = ('struct VTable { void* entries[4]; };\nvoid __cdecl AgentRelease(void*);\nnamespace fnv_00d2eae0 {\n'
+       'static const VTable g_vtblAgent = {\n    {(void*)&AgentRelease, (void*)&AgentRelease, 0, 0}};\n'
+       'static const VTable g_vtblBase = {{(void*)&AgentRelease}};\nstatic const VTable g_vtblPlain = {{0}};\n'
+       'void f(void** o) { *o = (void*)&g_vtblAgent; *o = (void*)&g_vtblBase; *o = (void*)g_vtblPlain.entries[1]; }\n}\n'
+       'static const VTable g_vtblGlobal = {{(void*)&AgentRelease}};\nvoid g(void** o) { *o = (void*)&g_vtblGlobal; }\n')
+s1._VFT_NAMES = {_VP: {'g_vtblAgent': True, 'g_vtblBase': False, 'g_vtblPlain': True, 'g_vtblGlobal': False}}
+_vo = run(s1.r_vftable_standins, _vt)
+check('VFTBL1 a namespace table bound by its C name becomes an extern "C" declaration', _vo,
+      ['extern "C" { extern const VTable g_vtblAgent; }'], ['g_vtblAgent = {'])
+check('VFTBL1 a namespace table not bound by its plain name stays', _vo, ['static const VTable g_vtblBase = {{('])
+check('VFTBL1 a table read through entries[k] stays (x86 slot k is native slot k+1)', _vo,
+      ['static const VTable g_vtblPlain = {{0}};'])
+check('VFTBL1 a global table becomes a plain declaration', _vo, ['extern const VTable g_vtblGlobal;'],
+      ['g_vtblGlobal = {'])
+check('VFTBL1 idempotent', run(s1.r_vftable_standins, _vo), [_vo])
+_st = Counter()
+s1.r_vftable_standins('/nonexistent/src/x.cpp', _vt, _st)
+check('VFTBL1 stats', str(_st['VFTBL1']), ['2'])
+s1._VFT_NAMES = {}
+check('VFTBL1 a name no unit binds to an exe vftable stays', run(s1.r_vftable_standins, _vt), [_vt])
+s1._VFT_NAMES = _saved_v
+check('VFTBL1 the committed list has the exe vftables 0x010ce838 and 0x0102e388',
+      str({0x010ce838, 0x0102e388} <= s1._exe_vftable_addrs()), ['True'])
 
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

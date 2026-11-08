@@ -23,6 +23,7 @@ import re
 import shutil
 import struct
 import sys
+import time
 import traceback
 import tempfile
 
@@ -77,9 +78,10 @@ def neg(e):
 _PLACEMENT = None
 
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
-STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
+STANDINS = os.environ.get("FNVNX_STANDINS") or os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
+# (FNVNX_STANDINS: another revision's file, for a guest that needs the table of its own time; tools/farm/s5boot_job.sh)
 TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding", "member-vtables",
-                 "repair-lost-slot-one")
+                 "repair-lost-slot-one", "exe-slot-one-d0")
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
 
@@ -172,13 +174,13 @@ def parse_milestones(path):
         if not f:
             continue
         ok = len(f) == 3 and re.fullmatch(r"[a-z][\w-]*", f[0]) and (
-            f[1] == "call" and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
+            f[1] in ("call", "callok", "calltrue") and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
             f[1] == "store" and re.fullmatch(r"\*?0x[0-9a-fA-F]+(\+(0x[0-9a-fA-F]+|\d+))?", f[2]) or
             f[1] == "data" and f[2] in datapath.DATA_MILESTONES)
         if not ok:
-            raise ValueError(f"{path}:{k}: <name> call <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
+            raise ValueError(f"{path}:{k}: <name> call|callok|calltrue <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
                              f"<name> data <{'|'.join(datapath.DATA_MILESTONES)}>")
-        if f[1] == "call" and f[2].startswith("re:"):
+        if f[1].startswith("call") and f[2].startswith("re:"):
             re.compile(f[2][3:])
         out.append(tuple(f))
     return out
@@ -676,7 +678,82 @@ class Emu:
                 print(f"   cpu boost: {'FastLoad' if mode else 'Normal'}"
                       f"{'' if on else ' (off: boost_loading=0)'} (thread {self.cur.tid if self.cur else '?'})")
             return 0 if on else 1
+        if module == 11 and 4 <= fn <= 7:   # FNVNX_PLAT_VM_*: VirtualAlloc's address space (toolchain/host/host_vm.inc)
+            av = struct.unpack("<QQ", bytes(self.uc.mem_read(args, 16))) if nargs >= 2 and args else (0, 0)
+            return self.vm_call(fn, av[0], av[1])
         return 0xFFFFFFFFFFFFFF01
+
+    # -- the host's VM service (S4; the device: toolchain/host/host_vm.inc). Without it the guest's os_vm_* carve
+    # reservations from its heap and refuse every fixed address, and the game's VirtualReservationSearch (16 MiB steps
+    # down from 0xff000000) finds nothing. A reservation is address space only; commits map zeroed pages; decommits
+    # zero them (the memory stays, as the device's partial decommit); release unmaps what was committed.
+    VM_ALIGN, VM_NO_GO = 0x10000, (0x00400000, 0x02100000)
+
+    def vm_free(self, a, n):
+        if a + n > 0x100000000 or (a < self.VM_NO_GO[1] and a + n > self.VM_NO_GO[0]) or a < 0x10000:
+            return False
+        for b, e, _p in self.uc.mem_regions():
+            if a <= e and b < a + n:
+                return False
+        return all(not (a < ra + rs and ra < a + n) for ra, rs in getattr(self, "vm_resv", {}).items())
+
+    def vm_call(self, fn, a0, a1):
+        resv = self.vm_resv = getattr(self, "vm_resv", {})      # base -> size
+        mapped = self.vm_mapped = getattr(self, "vm_mapped", {})  # page -> base of its reservation
+        P = 0x1000
+        if fn == 4:   # reserve (hint or 0, size) -> address or 0; (0, 0) is the guest's probe
+            if not a1:
+                return 0
+            size = (a1 + self.VM_ALIGN - 1) & ~(self.VM_ALIGN - 1)
+            if a0:
+                a = a0 & ~(self.VM_ALIGN - 1)
+                if not self.vm_free(a, size):
+                    return 0
+            else:
+                a = next((c for c in range(0x80000000, 0x100000000 - size, self.VM_ALIGN * 16) if self.vm_free(c, size)), 0)
+                if not a:
+                    return 0
+            resv[a] = size
+            self.vm_stats = getattr(self, "vm_stats", [0, 0])
+            self.vm_stats[0] += 1
+            if self.vm_stats[0] <= 20:
+                print(f"   vm: reserve {a:#x} +{size:#x}{' (fixed)' if a0 else ''}")
+            return a
+        base = next((b for b, s in resv.items() if b <= a0 < b + s), None)
+        if fn == 7:   # release (address) -> 0
+            if base is None or a0 != base:
+                return 1
+            for pg in [p for p, b in mapped.items() if b == base]:
+                self.uc.mem_unmap(pg, P)
+                del mapped[pg]
+            del resv[base]
+            return 0
+        if base is None or a0 + a1 > base + resv[base]:
+            return 1
+        lo, hi = a0 & ~(P - 1), (a0 + a1 + P - 1) & ~(P - 1)
+        if fn == 5:   # commit (address, size) -> 0: map the pages not mapped yet (fresh pages read as zero)
+            pg = lo
+            while pg < hi:
+                if pg in mapped:
+                    pg += P
+                    continue
+                run = pg
+                while run < hi and run not in mapped:
+                    run += P
+                try:
+                    self.uc.mem_map(pg, run - pg, UC_PROT_READ | UC_PROT_WRITE)
+                except UcError:
+                    return 1
+                for q in range(pg, run, P):
+                    mapped[q] = base
+                pg = run
+            return 0
+        if fn == 6:   # decommit (address, size) -> 0: the contents are gone
+            for pg in range(lo, hi, P):
+                if pg in mapped:
+                    self.uc.mem_write(pg, bytes(P))
+            return 0
+        return 1
 
     # -- crash trace: PC/LR and the frame-record chain (x29), symbolized with --elf (S2's __fnv_<addr> aliases
     # give the original FalloutNV.exe address of each native function)
@@ -689,7 +766,7 @@ class Emu:
         for line in out.splitlines():
             f = line.split()
             if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats",
-                                                                 "fnvnx_plat_on"):
+                                                                 "fnvnx_plat_on", "fnvnx_stub_nulldev"):
                 self.data_syms[f[2]] = int(f[0], 16)
             if len(f) == 3 and f[1] in "tTwW":
                 a = int(f[0], 16)
@@ -879,7 +956,7 @@ class Emu:
                 typ, S, P = info & 0xFF, addr_of(info >> 8) + add, layout[h[7]] + off
                 at = P - place
                 (w,) = struct.unpack_from("<I", blob, at)
-                if typ in (20, 21):   # R_AARCH64_P32_JUMP26, _CALL26
+                if typ in (20, 21):   # R_AARCH64_P32_JUMP26, _CALL26 (26/27 are the GOT page and GOT load: not branches)
                     disp = (S - P) >> 2
                     if not -(1 << 25) <= disp < (1 << 25):
                         raise SystemExit(f"--inject {obj}: branch to {S:#x} out of range")
@@ -891,6 +968,8 @@ class Emu:
                     w = (w & 0x9F00001F) | ((pg & 3) << 29) | (((pg >> 2) & 0x7FFFF) << 5)
                 elif typ == 12:         # R_AARCH64_P32_ADD_ABS_LO12_NC
                     w = (w & 0xFFC003FF) | ((S & 0xFFF) << 10)
+                elif typ == 15:         # R_AARCH64_P32_LDST32_ABS_LO12_NC (a word load/store of a static)
+                    w = (w & 0xFFC003FF) | (((S & 0xFFF) >> 2) << 10)
                 else:
                     raise SystemExit(f"--inject {obj}: relocation type {typ} not supported")
                 struct.pack_into("<I", blob, at, w)
@@ -978,7 +1057,7 @@ class Emu:
         X0 = UC_ARM64_REG_X0   # X0..X28 are consecutive in unicorn
         out = open(path, "w", buffering=1)
         self.trace_out = out
-        state = {"seq": 0, "n": 0, "frames": {}, "ret_hooks": {}, "whook": None, "live": 0}
+        state = {"seq": 0, "n": 0, "frames": {}, "ret_hooks": {}, "whook": None, "live": 0, "t0": {}}
         print(f"   trace-fn: {len(targets)} functions -> {path}{' (with writes)' if writes else ''}")
 
         def tid():
@@ -1000,7 +1079,9 @@ class Emu:
             sp = uc.reg_read(UC_ARM64_REG_SP)
             while fr and fr[-1][2] == addr and fr[-1][1] <= sp:
                 seq, _sp, _lr, label = fr.pop()
-                out.write(f"ret\t{seq}\t{t}\t{len(fr)}\t{label}\t{uc.reg_read(X0):#x}\n")
+                # the host wall time of the call, ns (S4's plat_calls: time per API under emulation)
+                dt = time.perf_counter_ns() - state["t0"].pop(seq, time.perf_counter_ns())
+                out.write(f"ret\t{seq}\t{t}\t{len(fr)}\t{label}\t{uc.reg_read(X0):#x}\t{dt}\n")
                 state["live"] -= 1
             # hooks stay installed (adding or deleting one flushes unicorn's translation cache): one return hook per
             # call site, and the write hook ignores stores while no traced call is live
@@ -1021,6 +1102,7 @@ class Emu:
             regs = "\t".join(f"{uc.reg_read(X0 + k) & 0xffffffffffffffff:#x}" for k in range(8))
             caller = self.sym(lr).split("+")[0].replace("\t", " ")
             out.write(f"call\t{seq}\t{t}\t{len(fr)}\t{label}\t{orig}\t{regs}\t{sp:#x}\t{lr:#x}\t{caller}\n")
+            state["t0"][seq] = time.perf_counter_ns()
             if deref:
                 for k in range(8):
                     v = uc.reg_read(X0 + k) & 0xffffffff
@@ -1118,6 +1200,8 @@ class Emu:
         self.extend_short_vtables(uc, objs, V, img, F, rt, st)
         if getattr(self, "repair_slot_one", False):
             self.repair_lost_slot_one(uc, objs, V, img, F, rt, link, st)
+        if getattr(self, "exe_slot_one_d0", False):
+            self.exe_slot_one_d0_fix(uc, objs, V, img, F, rt, link, st)
         if getattr(self, "image_minus_one", False):
             self.image_vptr_minus_one(uc, img, F, V, rt, st)
         self.vslot_thisless(uc, objs, V, rt, st)
@@ -1330,6 +1414,40 @@ class Emu:
             st["slot-one repaired"] += 1
         print("   repair-lost-slot-one: %d link-extended vtables whose renamed destructor pair hid exe slot 1 get it "
               "back in slot 1" % st["slot-one repaired"])
+
+    VT_D0_BASE = 0x0EA00000   # D0 thunks of exe_slot_one_d0_fix
+
+    def exe_slot_one_d0_fix(self, uc, objs, V, img, F, rt, link, st):
+        """table option exe-slot-one-d0: a native vtable in the exe's slot order whose slot 1 is NiRefObject::DeleteThis
+        (exe slot 0 the scalar deleting destructor, slot 1 DeleteThis) while native code compiled against a declared
+        virtual destructor (D1/D0 at slots 0/1) runs `delete p` through slot 1: DeleteThis, whose own `delete this`
+        goes through slot 1 again, a tail-call loop that never returns (GraphicsRenderer::Create's failure path,
+        object of _ZTV12FUN_00e754a0, ctor 0x00e754a0 declared by both GraphicsRenderer and FUN_00e754a0). Slot 1
+        gets a D0 thunk (exe slot 0's native with flags 1), which is what DeleteThis means in the exe too.
+        A stand-in for the decl fix (S2-bodies: one declaration per constructor) or a link-time D0 slot (S2c)."""
+        dt = self.code_syms.get("_ZN11NiRefObject10DeleteThisEv")
+        if dt is None:
+            return
+        dt = rt(dt) & 0xFFFFFFFF
+        uc.mem_map(self.VT_D0_BASE, 0x10000, UC_PROT_ALL)
+        at, done = self.VT_D0_BASE, set()
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            if (sym, off) in done or size - off < 8:
+                continue
+            done.add((sym, off))
+            ex = img.vtable_slots(exe_vt)
+            if len(ex) < 3 or ex[0] not in F or F.get(ex[1]) is None or rt(F[ex[1]]) & 0xFFFFFFFF != dt:
+                continue
+            (w1,) = struct.unpack("<I", bytes(uc.mem_read(rt(a + off + 4), 4)))
+            if w1 != dt or at + 24 > self.VT_D0_BASE + 0x10000:
+                continue
+            uc.mem_write(at, struct.pack("<IIIQ", 0x52800001 | (1 << 5), 0x58000050, 0xD61F0200,
+                                         rt(F[ex[0]]) & 0xFFFFFFFF))
+            uc.mem_write(rt(a + off + 4), struct.pack("<I", at))
+            at += 24
+            st["slot-one d0"] += 1
+        print("   exe-slot-one-d0: %d exe-order vtables whose slot 1 was DeleteThis get a D0 thunk there" % st["slot-one d0"])
 
     def image_vptr_minus_one(self, uc, img, F, V, rt, st):
         """table option image-vptr-minus-one: the guest's references to an exe vftable that no native vtable is bound
@@ -1879,6 +1997,144 @@ class Emu:
             print(f"   stubbed fault: {name} {how} ({err} at {where})")
         return resume, result
 
+    # -- discovery mode (--discover N): measurement only. Every fault that no stub, stand-in or initializer guard
+    # takes is recorded and the faulting function returns 0 to its caller, so one run lists every blocker on the boot
+    # path instead of the first. A call through a bad pointer (a fetch fault) returns to its call site at once; a
+    # fault inside a function unwinds that function's frame from its GCC prologue (the frame record at x29, the
+    # callee-saved registers it stored), so the caller resumes with its own registers. Leaf functions without a
+    # frame record return through x30. Never the product: the game ran with a function cut short.
+    def discover_fault(self, tid, err):
+        uc = self.uc
+        if len(getattr(self, "discovered", ())) >= getattr(self, "discover_max", 0):
+            return False
+        pc = uc.reg_read(UC_ARM64_REG_PC)
+        reps = self.__dict__.setdefault("discover_reps", {})
+        reps[pc] = reps.get(pc, 0) + 1
+        if reps[pc] > 50:   # the same fault site again and again: a loop around it, the run cannot go on past it
+            if reps[pc] == 51:
+                print(f"   discover: {self.sym(pc)} faulted 50 times: a loop, discovery stops taking it")
+            return False
+        lr = uc.reg_read(UC_ARM64_REG_LR)
+        bad_call = pc == 0 or "fetch" in err.lower()
+        if bad_call:
+            where = self.sym(lr - 4) + " | " + self.null_call()
+            resume, how = lr, "call skipped"
+            func = re.sub(r"^0x[0-9a-f]+ ", "", self.sym(lr - 4))
+        else:
+            got = self.discover_unwind(pc)
+            if got is None:
+                return False
+            resume, how = got
+            where = self.sym(pc)
+            func = re.sub(r"^0x[0-9a-f]+ ", "", where)
+        caller = re.sub(r"^0x[0-9a-f]+ ", "", self.sym(resume - 4))
+        if self.trap_text():
+            where += " | " + self.trap_text()
+        self.discovered.append((re.sub(r"\+0x[0-9a-f]+$", "", func), re.sub(r" \(UC_ERR_\w+\)", "", err), caller,
+                                where, len(getattr(self, "miles", {}))))
+        if len(self.discovered) <= 200:
+            print(f"   discover #{len(self.discovered)}: {err} at {where}: {how}, back in {caller}")
+        uc.reg_write(UC_ARM64_REG_X0, 0)
+        uc.reg_write(UC_ARM64_REG_PC, resume)
+        return True
+
+    def discover_unwind(self, pc):
+        """pop the frame of the function containing pc (link addresses from the symbol table, GCC aarch64 prologues):
+        (resume pc, how) with the registers restored, or None when the prologue is not one of the known shapes"""
+        import unicorn.arm64_const as c
+        from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs
+        uc = self.uc
+        la = pc - self.base + self.link_base if self.relocatable and self.base <= pc < self.base + self.size else pc
+        i = self._bisect(self.sym_addrs, la) - 1
+        if i < 0:
+            return None
+        start = self.sym_addrs[i] - self.link_base + self.base if self.relocatable else self.sym_addrs[i]
+        if pc - start > 0x10000:
+            return None
+        md = getattr(self, "_cs", None) or Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+        self._cs = md
+        code = bytes(uc.mem_read(start, 64))
+        ins = list(md.disasm(code, start))[:12]
+        fp = uc.reg_read(UC_ARM64_REG_X29)
+        sp = uc.reg_read(UC_ARM64_REG_SP)
+        rd = lambda a: struct.unpack("<Q", bytes(uc.mem_read(a, 8)))[0]
+        # shape A: stp x29, x30, [sp, #-N]! ; mov x29, sp ; stp/str callee-saved at [sp, #k]
+        # shape B: sub sp, sp, #M ; stp x29, x30, [sp, #k] ; add x29, sp, #k ; stores at [sp, #j]
+        base = entry_sp = None
+        # the frame setup may follow a few early-exit instructions (cbz, mov): start the shapes at the first stp of the
+        # frame record or sub sp; a fault before it is in the function's frameless head
+        k0 = next((j for j, x in enumerate(ins) if (x.mnemonic == "stp" and x.op_str.startswith("x29, x30, [sp, #-")
+                                                    and x.op_str.endswith("]!")) or
+                   (x.mnemonic == "sub" and x.op_str.startswith("sp, sp, #"))), None)
+        if k0:
+            if pc <= ins[k0].address:
+                return self.discover_leaf(start)
+            ins = ins[k0:]
+        if ins and ins[0].mnemonic == "stp" and ins[0].op_str.startswith("x29, x30, [sp, #-") and ins[0].op_str.endswith("]!"):
+            n = int(ins[0].op_str.split("#-")[1].rstrip("]!"), 0)
+            if pc <= ins[0].address + 4 or len(ins) < 2 or ins[1].mnemonic != "mov" or ins[1].op_str != "x29, sp":
+                return None
+            if pc == ins[1].address:   # between the stp and the mov: x29 is still the caller's
+                fp = sp
+            base, entry_sp = fp, fp + n
+        elif ins and ins[0].mnemonic == "sub" and ins[0].op_str.startswith("sp, sp, #"):
+            m = int(ins[0].op_str.split("#")[1], 0)
+            if len(ins) > 2 and ins[1].mnemonic == "stp" and ins[1].op_str.startswith("x29, x30, [sp, #") and \
+                    ins[2].mnemonic == "add" and ins[2].op_str.startswith("x29, sp, #") and pc > ins[2].address:
+                k = int(ins[2].op_str.split("#")[1], 0)
+                base, entry_sp = fp - k, fp - k + m
+            elif pc > ins[0].address:   # a leaf with a stack frame and no frame record
+                got = self.discover_leaf(start)
+                if got is not None:
+                    uc.reg_write(UC_ARM64_REG_SP, sp + m)
+                return got
+            else:
+                return None
+        else:   # a leaf without a frame: x30 is the return address
+            return self.discover_leaf(start)
+        regs = {}
+        for x in ins:
+            if x.mnemonic not in ("stp", "str") or "[sp" not in x.op_str or x.op_str.endswith("]!"):
+                continue
+            ops = x.op_str.split(", [sp")
+            names = [r.strip() for r in ops[0].split(",")]
+            off = int(ops[1].strip(", #]") or "0", 0) if "#" in ops[1] else 0
+            for j, r in enumerate(names):
+                if re.fullmatch(r"x(19|2[0-8])", r):
+                    regs[r] = base + off + 8 * j
+        for r, a in regs.items():
+            uc.reg_write(getattr(c, "UC_ARM64_REG_" + r.upper()), rd(a))
+        rec = base if ins[0].mnemonic == "stp" else fp   # the frame record (saved x29, x30)
+        ret, prev_fp = rd(rec + 8), rd(rec)
+        uc.reg_write(UC_ARM64_REG_X29, prev_fp)
+        uc.reg_write(UC_ARM64_REG_SP, entry_sp)
+        uc.reg_write(UC_ARM64_REG_LR, ret)
+        return ret, "returned 0"
+
+    def discover_leaf(self, start):
+        """return through x30 from a function without a frame record, unless x30 points back into the same function
+        (it called something itself: x30 is stale, the real return address is unknown)"""
+        lr = self.uc.reg_read(UC_ARM64_REG_LR)
+        i = self._bisect(self.sym_addrs, (lr - self.base + self.link_base) if self.relocatable else lr) - 1
+        own = self._bisect(self.sym_addrs, (start - self.base + self.link_base) if self.relocatable else start) - 1
+        if i == own:
+            return None
+        return lr, "leaf returned"
+
+    def discover_summary(self):
+        import collections
+        c = collections.Counter((f, e) for f, e, _c, _w, _m in getattr(self, "discovered", []))
+        first = {}
+        for f, e, cl, w, m in getattr(self, "discovered", []):
+            first.setdefault((f, e), (cl, m))
+        names = list(getattr(self, "mile_order", []))
+        out = []
+        for (f, e), k in c.most_common():
+            cl, m = first[(f, e)]
+            phase = names[m] if m < len(names) else "after " + (names[-1] if names else "?")
+            out.append(f"discovered\t{k}\t{f}\t{e}\tfirst back in {cl}\tbefore {phase}")
+        return out
+
     def stub_summary(self):
         import collections
         c = collections.Counter((n, re.sub(r" \(UC_ERR_\w+\)", "", e), re.sub(r"\+0x[0-9a-f]+", "", w))
@@ -1954,14 +2210,17 @@ class Emu:
         for name, kind, target in parse_milestones(path):
             if name not in self.mile_order:
                 self.mile_order.append(name)
-            if kind == "call":
+            if kind in ("call", "callok", "calltrue"):
                 if target.startswith("re:"):
                     rx = re.compile(target[3:])
                     addrs = sorted({self.code_addr(n) for n in self.code_syms if rx.search(n)})
                 else:
                     addrs = [a for a in [self.code_addr(target)] if a is not None]
                 for a in addrs:
-                    self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
+                    if kind == "call":
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
+                    else:   # reached when the call returns success: callok w0 == 0 (an HRESULT), calltrue w0 & 0xff
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_callret, user_data=(name, kind), begin=a, end=a)
                 if not addrs:
                     print(f"   milestones: {name}: {target} is not in the link")
             elif kind == "data":
@@ -1996,6 +2255,36 @@ class Emu:
     def on_mile_call(self, uc, addr, size, name):
         if name not in self.miles:
             self.mile_hit(name, "call", at=addr)
+
+    def on_mile_callret(self, uc, addr, size, data):
+        """'callok' / 'calltrue' F: at F's entry, a one-shot hook on the return address checks the result there (the
+        same thread and stack pointer: a recursive or other thread's return does not count)"""
+        name, kind = data
+        if name in self.miles:
+            return
+        ret, sp = uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF, uc.reg_read(UC_ARM64_REG_SP)
+        tid = self.cur.tid if getattr(self, "cur", None) else 1
+        pend = self.__dict__.setdefault("mile_ret_pending", {})
+        if ret not in pend:
+            pend[ret] = []
+            self.uc.hook_add(UC_HOOK_CODE, self.on_mile_ret, user_data=ret, begin=ret, end=ret)
+        pend[ret].append((name, kind, sp, tid, addr))
+
+    def on_mile_ret(self, uc, addr, size, ret):
+        pend = self.mile_ret_pending.get(ret) or []
+        sp = uc.reg_read(UC_ARM64_REG_SP)
+        tid = self.cur.tid if getattr(self, "cur", None) else 1
+        for e in list(pend):
+            name, kind, sp0, tid0, fn = e
+            if tid0 != tid or sp0 != sp:
+                continue
+            pend.remove(e)
+            x0 = uc.reg_read(UC_ARM64_REG_X0)
+            ok = (x0 & 0xFFFFFFFF) == 0 if kind == "callok" else (x0 & 0xFF) != 0
+            if ok and name not in self.miles:
+                self.mile_hit(name, f"{kind} (returned {x0 & 0xFFFFFFFF:#x})", at=fn)
+            elif not ok:
+                print(f"   milestone: {name} not reached: {self.sym(fn).split(' ', 1)[-1]} returned {x0 & 0xFFFFFFFF:#x}")
 
     def on_mile_store(self, uc, access, addr, size, value, data):
         name, target, want = data
@@ -2261,6 +2550,12 @@ class Emu:
                     t.resume_pc, t.result = stub
                     self.cur = None
                     continue
+                if getattr(self, "discover_max", 0) and not getattr(self, "guard", {}).get(t.tid) \
+                        and self.discover_fault(t.tid, str(e)):   # initializers keep their guard (skipped whole)
+                    t.ctx, t.state, t.resume_pc = uc.context_save(), "ready", uc.reg_read(UC_ARM64_REG_PC)
+                    t.result = 0
+                    self.cur = None
+                    continue
                 g = getattr(self, "guard", {}).pop(t.tid, None)
                 if g is not None and len(self.skipped) < getattr(self, "max_skips", 100000):
                     pc = uc.reg_read(UC_ARM64_REG_PC)
@@ -2272,6 +2567,13 @@ class Emu:
                     self.skipped.append((g[2], pc, why))
                     if len(self.skipped) <= 30:
                         print(f"   skipped initializer {self.sym(g[2])}: {e} at {self.sym(pc)}")
+                    if re.search(r" _?(_malloc_r|_free_r|_realloc_r|_calloc_r|malloc|free|realloc)\+0x",
+                                 self.sym(pc)) and not getattr(self, "libc_heap_undefined", None):
+                        # the skip leaves newlib's heap half-updated and its lock held by this thread: what follows
+                        # (a deadlock on the malloc lock, corrupted blocks) is a consequence, not a new blocker
+                        self.libc_heap_undefined = f"{self.sym(g[2])} at {self.sym(pc)}"
+                        print(f"   skipped inside libc malloc: the libc heap is undefined from here "
+                              f"({self.libc_heap_undefined})")
                     uc.context_restore(g[0])
                     uc.reg_write(UC_ARM64_REG_X0, 0)
                     t.ctx, t.resume_pc, t.result, t.state = uc.context_save(), g[1], 0, "ready"
@@ -2339,6 +2641,14 @@ def main(argv):
     ap.add_argument("--trace-writes", action="store_true", help="--trace-fn also logs the callees' memory writes")
     ap.add_argument("--trace-max", type=int, default=1_000_000, help="--trace-fn: at most this many calls")
     ap.add_argument("--trace-deref", type=int, default=32, help="--trace-fn: bytes dumped behind each pointer argument")
+    ap.add_argument("--discover", type=int, default=0, metavar="N",
+                    help="discovery mode, measurement only: up to N faults outside initializers are recorded and the "
+                         "faulting function returns 0 to its caller (a bad call is skipped), so one run lists every "
+                         "blocker on the boot path ('discovered' lines)")
+    ap.add_argument("--stub-nulldev", action="store_true",
+                    help="stub boots only (farm_boot.sh with FNVNX_STUB_NULLDEV=1): toolchain/game/native_device.cpp's "
+                         "fnvnx_stub_nulldev = 1 at __libc_init_array, so CreateDevice succeeds on the null device "
+                         "without a GPU backend (the engine runs headless past its renderer init; nothing is drawn)")
     ap.add_argument("--plat", action="store_true",
                     help="the platform lane's recorder on from the start (platform/win32/platstat.cpp's fnvnx_plat_on "
                          "= 1 at __libc_init_array, after runtime.c clears .bss, before every constructor): 'plat: ...' "
@@ -2383,6 +2693,7 @@ def main(argv):
                 emu.member_vtables_rx = fault_table_option_arg(a.stub_faults, "member-vtables") \
                     if emu.member_vtables else None
                 emu.repair_slot_one = bool(a.stub_faults) and "repair-lost-slot-one" in fault_table_options(a.stub_faults)
+                emu.exe_slot_one_d0 = bool(a.stub_faults) and "exe-slot-one-d0" in fault_table_options(a.stub_faults)
                 emu.image_minus_one = bool(a.stub_faults) and "image-vptr-minus-one" in fault_table_options(a.stub_faults)
                 emu.image_minus_one_rx = fault_table_option_arg(a.stub_faults, "image-vptr-minus-one") \
                     if emu.image_minus_one else None
@@ -2406,6 +2717,7 @@ def main(argv):
         addr, _, n = spec.partition(":")
         emu.install_watch(int(addr, 0), int(n, 0) if n else 4)
     emu.wall_seconds = a.wall_seconds
+    emu.discover_max, emu.discovered = a.discover, []
     if a.trace_fn:
         emu.install_trace_fn(a.trace_fn, a.trace_out or "trace_fn.tsv", writes=a.trace_writes, limit=a.trace_max,
                            deref=a.trace_deref)
@@ -2445,10 +2757,12 @@ def main(argv):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
+        for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.trap_table() + peeks() + emu.placements()
                      + emu.milestone_lines() + emu.dp.lines()
                      + emu.vt_past_lines() + emu.watch_lines()):
             print(line)
+        if getattr(emu, "libc_heap_undefined", None):
+            print(f"libc-heap-undefined\t{emu.libc_heap_undefined}")
         print(f"STOPPED: {why}")
         write_summary(f"STOPPED: {why}")
         return 1
@@ -2473,6 +2787,32 @@ def main(argv):
                     uc.hook_del(hk["h"])
                 hk["h"] = emu.uc.hook_add(UC_HOOK_CODE, plat_on, begin=ia, end=ia)
                 print("   plat: recorder on (fnvnx_plat_on at %#x, set at __libc_init_array %#x)" % (pa, ia))
+    if a.stub_nulldev:
+        na = getattr(emu, "data_syms", {}).get("fnvnx_stub_nulldev")
+        ia = getattr(emu, "code_syms", {}).get("__libc_init_array")
+        hook = getattr(emu, "code_syms", {}).get("fnvnx_d3d9_device_created")
+        if na is None and hook is not None:   # a guest built before the flag: the hook itself returns S_OK at once
+            hook = hook - emu.link_base + emu.base if emu.relocatable else hook
+
+            def nulldev_hook(uc, addr, size, data):
+                print("   stub-nulldev: fnvnx_d3d9_device_created returns S_OK (STUB BOOT: no renderer, headless)")
+                uc.reg_write(UC_ARM64_REG_X0, 0)
+                uc.reg_write(UC_ARM64_REG_PC, uc.reg_read(UC_ARM64_REG_LR))
+            emu.uc.hook_add(UC_HOOK_CODE, nulldev_hook, begin=hook, end=hook)
+            print("   stub-nulldev: on (no fnvnx_stub_nulldev in this guest: fnvnx_d3d9_device_created returns S_OK)")
+        elif na is None or ia is None:
+            print("   stub-nulldev: off (neither fnvnx_stub_nulldev nor fnvnx_d3d9_device_created in the ELF)")
+        else:
+            na = na - emu.link_base + emu.base if emu.relocatable else na
+            ia = ia - emu.link_base + emu.base if emu.relocatable else ia
+            hn = {}
+
+            def nulldev_on(uc, addr, size, data):
+                uc.mem_write(na, struct.pack("<I", 1))
+                uc.hook_del(hn["h"])
+            hn["h"] = emu.uc.hook_add(UC_HOOK_CODE, nulldev_on, begin=ia, end=ia)
+            print("   stub-nulldev: on (fnvnx_stub_nulldev at %#x): CreateDevice succeeds headless without a GPU backend"
+                  % na)
     try:
         rc = emu.run()
     except SystemExit as e:
@@ -2490,7 +2830,7 @@ def main(argv):
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
-    for line in (emu.skip_summary() + emu.stub_summary() + emu.trap_table() + peeks() + emu.placements()
+    for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.trap_table() + peeks() + emu.placements()
                  + emu.milestone_lines() + emu.dp.lines()
                  + emu.vt_past_lines() + emu.watch_lines()):
         print(line)

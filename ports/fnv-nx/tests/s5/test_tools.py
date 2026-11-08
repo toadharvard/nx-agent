@@ -481,6 +481,70 @@ class MilestoneTest(unittest.TestCase):
                 with self.assertRaises((ValueError, re.error)):
                     emu_guest.parse_milestones(p)
 
+    def test_callok_needs_success(self):
+        """'callok F' is reached when F returns 0 to its caller, not when F starts: the native-render hook fails
+        CreateDevice without a GPU backend (D3DERR_NOTAVAILABLE), and that boot has no renderer"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc
+        from unicorn.arm64_const import UC_ARM64_REG_SP
+        rows = emu_guest.parse_milestones(emu_guest.MILESTONES)
+        self.assertEqual({k for n, k, _ in rows if n == "renderer-init"}, {"callok", "calltrue"})
+        for ret, reached in ((0, True), (0x8876086A, False)):
+            e = emu_guest.Emu.__new__(emu_guest.Emu)
+            e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+            e.calls, e.cur, e.miles = 0, None, {}
+            e.code_syms = {"_ZN15Null_IDirect3D912CreateDeviceEj": 0x1100}
+            e.code_addr = lambda n, e=e: e.code_syms.get(n)
+            e.sym = lambda a: "x %#x" % a
+            uc.mem_map(0x1000, 0x1000)
+            uc.mem_map(0x8000, 0x1000)   # stack
+            # 0x1000: bl 0x1100; nop    0x1100: movz w0,#lo; movk w0,#hi,lsl 16; ret
+            uc.mem_write(0x1000, struct.pack("<2I", 0x94000040, 0xD503201F))
+            uc.mem_write(0x1100, struct.pack("<3I", 0x52800000 | ((ret & 0xFFFF) << 5),
+                                             0x72A00000 | ((ret >> 16) << 5), 0xD65F03C0))
+            uc.reg_write(UC_ARM64_REG_SP, 0x8800)
+            with tempfile.TemporaryDirectory() as t:
+                p = os.path.join(t, "m.txt")
+                with open(p, "w") as f:
+                    f.write("renderer-init callok re:CreateDevice\n")
+                e.install_milestones(p)
+            uc.emu_start(0x1000, 0x1008)
+            self.assertEqual("renderer-init" in e.miles, reached, hex(ret))
+
+    def test_discover_unwinds_frame(self):
+        """--discover: a fault inside a function with a GCC frame returns 0 to its caller with the caller's
+        callee-saved registers restored (x19), and a call through a null pointer is skipped at its call site"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc, UcError
+        from unicorn.arm64_const import UC_ARM64_REG_PC, UC_ARM64_REG_SP, UC_ARM64_REG_X0, UC_ARM64_REG_X19
+        e = emu_guest.Emu.__new__(emu_guest.Emu)
+        e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        e.cur, e.miles, e.discovered, e.discover_max = None, {}, [], 10
+        e.base = e.link_base = 0x1000
+        e.size, e.relocatable = 0x1000, False
+        e.sym_addrs, e.sym_names, e.code_syms = [0x1000, 0x1100], [["caller"], ["callee"]], {}
+        import bisect
+        e._bisect = bisect.bisect_right
+        uc.mem_map(0x1000, 0x1000)
+        uc.mem_map(0x8000, 0x1000)
+        # caller: mov x19,#7; mov x0,#99; bl callee; mov x1,x19; nop ...  (0x1010: after the call)
+        uc.mem_write(0x1000, struct.pack("<5I", 0xD28000F3, 0xD2800C60, 0x9400003E, 0xAA1303E1, 0xD503201F))
+        # callee: stp x29,x30,[sp,#-32]!; mov x29,sp; stp x19,x20,[sp,#16]; mov x19,#5; ldr w0,[xzr? -> x9=0]
+        uc.mem_write(0x1100, struct.pack("<6I", 0xA9BE7BFD, 0x910003FD, 0xA90153F3, 0xD28000B3, 0xD2800009,
+                                         0xB9400120))
+        uc.reg_write(UC_ARM64_REG_SP, 0x8800)
+        try:
+            uc.emu_start(0x1000, 0x1014)
+            self.fail("no fault")
+        except UcError as err:
+            self.assertTrue(e.discover_fault(1, str(err)))
+        self.assertEqual(uc.reg_read(UC_ARM64_REG_PC), 0x100C)
+        self.assertEqual((uc.reg_read(UC_ARM64_REG_X19), uc.reg_read(UC_ARM64_REG_X0), uc.reg_read(UC_ARM64_REG_SP)),
+                         (7, 0, 0x8800))
+        self.assertEqual(e.discovered[0][0], "callee")
+
     def test_stored_word(self):
         sys.path.insert(0, HERE)
         import emu_guest

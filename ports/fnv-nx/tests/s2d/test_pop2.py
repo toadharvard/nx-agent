@@ -134,6 +134,103 @@ UNITS = {'units': [
         {'symbol': '?FUN_00405200@Y@@QAEXPAXPAX@Z', 'address': '0x00405200'}]},
 ]}
 
+SRC_INLINE = '''#define __forceinline inline
+void g();
+namespace fnv_00403500 {
+struct FormMask
+{
+    unsigned int m;
+    __forceinline operator bool() const
+    {
+        return m != 0;
+    }
+};
+struct Buf
+{
+    FormMask Flags(unsigned int) const;
+};
+// @fnv 0x00403500
+void F(Buf* b)
+{
+    if (b->Flags(0x80000000))
+        g();
+}
+}  // namespace fnv_00403500
+struct Cell
+{
+    void Activate() {}
+};
+struct Tes
+{
+    Cell* Active(void* p);
+};
+// @fnv 0x00403600
+void K(Tes* t, void* p)
+{
+    t->Active(p)->Activate();
+}
+namespace fnv_00403700 {
+struct FormMask
+{
+    unsigned int m;
+    // @fnv 0x00402000
+    operator bool() const
+    {
+        return m != 0;
+    }
+};
+struct Buf
+{
+    FormMask Flags(unsigned int) const;
+};
+// @fnv 0x00403700
+void F(Buf* b)
+{
+    if (b->Flags(8))
+        g();
+}
+}  // namespace fnv_00403700
+struct SaveBuf
+{
+    int Flags();
+};
+namespace fnv_00403800 {
+namespace N {
+struct FormMask
+{
+    unsigned int m;
+    operator bool() const;
+};
+struct Buf
+{
+    FormMask Flags(unsigned int);
+};
+}
+// @fnv 0x00403800
+void F(N::Buf* b)
+{
+    if (((N::Buf*)b)->Flags(0x8000020))
+        g();
+    if (reinterpret_cast<N::Buf*>(b)->Flags(3))
+        g();
+}
+}  // namespace fnv_00403800
+'''
+
+UNITS_INLINE = {'units': [
+    {'source': 'src/c.cpp', 'flags': ['/Od'], 'functions': [], 'symbols': {
+        '?Flags@Buf@fnv_00403500@@QBE?AUFormMask@2@I@Z': '0x00401000',
+        '??BFormMask@fnv_00403500@@QBE_NXZ': '0x00402000',
+        '?Flags@Buf@fnv_00403700@@QBE?AUFormMask@2@I@Z': '0x00401000',
+        '??BFormMask@fnv_00403700@@QBE_NXZ': '0x00402000',
+        '?Flags@SaveBuf@@QAEHXZ': '0x00401200',
+        '?Flags@Buf@N@fnv_00403800@@QAE?AUFormMask@23@I@Z': '0x00401000',
+        '??BFormMask@N@fnv_00403800@@QBE_NXZ': '0x00402000',
+        '?Active@Tes@@QAEPAUCell@@PAX@Z': '0x00404100', '?Activate@Cell@@QAEXXZ': '0x00405100'}},
+    UNITS['units'][1],
+]}
+
+
 def syntax_ok(path, inc):
     cxx = shutil.which('g++')
     if not cxx:
@@ -224,6 +321,34 @@ class Pop2(unittest.TestCase):
                 self.assertTrue(r[0], r[1])
             rows = open(os.path.join(d, 'build', 'pop2_sites.tsv')).read()
             self.assertIn('src/a.cpp\t00403200\tGet\tUse\t00404000\t00405000\tnested\t1', rows)
+
+    def test_inline_stand_in_receiver(self):
+        """A receiver declared with an inline body (a unit-local copy's stand-in) gets the declaration-only overload
+        and the call names it; the stand-in stays. A body with its own @fnv tag stays skipped."""
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'build'))
+            os.makedirs(os.path.join(d, 'src'))
+            json.dump(UNITS_INLINE, open(os.path.join(d, 'build', 'units.json'), 'w'))
+            open(os.path.join(d, 'src', 'c.cpp'), 'w').write(SRC_INLINE)
+            stats = self.run_hook(d)
+            out = open(os.path.join(d, 'src', 'c.cpp')).read()
+            self.assertEqual(out.count('\n'), SRC_INLINE.count('\n'))
+            self.assertIn('if (b->Flags().FUN_00402000(0x80000000))', out)
+            self.assertIn('bool FUN_00402000(unsigned int) const;', out)
+            self.assertIn('return m != 0;', out)                                 # the stand-in stays
+            self.assertNotIn('inline bool FUN_', out)
+            self.assertIn('t->Active()->Activate(p);', out)                      # a named receiver, inline body
+            self.assertIn('void Activate(void* p);', out)
+            self.assertIn('if (b->Flags(8))', out)                               # tagged body: skipped
+            self.assertIn('if (((N::Buf*)b)->Flags().FUN_00402000(0x8000020))', out)    # a cast names the class
+            self.assertIn('if (reinterpret_cast<N::Buf*>(b)->Flags().FUN_00402000(3))', out)
+            self.assertEqual(stats['POP2'], 4)
+            self.assertEqual(stats['POP2-SKIP-R-declaration-inline-body-no'], 1)
+            syms = json.load(open(os.path.join(d, 'build', 'units.json')))['units'][0]['symbols']
+            self.assertEqual(syms.get('?FUN_00402000@FormMask@fnv_00403500@@QBE_NI@Z'), '0x00402000')
+            r = syntax_ok(os.path.join(d, 'src', 'c.cpp'), os.path.join(d, 'src'))
+            if r is not None:
+                self.assertTrue(r[0], r[1])
 
     def test_idempotent_on_patched_text(self):
         """A second run finds nothing: the moved calls no longer push more than their definitions pop."""

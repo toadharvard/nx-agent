@@ -814,7 +814,13 @@ resolve bound only through another unit's reference to the same name (gref / gde
 a *different* function there, TESForm::IsQuestItem at 0x0046f070 where the exe's TESForm slot 37 is 0x00401190) is a
 hint: when no code of the object calls the name, exe_slot_fill replaces the address with the exe vftable's function
 at the slot (`hint_rebound`; slot_fill.tsv row `exe vftable over the name's address`) and keeps it where the exe has
-none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+none or the function cannot be bound (`hint_kept_*`). W20 extends this to names the unit's own recipe binds (tier
+`unit/*`), by what the object's code does with the name: never called (class b, 24 of 208 holder x symbol items on link
+0540aff0d154, all of them the unit's own definitions nothing calls) is a hint like the above; called directly (class a,
+183 items: `Base::f()` from an override, whose exe call site reaches the bound address in the pristine object) keeps the
+symbol at its address for the call and gives each vtable slot that names it, where the exe vftables of that use agree,
+the exe's function as a per-slot override (`chint_slot_over`; slot_fill.tsv row `per slot (exe vftable; the name stays
+at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
 `test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
 
 ## Platform, imports, thread-locals and hand-written vptrs
@@ -992,10 +998,29 @@ none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (s
   `zz_bridges.o`, note "minus-one copy of the exe vftable"), so EQ's vtable pairing and `vtmetric` see the vftables of
   classes the decomp declares without virtual members (vtmetric's `no-polymorphic-view`: 164 primary + 7 secondary on
   link 0540aff0, 163 of them referenced as data) and none keeps `__fnv_<V> = 0x<V>` while a unit stores it.
+  W19 (option A): the candidates are every RTTI exe vftable no V row stands for, referenced as data or not
+  (`vmo_candidates`; `FNVNX_D26C_ALL=0` restores the referenced-only selection), offset-to-top from the COL. On a
+  secondary vftable a slot that is an MSVC adjustor thunk (`sub ecx, n; jmp f`, through at most two more thunks) gets
+  a stub (`__fnvnx_vadj_<a>`, destructor slot 0: `__fnvnx_vadjd_<a>_0|1` into f's D1/D0 or flags stubs) only when
+  the summed n is exactly the COL offset and f has a native definition (`vmo_adjustor`); any other adjusting thunk
+  stays a visible trap. On link 0540aff0's inputs (simulated from addrmap.tsv and the exe's RTTI): 746 copies, all
+  with exe slots, 47 beyond the referenced-only 699.
   `out/vmo.tsv` lists the copies. `FNVNX_D26C=0` turns the pass off, so a boot can be compared with and without
   it. On link 9f865b0a's inputs (offline) it makes 831 copies: 615 hand-stored + 239 RTTI-referenced candidates,
   minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
   slots.
+
+  **A D0 in native slot 1 of a table in the exe's slot order** (W23, `d0_slot_fix` in `exe_vtable_copies`;
+  `FNVNX_D0SLOT=0` turns it off). A native `delete p` through a declaration with a virtual destructor calls Itanium
+  slot 1. A native vtable with no D1/D0 pair (the decomp declares a placeholder `virtual void BaseVirtual();` where
+  the exe has the ??_G; `_ZTV12FUN_00e754a0`, ctor 0x00e754a0, which GraphicsRenderer also declares with a virtual
+  destructor) is built or extended in the exe's order, so slot 1 holds exe slot 1. When that is
+  `DeleteThis() { delete this; }` (`exevft.delete_this`: the exe's bytes, a call of vftable slot 0 with flags 1) the
+  native `delete this` goes through slot 1 again, forever (S5 round 6, link 97deacd38aec). Slot 1 becomes the D0 of
+  exe slot 0 (`vmo_dtor_slots`: the Itanium D0, or the flags-1 stub), which is what DeleteThis does in the exe.
+  Nothing else moves: a full shift to D26's order would break every caller compiled against the same table in the exe's
+  order (the call-only placeholders, e.g. the renderer's slot 54), which D26 (a)/(b) convert in S1-rules, not here.
+  vtmetric's `slot-one-delete-this` counts the tables still in that shape (96 on link 0540aff0; the fix's target is 0).
 
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 

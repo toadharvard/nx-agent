@@ -275,6 +275,21 @@ TEST(cpplib_ios_base_and_ostream)
     CHECK_EQ(o->ios.base._Mystate, 4); /* badbit without a buffer */
     CHECK(o->ios.base._Stdstr >= 1);
     fnvnx_ios_base_dtor(&o->ios.base);
+
+    /* basic_ios::init for the decomp's istream copies (S4 STL2): every field but the vptr their constructor set */
+    alignas(void *) unsigned char ib[sizeof(basic_ios)];
+    memset(ib, 0xcc, sizeof ib);
+    basic_ios *io = (basic_ios *)ib;
+    const void *vp = io->base.vptr;
+    fnvnx_basic_ios_init(io, &strbuf, 0);
+    CHECK(io->base.vptr == vp);
+    CHECK(io->_Mystrbuf == &strbuf && io->_Tiestr == NULL && io->_Fillch == ' ');
+    CHECK_EQ(io->base._Mystate, 0);
+    CHECK_EQ(io->base._Except, 0);
+    CHECK_EQ(io->base._Fmtfl, 0x201);
+    CHECK(io->base._Arr == NULL && io->base._Calls == NULL);
+    CHECK(io->base._Ploc != NULL && io->base._Ploc->_Ptr == fnvnx_locale_getgloballocale());
+    fnvnx_ios_base_dtor(&io->base);
 }
 
 TEST(cpplib_fiopen)
