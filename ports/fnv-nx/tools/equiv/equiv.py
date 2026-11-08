@@ -109,6 +109,8 @@ CLASSES = {
     'ANON1': 'platform',        # names an unnamed struct defined in a return type (MSVC decorates the name)
     'STL1': 'platform',        # fnvnx_msvcstl.h: MSVC <xutility> internals (_SCL_SECURE_VALIDATE, _Ptr_cat) for libstdc++
     'STL2': 'platform',        # fnvnx_vc9.h: VC9's containers in their x86 layout for units using real <string>/<vector>/<map>
+    'STLB1': 'platform',      # VC9 helper template bodies (_Allocate, _Destroy, fill, swap, vector::_Xlen) an in-unit std copy declares only
+    'STLB2': 'platform',      # VC9 bodies of an in-unit ifstream / vector<T> model's declared members (setstate, init, UseFacet, widen, open, vector ctor/dtor)
     'SPEC3': 'neutral',         # namespace qualification of names in specializations written inside a namespace
     'LEX1': 'neutral',          # MSVC token spellings (i64 suffixes, 0xae-0x34, "C"enum) -> standard ones
     'STD1': 'platform',         # a decomp `struct std { static float abs(float); }` -> <cmath>'s std::abs
