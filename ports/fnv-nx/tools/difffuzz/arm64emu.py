@@ -377,10 +377,15 @@ class Arm64Engine:
             return v - a64image.CODE_STUB if v in self._code_stub_set() else v
         return self.image.entries.get(v, v)
 
-    def _norm_bytes(self, b):
+    def _norm_bytes(self, b, base=None):
+        """base: the address of b[0] when b is copied data (libcalls.Mem.write data=True): a window is a code pointer
+        only at a 4-aligned address (r5-copywin); a stored value is scanned at every byte offset as before."""
         b = bytearray(b)
         i = 0
         while i + 4 <= len(b):
+            if base is not None and (base + i) & 3:
+                i += 1
+                continue
             w = int.from_bytes(b[i:i + 4], 'little')
             n = self._codeptr(w)
             if n == w and self.vtables:
@@ -574,8 +579,11 @@ class Arm64Engine:
                 x0 = r.calls[-1].args[0] & 0xffffffff
             elif ch and ch[0][1][0] == 'x':
                 x0 = r.calls[-1].args[ch[0][1][1]] & 0xffffffff
-        elif ck == 'ref':
+        elif ck == 'ref' or k in world.REF_CALLS:
             x0 = world.ref_result(k)
+            if k in world.REF_CALLS:
+                self._ensure(x0, 16)
+                uc.mem_write(x0, rb[:16])
         elif ck == 'bool' or (ck == 'untyped' and not self._is_import(name, target)):
             # a real bool result is 0/1. An import is not normalised: x86emu._on_import gives it the raw canned
             # word (S1-rules d26-imp: TlsGetValue was 0xffffffff on x86, 0xffffff01 natively, so [ret + 4] faulted
@@ -583,6 +591,11 @@ class Arm64Engine:
             x0 = (x0 & ~0xff) | (rb[0] & 1)
         uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
+        if k in world.REF_CALLS:
+            # (r5 design) the canned object seen by value: a struct of floats comes back in s0..s3 (AAPCS64 HFA), the
+            # words the oracle loads through the pointer
+            for i in range(1, 4):
+                uc.reg_write(VR[i], int.from_bytes(rb[4 * i:4 * i + 4], 'little'))
         if cv is not None and cv.hidden and cv.ret is not None:
             # the MSVC side returns this value through memory: the same bytes here, wherever AAPCS64 puts them
             res = world.result_bytes(case, k, cv.ret.size)

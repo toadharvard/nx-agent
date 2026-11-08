@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""tests/s2d - STL1 (tools/rules/s4_stl.py) on a hand-written unit: a `namespace std` copy declaring VC9's helper
+"""tests/s2d - STLB1 (tools/rules/s4_stl.py) on a hand-written unit: a `namespace std` copy declaring VC9's helper
 templates (_Allocate, _Destroy, fill, swap) and a vector with `static void _Xlen();`, none defined. After the rule
 the unit compiles (system aarch64-linux-gnu-g++ -mabi=ilp32, -O0 so nothing is inlined away) with none of them
-undefined; a unit that defines them itself is left as it is. STL2 on a hand-written iostream / vector<float> model:
+undefined; a unit that defines them itself is left as it is. STLB2 on a hand-written iostream / vector<float> model:
 setstate, basic_ios::init, a UseFacet with its widen, basic_ifstream::open and vector<float>'s ctor/dtor get bodies,
 calling only fnvnx_basic_ios_init and fnvnx_fiopen. Our own code only."""
 import collections
@@ -138,10 +138,10 @@ def ok(name, cond, info=''):
 def main():
     st = collections.Counter()
     out = s4_stl.r_stl_helper_bodies('src/t.cpp', UNIT, st)
-    ok('five helpers get bodies', st['STL1'] == 5 and out.startswith(UNIT), st)
+    ok('five helpers get bodies', st['STLB1'] == 5 and out.startswith(UNIT), st)
     st2 = collections.Counter()
     ok('a second run adds nothing (defined now)', s4_stl.r_stl_helper_bodies('src/t.cpp', out, st2) == out and
-       not st2['STL1'], st2)
+       not st2['STLB1'], st2)
     ok('no std copy: unchanged', s4_stl.r_stl_helper_bodies('src/u.cpp', 'int f() { return 1; }\n',
                                                             collections.Counter()) == 'int f() { return 1; }\n')
     cxx = shutil.which('aarch64-linux-gnu-g++')
@@ -164,10 +164,10 @@ def main():
                     ok('after: none undefined', not hits, hits)
     st = collections.Counter()
     out2 = s4_stl.r_stl_stream_bodies('src/t2.cpp', UNIT2, st)
-    ok('STL2: six bodies (the facet with its widen)', st['STL2'] == 6, (st, out2[len(UNIT2):]))
-    ok('STL2: vector fields all zeroed', 'auxiliary(0), allocatorAuxiliary(0), first(0), last(0), end(0)' in out2,
+    ok('STLB2: seven bodies', st['STLB2'] == 7, (st, out2[len(UNIT2):]))
+    ok('STLB2: vector fields all zeroed', 'auxiliary(0), allocatorAuxiliary(0), first(0), last(0), end(0)' in out2,
        out2[len(UNIT2):])
-    ok('STL2: a second run adds nothing', s4_stl.r_stl_stream_bodies('src/t2.cpp', out2, collections.Counter()) == out2)
+    ok('STLB2: a second run adds nothing', s4_stl.r_stl_stream_bodies('src/t2.cpp', out2, collections.Counter()) == out2)
     if cxx:
         with tempfile.TemporaryDirectory() as t:
             res = {}
@@ -176,13 +176,13 @@ def main():
                 open(src, 'w').write(text)
                 r = subprocess.run([cxx, '-mabi=ilp32', '-std=gnu++17', '-O0', '-fpermissive', '-c', src, '-o', obj],
                                    capture_output=True, text=True)
-                ok('STL2 %s compiles' % name, r.returncode == 0, r.stderr)
+                ok('STLB2 %s compiles' % name, r.returncode == 0, r.stderr)
                 res[name] = subprocess.run(['aarch64-linux-gnu-nm', '-u', obj], capture_output=True,
                                            text=True).stdout.split()
             want = ('setstate', '4init', 'XUseFacet', '5widen', '4open', '6vectorIfSaIfEEC', '6vectorIfSaIfEED')
-            ok('STL2 before: the seven members undefined',
+            ok('STLB2 before: the seven members undefined',
                all(any(k in s for s in res['before']) for k in want), res['before'])
-            ok('STL2 after: none, only the two platform calls',
+            ok('STLB2 after: none, only the two platform calls',
                not any(k in s for s in res['after'] for k in want) and 'fnvnx_basic_ios_init' in res['after'] and
                'fnvnx_fiopen' in res['after'], res['after'])
     # a recon for the unit (REC1, FNVNX_RECON) that covers a name: STL leaves that name to it
@@ -197,19 +197,35 @@ def main():
         try:
             st = collections.Counter()
             o = s4_stl.r_stl_stream_bodies('/x/src/t2.cpp', UNIT2, st)
-            ok('recon covers setstate and ~vector: STL2 leaves both', st['STL2'] == 4 and st['STL-RECON'] == 2 and
+            ok('recon covers setstate and ~vector: STLB2 leaves both', st['STLB2'] == 5 and st['STLB-RECON'] == 2 and
                'ios_base::setstate' not in o[len(UNIT2):] and '~vector' not in o[len(UNIT2):], (st, o[len(UNIT2):]))
             st = collections.Counter()
             o = s4_stl.r_stl_helper_bodies('/x/src/t.cpp', UNIT, st)
-            ok('a recon of another unit changes nothing', st['STL1'] == 5 and not st['STL-RECON'], st)
+            ok('a recon of another unit changes nothing', st['STLB1'] == 5 and not st['STLB-RECON'], st)
             st = collections.Counter()
             o = s4_stl.r_stl_helper_bodies('/x/src/t2.cpp', UNIT, st)
-            ok('STL1: the recon\'s fill symbol leaves fill', st['STL1'] == 4 and st['STL-RECON'] == 1, st)
+            ok('STLB1: the recon\'s fill symbol leaves fill', st['STLB1'] == 4 and st['STLB-RECON'] == 1, st)
         finally:
             if old is None:
                 os.environ.pop('FNVNX_RECON', None)
             else:
                 os.environ['FNVNX_RECON'] = old
+    # a recon binding the facet only (R2's csvusefacet_char): STLB2 keeps widen
+    with tempfile.TemporaryDirectory() as rd:
+        os.makedirs(os.path.join(rd, 'r1'))
+        json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/t2.cpp',
+                   'symbols': {'??$XUseFacet@D@std@@YAABU?$XCtype@D@0@ABULoc@@@Z': '0x00ad38d0'}},
+                  open(os.path.join(rd, 'r1', 'recon.json'), 'w'))
+        os.environ['FNVNX_RECON'] = rd
+        s4_stl._RECON_CACHE.clear()
+        try:
+            st = collections.Counter()
+            o = s4_stl.r_stl_stream_bodies('/x/src/t2.cpp', UNIT2, st)[len(UNIT2):]
+            ok('facet bound by a recon: STLB2 leaves the facet, keeps widen',
+               'XUseFacet(const Loc&)' not in o and 'XCtype<_E>::widen' in o and st['STLB-RECON'] == 1, (st, o))
+        finally:
+            os.environ.pop('FNVNX_RECON', None)
+            s4_stl._RECON_CACHE.clear()
     # a name the unit's units.json symbols bind: left to the binding (nested std@fnv_ copies do not count)
     with tempfile.TemporaryDirectory() as ur:
         os.makedirs(os.path.join(ur, 'build'))
@@ -220,7 +236,7 @@ def main():
                   open(os.path.join(ur, 'build', 'units.json'), 'w'))
         st = collections.Counter()
         o = s4_stl.r_stl_stream_bodies(os.path.join(ur, 'src', 't2.cpp'), UNIT2, st)
-        ok('bound ctor left to the binding, nested setstate ignored', st['STL-BOUND'] == 1 and st['STL2'] == 5 and
+        ok('bound ctor left to the binding, nested setstate ignored', st['STLB-BOUND'] == 1 and st['STLB2'] == 6 and
            '::vector()' not in o[len(UNIT2):] and 'ios_base::setstate' in o[len(UNIT2):], (st, o[len(UNIT2):]))
     print('test_stl1: %d failed' % fails)
     return 1 if fails else 0

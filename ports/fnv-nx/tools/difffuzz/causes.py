@@ -113,9 +113,26 @@ POLICY = {
                                                  'those stores differently (no allocation returns the caller\'s own '
                                                  'object); equal with the results moved to the heap'),
     'ptrdiff-unaligned': ('by-design', '-', False, 'a pointer difference that is not a multiple of the element size: '
-                                                   'GCC folds (end - begin) / size * size to end - begin, MSVC keeps '
-                                                   'the division (UB in C++); equal with 4-aligned arguments'),
+                                                   'GCC divides exactly (or folds (end - begin) / size * size), MSVC '
+                                                   'keeps the idiv (UB in C++); equal with 4-aligned arguments or, '
+                                                   'for `sub; cdq; idiv K` in the exe, with the subtrahend word '
+                                                   'rounded to a multiple of K (r5design.ptrdiff_probe)'),
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
+    'dead-result':    ('by-design', '-', False, 'the target\'s integer / pointer result is read by no caller in the exe '
+                                                '(every call is followed by a write of eax, or by a bare return of '
+                                                'a wrapper whose callers do the same; the address is never taken): '
+                                                'eax at the return is scratch (r5design.result_dead)'),
+    'dead-init-call': ('by-design', '-', False, 'MSVC /Od calls a constructor that only stores through this into a '
+                                                'frame object whose every byte the caller then overwrites before any '
+                                                'read; GCC drops the dead initialisation (r5design.dead_init_site)'),
+    'local-index-range': ('by-design', '-', False, 'a variable index into a local array leaves the frame (it writes '
+                                                   'the caller\'s arguments, or wraps): the result moves with each '
+                                                   'compiler\'s frame layout; equal for every index inside the frame '
+                                                   '(r5design.frame_index_probe)'),
+    'canned-null-deref': ('artifact', 'S13', False, 'the oracle\'s wild indirect call got a canned 0 and the next '
+                                                    'instruction loads through eax; the native\'s declaration returns a '
+                                                    'reference, which the harness answers with a valid object; equal '
+                                                    'with that object on both machines (r5design.deref_after_call)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
     'partial-return': ('by-design', '-', False, 'the oracle returns a byte / short in al / ax and the rest of eax is '
@@ -1502,6 +1519,13 @@ def _rule_callflow(d, rec):
                 others |= native_reaches(src, n) or set()   # what another unit-local callee could have called
         if (k == 'call-target' and '__fnv_%08x' % xa in cs
                 and native_ran(src, '__fnv_%08x' % xa, seen, exclude=cs | others)):
+            return 'oracle-callee-unloaded'
+        # (EQ, farm baseline 588863: 0x007d1bb0 StartMenu) runner's dynamic evidence: the native executed X's own
+        # __fnv_<X> entry block in this run (arm_entered) and its call here is the oracle's next one, so the one
+        # difference is the oracle's traced call of X, which the native ran untraced in its unit. A leaf X makes no
+        # traced call, so native_ran has nothing to go on; an early exit before X never enters it (V1 U1)
+        if (k == 'call-target' and '__fnv_%08x' % xa in cs and '%08x' % xa in (d.get('arm_entered') or ())
+                and a is not None and d.get('x86_next') == a):
             return 'oracle-callee-unloaded'
     # a decomp-local stand-in for an original function defined elsewhere, with an empty body: tied to the divergence
     # when the oracle calls that original where the native diverges, or when the native stops early

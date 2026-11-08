@@ -29,6 +29,9 @@ What is measured (each from the report itself, or its sidecar; a report that doe
             failing programs (bad items); a shard whose setup failed (sidecar "error") measures nothing
   scenario  each D25 target measured in at least one scenario (lower), per scenario count
   bootloop  the stub boot's game milestones (good items) and their count (higher), "(nulldev)" with FNVNX_STUB_NULLDEV=1
+Unreliable boots: a head whose tests/s5/emu_guest.py has S5's timer slices (2d1afaeb..6da559aa: --slice-ms
+without --hc-slice) booted nondeterministically; its boot metrics (full: boot / stub boot, bootloop, scenario) are
+listed as not compared, and neither advance nor regress the ledger.
 Comparison: a report of a head that is an ancestor of an entry's head (an older head, reported late) is not compared
 with it. A WIP report (--wip) is compared but never advances the ledger. The ledger advances only on a check with no
 regression (owner order): improved values take this head, new items are added, a "bad" baseline shrinks to the
@@ -211,6 +214,24 @@ def git(repo, *a):
     return r
 
 
+def boot_unreliable(repo, head):
+    """why the emulated boots of `head` are not comparable, or None: S5's timer slices (2d1afaeb..6da559aa; an
+    emu_guest.py with --slice-ms and without 620572bc's host-call preemption --hc-slice) were nondeterministic
+    (unicorn's emu_stop from the timer thread can leave the PC at the block start, a resume re-runs instructions).
+    Read from the head's own tests/s5/emu_guest.py, so it holds for the adopted commits of the integration branch."""
+    r = git(repo, 'show', '%s:ports/fnv-nx/tests/s5/emu_guest.py' % head)
+    if r is None or r.returncode:
+        return None
+    if '--slice-ms' in r.stdout and '--hc-slice' not in r.stdout:
+        return 'the emulated boots of this head ran on timer slices, nondeterministic (S5 2d1afaeb..6da559aa)'
+    return None
+
+
+def is_boot_metric(job, name):
+    """the metrics an emulated boot measures: the full report's boots, bootloop's, the scenarios'"""
+    return job in ('bootloop', 'scenario') or (job == 'full' and ' boot' in name)
+
+
 def is_ancestor(repo, a, b):
     """True when commit a is an ancestor of b (or equal); None when unknown"""
     if a == b:
@@ -356,6 +377,9 @@ def cmd_check(a):
             side = None
     fn = EXTRACT.get(a.job)
     ms = fn(text, side) if fn else []
+    why = boot_unreliable(a.repo, a.head)
+    if why:   # the boots of this head ran on a nondeterministic emulator: their numbers neither advance nor regress
+        ms = [M(m.name, 'skip', note='unreliable: ' + why) if is_boot_metric(a.job, m.name) else m for m in ms]
     regs, notes, upd = check(ledger, ms, a.head, a.job, a.repo, a.wip)
     if a.update:
         for u in upd:

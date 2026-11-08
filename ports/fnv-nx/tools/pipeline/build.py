@@ -114,8 +114,11 @@ CONFIG = [
                                        'fnv.nro restarts, so the placeholder is fine (NX1)'),
     ('TESTS', 'all', 'comma list of test suites to run (names in docs/BUILD.md), all, or none'),
     ('EMU_TIMEOUT', '3000', 'seconds for the emulated boot of the game guest (boot stage)'),
-    ('EMU_BUDGET', '6000000000', 'instructions per scheduling slice of the emulated boot (S5\'s value for game boots: '
-                                 'the loader\'s code pointer scan of a real data image needs billions)'),
+    ('EMU_BUDGET', 'auto', 'instructions per scheduling slice of the emulated boot; auto: 0 (threads switch at host '
+                           'calls, deterministically) when tests/s5/emu_guest.py has --hc-slice (S5 620572bc), else '
+                           '6000000000. An instruction count makes unicorn hook every instruction, about 10x slower'),
+    ('EMU_SLICE_MS', '', 'emu_guest.py --slice-ms (its fallback timer for a thread making no host call); empty: '
+                         'emu_guest.py\'s default (60 s). A short timer makes boots nondeterministic (S5)'),
     ('FORCE', '', 'comma list of stages to rerun even when cached (all = every stage)'),
     ('CLEAN_WORK', '1', '1: remove re-creatable work trees (clones, third-party build dirs) once their stage or test '
                         'suite succeeded; 0: keep them for faster reruns'),
@@ -1645,6 +1648,24 @@ def msvc_objs_id(b, key='MSVC_OBJS'):
     return sha(d, listing_id([os.path.join(d, n) for n in os.listdir(d)]) if os.path.isdir(d) else None)
 
 
+def emu_slicing(b):
+    """emu_guest.py's scheduling arguments for the boot stage. With an emu_guest.py that preempts at host calls
+    (S5 620572bc, --hc-slice: deterministic, and about 10x faster than an instruction count, which makes unicorn
+    hook every instruction): --budget 0 and emu_guest.py's own defaults; no timer of ours (its --slice-ms is now a
+    60 s fallback; EMU_SLICE_MS passes one only when set). Without it, the old instruction count 6e9: the timer
+    slices of 2d1afaeb..6da559aa were nondeterministic (emu_stop from the timer thread can leave the PC at the block
+    start, a resume re-runs instructions), and budget 0 on an older emu_guest.py means no preemption at all.
+    EMU_BUDGET other than auto is taken as given."""
+    emu = os.path.join(ROOT, 'tests', 's5', 'emu_guest.py')
+    text = open(emu, errors='replace').read() if os.path.isfile(emu) else ''
+    hc = '--hc-slice' in text
+    bud = b.cfg.get('EMU_BUDGET', 'auto')
+    if bud == 'auto':
+        bud = '0' if hc else '6000000000'
+    sl = b.cfg.get('EMU_SLICE_MS') or ''
+    return ['--budget', bud] + (['--slice-ms', sl] if sl and '--slice-ms' in text else [])
+
+
 def link_exe(b):
     """The player's FalloutNV.exe for the link (S2c's resolve --exe: image vftables paired by its RTTI class, slot
     fill; S2d's bodies --exe exe-addr): FNVNX_EXE, else a BOOT_IMAGE that is a file; '' when there is none.
@@ -2264,7 +2285,7 @@ class Boot(Stage):
                                      'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
                 up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
                 synth_inputs_id(b) if img == 'auto' else '',
-                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], b.cfg['EMU_BUDGET'],
+                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], emu_slicing(b),
                 file_hash(ini) if ini and os.path.isfile(ini) else '']    # the ini mounted beside the image
 
     def outputs_present(self, b):
@@ -2282,7 +2303,7 @@ class Boot(Stage):
         shutil.rmtree(root, ignore_errors=True)
         os.makedirs(root)
         argv = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--elf', elf, '--skip-faulting-init',
-                '--expect', 'fnvnx boot: calling WinMain', '--root', root, '--budget', b.cfg['EMU_BUDGET'],
+                '--expect', 'fnvnx boot: calling WinMain', '--root', root] + emu_slicing(b) + [
                 '--summary-json', os.path.join(d, 'boot_summary.json')]
         image = boot_image(b, r, d)
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'

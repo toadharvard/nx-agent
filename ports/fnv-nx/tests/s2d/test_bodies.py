@@ -867,6 +867,31 @@ class Fold(unittest.TestCase):
             else:
                 self.assertNotEqual(r.cls, 'template-fold', n)
 
+        # a failed msvc-inline synthesis of a foldable name falls back to the fold; others stay failed
+        rows = [bodies.Row('_ZN4ListIP3FooED2Ev', 'msvc-inline', None, None, 'src/b.cpp', 'x', 'src/b.cpp'),
+                bodies.Row('_ZN4ListIP3FooE3GetEv', 'msvc-inline', None, None, 'src/b.cpp', 'x', 'src/b.cpp'),
+                bodies.Row('_ZN4ListIiED1Ev', 'msvc-inline', None, None, 'src/b.cpp', 'x', 'src/b.cpp')]
+        failed = {r.name: 'synth-failed (not emitted)' for r in rows}
+        out = bodies.fold_fallback(rows, failed, cl, itanium)
+        self.assertEqual([(r.cls, r.target) for r in out], [('template-fold', '__fnv_00405000'),
+                                                          ('msvc-inline', None), ('msvc-inline', None)])
+        self.assertEqual(sorted(failed), ['_ZN4ListIP3FooE3GetEv', '_ZN4ListIiED1Ev'])
+
+
+class RetrySpecial(unittest.TestCase):
+    def test_retry(self):
+        """An msvc-inline special member whose host emitted nothing is tried again as the implicit member
+        (special-default) in the first referencing unit; a plain member or a template's destructor is not."""
+        names = ['_ZN16AabbCollectorE15D1Ev', '_ZN3Foo3GetEv', '_ZN4ListIiED1Ev', '_ZN3FooC1ERKS_']
+        _, itanium = tables(set(), set(names))
+        rows = [bodies.Row(n, 'msvc-inline', None, None, 'src/z.cpp,src/b.cpp', 'x', 'src/b.cpp') for n in names]
+        rows.append(bodies.Row('_ZN3BarD1Ev', 'special-default', None, None, 'src/b.cpp', 'x', 'src/b.cpp'))
+        failed = {r.name: 'synth-failed (not emitted)' for r in rows}
+        _, itanium = tables(set(), set(names) | {'_ZN3BarD1Ev'})
+        got = bodies.retry_special(rows, failed, itanium)
+        self.assertEqual({h: sorted(r.name for r in rs) for h, rs in got.items()},
+                         {'src/b.cpp': ['_ZN16AabbCollectorE15D1Ev', '_ZN3FooC1ERKS_']})
+
 
 class NotInImage(unittest.TestCase):
     def test_not_in_image(self):

@@ -16,3 +16,37 @@ int result=FUN_00d0f300(query,state,event,*m_arr30.m_phase,world,active,flags,ro
 ===
 int result=FUN_00d0f300((const Limits&)query,(Resources&)state,(PairEvent&)event,(ResourceManager&)*m_arr30.m_phase,(Scene*)world,(List<DynamicNode*>&)active,(StateTable&)flags,rotation);
 >>>
+
+@@ XINC1 src/havok/physics/dynamics/world/simulation/continuous/hkpcontinuoussimulation.cpp 0x00d0d020
+# The unplaced rendering of 0x00d0f300 (the overload taking EventQuery, SolverState, ...; it calls the invented
+# finishSolveStep / backstepSolveBody / updateSolveTransform / projectSolveTransform) is not an exe function: the exe
+# has exactly one call of 0x00d0f300, at 0x00d102bc in 0x00d100a0 (no other call, jmp or address word anywhere in
+# .text), and the site above makes it call the placed definition. The overload has no caller left, no exe address
+# and its four callees are declared only, so the object kept dead code in .text (one section per unit, no
+# gc-sections possible) whose relocations were four undefined names, i.e. four trap stubs in the guest. `static`
+# makes it an internal function nothing calls: GCC drops it, MSVC emits no code for an unreferenced static one.
+<<<
+int __cdecl FUN_00d0f300(const EventQuery&,SolverState&,Entry70&,PhaseObj&,Arg0*,PtrArr&,SolverFlagView&,float);
+===
+static int __cdecl FUN_00d0f300(const EventQuery&,SolverState&,Entry70&,PhaseObj&,Arg0*,PtrArr&,SolverFlagView&,float);
+>>>
+<<<
+__declspec(noinline) int __cdecl FUN_00d0f300(const EventQuery& query,
+===
+static __declspec(noinline) int __cdecl FUN_00d0f300(const EventQuery& query,
+>>>
+
+@@ XINC1 src/havok/physics/dynamics/world/simulation/continuous/hkpcontinuoussimulation_rtm_variant.cpp file
+# Same as the main unit: the variant defines the unplaced overload of 0x00d0f300 and has no caller of it (no
+# 0x00d100a0 definition; the exe's only call of 0x00d0f300 is at 0x00d102bc). Made static, it is dropped, and
+# finishSolveStep / backstepSolveBody / updateSolveTransform / projectSolveTransform are no longer referenced.
+<<<
+int __cdecl FUN_00d0f300(const EventQuery&,SolverState&,Entry70&,PhaseObj&,Arg0*,PtrArr&,SolverFlagView&,float);
+===
+static int __cdecl FUN_00d0f300(const EventQuery&,SolverState&,Entry70&,PhaseObj&,Arg0*,PtrArr&,SolverFlagView&,float);
+>>>
+<<<
+__declspec(noinline) int __cdecl FUN_00d0f300(const EventQuery& query,
+===
+static __declspec(noinline) int __cdecl FUN_00d0f300(const EventQuery& query,
+>>>

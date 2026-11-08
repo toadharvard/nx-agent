@@ -28,8 +28,13 @@ def main():
         got = [g[1] for g in game if len(g) > 2 and g[2] == "reached"]
         print(f"game milestones (tests/s5/milestones.txt): {len(got)} of {len(game)} reached"
               + (f", last: {got[-1]}" if got else ""))
+        ooo = [g[1] for g in game if len(g) > 2 and g[2] == "out-of-order"]
+        if ooo:
+            print(f"  hit out of order (not counted): {', '.join(ooo)}")
         for g in game:
-            print(f"  {g[1]}: " + (f"{g[3]} {g[4]}" if len(g) > 4 and g[2] == "reached" else "not reached"))
+            print(f"  {g[1]}: " + (f"{g[3]} {g[4]}" if len(g) > 4 and g[2] == "reached" else
+                                   f"hit out of order ({g[-1]})" if len(g) > 2 and g[2] == "out-of-order" else
+                                   "not reached"))
     names = [m.group(1) for l in log for m in [re.search(r"trap #\d+: unresolved (\S+)", l)] if m]
     names = list(dict.fromkeys(names))
     after = 0

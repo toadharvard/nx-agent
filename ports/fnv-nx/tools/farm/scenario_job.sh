@@ -110,6 +110,19 @@ export SCENARIO_CALLWATCH=${SCENARIO_CALLWATCH:-}
 SEP=(); [ -n "${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && SEP=(--patterns "$SCENARIO_SCRIPTERR_PATTERNS")
 [ -n "$SCENARIO_CALLWATCH${SEP[*]}" ] || note "no script-error config (scenario-cfg branch): #10 from the scof console log only"
 
+# ---- the private script-error config (D25 #10, R4's lane): game knowledge, so from the artifacts repository --------
+# SCENARIO_CALLWATCH (callwatch.py config) and SCENARIO_SCRIPTERR_PATTERNS (scripterr.py --patterns), else the files
+# callwatch.cfg / scripterr_patterns.tsv of branch scenario-cfg; without them #10 falls back to the scof console log
+if [ -z "${SCENARIO_CALLWATCH:-}${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && [ -d "$ARTIFACTS/.git" ] &&
+	git -C "$ARTIFACTS" fetch -q --depth 1 origin scenario-cfg 2> /dev/null; then
+	mkdir -p "$W/cfg"
+	git -C "$ARTIFACTS" show FETCH_HEAD:callwatch.cfg > "$W/cfg/callwatch.cfg" 2> /dev/null && SCENARIO_CALLWATCH=$W/cfg/callwatch.cfg
+	git -C "$ARTIFACTS" show FETCH_HEAD:scripterr_patterns.tsv > "$W/cfg/patterns.tsv" 2> /dev/null && SCENARIO_SCRIPTERR_PATTERNS=$W/cfg/patterns.tsv
+fi
+export SCENARIO_CALLWATCH=${SCENARIO_CALLWATCH:-}
+SEP=(); [ -n "${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && SEP=(--patterns "$SCENARIO_SCRIPTERR_PATTERNS")
+[ -n "$SCENARIO_CALLWATCH${SEP[*]}" ] || note "no script-error config (scenario-cfg branch): #10 from the scof console log only"
+
 # ---- the trace list (lockstep) -----------------------------------------------------------------------------------
 LIST=${SCENARIO_TRACE_LIST:-}
 if [ -z "$LIST" ] && [ -n "$LC" ] && [ -d "$ARTIFACTS/.git" ] && git -C "$ARTIFACTS" fetch -q --depth 1 origin "trace/$LC" 2> /dev/null; then

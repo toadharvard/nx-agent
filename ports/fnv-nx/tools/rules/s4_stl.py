@@ -1,6 +1,6 @@
 """Prepare rules of stream S4 (tools/rules/README.md).
 
-STL1 - definitions of the MSVC STL helpers the decomp's in-unit `std` copies declare and never define.
+STLB1 - definitions of the MSVC STL helpers the decomp's in-unit `std` copies declare and never define.
 
 Some decomp units carry a partial copy of VC9's standard library in `namespace std` (SpeedTree's indexed geometry:
 vector, _Vector_val, _Aux_cont). They declare VC9's helper templates the way <xmemory>/<xutility> do, but the decomp
@@ -8,7 +8,7 @@ copied no bodies, so GCC instantiates nothing and every use becomes an undefined
 guest (R2's s2d/list/97deacd38aec, `runtime`: std::_Allocate<T>, std::_Destroy<T>, std::fill<I, T>, std::swap<T>,
 std::vector<T>::_Xlen). VC9 compiled these inline at every call, so no exe function is theirs.
 
-STL1 appends the bodies with VC9's semantics, written here, not taken from the decomp:
+STLB1 appends the bodies with VC9's semantics, written here, not taken from the decomp:
   _Allocate(n, T *)     ::operator new(n * sizeof(T)); n == 0 asks for 0 bytes; an overflowing count throws
                         bad_alloc (VC9: _THROW_NCEE(std::bad_alloc, NULL)), here through the unit's bad_alloc if it
                         declares one, else operator new of the largest size, which fails the same way
@@ -23,12 +23,12 @@ head below); no definition of it anywhere in the unit (a `{` after the same head
 end of the unit, in `namespace std`, so they are instantiated for the unit's own types at the end of the
 translation unit. Line numbers stay (only appended text).
 
-STL2 - the members of the decomp's in-unit iostream and vector models it declares and never defines.
+STLB2 - the members of the decomp's in-unit iostream and vector models it declares and never defines.
 
 tesobject_ob1_variant.cpp models VC9's ifstream for its CSV reader (ios_base, basic_ios, basic_istream,
 basic_ifstream over the unit's basic_filebuf) and modelloader_ob1_variant.cpp models vector<float> as an explicit
 specialization. Each declares members VC9 compiled inline (or that live in msvcp90 as _Init / _Fiopen), so they become
-trap stubs (R2's s2d runtime list). STL2 appends, each gated on the declaration below and on no definition in the unit:
+trap stubs (R2's s2d runtime list). STLB2 appends, each gated on the declaration below and on no definition in the unit:
   ios_base::setstate(int s)        class ios_base with `int state, exceptions` and `void setstate(int);`:
                                    s != 0: state = (state | s) & 0x17 (VC9 clear(rdstate() | s), _Statmask). The copy
                                    has no exceptions() setter, so exceptions stays 0 and clear never throws
@@ -48,8 +48,8 @@ trap stubs (R2's s2d runtime list). STL2 appends, each gated on the declaration 
 
 Both rules leave a name to a recon (REC1, FNVNX_RECON) that covers it for the unit: its symbols, append or replace
 text name it (RECON_KEYS). R2's recons are matched against the exe; STL only stands in where there is none, and the
-two together would define a name twice. Counted as STL-RECON. Likewise a name the unit's own units.json `symbols`
-bind (top-level std only): the link takes it to the exe's function (STL-BOUND).
+two together would define a name twice. Counted as STLB-RECON. Likewise a name the unit's own units.json `symbols`
+bind (top-level std only): the link takes it to the exe's function (STLB-BOUND).
 """
 import re
 
@@ -124,7 +124,7 @@ def _recon_text(path):
 RECON_KEYS = {   # what in a recon's text means it covers the STL body of that key (GCC or MSVC spellings)
     '_Allocate': r'_Allocate', '_Destroy': r'_Destroy', 'fill': r'\bfill\s*[<(]|St4fill|\?\?\$fill@',
     'swap': r'\bswap\s*[<(]|St4swap|\?\?\$swap@', '_Xlen': r'_Xlen', 'setstate': r'setstate',
-    'init': r'\binit\s*\(|4initE|\?init@', 'facet': r'UseFacet|widen',
+    'init': r'\binit\s*\(|4initE|\?init@', 'facet': r'UseFacet', 'widen': r'\bwiden\s*\(|5widenE|\?widen@',
     'open': r'\bopen\s*\(|4openE|\?open@',
     'vector()': r'\bvector\s*\(\s*\)\s*[:{]|vectorI\w*EC[12]Ev|\?\?0\?\$vector@',
     '~vector()': r'~vector\s*\(|vectorI\w*ED[012]Ev|\?\?1\?\$vector@',
@@ -164,10 +164,10 @@ def _bound_text(path):
 def _covered(rtext, key, stats):
     rec, bound = rtext
     if rec and re.search(RECON_KEYS[key], rec):
-        stats['STL-RECON'] += 1
+        stats['STLB-RECON'] += 1
         return True
     if bound and re.search(RECON_KEYS[key], bound):
-        stats['STL-BOUND'] += 1
+        stats['STLB-BOUND'] += 1
         return True
     return False
 
@@ -234,7 +234,7 @@ def _vector_declares_xlen(text, blocks):
 
 
 def r_stl_helper_bodies(path, text, stats):
-    """STL1: VC9's helper templates the unit's std copy declares and never defines get their bodies."""
+    """STLB1: VC9's helper templates the unit's std copy declares and never defines get their bodies."""
     blocks = _std_blocks(text)
     if not blocks:
         return text
@@ -243,14 +243,14 @@ def r_stl_helper_bodies(path, text, stats):
         if any(re.search(head, text[a:b]) for a, b in blocks) and not re.search(DEFINED[key], text) and \
                 not _covered(rt, key, stats):
             adds.append(body)
-            stats['STL1'] += 1
+            stats['STLB1'] += 1
     if _vector_declares_xlen(text, blocks) and not XLEN_DEFINED.search(text) and not _covered(rt, '_Xlen', stats):
         adds.append(XLEN_BODY)
-        stats['STL1'] += 1
+        stats['STLB1'] += 1
     if not adds:
         return text
     return text + ('' if text.endswith('\n') else '\n') + \
-        '/* fnv-nx STL1 (tools/rules/s4_stl.py): VC9 helper bodies for the declarations above */\nnamespace std {\n' + \
+        '/* fnv-nx STLB1 (tools/rules/s4_stl.py): VC9 helper bodies for the declarations above */\nnamespace std {\n' + \
         ''.join(adds) + '}\n'
 
 
@@ -274,7 +274,7 @@ STL2_DECL = 'extern "C" void fnvnx_basic_ios_init(void*, void*, int);\nextern "C
 
 
 def r_stl_stream_bodies(path, text, stats):
-    """STL2: the in-unit iostream / vector<T> models' declared members get VC9's bodies."""
+    """STLB2: the in-unit iostream / vector<T> models' declared members get VC9's bodies."""
     blocks = _std_blocks(text)
     if not blocks:
         return text
@@ -295,11 +295,15 @@ def r_stl_stream_bodies(path, text, stats):
             fac, fn, loc = mf.group(2), mf.group(3), mf.group(4)
             ms = re.search(r'template\s*<\s*class\s+(\w+)\s*>\s*struct\s+%s\s*\{\s*\1\s+widen\s*\(\s*char\s*\)\s*const\s*;'
                            r'\s*\}\s*;' % fac, text[a:b])
-            if ms and not re.search(r'\b%s\s*\([^;)]*\)\s*\{' % fn, text) and not _covered(rt, 'facet', stats):
+            if not ms:
+                continue
+            # the facet and its widen are separate: a recon may bind the one (R2: CsvUseFacet<char> -> the exe's
+            # use_facet<ctype<char>>) and leave the other to STLB2
+            if not re.search(r'\b%s\s*\([^;)]*\)\s*\{' % fn, text) and not _covered(rt, 'facet', stats):
                 adds.append('template <class _E> const %s<_E>& %s(const %s&)\n{\n    static const %s<_E> _Facet = %s<_E>();\n'
-                            '    return _Facet;\n}\n'
-                            'template <class _E> _E %s<_E>::widen(char _C) const\n{\n    return (_E)_C;\n}\n'
-                            % (fac, fn, loc, fac, fac, fac))
+                            '    return _Facet;\n}\n' % (fac, fn, loc, fac, fac))
+            if not re.search(r'%s\s*<[^>]*>\s*::\s*widen\s*\(' % fac, text) and not _covered(rt, 'widen', stats):
+                adds.append('template <class _E> _E %s<_E>::widen(char _C) const\n{\n    return (_E)_C;\n}\n' % fac)
     m, body = _class_body(text, blocks, r'template\s*<\s*class\s+\w+\s*,\s*class\s+\w+\s*>\s*class\s+basic_ifstream\s*:[^{;]*\{')
     mo = re.search(r'\b(\w+)\s*\*\s*open\s*\(\s*const\s+char\s*\*\s*,\s*int\s*,\s*int\s*\)\s*;', body) if m else None
     if mo and re.search(r'\b%s\s+filebuf\s*;' % mo.group(1), body) and \
@@ -338,9 +342,9 @@ def r_stl_stream_bodies(path, text, stats):
                             '    first = last = end = 0;\n}\n' % (ty, ty))
     if not adds:
         return text
-    stats['STL2'] += len(adds)
+    stats['STLB2'] += len(adds)
     return text + ('' if text.endswith('\n') else '\n') + \
-        '/* fnv-nx STL2 (tools/rules/s4_stl.py): bodies of the stream / vector members declared above */\n' + STL2_DECL + \
+        '/* fnv-nx STLB2 (tools/rules/s4_stl.py): bodies of the stream / vector members declared above */\n' + STL2_DECL + \
         'namespace std {\n' + ''.join(adds) + '}\n'
 
 

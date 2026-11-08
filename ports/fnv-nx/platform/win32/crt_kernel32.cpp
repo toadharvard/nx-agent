@@ -943,10 +943,40 @@ extern "C" UINT GetDriveTypeA(LPCSTR root)
     return !w32_map_path(win, host, sizeof host) && !os_stat(host, &st) && st.is_dir ? DRIVE_FIXED : DRIVE_NO_ROOT_DIR;
 }
 
-/* ---- environment: a process-local block, empty at start (the CRT builds its environ from it) */
+/* ---- environment: a process-local block (the CRT builds its environ from it), seeded with the variables a
+ * Windows session always has (PATH, TEMP, SystemRoot, USERPROFILE, APPDATA...) on first use */
 static char **g_env;   /* "NAME=value", NULL-terminated */
 static size_t g_nenv;
 static os_lock_t g_env_lock;
+static bool g_env_seeded;
+
+static const char *const ENV_DEFAULTS[] = {
+    "ALLUSERSPROFILE=C:\\ProgramData", "APPDATA=C:\\Users\\Player\\AppData\\Roaming",
+    "COMPUTERNAME=FNVNX", "ComSpec=C:\\Windows\\System32\\cmd.exe",
+    "HOMEDRIVE=C:", "HOMEPATH=\\Users\\Player",
+    "LOCALAPPDATA=C:\\Users\\Player\\AppData\\Local", "NUMBER_OF_PROCESSORS=4", "OS=Windows_NT",
+    "PATH=C:\\Windows\\System32;C:\\Windows", "PATHEXT=.COM;.EXE;.BAT;.CMD",
+    "PROCESSOR_ARCHITECTURE=x86", "ProgramData=C:\\ProgramData", "ProgramFiles=C:\\Program Files",
+    "SystemDrive=C:", "SystemRoot=C:\\Windows", "TEMP=C:\\Users\\Player\\AppData\\Local\\Temp",
+    "TMP=C:\\Users\\Player\\AppData\\Local\\Temp", "USERNAME=Player", "USERPROFILE=C:\\Users\\Player",
+    "windir=C:\\Windows",
+};
+
+/* caller holds the lock */
+static void env_seed(void)
+{
+    if (g_env_seeded)
+        return;
+    g_env_seeded = true;
+    size_t n = sizeof ENV_DEFAULTS / sizeof *ENV_DEFAULTS;
+    char **v = (char **)malloc((n + 1) * sizeof *v);
+    if (!v)
+        return;
+    g_env = v;
+    for (size_t i = 0; i < n; i++)
+        if ((v[g_nenv] = strdup(ENV_DEFAULTS[i])))
+            g_nenv++;
+}
 
 /* index of name, or -1; caller holds the lock */
 static long env_find(const char *name)
@@ -979,7 +1009,13 @@ extern "C" BOOL SetEnvironmentVariableA(LPCSTR name, LPCSTR value)
         memcpy(e + ln + 1, value, lv + 1);
     }
     os_lock(&g_env_lock);
+    env_seed();
     long i = env_find(name);
+    if (i < 0 && !e) {   /* deleting a variable that is not there */
+        os_unlock(&g_env_lock);
+        SetLastError(ERROR_ENVVAR_NOT_FOUND);
+        return FALSE;
+    }
     if (i >= 0) {
         free(g_env[i]);
         if (e)
@@ -1009,6 +1045,7 @@ extern "C" DWORD GetEnvironmentVariableA(LPCSTR name, LPSTR buf, DWORD n)
         return 0;
     }
     os_lock(&g_env_lock);
+    env_seed();
     long i = env_find(name);
     DWORD r = 0;
     if (i < 0) {
@@ -1032,6 +1069,7 @@ extern "C" DWORD GetEnvironmentVariableA(LPCSTR name, LPSTR buf, DWORD n)
 extern "C" char *GetEnvironmentStrings(void)
 {
     os_lock(&g_env_lock);
+    env_seed();
     size_t total = 2;
     for (size_t i = 0; i < g_nenv; i++)
         total += strlen(g_env[i]) + 1;

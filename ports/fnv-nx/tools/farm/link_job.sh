@@ -60,7 +60,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 . "$(dirname "$0")/lib_job.sh"
 t0=$(date +%s)
 
-host_check git python3 make curl jq rsync dpkg-deb gcc llvm-undname py:elftools
+host_check git python3 make curl jq rsync dpkg-deb gcc llvm-undname $LINK_PY
 python3 -I -c 'import capstone' 2>/dev/null || [ "${FARM_APT:-0}" != 1 ] || python3 -m pip install -q --break-system-packages capstone
 job_sources "$REPO"
 LB=${LINK_BUILD:-$FARM_HOME/link/build}

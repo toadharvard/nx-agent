@@ -163,6 +163,24 @@ int fnvnx_xc_locate(const uint32_t *mem, uint32_t va_lo, uint32_t nwords, uint32
     return FNVNX_XC_OK;
 }
 
+int fnvnx_xi_locate(const uint32_t *mem, uint32_t va_lo, uint32_t nwords, uint32_t xc_end_va, uint32_t text_lo,
+                    uint32_t text_hi, uint32_t *begin_va, uint32_t *end_va) {
+    if (!mem || !begin_va || !end_va || xc_end_va < va_lo || (xc_end_va - va_lo) & 3) return FNVNX_XC_E_ARG;
+    uint32_t i = (xc_end_va - va_lo) / 4, zeros = 0;
+    if (i >= nwords) return FNVNX_XC_E_NOTFOUND;
+    while (i < nwords && mem[i] == 0 && zeros < 4) { i++; zeros++; }
+    uint32_t b = i;
+    while (i < nwords && mem[i] != 0 && is_code(mem[i], text_lo, text_hi)) i++;
+    if (i == b && zeros >= 2) {   /* no entry: __xi_a and __xi_z were among the NULLs, an empty table */
+        *begin_va = *end_va = va_lo + 4u * b;
+        return FNVNX_XC_OK;
+    }
+    if (i >= nwords || mem[i] != 0) return FNVNX_XC_E_NOTFOUND;   /* the run must end at __xi_z */
+    *begin_va = va_lo + 4u * b;
+    *end_va = va_lo + 4u * i;
+    return FNVNX_XC_OK;
+}
+
 static size_t put(char *buf, size_t cap, size_t len, const char *fmt, uint32_t a, uint32_t b) {
     if (len >= cap) return len;
     int k = snprintf(buf + len, cap - len, fmt, (unsigned)a, (unsigned)b);

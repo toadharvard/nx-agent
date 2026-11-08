@@ -15,7 +15,9 @@ Data milestones (milestones.txt kind 'data'), from the host file calls alone:
                   Fallout_default.ini, overridden by My Games/FalloutNV/Fallout.ini; without either: Data/*.bsa)
   bsa-opened      every archive of the list that exists in Data/ was opened (the summary has k/N)
   esm-header      a read at offset 0 of Data/FalloutNV.esm returned the TES4 record's tag
-  masters-loaded  FalloutNV.esm and every .esm that plugins.txt lists and Data/ holds were read up to their end
+  masters-loaded  FalloutNV.esm and every .esm that plugins.txt lists and Data/ holds were read for >= 99 % of
+                  their bytes (byte-range coverage, MASTER_COVERAGE; not the furthest offset read: a seek to the
+                  end proves nothing)
 File faults: every host file call that fails, by call, errno and SD path (a missing optional file is one too; the
 summary keeps the counts so a change can be measured).
 """
@@ -50,6 +52,7 @@ def port_names(path=SDLAYOUT):
 
 PORT_NAMES, PORT_PREFIXES = port_names()
 DATA_MILESTONES = ("ini-read", "archive-list", "bsa-opened", "esm-header", "masters-loaded")
+MASTER_COVERAGE = 0.99
 INI_NAMES = {"fallout_default.ini", "fallout.ini", "falloutprefs.ini"}
 # the profile: sdmc:/switch/fnv/user (the layout), sdmc:/fnvnx/user (guests built before it)
 USER_DIRS = ("switch/fnv/user", "fnvnx/user")
@@ -108,6 +111,7 @@ class DataPath:
         self.faults = {}                 # (call, errno name, sd path) -> count
         self.fd_path = {}                # fd -> (sd path lower-case, host path)
         self.read_end = {}               # host path -> the furthest byte read
+        self.cover = {}                  # host path -> merged [start, end) byte ranges read
         self.opened = set()              # host paths opened successfully
         self.touched = set()             # host paths of any file call
         self.events = {}                 # data milestone -> how
@@ -182,6 +186,7 @@ class DataPath:
         end = off + len(data)
         if end > self.read_end.get(key, 0):
             self.read_end[key] = end
+        self._cover(key, off, end)
         name = os.path.basename(host).lower()
         if name in INI_NAMES:
             self._hit("ini-read", f"read {name}")
@@ -189,6 +194,30 @@ class DataPath:
             self._hit("esm-header", "read FalloutNV.esm @0 = TES4")
         if name.endswith(".esm"):
             self._check("masters-loaded")
+
+    def _cover(self, key, a, b):
+        """add [a, b) to the merged byte ranges read of a file"""
+        rs = self.cover.setdefault(key, [])
+        out, placed = [], False
+        for x, y in rs:
+            if y < a or x > b:
+                if x > b and not placed:
+                    out.append((a, b))
+                    placed = True
+                out.append((x, y))
+            else:
+                a, b = min(a, x), max(b, y)
+        if not placed:
+            out.append((a, b))
+        self.cover[key] = out
+
+    def covered(self, host):
+        """the fraction of a file's bytes read (1.0 for an empty file)"""
+        size = os.path.getsize(host)
+        return 1.0 if size == 0 else sum(min(y, size) - x for x, y in self.cover.get(host, ()) if x < size) / size
+
+    def master_done(self, m):
+        return self.covered(m) >= MASTER_COVERAGE
 
     # -- the milestones
     def _hit(self, name, how):
@@ -244,15 +273,15 @@ class DataPath:
         elif name == "bsa-opened" and bsas and all(b in self.opened for b in bsas):
             self._hit(name, f"{len(bsas)} archives opened")
         elif name == "masters-loaded" and masters and all(
-                self.read_end.get(m, 0) >= os.path.getsize(m) for m in masters):
-            self._hit(name, f"{len(masters)} masters read to the end")
+                self.master_done(m) for m in masters):
+            self._hit(name, f"{len(masters)} masters read (>= {MASTER_COVERAGE:.0%} of their bytes)")
 
     def counts(self):
         bsas, masters = self.targets()
         nf = sum(self.faults.values())
         return {
             "bsa_opened": sum(b in self.opened for b in bsas), "bsa_listed": len(bsas),
-            "masters_read": sum(self.read_end.get(m, 0) >= os.path.getsize(m) for m in masters),
+            "masters_read": sum(self.master_done(m) for m in masters),
             "masters": len(masters),
             "file_faults": nf, "file_faults_distinct": len(self.faults),
             "file_faults_enoent": sum(v for (c, e, p), v in self.faults.items() if e == "ENOENT"),
