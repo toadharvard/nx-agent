@@ -1089,7 +1089,49 @@ class Prepare(Stage):
         dirty = port_dirty(PREPARE_INPUTS)
         pf = {'port_commit': b.head, 'port_dirty': dirty, 'decomp_commit': read_git_head(decomp), 'decomp': decomp,
               'recon': recon_id(), 'mode': 'prepare.py', 'tree': tree, 'at': now_iso()}
-        b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'prepare.py'), decomp, staging], r['log'], check=True)
+        # T1: prepare.py runs under tools/pipeline/traced.py, which records every file it read and every directory it
+        # listed (its imports too). When all of them are unchanged and the tree is the one that run made, the tree is
+        # what prepare.py would make at this head: it is kept, provenance names this head (572 s of every full build,
+        # tree unchanged). PREPARE_REUSE=0 always runs prepare.py.
+        script = os.path.join(ROOT, 'tools', 'prepare.py')
+        deps = os.path.join(d, 'prepare.deps.json')
+        argv = [script, decomp, staging]
+        if os.environ.get('PREPARE_REUSE', '1') != '0' and not dirty and \
+                os.path.isfile(os.path.join(tree, 'build', 'units.json')):
+            if HERE not in sys.path:
+                sys.path.insert(0, HERE)
+            import traced
+            try:
+                rec_tree = json.load(open(deps)).get('tree_id')
+            except (OSError, ValueError):
+                rec_tree = None
+            t0 = time.time()
+            if rec_tree and traced.check(deps, argv) and tree_content_id(tree) == rec_tree:
+                prev = read_prepared_from(tree).get('port_commit')
+                pf.update(mode='prepare.py (reused: inputs identical)', reused_from=prev)
+                write_prepared_from(d, pf)
+                rules = read_rule_stats(os.path.join(d, 'prepare_stats.tsv'))
+                units = json.load(open(os.path.join(tree, 'build', 'units.json')))['units']
+                ndeps = len(json.load(open(deps)).get('files', {}))
+                r.metric('prepare_rules', len(rules))
+                r.metric('prepare_edits', sum(e for _, e in rules.values()))
+                r.metric('prepare_units', len({u.get('source') for u in units}))
+                r.metric('prepare_files_changed', 0)
+                r.metric('prepare_from', short(b.head))
+                r.metric('prepare_reused', 1)
+                r.metric('prepare_check_s', round(time.time() - t0, 1))
+                r['rules'] = rules
+                r['prepared_from'] = pf
+                r.artifact('tree', tree)
+                r.artifact('prepared_from', os.path.join(d, 'prepared_from.txt'))
+                r['output_id'] = rec_tree
+                r['summary'] = 'from %s: the tree of %s kept (every input prepare.py read is unchanged: %d files); ' \
+                               '%d rules, %d edits' % (short(b.head), short(prev), ndeps, len(rules),
+                                                      sum(e for _, e in rules.values()))
+                return
+        b.sh([PY, '-I', os.path.join(HERE, 'traced.py'), deps, '--exclude', staging, '--'] + argv, r['log'],
+             check=True)
+        r.metric('prepare_reused', 0)
         stats = os.path.join(staging, 'prepare_stats.tsv')
         rules = read_rule_stats(stats)
         if os.path.isfile(stats):
@@ -1101,6 +1143,11 @@ class Prepare(Stage):
                 for p in lst:
                     f.write('%s\t%s\n' % (tag, p))
         write_prepared_from(d, pf)
+        try:   # the tree this record made: a later run keeps it only while it is still that tree
+            dj = json.load(open(deps)); dj['tree_id'] = cid
+            json.dump(dj, open(deps + '.tmp', 'w')); os.replace(deps + '.tmp', deps)
+        except (OSError, ValueError):
+            pass
         units = json.load(open(os.path.join(tree, 'build', 'units.json')))['units']
         r.metric('prepare_rules', len(rules))
         r.metric('prepare_edits', sum(e for _, e in rules.values()))
@@ -1707,6 +1754,10 @@ def seed_link_out(b, r, out):
     r.metric('link_seeded', len(got))
 
 
+def objcache_on(env):
+    return env.get('FNVNX_LINK_OBJCACHE', 'default') not in ('', 'none', 'off', '0')
+
+
 class Link(Stage):
     name = 'link'
     deps = ('compile',)
@@ -1805,10 +1856,19 @@ class Link(Stage):
             t = time.time()
             b.sh([PY, '-I', fl, 'resolve'] + args, log, env=env, check=True)
             r.metric('link_resolve%d_s' % n, round(time.time() - t, 1))
+            ph = re.findall(r'resolve phases: (.*)', open(log, errors='replace').read())
+            for name, sec in re.findall(r'([\w+/() -]+?) ([\d.]+) s(?:,|$)', ph[-1] if ph else ''):
+                r.metric('link_resolve%d_phase_%s_s' % (n, re.sub(r'\W+', '_', name.strip()).strip('_')), float(sec))
             shutil.copyfile(os.path.join(out, 'stats.txt'), os.path.join(d, 'resolve%d.stats.txt' % n))
 
         # S2c's order: resolve (asks for layouts and vtables), probe (layouts + synthesized vtables/typeinfo),
-        # resolve again with both, apply, trial link
+        # resolve again with both, apply, trial link. build/link/out persists between runs: resolve 1 starts from the
+        # compiled objects only, without the previous run's synthesized objects (fnvlink.reset_synth)
+        gone = subprocess.run([PY, '-I', '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import fnvlink; '
+                               'print(" ".join(fnvlink.reset_synth(sys.argv[2])))', os.path.dirname(fl), out],
+                              capture_output=True, text=True)
+        if gone.stdout.strip():
+            r.note('previous run\'s synthesized objects dropped before resolve 1: ' + gone.stdout.strip())
         resolve(1)
         # fnvlink probe = the layout probe, then the vtable synthesis; run as its two documented halves (probe with
         # FNVNX_NO_VTABLES=1, then vtables) to time each
@@ -1887,6 +1947,22 @@ class Link(Stage):
             r.metric('link_bypassing_relocs', int(mm.group(3)) + int(mm.group(4)))
         else:
             r.note('check_rebind.py gave no result (exit %d, %s)' % (rrc, b.rel(rb)))
+        # T1, incremental link: the compile cache's use per step (tools/link/objcache.py) and the steps' own phases
+        ltext = open(log, errors='replace').read()
+        for tag, n_, h_, cs in re.findall(r'objcache (\w+): (\d+) compiles, (\d+) hits \(\d+ %\), \d+ compiled '
+                                          r'\(([\d.]+) s\)', ltext):
+            r.metric('link_objcache_%s_compiles' % tag, int(n_))
+            r.metric('link_objcache_%s_hits' % tag, int(h_))
+            r.metric('link_objcache_%s_compile_s' % tag, float(cs))
+        for step, body in re.findall(r'^(bodies|vtables) phases: (.*)$', ltext, re.M):
+            for name, sec in re.findall(r'([\w+/ -]+?) ([\d.]+) s(?:,|$)', body):
+                r.metric('link_%s_phase_%s_s' % (step, re.sub(r'\W+', '_', name.strip())), float(sec))
+        if 'VERIFY MISMATCH' in ltext:
+            r['status'] = 'warn'
+            r.note('objcache: a cached compile differs from a fresh one (FNVNX_LINK_OBJCACHE_VERIFY=1, see the log)')
+        oc = os.path.join(ROOT, 'tools', 'link', 'objcache.py')
+        if objcache_on(env):   # least recently used results above FNVNX_LINK_OBJCACHE_MAX_MB (default 8192) go
+            b.sh([PY, '-I', oc, 'prune'], log, env=env)
         m, classes = parse_stats(os.path.join(out, 'stats.txt'))
         ctext = open(clog, errors='replace').read()
         cm, cclasses = parse_check(ctext)
@@ -2178,12 +2254,14 @@ class Boot(Stage):
 
     def fingerprint(self, b):
         img, bc = b.cfg['BOOT_IMAGE'], b.cfg['BOOT_CENSUS']
-        return ['boot-v3', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
+        ini = os.path.join(os.path.dirname(os.path.abspath(img)), 'Fallout_default.ini') if os.path.isfile(img) else ''
+        return ['boot-v4', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
                                      'tests/s5/milestones.txt',
                                      'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
                 up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
                 synth_inputs_id(b) if img == 'auto' else '',
-                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], b.cfg['EMU_BUDGET']]
+                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], b.cfg['EMU_BUDGET'],
+                file_hash(ini) if ini and os.path.isfile(ini) else '']    # the ini mounted beside the image
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'boot', 'emu.log'))
@@ -2206,6 +2284,12 @@ class Boot(Stage):
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'
         if image:
             argv += ['--file', 'switch/fnv/FalloutNV.exe=' + image]
+            # the owner's Fallout_default.ini beside the exe (gamedata/exe holds both): without it the boot stops at
+            # the ini read (R4, recon4-013); S14's synthesized image has none beside it, so nothing changes there
+            ini = os.path.join(os.path.dirname(image), 'Fallout_default.ini')
+            if os.path.isfile(ini):
+                argv += ['--file', 'switch/fnv/Fallout_default.ini=' + ini]
+                r['ini'] = 'Fallout_default.ini beside the image'
         elog = os.path.join(d, 'emu.log')
         open(elog, 'w').close()
         tmo = int(b.cfg['EMU_TIMEOUT'])

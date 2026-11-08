@@ -18,6 +18,41 @@ def _hook(uc, access, address, size, value, acc):
         acc.add(address + i)
 
 
+def layout_shift(pair, case, max_steps=200000):
+    """(F-uncls, difffuzz-20) d when the two machines read the same fields of the argument buffers at offsets that
+    differ by one constant d: of the words only the oracle reads and the words only the native reads, at least 3
+    pair up under +d and those are at least half of each side. A member placed d bytes elsewhere (a base subobject
+    or a member the native lays out differently), not a difference of the function's work. None otherwise."""
+    rx, ra = _read_sets(pair, case, max_steps)
+    ox, oa = sorted(rx - ra), sorted(ra - rx)
+    ox = [a for a in ox if not world.WINDOW[0] <= a < world.WINDOW[1]]
+    oa = [a for a in oa if not world.WINDOW[0] <= a < world.WINDOW[1]]
+    best = None
+    for d in {b - a for a in ox for b in oa if (a & ~(world.BUF_SIZE - 1)) == (b & ~(world.BUF_SIZE - 1)) and
+              0 < abs(b - a) <= 64}:
+        n = sum(1 for a in ox if a + d in oa)
+        if n >= 3 and 2 * n >= len(ox) and 2 * n >= len(oa) and (best is None or n > best[0]):
+            best = (n, d)
+    return best[1] if best else None
+
+
+def _read_sets(pair, case, max_steps):
+    pair.run(case, max_steps)          # make sure both engines exist for this case
+    sets = []
+    for eng in (pair.xe, pair.ae):
+        acc = set()
+        hs = [eng.uc.hook_add(UC_HOOK_MEM_READ, _hook, user_data=acc, begin=lo, end=hi - 1) for lo, hi in REGIONS]
+        sets.append(acc)
+        eng._probe_hooks = hs
+    try:
+        pair.run(case, max_steps)
+    finally:
+        for eng in (pair.xe, pair.ae):
+            for h in getattr(eng, '_probe_hooks', []):
+                eng.uc.hook_del(h)
+    return sets
+
+
 def probe(pair, case, max_steps=200000):
     pair.run(case, max_steps)          # make sure both engines exist for this case
     sets = []

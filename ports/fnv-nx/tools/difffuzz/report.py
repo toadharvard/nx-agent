@@ -157,6 +157,10 @@ def reclassify(rec):
             return 'split-global'
     if d.get('bool_repr'):
         return 'bool-repr'
+    if d.get('nrvo_copy'):
+        return 'nrvo-copy'
+    if d.get('nrvo_elided'):
+        return 'nrvo-elision'
     if d.get('nan_bits'):
         return 'nan-bits'
     if d['kind'] in ('mem-write', 'return'):

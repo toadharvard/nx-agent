@@ -558,7 +558,7 @@ def r_platform_protos(path, text, stats):
     function's own declaration instead of the header, and the decomp's float overloads stay (see MATH_NAMES)."""
     global PLATFORM
     if PLATFORM is None: PLATFORM = platform_names()
-    spans, out, pos, have, top, kept = None, [], 0, set(), [], set()
+    spans, out, pos, have, top, kept, dropped = None, [], 0, set(), [], set(), {}
     for m in PROTO.finditer(text):
         name = re.sub(r'\s+', ' ', m.group(1))
         is_op = name.startswith('operator')
@@ -611,6 +611,9 @@ def r_platform_protos(path, text, stats):
         elif name in IOBUF_NAMES and '_iobuf' in m.group(0):
             hdr = IOBUF_MACRO.get(name, '"fnvnx_iobuf.h"')
             if name in IOBUF_MACRO: stats['DECL1-FOPEN'] += 1
+        elif name == 'abs' and spaces == ['namespace std']:
+            hdr = '"fnvnx_cmath/std_abs.h"'           # DECL1-STDABS (the header says why)
+            stats['DECL1-STDABS'] += 1
         else:
             hdr = PLATFORM[name]
         if not is_op:
@@ -622,6 +625,8 @@ def r_platform_protos(path, text, stats):
             ls = text.rfind('\n', 0, start - 1) + 1
             if ls >= pos and PROTO_HEAD.match(text, ls, start): start = ls
         nl = '\n' * text.count('\n', start, m.end())
+        if not is_op and spaces != ['namespace std']:
+            dropped.setdefault(name, (m.group(0), {h.split()[-1] for h in spaces}))   # DECL1-CONV (below)
         out.append(text[pos:start])
         # in a namespace N other than std the name must stay visible as N::name (a local template or overload
         # would hide the global one): a using-declaration of the platform function takes the prototype's place
@@ -638,7 +643,161 @@ def r_platform_protos(path, text, stats):
         stats['DECL1'] += 1
     out.append(text[pos:])
     text = ''.join('#include %s /* fnv-nx DECL1 */\n' % h for h in top) + ''.join(out)
+    if dropped:
+        text = decl1_conversions(text, dropped, stats)
     return ns_own_calls(text, kept, stats) if kept and (have or top) else text
+
+
+# DECL1-CONV. A dropped prototype can differ from the platform's declaration in kind, not only in spelling: the
+# decomp declares `unsigned int CreateMutexA(...)`, `int FindWindowA(...)`, `int FindFirstFileA(...)` where the SDK /
+# shim return a handle, `CallNextHookEx(void *, ...)` where the platform takes an HHOOK, and the C++ <string.h>
+# overloads return `const char *` for `strrchr(const char *, int)` where the decomp declared `char *`. The decomp's
+# code uses the values as it declared them (`int state = FindFirstFileA(...)`), which the target compiles only
+# through -fpermissive's implicit conversions and MSVC 2008 refuses (C2440 / C2664). DECL1 writes those conversions
+# out where the call's result is stored or returned: as the decomp's return type, where the two differ in kind (an
+# integer against a pointer or handle, `char *` from a const-returning overload). On ILP32 and on x86 the bits are the
+# same: the code the -fpermissive conversion made, and what the decomp's own prototype meant under MSVC. Arguments
+# are CALL1's (pointer parameters of Win32 calls cast to the shim's types).
+
+CONST_RESULT = {'strchr', 'strrchr', 'strstr', 'strpbrk', 'wcschr', 'wcsrchr', 'wcsstr', 'wcspbrk', 'memchr'}
+_SHIM_PROTOS = None
+CONV_WORDS = re.compile(r'__declspec\s*\(\s*\w+\s*\)|"C"|\b(?:extern|static|inline|__inline|__forceinline|__cdecl|'
+                        r'__stdcall|__fastcall|WINAPI|APIENTRY|CALLBACK|WINAPIV|NTAPI)\b')
+NOT_PTR = {'LPARAM', 'WPARAM', 'LRESULT', 'LONG_PTR', 'ULONG_PTR', 'UINT_PTR', 'INT_PTR', 'DWORD_PTR', 'SIZE_T', 'HRESULT',
+           'LCID', 'LANGID', 'PROPID'}
+
+
+def shim_protos():
+    """{name: (return type, [parameter types])} of the target shim's fnvnx_win32.h prototypes"""
+    global _SHIM_PROTOS
+    if _SHIM_PROTOS is None:
+        _SHIM_PROTOS = {}
+        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'shim', 'include', 'fnvnx_win32.h')
+        t = re.sub(r'/\*.*?\*/|//[^\n]*', ' ', open(here).read(), flags=re.S)
+        for m in re.finditer(r'^[ \t]*((?:const\s+)?[A-Za-z_]\w*(?:\s*\*+)?)\s+\**\s*([A-Za-z_]\w*)\s*\(([^;{}()]*)\)\s*;', t, re.M):
+            ps = [p.strip() for p in m.group(3).split(',')] if m.group(3).strip() not in ('', 'void') else []
+            _SHIM_PROTOS.setdefault(m.group(2), (m.group(1).strip(), [_ptype(p) for p in ps]))
+    return _SHIM_PROTOS
+
+
+def _ptype(p):
+    """the type of a parameter declaration (drops the parameter name and default)"""
+    p = re.sub(r'=.*$', '', p).strip()
+    p = re.sub(r'\b(?:IN|OUT|OPTIONAL|_In_\w*|_Out_\w*|_Inout_\w*)\b', ' ', p).strip()
+    m = re.match(r'^(.*?[\s\*&])([A-Za-z_]\w*)\s*(\[[^\]]*\])?$', p)
+    if m and m.group(1).strip() and not re.fullmatch(r'(?:const\s+)?(?:unsigned|signed|struct|enum)', m.group(1).strip()):
+        p = m.group(1) + ('*' if m.group(3) else '')
+    return re.sub(r'\s+', ' ', re.sub(r'\s*\*', '*', p)).strip()
+
+
+def _proto_types(proto, name):
+    head, _, rest = proto.partition(name)
+    ret = re.sub(r'\s+', ' ', CONV_WORDS.sub(' ', head)).strip()
+    ret = re.sub(r'\s*\*', '*', ret)
+    params = rest[rest.index('(') + 1:rest.rindex(')')]
+    ps = [p for p in _split_args(params)] if params.strip() not in ('', 'void') else []
+    return ret, [_ptype(p) for p in ps]
+
+
+def _is_ptr(t):
+    t = t.replace('const ', '').strip()
+    if t in NOT_PTR:
+        return False
+    return '*' in t or bool(re.fullmatch(r'H[A-Z0-9_]+|LP[A-Z]\w*|P[A-Z][A-Z0-9_]*|HANDLE|LPVOID|PVOID|FARPROC', t))
+
+
+def _split_args(a):
+    out, depth, cur, q = [], 0, [], None
+    for ch in a:
+        if q:
+            cur.append(ch)
+            if ch == q and (len(cur) < 2 or cur[-2] != '\\'): q = None
+            continue
+        if ch in '"\'': q = ch
+        elif ch in '([{': depth += 1
+        elif ch in ')]}': depth -= 1
+        elif ch == ',' and depth == 0:
+            out.append(''.join(cur)); cur = []; continue
+        cur.append(ch)
+    out.append(''.join(cur))
+    return out
+
+
+CALL_PREV = re.compile(r'(?:[=(,;{}!&|?:+\-*/<>\[]|\breturn)\s*$')
+
+
+def decl1_conversions(text, dropped, stats):
+    """DECL1-CONV (see above): explicit conversions at the unqualified calls of the dropped names."""
+    shim = shim_protos()
+    plan, quals = {}, {}
+    for name, (proto, spaces) in dropped.items():
+        quals[name] = spaces
+        dret, dps = _proto_types(proto, name)
+        pret, pps = shim.get(name, (None, None))
+        ret_cast = None
+        if dret and dret != 'void':
+            if pret is not None and _is_ptr(pret) != _is_ptr(dret):
+                ret_cast = dret
+            elif name in CONST_RESULT and dret.replace(' ', '') in ('char*', 'wchar_t*', 'void*'):
+                ret_cast = dret
+        arg_casts = {}       # arguments: CALL1 casts pointer arguments of Win32 calls to the shim's types
+        if ret_cast or arg_casts:
+            plan[name] = (ret_cast, arg_casts)
+    if not plan:
+        return text
+    # unqualified, or qualified by the namespace the prototype was in (`InstalledPathDetail::RegOpenKeyExA(`, where
+    # DECL1 left `using ::RegOpenKeyExA;`)
+    rx = re.compile(r'(?<![\w.>:~])((?:[A-Za-z_]\w*\s*::\s*)?)(%s)\s*\(' % '|'.join(re.escape(n) for n in sorted(plan)))
+    out, pos = [], 0
+    for m in rx.finditer(text):
+        if m.start() < pos: continue
+        q = re.sub(r'\s*::\s*$', '', m.group(1))
+        if q and q not in quals[m.group(2)]: continue
+        line = text[text.rfind('\n', 0, m.start()) + 1:m.start()]
+        if '//' in line or '#' in line.lstrip()[:1] or not CALL_PREV.search(text[max(0, m.start() - 40):m.start()]):
+            continue
+        close = match_paren(text, m.end() - 1)
+        if close < 0: continue
+        ret_cast, arg_casts = plan[m.group(2)]
+        args = _split_args(text[m.end():close])
+        if arg_casts and not (len(args) == 1 and not args[0].strip()):
+            args = ['(%s)(%s)' % (arg_casts[i], a.strip()) if i in arg_casts and a.strip() else a for i, a in enumerate(args)]
+        call = m.group(1) + m.group(2) + '(' + ','.join(args) + ')'
+        # the result as the decomp's type only where it is stored or returned (`x = f(...)`, `T x = f(...)`,
+        # `return f(...)`): as another call's argument it meets that call's declaration, the platform's
+        as_value = re.search(r'(?:(?<![=!<>])=|\breturn)\s*$', text[max(0, m.start() - 40):m.start()])
+        if not as_value:
+            ret_cast = None
+        if not ret_cast and args == _split_args(text[m.end():close]):
+            continue
+        out.append(text[pos:m.start()])
+        out.append('((%s)%s)' % (ret_cast, call) if ret_cast else call)
+        pos = close + 1
+        stats['DECL1-CONV'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
+
+def match_paren(text, open_at):
+    """index of the ')' matching text[open_at] == '(' (strings and char literals skipped), or -1"""
+    depth, i, n = 0, open_at, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in '"\'':
+            j = i + 1
+            while j < n and text[j] != ch:
+                j += 2 if text[j] == '\\' else 1
+            i = j
+        elif ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                return i
+        elif ch == ';' or ch == '{':
+            return -1
+        i += 1
+    return -1
 
 NS_CALL_PREV = re.compile(r'(?:[(=,;{}!?:+\-|<\[]|\b(?:return|else|do|case))\s*$')
 

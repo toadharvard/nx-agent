@@ -11,6 +11,7 @@ Literal data the code reads from the image (string literals, `__real@`/`__xmm@` 
 itself defines at a mapped address) is recovered from the object, so the shared world can hold those bytes at their
 original addresses without the player's executable.
 """
+import collections
 import struct
 from pathlib import Path
 
@@ -25,6 +26,64 @@ LITERAL_POOL = 0x02f00000      # synthetic addresses of literals units.json does
 TLS_IMAGE_START = 0x01272000
 TLS_INDEX = 0x0126fd98
 _POOL_NEXT = LITERAL_POOL
+
+# (float class) The exe image the pinned literals are checked against: an object with .read(va, n) (exeimage.PE), set
+# by a test, else FNVNX_EXE when that file loads, else None (then nothing is checked: the order of the literals stays)
+EXE = None
+_EXE_TRIED = False
+
+
+def exe_image():
+    global EXE, _EXE_TRIED
+    if EXE is None and not _EXE_TRIED:
+        _EXE_TRIED = True
+        try:
+            import os
+            import config
+            import exeimage
+            if Path(config.EXE).exists():
+                EXE = exeimage.load_pe(config.EXE, not os.environ.get('FNVNX_EXE_ANY'))
+        except Exception:  # noqa: BLE001
+            EXE = None
+    return EXE
+
+
+def exe_literals(lit, exe=None, stats=None):
+    """{address: bytes} of pinned literals with the exe's bytes where they disagree. units.json maps several $SG
+    strings of one object to one address (26 of 37 overlaps matched neither literal), so a literal may sit where the
+    exe keeps other bytes and cover real constants behind it (0x00476b20). The union of a group of overlapping
+    literals below the synthetic pool is pinned as the exe's bytes; a lone literal that differs is only counted. Without the exe image nothing changes. `stats` (a dict) counts
+    {'differ': literals that differ from the exe, 'overlap': overlapping groups}."""
+    exe = exe if exe is not None else exe_image()
+    if exe is None:
+        return lit
+    stats = stats if stats is not None else {}
+    stats.setdefault('differ', 0); stats.setdefault('overlap', 0)
+    items = sorted((a, b) for a, b in lit.items() if a < LITERAL_POOL)
+    out = {a: b for a, b in lit.items() if a >= LITERAL_POOL}
+    groups, cur = [], None
+    for a, b in items:
+        if cur is not None and a < cur[1]:
+            cur[1] = max(cur[1], a + len(b)); cur[2].append((a, b))
+        else:
+            cur = [a, a + len(b), [(a, b)]]; groups.append(cur)
+    for lo, hi, members in groups:
+        try:
+            e = bytes(exe.read(lo, hi - lo))
+        except Exception:  # noqa: BLE001
+            for a, b in members:
+                out[a] = b
+            continue
+        if len(members) > 1:
+            stats['overlap'] += 1
+            stats['differ'] += sum(1 for a, b in members if e[a - lo:a - lo + len(b)] != b)
+            out[lo] = e
+        else:
+            a, b = members[0]
+            if e != b:
+                stats['differ'] += 1         # counted, not replaced: 3334 of 15143 pinned literals (tables whose
+            out[a] = b                       # relocated words the object holds as 0, ...), a wider verdict change
+    return out
 
 
 class Coff:
@@ -64,6 +123,54 @@ class Coff:
         return c[0] if len(c) == 1 else None
 
 
+def _sg_strings(coff):
+    """{n: bytes through the terminator} of the object's numbered $SG literals"""
+    out = {}
+    for s in coff.symbols.values():
+        if s['section'] > 0 and s['name'].startswith('$SG') and s['name'][3:].isdigit():
+            b = coff.sections[s['section']]['data'][s['value']:]
+            e = b.find(b'\0')
+            out[int(s['name'][3:])] = bytes(b[:e + 1 if e >= 0 else len(b)])
+    return out
+
+
+def sg_shift(coff, unit, exe=None):
+    """S1-rules (d25-sg): MSVC numbers a unit's string literals $SG<n> by an internal symbol counter, and the oracle
+    objects (msvc/pristine, built with S11's force-included header) count 43 higher in every C++ unit than the build
+    that wrote units.json (loader/synth/synth_image.py sg_shift). Looking the object's names up unshifted pinned each
+    literal at a neighbour's address: 3,334 of 15,143 pinned literals differed from the exe, 37 overlapping groups
+    (EQ). The shift is the delta d (object = units.json + d) under which the most of the unit's literals equal the
+    exe's bytes at their units.json address; without the exe, the delta that maps the most names, accepted when it
+    maps at least 90 %. 0 when unshifted or undecided."""
+    mine = {int(k[3:]): int(v, 16) for k, v in unit.get('symbols', {}).items() if k.startswith('$SG') and k[3:].isdigit()}
+    if not mine:
+        return 0
+    have = _sg_strings(coff)
+    if not have:
+        return 0
+    deltas = collections.Counter(b - a for a in mine for b in have if abs(b - a) < 5000)
+    if not deltas:
+        return 0
+    exe = exe if exe is not None else exe_image()
+    if exe is not None:
+        def score(d):
+            n = 0
+            for k, a in mine.items():
+                b = have.get(k + d)
+                if b is None:
+                    continue
+                try:
+                    if bytes(exe.read(a, len(b))) == b:
+                        n += 1
+                except Exception:  # noqa: BLE001
+                    pass
+            return n
+        best = max([0] + [d for d, _ in deltas.most_common(8)], key=lambda d: (score(d), d == 0))
+        return best if score(best) > score(0) else 0
+    d, n = deltas.most_common(1)[0]
+    return d if d and n * 10 >= len(mine) * 9 else 0
+
+
 class UnitImage:
     """All functions of one unit placed at their original addresses.
 
@@ -74,6 +181,15 @@ class UnitImage:
     def __init__(self, coff, unit):
         self.coff, self.unit = coff, unit
         self.mappings = {k: int(v, 16) for k, v in unit['symbols'].items()}
+        self.sg_shift = sg_shift(coff, unit)
+        if self.sg_shift:
+            # the object numbers its $SG literals d higher than the build that wrote units.json (S11's force-included
+            # header): object $SG<n> is units.json's $SG<n-d>
+            sg = {k: v for k, v in self.mappings.items() if k.startswith('$SG') and k[3:].isdigit()}
+            for k in sg:
+                del self.mappings[k]
+            for k, v in sg.items():
+                self.mappings['$SG%d' % (int(k[3:]) + self.sg_shift)] = v
         self.placements = {}
         self.errors = []
         self.synthetic = {}                       # (section, value) -> (pool address, bytes)
@@ -169,6 +285,36 @@ class UnitImage:
         return dict(symbol=f['symbol'], size=size, section=s['section'], start=start, code=bytes(code),
                     relocs=relocs, unresolved=unresolved, address=a)
 
+    def _relocated(self, sec, start, blob, base=None):
+        """blob (section bytes from `start`) with its DIR32 relocations applied: a read-only table of code or data
+        pointers (a jump table, a callback table, a vftable-like array) holds 0 + addend in the object and the
+        target's address in the exe (EQ reports/eq-sg: 91 pinned words were 00000000 where the exe has code
+        addresses such as 0x00722b50, slot 0 of ??_7FUN_00722880 -> its ??_E). A target the unit cannot place takes
+        the exe's word at that address when the exe is loaded (read-only data: the exe holds the relocated value),
+        else keeps the object's bytes."""
+        out = bytearray(blob)
+        exe = exe_image() if base is not None else None
+        for off, idx, kind in sec.get('relocs', ()):
+            r = off - start
+            if kind != DIR32 or r < 0 or r + 4 > len(out):
+                continue
+            tsym = self.coff.symbols.get(idx)
+            if tsym is None:
+                continue
+            addend = struct.unpack_from('<I', out, r)[0]
+            try:
+                v = self.resolve(tsym, addend)
+            except Exception:  # noqa: BLE001
+                v = None
+            if v is None and exe is not None:
+                try:
+                    v = struct.unpack('<I', bytes(exe.read(base + r, 4)))[0]
+                except Exception:  # noqa: BLE001
+                    v = None
+            if v is not None:
+                struct.pack_into('<I', out, r, v & 0xffffffff)
+        return bytes(out)
+
     def literal_bytes(self):
         """{original address: bytes} for read-only data the unit's code refers to and the object holds:
         string literals ($SG, ??_C@), __real@/__xmm@ constants, other symbols defined in non-writable data sections
@@ -201,9 +347,43 @@ class UnitImage:
                         nxt = [x['value'] for x in self.coff.symbols.values()
                                if x['section'] == s['section'] and x['value'] > s['value']]
                         blob = blob[:min(nxt) - s['value']] if nxt else blob
-                        blob = blob[:4096]
+                        blob = self._relocated(sec, s['value'], blob[:4096], base)
                     out[base] = bytes(blob)
-        return out
+        self._exe_constants(out)
+        return exe_literals(out)
+
+    def _exe_constants(self, out):
+        """(uncls2, difffuzz-20) A data symbol the object holds in a writable section (`float _INVALID_FLOAT` in
+        .data of the decomp's object) that the exe keeps in read-only data: nothing pinned its bytes, the oracle read
+        zeros where the exe's code reads the constant (0x00a3c6d0: a compare against -FLT_MAX, which the native
+        folds). The exe's bytes of the symbol's extent are pinned. With no exe image nothing changes."""
+        exe = exe_image()
+        sec_of = getattr(exe, 'section_of', None)
+        if exe is None or sec_of is None:
+            return
+        for f in self.funcs.values():
+            for rel, kind, t, name in f['relocs']:
+                if t is None or kind != DIR32 or name not in self.mappings:
+                    continue
+                if any(a <= t < a + len(b) for a, b in out.items()):
+                    continue
+                for s in self.coff.by_name.get(name, []):
+                    if s['section'] <= 0:
+                        continue
+                    sec = self.coff.sections[s['section']]
+                    if sec['flags'] & IMAGE_SCN_CNT_CODE or not sec['flags'] & IMAGE_SCN_MEM_WRITE or \
+                            sec['flags'] & IMAGE_SCN_CNT_UNINIT:
+                        continue
+                    es = sec_of(t)
+                    if es is None or es[2] & (0x20 | 0x80000000 | 0x80):    # exe code / writable / uninitialised
+                        continue
+                    nxt = [x['value'] for x in self.coff.symbols.values()
+                           if x['section'] == s['section'] and x['value'] > s['value']]
+                    ext = min(nxt) - s['value'] if nxt else len(sec['data']) - s['value']
+                    n = min(ext if ext > 0 else 4, 4096, es[0] + es[1] - t)
+                    if n > 0:
+                        out[t] = bytes(exe.read(t, n))
+                    break
 
     def writable_initial(self):
         """{original address: bytes}: initial values of writable data the unit defines at mapped addresses (a seed

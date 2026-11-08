@@ -119,6 +119,10 @@ inline __attribute__((always_inline)) unsigned long _exception_code(void) { retu
  * (S13: an inlined local duplicate differs from the function the address binds to). */
 #define FNVNX_KEEP __attribute__((used, noinline))
 
+/* The base of an opaque enum declaration (prepare.py ENUM1: the decomp's MSVC forward declaration `enum X;` becomes
+ * `enum X FNVNX_ENUM_INT;`). The S11 gate defines it empty: MSVC's own `enum X;` is that declaration there. */
+#define FNVNX_ENUM_INT : int
+
 /* MSVC binds a C-style cast to a non-const reference to a temporary ((T&)Make(x)); prepare.py RCAST1 wraps the
  * temporary in fnvnx_lvalue, which hands back the same object (alive to the end of the full expression). */
 #ifdef __cplusplus
@@ -177,6 +181,18 @@ struct fnvnx_new_tag {};
 /* IDTOR1: a body-less destructor declaration for a class whose implicit destructor the recipe binds (GCC calls the
  * bound D1 by name instead of defining it inline); MSVC's implicit one already compiles to that call */
 #define FNVNX_IDTOR1(cls) public: ~cls();
+/* D22: a listed class's slot-0 placeholder virtual becomes its virtual destructor (GCC's D1/D0 where MSVC's ??_G
+ * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
+#define FNVNX_D22(C, ...) virtual ~C();
+#define FNVNX_D22_DROP(...)
+/* D26: a call of a converted slot-0 placeholder (MSVC: the deleting destructor ??_G(flags)) is a virtual destructor
+ * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
+template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (flags & 1) delete p; else p->~T(); }
+#define FNVNX_D22_CALL(p, m, ...) fnvnx_d22_vdtor((p), (__VA_ARGS__))
+/* DTORB1: a destructor stand-in calls the address the recipe binds its ??1 to (the link's __fnv_<a>), the
+ * original body unreachable */
+#define FNVNX_DTORB_BEGIN(a) { extern void fnvnx_dtorb_##a(void*) __asm__("__fnv_" #a); fnvnx_dtorb_##a((void*)this); } if (0) {
+#define FNVNX_DTORB_END }
 #endif
 
 /* SAL annotations (sal.h) used without an include in pasted CRT prototypes */

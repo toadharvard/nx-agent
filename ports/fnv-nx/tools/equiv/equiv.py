@@ -64,6 +64,7 @@ CLASSES = {
     'COM1': 'neutral',          # renames a unit's own IUnknown copy (types only; the decomp's vtable slots kept)
     'SPEC1': 'neutral',         # early template<> declarations
     'STATIC1': 'neutral',       # internal -> external linkage of image-bound variables (MSVC may inline less)
+    'VFTBL1': 'neutral',        # the decomp's stand-in table for an exe vftable becomes a declaration (`&name` is the same symbol)
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
     'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
@@ -93,6 +94,13 @@ CLASSES = {
     'STAND3': 'platform',       # STAND2 for in-class / inline stand-ins, in /Od units without /Ob1 (MSVC inlines nothing)
     'STAND5': 'platform',       # STAND2 for an in-class member body whose MSVC name the unit binds to another unit's address
     'STAND4': 'platform',       # STAND1/2 for a static free stand-in: the definition becomes an extern declaration of the bound name
+    'PHSLOT1': 'platform',      # an empty `virtual void vNNN() {}` placeholder becomes declared-only (the exe slot fill binds it)
+    'STAND6': 'platform',       # STAND2 for a __declspec(noinline) stand-in, in any unit (MSVC never inlined it)
+    'ADDRFN1': 'platform',     # a code address cast to void* takes the address symbol __fnv_<a> (a GCC asm label)
+    'POP2': 'neutral',          # POST hook: pop-mismatch chains, the words a getter leaves move to the call that pops them
+    'THIS2': 'neutral',         # POST hook: a caller that hands its ecx to a thiscall callee calls it on its object
+    'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static);
+                               # not neutral: MSVC then drops the static recipe functions only a harness referenced
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
     'INC1': 'neutral',          # quoted include spelled as the including directory's file (MSVC: no case)
     'ANON2': 'platform',        # raw storage for members with special functions in an anonymous struct of a union
@@ -132,13 +140,17 @@ CLASSES = {
     'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
     'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor
+    'D22': 'neutral',          # FNVNX_D22 / FNVNX_D22_DROP: GCC declares the slot-0 virtual destructor, MSVC keeps the original declaration
+    'DTORB1': 'neutral',       # FNVNX_DTORB_BEGIN/END (empty under MSVC): a destructor stand-in calls the address its ??1 is bound to
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
-PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
+PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names', 'POP2': 'pop_chains',
+          'THIS2': 'this_members'}
 # POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
-POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1'}
+POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
+              'pop_chains': 'POP2', 'this_members': 'THIS2'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
@@ -148,7 +160,7 @@ DEFAULT_GROUPS = {
     'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2 NSCALL1',
     'newdel': 'NEW1 NEW2 NEW3 NEW4 NEW5 CTOR1',
     'EXC1': 'EXC1',
-    'link': 'LINK1 STATIC1 BIND1',
+    'link': 'LINK1 STATIC1 VFTBL1 BIND1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
     'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
     'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 COND1 RSTR1 FINL1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
@@ -376,7 +388,16 @@ class Resolver:
                     if len({int(v, 16) for v in alts}) == 1:
                         syms[n] = next(iter(alts)); how['game'] += 1
                         continue
-                for k, what in ((var_key(n), 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
+                vk = var_key(n)
+                if vk:
+                    # the other linkage of a variable the unit itself binds: LINK1 names it by variable name inside
+                    # this unit's link, so the unit's own address decides even where another unit binds the same
+                    # name elsewhere (extradatalist.cpp: DAT_011977d8 at 0x011977d0)
+                    mine = {v for k2, v in syms.items() if var_key(k2) == vk}
+                    if len({int(v, 16) for v in mine}) == 1:
+                        syms[n] = next(iter(mine)); how['linkage-unit'] += 1
+                        continue
+                for k, what in ((vk, 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
                     if k and len(self.by_key.get(k, ())) == 1:
                         syms[n] = hex(next(iter(self.by_key[k]))); how[what] += 1
                         break
@@ -444,7 +465,8 @@ SDK_AW_MACRO = re.compile(r'^\s*#\s*define\s+([A-Za-z_]\w*)\s+\1[AW]\b', re.M)
 
 
 def gen_dir():
-    """Headers generated from the SDK in use (never committed: they list SDK names): fnvnx_equiv_unaw.h."""
+    """Headers generated from the SDK in use (never committed: they list SDK names or paths): fnvnx_equiv_unaw.h,
+    fnvnx_equiv_winerror.h, fnvnx_equiv_sdk_windows.h."""
     root = os.environ.get('FNV_MSVC9_ROOT')
     d = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'fnvnx-equiv'
     d.mkdir(parents=True, exist_ok=True)
@@ -464,7 +486,74 @@ def gen_dir():
             if src else []
         w.write_text('/* generated by tools/equiv/equiv.py from %s/SDK/Include/winerror.h: its ERROR_* codes, which the '
                      'target shim does not define */\n' % root + ''.join('#undef %s\n' % n for n in names))
+    hide, unhide = d / 'fnvnx_equiv_sdkhide.h', d / 'fnvnx_equiv_sdkunhide.h'
+    if root and not (hide.exists() and unhide.exists()):
+        names = sorted(sdk_only_names(Path(root)))
+        note = '/* generated by tools/equiv/equiv.py from %s: SDK-HIDE (sdk_only_names) */\n' % root
+        tmp = hide.with_suffix('.tmp%d' % os.getpid())
+        # a name already a macro is left alone; the marker lets unhide undefine only what hide defined
+        tmp.write_text(note + ''.join('#ifndef %s\n#define %s fnvnx_sdk_%s\n#define FNVNX_HID_%s\n#endif\n' % (n, n, n, n)
+                                      for n in names)); os.replace(tmp, hide)
+        tmp = unhide.with_suffix('.tmp%d' % os.getpid())
+        tmp.write_text(note + ''.join('#ifdef FNVNX_HID_%s\n#undef %s\n#undef FNVNX_HID_%s\n#endif\n' % (n, n, n)
+                                      for n in names)); os.replace(tmp, unhide)
+    k = d / 'fnvnx_equiv_sdk_windows.h'       # SDK-WINDOWS: tools/equiv/msvc/windows.h stands in for <windows.h>
+    if root:
+        inc = Path(root, 'SDK/Include')
+        src = next((h for h in inc.iterdir() if h.name.lower() == 'windows.h'), None) if inc.is_dir() else None
+        body = ('/* generated by tools/equiv/equiv.py: the SDK\'s own <windows.h>, by path (tools/equiv/msvc/windows.h '
+                'takes its name on the include path) */\n#include "Z:%s"\n' % src) if src else '#error no SDK windows.h\n'
+        if not k.exists() or k.read_text() != body:
+            tmp = k.with_suffix('.tmp%d' % os.getpid()); tmp.write_text(body); os.replace(tmp, k)
     return d
+
+
+CXX_WORDS = set('''alignas alignof and asm auto bool break case catch char char16_t char32_t class const const_cast
+    constexpr continue decltype default delete do double dynamic_cast else enum explicit export extern false float for
+    friend goto if inline int long mutable namespace new noexcept not nullptr operator or private protected public
+    register reinterpret_cast return short signed sizeof static static_assert static_cast struct switch template this
+    throw true try typedef typeid typename union unsigned using virtual void volatile wchar_t while xor'''.split())
+
+
+# words of MSVC inline assembly (the SDK's own __asm blocks: winnt.h's Int64ShllMod32 `dword ptr`, `st`): never renamed
+X86_ASM_WORDS = set('''eax ebx ecx edx esi edi ebp esp eip ax bx cx dx si di bp sp al ah bl bh cl ch dl dh cs ds es fs
+    gs ss st byte word dword qword tbyte fword ptr offset short near far seg type length size mmword xmmword'''.split())
+
+
+def sdk_only_names(root):
+    """SDK-HIDE: the functions, typedef names, tags and enumerators the Windows SDK headers declare that the target shim never names
+    (no word of shim/include), the VC headers (CRT, STL) do not use, and that are not C++ words. The gate's
+    fnvnx_win32.h stand-in reads <windows.h> with each of them renamed to fnvnx_sdk_<name> and undefines the macros
+    afterwards (a name that is already a macro is left alone; one the SDK #defines later replaces the rename, and
+    the unhide list undefines it with the marker): the target has no such declaration, so a prepared unit cannot rely on one, and the decomp's own names
+    (a struct Arc, DragObject; typedef PCH; gethostname) no longer collide with the full SDK's."""
+    nocomment = lambda t: re.sub(r'/\*.*?\*/|//[^\n]*', ' ', t, flags=re.S)
+    words = set()
+    for f in (PORT / 'shim' / 'include').rglob('*.h'):    # code only: a name in a shim comment declares nothing
+        words.update(re.findall(r'[A-Za-z_]\w*', nocomment(f.read_text(errors='replace'))))
+    vc, sdk = Path(root, 'VC', 'include'), Path(root, 'SDK', 'Include')
+    for f in vc.rglob('*.h') if vc.is_dir() else ():   # VC's C headers (CRT, sal, sourceannotations; the STL's
+        t = f.read_text(errors='replace')               # names live in std), not the Windows headers VC ships beside
+        if not re.search(r'#\s*include\s*<(?:windows|windef|ole2|winbase)\.h>', t, re.I):   # them (penwin.h: RECTL)
+            words.update(re.findall(r'[A-Za-z_]\w*', nocomment(t)))
+    fn = re.compile(r'\b(?:WINAPI|APIENTRY|WINAPIV|CALLBACK|STDAPI|WSAAPI|PASCAL|__stdcall|__cdecl|NTAPI)\s+'
+                    r'(?:\w+\s+)*?([A-Za-z_]\w*)\s*\(')
+    td = re.compile(r'\}\s*([A-Za-z_][\w\s,*]*);')    # every name between a closing brace and `;`
+    td2 = re.compile(r'\btypedef\b[^;{}()]*?\b([A-Za-z_]\w*)\s*;')
+    names = set()
+    for h in sdk.iterdir() if sdk.is_dir() else ():
+        if h.suffix.lower() != '.h':
+            continue
+        t = nocomment(h.read_text(errors='replace'))
+        names.update(fn.findall(t))
+        names.update(re.findall(r'\b(?:struct|union|enum)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\{', t))   # tags
+        for body in re.findall(r'\benum\b[^{};]*\{([^{}]*)\}', t):      # enumerators
+            names.update(re.findall(r'(?:^|,)\s*([A-Za-z_]\w*)\s*(?==|,|$)', body.strip()))
+        for m in td.findall(t):
+            names.update(re.findall(r'[A-Za-z_]\w*', m))
+        names.update(td2.findall(t))
+    return {n for n in names if n not in words and n not in CXX_WORDS
+            and n.lower() not in X86_ASM_WORDS}
 
 
 _cmath_lock = threading.Lock()
@@ -550,14 +639,42 @@ def cmd_layouts(a):
 
 def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lean=False, variant=''):
     """variant: names a leave-out build (attribute) in the object cache, so it keeps its own manifest and does not
-    replace the unit's head build there"""
+    replace the unit's head build there. SDK-LEAN: a prepared unit that the full <windows.h> breaks (names of
+    winioctl / winsock / rpc / ole the target shim does not declare collide with the decomp's: RequestLocation,
+    gethostname) is built again with WIN32_LEAN_AND_MEAN, nearer the target shim's subset; every caller (head,
+    /EHs-c-, leave-out builds) makes the same choice, so their objects stay comparable."""
+    ok, text = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant)
+    if not ok and not plain and (tree / 'equiv_rules.txt').exists():
+        # STANDIN-RETRY: stand-in variants for a unit that does not compile, in order (the same choice for every
+        # caller): the variant its first error names, then SDK-HIDE, then lean, then both
+        extra = [d for pat, d in STANDIN_RETRIES if re.search(pat, text)]
+        hide = extra + ['/DFNVNX_EQUIV_SDKHIDE=1']
+        tries = ([(lean, extra)] if extra else []) + [(lean, hide)] + ([(True, extra), (True, hide)] if not lean else [])
+        for ln, ex in tries:
+            ok2, text2 = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, ln, variant, ex)
+            if ok2:
+                return ok2, text2
+    return ok, text
+
+
+# STANDIN-RETRY: (first-error pattern, /D of a gate stand-in variant). A unit that forward-declares the SDK's own
+# `union _ULARGE_INTEGER;` meets the stand-in's class of that name (other units declare `class _ULARGE_INTEGER;`).
+# A unit that includes <intrin.h> inside a namespace (hkadeltacompressedanimation's fnv_00e359f0) gets the barriers
+# declared there too; MSVC 2008 takes them and the compat's global extern "C" ones for two functions (C2668). The
+# retry includes <intrin.h> in the compat first (not for every unit: 140 of 382 intrinsic units break then).
+STANDIN_RETRIES = [(r"'_ULARGE_INTEGER' : 'union' type redefinition", '/DFNVNX_EQUIV_ULARGE_UNION=1'),
+                   (r"'_(?:ReadWrite|Read|Write)Barrier' : ambiguous call", '/DFNVNX_EQUIV_INTRIN=1')]
+
+
+def _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant, extra=()):
     args = [sys.executable, str(Path(decomp, 'tools/msvc.py').resolve()), '--compiler', unit['compiler'], '/c', '/nologo']
     flags = unit['flags']
     if eh_off:      # the same unit without C++ exception handling: separates EH-only differences from the rest
         flags = [f for f in flags if not f.upper().startswith('/EH')] + ['/EHs-c-']
     args += flags + ([] if plain else ['/I' + str(SHIM), '/I' + str(gen_dir()), '/FI', str(FORCE_INCLUDE)])
     if not plain and (tree / 'equiv_rules.txt').exists():      # a tree from `equiv.py prepare`
-        args += ['/I' + str(cmath_dir()), '/FI', str(COMPAT_INCLUDE)] + (['/DFNVNX_EQUIV_LEAN=1'] if lean else [])
+        args += ['/I' + str(cmath_dir()), '/FI', str(COMPAT_INCLUDE)] + (['/DFNVNX_EQUIV_LEAN=1'] if lean else []) \
+            + list(extra)
     if layout:      # /w: no diagnostics interleaved with the report (no effect on code)
         args += ['/d1reportAllClassLayout', '/w']
     args += ['/I' + str(tree / 'include'), str(tree / unit['source']), '/Fo' + str(obj)]

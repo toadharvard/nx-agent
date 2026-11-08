@@ -40,7 +40,7 @@ job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and
 			|| { echo "FARM_SRC=$SRC is not at $COMMIT"; exit 1; }
 	else
 		SRC=$FARM_HOME/src-${COMMIT:0:12}
-		if [ ! -d "$SRC" ]; then git -C "$repo" worktree add --detach "$SRC" "$COMMIT" >/dev/null; fi
+		bash "$(dirname "${BASH_SOURCE[0]}")/worktree.sh" "$repo" "$SRC" "$COMMIT" >/dev/null
 	fi
 	P=$SRC/ports/fnv-nx
 	COMMIT=$(git -C "$SRC" rev-parse HEAD)
@@ -163,7 +163,12 @@ stage_after() {  # stage_after <build dir> <stage> <earlier stage>: <stage> ende
 # fuzz farms read (link-head)
 VSUF=${FARM_VARIANT:+-$FARM_VARIANT}
 publish_link() { # publish_link <build dir>: link/<commit12> + the rolling branch link-head, for the fuzz farms
-	local bd=$1 wt=$FARM_HOME/link-wt$VSUF rb=link-head$VSUF ok
+	local bd=$1 wt=$FARM_HOME/link-wt$VSUF rb=link-head$VSUF ok wip=${FARM_WIP_BRANCH:-} base
+	# a try farm's WIP build (runner.sh WATCH=wip: FARM_WIP_BRANCH=wip/<b>) publishes link/<commit12> only: link-head
+	# is the integration branch's history, which the fuzz, scenario and boot farms read (it held try1of1's wip/d26
+	# link). Its commit is made in a separate local branch and worktree, so link-head cannot move even by mistake.
+	base=link-head$VSUF
+	[ -n "$wip" ] && { wt=$FARM_HOME/link-wt-wip$VSUF; rb=link-wip$VSUF; }
 	local pub=${FARM_PUBLISH:-auto}
 	[ "$pub" = 0 ] && { NOTE_PUB="not published (FARM_PUBLISH=0)"; return 0; }
 	ok=$(python3 -I - "$bd" "$COMMIT" "$pub" <<'EOF'
@@ -244,7 +249,7 @@ EOF
 		# V1-link's audits of this link (full_job.sh 4d): report, tables and logs, about 1 MB
 		[ -d "$bd/v1" ] && cp -r "$bd/v1" v1
 		cp "$REPORT" report.md
-		BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" "$P" > meta.json <<'EOF'
+		FARM_WIP_BRANCH=$wip BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" "$P" > meta.json <<'EOF'
 import json, os, sys
 bd, commit, tree, objs, objs_commit, port = sys.argv[1:7]
 sys.path.insert(0, os.path.join(port, 'tools', 'farm'))
@@ -270,7 +275,8 @@ def milestone(f):   # S5's boot summary (tests/s5/emu_guest.py --summary-json): 
         return None
 stub = os.path.join(bd, 'boot', 'stub', 'emu_stub.log')
 stub_lines = open(stub, errors='replace').read().splitlines() if os.path.isfile(stub) else []
-print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
+print(json.dumps({'commit': commit, 'wip_branch': os.environ.get('FARM_WIP_BRANCH') or None,
+                  'objects_commit': objs_commit or commit,
                   'prepared_from': rec('prepare').get('prepared_from'), 'tree': tree, 'objects': objs,
                   'link': {k[5:]: v for k, v in lm.items() if k.startswith('link_')},
                   'guest_undefined': rec('guest').get('metrics', {}).get('guest_undefined'),
@@ -296,19 +302,21 @@ print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
 EOF
 		git add -f -A .
 		# the new commit's parent is the newest publish of any link farm, so a push sends only what changed
-		if git fetch -q origin "+refs/heads/$rb:refs/remotes/origin/$rb" 2>/dev/null; then
-			git reset -q --soft "refs/remotes/origin/$rb"
+		if git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base" 2>/dev/null; then
+			git reset -q --soft "refs/remotes/origin/$base"
 		fi
-		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 link outputs" || true
+		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 link outputs${wip:+ ($wip)}" || true
 		for i in 1 2 3; do  # one ref per push: the proxy drops combined pushes now and then
-			git push -q -f origin "$rb" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/link/$C12$VSUF" 2>/dev/null && break
+			if [ -n "$wip" ]; then git push -q -f origin "HEAD:refs/heads/link/$C12$VSUF" 2>/dev/null && break
+			else git push -q -f origin "$rb" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/link/$C12$VSUF" 2>/dev/null && break; fi
 			sleep $((i * 5))
 		done
 		git ls-remote origin "refs/heads/link/$C12$VSUF" | grep -q .
 	)
 	prc=$?
 	set -e
-	if [ $prc -eq 0 ]; then NOTE_PUB="published: branch link/$C12$VSUF (history on link-head$VSUF)"
+	if [ $prc -eq 0 ] && [ -n "$wip" ]; then NOTE_PUB="published: branch link/$C12$VSUF ($wip; link-head not moved)"
+	elif [ $prc -eq 0 ]; then NOTE_PUB="published: branch link/$C12$VSUF (history on link-head$VSUF)"
 	else NOTE_PUB="publishing link/$C12$VSUF FAILED"; fi
 }
 

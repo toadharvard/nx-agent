@@ -27,15 +27,220 @@ static void null_caps(D3DCAPS9 *c) {
     c->StencilCaps = 0xFF; c->DeclTypes = 0x3FF; c->VertexProcessingCaps = 0xFFFF;
 }
 
+
+/* a device's state: what Set* stored, so Get* gives it back (D3D9's defaults before the first Set*) */
+struct DevState {
+    D3DPRESENT_PARAMETERS pp;                 /* as created or reset, sizes and format resolved */
+    D3DDEVICE_CREATION_PARAMETERS cp;
+    D3DVIEWPORT9 vp; RECT scissor;            /* the render target 0's size until set */
+    DWORD rs[256];
+    DWORD ss[20][16];                         /* samplers 0-15, then the 4 vertex samplers */
+    DWORD tss[8][33];
+    D3DMATRIX xf[512];                        /* VIEW, PROJECTION, TEXTUREn, WORLDMATRIX(n) = 256 + n */
+    IDirect3DBaseTexture9 *tex[20];
+    IDirect3DVertexBuffer9 *vb[16]; UINT vb_off[16], vb_stride[16], vb_freq[16];
+    IDirect3DIndexBuffer9 *ib;
+    IDirect3DVertexDeclaration9 *decl; DWORD fvf;
+    IDirect3DVertexShader9 *vs; IDirect3DPixelShader9 *ps;
+    IDirect3DSurface9 *rt[4], *ds; bool ds_set;   /* as set; unset: the back buffer / the auto depth buffer */
+    IDirect3DSurface9 *bb, *auto_ds; IDirect3DSwapChain9 *sc;   /* the device's own views: one object each */
+    BOOL swvp; float npatch;
+};
+template <class T> static T *null_ref(T *p) { if (p) p->AddRef(); return p; }
+template <class T> static void null_set(T *&slot, T *p) { if (p) p->AddRef(); T *old = slot; slot = p; if (old) old->Release(); }
+template <class T> static void null_rel(T *&p) { T *old = p; p = nullptr; if (old) old->Release(); }
+static DWORD null_f(float f) { DWORD d; memcpy(&d, &f, 4); return d; }
+static DWORD null_rs_default(unsigned s) {
+    switch (s) {
+    case D3DRS_ZENABLE: return 1;
+    case D3DRS_ZWRITEENABLE: return 1;
+    case D3DRS_LASTPIXEL: return 1;
+    case D3DRS_CLIPPING: return 1;
+    case D3DRS_LIGHTING: return 1;
+    case D3DRS_COLORVERTEX: return 1;
+    case D3DRS_LOCALVIEWER: return 1;
+    case D3DRS_MULTISAMPLEANTIALIAS: return 1;
+    case D3DRS_FILLMODE: return D3DFILL_SOLID;
+    case D3DRS_SHADEMODE: return D3DSHADE_GOURAUD;
+    case D3DRS_SRCBLEND: return D3DBLEND_ONE;
+    case D3DRS_SRCBLENDALPHA: return D3DBLEND_ONE;
+    case D3DRS_DESTBLEND: return D3DBLEND_ZERO;
+    case D3DRS_DESTBLENDALPHA: return D3DBLEND_ZERO;
+    case D3DRS_CULLMODE: return D3DCULL_CCW;
+    case D3DRS_ZFUNC: return D3DCMP_LESSEQUAL;
+    case D3DRS_ALPHAFUNC: return D3DCMP_ALWAYS;
+    case D3DRS_STENCILFUNC: return D3DCMP_ALWAYS;
+    case D3DRS_CCW_STENCILFUNC: return D3DCMP_ALWAYS;
+    case D3DRS_STENCILFAIL: return D3DSTENCILOP_KEEP;
+    case D3DRS_STENCILZFAIL: return D3DSTENCILOP_KEEP;
+    case D3DRS_STENCILPASS: return D3DSTENCILOP_KEEP;
+    case D3DRS_CCW_STENCILFAIL: return D3DSTENCILOP_KEEP;
+    case D3DRS_CCW_STENCILZFAIL: return D3DSTENCILOP_KEEP;
+    case D3DRS_CCW_STENCILPASS: return D3DSTENCILOP_KEEP;
+    case D3DRS_STENCILMASK: return 0xFFFFFFFFu;
+    case D3DRS_STENCILWRITEMASK: return 0xFFFFFFFFu;
+    case D3DRS_TEXTUREFACTOR: return 0xFFFFFFFFu;
+    case D3DRS_MULTISAMPLEMASK: return 0xFFFFFFFFu;
+    case D3DRS_BLENDFACTOR: return 0xFFFFFFFFu;
+    case D3DRS_DIFFUSEMATERIALSOURCE: return D3DMCS_COLOR1;
+    case D3DRS_SPECULARMATERIALSOURCE: return D3DMCS_COLOR2;
+    case D3DRS_COLORWRITEENABLE: return 0xF;
+    case D3DRS_COLORWRITEENABLE1: return 0xF;
+    case D3DRS_COLORWRITEENABLE2: return 0xF;
+    case D3DRS_COLORWRITEENABLE3: return 0xF;
+    case D3DRS_BLENDOP: return D3DBLENDOP_ADD;
+    case D3DRS_BLENDOPALPHA: return D3DBLENDOP_ADD;
+    case D3DRS_POSITIONDEGREE: return D3DDEGREE_CUBIC;
+    case D3DRS_NORMALDEGREE: return D3DDEGREE_LINEAR;
+    case D3DRS_FOGEND: return null_f(1.0f);
+    case D3DRS_FOGDENSITY: return null_f(1.0f);
+    case D3DRS_POINTSIZE: return null_f(1.0f);
+    case D3DRS_POINTSIZE_MIN: return null_f(1.0f);
+    case D3DRS_POINTSCALE_A: return null_f(1.0f);
+    case D3DRS_MINTESSELLATIONLEVEL: return null_f(1.0f);
+    case D3DRS_MAXTESSELLATIONLEVEL: return null_f(1.0f);
+    case D3DRS_POINTSIZE_MAX: return null_f(64.0f);
+    default: return 0;
+    }
+}
+
+static DWORD null_ss_default(unsigned t) {
+    switch (t) {
+    case D3DSAMP_ADDRESSU: case D3DSAMP_ADDRESSV: case D3DSAMP_ADDRESSW: return D3DTADDRESS_WRAP;
+    case D3DSAMP_MAGFILTER: case D3DSAMP_MINFILTER: return D3DTEXF_POINT;
+    case D3DSAMP_MAXANISOTROPY: return 1;
+    default: return 0;
+    }
+}
+static DWORD null_tss_default(unsigned stage, unsigned t) {
+    switch (t) {
+    case D3DTSS_COLOROP: return stage == 0 ? D3DTOP_MODULATE : D3DTOP_DISABLE;
+    case D3DTSS_ALPHAOP: return stage == 0 ? D3DTOP_SELECTARG1 : D3DTOP_DISABLE;
+    case D3DTSS_COLORARG1: case D3DTSS_ALPHAARG1: return D3DTA_TEXTURE;
+    case D3DTSS_TEXCOORDINDEX: return stage;
+    default: return 0;   /* COLORARG2 / ALPHAARG2 / ARG0 / RESULTARG are CURRENT (0) */
+    }
+}
+static DevState *null_new_state() {
+    DevState *s = (DevState *)calloc(1, sizeof *s);
+    for (unsigned i = 0; i < 256; i++) s->rs[i] = null_rs_default(i);
+    for (unsigned i = 0; i < 20; i++) for (unsigned t = 0; t < 16; t++) s->ss[i][t] = null_ss_default(t);
+    for (unsigned i = 0; i < 8; i++) for (unsigned t = 0; t < 33; t++) s->tss[i][t] = null_tss_default(i, t);
+    for (unsigned i = 0; i < 512; i++) s->xf[i]._11 = s->xf[i]._22 = s->xf[i]._33 = s->xf[i]._44 = 1.0f;
+    for (unsigned i = 0; i < 16; i++) s->vb_freq[i] = 1;
+    s->vp.MaxZ = 1.0f;
+    return s;
+}
+static void null_free_state(DevState *s) {
+    for (auto &t : s->tex) null_rel(t);
+    for (auto &v : s->vb) null_rel(v);
+    for (auto &r : s->rt) null_rel(r);
+    null_rel(s->ib); null_rel(s->decl); null_rel(s->vs); null_rel(s->ps); null_rel(s->ds);
+    null_rel(s->bb); null_rel(s->auto_ds); null_rel(s->sc);
+    free(s);
+}
+/* bytes in a row of w pixels (blocks for DXT): LockRect's Pitch, which the engine copies rows by */
+static uint32_t null_pitch(uint32_t fmt, uint32_t w) {
+    switch (fmt) {
+    case D3DFMT_DXT1: return ((w + 3) / 4) * 8;
+    case D3DFMT_DXT2: case D3DFMT_DXT3: case D3DFMT_DXT4: case D3DFMT_DXT5: return ((w + 3) / 4) * 16;
+    case D3DFMT_R8G8B8: return w * 3;
+    case D3DFMT_R5G6B5: case D3DFMT_X1R5G5B5: case D3DFMT_A1R5G5B5: case D3DFMT_A4R4G4B4: case D3DFMT_X4R4G4B4:
+    case D3DFMT_A8R3G3B2: case D3DFMT_A8P8: case D3DFMT_A8L8: case D3DFMT_V8U8: case D3DFMT_L16: case D3DFMT_R16F:
+    case D3DFMT_D16: case D3DFMT_D16_LOCKABLE: case D3DFMT_INDEX16: return w * 2;
+    case D3DFMT_A8: case D3DFMT_L8: case D3DFMT_P8: case D3DFMT_R3G3B2: case D3DFMT_A4L4: return w;
+    case D3DFMT_A16B16G16R16: case D3DFMT_A16B16G16R16F: case D3DFMT_Q16W16V16U16: case D3DFMT_G32R32F: return w * 8;
+    case D3DFMT_A32B32G32R32F: return w * 16;
+    default: return w * 4;
+    }
+}
 struct NullBase {
     volatile long refs = 1; uint32_t w = 0, h = 0, d = 0, fmt = 0, size = 0, levels = 0, usage = 0, pool = 0, fvf = 0;
-    void *buf = nullptr; IDirect3DDevice9 *dev = nullptr;
-    void inherit(void *) {}
-    uint32_t pitch() const { return (w ? w : 256) * 4; }
+    uint32_t ms = 0, msq = 0;   /* multisample type and quality (surfaces) */
+    void *buf = nullptr;
+    /* the device and the Direct3D object this one came from (D3D9 hands them back from GetDevice /
+     * GetDirect3D): not referenced here, so the device's own views of its back buffer make no cycle */
+    IDirect3DDevice9 *dev = nullptr; IDirect3D9 *d3d = nullptr;
+    IUnknown *container = nullptr;   /* a level surface's texture (referenced) */
+    IUnknown *child = nullptr;       /* a swap chain's back buffer (referenced) */
+    DevState *st = nullptr;          /* a device's state, made on first use */
+    D3DPRESENT_PARAMETERS *pp = nullptr;   /* a swap chain's present parameters */
+    void *blob = nullptr; uint32_t blob_size = 0;   /* a vertex declaration's elements */
+    void inherit(NullBase *p) { dev = p->dev; d3d = p->d3d; }
+    void set_container(IUnknown *c) { c->AddRef(); container = c; }
+    DevState *S() { if (!st) st = null_new_state(); return st; }
+    uint32_t pitch() const { return null_pitch(fmt, w ? w : 256); }
     void *scratch() { if (!buf) { size_t n = size ? size : (size_t)pitch() * (h ? h : 256) * (d ? d : 1); if (n < 4096) n = 4096; buf = calloc(1, n); } return buf; }
-    virtual ~NullBase() { free(buf); }
+    virtual ~NullBase() { free(buf); free(pp); free(blob); if (container) container->Release(); if (child) child->Release(); if (st) null_free_state(st); }
 };
 
+
+/* levels of a texture: Levels 0 is the whole chain (one level with AUTOGENMIPMAP) */
+static uint32_t null_mips(UINT levels, DWORD usage, UINT w, UINT h, UINT d) {
+    uint32_t full = 1, m = w > h ? w : h;
+    if (d > m) m = d;
+    while (m > 1) { m >>= 1; full++; }
+    if (!levels) return (usage & D3DUSAGE_AUTOGENMIPMAP) ? 1 : full;
+    return levels > full ? full : levels;
+}
+static uint32_t null_lvl(uint32_t v, UINT level) { v >>= level; return v ? v : 1; }
+/* a level surface / cube face / volume level of a texture: its size shifted by the level, the texture's format */
+static void null_sub(NullBase *o, const NullBase *p, UINT level) {
+    o->w = null_lvl(p->w, level); o->h = null_lvl(p->h, level); o->d = p->d ? null_lvl(p->d, level) : 0;
+    o->fmt = p->fmt; o->usage = p->usage; o->pool = p->pool; o->ms = p->ms; o->msq = p->msq;
+}
+static int null_sampler(DWORD s) { return s < 16 ? (int)s : (s >= D3DVERTEXTEXTURESAMPLER0 && s <= D3DVERTEXTEXTURESAMPLER3) ? (int)(s - D3DVERTEXTEXTURESAMPLER0 + 16) : -1; }
+/* 0 sizes / UNKNOWN format mean the window's and the display's: the null mode */
+static void null_resolve_pp(D3DPRESENT_PARAMETERS *p) {
+    if (!p->BackBufferWidth) p->BackBufferWidth = 1280;
+    if (!p->BackBufferHeight) p->BackBufferHeight = 720;
+    if (p->BackBufferFormat == D3DFMT_UNKNOWN) p->BackBufferFormat = D3DFMT_X8R8G8B8;
+    if (!p->BackBufferCount) p->BackBufferCount = 1;
+}
+static void null_display_mode(const D3DPRESENT_PARAMETERS &p, D3DDISPLAYMODE *m) {
+    null_mode(m);
+    if (!p.Windowed) { m->Width = p.BackBufferWidth; m->Height = p.BackBufferHeight; m->Format = p.BackBufferFormat; if (p.FullScreen_RefreshRateInHz) m->RefreshRate = p.FullScreen_RefreshRateInHz; }
+}
+/* render target 0 changed: the viewport and the scissor rect are its size again */
+static void null_target_size(DevState *s, uint32_t w, uint32_t h) {
+    s->vp.X = s->vp.Y = 0; s->vp.Width = w; s->vp.Height = h; s->vp.MinZ = 0.0f; s->vp.MaxZ = 1.0f;
+    s->scissor.left = s->scissor.top = 0; s->scissor.right = (LONG)w; s->scissor.bottom = (LONG)h;
+}
+static void null_setup(NullBase *d, const D3DPRESENT_PARAMETERS &p) {
+    DevState *s = d->S();
+    s->pp = p; d->w = p.BackBufferWidth; d->h = p.BackBufferHeight; d->fmt = (uint32_t)p.BackBufferFormat;
+    null_target_size(s, d->w, d->h);
+    s->rs[D3DRS_ZENABLE] = p.EnableAutoDepthStencil ? 1 : 0;   /* D3DZB_TRUE with an auto depth buffer */
+}
+/* CreateDevice(Ex): the device keeps its present parameters (resolved in place, as D3D9 does) and creation parameters */
+static void null_init_device(NullBase *o, IDirect3DDevice9 *self, IDirect3D9 *d3d, D3DPRESENT_PARAMETERS *pp,
+                             UINT adapter, D3DDEVTYPE type, HWND hwnd, DWORD flags) {
+    D3DPRESENT_PARAMETERS tmp; memset(&tmp, 0, sizeof tmp); tmp.Windowed = TRUE;
+    if (!pp) pp = &tmp;
+    o->dev = self; o->d3d = d3d;
+    null_resolve_pp(pp);
+    null_setup(o, *pp);
+    DevState *s = o->S();
+    s->cp.AdapterOrdinal = adapter; s->cp.DeviceType = type; s->cp.hFocusWindow = hwnd; s->cp.BehaviorFlags = flags;
+}
+/* Reset(Ex): every state is back to its default and the views are made again (the old ones keep their size) */
+static void null_reset(NullBase *d, D3DPRESENT_PARAMETERS *pp) {
+    DevState *old = d->S();
+    D3DPRESENT_PARAMETERS np = pp ? *pp : old->pp;
+    D3DDEVICE_CREATION_PARAMETERS cp = old->cp;
+    null_resolve_pp(&np);
+    if (pp) *pp = np;
+    d->st = nullptr; null_free_state(old);
+    null_setup(d, np);
+    d->S()->cp = cp;
+}
+/* CreateVertexDeclaration: keeps the elements through the D3DDECL_END entry, for GetDeclaration */
+static void null_copy_decl(NullBase *o, const D3DVERTEXELEMENT9 *e) {
+    if (!e) return;
+    size_t n = 1;
+    while (n < 64 && e[n - 1].Stream != 0xFF) n++;
+    o->blob = malloc(n * sizeof *e); memcpy(o->blob, e, n * sizeof *e); o->blob_size = (uint32_t)(n * sizeof *e);
+}
 extern "C" volatile int fnvnx_plat_on __attribute__((weak));
 extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail) __attribute__((weak));
 #define NULL_UNIMPL(n) do { if (&fnvnx_plat_on && fnvnx_plat_on && fnvnx_plat_note) \
@@ -618,6 +823,43 @@ struct Null_IDirect3DDevice9Ex : IDirect3DDevice9Ex, NullBase {
     HRESULT STDMETHODCALLTYPE GetDisplayModeEx(UINT swapchain_idx, D3DDISPLAYMODEEX * mode, D3DDISPLAYROTATION * rotation) override;
 };
 
+/* the device's own views: the back buffer, the auto depth buffer and the swap chain are one object each, so
+ * GetBackBuffer, GetRenderTarget(0) and the swap chain's GetBackBuffer agree (and compare equal) */
+static IDirect3DSurface9 *null_bb(NullBase *d) {
+    DevState *s = d->S();
+    if (!s->bb) {
+        auto *o = new Null_IDirect3DSurface9(); o->inherit(d);
+        o->w = d->w; o->h = d->h; o->fmt = d->fmt; o->usage = D3DUSAGE_RENDERTARGET; o->ms = s->pp.MultiSampleType; o->msq = s->pp.MultiSampleQuality;
+        s->bb = o;
+    }
+    return s->bb;
+}
+static IDirect3DSurface9 *null_auto_ds(NullBase *d) {
+    DevState *s = d->S();
+    if (!s->auto_ds) {
+        auto *o = new Null_IDirect3DSurface9(); o->inherit(d);
+        o->w = d->w; o->h = d->h; o->usage = D3DUSAGE_DEPTHSTENCIL; o->ms = s->pp.MultiSampleType; o->msq = s->pp.MultiSampleQuality;
+        o->fmt = s->pp.AutoDepthStencilFormat != D3DFMT_UNKNOWN ? (uint32_t)s->pp.AutoDepthStencilFormat : (uint32_t)D3DFMT_D24S8;
+        s->auto_ds = o;
+    }
+    return s->auto_ds;
+}
+static Null_IDirect3DSwapChain9 *null_new_sc(NullBase *d, const D3DPRESENT_PARAMETERS *p) {
+    auto *o = new Null_IDirect3DSwapChain9(); o->inherit(d);
+    o->w = p->BackBufferWidth; o->h = p->BackBufferHeight; o->fmt = (uint32_t)p->BackBufferFormat; o->ms = p->MultiSampleType; o->msq = p->MultiSampleQuality;
+    o->pp = (D3DPRESENT_PARAMETERS *)malloc(sizeof *p); *o->pp = *p;
+    return o;
+}
+static IDirect3DSwapChain9 *null_sc(NullBase *d) {
+    DevState *s = d->S();
+    if (!s->sc) {
+        auto *o = null_new_sc(d, &s->pp);
+        o->child = null_ref(null_bb(d));
+        s->sc = o;
+    }
+    return s->sc;
+}
+
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9::RegisterSoftwareDevice(void* pInitializeFunction) {
     (void)pInitializeFunction;
     return S_OK;
@@ -634,14 +876,14 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterIdentifier(UINT Adapter, DW
 UINT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format) {
     (void)Adapter;
     (void)Format;
-    return NULL_MODES;
+    return Adapter == 0 && Format == D3DFMT_X8R8G8B8 ? (UINT)NULL_MODES : 0;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9::EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
     (void)Format;
     (void)Mode;
     (void)pMode;
-    if (Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;
+    if (Adapter != 0 || Format != D3DFMT_X8R8G8B8 || Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9::GetAdapterDisplayMode(UINT Adapter, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
@@ -706,13 +948,13 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9::CreateDevice(UINT Adapter, D3DDEVTYPE
     (void)BehaviorFlags;
     (void)pPresentationParameters;
     (void)ppReturnedDeviceInterface;
-    if (ppReturnedDeviceInterface) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppReturnedDeviceInterface = o; }
+    if (ppReturnedDeviceInterface) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); null_init_device(o, o, this, pPresentationParameters, Adapter, DeviceType, hFocusWindow, BehaviorFlags); *ppReturnedDeviceInterface = o; }
     if (ppReturnedDeviceInterface && *ppReturnedDeviceInterface && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(pPresentationParameters, *ppReturnedDeviceInterface);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolume9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolume9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -735,7 +977,9 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DVolume9::FreePrivateData(REFGUID refguid
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolume9::GetContainer(REFIID riid, void** ppContainer) {
     (void)riid;
     (void)ppContainer;
-    return S_OK;
+    if (!ppContainer) return D3DERR_INVALIDCALL;
+    *ppContainer = nullptr;
+    return container ? container->QueryInterface(riid, ppContainer) : D3DERR_INVALIDCALL;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolume9::GetDesc(D3DVOLUME_DESC* pDesc) {
     (void)pDesc;
@@ -770,7 +1014,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9::GetBackBuffer(UINT iBackBuff
     (void)iBackBuffer;
     (void)Type;
     (void)ppBackBuffer;
-    if (ppBackBuffer) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppBackBuffer = o; }
+    if (!ppBackBuffer) return D3DERR_INVALIDCALL;
+    *ppBackBuffer = nullptr;
+    if (iBackBuffer >= (pp && pp->BackBufferCount ? pp->BackBufferCount : 1)) return D3DERR_INVALIDCALL;
+    if (!child) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = w; o->h = h; o->fmt = fmt; o->ms = ms; o->msq = msq; o->usage = D3DUSAGE_RENDERTARGET; child = o; }
+    child->AddRef(); *ppBackBuffer = (IDirect3DSurface9 *)child;
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9::GetRasterStatus(D3DRASTER_STATUS * pRasterStatus) {
@@ -779,20 +1027,23 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9::GetRasterStatus(D3DRASTER_ST
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9::GetDisplayMode(D3DDISPLAYMODE * pMode) {
     (void)pMode;
-    if (pMode) null_mode(pMode); return S_OK;
+    if (pMode) { if (pp) null_display_mode(*pp, pMode); else null_mode(pMode); } return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9::GetDevice(struct IDirect3DDevice9 ** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9::GetPresentParameters(D3DPRESENT_PARAMETERS * pPresentationParameters) {
     (void)pPresentationParameters;
+    if (!pPresentationParameters) return D3DERR_INVALIDCALL;
+    if (pp) *pPresentationParameters = *pp;
+    else { memset(pPresentationParameters, 0, sizeof *pPresentationParameters); pPresentationParameters->BackBufferWidth = w; pPresentationParameters->BackBufferHeight = h; pPresentationParameters->BackBufferFormat = (D3DFORMAT)fmt; pPresentationParameters->BackBufferCount = 1; pPresentationParameters->Windowed = TRUE; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DResource9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DResource9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -826,7 +1077,7 @@ D3DRESOURCETYPE STDMETHODCALLTYPE Null_IDirect3DResource9::GetType() {
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSurface9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSurface9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -861,11 +1112,13 @@ D3DRESOURCETYPE STDMETHODCALLTYPE Null_IDirect3DSurface9::GetType() {
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSurface9::GetContainer(REFIID riid, void** ppContainer) {
     (void)riid;
     (void)ppContainer;
-    return S_OK;
+    if (!ppContainer) return D3DERR_INVALIDCALL;
+    *ppContainer = nullptr;
+    return container ? container->QueryInterface(riid, ppContainer) : D3DERR_INVALIDCALL;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSurface9::GetDesc(D3DSURFACE_DESC* pDesc) {
     (void)pDesc;
-    if (pDesc) { auto *p = pDesc; memset(p, 0, sizeof *p); p->Format = (D3DFORMAT)fmt; p->Type = D3DRTYPE_SURFACE; p->Usage = usage; p->Pool = (D3DPOOL)pool; p->Width = w; p->Height = h; }
+    if (pDesc) { auto *p = pDesc; memset(p, 0, sizeof *p); p->Format = (D3DFORMAT)fmt; p->Type = D3DRTYPE_SURFACE; p->Usage = usage; p->Pool = (D3DPOOL)pool; p->Width = w; p->Height = h; p->MultiSampleType = (D3DMULTISAMPLE_TYPE)ms; p->MultiSampleQuality = msq; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSurface9::LockRect(D3DLOCKED_RECT * locked_rect, const RECT * rect, DWORD flags) {
@@ -890,7 +1143,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DSurface9::ReleaseDC(HDC hdc) {
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVertexBuffer9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVertexBuffer9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -940,7 +1193,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DVertexBuffer9::GetDesc(D3DVERTEXBUFFER_D
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DIndexBuffer9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DIndexBuffer9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -990,7 +1243,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DIndexBuffer9::GetDesc(D3DINDEXBUFFER_DES
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DBaseTexture9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DBaseTexture9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -1043,7 +1296,7 @@ void STDMETHODCALLTYPE Null_IDirect3DBaseTexture9::GenerateMipSubLevels() {
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DCubeTexture9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DCubeTexture9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -1097,14 +1350,18 @@ void STDMETHODCALLTYPE Null_IDirect3DCubeTexture9::GenerateMipSubLevels() {
 HRESULT STDMETHODCALLTYPE Null_IDirect3DCubeTexture9::GetLevelDesc(UINT Level, D3DSURFACE_DESC* pDesc) {
     (void)Level;
     (void)pDesc;
-    if (pDesc) { auto *p = pDesc; memset(p, 0, sizeof *p); p->Format = (D3DFORMAT)fmt; p->Type = D3DRTYPE_SURFACE; p->Usage = usage; p->Pool = (D3DPOOL)pool; p->Width = w; p->Height = h; }
+    if (Level >= (levels ? levels : 1)) return D3DERR_INVALIDCALL;
+    if (pDesc) { auto *p = pDesc; memset(p, 0, sizeof *p); p->Format = (D3DFORMAT)fmt; p->Type = D3DRTYPE_SURFACE; p->Usage = usage; p->Pool = (D3DPOOL)pool; p->Width = null_lvl(w, Level); p->Height = null_lvl(h, Level); p->MultiSampleType = (D3DMULTISAMPLE_TYPE)ms; p->MultiSampleQuality = msq; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DCubeTexture9::GetCubeMapSurface(D3DCUBEMAP_FACES FaceType, UINT Level, IDirect3DSurface9** ppCubeMapSurface) {
     (void)FaceType;
     (void)Level;
     (void)ppCubeMapSurface;
-    if (ppCubeMapSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppCubeMapSurface = o; }
+    if (ppCubeMapSurface) *ppCubeMapSurface = nullptr;
+    if ((unsigned)FaceType > D3DCUBEMAP_FACE_NEGATIVE_Z) return D3DERR_INVALIDCALL;
+    if (Level >= (levels ? levels : 1)) return D3DERR_INVALIDCALL;
+    if (ppCubeMapSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); null_sub(o, this, Level); o->set_container(this); *ppCubeMapSurface = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DCubeTexture9::LockRect(D3DCUBEMAP_FACES face, UINT level, D3DLOCKED_RECT * locked_rect, const RECT * rect, DWORD flags) {
@@ -1128,7 +1385,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DCubeTexture9::AddDirtyRect(D3DCUBEMAP_FA
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DTexture9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DTexture9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -1182,13 +1439,16 @@ void STDMETHODCALLTYPE Null_IDirect3DTexture9::GenerateMipSubLevels() {
 HRESULT STDMETHODCALLTYPE Null_IDirect3DTexture9::GetLevelDesc(UINT Level, D3DSURFACE_DESC* pDesc) {
     (void)Level;
     (void)pDesc;
-    if (pDesc) { auto *p = pDesc; memset(p, 0, sizeof *p); p->Format = (D3DFORMAT)fmt; p->Type = D3DRTYPE_SURFACE; p->Usage = usage; p->Pool = (D3DPOOL)pool; p->Width = w; p->Height = h; }
+    if (Level >= (levels ? levels : 1)) return D3DERR_INVALIDCALL;
+    if (pDesc) { auto *p = pDesc; memset(p, 0, sizeof *p); p->Format = (D3DFORMAT)fmt; p->Type = D3DRTYPE_SURFACE; p->Usage = usage; p->Pool = (D3DPOOL)pool; p->Width = null_lvl(w, Level); p->Height = null_lvl(h, Level); p->MultiSampleType = (D3DMULTISAMPLE_TYPE)ms; p->MultiSampleQuality = msq; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DTexture9::GetSurfaceLevel(UINT Level, IDirect3DSurface9** ppSurfaceLevel) {
     (void)Level;
     (void)ppSurfaceLevel;
-    if (ppSurfaceLevel) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppSurfaceLevel = o; }
+    if (ppSurfaceLevel) *ppSurfaceLevel = nullptr;
+    if (Level >= (levels ? levels : 1)) return D3DERR_INVALIDCALL;
+    if (ppSurfaceLevel) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); null_sub(o, this, Level); o->set_container(this); *ppSurfaceLevel = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DTexture9::LockRect(UINT level, D3DLOCKED_RECT * locked_rect, const RECT * rect, DWORD flags) {
@@ -1209,7 +1469,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DTexture9::AddDirtyRect(const RECT * dirt
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolumeTexture9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolumeTexture9::SetPrivateData(REFGUID guid, const void * data, DWORD data_size, DWORD flags) {
@@ -1263,13 +1523,16 @@ void STDMETHODCALLTYPE Null_IDirect3DVolumeTexture9::GenerateMipSubLevels() {
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolumeTexture9::GetLevelDesc(UINT Level, D3DVOLUME_DESC * pDesc) {
     (void)Level;
     (void)pDesc;
-    if (pDesc) { auto *p = pDesc; memset(p, 0, sizeof *p); p->Format = (D3DFORMAT)fmt; p->Type = D3DRTYPE_VOLUME; p->Usage = usage; p->Pool = (D3DPOOL)pool; p->Width = w; p->Height = h; p->Depth = d; }
+    if (Level >= (levels ? levels : 1)) return D3DERR_INVALIDCALL;
+    if (pDesc) { auto *p = pDesc; memset(p, 0, sizeof *p); p->Format = (D3DFORMAT)fmt; p->Type = D3DRTYPE_VOLUME; p->Usage = usage; p->Pool = (D3DPOOL)pool; p->Width = null_lvl(w, Level); p->Height = null_lvl(h, Level); p->Depth = null_lvl(d, Level); }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolumeTexture9::GetVolumeLevel(UINT Level, IDirect3DVolume9** ppVolumeLevel) {
     (void)Level;
     (void)ppVolumeLevel;
-    if (ppVolumeLevel) { auto *o = new Null_IDirect3DVolume9(); o->inherit(this);  *ppVolumeLevel = o; }
+    if (ppVolumeLevel) *ppVolumeLevel = nullptr;
+    if (Level >= (levels ? levels : 1)) return D3DERR_INVALIDCALL;
+    if (ppVolumeLevel) { auto *o = new Null_IDirect3DVolume9(); o->inherit(this); null_sub(o, this, Level); o->set_container(this); *ppVolumeLevel = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVolumeTexture9::LockBox(UINT level, D3DLOCKED_BOX * locked_box, const D3DBOX * box, DWORD flags) {
@@ -1290,17 +1553,20 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DVolumeTexture9::AddDirtyBox(const D3DBOX
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVertexDeclaration9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVertexDeclaration9::GetDeclaration(D3DVERTEXELEMENT9* a0, UINT* pNumElements) {
     (void)a0;
     (void)pNumElements;
+    if (!pNumElements) return D3DERR_INVALIDCALL;
+    if (a0 && blob) memcpy(a0, blob, blob_size);
+    *pNumElements = blob_size / sizeof(D3DVERTEXELEMENT9);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVertexShader9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DVertexShader9::GetFunction(void* a0, UINT* pSizeOfData) {
@@ -1310,7 +1576,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DVertexShader9::GetFunction(void* a0, UIN
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DPixelShader9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DPixelShader9::GetFunction(void* a0, UINT* pSizeOfData) {
@@ -1320,7 +1586,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DPixelShader9::GetFunction(void* a0, UINT
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DStateBlock9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DStateBlock9::Capture() {
@@ -1331,7 +1597,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DStateBlock9::Apply() {
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DQuery9::GetDevice(struct IDirect3DDevice9** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 D3DQUERYTYPE STDMETHODCALLTYPE Null_IDirect3DQuery9::GetType() {
@@ -1361,7 +1627,8 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::EvictManagedResources() {
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetDirect3D(IDirect3D9** ppD3D9) {
     (void)ppD3D9;
-    if (ppD3D9) { auto *o = new Null_IDirect3D9(); o->inherit(this);  *ppD3D9 = o; }
+    if (!ppD3D9) return D3DERR_INVALIDCALL;
+    if (d3d) { d3d->AddRef(); *ppD3D9 = d3d; } else *ppD3D9 = new Null_IDirect3D9();
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetDeviceCaps(D3DCAPS9* pCaps) {
@@ -1371,11 +1638,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetDeviceCaps(D3DCAPS9* pCaps) 
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetDisplayMode(UINT iSwapChain, D3DDISPLAYMODE* pMode) {
     (void)iSwapChain;
     (void)pMode;
-    if (pMode) null_mode(pMode); return S_OK;
+    if (iSwapChain != 0) return D3DERR_INVALIDCALL; if (pMode) null_display_mode(S()->pp, pMode); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetCreationParameters(D3DDEVICE_CREATION_PARAMETERS * pParameters) {
     (void)pParameters;
-    return S_OK;
+    if (!pParameters) return D3DERR_INVALIDCALL; *pParameters = S()->cp; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetCursorProperties(UINT XHotSpot, UINT YHotSpot, IDirect3DSurface9* pCursorBitmap) {
     (void)XHotSpot;
@@ -1395,13 +1662,20 @@ BOOL STDMETHODCALLTYPE Null_IDirect3DDevice9::ShowCursor(BOOL bShow) {
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateAdditionalSwapChain(D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DSwapChain9** pSwapChain) {
     (void)pPresentationParameters;
     (void)pSwapChain;
-    if (pSwapChain) { auto *o = new Null_IDirect3DSwapChain9(); o->inherit(this);  *pSwapChain = o; }
+    if (!pSwapChain) return D3DERR_INVALIDCALL;
+    *pSwapChain = nullptr;
+    if (!pPresentationParameters) return D3DERR_INVALIDCALL;
+    null_resolve_pp(pPresentationParameters);
+    *pSwapChain = null_new_sc(this, pPresentationParameters);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetSwapChain(UINT iSwapChain, IDirect3DSwapChain9** pSwapChain) {
     (void)iSwapChain;
     (void)pSwapChain;
-    if (pSwapChain) { auto *o = new Null_IDirect3DSwapChain9(); o->inherit(this);  *pSwapChain = o; }
+    if (!pSwapChain) return D3DERR_INVALIDCALL;
+    *pSwapChain = nullptr;
+    if (iSwapChain != 0) return D3DERR_INVALIDCALL;
+    *pSwapChain = null_ref(null_sc(this));
     return S_OK;
 }
 UINT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetNumberOfSwapChains() {
@@ -1409,7 +1683,7 @@ UINT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetNumberOfSwapChains() {
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters) {
     (void)pPresentationParameters;
-    return S_OK;
+    null_reset(this, pPresentationParameters); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::Present(const RECT * src_rect, const RECT * dst_rect, HWND dst_window_override, const RGNDATA * dirty_region) {
     (void)src_rect;
@@ -1424,7 +1698,10 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetBackBuffer(UINT iSwapChain, 
     (void)iBackBuffer;
     (void)Type;
     (void)ppBackBuffer;
-    if (ppBackBuffer) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppBackBuffer = o; }
+    if (!ppBackBuffer) return D3DERR_INVALIDCALL;
+    *ppBackBuffer = nullptr;
+    if (iSwapChain != 0 || iBackBuffer >= S()->pp.BackBufferCount) return D3DERR_INVALIDCALL;
+    *ppBackBuffer = null_ref(null_bb(this));
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetRasterStatus(UINT iSwapChain, D3DRASTER_STATUS* pRasterStatus) {
@@ -1454,7 +1731,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateTexture(UINT Width, UINT 
     (void)Pool;
     (void)ppTexture;
     (void)pSharedHandle;
-    if (ppTexture) { auto *o = new Null_IDirect3DTexture9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; *ppTexture = o; }
+    if (ppTexture) { auto *o = new Null_IDirect3DTexture9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; o->levels = null_mips(Levels, Usage, Width, Height, 1); *ppTexture = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateVolumeTexture(UINT Width, UINT Height, UINT Depth, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DVolumeTexture9** ppVolumeTexture, HANDLE* pSharedHandle) {
@@ -1467,7 +1744,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateVolumeTexture(UINT Width,
     (void)Pool;
     (void)ppVolumeTexture;
     (void)pSharedHandle;
-    if (ppVolumeTexture) { auto *o = new Null_IDirect3DVolumeTexture9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->d = (uint32_t)Depth; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; *ppVolumeTexture = o; }
+    if (ppVolumeTexture) { auto *o = new Null_IDirect3DVolumeTexture9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->d = (uint32_t)Depth; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; o->levels = null_mips(Levels, Usage, Width, Height, Depth); *ppVolumeTexture = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateCubeTexture(UINT EdgeLength, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DCubeTexture9** ppCubeTexture, HANDLE* pSharedHandle) {
@@ -1478,7 +1755,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateCubeTexture(UINT EdgeLeng
     (void)Pool;
     (void)ppCubeTexture;
     (void)pSharedHandle;
-    if (ppCubeTexture) { auto *o = new Null_IDirect3DCubeTexture9(); o->inherit(this); o->w = (uint32_t)EdgeLength; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; *ppCubeTexture = o; }
+    if (ppCubeTexture) { auto *o = new Null_IDirect3DCubeTexture9(); o->inherit(this); o->w = (uint32_t)EdgeLength; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; o->h = o->w; o->levels = null_mips(Levels, Usage, EdgeLength, EdgeLength, 1); *ppCubeTexture = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateVertexBuffer(UINT Length, DWORD Usage, DWORD FVF, D3DPOOL Pool, IDirect3DVertexBuffer9** ppVertexBuffer, HANDLE* pSharedHandle) {
@@ -1510,7 +1787,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateRenderTarget(UINT Width, 
     (void)Lockable;
     (void)ppSurface;
     (void)pSharedHandle;
-    if (ppSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->fmt = (uint32_t)Format; *ppSurface = o; }
+    if (ppSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->fmt = (uint32_t)Format; o->ms = (uint32_t)MultiSample; o->msq = (uint32_t)MultisampleQuality; o->usage |= D3DUSAGE_RENDERTARGET; *ppSurface = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateDepthStencilSurface(UINT Width, UINT Height, D3DFORMAT Format, D3DMULTISAMPLE_TYPE MultiSample, DWORD MultisampleQuality, BOOL Discard, IDirect3DSurface9** ppSurface, HANDLE* pSharedHandle) {
@@ -1522,7 +1799,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateDepthStencilSurface(UINT 
     (void)Discard;
     (void)ppSurface;
     (void)pSharedHandle;
-    if (ppSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->fmt = (uint32_t)Format; *ppSurface = o; }
+    if (ppSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->fmt = (uint32_t)Format; o->ms = (uint32_t)MultiSample; o->msq = (uint32_t)MultisampleQuality; o->usage |= D3DUSAGE_DEPTHSTENCIL; *ppSurface = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::UpdateSurface(IDirect3DSurface9 * src_surface, const RECT * src_rect, IDirect3DSurface9 * dst_surface, const POINT * dst_point) {
@@ -1580,22 +1857,36 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateOffscreenPlainSurface(UIN
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9* pRenderTarget) {
     (void)RenderTargetIndex;
     (void)pRenderTarget;
+    if (RenderTargetIndex >= 4 || (RenderTargetIndex == 0 && !pRenderTarget)) return D3DERR_INVALIDCALL;
+    DevState *s = S();
+    null_set(s->rt[RenderTargetIndex], pRenderTarget);
+    D3DSURFACE_DESC d;
+    if (RenderTargetIndex == 0 && SUCCEEDED(pRenderTarget->GetDesc(&d))) null_target_size(s, d.Width, d.Height);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9** ppRenderTarget) {
     (void)RenderTargetIndex;
     (void)ppRenderTarget;
-    if (ppRenderTarget) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppRenderTarget = o; }
+    if (!ppRenderTarget) return D3DERR_INVALIDCALL;
+    *ppRenderTarget = nullptr;
+    if (RenderTargetIndex >= 4) return D3DERR_INVALIDCALL;
+    IDirect3DSurface9 *r = S()->rt[RenderTargetIndex];
+    if (!r && RenderTargetIndex == 0) r = null_bb(this);
+    if (!r) return D3DERR_NOTFOUND;
+    *ppRenderTarget = null_ref(r);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetDepthStencilSurface(IDirect3DSurface9* pNewZStencil) {
     (void)pNewZStencil;
-    return S_OK;
+    DevState *s = S(); null_set(s->ds, pNewZStencil); s->ds_set = true; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetDepthStencilSurface(IDirect3DSurface9** ppZStencilSurface) {
     (void)ppZStencilSurface;
-    if (ppZStencilSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppZStencilSurface = o; }
-    return S_OK;
+    if (!ppZStencilSurface) return D3DERR_INVALIDCALL;
+    DevState *s = S();
+    IDirect3DSurface9 *r = s->ds_set ? s->ds : s->pp.EnableAutoDepthStencil ? null_auto_ds(this) : nullptr;
+    *ppZStencilSurface = null_ref(r);
+    return r ? S_OK : D3DERR_NOTFOUND;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::BeginScene() {
     return S_OK;
@@ -1616,12 +1907,12 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::Clear(DWORD rect_count, const D
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX * matrix) {
     (void)state;
     (void)matrix;
-    return S_OK;
+    if ((unsigned)state >= 512 || !matrix) return D3DERR_INVALIDCALL; S()->xf[state] = *matrix; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetTransform(D3DTRANSFORMSTATETYPE State, D3DMATRIX* pMatrix) {
     (void)State;
     (void)pMatrix;
-    return S_OK;
+    if ((unsigned)State >= 512 || !pMatrix) return D3DERR_INVALIDCALL; *pMatrix = S()->xf[State]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::MultiplyTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX * matrix) {
     (void)state;
@@ -1630,11 +1921,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::MultiplyTransform(D3DTRANSFORMS
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetViewport(const D3DVIEWPORT9 * viewport) {
     (void)viewport;
-    return S_OK;
+    if (!viewport) return D3DERR_INVALIDCALL; S()->vp = *viewport; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetViewport(D3DVIEWPORT9* pViewport) {
     (void)pViewport;
-    return S_OK;
+    if (!pViewport) return D3DERR_INVALIDCALL; *pViewport = S()->vp; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetMaterial(const D3DMATERIAL9 * material) {
     (void)material;
@@ -1677,12 +1968,12 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetClipPlane(DWORD Index, float
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {
     (void)State;
     (void)Value;
-    return S_OK;
+    if ((unsigned)State >= 256) return D3DERR_INVALIDCALL; S()->rs[State] = Value; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetRenderState(D3DRENDERSTATETYPE State, DWORD* pValue) {
     (void)State;
     (void)pValue;
-    return S_OK;
+    if ((unsigned)State >= 256 || !pValue) return D3DERR_INVALIDCALL; *pValue = S()->rs[State]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateStateBlock(D3DSTATEBLOCKTYPE Type, IDirect3DStateBlock9** ppSB) {
     (void)Type;
@@ -1709,41 +2000,40 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetClipStatus(D3DCLIPSTATUS9* p
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetTexture(DWORD Stage, IDirect3DBaseTexture9** ppTexture) {
     (void)Stage;
     (void)ppTexture;
-    if (ppTexture) { auto *o = new Null_IDirect3DBaseTexture9(); o->inherit(this);  *ppTexture = o; }
-    return S_OK;
+    int i = null_sampler(Stage); if (i < 0 || !ppTexture) return D3DERR_INVALIDCALL; *ppTexture = null_ref(S()->tex[i]); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture) {
     (void)Stage;
     (void)pTexture;
-    return S_OK;
+    int i = null_sampler(Stage); if (i < 0) return D3DERR_INVALIDCALL; null_set(S()->tex[i], pTexture); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD* pValue) {
     (void)Stage;
     (void)Type;
     (void)pValue;
-    return S_OK;
+    if (Stage >= 8 || (unsigned)Type >= 33 || !pValue) return D3DERR_INVALIDCALL; *pValue = S()->tss[Stage][Type]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value) {
     (void)Stage;
     (void)Type;
     (void)Value;
-    return S_OK;
+    if (Stage >= 8 || (unsigned)Type >= 33) return D3DERR_INVALIDCALL; S()->tss[Stage][Type] = Value; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetSamplerState(DWORD Sampler, D3DSAMPLERSTATETYPE Type, DWORD* pValue) {
     (void)Sampler;
     (void)Type;
     (void)pValue;
-    return S_OK;
+    int i = null_sampler(Sampler); if (i < 0 || (unsigned)Type >= 16 || !pValue) return D3DERR_INVALIDCALL; *pValue = S()->ss[i][Type]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetSamplerState(DWORD Sampler, D3DSAMPLERSTATETYPE Type, DWORD Value) {
     (void)Sampler;
     (void)Type;
     (void)Value;
-    return S_OK;
+    int i = null_sampler(Sampler); if (i < 0 || (unsigned)Type >= 16) return D3DERR_INVALIDCALL; S()->ss[i][Type] = Value; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::ValidateDevice(DWORD* pNumPasses) {
     (void)pNumPasses;
-    return S_OK;
+    if (pNumPasses) *pNumPasses = 1; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetPaletteEntries(UINT palette_idx, const PALETTEENTRY * entries) {
     (void)palette_idx;
@@ -1765,25 +2055,25 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetCurrentTexturePalette(UINT *
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetScissorRect(const RECT * rect) {
     (void)rect;
-    return S_OK;
+    if (!rect) return D3DERR_INVALIDCALL; S()->scissor = *rect; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetScissorRect(RECT* pRect) {
     (void)pRect;
-    return S_OK;
+    if (!pRect) return D3DERR_INVALIDCALL; *pRect = S()->scissor; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetSoftwareVertexProcessing(BOOL bSoftware) {
     (void)bSoftware;
-    return S_OK;
+    S()->swvp = bSoftware; return S_OK;
 }
 BOOL STDMETHODCALLTYPE Null_IDirect3DDevice9::GetSoftwareVertexProcessing() {
-    return TRUE;
+    return S()->swvp;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetNPatchMode(float nSegments) {
     (void)nSegments;
-    return S_OK;
+    S()->npatch = nSegments; return S_OK;
 }
 float STDMETHODCALLTYPE Null_IDirect3DDevice9::GetNPatchMode() {
-    return 0.0f;
+    return S()->npatch;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount) {
     (void)PrimitiveType;
@@ -1835,25 +2125,24 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::ProcessVertices(UINT SrcStartIn
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateVertexDeclaration(const D3DVERTEXELEMENT9 * elements, IDirect3DVertexDeclaration9 ** declaration) {
     (void)elements;
     (void)declaration;
-    if (declaration) { auto *o = new Null_IDirect3DVertexDeclaration9(); o->inherit(this);  *declaration = o; }
+    if (declaration) { auto *o = new Null_IDirect3DVertexDeclaration9(); o->inherit(this); null_copy_decl(o, elements); *declaration = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetVertexDeclaration(IDirect3DVertexDeclaration9* pDecl) {
     (void)pDecl;
-    return S_OK;
+    DevState *s = S(); null_set(s->decl, pDecl); s->fvf = 0; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetVertexDeclaration(IDirect3DVertexDeclaration9** ppDecl) {
     (void)ppDecl;
-    if (ppDecl) { auto *o = new Null_IDirect3DVertexDeclaration9(); o->inherit(this);  *ppDecl = o; }
-    return S_OK;
+    if (!ppDecl) return D3DERR_INVALIDCALL; *ppDecl = null_ref(S()->decl); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetFVF(DWORD FVF) {
     (void)FVF;
-    return S_OK;
+    if (FVF) { DevState *s = S(); null_set(s->decl, (IDirect3DVertexDeclaration9 *)nullptr); s->fvf = FVF; } return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetFVF(DWORD* pFVF) {
     (void)pFVF;
-    return S_OK;
+    if (!pFVF) return D3DERR_INVALIDCALL; *pFVF = S()->fvf; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateVertexShader(const DWORD * byte_code, IDirect3DVertexShader9 ** shader) {
     (void)byte_code;
@@ -1863,12 +2152,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreateVertexShader(const DWORD 
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetVertexShader(IDirect3DVertexShader9* pShader) {
     (void)pShader;
-    return S_OK;
+    null_set(S()->vs, pShader); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetVertexShader(IDirect3DVertexShader9** ppShader) {
     (void)ppShader;
-    if (ppShader) { auto *o = new Null_IDirect3DVertexShader9(); o->inherit(this);  *ppShader = o; }
-    return S_OK;
+    if (!ppShader) return D3DERR_INVALIDCALL; *ppShader = null_ref(S()->vs); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetVertexShaderConstantF(UINT reg_idx, const float * data, UINT count) {
     (void)reg_idx;
@@ -1911,6 +2199,10 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetStreamSource(UINT StreamNumb
     (void)pStreamData;
     (void)OffsetInBytes;
     (void)Stride;
+    if (StreamNumber >= 16) return D3DERR_INVALIDCALL;
+    DevState *s = S();
+    null_set(s->vb[StreamNumber], pStreamData);
+    s->vb_off[StreamNumber] = pStreamData ? OffsetInBytes : 0; s->vb_stride[StreamNumber] = pStreamData ? Stride : 0;
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetStreamSource(UINT StreamNumber, IDirect3DVertexBuffer9** ppStreamData, UINT* OffsetInBytes, UINT* pStride) {
@@ -1918,27 +2210,30 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetStreamSource(UINT StreamNumb
     (void)ppStreamData;
     (void)OffsetInBytes;
     (void)pStride;
-    if (ppStreamData) { auto *o = new Null_IDirect3DVertexBuffer9(); o->inherit(this);  *ppStreamData = o; }
+    if (StreamNumber >= 16 || !ppStreamData) return D3DERR_INVALIDCALL;
+    DevState *s = S();
+    *ppStreamData = null_ref(s->vb[StreamNumber]);
+    if (OffsetInBytes) *OffsetInBytes = s->vb_off[StreamNumber];
+    if (pStride) *pStride = s->vb_stride[StreamNumber];
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetStreamSourceFreq(UINT StreamNumber, UINT Divider) {
     (void)StreamNumber;
     (void)Divider;
-    return S_OK;
+    if (StreamNumber >= 16) return D3DERR_INVALIDCALL; S()->vb_freq[StreamNumber] = Divider; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetStreamSourceFreq(UINT StreamNumber, UINT* Divider) {
     (void)StreamNumber;
     (void)Divider;
-    return S_OK;
+    if (StreamNumber >= 16 || !Divider) return D3DERR_INVALIDCALL; *Divider = S()->vb_freq[StreamNumber]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetIndices(IDirect3DIndexBuffer9* pIndexData) {
     (void)pIndexData;
-    return S_OK;
+    null_set(S()->ib, pIndexData); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetIndices(IDirect3DIndexBuffer9** ppIndexData) {
     (void)ppIndexData;
-    if (ppIndexData) { auto *o = new Null_IDirect3DIndexBuffer9(); o->inherit(this);  *ppIndexData = o; }
-    return S_OK;
+    if (!ppIndexData) return D3DERR_INVALIDCALL; *ppIndexData = null_ref(S()->ib); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreatePixelShader(const DWORD * byte_code, IDirect3DPixelShader9 ** shader) {
     (void)byte_code;
@@ -1948,12 +2243,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::CreatePixelShader(const DWORD *
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetPixelShader(IDirect3DPixelShader9* pShader) {
     (void)pShader;
-    return S_OK;
+    null_set(S()->ps, pShader); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::GetPixelShader(IDirect3DPixelShader9** ppShader) {
     (void)ppShader;
-    if (ppShader) { auto *o = new Null_IDirect3DPixelShader9(); o->inherit(this);  *ppShader = o; }
-    return S_OK;
+    if (!ppShader) return D3DERR_INVALIDCALL; *ppShader = null_ref(S()->ps); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9::SetPixelShaderConstantF(UINT reg_idx, const float * data, UINT count) {
     (void)reg_idx;
@@ -2031,14 +2325,14 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterIdentifier(UINT Adapter, 
 UINT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format) {
     (void)Adapter;
     (void)Format;
-    return NULL_MODES;
+    return Adapter == 0 && Format == D3DFMT_X8R8G8B8 ? (UINT)NULL_MODES : 0;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::EnumAdapterModes(UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
     (void)Format;
     (void)Mode;
     (void)pMode;
-    if (Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;
+    if (Adapter != 0 || Format != D3DFMT_X8R8G8B8 || Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::GetAdapterDisplayMode(UINT Adapter, D3DDISPLAYMODE* pMode) {
     (void)Adapter;
@@ -2103,7 +2397,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::CreateDevice(UINT Adapter, D3DDEVTY
     (void)BehaviorFlags;
     (void)pPresentationParameters;
     (void)ppReturnedDeviceInterface;
-    if (ppReturnedDeviceInterface) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppReturnedDeviceInterface = o; }
+    if (ppReturnedDeviceInterface) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); null_init_device(o, o, this, pPresentationParameters, Adapter, DeviceType, hFocusWindow, BehaviorFlags); *ppReturnedDeviceInterface = o; }
     if (ppReturnedDeviceInterface && *ppReturnedDeviceInterface && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(pPresentationParameters, *ppReturnedDeviceInterface);
     return S_OK;
 }
@@ -2133,7 +2427,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3D9Ex::CreateDeviceEx(UINT adapter_idx, D3
     (void)parameters;
     (void)mode;
     (void)device;
-    if (device) { auto *o = new Null_IDirect3DDevice9Ex(); o->inherit(this);  *device = o; }
+    if (device) { auto *o = new Null_IDirect3DDevice9Ex(); o->inherit(this); null_init_device(o, o, this, parameters, adapter_idx, device_type, focus_window, flags); *device = o; }
     if (device && *device && fnvnx_d3d9_device_created) return fnvnx_d3d9_device_created(parameters, *device);
     return S_OK;
 }
@@ -2160,7 +2454,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9Ex::GetBackBuffer(UINT iBackBu
     (void)iBackBuffer;
     (void)Type;
     (void)ppBackBuffer;
-    if (ppBackBuffer) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppBackBuffer = o; }
+    if (!ppBackBuffer) return D3DERR_INVALIDCALL;
+    *ppBackBuffer = nullptr;
+    if (iBackBuffer >= (pp && pp->BackBufferCount ? pp->BackBufferCount : 1)) return D3DERR_INVALIDCALL;
+    if (!child) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = w; o->h = h; o->fmt = fmt; o->ms = ms; o->msq = msq; o->usage = D3DUSAGE_RENDERTARGET; child = o; }
+    child->AddRef(); *ppBackBuffer = (IDirect3DSurface9 *)child;
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9Ex::GetRasterStatus(D3DRASTER_STATUS * pRasterStatus) {
@@ -2169,15 +2467,18 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9Ex::GetRasterStatus(D3DRASTER_
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9Ex::GetDisplayMode(D3DDISPLAYMODE * pMode) {
     (void)pMode;
-    if (pMode) null_mode(pMode); return S_OK;
+    if (pMode) { if (pp) null_display_mode(*pp, pMode); else null_mode(pMode); } return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9Ex::GetDevice(struct IDirect3DDevice9 ** ppDevice) {
     (void)ppDevice;
-    if (ppDevice) { auto *o = new Null_IDirect3DDevice9(); o->inherit(this);  *ppDevice = o; }
+    if (ppDevice) { *ppDevice = nullptr; if (dev) { dev->AddRef(); *ppDevice = dev; } else { auto *o = new Null_IDirect3DDevice9(); o->inherit(this); *ppDevice = o; } }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9Ex::GetPresentParameters(D3DPRESENT_PARAMETERS * pPresentationParameters) {
     (void)pPresentationParameters;
+    if (!pPresentationParameters) return D3DERR_INVALIDCALL;
+    if (pp) *pPresentationParameters = *pp;
+    else { memset(pPresentationParameters, 0, sizeof *pPresentationParameters); pPresentationParameters->BackBufferWidth = w; pPresentationParameters->BackBufferHeight = h; pPresentationParameters->BackBufferFormat = (D3DFORMAT)fmt; pPresentationParameters->BackBufferCount = 1; pPresentationParameters->Windowed = TRUE; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DSwapChain9Ex::GetLastPresentCount(UINT * last_present_count) {
@@ -2204,7 +2505,8 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::EvictManagedResources() {
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetDirect3D(IDirect3D9** ppD3D9) {
     (void)ppD3D9;
-    if (ppD3D9) { auto *o = new Null_IDirect3D9(); o->inherit(this);  *ppD3D9 = o; }
+    if (!ppD3D9) return D3DERR_INVALIDCALL;
+    if (d3d) { d3d->AddRef(); *ppD3D9 = d3d; } else *ppD3D9 = new Null_IDirect3D9();
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetDeviceCaps(D3DCAPS9* pCaps) {
@@ -2214,11 +2516,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetDeviceCaps(D3DCAPS9* pCaps
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetDisplayMode(UINT iSwapChain, D3DDISPLAYMODE* pMode) {
     (void)iSwapChain;
     (void)pMode;
-    if (pMode) null_mode(pMode); return S_OK;
+    if (iSwapChain != 0) return D3DERR_INVALIDCALL; if (pMode) null_display_mode(S()->pp, pMode); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetCreationParameters(D3DDEVICE_CREATION_PARAMETERS * pParameters) {
     (void)pParameters;
-    return S_OK;
+    if (!pParameters) return D3DERR_INVALIDCALL; *pParameters = S()->cp; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetCursorProperties(UINT XHotSpot, UINT YHotSpot, IDirect3DSurface9* pCursorBitmap) {
     (void)XHotSpot;
@@ -2238,13 +2540,20 @@ BOOL STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::ShowCursor(BOOL bShow) {
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateAdditionalSwapChain(D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DSwapChain9** pSwapChain) {
     (void)pPresentationParameters;
     (void)pSwapChain;
-    if (pSwapChain) { auto *o = new Null_IDirect3DSwapChain9(); o->inherit(this);  *pSwapChain = o; }
+    if (!pSwapChain) return D3DERR_INVALIDCALL;
+    *pSwapChain = nullptr;
+    if (!pPresentationParameters) return D3DERR_INVALIDCALL;
+    null_resolve_pp(pPresentationParameters);
+    *pSwapChain = null_new_sc(this, pPresentationParameters);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetSwapChain(UINT iSwapChain, IDirect3DSwapChain9** pSwapChain) {
     (void)iSwapChain;
     (void)pSwapChain;
-    if (pSwapChain) { auto *o = new Null_IDirect3DSwapChain9(); o->inherit(this);  *pSwapChain = o; }
+    if (!pSwapChain) return D3DERR_INVALIDCALL;
+    *pSwapChain = nullptr;
+    if (iSwapChain != 0) return D3DERR_INVALIDCALL;
+    *pSwapChain = null_ref(null_sc(this));
     return S_OK;
 }
 UINT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetNumberOfSwapChains() {
@@ -2252,7 +2561,7 @@ UINT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetNumberOfSwapChains() {
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters) {
     (void)pPresentationParameters;
-    return S_OK;
+    null_reset(this, pPresentationParameters); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::Present(const RECT * src_rect, const RECT * dst_rect, HWND dst_window_override, const RGNDATA * dirty_region) {
     (void)src_rect;
@@ -2267,7 +2576,10 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetBackBuffer(UINT iSwapChain
     (void)iBackBuffer;
     (void)Type;
     (void)ppBackBuffer;
-    if (ppBackBuffer) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppBackBuffer = o; }
+    if (!ppBackBuffer) return D3DERR_INVALIDCALL;
+    *ppBackBuffer = nullptr;
+    if (iSwapChain != 0 || iBackBuffer >= S()->pp.BackBufferCount) return D3DERR_INVALIDCALL;
+    *ppBackBuffer = null_ref(null_bb(this));
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetRasterStatus(UINT iSwapChain, D3DRASTER_STATUS* pRasterStatus) {
@@ -2297,7 +2609,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateTexture(UINT Width, UIN
     (void)Pool;
     (void)ppTexture;
     (void)pSharedHandle;
-    if (ppTexture) { auto *o = new Null_IDirect3DTexture9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; *ppTexture = o; }
+    if (ppTexture) { auto *o = new Null_IDirect3DTexture9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; o->levels = null_mips(Levels, Usage, Width, Height, 1); *ppTexture = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateVolumeTexture(UINT Width, UINT Height, UINT Depth, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DVolumeTexture9** ppVolumeTexture, HANDLE* pSharedHandle) {
@@ -2310,7 +2622,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateVolumeTexture(UINT Widt
     (void)Pool;
     (void)ppVolumeTexture;
     (void)pSharedHandle;
-    if (ppVolumeTexture) { auto *o = new Null_IDirect3DVolumeTexture9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->d = (uint32_t)Depth; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; *ppVolumeTexture = o; }
+    if (ppVolumeTexture) { auto *o = new Null_IDirect3DVolumeTexture9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->d = (uint32_t)Depth; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; o->levels = null_mips(Levels, Usage, Width, Height, Depth); *ppVolumeTexture = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateCubeTexture(UINT EdgeLength, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DCubeTexture9** ppCubeTexture, HANDLE* pSharedHandle) {
@@ -2321,7 +2633,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateCubeTexture(UINT EdgeLe
     (void)Pool;
     (void)ppCubeTexture;
     (void)pSharedHandle;
-    if (ppCubeTexture) { auto *o = new Null_IDirect3DCubeTexture9(); o->inherit(this); o->w = (uint32_t)EdgeLength; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; *ppCubeTexture = o; }
+    if (ppCubeTexture) { auto *o = new Null_IDirect3DCubeTexture9(); o->inherit(this); o->w = (uint32_t)EdgeLength; o->levels = (uint32_t)Levels; o->usage = (uint32_t)Usage; o->fmt = (uint32_t)Format; o->pool = (uint32_t)Pool; o->h = o->w; o->levels = null_mips(Levels, Usage, EdgeLength, EdgeLength, 1); *ppCubeTexture = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateVertexBuffer(UINT Length, DWORD Usage, DWORD FVF, D3DPOOL Pool, IDirect3DVertexBuffer9** ppVertexBuffer, HANDLE* pSharedHandle) {
@@ -2353,7 +2665,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateRenderTarget(UINT Width
     (void)Lockable;
     (void)ppSurface;
     (void)pSharedHandle;
-    if (ppSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->fmt = (uint32_t)Format; *ppSurface = o; }
+    if (ppSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->fmt = (uint32_t)Format; o->ms = (uint32_t)MultiSample; o->msq = (uint32_t)MultisampleQuality; o->usage |= D3DUSAGE_RENDERTARGET; *ppSurface = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateDepthStencilSurface(UINT Width, UINT Height, D3DFORMAT Format, D3DMULTISAMPLE_TYPE MultiSample, DWORD MultisampleQuality, BOOL Discard, IDirect3DSurface9** ppSurface, HANDLE* pSharedHandle) {
@@ -2365,7 +2677,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateDepthStencilSurface(UIN
     (void)Discard;
     (void)ppSurface;
     (void)pSharedHandle;
-    if (ppSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->fmt = (uint32_t)Format; *ppSurface = o; }
+    if (ppSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)Width; o->h = (uint32_t)Height; o->fmt = (uint32_t)Format; o->ms = (uint32_t)MultiSample; o->msq = (uint32_t)MultisampleQuality; o->usage |= D3DUSAGE_DEPTHSTENCIL; *ppSurface = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::UpdateSurface(IDirect3DSurface9 * src_surface, const RECT * src_rect, IDirect3DSurface9 * dst_surface, const POINT * dst_point) {
@@ -2423,22 +2735,36 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateOffscreenPlainSurface(U
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9* pRenderTarget) {
     (void)RenderTargetIndex;
     (void)pRenderTarget;
+    if (RenderTargetIndex >= 4 || (RenderTargetIndex == 0 && !pRenderTarget)) return D3DERR_INVALIDCALL;
+    DevState *s = S();
+    null_set(s->rt[RenderTargetIndex], pRenderTarget);
+    D3DSURFACE_DESC d;
+    if (RenderTargetIndex == 0 && SUCCEEDED(pRenderTarget->GetDesc(&d))) null_target_size(s, d.Width, d.Height);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9** ppRenderTarget) {
     (void)RenderTargetIndex;
     (void)ppRenderTarget;
-    if (ppRenderTarget) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppRenderTarget = o; }
+    if (!ppRenderTarget) return D3DERR_INVALIDCALL;
+    *ppRenderTarget = nullptr;
+    if (RenderTargetIndex >= 4) return D3DERR_INVALIDCALL;
+    IDirect3DSurface9 *r = S()->rt[RenderTargetIndex];
+    if (!r && RenderTargetIndex == 0) r = null_bb(this);
+    if (!r) return D3DERR_NOTFOUND;
+    *ppRenderTarget = null_ref(r);
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetDepthStencilSurface(IDirect3DSurface9* pNewZStencil) {
     (void)pNewZStencil;
-    return S_OK;
+    DevState *s = S(); null_set(s->ds, pNewZStencil); s->ds_set = true; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetDepthStencilSurface(IDirect3DSurface9** ppZStencilSurface) {
     (void)ppZStencilSurface;
-    if (ppZStencilSurface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *ppZStencilSurface = o; }
-    return S_OK;
+    if (!ppZStencilSurface) return D3DERR_INVALIDCALL;
+    DevState *s = S();
+    IDirect3DSurface9 *r = s->ds_set ? s->ds : s->pp.EnableAutoDepthStencil ? null_auto_ds(this) : nullptr;
+    *ppZStencilSurface = null_ref(r);
+    return r ? S_OK : D3DERR_NOTFOUND;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::BeginScene() {
     return S_OK;
@@ -2459,12 +2785,12 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::Clear(DWORD rect_count, const
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX * matrix) {
     (void)state;
     (void)matrix;
-    return S_OK;
+    if ((unsigned)state >= 512 || !matrix) return D3DERR_INVALIDCALL; S()->xf[state] = *matrix; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetTransform(D3DTRANSFORMSTATETYPE State, D3DMATRIX* pMatrix) {
     (void)State;
     (void)pMatrix;
-    return S_OK;
+    if ((unsigned)State >= 512 || !pMatrix) return D3DERR_INVALIDCALL; *pMatrix = S()->xf[State]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::MultiplyTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX * matrix) {
     (void)state;
@@ -2473,11 +2799,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::MultiplyTransform(D3DTRANSFOR
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetViewport(const D3DVIEWPORT9 * viewport) {
     (void)viewport;
-    return S_OK;
+    if (!viewport) return D3DERR_INVALIDCALL; S()->vp = *viewport; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetViewport(D3DVIEWPORT9* pViewport) {
     (void)pViewport;
-    return S_OK;
+    if (!pViewport) return D3DERR_INVALIDCALL; *pViewport = S()->vp; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetMaterial(const D3DMATERIAL9 * material) {
     (void)material;
@@ -2520,12 +2846,12 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetClipPlane(DWORD Index, flo
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetRenderState(D3DRENDERSTATETYPE State, DWORD Value) {
     (void)State;
     (void)Value;
-    return S_OK;
+    if ((unsigned)State >= 256) return D3DERR_INVALIDCALL; S()->rs[State] = Value; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetRenderState(D3DRENDERSTATETYPE State, DWORD* pValue) {
     (void)State;
     (void)pValue;
-    return S_OK;
+    if ((unsigned)State >= 256 || !pValue) return D3DERR_INVALIDCALL; *pValue = S()->rs[State]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateStateBlock(D3DSTATEBLOCKTYPE Type, IDirect3DStateBlock9** ppSB) {
     (void)Type;
@@ -2552,41 +2878,40 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetClipStatus(D3DCLIPSTATUS9*
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetTexture(DWORD Stage, IDirect3DBaseTexture9** ppTexture) {
     (void)Stage;
     (void)ppTexture;
-    if (ppTexture) { auto *o = new Null_IDirect3DBaseTexture9(); o->inherit(this);  *ppTexture = o; }
-    return S_OK;
+    int i = null_sampler(Stage); if (i < 0 || !ppTexture) return D3DERR_INVALIDCALL; *ppTexture = null_ref(S()->tex[i]); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture) {
     (void)Stage;
     (void)pTexture;
-    return S_OK;
+    int i = null_sampler(Stage); if (i < 0) return D3DERR_INVALIDCALL; null_set(S()->tex[i], pTexture); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD* pValue) {
     (void)Stage;
     (void)Type;
     (void)pValue;
-    return S_OK;
+    if (Stage >= 8 || (unsigned)Type >= 33 || !pValue) return D3DERR_INVALIDCALL; *pValue = S()->tss[Stage][Type]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetTextureStageState(DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value) {
     (void)Stage;
     (void)Type;
     (void)Value;
-    return S_OK;
+    if (Stage >= 8 || (unsigned)Type >= 33) return D3DERR_INVALIDCALL; S()->tss[Stage][Type] = Value; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetSamplerState(DWORD Sampler, D3DSAMPLERSTATETYPE Type, DWORD* pValue) {
     (void)Sampler;
     (void)Type;
     (void)pValue;
-    return S_OK;
+    int i = null_sampler(Sampler); if (i < 0 || (unsigned)Type >= 16 || !pValue) return D3DERR_INVALIDCALL; *pValue = S()->ss[i][Type]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetSamplerState(DWORD Sampler, D3DSAMPLERSTATETYPE Type, DWORD Value) {
     (void)Sampler;
     (void)Type;
     (void)Value;
-    return S_OK;
+    int i = null_sampler(Sampler); if (i < 0 || (unsigned)Type >= 16) return D3DERR_INVALIDCALL; S()->ss[i][Type] = Value; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::ValidateDevice(DWORD* pNumPasses) {
     (void)pNumPasses;
-    return S_OK;
+    if (pNumPasses) *pNumPasses = 1; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetPaletteEntries(UINT palette_idx, const PALETTEENTRY * entries) {
     (void)palette_idx;
@@ -2608,25 +2933,25 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetCurrentTexturePalette(UINT
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetScissorRect(const RECT * rect) {
     (void)rect;
-    return S_OK;
+    if (!rect) return D3DERR_INVALIDCALL; S()->scissor = *rect; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetScissorRect(RECT* pRect) {
     (void)pRect;
-    return S_OK;
+    if (!pRect) return D3DERR_INVALIDCALL; *pRect = S()->scissor; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetSoftwareVertexProcessing(BOOL bSoftware) {
     (void)bSoftware;
-    return S_OK;
+    S()->swvp = bSoftware; return S_OK;
 }
 BOOL STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetSoftwareVertexProcessing() {
-    return TRUE;
+    return S()->swvp;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetNPatchMode(float nSegments) {
     (void)nSegments;
-    return S_OK;
+    S()->npatch = nSegments; return S_OK;
 }
 float STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetNPatchMode() {
-    return 0.0f;
+    return S()->npatch;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount) {
     (void)PrimitiveType;
@@ -2678,25 +3003,24 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::ProcessVertices(UINT SrcStart
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateVertexDeclaration(const D3DVERTEXELEMENT9 * elements, IDirect3DVertexDeclaration9 ** declaration) {
     (void)elements;
     (void)declaration;
-    if (declaration) { auto *o = new Null_IDirect3DVertexDeclaration9(); o->inherit(this);  *declaration = o; }
+    if (declaration) { auto *o = new Null_IDirect3DVertexDeclaration9(); o->inherit(this); null_copy_decl(o, elements); *declaration = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetVertexDeclaration(IDirect3DVertexDeclaration9* pDecl) {
     (void)pDecl;
-    return S_OK;
+    DevState *s = S(); null_set(s->decl, pDecl); s->fvf = 0; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetVertexDeclaration(IDirect3DVertexDeclaration9** ppDecl) {
     (void)ppDecl;
-    if (ppDecl) { auto *o = new Null_IDirect3DVertexDeclaration9(); o->inherit(this);  *ppDecl = o; }
-    return S_OK;
+    if (!ppDecl) return D3DERR_INVALIDCALL; *ppDecl = null_ref(S()->decl); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetFVF(DWORD FVF) {
     (void)FVF;
-    return S_OK;
+    if (FVF) { DevState *s = S(); null_set(s->decl, (IDirect3DVertexDeclaration9 *)nullptr); s->fvf = FVF; } return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetFVF(DWORD* pFVF) {
     (void)pFVF;
-    return S_OK;
+    if (!pFVF) return D3DERR_INVALIDCALL; *pFVF = S()->fvf; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateVertexShader(const DWORD * byte_code, IDirect3DVertexShader9 ** shader) {
     (void)byte_code;
@@ -2706,12 +3030,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateVertexShader(const DWOR
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetVertexShader(IDirect3DVertexShader9* pShader) {
     (void)pShader;
-    return S_OK;
+    null_set(S()->vs, pShader); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetVertexShader(IDirect3DVertexShader9** ppShader) {
     (void)ppShader;
-    if (ppShader) { auto *o = new Null_IDirect3DVertexShader9(); o->inherit(this);  *ppShader = o; }
-    return S_OK;
+    if (!ppShader) return D3DERR_INVALIDCALL; *ppShader = null_ref(S()->vs); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetVertexShaderConstantF(UINT reg_idx, const float * data, UINT count) {
     (void)reg_idx;
@@ -2754,6 +3077,10 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetStreamSource(UINT StreamNu
     (void)pStreamData;
     (void)OffsetInBytes;
     (void)Stride;
+    if (StreamNumber >= 16) return D3DERR_INVALIDCALL;
+    DevState *s = S();
+    null_set(s->vb[StreamNumber], pStreamData);
+    s->vb_off[StreamNumber] = pStreamData ? OffsetInBytes : 0; s->vb_stride[StreamNumber] = pStreamData ? Stride : 0;
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetStreamSource(UINT StreamNumber, IDirect3DVertexBuffer9** ppStreamData, UINT* OffsetInBytes, UINT* pStride) {
@@ -2761,27 +3088,30 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetStreamSource(UINT StreamNu
     (void)ppStreamData;
     (void)OffsetInBytes;
     (void)pStride;
-    if (ppStreamData) { auto *o = new Null_IDirect3DVertexBuffer9(); o->inherit(this);  *ppStreamData = o; }
+    if (StreamNumber >= 16 || !ppStreamData) return D3DERR_INVALIDCALL;
+    DevState *s = S();
+    *ppStreamData = null_ref(s->vb[StreamNumber]);
+    if (OffsetInBytes) *OffsetInBytes = s->vb_off[StreamNumber];
+    if (pStride) *pStride = s->vb_stride[StreamNumber];
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetStreamSourceFreq(UINT StreamNumber, UINT Divider) {
     (void)StreamNumber;
     (void)Divider;
-    return S_OK;
+    if (StreamNumber >= 16) return D3DERR_INVALIDCALL; S()->vb_freq[StreamNumber] = Divider; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetStreamSourceFreq(UINT StreamNumber, UINT* Divider) {
     (void)StreamNumber;
     (void)Divider;
-    return S_OK;
+    if (StreamNumber >= 16 || !Divider) return D3DERR_INVALIDCALL; *Divider = S()->vb_freq[StreamNumber]; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetIndices(IDirect3DIndexBuffer9* pIndexData) {
     (void)pIndexData;
-    return S_OK;
+    null_set(S()->ib, pIndexData); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetIndices(IDirect3DIndexBuffer9** ppIndexData) {
     (void)ppIndexData;
-    if (ppIndexData) { auto *o = new Null_IDirect3DIndexBuffer9(); o->inherit(this);  *ppIndexData = o; }
-    return S_OK;
+    if (!ppIndexData) return D3DERR_INVALIDCALL; *ppIndexData = null_ref(S()->ib); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreatePixelShader(const DWORD * byte_code, IDirect3DPixelShader9 ** shader) {
     (void)byte_code;
@@ -2791,12 +3121,11 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreatePixelShader(const DWORD
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetPixelShader(IDirect3DPixelShader9* pShader) {
     (void)pShader;
-    return S_OK;
+    null_set(S()->ps, pShader); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetPixelShader(IDirect3DPixelShader9** ppShader) {
     (void)ppShader;
-    if (ppShader) { auto *o = new Null_IDirect3DPixelShader9(); o->inherit(this);  *ppShader = o; }
-    return S_OK;
+    if (!ppShader) return D3DERR_INVALIDCALL; *ppShader = null_ref(S()->ps); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetPixelShaderConstantF(UINT reg_idx, const float * data, UINT count) {
     (void)reg_idx;
@@ -2886,7 +3215,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::PresentEx(const RECT * src_re
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetGPUThreadPriority(INT * priority) {
     (void)priority;
-    return S_OK;
+    if (priority) *priority = 0; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetGPUThreadPriority(INT priority) {
     (void)priority;
@@ -2908,7 +3237,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::SetMaximumFrameLatency(UINT m
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetMaximumFrameLatency(UINT * max_latency) {
     (void)max_latency;
-    return S_OK;
+    if (max_latency) *max_latency = 3; return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CheckDeviceState(HWND dst_window) {
     (void)dst_window;
@@ -2924,7 +3253,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateRenderTargetEx(UINT wid
     (void)surface;
     (void)shared_handle;
     (void)usage;
-    if (surface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *surface = o; }
+    if (surface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)width; o->h = (uint32_t)height; o->fmt = (uint32_t)format; o->ms = (uint32_t)multisample_type; o->msq = (uint32_t)multisample_quality; o->usage = (uint32_t)usage; o->usage |= D3DUSAGE_RENDERTARGET; *surface = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateOffscreenPlainSurfaceEx(UINT width, UINT Height, D3DFORMAT format, D3DPOOL pool, IDirect3DSurface9 ** surface, HANDLE * shared_handle, DWORD usage) {
@@ -2935,7 +3264,7 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateOffscreenPlainSurfaceEx
     (void)surface;
     (void)shared_handle;
     (void)usage;
-    if (surface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->h = (uint32_t)Height; *surface = o; }
+    if (surface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)width; o->h = (uint32_t)Height; o->fmt = (uint32_t)format; o->pool = (uint32_t)pool; o->usage = (uint32_t)usage; *surface = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateDepthStencilSurfaceEx(UINT width, UINT height, D3DFORMAT format, D3DMULTISAMPLE_TYPE multisample_type, DWORD multisample_quality, BOOL discard, IDirect3DSurface9 ** surface, HANDLE * shared_handle, DWORD usage) {
@@ -2948,13 +3277,13 @@ HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::CreateDepthStencilSurfaceEx(U
     (void)surface;
     (void)shared_handle;
     (void)usage;
-    if (surface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this);  *surface = o; }
+    if (surface) { auto *o = new Null_IDirect3DSurface9(); o->inherit(this); o->w = (uint32_t)width; o->h = (uint32_t)height; o->fmt = (uint32_t)format; o->ms = (uint32_t)multisample_type; o->msq = (uint32_t)multisample_quality; o->usage = (uint32_t)usage; o->usage |= D3DUSAGE_DEPTHSTENCIL; *surface = o; }
     return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::ResetEx(D3DPRESENT_PARAMETERS * parameters, D3DDISPLAYMODEEX * mode) {
     (void)parameters;
     (void)mode;
-    return S_OK;
+    null_reset(this, parameters); return S_OK;
 }
 HRESULT STDMETHODCALLTYPE Null_IDirect3DDevice9Ex::GetDisplayModeEx(UINT swapchain_idx, D3DDISPLAYMODEEX * mode, D3DDISPLAYROTATION * rotation) {
     (void)swapchain_idx;

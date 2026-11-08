@@ -4,7 +4,8 @@
 # runs exactly once), a farm re-taking its own claim, reports published.   bash tests/t1/test_runner_warm.sh
 set -uo pipefail
 P=$(cd "$(dirname "$0")/../.." && pwd); T=$(mktemp -d)
-cleanup() { pkill -f "$T/" 2>/dev/null; sleep 0.5; rm -rf "$T"; }; trap cleanup EXIT
+PIDS=()   # the persistent test runners: killed by pid (their command line does not hold $T)
+cleanup() { for p in "${PIDS[@]}"; do pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; done; sleep 0.5; rm -rf "$T"; }; trap cleanup EXIT
 fails=0; ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 B=claude/port-nsw-un6t9s
 git init -q --bare "$T/public.git"; git init -q --bare "$T/art.git"
@@ -13,18 +14,18 @@ git -C "$T/art" -c user.name=t -c user.email=t@t commit -q --allow-empty -m main
 mkdir -p "$T/w/ports/fnv-nx/tools/farm"
 cat >"$T/w/ports/fnv-nx/tools/farm/echo_job.sh" <<'J'
 #!/usr/bin/env bash
-echo "$(basename "$FARM_HOME") $1" >> "$RUNLOG"; sleep 3; printf '# echo %s\n' "${1:0:12}" > "$2"
+echo "$(basename "$FARM_HOME") $1 $(date +%s)" >> "$RUNLOG"; sleep 3; printf '# echo %s\n' "${1:0:12}" > "$2"
 J
 commit() { echo "$1" >"$T/w/f"; git -C "$T/w" add -A; git -C "$T/w" -c user.name=t -c user.email=t@t commit -qm "$1"; git -C "$T/w" push -q origin "HEAD:refs/heads/$B" 2>/dev/null; }
 commit h1
 export RUNNER_PUBLIC=$T/public.git RUNLOG=$T/runs.log RUNNER_PERSIST=1 RUNNER_POLL_S=1 RUNNER_CLAIM=t RUNNER_MAX_S=1
-start() { FARM_HOME=$T/$1 ARTIFACTS=$T/art bash "$P/tools/farm/runner.sh" "$1" echo >"$T/$1.out" 2>&1 & }
+start() { FARM_HOME=$T/$1 ARTIFACTS=$T/art bash "$P/tools/farm/runner.sh" "$1" echo >"$T/$1.out" 2>&1 & PIDS+=($!); }
 start qa; sleep 2
 FARM_HOME=$T/qa ARTIFACTS=$T/art bash "$P/tools/farm/runner.sh" qa echo >"$T/qa2.out" 2>&1
 ok "second start of the same farm exits" 'grep -q "already running" "$T/qa2.out"'
 start qb
 sleep 4; commit h2; sleep 1.5; commit h3; sleep 9
-ok "persist: still running after RUNNER_MAX_S" 'pgrep -f "$T/qa" >/dev/null || pgrep -f "runner.sh qa" >/dev/null'
+ok "persist: still running after RUNNER_MAX_S" 'kill -0 "${PIDS[0]}" 2>/dev/null'
 n=$(wc -l <"$T/runs.log"); u=$(cut -d" " -f2 "$T/runs.log" | sort -u | wc -l)
 ok "every head ran exactly once (runs $n, heads $u)" '[ "$n" = "$u" ] && [ "$u" -ge 2 ]'
 ok "both farms worked" '[ "$(cut -d" " -f1 "$T/runs.log" | sort -u | wc -l)" = 2 ]'
@@ -38,4 +39,24 @@ NAME=qa; CLAIM=t; FARM_HOME=$T/qa; ARTIFACTS=$T/art
 owner=$(git --git-dir="$T/art.git" log -1 --format=%s "refs/heads/quick/claim/t/${H:0:12}" 2>/dev/null | cut -d" " -f1)
 NAME=$owner; ok "the owner re-claims its head" 'claim "$H" >/dev/null'
 NAME=qz; ok "another farm cannot" '! claim "$H" >/dev/null'
+# RUNNER_MIN_GAP_S: two new heads 2 s apart, a 6 s gap: the second waits for the gap
+: >"$T/runs.log"; RUNNER_CLAIM= RUNNER_MIN_GAP_S=6 start qg; sleep 2; commit g1; sleep 7; commit g2; sleep 2; commit g3; sleep 8
+s1=$(grep "^qg " "$T/runs.log" | awk 'NR==2{print $2}'); n=$(grep -c "^qg " "$T/runs.log")
+mingap=$(grep "^qg " "$T/runs.log" | awk '{t=$3; if (p) {d=t-p; if (m=="" || d<m) m=d} p=t} END{print m}')
+ok "min gap: runs at least 6 s apart (min $mingap), the newest head taken" '[ "$n" -ge 2 ] && [ "$mingap" -ge 6 ] && grep -q "^qg $(git -C "$T/w" rev-parse HEAD)" "$T/runs.log"'
+# a try farm with WIP_ONLY: two unmerged wip branches, only the matching one is tried; the report's title names it
+for w in a03060db789a d26; do
+	git -C "$T/w" checkout -q -b "x$w" "origin/$B" 2>/dev/null || git -C "$T/w" checkout -q -b "x$w"
+	echo "$w" >"$T/w/wip_$w"; git -C "$T/w" add -A; git -C "$T/w" -c user.name=t -c user.email=t@t commit -qm "wip $w"
+	git -C "$T/w" push -q "$T/art.git" "HEAD:refs/heads/wip/$w" 2>/dev/null
+done
+DW=$(git -C "$T/w" rev-parse HEAD); git -C "$T/w" checkout -q -
+: >"$T/runs.log"
+FARM_HOME=$T/try1of1 ARTIFACTS=$T/art RUNNER_CLAIM= RUNNER_PERSIST=1 WIP_ONLY='^wip/d26$' \
+	bash "$P/tools/farm/runner.sh" try1of1 echo >"$T/try.out" 2>&1 & PIDS+=($!)
+sleep 8
+ok "WIP_ONLY: only wip/d26 tried" '[ "$(cut -d" " -f2 "$T/runs.log" | sort -u)" = "$DW" ]'
+git -C "$T/art" fetch -q origin "reports/try1of1" 2>/dev/null
+rep=$(git -C "$T/art" ls-tree --name-only FETCH_HEAD 2>/dev/null | grep -- "-echo.md$" | head -1)
+ok "try report's title names the branch and the commit" 'git -C "$T/art" show "FETCH_HEAD:$rep" | head -1 | grep -q "(wip/d26 @ ${DW:0:12})"'
 [ $fails = 0 ] && echo "test_runner_warm: all ok" || { echo "test_runner_warm: $fails failed"; cat "$T"/q*.out; exit 1; }

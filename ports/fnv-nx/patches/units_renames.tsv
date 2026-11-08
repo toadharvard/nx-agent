@@ -1391,3 +1391,12 @@ src/unmapped/matrixvt.hpp.cpp	ref	0x00629ab0	?Ref@A87A0Element@@QAEAAMXZ	?Ref@A8
 src/unmapped/threadsafestructures.cpp	ref	0x00449f80	?GetEntry@Queue44c640@@QAEPAUQueueEntry44c640@@IPAPAXH@Z	?GetEntry@Queue44c640@@QAEPAUQueueEntry44c640@@XZ
 src/unmapped/threadsafestructures.cpp	ref	0x0044ea60	?TryA@QueueEntry44c640@@QAE_NXZ	?TryA@QueueEntry44c640@@QAE_NIPAPAXH@Z
 src/unmapped/threadsafestructures.cpp	ref	0x0044eb80	?TryB@QueueEntry44c640@@QAE_NXZ	?TryB@QueueEntry44c640@@QAE_NIPAPAXH@Z
+src/havok/physics/collide/agent3/convexlist3/hkpconvexlistagent3.cpp	def	0x00d32b40	?FUN_00d32b40@@YAXHHH@Z	?FUN_00d32b40@@YAXHPAXMMH@Z
+src/havok/physics/collide/agent3/convexlist3/hkpconvexlistagent3.cpp	ref	0x00d32b40	?FUN_00d32b40@@YAXHHH@Z	?FUN_00d32b40@@YAXHPAXMMH@Z
+src/staging/blk_00ca0000_o2.cpp	def	0x00cbc8f0	?FUN_00cbc8f0@FUN_00cbc8f0_cls@@QAEXH@Z	?FUN_00cbc8f0@FUN_00cbc8f0_cls@@QAEHH@Z
+src/havok/common/serialize/tagfile/binary/hkbinarytagfilewriter.cpp	ref	0x00dba6a0	?SetShiftedValue@S_dbf1a0_Handle@@QBE?AU1@XZ	?SetShiftedValue@S_dbf1a0_Handle@@QBEPAXPAX@Z
+src/staging/blk_00800000_od.cpp	ref	0x00445300	?Log@Logger@fnv_0081de70@@QAEXH@Z	?Log@Logger@fnv_0081de70@@QAEXH_NI@Z
+src/havok/animation/ragdoll/instance/hkaragdollinstance_gs_ehsc_nogs_noehsc_variant.cpp	ref	0x00c66320	-	?FUN_00c66320@PoseRotation@@QAEXABU1@0@Z
+src/fallout/misc/garbagecollector.cpp	def	0x0040fc90	?QueryCurrentThread@GarbageCollector@@SAX_N@Z	?QueryCurrentThread@GarbageCollector@@SAKXZ
+src/fallout/misc/garbagecollector.cpp	ref	0x0040fc90	?QueryCurrentThread@GarbageCollector@@SAX_N@Z	?QueryCurrentThread@GarbageCollector@@SAKXZ
+src/fallout/interface/interfacemanager.cpp	ref	0x00716ae0	?GetByteAtOffset33@FUN_007e6620_Button@fnv_007e6620@@QAE_NXZ	?GetByteAtOffset33@FUN_007e6620_Button@fnv_007e6620@@QAEEXZ

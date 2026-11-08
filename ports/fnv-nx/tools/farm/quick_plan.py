@@ -12,6 +12,7 @@ checks is the plan. A path no class names selects everything (unknown means unsa
   audit    the overhead audit (audit_job.sh 1 of 1; the row cache re-measures only changed keys)
   replay   the cell sweep on cached reference captures (sweep_job.sh, SWEEP_CAPTURE=replay, the cover scenes)
   programs the shader-program sweep (sweep_job.sh's perm.py part), when the translator changed
+  plat     R4's platform lane (plat_job.sh, tools/perf/PLAT.md; after build, on its build directory)
   frames   the per-thread CPU and frame-pacing lane (frames_job.sh): the profiler's tests, then this head's guest under
            linhost --profile, frames cut at the D3D9 Present (after build, on its build directory)
   scenario S18's scenario bench (scenario_job.sh): D25's 12 targets on scripted scenarios, on this head's guest
@@ -33,7 +34,7 @@ cells.tsv lines when the index holds them, else (id) alone.
 """
 import argparse, json, os, re, subprocess, sys
 
-ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames', 'mem', 'scenario', 'boottrace')
+ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames', 'mem', 'scenario', 'boottrace', 'plat')
 # (regex on the path relative to ports/fnv-nx/, checks); first match wins
 CLASSES = [
     (r'^(docs/|journal/|JOURNAL\.md$|README\.md$|reports/)', ()),
@@ -41,9 +42,11 @@ CLASSES = [
     (r'^tests/s6n/', ('replay', 'build')),            # nx_render's build
     (r'^tests/s5/', ('build', 'scenario')),          # the boot scripts (the scenario guest side runs on them)
     (r'^tests/s18/', ()),                             # the bench's own tests (V1, the stream)
-    (r'^tests/s15/mtqemu/', ('threads', 'frames', 'mem')),  # the race checker, linhost (the profiler), boot_game.sh
+    (r'^tests/s15/mtqemu/', ('threads', 'frames', 'mem', 'plat')),  # the race checker, linhost (the profiler), boot_game.sh
     (r'^tests/s15/(test_mtqemu|test_threads_report)\.py$', ('threads',)),
     (r'^tests/s15/test_frames\.py$', ('frames',)),
+    (r'^tests/s15/test_linfeed\.py$', ('frames',)),
+    (r'^tests/s15/test_plat_report\.py$', ('plat',)),
     (r'^tests/s15/test_mem_report\.py$', ('mem',)),
     (r'^tests/', ()),                                 # tests run by the streams and V1, not by a check here
     (r'^render/shaders/', ('programs', 'replay', 'build')),
@@ -52,7 +55,8 @@ CLASSES = [
     (r'^tools/compare/', ('replay',)),                # the harness; a change to a capture-key input makes a new key
     (r'^tools/equiv/', ('equiv',)),
     (r'^tools/difffuzz/', ('fuzz', 'audit')),         # the audit runs on the fuzz harness and its keys
-    (r'^tools/perf/(frames\.py|FRAMES\.md)$', ('frames',)),
+    (r'^tools/perf/(frames\.py|FRAMES\.md|linfeed\.py)$', ('frames',)),
+    (r'^tools/perf/(plat\.py|plat_autostart\.c|PLAT\.md)$', ('plat',)),
     (r'^tools/perf/(mem\.py|mem_wrap\.c|mem_autostart\.c|MEM\.md)$', ('mem',)),
     (r'^tools/perf/', ('audit',)),
     (r'^tools/farm/(sweep_job|capstore)', ('replay',)),
@@ -65,17 +69,29 @@ CLASSES = [
     (r'^tools/farm/boottrace_job', ('boottrace',)),
     (r'^tools/lockstep/', ('boottrace',)),            # the Wine tracer: a new reference key
     (r'^tools/farm/frames_job', ('frames',)),
+    (r'^tools/farm/plat_job', ('plat',)),
     (r'^tools/farm/mem_job', ('mem',)),
-    (r'^tools/threads/report\.py$', ('threads', 'frames', 'mem')),   # frames.py and mem.py import its Symbols
-    (r'^tools/threads/variant\.sh$', ('threads', 'mem')),
+    (r'^tools/threads/report\.py$', ('threads', 'frames', 'mem', 'plat')),   # frames.py and mem.py import its Symbols
+    (r'^tools/threads/variant\.sh$', ('threads', 'mem', 'plat')),
     (r'^tools/threads/', ('threads',)),
     (r'^tools/farm/', ('build',)),                    # link/full/compile jobs and their library
+    # fnvlink and the compile cache: this head's link and guest, so every check on them; never equiv (the MSVC
+    # build of the prepared tree; order_check.py reads compile.sh's defaults but no check here runs it), never the
+    # replay (nx_render on captures) - qk1 on aec30808 ran a cold equiv for 2.9 h on a link change
+    (r'^tools/link/', ('build', 'fuzz', 'audit', 'threads', 'frames', 'mem', 'plat', 'scenario')),
 ]
 # a change here invalidates every cached result of a check: quick_job runs it all (a full run on one machine is slow:
 # the farms' sharded run is the better tool)
 FULL = [
     (r'^toolchain/', 'the toolchain (every object, the guest and the boot)'),
     (r'^tools/fetch\.sh$', 'the pinned decomp, sse2neon, libnx (every key)'),
+]
+# a change here makes every cached result of ONE check cold (the files are part of each of its keys): on one
+# machine that check is its whole cold run (equiv: 2.9 h on qk1, aec30808), so quick_job leaves it to the check's
+# sharded farms, which publish the cache it seeds from next time; it is planned again on the next head
+# (QUICK_COLD_LOCAL=1 runs it here anyway)
+COLD = [
+    ('equiv', r'^tools/equiv/msvc/', 'the MSVC shim headers (forced into or on the include path of every unit)'),
 ]
 # version constants that are part of every key of one cache: a different value between base and head means that
 # cache is cold (the sharded farms refill it: the rule for a full run of that check)
@@ -114,7 +130,7 @@ def changed(repo, base, head):
 
 
 def plan(paths):
-    checks, why, full = {}, {}, []
+    checks, why, full, cold = {}, {}, [], {}
     for p in paths:
         for rx, cs in CLASSES:
             if re.search(rx, p):
@@ -127,6 +143,9 @@ def plan(paths):
         for rx, w in FULL:
             if re.search(rx, p):
                 full.append('%s: %s' % (p, w))
+        for c, rx, w in COLD:
+            if re.search(rx, p):
+                cold.setdefault(c, []).append('%s: %s' % (p, w))
     # fuzz, audit and the boot need the link of this head; equiv only the prepared tree (build's prepare step)
     # every change that rebuilds the guest can move the boot's first divergence
     if checks.get('build'):
@@ -136,7 +155,8 @@ def plan(paths):
         checks['build'] = True
         why.setdefault('build', []).append('(fuzz/audit need this head\'s link)')
     return {'files': len(paths), 'checks': {c: bool(checks.get(c)) for c in ALL},
-            'why': {c: sorted(set(v))[:20] for c, v in why.items()}, 'full': full}
+            'why': {c: sorted(set(v))[:20] for c, v in why.items()}, 'full': full,
+            'cold': {c: v[:20] for c, v in cold.items() if checks.get(c)}}
 
 
 def cover(store, limit=0):

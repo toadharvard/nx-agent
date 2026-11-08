@@ -274,6 +274,11 @@ def t_report(tmp):
     check("report md: no game text", "SCRIPTS" not in md and "Missing.bsa" not in md and "12/12" in md, md[:400])
     rp = os.path.join(tmp, "rep", "r.json")
     json.dump(r, open(rp, "w"))
+    se = os.path.join(tmp, "rep", "scripterr.json")
+    json.dump({"schema": "fnvnx-scripterr/1", "metric": 4, "distinct": 6, "in_original": 2, "groups": []}, open(se, "w"))
+    r2 = scenario.report(plan, g, w, cmp_, thr, nx1, scripterr=se)
+    check("report: scripterr.py's metric is #10", r2["targets"]["10"]["count"] == 4 and
+          r2["targets"]["10"]["detail"]["source"] == "scripterr.py", str(r2["targets"]["10"]))
     empty = scenario.report(plan, os.path.join(tmp, "nothing"), nx1=nx1)
     m = scenario.metric([r, empty])
     check("metric: targets measured in any scenario", m["measured"] == 12 and m["targets"][1]["measured_in"] == 1, str(m["measured"]))
@@ -324,11 +329,15 @@ def t_job_dry(tmp):
     r = subprocess.run(["bash", os.path.join(P, "tools", "farm", "scenario_job.sh"), "0" * 40, rep], env=env,
                        capture_output=True, text=True, timeout=300)
     md = open(rep).read() if os.path.isfile(rep) else ""
-    check("job dry: exit 0 and a report", r.returncode == 0 and md.startswith("# scenarios"), r.stderr[-500:])
+    # nothing ran: a loud FAIL (exit 3, the reason first), never a table of zeros read as a result (T1: sc1 on
+    # dc5c0627023e reported 0/12 in 7 s on a link without a guest)
+    check("job dry: exit 3 and a report that says why", r.returncode == 3 and md.startswith("# scenarios") and
+          "- FAIL: the guest ran in no scenario (no link with a guest)" in md, (r.returncode, r.stderr[-500:], md[:300]))
     check("job dry: both scenarios reported", "## scenario boot-menu" in md and "## scenario saveload" in md, md[:600])
     check("job dry: metric line (nothing ran: nothing measured)", "S18 metric: 0/12" in md, md[:300])
     side = rep[:-3] + ".json"
-    check("job dry: metric sidecar", os.path.isfile(side) and json.load(open(side))["schema"] == "fnvnx-scenario-metric/1")
+    check("job dry: metric sidecar, with the error", os.path.isfile(side) and json.load(open(side))["schema"] ==
+          "fnvnx-scenario-metric/1" and "guest ran in no scenario" in json.load(open(side)).get("error", ""))
 
 
 def main():

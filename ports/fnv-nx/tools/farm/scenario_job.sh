@@ -15,9 +15,15 @@
 #   wine    tools/scenario/wine_scenario.sh (the sweep's prefix; fnvtrace with a trace list) unless SCENARIO_WINE=0
 #   compare tests/s5/boot_trace.py compare guest.tsv wine.tsv --json (S5-boot's lockstep) when both traces exist
 #   nx1     tests/nx1/run.py on the scenario's boot summary and guest (D25 #11: readiness checks not passing)
+#   frames  under linhost (R4): tools/perf/linfeed.py turns the plan into a feed, tests/s15/mtqemu/boot_game.sh runs
+#           the guest under qemu with --feed --profile --frame <Present> --progress-timeout, frames_job.sh reports
+#           (D25 #12: per-frame time, the critical thread; SCENARIO_LINHOST=0 skips it)
+#   scripts tools/report/scripterr.py on the guest's logs (callwatch.py lines; the private config from branch
+#           scenario-cfg) with the Wine console as baseline (D25 #10)
 #   threads tools/farm/threads_job.sh on the guest's log (R4's lane: THREADS_LOGS/THREADS_ELF) when the guest is the
 #           tools/threads/variant.sh build (SCENARIO_THREADS_BUILD=<pipeline build>; else the gate timeouts only)
 #   report  scenario.py report -> <s>.json / <s>.md; savediff.py for the round trip
+# After the scenarios: tools/farm/faults_job.sh over every scenario's guest logs (R4's classifier, D25 #1).
 # Then scenario.py metric over the reports: the head of <report.md>. Game-derived results (plans with resolved ids,
 # saves, console logs, traces, the reports' full detail) go to branch scenario/<link12> of the artifacts repository;
 # <report.md> carries counts and our own names only.
@@ -46,14 +52,15 @@ note() { NOTES+=("$*"); log "$*"; }
 
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 need=""
-for c in aarch64-linux-gnu-gcc git; do command -v "$c" > /dev/null || need="$need $c"; done
+for c in aarch64-linux-gnu-gcc aarch64-linux-gnu-g++ qemu-aarch64 git; do command -v "$c" > /dev/null || need="$need $c"; done
 [ "${SCENARIO_WINE:-1}" = 1 ] && for c in wine Xvfb xdotool; do command -v "$c" > /dev/null || need="$need $c"; done
 python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null || need="$need py"
 if [ -n "$need" ]; then
 	if [ "$FARM_APT" = 1 ]; then
 		dpkg --add-architecture i386; apt-get update -qq
 		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wine32:i386 wine gcc-mingw-w64-i686 xvfb xdotool \
-			x11-utils gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu git python3-pip > /dev/null || note "apt-get install failed"
+			x11-utils x11-apps imagemagick gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+			qemu-user git python3-pip > /dev/null || note "apt-get install failed"
 		python3 -m pip install -q --break-system-packages unicorn capstone pyelftools 2> /dev/null ||
 			python3 -m pip install -q unicorn capstone pyelftools || note "pip install failed"
 	else note "missing on this host:$need (FARM_APT=1 installs them)"; fi
@@ -74,12 +81,34 @@ LC=${SCENARIO_LINK:-}
 LINKDIR=${SCENARIO_LINK_DIR:-}; GUESTDIR0=${SCENARIO_GUEST_DIR:-}
 [ -n "$LINKDIR" ] && [ -z "$LC" ] && LC=$C12
 if [ -z "$LC" ] && [ -d "$ARTIFACTS/.git" ]; then
-	if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/link/$C12" > /dev/null 2>&1; then LC=$C12
-	elif git -C "$ARTIFACTS" fetch -q --depth 1 origin link-head 2> /dev/null; then
-		LC=$(git -C "$ARTIFACTS" show FETCH_HEAD:meta.json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print((d.get("commit") or d.get("head") or "")[:12])')
-	fi
+	# the newest link/<c12> of this head's own history whose guest linked (guest/fnvnx.elf on the branch). Never
+	# link-head: a try farm's WIP link can be there, and sc1 on dc5c0627023e took 1fe1e1463be8 from it, a link whose
+	# guest had failed: 0/12 measured in 7 s
+	REPO=$(cd "$P/../.." && pwd)
+	have=" $(git -C "$ARTIFACTS" ls-remote origin 'refs/heads/link/*' 2> /dev/null | awk '{print $2}' | sed 's|^refs/heads/link/||' | tr '\n' ' ') "
+	for h in $(git -C "$REPO" log --format=%H -n "${SCENARIO_LINK_DEPTH:-200}" "$COMMIT" 2> /dev/null | cut -c1-12); do
+		case "$have" in *" $h "*) ;; *) continue ;; esac
+		if git -C "$ARTIFACTS" fetch -q --depth 1 --filter=blob:none origin "+refs/heads/link/$h:refs/remotes/origin/link/$h" 2> /dev/null &&
+			git -C "$ARTIFACTS" cat-file -e "refs/remotes/origin/link/$h:guest/fnvnx.elf" 2> /dev/null; then
+			LC=$h; break
+		fi
+	done
+	[ -n "$LC" ] && [ "$LC" != "$C12" ] && note "link: $LC, the newest link of this head's history with a guest (none for $C12)"
 fi
-[ -n "$LC" ] || note "no link for $C12 and no link-head: the guest side cannot run"
+[ -n "$LC" ] || note "no link with a guest for $C12 or its history: the guest side cannot run"
+
+# ---- the private script-error config (D25 #10, R4's lane): game knowledge, so from the artifacts repository --------
+# SCENARIO_CALLWATCH (callwatch.py config) and SCENARIO_SCRIPTERR_PATTERNS (scripterr.py --patterns), else the files
+# callwatch.cfg / scripterr_patterns.tsv of branch scenario-cfg; without them #10 falls back to the scof console log
+if [ -z "${SCENARIO_CALLWATCH:-}${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && [ -d "$ARTIFACTS/.git" ] &&
+	git -C "$ARTIFACTS" fetch -q --depth 1 origin scenario-cfg 2> /dev/null; then
+	mkdir -p "$W/cfg"
+	git -C "$ARTIFACTS" show FETCH_HEAD:callwatch.cfg > "$W/cfg/callwatch.cfg" 2> /dev/null && SCENARIO_CALLWATCH=$W/cfg/callwatch.cfg
+	git -C "$ARTIFACTS" show FETCH_HEAD:scripterr_patterns.tsv > "$W/cfg/patterns.tsv" 2> /dev/null && SCENARIO_SCRIPTERR_PATTERNS=$W/cfg/patterns.tsv
+fi
+export SCENARIO_CALLWATCH=${SCENARIO_CALLWATCH:-}
+SEP=(); [ -n "${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && SEP=(--patterns "$SCENARIO_SCRIPTERR_PATTERNS")
+[ -n "$SCENARIO_CALLWATCH${SEP[*]}" ] || note "no script-error config (scenario-cfg branch): #10 from the scof console log only"
 
 # ---- the trace list (lockstep) -----------------------------------------------------------------------------------
 LIST=${SCENARIO_TRACE_LIST:-}
@@ -157,35 +186,119 @@ for s in $IDS; do
 			--json "$D/nx1.json" > "$D/nx1.log" 2>&1
 		[ -f "$D/nx1.json" ] && NX=$D/nx1.json
 	fi
+	FRJ=${SCENARIO_FRAMES_REPORT:-}
+	# D25 #12 under linhost (R4): the same plan as a linhost feed, the guest on real threads under qemu with the
+	# profiler cut at Present, then frames.py through frames_job.sh (per-frame time, the critical-path thread)
+	GE=$GUESTDIR/fnvnx.elf; [ -f "$GE" ] || GE=$D/emu/guest/fnvnx.elf
+	if [ -z "$FRJ" ] && [ "${SCENARIO_LINHOST:-1}" = 1 ] && [ -f "$P/tools/perf/linfeed.py" ] && [ -f "$GE" ] &&
+		[ -f "$GAME/FalloutNV.exe" ] && command -v qemu-aarch64 > /dev/null; then
+		NMX=$(command -v aarch64-none-elf-nm || command -v aarch64-linux-gnu-nm || echo nm)
+		FS=$("$NMX" --defined-only "$GE" | awk '$2 ~ /^[Tt]$/ {print $3}' | grep -E 'IDirect3DDevice9.*7Present|IDirect3DSwapChain9.*7Present' | sort -u)
+		if python3 -I "$P/tools/perf/linfeed.py" "$D/plan.json" --elf "$GE" --out "$D/feed.txt" > "$D/linfeed.log" 2>&1; then
+			LA="--feed $D/feed.txt --profile $D/lin_profile.txt --progress-timeout ${SCENARIO_PROGRESS_S:-600}"
+			[ -n "$SCENARIO_CALLWATCH" ] && python3 -I "$P/tools/perf/callwatch.py" resolve "$SCENARIO_CALLWATCH" --elf "$GE" \
+				--out "$D/watch.txt" > "$D/callwatch.log" 2>&1 && LA="$LA --calls $D/watch.txt"
+			for f in $FS; do LA="$LA --frame $f"; done
+			mkdir -p "$D/lin/sdmc"; [ -d "$D/emu/seed" ] && cp -a "$D/emu/seed/." "$D/lin/sdmc/"
+			LINHOST_ARGS="$LA" TIMEOUT=${SCENARIO_LINHOST_S:-${EMU_TIMEOUT:-3600}} EXPECT="linhost: scenario complete" \
+				bash "$P/tests/s15/mtqemu/boot_game.sh" "$GE" "$GAME/FalloutNV.exe" "$D/lin" > "$D/lin.log" 2>&1
+			if [ -s "$D/lin_profile.txt" ]; then
+				FRAMES_PROFILES=$D/lin_profile.txt FRAMES_ELF=$GE FRAMES_LOG=$D/lin/boot.log \
+					bash "$HERE/frames_job.sh" "$COMMIT" "$D/frames.md" > "$D/frames.log" 2>&1
+				[ -f "$D/frames.json" ] && FRJ=$D/frames.json
+			fi
+		fi
+	fi
+	SEJ=""   # D25 #10 (R4's lane): the guest's script errors minus the original's (its console through the patterns)
+	if [ -f "$P/tools/report/scripterr.py" ] && [ -n "$SCENARIO_CALLWATCH${SEP[*]}" ]; then
+		BL=()
+		if [ ${#SEP[@]} -gt 0 ] && [ -s "$D/wine/console.txt" ]; then
+			python3 -I "$P/tools/report/scripterr.py" "$D/wine/console.txt" "${SEP[@]}" --out "$D/wine_scripterr.md" > /dev/null 2>&1
+			[ -f "$D/wine_scripterr.json" ] && BL=(--baseline "$D/wine_scripterr.json")
+		fi
+		GL=(); for f in "$D/emu/emu_stub.log" "$D/lin/boot.log"; do [ -s "$f" ] && GL+=("$f"); done
+		if [ ${#GL[@]} -gt 0 ]; then
+			python3 -I "$P/tools/report/scripterr.py" "${GL[@]}" --elf "$GE" "${SEP[@]}" "${BL[@]}" --out "$D/scripterr.md" > "$D/scripterr.log" 2>&1
+			[ -f "$D/scripterr.json" ] && SEJ=$D/scripterr.json
+		fi
+	fi
 	python3 -I "$SC/scenario.py" report "$D/plan.json" --guest "$D/emu" --wine "$D/wine" ${CMP:+--compare "$CMP"} ${NX:+--nx1 "$NX"} \
-		${THR:+--threads "$THR"} ${SCENARIO_FRAMES_REPORT:+--frames-report "$SCENARIO_FRAMES_REPORT"} --out "$D/report.json" --md "$D/report.md" > "$D/report.log" 2>&1 &&
+		${THR:+--threads "$THR"} ${FRJ:+--frames-report "$FRJ"} ${SEJ:+--scripterr "$SEJ"} --out "$D/report.json" --md "$D/report.md" > "$D/report.log" 2>&1 &&
 		REPS+=("$D/report.json") || note "$s: report failed ($(tail -1 "$D/report.log"))"
 	log "$s: $(tail -1 "$D/report.log") ($(( $(date +%s) - ST )) s)"
 done
 
+# ---- the fault classifier (R4, D25 #1): every scenario's guest log, grouped by (kind, function, 3 callers), new /
+# known / fixed against the previous head; its report is appended below, its sidecar published with the results
+FAULTS_MD=""
+if [ -f "$HERE/faults_job.sh" ]; then
+	FL=""; for s in $IDS; do for f in "$W/$s/emu/emu_stub.log" "$W/$s/lin/boot.log"; do [ -s "$f" ] && FL="$FL $f"; done; done
+	GE=$GUESTDIR/fnvnx.elf; [ -f "$GE" ] || GE=$(ls "$W"/*/emu/guest/fnvnx.elf 2> /dev/null | head -1)
+	if [ -n "$FL" ]; then
+		FAULTS_LOGS="${FL# }" FAULTS_ELF=$GE bash "$HERE/faults_job.sh" "$COMMIT" "$W/faults.md" > "$W/faults.log" 2>&1
+		[ -f "$W/faults.md" ] && FAULTS_MD=$W/faults.md
+	fi
+fi
+
+# ---- the script-error lane over every scenario (the object zero_targets.py reads under "scripterr" in the sidecar)
+SCRIPTERR_ALL=""
+if [ -f "$P/tools/report/scripterr.py" ] && [ -n "$SCENARIO_CALLWATCH${SEP[*]}" ]; then
+	GL=(); WL=()
+	for s in $IDS; do
+		for f in "$W/$s/emu/emu_stub.log" "$W/$s/lin/boot.log"; do [ -s "$f" ] && GL+=("$f"); done
+		[ -s "$W/$s/wine/console.txt" ] && WL+=("$W/$s/wine/console.txt")
+	done
+	BL=()
+	if [ ${#SEP[@]} -gt 0 ] && [ ${#WL[@]} -gt 0 ]; then
+		python3 -I "$P/tools/report/scripterr.py" "${WL[@]}" "${SEP[@]}" --out "$W/wine_scripterr.md" > /dev/null 2>&1
+		[ -f "$W/wine_scripterr.json" ] && BL=(--baseline "$W/wine_scripterr.json")
+	fi
+	GE=$GUESTDIR/fnvnx.elf; [ -f "$GE" ] || GE=$(ls "$W"/*/emu/guest/fnvnx.elf 2> /dev/null | head -1)
+	if [ ${#GL[@]} -gt 0 ]; then
+		python3 -I "$P/tools/report/scripterr.py" "${GL[@]}" ${GE:+--elf "$GE"} "${SEP[@]}" "${BL[@]}" --out "$W/scripterr.md" > "$W/scripterr.log" 2>&1
+		[ -f "$W/scripterr.json" ] && SCRIPTERR_ALL=$W/scripterr.json
+	fi
+fi
+
 # ---- metric, report, publish ---------------------------------------------------------------------------------------
 if [ ${#REPS[@]} -gt 0 ]; then python3 -I "$SC/scenario.py" metric "${REPS[@]}" --out "$W/metric.json" --md "$W/metric.md" > /dev/null
 else echo "- S18 metric: 0/12 D25 targets measured (no scenario report)" > "$W/metric.md"; fi
+# loud, not zeros: a run in which the guest ran in no scenario measured nothing (exit 3, the reason first)
+GRAN=0
+for r in "${REPS[@]}"; do
+	python3 -I -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1])).get("guest", {}).get("ran") else 1)' "$r" 2> /dev/null && GRAN=$((GRAN + 1))
+done
+FAIL_WHY=""
+if [ "$GRAN" = 0 ]; then
+	FAIL_WHY="the guest ran in no scenario ($( [ -n "$LC" ] && echo "link $LC: see each scenario's farm_boot.log" || echo "no link with a guest"))"
+	[ -f "$W/metric.json" ] && python3 -I -c 'import json, sys
+m = json.load(open(sys.argv[1])); m["error"] = sys.argv[2]; json.dump(m, open(sys.argv[1], "w"), indent=1)' "$W/metric.json" "$FAIL_WHY"
+fi
 {
 	echo "# scenarios ${C12}"
 	echo
+	[ -n "$FAIL_WHY" ] && { echo "- FAIL: $FAIL_WHY: nothing measured"; echo; }
 	cat "$W/metric.md"
 	echo
 	[ ${#WCACHED[@]} -gt 0 ] && echo "- original's runs from the reference cache (key $HARNESS_KEY): ${WCACHED[*]}"
 	echo "- link: ${LC:-none}; game: $( [ -f "$GAME/FalloutNV.exe" ] && sha256sum "$GAME/FalloutNV.exe" | cut -c1-12 || echo none); lockstep list: $( [ -n "$LIST" ] && wc -l < "$LIST" || echo none); $(( $(date +%s) - T0 )) s"
 	for n in "${NOTES[@]}"; do echo "- $n"; done
 	for r in "${REPS[@]}"; do echo; sed 's/^# /## /' "$(dirname "$r")/report.md"; done
+	[ -n "$FAULTS_MD" ] && { echo; sed 's/^# /## /' "$FAULTS_MD"; }
+	[ -n "$SCRIPTERR_ALL" ] && { echo; sed 's/^# /## /' "${SCRIPTERR_ALL%.json}.md"; }
 } > "$REPORT"
 if [ "${SCENARIO_PUBLISH:-1}" = 1 ] && [ -n "$LC" ] && [ -d "$ARTIFACTS/.git" ]; then
 	pub=$W/pub.git; rm -rf "$pub"; git init -q "$pub"
-	cp -f "$W/metric.json" "$W/validate.txt" "$pub/" 2> /dev/null
+	cp -f "$W/metric.json" "$W/validate.txt" "$W/faults.json" "$pub/" 2> /dev/null
 	for s in $IDS; do
 		D=$W/$s; [ -d "$D" ] || continue; mkdir -p "$pub/$s"
-		cp -f "$D"/plan.json "$D"/report.json "$D"/compare.json "$D"/threads.json "$D"/nx1.json "$pub/$s/" 2> /dev/null
+		cp -f "$D"/scripterr.json "$D"/wine_scripterr.json "$pub/$s/" 2> /dev/null
+		cp -f "$D"/plan.json "$D"/report.json "$D"/compare.json "$D"/threads.json "$D"/nx1.json "$D"/frames.json "$D"/feed.txt "$pub/$s/" 2> /dev/null
 		[ -d "$D/emu/kept" ] && cp -a "$D/emu/kept" "$pub/$s/guest-kept"
 		[ -d "$D/wine/profile" ] && cp -a "$D/wine/profile" "$pub/$s/wine-profile"
-		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$pub/$s/" 2> /dev/null
-		for f in "$D/emu/emu_stub.log" "$D/guest.tsv" "$D/wine/wine.tsv"; do [ -f "$f" ] && xz -T0 -c "$f" > "$pub/$s/$(basename "$f").xz"; done
+		[ -d "$D/wine/shots" ] && cp -a "$D/wine/shots" "$pub/$s/wine-shots"
+		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$D/wine/original_opens.json" "$pub/$s/" 2> /dev/null
+		for f in "$D/emu/emu_stub.log" "$D/lin/boot.log" "$D/lin_profile.txt" "$D/guest.tsv" "$D/wine/wine.tsv"; do [ -f "$f" ] && xz -T0 -c "$f" > "$pub/$s/$(basename "$f").xz"; done
 	done
 	if git -C "$pub" add -A && git -C "$pub" -c user.name="fnvnx farm" -c user.email=farm@invalid commit -qm "scenarios $LC (head $C12)
 
@@ -195,7 +308,18 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" &&
 	else echo "- publish to scenario/$LC failed (log $W/push.log)" >> "$REPORT"; fi
 	rm -rf "$pub"
 fi
-# the sidecar the runner publishes beside the report: the metric (counts and target names only)
-[ -f "$W/metric.json" ] && cp -f "$W/metric.json" "${REPORT%.md}.json"
+# the sidecar the runner publishes beside the report: the metric (counts and target names only), with the
+# script-error lane's object (ids and counts only) under "scripterr" for zero_targets.py
+if [ -f "$W/metric.json" ]; then
+	python3 -I -c 'import json, sys
+m = json.load(open(sys.argv[1]))
+if sys.argv[2]:
+    try:
+        m["scripterr"] = json.load(open(sys.argv[2]))
+    except (OSError, ValueError):
+        pass
+json.dump(m, open(sys.argv[3], "w"), indent=1)' "$W/metric.json" "$SCRIPTERR_ALL" "${REPORT%.md}.json"
+fi
 log "done: $REPORT"
+[ -z "$FAIL_WHY" ] || { log "FAIL: $FAIL_WHY"; exit 3; }
 exit 0

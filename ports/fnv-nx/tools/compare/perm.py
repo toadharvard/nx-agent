@@ -11,6 +11,7 @@ every frame to its program (name, hash, stage, model) and lists the programs tha
 --perturb EPS writes the same captures with every float input (constants, vertex floats) scaled by 1 + EPS * u: the
 reference rendered from them against the unperturbed reference is the conditioning floor (S16 decision: EPS 1e-5,
 as V6n's SENS test). A frame whose reference moves under it is ill-conditioned; its difference is not a defect.
+--perturb-seed K draws another perturbation (default 0); permreport.py takes several draws (README, conditioning).
 --programs restricts the set to the hashes or names in a file (one per line): the coverage-guided subset, e.g. the
 permutations a real frame used (coverage.py).
 
@@ -25,11 +26,13 @@ Driving (V6n's choices, render/verify/shaders/sdpfuzz.py, so a difference here c
   BINORMAL/TEXCOORD FLOAT4, COLOR and BLENDINDICES D3DCOLOR, BLENDWEIGHT FLOAT4) on a 3x3 vertex grid; every
   CTAB matrix identity (z scaled by 0.5), every CTAB bone palette identity rows with a small translation, every other register c0..c255 uniform in [-1, 1]. Relative addressing stays
   inside the arrays it reads (bone indices inside the CTAB palette, texcoords in [0, 1) when the VS uses a0): D3D9
-  leaves reads outside [0, 255] undefined, so differences there are no evidence. A generated PS sums every
+  leaves reads outside [0, 255] undefined, so differences there are no evidence. World-space points taken from
+  constants (CTAB Instance*/Segment* arrays read relatively, Min/Max boxes) sit inside the clip volume
+  (place_points), and a Segment array's COLOR point index is FLOAT4 (segment_points). A generated PS sums every
   COLOR/TEXCOORD output the VS writes (sdpfuzz.combo_ps).
 Seeded by the program hash (plus its salt from --salts): the same package and salts give the same captures.
 """
-import argparse, json, os, random, shutil, struct, subprocess, sys, tempfile
+import argparse, json, os, random, re, shutil, struct, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
@@ -46,6 +49,9 @@ VARIANTS = {
     'large': {'const': 'large'},                    # constants in [-1000, 1000]
     'dxt':   {'tex': 'dxt1'},                       # the 2D textures as DXT1 (with mips)
     'atest': {'rs': {'ALPHATESTENABLE': 1, 'ALPHAREF': 128, 'ALPHAFUNC': 5}},    # alpha test GREATER 128
+    # its complement, LESSEQUAL 128: every pixel atest discards passes here, so a program whose alpha stays at or
+    # below 128 (atest vacuous) exercises the alpha-test epilogue too, and both comparison directions are covered
+    'atestle': {'rs': {'ALPHATESTENABLE': 1, 'ALPHAREF': 128, 'ALPHAFUNC': 4}},
     'fog':   {'rs': {'FOGENABLE': 1, 'FOGTABLEMODE': 3, 'FOGCOLOR': 0xff8040c0}, 'fog': True},   # linear table fog
 }
 VARIANT = {'v': VARIANTS['base']}
@@ -203,7 +209,7 @@ def ps_job(j, r):
     return elems, 32, verts, [0, 1, 2, 0, 2, 3], vsc, psc, samplers
 
 
-def vs_job(j, r, glsl=''):
+def vs_job(j, r, glsl='', prng=None):
     ins = [x for x in j.get('inputs', []) if x['usage'] in USAGE and x['usage'] != 'PSIZE']
     # relative addressing must stay inside the constant arrays it indexes (D3D9 leaves reads outside [0, 255]
     # undefined, so a difference there says nothing): bone indices inside the CTAB palette, other float inputs that
@@ -212,9 +218,11 @@ def vs_job(j, r, glsl=''):
     bones = max([c['count'] // 3 for c in j.get('ctab', []) if c['name'].lower().startswith('bone')] or [4])
     if not any(x['usage'] == 'POSITION' for x in ins):
         return None
+    pr = prng or random.Random(int(j.get('hash') or '0', 16) ^ PLACE_SALT)   # place_points' own stream
+    segn = segment_points(j, glsl)   # strips between the points of a segment array: COLOR is the point index
     elems, off = [], 0
     for x in ins:
-        t = TYPE_OF.get(x['usage'], FLOAT4)
+        t = FLOAT4 if segn and x['usage'] == 'COLOR' else TYPE_OF.get(x['usage'], FLOAT4)
         elems.append((0, off, t, 0, USAGE[x['usage']], x['index']))
         off += 16 if t == FLOAT4 else 4
     grid = [(-0.8 + 0.8 * gx + r.uniform(-0.1, 0.1), -0.8 + 0.8 * gy + r.uniform(-0.1, 0.1))
@@ -224,7 +232,9 @@ def vs_job(j, r, glsl=''):
         for x in ins:
             u = x['usage']
             if u == 'POSITION': verts += struct.pack('<4f', *pf(grid[gi][0], grid[gi][1], r.uniform(0.2, 0.8), 1.0))
-            elif u == 'COLOR': verts += struct.pack('<I', r.randrange(1 << 32))
+            elif u == 'COLOR':
+                c = r.randrange(1 << 32)   # drawn either way: the main stream stays the same
+                verts += struct.pack('<4f', *pf(*[(gi // 3) * (segn - 0.002) / 2] * 4)) if segn else struct.pack('<I', c)
             elif u == 'BLENDINDICES': verts += bytes(r.randrange(0, bones) for _ in range(4))   # B, G, R, A
             elif u == 'BLENDWEIGHT':
                 w = [r.uniform(0, 1) for _ in range(4)]; s = sum(w); verts += struct.pack('<4f', *pf(*[k / s for k in w]))
@@ -251,16 +261,70 @@ def vs_job(j, r, glsl=''):
             for e in range(c['count']):
                 k = e % 3
                 vsc[c['reg'] + e] = [1.0 if i == k else 0.0 for i in range(3)] + [r.uniform(-0.1, 0.1)]
+    place_points(j, glsl, vsc, pr)
     return elems, off, verts, idx, vsc
 
 
-def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=None, variant='base'):
+PLACE_SALT = 0x5160_1a5e
+
+
+def point_arrays(j, glsl):
+    """the CTAB vector arrays of points that the program reads relatively (c[a0 + n]): Segment* (every entry a
+    point: c[a0], c[a0 + 1]) and Instance* read at their base register only (one vector per instance). An instance
+    array also read at base + 1, ... holds several vectors per instance (DISTTREE: origin and rotation, PARTICLE:
+    origin, velocity and age past the CTAB count) whose meaning the CTAB does not give: it is left as drawn."""
+    rel = set(int(x) for x in re.findall(r'vs_dk_relc\((\d+) \+', glsl))
+    out = []
+    for c in j.get('ctab', []):
+        n = c['name'].lower()
+        if c.get('set') != 'float' or c.get('class', '').startswith('matrix') or c['reg'] not in rel:
+            continue
+        others = {k for k in rel if c['reg'] < k <= c['reg'] + c.get('count', 1)}
+        if n.startswith('segment') or (n.startswith('instance') and not others):
+            out.append(c)
+    return out
+
+
+def segment_points(j, glsl):
+    """the point count of a relatively read Segment* array (lightning bolts), else 0: such a program indexes the
+    points by a COLOR input (BOLT: a0 = floor(COLOR1.x), the strip joins point a0 to a0 + 1), so a D3DCOLOR in
+    [0, 1] keeps every vertex on one point and the strip has no area: that input is FLOAT4, the grid row's index
+    spread over [0, count) (rows 0, 1, 2 -> 0, (count - 0.002) / 2, count - 0.002), the columns the strip's width"""
+    return sum(c.get('count', 1) for c in point_arrays(j, glsl) if c['name'].lower().startswith('segment'))
+
+
+def place_points(j, glsl, vsc, pr):
+    """world-space points the program takes from constants, placed inside the clip volume (S16, the 'vacuous 9'):
+    with every constant uniform in [-1, 1] (or the variant's range) these programs put their geometry behind the
+    near plane or outside the target in every parameter set, so the reference is the clear colour and the comparison
+    proves nothing. Two shapes, set apart from the variant like the matrices:
+    * point arrays (point_arrays): instanced grass and distant LOD (InstanceData: xyz the instance origin, the
+      fraction of xyz a packed normal, w the scale in percent) and lightning bolts (SegmentData: the strip's points).
+      Every entry: x, y = +-0.5 (+- 0.1) so the fraction packs a near-vertical normal, z in [0.9, 0.99] (the identity
+      ModelViewProj halves z: depth about 0.5, room on both sides for the instance's own extent), w = 100 (scale 1).
+    * boxes: a CTAB vector pair Min<X>/Max<X> (precipitation's wrap volume): an ordered box around the view axis,
+      xy in [-0.6, 0.6], z in [0.5, 1.5], w = 1.
+    Its own random stream (seeded by the program hash), so the inputs of every other program stay byte-identical."""
+    for c in point_arrays(j, glsl):
+        for e in range(c.get('count', 1)):
+            vsc[c['reg'] + e] = [pr.choice((-0.5, 0.5)) + pr.uniform(-0.1, 0.1),
+                                 pr.choice((-0.5, 0.5)) + pr.uniform(-0.1, 0.1), pr.uniform(0.9, 0.99), 100.0]
+    ct = [c for c in j.get('ctab', []) if c.get('set') == 'float' and not c.get('class', '').startswith('matrix')]
+    by = {c['name']: c for c in ct}
+    for n, c in by.items():
+        if n.startswith('Min') and 'Max' + n[3:] in by:
+            lo = [pr.uniform(-0.6, -0.4), pr.uniform(-0.6, -0.4), pr.uniform(0.5, 0.6), 1.0]
+            hi = [pr.uniform(0.4, 0.6), pr.uniform(0.4, 0.6), pr.uniform(1.4, 1.5), 1.0]
+            vsc[c['reg']], vsc[by['Max' + n[3:]]['reg']] = lo, hi
+
+
+def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=None, variant='base', pseed=0):
     VARIANT['v'] = VARIANTS[variant]
-    PERTURB['eps'], PERTURB['rng'] = perturb, random.Random(0x5160)
+    PERTURB['eps'], PERTURB['rng'] = perturb, random.Random(0x5160 + pseed)
     os.makedirs(out, exist_ok=True)
     tex = make_textures()
     sdps = sdp if isinstance(sdp, list) else [sdp]
-    man = {'format': FORMAT, 'package': ','.join(os.path.basename(x) for x in sdps), 'size': size, 'perturb': perturb, 'variant': variant,
+    man = {'format': FORMAT, 'package': ','.join(os.path.basename(x) for x in sdps), 'size': size, 'perturb': perturb, 'perturb_seed': pseed, 'variant': variant,
            'captures': {}, 'skipped': []}
     from sdpfuzz import extract, combo_ps
     progs = {}
@@ -297,7 +361,8 @@ def build(sdp, asm, sdp2, out, per=64, size=96, only=None, perturb=0.0, salts=No
                 pair = ('VSH ', vbc, vgl), ('PSH ', bc, glsl)
                 nv, nt = 4, 2
             else:
-                job = vs_job(j, rnd, glsl)
+                salt = (salts or {}).get(h, 0)
+                job = vs_job(j, rnd, glsl, random.Random((int(h, 16) + salt * 0x9E3779B97F4A7C15) ^ PLACE_SALT))
                 if job is None:
                     man['skipped'].append({'name': name, 'hash': h, 'why': 'no POSITION input'}); continue
                 elems, stride, verts, idx, vsc = job
@@ -337,6 +402,7 @@ def main():
     ap.add_argument('--variant', default='base', choices=sorted(VARIANTS), help='parameter set (VARIANTS)')
     ap.add_argument('--salts', help='JSON {hash: salt}: another seed for those programs (permcover.py)')
     ap.add_argument('--perturb', type=float, default=0.0, help='scale every float input by 1 + eps * u (conditioning run)')
+    ap.add_argument('--perturb-seed', type=int, default=0, help='another draw of the perturbation (0: the default one)')
     a = ap.parse_args()
     only = set(a.only.split(',')) if a.only else None
     if a.programs:
@@ -344,7 +410,7 @@ def main():
     if a.shard:
         SHARD['k'], SHARD['n'] = map(int, a.shard.split('/'))
     m = build(a.sdp, a.asm, a.sdp2dksh, a.out, a.per_capture, a.size, only, a.perturb,
-              json.load(open(a.salts)) if a.salts else None, a.variant)
+              json.load(open(a.salts)) if a.salts else None, a.variant, a.perturb_seed)
     print(f"perm: {m['programs']} programs in {len(m['captures'])} captures, {len(m['skipped'])} skipped")
     return 0
 

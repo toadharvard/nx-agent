@@ -8,6 +8,7 @@ from the calling unit's own declaration of that address.
 """
 import collections
 import json
+import os
 import re
 
 import config
@@ -15,9 +16,41 @@ import coffobj
 import a64image
 import conv as convmod
 import runner
+import world
 import libcalls
 
 STUB_ADDR = re.compile(r'^__fnv(?:nx_br)?_([0-9a-f]{8})')
+_C_DECORATED = re.compile(r'^__imp__([A-Za-z_]\w*)@(\d+)$')
+
+
+def import_identity(counts, spellings):
+    """(name, stdcall bytes) of one IAT slot from every `__imp_` spelling units.json gives it (F1-callflow).
+
+    The decomp declares many imports itself as C++ functions (`__imp_?FreeLibrary@@YG...`, or a placeholder
+    `__imp_?IMP_fdf0a8@fnv_004da670@@YG...`) beside the import library's C spelling (`__imp__FreeLibrary@4`). The
+    most common spelling used to win, and a C++ spelling carries no `@N`: the stub popped 0 bytes for a stdcall
+    import, esp stayed off by its arguments, and the oracle's `ret` went to an argument word (wild calls after the
+    import, read as native-early-exit). Now: the name is the most common C spelling (the export), else the C++
+    identifier without `?`; the stack bytes come from a C spelling's `@N` (the chosen name's first), else from a
+    `__stdcall` C++ spelling's parameters (conv.py), else 0 (cdecl, or nothing known)."""
+    c = [(nm, n) for nm, n in counts.items() if not nm[0].startswith('?')]
+    if c:
+        (name, pop), _ = max(c, key=lambda x: (x[1], x[0][1] > 0, x[0][0]))
+    else:
+        (name, pop), _ = max(counts.items(), key=lambda x: (x[1], x[0][0]))
+        name = name.lstrip('?')
+    if pop:
+        return name, pop
+    dec = [(m.group(1), int(m.group(2))) for m in (_C_DECORATED.match(s) for s, _ in spellings) if m]
+    for nm, n in sorted(dec, key=lambda x: x[0] != name):
+        return name, n                         # an explicit `@N`, the chosen name's first (`@0` included)
+    for s, src in spellings:
+        if s.startswith('__imp_?') and '@@YG' in s:
+            try:
+                return name, convmod.Conv(s[len('__imp_'):], src).pop
+            except Exception:  # noqa: BLE001 - a parameter type conv.py cannot place: nothing known
+                continue
+    return name, 0
 MSVC_VFT = re.compile(r'^\?\?_7((?:[A-Za-z_]\w*@)+)@6B@$')
 
 
@@ -76,6 +109,8 @@ class UnitCache:
     def __init__(self, linkdir, workdir, unit_closed=True):
         self.linkdir, self.workdir, self.unit_closed = linkdir, workdir, unit_closed
         self.units = json.load(open(config.DECOMP / 'build/units.json'))['units']
+        if config.ORACLE == 'exe':      # the prepared tree's extents: REC1's recon functions are there, not in pristine
+            self.units = json.load(open(config.TREE / 'build/units.json'))['units']
         self.by_source = {}             # source -> [(index, unit)] (a source can be listed with two flag sets)
         self.def_at = {}
         for i, u in enumerate(self.units):
@@ -107,7 +142,11 @@ class UnitCache:
             entries = [e for e in entries if any(int(f['address'], 16) == addr for f in e[1]['functions'])] or entries
         i, u = entries[0]
         if i not in self._x86:
-            img = coffobj.UnitImage(coffobj.Coff(config.X86OBJ / ('u%d.obj' % i)), u)
+            if config.ORACLE == 'exe':
+                import exeimage
+                img = exeimage.ExeImage(exeimage.load_pe(config.EXE, not os.environ.get('FNVNX_EXE_ANY')), u)
+            else:
+                img = coffobj.UnitImage(coffobj.Coff(config.X86OBJ / ('u%d.obj' % i)), u)
             self._x86[i] = img
             self._pin[i] = img.literal_bytes()
         return self._x86[i]
@@ -173,8 +212,70 @@ class UnitCache:
                         pops.add(int(ins.op_str, 0) if ins.op_str else 0)
                 if len(pops) == 1:
                     got = pops.pop()
+                elif not pops and f['code'][:1] == b'\xe9' and len(f['code']) == 5 and f.get('relocs'):
+                    # (difffuzz-20, flow2) an incremental-link thunk `jmp rel32` (the exe's ILT: 0x00aa0ad0 -> 0x00a81fe0
+                    # -> the real function): the decomp defines it as a `void F(void)` placeholder whose declaration
+                    # popped 0; the stack bytes are those of the function it jumps to, through the chain. Unknown
+                    # when the chain ends in no single `ret N`: the pop is then learned from the run
+                    cache[addr] = None
+                    tgt = [tg for _r, _k, tg, _x in f['relocs'] if tg is not None]
+                    got = self.oracle_ret_pop(tgt[0]) if tgt else None
+                    if got is None:
+                        self.__dict__.setdefault('_thunk_unknown', set()).add(addr)
+                elif not pops and f['code'][:2] == b'\xff\x25':
+                    # an import thunk `jmp dword ptr [__imp_X]` (no ret of its own; F1-callflow: the decomp
+                    # defines the exe's D3DX thunks as `void FUN_00ee6df2(void)` placeholders, whose cdecl
+                    # declaration popped 0 for a stdcall import): the import's own stack bytes
+                    self.import_stubs()
+                    for _rel, _kind, tg, _x in f.get('relocs', ()):
+                        if tg in self._iat:
+                            got = self._imports[(self._iat[tg] - libcalls.IMPORT_BASE) // 16][1]
+                            break
+                    else:
+                        # a slot units.json names only as data (`?g_D3DXVec3TransformNormal@@3P6AXXZA`): no import
+                        # stub, no stack bytes; the declaration's are not evidence either. callee_info answers
+                        # None: the pop is unknown and runner.Pair._learn_pop finds it from the run
+                        self.__dict__.setdefault('_thunk_unknown', set()).add(addr)
         cache[addr] = got
         return got
+
+    def exe_ret_pop(self, addr):
+        """(difffuzz-20, flow2) The `ret N` of a function the tree does not define (a CRT function, a function no
+        unit covers), read from the player's exe: `addr` must be a function start (the byte before it is padding
+        `int3`/`nop` or a `ret`) in a code section, and its `ret N` is the first `ret` found. A
+        `jmp rel32` start is followed (an ILT thunk). None without the exe or when it does not say; the intercepted
+        call then pops what the learner finds (runner.Pair._learn_pop) or 0."""
+        cache = self.__dict__.setdefault('_exepop', {})
+        if addr in cache:
+            return cache[addr]
+        cache[addr] = None
+        pe = coffobj.exe_image()
+        if pe is None:
+            return None
+        import capstone
+        cs = self.__dict__.setdefault('_cs', capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32))
+        a = addr
+        for _ in range(4):
+            sec = pe.section_of(a)
+            if sec is None or not sec[2] & 0x20 or a - sec[0] < 4:      # not code (SCN_CODE), or no byte before
+                return None
+            prev = pe.read(a - 1, 1)
+            code = pe.read(a, 0x400)
+            if not code or prev[0] not in (0xcc, 0x90, 0xc3) and pe.read(a - 3, 1) != b'\xc2':
+                return None
+            if code[0] == 0xe9:
+                a = (a + 5 + int.from_bytes(code[1:5], 'little', signed=True)) & 0xffffffff
+                continue
+            # every `ret` of one function agrees, so the first one in the linear scan is the function's own (a
+            # later one may already belong to the next function, which MSVC pads with `mov edi, edi`, not int3)
+            for ins in cs.disasm(code, a):
+                if ins.mnemonic == 'int3':
+                    break
+                if ins.mnemonic == 'ret':
+                    cache[addr] = int(ins.op_str, 0) if ins.op_str else 0
+                    break
+            return cache[addr]
+        return None
 
     def providers(self):
         """{native name: original address} of the link's provider rows (addrmap kind F, `provider: ...`): the CRT
@@ -258,6 +359,8 @@ class UnitCache:
         def info(addr):
             cv = conv_of(addr)
             pop = self.oracle_ret_pop(addr)
+            if addr in getattr(self, '_thunk_unknown', ()):
+                return None
             if cv is None:
                 return (pop, 'int') if pop is not None else None
             kind = 'int'
@@ -279,6 +382,7 @@ class UnitCache:
                         got = None
                 self._callee[key] = got
             return self._callee[key]
+        info.exe_pop = self.exe_ret_pop
         info.conv = conv_of
         info.caller_conv = caller_conv_of
         return info
@@ -369,6 +473,7 @@ class UnitCache:
         m = self.vt_model()
         if m is None:
             return
+        t.exe_vfts = m.exe.vft.keys()        # every RTTI vftable of the exe (runner: destructor vptr words)
         import vtmodel
         cands = {}
         for lab, cls in vtmodel.arg_classes(cv).items():
@@ -401,18 +506,20 @@ class UnitCache:
         common); the slots are pinned to x86 import stubs (iat_pins)."""
         if self._imports is None:
             names = collections.defaultdict(collections.Counter)
+            spell = collections.defaultdict(list)          # slot -> [(decorated spelling, unit source)]
             for u in self.units:
                 for n, a in u['symbols'].items():
                     if n.startswith('__imp_'):
                         ad = int(a, 16)
                         if 0x00fdf000 <= ad < 0x00fe0000:
                             names[ad][libcalls.import_name(n)] += 1
+                            spell[ad].append((n, u['source']))
             self._iat = {}
             self._imports = {}
             for k, ad in enumerate(sorted(names)):
                 if k >= libcalls.IMPORT_MAX:
                     break
-                nm = names[ad].most_common(1)[0][0]
+                nm = import_identity(names[ad], spell[ad])
                 self._imports[k] = nm
                 self._iat[ad] = libcalls.IMPORT_BASE + 16 * k
                 runner.IMPORTS[libcalls.import_id(nm[0])] = nm[0]
@@ -614,4 +721,76 @@ class UnitCache:
         pin.update(self.pinned(source, orig_addr))
         for v, b in getattr(t, 'vt_pins', {}).items():
             pin[v] = b               # the exe's slot words win over a unit's recovered copy of the vftable
-        return runner.Pair(t, pin), t
+        p = runner.Pair(t, pin)
+        if t.custom_cc:
+            self.calibrate_custom(p, t)
+        return p, t
+
+    def calibrate_custom(self, pair, t):
+        """calibrate_custom (module function) with the data-window globals the oracle function refers to."""
+        fn = self.x86_unit(t.source, t.orig_addr).funcs[t.orig_addr]
+        pinned = set(pair.pinned)
+        globals_ = sorted({tg for _, k, tg, _ in fn['relocs'] if tg is not None and
+                           world.WINDOW[0] <= tg < world.WINDOW[1] and tg not in pinned})
+        calibrate_custom(pair, t, globals_)
+
+
+CALIB_CASES = 8
+CALIB_MAX = 120
+
+
+def calibrate_custom(pair, t, globals_=()):
+    """Which declared parameter each custom register carries (difffuzz-20, F1b). MSVC's whole-program
+    convention does not pass them in declared order: 0x00d58d40 (base, index) takes the index in eax, 0x00e5b130
+    (object, flags) the object in ecx and the flags in eax, so the declared-order pairing gave the oracle the
+    other argument and the records read as oracle-only near-null faults or other results. Every injective
+    pairing of the custom registers with the register-eligible parameters runs the same CALIB_CASES fresh cases
+    (fixed seed); a pairing other than the declared order is kept only when it leaves at most one case with a
+    divergence and does better than the declared order (a weaker lead is no evidence: a register read after
+    the entry path, or another difference, spoils every pairing). Nothing of the case or the native side
+    changes, and what the runs learned (followed code, pops) is dropped. t.custom_calib records {pairing:
+    score} (a pruned pairing scores below the bar)."""
+    import itertools
+    import fuzz
+    cv = t.conv
+    regs = list(getattr(cv, 'custom_regs', None) or t.custom_cc)
+    elig = cv.register_eligible()
+    if not regs or len(elig) < len(regs):
+        return
+    cands = list(itertools.permutations(elig, len(regs)))
+    if len(cands) < 2 or len(cands) > CALIB_MAX:
+        return
+    gen = fuzz.Gen(t, globals_, t.orig_addr ^ 0x5ca1ab1e)
+    cases = [gen.fresh() for _ in range(CALIB_CASES)]
+    saved = (dict(t.x86_code), dict(pair.pinned), dict(pair.pops), set(pair.pops_tried), pair.adapted)
+    declared = cands[0]                     # permutations() starts with the declared order
+    scores = {}
+    need = CALIB_CASES - 1
+    for cand in cands:
+        cv.with_registers(regs, dict(zip(cand, regs)))
+        n = bad = 0
+        for c in cases:
+            try:
+                _, _, d = pair.run(c)
+            except Exception:  # noqa: BLE001
+                d = True
+            n += not d
+            bad += bool(d)
+            if cand != declared and bad > CALIB_CASES - need:
+                break                       # cannot reach the bar any more
+        scores[cand] = n
+        if cand == declared:
+            if n == CALIB_CASES:
+                break                       # the declared order agrees on every case
+            need = max(need, n + 1)
+    best = max(scores, key=lambda c: (scores[c], c == declared))
+    if best != declared and scores[best] < need:
+        best = declared
+    cv.with_registers(regs, dict(zip(best, regs)))
+    t.x86_code.clear(); t.x86_code.update(saved[0])
+    pair.pinned.clear(); pair.pinned.update(saved[1])
+    pair.pops.clear(); pair.pops.update(saved[2])
+    pair.pops_tried = saved[3]; pair.adapted = saved[4]
+    pair.xe = pair.ae = None
+    t.custom_cc = list(cv.custom)
+    t.custom_calib = {','.join('%s=%s' % (r, lab) for lab, r in zip(c, regs)): s for c, s in scores.items()}
