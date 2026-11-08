@@ -401,12 +401,35 @@ class UnitCache:
                         got = convmod.Conv(refs[addr], source)
                     except Exception:  # noqa: BLE001
                         got = None
+                    if got is None:
+                        got = self._c_bool_decl(source, refs[addr])
                 self._callee[key] = got
             return self._callee[key]
         info.exe_pop = self.exe_ret_pop
         info.conv = conv_of
         info.caller_conv = caller_conv_of
         return info
+
+    def _c_bool_decl(self, source, name):
+        """(R4 flow) A C-linkage name (`_FUN_00401500`) carries no types, so the calling unit's declaration of the callee
+        is unknown and its bool result was not 0/1 on the oracle (MSVC tests al, GCC bit 0): read the declaration from
+        the unit's prepared source, `extern "C" bool __cdecl FUN_00401500();`. Returns a conv for `bool f(void)`
+        (only its result is used for the caller's side of a canned result), else None."""
+        if not name.startswith('_') or name.startswith('?'):
+            return None
+        ident = name[1:].split('@')[0]
+        cache = self.__dict__.setdefault('_cbool', {})
+        if source not in cache:
+            try:
+                cache[source] = open(str(config.TREE / source), encoding='utf-8', errors='replace').read()
+            except OSError:
+                cache[source] = ''
+        if not re.search(r'extern\s+"C"\s+bool\s+(?:__\w+\s+)?%s\s*\(' % re.escape(ident), cache[source]):
+            return None
+        try:
+            return convmod.Conv('?%s@@YA_NXZ' % ident, source)
+        except Exception:  # noqa: BLE001
+            return None
 
     def target(self, source, orig_addr):
         xu = self.x86_unit(source, orig_addr)
