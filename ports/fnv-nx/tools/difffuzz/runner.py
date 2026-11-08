@@ -927,6 +927,10 @@ class Pair:
                     vs = self.vslots_run(case, rx, ra)
                     if vs:
                         d = dict(d, vslot=vs)
+                    else:
+                        vn = self.vslot_entered(case, rx, ra)
+                        if vn:
+                            d = dict(d, vslot_native=vn)
                     return rx, ra, d
                 d = dict(d, index=0)
             else:
@@ -1141,6 +1145,39 @@ class Pair:
                     ks = [k for k in (j - 1, j) if 0 <= k < len(slots) and slots[k] in ran and slots[k] != ta]
                     if len(ks) == 1:
                         return dict(vft='%08x' % v, native_slot=j, exe_slot=ks[0], native='%08x' % ta,
+                                    exe='%08x' % slots[ks[0]])
+        return None
+
+    def vslot_entered(self, case, rx, ra):
+        """(bh_C, 0x00b004e0) A call-count where the oracle made no call: a virtual call through a planted vftable
+        ran the exe's slot function as code on the oracle (no call event), and the native entered, through the same
+        slot of its copy of the vftable, a different function of the unit (it made the extra calls). The native
+        vtable's slot holds another function than the exe's (D26 / vtables fix class: CompressedArchiveFile's slot 8
+        is 0x00afc060 in the exe, BSFile::Open 0x00aff300 natively), not a function the native inlined. Returns the
+        same dict as vslot_native, or None."""
+        t = self.target
+        ent = getattr(t.image, 'entries', {}) or {}
+        entered = {o: a for a, o in ent.items() if a in ra.blocks and o != t.orig_addr}
+        if not entered:
+            return None
+        pins = getattr(t, 'vt_pins', {}) or {}
+        for v in sorted(set(case.vptrs.values())):
+            b = pins.get(v) or b''
+            slots = list(struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4]))
+            ap = (getattr(t, 'vt_ap', {}) or {}).get(v)
+            if not slots or ap is None:
+                continue
+            for base, m in (getattr(t, 'vt_mem', {}) or {}).items():
+                if not base <= ap < base + len(m):
+                    continue
+                words = struct.unpack('<%dI' % ((len(m) - (ap - base)) // 4), m[ap - base:])
+                for j, w in enumerate(words[:len(slots) + 2]):
+                    o = ent.get(w)
+                    if o is None or o not in entered:
+                        continue
+                    ks = [k for k in (j - 1, j) if 0 <= k < len(slots) and slots[k] in rx.blocks and slots[k] != o]
+                    if len(ks) == 1:
+                        return dict(vft='%08x' % v, native_slot=j, exe_slot=ks[0], native='%08x' % o,
                                     exe='%08x' % slots[ks[0]])
         return None
 

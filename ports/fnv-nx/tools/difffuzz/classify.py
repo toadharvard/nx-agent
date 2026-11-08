@@ -798,7 +798,7 @@ def hint(pair, target, case, div, fn, max_steps):
             any(s.get('shift') == -1 and (k == 'call-count' or s.get('ran')) for s in div.get('vslot') or []):
         # the native's extra call is planted slot k, the oracle ran slot k+1 (unit code) for real (Pair.vslots_run)
         h['cause'] = 'vslot-shift'; return h
-    if k == 'call-target' and div.get('vslot_native'):
+    if k in ('call-target', 'call-count') and div.get('vslot_native'):
         # the native's vtable slot calls another exe function than the exe's vftable slot (runner.Pair.vslot_native)
         h['cause'] = 'native-vslot-differs'; return h
     if k == 'call-target' and div.get('vcall') == 'planted' and div.get('arm_vcall') == 'planted':
