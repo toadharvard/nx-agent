@@ -106,6 +106,9 @@ job_gamedata
 [ -n "$GAME_EXE" ] && { ARGS+=(BOOT_IMAGE="$GAME_EXE"); rm -rf "$F/build/boot/synth"; }   # no stale synth.exe in the publish
 # S5-boot's initializer generator (startup/tools/mkxcgen.py): the exe's straight-line __xc initializers become natives
 [ -n "$GAME_EXE" ] && export XCGEN_EXE="$GAME_EXE"
+# the player's exe for every link tool that reads FNVNX_EXE (thisadj's secondary-base entries, exevft, bodies), as
+# link_job.sh does: BOOT_IMAGE alone reached only resolve's --exe (full1 0540aff0: no __fnvnx_msvc_ binding at all)
+if [ -n "$GAME_EXE" ]; then export FNVNX_EXE="$GAME_EXE"; else unset FNVNX_EXE; fi
 log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; boot image: $NOTE_EXE"
 
 # 4. Guest, emulated boot, host, package on that link (the link stage stays cached: same inputs).
@@ -121,6 +124,10 @@ if [ -z "$TREE" ] || [ -z "$OBJS" ]; then
 	KEEP=(); for a in "${ARGS[@]}"; do case "$a" in PREPARED=*|OBJECTS=*) ;; *) KEEP+=("$a") ;; esac; done
 	ARGS=("${KEEP[@]}")
 fi
+# the link's compile cache (T1, tools/link/objcache.py): $FARM_HOME/linkobj, seeded from the artifacts repository's
+# linkobj/cache when this machine has (almost) none, so a fresh farm's first link is not cold (LINKCACHE=0: neither)
+export FNVNX_LINK_OBJCACHE=${FNVNX_LINK_OBJCACHE:-$FARM_HOME/linkobj}
+[ "${LINKCACHE:-1}" = 1 ] && { bash "$HERE/linkcache.sh" seed "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true; }
 # shellcheck disable=SC2086
 make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
 	${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
@@ -166,6 +173,11 @@ print(int(sum(v for k, v in m.items() if k.startswith("link_objcache_") and k.en
 	fi
 fi
 # step-4a-end
+# the cache back to the artifacts repository after a link that compiled something new (LINKCACHE_PUBLISH=0: not;
+# quick_job keeps it local like its other caches); unchanged caches are not pushed
+if [ "${LINKCACHE:-1}" = 1 ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ] && [ -f "$F/build/link/out/aliases.ld" ]; then
+	LINKCACHE_NOTE="full $C12" bash "$HERE/linkcache.sh" publish "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
+fi
 
 # 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
 # known faults (docs/TOOLCHAIN.md section 18), so the frontier beyond them is published next to the raw boot's
@@ -269,6 +281,11 @@ fi
 	fi
 } >> "$REPORT"
 if [ -n "$NOTE_LINKEQ" ]; then echo "- incremental link check (LINKEQ): $NOTE_LINKEQ" >> "$REPORT"; fi
+# 5c. The prepared tree as t/<commit12> when no prepare farm published one (the fuzz farms fetch it for the link
+# commit; T1), before link/<commit12>, so a fuzz farm that sees the link finds its tree. Never fails the job.
+if [ $INPUTS = 1 ]; then publish_tree "$F/build" || NOTE_TREEPUB="publish_tree exited $?"; else NOTE_TREEPUB="not published (no tree or no objects)"; fi
+echo "- prepared tree: $NOTE_TREEPUB" >> "$REPORT"
+log "prepared tree: $NOTE_TREEPUB"
 if [ $INPUTS = 1 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
 echo "- link outputs: $NOTE_PUB" >> "$REPORT"
 # 6. The device package (NX1): fnv.nro + the SD tree on the private branch nro/<commit12>.

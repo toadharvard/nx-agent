@@ -44,13 +44,17 @@
 #   FARM_GAME       a game install (FalloutNV.exe, Data/, Fallout_default.ini), mounted in place at the guest's
 #                   sdmc:/switch/fnv (emu_guest.py --game, tests/s5/datapath.py); its FalloutNV.exe is the default image.
 #                   Without it the image alone is copied to sdmc:/switch/fnv. Never inside the repository.
+#   FNVNX_STUB_NULLDEV  1: the stub boot passes --stub-nulldev (CreateDevice succeeds headless without a GPU backend;
+#                   toolchain/game/native_device.cpp); a measurement mode for stub boots, never the product
 #   EMU_EXTRA       extra emu_guest.py arguments for every boot (word-split; e.g. --trace-fn ... --trace-out ...)
 #   EMU_PY          the emulator script (default tests/s5/emu_guest.py; S18: tools/scenario/emu_scenario.py, a wrapper
 #                   that takes the same arguments plus its own --scenario ...)
 #   FARM_PROFILE    a profile dir (Documents/..., AppData/...; tools/lockstep/profile.py) copied to the guest's
 #                   sdmc:/switch/fnv/user before each boot, so the first-run profile is not made (lockstep: same inputs)
 #   FARM_FAULTS     the stub boot's fault table (default tests/s5/known_faults.txt)
-#   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 6000000000)
+#   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 200000000, as
+#                   S5's local boots: the timeout's SIGTERM waits for the running unicorn slice, and with 6e9 a boot
+#                   ran 22 min past its timeout)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
 set -euo pipefail
 COMMIT=${1:?commit}; OUT=${2:?out dir}; IMAGE=${3:-${FNVNX_IMAGE:-}}
@@ -69,7 +73,8 @@ fi
 ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
 C12=${COMMIT:0:12}
 BOOTS=${FARM_BOOTS:-raw slots stub}
-EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-6000000000}
+EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-200000000}
+NULLDEV_ARGS=(); [ "${FNVNX_STUB_NULLDEV:-0}" = 1 ] && NULLDEV_ARGS=(--stub-nulldev)
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 # The real install by default (orchestrator: every farm boots on the real Data/): when no FARM_GAME is given and the
@@ -214,7 +219,8 @@ for tag in $BOOTS; do
   case "$tag" in
     raw) boot raw ;;
     slots) boot slots --exe-vtables "${INJECT[@]}" ;;
-    stub) boot stub --stub-faults "${FARM_FAULTS:-$HERE/known_faults.txt}" "${INJECT[@]}" ;;
+    stub) boot stub --stub-faults "${FARM_FAULTS:-$HERE/known_faults.txt}" "${INJECT[@]}" \
+            "${NULLDEV_ARGS[@]}" ;;
     *) echo "farm_boot: unknown boot '$tag' (FARM_BOOTS: raw slots stub)" >&2; exit 1 ;;
   esac
 done

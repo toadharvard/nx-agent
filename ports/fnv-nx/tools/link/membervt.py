@@ -43,7 +43,7 @@ def _reg(cs, r):
 CTOR_NAME = re.compile(r'_ZN.*C[12]E.*|__fnv_[0-9a-f]{8}_C[12]')
 
 
-def vptr_stores(obj, name, is_ctor=None):
+def vptr_stores(obj, name, is_ctor=None, order=None):
     """obj: vtables.Obj; name: a function symbol it defines. -> {offset: event} (module doc), {} when the symbol is
     not a defined function of a code section or capstone is missing. is_ctor(callee) tells a constructor call from
     any other call with this + d (a method of the member: it constructs nothing, and must not hide the vptr stored
@@ -79,6 +79,8 @@ def vptr_stores(obj, name, is_ctor=None):
             if mn == 'bl' and rt == R_CALL26 and sym and st.get(0, ('',))[0] == 'this' and st[0][1] > 0 \
                     and is_ctor(sym):
                 got[st[0][1]] = ('ctor', sym)
+                if order is not None:
+                    order.append((st[0][1], got[st[0][1]]))
             for r in list(st):
                 if isinstance(r, int) and r <= 18:
                     del st[r]
@@ -90,6 +92,8 @@ def vptr_stores(obj, name, is_ctor=None):
             s, b = st.get(_reg(cs, ops[0].reg)), st.get(_reg(cs, ops[1].mem.base))
             if s and s[0] == 'vt' and b and b[0] == 'this' and not ins.writeback:
                 got[b[1] + ops[1].mem.disp] = s
+                if order is not None:
+                    order.append((b[1] + ops[1].mem.disp, s))
             continue
         if mn == 'stp' and len(ops) == 3 and ops[2].type == ca.ARM64_OP_MEM and \
                 (cs.reg_name(ops[0].reg) or '').startswith('w'):
@@ -99,6 +103,8 @@ def vptr_stores(obj, name, is_ctor=None):
                     s = st.get(_reg(cs, ops[k].reg))
                     if s and s[0] == 'vt':
                         got[b[1] + ops[2].mem.disp + 4 * k] = s
+                        if order is not None:
+                            order.append((b[1] + ops[2].mem.disp + 4 * k, s))
             if ins.writeback:
                 st.pop(_reg(cs, ops[2].mem.base), None)
             continue

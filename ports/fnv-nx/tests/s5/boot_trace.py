@@ -40,6 +40,7 @@ Our own code; it reads logs and names only addresses.
 import argparse
 import collections
 import json
+import os
 import re
 import sys
 
@@ -404,6 +405,12 @@ def fmt_call(c, side):
 
 
 def cmd_compare(a):
+    # T1: a side with no trace is an error that names it, not a traceback (bt1 0e2a4b160f9e: the guest wrote none)
+    for side, tp in (("guest", a.guest), ("wine", a.wine)):
+        if not os.path.isfile(tp) or os.path.getsize(tp) == 0:
+            print(f"compare: no {side} trace ({tp} {'is empty' if os.path.isfile(tp) else 'does not exist'})",
+                  file=sys.stderr)
+            return 2
     _, g_order = read_log(a.guest, "guest")
     _, w_order = read_log(a.wine, "wine")
     g, w = main_thread(g_order), main_thread(w_order)
@@ -512,7 +519,9 @@ def cmd_diff(a):
     a.guest, a.wine = a.guest_tsv, a.ref_tsv
     a.resync, a.context = 64, 8
     out = a.json
-    cmd_compare(a)
+    rc = cmd_compare(a)
+    if rc:
+        return rc
     if out:
         r = json.load(open(out))
         return 1 if r.get("first") else 0

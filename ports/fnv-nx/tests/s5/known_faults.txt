@@ -70,6 +70,10 @@ _ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb standin  # 0x00aa78a0 MemoryHeap's constr
 _ZN13HashTableBase14InsertOrUpdateEjj standin  # 0x00b57ea0: HashTableBase is a call-only declaration in the
                       # exe's slot order (Reserved0 at 0); its boot receivers are native D22 maps (D1/D0 at 0/1), so
                       # BucketIndex ran D0. standins.c dispatches exe slot k at k+1 (S1-refs: D22 for call-only)
+_ZN8NiTMap_S9RemoveKeyEj standin  # 0x00405430: NiTMap_S is a call-only declaration in the exe's slot order (v0 at 0,
+                      # KeyToHashIndex 1); its receiver (TESForm's map 0x011c54c0, exe vftable 0x0101ca78) is the native
+                      # NiTPointerMap with D1/D0 at 0/1, so slot 1 ran D0 and the bucket index faulted: the last skipped
+                      # initializer, 0x00f4ad10. standins.c dispatches exe slot k at k+1 (S1-rules: D26 (b))
 _Z12FUN_00406d50z standin  # 0x00406d50 strcat_s(dst, size, src), declared `(...)` and defined nowhere: WinMain's INI paths
                       # stayed empty, FalloutPrefs.ini was never read, sD3DDevice was "" and the device check sent the
                       # game to the launcher (ShellExecute, WinMain returns 0) (standins.c; S1-refs)

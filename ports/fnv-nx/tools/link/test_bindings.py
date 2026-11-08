@@ -112,11 +112,14 @@ SRC = {
                  'void FUN_00aa1460(void *, unsigned) {}\n',
     # S13 J-0114: a unit-local namespaced copy of a class binds like the global class (by address, else by the
     # native definition of the global name)
-    'src/ns.cpp': 'namespace fnv_00406400 { struct NS { int a; int get() const; };\n'
+    'src/ns.cpp': 'template <class T> struct PL { T *p; ~PL(); };\n'
+                  'namespace fnv_00406400 { struct NS { int a; int get() const; };\n'
                   'struct NT { int b; int peek() const; };\n'
-                  'int use_ns(NS *p, NT *q) { return p->get() + q->peek(); } }\n',
+                  'int use_ns(NS *p, NT *q) { return p->get() + q->peek(); }\n'
+                  'void drop_pl(PL<NT*> *x) { x->~PL(); } }\n',
     'src/nsg.cpp': 'struct NS { int a; int get() const; };\nint NS::get() const { return a; }\n'
-                   'struct NT { int b; int peek() const; };\nint NT::peek() const { return b; }\n',
+                   'struct NT { int b; int peek() const; };\nint NT::peek() const { return b; }\n'
+                   'template <class T> struct PL { T *p; ~PL() { p = 0; } };\ntemplate struct PL<NT*>;\n',
     # J-0108: a class's own operator new / delete that nothing defines -> the game's allocator
     'src/cd.cpp': 'struct CD { virtual ~CD(); int x; static void *operator new(unsigned long); '
                   'static void operator delete(void *); static void operator delete[](void *); };\n'
@@ -129,6 +132,10 @@ SRC = {
                  'void call_x(FUN_00403000_s1b *p) { p->FUN_00403000(1); }\n',
     'src/z.cpp': 'void FUN_00404000(int) {}\n',                                   # not patched: keeps its name
     'src/c2.cpp': 'extern "C" void FUN_00fdf008(void *);\nvoid call_iat(void *p) { FUN_00fdf008(p); }\n',
+    # S2 s2d-010 item: an import declared without extern "C" (C++-mangled), the slot's api has no exports.cpp entry
+    # (a platform module defines it under its C name): the reference binds to the api's C name
+    'src/d3.cpp': 'void *D3DXVec3Normalize(void *, const void *);\n'
+                  'void *call_vn(void *o, const void *v) { return D3DXVec3Normalize(o, v); }\n',
     'src/q1.cpp': 'bool FUN_00405000(void *, int, void *p2) { return p2 != 0; }\n',
     'src/q2.cpp': 'bool FUN_00405000(void *);\nbool call_q(void *p) { return FUN_00405000(p); }\n',
     'src/s1.cpp': 'int g_hdr = 3;\nint get_hdr1() { return g_hdr; }\n',             # STATIC1 copies (-O2)
@@ -170,6 +177,8 @@ UNITS = {'units': [
      'symbols': {'__imp__D3DXMatrixRotationYawPitchRoll@16': '0x00fdf100',
                  '?g_D3DXVec3TransformNormal@@3UImportEntry@@A': '0x00fdf104', '?g_x@@3HA': '0x01000900',
                  '_FUN_00ee6df2': '0x00ee6df2', '_FUN_00ee7000': '0x00ee7000'}},
+    {'source': 'src/d3.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x401380, '?call_vn@@YAPAXPAXPBX@Z')],
+     'symbols': {'__imp_?D3DXVec3Normalize@@YGPAXPAXPBX@Z': '0x00fdf108'}},
     {'source': 'src/a.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [
         F(0x401000, '?use_crt@@YAHPAD@Z'), F(0x401010, '?get_a@@YAHXZ'), F(0x401020, '?get_def@@YAHXZ')],
      'symbols': {'_FUN_00ec1000': '0x00ec1000', '_FUN_00ec2000': '0x00ec2000',
@@ -348,6 +357,9 @@ def main():
         r_ = refs.get(('src/ns.cpp', '_ZNK12fnv_004064002NT4peekEv'), [''] * 6)
         check(r_[2] == 'ns-alias' and r_[5] == '_ZNK2NT4peekEv', 'namespaced copy -> the native global definition: %s'
               % r_)
+        r_ = refs.get(('src/ns.cpp', '_ZN2PLIPN12fnv_004064002NTEED1Ev'), [''] * 6)
+        check(r_[2] == 'ns-alias' and r_[5] == '_ZN2PLIP2NTED1Ev', 'template over a pointer to a namespaced copy -> the '
+              'global instantiation\'s D1: %s' % r_)
         for name, want in (('_ZN2CDnwEm', '__fnv_00402000'), ('_ZN2CDdlEPv', '__fnv_00402030'),
                            ('_ZN2CDdaEPv', '__fnv_00402030')):
             r_ = refs.get(('src/cd.cpp', name), [''] * 6)
@@ -368,6 +380,9 @@ def main():
                                                                         [l for l in req.splitlines() if 'Lazy' in l]))
         for a_, sym in ((0xee6e04, 'D3DXMatrixRotationYawPitchRoll'), (0xee6df2, 'D3DXVec3TransformNormal')):
             check(rows.get(a_, [''] * 4)[1:4] == ['F', sym, sym], 'import thunk %x -> %s: %s' % (a_, sym, rows.get(a_)))
+        r_ = refs.get(('src/d3.cpp', '_Z17D3DXVec3NormalizePvPKv'), [''] * 6)
+        check(r_[2] == 'import' and r_[5] == 'D3DXVec3Normalize',
+              'a C++-declared import with no export entry binds to the api\'s C name: %s' % (r_,))
         check(refs.get(('src/b.cpp', 'FUN_00ee6df2'), [''] * 6)[5] == 'D3DXVec3TransformNormal',
               'a call of the thunk goes to the import: %s' % refs.get(('src/b.cpp', 'FUN_00ee6df2')))
         check(rows.get(0xee7000, [''] * 3)[1:3] == ['F', '__fnv_00ee7000'], '6-byte getter stays native')

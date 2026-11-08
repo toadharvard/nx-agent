@@ -76,7 +76,9 @@ in this order (first that applies):
 5b. `crt-rule` - a runtime member the C++ library defines by its contract, not by the decomp: the MSVC STL's
    throwers `C::_Xlen()` / `C::_Xran()` / `C::_Xinvalid_argument()` of the decomp's string and vector copies (a stub
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
-   placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing).
+   placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing), and
+   the decomp's `basic_streambuf` copies' `_Lock()` / `_Unlock()` (CRT_MUTEX: `this + 4` is the std::_Mutex, S4's
+   fnvnx_mutex_lock / unlock).
    After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
 
@@ -149,6 +151,37 @@ def load_native_names(addrmap_tsv):
             f = line.rstrip('\n').split('\t')
             if not line.startswith('#') and len(f) >= 4 and f[1] == 'F' and f[3].startswith('_Z'):
                 res[int(f[0], 16)] = f[3]
+    return res
+
+
+CRT_SYMBOLS_TSV = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'platform',
+                                                'crt', 'crt_symbols.tsv'))
+
+
+def load_provider_params(crt_symbols_tsv=None):
+    """platform/crt/crt_symbols.tsv -> {address: parameter count} of the rows whose identification (S4's reading of the
+    exe function) spells a C++ parameter list: `std::_Lockit::_Lockit(int)` -> 1 (the object is not counted),
+    `std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)` -> 2, `std::locale::_Getgloballocale() [note]` -> 0.
+    A trailing `[note]` is dropped first; a row with no parameter list is not listed."""
+    res = {}
+    path = crt_symbols_tsv or CRT_SYMBOLS_TSV
+    if not os.path.exists(path):
+        return res
+    for line in open(path, encoding='utf-8', errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if line.startswith('#') or len(f) < 7 or not f[0].startswith('0x'):
+            continue
+        m = re.search(r'\((.*)\)\s*(?:const)?\s*$', re.sub(r'\s*\[.*\]\s*$', '', f[2]))
+        if not m:
+            continue
+        s, depth, n = m.group(1).strip(), 0, 0
+        if s and s != 'void':
+            n = 1
+            for ch in s:
+                depth += ch in '<('
+                depth -= ch in '>)'
+                n += ch == ',' and depth == 0
+        res[int(f[0], 16)] = n
     return res
 
 
@@ -359,7 +392,7 @@ def pristine_bodies(objdir, nunits, wanted_tokens):
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:   # a damaged object must not stop the step
             continue
         for name, si in c.defs.items():
@@ -587,8 +620,17 @@ CRT_THROW = {'_Xlen': ('_ZSt20__throw_length_errorPKc', '%s too long'),
              '_Xinvalid_argument': ('_ZSt24__throw_invalid_argumentPKc', 'invalid %s argument')}
 
 
+# MSVC's basic_streambuf::_Lock() / _Unlock() are inline: `_Mylock._Lock()`, the std::_Mutex member at +4 (after the
+# vptr) whose first word is the critical section pointer. The exe's _Sentry_base constructor 0x00ad2fa0 and its
+# destructor do `add ecx, 4; call 0x00ec3277` / `0x00ec3280` (crt_symbols.tsv: std::_Mutex::_Lock / _Unlock, S4's
+# fnvnx_mutex_lock / fnvnx_mutex_unlock over `void *self` = the _Mutex). The decomp's streambuf copies declare the
+# two members and never define them (their `void* streamLock` is that first word).
+CRT_MUTEX = {'_Lock': 'fnvnx_mutex_lock', '_Unlock': 'fnvnx_mutex_unlock'}
+
+
 def crt_rule(isig):
-    """('throw', libstdc++ thrower, message) / ('ret', None, None) for a name crt-rule defines, else None."""
+    """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('mutex', platform function, 'this + 4') for a
+    name crt-rule defines, else None."""
     if isig.kind != 'func' or len(isig.qual) < 2 or isig.params is None:
         return None
     last = isig.qual[-1]
@@ -599,6 +641,8 @@ def crt_rule(isig):
     if last == 'operator delete' and len(isig.params) == 2 and \
             all(sigs.canon_param(p, 2) == 'void*' for p in isig.params):
         return ('ret', None, None)
+    if last in CRT_MUTEX and not isig.params and re.match(r'basic_streambuf\b', isig.qual[-2]):
+        return ('mutex', CRT_MUTEX[last], 'this + 4')
     return None
 
 
@@ -609,6 +653,7 @@ def crt_pass(rows, itanium):
         k = crt_rule(itanium(r.name)) if r.cls == 'missing' else None
         if k:
             r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
+                           else '%s(%s): the _Mutex member at +4' % (k[1], k[2]) if k[0] == 'mutex'
                            else 'placement delete: ret')
         out.append(r)
     return out
@@ -624,6 +669,8 @@ def emit_crt(rows, itanium):
                 '    .type %s, %%function' % q, q + ':']
         if kind == 'ret':
             out += ['    ret']
+        elif kind == 'mutex':
+            out += ['    add x0, x0, #4', '    b ' + fn]
         else:
             out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]
         out += ['    .size %s, .-%s' % (q, q)]
@@ -846,6 +893,13 @@ def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=
             items.append((k, 'bd', line))
     else:
         items.append((0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}'))
+        for k, r in enumerate(sorted(rows, key=lambda r: r.name)):   # a class template's destructor: instantiated here
+            line = inst_line(itanium(r.name))
+            if line and line not in {it[2] for it in items}:
+                for j, fw in enumerate(inst_fwd(itanium(r.name))):   # a pointee the host does not define
+                    if fw not in {it[2] for it in items}:
+                        items.append((-1 - len(items), 'fwd', fw))
+                items.append((k + 1, 'inst', line))
     # emitted bodies are game code: compile.sh's own flags (layout.game_flags: code generation, FTOI2, S12 order)
     flags = ('-ffunction-sections', '-fdata-sections') + (('-fkeep-inline-functions',) if inline else ())
     obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags, prelude='',
@@ -932,6 +986,149 @@ def load_type_sizes(out):
             if not line.startswith('#') and len(f) >= 3 and f[2].isdigit():
                 res[(f[0], sigs.canon_type(f[1]))].add(int(f[2]))
     return res
+
+
+def inst_line(isig):
+    """`template C<args>::~C();` - the explicit instantiation of the destructor of a class template instantiation
+    over global types (`NiPointer<NiLight>`), None for any other name. The body is the template's own, from the
+    host's headers: what a unit sees where the pointee is complete."""
+    if isig is None or isig.kind != 'func' or isig.params or isig.variant not in ('D1', 'D2') or len(isig.qual) < 2:
+        return None
+    if isig.qual[-1] != '{dtor}' or '<' not in isig.qual[-2] or not isig.qual[-2].endswith('>'):
+        return None
+    if any(UNIT_NS.match(q) or UNIT_NS_ANY.search(q) for q in isig.qual):
+        return None   # a unit-local copy of a class: its own unit hosts it (exe-addr / copy pairs)
+    if any(c in q for q in isig.qual[:-1] for c in '`\'({'):
+        return None
+    base = isig.qual[-2][:isig.qual[-2].index('<')]
+    return 'template %s::~%s();' % ('::'.join(isig.qual[:-1]), base)
+
+
+def inst_pointees(isig):
+    """Class names the template arguments of an inst_line name use only as pointees (`NiTArray<ImageSpaceEffect*,
+    NiTMallocInterface<ImageSpaceEffect*>>`): never as a value, a template argument of its own or a scope. The
+    destructor body does not look inside them, so the host needs a declaration (`struct X;`), not a definition."""
+    if inst_line(isig) is None:
+        return []
+    cls = isig.qual[-2]
+    args = cls[cls.index('<'):]
+    out = []
+    for w in dict.fromkeys(ARG_WORDS.findall(args)):
+        if w in BUILTIN_WORDS or w == cls[:cls.index('<')]:
+            continue
+        occ = list(re.finditer(r'(?<![\w:])%s(?![\w:])' % re.escape(w), args))
+        if occ and len(occ) == len(re.findall(r'\b%s\b' % re.escape(w), args)) and \
+                all(re.match(r'\s*\*', args[m.end():]) and not args[m.end():].lstrip().startswith('::') for m in occ):
+            out.append(w)
+    return out
+
+
+ARG_WORDS = re.compile(r'[A-Za-z_]\w*')
+BUILTIN_WORDS = frozenset('const volatile unsigned signed int long short char bool float double void wchar_t '
+                          'struct class enum'.split())
+
+
+INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+
+
+def include_closure(tree, files):
+    """{file: set of the files it includes, itself included} for tree-relative `files`: quoted includes resolved
+    against the file's directory, include/, src/ and the tree root, else by basename; read once per file."""
+    by_base = collections.defaultdict(list)
+    for base in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(tree, base)):
+            for f in fs:
+                if f.endswith(('.h', '.inl', '.hpp')):
+                    by_base[f].append(os.path.relpath(os.path.join(dp, f), tree))
+    direct = {}
+
+    def inc(rel):
+        if rel not in direct:
+            try:
+                raw = open(os.path.join(tree, rel), encoding='utf-8', errors='replace').read()
+            except OSError:
+                raw = ''
+            res = set()
+            for m in INCLUDE.findall(raw):
+                for cand in (os.path.normpath(os.path.join(os.path.dirname(rel), m)), os.path.join('include', m),
+                             os.path.join('src', m), m):
+                    if os.path.exists(os.path.join(tree, cand)):
+                        res.add(cand)
+                        break
+                else:
+                    res.update(by_base.get(os.path.basename(m), ())[:1])
+            direct[rel] = res
+        return direct[rel]
+    out = {}
+    for f in files:
+        seen, todo = {f}, [f]
+        while todo:
+            for g in inc(todo.pop()):
+                if g not in seen:
+                    seen.add(g)
+                    todo.append(g)
+        out[f] = seen
+    return out
+
+
+def inst_hosts(tree, rows, itanium, unit_sources, found, ref_units, limit=5):
+    """{name: [host units]} for destructors of template instantiations (inst_line) whose template has a body of its
+    own in the tree (`found`: bodycause.tree_bodies for (class, ~class), live only; specializations of other
+    arguments count too, the host's compile decides). A host is a unit whose includes reach that body and a
+    definition of every class the arguments name (the pointee is complete there); the referencing units are left
+    out (they declare the destructor without a body: the pointee is incomplete there)."""
+    import bodycause
+    want, bodyfiles, ptrs = {}, {}, {}
+    for r in rows:
+        isg = itanium(r.name)
+        c = bodycause.key_of(isg)
+        if not inst_line(isg) or not c:
+            continue
+        fl = {f for f, w in found.get((c[0], '~' + c[0]), ()) if w.startswith('live')}
+        if not fl:
+            continue
+        cls = isg.qual[-2]
+        words = [w for w in dict.fromkeys(ARG_WORDS.findall(cls[cls.index('<'):])) if w not in BUILTIN_WORDS and
+                 w != c[0]]
+        want[r.name], bodyfiles[r.name] = words, fl
+        ptrs[r.name] = set(inst_pointees(isg))
+    if not want:
+        return {}
+    alltok = sorted({w for ws in want.values() for w in ws}, key=len, reverse=True)
+    rdef = re.compile(r'\b(?:class|struct)\s+(%s)\b[^;{(]*\{' % '|'.join(map(re.escape, alltok))) if alltok else None
+    files = []
+    for base in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(tree, base)):
+            files += [os.path.relpath(os.path.join(dp, f), tree) for f in fs if f.endswith(('.h', '.inl', '.hpp', '.cpp'))]
+    defs = collections.defaultdict(set)     # word -> files defining a class of that name
+    for f in files:
+        try:
+            raw = open(os.path.join(tree, f), encoding='utf-8', errors='replace').read()
+        except OSError:
+            continue
+        if rdef:
+            for w in set(rdef.findall(raw)):
+                defs[w].add(f)
+    clo = include_closure(tree, sorted(unit_sources))
+    out = {}
+    for n, ws in want.items():
+        rus = set(ref_units.get(n, ()))
+        cand = []
+        for u in sorted(unit_sources):
+            if u in rus:
+                continue
+            reach = clo.get(u, {u})
+            if bodyfiles[n] & reach and all(not defs.get(w) or defs[w] & reach for w in ws if w not in ptrs[n]) and \
+                    any(defs.get(w) for w in ws):   # a pointee needs a declaration only (inst_fwd)
+                cand.append(u)
+        if cand:
+            out[n] = sorted(cand, key=lambda u: (len(clo[u]), u))[:limit]
+    return out
+
+
+def inst_fwd(isig):
+    """`struct X;` for each class inst_pointees names: what the host needs where it does not define X."""
+    return ['struct %s;' % w for w in inst_pointees(isig)]
 
 
 def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
@@ -1108,10 +1305,12 @@ def probe_vcalls(tree, work, host, names, itanium):
     if not items:
         return {}, {n: 'not a nameable member function' for n in names}
     head = os.path.join(work, 'fnvnx_bd_sel.h')   # by -include: GCC's notes naming it drop no probe line
-    if not os.path.exists(head):
-        with open(head + '.tmp', 'w') as f:
+    if not os.path.exists(head):   # probe threads race here: each writes its own temp file (one shared .tmp name
+        import threading           # made the loser's os.replace raise FileNotFoundError: 4 vcall rows of link
+        tmp = '%s.%d.%d.tmp' % (head, os.getpid(), threading.get_ident())   # 97deacd38aec, R2 trap loop)
+        with open(tmp, 'w') as f:
             f.write('#pragma once\n' + VCALL_HEAD + '\n')
-        os.replace(head + '.tmp', head)
+        os.replace(tmp, head)
     obj, alive = vtables.compile_probe(tree, work, host, items, 'bdvc', ('-include', head), prelude='')
     got, why = {}, {}
     alive_k = {k for k, _, _ in alive}
@@ -1163,7 +1362,7 @@ def pristine_externs(objdir, i, code_only=False):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p):
         return set()
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     ext = {s.name for s in c.syms.values() if s.secnum == 0 and s.storage == 2 and s.name.startswith('?')}
     if not code_only:
         return ext
@@ -1195,9 +1394,10 @@ class Pe:
             if flags & IMAGE_SCN_CNT_CODE:
                 self.code.append((self.base + va, roff, rsize))
 
-    def find_unique(self, body, masked):
-        """The one address in a code section whose bytes equal body outside the offsets in masked, else None.
-        Candidates come from a literal search of body's longest unmasked run, then each is compared in full."""
+    def find_all(self, body, masked, limit=None):
+        """Every address in a code section whose bytes equal body outside the offsets in masked (at most limit + 1 of
+        them are looked for; None if the body has no unmasked run of 4 bytes to search by). Candidates come from a
+        literal search of body's longest unmasked run, then each is compared in full."""
         runs, run = [], None   # the unmasked runs [a, b)
         for j in range(len(body) + 1):
             if j < len(body) and j not in masked:
@@ -1219,10 +1419,15 @@ class Pe:
                 start = at - lo
                 if start + len(body) <= end and all(self.data[start + a:start + b] == body[a:b] for a, b in runs):
                     hits.append(va + start - roff)
-                    if len(hits) > 1:
-                        return None
+                    if limit is not None and len(hits) > limit:
+                        return hits
                 at = self.data.find(lit, at + 1, end)
-        return hits[0] if hits else None
+        return hits
+
+    def find_unique(self, body, masked):
+        """The one address in a code section whose bytes equal body outside the offsets in masked, else None."""
+        hits = Pe.find_all(self, body, masked, 1)
+        return hits[0] if hits and len(hits) == 1 else None
 
     def matches(self, va, body, masked):
         """True when the exe's bytes at va equal body outside the offsets in masked."""
@@ -1254,6 +1459,7 @@ class Pe:
 
 
 FUNCLET = ('__catch$', '__unwindfunclet$', '__ehhandler$')   # MSVC labels inside a function's own section
+SEARCH_COPIES = 64  # most identical copies of a body in the exe whose call sites are compared (copy_sites)
 SEARCH_MIN = 16   # bytes: shorter bodies (a jmp thunk, `mov eax, [ecx]; ret`) occur too often to place by content
 
 
@@ -1274,6 +1480,34 @@ def same_shape(body, img):
     return a is not None and a == b
 
 
+def copy_sites(exe, body, rel, copies, wanted):
+    """A body the exe holds several times over (identical code, relocations masked: COMDAT folding left no unique
+    copy to place): the targets of its wanted relocation sites, for the sites where every copy reaches the same
+    address. A site whose copies disagree says nothing about which copy the pristine function is, and is left out.
+    -> [(msvc name, target)] one entry per agreeing site."""
+    import struct
+    out = []
+    for k, (sn, typ) in sorted(rel.items()):
+        if sn not in wanted or typ not in (0x06, 0x14) or k > len(body) - 4:
+            continue
+        addend, = struct.unpack_from('<i' if typ == 0x14 else '<I', body, k)
+        tg = set()
+        for h in copies:
+            img = exe.read(h, len(body))
+            if img is None:
+                tg = None
+                break
+            if typ == 0x14:
+                disp, = struct.unpack_from('<i', img, k)
+                tg.add((h + k + 4 + disp - addend) & 0xffffffff)
+            else:
+                word, = struct.unpack_from('<I', img, k)
+                tg.add((word - addend) & 0xffffffff)
+        if tg and len(tg) == 1:
+            out.append((sn, next(iter(tg))))
+    return out
+
+
 def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     """Original addresses the pristine object of unit i calls the MSVC names in wanted at. Functions are placed
     by units.json, then by following REL32 calls from placed functions (a COMDAT units.json does not list, such as
@@ -1282,7 +1516,8 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     function, the exe's displacement gives the target; at a DIR32 one (the address taken, `push offset f`), the
     exe's word does. search: a function that references a wanted name and was not placed (inlined into its callers
     in the exe, or reached at an address holding other code) is placed where its bytes, relocations masked, occur
-    exactly once in the exe's code (at least SEARCH_MIN bytes: a standalone copy units.json does not list).
+    exactly once in the exe's code (at least SEARCH_MIN bytes: a standalone copy units.json does not list); a body
+    that occurs up to SEARCH_COPIES times gives the sites on which all its copies reach one address (copy_sites).
     loose (exe-data only): a function whose bytes differ from the exe's counts as placed when it is the same
     instruction stream up to constants (same_shape: a variant unit's other stack layout); a word at a relocation
     sits in the same instruction there. A function's catch funclets (`__catch$f$0`, labels in its section) are then
@@ -1293,7 +1528,7 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p) or not wanted:
         return {}
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     funcs = {}   # defined code symbol -> (section, start, body)
     for name, si in c.defs.items():
         sy = c.syms[si]
@@ -1324,6 +1559,11 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
                     a = at_[0] if len(at_) == 1 else None
                 if a is not None:
                     todo.append((fname, a))
+                else:   # several identical copies: the sites all of them agree on
+                    copies = exe.find_all(body, masked, SEARCH_COPIES)
+                    if copies and 2 <= len(copies) <= SEARCH_COPIES:
+                        for sn, t in copy_sites(exe, body, rel, copies, wanted):
+                            out[sn][t] += 1
         if not todo:
             break
         fname, a = todo.pop()
@@ -1377,7 +1617,7 @@ def object_call_seqs(objdir, i):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p):
         return {}
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     funcs = {}
     for name, si in c.defs.items():
         sy = c.syms[si]
@@ -1478,10 +1718,13 @@ def load_synth(out):
     return res
 
 
-def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None):
+def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None,
+             provider_params=None):
     """`exe-addr`: a name still missing (or about to get a synthesized special member) whose MSVC counterpart the
     referencing unit's pristine object calls: bound to the address the exe's call at that site reaches, when every
-    site agrees and the native build defines it with the right kind."""
+    site agrees and the native build defines it with the right kind. provider_params: {address: parameter count} of
+    S4's providers (load_provider_params): a provider's address no unit defines has no MSVC definition to compare, so
+    its identification's parameter count stands for the shape (the provider takes the object first, then these)."""
     exe = Pe(exe_path)
     udata = json.load(open(units_json))['units']
     idx_of = collections.defaultdict(list)
@@ -1523,6 +1766,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             return True   # S4's runtime implements the exe's function there, taking the object (void *self)
         member = bool(rs.member)
         rparams = [p_ for p_ in rs.params if p_ != '...']
+        if a in (providers or {}) and a in (provider_params or {}) and not def_names.get(a):
+            return provider_params[a] == len(rparams)
         for n_ in def_names.get(a, ()):
             d_ = msvc(n_) if n_.startswith('?') else None
             if d_ is None or d_.kind != 'func' or d_.params is None:
@@ -1668,7 +1913,7 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data, members=None, msv
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:   # a damaged object must not stop the step
             continue
         for sy in c.syms.values():
@@ -1689,7 +1934,7 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data, members=None, msv
     if placed_refs is not None:   # referenced by code the exe has (a placed function's relocations)
         for i, ms_ in sorted(by_obj.items()):
             try:
-                c = vslots.Coff(os.path.join(msvc_objs, 'u%d.obj' % i))
+                c = vslots.coff(os.path.join(msvc_objs, 'u%d.obj' % i))
             except Exception:
                 continue
             body = {}   # defined function -> names its code references
@@ -1744,7 +1989,7 @@ def pristine_data_names(objdir, nunits, lasts):
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:
             continue
         for sy in c.syms.values():
@@ -1900,7 +2145,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     exe_vars = set()   # variables placed exe code references whose address exe-data did not find
     if msvc_objs and exe_path:
         rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
-                        load_providers(os.path.join(out, 'addrmap.tsv')))
+                        load_providers(os.path.join(out, 'addrmap.tsv')), load_provider_params())
         # placeholder variables the exe's code addresses: bound to that image address (before decl-data)
         have_ = {r.name for r in rows}
         # declared-only C++ variables (static data members, unit namespaces' globals) the same way, before decl-data
@@ -2022,6 +2267,16 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         vdone = set(vtargets) | (set(failed) - direct) | set(vnotes)
         rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
         tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
+        # a class template's destructor no object instantiates (the pointee is incomplete where it is referenced): the
+        # template's own body, explicitly instantiated in a unit that names the arguments (inst_hosts)
+        inst_rows = [r for r in rest if inst_line(itanium(r.name))]
+        if inst_rows:
+            import bodycause
+            want_ = {(k[0], '~' + k[0]) for k in (bodycause.key_of(itanium(r.name)) for r in inst_rows) if k and k[0]}
+            ih = inst_hosts(tree, inst_rows, itanium, set(unit_names), bodycause.tree_bodies(tree, want_),
+                            {r.name: r.units.split(',') for r in inst_rows})
+            for n_, hs_ in ih.items():
+                tin[n_] = hs_ + [h_ for h_ in tin.get(n_, []) if h_ not in hs_]
         # tree-inline's pairings across units pass the layout gate: names MSVC calls directly, constructors and
         # destructors (found since the search spells them by the class name), and every copy-key rename
         strict = direct | {n for n in tin if itanium(n).variant}
@@ -2033,7 +2288,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
             except Exception as e:
                 return h, k, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
         tdone = {}
-        for round_ in range(3):   # a host that does not pair a name: the next host with a body of the class
+        for round_ in range(5):   # a host that does not pair a name: the next host with a body of the class
             tby = collections.defaultdict(list)
             for r in rest:
                 hs = tin.get(r.name, [])

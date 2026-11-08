@@ -217,6 +217,7 @@ void fnvnx_init_locks_dtor(void *self);
 void *fnvnx_locale_init(void);                                         /* locale::_Init -> _Locimp* */
 void *fnvnx_locale_getgloballocale(void);                              /* locale::_Getgloballocale */
 void fnvnx_facet_register(void *facet);                                /* locale::facet::_Facet_Register */
+void fnvnx_facet_incref(void *facet);                                  /* locale::facet::_Incref */
 size_t fnvnx_cpplib_facet_count(void);
 void fnvnx_cpplib_facet_tidy(void);
 void fnvnx_locinfo_ctor(void *self, const void *locname_str);         /* _Locinfo::_Locinfo_ctor(this, const string&) */
@@ -234,6 +235,7 @@ const short *fnvnx_msvc_ctype_table(void);                             /* MSVC "
 void fnvnx_ios_base_addstd(void *ios);                                 /* ios_base::_Addstd */
 void fnvnx_ios_base_dtor(void *ios);                                   /* ios_base::_Ios_base_dtor */
 void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase); /* basic_ostream<char> */
+void fnvnx_basic_ios_init(void *self, void *strbuf, int isstd);        /* basic_ios<char>::init */
 void *fnvnx_fiopen(const char *name, int mode, int prot);              /* std::_Fiopen -> struct _iobuf * */
 
 /* ---- S4b: _CxxThrowException data (MSVC x86 EH tables in the image: absolute 32-bit addresses) */

@@ -78,7 +78,8 @@ _PLACEMENT = None
 
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
 STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
-TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding", "member-vtables")
+TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding", "member-vtables",
+                 "repair-lost-slot-one", "exe-slot-one-d0")
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
 
@@ -171,13 +172,13 @@ def parse_milestones(path):
         if not f:
             continue
         ok = len(f) == 3 and re.fullmatch(r"[a-z][\w-]*", f[0]) and (
-            f[1] == "call" and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
+            f[1] in ("call", "callok", "calltrue") and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
             f[1] == "store" and re.fullmatch(r"\*?0x[0-9a-fA-F]+(\+(0x[0-9a-fA-F]+|\d+))?", f[2]) or
             f[1] == "data" and f[2] in datapath.DATA_MILESTONES)
         if not ok:
-            raise ValueError(f"{path}:{k}: <name> call <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
+            raise ValueError(f"{path}:{k}: <name> call|callok|calltrue <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
                              f"<name> data <{'|'.join(datapath.DATA_MILESTONES)}>")
-        if f[1] == "call" and f[2].startswith("re:"):
+        if f[1].startswith("call") and f[2].startswith("re:"):
             re.compile(f[2][3:])
         out.append(tuple(f))
     return out
@@ -688,7 +689,7 @@ class Emu:
         for line in out.splitlines():
             f = line.split()
             if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats",
-                                                                 "fnvnx_plat_on"):
+                                                                 "fnvnx_plat_on", "fnvnx_stub_nulldev"):
                 self.data_syms[f[2]] = int(f[0], 16)
             if len(f) == 3 and f[1] in "tTwW":
                 a = int(f[0], 16)
@@ -1115,6 +1116,10 @@ class Emu:
                 uc.mem_write(rt(a + off + 4 * k), struct.pack("<I", rt(nat) & 0xFFFFFFFF))
             st["filled"] += len(fills)
         self.extend_short_vtables(uc, objs, V, img, F, rt, st)
+        if getattr(self, "repair_slot_one", False):
+            self.repair_lost_slot_one(uc, objs, V, img, F, rt, link, st)
+        if getattr(self, "exe_slot_one_d0", False):
+            self.exe_slot_one_d0_fix(uc, objs, V, img, F, rt, link, st)
         if getattr(self, "image_minus_one", False):
             self.image_vptr_minus_one(uc, img, F, V, rt, st)
         self.vslot_thisless(uc, objs, V, rt, st)
@@ -1296,6 +1301,71 @@ class Emu:
             return 0x00401000 <= img.read32(a) < 0x00fdf000
         except Exception:
             return False
+
+    def repair_lost_slot_one(self, uc, objs, V, img, F, rt, link, st):
+        """table option repair-lost-slot-one: a link-extended vtable (fnvlink exe_vtable_copies) whose destructor
+        pair resolve had renamed to the address-bound body before exevft.dtor_pos looked for D1/D0 (both slot words
+        name `FUN_<a>`, so no pair is seen): the extension starts at exe slot 2 after the two words, and exe slot 1
+        is in neither layout (_ZTV17SettingPointerMap, 0x010121b4: StringHashTable::HashKey lost, TMapStandIn's
+        hash call ran the destructor). Recognised by word 0 == word 1 and words 2.. matching the exe's slot k (not
+        k - 1); word 1 gets the native of exe slot 1, which makes the table exe order throughout (the layout of the
+        call-only placeholders and of the image vftable). A stand-in for the link fix (dtor_pos on the slot
+        symbols before the renames)."""
+        done = set()
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            if (sym, off) in done or size - off < 12:
+                continue
+            done.add((sym, off))
+            n = min(12, (size - off) // 4)
+            w = [link(x) & 0xFFFFFFFF for x in struct.unpack(f"<{n}I", bytes(uc.mem_read(rt(a + off), 4 * n)))]
+            if not w[0] or w[0] != w[1]:
+                continue
+            ex = img.vtable_slots(exe_vt)
+            if len(ex) < 3 or ex[1] not in F:
+                continue
+            same = sum(1 for k in range(2, min(n, len(ex))) if F.get(ex[k]) == w[k])
+            shifted = sum(1 for k in range(2, min(n, len(ex))) if F.get(ex[k - 1]) == w[k])
+            if same <= shifted:
+                continue
+            uc.mem_write(rt(a + off + 4), struct.pack("<I", rt(F[ex[1]]) & 0xFFFFFFFF))
+            st["slot-one repaired"] += 1
+        print("   repair-lost-slot-one: %d link-extended vtables whose renamed destructor pair hid exe slot 1 get it "
+              "back in slot 1" % st["slot-one repaired"])
+
+    VT_D0_BASE = 0x0EA00000   # D0 thunks of exe_slot_one_d0_fix
+
+    def exe_slot_one_d0_fix(self, uc, objs, V, img, F, rt, link, st):
+        """table option exe-slot-one-d0: a native vtable in the exe's slot order whose slot 1 is NiRefObject::DeleteThis
+        (exe slot 0 the scalar deleting destructor, slot 1 DeleteThis) while native code compiled against a declared
+        virtual destructor (D1/D0 at slots 0/1) runs `delete p` through slot 1: DeleteThis, whose own `delete this`
+        goes through slot 1 again, a tail-call loop that never returns (GraphicsRenderer::Create's failure path,
+        object of _ZTV12FUN_00e754a0, ctor 0x00e754a0 declared by both GraphicsRenderer and FUN_00e754a0). Slot 1
+        gets a D0 thunk (exe slot 0's native with flags 1), which is what DeleteThis means in the exe too.
+        A stand-in for the decl fix (S2-bodies: one declaration per constructor) or a link-time D0 slot (S2c)."""
+        dt = self.code_syms.get("_ZN11NiRefObject10DeleteThisEv")
+        if dt is None:
+            return
+        dt = rt(dt) & 0xFFFFFFFF
+        uc.mem_map(self.VT_D0_BASE, 0x10000, UC_PROT_ALL)
+        at, done = self.VT_D0_BASE, set()
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            if (sym, off) in done or size - off < 8:
+                continue
+            done.add((sym, off))
+            ex = img.vtable_slots(exe_vt)
+            if len(ex) < 3 or ex[0] not in F or F.get(ex[1]) is None or rt(F[ex[1]]) & 0xFFFFFFFF != dt:
+                continue
+            (w1,) = struct.unpack("<I", bytes(uc.mem_read(rt(a + off + 4), 4)))
+            if w1 != dt or at + 24 > self.VT_D0_BASE + 0x10000:
+                continue
+            uc.mem_write(at, struct.pack("<IIIQ", 0x52800001 | (1 << 5), 0x58000050, 0xD61F0200,
+                                         rt(F[ex[0]]) & 0xFFFFFFFF))
+            uc.mem_write(rt(a + off + 4), struct.pack("<I", at))
+            at += 24
+            st["slot-one d0"] += 1
+        print("   exe-slot-one-d0: %d exe-order vtables whose slot 1 was DeleteThis get a D0 thunk there" % st["slot-one d0"])
 
     def image_vptr_minus_one(self, uc, img, F, V, rt, st):
         """table option image-vptr-minus-one: the guest's references to an exe vftable that no native vtable is bound
@@ -1920,14 +1990,17 @@ class Emu:
         for name, kind, target in parse_milestones(path):
             if name not in self.mile_order:
                 self.mile_order.append(name)
-            if kind == "call":
+            if kind in ("call", "callok", "calltrue"):
                 if target.startswith("re:"):
                     rx = re.compile(target[3:])
                     addrs = sorted({self.code_addr(n) for n in self.code_syms if rx.search(n)})
                 else:
                     addrs = [a for a in [self.code_addr(target)] if a is not None]
                 for a in addrs:
-                    self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
+                    if kind == "call":
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
+                    else:   # reached when the call returns success: callok w0 == 0 (an HRESULT), calltrue w0 & 0xff
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_callret, user_data=(name, kind), begin=a, end=a)
                 if not addrs:
                     print(f"   milestones: {name}: {target} is not in the link")
             elif kind == "data":
@@ -1962,6 +2035,36 @@ class Emu:
     def on_mile_call(self, uc, addr, size, name):
         if name not in self.miles:
             self.mile_hit(name, "call", at=addr)
+
+    def on_mile_callret(self, uc, addr, size, data):
+        """'callok' / 'calltrue' F: at F's entry, a one-shot hook on the return address checks the result there (the
+        same thread and stack pointer: a recursive or other thread's return does not count)"""
+        name, kind = data
+        if name in self.miles:
+            return
+        ret, sp = uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF, uc.reg_read(UC_ARM64_REG_SP)
+        tid = self.cur.tid if getattr(self, "cur", None) else 1
+        pend = self.__dict__.setdefault("mile_ret_pending", {})
+        if ret not in pend:
+            pend[ret] = []
+            self.uc.hook_add(UC_HOOK_CODE, self.on_mile_ret, user_data=ret, begin=ret, end=ret)
+        pend[ret].append((name, kind, sp, tid, addr))
+
+    def on_mile_ret(self, uc, addr, size, ret):
+        pend = self.mile_ret_pending.get(ret) or []
+        sp = uc.reg_read(UC_ARM64_REG_SP)
+        tid = self.cur.tid if getattr(self, "cur", None) else 1
+        for e in list(pend):
+            name, kind, sp0, tid0, fn = e
+            if tid0 != tid or sp0 != sp:
+                continue
+            pend.remove(e)
+            x0 = uc.reg_read(UC_ARM64_REG_X0)
+            ok = (x0 & 0xFFFFFFFF) == 0 if kind == "callok" else (x0 & 0xFF) != 0
+            if ok and name not in self.miles:
+                self.mile_hit(name, f"{kind} (returned {x0 & 0xFFFFFFFF:#x})", at=fn)
+            elif not ok:
+                print(f"   milestone: {name} not reached: {self.sym(fn).split(' ', 1)[-1]} returned {x0 & 0xFFFFFFFF:#x}")
 
     def on_mile_store(self, uc, access, addr, size, value, data):
         name, target, want = data
@@ -2305,6 +2408,10 @@ def main(argv):
     ap.add_argument("--trace-writes", action="store_true", help="--trace-fn also logs the callees' memory writes")
     ap.add_argument("--trace-max", type=int, default=1_000_000, help="--trace-fn: at most this many calls")
     ap.add_argument("--trace-deref", type=int, default=32, help="--trace-fn: bytes dumped behind each pointer argument")
+    ap.add_argument("--stub-nulldev", action="store_true",
+                    help="stub boots only (farm_boot.sh with FNVNX_STUB_NULLDEV=1): toolchain/game/native_device.cpp's "
+                         "fnvnx_stub_nulldev = 1 at __libc_init_array, so CreateDevice succeeds on the null device "
+                         "without a GPU backend (the engine runs headless past its renderer init; nothing is drawn)")
     ap.add_argument("--plat", action="store_true",
                     help="the platform lane's recorder on from the start (platform/win32/platstat.cpp's fnvnx_plat_on "
                          "= 1 at __libc_init_array, after runtime.c clears .bss, before every constructor): 'plat: ...' "
@@ -2348,6 +2455,8 @@ def main(argv):
                 emu.member_vtables = bool(a.stub_faults) and "member-vtables" in fault_table_options(a.stub_faults)
                 emu.member_vtables_rx = fault_table_option_arg(a.stub_faults, "member-vtables") \
                     if emu.member_vtables else None
+                emu.repair_slot_one = bool(a.stub_faults) and "repair-lost-slot-one" in fault_table_options(a.stub_faults)
+                emu.exe_slot_one_d0 = bool(a.stub_faults) and "exe-slot-one-d0" in fault_table_options(a.stub_faults)
                 emu.image_minus_one = bool(a.stub_faults) and "image-vptr-minus-one" in fault_table_options(a.stub_faults)
                 emu.image_minus_one_rx = fault_table_option_arg(a.stub_faults, "image-vptr-minus-one") \
                     if emu.image_minus_one else None
@@ -2438,6 +2547,22 @@ def main(argv):
                     uc.hook_del(hk["h"])
                 hk["h"] = emu.uc.hook_add(UC_HOOK_CODE, plat_on, begin=ia, end=ia)
                 print("   plat: recorder on (fnvnx_plat_on at %#x, set at __libc_init_array %#x)" % (pa, ia))
+    if a.stub_nulldev:
+        na = getattr(emu, "data_syms", {}).get("fnvnx_stub_nulldev")
+        ia = getattr(emu, "code_syms", {}).get("__libc_init_array")
+        if na is None or ia is None:
+            print("   stub-nulldev: off (no fnvnx_stub_nulldev in the ELF: a guest without native_device.cpp's flag)")
+        else:
+            na = na - emu.link_base + emu.base if emu.relocatable else na
+            ia = ia - emu.link_base + emu.base if emu.relocatable else ia
+            hn = {}
+
+            def nulldev_on(uc, addr, size, data):
+                uc.mem_write(na, struct.pack("<I", 1))
+                uc.hook_del(hn["h"])
+            hn["h"] = emu.uc.hook_add(UC_HOOK_CODE, nulldev_on, begin=ia, end=ia)
+            print("   stub-nulldev: on (fnvnx_stub_nulldev at %#x): CreateDevice succeeds headless without a GPU backend"
+                  % na)
     try:
         rc = emu.run()
     except SystemExit as e:
