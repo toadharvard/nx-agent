@@ -23,6 +23,7 @@ import re
 import shutil
 import struct
 import sys
+import time
 import traceback
 import tempfile
 
@@ -1056,7 +1057,7 @@ class Emu:
         X0 = UC_ARM64_REG_X0   # X0..X28 are consecutive in unicorn
         out = open(path, "w", buffering=1)
         self.trace_out = out
-        state = {"seq": 0, "n": 0, "frames": {}, "ret_hooks": {}, "whook": None, "live": 0}
+        state = {"seq": 0, "n": 0, "frames": {}, "ret_hooks": {}, "whook": None, "live": 0, "t0": {}}
         print(f"   trace-fn: {len(targets)} functions -> {path}{' (with writes)' if writes else ''}")
 
         def tid():
@@ -1078,7 +1079,9 @@ class Emu:
             sp = uc.reg_read(UC_ARM64_REG_SP)
             while fr and fr[-1][2] == addr and fr[-1][1] <= sp:
                 seq, _sp, _lr, label = fr.pop()
-                out.write(f"ret\t{seq}\t{t}\t{len(fr)}\t{label}\t{uc.reg_read(X0):#x}\n")
+                # the host wall time of the call, ns (S4's plat_calls: time per API under emulation)
+                dt = time.perf_counter_ns() - state["t0"].pop(seq, time.perf_counter_ns())
+                out.write(f"ret\t{seq}\t{t}\t{len(fr)}\t{label}\t{uc.reg_read(X0):#x}\t{dt}\n")
                 state["live"] -= 1
             # hooks stay installed (adding or deleting one flushes unicorn's translation cache): one return hook per
             # call site, and the write hook ignores stores while no traced call is live
@@ -1099,6 +1102,7 @@ class Emu:
             regs = "\t".join(f"{uc.reg_read(X0 + k) & 0xffffffffffffffff:#x}" for k in range(8))
             caller = self.sym(lr).split("+")[0].replace("\t", " ")
             out.write(f"call\t{seq}\t{t}\t{len(fr)}\t{label}\t{orig}\t{regs}\t{sp:#x}\t{lr:#x}\t{caller}\n")
+            state["t0"][seq] = time.perf_counter_ns()
             if deref:
                 for k in range(8):
                     v = uc.reg_read(X0 + k) & 0xffffffff
