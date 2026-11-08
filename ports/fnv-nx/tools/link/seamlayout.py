@@ -15,11 +15,19 @@ Exe evidence (x86 disassembly, capstone; function bounds are the addrmap's addre
           slots, at most 40 instructions, no other allocation) by a call of a constructor of class C: exact sizeof.
           Allocators: 0x00401000, 0x00aa13e0 (cdecl, size on the stack) and 0x00aa3e40 (MemoryManager::Allocate,
           thiscall, size on the stack), see DEFAULT_ALLOCATORS; --alloc adds more.
+          With --tree, the class and unit of a `new` come from the source of the site's function: its exe allocation
+          calls are matched in order with the `new X` expressions after its `// @fnv 0x<addr>` tag, X is probed in
+          that unit (kind `new`, class id X@unit). An allocation whose source is an array, a built-in type or an
+          exe-constant size (`operator new(N)`) is no evidence. Functions that do not line up, and runs without a
+          tree, fall back to the constructor's class (kind `new-ctor`, never worse than `suspect`: the constructor's
+          unit often holds only a placeholder of the same name).
   static  `mov ecx, <data address>; call <constructor of C>`: a global object of C. The extent is the distance to
           the next known data symbol (refs.tsv data rows and the other constructed globals); that is an upper bound
           of the size (padding and unreferenced neighbours are inside it), so it is a mismatch only when the exe
           code also reads the object's tail (a reference within 4 bytes of the extent's end, the "tight" case) and
-          a lower bound otherwise: `suspect` (native smaller than the extent, tail not referenced) is reported
+          a lower bound otherwise: `suspect`. The extent ends at an MSVC init guard of a function-local static (`mov r,[g];
+          test r,1`), which is not part of the object, and then it is exact. A global bound to the exe image by
+          aliases.ld has no native storage and gives no row (native smaller than the extent, tail not referenced) is reported
           but not counted as a mismatch.
   maxoff  the highest member offset (+ access width) that member functions of C touch through `this` (ecx at entry
           and its copies in registers and ebp slots): a lower bound of the size.
@@ -176,6 +184,12 @@ class Link:
                 except ValueError:
                     pass
         self.starts = sorted({r[0] for r in self.rows})
+        fo = {}
+        for addr, kind, native, obj in self.rows:
+            if kind in ('F', 'C', 'X', 'G') and obj:
+                fo.setdefault(addr, obj)
+        self.fn_addrs = sorted(fo)
+        self.fn_objs = [fo[a] for a in self.fn_addrs]
         self.unit_of = {}   # addr -> a unit (src/...cpp) that references a symbol resolved to it
         self.sym_unit = {}  # (addr, native symbol) -> a unit that references it
         self.class_objs = collections.defaultdict(list)   # class -> object files / units with code or uses of it
@@ -231,6 +245,12 @@ class Link:
                 if cls in classes:
                     self.func_class.setdefault(addr, cls)
         self.classes = classes
+
+
+    def func_of(self, addr):
+        """(start, object file) of the addrmap function that contains addr, or None."""
+        i = bisect.bisect_right(self.fn_addrs, addr) - 1
+        return (self.fn_addrs[i], self.fn_objs[i]) if i >= 0 else None
 
 
 def crt_starts(root_hint=None):
@@ -335,6 +355,9 @@ def back_size(ins, k):
     return None
 
 
+_FULL = {'al': 'eax', 'cl': 'ecx', 'dl': 'edx', 'bl': 'ebx'}
+
+
 class Scan:
     def __init__(self):
         self.new_sites = []      # (site, func, size, ctor)
@@ -342,6 +365,8 @@ class Scan:
         self.maxoff = {}         # class -> [max end, accesses, example function, example offset]
         self.refs = set()        # data addresses referenced by absolute operands
         self.ro_ranges = []      # read-only data (vftables live there)
+        self.alloc_sites = {}    # function start -> [(call site, pushed size or None, constructor or None)]
+        self.guards = set()      # addresses of MSVC init guards of function-local statics
         self.derived = 0         # constructor calls inside a derived class's inlined constructor (skipped)
 
 
@@ -409,12 +434,12 @@ def _scan_function(ins, fva, member_class, ctors, allocators, data_ranges, sc):
             t = _imm(o)
             if t in allocators:
                 size = back_size(ins, k)
-                if size:
-                    hit = _track_ptr(ins, k, ctors, allocators)
-                    if hit and _vptr_store_after(ins, hit[0], sc):
-                        sc.derived += 1
-                    elif hit:
-                        sc.new_sites.append((ins[k][0], fva, size, hit[1]))
+                hit = _track_ptr(ins, k, ctors, allocators) if size else None
+                sc.alloc_sites.setdefault(fva, []).append((ins[k][0], size, hit[1] if hit else None))
+                if hit and _vptr_store_after(ins, hit[0], sc):
+                    sc.derived += 1
+                elif hit:
+                    sc.new_sites.append((ins[k][0], fva, size, hit[1]))
             elif t in ctors:
                 for j in range(k - 1, max(k - 5, -1), -1):
                     if ins[j][2] == 'mov':
@@ -428,6 +453,19 @@ def _scan_function(ins, fva, member_class, ctors, allocators, data_ranges, sc):
                                     sc.static_sites.append((ins[k][0], fva, v, t))
                             break
                     elif ins[j][2] in ('call', 'jmp', 'ret'):
+                        break
+        # MSVC's init guard of a function-local static: `mov reg, [guard]; and|test reg, 1`
+        if m in ('and', 'test') and k:
+            ops = _split_ops(o)
+            if len(ops) == 2 and ops[1] == '1':
+                reg = _FULL.get(ops[0], ops[0])
+                for j in range(k - 1, max(k - 4, -1), -1):
+                    if ins[j][2] == 'mov':
+                        mo = _split_ops(ins[j][3])
+                        if len(mo) == 2 and _FULL.get(mo[0], mo[0]) == reg and mo[1].endswith(']'):
+                            mp = _mem_parse(mo[1])
+                            if mp and mp[1] is None and not mp[3]:
+                                sc.guards.add(mp[2])
                         break
         # absolute data references
         if '0x' in o:
@@ -664,8 +702,21 @@ def probe_classes(tree, workdir, wanted, jobs, shard=None, on_result=None, solo=
                 lay = r.get(c)
                 res[c] = lay.size if lay and lay.size else -1
                 if on_result:
-                    on_result(c, res[c])
+                    on_result(unit, c, res[c])
     return res
+
+
+def load_aliases(root):
+    """Addresses bound to the exe image by out/aliases.ld (`__fnv_<addr> = 0x<addr>;`): no native storage."""
+    out = set()
+    try:
+        for line in open(os.path.join(root, 'out', 'aliases.ld')):
+            m = re.match(r'__fnv_([0-9a-f]{8}) = 0x', line)
+            if m:
+                out.add(int(m.group(1), 16))
+    except OSError:
+        pass
+    return out
 
 
 def load_probe_cache(outdir):
@@ -705,11 +756,84 @@ def boot_functions(topdown):
     return out
 
 
-def evidence(scan, link, image):
-    """-> {(class, kind): dict(sizes Counter, sites, example, ...)}."""
+_TAG = re.compile(r'// @fnv 0x([0-9a-f]+)')
+_ALLOC = re.compile(r'\boperator\s+new\s*\(|\bFUN_00(?:401000|aa13e0)\s*\(|'
+                    r'\bnew\s*(\([^)]*\)\s*)?([A-Za-z_][\w:]*)(\s*<[^;(){}]*?>)?(\s*\[)?')
+_BUILTIN = {'char', 'int', 'short', 'long', 'unsigned', 'signed', 'float', 'double', 'bool', 'void', 'wchar_t'}
+
+
+def alloc_expressions(body):
+    """The allocations of a function's source in order: the class X of each `new X`, None for what says nothing
+    about sizeof (an array, a built-in type, `operator new(N)` / `FUN_00aa13e0(N)` with a literal size). A placement
+    new does not allocate and is left out."""
+    body = re.sub(r'/\*.*?\*/|//[^\n]*', '', body, flags=re.S)
+    out = []
+    for m in _ALLOC.finditer(body):
+        if m.group(2) is None:
+            out.append(None)
+        elif m.group(1):
+            continue
+        elif m.group(4) or m.group(2) in _BUILTIN:
+            out.append(None)
+        else:
+            out.append(re.sub(r'\s+', '', m.group(2) + (m.group(3) or '')))
+    return out
+
+
+def source_sites(scan, link, tree, units, src_cache):
+    """{function start: (unit, [(site, size, X or None)])} for the functions whose exe allocation calls line up one
+    for one, in order, with the allocations of the function's source (found by its `// @fnv 0x<addr>` tag in the unit
+    of the addrmap function that contains it). The class of a `new` is the one the source names, and its size is
+    probed in that unit: the constructor's own unit often holds only a placeholder class of the same name."""
+    out = {}
+    for fva, sites in scan.alloc_sites.items():
+        fo = link.func_of(fva)
+        unit = units.get(fo[1]) if fo else None
+        if not unit:
+            continue
+        if unit not in src_cache:
+            try:
+                text = open(os.path.join(tree, unit), errors='replace').read()
+            except OSError:
+                text = ''
+            tags = [(m.start(), int(m.group(1), 16)) for m in _TAG.finditer(text)]
+            bodies = {}
+            for k, (pos, addr) in enumerate(tags):
+                bodies[addr] = text[pos:tags[k + 1][0] if k + 1 < len(tags) else len(text)]
+            src_cache[unit] = bodies
+        body = src_cache[unit].get(fo[0])
+        if body is None:
+            continue
+        news = alloc_expressions(body)
+        sites = sorted(sites)
+        if len(news) == len(sites):
+            out[fva] = (unit, [(a, sz, x) for (a, sz, _c), x in zip(sites, news)])
+    return out
+
+
+def evidence(scan, link, image, tree=None, aliases=()):
+    """-> {(class id, kind): dict(sizes Counter, sites, funcs, unit, ...)}. A class id is `X@unit` for evidence
+    whose class and unit come from the source, else the class name of a constructor."""
     ev = {}
+    aligned = {}
+    if tree:
+        aligned = source_sites(scan, link, tree, tree_units(tree), {})
+    for fva, (unit, sites) in aligned.items():
+        for site, size, x in sites:
+            if x is None or not size:
+                continue
+            e = ev.setdefault((x + '@' + unit, 'new'), {'sizes': collections.Counter(), 'sites': [], 'funcs': set(),
+                                                         'unit': unit})
+            e['sizes'][size] += 1
+            e['sites'].append(site)
+            e['funcs'].add(fva)
     for site, fva, size, ctor in scan.new_sites:
-        e = ev.setdefault((link.ctors[ctor], 'new'), {'sizes': collections.Counter(), 'sites': [], 'funcs': set()})
+        if fva in aligned:
+            continue
+        # not aligned with a source: the constructor's class, in the constructor's unit; the size may be a derived
+        # class's or the unit a placeholder, so it can only make a `suspect`
+        e = ev.setdefault((link.ctors[ctor], 'new-ctor'), {'sizes': collections.Counter(), 'sites': [],
+                                                             'funcs': set()})
         e['sizes'][size] += 1
         e['sites'].append(site)
         e['funcs'].add(fva)
@@ -718,8 +842,10 @@ def evidence(scan, link, image):
     syms_sorted = None
     glob = {}
     for site, fva, addr, ctor in scan.static_sites:
+        if addr in aliases:   # bound to the exe image by aliases.ld: no native storage to compare
+            continue
         glob.setdefault((link.ctors[ctor], addr), []).append((site, fva))
-    known = set(a for _, a in glob)
+    known = set(a for _, a in glob) | set(scan.guards)   # a guard word is not part of the object before it
     if link.root:
         path = os.path.join(link.root, 'out', 'refs.tsv')
         try:
@@ -758,7 +884,7 @@ def evidence(scan, link, image):
         e['sites'].extend(s for s, _ in sites)
         e['funcs'].update(f for _, f in sites)
         if e['gap'] is None or gap < e['gap']:   # the tightest global bounds the size best
-            e['gap'], e['lb'] = gap, lb
+            e['gap'], e['lb'], e['exact'] = gap, lb, nxt in scan.guards
     for cls, e in per.items():
         ev[(cls, 'static')] = e
     for cls, (end, cnt, fn, off) in scan.maxoff.items():
@@ -778,8 +904,13 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
     log('exe: %d new sites, %d static sites, %d classes with member accesses; %d constructor calls skipped as the '
         'base part of an inlined derived constructor' % (len(sc.new_sites), len(sc.static_sites), len(sc.maxoff),
                                                           sc.derived))
-    ev = evidence(sc, link, image)
+    aliases = load_aliases(link_root)
+    ev = evidence(sc, link, image, tree, aliases)
     classes = sorted({c for c, _ in ev})
+    nm = lambda c: c.split('@')[0]   # an id is `X@unit` or a class name
+    unit_of_id = {k[0]: e['unit'] for k, e in ev.items() if e.get('unit')}
+    objs_of = lambda c: ([unit_of_id[c].replace('/', '_') + '.o'] if c in unit_of_id else link.class_objs.get(c, []))
+    log('%d classes with evidence (%d named by their source)' % (len(classes), len(unit_of_id)))
     # native sizes
     native = {}
     src = {}
@@ -787,19 +918,19 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
     class_objs = link.class_objs
     by_obj = collections.defaultdict(list)
     for c in classes:
-        for o in class_objs.get(c, [])[:3]:
+        for o in objs_of(c)[:3]:
             by_obj[o].append(c)
     for obj, cs in by_obj.items():
         p = os.path.join(fixed, obj)
         if os.path.isfile(p):
             d = dwarf_sizes(p)
             for c in cs:
-                if c in d and c not in native:
-                    native[c], src[c] = d[c], 'dwarf'
+                if nm(c) in d and c not in native:
+                    native[c], src[c] = d[nm(c)], 'dwarf'
     lay = load_layouts(link_root)
     for c in classes:
-        if c not in native and c in lay:
-            sizes = {lay[c][o] for o in class_objs.get(c, []) if o in lay[c]}
+        if c not in native and nm(c) in lay:
+            sizes = {lay[nm(c)][o] for o in objs_of(c) if o in lay[nm(c)]}
             if len(sizes) == 1:
                 native[c], src[c] = sizes.pop(), 'layouts.tsv'
     outdir = os.path.join(link_root, 'out')
@@ -811,7 +942,7 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
         units = tree_units(tree)
         unit_for = {}
         for c in classes:
-            for o in class_objs.get(c, []):
+            for o in objs_of(c):
                 u = units.get(o)
                 if u:
                     unit_for[c] = u
@@ -825,12 +956,13 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
         out = open(os.path.join(outdir, name), 'a')
 
         def keep(mode):
-            def f(c, s):
-                with lock:
-                    out.write('%s\t%d\t%s\n' % (c, s, mode))
-                    out.flush()
-                if s > 0:
-                    native[c], src[c] = s, 'probe'
+            def f(unit, name, s):
+                for c in ids.get((unit, name), ()):
+                    with lock:
+                        out.write('%s\t%d\t%s\n' % (c, s, mode))
+                        out.flush()
+                    if s > 0:
+                        native[c], src[c] = s, 'probe'
             return f
 
         # stage 1: every class, one compile per unit (all its classes in one probe source); stage 2: the classes of the
@@ -839,9 +971,12 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
                            ('solo', lambda c: c in boot_classes and cache.get(c, (0, ''))[1] != 'solo'
                             and (c not in cache or cache[c][0] <= 0))):
             wanted = collections.defaultdict(list)
+            ids = collections.defaultdict(list)   # (unit, class name) -> class ids that want it
             for c in sorted(classes, key=lambda c: (c not in prio, c not in boot_classes, c)):
                 if c not in native and c in unit_for and pick(c):
-                    wanted[unit_for[c]].append(c)
+                    if not ids[(unit_for[c], nm(c))]:
+                        wanted[unit_for[c]].append(nm(c))
+                    ids[(unit_for[c], nm(c))].append(c)
             log('probe %s: %d classes in %d units' % (mode, sum(map(len, wanted.values())), len(wanted)))
             if wanted:
                 probe_classes(tree, os.path.join(outdir, 'seams_layout_work'), wanted, jobs or os.cpu_count(),
@@ -858,7 +993,7 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
             nsites = sizes[exe]
         else:
             top = max(sizes.items(), key=lambda kv: (kv[1], kv[0]))
-            exe = top[0] if kind == 'new' else e['gap']
+            exe = top[0] if kind in ('new', 'new-ctor') else e['gap']
             note = ''
             if len(sizes) > 1:
                 note = 'sizes ' + ','.join('0x%x x%d' % kv for kv in sorted(sizes.items()))
@@ -866,17 +1001,23 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
                 note = ('; '.join(x for x in [note, 'extent to next symbol; refs reach +0x%x' % e['lb']] if x))
         ns = native.get(cls)
         boot = int(bool(e['funcs'] & boots)) if kind != 'maxoff' else 0
+        if e.get('unit'):
+            note = '; '.join(x for x in [note, 'type and unit from the site\'s source: ' + e['unit']] if x)
         if SYNTH.search(cls):
             note = '; '.join(x for x in [note, 'synthetic class name'] if x)
         if ns is None:
             verdict = 'unknown'
-        elif kind == 'new':
+        elif kind in ('new', 'new-ctor'):
             verdict = 'mismatch' if ns < max(sizes) else ('larger' if ns > exe else 'ok')
+            if kind == 'new-ctor' and verdict in ('mismatch', 'larger'):
+                verdict = 'suspect'   # the unit and the class of a constructor call prove nothing about the type
         elif kind == 'maxoff':
             verdict = 'mismatch' if ns < exe else 'ok'
         else:   # static
             lb = e['lb']
-            if ns < lb:
+            if e.get('exact') and ns != exe:   # the extent ends at the object's own init guard: its size
+                verdict = 'mismatch' if ns < exe else 'larger'
+            elif ns < lb:
                 verdict = 'mismatch'
             elif ns < exe:
                 verdict = 'mismatch' if lb >= exe - 3 else 'suspect'
@@ -885,10 +1026,10 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
             else:
                 verdict = 'ok'
         example = '%08x' % (e['sites'][0] if e['sites'] else 0)
-        rows.append([cls, str(ns) if ns is not None else '', src.get(cls, ''), str(exe), kind, str(nsites), example,
+        rows.append([nm(cls), str(ns) if ns is not None else '', src.get(cls, ''), str(exe), kind, str(nsites), example,
                      verdict, str(boot), note])
     order = {'mismatch': 0, 'suspect': 1, 'larger': 2, 'unknown': 3, 'ok': 4}
-    kord = {'new': 0, 'static': 1, 'maxoff': 2}
+    kord = {'new': 0, 'new-ctor': 1, 'static': 2, 'maxoff': 3}
     rows.sort(key=lambda r: (order[r[7]], -int(r[8]), kord[r[4]], -int(r[5]), r[0]))
     return rows
 
