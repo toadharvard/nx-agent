@@ -473,8 +473,9 @@ def main():
         # minus-one copy and a V row: its D1 and its slot 0 are traps (one with a native at the exe slot), +2
         # Bf's own exe vftable (pure slots) is unreferenced too: its minus-one copy's slot 0 is a trap with a native at
         # the exe address (the fixture's 0x4010e0 is also Vk::kp's), and Bd3's slot 0 the exe body no unit compiles
-        check(st['trap-slots'] == 11 and st['trap-native-at-exe'] == 4 and st['primary-shorter'] == 0,
-              'vtmetric: 11 trap slots left (Sh\'s extension holds one, the unreferenced vftables\' copies three, '
+        # R2 (vtgate): a destructor slot that holds the CRT's _purecall (S4's provider) is that provider, not a trap: -1
+        check(st['trap-slots'] == 10 and st['trap-native-at-exe'] == 3 and st['primary-shorter'] == 0,
+              'vtmetric: 10 trap slots left (Sh\'s extension holds one, the unreferenced vftables\' copies three, '
               'Bd3\'s slot 0), 4 with a native at the exe slot, no short primary (%s)' % dict(st))
         check(st['slot-mismatch'] == 0 and st['slot-compared'] >= 1,
               'vtmetric: no native slot differs from the exe\'s function (%s)' % dict(st))
