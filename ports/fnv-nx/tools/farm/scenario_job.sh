@@ -81,12 +81,34 @@ LC=${SCENARIO_LINK:-}
 LINKDIR=${SCENARIO_LINK_DIR:-}; GUESTDIR0=${SCENARIO_GUEST_DIR:-}
 [ -n "$LINKDIR" ] && [ -z "$LC" ] && LC=$C12
 if [ -z "$LC" ] && [ -d "$ARTIFACTS/.git" ]; then
-	if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/link/$C12" > /dev/null 2>&1; then LC=$C12
-	elif git -C "$ARTIFACTS" fetch -q --depth 1 origin link-head 2> /dev/null; then
-		LC=$(git -C "$ARTIFACTS" show FETCH_HEAD:meta.json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print((d.get("commit") or d.get("head") or "")[:12])')
-	fi
+	# the newest link/<c12> of this head's own history whose guest linked (guest/fnvnx.elf on the branch). Never
+	# link-head: a try farm's WIP link can be there, and sc1 on dc5c0627023e took 1fe1e1463be8 from it, a link whose
+	# guest had failed: 0/12 measured in 7 s
+	REPO=$(cd "$P/../.." && pwd)
+	have=" $(git -C "$ARTIFACTS" ls-remote origin 'refs/heads/link/*' 2> /dev/null | awk '{print $2}' | sed 's|^refs/heads/link/||' | tr '\n' ' ') "
+	for h in $(git -C "$REPO" log --format=%H -n "${SCENARIO_LINK_DEPTH:-200}" "$COMMIT" 2> /dev/null | cut -c1-12); do
+		case "$have" in *" $h "*) ;; *) continue ;; esac
+		if git -C "$ARTIFACTS" fetch -q --depth 1 --filter=blob:none origin "+refs/heads/link/$h:refs/remotes/origin/link/$h" 2> /dev/null &&
+			git -C "$ARTIFACTS" cat-file -e "refs/remotes/origin/link/$h:guest/fnvnx.elf" 2> /dev/null; then
+			LC=$h; break
+		fi
+	done
+	[ -n "$LC" ] && [ "$LC" != "$C12" ] && note "link: $LC, the newest link of this head's history with a guest (none for $C12)"
 fi
-[ -n "$LC" ] || note "no link for $C12 and no link-head: the guest side cannot run"
+[ -n "$LC" ] || note "no link with a guest for $C12 or its history: the guest side cannot run"
+
+# ---- the private script-error config (D25 #10, R4's lane): game knowledge, so from the artifacts repository --------
+# SCENARIO_CALLWATCH (callwatch.py config) and SCENARIO_SCRIPTERR_PATTERNS (scripterr.py --patterns), else the files
+# callwatch.cfg / scripterr_patterns.tsv of branch scenario-cfg; without them #10 falls back to the scof console log
+if [ -z "${SCENARIO_CALLWATCH:-}${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && [ -d "$ARTIFACTS/.git" ] &&
+	git -C "$ARTIFACTS" fetch -q --depth 1 origin scenario-cfg 2> /dev/null; then
+	mkdir -p "$W/cfg"
+	git -C "$ARTIFACTS" show FETCH_HEAD:callwatch.cfg > "$W/cfg/callwatch.cfg" 2> /dev/null && SCENARIO_CALLWATCH=$W/cfg/callwatch.cfg
+	git -C "$ARTIFACTS" show FETCH_HEAD:scripterr_patterns.tsv > "$W/cfg/patterns.tsv" 2> /dev/null && SCENARIO_SCRIPTERR_PATTERNS=$W/cfg/patterns.tsv
+fi
+export SCENARIO_CALLWATCH=${SCENARIO_CALLWATCH:-}
+SEP=(); [ -n "${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && SEP=(--patterns "$SCENARIO_SCRIPTERR_PATTERNS")
+[ -n "$SCENARIO_CALLWATCH${SEP[*]}" ] || note "no script-error config (scenario-cfg branch): #10 from the scof console log only"
 
 # ---- the private script-error config (D25 #10, R4's lane): game knowledge, so from the artifacts repository --------
 # SCENARIO_CALLWATCH (callwatch.py config) and SCENARIO_SCRIPTERR_PATTERNS (scripterr.py --patterns), else the files
@@ -141,6 +163,14 @@ for s in $IDS; do
 		X="--scenario $D/plan.json --scenario-out $D/emu"
 		[ "${SCENARIO_FRAMES:-1}" = 1 ] && X="$X --frames"
 		[ -n "$LIST" ] && X="$X --trace-fn @$LIST --trace-out $D/guest.tsv"
+		# S4's Win32 calls on the guest (tools/perf/plat_calls.py list --guest: the imports by their platform names,
+		# hot ones left out), compared with the original's after the Wine side (plat_diff); SCENARIO_PLAT_CALLS=0 off
+		if [ "${SCENARIO_PLAT_CALLS:-1}" = 1 ] && [ -f "$P/tools/perf/plat_calls.py" ] && [ -f "$GAME/FalloutNV.exe" ]; then
+			ORIGC=$(ls -t "$FARM_HOME"/scenario_ref/*/original_calls.json 2> /dev/null | head -1)
+			python3 -I "$P/tools/perf/plat_calls.py" list --guest --exe "$GAME/FalloutNV.exe" ${ORIGC:+--original "$ORIGC"} \
+				--out "$D/plat_glist.txt" > /dev/null 2>&1 &&
+				{ X="$X --trace-fn @$D/plat_glist.txt"; [ -n "$LIST" ] || X="$X --trace-out $D/guest.tsv"; }
+		fi
 		FARM_BOOTS=stub FARM_GAME=$GAME EMU_TIMEOUT=${EMU_TIMEOUT:-3600} EMU_PY=$SC/emu_scenario.py EMU_EXTRA="$X" \
 			FARM_GUEST_DIR=$GUESTDIR FARM_LINK_DIR=${LINKDIR:-} bash "$S5/farm_boot.sh" "$LC" "$D/emu" > "$D/farm_boot.log" 2>&1
 		[ -z "${LINKDIR:-}" ] && [ -d "$D/emu/link/out" ] && LINKDIR=$D/emu/link
@@ -158,6 +188,12 @@ for s in $IDS; do
 				rm -rf "$RC"; mkdir -p "$(dirname "$RC")"; cp -a "$D/wine" "$RC"
 			fi
 		fi
+	fi
+	if [ -s "$D/plat_glist.txt" ] && [ -s "$D/guest.tsv" ] && [ -s "$D/wine/original_calls.json" ]; then
+		python3 -I "$P/tools/perf/plat_calls.py" report "$D/guest.tsv" --exe "$GAME/FalloutNV.exe" --out "$D/guest_calls.json" \
+			> /dev/null 2>&1 &&
+			python3 -I "$P/tools/perf/plat_calls.py" diff "$D/wine/original_calls.json" "$D/guest_calls.json" \
+				--guest-list "$D/plat_glist.txt" --out "$D/plat_diff.json" --md "$D/plat_diff.md" > "$D/plat_diff.log" 2>&1
 	fi
 	CMP=""
 	if [ -n "$LIST" ] && [ -s "$D/guest.tsv" ] && [ -s "$D/wine/wine.tsv" ]; then
@@ -254,9 +290,21 @@ fi
 # ---- metric, report, publish ---------------------------------------------------------------------------------------
 if [ ${#REPS[@]} -gt 0 ]; then python3 -I "$SC/scenario.py" metric "${REPS[@]}" --out "$W/metric.json" --md "$W/metric.md" > /dev/null
 else echo "- S18 metric: 0/12 D25 targets measured (no scenario report)" > "$W/metric.md"; fi
+# loud, not zeros: a run in which the guest ran in no scenario measured nothing (exit 3, the reason first)
+GRAN=0
+for r in "${REPS[@]}"; do
+	python3 -I -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1])).get("guest", {}).get("ran") else 1)' "$r" 2> /dev/null && GRAN=$((GRAN + 1))
+done
+FAIL_WHY=""
+if [ "$GRAN" = 0 ]; then
+	FAIL_WHY="the guest ran in no scenario ($( [ -n "$LC" ] && echo "link $LC: see each scenario's farm_boot.log" || echo "no link with a guest"))"
+	[ -f "$W/metric.json" ] && python3 -I -c 'import json, sys
+m = json.load(open(sys.argv[1])); m["error"] = sys.argv[2]; json.dump(m, open(sys.argv[1], "w"), indent=1)' "$W/metric.json" "$FAIL_WHY"
+fi
 {
 	echo "# scenarios ${C12}"
 	echo
+	[ -n "$FAIL_WHY" ] && { echo "- FAIL: $FAIL_WHY: nothing measured"; echo; }
 	cat "$W/metric.md"
 	echo
 	[ ${#WCACHED[@]} -gt 0 ] && echo "- original's runs from the reference cache (key $HARNESS_KEY): ${WCACHED[*]}"
@@ -272,11 +320,13 @@ if [ "${SCENARIO_PUBLISH:-1}" = 1 ] && [ -n "$LC" ] && [ -d "$ARTIFACTS/.git" ];
 	for s in $IDS; do
 		D=$W/$s; [ -d "$D" ] || continue; mkdir -p "$pub/$s"
 		cp -f "$D"/scripterr.json "$D"/wine_scripterr.json "$pub/$s/" 2> /dev/null
-		cp -f "$D"/plan.json "$D"/report.json "$D"/compare.json "$D"/threads.json "$D"/nx1.json "$D"/frames.json "$D"/feed.txt "$pub/$s/" 2> /dev/null
+		cp -f "$D"/plan.json "$D"/report.json "$D"/compare.json "$D"/threads.json "$D"/nx1.json "$D"/frames.json "$D"/feed.txt \
+			"$D"/guest_calls.json "$D"/plat_diff.json "$D"/plat_diff.md "$pub/$s/" 2> /dev/null
 		[ -d "$D/emu/kept" ] && cp -a "$D/emu/kept" "$pub/$s/guest-kept"
 		[ -d "$D/wine/profile" ] && cp -a "$D/wine/profile" "$pub/$s/wine-profile"
 		[ -d "$D/wine/shots" ] && cp -a "$D/wine/shots" "$pub/$s/wine-shots"
-		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$pub/$s/" 2> /dev/null
+		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$D/wine/original_opens.json" \
+			"$D/wine/original_calls.json" "$D/wine/original_calls.md" "$pub/$s/" 2> /dev/null
 		for f in "$D/emu/emu_stub.log" "$D/lin/boot.log" "$D/lin_profile.txt" "$D/guest.tsv" "$D/wine/wine.tsv"; do [ -f "$f" ] && xz -T0 -c "$f" > "$pub/$s/$(basename "$f").xz"; done
 	done
 	if git -C "$pub" add -A && git -C "$pub" -c user.name="fnvnx farm" -c user.email=farm@invalid commit -qm "scenarios $LC (head $C12)
@@ -300,4 +350,5 @@ if sys.argv[2]:
 json.dump(m, open(sys.argv[3], "w"), indent=1)' "$W/metric.json" "$SCRIPTERR_ALL" "${REPORT%.md}.json"
 fi
 log "done: $REPORT"
+[ -z "$FAIL_WHY" ] || { log "FAIL: $FAIL_WHY"; exit 3; }
 exit 0

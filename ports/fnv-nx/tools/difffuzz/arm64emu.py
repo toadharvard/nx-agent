@@ -476,6 +476,13 @@ class Arm64Engine:
                 if cur == fill[a - base:a - base + 4]:
                     uc.mem_write(a, bytes(4))
 
+    @staticmethod
+    def _is_import(name, target):
+        """the intercepted call is an import (its trace identity is libcalls.import_id of its name)"""
+        if not name or target is None or target >= 0:
+            return False
+        return target == libcalls.import_id(libcalls.import_name(name)[0]) or target == libcalls.import_id(name)
+
     def _on_stub(self, uc, address, size, user, wild=False):
         case, r = user
         if not wild and any(lo <= address < hi for lo, hi in self.holes()):
@@ -577,8 +584,11 @@ class Arm64Engine:
             if k in world.REF_CALLS:
                 self._ensure(x0, 16)
                 uc.mem_write(x0, rb[:16])
-        elif ck in ('bool', 'untyped'):
-            x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1
+        elif ck == 'bool' or (ck == 'untyped' and not self._is_import(name, target)):
+            # a real bool result is 0/1. An import is not normalised: x86emu._on_import gives it the raw canned
+            # word (S1-rules d26-imp: TlsGetValue was 0xffffffff on x86, 0xffffff01 natively, so [ret + 4] faulted
+            # on x86 only; oracle-fault in the Havok thread-memory callers)
+            x0 = (x0 & ~0xff) | (rb[0] & 1)
         uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
         if k in world.REF_CALLS:

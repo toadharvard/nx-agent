@@ -69,6 +69,7 @@ inline.
 | RET1 | 11 functions | identical (whole units, 1,395 functions) | 6 trailing statements, 5 with the callee's return type restored |
 | RET1 round 2 | 6 functions S12 found trapping (`ret1_fall1_r2.s1b`) | 4 identical, 2 differ by design | 3 made void, 1 callee return restored, 2 return the x86 eax |
 | DBUG1 | 1 (`dbug1_crt.s1b`) | identical (whole unit, 64 functions) | the S4b items were merged by S1 (`FUN_00ec78f1_t` 12 bytes, J-0041); S1-crt: 0x00b01510 calls FindFirstFileA with the find data the x86 code left on the stack (one-parameter decomp declaration of the two-parameter import) |
+| DBUG1 round 2 | 1 (`dbug1_w6_paramcount.s1b`; EQ fuzz row param-count 0x00d32b40) | MSVC byte check not run where written (no Visual C++ in that container): to run on a farm | the hkConvexList agent table callback 0x00d32b40 reads five stack words (unused, object, two floats, an integer); the decomp declared three ints and reached the rest through the address of the second parameter. Now five parameters, as the neighbouring table entry 0x00d34d80 is declared; a `def` and a `ref` row in `units_renames.tsv` carry the new decoration `?FUN_00d32b40@@YAXHPAXMMH@Z` |
 
 **XINC1 patterns.** (a) `jmp <callee>` forwarders declared `void f()`: they hand ecx and the caller's stack
 arguments to a thiscall callee, so they are thiscall members with the callee's parameters and result (22 pairs).
@@ -251,6 +252,12 @@ braces.
   body has them (76, among them the `GetChangeFlags` family of the pilot in 27 files); free functions (38); the donor's
   surplus differs from the receiver's deficit (30: one call shares its words with two others); side effects in moved
   arguments (19); conflicting hunks (26); paths with blanks (10).
+- POP2 (S2-bodies, tools/rules/s2_bodies.py; a prepare POST hook, no patch text): the chain fix as a rule, decided
+  from units.json's decorated names (the reference's words against the definition's) instead of popscan, with the
+  declarations found by MSVC's scopes in the unit or a local header (the `GetChangeFlags` family and the per-function
+  namespaces popgen left manual), and the S1b patches already applied when it runs. It also takes the explicit
+  `.operator bool()` spelling and literal type / name back-references in the moved codes. THIS2 is XINC1's shapes
+  A-C for the callers listed in `THIS2_SITES` (exe evidence: ecx untouched up to the call).
 
 S13b's `native-garbage-arg` hand-offs (131 functions) are mostly these: 30 are sites of these patches, 52 are
 `fewer-donor` / `fewer-other` callers still open, 4 call only `more` / `fewer-unread` callees, and 45 have no

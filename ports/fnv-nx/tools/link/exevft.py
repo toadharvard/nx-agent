@@ -144,6 +144,16 @@ def dtor_pos(names, words=None):
     return None
 
 
+def slot_one_is_d0(s0, s1):
+    """The native slots 0 / 1 (symbols as the object has them after resolve's renames) already are a destructor pair:
+    D1 / D0 names, a flags-stub pair (`__fnvnx_vflag_<a>_0` / `_1`), a deleting stub, or one body bound to both."""
+    if not s1:
+        return False
+    return bool(D0_SLOT.search(s1) or s1.endswith('_D0') or s1.startswith(('__fnvnx_d0del_', '__fnvnx_vgdel_')) or
+                (s0 and s0 == s1) or (s0 and s1.endswith('_1') and s1[:-1] == s0[:-1] and s0.endswith('_0') and
+                                      '__fnvnx_vflag' in s0))
+
+
 def exe_slot_index(k, d):
     """The minus-one rule: MSVC has one deleting destructor where GCC has D1 and D0 (at d, d + 1), so GCC slot k
     is exe slot k up to D1, D0 shares D1's slot, and every later slot is one lower."""
@@ -171,9 +181,31 @@ def plain_vftables(path, addrs, starts):
     return out
 
 
+def string_at(path, addr, max_len=512):
+    """The text of the C string the exe stores at addr, else None: addr in a data section the loader maps (never
+    code), the byte before it a NUL (a string starts there: not the middle of one, nor a number), then 1..max_len
+    printable ASCII characters (tab / newline / carriage return too) up to a NUL. The evidence a `str_<addr>`
+    name needs (S2-bodies top-down 10 / 11): the name is a claim, the exe's bytes say whether it holds."""
+    pe, data = _text(path)
+    import fnvnx_pe
+    img = _IMG.get(path)
+    if img is None:
+        img = _IMG[path] = fnvnx_pe.Image(pe)
+    got = img.string(addr, max_len)
+    if not got or not got[0]:
+        return None
+    prev = img.read(addr - 1, 1)
+    if prev != b'\0':
+        return None
+    if any(not (0x20 <= c < 0x7f or c in (9, 10, 13)) for c in got[0]):
+        return None
+    return got[0].decode('latin-1')
+
+
 # ---- trivial leaf functions of the exe (S2c-vt): an exact native stub where no unit compiles the address
 
 _PE = {}
+_IMG = {}
 
 
 def _text(path):
@@ -254,6 +286,66 @@ def deleting_dtor(path, addr):
     return i > 0 and _FLAGS_TEST.search(b[:i]) is not None
 
 
+def deleting_dtor_callee(path, addr):
+    """The destroy body an MSVC scalar deleting destructor `??_G` calls: the x86 function at addr returns with `ret 4`
+    and is exactly `call X; test flags, 1 (or and eax, 1); [je]; call <operator delete>` (two direct calls, the first
+    before the flags test, none after it but the delete; no int3 before the ret). -> X, else None (also without capstone, outside the image,
+    or when the shape is any other: a body inlined into the ??_G, an indirect call, more than two calls). The
+    decomp's `~C` at X is C's complete destructor; the identical-code folding that gives many classes one ??_G gives
+    them this X."""
+    try:
+        import capstone
+        from capstone import x86 as cx
+    except ImportError:
+        return None
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    if 'md' not in _CS:
+        _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        _CS['md'].detail = True
+    calls, tested, ret4 = [], False, False
+    for ins in _CS['md'].disasm(data[off:off + 0x100], addr):
+        if ins.id == cx.X86_INS_INT3:
+            return None
+        if ins.id == cx.X86_INS_RET:
+            ret4 = len(ins.operands) == 1 and ins.operands[0].imm == 4
+            break
+        if ins.id == cx.X86_INS_CALL:
+            if ins.operands[0].type != cx.X86_OP_IMM:
+                return None
+            calls.append((ins.operands[0].imm & 0xffffffff, tested))
+        elif ins.id == cx.X86_INS_TEST or (ins.id == cx.X86_INS_AND and ins.operands[-1].type == cx.X86_OP_IMM and
+                                           ins.operands[-1].imm == 1):
+            tested = True
+    if not ret4 or len(calls) != 2 or calls[0][1] or not calls[1][1]:
+        return None
+    return calls[0][0]
+
+
+_DELETE_THIS = re.compile(
+    rb'(?:\x85\xc9[\x74\x75][\x01-\x7f])?\x8b\x01(?:\x8b\x10\x6a\x01\xff\xd2|\x6a\x01\xff\x10)(?:\xc3|\xc2\x00\x00)')
+
+
+def delete_this(path, addr):
+    """True when the x86 function at addr is `void DeleteThis() { delete this; }` as MSVC compiles it: [`test ecx, ecx;
+    jz`] `mov eax, [ecx]; [mov edx, [eax];] push 1; call [eax] | edx; ret`, i.e. exactly a call of vftable slot 0 (the
+    scalar deleting destructor) with flags 1 and nothing else. Natively that function is one `delete this`, which GCC
+    dispatches through the Itanium D0 slot (native slot 1): a native vtable in the exe's slot order that holds this
+    function in slot 1 sends `delete this` back into it, a loop (S5 round 6, link 97deacd38aec). The exe is the
+    evidence: only a function with this exact body counts, never its name or position."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return False
+    return off is not None and _DELETE_THIS.match(data[off:off + 16]) is not None
+
+
 def thunk(path, addr):
     """(adjustment, target) of an MSVC thunk at addr: `sub ecx, imm8|imm32; jmp rel32` (an adjustor thunk of a
     secondary vftable: this -= imm), `add ecx, imm8; jmp rel32` (this += imm: a negative adjustment) or a plain
@@ -288,18 +380,40 @@ def thunk(path, addr):
     return None
 
 
+def this_thunk(path, addr):
+    """(imm32, target) of `mov ecx, imm32; jmp rel32` at addr: a member that takes a global object as its `this`
+    (a heap's free: `mov ecx, 0x011f6238; jmp FNV_MemoryManager::Free`) and passes its stack arguments on; else
+    None. Natively: x0 = imm32, then a tail branch (the other arguments are already where the target reads them)."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 10)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    b = data[off:off + 10]
+    if b[:1] != b'\xb9' or b[5:6] != b'\xe9':
+        return None
+    return (int.from_bytes(b[1:5], 'little'),
+            (addr + 10 + int.from_bytes(b[6:10], 'little', signed=True)) & 0xffffffff)
+
+
+def slot_index(exev):
+    """{address of a vftable slot: function address in it} over the exe's vftables (an `__imp_?...` name the recipe
+    placed on a vftable slot reads the slot's word)."""
+    return {v + 4 * j: w for v, e in exev.items() for j, w in enumerate(e.slots)}
+
+
 # ---- the vftable an exe constructor stores (S2c, S5 class 3: constructor-named vtables)
 
 CTOR_SPAN = 0x400   # bytes decoded from a constructor's entry (S5's stand-in reads the same span)
 _CS = {}
 
 
-def ctor_vftable(path, addr, starts):
-    """The vftable the x86 constructor at addr names: the immediate of its last `mov dword ptr [reg], imm32` (a base
-    register only: no index, no displacement, no segment - the vptr of the object the register holds) whose value is
-    in starts (vftable starts, e.g. scan()'s), decoded with capstone from addr up to its first `ret` / `ret N` (at
-    most CTOR_SPAN bytes). An inlined base constructor stores its own vftable first, so the last store is the most
-    derived class's. None without capstone, outside the image's sections, or when there is no such store."""
+def _ctor_stores(path, addr):
+    """The `mov dword ptr [reg+d], imm32` of the x86 function at addr up to its first `ret` / `ret N` (at most
+    CTOR_SPAN bytes), decoded with capstone: [(d, base register name, imm)] in order, for a base register only (no
+    index, no segment). None without capstone or outside the image's sections."""
     try:
         import capstone
         from capstone import x86 as cx
@@ -319,14 +433,55 @@ def ctor_vftable(path, addr, starts):
     if 'md' not in _CS:
         _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
         _CS['md'].detail = True
-    last = None
-    for ins in _CS['md'].disasm(data[off:off + n], addr):
+    md, got = _CS['md'], []
+    for ins in md.disasm(data[off:off + n], addr):
         if ins.id == cx.X86_INS_RET:
             break
         if ins.id != cx.X86_INS_MOV or len(ins.operands) != 2:
             continue
         dst, src = ins.operands
         if dst.type == cx.X86_OP_MEM and dst.size == 4 and src.type == cx.X86_OP_IMM and dst.mem.base and \
-                not dst.mem.index and not dst.mem.disp and not dst.mem.segment and (src.imm & 0xffffffff) in starts:
-            last = src.imm & 0xffffffff
+                not dst.mem.index and not dst.mem.segment:
+            got.append((dst.mem.disp, md.reg_name(dst.mem.base), src.imm & 0xffffffff))
+    return got
+
+
+def ctor_vftable(path, addr, starts):
+    """The vftable the x86 constructor at addr names: the immediate of its last `mov dword ptr [reg], imm32` (a base
+    register only: no index, no displacement, no segment - the vptr of the object the register holds) whose value is
+    in starts (vftable starts, e.g. scan()'s), decoded with capstone from addr up to its first `ret` / `ret N` (at
+    most CTOR_SPAN bytes). An inlined base constructor stores its own vftable first, so the last store is the most
+    derived class's. None without capstone, outside the image's sections, or when there is no such store."""
+    last = None
+    for d, _, v in _ctor_stores(path, addr) or ():
+        if not d and v in starts:
+            last = v
     return last
+
+
+def vptr_store_seq(path, addr, starts):
+    """The vftables the x86 function at addr stores in its own object (`mov dword ptr [reg], imm32` with no
+    displacement, value in starts), in code order, a vftable stored twice in a row once. A constructor lists its
+    inlined bases before its own class (derived last), a destructor its own class first. [] without capstone or
+    outside the image."""
+    seq = []
+    for d, _, v in _ctor_stores(path, addr) or ():
+        if not d and v in starts and (not seq or seq[-1] != v):
+            seq.append(v)
+    return seq
+
+
+MEMBER_MAX = 0x100000   # S5's bound on a member's offset (emu_guest install_member_vtables)
+
+
+def ctor_member_vftables(path, addr, vftables):
+    """The vftables the x86 constructor at addr stores at a displacement: {d: the immediate of the last
+    `mov dword ptr [reg+d], imm32` with 0 < d < MEMBER_MAX whose value is in vftables}, the vptrs of its member
+    objects and secondary bases (the renderer's RendererMap<N> members at +0x610.., s5-003 round 2). The base
+    register is the object's (esp / ebp bases are the frame's, not counted). Same decoding as ctor_vftable; {}
+    without capstone or outside the image."""
+    got = {}
+    for d, base, v in _ctor_stores(path, addr) or ():
+        if 0 < d < MEMBER_MAX and base not in ('esp', 'ebp') and v in vftables:
+            got[d] = v
+    return got

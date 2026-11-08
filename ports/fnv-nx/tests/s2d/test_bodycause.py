@@ -34,6 +34,11 @@ ROWS = [  # Itanium name, note
     ('_Z8LonelyFnv', 'no definition, address or body'),
     ('_ZN4BoxyIlE4SizeEv', 'no definition, address or body'),     # Boxy<long>::Size - objects have Boxy<int>
     ('_ZN2Cl4MakeEPKc', 'no definition, address or body'),        # only Cl::Make(char const*).isra.0 exists
+    ('_ZN2DdD1Ev', 'no definition, address or body'),             # only Dd's D0 is defined: no decoration of D1
+    ('_ZN3ErrD1Ev', 'no definition, address or body'),            # Err::~Err - objects have Other::Err::~Err
+    ('_ZN12fnv_000000013std3Str5eraseEjj', 'no definition, address or body'),   # unit copy; tree body in a header
+    ('_ZN12fnv_000000023std3Str6assignEj', 'no definition, address or body'),   # unit copy; objects have assign(int)
+    ('_ZN12fnv_000000033std3Str4zorkEv', 'no definition, address or body'),     # unit copy; no body anywhere
 ]
 EXPECT = {
     '_ZNSt6vectorIiSaIiEE5_TidyEv': ('crt-import', 'std scope'),
@@ -47,6 +52,12 @@ EXPECT = {
     '_ZN4Zork4PokeEv': ('no-body', 'msvc-direct'),
     '_Z8LonelyFnv': ('no-body', 'other'),
     '_ZN4BoxyIlE4SizeEv': ('no-body', 'other'),
+    '_ZN12fnv_000000013std3Str5eraseEjj': ('not-compiled', 'in a class copy or overload the referencing unit '
+                                                           'does not emit'),
+    '_ZN12fnv_000000023std3Str6assignEj': ('name-mismatch', 'defined as another decoration'),
+    '_ZN12fnv_000000033std3Str4zorkEv': ('crt-import', 'std scope (unit copy, no body in the tree)'),
+    '_ZN2DdD1Ev': ('no-body', 'other'),
+    '_ZN3ErrD1Ev': ('no-body', 'other'),                          # another scope's class is no decoration of it
     '_ZN2Cl4MakeEPKc': ('name-mismatch', 'defined only as a GCC clone (.isra/.constprop: its own signature, no '
                                           'alias target)'),
 }
@@ -65,13 +76,17 @@ class Causes(unittest.TestCase):
                 '#if 0\nstruct Baz { void Drop(); };\nvoid Baz::Drop() { }\n#endif\n')
             open(os.path.join(tree, 'src', 'extra.cpp'), 'w').write('void Bar::Load()\n{\n}\n')
             open(os.path.join(tree, 'include', 'q.h'), 'w').write(
-                'class Qux\n{\n  public:\n    int Top() { return 1; }\n    void Down();\n};\n')
+                'class Qux\n{\n  public:\n    int Top() { return 1; }\n    void Down();\n};\n'
+                'namespace std { struct Str { void erase(unsigned a, unsigned b) { } }; }\n')
             subprocess.run([GXX, '-c', '-x', 'c++', '-', '-o', os.path.join(objs, 'a.o')], check=True,
                            input='struct Foo { void Set(int); };\nvoid Foo::Set(int) {}\n'
                            'template <class T> struct Boxy { int Size(); };\n'
                            'template <> int Boxy<int>::Size() { return 0; }\n'
                            'extern "C" void make_clone() __asm__("_ZN2Cl4MakeEPKc.isra.0");\n'
-                           'extern "C" void make_clone() {}\n', text=True)
+                           'extern "C" void make_clone() {}\n'
+                           'extern "C" void dd_d0() __asm__("_ZN2DdD0Ev");\nextern "C" void dd_d0() {}\n'
+                           'namespace std { struct Str { void assign(int); }; void Str::assign(int) {} }\n'
+                           'namespace Other { struct Err { ~Err(); }; Err::~Err() {} }\n', text=True)
             with open(os.path.join(out, 'bodies', 'bodies.tsv'), 'w') as f:
                 f.write('#name\tclass\taddress\ttarget\tunits\tnote\thost\n')
                 for n, note in ROWS:

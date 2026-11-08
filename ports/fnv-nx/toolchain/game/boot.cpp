@@ -237,6 +237,13 @@ static int load_image(void) {
     rc = fnvnx_image_map(&img, &pe, &os, pe.image_base, 0, 0x00400000u, 0x02100000u, 0);
     if (rc) { printf("fnvnx boot: STOP: image_map: %s\n", fnvnx_strerror(rc)); return -1; }
     g_img = &img;
+    {   /* _tls_index = 0, as the Windows loader stores for the main module: fs:[0x2c][_tls_index] is the image TLS
+         * block (platform/win32/thread.cpp has one slot; FalloutNV.exe's file holds another value there) */
+        uint32_t tva = 0, told = 0;
+        int trc = fnvnx_image_tls_index_reset(&img, &tva, &told);
+        if (tva) printf("fnvnx boot: _tls_index %#010" PRIx32 " = 0 (file: %#" PRIx32 ")\n", tva, told);
+        else if (trc) printf("fnvnx boot: _tls_index not reset: %s\n", fnvnx_strerror(trc));
+    }
     __atomic_store_n(&g_image_mapped, 1, __ATOMIC_RELEASE);
     fnvnx_image_load_relocs(&img, &os);
     capture_xc(&pe, &img);

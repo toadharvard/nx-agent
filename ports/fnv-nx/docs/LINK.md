@@ -268,6 +268,16 @@ bridge of its argument moves, unless something else is wrong on x86 too (`this-n
 `cast-conflict`, `result-pointer-not-passed`); with nothing to move it is bound directly and listed. V1 counts
 1,517 pairs / 2,196 references on f13.
 
+Two prepare POST hooks fix the declarations behind the commonest real bugs of these classes (tools/rules/s2_bodies.py,
+EQ's fuzz rows at link/0540aff0d154): **POP2** moves the words a getter's reference pushes too many to the call on
+its result whose reference pushes them too few (`buffer->GetChangeFlags(2)` read as a bool ->
+`buffer->GetChangeFlags().FUN_004280f0(2)`; `R(D(a, x))` -> `R(D(a), x)`), decided from the words of the
+references and definitions in build/units.json; **THIS2** turns a free `__stdcall` caller that hands its own ecx to
+a thiscall callee (the exe's code, listed in `THIS2_SITES`) into a member of a shell, or a member caller's call into
+`((Shell*)this)->f(..)`. Both add the new decorated reference names to the unit's `symbols`, so the pairs are
+compared again and bridged where the decomp's parameter types differ. What they leave is counted in
+prepare_stats.tsv (`POP2-SKIP-*`, `THIS2-SKIP-*`) and listed in `<tree>/build/pop2_skipped.tsv`.
+
 Classes in the report: `edx-dummy`, `reg-shift` (same register file, other index), `int-float-param`
 (x86 tolerated an int/float swap in a 4-byte slot), `ret-regfile`, `sret-explicit` (one side returns an aggregate,
 the other passes the buffer pointer explicitly), `aggregate-param` / `ret-aggregate` (aggregates of different
@@ -716,6 +726,22 @@ class) that no unit pairs: the exe's constructor at `<ctor>` (a native `??0` def
 capstone). A free vftable gets the shell in the map; one with a vtable already takes it as a displaced vtable, so
 the slot fill and the extended copies (below) reach it either way. `ctor_vftables.tsv`: each candidate and outcome.
 On link 9f865b0a's inputs: 390 pairs (7 new V rows, 383 displaced), 319 of them shorter than the exe's vftable.
+After `exe_pair`, `member_store_pairs` (link class 4, s5-003 round 2) does the same for the vptrs a constructor
+stores at a displacement: its members' (the renderer's RendererMap<N> at +0x610.., one-slot placeholders called at
+slot 1) and its secondary bases'. The exe constructor's last `mov dword ptr [reg+d], imm32` of an RTTI vftable per
+offset d (0 < d < 0x100000, not through esp / ebp, before the first `ret`: `exevft.ctor_member_vftables`) is paired
+with the native vtable its compiled `??0` stores at the same offset (`membervt.vptr_stores`: capstone over the
+AArch64 code, `this` through copies and `this + c`, GOT and ADRP/ADD vtable addresses, the last store per offset,
+or the class of the constructor called with `this + d`; a call clobbers x0..x18). The decomp's layouts are the
+exe's (D11), so offsets compare as they are. A primary vtable takes a free vftable in the map or joins it as a
+displaced vtable (extended by `exe_vtable_copies`); a secondary one stands for it in the slot fill only. Named
+exclusions (`membervt.RULES`), never anonymous skips: `shader-factory-global-constant-map`, NiShaderFactory's (and
+so NiD3DShaderFactory's) `NiTFixedStringMap<NiGlobalConstantEntry*>` at +0x8, whose extension makes WinMain's INI
+load (0x005e0200) loop in GetPrivateProfileIntA (S5). `member_vftables.tsv`: per (constructor, offset) the exe
+classes, base or member, the native vtable, both slot counts and the outcome. On link 9f865b0a's inputs: 651
+offsets in 245 constructors (83 members, 568 secondary bases); 388 already paired (252 by the map, 136 hand-stored
+image vftables), 206 new (19 displaced primaries, 187 secondaries for the slot fill), 1 excluded; 14 member vtables
+shorter than the exe's (the 6 RendererMaps: 1 slot for 7).
 
 **Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's
@@ -731,6 +757,11 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   (`D1Ev`/`D0Ev`, their address-bound forms) or, in an abstract class, as two adjacent zero words.
 * One undefined symbol is renamed once per object: every vtable of the object naming it must agree on the address,
   else the declaring class's vtable decides, else it stays a trap.
+* The synthesized vtable objects (`<unit>#vtables`, vtables.py) are objects of the loop like any compiled one, with
+  the same evidence (the exe vftable the vtable is paired with, the exe word at the slot). refs.tsv names them by
+  their own source, so the rewrite of the bound rows (`rewrite_refs`) matches that name, never the host unit's. A
+  symbol whose uses are bound only per slot (the vtables disagree on the address) keeps its refs.tsv row: the
+  words are in the extended copy (slot_fill.tsv `per slot`), and the row has one target column.
 * ABI (`slot_abi`): every argument the slot's declaration passes and the definition reads must arrive where the
   definition reads it, in the same register file (abi.a64_locations; a free definition takes the object as its
   first pointer parameter, a free definition without parameters reads nothing). A definition that reads more
@@ -776,7 +807,20 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
 **Metric** (`vtmetric.py <link dir> <exe>`, read-only on a published link or a build's link stage): over the V rows,
 trap slots split by whether the address map has a native at the exe slot's address, primary vftables whose native
 vtable is shorter than the exe's (the destructor pair counted once), and mispairings (the native class is another
-RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+RTTI class of the exe). S2d-vslot adds `slot-mismatch` (native slot k + 1 against exe slot k by address through the
+map, exe slots 0 and 1 and unplaced slots not compared; `--rows` lists them) and `unpaired-<primary|secondary>-<why>`
+(exe vftables with RTTI that no V row stands for, by the class's row in vtables/classes.tsv). A vtable-slot name that
+resolve bound only through another unit's reference to the same name (gref / gdef tier: units.json puts the call of
+a *different* function there, TESForm::IsQuestItem at 0x0046f070 where the exe's TESForm slot 37 is 0x00401190) is a
+hint: when no code of the object calls the name, exe_slot_fill replaces the address with the exe vftable's function
+at the slot (`hint_rebound`; slot_fill.tsv row `exe vftable over the name's address`) and keeps it where the exe has
+none or the function cannot be bound (`hint_kept_*`). W20 extends this to names the unit's own recipe binds (tier
+`unit/*`), by what the object's code does with the name: never called (class b, 24 of 208 holder x symbol items on link
+0540aff0d154, all of them the unit's own definitions nothing calls) is a hint like the above; called directly (class a,
+183 items: `Base::f()` from an override, whose exe call site reaches the bound address in the pristine object) keeps the
+symbol at its address for the call and gives each vtable slot that names it, where the exe vftables of that use agree,
+the exe's function as a per-slot override (`chint_slot_over`; slot_fill.tsv row `per slot (exe vftable; the name stays
+at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
 `test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
 
 ## Platform, imports, thread-locals and hand-written vptrs
@@ -939,6 +983,56 @@ RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cac
     needs S1 to give the shell a polymorphic class, or the image's RTTI, which needs the exe.
   * 99 stores have no usable storing address: the function stores several vtables at one offset (a base's, then
     its own), or it has no `@fnv` annotation.
+
+  **D26 (c): a minus-one copy for every image vftable left at its image address** (`minus_one_copies`, on
+  wip/d26). An address that stays `__fnv_<V> = 0x<V>` while it is stored by hand (`hand_vptr_stores`) or is an
+  RTTI vftable referenced as data gets a strong copy `__fnvnx_vmo_<V>` in `bridges.S`, and `aliases.ld` binds
+  `__fnv_<V>` to the copy's address point (+8). The copy is in D22's minus-one order:
+  * offset-to-top (from the exe's COL, else the store's offset), then typeinfo 0;
+  * D1/D0 at slots 0/1 for exe slot 0 when it is the deleting destructor. The address map's G pair is used as it
+    is. A decomp `(this, flags)` definition gets flags stubs 0/1; it qualifies by its declaration, its `??_G` name,
+    or the exe's code shape (`exevft.deleting_dtor`: `ret 4` after a test of bit 0, which finds 121 of the 132
+    G rows). When exe slot 0 is not a destructor, slot 0 is a trap and exe slot 0 goes to slot 1;
+  * exe slot k at slot k + 1 (`exe_slot_target`, the same choice as the extended copies).
+  Every copy also gets an address-map `V` row (`vmo_vrows`: the copy's symbol, address point 8, object
+  `zz_bridges.o`, note "minus-one copy of the exe vftable"), so EQ's vtable pairing and `vtmetric` see the vftables of
+  classes the decomp declares without virtual members (vtmetric's `no-polymorphic-view`: 164 primary + 7 secondary on
+  link 0540aff0, 163 of them referenced as data) and none keeps `__fnv_<V> = 0x<V>` while a unit stores it.
+  W19 (option A): the candidates are every RTTI exe vftable no V row stands for, referenced as data or not
+  (`vmo_candidates`; `FNVNX_D26C_ALL=0` restores the referenced-only selection), offset-to-top from the COL. On a
+  secondary vftable a slot that is an MSVC adjustor thunk (`sub ecx, n; jmp f`, through at most two more thunks) gets
+  a stub (`__fnvnx_vadj_<a>`, destructor slot 0: `__fnvnx_vadjd_<a>_0|1` into f's D1/D0 or flags stubs) only when
+  the summed n is exactly the COL offset and f has a native definition (`vmo_adjustor`); any other adjusting thunk
+  stays a visible trap. On link 0540aff0's inputs (simulated from addrmap.tsv and the exe's RTTI): 746 copies, all
+  with exe slots, 47 beyond the referenced-only 699.
+  `out/vmo.tsv` lists the copies. `FNVNX_D26C=0` turns the pass off, so a boot can be compared with and without
+  it. On link 9f865b0a's inputs (offline) it makes 831 copies: 615 hand-stored + 239 RTTI-referenced candidates,
+  minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
+  slots.
+
+  **A D0 in native slot 1 of a table in the exe's slot order** (W23, `d0_slot_fix` in `exe_vtable_copies`;
+  `FNVNX_D0SLOT=0` turns it off). A native `delete p` through a declaration with a virtual destructor calls Itanium
+  slot 1. A native vtable with no D1/D0 pair (the decomp declares a placeholder `virtual void BaseVirtual();` where
+  the exe has the ??_G; `_ZTV12FUN_00e754a0`, ctor 0x00e754a0, which GraphicsRenderer also declares with a virtual
+  destructor) is built or extended in the exe's order, so slot 1 holds exe slot 1. When that is
+  `DeleteThis() { delete this; }` (`exevft.delete_this`: the exe's bytes, a call of vftable slot 0 with flags 1) the
+  native `delete this` goes through slot 1 again, forever (S5 round 6, link 97deacd38aec). Slot 1 becomes the D0 of
+  exe slot 0 (`vmo_dtor_slots`: the Itanium D0, or the flags-1 stub), which is what DeleteThis does in the exe.
+  Nothing else moves: a full shift to D26's order would break every caller compiled against the same table in the exe's
+  order (the call-only placeholders, e.g. the renderer's slot 54), which D26 (a)/(b) convert in S1-rules, not here.
+  vtmetric's `slot-one-delete-this` counts the tables still in that shape (96 on link 0540aff0; the fix's target is 0).
+
+  **Minus-one tables without a pair** (W30, `d26_minus_one_reason` in `exe_vtable_copies`; `FNVNX_D26T=0` turns it off).
+  A table made from the exe vftable with no D1/D0 (the probe's synthesis, an extended copy) used to stay in the exe's
+  order, while callers compiled against D26 (b)'s `virtual ~C()` dispatch minus-one: `_ZTV12FUN_00aa7400` and
+  `_ZTV26FUN_00aa2230_BSNiAllocator` ran the wrong slot (the heap's Allocate ran an empty slot returning `this`). A table
+  is now rebuilt whole as a strong copy in D26's layout (D1/D0 from exe slot 0 by `vmo_dtor_slots`, exe slot k at k + 1 by
+  `exe_slot_target`, free-function slots through the `__fnvnx_vfree_` this-drop thunks) only on evidence: the exe vftable
+  is in S1's D22 list (`d22.json` under FNVNX_RECON, `load_d22_list`): the classes prepare's D22 / D26 (b) converted,
+  so their callers are minus-one. A placeholder name alone is no evidence (an unlisted class is not converted and its
+  callers keep the exe's order), and no code may name slot 0 (D22-USED keeps the exe order). Tables with no evidence are
+  counted as `exe-order-no-evidence`. A caller in the exe's order for the same class (BSNiAllocator's InitHolder
+  0x00aa2020 loads offset 28) disagrees with a shifted table: S1 converts it first or together.
 
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 

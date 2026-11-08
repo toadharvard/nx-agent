@@ -15,7 +15,7 @@ import argparse
 import json
 import sys
 
-KEYS = ("winmain", "ini-read", "renderer-init", "archive-list", "bsa-opened", "esm-header", "masters-loaded",
+KEYS = ("winmain", "ini-read", "archive-list", "bsa-opened", "renderer-init", "esm-header", "masters-loaded",
         "main-menu", "first-frame", "first-cell")
 
 

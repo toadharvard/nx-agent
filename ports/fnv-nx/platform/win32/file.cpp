@@ -7,9 +7,12 @@
 
 struct w32_file {
     struct w32_obj o;
-    int fd;
+    int fd;         /* -1: a directory handle the host could not open (attribute queries only) */
     DWORD access;
 };
+
+#define ACC_READ (GENERIC_READ | 0x0001 /* FILE_READ_DATA */ | 0x10000000 /* GENERIC_ALL */)
+#define ACC_WRITE (GENERIC_WRITE | 0x0002 /* FILE_WRITE_DATA */ | 0x0004 /* FILE_APPEND_DATA */ | 0x10000000)
 
 static void file_destroy(struct w32_obj *o)
 {
@@ -43,6 +46,10 @@ static int map_or_fail(const char *win, char *host)
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }
+    if (strpbrk(win, "*?\"<>|")) { /* wildcards and reserved characters are not file names */
+        SetLastError(ERROR_INVALID_NAME);
+        return 0;
+    }
     DWORD e = w32_map_path(win, host, W32_PATH_MAX);
     if (e) {
         SetLastError(e);
@@ -64,9 +71,9 @@ extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share, void *sa, 
     }
     access = W32_DW(access);
     int of = 0;
-    if (access & (GENERIC_READ | 0x0001 /* FILE_READ_DATA */ | 0x10000000 /* GENERIC_ALL */))
+    if (access & ACC_READ)
         of |= OS_O_READ;
-    if (access & (GENERIC_WRITE | 0x0002 /* FILE_WRITE_DATA */ | 0x0004 /* APPEND */ | 0x10000000))
+    if (access & ACC_WRITE)
         of |= OS_O_WRITE;
     os_stat_t st;
     int exists = os_stat(host, &st) == 0;
@@ -95,7 +102,9 @@ extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share, void *sa, 
     if (!(of & (OS_O_READ | OS_O_WRITE)))
         of |= OS_O_READ; /* access 0: attribute-only handle */
     int fd = os_file_open(host, of);
-    if (fd < 0) {
+    if (fd < 0 && exists && st.is_dir && of == OS_O_READ && W32_DW(disp) == OPEN_EXISTING)
+        fd = -1; /* fsdev cannot open() a directory: the handle still serves GetFileAttributes-style queries */
+    else if (fd < 0) {
         fail_os(fd, host);
         if (fd == -OS_EEXIST)
             SetLastError(ERROR_FILE_EXISTS);
@@ -139,10 +148,24 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPE
         *got = 0;
     if (!f)
         return FALSE;
-    int64_t r = ov ? os_file_pread(f->fd, buf, W32_DW(n), ov_offset(ov)) : os_file_read(f->fd, buf, W32_DW(n));
-    if (r < 0) {
-        SetLastError(w32_os_error((int)r));
+    if (!(f->access & ACC_READ) || f->fd < 0) {
+        SetLastError(ERROR_ACCESS_DENIED);
         return FALSE;
+    }
+    /* ReadFile returns short only at EOF: loop over the partial reads the host may return */
+    int64_t r = 0, want = (int64_t)W32_DW(n);
+    while (r < want) {
+        int64_t k = ov ? os_file_pread(f->fd, (char *)buf + r, (size_t)(want - r), ov_offset(ov) + (uint64_t)r)
+                       : os_file_read(f->fd, (char *)buf + r, (size_t)(want - r));
+        if (k < 0) {
+            SetLastError(w32_os_error((int)k));
+            if (got)
+                *got = (DWORD)r;
+            return FALSE;
+        }
+        if (k == 0)
+            break;
+        r += k;
     }
     if (got)
         *got = (DWORD)r;
@@ -166,6 +189,10 @@ extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAP
         *put = 0;
     if (!f)
         return FALSE;
+    if (!(f->access & ACC_WRITE) || f->fd < 0) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
     int64_t done = 0, want = (int64_t)W32_DW(n);
     while (done < want) {
         int64_t r = ov ? os_file_pwrite(f->fd, (const char *)buf + done, (size_t)(want - done), ov_offset(ov) + (uint64_t)done)
@@ -190,6 +217,7 @@ extern "C" BOOL SetFilePointerEx(HANDLE h, LARGE_INTEGER dist, PLARGE_INTEGER ne
     struct w32_file *f = file_of(h);
     if (!f)
         return FALSE;
+    method = W32_DW(method);
     int w = method == FILE_CURRENT ? OS_SEEK_CUR : method == FILE_END ? OS_SEEK_END : OS_SEEK_SET;
     if (method > FILE_END) {
         SetLastError(ERROR_INVALID_PARAMETER);
@@ -237,7 +265,9 @@ extern "C" BOOL GetFileSizeEx(HANDLE h, PLARGE_INTEGER size)
     os_stat_t st;
     if (!f)
         return FALSE;
-    int r = os_file_fstat(f->fd, &st);
+    int r = f->fd < 0 ? 0 : os_file_fstat(f->fd, &st);
+    if (f->fd < 0)
+        st.size = 0; /* directory handle */
     if (r) {
         SetLastError(w32_os_error(r));
         return FALSE;
@@ -260,7 +290,18 @@ extern "C" DWORD GetFileSize(HANDLE h, LPDWORD hi)
 extern "C" BOOL FlushFileBuffers(HANDLE h)
 {
     struct w32_file *f = file_of(h);
-    return f && os_file_sync(f->fd) == 0;
+    if (!f)
+        return FALSE;
+    if (!(f->access & ACC_WRITE) || f->fd < 0) { /* FlushFileBuffers needs GENERIC_WRITE */
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    int r = os_file_sync(f->fd);
+    if (r) {
+        SetLastError(w32_os_error(r));
+        return FALSE;
+    }
+    return TRUE;
 }
 
 extern "C" BOOL SetEndOfFile(HANDLE h)
@@ -268,6 +309,10 @@ extern "C" BOOL SetEndOfFile(HANDLE h)
     struct w32_file *f = file_of(h);
     if (!f)
         return FALSE;
+    if (!(f->access & ACC_WRITE) || f->fd < 0) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
     int64_t pos = os_file_seek(f->fd, 0, OS_SEEK_CUR);
     int r = pos < 0 ? (int)pos : os_file_truncate(f->fd, (uint64_t)pos);
     if (r) {
@@ -295,7 +340,7 @@ extern "C" BOOL DeleteFileA(LPCSTR name)
     if (!map_or_fail(name, host))
         return FALSE;
     os_stat_t st;
-    if (os_stat(host, &st) == 0 && st.is_dir) {
+    if (os_stat(host, &st) == 0 && (st.is_dir || st.read_only)) { /* a directory or a read-only file */
         SetLastError(ERROR_ACCESS_DENIED);
         return FALSE;
     }
@@ -367,6 +412,10 @@ extern "C" BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists)
     char a[W32_PATH_MAX], b[W32_PATH_MAX];
     if (!map_or_fail(from, a) || !map_or_fail(to, b))
         return FALSE;
+    if (!strcmp(a, b)) { /* onto itself: the destination would truncate the source */
+        SetLastError(ERROR_SHARING_VIOLATION);
+        return FALSE;
+    }
     int in = os_file_open(a, OS_O_READ);
     if (in < 0) {
         fail_os(in, a);

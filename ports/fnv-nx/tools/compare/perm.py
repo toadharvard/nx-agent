@@ -49,6 +49,9 @@ VARIANTS = {
     'large': {'const': 'large'},                    # constants in [-1000, 1000]
     'dxt':   {'tex': 'dxt1'},                       # the 2D textures as DXT1 (with mips)
     'atest': {'rs': {'ALPHATESTENABLE': 1, 'ALPHAREF': 128, 'ALPHAFUNC': 5}},    # alpha test GREATER 128
+    # its complement, LESSEQUAL 128: every pixel atest discards passes here, so a program whose alpha stays at or
+    # below 128 (atest vacuous) exercises the alpha-test epilogue too, and both comparison directions are covered
+    'atestle': {'rs': {'ALPHATESTENABLE': 1, 'ALPHAREF': 128, 'ALPHAFUNC': 4}},
     'fog':   {'rs': {'FOGENABLE': 1, 'FOGTABLEMODE': 3, 'FOGCOLOR': 0xff8040c0}, 'fog': True},   # linear table fog
 }
 VARIANT = {'v': VARIANTS['base']}

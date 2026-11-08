@@ -27,6 +27,7 @@
 # Needs: link_job.sh's, plus g++; for fnvnx-a64: libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex; python
 # unicorn; for TESTS=all also qemu-user, cmake, meson, ninja-build. FARM_APT=1 installs them (root).
 set -euo pipefail
+unset FNVNX_STUB_NULLDEV   # the stub boot (4b) sets it for itself only; never the raw boot or the product (S5 a3b368ed)
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../../.." && pwd)
@@ -106,6 +107,9 @@ job_gamedata
 [ -n "$GAME_EXE" ] && { ARGS+=(BOOT_IMAGE="$GAME_EXE"); rm -rf "$F/build/boot/synth"; }   # no stale synth.exe in the publish
 # S5-boot's initializer generator (startup/tools/mkxcgen.py): the exe's straight-line __xc initializers become natives
 [ -n "$GAME_EXE" ] && export XCGEN_EXE="$GAME_EXE"
+# the player's exe for every link tool that reads FNVNX_EXE (thisadj's secondary-base entries, exevft, bodies), as
+# link_job.sh does: BOOT_IMAGE alone reached only resolve's --exe (full1 0540aff0: no __fnvnx_msvc_ binding at all)
+if [ -n "$GAME_EXE" ]; then export FNVNX_EXE="$GAME_EXE"; else unset FNVNX_EXE; fi
 log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; boot image: $NOTE_EXE"
 
 # 4. Guest, emulated boot, host, package on that link (the link stage stays cached: same inputs).
@@ -121,14 +125,65 @@ if [ -z "$TREE" ] || [ -z "$OBJS" ]; then
 	KEEP=(); for a in "${ARGS[@]}"; do case "$a" in PREPARED=*|OBJECTS=*) ;; *) KEEP+=("$a") ;; esac; done
 	ARGS=("${KEEP[@]}")
 fi
+# the link's compile cache (T1, tools/link/objcache.py): $FARM_HOME/linkobj, seeded from the artifacts repository's
+# linkobj/cache when this machine has (almost) none, so a fresh farm's first link is not cold (LINKCACHE=0: neither)
+export FNVNX_LINK_OBJCACHE=${FNVNX_LINK_OBJCACHE:-$FARM_HOME/linkobj}
+[ "${LINKCACHE:-1}" = 1 ] && { bash "$HERE/linkcache.sh" seed "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true; }
 # shellcheck disable=SC2086
 make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
 	${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
 ls -1t "$F"/make-*.log | tail -n +6 | xargs -r rm -f
 
+# 4a. LINKEQ=1 (T1, the incremental link's farm check, once per farm): when this head's link took compiles from the
+# link's compile cache (tools/link/objcache.py: link_objcache_*_hits > 0 in its stage.json), the link and guest are
+# built again cold at the same paths (the link and guest directories set aside, an empty compile cache) and
+# guest.nso and addrmap.tsv must have the same sha256 as the warm ones. The result goes to $F/linkeq.txt and the
+# report; a pass writes $F/linkeq.done (not again), a FAIL keeps the warm directories as link.warm/guest.warm and
+# the cold build in place (the cold one is the reference). About a cold link plus the guest (~1 h).
+NOTE_LINKEQ=""
+# step-4a-begin
+if [ "${LINKEQ:-0}" = 1 ] && [ ! -f "$F/linkeq.done" ] && [ $INPUTS = 1 ] && [ -f "$F/build/guest/guest.nso" ] \
+	&& [ -f "$F/build/link/out/addrmap.tsv" ]; then
+	hits=$(python3 -I -c 'import json, sys
+m = json.load(open(sys.argv[1])).get("metrics", {})
+print(int(sum(v for k, v in m.items() if k.startswith("link_objcache_") and k.endswith("_hits"))))' \
+		"$F/build/link/stage.json" 2>/dev/null || echo 0)
+	if [ "${hits:-0}" -gt 0 ]; then
+		log "LINKEQ: warm link took $hits compiles from the cache; linking again cold"
+		warm=$(cd "$F/build" && sha256sum guest/guest.nso link/out/addrmap.tsv)
+		rm -rf "$F/build/link.warm" "$F/build/guest.warm"
+		mv "$F/build/link" "$F/build/link.warm"; mv "$F/build/guest" "$F/build/guest.warm"
+		EQC=$F/linkeq-cache; rm -rf "$EQC"
+		t_eq=$(date +%s)
+		# shellcheck disable=SC2086
+		FNVNX_LINK_OBJCACHE=$EQC make -C "$P" guest BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS=none \
+			"${ARGS[@]}" ${FARM_MAKE_ARGS:-} > "$F/linkeq-$C12.log" 2>&1 || true
+		rm -rf "$EQC"
+		cold=$(cd "$F/build" && sha256sum guest/guest.nso link/out/addrmap.tsv 2>/dev/null || echo "no cold outputs")
+		{ echo "commit $COMMIT; warm link: $hits compiles from the cache; cold link + guest $(( $(date +%s) - t_eq )) s"
+		  echo "warm:"; echo "$warm"; echo "cold:"; echo "$cold"; } > "$F/linkeq.txt"
+		if [ "$warm" = "$cold" ]; then
+			NOTE_LINKEQ="PASS: warm == cold (guest.nso, addrmap.tsv sha256; $hits cached compiles)"
+			rm -rf "$F/build/link.warm" "$F/build/guest.warm"; cp "$F/linkeq.txt" "$F/linkeq.done"
+		else
+			NOTE_LINKEQ="FAIL: warm != cold (see linkeq.txt; link.warm and guest.warm kept)"
+		fi
+		echo "$NOTE_LINKEQ" >> "$F/linkeq.txt"; log "LINKEQ: $NOTE_LINKEQ"
+	else
+		NOTE_LINKEQ="not run: this link took nothing from the compile cache (a cold link); the next head checks"
+	fi
+fi
+# step-4a-end
+# the cache back to the artifacts repository after a link that compiled something new (LINKCACHE_PUBLISH=0: not;
+# quick_job keeps it local like its other caches); unchanged caches are not pushed
+if [ "${LINKCACHE:-1}" = 1 ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ] && [ -f "$F/build/link/out/aliases.ld" ]; then
+	LINKCACHE_NOTE="full $C12" bash "$HERE/linkcache.sh" publish "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
+fi
+
 # 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
 # known faults (docs/TOOLCHAIN.md section 18), so the frontier beyond them is published next to the raw boot's
 # (boot/stub/). tests/s5/farm_boot.sh FARM_BOOTS=stub on the pipeline's build directory; under a minute.
+# step-4b-begin
 STUB=$F/build/boot/stub
 rm -rf "$STUB"
 if [ $INPUTS = 1 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
@@ -136,12 +191,18 @@ if [ $INPUTS = 1 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso
 	IMG=${GAME_EXE:-$F/build/boot/synth/synth.exe}; [ -f "$IMG" ] || IMG=""
 	# EMU_EXTRA=--plat (R4, recon4-013): the platform lane's data (unimplemented calls, failed opens, decode and input
 	# failures) from every full job's boot path
+	# FNVNX_STUB_NULLDEV=1 (S5 a3b368ed): CreateDevice succeeds on the null device in a logged measurement mode, so
+	# the stub boot's frontier goes past the renderer. This boot only, never the raw boot or the product;
+	# FULL_STUB_NULLDEV=0 runs it without. boot/stub/nulldev records the value (the report and the ratchet name it).
+	NULLDEV=${FULL_STUB_NULLDEV:-1}; mkdir -p "$STUB"; echo "$NULLDEV" > "$STUB/nulldev"
+	FNVNX_STUB_NULLDEV=$NULLDEV \
 	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub EMU_EXTRA="${FULL_EMU_EXTRA:---plat}" \
 		FARM_UNITS="${TREE:+$TREE/build/units.json}" PY="${PY:-python3}" EMU_TIMEOUT="${EMU_TIMEOUT:-3000}" \
 		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" $IMG > "$F/stub_boot-$C12.log" 2>&1 \
 		|| log "farm_boot.sh (stub boot) exited $?"
 	ls -1t "$F"/stub_boot-*.log | tail -n +6 | xargs -r rm -f
 fi
+# step-4b-end
 # 4c. S5's work list of hand-stored image vptrs (tests/s5/hand_vptrs.py): each vptr store of an image vftable
 # address in the prepared tree, how this link binds it and the rule that fixes it, boot-hit addresses first;
 # published as boot/hand_vptrs*.tsv. About a minute.
@@ -173,12 +234,50 @@ fi
 t1=$(date +%s)
 
 # 5. Report, then the link outputs again with the guest ELF and the boot reports.
-python3 -I "$P/tools/farm/full_report.py" "$F/build" "$REPORT" --commit "$COMMIT" --make-rc "$rc" \
-	--since "$(date -u -d "@$t0" +%Y%m%d-%H%M%S)" --seconds $((t1 - t0)) --inputs "tree: $NOTE_TREE" "objects: $NOTE_OBJS" \
-	"pristine MSVC objects: $(if [ -n "$PR" ]; then echo "branch msvc/pristine/$D12"; else echo "none (zero data image)"; fi)" \
-	--hide FARM_HOME="$FARM_HOME" SRC="$SRC" EXT="$EXT" TOOLCHAIN="$TCB" ARTIFACTS="$ARTIFACTS" \
-	${FNVNX_TC:+FNVNX_TC="$FNVNX_TC"} ${DEVKITPRO:+DEVKITPRO="$DEVKITPRO"} ${PRISTINE_OBJS:+PRISTINE_OBJS="$PRISTINE_OBJS"} \
-	HOME="$HOME" > /dev/null
+# The report always renders (try1of1, 2026-11-07: the commit under test's older full_report.py rejected --since and the
+# job lost its whole report): the tool is this job's own copy ($HERE, the same checkout as full_job.sh, not the
+# commit's $P); an option it rejects ("unrecognized arguments") is dropped and it runs again; if it still fails, a
+# minimal report (commit, make exit, the stage table from the build's stage.json files, the tool's error) stands in.
+# Everything after this step appends to whichever report there is.
+# step-5-begin
+REPORT_TOOL=${FULL_REPORT_TOOL:-$HERE/full_report.py}
+RARGS=("$F/build" "$REPORT" --commit "$COMMIT" --make-rc "$rc" --since "$(date -u -d "@$t0" +%Y%m%d-%H%M%S)"
+	--seconds $((t1 - t0)) --inputs "tree: $NOTE_TREE" "objects: $NOTE_OBJS"
+	"pristine MSVC objects: $(if [ -n "$PR" ]; then echo "branch msvc/pristine/$D12"; else echo "none (zero data image)"; fi)"
+	--hide FARM_HOME="$FARM_HOME" SRC="$SRC" EXT="$EXT" TOOLCHAIN="$TCB" ARTIFACTS="$ARTIFACTS"
+	${FNVNX_TC:+FNVNX_TC="$FNVNX_TC"} ${DEVKITPRO:+DEVKITPRO="$DEVKITPRO"} ${PRISTINE_OBJS:+PRISTINE_OBJS="$PRISTINE_OBJS"}
+	HOME="$HOME")
+REPORT_RC=0
+python3 -I "$REPORT_TOOL" "${RARGS[@]}" > "$F/full_report.log" 2>&1 || REPORT_RC=$?
+if [ "$REPORT_RC" != 0 ] && grep -q 'unrecognized arguments' "$F/full_report.log"; then
+	drop=$(sed -n 's/.*unrecognized arguments: //p' "$F/full_report.log" | tr ' ' '\n' | grep '^--' || true)
+	KEEP=(); skipval=0
+	for a in "${RARGS[@]}"; do
+		if [ "$skipval" = 1 ]; then skipval=0; case "$a" in --*) ;; *) continue ;; esac; fi
+		if grep -qxF -- "$a" <<<"$drop"; then skipval=1; continue; fi
+		KEEP+=("$a")
+	done
+	log "full_report.py rejected: $(echo $drop); running it without them"
+	REPORT_RC=0; python3 -I "$REPORT_TOOL" "${KEEP[@]}" > "$F/full_report.log" 2>&1 || REPORT_RC=$?
+fi
+if [ "$REPORT_RC" != 0 ] || [ ! -s "$REPORT" ]; then
+	log "full_report.py failed (exit $REPORT_RC): minimal report"
+	python3 -I - "$F/build" "$REPORT" "$COMMIT" "$rc" "$((t1 - t0))" "$F/full_report.log" <<'PY' || printf '# full build %s\n\n- make exit %s; the report tool failed\n' "${COMMIT:0:12}" "$rc" > "$REPORT"
+import glob, json, os, sys
+b, out, commit, rc, secs, logf = sys.argv[1:7]
+L = ['# full build %s' % commit[:12], '', '- commit: `%s`; make exit %s; %d min' % (commit, rc, int(secs) // 60),
+     '- the report tool failed, this is the minimal report: %s' % (open(logf, errors='replace').read().strip().splitlines() or ['?'])[-1][:300],
+     '', '| stage | status | summary |', '|---|---|---|']
+for p in sorted(glob.glob(os.path.join(b, '*', 'stage.json'))):
+    try:
+        r = json.load(open(p))
+    except (OSError, ValueError):
+        continue
+    L.append('| %s | %s | %s |' % (os.path.basename(os.path.dirname(p)), r.get('status'), str(r.get('summary') or r.get('error') or '')[:160].replace('|', '/')))
+open(out, 'w').write('\n'.join(L) + '\n')
+PY
+fi
+# step-5-end
 {
 	if [ -f "$V1/report.md" ]; then
 		printf -- '- V1-link audits: %s (details: link/%s/v1/report.md)\n' "$NOTE_V1" "$C12"
@@ -189,6 +288,12 @@ python3 -I "$P/tools/farm/full_report.py" "$F/build" "$REPORT" --commit "$COMMIT
 		echo "- V1-link audits: $NOTE_V1"
 	fi
 } >> "$REPORT"
+if [ -n "$NOTE_LINKEQ" ]; then echo "- incremental link check (LINKEQ): $NOTE_LINKEQ" >> "$REPORT"; fi
+# 5c. The prepared tree as t/<commit12> when no prepare farm published one (the fuzz farms fetch it for the link
+# commit; T1), before link/<commit12>, so a fuzz farm that sees the link finds its tree. Never fails the job.
+if [ $INPUTS = 1 ]; then publish_tree "$F/build" || NOTE_TREEPUB="publish_tree exited $?"; else NOTE_TREEPUB="not published (no tree or no objects)"; fi
+echo "- prepared tree: $NOTE_TREEPUB" >> "$REPORT"
+log "prepared tree: $NOTE_TREEPUB"
 if [ $INPUTS = 1 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
 echo "- link outputs: $NOTE_PUB" >> "$REPORT"
 # 6. The device package (NX1): fnv.nro + the SD tree on the private branch nro/<commit12>.

@@ -89,38 +89,89 @@ def changed_text(ta, tb):
     return '\n'.join(parts)
 
 
+def unit_rules(a, b):
+    """One unit's pristine text a and prepared text b -> ([(address key, entry)] in text order, counts)."""
+    got, st = [], collections.Counter()
+    ba, bb = bodies(a), bodies(b)
+    for addr, text_a in ba.items():
+        text_b = bb.get(addr)
+        if text_b is None:
+            got.append(('%08x' % addr, dict(changed=True, rules=['GONE'])))
+            st['GONE'] += 1
+            continue
+        ta, tb = norm(text_a), norm(text_b)
+        if ta == tb:
+            continue
+        ct = changed_text(ta, tb)
+        fams = [f for f, rx in FAMILIES if rx.search(ct)]
+        if 'goto' in ta and re.search(r'\b(\w+) ; \1 =', ct):
+            fams.append('GOTO1')
+        fams = fams or ['other']
+        got.append(('%08x' % addr, dict(changed=True, rules=fams)))
+        st['changed'] += 1
+        for f in fams:
+            st[f] += 1
+    return got, st
+
+
+def _text(raw):
+    """The bytes read as open(path, encoding='utf-8', errors='replace').read() reads them (newlines translated)."""
+    import io
+    return io.TextIOWrapper(io.BytesIO(raw), encoding='utf-8', errors='replace').read()
+
+
+def _rules_cache():
+    """FNVNX_ATTRIB_CACHE=<file>: per unit, its result under sha256(this file, the pristine source, the prepared
+    source) (T1: the step diffed every changed function of every unit for every new link, minutes per fuzz run; a
+    unit whose two texts did not change gives back what it gave). marshal: str, list, dict, int keep their types."""
+    import hashlib, marshal, os
+    path = os.environ.get('FNVNX_ATTRIB_CACHE')
+    if not path:
+        return None, None, None
+    code = hashlib.sha256(open(os.path.abspath(__file__), 'rb').read()).hexdigest()
+    try:
+        d = marshal.load(open(path, 'rb'))
+        m = d['units'] if d.get('code') == code else {}
+    except (OSError, EOFError, ValueError, TypeError, KeyError):
+        m = {}
+    return path, code, m
+
+
 def cmd_rules(out):
+    import hashlib, marshal, os
     units = json.load(open(config.DECOMP / 'build/units.json'))['units']
     res, seen, stats = {}, set(), collections.Counter()
+    cpath, code, cache = _rules_cache()
+    used, hits = {}, 0
     for u in units:
         src = u['source']
         if src in seen:
             continue
         seen.add(src)
         try:
-            a = open(config.DECOMP / src, encoding='utf-8', errors='replace').read()
-            b = open(config.TREE / src, encoding='utf-8', errors='replace').read()
+            ra = open(config.DECOMP / src, 'rb').read()
+            rb = open(config.TREE / src, 'rb').read()
         except OSError:
             continue
-        ba, bb = bodies(a), bodies(b)
-        for addr, text_a in ba.items():
-            text_b = bb.get(addr)
-            if text_b is None:
-                res['%08x' % addr] = dict(changed=True, rules=['GONE'])
-                stats['GONE'] += 1
-                continue
-            ta, tb = norm(text_a), norm(text_b)
-            if ta == tb:
-                continue
-            ct = changed_text(ta, tb)
-            fams = [f for f, rx in FAMILIES if rx.search(ct)]
-            if 'goto' in ta and re.search(r'\b(\w+) ; \1 =', ct):
-                fams.append('GOTO1')
-            fams = fams or ['other']
-            res['%08x' % addr] = dict(changed=True, rules=fams)
-            stats['changed'] += 1
-            for f in fams:
-                stats[f] += 1
+        key = hashlib.sha256(b'%d\0' % len(ra) + ra + rb).hexdigest() if cache is not None else None
+        hit = cache.get(key) if cache is not None else None
+        if hit is not None:
+            got, st = [(k, dict(changed=True, rules=list(r))) for k, r in hit[0]], collections.Counter(hit[1])
+            hits += 1
+        else:
+            got, st = unit_rules(_text(ra), _text(rb))
+        if cache is not None:
+            used[key] = ([(k, e['rules']) for k, e in got], dict(st))
+        for k, e in got:
+            res[k] = e
+        stats.update(st)
+    if cpath:
+        tmp = '%s.%d.tmp' % (cpath, os.getpid())
+        os.makedirs(os.path.dirname(cpath) or '.', exist_ok=True)
+        with open(tmp, 'wb') as f:
+            marshal.dump({'code': code, 'units': used}, f)
+        os.replace(tmp, cpath)
+        print('attrib cache: %d of %d units reused' % (hits, len(used)))
     # S1b per-site patches: exact attribution from the patch files (`@@ RULE source 0xaddr`)
     pdir = config.PORT / 'patches'
     for p in sorted(pdir.glob('*.s1b')) if pdir.exists() else []:

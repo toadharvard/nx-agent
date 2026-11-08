@@ -32,8 +32,10 @@ import re
 import shutil
 import struct
 import subprocess
+import time
 
 import layout
+import objcache
 
 AS = os.environ.get('AS', 'aarch64-linux-gnu-as')
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
@@ -348,7 +350,9 @@ def write_requests(path, reqs):
     with open(path, 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#class\tspelling\twhy\thosts\n')
         for c, (sp, why, hosts) in sorted(reqs.items()):
-            f.write('%s\t%s\t%s\t%s\n' % (c, sp or '', ','.join(sorted(why)), ' '.join(hosts)))
+            # every host is followed by '|': unit paths may hold spaces (src/fallout/region system/tesregion.cpp); split on
+            # spaces they were torn apart and the class ended "no host unit could name the class" (R2, ranks 454...)
+            f.write('%s\t%s\t%s\t%s\n' % (c, sp or '', ','.join(sorted(why)), ''.join(h + '|' for h in hosts)))
 
 
 def load_requests(path):
@@ -359,7 +363,10 @@ def load_requests(path):
                 continue
             f = line.rstrip('\n').split('\t')
             if len(f) >= 4:
-                out[f[0]] = (f[1] or None, set(f[2].split(',')), f[3].split())
+                # every host ends in '|', so a single host with a space (src/fallout_shared/region system/tesregion.cpp) is
+                # not torn apart; a file without '|' is an older one (hosts split on spaces)
+                hosts = f[3].split('|') if '|' in f[3] else f[3].split()
+                out[f[0]] = (f[1] or None, set(f[2].split(',')), [h for h in hosts if h])
     return out
 
 
@@ -576,8 +583,8 @@ def compile_probe(tree, workdir, unit, items, tag, extra=(), prelude=None, game=
             return None, []
         open(src, 'w').write(head + '\n'.join(line for _, _, line in alive) + '\n')
         try:
-            r = subprocess.run([CXX, *fl, src, '-o', obj], cwd=tree, capture_output=True, text=True,
-                               errors='replace', timeout=600)
+            # objcache: the same compile of the last link gives back its status, errors and object (T1)
+            r = objcache.Result(*objcache.compile(CXX, fl, src, obj, cwd=tree, timeout=600))
         except subprocess.TimeoutExpired:
             return None, []
         if os.environ.get('FNVNX_PROBE_DEBUG'):
@@ -1198,6 +1205,7 @@ def run(out, tree, jobs=4):
     classes.tsv, stats.txt, one .vt.S / zz_vt_*.o per host unit). Probe results are cached per host unit (source
     mtime + class list) in out/vtables/cache.json."""
     import sigs   # sibling module (fnvlink.py puts this directory on sys.path)
+    sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'))   # the parses of the last link process (T1)
     reqs = load_requests(os.path.join(out, 'vtable_requests.tsv'))
     dpath = os.path.join(out, 'rtti_defined.txt')
     defined = set(open(dpath, encoding='utf-8', errors='surrogateescape').read().split()) if os.path.exists(dpath) \
@@ -1209,6 +1217,7 @@ def run(out, tree, jobs=4):
         if name.endswith(('.vt.S', '.o')):
             os.remove(os.path.join(vdir, name))
     print('vtables: %d classes requested' % len(reqs), flush=True)
+    t_start = time.time()
     todo = {c: (sp, hosts) for c, (sp, why, hosts) in reqs.items() if sp and hosts}
     results = {}          # class -> (host, probe result)
     fallback = {}         # class -> (host, non-polymorphic probe result) while a polymorphic view is looked for
@@ -1239,7 +1248,14 @@ def run(out, tree, jobs=4):
 
     while todo and rounds < 8:
         rounds += 1
-        open_ = {c: [h for h in hs if h not in tried[c]][:3] for c, (_, hs) in todo.items()}
+        # a class's first host is the unit that referenced it (resolve lists referencing units first): the one most
+        # likely to see its declaration. It is probed before any other host, whatever batch it makes; the greedy choice
+        # among the next three hosts only orders the rest. With the greedy choice alone, a class whose own unit has few
+        # open classes can lose every round to larger hosts and is never probed there once the 8 rounds end
+        # (tests/s2d/test_vtreq_first_host.py). Link 97deacd38aec: stats say 8 probe rounds and 1,255 classes with no
+        # host; the cached probe batch of tesobjectclot.cpp holds its other 8 classes but not FUN_005155b0_Base144
+        open_ = {c: ([hs[0]] if hs and hs[0] not in tried[c] else [h for h in hs if h not in tried[c]][:3])
+                 for c, (_, hs) in todo.items()}
         open_ = {c: hs for c, hs in open_.items() if hs}
         assign = collections.defaultdict(list)
         while open_:   # greedy: the host unit that can take most of the open classes first
@@ -1296,6 +1312,7 @@ def run(out, tree, jobs=4):
     json.dump(newcache, open(cache_path + '.tmp', 'w'))
     os.replace(cache_path + '.tmp', cache_path)
 
+    t_probe = time.time()
     # ---- emit, per host unit
     per_host = collections.defaultdict(list)
     done_enc, rows = set(), []
@@ -1443,7 +1460,9 @@ def run(out, tree, jobs=4):
         shutil.copyfile(vt_o, o_path)
     json.dump(newx, open(xcache_path + '.tmp', 'w'))
     os.replace(xcache_path + '.tmp', xcache_path)
+    t_emit = time.time()
     close_emitted(tree, work, [(h, o_path) for h, _, o_path, _ in built], defined, stats)
+    t_close = time.time()
     stats['slot functions no object defines'] = len(wanted_all)
     stats['slot functions emitted from the host units'] = len(emitted_all & wanted_all)
     with open(os.path.join(vdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
@@ -1459,4 +1478,7 @@ def run(out, tree, jobs=4):
     lines += ['  %-64s %d' % kv for kv in sorted(stats.items())]
     open(os.path.join(vdir, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines), flush=True)
+    print('vtables phases: probe rounds %.1f s, emit %.1f s, close %.1f s, write %.1f s' % (
+        t_probe - t_start, t_emit - t_probe, t_close - t_emit, time.time() - t_close), flush=True)
+    print(objcache.summary('vtables'), flush=True)
     return stats

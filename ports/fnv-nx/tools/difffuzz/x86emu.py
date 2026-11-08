@@ -685,10 +685,8 @@ class X86Engine:
                 uc.emu_stop()
                 return
             v = world.u32(case.ret_bytes(k), 0)
-            # (R4 flow) an import has no declaration here, so the native's canned result is the untyped one (arm64emu
-            # _on_stub: the low byte is 0/1, a call site may test it as a bool). The same byte here: 0x00d45c50 read
-            # TlsGetValue's 0x030020f4 on the oracle and 0x03002000 natively, and stored through two stream pointers
-            v = (v & ~0xff) | (case.ret_bytes(k)[0] & 1)
+            # an import's canned result is the raw word on both machines (S1-rules d26-imp: arm64emu._on_stub does not
+            # normalise an import's low byte either; R4 flow had normalised both, 0x00d45c50)
             uc.reg_write(UC_X86_REG_EDX, world.u32(case.ret_bytes(k), 4))
             uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)

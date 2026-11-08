@@ -55,7 +55,13 @@ in this order (first that applies):
 4c. `tree-inline` - (after vcall) the tree has the body inline in a unit's own source, out of line (`inline
    C::f() {...}` in a .cpp) or in the class body of a copy of C: that unit is compiled again with
    `-fkeep-inline-functions` like msvc-inline and only the wanted symbol is kept (its own name, or the one the
-   relaxed key pairs, as for msvc-inline). A host that does not emit it leaves the name `missing`.
+   relaxed key pairs, as for msvc-inline). A host that does not emit it leaves the name `missing`. Across copies of
+   a class (s2d not-compiled): the emitted member of another copy (copy_key: unit namespaces removed, parameters and
+   cv exact) is renamed to the wanted name when the layout probe (LayoutGate) gives both classes and their
+   class-like parameters one size; names MSVC calls out of line (the vcall check's pristine reference) and
+   constructors / destructors are taken too, always through the gate; up to three hosts are tried.
+1e. `copy-addr` (after exe-addr) - a member of a class copy whose same member of another copy (copy_key) units.json
+   places at one address the native build defines, with one layout on both sides (LayoutGate): `__fnv_<addr>`.
 5c. `addr-host` - an exe address refs.tsv binds references to (`code-defmissing`) whose placing unit's object
    defines nothing there: a `??_G` scalar deleting destructor (no GCC counterpart: `gdel_line` defines
    `__fnv_<addr>(C *, unsigned)` in the placing unit), or an inline body GCC did not emit (the unit compiled with
@@ -70,7 +76,9 @@ in this order (first that applies):
 5b. `crt-rule` - a runtime member the C++ library defines by its contract, not by the decomp: the MSVC STL's
    throwers `C::_Xlen()` / `C::_Xran()` / `C::_Xinvalid_argument()` of the decomp's string and vector copies (a stub
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
-   placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing).
+   placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing), and
+   the decomp's `basic_streambuf` copies' `_Lock()` / `_Unlock()` (CRT_MUTEX: `this + 4` is the std::_Mutex, S4's
+   fnvnx_mutex_lock / unlock).
    After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
 
@@ -89,6 +97,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import sys
 
 import sigs
@@ -142,6 +151,37 @@ def load_native_names(addrmap_tsv):
             f = line.rstrip('\n').split('\t')
             if not line.startswith('#') and len(f) >= 4 and f[1] == 'F' and f[3].startswith('_Z'):
                 res[int(f[0], 16)] = f[3]
+    return res
+
+
+CRT_SYMBOLS_TSV = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'platform',
+                                                'crt', 'crt_symbols.tsv'))
+
+
+def load_provider_params(crt_symbols_tsv=None):
+    """platform/crt/crt_symbols.tsv -> {address: parameter count} of the rows whose identification (S4's reading of the
+    exe function) spells a C++ parameter list: `std::_Lockit::_Lockit(int)` -> 1 (the object is not counted),
+    `std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)` -> 2, `std::locale::_Getgloballocale() [note]` -> 0.
+    A trailing `[note]` is dropped first; a row with no parameter list is not listed."""
+    res = {}
+    path = crt_symbols_tsv or CRT_SYMBOLS_TSV
+    if not os.path.exists(path):
+        return res
+    for line in open(path, encoding='utf-8', errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if line.startswith('#') or len(f) < 7 or not f[0].startswith('0x'):
+            continue
+        m = re.search(r'\((.*)\)\s*(?:const)?\s*$', re.sub(r'\s*\[.*\]\s*$', '', f[2]))
+        if not m:
+            continue
+        s, depth, n = m.group(1).strip(), 0, 0
+        if s and s != 'void':
+            n = 1
+            for ch in s:
+                depth += ch in '<('
+                depth -= ch in '>)'
+                n += ch == ',' and depth == 0
+        res[int(f[0], 16)] = n
     return res
 
 
@@ -352,7 +392,7 @@ def pristine_bodies(objdir, nunits, wanted_tokens):
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:   # a damaged object must not stop the step
             continue
         for name, si in c.defs.items():
@@ -435,6 +475,18 @@ class Classifier:
                     for _, k in def_keys(m):
                         self.idx[k][a].add(n)
                     self.addr_units[a].add(u.source)
+        # copy key -> {addr: {MSVC names of a unit-local class copy}}, and the units naming each (by_copy)
+        self.cidx = collections.defaultdict(lambda: collections.defaultdict(set))
+        self.cunits = collections.defaultdict(set)
+        for u in units.values():
+            for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
+                if a in native and n.startswith('?') and 'fnv_' in n:
+                    m = msvc(n)
+                    if m.kind == 'func' and any(UNIT_NS.match(q) for q in m.qual):
+                        k = copy_key(m, variant=False)
+                        if k:
+                            self.cidx[k][a].add(n)
+                            self.cunits[n].add(u.source)
         self.fidx = collections.defaultdict(lambda: collections.defaultdict(set))  # fold key -> {addr: {names}}
         for u in units.values():
             for a, n in list(u.defs) + [(a, n) for n, a in u.refs.items()]:
@@ -464,6 +516,21 @@ class Classifier:
             if len(cands) > 1:
                 return 'ambiguous', None, ','.join('%08x' % a for a in sorted(cands)[:6])
         return None
+
+    def by_copy(self, isig):
+        """(address, MSVC name, units naming it) when another unit-local copy of the member's class has the same
+        member (copy_key) at exactly one address the native build defines with the right kind, else None. The
+        layout gate is the caller's (copy_addr_pass)."""
+        k = copy_key(isig, variant=False)
+        if not k or isig.variant == 'D0':
+            return None
+        want = VARIANT_KIND.get(isig.variant, 'F') if isig.variant else 'F'
+        cands = {a: ns for a, ns in self.cidx.get(k, {}).items() if self.native.get(a) == want}
+        if len(cands) != 1:
+            return None
+        (a, ns), = cands.items()
+        n = sorted(ns)[0]
+        return a, n, self.cunits[n]
 
     def dtor_as_fun(self, isig, a, ns):
         """A D1/D2 whose address units.json names with this destructor (an MSVC `??1` there) while the native build
@@ -553,8 +620,17 @@ CRT_THROW = {'_Xlen': ('_ZSt20__throw_length_errorPKc', '%s too long'),
              '_Xinvalid_argument': ('_ZSt24__throw_invalid_argumentPKc', 'invalid %s argument')}
 
 
+# MSVC's basic_streambuf::_Lock() / _Unlock() are inline: `_Mylock._Lock()`, the std::_Mutex member at +4 (after the
+# vptr) whose first word is the critical section pointer. The exe's _Sentry_base constructor 0x00ad2fa0 and its
+# destructor do `add ecx, 4; call 0x00ec3277` / `0x00ec3280` (crt_symbols.tsv: std::_Mutex::_Lock / _Unlock, S4's
+# fnvnx_mutex_lock / fnvnx_mutex_unlock over `void *self` = the _Mutex). The decomp's streambuf copies declare the
+# two members and never define them (their `void* streamLock` is that first word).
+CRT_MUTEX = {'_Lock': 'fnvnx_mutex_lock', '_Unlock': 'fnvnx_mutex_unlock'}
+
+
 def crt_rule(isig):
-    """('throw', libstdc++ thrower, message) / ('ret', None, None) for a name crt-rule defines, else None."""
+    """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('mutex', platform function, 'this + 4') for a
+    name crt-rule defines, else None."""
     if isig.kind != 'func' or len(isig.qual) < 2 or isig.params is None:
         return None
     last = isig.qual[-1]
@@ -565,6 +641,8 @@ def crt_rule(isig):
     if last == 'operator delete' and len(isig.params) == 2 and \
             all(sigs.canon_param(p, 2) == 'void*' for p in isig.params):
         return ('ret', None, None)
+    if last in CRT_MUTEX and not isig.params and re.match(r'basic_streambuf\b', isig.qual[-2]):
+        return ('mutex', CRT_MUTEX[last], 'this + 4')
     return None
 
 
@@ -575,6 +653,7 @@ def crt_pass(rows, itanium):
         k = crt_rule(itanium(r.name)) if r.cls == 'missing' else None
         if k:
             r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
+                           else '%s(%s): the _Mutex member at +4' % (k[1], k[2]) if k[0] == 'mutex'
                            else 'placement delete: ret')
         out.append(r)
     return out
@@ -590,6 +669,8 @@ def emit_crt(rows, itanium):
                 '    .type %s, %%function' % q, q + ':']
         if kind == 'ret':
             out += ['    ret']
+        elif kind == 'mutex':
+            out += ['    add x0, x0, #4', '    b ' + fn]
         else:
             out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]
         out += ['    .size %s, .-%s' % (q, q)]
@@ -777,11 +858,27 @@ def emit_empty(rows):
     return '\n'.join(out) + '\n'
 
 
-def synth_host(tree, work, host, rows, itanium, inline=False):
+def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=()):
     """Compile the host unit again with the `= default` lines (special-default) or with -fkeep-inline-functions
-    (msvc-inline); keep only the wanted symbols. -> (object path or None, {names defined}, {name: why failed})."""
+    (msvc-inline); keep only the wanted symbols. -> (object path or None, {names defined}, {name: why failed}).
+    gate (inline): a LayoutGate. With it, an emitted member of another copy of the wanted name's class (copy_key:
+    the same member, parameters and cv once unit namespaces are removed) is renamed to the wanted name when it is the
+    only such symbol and the gate gives both classes (and their class-like parameters) one size. Names in strict
+    (tree-inline's own pairings across units: copies, constructors and destructors, names MSVC calls out of line)
+    pass the gate for every pairing, also a body the host emits under the wanted name itself when the host is not a
+    referencing unit."""
     import vtables
     want = {r.name for r in rows}
+    ref_units = {r.name: [u for u in r.units.split(',') if u] for r in rows}
+    gnotes = {}
+
+    def gate_ok(w, emitted):
+        if gate is None:
+            return False
+        ok, why = gate.same(ref_units.get(w) or [host], copy_types(itanium(w)), host, copy_types(itanium(emitted)))
+        if not ok:
+            gnotes[w] = why
+        return ok
     items, failed = [], {}
     if not inline:
         for k, r in enumerate(sorted(rows, key=lambda r: r.name)):
@@ -796,6 +893,13 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
             items.append((k, 'bd', line))
     else:
         items.append((0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}'))
+        for k, r in enumerate(sorted(rows, key=lambda r: r.name)):   # a class template's destructor: instantiated here
+            line = inst_line(itanium(r.name))
+            if line and line not in {it[2] for it in items}:
+                for j, fw in enumerate(inst_fwd(itanium(r.name))):   # a pointee the host does not define
+                    if fw not in {it[2] for it in items}:
+                        items.append((-1 - len(items), 'fwd', fw))
+                items.append((k + 1, 'inst', line))
     # emitted bodies are game code: compile.sh's own flags (layout.game_flags: code generation, FTOI2, S12 order)
     flags = ('-ffunction-sections', '-fdata-sections') + (('-fkeep-inline-functions',) if inline else ())
     obj, alive = vtables.compile_probe(tree, work, host, items, 'bdi' if inline else 'bd', flags, prelude='',
@@ -815,23 +919,46 @@ def synth_host(tree, work, host, rows, itanium, inline=False):
             if n.startswith('_Z') and n not in want:
                 for _, k in def_keys(itanium(n)):
                     byk[k].add(n)
-        for w in want - defined:
+        cbyk = collections.defaultdict(set)   # copy keys of the emitted names (gate given)
+        if gate is not None:
+            for n in defined:
+                if n.startswith('_Z') and n not in want:
+                    k = copy_key(itanium(n))
+                    if k:
+                        cbyk[k].add(n)
+        for w in sorted(want & defined & set(strict)):
+            if host not in ref_units.get(w, ()) and not gate_ok(w, w):
+                want.discard(w)
+                failed[w] = 'synth-failed (copy pair gate: %s)' % gnotes.get(w, '?')
+        for w in sorted(want - defined):
+            done = False
             for _, k in relaxed_keys(itanium(w)):
                 if len(byk.get(k, ())) == 1:
-                    renames[next(iter(byk[k]))] = w
+                    e = next(iter(byk[k]))
+                    if e not in renames and (w not in strict or gate_ok(w, e)):
+                        renames[e] = w
+                        done = True
                     break
+            if not done and gate is not None:
+                k = copy_key(itanium(w))
+                e = next(iter(cbyk[k])) if k and len(cbyk.get(k, ())) == 1 else None
+                if e and e not in renames and gate_ok(w, e):
+                    renames[e] = w
         if renames:
             ren = base + 'r.o'
             args = ['--redefine-sym=%s=%s' % kv for kv in sorted(renames.items())]
             if subprocess.run([vtables.OBJCOPY, *args, clean, ren], capture_output=True).returncode == 0:
                 clean = ren
                 defined = (defined - set(renames)) | set(renames.values())
-    got = vtables.gc_weaken(clean, want & defined, base + '.x')
+    got = vtables.gc_weaken(clean, want & defined, base + '.x') if want & defined else None
     if not got:
-        return None, set(), {n: 'synth-failed (not emitted)' for n in want}
+        failed.update({n: 'synth-failed (not emitted%s)' % ('; copy pair gate: ' + gnotes[n] if n in gnotes else '')
+                       for n in want})
+        return None, set(), failed
     path, roots = got
     for n in want - roots:
-        failed[n] = 'synth-failed (%s)' % ('not emitted by the host' if inline else 'GCC refused the = default')
+        failed[n] = 'synth-failed (%s)' % ('not emitted by the host' if inline else 'GCC refused the = default') + \
+            ('; copy pair gate: ' + gnotes[n] if n in gnotes else '')
     return path, roots, failed
 
 
@@ -861,6 +988,149 @@ def load_type_sizes(out):
     return res
 
 
+def inst_line(isig):
+    """`template C<args>::~C();` - the explicit instantiation of the destructor of a class template instantiation
+    over global types (`NiPointer<NiLight>`), None for any other name. The body is the template's own, from the
+    host's headers: what a unit sees where the pointee is complete."""
+    if isig is None or isig.kind != 'func' or isig.params or isig.variant not in ('D1', 'D2') or len(isig.qual) < 2:
+        return None
+    if isig.qual[-1] != '{dtor}' or '<' not in isig.qual[-2] or not isig.qual[-2].endswith('>'):
+        return None
+    if any(UNIT_NS.match(q) or UNIT_NS_ANY.search(q) for q in isig.qual):
+        return None   # a unit-local copy of a class: its own unit hosts it (exe-addr / copy pairs)
+    if any(c in q for q in isig.qual[:-1] for c in '`\'({'):
+        return None
+    base = isig.qual[-2][:isig.qual[-2].index('<')]
+    return 'template %s::~%s();' % ('::'.join(isig.qual[:-1]), base)
+
+
+def inst_pointees(isig):
+    """Class names the template arguments of an inst_line name use only as pointees (`NiTArray<ImageSpaceEffect*,
+    NiTMallocInterface<ImageSpaceEffect*>>`): never as a value, a template argument of its own or a scope. The
+    destructor body does not look inside them, so the host needs a declaration (`struct X;`), not a definition."""
+    if inst_line(isig) is None:
+        return []
+    cls = isig.qual[-2]
+    args = cls[cls.index('<'):]
+    out = []
+    for w in dict.fromkeys(ARG_WORDS.findall(args)):
+        if w in BUILTIN_WORDS or w == cls[:cls.index('<')]:
+            continue
+        occ = list(re.finditer(r'(?<![\w:])%s(?![\w:])' % re.escape(w), args))
+        if occ and len(occ) == len(re.findall(r'\b%s\b' % re.escape(w), args)) and \
+                all(re.match(r'\s*\*', args[m.end():]) and not args[m.end():].lstrip().startswith('::') for m in occ):
+            out.append(w)
+    return out
+
+
+ARG_WORDS = re.compile(r'[A-Za-z_]\w*')
+BUILTIN_WORDS = frozenset('const volatile unsigned signed int long short char bool float double void wchar_t '
+                          'struct class enum'.split())
+
+
+INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+
+
+def include_closure(tree, files):
+    """{file: set of the files it includes, itself included} for tree-relative `files`: quoted includes resolved
+    against the file's directory, include/, src/ and the tree root, else by basename; read once per file."""
+    by_base = collections.defaultdict(list)
+    for base in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(tree, base)):
+            for f in fs:
+                if f.endswith(('.h', '.inl', '.hpp')):
+                    by_base[f].append(os.path.relpath(os.path.join(dp, f), tree))
+    direct = {}
+
+    def inc(rel):
+        if rel not in direct:
+            try:
+                raw = open(os.path.join(tree, rel), encoding='utf-8', errors='replace').read()
+            except OSError:
+                raw = ''
+            res = set()
+            for m in INCLUDE.findall(raw):
+                for cand in (os.path.normpath(os.path.join(os.path.dirname(rel), m)), os.path.join('include', m),
+                             os.path.join('src', m), m):
+                    if os.path.exists(os.path.join(tree, cand)):
+                        res.add(cand)
+                        break
+                else:
+                    res.update(by_base.get(os.path.basename(m), ())[:1])
+            direct[rel] = res
+        return direct[rel]
+    out = {}
+    for f in files:
+        seen, todo = {f}, [f]
+        while todo:
+            for g in inc(todo.pop()):
+                if g not in seen:
+                    seen.add(g)
+                    todo.append(g)
+        out[f] = seen
+    return out
+
+
+def inst_hosts(tree, rows, itanium, unit_sources, found, ref_units, limit=5):
+    """{name: [host units]} for destructors of template instantiations (inst_line) whose template has a body of its
+    own in the tree (`found`: bodycause.tree_bodies for (class, ~class), live only; specializations of other
+    arguments count too, the host's compile decides). A host is a unit whose includes reach that body and a
+    definition of every class the arguments name (the pointee is complete there); the referencing units are left
+    out (they declare the destructor without a body: the pointee is incomplete there)."""
+    import bodycause
+    want, bodyfiles, ptrs = {}, {}, {}
+    for r in rows:
+        isg = itanium(r.name)
+        c = bodycause.key_of(isg)
+        if not inst_line(isg) or not c:
+            continue
+        fl = {f for f, w in found.get((c[0], '~' + c[0]), ()) if w.startswith('live')}
+        if not fl:
+            continue
+        cls = isg.qual[-2]
+        words = [w for w in dict.fromkeys(ARG_WORDS.findall(cls[cls.index('<'):])) if w not in BUILTIN_WORDS and
+                 w != c[0]]
+        want[r.name], bodyfiles[r.name] = words, fl
+        ptrs[r.name] = set(inst_pointees(isg))
+    if not want:
+        return {}
+    alltok = sorted({w for ws in want.values() for w in ws}, key=len, reverse=True)
+    rdef = re.compile(r'\b(?:class|struct)\s+(%s)\b[^;{(]*\{' % '|'.join(map(re.escape, alltok))) if alltok else None
+    files = []
+    for base in ('src', 'include'):
+        for dp, _, fs in os.walk(os.path.join(tree, base)):
+            files += [os.path.relpath(os.path.join(dp, f), tree) for f in fs if f.endswith(('.h', '.inl', '.hpp', '.cpp'))]
+    defs = collections.defaultdict(set)     # word -> files defining a class of that name
+    for f in files:
+        try:
+            raw = open(os.path.join(tree, f), encoding='utf-8', errors='replace').read()
+        except OSError:
+            continue
+        if rdef:
+            for w in set(rdef.findall(raw)):
+                defs[w].add(f)
+    clo = include_closure(tree, sorted(unit_sources))
+    out = {}
+    for n, ws in want.items():
+        rus = set(ref_units.get(n, ()))
+        cand = []
+        for u in sorted(unit_sources):
+            if u in rus:
+                continue
+            reach = clo.get(u, {u})
+            if bodyfiles[n] & reach and all(not defs.get(w) or defs[w] & reach for w in ws if w not in ptrs[n]) and \
+                    any(defs.get(w) for w in ws):   # a pointee needs a declaration only (inst_fwd)
+                cand.append(u)
+        if cand:
+            out[n] = sorted(cand, key=lambda u: (len(clo[u]), u))[:limit]
+    return out
+
+
+def inst_fwd(isig):
+    """`struct X;` for each class inst_pointees names: what the host needs where it does not define X."""
+    return ['struct %s;' % w for w in inst_pointees(isig)]
+
+
 def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
     """{name: host unit} for missing names whose body the tree has inline (out of line `inline C::f(`, or in a
     class body of C) in a unit's own source (.cpp in units.json). A referencing unit is preferred, then the first
@@ -873,25 +1143,169 @@ def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
             keys[r.name] = (k[0], k[1])
     if not keys:
         return {}
-    found = bodycause.tree_bodies(tree, set(keys.values()))
+    search = {}   # tree_bodies spells a constructor / destructor by the class's own name
+    for n, (c, m) in keys.items():
+        search[n] = (c, c if m == '{ctor}' else '~' + c if m == '{dtor}' else m)
+    found = bodycause.tree_bodies(tree, set(search.values()))
     out = {}
     for r in rows:
         k = keys.get(r.name)
         if not k:
             continue
-        hosts = sorted({f for f, where in found.get(k, ()) if where.startswith('live') and f in unit_sources})
+        hosts = sorted({f for f, where in found.get(search[r.name], ()) if where.startswith('live') and
+                        f in unit_sources})
         if layouts:   # the class must have the referencing units' size in the host where the probe knows both
             ref = set().union(*(layouts.get((u, k[0]), set()) for u in r.units.split(',')))
             hosts = [h for h in hosts if not (ref and layouts.get((h, k[0])) and layouts[(h, k[0])] != ref)]
         if hosts:
             refs = [h for h in hosts if h in r.units.split(',')]
-            out[r.name] = (refs or hosts)[0]
+            out[r.name] = refs + [h for h in hosts if h not in refs]
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------- copy pairs
+
+def copy_key(sig, variant=True):
+    """The key the copies of one class share: the qualified name and the parameter types with every unit namespace
+    (`fnv_<a>::`) removed, parameters at sigs level 0 (exact spellings), the member's cv and (variant) the Itanium
+    ctor/dtor variant kept. The decomp's unit-local copies of a class (`fnv_00ad47f0::std::basic_ostream`,
+    `fnv_00ac9790::std::basic_ostream`) and the global class get one key; another class, overload or cv does not."""
+    if sig is None or sig.kind != 'func' or sig.params is None or len(sig.qual) < 2:
+        return None
+    qual = tuple(UNIT_NS_ANY.sub('', sigs.canon_type(q)) for q in sig.qual if not UNIT_NS.match(q))
+    if len(qual) < 2:
+        return None
+    params = tuple(UNIT_NS_ANY.sub('', sigs.canon_param(p, 0)) for p in sig.params)
+    return (qual, params, sig.cv or '', (sig.variant or '') if variant else '')
+
+
+def copy_types(sig):
+    """The spellings the copy-pair layout gate compares, in order: the member's class, then each class-like
+    parameter type (cv, `*` and `&` stripped; scalars and function types left out)."""
+    qual = [sigs.canon_type(q) for q in sig.qual[:-1]]
+    out = ['::'.join(qual)]
+    for p in sig.params or ():
+        t = sigs.canon_param(p, 0)
+        while True:
+            t2 = re.sub(r'^(?:const|volatile)\s+|\s*(?:const|volatile)$|\s*[\*&]$', '', t).strip()
+            if t2 == t:
+                break
+            t = t2
+        if t and t != '...' and '(' not in t and not SCALARS.match(t) and not re.match(r'^-?\d+$', t):
+            out.append(t)
+    return out
+
+
+class LayoutGate:
+    """Sizes of types in units for the copy pairs (copy-addr, tree-inline across copies): out/layouts.tsv's rows,
+    else the layout probe (layout.probe_unit in work, cached per (unit, type); thread-safe, one probe per unit at a
+    time). same(): every type of the pair is sized in each referencing unit (at most max_units of them) and in the
+    defining unit, with one size on both sides. A type the probe cannot name is no evidence: the pair fails."""
+
+    def __init__(self, tree, work, known=None, max_units=8):
+        import threading
+        self.tree, self.work, self.known, self.max_units = tree, work, known or {}, max_units
+        self.cache, self.lock = {}, threading.Lock()
+        self.ulocks = collections.defaultdict(threading.Lock)
+
+    def sizes(self, unit, types):
+        """{type: size or None}."""
+        res, need = {}, []
+        for t in types:
+            k = (unit, sigs.canon_type(t))
+            kn = {s for s in self.known.get(k, ()) if s >= 0}
+            if len(kn) == 1:
+                res[t] = next(iter(kn))
+            elif k in self.cache:
+                res[t] = self.cache[k]
+            elif t not in need:
+                need.append(t)
+        if need:
+            import layout
+            with self.lock:
+                ul = self.ulocks[unit]
+            with ul:
+                got = layout.probe_unit(self.tree, self.work, unit, need)
+            for t in need:
+                lay = got.get(t)
+                self.cache[(unit, sigs.canon_type(t))] = res[t] = lay.size if lay and lay.size >= 0 else None
+        return res
+
+    def same(self, ref_units, ref_types, def_unit, def_types):
+        """-> (ok, note)."""
+        if len(ref_types) != len(def_types) or not ref_units or not def_unit:
+            return False, 'no layout pair'
+        d = self.sizes(def_unit, def_types)
+        refs = sorted(ref_units)[:self.max_units]
+        for u in refs:
+            s = self.sizes(u, ref_types)
+            for rt, dt in zip(ref_types, def_types):
+                if s.get(rt) is None or d.get(dt) is None:
+                    return False, 'layout probe does not size %s' % (rt if s.get(rt) is None else dt)
+                if s[rt] != d[dt]:
+                    return False, 'sizes differ: %s %d in %s, %s %d in %s' % (rt, s[rt], u, dt, d[dt], def_unit)
+        return True, 'sizes %s' % ','.join(str(d[t]) for t in def_types)
+
+
+def copy_addr_pass(rows, cl, itanium, gate):
+    """`copy-addr`: a missing member of a class copy (or of the global class) whose same member of another copy
+    units.json places at one address the native build defines (Classifier.by_copy), with one layout on both sides
+    (LayoutGate: the class and its class-like parameters, in the referencing units and in a unit naming the other
+    copy's MSVC name). Bound to `__fnv_<addr>`."""
+    out = []
+    for r in rows:
+        isig = itanium(r.name)
+        hit = cl.by_copy(isig) if r.cls == 'missing' and r.units and isig.kind == 'func' else None
+        if hit:
+            a, mn, dunits = hit
+            ok, why = gate.same(r.units.split(','), copy_types(isig), sorted(dunits)[0], copy_types(cl.msvc(mn)))
+            if ok:
+                r = Row(r.name, 'copy-addr', a, ADDR_SYM % a, r.units, 'via %s in %s (%s)' %
+                        (mn, sorted(dunits)[0], why), None)
+            else:
+                r = r._replace(note=r.note + '; copy-addr %08x: %s' % (a, why))
+        out.append(r)
+    return out
+
+
+def retry_special(rows, failed, itanium):
+    """{host unit: rows}: `msvc-inline` names whose synthesis failed and that are a special member the implicit
+    definition covers (special_of / default_line, a class that is not a template): tried again as `special-default`
+    in the first referencing unit."""
+    out = collections.defaultdict(list)
+    for r in rows:
+        if r.cls == 'msvc-inline' and r.name in failed and r.units:
+            isig = itanium(r.name)
+            sk = special_of(isig) if isig.kind == 'func' else None
+            if sk and default_line(sk, isig):
+                out[sorted(r.units.split(','))[0]].append(r)
+    return out
+
+
+def fold_fallback(rows, failed, cl, itanium):
+    """A `msvc-inline` / `msvc-empty` name whose synthesis failed (`failed`: the host does not emit it) but which is a
+    pointer-argument template member whose other instantiations units.json places at one native address
+    (Classifier.by_fold): the folded exe body, `template-fold`. `BSSimpleList<fnv_<a>::Rec*>::~BSSimpleList` is
+    classified msvc-inline first (the pristine object has the instantiation), and its host unit only uses the list,
+    so the body is not emitted there. Removes the name from `failed`."""
+    out = []
+    for r in rows:
+        if r.name in failed and r.cls in ('msvc-inline', 'msvc-empty'):
+            isig = itanium(r.name)
+            hit = cl.by_fold(isig) if isig.kind == 'func' else None
+            if hit:
+                a, ns = hit
+                failed.pop(r.name)
+                r = Row(r.name, 'template-fold', a, ADDR_SYM % a, r.units, 'folded with %d instantiations, e.g. %s;'
+                        ' after %s: %s' % (len(ns), ns[0], r.cls, r.note), None)
+        out.append(r)
     return out
 
 
 # ---------------------------------------------------------------------------------------------------- vcalls
 
 VCALL_SYM = '__fnvnx_bdvc_%08x'
+VCALL_DIRECT = 'MSVC calls it directly (pristine reference)'   # not a vcall: a real non-virtual call
 VCALL_HEAD = ('namespace __fnvnx_bd { template <class C, class... A> struct sel { '
               'template <class R> static constexpr auto m(R (C::*p)(A...)) { return p; } '
               'template <class R> static constexpr auto c(R (C::*p)(A...) const) { return p; } }; }')
@@ -925,10 +1339,12 @@ def probe_vcalls(tree, work, host, names, itanium):
     if not items:
         return {}, {n: 'not a nameable member function' for n in names}
     head = os.path.join(work, 'fnvnx_bd_sel.h')   # by -include: GCC's notes naming it drop no probe line
-    if not os.path.exists(head):
-        with open(head + '.tmp', 'w') as f:
+    if not os.path.exists(head):   # probe threads race here: each writes its own temp file (one shared .tmp name
+        import threading           # made the loser's os.replace raise FileNotFoundError: 4 vcall rows of link
+        tmp = '%s.%d.%d.tmp' % (head, os.getpid(), threading.get_ident())   # 97deacd38aec, R2 trap loop)
+        with open(tmp, 'w') as f:
             f.write('#pragma once\n' + VCALL_HEAD + '\n')
-        os.replace(head + '.tmp', head)
+        os.replace(tmp, head)
     obj, alive = vtables.compile_probe(tree, work, host, items, 'bdvc', ('-include', head), prelude='')
     got, why = {}, {}
     alive_k = {k for k, _, _ in alive}
@@ -980,7 +1396,7 @@ def pristine_externs(objdir, i, code_only=False):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p):
         return set()
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     ext = {s.name for s in c.syms.values() if s.secnum == 0 and s.storage == 2 and s.name.startswith('?')}
     if not code_only:
         return ext
@@ -1012,9 +1428,10 @@ class Pe:
             if flags & IMAGE_SCN_CNT_CODE:
                 self.code.append((self.base + va, roff, rsize))
 
-    def find_unique(self, body, masked):
-        """The one address in a code section whose bytes equal body outside the offsets in masked, else None.
-        Candidates come from a literal search of body's longest unmasked run, then each is compared in full."""
+    def find_all(self, body, masked, limit=None):
+        """Every address in a code section whose bytes equal body outside the offsets in masked (at most limit + 1 of
+        them are looked for; None if the body has no unmasked run of 4 bytes to search by). Candidates come from a
+        literal search of body's longest unmasked run, then each is compared in full."""
         runs, run = [], None   # the unmasked runs [a, b)
         for j in range(len(body) + 1):
             if j < len(body) and j not in masked:
@@ -1036,10 +1453,15 @@ class Pe:
                 start = at - lo
                 if start + len(body) <= end and all(self.data[start + a:start + b] == body[a:b] for a, b in runs):
                     hits.append(va + start - roff)
-                    if len(hits) > 1:
-                        return None
+                    if limit is not None and len(hits) > limit:
+                        return hits
                 at = self.data.find(lit, at + 1, end)
-        return hits[0] if hits else None
+        return hits
+
+    def find_unique(self, body, masked):
+        """The one address in a code section whose bytes equal body outside the offsets in masked, else None."""
+        hits = Pe.find_all(self, body, masked, 1)
+        return hits[0] if hits and len(hits) == 1 else None
 
     def matches(self, va, body, masked):
         """True when the exe's bytes at va equal body outside the offsets in masked."""
@@ -1071,6 +1493,7 @@ class Pe:
 
 
 FUNCLET = ('__catch$', '__unwindfunclet$', '__ehhandler$')   # MSVC labels inside a function's own section
+SEARCH_COPIES = 64  # most identical copies of a body in the exe whose call sites are compared (copy_sites)
 SEARCH_MIN = 16   # bytes: shorter bodies (a jmp thunk, `mov eax, [ecx]; ret`) occur too often to place by content
 
 
@@ -1091,6 +1514,34 @@ def same_shape(body, img):
     return a is not None and a == b
 
 
+def copy_sites(exe, body, rel, copies, wanted):
+    """A body the exe holds several times over (identical code, relocations masked: COMDAT folding left no unique
+    copy to place): the targets of its wanted relocation sites, for the sites where every copy reaches the same
+    address. A site whose copies disagree says nothing about which copy the pristine function is, and is left out.
+    -> [(msvc name, target)] one entry per agreeing site."""
+    import struct
+    out = []
+    for k, (sn, typ) in sorted(rel.items()):
+        if sn not in wanted or typ not in (0x06, 0x14) or k > len(body) - 4:
+            continue
+        addend, = struct.unpack_from('<i' if typ == 0x14 else '<I', body, k)
+        tg = set()
+        for h in copies:
+            img = exe.read(h, len(body))
+            if img is None:
+                tg = None
+                break
+            if typ == 0x14:
+                disp, = struct.unpack_from('<i', img, k)
+                tg.add((h + k + 4 + disp - addend) & 0xffffffff)
+            else:
+                word, = struct.unpack_from('<I', img, k)
+                tg.add((word - addend) & 0xffffffff)
+        if tg and len(tg) == 1:
+            out.append((sn, next(iter(tg))))
+    return out
+
+
 def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     """Original addresses the pristine object of unit i calls the MSVC names in wanted at. Functions are placed
     by units.json, then by following REL32 calls from placed functions (a COMDAT units.json does not list, such as
@@ -1099,7 +1550,8 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     function, the exe's displacement gives the target; at a DIR32 one (the address taken, `push offset f`), the
     exe's word does. search: a function that references a wanted name and was not placed (inlined into its callers
     in the exe, or reached at an address holding other code) is placed where its bytes, relocations masked, occur
-    exactly once in the exe's code (at least SEARCH_MIN bytes: a standalone copy units.json does not list).
+    exactly once in the exe's code (at least SEARCH_MIN bytes: a standalone copy units.json does not list); a body
+    that occurs up to SEARCH_COPIES times gives the sites on which all its copies reach one address (copy_sites).
     loose (exe-data only): a function whose bytes differ from the exe's counts as placed when it is the same
     instruction stream up to constants (same_shape: a variant unit's other stack layout); a word at a relocation
     sits in the same instruction there. A function's catch funclets (`__catch$f$0`, labels in its section) are then
@@ -1110,7 +1562,7 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p) or not wanted:
         return {}
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     funcs = {}   # defined code symbol -> (section, start, body)
     for name, si in c.defs.items():
         sy = c.syms[si]
@@ -1141,6 +1593,11 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
                     a = at_[0] if len(at_) == 1 else None
                 if a is not None:
                     todo.append((fname, a))
+                else:   # several identical copies: the sites all of them agree on
+                    copies = exe.find_all(body, masked, SEARCH_COPIES)
+                    if copies and 2 <= len(copies) <= SEARCH_COPIES:
+                        for sn, t in copy_sites(exe, body, rel, copies, wanted):
+                            out[sn][t] += 1
         if not todo:
             break
         fname, a = todo.pop()
@@ -1194,7 +1651,7 @@ def object_call_seqs(objdir, i):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p):
         return {}
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     funcs = {}
     for name, si in c.defs.items():
         sy = c.syms[si]
@@ -1295,10 +1752,13 @@ def load_synth(out):
     return res
 
 
-def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None):
+def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None,
+             provider_params=None):
     """`exe-addr`: a name still missing (or about to get a synthesized special member) whose MSVC counterpart the
     referencing unit's pristine object calls: bound to the address the exe's call at that site reaches, when every
-    site agrees and the native build defines it with the right kind."""
+    site agrees and the native build defines it with the right kind. provider_params: {address: parameter count} of
+    S4's providers (load_provider_params): a provider's address no unit defines has no MSVC definition to compare, so
+    its identification's parameter count stands for the shape (the provider takes the object first, then these)."""
     exe = Pe(exe_path)
     udata = json.load(open(units_json))['units']
     idx_of = collections.defaultdict(list)
@@ -1340,6 +1800,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             return True   # S4's runtime implements the exe's function there, taking the object (void *self)
         member = bool(rs.member)
         rparams = [p_ for p_ in rs.params if p_ != '...']
+        if a in (providers or {}) and a in (provider_params or {}) and not def_names.get(a):
+            return provider_params[a] == len(rparams)
         for n_ in def_names.get(a, ()):
             d_ = msvc(n_) if n_.startswith('?') else None
             if d_ is None or d_.kind != 'func' or d_.params is None:
@@ -1485,7 +1947,7 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data, members=None, msv
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:   # a damaged object must not stop the step
             continue
         for sy in c.syms.values():
@@ -1506,7 +1968,7 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data, members=None, msv
     if placed_refs is not None:   # referenced by code the exe has (a placed function's relocations)
         for i, ms_ in sorted(by_obj.items()):
             try:
-                c = vslots.Coff(os.path.join(msvc_objs, 'u%d.obj' % i))
+                c = vslots.coff(os.path.join(msvc_objs, 'u%d.obj' % i))
             except Exception:
                 continue
             body = {}   # defined function -> names its code references
@@ -1561,7 +2023,7 @@ def pristine_data_names(objdir, nunits, lasts):
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:
             continue
         for sy in c.syms.values():
@@ -1656,12 +2118,29 @@ def emit_gdel(addrs):
     return '\n'.join(out) + '\n'
 
 
+class Phases:
+    """Seconds per step of run(), printed at the end (T1: where the link's time goes, for the incremental link)."""
+    def __init__(self):
+        self.t, self.got = time.time(), []
+
+    def mark(self, name):
+        now = time.time()
+        self.got.append((name, now - self.t))
+        self.t = now
+
+    def line(self):
+        return 'bodies phases: ' + ', '.join('%s %.1f s' % g for g in self.got)
+
+
 def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synth=True, exe_path=None):
     import fnvlink
+    import objcache
+    T = Phases()
     units_json = units_json or os.path.join(tree, 'build', 'units.json')
     bdir = os.path.join(out, 'bodies')
     os.makedirs(bdir, exist_ok=True)
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
+    sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'))   # the parses of the last link process (T1)
     trapped = load_trapped(os.path.join(out, 'refs.tsv'), names_txt)
     native = load_native(os.path.join(out, 'addrmap.tsv'))
     units = fnvlink.load_units(units_json)
@@ -1695,11 +2174,12 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     cl = Classifier(units, native, msvc, itanium, bodies, unit_names, load_type_sizes(out),
                     load_native_names(os.path.join(out, 'addrmap.tsv')))
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
+    T.mark('load+classify')
 
     exe_vars = set()   # variables placed exe code references whose address exe-data did not find
     if msvc_objs and exe_path:
         rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
-                        load_providers(os.path.join(out, 'addrmap.tsv')))
+                        load_providers(os.path.join(out, 'addrmap.tsv')), load_provider_params())
         # placeholder variables the exe's code addresses: bound to that image address (before decl-data)
         have_ = {r.name for r in rows}
         # declared-only C++ variables (static data members, unit namespaces' globals) the same way, before decl-data
@@ -1714,7 +2194,13 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         rows = [bym_[r.name] if r.name in bym_ else r for r in rows]
         rows += [r for r in got_ if r.name not in have_]
         exe_vars -= {r.name for r in got_}
+        T.mark('exe-pass')
+    gate = None
     if synth:   # its stubs are emitted with the synthesized objects
+        # a member of another copy of the class at an exe address, one layout on both sides (layout probe)
+        os.makedirs(os.path.join(bdir, 'work'), exist_ok=True)
+        gate = LayoutGate(tree, os.path.join(bdir, 'work'), load_type_sizes(out))
+        rows = copy_addr_pass(rows, cl, itanium, gate)
         rows = gdel_pass(rows, units, native, itanium, msvc, ms, known=set(trapped) | allms_itanium(out))
         rows = crt_pass(rows, itanium)   # its stubs are emitted with the synthesized objects
         # variables declared and defined nowhere, without an exe address: a typed zero definition (decl-data)
@@ -1733,6 +2219,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 rows.append(Row(n, 'decl-data', None, None, ','.join(sorted(us)),
                                 'zero-initialized definition of the declared variable (no exe address)', sorted(us)[0]))
 
+    T.mark('copy/gdel/crt/decl passes')
     synth_rows, failed, vnotes = [], {}, {}
     if synth:
         work = os.path.join(bdir, 'work')
@@ -1758,6 +2245,30 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                     dst = os.path.join(bdir, 'zz_bd_%s%s.o' % (h.replace('/', '_'), '_i' if inl else ''))
                     os.replace(path, dst)
                     synth_rows.append((h, dst, len(roots)))
+        # an implicit special member the pristine object has a body for (msvc-inline) but whose host unit emits none
+        # (the class declares no such member, so nothing odr-uses it there): the implicit member's own semantics
+        retry = retry_special(rows, failed, itanium)
+        if retry:
+            def rone(job):
+                h, rs = job
+                try:
+                    return h, rs, synth_host(tree, work, h, [r._replace(cls='special-default', host=h) for r in rs],
+                                             itanium, False)
+                except Exception as e:
+                    return h, rs, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
+            done_sd = {}
+            with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+                for h, rs, (path, roots, fail) in ex.map(rone, sorted(retry.items())):
+                    if path:
+                        dst = os.path.join(bdir, 'zz_bd_%s_sd.o' % h.replace('/', '_'))
+                        os.replace(path, dst)
+                        synth_rows.append((h, dst, len(roots)))
+                    done_sd.update({n: h for n in roots})
+            for n in done_sd:
+                failed.pop(n, None)
+            rows = [Row(x.name, 'special-default', None, None, x.units, 'implicit member after msvc-inline (%s)' %
+                        x.note, done_sd[x.name]) if x.name in done_sd else x for x in rows]
+        T.mark('synth-host')
         # virtual functions GCC calls directly (an object member, `a->m.f()`) where MSVC called through the vptr
         cand = {r.name: r for r in rows if r.cls == 'missing' and r.note == 'no definition, address or body'
                 and r.units and vcall_line(0, itanium(r.name))}
@@ -1774,7 +2285,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 for u_ in r.units.split(','):
                     if any(keys & {k for _, k in relaxed_keys(msvc(m_))} for i_ in idx_of.get(u_, ())
                            for m_ in ext[i_]):
-                        failed[n] = 'MSVC calls it directly (pristine reference)'
+                        failed[n] = VCALL_DIRECT
                         del cand[n]
                         break
         vby = collections.defaultdict(list)
@@ -1806,32 +2317,59 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                         else r for r in rows]
         # bodies the decomp writes inline in another unit's source (`inline C::f() {...}`, an in-class body of a
         # copy of C): that unit hosts them, compiled with -fkeep-inline-functions like msvc-inline
-        vdone = set(vtargets) | set(failed) | set(vnotes)
+        # a name MSVC calls out of line (the vcall check's pristine reference) is no vcall, but the decomp's inline
+        # body is still its body: tree-inline takes it, gated like a copy pair (strict)
+        T.mark('vcall')
+        direct = {n for n, why in failed.items() if why == VCALL_DIRECT}
+        vdone = set(vtargets) | (set(failed) - direct) | set(vnotes)
         rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
         tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
-        tby = collections.defaultdict(list)
-        for r in rest:
-            if r.name in tin:
-                tby[tin[r.name]].append(r)
+        # a class template's destructor no object instantiates (the pointee is incomplete where it is referenced): the
+        # template's own body, explicitly instantiated in a unit that names the arguments (inst_hosts)
+        inst_rows = [r for r in rest if inst_line(itanium(r.name))]
+        if inst_rows:
+            import bodycause
+            want_ = {(k[0], '~' + k[0]) for k in (bodycause.key_of(itanium(r.name)) for r in inst_rows) if k and k[0]}
+            ih = inst_hosts(tree, inst_rows, itanium, set(unit_names), bodycause.tree_bodies(tree, want_),
+                            {r.name: r.units.split(',') for r in inst_rows})
+            for n_, hs_ in ih.items():
+                tin[n_] = hs_ + [h_ for h_ in tin.get(n_, []) if h_ not in hs_]
+        # tree-inline's pairings across units pass the layout gate: names MSVC calls directly, constructors and
+        # destructors (found since the search spells them by the class name), and every copy-key rename
+        strict = direct | {n for n in tin if itanium(n).variant}
 
         def tone(job):
-            h, rs = job
+            h, rs, k = job
             try:
-                return h, synth_host(tree, work, h, rs, itanium, True)
+                return h, k, synth_host(tree, work, h, rs, itanium, True, gate=gate, strict=strict)
             except Exception as e:
-                return h, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
+                return h, k, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
         tdone = {}
-        with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
-            for h, (path, roots, fail) in ex.map(tone, sorted(tby.items())):
-                if path:
-                    dst = os.path.join(bdir, 'zz_bd_%s_t.o' % h.replace('/', '_'))
-                    os.replace(path, dst)
-                    synth_rows.append((h, dst, len(roots)))
-                    tdone.update({n: h for n in roots})
-                for n, why in fail.items():
-                    vnotes[n] = 'tree-inline in %s: %s' % (h, why)
+        for round_ in range(5):   # a host that does not pair a name: the next host with a body of the class
+            tby = collections.defaultdict(list)
+            for r in rest:
+                hs = tin.get(r.name, [])
+                if r.name not in tdone and round_ < len(hs) and (round_ == 0 or r.name in strict):
+                    tby[hs[round_]].append(r)
+            if not tby:
+                break
+            with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+                for h, k, (path, roots, fail) in ex.map(tone, [(h, rs, round_) for h, rs in sorted(tby.items())]):
+                    if path:
+                        dst = os.path.join(bdir, 'zz_bd_%s_t%s.o' % (h.replace('/', '_'), str(k) if k else ''))
+                        os.replace(path, dst)
+                        synth_rows.append((h, dst, len(roots)))
+                        tdone.update({n: h for n in roots})
+                    for n, why in fail.items():
+                        if n not in tdone:
+                            vnotes[n] = (vnotes[n] + '; ' if n in vnotes and k else '') + \
+                                'tree-inline in %s: %s' % (h, why)
+        for n in tdone:
+            failed.pop(n, None)
+            vnotes.pop(n, None)
         rows = [r._replace(cls='tree-inline', host=tdone[r.name], note='inline body in ' + tdone[r.name])
                 if r.name in tdone else r for r in rows]
+        T.mark('tree-inline')
         gd = [r for r in rows if r.cls == 'gdel']
         if gd:
             s_path, o_path = os.path.join(bdir, 'gdel.S'), os.path.join(bdir, 'zz_bd_gdel.o')
@@ -1864,6 +2402,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 return h, items, addr_host(tree, work, h, sorted(items), msvc, ita_defs)
             except Exception as e:
                 return h, items, ([], {}, {a: 'addr-host failed (%r)' % e for a, _ in items})
+        T.mark('gdel+defmissing')
         atargets = {}
         with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
             for h, items, (objs, got, fail) in ex.map(aone, sorted(aby.items())):
@@ -1882,6 +2421,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
             as_ = os.environ.get('AS', 'aarch64-linux-gnu-as')
             if subprocess.run([as_, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True).returncode == 0:
                 synth_rows.append((unit_names[0], o_path, len(atargets)))
+        T.mark('addr-host')
         thunks = load_thunks(os.path.join(out, 'refs.tsv'))
         if thunks:
             s_path, o_path = os.path.join(bdir, 'thunks.S'), os.path.join(bdir, 'zz_bd_thunks.o')
@@ -1915,6 +2455,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                                    o_path, len(empty)))
             else:
                 failed.update({r.name: 'synth-failed (as)' for r in empty})
+    rows = fold_fallback(rows, failed, cl, itanium)
     rows = [r._replace(cls='missing', note=failed[r.name] + '; was ' + r.cls + ': ' + r.note)
             if r.name in failed else r for r in rows]
     rows = [r._replace(note=r.note + '; ' + vnotes[r.name]) if r.cls == 'missing' and r.name in vnotes else r
@@ -1928,7 +2469,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     with open(os.path.join(bdir, 'bind.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#name\tclass\ttarget\n')
         for r in rows:
-            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel', 'template-fold', 'exe-data'):
+            if r.cls in ('addr', 'exe-addr', 'vcall', 'gdel', 'template-fold', 'exe-data', 'copy-addr'):
                 f.write('%s\t%s\t%s\n' % (r.name, r.cls, r.target))
     with open(os.path.join(bdir, 'synth.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#host_unit\tobject\tnames\n')
@@ -1938,14 +2479,17 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     special = collections.Counter(r.cls for r in rows if itanium(r.name).variant)
     lines = ['names still undefined after resolve: %d (ctors/dtors %d)' % (len(rows), sum(special.values()))]
     lines += ['%-16s %6d  (ctors/dtors %d)' % (k, st[k], special[k])
-              for k in ('addr', 'template-fold', 'exe-addr', 'exe-data', 'gdel', 'vcall', 'msvc-empty', 'msvc-inline',
-                        'tree-inline', 'exe-sret', 'thunk', 'addr-host', 'decl-data', 'special-default', 'crt-rule',
+              for k in ('addr', 'template-fold', 'exe-addr', 'copy-addr', 'exe-data', 'gdel', 'vcall', 'msvc-empty',
+                        'msvc-inline', 'tree-inline', 'exe-sret', 'thunk', 'addr-host', 'decl-data', 'special-default', 'crt-rule',
                         'missing')]
     lines.append('pristine MSVC objects: %s' % ('%d code COMDATs matched by token' % len(bodies) if bodies is not None
                                                  else 'not given (--msvc-objs)'))
     lines.append('synthesized objects: %d' % len(synth_rows))
     open(os.path.join(bdir, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines), file=sys.stderr)
+    T.mark('emit+write')
+    print(T.line(), file=sys.stderr)
+    print(objcache.summary('bodies'), file=sys.stderr, flush=True)
     return rows
 
 

@@ -165,7 +165,7 @@ Not here: d3d9, d3dx9_38 and binkw32 (S6), dinput8, dsound, xinput1_3 and vorbis
   below 256 KiB. `RaiseException(0x406D1388)` (SetThreadName) names the thread and returns; any other code is fatal.
 * **TLS**: 1088 `TlsAlloc` slots. The image's implicit TLS (`__declspec(thread)` data of FalloutNV.exe, reached as
   `((char**)__readfsdword(0x2c))[_tls_index] + off` in 15 places) gets a per-thread copy of the template the loader
-  passes to `fnvnx_tls_set_template`. The loader must store 0 in the image's `_tls_index`.
+  passes to `fnvnx_tls_set_template`. The loader stores 0 in the image's `_tls_index` (`fnvnx_image_tls_index_reset`, called by toolchain/game/boot.cpp: FalloutNV.exe holds 0xFFBF8C85 there on disk).
 * **Fake TEB** for `__readfsdword`: 0x00 SEH chain (-1), 0x18 self, 0x20 pid, 0x24 tid, 0x2c TLS array, 0x30 PEB
   (zeroed: not being debugged), 0x34 last error, 0xE10.. TlsSlots[64]; other offsets read 0 and are logged.
 * **Time**: `QueryPerformanceCounter/Frequency` read the same counter as S8's `__rdtsc`: CNTVCT_EL0 / CNTFRQ_EL0

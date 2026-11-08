@@ -121,7 +121,7 @@
 0x00fdf2e0	user32	DefWindowProcA	2	-	S4 platform/win32
 0x00fdf2e4	user32	EnumChildWindows	1	-	S4 platform/win32
 0x00fdf2e8	user32	GetWindowLongA	2	IMP_fdf2e8	S4 platform/win32
-0x00fdf2ec	user32	? (user32; decomp: IMP_fdf2ec)	1	IMP_fdf2ec	resolve name from the exe import directory
+0x00fdf2ec	user32	GetClassLongA	1	IMP_fdf2ec	S4 platform/win32
 0x00fdf2f0	user32	EnumDisplayDevicesA	1	DAT_00fdf2f0	S4 platform/win32; S5: (LPCSTR, DWORD, DISPLAY_DEVICEA*, DWORD)
 0x00fdf2f4	user32	MessageBoxA	4	-	S4 platform/win32
 0x00fdf2f8	user32	AdjustWindowRectEx	1	-	S4 platform/win32
@@ -159,7 +159,7 @@
 0x00fdf3c0	binkw32	BinkCopyToBufferRect	1	-	S6 (video)
 0x00fdf3c8	d3d9	D3DPERF_SetOptions	1	-	S6
 0x00fdf3d0	d3dx9_38	D3DXLoadSurfaceFromSurface	1	-	S6
-0x00fdf3d4	d3dx9_38	? (d3dx9; decomp: ImportedFunction)	1	ImportedFunction	S6
+0x00fdf3d4	d3dx9_38	D3DXSaveTextureToFileA	1	ImportedFunction	S6
 0x00fdf3d8	d3dx9_38	D3DXAssembleShader	1	-	S6
 0x00fdf3dc	d3dx9_38	D3DXAssembleShaderFromFileA	1	-	S6
 0x00fdf3e0	d3dx9_38	D3DXCompileShaderFromFileA	1	-	S6
