@@ -64,6 +64,7 @@ import config
 # call first (three call sites over branches), an integer result that the 24-bit x87 control word rerun reproduces
 # is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
 # placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return.
+# Virtual-call class (F2b): a call-target where the native called planted slot k and the oracle's call went to slot k+1, a unit function it ran as code (no call event), is vslot-shift (Pair.vslots_run on call-target too), and a native callee that sits in the native copy of a planted vftable at a slot whose exe function the oracle ran is native-vslot-differs.
 HARNESS = 'difffuzz-20'
 
 

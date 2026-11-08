@@ -200,6 +200,10 @@ POLICY = {
                                                 'where the oracle has an image-window address: an unrebound '
                                                 'variable or table (or a literal: check the pointee)'),
     'vptr-unpaired':  ('real-bug', 'S2c', False, 'no kind-V row pairs the native vtable with the image vftable'),
+    'native-vslot-differs': ('real-bug', 'S2c', True, 'the native vtable of a planted class has, at the slot where the '
+                                                      'exe\'s vftable holds function Y, another exe function X, and '
+                                                      'the native called it (D26: the decomp class\'s virtual at '
+                                                      'that slot is not the exe\'s; the oracle ran Y)'),
     'vslot-shift':    ('real-bug', 'S1-rules', True, 'a virtual call through the planted vftable reaches the exe\'s '
                                                      'slot k-1 where the oracle calls slot k: the caller\'s class '
                                                      'declaration numbers its virtuals from a slot-0 placeholder, '
@@ -345,7 +349,7 @@ FIX_CLASSES = {
                       ('native-stub-data', 'native-address', 'split-global', 'import-slot-called', 'call-args')),
     'vtables':       ('S2c', 'every image vftable pairs with a full native vtable of the static class (no short '
                              'vtables, overrides bound to their this-adjusting thunks)',
-                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap')),
+                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap', 'native-vslot-differs')),
     'vtable-slots':  ('S1-rules', 'every virtual call reaches the exe\'s slot: each declaration a caller dispatches '
                                   'through numbers its virtuals in D26\'s one minus-one order (a `virtual ~X()` '
                                   'where the exe has its deleting destructor, then the exe\'s slots in order)',
