@@ -10,8 +10,8 @@
 #           $FARM_HOME/quick/status.json (failed, or never ran here) is planned again whatever the diff.
 # 2. lanes, in parallel (4 CPUs):
 #    A  build: full_job.sh (prepare, compile and link incremental in its persistent build directory; guest; emulated
-#       boot; publishes link/<c12>), then fuzz_job.sh 1 of 1 (verdict cache: only changed function keys; FUZZ_MAX_S,
-#       default 600) and audit_job.sh 1 of 1 (row cache: only changed keys; AUDIT_BUDGET, default 300)
+#       boot; publishes link/<c12>), then fuzz_job.sh 1 of 1 (verdict cache: only changed function keys; FUZZ_LOOP_S,
+#       default 420 s of fuzzing after its setup) and audit_job.sh 1 of 1 (row cache: only changed keys; AUDIT_BUDGET, default 300)
 #    B  equiv: equiv_job.sh 1 of 1 (object cache: only units whose source, headers, flags or compiler changed)
 #    D  after lane A's build, beside its fuzz and audit: threads_job.sh (D25 #7: the race checker's and the watchdog's tests, then the guest just built relinked
 #       with the watchdog and run under qemu-aarch64 for THREADS_TIMEOUT, default 180 s here; tools/threads/README.md)
@@ -32,7 +32,7 @@
 #    sub-reports' heads; the wall-clock total is T1's metric. A run where every selected check exited 0 records the
 #    commit as the next base ($FARM_HOME/quick/verified). A plan that says "full" (a key every cached result depends
 #    on changed: toolchain, pins) is reported as such: the sharded farms do that run.
-# Env: QUICK_BASE, QUICK_CHECKS (a comma list that replaces the plan), QUICK_CELLS, FUZZ_MAX_S, AUDIT_BUDGET, QUICK_COLD_LOCAL,
+# Env: QUICK_BASE, QUICK_CHECKS (a comma list that replaces the plan), QUICK_CELLS, FUZZ_LOOP_S, AUDIT_BUDGET, QUICK_COLD_LOCAL,
 # QUICK_SKIP_LANES (e.g. "C"), QUICK_JOBS (a directory of stand-in sub-jobs, for tests). Everything the sub-jobs need (README.md); they run as on their own farms.
 set -uo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
@@ -146,7 +146,9 @@ lane_a() {
 		wait; return
 	fi
 	if on fuzz; then
-		FUZZ_MAX_S=${FUZZ_MAX_S:-600} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
+		# FUZZ_LOOP_S: 420 s of fuzzing after the setup (the targets' keys, the cache); FUZZ_MAX_S counted from the
+		# job's start had the loop end before its first chunk (aec30808: 689 s of setup, 0 functions fuzzed)
+		FUZZ_LOOP_S=${FUZZ_LOOP_S:-420} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
 	else skip fuzz "not affected"; fi
 	if on audit; then AUDIT_BUDGET=${AUDIT_BUDGET:-300} run audit bash "$J/audit_job.sh" "$COMMIT" 1 1
 	else skip audit "not affected"; fi
