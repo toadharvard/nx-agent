@@ -5852,8 +5852,11 @@ def _classlayout():
         if not lines or not lines[0].startswith('# fnvnx-classlayout/1'): continue
         for line in lines[1:]:
             if not line.strip() or line.startswith('#'): continue
-            fs = line.split('\t') + [''] * 7
+            fs = line.split('\t') + [''] * 9
             if fs[0] == 'class': continue
+            # a secondary vftable's row (COL offset > 0: reason or evidence `secondary...`) does not decide the class:
+            # the primary does (S2-bodies)
+            if fs[4].strip().startswith('secondary') or fs[7].strip().startswith('secondary'): continue
             try: k = int(fs[3])
             except ValueError: continue
             if fs[2] not in ('minus-one', 'exe-order', 'com'): continue
