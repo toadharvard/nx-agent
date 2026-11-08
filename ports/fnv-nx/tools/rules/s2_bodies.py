@@ -28,6 +28,10 @@ gate (`_stl_copy_edits`): MSVC called `basic_ofstream(const char*, int, int)` (0
 (0x00acfb90) and `basic_ostream::sentry::sentry` out of line, where GCC inlined the decomp's partial model of them
 and referenced members it never defines (`basic_filebuf::open`, `_Init`, `basic_streambuf::_Lock`).
 
+And the converse (`_stl_string_bodies`): `~basic_string()` and `operator=(const basic_string&)` of those copies, declared and
+defined nowhere because VC9 wrote both inline, get the bodies the exe's inlined sites show: `_Tidy(true, 0)` and
+`assign(r, 0, npos)`.
+
 HARN1 - the decomp's harness-only code gets internal linkage.
 
 The decomp keeps byte-matching harnesses next to the matched code: convention callers that exist only so MSVC emits
@@ -142,7 +146,9 @@ def r_stand_in_class_bodies(path, text, stats):
         decl = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', decl)
         nl = '\n' * (text.count('\n', m.start(), c) - decl.count('\n'))   # line numbers stay
         edits.append((m.start(), c, decl + '; /* fnv-nx STAND5: bound to the address MSVC called */' + nl))
-    edits += _stl_copy_edits(path, text, syms, tagged, own_names, spans or prepare.scope_spans(text))
+    spans = spans or prepare.scope_spans(text)
+    edits += _stl_copy_edits(path, text, syms, tagged, own_names, spans)
+    edits += _stl_string_bodies(text, spans)
     if not edits:
         return text
     out, pos = [], 0
@@ -250,6 +256,47 @@ def _stl_copy_edits(path, text, syms, tagged, own_names, spans):
         decl = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', decl)
         nl = '\n' * (text.count('\n', m.start(), c) - decl.count('\n'))   # line numbers stay
         edits.append((m.start(), c, decl + '; /* fnv-nx STAND5: bound to the address MSVC called */' + nl))
+    return edits
+
+
+STRING_DTOR = re.compile(r'^([ \t]*)~basic_string\s*\(\s*\)\s*;', re.M)
+STRING_ASSIGN = re.compile(r'^([ \t]*)basic_string\s*&\s*operator\s*=\s*\(\s*const\s+basic_string\s*&\s*\)\s*;', re.M)
+STRING_TIDY = re.compile(r'\b_Tidy\s*\(\s*bool\b[^()]*\)\s*[;{]')
+STRING_ASSIGN3 = re.compile(r'\bassign\s*\(\s*const\s+basic_string\s*&\s*,\s*unsigned(?:\s+int)?\s*,\s*unsigned(?:\s+int)?\s*\)\s*;')
+STRING_NPOS = re.compile(r'\bstatic\s+const\s+unsigned(?:\s+int)?\s+npos\s*;')
+
+
+def _stl_string_bodies(text, spans):
+    """Members of the decomp's unit copies of `basic_string` (`namespace fnv_<a> { namespace std { template <..> class
+    basic_string`) that the model declares and nothing defines: VC9 wrote both inline, so MSVC never called them out of
+    line and the unit's symbols hold no address for them (crt-import: `~basic_string`, `operator=` of fnv_00ac9790,
+    fnv_00ad60c0, fnv_00ad61e0). Their bodies are what the exe's inlined copies do, read from its call sites:
+    - `~basic_string() { _Tidy(true, 0); }`: the destructor sites push 0, push 1 and call `_Tidy` (0x0044a730, bound by
+      the unit) - `6a 00 6a 01 lea ecx, [..]; call 0x0044a730`, 21 + 20 + 18 + ... sites in the exe;
+    - `operator=(const basic_string& r) { return assign(r, 0, npos); }`: std::_Copy_opt's element copy (0x00ad5a80)
+      pushes `[0x010173f0]` (npos), 0 and the source, then calls `assign(const string&, size_t, size_t)` (0x0044a580).
+    Gates: the class declares the member without a body, the helper it calls with the exact signature (and `npos` for
+    the assignment), and the unit has no out-of-line definition of the member."""
+    edits = []
+    for o, c, kind, head in spans:
+        if kind != 'class' or _scope_name('class', head) != 'basic_string' or not TEMPLATE_HEAD.match(head.strip()):
+            continue
+        chain = [(k, h) for k, h in prepare.scope_chain(spans, o)]
+        nss = [_scope_name(k, h) for k, h in chain if k == 'namespace']
+        if len(chain) != len(nss) or not any(UNIT_NS_HEAD.match(a or '') and b in STL_NS for a, b in zip(nss, nss[1:])):
+            continue
+        body = text[o:c]
+        for rx, need, repl, out_of_class in (
+                (STRING_DTOR, (STRING_TIDY,), '~basic_string() { _Tidy(true, 0); }', r'basic_string\s*(?:<[^;{]*?>)?\s*::\s*~'),
+                (STRING_ASSIGN, (STRING_ASSIGN3,), 'basic_string& operator=(const basic_string& _Right) '
+                 '{ return assign(_Right, 0, %s); }', r'basic_string\s*(?:<[^;{]*?>)?\s*::\s*operator\s*=')):
+            m = rx.search(body)
+            if not m or not all(n.search(body) for n in need) or re.search(out_of_class, text):
+                continue
+            a = o + m.start() + len(m.group(1))
+            if '%s' in repl:   # npos where the model declares it, else its own spelling of it (assign(rhs, 0, -1))
+                repl = repl % ('npos' if STRING_NPOS.search(body) else '-1')
+            edits.append((a, o + m.end(), repl + ' /* fnv-nx STAND5: the exe\'s inlined body */'))
     return edits
 
 
