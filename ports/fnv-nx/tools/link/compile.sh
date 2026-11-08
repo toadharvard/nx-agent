@@ -168,7 +168,19 @@ objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO"; find "$HERE/shim/inc
 exec 7>"$OUT/.compile.lock"
 flock -w "${COMPILE_LOCK_WAIT:-7200}" 7 || { echo "compile.sh: $OUT is locked by another compile.sh" >&2; exit 2; }
 if [ "$(cat "$OUT/.objstamp" 2>/dev/null)" != "$objstamp" ]; then
-  echo "compile.sh: flags, plugins or shim headers changed: every object of $OUT is rebuilt" >&2
+  # Every object here is about to go, so every unit that had one is compiled again, not only the given list: the
+  # pipeline passes only the units it thinks stale, and its key does not see the plugins' bytes or the shim headers
+  # (try1of1, D26: it asked for 493, this wiped the other 2,485 objects and left them unbuilt: "failed (no error line)").
+  if [ -n "$LIST" ] && [ "$LIST" != "$OUT/units.list" ]; then
+    jq -r '.units[].source' "$TREE/build/units.json" | sort -u | while read -r s_; do
+      [ -f "$OUT/$(echo "$s_" | tr / _).o" ] && echo "$s_"
+    done > "$OUT/.wiped.list"
+    sort -u "$LIST" "$OUT/.wiped.list" > "$OUT/.rebuild.list"
+    echo "compile.sh: flags, plugins or shim headers changed: every object of $OUT is rebuilt ($(wc -l < "$OUT/.wiped.list") had one, $(wc -l < "$LIST") were asked for)" >&2
+    LIST=$OUT/.rebuild.list
+  else
+    echo "compile.sh: flags, plugins or shim headers changed: every object of $OUT is rebuilt" >&2
+  fi
   rm -f "$OUT"/*.o "$OUT"/*.ok; echo "$objstamp" > "$OUT/.objstamp"
 fi
 
