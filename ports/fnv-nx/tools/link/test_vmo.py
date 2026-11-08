@@ -71,6 +71,21 @@ def main():
     check(c[2] in traps and c[3] == '__fnv_00401300', 'slot 0 not a destructor: D1 traps, exe slot 0 at slot 1')
     rows = open(os.path.join(out, 'vmo.tsv')).read().splitlines()
     check(len(rows) == 4 and rows[1].split('\t')[3] == '1', 'vmo.tsv: one row per copy with its trap slots')
+    # V rows (W14): each copy of an exe vftable no native vtable stands for gets an address-map V row at word 2
+    vm = fnvlink.vmo_vrows(got, {0x01010100: ('_ZTV1B', 8, 'b.o', 'primary')}, exev)
+    check(set(vm) == {0x01010000, 0x01010200}, 'a V row for each copy; a vftable the map already pairs keeps its row')
+    check(vm[0x01010000][:3] == ('__fnvnx_vmo_01010000', 8, fnvlink.VTEXT_OBJ), 'the row names the copy, point 8, bridges')
+    check(vm[0x01010000][3].startswith('primary') and "RTTI class A" in vm[0x01010000][3],
+          'the note says primary and names the RTTI class')
+    sec = {**exev, 0x01010000: exev[0x01010000]._replace(off=8)}
+    check(fnvlink.vmo_vrows(got, {}, sec)[0x01010000][3].startswith('secondary'), 'a secondary vftable is noted so')
+    amd = tempfile.mkdtemp()
+    kinds, _ = fnvlink.write_addrmap(amd, {}, {}, {}, vm, None, None)
+    tsv = [l.split('\t') for l in open(os.path.join(amd, 'addrmap.tsv')) if not l.startswith('#')]
+    check([(r[1], r[2], r[6]) for r in tsv] == [('V', '__fnvnx_vmo_01010000', '8'), ('V', '__fnvnx_vmo_01010200', '8')],
+          'addrmap.tsv carries the V rows')
+    check('__fnvnx_vmo_01010000 + 8' in open(os.path.join(amd, 'addrmap.c')).read(), 'addrmap.c points at the address point')
+    shutil.rmtree(amd)
     asm = shutil.which('aarch64-linux-gnu-as')
     if asm:
         src = os.path.join(out, 'b.S')

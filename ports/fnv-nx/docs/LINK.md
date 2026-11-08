@@ -988,6 +988,10 @@ none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (s
     or the exe's code shape (`exevft.deleting_dtor`: `ret 4` after a test of bit 0, which finds 121 of the 132
     G rows). When exe slot 0 is not a destructor, slot 0 is a trap and exe slot 0 goes to slot 1;
   * exe slot k at slot k + 1 (`exe_slot_target`, the same choice as the extended copies).
+  Every copy also gets an address-map `V` row (`vmo_vrows`: the copy's symbol, address point 8, object
+  `zz_bridges.o`, note "minus-one copy of the exe vftable"), so EQ's vtable pairing and `vtmetric` see the vftables of
+  classes the decomp declares without virtual members (vtmetric's `no-polymorphic-view`: 164 primary + 7 secondary on
+  link 0540aff0, 163 of them referenced as data) and none keeps `__fnv_<V> = 0x<V>` while a unit stores it.
   `out/vmo.tsv` lists the copies. `FNVNX_D26C=0` turns the pass off, so a boot can be compared with and without
   it. On link 9f865b0a's inputs (offline) it makes 831 copies: 615 hand-stored + 239 RTTI-referenced candidates,
   minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
