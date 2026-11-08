@@ -18,3 +18,11 @@
   **pinned literals differing from the exe 3,278 (head) -> 3,179 (shift) -> 72 (relocations), in 57 units;
   overlaps 0, bin-at-str 0.** Left: 62 binary vs binary and 10 string literals over exe binary bytes (list
   requested).
+* **the last 72** (EQ reports/eq-sg eq-sg-72.tsv) - no further harness class. They are per-site decomp data that
+  differs from the exe, so they go to EQ / F2:
+  - vtables with other slot functions: tile3d 0x010948ac, the image-space shader tables 0x010b37a8.. (one slot
+    each), character / bgsmessage / bgsradiation 8-byte vtables;
+  - `__real` constants mapped where the exe has another value: 1.1 at 0x01031148 in actor, creature, caravanmenu,
+    main (the exe has 0.01), 200.0 vs 256.0 at 0x010231d8;
+  - 10 strings that differ from the exe in one or two bytes.
+  The S1 harness side of the $SG item is closed.
