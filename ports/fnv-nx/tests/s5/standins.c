@@ -154,10 +154,63 @@ void *fnv_standin_00aa7400(void *self, uint32_t size, const char *name) {
  * NiMalloc 0x00aa1070 (vfn_04, native slot 5) ran exe slot 5 and called MemoryManager::Deallocate on its own stack
  * block, _free_r wrote through a bad reent, 554 Setting initializers skipped. The same class as 0x00aa7400 above:
  * a defined class whose slot-0 placeholder is not a destructor (S1-rules). A minus-one table of the exe's 9 slots. */
+/* The exe's slots 1, 3, 4, 6, 7 and 8 hold free functions (stdcall/cdecl: AllocateZeroedMemory 0x00aa2240,
+ * ResizeHeapBlock 0x00aa22f0, AllocateAlignedBuffer 0x00aa2370, 0x00aa2420, 0x00a29680), which natively take no
+ * `this`: emu_guest.py's thisless pass thunks them in the tables it knows; a table built here drops `this` itself
+ * (x1..x7 -> x0..x6, then a branch). */
+#define FNV_DROP_THIS(name, target) \
+    __asm__(".text\n.balign 16\n.type " #name ",%function\n" #name ":\n" \
+            "mov x0, x1\nmov x1, x2\nmov x2, x3\nmov x3, x4\nmov x4, x5\nmov x5, x6\nmov x6, x7\n" \
+            "b " #target "\n"); \
+    extern void name(void) __attribute__((visibility("hidden")))
+FNV_DROP_THIS(fnv_drop_00aa2240, __fnv_00aa2240);
+FNV_DROP_THIS(fnv_drop_00aa22f0, __fnv_00aa22f0);
+FNV_DROP_THIS(fnv_drop_00aa2370, __fnv_00aa2370);
+FNV_DROP_THIS(fnv_drop_00aa2420, __fnv_00aa2420);
+FNV_DROP_THIS(fnv_drop_00a29680, __fnv_00a29680);
 static void *fnv_niallocator_vtable[2 + 9];
 void *fnv_standin_00aa2230(void *self) __asm__("_ZN26FUN_00aa2230_BSNiAllocatorC1Ev");
 void *fnv_standin_00aa2230(void *self) {
-    *(uint32_t *)self = (uint32_t)(uintptr_t)fnv_m1_table(fnv_niallocator_vtable, 0x010a2528u, 9);
+    void **t = fnv_m1_table(fnv_niallocator_vtable, 0x010a2528u, 9);
+    t[2] = (void *)fnv_drop_00aa2240;   /* exe slot 1 */
+    t[4] = (void *)fnv_drop_00aa22f0;   /* 3 */
+    t[5] = (void *)fnv_drop_00aa2370;   /* 4 */
+    t[7] = (void *)fnv_drop_00aa2420;   /* 6 */
+    t[8] = (void *)fnv_drop_00a29680;   /* 7 */
+    t[9] = (void *)fnv_drop_00a29680;   /* 8 */
+    *(uint32_t *)self = (uint32_t)(uintptr_t)t;
+    return self;
+}
+
+/* The Setting registries 0x00632ec0 (image vftable 0x0104e6ac) and 0x0045d220 (0x01018508), singletons that every
+ * Setting initializer registers itself with: the callers (hundreds of constructors and inlined initializers) declare
+ * the registry as a call-only class with a NAMED slot-0 virtual (ObjectRegistry { Reset(); Register(); }), which
+ * D26 (b) does not rewrite (it takes placeholder names: v0, Unk_00, Reserved0, ...). `Register` stays native slot 1
+ * there, while the registry carries the minus-one table of its image vftable (D26 (c)): slot 1 is D0, so every
+ * registration deleted the registry (FUN_004de550 with flags 1), its block was reused and the next one hit _purecall
+ * (fatal after initializer #4000). Until the callers are declared right (S1-rules: widen D26 (b) to every call-only
+ * class whose slot 0 is not defined or called by name; S2c), the registries get a copy of their table with slot 1 =
+ * slot 2 (Register), which serves both the declared callers (1) and the D26 ones (2); a singleton is never deleted. */
+extern void fnv_collection_init(void *self) __asm__("_ZN18FUN_0044f600_class14InitializeVtblEv");
+extern const void *fnv_vt_632ec0[] __asm__("__fnv_0104e6ac") __attribute__((visibility("hidden")));
+extern const void *fnv_vt_45d220[] __asm__("__fnv_01018508") __attribute__((visibility("hidden")));
+static void *fnv_registry_vt_a[16], *fnv_registry_vt_b[16];
+static void *fnv_registry_vtable(void **dst, const void *const *src) {
+    for (int k = 0; k < 14; k++)
+        dst[k] = (void *)src[k];
+    dst[1] = dst[2];
+    return dst;
+}
+void *fnv_standin_00632ec0(void *self) __asm__("_ZN12fnv_00632ec012FUN_00632ec0C1Ev");
+void *fnv_standin_00632ec0(void *self) {
+    fnv_collection_init(self);
+    *(void *volatile *)self = fnv_registry_vtable(fnv_registry_vt_a, fnv_vt_632ec0);
+    return self;
+}
+void *fnv_standin_0045d220(void *self) __asm__("_ZN10S_0045d22012FUN_0045d220Ev");
+void *fnv_standin_0045d220(void *self) {
+    fnv_collection_init(self);
+    *(void *volatile *)self = fnv_registry_vtable(fnv_registry_vt_b, fnv_vt_45d220);
     return self;
 }
 

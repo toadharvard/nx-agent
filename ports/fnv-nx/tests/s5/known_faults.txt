@@ -12,7 +12,7 @@ exe-vtables         # stand-in for S2c's link-time slot fill (emu_guest.py --exe
                     # misaligned vtables are left); a virtual call past a native vtable's end continues at the exe
                     # slot's native; GOT entries of absolute aliases (aliases.ld `sym + 8`) are relocated. Remove
                     # when S2c fills the slots, sizes native vtables to the exe's and aliases.ld has SANE_EXPR
-image-vptr-minus-one ^\.\?AV\?\$NiT  # hand-stored image vptrs (hand_vptrs.tsv class 'image': no native
+image-vptr-minus-one  # hand-stored image vptrs (hand_vptrs.tsv class 'image': no native
                       # vtable bound to the exe vftable) of the classes whose RTTI name matches get a D22 minus-one
                       # copy (D1/D0 thunks to exe slot 0, then exe slot k at k+1): the Gamebryo NiT* containers,
                       # dispatched through their declared hierarchies (virtual destructor first). The creator map's
@@ -75,6 +75,10 @@ _ZN12FUN_00aa7400C1Ejj standin  # 0x00aa7400 the memory manager's second heap (c
 _ZN26FUN_00aa2230_BSNiAllocatorC1Ev standin  # 0x00aa2230 BSNiAllocator: defined with `virtual m_virtual0()` for slot 0, so its
                       # table is in the exe's order while NiAllocator callers are minus-one (D26 b): NiMalloc ran Free on
                       # a stack block (554 skips in _free_r). standins.c stores a minus-one table (S1-rules: virtual dtor)
+_ZN12fnv_00632ec012FUN_00632ec0C1Ev standin  # 0x00632ec0 the Setting registry (vftable 0x0104e6ac): the Setting initializers
+                      # call it through a call-only class with a named slot 0 (Reset), which D26 (b) does not rewrite, so
+                      # Register ran D0 and deleted it. standins.c gives it a table with slot 1 = Register (S1-rules)
+_ZN10S_0045d22012FUN_0045d220Ev standin  # 0x0045d220 the other Setting registry (vftable 0x01018508), the same
 _ZN8NiTMap_S9RemoveKeyEj standin  # 0x00405430: NiTMap_S is a call-only declaration in the exe's slot order (v0 at 0,
                       # KeyToHashIndex 1); its receiver (TESForm's map 0x011c54c0, exe vftable 0x0101ca78) is the native
                       # NiTPointerMap with D1/D0 at 0/1, so slot 1 ran D0 and the bucket index faulted: the last skipped

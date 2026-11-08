@@ -880,7 +880,7 @@ class Emu:
                 typ, S, P = info & 0xFF, addr_of(info >> 8) + add, layout[h[7]] + off
                 at = P - place
                 (w,) = struct.unpack_from("<I", blob, at)
-                if typ in (20, 21):   # R_AARCH64_P32_JUMP26, _CALL26
+                if typ in (20, 21, 26, 27):   # R_AARCH64_P32_JUMP26, _CALL26 (and the plain ones an assembler branch uses)
                     disp = (S - P) >> 2
                     if not -(1 << 25) <= disp < (1 << 25):
                         raise SystemExit(f"--inject {obj}: branch to {S:#x} out of range")
