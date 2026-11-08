@@ -221,7 +221,8 @@ class X86Engine:
         for a, code in self.text_funcs.items():
             self._ensure(a, len(code))
             uc.mem_write(a, code)
-        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + world.stack_fill(case.seed, 0x1000))
+        self._fill = world.stack_fill(case.seed, 0x1000)
+        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + self._fill)
         uc.mem_write(world.SP0, bytes(world.STACK[1] - world.SP0))
         uc.mem_write(TLS_BLOCK, bytes(TLS_SIZE))
         # float epilogue: fld st0; fstp dword/qword [FRET+16] (the caller's rounding); fstp tbyte [FRET]; jmp SENTINEL
@@ -428,19 +429,42 @@ class X86Engine:
 
     def _zero_unwritten(self, uc, r, ptrs):
         """STUB_OUT (R4 flow, the oracle's side of arm64emu._zero_unwritten): for each argument that points into the
-        stack, the words of the next 0x40 bytes that the oracle code has not stored to (and that are not the
-        return-address slot) become 0, as the real callee would have filled them. MSVC reuses a dead parameter slot
-        as the out-parameter temporary where GCC takes a fresh local (0x00a57670: `lea ecx, [esp+0xc]` is the
-        slot of the parameter it already consumed)."""
+        stack, the words of the next 0x40 bytes of the function's own frame (below the return-address slot) that
+        still hold the planted fill, i.e. nothing stored to them, become 0, as the real callee would have filled
+        them. (difffuzz-20, stub-flow) The words are compared with the planted fill, as the native side does: the
+        stack stores are not in r.writes, so the earlier test zeroed the callee's pushed arguments and the locals the
+        code had initialised (0x006a0c50: the oracle then read a null it had stored a pointer over). A pointer into
+        the incoming-argument words zeroes the one dword it designates: MSVC reuses a dead parameter slot as the
+        out-parameter temporary where GCC takes a fresh local (0x00a57670: `lea ecx, [esp+0xc]` is the slot of the
+        parameter it already consumed; 0x00a3d370: the key count read into the slot of its stream argument), and
+        the arguments around it are live."""
         esp0 = getattr(self, '_esp0', None)
+        fill = getattr(self, '_fill', None)
+        base = world.SP0 - 0x1000
         for v in ptrs:
             v &= 0xffffffff
             if not (world.STACK[0] <= v < world.STACK[1]):
                 continue
-            for a in range(v & ~3, min(v + 0x40, world.STACK[1]) & ~3, 4):
+            if esp0 is not None and v > esp0:
+                try:
+                    uc.mem_write(v & ~3, bytes(4))
+                except UcError:
+                    pass
+                continue
+            end = min(v + 0x40, world.STACK[1]) if esp0 is None else min(v + 0x40, esp0)
+            for a in range(v & ~3, end & ~3, 4):
                 if esp0 is not None and a == esp0:
                     continue
-                if any((a + i) in r.writes for i in range(4)):
+                if fill is not None:
+                    if a < base:
+                        continue
+                    try:
+                        cur = bytes(uc.mem_read(a, 4))
+                    except UcError:
+                        break
+                    if cur != fill[a - base:a - base + 4]:
+                        continue
+                elif any((a + i) in r.writes for i in range(4)):
                     continue
                 try:
                     uc.mem_write(a, bytes(4))
@@ -454,6 +478,8 @@ class X86Engine:
     def _on_block(self, uc, address, size, user):
         case, r = user
         if self._in_loaded(address):
+            if world.STUB_OUT and address in self.text_funcs:
+                world.scrub_dead_frames(uc, uc.reg_read(UC_X86_REG_ESP), self._fill)
             r.blocks.add(address)
             return
         esp = uc.reg_read(UC_X86_REG_ESP)
