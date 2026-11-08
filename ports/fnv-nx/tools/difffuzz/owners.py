@@ -26,7 +26,7 @@ for o, cs in {
     'S2-bodies': ('native-undefined', 'after-native-undefined', 'native-stub-data', 'native-zero-stub', 'native-trap'),
     'F1': ('call-flow', 'native-extra-calls', 'native-early-exit', 'native-inlined', 'call-order', 'call-order-unproven', 'call-order-args', 'native-empty-callee', 'oracle-empty-call',
            'native-empty-body', 'native-missing-free', 'nrvo-copy', 'dtor-split-delete', 'nrvo-elision', 'array-new-check', 'falloff?', 'native-stale-result', 'literal-ret',
-           'param-count', 'dead-init-call', 'dead-result'),
+           'param-count', 'dead-init-call', 'dead-result', 'thunk-forward'),
     'F2': ('vptr-unpaired', 'vptr-differs', 'vptr-store', 'thunk-binding', 'canned-this', 'ctor-this', 'layout-offset',
            'dyninit-no-atexit', 'native-vcall-oracle-direct', 'byvalue-arg-dtor', 'vslot-shift', 'vslot-differs', 'native-vslot-differs'),
     'F3': ('uninit-x86', 'uninit-arm', 'uninit-both', 'stub-outparam','store-width', 'x86-only-store', 'native-only-store',

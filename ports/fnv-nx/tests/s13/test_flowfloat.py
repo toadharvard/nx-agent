@@ -16,6 +16,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'difffuzz'))
+sys.path.insert(0, HERE)                                 # test_d14 (its helpers), also under python -I
 os.environ.setdefault('FNVNX_DFWORK', tempfile.mkdtemp(prefix='s13flowfloat'))
 
 import conv       # noqa: E402
