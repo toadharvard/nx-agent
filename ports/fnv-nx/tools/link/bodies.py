@@ -1366,9 +1366,10 @@ class Pe:
             if flags & IMAGE_SCN_CNT_CODE:
                 self.code.append((self.base + va, roff, rsize))
 
-    def find_unique(self, body, masked):
-        """The one address in a code section whose bytes equal body outside the offsets in masked, else None.
-        Candidates come from a literal search of body's longest unmasked run, then each is compared in full."""
+    def find_all(self, body, masked, limit=None):
+        """Every address in a code section whose bytes equal body outside the offsets in masked (at most limit + 1 of
+        them are looked for; None if the body has no unmasked run of 4 bytes to search by). Candidates come from a
+        literal search of body's longest unmasked run, then each is compared in full."""
         runs, run = [], None   # the unmasked runs [a, b)
         for j in range(len(body) + 1):
             if j < len(body) and j not in masked:
@@ -1390,10 +1391,15 @@ class Pe:
                 start = at - lo
                 if start + len(body) <= end and all(self.data[start + a:start + b] == body[a:b] for a, b in runs):
                     hits.append(va + start - roff)
-                    if len(hits) > 1:
-                        return None
+                    if limit is not None and len(hits) > limit:
+                        return hits
                 at = self.data.find(lit, at + 1, end)
-        return hits[0] if hits else None
+        return hits
+
+    def find_unique(self, body, masked):
+        """The one address in a code section whose bytes equal body outside the offsets in masked, else None."""
+        hits = Pe.find_all(self, body, masked, 1)
+        return hits[0] if hits and len(hits) == 1 else None
 
     def matches(self, va, body, masked):
         """True when the exe's bytes at va equal body outside the offsets in masked."""
@@ -1425,6 +1431,7 @@ class Pe:
 
 
 FUNCLET = ('__catch$', '__unwindfunclet$', '__ehhandler$')   # MSVC labels inside a function's own section
+SEARCH_COPIES = 64  # most identical copies of a body in the exe whose call sites are compared (copy_sites)
 SEARCH_MIN = 16   # bytes: shorter bodies (a jmp thunk, `mov eax, [ecx]; ret`) occur too often to place by content
 
 
@@ -1445,6 +1452,34 @@ def same_shape(body, img):
     return a is not None and a == b
 
 
+def copy_sites(exe, body, rel, copies, wanted):
+    """A body the exe holds several times over (identical code, relocations masked: COMDAT folding left no unique
+    copy to place): the targets of its wanted relocation sites, for the sites where every copy reaches the same
+    address. A site whose copies disagree says nothing about which copy the pristine function is, and is left out.
+    -> [(msvc name, target)] one entry per agreeing site."""
+    import struct
+    out = []
+    for k, (sn, typ) in sorted(rel.items()):
+        if sn not in wanted or typ not in (0x06, 0x14) or k > len(body) - 4:
+            continue
+        addend, = struct.unpack_from('<i' if typ == 0x14 else '<I', body, k)
+        tg = set()
+        for h in copies:
+            img = exe.read(h, len(body))
+            if img is None:
+                tg = None
+                break
+            if typ == 0x14:
+                disp, = struct.unpack_from('<i', img, k)
+                tg.add((h + k + 4 + disp - addend) & 0xffffffff)
+            else:
+                word, = struct.unpack_from('<I', img, k)
+                tg.add((word - addend) & 0xffffffff)
+        if tg and len(tg) == 1:
+            out.append((sn, next(iter(tg))))
+    return out
+
+
 def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     """Original addresses the pristine object of unit i calls the MSVC names in wanted at. Functions are placed
     by units.json, then by following REL32 calls from placed functions (a COMDAT units.json does not list, such as
@@ -1453,7 +1488,8 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     function, the exe's displacement gives the target; at a DIR32 one (the address taken, `push offset f`), the
     exe's word does. search: a function that references a wanted name and was not placed (inlined into its callers
     in the exe, or reached at an address holding other code) is placed where its bytes, relocations masked, occur
-    exactly once in the exe's code (at least SEARCH_MIN bytes: a standalone copy units.json does not list).
+    exactly once in the exe's code (at least SEARCH_MIN bytes: a standalone copy units.json does not list); a body
+    that occurs up to SEARCH_COPIES times gives the sites on which all its copies reach one address (copy_sites).
     loose (exe-data only): a function whose bytes differ from the exe's counts as placed when it is the same
     instruction stream up to constants (same_shape: a variant unit's other stack layout); a word at a relocation
     sits in the same instruction there. A function's catch funclets (`__catch$f$0`, labels in its section) are then
@@ -1495,6 +1531,11 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
                     a = at_[0] if len(at_) == 1 else None
                 if a is not None:
                     todo.append((fname, a))
+                else:   # several identical copies: the sites all of them agree on
+                    copies = exe.find_all(body, masked, SEARCH_COPIES)
+                    if copies and 2 <= len(copies) <= SEARCH_COPIES:
+                        for sn, t in copy_sites(exe, body, rel, copies, wanted):
+                            out[sn][t] += 1
         if not todo:
             break
         fname, a = todo.pop()
