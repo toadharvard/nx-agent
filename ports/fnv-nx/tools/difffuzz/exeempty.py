@@ -193,7 +193,8 @@ def _deleting_wrapper(addr):
             break
         t = (n.mnemonic, n.op_str.replace(' ', ''))
         # test byte ptr [esp+8], 1 / test byte ptr [ebp+8], 1 / (mov r, [ebp+8]; and r, 1)
-        if t[0] == 'test' and t[1] in ('byteptr[esp+8],1', 'byteptr[esp+0xc],1', 'byteptr[ebp+8],1'):
+        # (difffuzz-20, vtable) [esp+4] is the flags word of a frameless wrapper that tests it before any push
+        if t[0] == 'test' and t[1] in ('byteptr[esp+4],1', 'byteptr[esp+8],1', 'byteptr[esp+0xc],1', 'byteptr[ebp+8],1'):
             flag_at = i
             break
         if t[0] == 'and' and t[1].endswith(',1') and i and ins[i - 1].mnemonic == 'mov' and \
@@ -201,11 +202,18 @@ def _deleting_wrapper(addr):
                 ins[i - 1].op_str.split(',')[0].strip() == n.op_str.split(',')[0].strip():
             flag_at = i
             break
-    if flag_at is None or flag_at + 1 >= len(ins) or ins[flag_at + 1].mnemonic not in ('je', 'jz'):
+    if flag_at is None:
         return False
-    tgt = ins[flag_at + 1].operands[0].imm
+    # (difffuzz-20, vtable) the branch may follow the test after instructions that leave the flags alone (the
+    # wrapper stores its vftable word first: `test [esp+4], 1; push esi; mov esi, ecx; mov [esi], vft; je`)
+    je_at = flag_at + 1
+    while je_at < len(ins) and ins[je_at].mnemonic in ('mov', 'push', 'lea', 'pop', 'nop') and je_at - flag_at <= 6:
+        je_at += 1
+    if je_at >= len(ins) or ins[je_at].mnemonic not in ('je', 'jz'):
+        return False
+    tgt = ins[je_at].operands[0].imm
     # something is called inside the guarded block, and the function returns `ret 4`
-    inside = [n for n in ins[flag_at + 2:] if n.address < tgt]
+    inside = [n for n in ins[je_at + 1:] if n.address < tgt]
     if not any(n.mnemonic == 'call' for n in inside):
         return False
     rets = [n for n in ins if n.mnemonic in ('ret', 'retn')]
@@ -242,6 +250,61 @@ def _dtor_chain(addr):
     for (b1, v1, c1), (b2, v2, c2) in zip(stores, stores[1:]):
         if b1 == b2 and v1 != v2 and c2[0] != c1[0] and c2[0] in c1[1]:
             return True                       # derived vftable first, then a base class's
+    return False
+
+
+_VIA = {}
+
+
+def dtor_via_callee(addr):
+    """(difffuzz-20, vtable) A destructor whose vftable chain runs in another function: a thin wrapper whose only call
+    is a destructor chain (dtor_chain), or a body that stores its class's vftable and then jumps to the base
+    destructor, whose first vftable store is a base class's. The final vptr word of the destroyed object is then
+    representation, as in a destructor that stores both itself."""
+    if addr not in _VIA:
+        try:
+            _VIA[addr] = _dtor_via_callee(addr)
+        except Exception:  # noqa: BLE001
+            _VIA[addr] = False
+    return _VIA[addr]
+
+
+def _vftable_stores(ins):
+    import capstone
+    out = []
+    for n in ins:
+        ops = n.operands
+        if n.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == capstone.x86.X86_OP_MEM and \
+                ops[0].mem.disp == 0 and ops[0].mem.index == 0 and ops[0].mem.base != 0 and \
+                ops[1].type == capstone.x86.X86_OP_IMM and ops[0].size == 4:
+            c = vftable_class(ops[1].imm & 0xffffffff)
+            if c is not None:
+                out.append((ops[0].mem.base, ops[1].imm & 0xffffffff, c))
+    return out
+
+
+def _dtor_via_callee(addr):
+    import capstone
+    IMM = capstone.x86.X86_OP_IMM
+    ins = _insns(addr, 40)
+    body = []
+    for n in ins:
+        body.append(n)
+        if n.mnemonic in ('ret', 'retn') or (n.mnemonic == 'jmp' and n.operands and n.operands[0].type == IMM and
+                                             not addr <= n.operands[0].imm <= ins[-1].address):
+            break
+    if not body:
+        return False
+    own = _vftable_stores(body)
+    last = body[-1]
+    calls = [n for n in body if n.mnemonic == 'call' and n.operands and n.operands[0].type == IMM]
+    if last.mnemonic in ('ret', 'retn') and not own and len(calls) == 1 and len(body) <= 12 and \
+            dtor_chain(calls[0].operands[0].imm):
+        return True
+    if last.mnemonic == 'jmp' and own and not calls:
+        c1 = own[0][2]
+        theirs = _vftable_stores(_insns(last.operands[0].imm, 16))
+        return bool(theirs) and theirs[0][2][0] != c1[0] and theirs[0][2][0] in c1[1]
     return False
 
 

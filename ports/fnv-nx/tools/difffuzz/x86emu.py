@@ -585,8 +585,11 @@ class X86Engine:
                 libcalls.Mem(uc, r.writes, self._ensure).write(p, world.result_bytes(case, k, cv.ret.size))
                 eax = p
         uc.reg_write(UC_X86_REG_EAX, eax)
-        uc.reg_write(UC_X86_REG_EDX, world.u32(rb, 4))
-        uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
+        keep = retsrc.preserved(address) if address >= 0 else ()    # (eq-rest) a leaf that writes neither
+        if 'edx' not in keep:
+            uc.reg_write(UC_X86_REG_EDX, world.u32(rb, 4))
+        if 'ecx' not in keep:
+            uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         if kind in ('f32', 'f64'):
             v = struct.unpack('<f', rb[:4])[0] if kind == 'f32' else struct.unpack('<d', rb[:8])[0]
             uc.mem_write(FLD_VAL, struct.pack('<d', v))
