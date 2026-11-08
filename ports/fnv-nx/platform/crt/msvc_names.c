@@ -126,3 +126,6 @@ WEAK void FreeBlockImp(void *p)
 WEAK void __fnv_00ec330b(void *self) { fnvnx_lockit_dtor(self); }
 WEAK void *__fnv_00ec78e0(void *self) { return fnvnx_exception_ctor(self); }
 WEAK void __fnv_00ec79a1(void *self) { fnvnx_exception_dtor(self); }
+/* R2 recon2-015: exception::what() const (vftable slot 1 of std::exception; units with their own exception copy
+   reference it, no unit places it) */
+WEAK const char *__fnv_00ec79b7(const void *self) { return fnvnx_exception_what(self); }
