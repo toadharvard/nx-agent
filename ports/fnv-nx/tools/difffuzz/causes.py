@@ -1435,6 +1435,8 @@ def _libc_variant(x, a):
         return m is not None and n in (m, m + 'f')
     if base is not None and base == m:
         return True                                     # sprintf vs __sprintf_chk (_FORTIFY_SOURCE)
+    if n.startswith('__isoc23_') and n[9:] == m:
+        return True                                     # strtoul vs glibc's C23 redirect __isoc23_strtoul
     if m in MATH and n == m + 'f':
         return True                                     # atan vs atanf
     return (m, n) in LIBC_PAIRS
