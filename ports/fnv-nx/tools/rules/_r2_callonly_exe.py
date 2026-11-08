@@ -8,7 +8,7 @@ Evidence: for each candidate, the seamcheck vcall rows (S2-bodies, `fnvnx-seams 
 (units.json; for a header, the units including it) at the slots of the class's members that the unit calls by name.
 The vftables they reach are those holding the row's exe target at that slot, plus the receivers seamcheck names. A
 class is listed (`ok`) when that set is not empty and every vftable in it has a deleting destructor at slot 0
-(_d22_classes.deleting). It is `reject` when one of them does not, and `none` when there is no evidence. Only `ok`
+(exevft.deleting_dtor, the test S2-bodies' D26DS link rule uses). It is `reject` when one of them does not, and `none` when there is no evidence. Only `ok`
 rows go to `callonly_exe`; the `report` key has all of them.
 
 The output reads the owner's exe, so it is exe-derived: it goes to the private fnv-nx-build branch
@@ -17,11 +17,12 @@ recon/d22_vtable_dtor (tools/farm/recon.sh puts it into FNVNX_RECON), never into
 import argparse, collections, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [os.path.dirname(HERE), HERE]
+sys.path[:0] = [os.path.dirname(HERE), HERE, os.path.join(os.path.dirname(HERE), 'link')]
 import prepare                      # noqa: E402
 sys.modules['prepare'] = prepare
 import s1_compile as S              # noqa: E402
 import _d22_classes as DC           # noqa: E402
+import exevft                       # noqa: E402  (the deleting-destructor test shared with S2's D26DS)
 
 RX = re.compile(r'FNVNX_D22\((\w+),')
 
@@ -105,7 +106,7 @@ def main():
     dels = {}
     def deleting(v):
         if v not in dels:
-            x = img.dword(v); dels[v] = bool(x and img.text(x) and DC.deleting(img, x, names, deletes))
+            x = img.dword(v); dels[v] = bool(x and img.text(x) and exevft.deleting_dtor(a.exe, x))
         return dels[v]
     out, st = [], collections.Counter()
     for path, key, ph, members in candidates(T):
