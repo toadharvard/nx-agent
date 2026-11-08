@@ -40,7 +40,17 @@ import config
 # (x86emu.x87_result_use), CRT_MATH builtins and engine's decorated-spelling preference change verdicts no key
 # reflects, and so do the untyped canned results, the secondary-base entry and the vtpad-before-unplanted order of
 # this bump. Every key changes; the scoped CHANGES rows below stay for later partial refreshes.
-HARNESS = 'difffuzz-19'
+# difffuzz-20: a full refresh (orchestrator decision, EQ eq-003): the d21 / d24 harness changes (F1 pop learning on
+# a derail and IAT / thunk pops, F2 destructor vptr words / stub holes / planted slots, F3 builtin faults /
+# callee-saved pop learning / bound-stub rewrite / canned results out of the private ranges) change how every
+# function is fuzzed, so no cache from before them is trusted. The d21 / d24 rows below stay for later partial
+# refreshes, as difffuzz-19's did. F3b (native-stub-data): the AArch64 stub range is background memory, as on the
+# oracle, except the slots of the named / vtable stubs the image binds, where a data access still faults. F1b: MSVC
+# padding and value-free writes are no custom-register reads, custom registers carry the parameter their calibrated
+# pairing agrees on, the adaptive follow skips a callee the native calls out of line itself and reruns after its
+# last load, the bool-repr probe covers background bytes and NaN-only remainders, a store into the oracle's return
+# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy.
+HARNESS = 'difffuzz-20'
 
 
 class Facts:
@@ -100,6 +110,47 @@ def _crt_malloc(f):
 
 def _indirect(f):
     return f.oindirect
+
+
+def _f3_mem(rec):
+    """F3 (d21-f3mem): a cached divergence one of its four harness fixes can explain differently: one machine
+    faulted (builtins fault where the machine would), callee-saved registers (pop learning), a differing word in the
+    code-stub range (stub rewrite), or a canned result word the case puts in a private range. A trap (exc:N) is
+    not a data fault and stays d14's."""
+    d = rec.get('divergence') or {}
+    k = d.get('kind')
+    if k == 'callee-saved':
+        return True
+    if k == 'error' and any(str(d.get(s) or '').startswith(('fault:r:', 'fault:w:')) for s in ('x86', 'arm')):
+        return True
+    for side in ('x86', 'arm'):
+        v = d.get(side)
+        if isinstance(v, str) and len(v) >= 8:
+            try:
+                b = bytes.fromhex(v)
+            except ValueError:
+                continue
+            if any(0x08000000 <= int.from_bytes(b[i:i + 4], 'little') < 0x09000000 for i in range(len(b) - 3)):
+                return True
+    import random
+    import world
+    case = rec.get('case')
+    if not case:
+        return False
+    rets = case.get('rets') or []
+    for i in range(16):
+        if i < len(rets) and rets[i]:
+            raw = bytes.fromhex(rets[i]).ljust(16, b'\0')
+        else:
+            r = random.Random(((case.get('seed') or 0) * 1000003 + i) & 0xffffffff)
+            raw = bytes(r.getrandbits(8) for _ in range(16))
+        if world.canned_out_of_private(raw) != raw:
+            return True
+    return False
+
+
+def _old_callflow(rec):
+    return (rec.get('divergence') or {}).get('kind') in ('call-count', 'call-target')
 
 
 def _hole_trace(rec):
@@ -171,6 +222,12 @@ CHANGES = [
     Change('d20-malloc', 'functions whose oracle code calls the CRT malloc (0x00ecd1c7): it returns a fresh heap block '
            'like the game allocators (world.ALLOCATORS) and pairs with operator new / MemoryManager::Allocate by '
            'family (libcalls.FAMILY)', selects=_crt_malloc),
+    Change('d21-f3mem', 'cached divergences F3 explains differently (one machine faulted, callee-saved registers, a '
+           'word in the code-stub range, a canned result in a private range): CRT/libc builtins fault where the '
+           'machine\'s own access would (null region, own private range); a clean oracle run that only lost '
+           'callee-saved registers learns the pops of its unknown callee-pops calls; only stubs the image binds are '
+           'rewritten to their original address; canned results are moved out of both private ranges',
+           recheck=_f3_mem),
     Change('d21-holes', 'cached divergences whose native trace has a call into a hole of the stub range traced '
            'twice (the stub hook and the wild hook both fired: `name:<hex>` + `<hex>`, or a code stub outside .text '
            'as its original address + the raw word): arm64emu traces it once, as the oracle does',
@@ -183,8 +240,15 @@ CHANGES = [
            'call slots of the planted vftable is no longer followed (it became call-count x86 0, falloff?) and is '
            'vslot-shift / vslot-differs; a call-count whose native extra call is slot k of a vftable whose slot k+1 '
            'the oracle ran for real is vslot-shift (runner.Pair.vslots, vslots_run)', recheck=_planted_call),
+    Change('d24-pop', 'functions whose oracle code (or a same-unit function it runs) makes indirect calls, IAT calls '
+           'included: an intercepted callee of unknown convention whose wrong pop sent the oracle on into argument '
+           'words without a fault (wild calls) is learned too; every IAT slot is named by its import library '
+           'spelling and pops its stdcall bytes (the decomp\'s C++ spellings of an import popped 0); and cached '
+           'call-count / call-target records, for callers of the exe\'s `jmp [__imp_X]` thunks (the import\'s bytes, '
+           'or unknown and learned, instead of the placeholder definition\'s 0)', selects=_indirect,
+           recheck=_old_callflow),
 ]
-SCOPED = 'd21'
+SCOPED = 'd24'
 
 
 def harness_tag():
