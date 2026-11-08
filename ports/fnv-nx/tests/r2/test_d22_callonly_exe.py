@@ -52,6 +52,18 @@ class CallOnlyExe(unittest.TestCase):
         out, _ = rule(OWN, [{'class': 'Owner', 'file': 'src/ai/unit.cpp'}])
         self.assertIn('FNVNX_D22(Owner, virtual void v00();)', out)
 
+    def test_deriving_class_without_virtuals(self):
+        # V4 g10: `struct Shell : Owner { void Run2(); }` with Shell::Run2 defined held Owner back; exe-confirmed it
+        # does not (Shell declares no virtual and no destructor of its own: no vtable of its own here)
+        t = OWN.replace('Owner::SetObject', 'Owner::Run') + 'struct Shell : Owner\n{\n    void Run2();\n};\nvoid Shell::Run2() { Apply(); }\n'
+        out, _ = rule(t, [])
+        self.assertNotIn('FNVNX_D22(Owner', out)
+        out, _ = rule(t, [{'class': 'Owner', 'file': 'src/ai/unit.cpp'}])
+        self.assertIn('FNVNX_D22(Owner, virtual void v00();)', out)
+        out, _ = rule(t.replace('    void Run2();', '    virtual void Extra();\n    void Run2();'),
+                      [{'class': 'Owner', 'file': 'src/ai/unit.cpp'}])
+        self.assertNotIn('FNVNX_D22(Owner', out)     # a deriving class with a virtual of its own still holds it
+
     def test_other_names_unchanged(self):
         # a real name at slot 0 stays, row or not
         t = REF.replace('r0()', 'Init()')

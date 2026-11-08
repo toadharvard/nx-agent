@@ -6050,10 +6050,10 @@ def r_vtable_dtor_slot(path, text, stats):
             done[c['qual'][-1] + ('<>' if c['template'] else '')] = t[2]
             stats['D22-SLOTK'] += 1
             continue
-        callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc')),
-                                                    exe_ok=_d22_callonly_exe(path, key)) and \
+        exe_ok = _d22_callonly_exe(path, key)    # R2: exe-confirmed; a deriving class without virtuals of its own holds nothing
+        callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc')), exe_ok=exe_ok) and \
             not any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
-                    for o in classes if o['bases'])
+                    and not (exe_ok and not o['virtuals'] and not o['dtor']) for o in classes if o['bases'])
         if not callonly:
             if key not in lst or not c['first']: continue
             if c['bases'] or c['dtor'] or c['first'][2] not in lst[key]: continue
