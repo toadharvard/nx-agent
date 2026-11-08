@@ -4183,6 +4183,26 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 want[(z, path)].append(v)
                 vt_main.add((z, path))
                 st['displaced-vtables'] += 1
+    # a group whose V rows are all secondary vtables of one RTTI class C (TESActorBase's FUN_005f75e0, AlchemyItem's
+    # FUN_00402d50: the primary's own V row names another native table): its primary stands for C's primary exe
+    # vftable too, so VTFILL decides and fills it (W46's 837 undecided slots on 4264bfd7). FNVNX_VTPRIM=0 turns it off.
+    if vt_on and os.environ.get('FNVNX_VTPRIM', '1') != '0':
+        sec_td = collections.defaultdict(set)
+        for v, (z, ap, path, note) in vmap.items():
+            if v in exev and exev[v].td and exev[v].off and ap != 8:
+                sec_td[(z, path)].add(exev[v].td)
+        prim_of = collections.defaultdict(list)
+        for v, e in exev.items():
+            if e.td and e.off == 0:
+                prim_of[e.td].append(v)
+        for key, tds in sec_td.items():
+            if key in want or len(tds) != 1:
+                continue
+            ps = prim_of.get(next(iter(tds)), [])
+            if len(ps) == 1:
+                want[key].append(ps[0])
+                vt_only.add(key)
+                st['vtfill-primary-by-class'] += 1
     called, defined = set(), set()
     exe_order = []   # (table, exe vftables, reason): the pair-less tables that stay in the exe's slot order
     if called_fn is not None:   # W30: slot 0 placeholders some code names (D22-USED): one pass over the objects
