@@ -772,7 +772,10 @@ class UnitCache:
             self.providers()
             for name, addr in self._prov_rows:       # every address of a name (memmove: 0x00ec44d0, 0x00ec7230)
                 b = libcalls.A64.get(name)
-                if (b in int_names or b in libcalls.CRT_MATH and not b.endswith('f')) and addr not in libcalls.X86:
+                # (difffuzz-20, flow) the `f` names too: the exe's ceilf / floorf / cosf / acosf wrappers
+                # (0x004e4430, 0x00406cc0, 0x004e4470, 0x004f6e40) are float functions GCC inlines (frintp), the
+                # oracle traced them as calls (11 native-inlined rows); x86emu._builtin reads their float argument
+                if (b in int_names or b in libcalls.CRT_MATH) and addr not in libcalls.X86:
                     libcalls.X86[addr] = b
 
     def pair(self, source, orig_addr):
