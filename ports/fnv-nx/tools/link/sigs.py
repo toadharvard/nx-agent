@@ -72,7 +72,7 @@ def top_level(s):
         i += 1
 
 
-def split_top(s, sep=','):
+def _split_top(s, sep=','):
     out, last = [], 0
     for i, c in top_level(s):
         if c == sep:
@@ -81,7 +81,7 @@ def split_top(s, sep=','):
     return [p.strip() for p in out]
 
 
-def split_qual(s):
+def _split_qual(s):
     """'A<B::C>::D::f' -> ['A<B::C>', 'D', 'f'] (top-level '::' only)."""
     out, last, prev = [], 0, -2
     for i, c in top_level(s):
@@ -95,7 +95,7 @@ def split_qual(s):
 CONV_OP = re.compile(r'(?:^|::)\s*operator (?!new\b|delete\b)(?=[A-Za-z_])')
 
 
-def split_qual_conv(qual):
+def _split_qual_conv(qual):
     """split_qual for a conversion operator too: 'A::B::operator struct N::T *' -> ['A', 'B', 'operator N::T*'] (the
     target type is one component, canonical, so MSVC and Itanium spell it the same)."""
     m = CONV_OP.search(qual)
@@ -144,7 +144,7 @@ SPACE_NONWORD = re.compile(r' (?=\W)|(?<=\W) ')
 LONG = re.compile(r'\b(?<!long )long\b(?! long| double)')
 
 
-def canon_type(t, level=0):
+def _canon_type(t, level=0):
     t = t.replace('`anonymous namespace\'', '{anon}').replace('(anonymous namespace)', '{anon}')
     t = TAGS.sub('', t)
     t = NOISE.sub('', t)
@@ -165,7 +165,7 @@ def canon_type(t, level=0):
     return t
 
 
-def canon_param(t, level=0):
+def _canon_param(t, level=0):
     t = canon_type(t, level)
     while True:  # top-level cv of a by-value parameter is not part of the type (Itanium drops it)
         m = re.match(r'^(.*?)(?:\s*\b(?:const|volatile))$', t)
@@ -174,7 +174,7 @@ def canon_param(t, level=0):
         t = m.group(1).rstrip()
 
 
-def canon_qual(parts):
+def _canon_qual(parts):
     """Canonical qualified-name components; ctor/dtor names become {ctor}/{dtor}."""
     parts = [canon_type(p) for p in parts]
     if len(parts) >= 2:
@@ -185,6 +185,47 @@ def canon_qual(parts):
         elif last == '~' + cls:
             parts[-1] = '{dtor}'
     return parts
+
+
+# ---------------------------------------------------------------------------------------------------- memoized
+# T1 (incremental link): the link calls these pure string functions millions of times on far fewer distinct strings
+# (resolve of 31971038: canon_type 3.3M calls, 49 s of 255 s under the profiler). Memoized per process; the
+# list-returning ones keep a tuple and give every caller its own list, so a caller that edits the list cannot change
+# what the next caller gets. Same results, by construction.
+_memo = {}
+
+
+def _cached(fn, key, *args):
+    try:
+        return _memo[key]
+    except KeyError:
+        v = _memo[key] = fn(*args)
+        return v
+
+
+def split_top(s, sep=','):
+    return list(_cached(lambda: tuple(_split_top(s, sep)), ('st', s, sep)))
+
+
+def split_qual(s):
+    return list(_cached(lambda: tuple(_split_qual(s)), ('sq', s)))
+
+
+def split_qual_conv(qual):
+    return list(_cached(lambda: tuple(_split_qual_conv(qual)), ('sqc', qual)))
+
+
+def canon_type(t, level=0):
+    return _cached(_canon_type, ('ct', t, level), t, level)
+
+
+def canon_param(t, level=0):
+    return _cached(_canon_param, ('cp', t, level), t, level)
+
+
+def canon_qual(parts):
+    parts = tuple(parts)
+    return list(_cached(lambda: tuple(_canon_qual(list(parts))), ('cq', parts)))
 
 
 # ---------------------------------------------------------------------------------------------------- signatures
