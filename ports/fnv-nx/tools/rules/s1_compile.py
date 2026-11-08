@@ -4986,6 +4986,10 @@ def r_vfptr_empty_base(path, text, stats):
 # stay visible trap stubs, and the prepare goes on (orchestrator, R2: one stale recon must not block every build).
 # Each rejection is counted (REC1-REJECT), printed to stderr and listed in <out>/build/recon_rejected.tsv (recon dir,
 # unit, pair index, count, the start of `old`) by the POST hook.
+# REC1-DUP-DEF (orchestrator, R2): an append that would define a function the unit already defines (same namespace
+# path, qualified name and parameter types, at namespace scope) is rejected the same way (pair index -2), instead of
+# failing the compile with a redefinition. A recon that restored a body a rule had stripped (STAND1 with a split head)
+# then stops applying by itself once the rule keeps the body.
 
 def _recon_entries(path):
     """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
@@ -5024,6 +5028,61 @@ def _recon_entries(path):
         _RECON.append((r, os.path.dirname(f)))
     return _RECON
 
+# ---- REC1-DUP-DEF: function definitions at namespace scope, by a light scan (no preprocessor, no templates)
+_REC1_KW = {'if', 'while', 'for', 'switch', 'catch', 'return', 'sizeof', 'else', 'do', 'defined', 'decltype', 'alignof', 'case', 'new', 'delete'}
+def _rec1_strip(s):
+    s = re.sub(r'/\*.*?\*/', lambda m: re.sub(r'[^\n]', ' ', m.group(0)), s, flags=re.S)
+    s = re.sub(r'//[^\n]*', '', s)
+    s = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', s)
+    s = re.sub(r"'(?:\\.|[^'\\\n])*'", "''", s)
+    s = re.sub(r'^\s*#[^\n]*', '', s, flags=re.M)   # preprocessor lines
+    return s
+_REC1_HEAD = re.compile(r'((?:[A-Za-z_]\w*\s*::\s*)*(?:~?[A-Za-z_]\w*|operator\s*(?:\(\)|[^\s(]+)))\s*\(((?:[^;{}()]|\([^;{}()]*\))*)\)\s*(?:const\b\s*)?(?:throw\s*\(\s*\)\s*|noexcept\s*)?(?::[^;{}]*)?$')
+def _rec1_params(p):
+    p = re.sub(r'=[^,]*', '', p)                      # default arguments
+    out = []
+    for a in [x.strip() for x in p.split(',') if x.strip()]:
+        a = re.sub(r'\b(const|volatile|struct|class|enum|typename|register)\b', ' ', a)
+        a = re.sub(r'\s+', ' ', a).strip()
+        a = re.sub(r'\s*([*&])\s*', r'\1', a)
+        m = re.match(r'^(.*?[*&\s>])\s*([A-Za-z_]\w*)(\[[^\]]*\])?$', a)   # drop the parameter name
+        if m and m.group(1).strip() and not m.group(1).strip().endswith('::'): a = m.group(1).strip() + (m.group(3) or '')
+        out.append(a.replace(' ', ''))
+    return ','.join(x for x in out if x != 'void')
+def _rec1_defs(text):
+    """{(namespace path, qualified name, normalized params)} of function definitions at namespace scope (template
+    heads ignored: a template and its instantiation are one definition only when the text is the same)"""
+    s = _rec1_strip(text); out = set(); scope = []; last = 0
+    for m in re.finditer(r'[{};]', s):
+        p, ch = m.start(), m.group(0)
+        if ch == ';': last = p + 1; continue
+        if ch == '{':
+            head = s[last:p]
+            kind = 'blk'
+            mn = re.search(r'\bnamespace\s+([A-Za-z_]\w*)\s*$', head)
+            if mn: kind = ('ns', mn.group(1))
+            elif re.search(r'\bnamespace\s*$', head): kind = ('ns', '(anon)')
+            elif re.search(r'\bextern\s*""\s*$', head): kind = ('ns', '')
+            elif all(k != 'blk' for k in scope):
+                hm = _REC1_HEAD.search(head.rstrip())
+                if hm and not re.search(r'\b(struct|class|union|enum)\b[^()]*$', head[:hm.start()].split('\n')[-1] if hm else ''):
+                    name = re.sub(r'\s+', '', hm.group(1))
+                    if name.split('::')[-1] not in _REC1_KW and not re.search(r'=\s*$', head[:hm.start()]):
+                        ns = '::'.join(k[1] for k in scope if k[1])
+                        out.add((ns, name, _rec1_params(hm.group(2))))
+            scope.append(kind); last = p + 1
+        else:
+            if scope: scope.pop()
+            last = p + 1
+    return out
+def _rec1_full(d):
+    ns, name, params = d
+    return ((ns + '::') if ns else '') + name + '(' + params + ')'
+def _rec1_duplicates(text, body):
+    t = {_rec1_full(d) for d in _rec1_defs(text)}
+    return sorted(_rec1_full(d) for d in _rec1_defs(body) if _rec1_full(d) in t)
+
+
 def _recon_reject(r, d, src, bad, stats):
     """REC1-REPL: record a recon rejected for unit src (bad = (pair index, count or -1, `old` start or reason)); the
     POST hook writes the list to build/recon_rejected.tsv."""
@@ -5032,7 +5091,9 @@ def _recon_reject(r, d, src, bad, stats):
     rej = prepare.__dict__.setdefault('_fnvnx_recon_rejected', [])
     rej.append((d, src, k, c, what))
     stats['REC1-REJECT'] += 1
-    if c < 0:
+    if c == -2:
+        msg = 'the append defines what the unit already defines: %s' % what
+    elif c < 0:
         msg = 'replace[%d] %s' % (k, what)
     else:
         msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
@@ -5061,10 +5122,15 @@ def r_recon_bodies(path, text, stats):
             edited = edited.replace(old, new)
         if bad is not None:
             _recon_reject(r, d, src, bad, stats); continue
-        stats['REC1-REPL'] += len(r.get('replace') or [])
-        text = edited
+        body = None
         if r.get('append'):
             body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
+            dup = _rec1_duplicates(edited, body)
+            if dup:
+                _recon_reject(r, d, src, (-1, -2, ', '.join(dup)[:300]), stats); continue
+        stats['REC1-REPL'] += len(r.get('replace') or [])
+        text = edited
+        if body is not None:
             text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
             if not text.endswith('\n'): text += '\n'
             stats['REC1'] += len(r.get('functions', []))
@@ -5078,7 +5144,7 @@ def add_recon_definitions(out_root, stats, files=None):
     rej = prepare.__dict__.get('_fnvnx_recon_rejected') or []
     if rej and os.path.isdir(os.path.join(out_root, 'build')):
         with open(os.path.join(out_root, 'build', 'recon_rejected.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed)\told (start) or reason\n')
+            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed, -2: append redefines)\told (start) or reason\n')
             for row in rej:
                 f.write('\t'.join(str(x).replace('\t', ' ').replace('\n', '\\n') for x in row) + '\n')
         stats['REC1-REJECTED-RECONS'] = len(rej)
