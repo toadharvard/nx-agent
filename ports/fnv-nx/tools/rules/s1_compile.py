@@ -5631,11 +5631,27 @@ D22_CALLONLY_PLACEHOLDER = re.compile(
     r"^(?:v|vf|vfn|vt|vfunc|virt|virtual|slot|func|fn|unk|unknown|Unk_?|Unknown|Func|Virtual|Reserved|reserved|pad|Pad|"
     r"Slot|V|F)_?0+$|^\w*?Unknown_?0*$|^\w*_v0$|^v0_\w*$|^vfunc0\w*$|^Unk(?:nown)?0+\w*$", re.IGNORECASE)
 
-def _d22_callonly(masked, c):
+D22_EMPTY_BODY = re.compile(r'\{\s*(?:return\s+(?:[-+]?(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*|true|false|0\.0f?|nullptr|NULL)\s*;\s*)?\}\s*$')
+
+def _d22_callonly(masked, c, unit=True):
     """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above)"""
     if c['bases'] or c['dtor'] or not c['first'] or len(c['virtuals']) < 2: return False
     if not c['first'][2] or not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]): return False
-    if any('{' in masked[v[0]:v[1]] for v in c['virtuals']): return False
+    # an empty inline body (`virtual void f00() {}`) or one that only returns a constant (`{ return 0; }`) is a
+    # placeholder too, not a definition (EQ, link 0540aff0: tesobjectrefr.cpp's FUN_00567f40_class, 19 such slots;
+    # S2-bodies' PHSLOT1 makes the empty ones declarations as well)
+    if any('{' in masked[v[0]:v[1]] and not (unit and D22_EMPTY_BODY.search(masked[v[0]:v[1]])) for v in c['virtuals']):
+        return False                                     # (a header's includers could build the class: .cpp only)
+    if any('{' in masked[v[0]:v[1]] for v in c['virtuals']):
+        # with inline bodies GCC can build the class (its vtable from those bodies); once `virtual ~C()` is the key
+        # function nothing defines, a construction would need it. Only a class the file never uses as an object:
+        # its name only as `C*`, `C&`, `C::`, in its own body or after `struct` / `class`
+        nm = c['qual'][-1]
+        for u in re.finditer(r'(?<![\w~:])%s\b' % re.escape(nm), masked):
+            if c['open'] < u.start() < c['close']: continue
+            if re.match(r'\s*(?:\*|&|::)', masked[u.end():u.end() + 4]): continue
+            if re.search(r'(?:struct|class)\s+$', masked[max(0, u.start() - 12):u.start()]): continue
+            return False
     name = c['qual'][-1]
     members = {v[2] for v in c['virtuals'] if v[2]}
     for m in re.finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), masked):
@@ -5732,7 +5748,7 @@ def r_vtable_dtor_slot(path, text, stats):
         return calls[ph]
     for c in classes:
         key = c['qual'][-1] + '<>' if c['template'] else '::'.join(c['qual'])
-        callonly = key not in lst and _d22_callonly(masked, c) and \
+        callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc'))) and \
             not any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
                     for o in classes if o['bases'])
         if not callonly:

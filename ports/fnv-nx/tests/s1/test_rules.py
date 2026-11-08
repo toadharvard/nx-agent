@@ -1881,6 +1881,13 @@ prepare.__dict__.pop('_fnvnx_d22_refs', None)
 check('D26 a placeholder call with a non-literal argument is not a destructor call',
       run(s1.r_vtable_dtor_slot, _CO.replace('virtual void v0();', 'virtual void* v0(void*);') +
           'void g(HeapStandIn* h, void* r) { h->v0(r); }\n'), [], ['FNVNX_D22'])
+_CE = ('struct Q\n{\n    virtual void f00()\n    {}\n    virtual void f01()\n    {}\n    virtual int f02(unsigned v)\n    {\n        return 0;\n    }\n};\n'
+       'int g(Q* q) { return q->f02(1); }\n')
+check('D26 call-only: empty or return-a-constant inline placeholders count as declarations (.cpp)',
+      run(s1.r_vtable_dtor_slot, _CE), ['FNVNX_D22(Q, virtual void f00()'])
+check('D26 call-only: ... not when the file uses the class as an object, nor in a header, nor with a real body',
+      run(s1.r_vtable_dtor_slot, _CE + 'Q g_q;\n') + run(s1.r_vtable_dtor_slot, _CE, '/nonexistent/src/q.h') +
+      run(s1.r_vtable_dtor_slot, _CE.replace('return 0;', 'return v + 1;')), [], ['FNVNX_D22(Q'])
 check('D26 call-only: a named first virtual is not a placeholder',
       run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'GetName()')), [], ['FNVNX_D22'])
 if _shutil.which('aarch64-linux-gnu-g++'):
