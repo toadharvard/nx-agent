@@ -151,6 +151,11 @@ static void xc_before(void *, uint32_t orig, uint32_t seq) {
 }
 extern "C" const fnvnx_xc_hooks fnvnx_guest_xc_hooks = {nullptr, xc_before, nullptr};
 
+/* __xi_a..__xi_z, the C initializers _initterm runs before __xc: captured with __xc (before the code-pointer fixups
+ * rewrite them), run at the end of load_image (before every game initializer) */
+static uint32_t *g_xi_slots, g_xi_n;
+static void *addrmap_native(uint32_t orig, const char *kinds);
+
 static void capture_xc(const fnvnx_pe *pe, const fnvnx_image *img) {
     for (unsigned i = 0; i < pe->nsections; i++) {
         const fnvnx_section &sec = pe->sec[i];
@@ -171,6 +176,13 @@ static void capture_xc(const fnvnx_pe *pe, const fnvnx_image *img) {
         fnvnx_xc_image_nslots = ns;
         printf("fnvnx boot: image __xc %#010" PRIx32 "..%#010" PRIx32 ": %" PRIu32 " slots, %" PRIu32
                " in the initializer group: IMAGE order\n", b, e, ns, hits);
+        uint32_t xb = 0, xe = 0;
+        if (fnvnx_xi_locate(mem, va, n, e, pe->image_base + pe->text_lo_rva, pe->image_base + pe->text_hi_rva, &xb,
+                            &xe) == FNVNX_XC_OK && xe > xb && (g_xi_slots = (uint32_t *)malloc(xe - xb)) != nullptr) {
+            g_xi_n = (xe - xb) / 4;
+            memcpy(g_xi_slots, mem + (xb - va) / 4, xe - xb);
+        }
+        printf("fnvnx boot: image __xi %#010" PRIx32 "..%#010" PRIx32 ": %" PRIu32 " C initializers\n", xb, xe, g_xi_n);
         return;
     }
 }
@@ -283,6 +295,27 @@ static int load_image(void) {
            n, as.applied, as.trapped, as.mismatched);
     fnvnx_image_finalize(&img, &os);
     fnvnx_guest_thread_tls_hook();   /* main thread: image .tls template -> __fnvnx_tls_image */
+    {   /* _initterm(__xi_a, __xi_z) before __xc, as the CRT does. FalloutNV.exe's eight are the static CRT's own (onexit
+         * table, _initstdio, __initmbctable, encoded pointers, a terminator, __CxxSetUnhandledExceptionFilter), which
+         * the platform provides natively: an entry with a native definition is called (its int result: nonzero is
+         * the CRT's _RT_* failure, logged), one in the CRT's code without one is skipped, any other is reported */
+        unsigned called = 0, crt = 0, missing = 0;
+        for (uint32_t k = 0; k < g_xi_n; k++) {
+            uint32_t o = g_xi_slots[k];
+            void *fn = addrmap_native(o, "F");
+            if (fn) {
+                int rr = ((int (*)(void))fn)();
+                called++;
+                if (rr) printf("fnvnx boot: __xi %#010" PRIx32 " returned %d\n", o, rr);
+            } else if (o >= 0x00ec0000u && o < 0x00f34eb0u) {
+                crt++;
+            } else {
+                missing++;
+                printf("fnvnx boot: __xi %#010" PRIx32 " has no native definition: not run\n", o);
+            }
+        }
+        printf("fnvnx boot: __xi: %u called, %u CRT entries provided natively, %u missing\n", called, crt, missing);
+    }
     {   /* TLS callbacks: the Windows loader calls each with (hModule, DLL_PROCESS_ATTACH, NULL) before the entry point.
          * FalloutNV.exe's list is empty; a callback the fixups made native is called, an x86 one is reported */
         uint32_t cbs[16], ncb = 0;
@@ -321,7 +354,7 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
     printf("fnvnx boot: static initialisers done, %u trap hits (%u distinct)\n", g_trap_hits, g_trap_distinct);
     printf("fnvnx boot: guest image linked at %p, address map %u entries\n", (void *)fnvnx_guest_main, fnvnx_addrmap_count);
     fnvnx_set_command_line(argc, argv);
-    /* TODO (S4): run the image's __xi_a..__xi_z / __xc_a..__xc_z initializer tables here (DATAIMAGE.md step 9) */
+    /* the image's __xi table ran in load_image, its __xc table in IMAGE order (S10) before this, in CRT order */
     if (!&__fnv_0086a850) {
         printf("fnvnx boot: STOP: WinMain (0x0086a850) is not in the link (src/fallout/misc/main.cpp does not compile)\n");
         return 3;

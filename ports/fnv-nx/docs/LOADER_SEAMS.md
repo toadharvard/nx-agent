@@ -14,7 +14,7 @@ Facts of the player's exe, from its headers; no game bytes are in this file:
 - 280 imports from 17 DLLs.
 
 **Status:** pass = matches Windows for the game, with a test. fixed = differed, fixed in this audit. differs =
-differs from Windows, harmless for the game (why given). open = not verified.
+differs from Windows, harmless for the game (why given).
 
 | # | duty | Windows | port | status | test |
 |---|---|---|---|---|---|
@@ -28,7 +28,7 @@ differs from Windows, harmless for the game (why given). open = not verified.
 | 8 | section protections | `.rdata` read-only, `.data` RW, `.text` RX | the guest's protect is a no-op: everything mapped stays RW | differs: a write to `.rdata` faults on Windows and not here. The game makes none (it would crash on the PC) | - |
 | 9 | `.reloc`, discardable sections | mapped (readable) | not mapped | differs: nothing reads them after load | - |
 | 10 | `.rsrc` | mapped | mapped | pass | tests/s3 |
-| 11 | init order | DLLs initialised, then TLS callbacks, then the CRT's `_initterm` over `__xi` (C) and `__xc` (C++), then WinMain | platform first (S10 early init, before the game's static initialisers); the loader and TLS callbacks in the first initializer (`boot_banner`); then the image's `__xc` table in image order (S10); then WinMain | open: the exe's `__xi` C-initializer table. boot.cpp still has a TODO; the CRT's own C inits are native, but a game C initializer in `__xi` would not run. Owner: S10 | S10's boot log (`image __xc ... in the initializer group`) |
+| 11 | init order | DLLs initialised, then TLS callbacks, then the CRT's `_initterm` over `__xi` (C) and `__xc` (C++), then WinMain | platform first (S10 early init, before the game's static initialisers); in the first initializer (`boot_banner`) the loader, the TLS callbacks, then the image's `__xi` table (`fnvnx_xi_locate` after `__xc_z`: entries with a native definition called in table order, CRT entries the platform provides natively skipped, any other reported); then `__xc` in image order (S10); then WinMain. FalloutNV.exe's 8 `__xi` entries are the static CRT's own (onexit table, `_initstdio`, `__initmbctable`, encoded pointers, a terminator, `__CxxSetUnhandledExceptionFilter`) | fixed | tests/s10 `test_xc` (`fnvnx_xi_locate`: past `__xc_z`/`__xi_a`, up to `__xi_z`, empty table, no terminator); boot log `__xi: n called, n CRT entries provided natively, n missing` |
 | 12 | process heap | GetProcessHeap, HeapAlloc/ReAlloc/Free/Size; CRT `_crtheap` via HeapCreate | over malloc; HeapReAlloc(NULL) fails, HeapFree(NULL) is TRUE. HeapSize is malloc_usable_size (>= the request; Windows also allows a larger block) | pass (fixed: NULL rules) | tests/s4 `procenv_heap`, `heap_functions` |
 | 13 | command line | GetCommandLineA/W stable, program name first and quoted; WinMain gets the tail | `"C:\FalloutNV\FalloutNV.exe" args`. WinMain's lpCmdLine was always "": it is now GetCommandLineA past the program name | fixed (lpCmdLine) | tests/s4 `procenv_command_line` |
 | 14 | environment | a non-empty double-NUL block (PATH, TEMP, SystemRoot, USERPROFILE, APPDATA...) for the CRT's `_setenvp` and getenv | was empty; now seeded with the session variables a Windows desktop has | fixed | tests/s4 `procenv_environment_defaults`, `procenv_environment_roundtrip`, `crt_k32_environment` |
@@ -37,5 +37,4 @@ differs from Windows, harmless for the game (why given). open = not verified.
 | 17 | module identity | GetModuleHandle(NULL) = image base; GetModuleFileName = the exe's path; system DLL handles valid for GetProcAddress | 0x00400000, `C:\FalloutNV\FalloutNV.exe`; kernel32/user32 handles | pass | tests/s4 `procenv_module_identity` |
 | 18 | default thread stack | CreateThread(0) uses the exe's SizeOfStackReserve (1 MiB) | 1 MiB; larger requests honoured, < 256 KiB raised | pass | tests/s4 `procenv_thread_stack` |
 
-Open item 11 (`__xi`) goes to S10's owner. If a game C initializer sits in the exe's `__xi_a..__xi_z`, it has to run
-before `__xc`, as `_initterm(__xi)` does.
+All 18 are pass, fixed, or a harmless difference: 10 pass, 6 fixed, 2 differ.
