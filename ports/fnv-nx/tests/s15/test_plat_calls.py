@@ -169,7 +169,7 @@ def main():
                               call(3, 7, '_BinkOpen@8', 0x00ec1234) + 'ret\t3\t7\t0\t_BinkOpen@8\t0x9000\t0\n' +
                               call(4, 7, 'EnterCriticalSection', 0x00ec1234))
         gtsv = os.path.join(d, 'guest.tsv')
-        g = 'call\t%d\t1\t0\t%s\t-\t' + '\t'.join(['0x0'] * 8) + '\t0x40000\t0x30001000\n'
+        g = 'call\t%d\t1\t0\t%s\t-\t' + '\t'.join(['0x0'] * 8) + '\t0x40000\t0x30001000\t0x30001000 _Z1fv [orig 00401000]\n'
         open(gtsv, 'w').write(g % (1, 'CreateFileA') + 'ret\t1\t1\t0\tCreateFileA\t0xffffffff\n' +
                               g % (2, 'BinkOpen') + 'ret\t2\t1\t0\tBinkOpen\t0x0\n' + g % (3, 'Sleep') +
                               'ret\t3\t1\t0\tSleep\t0x0\n')

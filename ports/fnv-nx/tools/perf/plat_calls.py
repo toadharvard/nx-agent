@@ -161,8 +161,8 @@ def parse(path, names):
         f = line.rstrip('\n').split('\t')
         k = f[0]
         if k == 'call' and len(f) >= 16 and f[4] in names:
-            try:
-                ra = int(f[-1], 16)
+            try:   # Wine: ... esp ret; guest (emu_guest.py): ... sp ret "<caller pc> <label>"
+                ra = int(f[-1], 16) if len(f) == 18 or not f[-1].strip().count(' ') else int(f[-2], 16)
             except ValueError:
                 continue
             s = st.setdefault(f[4], {'logged': 0, 'count': 0, 'first_seq': None, 'first_tid': None, 'tids': set(),
