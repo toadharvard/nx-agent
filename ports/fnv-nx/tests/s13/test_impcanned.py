@@ -27,7 +27,7 @@ check(is_import('__imp__TlsGetValue@4', libcalls.import_id('TlsGetValue')), 'its
 check(not is_import('_ZN3Foo3barEv', -0x1234) and not is_import(None, libcalls.import_id('TlsGetValue')) and
       not is_import('TlsGetValue', 0x00401000), 'a C++ name, no name, an image address: not an import')
 ch = [c for c in fnkeys.CHANGES if c.tag == 'd26-imp']
-check(len(ch) == 1 and fnkeys.SCOPED == 'd26' and
+check(len(ch) == 1 and fnkeys.SCOPED >= 'd26' and
       ch[0].recheck({'divergence': {'kind': 'error', 'x86': 'fault:r:00000003', 'arm': None}}) and
       not ch[0].recheck({'divergence': {'kind': 'error', 'x86': None, 'arm': 'fault:r:00000003'}}),
       'd26-imp rechecks the records where only the oracle faulted; SCOPED d26')

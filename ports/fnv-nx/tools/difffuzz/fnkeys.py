@@ -161,6 +161,22 @@ def _old_oracle_fault(rec):
     return d.get('kind') == 'error' and str(d.get('x86') or '').startswith('fault:') and d.get('arm') is None
 
 
+def _hard_cached(rec):
+    """d27-eqbase: a cached divergence the farm counted (not soft): EQ's farm-baseline round changed how many of them
+    are explained (orchestrator's decision (b): re-fuzz the hard verdicts only, HARNESS stays)."""
+    d = rec.get('divergence') or {}
+    if not d or d.get('soft'):
+        return False
+    import report
+    import causes
+    try:
+        cause = report.reclassify(dict(rec, _now=d))
+    except Exception:  # noqa: BLE001
+        return True                          # cannot tell: re-fuzz it
+    pol = causes.policy(cause)
+    return bool(pol[2]) and pol[0] in ('real-bug', 'triage')   # the hard verdicts the farm counts
+
+
 def _indirect(f):
     return f.oindirect
 
@@ -309,8 +325,15 @@ CHANGES = [
     Change('d26-imp', 'cached divergences where only the oracle faulted: a native call of an import gets the raw canned word as '
            'on x86 (it was normalised as an untyped bool, 0xffffff01 against 0xffffffff for TlsGetValue, so [ret + 4] '
            'faulted on x86 only)', recheck=_old_oracle_fault),
+    Change('d27-eqbase', 'cached hard divergences (real-bug / triage by causes.policy of the record cause): EQ\'s farm-baseline round (588863) explains many of them '
+           'differently: oracle-callee-unloaded from arm_entered and base-object entries, __fnvnx_msvc_ secondary-base '
+           'entries in the image, provider objects for C++ names another object defines, push-ecx reservations, '
+           'local-static pairing of class-typed statics, thunk-forward, edx placeholders, float libm wrappers, '
+           'throw-temp-dtor, x87 f32den, `pop ecx; ret` pop learning, the wild call at the top of the address space, '
+           'deleting D0 pairing, unplanted vcalls, __readfsdword, returned vtables paired by the link (re-fuzzed once)',
+           recheck=_hard_cached),
 ]
-SCOPED = 'd26'
+SCOPED = 'd27'
 
 
 def harness_tag():
