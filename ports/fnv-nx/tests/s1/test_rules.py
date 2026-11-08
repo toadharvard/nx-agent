@@ -1059,7 +1059,17 @@ s1.bind_units_data(_data, _c)
 s1.bind_units_data(_data, _c)
 check('BIND1 binds the stand-in names once, in their unit only', repr(_data) + ' %d' % _c['BIND1'],
       ["'?Allocate@MemoryManagerAA3880@@QAEPAXI@Z': '0x00aa3e40'", "'?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A': '0x011f6238'",
-       "'?entryNpos@@3IA': '0x010173f0'", "'symbols': {}}]} 3", "'?x@@3HA': '0x1'"])
+       "'?entryNpos@@3IA': '0x010173f0'", "'symbols': {}}]} 4", "'?x@@3HA': '0x1'",
+       "'?smallPools@fnv_00aafc80@@3PAPAUDeallocPool@1@A': '0x011f67b8'"])
+# W28: the memory manager of src/bssystem/archive.cpp (top-down 109) and the small-pool table (44) are bound in their units
+_c = Counter()
+_data = {'units': [{'source': 'src/bssystem/archive.cpp', 'symbols': {}}]}
+s1.bind_units_data(_data, _c)
+check('BIND1 binds archive.cpp\'s g_memoryManager_af5480 to the memory manager', repr(_data['units'][0]['symbols']),
+      ["'?g_memoryManager_af5480@fnv_00af5480@@3UMemoryManager_af5480@1@A': '0x011f6238'"])
+check('BIND1 rows are all well-formed (MSVC data names at image data addresses)',
+      repr([r for r in s1.BIND1_REFS if not (r[1].startswith('?') and r[2].startswith('0x') and
+                                              0x00401000 <= int(r[2], 16) < 0x02100000)]), ['[]'])
 
 # ---- NATIVE1 (render R3): the drop list's matching, shared by prepare's drop_native_units and tools/rules/native1.py
 _spec = importlib.util.spec_from_file_location('native1', os.path.join(HERE, '..', '..', 'tools', 'rules', 'native1.py'))

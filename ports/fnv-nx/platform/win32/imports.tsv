@@ -145,6 +145,7 @@
 0x00fdf370	ws2_32	bind	1	-	S4 platform/win32
 0x00fdf374	ws2_32	setsockopt	1	-	S4 platform/win32
 0x00fdf378	ws2_32	inet_ntoa	1	-	S4 platform/win32
+0x00fdf380	ws2_32	__WSAFDIsSet	1	FUN_00DF3880	S4 platform/win32 (WSOCK32 ordinal 151; the thunk 0x00ee6db6 jumps through it)
 0x00fdf384	ws2_32	accept	1	-	S4 platform/win32
 0x00fdf388	ws2_32	ntohs	1	-	S4 platform/win32
 0x00fdf394	xinput1_3	XInputGetState	1	-	S7
