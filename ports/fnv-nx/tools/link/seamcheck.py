@@ -201,7 +201,7 @@ def x86_events(insns, start, end_hint=None, info=None):
     depth = 0          # bytes pushed since the entry while the entry block runs straight (None after it)
     pushed = []
     if info is not None:
-        for k in ('thisof', 'vstore', 'stores', 'rets', 'calls'):
+        for k in ('thisof', 'vstore', 'stores', 'rets', 'calls', 'ostores'):
             info.setdefault(k, [])
         info.setdefault('retthis', {})
     slots = info.setdefault('slots', {}) if info is not None else {}
@@ -247,6 +247,8 @@ def x86_events(insns, start, end_hint=None, info=None):
                 key = ('g', (btag[1] + m.disp) & 0xffffffff)
             elif btag == ('this',):
                 key = ('f', m.disp)
+            if not key and m.disp >= 0 or btag == ('this',):
+                info['ostores'].append((btag, m.disp, val, site))   # a field of an object (Infer.field)
         if key and m.disp >= 0:
             info['stores'].append((key, val, site))
         if (m.disp == 0 or not m.base) and val and val[0] == 'ga':
@@ -520,6 +522,55 @@ def _consistent(pairs):
     return None
 
 
+def mode_repair(pairs, note):
+    """GCC reorders neighbouring virtual calls (switch arms, blocks it sinks or hoists), so pairing in address order
+    can pair exe call i with native call i + 1. When one slot delta in -2..2 (native slot - exe slot) explains the
+    function (the most exe calls of slot j find a native call of slot j + delta: at least two and half the calls, more
+    than any other delta), the pairs off that delta are re-matched among themselves by value: an exe call of slot j
+    takes the one native call of slot j + delta, if exactly one; the rest pair in order. Kept only when the
+    offset map stays consistent. -> (pairs, note); the note gains ' mode-repaired'."""
+    if len(pairs) < 3:
+        return pairs, note
+    nat = collections.Counter((b[1], b[2] // 4) for _, b in pairs)
+    score = {}
+    for delta in range(-2, 3):   # how many exe calls find a native call of slot j + delta
+        c = collections.Counter(nat)
+        n = 0
+        for a, _ in pairs:
+            key = (a[1], a[2] // 4 + delta)
+            if c[key] > 0:
+                c[key] -= 1
+                n += 1
+        score[delta] = n
+    top = sorted(score.items(), key=lambda kv: -kv[1])
+    mode, n = top[0]
+    if n < 2 or 2 * n < len(pairs) or top[1][1] == n:
+        return pairs, note
+    off = [i for i, (a, b) in enumerate(pairs) if b[2] // 4 - a[2] // 4 != mode]
+    if not off:
+        return pairs, note
+    pool = [pairs[i][1] for i in off]
+    new = list(pairs)
+    taken, done = set(), set()
+    for i in off:
+        a = pairs[i][0]
+        hits = [x for x, b in enumerate(pool) if x not in taken and b[1] == a[1] and b[2] // 4 == a[2] // 4 + mode]
+        if len(hits) == 1:
+            taken.add(hits[0])
+            done.add(i)
+            new[i] = (a, pool[hits[0]])
+    if all(new[i][1] is pairs[i][1] for i in off):
+        return pairs, note
+    # the native calls left over go, in order, to the exe calls left over
+    left = [i for i in off if i not in done]
+    rest = [b for x, b in enumerate(pool) if x not in taken]
+    for i, b in zip(left, rest):
+        new[i] = (pairs[i][0], b)
+    if _consistent([((a[1], a[2]), (b[1], b[2])) for a, b in new]):
+        return pairs, note
+    return new, (note + ' mode-repaired').strip()
+
+
 def align(exe_ev, nat_ev):
     """Pair the virtual calls of one function. -> (status, [(exe event, native event)], note).
     status: 'aligned', 'no-vcalls' (neither side has one), or 'unaligned' (note: why).
@@ -552,7 +603,7 @@ def align(exe_ev, nat_ev):
         for (_, a), (_, b) in zip(re_, rn):
             for i, x in enumerate(a):
                 pairs.append((x, b[min(i, len(b) - 1)]))
-        return 'aligned', pairs, ''
+        return ('aligned',) + mode_repair(pairs, '')
     ea = {e[1] for e in ev if e[0] == 'D' and e[1] is not None}
     na = {e[1] for e in nv if e[0] == 'D' and e[1] is not None}
     common = ea & na
@@ -580,7 +631,7 @@ def align(exe_ev, nat_ev):
     why = _consistent([((a[1], a[2]), (b[1], b[2])) for a, b in pairs])
     if why:
         return 'unaligned', [], why
-    return 'aligned', pairs, 'anchors'
+    return ('aligned',) + mode_repair(pairs, 'anchors')
 
 
 # ------------------------------------------------------------------------------------------------------- tables
@@ -1075,6 +1126,7 @@ class Infer:
         self.objv = collections.defaultdict(list)      # A -> [(function, tag)] constructor calls / vptr stores on &A
         self.args = collections.defaultdict(list)      # (callee, n) -> [(function, tag)]
         self.callers = collections.Counter()
+        self.args_partial = set()
         self.static = collections.defaultdict(set)     # location key -> member classes it is passed to as this
         self.slot_fns = set(judge.by_slot) if judge else set()
         self.td_pairs = collections.defaultdict(list)  # TypeDescriptor -> pairs whose exe hierarchy holds it
@@ -1085,6 +1137,16 @@ class Infer:
                     if m == e.off:
                         self.td_pairs[td].append(p)
         self.pair_by_v = {p.v: p for p in judge.pairs} if judge else {}
+        self.vft_of = collections.defaultdict(set)    # exe function -> primary vftables holding it
+        self.td2v = {}
+        for v, e in exev.items():
+            if e.off == 0:
+                self.td2v.setdefault(e.td, v)
+                for a in set(e.slots):
+                    self.vft_of[a].add(v)
+        self.thiscallers = collections.defaultdict(list)
+        self.fidx = collections.defaultdict(list)
+        self._tc, self._building, self._indexed = {}, False, False
         for f, inf in finfo.items():
             fc = method_class(symof.get(f, '') or '')
             for key, tag, site in inf.get('stores', ()):
@@ -1094,6 +1156,7 @@ class Infer:
                     key = ('f', fc, key[1])
                 self.stores[key].append((f, tag, site))
             for tag, t, site in inf.get('thisof', ()):
+                self.thiscallers[t].append((f, tag, site))
                 if tag and tag[0] == 'ga' and isinstance(tag[1], int):
                     self.objv[tag[1]].append((f, tag))
                 lk = self.loc_key(f, tag, fc)
@@ -1106,7 +1169,10 @@ class Infer:
             for t, pushed, site in inf.get('calls', ()):
                 self.callers[t] += 1
                 pt = self.arity(t)
-                if pt is None or len(pushed) < pt:
+                if pt is None:
+                    continue
+                if len(pushed) < pt:
+                    self.args_partial.add(t)   # a call whose pushes are not all seen: its arguments are unknown
                     continue
                 for n in range(pt):
                     self.args[(t, n + 1)].append((f, pushed[n], site))
@@ -1133,6 +1199,78 @@ class Infer:
             fc = fc or method_class(self.symof.get(f, '') or '')
             return ('f', fc, tag[2]) if fc else None
         return None
+
+    # ---- fields of objects whose exe class is known (source b with a: keyed by the exe vftable, not a name)
+    def this_classes(self, f, depth=0):
+        """The exe classes (primary vftables) `this` of f can have: the vftables that hold f in a slot, the class
+        its constructor body stores (a constructor), else the union over its direct callers' ecx (all known)."""
+        if f in self._tc:
+            return self._tc[f]
+        self._tc[f] = None
+        got = set(self.vft_of.get(f, ()))
+        if self.is_ctor(f):
+            v = self.ctor_vft(f)
+            if v is not None:
+                got.add(v)
+        if not got and depth < 4:
+            calls = self.thiscallers.get(f, [])
+            ok = bool(calls)
+            for g, t, site in calls:
+                cl = self.obj_classes(g, t, site, depth + 1)
+                if not cl:
+                    ok = False
+                    break
+                got |= cl
+            if not ok:
+                got = set()
+        self._tc[f] = frozenset(got) or None
+        return self._tc[f]
+
+    def obj_classes(self, f, base, at, depth=0):
+        if base == ('this',):
+            return self.this_classes(f, depth)
+        e, _ = self.resolve(f, base, at, depth + 1)
+        if e and all(a[0] == 'dyn' for a in e):
+            return frozenset(a[1] for a in e)
+        return None
+
+    def _with_bases(self, v):
+        e = self.exev.get(v)
+        out = {v}
+        for td, m in (e.bases if e else ()):
+            w = self.td2v.get(td)
+            if w is not None:
+                out.add(w)
+        return out
+
+    def _index_fields(self):
+        self._building = True
+        for f, inf in self.fi.items():
+            for base, d, val, site in inf.get('ostores', ()):
+                cl = self.obj_classes(f, base, site)
+                for v in cl or ():
+                    self.fidx[(v, d)].append((f, val, site))
+        self._building = False
+        self.memo.clear()
+        self._tc.clear()
+        self._indexed = True
+
+    def field(self, f, tag, at, depth):
+        """[base + d] where base's exe class is known: the values stored at +d of objects of that class (and its
+        RTTI bases' fields) anywhere in the image; unknown unless every one is known."""
+        if not self._indexed:
+            self._index_fields()
+        cl = self.obj_classes(f, tag[1], at, depth)
+        if not cl:
+            return None, frozenset()
+        vals = []
+        for v in cl:
+            for w in self._with_bases(v):
+                vals += self.fidx.get((w, tag[2]), [])
+        if not vals:
+            return None, frozenset()
+        e, s = self._all(None, vals, 'objfield', depth, None, None)
+        return (e, s) if e and not any(a[0] == 'st' for a in e) else (None, frozenset())
 
     # ---- resolution
     def resolve(self, f, tag, at=None, depth=0):
@@ -1193,9 +1331,14 @@ class Infer:
                         return frozenset([('dyn', b[1])]), frozenset([b[2], 'gobj'])
             return None, frozenset()
         if k == 'arg':
-            if f in self.slot_fns or not is_member(self.symof.get(f)) or not self.callers.get(f):
+            if f in self.slot_fns or not is_member(self.symof.get(f)) or not self.callers.get(f) or \
+                    f in self.args_partial:
                 return self._static(f, tag)
             return self._all(('a', f, tag[1]), self.args.get((f, tag[1]), []), 'arg', depth, f, tag)
+        if k == 'ld' and 'a' in self.on and not self._building:
+            r = self.field(f, tag, at, depth)
+            if r[0]:
+                return r
         lk = self.loc_key(f, tag)
         if lk:
             return self._all(lk, self.stores.get(lk, []), 'global' if lk[0] == 'g' else 'field', depth, f, tag)
@@ -1381,11 +1524,12 @@ def _slim(info):
     if not info:
         return None
     out = {}
-    out['thisof'] = [x for x in info.get('thisof', ()) if x[0]]
+    out['thisof'] = [x if x[0] else (None, x[1], x[2]) for x in info.get('thisof', ())]
     out['vstore'] = [x for x in info.get('vstore', ()) if x[0]]
     out['stores'] = info.get('stores', [])
+    out['ostores'] = [x for x in info.get('ostores', ()) if x[0] and x[2]]
     out['rets'] = info.get('rets', [])
-    out['calls'] = [x for x in info.get('calls', ()) if x[1]]
+    out['calls'] = info.get('calls', [])
     out['slots'] = info.get('slots', {})
     out['retthis'] = {k: v for k, v in info.get('retthis', {}).items() if v}
     return {k: v for k, v in out.items() if v}
@@ -1568,7 +1712,7 @@ def repair_crossed(sites, judged, judge_one):
     """Crossed pairs: two sites of one function whose call sites the native code lays out in the other order
     (GCC reorders neighbouring calls, switch arms, loop bodies), so pairing by address order within a segment
     crossed them: A's exe target is B's native target and back. They are re-paired (exe A with native B and back)
-    when both re-judged sites then agree; sites / judged ([((verdict, receiver, native target, exe target, note),
+    when both re-judged sites then agree or share a smaller delta; sites / judged ([((verdict, receiver, native target, exe target, note),
     sources)]) are updated in place. judge_one(site) -> a judged entry. -> the number of pairs re-paired."""
     n = 0
     by_fn = collections.defaultdict(list)
@@ -1596,7 +1740,11 @@ def repair_crossed(sites, judged, judge_one):
                 if sa[6] != sb[6]:
                     break   # one this-based, one not: no re-pairing
                 ja, jb = judge_one(na), judge_one(nb)
-                if ja[0][0] == 'ok' and jb[0][0] == 'ok':
+                # agree after the swap, or one common delta smaller than the crossed ones (the swap undoes the
+                # crossing; the sites can still be a real seam of that delta, e.g. R2's +1 in a switch)
+                dn = (na[5] - na[4], nb[5] - nb[4])
+                closer = dn[0] == dn[1] and abs(dn[0]) * 2 < abs(sa[5] - sa[4]) + abs(sb[5] - sb[4])
+                if (ja[0][0] == 'ok' and jb[0][0] == 'ok') or closer:
                     sites[a], sites[b] = na, nb
                     judged[a] = ((ja[0][:4] + (ja[0][4] + ' repaired-crossed',)), ja[1])
                     judged[b] = ((jb[0][:4] + (jb[0][4] + ' repaired-crossed',)), jb[1])

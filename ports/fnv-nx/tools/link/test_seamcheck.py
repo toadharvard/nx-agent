@@ -118,8 +118,18 @@ def crossed_pairs(tmp):
         judged = [judge_one(x) for x in sites]
         before = sum(1 for x in judged if x[0][0] != 'ok')
         n = S.repair_crossed(sites, judged, judge_one)
-        check(st == 'aligned' and before == 2 and n == 1 and all(x[0][0] == 'ok' for x in judged) and
+        # (align's delta rule re-matches the three-call switch already; the two neighbours need the target cross)
+        check(st == 'aligned' and before + n in (0 + 0, 2 + 1) and all(x[0][0] == 'ok' for x in judged) and
               all(s[5] == s[4] + 1 for s in sites), 'crossed pair repaired: %s (%s)' % (what, [(s[4], s[5]) for s in sites]))
+    # the function's delta mode re-matches the calls GCC moved (R2's 008aa98c switch, 00901d46 rotation)
+    for xo, no, want, what in (([8, 12, 24, 20], [12, 16, 24, 28], [(2, 3), (3, 4), (6, 7), (5, 6)], 'switch arms'),
+                               ([8, 36, 12, 16], [12, 16, 40, 20], [(2, 3), (9, 10), (3, 4), (4, 5)], 'a rotation'),
+                               ([8, 12, 16], [12, 16, 24], [(2, 3), (3, 4), (4, 6)], 'an off-mode site with no '
+                                                                                   'other partner stays')):
+        ex, nv = events(xo, no, tmp)
+        st, pairs, note = S.align(ex, nv)
+        got = [(a[2] // 4, b[2] // 4) for a, b in pairs]
+        check(st == 'aligned' and got == want, 'mode repair: %s (%s, %s)' % (what, got, note))
     # a real mismatch is not "repaired": the targets do not cross
     ex, nv = events([8, 12], [8, 12], tmp)
     _, pairs, _ = S.align(ex, nv)
@@ -196,6 +206,30 @@ def receiver_inference(tmp):
     e, (ev, src) = site(0x402700)
     check(e[4] == ('arg', 1) and e[2] == 0x10, 'x86: ebp without a frame is a register (arg 1, slot 4)')
     check(ev == frozenset([('dyn', VFT)]) and 'arg' in src, 'infer (b): an argument from the only caller')
+    # (a+b) a field of an object of a known exe class: Owner's constructor stores a Der at +0x10, Owner's virtual
+    # method (a slot of Owner's vftable) calls through [this+0x10]
+    vown = 0x01100200
+    own = {0x402900: 'push esi\nmov esi, ecx\nmov dword ptr [esi], 0x%x\npush 0x14\ncall 0x%x\nadd esp, 4\n'
+                     'mov ecx, eax\ncall 0x%x\nmov [esi+0x10], eax\nmov eax, esi\npop esi\nret' % (vown, NEW, CTOR),
+           0x402a00: 'mov ecx, [ecx+0x10]\nmov eax, [ecx]\ncall dword ptr [eax+8]\nret'}
+    fo = dict(finfo)
+    ev_own = {}
+    for a, src in own.items():
+        ev_own[a], fo[a] = x86_function(src, a, tmp)
+    xv = dict(exev)
+    xv[vown] = Vft('.?AVOwner@@', 0, [('.?AVOwner@@', 0)], [0x402a00])
+    vfts = {CTOR: VFT, 0x402900: vown}
+
+    def infer_own(fi):
+        return S.Infer(fi, symof, {CTOR: 'C', 0x402900: 'C'}, xv, vfts.get, judge, 'abcd', (0xfdf000, 0xfdf100))
+    e = [x for x in ev_own[0x402a00] if x[0] == 'V'][0]
+    ev, src = infer_own(fo).resolve(0x402a00, e[4], e[-1])
+    check(e[4] == ('ld', ('this',), 0x10) and ev == frozenset([('dyn', VFT)]) and 'objfield' in src,
+          'infer (a+b): a field of a known exe class -> the class stored there (%s %s)' % (ev, sorted(src)))
+    r = x86_function('mov dword ptr [esi], 0x%x\nmov [esi+0x10], edi\nret' % vown, 0x402b00, tmp)
+    fo[0x402b00] = r[1]
+    ev, src = infer_own(fo).resolve(0x402a00, e[4], e[-1])
+    check(ev is None, 'infer (a+b): one unknown store to the field -> unknown')
     # (c) a static type is judged by every class whose RTTI hierarchy holds it
     c = infer().candidates(frozenset([('st', '4Base')]))
     check(c and set(map(id, c[0])) == {id(der), id(base)}, 'infer (c): static Base -> Base and Der')
