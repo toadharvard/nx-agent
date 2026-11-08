@@ -693,6 +693,10 @@ def boot_functions(topdown):
             if line.startswith('#'):
                 continue
             p = line.rstrip('\n').split('\t')
+            a0 = line.split(None, 1)[0] if line.strip() else ''
+            if re.fullmatch(r'[0-9a-fA-F]{8}', a0):
+                out.add(int(a0, 16))   # a plain address list (S18's trace-coc called set: `<addr> [name]` per line)
+                continue
             for col in (p[-1:] if p else []):
                 for tok in re.findall(r'__fnv_([0-9a-f]{8})', col):
                     out.add(int(tok, 16))
