@@ -15,7 +15,7 @@ import bisect
 import struct
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ,
-                     UC_HOOK_INTR, UC_HOOK_CODE, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
+                     UC_HOOK_CODE, UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
 from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, UC_X86_REG_EDX, UC_X86_REG_ECX,
                                UC_X86_REG_EBX, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_GDTR,
                                UC_X86_REG_FS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FPCW,
@@ -266,6 +266,11 @@ class X86Engine:
         esp0 = uc.reg_read(UC_X86_REG_ESP)
         # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
         hrs = uc.hook_add(UC_HOOK_MEM_WRITE, self._on_ret_slot, user_data=r, begin=esp0, end=esp0 + 3)
+        hcode = []
+        if world.EAX_TRACK is not None:
+            world.EAX_TRACK.clear()
+            hcode.append(uc.hook_add(UC_HOOK_CODE, self._on_eax, user_data=world.EAX_TRACK, begin=world.TEXT[0],
+                                     end=world.TEXT[1] - 1))
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
@@ -275,6 +280,8 @@ class X86Engine:
             uc.hook_del(hb)
             uc.hook_del(hb2)
             uc.hook_del(hrs)
+            for h in hcode:
+                uc.hook_del(h)
             if hfp is not None:
                 uc.hook_del(hfp)
             for h in hwild:
@@ -360,6 +367,33 @@ class X86Engine:
 
     def _on_ret_slot(self, uc, access, address, size, value, r):
         r.ret_smashed = True
+
+    _CSD = None
+
+    def _on_eax(self, uc, address, size, trk):
+        """world.EAX_TRACK: how the last instruction that wrote eax wrote it (trk['last'] = 'full', or the width in
+        bytes of an al / ax write, with the address): a function that returns in al leaves the rest of eax as it
+        was. A call counts as a full write (the callee's result)."""
+        if X86Engine._CSD is None:
+            import capstone
+            X86Engine._CSD = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+            X86Engine._CSD.detail = True
+        try:
+            ins = next(X86Engine._CSD.disasm(bytes(uc.mem_read(address, size)), address), None)
+            if ins is None:
+                return
+            if ins.mnemonic == 'call':
+                trk['last'] = 'full'
+                return
+            names = {ins.reg_name(x) for x in ins.regs_access()[1]}
+        except Exception:  # noqa: BLE001
+            return
+        if 'eax' in names:
+            trk['last'] = 'full'
+        elif 'ax' in names:
+            trk['last'] = 2
+        elif 'al' in names:
+            trk['last'] = 1
 
     def _on_write(self, uc, access, address, size, value, r):
         for i in range(size):

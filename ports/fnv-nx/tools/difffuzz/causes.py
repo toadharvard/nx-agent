@@ -97,6 +97,8 @@ POLICY = {
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
+    'partial-return': ('by-design', '-', False, 'the oracle returns a byte / short in al / ax and the rest of eax is '
+                                                'what it held; the declared int result differs only there'),
     'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
                                               'buffer and destroys the local, GCC constructs it there (copy '
                                               'elision, allowed by C++), F1b'),
@@ -230,6 +232,9 @@ POLICY = {
                                                 'return-in-memory rules)'),
     'callee-saved':   ('real-bug', 'S1b', True, 'callee-saved registers clobbered: an ABI break'),
     'call-args':      ('real-bug', 'S2c', True, 'a bridge or definition delivers other argument bytes'),
+    'param-count':    ('real-bug', 'S1b', True, 'the exe function reads stack parameters its decomp declaration does '
+                                                'not have (every caller passes too few; the native reads what is '
+                                                'in its registers)'),
     'signedness':     ('real-bug', 'S1', True, 'the divergence goes when an input byte >= 0x80 loses its top bit'),
     'float':          ('real-bug', 'S1', True, 'a float difference beyond tolerance (inf/NaN on one side)'),
     # --- not decided from the record -------------------------------------------------------------------------------
@@ -333,7 +338,8 @@ FIX_CLASSES = {
                       ('dyninit-no-atexit',)),
     'call-abi':      ('S1b', 'every call passes and preserves registers by the callee\'s MSVC convention (argument '
                              'slots written, results not reused, callee-saved kept, sret as MSVC)',
-                      ('uninit-arm', 'native-garbage-arg', 'native-stale-result', 'callee-saved', 'sret-mismatch')),
+                      ('uninit-arm', 'native-garbage-arg', 'native-stale-result', 'callee-saved', 'sret-mismatch',
+                       'param-count')),
     'data-binding':  ('S2c', 'every data symbol and import binds to the exe object (no stub as data, no unit copy, '
                              'no native address where the exe has an image address, bridges deliver the bytes)',
                       ('native-stub-data', 'native-address', 'split-global', 'import-slot-called', 'call-args')),
@@ -1533,7 +1539,9 @@ def _ctor_pair(case, vx, va, limit):
 
 
 _FACTS_CACHE = {}
-_ZERO_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0)}
+_ZERO_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0),
+                # (F-uncls, difffuzz-20) a float / double placeholder: `movi v0.2s, #0; ret`, `movi d0, #0; ret`
+                struct.pack('<II', 0x0f000400, 0xd65f03c0), struct.pack('<II', 0x2f00e400, 0xd65f03c0)}
 
 
 def _object_facts(source):
@@ -1666,6 +1674,11 @@ def _rule_unclassified(d, rec, k):
         vx, va = _word(d['x86']), _word(d['arm'])
     except ValueError:
         return None
+    if d.get('arm_zero_stub'):
+        # (F-uncls, difffuzz-20) the native entered a function of its unit whose whole body is a placeholder that
+        # returns 0 (runner.zero_stubs): the exe's work there is not done, and what the function returns or stores
+        # from its result differs (0x00d57b20 stores 1.0 - 0.0 where the exe's FUN_00d571d0 returned 0.51)
+        return 'native-zero-stub'
     if k == 'mem-write':
         bx, ba = bytes.fromhex(d['x86']), bytes.fromhex(d['arm'])
         diff = [i for i in range(min(len(bx), len(ba))) if bx[i] != ba[i]]
