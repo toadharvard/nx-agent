@@ -6133,6 +6133,36 @@ def d22_write_applied(out_root, stats, files):
 
 POST.append(d22_write_applied)
 
+# ---------------------------------------------------------------------------------------------------------- EMPTY1
+#
+# A placeholder object for an empty string (R2's trap list, rank 32: fnv_00b2d2e0::TagEmpty). The decomp writes the
+# `sys == false` arm of the runtime-error constructor FUN_00b09480 (treeengine units) as `extern const TagText TagEmpty;`,
+# defined nowhere: the native link has no data at that name (a trap). The exe's 0x00b09480 builds that arm from the
+# empty literal at 0x01011584 through 0x0044a4c0 (TagText's constructor), a temporary like the other arm. EMPTY1
+# writes a use of such a name as `FNVNX_EMPTY1(T, Name)`: `T("")` under GCC, the original name under MSVC
+# (fnvnx_equiv_fi.h), only where the file declares `extern const T Name;` (Name ends with `Empty`), never defines
+# it, and declares `T(const char*)` in T.
+EMPTY1_DECL = re.compile(r'^[ \t]*extern[ \t]+const[ \t]+([A-Za-z_]\w*)[ \t]+([A-Za-z_]\w*Empty)[ \t]*;', re.M)
+
+def r_empty_string_objects(path, text, stats):
+    """EMPTY1: a declared-only empty-string object -> FNVNX_EMPTY1(T, Name) (see above)."""
+    if 'Empty' not in text: return text
+    masked = d22_mask(text)
+    for m in list(EMPTY1_DECL.finditer(masked)):
+        t, nm = m.group(1), m.group(2)
+        if re.search(r'(?<![\w:])(?:const\s+)?%s\s+(?:\w+::)*%s\s*(?:\(|=|\{)' % (re.escape(t), re.escape(nm)), masked):
+            continue                                            # defined in the file
+        cls = [c for c in d22_classes(text, masked) if c['qual'][-1] == t]
+        if len(cls) != 1 or not re.search(r'(?<![\w~])%s\s*\(\s*const\s+char\s*\*\s*\w*\s*\)' % re.escape(t),
+                                          masked[cls[0]['open']:cls[0]['close']]):
+            continue
+        uses = [u for u in re.finditer(r'(?<![\w:.>])%s\b' % re.escape(nm), masked) if not (m.start() <= u.start() < m.end())]
+        for u in reversed(uses):
+            text = text[:u.start()] + 'FNVNX_EMPTY1(%s, %s)' % (t, nm) + text[u.end():]
+        stats['EMPTY1'] += len(uses)
+        masked = d22_mask(text)
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- RAWVT1
 #
 # D26 (S5-boot, link 3f7a6c35e923): every native C++ vtable is minus-one (GCC's D1 / D0 at slots 0 / 1 where MSVC
@@ -6363,5 +6393,5 @@ REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_add
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
               r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
-              r_template_member_stand_ins, r_raw_vtable_slots]
+              r_template_member_stand_ins, r_raw_vtable_slots, r_empty_string_objects]
 RULES += REFS_RULES
