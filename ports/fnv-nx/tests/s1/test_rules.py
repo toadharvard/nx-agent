@@ -1921,6 +1921,17 @@ check('D26 call-only: ... a cast to the class itself, or an unresolved receiver,
       run(s1.r_vtable_dtor_slot, _RQ.replace('((Ref*)r)->sub.v0()', '(int*)0; ((HeapStandIn*)r)->v0()')) +
       run(s1.r_vtable_dtor_slot, _RQ.replace('((Ref*)r)->sub.v0()', '((Sub*)r)->v0(), ((Ref*)r)->q.v0()')), [],
       ['FNVNX_D22(HeapStandIn'])
+# ---- S1-rules: RAWVT1 (a raw exe slot index on `this` -> FNVNX_D26_SLOT(k): k + 1 under GCC, D26 minus-one)
+_RV = ('struct Coll\n{\n    void Load(const char* f);\n    void Open(const char* f, bool w);\n};\n'
+       'void Coll::Open(const char* f, bool w)\n{\n    Load(f);\n'
+       '    ((void(__thiscall*)(void*, bool))(*reinterpret_cast<void***>(this))[6])(this, w);\n}\n')
+check('RAWVT1 a raw slot index on this in a member -> FNVNX_D26_SLOT(k)', run(s1.r_raw_vtable_slots, _RV),
+      ['(*reinterpret_cast<void***>(this))[FNVNX_D26_SLOT(6)])(this, w);'])
+check('RAWVT1 not slot 0, not in a free function, not in a COM-shaped class',
+      run(s1.r_raw_vtable_slots, _RV.replace('[6]', '[0]')) +
+      run(s1.r_raw_vtable_slots, 'void f(void* p) { ((void(*)(void*))(*(void***)this)[3])(p); }\n') +
+      run(s1.r_raw_vtable_slots, _RV.replace('    void Load(const char* f);', '    virtual long __stdcall Q(int);\n    virtual long __stdcall R(int);\n    void Load(const char* f);')),
+      [], ['FNVNX_D26_SLOT'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
