@@ -236,6 +236,9 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
   H12=${H:0:12}; R=$FARM_HOME/out/$TAG$H12-$JOB.md; mkdir -p "$FARM_HOME/out"; rm -f "${R%.md}.json"
   J=$NX/ports/fnv-nx/tools/farm
   rm -f "${R%.md}.json"     # a sidecar is this run's or none
+  # T1: the disk before every job (three disk-full farms in one day): old per-head directories, old outputs, the pip
+  # cache; more when / is under 15 GB (tools/farm/cleanup.sh; never gamedata, toolchains or the caches)
+  bash "$J/cleanup.sh" "$FARM_HOME" "$NX" >> "$LOG" 2>&1 9>&- || true
   log "start $JOB $* at $H12"
   case "$JOB" in
     prepare) bash "$J/prepare_job.sh" "$H" "$R" ;;
