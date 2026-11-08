@@ -5980,6 +5980,9 @@ def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     # the text without this declaration and other classes' virtual declarations of the same name, as spans blanked
     # (T1: read through an index of the file's words, not rebuilt and scanned per name; _d22_finditer)
     spans = [(start, end)] + [(a, b) for a, b in ignore if (a, b) != (start, end)]
+    # an empty out-of-class definition of the member is a placeholder as well (D22 drops it under GCC)
+    spans += [(d.start(), d.end()) for d in _d22_out_of_class_defs(masked, cls)
+              if d.group('mem') == member and D22_EMPTY_BODY.search(d.group(0))]
     rest = _D22Rest(masked, spans)
     if _d22_search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), cls, masked, spans): return False
     for u in _d22_finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), member, masked, spans):
@@ -6220,7 +6223,16 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
     # S2-bodies' PHSLOT1 makes the empty ones declarations as well)
     if any('{' in masked[v[0]:v[1]] and not (unit and D22_EMPTY_BODY.search(masked[v[0]:v[1]])) for v in c['virtuals']):
         return False                                     # (a header's includers could build the class: .cpp only)
-    if any('{' in masked[v[0]:v[1]] for v in c['virtuals']):
+    name = c['qual'][-1]
+    members = {v[2] for v in c['virtuals'] if v[2]}
+    # S5-boot (link af44165ab2d8, NiAlloc corruption): an out-of-class definition with an empty body
+    # (`inline void S_00aa1420_Object::S_00aa1420_v1(...) {}`) is a placeholder too, as an empty inline body is
+    outside = []
+    for m in _d22_out_of_class_defs(masked, name):
+        if m.group('mem') not in members: continue
+        if not (unit and D22_EMPTY_BODY.search(m.group(0))): return False
+        outside.append(m)
+    if outside or any('{' in masked[v[0]:v[1]] for v in c['virtuals']):
         # with inline bodies GCC can build the class (its vtable from those bodies); once `virtual ~C()` is the key
         # function nothing defines, a construction would need it. Only a class the file never uses as an object:
         # its name only as `C*`, `C&`, `C::`, in its own body or after `struct` / `class`
@@ -6230,11 +6242,19 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
             if re.match(r'\s*(?:\*|&|::)', masked[u.end():u.end() + 4]): continue
             if re.search(r'(?:struct|class)\s+$', masked[max(0, u.start() - 12):u.start()]): continue
             return False
-    name = c['qual'][-1]
-    members = {v[2] for v in c['virtuals'] if v[2]}
+    spans = [(m.start(), m.end()) for m in outside]
     for m in _d22_finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), name, masked):
+        if any(a <= m.start() < b for a, b in spans): continue
         if re.sub(r'\s+', '', m.group(1)) in members: return False
     return True
+
+
+def _d22_out_of_class_defs(masked, name):
+    """the out-of-class definitions `[inline] T C::member(...) [const] { ... }` of class `name` whose body has no
+    nested brace (the whole definition in group 0, the member in 'mem')"""
+    return re.finditer(r'(?m)^[ \t]*(?:inline[ \t]+|__forceinline[ \t]+)?[\w:<>*& \t]*?(?<![\w~])%s[ \t]*::[ \t]*'
+                       r'(?P<mem>[A-Za-z_]\w*)[ \t]*\((?:[^()]|\([^()]*\))*\)[ \t]*(?:const[ \t]*)?\s*\{[^{}]*\}'
+                       % re.escape(name), masked)
 
 def _d22_defines_none(masked, c):
     """class c defines no member function in the file (no body in the class, no `C::member(` definition) and
@@ -6431,6 +6451,12 @@ def r_vtable_dtor_slot(path, text, stats):
         applied[c['first'][0]] = (key, c['first'][2], 'callonly' if callonly else 'listed')
         if inline_dtor: stats['D22-INLINE'] += 1
         if callonly and c['dtor']: dtor_drops[c['first'][0]] = c['dtor_decl']
+        if callonly:
+            # the slot-0 placeholder is `virtual ~C()` under GCC now: its out-of-class empty definition goes too
+            for d in _d22_out_of_class_defs(masked, c['qual'][-1]):
+                if d.group('mem') == c['first'][2]:
+                    edits.append((d.start(), d.end(), 'FNVNX_D22_DROP(%s)' % text[d.start():d.end()].strip('\n')))
+                    stats['D22-DEFDROP'] += 1
         done[c['qual'][-1] + ('<>' if c['template'] else '')] = c['first'][2]
         stats['D22-CALLONLY' if callonly else 'D22'] += 1
     drop = set()
