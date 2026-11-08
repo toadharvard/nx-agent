@@ -10,6 +10,7 @@ log() { echo "$(date -u +%FT%TZ) $(basename "$0"): $*"; }
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 export FARM_APT
 
+NEED_PIP="capstone==5.0.9 unicorn==2.1.4 pyelftools==0.33 mako"
 NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu liblz4-dev libnewlib-dev python3-mako"
 host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c
@@ -22,15 +23,34 @@ host_check() {   # commands (py:<module> for python modules) -> installed with a
 	done
 	[ -z "$missing" ] && return 0
 	if [ "${FARM_APT:-0}" = 1 ]; then
-		apt-get update -qq
+		# apt only for commands; the Python modules are pip's (the pinned versions the link and harness use)
+		if [ -n "$(printf '%s\n' $missing | grep -v '^py:')" ]; then
+			apt-get update -qq
+			# shellcheck disable=SC2086
+			DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $NEED_APT
+		fi
 		# shellcheck disable=SC2086
-		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $NEED_APT
-		python3 -m pip install -q --break-system-packages unicorn==2.1.4 pyelftools==0.33
-		return 0
+		python3 -m pip install -q --break-system-packages $NEED_PIP 2>/dev/null || python3 -m pip install -q $NEED_PIP
+		# T1: install, then check again: a host that still lacks one fails here, at setup (bl1 bea5a2ed failed at
+		# the link stage after 72 min: No module named 'capstone', which nothing installed)
+		local still=""
+		for c in $missing; do
+			case "$c" in
+				llvm-undname) command -v llvm-undname >/dev/null || command -v llvm-undname-18 >/dev/null || still="$still $c" ;;
+				py:*) python3 -I -c "import ${c#py:}" 2>/dev/null || still="$still $c" ;;
+				*) command -v "$c" >/dev/null || still="$still $c" ;;
+			esac
+		done
+		[ -z "$still" ] && return 0
+		echo "$(basename "$0"): still missing after installing:$still"
+		exit 1
 	fi
-	echo "$(basename "$0"): missing on this host:$missing (FARM_APT=1 installs: $NEED_APT; pip unicorn pyelftools)"
+	echo "$(basename "$0"): missing on this host:$missing (FARM_APT=1 installs: $NEED_APT; pip $NEED_PIP)"
 	exit 1
 }
+# every Python module the link and the boot import (tools/link: capstone in slotfill2, exevft, bodies, vslots,
+# membervt; unicorn, elftools in the emulator), at the versions the harness was run with
+LINK_PY="py:capstone py:unicorn py:elftools py:mako"
 
 hostcache() {   # hostcache fetch|publish <name> <key> <dir> [...]: tools/farm/hostcache.sh (HOSTCACHE=0: nothing)
 	[ "${HOSTCACHE:-1}" = 1 ] || return 1
