@@ -736,7 +736,7 @@ class UnitCache:
 
 
 CALIB_CASES = 8
-CALIB_MAX = 24
+CALIB_MAX = 120
 
 
 def calibrate_custom(pair, t, globals_=()):
