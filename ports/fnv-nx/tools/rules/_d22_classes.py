@@ -8,7 +8,9 @@ A decomp class is listed when:
   - that virtual is a placeholder: no definition outside the class, an empty or one-statement inline body at
     most, and no call by its name in the file;
   - every exe vftable paired with the class's name has a deleting destructor in slot 0.
-    The pairings are the recipe's `??_7<C>@@6B@` symbols, plus the link's primary V rows when --addrmap is given.
+    The pairings are the recipe's `??_7<C>@@6B@` symbols, plus the link's primary V rows when --addrmap is given,
+    plus (--rtti) the image's RTTI: the primary vftables whose type descriptor names the class. RTTI is used only to
+    list (positive evidence); a slot 0 the shape test does not recognise is no evidence against a class.
     A slot-0 function is a deleting destructor when the recipe names it ??_G / ??_E, or when its x86 tests bit 0
     of its flags argument, calls an operator delete and returns 4 bytes.
 
@@ -117,6 +119,36 @@ def pairings(units, addrmap):
     return pair
 
 
+def rtti_vftables(img):
+    """{class key: set(primary vftable)} from the image's RTTI: a dword in .rdata that points at a Complete Object
+    Locator (signature 0, offset 0) whose type descriptor names `.?AV<C>@@` / `.?AU<C>@@` is followed by the
+    vftable (its first slot in .text). Secondary (offset != 0) vftables are left out."""
+    out = collections.defaultdict(set)
+    for nm, vs, va, rs, ra in img.secs:
+        if not nm.startswith(b'.rdata'):
+            continue
+        for o in range(ra, ra + min(vs, rs) - 8, 4):
+            co = img.off(struct.unpack_from('<I', img.d, o)[0])
+            if co is None or co + 20 > len(img.d):
+                continue
+            sig, off, _, td, _ = struct.unpack_from('<IIIII', img.d, co)
+            if sig or off:
+                continue
+            to = img.off(td)
+            if to is None:
+                continue
+            name = img.d[to + 8:to + 208].split(b'\0')[0]
+            if not name.startswith((b'.?AV', b'.?AU')) or not name.endswith(b'@@'):
+                continue
+            vft = img.base + va + (o - ra) + 4
+            if not img.text(img.dword(vft) or 0):
+                continue
+            q = msvc_class(name[4:-2].decode('latin1'))
+            if q:
+                out[q].add(vft)
+    return out
+
+
 def scan(decomp):
     """{class key: set(members)} for every definition whose first virtual is a placeholder at slot 0"""
     found = collections.defaultdict(set)
@@ -152,6 +184,10 @@ def main():
     ap.add_argument('--addrmap')
     ap.add_argument('-o', '--out', required=True)
     ap.add_argument('--report')
+    ap.add_argument('--rtti', action='store_true',
+                    help='also pair a class with the primary vftables the image\'s RTTI names it by (S1-rules: '
+                         'stand-ins with a named slot 0 that carry the game\'s class name)')
+    ap.add_argument('--only-new', help='an existing d22.json: write only classes it does not list')
     a = ap.parse_args()
     img = Image(a.exe)
     units = json.load(open(os.path.join(a.decomp, 'build', 'units.json')))['units']
@@ -163,7 +199,14 @@ def main():
             if DELETE_NAME.match(n):
                 deletes.add(int(ad, 16))
     pair = pairings(units, a.addrmap)
+    if a.rtti:
+        for k, v in rtti_vftables(img).items():
+            if k not in pair:                  # the recipe's / link's pairing wins where it has one
+                pair[k] |= v
     found, files = scan(a.decomp)
+    if a.only_new:
+        known = {c['class'] for c in json.load(open(a.only_new)).get('classes', ())}
+        found = {k: v for k, v in found.items() if k not in known}
     st = collections.Counter()
     out, rep = [], []
     for key in sorted(found):
