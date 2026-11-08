@@ -54,7 +54,7 @@ import config
 # the exe bytes (when available) replace the union, and a float difference runs the garbage / bool / x87 control-word (24-bit) / x87-range / callee
 # float width probes before it stays `float`. Flow rows (EQ): float libm wrappers (ceilf / floorf ..) are untraced
 # builtins with a float argument, the secondary-base entry `__fnvnx_msvc_<addr>` comes from aliases.ld, and a temporary's
-# destructor before a throw the exe makes after its _CxxThrowException is throw-temp-dtor.
+# destructor before a throw the exe makes after its _CxxThrowException is throw-temp-dtor. Oracle-callee-unloaded also reads the base-object entries `__fnv_<Y>_C2` / `_D2` that a unit-local constructor X reaches as the traced call Y (the 71 global-object initializers calling the constructor 0x0045cfe0, whose first exe call is 0x00404920 at 0x0045d013; tests/s13/test_basector.py).
 # The signedness probe clears an argument byte only when the oracle can
 # widen it (not a float sign or a whole-read int), and an uninit-arm that vanishes once the unwritten stack words of
 # buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
