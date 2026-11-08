@@ -851,6 +851,29 @@ class Exe(unittest.TestCase):
         asm = bodies.emit_crt(got, it)
         self.assertEqual(asm.count(':\n    b fnvnx_facet_register\n'), 2)
 
+    def test_crt_rule_niptr(self):
+        """439a row 51: NiPointer<ProjectileAuxiliaryData>::~NiPointer() (forward-declared T, inlined everywhere in the
+        exe) tail-calls NiPointer<NiRefObject>'s D1; NiPointer<NiRefObject> itself, D0 and other classes are not the
+        rule; FNVNX_NIPTR=0 turns it off."""
+        def k(n, d):
+            return bodies.crt_rule(sigs.parse_itanium(n, d))
+        n = '_ZN9NiPointerI23ProjectileAuxiliaryDataED1Ev'
+        d = 'NiPointer<ProjectileAuxiliaryData>::~NiPointer()'
+        self.assertEqual(k(n, d), ('niptr', '_ZN9NiPointerI11NiRefObjectED1Ev', 'NiPointer<NiRefObject>'))
+        self.assertEqual(k('_ZN9NiPointerI23ProjectileAuxiliaryDataED2Ev', d)[0], 'niptr')
+        self.assertIsNone(k('_ZN9NiPointerI11NiRefObjectED1Ev', 'NiPointer<NiRefObject>::~NiPointer()'))
+        self.assertIsNone(k('_ZN7NiLightD1Ev', 'NiLight::~NiLight()'))
+        os.environ['FNVNX_NIPTR'] = '0'
+        try:
+            self.assertIsNone(k(n, d))
+        finally:
+            del os.environ['FNVNX_NIPTR']
+        got = bodies.crt_pass([bodies.Row(n, 'missing', None, None, 'src/a.cpp', 'no definition', None)],
+                              lambda x: sigs.parse_itanium(x, d))
+        self.assertEqual(got[0].cls, 'crt-rule')
+        asm = bodies.emit_crt(got, lambda x: sigs.parse_itanium(x, d))
+        self.assertIn('"%s":\n    b _ZN9NiPointerI11NiRefObjectED1Ev\n' % n, asm)
+
     def test_code_only_externs(self):
         """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take
         it); one a code section names is."""
