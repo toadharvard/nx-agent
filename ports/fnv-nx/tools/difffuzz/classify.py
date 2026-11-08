@@ -660,9 +660,9 @@ def hint(pair, target, case, div, fn, max_steps):
     if div.get('split_delete'):
         h['cause'] = 'split-delete'; return h
     if div.get('after_perm'):
-        h['cause'] = 'eval-order-args'; return h
-    if div.get('eval_order'):
-        h['cause'] = 'eval-order'; return h
+        h['cause'] = 'call-order-args'; return h
+    if div.get('arg_order'):
+        h['cause'] = 'call-order'; return h
     if div.get('null_delete'):
         h['cause'] = 'null-delete'; return h
     if div.get('vptr_store'):

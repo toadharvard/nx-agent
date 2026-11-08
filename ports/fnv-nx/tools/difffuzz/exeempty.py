@@ -216,3 +216,53 @@ def _dtor_chain(addr):
         if b1 == b2 and v1 != v2 and c2[0] != c1[0] and c2[0] in c1[1]:
             return True                       # derived vftable first, then a base class's
     return False
+
+
+def arg_blocks(rets, limit=160):
+    """(r4 uncls, call-order) Split the oracle's traced calls of one region into argument blocks, from the exe's code.
+    `rets` are the return addresses of the traced calls in trace order. A block starts at a traced call, and the code
+    after it is walked linearly: it is a run of traced calls closed by the next call instruction that is not one of
+    them (the consuming call, run as code), and every traced call of the block must have its result (eax) pushed or
+    moved to a register before the next call instruction: `push eax`, or `mov <register other than eax>, eax` (a
+    store to memory is a statement, not an argument). The next block starts where the trace goes on (a block may sit
+    in another function). Returns a list of (first, last+1) index pairs that tile the region, or None when the code
+    does not show that shape (branches are not followed)."""
+    if not rets:
+        return None
+    blocks, start = [], 0
+    while start < len(rets):
+        end = _one_block(rets, start, limit)
+        if end is None:
+            return None
+        blocks.append((start, end))
+        start = end
+    return blocks
+
+
+def _one_block(rets, start, limit):
+    import capstone
+    from capstone import x86_const as X
+    want = {r: i for i, r in enumerate(rets)}
+    nxt, pending = start + 1, start            # the scan starts after the first call: its result is pending
+    for n in _insns(rets[start], limit):
+        if n.mnemonic == 'call':
+            if pending is not None:
+                return None                    # a call before the previous result was taken
+            ret = n.address + n.size
+            if ret in want:
+                if want[ret] != nxt:
+                    return None
+                pending, nxt = nxt, nxt + 1
+            else:
+                return nxt                     # the consumer closes the block
+            continue
+        if n.mnemonic in ('ret', 'retn') or n.mnemonic.startswith('j'):
+            return None                        # branches are not followed
+        if pending is not None:
+            ops = n.operands
+            if (n.mnemonic == 'push' and ops[0].type == capstone.x86.X86_OP_REG and ops[0].reg == X.X86_REG_EAX) or \
+                    (n.mnemonic == 'mov' and len(ops) == 2 and ops[1].type == capstone.x86.X86_OP_REG and
+                     ops[1].reg == X.X86_REG_EAX and ops[0].type == capstone.x86.X86_OP_REG and
+                     ops[0].reg != X.X86_REG_EAX):
+                pending = None
+    return None

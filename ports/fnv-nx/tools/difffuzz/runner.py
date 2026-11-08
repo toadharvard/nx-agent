@@ -239,39 +239,40 @@ def _nrvo_copy(xcalls, ta, sret, convs):
     return None
 
 
-def _perm_align(tx, ta, vcalls):
-    """(r4 uncls, eval-order) The native's call index for each oracle call when the two traces are permutations of one
-    another (the same calls, in another order), else None. Calls through memory the case did not plant (garbage
-    targets) count as one kind. C++ leaves the evaluation order of unsequenced operands open: MSVC evaluates the
-    arguments of a call right to left, GCC left to right (0x0060bb40: PtrCat(&d), Unchecked(&a), Unchecked(&b) in
-    one argument list; 0x008287e0)."""
-    if len(tx) != len(ta) or tx == ta or len(tx) < 2:
+def _perm_align(rx, ra):
+    """(r4 uncls, call-order) The native's call index for each oracle call, when the traces differ only by the order
+    MSVC and GCC evaluate the arguments of one call in (right to left against left to right), else None. All three:
+    1. every block of calls that differs is exactly reversed on the other machine (no other permutation counts);
+    2. the traces are equal before and after the differing region (the same consuming call follows on both);
+    3. in the exe, each block is a run of calls whose results (eax) are pushed or moved before the consuming call
+       (exeempty.arg_blocks, read from the return addresses of the oracle's calls).
+    A reordered pair of statements (unlock before lock, free before use) fails 3 and stays a divergence."""
+    import exeempty
+    tx, ta = [c.target for c in rx.calls], [c.target for c in ra.calls]
+    if len(tx) != len(ta) or tx == ta:
         return None
-
-    def key(t):
-        if vcalls is not None and t >= 0 and t not in vcalls[0] and t not in vcalls[1]:
-            return 'wild'
-        return t
-    kx, ka = [key(t) for t in tx], [key(t) for t in ta]
-    if sorted(map(str, kx)) != sorted(map(str, ka)):
+    lo = next(i for i, (p, q) in enumerate(zip(tx, ta)) if p != q)
+    hi = len(tx) - next(i for i, (p, q) in enumerate(zip(reversed(tx), reversed(ta))) if p != q)
+    rets = [getattr(c, 'ret_to', None) for c in rx.calls[lo:hi]]
+    if None in rets or hi - lo > 16:
         return None
-    pos = {}
-    for j, k in enumerate(ka):
-        pos.setdefault(k, []).append(j)
-    used, order = {}, []
-    for k in kx:
-        n = used.get(k, 0)
-        order.append(pos[k][n])
-        used[k] = n + 1
-    if max(abs(i - j) for i, j in enumerate(order)) > 8:
+    blocks = exeempty.arg_blocks(rets)
+    if not blocks:
         return None
-    return order
+    order = list(range(len(tx)))
+    for b0, b1 in blocks:
+        b0, b1 = b0 + lo, b1 + lo
+        if ta[b0:b1] == tx[b0:b1][::-1]:
+            order[b0:b1] = list(range(b1 - 1, b0 - 1, -1))
+        elif ta[b0:b1] != tx[b0:b1]:
+            return None
+    return order if order != list(range(len(tx))) else None
 
 
 def compare(*a, **kw):
     """_compare, plus (r4 uncls) a mark on a hard divergence found after the calls were paired by callee instead of by
     position (`_perm_align`): the canned results are numbered by call index, so a reordered callee got another value
-    and the arguments it feeds differ for that reason (eval-order-args, not decided)."""
+    and the arguments it feeds differ for that reason (call-order-args, not decided)."""
     rx = a[1] if len(a) > 1 else kw['rx']
     rx.perm_aligned = False
     d = _compare(*a, **kw)
@@ -302,14 +303,14 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
                     null_delete=getattr(rx, 'null_deletes', 0) != getattr(ra, 'null_deletes', 0))
     tx = [c.target for c in rx.calls]
     ta = [c.target for c in ra.calls]
-    perm = _perm_align(tx, ta, vcalls) if not one_error else None
+    perm = _perm_align(rx, ra) if not one_error else None
     if perm is not None:
         # (r4 uncls) the same calls in another order, further apart than the adjacent swap below: pair each oracle
         # call with the native call of the same callee (occurrence by occurrence) and compare those; by design
         ra.calls = [ra.calls[j] for j in perm]
         ta = [c.target for c in ra.calls]
         rx.perm_aligned = True
-        soft = soft or dict(kind='call-count', x86=len(tx), arm=len(ta), soft=True, eval_order=True)
+        soft = soft or dict(kind='call-count', x86=len(tx), arm=len(ta), soft=True, call_order=True, arg_order=True)
     fam = libcalls.FAMILY
     # D21 (coverage first): a by-design or harness-made difference does not end the comparison; the first one is
     # kept and returned only when nothing hard follows (`soft`)

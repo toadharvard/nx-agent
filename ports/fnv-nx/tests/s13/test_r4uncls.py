@@ -10,8 +10,9 @@ code and hand-built results (no decomp, no exe bytes).
                evidence for the second, read from the code bytes
   dtor-shape   exeempty.dtor_chain: a function that stores a derived class's vftable and then a base class's
                (RTTI), derived first; a constructor stores them the other way round
-  eval-order   runner._perm_align / compare: the same calls in another order are paired by callee (soft eval-order);
-               a difference found after that is marked (eval-order-args), not hidden
+  call-order   runner._perm_align / compare: a reversed argument list the exe shows (results pushed before the
+               consuming call) is paired by callee (soft call-order); reordered statements stay; a difference found
+               after the pairing is marked (call-order-args), not hidden
   bool-chain   classify._bool_chain: several random-background bool bytes are needed, one is not enough
 
 Needs capstone, unicorn (the engines' Result classes).
@@ -148,6 +149,20 @@ def build_exe():
     put(mem, 0x401500, bytes.fromhex('c706') + u32(0x410210) + b'\xc3')
     # a store of a non-vftable immediate and then a vftable
     put(mem, 0x401600, bytes.fromhex('c706') + u32(0x12345) + bytes.fromhex('c706') + u32(0x410010) + b'\xc3')
+    def call(a, to):
+        return b'\xe8' + rel(a + 5, to)
+    # argument list of one call: A; push eax; B; push eax; C; push eax; consumer (results pushed)
+    a = 0x401700
+    code = call(a, 0x401f00) + b'\x50' + call(a + 6, 0x401f00) + b'\x50' + call(a + 12, 0x401f00) + b'\x50' + \
+        call(a + 18, 0x401f80) + b'\xc3'
+    put(mem, a, code)
+    # two statements: A; B; consumer (no result is taken)
+    a = 0x401780
+    put(mem, a, call(a, 0x401f00) + call(a + 5, 0x401f00) + call(a + 10, 0x401f80) + b'\xc3')
+    # two statements that store their results: A; mov [ebp-4], eax; B; mov [ebp-8], eax; consumer
+    a = 0x4017c0
+    put(mem, a, call(a, 0x401f00) + bytes.fromhex('8945fc') + call(a + 8, 0x401f00) + bytes.fromhex('8945f8') +
+        call(a + 16, 0x401f80) + b'\xc3')
     return mem
 
 
@@ -182,48 +197,60 @@ try:
 except AttributeError as e:
     check(False, 'delete-fold: %s' % e)
 
-# ---------------------------------------------------------------------------------------------------- eval-order
-check(hasattr(runner, '_perm_align'), 'eval-order: runner._perm_align exists')
-if hasattr(runner, '_perm_align'):
-    vc = ({0x00402000, 0x00403000, 0x00404000}, set())
-    check(runner._perm_align([1, 2, 3], [1, 2, 3], vc) is None, 'eval-order: equal traces: nothing to align')
-    check(runner._perm_align([0x402000, 0x403000, 0x403000], [0x403000, 0x403000, 0x402000], vc) == [2, 0, 1],
-          'eval-order: a rotation is paired occurrence by occurrence')
-    check(runner._perm_align([0x402000, 0x403000], [0x402000, 0x404000], vc) is None, 'eval-order: other calls: no')
-    check(runner._perm_align([0x402000, 0x403000, 0x403000], [0x403000, 0x402000], vc) is None,
-          'eval-order: a call missing: no')
-
+# ---------------------------------------------------------------------------------------------------- call-order
 cv = conv.Conv('?f@@YAXXZ', 'test')
 w = world.World(world.Case(seed=1), {}, {})
+TA, TB, TC = 0x402000, 0x403000, 0x404000
+vc = ({TA, TB, TC}, set())
 
 
-def res(tx, ta, writes=None, ret=None):
+def res(tx, ta, writes=None, ret=None, rets=None):
     a, b = x86emu.Result(), arm64emu.Result()
-    a.calls = [x86emu.Call(t, [0, 0, 0], 0) for t in tx]
+    a.calls = [x86emu.Call(t, [0, 0, 0], (rets[i] if rets else 0)) for i, t in enumerate(tx)]
     b.calls = [arm64emu.Call(t, [0] * 8, [0] * 8, 0) for t in ta]
     a.ret = b.ret = ret
     a.writes, b.writes = dict((writes or ({}, {}))[0]), dict((writes or ({}, {}))[1])
     return a, b
 
 
-vc = ({0x402000, 0x403000, 0x404000}, set())
-rx, ra = res([0x402000, 0x403000, 0x403000], [0x403000, 0x403000, 0x402000])
+ARGS3 = [0x401705, 0x40170b, 0x401711]          # return addresses of the three calls of the argument list
+STMT2 = [0x401785, 0x40178a]                    # two calls, results not taken
+STORE2 = [0x4017c5, 0x4017d0]                   # two calls, results stored to memory
+check(hasattr(runner, '_perm_align'), 'call-order: runner._perm_align exists')
+if hasattr(runner, '_perm_align'):
+    rx, ra = res([TA, TB, TC], [TC, TB, TA], rets=ARGS3)
+    check(runner._perm_align(rx, ra) == [2, 1, 0], 'call-order: a reversed argument list is aligned')
+    rx, ra = res([TA, TB, TC], [TB, TC, TA], rets=ARGS3)
+    check(runner._perm_align(rx, ra) is None, 'call-order: a rotation is no reversal: stays')
+    rx, ra = res([TA, TB], [TB, TA], rets=STMT2)
+    check(runner._perm_align(rx, ra) is None, 'call-order: two reordered statements (no result taken): stays')
+    rx, ra = res([TA, TB], [TB, TA], rets=STORE2)
+    check(runner._perm_align(rx, ra) is None, 'call-order: two reordered statements storing results: stays')
+    rx, ra = res([TA, TB, TC], [TC, TB, TA], rets=[0x401705, 0x40170b, 0x401999])
+    check(runner._perm_align(rx, ra) is None, 'call-order: return addresses the code does not show: stays')
+    rx, ra = res([TA, TB, TC], [TA, TB, TC], rets=ARGS3)
+    check(runner._perm_align(rx, ra) is None, 'call-order: equal traces: nothing to align')
+
+# the same through compare(): the argument list is soft, the statements are a hard call-target divergence
+rx, ra = res([TA, TB, TC], [TC, TB, TA], rets=ARGS3)
 d = runner.compare(cv, rx, ra, w, vcalls=vc)
-check(d is not None and d.get('soft') and d.get('eval_order'),
-      'eval-order: the same calls in another order alone: soft eval_order (%s)' % d)
+check(d is not None and d.get('soft') and d.get('arg_order'),
+      'call-order: a reversed argument list alone: soft arg_order (%s)' % d)
 if d:
-    check(hint_cause(d) == 'eval-order',
-          'eval-order: classify names it')
-rx, ra = res([0x402000, 0x403000, 0x403000], [0x403000, 0x403000, 0x402000],
-             writes=({0x01000000: 1}, {0x01000000: 2}))
+    check(hint_cause(d) == 'call-order', 'call-order: classify names it')
+rx, ra = res([TA, TB, TC], [TC, TB, TA], writes=({0x01000000: 1}, {0x01000000: 2}), rets=ARGS3)
 d = runner.compare(cv, rx, ra, w, vcalls=vc)
 check(d is not None and d['kind'] == 'mem-write' and not d.get('soft') and d.get('after_perm'),
-      'eval-order: then a different store: reported, marked after_perm (%s)' % (d and d['kind']))
+      'call-order: then a different store: reported, marked after_perm (%s)' % (d and d['kind']))
 if d:
-    check(hint_cause(d) == 'eval-order-args',
-          'eval-order: ... and named eval-order-args, not decided')
-check(causes.policy('eval-order-args')[1:3] == ('S13b', True) and not causes.policy('eval-order')[2] and
-      causes.policy('eval-order')[0] == 'by-design', 'eval-order: policy (by-design soft; the args one hard)')
+    check(hint_cause(d) == 'call-order-args', 'call-order: ... and named call-order-args, not decided')
+for what, rets in (('statements', STMT2), ('statements that store', STORE2)):
+    rx, ra = res([TA, TB], [TB, TA], rets=rets)
+    d = runner.compare(cv, rx, ra, w, vcalls=vc)
+    check(d is not None and not (d.get('soft') and d.get('arg_order')) and not d.get('after_perm'),
+          'call-order: reordered %s: not softened by the argument rule (%s)' % (what, d and d.get('kind')))
+check(causes.policy('call-order-args')[1:3] == ('S13b', True) and not causes.policy('call-order')[2],
+      'call-order: policy (by-design soft; the args one hard)')
 
 # a delete(0) the native dropped, the oracle's engines left both out: the note is soft
 rx, ra = res([0x402000], [0x402000])

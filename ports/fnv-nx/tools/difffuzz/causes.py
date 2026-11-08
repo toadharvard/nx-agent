@@ -120,12 +120,7 @@ POLICY = {
                                                 'and then calls the deallocator); GCC calls the destructor, F(p, 0), '
                                                 'and a separate operator delete of the same p. The pair is the one '
                                                 'call; the arguments and the stores are compared'),
-    'eval-order':     ('by-design', '-', False, 'the two machines make the same calls in another order (C++ leaves the '
-                                                'evaluation order of unsequenced operands open: MSVC evaluates the '
-                                                'arguments of a call right to left, GCC left to right); each oracle '
-                                                'call is compared with the native call of the same callee, the stores '
-                                                'and the result are compared as usual'),
-    'eval-order-args': ('triage', 'S13b', True, 'the calls are in another order on the two machines (eval-order) and the '
+    'call-order-args': ('triage', 'S13b', True, 'the calls are in another order on the two machines (eval-order) and the '
                                                 'comparison after pairing them by callee still differs; the canned '
                                                 'results are numbered by call index, so a reordered callee got '
                                                 'another value and the arguments it feeds differ for that reason: '
