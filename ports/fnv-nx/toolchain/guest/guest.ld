@@ -118,6 +118,16 @@ SECTIONS
 
 	.data.rel.ro :
 	{
+		/* S2 / S1: the native vtables of minus-one classes (the link's .data.rel.ro.fnvnx_m1.* sections, compiled
+		   groups renamed by apply), one contiguous range S1's runtime slot rule tests a vptr against */
+		. = ALIGN(8);
+		PROVIDE_HIDDEN( __fnvnx_m1_start = . );
+		KEEP( *(.data.rel.ro.fnvnx_m1 .data.rel.ro.fnvnx_m1.*) )
+		PROVIDE_HIDDEN( __fnvnx_m1_end = . );
+		/* the same with the destructor pair at slot 4 (the TESForm family): S1 shifts only the slots past 4 */
+		PROVIDE_HIDDEN( __fnvnx_m1k4_start = . );
+		KEEP( *(.data.rel.ro.fnvnx_m1k4 .data.rel.ro.fnvnx_m1k4.*) )
+		PROVIDE_HIDDEN( __fnvnx_m1k4_end = . );
 		*(.data.rel.ro.local* .gnu.linkonce.d.rel.ro.local.*)
 		*(.data.rel.ro .data.rel.ro.* .gnu.linkonce.d.rel.ro.*)
 		. = ALIGN(8);
