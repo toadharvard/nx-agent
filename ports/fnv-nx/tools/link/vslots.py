@@ -49,6 +49,25 @@ CoffSym = collections.namedtuple('CoffSym', 'name value secnum type storage')   
 Section = collections.namedtuple('Section', 'name size data_off reloc_off nreloc flags')
 
 
+_COFFS = {}
+_COFFS_LOCK = __import__('threading').Lock()
+
+
+def coff(path):
+    """Coff(path), parsed once per process for an unchanged file (path, size, mtime): bodies' passes read each
+    pristine object about five times (T1: 16,198 parses of 2,990 objects, 26 s of bodies' 76 under the profiler).
+    A Coff is not changed after its parse (its relocs/symbols_in tables fill in lazily, the same for every caller)."""
+    st = os.stat(path)
+    k = (path, st.st_size, st.st_mtime_ns)
+    with _COFFS_LOCK:
+        c = _COFFS.get(k)
+    if c is None:
+        c = Coff(path)
+        with _COFFS_LOCK:
+            c = _COFFS.setdefault(k, c)
+    return c
+
+
 class Coff:
     """i386 COFF object (plain or /bigobj). syms: {raw symbol index: CoffSym} (aux records skipped); defs: name ->
     index of its definition (external over static); weak: weak external name -> default symbol name; comdat_sel:
