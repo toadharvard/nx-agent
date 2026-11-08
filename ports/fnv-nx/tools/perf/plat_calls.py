@@ -166,7 +166,8 @@ def parse(path, names):
             except ValueError:
                 continue
             s = st.setdefault(f[4], {'logged': 0, 'count': 0, 'first_seq': None, 'first_tid': None, 'tids': set(),
-                                     'ret': {'zero': 0, 'minus_one': 0, 'other': 0}, 'strings': [], 'from_image': 0})
+                                     'ret': {'zero': 0, 'minus_one': 0, 'other': 0}, 'strings': [], 'from_image': 0,
+                                     'ns': 0})
             s['logged'] += 1
             s['from_image'] += IMAGE[0] <= ra < IMAGE[1]
             seq = int(f[1])
@@ -183,11 +184,14 @@ def parse(path, names):
             s = st[open_calls.pop(f[1])]
             eax = int(f[5], 16) & 0xFFFFFFFF
             s['ret']['zero' if eax == 0 else 'minus_one' if eax == 0xFFFFFFFF else 'other'] += 1
+            if len(f) >= 7 and f[6].isdigit():   # the guest tracer's host wall time of the call
+                s['ns'] = s.get('ns', 0) + int(f[6])
         elif k == 'end' and len(f) >= 2 and f[1] == 'detach':
             detached = True   # fnvtrace wrote every count at DLL_PROCESS_DETACH: exact
         elif k == 'count' and len(f) >= 3 and f[1] in names:
             s = st.setdefault(f[1], {'logged': 0, 'count': 0, 'first_seq': None, 'first_tid': None, 'tids': set(),
-                                     'ret': {'zero': 0, 'minus_one': 0, 'other': 0}, 'strings': [], 'from_image': 0})
+                                     'ret': {'zero': 0, 'minus_one': 0, 'other': 0}, 'strings': [], 'from_image': 0,
+                                     'ns': 0})
             s['count'] = max(s['count'], int(f[2]))
     return st, detached
 
@@ -207,7 +211,9 @@ def cmd_report(a):
             seen = True
             api = api if api in by_api else alias[api]
             m = merged.setdefault(api, {'calls': 0, 'logged': 0, 'first_seq': None, 'first_tid': None, 'tids': set(),
-                                        'ret': {'zero': 0, 'minus_one': 0, 'other': 0}, 'strings': [], 'exact': det})
+                                        'ret': {'zero': 0, 'minus_one': 0, 'other': 0}, 'strings': [], 'exact': det,
+                                        'ns': 0})
+            m['ns'] += s.get('ns', 0)
             m['calls'] += max(s['count'], s['logged'])
             m['logged'] += s['logged']
             if s['first_seq'] is not None and (m['first_seq'] is None or s['first_seq'] < m['first_seq']):
@@ -225,6 +231,8 @@ def cmd_report(a):
             total += m['calls']
             row.update(logged=m['logged'], exact=m['exact'], first_seq=m['first_seq'], first_tid=m['first_tid'],
                        threads=len(m['tids']), ret=m['ret'], string_hashes=m['strings'])
+            if m['ns']:
+                row['wall_ms'] = round(m['ns'] / 1e6, 3)   # guest traces: host wall time inside the calls
         rows.append(row)
     called = [r for r in rows if r['calls']]
     called.sort(key=lambda r: (r['first_seq'] is None, r['first_seq'] or 0))
@@ -237,11 +245,12 @@ def cmd_report(a):
         with open(a.md, 'w') as f:
             f.write('# The original\'s Win32 calls (fnvnx-plat-calls/1)\n\n%d of %d imports called, %d calls%s.\n\n'
                     % (len(called), len(rows), total, '' if j['exact'] else ' (counts are lower bounds: no detach)'))
-            f.write('| order | api | calls | threads | ret 0 / -1 / other (logged) | provider |\n|---|---|---|---|---|---|\n')
+            f.write('| order | api | calls | threads | ret 0 / -1 / other (logged) | wall ms | provider |\n'
+                    '|---|---|---|---|---|---|---|\n')
             for r in called:
-                f.write('| %d | %s | %d%s | %d | %d / %d / %d | %s |\n' % (
+                f.write('| %d | %s | %d%s | %d | %d / %d / %d | %s | %s |\n' % (
                     r['order'], r['api'], r['calls'], '' if r['exact'] else '+', r['threads'], r['ret']['zero'],
-                    r['ret']['minus_one'], r['ret']['other'], r['provider']))
+                    r['ret']['minus_one'], r['ret']['other'], r.get('wall_ms', '-'), r['provider']))
             never = [r['api'] for r in rows if not r['calls']]
             f.write('\nImported, never called (%d): %s\n' % (len(never), ', '.join(never)))
     print('plat_calls: %d of %d imports called, %d calls' % (len(called), len(rows), total))
