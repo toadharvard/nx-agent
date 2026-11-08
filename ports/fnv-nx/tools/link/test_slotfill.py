@@ -359,9 +359,11 @@ def main():
         import re as re_
         blk = lambda z_: (re_.search(r'%s:\n((?:    \.word [^\n]*\n)+)' % z_, bridges_) or [None, ''])[1].split('\n')  # noqa: E731
         w1, w2, w3 = blk('_ZTV3Bd1'), blk('_ZTV3Bd2'), blk('_ZTV3Bd3')
-        check(any('__fnv_00401020' in x for x in w1[2:3]) and any('__fnv_00401028' in x for x in w1[3:4]) and
-              any('__fnv_00401010' in x for x in w2[2:3]) and any('__fnv_004011a8' in x for x in w2[3:4]),
-              'Bd1 / Bd2: Bf::bi and bc take the exe functions of each class (per slot): %s %s' % (w1, w2))
+        # W38: slot 0 has no body (undefined) and the exe's slot 0 is a deleting destructor: a minus-one table, D1 / D0 (the
+        # flags stubs of the exe address), then exe slot 1 at native slot 2
+        check('vflag_00401020_0' in w1[2] and 'vflag_00401020_1' in w1[3] and '__fnv_00401028' in w1[4] and
+              'vflag_00401010_0' in w2[2] and 'vflag_00401010_1' in w2[3] and '__fnv_004011a8' in w2[4],
+              'Bd1 / Bd2: Bf::bi and bc take the exe functions of each class (per slot), minus-one: %s %s' % (w1, w2))
         check(len(w3) > 3 and 'vtrap' in w3[2] and '__fnv_00401020' in w3[3] and
               all('_ZN2Bf2' not in x for x in w3),
               'Bd3: Bf::bi (the exe body no unit compiles) -> a trap stub for the exe address, Bf::bc -> the exe '

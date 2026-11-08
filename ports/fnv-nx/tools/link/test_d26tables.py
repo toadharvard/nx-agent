@@ -35,13 +35,14 @@ A0, A1, A2, AF = 0x00401000, 0x00401010, 0x00401020, 0x00401200   # ??_G, f, g, 
 OTHER = t0.OTHER
 
 
-def run(tmp, exe, groups, exev, native, listed=(), called=()):
+def run(tmp, exe, groups, exev, native, listed=(), called=(), defined=(), per_obj=None, alt=None, outdir=None):
     vmap = {v: (z, 8, obj, 'primary') for z, (obj, v) in groups.items()}
     have = [types.SimpleNamespace(obj=obj, source=z) for z, (obj, v) in groups.items()]
     bridges, traps = {}, {}
-    out = tempfile.mkdtemp(dir=tmp)
-    st = fnvlink.exe_vtable_copies(exev, vmap, types.SimpleNamespace(where={}), have, {}, traps, native, bridges, out,
-                                   None, exe, {}, None, lambda n: None, set(listed), lambda c: set(c) & set(called))
+    out = outdir or tempfile.mkdtemp(dir=tmp)
+    st = fnvlink.exe_vtable_copies(exev, vmap, types.SimpleNamespace(where={}), have, per_obj or {}, traps, native, bridges,
+                                   out, None, exe, {}, alt, lambda n: None, set(listed), lambda c: set(c) & set(called),
+                                   defined_fn=lambda c: set(c) & set(defined))
     return st, bridges, traps
 
 
@@ -62,12 +63,15 @@ def main():
         native = {A0: dict(unit='u.cpp', sym=d0, variants={'D0': d0, 'D1': d1}, tier='def', msvc='??_GA@@UAEPAXI@Z'),
                   A1: nat('_ZN3Foo1fEv'), A2: nat('_ZN3Foo1gEv'),
                   AF: nat('_Z12FUN_00401200Pvi', msvc='?FUN_00401200@@YGXPAXH@Z')}   # stdcall free function
-        V = {n: 0x01010000 + 0x100 * i for i, n in enumerate('ABCDE')}
+        V = {n: 0x01010000 + 0x100 * i for i, n in enumerate('ABCDEFGH')}
         exev = {V['A']: exevft.Vft('.?AVFoo@@', 0, [], [A0, A1, A2]),        # call-only placeholder v00
                 V['B']: exevft.Vft('.?AVAlloc@@', 0, [], [A0, AF, A2, AF]),   # named slot 0, free fn in slots 1 and 3
                 V['C']: exevft.Vft('.?AVUsed@@', 0, [], [A0, A1, A2]),       # placeholder, called by name
                 V['D']: exevft.Vft('.?AVPlain@@', 0, [], [A0, A1, A2]),      # named slot 0, nothing says minus-one
-                V['E']: exevft.Vft('.?AVPair@@', 0, [], [A0, A1, A2])}       # a real pair: already right
+                V['E']: exevft.Vft('.?AVPair@@', 0, [], [A0, A1, A2]),       # a real pair: already right
+                V['F']: exevft.Vft('.?AVFlag@@', 0, [], [A0, A1, A2]),       # slot 0 the single flags-0 stub
+                V['G']: exevft.Vft('.?AVThingCO@@', 0, [], [A1, A1, A2, A2]),  # COM: QueryInterface / AddRef / Release
+                V['H']: exevft.Vft('.?AVUnused@@', 0, [], [A0, A1, A2])}     # slot 0 `unused`: no body, any name
         zb = '_ZTV26FUN_00401200_BSNiAllocator'
         g = {'_ZTV3Foo': (t0.asm_group(tmp, 'a', '_ZTV3Foo', ['_ZN3Foo3v00Ev', '_ZN3Foo3v01Ev', '_ZN3Foo3v02Ev']), V['A']),
              zb: (t0.asm_group(tmp, 'b', zb, ['_ZN26FUN_00401200_BSNiAllocator7DestroyEj', '__fnv_00401200',
@@ -75,8 +79,17 @@ def main():
              '_ZTV4Used': (t0.asm_group(tmp, 'c', '_ZTV4Used', ['_ZN4Used3v00Ev', '_ZN4Used3v01Ev', '_ZN4Used3v02Ev']), V['C']),
              '_ZTV5Plain': (t0.asm_group(tmp, 'd', '_ZTV5Plain', ['_ZN5Plain7DestroyEj', '__fnv_00401010', '__fnv_00401020']),
                             V['D']),
+             '_ZTV4Flag': (t0.asm_group(tmp, 'f', '_ZTV4Flag', ['_ZN4Flag3v00Ev', '_ZN4Flag3v01Ev', '_ZN4Flag3v02Ev']), V['F']),
+             '_ZTV7ThingCO': (t0.asm_group(tmp, 'g', '_ZTV7ThingCO', ['_ZN7ThingCO14QueryInterfaceEv', '_ZN7ThingCO6AddRefEv',
+                                                                        '_ZN7ThingCO7ReleaseEv']), V['G']),
+             '_ZTV6Unused': (t0.asm_group(tmp, 'h', '_ZTV6Unused', ['_ZN6Unused6unusedEv', '_ZN6Unused3v01Ev', '_ZN6Unused3v02Ev']),
+                             V['H']),
              '_ZTV4Pair': (t0.asm_group(tmp, 'e', '_ZTV4Pair', ['_ZN4PairD1Ev', '_ZN4PairD0Ev', '__fnv_00401010', '__fnv_00401020']), V['E'])}
-        st, br, traps = run(tmp, exe, g, exev, native, listed={V['B']}, called={'_ZN4Used3v00Ev'})
+        dfn = {'_ZN26FUN_00401200_BSNiAllocator7DestroyEj', '_ZN5Plain7DestroyEj'}   # slot-0 functions with a body
+        outd = tempfile.mkdtemp(dir=tmp)
+        fl0 = {'_ZTV4Flag': {'_ZN4Flag3v00Ev': '__fnvnx_vflag_00401000_0'}}
+        st, br, traps = run(tmp, exe, g, exev, native, listed={V['B']}, called={'_ZN4Used3v00Ev'}, defined=dfn,
+                            per_obj=fl0, outdir=outd, alt={V['A']: [('_ZTV12FUN_00bb83d0', 8, 'x.o', 'primary')]})
         w = words(br, '_ZTV3Foo')
         check(w[:2] == ['0x0', '_ZTI3Foo'] and w[2:] == ['__fnv_00401000_D1', '__fnv_00401000', '__fnv_00401010',
                                                          '__fnv_00401020'],
@@ -88,13 +101,29 @@ def main():
         check('mov x0, x1' in br['__fnvnx_vfree_00401200'] and 'b __fnv_00401200' in br['__fnvnx_vfree_00401200'],
               'the thunk shifts the arguments down and tail-calls the free function')
         check('zzvtext__ZTV4Used' not in br, 'a placeholder called by name stays in the exe order')
-        check('zzvtext__ZTV5Plain' not in br, 'a named slot 0 with no evidence stays as it is (no copy)')
+        check('zzvtext__ZTV5Plain' not in br, 'a slot 0 defined in code, with no list evidence, stays as it is (no copy)')
+        w = words(br, '_ZTV4Flag')
+        check(w[2:4] == ['__fnv_00401000_D1', '__fnv_00401000'] and w[4:] == ['__fnv_00401010', '__fnv_00401020'],
+              'a synthesized table with a single flags-0 slot 0 becomes D1/D0 + shift: %s' % w)
+        w = words(br, '_ZTV6Unused')
+        check(w[2:4] == ['__fnv_00401000_D1', '__fnv_00401000'] and len(w) == 6,
+              'slot 0 `unused` with no body is minus-one whatever its name: %s' % w)
+        w = words(br, '_ZTV7ThingCO') if 'zzvtext__ZTV7ThingCO' in br else []
+        check(not w or (w[2] == '_ZN7ThingCO14QueryInterfaceEv' and st['d26-minus-one-tables'] == 4),
+              'a COM interface is left alone (no D1/D0 pair, slot 0 stays QueryInterface): %s' % w)
         check('zzvtext__ZTV4Pair' not in br, 'a table with a pair is left alone')
-        check(st['d26-minus-one'] == 2 and st['d26-minus-one-d22-list'] == 1 and
-              st['d26-minus-one-d26-callonly'] == 1 and st['exe-order-no-evidence'] == 2
-              and st['d26-minus-one-BSNiAllocator'] == 1, 'counted: %s' % dict(st))
+        check(st['d26-minus-one'] == 4 and st['d26-minus-one-d22-list'] == 1 and
+              st['d26-minus-one-d26-callonly'] == 2 and st['d26-minus-one-d26-undefined'] == 1 and
+              st['exe-order-no-evidence'] == 3 and st['exe-order-com'] == 1 and st['exe-order-d22-used'] == 1 and
+              st['exe-order-defined-slot0'] == 1 and st['d26-minus-one-BSNiAllocator'] == 1, 'counted: %s' % dict(st))
+        tsv = [l.rstrip('\n').split('\t') for l in open(os.path.join(outd, 'exe_order_classes.tsv')) if not l.startswith('#')]
+        by = {(r[0], r[2]) for r in tsv}
+        check(('Used', 'd22-used') in by and ('Plain', 'defined-slot0') in by and ('ThingCO', 'com') in by and
+              ('Foo', 'd26-callonly') not in {(r[0], r[2]) for r in tsv} and all(len(r) == 4 for r in tsv) and
+              any(r[1] == '%08x' % V['C'] and r[3] == '_ZTV4Used' for r in tsv),
+              'out/exe_order_classes.tsv names the exe-order tables (class, vftable, reason, symbol): %s' % tsv)
         # a named slot 0 with no list evidence (BSNiAllocator::Destroy unlisted) stays in the exe's order
-        _, bu, _ = run(tmp, exe, g, exev, native, listed=set(), called={'_ZN4Used3v00Ev'})
+        _, bu, _ = run(tmp, exe, g, exev, native, listed=set(), called={'_ZN4Used3v00Ev'}, defined=dfn)
         check('zzvtext__' + zb not in bu and 'zzvtext__ZTV3Foo' in bu,
               'unlisted: the named slot 0 stays in exe order, the call-only placeholder is still minus-one')
         os.environ['FNVNX_D26T'] = '0'
