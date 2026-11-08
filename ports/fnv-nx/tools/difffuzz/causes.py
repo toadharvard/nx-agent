@@ -108,6 +108,10 @@ POLICY = {
     'x87-trig-inf':   ('artifact', 'S13', False, 'fsin / fcos / fsincos / fptan of an infinity: the oracle emulator '
                                                  'leaves the infinity in st0 where the x87 gives the indefinite NaN '
                                                  '(Intel SDM, #IA masked); equal once the probe applies it'),
+    'canned-alias':   ('artifact', 'S13', False, 'a canned callee result points into the argument buffers, so the '
+                                                 'function writes the object through two names; the machines order '
+                                                 'those stores differently (no allocation returns the caller\'s own '
+                                                 'object); equal with the results moved to the heap'),
     'ptrdiff-unaligned': ('by-design', '-', False, 'a pointer difference that is not a multiple of the element size: '
                                                    'GCC folds (end - begin) / size * size to end - begin, MSVC keeps '
                                                    'the division (UB in C++); equal with 4-aligned arguments'),
