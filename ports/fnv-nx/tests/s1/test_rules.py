@@ -804,6 +804,24 @@ check('STAND1 keeps tagged definitions behind pragmas, declarations, a type or a
       ['return p + i;', 'return &g;', 'return a->n;', '*(int*)this = 1;', 'pooled = 1;',
        '/* fnv-nx STAND1: Cls::Stand is the function at the tagged address */'], ['fnv-nx STAND1: Bip', 'Map();'])
 
+# STAND1 keeps an untagged definition the unit's own units.json `functions` place, even when another definition
+# carries the address's tag (R2: caravanmenu 0x0073b730)
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_json.dump({'units': [{'source': 'src/staging/u.cpp',
+                       'functions': [{'address': '0x0073b730', 'symbol': '?Run@Hand@@QAEXPAH@Z', 'size': 168}],
+                       'symbols': {'?Run@Hand@@QAEXPAH@Z': '0x0073b730', '?Stand@Hand@@QAEXXZ': '0x0073b730'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          'struct Card\n{\n// @fnv 0x0073b730\n    virtual char* Run_card()\n    {\n        return 0;\n    }\n};\n'
+          'struct Hand { void Run(int* p); void Stand(); };\nvoid Hand::Run(int* p)\n{\n    p[0] = 7;\n}\n'
+          'void Hand::Stand()\n{\n}\n', os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND1 keeps a definition its unit places, whatever carries the tag', got,
+      ['p[0] = 7;', '/* fnv-nx STAND1: Hand::Stand is the function at the tagged address */'],
+      ['fnv-nx STAND1: Hand::Run'])
+
 # ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
 _s = tempfile.mkdtemp()
 os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
