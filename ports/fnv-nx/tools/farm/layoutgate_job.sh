@@ -17,7 +17,7 @@ set -euo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 C12=${COMMIT:0:12}
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=$(cd "$HERE/../../../.." && pwd)
+REPO=${LAYOUTGATE_REPO:-$(cd "$HERE/../../../.." && pwd)}
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
 JOBS=${JOBS:-$(nproc)}
 EXT=$FARM_HOME/ext
@@ -31,6 +31,11 @@ mkdir -p "$FARM_HOME" "$(dirname "$REPORT")"
 SRC=$FARM_HOME/src-$C12
 bash "$HERE/worktree.sh" "$REPO" "$SRC" "$COMMIT" >/dev/null
 P=$SRC/ports/fnv-nx
+# the commit's own job script: runner.sh runs the farm checkout's copy, which may be older than <commit> (5e94e04e5a61
+# ran a copy without the recon-set tree check and took a tree prepared before three recons existed)
+if [ -z "${LAYOUTGATE_REEXEC:-}" ] && [ -f "$P/tools/farm/layoutgate_job.sh" ] && ! cmp -s "$0" "$P/tools/farm/layoutgate_job.sh"; then
+  LAYOUTGATE_REEXEC=1 LAYOUTGATE_REPO=$REPO exec bash "$P/tools/farm/layoutgate_job.sh" "$@"
+fi
 bash "$P/tools/fetch.sh" "$EXT" >/dev/null
 command -v clang++ >/dev/null || { [ "$(id -u)" = 0 ] && apt-get install -y -qq clang >/dev/null; } || true
 command -v clang++ >/dev/null || { echo "- FAIL: clang++ is missing (apt-get install clang)" > "$REPORT"; exit 1; }
@@ -93,7 +98,7 @@ SUM=$(cat "$WORK/$C12.tsv.summary")
   echo "# layoutgate $C12"
   echo
   echo "- $SUM"
-  echo "- commit: \`$COMMIT\`, tree $TREE_HASH ($TREE_HOW), $((t1-t0)) s, jobs $JOBS, boot units $(wc -l < "$BOOT") ($(basename "${LIST:-none}"))"
+  echo "- commit: \`$COMMIT\`, tree $TREE_HASH ($TREE_HOW, recon ${RECON_ID:-none}), $((t1-t0)) s, jobs $JOBS, boot units $(wc -l < "$BOOT") ($(basename "${LIST:-none}"))"
   echo "- MSVC side: clang $(clang++ --version | head -1 | grep -o '[0-9][0-9.]*' | head -1) i686-pc-windows-msvc record layouts"
   echo
   echo "## Rows by cause (size / field / member rows)"; echo
