@@ -24,6 +24,7 @@
           data-unmapped            a read/write/fetch in a non-code exe section (the data window is not mapped yet)
     image-check-summary<TAB>count<TAB>kind<TAB>section<TAB>pc function<TAB>lr function<TAB>first addr[<TAB>native=..]
 """
+import bisect
 import collections
 import re
 import struct
@@ -171,6 +172,11 @@ class SanitizeMixin:
                 finding("unknown-block", ptr, fam, label, st, inside(ptr))
 
         def release(ptr, fam, label, st):
+            if ptr in ac["live"]:
+                starts = ac.setdefault("starts", [])
+                k = bisect.bisect_left(starts, ptr)
+                if k < len(starts) and starts[k] == ptr:
+                    starts.pop(k)
             rec = ac["live"].pop(ptr, None)
             if rec is not None:
                 ac["freed"][ptr] = rec[:4] + ((fam, label, st),)
@@ -228,6 +234,22 @@ class SanitizeMixin:
                 else:
                     ac["allocs"] += 1
                 ac["freed"].pop(res, None)
+                # overlap: the new block [res, res+n) must not intersect a live block (an allocator handing out
+                # overlapping memory: a broken heap, e.g. a stand-in's pool or table that does not match the exe's)
+                starts = ac.setdefault("starts", [])
+                i = bisect.bisect_right(starts, res)
+                for j in (i - 1, i):
+                    if 0 <= j < len(starts) and starts[j] != res:
+                        q = starts[j]
+                        qrec = ac["live"].get(q)
+                        # a block of 1 MiB or more is a heap's region (the VirtualAlloc fallback carves the game
+                        # heaps from one memalign block), not a block: containment there is the design
+                        if qrec and qrec[2] < (1 << 20) and n < (1 << 20) and \
+                                q < res + max(n, 1) and res < q + max(qrec[2], 1):
+                            finding("overlap", res, fam, label, st, qrec)
+                            break
+                if res not in ac["live"]:
+                    bisect.insort(starts, res)
                 ac["live"][res] = (fam, label, n, st)
                 break
 
