@@ -17,6 +17,9 @@ cat > "$Q/Makefile" <<'MK'
 # FAKE_FAIL=link: the link stage fails with a traceback in its log
 $(firstword $(MAKECMDGOALS)):
 	@echo "$(MAKECMDGOALS) PREPARED=$(PREPARED) FORCE_STALE=$(FORCE_STALE)" >> $(CALLS)
+	@# as build.py's adopt: a tree with no prepared_from record next to it is refused (sw14 6d8ec3fd)
+	@[ -z "$(PREPARED)" ] || head -1 $(dir $(PREPARED))prepared_from.txt 2>/dev/null | grep -Eq '^[0-9a-f]{40}$$' || \
+	  { mkdir -p $(BUILD_DIR)/compile; echo '{"status": "fail", "error": "prepared from unknown (no prepared_from record)"}' > $(BUILD_DIR)/compile/stage.json; exit 2; }
 	@for s in $(if $(filter link,$(MAKECMDGOALS)),prepare compile link,fetch toolchain); do mkdir -p $(BUILD_DIR)/$$s; \
 	  st=ok; err=""; if [ "$$s" = "$${FAKE_FAIL:-}" ]; then st=fail; err=', "error": "IndexError: list index out of range"'; \
 	    printf 'resolve: start\nTraceback (most recent call last):\n  File "fnvlink.py", line 9, in minus_one_copies\n    x = t[k]\nIndexError: list index out of range\nmake: *** [link] Error 1\n' > $(BUILD_DIR)/$$s/stage.log; fi; \
@@ -25,14 +28,15 @@ $(firstword $(MAKECMDGOALS)):
 	@[ -z "$(filter link,$(MAKECMDGOALS))" ] || touch $(BUILD_DIR)/compile/objects.tsv
 MK
 git -C "$S" init -q; git -C "$S" add -A; git -C "$S" -c user.name=t -c user.email=t@t commit -qm one; C1=$(git -C "$S" rev-parse HEAD)
-# the artifacts: link-head (meta.json commit X) and the tree t/<X12> in publish_tree's layout
-X=$(printf 'b%.0s' $(seq 40))
+# the artifacts: the tree t/<C1 12> in publish_tree's layout (the newest published tree on every later head's history;
+# link-head names an older commit, which linkcheck no longer takes)
+X=$C1; D=$(printf 'd%.0s' $(seq 40))
 git init -q --bare "$T/art.git"; git clone -q "$T/art.git" "$T/art" 2>/dev/null
-( cd "$T/art" && git checkout -q --orphan lh && echo "{\"commit\": \"$X\"}" > meta.json && git add -A &&
+( cd "$T/art" && git checkout -q --orphan lh && echo "{\"commit\": \"$(printf 'b%.0s' $(seq 40))\"}" > meta.json && git add -A &&
   git -c user.name=t -c user.email=t@t commit -qm lh && git push -q origin HEAD:refs/heads/link-head
   git checkout -q --orphan tt && git rm -rqf . && mkdir -p tree/build tree/src && echo '{"units": []}' > tree/build/units.json &&
   echo 'int f();' > tree/src/a.cpp && th=$(bash "$Q/tools/farm/tree_hash.sh" tree) &&
-  echo "{\"commit\": \"$X\", \"decomp_commit\": \"$X\", \"tree_hash\": \"$th\"}" > meta.json && git add -A &&
+  echo "{\"commit\": \"$X\", \"decomp_commit\": \"$D\", \"tree_hash\": \"$th\"}" > meta.json && git add -A &&
   git -c user.name=t -c user.email=t@t commit -qm tree && git push -q origin "HEAD:refs/heads/t/${X:0:12}" ) > /dev/null 2>&1
 run() {   # run <name> <commit> [VAR=value ...]
 	local n=$1 c=$2; shift 2
@@ -42,7 +46,8 @@ run() {   # run <name> <commit> [VAR=value ...]
 }
 side() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d[sys.argv[2]])" "$T/$1.json" "$2"; }
 : > "$T/calls"; run first "$C1"
-ok "first: PASS, cold, the base is link-head's tree" '[ "$(cat $T/first.rc)" = 0 ] && sed -n 3p $T/first.md | grep -q "^- verdict: PASS" && grep -q "cold: the first build" $T/first.md && grep -q "^- base: t/${X:0:12} (link-head" $T/first.md && [ -f $T/home/linkcheck/base/tree/build/units.json ]'
+ok "first: PASS, cold, the base is the newest published tree on the head's history" '[ "$(cat $T/first.rc)" = 0 ] && sed -n 3p $T/first.md | grep -q "^- verdict: PASS" && grep -q "cold: the first build" $T/first.md && grep -q "^- base: t/${X:0:12} (the newest published tree" $T/first.md && [ -f $T/home/linkcheck/base/tree/build/units.json ]'
+ok "the base's provenance next to it: commit, decomp (sw14: compile refused \"prepared from unknown\")" '[ "$(head -1 $T/home/linkcheck/base/prepared_from.txt)" = "$X" ] && grep -qx "decomp $D" $T/home/linkcheck/base/prepared_from.txt'
 ok "make link only, the base adopted with FORCE_STALE=1" 'grep -q "^link PREPARED=$T/home/linkcheck/base/tree FORCE_STALE=1$" $T/calls && ! grep -q "^guest\|^all" $T/calls'
 ok "the sidecar: fnvnx-linkcheck/1, pass, the stage table" '[ "$(side first verdict)" = pass ] && [ "$(side first format)" = fnvnx-linkcheck/1 ] && grep -q "^| link | ok | ran | 4 |" $T/first.md'
 # a head that changes no link tool: the verdict of the first, no build
@@ -56,6 +61,6 @@ ok "a failing link: RED with its error, exit 0, not cold" '[ "$(cat $T/red.rc)" 
 ok "... the traceback in the report, not make's tail" 'grep -q "in minus_one_copies" $T/red.md && grep -q "^Traceback (most recent call last):" $T/red.md && ! grep -q "make: \*\*\*" $T/red.md'
 ok "... the sidecar says red; the key keeps red for the next head with these tools" '[ "$(side red verdict)" = red ] && grep -q " red$" $T/home/linkcheck/keys/*'
 # no base: ERROR, not checked (the gate does not hold a head on it)
-rm -rf "$T/home"; git -C "$T/art.git" update-ref -d refs/heads/link-head; run nobase "$C3"
+rm -rf "$T/home"; git -C "$T/art.git" update-ref -d "refs/heads/t/${X:0:12}"; git -C "$T/art" update-ref -d "refs/remotes/origin/t/${X:0:12}" 2>/dev/null; run nobase "$C3"
 ok "no base: ERROR (not checked), exit 0, the sidecar error" '[ "$(cat $T/nobase.rc)" = 0 ] && grep -q "^- verdict: ERROR (not checked): no base" $T/nobase.md && [ "$(side nobase verdict)" = error ] && ! ls $T/home/linkcheck/keys/* > /dev/null 2>&1'
 [ $fails = 0 ] && echo "test_linkcheck: all ok" || { for f in "$T"/*.log; do echo "== $f"; tail -5 "$f"; done; echo "test_linkcheck: $fails failed"; exit 1; }

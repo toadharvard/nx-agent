@@ -10,7 +10,7 @@
 # The link tools: tools/farm/link_key.sh (what tools/pipeline/build.py link_tool_inputs hashes, plus build.py itself);
 # their git object ids at the head are the head's link key. A head whose key was checked already gets a short report with
 # that verdict (seconds); a new key runs `make link` in $FARM_HOME/linkcheck/build:
-#   base     the tree t/<c12> of link-head's commit (the newest link a full farm published), fetched once to
+#   base     the newest published tree t/<c12> on the head's history (full_job.sh publish_tree), fetched once to
 #            $FARM_HOME/linkcheck/base/tree and kept (stable paths: the unit and link compile caches hit), replaced
 #            when it is older than LINKCHECK_REBASE_H hours (default 24) or LINKCHECK_REBASE=1; PREPARED=<base tree>
 #            FORCE_STALE=1, so prepare is adopted and compile is cached (it compiles again only when the head
@@ -116,28 +116,43 @@ if ! stage_ok "$TCB" toolchain; then
 fi
 step toolchain
 
-# the base: link-head's commit and its published tree, kept at one path
+# the base: the newest published tree t/<c12> on the head's history (full_job.sh publish_tree), kept at one path.
+# Not link-head: it stays on the last link that got through (4aa2f953, 47 units uncompiled, while t/cf66957439a9 had
+# 2,976 of 2,978). A base from before this layout (no base/prepared_from.txt) is replaced.
 BT=$F/base/tree
 age_h=999
 [ -f "$F/base/commit" ] && age_h=$(( ($(date +%s) - $(stat -c %Y "$F/base/commit")) / 3600 ))
-if [ ! -f "$BT/build/units.json" ] || [ "${LINKCHECK_REBASE:-0}" = 1 ] || [ "$age_h" -ge "${LINKCHECK_REBASE_H:-24}" ]; then
-	nb=""
-	if git -C "$ARTIFACTS" fetch -q --depth 1 origin link-head 2> /dev/null; then
-		nb=$(git -C "$ARTIFACTS" show FETCH_HEAD:meta.json | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("commit") or "")' 2> /dev/null || true)
-	fi
+newest_tree() {   # the newest ancestor of COMMIT (itself included) with a published t/<c12>, or nothing
+	local have c
+	have=$(git -C "$ARTIFACTS" ls-remote origin 'refs/heads/t/*' 2> /dev/null | sed -n 's|.*refs/heads/t/\([0-9a-f]\{12\}\)$|\1|p')
+	[ -n "$have" ] || return 0
+	for c in $(git -C "$SRC" rev-list --max-count="${LINKCHECK_TREE_DEPTH:-400}" "$COMMIT"); do
+		grep -qx "${c:0:12}" <<<"$have" && { echo "$c"; return 0; }
+	done
+}
+if [ ! -f "$BT/build/units.json" ] || [ ! -f "$F/base/prepared_from.txt" ] || [ "${LINKCHECK_REBASE:-0}" = 1 ] \
+		|| [ "$age_h" -ge "${LINKCHECK_REBASE_H:-24}" ]; then
+	nb=$(newest_tree)
 	if [ -n "$nb" ] && bash "$P/tools/farm/fetch_tree.sh" "$nb" "$F/base/tree.new" "${LINKCHECK_TREE_WAIT:-120}" > "$F/fetch_tree.log" 2>&1; then
 		rm -rf "$BT"; mv "$F/base/tree.new" "$BT"; echo "$nb" > "$F/base/commit"; COLD=1
+		# the tree's provenance for the pipeline's adopt (build.py read_prepared_from: the commit on the first line,
+		# next to the tree), as lib_job.sh job_inputs writes it; without it compile refused "prepared from unknown"
+		dc=$(git -C "$ARTIFACTS" show "refs/remotes/origin/t/${nb:0:12}:meta.json" 2> /dev/null \
+			| python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("decomp_commit") or "")' 2> /dev/null || true)
+		{ echo "$nb"; [ -n "$dc" ] && echo "decomp $dc"; echo "published for $nb"; } > "$F/base/prepared_from.txt"
 		rm -f "$F"/keys/*                      # the verdicts were on the old base
 		log "base: t/${nb:0:12}"
 	else
 		rm -rf "$F/base/tree.new"
-		[ -f "$BT/build/units.json" ] || { WHY="no base: link-head's tree t/${nb:0:12} could not be fetched (see $F/fetch_tree.log)"
-			tail -5 "$F/fetch_tree.log" > "$F/detail.txt" 2> /dev/null || true; write_report; exit 0; }
+		if [ ! -f "$BT/build/units.json" ] || [ ! -f "$F/base/prepared_from.txt" ]; then
+			WHY="no base: no published tree t/<c12> on the head's history could be fetched${nb:+ (t/${nb:0:12}, see $F/fetch_tree.log)}"
+			tail -5 "$F/fetch_tree.log" > "$F/detail.txt" 2> /dev/null || true; write_report; exit 0
+		fi
 		log "base: kept (the new one could not be fetched)"
 	fi
 fi
 BASE_C=$(cat "$F/base/commit")
-BASE_NOTE="t/${BASE_C:0:12} (link-head's tree; kept at $BT since $(date -u -d "@$(stat -c %Y "$F/base/commit")" +%FT%TZ))"
+BASE_NOTE="t/${BASE_C:0:12} (the newest published tree on the head's history; kept at $BT since $(date -u -d "@$(stat -c %Y "$F/base/commit")" +%FT%TZ))"
 [ -f "$B/compile/objects.tsv" ] || COLD=1
 step base
 
