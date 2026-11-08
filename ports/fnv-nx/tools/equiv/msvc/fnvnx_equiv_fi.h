@@ -44,6 +44,7 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_D22(C, ...) __VA_ARGS__
 #define FNVNX_D22_DROP(...) __VA_ARGS__
 #define FNVNX_D22_CALL(p, m, ...) (p)->m(__VA_ARGS__)
+#define FNVNX_VSLOT(k) (k)
 
 /* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
 #ifndef fnvnx_ftol2

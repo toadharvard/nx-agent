@@ -67,7 +67,7 @@ def main():
         exev = {V['A']: exevft.Vft('.?AVFoo@@', 0, [], [A0, A1, A2]),        # call-only placeholder v00
                 V['B']: exevft.Vft('.?AVAlloc@@', 0, [], [A0, AF, A2, AF]),   # named slot 0, free fn in slots 1 and 3
                 V['C']: exevft.Vft('.?AVUsed@@', 0, [], [A0, A1, A2]),       # placeholder, called by name
-                V['D']: exevft.Vft('.?AVPlain@@', 0, [], [A0, A1, A2]),      # named slot 0, nothing says minus-one
+                V['D']: exevft.Vft('.?AVPlain@@', 0, [], [A1, A1, A2]),      # named slot 0, no deleting dtor in the exe (D26DS)
                 V['E']: exevft.Vft('.?AVPair@@', 0, [], [A0, A1, A2]),       # a real pair: already right
                 V['F']: exevft.Vft('.?AVFlag@@', 0, [], [A0, A1, A2]),       # slot 0 the single flags-0 stub
                 V['G']: exevft.Vft('.?AVThingCO@@', 0, [], [A1, A1, A2, A2]),  # COM: QueryInterface / AddRef / Release
@@ -199,6 +199,16 @@ def main():
             'b.cpp\tFoo\tv00\tcallonly\t\n')
         check(fnvlink.load_d22_applied(tr) == {0x010a2528} and fnvlink.load_d22_applied(None) == set(),
               'load_d22_applied reads the listed rows of build/d22_applied.tsv')
+        # D26DS (orchestrator 11:49): a defined slot 0 that is the exe's deleting destructor goes minus-one
+        nm = ['_ZN18FUN_00cc8da0_Class12FUN_00cc8da0Eb', '_ZN1X1fEv']
+        c = lambda dd: fnvlink.d26_classify('_ZTV1X', 0x010ca06c, nm, None, set(), set(), {nm[0]}, dd)
+        check(c(True) == 'd26-defined-deldtor' and c(False) == 'defined-slot0',
+              'd26_classify: defined slot 0 + exe deleting dtor -> d26-defined-deldtor, else defined-slot0')
+        os.environ['FNVNX_D26DS'] = '0'
+        check(c(True) == 'defined-slot0', 'd26_classify: FNVNX_D26DS=0 keeps defined-slot0')
+        del os.environ['FNVNX_D26DS']
+        check(fnvlink.d26_classify('_ZTV1X', 1, nm, None, set(), {nm[0]}, {nm[0]}, True) == 'd22-used',
+              'd26_classify: a slot 0 named by code stays d22-used')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('%d failed' % len(FAILS))

@@ -3453,7 +3453,7 @@ def is_com(z, raw_names):
     return False
 
 
-def d26_classify(z, v, raw_names, d, listed, called, defined=()):
+def d26_classify(z, v, raw_names, d, listed, called, defined=(), slot0_deldtor=False):
     """Why the table z (exe vftable v, slot symbols raw_names, destructor pair position d) is minus-one or stays in the
     exe's order, though it holds no D1/D0 pair, as (reason). D26 (docs/ARCHITECTURE.md): natively every polymorphic object
     is dispatched minus-one; D26 (b) gives every call-only declaration's slot-0 placeholder a `virtual ~X()`, so its
@@ -3462,11 +3462,15 @@ def d26_classify(z, v, raw_names, d, listed, called, defined=()):
       'd22-list'      v is a vftable of a class in S1's D22 list (d22.json) or of one prepare converted
                       (build/d22_applied.tsv), whatever slot 0 is;
       'd26-callonly'  slot 0 is a placeholder name (D26B_PLACEHOLDER) no body defines;
-      'd26-undefined' slot 0 has no body in any object (undefined, a trap or placeholder under any name).
+      'd26-undefined' slot 0 has no body in any object (undefined, a trap or placeholder under any name);
+      'd26-defined-deldtor' slot 0 is a defined native function and exe slot 0 is a deleting destructor
+                      (slot0_deldtor: exevft.deleting_dtor, the exe-verified rule of D26; orchestrator 2026-11-08 11:49):
+                      D1 / D0 become the flags stubs into the named function (vmo_dtor_slots). FNVNX_D26DS=0 opts out.
     Exe-order reasons (EXE_ORDER_REASONS):
       'com'           a COM interface;
       'd22-used'      some code names slot 0 (the callers number the slots as the exe does);
-      'defined-slot0' slot 0 is a defined native function (BSNiAllocator::Destroy) and v has no list evidence.
+      'defined-slot0' slot 0 is a defined native function (BSNiAllocator::Destroy) that is no deleting destructor in the
+                      exe, and v has no list evidence.
     None: the table has a pair (d). called / defined: slot-0 symbols code references / a .text body defines."""
     if d is not None:
         return None
@@ -3478,14 +3482,16 @@ def d26_classify(z, v, raw_names, d, listed, called, defined=()):
     if v in listed:
         return 'd22-list'
     if s0 and s0 in (defined or ()):
+        if slot0_deldtor and os.environ.get('FNVNX_D26DS', '1') != '0':
+            return 'd26-defined-deldtor'
         return 'defined-slot0'
     mem = itanium_member(s0)
     return 'd26-callonly' if mem and D26B_PLACEHOLDER.match(mem) else 'd26-undefined'
 
 
-def d26_minus_one_reason(z, v, raw_names, d, listed, called, defined=()):
+def d26_minus_one_reason(z, v, raw_names, d, listed, called, defined=(), slot0_deldtor=False):
     """d26_classify's reason when the table is a minus-one one, else None (a pair, or an exe-order reason)."""
-    r = d26_classify(z, v, raw_names, d, listed, called, defined)
+    r = d26_classify(z, v, raw_names, d, listed, called, defined, slot0_deldtor)
     return None if r is None or r in EXE_ORDER_REASONS else r
 
 
@@ -3635,7 +3641,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         # layout: offset-to-top, typeinfo, D1, D0 (exe slot 0), then exe slot k at native k + 1
         m1 = None
         if slots and len(pts) == 1 and d is None and os.environ.get('FNVNX_D26T', '1') != '0':
-            why = d26_classify(z, max(vs), [e.sym for e in ents[2:2 + n]], d, listed or (), called, defined)
+            s0n = ents[2].sym if n else None
+            dd = bool(exe_path and s0n and s0n in (defined or ()) and exevft.deleting_dtor(exe_path, slots[0]))
+            why = d26_classify(z, max(vs), [e.sym for e in ents[2:2 + n]], d, listed or (), called, defined, dd)
             m1 = None if why in EXE_ORDER_REASONS else why
             if not m1:
                 st['exe-order-' + why] += 1
