@@ -564,6 +564,8 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
     if callee_conv is not None:
         for i, (cx, ca) in enumerate(zip(rx.calls, ra.calls)):
             cv = callee_conv(cx.target) if cx.target >= 0 and cx.target not in libcalls.NO_ARGS else None
+            if cx.target == 0x00aa4060 and ca.target != cx.target:
+                cv = None     # (bh_C) MemoryManager::Deallocate(this, p) against the native cdecl operator delete(p): same family, no `this`
             if cv is None:
                 continue
             skip = dummies(cx.target) if dummies else ()
