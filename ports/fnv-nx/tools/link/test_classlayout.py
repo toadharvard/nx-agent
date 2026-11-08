@@ -153,6 +153,25 @@ def main():
               'FNVNX_D0DESTROY=0: as before (no pair)')
     finally:
         del os.environ['FNVNX_D0DESTROY']
+    # a named global __stdcall function in a member slot (BSNiAllocator 0x00aa2240): `this` dropped when the exe's
+    # return pops exactly its parameters
+    F2, F1 = 0x401000, 0x401010
+    pe3 = os.path.join(_tf.mkdtemp(), 'f.exe')
+    tx.make_pe(pe3, lambda rd: None, {F2: b'\x8b\x44\x24\x04\xc2\x08\x00', F1: b'\x8b\x44\x24\x04\xc2\x04\x00'})
+    fs = elfsyms.Sym('_Z3fooRjS_', 0, 0, 'func', 'global', 1, '.text', False)
+    ndf = dict(sym=fs, msvc='?foo@@YGXAAI0@Z', variants={})
+    check(fnvlink.named_free_drop(F2, ndf, pe3) and not fnvlink.named_free_drop(F1, ndf, pe3),
+          'named_free_drop: ret 8 for 2 parameters drops this; ret 4 (the object among them) does not')
+    check(not fnvlink.named_free_drop(F2, dict(ndf, msvc='?foo@@YAXAAI0@Z'), pe3),
+          'named_free_drop: cdecl (no exe pop count to check) is left')
+    b3, s3 = {}, _c.Counter()
+    check(fnvlink.free_slot(F2, ndf, b3, s3, pe3) == '__fnvnx_vfree_00401000' and s3['free-slot-named'] == 1 and
+          'mov x0, x1' in b3['__fnvnx_vfree_00401000'], 'free_slot: the named stdcall slot gets the drop bridge')
+    os.environ['FNVNX_FREENAMED'] = '0'
+    try:
+        check(fnvlink.free_slot(F2, ndf, {}, _c.Counter(), pe3) is None, 'FNVNX_FREENAMED=0: as before')
+    finally:
+        del os.environ['FNVNX_FREENAMED']
     # D22-USED counts a placeholder slot code calls by name, never a real destructor (link 0e8b2eb8's HighProcess shell)
     NP = fnvlink.named_placeholder
     called = {'_ZN12FUN_008d98e0D1Ev', '_ZN3Foo3v00Ev'}
