@@ -49,7 +49,7 @@ run first
 ok "the warm link is checked once against a cold link at the same paths: PASS" 'grep -q "^cold$" $T/calls && grep -q "incremental link check (warm == cold): PASS" $T/first.md && [ -f $T/home/bootloop/linkeq.done ] && [ ! -d $T/home/bootloop/build/link.warm ]'
 ok "first iteration: exit 0, cold, milestones 3/10, null device" '[ "$(cat $T/first.rc)" = 0 ] && grep -q "cold: the first build on this machine" $T/first.md && grep -q "game milestones 3/10; last reached: renderer-init; null device: FNVNX_STUB_NULLDEV=1" $T/first.md'
 ok "make: guest only, with FNVNX_STUB_NULLDEV unset (the farm exported it)" 'grep -q "^guest FNVNX_STUB_NULLDEV=unset" $T/calls && ! grep -q "census\|package" $T/calls'
-ok "the stub boot on the build's guest, nulldev=1, 480 s" 'grep -q "^boot stub nulldev=1 guest=$T/home/bootloop/build/guest timeout=480" $T/calls'
+ok "the stub boot on the build's guest, nulldev=1, 300 s" 'grep -q "^boot stub nulldev=1 guest=$T/home/bootloop/build/guest timeout=300" $T/calls'
 ok "steps and stages with seconds; the stages ran" 'grep -q "^| build | [0-9]* |" $T/first.md && grep -q "^| stub boot | [0-9]* |" $T/first.md && grep -q "^| link | ok | ran | 3.5 | compile cache 9 hits, 1 misses |" $T/first.md && grep -q "^| compile | ok | ran | 3.5 | 2 units compiled now |" $T/first.md'
 ok "sidecar fnvnx-bootloop/1" 'python3 -c "import json,sys; j=json.load(open(sys.argv[1])); assert j[\"schema\"]==\"fnvnx-bootloop/1\" and j[\"reached\"]==3 and j[\"of\"]==10 and j[\"cold\"] and \"stub boot\" in j[\"steps\"] and j[\"error\"] is None" $T/first.json'
 run second
