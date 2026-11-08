@@ -15,7 +15,8 @@ import bisect
 import struct
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ,
-                     UC_HOOK_CODE, UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
+                     UC_HOOK_CODE, UC_HOOK_INTR, UC_HOOK_INSN, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
+from unicorn.x86_const import UC_X86_INS_CPUID, UC_X86_REG_EBX
 from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, UC_X86_REG_EDX, UC_X86_REG_ECX,
                                UC_X86_REG_EBX, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_GDTR,
                                UC_X86_REG_FS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FPCW,
@@ -279,6 +280,8 @@ class X86Engine:
             world.EAX_TRACK.clear()
             hcode.append(uc.hook_add(UC_HOOK_CODE, self._on_eax, user_data=world.EAX_TRACK, begin=world.TEXT[0],
                                      end=world.TEXT[1] - 1))
+        if world.CPUID is not None:
+            hcode.append(uc.hook_add(UC_HOOK_INSN, self._on_cpuid, world.CPUID, 1, 0, UC_X86_INS_CPUID))
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
@@ -549,6 +552,20 @@ class X86Engine:
             return
         uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
         uc.reg_write(UC_X86_REG_EIP, retaddr)
+
+    @staticmethod
+    def _on_cpuid(uc, user):
+        """The oracle executes `cpuid`: recorded; with `perturb` answered by values other than the host model's
+        (every register a function of the leaf, so a second run shows what the stored bytes depend on)."""
+        user['seen'].append(uc.reg_read(UC_X86_REG_EIP))
+        mode = user.get('perturb')
+        if not mode:
+            return False
+        leaf = uc.reg_read(UC_X86_REG_EAX)
+        for n, reg in enumerate((UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX)):
+            # 'zero': a CPU that reports nothing (no feature bits); anything else: a value per leaf and register
+            uc.reg_write(reg, 0 if mode == 'zero' else (leaf * 0x9e3779b1 + 0x5bd1e995 * (n + 1)) & 0xffffffff)
+        return True
 
     def _on_wild(self, uc, address, size, user):
         """Execution reached memory that holds no code: an indirect call through a planted pointer."""

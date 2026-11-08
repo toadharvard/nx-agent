@@ -390,6 +390,43 @@ def image_vftables():
     return _VFT
 
 
+def cpuid_dependent(pair, case, div, max_steps):
+    """(difffuzz-20, args class, cpuid-env) The addresses of the `cpuid` instructions the oracle executes when every
+    differing byte of the divergence is one whose oracle value depends on the CPU: replayed with the cpuid answers
+    changed, each of those bytes (or the returned value) changes on the oracle. CPUID has no AArch64 equivalent; the
+    port answers with the fixed values of shim/include/fnvnx_asm.h (docs/ASM.md), so the bytes stored from cpuid
+    results differ from the host model's by design. [] when the oracle runs no cpuid or a differing byte does not
+    depend on it."""
+    kind = div.get('kind')
+    if kind == 'mem-write':
+        try:
+            addrs = {int(a, 16) for a in div.get('addrs') or ()}
+        except ValueError:
+            return []
+        if not addrs or len(addrs) != div.get('ndiff'):
+            return []
+    elif kind != 'return':
+        return []
+    world.CPUID = {'seen': [], 'perturb': False}
+    runs = []
+    try:
+        rx0, _, _ = pair.run(case, max_steps)
+        seen = sorted(set(world.CPUID['seen']))
+        if not seen:
+            return []
+        for mode in ('rand', 'zero'):
+            world.CPUID = {'seen': [], 'perturb': mode}
+            runs.append(pair.run(case, max_steps)[0])
+    finally:
+        world.CPUID = None
+    if kind == 'return':
+        return seen if any(r.ret != rx0.ret for r in runs) else []
+    changed = set()
+    for r in runs:
+        changed |= {a for a in set(rx0.writes) | set(r.writes) if rx0.writes.get(a) != r.writes.get(a)}
+    return seen if addrs <= changed else []
+
+
 def oracle_vcall(pair, case, max_steps):
     """The oracle faulted on an indirect call through a fuzzed object (loading its vptr or slot, or calling the
     loaded address) that the native code never makes (GCC devirtualised it, or the call is on a path it does not
@@ -733,6 +770,11 @@ def hint(pair, target, case, div, fn, max_steps):
                 return h
             if pair is not None and any(m.startswith('f') for m in mn) and x87_probes(pair, case, div, max_steps, h):
                 return h
+    if pair is not None and k in ('mem-write', 'return'):
+        cp = cpuid_dependent(pair, case, div, max_steps)
+        h['_runs'] += 2
+        if cp:
+            h['cause'] = 'cpuid-env'; h['cpuid'] = ['%08x' % a for a in cp]; return h
     # bool representation probe: a byte that is neither 0 nor 1 read as bool (MSVC tests the whole byte, GCC may
     # test bit 0 only): set each such input byte to 1
     # S1-rules: only a byte the MSVC code reads by itself (a 1-byte access at that address, no wider access over it)

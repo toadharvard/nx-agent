@@ -506,7 +506,11 @@ class Arm64Engine:
         r.calls[-1].addr = address
         if world.STUB_OUT:
             self._zero_unwritten(uc, case, [r.calls[-1].args[i] for i in range(8)] + [r.calls[-1].x8])
-        if libcalls.noreturn_a64(name) or (name is None and target in libcalls.NORETURN_X86):
+        # (difffuzz-20, args class) a platform shim standing for a noreturn exe function ends the run as well:
+        # `fnvnx_xlength_error` is the native of std::_Xlen 0x00ec30b0 (it throws), a named stub whose original
+        # address maps to the exe function
+        if libcalls.noreturn_a64(name) or (target is not None and target in libcalls.NORETURN_X86 and
+                                           (name is None or address >= a64image.NAMED_STUB)):
             r.noreturn = name or libcalls.NORETURN_X86[target]   # never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
             return
