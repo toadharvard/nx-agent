@@ -16,6 +16,7 @@ import coffobj
 import a64image
 import conv as convmod
 import runner
+import world
 import libcalls
 
 STUB_ADDR = re.compile(r'^__fnv(?:nx_br)?_([0-9a-f]{8})')
@@ -671,4 +672,76 @@ class UnitCache:
         pin.update(self.pinned(source, orig_addr))
         for v, b in getattr(t, 'vt_pins', {}).items():
             pin[v] = b               # the exe's slot words win over a unit's recovered copy of the vftable
-        return runner.Pair(t, pin), t
+        p = runner.Pair(t, pin)
+        if t.custom_cc:
+            self.calibrate_custom(p, t)
+        return p, t
+
+    def calibrate_custom(self, pair, t):
+        """calibrate_custom (module function) with the data-window globals the oracle function refers to."""
+        fn = self.x86_unit(t.source, t.orig_addr).funcs[t.orig_addr]
+        pinned = set(pair.pinned)
+        globals_ = sorted({tg for _, k, tg, _ in fn['relocs'] if tg is not None and
+                           world.WINDOW[0] <= tg < world.WINDOW[1] and tg not in pinned})
+        calibrate_custom(pair, t, globals_)
+
+
+CALIB_CASES = 8
+CALIB_MAX = 24
+
+
+def calibrate_custom(pair, t, globals_=()):
+    """Which declared parameter each custom register carries (difffuzz-20, F1b). MSVC's whole-program
+    convention does not pass them in declared order: 0x00d58d40 (base, index) takes the index in eax, 0x00e5b130
+    (object, flags) the object in ecx and the flags in eax, so the declared-order pairing gave the oracle the
+    other argument and the records read as oracle-only near-null faults or other results. Every injective
+    pairing of the custom registers with the register-eligible parameters runs the same CALIB_CASES fresh cases
+    (fixed seed); a pairing other than the declared order is kept only when it leaves at most one case with a
+    divergence and does better than the declared order (a weaker lead is no evidence: a register read after
+    the entry path, or another difference, spoils every pairing). Nothing of the case or the native side
+    changes, and what the runs learned (followed code, pops) is dropped. t.custom_calib records {pairing:
+    score} (a pruned pairing scores below the bar)."""
+    import itertools
+    import fuzz
+    cv = t.conv
+    regs = list(getattr(cv, 'custom_regs', None) or t.custom_cc)
+    elig = cv.register_eligible()
+    if not regs or len(elig) < len(regs):
+        return
+    cands = list(itertools.permutations(elig, len(regs)))
+    if len(cands) < 2 or len(cands) > CALIB_MAX:
+        return
+    gen = fuzz.Gen(t, globals_, t.orig_addr ^ 0x5ca1ab1e)
+    cases = [gen.fresh() for _ in range(CALIB_CASES)]
+    saved = (dict(t.x86_code), dict(pair.pinned), dict(pair.pops), set(pair.pops_tried), pair.adapted)
+    declared = cands[0]                     # permutations() starts with the declared order
+    scores = {}
+    need = CALIB_CASES - 1
+    for cand in cands:
+        cv.with_registers(regs, dict(zip(cand, regs)))
+        n = bad = 0
+        for c in cases:
+            try:
+                _, _, d = pair.run(c)
+            except Exception:  # noqa: BLE001
+                d = True
+            n += not d
+            bad += bool(d)
+            if cand != declared and bad > CALIB_CASES - need:
+                break                       # cannot reach the bar any more
+        scores[cand] = n
+        if cand == declared:
+            if n == CALIB_CASES:
+                break                       # the declared order agrees on every case
+            need = max(need, n + 1)
+    best = max(scores, key=lambda c: (scores[c], c == declared))
+    if best != declared and scores[best] < need:
+        best = declared
+    cv.with_registers(regs, dict(zip(best, regs)))
+    t.x86_code.clear(); t.x86_code.update(saved[0])
+    pair.pinned.clear(); pair.pinned.update(saved[1])
+    pair.pops.clear(); pair.pops.update(saved[2])
+    pair.pops_tried = saved[3]; pair.adapted = saved[4]
+    pair.xe = pair.ae = None
+    t.custom_cc = list(cv.custom)
+    t.custom_calib = {','.join('%s=%s' % (r, lab) for lab, r in zip(c, regs)): s for c, s in scores.items()}

@@ -123,19 +123,38 @@ class Conv:
         d = '%s -> %s' % (', '.join(map(repr, self.vals)), repr(self.ret) if self.ret else 'void')
         return d + (' [x86 regs %s]' % ','.join(self.custom) if getattr(self, 'custom', None) else '')
 
-    def with_registers(self, regs):
+    def register_eligible(self):
+        """Labels of the declared values a custom register can carry (integers/pointers of at most 4 bytes on the
+        stack in the declared convention), in declared order."""
+        out = []
+        for lab, space, o, size in getattr(self, 'x86_declared', self.x86):
+            v = next((x for x in self.vals if x.label == lab), None)
+            if space not in ('ecx', 'edx') and v is not None and v.kind == 'gpr' and v.size <= 4:
+                out.append(lab)
+        return out
+
+    def with_registers(self, regs, assign=None):
         """MSVC whole-program custom convention: the oracle also takes arguments in `regs` (registers it reads on
         entry that the declared convention does not pass). Model: register-eligible values (integers/pointers of at
         most 4 bytes, `this` first) take those registers in declared order, everything else keeps the stack in
-        declared order. AArch64 placement is unchanged (GCC compiled the declared signature)."""
+        declared order. AArch64 placement is unchanged (GCC compiled the declared signature). `assign`
+        ({label: register}) replaces the declared-order pairing (engine.calibrate_custom, difffuzz-20)."""
         regs = list(regs)
+        if not hasattr(self, 'x86_declared'):
+            self.x86_declared = list(self.x86)
+        self.custom_regs = list(regs)
         out, off, used = [], 0, []
-        for lab, space, o, size in self.x86:
+        for lab, space, o, size in self.x86_declared:
             v = next((x for x in self.vals if x.label == lab), None)
             if space in ('ecx', 'edx'):
                 out.append((lab, space, 0, size))
                 continue
-            if regs and v is not None and v.kind == 'gpr' and v.size <= 4:
+            if assign is not None:
+                if lab in assign:
+                    used.append(assign[lab])
+                    out.append((lab, assign[lab], 0, size))
+                    continue
+            elif regs and v is not None and v.kind == 'gpr' and v.size <= 4:
                 used.append(regs.pop(0))
                 out.append((lab, used[-1], 0, size))
                 continue
