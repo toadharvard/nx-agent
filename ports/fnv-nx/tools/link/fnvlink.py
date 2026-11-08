@@ -144,6 +144,16 @@ NEWDEL_ANY = re.compile(r'^_Z(?:n[wa]|d[la])')
 # the decomp's unit-local namespaces (`namespace fnv_00650ea0 { struct NiFixedString ... }`): a copy of a class
 UNIT_NS = re.compile(r'^fnv_[0-9a-f]{8}$')
 UNIT_NS_ANY = re.compile(r'\bfnv_[0-9a-f]{8}::')
+PTR_TARG = re.compile(r'\bfnv_[0-9a-f]{8}::[\w:]+\s*\*')
+
+
+def ptr_targ_copy(isig, dem):
+    """True for a member of a global class template whose only unit-local types are pointee types of pointer
+    arguments (`BSSimpleList<fnv_009bc470::InventoryStackRecord*>::~BSSimpleList`): the member's code does not depend
+    on the pointee, so the global instantiation's definition (`BSSimpleList<InventoryStackRecord*>`) is the same
+    function. A copy held by value (`NiPointer<fnv_a::T>`) is not: its code reads the pointee."""
+    return bool(isig.variant) and not isig.params and UNIT_NS_ANY.search(dem) is not None and \
+        UNIT_NS_ANY.search(PTR_TARG.sub('', dem)) is None
 # a class's own operator new / new[] / delete / delete[] (sized or not): the global form it stands for, read from
 # the demangled name (the mangled operator codes nw/na/dl/da cannot be told from a name ending in those letters)
 MEMBER_NEWDEL_GLOBAL = {('operator new', 1): '_Znwj', ('operator new[]', 1): '_Znaj',
@@ -849,7 +859,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     stats['colliding_refs_by_address'] += 1
                 if tier == 'gref/ident':
                     stats['ident_' + cls] += 1
-                if cls == 'unresolved' and isig.qual and UNIT_NS.match(isig.qual[0]) and it[un]:
+                if cls == 'unresolved' and isig.qual and it[un] and (UNIT_NS.match(isig.qual[0]) or
+                                                                     ptr_targ_copy(isig, it[un])):
                     # a unit-local namespaced copy of a class (`fnv_00650ea0::NiFixedString`, S13 J-0114): bound like
                     # the global class - by its names in units.json without the namespace, else to the native
                     # definition of the global name
@@ -862,10 +873,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     else:
                         if native_text is None:
                             native_text = {}
+                            native_variant = {}
                             for n_ in sorted(anydef):
                                 if it[n_]:
                                     native_text.setdefault(it[n_], n_)
+                                    v_ = itanium(n_).variant
+                                    if v_:
+                                        native_variant.setdefault((it[n_], v_), n_)
                         g_ = native_text.get(st_)
+                        if g_ and isig.variant and not UNIT_NS.match(isig.qual[0]):
+                            g_ = native_variant.get((st_, isig.variant))   # a constructor / destructor of that variant
                         if g_ in colliding:   # S5 class 2: the unrelated body's name is undefined after apply
                             cls, tier, addr = 'addr', 'ns/colliding', colliding[g_]
                             stats['colliding_refs_by_address'] += 1
