@@ -6079,9 +6079,30 @@ POST.append(d22_write_applied)
 # - the receiver is `this` (the object of the enclosing member function: a C++ object of the game);
 # - the enclosing class is not COM-shaped (D22-COM: a __stdcall / HRESULT virtual, QueryInterface / AddRef /
 #   Release, an SDK interface name; COM vtables have no destructor slot), as far as the file defines it;
-# - k > 0 (slot 0 is the deleting destructor: a call of it needs FNVNX_D22_CALL's form; counted RAWVT1-SLOT0).
+# - k > 0 (slot 0 is the deleting destructor: a call of it needs FNVNX_D22_CALL's form; counted RAWVT1-SLOT0);
+# - the class is not one whose table the link keeps in exe order (S2-bodies' exe_order_classes.tsv, read from
+#   FNVNX_EXE_ORDER or under FNVNX_RECON; RAWVT1-EXEORDER).
 RAWVT1_RX = re.compile(r'(\(\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*this\s*\)|'
                        r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*this)\s*\)\s*\[\s*)([0-9]+|0[xX][0-9a-fA-F]+)(\s*\])')
+
+def _rawvt_exe_order():
+    """{class simple name} whose native table the link keeps in exe order (S2-bodies' out/exe_order_classes.tsv:
+    class, vftable, reason), from FNVNX_EXE_ORDER or any exe_order_classes.tsv under FNVNX_RECON; cached on prepare"""
+    got = prepare.__dict__.get('_fnvnx_exe_order')
+    if got is not None: return got
+    files = [os.environ['FNVNX_EXE_ORDER']] if os.environ.get('FNVNX_EXE_ORDER') else []
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'exe_order_classes.tsv') for dp, _, ns in os.walk(top) if 'exe_order_classes.tsv' in ns)
+    got = set()
+    for f in files:
+        try:
+            for line in open(f):
+                if line.startswith('#') or not line.strip(): continue
+                got.add(line.split('\t')[0].strip().split('::')[-1])
+        except OSError: continue
+    prepare.__dict__['_fnvnx_exe_order'] = got
+    return got
 
 def r_raw_vtable_slots(path, text, stats):
     """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above)."""
@@ -6107,6 +6128,7 @@ def r_raw_vtable_slots(path, text, stats):
         if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
             stats['RAWVT1-COM'] += 1; continue
         if k == 0: stats['RAWVT1-SLOT0'] += 1; continue
+        if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
         edits.append((m.start(2), m.end(2), 'FNVNX_D26_SLOT(%s)' % text[m.start(2):m.end(2)]))
     for a, b, rep in sorted(edits, reverse=True):
         text = text[:a] + rep + text[b:]
