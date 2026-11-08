@@ -74,9 +74,9 @@ def build_code():
     """-> ({address: bytes}, {name: address})."""
     A = {'new': 0x401000, 'foo': 0x401010, 'qux': 0x401020, 'bar': 0x401030, 'gar': 0x401040, 'har': 0x401050,
          'baz': 0x401060, 'fine': 0x401070, 'other': 0x401080, 'c1': 0x401100, 'c2': 0x401140, 'c3': 0x401180,
-         'bazf': 0x401200, 'finef': 0x401220, 'c4': 0x401300}
+         'bazf': 0x401200, 'finef': 0x401220, 'c4': 0x401300, 'kar': 0x401090, 'lar': 0x4010a0, 'c5': 0x401400}
     code = {A['new']: b'\xc3'}
-    for k in ('foo', 'qux', 'bar', 'gar', 'har', 'baz', 'fine', 'other'):
+    for k in ('foo', 'qux', 'bar', 'gar', 'har', 'baz', 'fine', 'other', 'kar', 'lar'):
         code[A[k]] = b'\x8b\xc1\xc3'                       # mov eax, ecx; ret
     # Foo: push 0x20; call new; add esp,4; mov ecx,eax; call Foo::Foo; ret
     c = b'\x68\x20\0\0\0'
@@ -108,6 +108,13 @@ def build_code():
     c += call(A['c4'] + len(c), A['foo'])
     c += b'\xc7\x06' + struct.pack('<I', RDATA_VA) + b'\xc3'                    # mov dword ptr [esi], vftable; ret
     code[A['c4']] = c
+    # Kar: a function-local static with MSVC's init guard right after it; Lar: bound to the exe image (aliases.ld)
+    c = b'\xa0' + struct.pack('<I', DATA_VA + 0xa8) + b'\xa8\x01'                  # mov al,[guard]; test al,1
+    c += b'\xb9' + struct.pack('<I', DATA_VA + 0xa0)
+    c += call(A['c5'] + len(c), A['kar'])
+    c += b'\xb9' + struct.pack('<I', DATA_VA + 0xc0)
+    c += call(A['c5'] + len(c), A['lar']) + b'\xc3'
+    code[A['c5']] = c
     code[A['bazf']] = b'\x8b\x41\x40\xc3'                   # mov eax, [ecx+0x40]; ret
     code[A['finef']] = b'\x8b\x41\x04\xc3'                  # mov eax, [ecx+4]; ret
     return code, A
@@ -136,21 +143,26 @@ def make_link(root, A):
     rows = [('foo', 'F', '_ZN3FooC1Ev'), ('qux', 'F', '_ZN2ns3QuxC1Ev'), ('bar', 'C', '_ZN3BarC1Ev'),
             ('gar', 'F', '_ZN3GarC1Ev'), ('har', 'F', '_ZN3HarC1Ev'), ('baz', 'F', '_ZN3BazC1Ev'),
             ('fine', 'F', '_ZN4FineC1Ev'), ('other', 'F', '_Z5otherv'), ('bazf', 'F', '_ZN3Baz1fEv'),
-            ('finef', 'F', '_ZN4Fine1fEv'), ('new', 'F', '_Znwj')]
+            ('finef', 'F', '_ZN4Fine1fEv'), ('new', 'F', '_Znwj'), ('kar', 'F', '_ZN3KarC1Ev'),
+            ('lar', 'F', '_ZN3LarC1Ev')]
     with open(os.path.join(root, 'out', 'addrmap.tsv'), 'w') as f:
         f.write('# fnvnx-addrmap 1\n# address\tkind\tlink_symbol\tnative_symbol\tobject\tnote\n')
         for k, kind, sym in rows:
             f.write('%08x\t%s\t__fnv_%08x\t%s\tu.cpp.o\t\t\t\t\n' % (A[k], kind, A[k], sym))
+        f.write('%08x\tF\t__fnv_%08x\t_Z2c4v\tsrc_u.cpp.o\t\t\t\t\n' % (A['c4'], A['c4']))   # a unit in the tree
+    with open(os.path.join(root, 'out', 'aliases.ld'), 'w') as f:
+        f.write('__fnv_%08x = 0x%08x;\n' % (DATA_VA + 0xc0, DATA_VA + 0xc0))
     with open(os.path.join(root, 'out', 'refs.tsv'), 'w') as f:
         f.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
         for off in (0x00, 0x20, 0x60, 0x80):      # the data symbols (neighbours): Bar 0x20, Gar 0x40, Har 0x20
             f.write('src/u.cpp\tDAT_%08x\tdata\tunit/cname\t%08x\t__fnv_%08x\t?x@@3HA\n' % (
                 DATA_VA + off, DATA_VA + off, DATA_VA + off))
         # a constructor no object defines, reached only through refs.tsv (the StandardLibrarySingletonObject case)
+        f.write('src/u.cpp\tDAT_%08x\tdata\tunit/cname\t%08x\t__fnv_%08x\t?x@@3HA\n' % (DATA_VA + 0xc0, DATA_VA + 0xc0, DATA_VA + 0xc0))
         f.write('src/u.cpp\t_ZN4FineC2Ev\tcode\tunit/exact\t%08x\t__fnv_%08x\t?x\n' % (A['fine'], A['fine']))
     with open(os.path.join(root, 'out', 'layouts.tsv'), 'w') as f:
         f.write('#unit\ttype\tsize\talign\ttrivial\tempty\tclass\tkey\tpod\trule\n')
-        for t, sz in (('Bar', 32), ('Gar', 4), ('Har', 4)):
+        for t, sz in (('Kar', 4), ('Lar', 4), ('Bar', 32), ('Gar', 4), ('Har', 4)):
             f.write('u.cpp\t%s\t%d\t4\t1\t0\tG1\tk\t0\tpod2\n' % (t, sz))
         f.write('other.cpp\tBar\t4\t4\t1\t0\tG1\tk\t0\tpod2\n')   # another unit's own `Bar`: not this class
 
@@ -180,11 +192,11 @@ def main():
         by = {(r[0], r[4]): r for r in rows}
         for r in rows:
             print('   ', '\t'.join(r))
-        r = by.get(('Foo', 'new'))
-        check(r and r[3] == '32' and r[1] == str(d['Foo']) and r[2] == 'dwarf' and r[7] == 'mismatch',
-              'Foo: new 0x20 against native %s: mismatch' % (r and r[1]))
-        check(by[('Foo', 'new')][5] == '1', 'Foo: the call inside an inlined derived constructor is not evidence')
-        r = by.get(('ns::Qux', 'new'))
+        r = by.get(('Foo', 'new-ctor'))
+        check(r and r[3] == '32' and r[1] == str(d['Foo']) and r[2] == 'dwarf' and r[7] == 'suspect',
+              'Foo: new 0x20 against native %s, no source: only suspect' % (r and r[1]))
+        check(by[('Foo', 'new-ctor')][5] == '1', 'Foo: the call inside an inlined derived constructor is not evidence')
+        r = by.get(('ns::Qux', 'new-ctor'))
         check(r and r[3] == '16' and r[1] == '16' and r[7] == 'ok' and r[5] == '1',
               'ns::Qux: new through an ebp slot, 16 = 16: ok (the decoy new is no evidence)')
         r = by.get(('Bar', 'static'))
@@ -200,6 +212,20 @@ def main():
         check(r and r[3] == '8' and r[1] == '' and r[7] == 'unknown',
               'Fine: constructor known only from refs.tsv, max offset 8, native size unknown (%s)' % (r and r[7]))
         check(rows[0][7] == 'mismatch', 'mismatches sort first')
+        r = by.get(('Kar', 'static'))
+        check(r and r[3] == '8' and r[1] == '4' and r[7] == 'mismatch',
+              'Kar: the extent ends at the init guard (8), native 4: mismatch (%s)' % (r and r[3:8]))
+        check(('Lar', 'static') not in by, 'Lar: bound to the exe image by aliases.ld: no static row')
+        # a tree: the function at 0x401300 allocates 0x30 bytes; its source says `new Narrow` (4 bytes)
+        tree = os.path.join(tmp, 'tree')
+        os.makedirs(os.path.join(tree, 'src'))
+        open(os.path.join(tree, 'src', 'u.cpp'), 'w').write(
+            'struct Narrow { char b[4]; };\n// @fnv 0x00401300\nvoid c4() { new Narrow; }\n')
+        rows = seamlayout.check_layout(root, exe, tree=tree, jobs=1)
+        by2 = {(r[0], r[4]): r for r in rows}
+        r = by2.get(('Narrow', 'new'))
+        check(r and r[1] == '4' and r[3] == '48' and r[7] == 'mismatch' and 'src/u.cpp' in r[9],
+              'tree: `new Narrow` in the source of 0x401300 against push 0x30: mismatch in src/u.cpp (%s)' % (r,))
         out = os.path.join(tmp, 'seams_layout.tsv')
         rc = subprocess.run([sys.executable, os.path.join(HERE, 'seamlayout.py'), root, exe, '-o', out, '--no-probe'],
                             capture_output=True, text=True)

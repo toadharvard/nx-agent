@@ -32,6 +32,10 @@ def check(cond, what):
 
 
 A0, A1, A2, AF = 0x00401000, 0x00401010, 0x00401020, 0x00401200   # ??_G, f, g, a stdcall free function
+AU = 0x00401100   # a ??_G no unit compiles (W45: ZeroOverheadHeap's 0x00aa77e0)
+# its MSVC shape: call ~C (A1); test byte [esp+8], 1; je; call operator delete (A2); ret 4
+SDD_CALLS = (b'\xe8' + (A1 - (AU + 5) & 0xffffffff).to_bytes(4, 'little') + b'\xf6\x44\x24\x08\x01\x74\x05' +
+             b'\xe8' + (A2 - (AU + 17) & 0xffffffff).to_bytes(4, 'little') + b'\xc2\x04\x00')
 OTHER = t0.OTHER
 
 
@@ -51,6 +55,9 @@ def words(bridges, z):
 
 
 def main():
+    os.environ['FNVNX_VTFILL'] = '0'   # the builder's own checks; VTFILL's are in test_d0slot's VTFILL section
+    # the heuristics' own checks: classlayout (the exe's decision, checked at the end) off
+    os.environ['FNVNX_CLASSLAYOUT'] = '0'
     tmp = tempfile.mkdtemp(prefix='d26t-')
     try:
         if not shutil.which('aarch64-linux-gnu-as'):
@@ -67,7 +74,7 @@ def main():
         exev = {V['A']: exevft.Vft('.?AVFoo@@', 0, [], [A0, A1, A2]),        # call-only placeholder v00
                 V['B']: exevft.Vft('.?AVAlloc@@', 0, [], [A0, AF, A2, AF]),   # named slot 0, free fn in slots 1 and 3
                 V['C']: exevft.Vft('.?AVUsed@@', 0, [], [A0, A1, A2]),       # placeholder, called by name
-                V['D']: exevft.Vft('.?AVPlain@@', 0, [], [A0, A1, A2]),      # named slot 0, nothing says minus-one
+                V['D']: exevft.Vft('.?AVPlain@@', 0, [], [A1, A1, A2]),      # named slot 0, no deleting dtor in the exe (D26DS)
                 V['E']: exevft.Vft('.?AVPair@@', 0, [], [A0, A1, A2]),       # a real pair: already right
                 V['F']: exevft.Vft('.?AVFlag@@', 0, [], [A0, A1, A2]),       # slot 0 the single flags-0 stub
                 V['G']: exevft.Vft('.?AVThingCO@@', 0, [], [A1, A1, A2, A2]),  # COM: QueryInterface / AddRef / Release
@@ -159,6 +166,29 @@ def main():
         finally:
             del os.environ['FNVNX_D26T']
         check('zzvtext__ZTV3Foo' not in br0, 'FNVNX_D26T=0 turns the rebuild off')
+        # W45 (link 8111f58a): a call-only table whose exe slot 0 is a deleting destructor no unit compiles (no native
+        # definition) is still minus-one: D1 / D0 become traps for the exe address and exe slot k lands at k + 1, so the
+        # heap's Allocate (exe slot 2) is native slot 3, where MemoryManager FUN_00aa3e40 calls it
+        exu = {V['A']: exevft.Vft('.?AVZoh@@', 0, [], [AU, A1, A2, A1])}
+        gu = {'_ZTV3Zoh': (t0.asm_group(tmp, 'u', '_ZTV3Zoh', ['_ZN3Zoh3v00Ev', '_ZN3Zoh2v1Ev', '_ZN3Zoh2v2Ev']), V['A'])}
+        exe_u = os.path.join(tmp, 'U.exe')   # its own image: the loose exevft.deleting_dtor of A1 / A2 would see AU's ret 4
+        tx.make_pe(exe_u, lambda rd: None, {A0: t0.SDD, A1: OTHER, A2: OTHER, AU: SDD_CALLS})
+        stu, bru, tru = run(tmp, exe_u, gu, exu, native)
+        w = words(bru, '_ZTV3Zoh') if 'zzvtext__ZTV3Zoh' in bru else []
+        trap_ok = len(w) == 7 and w[2] != w[3] and all(x.startswith('__fnvnx_vtrap_') and x in tru and
+                                                       'exe 0x00401100' in tru[x][0] for x in w[2:4])
+        check(trap_ok and w[4:] == ['__fnv_00401010', '__fnv_00401020', '__fnv_00401010'] and
+              stu['slot0-dtor-not-compiled'] == 1 and stu['d26-slot0-not-a-destructor'] == 0,
+              'an uncompiled exe ??_G at slot 0: D1/D0 traps, then exe slot k at k + 1: %s' % w)
+        os.environ['FNVNX_D26U'] = '0'
+        try:
+            stu0, _, _ = run(tmp, exe_u, gu, exu, native)
+        finally:
+            del os.environ['FNVNX_D26U']
+        check(stu0['d26-slot0-not-a-destructor'] == 1 and stu0['slot0-dtor-not-compiled'] == 0,
+              'FNVNX_D26U=0: the uncompiled ??_G leaves the table in the exe order, as before')
+        br.update(bru)
+        traps.update(tru)
         text = ''.join(br[k] for k in sorted(br) if isinstance(br[k], str))
         src = os.path.join(tmp, 'all.S')
         open(src, 'w').write('    .text\n' + text + fnvlink.emit_traps(traps))
@@ -199,6 +229,30 @@ def main():
             'b.cpp\tFoo\tv00\tcallonly\t\n')
         check(fnvlink.load_d22_applied(tr) == {0x010a2528} and fnvlink.load_d22_applied(None) == set(),
               'load_d22_applied reads the listed rows of build/d22_applied.tsv')
+        # classlayout (orchestrator 12:10): the exe's decision first; a slot 0 named by code stays exe order
+        # (prepare keeps such a declaration: D22-USED), a COM class by its slot names stays com
+        os.environ['FNVNX_CLASSLAYOUT'] = '1'
+        outc = tempfile.mkdtemp(dir=tmp)
+        stc, brc, _ = run(tmp, exe, g, exev, native, listed={V['B']}, called={'_ZN4Used3v00Ev'}, defined=dfn,
+                          per_obj=fl0, outdir=outc, alt={V['A']: [('_ZTV12FUN_00bb83d0', 8, 'x.o', 'primary')]})
+        wf = words(brc, '_ZTV3Foo')
+        check(wf[2:4] == ['__fnv_00401000_D1', '__fnv_00401000'] and stc['classlayout-minus-one'] >= 1,
+              'classlayout: a table whose exe slot 0 is the deleting dtor is minus-one: %s %s' % (wf, dict(stc)))
+        check('zzvtext__ZTV4Used' not in brc and stc['classlayout-d22-used'] == 1 and
+              ('zzvtext__ZTV7ThingCO' not in brc or words(brc, '_ZTV7ThingCO')[2] == '_ZN7ThingCO14QueryInterfaceEv'),
+              'classlayout: a slot 0 named by code stays exe order, a COM interface stays as it is: %s' % dict(stc))
+        check(os.path.isfile(os.path.join(outc, 'classlayout.tsv')), 'classlayout: out/classlayout.tsv is written')
+        os.environ['FNVNX_CLASSLAYOUT'] = '0'
+        # D26DS (orchestrator 11:49): a defined slot 0 that is the exe's deleting destructor goes minus-one
+        nm = ['_ZN18FUN_00cc8da0_Class12FUN_00cc8da0Eb', '_ZN1X1fEv']
+        c = lambda dd: fnvlink.d26_classify('_ZTV1X', 0x010ca06c, nm, None, set(), set(), {nm[0]}, dd)
+        check(c(True) == 'd26-defined-deldtor' and c(False) == 'defined-slot0',
+              'd26_classify: defined slot 0 + exe deleting dtor -> d26-defined-deldtor, else defined-slot0')
+        os.environ['FNVNX_D26DS'] = '0'
+        check(c(True) == 'defined-slot0', 'd26_classify: FNVNX_D26DS=0 keeps defined-slot0')
+        del os.environ['FNVNX_D26DS']
+        check(fnvlink.d26_classify('_ZTV1X', 1, nm, None, set(), {nm[0]}, {nm[0]}, True) == 'd22-used',
+              'd26_classify: a slot 0 named by code stays d22-used')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('%d failed' % len(FAILS))

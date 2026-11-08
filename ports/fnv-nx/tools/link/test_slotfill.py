@@ -196,6 +196,7 @@ def build_exe(rd, where):
 
 
 def main():
+    os.environ['FNVNX_VTFILL'] = '0'   # the builder's own checks; VTFILL's are in test_d0slot's VTFILL section
     with tempfile.TemporaryDirectory() as t:
         t = os.environ.get("FNVNX_TEST_KEEP") or t
         exe = os.path.join(t, 'Synthetic.exe')
@@ -415,7 +416,10 @@ def main():
               '(with or without the exe): %s / %s' % (rc_, rc0))
         zbc = vtables.Obj(os.path.join(fixed, 'zz_bridges.o'))
         ce = zbc.ents('_ZTV2Vc') if '_ZTV2Vc' in zbc.defs else []
-        check(len(ce) >= 5 and ce[4].sym == '__fnv_004011a8' and zbc.bind('_ZTV2Vc') == 'global',
+        # D26DS: the fixture's exe slot 0 is a deleting destructor that the unit defines, so the copy is minus-one
+        # (D1 / D0 = the flags stubs) and exe slot 2 is native slot 3 (word 5); in the exe's order it is word 4
+        ci = 5 if len(ce) > 3 and (ce[2].sym or '').startswith('__fnvnx_vflag_') else 4
+        check(len(ce) > ci and ce[ci].sym == '__fnv_004011a8' and zbc.bind('_ZTV2Vc') == 'global',
               'W20 (a) Vc\'s vtable: a strong copy whose hc slot holds the exe\'s __fnv_004011a8: %s' % (ce,))
         cf = [r for r in fill if r[2] == '_ZN2Vc2hcEv']
         check(len(cf) == 1 and cf[0][4] == '__fnv_004011a8' and cf[0][5].startswith('per slot (exe vftable') and
@@ -428,7 +432,8 @@ def main():
               'decides the symbol, without the exe the name keeps its address: %s / %s' % (rw, rw0))
         zbw = vtables.Obj(os.path.join(fixed, 'zz_bridges.o'))
         we = zbw.ents('_ZTV2Wd') if '_ZTV2Wd' in zbw.defs else []
-        check(len(we) >= 5 and we[4].sym == '__fnv_00401198' and zbw.bind('_ZTV2Wd') == 'global',
+        wi = 5 if len(we) > 3 and (we[2].sym or '').startswith('__fnvnx_vflag_') else 4   # D26DS, as for Vc
+        check(len(we) > wi and we[wi].sym == '__fnv_00401198' and zbw.bind('_ZTV2Wd') == 'global',
               'W32 Wd\'s vtable: a strong copy whose hw slot holds the exe Wd\'s override __fnv_00401198: %s' % (we,))
         wb = vtables.Obj(os.path.join(fixed, 'src_a.cpp.o'))
         wh = wb.ents('_ZTV2Wh') if '_ZTV2Wh' in wb.defs else []
