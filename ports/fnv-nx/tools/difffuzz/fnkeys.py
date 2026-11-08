@@ -58,6 +58,10 @@ import config
 # buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
 # read on a later path is a custom register, the oracle gets ST0 for a call the caller's unit declares float, and
 # native-zero-init / dtor-dead-store (by design) / thunk-binding relabel store-only divergences.
+# Uncls2: the leftovers get reruns that change one mechanism (all-zero garbage fill, equal results for adjacent calls of one callee,
+# 64-bit shift counts modulo 64, fsin/fcos/fsincos/fptan of an infinity giving the indefinite NaN, the native word in a planted vptr,
+# 4-aligned arguments for a pointer difference), a unit's pool copy of an unnamed vftable is compared with the exe's table, and a data
+# symbol the object keeps writable but the exe keeps read-only gets the exe's bytes pinned.
 # F-uncls: the garbage probe compares
 # the argument a call-args divergence names and probes random-background cases with the background pinned (an
 # uninitialised out-parameter of an intercepted callee is uninit-x86), pop learning tries the pushes right before a
@@ -73,6 +77,7 @@ import config
 # Virtual-call class (F2b): a call-target where the native called planted slot k and the oracle's call went to slot k+1, a unit function it ran as code (no call event), is vslot-shift (Pair.vslots_run on call-target too), and a native callee that sits in the native copy of a planted vftable at a slot whose exe function the oracle ran is native-vslot-differs.
 # Oracle-fault class: calls to proven effect-free exe functions (exeempty.py) are no divergence (oracle-empty-call), an oracle-only fault of a bare-ret native is native-empty-body, and calibrate_custom tries up to 120 pairings.
 # Small address classes: a stored pinned-literal address is compared by its pointee (literal-store), the canned result of a callee whose exe code returns its `this` or first pointer argument is that input (retsrc.py, canned-this), the address of a by-value aggregate parameter is its stack slot on the oracle and the hidden pointer natively, a hidden result buffer against a frame local is nrvo-elision (by design), and a jump into the native vtable region is a wild call.
+# Small address classes: a stored pinned-literal address is compared by its pointee (literal-store), the canned result of a callee whose exe code returns its `this` or first pointer argument is that input (retsrc.py, canned-this), the address of a by-value aggregate parameter is its stack slot on the oracle and the hidden pointer natively, a hidden result buffer against a frame local is nrvo-elision (by design), and a jump into the native vtable region is a wild call.# Pops class: the pop search fixes the unknown-pop call sites one at a time in run order (the count that takes the run farthest before a fault or a return outside the code, a clean balanced run to end), and `_pushes_before` counts a `sub esp, N` argument block.
 HARNESS = 'difffuzz-20'
 
 

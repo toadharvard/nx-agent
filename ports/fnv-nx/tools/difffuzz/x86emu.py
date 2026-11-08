@@ -264,6 +264,11 @@ class X86Engine:
             world.X87_CLAMP.update(n=0, addr=None, over=0, under=0)
             hfp = uc.hook_add(UC_HOOK_CODE, self._on_fp_clamp, user_data=world.X87_CLAMP, begin=world.TEXT[0],
                               end=world.TEXT[1] - 1)
+        if world.TRIG_INF:
+            hfp2 = uc.hook_add(UC_HOOK_CODE, self._on_trig_inf, user_data=None, begin=world.TEXT[0],
+                               end=world.TEXT[1] - 1)
+        else:
+            hfp2 = None
         start = start if start is not None else next(iter(self.text_funcs))
         esp0 = uc.reg_read(UC_X86_REG_ESP)
         # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
@@ -286,6 +291,8 @@ class X86Engine:
                 uc.hook_del(h)
             if hfp is not None:
                 uc.hook_del(hfp)
+            if hfp2 is not None:
+                uc.hook_del(hfp2)
             for h in hwild:
                 uc.hook_del(h)
             for h in hws:
@@ -361,6 +368,20 @@ class X86Engine:
             rec['n'] += 1
             if rec['addr'] is None:
                 rec['addr'] = address
+
+    def _on_trig_inf(self, uc, address, size, _):
+        """world.TRIG_INF: fsin / fcos / fsincos / fptan of an infinity is an invalid operation: with the exception
+        masked the x87 returns the real indefinite (a QNaN with the sign bit set). QEMU leaves the infinity in st0 and
+        sets C2 (as for an operand beyond 2**63): the probe makes st0 the indefinite before the instruction."""
+        if size != 2:
+            return
+        b = bytes(uc.mem_read(address, 2))
+        if b[0] != 0xd9 or b[1] not in (0xfb, 0xfe, 0xff, 0xf2):
+            return
+        top = (uc.reg_read(UC_X86_REG_FPSW) >> 11) & 7
+        mant, se = uc.reg_read(UC_X86_REG_FP0 + top)
+        if se & 0x7fff == 0x7fff and mant == 0x8000000000000000:
+            uc.reg_write(UC_X86_REG_FP0 + top, (0xc000000000000000, 0xffff))
 
     def _on_bg_read(self, uc, access, address, size, value, log):
         e = log.setdefault(address, [set(), None])
@@ -611,6 +632,8 @@ class X86Engine:
         if name in ('allshl', 'allshr'):         # edx:eax << / >> cl (MSVC: counts >= 64 give 0 / the sign)
             v = uc.reg_read(UC_X86_REG_EAX) | uc.reg_read(UC_X86_REG_EDX) << 32
             c = uc.reg_read(UC_X86_REG_ECX) & 0xff
+            if world.SHIFT_MASK:
+                c &= 63                     # probe: the AArch64 count (classify.hint, shift-count)
             if name == 'allshl':
                 v = 0 if c >= 64 else (v << (c & 31 if c < 32 else c)) & (2 ** 64 - 1)
             else:

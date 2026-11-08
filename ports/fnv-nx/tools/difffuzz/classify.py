@@ -464,6 +464,13 @@ def x87_probes(pair, case, div, max_steps, h):
             return True
     finally:
         world.X87_FLIP_WIDTH = False
+    world.TRIG_INF = True
+    try:
+        if rerun():
+            h['cause'] = 'x87-trig-inf'
+            return True
+    finally:
+        world.TRIG_INF = False
     for kind, cw in (('f32', 0x007f), ('f64', 0x027f)):
         rec = {'kind': kind}
         world.X87_CLAMP, world.X87_CW = rec, cw
@@ -779,6 +786,11 @@ def hint(pair, target, case, div, fn, max_steps):
         big = [lab for lab, b in case.args.items() if int.from_bytes(b[:4], 'little') & 0xffffffff >= 32]
         if big and hits:
             h['cause'] = 'shift-count'; h['args'] = big; return h
+    if k == 'call-count' and pair is not None:
+        # (uncls2) a call that only runs on garbage: the same uniform-fill probe (0x00a82d90)
+        c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=True)
+        if c:
+            h['cause'] = c; return h
     if k in ('call-target', 'call-count'):
         h['cause'] = 'call-flow'; return h
     if hits:
@@ -800,5 +812,122 @@ def hint(pair, target, case, div, fn, max_steps):
         h['_runs'] += 2
         if d:
             h['cause'] = 'layout-offset'; h['shift'] = d; return h
+    if k in ('return', 'mem-write', 'call-args') and pair is not None:
+        c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h)
+        if c:
+            h['cause'] = c; return h
     h['cause'] = 'unclassified'
     return h
+
+
+def pool_vftable_stores(rx, ra, pinned):
+    """(uncls2) Every byte the two machines store differently lies in a 4-byte word where the oracle stored the
+    synthetic pool address of a read-only section of its object (coffobj: a `$SG<n>` section symbol, here the
+    unit's own unnamed vftable) and the native stored an address of the exe whose first word is the first word of
+    that pool literal, a code address (0x006ad660: the oracle's constructors store 0x02f00000, the pool copy of
+    the table {0x006b3970, ...}; the native stores 0x0106ba58, where the exe's vftable begins with 0x006b3970)."""
+    import coffobj
+    exe = coffobj.exe_image()
+    if exe is None:
+        return False
+    diff = {a for a in set(rx.writes) | set(ra.writes) if rx.writes.get(a) != ra.writes.get(a)}
+    if not diff:
+        return False
+    for a in diff:
+        base = a & ~3
+        if any(rx.writes.get(base + i) is None or ra.writes.get(base + i) is None for i in range(4)):
+            return False
+        vx = struct.unpack('<I', bytes(rx.writes[base + i] for i in range(4)))[0]
+        va = struct.unpack('<I', bytes(ra.writes[base + i] for i in range(4)))[0]
+        lit = None
+        for pa, pb in pinned.items():
+            if pa <= vx < pa + max(len(pb), 1):
+                lit = pb[vx - pa:vx - pa + 4]
+        if lit is None or len(lit) < 4 or not coffobj.LITERAL_POOL <= vx < coffobj._POOL_NEXT or va & 3 or \
+                not world.TEXT[0] <= struct.unpack('<I', lit)[0] < world.TEXT[1]:
+            return False        # the pool literal must begin with a code address (a vftable's first slot)
+        try:
+            if bytes(exe.read(va, 4)) != lit:
+                return False
+        except Exception:  # noqa: BLE001
+            return False
+    return True
+
+
+def _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=False):
+    """(uncls2, difffuzz-20) What is left after every other probe: each one reruns the case with one mechanism changed
+    and names the cause only when the two machines then agree (`_benign`).
+      uninit-*       every garbage word 0 on both machines (world.UNIFORM): the outcome of a machine moves with the
+                     fill but not between two random fills (a bool test of an unwritten byte is 1 for 255 of 256
+                     fills, so the seed probe above saw nothing)
+      call-order     two adjacent calls of one callee that return the same value: the machines used the two results
+                     in swapped roles (C++ leaves the evaluation order of operands open)
+      shift-count    the 64-bit shift helpers take the count modulo 64 (world.SHIFT_MASK)
+      x87-trig-inf   fsin / fcos / fsincos / fptan of an infinity give the indefinite NaN (world.TRIG_INF)
+      vptr-bytes     the planted vptr word holds the native address point on the oracle too (world.VPTR_NATIVE): a
+                     byte or part of the vptr word that the code reads as data
+      ptrdiff-unaligned  a result that differs by the low two bits only, with every argument word 4-aligned
+                     (GCC folds (end - begin) / 4 * 4 to end - begin: UB for pointers that are not 4 apart)"""
+    def rerun(c=case):
+        _, _, d = pair.run(c, max_steps)
+        h['_runs'] += 1
+        return _benign(d)
+
+    def pinned_rets():
+        t = case.copy(); t.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+        return t
+    world.BG_SEED = case.seed if case.bg != 'zero' else None
+    try:
+        base = pinned_rets()
+        rx, ra, _ = pair.run(base, max_steps)
+        h['_runs'] += 1
+        world.UNIFORM = True
+        try:
+            rxu, rau, du = pair.run(base, max_steps)
+        finally:
+            world.UNIFORM = False
+        h['_runs'] += 1
+        if _benign(du):
+            mx, ma = _outcome(rxu) != _outcome(rx), _outcome(rau) != _outcome(ra)
+            if mx or ma:
+                return 'uninit-x86' if mx and not ma else 'uninit-arm' if ma and not mx else 'uninit-both'
+        if only_uniform:
+            return None
+        tx = [c.target for c in rx.calls]
+        for i in range(min(len(tx), len(base.rets)) - 1):
+            if tx[i] == tx[i + 1] and tx[i] >= 0 and base.rets[i] != base.rets[i + 1]:
+                # equal results in either value: only the roles the two machines gave them differ (one value alone
+                # could remove the divergence by moving a pointer, 0x00480000)
+                ta, tb = base.copy(), base.copy()
+                ta.rets[i + 1] = ta.rets[i]
+                tb.rets[i] = tb.rets[i + 1]
+                if rerun(ta) and rerun(tb):
+                    return 'call-order'
+        for flag, cause in (('SHIFT_MASK', 'shift-count'), ('TRIG_INF', 'x87-trig-inf')):
+            setattr(world, flag, True)
+            try:
+                if rerun(base):
+                    return cause
+            finally:
+                setattr(world, flag, False)
+        if div.get('kind') == 'mem-write' and pool_vftable_stores(rx, ra, pair.pinned):
+            return 'vptr-pool'
+        if case.vptrs:
+            world.VPTR_NATIVE = True
+            try:
+                if rerun(base):
+                    return 'vptr-bytes'
+            finally:
+                world.VPTR_NATIVE = False
+        if div.get('kind') == 'return' and mn & {'sar', 'shr', 'idiv', 'div'}:
+            bx, ba = bytes.fromhex(div.get('x86') or ''), bytes.fromhex(div.get('arm') or '')
+            if len(bx) == 4 == len(ba) and 0 < abs(int.from_bytes(bx, 'little') - int.from_bytes(ba, 'little')) < 4:
+                t = base.copy()
+                t.args = {l: b''.join((int.from_bytes(b[o:o + 4], 'little') & ~3).to_bytes(4, 'little')
+                                      for o in range(0, len(b) - 3, 4)) + b[len(b) // 4 * 4:]
+                          for l, b in base.args.items()}
+                if t.args != base.args and rerun(t):
+                    return 'ptrdiff-unaligned'
+    finally:
+        world.BG_SEED = None
+    return None

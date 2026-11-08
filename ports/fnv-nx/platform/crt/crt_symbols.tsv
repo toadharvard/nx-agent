@@ -124,6 +124,7 @@
 0x00ec78f1	cpplib	std::exception::exception(const char* const&)	n	11	491	fnvnx_exception_ctor_str
 0x00ec7944	cpplib	std::exception::exception(const exception&)	i	2	2	fnvnx_exception_copy_ctor
 0x00ec79a1	cpplib	std::exception::~exception()	i	6	9	fnvnx_exception_dtor
+0x00ec79b7	cpplib	std::exception::what() const (vftable slot 1 of the units' own std::exception copies; no unit names it)	i	0	0	fnvnx_exception_what
 0x00ec79c4	cpplib	std::bad_cast::bad_cast(const char*)	n	1	1	fnvnx_bad_cast_ctor
 0x00ec7c56	crt	_invalid_parameter_noinfo	n	38	42	platform/crt: _invalid_parameter_noinfo
 0x00ec7c66	crt	memcpy_s	n	6	16	platform/crt: memcpy_s

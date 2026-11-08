@@ -121,13 +121,15 @@ git -C "$G" -c user.name=t -c user.email=t@t commit -q -m c1; C1=$(git -C "$G" r
 ok "cold equiv: skipped, said why, not run" 'grep -q "^| equiv | skipped: cold cache (1 files every key reads): left to the eq farms" "$T/q-$C1.md" && grep -q "^- equiv: cold cache, left to its sharded farms (tools/equiv/msvc/fnvnx_win32.h" "$T/q-$C1.md" && ! grep -q "equiv" "$T/order"'
 ok "cold equiv: not recorded as a pass" 'grep -q "\"equiv\": \"skipped: cold cache" "$T/home/quick/status.json"'
 echo d >"$G/ports/fnv-nx/docs/a.md"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m c2; C2=$(git -C "$G" rev-parse HEAD)
+# a retired farm's shard of an older head, its set incomplete (1of6 only): it neither counts nor holds anything back
+( cd "$T/art" && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m "equiv object cache ${D1:0:12} shard 1/6: 3 objects" && git push -q origin HEAD:refs/heads/equiv/cache/1of6 ) 2>/dev/null
 run_q "$C2"
 ok "the next head: still cold until the eq farms publish a warm cache (none here)" 'grep -q "^| equiv | skipped: cold cache (since ${C1:0:12}): the eq farms have not published" "$T/q-$C2.md"'
 # the eq farms publish a cache of C2 (after C1): the next head runs equiv here, from the warm cache
 ( cd "$T/art" && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m "equiv object cache ${C2:0:12} shard 1/1: 10 objects" && git push -q origin HEAD:refs/heads/equiv/cache/1of1 ) 2>/dev/null
 echo e >"$G/ports/fnv-nx/docs/a.md"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m c3; C3=$(git -C "$G" rev-parse HEAD)
 run_q "$C3"
-ok "the eq farms' cache is of a later head: equiv runs here" 'grep -q "^| equiv | ran | 0 " "$T/q-$C3.md"'
+ok "eqa's 1of1 is of a later head (a stale 1of6 beside it): equiv runs here" 'grep -q "^| equiv | ran | 0 " "$T/q-$C3.md"'
 rm -rf "$T/home/quick"; run_q "$D3"; QUICK_COLD_LOCAL=1 run_q "$C1"
 ok "QUICK_COLD_LOCAL=1: the cold equiv runs here" 'grep -q "^| equiv | ran | 0 " "$T/q-$C1.md"'
 [ $fails = 0 ] && echo "test_quick: all ok" || { echo "test_quick: $fails failed"; exit 1; }

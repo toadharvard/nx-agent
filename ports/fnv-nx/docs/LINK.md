@@ -807,7 +807,14 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
 **Metric** (`vtmetric.py <link dir> <exe>`, read-only on a published link or a build's link stage): over the V rows,
 trap slots split by whether the address map has a native at the exe slot's address, primary vftables whose native
 vtable is shorter than the exe's (the destructor pair counted once), and mispairings (the native class is another
-RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+RTTI class of the exe). S2d-vslot adds `slot-mismatch` (native slot k + 1 against exe slot k by address through the
+map, exe slots 0 and 1 and unplaced slots not compared; `--rows` lists them) and `unpaired-<primary|secondary>-<why>`
+(exe vftables with RTTI that no V row stands for, by the class's row in vtables/classes.tsv). A vtable-slot name that
+resolve bound only through another unit's reference to the same name (gref / gdef tier: units.json puts the call of
+a *different* function there, TESForm::IsQuestItem at 0x0046f070 where the exe's TESForm slot 37 is 0x00401190) is a
+hint: when no code of the object calls the name, exe_slot_fill replaces the address with the exe vftable's function
+at the slot (`hint_rebound`; slot_fill.tsv row `exe vftable over the name's address`) and keeps it where the exe has
+none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
 `test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
 
 ## Platform, imports, thread-locals and hand-written vptrs
@@ -981,6 +988,10 @@ RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cac
     or the exe's code shape (`exevft.deleting_dtor`: `ret 4` after a test of bit 0, which finds 121 of the 132
     G rows). When exe slot 0 is not a destructor, slot 0 is a trap and exe slot 0 goes to slot 1;
   * exe slot k at slot k + 1 (`exe_slot_target`, the same choice as the extended copies).
+  Every copy also gets an address-map `V` row (`vmo_vrows`: the copy's symbol, address point 8, object
+  `zz_bridges.o`, note "minus-one copy of the exe vftable"), so EQ's vtable pairing and `vtmetric` see the vftables of
+  classes the decomp declares without virtual members (vtmetric's `no-polymorphic-view`: 164 primary + 7 secondary on
+  link 0540aff0, 163 of them referenced as data) and none keeps `__fnv_<V> = 0x<V>` while a unit stores it.
   `out/vmo.tsv` lists the copies. `FNVNX_D26C=0` turns the pass off, so a boot can be compared with and without
   it. On link 9f865b0a's inputs (offline) it makes 831 copies: 615 hand-stored + 239 RTTI-referenced candidates,
   minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
