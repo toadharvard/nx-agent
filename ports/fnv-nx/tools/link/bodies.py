@@ -78,7 +78,8 @@ in this order (first that applies):
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
    placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing), and
    the decomp's `basic_streambuf` copies' `_Lock()` / `_Unlock()` (CRT_MUTEX: `this + 4` is the std::_Mutex, S4's
-   fnvnx_mutex_lock / unlock).
+   fnvnx_mutex_lock / unlock), and the facet copies' `_Register()` / static `_Register(facet*)` (CRT_FACET: S4's
+   fnvnx_facet_register, MSVC's _Facet_Register at 0x00ec3599).
    After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
 
@@ -627,6 +628,13 @@ CRT_THROW = {'_Xlen': ('_ZSt20__throw_length_errorPKc', '%s too long'),
 # two members and never define them (their `void* streamLock` is that first word).
 CRT_MUTEX = {'_Lock': 'fnvnx_mutex_lock', '_Unlock': 'fnvnx_mutex_unlock'}
 
+# MSVC's locale::facet::_Register() is `_Facet_Register(this)`: the facet goes on the list the CRT frees at exit
+# (0x00ec3599, crt_symbols.tsv: std::locale::facet::_Facet_Register, S4's fnvnx_facet_register(void *facet)). The
+# decomp's facet copies declare it as a static `_Register(facet*)` (blk_00ac0000_od_ob1_variant.cpp's
+# `fnv_00acfab0::facet`, called as `facet::_Register(_Pfmod)` in use_facet) or as the member `_Register()`, and define
+# neither. Either way the facet is the first argument (x0): a tail call.
+CRT_FACET = 'fnvnx_facet_register'
+
 
 def crt_rule(isig):
     """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('mutex', platform function, 'this + 4') for a
@@ -643,6 +651,9 @@ def crt_rule(isig):
         return ('ret', None, None)
     if last in CRT_MUTEX and not isig.params and re.match(r'basic_streambuf\b', isig.qual[-2]):
         return ('mutex', CRT_MUTEX[last], 'this + 4')
+    if last == '_Register' and isig.qual[-2] == 'facet' and (
+            not isig.params or (len(isig.params) == 1 and re.fullmatch(r'(?:\w+::)*facet\s*\*', isig.params[0].strip()))):
+        return ('facet', CRT_FACET, 'the facet')
     return None
 
 
@@ -654,6 +665,7 @@ def crt_pass(rows, itanium):
         if k:
             r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
                            else '%s(%s): the _Mutex member at +4' % (k[1], k[2]) if k[0] == 'mutex'
+                           else '%s(%s): MSVC\'s _Facet_Register' % (k[1], k[2]) if k[0] == 'facet'
                            else 'placement delete: ret')
         out.append(r)
     return out
@@ -671,6 +683,8 @@ def emit_crt(rows, itanium):
             out += ['    ret']
         elif kind == 'mutex':
             out += ['    add x0, x0, #4', '    b ' + fn]
+        elif kind == 'facet':
+            out += ['    b ' + fn]
         else:
             out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]
         out += ['    .size %s, .-%s' % (q, q)]
