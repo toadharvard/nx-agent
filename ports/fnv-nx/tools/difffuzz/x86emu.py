@@ -15,12 +15,13 @@ import bisect
 import struct
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ,
-                     UC_HOOK_INTR, UC_HOOK_CODE, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
+                     UC_HOOK_CODE, UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
 from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, UC_X86_REG_EDX, UC_X86_REG_ECX,
                                UC_X86_REG_EBX, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_GDTR,
                                UC_X86_REG_FS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FPCW,
                                UC_X86_REG_FPSW, UC_X86_REG_FP0)
 import libcalls
+import retsrc
 import world
 
 PAGE = world.PAGE
@@ -237,6 +238,7 @@ class X86Engine:
                                  UC_X86_REG_EDI, UC_X86_REG_EBP)):
             uc.reg_write(reg, world.garbage32(case.seed, i))
         self._place_args(conv, case, placement, world.SP0, ret_stub)
+        r.agg_addr = self.agg_addr
         saved = [uc.reg_read(x) for x in (UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP)]
         hb = uc.hook_add(UC_HOOK_BLOCK, self._on_block, user_data=(case, r), begin=world.TEXT[0],
                          end=world.TEXT[1] - 1)
@@ -266,6 +268,11 @@ class X86Engine:
         esp0 = uc.reg_read(UC_X86_REG_ESP)
         # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
         hrs = uc.hook_add(UC_HOOK_MEM_WRITE, self._on_ret_slot, user_data=r, begin=esp0, end=esp0 + 3)
+        hcode = []
+        if world.EAX_TRACK is not None:
+            world.EAX_TRACK.clear()
+            hcode.append(uc.hook_add(UC_HOOK_CODE, self._on_eax, user_data=world.EAX_TRACK, begin=world.TEXT[0],
+                                     end=world.TEXT[1] - 1))
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
@@ -275,6 +282,8 @@ class X86Engine:
             uc.hook_del(hb)
             uc.hook_del(hb2)
             uc.hook_del(hrs)
+            for h in hcode:
+                uc.hook_del(h)
             if hfp is not None:
                 uc.hook_del(hfp)
             for h in hwild:
@@ -320,6 +329,10 @@ class X86Engine:
             frame[o:o + len(d)] = d
         esp = (esp - len(frame)) & ~0xf
         esp -= 4
+        # where each by-value aggregate lives (the native passes a hidden pointer to its copy: runner.compare_args)
+        self.agg_addr = {lab: (esp + 4 + off, size) for lab, space, off, size in conv.x86
+                         if space == 'stk' and lab != 'sret' and
+                         next(x for x in conv.vals if x.label == lab).kind not in ('gpr', 'fpr')}
         uc.mem_write(esp + 4, bytes(frame))
         uc.mem_write(esp, struct.pack('<I', ret_stub))
         uc.reg_write(UC_X86_REG_ESP, esp)
@@ -360,6 +373,33 @@ class X86Engine:
 
     def _on_ret_slot(self, uc, access, address, size, value, r):
         r.ret_smashed = True
+
+    _CSD = None
+
+    def _on_eax(self, uc, address, size, trk):
+        """world.EAX_TRACK: how the last instruction that wrote eax wrote it (trk['last'] = 'full', or the width in
+        bytes of an al / ax write, with the address): a function that returns in al leaves the rest of eax as it
+        was. A call counts as a full write (the callee's result)."""
+        if X86Engine._CSD is None:
+            import capstone
+            X86Engine._CSD = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+            X86Engine._CSD.detail = True
+        try:
+            ins = next(X86Engine._CSD.disasm(bytes(uc.mem_read(address, size)), address), None)
+            if ins is None:
+                return
+            if ins.mnemonic == 'call':
+                trk['last'] = 'full'
+                return
+            names = {ins.reg_name(x) for x in ins.regs_access()[1]}
+        except Exception:  # noqa: BLE001
+            return
+        if 'eax' in names:
+            trk['last'] = 'full'
+        elif 'ax' in names:
+            trk['last'] = 2
+        elif 'al' in names:
+            trk['last'] = 1
 
     def _on_write(self, uc, access, address, size, value, r):
         for i in range(size):
@@ -405,7 +445,14 @@ class X86Engine:
             return
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
-        pop, kind = info if info else (self.pop_override.get(retaddr, 0), x87_result_use(uc, retaddr, self._fret))
+        if info:
+            pop, kind = info
+        else:
+            pop = self.pop_override.get(retaddr)
+            if pop is None:              # (flow2) not learned: what the exe's function there pops (CRT cdecl: 0)
+                f = getattr(self.callee_info, 'exe_pop', None)
+                pop = (f(address) if f else None) or 0
+            kind = x87_result_use(uc, retaddr, self._fret)
         if not info:
             r.calls[-1].pop_unknown = True
             if world.X87_FLIP_WIDTH and kind in ('f32', 'f64'):
@@ -423,6 +470,14 @@ class X86Engine:
             eax = world.alloc_result(k)
         elif world.returns_this((cv, ccv)):
             eax = r.calls[-1].args[0]                  # this (ecx), as the native gets x0 (difffuzz-19)
+        elif retsrc.returned_input(cv, address) is not None:
+            lab = retsrc.returned_input(cv, address)   # the exe's callee returns an input (difffuzz-20, canned-this)
+            if lab == 'this':
+                eax = r.calls[-1].args[0]
+            else:
+                n = next(off for l_, sp, off, sz in getattr(cv, 'x86_declared', cv.x86) if l_ == lab) // 4
+                if 2 + n < len(r.calls[-1].args):
+                    eax = r.calls[-1].args[2 + n]
         elif ck == 'ref':
             eax = world.ref_result(k)
         elif ck in ('bool', 'untyped'):

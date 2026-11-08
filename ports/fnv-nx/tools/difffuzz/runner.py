@@ -15,6 +15,7 @@ compare() returns the FIRST difference (so a reproducer stays minimal), or None:
   callee-saved x86 ebx/esi/edi/ebp or AArch64 x19..x29/sp not preserved (an ABI break, e.g. a bridge or asm)
 Timeouts on either side are inconclusive (not a divergence), both sides faulting is agreement.
 """
+import bisect
 import math
 import re
 import struct
@@ -151,13 +152,15 @@ def _nan(b):
     return False
 
 
-def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=None, alias=None):
+def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=None, alias=None, agg_ptrs=None,
+                 result_buf=None):
     """First logical argument the two sides pass differently to the same callee (pointers to their own stack
     frames are equal by definition: the frames differ by design). skip: definition labels the caller does not pass
     (S2's edx dummies); gx/ga: garbage words planted on each machine - an oracle argument that is oracle garbage is
     noise (the original caller passed whatever its registers held), a native one that is native garbage while the
     oracle's is not stays a divergence (marked arm_garbage)."""
     dx, da = decode_x86(cv, cx), decode_a64(cv, ca)
+    soft_d = None
     pushed = getattr(cx, 'pushed', None)
     beyond = {lab for lab, space, off, size in cv.x86 if space == 'stk' and pushed is not None and off >= pushed}
     for v in cv.vals:
@@ -174,6 +177,17 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
             continue        # each machine's own stack frame (also through an int parameter that carries a pointer)
         if v.size == 4 and alias is not None and (px, pa) == alias:
             continue        # the oracle's NRVO local is the native's result buffer (F1b nrvo-copy)
+        if v.size == 4 and agg_ptrs and any(xa <= px < xa + sz and pa - px == na - xa and na <= pa < na + sz
+                                            for xa, na, sz in agg_ptrs):
+            continue        # the address of the caller's by-value aggregate parameter: its stack slot on the oracle,
+                            # the hidden pointer to the caller's copy natively (Itanium passes a non-trivially
+                            # copyable class by invisible reference): the same object at the same offset
+        if v.size == 4 and result_buf is not None and ((px == result_buf and _in_stack(pa)) or
+                                                         (pa == result_buf and _in_stack(px))):
+            # the function's hidden result buffer on one side, a local of the frame on the other: NRVO on one
+            # machine only (nrvo-elision). Kept going (soft); the result buffer itself is compared at the end
+            soft_d = soft_d or dict(arg=v.label, cls=v.cls, x86=bx.hex(), arm=ba.hex(), soft=True, nrvo_elided=True)
+            continue
         if v.size == 4 and px in gx:
             continue
         if v.size == 4 and codeptr is not None and codeptr(pa) == px:
@@ -190,7 +204,7 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
         if v.cls in ('F32', 'F64') and _nan(bx) and _nan(ba):
             d.update(soft=True, nan_bits=True)   # x87 real indefinite 0xffc00000 vs AArch64 default NaN 0x7fc00000
         return d
-    return None
+    return soft_d
 
 
 def _nrvo_copy(xcalls, ta, sret, convs):
@@ -226,7 +240,8 @@ def _nrvo_copy(xcalls, ta, sret, convs):
 
 
 def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
-            garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None):
+            garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
+            agg_ptrs=None):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
     the planted vftables; a differing call to neither is an indirect call through memory the case did not plant
     (marked vcall='unplanted': an oracle-model gap, classify.py oracle-vcall)."""
@@ -310,14 +325,14 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
                 skip = set(skip) | {v.label for v in cv.vals if v.label != 'this'}
             d = compare_args(cv, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                              garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                             (nrvo, sret) if nrvo is not None else None)
+                             (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret)
             if d and (i in swapped or i + 1 in swapped):
                 # a swapped pair: the calls at i and i + 1 are different callees on the two machines, so compare
                 # each oracle call with the native call of the same callee
                 cx2, ca2 = rx.calls[i], ra.calls[i + 1 if i + 1 in swapped else i - 1]
                 d = compare_args(cv, cx2, ca2, readers[0] if readers else None, readers[1] if readers else None,
                                  skip, garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                                 (nrvo, sret) if nrvo is not None else None)
+                                 (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret)
             if d:
                 d.update(kind='call-args', index=i, target=_hex(cx.target), callee=cv.name)
                 if d.get('soft'):
@@ -381,6 +396,13 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             # .bss (not compared). Not a divergence of the function itself; reported for the static-state audit.
             soft = soft or dict(kind='local-static', soft=True, addr='%08x' % diff[0], ndiff=len(diff))
             diff = []
+    if wx != wa and diff and readers:
+        lit = literal_store_words(diff, wx, wa, readers, w)
+        if lit:
+            # a stored literal address: the oracle's pinned pool copy, the native unit's own .rodata copy (difffuzz-20,
+            # literal-store). The addresses differ by design; the pointees (what the field means) are compared, and a
+            # word whose pointees differ stays in the diff (with pointee_x86 / pointee_arm)
+            diff = [k for k in diff if k not in lit]
     if wx != wa and diff and vptr_words is not None:
         drop = dtor_vptr_bytes(diff, wx, wa, *vptr_words)
         if drop:
@@ -416,6 +438,33 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     return soft
 
 
+LIT_POOL = (0x02f00000, 0x03000000)       # coffobj.LITERAL_POOL: literals units.json does not name
+
+
+def literal_store_words(diff, wx, wa, readers, w):
+    """Bytes of `diff` in aligned words where the oracle stored an address of its literal pool and the native an
+    address in its private image (its own copy of the literal) and the pointees are equal: a C string, or for an
+    empty one the first 8 raw bytes (a __real@ constant). Representation, not behaviour."""
+    out = set()
+    for g in sorted({k & ~3 for k in diff}):
+        ks = range(g, g + 4)
+        pg = w.page(world.page_of(g))        # `effective` drops a byte equal to the world's initial one
+        base = [pg[k - world.page_of(g)] for k in ks]
+        vx = struct.unpack('<I', bytes(wx.get(k, b_) for k, b_ in zip(ks, base)))[0]
+        va = struct.unpack('<I', bytes(wa.get(k, b_) for k, b_ in zip(ks, base)))[0]
+        if not (LIT_POOL[0] <= vx < LIT_POOL[1] and world.A64_PRIV[0] <= va < world.A64_PRIV[1]):
+            continue
+        sx, sa = _cstr(readers[0], vx), _cstr(readers[1], va)
+        if sx == sa and sx is not None and not sx:
+            try:
+                sx, sa = readers[0](vx, 8), readers[1](va, 8)
+            except Exception:  # noqa: BLE001
+                continue
+        if sx is not None and sx == sa:
+            out.update(k for k in ks if k in diff)
+    return out
+
+
 DTOR_ITANIUM = re.compile(r'D[012]Ev$')
 
 
@@ -438,6 +487,28 @@ def dtor_vptr_bytes(diff, wx, wa, is_vftable, is_native_vtable):
         if None not in sides and 'vt' in sides:
             out.update(k for k in ks if k in dset)
     return out
+
+
+_ZERO_STUB_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0),
+                     struct.pack('<II', 0x0f000400, 0xd65f03c0), struct.pack('<II', 0x2f00e400, 0xd65f03c0)}
+
+
+def zero_stubs(img):
+    """{address: name} of the functions of a native image whose whole body is `mov w0, #0; ret` or the float / double
+    zero equivalent (decomp placeholders), built once per image."""
+    got = getattr(img, '_zero_stubs', None)
+    if got is None:
+        got = {}
+        for n, a in img.syms.items():
+            if img.sizes.get(n) != 8:
+                continue
+            for base, data in img.segments:
+                if base <= a and a + 8 <= base + len(data):
+                    if data[a - base:a - base + 8] in _ZERO_STUB_BODIES:
+                        got[a] = n
+                    break
+        img._zero_stubs = got
+    return got
 
 
 def _read(uc, w, a, n):
@@ -497,6 +568,21 @@ class Pair:
                 got = self._learn_pop(case, max_steps, rx)
                 if got is not None:
                     rx, ra, d = got
+            if d and d['kind'] == 'error' and (ra.error or '').startswith('fault:') and rx.error is None and \
+                    self.adapted < 16:
+                # (EQ native-null-read, difffuzz-20) the native faulted inside its own copy of a function the oracle
+                # only called out (the unit defines `FUN_<X>`, the oracle's unit does not, so X was intercepted with
+                # a canned result): run the oracle's X for real, as the adaptive follow below does, and compare again
+                x = self._native_own_copy(rx, ra)
+                got = self.target.oracle_code(x) if x is not None and getattr(self.target, 'oracle_code', None) \
+                    else None
+                if got:
+                    self.target.x86_code[x] = got[0]
+                    for a_, b_ in got[1].items():
+                        self.pinned.setdefault(a_, b_)
+                    self.adapted += 1
+                    self.xe = None
+                    continue
             if not d or d['kind'] not in ('call-target', 'call-count') or self.adapted >= 16:
                 return rx, ra, d
             if d['kind'] == 'call-count':
@@ -518,6 +604,29 @@ class Pair:
                     # slot function for real) turned this into `call-count x86 0` = falloff? (F2 d21-vslot)
                     d['vslot'] = self.vslots(case, int(d['x86'], 16), int(d['arm'], 16))
                     return rx, ra, d
+                if d.get('vcall') == 'planted' and str(d.get('arm') or '').startswith('name:') and \
+                        x in (self.target.vt_slots if hasattr(self.target, 'vt_slots') else ()):
+                    # (EQ native-null-read, difffuzz-20) the oracle called slot X of a planted vftable and the native
+                    # a named stub (a virtual the link binds to no definition: `_ZN10NiAVObject4v003Ev`). A virtual
+                    # call is not an inlined X: following X ran the exe's body (`xor eax, eax`) against the stub's
+                    # canned result, and the native then dereferenced that result (00477560, 009abe40: null-read)
+                    return rx, ra, d
+                if d.get('arm_vcall') == 'planted' and d.get('vcall') != 'planted':
+                    # (F2b, difffuzz-20) the native called planted slot k and the oracle's call went to a function it
+                    # runs as code (no call event): slot k+1 of the same vftable. Following it turned the native's
+                    # slot into an inlined callee (0x005c12a0, 0x007aecb0: `call [edx+0x34]` natively reaches the
+                    # exe's slot 12, the oracle's slot 13 ran 0x007ac4f0 for real)
+                    vs = self.vslots_run(case, rx, ra)
+                    if vs:
+                        d['vslot'] = vs
+                        return rx, ra, d
+                if d.get('arm_vcall') != 'planted' and d.get('vcall') != 'planted':
+                    vn = self.vslot_native(case, rx, ra, d)
+                    if vn:
+                        # (F2b) the native called slot j of its copy of a planted vftable, a function the exe's slot
+                        # does not hold: a different callee on the native's vtable, not an inlined one
+                        d['vslot_native'] = vn
+                        return rx, ra, d
                 if str(d.get('arm') or '').startswith('name:__s13_vtpad_'):
                     # the native called through a padding slot of a planted vftable's native vtable (vptr-unpaired):
                     # a virtual call, not an inlined X (F1b: once the follow ran past five loads, 0x005d6d10's
@@ -541,6 +650,28 @@ class Pair:
             self.adapted += 1
             self.xe = None              # rebuilt with the larger code set
         return rx, ra, d
+
+    def _native_own_copy(self, rx, ra):
+        """The first call the oracle made past the native's calls (it faulted before making them) whose original
+        address X is outside the oracle code and whose native definition in the unit (a symbol named `FUN_<X>`) the
+        native run executed blocks in; None if there is none."""
+        img = self.target.image
+        syms = getattr(img, 'syms', None)
+        if not syms:
+            return None
+        starts = sorted(set(syms.values()))
+        cand = [c.target for c in rx.calls[len(ra.calls):] if c.target >= 0 and c.target not in self.target.x86_code]
+        if not cand:
+            return None
+        for x in cand:
+            tag = 'FUN_%08x' % x
+            for n, a in syms.items():
+                if tag in n and not n.startswith('__fnv_'):
+                    i = bisect.bisect_right(starts, a)
+                    hi = starts[i] if i < len(starts) else a + 0x10000
+                    if any(a <= b < hi for b in ra.blocks):
+                        return x
+        return None
 
     def _native_calls(self, x, ra):
         """Does the native definition of the target, or of a function of its unit the native run `ra` entered,
@@ -583,6 +714,40 @@ class Pair:
                                 shift=-1 if any(j == i - 1 for i in ix for j in ia) else None))
         return out
 
+    def vslot_native(self, case, rx, ra, d):
+        """A call-target whose native callee is no slot of the exe's planted vftables but sits in the native copy of
+        one (Target.vt_mem), at the slot where the exe's vftable holds a function the oracle called or ran as code:
+        the native vtable's slot calls another function than the exe's (D26 / vtables fix class; the exe slot is
+        j - 1 against an Itanium vtable with a second destructor slot, else j). Returns {vft, native_slot, exe_slot,
+        native, exe} or None."""
+        try:
+            ta = int(d['arm'], 16)
+        except (TypeError, ValueError, KeyError):
+            return None
+        t = self.target
+        pins = getattr(t, 'vt_pins', {}) or {}
+        ran = {c.target for c in rx.calls} | set(rx.blocks)
+        for v in sorted(set(case.vptrs.values())):
+            b = pins.get(v) or b''
+            slots = list(struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4]))
+            ap = (getattr(t, 'vt_ap', {}) or {}).get(v)
+            if not slots or ap is None or ta in slots:
+                continue
+            for base, m in (getattr(t, 'vt_mem', {}) or {}).items():
+                if not base <= ap < base + len(m):
+                    continue
+                words = struct.unpack('<%dI' % ((len(m) - (ap - base)) // 4), m[ap - base:])
+                orig = getattr(t, 'stub_orig', {}) or {}
+                for j, w in enumerate(words[:len(slots) + 2]):
+                    o = orig.get(w) or (w - 0x08000000 if 0x08400000 <= w < 0x09000000 else None)
+                    if o != ta:
+                        continue
+                    ks = [k for k in (j - 1, j) if 0 <= k < len(slots) and slots[k] in ran and slots[k] != ta]
+                    if len(ks) == 1:
+                        return dict(vft='%08x' % v, native_slot=j, exe_slot=ks[0], native='%08x' % ta,
+                                    exe='%08x' % slots[ks[0]])
+        return None
+
     def vslots_run(self, case, rx, ra):
         """A call-count where the native makes more calls: its first call the oracle does not make is a planted
         slot k whose next slot k+1 is oracle code the x86 machine ran for real (a function of the unit: no call
@@ -603,9 +768,11 @@ class Pair:
                 out.append(dict(vft='%08x' % v, x86=[k + 1 for k in ks[:8]], arm=ks[:8], shift=-1, ran=True))
         return out or None
 
-    def _pushes_before(self, retaddr):
+    def _pushes_before(self, retaddr, strict=False):
         """Pushes in the straight-line code before the call that returns to retaddr (back to the previous call,
-        branch, return or esp adjustment): an upper bound of the arguments the caller passed on the stack."""
+        branch, return or esp adjustment): an upper bound of the arguments the caller passed on the stack. With
+        strict, the count stops at a conditional branch too: the pushes of the call itself (_learn_pop tries that
+        count first)."""
         import capstone
         for a, code in self.target.x86_code.items():
             if a < retaddr <= a + len(code):
@@ -617,10 +784,20 @@ class Pair:
         ins = list(cs.disasm(code, a))
         i = next((k for k, x in enumerate(ins) if x.address + x.size == retaddr and x.mnemonic == 'call'), None)
         n = 0
+        # (flow2) the entry prologue's `push ebx/ebp/esi/edi` are the function's saved registers, not arguments of
+        # a call the walk reaches back to (0x00a64940: every call counted five)
+        pro = set()
+        for x in ins:
+            if x.mnemonic == 'push' and x.op_str in ('ebx', 'ebp', 'esi', 'edi'):
+                pro.add(x.address)
+            elif not (x.mnemonic == 'sub' and x.op_str.startswith('esp,')):
+                break
         for x in reversed(ins[:i] if i is not None else []):
+            if x.address in pro:
+                break
             if x.mnemonic == 'push':
                 n += 1
-            elif x.mnemonic.startswith('j') and x.mnemonic != 'jmp':
+            elif x.mnemonic.startswith('j') and x.mnemonic != 'jmp' and not strict:
                 # a conditional branch between the pushes and the call (00e899a0: the arguments, then a switch
                 # on a type field, then `call edx`): walk on. Only an upper bound is needed (_learn_pop tries
                 # every count below it and keeps the one that runs clean)
@@ -629,6 +806,34 @@ class Pair:
                     (x.op_str.startswith('esp,') and x.mnemonic in ('add', 'sub', 'mov', 'lea', 'and')):
                 break
         return min(n, 8)
+
+    def _delayed_cleanup(self, retaddr):
+        """The caller cleans up after the call later than right after it: MSVC merges the `add esp, N` of
+        consecutive cdecl calls (0x00a64940: `call; ...; call; add esp, 0x50`). True when, going on in a straight
+        line (calls and conditional branches passed, a `pop`, `ret`, `leave` or `jmp` ends it), an `add esp, N`
+        frees more than the words pushed since the call: some earlier call left its arguments, and this one may be
+        it. A hint for the order the pops are tried in (cdecl: 0 first); the clean-run check decides."""
+        import capstone
+        for a, code in self.target.x86_code.items():
+            if a <= retaddr < a + len(code):
+                break
+        else:
+            return False
+        cs = getattr(Pair, '_cs', None) or capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        pushed = 0
+        for k, x in enumerate(cs.disasm(code[retaddr - a:], retaddr)):
+            if k > 80 or x.mnemonic in ('pop', 'ret', 'leave', 'jmp'):
+                break
+            if x.mnemonic == 'push':
+                pushed += 1
+            elif x.mnemonic == 'add' and x.op_str.startswith('esp, '):
+                try:
+                    return int(x.op_str.split(', ')[1], 0) > 4 * pushed
+                except ValueError:
+                    return False
+            elif x.mnemonic == 'sub' and x.op_str.startswith('esp,'):
+                break
+        return False
 
     def _derailed(self, rx):
         """The oracle ran on after an intercepted call of unknown convention with its stack off, without faulting
@@ -643,8 +848,17 @@ class Pair:
             return False
         if rx.esp_ok is False:
             return True
-        return any(getattr(c, 'ret_to', None) is not None and not self.xe._in_loaded(c.ret_to)
-                   for c in calls[k + 1:])
+        return any(not self._returns_into_code(c) for c in calls[k + 1:])
+
+    def _returns_into_code(self, c):
+        """The intercepted call returns into the oracle's code, or into the epilogue stub after a tail `jmp` to a
+        callee whose pop is known (difffuzz-20, flow2: 0x00e971d0 ends `jmp 0x00e89b70` and 0x00e89b70 tail-calls
+        0x00e89840: that call returns to the stub, which a derail's wild call does too, but a derail's callee has
+        no known pop). Without this a clean run read as a derail and _learn_pop discarded the true pops."""
+        r = getattr(c, 'ret_to', None)
+        if r is None or self.xe._in_loaded(r):
+            return True
+        return x86emu.STUBS <= r < x86emu.STUBS + 0x40 and not getattr(c, 'pop_unknown', False)
 
     def _learn_pop(self, case, max_steps, rx):
         """The oracle faulted after an intercepted call whose callee pops an unknown number of bytes (a call through
@@ -678,14 +892,38 @@ class Pair:
                     continue
                 cdecl.add(ra_)
             sites.append(ra_)
-        sites = sites[:3]
+        # (flow2) more than three unknown-pop sites (a case that plants a pointer in a loop: 0x00a64940's twelve
+        # `call [vftable slot]`): the first three are searched, the rest take their own push count (the commonest
+        # answer for a thiscall/stdcall site) so that the search can end clean; a wrong guess there only fails the run
+        cdecl.update(r for r in sites if self._delayed_cleanup(r))
+        rest, sites = sites[3:16], sites[:3]
         if not sites:
             return None
-        self.pops_tried.update(sites)
+        self.pops_tried.update(sites + rest)
         # no push in the straight line before the call (the arguments pushed before a branch, 00e899a0): any count
         # up to 6 words, each checked by clean()
-        cands = [([0] if a in cdecl else []) + [4 * n for n in range(self._pushes_before(a) or 6, 0, -1)] +
-                 ([] if a in cdecl else [0]) for a in sites]
+        def counts(a):
+            # (F-uncls, difffuzz-20) the pushes right before the call first, then the walk across branches from the
+            # most down: the search is bounded (27 runs) and three sites with a branch each (0x00e68870: two
+            # `call edx` and a third) put the true counts beyond it in the descending order alone
+            top = self._pushes_before(a)
+            if not top:
+                # (flow2) no push anywhere in the straight line before the call (a virtual call with ecx = this
+                # and nothing pushed, 0x00a5ff10's `call eax`): 0 first, then the old descending counts
+                return [0] + [4 * n for n in range(6, 0, -1)]
+            near = min(self._pushes_before(a, strict=True), top)
+            return ([4 * near] if near else []) + [4 * n for n in range(top, 0, -1) if n != near]
+        exe_pop = getattr(self.target.callee_info, 'exe_pop', None)
+        tgt = {getattr(c, 'ret_to', None): c.target for c in rx.calls}
+
+        def first(a):
+            """The count to try first: the exe's own `ret N` of the function called (a CRT function the tree does
+            not define), else the pushes right before the call."""
+            n = exe_pop(tgt[a]) if exe_pop and a in tgt else None
+            return [] if n is None else [n]
+        cands = [first(a) + ([0] if a in cdecl else []) + counts(a) + ([] if a in cdecl else [0]) for a in sites]
+        cands = [list(dict.fromkeys(c)) for c in cands]
+        fixed = {a: (first(a) or [0 if a in cdecl else 4 * self._pushes_before(a, strict=True)])[0] for a in rest}
 
         # a clean run that only kept callee-saved registers wrong (no fault) need not also fix an esp difference it
         # already had at the target's return (a custom convention's pop: F3, 0x00d55bd0); F1's derail (callee-saved
@@ -696,19 +934,21 @@ class Pair:
             x = got[0]
             return not (x.error or '').startswith('fault:') and (x.esp_ok or not need_esp) and \
                 x.saved_ok is not False and \
-                all(self.xe._in_loaded(c.ret_to) for c in x.calls if getattr(c, 'ret_to', None) is not None)
+                all(self._returns_into_code(c) for c in x.calls)
         for combo in itertools.islice(itertools.product(*cands), 27):
             if not any(combo):
                 continue
             for a, n in zip(sites, combo):
                 self.pops[a] = n
+            for a, n in fixed.items():
+                self.pops[a] = n
             got = self._run(case, max_steps)
             if clean(got):
-                for a, n in zip(sites, combo):
+                for a, n in list(zip(sites, combo)) + list(fixed.items()):
                     if not n:
                         self.pops.pop(a, None)
                 return got
-        for a in sites:
+        for a in sites + rest:
             self.pops.pop(a, None)
         return None
 
@@ -791,7 +1031,9 @@ class Pair:
                                 getattr(self.target, 'dummies', None),
                                 (world.garbage_words(case.seed, 'x86'), world.garbage_words(case.seed, 'a64')),
                                 self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()),
-                                self._vptr_words(), getattr(self.target.callee_info, 'caller_conv', None))
+                                self._vptr_words(), getattr(self.target.callee_info, 'caller_conv', None),
+                                [(xa, placement[l], sz) for l, (xa, sz) in getattr(rx, 'agg_addr', {}).items()
+                                 if l in placement])
         if d is not None:
             # dynamic evidence for causes.py (S13b: oracle-callee-unloaded): the original addresses of the unit's
             # functions the native actually entered in this run (their __fnv_<X> entry blocks were executed)
@@ -799,6 +1041,24 @@ class Pair:
             got = sorted({o for a, o in ent.items() if a in ra.blocks})
             if got:
                 d['arm_entered'] = ['%08x' % o for o in got[:64]]
+        if d is not None:
+            zs = zero_stubs(self.target.image)
+            hit = sorted(n for a, n in zs.items() if a in ra.blocks)
+            if hit:
+                d['arm_zero_stub'] = hit[:4]       # F-uncls: the native ran a placeholder body that returns 0
+                # the exe functions those placeholders stand for (their __fnv_<X> entry, else the name's address):
+                # causes.py does not call a placeholder of a trivial exe leaf native-zero-stub (S2 W6, 0x0065f820)
+                ent = getattr(self.target.image, 'entries', {}) or {}
+                exe = []
+                for a, n in sorted(zs.items()):
+                    if a not in ra.blocks:
+                        continue
+                    o = ent.get(a)
+                    if o is None:
+                        m = re.search(r'(?<![0-9a-f])([0-9a-f]{8})(?![0-9a-f])', n)
+                        o = int(m.group(1), 16) if m else None
+                    exe.append('%08x' % o if o is not None else '?')
+                d['arm_zero_stub_exe'] = exe[:4]
         if d is not None and getattr(rx, 'ret_smashed', False):
             d['x86_frame_smash'] = True        # the oracle overran a local into its return-address slot (F1b)
         if d is not None and ra.private_reads:
