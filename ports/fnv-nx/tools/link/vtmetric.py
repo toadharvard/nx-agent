@@ -313,24 +313,44 @@ def _pair_positions(names, d):
     return out
 
 
+def _align(addr, c, exe_slots):
+    agree, bad = 0, []
+    for k, a in enumerate(addr):
+        j = exevft.exe_slot_index(k, c)
+        if a is None or j < 2 or j >= len(exe_slots):
+            continue
+        if a == exe_slots[j]:
+            agree += 1
+        else:
+            bad.append((k, j, a, exe_slots[j]))
+    return agree, bad
+
+
 def compare_slots(names, d, exe_slots, symaddr):
     """-> (agree, [(k, j, native address, exe address)] mismatches) for the alignment that agrees most: candidates are
     d (exevft.dtor_pos, may be None), every flag-stub pair, and no pair at all; ties keep the earliest candidate.
-    Only exe slots j >= 2 are compared."""
+    Only exe slots j >= 2 are compared.
+
+    W31: when those leave mismatches, every other adjacent slot pair is tried as the destructor pair too, and one
+    that agrees on more slots wins. The fixed object's pair is often not spelled D1/D0 any more after resolve's
+    renames (`__fnv_<a>` then `__fnvnx_d0del_<a>`, `__fnv_<a>_D1` then a bare `__fnv_<a>`, two trap stubs), while
+    exe_vtable_copies, which reads the raw names, found it and started the extra slots at exe slot nm = n - 1: the
+    whole table is in the minus-one layout, and with k = j compared it showed as a tail of -1 mismatches (697
+    rows on link 3f7a6c35, 127 extended copies). The exe is the evidence, not the spelling."""
     addr = [slot_address(n, symaddr) for n in names]
     best = None
     for c in [d] + [p for p in _pair_positions(names, d) if p != d] + ([None] if d is not None else []):
-        agree, bad = 0, []
-        for k, a in enumerate(addr):
-            j = exevft.exe_slot_index(k, c)
-            if a is None or j < 2 or j >= len(exe_slots):
-                continue
-            if a == exe_slots[j]:
-                agree += 1
-            else:
-                bad.append((k, j, a, exe_slots[j]))
+        agree, bad = _align(addr, c, exe_slots)
         if best is None or agree > best[0]:
             best = (agree, bad)
+    if best[1]:
+        tried = {d, None} | set(_pair_positions(names, d))
+        for c in range(len(names) - 1):
+            if c in tried:
+                continue
+            agree, bad = _align(addr, c, exe_slots)
+            if agree > best[0]:
+                best = (agree, bad)
     return best
 
 
