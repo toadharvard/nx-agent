@@ -1844,7 +1844,7 @@ check('D26 call-only: the slot-0 placeholder becomes FNVNX_D22 (no list)', _coo,
       ['FNVNX_D22(HeapStandIn, virtual void v0();) /* fnv-nx D22 */', 'virtual void v1();'])
 check('D26 call-only: one virtual only, a defined virtual, a base, a called placeholder, a derived class: nothing',
       run(s1.r_vtable_dtor_slot, 'struct A\n{\n    virtual void v0();\n};\n') +
-      run(s1.r_vtable_dtor_slot, _CO + 'void HeapStandIn::v1() {}\n') +
+      run(s1.r_vtable_dtor_slot, _CO + 'int g_v1;\nvoid HeapStandIn::v1() { g_v1 = 1; }\n') +
       run(s1.r_vtable_dtor_slot, _CO.replace('struct HeapStandIn\n', 'struct HeapStandIn : B\n')) +
       run(s1.r_vtable_dtor_slot, _CO + 'void g(HeapStandIn* h) { h->v0(); }\n') +
       run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v0() {}\n};\n'),
@@ -2201,6 +2201,16 @@ check('RAWVT1-MEM: a called slot of the vptr member / a local *(void***)this get
       'member of a class with virtuals do not',
       _rmo, ['m_ppVirtualMethodTable[FNVNX_D26_SLOT(2)]', 'vtbl[FNVNX_D26_SLOT(0x1a)]'],
       ['m_ppVirtualMethodTable[FNVNX_D26_SLOT(7)]', 'vtable[FNVNX_D26_SLOT(3)]'])
+
+# ---- S5-boot: D22 call-only with empty out-of-class definitions (FUN_00aa1420's S_00aa1420_Object, NiAlloc corruption)
+_OC = ('struct S_00aa1420_Object\n{\n    virtual void S_00aa1420_v0();\n    virtual void S_00aa1420_v1(int* a, int b);\n};\n\n'
+       'inline void S_00aa1420_Object::S_00aa1420_v0()\n{}\n\ninline void S_00aa1420_Object::S_00aa1420_v1(int* a, int b)\n{}\n\n'
+       'struct H { S_00aa1420_Object* m_00; };\nvoid f(H* h) { int v; h->m_00->S_00aa1420_v1(&v, 1); }\n')
+check('D22 call-only: empty out-of-class definitions are placeholders; slot 0\'s definition goes under FNVNX_D22_DROP',
+      run(s1.r_vtable_dtor_slot, _OC),
+      ['FNVNX_D22(S_00aa1420_Object, virtual void S_00aa1420_v0();)',
+       'FNVNX_D22_DROP(inline void S_00aa1420_Object::S_00aa1420_v0()\n{})',
+       'inline void S_00aa1420_Object::S_00aa1420_v1(int* a, int b)\n{}'])
 
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)
