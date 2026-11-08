@@ -1636,6 +1636,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # _ZTV7StandIn is some other unit's class); such a store keeps its image vftable (D26 (c) copy, transform(exe))
     # unless the exe's own RTTI class has that name (FNVNX_HANDAMB=0: the name decides as before)
     amb_hand = hand_ambiguous_names(hand, exev)
+    # the same rule for the class constructed at the storing address (R4 15:33: SpawnedSub's stand-in ctors at
+    # 004385f0 / 00438660 / 00631750 store three different image vftables, none of them a SpawnedSub)
+    amb_cc = hand_ambiguous_names({a: [(unit, cc, fa, off) for unit, _, fa, off in sites if fa is not None
+                                       for cc in ctor_classes(fa)] for a, sites in hand.items()}, exev)
     for a, sites in sorted(hand.items()):
         how = 'named vftable' if a in vmap else None
         if a not in vmap:
@@ -1660,6 +1664,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             for unit, _, fa, off in sites:
                 for cc in (ctor_classes(fa) if fa is not None else {}):
                     want_.add(cc)
+                    if (a, cc, off) in amb_cc:
+                        vstats['hand-written-ambiguous-ctor-class'] += 1
+                        continue
                     for z in sorted(by_cls.get(cc, [])):
                         ents = rtti.ents(z) or []
                         pts = [p for p, ott in vtables.address_points(ents) if ott == -off]
@@ -1796,6 +1803,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         # so a relocated guest's GOT keeps its link address (1,330 entries; INISettingCollection's vptr 0x3191f7b8);
         # with it, `sym + 8` is section-relative (RELATIVE relocations) and `= 0x...` stays absolute
         f.write('LD_FEATURE("SANE_EXPR")\n')
+        # R4: vftable getters return their stand-in's vtable; the stand-in's symbol is an alias of the paired native one
+        vtget_lines, _ = vtget_aliases(exev, vmap, rebind, rtti, native, exe_path, {u.source: u.obj for u in have},
+                                       stats, out)
+        alias_lines += vtget_lines
         for a in sorted(x for x in used_addr if kind_of_addr(x) == 'data'):
             # an image vftable (a V entry, whether or not a vptr store was recognised: S5 J-0109 S2:mapped): every
             # data reference to it is the native address point
@@ -2561,6 +2572,113 @@ def bound_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out, obj_
 
 
 BOUND_CALLEE = re.compile(r'__fnv(?:nx_cthis)?_([0-9a-f]{8})(?:_C[12])?')
+
+
+def vtget_pick(v, n, refs, ap_of, users):
+    """R4 vftable getters: which stand-in vtable Z of a getter becomes an alias of the paired native vtable N.
+    v: the image vftable the getter returns; n: (native vtable, address point) vmap/rebind gives v; refs: the `_ZTV`
+    symbols the native function references; ap_of(z) -> [(address point, offset-to-top)] of z's group (None when z has
+    no words); users: {vtable: {image vftables paired to it}}; refs in code order (the last one is the returned vptr).
+    -> (outcome, z, delta) where delta = ap(N) - ap(Z) when outcome is 'alias', else z / delta are None."""
+    zs = [r for r in refs if not r.startswith('_ZTVN10__cxxabiv')]
+    if not zs:
+        return 'native references no vtable', None, None
+    if n[0] in zs:
+        return 'already the paired vtable', None, None
+    # a vtable another image vftable is paired with is a real class's (0x00dfd800 builds a second local
+    # hkReferencedObject): not the stand-in. Of the rest, in code order, an inlined constructor sequence stores its
+    # bases first, so the returned vptr is the last one (0x00dff380: S00dfbe20_Mid, then S00dff380_Object)
+    free = [r for r in zs if not (users.get(r, set()) - {v})]
+    if not free:
+        return 'stand-in is paired to another vftable', None, None
+    z = free[-1]
+    pts = ap_of(z)
+    if pts is None:
+        return 'stand-in has no words', None, None
+    if len(pts) != 1 or pts[0][1] != 0:
+        return 'stand-in has %d address points' % len(pts), None, None
+    return 'alias', z, n[1] - pts[0][0]
+
+
+def vtget_aliases(exev, vmap, rebind, rtti, native, exe_path, obj_of, vstats, out):
+    """R4: an MSVC vftable getter (Havok class registry: exevft.vtable_getter) returns the image vftable V; its native
+    version builds a stand-in object and returns its own `_ZTV<stand-in>+8`, while the link pairs V with another native
+    vtable N, so the getter hands back a vptr no object of the class carries. The stand-in's vtable symbol becomes an
+    alias of N in aliases.ld (`Z = N + (apN - apZ);`; the script assignment overrides the weak COMDAT definition).
+    -> ([alias line], vtget.tsv rows). FNVNX_VTGET=0 turns it off."""
+    lines, rows = [], []
+    if os.environ.get('FNVNX_VTGET', '1') == '0' or not exe_path:
+        return lines, rows
+    vfts = set(exev)
+    users = collections.defaultdict(set)
+    pairing = {}
+    for v_ in vfts:
+        e_ = rebind.get(v_) or (vmap[v_][:2] if v_ in vmap else None)
+        if e_:
+            pairing[v_] = e_
+            users[e_[0]].add(v_)
+    ap_cache = {}
+
+    def ap_of(z):
+        if z not in ap_cache:
+            ents = rtti.ents(z) if z in rtti.where else None
+            ap_cache[z] = vtables.address_points(ents) if ents else None
+        return ap_cache[z]
+    objs, claimed = {}, {}
+    for a in sorted(native):
+        nd = native[a]
+        path = obj_of.get(nd.get('unit'))
+        if not path:
+            continue
+        v = exevft.vtable_getter(exe_path, a, vfts)
+        if v is None:
+            continue
+        vstats['vtget-candidates'] += 1
+        n = pairing.get(v)
+        row = ['%08x' % a, '%08x' % v, '', n[0] if n else '', '']
+        rows.append(row)
+        if n is None:
+            row[4] = 'vftable is paired to no native vtable'
+            continue
+        if path not in objs:
+            objs.clear()
+            try:
+                objs[path] = vtables.Obj(path)
+            except (OSError, ValueError):
+                objs[path] = None
+        o = objs[path]
+        sym = nd['sym'].name
+        if o is None or sym not in o.defs:
+            row[4] = 'no object / symbol'
+            continue
+        _, value, size, typ, _, shndx = o.syms[o.defs[sym]]
+        if typ != 2 or shndx >= len(o.secs):
+            row[4] = 'not a function'
+            continue
+        refs = []
+        for off, r in sorted(o.rel(shndx).items()):
+            nm_ = o.syms[r[0]][0]
+            if value <= off < value + size and nm_.startswith('_ZTV'):
+                if nm_ in refs:
+                    refs.remove(nm_)
+                refs.append(nm_)
+        outcome, z, delta = vtget_pick(v, n, refs, ap_of, users)
+        row[2] = z or ' '.join(sorted(refs))
+        row[4] = outcome
+        if outcome != 'alias':
+            continue
+        if claimed.get(z, (n, delta)) != (n, delta):
+            row[4] = 'stand-in aliased to another vtable by another getter'
+            continue
+        claimed[z] = (n, delta)
+        lines.append('%s = %s + %d;' % (z, n[0], delta))
+        vstats['vtget_alias'] += 1
+        row[4] = 'aliased'
+    with open(os.path.join(out, 'vtget.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#address\tvftable\tstand-in vtable\tnative vtable\toutcome\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    return lines, rows
 
 
 def member_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out, obj_of, rules=None):

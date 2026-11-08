@@ -449,7 +449,7 @@ def with_static_pairs(agg_ptrs, spairs):
 
 def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
             garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
-            agg_ptrs=None, spairs=None):
+            agg_ptrs=None, spairs=None, vtpair=None):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
     the planted vftables; a differing call to neither is an indirect call through memory the case did not plant
     (marked vcall='unplanted': an oracle-model gap, classify.py oracle-vcall)."""
@@ -625,6 +625,10 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
         px, pa = struct.unpack('<I', rx.ret[:4])[0], struct.unpack('<I', ra.ret[:4])[0]
         if codeptr is not None and codeptr(pa) == px:
             pass                                    # the same function, as a native code address
+        elif vtpair and vtpair.get(pa) == px:
+            # (R4, farm baseline 588863: vftable getters 0x00da0780, 0x00dfc400, 0x00dfe5e0, 0x00dfe9b0) the native
+            # returns the vtable the link pairs with the exe's vftable (an addrmap V row): the same class identity
+            pass
         elif readers and world.A64_PRIV[0] <= pa < world.A64_PRIV[1]:
             # a literal the native unit keeps in its own .rodata, the oracle at its image address: compare the
             # pointees (C strings)
@@ -1591,7 +1595,8 @@ class Pair:
                            self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()),
                            self._vptr_words(), getattr(self.target.callee_info, 'caller_conv', None),
                            [(xa, placement[l], sz) for l, (xa, sz) in getattr(rx, 'agg_addr', {}).items()
-                            if l in placement], getattr(self.target, 'static_pairs', ()))
+                            if l in placement], getattr(self.target, 'static_pairs', ()),
+                           vtpair=getattr(self.target, 'vtables_defined', None))
         d = cmp_(ra, w)
         if d is not None and not d.get('soft') and (d['kind'] == 'call-target' or d.get('after_perm')):
             got = self._order_probe(case, rx, ra, w, placement, max_steps, cmp_)
