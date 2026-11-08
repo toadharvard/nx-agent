@@ -58,7 +58,14 @@ step sources
 TCID=$(cat "$P"/toolchain/sources.sh "$P"/toolchain/gcc/build.sh "$P"/toolchain/devkita64/* "$P"/toolchain/cross/* \
 	"$P"/toolchain/vorbis/build.sh "$P"/tools/fetch.sh | sha256sum | cut -c1-12)
 TCB=$FARM_HOME/toolchain-$TCID; mkdir -p "$TCB"
+# T1: a fresh machine restores the built toolchain of this TCID from the artifacts repository (hostcache.sh) instead
+# of building it (gcc ~45 min on 4 cores); the first machine to build it publishes it, in the background
+TC_RESTORED=0
+if [ ! -f "$TCB/toolchain/stage.json" ] && hostcache fetch toolchain "$TCID" "$TCB"; then TC_RESTORED=1; fi
 make -C "$P" fetch toolchain BUILD_DIR="$TCB" EXT="$EXT" JOBS="$JOBS" TESTS=none > "$TCB/make.log" 2>&1 || true
+if [ "$TC_RESTORED" = 0 ] && stage_ok "$TCB" toolchain; then
+	hostcache_publish_bg toolchain "$TCID" "$TCB" --exclude toolchain/dl --exclude toolchain/src --exclude toolchain/work
+fi
 art() { python3 -I -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.get("artifacts",{}).get(sys.argv[2]) or "")' \
 	"$TCB/toolchain/stage.json" "$1"; }
 stage_ok "$TCB" toolchain || FAIL="the toolchain stage failed (see $TCB/make.log)"

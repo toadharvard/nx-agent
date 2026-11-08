@@ -32,6 +32,16 @@ host_check() {   # commands (py:<module> for python modules) -> installed with a
 	exit 1
 }
 
+hostcache() {   # hostcache fetch|publish <name> <key> <dir> [...]: tools/farm/hostcache.sh (HOSTCACHE=0: nothing)
+	[ "${HOSTCACHE:-1}" = 1 ] || return 1
+	ARTIFACTS=$ARTIFACTS bash "$(dirname "${BASH_SOURCE[0]}")/hostcache.sh" "$@" 2>> "$FARM_HOME/hostcache.log"
+}
+hostcache_publish_bg() {   # hostcache_publish_bg <name> <key> <dir> [--exclude sub ...]: once per key, in the background
+	[ "${HOSTCACHE:-1}" = 1 ] || return 0
+	[ -f "$FARM_HOME/hostcache-$1-$2.published" ] && return 0
+	( hostcache publish "$@" && touch "$FARM_HOME/hostcache-$1-$2.published" ) > /dev/null 2>&1 &
+	return 0
+}
 job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and the pinned checkouts (or FARM_EXT)
 	local repo=$1
 	if [ -z "${FARM_SRC:-}" ] && [ -n "${FARM_STABLE_SRC:-}" ]; then
@@ -57,7 +67,18 @@ job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and
 	COMMIT=$(git -C "$SRC" rev-parse HEAD)
 	C12=${COMMIT:0:12}
 	EXT=$FARM_HOME/ext
-	if [ -n "${FARM_EXT:-}" ]; then EXT=$(cd "$FARM_EXT" && pwd); else bash "$P/tools/fetch.sh" "$EXT" >/dev/null; fi
+	if [ -n "${FARM_EXT:-}" ]; then EXT=$(cd "$FARM_EXT" && pwd)
+	else
+		# T1: a fresh machine takes the pinned checkouts from the artifacts repository (tools/farm/hostcache.sh,
+		# keyed by tools/fetch.sh itself: the pins) instead of cloning them; fetch.sh then only checks them
+		local ek ext_restored=0
+		ek=$(sha256sum "$P/tools/fetch.sh" | cut -c1-16)
+		if [ "${HOSTCACHE:-1}" = 1 ] && [ ! -d "$EXT/fnv_decomp/.git" ]; then
+			hostcache fetch ext "$ek" "$EXT" && ext_restored=1
+		fi
+		bash "$P/tools/fetch.sh" "$EXT" >/dev/null
+		[ "$ext_restored" = 1 ] || hostcache_publish_bg ext "$ek" "$EXT"
+	fi
 	D12=$(sed -n 's/^pin fnv_decomp  *[^ ]*  *\([0-9a-f]\{12\}\).*/\1/p' "$P/tools/fetch.sh")
 	[ -d "$ARTIFACTS/.git" ] || git clone -q --no-checkout https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"
 }
