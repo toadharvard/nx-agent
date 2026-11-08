@@ -28,6 +28,7 @@ Design, formats and measurements: [`../../docs/LINK.md`](../../docs/LINK.md).
 | `test_vslots.py` | Slot order and binding on hand-written classes compiled by MSVC 2008 (Wine) and GCC; image-slot stubs under qemu. |
 | `elfsyms.py` | ELF symbol tables, vtable-slot relocations, renaming undefined symbols (many old names -> one new). |
 | `fnvnx_addrmap.h` | Runtime form of the address map (`addrmap.c` is generated). |
+| `test_tagflags.py` | W48: a `??_G` recipe name no object defines, bound through the unit's `// @fnv` tag to a plain (this, flags) / (ptr, flags) definition. |
 | `test_link.py` | Self-test on hand-written names (no decomp content). |
 
 ```sh

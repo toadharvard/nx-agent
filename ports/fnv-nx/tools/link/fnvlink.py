@@ -567,6 +567,17 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             native[a] = dict(unit=u.source, sym=pick, variants=variants, tier=tier, msvc=n)
             def_stats['matched-' + tier] += 1
 
+    # ---- W48 (R2, vtgate 4264bfd7): a `??_G` / `??_E` recipe name no object defines, whose unit defines the
+    # function at that address under the decomp's own name (`FUN_00e22500_cls::FUN_00e22500(unsigned char)`,
+    # `FUN_00431980(void *, unsigned)`): bound through the unit's `// @fnv 0x<a>` tag (tag_flags_defs)
+    bound = {nd['sym'].name for nd in native.values()}
+    for a, (u, n, pick) in sorted(tag_flags_defs(real, native, objsyms, msvc, itanium, tree, def_stats).items()):
+        if pick.name in bound:
+            def_stats['tag-flags-bound-elsewhere'] += 1; continue
+        bound.add(pick.name)
+        native[a] = dict(unit=u.source, sym=pick, variants={}, tier='tag-flags', msvc=n)
+        def_stats['matched-tag-flags'] += 1
+
     # ---- startup natives (docs/STARTUP.md, prepare rule XC1): extern "C" __fnvnx_dyninit_<addr> / _dynexit_<addr>
     # stand for the ??__E / ??__F at <addr>, which MSVC names only as specials
     for u in sorted(real, key=lambda x: x.source):
@@ -804,7 +815,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for var_ in ('D1', 'D2'):
             if nd_['variants'].get(var_) is not None and sigs.itanium_variant(nd_['sym'].name) == 'D0':
                 return g_, (ADDR_SYM % g_) + ('' if nd_['variants'][var_] is nd_['sym'] else '_' + var_)
-        if sigs.itanium_variant(nd_['sym'].name) is None and flags_param(msvc(nd_['msvc']) if nd_['msvc'] else None):
+        if sigs.itanium_variant(nd_['sym'].name) is None and (
+                nd_.get('tier') == 'tag-flags' or flags_param(msvc(nd_['msvc']) if nd_['msvc'] else None)):
             name_ = FLAG_SYM % (g_, 0)
             bridges.setdefault(name_, emit_flag_stub(name_, ADDR_SYM % g_, 0))
             return g_, name_
@@ -1952,6 +1964,79 @@ FREE_HDR = re.compile(r'^(?![ \t]|//)(?![^\n;{}#(]*::)[^\n;{}#(]*?\b(?!(?:if|for
                       r'\([^;{}]*\)\s*(?:const\s*)?\{', re.M)
 
 
+TAG_HEAD = re.compile(r'//\s*@fnv\s+0x([0-9a-fA-F]+)[^\n]*\n((?:[ \t]*(?://[^\n]*)?\n)*)([^\n(;{}]*)\(')
+TAG_NAME = re.compile(r'((?:\w+\s*::\s*)*~?\w+)\s*$')
+
+
+def tag_names(text):
+    """`// @fnv 0x<a>` tags of a unit text -> {address: [qualified name of the function defined after the tag]}:
+    the head before the first `(` of the next non-blank, non-comment line (`FNVNX_KEEP T *C::f(` -> `C::f`)."""
+    out = collections.defaultdict(list)
+    for m in TAG_HEAD.finditer(text):
+        n = TAG_NAME.search(m.group(3))
+        out[int(m.group(1), 16)].append(re.sub(r'\s+', '', n.group(1)) if n else None)
+    return out
+
+
+def flags_like(isig, cls):
+    """An Itanium definition shaped like a deleting destructor of class qual `cls`: a member of cls with one integer
+    parameter (the flags), or a free function (pointer, integer). cls is empty when undname gives no qualified name
+    (a class local to a function: `??_GFUN_0048ef40_shell@?1??FUN_0048ef60@@...`): the free shape only."""
+    ps = [abi.classify(p) for p in (isig.raw_params or []) if p != 'void']
+    ints = ('I8', 'I16', 'I32')
+    if cls and isig.qual[:-1] == cls:
+        return len(ps) == 1 and ps[0] in ints
+    return len(isig.qual) == 1 and len(ps) == 2 and ps[0] == 'P' and ps[1] in ints
+
+
+def tag_flags_defs(real, native, objsyms, msvc, itanium, tree, stats):
+    """W48 (R2, vtgate 4264bfd7, exe 0x00e22500 / 00431980 / 0048ef60 / 00e00910): units.json binds address a to
+    the MSVC deleting destructor `??_GC@@UAEPAXI@Z` (or `??_E`), no object defines C's D0, and the unit's source
+    defines the code at a as a plain function: `// @fnv 0x00e22500` before `C *C::FUN_00e22500(unsigned char)`, or
+    a free `void FUN_00431980(void *, unsigned)`. The definition the tag names, when the unit tags a exactly once
+    and defines exactly one function of that name with the flags shape (flags_like), is the native definition at a
+    (its msvc stays the ??_G name: vmo_dtor_slots / exe_slot_fill make D1 / D0 from it with the flags stubs).
+    Returns {a: (unit, msvc name, elf sym)}. stats: tag-flags-* (no-tag: no body at all, a D0 to synthesize)."""
+    want = collections.defaultdict(list)
+    for u in real:
+        for a, n in u.defs:
+            if a not in native and n.startswith(('??_G', '??_E')):   # undname: a local class's ??_G has no variant
+                want[u].append((a, n))
+    out = {}
+    for u in sorted(want, key=lambda x: x.source):
+        path = os.path.join(tree or '', u.source)
+        if not tree or not os.path.exists(path):
+            stats['tag-flags-no-source'] += len(want[u]); continue
+        tags = tag_names(open(path, encoding='utf-8', errors='surrogateescape').read())
+        funcs = collections.defaultdict(list)
+        for s in objsyms.get(u.source, ()):
+            if s.shndx != 0 and s.type == 'func' and s.bind in ('global', 'weak') and \
+                    not s.name.endswith('.localalias') and s.name.startswith('_Z'):
+                funcs[tuple(itanium(s.name).qual)].append(s)
+        for a, n in want[u]:
+            if a in out:
+                continue
+            names = tags.get(a, [])
+            if not names:
+                stats['tag-flags-no-tag'] += 1; log('tag-flags: no @fnv tag for %08x (%s)' % (a, n)); continue
+            if len(names) != 1 or names[0] is None:
+                stats['tag-flags-several-tags'] += 1; continue
+            cands = {s.name: s for s in funcs.get(tuple(names[0].split('::')), ())
+                     if not itanium(s.name).variant}
+            cls = msvc(n).qual[:-1]
+            shaped = [s for nm, s in sorted(cands.items()) if flags_like(itanium(nm), cls)]
+            if not cands:   # a constructor's spelling at the ??_G (`C::C()`, R2's 00cc7e50 / 0041c660): no body
+                q_ = names[0].split('::')
+                stats['tag-flags-not-defined' + ('-ctor' if len(q_) > 1 and q_[-1] == q_[-2] else '')] += 1
+                continue
+            if len(shaped) != 1:
+                stats['tag-flags-not-flags-shape' if not shaped else 'tag-flags-ambiguous'] += 1
+                log('tag-flags: %08x %s: %s' % (a, names[0], 'not flags-shaped' if not shaped else 'ambiguous'))
+                continue
+            out[a] = (u, n, shaped[0])
+    return out
+
+
 def no_candidate_why(sites, ctor_classes):
     """Why a hand-stored image vtable has no candidate class (S5 J-0108 item 3): what a candidate would need."""
     if all(fa is None for _, _, fa, _ in sites):
@@ -2623,15 +2708,16 @@ def load_vtbind(top=None, path=None):
     if path and os.path.isfile(path):
         files = [path]
     elif top and os.path.isdir(top):
-        files = sorted(os.path.join(dp, 'bind.tsv') for dp, _, fs in os.walk(top) if 'bind.tsv' in fs)
+        files = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(top) for f in fs if f in ('bind.tsv', 'bindings.tsv'))
     out = {}
     for f in files:
         try:
             lines = open(f).read().split('\n')
         except OSError:
             continue
-        if not lines or not lines[0].startswith('# fnvnx-vtbind/1'):
+        if not lines or not lines[0].startswith(('# fnvnx-vtbind/1', '# fnvnx-vtgate-r4-bindings/1')):
             continue
+        r4 = lines[0].startswith('# fnvnx-vtgate-r4-bindings/1')   # exe_addr, native_symbol, kind, target, n
         for line in lines[1:]:
             if not line or line.startswith('#'):
                 continue
@@ -2639,7 +2725,10 @@ def load_vtbind(top=None, path=None):
             if len(p) < 5:
                 continue
             try:
-                out[int(p[0], 16)] = (p[1], p[2], p[3], int(p[4] or 0))
+                if r4:
+                    out[int(p[0], 16)] = (p[2], p[1], p[3], int(p[4] or 0))
+                else:
+                    out[int(p[0], 16)] = (p[1], p[2], p[3], int(p[4] or 0))
             except ValueError:
                 continue
     return out
@@ -2784,7 +2873,7 @@ def deleting_native(nd, msvc):
     if sigs.itanium_variant(nd['sym'].name) == 'D0':
         return True
     n = nd.get('msvc') or ''
-    return n.startswith(('??_G', '??_E')) or flags_param(msvc(n) if n else None)
+    return n.startswith(('??_G', '??_E')) or nd.get('tier') == 'tag-flags' or flags_param(msvc(n) if n else None)
 
 
 def global_delete(newdel_votes, native, providers):
@@ -3093,7 +3182,8 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
         dsym = nd['sym'].name
         dvar = sigs.itanium_variant(dsym)
         ds = msvc(nd['msvc']) if nd.get('msvc') else None
-        if isig.variant and isig.variant.startswith('D') and dvar is None and flags_param(ds):
+        if isig.variant and isig.variant.startswith('D') and dvar is None and (
+                flags_param(ds) or nd.get('tier') == 'tag-flags'):   # W48: tag_flags_defs checked the shape
             # GCC's D1/D0 where the decomp defines the exe's ??_G as a plain function taking the flags
             # (`FUN_00c2a090(unsigned int)`): a stub passes them, 1 for D0 (delete), 0 for D1/D2
             fl = 1 if isig.variant == 'D0' else 0
@@ -3858,7 +3948,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     st['vtfill-skipped-strong'] += 1
                 else:
                     import classlayout as _cl
-                    expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), slots)
+                    vv_ = max(vs, key=lambda v: len(exev[v].slots))
+                    sl_ = _cl.real_slots(exe_path, vv_, slots) if exe_path else slots   # no words past the table
+                    expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), sl_)
                     fill, i_, pair_ = [], 0, None
                     cur = names[2:2 + n]
                     while i_ < len(expv):
@@ -3877,6 +3969,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                         t_ = exe_slot_target(x_, native, providers, exe_path, bridges, traps, st, (z, 2 + i_))
                         if t_.startswith('__fnvnx_vtrap_') and x_ in vtbind:
                             kb_, sb_, tb_, nb_ = vtbind[x_]
+                            kb_ = {'function': 'fn', 'adjthunk': 'adj', 'deldtor': 'fn'}.get(kb_, kb_)   # R4's two files
                             if kb_ == 'adj' and tb_:
                                 t_ = ADJ_SYM % x_
                                 bridges.setdefault(t_, emit_adj_stub(t_, tb_, nb_))
