@@ -131,3 +131,32 @@ void fnv_standin_00b57ea0(HashTableBase *t, uint32_t key, uint32_t value) {
     t->buckets[i] = n;
     t->count++;
 }
+
+/* 0x00405430 NiTMap_S::RemoveKey(key) (the AllForms-style map RemoveKey that TESForm's 0x00483c70 reaches from the
+ * form constructor of the static form 0x011c9750, initializer 0x00f4ad10): NiTMap_S is a call-only declaration with
+ * a placeholder at slot 0 (actor.cpp), so its KeyToHashIndex call reads native slot 1. The receiver is the native
+ * NiTPointerMap<unsigned, TESForm*> (exe vftable 0x0101ca78, native _ZTV13NiTPointerMapIjP7TESFormE) with GCC's
+ * D1/D0 at 0/1, so the call ran the deleting destructor and its result indexed the hash table out of range. The
+ * same body, exe slot k at native slot k+1 (S1-rules: `virtual ~NiTMap_S()` for `v0`, D26 (b)). */
+typedef struct MapItemS { struct MapItemS *next; uint32_t key; void *val; } MapItemS;
+typedef struct { void **vptr; uint32_t size; MapItemS **table; uint32_t count; } NiTMapS;
+#define MSLOT_M1(obj, k) (((void **)((NiTMapS *)(obj))->vptr)[(k) + 1])
+_Bool fnv_standin_00405430(NiTMapS *m, uint32_t key) __asm__("_ZN8NiTMap_S9RemoveKeyEj");
+_Bool fnv_standin_00405430(NiTMapS *m, uint32_t key) {
+    uint32_t i = ((uint32_t (*)(void *, uint32_t))MSLOT_M1(m, 1))(m, key);
+    MapItemS *cur = m->table[i], *prev = 0;
+    while (cur && !((_Bool (*)(void *, uint32_t, uint32_t))MSLOT_M1(m, 2))(m, key, cur->key)) {
+        prev = cur;
+        cur = cur->next;
+    }
+    if (!cur)
+        return 0;
+    if (prev)
+        prev->next = cur->next;
+    else
+        m->table[i] = cur->next;
+    ((void (*)(void *, MapItemS *))MSLOT_M1(m, 4))(m, cur);
+    ((void (*)(void *, MapItemS *))MSLOT_M1(m, 6))(m, cur);
+    m->count--;
+    return 1;
+}
