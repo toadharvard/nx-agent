@@ -266,3 +266,287 @@ def _one_block(rets, start, limit):
                      ops[0].reg != X.X86_REG_EAX):
                 pending = None
     return None
+
+
+# ------------------------------------------------------------- r5 design: a destructor that leaves the vptr to its base
+_DEFER = {}
+
+
+def dtor_defers_vptr(addr):
+    """(r5 design, dtor-base-vptr) True when the exe shows that the destructor at `addr` (or the destructor a scalar
+    deleting wrapper at `addr` calls first) never stores a vftable into its object itself and ends by calling a
+    function that does: the last direct call of the body is a base-class destructor whose first instructions store
+    an image vftable (RTTI-checked) at offset 0 of `this`. The final vptr of the object is that base's vftable on
+    the exe whatever the harness does to the call, so a machine that left the word alone (the call is intercepted
+    with a canned result) and one that stored an address point of its own agree only if that base destructor is
+    what sets it. False without the exe."""
+    if addr not in _DEFER:
+        try:
+            _DEFER[addr] = _defers(addr, 0)
+        except Exception:  # noqa: BLE001
+            _DEFER[addr] = False
+    return _DEFER[addr]
+
+
+def _vftable_store_at0(ins):
+    import capstone
+    ops = ins.operands
+    if ins.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == capstone.x86.X86_OP_MEM and ops[0].size == 4 and \
+            ops[0].mem.disp == 0 and ops[0].mem.index == 0 and ops[0].mem.base != 0 and \
+            ops[1].type == capstone.x86.X86_OP_IMM:
+        return vftable_class(ops[1].imm & 0xffffffff) is not None
+    return False
+
+
+def _defers(addr, depth):
+    import capstone
+    body = []
+    for n in _insns(addr, 90):
+        if n.mnemonic in ('ret', 'retn') or n.mnemonic == 'int3':
+            break
+        body.append(n)
+    if not body:
+        return False
+    calls = [n for n in body if n.mnemonic == 'call' and n.operands[0].type == capstone.x86.X86_OP_IMM]
+    if depth == 0 and deleting_wrapper(addr) and calls:
+        return _defers(calls[0].operands[0].imm, 1)           # the wrapper's first call is the destructor
+    if any(_vftable_store_at0(n) for n in body):
+        return False                                           # it stores a vftable itself
+    if not calls:
+        return False
+    base = calls[-1].operands[0].imm
+    # nothing is called after the base destructor but the epilogue, and its body begins by storing a vftable
+    after = body[body.index(calls[-1]) + 1:]
+    if any(n.mnemonic == 'call' for n in after):
+        return False
+    return any(_vftable_store_at0(n) for n in _insns(base, 24) if n.mnemonic not in ('ret', 'retn'))
+
+# ---------------------------------------------------------------- r5 order: one full expression, read from the exe
+#
+# arg_blocks above proves the narrow shape (results pushed or moved, the calls in a run). MSVC /Od also evaluates the
+# operands of one expression in an order of its own that is not a plain reversal: `A()->f() == B()->g()` calls both
+# getters first (each result spilled to a compiler temporary, loaded back as `this`), then the two virtual calls and
+# compares them (`mov esi, eax` ... `cmp eax, esi`); `F(a(), b()->c()->d(), x->e())` pushes each argument's result
+# (`push eax`, or `push ecx; fstp [esp]` for a float) and evaluates the argument chains one after another.
+# GCC's order differs, and C++ leaves both open. expr_deps() proves the region is ONE such expression, from the
+# exe's bytes (never from a name): a straight-line walk from the first traced call's return address that follows
+# where every call's result goes (registers, the x87 top, the pushed stack, and `[ebp-N]` frame slots) and accepts
+# it only when
+#   - there is no branch, jump or return before every traced result has been consumed (no `&&`, `||`, `?:`, no end
+#     of a statement in the middle);
+#   - every traced result is consumed by a later call (ecx / the call target register), pushed as an argument, or
+#     combined by an instruction (`cmp eax, esi`), i.e. reaches the end of the expression; a result that is
+#     dropped (a statement `f();`) is no operand;
+#   - no result is stored to memory except into an `[ebp-N]` slot that the rest of the function never reads again
+#     (a compiler temporary: a statement `x = f();` stores to a variable that is read later; a store through any
+#     other address is a side effect).
+# The result is the data-dependence relation between the traced calls: i depends on j when j's result reaches i's
+# `this` / target register (through temporaries and the vtable load). Calls with no path between them may run in any
+# order. What it cannot see: a result pushed for a callee that takes it (g(f()), two calls adjacent in the stack
+# area) is not a dependence here; the argument comparison after pairing the calls catches a native that passed
+# something else.
+_EXPR = {}
+_CANON = {'eax': 'a', 'ax': 'a', 'al': 'a', 'ah': 'a', 'ecx': 'c', 'cx': 'c', 'cl': 'c', 'ch': 'c',
+          'edx': 'd', 'dx': 'd', 'dl': 'd', 'dh': 'd', 'ebx': 'b', 'bx': 'b', 'bl': 'b', 'bh': 'b',
+          'esi': 'si', 'si': 'si', 'edi': 'di', 'di': 'di', 'ebp': 'bp', 'bp': 'bp', 'esp': 'sp', 'sp': 'sp'}
+_NO = frozenset()
+
+
+def expr_deps(rets, limit=260):
+    """{i: frozenset of the traced calls j whose result reaches call i} for the traced calls whose return addresses
+    are `rets` (trace order), when the exe shows them to be the calls of one expression (see above); else None."""
+    if not rets or None in rets:
+        return None
+    key = tuple(rets)
+    if key not in _EXPR:
+        try:
+            _EXPR[key] = _expr_deps(list(rets), limit)
+        except Exception:  # noqa: BLE001
+            _EXPR[key] = None
+    return _EXPR[key]
+
+
+def _expr_deps(rets, limit):
+    import capstone
+    from capstone import x86_const as X
+    n = len(rets)
+    want = {r: i for i, r in enumerate(rets)}
+    if len(want) != n:
+        return None
+    code = _insns(rets[0], limit)
+    if not code:
+        return None
+    OP_REG, OP_MEM, OP_IMM = capstone.x86.X86_OP_REG, capstone.x86.X86_OP_MEM, capstone.x86.X86_OP_IMM
+    reg = {k: _NO for k in ('a', 'b', 'c', 'd', 'si', 'di', 'bp', 'sp')}
+    slots, temps, stack = {}, set(), []
+    deps, sinks = {}, set()
+    st = {'st0': frozenset([0]), 'nxt': 1, 'node': n}        # the scan starts after the first call: its result is in eax / st0
+    deps[0] = set()
+    reg['a'] = frozenset([0])
+
+    def closure(roots):
+        seen, todo = set(), list(roots)
+        while todo:
+            x = todo.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            todo.extend(deps.get(x, ()))
+        return seen
+
+    def done():
+        return st['nxt'] == n and set(range(n)) <= closure(sinks)
+
+    def cn(ins, r):
+        return _CANON.get(ins.reg_name(r))
+
+    def slot_of(op):
+        m = op.mem
+        return m.disp if m.base == X.X86_REG_EBP and m.index == 0 else None
+
+    def mem_taint(ins, op):
+        d = slot_of(op)
+        if d is not None:
+            return slots.get(d, _NO)
+        t = _NO
+        for r in (op.mem.base, op.mem.index):
+            if r:
+                t = t | reg.get(cn(ins, r), _NO)
+        return t
+
+    def src_taint(ins, op):
+        if op.type == OP_REG:
+            return reg.get(cn(ins, op.reg), _NO)
+        if op.type == OP_MEM:
+            return mem_taint(ins, op)
+        return _NO
+
+    last = None
+    for ins in code:
+        last = ins
+        m, ops = ins.mnemonic, ins.operands
+        if m == 'call':
+            ret = ins.address + ins.size
+            inp = set(reg['c'])
+            if ops and ops[0].type != OP_IMM:
+                inp |= src_taint(ins, ops[0])
+            if ret in want:
+                if want[ret] != st['nxt']:
+                    return None
+                node, st['nxt'] = st['nxt'], st['nxt'] + 1
+                deps[node] = inp
+            else:
+                node, st['node'] = st['node'], st['node'] + 1
+                for t in stack:
+                    inp |= t                # the closing call takes what was pushed
+                deps[node] = inp
+                sinks.add(node)
+            reg['a'], reg['c'], reg['d'] = frozenset([node]), _NO, _NO
+            st['st0'] = frozenset([node])
+            if done():
+                break
+            continue
+        if m in ('ret', 'retn'):
+            sinks |= set(reg['a']) | set(st['st0'])
+            if done():
+                break
+            return None
+        if m.startswith('j') or m in ('leave', 'int3') or m.startswith('loop'):
+            return None
+        if m == 'push':
+            stack.append(src_taint(ins, ops[0]) if ops else _NO)
+            continue
+        if m == 'pop':
+            t = stack.pop() if stack else _NO
+            if ops and ops[0].type == OP_REG and cn(ins, ops[0].reg) in reg:
+                reg[cn(ins, ops[0].reg)] = t
+            continue
+        if m in ('sub', 'add') and len(ops) == 2 and ops[0].type == OP_REG and ops[0].reg == X.X86_REG_ESP and \
+                ops[1].type == OP_IMM:
+            k = (ops[1].imm & 0xffffffff) // 4
+            if m == 'sub':
+                stack.extend([_NO] * k)
+            else:
+                for t in stack[max(0, len(stack) - k):]:
+                    sinks |= set(t)
+                del stack[max(0, len(stack) - k):]
+            continue
+        if m.startswith('f'):
+            mem = next((o for o in ops if o.type == OP_MEM), None)
+            if m in ('fstp', 'fst', 'fistp', 'fist', 'fisttp') and mem is not None:
+                t = st['st0']
+                d = slot_of(mem)
+                if mem.mem.base == X.X86_REG_ESP and mem.mem.index == 0 and mem.mem.disp == 0 and stack:
+                    stack[-1] = t
+                elif d is not None:
+                    slots[d] = t
+                    if t:
+                        temps.add(d)
+                elif t:
+                    return None                 # a result stored through another address: a side effect
+                if m != 'fst' and m != 'fist':
+                    st['st0'] = _NO
+            elif m.startswith(('fld', 'fild')):
+                st['st0'] = mem_taint(ins, mem) if mem is not None else _NO
+            elif m.startswith(('fcom', 'fucom', 'ftst', 'fnstsw', 'fstsw')):
+                sinks |= set(st['st0'])
+            elif mem is not None:
+                st['st0'] = st['st0'] | mem_taint(ins, mem)
+            continue
+        # everything else: the registers and slots read -> the registers and slots written
+        try:
+            rd, wr = ins.regs_access()
+        except Exception:  # noqa: BLE001
+            return None
+        t = _NO
+        for r in rd:
+            c = cn(ins, r)
+            if c in reg and c not in ('sp', 'bp'):
+                t = t | reg[c]
+        for o in ops:
+            if o.type == OP_MEM and (o.access & capstone.CS_AC_READ):
+                d = slot_of(o)
+                if d is not None:
+                    t = t | slots.get(d, _NO)
+        if m in ('xor', 'sub') and len(ops) == 2 and ops[0].type == ops[1].type == OP_REG and \
+                ops[0].reg == ops[1].reg:
+            t = _NO
+        wrote = False
+        for o in ops:
+            if o.type == OP_MEM and (o.access & capstone.CS_AC_WRITE):
+                wrote = True
+                d = slot_of(o)
+                if d is not None:
+                    slots[d] = t
+                    if t:
+                        temps.add(d)
+                elif t:
+                    return None                 # a result stored through another address: a side effect
+        for r in wr:
+            c = cn(ins, r)
+            if c in reg and c not in ('sp', 'bp'):
+                reg[c] = t
+                wrote = True
+        if m == 'lea' and len(ops) == 2 and ops[1].type == OP_MEM and ops[0].type == OP_REG:
+            t2 = _NO
+            for r in (ops[1].mem.base, ops[1].mem.index):
+                if r:
+                    t2 = t2 | reg.get(cn(ins, r), _NO)
+            reg[cn(ins, ops[0].reg)] = t2
+        elif not wrote:
+            sinks |= set(t)                     # cmp / test: the expression consumes the value
+        if done():
+            break
+    if not done():
+        return None
+    # the temporaries must be dead: nothing after the expression reads them (a variable would be read again)
+    live = set(temps)
+    for ins in _insns(last.address + last.size, 100):
+        if not live or ins.mnemonic in ('ret', 'retn'):
+            break
+        for o in ins.operands:
+            if o.type == OP_MEM and o.mem.base == X.X86_REG_EBP and o.mem.index == 0 and o.mem.disp in live:
+                if o.access & capstone.CS_AC_READ:
+                    return None
+                live.discard(o.mem.disp)
+    return {i: frozenset(j for j in closure(deps.get(i, ())) if j < n and j != i) for i in range(n)}

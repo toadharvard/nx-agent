@@ -999,6 +999,12 @@ def hint(pair, target, case, div, fn, max_steps):
         big = [lab for lab, b in case.args.items() if int.from_bytes(b[:4], 'little') & 0xffffffff >= 32]
         if big and hits:
             h['cause'] = 'shift-count'; h['args'] = big; return h
+    if k == 'call-count' and pair is not None:
+        # (r5 design) a constructor call whose every store the caller overwrites (dead-init-call)
+        import r5design
+        c = r5design.dead_init_probe(pair, case, div, max_steps, h)
+        if c:
+            h['cause'] = c; return h
     if k in ('call-count', 'call-target') and pair is not None:
         # (uncls2) a call that only runs on garbage: the same uniform-fill probe (0x00a82d90). (r5-calltarget) A
         # call-target too: the call a branch on an unwritten local picks (0x006e1670: `len`, the out-parameter of a
@@ -1006,6 +1012,22 @@ def hint(pair, target, case, div, fn, max_steps):
         c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=True)
         if c:
             h['cause'] = c; return h
+    if k in ('call-target', 'call-count') and pair is not None and h['_runs'] < 40:
+        # (difffuzz-20, stub-flow) a call sequence that depends on a stack word an intercepted callee should have
+        # filled (a count or flag read back into a local or a dead parameter slot, 0x00a3d370): the words the code
+        # never stored to are 0 on both machines (world.STUB_OUT), under two garbage seeds. Both must then run to
+        # the end and agree; a rerun that faults on both machines is no evidence (_benign sees no divergence)
+        world.STUB_OUT = True
+        try:
+            alt = case.copy(); alt.seed = case.seed ^ 0x13572468
+            alt.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+            base = case.copy(); base.rets = list(alt.rets)
+            runs = [pair.run(c, max_steps) for c in (base, alt)]
+        finally:
+            world.STUB_OUT = False
+        h['_runs'] += 2
+        if all(_benign(d_) and not rx_.error and not ra_.error for rx_, ra_, d_ in runs):
+            h['cause'] = 'stub-outparam'; return h
     if k in ('call-target', 'call-count'):
         h['cause'] = 'call-flow'; return h
     if hits:
@@ -1029,6 +1051,18 @@ def hint(pair, target, case, div, fn, max_steps):
             h['cause'] = 'layout-offset'; h['shift'] = d; return h
     if k in ('return', 'mem-write', 'call-args') and pair is not None:
         c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h)
+        if c:
+            h['cause'] = c; return h
+    if k in ('return', 'mem-write', 'call-args') and pair is not None:
+        # (r5 design) mechanisms the exe's own code has to show (r5design.py): dead-result, local-index-range,
+        # ptrdiff-unaligned, x87-range of a float argument
+        import r5design
+        c = r5design.value_probes(pair, target, case, div, fn, max_steps, h)
+        if c:
+            h['cause'] = c; return h
+    if k == 'error' and pair is not None:
+        import r5design
+        c = r5design.null_deref_probe(pair, case, div, max_steps, h)
         if c:
             h['cause'] = c; return h
     h['cause'] = 'unclassified'

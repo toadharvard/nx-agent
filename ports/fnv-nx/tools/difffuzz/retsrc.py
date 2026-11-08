@@ -26,6 +26,7 @@ _CACHE = {}
 _READS = {}
 _PE = []
 MAX_STEPS = 600
+BYTE_STEPS = 4000
 
 _GPR = {'eax': 'eax', 'ax': 'eax', 'al': 'eax', 'ah': 'eax', 'ecx': 'ecx', 'cx': 'ecx', 'cl': 'ecx', 'ch': 'ecx',
         'edx': 'edx', 'dx': 'edx', 'dl': 'edx', 'dh': 'edx', 'ebx': 'ebx', 'bx': 'ebx', 'bl': 'ebx', 'bh': 'ebx',
@@ -385,6 +386,238 @@ def unread_labels(cv, addr):
         if space == 'ecx' and not ecx:
             out.add(lab)
         elif space == 'stk' and not every and all(w not in args for w in range(off // 4, (off + max(size, 1) + 3) // 4)):
+            out.add(lab)
+    return out
+
+
+_BYTES = {}
+
+
+def byte_only_args(addr, depth=3):
+    """(difffuzz-20, byte-arg) The stack-argument words of the exe function at addr that its code reads only as one
+    byte, directly (`cmp byte ptr [esp+0x2c], 0`) or by handing the whole word on to a callee that does (the same test
+    one level down, `depth` levels at most). A bool or char parameter occupies a dword whose upper three bytes are
+    whatever the caller's register or slot held (MSVC forwards a bool parameter by pushing its slot, after a byte
+    store into the dead slot of an earlier parameter: 0x00b6d170 passes 0xffffff01 where the native passes 1), so
+    those bytes are no part of the argument. A set of word indices (0 = the first after the return address); None when
+    the code does not say (an address of a slot taken, a branch or an esp-relative access the walk cannot follow, a word
+    handed to a callee it cannot read, no exe). Any other use of a word, whole or in 16 bits, is not byte-only."""
+    key = (addr, depth)
+    if key not in _BYTES:
+        try:
+            r = _byte_only(addr, depth)
+            _BYTES[key] = None if r is None else frozenset(r[0] - r[1])
+        except Exception:  # noqa: BLE001
+            _BYTES[key] = None
+    return _BYTES[key]
+
+
+def _byte_only(addr, depth):
+    """(narrow words, wide words) of the function at addr, see byte_only_args. A word handed to a callee counts as
+    wide unless the callee reads it as one byte only; one the callee never reads counts as neither."""
+    pe = _pe()
+    if pe is None:
+        return None
+    import capstone
+    from capstone import x86_const as X
+    s = pe.section_of(addr)
+    if s is None or not s[2] & 0x20000000:
+        return None
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    base, data = s[0], s[3]
+
+    def at(a):
+        off = a - base
+        for i in md.disasm(bytes(data[off:off + 16]), a, 1):
+            return i
+        return None
+    narrow, wide = set(), set()
+    ESPEBP = (X.X86_REG_ESP, X.X86_REG_EBP)
+    OP = capstone.x86
+    seen, steps = set(), 0
+    work = [(addr, (0, None, (None,) * 6, (), frozenset(), 0))]
+    while work:
+        a, st = work.pop()
+        while True:
+            if (a, st) in seen:
+                break
+            seen.add((a, st))
+            steps += 1
+            if steps > BYTE_STEPS:
+                return None
+            i = at(a)
+            if i is None:
+                return None
+            delta, ebp, regs, stk, wrote, argp = st
+            regs, m, ops, nxt = list(regs), i.mnemonic, i.operands, a + i.size
+            if m in ('ret', 'retn'):
+                break
+            rd, wr = i.regs_access()
+            rnames = {_GPR.get(i.reg_name(r)) for r in rd}
+            wnames = {_GPR.get(i.reg_name(r)) for r in wr}
+            if m in ('xor', 'sub', 'sbb') and len(ops) == 2 and ops[0].type == ops[1].type == OP.X86_OP_REG and \
+                    ops[0].reg == ops[1].reg:
+                rnames = set()
+            loaded = pushed = None
+            for o in ops:
+                if o.type != OP.X86_OP_MEM:
+                    continue
+                for rg in (o.mem.base, o.mem.index):          # an argument word used as an address
+                    nm = _GPR.get(i.reg_name(rg)) if rg else None
+                    if nm in _REGS and regs[_REGS.index(nm)] is not None:
+                        wide.add(regs[_REGS.index(nm)])
+                if o.mem.base not in ESPEBP:
+                    continue
+                if o.mem.index != 0:
+                    return None
+                d = o.mem.disp
+                if o.mem.base == X.X86_REG_EBP:
+                    if ebp is None:
+                        continue                    # ebp is data here (no `mov ebp, esp` yet, or reloaded)
+                    n = (d - ebp - 4) // 4 if d >= ebp + 4 else None
+                    off = (d - ebp - 4) % 4
+                else:
+                    if delta is None:
+                        return None
+                    n = (d - delta - 4) // 4 if d - delta >= 4 else None
+                    off = (d - delta - 4) % 4
+                if n is None:
+                    continue
+                if m == 'lea':
+                    return None
+                if o.access & capstone.CS_AC_READ and n not in wrote:
+                    if o.size == 1 and off == 0:
+                        narrow.add(n)
+                    elif o.size == 4 and off == 0 and m == 'mov' and ops[0].type == OP.X86_OP_REG and \
+                            ops[1] is o and _GPR.get(i.reg_name(ops[0].reg)) == i.reg_name(ops[0].reg):
+                        loaded = (_REGS.index(i.reg_name(ops[0].reg)), n)
+                    elif o.size == 4 and off == 0 and m == 'push':
+                        pushed = n
+                    else:
+                        wide.add(n)
+                if o.access & capstone.CS_AC_WRITE:
+                    wrote = wrote | {n}
+            for o in ops:                                       # register operands that carry an argument word
+                if o.type != OP.X86_OP_REG or not o.access & capstone.CS_AC_READ:
+                    continue
+                nm = _GPR.get(i.reg_name(o.reg))
+                if nm not in _REGS or nm not in rnames or regs[_REGS.index(nm)] is None:
+                    continue
+                pn = regs[_REGS.index(nm)]
+                if m == 'push':
+                    continue
+                if m == 'mov' and o is ops[1] and ops[0].type == OP.X86_OP_REG and o.size == 4:
+                    continue                                     # a copy: provenance follows below
+                if o.size == 1:
+                    narrow.add(pn)
+                else:
+                    wide.add(pn)
+            if m == 'call':
+                tgt = ops[0].imm if ops[0].type == OP.X86_OP_IMM else None
+                sub = _byte_only(tgt, depth - 1) if tgt is not None and depth > 0 else None
+                for j, p in enumerate(reversed(stk)):
+                    if p is None:
+                        continue
+                    if sub is not None and j not in sub[1]:
+                        if j in sub[0]:
+                            narrow.add(p)
+                    else:
+                        wide.add(p)
+                pop = _callee_pop(s, md, tgt) if tgt is not None else None
+                if pop is None:
+                    # an indirect call or a thunk: the next instruction tells a cdecl callee (`add esp, N` follows)
+                    # from a callee that pops the arguments pushed since the last call (stdcall, thiscall)
+                    nx = at(nxt)
+                    cd = nx is not None and nx.mnemonic == 'add' and nx.op_str.startswith('esp,')
+                    pop = 0 if cd else 4 * argp
+                argp = 0
+                for k in (0, 1, 2):
+                    regs[k] = None
+                stk = stk[:len(stk) - pop // 4] if pop // 4 <= len(stk) else ()
+                delta = delta - pop if delta is not None else None
+                st = (delta, ebp, tuple(regs), stk, wrote, argp)
+                a = nxt
+                continue
+            if m == 'jmp':
+                if ops[0].type == OP.X86_OP_IMM and s[0] <= ops[0].imm < s[0] + s[1] and \
+                        addr <= ops[0].imm < addr + 0x1000:
+                    a = ops[0].imm
+                    st = (delta, ebp, tuple(regs), stk, wrote, argp)
+                    continue
+                return None
+            if m.startswith('j'):
+                if ops[0].type != OP.X86_OP_IMM:
+                    return None
+                work.append((ops[0].imm, (delta, ebp, tuple(regs), stk, wrote, argp)))
+                a = nxt
+                continue
+            # register state: written registers lose their provenance, a 32-bit load or copy gives it
+            newprov = None
+            if loaded is not None:
+                newprov = (loaded[0], loaded[1])
+            elif m == 'mov' and len(ops) == 2 and ops[0].type == ops[1].type == OP.X86_OP_REG and ops[0].size == 4 and \
+                    _GPR.get(i.reg_name(ops[1].reg)) in _REGS and _GPR.get(i.reg_name(ops[0].reg)) in _REGS:
+                src = regs[_REGS.index(_GPR[i.reg_name(ops[1].reg)])]
+                if src is not None:
+                    newprov = (_REGS.index(_GPR[i.reg_name(ops[0].reg)]), src)
+            for nm in wnames:
+                if nm in _REGS:
+                    regs[_REGS.index(nm)] = None
+            if newprov is not None:
+                regs[newprov[0]] = newprov[1]
+            if m == 'push':
+                argp += 1
+                if delta is not None:
+                    delta += 4
+                if pushed is not None:
+                    stk = stk + (pushed,)
+                elif ops[0].type == OP.X86_OP_REG and _GPR.get(i.reg_name(ops[0].reg)) in _REGS and \
+                        ops[0].size == 4:
+                    stk = stk + (regs[_REGS.index(_GPR[i.reg_name(ops[0].reg)])],)
+                else:
+                    stk = stk + (None,)
+            elif m == 'pop':
+                argp = max(0, argp - 1)
+                if delta is not None:
+                    delta -= 4
+                top = stk[-1] if stk else None
+                stk = stk[:-1]
+                if ops[0].type == OP.X86_OP_REG and _GPR.get(i.reg_name(ops[0].reg)) in _REGS:
+                    regs[_REGS.index(_GPR[i.reg_name(ops[0].reg)])] = top
+            elif m in ('sub', 'add') and ops[0].type == OP.X86_OP_REG and ops[0].reg == X.X86_REG_ESP:
+                if ops[1].type != OP.X86_OP_IMM or delta is None:
+                    return None
+                k = ops[1].imm
+                argp = 0
+                delta += k if m == 'sub' else -k
+                if m == 'sub':
+                    stk = stk + (None,) * (k // 4)
+                else:
+                    stk = stk[:len(stk) - k // 4] if k // 4 <= len(stk) else ()
+            elif ops and ops[0].type == OP.X86_OP_REG and ops[0].reg == X.X86_REG_ESP and m != 'cmp':
+                return None
+            if m == 'mov' and len(ops) == 2 and ops[0].type == OP.X86_OP_REG and ops[0].reg == X.X86_REG_EBP and \
+                    ops[1].type == OP.X86_OP_REG and ops[1].reg == X.X86_REG_ESP:
+                ebp = delta
+            elif X.X86_REG_EBP in [r for r in wr]:
+                ebp = None
+            if m == 'leave':
+                return None
+            st = (delta, ebp, tuple(regs), stk, wrote, argp)
+            a = nxt
+    return narrow, wide
+
+
+def byte_only_labels(cv, addr):
+    """Labels of cv's stack parameters (one 4-byte integer / pointer word) that the exe code at addr reads only as a
+    byte (byte_only_args): their upper three bytes are not part of the argument."""
+    words = byte_only_args(addr)
+    if not words:
+        return set()
+    out = set()
+    for lab, space, off, size in getattr(cv, 'x86_declared', cv.x86):
+        if lab != 'sret' and space == 'stk' and size == 4 and off % 4 == 0 and off // 4 in words:
             out.add(lab)
     return out
 
