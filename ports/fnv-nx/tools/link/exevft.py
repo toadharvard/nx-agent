@@ -126,7 +126,7 @@ def load(path, cache):
 # ---- GCC vtable slot k -> exe vftable slot j (the slot fill, docs/LINK.md "Vftables from the player's exe")
 
 D1_SLOT = re.compile(r'(D[12]Ev$|_D[12]$|_d1$)')
-D0_SLOT = re.compile(r'(D0Ev$|_d0$)')
+D0_SLOT = re.compile(r'(D0Ev$|_D0$|_d0$)')
 
 
 def dtor_pos(names, words=None):
@@ -136,6 +136,10 @@ def dtor_pos(names, words=None):
     for i in range(len(names) - 1):
         a, b = names[i], names[i + 1]
         if a and b and D1_SLOT.search(a) and D0_SLOT.search(b):
+            return i
+        # a flags-stub pair into one decomp ??_G (`__fnvnx_vflag_<a>_0` / `_1`): what the binding makes of D1 / D0, so
+        # a table that already has it (Character at slots 4 / 5) is not taken for pair-less (V2, seams triage)
+        if a and b and a.startswith('__fnvnx_vflag_') and a.endswith('_0') and b == a[:-1] + '1':
             return i
     if words is not None:
         for i in range(len(names) - 1):

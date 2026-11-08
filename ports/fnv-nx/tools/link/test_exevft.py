@@ -244,6 +244,13 @@ def main():
               'exe_slot_index: D1 and D0 share the deleting destructor\'s slot, later slots move down by one')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    # dtor_pos: a flags-stub pair is a destructor pair; two unrelated stubs, or a lone _0, are not (V2)
+    check(exevft.dtor_pos(['a', 'b', '__fnvnx_vflag_0087d830_0', '__fnvnx_vflag_0087d830_1', 'c']) == 2,
+          'dtor_pos: vflag pair at slots 2 / 3')
+    check(exevft.dtor_pos(['__fnvnx_vflag_0087d830_0', '__fnvnx_vflag_00aa0000_1']) is None,
+          'dtor_pos: vflag stubs of two functions are no pair')
+    check(exevft.dtor_pos(['__fnvnx_vflag_0087d830_0', 'x']) is None, 'dtor_pos: a lone flags-0 stub is no pair')
+    check(exevft.dtor_pos(['x', '__fnv_00af3120_D1', '__fnv_00af3120_D0']) == 1, 'dtor_pos: _D1 / _D0 bound forms')
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 
