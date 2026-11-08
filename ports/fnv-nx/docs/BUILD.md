@@ -293,8 +293,8 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `PROGRAM_ID` | 0100000000000000 | Title id for the SD path. The placeholder makes `package` a warning. |
 | `TESTS` | all | Comma list of suite names, `all` or `none`. |
 | `EMU_TIMEOUT` | 3000 | Seconds for the emulated boot (S5's value). |
-| `EMU_BUDGET` | auto | Instructions per scheduling slice of the emulated boot. auto: 0 (none; slices are `EMU_SLICE_MS` long) when tests/s5/emu_guest.py has `--slice-ms`, else 6000000000 (S5's old value for game boots). An instruction count makes unicorn hook every instruction, about 10x slower (S5 2d1afaeb). |
-| `EMU_SLICE_MS` | 2000 | Wall-clock ms per scheduling slice of the emulated boot (with an emu_guest.py that has `--slice-ms`). |
+| `EMU_BUDGET` | auto | Instructions per scheduling slice of the emulated boot. auto: 0 when tests/s5/emu_guest.py has `--hc-slice` (S5 620572bc: threads switch at host calls, deterministic, about 10x faster than a count), else 6000000000. An instruction count makes unicorn hook every instruction. |
+| `EMU_SLICE_MS` | (empty) | emu_guest.py `--slice-ms`, its fallback timer for a thread making no host call; empty: emu_guest.py's default (60 s). A short timer makes boots nondeterministic (S5: 2d1afaeb..6da559aa). |
 | `JOBS` | nproc | Parallel jobs (compile, census, probe, guest link). `JOBS=1` with `nice -n 19` is a light run. |
 | `BUILD_DIR` | build | Output root. |
 | `FORCE` | | Stages to rerun. |

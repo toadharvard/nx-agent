@@ -11,7 +11,7 @@ fails=0; ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$(
 # a stand-in source tree: the job's own scripts, a Makefile that writes stage records, a farm_boot.sh
 S=$T/src; Q=$S/ports/fnv-nx
 mkdir -p "$Q/tools/farm" "$Q/tests/s5" "$Q/toolchain/gcc" "$Q/toolchain/devkita64" "$Q/toolchain/cross" "$Q/toolchain/vorbis"
-for f in bootloop_job.sh lib_job.sh recon.sh linkcache.sh ratchet.py; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
+for f in bootloop_job.sh lib_job.sh recon.sh linkcache.sh ratchet.py boot_determinism.py; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
 for f in toolchain/sources.sh toolchain/gcc/build.sh toolchain/devkita64/x toolchain/cross/x toolchain/vorbis/build.sh; do echo x > "$Q/$f"; done
 printf '# pins\n' > "$Q/tools/fetch.sh"
 cat > "$Q/Makefile" <<'MK'
@@ -41,10 +41,11 @@ to=$(echo "$EMU_EXTRA" | sed -n 's/.*--trace-out \([^ ]*\).*/\1/p')
 echo "trace-out=${to:-none} list=$(echo "$EMU_EXTRA" | sed -n 's/.*--trace-fn @\([^ ]*\).*/\1/p')" >> "$CALLS"
 if [ -n "$to" ]; then
 	printf 'call\t1\t1\t0\tA\t00401000\t0x11f6238\t0x5\t0\t0\t0\t0\t0\t0\t0x3dfff000\t0x5000000\tWinMain [orig 0086a850]\n' > "$to"
-	printf 'call\t2\t1\t0\tB\t00402000\t0x22\t0x5\t0\t0\t0\t0\t0\t0\t0x3dfff000\t0x5000000\tWinMain [orig 0086a850]\n' >> "$to"
+	rcv=0x22; [ -n "${FAKE_NONDET:-}" ] && rcv=$(printf '0x%x' $((RANDOM + 1)))   # FAKE_NONDET: another receiver each boot
+	printf 'call\t2\t1\t0\tB\t00402000\t%s\t0x5\t0\t0\t0\t0\t0\t0\t0x3dfff000\t0x5000000\tWinMain [orig 0086a850]\n' "$rcv" >> "$to"
 fi
 SH
-cp "$P/tests/s5/boot_trace.py" "$Q/tests/s5/"
+cp "$P/tests/s5/boot_trace.py" "$Q/tests/s5/"; echo '# stand-in emu_guest.py (its hash names the determinism check)' > "$Q/tests/s5/emu_guest.py"
 git -C "$S" init -q; git -C "$S" add -A; git -C "$S" -c user.name=t -c user.email=t@t commit -qm one; C1=$(git -C "$S" rev-parse HEAD)
 git init -q --bare "$T/art.git"; git clone -q "$T/art.git" "$T/art" 2>/dev/null
 run() {   # run <name> [VAR=value ...]
@@ -75,7 +76,7 @@ ok "sidecar fnvnx-bootloop/1" 'python3 -c "import json,sys; j=json.load(open(sys
 run second
 ok "second iteration: the same build directory, not cold, no second cold link" '[ "$(cat $T/second.rc)" = 0 ] && ! grep -q "cold:" $T/second.md && [ "$(grep -c "^cold$" $T/calls)" = 1 ] && grep -q "passed on this machine before" $T/second.md'
 run bad FAKE_FAIL=link
-ok "a failed stage: exit 1, FAIL names it, no boot" '[ "$(cat $T/bad.rc)" = 1 ] && sed -n 3p $T/bad.md | grep -q "^- FAIL: the link stage did not end ok/warn" && [ "$(grep -c "^boot " $T/calls)" = 2 ] && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"error\"]" $T/bad.json'
+ok "a failed stage: exit 1, FAIL names it, no boot" '[ "$(cat $T/bad.rc)" = 1 ] && sed -n 3p $T/bad.md | grep -q "^- FAIL: the link stage did not end ok/warn" && ! grep -q "^boot " <(tail -n +$(grep -n "^guest " $T/calls | tail -1 | cut -d: -f1) $T/calls) && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"error\"]" $T/bad.json'
 python3 -I - "$P" "$T/first.md" "$T/first.json" <<'PY' > "$T/py.out" 2>&1
 import json, sys
 sys.path.insert(0, sys.argv[1] + '/tools/farm')
@@ -91,4 +92,9 @@ ok "the ratchet measures the bootloop's milestones (nulldev metrics)" 'grep -q "
 mv "$T/home/bootloop/linkeq.done" "$T/linkeq.done.first"; n0=$(grep -c "^boot " $T/calls)
 run diff FAKE_DIFF=1
 ok "warm != cold: exit 1, FAIL, warm outputs kept, no boot" '[ "$(cat $T/diff.rc)" = 1 ] && grep -q "^- FAIL: the incremental link differs from the cold link" $T/diff.md && [ -d $T/home/bootloop/build/link.warm ] && [ ! -f $T/home/bootloop/linkeq.done ] && [ "$(grep -c "^boot " $T/calls)" = "$n0" ]'
+# determinism: once per machine and emu_guest.py, the same stub boot twice; a boot that disagrees fails the job
+ok "determinism: the second stub boot agreed (a prefix: cut short by the clock), recorded once" 'grep -q "^- determinism (two identical stub boots): PASS: consistent" $T/first.md && ls $T/home/bootloop/determinism-*.done > /dev/null && grep -q "^- determinism (two identical stub boots): passed on this machine" $T/second.md'
+rm -f "$T"/home/bootloop/determinism-*.done; mv "$T/linkeq.done.first" "$T/home/bootloop/linkeq.done"
+run nondet FAKE_NONDET=1
+ok "two stub boots that disagree: exit 1, FAIL, not recorded" '[ "$(cat $T/nondet.rc)" = 1 ] && grep -q "^- FAIL: two identical stub boots disagree: FAIL: the function traces differ at line 2" $T/nondet.md && ! ls $T/home/bootloop/determinism-*.done > /dev/null 2>&1'
 [ $fails = 0 ] && echo "test_bootloop: all ok" || { tail -5 "$T"/*.log "$T/py.out"; cat "$T/calls"; echo "test_bootloop: $fails failed"; exit 1; }

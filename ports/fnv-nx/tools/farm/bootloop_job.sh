@@ -13,8 +13,8 @@
 # by tools/farm/linkcache.sh), the guest is relinked. `make guest` runs only fetch, toolchain, prepare, compile,
 # link, guest (and nine, disabled): no census, raw boot, host, package or tests. Then tests/s5/farm_boot.sh
 # FARM_BOOTS=stub on that guest with FNVNX_STUB_NULLDEV=1 (S5 a3b368ed: CreateDevice on the null device, so the
-# frontier goes past the renderer), EMU_TIMEOUT=${BOOTLOOP_EMU_TIMEOUT:-300} (with S5's time slices, farm_boot.sh BUDGET=0
-# SLICE_MS=2000, 300 s goes about as far as 3,000 s did with an instruction count: archive-list in 46 s).
+# frontier goes past the renderer), EMU_TIMEOUT=${BOOTLOOP_EMU_TIMEOUT:-300} (S5 620572bc: deterministic, about 10x
+# faster than an instruction count; the D26 stub boot ran 37-40 s).
 # The first iteration on a machine compiles every unit (about an hour); the report says "cold" then.
 # Report: the stage table (seconds, cached or ran, from each stage.json), the boot's game milestones (n/10 and the
 # last reached), its stop, and the sidecar <report>.json (fnvnx-bootloop/1). Nothing is published but the report
@@ -22,6 +22,10 @@
 # Env: BOOTLOOP_EMU_TIMEOUT, BOOTLOOP_NULLDEV (default 1), JOBS, FARM_REAL_EXE (lib_job.sh), LINKCACHE=0.
 set -euo pipefail
 unset FNVNX_STUB_NULLDEV   # set for the stub boot only (below)
+# the boots schedule as emu_guest.py does by default (S5 620572bc: threads switch at host calls, deterministic);
+# no instruction count or timer slicing of ours, not even one the farm's environment carries (the timer slices
+# of 2d1afaeb..6da559aa were nondeterministic). EMU_BUDGET: the raw boot's, tools/pipeline/build.py emu_slicing.
+unset BUDGET SLICE_MS EMU_BUDGET EMU_SLICE_MS
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../../.." && pwd)
@@ -154,6 +158,29 @@ if [ -z "$FAIL" ]; then
 	[ -f "$STUB/boot_summary_stub.json" ] || FAIL="the stub boot wrote no summary (see $F/stub_boot.log)"
 	step "stub boot"
 fi
+# Determinism (orchestrator: S5's timer slices of 2d1afaeb..6da559aa made boots nondeterministic): once per machine
+# and emu_guest.py version (bootloop/determinism-<hash>.done), the same stub boot runs again with the same inputs,
+# and tools/farm/boot_determinism.py compares the two: the same summary and function trace when both ended by
+# themselves, else the shorter a prefix of the longer. A FAIL fails the job (checked again next iteration).
+# BOOTLOOP_DETERMINISM=0: never.
+NOTE_DET=""
+EMUH=$(sha256sum "$P/tests/s5/emu_guest.py" 2>/dev/null | cut -c1-12)
+if [ -z "$FAIL" ] && [ "${BOOTLOOP_DETERMINISM:-1}" = 1 ] && [ -n "$EMUH" ] && [ ! -f "$F/determinism-$EMUH.done" ]; then
+	STUB2=$F/stub2; rm -rf "$STUB2"; mkdir -p "$STUB2"; T2=${STUB_TRACE%.tsv}-2.tsv; rm -f "$T2"
+	FNVNX_STUB_NULLDEV=$NULLDEV FARM_LINK_DIR=$B/link FARM_GUEST_DIR=$B/guest FARM_BOOTS=stub \
+		EMU_EXTRA="${BOOTLOOP_EMU_EXTRA:-}${LS_EXTRA:+ ${LS_EXTRA/$STUB_TRACE/$T2}}" FARM_UNITS="$B/prepare/tree/build/units.json" \
+		EMU_TIMEOUT="${BOOTLOOP_EMU_TIMEOUT:-300}" \
+		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB2" ${GAME_EXE:+"$GAME_EXE"} > "$F/stub_boot2.log" 2>&1 || true
+	NOTE_DET=$(python3 -I "$HERE/boot_determinism.py" "$STUB" "$STUB2" ${LS_EXTRA:+--trace-a "$STUB_TRACE" --trace-b "$T2"} 2>&1) || true
+	case "$NOTE_DET" in
+		PASS:*) echo "$NOTE_DET" > "$F/determinism-$EMUH.done" ;;
+		*) FAIL="two identical stub boots disagree: $NOTE_DET" ;;
+	esac
+	rm -rf "$STUB2" "$T2"
+	step "determinism (once)"
+elif [ -f "$F/determinism-$EMUH.done" ]; then
+	NOTE_DET="passed on this machine for emu_guest.py $EMUH ($(cut -c1-120 "$F/determinism-$EMUH.done"))"
+fi
 rm -f "$F/lockstep.txt" "$F/lockstep.json"
 if [ -n "$LS_EXTRA" ] && [ -z "$FAIL" ]; then
 	if [ -s "$STUB_TRACE" ]; then
@@ -174,9 +201,9 @@ fi
 
 printf '%s\n' "${STEPS[@]}" > "$F/steps.tsv"
 python3 -I - "$B" "$STUB" "$F/steps.tsv" "$REPORT" "$COMMIT" "$(( $(date +%s) - T0 ))" "${COLD:-?}" "$FAIL" \
-	"${BOOTLOOP_EMU_TIMEOUT:-300}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" "$NOTE_LINKEQ" "$LS_NOTE" <<'EOF'
+	"${BOOTLOOP_EMU_TIMEOUT:-300}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" "$NOTE_LINKEQ" "$LS_NOTE" "$NOTE_DET" <<'EOF'
 import json, os, sys
-B, stub, steps, report, commit, total, cold, fail, emu_s, wip, tb, linkeq, ls_note = sys.argv[1:14]
+B, stub, steps, report, commit, total, cold, fail, emu_s, wip, tb, linkeq, ls_note, det = sys.argv[1:15]
 tb = int(tb)
 total = int(total)
 rd = lambda p: json.load(open(p)) if os.path.isfile(p) else None
@@ -212,6 +239,7 @@ L += ['- iteration: %d s (%.1f min; target 15 min)%s' % (total, total / 60, '; c
       '- incremental link check (warm == cold): %s' % (linkeq or 'passed on this machine before (bootloop/linkeq.done)'
                                                       if os.path.isfile(os.path.join(os.path.dirname(B), 'linkeq.done')) or linkeq
                                                       else 'off'),
+      '- determinism (two identical stub boots): %s' % (det or 'off'),
       '- stop: %s' % ' / '.join([str(stop.get('reason') or '-')] + [str(x) for x in (stop.get('messages') or [])[:2]])[:300],
       '', '| step | seconds |', '|---|---:|'] + ['| %s | %s |' % (n, s) for n, s in st] + [
       '', '| stage | status | run | seconds | note |', '|---|---|---|---:|---|'] + [
@@ -238,7 +266,7 @@ open(report, 'w').write('\n'.join(L) + '\n')
 json.dump({'schema': 'fnvnx-bootloop/1', 'commit': commit, 'seconds': total, 'cold': cold == '1', 'error': fail or None,
            'steps': {n: int(s) for n, s in st}, 'stages': stages, 'nulldev': nd or None,
            'milestones': [[m.get('name'), bool(m.get('reached'))] for m in ms], 'reached': reached, 'of': len(ms),
-           'last': bs.get('milestone'), 'linkeq': linkeq or None,
+           'last': bs.get('milestone'), 'linkeq': linkeq or None, 'determinism': det or None,
            'lockstep': {'note': ls_note, 'matched': lsj.get('matched'), 'divergences': len(lsj.get('divergences') or []),
                         'first': (lsj.get('first') or {}).get('function')} if lsj else {'note': ls_note}},
           open(report[:-3] + '.json' if report.endswith('.md') else report + '.json', 'w'), indent=1)
