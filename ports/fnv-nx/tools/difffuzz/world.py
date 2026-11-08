@@ -165,8 +165,9 @@ class World:
     def _overlay_pages(self):
         if self._ov is None:
             ov = {}
-            for src in (self.text_code, self.case.mem, self.pinned):
-                for a, b in src.items():
+            pinned = self.pinned.items()
+            for src in (self.text_code.items(), self.case.mem.items(), pinned):
+                for a, b in src:
                     for p in range(page_of(a), a + len(b), PAGE):
                         ov.setdefault(p, []).append((a, b))
             self._ov = ov
@@ -231,12 +232,38 @@ BYTE_READS = None
 # come from the random background (a bool global or a field behind a background pointer), which the case does not
 # plant
 BG_READS = None
+# (float class, difffuzz-20) x87 control word of the oracle run: 0x027f is the MSVC CRT default (53-bit mantissa). The
+# precision probe of classify.hint reruns a case with 0x007f (24-bit mantissa: every x87 operation rounds to a float,
+# as the AArch64 build does) to see whether the divergence is only the excess precision of x87 intermediates
+X87_CW = 0x027f
+# with X87_CLAMP set to {'kind': 'f32' | 'f64'}, x86emu.run flushes every x87 register value beyond the exponent range of
+# that type to inf (overflow) or zero (underflow) before each instruction, as float / double arithmetic would have
+# done: the x87 stack keeps a 15-bit exponent at every precision. classify.x87_probes reruns a case that way (with the
+# control word at 24 / 53 bits) to see whether the divergence is only the missing overflow / underflow; the dict also
+# receives {'n': values clamped, 'addr': the first instruction after which one was}
+X87_CLAMP = None
+# the width an intercepted callee of unknown type returns its float in is guessed from the code that consumes ST0
+# (x86emu.x87_result_use: fstp dword -> f32, fstp qword -> f64); the consumer cannot tell a float result from a double
+# narrowed or a float widened. classify's width probe reruns the case with the other guess
+X87_FLIP_WIDTH = False
+
+
+# (float class) XORed into the seed of every garbage source (stack fill, non-argument registers, argument padding) but
+# not into the random background pages: classify's garbage probe for a case with a random background changes only the
+# garbage (the generic probe changes the case seed, which also redraws the background)
+GARBAGE_XOR = 0
+
+
+# difffuzz-20 (sign-outparam): with STUB_OUT set, the native run zeroes the stack words of a buffer it passes to an
+# intercepted call that still hold the planted fill (the native never wrote them), as the exe's real callee would have
+# filled or left them; classify.py's stub-outparam probe reruns an uninit-arm case that way
+STUB_OUT = False
 
 
 def stack_fill(seed, n):
     if UNIFORM:
         return bytes(n)
-    return random.Random(seed ^ 0x5a5a5a5a).randbytes(n)
+    return random.Random((seed ^ GARBAGE_XOR) ^ 0x5a5a5a5a).randbytes(n)
 
 
 _GARBAGE = {}
@@ -274,7 +301,7 @@ def garbage_words(seed, side):
 def garbage32(seed, k):
     if UNIFORM:
         return 0
-    return random.Random((seed * 7919 + k * 104729) & 0xffffffff).getrandbits(32)
+    return random.Random((((seed ^ GARBAGE_XOR) * 7919) + k * 104729) & 0xffffffff).getrandbits(32)
 
 
 def ref_result(k):

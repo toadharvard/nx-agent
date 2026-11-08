@@ -1681,6 +1681,8 @@ INT32_TYPES = re.compile(r'^(?:const\s+|volatile\s+)*(?:(?:signed|unsigned)(?:\s
                          r'unsigned\s+long\s+int|__int32|size_t|DWORD|UINT|INT|LONG|ULONG|BOOL)(?:\s+const)?$')
 _UNIT_SYMBOLS = None
 
+_UNIT_PLACED = {}   # absolute unit source -> the decorated names its units.json `functions` place (_unit_symbols)
+
 def _unit_symbols(path):
     """{absolute unit source: {decorated name: address}}"""
     global _UNIT_SYMBOLS
@@ -1689,8 +1691,11 @@ def _unit_symbols(path):
         _UNIT_SYMBOLS = {}
         root, uj = prepare._units_json(path)
         if uj:
+            _UNIT_PLACED.clear()
             for u in json.load(open(uj))['units']:
                 _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = dict(u.get('symbols', {}))
+                _UNIT_PLACED[os.path.normpath(os.path.join(root, u['source']))] = {
+                    f['symbol'] for f in u.get('functions') or () if f.get('symbol')}
             # BIND1's rows (a POST hook on units.json): the source rules see the bindings the link will have
             for src, name, addr in BIND1_REFS + sorted(VLIT1_BINDS):
                 k = os.path.normpath(os.path.join(root, src))
@@ -3488,13 +3493,12 @@ def _stand_ins(path, text, stats, which):
         info = _unit_info(path)
         if info is None or set(info[0]) & STAND2_INLINING_FLAGS: return text
         elsewhere = _all_unit_functions(path) - info[1]
-    spans, edits = None, []
+    spans, edits, cands, tagged_prefixes = None, [], [], set()
     for m in STAND_DEF.finditer(text):
         q = re.sub(r'\s+', '', m.group(2))
         parts = q.split('::')
         if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS: continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', m.group(1) or ''): continue
-        if _stand_tagged(text, m.start()): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
         if any(k != 'namespace' for k, _ in chain): continue
@@ -3504,8 +3508,18 @@ def _stand_ins(path, text, stats, which):
         if len(parts) >= 2 and name == parts[-2]: prefix = '??0' + '@'.join(scope) + '@@'
         elif name.startswith('~'): prefix = '??1' + '@'.join(scope) + '@@'
         else: prefix = '?' + '@'.join([name] + scope) + '@@'
+        if _stand_tagged(text, m.start()):
+            tagged_prefixes.add(prefix); continue
+        cands.append((m, q, parts, name, prefix))
+    placed = _UNIT_PLACED.get(os.path.normpath(os.path.abspath(path)), ())
+    for m, q, parts, name, prefix in cands:
         if which == 'STAND1':
             if not any(k.startswith(prefix) and int(a, 16) in tagged for k, a in syms.items()): continue
+            # the unit's own recipe places this name and no tagged definition of the unit has it: it is the function,
+            # the tag sits on another one (R2: caravanmenu 0x0073b730, the tag is on TESCaravanCard::
+            # FUN_0073b730_card, units.json places NPCHandArrayInfo's). A tagged overload of the name keeps STAND1.
+            if prefix not in tagged_prefixes and any(k.startswith(prefix) for k in placed):
+                continue
         else:
             bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
             if not (bound and all(a in elsewhere and a not in tagged for a in bound)): continue
@@ -5137,6 +5151,22 @@ def r_recon_bodies(path, text, stats):
         r['_applied'] = True
     return text
 
+def recon_retarget(u, rt):
+    """REC1-RETARGET: a recon whose replace pairs change the decoration of a function the unit's recipe already places
+    (a return type fixed from the exe: EQ/R2 0x008d1e50 GetNextObjectFloat, float -> void*, QAEMXZ -> QAEPAXXZ) moves
+    that recipe entry to the new decoration: {address, old, new}. Only when the unit places exactly `old` at `address`
+    (anything else is a miss, counted, and changes nothing); the unit's symbols binding of `old` follows. -> 1 or 0."""
+    a = rt.get('address', '').lower()
+    for f in u.get('functions', []):
+        if f['address'].lower() == a and f['symbol'] == rt.get('old') and rt.get('new'):
+            f['symbol'] = rt['new']
+            sy = u.setdefault('symbols', {})
+            if rt['old'] in sy:
+                sy.setdefault(rt['new'], sy.pop(rt['old']))
+            return 1
+    return 0
+
+
 def add_recon_definitions(out_root, stats, files=None):
     """POST hook: REC1's recipe entries (functions and symbols) in <out_root>/build/units.json."""
     import json
@@ -5164,6 +5194,10 @@ def add_recon_definitions(out_root, stats, files=None):
             for k, v in r.get('symbols', {}).items():
                 if k not in u.setdefault('symbols', {}):
                     u['symbols'][k] = v; m += 1
+            for rt in r.get('retarget_functions', []):     # REC1-RETARGET (see recon_retarget)
+                t = recon_retarget(u, rt)
+                stats['REC1-RETARGET' if t else 'REC1-RETARGET-MISS'] += 1
+                n += t
     if n or m:   # symbols persist on their own: a recon may only bind names to the exe's functions (R1: the Havok
         # agents DCD6A0Agent1..9, compared by address in FUN_00dcd4d0, must bind to the exe and get no body)
         stats['REC1-DEF'] += n

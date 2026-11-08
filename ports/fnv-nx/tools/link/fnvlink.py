@@ -79,7 +79,9 @@ TEXTADDR_SYM = '__fnvnx_textaddr_%08x'   # a variable at a .text address nothing
 XTRAP_SYM = '__fnvnx_xtrap_%08x'  # ctor/dtor defined nowhere, reached only by unwinding / emitted code -> trap
 DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup natives (docs/STARTUP.md)
 # renamed in game objects so their static destructors share the game's onexit table (STARTUP.md, "Termination")
-GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit'}
+# __errno_location: GCC's errno in a game unit; the guest's libc has none, the CRT's _errno (0x00ec85e3,
+# platform/crt/heap.c) is the same int *(void) (R2 trap loop, rank 1192)
+GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit', '__errno_location': '_errno'}
 ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
 FUNC_SPANS = ([], [])   # sorted starts and their ends of units.json functions with a size (set by resolve)
 
@@ -376,8 +378,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
     this tree, 'none': not used). exe: the player's FalloutNV.exe (None: FNVNX_EXE / PLAYER_EXE, 'none': not used):
     its RTTI pairs each image vftable with its own class's native vtable (exevft.py)."""
+    import time
+    _pt, _phases = [time.time()], []
+
+    def _phase(name):   # seconds per step (T1: what the incremental link has left to do)
+        now = time.time()
+        _phases.append('%s %.1f s' % (name, now - _pt[0]))
+        _pt[0] = now
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
+    sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'), prune=True)   # the last link's parses (T1)
     pre_stats = collections.Counter()
     tree = os.path.dirname(os.path.dirname(os.path.abspath(units_json)))   # <tree>/build/units.json
     renames = load_renames(UNITS_RENAMES if units_renames is None else units_renames, tree)
@@ -392,6 +402,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     have = [u for u in units.values() if u.obj]
     log('units: %d, with objects: %d' % (len(units), len(have)))
 
+    _phase('load units+objects')
     # MSVC side
     ms = DemangleCache(os.path.join(out, 'cache', 'msvc.tsv'), UNDNAME)
     allms = set()
@@ -457,6 +468,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     body_bind = bodies.load_bind(out)
     # ---- end S2d
 
+    _phase('msvc side')
     # Itanium side
     objsyms, itnames = {}, set()
     for u in have:
@@ -485,6 +497,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 if s.bind == 'global' and not s.comdat:
                     strong[s.name].append(u.source)
 
+    _phase('itanium side')
     # ---- definitions: original address -> native symbol in the defining object
     native = {}      # addr -> dict(unit, sym (elf Sym), variants {variant: Sym}, how)
     def_stats = collections.Counter()
@@ -608,6 +621,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             pre_stats['msvc_entry_no_thunk'] += 1
     pre_stats['msvc_entry_exe'] = len(sec_entries)
 
+    _phase('definitions/overrides')
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
     lay_of = abi2.lookup(layouts)   # unit -> type -> Layout, with the unit's unique `ns::type` for a bare name
@@ -790,6 +804,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             called_cache[u_.source] = {o_.syms[si][0] for i_ in range(len(o_.secs)) if o_.secs[i_][2] & 4
                                        for _, (si, typ, _) in o_.rel(i_).items() if typ in (21, 20)}   # P32
         return called_cache[u_.source]
+    _phase('references (1)')
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
     ecx_use = msvc_code_use(units_json, ms, msvc, renames)
     for u in have:
@@ -1225,6 +1240,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 have_def.add((sym.name, u.source))
                 stats['rebound_copies'] += 1
 
+    _phase('references')
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
     alias_lines += ['%s = 0x%08x;' % (TEXTADDR_SYM % a, a) for a in sorted(text_addrs)]
@@ -1340,6 +1356,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                   errors='surrogateescape') as f:   # rebound variables: apply retargets the object's own references
             f.write(''.join(n + '\n' for n in sorted(set(dd.values()))))
 
+    _phase('objcopy args')
     # ---- vftables
     # image vftables (primary `vftable' and secondary `vftable'{for `B'}) -> address point of the Itanium vtable of
     # the class of the same name, emitted by a compiled object or synthesized (vtables.py, docs/LINK.md "Vtables")
@@ -1394,6 +1411,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 for h_ in [unit] + hosts:
                     if h_ not in e[1]:
                         e[1].append(h_)
+    _phase('vftables')
     # ---- S2c: the player's exe (RTTI): every image vftable with its class and offset (exevft.py)
     exe_path = exevft.exe_path(None if exe in (None, '') else exe) if exe != 'none' else None
     exev = exevft.load(exe_path, os.path.join(out, 'cache', 'exe_vftables.json')) if exe_path else {}
@@ -1523,6 +1541,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                     'yes' if z and vmap[a_][0] == z[0] else 'no'))
                 stats['vftable_aliases'] += 1
 
+    _phase('exe rtti')
     # ---- data addresses: absolute symbols at the original address (the data image is mapped there, D3)
     with open(os.path.join(out, 'aliases.ld'), 'w') as f:
         f.write('/* fnv-nx link-by-address aliases (generated by tools/link/fnvlink.py; local output) */\n')
@@ -1543,6 +1562,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for line in sorted(set(alias_lines)):
             f.write(line + '\n')
 
+    _phase('data addresses')
     # ---- bridges
     # S5 (s5-002 item 4): an address map C row stands for an MSVC constructor, which returns this in eax; the
     # Itanium C1 returns void, so the row names a stub that returns this (all arguments in registers)
@@ -1575,6 +1595,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for unit, t in sorted(probe_req):
             f.write('%s\t%s\n' % (unit, t))
 
+    _phase('bridges')
     # ---- address map
     for a, names in load_extern_list(extern_list).items():
         extern_text.setdefault(a, set()).update(names)
@@ -1586,6 +1607,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows,
                                           adj_rows, gdel_rows)
 
+    _phase('address map')
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
                                          'code-defmissing', 'code-adjthunk', 'code-sddstub', 'extern-text', 'text-addr',
@@ -1690,6 +1712,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     lines += ['  %-6d %s' % (n, c) for c, n in pair_classes.most_common()]
     open(os.path.join(out, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
+    _phase('stats')
+    log('resolve phases: ' + ', '.join(_phases))
 
 
 VPTR_LHS = re.compile(r'(?i)(?:^|[^\w])(?:\w*_)?(?:vptr|vtbl|vtable|vftable|vfptr|vft|vftbl|vtab|vt)\w*\s*$')
@@ -1726,6 +1750,12 @@ def no_candidate_why(sites, ctor_classes):
     return 'candidates without a vtable'
 
 
+HV_BRACE = re.compile(r'[{}]')
+HV_ASSIGN = re.compile(r'^(?P<lhs>(?:[^=]|==)*?[^=!<>+\-*/%&|^])=(?!=)(?P<rhs>.*)$', re.S)
+HV_CAST = re.compile(r'\(\s*(?:const\s+|unsigned\s+|signed\s+|struct\s+|class\s+)*[\w:<>]+(?:\s*\*)*\s*\)')
+HV_NOISE = re.compile(r'[\s&()]')
+
+
 def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
     """Hand-written stores of image vftable addresses into vptrs in the unit sources: `x.vtbl = &DAT_010176f8;`,
     `*(void **)this = kVtbl_X;`, ... -> {address: [(unit, canonical class of the storing member function or
@@ -1755,18 +1785,20 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
         pos = 0
         for stmt in text.split(';'):
             start, pos = pos, pos + len(stmt) + 1
-            st = re.split(r'[{}]', stmt)[-1]
+            if '=' not in stmt:   # HV_ASSIGN needs one (T1: most statements; the same sites)
+                continue
+            st = HV_BRACE.split(stmt)[-1]
             spos = start + len(stmt) - len(st)   # where the statement itself begins (after the last brace)
-            m = re.match(r'^(?P<lhs>(?:[^=]|==)*?[^=!<>+\-*/%&|^])=(?!=)(?P<rhs>.*)$', st, re.S)
+            m = HV_ASSIGN.match(st)
             if not m:
                 continue
             rhs = m.group('rhs')
             while True:
-                r2 = re.sub(r'\(\s*(?:const\s+|unsigned\s+|signed\s+|struct\s+|class\s+)*[\w:<>]+(?:\s*\*)*\s*\)', '', rhs)
+                r2 = HV_CAST.sub('', rhs)
                 if r2 == rhs:
                     break
                 rhs = r2
-            rhs = re.sub(r'[\s&()]', '', rhs)
+            rhs = HV_NOISE.sub('', rhs)
             a = names.get(rhs)
             if a is None and DAT_NAME.match(rhs):   # a name units.json does not bind for this unit (S5 J-0109)
                 a = int(DAT_NAME.match(rhs).group(1), 16)
@@ -3643,11 +3675,27 @@ class CDecls:
             p = m.group(1).strip() + (' *' if m.group(3) else '')
         return self.ctype(p)
 
+    _IDENT = re.compile(r'[A-Za-z_]\w*\Z')
+    _CALLS = re.compile(r'(?<![\w.>:])([A-Za-z_]\w*)\s*\(')
+
+    def _sites(self, name):
+        """The matches of `(?<![\\w.>:])name\\s*\\(` in text order, as (start, end). For an identifier: one scan of the
+        text for every `ident(` (T1: find ran one scan of the whole unit per name, 12 s of resolve under the
+        profiler); the same matches, since an identifier match starts and ends at word boundaries."""
+        if not self._IDENT.match(name):
+            return [(m.start(), m.end()) for m in re.finditer(r'(?<![\w.>:])' + re.escape(name) + r'\s*\(', self.s)]
+        idx = getattr(self, '_calls', None)
+        if idx is None:
+            idx = self._calls = {}
+            for m in self._CALLS.finditer(self.s):
+                idx.setdefault(m.group(1), []).append((m.start(), m.end()))
+        return idx.get(name, [])
+
     def find(self, name):
         """[(result type, [parameter types])] of the declarations of the free function `name`, in text order."""
         out, s = [], self.s
-        for m in re.finditer(r'(?<![\w.>:])' + re.escape(name) + r'\s*\(', s):
-            depth, j = 0, m.end() - 1
+        for m_start, m_end in self._sites(name):
+            depth, j = 0, m_end - 1
             while j < len(s):
                 depth += {'(': 1, ')': -1}.get(s[j], 0)
                 if depth == 0:
@@ -3658,17 +3706,17 @@ class CDecls:
             tail = re.match(r'\s*(?:const\b\s*)?(?:throw\s*\([^()]*\)\s*)?([;{])', s[j + 1:])
             if not tail:
                 continue
-            inner = max((b for b in self.class_body if b[0] < m.start() < b[1]), default=None)
+            inner = max((b for b in self.class_body if b[0] < m_start < b[1]), default=None)
             if inner is not None and inner[2]:
                 continue                      # declared in a class body: a member, not the C function
-            k = max(s.rfind(c, 0, m.start()) for c in ';{}')
-            pre = re.sub(r'^\s*(?:(?:public|private|protected)\s*:(?!:))?', '', s[k + 1:m.start()])
+            k = max(s.rfind(c, 0, m_start) for c in ';{}')
+            pre = re.sub(r'^\s*(?:(?:public|private|protected)\s*:(?!:))?', '', s[k + 1:m_start])
             pre = ' '.join(DECL_SPEC.sub(' ', pre).split())
             words = set(re.findall(r'[A-Za-z_]\w*', pre))
             if not pre or not re.match(r'^[A-Za-z_][\w\s\*&:<>,]*$', pre) or words & NOT_A_TYPE or \
                     pre.endswith((':', ',')) or pre.startswith('template'):
                 continue                      # a call (`return f(x);`, `a = f(x);`, `case 1: f(x);`), a template
-            params = [self.param(x) for x in split_top(s[m.end():j])]
+            params = [self.param(x) for x in split_top(s[m_end:j])]
             out.append((self.ctype(pre), [x for x in params if x != 'void']))
         return out
 

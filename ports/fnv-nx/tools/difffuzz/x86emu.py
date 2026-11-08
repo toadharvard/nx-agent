@@ -15,11 +15,11 @@ import bisect
 import struct
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ,
-                     UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
+                     UC_HOOK_INTR, UC_HOOK_CODE, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
 from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, UC_X86_REG_EDX, UC_X86_REG_ECX,
                                UC_X86_REG_EBX, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_GDTR,
                                UC_X86_REG_FS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FPCW,
-                               UC_X86_REG_FPSW)
+                               UC_X86_REG_FPSW, UC_X86_REG_FP0)
 import libcalls
 import world
 
@@ -77,6 +77,10 @@ def x87_result_use(uc, retaddr, fret='int', depth=0):
         return x87_result_use(uc, retaddr + skip, fret, depth + 1)
     if b[0] in (0xc3, 0xc2):
         return fret
+    if b[0] == 0xeb or b[0] == 0xe9:       # a jump (the shared epilogue of a `return call()` after the call): follow it
+        rel = int.from_bytes(b[1:2], 'little', signed=True) + 2 if b[0] == 0xeb else \
+            int.from_bytes(b[1:5], 'little', signed=True) + 5
+        return x87_result_use(uc, retaddr + rel, fret, depth + 1)
     b0, m = b[0], b[1]
     if b0 == 0xd9 and m == 0xc0:          # fld st0 (the float epilogue stub): the store after it decides
         nxt = x87_result_use(uc, retaddr + 2, fret, depth + 1)
@@ -86,6 +90,16 @@ def x87_result_use(uc, retaddr, fret='int', depth=0):
         return 'f64' if b0 == 0xdd else 'f32'
     if b0 in (0xd8, 0xdc, 0xde) or (b0 == 0xd9 and (0xc8 <= m <= 0xcf or m in (0xe0, 0xe1))) or \
             (b0 == 0xdd and 0xd8 <= m <= 0xdf):
+        return 'f32'
+    # the rest of the x87 instructions that read ST0 (a callee's float result): integer arithmetic and compares
+    # (fiadd/fimul/ficom/fisub/fidiv m32: DA /r), fist/fistp/fisttp, fcmov and fucompp, fcomi/fucomi(p), fucom(p),
+    # ftst/fxam, and the transcendental / rounding group (f2xm1 .. fcos); the fld constants (D9 E8..EE) and
+    # fdecstp/fincstp do not read it
+    if (b0 == 0xda and (mod != 3 or 0xc0 <= m <= 0xdf or m == 0xe9)) or \
+            (b0 == 0xdb and (mod != 3 and reg in (1, 2, 3) or 0xe8 <= m <= 0xf7)) or \
+            (b0 == 0xdf and (mod != 3 and reg in (1, 2, 3, 7) or 0xe8 <= m <= 0xf7)) or \
+            (b0 == 0xdd and (mod != 3 and reg == 1 or 0xe0 <= m <= 0xef)) or \
+            (b0 == 0xd9 and (m in (0xe4, 0xe5) or 0xf0 <= m <= 0xf5 or 0xf8 <= m <= 0xff)):
         return 'f32'
     return 'int'
 
@@ -215,7 +229,7 @@ class X86Engine:
         uc.mem_write(STUBS, st)
         uc.mem_write(STUBS + 0x20, b'\xe9' + struct.pack('<i', (world.SENTINEL - (STUBS + 0x20 + 5)) & 0xffffffff))
         self._ensure(world.SENTINEL, 1)
-        uc.reg_write(UC_X86_REG_FPCW, FPCW_MSVC)
+        uc.reg_write(UC_X86_REG_FPCW, world.X87_CW)
         ret_stub = STUBS if conv.x86_ret == 'st0' else STUBS + 0x20
         self._fret = ('f32' if conv.ret.size == 4 else 'f64') if conv.x86_ret == 'st0' else 'int'
         # garbage in every register that is not an argument (identical per seed)
@@ -243,6 +257,11 @@ class X86Engine:
                            (world.X86_PRIV[1], world.MAX)):
                 hrd.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_bg_read, user_data=world.BG_READS, begin=lo,
                                        end=hi - 1))
+        hfp = None
+        if world.X87_CLAMP is not None:
+            world.X87_CLAMP.update(n=0, addr=None, over=0, under=0)
+            hfp = uc.hook_add(UC_HOOK_CODE, self._on_fp_clamp, user_data=world.X87_CLAMP, begin=world.TEXT[0],
+                              end=world.TEXT[1] - 1)
         start = start if start is not None else next(iter(self.text_funcs))
         esp0 = uc.reg_read(UC_X86_REG_ESP)
         # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
@@ -256,6 +275,8 @@ class X86Engine:
             uc.hook_del(hb)
             uc.hook_del(hb2)
             uc.hook_del(hrs)
+            if hfp is not None:
+                uc.hook_del(hfp)
             for h in hwild:
                 uc.hook_del(h)
             for h in hws:
@@ -305,6 +326,28 @@ class X86Engine:
 
     def _on_read(self, uc, access, address, size, value, log):
         log.setdefault(address, set()).add(size)
+
+    def _on_fp_clamp(self, uc, address, size, rec):
+        """world.X87_CLAMP: before each instruction, the x87 registers lose what float (or double) arithmetic could
+        not hold: a magnitude of 2**128 (2**1024) or more becomes inf, one below 2**-150 (2**-1075) becomes zero."""
+        hi, lo = (128, -150) if rec['kind'] == 'f32' else (1024, -1075)
+        for i in range(8):
+            mant, se = uc.reg_read(UC_X86_REG_FP0 + i)
+            ex = se & 0x7fff
+            if not mant or ex == 0 or ex == 0x7fff:
+                continue
+            e = ex - 16383
+            if e >= hi:
+                uc.reg_write(UC_X86_REG_FP0 + i, (0x8000000000000000, (se & 0x8000) | 0x7fff))
+                rec['over'] = rec.get('over', 0) + 1
+            elif e < lo:
+                uc.reg_write(UC_X86_REG_FP0 + i, (0, se & 0x8000))
+                rec['under'] = rec.get('under', 0) + 1
+            else:
+                continue
+            rec['n'] += 1
+            if rec['addr'] is None:
+                rec['addr'] = address
 
     def _on_bg_read(self, uc, access, address, size, value, log):
         e = log.setdefault(address, [set(), None])
@@ -365,9 +408,16 @@ class X86Engine:
         pop, kind = info if info else (self.pop_override.get(retaddr, 0), x87_result_use(uc, retaddr, self._fret))
         if not info:
             r.calls[-1].pop_unknown = True
+            if world.X87_FLIP_WIDTH and kind in ('f32', 'f64'):
+                kind = 'f64' if kind == 'f32' else 'f32'
         eax = world.u32(rb, 0)
         cv = self._callee_conv(address)
         ccv = self._callee_conv(address, caller=True)
+        if kind == 'int' and ccv is not None and ccv.x86_ret == 'st0' and ccv.ret is not None and \
+                (cv is None or cv.x86_ret != 'st0'):
+            # the calling unit declares a float result the callee's definition does not (a void decl in the tree):
+            # the caller's code reads ST0 and the native reads v0 (the same canned bytes), so the oracle gets ST0
+            kind = 'f32' if ccv.ret.size == 4 else 'f64'
         ck = world.canned_kind((cv, ccv))
         if address in world.ALLOCATORS:
             eax = world.alloc_result(k)

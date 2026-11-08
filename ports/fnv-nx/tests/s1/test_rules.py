@@ -744,6 +744,15 @@ check('PTR1 ordered compares of a function / pointer with 0',
           '    if (!(GetTime64 > 0)) return;\n    if (c > 0 && n > 0 && q <= 0) return;\n}\n'),
       ['!(GetTime64 != 0)', 'c != 0 && n > 0 && q == 0'])
 
+# ---- REC1-RETARGET: a placed function's recipe symbol moves to the recon's new decoration, only from the expected old
+_u = {'source': 'src/x.cpp', 'functions': [{'address': '0x008d1e50', 'symbol': '?F@S@@QAEMXZ', 'size': 31}],
+      'symbols': {'?F@S@@QAEMXZ': '0x008d1e50'}}
+_r1 = s1.recon_retarget(_u, {'address': '0x008D1E50', 'old': '?F@S@@QAEMXZ', 'new': '?F@S@@QAEPAXXZ'})
+check('REC1-RETARGET moves the placed symbol', repr((_r1, _u['functions'][0]['symbol'], sorted(_u['symbols']))),
+      ["(1, '?F@S@@QAEPAXXZ', ['?F@S@@QAEPAXXZ'])"])
+_r2 = s1.recon_retarget(_u, {'address': '0x008d1e50', 'old': '?F@S@@QAEMXZ', 'new': '?G@@'})
+check('REC1-RETARGET leaves another old symbol alone', repr((_r2, _u['functions'][0]['symbol'])), ["(0, '?F@S@@QAEPAXXZ')"])
+
 # ---- STAND1 (needs a units.json: a small tree of its own; the symbol cache is reset around it)
 import json as _json
 _s = tempfile.mkdtemp()
@@ -803,6 +812,35 @@ check('STAND4 an untagged static overload of a tagged address becomes an extern 
 check('STAND1 keeps tagged definitions behind pragmas, declarations, a type or a two-line head', got,
       ['return p + i;', 'return &g;', 'return a->n;', '*(int*)this = 1;', 'pooled = 1;',
        '/* fnv-nx STAND1: Cls::Stand is the function at the tagged address */'], ['fnv-nx STAND1: Bip', 'Map();'])
+
+# STAND1 keeps an untagged definition the unit's own units.json `functions` place, even when another definition
+# carries the address's tag (R2: caravanmenu 0x0073b730)
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_json.dump({'units': [{'source': 'src/staging/u.cpp',
+                       'functions': [{'address': '0x0073b730', 'symbol': '?Run@Hand@@QAEXPAH@Z', 'size': 168}],
+                       'symbols': {'?Run@Hand@@QAEXPAH@Z': '0x0073b730', '?Stand@Hand@@QAEXXZ': '0x0073b730'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          'struct Card\n{\n// @fnv 0x0073b730\n    virtual char* Run_card()\n    {\n        return 0;\n    }\n};\n'
+          'struct Hand { void Run(int* p); void Stand(); };\nvoid Hand::Run(int* p)\n{\n    p[0] = 7;\n}\n'
+          'void Hand::Stand()\n{\n}\n', os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND1 keeps a definition its unit places, whatever carries the tag', got,
+      ['p[0] = 7;', '/* fnv-nx STAND1: Hand::Stand is the function at the tagged address */'],
+      ['fnv-nx STAND1: Hand::Run'])
+_json.dump({'units': [{'source': 'src/staging/u.cpp',
+                       'functions': [{'address': '0x00b26260', 'symbol': '?Sort@@YAXPAH@Z', 'size': 40}],
+                       'symbols': {'?Sort@@YAXPAH@Z': '0x00b26260', '?Sort@@YAXPAN@Z': '0x00b26260'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          '// @fnv 0x00b26260\nvoid Sort(int* p)\n{\n    p[0] = 1;\n}\nvoid Sort(double* p)\n{\n    p[0] = 2;\n}\n',
+          os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND1 still drops the untagged overload of a tagged, placed name', got,
+      ['p[0] = 1;', 'void Sort(double* p); /* fnv-nx STAND1 */'], ['p[0] = 2;'])
 
 # ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
 _s = tempfile.mkdtemp()

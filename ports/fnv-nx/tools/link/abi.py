@@ -33,8 +33,20 @@ GPR_CLASSES = ('I8', 'I16', 'I32', 'I64', 'P', 'MP')
 FPR_CLASSES = ('F32', 'F64', 'F80')
 
 
+_CLASS = {}
+
+
 def classify(t):
-    """Class of one MSVC type: I8/I16/I32/I64/P/F32/F64/F80/VOID/VARARGS/MP or AGG:<name> / ?:<text>."""
+    """Class of one MSVC type: I8/I16/I32/I64/P/F32/F64/F80/VOID/VARARGS/MP or AGG:<name> / ?:<text>. Memoized per
+    process (T1: 1.8M calls in one resolve on far fewer spellings; a pure function of t and the FUND table)."""
+    try:
+        return _CLASS[t]
+    except KeyError:
+        v = _CLASS[t] = _classify(t)
+        return v
+
+
+def _classify(t):
     t = ' '.join(re.sub(r'\b(?:__ptr64|__ptr32|__restrict|__unaligned)\b', ' ', t).split())
     if t.endswith(('*', '&')) or re.search(r'\*(?:\s*(?:const|volatile))*\s*$', t):
         return 'P'

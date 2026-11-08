@@ -399,6 +399,10 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
                  arm=bytes(wa.get(k, 0) for k in range(first & ~3, (first & ~3) + 8)).hex(),
                  only_x86=sum(1 for k in diff if k not in wa), only_arm=sum(1 for k in diff if k not in wx),
                  addrs=["%08x" % k for k in diff[:16]])
+        if diff and all(k not in wx and wa.get(k) == 0 for k in diff):
+            d['arm_zero_only'] = True      # the native only zeroes bytes the oracle leaves (value-initialisation)
+        if diff and all(k not in wa and wx.get(k) == 0 for k in diff):
+            d['x86_zero_only'] = True      # the oracle only zeroes bytes the native leaves (a dead store in a dtor)
         # float stores: compare the aligned words as floats
         if all(k in wx and k in wa for k in range(first & ~3, (first & ~3) + 4)):
             bx = bytes(wx[k] for k in range(first & ~3, (first & ~3) + 4))

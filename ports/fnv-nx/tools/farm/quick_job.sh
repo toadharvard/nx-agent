@@ -20,7 +20,8 @@
 #       recorder for MEM_TIMEOUT, default 180 s here; the peak against 3.2 GiB; tools/perf/MEM.md)
 #       and plat_job.sh (R4's platform lane, PLAT_TIMEOUT default 180 s here; tools/perf/PLAT.md)
 #       and scenario_job.sh (S18, D25's targets on scripted scenarios: QUICK_SCENARIOS, default "boot-menu saveload",
-#       on this build's link and guest, EMU_TIMEOUT 900 s each; the original's runs come from its reference cache)
+#       on this build's link and guest, EMU_TIMEOUT 900 s each, linhost 180 s without progress and 600 s in all;
+#       the original's runs come from its reference cache)
 #       and boottrace_job.sh (T1: the guest's function-boundary trace against the cached Wine reference trace of the
 #       same list, S5-boot's tests/s5/boot_trace.py; gate: the first divergence does not move earlier than at the
 #       verified head). A failed build skips lane D (its checks would run an older guest).
@@ -31,7 +32,7 @@
 #    sub-reports' heads; the wall-clock total is T1's metric. A run where every selected check exited 0 records the
 #    commit as the next base ($FARM_HOME/quick/verified). A plan that says "full" (a key every cached result depends
 #    on changed: toolchain, pins) is reported as such: the sharded farms do that run.
-# Env: QUICK_BASE, QUICK_CHECKS (a comma list that replaces the plan), QUICK_CELLS, FUZZ_MAX_S, AUDIT_BUDGET,
+# Env: QUICK_BASE, QUICK_CHECKS (a comma list that replaces the plan), QUICK_CELLS, FUZZ_MAX_S, AUDIT_BUDGET, QUICK_COLD_LOCAL,
 # QUICK_SKIP_LANES (e.g. "C"), QUICK_JOBS (a directory of stand-in sub-jobs, for tests). Everything the sub-jobs need (README.md); they run as on their own farms.
 set -uo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
@@ -164,13 +165,45 @@ lane_d() {   # D: the emulator lanes on lane A's build, one after another (each 
 		local fb=$FARM_HOME/full/build ld="" gd=""
 		[ -d "$fb/link/out" ] && ld=$fb/link
 		[ -f "$fb/guest/guest.nso" ] && gd=$fb/guest
+		# linhost (D25 #12): 180 s without progress ends a scenario here (the farm default 600 s: on aec30808 both
+		# scenarios stopped early and waited it out, 3,057 s for the check), 600 s in all
+		SCENARIO_PROGRESS_S=${SCENARIO_PROGRESS_S:-180} SCENARIO_LINHOST_S=${SCENARIO_LINHOST_S:-600} \
 		SCENARIOS=${QUICK_SCENARIOS:-boot-menu saveload} EMU_TIMEOUT=${SCENARIO_EMU_TIMEOUT:-900} SCENARIO_PUBLISH=0 \
 			SCENARIO_LINK_DIR=$ld SCENARIO_GUEST_DIR=$gd run scenario bash "$J/scenario_job.sh" "$COMMIT"
 	else skip scenario "not affected"; fi
 	if on boottrace; then BOOTTRACE_BUILD=$FARM_HOME/full/build run boottrace bash "$J/boottrace_job.sh" "$COMMIT"
 	else skip boottrace "not affected"; fi
 }
-lane_b() { if on equiv; then run equiv bash "$J/equiv_job.sh" "$COMMIT" 1 1; else skip equiv "not affected"; fi; }
+eq_cache_after() {   # every eq farm shard's cache (equiv/cache/*, "equiv object cache <c12> shard k/N") is of a head
+	# at or after $1: the cold run is over, a run here seeds from a warm cache
+	local A=${ARTIFACTS:-}; [ -n "$A" ] || { if [ -d /home/user/fnv-nx-build/.git ]; then A=/home/user/fnv-nx-build; else A=$FARM_HOME/artifacts; fi; }
+	local refs r c; refs=$(git -C "$A" ls-remote origin 'refs/heads/equiv/cache/*' 2>/dev/null | awk '{print $2}')
+	[ -n "$refs" ] || return 1
+	for r in $refs; do
+		git -C "$A" fetch -q --depth 1 --filter=blob:none origin "+$r:refs/quick-eqc/${r#refs/heads/}" 2>/dev/null || return 1
+		c=$(git -C "$A" log -1 --format=%s "refs/quick-eqc/${r#refs/heads/}" | sed -n 's/^equiv object cache \([0-9a-f]\{12\}\) .*/\1/p')
+		[ -n "$c" ] && git -C "$REPO" merge-base --is-ancestor "$1" "$c" 2>/dev/null || return 1
+	done
+}
+lane_b() {
+	if ! on equiv; then skip equiv "not affected"; return; fi
+	# planned again after a cold skip (status: "skipped: cold cache ... at <c12>"): still cold here until the eq farms
+	# have published the cache of a head at or after it
+	local carried; carried=$(python3 -I -c 'import json, os, re, sys
+s = json.load(open(sys.argv[1])).get("equiv", "") if os.path.isfile(sys.argv[1]) else ""
+m = re.match(r"skipped: cold cache.* at ([0-9a-f]{12})$", s)
+print(m.group(1) if m else "")' "$Q/status.json" 2>/dev/null)
+	if [ -n "$carried" ] && [ "${QUICK_COLD_LOCAL:-0}" != 1 ] && ! eq_cache_after "$carried"; then
+		skip equiv "cold cache (since $carried): the eq farms have not published a warm cache yet"; return
+	fi
+	# a cold cache (quick_plan COLD: the MSVC shim headers): the whole check, hours here; the eq farms' sharded run
+	# verifies the head and publishes the cache the next run seeds from (QUICK_COLD_LOCAL=1: run it here anyway)
+	local cold; cold=$(python3 -I -c 'import json, sys; print(len(json.load(open(sys.argv[1])).get("cold", {}).get("equiv", [])))' "$R/plan.json" 2>/dev/null || echo 0)
+	if [ "${cold:-0}" != 0 ] && [ "${QUICK_COLD_LOCAL:-0}" != 1 ]; then
+		skip equiv "cold cache ($cold files every key reads): left to the eq farms' sharded run"; return
+	fi
+	run equiv bash "$J/equiv_job.sh" "$COMMIT" 1 1
+}
 lane_c() {
 	if ! on replay && ! on programs; then skip replay "not affected"; return; fi
 	local store; store=$(ls -1dt "$FARM_HOME"/capture/*/ 2>/dev/null | head -1)
@@ -228,6 +261,8 @@ o.write('- base: %s; %s changed files\n' % (base[:12] or 'none (no verified head
 o.write('- checks: %s\n' % (', '.join(c for c, v in plan['checks'].items() if v) or 'none'))
 for f in full:
     o.write('- full run needed: %s\n' % f)
+for c, fs in sorted((plan.get('cold') or {}).items()):
+    o.write('- %s: cold cache, left to its sharded farms (%s)\n' % (c, '; '.join(fs[:3]) + (' ...' if len(fs) > 3 else '')))
 cv = rd('cover.txt')
 if cv:
     o.write('- replay scenes: %s\n' % cv.splitlines()[-1])
