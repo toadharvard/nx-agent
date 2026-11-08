@@ -67,6 +67,14 @@ _ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb standin  # 0x00aa78a0 MemoryHeap's constr
                       # the exe's slots, so Allocate returned the heap's name and frees hit wrong blocks (J-0155 S10
                       # fault). standins.c stores the exe's vptr 0x010a28fc as the exe does (S1-refs: D22 for
                       # call-only declarations, tests/s5/callonly_vt.py)
+_ZN12FUN_00aa7400C1Ejj standin  # 0x00aa7400 the memory manager's second heap (classes 0/3/9): its _ZTV12FUN_00aa7400 is in
+                      # the exe's slot order (the class declares v00, not a destructor, for slot 0), the manager's HeapStandIn
+                      # calls are minus-one (D26 b), so Allocate ran the empty exe slot 3 and returned the heap itself
+                      # (boot_banner fault, 4,550 skips). standins.c stores a minus-one table (S1-rules: virtual
+                      # ~FUN_00aa7400(); S2-bodies: D22 layout for a defined class)
+_ZN26FUN_00aa2230_BSNiAllocatorC1Ev standin  # 0x00aa2230 BSNiAllocator: defined with `virtual m_virtual0()` for slot 0, so its
+                      # table is in the exe's order while NiAllocator callers are minus-one (D26 b): NiMalloc ran Free on
+                      # a stack block (554 skips in _free_r). standins.c stores a minus-one table (S1-rules: virtual dtor)
 _ZN8NiTMap_S9RemoveKeyEj standin  # 0x00405430: NiTMap_S is a call-only declaration in the exe's slot order (v0 at 0,
                       # KeyToHashIndex 1); its receiver (TESForm's map 0x011c54c0, exe vftable 0x0101ca78) is the native
                       # NiTPointerMap with D1/D0 at 0/1, so slot 1 ran D0 and the bucket index faulted: the last skipped

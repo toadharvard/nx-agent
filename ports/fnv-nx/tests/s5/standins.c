@@ -112,6 +112,56 @@ void *fnv_standin_00aa78a0(void *self, uint32_t reserve, uint32_t commit, const 
     return self;
 }
 
+/* 0x00aa7400 FUN_00aa7400::FUN_00aa7400(size, name): the memory manager's second heap (classes 0, 3 and 9). The class
+ * is defined (its constructor is native) but declares only `virtual void v00()` for the exe's slot 0, so the link
+ * gives _ZTV12FUN_00aa7400 the exe's order (slot k at k, filled from the exe vftable 0x010a2884: slot 2 is 0x00aa7530
+ * Allocate, slot 3 the empty 0x00aa75e0), not D26's minus-one order. The memory manager's heap calls are declared
+ * through HeapStandIn, which has a virtual destructor now (D26 (b)), so Allocate is native slot 3: it ran the empty
+ * exe slot 3, returned `this` and handed the heap object itself out as the next allocation; BSNiAllocator was built on
+ * it, FUN_00aa21d0 stored the address in word 0, and the next Allocate fetched [obj+12] (the buffer pointer
+ * 0x4cb4e020) as code: the boot_banner fault and the 4,550 skips behind it (S1-rules: the class needs a
+ * `virtual ~FUN_00aa7400()` for slot 0; S2-bodies: the link must lay out a defined class by D22). The same body as
+ * the exe's, with a minus-one table (D1 stub, D0 = the exe's deleting destructor at 0, exe slot k at k+1). */
+extern void *fnv_alloc_buffer(void *mm, uint32_t size, uint32_t pad)
+    __asm__("_ZN18FUN_00aa4290_Class14AllocateBufferEjj");
+static void *fnv_heap2_vtable[2 + 14];
+/* D26 minus-one table from an exe vftable: D1 stub and D0 (the exe's slot 0) at 0/1, exe slot k at k+1. */
+static void fnv_m1_d1(void *self) { (void)self; }
+static void **fnv_m1_table(void **tab, uint32_t exe_vftable, int n) {
+    void **exe = (void **)exe_vftable;
+    tab[0] = (void *)fnv_m1_d1;
+    tab[1] = exe[0];
+    for (int k = 1; k < n; k++)
+        tab[k + 1] = exe[k];
+    return tab;
+}
+void *fnv_standin_00aa7400(void *self, uint32_t size, const char *name) __asm__("_ZN12FUN_00aa7400C1Ejj");
+void *fnv_standin_00aa7400(void *self, uint32_t size, const char *name) {
+    uint32_t *p = self;
+    p[0] = (uint32_t)(uintptr_t)fnv_m1_table(fnv_heap2_vtable, 0x010a2884u, 14);
+    p[1] = size;
+    p[2] = (uint32_t)(uintptr_t)name;
+    p[5] = 0;
+    p[8] = 0;
+    p[9] = 0;
+    p[3] = p[4] = (uint32_t)(uintptr_t)fnv_alloc_buffer(G_MEMORY_MANAGER, size, 1);
+    return self;
+}
+
+/* 0x00aa2230 BSNiAllocator's constructor (the exe stores only the vftable 0x010a2528): the decomp defines the class
+ * with `virtual void m_virtual0()` for the destructor slot, so _ZTV26FUN_00aa2230_BSNiAllocator is in the exe's order
+ * and Gamebryo's allocator calls (NiAllocator, declared with a virtual destructor, D26 (b)) land one slot early:
+ * NiMalloc 0x00aa1070 (vfn_04, native slot 5) ran exe slot 5 and called MemoryManager::Deallocate on its own stack
+ * block, _free_r wrote through a bad reent, 554 Setting initializers skipped. The same class as 0x00aa7400 above:
+ * a defined class whose slot-0 placeholder is not a destructor (S1-rules). A minus-one table of the exe's 9 slots. */
+static void *fnv_niallocator_vtable[2 + 9];
+void *fnv_standin_00aa2230(void *self) __asm__("_ZN26FUN_00aa2230_BSNiAllocatorC1Ev");
+void *fnv_standin_00aa2230(void *self) {
+    *(uint32_t *)self = (uint32_t)(uintptr_t)fnv_m1_table(fnv_niallocator_vtable, 0x010a2528u, 9);
+    return self;
+}
+
+
 /* 0x00405430 NiTMap_S::RemoveKey(key) (the AllForms-style map RemoveKey that TESForm's 0x00483c70 reaches from the
  * form constructor of the static form 0x011c9750, initializer 0x00f4ad10): NiTMap_S is a call-only declaration with
  * a placeholder at slot 0 (actor.cpp), so its KeyToHashIndex call reads native slot 1. The receiver is the native

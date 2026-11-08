@@ -892,6 +892,8 @@ class Emu:
                     w = (w & 0x9F00001F) | ((pg & 3) << 29) | (((pg >> 2) & 0x7FFFF) << 5)
                 elif typ == 12:         # R_AARCH64_P32_ADD_ABS_LO12_NC
                     w = (w & 0xFFC003FF) | ((S & 0xFFF) << 10)
+                elif typ == 15:         # R_AARCH64_P32_LDST32_ABS_LO12_NC (a word load/store of a static)
+                    w = (w & 0xFFC003FF) | (((S & 0xFFF) >> 2) << 10)
                 else:
                     raise SystemExit(f"--inject {obj}: relocation type {typ} not supported")
                 struct.pack_into("<I", blob, at, w)
