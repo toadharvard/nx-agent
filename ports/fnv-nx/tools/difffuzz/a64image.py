@@ -147,6 +147,33 @@ def build_many(sources, linkdir, workdir, name):
         return _build_many(sources, linkdir, workdir, name)
 
 
+def alias_lines(weak, undef, defined, absolute, alias):
+    """Linker-script lines for one image (adds what they define to `defined`): weak image variables and undefined
+    names at their absolute original addresses, undefined names aliased to a defined symbol, and every
+    __fnvnx_msvc_<addr> whose target the image defines."""
+    lines = []
+    # natively defined image variables are weak address symbols; the game link's aliases.ld puts them at their
+    # original address (the image copy), so do the same here
+    for n in sorted(weak):
+        if n in absolute:
+            lines.append('%s = 0x%08x;' % (n, absolute[n]))
+    for n in sorted(undef - defined):
+        if n in absolute:
+            lines.append('%s = 0x%08x;' % (n, absolute[n]))
+            defined.add(n)
+        elif n in alias and alias[n] in defined:
+            lines.append('%s = %s;' % (n, alias[n]))
+            defined.add(n)
+    # (R2, farm baseline 588863: 0x0040e3c0) the link's __fnvnx_msvc_<addr> entry of an override on a secondary base
+    # (GCC's _ZThn<d>_ thunk) is defined whenever its thunk is, also when the unit never names it: the runner enters
+    # there (arm64emu.entry) with the exe's subobject `this`, as a call through the vtable does
+    for n in sorted(alias):
+        if n.startswith('__fnvnx_msvc_') and n not in defined and alias[n] in defined:
+            lines.append('%s = %s;' % (n, alias[n]))
+            defined.add(n)
+    return lines
+
+
 def _build_many(sources, linkdir, workdir, name):
     fixed = os.path.join(linkdir, 'fixed')
     units = []
@@ -181,19 +208,7 @@ def _build_many(sources, linkdir, workdir, name):
                 if s.bind == 'weak':
                     weak.add(s.name)
     absolute, alias = load_aliases(os.path.join(linkdir, 'out', 'aliases.ld'))
-    lines = []
-    # natively defined image variables are weak address symbols; the game link's aliases.ld puts them at their
-    # original address (the image copy), so do the same here
-    for n in sorted(weak):
-        if n in absolute:
-            lines.append('%s = 0x%08x;' % (n, absolute[n]))
-    for n in sorted(undef - defined):
-        if n in absolute:
-            lines.append('%s = 0x%08x;' % (n, absolute[n]))
-            defined.add(n)
-        elif n in alias and alias[n] in defined:
-            lines.append('%s = %s;' % (n, alias[n]))
-            defined.add(n)
+    lines = alias_lines(weak, undef, defined, absolute, alias)
     stubs, k = {}, 0
     info = dict(code_stubs=0, named_stubs=0, data_abs=0)
     for n in sorted(undef - defined):
