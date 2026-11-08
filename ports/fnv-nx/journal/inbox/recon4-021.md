@@ -15,11 +15,12 @@
 
   | covered by | rows |
   |---|---|
-  | R2's recons | 22 |
+  | R2's recons | 25 |
   | STL | 1, the vector<float> ctor |
-  | the std_exports binding | 1, StandardLibrarySingletonObject ctor |
-  | STL1's body, not instantiated locally | 2, the swap instances (R2's swap_generic covers them too) |
 
+  - The 25 recon rows: the 17 SpeedTree helpers (the 2 swaps through swap_generic), tesobject rows 1-5, the
+    StandardLibrarySingletonObject ctor and dtor (slso_layout; the ctor also binds through std_exports), and
+    ~vector<float>.
   - The extra row from recon4-020, CsvCtype::widen, is covered by csvusefacet_char.
 * **R2 takes two leftovers as recons:** ParserUseFacet and basic_ios::setstate(int, bool), both in the nested
   fnv_00ac9790::std copy.
