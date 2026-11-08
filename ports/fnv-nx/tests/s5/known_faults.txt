@@ -63,6 +63,10 @@ _Z12FUN_00c3c460v standin  # 0x00c3c460 (WinMain, via 0x00c3bd30): the decomp's 
                       # leaves MessageHandler::pHandler without a vptr; once the heaps work (MemoryHeap stand-in,
                       # heap_standin.c) the first AbstractHeap commit logs through it (slot 5 of a zeroed object).
                       # standins.c does what the exe does: new(8), MessageHandler 0x00c3bcf0(this, false) (S1)
+__fnvnx_cthis_00aa3880 standin  # boot.cpp's early MemoryManager construction: the game's initializer 0x00fb66a0
+                      # (xc slot 7) constructs it again; with the VM service the second run clears the live pool
+                      # tables and frees a pool block through CRT free (30 skips). standins.c skips the early run
+                      # (S5: delete construct_memory_manager from boot.cpp)
 _ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool without memory (no fixed-hint
                       # reservation here) is freed through NiFree before Gamebryo's allocator exists, which skipped
                       # boot_banner (MemoryManager's constructor) once the game's heaps are used; the exe destroys it

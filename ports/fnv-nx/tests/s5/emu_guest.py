@@ -331,7 +331,8 @@ class Emu:
     def rs(self, addr):
         out = bytearray()
         while True:
-            b = self.uc.mem_read(addr + len(out), 64)
+            a = addr + len(out)
+            b = self.uc.mem_read(a, min(64, 0x1000 - (a & 0xFFF)))   # never past the page: the next may be unmapped
             i = b.find(0)
             if i >= 0:
                 return (out + b[:i]).decode(errors="surrogateescape")   # the guest may pass any bytes
