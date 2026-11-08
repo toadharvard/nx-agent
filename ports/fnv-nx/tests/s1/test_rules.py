@@ -1932,6 +1932,11 @@ check('RAWVT1 not slot 0, not in a free function, not in a COM-shaped class',
       run(s1.r_raw_vtable_slots, 'void f(void* p) { ((void(*)(void*))(*(void***)this)[3])(p); }\n') +
       run(s1.r_raw_vtable_slots, _RV.replace('    void Load(const char* f);', '    virtual long __stdcall Q(int);\n    virtual long __stdcall R(int);\n    void Load(const char* f);')),
       [], ['FNVNX_D26_SLOT'])
+_eo = tempfile.mkdtemp(); open(os.path.join(_eo, 'exe_order_classes.tsv'), 'w').write('# class\tvftable\treason\nColl\t010a2528\tD22-USED\n')
+os.environ['FNVNX_EXE_ORDER'] = os.path.join(_eo, 'exe_order_classes.tsv'); prepare.__dict__['_fnvnx_exe_order'] = None
+check('RAWVT1 not in a class whose table the link keeps in exe order (exe_order_classes.tsv)',
+      run(s1.r_raw_vtable_slots, _RV), [], ['FNVNX_D26_SLOT'])
+del os.environ['FNVNX_EXE_ORDER']; prepare.__dict__['_fnvnx_exe_order'] = None
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
