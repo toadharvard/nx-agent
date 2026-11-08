@@ -605,6 +605,23 @@ def hint(pair, target, case, div, fn, max_steps):
         if str(div.get('x86', '')).startswith('fault:') and div.get('arm') is None and oracle_vcall(pair, case,
                                                                                                     max_steps):
             h['cause'] = 'oracle-vcall'; return h
+        one = 'x86' if div.get('arm') is None and str(div.get('x86', '')).startswith('fault:') else \
+            'arm' if div.get('x86') is None and str(div.get('arm', '')).startswith('fault:') else None
+        if one and pair is not None:
+            # S1-rules (d26-uniform): a fault on one machine that goes away when every planted garbage word is 0 on
+            # both (world.UNIFORM) came from garbage that machine read: a stack out-parameter an intercepted callee
+            # would have written (00dc9240: [esp + 0xb] after 0x00d874b0, random fill on x86, 0 natively), a
+            # non-argument register. The seed probe below misses it (a random byte is nonzero under both seeds)
+            world.UNIFORM = True
+            try:
+                _, _, du = pair.run(case, max_steps)
+            finally:
+                world.UNIFORM = False
+            h['_runs'] += 1
+            if du is None:
+                h['cause'] = 'uninit-x86' if one == 'x86' else 'uninit-arm'
+                h['uniform'] = 'agree'
+                return h
     if k == 'callee-saved':
         h['cause'] = 'callee-saved'; return h
     isfloat = False
