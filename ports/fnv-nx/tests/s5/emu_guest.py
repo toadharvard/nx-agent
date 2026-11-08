@@ -678,7 +678,7 @@ class Emu:
                 print(f"   cpu boost: {'FastLoad' if mode else 'Normal'}"
                       f"{'' if on else ' (off: boost_loading=0)'} (thread {self.cur.tid if self.cur else '?'})")
             return 0 if on else 1
-        if module == 11 and 4 <= fn <= 7:   # FNVNX_PLAT_VM_*: VirtualAlloc's address space (toolchain/host/host_vm.inc)
+        if module == 11 and 4 <= fn <= 7 and self.vm_service:   # FNVNX_PLAT_VM_*: VirtualAlloc's address space
             av = struct.unpack("<QQ", bytes(self.uc.mem_read(args, 16))) if nargs >= 2 and args else (0, 0)
             return self.vm_call(fn, av[0], av[1])
         return 0xFFFFFFFFFFFFFF01
@@ -687,6 +687,9 @@ class Emu:
     # reservations from its heap and refuse every fixed address, and the game's VirtualReservationSearch (16 MiB steps
     # down from 0xff000000) finds nothing. A reservation is address space only; commits map zeroed pages; decommits
     # zero them (the memory stays, as the device's partial decommit); release unmaps what was committed.
+    # Opt-in (--vm-service or FNVNX_EMU_VM=1) until the stub boots are measured with it: S5's D26 stub boot faults in
+    # fs_stat with it (reverted on claude/fnv-s5), so by default the guest keeps the heap-carved fallback.
+    vm_service = os.environ.get("FNVNX_EMU_VM") == "1"
     VM_ALIGN, VM_NO_GO = 0x10000, (0x00400000, 0x02100000)
 
     def vm_free(self, a, n):
@@ -2641,6 +2644,9 @@ def main(argv):
                     help="log every guest write to ADDR..ADDR+SIZE (default 4) with pc, lr and the value")
     ap.add_argument("--wall-seconds", type=int, default=0,
                     help="end the run after this many seconds with the usual report (SIGTERM does the same)")
+    ap.add_argument("--vm-service", action="store_true",
+                    help="answer the host VM service (FNVNX_PLAT_VM_*: fixed-address VirtualAlloc reservations, as the "
+                    "device's toolchain/host/host_vm.inc); default off, FNVNX_EMU_VM=1 also turns it on")
     ap.add_argument("--trace-fn", action="append", default=[], metavar="NAMES",
                     help="function-boundary trace: symbols, 0xORIG or re:REGEX, comma-separated (args, return; "
                     "install_trace_fn)")
@@ -2679,6 +2685,8 @@ def main(argv):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
     emu = Emu(a.nso, root, load_base=a.load_base, game=a.game)
+    if a.vm_service:
+        emu.vm_service = True
     emu.budget, emu.slice_ms = a.budget, a.slice_ms
     emu.core3, emu.boost_loading = a.core3, not a.no_boost
     if a.elf:
