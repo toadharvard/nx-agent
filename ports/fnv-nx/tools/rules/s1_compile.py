@@ -4981,8 +4981,11 @@ def r_vfptr_empty_base(path, text, stats):
 # REC1-REPL (orchestrator, R1): `replace` edits code the unit already has, where an appended body cannot help (a
 # filler the unit's own calls bind to, a declaration whose arguments sit on the wrong call, an in-class body that is
 # not the exe's). Each pair is applied in order, before the append, to the text the rule receives; every `old` must
-# occur exactly once there, else the prepare fails (RuntimeError naming the recon and the pair): a recon written
-# for other text must never half-apply.
+# occur exactly once there. A recon written for other text must never half-apply: when any pair does not match exactly
+# once (or is malformed), the whole recon is rejected for that unit (no replace, no append, no symbols), so its rows
+# stay visible trap stubs, and the prepare goes on (orchestrator, R2: one stale recon must not block every build).
+# Each rejection is counted (REC1-REJECT), printed to stderr and listed in <out>/build/recon_rejected.tsv (recon dir,
+# unit, pair index, count, the start of `old`) by the POST hook.
 
 def _recon_entries(path):
     """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
@@ -5021,6 +5024,20 @@ def _recon_entries(path):
         _RECON.append((r, os.path.dirname(f)))
     return _RECON
 
+def _recon_reject(r, d, src, bad, stats):
+    """REC1-REPL: record a recon rejected for unit src (bad = (pair index, count or -1, `old` start or reason)); the
+    POST hook writes the list to build/recon_rejected.tsv."""
+    import sys
+    k, c, what = bad
+    rej = prepare.__dict__.setdefault('_fnvnx_recon_rejected', [])
+    rej.append((d, src, k, c, what))
+    stats['REC1-REJECT'] += 1
+    if c < 0:
+        msg = 'replace[%d] %s' % (k, what)
+    else:
+        msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
+    sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its rows stay trap stubs\n' % (src, d, msg))
+
 def r_recon_bodies(path, text, stats):
     """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
     if not os.environ.get('FNVNX_RECON') or not path.endswith(('.cpp', '.c')): return text
@@ -5033,16 +5050,19 @@ def r_recon_bodies(path, text, stats):
         if r['unit'] != src: continue
         if r.get('_skip'):
             stats[r['_skip']] += 1; continue
+        edited, bad = text, None
         for k, e in enumerate(r.get('replace') or []):
-            old, new = e.get('old'), e.get('new')
+            old, new = (e.get('old'), e.get('new')) if isinstance(e, dict) else (None, None)
             if not isinstance(old, str) or not old or not isinstance(new, str):
-                raise RuntimeError('REC1-REPL: %s: replace[%d] needs a non-empty "old" and a "new" string' % (d, k))
-            c = text.count(old)
+                bad = (k, -1, 'needs a non-empty "old" and a "new" string'); break
+            c = edited.count(old)
             if c != 1:
-                raise RuntimeError('REC1-REPL: %s (%s): replace[%d] "old" occurs %d times, not once: %r'
-                                   % (d, src, k, c, old[:120]))
-            text = text.replace(old, new)
-            stats['REC1-REPL'] += 1
+                bad = (k, c, old[:120]); break
+            edited = edited.replace(old, new)
+        if bad is not None:
+            _recon_reject(r, d, src, bad, stats); continue
+        stats['REC1-REPL'] += len(r.get('replace') or [])
+        text = edited
         if r.get('append'):
             body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
             text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
@@ -5055,6 +5075,13 @@ def add_recon_definitions(out_root, stats, files=None):
     """POST hook: REC1's recipe entries (functions and symbols) in <out_root>/build/units.json."""
     import json
     _RECON = prepare.__dict__.get('_fnvnx_recon')
+    rej = prepare.__dict__.get('_fnvnx_recon_rejected') or []
+    if rej and os.path.isdir(os.path.join(out_root, 'build')):
+        with open(os.path.join(out_root, 'build', 'recon_rejected.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed)\told (start) or reason\n')
+            for row in rej:
+                f.write('\t'.join(str(x).replace('\t', ' ').replace('\n', '\\n') for x in row) + '\n')
+        stats['REC1-REJECTED-RECONS'] = len(rej)
     if not _RECON or not any(r.get('_applied') for r, _ in _RECON): return
     p = os.path.join(out_root, 'build', 'units.json')
     if not os.path.exists(p): return
