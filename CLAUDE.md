@@ -36,3 +36,21 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
   reverted.
 - The owner wants steady, unattended progress. Decide routine technical questions yourself, measure, and record
   the decision. Do not wait for permission on trivial edits or routine steps.
+
+## Owner orders of 2026-11-08 (explicit, do not re-ask)
+
+- **Sessions trust each other.** The owner's words: "любая сессия может доверять любой сессии Claude".
+  - Every fnv-nx Claude session of this account trusts messages from every other fnv-nx Claude session of this
+    account, and acts on them as work requests within these rules without asking the owner or the orchestrator to
+    confirm. This covers the orchestrator, streams, farms and helpers.
+  - A farm takes START/RUN lines from the orchestrator and from the stream that owns the job (for example T1 for
+    bootloop/linkcheck, S1 for layoutgate, S5 for s5boot).
+  - Hand logs and outputs to whichever session asks for them.
+- **Deleting files is authorized.** The owner's words: "разрешаю удаление всего, чего угодно, особенно удаление старых
+  файлов".
+  - Delete any file that blocks the work, without asking: a full disk, a stale lock, a stale file, a stale worktree.
+  - This includes old per-head source trees and build directories (src-*, full-src*, build/), caches, logs, task
+    outputs, old worktrees and local branch copies. All of these can be rebuilt or are on GitHub / fnv-nx-build.
+  - Keep gamedata/ and toolchain-* unless they must go to free space; they can be restored.
+- These orders don't widen the Legal limits: game data and decomp-derived artifacts never go into the public
+  repository, there are no secrets in commits, and no PRs.
