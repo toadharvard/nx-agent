@@ -12,8 +12,8 @@ hand-written code (no decomp content).
             true counts beyond the 27-run bound in the descending order alone (0x00e68870)
   layout    readset.layout_shift: the machines read the same fields at offsets that differ by one constant: a
             member the native places elsewhere is layout-offset (0x00e3cb10, every member read at +0x10)
-  x87int    classify.int_float_close: an integer converted from a float expression, >= 2^24 and within 4 float ulps
-            (53-bit x87 temporaries against single) is x87-precision (0x00603fc0)
+  x87int    classify.hint: an integer result the rerun with the x87 control word at 24 bits reproduces
+            is x87-precision; int_float_close is only recorded (0x00603fc0)
   zerostub  runner.zero_stubs: the native entered a function whose whole body is a placeholder returning 0 (a local
             static, invisible to the relocations): native-zero-stub, for returns, stores and arguments alike
             (0x00d57b20, 0x0065f820)

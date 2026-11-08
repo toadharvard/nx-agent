@@ -49,11 +49,20 @@ import config
 # padding and value-free writes are no custom-register reads, custom registers carry the parameter their calibrated
 # pairing agrees on, the adaptive follow skips a callee the native calls out of line itself and reruns after its
 # last load, the bool-repr probe covers background bytes and NaN-only remainders, a store into the oracle's return
-# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. F-uncls: the garbage probe compares
+# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. Float class: x87_result_use follows
+# a jmp to the shared epilogue and knows fidiv / fist / fcomi / ftst / fsqrt consumers, overlapping pinned literals let
+# the exe bytes (when available) replace the union, and a float difference runs the garbage / bool / x87 control-word (24-bit) / x87-range / callee
+# float width probes before it stays `float`.
+# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. The signedness probe clears an argument byte only when the oracle can
+# widen it (not a float sign or a whole-read int), and an uninit-arm that vanishes once the unwritten stack words of
+# buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
+# read on a later path is a custom register, the oracle gets ST0 for a call the caller's unit declares float, and
+# native-zero-init / dtor-dead-store (by design) / thunk-binding relabel store-only divergences.
+# F-uncls: the garbage probe compares
 # the argument a call-args divergence names and probes random-background cases with the background pinned (an
 # uninitialised out-parameter of an intercepted callee is uninit-x86), pop learning tries the pushes right before a
-# call first (three call sites over branches), an integer converted from a float expression within 4 float ulps
-# above 2^24 is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
+# call first (three call sites over branches), an integer result that the 24-bit x87 control word rerun reproduces
+# is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
 # placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return.
 HARNESS = 'difffuzz-20'
 
