@@ -671,6 +671,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # the address does what the exe's `sub ecx, n; jmp f` does (this -= n, then f's native entry)
     adj_rows = adjustor_thunks(def_at, native, exevft.exe_path(None if exe in (None, '') else exe)
                                if exe != 'none' else None, providers)
+    # An object that already defines `__fnv_<a>` itself (a recon's GCC-only spelling of the thunk, REC1) keeps it:
+    # a stub too was a multiple definition and failed the guest link (link 4a15e91c967a, 11 names; R2).
+    own_addr_defs = {a_ for a_ in list(adj_rows) if ADDR_SYM % a_ in anydef}
+    for a_ in own_addr_defs:
+        del adj_rows[a_]
+    stats['adjustor_thunk_unit_defined'] = len(own_addr_defs)
     for a_, (n_, t_) in sorted(adj_rows.items()):
         bridges.setdefault(ADDR_SYM % a_, emit_adj_stub(ADDR_SYM % a_, adj_target(native, t_), n_))
     stats['adjustor_thunk_stubs'] = len(adj_rows)
@@ -678,6 +684,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # non-virtual destructor, so callers bound there trapped. A stub does what MSVC's ??_G does: D1 (the unit's own,
     # else the address its ??1 is bound to), then the global operator delete when flags bit 0 is set; returns this
     gdel_rows = nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_votes, providers)
+    for a_ in [a_ for a_ in gdel_rows if ADDR_SYM % a_ in anydef]:   # unit-defined, as for adjustor thunks
+        del gdel_rows[a_]
     for a_, (d1_, del_) in sorted(gdel_rows.items()):
         bridges.setdefault(ADDR_SYM % a_, emit_sdd_stub(ADDR_SYM % a_, d1_, del_))
     stats['nonvirtual_deldtor_stubs'] = len(gdel_rows)
