@@ -82,6 +82,10 @@ _ZN10S_0045d22012FUN_0045d220Ev standin  # 0x0045d220 the other Setting registry
 _ZN18FUN_00869f00_shell12FUN_00869f00Ejj standin  # 0x00869f00: its array's Allocate is called through a call-only class with a
                       # named slot 0 (extradatalist.cpp AX), native slot 1 = D0: the static object was freed (initializers
                       # 0x00fa1fc0/0x00fa1fe0). standins.c: slot 1 = slot 2 in its table (S1-rules: widen D26 (b))
+InitHolder standin  # 0x00aa2020 Gamebryo's allocator holder: the native body calls the allocator's native slot 7 (an
+                      # exe-order call-only declaration that D26 (b) does not shift) on BSNiAllocator's minus-one table, so
+                      # it ran exe slot 6 and faulted in _malloc_usable_size_r right after WinMain started (link
+                      # 3f7a6c35e923). standins.c calls exe slot 7 at native 8 (S1-rules: named slot-0 declarations)
 _ZN8NiTMap_S9RemoveKeyEj standin  # 0x00405430: NiTMap_S is a call-only declaration in the exe's slot order (v0 at 0,
                       # KeyToHashIndex 1); its receiver (TESForm's map 0x011c54c0, exe vftable 0x0101ca78) is the native
                       # NiTPointerMap with D1/D0 at 0/1, so slot 1 ran D0 and the bucket index faulted: the last skipped
