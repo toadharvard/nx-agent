@@ -16,3 +16,12 @@
     compiled once more without the cache. If it still fails, it is reported as `probe-failed <unit>` and the run
     goes on.
   - objcache: an empty cached object is treated as a miss and never stored.
+* **Boot blocker, S5 link af44165ab2d8: BSDiscBootSystemUtility::Initialize recursed** (heap ctor dyninit 00fb66a0).
+  - Fixed by RAWVT1-MEM (207cbc4e).
+  - The cause: the decomp indexes the vptr modelled as a data member, `m_ppVirtualMethodTable[2]`. Exe slot 2 is
+    Destroy, while native slot 2 of the minus-one table is Initialize itself.
+  - What RAWVT1-MEM does: it gives FNVNX_D26_SLOT(k) to a called slot of such a member, or of a local initialised
+    from `*(void***)this`, on `this`, under RAWVT1's conditions.
+  - A data read is excluded: blk_00cc0000 FUN_00cd9f10 reads `(int)m_ppVirtualMethodTable[7]`, a count (exe
+    [[esi]+0x1c]).
+  - prep_k: 17 sites in 13 units, all compile.
