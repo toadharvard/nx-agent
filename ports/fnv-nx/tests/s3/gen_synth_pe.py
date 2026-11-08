@@ -275,7 +275,8 @@ class Synth:
         self.cptr(r, TLSCB, TLS, 0)
         r.u32(0)
         self.func(TLSCB)
-        tls_index = d.u32(0)
+        tls_index = d.u32(0xFFBF8C85)   # not 0 on disk, like the real exe: the loader must store 0
+        self.tls_index = tls_index
         tdir = r.at()
         self.dptr(r, self.tls.va)
         self.dptr(r, self.tls.va + 8)

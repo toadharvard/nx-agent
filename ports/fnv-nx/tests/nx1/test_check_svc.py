@@ -18,7 +18,7 @@ CASES = [  # (encoding, expected kind or None, what)
     (0xD508871F, "bad", "tlbi vmalle1"),
     (0xD53BE020, None, "mrs x0, cntpct_el0"), (0xD53BE000, None, "mrs x0, cntfrq_el0"),
     (0xD53BE040, "bad", "mrs x0, cntvct_el0 (traps: CNTKCTL_EL1.EL0VCTEN = 0)"),
-    (0xD53B0020, "bad", "mrs x0, ctr_el0"), (0xD5380000, "bad", "mrs x0, midr_el1"),
+    (0xD53B0020, None, "mrs x0, ctr_el0 (UCT set in Mesosphere's SCTLR_EL1)"), (0xD51B0020, "bad", "msr ctr_el0, x0"), (0xD5380000, "bad", "mrs x0, midr_el1"),
     (0xD53BD040, None, "mrs x0, tpidr_el0"), (0xD51BD040, None, "msr tpidr_el0, x0"),
     (0xD53BD060, None, "mrs x0, tpidrro_el0"), (0xD51BD060, "bad", "msr tpidrro_el0, x0"),
     (0xD53B4400, None, "mrs x0, fpcr"), (0xD51B4420, None, "msr fpsr, x0"), (0xD53B4200, None, "mrs x0, nzcv"),

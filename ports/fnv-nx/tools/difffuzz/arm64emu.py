@@ -21,6 +21,7 @@ from unicorn import arm64_const as A
 import world
 import a64image
 import libcalls
+import retsrc
 
 PAGE = world.PAGE
 TLS_BASE, TLS_SIZE = 0x0b900000, 0x00010000   # inside the AArch64 private range (faults as data elsewhere)
@@ -30,6 +31,10 @@ XR = [A.UC_ARM64_REG_X0 + i for i in range(29)] + [A.UC_ARM64_REG_X29, A.UC_ARM6
 VR = [A.UC_ARM64_REG_V0 + i for i in range(32)]
 STUB_LO, STUB_HI = a64image.CODE_STUB, a64image.NAMED_STUB + 0x00800000
 BRK = struct.pack('<I', 0xd4200000)
+# one named stub's slot: a named stub every 16 bytes (a64image.NAMED_STUB + 16 * k, vtmodel.VT_STUBS + 16 * n). A data
+# access there is the native using a data symbol the link left unbound (native-stub-data). Everything else in the
+# stub range, the code-stub region CODE_STUB + X included, is background as on the oracle (F3b)
+STUB_SLOT = 16
 
 
 class Call:
@@ -86,12 +91,18 @@ class Arm64Engine:
         self.mapped.add(a64image.STACK_GUARD)
         # native vtable groups synthesized for planted vptrs (vtmodel.py: classes whose _ZTV the unit image does not
         # define), read only, in the private range
-        for base, data in sorted((vt_mem or {}).items()):
-            for p in range(world.page_of(base), base + len(data), PAGE):
+        # (EQ native-null-read, difffuzz-20) a group's page holds the same background the oracle reads past the end of
+        # its vftable (a call through a slot the exe's vftable does not have), not zeros that fault at call 0; one
+        # page past the last group is mapped for the same reason
+        self.vt_mem = vt_mem or {}
+        self.vt_pages = set()
+        for base, data in sorted(self.vt_mem.items()):
+            for p in range(world.page_of(base), base + len(data) + PAGE, PAGE):
                 if p not in self.mapped:
                     uc.mem_map(p, PAGE, UC_PROT_READ)
                     self.mapped.add(p)
-            uc.mem_write(base, data)
+                    self.vt_pages.add(p)
+        self._fill_vt()
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
         uc.hook_add(UC_HOOK_INTR, self._on_intr)
         self._trap_pcs = None
@@ -102,8 +113,45 @@ class Arm64Engine:
             return
         self.uc.mem_map(page, PAGE, prot)
         self.uc.mem_write(page, self.world.page_a64(page))
+        if a64image.NAMED_STUB <= page < STUB_HI:
+            # a named-stub page: background as on the oracle, `brk #0` in the slots of the stubs this image binds
+            # (a data access there faults: _bound). A code-stub page is all background: a call there is intercepted
+            # by the block hook whatever the page holds, and only data symbols become named stubs
+            stubs = getattr(self.image, 'stubs', {})
+            for s in range(page, page + PAGE, STUB_SLOT):
+                if s in stubs:
+                    self.uc.mem_write(s, BRK * (STUB_SLOT // 4))
         self.mapped.add(page)
         self.dynamic.add(page)
+
+    def _code_stub_set(self):
+        st = getattr(self, '_code_stubs', None)
+        if st is None:
+            st = self._code_stubs = {a for a in getattr(self.image, 'syms', {}).values()
+                                     if a64image.CODE_STUB <= a < a64image.NAMED_STUB}
+        return st
+
+    def _bound(self, a, size=1):
+        """Does [a, a + size) touch the slot of a named or vtable stub this image binds (image.stubs)? Only a data
+        symbol the link leaves unbound becomes a named stub (a64image: `__fnv_<X>` of code is CODE_STUB + X, of data
+        its own address), so a data access there is the native using that symbol (native-stub-data). Elsewhere the
+        stub range is background memory, as on the oracle (F3b: a pointer chase through background words landed on a
+        stub page, 0x0860d648 or exactly on __fnv_00815300; the native faulted, the oracle read background)."""
+        if not (a64image.NAMED_STUB <= a + size - 1 and a < STUB_HI):
+            return False
+        stubs = getattr(self.image, 'stubs', {})
+        return any(x & ~(STUB_SLOT - 1) in stubs for x in (a, a + size - 1))
+
+    def _on_stub_data(self, uc, access, address, size, value, data):
+        if self._bound(address, size) and self._fault is None:
+            self._fault = 'fault:%s:%08x' % ('w' if access == 17 else 'r', address & 0xffffffff)
+            uc.emu_stop()
+
+    def _fill_vt(self):
+        for p in sorted(self.vt_pages):
+            self.uc.mem_write(p, self.world.page_a64(p))
+        for base, data in sorted(self.vt_mem.items()):
+            self.uc.mem_write(base, data)
 
     def reset(self, world_obj):
         """Forget the previous case's world pages and restore the image's writable data."""
@@ -112,6 +160,7 @@ class Arm64Engine:
             self.mapped.discard(p)
         self.dynamic = set()
         self.world = world_obj
+        self._fill_vt()
         for base, data in self.image.segments:
             if base >= self.image.data_start:
                 self.uc.mem_write(base, data)
@@ -119,6 +168,11 @@ class Arm64Engine:
     def _ensure(self, addr, size=1):
         for p in range(world.page_of(addr), addr + size, PAGE):
             self._map(p)
+
+    def _bmem(self, uc, r):
+        """Memory for a builtin: faults where this machine's own load or store would (libcalls.Fault)."""
+        return libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes,
+                            check=lambda p, a: p in self.mapped or self._mappable(a) or libcalls.uc_mapped(uc, a))
 
     def _on_unmapped(self, uc, access, address, size, value, data):
         if access == 21 and libcalls.IMPORT_BASE <= address < libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16:
@@ -130,13 +184,15 @@ class Arm64Engine:
             self.mapped.add(p)
             return True
         if STUB_LO <= address < STUB_HI and access == 21 and not any(lo <= address < hi for lo, hi in self.holes()):
-            # UC_MEM_FETCH_UNMAPPED: a call into a stub
-            p = world.page_of(address)
-            uc.mem_map(p, PAGE, UC_PROT_ALL)
-            uc.mem_write(p, BRK * (PAGE // 4))
-            self.mapped.add(p)
+            # UC_MEM_FETCH_UNMAPPED: a call into a stub (the block hook intercepts it whatever the page holds)
+            self._map(world.page_of(address))
             return True
-        if not self._mappable(address) or not self._mappable(address + size - 1):
+        if access != 21 and self._bound(address, size):
+            # a data access to a named stub the image binds: the native uses an unbound data symbol (native-stub-data)
+            self._fault = 'fault:%s:%08x' % ('w' if access == 20 else 'r', address & 0xffffffff)
+            return False
+        fetch = access == 21
+        if not self._mappable(address, fetch) or not self._mappable(address + size - 1, fetch):
             kind = {20: 'w', 21: 'x'}.get(access, 'r')
             self._fault = 'fault:%s:%08x' % (kind, address & 0xffffffff) if address < world.MAX else \
                 'fault:%s:ilp32-high:%x' % (kind, address)
@@ -156,12 +212,19 @@ class Arm64Engine:
                 (a64image.CODE_STUB, a64image.CODE_STUB + world.TEXT[0]),
                 (pg(a64image.CODE_STUB + world.TEXT[1]), a64image.NAMED_STUB),
                 (pg(top + 16), vtmodel.VT_STUBS),
-                (pg(max(self.image.end, a64image.A64_BASE)), TLS_BASE)]
+                (pg(max(self.image.end, a64image.A64_BASE)), TLS_BASE),
+                # the synthesized vtable region: data to read, never code; a jump there is the wild call the oracle
+                # makes of the same address (difffuzz-20: it faulted natively, fault:x:0bd7f08d, native-wild-private)
+                (vtmodel.VT_BASE, vtmodel.VT_END)]
             self._holes = [(lo, hi) for lo, hi in h if lo < hi]
         return self._holes
 
-    def _mappable(self, a):
-        return world.mappable(a, 'a64') or any(lo <= a < hi for lo, hi in self.holes())
+    def _mappable(self, a, fetch=False):
+        import vtmodel
+        # the stub range and the synthesized vtable region outside the named stubs' slots / the mapped groups are
+        # background memory, as on the oracle (F3b; _bound faults the bound slots)
+        return (world.mappable(a, 'a64') or any(lo <= a < hi for lo, hi in self.holes())
+                or STUB_LO <= a < STUB_HI or (not fetch and vtmodel.VT_BASE <= a < vtmodel.VT_END))
 
     # the link's trap stubs for vtable slots it cannot bind (fnvlink.py: __fnvnx_vtrap_<X> loads x1 = a text naming
     # the class and slot, then `b fnvnx_vslot_trap`; special members -> fnvnx_special_trap; weak defaults: brk)
@@ -215,7 +278,11 @@ class Arm64Engine:
         saved = [uc.reg_read(XR[i]) for i in range(19, 30)] + [uc.reg_read(A.UC_ARM64_REG_SP)]
         hs = uc.hook_add(UC_HOOK_BLOCK, self._on_stub, user_data=(case, r), begin=STUB_LO, end=STUB_HI - 1)
         hwild = [uc.hook_add(UC_HOOK_BLOCK, self._on_wild, user_data=(case, r), begin=lo, end=hi - 1)
-                 for lo, hi in tuple(world.WILD_A64) + tuple(self.holes())]
+                 for lo, hi in sorted(set(world.WILD_A64) | set(self.holes()))]
+        # (world.A64_HOLES is in both lists: hooked twice, a wild call there was traced twice; F2 d21-holes)
+        # data accesses on named-stub pages already mapped (by a call or by a background read): fault in a bound slot
+        hws_stub = uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self._on_stub_data, begin=a64image.NAMED_STUB,
+                               end=STUB_HI - 1)
         hc = uc.hook_add(UC_HOOK_BLOCK, self._on_cov, user_data=r, begin=a64image.A64_BASE,
                          end=max(self.image.end, a64image.A64_BASE + 4) - 1)
         hws = [uc.hook_add(UC_HOOK_MEM_WRITE, self._on_write, user_data=r, begin=lo, end=hi - 1)
@@ -235,7 +302,7 @@ class Arm64Engine:
         except UcError as e:
             r.error = self._fault or 'fault:uc:%s' % e
         finally:
-            for h in [hs, hc] + hws + hwild:
+            for h in [hs, hc, hws_stub] + hws + hwild:
                 uc.hook_del(h)
         pc = uc.reg_read(A.UC_ARM64_REG_PC)
         if r.error is None and self._fault:
@@ -300,7 +367,10 @@ class Arm64Engine:
         """A native code address stored as data stands for its original address (S3 maps image code pointers to
         native ones): a code stub (unlinked callee) or a native entry of the image."""
         if a64image.CODE_STUB <= v < a64image.NAMED_STUB:
-            return v - a64image.CODE_STUB
+            # only a stub the image binds (`__fnv_<X>` = CODE_STUB + X): any other word there is data both machines
+            # hold, e.g. a canned call result, and stays as it is (F3: 0x0805ddf1 stored by both, the native's
+            # rewritten to 0x0005ddf1: store-width / stub-normalized)
+            return v - a64image.CODE_STUB if v in self._code_stub_set() else v
         return self.image.entries.get(v, v)
 
     def _norm_bytes(self, b):
@@ -373,8 +443,39 @@ class Arm64Engine:
             return
         self._on_stub(uc, address, size, user, wild=True)
 
+    def _zero_unwritten(self, uc, case, ptrs):
+        """STUB_OUT: for each argument that points into the stack, the words of the next 0x100 bytes that still equal
+        the planted fill (the native code never stored there) become 0."""
+        base = world.SP0 - 0x1000
+        fill = world.stack_fill(case.seed ^ 0xa5, 0x1000)
+        for v in ptrs:
+            v &= 0xffffffff
+            if not (world.STACK[0] <= v < world.STACK[1]):
+                continue
+            for a in range(v & ~3, min(v + 0x100, world.SP0, world.STACK[1]) & ~3, 4):
+                if a < base:
+                    continue
+                try:
+                    cur = bytes(uc.mem_read(a, 4))
+                except UcError:
+                    break
+                if cur == fill[a - base:a - base + 4]:
+                    uc.mem_write(a, bytes(4))
+
+    @staticmethod
+    def _is_import(name, target):
+        """the intercepted call is an import (its trace identity is libcalls.import_id of its name)"""
+        if not name or target is None or target >= 0:
+            return False
+        return target == libcalls.import_id(libcalls.import_name(name)[0]) or target == libcalls.import_id(name)
+
     def _on_stub(self, uc, address, size, user, wild=False):
         case, r = user
+        if not wild and any(lo <= address < hi for lo, hi in self.holes()):
+            # a hole of the stub range is background memory, not a stub: _on_wild (hooked on the holes too) traces
+            # the call once, by its raw address as the oracle does. Both hooks traced it before (F2 d21-holes: a
+            # garbage call there was `name:<hex>` + `<hex>` natively, one call on x86: vcall-stub-alias / call-flow)
+            return
         if wild:
             target, name = address, None
             if libcalls.IMPORT_BASE <= address < libcalls.IMPORT_BASE + libcalls.IMPORT_MAX * 16:
@@ -390,8 +491,11 @@ class Arm64Engine:
             # an import called through its IAT slot (S2's IAT binding): the import, as on x86
             name = self.iat_names[target]
             target = libcalls.import_id(name)
-        if self._builtin(uc, name, target, r):
-            return
+        try:
+            if self._builtin(uc, name, target, r):
+                return
+        except libcalls.Fault as e:              # the real libc function faults there too (libcalls.Mem.check)
+            self._fault = e.args[0]; uc.emu_stop(); return
         if name == '__stack_chk_fail':
             self._fault = 'stack-protector'; uc.emu_stop(); return
         k = len(r.calls)
@@ -407,6 +511,8 @@ class Arm64Engine:
         r.calls.append(Call(target, [uc.reg_read(XR[i]) for i in range(8)], [uc.reg_read(VR[i]) for i in range(8)],
                             uc.reg_read(A.UC_ARM64_REG_X8), stk))
         r.calls[-1].addr = address
+        if world.STUB_OUT:
+            self._zero_unwritten(uc, case, [r.calls[-1].args[i] for i in range(8)] + [r.calls[-1].x8])
         if libcalls.noreturn_a64(name) or (name is None and target in libcalls.NORETURN_X86):
             r.noreturn = name or libcalls.NORETURN_X86[target]   # never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
@@ -435,10 +541,20 @@ class Arm64Engine:
             x0 = world.alloc_result(k)
         elif world.returns_this((cv, ccv)):
             x0 = r.calls[-1].args[0] & 0xffffffff      # this (x0), as the oracle gets ecx (difffuzz-19)
+        elif target is not None and target >= 0 and retsrc.returned_input(cv, target) is not None:
+            lab = retsrc.returned_input(cv, target)    # the exe's callee returns an input (difffuzz-20, canned-this)
+            ch = cv.a64.get(lab) or []
+            if lab == 'this':
+                x0 = r.calls[-1].args[0] & 0xffffffff
+            elif ch and ch[0][1][0] == 'x':
+                x0 = r.calls[-1].args[ch[0][1][1]] & 0xffffffff
         elif ck == 'ref':
             x0 = world.ref_result(k)
-        elif ck in ('bool', 'untyped'):
-            x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1
+        elif ck == 'bool' or (ck == 'untyped' and not self._is_import(name, target)):
+            # a real bool result is 0/1. An import is not normalised: x86emu._on_import gives it the raw canned
+            # word (S1-rules d26-imp: TlsGetValue was 0xffffffff on x86, 0xffffff01 natively, so [ret + 4] faulted
+            # on x86 only; oracle-fault in the Havok thread-memory callers)
+            x0 = (x0 & ~0xff) | (rb[0] & 1)
         uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
         if cv is not None and cv.hidden and cv.ret is not None:
@@ -462,13 +578,13 @@ class Arm64Engine:
             op = uc.reg_read(XR[0]) & 0xffffffff
             fn = libcalls.INTERLOCKED_SLOW_OPS.get(op, 'InterlockedCompareExchange')
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in (1, 2, 3)]
-            v = libcalls.run_import(fn, libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
+            v = libcalls.run_import(fn, self._bmem(uc, r), args)
             uc.reg_write(XR[0], v & 0xffffffff)
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
             return True
         if name and libcalls.import_name(name)[0] in libcalls.IMPORT_BUILTINS:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
-            v = libcalls.run_import(libcalls.import_name(name)[0], libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
+            v = libcalls.run_import(libcalls.import_name(name)[0], self._bmem(uc, r), args)
             uc.reg_write(XR[0], v & 0xffffffff)
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
             return True
@@ -484,7 +600,7 @@ class Arm64Engine:
             f = bname.endswith('f')
             x = struct.unpack('<f' if f else '<d', (v & (2 ** (32 if f else 64) - 1)).to_bytes(4 if f else 8, 'little'))[0]
             s, c = libcalls.run_float('sin', x), libcalls.run_float('cos', x)
-            m = libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes)
+            m = self._bmem(uc, r)
             m.write(uc.reg_read(XR[0]) & 0xffffffff, struct.pack('<f' if f else '<d', s))
             m.write(uc.reg_read(XR[1]) & 0xffffffff, struct.pack('<f' if f else '<d', c))
             uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
@@ -507,7 +623,7 @@ class Arm64Engine:
         else:
             args = [uc.reg_read(XR[i]) & 0xffffffff for i in range(4)]
             try:
-                v = libcalls.run(bname, libcalls.Mem(uc, r.writes, self._ensure, self._norm_bytes), args)
+                v = libcalls.run(bname, self._bmem(uc, r), args)
             except libcalls.TooLong:
                 self._fault = 'fault:libcall-length'; uc.emu_stop(); return True
             uc.reg_write(XR[0], v & 0xffffffff)

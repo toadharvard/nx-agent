@@ -43,6 +43,7 @@ import glob
 import json
 import math
 import os
+import re
 import struct
 import sys
 
@@ -74,6 +75,10 @@ POLICY = {
     'x87-precision':  ('by-design', '-', False, 'x87 80-bit intermediates vs IEEE single/double, within 4 ulp or '
                                                 'relative 1e-6/1e-12, or the native value equals the oracle\'s '
                                                 'unrounded x87 value'),
+    'x87-range':      ('by-design', '-', False, 'an x87 intermediate beyond the float range (|v| >= 2**128: the '
+                                                'x87 stack keeps a 15-bit exponent at every precision) that the '
+                                                'AArch64 float arithmetic overflows to inf/NaN; the record keeps the '
+                                                'instruction and exponent (classify.x87_probes)'),
     'division':       ('by-design', '-', False, 'x86 raises #DE (x/0, INT_MIN/-1) where sdiv/udiv give 0 / wrap: '
                                                 'the exe would crash on that input'),
     'deleting-dtor-ret': ('triage', 'S13', True, 'MSVC\'s scalar/vector deleting destructor returns this, the '
@@ -89,13 +94,50 @@ POLICY = {
                                                 'the exe never holds'),
     'float->int':     ('by-design', 'S12', False, 'out-of-range float->int (UB in C++); the FTOI2 plugin gives '
                                                   'MSVC semantics where the build loads it'),
+    'vptr-bytes':     ('artifact', 'S13', False, 'the code reads a byte or part of a planted vptr word as data: the exe '
+                                                 'vftable address on the oracle, the Itanium address point natively '
+                                                 '(D7); equal once the oracle holds the native word too'),
+    'vptr-pool':      ('artifact', 'S13', False, 'the oracle stores the synthetic pool address of its object\'s unnamed '
+                                                 'vftable section where the native stores the image vftable that begins '
+                                                 'with the same function address (the pool copy of the table)'),
+    'x87-trig-inf':   ('artifact', 'S13', False, 'fsin / fcos / fsincos / fptan of an infinity: the oracle emulator '
+                                                 'leaves the infinity in st0 where the x87 gives the indefinite NaN '
+                                                 '(Intel SDM, #IA masked); equal once the probe applies it'),
+    'ptrdiff-unaligned': ('by-design', '-', False, 'a pointer difference that is not a multiple of the element size: '
+                                                   'GCC folds (end - begin) / size * size to end - begin, MSVC keeps '
+                                                   'the division (UB in C++); equal with 4-aligned arguments'),
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
+    'partial-return': ('by-design', '-', False, 'the oracle returns a byte / short in al / ax and the rest of eax is '
+                                                'what it held; the declared int result differs only there'),
+    'oracle-empty-call': ('by-design', '-', False, 'the oracle calls an exe function whose body is proven to do '
+                                                   'nothing (push ebp; mov ebp, esp; pop ebp; ret, exeempty.py: no '
+                                                   'store, no call, no register but ebp/esp written) and GCC drops '
+                                                   'the call; the traces are equal without those calls'),
+    'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
+                                              'buffer and destroys the local, GCC constructs it there (copy '
+                                              'elision, allowed by C++), F1b'),
+    'dtor-split-delete': ('by-design', '-', False, 'the oracle calls a scalar deleting destructor wrapper (exe: `and '
+                                                   'eax, 1; je`, then a call of operator delete / Deallocate) and '
+                                                   'goes on; the native calls the same exe function through its D1 '
+                                                   'binding with flags 0 and frees with its own operator delete '
+                                                   'call. Same destructor body, same heap (libcalls: delete 0x401030 '
+                                                   'and sized delete 0x00aa1460 both reach MemoryManager::Deallocate)'),
+    'nrvo-elision':   ('by-design', '-', False, 'one machine passes the hidden result buffer of the function as the object a '
+                                                'callee works on, the other a local of its own frame (named return '
+                                                'value optimisation on one side only; allowed by C++). The result '
+                                                'buffer is compared at the end, so a wrong copy still shows'),
+    'oracle-frame-smash': ('by-design', '-', False, 'the oracle faults after a store into its own return-address '
+                                                    'slot: a local array overrun by an out-of-range fuzzed count (UB '
+                                                    'in C++; the exe corrupts its frame the same way), F1b'),
     # --- harness / oracle-model artefacts ----------------------------------------------------------------------------
-    'local-static':   ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
+    'local-static':  ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
                                                  '(fuzzed bytes), GCC in .bss (zero): not compared state'),
     'uninit-both':    ('artifact', 'S13', False, 'both machines read garbage: the fuzzed case is invalid for both'),
+    'stub-outparam':  ('artifact', 'S13', False, 'the native reads back a stack buffer it passed to a stubbed callee '
+                                                 'that never filled it (GCC temporary + copy where MSVC passed its '
+                                                 'destination)'),
     'oracle-vcall':   ('artifact', 'S13', False, 'the oracle faults on an indirect call the harness does not model '
                                                  '(S13 vftable modelling)'),
     'x86-custom-cc':  ('artifact', 'S13', False, 'MSVC whole-program custom register convention not in units.json'),
@@ -184,6 +226,18 @@ POLICY = {
                                                 'where the oracle has an image-window address: an unrebound '
                                                 'variable or table (or a literal: check the pointee)'),
     'vptr-unpaired':  ('real-bug', 'S2c', False, 'no kind-V row pairs the native vtable with the image vftable'),
+    'native-vslot-differs': ('real-bug', 'S2c', True, 'the native vtable of a planted class has, at the slot where the '
+                                                      'exe\'s vftable holds function Y, another exe function X, and '
+                                                      'the native called it (D26: the decomp class\'s virtual at '
+                                                      'that slot is not the exe\'s; the oracle ran Y)'),
+    'vslot-shift':    ('real-bug', 'S1-rules', True, 'a virtual call through the planted vftable reaches the exe\'s '
+                                                     'slot k-1 where the oracle calls slot k: the caller\'s class '
+                                                     'declaration numbers its virtuals from a slot-0 placeholder, '
+                                                     'not D22\'s minus-one order (D26 b: `virtual ~X()` for the '
+                                                     'placeholder; tests/s5/callonly_vt.py)'),
+    'vslot-differs':  ('real-bug', 'S1-rules', True, 'a virtual call through the planted vftable reaches another '
+                                                      'slot than the oracle\'s (not one lower): the caller\'s class '
+                                                      'declaration orders its virtuals otherwise than the exe'),
     'falloff?':       ('real-bug', 'S1', True, 'the native runs off a function end (FALL1)'),
     'after-native-undefined': ('real-bug', 'S1', True, 'the function calls a C++ name the link binds to nothing '
                                                        '(native-undefined): the native side gets a canned result '
@@ -208,6 +262,9 @@ POLICY = {
                                                 'return-in-memory rules)'),
     'callee-saved':   ('real-bug', 'S1b', True, 'callee-saved registers clobbered: an ABI break'),
     'call-args':      ('real-bug', 'S2c', True, 'a bridge or definition delivers other argument bytes'),
+    'param-count':    ('real-bug', 'S1b', True, 'the exe function reads stack parameters its decomp declaration does '
+                                                'not have (every caller passes too few; the native reads what is '
+                                                'in its registers)'),
     'signedness':     ('real-bug', 'S1', True, 'the divergence goes when an input byte >= 0x80 loses its top bit'),
     'float':          ('real-bug', 'S1', True, 'a float difference beyond tolerance (inf/NaN on one side)'),
     # --- not decided from the record -------------------------------------------------------------------------------
@@ -218,6 +275,14 @@ POLICY = {
                                                   'early return or a branch on a field read differently'),
     'native-extra-calls': ('triage', 'S13b', True, 'the native makes the oracle\'s calls and more: a check the '
                                                    'oracle skips, or a call MSVC inlined into a loop'),
+    'native-zero-init': ('by-design', '-', False, 'the native only writes zero bytes the oracle leaves, into the object '
+                                                  'being constructed (this of a constructor, a fresh allocation): '
+                                                  'GCC value-initialises `T()` / `new T()` / `: Base()` of a class '
+                                                  'with an implicit constructor (zero, then the constructor), MSVC '
+                                                  '2008 runs the constructor only'),
+    'dtor-dead-store': ('by-design', '-', False, 'the oracle only zeroes bytes of the object a destructor (or a scalar '
+                                                 'deleting destructor wrapper) destroys: MSVC /Od keeps `m_p = 0` '
+                                                 'after a release, GCC drops stores to an object whose lifetime ends'),
     'store-width':    ('triage', 'S13b', True, 'the same bytes stored with another width: one side writes bytes '
                                                'the other leaves (a bool/char vs dword member, a padded struct copy)'),
     'native-only-store': ('triage', 'S13b', True, 'the native writes memory the oracle never writes'),
@@ -248,6 +313,10 @@ POLICY = {
                                                 'native destructor, unchecked), and the call-count difference at '
                                                 'the free hides the return value and writes. Triage until the '
                                                 'harness drops the oracle\'s trailing argument frees (S13b audit)'),
+    'callee-float-width': ('artifact', '-', False, 'the width (float or double) in which the harness hands an untyped '
+                                                     'callee\'s canned float result to the oracle\'s ST0 is a guess '
+                                                     'from the consuming x87 store; the other guess makes the '
+                                                     'machines agree (classify.x87_probes)'),
     'libc-variant':   ('artifact', 'S13', False, 'the same C library function under another entry: an MSVC x87 '
                                                  'intrinsic (_CIacos ...) or the double function vs libc or its '
                                                  'float variant, sprintf vs GCC\'s fortified __sprintf_chk, atof vs '
@@ -299,13 +368,18 @@ FIX_CLASSES = {
                       ('dyninit-no-atexit',)),
     'call-abi':      ('S1b', 'every call passes and preserves registers by the callee\'s MSVC convention (argument '
                              'slots written, results not reused, callee-saved kept, sret as MSVC)',
-                      ('uninit-arm', 'native-garbage-arg', 'native-stale-result', 'callee-saved', 'sret-mismatch')),
+                      ('uninit-arm', 'native-garbage-arg', 'native-stale-result', 'callee-saved', 'sret-mismatch',
+                       'param-count')),
     'data-binding':  ('S2c', 'every data symbol and import binds to the exe object (no stub as data, no unit copy, '
                              'no native address where the exe has an image address, bridges deliver the bytes)',
                       ('native-stub-data', 'native-address', 'split-global', 'import-slot-called', 'call-args')),
     'vtables':       ('S2c', 'every image vftable pairs with a full native vtable of the static class (no short '
                              'vtables, overrides bound to their this-adjusting thunks)',
-                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap')),
+                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap', 'native-vslot-differs')),
+    'vtable-slots':  ('S1-rules', 'every virtual call reaches the exe\'s slot: each declaration a caller dispatches '
+                                  'through numbers its virtuals in D26\'s one minus-one order (a `virtual ~X()` '
+                                  'where the exe has its deleting destructor, then the exe\'s slots in order)',
+                      ('vslot-shift', 'vslot-differs')),
 }
 FIX_CLASS_OF = {c: k for k, v in FIX_CLASSES.items() for c in v[2]}
 
@@ -417,6 +491,8 @@ def _rule_error(d, rec=None):
             if fa[1] < NULL_END:
                 return 'native-null-read'
     if a is None and isinstance(x, str):
+        if d.get('x86_frame_smash'):
+            return 'oracle-frame-smash'
         if x == 'exc:3':
             return 'oracle-trap'
         fx = _fault_addr(x)
@@ -539,6 +615,14 @@ def _rule_mem_write(d, rec=None):
         return 'x87-precision'
     n, ox, oa = d.get('ndiff', 0), d.get('only_x86', 0), d.get('only_arm', 0)
     bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+    if rec is not None and n:
+        th = (_object_facts(rec.get('source')) or ({}, set()))[0]
+        if th.get('__fnv_' + str(rec.get('address') or '')):
+            return 'thunk-binding'      # the function's own `_ZThn<d>_` thunk: the oracle enters with the secondary base
+        if d.get('arm_zero_only') and oa == n and _zero_init_region(d, rec):
+            return 'native-zero-init'
+        if (d.get('x86_zero_only') or d.get('x86_const_only')) and ox == n and _dtor_this_region(d, rec):
+            return 'dtor-dead-store'
     if len(bx) >= 4 and len(ba) >= 4:
         if ww and all(_nan_generated(x, a) for x, a in ww):
             return 'nan-bits'
@@ -561,6 +645,42 @@ def _rule_mem_write(d, rec=None):
     if n and ox + oa == n and ox and oa:
         return 'store-width'
     return None
+
+
+def _zero_init_region(d, rec):
+    """Every listed differing byte lies in the object the function constructs: a fresh allocation block of the
+    harness (ALLOC_BASE..) or, for an MSVC constructor (??0), the `this` buffer."""
+    addrs = [int(a, 16) for a in d.get('addrs') or ()]
+    if not addrs:
+        return False
+    if all(ALLOC_BASE <= a < ALLOC_BASE + 0x400 * 0x1000 for a in addrs):
+        return True
+    if str(rec.get('symbol') or '').startswith('??0'):
+        this = _this_buffer(rec)
+        return this is not None and all(this <= a < this + 0x1000 for a in addrs)
+    return False
+
+
+def _this_buffer(rec):
+    """The address of the `this` buffer of a record: the case's `this` bytes when it lists them (a minimised case
+    drops arguments equal to the default), else the first argument buffer (world.BUF, Target.placement)."""
+    try:
+        return int.from_bytes(bytes.fromhex(rec['case']['args']['this']), 'little')
+    except (KeyError, ValueError, TypeError):
+        return BUFS[0] if isinstance(rec.get('case'), dict) else None
+
+
+_DTOR_SYM = re.compile(r'^\?\?(1|_G|_E)|^\?Destructor@|[QU]AEPAX(I|H|_N)@Z$|D[012]Ev$')
+
+
+def _dtor_this_region(d, rec):
+    """A destructor (??1, ??_G, ??_E, an Itanium D0/D1/D2) or an MSVC scalar-deleting-destructor wrapper shape (a
+    member returning void* with one int / bool flag) whose differing bytes all lie in its `this` buffer."""
+    if not _DTOR_SYM.search(str(rec.get('symbol') or '')):
+        return False
+    addrs = [int(a, 16) for a in d.get('addrs') or ()]
+    this = _this_buffer(rec)
+    return bool(addrs) and this is not None and all(this <= a < this + 0x1000 for a in addrs)
 
 
 def _narrower(wide, narrow):
@@ -588,8 +708,73 @@ def iat_names():
     return _IAT
 
 
+def _rule_empty_call(d):
+    """oracle-empty-call: the call traces are equal once the calls to proven effect-free exe functions are removed
+    from both (at least one removed from the oracle's)."""
+    tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if d.get('kind') not in ('call-count', 'call-target') or not isinstance(tx, list) or not isinstance(ta, list):
+        return None
+    import exeempty
+    def strip(t):
+        out = []
+        for c in t:
+            try:
+                if exeempty.effect_free(int(str(c), 16)):
+                    continue
+            except ValueError:
+                pass
+            out.append(c)
+        return out
+    sx, sa = strip(tx), strip(ta)
+    return 'oracle-empty-call' if sx == sa and len(sx) < len(tx) else None
+
+
+def _is_deleting_wrapper(addr):
+    """The exe function at `addr` is a scalar deleting destructor wrapper: a flags test (`and r, 1`, then a branch) and a
+    call of a deallocator (operator delete 0x00401030 / sized delete 0x00aa1460 / Deallocate 0x00aa4060) within its
+    first 0x30 bytes. None without the exe."""
+    import retsrc
+    pe = retsrc._pe()
+    if pe is None or addr is None or addr < 0:
+        return None
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    try:
+        code = pe.read(addr, 0x30)
+    except Exception:  # noqa: BLE001
+        return None
+    flag = False
+    for i in md.disasm(code, addr):
+        if i.mnemonic == 'and' and i.op_str.endswith(', 1'):
+            flag = True
+        elif i.mnemonic == 'call' and flag:
+            try:
+                return int(i.op_str, 16) in DEALLOCATORS
+            except ValueError:
+                return False
+        elif i.mnemonic == 'ret':
+            break
+    return False
+
+
+def _rule_dtor_split(d):
+    """dtor-split-delete: the traces agree up to a call of a scalar deleting destructor wrapper, the native then
+    frees with a deallocator of its own and goes on with the oracle's next call."""
+    tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    i = d.get('index')
+    if d.get('kind') != 'call-target' or not isinstance(tx, list) or not isinstance(ta, list) or not isinstance(i, int):
+        return None
+    if i < 1 or i >= len(ta) or tx[:i] != ta[:i] or d.get('arm_next') != d.get('x86'):
+        return None
+    if _hex(d.get('arm')) not in DEALLOCATORS or not _is_deleting_wrapper(_hex(ta[i - 1])):
+        return None
+    return 'dtor-split-delete'
+
+
 def _rule_calls(d, rec=None):
     tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if _rule_dtor_split(d):
+        return 'dtor-split-delete'
     if d.get('kind') == 'call-target':
         x, a = str(d.get('x86') or ''), str(d.get('arm') or '')
         if a.startswith('name:_Z'):
@@ -734,6 +919,12 @@ def _rule_oracle_fault(d, rec):
         em = None
     if em and (fx or str(d.get('x86') or '').startswith('fault:')):
         return 'native-empty-callee'
+    try:
+        me = native_body(rec.get('source'), '__fnv_%08x' % int(rec.get('address') or '0', 16))
+    except (TypeError, ValueError):
+        me = None
+    if me is not None and _empty_body(me[0]) and (fx or str(d.get('x86') or '').startswith('fault:')):
+        return 'native-empty-body'      # the native function itself is a bare ret where the exe reads memory
     return None
 
 
@@ -1417,13 +1608,28 @@ def _alloc_result(k):
     return ALLOC_BASE + 0x1000 * (k % 0x400) + 0x10
 
 
+def _zero_stub_of_leaf(d):
+    """(S2 W6) every placeholder the native ran stands for an exe function that is itself a trivial leaf
+    (retsrc.trivial_leaf: straight-line, no call, no store outside its frame): not the native-zero-stub class; the
+    record goes on to the other rules (0x0065f820: 0x0065e750 returns an uninitialised al, 0x0065fd70 its argument)"""
+    exe = d.get('arm_zero_stub_exe') or ()
+    if not exe or '?' in exe:
+        return False
+    try:
+        import retsrc
+    except ImportError:
+        return False
+    return all(retsrc.trivial_leaf(int(a, 16)) for a in exe)
+
+
 def _ret_bytes(case, k):
+    import world             # plain module (no emulator): the same move out of the private ranges as Case.ret_bytes
     rets = case.get('rets') or []
     if k < len(rets) and rets[k] is not None:
-        return bytes.fromhex(rets[k]).ljust(16, b'\0')
+        return world.canned_out_of_private(bytes.fromhex(rets[k]).ljust(16, b'\0'))
     import random
     r = random.Random(((case.get('seed') or 0) * 1000003 + k) & 0xffffffff)
-    return bytes(r.getrandbits(8) for _ in range(16))
+    return world.canned_out_of_private(bytes(r.getrandbits(8) for _ in range(16)))
 
 
 def _canned_word(case, v, upto=64):
@@ -1448,7 +1654,9 @@ def _ctor_pair(case, vx, va, limit):
 
 
 _FACTS_CACHE = {}
-_ZERO_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0)}
+_ZERO_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0),
+                # (F-uncls, difffuzz-20) a float / double placeholder: `movi v0.2s, #0; ret`, `movi d0, #0; ret`
+                struct.pack('<II', 0x0f000400, 0xd65f03c0), struct.pack('<II', 0x2f00e400, 0xd65f03c0)}
 
 
 def _object_facts(source):
@@ -1581,6 +1789,11 @@ def _rule_unclassified(d, rec, k):
         vx, va = _word(d['x86']), _word(d['arm'])
     except ValueError:
         return None
+    if d.get('arm_zero_stub') and not _zero_stub_of_leaf(d):
+        # (F-uncls, difffuzz-20) the native entered a function of its unit whose whole body is a placeholder that
+        # returns 0 (runner.zero_stubs): the exe's work there is not done, and what the function returns or stores
+        # from its result differs (0x00d57b20 stores 1.0 - 0.0 where the exe's FUN_00d571d0 returned 0.51)
+        return 'native-zero-stub'
     if k == 'mem-write':
         bx, ba = bytes.fromhex(d['x86']), bytes.fromhex(d['arm'])
         diff = [i for i in range(min(len(bx), len(ba))) if bx[i] != ba[i]]
@@ -1662,7 +1875,7 @@ def refine(rec, cause=None):
     elif k == 'mem-write':
         got = _rule_mem_write(d, rec)
     elif k in ('call-count', 'call-target'):
-        got = _rule_calls(d, rec)
+        got = _rule_empty_call(d) or _rule_calls(d, rec)
         if got in (None, 'native-inlined', 'native-early-exit', 'native-extra-calls'):
             got = _callflow(d, rec) or got
     if got is None and cause in (None, 'unclassified') and _with_effects(rec, 'unclassified') == 'unclassified':

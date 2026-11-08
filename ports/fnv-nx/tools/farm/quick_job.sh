@@ -6,10 +6,12 @@
 #
 # 1. plan   tools/farm/quick_plan.py: the files changed since the last verified head ($FARM_HOME/quick/verified, or
 #           QUICK_BASE) -> the checks (build, equiv, fuzz, audit, replay, programs); no verified head -> all of them.
+#           The base is the last head this farm finished ($FARM_HOME/quick/last); a check that is not a pass in
+#           $FARM_HOME/quick/status.json (failed, or never ran here) is planned again whatever the diff.
 # 2. lanes, in parallel (4 CPUs):
 #    A  build: full_job.sh (prepare, compile and link incremental in its persistent build directory; guest; emulated
-#       boot; publishes link/<c12>), then fuzz_job.sh 1 of 1 (verdict cache: only changed function keys; FUZZ_MAX_S,
-#       default 600) and audit_job.sh 1 of 1 (row cache: only changed keys; AUDIT_BUDGET, default 300)
+#       boot; publishes link/<c12>), then fuzz_job.sh 1 of 1 (verdict cache: only changed function keys; FUZZ_LOOP_S,
+#       default 420 s of fuzzing after its setup) and audit_job.sh 1 of 1 (row cache: only changed keys; AUDIT_BUDGET, default 300)
 #    B  equiv: equiv_job.sh 1 of 1 (object cache: only units whose source, headers, flags or compiler changed)
 #    D  after lane A's build, beside its fuzz and audit: threads_job.sh (D25 #7: the race checker's and the watchdog's tests, then the guest just built relinked
 #       with the watchdog and run under qemu-aarch64 for THREADS_TIMEOUT, default 180 s here; tools/threads/README.md)
@@ -18,7 +20,8 @@
 #       recorder for MEM_TIMEOUT, default 180 s here; the peak against 3.2 GiB; tools/perf/MEM.md)
 #       and plat_job.sh (R4's platform lane, PLAT_TIMEOUT default 180 s here; tools/perf/PLAT.md)
 #       and scenario_job.sh (S18, D25's targets on scripted scenarios: QUICK_SCENARIOS, default "boot-menu saveload",
-#       on this build's link and guest, EMU_TIMEOUT 900 s each; the original's runs come from its reference cache)
+#       on this build's link and guest, EMU_TIMEOUT 900 s each, linhost 180 s without progress and 600 s in all;
+#       the original's runs come from its reference cache)
 #       and boottrace_job.sh (T1: the guest's function-boundary trace against the cached Wine reference trace of the
 #       same list, S5-boot's tests/s5/boot_trace.py; gate: the first divergence does not move earlier than at the
 #       verified head). A failed build skips lane D (its checks would run an older guest).
@@ -29,7 +32,7 @@
 #    sub-reports' heads; the wall-clock total is T1's metric. A run where every selected check exited 0 records the
 #    commit as the next base ($FARM_HOME/quick/verified). A plan that says "full" (a key every cached result depends
 #    on changed: toolchain, pins) is reported as such: the sharded farms do that run.
-# Env: QUICK_BASE, QUICK_CHECKS (a comma list that replaces the plan), QUICK_CELLS, FUZZ_MAX_S, AUDIT_BUDGET,
+# Env: QUICK_BASE, QUICK_CHECKS (a comma list that replaces the plan), QUICK_CELLS, FUZZ_LOOP_S, AUDIT_BUDGET, QUICK_COLD_LOCAL,
 # QUICK_SKIP_LANES (e.g. "C"), QUICK_JOBS (a directory of stand-in sub-jobs, for tests). Everything the sub-jobs need (README.md); they run as on their own farms.
 set -uo pipefail
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
@@ -41,7 +44,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 T0=$(date +%s)
 # the warm farms keep their caches local: three machines must not write one 1-of-1 branch (they are seeded from the
 # sharded farms' branches; their own results stay on the machine). Reports still go to reports/<farm>.
-export FUZZ_PUBLISH=${FUZZ_PUBLISH:-0} AUDIT_PUBLISH=${AUDIT_PUBLISH:-0} EQUIV_CACHE_PUBLISH=${EQUIV_CACHE_PUBLISH:-0}
+export LINKCACHE_PUBLISH=${LINKCACHE_PUBLISH:-0} FUZZ_PUBLISH=${FUZZ_PUBLISH:-0} AUDIT_PUBLISH=${AUDIT_PUBLISH:-0} EQUIV_CACHE_PUBLISH=${EQUIV_CACHE_PUBLISH:-0}
 # lane A builds in full_job's persistent build directory (incremental): it does not wait for the prepare/compile
 # farms' tree and objects (full_job's default is 300 s each, a third of the budget idle); one look, then local. V1's
 # link audits keep running, with a smaller budget (its slow audits are skipped and marked so).
@@ -49,13 +52,31 @@ export FARM_TREE_WAIT=${FARM_TREE_WAIT:-0} FARM_OBJ_WAIT=${FARM_OBJ_WAIT:-0} V1_
 log() { echo "$(date -u +%FT%TZ) quick_job: $*"; }
 
 # ---- 1. plan --------------------------------------------------------------------------------------------------------
-BASE=${QUICK_BASE:-$(cat "$Q/verified" 2>/dev/null || true)}
+# the base is the last head this farm finished, whatever its verdict ($Q/last); every check whose last result here is
+# not a pass ($Q/status.json: per check, updated by the checks that ran) is planned again whatever the diff, so one
+# failing check neither hides itself nor sends every later head back to "every check" (qk2: a cold run with a failure)
+BASE=${QUICK_BASE:-$(cat "$Q/last" 2>/dev/null || cat "$Q/verified" 2>/dev/null || true)}
 git -C "$REPO" cat-file -e "$COMMIT^{commit}" 2>/dev/null || git -C "$REPO" fetch -q origin "$COMMIT" 2>/dev/null || true
 if [ -n "$BASE" ] && git -C "$REPO" cat-file -e "$BASE^{commit}" 2>/dev/null && [ "$BASE" != "$COMMIT" ]; then
 	python3 -I "$HERE/quick_plan.py" plan "$REPO" "$BASE" "$COMMIT" --out "$R/plan.json" || BASE=""
 fi
 if [ -z "$BASE" ] || [ ! -s "$R/plan.json" ]; then
 	printf '{"files": null, "checks": {"build": true, "equiv": true, "fuzz": true, "audit": true, "replay": true, "programs": false, "threads": true, "frames": true, "mem": true, "scenario": true, "boottrace": true, "plat": true}, "why": {"all": ["no verified head"]}, "full": [], "base": null}\n' >"$R/plan.json"
+fi
+if [ -f "$Q/status.json" ] && [ -n "$BASE" ]; then
+	python3 -I - "$R/plan.json" "$Q/status.json" <<'PY'
+import json, sys
+p, st = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+for c in p['checks']:
+    if c == 'programs':          # only when the translator changed (replay carries the sweep's state)
+        continue
+    if st.get(c) != 'pass' and not p['checks'][c]:
+        p['checks'][c] = True
+        p.setdefault('why', {}).setdefault(c, []).append('(not a pass here before: %s)' % (st.get(c) or 'never ran'))
+if any(p['checks'].get(c) for c in ('fuzz', 'audit', 'threads', 'frames', 'mem', 'plat', 'scenario', 'boottrace')):
+    p['checks']['build'] = True   # their inputs: this head's link / build directory
+json.dump(p, open(sys.argv[1], 'w'), indent=1)
+PY
 fi
 if [ -n "${QUICK_CHECKS:-}" ]; then
 	python3 -I - "$R/plan.json" "$QUICK_CHECKS" <<'EOF'
@@ -69,6 +90,9 @@ on() { python3 -I -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])
 log "plan: base ${BASE:0:12} -> $C12: $(python3 -I -c 'import json,sys; p=json.load(open(sys.argv[1])); print(",".join(c for c,v in p["checks"].items() if v) or "nothing")' "$R/plan.json")"
 
 # ---- 2. lanes -------------------------------------------------------------------------------------------------------
+# the head's worktree once, before the lanes: every sub-job of this head uses $FARM_HOME/src-<c12> (worktree.sh locks
+# the add as well; qk2 on ed380ec7 lost build, fuzz and audit to two jobs adding it at the same moment)
+bash "$HERE/worktree.sh" "$REPO" "$FARM_HOME/src-$C12" "$COMMIT" >/dev/null 2>&1 || log "worktree src-$C12 failed (the jobs try again)"
 run() {   # run <check> <cmd...>: time, exit status, report path, in $R/<check>.{rc,s,md,log}
 	local c=$1 t=$(date +%s) rc; shift
 	log "start $c"
@@ -78,13 +102,53 @@ run() {   # run <check> <cmd...>: time, exit status, report path, in $R/<check>.
 	return $rc
 }
 skip() { echo "$2" >"$R/$1.skip"; }
+build_verdict() {   # full_job exits 0 once its report is written: the build passes only when its stages did
+	# (qk1 on 78435e5a: prepare failed, the check said 0, fuzz then took a stale link). prepare, compile, link and
+	# guest must be ok/warn in the build directory and the report's provenance must not FAIL; else build.rc = 2.
+	[ "$(cat "$R/build.rc" 2>/dev/null)" = 0 ] || return 0
+	local why
+	why=$(python3 -I - "$FARM_HOME/full/build" "$R/build.md" <<'PY'
+import json, os, sys
+b, md = sys.argv[1], sys.argv[2]
+bad = []
+for st in ('prepare', 'compile', 'link', 'guest'):
+    try:
+        r = json.load(open(os.path.join(b, st, 'stage.json')))
+    except (OSError, ValueError):
+        bad.append('%s: no record' % st); continue
+    if r.get('status') not in ('ok', 'warn'):
+        bad.append('%s: %s' % (st, r.get('status')))
+if os.path.isfile(md) and any(l.startswith('- provenance: FAIL') for l in open(md, errors='replace')):
+    bad.append('provenance FAIL')
+print('; '.join(bad))
+PY
+)
+	if [ -n "$why" ]; then echo 2 >"$R/build.rc"; echo "the build failed: $why" >"$R/build.why"; log "build: $why"; fi
+}
 lane_a() {
-	if on build; then run build bash "$J/full_job.sh" "$COMMIT"; else skip build "not affected"; fi
+	if on build; then run build bash "$J/full_job.sh" "$COMMIT"; build_verdict; else skip build "not affected"; fi
 	if [ -f "$R/build.rc" ] && [ "$(cat "$R/build.rc")" != 0 ]; then   # lane D would run an older build's guest
 		for c in threads frames mem plat scenario boottrace; do skip $c "the build failed"; done
 	else lane_d & fi   # the emulator lanes need this build; they run beside fuzz and audit
+	# fuzz and audit on this head's own prepared tree and link (full_job's build directory): no prepare farm has to
+	# publish t/<c12> for a quick farm (qk1 on 2e000047: "no prepared tree for the link commit", both not run)
+	local fb=$FARM_HOME/full/build tr
+	tr=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("artifacts",{}).get("tree") or "")' \
+		"$fb/prepare/stage.json" 2>/dev/null)
+	case "$tr" in ""|/*) ;; *) tr=$P/$tr ;; esac
+	[ -n "$tr" ] && [ -f "$tr/build/units.json" ] || tr=$fb/prepare/tree
+	if [ -f "$R/build.rc" ] && [ "$(cat "$R/build.rc")" = 0 ] && [ -f "$tr/build/units.json" ] && [ -d "$fb/link/fixed" ]; then
+		export FUZZ_TREE=$tr FUZZ_LINK_DIR=$fb/link FUZZ_LINK_COMMIT=$COMMIT
+	fi
+	if [ "$(cat "$R/build.rc" 2>/dev/null || echo 0)" != 0 ]; then   # no link of this head: not someone else's
+		on fuzz && skip fuzz "the build failed" || skip fuzz "not affected"
+		on audit && skip audit "the build failed" || skip audit "not affected"
+		wait; return
+	fi
 	if on fuzz; then
-		FUZZ_MAX_S=${FUZZ_MAX_S:-600} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
+		# FUZZ_LOOP_S: 420 s of fuzzing after the setup (the targets' keys, the cache); FUZZ_MAX_S counted from the
+		# job's start had the loop end before its first chunk (aec30808: 689 s of setup, 0 functions fuzzed)
+		FUZZ_LOOP_S=${FUZZ_LOOP_S:-420} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
 	else skip fuzz "not affected"; fi
 	if on audit; then AUDIT_BUDGET=${AUDIT_BUDGET:-300} run audit bash "$J/audit_job.sh" "$COMMIT" 1 1
 	else skip audit "not affected"; fi
@@ -103,13 +167,54 @@ lane_d() {   # D: the emulator lanes on lane A's build, one after another (each 
 		local fb=$FARM_HOME/full/build ld="" gd=""
 		[ -d "$fb/link/out" ] && ld=$fb/link
 		[ -f "$fb/guest/guest.nso" ] && gd=$fb/guest
+		# linhost (D25 #12): 180 s without progress ends a scenario here (the farm default 600 s: on aec30808 both
+		# scenarios stopped early and waited it out, 3,057 s for the check), 600 s in all
+		SCENARIO_PROGRESS_S=${SCENARIO_PROGRESS_S:-180} SCENARIO_LINHOST_S=${SCENARIO_LINHOST_S:-600} \
 		SCENARIOS=${QUICK_SCENARIOS:-boot-menu saveload} EMU_TIMEOUT=${SCENARIO_EMU_TIMEOUT:-900} SCENARIO_PUBLISH=0 \
 			SCENARIO_LINK_DIR=$ld SCENARIO_GUEST_DIR=$gd run scenario bash "$J/scenario_job.sh" "$COMMIT"
 	else skip scenario "not affected"; fi
 	if on boottrace; then BOOTTRACE_BUILD=$FARM_HOME/full/build run boottrace bash "$J/boottrace_job.sh" "$COMMIT"
 	else skip boottrace "not affected"; fi
 }
-lane_b() { if on equiv; then run equiv bash "$J/equiv_job.sh" "$COMMIT" 1 1; else skip equiv "not affected"; fi; }
+eq_cache_after() {   # one complete set of the eq farms' cache shards (equiv/cache/kofN for k = 1..N, each "equiv object
+	# cache <c12> shard k/N") is of a head at or after $1: the cold run is over, a run here seeds from a warm cache.
+	# Any N: eqa's 1of1 (the eq farm since 06:40) counts, and the retired eq1-eq6's 1of6..6of6 do not hold it back
+	local A=${ARTIFACTS:-}; [ -n "$A" ] || { if [ -d /home/user/fnv-nx-build/.git ]; then A=/home/user/fnv-nx-build; else A=$FARM_HOME/artifacts; fi; }
+	local refs r c n k bad
+	refs=$(git -C "$A" ls-remote origin 'refs/heads/equiv/cache/*' 2>/dev/null | awk '{print $2}')
+	[ -n "$refs" ] || return 1
+	for n in $(printf '%s\n' $refs | sed -n 's|.*/[0-9]*of\([0-9]*\)$|\1|p' | sort -un); do
+		bad=0
+		for k in $(seq 1 "$n"); do
+			r=refs/heads/equiv/cache/${k}of$n
+			printf '%s\n' $refs | grep -qx "$r" || { bad=1; break; }
+			git -C "$A" fetch -q --depth 1 --filter=blob:none origin "+$r:refs/quick-eqc/${r#refs/heads/}" 2>/dev/null || { bad=1; break; }
+			c=$(git -C "$A" log -1 --format=%s "refs/quick-eqc/${r#refs/heads/}" | sed -n 's/^equiv object cache \([0-9a-f]\{12\}\) .*/\1/p')
+			[ -n "$c" ] && git -C "$REPO" merge-base --is-ancestor "$1" "$c" 2>/dev/null || { bad=1; break; }
+		done
+		[ $bad = 0 ] && return 0
+	done
+	return 1
+}
+lane_b() {
+	if ! on equiv; then skip equiv "not affected"; return; fi
+	# planned again after a cold skip (status: "skipped: cold cache ... at <c12>"): still cold here until the eq farms
+	# have published the cache of a head at or after it
+	local carried; carried=$(python3 -I -c 'import json, os, re, sys
+s = json.load(open(sys.argv[1])).get("equiv", "") if os.path.isfile(sys.argv[1]) else ""
+m = re.match(r"skipped: cold cache.* at ([0-9a-f]{12})$", s)
+print(m.group(1) if m else "")' "$Q/status.json" 2>/dev/null)
+	if [ -n "$carried" ] && [ "${QUICK_COLD_LOCAL:-0}" != 1 ] && ! eq_cache_after "$carried"; then
+		skip equiv "cold cache (since $carried): the eq farms have not published a warm cache yet"; return
+	fi
+	# a cold cache (quick_plan COLD: the MSVC shim headers): the whole check, hours here; the eq farms' sharded run
+	# verifies the head and publishes the cache the next run seeds from (QUICK_COLD_LOCAL=1: run it here anyway)
+	local cold; cold=$(python3 -I -c 'import json, sys; print(len(json.load(open(sys.argv[1])).get("cold", {}).get("equiv", [])))' "$R/plan.json" 2>/dev/null || echo 0)
+	if [ "${cold:-0}" != 0 ] && [ "${QUICK_COLD_LOCAL:-0}" != 1 ]; then
+		skip equiv "cold cache ($cold files every key reads): left to the eq farms' sharded run"; return
+	fi
+	run equiv bash "$J/equiv_job.sh" "$COMMIT" 1 1
+}
 lane_c() {
 	if ! on replay && ! on programs; then skip replay "not affected"; return; fi
 	local store; store=$(ls -1dt "$FARM_HOME"/capture/*/ 2>/dev/null | head -1)
@@ -148,7 +253,7 @@ def headline(md):
         if l and not l.startswith('|') and not l.startswith('#'):
             return l[:160].replace('|', '/')
     return ''
-rows, ok = [], True
+rows, ok, failed = [], True, []
 for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'plat', 'scenario', 'boottrace'):
     sk, rc = rd(c + '.skip'), rd(c + '.rc')
     if sk is not None:
@@ -157,9 +262,16 @@ for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem
         rows.append((c, 'not run (lane skipped)', '-', '-', ''))
     else:
         ok &= rc == '0'
-        rows.append((c, 'ran', rc, rd(c + '.s') or '?', headline(rd(c + '.md'))))
+        hl = rd(c + '.why') or headline(rd(c + '.md'))
+        if rc != '0':        # a failed check never reads as its counts (qk1 89dcf1c0's replay: rc 1, "programs checked 0")
+            failed.append(c)
+            hl = 'FAILED (exit %s): %s' % (rc, hl.replace('FAIL: ', '', 1) if hl.startswith('FAIL: ') else hl)
+        rows.append((c, 'ran', rc, rd(c + '.s') or '?', hl))
 full = plan.get('full') or []
-verdict = 'FULL RUN NEEDED' if full else ('PASS (every selected check exited 0)' if ok else 'FAIL')
+# T1: a failed check is a FAIL whatever else the plan says (qk1 89dcf1c0: build rc 2, the verdict read "FULL RUN
+# NEEDED"); a full run needed is named beside it
+verdict = ('FAIL (%s)' % ', '.join(failed) + ('; a full run is needed too' if full else '')) if not ok else \
+    ('FULL RUN NEEDED' if full else 'PASS (every selected check exited 0)')
 o = open(out, 'w')
 o.write('# quick %s\n\n' % commit[:12])
 o.write('- verdict: %s\n- wall clock: %d s (%.1f min) on one machine\n' % (verdict, secs, secs / 60))
@@ -167,6 +279,8 @@ o.write('- base: %s; %s changed files\n' % (base[:12] or 'none (no verified head
 o.write('- checks: %s\n' % (', '.join(c for c, v in plan['checks'].items() if v) or 'none'))
 for f in full:
     o.write('- full run needed: %s\n' % f)
+for c, fs in sorted((plan.get('cold') or {}).items()):
+    o.write('- %s: cold cache, left to its sharded farms (%s)\n' % (c, '; '.join(fs[:3]) + (' ...' if len(fs) > 3 else '')))
 cv = rd('cover.txt')
 if cv:
     o.write('- replay scenes: %s\n' % cv.splitlines()[-1])
@@ -187,6 +301,19 @@ json.dump({'schema': 'fnvnx-quick/1', 'commit': commit, 'base': base or None, 's
 sys.exit(0 if ok and not full else 4)
 EOF
 st=$?
+# the next base and each check's standing (a check that did not run keeps the one it had)
+echo "$COMMIT" >"$Q/last"
+python3 -I - "${REPORT%.md}.json" "$Q/status.json" <<'PY'
+import json, os, sys
+r = json.load(open(sys.argv[1]))
+st = json.load(open(sys.argv[2])) if os.path.isfile(sys.argv[2]) else {}
+for c, v in r['checks'].items():
+    if v['run'] == 'ran':
+        st[c] = 'pass' if v['rc'] == '0' else 'fail rc %s at %s' % (v['rc'], r['commit'][:12])
+    elif not v['run'].startswith('skipped: not affected'):
+        st[c] = '%s at %s' % (v['run'], r['commit'][:12])      # the build failed, no store yet, lane skipped
+json.dump(st, open(sys.argv[2], 'w'), indent=1)
+PY
 if [ "$st" = 0 ]; then echo "$COMMIT" >"$Q/verified"
 	# the boot trace's first divergence becomes the bar for the next head (boottrace_job.sh: "not earlier")
 	cand=$FARM_HOME/boottrace/$C12/boottrace.candidate; [ -f "$cand" ] && cp "$cand" "$Q/boottrace.base"

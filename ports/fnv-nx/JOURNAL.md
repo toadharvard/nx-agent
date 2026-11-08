@@ -3525,3 +3525,85 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
     29), then the 1,142 missing classified by cause.
   - after these: fuzz rule classes (bool-repr, call-flow, vptr-unpaired, native-early-exit, uninit), audit pending,
     shaders 232 over / 596 vacuous, then the frame profile in emulation and the D21 performance levers.
+
+### J-0157 | 2026-11-07 | stream: orchestration | status: active | parent: J-0156
+
+* **first farm numbers on a current head** (full1, integration d1ed15e7 of 21:19, 73 min, make exit 0; vs 0540aff0)
+  - prepare 118 rules; census 2,977 / 2,978 clean (1 failing); compile 2,977 objects.
+  - link: 86.2 % of references by address (85.5), 9,510 bridges (8,822); trial-link undefined 2,566 (2,077).
+  - guest trap stubs 1,843 (1,424). The rise is cxx_ctor_dtor 130 -> 644; vtable/typeinfo 135 -> 114. Part of it
+    is the honesty rule (abi-manual pairs left unbound, c4fbea9). The ctor/dtor jump is under investigation
+    (S2-bodies-2), and the commit that caused it is reverted or fixed if it is not evidence-backed.
+  - boot: raw boot still faults in HeapFreeBlock (3,475 skipped; S5's standins bridge is not in the farm boot).
+    Stub boot: winmain, ini-read, **archive-list** (first time on a farm), renderer-init not reached.
+  - package: fnv.nro 743 KiB, check_package exit 0, NX1 open 4.
+* **not yet in this head**: HARN1, GC1, BIND1, STAND6, vtables 78 -> 0, abi2 bridges, D26 (wip/d26 on try1of1).
+* **decisions since J-0156**: D26 (one virtual-slot order, three parts land together); D23 (c) inline, (d) binding,
+  unmatched bodies stay pending; session cap 50 (owner); D17 kept (no heavy jobs in stream containers, owner);
+  T1 owns quick_job / quick_plan / test_quick / full_job; autoadopt skips *-wip branches.
+* **D25** (S18 boot-menu, cec2a7ee): 9 / 12 measured, sum 12; the guest's WinMain returns early, while the original
+  reaches the menu under Wine.
+* **D24 open false interpretations** (EQ): 65 at the farms (184 raw), ~10 locally. **Wrong shaders** (S16,
+  local): 0 projected, waiting for the farm sweep.
+
+### J-0158 | 2026-11-08 | stream: orchestration | status: active | parent: J-0157
+
+* **first clean farm link since J-0157** (full1, integration 97deacd3, 73 min, make exit 0)
+  - compile 2,978 / 2,978. The night's farm failures were compile.sh bugs, not source: first the object wipe on a
+    flag-stamp change, then a silent `set -e` exit after "order keys" (T1 3a795a1, 5a20649, 6ca280e).
+  - link: 85.9 % by address, 10,549 bridges. Trial-link undefined 2,566 -> 674. **Guest trap stubs 1,843 -> 222**:
+    the stale-synth oscillation fix (a3bf7fe8) plus S2-bodies-2's classes (HARN1, GC1, BIND1, STAND6, vtables,
+    abi2 bridges) and the recon fleet.
+  - boot: stub boot reaches winmain, ini-read, archive-list. The raw boot does not enter WinMain (heap fault; the
+    standins bridge is not in the farm's raw boot).
+* **wrong shaders** (S16, farm programs sweep at 4c48678b): 0 of 1,696 checked; shards 2 and 29 are pending.
+* **traps are now worked top-down** (owner): R2 publishes topdown.tsv (hits first, then call depth from the
+  entry). Fixing runs as a loop of Sonnet workers with Opus review (owner order) in R2, S2-bodies-2, EQ, S16, R4
+  and S5.
+* **D26**: the source fixes are in (S1-rules, 14 units). wip/d26 686c576f is building on try1of1.
+* **budget**: hourly orchestrator check-ins; streams batch their messages hourly.
+
+### J-0159 | 2026-11-08 | stream: orchestration | status: active | parent: J-0158
+
+* **boot regression on 97deacd** (S5 stub boot): 3,458 skipped initializers (baseline 1), milestones 2/10
+  (baseline 3/10). One link-side class: fnvlink.exe_vtable_copies ran exevft.dtor_pos on post-rename slot names,
+  so a D1/D0 pair renamed to one native FUN_ was not seen and exe slot 1 was lost (SettingPointerMap: HashKey
+  replaced by the destructor; 91-113 tables of this shape, 86 already at 0540). An emulator-only repair of slot 1
+  gives 1 skip and 3/10 with no fault: renderer-init through Null_IDirect3D9::CreateDevice, the old
+  InitRenderer +0x434 fault gone. The product fix (S2-bodies 53042f17: raw-symbol pairing, D0 never runs a
+  destroy-only body; S1-rules c24a232: virtual ~C() for call-only header classes) lands only with D26, on
+  wip/d26 3f7a6c35, since slot-1 calls in exe order need D26 (b).
+* **try farms read wip/* from fnv-nx-build**: the streams pushed wip/d26 to nx-agent only, so try1of1 built the
+  stale 686c576f. The build repo's wip/d26 is fast-forwarded to 3f7a6c35; streams now push to both.
+* **eqa 9a303226** (MSVC gate, 1 shard): 2,988 units, 2,407 identical, 580 differ; functions 68,456 compared,
+  1,141 differ (EH-only 789, retarget 211, code 141).
+* **ABI class found** (S2-bodies 4b150828): thisadj and xexit read the exe only from FNVNX_EXE, which full_job
+  never set, so full1 had 0 secondary-base thunk bindings. 823 secondary entries; bodies/exevft/fnvlink read it
+  too, and the full_job export follows.
+* **incremental link** (T1): resolve 104 -> 57 s, exe pass 88 -> 23 s, vtables on a subset 95 -> 4 s warm; the
+  output is identical. LINKEQ runs on its own farm (leq1). The eq farms are retired: eqa is the equiv farm,
+  persistent, and its cache now keys SDK/CRT units (06e0e3e).
+* **top-down** (R2, 97deacd): 252 rows (181 functions, 71 data), owners s2-bodies 157 / recon 95, 1 hit in boots.
+  Every batch now accounts for every row taken (owner).
+* **decisions**: x87-range is a declared compiler class (per record, clamped rerun); SSE2NEON_PRECISE_MINMAX=1
+  for SSE parity; the 0xd0f300 placed caller binds the real body.
+* **open**: zero table and sc1 read stale reports (T1); fuzz baseline fz1..fz8 and boot_trace bt1 are running.
+
+### J-0160 | 2026-11-08 | stream: orchestration | status: active | parent: J-0159
+
+* **full1 dc5c0627** (101 min, make exit 0, before D26): compile 2,978/2,978, link 86.0 % by address, 10,568
+  bridges, trial-link undefined 674 -> 615, guest trap stubs 222 -> 167. The raw boot does not enter WinMain
+  (emulation fault at pc 0x501a060). R4 shows 30 of the listed traps are STT_TLS slots, not traps; R2's reader
+  is being fixed.
+* **D26 merged ahead of its verdict** (owner: no waiting): integration 8467d3ca. It is verified by S5's stub boot
+  on the first link that has it (try1of1 wip/d26 3f7a6c35, or full1); it gets reverted if that boot regresses.
+* **measurement faults found by a per-agent audit** (owner: a full status every message):
+  - all 8 fuzz farms exited rc=3 (no published prepared tree for the link head), so false interpretations are
+    unmeasured, and the zero table's 893 covers 1 of 8 shards;
+  - bt1 reported OK with 0 guest calls and a traceback;
+  - qk1 read a failed build as "FULL RUN NEEDED";
+  - the zero runner died. T1 fixes them; zero moves to farm sw14.
+* **shaders**: 0 wrong among programs, but scenes at 4487b8dd had 2 of 34 failing (2,021 draws), all from an
+  arena crash that d009f9b fixes. The atestle set (S16 4181cc5) covers the 21 set-vacuous programs. A 22-shard
+  program sweep and a cells replay are running.
+* **owner rules 1-11** recorded in tools/orch/README.md, among them the regression ratchet (T1).

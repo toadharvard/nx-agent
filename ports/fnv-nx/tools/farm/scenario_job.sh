@@ -81,12 +81,34 @@ LC=${SCENARIO_LINK:-}
 LINKDIR=${SCENARIO_LINK_DIR:-}; GUESTDIR0=${SCENARIO_GUEST_DIR:-}
 [ -n "$LINKDIR" ] && [ -z "$LC" ] && LC=$C12
 if [ -z "$LC" ] && [ -d "$ARTIFACTS/.git" ]; then
-	if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/link/$C12" > /dev/null 2>&1; then LC=$C12
-	elif git -C "$ARTIFACTS" fetch -q --depth 1 origin link-head 2> /dev/null; then
-		LC=$(git -C "$ARTIFACTS" show FETCH_HEAD:meta.json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print((d.get("commit") or d.get("head") or "")[:12])')
-	fi
+	# the newest link/<c12> of this head's own history whose guest linked (guest/fnvnx.elf on the branch). Never
+	# link-head: a try farm's WIP link can be there, and sc1 on dc5c0627023e took 1fe1e1463be8 from it, a link whose
+	# guest had failed: 0/12 measured in 7 s
+	REPO=$(cd "$P/../.." && pwd)
+	have=" $(git -C "$ARTIFACTS" ls-remote origin 'refs/heads/link/*' 2> /dev/null | awk '{print $2}' | sed 's|^refs/heads/link/||' | tr '\n' ' ') "
+	for h in $(git -C "$REPO" log --format=%H -n "${SCENARIO_LINK_DEPTH:-200}" "$COMMIT" 2> /dev/null | cut -c1-12); do
+		case "$have" in *" $h "*) ;; *) continue ;; esac
+		if git -C "$ARTIFACTS" fetch -q --depth 1 --filter=blob:none origin "+refs/heads/link/$h:refs/remotes/origin/link/$h" 2> /dev/null &&
+			git -C "$ARTIFACTS" cat-file -e "refs/remotes/origin/link/$h:guest/fnvnx.elf" 2> /dev/null; then
+			LC=$h; break
+		fi
+	done
+	[ -n "$LC" ] && [ "$LC" != "$C12" ] && note "link: $LC, the newest link of this head's history with a guest (none for $C12)"
 fi
-[ -n "$LC" ] || note "no link for $C12 and no link-head: the guest side cannot run"
+[ -n "$LC" ] || note "no link with a guest for $C12 or its history: the guest side cannot run"
+
+# ---- the private script-error config (D25 #10, R4's lane): game knowledge, so from the artifacts repository --------
+# SCENARIO_CALLWATCH (callwatch.py config) and SCENARIO_SCRIPTERR_PATTERNS (scripterr.py --patterns), else the files
+# callwatch.cfg / scripterr_patterns.tsv of branch scenario-cfg; without them #10 falls back to the scof console log
+if [ -z "${SCENARIO_CALLWATCH:-}${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && [ -d "$ARTIFACTS/.git" ] &&
+	git -C "$ARTIFACTS" fetch -q --depth 1 origin scenario-cfg 2> /dev/null; then
+	mkdir -p "$W/cfg"
+	git -C "$ARTIFACTS" show FETCH_HEAD:callwatch.cfg > "$W/cfg/callwatch.cfg" 2> /dev/null && SCENARIO_CALLWATCH=$W/cfg/callwatch.cfg
+	git -C "$ARTIFACTS" show FETCH_HEAD:scripterr_patterns.tsv > "$W/cfg/patterns.tsv" 2> /dev/null && SCENARIO_SCRIPTERR_PATTERNS=$W/cfg/patterns.tsv
+fi
+export SCENARIO_CALLWATCH=${SCENARIO_CALLWATCH:-}
+SEP=(); [ -n "${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && SEP=(--patterns "$SCENARIO_SCRIPTERR_PATTERNS")
+[ -n "$SCENARIO_CALLWATCH${SEP[*]}" ] || note "no script-error config (scenario-cfg branch): #10 from the scof console log only"
 
 # ---- the private script-error config (D25 #10, R4's lane): game knowledge, so from the artifacts repository --------
 # SCENARIO_CALLWATCH (callwatch.py config) and SCENARIO_SCRIPTERR_PATTERNS (scripterr.py --patterns), else the files
@@ -254,9 +276,21 @@ fi
 # ---- metric, report, publish ---------------------------------------------------------------------------------------
 if [ ${#REPS[@]} -gt 0 ]; then python3 -I "$SC/scenario.py" metric "${REPS[@]}" --out "$W/metric.json" --md "$W/metric.md" > /dev/null
 else echo "- S18 metric: 0/12 D25 targets measured (no scenario report)" > "$W/metric.md"; fi
+# loud, not zeros: a run in which the guest ran in no scenario measured nothing (exit 3, the reason first)
+GRAN=0
+for r in "${REPS[@]}"; do
+	python3 -I -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1])).get("guest", {}).get("ran") else 1)' "$r" 2> /dev/null && GRAN=$((GRAN + 1))
+done
+FAIL_WHY=""
+if [ "$GRAN" = 0 ]; then
+	FAIL_WHY="the guest ran in no scenario ($( [ -n "$LC" ] && echo "link $LC: see each scenario's farm_boot.log" || echo "no link with a guest"))"
+	[ -f "$W/metric.json" ] && python3 -I -c 'import json, sys
+m = json.load(open(sys.argv[1])); m["error"] = sys.argv[2]; json.dump(m, open(sys.argv[1], "w"), indent=1)' "$W/metric.json" "$FAIL_WHY"
+fi
 {
 	echo "# scenarios ${C12}"
 	echo
+	[ -n "$FAIL_WHY" ] && { echo "- FAIL: $FAIL_WHY: nothing measured"; echo; }
 	cat "$W/metric.md"
 	echo
 	[ ${#WCACHED[@]} -gt 0 ] && echo "- original's runs from the reference cache (key $HARNESS_KEY): ${WCACHED[*]}"
@@ -300,4 +334,5 @@ if sys.argv[2]:
 json.dump(m, open(sys.argv[3], "w"), indent=1)' "$W/metric.json" "$SCRIPTERR_ALL" "${REPORT%.md}.json"
 fi
 log "done: $REPORT"
+[ -z "$FAIL_WHY" ] || { log "FAIL: $FAIL_WHY"; exit 3; }
 exit 0

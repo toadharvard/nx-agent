@@ -5,7 +5,7 @@ decomp content).
     python3 -I tests/s2d/test_bodycause.py       # needs c++filt, nm and aarch64-linux-gnu-g++ or g++
 
 Checks one name per cause: crt-import (std::, _Xran), data, name-mismatch (an object defines the member with
-another parameter spelling), not-compiled (a body in a source that is not a unit; a body under #if 0; an in-class
+another parameter spelling; a GCC clone only; never another instantiation of the class template), not-compiled (a body in a source that is not a unit; a body under #if 0; an in-class
 body), no-body (template-special, msvc-direct, other).
 """
 import os
@@ -32,6 +32,9 @@ ROWS = [  # Itanium name, note
     ('_ZN4ListIiED1Ev', 'special member of a template or unnamed class'),
     ('_ZN4Zork4PokeEv', 'MSVC calls it directly (pristine reference); was missing: no definition, address or body'),
     ('_Z8LonelyFnv', 'no definition, address or body'),
+    ('_ZN4BoxyIlE4SizeEv', 'no definition, address or body'),     # Boxy<long>::Size - objects have Boxy<int>
+    ('_ZN2Cl4MakeEPKc', 'no definition, address or body'),        # only Cl::Make(char const*).isra.0 exists
+    ('_ZN3ErrD1Ev', 'no definition, address or body'),            # Err::~Err - objects have Other::Err::~Err
 ]
 EXPECT = {
     '_ZNSt6vectorIiSaIiEE5_TidyEv': ('crt-import', 'std scope'),
@@ -44,6 +47,10 @@ EXPECT = {
     '_ZN4ListIiED1Ev': ('no-body', 'template-special'),
     '_ZN4Zork4PokeEv': ('no-body', 'msvc-direct'),
     '_Z8LonelyFnv': ('no-body', 'other'),
+    '_ZN4BoxyIlE4SizeEv': ('no-body', 'other'),
+    '_ZN3ErrD1Ev': ('no-body', 'other'),                          # another scope's class is no decoration of it
+    '_ZN2Cl4MakeEPKc': ('name-mismatch', 'defined only as a GCC clone (.isra/.constprop: its own signature, no '
+                                          'alias target)'),
 }
 
 
@@ -62,7 +69,12 @@ class Causes(unittest.TestCase):
             open(os.path.join(tree, 'include', 'q.h'), 'w').write(
                 'class Qux\n{\n  public:\n    int Top() { return 1; }\n    void Down();\n};\n')
             subprocess.run([GXX, '-c', '-x', 'c++', '-', '-o', os.path.join(objs, 'a.o')], check=True,
-                           input='struct Foo { void Set(int); };\nvoid Foo::Set(int) {}\n', text=True)
+                           input='struct Foo { void Set(int); };\nvoid Foo::Set(int) {}\n'
+                           'template <class T> struct Boxy { int Size(); };\n'
+                           'template <> int Boxy<int>::Size() { return 0; }\n'
+                           'extern "C" void make_clone() __asm__("_ZN2Cl4MakeEPKc.isra.0");\n'
+                           'extern "C" void make_clone() {}\n'
+                           'namespace Other { struct Err { ~Err(); }; Err::~Err() {} }\n', text=True)
             with open(os.path.join(out, 'bodies', 'bodies.tsv'), 'w') as f:
                 f.write('#name\tclass\taddress\ttarget\tunits\tnote\thost\n')
                 for n, note in ROWS:
@@ -84,6 +96,37 @@ class Causes(unittest.TestCase):
                 self.assertEqual(got[n][1], detail, n)
         self.assertEqual(got['_ZN3Foo3SetEj'][2], '1')
         self.assertEqual(got['_ZN3Bar4LoadEv'][2], '0')
+
+
+A64 = shutil.which('aarch64-linux-gnu-g++')
+
+
+@unittest.skipUnless(A64 and shutil.which('readelf') and shutil.which('nm'), 'needs aarch64-linux-gnu-g++, readelf, nm')
+class Placeholders(unittest.TestCase):
+    def test_reach(self):
+        """`unresolved` C placeholders: called -> function, else variable; live when reachable from a placed
+        `__fnv_` definition, a data table or another object's reference, harness-only when only an unreferenced
+        convention caller uses it (a synthesized zz_ object's bare undefined name is no reference)."""
+        a = ('extern "C" int stub_a(void); extern int g_h, g_live, g_tab, g_b; extern "C" int f_live(int);\n'
+             'int stub_caller() { return stub_a() + g_h; }\n'
+             'extern "C" int __fnv_00401000(int x) { return f_live(x) + g_live; }\n'
+             'static int __attribute__((noinline)) viatab() { return g_tab; }\nint (*tab[])() = { viatab };\n'
+             'int from_b() { return g_b; }\n')
+        with tempfile.TemporaryDirectory() as d:
+            for name, src in (('src_a.cpp.o', a), ('src_b.cpp.o', 'int from_b();\nint user() { return from_b(); }\n')):
+                subprocess.run([A64, '-mabi=ilp32', '-O1', '-c', '-x', 'c++', '-', '-o', os.path.join(d, name)],
+                               check=True, input=src, text=True)
+            subprocess.run([A64, '-mabi=ilp32', '-c', '-x', 'assembler', '-', '-o',
+                            os.path.join(d, 'zz_bd_src_a.cpp.o')], check=True, input='.globl _Z11stub_callerv\n',
+                           text=True)
+            rows = [{'name': n, 'units': 'src/a.cpp', 'cause': 'unresolved', 'detail': 'unresolved'}
+                    for n in ('stub_a', 'g_h', 'f_live', 'g_live', 'g_tab', 'g_b')]
+            rows.append({'name': '_ZN1A1fEv', 'units': 'src/a.cpp', 'cause': 'unresolved', 'detail': 'unresolved'})
+            bodycause.placeholder_details(rows, d)
+        self.assertEqual({r['name']: r['detail'] for r in rows},
+                         {'stub_a': 'c function harness-only', 'g_h': 'c variable harness-only',
+                          'f_live': 'c function live', 'g_live': 'c variable live', 'g_tab': 'c variable live',
+                          'g_b': 'c variable live', '_ZN1A1fEv': 'unresolved'})
 
 
 if __name__ == '__main__':

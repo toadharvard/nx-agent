@@ -233,6 +233,15 @@ size_t g_nfacets, g_capfacets;
 } // namespace
 
 extern "C" void *fnvnx_locale_init(void) { return global_locimp(); }            /* locale::_Init */
+
+/* locale::facet::_Incref: one more reference, under the locale lock; an immortal facet ((size_t)-1) stays so */
+extern "C" void fnvnx_facet_incref(void *fp)
+{
+    facet *f = (facet *)fp;
+    lockit_guard g(LOCK_LOCALE);
+    if (f->_Refs < (size_t)-1 - 1)
+        ++f->_Refs;
+}
 extern "C" void *fnvnx_locale_getgloballocale(void) { return global_locimp(); } /* locale::_Getgloballocale */
 
 /* locale::facet::_Facet_Register: remembered so fnvnx_cpplib_facet_tidy can release them (VC9 does at exit;
@@ -275,10 +284,13 @@ extern "C" void fnvnx_cpplib_facet_tidy(void)
     }
 }
 
-/* ---- _Locinfo: the port's C library locale is always "C" */
-extern "C" void fnvnx_locinfo_ctor(void *self, const char *locname)
+/* ---- _Locinfo: the port's C library locale is always "C".
+ * _Locinfo_ctor(_Locinfo *, const string &): the exe passes the locale name as a VC9 std::string by reference (R2:
+ * the byte-matched 0x00ad3ca0 does), so the name is read through its c_str() (inline when _Myres < 16, else heap). */
+extern "C" void fnvnx_locinfo_ctor(void *self, const void *locname_str)
 {
     locinfo *p = (locinfo *)self;
+    const char *locname = locname_str ? ((const string *)locname_str)->c_str() : nullptr;
     p->_Oldlocname.assign_short("C");
     const char *n = "*"; /* setlocale failed */
     if (locname && (!*locname || !strcmp(locname, "C")))
@@ -403,20 +415,15 @@ extern "C" void fnvnx_ios_base_dtor(void *self)
     }
 }
 
-/* basic_ostream<char>::basic_ostream(basic_streambuf *sb, bool isstd) with MSVC's hidden "construct the virtual
- * base" flag: the library's standard ostream object in the image (only constructed and destroyed by the game, never
- * written to). Builds the MSVC layout so that the game's destructor (vbptr lookup, _Ios_base_dtor) works; the
- * ios_base / basic_ios vptrs stay NULL - there is no native vftable for them. */
-extern "C" void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase)
+/* basic_ios<char>::init(basic_streambuf *sb, bool isstd): ios_base::_Init (every field but the vptr, which the
+ * caller's constructor has set) with a new locale of the global locimp, then the stream buffer, no tie, fill ' ',
+ * badbit without a buffer, and _Addstd for a standard stream. For the decomp's unit copies of basic_istream (S4 STL2,
+ * tools/rules/s4_stl.py), whose ios_base has MSVC's layout. */
+extern "C" void fnvnx_basic_ios_init(void *self, void *strbuf, int isstd)
 {
-    static const int32_t vbtable[2] = { 0, (int32_t)offsetof(ostream, ios) };
-    ostream *o = (ostream *)self;
-    if (construct_vbase)
-        o->vbptr = vbtable;
-    basic_ios *io = &o->ios;
+    basic_ios *io = (basic_ios *)self;
     ios_base *b = &io->base;
     /* ios_base::_Init */
-    b->vptr = nullptr;
     b->_Ploc = nullptr;
     b->_Stdstr = 0;
     b->_Except = 0;
@@ -437,6 +444,20 @@ extern "C" void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int con
         b->_Mystate |= 4; /* badbit */
     if (isstd)
         fnvnx_ios_base_addstd(b);
+}
+
+/* basic_ostream<char>::basic_ostream(basic_streambuf *sb, bool isstd) with MSVC's hidden "construct the virtual
+ * base" flag: the library's standard ostream object in the image (only constructed and destroyed by the game, never
+ * written to). Builds the MSVC layout so that the game's destructor (vbptr lookup, _Ios_base_dtor) works; the
+ * ios_base / basic_ios vptrs stay NULL - there is no native vftable for them. */
+extern "C" void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase)
+{
+    static const int32_t vbtable[2] = { 0, (int32_t)offsetof(ostream, ios) };
+    ostream *o = (ostream *)self;
+    if (construct_vbase)
+        o->vbptr = vbtable;
+    o->ios.base.vptr = nullptr;
+    fnvnx_basic_ios_init(&o->ios, strbuf, isstd);
     return self;
 }
 

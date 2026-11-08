@@ -88,7 +88,7 @@ fi
 
 # 2. The port's tools at that commit, as a detached worktree outside the main checkout.
 SRC=${FARM_SRC:-$FARM_HOME/src-$C12}
-if [ -z "${FARM_SRC:-}" ] && [ ! -d "$SRC" ]; then git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" >/dev/null; fi
+if [ -z "${FARM_SRC:-}" ]; then bash "$(dirname "$0")/worktree.sh" "$REPO" "$SRC" "$COMMIT" >/dev/null; fi
 if [ "$(git -C "$SRC" rev-parse HEAD)" != "$(git -C "$SRC" rev-parse "$COMMIT^{commit}")" ]; then
   echo "static_job.sh: $SRC is not at $COMMIT" >&2; exit 2
 fi

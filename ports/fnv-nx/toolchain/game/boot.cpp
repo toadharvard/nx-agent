@@ -193,6 +193,27 @@ void fnvnx_guest_thread_tls_hook(void) {
 }
 }
 
+/* Constants of the exe in sections the loader does not map (.text): read from the file (platform/include/
+ * fnvnx_win32_ext.h fnvnx_image_const). Mapped addresses, and anything outside the image's sections, stay as they are. */
+static const fnvnx_pe *g_pe;
+static const fnvnx_image *g_img;
+extern "C" const void *fnvnx_image_const(const void *p, uint32_t n, void *buf) {
+    uint32_t va = (uint32_t)(uintptr_t)p;
+    const fnvnx_pe *pe = g_pe;
+    if (!pe || !g_img || g_fd < 0 || !n || (uintptr_t)p != va || fnvnx_image_ptr(g_img, va, n)) return p;
+    for (unsigned i = 0; i < pe->nsections; i++) {
+        const fnvnx_section &sec = pe->sec[i];
+        uint32_t lo = pe->image_base + sec.rva, size = sec.vsize > sec.raw_size ? sec.vsize : sec.raw_size;
+        if (va < lo || va - lo > size || n > size - (va - lo)) continue;
+        uint32_t off = va - lo;
+        memset(buf, 0, n);
+        uint32_t have = off < sec.raw_size ? (sec.raw_size - off < n ? sec.raw_size - off : n) : 0;
+        if (have && os_file_pread(g_fd, buf, have, sec.raw_off + off) != (int64_t)have) return p;
+        return buf;
+    }
+    return p;
+}
+
 static int load_image(void) {
     static const fnvnx_os os = {nullptr, os_read, os_map_fixed, os_protect, os_alloc, os_free, os_log};
     g_fd = os_file_open(k_exe, OS_O_READ);
@@ -208,12 +229,21 @@ static int load_image(void) {
     os_file_fstat(g_fd, &st);
     static fnvnx_pe pe;
     int rc = fnvnx_pe_open(&pe, &os, (uint32_t)st.size);
+    if (!rc) g_pe = &pe;
     if (rc) { printf("fnvnx boot: STOP: pe_open: %s\n", fnvnx_strerror(rc)); return -1; }
     printf("fnvnx boot: %s: image base %#" PRIx32 ", %u sections%s\n", k_exe, pe.image_base, pe.nsections,
            pe.wrapped ? " (SteamStub-wrapped: code probes will not match)" : "");
     static fnvnx_image img;
     rc = fnvnx_image_map(&img, &pe, &os, pe.image_base, 0, 0x00400000u, 0x02100000u, 0);
     if (rc) { printf("fnvnx boot: STOP: image_map: %s\n", fnvnx_strerror(rc)); return -1; }
+    g_img = &img;
+    {   /* _tls_index = 0, as the Windows loader stores for the main module: fs:[0x2c][_tls_index] is the image TLS
+         * block (platform/win32/thread.cpp has one slot; FalloutNV.exe's file holds another value there) */
+        uint32_t tva = 0, told = 0;
+        int trc = fnvnx_image_tls_index_reset(&img, &tva, &told);
+        if (tva) printf("fnvnx boot: _tls_index %#010" PRIx32 " = 0 (file: %#" PRIx32 ")\n", tva, told);
+        else if (trc) printf("fnvnx boot: _tls_index not reset: %s\n", fnvnx_strerror(trc));
+    }
     __atomic_store_n(&g_image_mapped, 1, __ATOMIC_RELEASE);
     fnvnx_image_load_relocs(&img, &os);
     capture_xc(&pe, &img);

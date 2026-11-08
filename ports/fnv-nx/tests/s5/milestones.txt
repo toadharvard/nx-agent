@@ -3,6 +3,8 @@
 # order are the order of the boot; the summary's "milestone" is the last one in that order that was reached.
 #   <name> call 0xORIG       the function at that original address starts (its native definition)
 #   <name> call re:REGEX     a native function whose ELF symbol matches starts (the D3D9 device: null or Nine proxy)
+#   <name> callok F          F (0xORIG or re:REGEX) returns 0 (an HRESULT S_OK) to its caller
+#   <name> calltrue F        F returns true (w0's low byte non-zero)
 #   <name> store 0xADDR      a non-zero word is stored at that data-window address
 #   <name> store *0xADDR+N   a non-zero word is stored at (the pointer at ADDR) + N
 #   <name> data WHAT         a game-data step seen in the host file calls (tests/s5/datapath.py: ini-read,
@@ -15,11 +17,12 @@ winmain        call   0x0086a850   # WinMain (units.json, the decomp's entry; bo
 # the game read its INI (Fallout_default.ini / Fallout.ini / FalloutPrefs.ini, ReadFile through platform/win32)
 ini-read       data   ini-read
 # the game's D3D9 device exists: IDirect3D9::CreateDevice of the null device (toolchain/game/null_d3d9.cpp) or of
-# the Nine proxy (render/nine, class Px<interface>)
-renderer-init  call   re:^_ZN\d+(Null_I|Px)Direct3D9(Ex)?\d+CreateDevice(Ex)?E
+# the Nine proxy (render/nine, class Px<interface>) returned S_OK. Reaching the call is not enough: the native-render
+# hook (toolchain/game/native_device.cpp) fails it without a GPU backend, and the engine takes its no-device path.
+renderer-init  callok re:^_ZN\d+(Null_I|Px)Direct3D9(Ex)?\d+CreateDevice(Ex)?E
 # ... or, in the native-render build (LINK_OVERRIDES=render; tests/s5/native_render.py), nx::Renderer came up with it
 # (toolchain/game/native_device.cpp from the device's CreateDevice)
-renderer-init  call   re:^_ZN2nx8Renderer4InitEPNS_7BackendEjjjj$
+renderer-init  calltrue re:^_ZN2nx8Renderer4InitEPNS_7BackendEjjjj$
 # the archives: a file call on one of SArchiveList's archives, then every one of them opened
 archive-list   data   archive-list
 bsa-opened     data   bsa-opened

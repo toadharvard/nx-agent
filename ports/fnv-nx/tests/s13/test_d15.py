@@ -95,7 +95,7 @@ def test_keys():
     ind = set()
     fnkeys.oracle_closure(cat, ind)
     check(ind == {'00401000', '00401100'}, 'indirect calls through same-unit callees: %s' % sorted(ind))
-    check(fnkeys.change_tags(fnkeys.Facts('?f@@YAXXZ', oindirect=True)) == ['d15-vcall'] and
+    check('d15-vcall' in fnkeys.change_tags(fnkeys.Facts('?f@@YAXXZ', oindirect=True)) and
           fnkeys.change_tags(fnkeys.Facts('?f@@YAXXZ')) == [], 'd15-vcall selects only those')
     check(fnkeys.SCOPED == fnkeys.CHANGES[-1].tag.split('-')[0], 'SCOPED names the newest change')
 

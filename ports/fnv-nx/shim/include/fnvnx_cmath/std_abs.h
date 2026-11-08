@@ -21,6 +21,7 @@ inline double __cdecl abs(double _X) { return fabs(_X); }
 inline float __cdecl abs(float _X) { return (float)fabs((double)_X); }
 inline long double __cdecl abs(long double _X) { return fabs((double)_X); }
 }
-using std::abs;
+/* no `using std::abs;` at global scope here: a later <math.h> defines the same global overloads (abs(long),
+ * abs(double), abs(float)) itself and would conflict with the using-declaration (bgsprimitive) */
 #endif
 #endif

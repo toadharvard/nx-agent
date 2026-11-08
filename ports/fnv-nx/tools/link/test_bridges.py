@@ -9,6 +9,7 @@ probe (layout.py) on the test unit; abi2 decides and emits the bridges; everythi
 and run under qemu-aarch64 (the ILP32 image is wrapped into an ELF64 container at the same addresses, since qemu
 user mode has no ILP32 loader). Exit status of the program = number of failed checks.
 """
+import copy
 import os
 import subprocess
 import sys
@@ -34,6 +35,16 @@ struct I2 { int a, b; };
 struct F2 { float x, y; };
 struct Holder { Foo *p; ~Holder(); };
 Holder::~Holder() {}
+struct F4 { float a, b, c, d; };
+struct S8 { int lo, hi; };
+struct B1 { unsigned char ok; };
+struct B2 { unsigned char ok; };
+enum Mode { MODE_A, MODE_B = 7 };
+typedef struct { int a, b, c, d; } QI;
+namespace ns1 { struct W3 { float x, y, z; }; }
+struct Hidden { int a, b; Hidden(); ~Hidden(); };
+int Hidden(int);
+namespace ns2 { struct Outer { enum Bits { B0, B1 }; }; template <class T> struct Ref { T *p; }; struct Si { int x; }; }
 '''
 
 # (name, ref MSVC, def MSVC, expected verdict, C++ definition, C++ check calling bridge `br_<name>`)
@@ -88,6 +99,71 @@ CASES = [
      'extern "C" int def_ptr_vs_holder(Holder h) { return h.p->k; }',
      'extern "C" int br_ptr_vs_holder(Foo *f);\n'
      'static int t_ptr_vs_holder() { Foo f{77}; return (br_ptr_vs_holder(&f) == 77) - 1; }'),
+    # D24 option (a): the abi-manual classes bind through bridges
+    # free-cdecl->static-member-cdecl,sret-explicit: a free function's hidden result (x8) against a static member's
+    # explicit out pointer (x0), the int moves from x0 to x1, the definition's returned pointer is dropped
+    ('free_vs_static_out', '?f@@YA?AUBig@@H@Z', '?f@A@@SAPAUBig@@PAU2@H@Z', 'bridge',
+     'extern "C" Big *def_free_vs_static_out(Big *o, int n) { for (int i = 0; i < 8; i++) o->a[i] = n + i; return o; }',
+     'extern "C" Big br_free_vs_static_out(int n);\n'
+     'static int t_free_vs_static_out() { Big b = br_free_vs_static_out(40);'
+     ' return (b.a[0] == 40) + (b.a[7] == 47) - 2; }'),
+    # ret-aggregate: a 16-byte struct of ints (x0:x1) read from a definition returning four floats (v0-v3); x86
+    # passed both through a buffer, so the bytes are the floats' bits
+    ('ret_g2_vs_hfa', '?q@@YA?AUQ@@XZ', '?q@@YA?AUF4@@XZ', 'bridge',
+     'extern "C" F4 def_ret_g2_vs_hfa() { F4 f; f.a = 1.0f; f.b = 2.0f; f.c = -1.0f; f.d = 0.5f; return f; }',
+     'extern "C" Q br_ret_g2_vs_hfa();\n'
+     'static int t_ret_g2_vs_hfa() { Q q = br_ret_g2_vs_hfa(); return (q.a == 0x3f800000) + (q.b == 0x40000000)'
+     ' + (q.c == (int)0xbf800000) + (q.d == 0x3f000000) - 4; }'),
+    # aggregate-param: an 8-byte struct by value (x0) against its two words (x0, x1)
+    ('s8_vs_ints', '?e@@YAHUS8@@@Z', '?e@@YAHHH@Z', 'bridge',
+     'extern "C" int def_s8_vs_ints(int lo, int hi) { return lo * 10 + hi; }',
+     'extern "C" int br_s8_vs_ints(S8 s);\n'
+     'static int t_s8_vs_ints() { return (br_s8_vs_ints(S8{4, 2}) == 42) - 1; }'),
+    # varargs-tail,ret-aggregate: a variadic definition's 1-byte POD result against another 1-byte POD: the named
+    # part and the result agree, nothing to bridge (the anonymous arguments arrive where named ones would)
+    ('va_ret_pod', '?v@@YA?AUB1@@PAH@Z', '?v@@YA?AUB2@@PAHZZ', 'same', '', ''),
+    # a variadic definition whose named part needs a bridge stays manual (the bridge would move the anonymous ones)
+    ('va_needs_bridge', '?x@@YAXUQ@@@Z', '?x@@YAXHHHHZZ', None, '', ''),
+    # a void reference against a member returning an aggregate through MSVC's hidden buffer (R2 InsertAt): the
+    # arguments match without the buffer; a register result (S8, x0) is not read, a memory one (Big, x8) gets a
+    # scratch buffer in the bridge's frame
+    ('void_vs_hidden_regs', '?ins@L@@QAEXUS8@@ABH@Z', '?ins@V@@QAE?AUS8@@US8@@ABH@Z', 'same', '', ''),
+    # the same for a free cdecl pair (no pop check): read with the buffer, the S8 would be split and the int
+    # reference missing
+    ('void_vs_hidden_free', '?inf@@YAXUS8@@ABH@Z', '?inf@@YA?AUBig@@US8@@ABH@Z', 'bridge',
+     'extern "C" int g_inf; int g_inf; extern "C" Big def_void_vs_hidden_free(S8 it, const int &v) '
+     '{ Big b; for (int i = 0; i < 8; i++) b.a[i] = -1; g_inf = it.lo * 100 + it.hi * 10 + v; return b; }',
+     'extern "C" void br_void_vs_hidden_free(S8 it, const int &v);\n'
+     'static int t_void_vs_hidden_free() { int v = 9; br_void_vs_hidden_free(S8{5, 6}, v); return (g_inf == 569) - 1; }'),
+    # a void reference that passes the buffer itself (sret-explicit): the explicit reading is consistent and wins
+    ('void_explicit_out', '?xo@@YAXPAUBig@@H@Z', '?xo@@YA?AUBig@@H@Z', 'bridge',
+     'extern "C" Big def_void_explicit_out(int n) { Big b; for (int i = 0; i < 8; i++) b.a[i] = n * i; return b; }',
+     'extern "C" void br_void_explicit_out(Big *o, int n);\n'
+     'static int t_void_explicit_out() { Big b; br_void_explicit_out(&b, 3); return (b.a[1] == 3) + (b.a[7] == 21) - 2; }'),
+    ('void_vs_hidden_mem', '?inm@L@@QAEXUS8@@ABH@Z', '?inm@V@@QAE?AUBig@@US8@@ABH@Z', 'bridge',
+     'extern "C" int g_inm; int g_inm; extern "C" Big def_void_vs_hidden_mem(Foo *self, S8 it, const int &v) '
+     '{ Big b; for (int i = 0; i < 8; i++) b.a[i] = -1; g_inm = self->k * 1000 + it.lo * 100 + it.hi * 10 + v;'
+     ' return b; }',
+     'extern "C" void br_void_vs_hidden_mem(Foo *self, S8 it, const int &v);\n'
+     'static int t_void_vs_hidden_mem() { Foo f{3}; int v = 4; volatile int guard[4] = {7, 7, 7, 7};'
+     ' br_void_vs_hidden_mem(&f, S8{1, 2}, v);'
+     ' return (g_inm == 3124) + (guard[0] == 7) + (guard[3] == 7) - 3; }'),
+]
+
+# untagged named parameter types (a C name's declaration read from source: a typedef or an enum the reader did not
+# expand) - (name, ref MSVC, def MSVC, def parameter spellings replacing the definition's, expected verdict, C++ def,
+# C++ check); the probe measures them like aggregates
+UNTAGGED = [
+    ('enum_param', '?w@@YAXHH@Z', '?w@@YAXHH@Z', ['int', 'Mode'], 'same', '', ''),
+    ('ints_vs_qi', '?c@@YAXHHHH@Z', '?c@@YAXHHHH@Z', ['QI'], 'bridge',
+     'extern "C" int g_qi; int g_qi; extern "C" void def_ints_vs_qi(QI q) { g_qi = q.a * 1000 + q.b * 100 + q.c * 10'
+     ' + q.d; }',
+     'extern "C" void br_ints_vs_qi(int a, int b, int c, int d);\n'
+     'static int t_ints_vs_qi() { br_ints_vs_qi(5, 6, 7, 8); return (g_qi == 5678) - 1; }'),
+    # fastcall: an enum would go in ecx/edx, a struct on the stack - not known from the spelling
+    ('fastcall_untagged', '?s@@YIXHH@Z', '?s@@YIXHH@Z', ['Mode', 'int'], None, '', ''),
+    # a bare name the probe cannot measure, while the unit has one `ns1::W3`: abi2.lookup takes it
+    ('bare_ns_name', '?k@@YAXMMM@Z', '?k@@YAXMMM@Z', ['W3'], 'same', '', ''),
 ]
 
 RUNTIME = r'''
@@ -148,17 +224,29 @@ def execute(tree, types, defs, checks, calls, asm):
 
 def main():
     fails = 0
-    names = [c[1] for c in CASES] + [c[2] for c in CASES]
+    names = [c[1] for c in CASES + UNTAGGED] + [c[2] for c in CASES + UNTAGGED]
     dem = fnvlink.batch_demangle(fnvlink.UNDNAME, names)
     with tempfile.TemporaryDirectory() as tree:
         os.makedirs(os.path.join(tree, 'src')); os.makedirs(os.path.join(tree, 'include'))
         open(os.path.join(tree, 'src', 'types.cpp'), 'w').write(TYPES)
         lay = layout.probe_unit(tree, tree, 'src/types.cpp', ['Vec3', 'Big', 'Rgba', 'Q', 'P2', 'NiPoint2', 'V2', 'I2', 'F2',
-                                                              'Holder'])
-        look = lambda t: lay.get(t)  # noqa: E731
+                                                              'Holder', 'F4', 'S8', 'B1', 'B2', 'Mode', 'QI', 'W3',
+                                                              'ns1::W3', 'Hidden', 'Outer::Bits', 'Ref<Si>', 'Nope'])
+        # names a C declaration's spelling leaves to the probe: the one namespace GCC names for a bare name or its
+        # first component or template arguments, `struct ::T` for a class a function of the same name hides
+        for t, want in (('W3', (12, 'H3x4')), ('Hidden', (8, 'IND')), ('Outer::Bits', (4, 'G1')),
+                        ('Ref<Si>', (4, 'G1')), ('Nope', None)):
+            got = lay.get(t) and (lay[t].size, lay[t].cls)
+            if got != want:
+                print('FAIL probe %s: %s (want %s)' % (t, got, want)); fails += 1
+        look = abi2.lookup({('u', t): l for t, l in lay.items() if l is not None})('u')
         asm, defs, checks, calls = ['    .text'], [], [], []
-        for name, rm, dm, want, cdef, ccheck in CASES:
+        cases = [(n, rm, dm, None, w, cd, cc) for n, rm, dm, w, cd, cc in CASES] + UNTAGGED
+        for name, rm, dm, dparams, want, cdef, ccheck in cases:
             rs, ds = sigs.parse_msvc(rm, dem[rm]), sigs.parse_msvc(dm, dem[dm])
+            if dparams is not None:
+                ds = copy.copy(ds)
+                ds.raw_params = ds.params = list(dparams)
             p = abi2.compare(rs, ds, look, look)
             got = p.kind if p else None
             if os.environ.get('FNVNX_TEST_DEBUG'):

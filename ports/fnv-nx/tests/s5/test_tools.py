@@ -481,6 +481,37 @@ class MilestoneTest(unittest.TestCase):
                 with self.assertRaises((ValueError, re.error)):
                     emu_guest.parse_milestones(p)
 
+    def test_callok_needs_success(self):
+        """'callok F' is reached when F returns 0 to its caller, not when F starts: the native-render hook fails
+        CreateDevice without a GPU backend (D3DERR_NOTAVAILABLE), and that boot has no renderer"""
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc
+        from unicorn.arm64_const import UC_ARM64_REG_SP
+        rows = emu_guest.parse_milestones(emu_guest.MILESTONES)
+        self.assertEqual({k for n, k, _ in rows if n == "renderer-init"}, {"callok", "calltrue"})
+        for ret, reached in ((0, True), (0x8876086A, False)):
+            e = emu_guest.Emu.__new__(emu_guest.Emu)
+            e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+            e.calls, e.cur, e.miles = 0, None, {}
+            e.code_syms = {"_ZN15Null_IDirect3D912CreateDeviceEj": 0x1100}
+            e.code_addr = lambda n, e=e: e.code_syms.get(n)
+            e.sym = lambda a: "x %#x" % a
+            uc.mem_map(0x1000, 0x1000)
+            uc.mem_map(0x8000, 0x1000)   # stack
+            # 0x1000: bl 0x1100; nop    0x1100: movz w0,#lo; movk w0,#hi,lsl 16; ret
+            uc.mem_write(0x1000, struct.pack("<2I", 0x94000040, 0xD503201F))
+            uc.mem_write(0x1100, struct.pack("<3I", 0x52800000 | ((ret & 0xFFFF) << 5),
+                                             0x72A00000 | ((ret >> 16) << 5), 0xD65F03C0))
+            uc.reg_write(UC_ARM64_REG_SP, 0x8800)
+            with tempfile.TemporaryDirectory() as t:
+                p = os.path.join(t, "m.txt")
+                with open(p, "w") as f:
+                    f.write("renderer-init callok re:CreateDevice\n")
+                e.install_milestones(p)
+            uc.emu_start(0x1000, 0x1008)
+            self.assertEqual("renderer-init" in e.miles, reached, hex(ret))
+
     def test_stored_word(self):
         sys.path.insert(0, HERE)
         import emu_guest

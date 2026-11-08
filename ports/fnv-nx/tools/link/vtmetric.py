@@ -77,8 +77,11 @@ def read_renames(path):
             continue
         f = line.rstrip('\n').split('\t')
         if len(f) >= 6 and f[5]:
+            if f[0].endswith('#vtables'):   # the synthesized vtable object of a host unit: zz_vt_<host>.o
+                out['zz_vt_' + obj_name(f[0][:-len('#vtables')])][f[5]] = f[1]
+                continue
             out[obj_name(f[0])][f[5]] = f[1]
-            out['zz_vt_' + obj_name(f[0])][f[5]] = f[1]
+            out['zz_vt_' + obj_name(f[0])].setdefault(f[5], f[1])
     return out
 
 
@@ -110,6 +113,9 @@ def measure(link, exe, rows_path=None):
     out = os.path.join(link, 'out')
     native, vrows = read_addrmap(os.path.join(out, 'addrmap.tsv'))
     renames = read_renames(os.path.join(out, 'refs.tsv'))
+    symaddr = read_symaddr(os.path.join(out, 'addrmap.tsv'))
+    mism_pairs = collections.Counter()
+    classes = read_class_rows(os.path.join(out, 'vtables', 'classes.tsv'))
     exev = exevft.scan(exe)
     if os.environ.get('VTMETRIC_RTTI_ONLY') != '1':   # the V rows' vftables without RTTI too (exevft.plain_vftables)
         exev.update(exevft.plain_vftables(exe, [v for v in vrows if v not in exev], set(exev) | set(vrows)))
@@ -146,6 +152,18 @@ def measure(link, exe, rows_path=None):
             st['v-%s-not-in-exe' % kind] += 1
         elif nmsvc < len(e.slots) and e.td:   # a vftable without RTTI has no reliable end (exevft.plain_vftables)
             st['%s-shorter' % kind] += 1
+        if e is not None:
+            st['slot-vftables'] += 1
+            cur = [x.sym for x in slot_ents]   # the symbols the fixed object names now (names: the units' own)
+            agree, bad = compare_slots(cur, d, e.slots, symaddr)
+            st['slot-compared'] += agree + len(bad)
+            if bad:
+                st['slot-vftables-mismatch'] += 1
+                st['slot-mismatch'] += len(bad)
+                for k_, j_, na_, ea_ in bad:
+                    mism_pairs[(na_, ea_)] += 1
+                    rows.append(('%08x' % v, z, str(k_), str(j_), '%08x' % ea_, '%08x' % na_, cur[k_] or '',
+                                 'slot-mismatch'))
         for k, ent in enumerate(slot_ents):
             if kind == 'secondary' and e is not None and (ent.sym or '').startswith('__fnv_'):
                 # S2c-vt2: a secondary slot bound to the full-object entry of a function MSVC enters at this base
@@ -174,6 +192,10 @@ def measure(link, exe, rows_path=None):
         for s in o.syms:
             if s[0].startswith(TRAP) and s[5] == 0:
                 trap_syms.add(s[0])
+    st['slot-mismatch-pairs'] = len(mism_pairs)
+    for v, e_ in exev.items():
+        if v not in vrows and e_.td:
+            st['unpaired-%s-%s' % ('secondary' if e_.off else 'primary', unpaired_reason(e_.td, e_.off, classes))] += 1
     st['trap-symbols'] = len(trap_paired)
     st['trap-symbols-unpaired'] = len(trap_syms - trap_paired)
     # mispairings: the native vtable's class against the exe's RTTI class
@@ -209,6 +231,136 @@ def measure(link, exe, rows_path=None):
             for r in rows:
                 f.write('\t'.join(r) + '\n')
     return st
+
+
+# ---- S2d-vslot: where the native slot's function is not the exe's (EQ difffuzz native-vslot-differs)
+#
+# `slot-mismatch` compares, for every image vftable paired with a native vtable, the address behind each native slot
+# (through the address map) with the exe vftable's word at the slot GCC's minus-one layout puts it in: slot k + 1 of
+# the native vtable against exe slot k after the destructor pair. Exe slots 0 and 1 are not compared (the destructor
+# and the first virtual, so a shifted pair is not mistaken for a mismatch). A slot whose symbol or exe word the map
+# does not place is skipped, so a trap stub never counts (trap-slots has those). Where the destructor pair is not
+# found by name (`__fnvnx_vflag_<a>_0|1` flag stubs bind a pair of exe slots as often as a destructor), the
+# alignment with the most agreeing slots decides: the exe is the evidence, not the spelling.
+FLAG_PAIR = re.compile(r'__fnvnx_vflag[3c]?_[0-9a-f]{8}_([01])$')
+ADDR_NAME = re.compile(r'__fnv(?:nx_msvc)?_([0-9a-f]{8})(?:_(?:D[012]|d[01]))?$')
+ADDR_STUB = re.compile(r'__fnvnx_v(?:flag[3c]?|gdel|free|const|adj)_([0-9a-f]{8})(?:_\d)?$')
+
+
+def read_symaddr(path):
+    """{symbol: address} for every symbol the address map's code rows name (link symbol, native symbol, and the
+    D1 forms): the address behind a native vtable slot's name."""
+    out = {}
+    for line in open(path, encoding='utf-8', errors='surrogateescape'):
+        if line.startswith('#'):
+            continue
+        f = line.rstrip('\n').split('\t')
+        if len(f) < 6 or f[1] not in NATIVE_KINDS:
+            continue
+        a = int(f[0], 16)
+        for c in (f[2], f[3], f[7] if len(f) > 7 else '', f[8] if len(f) > 8 else ''):
+            if c:
+                out.setdefault(c, a)
+    return out
+
+
+def slot_address(name, symaddr):
+    """The exe address a native vtable slot's symbol stands for: the map's row for the name, else the address a bound
+    name carries (`__fnv_<a>`, `__fnv_<a>_D1`, `__fnvnx_msvc_<a>`, `__fnvnx_vflag_<a>_<n>`, `__fnvnx_vgdel_<a>`);
+    None for a trap stub, a stand-in or a name nothing places."""
+    if not name:
+        return None
+    if name in symaddr:
+        return symaddr[name]
+    m = ADDR_NAME.match(name) or ADDR_STUB.match(name)
+    return int(m.group(1), 16) if m else None
+
+
+def _pair_positions(names, d):
+    """The slots a destructor pair (D1 then D0) can start at, by what the fixed object's names say: the pair given
+    (d), a flag-stub pair (_0, _1), a slot followed by a D0-named one (the link binds D1 to an address-bound name or a
+    flag stub and leaves the class's own `...D0Ev`, or `__fnv_<a>_D0`, as it was), and two adjacent slots with the
+    same symbol (D1 and D0 bound to the one function the exe's single deleting destructor is). compare_slots lets the
+    exe decide between them."""
+    out = []
+    if d is not None:
+        out.append(d)
+    for i in range(len(names) - 1):
+        a, b = names[i], names[i + 1]
+        if not a or not b or i in out:
+            continue
+        fa, fb = FLAG_PAIR.match(a), FLAG_PAIR.match(b)
+        if fa and fb and fa.group(1) == '0' and fb.group(1) == '1':
+            out.append(i)
+        elif not exevft.D0_SLOT.search(a) and (exevft.D0_SLOT.search(b) or b.endswith('_D0')
+                                               or (fb and fb.group(1) == '1' and fa is None)):
+            out.append(i)
+        elif a == b:
+            out.append(i)
+    return out
+
+
+def compare_slots(names, d, exe_slots, symaddr):
+    """-> (agree, [(k, j, native address, exe address)] mismatches) for the alignment that agrees most: candidates are
+    d (exevft.dtor_pos, may be None), every flag-stub pair, and no pair at all; ties keep the earliest candidate.
+    Only exe slots j >= 2 are compared."""
+    addr = [slot_address(n, symaddr) for n in names]
+    best = None
+    for c in [d] + [p for p in _pair_positions(names, d) if p != d] + ([None] if d is not None else []):
+        agree, bad = 0, []
+        for k, a in enumerate(addr):
+            j = exevft.exe_slot_index(k, c)
+            if a is None or j < 2 or j >= len(exe_slots):
+                continue
+            if a == exe_slots[j]:
+                agree += 1
+            else:
+                bad.append((k, j, a, exe_slots[j]))
+        if best is None or agree > best[0]:
+            best = (agree, bad)
+    return best
+
+
+# ---- S2d-vslot: exe vftables no V row stands for
+#
+# `unpaired-<primary|secondary>-<reason>` counts the exe vftables with RTTI that the address map has no kind-V row
+# for, by what the class's row in vtables/classes.tsv says (the synthesis step's outcome for the class):
+#   no-polymorphic-view  - `typeinfo` only: every host unit declares the class without a virtual member, so GCC gives
+#                          it no vptr and the synthesis (vtables.py) cannot emit a vtable (QuantityMenu, 0x010701c4,
+#                          which the destructor 0x00720a40 stores in its vptr; 171 more on link 0540aff0d154);
+#   no-secondary-base    - the class has a vtable, but the decomp declares it without the base subobject this vftable
+#                          belongs to (offset > 0: TESObjectARMA's 12 component vftables, 0x0102a28c among them), so no
+#                          native address point has offset-to-top minus the COL offset;
+#   not-nameable         - no host unit could name the class (the row says so);
+#   template-or-no-row   - a class template instance or a name with no row (the simple-name match cannot place it).
+UNPAIRED_NAME = re.compile(r'^\.\?A[VU]([^@?$]+)@@$')
+
+
+def read_class_rows(path):
+    """{class name: outcome} from vtables/classes.tsv (the synthesis step's per-class result column)."""
+    out = {}
+    if not os.path.exists(path):
+        return out
+    for line in open(path, encoding='utf-8', errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if len(f) >= 4 and not line.startswith('#'):
+            out[f[0]] = f[3]
+    return out
+
+
+def unpaired_reason(td, off, classes):
+    """The reason an exe vftable of RTTI class `td` (COL offset `off`) has no V row, from the class rows."""
+    m = UNPAIRED_NAME.match(td or '')
+    if not m or m.group(1) not in classes:
+        return 'template-or-no-row'
+    r = classes[m.group(1)]
+    if r.startswith('vtable'):
+        return 'no-secondary-base' if off else 'paired-elsewhere'
+    if r.startswith('typeinfo'):
+        return 'no-polymorphic-view'
+    if 'no host unit' in r or 'nameable' in r:
+        return 'not-nameable'
+    return 'other'
 
 
 def shutil_which(x):

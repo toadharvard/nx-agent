@@ -21,6 +21,9 @@ vs memory results, different aggregates of the same size). A by-reference defini
 buffer (or the reference's own pointer when the bytes are all there); no constructor or destructor runs for these
 temporaries, which matches what the definition sees on x86 (a bitwise copy) and leaves ownership with the caller.
 """
+import copy
+import re
+
 import abi
 import sigs
 
@@ -43,6 +46,20 @@ def agg_name(cls):
     return sigs.canon_type(cls[4:])
 
 
+# an untagged type a source declaration spells by name (a typedef the C-name reader did not expand, `WPARAM`, or a
+# nested enum, `PacketMask::Bits`): the layout probe measures it like an aggregate
+TYPE_ID = re.compile(r'^(?:::)?[A-Za-z_]\w*(?:<[^()*&]*>)?(?:::[A-Za-z_]\w*(?:<[^()*&]*>)?)*$')
+
+
+def probe_name(cls):
+    """The type name the layout probe is asked for: a by-value aggregate, or an untagged named type ('?:T')."""
+    if cls.startswith('AGG:'):
+        return agg_name(cls)
+    if cls.startswith('?:') and TYPE_ID.match(cls[2:].strip()):
+        return sigs.canon_type(cls[2:].strip())
+    return None
+
+
 def value(label, cls, lay):
     if cls in SCALAR:
         return Val(label, cls, SCALAR[cls], 'fpr' if cls.startswith('F') else 'gpr', min(SCALAR[cls], 8))
@@ -51,7 +68,15 @@ def value(label, cls, lay):
         if lt is None:
             raise Unknown(cls)
         return Val(label, cls, lt.size, lt.cls, lt.align, lt.trivial, getattr(lt, 'pod', None))
-    raise Unknown(cls)  # varargs, long double, member pointers, untagged names
+    if cls.startswith('?:') and label != 'ret' and probe_name(cls):
+        # a parameter of an untagged named type: its bytes are all that count. A result is not: whether MSVC returns
+        # it through a buffer depends on its being a class, which the probe does not say. Below 4 bytes the x86
+        # caller widened a scalar to a stack word and AArch64 leaves the upper bits unspecified: not byte-comparable
+        lt = lay(probe_name(cls))
+        if lt is None or lt.size < 4:
+            raise Unknown(cls)
+        return Val(label, cls, lt.size, lt.cls, lt.align, lt.trivial, getattr(lt, 'pod', None))
+    raise Unknown(cls)  # varargs, long double, member pointers, untagged results and spellings
 
 
 def values(sig, lay):
@@ -59,6 +84,50 @@ def values(sig, lay):
     rc = abi.ret_class(sig)
     ret = None if rc == 'VOID' else value('ret', rc, lay)
     return vals, ret
+
+
+def unknown(sig, lay):
+    """The classes of sig that values() cannot place (missing layouts, varargs, ...), for the abi-manual note."""
+    out = []
+    for lab, cls in abi.params_of(sig) + [('ret', abi.ret_class(sig))]:
+        if cls == 'VOID' and lab == 'ret':
+            continue
+        try:
+            value(lab, cls, lay)
+        except Unknown:
+            out.append(cls + (' result' if lab == 'ret' and cls.startswith('?:') else ''))
+    return out
+
+
+def lookup(layouts):
+    """unit -> type -> Layout from {(unit, type): Layout}. A name the probe could not measure in the unit, while the
+    unit has exactly one layout (or several identical ones) of a qualified `ns::name`, takes that: a C name's
+    declaration read from the source loses the namespace it stands in (`CreateProjectileRef(..., W20Point)` inside
+    `namespace fnv_00891360`), the probe then cannot name `::W20Point`."""
+    by_last = {}
+
+    def index(unit):
+        ix = by_last.get(unit)
+        if ix is None:
+            ix = by_last[unit] = {}
+            for (u, t), l in layouts.items():
+                if u == unit and l is not None and '::' in t:
+                    parts = re.split(r'::(?![^<]*>)', t)
+                    for k in range(1, len(parts)):
+                        ix.setdefault('::'.join(parts[k:]), []).append(l)
+        return ix
+
+    def for_unit(unit):
+        def get(t):
+            lt = layouts.get((unit, t))
+            if lt is not None:
+                return lt
+            cands = index(unit).get(t, [])
+            if cands and all(tuple(c) == tuple(cands[0]) for c in cands):
+                return cands[0]
+            return None
+        return get
+    return for_unit
 
 
 def hidden_result(sig, ret):
@@ -86,6 +155,8 @@ def x86(sig, vals, ret):
     for v in order:
         if cc == 'thiscall' and v.label == 'this':
             out.append((v.label, 'ecx', 0, 4)); continue
+        if cc == 'fastcall' and regs < 2 and v.cls.startswith('?:') and v.size <= 4:
+            raise Unknown(v.cls)   # an enum or integer typedef goes in ecx/edx, a struct on the stack: not known
         if cc == 'fastcall' and regs < 2 and v.cls in ('I8', 'I16', 'I32', 'P') and (v.label != 'sret' or non_pod):
             out.append((v.label, ('ecx', 'edx')[regs], 0, v.size)); regs += 1; continue
         out.append((v.label, 'stk', off, v.size))
@@ -184,21 +255,82 @@ class Plan:
         self.ret_conv = False
         self.ret_fcvt = None      # instructions after the call: float <-> double, FP through an integer result
         self.moves = False        # the AArch64 side needs a bridge (bytes elsewhere, a result to convert)
+        self.discard = False      # void reference: the definition's result goes to a scratch buffer (x8) or is ignored
 
 
-def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
-    """Plan for calling definition `dfn` through declaration `ref`, or None when a layout is missing. ecx_unused: as
-    abi.compare (the definition's code never uses the incoming ecx)."""
+def variadic(sig):
+    return bool(sig.raw_params) and sig.raw_params[-1].strip() == '...'
+
+
+def fixed_part(sig):
+    """sig without its trailing `...`."""
+    s = copy.copy(sig)
+    s.raw_params = list(sig.raw_params[:-1])
+    return s
+
+
+def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False, why=None, _drop=None):
+    """Plan for calling definition `dfn` through declaration `ref`, or None when a layout is missing (why, a list,
+    gets the reason). ecx_unused: as abi.compare (the definition's code never uses the incoming ecx).
+
+    A variadic side (`...` last) is compared on its named parameters: AArch64 Linux passes anonymous arguments where
+    it passes named ones, so when the named bytes and the result agree without a bridge the pair is `same` (abi
+    decided the anonymous part, class varargs; here the aggregate result: `BoolResult f(Ctx *, ...)` against
+    `MatchStatus f(World *, Body *)`, both 1-byte PODs). A bridge would move or drop the anonymous arguments it does
+    not know (registers past the named ones, the caller's stack behind a new frame): None, the pair stays manual."""
+    if variadic(ref) or variadic(dfn):
+        p = compare(fixed_part(ref) if variadic(ref) else ref, fixed_part(dfn) if variadic(dfn) else dfn,
+                    lay_ref, lay_def, ecx_unused, why)
+        if p is None:
+            return None
+        if p.kind == 'bridge' or 'ref-passes-fewer' in p.classes:
+            if why is not None:
+                why.append('variadic: the named part needs a bridge that would move the anonymous arguments'
+                           if p.kind == 'bridge' else 'variadic: the definition reads named parameters the '
+                           'reference passes anonymously')
+            return None
+        p.classes = sorted(set(p.classes + ['varargs']) - {'layout'})
+        p.notes.append('anonymous arguments where the named ones would be (AAPCS64)')
+        return p
     try:
         rv, rret = values(ref, lay_ref)
         dv, dret = values(dfn, lay_def)
         rch, dch = a64(rv), a64(dv)
         a64_ret(rret), a64_ret(dret)
+        x86(ref, rv, rret), x86(dfn, dv, dret)
     except Unknown:
+        if why is not None:
+            u = unknown(ref, lay_ref) + unknown(dfn, lay_def)
+            why.append('no layout: %s' % '; '.join(sorted(set(u))) if u else 'fastcall register of an untagged type')
         return None
+    # a void reference against a definition with a result: a register result is simply not read. A hidden result
+    # buffer has two readings. Either the reference passes it explicitly (a pointer argument where the buffer goes:
+    # `void f(unsigned char *out, ...)` against `PacketResult f(...)`, sret-explicit), or its declaration lost the
+    # result: MSVC passes a buffer to any callee returning an aggregate, its caller reading the value or not, so the
+    # arguments are matched without it and the bridge hands the definition a scratch one (R2: void
+    # P133List::InsertAt(OutIter, P133Camera *const &) against 0x00b156b0, which returns its iterator through the
+    # buffer; read the first way, the callee would write through the iterator's first word). The explicit reading
+    # wins when every definition byte comes from the reference with it (x86-consistent, nothing missing or
+    # partial); else the discarding one when that is clean
+    hidden = rret is None and dret is not None and hidden_result(dfn, dret)
+    if hidden and _drop is None:
+        def clean(q):
+            return q.kind != 'x86-inconsistent' and 'ref-passes-fewer' not in q.classes and \
+                not any(' bytes passed' in n for n in q.notes)
+        pe = compare(ref, dfn, lay_ref, lay_def, ecx_unused, None, False)
+        if not clean(pe):
+            pd = compare(ref, dfn, lay_ref, lay_def, ecx_unused, None, True)
+            if clean(pd):
+                return pd
+        return pe
     p = Plan()
     p.dvals, p.rvals, p.dch, p.rch, p.dret, p.rret = dv, rv, dch, rch, dret, rret
-    rx, dx = x86(ref, rv, rret), x86(dfn, dv, dret)
+    p.discard = rret is None and dret is not None and (not hidden or bool(_drop))
+    if p.discard:
+        p.classes.append('result-discarded')
+        if hidden_result(dfn, dret):
+            p.notes.append('void reference: matched without the definition\'s hidden result buffer; the result is dropped')
+    rx, dx = x86(ref, rv, rret), x86(dfn, dv, None if p.discard else dret)
     x86_ok, identity = True, True
     for lab, space, off, size in dx:
         pieces, covered = [], 0
@@ -271,6 +403,9 @@ def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
         elif abi.ret_carry(dret.cls, rret.cls) is not None:
             p.ret_fcvt = tuple(abi.ret_carry(dret.cls, rret.cls))   # chain_x87: FP through an integer result
             p.classes.append('ret-regfile')
+        elif abi.bool_from_int(ref, dfn) is not None:   # bool read from a char/int result: (value != 0)
+            p.ret_fcvt = abi.bool_from_int(ref, dfn)
+            p.classes.append('ret-bool-from-int')
         else:
             for vo in range(min(rret.size, dret.size)):
                 if locate(rr, vo)[:2] != (locate(dr, vo) or (None, None, 0))[:2]:
@@ -281,10 +416,11 @@ def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False):
                                       for side in (rx, dx)))
     if pm:
         x86_ok = False; p.notes.append(pm); p.classes.append('pop-mismatch')
-    p.moves = not identity or p.ret_conv or bool(p.ret_fcvt) or p.def_sret_from is not None
+    scratch = p.discard and dret.kind == 'IND'   # AArch64: x8 must point at writable memory
+    p.moves = not identity or p.ret_conv or bool(p.ret_fcvt) or p.def_sret_from is not None or scratch
     if not x86_ok:
         p.kind = 'x86-inconsistent'
-    elif not identity or p.ret_conv or p.ret_fcvt or p.def_sret_from is not None:
+    elif not identity or p.ret_conv or p.ret_fcvt or p.def_sret_from is not None or scratch:
         p.kind = 'bridge'
         if any(src == ('refsret',) for ps in p.pieces.values() for _, src, _, _ in ps) and rret is None:
             p.kind = 'x86-inconsistent'; p.notes.append('result buffer of a void reference')
@@ -448,7 +584,8 @@ def emit(name, target, p, comment):
         else:
             a.addr('x8', R)
     refsret = any(src == ('refsret',) for ps in p.pieces.values() for _, src, _, _ in ps)
-    tail = (not any(c[0] == 'stk' or (c[0] == 'mem' and l not in passthru)
+    # (no tail call when x8 points into this frame: a void reference's scratch result buffer)
+    tail = (not (def_ind and p.discard) and not any(c[0] == 'stk' or (c[0] == 'mem' and l not in passthru)
                     for l, ch in p.dch.items() if l in p.pieces for _, c, _, _ in ch)
             and not p.ret_conv and not p.ret_fcvt and p.def_sret_from is None and not (refsret and not ref_ind))
     if tail:

@@ -111,21 +111,43 @@ FAMILY = {0x00401000: 'new', 0x00aa3e40: 'new', 0x00ecd1c7: 'new', 0x00401030: '
           0x00ecd291: 'delete'}   # 0x00ecd1c7 CRT malloc (S1-rules d20-malloc)
 
 
-class Mem:
-    """Memory access for builtins: reads via the engine, writes recorded as program stores."""
+class Fault(Exception):
+    """A builtin touched memory its machine cannot map (the null region, the machine's own private range, ILP32
+    high): args[0] is the engine's fault text, 'fault:r|w:<address>'."""
 
-    def __init__(self, uc, writes, ensure, norm=None):
-        self.uc, self.writes, self.ensure, self.norm = uc, writes, ensure, norm
+
+def uc_mapped(uc, a):
+    """Is address a mapped on this machine already (the fixed blocks: TLS, exception objects, import stubs)?"""
+    return any(lo <= a <= hi for lo, hi, _ in uc.mem_regions())
+
+
+class Mem:
+    """Memory access for builtins: reads via the engine, writes recorded as program stores. With `check` (the
+    engine's page test: mapped already, or mappable on first touch) an access the machine's own instructions would
+    fault on raises Fault: the real memcpy/strlen/... faults there too, and GCC often inlines what MSVC calls (F3:
+    a memcpy from a null source ran on the oracle and faulted only natively, `native-null-read`)."""
+
+    def __init__(self, uc, writes, ensure, norm=None, check=None):
+        self.uc, self.writes, self.ensure, self.norm, self.check = uc, writes, ensure, norm, check
+
+    def _check(self, a, n, k):
+        if self.check is None:
+            return
+        for p in range(world.page_of(a), a + n, world.PAGE):
+            if not self.check(p, max(a, p)):
+                raise Fault('fault:%s:%08x' % (k, max(a, p)))
 
     def read(self, a, n):
         if n <= 0:
             return b''
+        self._check(a, n, 'r')
         self.ensure(a, n)
         return bytes(self.uc.mem_read(a, n))
 
     def write(self, a, b):
         if not b:
             return
+        self._check(a, len(b), 'w')
         self.ensure(a, len(b))
         self.uc.mem_write(a, b)
         if self.norm:

@@ -53,6 +53,26 @@ def divs_of(d, addr):
     return sorted(glob.glob(os.path.join(d, 'div', '%s-*.json' % addr)))
 
 
+def divs_index(d):
+    """{address: divs_of(d, address)} for every address, from one listing of d/div (T1: a glob per address scanned
+    the whole directory each time - todo, view and status did it for every cached row or target, a quadratic setup
+    and report step on the quick farm). The same paths in the same order: an address is hex (no '-'), so a name
+    'A-*.json' belongs to address A, the text before its first '-'."""
+    idx = {}
+    dd = os.path.join(d, 'div')
+    try:
+        names = os.listdir(dd)
+    except OSError:
+        return idx
+    for n in names:
+        if n.startswith('.') or not n.endswith('.json') or '-' not in n:
+            continue
+        idx.setdefault(n[:n.index('-')], []).append(os.path.join(dd, n))
+    for v in idx.values():
+        v.sort()
+    return idx
+
+
 VERDICT_SETUP = ('setup:Unsupported', 'setup:KeyError', 'setup:ValueError')   # deterministic: no function to fuzz
 
 
@@ -73,11 +93,12 @@ def recheck_due(cache, changes=None, rows=None):
     changes = [c for c in (fnkeys.CHANGES if changes is None else changes) if c.recheck is not None]
     rows = load_rows(cache) if rows is None else rows
     due = set()
+    idx = divs_index(cache)
     for a, r in rows.items():
         todo = [c for c in changes if c.tag not in (r.get('changes') or ())]
         if not todo or harness_failure(r):
             continue
-        for p in divs_of(cache, a):
+        for p in idx.get(a, ()):
             try:
                 rec = json.load(open(p))
             except (OSError, ValueError):
@@ -137,13 +158,14 @@ def cmd_merge(cache, camp, keys, commit):
     tags = change_tags()
     os.makedirs(os.path.join(cache, 'div'), exist_ok=True)
     n = 0
+    cidx, midx = divs_index(cache), divs_index(camp)   # each address is handled once: the listings stay true for it
     for a, r in load_rows(camp).items():
         if a not in keys or (a in rows and rows[a].get('key') == keys[a] and rows[a].get('commit') == commit
                              and rows[a].get('changes') == tags):
             continue
-        for p in divs_of(cache, a):
+        for p in cidx.get(a, ()):
             os.remove(p)
-        for p in divs_of(camp, a):
+        for p in midx.get(a, ()):
             shutil.copy(p, os.path.join(cache, 'div', os.path.basename(p)))
         # the scoped changes this verdict saw; shard: where this head published the reproducer
         r = dict(r, key=keys[a], commit=commit, changes=tags, shard=shard_of(cache))
@@ -159,12 +181,13 @@ def cmd_view(cache, targets, keys, out):
         shutil.rmtree(out)
     os.makedirs(os.path.join(out, 'div'))
     keep = {}
+    idx = divs_index(cache)
     for line in open(targets):
         a = json.loads(line)['address']
         r = rows.get(a)
         if r is not None and keys.get(a) is not None and r.get('key') == keys[a]:
             keep[a] = r
-            for p in divs_of(cache, a):
+            for p in idx.get(a, ()):
                 os.symlink(os.path.abspath(p), os.path.join(out, 'div', os.path.basename(p)))
     save_rows(out, keep)
     print('cumulative: %d functions' % len(keep))
@@ -222,12 +245,13 @@ def cmd_seed(cache, targets, others):
     os.makedirs(os.path.join(cache, 'div'), exist_ok=True)
     n = 0
     for o in others:
+        oidx = divs_index(o)
         for a, r in load_rows(o).items():
             # a harness failure is no verdict to reuse (the 32-shard caches held only crash:ModuleNotFoundError
             # rows of 9a0243c: seeding them made every new 26-shard cache start with a backlog of failures)
             if a in want and a not in rows and not harness_failure(r):
                 rows[a] = dict(r, shard=r.get('shard') or shard_of(o))   # it stays published under its source shard
-                for p in divs_of(o, a):
+                for p in oidx.get(a, ()):
                     shutil.copy(p, os.path.join(cache, 'div', os.path.basename(p)))
                 n += 1
     save_rows(cache, rows)

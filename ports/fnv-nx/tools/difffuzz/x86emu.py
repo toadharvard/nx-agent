@@ -15,12 +15,13 @@ import bisect
 import struct
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ,
-                     UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
+                     UC_HOOK_CODE, UC_HOOK_INTR, UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UcError)
 from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, UC_X86_REG_EDX, UC_X86_REG_ECX,
                                UC_X86_REG_EBX, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_GDTR,
                                UC_X86_REG_FS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FPCW,
-                               UC_X86_REG_FPSW)
+                               UC_X86_REG_FPSW, UC_X86_REG_FP0)
 import libcalls
+import retsrc
 import world
 
 PAGE = world.PAGE
@@ -77,6 +78,10 @@ def x87_result_use(uc, retaddr, fret='int', depth=0):
         return x87_result_use(uc, retaddr + skip, fret, depth + 1)
     if b[0] in (0xc3, 0xc2):
         return fret
+    if b[0] == 0xeb or b[0] == 0xe9:       # a jump (the shared epilogue of a `return call()` after the call): follow it
+        rel = int.from_bytes(b[1:2], 'little', signed=True) + 2 if b[0] == 0xeb else \
+            int.from_bytes(b[1:5], 'little', signed=True) + 5
+        return x87_result_use(uc, retaddr + rel, fret, depth + 1)
     b0, m = b[0], b[1]
     if b0 == 0xd9 and m == 0xc0:          # fld st0 (the float epilogue stub): the store after it decides
         nxt = x87_result_use(uc, retaddr + 2, fret, depth + 1)
@@ -86,6 +91,16 @@ def x87_result_use(uc, retaddr, fret='int', depth=0):
         return 'f64' if b0 == 0xdd else 'f32'
     if b0 in (0xd8, 0xdc, 0xde) or (b0 == 0xd9 and (0xc8 <= m <= 0xcf or m in (0xe0, 0xe1))) or \
             (b0 == 0xdd and 0xd8 <= m <= 0xdf):
+        return 'f32'
+    # the rest of the x87 instructions that read ST0 (a callee's float result): integer arithmetic and compares
+    # (fiadd/fimul/ficom/fisub/fidiv m32: DA /r), fist/fistp/fisttp, fcmov and fucompp, fcomi/fucomi(p), fucom(p),
+    # ftst/fxam, and the transcendental / rounding group (f2xm1 .. fcos); the fld constants (D9 E8..EE) and
+    # fdecstp/fincstp do not read it
+    if (b0 == 0xda and (mod != 3 or 0xc0 <= m <= 0xdf or m == 0xe9)) or \
+            (b0 == 0xdb and (mod != 3 and reg in (1, 2, 3) or 0xe8 <= m <= 0xf7)) or \
+            (b0 == 0xdf and (mod != 3 and reg in (1, 2, 3, 7) or 0xe8 <= m <= 0xf7)) or \
+            (b0 == 0xdd and (mod != 3 and reg == 1 or 0xe0 <= m <= 0xef)) or \
+            (b0 == 0xd9 and (m in (0xe4, 0xe5) or 0xf0 <= m <= 0xf5 or 0xf8 <= m <= 0xff)):
         return 'f32'
     return 'int'
 
@@ -109,6 +124,7 @@ class Result:
         self.saved_ok = True     # callee-saved registers preserved
         self.noreturn = None            # the noreturn callee the run ended at (libcalls.NORETURN_X86)
         self.esp_ok = None              # the target returned with esp = entry + 4 + its own ret N
+        self.ret_smashed = False        # the target wrote its own return-address slot (a frame overrun, F1b)
 
 
 class X86Engine:
@@ -177,6 +193,12 @@ class X86Engine:
         for p in range(world.page_of(addr), addr + size, PAGE):
             self._map(p)
 
+    def _bmem(self, uc, r):
+        """Memory for a builtin: faults where this machine's own load or store would (libcalls.Fault)."""
+        return libcalls.Mem(uc, r.writes, self._ensure,
+                            check=lambda p, a: p in self.mapped or world.mappable(a, 'x86') or
+                            libcalls.uc_mapped(uc, a))
+
     def _on_unmapped(self, uc, access, address, size, value, data):
         if not world.mappable(address, 'x86') or not world.mappable(address + size - 1, 'x86'):
             self._fault = 'fault:%s:%08x' % ({20: 'w', 21: 'x'}.get(access, 'r'), address)
@@ -208,7 +230,7 @@ class X86Engine:
         uc.mem_write(STUBS, st)
         uc.mem_write(STUBS + 0x20, b'\xe9' + struct.pack('<i', (world.SENTINEL - (STUBS + 0x20 + 5)) & 0xffffffff))
         self._ensure(world.SENTINEL, 1)
-        uc.reg_write(UC_X86_REG_FPCW, FPCW_MSVC)
+        uc.reg_write(UC_X86_REG_FPCW, world.X87_CW)
         ret_stub = STUBS if conv.x86_ret == 'st0' else STUBS + 0x20
         self._fret = ('f32' if conv.ret.size == 4 else 'f64') if conv.x86_ret == 'st0' else 'int'
         # garbage in every register that is not an argument (identical per seed)
@@ -216,6 +238,7 @@ class X86Engine:
                                  UC_X86_REG_EDI, UC_X86_REG_EBP)):
             uc.reg_write(reg, world.garbage32(case.seed, i))
         self._place_args(conv, case, placement, world.SP0, ret_stub)
+        r.agg_addr = self.agg_addr
         saved = [uc.reg_read(x) for x in (UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP)]
         hb = uc.hook_add(UC_HOOK_BLOCK, self._on_block, user_data=(case, r), begin=world.TEXT[0],
                          end=world.TEXT[1] - 1)
@@ -231,8 +254,31 @@ class X86Engine:
                 lo = int(a, 16) if isinstance(a, str) else a
                 hrd.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_read, user_data=world.BYTE_READS, begin=lo,
                                        end=lo + max(1, len(b)) - 1))
+        if world.BG_READS is not None:
+            for lo, hi in ((world.NULL_END, world.STACK[0]), (world.STACK[1], world.X86_PRIV[0]),
+                           (world.X86_PRIV[1], world.MAX)):
+                hrd.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_bg_read, user_data=world.BG_READS, begin=lo,
+                                       end=hi - 1))
+        hfp = None
+        if world.X87_CLAMP is not None:
+            world.X87_CLAMP.update(n=0, addr=None, over=0, under=0)
+            hfp = uc.hook_add(UC_HOOK_CODE, self._on_fp_clamp, user_data=world.X87_CLAMP, begin=world.TEXT[0],
+                              end=world.TEXT[1] - 1)
+        if world.TRIG_INF:
+            hfp2 = uc.hook_add(UC_HOOK_CODE, self._on_trig_inf, user_data=None, begin=world.TEXT[0],
+                               end=world.TEXT[1] - 1)
+        else:
+            hfp2 = None
         start = start if start is not None else next(iter(self.text_funcs))
         esp0 = uc.reg_read(UC_X86_REG_ESP)
+        self._esp0 = esp0
+        # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
+        hrs = uc.hook_add(UC_HOOK_MEM_WRITE, self._on_ret_slot, user_data=r, begin=esp0, end=esp0 + 3)
+        hcode = []
+        if world.EAX_TRACK is not None:
+            world.EAX_TRACK.clear()
+            hcode.append(uc.hook_add(UC_HOOK_CODE, self._on_eax, user_data=world.EAX_TRACK, begin=world.TEXT[0],
+                                     end=world.TEXT[1] - 1))
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
@@ -241,6 +287,13 @@ class X86Engine:
         finally:
             uc.hook_del(hb)
             uc.hook_del(hb2)
+            uc.hook_del(hrs)
+            for h in hcode:
+                uc.hook_del(h)
+            if hfp is not None:
+                uc.hook_del(hfp)
+            if hfp2 is not None:
+                uc.hook_del(hfp2)
             for h in hwild:
                 uc.hook_del(h)
             for h in hws:
@@ -284,12 +337,112 @@ class X86Engine:
             frame[o:o + len(d)] = d
         esp = (esp - len(frame)) & ~0xf
         esp -= 4
+        # where each by-value aggregate lives (the native passes a hidden pointer to its copy: runner.compare_args)
+        self.agg_addr = {lab: (esp + 4 + off, size) for lab, space, off, size in conv.x86
+                         if space == 'stk' and lab != 'sret' and
+                         next(x for x in conv.vals if x.label == lab).kind not in ('gpr', 'fpr')}
         uc.mem_write(esp + 4, bytes(frame))
         uc.mem_write(esp, struct.pack('<I', ret_stub))
         uc.reg_write(UC_X86_REG_ESP, esp)
 
     def _on_read(self, uc, access, address, size, value, log):
         log.setdefault(address, set()).add(size)
+
+    def _on_fp_clamp(self, uc, address, size, rec):
+        """world.X87_CLAMP: before each instruction, the x87 registers lose what float (or double) arithmetic could
+        not hold: a magnitude of 2**128 (2**1024) or more becomes inf, one below 2**-150 (2**-1075) becomes zero."""
+        hi, lo = (128, -150) if rec['kind'] == 'f32' else (1024, -1075)
+        for i in range(8):
+            mant, se = uc.reg_read(UC_X86_REG_FP0 + i)
+            ex = se & 0x7fff
+            if not mant or ex == 0 or ex == 0x7fff:
+                continue
+            e = ex - 16383
+            if e >= hi:
+                uc.reg_write(UC_X86_REG_FP0 + i, (0x8000000000000000, (se & 0x8000) | 0x7fff))
+                rec['over'] = rec.get('over', 0) + 1
+            elif e < lo:
+                uc.reg_write(UC_X86_REG_FP0 + i, (0, se & 0x8000))
+                rec['under'] = rec.get('under', 0) + 1
+            else:
+                continue
+            rec['n'] += 1
+            if rec['addr'] is None:
+                rec['addr'] = address
+
+    def _on_trig_inf(self, uc, address, size, _):
+        """world.TRIG_INF: fsin / fcos / fsincos / fptan of an infinity is an invalid operation: with the exception
+        masked the x87 returns the real indefinite (a QNaN with the sign bit set). QEMU leaves the infinity in st0 and
+        sets C2 (as for an operand beyond 2**63): the probe makes st0 the indefinite before the instruction."""
+        if size != 2:
+            return
+        b = bytes(uc.mem_read(address, 2))
+        if b[0] != 0xd9 or b[1] not in (0xfb, 0xfe, 0xff, 0xf2):
+            return
+        top = (uc.reg_read(UC_X86_REG_FPSW) >> 11) & 7
+        mant, se = uc.reg_read(UC_X86_REG_FP0 + top)
+        if se & 0x7fff == 0x7fff and mant == 0x8000000000000000:
+            uc.reg_write(UC_X86_REG_FP0 + top, (0xc000000000000000, 0xffff))
+
+    def _on_bg_read(self, uc, access, address, size, value, log):
+        e = log.setdefault(address, [set(), None])
+        e[0].add(size)
+        if size == 1 and e[1] is None:
+            try:
+                e[1] = bytes(uc.mem_read(address, 1))[0]
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _on_ret_slot(self, uc, access, address, size, value, r):
+        r.ret_smashed = True
+
+    _CSD = None
+
+    def _on_eax(self, uc, address, size, trk):
+        """world.EAX_TRACK: how the last instruction that wrote eax wrote it (trk['last'] = 'full', or the width in
+        bytes of an al / ax write, with the address): a function that returns in al leaves the rest of eax as it
+        was. A call counts as a full write (the callee's result)."""
+        if X86Engine._CSD is None:
+            import capstone
+            X86Engine._CSD = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+            X86Engine._CSD.detail = True
+        try:
+            ins = next(X86Engine._CSD.disasm(bytes(uc.mem_read(address, size)), address), None)
+            if ins is None:
+                return
+            if ins.mnemonic == 'call':
+                trk['last'] = 'full'
+                return
+            names = {ins.reg_name(x) for x in ins.regs_access()[1]}
+        except Exception:  # noqa: BLE001
+            return
+        if 'eax' in names:
+            trk['last'] = 'full'
+        elif 'ax' in names:
+            trk['last'] = 2
+        elif 'al' in names:
+            trk['last'] = 1
+
+    def _zero_unwritten(self, uc, r, ptrs):
+        """STUB_OUT (R4 flow, the oracle's side of arm64emu._zero_unwritten): for each argument that points into the
+        stack, the words of the next 0x40 bytes that the oracle code has not stored to (and that are not the
+        return-address slot) become 0, as the real callee would have filled them. MSVC reuses a dead parameter slot
+        as the out-parameter temporary where GCC takes a fresh local (0x00a57670: `lea ecx, [esp+0xc]` is the
+        slot of the parameter it already consumed)."""
+        esp0 = getattr(self, '_esp0', None)
+        for v in ptrs:
+            v &= 0xffffffff
+            if not (world.STACK[0] <= v < world.STACK[1]):
+                continue
+            for a in range(v & ~3, min(v + 0x40, world.STACK[1]) & ~3, 4):
+                if esp0 is not None and a == esp0:
+                    continue
+                if any((a + i) in r.writes for i in range(4)):
+                    continue
+                try:
+                    uc.mem_write(a, bytes(4))
+                except UcError:
+                    break
 
     def _on_write(self, uc, access, address, size, value, r):
         for i in range(size):
@@ -304,8 +457,11 @@ class X86Engine:
         retaddr = world.u32(uc.mem_read(esp, 4))
         words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(16)]
         bname = libcalls.X86.get(address)
-        if bname is not None and self._builtin(uc, bname, esp, retaddr, words, r):
-            return
+        try:
+            if bname is not None and self._builtin(uc, bname, esp, retaddr, words, r):
+                return
+        except libcalls.Fault as e:              # the real CRT function faults there too (libcalls.Mem.check)
+            self._fault = e.args[0]; uc.emu_stop(); return
         code = self.follow(address) if self.follow and address not in libcalls.NORETURN_X86 else None
         if code:
             # the native object never calls this address (GCC inlined it, typically a header inline function MSVC
@@ -326,23 +482,47 @@ class X86Engine:
         r.calls.append(Call(address, [uc.reg_read(UC_X86_REG_ECX), uc.reg_read(UC_X86_REG_EDX)] + words, retaddr,
                             {n: uc.reg_read(REGS[n]) for n in ('eax', 'ebx', 'esi', 'edi')}))
         r.calls[-1].pushed = self._pushed(uc, retaddr, address)
+        if world.STUB_OUT:
+            self._zero_unwritten(uc, r, r.calls[-1].args)
         if address in libcalls.NORETURN_X86:
             r.noreturn = libcalls.NORETURN_X86[address]   # the call never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
             return
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
-        pop, kind = info if info else (self.pop_override.get(retaddr, 0), x87_result_use(uc, retaddr, self._fret))
+        if info:
+            pop, kind = info
+        else:
+            pop = self.pop_override.get(retaddr)
+            if pop is None:              # (flow2) not learned: what the exe's function there pops (CRT cdecl: 0)
+                f = getattr(self.callee_info, 'exe_pop', None)
+                pop = (f(address) if f else None) or 0
+            kind = x87_result_use(uc, retaddr, self._fret)
         if not info:
             r.calls[-1].pop_unknown = True
+            if world.X87_FLIP_WIDTH and kind in ('f32', 'f64'):
+                kind = 'f64' if kind == 'f32' else 'f32'
         eax = world.u32(rb, 0)
         cv = self._callee_conv(address)
         ccv = self._callee_conv(address, caller=True)
+        if kind == 'int' and ccv is not None and ccv.x86_ret == 'st0' and ccv.ret is not None and \
+                (cv is None or cv.x86_ret != 'st0'):
+            # the calling unit declares a float result the callee's definition does not (a void decl in the tree):
+            # the caller's code reads ST0 and the native reads v0 (the same canned bytes), so the oracle gets ST0
+            kind = 'f32' if ccv.ret.size == 4 else 'f64'
         ck = world.canned_kind((cv, ccv))
         if address in world.ALLOCATORS:
             eax = world.alloc_result(k)
         elif world.returns_this((cv, ccv)):
             eax = r.calls[-1].args[0]                  # this (ecx), as the native gets x0 (difffuzz-19)
+        elif retsrc.returned_input(cv, address) is not None:
+            lab = retsrc.returned_input(cv, address)   # the exe's callee returns an input (difffuzz-20, canned-this)
+            if lab == 'this':
+                eax = r.calls[-1].args[0]
+            else:
+                n = next(off for l_, sp, off, sz in getattr(cv, 'x86_declared', cv.x86) if l_ == lab) // 4
+                if 2 + n < len(r.calls[-1].args):
+                    eax = r.calls[-1].args[2 + n]
         elif ck == 'ref':
             eax = world.ref_result(k)
         elif ck in ('bool', 'untyped'):
@@ -425,16 +605,25 @@ class X86Engine:
         ret = world.u32(uc.mem_read(esp, 4))
         words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(16)]
         if name in libcalls.IMPORT_BUILTINS:
-            v = libcalls.run_import(name, libcalls.Mem(uc, r.writes, self._ensure), words)
+            try:
+                v = libcalls.run_import(name, self._bmem(uc, r), words)
+            except libcalls.Fault as e:
+                self._fault = e.args[0]; uc.emu_stop(); return
         else:
             k = len(r.calls)
             r.calls.append(Call(libcalls.import_id(name), [uc.reg_read(UC_X86_REG_ECX),
                                                            uc.reg_read(UC_X86_REG_EDX)] + words, ret))
+            if world.STUB_OUT:
+                self._zero_unwritten(uc, r, r.calls[-1].args)
             if name in libcalls.NORETURN_IMPORTS:
                 r.noreturn = name
                 uc.emu_stop()
                 return
             v = world.u32(case.ret_bytes(k), 0)
+            # (R4 flow) an import has no declaration here, so the native's canned result is the untyped one (arm64emu
+            # _on_stub: the low byte is 0/1, a call site may test it as a bool). The same byte here: 0x00d45c50 read
+            # TlsGetValue's 0x030020f4 on the oracle and 0x03002000 natively, and stored through two stream pointers
+            v = (v & ~0xff) | (case.ret_bytes(k)[0] & 1)
             uc.reg_write(UC_X86_REG_EDX, world.u32(case.ret_bytes(k), 4))
             uc.reg_write(UC_X86_REG_ECX, world.garbage32(case.seed, 100 + k))
         uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff)
@@ -473,6 +662,8 @@ class X86Engine:
         if name in ('allshl', 'allshr'):         # edx:eax << / >> cl (MSVC: counts >= 64 give 0 / the sign)
             v = uc.reg_read(UC_X86_REG_EAX) | uc.reg_read(UC_X86_REG_EDX) << 32
             c = uc.reg_read(UC_X86_REG_ECX) & 0xff
+            if world.SHIFT_MASK:
+                c &= 63                     # probe: the AArch64 count (classify.hint, shift-count)
             if name == 'allshl':
                 v = 0 if c >= 64 else (v << (c & 31 if c < 32 else c)) & (2 ** 64 - 1)
             else:
@@ -481,7 +672,7 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff); uc.reg_write(UC_X86_REG_EDX, v >> 32)
             uc.reg_write(UC_X86_REG_ESP, esp + 4); uc.reg_write(UC_X86_REG_EIP, ret); return True
         try:
-            v = libcalls.run(name, libcalls.Mem(uc, r.writes, self._ensure), words)
+            v = libcalls.run(name, self._bmem(uc, r), words)
         except KeyError:
             return False
         except libcalls.TooLong:

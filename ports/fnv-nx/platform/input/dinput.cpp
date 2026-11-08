@@ -22,7 +22,14 @@
 
 namespace {
 
-bool guid_eq(const GUID &a, const GUID &b) { return !memcmp(&a, &b, sizeof(GUID)); }
+/* both sides through fnvnx_image_const: the game's DIOBJECTDATAFORMAT tables (c_dfDIKeyboard, c_dfDIMouse in its
+ * .data) point at GUIDs MSVC placed in the exe's .text, which the port does not map (a stub boot faulted here) */
+bool guid_eq(const GUID &a, const GUID &b)
+{
+    GUID ta, tb;
+    const void *pa = fnvnx_image_const(&a, sizeof(GUID), &ta), *pb = fnvnx_image_const(&b, sizeof(GUID), &tb);
+    return !memcmp(pa, pb, sizeof(GUID));
+}
 const GUID IID_IUnknown_ = {0x00000000, 0x0000, 0x0000, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
 const GUID GUID_Product_Kbd = {0x6f1d2b61, 0xd5a0, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
 const GUID GUID_Product_Mouse = {0x6f1d2b60, 0xd5a0, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
@@ -336,18 +343,27 @@ Device::Device(Kind k) : kind(k)
 HRESULT Device::SetDataFormat(LPCDIDATAFORMAT f)
 {
     if (!f) return DIERR_INVALIDPARAM;
+    DIDATAFORMAT f_copy;   /* the header too, if the exe keeps it where the port does not map */
+    f = (LPCDIDATAFORMAT)fnvnx_image_const(f, (uint32_t)sizeof f_copy, &f_copy);
     if (acquired) return DIERR_ACQUIRED;
     if (DW(f->dwSize) != sizeof(DIDATAFORMAT) || DW(f->dwObjSize) != sizeof(DIOBJECTDATAFORMAT)) return DIERR_INVALIDPARAM;
     uint32_t n = DW(f->dwNumObjs), size = DW(f->dwDataSize);
     if (size & 3) return DIERR_INVALIDPARAM;
     Map *m = n ? (Map *)calloc(n, sizeof *m) : nullptr;
     if (n && !m) return DIERR_OUTOFMEMORY;
+    /* the object table itself may lie in the exe's unmapped .text, like the GUIDs it points at (c_dfDIKeyboard /
+     * c_dfDIMouse2: a stub boot of 97deacd38aec still faulted reading rgodf[i].dwType): a copy through
+     * fnvnx_image_const, kept until the loop is done */
+    DIOBJECTDATAFORMAT *od_copy = n ? (DIOBJECTDATAFORMAT *)malloc((size_t)n * sizeof(DIOBJECTDATAFORMAT)) : nullptr;
+    if (n && !od_copy) { free(m); return DIERR_OUTOFMEMORY; }
+    const DIOBJECTDATAFORMAT *od = n ? (const DIOBJECTDATAFORMAT *)fnvnx_image_const(
+                                           f->rgodf, n * (uint32_t)sizeof(DIOBJECTDATAFORMAT), od_copy) : nullptr;
     int o2m[KEYS];
     bool used[KEYS];
     for (int i = 0; i < KEYS; i++) { o2m[i] = -1; used[i] = false; }
     uint32_t nm = 0;
     for (uint32_t i = 0; i < n; i++) {
-        const DIOBJECTDATAFORMAT &e = f->rgodf[i];
+        const DIOBJECTDATAFORMAT &e = od[i];
         uint32_t t = DW(e.dwType), inst = (t >> 8) & 0xFFFF, ofs = DW(e.dwOfs);
         bool want_axis = (t & DIDFT_AXIS) != 0, want_button = (t & DIDFT_BUTTON) != 0;
         int found = -1;
@@ -364,16 +380,18 @@ HRESULT Device::SetDataFormat(LPCDIDATAFORMAT f)
         if (found < 0) {
             if (t & DIDFT_OPTIONAL) continue;
             free(m);
+            free(od_copy);
             return DIERR_INVALIDPARAM;
         }
         uint32_t width = (objs[found].type & DIDFT_AXIS) ? 4 : 1;
-        if (ofs + width > size) { free(m); return DIERR_INVALIDPARAM; }
+        if (ofs + width > size) { free(m); free(od_copy); return DIERR_INVALIDPARAM; }
         used[found] = true;
         o2m[found] = (int)nm;
         m[nm].ofs = ofs;
         m[nm].obj = found;
         nm++;
     }
+    free(od_copy);
     os_lock(&g_lock);
     free(map);
     map = m;

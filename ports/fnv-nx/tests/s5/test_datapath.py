@@ -73,6 +73,19 @@ class DataPathTest(unittest.TestCase):
         self.assertEqual(dp.resolve("sdmc:/switch/fnv/FalloutNV.exe"), want)
         self.assertEqual(dp.resolve("sdmc:/fnvnx/game/FalloutNV.exe"), want)
 
+    def test_no_game_mount_profile_dirs(self):
+        # the farm boots (--file only): the card has switch/fnv as on the device, so the profile's mkdirs succeed;
+        # a second DataPath on the same card (emu_guest makes two) still finds the exe under fnvnx/game
+        card = os.path.join(self.tmp, "farmcard"); os.makedirs(card)
+        dp = datapath.DataPath(card)
+        self.assertTrue(os.path.isdir(os.path.join(card, "switch", "fnv")))
+        user = dp.resolve("sdmc:/switch/fnv/user")
+        self.assertEqual(user, os.path.join(card, "switch", "fnv", "user"))
+        os.mkdir(user)   # the parent exists: no ENOENT
+        put(dp.resolve("sdmc:/switch/fnv/FalloutNV.exe"), b"MZ")
+        again = datapath.DataPath(card)
+        self.assertEqual(again.resolve("sdmc:/switch/fnv/FalloutNV.exe"), os.path.join(card, "fnvnx", "game", "FalloutNV.exe"))
+
     def test_install_on_the_card(self):
         put(os.path.join(self.root, "switch", "fnv", "Data", "FalloutNV.esm"), b"TES4")   # no --game
         dp = datapath.DataPath(self.root)

@@ -268,6 +268,16 @@ bridge of its argument moves, unless something else is wrong on x86 too (`this-n
 `cast-conflict`, `result-pointer-not-passed`); with nothing to move it is bound directly and listed. V1 counts
 1,517 pairs / 2,196 references on f13.
 
+Two prepare POST hooks fix the declarations behind the commonest real bugs of these classes (tools/rules/s2_bodies.py,
+EQ's fuzz rows at link/0540aff0d154): **POP2** moves the words a getter's reference pushes too many to the call on
+its result whose reference pushes them too few (`buffer->GetChangeFlags(2)` read as a bool ->
+`buffer->GetChangeFlags().FUN_004280f0(2)`; `R(D(a, x))` -> `R(D(a), x)`), decided from the words of the
+references and definitions in build/units.json; **THIS2** turns a free `__stdcall` caller that hands its own ecx to
+a thiscall callee (the exe's code, listed in `THIS2_SITES`) into a member of a shell, or a member caller's call into
+`((Shell*)this)->f(..)`. Both add the new decorated reference names to the unit's `symbols`, so the pairs are
+compared again and bridged where the decomp's parameter types differ. What they leave is counted in
+prepare_stats.tsv (`POP2-SKIP-*`, `THIS2-SKIP-*`) and listed in `<tree>/build/pop2_skipped.tsv`.
+
 Classes in the report: `edx-dummy`, `reg-shift` (same register file, other index), `int-float-param`
 (x86 tolerated an int/float swap in a 4-byte slot), `ret-regfile`, `sret-explicit` (one side returns an aggregate,
 the other passes the buffer pointer explicitly), `aggregate-param` / `ret-aggregate` (aggregates of different
@@ -455,6 +465,42 @@ temporaries (x86 saw a bitwise copy too); ownership stays with the caller. `test
 register-result conversion, pointer vs non-trivial holder, fastcall edx dummy with stack arguments) under
 qemu-aarch64 against C++ definitions, with layouts from the real probe.
 
+**abi-manual pairs (D24 option a).** A `manual` pair with an aggregate or result-pointer class (sret-explicit,
+ret-aggregate, aggregate-param) that abi2 cannot plan stays unbound (trap stub, cause `abi-manual`, the reason in the
+abi.tsv notes as `abi2: ...` and in the stats as `abi_manual_why:*`). What used to keep pairs there, and now binds:
+* layouts the probe could not name: a C name's declaration read from source loses its namespace
+  (`CopyFromSource(FUN_00cc83b0_Class *, RefBlockArgument)` inside `namespace fnv_00cc83b0`). The probe takes the one
+  namespace GCC names ("did you mean `ns::T`"; several candidates get "suggested alternatives" and stay unknown) for
+  the type, its first component (`PacketMask::Bits`) or a template and its arguments (`Ref<SolverInfo>`), and spells
+  a class that a function of the same name hides as `struct ::T` (`FUN_0040c0e0`). Unnameable rows carry the rule
+  `pod2+ns`; older ones are probed again. `abi2.lookup` also takes a unit's unique (or identical) `ns::T` row for a
+  bare `T`.
+* untagged named parameter types (`?:WPARAM`, a typedef the C-name reader did not expand, or a nested enum): measured
+  by the probe like aggregates, parameters only and from 4 bytes (a narrower scalar was widened by the x86 caller,
+  AArch64 leaves the upper bits unspecified), never in a fastcall register (an enum goes in ecx/edx, a struct on the
+  stack). An untagged result stays manual: whether MSVC returns it through a buffer depends on its being a class.
+* function pointers spelled with a parameter name and no blank (`bool(__cdecl* handler)(char *)`): `P` (abi.py).
+* a variadic side: compared on its named part. When that is `same`, the pair is `same` (the anonymous arguments are
+  where the named ones would be); one that needs a bridge stays manual (the bridge would move the anonymous
+  arguments it does not know).
+* a void reference against a definition that returns an aggregate through MSVC's hidden buffer: two readings. The
+  reference passes the buffer itself (`void f(unsigned char *out, ...)`, sret-explicit) when every definition byte
+  comes from the reference that way; otherwise, when it is clean, the declaration lost the result and the arguments
+  are matched without the buffer (`result-discarded`: R2's `void P133List::InsertAt(OutIter, P133Camera *const &)`
+  against 0x00b156b0; read with the buffer the callee writes through the iterator's first word, and c4fbea9's
+  pop-mismatch rule bridged it that way). A memory result (x8) gets a scratch buffer in the bridge's frame (no tail
+  call), a register result is not read.
+
+`test_bridges.py` runs these under qemu-aarch64 too (free function's hidden result against a static member's out
+pointer, 16-byte ints result against an HFA, an 8-byte struct against two ints, a typedef'd struct against four ints,
+void references against a hidden memory result, member and free, and against an explicit out pointer) and checks the
+probe's respelling; `test_abimanual.py` the reasons, `abi2.lookup` and the function-pointer spellings. Offline, on
+link 9f865b0a's inputs with the branch's sigs (abi.tsv's manual pairs and the newly paired ones, the missing layouts
+probed on a prepared tree), abi-manual pairs went 16 -> 2 (aggregate-param 12 -> 1, ret-aggregate 4 -> 1,
+sret-explicit 1 -> 0). Left: `std::_Vector_const_iterator<El, std::allocator<El>>` (0x00abfa90), a MSVC STL type the
+definition's unit does not declare under libstdc++, and `NavMeshPtr` (0x00464fc0 called through a cast), an
+untagged result.
+
 ## Vtables (`vtables.py`, kind `V`, D7)
 
 Objects only ever hold Itanium vptrs (DATAIMAGE.md D7); an image vftable address stands for the Itanium address
@@ -488,9 +534,34 @@ classes alike, C need not be constructible). The typeinfo is built from `std::tr
 `__direct_bases`): per base its `type_info` symbol (`typeid`), offset (the folded constant `(B *)(C *)4096`, minus
 4096) and public-ness (`std::is_convertible<C *, B *>`); repeated bases in `std::tr2::bases<C>` set
 `__non_diamond_repeat_mask`; GCC's choice of `__class` / `__si` (one public non-virtual base at offset 0) / `__vmi`.
-A base typeinfo no object defines is probed in the next round. Classes with virtual bases (no constant offset; VTT,
-construction vtables, virtual thunks) and anonymous-namespace classes are not synthesized. Errors in the probe drop
-only the items GCC names (or the class), and the class moves to its next host.
+A base typeinfo no object defines is probed in the next round. Anonymous-namespace classes are not synthesized.
+Errors in the probe drop only the items GCC names (or the class), and the class moves to its next host.
+
+Retries on one host (link 9f865b0a: 78 trap stubs of D23's `special-unresolved:typeinfo-for` / `vtable-for` /
+`VTT-for`, all with a 4 KiB zero block standing in):
+* *Units that do not compile after the probe's standard headers* (their own `std::exception` / `std::bad_alloc`,
+  or a `using namespace std` swap that `<type_traits>` makes ambiguous: blk_00640000_od, blk_00ac0000_od_ob1_variant,
+  blk_00b00000_od_ob1_variant, blk_00e00000_o2, frondengine_ob1_variant): probed again with `HEAD_BARE`, the same
+  helpers from GCC's builtins (`__direct_bases`, `__bases`, `__is_convertible`) and a declared `std::type_info`,
+  no header. The emitted slot functions of such a host use it too.
+* *A class hidden by a function of the same name* (`void FUN_00405310(); struct FUN_00405310 {...};`, the decomp's
+  constructor/destructor shells): probed again by its elaborated name `struct ::C`, through a typedef.
+* *A class whose scope has only a placement `operator delete`* (V<k>'s implicit deleting destructor finds no usual
+  one): V<k> declares its own; only V<k>'s D0, which is renamed to C's, would call it.
+* *Classes the derived class cannot stand for* - virtual bases (the VTT and construction vtables of V<k> are not
+  C's) or a direct base repeated in the hierarchy (the cast that gives its offset is ambiguous): the key function
+  is defined in a probe of the host, `::C::~C() {}` and, for the virtual functions C declares, `auto ::C::f(T)
+  const -> decltype(((const ::C *)0)->f(dv<T>())) {}`, so GCC emits C's own vtable group, `_ZTT`, `_ZTC` (hidden)
+  and `_ZTI` (`key_group`). A class with only inline virtuals (no key function) gets its complete destructor
+  called by qualified name and its `typeid` taken there, so the same data comes out as COMDAT copies. Only the data
+  is taken; the functions keep their real names (bound like any slot). A base probed only because another class's
+  typeinfo or construction vtable names it gets only its typeinfo. Virtual thunks no object defines
+  (`_ZTv<fixed>_<vcall>_f`) are generated: `this += fixed`, `this += *(vptr + vcall)`, tail call. A class whose key
+  function its unit defines keeps its reason.
+* *What the emitted slot functions name* (`close_emitted`): their code can catch or throw a class whose key
+  function is defined nowhere, or keep a COMDAT typeinfo or vtable that names a base's typeinfo or a virtual thunk.
+  Such a typeinfo is probed on the same host (typeinfo only, the C++ runtime's `std::` classes excepted), thunks
+  are generated, and both are linked into the host's object, round after round for the bases they name.
 
 Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the compiled objects): weak `_ZTV`, `_ZTI`,
 `_ZTS` for names no compiled object defines, and the non-virtual thunks (`_ZTh[n]<k>_f`: `sub`/`add w0`, tail call
@@ -655,6 +726,22 @@ class) that no unit pairs: the exe's constructor at `<ctor>` (a native `??0` def
 capstone). A free vftable gets the shell in the map; one with a vtable already takes it as a displaced vtable, so
 the slot fill and the extended copies (below) reach it either way. `ctor_vftables.tsv`: each candidate and outcome.
 On link 9f865b0a's inputs: 390 pairs (7 new V rows, 383 displaced), 319 of them shorter than the exe's vftable.
+After `exe_pair`, `member_store_pairs` (link class 4, s5-003 round 2) does the same for the vptrs a constructor
+stores at a displacement: its members' (the renderer's RendererMap<N> at +0x610.., one-slot placeholders called at
+slot 1) and its secondary bases'. The exe constructor's last `mov dword ptr [reg+d], imm32` of an RTTI vftable per
+offset d (0 < d < 0x100000, not through esp / ebp, before the first `ret`: `exevft.ctor_member_vftables`) is paired
+with the native vtable its compiled `??0` stores at the same offset (`membervt.vptr_stores`: capstone over the
+AArch64 code, `this` through copies and `this + c`, GOT and ADRP/ADD vtable addresses, the last store per offset,
+or the class of the constructor called with `this + d`; a call clobbers x0..x18). The decomp's layouts are the
+exe's (D11), so offsets compare as they are. A primary vtable takes a free vftable in the map or joins it as a
+displaced vtable (extended by `exe_vtable_copies`); a secondary one stands for it in the slot fill only. Named
+exclusions (`membervt.RULES`), never anonymous skips: `shader-factory-global-constant-map`, NiShaderFactory's (and
+so NiD3DShaderFactory's) `NiTFixedStringMap<NiGlobalConstantEntry*>` at +0x8, whose extension makes WinMain's INI
+load (0x005e0200) loop in GetPrivateProfileIntA (S5). `member_vftables.tsv`: per (constructor, offset) the exe
+classes, base or member, the native vtable, both slot counts and the outcome. On link 9f865b0a's inputs: 651
+offsets in 245 constructors (83 members, 568 secondary bases); 388 already paired (252 by the map, 136 hand-stored
+image vftables), 206 new (19 displaced primaries, 187 secondaries for the slot fill), 1 excluded; 14 member vtables
+shorter than the exe's (the 6 RendererMaps: 1 slot for 7).
 
 **Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's
@@ -670,6 +757,11 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   (`D1Ev`/`D0Ev`, their address-bound forms) or, in an abstract class, as two adjacent zero words.
 * One undefined symbol is renamed once per object: every vtable of the object naming it must agree on the address,
   else the declaring class's vtable decides, else it stays a trap.
+* The synthesized vtable objects (`<unit>#vtables`, vtables.py) are objects of the loop like any compiled one, with
+  the same evidence (the exe vftable the vtable is paired with, the exe word at the slot). refs.tsv names them by
+  their own source, so the rewrite of the bound rows (`rewrite_refs`) matches that name, never the host unit's. A
+  symbol whose uses are bound only per slot (the vtables disagree on the address) keeps its refs.tsv row: the
+  words are in the extended copy (slot_fill.tsv `per slot`), and the row has one target column.
 * ABI (`slot_abi`): every argument the slot's declaration passes and the definition reads must arrive where the
   definition reads it, in the same register file (abi.a64_locations; a free definition takes the object as its
   first pointer parameter, a free definition without parameters reads nothing). A definition that reads more
@@ -715,7 +807,20 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
 **Metric** (`vtmetric.py <link dir> <exe>`, read-only on a published link or a build's link stage): over the V rows,
 trap slots split by whether the address map has a native at the exe slot's address, primary vftables whose native
 vtable is shorter than the exe's (the destructor pair counted once), and mispairings (the native class is another
-RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
+RTTI class of the exe). S2d-vslot adds `slot-mismatch` (native slot k + 1 against exe slot k by address through the
+map, exe slots 0 and 1 and unplaced slots not compared; `--rows` lists them) and `unpaired-<primary|secondary>-<why>`
+(exe vftables with RTTI that no V row stands for, by the class's row in vtables/classes.tsv). A vtable-slot name that
+resolve bound only through another unit's reference to the same name (gref / gdef tier: units.json puts the call of
+a *different* function there, TESForm::IsQuestItem at 0x0046f070 where the exe's TESForm slot 37 is 0x00401190) is a
+hint: when no code of the object calls the name, exe_slot_fill replaces the address with the exe vftable's function
+at the slot (`hint_rebound`; slot_fill.tsv row `exe vftable over the name's address`) and keeps it where the exe has
+none or the function cannot be bound (`hint_kept_*`). W20 extends this to names the unit's own recipe binds (tier
+`unit/*`), by what the object's code does with the name: never called (class b, 24 of 208 holder x symbol items on link
+0540aff0d154, all of them the unit's own definitions nothing calls) is a hint like the above; called directly (class a,
+183 items: `Base::f()` from an override, whose exe call site reaches the bound address in the pristine object) keeps the
+symbol at its address for the call and gives each vtable slot that names it, where the exe vftables of that use agree,
+the exe's function as a per-slot override (`chint_slot_over`; slot_fill.tsv row `per slot (exe vftable; the name stays
+at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus-one rule),
 `test_slotfill.py` (end to end: resolve, apply, trial link, vtmetric).
 
 ## Platform, imports, thread-locals and hand-written vptrs
@@ -878,6 +983,32 @@ RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cac
     needs S1 to give the shell a polymorphic class, or the image's RTTI, which needs the exe.
   * 99 stores have no usable storing address: the function stores several vtables at one offset (a base's, then
     its own), or it has no `@fnv` annotation.
+
+  **D26 (c): a minus-one copy for every image vftable left at its image address** (`minus_one_copies`, on
+  wip/d26). An address that stays `__fnv_<V> = 0x<V>` while it is stored by hand (`hand_vptr_stores`) or is an
+  RTTI vftable referenced as data gets a strong copy `__fnvnx_vmo_<V>` in `bridges.S`, and `aliases.ld` binds
+  `__fnv_<V>` to the copy's address point (+8). The copy is in D22's minus-one order:
+  * offset-to-top (from the exe's COL, else the store's offset), then typeinfo 0;
+  * D1/D0 at slots 0/1 for exe slot 0 when it is the deleting destructor. The address map's G pair is used as it
+    is. A decomp `(this, flags)` definition gets flags stubs 0/1; it qualifies by its declaration, its `??_G` name,
+    or the exe's code shape (`exevft.deleting_dtor`: `ret 4` after a test of bit 0, which finds 121 of the 132
+    G rows). When exe slot 0 is not a destructor, slot 0 is a trap and exe slot 0 goes to slot 1;
+  * exe slot k at slot k + 1 (`exe_slot_target`, the same choice as the extended copies).
+  Every copy also gets an address-map `V` row (`vmo_vrows`: the copy's symbol, address point 8, object
+  `zz_bridges.o`, note "minus-one copy of the exe vftable"), so EQ's vtable pairing and `vtmetric` see the vftables of
+  classes the decomp declares without virtual members (vtmetric's `no-polymorphic-view`: 164 primary + 7 secondary on
+  link 0540aff0, 163 of them referenced as data) and none keeps `__fnv_<V> = 0x<V>` while a unit stores it.
+  W19 (option A): the candidates are every RTTI exe vftable no V row stands for, referenced as data or not
+  (`vmo_candidates`; `FNVNX_D26C_ALL=0` restores the referenced-only selection), offset-to-top from the COL. On a
+  secondary vftable a slot that is an MSVC adjustor thunk (`sub ecx, n; jmp f`, through at most two more thunks) gets
+  a stub (`__fnvnx_vadj_<a>`, destructor slot 0: `__fnvnx_vadjd_<a>_0|1` into f's D1/D0 or flags stubs) only when
+  the summed n is exactly the COL offset and f has a native definition (`vmo_adjustor`); any other adjusting thunk
+  stays a visible trap. On link 0540aff0's inputs (simulated from addrmap.tsv and the exe's RTTI): 746 copies, all
+  with exe slots, 47 beyond the referenced-only 699.
+  `out/vmo.tsv` lists the copies. `FNVNX_D26C=0` turns the pass off, so a boot can be compared with and without
+  it. On link 9f865b0a's inputs (offline) it makes 831 copies: 615 hand-stored + 239 RTTI-referenced candidates,
+  minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
+  slots.
 
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
