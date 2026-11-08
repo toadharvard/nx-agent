@@ -176,11 +176,15 @@ def run_cand(cap, a, out, extra, prune=None):
             time.sleep(0.1)
     th = threading.Thread(target=pruner, daemon=True) if prune is not None else None
     if th: th.start()
+    run_cand.last_err = ''
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=a.timeout)
         rc = r.returncode
+        if rc not in (0, 3):   # nx_render's own error line ("nx_render: ..."), kept for the scene's class
+            run_cand.last_err = ((r.stderr or '').strip().splitlines() or [''])[-1][:200]
     except subprocess.TimeoutExpired:
         rc = -1
+        run_cand.last_err = f'timeout ({a.timeout} s)'
     if th:
         stop.set(); th.join()
         for f in os.listdir(out):
@@ -372,7 +376,15 @@ def main():
         p = {'rc': rc, 'skipped': int(m.group(1)) if m else None, 'summary': summ, 'draws_by_path': dict(by_path),
              'frames': fv, 'frames_over': sum(1 for x in fv if not x['pass'])}
         fF = fv[F] if F < len(fv) else None
-        if fF and not fF['pass'] and not a.no_bisect and drawsF:
+        cand_err = getattr(run_cand, 'last_err', '')
+        if rc not in (0, 3) and not any('error' not in x for x in fv):
+            # the candidate rendered no frame at all: no draw to bisect; the class is the failure itself (formerly
+            # counted as 'unknown' by sweep_report), its error line the reason
+            p['first_divergence'] = {'frame': F, 'draw': 0, 'class': 'candidate_error', 'why': cand_err or f'exit {rc}',
+                                     'vs': None, 'ps': None, 'vs_names': [], 'ps_names': [], 'family': 'none',
+                                     'metrics': {}}
+            p['draws_pass_frame'] = 0
+        elif fF and not fF['pass'] and not a.no_bisect and drawsF:
             fd = first_divergence(cap, a, os.path.join(work, 'bis_' + pname), F, len(drawsF), extra)
             if fd:
                 k, mm = fd
