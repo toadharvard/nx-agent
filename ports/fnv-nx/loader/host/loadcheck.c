@@ -290,6 +290,12 @@ int main(int argc, char **argv) {
         return 4;
     }
     printf("verdict=%s\n", code_ok == 1 ? "code-and-data-checked" : data_ok == 1 ? "data-checked" : "unchecked");
+    {
+        uint32_t tva = 0, told = 0, tnow = 0;
+        r = fnvnx_image_tls_index_reset(&img, &tva, &told);
+        if (tva && r == FNVNX_OK) memcpy(&tnow, (const void *)((uintptr_t)tva + img.bias), 4);
+        printf("tls_index=0x%08x old=0x%08x now=0x%08x rc=%d\n", tva, told, tnow, r);
+    }
     if ((r = fnvnx_image_load_relocs(&img, &os))) { fprintf(stderr, "relocs: %s\n", fnvnx_strerror(r)); return 5; }
     stat_set("relocs", img.nrelocs);
     {
