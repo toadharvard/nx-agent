@@ -293,6 +293,10 @@ static int neg_errno(void)
     }
 }
 
+/* newlib's off_t is as wide as the build's long (32 bits on ILP32): refuse an offset it would wrap rather than seek
+ * to the wrong place (BSAs stay below 2 GB; a larger position is an error, not a modulo) */
+static int off_fits(uint64_t off) { return (uint64_t)(off_t)off == off && (off_t)off >= 0; }
+
 int os_file_open(const char *path, int flags)
 {
     int o;
@@ -315,6 +319,8 @@ static os_lock_t g_pio_lock;
 
 int64_t os_file_pread(int fd, void *b, size_t n, uint64_t off)
 {
+    if (!off_fits(off))
+        return -OS_EINVAL;
     os_lock(&g_pio_lock);
     off_t cur = lseek(fd, 0, SEEK_CUR);
     ssize_t r = lseek(fd, (off_t)off, SEEK_SET) < 0 ? -1 : read(fd, b, n);
@@ -326,6 +332,8 @@ int64_t os_file_pread(int fd, void *b, size_t n, uint64_t off)
 
 int64_t os_file_pwrite(int fd, const void *b, size_t n, uint64_t off)
 {
+    if (!off_fits(off))
+        return -OS_EINVAL;
     os_lock(&g_pio_lock);
     off_t cur = lseek(fd, 0, SEEK_CUR);
     ssize_t r = lseek(fd, (off_t)off, SEEK_SET) < 0 ? -1 : write(fd, b, n);
@@ -338,11 +346,16 @@ int64_t os_file_pwrite(int fd, const void *b, size_t n, uint64_t off)
 int64_t os_file_seek(int fd, int64_t off, int whence)
 {
     int w = whence == OS_SEEK_CUR ? SEEK_CUR : whence == OS_SEEK_END ? SEEK_END : SEEK_SET;
+    if ((int64_t)(off_t)off != off)
+        return -OS_EINVAL;
     off_t r = lseek(fd, (off_t)off, w);
     return r < 0 ? neg_errno() : (int64_t)r;
 }
 
-int os_file_truncate(int fd, uint64_t size) { return ftruncate(fd, (off_t)size) ? neg_errno() : 0; }
+int os_file_truncate(int fd, uint64_t size)
+{
+    return !off_fits(size) ? -OS_EINVAL : ftruncate(fd, (off_t)size) ? neg_errno() : 0;
+}
 int os_file_sync(int fd) { return fsync(fd) ? neg_errno() : 0; }
 int os_file_close(int fd) { return close(fd) ? neg_errno() : 0; }
 
