@@ -40,7 +40,12 @@ import config
 # (x86emu.x87_result_use), CRT_MATH builtins and engine's decorated-spelling preference change verdicts no key
 # reflects, and so do the untyped canned results, the secondary-base entry and the vtpad-before-unplanted order of
 # this bump. Every key changes; the scoped CHANGES rows below stay for later partial refreshes.
-HARNESS = 'difffuzz-19'
+# difffuzz-20: a full refresh (orchestrator decision, EQ eq-003): the d21 / d24 harness changes (F1 pop learning on
+# a derail and IAT / thunk pops, F2 destructor vptr words / stub holes / planted slots, F3 builtin faults /
+# callee-saved pop learning / bound-stub rewrite / canned results out of the private ranges) change how every
+# function is fuzzed, so no cache from before them is trusted. The d21 / d24 rows below stay for later partial
+# refreshes, as difffuzz-19's did.
+HARNESS = 'difffuzz-20'
 
 
 class Facts:
