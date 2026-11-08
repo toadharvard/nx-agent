@@ -76,7 +76,9 @@ in this order (first that applies):
 5b. `crt-rule` - a runtime member the C++ library defines by its contract, not by the decomp: the MSVC STL's
    throwers `C::_Xlen()` / `C::_Xran()` / `C::_Xinvalid_argument()` of the decomp's string and vector copies (a stub
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
-   placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing).
+   placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing), and
+   the decomp's `basic_streambuf` copies' `_Lock()` / `_Unlock()` (CRT_MUTEX: `this + 4` is the std::_Mutex, S4's
+   fnvnx_mutex_lock / unlock).
    After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
 
@@ -587,8 +589,17 @@ CRT_THROW = {'_Xlen': ('_ZSt20__throw_length_errorPKc', '%s too long'),
              '_Xinvalid_argument': ('_ZSt24__throw_invalid_argumentPKc', 'invalid %s argument')}
 
 
+# MSVC's basic_streambuf::_Lock() / _Unlock() are inline: `_Mylock._Lock()`, the std::_Mutex member at +4 (after the
+# vptr) whose first word is the critical section pointer. The exe's _Sentry_base constructor 0x00ad2fa0 and its
+# destructor do `add ecx, 4; call 0x00ec3277` / `0x00ec3280` (crt_symbols.tsv: std::_Mutex::_Lock / _Unlock, S4's
+# fnvnx_mutex_lock / fnvnx_mutex_unlock over `void *self` = the _Mutex). The decomp's streambuf copies declare the
+# two members and never define them (their `void* streamLock` is that first word).
+CRT_MUTEX = {'_Lock': 'fnvnx_mutex_lock', '_Unlock': 'fnvnx_mutex_unlock'}
+
+
 def crt_rule(isig):
-    """('throw', libstdc++ thrower, message) / ('ret', None, None) for a name crt-rule defines, else None."""
+    """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('mutex', platform function, 'this + 4') for a
+    name crt-rule defines, else None."""
     if isig.kind != 'func' or len(isig.qual) < 2 or isig.params is None:
         return None
     last = isig.qual[-1]
@@ -599,6 +610,8 @@ def crt_rule(isig):
     if last == 'operator delete' and len(isig.params) == 2 and \
             all(sigs.canon_param(p, 2) == 'void*' for p in isig.params):
         return ('ret', None, None)
+    if last in CRT_MUTEX and not isig.params and re.match(r'basic_streambuf\b', isig.qual[-2]):
+        return ('mutex', CRT_MUTEX[last], 'this + 4')
     return None
 
 
@@ -609,6 +622,7 @@ def crt_pass(rows, itanium):
         k = crt_rule(itanium(r.name)) if r.cls == 'missing' else None
         if k:
             r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
+                           else '%s(%s): the _Mutex member at +4' % (k[1], k[2]) if k[0] == 'mutex'
                            else 'placement delete: ret')
         out.append(r)
     return out
@@ -624,6 +638,8 @@ def emit_crt(rows, itanium):
                 '    .type %s, %%function' % q, q + ':']
         if kind == 'ret':
             out += ['    ret']
+        elif kind == 'mutex':
+            out += ['    add x0, x0, #4', '    b ' + fn]
         else:
             out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]
         out += ['    .size %s, .-%s' % (q, q)]

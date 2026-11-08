@@ -742,6 +742,31 @@ class Exe(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, r.stderr)
 
 
+    def test_crt_rule_streambuf_lock(self):
+        """The decomp's basic_streambuf copies never define _Lock / _Unlock: MSVC's are `_Mylock._Lock()` on the
+        _Mutex at +4 (exe: `add ecx, 4; call 0x00ec3277` in the _Sentry_base constructor). The stub adds 4 to
+        `this` and tail-calls S4's mutex function; another class, or a member with parameters, is not the rule."""
+        def k(n, d):
+            return bodies.crt_rule(sigs.parse_itanium(n, d))
+        n = '_ZN12fnv_00ad47f03std15basic_streambufIcNS0_11char_traitsIcEEE5_LockEv'
+        d = 'fnv_00ad47f0::std::basic_streambuf<char, fnv_00ad47f0::std::char_traits<char> >::_Lock()'
+        self.assertEqual(k(n, d), ('mutex', 'fnvnx_mutex_lock', 'this + 4'))
+        n2 = n.replace('5_LockEv', '7_UnlockEv')
+        d2 = d.replace('_Lock()', '_Unlock()')
+        self.assertEqual(k(n2, d2), ('mutex', 'fnvnx_mutex_unlock', 'this + 4'))
+        self.assertIsNone(k('_ZN6Widget5_LockEv', 'Widget::_Lock()'))
+        rows = [bodies.Row(n, 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row(n2, 'missing', None, None, 'src/a.cpp', 'no definition', None)]
+        dem = {n: d, n2: d2}
+
+        def it(x):
+            return sigs.parse_itanium(x, dem[x])
+        got = bodies.crt_pass(rows, it)
+        self.assertEqual([r.cls for r in got], ['crt-rule', 'crt-rule'])
+        asm = bodies.emit_crt(got, it)
+        self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_lock', asm)
+        self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_unlock', asm)
+
     def test_code_only_externs(self):
         """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take
         it); one a code section names is."""
