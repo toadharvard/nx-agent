@@ -83,6 +83,11 @@ DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup n
 # platform/crt/heap.c) is the same int *(void) (R2 trap loop, rank 1192)
 GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit', '__errno_location': '_errno'}
 ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
+# `str_<addr>`: the decomp's name for a C string of the image (`extern const char str_0109dca0[];`). Unlike the Ghidra
+# names above it binds only where the exe holds a string at that address (exevft.string_at): units.json names the
+# strings the pristine object emitted, and the two that only an inline function uses (MSVC inlined it away, so no
+# symbol) stayed unresolved (top-down 10 / 11: a zero-filled data stub stood for the format string)
+STR_IN_NAME = re.compile(r'^str_([0-9a-f]{8})$')
 FUNC_SPANS = ([], [])   # sorted starts and their ends of units.json functions with a size (set by resolve)
 
 
@@ -139,6 +144,16 @@ NEWDEL_ANY = re.compile(r'^_Z(?:n[wa]|d[la])')
 # the decomp's unit-local namespaces (`namespace fnv_00650ea0 { struct NiFixedString ... }`): a copy of a class
 UNIT_NS = re.compile(r'^fnv_[0-9a-f]{8}$')
 UNIT_NS_ANY = re.compile(r'\bfnv_[0-9a-f]{8}::')
+PTR_TARG = re.compile(r'\bfnv_[0-9a-f]{8}::[\w:]+\s*\*')
+
+
+def ptr_targ_copy(isig, dem):
+    """True for a member of a global class template whose only unit-local types are pointee types of pointer
+    arguments (`BSSimpleList<fnv_009bc470::InventoryStackRecord*>::~BSSimpleList`): the member's code does not depend
+    on the pointee, so the global instantiation's definition (`BSSimpleList<InventoryStackRecord*>`) is the same
+    function. A copy held by value (`NiPointer<fnv_a::T>`) is not: its code reads the pointee."""
+    return bool(isig.variant) and not isig.params and UNIT_NS_ANY.search(dem) is not None and \
+        UNIT_NS_ANY.search(PTR_TARG.sub('', dem)) is None
 # a class's own operator new / new[] / delete / delete[] (sized or not): the global form it stands for, read from
 # the demangled name (the mangled operator codes nw/na/dl/da cannot be told from a name ending in those letters)
 MEMBER_NEWDEL_GLOBAL = {('operator new', 1): '_Znwj', ('operator new[]', 1): '_Znaj',
@@ -603,7 +618,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- S2c-abi: overrides of a secondary base's virtual, which MSVC enters with `this` at that base (thisadj.py):
     # image code pointers to the address reach GCC's _ZThn<d>_ thunk, the units' own references the primary entry
-    sec_entries = thisadj.from_env()
+    # resolve's own --exe (the full build passes it without FNVNX_EXE: full1 0540aff0 had no MSVC entries at all, so
+    # base-class views of 0x00d089f0 entered the primary entry with the subobject's this; EQ difffuzz-20)
+    sec_entries = thisadj.from_env(None if exe in (None, '', 'none') else exe) if exe != 'none' else {}
     syms_by_obj = {}
     for a, d in sorted(sec_entries.items()):
         nd = native.get(a)
@@ -630,6 +647,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
     stats = collections.Counter(pre_stats)
     stats['libstdcxx_identifiers'] = len(std_identifiers(os.path.join(out, 'cache')))   # decomp_std's view
+    stats['libstdcxx_symbols'] = len(std_exports(os.path.join(out, 'cache')))
     byclass = collections.Counter()
     # the game's operator new/delete for GCC's global forms: the unit's own binding of the MSVC name, else the one
     # most units use
@@ -842,7 +860,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     stats['colliding_refs_by_address'] += 1
                 if tier == 'gref/ident':
                     stats['ident_' + cls] += 1
-                if cls == 'unresolved' and isig.qual and UNIT_NS.match(isig.qual[0]) and it[un]:
+                if cls == 'unresolved' and isig.qual and it[un] and (UNIT_NS.match(isig.qual[0]) or
+                                                                     ptr_targ_copy(isig, it[un])):
                     # a unit-local namespaced copy of a class (`fnv_00650ea0::NiFixedString`, S13 J-0114): bound like
                     # the global class - by its names in units.json without the namespace, else to the native
                     # definition of the global name
@@ -855,10 +874,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     else:
                         if native_text is None:
                             native_text = {}
+                            native_variant = {}
                             for n_ in sorted(anydef):
                                 if it[n_]:
                                     native_text.setdefault(it[n_], n_)
+                                    v_ = itanium(n_).variant
+                                    if v_:
+                                        native_variant.setdefault((it[n_], v_), n_)
                         g_ = native_text.get(st_)
+                        if g_ and isig.variant and not UNIT_NS.match(isig.qual[0]):
+                            g_ = native_variant.get((st_, isig.variant))   # a constructor / destructor of that variant
                         if g_ in colliding:   # S5 class 2: the unrelated body's name is undefined after apply
                             cls, tier, addr = 'addr', 'ns/colliding', colliding[g_]
                             stats['colliding_refs_by_address'] += 1
@@ -879,6 +904,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
                 cls, tier, addr, target, note = vsb.classify(u.host or u.source, u.obj, un, isig, native, def_at,
                                                              (cls, tier, addr, target, note))
+            if cls == 'unresolved' and isig.kind == 'data' and isig.qual and exe_path_ and \
+                    STR_IN_NAME.match(isig.qual[-1]) and \
+                    exevft.string_at(exe_path_, int(isig.qual[-1][4:], 16)) is not None:
+                # S2d (top-down 10 / 11): a string name whose address holds a C string in the exe
+                cls, tier, addr, target = 'addr', 'name-addr/str', int(isig.qual[-1][4:], 16), None
+                stats['str_name_addr_refs'] += 1
             if cls == 'unresolved' and body_data_addr(body_bind, un) is not None:
                 # S2d exe-data: a placeholder variable at the image address the exe's code uses for it; bound like
                 # any address (data, an IAT slot GCC calls, TLS)
@@ -1135,7 +1166,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                             tree, u.host or u.source, msvc(note).qual[-1] if msvc(note).qual else un, label_cache):
                     # a char label whose address the unit passes to a call: a callback (atexit with the exe's exit
                     # thunk, V2 X2). A thunk of a known shape becomes a native stand-in (xexit.py); else the trap
-                    exe_ = thisadj.exe_path()
+                    exe_ = thisadj.exe_path(None if exe in (None, '', 'none') else exe) if exe != 'none' else None
                     sh_ = xexit.decode(exe_, addr) if exe_ else None
                     if sh_ is not None and (sh_[0] != 'thiscall' or sh_[2] in native):
                         cls, target = 'text-callback', XEXIT_SYM % addr
@@ -3436,12 +3467,74 @@ def std_identifiers(cache_dir=None):
     return ids
 
 
+STD_EXPORTS = []   # [set] of every global symbol libstdc++ defines (std_exports); empty: not known
+STD_PLATFORM = []  # [set] of the std:: names platform/crt defines under an asm label (platform_std_names)
+CRT_DIR = os.path.normpath(os.path.join(HERE, '..', '..', 'platform', 'crt'))
+
+
+def std_exports(cache_dir=None):
+    """Every global symbol the toolchain's libstdc++ defines (`nm -g --defined-only` of its libstdc++.a and of the
+    shared library next to it; $CXX -print-file-name finds both), cached in <cache_dir>/libstdcxx_syms.txt. A std::
+    name referenced and undefined in an object is one the unit's own headers did not instantiate, so only a library
+    symbol can satisfy it. Empty when the compiler or nm is not there (decomp_std then relies on the identifiers)."""
+    if STD_EXPORTS:
+        return STD_EXPORTS[0]
+    path = os.path.join(cache_dir, 'libstdcxx_syms.txt') if cache_dir else None
+    syms = set()
+    if path and os.path.exists(path):
+        syms = set(open(path).read().split())
+    else:
+        cxx = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
+        nm = os.environ.get('NM', cxx[:-len('g++')] + 'nm' if cxx.endswith('g++') else 'nm')
+        for lib, flags in (('libstdc++.a', ['-g']), ('libstdc++.so', ['-D'])):
+            try:
+                p = subprocess.run([cxx, '-print-file-name=' + lib], capture_output=True, text=True, timeout=60)
+                f = p.stdout.strip()
+                if p.returncode or not os.path.isabs(f) or not os.path.exists(f):
+                    continue
+                r = subprocess.run([nm] + flags + ['--defined-only', os.path.realpath(f)], capture_output=True,
+                                   text=True, timeout=300, errors='replace')
+            except (OSError, subprocess.SubprocessError):
+                continue
+            for line in r.stdout.splitlines():
+                w = line.split()
+                if len(w) == 3:
+                    syms.add(w[2].split('@')[0])
+        if syms and path:
+            os.makedirs(cache_dir, exist_ok=True)
+            open(path, 'w').write('\n'.join(sorted(syms)) + '\n')
+    STD_EXPORTS.append(syms)
+    return syms
+
+
+def platform_std_names():
+    """The std:: names platform/crt defines (S4's msvc_std_names.cpp: asm labels spelled as string literals) - they
+    stay with the runtime link, whoever the libstdc++ is."""
+    if not STD_PLATFORM:
+        names = set()
+        if os.path.isdir(CRT_DIR):
+            for f in sorted(os.listdir(CRT_DIR)):
+                if f.endswith(('.c', '.cpp', '.h')):
+                    names |= set(re.findall(r'"(_ZN?K?St\w+)"', open(os.path.join(CRT_DIR, f), errors='replace').read()))
+        STD_PLATFORM.append(names)
+    return STD_PLATFORM[0]
+
+
 def decomp_std(un, isig):
-    """A `std::` name (_ZNSt / _ZSt) whose first component after std:: libstdc++ does not declare: the decomp's own
-    class or function in namespace std (std::StandardLibrarySingletonObject, std::StringBase::_Xlen, std::_Lockit,
-    std::FUN_00ad5770, ...). libstdc++ defines none of them, so they are classified like any other decomp name
-    (units.json, bodies' exe-addr / crt-rule) instead of being left to the runtime (topdown rank 2/3, d1ed15e7)."""
-    if not un.startswith(('_ZNSt', '_ZSt')) or not STD_IDS or not STD_IDS[0]:
+    """A `std::` name (_ZNSt / _ZSt) that libstdc++ cannot provide: the decomp's own class or function in namespace
+    std (std::StandardLibrarySingletonObject, std::StringBase::_Xlen, std::_Lockit, std::FUN_00ad5770, ...), or an
+    MSVC STL helper or member it declares without a body (std::_Destroy<T>(T*), std::swap<T>(T&, T&) with a
+    `void` result, std::fill, std::vector<T>::_Xlen, std::locale::facet::_Incref, std::bad_cast(const char*), ...).
+    Two tests, either one: libstdc++'s headers do not declare the first component after std:: (the identifiers,
+    std_identifiers), or the name is not a symbol of the toolchain's libstdc++ (std_exports) and platform/crt does
+    not define it (platform_std_names). They are classified like any other decomp name (units.json, bodies'
+    exe-addr / crt-rule) instead of being left to the runtime (topdown rank 2/3 on d1ed15e7; the second test:
+    rows 1047-1154 on 0540aff0d154)."""
+    if not un.startswith(('_ZNSt', '_ZSt')):
+        return False
+    if STD_EXPORTS and STD_EXPORTS[0] and un not in STD_EXPORTS[0] and un not in platform_std_names():
+        return True
+    if not STD_IDS or not STD_IDS[0]:
         return False
     q = getattr(isig, 'qual', None) or []
     if len(q) < 2 or q[0] != 'std':

@@ -112,11 +112,14 @@ SRC = {
                  'void FUN_00aa1460(void *, unsigned) {}\n',
     # S13 J-0114: a unit-local namespaced copy of a class binds like the global class (by address, else by the
     # native definition of the global name)
-    'src/ns.cpp': 'namespace fnv_00406400 { struct NS { int a; int get() const; };\n'
+    'src/ns.cpp': 'template <class T> struct PL { T *p; ~PL(); };\n'
+                  'namespace fnv_00406400 { struct NS { int a; int get() const; };\n'
                   'struct NT { int b; int peek() const; };\n'
-                  'int use_ns(NS *p, NT *q) { return p->get() + q->peek(); } }\n',
+                  'int use_ns(NS *p, NT *q) { return p->get() + q->peek(); }\n'
+                  'void drop_pl(PL<NT*> *x) { x->~PL(); } }\n',
     'src/nsg.cpp': 'struct NS { int a; int get() const; };\nint NS::get() const { return a; }\n'
-                   'struct NT { int b; int peek() const; };\nint NT::peek() const { return b; }\n',
+                   'struct NT { int b; int peek() const; };\nint NT::peek() const { return b; }\n'
+                   'template <class T> struct PL { T *p; ~PL() { p = 0; } };\ntemplate struct PL<NT*>;\n',
     # J-0108: a class's own operator new / delete that nothing defines -> the game's allocator
     'src/cd.cpp': 'struct CD { virtual ~CD(); int x; static void *operator new(unsigned long); '
                   'static void operator delete(void *); static void operator delete[](void *); };\n'
@@ -348,6 +351,9 @@ def main():
         r_ = refs.get(('src/ns.cpp', '_ZNK12fnv_004064002NT4peekEv'), [''] * 6)
         check(r_[2] == 'ns-alias' and r_[5] == '_ZNK2NT4peekEv', 'namespaced copy -> the native global definition: %s'
               % r_)
+        r_ = refs.get(('src/ns.cpp', '_ZN2PLIPN12fnv_004064002NTEED1Ev'), [''] * 6)
+        check(r_[2] == 'ns-alias' and r_[5] == '_ZN2PLIP2NTED1Ev', 'template over a pointer to a namespaced copy -> the '
+              'global instantiation\'s D1: %s' % r_)
         for name, want in (('_ZN2CDnwEm', '__fnv_00402000'), ('_ZN2CDdlEPv', '__fnv_00402030'),
                            ('_ZN2CDdaEPv', '__fnv_00402030')):
             r_ = refs.get(('src/cd.cpp', name), [''] * 6)

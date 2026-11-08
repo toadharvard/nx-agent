@@ -3598,7 +3598,14 @@ def r_static_stand_ins(path, text, stats):
         if not re.search(r'\bstatic\b', lead): continue
         single = names0[name] == 1 and '__declspec' not in lead   # the rule as it was
         overload = not single and names[name] != 1
-        if not single and not overload: continue   # S5's single static noinline stand-ins: not this rule's
+        # A lone `static __declspec(noinline)` stand-in (W6-EQ, 0x00d57aa0 / 0x00d57b20: `static __declspec(noinline)
+        # float FUN_00d571d0() { return DAT_01030ff0; }`, whose name the unit binds to 0x00d571d0, a function the exe
+        # calls there): MSVC never inlines it, so every caller called the bound name, in any optimization flags. The
+        # same address gates apply, with `elsewhere` taken over all units for it (STAND6's argument). Other
+        # __declspec heads (align, naked, ...) and names with no address are still S5's.
+        noinline = (not single and re.search(r'\bnoinline\b', lead)
+                    and not re.search(r'__declspec\s*\(\s*(?!noinline)\w+', lead))
+        if not single and not overload and not noinline: continue
         if overload and re.search(r'(?m)^[ \t]*static\s+[^;{}()]*\b%s\s*\([^;{}]*\)\s*;' % re.escape(name), text): continue
         if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
@@ -3613,7 +3620,10 @@ def r_static_stand_ins(path, text, stats):
         prefix = '?' + '@'.join([name] + list(reversed(ns))) + '@@'
         bound = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
         if not bound or len(bound) != 1: continue
-        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged and single)): continue
+        if noinline:
+            if not (bound <= tagged or (info is not None and bound <= _all_unit_functions(path) - info[1] and not bound & tagged)):
+                continue
+        elif not (bound <= tagged or (bound <= elsewhere and not bound & tagged and single)): continue
         o = m.end() - 1
         c = prepare.match_brace(text, o)
         start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
@@ -3621,7 +3631,7 @@ def r_static_stand_ins(path, text, stats):
         head = re.sub(r'\bstatic\s+', '', text[start:o].rstrip(), count=1)
         edits.append((start, c, head + '; /* fnv-nx STAND4 0x%08x */' % next(iter(bound)) + nl[head.count('\n'):]))
         # the other declarations of the name lose `static` too (a first static declaration keeps the name internal)
-        for d in re.finditer(r'(?m)^([ \t]*)static\s+(?=[^;{}()]*\b%s\s*\([^;{}]*\)\s*;)' % re.escape(name), text):
+        for d in re.finditer(r'(?m)^([ \t]*)static\s+(?=(?:__declspec\s*\(\s*\w+\s*\)|[^;{}()])*\b%s\s*\([^;{}]*\)\s*;)' % re.escape(name), text):
             if d.start() < start or d.start() >= c:
                 edits.append((d.start(), d.end(), d.group(1)))
     if not edits: return text

@@ -80,9 +80,9 @@ def thunk_name(primary, d):
     return '_ZThn%d_%s' % (d, primary[2:])
 
 
-def from_env():
-    """{address: d} for resolve: FNVNX_SECONDARY_ENTRIES (a tsv `address<TAB>d`, for tests) or the player's exe;
-    {} without either."""
+def from_env(explicit=None):
+    """{address: d} for resolve: FNVNX_SECONDARY_ENTRIES (a tsv `address<TAB>d`, for tests) or the player's exe
+    (explicit: resolve's own --exe, else FNVNX_EXE / PLAYER_EXE); {} without either."""
     t = os.environ.get('FNVNX_SECONDARY_ENTRIES')
     if t:
         out = {}
@@ -91,5 +91,5 @@ def from_env():
             if len(f) >= 2 and not line.startswith('#'):
                 out[int(f[0], 16)] = int(f[1])
         return out
-    p = exe_path()
+    p = exe_path(explicit)
     return secondary_entries(p) if p else {}

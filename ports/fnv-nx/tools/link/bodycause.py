@@ -115,7 +115,8 @@ def inst_key_of(sig):
         return None
     last = UNIT_NS_IN.sub('', qual[-1])
     cls = norm(UNIT_NS_IN.sub('', sigs.canon_type(qual[-2]))) if len(qual) >= 2 else None
-    return (cls, last, len(sig.params))
+    # the enclosing scope stays: a unit's `fnv_<a>::LengthError` is no `vector_count_release::LengthError`
+    return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]))
 
 
 def is_crt(sig, dem):
@@ -180,7 +181,10 @@ def masked_if0(text):
 
 
 OOL = re.compile(r'\b(\w+)\s*(?:<[^;{}()]*?>)?\s*::\s*(~?\w+|operator\s*[^\s(]+(?:\s*\[\])?)\s*\(')
-CLASS = re.compile(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?(\w+)[^;{(]*\{')
+# the name is followed by its template arguments (a specialization), `final` or a base list, then the body: a
+# template header `template <class T> class C {` would else take `T` for the class and swallow `> class C`
+CLASS = re.compile(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?(\w+)\s*(?:<[^;{}()]*?>)?\s*'
+                   r'(?:final\s*)?(?::[^;{(]*)?\{')
 INCLASS = re.compile(r'(?<![\w:.>])(~?\w+|operator\s*[^\s(]+)\s*\(([^;{}]*?)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?'
                      r'(?::[^;{]*)?\{')
 
