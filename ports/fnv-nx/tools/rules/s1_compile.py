@@ -5834,6 +5834,46 @@ def _d22_dtor_slots():
     prepare.__dict__['_fnvnx_d22_slots'] = st
     return st
 
+def _classlayout():
+    """{(simple name, file or ''): (kind, dtor_slot)} from S2's classlayout.tsv (tools/link/classlayout.py: one row per
+    RTTI class of the exe, `# fnvnx-classlayout/1`; columns class, vftable, kind minus-one / exe-order / com, dtor_slot,
+    reason, file, qualified), from FNVNX_CLASSLAYOUT or any classlayout.tsv under FNVNX_RECON. Rows of one key that
+    disagree make that key undecided (left to the heuristics). Cached on prepare."""
+    got = prepare.__dict__.get('_fnvnx_classlayout')
+    if got is not None: return got
+    files = [os.environ['FNVNX_CLASSLAYOUT']] if os.environ.get('FNVNX_CLASSLAYOUT') else []
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'classlayout.tsv') for dp, _, ns in os.walk(top) if 'classlayout.tsv' in ns)
+    rows = collections.defaultdict(set)
+    for f in files:
+        try: lines = open(f).read().splitlines()
+        except OSError: continue
+        if not lines or not lines[0].startswith('# fnvnx-classlayout/1'): continue
+        for line in lines[1:]:
+            if not line.strip() or line.startswith('#'): continue
+            fs = line.split('\t') + [''] * 9
+            if fs[0] == 'class': continue
+            # a secondary vftable's row (COL offset > 0: reason or evidence `secondary...`) does not decide the class:
+            # the primary does (S2-bodies)
+            if fs[4].strip().startswith('secondary') or fs[7].strip().startswith('secondary'): continue
+            try: k = int(fs[3])
+            except ValueError: continue
+            if fs[2] not in ('minus-one', 'exe-order', 'com'): continue
+            rows[(fs[0].strip().split('::')[-1], fs[5].strip().lstrip('/'))].add((fs[2], k))
+    got = {key: next(iter(v)) for key, v in rows.items() if len(v) == 1}
+    prepare.__dict__['_fnvnx_classlayout'] = got
+    return got
+
+def _classlayout_row(path, name):
+    """the classlayout decision (kind, dtor_slot) for class `name` in file `path`: a file row first, or None"""
+    cl = _classlayout()
+    if not cl: return None
+    p = path.replace('\\', '/')
+    for (n, f), v in cl.items():
+        if n == name and f and p.endswith('/' + f): return v
+    return cl.get((name, ''))
+
 def _d22_dtor_slot(path, name):
     """the dtor_slots slot of class `name` in the file `path` (a per-file row first), or None"""
     st = _d22_dtor_slots()
@@ -6033,6 +6073,29 @@ def r_vtable_dtor_slot(path, text, stats):
         if c['first'] and _d22_com(masked, c):
             if key in lst or (not c['bases'] and len(c['virtuals']) >= 2): stats['D22-COM'] += 1
             continue
+        cl = _classlayout_row(path, c['qual'][-1]) if c['first'] and not c['bases'] else None
+        if cl is not None:
+            # D22-CL: the exe decides (S2's classlayout.tsv, orchestrator 2026-11-08): exe-order / com keep the
+            # declaration as it is; minus-one puts `virtual ~C()` at the exe's deleting-destructor slot k
+            kind, k = cl
+            if kind != 'minus-one' or k < 0:
+                stats['D22-CL-KEEP'] += 1; continue
+            if len(c['virtuals']) <= k or (c['dtor'] and not c.get('dtor_decl')):
+                stats['D22-CL-HELD'] += 1; continue
+            t = c['virtuals'][k]
+            ck = dict(c, first=t)
+            blockers = [o for o in classes if o['bases'] and c['qual'][-1] in _d22_bases(o['bases'])
+                        and not _d22_defines_none(masked, o)]
+            if any(v[2] == t[2] for o in blockers for v in o['virtuals']) or _d22_extern_use(path, t[2]) or \
+                    not _d22_callonly(masked, ck, path.endswith(('.cpp', '.c', '.cxx', '.cc')), named_ok=True) or \
+                    not d22_placeholder(masked, c['qual'][-1], t, vdecls[t[2]], reach(c['qual'][-1])):
+                stats['D22-CL-HELD'] += 1; continue
+            edits.append((t[0], t[1], '%s(%s, %s)' % ('FNVNX_D22I' if blockers else 'FNVNX_D22', c['qual'][-1], t[3])))
+            applied[t[0]] = (key, t[2], 'classlayout-slot%d' % k)
+            if c['dtor'] and c.get('dtor_decl'): dtor_drops[t[0]] = c['dtor_decl']
+            done[c['qual'][-1] + ('<>' if c['template'] else '')] = t[2]
+            stats['D22-CL'] += 1
+            continue
         k = _d22_dtor_slot(path, c['qual'][-1])
         if not k and c['first'] and _rawvt_exe_order().get(c['qual'][-1], set()) & D22_EXE_ORDER_REASONS:
             # D22-EXEORDER (S2-bodies seamcheck V3 / V4): the link keeps this class's table in exe order, so its
@@ -6170,6 +6233,8 @@ def d22_write_applied(out_root, stats, files):
         f.write('# fnvnx-d22-applied/1\tfile\tclass\tmember\tkind\tvftables\n')
         for r in sorted(set(rows)):
             vt = ','.join(sorted(lst.get(r[1], ()))) if r[3] == 'listed' else ''
+            if _classlayout() and not r[3].startswith(('classlayout', 'derived')):
+                r = r[:3] + ('fallback:' + r[3],)              # decided without an exe row (orchestrator: listed)
             f.write('%s\t%s\t%s\t%s\t%s\n' % (r + (vt,)))
     stats['D22-APPLIED'] += 0
 
@@ -6324,7 +6389,10 @@ def r_raw_vtable_slots(path, text, stats):
         if owner is None: stats['RAWVT1-FREE'] += 1; continue
         if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
             stats['RAWVT1-COM'] += 1; continue
-        K = _d22_dtor_slot(path, owner) or 0      # D22-SLOTK: the pair sits at K (TESForm family: 4)
+        cl = _classlayout_row(path, owner)
+        if cl is not None and (cl[0] != 'minus-one' or cl[1] < 0):
+            stats['RAWVT1-CL-KEEP'] += 1; continue
+        K = cl[1] if cl is not None else (_d22_dtor_slot(path, owner) or 0)   # D22-SLOTK: the pair sits at K
         if k == K: stats['RAWVT1-SLOT0'] += 1; continue
         if k < K: stats['RAWVT1-BELOWK'] += 1; continue
         if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order

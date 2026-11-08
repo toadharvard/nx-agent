@@ -28,7 +28,7 @@ X86 = {
     # double f(double[, double]) -> ST0, run as crt_math; the _CI* forms take the operands on the x87 stack (ST1 op
     # ST0 for two operands) and run through a stub that spills them into a cdecl call (difffuzz-14)
     0x00ec9ac0: 'pow', 0x00eca920: 'log', 0x00ecae30: 'exp', 0x00ec9010: 'atan', 0x00ec9760: 'atan2',
-    0x00ec9130: 'fmod', 0x00ec9e10: 'ceil', 0x00406cc0: 'floor', 0x00ec6940: 'floor', 0x00eca590: 'tan',
+    0x00ec9130: 'fmod', 0x00ec9e10: 'ceil', 0x00406cc0: 'floorf', 0x00ec6940: 'floor', 0x00eca590: 'tan',
     0x00ec9610: 'asin', 0x00eca190: 'acos', 0x00eca060: 'sin', 0x00ec9f30: 'cos',
     0x00ec9b00: 'CIpow', 0x00ec913a: 'CIfmod', 0x00ecae6c: 'CIexp', 0x00ec9050: 'CIatan', 0x00ec9650: 'CIasin',
     0x00eca1d0: 'CIacos', 0x00eca5d0: 'CItan',

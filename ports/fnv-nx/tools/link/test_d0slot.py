@@ -87,6 +87,7 @@ def words(bridges, z):
 
 
 def main():
+    os.environ['FNVNX_VTFILL'] = '0'   # the builder's own checks; VTFILL's are in test_d0slot's VTFILL section
     tmp = tempfile.mkdtemp(prefix='d0slot-')
     try:
         exe = os.path.join(tmp, 'S.exe')
@@ -125,6 +126,19 @@ def main():
                              V['E']),
                 '_ZTV3NoD': (asm_group(tmp, 'g', '_ZTV3NoD', ['_ZN3NoD3v00Ev', '_ZN3NoD3v01Ev']), V['F']),
             }
+            # VTFILL (orchestrator 12:22): every decided table is transform(exe) from classlayout. Foo is the shape of
+            # NiDX9Renderer's _ZTV12FUN_00e754a0 on link 8111f58a (one native slot, exe ??_G, DeleteThis, f, g):
+            # it must come out D1, D0, DeleteThis, f, g
+            os.environ['FNVNX_VTFILL'] = '1'
+            stv, brv, _, _ = run(tmp, exe, g, exev, native)
+            wv = words(brv, '_ZTV3Foo')
+            check(wv == ['0x0', '_ZTI3Foo', '__fnv_00401000_D1', '__fnv_00401000', '__fnv_00401010', '__fnv_00401020',
+                         '__fnv_00401030'], 'VTFILL: Foo = transform(exe): D1, D0, exe 1, 2, 3: %s' % wv)
+            wb = words(brv, '_ZTV3Bar')
+            check(wb == ['0x0', '_ZTI3Bar', '__fnv_00401000_D1', '__fnv_00401000', '__fnv_00401010', '__fnv_00401020'],
+                  'VTFILL: Bar = transform(exe): %s' % wb)
+            check(stv['vtfill-tables'] >= 2, 'VTFILL: counted: %s' % dict(stv))
+            os.environ['FNVNX_VTFILL'] = '0'
             st, bridges, traps, vmap = run(tmp, exe, g, exev, native)
             # 1. the loop shape: one placeholder slot, extended from the exe in its order
             w = words(bridges, '_ZTV3Foo')

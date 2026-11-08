@@ -3658,3 +3658,26 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   memory-pool setup, and the guest ends in a thread-1 deadlock.
 * **orchestration**: autoadopt survives container restarts (SessionStart hook, deepen, retry on rc=1). Streams
   message only for blocker rows, measurements and blocking questions (token budget).
+
+### J-0163 | 2026-11-08 | stream: orchestration | status: active | parent: J-0162
+
+* **link 8111f58a** (full1, integration at 10:38: COM 2018b38 and dd9fc1f7, without W38 and W41). The farm's
+  boot without stand-ins: 0/10, 4,551 initializers fault in MemoryManagerStandIn::FUN_00aa3e40. That is not a
+  vtable: the "table" 0x063b8d58 is the pool-name strings, so it is a body or field fault (S2 W45, open). S5's
+  boot with stand-ins and game data on sw13: **4/10** (winmain, ini-read, archive-list, bsa-opened). The D3D9 COM
+  loop now passes. Next stop: renderer-init, where NiDX9Renderer's table _ZTV12FUN_00e754a0 lost exe slot 1, so
+  the minus-one calls in FUN_00e7d6b0 hit the slot after their target (null device +0x8c4). The table is correct
+  at head (W38 d26-undefined, classlayout).
+* **all-tables gate** (S2, classlayout.py af16c17a, gate cb79ffed). Every RTTI vftable of the exe (3,269, 2,678
+  primary) gets one decision: 2,835 minus-one, 419 exe-order, 15 COM. Every native copy is compared with
+  transform(exe) slot by slot. Baseline 8111f58a: 1,470 of 3,269 exe vftables have a bad native table (1,744
+  tables, 15,678 slots). On 4264bfd7 (primary copies only): 1,233 tables, 7,624 slots (shift 5,804, short 720,
+  wrong 589, trap 290, pure 183, null 38). The link builds RTTI tables from classlayout first (dca867b6), and
+  S1's prepare decl rule reads the same file (92099e4). The residual goes to R4 (short, null) and R2 (trap,
+  pure), with Sonnet workers. Target: 0, counted on every link.
+* **flags**: -fno-lifetime-dse joins the MSVC-semantics set (R2 eeb66b6d: GCC dropped the vptr store after an
+  explicit dtor call, 254 sites). It shares W41's full recompile.
+* **traps** (R2, 4264bfd7): 67, 22 open (S2 and S1 stand-ins), 45 fixes in flight, R2 open 0.
+* **orchestration**: owner rule 13 (layout changes checked whole against the exe before merge, flags batched,
+  Sonnet workers). S2-bodies had been rc=3 since 11:42 (fnvnx_compat.h, fnvnx_equiv_fi.h), so D26DS and
+  classlayout were not in integration. S2 is resolving it.

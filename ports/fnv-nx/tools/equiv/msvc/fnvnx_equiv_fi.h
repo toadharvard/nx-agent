@@ -45,6 +45,7 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_D22I(C, ...) __VA_ARGS__
 #define FNVNX_D22_DROP(...) __VA_ARGS__
 #define FNVNX_D22_CALL(p, m, ...) (p)->m(__VA_ARGS__)
+#define FNVNX_VSLOT(k) (k)
 /* RAWVT1: MSVC keeps the exe slot */
 #define FNVNX_D26_SLOT(k) (k)
 /* EMPTY1: MSVC keeps the name */

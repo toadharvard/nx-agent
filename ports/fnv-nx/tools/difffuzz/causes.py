@@ -368,6 +368,12 @@ POLICY = {
     'oracle-callee-unloaded': ('artifact', 'S13', False, 'the oracle intercepts X (canned result) while the native '
                                                          'object defines X and runs its body: X is not in the '
                                                          'oracle\'s code set (unit membership / follow gap)'),
+    'throw-temp-dtor': ('by-design', '-', False, 'the native calls the destructor of a temporary right before the throw '
+                                                'the oracle ends the run at: GCC destroys the temporaries of a throw '
+                                                'expression before __cxa_throw, MSVC emits the same call after '
+                                                '_CxxThrowException (never run, the unwind map does it); the exe has '
+                                                'that call within a few instructions after the throw '
+                                                '(exeempty.calls_after_noreturn)'),
     'dyninit-no-atexit': ('real-bug', 'S10', False, 'the dynamic initializer registers the object\'s destructor '
                                                     'with atexit in the exe; the native initializer does not '
                                                     '(no fnvnx_xc_atexit): the destructor never runs at exit'),
@@ -1435,6 +1441,8 @@ def _libc_variant(x, a):
         return m is not None and n in (m, m + 'f')
     if base is not None and base == m:
         return True                                     # sprintf vs __sprintf_chk (_FORTIFY_SOURCE)
+    if n.startswith('__isoc23_') and n[9:] == m:
+        return True                                     # strtoul vs glibc's C23 redirect __isoc23_strtoul
     if m in MATH and n == m + 'f':
         return True                                     # atan vs atanf
     return (m, n) in LIBC_PAIRS
@@ -1494,6 +1502,13 @@ def _rule_callflow(d, rec):
     if x is not None and not ta and me is not None and _empty_body(me[0]):
         return 'native-empty-body'
     xa = _hex(x)
+    if k == 'call-target' and xa == 0x00ec7894 and a is not None and d.get('arm_next') == x and \
+            _hex(a) is not None:
+        # (difffuzz-20, flow) the native's one extra call before the throw is the destructor of a temporary the exe
+        # calls right after its _CxxThrowException 0x00ec7894 (dead code, run by the unwind map)
+        import exeempty
+        if _hex(a) in exeempty.calls_after_noreturn(addr, xa):
+            return 'throw-temp-dtor'
     if xa == ATEXIT:
         cs = native_callees(src, addr)
         if cs is not None and not cs & ATEXIT_NAMES:

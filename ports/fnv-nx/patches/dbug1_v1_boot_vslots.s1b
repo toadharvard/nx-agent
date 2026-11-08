@@ -1,0 +1,23 @@
+# DBUG1 - hand-indexed virtual calls on PlayerCharacter that use the exe's slot number where the native vtable is
+# D26's minus-one layout (V1 boot triage of seamcheck --vcall, link 5fd996a4). The native PlayerCharacter vtable
+# (exe vftable 0x0108aa3c) holds the D1/D0 pair at slots 4/5, so exe slot k >= 5 is native slot k + 1 (seamcheck: exe
+# slot 302 is held at native slot 303, the function 0x009508f0). The two bodies index the raw table with 0x12e (302)
+# and reach native slot 302, the neighbour. The exe calls `mov edx,[eax+0x4b8]; call edx` (slot 302) at both sites
+# (0x0093af43, 0x0093b557). FNVNX_VSLOT(k) is k + 1 for GCC (shim/include/fnvnx_compat.h) and k for MSVC (the
+# equivalence and S1b check headers), so the patched functions compile to the same MSVC bytes. Method: docs/PATCHES.md.
+
+@@ DBUG1 src/fallout/ai/playercharacter.cpp 0x0093ae80
+# exe 0x0093af43: ecx = this (a PlayerCharacter), slot 302 = the health-loss update, argument (source, float amount).
+<<<
+        reinterpret_cast<HealthUpdate>((*reinterpret_cast<void***>(this))[0x12e])(this, source,
+===
+        reinterpret_cast<HealthUpdate>((*reinterpret_cast<void***>(this))[FNVNX_VSLOT(0x12e)])(this, source,
+>>>
+
+@@ DBUG1 src/fallout/ai/playercharacter.cpp 0x0093b3a0
+# exe 0x0093b557: the same slot 302 through the object's vptr.
+<<<
+            ((void(__thiscall*)(Actor*, Actor*, float))(*(void***)this)[0x12E])(this, attacker, (float)delta);
+===
+            ((void(__thiscall*)(Actor*, Actor*, float))(*(void***)this)[FNVNX_VSLOT(0x12E)])(this, attacker, (float)delta);
+>>>

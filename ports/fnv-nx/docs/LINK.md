@@ -619,6 +619,28 @@ virtual functions declared but defined nowhere (and without an address) their mi
 `vslot-unresolved`, and resolve binds such slots, in GCC's vtables and synthesized ones, to trap stubs (above)
 instead of leaving the link undefined.
 
+### classlayout: one exe decision per RTTI vftable (orchestrator 2026-11-08)
+
+`tools/link/classlayout.py` decides every RTTI vftable of the exe in one pass (`out/classlayout.tsv`, format
+fnvnx-classlayout/1; the same file, published on fnv-nx-build `recon/classlayout`, is what S1's prepare reads):
+
+- `com`: IUnknown (or a COM-named class) in the hierarchy descriptor; exe order.
+- `minus-one` at k: the first exe slot with MSVC's deleting-destructor shape (exevft.deleting_dtor, through adjustor
+  thunks). MSVC places it where the class declares its virtual destructor, and GCC places D1 / D0 at the same spot, so
+  native slots 0..k-1 = exe 0..k-1, D1 / D0 at k / k+1, exe slot i > k at native i + 1 (k = 4 for the TESForm family).
+- `exe-order`: no deleting destructor.
+
+`exe_vtable_copies` takes this decision first for a pair-less primary table. Two cases stay in exe order whatever it
+says, as prepare does: a COM class by its slot names, and a destructor slot that code calls by name (`d22-used`).
+d26_classify, family_dtor_pos and D26DS remain only as fallbacks for tables classlayout does not decide (stat
+`classlayout-fallback`). `FNVNX_CLASSLAYOUT=0` restores the heuristics alone, and `FNVNX_D26T=0` still turns every
+rebuild off. Stats: `classlayout-minus-one(-at-k)`, `classlayout-exe-order`, `classlayout-com`, `classlayout-d22-used`,
+`classlayout-no-dtor-stub`, `classlayout-disagree`.
+
+The gate: `classlayout.py <exe> -o <dir>/classlayout.tsv --link <link root>` checks every native table against
+transform(exe table) slot by slot (classgate.tsv, causes shift / wrong / trap / pure / null / short; unmapped names
+are reported apart). The number of mismatching tables is driven to 0, like traps: 1,233 of 3,269 on 4264bfd7.
+
 ## Vtable slots through the MSVC vftables (`vslots.py`, D12)
 
 `resolve --msvc-objs <dir>` (or `FNVNX_MSVC_OBJS`): `<dir>/u<index>.obj` are the pristine decomp's units compiled
@@ -1040,6 +1062,12 @@ at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus
   with no evidence are
   counted as `exe-order-no-evidence`. A caller in the exe's order for the same class (BSNiAllocator's InitHolder
   0x00aa2020 loads offset 28) disagrees with a shifted table: S1 converts it first or together.
+  An exe slot 0 that is a `??_G` no unit compiles (no native definition, the exact shape of
+  exevft.deleting_dtor_callee) still gives the pair, as two traps for the exe address (W45, `slot0-dtor-not-compiled`,
+  `FNVNX_D26U=0` turns it off). Before, such a table counted as `d26-slot0-not-a-destructor` and stayed in the exe's
+  order, so `_ZTV12FUN_00aa7400` (ZeroOverheadHeap, `??_G` 0x00aa77e0) ran Deallocate where MemoryManager FUN_00aa3e40
+  calls Allocate (minus-one slot 3). Deallocate returned `this`, the pool constructor wrote its name over the heap's
+  vptr, and 4,551 initializers faulted at "vslot 3 of 0x063b8d58" (link 8111f58a).
 
   **A family whose destructor is not exe slot 0** (V2, seams triage of link 5fd996a4; `family_dtor_pos`,
   `FNVNX_D26F=0` turns it off). TESForm, the Actor / Projectile / TESActorBase family and their descendants have four
@@ -1298,6 +1326,22 @@ arity, under another decoration), `not-compiled` (the tree has a body: out of li
 source that is no unit, or in a class copy the referencing unit does not emit), `no-body` (the decomp has none:
 `template-special`, `msvc-direct`, `exe-shape`, `other`). `--traps` weighs each class by the names the guest binds to
 trap stubs. Output `causes.tsv` (agent-only). Test: `tests/s2d/test_bodycause.py`.
+
+**Names defined only as a GCC clone (decision, W44 on W37's fix).** `name-mismatch` with the detail `defined only as a
+GCC clone`: the only definition is a local `.isra.0` / `.constprop.0`. The case in link 4264bfd7 (rows 52 / 53,
+`fnvnx_vc9::string::assign(const char*)` and `assign(const string&, unsigned, unsigned)`): projectedshadow_ob1_variant.cpp
+declares both as explicit specializations (`template <> ... assign(...);`, MSVC's out-of-line library instance) and
+nothing defines them, so the unit references the plain names; every other unit instantiates the in-class template
+body implicitly, and where GCC keeps a call out of line it keeps only its IPA clone (internal, its own signature). An
+alias is impossible (the clone's parameters differ). Options measured on leafinfo_ob1_variant.cpp and
+tesobject_ob1_nogf_variant.cpp: per-unit `-fno-ipa-sra -fno-ipa-cp-clone` does make GCC emit the plain names (weak),
+at +184 bytes (+2.1 %) and +372 bytes (+9.2 %) of `.text` in those units, and it rests on GCC still choosing an
+out-of-line call there (another tree, another inlining decision, and the name is gone again) while it changes code
+generation for every function of the unit. `noipa` / `noclone` on the member would need a change to the shim header,
+seen by every unit. Chosen: bodies.py's inst tier for members (W37, `member_inst_line` / `member_inst_hosts`): one
+explicit instantiation `template decltype(...) C<A>::m(P);` in a host unit that reaches the body and declares no such
+specialization. It always emits the plain (weak) name, costs only that one function's code, and no other unit's code
+changes. No compile flag was added.
 
 The farm link gets the exe from `link_job.sh` (`job_gamedata` -> `FNVNX_EXE`); the link stage's fingerprint holds its
 sha256. On link c0d6c71516f6 (relink of its out/): 4,425 undefined without bodies, 2,474 with. The 1,002 names left

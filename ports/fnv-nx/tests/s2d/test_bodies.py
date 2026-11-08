@@ -817,6 +817,40 @@ class Exe(unittest.TestCase):
         self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_lock', asm)
         self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_unlock', asm)
 
+    def test_msvc_inline_retry(self):
+        """W44 (rows 24 / 54): an msvc-inline name its host did not emit goes on to tree-inline; a host that does not
+        compile, a refused = default and a name that is no msvc-inline row do not."""
+        R = bodies.Row
+        rows = [R('a', 'msvc-inline', None, None, 'u', '', 'h'), R('b', 'msvc-inline', None, None, 'u', '', 'h'),
+                R('c', 'special-default', None, None, 'u', '', 'h'), R('d', 'msvc-inline', None, None, 'u', '', 'h')]
+        failed = {'a': 'synth-failed (not emitted by the host)', 'b': 'host does not compile',
+                  'c': 'synth-failed (not emitted by the host)'}
+        self.assertEqual(bodies.msvc_inline_retry(rows, failed), {'a'})
+
+    def test_crt_rule_facet_register(self):
+        """W44 (row 22): the decomp's facet copies declare the static `_Register(facet*)` or the member `_Register()`
+        and define neither; MSVC's is _Facet_Register(facet) at 0x00ec3599, S4's fnvnx_facet_register. The stub
+        tail-calls it with the facet in x0; another class, or another parameter, is not the rule."""
+        def k(n, d):
+            return bodies.crt_rule(sigs.parse_itanium(n, d))
+        n = '_ZN12fnv_00acfab05facet9_RegisterEPS0_'
+        d = 'fnv_00acfab0::facet::_Register(fnv_00acfab0::facet*)'
+        self.assertEqual(k(n, d), ('facet', 'fnvnx_facet_register', 'the facet'))
+        n2 = '_ZN5facet9_RegisterEv'
+        d2 = 'facet::_Register()'
+        self.assertEqual(k(n2, d2), ('facet', 'fnvnx_facet_register', 'the facet'))
+        self.assertIsNone(k('_ZN5facet9_RegisterEi', 'facet::_Register(int)'))
+        self.assertIsNone(k('_ZN6Widget9_RegisterEv', 'Widget::_Register()'))
+        dem = {n: d, n2: d2}
+
+        def it(x):
+            return sigs.parse_itanium(x, dem[x])
+        got = bodies.crt_pass([bodies.Row(x, 'missing', None, None, 'src/a.cpp', 'no definition', None)
+                               for x in (n, n2)], it)
+        self.assertEqual([r.cls for r in got], ['crt-rule', 'crt-rule'])
+        asm = bodies.emit_crt(got, it)
+        self.assertEqual(asm.count(':\n    b fnvnx_facet_register\n'), 2)
+
     def test_code_only_externs(self):
         """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take
         it); one a code section names is."""
