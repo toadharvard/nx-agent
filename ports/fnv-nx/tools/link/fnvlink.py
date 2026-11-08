@@ -2613,6 +2613,38 @@ CONST_SYM = '__fnvnx_vconst_%08x'   # a trivial x86 leaf (exevft.leaf_constant) 
 ADJ_SYM = '__fnvnx_vadj_%08x'       # an MSVC adjustor thunk no unit compiles: this -= n, then its target
 
 
+def load_vtbind(top=None, path=None):
+    """R4's VTFILL binding file (fnvnx-vtbind/1, fnv-nx-build recon/vtbind bind.tsv): {exe address: (kind, symbol,
+    target, n)}; kind `fn` (the native of the exe function) or `adj` (an MSVC adjustor thunk: this -= n, then target).
+    From FNVNX_VTBIND, else any bind.tsv with that header under FNVNX_RECON; {} without one."""
+    files = []
+    path = path or os.environ.get('FNVNX_VTBIND')
+    top = top or os.environ.get('FNVNX_RECON')
+    if path and os.path.isfile(path):
+        files = [path]
+    elif top and os.path.isdir(top):
+        files = sorted(os.path.join(dp, 'bind.tsv') for dp, _, fs in os.walk(top) if 'bind.tsv' in fs)
+    out = {}
+    for f in files:
+        try:
+            lines = open(f).read().split('\n')
+        except OSError:
+            continue
+        if not lines or not lines[0].startswith('# fnvnx-vtbind/1'):
+            continue
+        for line in lines[1:]:
+            if not line or line.startswith('#'):
+                continue
+            p = line.split('\t')
+            if len(p) < 5:
+                continue
+            try:
+                out[int(p[0], 16)] = (p[1], p[2], p[3], int(p[4] or 0))
+            except ValueError:
+                continue
+    return out
+
+
 def emit_adj_stub(name, target, n):
     op = ('    sub w0, w0, #%d' % n) if 0 < n < 4096 else ('    add w0, w0, #%d' % -n) if -4096 < n < 0 else None
     if op is None:   # a larger adjustment: through w16
@@ -2834,12 +2866,18 @@ def free_slot(a, nd, bridges, st):
     it every argument one register early. Such a slot gets a bridge by the definition's MSVC convention: cdecl /
     stdcall drop `this` (x1..x7 -> x0..x6), fastcall (ecx = this, edx undefined on the x86 call, then the stack)
     inserts edx as 0 (x1..x6 -> x2..x7). Returns the bridge symbol, or None for any other definition."""
-    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'_Z\d+FUN_[0-9a-f]{8}', nd['sym'].name):
+    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
         return None
     m = FREE_SLOT.match(nd.get('msvc') or '')
-    if not m:
-        return None
-    mode = 'edx' if m.group(1) == 'I' else 'drop'
+    if m:
+        mode = 'edx' if m.group(1) == 'I' else 'drop'
+    else:
+        # R2 (vtgate 4264bfd7): an extern "C" stand-in, `@FUN_<a>@N` (fastcall: edx inserted) or `_FUN_<a>@N` /
+        # `_FUN_<a>` (stdcall / cdecl: this dropped), whose native name is the plain C name (00c73170, 00d2dd50)
+        mc = re.match(r'^([@_])(FUN_[0-9a-f]{8})(?:@\d+)?$', nd.get('msvc') or '')
+        if not mc or nd['sym'].name != mc.group(2):
+            return None
+        mode = 'edx' if mc.group(1) == '@' else 'drop'
     name = FREE_SYM % a
     if name not in bridges:
         if mode == 'drop':
@@ -3665,6 +3703,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     fam = family_prefixes(want, by_obj, exev, exe_path) if exe_path else {}
     # classlayout (orchestrator 2026-11-08 12:10): the exe's own decision per RTTI vftable, the one prepare reads too;
     # the heuristics below (d26_classify, family_dtor_pos) remain only for tables it does not decide
+    vtbind = load_vtbind()   # R4's address -> native / adjustor binding for VTFILL's otherwise-trap slots
+    st['vtbind-rows'] = len(vtbind)
     lay = {}
     if exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0':
         import classlayout
@@ -3835,6 +3875,15 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                             i_ += 2
                             continue
                         t_ = exe_slot_target(x_, native, providers, exe_path, bridges, traps, st, (z, 2 + i_))
+                        if t_.startswith('__fnvnx_vtrap_') and x_ in vtbind:
+                            kb_, sb_, tb_, nb_ = vtbind[x_]
+                            if kb_ == 'adj' and tb_:
+                                t_ = ADJ_SYM % x_
+                                bridges.setdefault(t_, emit_adj_stub(t_, tb_, nb_))
+                                st['vtfill-vtbind-adj'] += 1
+                            elif kb_ == 'fn' and sb_:
+                                t_ = sb_
+                                st['vtfill-vtbind-fn'] += 1
                         if t_.startswith('__fnvnx_vtrap_') and i_ < len(cur) and cur[i_] and \
                                 not cur[i_].startswith(('__fnvnx_vtrap_', '.reloc', '.section:')):
                             t_ = cur[i_]
