@@ -3545,3 +3545,20 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   reaches the menu under Wine.
 * **D24 open false interpretations** (EQ): 65 at the farms (184 raw), ~10 locally. **Wrong shaders** (S16,
   local): 0 projected, waiting for the farm sweep.
+
+### J-0158 | 2026-11-08 | stream: orchestration | status: active | parent: J-0157
+
+* **first clean farm link since J-0157** (full1, integration 97deacd3, 73 min, make exit 0)
+  - compile 2,978 / 2,978. The night's farm failures were compile.sh bugs, not source: first the object wipe on a
+    flag-stamp change, then a silent `set -e` exit after "order keys" (T1 3a795a1, 5a20649, 6ca280e).
+  - link: 85.9 % by address, 10,549 bridges. Trial-link undefined 2,566 -> 674. **Guest trap stubs 1,843 -> 222**:
+    the stale-synth oscillation fix (a3bf7fe8) plus S2-bodies-2's classes (HARN1, GC1, BIND1, STAND6, vtables,
+    abi2 bridges) and the recon fleet.
+  - boot: stub boot reaches winmain, ini-read, archive-list. The raw boot does not enter WinMain (heap fault; the
+    standins bridge is not in the farm's raw boot).
+* **wrong shaders** (S16, farm programs sweep at 4c48678b): 0 of 1,696 checked; shards 2 and 29 are pending.
+* **traps are now worked top-down** (owner): R2 publishes topdown.tsv (hits first, then call depth from the
+  entry). Fixing runs as a loop of Sonnet workers with Opus review (owner order) in R2, S2-bodies-2, EQ, S16, R4
+  and S5.
+* **D26**: the source fixes are in (S1-rules, 14 units). wip/d26 686c576f is building on try1of1.
+* **budget**: hourly orchestrator check-ins; streams batch their messages hourly.
