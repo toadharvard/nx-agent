@@ -3602,6 +3602,16 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         called = called_fn(c0)
         defined = defined_fn(c0) if defined_fn is not None else set()
     fam = family_prefixes(want, by_obj, exev, exe_path) if exe_path else {}
+    # classlayout (orchestrator 2026-11-08 12:10): the exe's own decision per RTTI vftable, the one prepare reads too;
+    # the heuristics below (d26_classify, family_dtor_pos) remain only for tables it does not decide
+    lay = {}
+    if exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0':
+        import classlayout
+        lrows = classlayout.build(exe_path, exev)
+        lay = {r['vftable']: r for r in lrows}
+        if out and os.path.isdir(out):
+            classlayout.write_layout(lrows, os.path.join(out, 'classlayout.tsv'))
+        st['classlayout-rows'] = len(lrows)
     over = collections.defaultdict(dict)    # (z, kept path) -> {word index: target}
     for (path, z, i), t in (slot_over or {}).items():
         if rtti.where.get(z) and rtti.where[z][0].path == path:
@@ -3647,7 +3657,38 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         # W30: a table without a pair that its callers number minus-one (d26_minus_one_reason) is rebuilt whole in D26's
         # layout: offset-to-top, typeinfo, D1, D0 (exe slot 0), then exe slot k at native k + 1
         m1 = None
-        if slots and len(pts) == 1 and d is None and os.environ.get('FNVNX_D26T', '1') != '0':
+        dp = 0
+        cl_done = False
+        if slots and len(pts) == 1 and d is None and lay and os.environ.get('FNVNX_D26T', '1') != '0':
+            dec = {(lay[v]['kind'], lay[v]['dtor_slot']) for v in vs if v in lay}
+            if len(dec) == 1:
+                kind_, k_ = dec.pop()
+                cl_done = True
+                raw_ = [e.sym for e in ents[2:2 + n]]
+                if kind_ == 'minus-one' and is_com(z, raw_):
+                    kind_ = 'com'   # IUnknown's slots by name (the hierarchy descriptor may not name IUnknown)
+                elif kind_ == 'minus-one' and 0 <= k_ < len(raw_) and raw_[k_] and raw_[k_] in (called or ()):
+                    kind_ = 'd22-used'   # code names the destructor slot: prepare keeps the declaration (D22-USED)
+                if kind_ == 'minus-one' and 0 <= k_ < len(slots):
+                    pair1 = vmo_dtor_slots(slots[k_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + k_),
+                                           exe_path)
+                    if pair1:
+                        m1, dp = 'classlayout', k_
+                        st['classlayout-minus-one'] += 1
+                        st['classlayout-minus-one-at-%d' % min(k_, 5)] += 1
+                    else:
+                        st['classlayout-no-dtor-stub'] += 1
+                        exe_order.append((z, vs, 'classlayout-no-dtor-stub', path))
+                else:
+                    st['classlayout-' + kind_] += 1
+                    exe_order.append((z, vs, 'classlayout-' + kind_, path))
+            elif dec:
+                st['classlayout-disagree'] += 1
+            else:
+                st['classlayout-fallback'] += 1
+        if cl_done:
+            pass
+        elif slots and len(pts) == 1 and d is None and os.environ.get('FNVNX_D26T', '1') != '0':
             s0n = ents[2].sym if n else None
             dd = bool(exe_path and s0n and s0n in (defined or ()) and exevft.deleting_dtor(exe_path, slots[0]))
             why = d26_classify(z, max(vs), [e.sym for e in ents[2:2 + n]], d, listed or (), called, defined, dd)
@@ -3668,8 +3709,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
             st['exe-order-multi-vtable'] += 1
         # V2 (seams triage, link 5fd996a4): the Actor / Projectile / TESForm family has four placeholder slots before the
         # deleting destructor (exe slot 4), so a pair-less table of it is minus-one from slot 4 (family_dtor_pos)
-        dp = 0
-        if slots and len(pts) == 1 and d is None and not m1 and fam and os.environ.get('FNVNX_D26F', '1') != '0' \
+        if not cl_done and slots and len(pts) == 1 and d is None and not m1 and fam and os.environ.get('FNVNX_D26F', '1') != '0' \
                 and os.environ.get('FNVNX_D26T', '1') != '0' and not is_com(z, [e.sym for e in ents[2:2 + n]]):
             dp_ = family_dtor_pos(slots, fam)
             pair1 = vmo_dtor_slots(slots[dp_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + dp_),

@@ -51,6 +51,8 @@ def words(bridges, z):
 
 
 def main():
+    # the heuristics' own checks: classlayout (the exe's decision, checked at the end) off
+    os.environ['FNVNX_CLASSLAYOUT'] = '0'
     tmp = tempfile.mkdtemp(prefix='d26t-')
     try:
         if not shutil.which('aarch64-linux-gnu-as'):
@@ -199,6 +201,20 @@ def main():
             'b.cpp\tFoo\tv00\tcallonly\t\n')
         check(fnvlink.load_d22_applied(tr) == {0x010a2528} and fnvlink.load_d22_applied(None) == set(),
               'load_d22_applied reads the listed rows of build/d22_applied.tsv')
+        # classlayout (orchestrator 12:10): the exe's decision first; a slot 0 named by code stays exe order
+        # (prepare keeps such a declaration: D22-USED), a COM class by its slot names stays com
+        os.environ['FNVNX_CLASSLAYOUT'] = '1'
+        outc = tempfile.mkdtemp(dir=tmp)
+        stc, brc, _ = run(tmp, exe, g, exev, native, listed={V['B']}, called={'_ZN4Used3v00Ev'}, defined=dfn,
+                          per_obj=fl0, outdir=outc, alt={V['A']: [('_ZTV12FUN_00bb83d0', 8, 'x.o', 'primary')]})
+        wf = words(brc, '_ZTV3Foo')
+        check(wf[2:4] == ['__fnv_00401000_D1', '__fnv_00401000'] and stc['classlayout-minus-one'] >= 1,
+              'classlayout: a table whose exe slot 0 is the deleting dtor is minus-one: %s %s' % (wf, dict(stc)))
+        check('zzvtext__ZTV4Used' not in brc and stc['classlayout-d22-used'] == 1 and
+              ('zzvtext__ZTV7ThingCO' not in brc or words(brc, '_ZTV7ThingCO')[2] == '_ZN7ThingCO14QueryInterfaceEv'),
+              'classlayout: a slot 0 named by code stays exe order, a COM interface stays as it is: %s' % dict(stc))
+        check(os.path.isfile(os.path.join(outc, 'classlayout.tsv')), 'classlayout: out/classlayout.tsv is written')
+        os.environ['FNVNX_CLASSLAYOUT'] = '0'
         # D26DS (orchestrator 11:49): a defined slot 0 that is the exe's deleting destructor goes minus-one
         nm = ['_ZN18FUN_00cc8da0_Class12FUN_00cc8da0Eb', '_ZN1X1fEv']
         c = lambda dd: fnvlink.d26_classify('_ZTV1X', 0x010ca06c, nm, None, set(), set(), {nm[0]}, dd)

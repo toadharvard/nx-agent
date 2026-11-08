@@ -619,6 +619,28 @@ virtual functions declared but defined nowhere (and without an address) their mi
 `vslot-unresolved`, and resolve binds such slots, in GCC's vtables and synthesized ones, to trap stubs (above)
 instead of leaving the link undefined.
 
+### classlayout: one exe decision per RTTI vftable (orchestrator 2026-11-08)
+
+`tools/link/classlayout.py` decides every RTTI vftable of the exe in one pass (`out/classlayout.tsv`, format
+fnvnx-classlayout/1; the same file, published on fnv-nx-build `recon/classlayout`, is what S1's prepare reads):
+
+- `com`: IUnknown (or a COM-named class) in the hierarchy descriptor; exe order.
+- `minus-one` at k: the first exe slot with MSVC's deleting-destructor shape (exevft.deleting_dtor, through adjustor
+  thunks). MSVC places it where the class declares its virtual destructor, and GCC places D1 / D0 at the same spot, so
+  native slots 0..k-1 = exe 0..k-1, D1 / D0 at k / k+1, exe slot i > k at native i + 1 (k = 4 for the TESForm family).
+- `exe-order`: no deleting destructor.
+
+`exe_vtable_copies` takes this decision first for a pair-less primary table. Two cases stay in exe order whatever it
+says, as prepare does: a COM class by its slot names, and a destructor slot that code calls by name (`d22-used`).
+d26_classify, family_dtor_pos and D26DS remain only as fallbacks for tables classlayout does not decide (stat
+`classlayout-fallback`). `FNVNX_CLASSLAYOUT=0` restores the heuristics alone, and `FNVNX_D26T=0` still turns every
+rebuild off. Stats: `classlayout-minus-one(-at-k)`, `classlayout-exe-order`, `classlayout-com`, `classlayout-d22-used`,
+`classlayout-no-dtor-stub`, `classlayout-disagree`.
+
+The gate: `classlayout.py <exe> -o <dir>/classlayout.tsv --link <link root>` checks every native table against
+transform(exe table) slot by slot (classgate.tsv, causes shift / wrong / trap / pure / null / short; unmapped names
+are reported apart). The number of mismatching tables is driven to 0, like traps: 1,233 of 3,269 on 4264bfd7.
+
 ## Vtable slots through the MSVC vftables (`vslots.py`, D12)
 
 `resolve --msvc-objs <dir>` (or `FNVNX_MSVC_OBJS`): `<dir>/u<index>.obj` are the pristine decomp's units compiled
