@@ -50,8 +50,22 @@ def main():
     # the pair at slot 3 (a base class with virtuals first), two trap stubs for D1 / D0
     ext3 = [fn(EXE[0]), fn(EXE[1]), fn(EXE[2]), '__fnvnx_vtrap_aaaa0001', '__fnvnx_vtrap_aaaa0002',
             fn(EXE[4]), fn(EXE[5]), fn(EXE[6])]
-    agree, bad = vtmetric.compare_slots(ext3, None, EXE, symaddr)
-    check(bad == [] and agree == 4, 'pair at 3 behind two virtuals: slots after it are one lower (%s, %s)' % (agree, bad))
+    isd = lambda a: a == EXE[0]   # noqa: E731
+    agree, bad = vtmetric.compare_slots(ext3, None, EXE, symaddr, isd)
+    check(len(bad) == 2, 'two traps at slot 3 are not a named pair (gate: slot 0): still mismatches (%s)' % bad)
+    ext4 = ['__fnvnx_vtrap_aaaa0001', '__fnvnx_vtrap_aaaa0002'] + [fn(a) for a in EXE[1:]]
+    agree, bad = vtmetric.compare_slots(ext4, None, EXE, symaddr, isd)
+    check(bad == [] and agree == 5, 'two traps at slot 0, exe slot 0 a deleting destructor: no mismatch (%s, %s)' % (agree, bad))
+    agree, bad = vtmetric.compare_slots(ext4, None, EXE, symaddr, lambda a: False)
+    check(len(bad) == 5, 'the same traps with exe slot 0 not a destructor: not a pair (%s)' % bad)
+    ext5 = [fn(EXE[0]), '__fnvnx_vgdel_%08x' % EXE[0], '__fnvnx_vtrap_aaaa0002'] + [fn(a) for a in EXE[1:]]
+    ext5 = ['__fnvnx_vgdel_%08x' % EXE[0], '__fnvnx_vtrap_aaaa0002'] + [fn(a) for a in EXE[1:]]
+    agree, bad = vtmetric.compare_slots(ext5, None, EXE, symaddr)
+    check(bad == [] and agree == 5, 'vgdel then a trap: no mismatch (%s, %s)' % (agree, bad))
+    # a genuinely shifted copy: no named pair, every slot after 1 holds the exe slot one too low
+    shifted = [fn(EXE[0]), fn(0x00500000)] + [fn(a) for a in EXE[1:-1]]
+    agree, bad = vtmetric.compare_slots(shifted, None, EXE, symaddr, isd)
+    check(len(bad) == 5, 'a copy one slot off, no named pair: stays reported (%s)' % bad)
 
     # D26 (c): a minus-one copy of an image vftable no native vtable stands for, its V row from vmo_vrows; the
     # flag-stub pair is a name pair _pair_positions already knows, the comparison must not move
