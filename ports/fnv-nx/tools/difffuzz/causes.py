@@ -177,6 +177,10 @@ POLICY = {
     # --- harness / oracle-model artefacts ----------------------------------------------------------------------------
     'local-static':  ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
                                                  '(fuzzed bytes), GCC in .bss (zero): not compared state'),
+    'thunk-forward':  ('artifact', 'S13', False, 'the exe function is a single `jmp rel32` (incremental-link thunk) and the '
+                                                 'decomp declares it without parameters: the arguments it forwards '
+                                                 'to its callee are not defined by the case (zero stack words on '
+                                                 'the oracle, unset registers natively)'),
     'uninit-both':    ('artifact', 'S13', False, 'both machines read garbage: the fuzzed case is invalid for both'),
     'stub-outparam':  ('artifact', 'S13', False, 'the native reads back a stack buffer it passed to a stubbed callee '
                                                  'that never filled it (GCC temporary + copy where MSVC passed its '
