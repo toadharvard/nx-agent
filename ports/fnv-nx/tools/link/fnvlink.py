@@ -589,7 +589,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
 
     # ---- S2c-abi: overrides of a secondary base's virtual, which MSVC enters with `this` at that base (thisadj.py):
     # image code pointers to the address reach GCC's _ZThn<d>_ thunk, the units' own references the primary entry
-    sec_entries = thisadj.from_env()
+    # resolve's own --exe (the full build passes it without FNVNX_EXE: full1 0540aff0 had no MSVC entries at all, so
+    # base-class views of 0x00d089f0 entered the primary entry with the subobject's this; EQ difffuzz-20)
+    sec_entries = thisadj.from_env(None if exe in (None, '', 'none') else exe) if exe != 'none' else {}
     syms_by_obj = {}
     for a, d in sorted(sec_entries.items()):
         nd = native.get(a)
@@ -1119,7 +1121,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                             tree, u.host or u.source, msvc(note).qual[-1] if msvc(note).qual else un, label_cache):
                     # a char label whose address the unit passes to a call: a callback (atexit with the exe's exit
                     # thunk, V2 X2). A thunk of a known shape becomes a native stand-in (xexit.py); else the trap
-                    exe_ = thisadj.exe_path()
+                    exe_ = thisadj.exe_path(None if exe in (None, '', 'none') else exe) if exe != 'none' else None
                     sh_ = xexit.decode(exe_, addr) if exe_ else None
                     if sh_ is not None and (sh_[0] != 'thiscall' or sh_[2] in native):
                         cls, target = 'text-callback', XEXIT_SYM % addr
