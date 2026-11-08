@@ -3588,3 +3588,22 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
 * **decisions**: x87-range is a declared compiler class (per record, clamped rerun); SSE2NEON_PRECISE_MINMAX=1
   for SSE parity; the 0xd0f300 placed caller binds the real body.
 * **open**: zero table and sc1 read stale reports (T1); fuzz baseline fz1..fz8 and boot_trace bt1 are running.
+
+### J-0160 | 2026-11-08 | stream: orchestration | status: active | parent: J-0159
+
+* **full1 dc5c0627** (101 min, make exit 0, before D26): compile 2,978/2,978, link 86.0 % by address, 10,568
+  bridges, trial-link undefined 674 -> 615, guest trap stubs 222 -> 167. The raw boot does not enter WinMain
+  (emulation fault at pc 0x501a060). R4 shows 30 of the listed traps are STT_TLS slots, not traps; R2's reader
+  is being fixed.
+* **D26 merged ahead of its verdict** (owner: no waiting): integration 8467d3ca. It is verified by S5's stub boot
+  on the first link that has it (try1of1 wip/d26 3f7a6c35, or full1); it gets reverted if that boot regresses.
+* **measurement faults found by a per-agent audit** (owner: a full status every message):
+  - all 8 fuzz farms exited rc=3 (no published prepared tree for the link head), so false interpretations are
+    unmeasured, and the zero table's 893 covers 1 of 8 shards;
+  - bt1 reported OK with 0 guest calls and a traceback;
+  - qk1 read a failed build as "FULL RUN NEEDED";
+  - the zero runner died. T1 fixes them; zero moves to farm sw14.
+* **shaders**: 0 wrong among programs, but scenes at 4487b8dd had 2 of 34 failing (2,021 draws), all from an
+  arena crash that d009f9b fixes. The atestle set (S16 4181cc5) covers the 21 set-vacuous programs. A 22-shard
+  program sweep and a cells replay are running.
+* **owner rules 1-11** recorded in tools/orch/README.md, among them the regression ratchet (T1).
