@@ -1102,11 +1102,15 @@ class Prepare(Stage):
                 sys.path.insert(0, HERE)
             import traced
             try:
-                rec_tree = json.load(open(deps)).get('tree_id')
+                rec = json.load(open(deps))
             except (OSError, ValueError):
-                rec_tree = None
+                rec = {}
+            rec_tree = rec.get('tree_id')
             t0 = time.time()
-            if rec_tree and traced.check(deps, argv) and tree_content_id(tree) == rec_tree:
+            # what the trace cannot see: prepare.py's subprocesses (s1_compile's `git rev-parse HEAD` of the decomp, for
+            # the recon checks) - the decomp's head and the recon id are compared as well
+            if rec_tree and rec.get('decomp_head') == pf['decomp_commit'] and rec.get('recon') == pf['recon'] and \
+                    traced.check(deps, argv) and tree_content_id(tree) == rec_tree:
                 prev = read_prepared_from(tree).get('port_commit')
                 pf.update(mode='prepare.py (reused: inputs identical)', reused_from=prev)
                 write_prepared_from(d, pf)
@@ -1144,7 +1148,7 @@ class Prepare(Stage):
                     f.write('%s\t%s\n' % (tag, p))
         write_prepared_from(d, pf)
         try:   # the tree this record made: a later run keeps it only while it is still that tree
-            dj = json.load(open(deps)); dj['tree_id'] = cid
+            dj = json.load(open(deps)); dj.update(tree_id=cid, decomp_head=pf['decomp_commit'], recon=pf['recon'])
             json.dump(dj, open(deps + '.tmp', 'w')); os.replace(deps + '.tmp', deps)
         except (OSError, ValueError):
             pass

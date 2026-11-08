@@ -92,6 +92,16 @@ def main():
         open(os.path.join(out, 'prepare', 'tree', 'src', 'a.cpp'), 'a').write('// edited\n')
         b5, r5 = run(out, dec, 'e' * 40)
         ok('a tree that is not the recorded one: prepare.py runs', b5.ran == 1)
+        # the decomp's head moved with no file changed (prepare.py's subprocess `git rev-parse HEAD`, which the trace
+        # cannot see): prepare.py runs
+        g = lambda *a: subprocess.run(['git', '-C', dec, '-c', 'user.name=t', '-c', 'user.email=t@t'] + list(a),
+                                      capture_output=True, check=True)
+        g('init', '-q'); g('add', '-A'); g('commit', '-qm', 'one')
+        run(out, dec, 'f' * 40)
+        b7, r7 = run(out, dec, 'g' * 40)
+        g('commit', '-q', '--allow-empty', '-m', 'two')
+        b8, r8 = run(out, dec, 'h' * 40)
+        ok('the decomp head moved, no file changed: kept before, prepare.py runs after', b7.ran == 0 and b8.ran == 1)
     finally:
         shutil.rmtree(t, ignore_errors=True)
     print('test_prepare_reuse: all ok' if not fails else 'test_prepare_reuse: %d failed' % fails)
