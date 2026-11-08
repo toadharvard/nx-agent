@@ -116,12 +116,20 @@ def inst_key_of(sig):
     last = UNIT_NS_IN.sub('', qual[-1])
     cls = norm(UNIT_NS_IN.sub('', sigs.canon_type(qual[-2]))) if len(qual) >= 2 else None
     # the enclosing scope stays: a unit's `fnv_<a>::LengthError` is no `vector_count_release::LengthError`
-    return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]))
+    # a deleting destructor (D0) is no other decoration of the complete / base one (D1 / D2), nor a constructor of
+    # another variant group: only C1/C2 and D1/D2 pair
+    grp = {'D0': 'D0', 'D1': 'D', 'D2': 'D', 'C1': 'C', 'C2': 'C'}.get(sig.variant or '', '')
+    return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]), grp)
+
+
+UNIT_STD = re.compile(r'^fnv_[0-9a-f]{8}::(?:std|stdext)::')
 
 
 def is_crt(sig, dem):
     if CRT_SCOPE.match(dem):
-        return 'std scope'
+        # a unit's own copy of a std class (`fnv_<a>::std::basic_string`) is decomp-declared: classify() weighs it
+        # by the checks below first and keeps this class for the copies nothing in the tree or the objects defines
+        return None if UNIT_STD.match(dem) else 'std scope'
     if sig is not None and sig.qual:
         last = sig.qual[-1]
         if CRT_MEMBER.match(last):
@@ -279,6 +287,8 @@ def classify(rows, objidx, tbodies, units):
                 else:
                     detail = 'in a class copy or overload the referencing unit does not emit'
                 cause, ev = 'not-compiled', ' '.join(sorted({'%s(%s)' % h for h in hits})[:3])
+        if cause is None and UNIT_STD.match(dem):
+            cause, detail = 'crt-import', 'std scope (unit copy, no body in the tree)'
         if cause is None:
             cause = 'no-body'
             if 'template or unnamed' in note:

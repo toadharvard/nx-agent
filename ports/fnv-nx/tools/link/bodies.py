@@ -1268,6 +1268,40 @@ def copy_addr_pass(rows, cl, itanium, gate):
     return out
 
 
+def retry_special(rows, failed, itanium):
+    """{host unit: rows}: `msvc-inline` names whose synthesis failed and that are a special member the implicit
+    definition covers (special_of / default_line, a class that is not a template): tried again as `special-default`
+    in the first referencing unit."""
+    out = collections.defaultdict(list)
+    for r in rows:
+        if r.cls == 'msvc-inline' and r.name in failed and r.units:
+            isig = itanium(r.name)
+            sk = special_of(isig) if isig.kind == 'func' else None
+            if sk and default_line(sk, isig):
+                out[sorted(r.units.split(','))[0]].append(r)
+    return out
+
+
+def fold_fallback(rows, failed, cl, itanium):
+    """A `msvc-inline` / `msvc-empty` name whose synthesis failed (`failed`: the host does not emit it) but which is a
+    pointer-argument template member whose other instantiations units.json places at one native address
+    (Classifier.by_fold): the folded exe body, `template-fold`. `BSSimpleList<fnv_<a>::Rec*>::~BSSimpleList` is
+    classified msvc-inline first (the pristine object has the instantiation), and its host unit only uses the list,
+    so the body is not emitted there. Removes the name from `failed`."""
+    out = []
+    for r in rows:
+        if r.name in failed and r.cls in ('msvc-inline', 'msvc-empty'):
+            isig = itanium(r.name)
+            hit = cl.by_fold(isig) if isig.kind == 'func' else None
+            if hit:
+                a, ns = hit
+                failed.pop(r.name)
+                r = Row(r.name, 'template-fold', a, ADDR_SYM % a, r.units, 'folded with %d instantiations, e.g. %s;'
+                        ' after %s: %s' % (len(ns), ns[0], r.cls, r.note), None)
+        out.append(r)
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------- vcalls
 
 VCALL_SYM = '__fnvnx_bdvc_%08x'
@@ -2211,6 +2245,29 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                     dst = os.path.join(bdir, 'zz_bd_%s%s.o' % (h.replace('/', '_'), '_i' if inl else ''))
                     os.replace(path, dst)
                     synth_rows.append((h, dst, len(roots)))
+        # an implicit special member the pristine object has a body for (msvc-inline) but whose host unit emits none
+        # (the class declares no such member, so nothing odr-uses it there): the implicit member's own semantics
+        retry = retry_special(rows, failed, itanium)
+        if retry:
+            def rone(job):
+                h, rs = job
+                try:
+                    return h, rs, synth_host(tree, work, h, [r._replace(cls='special-default', host=h) for r in rs],
+                                             itanium, False)
+                except Exception as e:
+                    return h, rs, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
+            done_sd = {}
+            with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
+                for h, rs, (path, roots, fail) in ex.map(rone, sorted(retry.items())):
+                    if path:
+                        dst = os.path.join(bdir, 'zz_bd_%s_sd.o' % h.replace('/', '_'))
+                        os.replace(path, dst)
+                        synth_rows.append((h, dst, len(roots)))
+                    done_sd.update({n: h for n in roots})
+            for n in done_sd:
+                failed.pop(n, None)
+            rows = [Row(x.name, 'special-default', None, None, x.units, 'implicit member after msvc-inline (%s)' %
+                        x.note, done_sd[x.name]) if x.name in done_sd else x for x in rows]
         T.mark('synth-host')
         # virtual functions GCC calls directly (an object member, `a->m.f()`) where MSVC called through the vptr
         cand = {r.name: r for r in rows if r.cls == 'missing' and r.note == 'no definition, address or body'
@@ -2398,6 +2455,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                                    o_path, len(empty)))
             else:
                 failed.update({r.name: 'synth-failed (as)' for r in empty})
+    rows = fold_fallback(rows, failed, cl, itanium)
     rows = [r._replace(cls='missing', note=failed[r.name] + '; was ' + r.cls + ': ' + r.note)
             if r.name in failed else r for r in rows]
     rows = [r._replace(note=r.note + '; ' + vnotes[r.name]) if r.cls == 'missing' and r.name in vnotes else r
