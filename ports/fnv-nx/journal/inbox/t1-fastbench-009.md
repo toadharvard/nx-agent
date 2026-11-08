@@ -27,11 +27,14 @@
 
   All 56 emitted objects are byte-identical to the cold run's (cmp). At that ratio the full step (700-1,300 s on
   the farms) should take about 30-50 s on a warm machine.
-* **bodies without synthesis** (`--no-synth`, here): load and classify take 8 s. The exe pass (the pristine
-  objects plus the player's exe) cannot run here without game data. Its seconds come with the next farm link
-  (link_bodies_phase_exe_pass_s), together with the other bodies and vtables phases and the objcache hits.
+* **bodies without synthesis**, here with the pristine MSVC objects (msvc/pristine/87eb9373a0bb) and the player's
+  exe (gamedata/exe), 2 jobs: before 99 s, of which the exe pass was 87.7 s. Under the profiler, 65 s of the
+  exe pass was vslots.Coff.symbols_in (387k calls, each sorting the whole symbol table). b9374f3 groups the table
+  once per object: 33 s, exe pass 23.3 s. bodies.tsv, bind.tsv, synth.tsv and stats.txt are identical, and
+  29,771 sections of 400 real objects give the same answers. The synthesis half of bodies compiles through
+  compile_probe, i.e. the compile cache; the farm's LINKEQ check covers it end to end.
 * tests: tests/t1/test_sigs_persist.py (new). test_link_incremental, test_objcache, test_full_linkeq,
   test_link, test_bindings, test_vtables, test_slotfill and test_abimanual pass.
 * merged integration at 05fe90e into the branch (2b7bdf5).
-* metric: resolve 1 of 31971038913d here: 104 -> 57 s (warm store). On farms (101-187 s per resolve, two per
+* metric: resolve 1 of 31971038913d here: 104 -> 57 s (warm store); bodies front end 99 -> 33 s; vtables (subset) 95 -> 4 s. On farms (101-187 s per resolve, two per
   link) that should save about 1.5-3 min per link.

@@ -131,8 +131,20 @@ class Coff:
         return self.data[s.data_off:s.data_off + s.size] if s.data_off else bytes(s.size)
 
     def symbols_in(self, secnum):
-        return sorted((s.value, s.name) for s in self.syms.values() if s.secnum == secnum and s.storage in
-                      (SYM_CLASS_EXTERNAL, SYM_CLASS_STATIC) and s.name != self.secs[secnum].name)
+        """Sorted (value, name) of the symbols defined in a section. The symbols are grouped by section once and
+        each section's answer kept (T1: bodies' exe pass asked 387k times, each a scan of the whole table: 65 s of
+        135 under the profiler); the filter is the old one on that section's group, and every call gets a new list."""
+        got = self.__dict__.setdefault('_symsec_ans', {})
+        ans = got.get(secnum)
+        if ans is None:
+            groups = self.__dict__.get('_symsec')
+            if groups is None:
+                groups = self._symsec = {}
+                for sym in self.syms.values():
+                    groups.setdefault(sym.secnum, []).append(sym)
+            ans = got[secnum] = sorted((s.value, s.name) for s in groups.get(secnum, ()) if s.storage in
+                                       (SYM_CLASS_EXTERNAL, SYM_CLASS_STATIC) and s.name != self.secs[secnum].name)
+        return list(ans)
 
     def word_at(self, name, k):
         """(relocation target or None, dword) of the k-th dword of a defined symbol."""
