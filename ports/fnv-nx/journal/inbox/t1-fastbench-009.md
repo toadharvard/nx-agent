@@ -16,6 +16,17 @@
   With the store cold (the first link on a machine), resolve takes 96 s. The store is 111 MB in out/cache/.
   FNVNX_SIGS_PERSIST=0 turns it off.
   Phases now: references 27.5 s, vftables 12.7 s, msvc side 7.4 s, the rest under 3 s each.
+* **vtables on real data, a subset** (31971038913d: the 157 requested classes whose hosts are among 25 random host
+  units, 31 hosts, 2 jobs, ORDER_KEYS=unit):
+
+  | run | seconds | phases | compile cache |
+  |---|---:|---|---|
+  | cold | 95 | probe rounds 79, emit 16 | 272 compiles, stored |
+  | new out/vtables/ (fnvlink's own caches gone), compile cache warm | 4 | probe 1.0, emit 3.7 | 272 of 272 hits |
+  | everything kept | 1 | 0.3 + 0.3 | not asked (fnvlink's caches) |
+
+  All 56 emitted objects are byte-identical to the cold run's (cmp). At that ratio the full step (700-1,300 s on
+  the farms) should take about 30-50 s on a warm machine.
 * **bodies without synthesis** (`--no-synth`, here): load and classify take 8 s. The exe pass (the pristine
   objects plus the player's exe) cannot run here without game data. Its seconds come with the next farm link
   (link_bodies_phase_exe_pass_s), together with the other bodies and vtables phases and the objcache hits.
