@@ -473,11 +473,11 @@ template <class C> using db = typename std::tr2::direct_bases<C>::type;
 template <class C> using ab = typename std::tr2::bases<C>::type;
 template <class C, int I> using dbase = typename nth<I, db<C>>::type;
 template <class C, int I> using abase = typename nth<I, ab<C>>::type;
-// the deallocation of a deleting destructor: class operator delete (unsized first), else the global sized one
+// the deallocation of a deleting destructor: class operator delete (unsized first), else the global unsized one (MSVC 2008 has no sized delete: -fno-sized-deallocation)
 template <class T> auto dealloc(void *p, int) -> decltype(T::operator delete(p), void()) { T::operator delete(p); }
 template <class T> auto dealloc(void *p, long) -> decltype(T::operator delete(p, sizeof(T)), void())
 { T::operator delete(p, sizeof(T)); }
-template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T)); }
+template <class T> void dealloc(void *p, ...) { ::operator delete(p); }
 }
 '''
 NS = '__fnvnx_vt::'
@@ -504,7 +504,7 @@ template <class C, int I> using abase = typename nth<I, ab<C>>::type;
 template <class T> auto dealloc(void *p, int) -> decltype(T::operator delete(p), void()) { T::operator delete(p); }
 template <class T> auto dealloc(void *p, long) -> decltype(T::operator delete(p, sizeof(T)), void())
 { T::operator delete(p, sizeof(T)); }
-template <class T> void dealloc(void *p, ...) { ::operator delete(p, sizeof(T)); }
+template <class T> void dealloc(void *p, ...) { ::operator delete(p); }
 }
 '''
 KEY_HEAD = 'namespace __fnvnx_vt { template <class T> T dv(); }\n'   # key_items: an argument of type T
@@ -999,7 +999,7 @@ def extract_host(tree, workdir, unit, classes, want, bare=False):
     classes: [(k, spelling, enc)] of the classes synthesized on this host; want: the slot symbols nobody defines.
     The host unit is compiled again with -fkeep-inline-functions and, per class, a qualified destructor call (so the
     implicit destructor D1/D2 is defined; for a class without key function its vtable, D0 and inline virtuals come
-    with it); a deleting destructor still missing is emulated (D1, then the class's or the global sized operator
+    with it); a deleting destructor still missing is emulated (D1, then the class's or the global unsized operator
     delete) under its mangled name. `ld -r --gc-sections` keeps what the wanted symbols reach (static initializers
     removed first, so they are no roots); every global definition is weakened: a copy of a definition of the host
     unit loses to the real one, COMDAT copies dedupe. bare: the unit was probed with HEAD_BARE (it does not compile
