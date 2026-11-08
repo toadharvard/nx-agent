@@ -626,6 +626,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
     stats = collections.Counter(pre_stats)
+    stats['libstdcxx_identifiers'] = len(std_identifiers(os.path.join(out, 'cache')))   # decomp_std's view
     byclass = collections.Counter()
     # the game's operator new/delete for GCC's global forms: the unit's own binding of the MSVC name, else the one
     # most units use
@@ -683,6 +684,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # the address does what the exe's `sub ecx, n; jmp f` does (this -= n, then f's native entry)
     adj_rows = adjustor_thunks(def_at, native, exevft.exe_path(None if exe in (None, '') else exe)
                                if exe != 'none' else None, providers)
+    # An object that already defines `__fnv_<a>` itself (a recon's GCC-only spelling of the thunk, REC1) keeps it:
+    # a stub too was a multiple definition and failed the guest link (link 4a15e91c967a, 11 names; R2).
+    own_addr_defs = {a_ for a_ in list(adj_rows) if ADDR_SYM % a_ in anydef}
+    for a_ in own_addr_defs:
+        del adj_rows[a_]
+    stats['adjustor_thunk_unit_defined'] = len(own_addr_defs)
     for a_, (n_, t_) in sorted(adj_rows.items()):
         bridges.setdefault(ADDR_SYM % a_, emit_adj_stub(ADDR_SYM % a_, adj_target(native, t_), n_))
     stats['adjustor_thunk_stubs'] = len(adj_rows)
@@ -690,6 +697,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # non-virtual destructor, so callers bound there trapped. A stub does what MSVC's ??_G does: D1 (the unit's own,
     # else the address its ??1 is bound to), then the global operator delete when flags bit 0 is set; returns this
     gdel_rows = nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_votes, providers)
+    for a_ in [a_ for a_ in gdel_rows if ADDR_SYM % a_ in anydef]:   # unit-defined, as for adjustor thunks
+        del gdel_rows[a_]
     for a_, (d1_, del_) in sorted(gdel_rows.items()):
         bridges.setdefault(ADDR_SYM % a_, emit_sdd_stub(ADDR_SYM % a_, d1_, del_))
     stats['nonvirtual_deldtor_stubs'] = len(gdel_rows)
@@ -3177,12 +3186,54 @@ def disambiguate_defs(names, m, itanium):
     return c or names
 
 
+STD_IDS = []   # [set] of every identifier libstdc++'s headers declare (std_identifiers); empty: not known
+
+
+def std_identifiers(cache_dir=None):
+    """The identifiers in GCC's libstdc++ headers (`#include <bits/stdc++.h>` preprocessed with $CXX, default
+    aarch64-linux-gnu-g++), cached in <cache_dir>/libstdcxx_ids.txt. Empty when the compiler is not there: every
+    std:: name then stays `runtime`, as before."""
+    if STD_IDS:
+        return STD_IDS[0]
+    path = os.path.join(cache_dir, 'libstdcxx_ids.txt') if cache_dir else None
+    ids = set()
+    if path and os.path.exists(path):
+        ids = set(open(path).read().split())
+    else:
+        try:
+            r = subprocess.run([os.environ.get('CXX', 'aarch64-linux-gnu-g++'), '-std=gnu++17', '-E', '-x', 'c++', '-'],
+                               input='#include <bits/stdc++.h>\n', capture_output=True, text=True, timeout=300)
+            if r.returncode == 0:
+                ids = set(re.findall(r'\b[A-Za-z_]\w*\b', r.stdout))
+        except (OSError, subprocess.SubprocessError):
+            ids = set()
+        if ids and path:
+            os.makedirs(cache_dir, exist_ok=True)
+            open(path, 'w').write('\n'.join(sorted(ids)) + '\n')
+    STD_IDS.append(ids)
+    return ids
+
+
+def decomp_std(un, isig):
+    """A `std::` name (_ZNSt / _ZSt) whose first component after std:: libstdc++ does not declare: the decomp's own
+    class or function in namespace std (std::StandardLibrarySingletonObject, std::StringBase::_Xlen, std::_Lockit,
+    std::FUN_00ad5770, ...). libstdc++ defines none of them, so they are classified like any other decomp name
+    (units.json, bodies' exe-addr / crt-rule) instead of being left to the runtime (topdown rank 2/3, d1ed15e7)."""
+    if not un.startswith(('_ZNSt', '_ZSt')) or not STD_IDS or not STD_IDS[0]:
+        return False
+    q = getattr(isig, 'qual', None) or []
+    if len(q) < 2 or q[0] != 'std':
+        return False
+    first = re.match(r'[A-Za-z_]\w*', q[1])
+    return bool(first) and first.group(0) not in STD_IDS[0]
+
+
 def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
     """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller).
     ident: {data identifier: image addresses} - the last resort for a data reference (S5): the same identifier in
     another scope (the decomp's per-function namespaces) or with another decorated type (an array declared where
     MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise."""
-    if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)):
+    if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)) and not decomp_std(un, isig):
         return 'runtime', None, None, None, None
     if isig.kind == 'special':
         return ('native' if un in anydef else 'special-unresolved'), None, None, None, isig.special

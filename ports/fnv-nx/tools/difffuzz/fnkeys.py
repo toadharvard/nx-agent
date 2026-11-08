@@ -45,7 +45,11 @@ import config
 # callee-saved pop learning / bound-stub rewrite / canned results out of the private ranges) change how every
 # function is fuzzed, so no cache from before them is trusted. The d21 / d24 rows below stay for later partial
 # refreshes, as difffuzz-19's did. F3b (native-stub-data): the AArch64 stub range is background memory, as on the
-# oracle, except the slots of the named / vtable stubs the image binds, where a data access still faults.
+# oracle, except the slots of the named / vtable stubs the image binds, where a data access still faults. F1b: MSVC
+# padding and value-free writes are no custom-register reads, custom registers carry the parameter their calibrated
+# pairing agrees on, the adaptive follow skips a callee the native calls out of line itself and reruns after its
+# last load, the bool-repr probe covers background bytes and NaN-only remainders, a store into the oracle's return
+# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy.
 HARNESS = 'difffuzz-20'
 
 

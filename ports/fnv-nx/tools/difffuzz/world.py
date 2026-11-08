@@ -226,6 +226,11 @@ UNIFORM = False
 # {address: set of access sizes}; classify.py's bool-repr probe counts a byte only when the MSVC code read exactly
 # that byte with a 1-byte access (a bool), not when it is part of a pointer or integer word
 BYTE_READS = None
+# F1b (difffuzz-20): with BG_READS set to a dict, x86emu.run records every read outside the stack and the x86
+# private range as {address: [set of access sizes, the byte a 1-byte read saw]}: the bool-repr probe's bytes that
+# come from the random background (a bool global or a field behind a background pointer), which the case does not
+# plant
+BG_READS = None
 
 
 def stack_fill(seed, n):

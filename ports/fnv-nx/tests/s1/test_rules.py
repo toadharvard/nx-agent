@@ -804,6 +804,35 @@ check('STAND1 keeps tagged definitions behind pragmas, declarations, a type or a
       ['return p + i;', 'return &g;', 'return a->n;', '*(int*)this = 1;', 'pooled = 1;',
        '/* fnv-nx STAND1: Cls::Stand is the function at the tagged address */'], ['fnv-nx STAND1: Bip', 'Map();'])
 
+# STAND1 keeps an untagged definition the unit's own units.json `functions` place, even when another definition
+# carries the address's tag (R2: caravanmenu 0x0073b730)
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_json.dump({'units': [{'source': 'src/staging/u.cpp',
+                       'functions': [{'address': '0x0073b730', 'symbol': '?Run@Hand@@QAEXPAH@Z', 'size': 168}],
+                       'symbols': {'?Run@Hand@@QAEXPAH@Z': '0x0073b730', '?Stand@Hand@@QAEXXZ': '0x0073b730'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          'struct Card\n{\n// @fnv 0x0073b730\n    virtual char* Run_card()\n    {\n        return 0;\n    }\n};\n'
+          'struct Hand { void Run(int* p); void Stand(); };\nvoid Hand::Run(int* p)\n{\n    p[0] = 7;\n}\n'
+          'void Hand::Stand()\n{\n}\n', os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND1 keeps a definition its unit places, whatever carries the tag', got,
+      ['p[0] = 7;', '/* fnv-nx STAND1: Hand::Stand is the function at the tagged address */'],
+      ['fnv-nx STAND1: Hand::Run'])
+_json.dump({'units': [{'source': 'src/staging/u.cpp',
+                       'functions': [{'address': '0x00b26260', 'symbol': '?Sort@@YAXPAH@Z', 'size': 40}],
+                       'symbols': {'?Sort@@YAXPAH@Z': '0x00b26260', '?Sort@@YAXPAN@Z': '0x00b26260'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          '// @fnv 0x00b26260\nvoid Sort(int* p)\n{\n    p[0] = 1;\n}\nvoid Sort(double* p)\n{\n    p[0] = 2;\n}\n',
+          os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND1 still drops the untagged overload of a tagged, placed name', got,
+      ['p[0] = 1;', 'void Sort(double* p); /* fnv-nx STAND1 */'], ['p[0] = 2;'])
+
 # ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
 _s = tempfile.mkdtemp()
 os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
@@ -1524,12 +1553,35 @@ check('REC1-REPL never half-applies: pair 0 matches, pair 1 does not -> nothing 
       ['unchanged', ", 1, 0, 'nowhere')"], ['raised', 'void G();', 'REC1-REPL\': 1'])
 check('REC1-REPL a malformed pair: rejected',
       _kfails('k7', {'replace': [{'old': '', 'new': 'x'}]}, _ktext), ['unchanged', ', 0, -1,'], ['raised'])
+def _kdup(name, body, text):
+    os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', name)
+    _krecon(name, {'append': 'body.cpp'}, body)
+    prepare.__dict__['_fnvnx_recon_rejected'] = []
+    st = Counter(); out = s1.r_recon_bodies(_kp, text, st)
+    return ('appended ' if 'fnv-nx REC1' in out else 'unchanged ') + str(dict(st)) + ' ' + repr(prepare.__dict__['_fnvnx_recon_rejected'])
+_dt = 'struct E { int a; };\n// @fnv 0x00d2cac0\nstatic void __declspec(noinline)\n    Copy(E* d, const E* s, unsigned int n)\n{\n    d[0] = s[0];\n}\n'
+check('REC1-DUP-DEF an append that redefines a function the unit defines (split head): rejected, not appended',
+      _kdup('d1', '#if !defined(_MSC_VER)\nstatic void Copy(E* apDest, const E* apSource, unsigned int auiByteCount)\n{\n}\n#endif\n', _dt),
+      ['unchanged', "'REC1-REJECT': 1", '-2, ', 'Copy(E*,E*,unsignedint)'], ['appended'])
+check('REC1-DUP-DEF the same body when a rule left only the declaration: appended',
+      _kdup('d2', 'static void Copy(E* d, const E* s, unsigned int n)\n{\n}\n',
+            'struct E { int a; };\nstatic void Copy(E* d, const E* s, unsigned int n); /* fnv-nx STAND1 */\n'),
+      ['appended'], ['REC1-REJECT'])
+check('REC1-DUP-DEF an overload (other parameters) and a member of another class are not duplicates',
+      _kdup('d3', 'void Copy(E* d, int n)\n{\n}\nvoid F::Copy(E* d, const E* s, unsigned int n)\n{\n}\n', _dt),
+      ['appended'], ['REC1-REJECT'])
+check('REC1-DUP-DEF a definition inside the same namespace counts; another namespace does not',
+      _kdup('d4', 'namespace q {\nvoid g()\n{\n}\n}\n', 'namespace q {\nvoid g() { }\n}\nnamespace r {\nvoid h() { }\n}\n'),
+      ['unchanged', 'q::g()'], ['appended'])
+check('REC1-DUP-DEF ... and the same name in another namespace is appended',
+      _kdup('d5', 'namespace p {\nvoid g()\n{\n}\n}\n', 'namespace q {\nvoid g() { }\n}\n'), ['appended'], ['REC1-REJECT'])
+_kfails('k8', {'replace': [{'old': '', 'new': 'x'}]}, _ktext)   # one rejection for the report below
 os.makedirs(os.path.join(_rc, 'out', 'build'), exist_ok=True)
 _st = Counter()
 s1.add_recon_definitions(os.path.join(_rc, 'out'), _st)
 _rt = open(os.path.join(_rc, 'out', 'build', 'recon_rejected.tsv')).read()
 check('REC1-REPL the POST hook lists the rejected recons in build/recon_rejected.tsv',
-      _rt + str(dict(_st)), ['#recon dir', 'k7', 'src/k.cpp', "'REC1-REJECTED-RECONS': 1"])
+      _rt + str(dict(_st)), ['#recon dir', 'src/k.cpp', "'REC1-REJECTED-RECONS': 1"])
 prepare.__dict__['_fnvnx_recon_rejected'] = []
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None

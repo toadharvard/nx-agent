@@ -92,8 +92,14 @@ POLICY = {
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
+    'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
+                                              'buffer and destroys the local, GCC constructs it there (copy '
+                                              'elision, allowed by C++), F1b'),
+    'oracle-frame-smash': ('by-design', '-', False, 'the oracle faults after a store into its own return-address '
+                                                    'slot: a local array overrun by an out-of-range fuzzed count (UB '
+                                                    'in C++; the exe corrupts its frame the same way), F1b'),
     # --- harness / oracle-model artefacts ----------------------------------------------------------------------------
-    'local-static':   ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
+    'local-static':  ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
                                                  '(fuzzed bytes), GCC in .bss (zero): not compared state'),
     'uninit-both':    ('artifact', 'S13', False, 'both machines read garbage: the fuzzed case is invalid for both'),
     'oracle-vcall':   ('artifact', 'S13', False, 'the oracle faults on an indirect call the harness does not model '
@@ -429,6 +435,8 @@ def _rule_error(d, rec=None):
             if fa[1] < NULL_END:
                 return 'native-null-read'
     if a is None and isinstance(x, str):
+        if d.get('x86_frame_smash'):
+            return 'oracle-frame-smash'
         if x == 'exc:3':
             return 'oracle-trap'
         fx = _fault_addr(x)

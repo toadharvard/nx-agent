@@ -94,6 +94,9 @@ CLASSES = {
     'STAND5': 'platform',       # STAND2 for an in-class member body whose MSVC name the unit binds to another unit's address
     'STAND4': 'platform',       # STAND1/2 for a static free stand-in: the definition becomes an extern declaration of the bound name
     'STAND6': 'platform',       # STAND2 for a __declspec(noinline) stand-in, in any unit (MSVC never inlined it)
+    'ADDRFN1': 'platform',     # a code address cast to void* takes the address symbol __fnv_<a> (a GCC asm label)
+    'POP2': 'neutral',          # POST hook: pop-mismatch chains, the words a getter leaves move to the call that pops them
+    'THIS2': 'neutral',         # POST hook: a caller that hands its ecx to a thiscall callee calls it on its object
     'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static);
                                # not neutral: MSVC then drops the static recipe functions only a harness referenced
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
@@ -137,11 +140,13 @@ CLASSES = {
     'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
-PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
+PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names', 'POP2': 'pop_chains',
+          'THIS2': 'this_members'}
 # POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
-POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1'}
+POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
+              'pop_chains': 'POP2', 'this_members': 'THIS2'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
