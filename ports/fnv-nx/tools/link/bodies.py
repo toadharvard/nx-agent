@@ -1268,6 +1268,26 @@ def copy_addr_pass(rows, cl, itanium, gate):
     return out
 
 
+def fold_fallback(rows, failed, cl, itanium):
+    """A `msvc-inline` / `msvc-empty` name whose synthesis failed (`failed`: the host does not emit it) but which is a
+    pointer-argument template member whose other instantiations units.json places at one native address
+    (Classifier.by_fold): the folded exe body, `template-fold`. `BSSimpleList<fnv_<a>::Rec*>::~BSSimpleList` is
+    classified msvc-inline first (the pristine object has the instantiation), and its host unit only uses the list,
+    so the body is not emitted there. Removes the name from `failed`."""
+    out = []
+    for r in rows:
+        if r.name in failed and r.cls in ('msvc-inline', 'msvc-empty'):
+            isig = itanium(r.name)
+            hit = cl.by_fold(isig) if isig.kind == 'func' else None
+            if hit:
+                a, ns = hit
+                failed.pop(r.name)
+                r = Row(r.name, 'template-fold', a, ADDR_SYM % a, r.units, 'folded with %d instantiations, e.g. %s;'
+                        ' after %s: %s' % (len(ns), ns[0], r.cls, r.note), None)
+        out.append(r)
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------- vcalls
 
 VCALL_SYM = '__fnvnx_bdvc_%08x'
@@ -2398,6 +2418,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                                    o_path, len(empty)))
             else:
                 failed.update({r.name: 'synth-failed (as)' for r in empty})
+    rows = fold_fallback(rows, failed, cl, itanium)
     rows = [r._replace(cls='missing', note=failed[r.name] + '; was ' + r.cls + ': ' + r.note)
             if r.name in failed else r for r in rows]
     rows = [r._replace(note=r.note + '; ' + vnotes[r.name]) if r.cls == 'missing' and r.name in vnotes else r

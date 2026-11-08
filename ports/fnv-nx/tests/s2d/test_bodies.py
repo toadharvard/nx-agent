@@ -867,6 +867,16 @@ class Fold(unittest.TestCase):
             else:
                 self.assertNotEqual(r.cls, 'template-fold', n)
 
+        # a failed msvc-inline synthesis of a foldable name falls back to the fold; others stay failed
+        rows = [bodies.Row('_ZN4ListIP3FooED2Ev', 'msvc-inline', None, None, 'src/b.cpp', 'x', 'src/b.cpp'),
+                bodies.Row('_ZN4ListIP3FooE3GetEv', 'msvc-inline', None, None, 'src/b.cpp', 'x', 'src/b.cpp'),
+                bodies.Row('_ZN4ListIiED1Ev', 'msvc-inline', None, None, 'src/b.cpp', 'x', 'src/b.cpp')]
+        failed = {r.name: 'synth-failed (not emitted)' for r in rows}
+        out = bodies.fold_fallback(rows, failed, cl, itanium)
+        self.assertEqual([(r.cls, r.target) for r in out], [('template-fold', '__fnv_00405000'),
+                                                          ('msvc-inline', None), ('msvc-inline', None)])
+        self.assertEqual(sorted(failed), ['_ZN4ListIP3FooE3GetEv', '_ZN4ListIiED1Ev'])
+
 
 class NotInImage(unittest.TestCase):
     def test_not_in_image(self):
