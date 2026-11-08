@@ -12,4 +12,6 @@
 /* the int conversion that MSVC compiles to `call __ftol2_sse` (FTOL1 sites define the target helper as
  * `(fnvnx_ftol2_sse)(double)`, untouched by this macro) */
 #define fnvnx_ftol2_sse(x) ((int)(x))
+/* DBUG1 (V1): a hand-indexed vtable slot; the native build adds one behind the D1/D0 pair, MSVC keeps it */
+#define FNVNX_VSLOT(k) (k)
 #endif
