@@ -44,10 +44,13 @@ def main():
     ok('the same range again: 0', call(4, 0xff200000, 0x100000) == 0)
     ok('a mapped range: 0', call(4, 0x40000000, 0x10000) == 0)
     ok('the image window: 0', call(4, 0x00400000, 0x10000) == 0)
+    ok('the emulator\'s own VT window (mapped later): 0', call(4, 0x0E000000, 0x10000) == 0 and call(4, 0x0D000000, 0x2000000) == 0)
+    e.base, e.size = 0x05000000, 0x01000000
+    ok('the guest image and its inject room: 0', call(4, 0x06800000, 0x10000) == 0 and call(4, 0x07000000, 0x10000) == 0x07000000)
     ok('past 4 GiB: 0', call(4, 0xfff00000, 0x200000) == 0)
     ok('unaligned hint rounds down to 64 KiB', call(4, 0x10012345, 0x1000) == 0x10010000)
     b = call(4, 0, 0x20000)
-    ok('no hint: a free range', b and b >= 0x80000000 and b != a, hex(b))
+    ok('no hint: a free range below 0x80000000 (ILP32 sign extension)', b and 0x18000000 <= b < 0x3C000000, hex(b))
     ok('nothing mapped before a commit', not any(r[0] <= a < r[1] for r in e.uc.mem_regions()))
     ok('commit inside the reservation', call(5, a + 0x1000, 0x2000) == 0)
     reg = [r for r in e.uc.mem_regions() if r[0] <= a + 0x1000 <= r[1]]

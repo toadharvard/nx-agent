@@ -690,9 +690,20 @@ class Emu:
     # fs_stat with it (reverted on claude/fnv-s5), so by default the guest keeps the heap-carved fallback.
     vm_service = os.environ.get("FNVNX_EMU_VM") == "1"
     VM_ALIGN, VM_NO_GO = 0x10000, (0x00400000, 0x02100000)
+    # regions the emulator maps itself, some only later (the VT_* copies and thunks at __libc_init_array, injected
+    # objects past the guest image): a reservation there would be unmapped under them (S5)
+    VM_EMU = ((0x0E000000, 0x10000000),)
+    # reservations without a hint: below 0x80000000 (an ILP32 pointer at or above it can be sign-extended into an
+    # unmapped 64-bit address) and below the thread stacks
+    VM_ANY = (0x18000000, 0x3C000000)
 
     def vm_free(self, a, n):
         if a + n > 0x100000000 or (a < self.VM_NO_GO[1] and a + n > self.VM_NO_GO[0]) or a < 0x10000:
+            return False
+        emu = list(self.VM_EMU)
+        if getattr(self, "base", None) is not None and getattr(self, "size", None):
+            emu.append((self.base, self.base + self.size + 0x01000000))   # the guest image and what is injected after it
+        if any(a < hi and lo < a + n for lo, hi in emu):
             return False
         for b, e, _p in self.uc.mem_regions():
             if a <= e and b < a + n:
@@ -712,7 +723,7 @@ class Emu:
                 if not self.vm_free(a, size):
                     return 0
             else:
-                a = next((c for c in range(0x80000000, 0x100000000 - size, self.VM_ALIGN * 16) if self.vm_free(c, size)), 0)
+                a = next((c for c in range(self.VM_ANY[0], self.VM_ANY[1] - size, self.VM_ALIGN) if self.vm_free(c, size)), 0)
                 if not a:
                     return 0
             resv[a] = size
