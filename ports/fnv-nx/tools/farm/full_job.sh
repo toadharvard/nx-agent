@@ -142,6 +142,14 @@ fi
 # linkobj/cache when this machine has (almost) none, so a fresh farm's first link is not cold (LINKCACHE=0: neither)
 export FNVNX_LINK_OBJCACHE=${FNVNX_LINK_OBJCACHE:-$FARM_HOME/linkobj}
 [ "${LINKCACHE:-1}" = 1 ] && { bash "$HERE/linkcache.sh" seed "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true; }
+# T1: the game units' objects through the content-addressed cache shared by the farms (compile.sh
+# FNVNX_UNIT_OBJCACHE; branch unitobj/cache): a unit another farm compiled with the same compiler, flags, source and
+# headers at the same paths is taken instead of compiled (a flags change costs one farm's compile, not every farm's).
+# Seeded every job (only the files this machine lacks), published after the build. UNITCACHE=0: neither.
+if [ "${UNITCACHE:-1}" = 1 ]; then
+	export FNVNX_UNIT_OBJCACHE=${FNVNX_UNIT_OBJCACHE:-$FARM_HOME/unitobj}
+	LINKCACHE_BRANCH=unitobj/cache LINKCACHE_SEED_MIN=1000000000 bash "$HERE/linkcache.sh" seed "$FNVNX_UNIT_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
+else unset FNVNX_UNIT_OBJCACHE; fi
 # shellcheck disable=SC2086
 make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
 	${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
@@ -191,6 +199,11 @@ fi
 # quick_job keeps it local like its other caches); unchanged caches are not pushed
 if [ "${LINKCACHE:-1}" = 1 ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ] && [ -f "$F/build/link/out/aliases.ld" ]; then
 	LINKCACHE_NOTE="full $C12" bash "$HERE/linkcache.sh" publish "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
+fi
+# the units' cache back to the artifacts repository (only when it changed; never from a WIP build)
+if [ -n "${FNVNX_UNIT_OBJCACHE:-}" ] && [ -z "${FARM_WIP_BRANCH:-}" ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ]; then
+	LINKCACHE_BRANCH=unitobj/cache LINKCACHE_PUBLISH_MB=${UNITCACHE_PUBLISH_MB:-1500} LINKCACHE_NOTE="units full $C12" \
+		bash "$HERE/linkcache.sh" publish "$FNVNX_UNIT_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
 fi
 
 # 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the

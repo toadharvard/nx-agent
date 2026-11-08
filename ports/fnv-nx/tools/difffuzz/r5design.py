@@ -570,23 +570,37 @@ def dead_init_probe(pair, case, div, max_steps, h):
 
 def deref_after_call(code, base, ret_to, disp=None):
     """True when the call that returns to `ret_to` in `code` is an indirect call (through a register or memory) and
-    the next instructions, before eax is written or any branch, load through `[eax + disp]` (the first read of eax;
-    any displacement when `disp` is None)."""
+    the next instructions, before the result is lost or any branch, load through `[eax + disp]` (the first read of
+    eax; any displacement when `disp` is None). (bh_C, 0x00885560) The result may first be copied to a register
+    (`mov esi, eax`) and the load made through the copy: the scan follows such copies, and a later call keeps the
+    callee-saved ones (esi, edi, ebx) alive: `mov esi, eax; ...; call [vt+0x1d8]; fld [esi+8]`."""
     ins = list(_MD.disasm(bytes(code), base))
     i = next((j for j, n in enumerate(ins) if n.address + n.size == ret_to and n.mnemonic == 'call'), None)
     if i is None or ins[i].operands[0].type == capstone.x86.X86_OP_IMM:
         return False
-    for n in ins[i + 1:i + 7]:
-        if n.mnemonic.startswith('j') or n.mnemonic in ('call', 'ret', 'retn'):
+    live, saved = {'eax'}, {'esi', 'edi', 'ebx'}
+    for n in ins[i + 1:i + 17]:
+        if n.mnemonic.startswith('j') or n.mnemonic in ('ret', 'retn'):
             return False
+        if n.mnemonic == 'call':
+            live &= saved
+            if not live:
+                return False
+            continue
         for op in n.operands:
-            if op.type == capstone.x86.X86_OP_MEM and op.mem.base and n.reg_name(op.mem.base) == 'eax' and \
+            if op.type == capstone.x86.X86_OP_MEM and op.mem.base and n.reg_name(op.mem.base) in live and \
                     not op.mem.index:
                 return disp is None or op.mem.disp == disp
         rd, wr = n.regs_access()
-        if {n.reg_name(r) for r in rd} & _EAX:
+        rn, wn = {n.reg_name(r) for r in rd}, {n.reg_name(r) for r in wr}
+        if n.mnemonic == 'mov' and len(n.operands) == 2 and all(o.type == capstone.x86.X86_OP_REG for o in n.operands) \
+                and len(wn) == 1 and rn & live and not (rn & _EAX - live):
+            live = (live - wn) | wn          # a copy of the result: the load may come through it
+            continue
+        if rn & (live | (_EAX if 'eax' in live else set())):
             return False
-        if 'eax' in {n.reg_name(r) for r in wr}:
+        live -= wn
+        if not live:
             return False
     return False
 
@@ -613,6 +627,12 @@ def null_deref_probe(pair, case, div, max_steps, h):
     if rngc is None or not deref_after_call(rngc[1], rngc[0], c.ret_to, int(m.group(1), 16)):
         return None
     refs = {k}
+    # (bh_C, 0x00885560) the first run faulted before it could learn the pops of its wild calls and marked those sites
+    # as tried; the rerun that no longer faults must learn them (a stdcall `call [vt+0x1d8]` the oracle has no
+    # declaration for), then the pair goes back to what it knew
+    tried0, pops0 = set(getattr(pair, 'pops_tried', ())), dict(getattr(pair, 'pops', {}))
+    if hasattr(pair, 'pops_tried'):
+        pair.pops_tried.clear()
     try:
         for _ in range(4):
             for kk, cc in enumerate(rx.calls):
@@ -627,6 +647,9 @@ def null_deref_probe(pair, case, div, max_steps, h):
                 return 'canned-null-deref'
     finally:
         world.REF_CALLS = frozenset()
+        if hasattr(pair, 'pops_tried'):
+            pair.pops_tried.clear(); pair.pops_tried.update(tried0)
+            pair.pops.clear(); pair.pops.update(pops0)
     return None
 
 

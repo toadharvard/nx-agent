@@ -124,6 +124,30 @@ def run(t):
     ok('verify: compared, no mismatch', objcache.STATS['verified'] == 1 and not objcache.STATS['verify_mismatch']
        and got6 == want3)
 
+    # misses are explained: the first parts that changed since this compile was stored
+    objcache.WHY.clear()
+    w('include/a.h', 'struct A { int a; };\n')
+    cached(text)
+    ok('why: a changed header is named (dep:)', list(objcache.WHY) == ['dep:' + os.path.join(tree, 'include', 'a.h')])
+    objcache.WHY.clear()
+    cached(text + '// changed\n')
+    ok('why: changed source text', list(objcache.WHY) == ['source'])
+    objcache.WHY.clear()
+    cached(text, [f if f != '-O2' else '-O1' for f in fl])
+    ok('why: other flags (argv; the source: the last stored compile had the changed text)', set(objcache.WHY) == {'argv', 'source'})   # against the last stored: the changed text
+    objcache.WHY.clear()
+    objcache.compile(CXX, [f for f in fl if not f.startswith('-fplugin-arg')], src, obj + '2.o', cwd=tree)
+    ok('why: another object path is new', list(objcache.WHY) == ['new'])
+    objcache.WHY.clear()
+    os.makedirs(os.path.join(tree, 'include', 'sub'))
+    open(os.path.join(tree, 'include', 'sub', 'n.h'), 'w').write('\n')
+    objcache._names.clear()
+    cached(text)
+    ok('why: a file added under an -I directory (names:)',
+       set(objcache.WHY) == {'argv', 'names:' + os.path.join(tree, 'include')})
+    ok('why: in the summary', '; misses: 1 argv, 1 names:' in objcache.summary('t'))
+    w('include/a.h', 'struct A { int a; int b; int c; };\n')   # back to want3's header
+
     # off: no cache directory is touched
     os.environ['FNVNX_LINK_OBJCACHE'] = 'none'
     objcache.STATS.clear()

@@ -1979,6 +1979,10 @@ class Link(Stage):
             r.metric('link_objcache_%s_compiles' % tag, int(n_))
             r.metric('link_objcache_%s_hits' % tag, int(h_))
             r.metric('link_objcache_%s_compile_s' % tag, float(cs))
+        # why the misses missed (objcache.py explain): the step's most common reasons, a note on the report
+        for tag, why in re.findall(r'^objcache (\w+): .*?; misses: (.*)$', ltext, re.M):
+            r[('link_objcache_%s_misses' % tag)] = why[:600]
+            r.note('objcache %s misses: %s' % (tag, why[:300]))
         for step, body in re.findall(r'^(bodies|vtables) phases: (.*)$', ltext, re.M):
             for name, sec in re.findall(r'([\w+/ -]+?) ([\d.]+) s(?:,|$)', body):
                 r.metric('link_%s_phase_%s_s' % (step, re.sub(r'\W+', '_', name.strip())), float(sec))

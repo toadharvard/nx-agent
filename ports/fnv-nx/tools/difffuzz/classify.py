@@ -513,6 +513,41 @@ def oracle_vcall(pair, case, max_steps):
     return False
 
 
+def native_unplanted_vcall(pair, case, div, max_steps):
+    """(bh_C, 0x0078a3e0) The native fetched from address 0 (`blr` of a word that is 0) where the oracle, at the same
+    point, made an indirect call (`call [reg+N]` / `call reg`) to a wild target: both read a slot of a table in case
+    memory that no vptr planting made a vftable, the oracle at exe slot k, the native at k + 1 (the Itanium
+    destructor pair), which is another word of the garbage. Not a null the port dereferences: each machine reads its
+    own slot layout of memory with no layout. Needs the oracle's next call after the native's last one."""
+    if div.get('kind') != 'error' or div.get('x86') is not None or div.get('arm') != 'fault:x:00000000':
+        return False
+    rx, ra, _ = pair.run(case, max_steps)
+    if rx.error or ra.error != 'fault:x:00000000':
+        return False
+    n = len(ra.calls)
+    if len(rx.calls) <= n:
+        return False
+    vfts = image_vftables()
+    for a in sorted(rx.writes):
+        if a % 4 == 0 and all(a + i in rx.writes for i in range(4)) and \
+                int.from_bytes(bytes(rx.writes[a + i] for i in range(4)), 'little') in vfts:
+            return False     # (0x00551180) the oracle built an object in this run: its vptr is a vftable the oracle's
+                             # world does not map, the native's table for that class lacks the slot: a defect
+    c = rx.calls[n]
+    if c.target < 0 or c.target in (getattr(pair.target, 'vt_slots', None) or ()) or \
+            c.target in pair.target.x86_code or getattr(c, 'ret_to', None) is None or 0x00401000 <= c.target < 0x00fdf000:
+        # an import, a planted slot, oracle code or any exe function (0x00551180: an object the exe constructor built
+        # holds a real vftable, whose slot the native table lacks: a defect): not a wild word of garbage
+        return False
+    import capstone
+    for a, code in pair.target.x86_code.items():
+        if a < c.ret_to <= a + len(code):
+            cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+            ins = [i for i in cs.disasm(code, a) if i.address + i.size == c.ret_to]
+            return bool(ins) and ins[0].mnemonic == 'call' and not ins[0].op_str.startswith('0x')
+    return False
+
+
 def msvc_inlined(target, div):
     """The native code calls X out of line where the oracle runs X's body inline (MSVC inlined it; the oracle's
     next call is one X itself makes): the native side would have to run X too. An oracle-model gap."""
@@ -600,7 +635,7 @@ def x87_probes(pair, case, div, max_steps, h):
             return True
     finally:
         world.TRIG_INF = False
-    for kind, cw in (('f32', 0x007f), ('f64', 0x027f)):
+    for kind, cw in (('f32', 0x007f), ('f64', 0x027f), ('f32den', 0x027f)):
         rec = {'kind': kind}
         world.X87_CLAMP, world.X87_CW = rec, cw
         try:
@@ -738,12 +773,31 @@ def _plant(c, a):
     c.mem[a] = b'\x01'
 
 
+def _jmp_thunk_target(fn):
+    """The jump target of an exe function that is exactly `jmp rel32` (then padding), else None."""
+    code = (fn or {}).get('code') or b''
+    if len(code) < 5 or code[0] != 0xe9 or any(b not in (0xcc, 0x90) for b in code[5:]):
+        return None
+    return ((fn['address'] + 5) + int.from_bytes(code[1:5], 'little', signed=True)) & 0xffffffff
+
+
+def _thunk_forward(div, fn):
+    """A call-args divergence on a native garbage word at the jump target of a `jmp rel32` thunk."""
+    return div.get('kind') == 'call-args' and bool(div.get('arm_garbage')) and \
+        _jmp_thunk_target(fn) == int(div.get('target') or '-1', 16)
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
     k = div['kind']
     if k == 'local-static':
         h['cause'] = 'local-static'; return h
+    if _thunk_forward(div, fn):
+        # (difffuzz-20, thunk-forward) the exe function is one `jmp rel32` (an incremental-link thunk): every argument
+        # of its callee is the thunk's own incoming one, and its declaration (`void F(void)`) names none, so the case
+        # defines none: the oracle reads zero stack words, the native forwards registers nobody set
+        h['cause'] = 'thunk-forward'; return h
     if k == 'error' and str(div.get('arm') or '').startswith('trap:'):
         # the native called a vtable slot the link filled with its trap stub (a virtual defined nowhere,
         # arm64emu.TRAPS): the native calls a name the link binds to nothing (difffuzz-14)
@@ -779,7 +833,7 @@ def hint(pair, target, case, div, fn, max_steps):
             any(s.get('shift') == -1 and (k == 'call-count' or s.get('ran')) for s in div.get('vslot') or []):
         # the native's extra call is planted slot k, the oracle ran slot k+1 (unit code) for real (Pair.vslots_run)
         h['cause'] = 'vslot-shift'; return h
-    if k == 'call-target' and div.get('vslot_native'):
+    if k in ('call-target', 'call-count') and div.get('vslot_native'):
         # the native's vtable slot calls another exe function than the exe's vftable slot (runner.Pair.vslot_native)
         h['cause'] = 'native-vslot-differs'; return h
     if k == 'call-target' and div.get('vcall') == 'planted' and div.get('arm_vcall') == 'planted':
@@ -846,6 +900,8 @@ def hint(pair, target, case, div, fn, max_steps):
         if str(div.get('x86', '')).startswith('fault:') and div.get('arm') is None and oracle_vcall(pair, case,
                                                                                                     max_steps):
             h['cause'] = 'oracle-vcall'; return h
+        if pair is not None and native_unplanted_vcall(pair, case, div, max_steps):
+            h['cause'] = 'native-vcall-unplanted'; return h
         one = 'x86' if div.get('arm') is None and str(div.get('x86', '')).startswith('fault:') else \
             'arm' if div.get('x86') is None and str(div.get('arm', '')).startswith('fault:') else None
         if one and pair is not None:
@@ -948,6 +1004,11 @@ def hint(pair, target, case, div, fn, max_steps):
             # (difffuzz-20, zero-sign) -0.0 against +0.0: an x87 intermediate beyond the float range keeps its sign
             # until the store rounds it (0x00c206b0: -4.5e-44 * 4.5e-44 = -2e-87, then + 0.0 stays negative); the
             # rerun that clamps such values (x87-range) is the evidence, not the equal numeric value
+            return h
+        if not fl and k == 'mem-write' and div.get('float_store') and pair is not None and 'fstp' in mn and \
+                x87_probes(pair, case, div, max_steps, h):
+            # (bh_C, 0x00f92520) a float the function stores with `fstp dword` after x87 arithmetic, off by more
+            # than the tolerance: the same rerun probes as a float result; only an agreeing rerun names the cause
             return h
         if fl:
             if fl.get('tolerant'):

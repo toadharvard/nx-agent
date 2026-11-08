@@ -173,7 +173,16 @@ def main():
         gu = {'_ZTV3Zoh': (t0.asm_group(tmp, 'u', '_ZTV3Zoh', ['_ZN3Zoh3v00Ev', '_ZN3Zoh2v1Ev', '_ZN3Zoh2v2Ev']), V['A'])}
         exe_u = os.path.join(tmp, 'U.exe')   # its own image: the loose exevft.deleting_dtor of A1 / A2 would see AU's ret 4
         tx.make_pe(exe_u, lambda rd: None, {A0: t0.SDD, A1: OTHER, A2: OTHER, AU: SDD_CALLS})
+        # the destructor X the ??_G calls (A1) has a native: D1 = X, D0 = a synthesised `X; delete` (W48's bodiless
+        # ??_G); FNVNX_GSYN=0 keeps W45's trap pair, checked here
+        sts, brs, _ = run(tmp, exe_u, gu, exu, native)
+        ws = words(brs, '_ZTV3Zoh') if 'zzvtext__ZTV3Zoh' in brs else []
+        check(ws[2:4] == ['__fnv_00401010', '__fnvnx_vgsyn_00401100'] and sts['slot0-dtor-synth'] == 1 and
+              'bl __fnv_00401010' in brs.get('__fnvnx_vgsyn_00401100', '') and 'bl _ZdlPv' in brs['__fnvnx_vgsyn_00401100'],
+              'an uncompiled ??_G whose destructor has a native: D1 = the destructor, D0 = destructor + delete: %s' % ws)
+        os.environ['FNVNX_GSYN'] = '0'
         stu, bru, tru = run(tmp, exe_u, gu, exu, native)
+        del os.environ['FNVNX_GSYN']
         w = words(bru, '_ZTV3Zoh') if 'zzvtext__ZTV3Zoh' in bru else []
         trap_ok = len(w) == 7 and w[2] != w[3] and all(x.startswith('__fnvnx_vtrap_') and x in tru and
                                                        'exe 0x00401100' in tru[x][0] for x in w[2:4])

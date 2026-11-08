@@ -5709,6 +5709,139 @@ def d22_classes(text, masked=None):
                         first=virtuals[0] if virtuals else None, virtuals=virtuals, kind=m.group(1)))
     return out
 
+# ---- T1: d22_placeholder / _d22_callonly read a file through an index of its words (prepare speed) -----------------
+# A cold prepare spent 363 of 1,328 s in r_vtable_dtor_slot, nearly all in these two functions scanning whole files
+# with one regex per class and member name. Every match of their patterns starts at a maximal \w+ run equal to that
+# name (the lookbehinds forbid a word character before it; what follows the name cannot be one), so the patterns run
+# only in small windows at those runs. A window ends at the first ( ; { } ) after the name: no match of these
+# patterns crosses one before its final '('. d22_placeholder's text has spans blanked (_D22Rest): the runs a blank cuts
+# are candidates too, and its windows are read from the blanked text. A name that is not a plain identifier keeps the
+# whole-text scan. Same matches, in the same order (checked against re.finditer on the decomp's texts).
+_D22_WORD = re.compile(r'\w+')
+_D22_STOP = re.compile(r'[(;{})]')
+_D22_IDX = {}
+
+
+def _d22_index(text):
+    """(word -> run starts, stop-char positions, run starts, run ends) of one text object (a few kept)"""
+    e = _D22_IDX.get(id(text))
+    if e is not None and e[0] is text:
+        return e[1]
+    words, starts, ends = collections.defaultdict(list), [], []
+    for m in _D22_WORD.finditer(text):
+        words[m.group()].append(m.start())
+        starts.append(m.start())
+        ends.append(m.end())
+    if len(_D22_IDX) > 6:
+        _D22_IDX.clear()
+    _D22_IDX[id(text)] = (text, (words, [m.start() for m in _D22_STOP.finditer(text)], starts, ends))
+    return _D22_IDX[id(text)][1]
+
+
+class _D22Rest:
+    """text with the (merged) spans blanked, as d22_placeholder's `rest` was, read in pieces"""
+    def __init__(self, text, spans):
+        sp = []
+        for a, b in sorted(s for s in spans if s[1] > s[0]):
+            if sp and a <= sp[-1][1]:
+                sp[-1][1] = max(sp[-1][1], b)
+            else:
+                sp.append([a, b])
+        self.t, self.sp, self.sa = text, sp, [a for a, _ in sp]
+
+    def blanked(self, i):
+        k = bisect.bisect_right(self.sa, i) - 1
+        return k >= 0 and self.sp[k][0] <= i < self.sp[k][1]
+
+    def slice(self, lo, hi):
+        t, out, pos = self.t, [], lo
+        k = max(0, bisect.bisect_right(self.sa, lo) - 1)
+        while k < len(self.sp) and self.sp[k][0] < hi:
+            a, b = self.sp[k]
+            if b > pos:
+                a = max(a, pos)
+                if a > pos:
+                    out.append(t[pos:min(a, hi)])
+                if a < hi:
+                    out.append(' ' * (min(b, hi) - a))
+                pos = min(b, hi)
+            k += 1
+        if pos < hi:
+            out.append(t[pos:hi])
+        return ''.join(out)
+
+
+class _D22Match:
+    __slots__ = ('_s', '_e', '_g')
+
+    def __init__(self, s, e, g):
+        self._s, self._e, self._g = s, e, g
+
+    def start(self):
+        return self._s
+
+    def end(self):
+        return self._e
+
+    def group(self, i=0):
+        return self._g[i]
+
+
+def _d22_finditer(pattern, name, text, spans=()):
+    """re.finditer(pattern, text with spans blanked), where the pattern's first token after its one-character
+    lookbehind is the literal name"""
+    pat = re.compile(pattern)
+    if not _D22_WORD.fullmatch(name):
+        return list(pat.finditer(_D22Rest(text, spans).slice(0, len(text)) if spans else text))
+    words, stops, rs, re_ = _d22_index(text)
+    rest = _D22Rest(text, spans) if spans else None
+    cands = set()
+    if rest is None:
+        cands.update(words.get(name, ()))
+    else:
+        hit = set()     # runs a span touches: their pieces outside the spans
+        for a, b in rest.sp:
+            k = max(0, bisect.bisect_right(rs, a) - 1)
+            while k < len(rs) and rs[k] < b:
+                if re_[k] > a:
+                    hit.add(k)
+                k += 1
+        hit_starts = {rs[k] for k in hit}
+        cands.update(s0 for s0 in words.get(name, ()) if s0 not in hit_starts)
+        for k in hit:
+            i, r1 = rs[k], re_[k]
+            while i < r1:
+                while i < r1 and rest.blanked(i):
+                    i += 1
+                j = i
+                while j < r1 and not rest.blanked(j):
+                    j += 1
+                if j - i == len(name) and text[i:j] == name:
+                    cands.add(i)
+                i = j
+    out, last_end, n = [], -1, len(text)
+    for s0 in sorted(cands):
+        if s0 < last_end:
+            continue
+        k = bisect.bisect_left(stops, s0 + len(name))
+        while k < len(stops) and rest is not None and rest.blanked(stops[k]):
+            k += 1
+        hi = stops[k] + 1 if k < len(stops) else n
+        lo = max(0, s0 - 1)
+        w = rest.slice(lo, hi) if rest is not None else text[lo:hi]
+        m = pat.match(w, s0 - lo)
+        if m:
+            out.append(_D22Match(lo + m.start(), lo + m.end(), [m.group(i) for i in range(pat.groups + 1)]))
+            last_end = lo + m.end()
+    return out
+
+
+def _d22_search(pattern, name, text, spans=()):
+    """re.search on the same terms (the first match, or None)"""
+    ms = _d22_finditer(pattern, name, text, spans)
+    return ms[0] if ms else None
+
+
 def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     """the virtual declaration decl = (start, end, member, text) of class cls is a placeholder in this file: no
     definition outside the class, an inline body of one statement at most, and no other use of its name followed by
@@ -5719,14 +5852,15 @@ def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     if '{' in body:
         inner = body[body.find('{') + 1:body.rfind('}')]
         if len([s for s in inner.split(';') if s.strip()]) > 1 or '{' in inner: return False
-    rest = masked[:start] + ' ' * (end - start) + masked[end:]
-    for a, b in ignore:                         # other classes' virtual declarations of the same name
-        if (a, b) != (start, end): rest = rest[:a] + ' ' * (b - a) + rest[b:]
-    if re.search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), rest): return False
-    for u in re.finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), rest):
+    # the text without this declaration and other classes' virtual declarations of the same name, as spans blanked
+    # (T1: read through an index of the file's words, not rebuilt and scanned per name; _d22_finditer)
+    spans = [(start, end)] + [(a, b) for a, b in ignore if (a, b) != (start, end)]
+    rest = _D22Rest(masked, spans)
+    if _d22_search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), cls, masked, spans): return False
+    for u in _d22_finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), member, masked, spans):
         # an unqualified call reaches cls's member only from a member of cls or of a class deriving from it (S5-boot:
         # actor.cpp's CVShell::FUN_008805f0 calls its own base CVB's `v0(p)`; NiTMap_S's `v0` stayed unconverted)
-        qualified = re.search(r'(?:->|\.|::)\s*$', rest[max(0, u.start() - 8):u.start()])
+        qualified = re.search(r'(?:->|\.|::)\s*$', rest.slice(max(0, u.start() - 8), u.start()))
         if reach is not None and not qualified and not reach(u.start()):
             continue
         # a qualified call whose receiver's type resolves to a class outside the family (extradatalist.cpp:
@@ -5950,8 +6084,8 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
     slot is known from the exe (D22-SLOTK), so its member's name is not tested"""
     if c['bases'] or not c['first'] or len(c['virtuals']) < 2: return False
     if c['dtor'] and not c.get('dtor_decl'): return False
-    if c['dtor'] and re.search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~\s*%s\s*\(' % ((re.escape(c['qual'][-1]),) * 2),
-                               masked):
+    if c['dtor'] and _d22_search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~\s*%s\s*\(' % ((re.escape(c['qual'][-1]),) * 2),
+                                 c['qual'][-1], masked):
         return False                                     # `~C();` defined in the file: a real destructor
     if not c['first'][2]: return False
     if not named_ok and not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]) and not _d22_numbered(c):
@@ -5966,14 +6100,14 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
         # function nothing defines, a construction would need it. Only a class the file never uses as an object:
         # its name only as `C*`, `C&`, `C::`, in its own body or after `struct` / `class`
         nm = c['qual'][-1]
-        for u in re.finditer(r'(?<![\w~:])%s\b' % re.escape(nm), masked):
+        for u in _d22_finditer(r'(?<![\w~:])%s\b' % re.escape(nm), nm, masked):
             if c['open'] < u.start() < c['close']: continue
             if re.match(r'\s*(?:\*|&|::)', masked[u.end():u.end() + 4]): continue
             if re.search(r'(?:struct|class)\s+$', masked[max(0, u.start() - 12):u.start()]): continue
             return False
     name = c['qual'][-1]
     members = {v[2] for v in c['virtuals'] if v[2]}
-    for m in re.finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), masked):
+    for m in _d22_finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), name, masked):
         if re.sub(r'\s+', '', m.group(1)) in members: return False
     return True
 
@@ -6038,10 +6172,22 @@ def _d22_extern_use(path, member):
     if path.endswith(('.cpp', '.c', '.cxx', '.cc')) or not member: return False
     me = os.path.abspath(path)
     refs, includers = _d22_tree_refs(path)
-    users = refs.get(member, ())
-    if not users: return False
     inc = includers(me)
-    return any(f != me and f in inc for f in users)
+    users = refs.get(member, ())
+    if any(f != me and f in inc for f in users): return True
+    # an unqualified call in an including file (magiccaster.cpp's members call `SpellCast(...)` of the
+    # magiccaster_match.h MagicCaster that D22-CL converted at the exe's dtor slot 9: the unit stopped compiling,
+    # full3 74a1c281). The files' texts are read once per tree (cached with the index).
+    uq = prepare.__dict__.setdefault('_fnvnx_d22_uq', {})
+    rx = re.compile(r'(?<![\w.>:~])%s\s*\(' % re.escape(member))
+    for f in inc:
+        if f == me: continue
+        t = uq.get(f)
+        if t is None:
+            try: t = uq[f] = d22_mask(open(f, encoding='utf-8', errors='surrogateescape').read())
+            except OSError: t = uq[f] = ''
+        if rx.search(t): return True
+    return False
 
 def r_vtable_dtor_slot(path, text, stats):
     """D22: `virtual ~C();` for a listed class's slot-0 placeholder under GCC (above); a derived class's
@@ -6080,8 +6226,15 @@ def r_vtable_dtor_slot(path, text, stats):
             kind, k = cl
             if kind != 'minus-one' or k < 0:
                 stats['D22-CL-KEEP'] += 1; continue
-            if len(c['virtuals']) <= k or (c['dtor'] and not c.get('dtor_decl')):
-                stats['D22-CL-HELD'] += 1; continue
+            if len(c['virtuals']) <= k:
+                # the declaration ends before the exe's destructor slot: its slots are the exe's already (k' < k
+                # stays in a minus-one table at k)
+                stats['D22-CL-BELOW'] += 1; continue
+            if c['dtor'] and not c.get('dtor_decl'):
+                vd = next((i for i, v in enumerate(c['virtuals']) if (v[2] or '').startswith('~')), None)
+                # a declared virtual destructor: right where the exe has its deleting destructor, else a layout
+                # difference of the class definition (S2-bodies' DBUG1 side), counted
+                stats['D22-CL-ASIS' if vd == k else 'D22-CL-DTORPOS'] += 1; continue
             t = c['virtuals'][k]
             ck = dict(c, first=t)
             blockers = [o for o in classes if o['bases'] and c['qual'][-1] in _d22_bases(o['bases'])
@@ -6288,6 +6441,30 @@ def r_split_virtual_declarators(path, text, stats):
     if not edits: return text
     for a, b, rep in sorted(edits, reverse=True):
         text = text[:a] + rep + text[b:]
+    return text
+
+# ---------------------------------------------------------------------------------------------------------- HKRO1
+#
+# Havok's hkReferencedObject declares, after its destructor, `getClassType()` and `calcContentStatistics(collector,
+# cls)`: every hkReferencedObject-derived exe vftable has 0x00c90350 / 0x00c90360 at slots 1 / 2 (R4 vtgate abi_check:
+# hkpWeldingViewer 010d1634 slot 3 is 0x00c90360; S2-bodies W32: 11 Havok tables one slot off from slot 2 on). 17 units
+# declare hkReferencedObject with the destructor only (9 have the full form, 12 the two without the destructor), so
+# their derived classes number every own virtual two slots early. HKRO1 adds the two declarations after the destructor
+# under GCC (FNVNX_HKRO1; empty under MSVC, whose objects stay as they are), with `void` parameter types (the unit may
+# not declare hkClass): declared-only slots, which the link fills from the exe's. Only a class named
+# hkReferencedObject whose virtuals are exactly its destructor.
+def r_hk_referenced_object_slots(path, text, stats):
+    """HKRO1: hkReferencedObject's two missing base virtuals after its destructor (see above)."""
+    if 'hkReferencedObject' not in text: return text
+    masked = d22_mask(text)
+    edits = []
+    for c in d22_classes(text, masked):
+        if c['qual'][-1] != 'hkReferencedObject': continue
+        if [v[2] for v in c['virtuals']] != ['~hkReferencedObject']: continue
+        edits.append(c['virtuals'][0][1])
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + ' FNVNX_HKRO1 /* fnv-nx HKRO1 */' + text[at:]
+    stats['HKRO1'] += len(edits)
     return text
 
 # ---------------------------------------------------------------------------------------------------------- EMPTY1
@@ -6559,6 +6736,6 @@ REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_add
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_split_virtual_declarators, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
+              r_implicit_bound_destructors, r_split_virtual_declarators, r_hk_referenced_object_slots, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
               r_template_member_stand_ins, r_raw_vtable_slots, r_empty_string_objects]
 RULES += REFS_RULES
