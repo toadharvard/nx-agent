@@ -1391,3 +1391,7 @@ src/unmapped/matrixvt.hpp.cpp	ref	0x00629ab0	?Ref@A87A0Element@@QAEAAMXZ	?Ref@A8
 src/unmapped/threadsafestructures.cpp	ref	0x00449f80	?GetEntry@Queue44c640@@QAEPAUQueueEntry44c640@@IPAPAXH@Z	?GetEntry@Queue44c640@@QAEPAUQueueEntry44c640@@XZ
 src/unmapped/threadsafestructures.cpp	ref	0x0044ea60	?TryA@QueueEntry44c640@@QAE_NXZ	?TryA@QueueEntry44c640@@QAE_NIPAPAXH@Z
 src/unmapped/threadsafestructures.cpp	ref	0x0044eb80	?TryB@QueueEntry44c640@@QAE_NXZ	?TryB@QueueEntry44c640@@QAE_NIPAPAXH@Z
+src/havok/physics/collide/agent3/convexlist3/hkpconvexlistagent3.cpp	def	0x00d32b40	?FUN_00d32b40@@YAXHHH@Z	?FUN_00d32b40@@YAXHPAXMMH@Z
+src/havok/physics/collide/agent3/convexlist3/hkpconvexlistagent3.cpp	ref	0x00d32b40	?FUN_00d32b40@@YAXHHH@Z	?FUN_00d32b40@@YAXHPAXMMH@Z
+src/staging/blk_00ca0000_o2.cpp	def	0x00cbc8f0	?FUN_00cbc8f0@FUN_00cbc8f0_cls@@QAEXH@Z	?FUN_00cbc8f0@FUN_00cbc8f0_cls@@QAEHH@Z
+src/havok/common/serialize/tagfile/binary/hkbinarytagfilewriter.cpp	ref	0x00dba6a0	?SetShiftedValue@S_dbf1a0_Handle@@QBE?AU1@XZ	?SetShiftedValue@S_dbf1a0_Handle@@QBEPAXPAX@Z

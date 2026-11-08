@@ -21,6 +21,7 @@ from unicorn import arm64_const as A
 import world
 import a64image
 import libcalls
+import retsrc
 
 PAGE = world.PAGE
 TLS_BASE, TLS_SIZE = 0x0b900000, 0x00010000   # inside the AArch64 private range (faults as data elsewhere)
@@ -90,12 +91,18 @@ class Arm64Engine:
         self.mapped.add(a64image.STACK_GUARD)
         # native vtable groups synthesized for planted vptrs (vtmodel.py: classes whose _ZTV the unit image does not
         # define), read only, in the private range
-        for base, data in sorted((vt_mem or {}).items()):
-            for p in range(world.page_of(base), base + len(data), PAGE):
+        # (EQ native-null-read, difffuzz-20) a group's page holds the same background the oracle reads past the end of
+        # its vftable (a call through a slot the exe's vftable does not have), not zeros that fault at call 0; one
+        # page past the last group is mapped for the same reason
+        self.vt_mem = vt_mem or {}
+        self.vt_pages = set()
+        for base, data in sorted(self.vt_mem.items()):
+            for p in range(world.page_of(base), base + len(data) + PAGE, PAGE):
                 if p not in self.mapped:
                     uc.mem_map(p, PAGE, UC_PROT_READ)
                     self.mapped.add(p)
-            uc.mem_write(base, data)
+                    self.vt_pages.add(p)
+        self._fill_vt()
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
         uc.hook_add(UC_HOOK_INTR, self._on_intr)
         self._trap_pcs = None
@@ -140,6 +147,12 @@ class Arm64Engine:
             self._fault = 'fault:%s:%08x' % ('w' if access == 17 else 'r', address & 0xffffffff)
             uc.emu_stop()
 
+    def _fill_vt(self):
+        for p in sorted(self.vt_pages):
+            self.uc.mem_write(p, self.world.page_a64(p))
+        for base, data in sorted(self.vt_mem.items()):
+            self.uc.mem_write(base, data)
+
     def reset(self, world_obj):
         """Forget the previous case's world pages and restore the image's writable data."""
         for p in self.dynamic:
@@ -147,6 +160,7 @@ class Arm64Engine:
             self.mapped.discard(p)
         self.dynamic = set()
         self.world = world_obj
+        self._fill_vt()
         for base, data in self.image.segments:
             if base >= self.image.data_start:
                 self.uc.mem_write(base, data)
@@ -198,7 +212,10 @@ class Arm64Engine:
                 (a64image.CODE_STUB, a64image.CODE_STUB + world.TEXT[0]),
                 (pg(a64image.CODE_STUB + world.TEXT[1]), a64image.NAMED_STUB),
                 (pg(top + 16), vtmodel.VT_STUBS),
-                (pg(max(self.image.end, a64image.A64_BASE)), TLS_BASE)]
+                (pg(max(self.image.end, a64image.A64_BASE)), TLS_BASE),
+                # the synthesized vtable region: data to read, never code; a jump there is the wild call the oracle
+                # makes of the same address (difffuzz-20: it faulted natively, fault:x:0bd7f08d, native-wild-private)
+                (vtmodel.VT_BASE, vtmodel.VT_END)]
             self._holes = [(lo, hi) for lo, hi in h if lo < hi]
         return self._holes
 
@@ -517,6 +534,13 @@ class Arm64Engine:
             x0 = world.alloc_result(k)
         elif world.returns_this((cv, ccv)):
             x0 = r.calls[-1].args[0] & 0xffffffff      # this (x0), as the oracle gets ecx (difffuzz-19)
+        elif target is not None and target >= 0 and retsrc.returned_input(cv, target) is not None:
+            lab = retsrc.returned_input(cv, target)    # the exe's callee returns an input (difffuzz-20, canned-this)
+            ch = cv.a64.get(lab) or []
+            if lab == 'this':
+                x0 = r.calls[-1].args[0] & 0xffffffff
+            elif ch and ch[0][1][0] == 'x':
+                x0 = r.calls[-1].args[ch[0][1][1]] & 0xffffffff
         elif ck == 'ref':
             x0 = world.ref_result(k)
         elif ck in ('bool', 'untyped'):

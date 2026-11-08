@@ -5,9 +5,11 @@
  *   _memcpy, __memcpy                 the decomp's names for memcpy (an import thunk and its decorated form)
  *   __mbsnicmp, __time64              _mbsnicmp/_time64 under the decorated (extra underscore) name
  *   _ReadWriteBarrier                 a unit's out-of-line declaration of the intrinsic fnvnx_compat.h inlines
- *   __isoc23_sscanf, __isoc23_strtol  glibc's C23 redirections: units compiled by the stand-in compiler against
+ *   __isoc23_sscanf, __isoc23_strtol, glibc's C23 redirections (and __errno_location, glibc's errno accessor)
+ *   __isoc23_strtoul: units compiled by the stand-in compiler against
  *                                     glibc headers (S9) call them; newlib has only the plain functions
- *   __emul, __movsd, __debugbreak     MSVC intrinsics declared as functions by Havok units (out-of-line calls)
+ *   __errno_location                  glibc's errno accessor (newlib: __errno()), read by IdvFileError's constructor
+ *   __emul, __movsd, __debugbreak    MSVC intrinsics declared as functions by Havok units (out-of-line calls)
  *   xmemcpy                           SpeedTree's memcpy wrapper (TreeModelX, bstreemodel)
  *   __fnv_00401050                    the vector constructor iterator (no EH), reached by the boot
  *   FUN_00401460, FUN_00406d50        CopyMemoryBlock / AppendPreview (crt_symbols.tsv "needs body"): cdecl
@@ -22,6 +24,7 @@
  *                                     MemoryManager::Deallocate(p) on the global heap, which is FormHeap_Free
  *                                     (0x00401030). The callers (SsArr in shadowscenelight) free a buffer with it.
  * All are weak: a definition elsewhere (a library, the game's own) takes precedence. */
+#include <errno.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -96,6 +99,20 @@ WEAK int __isoc23_sscanf(const char *s, const char *fmt, ...)
     return r;
 }
 WEAK long __isoc23_strtol(const char *s, char **end, int base) { return strtol(s, end, base); }
+WEAK unsigned long __isoc23_strtoul(const char *s, char **end, int base) { return strtoul(s, end, base); }
+/* glibc's errno accessor (units compiled against glibc headers, S9): newlib's errno of this thread. Not on a glibc
+ * host (tests/s4): there errno itself is (*__errno_location()), so this one would call itself. */
+#if !defined(__GLIBC__)
+WEAK int *__errno_location(void) { return &errno; }
+#endif
+
+/* glibc's errno accessor: `errno` expands to (*__errno_location()) in the headers the stand-in compiler (S9) used for
+ * the units that read errno (IdvFileError); newlib's errno is (*__errno()), the same thread's int. Only where newlib
+ * is the library: glibc's own is not replaced (that errno would call back into this function). */
+#include <errno.h>
+#ifdef __NEWLIB__
+WEAK int *__errno_location(void) { return __errno(); }
+#endif
 
 /* FormHeap_Free, native (S2 binds the address); weak so builds without the game objects (host tests) link */
 extern void __fnv_00401030(void *p) __attribute__((weak));

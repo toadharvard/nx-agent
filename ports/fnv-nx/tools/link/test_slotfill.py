@@ -67,7 +67,8 @@ struct Agg { int a, b, c, d, e; };
 struct Vb { virtual ~Vb(); virtual int a(); virtual int b(); virtual int c(int); virtual int d(); virtual int f();
             virtual int e(); int x; };
 struct Der : Vb { int a() override; };
-struct Shell { int impl(); int impl2(Agg); int impl3(int, int); void *del(unsigned); int impl4(); int y; };
+struct Shell { int impl(); int impl2(Agg); int impl3(int, int); void *del(unsigned); int impl4(); int implh(); int y; };
+struct Vh { virtual int g0(); virtual int g1(); virtual int hh(); int q; };   // hh defined nowhere; another unit's reference names it
 struct Vd { virtual int g(); virtual ~Vd(); int z; };      // key function g; ~Vd defined nowhere
 struct Gd { virtual ~Gd(); int w; };
 struct Vp { virtual int h(); virtual void v00(); int u; }; // v00: a placeholder for the exe's ??_G
@@ -104,7 +105,8 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'int call_thk(ThkUse *p) { return p->FUN_00401110(); }\n'
                     'Nv::~Nv() { q = 0; }\nvoid game_free(void *p) { g_q = p != 0; }\n'
                     'void *call_nv(NvUse *p) { return p->FUN_00401160(1); }\n'
-                    'Pv *mk_pv() { return new Pv; }\nvoid call_bi(Bi *p) { p->Free(0); }\n'}
+                    'Pv *mk_pv() { return new Pv; }\nvoid call_bi(Bi *p) { p->Free(0); }\n'
+                    'int Vh::g0() { return 8; }\nint Shell::implh() { return 9; }\nVh *mk_vh() { return new Vh; }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
 
@@ -124,7 +126,7 @@ def run(cmd, **kw):
 
 def build_exe(rd, where):
     td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0')
-          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@')}
+          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@', '.?AVVh@@')}
 
     def chd(names):
         bs = [rd.words(td[n], 0, 0, 0xffffffff, 0, 0x40, 0) for n in names]
@@ -150,6 +152,8 @@ def build_exe(rd, where):
     # `mov ecx, 0x00500000; jmp qbody` (a heap's free)
     where['Pv'] = vft('.?AVPv@@', chd(['.?AVPv@@']), [0x4010e0, 0x401020])
     where['Vi'] = vft('.?AVVi@@', chd(['.?AVVi@@']), [0x4010f8, 0x4010f0])
+    # Vh: g0, then Shell::implh; the units.json of another unit names `Vh::hh` as a function at Shell::impl's address
+    where['Vh'] = vft('.?AVVh@@', chd(['.?AVVh@@']), [0x4011a0, 0x4011a0, 0x4011a8])
     hm = chd(['.?AUM@@'])
     where['M'] = vft('.?AUM@@', hm, [0x401120])
     col = rd.words(0, 8, 0, td['.?AUM@@'], hm)   # M's vftable {for S2} at +8: an adjustor thunk at 0x401110
@@ -194,7 +198,8 @@ def main():
                 F(0x401140, '?FUN_00401140@Dd@@QAEPAXI@Z'), F(0x401148, '?del_dd@@YAXPAUDd@@@Z'),
                 F(0x401110, '?s2@M@@W7AEHXZ'), F(0x401150, '?call_thk@@YAHPAUThkUse@@@Z'),
                 F(0x401160, '??_GNv@@QAEPAXI@Z'), F(0x401170, '?game_free@@YAXPAX@Z'),
-                F(0x401178, '?call_nv@@YAPAXPAUNvUse@@@Z')],
+                F(0x401178, '?call_nv@@YAPAXPAUNvUse@@@Z'), F(0x4011a0, '?g0@Vh@@UAEHXZ'),
+                F(0x4011a8, '?implh@Shell@@QAEHXZ')],
              'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
                          '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp'],
                          '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk'],
@@ -203,9 +208,9 @@ def main():
                          '?FUN_00401110@ThkUse@@QAEHXZ': '0x00401110', '?FUN_00401160@NvUse@@QAEPAXI@Z': '0x00401160',
                          '??3@YAXPAX@Z': '0x00401170', '??_7Pv@@6B@': '0x%08x' % where['Pv'],
                          '?pa@Pv@@UAEHXZ': '0x004010e8', '?pb@Pv@@UAEHXZ': '0x004010ec',
-                         '__imp_?Free@Bi@@QAEXPAX@Z': '0x%08x' % where['Vi']}},
+                         '__imp_?Free@Bi@@QAEXPAX@Z': '0x%08x' % where['Vi'], '??_7Vh@@6B@': '0x%08x' % where['Vh']}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
-                F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {}},
+                F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {'?hh@Vh@@QAEHXZ': '0x00401020'}},
         ]}
         import json
         json.dump(units, open(os.path.join(t, 'units.json'), 'w'))
@@ -320,6 +325,11 @@ def main():
         check(rd is not None and rd[2] == 'dtor-by-deldtor' and rd[5] == '__fnvnx_vflag_00401140_0',
               'Dd\'s D1 (defined nowhere; the unit binds ??_GDd to a (this, flags) function) -> ??_G(this, 0): %s'
               % (rd,))
+        rh, rh0 = refs.get('_ZN2Vh2hhEv'), res['none'][2].get('_ZN2Vh2hhEv')
+        check(rh is not None and rh[2] == 'vslot-exe' and rh[5] == '__fnv_004011a8' and
+              rh0 is not None and rh0[2] == 'code' and rh0[5] == '__fnv_00401020',
+              'Vh::hh, whose name another unit binds to 0x401020 (S2d-vslot): the exe slot\'s 0x4011a8 decides, and '
+              'without the exe the name keeps its address: %s / %s' % (rh, rh0))
         rk = refs.get('_ZN2Vk1kEi')
         check(rk is not None and rk[2] == 'vslot-exe' and rk[5].startswith('__fnvnx_br_004010c8_') and
               ('%s:\n    mov x0, x1\n    b __fnv_004010c8' % rk[5]) in bridges_,
@@ -347,9 +357,13 @@ def main():
         check(st['trap-slots'] == 7 and st['trap-native-at-exe'] == 2 and st['primary-shorter'] == 0,
               'vtmetric: 7 trap slots left (Sh\'s extension holds one), 2 with a native at the exe slot, no short '
               'primary (%s)' % dict(st))
+        check(st['slot-mismatch'] == 0 and st['slot-compared'] >= 1,
+              'vtmetric: no native slot differs from the exe\'s function (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
-        check(st0['trap-slots'] == 18 and st0['trap-native-at-exe'] == 12 and st0['primary-shorter'] == 1,
-              'vtmetric without the fill: 18 / 12, Sh short (%s)'
+        check(st0['slot-mismatch'] == 1 and st0['slot-mismatch-pairs'] == 1,
+              'vtmetric without the fill: Vh::hh (0x401020 against the exe\'s 0x4011a8) is the one mismatch (%s)' % dict(st0))
+        check(st0['trap-slots'] == 19 and st0['trap-native-at-exe'] == 13 and st0['primary-shorter'] == 1,
+              'vtmetric without the fill: 19 / 13, Sh short (%s)'
               % dict(st0))
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

@@ -197,7 +197,8 @@ class World:
         if TEXT[0] <= p < TEXT[1]:
             data = bytearray(b'\xcc' * PAGE)
         elif self.case.bg == 'rand' and not (STACK[0] <= p < STACK[1]):
-            data = bytearray(random.Random((self.case.seed << 20) ^ p).randbytes(PAGE))
+            data = bytearray(random.Random(((self.case.seed if BG_SEED is None else BG_SEED) << 20) ^ p)
+                             .randbytes(PAGE))
         else:
             data = bytearray(PAGE)
         for a, b in self._overlay_pages().get(p, ()):
@@ -205,7 +206,7 @@ class World:
             data[lo - p:hi - p] = b[lo - a:hi - a]
         for a, v in self.case.vptrs.items():
             if p <= a and a + 4 <= p + PAGE:
-                struct.pack_into('<I', data, a - p, v)
+                struct.pack_into('<I', data, a - p, self.a64_vptrs.get(a, v) if VPTR_NATIVE else v)
         return bytes(data)
 
     def initial(self, a, n):
@@ -232,6 +233,12 @@ BYTE_READS = None
 # come from the random background (a bool global or a field behind a background pointer), which the case does not
 # plant
 BG_READS = None
+# F-uncls (difffuzz-20): with BG_SEED set, the random background ('rand' cases) is that seed's, whatever the case's
+# own seed: classify.py's garbage probe changes the seed (stack fill, registers) and keeps the background
+BG_SEED = None
+# F-uncls: with EAX_TRACK set to a dict, x86emu.run records in it how the last instruction that wrote eax wrote it
+# ('full', or 1 / 2 for an al / ax write): classify.py's partial-return probe
+EAX_TRACK = None
 # (float class, difffuzz-20) x87 control word of the oracle run: 0x027f is the MSVC CRT default (53-bit mantissa). The
 # precision probe of classify.hint reruns a case with 0x007f (24-bit mantissa: every x87 operation rounds to a float,
 # as the AArch64 build does) to see whether the divergence is only the excess precision of x87 intermediates
@@ -246,6 +253,17 @@ X87_CLAMP = None
 # (x86emu.x87_result_use: fstp dword -> f32, fstp qword -> f64); the consumer cannot tell a float result from a double
 # narrowed or a float widened. classify's width probe reruns the case with the other guess
 X87_FLIP_WIDTH = False
+
+# (uncls2, difffuzz-20) probe switches, each set by classify.hint for one rerun of a divergence:
+#  SHIFT_MASK   the 64-bit shift helpers (_allshl / _allshr) take the count modulo 64, as an AArch64 `lsl x, x, x`
+#               does; MSVC's helper gives 0 / the sign for a count of 64 or more (a shift UB in C++)
+#  TRIG_INF     fsin / fcos / fsincos / fptan of an infinity give the x87 indefinite NaN (the Intel manual's #IA
+#               response); unicorn's QEMU leaves the infinity in st0 and sets C2
+#  VPTR_NATIVE  the x86 machine holds the native address point in a planted vptr word too (case.vptrs), so a byte
+#               or a part of the word that the code reads as data is the same on both
+SHIFT_MASK = False
+TRIG_INF = False
+VPTR_NATIVE = False
 
 
 # (float class) XORed into the seed of every garbage source (stack fill, non-argument registers, argument padding) but

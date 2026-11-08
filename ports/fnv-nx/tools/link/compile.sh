@@ -25,9 +25,10 @@
 # -ffile-prefix-map: __FILE__ and other recorded paths do not depend on where the tree lives, so objects built on
 # different machines from the same tree are byte-identical (tools/farm/).
 # Objects are derived from the decomp: local output only, never committed.
-set -euo pipefail
-# a failure under set -e always names its line (full1: an exit 1 with no message cost a build)
-trap 'rc_=$?; echo "compile.sh: line $LINENO: exit $rc_" >&2' ERR
+set -Eeuo pipefail
+# a failure under set -e always names its line and command, in functions and subshells too (-E) (full1: an exit 1
+# with no message cost a build)
+trap 'rc_=$?; echo "compile.sh: line $LINENO: exit $rc_: $BASH_COMMAND" >&2' ERR
 PRINT_FLAGS=0
 if [ "${1:-}" = --print-flags ]; then PRINT_FLAGS=1; shift; fi
 TREE=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd)

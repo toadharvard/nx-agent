@@ -212,6 +212,16 @@ class UnitCache:
                         pops.add(int(ins.op_str, 0) if ins.op_str else 0)
                 if len(pops) == 1:
                     got = pops.pop()
+                elif not pops and f['code'][:1] == b'\xe9' and len(f['code']) == 5 and f.get('relocs'):
+                    # (difffuzz-20, flow2) an incremental-link thunk `jmp rel32` (the exe's ILT: 0x00aa0ad0 -> 0x00a81fe0
+                    # -> the real function): the decomp defines it as a `void F(void)` placeholder whose declaration
+                    # popped 0; the stack bytes are those of the function it jumps to, through the chain. Unknown
+                    # when the chain ends in no single `ret N`: the pop is then learned from the run
+                    cache[addr] = None
+                    tgt = [tg for _r, _k, tg, _x in f['relocs'] if tg is not None]
+                    got = self.oracle_ret_pop(tgt[0]) if tgt else None
+                    if got is None:
+                        self.__dict__.setdefault('_thunk_unknown', set()).add(addr)
                 elif not pops and f['code'][:2] == b'\xff\x25':
                     # an import thunk `jmp dword ptr [__imp_X]` (no ret of its own; F1-callflow: the decomp
                     # defines the exe's D3DX thunks as `void FUN_00ee6df2(void)` placeholders, whose cdecl
@@ -228,6 +238,44 @@ class UnitCache:
                         self.__dict__.setdefault('_thunk_unknown', set()).add(addr)
         cache[addr] = got
         return got
+
+    def exe_ret_pop(self, addr):
+        """(difffuzz-20, flow2) The `ret N` of a function the tree does not define (a CRT function, a function no
+        unit covers), read from the player's exe: `addr` must be a function start (the byte before it is padding
+        `int3`/`nop` or a `ret`) in a code section, and its `ret N` is the first `ret` found. A
+        `jmp rel32` start is followed (an ILT thunk). None without the exe or when it does not say; the intercepted
+        call then pops what the learner finds (runner.Pair._learn_pop) or 0."""
+        cache = self.__dict__.setdefault('_exepop', {})
+        if addr in cache:
+            return cache[addr]
+        cache[addr] = None
+        pe = coffobj.exe_image()
+        if pe is None:
+            return None
+        import capstone
+        cs = self.__dict__.setdefault('_cs', capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32))
+        a = addr
+        for _ in range(4):
+            sec = pe.section_of(a)
+            if sec is None or not sec[2] & 0x20 or a - sec[0] < 4:      # not code (SCN_CODE), or no byte before
+                return None
+            prev = pe.read(a - 1, 1)
+            code = pe.read(a, 0x400)
+            if not code or prev[0] not in (0xcc, 0x90, 0xc3) and pe.read(a - 3, 1) != b'\xc2':
+                return None
+            if code[0] == 0xe9:
+                a = (a + 5 + int.from_bytes(code[1:5], 'little', signed=True)) & 0xffffffff
+                continue
+            # every `ret` of one function agrees, so the first one in the linear scan is the function's own (a
+            # later one may already belong to the next function, which MSVC pads with `mov edi, edi`, not int3)
+            for ins in cs.disasm(code, a):
+                if ins.mnemonic == 'int3':
+                    break
+                if ins.mnemonic == 'ret':
+                    cache[addr] = int(ins.op_str, 0) if ins.op_str else 0
+                    break
+            return cache[addr]
+        return None
 
     def providers(self):
         """{native name: original address} of the link's provider rows (addrmap kind F, `provider: ...`): the CRT
@@ -334,6 +382,7 @@ class UnitCache:
                         got = None
                 self._callee[key] = got
             return self._callee[key]
+        info.exe_pop = self.exe_ret_pop
         info.conv = conv_of
         info.caller_conv = caller_conv_of
         return info
@@ -687,7 +736,7 @@ class UnitCache:
 
 
 CALIB_CASES = 8
-CALIB_MAX = 24
+CALIB_MAX = 120
 
 
 def calibrate_custom(pair, t, globals_=()):

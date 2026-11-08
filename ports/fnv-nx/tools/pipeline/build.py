@@ -1089,7 +1089,49 @@ class Prepare(Stage):
         dirty = port_dirty(PREPARE_INPUTS)
         pf = {'port_commit': b.head, 'port_dirty': dirty, 'decomp_commit': read_git_head(decomp), 'decomp': decomp,
               'recon': recon_id(), 'mode': 'prepare.py', 'tree': tree, 'at': now_iso()}
-        b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'prepare.py'), decomp, staging], r['log'], check=True)
+        # T1: prepare.py runs under tools/pipeline/traced.py, which records every file it read and every directory it
+        # listed (its imports too). When all of them are unchanged and the tree is the one that run made, the tree is
+        # what prepare.py would make at this head: it is kept, provenance names this head (572 s of every full build,
+        # tree unchanged). PREPARE_REUSE=0 always runs prepare.py.
+        script = os.path.join(ROOT, 'tools', 'prepare.py')
+        deps = os.path.join(d, 'prepare.deps.json')
+        argv = [script, decomp, staging]
+        if os.environ.get('PREPARE_REUSE', '1') != '0' and not dirty and \
+                os.path.isfile(os.path.join(tree, 'build', 'units.json')):
+            if HERE not in sys.path:
+                sys.path.insert(0, HERE)
+            import traced
+            try:
+                rec_tree = json.load(open(deps)).get('tree_id')
+            except (OSError, ValueError):
+                rec_tree = None
+            t0 = time.time()
+            if rec_tree and traced.check(deps, argv) and tree_content_id(tree) == rec_tree:
+                prev = read_prepared_from(tree).get('port_commit')
+                pf.update(mode='prepare.py (reused: inputs identical)', reused_from=prev)
+                write_prepared_from(d, pf)
+                rules = read_rule_stats(os.path.join(d, 'prepare_stats.tsv'))
+                units = json.load(open(os.path.join(tree, 'build', 'units.json')))['units']
+                ndeps = len(json.load(open(deps)).get('files', {}))
+                r.metric('prepare_rules', len(rules))
+                r.metric('prepare_edits', sum(e for _, e in rules.values()))
+                r.metric('prepare_units', len({u.get('source') for u in units}))
+                r.metric('prepare_files_changed', 0)
+                r.metric('prepare_from', short(b.head))
+                r.metric('prepare_reused', 1)
+                r.metric('prepare_check_s', round(time.time() - t0, 1))
+                r['rules'] = rules
+                r['prepared_from'] = pf
+                r.artifact('tree', tree)
+                r.artifact('prepared_from', os.path.join(d, 'prepared_from.txt'))
+                r['output_id'] = rec_tree
+                r['summary'] = 'from %s: the tree of %s kept (every input prepare.py read is unchanged: %d files); ' \
+                               '%d rules, %d edits' % (short(b.head), short(prev), ndeps, len(rules),
+                                                      sum(e for _, e in rules.values()))
+                return
+        b.sh([PY, '-I', os.path.join(HERE, 'traced.py'), deps, '--exclude', staging, '--'] + argv, r['log'],
+             check=True)
+        r.metric('prepare_reused', 0)
         stats = os.path.join(staging, 'prepare_stats.tsv')
         rules = read_rule_stats(stats)
         if os.path.isfile(stats):
@@ -1101,6 +1143,11 @@ class Prepare(Stage):
                 for p in lst:
                     f.write('%s\t%s\n' % (tag, p))
         write_prepared_from(d, pf)
+        try:   # the tree this record made: a later run keeps it only while it is still that tree
+            dj = json.load(open(deps)); dj['tree_id'] = cid
+            json.dump(dj, open(deps + '.tmp', 'w')); os.replace(deps + '.tmp', deps)
+        except (OSError, ValueError):
+            pass
         units = json.load(open(os.path.join(tree, 'build', 'units.json')))['units']
         r.metric('prepare_rules', len(rules))
         r.metric('prepare_edits', sum(e for _, e in rules.values()))

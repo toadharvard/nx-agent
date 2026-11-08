@@ -28,6 +28,10 @@ gate (`_stl_copy_edits`): MSVC called `basic_ofstream(const char*, int, int)` (0
 (0x00acfb90) and `basic_ostream::sentry::sentry` out of line, where GCC inlined the decomp's partial model of them
 and referenced members it never defines (`basic_filebuf::open`, `_Init`, `basic_streambuf::_Lock`).
 
+And the converse (`_stl_string_bodies`): `~basic_string()` and `operator=(const basic_string&)` of those copies, declared and
+defined nowhere because VC9 wrote both inline, get the bodies the exe's inlined sites show: `_Tidy(true, 0)` and
+`assign(r, 0, npos)`.
+
 HARN1 - the decomp's harness-only code gets internal linkage.
 
 The decomp keeps byte-matching harnesses next to the matched code: convention callers that exist only so MSVC emits
@@ -142,7 +146,9 @@ def r_stand_in_class_bodies(path, text, stats):
         decl = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', decl)
         nl = '\n' * (text.count('\n', m.start(), c) - decl.count('\n'))   # line numbers stay
         edits.append((m.start(), c, decl + '; /* fnv-nx STAND5: bound to the address MSVC called */' + nl))
-    edits += _stl_copy_edits(path, text, syms, tagged, own_names, spans or prepare.scope_spans(text))
+    spans = spans or prepare.scope_spans(text)
+    edits += _stl_copy_edits(path, text, syms, tagged, own_names, spans)
+    edits += _stl_string_bodies(text, spans)
     if not edits:
         return text
     out, pos = [], 0
@@ -253,6 +259,47 @@ def _stl_copy_edits(path, text, syms, tagged, own_names, spans):
     return edits
 
 
+STRING_DTOR = re.compile(r'^([ \t]*)~basic_string\s*\(\s*\)\s*;', re.M)
+STRING_ASSIGN = re.compile(r'^([ \t]*)basic_string\s*&\s*operator\s*=\s*\(\s*const\s+basic_string\s*&\s*\)\s*;', re.M)
+STRING_TIDY = re.compile(r'\b_Tidy\s*\(\s*bool\b[^()]*\)\s*[;{]')
+STRING_ASSIGN3 = re.compile(r'\bassign\s*\(\s*const\s+basic_string\s*&\s*,\s*unsigned(?:\s+int)?\s*,\s*unsigned(?:\s+int)?\s*\)\s*;')
+STRING_NPOS = re.compile(r'\bstatic\s+const\s+unsigned(?:\s+int)?\s+npos\s*;')
+
+
+def _stl_string_bodies(text, spans):
+    """Members of the decomp's unit copies of `basic_string` (`namespace fnv_<a> { namespace std { template <..> class
+    basic_string`) that the model declares and nothing defines: VC9 wrote both inline, so MSVC never called them out of
+    line and the unit's symbols hold no address for them (crt-import: `~basic_string`, `operator=` of fnv_00ac9790,
+    fnv_00ad60c0, fnv_00ad61e0). Their bodies are what the exe's inlined copies do, read from its call sites:
+    - `~basic_string() { _Tidy(true, 0); }`: the destructor sites push 0, push 1 and call `_Tidy` (0x0044a730, bound by
+      the unit) - `6a 00 6a 01 lea ecx, [..]; call 0x0044a730`, 21 + 20 + 18 + ... sites in the exe;
+    - `operator=(const basic_string& r) { return assign(r, 0, npos); }`: std::_Copy_opt's element copy (0x00ad5a80)
+      pushes `[0x010173f0]` (npos), 0 and the source, then calls `assign(const string&, size_t, size_t)` (0x0044a580).
+    Gates: the class declares the member without a body, the helper it calls with the exact signature (and `npos` for
+    the assignment), and the unit has no out-of-line definition of the member."""
+    edits = []
+    for o, c, kind, head in spans:
+        if kind != 'class' or _scope_name('class', head) != 'basic_string' or not TEMPLATE_HEAD.match(head.strip()):
+            continue
+        chain = [(k, h) for k, h in prepare.scope_chain(spans, o)]
+        nss = [_scope_name(k, h) for k, h in chain if k == 'namespace']
+        if len(chain) != len(nss) or not any(UNIT_NS_HEAD.match(a or '') and b in STL_NS for a, b in zip(nss, nss[1:])):
+            continue
+        body = text[o:c]
+        for rx, need, repl, out_of_class in (
+                (STRING_DTOR, (STRING_TIDY,), '~basic_string() { _Tidy(true, 0); }', r'basic_string\s*(?:<[^;{]*?>)?\s*::\s*~'),
+                (STRING_ASSIGN, (STRING_ASSIGN3,), 'basic_string& operator=(const basic_string& _Right) '
+                 '{ return assign(_Right, 0, %s); }', r'basic_string\s*(?:<[^;{]*?>)?\s*::\s*operator\s*=')):
+            m = rx.search(body)
+            if not m or not all(n.search(body) for n in need) or re.search(out_of_class, text):
+                continue
+            a = o + m.start() + len(m.group(1))
+            if '%s' in repl:   # npos where the model declares it, else its own spelling of it (assign(rhs, 0, -1))
+                repl = repl % ('npos' if STRING_NPOS.search(body) else '-1')
+            edits.append((a, o + m.end(), repl + ' /* fnv-nx STAND5: the exe\'s inlined body */'))
+    return edits
+
+
 # ---------------------------------------------------------------------------------------------------------- HARN1
 
 _HEAD = (r'((?:extern[ \t]+"C"[ \t]+)?)((?:__declspec\s*\(\s*\w+\s*\)[ \t]+|[\w:<>,\*&]+[ \t\*&]+)+?)'
@@ -348,6 +395,22 @@ def _params_key(params):
     return tuple(p for p in ps if p != 'void')
 
 
+_PP_OPEN, _PP_CLOSE = re.compile(r'^[ \t]*#[ \t]*if'), re.compile(r'^[ \t]*#[ \t]*endif')
+
+
+def _conditional_depth(text, pos):
+    """How many #if blocks are open at `pos`. A definition inside one is not known to be the one GCC compiles: a
+    recon body defines the function under `#if defined(_MSC_VER)` and forwards it by assembler on the GCC side, so
+    a `static` there would turn the unit's own prototype (and its call) internal while the definition is external."""
+    depth = 0
+    for line in text[:pos].split('\n'):
+        if _PP_OPEN.match(line):
+            depth += 1
+        elif _PP_CLOSE.match(line):
+            depth = max(0, depth - 1)
+    return depth
+
+
 def r_harness_internal(path, text, stats):
     """HARN1: an untagged free definition whose name no unit references (a decomp harness) becomes static."""
     if not path.endswith(('.cpp', '.c')):
@@ -371,6 +434,9 @@ def r_harness_internal(path, text, stats):
         chain = prepare.scope_chain(spans, m.start(4))
         if any(k not in ('namespace', 'extern') for k, _ in chain):
             continue                          # members, local classes, bodies
+        if _conditional_depth(masked, m.start(4)):
+            bad.add(name)                     # maybe not this compiler's definition (a recon body's MSVC branch)
+            continue
         if (name in refs or foreign.get(name, set()) - {me} or name in HARN_KEEP_NAMES or name.startswith(('__fnv', '_fnvnx', 'fnvnx', 'FNVNX'))
                 or HARN_SKIP_HEAD.search(head) or not re.search(r'\w', head)):
             bad.add(name)
@@ -1175,6 +1241,13 @@ THIS2_SITES = {
     0x00e14b30: 0x00e230f0, 0x00bc31f0: 0x00a576c0, 0x00bc3450: 0x00a576c0, 0x00bc3700: 0x00a576c0,
     0x00e5c5b0: 0x00e5c540, 0x00e5c5d0: 0x00e5c540, 0x00e5c5f0: 0x00e5c540, 0x00e5c610: 0x00e5c540,
     0x00e5c630: 0x00e5c540, 0x00e5c650: 0x00e5c540, 0x00e5c670: 0x00e5c540, 0x00e5c690: 0x00e5c540,
+    # W12 (EQ fuzz 0540aff0d154, this-not-passed rows missing from the first scan): a re-scan of the exe for every
+    # direct call of a callee the link references both as a free `__stdcall` and as a thiscall member, from a caller
+    # whose unit makes the free reference, with ecx untouched and no call or branch between the caller's entry and
+    # that call, and the caller calling it once (capstone: no instruction before the call writes ecx).
+    0x00c2a960: 0x00c32f60, 0x00a3ed90: 0x00aa0ac0, 0x00a40360: 0x00aa0ab0, 0x00a87520: 0x00a71d10,
+    0x00b70270: 0x00c9a420, 0x00c8c3d0: 0x00c84ec0, 0x00cb9d80: 0x00a89af0, 0x00cc1610: 0x00a89af0,
+    0x00cd2f10: 0x00c84ec0, 0x00e07c50: 0x00e06b20, 0x00e07ca0: 0x00e06b20,
 }
 THIS2_NOTE = '/* fnv-nx THIS2: the caller passes its ecx */ '
 
