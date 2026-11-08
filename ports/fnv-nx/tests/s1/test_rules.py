@@ -1496,23 +1496,41 @@ _ku2 = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'
 check('REC1-REPL with symbols: REC1-SYM still persists the binding', _json.dumps(_ku2) + str(dict(_st)),
       ['"?h@@YAXXZ": "0x00402000"', "'REC1-SYM': 1"])
 def _kfails(name, rec, text):
+    """a recon whose replace does not apply: rejected whole for the unit (no edit, no append), the prepare goes on"""
     os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', name)
-    _krecon(name, rec)
+    _krecon(name, rec, '/* appended body */\n')
+    prepare.__dict__['_fnvnx_recon_rejected'] = []
+    st = Counter()
     try:
-        s1.r_recon_bodies(_kp, text, Counter())
+        out = s1.r_recon_bodies(_kp, text, st)
     except RuntimeError as e:
         return 'raised: ' + str(e)
-    return 'no error'
-check('REC1-REPL an old that occurs twice fails the prepare',
+    rej = prepare.__dict__['_fnvnx_recon_rejected']
+    return ('unchanged ' if out == text else 'CHANGED ') + str(dict(st)) + ' ' + repr(rej)
+check('REC1-REPL an old that occurs twice: the recon is rejected, the prepare goes on',
       _kfails('k2', {'replace': [{'old': 'g()', 'new': 'h()'}]}, 'void a() { g(); }\nvoid b() { g(); }\n'),
-      ['raised: REC1-REPL', 'occurs 2 times'])
-check('REC1-REPL a missing old fails the prepare',
-      _kfails('k3', {'replace': [{'old': 'void q();', 'new': 'void r();'}]}, _ktext), ['raised: REC1-REPL', 'occurs 0 times'])
-check('REC1-REPL an old found only in the appended body fails (replace runs before the append)',
+      ['unchanged', "'REC1-REJECT': 1", ", 0, 2, 'g()')"], ['raised', 'appended body'])
+check('REC1-REPL a missing old: rejected',
+      _kfails('k3', {'replace': [{'old': 'void q();', 'new': 'void r();'}]}, _ktext), ['unchanged', "'REC1-REJECT': 1", ', 0, 0,'],
+      ['raised'])
+check('REC1-REPL an old found only in the appended body: rejected (replace runs before the append)',
       _kfails('k4', {'append': 'body.cpp', 'replace': [{'old': 'void f2()', 'new': 'void f3()'}]}, _ktext),
-      ['raised: REC1-REPL', 'occurs 0 times'])
-check('REC1-REPL a replace-only recon is a recon (no body, no symbols)',
-      _kfails('k5', {'replace': [{'old': 'void q();', 'new': 'x'}]}, _ktext), ['raised: REC1-REPL'])
+      ['unchanged', "'REC1-REJECT': 1"], ['raised', 'appended body'])
+check('REC1-REPL a replace-only recon is a recon (no body, no symbols): rejected the same way',
+      _kfails('k5', {'replace': [{'old': 'void q();', 'new': 'x'}]}, _ktext), ['unchanged', "'REC1-REJECT': 1"], ['raised'])
+check('REC1-REPL never half-applies: pair 0 matches, pair 1 does not -> nothing applied, no append',
+      _kfails('k6', {'append': 'body.cpp', 'replace': [{'old': 'void g();', 'new': 'void G();'},
+                                                        {'old': 'nowhere', 'new': 'x'}]}, _ktext),
+      ['unchanged', ", 1, 0, 'nowhere')"], ['raised', 'void G();', 'REC1-REPL\': 1'])
+check('REC1-REPL a malformed pair: rejected',
+      _kfails('k7', {'replace': [{'old': '', 'new': 'x'}]}, _ktext), ['unchanged', ', 0, -1,'], ['raised'])
+os.makedirs(os.path.join(_rc, 'out', 'build'), exist_ok=True)
+_st = Counter()
+s1.add_recon_definitions(os.path.join(_rc, 'out'), _st)
+_rt = open(os.path.join(_rc, 'out', 'build', 'recon_rejected.tsv')).read()
+check('REC1-REPL the POST hook lists the rejected recons in build/recon_rejected.tsv',
+      _rt + str(dict(_st)), ['#recon dir', 'k7', 'src/k.cpp', "'REC1-REJECTED-RECONS': 1"])
+prepare.__dict__['_fnvnx_recon_rejected'] = []
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)
