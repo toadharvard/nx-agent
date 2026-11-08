@@ -56,6 +56,8 @@ if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/incl
 	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends liblz4-dev libnewlib-dev qemu-user python3-mako \
 		|| echo "full_job.sh: NX1 packages not installed; checks 1 and 7 report incomplete"
 fi
+# one worktree path for every head (lib_job.sh job_sources): the link's compile cache hits across heads
+export FARM_STABLE_SRC=${FARM_STABLE_SRC:-$FARM_HOME/full-src}
 job_sources "$REPO"
 F=$FARM_HOME/full; mkdir -p "$F"
 # the reconstructed bodies (D20, branches recon/*) for S1-refs' rule REC1, exported for every prepare this job runs

@@ -46,6 +46,8 @@ F=$FARM_HOME/bootloop; B=$F/build; mkdir -p "$F"
 FAIL=""
 
 host_check git python3 make curl jq rsync gcc g++ py:unicorn py:elftools py:mako meson ninja flex bison
+# one worktree path for every head (lib_job.sh job_sources): the link's compile cache hits across heads
+export FARM_STABLE_SRC=${FARM_STABLE_SRC:-$FARM_HOME/bootloop-src}
 job_sources "$REPO"
 # shellcheck source=recon.sh
 . "$HERE/recon.sh"

@@ -34,6 +34,17 @@ host_check() {   # commands (py:<module> for python modules) -> installed with a
 
 job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and the pinned checkouts (or FARM_EXT)
 	local repo=$1
+	if [ -z "${FARM_SRC:-}" ] && [ -n "${FARM_STABLE_SRC:-}" ]; then
+		# T1: one worktree at a fixed path for every commit of this job, checked out at each head. The link's compile
+		# cache keys on the command line and its paths (tools/link/objcache.py: an object names its paths), and the
+		# probes' flags name the port (-I<port>/shim/include): with a src-<commit12> worktree per head, full1's link
+		# had 0 cache hits of 2,420 compiles (5fd996a4127f, 1,756 s compiling). A checkout rewrites only the files
+		# that changed (their mtimes), so the rest stay as they were.
+		bash "$(dirname "${BASH_SOURCE[0]}")/worktree.sh" "$repo" "$FARM_STABLE_SRC" "$COMMIT" >/dev/null
+		git -C "$FARM_STABLE_SRC" checkout -q -f --detach "$COMMIT" && git -C "$FARM_STABLE_SRC" reset -q --hard "$COMMIT" \
+			|| { echo "the stable worktree $FARM_STABLE_SRC cannot be put at $COMMIT"; exit 1; }
+		FARM_SRC=$FARM_STABLE_SRC
+	fi
 	if [ -n "${FARM_SRC:-}" ]; then
 		SRC=$(cd "$FARM_SRC" && pwd)
 		[ "$(git -C "$SRC" rev-parse HEAD)" = "$(git -C "$SRC" rev-parse "$COMMIT^{commit}")" ] \
