@@ -1253,10 +1253,27 @@ THIS2_NOTE = '/* fnv-nx THIS2: the caller passes its ecx */ '
 
 
 def _this2_member_name(name, fn, shell):
-    """The decorated name of free function `name` (parsed fn) as a thiscall member of `shell`, or None."""
-    if fn is None or fn.member or fn.cc != 'stdcall' or fn.name_refs or fn.scopes:
+    """The decorated name of free function `name` (parsed fn) as a thiscall member of `shell`, or None. `shell` is
+    declared in fn's own scopes (the caller's namespace, checked by _this2_site), so it enters MSVC's name
+    back-reference table right after the identifier and every later entry moves up by one: `StrArr@1@` (StrArr in
+    namespace fnv_00c2a960, table [FUN_00c32f60, fnv_00c2a960]) becomes `StrArr@2@`. A candidate is accepted only when
+    it parses to exactly the original's parameters and result (_msvcsig spells back-references out), so a digit that
+    is not a name back-reference can never slip through."""
+    if fn is None or fn.member or fn.cc != 'stdcall':
         return None
-    return '?%s@%s@@QAE%s' % (fn.ident, shell, name[fn.head_end:])
+    head = '?%s@%s@%s@QAE' % (fn.ident, shell, ''.join(x + '@' for x in fn.scopes))
+    tail = name[fn.head_end:]
+    cands = [tail]
+    if fn.name_refs:
+        cands.append(re.sub(r'(?<=[@UVT])([1-8])(?=@|[A-Za-z_])', lambda m: str(int(m.group(1)) + 1), tail))
+    for t in cands:
+        new = head + t
+        g = _msvcsig.parse(new)
+        if g is not None and g.member and g.cc == 'thiscall' and g.ident == fn.ident and \
+                g.scopes == [shell] + list(fn.scopes) and g.params == fn.params and g.ret == fn.ret and \
+                getattr(g, 'ret_class', None) == getattr(fn, 'ret_class', None):
+            return new
+    return None
 
 
 def _this2_site(text, caller, callee, u, words, why):
@@ -1307,6 +1324,9 @@ def _this2_site(text, caller, callee, u, words, why):
         why['no __stdcall prototype of the callee'] += 1
         return None
     cdecl = '%s %s(%s);' % (proto[0], rf.ident, proto[1])
+    if list((df.scopes[1:] if df.member else df.scopes) or []) != list(rf.scopes or []):
+        why['caller not in the callee reference scope'] += 1   # the shell must share the reference's scopes
+        return None
     newref = _this2_member_name(rname, rf, shell)
     if newref is None:
         why['reference name not re-encodable'] += 1

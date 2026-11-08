@@ -16,6 +16,10 @@ pairs with a native vtable (kind `V`):
 * `secondary-full-entry` (S2c-vt2) - secondary vftable slots bound to `__fnv_<a>` where the exe slot's function is
   one MSVC enters with `this` at that secondary base (the map's entry is `__fnvnx_msvc_<a>`): `this` arrives d bytes
   off; not part of `metric`;
+* `slot-one-delete-this` (W23) - primary tables with no destructor pair whose exe slot 0 is a deleting destructor and
+  whose native slot 1 still holds exe slot 1 = `DeleteThis() { delete this; }` (exevft.delete_this): the exe's slot
+  order where Itanium's D0 belongs, a loop on any native `delete`. fnvlink's d0_slot_fix drives it to 0 (not part
+  of `metric`);
 * `mispaired-primary` / `mispaired-secondary` - vftables whose native vtable is another class than the exe's RTTI
   class, where the native class is itself an RTTI class of the exe (by name, after demangling both sides; shells
   such as `FUN_<addr>` or the decomp's local reconstructions, which name no RTTI class, are not counted).
@@ -145,6 +149,15 @@ def measure(link, exe, rows_path=None):
         nmsvc = n - 1 if d is not None else n
         e = exev.get(v)
         per_v[v] = (z, note, n, nmsvc, e)
+        # W23: `delete p` calls Itanium slot 1. A primary table in the exe's slot order (no destructor pair) that
+        # holds exe slot 1 = `DeleteThis() { delete this; }` there loops on a native delete (S5 round 6)
+        if e is not None and e.td and ap == 8 and note.startswith('primary') and len(e.slots) >= 2 and d is None \
+                and (native.get(e.slots[0]) == 'G' or exevft.deleting_dtor(exe, e.slots[0])) \
+                and exevft.delete_this(exe, e.slots[1]) and not (n >= 2 and exevft.slot_one_is_d0(
+                    names[0], names[1])):
+            st['slot-one-delete-this'] += 1
+            rows.append(('%08x' % v, z, '1', '1', '%08x' % e.slots[1], '', names[1] if n >= 2 else '',
+                         'slot-one-delete-this'))
         znames.add(z)
         kind = 'primary' if note.startswith('primary') else 'secondary'
         st['v-%s' % kind] += 1
