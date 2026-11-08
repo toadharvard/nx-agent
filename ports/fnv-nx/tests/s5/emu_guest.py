@@ -2485,6 +2485,13 @@ class Emu:
                     self.skipped.append((g[2], pc, why))
                     if len(self.skipped) <= 30:
                         print(f"   skipped initializer {self.sym(g[2])}: {e} at {self.sym(pc)}")
+                    if re.search(r" _?(_malloc_r|_free_r|_realloc_r|_calloc_r|malloc|free|realloc)\+0x",
+                                 self.sym(pc)) and not getattr(self, "libc_heap_undefined", None):
+                        # the skip leaves newlib's heap half-updated and its lock held by this thread: what follows
+                        # (a deadlock on the malloc lock, corrupted blocks) is a consequence, not a new blocker
+                        self.libc_heap_undefined = f"{self.sym(g[2])} at {self.sym(pc)}"
+                        print(f"   skipped inside libc malloc: the libc heap is undefined from here "
+                              f"({self.libc_heap_undefined})")
                     uc.context_restore(g[0])
                     uc.reg_write(UC_ARM64_REG_X0, 0)
                     t.ctx, t.resume_pc, t.result, t.state = uc.context_save(), g[1], 0, "ready"
@@ -2672,6 +2679,8 @@ def main(argv):
                      + emu.milestone_lines() + emu.dp.lines()
                      + emu.vt_past_lines() + emu.watch_lines()):
             print(line)
+        if getattr(emu, "libc_heap_undefined", None):
+            print(f"libc-heap-undefined\t{emu.libc_heap_undefined}")
         print(f"STOPPED: {why}")
         write_summary(f"STOPPED: {why}")
         return 1
