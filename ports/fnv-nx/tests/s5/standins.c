@@ -278,3 +278,36 @@ void fnv_standin_00aa2020(void) {
     void **vt = *(void ***)alloc;
     ((void (*)(void *))vt[7 + 1])(alloc);
 }
+
+/* The INI settings load 0x005e0200 and its Open 0x005e0830 (the file name 0x004f8ac0, then slot 6 of the object's
+ * vftable, the file's Open with the bool), called on two kinds of collection: the INI collections (image vftable
+ * 0x0101772c: slot 5 = IniCollection::FUN_00c44280(IniSetting*), slot 6 = Open 0x00c43d60), whose native table is a
+ * D26 (c) minus-one table (exe slot k at k+1), and the registry collection (0x01082ed8, RegSettingCollection's native
+ * vtable), whose table is the exe's order with a D1 stub at slot 0 (a class with a placeholder in the destructor slot,
+ * as BSNiAllocator was). The native bodies read exe order (offset 24) in Open and minus-one (+32, +40) in 0x005e0200:
+ * each is right for one kind. On the INI collection Open ran exe slot 5 with the bool as its setting (null) and read
+ * [0 + 8]: the four faults that made 0x005e0200 return 0, so fallout.ini was never read; on the registry one
+ * 0x005e0200 called slot 10 of a 10-slot table (0). Both bodies here pick the slot by the vftable kind
+ * (S1-rules: D26 (b) must shift the Open declaration and RegSettingCollection's placeholder slot 0, then both go). */
+extern void fnv_file_setname(void *self, const char *name) __asm__("_ZN18FUN_004f8a60_class12FUN_004f8ac0Ei");
+extern const void *fnv_vt_regsetting[] __asm__("__fnv_01082ed8") __attribute__((visibility("hidden")));
+static void *fnv_exe_slot(void *self, int k) {
+    void **vt = *(void ***)self;
+    return vt[(const void *)vt == (const void *)fnv_vt_regsetting ? k : k + 1];
+}
+uint32_t fnv_standin_005e0830(void *self, const char *path, uint32_t flag) __asm__("_ZN12FUN_005e08304OpenEPKcb");
+uint32_t fnv_standin_005e0830(void *self, const char *path, uint32_t flag) {
+    fnv_file_setname(self, path);
+    return ((uint32_t (*)(void *, uint32_t))fnv_exe_slot(self, 6))(self, flag & 0xff);
+}
+/* 0x005e0200: Open(path, false); when it opened, exe slot 9 (the enumerator 0x0044f9c0: every registered Setting
+ * through slot 5) and exe slot 7. The memory context 9 (0x00404eb0) around it only labels allocations. */
+uint32_t fnv_standin_005e0200(void *self, const char *path) __asm__("_ZN11C5E0200File12FUN_005e0200EPKc");
+uint32_t fnv_standin_005e0200(void *self, const char *path) {
+    uint32_t ok = fnv_standin_005e0830(self, path, 0) & 0xff;
+    if (ok) {
+        ((void (*)(void *))fnv_exe_slot(self, 9))(self);
+        ((void (*)(void *))fnv_exe_slot(self, 7))(self);
+    }
+    return ok;
+}

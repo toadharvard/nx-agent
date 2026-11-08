@@ -163,9 +163,13 @@ def exe_slot_plan(slots, exe_slots, natives):
 MILESTONES = os.path.join(HERE, "milestones.txt")
 
 
-def parse_milestones(path):
-    """--milestones table (tests/s5/milestones.txt): [(name, 'call'|'store', target)] in file order; a name may have
-    several lines (any one reaches it); '#' starts a comment."""
+MILE_GROUP = re.compile(r"(all|seq)(?::([\w-]+))?")
+MILE_MODS = ("main-thread",)
+
+
+def parse_milestone_specs(path):
+    """--milestones table (tests/s5/milestones.txt): [{name, group, kind, target, mods}] in file order. group is None
+    (a plain line: one way to the milestone) or ('all'|'seq', id): a part of a compound way. '#' starts a comment."""
     out = []
     with open(path) as fh:
         lines = fh.read().splitlines()
@@ -173,17 +177,31 @@ def parse_milestones(path):
         f = line.split("#", 1)[0].split()
         if not f:
             continue
+        group = None
+        if len(f) > 1 and MILE_GROUP.fullmatch(f[1]):
+            m = MILE_GROUP.fullmatch(f[1])
+            group = (m.group(1), m.group(2) or "")
+            del f[1]
+        mods = []
+        while len(f) > 3 and f[-1] in MILE_MODS:
+            mods.append(f.pop())
         ok = len(f) == 3 and re.fullmatch(r"[a-z][\w-]*", f[0]) and (
-            f[1] in ("call", "callok", "calltrue") and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
+            f[1] in ("call", "callok", "calltrue", "ret") and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
             f[1] == "store" and re.fullmatch(r"\*?0x[0-9a-fA-F]+(\+(0x[0-9a-fA-F]+|\d+))?", f[2]) or
             f[1] == "data" and f[2] in datapath.DATA_MILESTONES)
         if not ok:
-            raise ValueError(f"{path}:{k}: <name> call|callok|calltrue <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
-                             f"<name> data <{'|'.join(datapath.DATA_MILESTONES)}>")
-        if f[1].startswith("call") and f[2].startswith("re:"):
+            raise ValueError(f"{path}:{k}: <name> [all|seq[:id]] call|callok|calltrue|ret <0xORIG | re:REGEX> | "
+                             f"<name> [all|seq[:id]] store <0xADDR | *0xADDR+N> | "
+                             f"<name> [all|seq[:id]] data <{'|'.join(datapath.DATA_MILESTONES)}>  [main-thread]")
+        if f[1] in ("call", "callok", "calltrue", "ret") and f[2].startswith("re:"):
             re.compile(f[2][3:])
-        out.append(tuple(f))
+        out.append(dict(name=f[0], group=group, kind=f[1], target=f[2], mods=tuple(mods)))
     return out
+
+
+def parse_milestones(path):
+    """the table as [(name, kind, target)] in file order (the compound markers' parts too; see parse_milestone_specs)"""
+    return [(d["name"], d["kind"], d["target"]) for d in parse_milestone_specs(path)]
 
 
 def placement_table():
@@ -2217,14 +2235,28 @@ class Emu:
     # boot cannot fake. 'call F' is reached when F's first instruction runs (F an original address 0x... or
     # 're:<regex>' over the ELF's code symbols, for native code such as the D3D9 device); 'store A' when a non-zero
     # word is written to the data-window address A; 'store *A+N' when one is written to (the pointer stored at A)+N.
+    # An event ("condition") belongs to one line; a line is a way to its milestone alone, or a part of an `all` / `seq`
+    # group (milestones.txt header). A milestone counts only when every one before it in the order is reached
+    # (self.miles); a hit without that is kept in self.mile_ooo, printed, and promoted only by a new hit.
     def install_milestones(self, path):
         self.miles, self.mile_order, self.mile_data = {}, [], {}
+        self.mile_ooo, self.mile_groups, self.mile_conds = {}, {}, []
         if getattr(self, "dp", None):   # tests may build an Emu without __init__
             self.dp.notify = self.on_mile_data
-        for name, kind, target in parse_milestones(path):
+        for d in parse_milestone_specs(path):
+            name, kind, target = d["name"], d["kind"], d["target"]
             if name not in self.mile_order:
                 self.mile_order.append(name)
-            if kind in ("call", "callok", "calltrue"):
+            grp = None
+            if d["group"]:
+                grp = self.mile_groups.setdefault((name,) + d["group"], {"name": name, "mode": d["group"][0],
+                                                                         "parts": [], "done": False})
+            cond = {"id": len(self.mile_conds), "name": name, "kind": kind, "target": target, "grp": grp,
+                    "main": "main-thread" in d["mods"], "idx": len(grp["parts"]) if grp else 0, "fired": False}
+            if grp:
+                grp["parts"].append(cond)
+            self.mile_conds.append(cond)
+            if kind in ("call", "callok", "calltrue", "ret"):
                 if target.startswith("re:"):
                     rx = re.compile(target[3:])
                     addrs = sorted({self.code_addr(n) for n in self.code_syms if rx.search(n)})
@@ -2232,49 +2264,86 @@ class Emu:
                     addrs = [a for a in [self.code_addr(target)] if a is not None]
                 for a in addrs:
                     if kind == "call":
-                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
-                    else:   # reached when the call returns success: callok w0 == 0 (an HRESULT), calltrue w0 & 0xff
-                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_callret, user_data=(name, kind), begin=a, end=a)
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=cond, begin=a, end=a)
+                    else:   # reached when the call returns: callok w0 == 0 (an HRESULT), calltrue w0 & 0xff, ret any
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_callret, user_data=cond, begin=a, end=a)
                 if not addrs:
                     print(f"   milestones: {name}: {target} is not in the link")
             elif kind == "data":
-                self.mile_data.setdefault(target, []).append(name)
+                self.mile_data.setdefault(target, []).append(cond)
             else:
                 m = re.fullmatch(r"(\*?)(0x[0-9a-fA-F]+)(?:\+(0x[0-9a-fA-F]+|\d+))?", target)
                 addr, off = int(m.group(2), 16), int(m.group(3) or "0", 0)
                 # The hook range starts STORE_REACH bytes below the word: a wider store (str x at want-4, a q store
                 # Unicorn splits into 8-byte pieces) covers it from below; stored_word keeps only full covers.
                 if m.group(1):
-                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_base, user_data=(name, target, addr, off),
+                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_base, user_data=(cond, addr, off),
                                      begin=addr - self.STORE_REACH, end=addr + 3)
                 else:
-                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, addr),
+                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(cond, addr),
                                      begin=addr - self.STORE_REACH, end=addr + 3)
         print(f"   milestones: {', '.join(self.mile_order)}")
+
+    def mile_fire(self, cond, how, at=None):
+        """a condition's event happened (now, in the running guest): a plain line hits its milestone; a group part
+        counts when its group allows (seq: the parts above it happened), and the milestone is hit when the group is
+        complete (and again by every later event of it, which is how an out-of-order hit recovers)"""
+        if cond["main"] and (self.cur.tid if self.cur else 1) != 1:
+            return
+        name, g = cond["name"], cond["grp"]
+        if name in self.miles:   # reached: nothing to add
+            return
+        if g is None:
+            self.mile_hit(name, how, at=at)
+            return
+        parts = g["parts"]
+        if g["mode"] == "seq" and not all(p["fired"] for p in parts[:cond["idx"]]):
+            return
+        cond["fired"] = True
+        if all(p["fired"] for p in parts):
+            g["done"] = True
+            self.mile_hit(name, how + (f" [{len(parts)} parts]" if len(parts) > 1 else ""), at=at)
+
+    def mile_missing(self, name):
+        i = self.mile_order.index(name)
+        return [p for p in self.mile_order[:i] if p not in self.miles]
 
     def mile_hit(self, name, how, at=None):
         if name in self.miles:
             return
+        missing = self.mile_missing(name)
         lr = self.uc.reg_read(UC_ARM64_REG_LR)
         where = self.sym(self.uc.reg_read(UC_ARM64_REG_PC) if at is None else at).split(" ", 1)[-1]
-        self.miles[name] = {"how": how, "where": where, "caller": self.sym(lr).split(" ", 1)[-1],
-                            "seq": len(self.miles) + 1, "host_calls": self.calls,
-                            "thread": self.cur.tid if self.cur else 1}
-        print(f"   milestone: {name} ({how} at {where}, caller {self.miles[name]['caller']})")
+        rec = {"how": how, "where": where, "caller": self.sym(lr).split(" ", 1)[-1], "host_calls": self.calls,
+               "thread": self.cur.tid if self.cur else 1}
+        if missing:
+            o = self.mile_ooo.get(name)
+            if o:   # recorded already: count it, keep the first hit's details
+                o["hits"] += 1
+                o["missing"] = missing
+                return
+            self.mile_ooo[name] = dict(rec, missing=missing, hits=1)
+            print(f"   milestone: {name} hit out of order (missing: {', '.join(missing)})"
+                  f" ({how} at {where}, caller {rec['caller']})")
+            return
+        rec["seq"] = len(self.miles) + 1
+        if name in self.mile_ooo:
+            rec["was_out_of_order"] = True
+            self.mile_ooo.pop(name)
+        self.miles[name] = rec
+        print(f"   milestone: {name} ({how} at {where}, caller {rec['caller']})")
 
     def on_mile_data(self, target, how):
-        for name in self.mile_data.get(target, ()):
-            self.mile_hit(name, f"data {how}")
+        for cond in self.mile_data.get(target, ()):
+            self.mile_fire(cond, f"data {how}")
 
-    def on_mile_call(self, uc, addr, size, name):
-        if name not in self.miles:
-            self.mile_hit(name, "call", at=addr)
+    def on_mile_call(self, uc, addr, size, cond):
+        self.mile_fire(cond, "call", at=addr)
 
-    def on_mile_callret(self, uc, addr, size, data):
-        """'callok' / 'calltrue' F: at F's entry, a one-shot hook on the return address checks the result there (the
-        same thread and stack pointer: a recursive or other thread's return does not count)"""
-        name, kind = data
-        if name in self.miles:
+    def on_mile_callret(self, uc, addr, size, cond):
+        """'callok' / 'calltrue' / 'ret' F: at F's entry, a one-shot hook on the return address checks the result
+        there (the same thread and stack pointer: a recursive or other thread's return does not count)"""
+        if cond["name"] in self.miles:
             return
         ret, sp = uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF, uc.reg_read(UC_ARM64_REG_SP)
         tid = self.cur.tid if getattr(self, "cur", None) else 1
@@ -2282,58 +2351,52 @@ class Emu:
         if ret not in pend:
             pend[ret] = []
             self.uc.hook_add(UC_HOOK_CODE, self.on_mile_ret, user_data=ret, begin=ret, end=ret)
-        pend[ret].append((name, kind, sp, tid, addr))
+        pend[ret].append((cond, sp, tid, addr))
 
     def on_mile_ret(self, uc, addr, size, ret):
         pend = self.mile_ret_pending.get(ret) or []
         sp = uc.reg_read(UC_ARM64_REG_SP)
         tid = self.cur.tid if getattr(self, "cur", None) else 1
         for e in list(pend):
-            name, kind, sp0, tid0, fn = e
+            cond, sp0, tid0, fn = e
             if tid0 != tid or sp0 != sp:
                 continue
             pend.remove(e)
-            x0 = uc.reg_read(UC_ARM64_REG_X0)
-            ok = (x0 & 0xFFFFFFFF) == 0 if kind == "callok" else (x0 & 0xFF) != 0
-            if ok and name not in self.miles:
-                self.mile_hit(name, f"{kind} (returned {x0 & 0xFFFFFFFF:#x})", at=fn)
-            elif not ok:
-                print(f"   milestone: {name} not reached: {self.sym(fn).split(' ', 1)[-1]} returned {x0 & 0xFFFFFFFF:#x}")
+            x0, kind = uc.reg_read(UC_ARM64_REG_X0), cond["kind"]
+            ok = kind == "ret" or ((x0 & 0xFFFFFFFF) == 0 if kind == "callok" else (x0 & 0xFF) != 0)
+            if ok:
+                self.mile_fire(cond, f"{kind} (returned {x0 & 0xFFFFFFFF:#x})", at=fn)
+            elif cond["name"] not in self.miles:
+                print(f"   milestone: {cond['name']} not reached: {self.sym(fn).split(' ', 1)[-1]} returned {x0 & 0xFFFFFFFF:#x}")
 
     def on_mile_store(self, uc, access, addr, size, value, data):
-        name, target, want = data
-        if name not in self.miles and self.stored_word(addr, size, value, want):
-            self.mile_hit(name, f"store {target}")
+        cond, want = data
+        if cond["name"] not in self.miles and self.stored_word(addr, size, value, want):
+            self.mile_fire(cond, f"store {cond['target']}")
 
     STORE_REACH = 12   # a 16-byte store at want-12 still covers the word at want
 
     def on_mile_base(self, uc, access, addr, size, value, data):
-        """a store to A of 'store *A+N': watch (the new pointer)+N, which may hold its value already. The object the
-        old pointer named is no longer watched (freed and reused memory must not count)."""
-        name, target, base, off = data
-        if name in self.miles or not (addr <= base < addr + size):
+        """a store to A of 'store *A+N': watch (the new pointer)+N for a store. The object the old pointer named is
+        no longer watched (freed and reused memory must not count). A value already there when the pointer is
+        stored does not count: only a store does."""
+        cond, base, off = data
+        if cond["name"] in self.miles or not (addr <= base < addr + size):
             return
         p = self.stored_word(addr, size, value, base, nonzero=False)
         if p is None:   # a store that covers only part of A: not a pointer store
             return
-        held = getattr(self, "mile_obj", {}).get(name)
+        held = cond.get("obj")
         if held and held[0] == p:
             return
         if held:
             uc.hook_del(held[1])
-            self.mile_obj.pop(name)
+            cond["obj"] = None
         if not p:
             return
-        try:
-            (cur,) = struct.unpack("<I", uc.mem_read(p + off, 4))
-        except UcError:
-            cur = 0
-        if cur:
-            self.mile_hit(name, f"store {target} (already set when the pointer was stored)")
-        else:
-            h = uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, p + off),
-                            begin=p + off - self.STORE_REACH, end=p + off + 3)
-            self.__dict__.setdefault("mile_obj", {})[name] = (p, h)
+        h = uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(cond, p + off),
+                        begin=p + off - self.STORE_REACH, end=p + off + 3)
+        cond["obj"] = (p, h)
 
     @staticmethod
     def stored_word(addr, size, value, want, nonzero=True):
@@ -2344,28 +2407,45 @@ class Emu:
         return (w if w or not nonzero else None)
 
     def milestone_lines(self):
-        """milestone <name> <reached|-> <how> <where> <caller>, in the table's order"""
+        """milestone <name> <reached|out-of-order|-> <how> <where> <caller> [missing: ...], in the table's order"""
         out = []
+        ooo = getattr(self, "mile_ooo", {})
         for n in getattr(self, "mile_order", []):
-            m = self.miles.get(n)
-            out.append(f"milestone\t{n}\t" + ("\t".join(["reached", m["how"], m["where"], m["caller"]]) if m else "-"))
+            m, o = self.miles.get(n), ooo.get(n)
+            if m:
+                out.append(f"milestone\t{n}\t" + "\t".join(["reached", m["how"], m["where"], m["caller"]]))
+            elif o:
+                out.append(f"milestone\t{n}\t" + "\t".join(["out-of-order", o["how"], o["where"], o["caller"],
+                                                          "missing: " + ",".join(o["missing"])]))
+            else:
+                out.append(f"milestone\t{n}\t-")
         return out
+
+    def milestone_summary(self):
+        """the summary's milestone fields: milestones (reached = in order and counted; an out-of-order hit has
+        out_of_order true, its missing prerequisites and reached false), milestone (the last reached), reached, of,
+        out_of_order (the hits that did not count)"""
+        order = getattr(self, "mile_order", [])
+        ooo = getattr(self, "mile_ooo", {})
+        reached = [n for n in order if n in self.miles]
+        return {
+            "milestones": [dict(name=n, reached=n in self.miles,
+                                **({"out_of_order": True, **ooo[n]} if n in ooo else self.miles.get(n, {})))
+                           for n in order],
+            "milestone": reached[-1] if reached else None,   # reached counts in order: the last is the boot's state
+            "reached": len(reached), "of": len(order),
+            "out_of_order": [dict(name=n, missing=ooo[n]["missing"], how=ooo[n]["how"]) for n in order if n in ooo],
+        }
 
     def summary(self, stop, rc=None):
         """the machine-readable boot summary (--summary-json): milestones in order, the highest reached, the stop"""
-        order = getattr(self, "mile_order", [])
-        reached = [n for n in order if n in self.miles]
-        best = None
-        for n in order:   # the last milestone in table order that was reached (later ones may come without earlier)
-            if n in self.miles:
-                best = n
+        mile = self.milestone_summary()
         msgs = [l.strip() for l in self.console.decode(errors="replace").splitlines()
                 if re.search(r"\[fnvnx\] (MessageBox|ExitProcess|FatalAppExit)", l)]
         tr = getattr(self, "last_trace", None)
         return {
             "schema": "fnvnx-boot-summary/1",
-            "milestones": [dict(name=n, reached=n in self.miles, **self.miles.get(n, {})) for n in order],
-            "milestone": best, "reached": len(reached), "of": len(order),
+            **mile,
             "winmain": "calling WinMain" in self.console.decode(errors="replace"),
             "stop": {"reason": stop, "exit_code": rc, "trace": tr, "messages": msgs[:20]},
             "initializers_skipped": len(getattr(self, "skipped", None) or []),
