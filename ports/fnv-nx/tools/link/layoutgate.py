@@ -23,7 +23,8 @@ double, long long, __int64, __m64), memfnptr (a pointer to member function: 8 by
 vfpad / vfpad-src (MSVC pads a record's own vfptr to the record's alignment > 4; -src: the members' offset names
 say the exe has no padding, see vfpad()), vptr (the record's or a base's vfptr), pack (a record MSVC packs below its
 members' alignment), or other. A record identical on both sides gives no row. The summary line (stderr and the
-.summary file next to the TSV) counts differing records and fields, boot set and the rest, unique by record name.
+.summary file next to the TSV) counts differing records and fields, boot set and the rest, unique by record name; an EBO2 base (size 0 natively,
+1 under MSVC, nothing else differs) is counted apart, as ebo2 bases (the member check covers it).
 """
 import argparse
 import collections
@@ -161,23 +162,27 @@ def probe(tree, workdir, unit, recs):
     base = unit.replace('/', '_')
     src, obj = os.path.join(workdir, base + '.lg.cpp'), os.path.join(workdir, base + '.lg.o')
     alive = [r for r in recs if '<' not in r.name or r.name.count('<') == r.name.count('>')]
-    res = {}
-    for _ in range(8):
+    res, plain = {}, set()
+    for _ in range(10):
         if not alive:
             break
         lines = ['#include "%s"' % os.path.join(tree, unit), '#include <cstddef>', '#include <type_traits>']
         first = len(lines) + 1
         layout_of = []
         for i, r in enumerate(alive):
-            q = '::' + r.name
+            # the elaborated name: a function of the record's name hides it (tesobjectrefr.cpp's struct and function
+            # FUN_0057a9d0: sizeof(::FUN_0057a9d0) was the function's, 1); the plain name when that fails
+            el = r.name not in plain
+            q = ('struct ::' if el else '::') + r.name
             vals = ['sizeof(%s)' % q, 'alignof(%s)' % q]
             fs = [f for f in r.fields if f[0] is not None and f[1]]
             vals += ['__builtin_offsetof(%s, %s)' % (q, f[1]) for f in fs]
             bs = [b for b in r.bases if b[2] != 'virtual base']
-            vals += ['(unsigned)((char *)static_cast< ::%s *>((%s *)0x10000) - (char *)0x10000)' % (b[1], q) for b in bs]
+            vals += ['(unsigned)((char *)static_cast<%s ::%s *>((%s *)0x10000) - (char *)0x10000)'
+                     % ('struct' if el else '', b[1], q) for b in bs]
             # the member-function-pointer fields (bit j: field j < 32): 8 bytes natively (Itanium ptr + adj), 4 under
             # MSVC for a single-inheritance class
-            vals.append('0u' + ''.join(' | (std::is_member_function_pointer<std::remove_all_extents<decltype(%s::%s)>'
+            vals.append('0u' + ''.join(' | (std::is_member_function_pointer<std::remove_all_extents<decltype(((%s *)0)->%s)>'
                                        '::type>::value ? %du : 0u)' % (q, f[1], 1 << j) for j, f in enumerate(fs[:32])))
             layout_of.append((r, fs, bs))
             lines.append('extern "C" const unsigned __fnvnx_lg_%d[] = {%s};' % (i, ', '.join(vals)))
@@ -200,7 +205,9 @@ def probe(tree, workdir, unit, recs):
         bad = {b for b in bad if 0 <= b < len(alive)}
         if not bad:
             break
-        alive = [r for i, r in enumerate(alive) if i not in bad]
+        retry = {alive[b].name for b in bad if alive[b].name not in plain}
+        plain |= retry
+        alive = [r for i, r in enumerate(alive) if i not in bad or r.name in retry]
     return res
 
 
@@ -332,32 +339,42 @@ def main():
     # the member check: a record whose layout differs only by its alignment under #pragma pack (pack) or by a zero
     # native size (ebo) is harmless as a base; as a member it moves its neighbours when MSVC places it at an offset
     # the native alignment does not allow (pack), or always (ebo: 1 byte under MSVC, 0 natively)
-    pack = {r[1]: int(r[4]) for r in allrows if r[2] == 'align' and int(r[3]) < int(r[4])}
-    ebo = {r[1] for r in allrows if r[2] == 'size' and str(r[4]) == '0'}
+    # per unit: a name is one class in a unit, another elsewhere (hkxnode.cpp's hkReferencedObject member is the real
+    # 8-byte class; hkserializeutil.cpp's empty stand-in of that name is the one of native size 0)
+    pack = {(r[0], r[1]): int(r[4]) for r in allrows if r[2] == 'align' and int(r[3]) < int(r[4])}
+    ebo = {(r[0], r[1]) for r in allrows if r[2] == 'size' and str(r[4]) == '0'}
     for unit, rec, off, nm, t, b in allmembers:
-        base = re.sub(r'\s*\[\d+\]$', '', t).split('::')[-1].strip()
+        name = re.sub(r'\s*\[\d+\]$', '', t).strip()
+        base = next(((unit, k) for k in (name, name.split('::')[-1].strip()) if (unit, k) in ebo or (unit, k) in pack),
+                    (unit, name))
         if base in ebo:
-            allrows.append((unit, rec, 'member %s' % nm, off, '%s (native size 0)' % base, 'ebo-member', b))
+            allrows.append((unit, rec, 'member %s' % nm, off, '%s (native size 0)' % base[1], 'ebo-member', b))
         elif base in pack and off % pack[base]:
-            allrows.append((unit, rec, 'member %s' % nm, off, '%s (native align %d)' % (base, pack[base]), 'pack-member', b))
+            allrows.append((unit, rec, 'member %s' % nm, off, '%s (native align %d)' % (base[1], pack[base]),
+                            'pack-member', b))
     allrows.sort(key=lambda r: tuple(str(x) for x in r))
     with open(a.out, 'w') as f:
         f.write('# fnvnx-layoutgate/1\n' + '\t'.join(COLUMNS) + '\n')
         for r in allrows:
             f.write('\t'.join(str(x) for x in r) + '\n')
+    # an EBO2 base (only the FNVNX_EBO2 filler: native size 0, MSVC 1, by design - a 1-byte filler would move the
+    # derived class's members) differs in its size alone; the member check above covers its use as a member, so the
+    # record counts as an ebo2 base, not as a differing record
+    ebo2 = {(r[0], r[1]) for r in allrows if r[2] == 'size' and str(r[4]) == '0' and r[5] == 'ebo'}
+    ebo2 -= {(r[0], r[1]) for r in allrows if r[2] not in ('size', 'align') and not r[2].startswith('member')}
     recs = collections.defaultdict(set)
     for r in allrows:
-        if not r[2].startswith('member'): recs[(r[1], r[6])].add(r[2])
+        if not r[2].startswith('member') and (r[0], r[1]) not in ebo2: recs[(r[1], r[6])].add(r[2])
     rb = {k[0] for k in recs if k[1] == 1}
     rr = {k[0] for k in recs if k[1] == 0} - rb
     fb = sum(1 for r in allrows if r[6] == 1 and r[2].startswith('field'))
     causes = collections.Counter(r[5] for r in allrows if r[2] == 'size' or r[2].startswith('field'))
     mrows = [r for r in allrows if r[2].startswith('member')]
     summary = ('layoutgate: %d units, records msvc %d / probed %d; differing records %d (boot %d, rest %d), '
-               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); causes %s' %
+               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); ebo2 bases %d; causes %s' %
                (len(units), measured[0], measured[1], len(rb | rr), len(rb), len(rr),
                 sum(1 for r in allrows if r[2].startswith('field')), fb, len(mrows), sum(1 for r in mrows if r[6] == 1),
-                dict(causes.most_common())))
+                len({k[1] for k in ebo2}), dict(causes.most_common())))
     print(summary, file=sys.stderr)
     open(a.out + '.summary', 'w').write(summary + '\n')
 

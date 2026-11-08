@@ -67,3 +67,15 @@
 * **START (farms)**: please run `layoutgate` again on a head that has 51a3ea0f (and 6c9a8ee0, VFPAD1). The whole-tree report
   cf66957439a9 predates the filler fix, TAIL1-PACK and the new causes.
 * Next: vfpad-src classes (per-class base recons), and the remaining whole-tree causes from the new report.
+* **11a6f7cdb79a run** (120,603 MSVC records; 206 field rows: vfpad-src 204, memfnptr 8, other 1, plus 1 member at
+  risk):
+  - The D1E4 and ClsReader recons were published after the job fetched its recon set.
+  - recon/s1_hkobjectresource_listener ac784311 also makes the table's entries 4-byte function pointers under GCC.
+  - Gate fixes (1dc4016f):
+    - The probe names records as `struct ::X`. In tesobjectrefr.cpp, a function FUN_0057a9d0 hid the struct of
+      that name.
+    - The member check keys records by unit. hkxnode's real hkReferencedObject was matched against
+      hkserializeutil's empty stand-in.
+    - EBO2-only records (size 0 natively, 1 under MSVC, by design) count as "ebo2 bases", not as differing records.
+      They are the boot set's 3.
+  - Expected on the next run: 0 field rows.
