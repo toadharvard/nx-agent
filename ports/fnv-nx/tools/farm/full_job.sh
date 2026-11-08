@@ -27,6 +27,11 @@
 # Needs: link_job.sh's, plus g++; for fnvnx-a64: libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex; python
 # unicorn; for TESTS=all also qemu-user, cmake, meson, ninja-build. FARM_APT=1 installs them (root).
 set -euo pipefail
+unset FNVNX_STUB_NULLDEV   # the stub boot (4b) sets it for itself only; never the raw boot or the product (S5 a3b368ed)
+# the boots schedule as emu_guest.py does by default (S5 620572bc: threads switch at host calls, deterministic);
+# no instruction count or timer slicing of ours, not even one the farm's environment carries (the timer slices
+# of 2d1afaeb..6da559aa were nondeterministic). EMU_BUDGET: the raw boot's, tools/pipeline/build.py emu_slicing.
+unset BUDGET SLICE_MS EMU_BUDGET EMU_SLICE_MS
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../../.." && pwd)
@@ -42,7 +47,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 . "$HERE/lib_job.sh"
 t0=$(date +%s)
 
-host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname py:unicorn py:elftools py:mako meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native); mako: uam (LINK_OVERRIDES=render)
+host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname $LINK_PY meson ninja flex bison   # meson..bison: deko3d (HOST_BACKEND=native); mako: uam (LINK_OVERRIDES=render)
 # NX1's package checks (tests/nx1): switch-tools elf2nro needs lz4.h, the host device test qemu-user, the libnx
 # syntax check newlib's headers. Libraries are not commands, so host_check cannot see them.
 # uam (toolchain/uam/build.sh, LINK_OVERRIDES=render without RENDER_LIB) needs the system python's mako.
@@ -51,6 +56,8 @@ if [ "${FARM_APT:-0}" = 1 ] && { [ ! -f /usr/include/lz4.h ] || [ ! -d /usr/incl
 	apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends liblz4-dev libnewlib-dev qemu-user python3-mako \
 		|| echo "full_job.sh: NX1 packages not installed; checks 1 and 7 report incomplete"
 fi
+# one worktree path for every head (lib_job.sh job_sources): the link's compile cache hits across heads
+export FARM_STABLE_SRC=${FARM_STABLE_SRC:-$FARM_HOME/full-src}
 job_sources "$REPO"
 F=$FARM_HOME/full; mkdir -p "$F"
 # the reconstructed bodies (D20, branches recon/*) for S1-refs' rule REC1, exported for every prepare this job runs
@@ -69,7 +76,14 @@ if [ -z "${FNVNX_TC:-}${DEVKITPRO:-}" ] && [ ! -f "$TCB/toolchain/prefix/.fnvnx-
 	host_check makeinfo bison flex     # toolchain/gcc/build.sh (its configure checks the gmp/mpfr/mpc headers)
 fi
 log "toolchain $TCB"
+# T1: a fresh machine restores the built toolchain of this TCID from the artifacts repository (hostcache.sh) instead
+# of building it (gcc ~45 min on 4 cores); the first machine to build it publishes it, in the background
+TC_RESTORED=0
+if [ ! -f "$TCB/toolchain/stage.json" ] && hostcache fetch toolchain "$TCID" "$TCB"; then TC_RESTORED=1; fi
 make -C "$P" fetch toolchain BUILD_DIR="$TCB" EXT="$EXT" JOBS="$JOBS" TESTS=none > "$TCB/make.log" 2>&1 || true
+if [ "$TC_RESTORED" = 0 ] && stage_ok "$TCB" toolchain; then
+	hostcache_publish_bg toolchain "$TCID" "$TCB" --exclude toolchain/dl --exclude toolchain/src --exclude toolchain/work
+fi
 art() { python3 -I -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.get("artifacts",{}).get(sys.argv[2]) or "")' \
 	"$TCB/toolchain/stage.json" "$1"; }
 stage_ok "$TCB" toolchain || { echo "toolchain stage failed, see $TCB/make.log"; tail -5 "$TCB/make.log"; exit 1; }
@@ -124,6 +138,10 @@ if [ -z "$TREE" ] || [ -z "$OBJS" ]; then
 	KEEP=(); for a in "${ARGS[@]}"; do case "$a" in PREPARED=*|OBJECTS=*) ;; *) KEEP+=("$a") ;; esac; done
 	ARGS=("${KEEP[@]}")
 fi
+# the link's compile cache (T1, tools/link/objcache.py): $FARM_HOME/linkobj, seeded from the artifacts repository's
+# linkobj/cache when this machine has (almost) none, so a fresh farm's first link is not cold (LINKCACHE=0: neither)
+export FNVNX_LINK_OBJCACHE=${FNVNX_LINK_OBJCACHE:-$FARM_HOME/linkobj}
+[ "${LINKCACHE:-1}" = 1 ] && { bash "$HERE/linkcache.sh" seed "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true; }
 # shellcheck disable=SC2086
 make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
 	${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
@@ -169,10 +187,16 @@ print(int(sum(v for k, v in m.items() if k.startswith("link_objcache_") and k.en
 	fi
 fi
 # step-4a-end
+# the cache back to the artifacts repository after a link that compiled something new (LINKCACHE_PUBLISH=0: not;
+# quick_job keeps it local like its other caches); unchanged caches are not pushed
+if [ "${LINKCACHE:-1}" = 1 ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ] && [ -f "$F/build/link/out/aliases.ld" ]; then
+	LINKCACHE_NOTE="full $C12" bash "$HERE/linkcache.sh" publish "$FNVNX_LINK_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
+fi
 
 # 4b. S5's stub-fault boot: the same guest on the same data image with tests/s5/known_faults.txt, which runs past the
 # known faults (docs/TOOLCHAIN.md section 18), so the frontier beyond them is published next to the raw boot's
 # (boot/stub/). tests/s5/farm_boot.sh FARM_BOOTS=stub on the pipeline's build directory; under a minute.
+# step-4b-begin
 STUB=$F/build/boot/stub
 rm -rf "$STUB"
 if [ $INPUTS = 1 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
@@ -180,12 +204,18 @@ if [ $INPUTS = 1 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso
 	IMG=${GAME_EXE:-$F/build/boot/synth/synth.exe}; [ -f "$IMG" ] || IMG=""
 	# EMU_EXTRA=--plat (R4, recon4-013): the platform lane's data (unimplemented calls, failed opens, decode and input
 	# failures) from every full job's boot path
+	# FNVNX_STUB_NULLDEV=1 (S5 a3b368ed): CreateDevice succeeds on the null device in a logged measurement mode, so
+	# the stub boot's frontier goes past the renderer. This boot only, never the raw boot or the product;
+	# FULL_STUB_NULLDEV=0 runs it without. boot/stub/nulldev records the value (the report and the ratchet name it).
+	NULLDEV=${FULL_STUB_NULLDEV:-1}; mkdir -p "$STUB"; echo "$NULLDEV" > "$STUB/nulldev"
+	FNVNX_STUB_NULLDEV=$NULLDEV \
 	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub EMU_EXTRA="${FULL_EMU_EXTRA:---plat}" \
 		FARM_UNITS="${TREE:+$TREE/build/units.json}" PY="${PY:-python3}" EMU_TIMEOUT="${EMU_TIMEOUT:-3000}" \
 		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" $IMG > "$F/stub_boot-$C12.log" 2>&1 \
 		|| log "farm_boot.sh (stub boot) exited $?"
 	ls -1t "$F"/stub_boot-*.log | tail -n +6 | xargs -r rm -f
 fi
+# step-4b-end
 # 4c. S5's work list of hand-stored image vptrs (tests/s5/hand_vptrs.py): each vptr store of an image vftable
 # address in the prepared tree, how this link binds it and the rule that fixes it, boot-hit addresses first;
 # published as boot/hand_vptrs*.tsv. About a minute.
@@ -272,6 +302,11 @@ fi
 	fi
 } >> "$REPORT"
 if [ -n "$NOTE_LINKEQ" ]; then echo "- incremental link check (LINKEQ): $NOTE_LINKEQ" >> "$REPORT"; fi
+# 5c. The prepared tree as t/<commit12> when no prepare farm published one (the fuzz farms fetch it for the link
+# commit; T1), before link/<commit12>, so a fuzz farm that sees the link finds its tree. Never fails the job.
+if [ $INPUTS = 1 ]; then publish_tree "$F/build" || NOTE_TREEPUB="publish_tree exited $?"; else NOTE_TREEPUB="not published (no tree or no objects)"; fi
+echo "- prepared tree: $NOTE_TREEPUB" >> "$REPORT"
+log "prepared tree: $NOTE_TREEPUB"
 if [ $INPUTS = 1 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
 echo "- link outputs: $NOTE_PUB" >> "$REPORT"
 # 6. The device package (NX1): fnv.nro + the SD tree on the private branch nro/<commit12>.

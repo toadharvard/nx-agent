@@ -43,7 +43,7 @@ FNVLINK = os.path.join(HERE, 'fnvlink.py')
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
 # MSVC-like semantics the shim insists on (compile.sh)
 SEMANTICS = getattr(layout, 'SEMANTICS', ['-frounding-math', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv',
-                                          '-fno-delete-null-pointer-checks', '-fno-sized-deallocation',
+                                          '-fno-delete-null-pointer-checks', '-fno-sized-deallocation', '-fno-lifetime-dse',
                                           '-ffp-contract=off'])
 
 HEADER = r'''#pragma once

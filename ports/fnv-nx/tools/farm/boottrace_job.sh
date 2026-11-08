@@ -24,6 +24,10 @@
 #            "no regression" until the boot traces clean, so a head is never failed for a divergence it did not cause.
 # Writes <report.md> and <report>.json (fnvnx-boottrace/1). Exit 0 with any verdict, 1 when the lane could not run.
 set -uo pipefail
+# the boots schedule as emu_guest.py does by default (S5 620572bc: threads switch at host calls, deterministic);
+# no instruction count or timer slicing of ours, not even one the farm's environment carries (the timer slices
+# of 2d1afaeb..6da559aa were nondeterministic). EMU_BUDGET: the raw boot's, tools/pipeline/build.py emu_slicing.
+unset BUDGET SLICE_MS EMU_BUDGET EMU_SLICE_MS
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 HERE=$(cd "$(dirname "$0")" && pwd); P=$(cd "$HERE/../.." && pwd); S5=$P/tests/s5
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}

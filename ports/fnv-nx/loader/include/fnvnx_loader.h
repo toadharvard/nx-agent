@@ -124,7 +124,10 @@ typedef struct fnvnx_mapping {
     uint32_t va, size;        /* current VA (load_base + rva), page-rounded size */
     uint32_t file_bytes;      /* bytes copied from the file, the rest is zero (.bss) */
     unsigned prot, sec;       /* final protection; section index or 0xffff for the headers */
+    unsigned code;            /* 1: a code section mapped read-only as data (FNVNX_MAP_CODE); scanners skip it */
 } fnvnx_mapping;
+/* a mapping the code-pointer scanners and data lookups leave alone: the headers and code sections */
+#define FNVNX_MAPPING_SKIP(m) ((m)->sec == 0xffffu || (m)->code)
 
 typedef struct fnvnx_image {
     const fnvnx_pe *pe;
@@ -139,6 +142,9 @@ typedef struct fnvnx_image {
 } fnvnx_image;
 
 #define FNVNX_MAP_HEADERS 1u      /* also map the header page at load_base, read-only */
+#define FNVNX_MAP_CODE 2u         /* also map code sections (.text) read-only, never executable: their bytes read as
+                                     data as on Windows (constant tables, GUIDs, DirectInput formats the game keeps
+                                     in .text); a branch there still faults. Not scanned for code pointers. */
 
 /* Map every section that is neither code nor discardable at load_base + rva (host: + bias). All of it must lie in
  * [window_lo, window_hi) (current VAs). load_base is normally pe->image_base. */
@@ -169,6 +175,16 @@ int fnvnx_image_load_relocs(fnvnx_image *img, const fnvnx_os *os);
 /* Apply base relocations when load_base != pe->image_base (loads the relocations first if needed). Without a
  * .reloc directory that is FNVNX_E_UNSUPPORTED; with load_base == image_base it does nothing. */
 int fnvnx_image_relocate(fnvnx_image *img, const fnvnx_os *os, uint32_t *applied);
+/* Store 0 in the image's TLS index word (the TLS directory's AddressOfIndex, the CRT's _tls_index), as the Windows
+ * loader does for the main module: code reaches __declspec(thread) data as ((char **)fs:[0x2c])[_tls_index], and
+ * the port's fs:[0x2c] (platform/win32/thread.cpp) has one slot. The file holds whatever the linker left there
+ * (FalloutNV.exe: not 0). *va = the word's address (0 without a TLS directory), *old = its value from the file.
+ * FNVNX_OK, also without a TLS directory; FNVNX_E_RANGE when the word is not in a mapped section. */
+int fnvnx_image_tls_index_reset(const fnvnx_image *img, uint32_t *va, uint32_t *old);
+/* the TLS directory's callbacks (AddressOfCallBacks, a 0-terminated array of VAs): their current values in out (up
+ * to cap), the count in *n. Windows calls each with (hModule, DLL_PROCESS_ATTACH, NULL) before the entry point; after
+ * the code-pointer fixups a value is the native function's address, else still the x86 one */
+int fnvnx_image_tls_callbacks(const fnvnx_image *img, uint32_t *out, uint32_t cap, uint32_t *n);
 /* Set the final protections (read-only for sections without IMAGE_SCN_MEM_WRITE). Call after all fixups. */
 int fnvnx_image_finalize(fnvnx_image *img, const fnvnx_os *os);
 void fnvnx_image_release(fnvnx_image *img, const fnvnx_os *os);   /* frees the reloc list only */

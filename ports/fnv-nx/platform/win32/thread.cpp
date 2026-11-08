@@ -75,8 +75,13 @@ extern "C" BOOL TlsFree(DWORD i)
         return FALSE;
     }
     os_lock(&g_tls_lock);
+    bool was_used = (g_tls_used[i / 32] >> (i % 32)) & 1u;
     g_tls_used[i / 32] &= ~(1u << (i % 32));
     os_unlock(&g_tls_lock);
+    if (!was_used) {   /* freeing a slot that is not allocated fails */
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -215,6 +220,7 @@ static void thread_finish(struct w32_thread_obj *to, DWORD code)
     os_lock(&w32_wait_lock);
     to->exit_code = code;
     to->done = 1;
+    w32_mutexes_abandon_locked(to->tid);
     w32_obj_signal_locked(&to->o);
     os_unlock(&w32_wait_lock);
 }
@@ -346,8 +352,13 @@ extern "C" DWORD SuspendThread(HANDLE h)
 extern "C" BOOL GetExitCodeThread(HANDLE h, LPDWORD code)
 {
     struct w32_thread_obj *t = thread_of(h);
-    if (!t)
+    if (!t) {
+        if (h == W32_PSEUDO_THREAD && code) {   /* a thread the game did not start (the main thread): running */
+            *code = STILL_ACTIVE;
+            return TRUE;
+        }
         return FALSE;
+    }
     os_lock(&w32_wait_lock);
     *code = t->done ? t->exit_code : STILL_ACTIVE;
     os_unlock(&w32_wait_lock);

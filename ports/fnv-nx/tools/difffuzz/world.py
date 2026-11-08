@@ -206,7 +206,7 @@ class World:
             data[lo - p:hi - p] = b[lo - a:hi - a]
         for a, v in self.case.vptrs.items():
             if p <= a and a + 4 <= p + PAGE:
-                struct.pack_into('<I', data, a - p, v)
+                struct.pack_into('<I', data, a - p, self.a64_vptrs.get(a, v) if VPTR_NATIVE else v)
         return bytes(data)
 
     def initial(self, a, n):
@@ -254,6 +254,28 @@ X87_CLAMP = None
 # narrowed or a float widened. classify's width probe reruns the case with the other guess
 X87_FLIP_WIDTH = False
 
+# (r5 design, difffuzz-20) probe switches of r5design.py, each set for one rerun of a divergence:
+#  SKIP_RETS  oracle return addresses of calls the oracle engine does not make (not traced, nothing run): a constructor
+#             call whose every store the caller overwrites before any read (r5design.dead_init_site)
+#  REF_CALLS  indices k of intercepted calls whose canned result is world.ref_result(k) on both machines: a wild call
+#             whose result the oracle dereferences at once (r5design.deref_after_call)
+#  RET_DEAD   the integer / pointer result of the target is not compared: no caller in the exe reads eax
+#             (r5design.result_dead)
+SKIP_RETS = frozenset()
+REF_CALLS = frozenset()
+RET_DEAD = False
+
+# (uncls2, difffuzz-20) probe switches, each set by classify.hint for one rerun of a divergence:
+#  SHIFT_MASK   the 64-bit shift helpers (_allshl / _allshr) take the count modulo 64, as an AArch64 `lsl x, x, x`
+#               does; MSVC's helper gives 0 / the sign for a count of 64 or more (a shift UB in C++)
+#  TRIG_INF     fsin / fcos / fsincos / fptan of an infinity give the x87 indefinite NaN (the Intel manual's #IA
+#               response); unicorn's QEMU leaves the infinity in st0 and sets C2
+#  VPTR_NATIVE  the x86 machine holds the native address point in a planted vptr word too (case.vptrs), so a byte
+#               or a part of the word that the code reads as data is the same on both
+SHIFT_MASK = False
+TRIG_INF = False
+VPTR_NATIVE = False
+
 
 # (float class) XORed into the seed of every garbage source (stack fill, non-argument registers, argument padding) but
 # not into the random background pages: classify's garbage probe for a case with a random background changes only the
@@ -265,6 +287,25 @@ GARBAGE_XOR = 0
 # intercepted call that still hold the planted fill (the native never wrote them), as the exe's real callee would have
 # filled or left them; classify.py's stub-outparam probe reruns an uninit-arm case that way
 STUB_OUT = False
+
+# difffuzz-20 (args class, cpuid-env): when set to {'seen': [], 'perturb': bool}, the oracle's `cpuid` instructions are
+# recorded (address in 'seen') and, with 'perturb', answered with other values than Unicorn's host model gives;
+# classify.py's cpuid probe uses the pair to show which stored bytes depend on the CPU
+CPUID = None
+
+
+def scrub_dead_frames(uc, sp, fill, depth=0x600):
+    """STUB_OUT, at the entry of a function that runs for real: the stack below `sp` goes back to what the case planted
+    (the garbage fill in its top 0x1000 bytes, zeros under it). Without it a frame holds what the frames of the
+    functions called before it left there, and a local an intercepted callee should have filled reads as that residue
+    on the machine whose earlier callees were other functions (0x006a0c50: the oracle's `Handle` local held the
+    pointer a returned frame had stored, the native's the zeros). Both machines scrub the same way."""
+    base = SP0 - 0x1000
+    for a in range(max(sp - depth, STACK[0]) & ~3, sp & ~3, 4):
+        try:
+            uc.mem_write(a, fill[a - base:a - base + 4] if a >= base else bytes(4))
+        except Exception:  # noqa: BLE001
+            return
 
 
 def stack_fill(seed, n):

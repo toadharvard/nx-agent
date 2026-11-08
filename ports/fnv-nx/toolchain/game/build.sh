@@ -41,7 +41,7 @@ compile() {   # src obj extra-flags...
 	local src=$1 obj=$2; shift 2
 	case "$src" in
 		*.c) aarch64-none-elf-gcc $COMMON -std=gnu11 $PINC "$@" -c "$src" -o "$obj" ;;
-		*.cpp) aarch64-none-elf-g++ $COMMON -std=gnu++17 -fno-sized-deallocation -DSTDMETHODCALLTYPE= $PINC "$@" -c "$src" -o "$obj" ;;
+		*.cpp) aarch64-none-elf-g++ $COMMON -std=gnu++17 -fno-sized-deallocation -fno-lifetime-dse -DSTDMETHODCALLTYPE= $PINC "$@" -c "$src" -o "$obj" ;;
 		*.S|*.s) aarch64-none-elf-gcc $ARCH -c "$src" -o "$obj" ;;
 	esac
 }

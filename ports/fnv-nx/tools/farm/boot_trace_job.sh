@@ -27,20 +27,28 @@
 # prefix setup (2 min warm); C and D a few minutes. Local test on a short run: TRACE_DISC_MAX=50000
 # TRACE_WINE_S=60 FARM_GAME=<exe-only install> (docs: tools/lockstep/README.md).
 set -uo pipefail
+# the boots schedule as emu_guest.py does by default (S5 620572bc: threads switch at host calls, deterministic);
+# no instruction count or timer slicing of ours, not even one the farm's environment carries (the timer slices
+# of 2d1afaeb..6da559aa were nondeterministic). EMU_BUDGET: the raw boot's, tools/pipeline/build.py emu_slicing.
+unset BUDGET SLICE_MS EMU_BUDGET EMU_SLICE_MS
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 P=$(cd "$(dirname "$0")/../.." && pwd)
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
 W=$FARM_HOME/boot_trace; mkdir -p "$W" "$(dirname "$REPORT")"
 S5=$P/tests/s5
 T0=$(date +%s)
-NOTES=(); PHASES=()
+NOTES=(); PHASES=(); FAILS=()
 log() { echo "$(date -u +%FT%TZ) boot_trace_job: $*"; }
 phase() { PHASES+=("| $1 | $2 | $(( $(date +%s) - PT ))s |"); }
-fail() { NOTES+=("FAILED: $*"); log "FAILED: $*"; write_report; exit 1; }
+fail() { FAILS+=("$*"); NOTES+=("FAILED: $*"); log "FAILED: $*"; write_report; exit 1; }
+soft_fail() { FAILS+=("$*"); log "FAILED: $*"; }   # the job goes on (the reference trace is still published), exits 1
 write_report() {
 	{
 		echo "# boot trace (lockstep) - ${COMMIT:0:12}"
 		echo
+		# T1: a stage that did not run or produced nothing fails the job, named on the report's first line under
+		# the title (bt1 0e2a4b160f9e read rc=0 with "guest 0 calls" and a compare traceback)
+		if [ ${#FAILS[@]} -gt 0 ]; then echo "- FAIL: $(IFS=';'; echo "${FAILS[*]}")"; echo; fi
 		echo "link: ${LC:-?}; game: ${GAMEDESC:-?}; $(( $(date +%s) - T0 ))s"
 		echo
 		echo "| phase | result | time |"; echo "|---|---|---|"
@@ -100,7 +108,11 @@ boot() {   # boot <tag> <emu_guest extra args...>: the stub boot of link LC with
 		bash "$S5/farm_boot.sh" "$LC" "$W/$tag" > "$W/$tag.log" 2>&1
 	local rc=$?
 	[ -z "${LINKDIR:-}" ] && [ -d "$W/$tag/link/out" ] && LINKDIR=$W/$tag/link
-	[ -z "${GUESTDIR:-}" ] && [ -f "$W/$tag/guest/guest.nso" ] && { mkdir -p "$W/guest"; cp -f "$W/$tag/guest/"* "$W/guest/"; GUESTDIR=$W/guest; }
+	# the guest kept beside the boots, not in one ($W/guest is the work dir of `boot guest`, which starts with rm -rf:
+	# bt1 0e2a4b160f9e's phase C booted a deleted guest in 0 s and wrote no trace)
+	if [ -z "${GUESTDIR:-}" ] && [ -f "$W/$tag/guest/guest.nso" ]; then
+		rm -rf "$W/guest-bin"; mkdir -p "$W/guest-bin"; cp -f "$W/$tag/guest/"* "$W/guest-bin/"; GUESTDIR=$W/guest-bin
+	fi
 	return $rc
 }
 stop_line() { grep -m1 '^STOPPED\|STOPPED:' "$W/$1/emu_stub.log" 2> /dev/null | cut -c1-200; }
@@ -132,20 +144,29 @@ print(f"discovery: {sum(calls.values())} calls of {len(calls)} functions; {len(k
       f"{len(calls) - len(keep)} hot (> {hot} calls) dropped", file=sys.stderr)
 EOF
 	phase discovery "$(cat "$W/disc.txt"); guest stop: $(stop_line disc)"
+	if stop_line disc | grep -q 'wall-clock'; then
+		NOTES+=("WARN: discovery stopped by the wall-clock limit (EMU_TIMEOUT ${EMU_TIMEOUT:-5400} s) before TRACE_DISC_MAX (${TRACE_DISC_MAX:-3000000}) calls: the list is the part of the boot reached in that time")
+	fi
 fi
 [ -s "$W/list.txt" ] || fail "empty trace list"
 
 # ---- B: reference under Wine ---------------------------------------------------------------------------------------
 PT=$(date +%s)
+rm -f "$W/wine.tsv" "$W/guest.tsv" "$W/compare.json" "$W/compare.txt" "$W/seeds.jsonl" "$W/seeds.txt"
 bash "$P/tools/lockstep/wine_trace.sh" "$GAME" "$FARM_HOME/boot_trace_wine" "$W/list.txt" "$W/wine.tsv" "${TRACE_WINE_S:-300}" \
 	> "$W/wine_trace.log" 2>&1 || NOTES+=("wine_trace.sh exit $? (log $W/wine_trace.log)")
+[ -s "$W/wine.tsv" ] || soft_fail "the Wine reference wrote no trace (log $W/wine_trace.log)"
 phase reference "$(tail -2 "$W/wine_trace.log" | tr '\n' ' ' | cut -c1-200)"
 
 # ---- C: the guest on the same list ---------------------------------------------------------------------------------
 PT=$(date +%s)
 WR=""; [ "${TRACE_WRITES:-0}" = 1 ] && WR="--trace-writes"
-boot guest "--trace-fn @$W/list.txt $WR --trace-out $W/guest.tsv"
-phase guest "$(grep -c '^call' "$W/guest.tsv" 2> /dev/null || echo 0) calls; stop: $(stop_line guest)"
+boot guest "--trace-fn @$W/list.txt $WR --trace-out $W/guest.tsv"; grc=$?
+gcalls=$(grep -c '^call' "$W/guest.tsv" 2> /dev/null); gcalls=${gcalls:-0}
+phase guest "$gcalls calls; stop: $(stop_line guest)"
+if [ "$gcalls" = 0 ]; then
+	soft_fail "the guest wrote no trace (farm_boot.sh exit $grc; $(tail -1 "$W/guest.log" 2> /dev/null | cut -c1-160); log $W/guest.log)"
+fi
 
 # ---- D: compare and seeds ------------------------------------------------------------------------------------------
 PT=$(date +%s)
@@ -154,10 +175,17 @@ if git -C "$ARTIFACTS" fetch -q --depth 1 origin "t/$LC" 2> /dev/null; then
 	mkdir -p "$W/tree"; git -C "$ARTIFACTS" show FETCH_HEAD:tree/build/units.json > "$W/tree/units.json" 2> /dev/null && UNITS=$W/tree/units.json
 fi
 [ -n "$UNITS" ] || NOTES+=("no units.json for $LC: only the receiver and the return value are compared")
-python3 -I "$S5/boot_trace.py" compare "$W/guest.tsv" "$W/wine.tsv" ${UNITS:+--units "$UNITS"} --json "$W/compare.json" \
-	> "$W/compare.txt" 2>&1 || NOTES+=("compare failed (see the block above)")
-python3 -I "$S5/boot_trace.py" seeds "$W/wine.tsv" ${UNITS:+--units "$UNITS"} --out "$W/seeds.jsonl" > "$W/seeds.txt" 2>&1
-phase compare "$(grep -m1 'FIRST DIVERGENCE\|ended:' "$W/compare.txt" | cut -c1-200)"
+if [ -s "$W/guest.tsv" ] && [ -s "$W/wine.tsv" ]; then
+	python3 -I "$S5/boot_trace.py" compare "$W/guest.tsv" "$W/wine.tsv" ${UNITS:+--units "$UNITS"} --json "$W/compare.json" \
+		> "$W/compare.txt" 2>&1 || soft_fail "boot_trace.py compare exit $? (see the block above)"
+	[ -s "$W/compare.json" ] || soft_fail "boot_trace.py compare wrote no compare.json"
+	cr="$(grep -m1 'FIRST DIVERGENCE\|ended:' "$W/compare.txt" | cut -c1-200)"
+else cr="not run: a side has no trace"; fi
+if [ -s "$W/wine.tsv" ]; then
+	python3 -I "$S5/boot_trace.py" seeds "$W/wine.tsv" ${UNITS:+--units "$UNITS"} --out "$W/seeds.jsonl" > "$W/seeds.txt" 2>&1 ||
+		soft_fail "boot_trace.py seeds exit $?"
+fi
+phase compare "$cr"
 
 # ---- publish (private) ---------------------------------------------------------------------------------------------
 pub=$W/pub; rm -rf "$pub"; mkdir -p "$pub"
@@ -174,3 +202,5 @@ else NOTES+=("publish to trace/$LC failed (log $W/push.log)"); fi
 rm -rf "$g" "$pub"
 write_report
 log "done: $REPORT"
+if [ ${#FAILS[@]} -gt 0 ]; then log "FAIL: ${FAILS[*]}"; exit 1; fi
+exit 0

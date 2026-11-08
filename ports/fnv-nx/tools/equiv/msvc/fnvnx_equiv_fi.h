@@ -42,9 +42,17 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_IDTOR1(cls)
 /* D22: MSVC keeps the original declaration */
 #define FNVNX_D22(C, ...) __VA_ARGS__
+#define FNVNX_D22I(C, ...) __VA_ARGS__
 #define FNVNX_D22_DROP(...) __VA_ARGS__
 #define FNVNX_D22_CALL(p, m, ...) (p)->m(__VA_ARGS__)
 #define FNVNX_VSLOT(k) (k)
+/* RAWVT1: MSVC keeps the exe slot */
+#define FNVNX_D26_SLOT(k) (k)
+/* EMPTY1: MSVC keeps the name */
+#define FNVNX_EMPTY1(T, name) name
+/* DTORB1: MSVC keeps the original body */
+#define FNVNX_DTORB_BEGIN(a)
+#define FNVNX_DTORB_END
 
 /* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
 #ifndef fnvnx_ftol2

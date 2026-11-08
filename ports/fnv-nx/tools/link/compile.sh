@@ -25,9 +25,10 @@
 # -ffile-prefix-map: __FILE__ and other recorded paths do not depend on where the tree lives, so objects built on
 # different machines from the same tree are byte-identical (tools/farm/).
 # Objects are derived from the decomp: local output only, never committed.
-set -euo pipefail
-# a failure under set -e always names its line (full1: an exit 1 with no message cost a build)
-trap 'rc_=$?; echo "compile.sh: line $LINENO: exit $rc_" >&2' ERR
+set -Eeuo pipefail
+# a failure under set -e always names its line and command, in functions and subshells too (-E) (full1: an exit 1
+# with no message cost a build)
+trap 'rc_=$?; echo "compile.sh: line $LINENO: exit $rc_: $BASH_COMMAND" >&2' ERR
 PRINT_FLAGS=0
 if [ "${1:-}" = --print-flags ]; then PRINT_FLAGS=1; shift; fi
 TREE=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd)
@@ -42,7 +43,9 @@ OPT=${OPT:--O2}
 # test for both, so an append into an hkArray whose m_data is still null constructed at address 0. A semantics flag.
 # -fno-sized-deallocation (W41): MSVC 2008 never emits a sized delete (the exe's delete sites call 0x00401030, the unsized
 # one); GCC under gnu++17 would bind every delete-expression to the sized `operator delete(void*, size_t)` (0x00aa1460).
-FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
+# -fno-lifetime-dse (EQ 588863, 00d979f0): decomp code calls a destructor explicitly and reuses the object (ResetFields'
+# `this->SpawnedBase::~SpawnedBase()`); MSVC never elides the destructor's vptr store, GCC drops it as dead.
+FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
        -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics -U_FORTIFY_SOURCE
        -ffile-prefix-map="$TREE"/= -ffile-prefix-map="$HERE"/=fnv-nx/ -ffile-prefix-map="$SSE2NEON"/=sse2neon/
        -include "$HERE/shim/include/fnvnx_compat.h" -I"$HERE/shim/include" -I"$SSE2NEON" -I"$TREE/include")

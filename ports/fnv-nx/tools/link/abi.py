@@ -84,6 +84,26 @@ def params_x86(sig):
     return out
 
 
+INT_WIDTH_TEST = {'I8': 'tst w0, #0xff', 'I16': 'tst w0, #0xffff', 'I32': 'cmp w0, #0'}
+
+
+def _ret_text(sig):
+    return ' '.join(re.sub(r'\b(?:const|volatile)\b', ' ', sig.raw_ret or '').split())
+
+
+def bool_from_int(ref, dfn):
+    """Instructions after the call when the reference reads a bool the definition returns as another integer type
+    (decomp `char f()` vs `bool f()`, S2 s2d-010: 1,343 references to 205 definitions). MSVC callers test al (any
+    non-zero is true); GCC's bool callers read bit 0 (tbz w0, #0) and assume 0 or 1, so a char 2 reads as false.
+    The result becomes w0 = (value != 0) at the definition's width; None when it is not that pair."""
+    if _ret_text(ref) != 'bool' or _ret_text(dfn) in ('bool', ''):
+        return None
+    t = INT_WIDTH_TEST.get(ret_class(dfn))
+    if t is None or _ret_text(dfn).startswith('enum '):
+        return None
+    return (t, 'cset w0, ne')
+
+
 def ret_class(sig):
     if sig.variant in ('ctor', 'dtor'):
         return 'VOID'
@@ -346,6 +366,9 @@ def compare(ref, dfn, ecx_unused=False, va_reads=None):
                 v.kind = 'manual'
         else:
             v.classes.append('ret-aggregate'); v.kind = 'manual'
+    elif rr == dr == 'x0' and bool_from_int(ref, dfn) is not None:
+        v.classes.append('ret-bool-from-int')
+        v.ret_fix = ('ops', bool_from_int(ref, dfn))
     elif rr == dr == 'v0' and ret_class(ref) != ret_class(dfn):
         # float vs double result (V1 defect 2): x86 hands the value over exactly in st(0); AArch64 would read d0 where
         # the callee wrote s0 - convert after the call (long double is binary128 here: manual)

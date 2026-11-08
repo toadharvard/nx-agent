@@ -444,10 +444,11 @@ TEST(crt_k32_environment)
 {
     char *e = GetEnvironmentStrings();
     CHECK(e != NULL);
-    if (e) {
-        CHECK_EQ(e[0], 0);   /* empty: two NULs */
-        CHECK_EQ(e[1], 0);
-    }
+    size_t base_total = 0;
+    int base_count = 0;
+    for (char *p = e; *p; p += strlen(p) + 1, base_count++)   /* the Windows session's own variables (test_procenv.cpp) */
+        base_total += strlen(p) + 1;
+    CHECK(base_count > 0);
     CHECK(FreeEnvironmentStringsA(e));
     char buf[16];
     SetLastError(0);
@@ -466,15 +467,20 @@ TEST(crt_k32_environment)
     int count = 0;
     for (char *p = e; *p; p += strlen(p) + 1, count++)
         total += strlen(p) + 1;
-    CHECK_EQ(count, 2);
-    CHECK_EQ(total, strlen("FNVNX_K32=on\xe9") + 1 + strlen("OTHER=2") + 1);
+    CHECK_EQ(count, base_count + 2);
+    CHECK_EQ(total, base_total + strlen("FNVNX_K32=on\xe9") + 1 + strlen("OTHER=2") + 1);
     FreeEnvironmentStringsA(e);
     WCHAR *w = GetEnvironmentStringsW();
     CHECK(w != NULL);
     if (w) {
-        CHECK_EQ(w16len(w), 13);   /* in the order set */
-        CHECK_EQ(w[12], 0xE9);
-        CHECK_EQ(w16len(w + 14), 7);
+        const WCHAR *last = w, *prev = w;   /* the two set above are the last two, in the order set */
+        for (const WCHAR *q = w; *q; q += w16len(q) + 1) {
+            prev = last;
+            last = q;
+        }
+        CHECK_EQ(w16len(prev), 13);
+        CHECK_EQ(prev[12], 0xE9);
+        CHECK_EQ(w16len(last), 7);
         /* the CRT sizes the block by WideCharToMultiByte up to the double NUL */
         const WCHAR *q = w;
         while (*q)
@@ -484,11 +490,15 @@ TEST(crt_k32_environment)
     CHECK(FreeEnvironmentStringsW(w));
     CHECK(SetEnvironmentVariableA("FNVNX_K32", NULL));
     CHECK(SetEnvironmentVariableA("OTHER", NULL));
-    CHECK(SetEnvironmentVariableA("NEVER_SET", NULL));
+    CHECK(!SetEnvironmentVariableA("NEVER_SET", NULL));   /* deleting what is not there fails */
+    CHECK_EQ(GetLastError(), ERROR_ENVVAR_NOT_FOUND);
     CHECK_EQ(GetEnvironmentVariableA("FNVNX_K32", buf, 16), 0);
     CHECK_EQ(GetLastError(), ERROR_ENVVAR_NOT_FOUND);
     e = GetEnvironmentStrings();
-    CHECK(e && !e[0] && !e[1]);
+    int n = 0;
+    for (char *p = e; e && *p; p += strlen(p) + 1)
+        n++;
+    CHECK_EQ(n, base_count);
     FreeEnvironmentStringsA(e);
 }
 

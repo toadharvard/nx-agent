@@ -159,12 +159,12 @@ static int is_reloc(const scan *s, uint32_t w) {
     return lo < s->img->nrelocs && s->img->relocs[lo] == w;
 }
 
-/* the data mapping that holds w, or NULL (headers never count) */
+/* the data mapping that holds w, or NULL (headers and code sections never count) */
 static const fnvnx_mapping *mapping_of(const scan *s, uint32_t w) {
     unsigned i;
     for (i = 0; i < s->img->nmapped; i++) {
         const fnvnx_mapping *m = &s->img->map[i];
-        if (m->sec != 0xffff && w >= m->va && w - m->va < m->size) return m;
+        if (!FNVNX_MAPPING_SKIP(m) && w >= m->va && w - m->va < m->size) return m;
     }
     return NULL;
 }
@@ -198,14 +198,14 @@ static void build_eligibility(scan *s, const fnvnx_os *os) {
         for (j = 1; j < img->nrelocs; j++) if (img->relocs[j] < img->relocs[j - 1]) return;
     for (i = 0; i < img->nmapped && i <= FNVNX_MAX_SECTIONS; i++) {
         const fnvnx_mapping *m = &img->map[i];
-        if (m->sec == 0xffff || m->size < 4 || (uint64_t)m->va + m->size > 0xfffffff0ull) continue;
+        if (FNVNX_MAPPING_SKIP(m) || m->size < 4 || (uint64_t)m->va + m->size > 0xfffffff0ull) continue;
         total += ((m->size - 4) / 4 + 1 + 31) / 32 * (s->relmode ? 2u : 1u);
     }
     if (!total || !(s->bitmem = (uint32_t *)os->alloc(os->ctx, total * (uint32_t)sizeof(uint32_t)))) return;
     for (i = 0, off = 0; i < img->nmapped && i <= FNVNX_MAX_SECTIONS; i++) {
         const fnvnx_mapping *m = &img->map[i];
         uint32_t nw, ng, k, *b;
-        if (m->sec == 0xffff || m->size < 4 || (uint64_t)m->va + m->size > 0xfffffff0ull) continue;
+        if (FNVNX_MAPPING_SKIP(m) || m->size < 4 || (uint64_t)m->va + m->size > 0xfffffff0ull) continue;
         nw = (m->size - 4) / 4 + 1;
         ng = (nw + 31) / 32;
         b = s->bitmem + off;
@@ -343,7 +343,7 @@ static int find_vtables(scan *s, const fnvnx_os *os, const fnvnx_scan_opts *opts
     for (i = 0; i < img->nmapped; i++) {
         const fnvnx_mapping *m = &img->map[i];
         uint32_t w;
-        if (m->sec == 0xffff) continue;
+        if (FNVNX_MAPPING_SKIP(m)) continue;
         uint64_t end = (uint64_t)m->va + m->size;
         for (w = m->va; (uint64_t)w + 8 <= end; w += 4) {
             uint32_t c;
@@ -522,7 +522,7 @@ int fnvnx_scan_codeptrs(const fnvnx_image *img, const fnvnx_os *os, const fnvnx_
         const fnvnx_mapping *m = &img->map[i];
         const uint32_t *b = s.bits[i];
         uint32_t w;
-        if (m->sec == 0xffff) continue;
+        if (FNVNX_MAPPING_SKIP(m)) continue;
         if (b && s.vt_cursor) {   /* eligible words in increasing order, 32 at a time */
             uint32_t ng = (s.nw[i] + 31) / 32, gi, vc = s.nvt ? vt_lower(&s, m->va) : 0, words = 0;
             for (gi = 0; gi < ng; gi++) {

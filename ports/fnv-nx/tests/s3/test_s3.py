@@ -243,6 +243,47 @@ class T02Runtime(unittest.TestCase):
                         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                         self.assertIn('expect_failures=0', r.stdout)
 
+    def test_tls_index_reset(self):
+        # the TLS directory's AddressOfIndex holds 0xFFBF8C85 on disk (gen_synth_pe.py, like the real exe); the
+        # loader stores 0, as Windows does for the main module (fs:[0x2c][_tls_index] has one slot in the port)
+        for cfg, moved in (('hints', False), ('reloc', False), ('reloc', True)):
+            with self.subTest(cfg=cfg, moved=moved):
+                r = loadcheck(cfg, moved=moved)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                line = next((l for l in r.stdout.splitlines() if l.startswith('tls_index=')), '')
+                st = stats_of(line)
+                self.assertNotEqual(st.get('tls_index', '0x00000000'), '0x00000000', line)
+                self.assertEqual((st.get('old'), st.get('now'), st.get('rc')), ('0xffbf8c85', '0x00000000', '0'), line)
+
+    def test_tls_callbacks_listed(self):
+        # gen_synth_pe.py's TLS directory has one callback (TLSCB, in .text): the loader lists it, as the Windows
+        # loader would call it before the entry point
+        r = loadcheck('hints')
+        line = next((l for l in r.stdout.splitlines() if l.startswith('tls_callbacks=')), '')
+        st = stats_of(line)
+        self.assertEqual((st.get('tls_callbacks'), st.get('first'), st.get('rc')), ('1', '0x00403100', '0'), line)
+
+    def test_map_code_read_only(self):
+        # FNVNX_MAP_CODE (the loader-seam audit: .text readable as data, as on Windows): code sections map with the
+        # file's bytes, read-only, and the code-pointer scan, imports and fixups come out exactly as without it
+        for cfg, moved in (('hints', False), ('reloc', False), ('reloc', True)):
+            with self.subTest(cfg=cfg, moved=moved):
+                base = loadcheck(cfg, moved=moved)
+                code = loadcheck(cfg, '--map-code', moved=moved)
+                self.assertEqual(code.returncode, base.returncode, code.stdout + code.stderr)
+                line = next((l for l in code.stdout.splitlines() if l.startswith('code_map=')), '')
+                st = stats_of(line)
+                self.assertTrue(int(st.get('code_map', '0')) >= 1 and st.get('match') == '1' and
+                                st.get('prot_r') == '1', line)
+
+                def same(out):   # the mapping count and its protect call are the only expected differences
+                    return [l for l in out.splitlines() if not l.startswith('code_map=') and 'sections_mapped' not in l
+                            and not l.startswith('protect_calls=')]
+                self.assertEqual(same(code.stdout), same(base.stdout))
+                pc = [int(stats_of(o).get('protect_calls', '0')) for o in (base.stdout, code.stdout)]
+                self.assertEqual(pc[1], pc[0] + int(st['code_map']), pc)
+                self.assertEqual(same(code.stderr), same(base.stderr))
+
     def test_precomputed_list(self):
         pe, fixups, _ = py_scan('hints')
         path = os.path.join(OUT, 'py_hints.bin')

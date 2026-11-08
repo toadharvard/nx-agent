@@ -1764,6 +1764,76 @@ prepare.__dict__['_fnvnx_d22'] = None
 _shutil.rmtree(_d2, ignore_errors=True)
 
 
+# ---- S1-rules: VLIT2 (a vptr literal by the exe's vftables: slot 0 at the store's offset, the function's class)
+_vl = tempfile.mkdtemp(); os.makedirs(os.path.join(_vl, 'src')); os.makedirs(os.path.join(_vl, 'build'))
+_json.dump({'units': [{'source': 'src/a.cpp', 'symbols': {}, 'functions': [{'address': '0x00487220', 'symbol': '?f@@YAXXZ', 'size': 4}]}]},
+           open(os.path.join(_vl, 'build', 'units.json'), 'w'))
+_json.dump({'format': 'fnvnx-vlit/1', 'slot0': {'00487220': [['0101cb94', 0], ['0102a28c', 104], ['0102a59c', 104]]},
+            'class': {'0101cb94': '.?AVTESHealthForm@@', '0102a28c': '.?AVTESObjectARMA@@', '0102a59c': '.?AVTESObjectARMO@@',
+                      '0102a31c': '.?AVTESObjectARMA@@'}}, open(os.path.join(_vl, 'vlit.json'), 'w'))
+os.environ['FNVNX_VLIT'] = os.path.join(_vl, 'vlit.json')
+prepare.__dict__['_fnvnx_vlit'] = None
+_saved_vlit = s1._VLIT; s1._VLIT = None
+_VL = ('struct C { C(); };\nC::C()\n{\n    *(int*)((char*)this + 0x0) = (int)&DAT_0102a31c;\n'
+       '    *(const char**)((char*)this + 0x68) = " rH";\n    *(void**)((char*)this + 0x68) = (void*)" rH";\n}\n'
+       'struct H { void f(); };\nvoid H::f()\n{\n    *reinterpret_cast<const char**>(this) = " rH";\n}\n'
+       'struct Z { void g(); };\nvoid Z::g()\n{\n    *(const char**)((char*)this + 0x10) = " rH";\n}\n')
+_vlo = run(s1.r_vptr_literals_exe, _VL, os.path.join(_vl, 'src', 'a.cpp'))
+check('VLIT2 the store at +0x68 takes the vftable of the function\'s class (ARMA, not ARMO); the cast is kept', _vlo,
+      ['*(const char**)((char*)this + 0x68) = (char*)&fnvnx_vlit_0102a28c;', '= (void*)(char*)&fnvnx_vlit_0102a28c;',
+       'extern "C" char fnvnx_vlit_0102a28c __asm__("DAT_0102a28c"); /* fnv-nx VLIT2 */ C::C()'])
+check('VLIT2 a store through this at offset 0: the one vftable with that slot 0 there', _vlo,
+      ['*reinterpret_cast<const char**>(this) = (char*)&fnvnx_vlit_0101cb94;'])
+check('VLIT2 no vftable with that slot 0 at the offset: left as it is', _vlo,
+      ['*(const char**)((char*)this + 0x10) = " rH";'])
+os.environ.pop('FNVNX_VLIT', None); prepare.__dict__['_fnvnx_vlit'] = None; s1._VLIT = _saved_vlit
+
+# ---- S1-rules: STAND7 (an out-of-class inline template member stand-in bound elsewhere -> MSVC only)
+_s7 = tempfile.mkdtemp(); os.makedirs(os.path.join(_s7, 'src')); os.makedirs(os.path.join(_s7, 'build'))
+_json.dump({'units': [{'source': 'src/u.cpp', 'flags': ['/MT', '/Od', '/Ob1'],
+                       'symbols': {'?assign@?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z': '0x0044a580'},
+                       'functions': [{'address': '0x00b2b910', 'symbol': '?f@@YAXXZ', 'size': 8}]},
+                      {'source': 'src/v.cpp', 'symbols': {}, 'functions': [{'address': '0x0044a580', 'symbol': '?assign@x', 'size': 8}]}]},
+           open(os.path.join(_s7, 'build', 'units.json'), 'w'))
+_S7 = ('template <class C, class T, class A>\ninline basic_string<C, T, A>& basic_string<C, T, A>::assign(const basic_string<C, T, A>& r,'
+       ' unsigned int o, unsigned int n)\n{\n    if (o == 0x7f3f3f3f) { _Tidy(true); }\n    return *this;\n}\n'
+       '// @fnv 0x00b2b910\nvoid f() {}\n')
+_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+_s7o = run(s1.r_template_member_stand_ins, _S7, os.path.join(_s7, 'src', 'u.cpp'))
+_json.dump({'units': [{'source': 'src/u.cpp', 'flags': ['/MT', '/O2'], 'symbols': {'?assign@?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z': '0x0044a580'},
+                       'functions': []}, {'source': 'src/v.cpp', 'symbols': {}, 'functions': [{'address': '0x0044a580', 'symbol': '?assign@x', 'size': 8}]}]},
+           open(os.path.join(_s7, 'build', 'units.json'), 'w'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+_s7b = run(s1.r_template_member_stand_ins, _S7, os.path.join(_s7, 'src', 'u.cpp'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('STAND7 an inline out-of-class template member bound to another unit\'s address: MSVC only', _s7o,
+      ['#ifdef _MSC_VER /* fnv-nx STAND7 */\ntemplate <class C', '    return *this;\n}\n#endif\n'])
+check('STAND7 not in an /Od /Ob1 unit: nothing', _s7b, [], ['STAND7'])
+
+# ---- S1-rules: DTORB1 (a destructor stand-in calls the address its ??1 is bound to, under GCC)
+_db = tempfile.mkdtemp(); os.makedirs(os.path.join(_db, 'src')); os.makedirs(os.path.join(_db, 'build'))
+_json.dump({'units': [{'source': 'src/u.cpp', 'symbols': {'??1S@@UAE@XZ': '0x004aa280', '??1T@@UAE@XZ': '0x004aa280'},
+                       'functions': [{'address': '0x004aa1e0', 'symbol': '??_GS@@UAEPAXI@Z', 'size': 44},
+                                     {'address': '0x004aa300', 'symbol': '??_GT@@UAEPAXI@Z', 'size': 44},
+                                     {'address': '0x004aa280', 'symbol': '??1Y@@UAE@XZ', 'size': 92}]}]},
+           open(os.path.join(_db, 'build', 'units.json'), 'w'))
+_DB = ('struct S\n{\n    virtual ~S();\n    int x;\n};\n// @fnv 0x004aa1e0\nS::~S()\n{}\n'
+       'struct M { ~M(); };\nstruct T\n{\n    virtual ~T();\n    M m;\n};\n// @fnv 0x004aa300\nT::~T()\n{}\n')
+_saved = (s1._UNIT_SYMBOLS, prepare.__dict__.get('_fnvnx_dtorb_funcs'))
+s1._UNIT_SYMBOLS = None; prepare.__dict__['_fnvnx_dtorb_funcs'] = None
+_dbo = run(s1.r_bound_dtor_stand_ins, _DB, os.path.join(_db, 'src', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved[0]; prepare.__dict__['_fnvnx_dtorb_funcs'] = _saved[1]
+check('DTORB1 the stand-in body calls the bound address under GCC', _dbo,
+      ['S::~S()\n{ FNVNX_DTORB_BEGIN(004aa280) /* fnv-nx DTORB1 */ FNVNX_DTORB_END }'])
+check('DTORB1 a class with a member that has a destructor: nothing', _dbo, [], ['T::~T()\n{ FNVNX_DTORB'])
+if _shutil.which('aarch64-linux-gnu-g++'):
+    _mB = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
+           if l.startswith('#define FNVNX_DTORB')]
+    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x', 'c++',
+                          '-'], input=''.join(_mB) + _dbo.split('struct M')[0], capture_output=True, text=True)
+    check('DTORB1 output: S::~S calls __fnv_004aa280 (ILP32)', _r.stderr or _r.stdout, ['__fnv_004aa280'], ['error'])
+
 # ---- S1-rules: D26 (b) a call-only placeholder declaration takes FNVNX_D22 without a list
 _save_d22 = os.environ.pop('FNVNX_D22', None); _save_rc = os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_d22'] = None
@@ -1777,8 +1847,11 @@ check('D26 call-only: one virtual only, a defined virtual, a base, a called plac
       run(s1.r_vtable_dtor_slot, _CO + 'void HeapStandIn::v1() {}\n') +
       run(s1.r_vtable_dtor_slot, _CO.replace('struct HeapStandIn\n', 'struct HeapStandIn : B\n')) +
       run(s1.r_vtable_dtor_slot, _CO + 'void g(HeapStandIn* h) { h->v0(); }\n') +
-      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v1() {}\n};\n'),
+      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v0() {}\n};\n'),
       [], ['FNVNX_D22'])
+check('D22-INLINE: a derived class that defines other members -> the base takes FNVNX_D22I (inline empty ~C)',
+      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v1() {}\n};\n'),
+      ['FNVNX_D22I(HeapStandIn, virtual void v0();)'])
 check('D26 call-only: a derived class that defines none of its virtuals does not block it',
       run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    virtual void v1();\n};\n'),
       ['FNVNX_D22(HeapStandIn, virtual void v0();)'])
@@ -1821,8 +1894,144 @@ prepare.__dict__.pop('_fnvnx_d22_refs', None)
 check('D26 a placeholder call with a non-literal argument is not a destructor call',
       run(s1.r_vtable_dtor_slot, _CO.replace('virtual void v0();', 'virtual void* v0(void*);') +
           'void g(HeapStandIn* h, void* r) { h->v0(r); }\n'), [], ['FNVNX_D22'])
+_CE = ('struct Q\n{\n    virtual void f00()\n    {}\n    virtual void f01()\n    {}\n    virtual int f02(unsigned v)\n    {\n        return 0;\n    }\n};\n'
+       'int g(Q* q) { return q->f02(1); }\n')
+check('D26 call-only: empty or return-a-constant inline placeholders count as declarations (.cpp)',
+      run(s1.r_vtable_dtor_slot, _CE), ['FNVNX_D22(Q, virtual void f00()'])
+check('D26 call-only: ... not when the file uses the class as an object, nor in a header, nor with a real body',
+      run(s1.r_vtable_dtor_slot, _CE + 'Q g_q;\n') + run(s1.r_vtable_dtor_slot, _CE, '/nonexistent/src/q.h') +
+      run(s1.r_vtable_dtor_slot, _CE.replace('return 0;', 'return v + 1;')), [], ['FNVNX_D22(Q'])
 check('D26 call-only: a named first virtual is not a placeholder',
       run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'GetName()')), [], ['FNVNX_D22'])
+# S5-boot (link 3f7a6c35e923, 0x00e7bc90): a COM interface has no destructor slot; D22 / D26 leave it alone
+_COM = ('struct D3DShell\n{\n    virtual void v0();\n    virtual void v1();\n'
+        '    virtual unsigned int __stdcall GetAdapterModeCount(unsigned int a, int f);\n};\n'
+        'unsigned f(D3DShell* d) { return d->GetAdapterModeCount(0, 22); }\n')
+import collections as _collections
+_comst = _collections.Counter()
+check('D26 COM: a class with a __stdcall virtual is not converted', s1.r_vtable_dtor_slot('/x/src/a.cpp', _COM, _comst) +
+      run(s1.r_vtable_dtor_slot, _COM.replace('unsigned int __stdcall', 'HRESULT')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v1()', 'AddRef()')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'IDirect3D9')), [], ['FNVNX_D22'])
+check('D26 COM: counted D22-COM', str(dict(_comst)), ["'D22-COM': 1"])
+import tempfile as _tempfile
+prepare.__dict__['_fnvnx_d22_applied'] = []
+run(s1.r_vtable_dtor_slot, _CO, '/t/src/a/heap.cpp')
+_td = _tempfile.mkdtemp(); s1.d22_write_applied(_td, _collections.Counter(), _collections.Counter())
+check('D26 build/d22_applied.tsv lists what prepare converted', open(os.path.join(_td, 'build', 'd22_applied.tsv')).read(),
+      ['src/a/heap.cpp\tHeapStandIn\tv0\tcallonly\t\n'])
+check('D26 call-only: a numbered sequence P_00, P_01 is a placeholder; P_00 with another second name is not',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'Impl_00()').replace('v1()', 'Impl_01()')) + '|' +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'Impl_00()')), ['FNVNX_D22(HeapStandIn, virtual void Impl_00();)'],
+      ['FNVNX_D22(HeapStandIn, virtual void Impl_00();) /* fnv-nx D22 */\n    virtual void v1();'])
+# S5-boot (extradatalist.cpp AX): a qualified call whose receiver resolves to another class does not block it
+_RQ = _CO + ('struct Sub\n{\n    virtual int* v0();\n    virtual void s1();\n};\n'
+             'struct Ref\n{\n    virtual void r0();\n    Sub sub;\n};\n'
+             'int* g(void* r) { return ((Ref*)r)->sub.v0(); }\n')
+check('D26 call-only: `((T*)x)->m.ph()` on another class does not block it (Sub is held: its own call)',
+      run(s1.r_vtable_dtor_slot, _RQ), ['FNVNX_D22(HeapStandIn, virtual void v0();)'], ['FNVNX_D22(Sub'])
+check('D26 call-only: ... a cast to the class itself, or an unresolved receiver, does',
+      run(s1.r_vtable_dtor_slot, _RQ.replace('((Ref*)r)->sub.v0()', '(int*)0; ((HeapStandIn*)r)->v0()')) +
+      run(s1.r_vtable_dtor_slot, _RQ.replace('((Ref*)r)->sub.v0()', '((Sub*)r)->v0(), ((Ref*)r)->q.v0()')), [],
+      ['FNVNX_D22(HeapStandIn'])
+# ---- S1-rules: RAWVT1 (a raw exe slot index on `this` -> FNVNX_D26_SLOT(k): k + 1 under GCC, D26 minus-one)
+_RV = ('struct Coll\n{\n    void Load(const char* f);\n    void Open(const char* f, bool w);\n};\n'
+       'void Coll::Open(const char* f, bool w)\n{\n    Load(f);\n'
+       '    ((void(__thiscall*)(void*, bool))(*reinterpret_cast<void***>(this))[6])(this, w);\n}\n')
+check('RAWVT1 a raw slot index on this in a member -> FNVNX_D26_SLOT(k)', run(s1.r_raw_vtable_slots, _RV),
+      ['(*reinterpret_cast<void***>(this))[FNVNX_D26_SLOT(6)])(this, w);'])
+check('RAWVT1 not slot 0, not in a free function, not in a COM-shaped class',
+      run(s1.r_raw_vtable_slots, _RV.replace('[6]', '[0]')) +
+      run(s1.r_raw_vtable_slots, 'void f(void* p) { ((void(*)(void*))(*(void***)this)[3])(p); }\n') +
+      run(s1.r_raw_vtable_slots, _RV.replace('    void Load(const char* f);', '    virtual long __stdcall Q(int);\n    virtual long __stdcall R(int);\n    void Load(const char* f);')),
+      [], ['FNVNX_D26_SLOT'])
+_eo = tempfile.mkdtemp(); open(os.path.join(_eo, 'exe_order_classes.tsv'), 'w').write('# class\tvftable\treason\nColl\t010a2528\tD22-USED\n')
+os.environ['FNVNX_EXE_ORDER'] = os.path.join(_eo, 'exe_order_classes.tsv'); prepare.__dict__['_fnvnx_exe_order'] = None
+check('RAWVT1 not in a class whose table the link keeps in exe order (exe_order_classes.tsv)',
+      run(s1.r_raw_vtable_slots, _RV), [], ['FNVNX_D26_SLOT'])
+del os.environ['FNVNX_EXE_ORDER']; prepare.__dict__['_fnvnx_exe_order'] = None
+# S2-bodies (vtmetric 3f7a6c35): the TESForm family's exe deleting destructor is slot 4 (slots 0 / 1 trivial)
+_sk = tempfile.mkdtemp(); os.makedirs(os.path.join(_sk, 'slots'))
+_json.dump({'format': 'fnvnx-d22/1', 'classes': [], 'dtor_slots': [{'class': 'TESWorldSpace', 'slot': 4}]},
+           open(os.path.join(_sk, 'slots', 'd22.json'), 'w'))
+os.environ['FNVNX_RECON'] = _sk; prepare.__dict__['_fnvnx_d22'] = None; prepare.__dict__['_fnvnx_d22_slots'] = None
+_WS = 'struct TESWorldSpace\n{\n' + ''.join('    virtual void v%d();\n' % i for i in range(8)) + '};\n' \
+      'void f(TESWorldSpace* w) { w->v6(); }\n'
+_wso = run(s1.r_vtable_dtor_slot, _WS)
+check('D22-SLOTK: the exe dtor slot k (4), not slot 0, becomes FNVNX_D22', _wso,
+      ['    virtual void v0();', 'FNVNX_D22(TESWorldSpace, virtual void v4();)'], ['FNVNX_D22(TESWorldSpace, virtual void v0();)'])
+check('D22-SLOTK: held when the class has k virtuals or fewer, or calls slot k by name',
+      run(s1.r_vtable_dtor_slot, 'struct TESWorldSpace\n{\n    virtual void v0();\n    virtual void v1();\n};\n') +
+      run(s1.r_vtable_dtor_slot, _WS.replace('w->v6()', 'w->v4()')), [], ['FNVNX_D22'])
+_RW = _RV.replace('Coll', 'TESWorldSpace')
+check('RAWVT1 with a dtor slot K = 4: k < 4 stays, k > 4 shifts, k = 4 held',
+      run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[2]')) + '|' + run(s1.r_raw_vtable_slots, _RW) + '|' +
+      run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[4]')),
+      ['(this))[2])', '(this))[FNVNX_D26_SLOT(6)])', '(this))[4])'])
+_json.dump({'format': 'fnvnx-d22/1', 'classes': [], 'dtor_slots': [{'class': 'Shell', 'slot': 4, 'file': 'src/ai/actor.cpp'}]},
+           open(os.path.join(_sk, 'slots', 'd22.json'), 'w')); prepare.__dict__['_fnvnx_d22_slots'] = None
+_SH = _WS.replace('TESWorldSpace', 'Shell')
+check('D22-SLOTK: a per-file dtor_slots row applies in that file only',
+      run(s1.r_vtable_dtor_slot, _SH, '/t/src/ai/actor.cpp') + '|' + run(s1.r_vtable_dtor_slot, _SH, '/t/src/ai/other.cpp'),
+      ['FNVNX_D22(Shell, virtual void v4();) /* fnv-nx D22 */', '|struct Shell\n{\n    FNVNX_D22(Shell, virtual void v0();)'])
+del os.environ['FNVNX_RECON']; prepare.__dict__['_fnvnx_d22'] = None; prepare.__dict__['_fnvnx_d22_slots'] = None
+# ---- S1-rules: EMPTY1 (R2 trap rank 32: treeengine's declared-only TagEmpty is the temporary TagText(""))
+_EM = ('struct TagText\n{\n    int w;\n    TagText(const char*);\n};\nextern const TagText TagEmpty;\n'
+       'TagText g(bool s) { return s ? TagText("x") : TagEmpty; }\n')
+check('EMPTY1 a declared-only empty-string object -> FNVNX_EMPTY1(T, name)', run(s1.r_empty_string_objects, _EM),
+      [': FNVNX_EMPTY1(TagText, TagEmpty); }', 'extern const TagText TagEmpty;'])
+check('EMPTY1 not when the file defines it, or T has no const char* constructor',
+      run(s1.r_empty_string_objects, _EM + 'const TagText TagEmpty("");\n') +
+      run(s1.r_empty_string_objects, _EM.replace('TagText(const char*);', 'TagText(int);')), [], ['FNVNX_EMPTY1'])
+_eo2 = tempfile.mkdtemp(); open(os.path.join(_eo2, 'exe_order_classes.tsv'), 'w').write(
+    'class\tvftable\treason\tsymbol\nHeapStandIn\t0101cd04\tdefined-slot0\t_ZTV1X\nOther\t01\tmulti-vtable\t_ZTV1Y\n')
+os.environ['FNVNX_EXE_ORDER'] = os.path.join(_eo2, 'exe_order_classes.tsv'); prepare.__dict__['_fnvnx_exe_order'] = None
+check('D22-EXEORDER: a class the link keeps in exe order (defined-slot0) keeps its callers\' numbering',
+      run(s1.r_vtable_dtor_slot, _CO), [], ['FNVNX_D22'])
+check('D22-EXEORDER: ... another reason (multi-vtable) does not hold a class',
+      run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'Other')), ['FNVNX_D22(Other'])
+del os.environ['FNVNX_EXE_ORDER']; prepare.__dict__['_fnvnx_exe_order'] = None
+check('D26 call-only: numbered sequences _v01/_v02, d000/d001, v000/v004/v008 are placeholders; v000/v002 is not (EQ G1)',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', '_v01()').replace('v1()', '_v02()')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'd000()').replace('v1()', 'd001()')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'w000()').replace('v1()', 'w004()').replace('void* Allocate', 'void* w008')),
+      ['FNVNX_D22(HeapStandIn, virtual void _v01();)', 'FNVNX_D22(HeapStandIn, virtual void d000();)',
+       'FNVNX_D22(HeapStandIn, virtual void w000();)'])
+check('D26 call-only: ... a step-2 sequence is not',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'w000()').replace('v1()', 'w002()')), [], ['FNVNX_D22'])
+# ---- S1-rules: D22-CL (the exe decides: S2's classlayout.tsv, orchestrator 2026-11-08)
+_cl = tempfile.mkdtemp(); open(os.path.join(_cl, 'classlayout.tsv'), 'w').write(
+    '# fnvnx-classlayout/1\nclass\tvftable\tkind\tdtor_slot\treason\tfile\tqualified\n'
+    'Named\t01000000\tminus-one\t0\trtti\t\t\nHeapStandIn\t01000004\texe-order\t-1\tdefined-slot0\t\t\n'
+    'TESWorldSpace\t0103195c\tminus-one\t4\tvflag\t\t\nComX\t01000008\tcom\t-1\trtti-com\t\t\n'
+    'Named\t0100000c\texe-order\t-1\tsecondary off 8\t\t\t\t\n')
+os.environ['FNVNX_CLASSLAYOUT'] = os.path.join(_cl, 'classlayout.tsv'); prepare.__dict__['_fnvnx_classlayout'] = None
+check('D22-CL: minus-one, slot 0: a named first virtual converts (no placeholder name needed)',
+      run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'Named').replace('v0()', 'Reset()')),
+      ['FNVNX_D22(Named, virtual void Reset();)'])
+check('D22-CL: exe-order and com keep the declaration, even a placeholder one',
+      run(s1.r_vtable_dtor_slot, _CO) + run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'ComX')), [], ['FNVNX_D22'])
+check('D22-CL: minus-one, slot 4: the fifth virtual', run(s1.r_vtable_dtor_slot, _WS),
+      ['FNVNX_D22(TESWorldSpace, virtual void v4();)'], ['virtual void v0();) /* fnv-nx D22'])
+check('D22-CL: RAWVT1 leaves an exe-order class in exe order', run(s1.r_raw_vtable_slots, _RV.replace('Coll', 'HeapStandIn')),
+      [], ['FNVNX_D26_SLOT'])
+del os.environ['FNVNX_CLASSLAYOUT']; prepare.__dict__['_fnvnx_classlayout'] = None
+# S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
+_UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
+             'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
+check('D26 call-only: an unqualified call in an unrelated class member does not block it',
+      run(s1.r_vtable_dtor_slot, _UQ), ['FNVNX_D22(HeapStandIn, virtual void v0();)'])
+check('D26 call-only: ... an unqualified call in a member of a derived class does',
+      run(s1.r_vtable_dtor_slot, _UQ.replace('struct CVS : CVB', 'struct CVS : HeapStandIn')), [],
+      ['FNVNX_D22(HeapStandIn'])
+# S5-boot (modelloader_activator_declarations.h BGSOpenCloseForm): a body-less non-virtual `~C();` gives way
+_DT = _CO.replace('    virtual void* Allocate(unsigned n);\n', '    virtual void* Allocate(unsigned n);\n    HeapStandIn();\n    ~HeapStandIn();\n')
+check('D26 call-only: a body-less `~C();` is dropped under GCC (D22-DTOR)', run(s1.r_vtable_dtor_slot, _DT),
+      ['FNVNX_D22(HeapStandIn, virtual void v0();)', 'FNVNX_D22_DROP(~HeapStandIn();)'])
+check('D26 call-only: ... not when the file defines it, nor a virtual or inline one',
+      run(s1.r_vtable_dtor_slot, _DT + 'HeapStandIn::~HeapStandIn() {}\n') +
+      run(s1.r_vtable_dtor_slot, _DT.replace('    ~HeapStandIn();', '    virtual ~HeapStandIn();')) +
+      run(s1.r_vtable_dtor_slot, _DT.replace('    ~HeapStandIn();', '    ~HeapStandIn() {}')), [], ['FNVNX_D22(HeapStandIn'])
 if _shutil.which('aarch64-linux-gnu-g++'):
     _mD = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h')) if l.startswith('#define FNVNX_D22')]
     _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x', 'c++',

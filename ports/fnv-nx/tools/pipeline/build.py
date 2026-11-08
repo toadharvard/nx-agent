@@ -114,8 +114,11 @@ CONFIG = [
                                        'fnv.nro restarts, so the placeholder is fine (NX1)'),
     ('TESTS', 'all', 'comma list of test suites to run (names in docs/BUILD.md), all, or none'),
     ('EMU_TIMEOUT', '3000', 'seconds for the emulated boot of the game guest (boot stage)'),
-    ('EMU_BUDGET', '6000000000', 'instructions per scheduling slice of the emulated boot (S5\'s value for game boots: '
-                                 'the loader\'s code pointer scan of a real data image needs billions)'),
+    ('EMU_BUDGET', 'auto', 'instructions per scheduling slice of the emulated boot; auto: 0 (threads switch at host '
+                           'calls, deterministically) when tests/s5/emu_guest.py has --hc-slice (S5 620572bc), else '
+                           '6000000000. An instruction count makes unicorn hook every instruction, about 10x slower'),
+    ('EMU_SLICE_MS', '', 'emu_guest.py --slice-ms (its fallback timer for a thread making no host call); empty: '
+                         'emu_guest.py\'s default (60 s). A short timer makes boots nondeterministic (S5)'),
     ('FORCE', '', 'comma list of stages to rerun even when cached (all = every stage)'),
     ('CLEAN_WORK', '1', '1: remove re-creatable work trees (clones, third-party build dirs) once their stage or test '
                         'suite succeeded; 0: keep them for faster reruns'),
@@ -1089,7 +1092,53 @@ class Prepare(Stage):
         dirty = port_dirty(PREPARE_INPUTS)
         pf = {'port_commit': b.head, 'port_dirty': dirty, 'decomp_commit': read_git_head(decomp), 'decomp': decomp,
               'recon': recon_id(), 'mode': 'prepare.py', 'tree': tree, 'at': now_iso()}
-        b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'prepare.py'), decomp, staging], r['log'], check=True)
+        # T1: prepare.py runs under tools/pipeline/traced.py, which records every file it read and every directory it
+        # listed (its imports too). When all of them are unchanged and the tree is the one that run made, the tree is
+        # what prepare.py would make at this head: it is kept, provenance names this head (572 s of every full build,
+        # tree unchanged). PREPARE_REUSE=0 always runs prepare.py.
+        script = os.path.join(ROOT, 'tools', 'prepare.py')
+        deps = os.path.join(d, 'prepare.deps.json')
+        argv = [script, decomp, staging]
+        if os.environ.get('PREPARE_REUSE', '1') != '0' and not dirty and \
+                os.path.isfile(os.path.join(tree, 'build', 'units.json')):
+            if HERE not in sys.path:
+                sys.path.insert(0, HERE)
+            import traced
+            try:
+                rec = json.load(open(deps))
+            except (OSError, ValueError):
+                rec = {}
+            rec_tree = rec.get('tree_id')
+            t0 = time.time()
+            # what the trace cannot see: prepare.py's subprocesses (s1_compile's `git rev-parse HEAD` of the decomp, for
+            # the recon checks) - the decomp's head and the recon id are compared as well
+            if rec_tree and rec.get('decomp_head') == pf['decomp_commit'] and rec.get('recon') == pf['recon'] and \
+                    traced.check(deps, argv) and tree_content_id(tree) == rec_tree:
+                prev = read_prepared_from(tree).get('port_commit')
+                pf.update(mode='prepare.py (reused: inputs identical)', reused_from=prev)
+                write_prepared_from(d, pf)
+                rules = read_rule_stats(os.path.join(d, 'prepare_stats.tsv'))
+                units = json.load(open(os.path.join(tree, 'build', 'units.json')))['units']
+                ndeps = len(json.load(open(deps)).get('files', {}))
+                r.metric('prepare_rules', len(rules))
+                r.metric('prepare_edits', sum(e for _, e in rules.values()))
+                r.metric('prepare_units', len({u.get('source') for u in units}))
+                r.metric('prepare_files_changed', 0)
+                r.metric('prepare_from', short(b.head))
+                r.metric('prepare_reused', 1)
+                r.metric('prepare_check_s', round(time.time() - t0, 1))
+                r['rules'] = rules
+                r['prepared_from'] = pf
+                r.artifact('tree', tree)
+                r.artifact('prepared_from', os.path.join(d, 'prepared_from.txt'))
+                r['output_id'] = rec_tree
+                r['summary'] = 'from %s: the tree of %s kept (every input prepare.py read is unchanged: %d files); ' \
+                               '%d rules, %d edits' % (short(b.head), short(prev), ndeps, len(rules),
+                                                      sum(e for _, e in rules.values()))
+                return
+        b.sh([PY, '-I', os.path.join(HERE, 'traced.py'), deps, '--exclude', staging, '--'] + argv, r['log'],
+             check=True)
+        r.metric('prepare_reused', 0)
         stats = os.path.join(staging, 'prepare_stats.tsv')
         rules = read_rule_stats(stats)
         if os.path.isfile(stats):
@@ -1101,6 +1150,11 @@ class Prepare(Stage):
                 for p in lst:
                     f.write('%s\t%s\n' % (tag, p))
         write_prepared_from(d, pf)
+        try:   # the tree this record made: a later run keeps it only while it is still that tree
+            dj = json.load(open(deps)); dj.update(tree_id=cid, decomp_head=pf['decomp_commit'], recon=pf['recon'])
+            json.dump(dj, open(deps + '.tmp', 'w')); os.replace(deps + '.tmp', deps)
+        except (OSError, ValueError):
+            pass
         units = json.load(open(os.path.join(tree, 'build', 'units.json')))['units']
         r.metric('prepare_rules', len(rules))
         r.metric('prepare_edits', sum(e for _, e in rules.values()))
@@ -1592,6 +1646,24 @@ def msvc_objs_id(b, key='MSVC_OBJS'):
         return ''
     d = os.path.abspath(d)
     return sha(d, listing_id([os.path.join(d, n) for n in os.listdir(d)]) if os.path.isdir(d) else None)
+
+
+def emu_slicing(b):
+    """emu_guest.py's scheduling arguments for the boot stage. With an emu_guest.py that preempts at host calls
+    (S5 620572bc, --hc-slice: deterministic, and about 10x faster than an instruction count, which makes unicorn
+    hook every instruction): --budget 0 and emu_guest.py's own defaults; no timer of ours (its --slice-ms is now a
+    60 s fallback; EMU_SLICE_MS passes one only when set). Without it, the old instruction count 6e9: the timer
+    slices of 2d1afaeb..6da559aa were nondeterministic (emu_stop from the timer thread can leave the PC at the block
+    start, a resume re-runs instructions), and budget 0 on an older emu_guest.py means no preemption at all.
+    EMU_BUDGET other than auto is taken as given."""
+    emu = os.path.join(ROOT, 'tests', 's5', 'emu_guest.py')
+    text = open(emu, errors='replace').read() if os.path.isfile(emu) else ''
+    hc = '--hc-slice' in text
+    bud = b.cfg.get('EMU_BUDGET', 'auto')
+    if bud == 'auto':
+        bud = '0' if hc else '6000000000'
+    sl = b.cfg.get('EMU_SLICE_MS') or ''
+    return ['--budget', bud] + (['--slice-ms', sl] if sl and '--slice-ms' in text else [])
 
 
 def link_exe(b):
@@ -2213,7 +2285,7 @@ class Boot(Stage):
                                      'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
                 up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
                 synth_inputs_id(b) if img == 'auto' else '',
-                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], b.cfg['EMU_BUDGET'],
+                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], emu_slicing(b),
                 file_hash(ini) if ini and os.path.isfile(ini) else '']    # the ini mounted beside the image
 
     def outputs_present(self, b):
@@ -2231,7 +2303,7 @@ class Boot(Stage):
         shutil.rmtree(root, ignore_errors=True)
         os.makedirs(root)
         argv = [PY, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--elf', elf, '--skip-faulting-init',
-                '--expect', 'fnvnx boot: calling WinMain', '--root', root, '--budget', b.cfg['EMU_BUDGET'],
+                '--expect', 'fnvnx boot: calling WinMain', '--root', root] + emu_slicing(b) + [
                 '--summary-json', os.path.join(d, 'boot_summary.json')]
         image = boot_image(b, r, d)
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'

@@ -44,7 +44,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 T0=$(date +%s)
 # the warm farms keep their caches local: three machines must not write one 1-of-1 branch (they are seeded from the
 # sharded farms' branches; their own results stay on the machine). Reports still go to reports/<farm>.
-export FUZZ_PUBLISH=${FUZZ_PUBLISH:-0} AUDIT_PUBLISH=${AUDIT_PUBLISH:-0} EQUIV_CACHE_PUBLISH=${EQUIV_CACHE_PUBLISH:-0}
+export LINKCACHE_PUBLISH=${LINKCACHE_PUBLISH:-0} FUZZ_PUBLISH=${FUZZ_PUBLISH:-0} AUDIT_PUBLISH=${AUDIT_PUBLISH:-0} EQUIV_CACHE_PUBLISH=${EQUIV_CACHE_PUBLISH:-0}
 # lane A builds in full_job's persistent build directory (incremental): it does not wait for the prepare/compile
 # farms' tree and objects (full_job's default is 300 s each, a third of the budget idle); one look, then local. V1's
 # link audits keep running, with a smaller budget (its slow audits are skipped and marked so).
@@ -176,16 +176,25 @@ lane_d() {   # D: the emulator lanes on lane A's build, one after another (each 
 	if on boottrace; then BOOTTRACE_BUILD=$FARM_HOME/full/build run boottrace bash "$J/boottrace_job.sh" "$COMMIT"
 	else skip boottrace "not affected"; fi
 }
-eq_cache_after() {   # every eq farm shard's cache (equiv/cache/*, "equiv object cache <c12> shard k/N") is of a head
-	# at or after $1: the cold run is over, a run here seeds from a warm cache
+eq_cache_after() {   # one complete set of the eq farms' cache shards (equiv/cache/kofN for k = 1..N, each "equiv object
+	# cache <c12> shard k/N") is of a head at or after $1: the cold run is over, a run here seeds from a warm cache.
+	# Any N: eqa's 1of1 (the eq farm since 06:40) counts, and the retired eq1-eq6's 1of6..6of6 do not hold it back
 	local A=${ARTIFACTS:-}; [ -n "$A" ] || { if [ -d /home/user/fnv-nx-build/.git ]; then A=/home/user/fnv-nx-build; else A=$FARM_HOME/artifacts; fi; }
-	local refs r c; refs=$(git -C "$A" ls-remote origin 'refs/heads/equiv/cache/*' 2>/dev/null | awk '{print $2}')
+	local refs r c n k bad
+	refs=$(git -C "$A" ls-remote origin 'refs/heads/equiv/cache/*' 2>/dev/null | awk '{print $2}')
 	[ -n "$refs" ] || return 1
-	for r in $refs; do
-		git -C "$A" fetch -q --depth 1 --filter=blob:none origin "+$r:refs/quick-eqc/${r#refs/heads/}" 2>/dev/null || return 1
-		c=$(git -C "$A" log -1 --format=%s "refs/quick-eqc/${r#refs/heads/}" | sed -n 's/^equiv object cache \([0-9a-f]\{12\}\) .*/\1/p')
-		[ -n "$c" ] && git -C "$REPO" merge-base --is-ancestor "$1" "$c" 2>/dev/null || return 1
+	for n in $(printf '%s\n' $refs | sed -n 's|.*/[0-9]*of\([0-9]*\)$|\1|p' | sort -un); do
+		bad=0
+		for k in $(seq 1 "$n"); do
+			r=refs/heads/equiv/cache/${k}of$n
+			printf '%s\n' $refs | grep -qx "$r" || { bad=1; break; }
+			git -C "$A" fetch -q --depth 1 --filter=blob:none origin "+$r:refs/quick-eqc/${r#refs/heads/}" 2>/dev/null || { bad=1; break; }
+			c=$(git -C "$A" log -1 --format=%s "refs/quick-eqc/${r#refs/heads/}" | sed -n 's/^equiv object cache \([0-9a-f]\{12\}\) .*/\1/p')
+			[ -n "$c" ] && git -C "$REPO" merge-base --is-ancestor "$1" "$c" 2>/dev/null || { bad=1; break; }
+		done
+		[ $bad = 0 ] && return 0
 	done
+	return 1
 }
 lane_b() {
 	if ! on equiv; then skip equiv "not affected"; return; fi
@@ -244,7 +253,7 @@ def headline(md):
         if l and not l.startswith('|') and not l.startswith('#'):
             return l[:160].replace('|', '/')
     return ''
-rows, ok = [], True
+rows, ok, failed = [], True, []
 for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem', 'plat', 'scenario', 'boottrace'):
     sk, rc = rd(c + '.skip'), rd(c + '.rc')
     if sk is not None:
@@ -253,9 +262,16 @@ for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem
         rows.append((c, 'not run (lane skipped)', '-', '-', ''))
     else:
         ok &= rc == '0'
-        rows.append((c, 'ran', rc, rd(c + '.s') or '?', rd(c + '.why') or headline(rd(c + '.md'))))
+        hl = rd(c + '.why') or headline(rd(c + '.md'))
+        if rc != '0':        # a failed check never reads as its counts (qk1 89dcf1c0's replay: rc 1, "programs checked 0")
+            failed.append(c)
+            hl = 'FAILED (exit %s): %s' % (rc, hl.replace('FAIL: ', '', 1) if hl.startswith('FAIL: ') else hl)
+        rows.append((c, 'ran', rc, rd(c + '.s') or '?', hl))
 full = plan.get('full') or []
-verdict = 'FULL RUN NEEDED' if full else ('PASS (every selected check exited 0)' if ok else 'FAIL')
+# T1: a failed check is a FAIL whatever else the plan says (qk1 89dcf1c0: build rc 2, the verdict read "FULL RUN
+# NEEDED"); a full run needed is named beside it
+verdict = ('FAIL (%s)' % ', '.join(failed) + ('; a full run is needed too' if full else '')) if not ok else \
+    ('FULL RUN NEEDED' if full else 'PASS (every selected check exited 0)')
 o = open(out, 'w')
 o.write('# quick %s\n\n' % commit[:12])
 o.write('- verdict: %s\n- wall clock: %d s (%.1f min) on one machine\n' % (verdict, secs, secs / 60))

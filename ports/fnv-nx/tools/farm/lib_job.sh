@@ -10,6 +10,7 @@ log() { echo "$(date -u +%FT%TZ) $(basename "$0"): $*"; }
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 export FARM_APT
 
+NEED_PIP="capstone==5.0.9 unicorn==2.1.4 pyelftools==0.33 mako"
 NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu liblz4-dev libnewlib-dev python3-mako"
 host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c
@@ -22,18 +23,58 @@ host_check() {   # commands (py:<module> for python modules) -> installed with a
 	done
 	[ -z "$missing" ] && return 0
 	if [ "${FARM_APT:-0}" = 1 ]; then
-		apt-get update -qq
+		# apt only for commands; the Python modules are pip's (the pinned versions the link and harness use)
+		if [ -n "$(printf '%s\n' $missing | grep -v '^py:')" ]; then
+			apt-get update -qq
+			# shellcheck disable=SC2086
+			DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $NEED_APT
+		fi
 		# shellcheck disable=SC2086
-		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $NEED_APT
-		python3 -m pip install -q --break-system-packages unicorn==2.1.4 pyelftools==0.33
-		return 0
+		python3 -m pip install -q --break-system-packages $NEED_PIP 2>/dev/null || python3 -m pip install -q $NEED_PIP
+		# T1: install, then check again: a host that still lacks one fails here, at setup (bl1 bea5a2ed failed at
+		# the link stage after 72 min: No module named 'capstone', which nothing installed)
+		local still=""
+		for c in $missing; do
+			case "$c" in
+				llvm-undname) command -v llvm-undname >/dev/null || command -v llvm-undname-18 >/dev/null || still="$still $c" ;;
+				py:*) python3 -I -c "import ${c#py:}" 2>/dev/null || still="$still $c" ;;
+				*) command -v "$c" >/dev/null || still="$still $c" ;;
+			esac
+		done
+		[ -z "$still" ] && return 0
+		echo "$(basename "$0"): still missing after installing:$still"
+		exit 1
 	fi
-	echo "$(basename "$0"): missing on this host:$missing (FARM_APT=1 installs: $NEED_APT; pip unicorn pyelftools)"
+	echo "$(basename "$0"): missing on this host:$missing (FARM_APT=1 installs: $NEED_APT; pip $NEED_PIP)"
 	exit 1
 }
+# every Python module the link and the boot import (tools/link: capstone in slotfill2, exevft, bodies, vslots,
+# membervt; unicorn, elftools in the emulator), at the versions the harness was run with
+LINK_PY="py:capstone py:unicorn py:elftools py:mako"
 
+hostcache() {   # hostcache fetch|publish <name> <key> <dir> [...]: tools/farm/hostcache.sh (HOSTCACHE=0: nothing)
+	[ "${HOSTCACHE:-1}" = 1 ] || return 1
+	ARTIFACTS=$ARTIFACTS bash "$(dirname "${BASH_SOURCE[0]}")/hostcache.sh" "$@" 2>> "$FARM_HOME/hostcache.log"
+}
+hostcache_publish_bg() {   # hostcache_publish_bg <name> <key> <dir> [--exclude sub ...]: once per key, in the background
+	[ "${HOSTCACHE:-1}" = 1 ] || return 0
+	[ -f "$FARM_HOME/hostcache-$1-$2.published" ] && return 0
+	( hostcache publish "$@" && touch "$FARM_HOME/hostcache-$1-$2.published" ) > /dev/null 2>&1 &
+	return 0
+}
 job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and the pinned checkouts (or FARM_EXT)
 	local repo=$1
+	if [ -z "${FARM_SRC:-}" ] && [ -n "${FARM_STABLE_SRC:-}" ]; then
+		# T1: one worktree at a fixed path for every commit of this job, checked out at each head. The link's compile
+		# cache keys on the command line and its paths (tools/link/objcache.py: an object names its paths), and the
+		# probes' flags name the port (-I<port>/shim/include): with a src-<commit12> worktree per head, full1's link
+		# had 0 cache hits of 2,420 compiles (5fd996a4127f, 1,756 s compiling). A checkout rewrites only the files
+		# that changed (their mtimes), so the rest stay as they were.
+		bash "$(dirname "${BASH_SOURCE[0]}")/worktree.sh" "$repo" "$FARM_STABLE_SRC" "$COMMIT" >/dev/null
+		git -C "$FARM_STABLE_SRC" checkout -q -f --detach "$COMMIT" && git -C "$FARM_STABLE_SRC" reset -q --hard "$COMMIT" \
+			|| { echo "the stable worktree $FARM_STABLE_SRC cannot be put at $COMMIT"; exit 1; }
+		FARM_SRC=$FARM_STABLE_SRC
+	fi
 	if [ -n "${FARM_SRC:-}" ]; then
 		SRC=$(cd "$FARM_SRC" && pwd)
 		[ "$(git -C "$SRC" rev-parse HEAD)" = "$(git -C "$SRC" rev-parse "$COMMIT^{commit}")" ] \
@@ -46,7 +87,18 @@ job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and
 	COMMIT=$(git -C "$SRC" rev-parse HEAD)
 	C12=${COMMIT:0:12}
 	EXT=$FARM_HOME/ext
-	if [ -n "${FARM_EXT:-}" ]; then EXT=$(cd "$FARM_EXT" && pwd); else bash "$P/tools/fetch.sh" "$EXT" >/dev/null; fi
+	if [ -n "${FARM_EXT:-}" ]; then EXT=$(cd "$FARM_EXT" && pwd)
+	else
+		# T1: a fresh machine takes the pinned checkouts from the artifacts repository (tools/farm/hostcache.sh,
+		# keyed by tools/fetch.sh itself: the pins) instead of cloning them; fetch.sh then only checks them
+		local ek ext_restored=0
+		ek=$(sha256sum "$P/tools/fetch.sh" | cut -c1-16)
+		if [ "${HOSTCACHE:-1}" = 1 ] && [ ! -d "$EXT/fnv_decomp/.git" ]; then
+			hostcache fetch ext "$ek" "$EXT" && ext_restored=1
+		fi
+		bash "$P/tools/fetch.sh" "$EXT" >/dev/null
+		[ "$ext_restored" = 1 ] || hostcache_publish_bg ext "$ek" "$EXT"
+	fi
 	D12=$(sed -n 's/^pin fnv_decomp  *[^ ]*  *\([0-9a-f]\{12\}\).*/\1/p' "$P/tools/fetch.sh")
 	[ -d "$ARTIFACTS/.git" ] || git clone -q --no-checkout https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"
 }
@@ -163,7 +215,12 @@ stage_after() {  # stage_after <build dir> <stage> <earlier stage>: <stage> ende
 # fuzz farms read (link-head)
 VSUF=${FARM_VARIANT:+-$FARM_VARIANT}
 publish_link() { # publish_link <build dir>: link/<commit12> + the rolling branch link-head, for the fuzz farms
-	local bd=$1 wt=$FARM_HOME/link-wt$VSUF rb=link-head$VSUF ok
+	local bd=$1 wt=$FARM_HOME/link-wt$VSUF rb=link-head$VSUF ok wip=${FARM_WIP_BRANCH:-} base
+	# a try farm's WIP build (runner.sh WATCH=wip: FARM_WIP_BRANCH=wip/<b>) publishes link/<commit12> only: link-head
+	# is the integration branch's history, which the fuzz, scenario and boot farms read (it held try1of1's wip/d26
+	# link). Its commit is made in a separate local branch and worktree, so link-head cannot move even by mistake.
+	base=link-head$VSUF
+	[ -n "$wip" ] && { wt=$FARM_HOME/link-wt-wip$VSUF; rb=link-wip$VSUF; }
 	local pub=${FARM_PUBLISH:-auto}
 	[ "$pub" = 0 ] && { NOTE_PUB="not published (FARM_PUBLISH=0)"; return 0; }
 	ok=$(python3 -I - "$bd" "$COMMIT" "$pub" <<'EOF'
@@ -244,7 +301,7 @@ EOF
 		# V1-link's audits of this link (full_job.sh 4d): report, tables and logs, about 1 MB
 		[ -d "$bd/v1" ] && cp -r "$bd/v1" v1
 		cp "$REPORT" report.md
-		BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" "$P" > meta.json <<'EOF'
+		FARM_WIP_BRANCH=$wip BOOT_EXE=${GAME_EXE:-} python3 -I - "$bd" "$COMMIT" "$NOTE_TREE" "$NOTE_OBJS" "${OBJ_COMMIT:-}" "$P" > meta.json <<'EOF'
 import json, os, sys
 bd, commit, tree, objs, objs_commit, port = sys.argv[1:7]
 sys.path.insert(0, os.path.join(port, 'tools', 'farm'))
@@ -270,7 +327,8 @@ def milestone(f):   # S5's boot summary (tests/s5/emu_guest.py --summary-json): 
         return None
 stub = os.path.join(bd, 'boot', 'stub', 'emu_stub.log')
 stub_lines = open(stub, errors='replace').read().splitlines() if os.path.isfile(stub) else []
-print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
+print(json.dumps({'commit': commit, 'wip_branch': os.environ.get('FARM_WIP_BRANCH') or None,
+                  'objects_commit': objs_commit or commit,
                   'prepared_from': rec('prepare').get('prepared_from'), 'tree': tree, 'objects': objs,
                   'link': {k[5:]: v for k, v in lm.items() if k.startswith('link_')},
                   'guest_undefined': rec('guest').get('metrics', {}).get('guest_undefined'),
@@ -296,20 +354,85 @@ print(json.dumps({'commit': commit, 'objects_commit': objs_commit or commit,
 EOF
 		git add -f -A .
 		# the new commit's parent is the newest publish of any link farm, so a push sends only what changed
-		if git fetch -q origin "+refs/heads/$rb:refs/remotes/origin/$rb" 2>/dev/null; then
-			git reset -q --soft "refs/remotes/origin/$rb"
+		if git fetch -q origin "+refs/heads/$base:refs/remotes/origin/$base" 2>/dev/null; then
+			git reset -q --soft "refs/remotes/origin/$base"
 		fi
-		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 link outputs" || true
+		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 link outputs${wip:+ ($wip)}" || true
 		for i in 1 2 3; do  # one ref per push: the proxy drops combined pushes now and then
-			git push -q -f origin "$rb" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/link/$C12$VSUF" 2>/dev/null && break
+			if [ -n "$wip" ]; then git push -q -f origin "HEAD:refs/heads/link/$C12$VSUF" 2>/dev/null && break
+			else git push -q -f origin "$rb" 2>/dev/null && git push -q -f origin "HEAD:refs/heads/link/$C12$VSUF" 2>/dev/null && break; fi
 			sleep $((i * 5))
 		done
 		git ls-remote origin "refs/heads/link/$C12$VSUF" | grep -q .
 	)
 	prc=$?
 	set -e
-	if [ $prc -eq 0 ]; then NOTE_PUB="published: branch link/$C12$VSUF (history on link-head$VSUF)"
+	if [ $prc -eq 0 ] && [ -n "$wip" ]; then NOTE_PUB="published: branch link/$C12$VSUF ($wip; link-head not moved)"
+	elif [ $prc -eq 0 ]; then NOTE_PUB="published: branch link/$C12$VSUF (history on link-head$VSUF)"
 	else NOTE_PUB="publishing link/$C12$VSUF FAILED"; fi
+}
+
+publish_tree() { # publish_tree <build dir>: t/<commit12> from the pipeline's prepared tree, when no prepare farm did
+	# (T1: full1 prepares locally and the 8 fuzz farms stopped on "no prepared tree for link commit 97deacd38aec").
+	# The prepare farm's layout (tree/, meta.json with commit / decomp_commit / tree_hash, prepare.log), as a child of
+	# origin's `tree` (a push sends only changed files); only t/<commit12> is pushed, `tree` stays the prepare farm's.
+	# Only for a tree prepared from this very commit (the prepare stage's provenance), never for a WIP build.
+	local bd=$1 wt=$FARM_HOME/tree-pub-wt tr ok th dc prc
+	NOTE_TREEPUB=""
+	[ "${FARM_PUBLISH:-auto}" = 0 ] && { NOTE_TREEPUB="not published (FARM_PUBLISH=0)"; return 0; }
+	[ -n "${FARM_WIP_BRANCH:-}" ] && { NOTE_TREEPUB="not published (a WIP build)"; return 0; }
+	if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/t/$C12" > /dev/null 2>&1; then
+		NOTE_TREEPUB="t/$C12 exists"; return 0
+	fi
+	tr=$(python3 -I - "$bd" "$COMMIT" <<'EOF'
+import json, os, sys
+bd, commit = sys.argv[1:3]
+d = os.path.join(bd, 'prepare')
+try:
+    r = json.load(open(os.path.join(d, 'stage.json')))
+    pf = json.load(open(os.path.join(d, 'prepared_from.json')))
+except (OSError, ValueError):
+    sys.exit(0)
+t = os.path.join(d, 'tree')      # prepared here (an adopted PREPARED= tree came from the artifacts repository)
+if r.get('status') in ('ok', 'warn') and pf.get('port_commit') == commit and not pf.get('port_dirty') and \
+        str(pf.get('mode', '')).startswith('prepare.py') and os.path.isfile(os.path.join(t, 'build', 'units.json')):
+    print(t + '\t' + str(pf.get('decomp_commit') or 'unknown'))
+EOF
+)
+	[ -n "$tr" ] || { NOTE_TREEPUB="not published: no prepared tree of $C12 in the build"; return 0; }
+	dc=${tr#*$'\t'}; tr=${tr%%$'\t'*}
+	th=$(bash "$P/tools/farm/tree_hash.sh" "$tr")
+	set +e
+	(
+		set -e
+		git -C "$ARTIFACTS" worktree prune
+		git -C "$ARTIFACTS" fetch -q origin "+refs/heads/tree:refs/remotes/origin/tree" 2>/dev/null || true
+		if [ ! -e "$wt/.git" ]; then
+			rm -rf "$wt"
+			if git -C "$ARTIFACTS" rev-parse -q --verify refs/heads/tree-pub > /dev/null; then
+				git -C "$ARTIFACTS" worktree add -q -f -f --no-checkout "$wt" tree-pub
+			else
+				git -C "$ARTIFACTS" worktree add -q -f --orphan -b tree-pub "$wt"
+			fi
+		fi
+		cd "$wt" || exit 1
+		[ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || exit 1
+		[ "$(git rev-parse --git-common-dir | xargs realpath)" = "$(git -C "$ARTIFACTS" rev-parse --git-common-dir | (cd "$ARTIFACTS" && xargs realpath))" ] || exit 1
+		git rm -rqf --cached . > /dev/null 2>&1 || true
+		rm -rf tree meta.json prepare.log
+		mkdir -p tree; rsync -rc --delete --exclude "*.o" "$tr/" tree/
+		cp "$bd/prepare/stage.log" prepare.log 2>/dev/null || echo "prepared by full_job (pipeline)" > prepare.log
+		printf '{"commit": "%s", "decomp_commit": "%s", "tree_hash": "%s", "reused": 0, "from": "full_job"}\n' \
+			"$COMMIT" "$dc" "$th" > meta.json
+		git add -f -A tree meta.json prepare.log
+		if git rev-parse -q --verify refs/remotes/origin/tree > /dev/null; then git reset -q --soft refs/remotes/origin/tree; fi
+		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 tree $th (full_job)" || true
+		for i in 1 2 3; do git push -q -f origin "HEAD:refs/heads/t/$C12" 2> /dev/null && break; sleep $((i * 5)); done
+		git ls-remote origin "refs/heads/t/$C12" | grep -q .
+	)
+	prc=$?
+	set -e
+	if [ $prc -eq 0 ]; then NOTE_TREEPUB="published: t/$C12 (tree hash $th)"; else NOTE_TREEPUB="publishing t/$C12 FAILED"; fi
 }
 
 publish_nro() { # publish_nro <build dir>: the device package (NX1) on the private branch nro/<commit12>, one orphan

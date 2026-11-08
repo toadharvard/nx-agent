@@ -109,8 +109,10 @@ def entry_register_reads(fn, conv):
     argument MSVC's whole-program optimisation added (a custom convention units.json does not record)."""
     passed = {sp for _, sp, _, _ in conv.x86 if sp in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi')}
     written, reads = set(), []
-    for ins in CSD.disasm(fn['code'], fn['address']):
-        if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
+    insns = list(CSD.disasm(fn['code'], fn['address']))
+    for ix, ins in enumerate(insns):
+        if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx') and \
+                not (ins.op_str == 'ecx' and _push_is_call_arg(insns, ix)):
             continue                  # saving a callee-saved register / reserving a slot is not a use
         if ins.mnemonic in ('xor', 'sub', 'sbb') and len(ins.operands) == 2 and ins.op_str.split(', ')[0] == \
                 ins.op_str.split(', ')[-1]:
@@ -142,6 +144,48 @@ def entry_register_reads(fn, conv):
     return reads          # in first-read order: the straight-line prefix first, then the later branches
 
 
+_ESP_SLOT = __import__('re').compile(r'^(?:byte|word|dword|qword|xmmword|tbyte) ptr \[esp(?: \+ (0x[0-9a-f]+|\d+))?\]')
+
+
+def _stores_esp_slot(ins, off):
+    """ins writes the stack word at [esp + off] (its first operand, a store: fstp / fst / fistp / mov / movss ...)."""
+    if ins.mnemonic not in ('fstp', 'fst', 'fistp', 'fist', 'mov', 'movss', 'movsd', 'movq', 'movd'):
+        return False
+    m = _ESP_SLOT.match(ins.op_str.split(',')[0].strip() if ins.mnemonic.startswith('mov') else ins.op_str.strip())
+    return bool(m) and int(m.group(1) or '0', 0) == off
+
+
+def _push_is_call_arg(insns, ix, window=24):
+    """(R4 flow) `push ecx` at the entry is MSVC's one-word stack reservation, unless the word is an argument of the
+    next call: the pushes from it to a `call` followed by `add esp, N` number no more than N / 4, so the call's
+    cleanup consumes it (0x00d409b0: `push eax; push ecx; push esi; call; add esp, 0xc` passes ecx on). A reservation
+    is followed by fewer cleanup words than pushes (or by none) and stays padding."""
+    pushes = 0
+    for j in range(ix, min(ix + window, len(insns))):
+        m = insns[j].mnemonic
+        if m == 'push':
+            pushes += 1
+        elif _stores_esp_slot(insns[j], 4 * (pushes - 1)):
+            # (R2, farm baseline 588863: 0x00706f50, 0x00b799a0, 0x00e0c700) the pushed word is overwritten before
+            # the call (`push ecx; fld ..; fstp dword ptr [esp]`): a reservation the call's float argument fills
+            return False
+        elif m == 'call':
+            # the cleanup may follow a few plain instructions (0x00d409b0: `mov dl, [esi+2]; mov eax, [esp+0x10]`)
+            for nxt in insns[j + 1:j + 7]:
+                if nxt.mnemonic == 'add' and nxt.op_str.startswith('esp, '):
+                    try:
+                        return pushes <= int(nxt.op_str.split(', ')[1], 0) // 4
+                    except ValueError:
+                        return False
+                if nxt.mnemonic in ('call', 'push', 'pop', 'ret', 'leave') or nxt.mnemonic.startswith('j'):
+                    return False
+            return False
+        elif m in ('pop', 'ret', 'jmp') or m.startswith('j') or m in ('leave',) or \
+                (m in ('sub', 'add') and insns[j].op_str.startswith('esp')):
+            return False
+    return False
+
+
 def _later_entry_reads(fn, passed, limit=20000):
     """Registers some path from the entry reads before writing it (difffuzz-20, stores class): the straight-line
     scan stops at the first branch, so a register argument first used on a later path (0x00db0e80 takes its second
@@ -160,7 +204,8 @@ def _later_entry_reads(fn, passed, limit=20000):
             steps += 1
             ins = insns[addr]
             nxt = addr + ins.size
-            if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
+            if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx') and \
+                    not (ins.op_str == 'ecx' and _push_is_call_arg(list(insns.values()), list(insns).index(addr))):
                 addr = nxt
                 continue
             if ins.mnemonic in ('xor', 'sub', 'sbb') and len(ins.operands) == 2 and \
@@ -203,11 +248,32 @@ def _later_entry_reads(fn, passed, limit=20000):
                     addr = nxt
                     continue
                 if ins.mnemonic == 'jmp':
+                    # (difffuzz-20, eq-rest) a switch's jump table inside the function (`jmp [reg*4 + table]`): every
+                    # case is a path (0x00e03170 pushes edx in a case body, behind the table)
+                    for t in _jump_table(fn, ins):
+                        stack.append((t, written))
                     break
                 addr = nxt
                 continue
             addr = nxt
     return found
+
+
+def _jump_table(fn, ins):
+    """The case targets of `jmp dword ptr [index*4 + table]` when the table lies inside the function's own bytes:
+    consecutive dwords that point back into the function (the table ends at the first word that does not)."""
+    op = ins.operands[0] if ins.operands else None
+    if op is None or op.type != capstone.x86.X86_OP_MEM or op.mem.base != 0 or op.mem.scale != 4 or op.mem.index == 0:
+        return []
+    lo, hi = fn['address'], fn['address'] + len(fn['code'])
+    a, out = op.mem.disp & 0xffffffff, []
+    while lo <= a and a + 4 <= hi and len(out) < 256:
+        t = int.from_bytes(fn['code'][a - lo:a - lo + 4], 'little')
+        if not lo <= t < hi:
+            break
+        out.append(t)
+        a += 4
+    return out
 
 
 def is_dtor_name(sym):
@@ -265,6 +331,22 @@ def indefinite_word(x86_hex, arm_hex):
     return False
 
 
+def _guard_skipped(div, target, fn):
+    """The oracle made no call, the native made some, every private word the native read is a function-local static
+    or its guard (arm_local_static), a guard among them, and the exe code itself addresses a local static."""
+    st = getattr(target, 'local_statics', None)
+    if not st or div.get('x86') != 0 or not div.get('arm') or \
+            not any(n.startswith('_ZGVZ') for n in div.get('arm_private_syms') or ()):
+        return False
+    for ins in CSD.disasm(fn['code'], fn['address']):
+        for op in ins.operands:
+            if (op.type == capstone.x86.X86_OP_MEM and op.mem.base == 0 and op.mem.index == 0 and
+                    (op.mem.disp & 0xffffffff) in st) or \
+                    (op.type == capstone.x86.X86_OP_IMM and (op.imm & 0xffffffff) in st):
+                return True
+    return False
+
+
 def _static_only_store(div, target):
     """The record's own evidence for local-static: a mem-write whose differing bytes are all oracle-only stores to
     the unit's function-local statics, or one extra native call followed by the oracle's call there (the native's
@@ -272,9 +354,19 @@ def _static_only_store(div, target):
     if div.get('kind') == 'call-target' and div.get('x86') and div.get('arm_next') == div.get('x86') and \
             div.get('x86_next') != div.get('arm'):     # (x86_next == arm too: two calls swapped, V2 L1)
         return True     # the native makes one extra call (its own static's guarded initializer), then the oracle's
+    st = getattr(target, 'local_statics', None)
+    if div.get('kind') == 'call-args' and div.get('cls') == 'P' and st is not None:
+        # (difffuzz-20, eq-rest) a pointer argument that is the address of a function-local static: the oracle passes
+        # the static's image address, the native its own .bss copy (0x00aff100: `this` of the guarded constructor)
+        # and the native's pointer is its own copy of a function-local static (runner's arm_arg_syms, EQ review)
+        if not any(n.startswith('_ZZ') for n in div.get('arm_arg_syms') or ()):
+            return False
+        try:
+            return int.from_bytes(bytes.fromhex(div.get('x86') or ''), 'little') in st
+        except ValueError:
+            return False
     if div.get('kind') != 'mem-write' or div.get('only_x86') != div.get('ndiff'):
         return False
-    st = getattr(target, 'local_statics', None)
     addrs = [int(a, 16) for a in div.get('addrs') or ()]
     return bool(addrs) and st is not None and all(a in st for a in addrs)
 
@@ -358,6 +450,43 @@ def image_vftables():
                 if len(f) > 1 and f[1] == 'V':
                     _VFT.add(int(f[0], 16))
     return _VFT
+
+
+def cpuid_dependent(pair, case, div, max_steps):
+    """(difffuzz-20, args class, cpuid-env) The addresses of the `cpuid` instructions the oracle executes when every
+    differing byte of the divergence is one whose oracle value depends on the CPU: replayed with the cpuid answers
+    changed, each of those bytes (or the returned value) changes on the oracle. CPUID has no AArch64 equivalent; the
+    port answers with the fixed values of shim/include/fnvnx_asm.h (docs/ASM.md), so the bytes stored from cpuid
+    results differ from the host model's by design. [] when the oracle runs no cpuid or a differing byte does not
+    depend on it."""
+    kind = div.get('kind')
+    if kind == 'mem-write':
+        try:
+            addrs = {int(a, 16) for a in div.get('addrs') or ()}
+        except ValueError:
+            return []
+        if not addrs or len(addrs) != div.get('ndiff'):
+            return []
+    elif kind != 'return':
+        return []
+    world.CPUID = {'seen': [], 'perturb': False}
+    runs = []
+    try:
+        rx0, _, _ = pair.run(case, max_steps)
+        seen = sorted(set(world.CPUID['seen']))
+        if not seen:
+            return []
+        for mode in ('rand', 'zero'):
+            world.CPUID = {'seen': [], 'perturb': mode}
+            runs.append(pair.run(case, max_steps)[0])
+    finally:
+        world.CPUID = None
+    if kind == 'return':
+        return seen if any(r.ret != rx0.ret for r in runs) else []
+    changed = set()
+    for r in runs:
+        changed |= {a for a in set(rx0.writes) | set(r.writes) if rx0.writes.get(a) != r.writes.get(a)}
+    return seen if addrs <= changed else []
 
 
 def oracle_vcall(pair, case, max_steps):
@@ -464,6 +593,13 @@ def x87_probes(pair, case, div, max_steps, h):
             return True
     finally:
         world.X87_FLIP_WIDTH = False
+    world.TRIG_INF = True
+    try:
+        if rerun():
+            h['cause'] = 'x87-trig-inf'
+            return True
+    finally:
+        world.TRIG_INF = False
     for kind, cw in (('f32', 0x007f), ('f64', 0x027f)):
         rec = {'kind': kind}
         world.X87_CLAMP, world.X87_CW = rec, cw
@@ -504,6 +640,104 @@ def arg_narrow_top(target, fn, lab, i):
     return False
 
 
+_IN_CHAIN = False
+
+
+def _bool_chain(pair, target, case, div, fn, max_steps, h, rounds=8):
+    """(r4 uncls) bool-repr when it takes SEVERAL bytes: a function reads a bool flag, then more of them (the early
+    exit of 0x006141f0 depends on eight random-background bytes, one per branch), so no single byte removes the
+    divergence the probes above look for. Every round plants 1 in the 1-byte reads the oracle's code makes of a byte
+    above 1 (random background or planted memory) and runs again; once the machines agree, the planted set is
+    minimised (a byte whose removal leaves the agreement is left out) and returned. When a divergence remains
+    after the last round that is itself a by-design or artifact cause (the divergence the early exit hid, named by a
+    nested `hint`; h['then'] keeps its name), the earlier one was bool-repr too; anything else leaves the record
+    where it was (a real second divergence is not hidden behind the bool bytes)."""
+    global _IN_CHAIN
+    if case.bg == 'zero' and not any(x > 1 for b in case.mem.values() for x in b):
+        return []
+    cur, planted = case.copy(), []
+    d = div
+    _IN_CHAIN = True
+    try:
+        for _ in range(rounds):
+            if h['_runs'] >= 45:
+                return []
+            reads, bg = {}, {}
+            world.BYTE_READS, world.BG_READS = reads, bg
+            try:
+                pair.run(cur, max_steps)
+            finally:
+                world.BYTE_READS = world.BG_READS = None
+            h['_runs'] += 1
+            new = []
+            for a, b in cur.mem.items():
+                for i, x in enumerate(b):
+                    if x > 1 and reads.get(a + i) == {1} and \
+                            not any(s > k for k in range(1, 8) for s in reads.get(a + i - k, ())):
+                        new.append(a + i)
+            held = [(a, a + len(b)) for a, b in cur.mem.items()]
+            for a in sorted(bg):
+                sizes, v = bg[a]
+                if sizes == {1} and v is not None and v > 1 and a not in planted and \
+                        not any(lo <= a < hi for lo, hi in held) and \
+                        not any(s > k for k in range(1, 8) for s in bg.get(a - k, (set(),))[0]):
+                    new.append(a)
+            new = [a for a in new if a not in planted][:4]
+            if not new:
+                break
+            for a in new:
+                _plant(cur, a)
+                planted.append(a)
+            _, _, d = pair.run(cur, max_steps)
+            h['_runs'] += 1
+            if _benign(d):
+                break
+        if not planted:
+            return []
+        if d is not None and not _benign(d):
+            # the early exit hid another divergence: only a call-flow divergence the planted bytes cleared (the calls
+            # now agree and a later difference shows) can; it must be named by the other probes, and a soft one
+            if div.get('kind') not in ('call-target', 'call-count') or d.get('kind') in ('call-target', 'call-count'):
+                return []
+            import causes
+            sub = hint(pair, target, cur, d, fn, max_steps)
+            h['_runs'] += sub.get('_runs', 0)
+            c = sub.get('cause')
+            h['then'] = c
+            if c in (None, 'unclassified', 'call-flow', 'bool-repr') or \
+                    (c == 'uninit-both' and sub.get('uniform') != 'agree'):
+                return []
+            if causes.policy(c)[2]:
+                h['chain_cause'] = c        # a real second divergence behind the bool bytes: named, not hidden
+                return []
+        keep = list(planted)
+        for a in list(planted):
+            if d is not None and not _benign(d):
+                break                       # the remaining divergence is the nested cause's: no minimisation
+            if len(keep) <= 1 or h['_runs'] >= 55:
+                break
+            t = case.copy()
+            for b in keep:
+                if b != a:
+                    _plant(t, b)
+            _, _, dd = pair.run(t, max_steps)
+            h['_runs'] += 1
+            if _benign(dd):
+                keep.remove(a)
+        return ['%08x' % a for a in keep]
+    finally:
+        _IN_CHAIN = False
+
+
+def _plant(c, a):
+    """1 at address a of the case's memory (inside a planted block, or as a new one-byte block)."""
+    for base, b in list(c.mem.items()):
+        if base <= a < base + len(b):
+            nb = bytearray(b); nb[a - base] = 1; c.mem[base] = bytes(nb)
+            return
+    c.mem[a] = b'\x01'
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
@@ -522,6 +756,16 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'nrvo-elision'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
+    if div.get('split_delete'):
+        h['cause'] = 'split-delete'; return h
+    if div.get('call_order_unproven'):
+        h['cause'] = 'call-order-unproven'; return h
+    if div.get('after_perm'):
+        h['cause'] = 'call-order-args'; return h
+    if div.get('arg_order'):
+        h['cause'] = 'call-order'; return h
+    if div.get('null_delete'):
+        h['cause'] = 'null-delete'; return h
     if div.get('vptr_store'):
         # only a destructor's vptr resets differ (runner.dtor_vptr_bytes, F2 d21-dtorvptr): by design
         h['cause'] = 'vptr-store'; return h
@@ -572,6 +816,10 @@ def hint(pair, target, case, div, fn, max_steps):
             hits = check_rebind.bypassing_functions(str(obj)).get(target.orig_addr)
             if hits:
                 h['cause'] = 'split-global'; h['vars'] = hits; return h
+    if div.get('arm_local_static') and div.get('kind') == 'call-count' and _guard_skipped(div, target, fn):
+        # (difffuzz-20, eq-rest) the case's background has the oracle's static guard set, so it skips the one-time
+        # initializer, and the native's own guard (its .bss, zero) runs it: the native calls are that initializer
+        h['cause'] = 'local-static'; return h
     if div.get('arm_local_static') and _static_only_store(div, target):
         # evidence in the record: every differing byte is an oracle-only store into a function-local static the
         # native keeps in its .bss (S13b audit, V2 L1: the flag alone filed 344 call/error records, among them a
@@ -598,6 +846,23 @@ def hint(pair, target, case, div, fn, max_steps):
         if str(div.get('x86', '')).startswith('fault:') and div.get('arm') is None and oracle_vcall(pair, case,
                                                                                                     max_steps):
             h['cause'] = 'oracle-vcall'; return h
+        one = 'x86' if div.get('arm') is None and str(div.get('x86', '')).startswith('fault:') else \
+            'arm' if div.get('x86') is None and str(div.get('arm', '')).startswith('fault:') else None
+        if one and pair is not None:
+            # S1-rules (d26-uniform): a fault on one machine that goes away when every planted garbage word is 0 on
+            # both (world.UNIFORM) came from garbage that machine read: a stack out-parameter an intercepted callee
+            # would have written (00dc9240: [esp + 0xb] after 0x00d874b0, random fill on x86, 0 natively), a
+            # non-argument register. The seed probe below misses it (a random byte is nonzero under both seeds)
+            world.UNIFORM = True
+            try:
+                _, _, du = pair.run(case, max_steps)
+            finally:
+                world.UNIFORM = False
+            h['_runs'] += 1
+            if du is None:
+                h['cause'] = 'uninit-x86' if one == 'x86' else 'uninit-arm'
+                h['uniform'] = 'agree'
+                return h
     if k == 'callee-saved':
         h['cause'] = 'callee-saved'; return h
     isfloat = False
@@ -647,6 +912,18 @@ def hint(pair, target, case, div, fn, max_steps):
                 h['_runs'] += 1
                 h['uniform'] = 'agree' if du is None else du.get('kind')
             return h
+    if k == 'call-args' and pair is not None and h['_runs'] < 40:
+        # (R4 flow, stub-outparam both ways) an argument that is an uninitialised local passed on after an
+        # intercepted call that should have filled it: the words the function never stored to are 0 on both
+        # machines (world.STUB_OUT zeroes them in the oracle too). A rerun that agrees names the cause
+        world.STUB_OUT = True
+        try:
+            _, _, d_so = pair.run(case, max_steps)
+        finally:
+            world.STUB_OUT = False
+        h['_runs'] += 1
+        if _benign(d_so):
+            h['cause'] = 'stub-outparam'; return h
     if k in ('return', 'mem-write'):
         fl = div.get('float') or div.get('float_word')
         conv_ops = {'fistp', 'fist', 'cvttss2si', 'cvttsd2si', 'cvtss2si', 'cvtsd2si', 'fisttp'}
@@ -666,6 +943,12 @@ def hint(pair, target, case, div, fn, max_steps):
                 h['cause'] = 'x87-precision'; h['x87_pc24'] = True
                 h['int_float_close'] = int_float_close(div.get('x86'), div.get('arm'))
                 return h
+        if div.get('zero_sign') and pair is not None and any(m.startswith('f') for m in mn) and \
+                x87_probes(pair, case, div, max_steps, h):
+            # (difffuzz-20, zero-sign) -0.0 against +0.0: an x87 intermediate beyond the float range keeps its sign
+            # until the store rounds it (0x00c206b0: -4.5e-44 * 4.5e-44 = -2e-87, then + 0.0 stays negative); the
+            # rerun that clamps such values (x87-range) is the evidence, not the equal numeric value
+            return h
         if fl:
             if fl.get('tolerant'):
                 h['cause'] = 'x87-precision' if any(m.startswith('f') for m in mn) else 'float-tolerance'
@@ -678,6 +961,11 @@ def hint(pair, target, case, div, fn, max_steps):
                 return h
             if pair is not None and any(m.startswith('f') for m in mn) and x87_probes(pair, case, div, max_steps, h):
                 return h
+    if pair is not None and k in ('mem-write', 'return'):
+        cp = cpuid_dependent(pair, case, div, max_steps)
+        h['_runs'] += 2
+        if cp:
+            h['cause'] = 'cpuid-env'; h['cpuid'] = ['%08x' % a for a in cp]; return h
     # bool representation probe: a byte that is neither 0 nor 1 read as bool (MSVC tests the whole byte, GCC may
     # test bit 0 only): set each such input byte to 1
     # S1-rules: only a byte the MSVC code reads by itself (a 1-byte access at that address, no wider access over it)
@@ -705,6 +993,17 @@ def hint(pair, target, case, div, fn, max_steps):
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
                 if _benign(d):
                     bhits.append('%08x' % (a + i))
+    if not bhits and pair is not None and h['_runs'] < 30:
+        # (R4 flow) the same for a one-byte argument (a by-value aggregate of a single bool, `BoolArg { bool v; }`
+        # passed in dl: 0x00572a50, MSVC tests the byte, GCC bit 0): replace a byte above 1 by 1; only a rerun that
+        # agrees names the cause
+        for lab, b in list(case.args.items()):
+            if len(b) == 1 and 1 < b[0] < 0x80 and len(bhits) < 2 and h['_runs'] < 30:
+                trial = case.copy()
+                trial.args[lab] = b'\x01'
+                _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
+                if _benign(d):
+                    bhits.append('%s+0' % lab)
     if not bhits and pair is not None and case.bg != 'zero' and h['_runs'] < 30:
         # (F1b, difffuzz-20) the same for a byte of the random background the MSVC code reads by itself (a bool
         # global the case does not plant, a field behind a background pointer): plant 1 there (0x00adb9f0,
@@ -729,6 +1028,10 @@ def hint(pair, target, case, div, fn, max_steps):
             _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
             if _benign(d):
                 bhits.append('%08x' % a)
+    if not bhits and pair is not None and not _IN_CHAIN:
+        bhits = _bool_chain(pair, target, case, div, fn, max_steps, h)
+        if h.get('chain_cause'):
+            h['cause'] = h['chain_cause']; return h
     if bhits:
         h['cause'] = 'bool-repr'; h['bytes'] = bhits; return h
     if isfloat:
@@ -779,6 +1082,35 @@ def hint(pair, target, case, div, fn, max_steps):
         big = [lab for lab, b in case.args.items() if int.from_bytes(b[:4], 'little') & 0xffffffff >= 32]
         if big and hits:
             h['cause'] = 'shift-count'; h['args'] = big; return h
+    if k == 'call-count' and pair is not None:
+        # (r5 design) a constructor call whose every store the caller overwrites (dead-init-call)
+        import r5design
+        c = r5design.dead_init_probe(pair, case, div, max_steps, h)
+        if c:
+            h['cause'] = c; return h
+    if k in ('call-count', 'call-target') and pair is not None:
+        # (uncls2) a call that only runs on garbage: the same uniform-fill probe (0x00a82d90). (r5-calltarget) A
+        # call-target too: the call a branch on an unwritten local picks (0x006e1670: `len`, the out-parameter of a
+        # stubbed callee, against `limit`) moves with the fill, and both machines agree on an all-zero one
+        c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=True)
+        if c:
+            h['cause'] = c; return h
+    if k in ('call-target', 'call-count') and pair is not None and h['_runs'] < 40:
+        # (difffuzz-20, stub-flow) a call sequence that depends on a stack word an intercepted callee should have
+        # filled (a count or flag read back into a local or a dead parameter slot, 0x00a3d370): the words the code
+        # never stored to are 0 on both machines (world.STUB_OUT), under two garbage seeds. Both must then run to
+        # the end and agree; a rerun that faults on both machines is no evidence (_benign sees no divergence)
+        world.STUB_OUT = True
+        try:
+            alt = case.copy(); alt.seed = case.seed ^ 0x13572468
+            alt.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+            base = case.copy(); base.rets = list(alt.rets)
+            runs = [pair.run(c, max_steps) for c in (base, alt)]
+        finally:
+            world.STUB_OUT = False
+        h['_runs'] += 2
+        if all(_benign(d_) and not rx_.error and not ra_.error for rx_, ra_, d_ in runs):
+            h['cause'] = 'stub-outparam'; return h
     if k in ('call-target', 'call-count'):
         h['cause'] = 'call-flow'; return h
     if hits:
@@ -800,5 +1132,163 @@ def hint(pair, target, case, div, fn, max_steps):
         h['_runs'] += 2
         if d:
             h['cause'] = 'layout-offset'; h['shift'] = d; return h
+    if k in ('return', 'mem-write', 'call-args') and pair is not None:
+        c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h)
+        if c:
+            h['cause'] = c; return h
+    if k in ('return', 'mem-write', 'call-args') and pair is not None:
+        # (r5 design) mechanisms the exe's own code has to show (r5design.py): dead-result, local-index-range,
+        # ptrdiff-unaligned, x87-range of a float argument
+        import r5design
+        c = r5design.value_probes(pair, target, case, div, fn, max_steps, h)
+        if c:
+            h['cause'] = c; return h
+    if k == 'error' and pair is not None:
+        import r5design
+        c = r5design.null_deref_probe(pair, case, div, max_steps, h)
+        if c:
+            h['cause'] = c; return h
     h['cause'] = 'unclassified'
     return h
+
+
+def pool_vftable_stores(rx, ra, pinned):
+    """(uncls2) Every byte the two machines store differently lies in a 4-byte word where the oracle stored the
+    synthetic pool address of a read-only section of its object (coffobj: a `$SG<n>` section symbol, here the
+    unit's own unnamed vftable) and the native stored an address of the exe whose first word is the first word of
+    that pool literal, a code address (0x006ad660: the oracle's constructors store 0x02f00000, the pool copy of
+    the table {0x006b3970, ...}; the native stores 0x0106ba58, where the exe's vftable begins with 0x006b3970)."""
+    import coffobj
+    exe = coffobj.exe_image()
+    if exe is None:
+        return False
+    diff = {a for a in set(rx.writes) | set(ra.writes) if rx.writes.get(a) != ra.writes.get(a)}
+    if not diff:
+        return False
+    for a in diff:
+        base = a & ~3
+        if any(rx.writes.get(base + i) is None or ra.writes.get(base + i) is None for i in range(4)):
+            return False
+        vx = struct.unpack('<I', bytes(rx.writes[base + i] for i in range(4)))[0]
+        va = struct.unpack('<I', bytes(ra.writes[base + i] for i in range(4)))[0]
+        lit = None
+        for pa, pb in pinned.items():
+            if pa <= vx < pa + max(len(pb), 1):
+                lit = pb[vx - pa:vx - pa + 4]
+        if lit is None or len(lit) < 4 or not coffobj.LITERAL_POOL <= vx < coffobj._POOL_NEXT or va & 3 or \
+                not world.TEXT[0] <= struct.unpack('<I', lit)[0] < world.TEXT[1]:
+            return False        # the pool literal must begin with a code address (a vftable's first slot)
+        try:
+            if bytes(exe.read(va, 4)) != lit:
+                return False
+        except Exception:  # noqa: BLE001
+            return False
+    return True
+
+
+def canned_unaliased(case):
+    """(difffuzz-20, canned-alias) The case with every canned call result whose low word points into the argument
+    buffers (world.BUF .. +0x10000) moved to a private heap address, one per call; None when no result does. The
+    fuzzer draws 30 % of the canned words as pointers into the buffers, so an allocator or getter callee "returns"
+    memory inside the object the function builds and then writes: the two compilers order the stores to the object
+    and through that pointer differently (GCC assumes they do not alias), which no real allocation does."""
+    out, n = [], 0
+    for i in range(max(8, len(case.rets))):
+        b = case.ret_bytes(i)
+        w = int.from_bytes(b[:4], 'little')
+        if world.BUF <= w < world.BUF + 0x10000:
+            w = world.HEAP + 0x10000 + 0x1000 * i
+            b = w.to_bytes(4, 'little') + b[4:]
+            n += 1
+        out.append(b)
+    if not n:
+        return None
+    t = case.copy()
+    t.rets = out
+    return t
+
+
+def _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=False):
+    """(uncls2, difffuzz-20) What is left after every other probe: each one reruns the case with one mechanism changed
+    and names the cause only when the two machines then agree (`_benign`).
+      uninit-*       every garbage word 0 on both machines (world.UNIFORM): the outcome of a machine moves with the
+                     fill but not between two random fills (a bool test of an unwritten byte is 1 for 255 of 256
+                     fills, so the seed probe above saw nothing)
+      canned-alias   every canned result that points into the argument buffers moved to the heap (world.HEAP)
+      call-order     two adjacent calls of one callee that return the same value: the machines used the two results
+                     in swapped roles (C++ leaves the evaluation order of operands open)
+      shift-count    the 64-bit shift helpers take the count modulo 64 (world.SHIFT_MASK)
+      x87-trig-inf   fsin / fcos / fsincos / fptan of an infinity give the indefinite NaN (world.TRIG_INF)
+      vptr-bytes     the planted vptr word holds the native address point on the oracle too (world.VPTR_NATIVE): a
+                     byte or part of the vptr word that the code reads as data
+      ptrdiff-unaligned  a result that differs by the low two bits only, with every argument word 4-aligned
+                     (GCC folds (end - begin) / 4 * 4 to end - begin: UB for pointers that are not 4 apart)"""
+    def rerun(c=case):
+        _, _, d = pair.run(c, max_steps)
+        h['_runs'] += 1
+        return _benign(d)
+
+    def pinned_rets():
+        t = case.copy(); t.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+        return t
+    world.BG_SEED = case.seed if case.bg != 'zero' else None
+    try:
+        base = pinned_rets()
+        rx, ra, _ = pair.run(base, max_steps)
+        h['_runs'] += 1
+        world.UNIFORM = True
+        try:
+            rxu, rau, du = pair.run(base, max_steps)
+        finally:
+            world.UNIFORM = False
+        h['_runs'] += 1
+        if _benign(du):
+            mx, ma = _outcome(rxu) != _outcome(rx), _outcome(rau) != _outcome(ra)
+            if mx or ma:
+                return 'uninit-x86' if mx and not ma else 'uninit-arm' if ma and not mx else 'uninit-both'
+        if only_uniform:
+            return None
+        tx = [c.target for c in rx.calls]
+        for i in range(min(len(tx), len(base.rets)) - 1):
+            if tx[i] == tx[i + 1] and tx[i] >= 0 and base.rets[i] != base.rets[i + 1]:
+                # equal results in either value: only the roles the two machines gave them differ (one value alone
+                # could remove the divergence by moving a pointer, 0x00480000)
+                ta, tb = base.copy(), base.copy()
+                ta.rets[i + 1] = ta.rets[i]
+                tb.rets[i] = tb.rets[i + 1]
+                if rerun(ta) and rerun(tb):
+                    # (r4 uncls) a by-design evaluation order only when the exe shows the two calls are the
+                    # arguments of one call (their results pushed or moved before the consumer)
+                    import runner
+                    return 'call-order' if runner._is_arg_block(rx, i) else 'call-order-unproven'
+        moved = canned_unaliased(base)
+        if moved is not None and rerun(moved):
+            return 'canned-alias'
+        for flag, cause in (('SHIFT_MASK', 'shift-count'), ('TRIG_INF', 'x87-trig-inf')):
+            setattr(world, flag, True)
+            try:
+                if rerun(base):
+                    return cause
+            finally:
+                setattr(world, flag, False)
+        if div.get('kind') == 'mem-write' and pool_vftable_stores(rx, ra, pair.pinned):
+            return 'vptr-pool'
+        if case.vptrs:
+            world.VPTR_NATIVE = True
+            try:
+                if rerun(base):
+                    return 'vptr-bytes'
+            finally:
+                world.VPTR_NATIVE = False
+        if div.get('kind') == 'return' and mn & {'sar', 'shr', 'idiv', 'div'}:
+            bx, ba = bytes.fromhex(div.get('x86') or ''), bytes.fromhex(div.get('arm') or '')
+            if len(bx) == 4 == len(ba) and 0 < abs(int.from_bytes(bx, 'little') - int.from_bytes(ba, 'little')) < 4:
+                t = base.copy()
+                t.args = {l: b''.join((int.from_bytes(b[o:o + 4], 'little') & ~3).to_bytes(4, 'little')
+                                      for o in range(0, len(b) - 3, 4)) + b[len(b) // 4 * 4:]
+                          for l, b in base.args.items()}
+                if t.args != base.args and rerun(t):
+                    return 'ptrdiff-unaligned'
+    finally:
+        world.BG_SEED = None
+    return None

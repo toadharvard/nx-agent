@@ -44,11 +44,40 @@ fi
 export ARTIFACTS=${ARTIFACTS:?no checkout of toadharvard/fnv-nx-build}
 mkdir -p "$FARM_HOME"; LOG=$FARM_HOME/$NAME.log; LAST=$FARM_HOME/$NAME.last
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$LOG"; }
-exec 9>"$FARM_HOME/$NAME.lock"
-if ! flock -n 9; then log "runner $NAME is already running (lock $FARM_HOME/$NAME.lock): this start exits"; exit 0; fi
+LOCK=$FARM_HOME/$NAME.lock
+lock_holders() {   # the pids (other than this shell) whose open files include the lock, one "pid cmdline" per line
+  local d p
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}; { [ "$p" = $$ ] || [ "$p" = "$BASHPID" ]; } && continue   # this runner, this scan
+    ls -l "$d/fd" 2>/dev/null | grep -qF -- "$LOCK" || continue
+    echo "$p $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c1-160)"
+  done
+}
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  # T1: a lock held only by orphans of a dead runner (a job's or a job's background child, which inherited the
+  # runner's fd 9: sw24 pid 10080, full1, bt1) blocks every restart. The holders are named; when none of them is a
+  # runner.sh, they are stopped and the lock taken again (RUNNER_LOCK_TAKEOVER=0: never, only named).
+  h=$(lock_holders 9>&-)   # (the scan and its children without the fd, or they list themselves)
+  if [ -n "$h" ] && ! printf '%s\n' "$h" | grep -q 'tools/farm/runner\.sh'; then
+    log "lock $LOCK held by orphans of a dead runner: $(printf '%s; ' "$h")"
+    if [ "${RUNNER_LOCK_TAKEOVER:-1}" = 1 ]; then
+      for p in $(printf '%s\n' "$h" | cut -d' ' -f1); do kill "$p" 2>/dev/null; done
+      sleep 3
+      for p in $(printf '%s\n' "$h" | cut -d' ' -f1); do kill -9 "$p" 2>/dev/null; done
+      flock -w 10 9 && log "orphans stopped; lock taken" || { log "lock still held: this start exits"; exit 0; }
+    else
+      log "RUNNER_LOCK_TAKEOVER=0: this start exits"; exit 0
+    fi
+  else
+    log "runner $NAME is already running (lock $LOCK, held by: $(printf '%s; ' "$h")): this start exits"; exit 0
+  fi
+fi
 echo $$ > "$FARM_HOME/$NAME.pid"   # the runner itself (a watcher's kill -0 target; the lock says it is alive)
 # qk<k> (the warm quick farms): persistent, a 20 s poll, claims shared under the tag "quick" (env still overrides)
 if [[ "$NAME" =~ ^qk[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}" "${RUNNER_CLAIM:=quick}"; fi
+# bl<k> (the bootloop farms, bootloop_job.sh): persistent, a 20 s poll (each takes the newest head when it is free)
+if [[ "$NAME" =~ ^bl[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}"; fi
 PERSIST=${RUNNER_PERSIST:-0}; POLL=${RUNNER_POLL_S:-60}; CLAIM=${RUNNER_CLAIM:-}
 GAP=${RUNNER_MIN_GAP_S:-0}; LAST_START=0   # RUNNER_MIN_GAP_S: at least this many seconds between two job starts (a light
                                            # job hosted beside other work, e.g. `zero` on a busy integration branch)
@@ -81,6 +110,38 @@ publish_report() {  # publish_report <file.md>: commit it and its <file>.json si
   git -C "$wt" -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$NAME: $(basename "$f")" || true
   for i in 1 2 3; do git -C "$wt" push -q -f origin "HEAD:refs/heads/$rb" 2>/dev/null && return 0; sleep $((i * 5)); done
   log "report push failed: $f"
+}
+
+# The regression ratchet (tools/farm/ratchet.py): every report gets its REGRESSIONS section from the best-known ledger
+# (branch reports/ratchet, ledger.json, of the artifacts repository), and an integration report with no regression
+# advances it. The push is never forced: a farm whose push is refused (another farm moved the ledger) checks the
+# job's report again on the new ledger. RATCHET=0 turns it off. Never fails the run.
+ratchet_report() {  # ratchet_report <file.md>
+  local f=$1 side=${1%.md}.json wt=$FARM_HOME/ratchet-wt orig=$FARM_HOME/ratchet-orig.md i c
+  [ "${RATCHET:-1}" = 0 ] && return 0
+  cp "$f" "$orig"
+  git -C "$ARTIFACTS" worktree prune
+  if [ ! -e "$wt/.git" ]; then rm -rf "$wt"; git -C "$ARTIFACTS" worktree add -q -f --detach "$wt" >/dev/null 2>&1 || return 0; fi
+  for i in 1 2 3 4 5; do
+    if git -C "$wt" fetch -q origin "+refs/heads/reports/ratchet:refs/remotes/origin/reports/ratchet" 2>/dev/null; then
+      git -C "$wt" checkout -q -f --detach refs/remotes/origin/reports/ratchet || return 0
+    else   # the first ledger: a root commit of its own
+      c=$(git -C "$wt" -c user.name=fnv-nx-farm -c user.email=farm@invalid commit-tree "$(git -C "$wt" mktree </dev/null)" -m "ratchet ledger") || return 0
+      git -C "$wt" checkout -q -f --detach "$c" || return 0
+    fi
+    cp "$orig" "$f"
+    if ! python3 -I "$J/ratchet.py" check --ledger "$wt/ledger.json" --report "$f" --job "$JOB" --head "$H" \
+        ${side:+--sidecar "$side"} --repo "$NX" ${FARM_WIP_BRANCH:+--wip "$FARM_WIP_BRANCH"} --update >>"$LOG" 2>&1; then
+      cp "$orig" "$f"; log "ratchet failed on $f (the report is published without it)"; return 0
+    fi
+    [ -n "${FARM_WIP_BRANCH:-}" ] && return 0                     # a WIP report changes no ledger
+    git -C "$wt" add -A ledger.json 2>/dev/null
+    git -C "$wt" diff --cached --quiet && return 0               # nothing to advance
+    git -C "$wt" -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "ratchet: $NAME $JOB $H12" || return 0
+    git -C "$wt" push -q origin "HEAD:refs/heads/reports/ratchet" 2>/dev/null && return 0
+    sleep $((i * 3))
+  done
+  log "ratchet: the ledger push was refused 5 times; $f carries the last check"
 }
 
 # WATCH=wip (try farms): instead of the integration head, run the job on unmerged agent work. The orchestrator
@@ -117,7 +178,9 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     git -C "$NX" fetch -q "$(git -C "$ARTIFACTS" remote get-url origin)" "+refs/heads/$WB:refs/remotes/wip/${WB#wip/}" || { sleep 60; continue; }
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "origin/$BRANCH" || { sleep 60; continue; }
     TAG="${WB//\//_}-"
+    export FARM_WIP_BRANCH=$WB   # the job's publishes: link/<c12> only, never link-head (lib_job.sh publish_link)
   else
+    unset FARM_WIP_BRANCH
     H=$(git ls-remote "$PUBLIC" "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
     if [ -z "$H" ]; then sleep 60; continue; fi
     if [ "$H" = "$(cat "$LAST" 2>/dev/null)" ]; then
@@ -140,10 +203,14 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     census)  bash "$J/census_job.sh" "$H" "$R" ;;
     compile) bash "$J/compile_job.sh" "$H" "$1" "$2" "$R" ;;
     *)       bash "$J/${JOB}_job.sh" "$H" "$@" "$R" ;;
-  esac >> "$LOG" 2>&1
+  esac >> "$LOG" 2>&1 9>&-   # the job and its children never hold the runner's lock (an orphan would block restarts)
   rc=$?
   if [ $rc -ne 0 ]; then
-    { echo "# $JOB $H12 FAILED (rc $rc)"; echo; echo '```'; tail -40 "$LOG"; echo '```'; } > "$R"
+    # the job's own report, when it wrote one, is kept under the FAILED title (its "- FAIL: ..." says why; T1)
+    { echo "# $JOB $H12 FAILED (rc $rc)"; echo
+      if [ -s "$R" ]; then echo "## the job's report"; echo; sed 's/^#/##/' "$R"; echo; fi
+      echo '```'; tail -40 "$LOG"; echo '```'; } > "$R.failed"
+    mv -f "$R.failed" "$R"
     rm -f "${R%.md}.json"
   fi
   # a job's machine-readable summary (<report>.json, e.g. fuzz_job.sh's fnvnx-fuzz-summary/1) goes first, its report
@@ -154,6 +221,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     sed -i "1{/^#/s|\$| ($WB @ $H12)|;}" "$R"
     head -1 "$R" | grep -q "^#" || sed -i "1i # $JOB ($WB @ $H12)\n" "$R"
   fi
+  [ -f "$R" ] && ratchet_report "$R"
   [ -f "$R" ] && publish_report "$R"
   if [ "$WATCH" = wip ]; then echo "$H" >> "$FARM_HOME/$NAME.done"; else echo "$H" > "$LAST"; fi
   log "done $JOB at $H12 rc=$rc"

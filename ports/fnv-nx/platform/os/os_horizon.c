@@ -110,7 +110,39 @@ struct os_thread {
     os_thread_fn fn;
     void *arg;
     int created, started, joined;
+    u64 tid;                       /* kernel thread id, set by the thread itself on entry */
+    struct os_thread *zombie_next; /* g_zombies */
 };
+
+/* A thread whose last reference goes away on the thread itself (CreateThread, CloseHandle, then the thread ends)
+ * cannot wait for its own exit in os_thread_free: that would never return and the thread would leak for good.
+ * Such a thread is parked here and closed by a later os_thread_create / os_thread_free, once it has exited. */
+static os_lock_t g_zombie_lock;
+static os_thread *g_zombies;
+
+static void zombies_reap(void)
+{
+    os_thread *dead = NULL;
+    os_lock(&g_zombie_lock);
+    for (os_thread **p = &g_zombies; *p;) {
+        os_thread *z = *p;
+        s32 idx;
+        if (R_SUCCEEDED(svcWaitSynchronization(&idx, &z->th.handle, 1, 0))) { /* a thread handle signals at exit */
+            *p = z->zombie_next;
+            z->zombie_next = dead;
+            dead = z;
+        } else {
+            p = &z->zombie_next;
+        }
+    }
+    os_unlock(&g_zombie_lock);
+    while (dead) {
+        os_thread *z = dead;
+        dead = z->zombie_next;
+        threadClose(&z->th);
+        free(z);
+    }
+}
 
 /* Win32 priority (-15..15, higher = more urgent) -> Horizon (0x18..0x3B for applications, lower = more urgent).
  * 0x2C is the default priority of the main thread. */
@@ -123,11 +155,15 @@ static int map_prio(int p)
 static void thread_entry(void *p)
 {
     os_thread *t = (os_thread *)p;
+    u64 id = 0;
+    svcGetThreadId(&id, CUR_THREAD_HANDLE);
+    __atomic_store_n(&t->tid, id, __ATOMIC_RELEASE);
     t->fn(t->arg);
 }
 
 os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int prio, int cpu)
 {
+    zombies_reap();
     os_thread *t = (os_thread *)calloc(1, sizeof *t);
     if (!t)
         return NULL;
@@ -168,9 +204,20 @@ void os_thread_free(os_thread *t)
 {
     if (!t)
         return;
-    /* libnx frees the stack in threadClose, which needs the thread to have exited */
-    if (t->started && !t->joined)
+    zombies_reap();
+    if (t->started && !t->joined) {
+        u64 me = 0;
+        svcGetThreadId(&me, CUR_THREAD_HANDLE);
+        if (__atomic_load_n(&t->tid, __ATOMIC_ACQUIRE) == me) {   /* freed by the thread itself: see g_zombies */
+            os_lock(&g_zombie_lock);
+            t->zombie_next = g_zombies;
+            g_zombies = t;
+            os_unlock(&g_zombie_lock);
+            return;
+        }
+        /* libnx frees the stack in threadClose, which needs the thread to have exited */
         threadWaitForExit(&t->th);
+    }
     if (t->created)
         threadClose(&t->th);
     free(t);
@@ -293,6 +340,10 @@ static int neg_errno(void)
     }
 }
 
+/* newlib's off_t is as wide as the build's long (32 bits on ILP32): refuse an offset it would wrap rather than seek
+ * to the wrong place (BSAs stay below 2 GB; a larger position is an error, not a modulo) */
+static int off_fits(uint64_t off) { return (uint64_t)(off_t)off == off && (off_t)off >= 0; }
+
 int os_file_open(const char *path, int flags)
 {
     int o;
@@ -315,6 +366,8 @@ static os_lock_t g_pio_lock;
 
 int64_t os_file_pread(int fd, void *b, size_t n, uint64_t off)
 {
+    if (!off_fits(off))
+        return -OS_EINVAL;
     os_lock(&g_pio_lock);
     off_t cur = lseek(fd, 0, SEEK_CUR);
     ssize_t r = lseek(fd, (off_t)off, SEEK_SET) < 0 ? -1 : read(fd, b, n);
@@ -326,6 +379,8 @@ int64_t os_file_pread(int fd, void *b, size_t n, uint64_t off)
 
 int64_t os_file_pwrite(int fd, const void *b, size_t n, uint64_t off)
 {
+    if (!off_fits(off))
+        return -OS_EINVAL;
     os_lock(&g_pio_lock);
     off_t cur = lseek(fd, 0, SEEK_CUR);
     ssize_t r = lseek(fd, (off_t)off, SEEK_SET) < 0 ? -1 : write(fd, b, n);
@@ -338,11 +393,16 @@ int64_t os_file_pwrite(int fd, const void *b, size_t n, uint64_t off)
 int64_t os_file_seek(int fd, int64_t off, int whence)
 {
     int w = whence == OS_SEEK_CUR ? SEEK_CUR : whence == OS_SEEK_END ? SEEK_END : SEEK_SET;
+    if ((int64_t)(off_t)off != off)
+        return -OS_EINVAL;
     off_t r = lseek(fd, (off_t)off, w);
     return r < 0 ? neg_errno() : (int64_t)r;
 }
 
-int os_file_truncate(int fd, uint64_t size) { return ftruncate(fd, (off_t)size) ? neg_errno() : 0; }
+int os_file_truncate(int fd, uint64_t size)
+{
+    return !off_fits(size) ? -OS_EINVAL : ftruncate(fd, (off_t)size) ? neg_errno() : 0;
+}
 int os_file_sync(int fd) { return fsync(fd) ? neg_errno() : 0; }
 int os_file_close(int fd) { return close(fd) ? neg_errno() : 0; }
 
