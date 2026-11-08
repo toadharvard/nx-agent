@@ -4863,6 +4863,14 @@ def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None, u
     if var == 'D0' and nd['variants'].get('D1') is not None:
         st['slot0-dtor-pair'] += 1
         return ADDR_SYM % a0 + ('' if nd['variants']['D1'] is nd['sym'] else '_D1'), ADDR_SYM % a0
+    if var == 'D0' and os.environ.get('FNVNX_D0DESTROY', '1') != '0' and exe_path:
+        # a native D0 alone (R2's Havok ??_G recons: 0x00d68740 hkpToiContactPointViewer, cb17b0, dfd8d0, d10730, ...):
+        # the exe ??_G's destroy call before the flags test is the D1 (exevft.deleting_dtor_destroy; its free goes
+        # through the Havok router, not operator delete), when that destructor has a native
+        x_ = exevft.deleting_dtor_destroy(exe_path, a0)
+        if x_ is not None and native.get(x_) is not None and sigs.itanium_variant(native[x_]['sym'].name) != 'D0':
+            st['slot0-d0-destroy'] += 1
+            return ADDR_SYM % x_, ADDR_SYM % a0
     if var == 'D1':   # destroys only: no deleting variant compiled
         t = TRAP_SYM % int(hashlib.sha1((XTRAP % a0 + ' D0').encode()).hexdigest()[:8], 16)
         traps.setdefault(t, (XTRAP % a0 + ' (D0 not compiled)', where))
