@@ -2212,5 +2212,23 @@ check('D22 call-only: empty out-of-class definitions are placeholders; slot 0\'s
        'FNVNX_D22_DROP(inline void S_00aa1420_Object::S_00aa1420_v0()\n{})',
        'inline void S_00aa1420_Object::S_00aa1420_v1(int* a, int b)\n{}'])
 
+# ---- S5-boot: RAWVT1-RECV (another receiver whose class has a minus-one classlayout row)
+import tempfile as _tf
+_clf = _tf.NamedTemporaryFile('w', suffix='.tsv', delete=False)
+_clf.write('# fnvnx-classlayout/1\nclass\tvftable\tkind\tdtor_slot\treason\tfile\tqualified\tevidence\tslots\n'
+           'BSExtraData\t0x01\tminus-one\t0\t-\t\tBSExtraData\t-\t-\nIDevX\t0x02\tcom\t-1\t-\t\tIDevX\t-\t-\n'); _clf.close()
+_save_cl = os.environ.get('FNVNX_CLASSLAYOUT'); os.environ['FNVNX_CLASSLAYOUT'] = _clf.name
+prepare.__dict__.pop('_fnvnx_classlayout', None)
+_RR = ('typedef bool(__thiscall* CmpFn)(BSExtraData*, BSExtraData*);\n'
+       'bool f(BSExtraData* apExtra, BSExtraData* w, void* raw)\n{\n'
+       '    if (((CmpFn)apExtra->m_ppVirtualMethodTable[1])(apExtra, w)) return 1;\n'
+       '    return ((CmpFn)((void**)raw)[1])(0, 0);\n}\n'
+       'void g(Shell* s)\n{\n    ((CmpFn)s->vtable[2])(0, 0);\n}\n')
+check('RAWVT1-RECV: a receiver with a minus-one classlayout row gets FNVNX_D26_SLOT; one without a row does not',
+      run(s1.r_raw_vtable_slots, _RR), ['apExtra->m_ppVirtualMethodTable[FNVNX_D26_SLOT(1)]'], ['s->vtable[FNVNX'])
+if _save_cl is None: os.environ.pop('FNVNX_CLASSLAYOUT', None)
+else: os.environ['FNVNX_CLASSLAYOUT'] = _save_cl
+prepare.__dict__.pop('_fnvnx_classlayout', None)
+
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)
