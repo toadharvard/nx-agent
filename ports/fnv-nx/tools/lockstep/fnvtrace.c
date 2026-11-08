@@ -10,7 +10,12 @@
  *                  the entry point (jmp $) until the loader has run, LoadLibraryA(fnvtrace.dll) in the child through
  *                  CreateRemoteThread, the entry's bytes restored, resume.
  * Environment (read by the DLL):
- *   FNVTRACE_LIST  functions, one per line: <hex address> [name]   ('#' comments)
+ *   FNVTRACE_LIST  functions, one per line: <hex address> [name]   ('#' comments); a site line
+ *                  `@<hex address> <reg> [name]` (reg: eax ecx edx ebx esp ebp esi edi) puts the int3 on that
+ *                  instruction (any instruction start, not only an entry) and logs the register at each hit: S1's
+ *                  raw-slot sites, the receiver's vptr at its slot load (T1, rawvt-wine)
+ *   FNVTRACE_SITEMAX hits logged per site (default 8); later hits are counted (a sitecount line at each power of 2
+ *                  and every 65536)
  *   FNVTRACE_OUT   the TSV log (default fnvtrace.tsv beside the exe)
  *   FNVTRACE_MAX   stop logging after this many calls (default 1000000)
  *   FNVTRACE_SNAP  bytes snapshotted at ecx and at each pointer-looking stack argument at entry and compared at
@@ -42,7 +47,7 @@
 #define MAXDEPTH 512
 #define NSLOT 10   /* ecx, edx, s0..s7 */
 
-typedef struct { DWORD addr; BYTE orig, api; LONG n; long cap; char name[64]; } Fn;   /* cap -1: FNVTRACE_PERFN */
+typedef struct { DWORD addr; BYTE orig, api, site, reg; LONG n; long cap; char name[64]; } Fn;   /* cap -1: FNVTRACE_PERFN */
 typedef struct {
     DWORD ret, esp, seq, fn;
     DWORD ptr[NSLOT];
@@ -57,6 +62,7 @@ static LONG g_seq, g_calls;
 static long g_max = 1000000;
 static int g_snap = 64, g_deref = 32;
 static long g_perfn;
+static long g_sitemax = 8;
 static DWORD g_caller_lo, g_caller_hi;
 static DWORD g_tls = TLS_OUT_OF_INDEXES;
 static BYTE *g_trap;   /* return trap: one int3 */
@@ -154,6 +160,25 @@ static void on_call(CONTEXT *c, Fn *f) {
     sp[0] = (DWORD)g_trap;
 }
 
+/* a site (`@addr reg`): the register's value, and the 4 bytes behind it when readable (the vptr's first slot) */
+static void on_site(CONTEXT *c, Fn *f) {
+    DWORD r[8] = {c->Eax, c->Ecx, c->Edx, c->Ebx, c->Esp, c->Ebp, c->Esi, c->Edi};
+    static const char *rn[8] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
+    DWORD v = r[f->reg & 7];
+    LONG n = InterlockedIncrement(&f->n);
+    EnterCriticalSection(&g_lock);
+    if (n <= g_sitemax) {
+        DWORD seq = (DWORD)InterlockedIncrement(&g_seq);
+        fprintf(g_out, "site\t%lu\t%lu\t%08lx\t%s\t%s\t%#lx\t", seq, GetCurrentThreadId(), f->addr, f->name,
+                rn[f->reg & 7], v);
+        if (readable(v, 4)) fprintf(g_out, "%#lx\n", *(DWORD *)v); else fprintf(g_out, "-\n");
+    } else if (!(n & (n - 1)) || !(n & 0xFFFF)) {
+        fprintf(g_out, "sitecount\t%08lx\t%s\t%ld\n", f->addr, f->name, n);
+    }
+    fflush(g_out);
+    LeaveCriticalSection(&g_lock);
+}
+
 static void on_ret(CONTEXT *c) {
     Tls *t = tls();
     /* The returning frame is the top one, unless the top one was unwound without returning (longjmp, an
@@ -204,7 +229,7 @@ static LONG CALLBACK handler(EXCEPTION_POINTERS *e) {
         }
         Fn *f = fn_find(at);
         if (!f) return EXCEPTION_CONTINUE_SEARCH;
-        on_call(c, f);
+        if (f->site) on_site(c, f); else on_call(c, f);
         /* run the original first instruction: restore it, single-step, re-arm in the step handler */
         patch(f->addr, f->orig);
         tls()->rearm = f->addr;
@@ -262,10 +287,24 @@ static void load_list(const char *path) {
             if (*after >= '0' && *after <= '9') fn->cap = strtol(after, 0, 0);   /* per-entry FNVTRACE_PERFN */
             continue;
         }
-        a = strtoul(p, &end, 16);
-        if (end == p) continue;
+        int site = -1;
+        if (*p == '@') {   /* a site: @<hex address> <reg> [name] */
+            static const char *rn[8] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
+            a = strtoul(p + 1, &end, 16);
+            if (end == p + 1) continue;
+            while (*end == ' ' || *end == '\t') end++;
+            for (int k = 0; k < 8; k++)
+                if (!strncmp(end, rn[k], 3) && (end[3] == ' ' || end[3] == '\t' || end[3] == '\r' || end[3] == '\n' || !end[3])) {
+                    site = k; end += 3; break;
+                }
+            if (site < 0) continue;
+        } else {
+            a = strtoul(p, &end, 16);
+            if (end == p) continue;
+        }
         Fn *fn = &g_fn[g_nfn++];
         fn->addr = a;
+        if (site >= 0) { fn->site = 1; fn->reg = (BYTE)site; }
         while (*end == ' ' || *end == '\t') end++;
         size_t n = strcspn(end, "\r\n\t ");
         if (!n) snprintf(fn->name, sizeof fn->name, "0x%08lx", a);
@@ -283,6 +322,7 @@ static void start(void) {
     if (GetEnvironmentVariableA("FNVTRACE_SNAP", buf, sizeof buf)) g_snap = (int)strtol(buf, 0, 0) & ~3;
     if (GetEnvironmentVariableA("FNVTRACE_DEREF", buf, sizeof buf)) g_deref = (int)strtol(buf, 0, 0);
     if (GetEnvironmentVariableA("FNVTRACE_PERFN", buf, sizeof buf)) g_perfn = strtol(buf, 0, 0);
+    if (GetEnvironmentVariableA("FNVTRACE_SITEMAX", buf, sizeof buf)) g_sitemax = strtol(buf, 0, 0);
     if (GetEnvironmentVariableA("FNVTRACE_CALLER", buf, sizeof buf)) {
         char *e;
         g_caller_lo = strtoul(buf, &e, 16);

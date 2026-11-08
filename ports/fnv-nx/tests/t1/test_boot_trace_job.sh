@@ -79,6 +79,24 @@ ok "the stub boot did not start: rc 0, NO TRACE under the title naming emu_guest
 ok "... the stale discovery not used, no reference run, nothing published" '! grep -q "| discovery | discovery: 1 calls" $T/nostart.md && ! grep -q "| reference" $T/nostart.md && ! git -C $T/origin.git rev-parse -q --verify "trace/${C:0:12}" > /dev/null'
 run nostartg FAKE_NOSTART=guest
 ok "the guest boot did not start: NO TRACE, rc 0" '[ "$(cat $T/nostartg.rc)" = 0 ] && grep -q "^- NO TRACE: the stub boot of link" $T/nostartg.md'
+# TRACE_SITES (rawvt-wine): the Wine pass only, on S1's site list; the report published to reports/rawvt-wine/<c12>.tsv
+mkdir -p "$Q/tools/lockstep"
+cat > "$Q/tools/lockstep/rawvt_sites.py" <<'PY2'
+import sys
+if sys.argv[1] == "list":
+    open(sys.argv[4], "w").write("@00496800 edx s0\n"); open(sys.argv[5], "w").write("00496800\tedx\t0\tslot load\n"); print("1 sites for 1 rows")
+else:
+    open(sys.argv[6], "w").write("# rawvt-wine\nsrc/a.cpp\t004965d0\t121\t-\t00496800\tedx\tslot load\tsym\t3\t0x10a0000=.?AVX@@\n"); print("1 sites hit, 0 never reached")
+PY2
+( cd "$T/art" && git checkout -q --orphan s1s && git rm -rqf . 2> /dev/null; printf '# unit\nsrc/a.cpp\t004965d0\tthis\t121\t-\t00496800\tedx\tsym\n' > rawvt_wine_sites.tsv &&
+  git add -A && git -c user.name=t -c user.email=t@t commit -qm s && git push -q origin HEAD:refs/heads/recon/s1_rawvt_sites ) > /dev/null 2>&1
+cat > "$Q/tools/lockstep/wine_trace.sh" <<'SH'
+#!/usr/bin/env bash
+echo "list=$(cat "$3") sitemax=${FNVTRACE_SITEMAX:-unset}" > "$4.args"; printf 'site\t1\t1\t00496800\ts0\tedx\t0x10a0000\t0x401000\n' > "$4"; echo "game ended"
+SH
+run sites TRACE_SITES=recon/s1_rawvt_sites:rawvt_wine_sites.tsv
+ok "TRACE_SITES: the Wine pass on the site lines only (no discovery, no guest), FNVTRACE_SITEMAX 8" '[ "$(cat $T/sites.rc)" = 0 ] && grep -q "^list=@00496800 edx s0 sitemax=8" $T/home-sites/boot_trace/sites-wine.tsv.args && ! grep -q "| discovery\|| guest" $T/sites.md'
+ok "TRACE_SITES: the report published to reports/rawvt-wine/<c12>.tsv, said" 'git -C "$T/origin.git" show "reports/rawvt-wine:${C:0:12}.tsv" | grep -q "0x10a0000=.?AVX@@" && grep -q "published reports/rawvt-wine/${C:0:12}.tsv" $T/sites.md'
 python3 -I "$P/tests/s5/boot_trace.py" compare "$T/none.tsv" "$T/none2.tsv" > "$T/real.out" 2>&1; rrc=$?
 ok "boot_trace.py compare, missing guest trace: exit 2, an error line, no traceback" '[ $rrc = 2 ] && grep -q "no guest trace" $T/real.out && ! grep -q Traceback $T/real.out'
 [ $fails = 0 ] && echo "test_boot_trace_job: all ok" || { for f in "$T"/*.log; do echo "== $f"; tail -5 "$f"; done; echo "test_boot_trace_job: $fails failed"; exit 1; }
