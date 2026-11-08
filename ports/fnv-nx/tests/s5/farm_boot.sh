@@ -53,7 +53,8 @@
 #   FARM_PROFILE    a profile dir (Documents/..., AppData/...; tools/lockstep/profile.py) copied to the guest's
 #                   sdmc:/switch/fnv/user before each boot, so the first-run profile is not made (lockstep: same inputs)
 #   FARM_FAULTS     the stub boot's fault table (default tests/s5/known_faults.txt)
-#   EMU_TIMEOUT     seconds per boot (default 1200); SLICE_MS wall-clock ms per thread slice (default 2000);
+#   EMU_TIMEOUT     seconds per boot (default 1200); SLICE_MS the fallback timer for a thread making no host
+#                   call (default 60000; threads switch at host calls, deterministically: emu_guest.py --hc-slice);
 #                   BUDGET instructions per slice (default 0: none - an instruction count makes unicorn hook every
 #                   instruction, about 10x slower; before: default 200000000, as
 #                   S5's local boots: the timeout's SIGTERM waits for the running unicorn slice, and with 6e9 a boot
@@ -76,7 +77,7 @@ fi
 ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
 C12=${COMMIT:0:12}
 BOOTS=${FARM_BOOTS:-raw slots stub}
-EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-0}; SLICE_MS=${SLICE_MS:-2000}
+EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-0}; SLICE_MS=${SLICE_MS:-60000}
 NULLDEV_ARGS=(); [ "${FNVNX_STUB_NULLDEV:-0}" = 1 ] && NULLDEV_ARGS=(--stub-nulldev)
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)

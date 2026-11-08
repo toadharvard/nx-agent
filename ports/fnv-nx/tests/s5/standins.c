@@ -56,6 +56,20 @@ void fnv_standin_00aa3cc0(void *self, uint32_t block, uint32_t pool, const char 
     mm[0x129] = 1;
 }
 
+/* __fnvnx_cthis_00aa3880 (the MemoryManager constructor 0x00aa3880 with `this` returned), called by boot.cpp's
+ * construct_memory_manager() before the game's initializers. The game's own initializer 0x00fb66a0 (slot 7 of the exe's
+ * _xc table, before the Setting initializers from slot 57) runs the same constructor on the same object, as the exe
+ * does, once. Constructing twice was harmless while VirtualAlloc reservations failed (no pool existed), but with the
+ * host VM service the first run builds real pools (0x3000000 +0x600000 ...) and the second run, on a live manager,
+ * clears the pool tables (0x00aa6840) and zeroes [mm+0] before it frees the first run's holder 0x3000fe8 (the options
+ * of 0x00866690) with Deallocate 0x00aa4060: with [mm+0] == 0 and no table entry that goes to CRT free, which wrote
+ * into the guest's .text (30 more initializers skipped). So the early construction is redundant (initializers 0..6 do
+ * not allocate; anything the GCC initializers allocate before it goes through the CRT path, [mm+0] == 0, as in the
+ * exe's pre-construction window): skip it and leave the object to the game's initializer. Fix: delete
+ * construct_memory_manager() from boot.cpp (S5), then this stand-in and its table line. */
+void *fnv_standin_cthis_00aa3880(void *self) __asm__("__fnvnx_cthis_00aa3880");
+void *fnv_standin_cthis_00aa3880(void *self) { return self; }
+
 /* 0x00406d50 (dst, size, src): the exe's body is strcat_s (0x00ec6bd2) of src onto dst[size]; 0x00406d30 before it is
  * strcpy_s (0x00ec65a6). WinMain builds each INI path as strcpy_s(buf, 0x104, <My Games dir>) then
  * strcat_s(buf, 0x104, "FalloutPrefs.ini"). The decomp declares this one `FUN_00406d50(...)` and defines it nowhere,

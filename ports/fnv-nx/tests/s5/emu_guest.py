@@ -331,7 +331,8 @@ class Emu:
     def rs(self, addr):
         out = bytearray()
         while True:
-            b = self.uc.mem_read(addr + len(out), 64)
+            a = addr + len(out)
+            b = self.uc.mem_read(a, min(64, 0x1000 - (a & 0xFFF)))   # never past the page: the next may be unmapped
             i = b.find(0)
             if i >= 0:
                 return (out + b[:i]).decode(errors="surrogateescape")   # the guest may pass any bytes
@@ -370,6 +371,13 @@ class Emu:
             return
         uc.reg_write(UC_ARM64_REG_X0, res & U64)
         uc.reg_write(UC_ARM64_REG_PC, uc.reg_read(UC_ARM64_REG_LR))
+        # Deterministic preemption and stops: only here, at a host call's return (block() saves an exact context).
+        # A wall-clock limit or SIGTERM ends the run at the next host call; while other threads are ready, the thread
+        # yields after --hc-slice host calls (a count, so the same run switches at the same point every time).
+        if getattr(self, "stop_signal", None) or (
+                self.calls - getattr(self, "slice_calls0", 0) >= getattr(self, "hc_slice", 2000)
+                and any(x is not self.cur and x.state == "ready" for x in self.threads.values())):
+            self.block(("yield",), result=res & U64, stop=True)
 
     def block(self, wait, result=0, stop=True):
         t = self.cur
@@ -2594,16 +2602,12 @@ class Emu:
         uc.reg_write(UC_ARM64_REG_TPIDR_EL0, 0xDEAD0000)
         main.ctx, main.resume_pc, main.state, main.result = uc.context_save(), self.base, "ready", HOST_PAGE
         budget = getattr(self, "budget", 0)
-        slice_us = int(getattr(self, "slice_ms", 2000)) * 1000
+        slice_us = int(getattr(self, "slice_ms", 60000)) * 1000   # the fallback timer, see emu_start below
         import signal
         self.stop_signal = None
 
         def on_signal(sig, _frame):   # SIGTERM (timeout) or SIGALRM (--wall-seconds): end the run with its report
-            self.stop_signal = signal.Signals(sig).name
-            try:
-                uc.emu_stop()
-            except UcError:
-                pass
+            self.stop_signal = signal.Signals(sig).name   # taken at the next host call (on_code), or the slice's end
         for sig in (signal.SIGTERM, signal.SIGALRM):
             signal.signal(sig, on_signal)
         if getattr(self, "wall_seconds", 0):
@@ -2626,10 +2630,26 @@ class Emu:
             uc.reg_write(UC_ARM64_REG_X0, t.result & U64)
             t.state = "running"
             try:
-                # a time slice (timeout, a timer thread calls emu_stop): count= makes unicorn hook every
-                # instruction, about 10x slower (the INI read took more than 540 s with count=2e8, 46 s for the
-                # whole boot to past renderer-init with a timeout). count only when --budget is given explicitly.
-                uc.emu_start(t.resume_pc, RETURN_ADDR, timeout=slice_us, count=budget)
+                # Slices. count= makes unicorn hook every instruction (about 10x slower: the INI read took more than
+                # 540 s with count=2e8, the whole boot past renderer-init 46 s with a timeout), but a timer-stopped
+                # slice ends at a wall-clock-dependent instruction, so with another thread ready the switch point
+                # (and the boot) differs run to run (3 identical D26 boots: 2 stops, 1 deadlock). So: another thread
+                # ready -> an instruction count (deterministic switches); this thread alone -> a time slice (resuming
+                # the same thread is the same run wherever the stop lands).
+                # (A timer-stopped slice was tried too: unicorn's emu_stop from the timer thread can leave the PC at
+                # the start of the block, so resuming re-ran instructions - 4 identical boots, 3 outcomes. Preemption
+                # is at host calls now, see on_code; the timer is only a fallback for a guest that spins without
+                # making any.)
+                self.slice_calls0 = self.calls
+                if budget:
+                    uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
+                else:
+                    uc.emu_start(t.resume_pc, RETURN_ADDR, timeout=slice_us)
+                    if self.cur is t and self.calls == self.slice_calls0 and not self.stop_signal:
+                        self.timer_slices = getattr(self, "timer_slices", 0) + 1
+                        if self.timer_slices == 1:
+                            print(f"   scheduler: thread {t.tid} ran {slice_us // 1000} ms without a host call; the "
+                                  f"fallback timer stopped it (from here the run may not be deterministic)")
             except UcError as e:
                 if getattr(self, "collect_traps", False) and self.collect_trap():
                     t.result = uc.reg_read(UC_ARM64_REG_X0)
@@ -2714,7 +2734,10 @@ def main(argv):
     ap.add_argument("--budget", type=int, default=0,
                     help="instructions per scheduling slice (0, the default: none; slices are --slice-ms long. An "
                          "instruction count makes unicorn hook every instruction, about 10x slower)")
-    ap.add_argument("--slice-ms", type=int, default=2000, help="wall-clock length of a scheduling slice (ms)")
+    ap.add_argument("--slice-ms", type=int, default=60000, help="fallback timer (ms) for a thread that makes no host "
+                    "call; threads switch at host calls (--hc-slice)")
+    ap.add_argument("--hc-slice", type=int, default=2000,
+                    help="host calls per slice while other threads are ready (deterministic switch points)")
     ap.add_argument("--core3", action="store_true", help="the host's core 3 opt-in (fnvnx.ini core3=1)")
     ap.add_argument("--no-boost", action="store_true", help="the host's boost_loading=0")
     ap.add_argument("--stub-faults", metavar="FILE", help="functions (names or 0xORIG, one per line) that return 0 "
@@ -2778,7 +2801,7 @@ def main(argv):
     emu = Emu(a.nso, root, load_base=a.load_base, game=a.game)
     if a.vm_service:
         emu.vm_service = True
-    emu.budget, emu.slice_ms = a.budget, a.slice_ms
+    emu.budget, emu.slice_ms, emu.hc_slice = a.budget, a.slice_ms, a.hc_slice
     emu.core3, emu.boost_loading = a.core3, not a.no_boost
     if a.elf:
         emu.load_symbols(a.elf)

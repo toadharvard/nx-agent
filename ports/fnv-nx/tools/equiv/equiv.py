@@ -88,6 +88,7 @@ CLASSES = {
     'ENUM2': 'neutral',        # enum with enumerators >= 2^31: MSVC's int base written out, (int) on those literals
     'VA2': 'neutral',          # va_arg(ap, Enum) -> (Enum)va_arg(ap, int): the int MSVC read
     'VLIT1': 'platform',       # a vptr store printed as a string literal -> the vftable address the recipe binds it to
+    'VLIT2': 'platform',       # VLIT1 by the exe's vftables (private vlit.json): slot 0 at the store's COL offset, the class of the function's other vptrs
     'CSX2': 'neutral',          # the decomp's 28-byte critical sections keep their 28 bytes (D15 reopened, J-0067)
     'STAND1': 'platform',       # drops untagged stand-ins bound to a tagged definition's address (one function per address)
     'STAND2': 'platform',       # STAND1 for an address another unit defines, in units MSVC compiled without auto-inlining
@@ -141,7 +142,9 @@ CLASSES = {
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
     'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor
     'D22': 'neutral',          # FNVNX_D22 / FNVNX_D22_DROP: GCC declares the slot-0 virtual destructor, MSVC keeps the original declaration
+    'RAWVT1': 'neutral',       # FNVNX_D26_SLOT(k) (k under MSVC): a raw exe slot index on `this`, k + 1 for GCC's minus-one vtables
     'DTORB1': 'neutral',       # FNVNX_DTORB_BEGIN/END (empty under MSVC): a destructor stand-in calls the address its ??1 is bound to
+    'STAND7': 'neutral',       # #ifdef _MSC_VER around an inline out-of-class template member stand-in bound elsewhere (MSVC keeps it)
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
 PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names', 'POP2': 'pop_chains',
@@ -150,7 +153,7 @@ PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names', 'POP2'
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
 POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
-              'pop_chains': 'POP2', 'this_members': 'THIS2'}
+              'pop_chains': 'POP2', 'this_members': 'THIS2', 'd22_write_applied': 'D22'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one

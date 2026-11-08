@@ -109,6 +109,7 @@ class Conv:
             self.x86_ret = 'edx:eax'
         else:
             self.x86_ret = 'eax'
+        self._avals = vals
         try:
             self.a64 = abi2.a64(vals)
             self.a64_ret = abi2.a64_ret(ret)
@@ -118,6 +119,21 @@ class Conv:
             for _, cont, _, _ in ch:
                 if cont[0] == 'mem' and cont[1][0] != 'x':
                     raise Unsupported('by-reference aggregate passed on the stack')
+
+    def bridged_view(self, drop):
+        """(difffuzz-20, r5-sretbridge) The convention the native side delivers to the stub behind an `sret-explicit`
+        bridge (tools/link abi2: the reference passes the result buffer as an explicit pointer parameter `drop`, the
+        definition takes it as the hidden result): the bridge consumes that parameter, so every later one sits one
+        slot earlier. Returns a copy whose `vals` and `a64` omit `drop` (decode_a64 then finds the others where the
+        bridge put them); None when `drop` is not a parameter."""
+        import copy
+        keep = [i for i, v in enumerate(self.vals) if v.label != drop]
+        if len(keep) == len(self.vals):
+            return None
+        out = copy.copy(self)
+        out.vals = [self.vals[i] for i in keep]
+        out.a64 = abi2.a64([self._avals[i] for i in keep])
+        return out
 
     def describe(self):
         d = '%s -> %s' % (', '.join(map(repr, self.vals)), repr(self.ret) if self.ret else 'void')
