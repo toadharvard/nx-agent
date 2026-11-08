@@ -94,6 +94,7 @@ CLASSES = {
     'STAND5': 'platform',       # STAND2 for an in-class member body whose MSVC name the unit binds to another unit's address
     'STAND4': 'platform',       # STAND1/2 for a static free stand-in: the definition becomes an extern declaration of the bound name
     'STAND6': 'platform',       # STAND2 for a __declspec(noinline) stand-in, in any unit (MSVC never inlined it)
+    'ADDRFN1': 'platform',     # a code address cast to void* takes the address symbol __fnv_<a> (a GCC asm label)
     'POP2': 'neutral',          # POST hook: pop-mismatch chains, the words a getter leaves move to the call that pops them
     'THIS2': 'neutral',         # POST hook: a caller that hands its ecx to a thiscall callee calls it on its object
     'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static);

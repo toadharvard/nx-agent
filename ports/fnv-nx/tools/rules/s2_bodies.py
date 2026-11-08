@@ -1107,7 +1107,33 @@ def pop_chains(out_root, stats, files=None):
         stats['POP2-SKIP-' + re.sub(r'\W+', '-', k).strip('-')] += v
 
 
-RULES = [r_stand_in_class_bodies, r_harness_internal, r_noinline_stand_ins]
+# ADDRFN1 - a code address the decomp writes as an integer (`readHandler = reinterpret_cast<void*>(0x00aff9d0);`,
+# BSFile::SetEndianSwap and the archive's handler pairs): natively the raw exe address is stored and later called -
+# the stub boot's first WinMain-path fault (link d1ed15e7: the BSA archive constructor 0x00af7eb0 calls 0x00aff9d0).
+# When some unit defines the address (units.json `functions`), the cast takes the address symbol instead, which the
+# link binds to the native definition: a GCC block-scope asm label in a statement expression, so line numbers stay
+# and nothing at file scope changes. Only .text addresses (0x00401000 .. 0x00fdf000) cast to `void*`.
+ADDRFN_CAST = re.compile(r'reinterpret_cast<\s*void\s*\*\s*>\(\s*0x(00[0-9a-fA-F]{6})\s*\)')
+
+
+def r_code_address_casts(path, text, stats):
+    """ADDRFN1: `reinterpret_cast<void*>(0x00<a>)` of a defined code address -> the address symbol __fnv_<a>."""
+    if 'reinterpret_cast' not in text or not path.endswith(('.cpp', '.h', '.inl')):
+        return text
+    defined = s1_compile._all_unit_functions(path)
+
+    def sub(m):
+        a = int(m.group(1), 16)
+        if not (0x00401000 <= a < 0x00fdf000) or a not in defined:
+            return m.group(0)
+        stats['ADDRFN1'] += 1
+        sym = '__fnv_%08x' % a
+        return ('({ extern char fnvnx_addrfn_%08x[] __asm__("%s"); (void*)fnvnx_addrfn_%08x; })'
+                ' /* fnv-nx ADDRFN1 */' % (a, sym, a))
+    return ADDRFN_CAST.sub(sub, text)
+
+
+RULES = [r_stand_in_class_bodies, r_harness_internal, r_noinline_stand_ins, r_code_address_casts]
 POST = [pop_chains]
 
 # ---------------------------------------------------------------------------------------------------------- THIS2
