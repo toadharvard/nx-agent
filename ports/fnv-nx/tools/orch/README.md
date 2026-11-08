@@ -43,5 +43,7 @@ These come from the owner and bind every orchestrator session, including one tha
 11. **Ratchet: what works stays working.** Every working item is recorded per metric with the head that first
     reached it: identical functions (eqa), passing fuzz functions, boot milestones and skips, passing shader
     programs, trap and undefined counts, D25 counts. Every farm report checks the newest head against that ledger.
-    A regression makes the report's first line `- REGRESSION`. The commit that caused it is fixed or reverted
-    before the next merge of the same area. T1 owns tools/farm/ratchet.py.
+    A regression makes the report's first line `- REGRESSION`. The commit that caused it is fixed forward before the next merge of the same
+    area. T1 owns tools/farm/ratchet.py.
+12. **Fix forward, no rollbacks.** A regression is fixed forward by its owner, ahead of other work. Reverting needs the
+    owner's explicit approval (owner, 2026-11-08: "Не надо ниче роллбекать"; "Какой откат? Ты же фикс написал").
