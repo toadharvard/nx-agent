@@ -13,3 +13,8 @@
     hard count.
 * **D26** (wip/d26 = 686c576): waiting for try1of1's full build + stub boot and the fuzz pass. The compile fixes are
   verified by a full census, 2,978 / 2,978 clean (s1-rules-005 on wip/d26).
+* **d25-sg, part 2** (f882f1d): pinned read-only tables now carry their DIR32 relocations. EQ's 91 "bin-at-str"
+  rows were vtables and pointer tables pinned as zeros. EQ's recount over all 2,988 units with the owner's exe:
+  **pinned literals differing from the exe 3,278 (head) -> 3,179 (shift) -> 72 (relocations), in 57 units;
+  overlaps 0, bin-at-str 0.** Left: 62 binary vs binary and 10 string literals over exe binary bytes (list
+  requested).
