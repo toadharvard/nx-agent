@@ -38,4 +38,17 @@ ok "an object that disappeared after compiling is named" 'grep -q "src/e.cpp: co
 ok "a unit the run never reached is named" 'grep -q "src/f.cpp: never compiled" "$OUT/src_f.cpp.log"'
 ok "objects.tsv: d ok, the rest fail" '[ "$(grep -c $'"'"'\tok$'"'"' "$OUT/objects.tsv")" = 1 ] && [ "$(grep -c $'"'"'\tfail$'"'"' "$OUT/objects.tsv")" = 5 ]'
 ok "every failed unit's log has a reason" '( for u in a b c e f; do grep -q "^compile.sh: src/$u.cpp: " "$OUT/src_$u.cpp.log" || exit 1; done )'
+# the flags stamp changes while the pipeline asks for one unit: every unit that had an object is rebuilt (try1of1:
+# 493 asked for, the other 2,485 objects wiped and left unbuilt)
+W=$T/wipe; mkdir -p "$W/tree/build" "$W/obj"
+printf '{"units": [{"source": "src/a.cpp"}, {"source": "src/b.cpp"}, {"source": "src/c.cpp"}, {"source": "src/d.cpp"}]}\n' >"$W/tree/build/units.json"
+for u in a b c; do echo o >"$W/obj/src_$u.cpp.o"; done; echo old >"$W/obj/.objstamp"; echo src/a.cpp >"$W/asked.list"
+sed -n '/^if \[ "\$(cat "\$OUT\/.objstamp" 2>\/dev\/null)" != "\$objstamp" \]; then$/,/^fi$/p' "$P/tools/link/compile.sh" >"$W/stamp.sh"
+ok "the stamp block was found" 'grep -q "wiped.list" "$W/stamp.sh"'
+( TREE=$W/tree OUT=$W/obj LIST=$W/asked.list objstamp=new; . "$W/stamp.sh"; cat "$LIST" ) >"$W/list.after" 2>"$W/err"
+ok "stamp change: the work list holds every unit that had an object" '[ "$(cat "$W/list.after" | tr "\n" " ")" = "src/a.cpp src/b.cpp src/c.cpp " ]'
+ok "stamp change: objects removed, new stamp, said on stderr" '[ -z "$(ls "$W/obj"/*.o 2>/dev/null)" ] && [ "$(cat "$W/obj/.objstamp")" = new ] && grep -q "3 had one, 1 were asked for" "$W/err"'
+echo o >"$W/obj/src_a.cpp.o"
+( TREE=$W/tree OUT=$W/obj LIST=$W/asked.list objstamp=new; . "$W/stamp.sh"; cat "$LIST" ) >"$W/list.same" 2>/dev/null
+ok "same stamp: the list as given, objects kept" '[ "$(cat "$W/list.same")" = src/a.cpp ] && [ -f "$W/obj/src_a.cpp.o" ]'
 [ $fails = 0 ] && echo "test_compile_reasons: all ok" || { echo "test_compile_reasons: $fails failed"; exit 1; }
