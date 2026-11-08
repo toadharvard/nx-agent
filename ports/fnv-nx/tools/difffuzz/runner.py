@@ -441,13 +441,22 @@ def _is_arg_block(rx, i):
     return None not in rets and len(rets) == 2 and exeempty.arg_blocks(rets) == [(0, 2)]
 
 
+def with_static_pairs(agg_ptrs, spairs):
+    """compare_args' same-object ranges (oracle address, native address, size): the aggregate parameters, plus every
+    paired function-local static (engine.static_pairs rows are (native, oracle, size))."""
+    return list(agg_ptrs or ()) + [(oa, na, n) for na, oa, n in (spairs or ())]
+
+
 def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
             garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
-            agg_ptrs=None):
+            agg_ptrs=None, spairs=None):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
     the planted vftables; a differing call to neither is an indirect call through memory the case did not plant
     (marked vcall='unplanted': an oracle-model gap, classify.py oracle-vcall)."""
     ex, ea = rx.error, ra.error
+    # (difffuzz-20, static-addr-arg) the address of a function-local static: the oracle's image address on one side,
+    # the unit's paired `_ZZ..` object at the same offset on the other (engine.static_pairs)
+    sptrs = with_static_pairs(agg_ptrs, spairs)
     if ex == 'timeout' or ea == 'timeout':
         return None
     # a fault on one machine is compared after the calls both made before it: a differing call earlier in the
@@ -577,14 +586,14 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
                 skip = set(skip) | {v.label for v in cv.vals if v.label != 'this'}
             d = compare_args(cv, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                              garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                             (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret, narrow)
+                             (nrvo, sret) if nrvo is not None else None, sptrs, sret, narrow)
             if d and not d.get('soft') and cx.target >= 0:
                 ths = {l for l, sp, _o, _s in cv.x86 if sp == 'ecx' and l in skip}
                 cv2 = _thisless(cv, ths) if ths else None
                 if cv2 is not None and compare_args(
                         cv2, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                         garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                        (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret, narrow) is None:
+                        (nrvo, sret) if nrvo is not None else None, sptrs, sret, narrow) is None:
                     d = None     # the registers at the stub are the exe's layout: the unit's call went through the adapter
             if d and (i in swapped or i + 1 in swapped):
                 # a swapped pair: the calls at i and i + 1 are different callees on the two machines, so compare
@@ -592,7 +601,7 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
                 cx2, ca2 = rx.calls[i], ra.calls[i + 1 if i + 1 in swapped else i - 1]
                 d = compare_args(cv, cx2, ca2, readers[0] if readers else None, readers[1] if readers else None,
                                  skip, garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                                 (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret)
+                                 (nrvo, sret) if nrvo is not None else None, sptrs, sret)
             if d:
                 d.update(kind='call-args', index=i, target=_hex(cx.target), callee=cv.name)
                 if d.get('soft'):
@@ -1524,6 +1533,7 @@ class Pair:
             self.ae.reset(w)
         self.xe.pop_override = self.pops
         self.ae.static_pairs = getattr(self.target, 'static_pairs', ())
+        self.ae.static_nguards = getattr(self.target, 'static_nguards', ())
         self.ae.callee_conv = getattr(self.target.callee_info, 'conv', None)
         self.ae.iat_names = getattr(self.target, 'iat_names', {}) or {}
         self.ae.caller_conv = getattr(self.target.callee_info, 'caller_conv', None)
@@ -1540,7 +1550,7 @@ class Pair:
                            self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()),
                            self._vptr_words(), getattr(self.target.callee_info, 'caller_conv', None),
                            [(xa, placement[l], sz) for l, (xa, sz) in getattr(rx, 'agg_addr', {}).items()
-                            if l in placement])
+                            if l in placement], getattr(self.target, 'static_pairs', ()))
         d = cmp_(ra, w)
         if d is not None and not d.get('soft') and (d['kind'] == 'call-target' or d.get('after_perm')):
             got = self._order_probe(case, rx, ra, w, placement, max_steps, cmp_)
