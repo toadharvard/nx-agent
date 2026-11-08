@@ -5633,16 +5633,20 @@ def d22_reach(masked, classes):
         return f
     return reach
 
-def _d22_list():
-    """{class key: set(members)} from every d22.json under FNVNX_RECON (or the file FNVNX_D22); cached on prepare
-    (equiv.py loads the stream modules twice)"""
-    st = prepare.__dict__.get('_fnvnx_d22')
-    if st is not None: return st
+def _d22_files():
     files = []
     if os.environ.get('FNVNX_D22') and os.path.isfile(os.environ['FNVNX_D22']): files.append(os.environ['FNVNX_D22'])
     top = os.environ.get('FNVNX_RECON')
     if top and os.path.isdir(top):
         files += sorted(os.path.join(dp, 'd22.json') for dp, _, ns in os.walk(top) if 'd22.json' in ns)
+    return files
+
+def _d22_list():
+    """{class key: set(members)} from every d22.json under FNVNX_RECON (or the file FNVNX_D22); cached on prepare
+    (equiv.py loads the stream modules twice)"""
+    st = prepare.__dict__.get('_fnvnx_d22')
+    if st is not None: return st
+    files = _d22_files()
     st = collections.defaultdict(set)
     import json
     for f in files:
@@ -5709,7 +5713,12 @@ def _d22_callonly(masked, c, unit=True):
     if c['dtor'] and re.search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~\s*%s\s*\(' % ((re.escape(c['qual'][-1]),) * 2),
                                masked):
         return False                                     # `~C();` defined in the file: a real destructor
-    if not c['first'][2] or not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]): return False
+    if not c['first'][2]: return False
+    if not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]):
+        # a numbered sequence `P_00(), P_01(), ...` (InitHolder 0x00aa2020's FUN_00aa2020_Impl, S2-bodies)
+        m0 = re.match(r'^(\w*?_)0+$', c['first'][2])
+        v1 = c['virtuals'][1][2] or ''
+        if not (m0 and re.match(r'^%s0*1$' % re.escape(m0.group(1)), v1)): return False
     # an empty inline body (`virtual void f00() {}`) or one that only returns a constant (`{ return 0; }`) is a
     # placeholder too, not a definition (EQ, link 0540aff0: tesobjectrefr.cpp's FUN_00567f40_class, 19 such slots;
     # S2-bodies' PHSLOT1 makes the empty ones declarations as well)
@@ -5812,6 +5821,7 @@ def r_vtable_dtor_slot(path, text, stats):
     calls, masked_nc, needs = {}, {}, collections.defaultdict(list)
     reach = d22_reach(masked, classes)
     dtor_drops = {}                             # first-virtual start -> span of the class's `~C();` (dropped)
+    applied = {}                                # edit start -> (class key, member, kind): build/d22_applied.tsv
     def statement_calls(ph):
         # `EXPR->ph(flags);` as a statement: the deleting-destructor call D26 turns into FNVNX_D22_CALL
         if ph not in calls:
@@ -5843,6 +5853,7 @@ def r_vtable_dtor_slot(path, text, stats):
                 stats['D22-USED'] += 1; continue
             needs[ph].append(len(edits))
         edits.append((c['first'][0], c['first'][1], 'FNVNX_D22(%s, %s)' % (c['qual'][-1], c['first'][3])))
+        applied[c['first'][0]] = (key, c['first'][2], 'callonly' if callonly else 'listed')
         if callonly and c['dtor']: dtor_drops[c['first'][0]] = c['dtor_decl']
         done[c['qual'][-1] + ('<>' if c['template'] else '')] = c['first'][2]
         stats['D22-CALLONLY' if callonly else 'D22'] += 1
@@ -5890,15 +5901,44 @@ def r_vtable_dtor_slot(path, text, stats):
                     if not d22_placeholder(masked, c['qual'][-1], v, vdecls[v[2]], reach(c['qual'][-1])):
                         stats['D22-USED'] += 1; continue
                     edits.append((v[0], v[1], 'FNVNX_D22_DROP(%s)' % v[3]))
+                    applied[v[0]] = ('::'.join(c['qual']) + ('<>' if c['template'] else ''), v[2], 'derived:' + b)
                     stats['D22-DERIVED'] += 1
                     if mine not in done: done[mine] = mem; changed = True
     if not edits: return text
     out, pos = [], 0
+    rec = prepare.__dict__.setdefault('_fnvnx_d22_applied', [])
+    i = path.replace('\\', '/').rfind('/src/')
+    rel = path.replace('\\', '/')[i + 1:] if i >= 0 else os.path.basename(path)
     for a, b, rep in sorted(edits):
         if a < pos: continue
+        if a in applied and rep.startswith(('FNVNX_D22(', 'FNVNX_D22_DROP(')):
+            rec.append((rel,) + applied[a])
         out.append(text[pos:a]); out.append(rep + ' /* fnv-nx D22 */'); pos = b
     out.append(text[pos:])
     return ''.join(out)
+
+def d22_write_applied(out_root, stats, files):
+    """<out>/build/d22_applied.tsv: every class the D22 / D26 rule converted, as prepare decided (S2-bodies: the link
+    rebuilds minus-one tables from it instead of re-deriving the decisions from the objects). Columns: file (tree
+    path), class (qualified; T<> for a template), member (the slot-0 placeholder, or the dropped re-declaration),
+    kind (listed = d22.json, callonly = D26 (b), derived:<base> = a dropped re-declaration), vftables (d22.json's,
+    for a listed class; empty otherwise: a call-only declaration names no exe vftable). Names and addresses only."""
+    rows = prepare.__dict__.get('_fnvnx_d22_applied') or []
+    lst = {}
+    import json
+    for f in _d22_files():
+        try: d = json.load(open(f))
+        except (OSError, ValueError): continue
+        for c in d.get('classes', ()): lst.setdefault(c['class'], set()).update(c.get('vftables', ()))
+    os.makedirs(os.path.join(out_root, 'build'), exist_ok=True)
+    with open(os.path.join(out_root, 'build', 'd22_applied.tsv'), 'w') as f:
+        f.write('# fnvnx-d22-applied/1\tfile\tclass\tmember\tkind\tvftables\n')
+        for r in sorted(set(rows)):
+            vt = ','.join(sorted(lst.get(r[1], ()))) if r[3] == 'listed' else ''
+            f.write('%s\t%s\t%s\t%s\t%s\n' % (r + (vt,)))
+    stats['D22-APPLIED'] += 0
+
+POST.append(d22_write_applied)
 
 # ---------------------------------------------------------------------------------------------------------- PHSLOT1
 #

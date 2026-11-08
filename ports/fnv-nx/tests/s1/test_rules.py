@@ -1901,6 +1901,16 @@ check('D26 COM: a class with a __stdcall virtual is not converted', s1.r_vtable_
       run(s1.r_vtable_dtor_slot, _CO.replace('v1()', 'AddRef()')) +
       run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'IDirect3D9')), [], ['FNVNX_D22'])
 check('D26 COM: counted D22-COM', str(dict(_comst)), ["'D22-COM': 1"])
+import tempfile as _tempfile
+prepare.__dict__['_fnvnx_d22_applied'] = []
+run(s1.r_vtable_dtor_slot, _CO, '/t/src/a/heap.cpp')
+_td = _tempfile.mkdtemp(); s1.d22_write_applied(_td, _collections.Counter(), _collections.Counter())
+check('D26 build/d22_applied.tsv lists what prepare converted', open(os.path.join(_td, 'build', 'd22_applied.tsv')).read(),
+      ['src/a/heap.cpp\tHeapStandIn\tv0\tcallonly\t\n'])
+check('D26 call-only: a numbered sequence P_00, P_01 is a placeholder; P_00 with another second name is not',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'Impl_00()').replace('v1()', 'Impl_01()')) + '|' +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'Impl_00()')), ['FNVNX_D22(HeapStandIn, virtual void Impl_00();)'],
+      ['FNVNX_D22(HeapStandIn, virtual void Impl_00();) /* fnv-nx D22 */\n    virtual void v1();'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
