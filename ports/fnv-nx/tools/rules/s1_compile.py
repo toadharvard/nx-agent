@@ -4218,6 +4218,95 @@ def _vlit_index(path):
     _VLIT = (defs, sg)
     return _VLIT
 
+# VLIT2: VLIT1 by the exe's vftables (S1-rules, from S2-bodies: TESObjectARMA's constructor 0x00511f60 stores its
+# secondary vptr at +0x68 as `" rH"`, the bytes of 0x00487220, slot 0 of 0x0102a28c; the unit has many literals, so
+# VLIT1 left it to VLIT1-LIST and the store could not reach the minus-one copy). The table is exe-derived and
+# private: tools/rules/_vlit_vftables.py writes vlit.json (fnvnx-vlit/1: slot 0 -> [(vftable, COL offset)], vftable ->
+# RTTI class) to fnv-nx-build recon/vlit_vftables, read from FNVNX_RECON (or the file FNVNX_VLIT). For each 1-3
+# character literal stored with `=` (also through a `(void*)` / `(const char*)` cast) whose bytes read as a decompiled
+# function's address: the store offset comes from the left side (`(char*)this + N`, else 0 when it stores through
+# `this`). The literal becomes `(char*)&DAT_<V>` when exactly one vftable V has that slot 0 at that offset. When
+# several have it, V is the one whose class is the class of the other vftables (`DAT_<hex>`) the same function stores.
+# Without the table VLIT1 is unchanged; the stores VLIT2 cannot decide are VLIT2-LIST.
+VLIT_STORE2 = re.compile(r'(=\s*)((?:\((?:const\s+)?(?:void|char)\s*\*\s*\)\s*)?)"([^"\\\n]{1,3})"(\s*;)')
+VLIT_THIS_OFF = re.compile(r'\bthis\s*\)?\s*\+\s*(0[xX][0-9a-fA-F]+|\d+)')
+
+def _vlit_table():
+    st = prepare.__dict__.get('_fnvnx_vlit')
+    if st is not None: return st
+    import json
+    files = []
+    if os.environ.get('FNVNX_VLIT') and os.path.isfile(os.environ['FNVNX_VLIT']): files.append(os.environ['FNVNX_VLIT'])
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'vlit.json') for dp, _, ns in os.walk(top) if 'vlit.json' in ns)
+    st = {}
+    for f in files:
+        try: d = json.load(open(f))
+        except (OSError, ValueError): continue
+        if d.get('format') == 'fnvnx-vlit/1':
+            st = d; break
+    prepare.__dict__['_fnvnx_vlit'] = st
+    return st
+
+def _vlit_exe_stores(path, text, stats, defs):
+    """VLIT2 (above): [(match, vftable address)] for the stores the exe's vftables decide"""
+    tab = _vlit_table()
+    if not tab: return []
+    out, spans = [], None
+    for m in VLIT_STORE2.finditer(text):
+        a = int.from_bytes((m.group(3).encode('latin-1', 'replace') + b'\0' * 4)[:4], 'little')
+        if not 0x00401000 <= a < 0x00fde578 or a not in defs: continue
+        ls = max(text.rfind(';', 0, m.start()), text.rfind('{', 0, m.start()), text.rfind('}', 0, m.start())) + 1
+        lv = text[ls:m.start()]
+        om = VLIT_THIS_OFF.search(lv)
+        off = int(om.group(1), 0) if om else (0 if re.search(r'\bthis\b', lv) else None)
+        cands = [c for c in tab.get('slot0', {}).get('%08x' % a, ()) if off is None or c[1] == off]
+        if len(cands) > 1:
+            if spans is None: spans = prepare.scope_map(text)
+            outer = [sp for sp in spans if sp[0] < m.start() < sp[1] and sp[2] not in ('namespace', 'extern')]
+            body = text[outer[0][0]:outer[0][1]] if outer else ''
+            cls = {tab.get('class', {}).get(h.lower()) for h in re.findall(r'\bDAT_([0-9a-fA-F]{8})\b', body)} - {None}
+            cands = [c for c in cands if tab.get('class', {}).get(c[0]) in cls]
+        if len(cands) != 1:
+            stats['VLIT2-LIST'] += 1; continue
+        out.append((m, int(cands[0][0], 16)))
+    return out
+
+def _vlit_apply(path, text, stats, hits):
+    """VLIT2's edits: each literal -> `(char*)&DAT_<V>` (its cast kept), `extern "C" char DAT_<V>;` in front of the
+    outermost function or class around its first store, a binding row for the link (VLIT1_BINDS). All positions are
+    in the original text; the edits apply from the end."""
+    root, _ = prepare._units_json(path)
+    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
+    spans = prepare.scope_map(masked)
+    edits, first = [], {}
+    for m, v in hits:
+        name = 'DAT_%08x' % v
+        edits.append((m.start(), m.end(), '%s%s(char*)&fnvnx_vlit_%08x%s /* fnv-nx VLIT2: "%s" */' % (
+            m.group(1), m.group(2), v, m.group(4), m.group(3).replace('*/', '* /'))))
+        first[name] = min(first.get(name, m.start()), m.start())
+        stats['VLIT2'] += 1
+        if root: VLIT1_BINDS.add((os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/'), '_' + name,
+                                  '0x%08x' % v))
+    for name, pos in first.items():
+        # its own identifier for the symbol DAT_<V> (asm label): the file may declare DAT_<V> itself, with another
+        # type or in another scope (blk_004c0000_od.cpp `int DAT_01020944`)
+        outer = [sp for sp in spans if sp[0] < pos < sp[1] and sp[2] not in ('namespace', 'extern')]
+        at = _decl_start(masked, outer[0][0]) if outer else 0
+        edits.append((at, at, 'extern "C" char fnvnx_vlit_%s __asm__("%s"); /* fnv-nx VLIT2 */ ' % (name[4:], name)))
+    for a, b, r in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+        text = text[:a] + r + text[b:]
+    return text
+
+def r_vptr_literals_exe(path, text, stats):
+    """VLIT2: a 1-3 character string literal stored as a vptr -> the exe vftable with that slot 0 at the store's
+    offset (vlit.json; see above). Runs before VLIT1, which sees only what is left."""
+    if '"' not in text or not _vlit_table(): return text
+    defs, _ = _vlit_index(path)
+    hits = _vlit_exe_stores(path, text, stats, defs)
+    return _vlit_apply(path, text, stats, hits) if hits else text
+
 def r_vptr_literals(path, text, stats):
     """VLIT1: a 1-3 character string literal stored as a vptr -> the vftable address the unit binds it to (see
     above)."""
@@ -4378,7 +4467,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs

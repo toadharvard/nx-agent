@@ -1754,6 +1754,30 @@ prepare.__dict__['_fnvnx_d22'] = None
 _shutil.rmtree(_d2, ignore_errors=True)
 
 
+# ---- S1-rules: VLIT2 (a vptr literal by the exe's vftables: slot 0 at the store's offset, the function's class)
+_vl = tempfile.mkdtemp(); os.makedirs(os.path.join(_vl, 'src')); os.makedirs(os.path.join(_vl, 'build'))
+_json.dump({'units': [{'source': 'src/a.cpp', 'symbols': {}, 'functions': [{'address': '0x00487220', 'symbol': '?f@@YAXXZ', 'size': 4}]}]},
+           open(os.path.join(_vl, 'build', 'units.json'), 'w'))
+_json.dump({'format': 'fnvnx-vlit/1', 'slot0': {'00487220': [['0101cb94', 0], ['0102a28c', 104], ['0102a59c', 104]]},
+            'class': {'0101cb94': '.?AVTESHealthForm@@', '0102a28c': '.?AVTESObjectARMA@@', '0102a59c': '.?AVTESObjectARMO@@',
+                      '0102a31c': '.?AVTESObjectARMA@@'}}, open(os.path.join(_vl, 'vlit.json'), 'w'))
+os.environ['FNVNX_VLIT'] = os.path.join(_vl, 'vlit.json')
+prepare.__dict__['_fnvnx_vlit'] = None
+_saved_vlit = s1._VLIT; s1._VLIT = None
+_VL = ('struct C { C(); };\nC::C()\n{\n    *(int*)((char*)this + 0x0) = (int)&DAT_0102a31c;\n'
+       '    *(const char**)((char*)this + 0x68) = " rH";\n    *(void**)((char*)this + 0x68) = (void*)" rH";\n}\n'
+       'struct H { void f(); };\nvoid H::f()\n{\n    *reinterpret_cast<const char**>(this) = " rH";\n}\n'
+       'struct Z { void g(); };\nvoid Z::g()\n{\n    *(const char**)((char*)this + 0x10) = " rH";\n}\n')
+_vlo = run(s1.r_vptr_literals_exe, _VL, os.path.join(_vl, 'src', 'a.cpp'))
+check('VLIT2 the store at +0x68 takes the vftable of the function\'s class (ARMA, not ARMO); the cast is kept', _vlo,
+      ['*(const char**)((char*)this + 0x68) = (char*)&fnvnx_vlit_0102a28c;', '= (void*)(char*)&fnvnx_vlit_0102a28c;',
+       'extern "C" char fnvnx_vlit_0102a28c __asm__("DAT_0102a28c"); /* fnv-nx VLIT2 */ C::C()'])
+check('VLIT2 a store through this at offset 0: the one vftable with that slot 0 there', _vlo,
+      ['*reinterpret_cast<const char**>(this) = (char*)&fnvnx_vlit_0101cb94;'])
+check('VLIT2 no vftable with that slot 0 at the offset: left as it is', _vlo,
+      ['*(const char**)((char*)this + 0x10) = " rH";'])
+os.environ.pop('FNVNX_VLIT', None); prepare.__dict__['_fnvnx_vlit'] = None; s1._VLIT = _saved_vlit
+
 # ---- S1-rules: DTORB1 (a destructor stand-in calls the address its ??1 is bound to, under GCC)
 _db = tempfile.mkdtemp(); os.makedirs(os.path.join(_db, 'src')); os.makedirs(os.path.join(_db, 'build'))
 _json.dump({'units': [{'source': 'src/u.cpp', 'symbols': {'??1S@@UAE@XZ': '0x004aa280', '??1T@@UAE@XZ': '0x004aa280'},
