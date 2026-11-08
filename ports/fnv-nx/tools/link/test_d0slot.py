@@ -74,8 +74,11 @@ def run(d, exe, groups, exev, native, per_obj=None):
     have = [types.SimpleNamespace(obj=obj, source=z) for z, (obj, v) in groups.items()]
     bridges, traps = {}, {}
     out = tempfile.mkdtemp(dir=d)
+    # these classes are the exe-order path (W30's minus-one rebuild, test_d26tables, has its own evidence)
+    os.environ['FNVNX_D26T'] = '0'
     st = fnvlink.exe_vtable_copies(exev, vmap, types.SimpleNamespace(where={}), have, per_obj or {}, traps, native,
                                    bridges, out, None, exe, {}, None, lambda n: None)
+    del os.environ['FNVNX_D26T']
     return st, bridges, traps, vmap
 
 

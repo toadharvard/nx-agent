@@ -1638,8 +1638,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         byclass['vslot-unresolved'] -= fill.get('bound_refs', 0)
         byclass['vslot-exe'] += fill.get('bound_refs', 0)
         # primary vtables shorter than the exe's: an extended strong copy (the exe's remaining slots)
+        d22_listed, d22_files = load_d22_list(os.environ.get('FNVNX_RECON'))
         ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
-                                exe_path, providers, exe_alt, msvc)
+                                exe_path, providers, exe_alt, msvc, d22_listed,
+                                lambda c_: code_refs([u.obj for u in have], c_))
+        vstats['d22-list-files'] = d22_files
+        vstats['d22-list-vftables'] = len(d22_listed)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
         for a in rebind:   # S2c-vt2: shifted secondary groups moved their address points (slotfill2.shifted)
@@ -3270,8 +3274,93 @@ def d0_slot_fix(z, n, d, names, slots, native, msvc, bridges, traps, st, exe_pat
     return pair[1]
 
 
+# W30 (S5 boot, link 3f7a6c35): the evidence that a table without a D1/D0 pair is nevertheless a minus-one table
+# (D26 layout: D1, D0, then exe slot k at native k + 1). S1's D26 (b) call-only placeholder: a first virtual named like
+# these (the same pattern as tools/rules/s1_compile.py D22_CALLONLY_PLACEHOLDER) becomes `virtual ~C()`, unless a
+# unit calls it by name (D22-USED) or defines it (D22-DEFINED): then the callers number the slots as the exe does.
+D26B_PLACEHOLDER = re.compile(
+    r"^(?:v|vf|vfn|vt|vfunc|virt|virtual|slot|func|fn|unk|unknown|Unk_?|Unknown|Func|Virtual|Reserved|reserved|pad|Pad|"
+    r"Slot|V|F)_?0+$|^\w*?Unknown_?0*$|^\w*_v0$|^v0_\w*$|^vfunc0\w*$|^Unk(?:nown)?0+\w*$", re.IGNORECASE)
+ITANIUM_MEMBER = re.compile(r'^_ZN(\d+)')
+
+
+def itanium_member(sym):
+    """The unqualified member name of a plain `_ZN<len><Class><len><member>...` symbol, else None."""
+    m = ITANIUM_MEMBER.match(sym or '')
+    if not m:
+        return None
+    i = m.end() + int(m.group(1))
+    m2 = re.compile(r'(\d+)').match(sym, i)
+    if not m2:
+        return None
+    return sym[m2.end():m2.end() + int(m2.group(1))]
+
+
+def load_d22_list(top):
+    """Explicit minus-one evidence: the exe vftable addresses of the classes in S1's D22 list (d22.json, format
+    fnvnx-d22/1, under `top` = FNVNX_RECON, tools/farm/recon.sh). Prepare's D22 rule converts exactly those classes to
+    `virtual ~C()` (the compiled callers are minus-one). Returns ({vftable address}, number of files); empty with no
+    recon. Names and addresses only."""
+    got, n = set(), 0
+    if not top or not os.path.isdir(top):
+        return got, 0
+    for dp, _, fs in os.walk(top):
+        if 'd22.json' not in fs:
+            continue
+        try:
+            d = json.load(open(os.path.join(dp, 'd22.json')))
+        except (OSError, ValueError):
+            continue
+        if d.get('format') != 'fnvnx-d22/1':
+            continue
+        n += 1
+        for c in d.get('classes', ()):
+            got.update(int(v, 16) for v in c.get('vftables', ()))
+    return got, n
+
+
+def d26_minus_one_reason(z, v, raw_names, d, listed, called):
+    """Why the table z (exe vftable v, slot symbols raw_names, destructor pair position d) is a minus-one table though
+    it holds no D1/D0 pair, or None:
+      'd22-list'             v is a vftable of a class in S1's D22 list (load_d22_list), and no code names slot 0
+                             (D22-USED leaves the placeholder, and its callers number the slots as the exe does);
+      'callonly-placeholder' slot 0 is a D26 (b) call-only placeholder no code names (S1 declares `virtual ~C()`).
+    A table with a pair is minus-one already; one with no evidence stays in the exe's order, which is what callers
+    compiled against a dtor-less declaration use. called: symbols referenced from code (not vtables) by any object."""
+    if d is not None:
+        return None
+    s0 = raw_names[0] if raw_names else None
+    if s0 and s0 in (called or ()):
+        return None
+    if v in listed:
+        return 'd22-list'
+    mem = itanium_member(s0)
+    if mem and D26B_PLACEHOLDER.match(mem):
+        return 'callonly-placeholder'
+    return None
+
+
+def code_refs(objpaths, cands):
+    """Symbols of cands that some object's code (.text sections) references: the calls by name D22-USED looks for."""
+    hit = set()
+    for p in objpaths:
+        try:
+            o = vtables.Obj(p)
+        except (OSError, ValueError):
+            continue
+        for i, s in enumerate(o.secnames):
+            if not s.startswith('.text'):
+                continue
+            for off, (si, ty, add) in o.rel(i).items():
+                nm = o.syms[si][0]
+                if nm in cands:
+                    hit.add(nm)
+    return hit
+
+
+
 def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
-                      providers=None, alt=None, msvc=None):
+                      providers=None, alt=None, msvc=None, listed=None, called_fn=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
     kept object has them (its slot symbols renamed as resolve renames them in that object), then exe slot j for every
     j past the native slots (the minus-one rule): `__fnv_<a>` where the address map has a plain native definition,
@@ -3305,6 +3394,16 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     continue
                 want[(z, path)].append(v)
                 st['displaced-vtables'] += 1
+    called = set()
+    if called_fn is not None:   # W30: slot 0 placeholders some code names (D22-USED): one pass over the objects
+        c0 = set()
+        for (z, path) in want:
+            o_ = by_obj.get(path) and vtables.Obj(path)
+            if o_ and z in o_.defs:
+                e_ = o_.ents(z)
+                if len(e_) > 2 and e_[2].sym:
+                    c0.add(e_[2].sym)
+        called = called_fn(c0)
     over = collections.defaultdict(dict)    # (z, kept path) -> {word index: target}
     for (path, z, i), t in (slot_over or {}).items():
         if rtti.where.get(z) and rtti.where[z][0].path == path:
@@ -3347,11 +3446,24 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                           exe_path) if slots else None
         if d0w:
             st['d0slot-candidates'] += 1
+        # W30: a table without a pair that its callers number minus-one (d26_minus_one_reason) is rebuilt whole in D26's
+        # layout: offset-to-top, typeinfo, D1, D0 (exe slot 0), then exe slot k at native k + 1
+        m1 = None
+        if slots and len(pts) == 1 and d is None and os.environ.get('FNVNX_D26T', '1') != '0':
+            m1 = d26_minus_one_reason(z, max(vs), [e.sym for e in ents[2:2 + n]], d, listed or (), called)
+            if not m1:
+                st['exe-order-no-evidence'] += 1
+                st['exe-order-no-evidence-BSNiAllocator'] += 'BSNiAllocator' in z
+            if m1:
+                pair1 = vmo_dtor_slots(slots[0], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2), exe_path)
+                if pair1 is None:
+                    st['d26-slot0-not-a-destructor'] += 1
+                    m1 = None
         shift = slotfill2.shift_plan(z, pts, n, nm, slots, out, have, st) if extend and len(pts) != 1 else None
         if extend and len(pts) != 1 and not shift:   # S2c-vt2: shifted secondary groups (slotfill2.shift_plan)
             st['skipped-secondary-vtables'] += 1
             extend = False
-        if not extend and not ov and not d0w:
+        if not extend and not ov and not d0w and not m1:
             continue
         if o.bind(z) != 'weak':   # a key function's unit: its strong copy would be a second definition
             st['skipped-strong'] += 1
@@ -3377,6 +3489,15 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         words = ['    .word %s' % ('%s%+d' % (nmz, e.addend) if e.addend else nmz) if e.sym else
                  '    .word 0x%x' % e.word for e, nmz in zip(ents, names)]
         extra = []
+        if m1:
+            words = words[:2] + ['    .word %s' % w_ for w_ in pair1] + \
+                    ['    .word %s' % exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (z, 3 + k))
+                     for k, a in enumerate(slots[1:], 1)]
+            extend, d0w, ov, shift = False, None, {}, None
+            st['d26-minus-one'] += 1
+            st['d26-minus-one-BSNiAllocator'] += 'BSNiAllocator' in z
+            st['d26-minus-one-' + m1] += 1
+            st['d26-minus-one-slots'] += len(words) - 2
         for j in (range(nm, len(slots)) if extend else ()):
             a = slots[j]
             t = exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (z, 2 + j))
@@ -3395,7 +3516,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                  '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3', '    .globl %s' % z,
                  '    .type %s, %%object' % z, '%s:' % z] + slotfill2.place_extra(words, extra, shift, z, out) + ['    .size %s, .-%s' % (z, z), '    .text']
         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
-        st['extended' if extra else 'copied-per-slot'] += 1
+        st['d26-minus-one-tables' if m1 else ('extended' if extra else 'copied-per-slot')] += 1
         st['slots-added'] += len(extra)
         st['slots-per-use'] += len(ov)
         for v, (z_, ap_, path_, note_) in list(vmap.items()):
