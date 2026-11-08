@@ -12,6 +12,7 @@ the caller. The callee's own stack cleanup (stdcall/thiscall `ret N`) is applied
 known (callee_pop), else none (cdecl).
 """
 import bisect
+import math
 import struct
 
 from unicorn import (Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ,
@@ -701,8 +702,19 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_ESP, (esp + 4 - uc.reg_read(UC_X86_REG_EAX)) & 0xffffffff)
             uc.reg_write(UC_X86_REG_EIP, ret); return True
         if name in libcalls.CRT_MATH:            # cdecl double functions: doubles at [esp+4], [esp+12] -> ST0
-            xs = [struct.unpack('<d', bytes(uc.mem_read(esp + 4 + 8 * i, 8)))[0] for i in range(libcalls.CRT_MATH[name])]
-            uc.mem_write(FLD_VAL, struct.pack('<d', libcalls.crt_math(name, xs)))
+            # (difffuzz-20, flow) an `f` name is the exe's float wrapper (ceilf 0x004e4430, floorf 0x00406cc0: `fld
+            # dword [ebp + 8]`): floats at [esp+4], [esp+8], the result rounded to float, in ST0
+            fl = name.endswith('f') and name[:-1] in libcalls.CRT_MATH
+            sz = 4 if fl else 8
+            xs = [struct.unpack('<f' if fl else '<d', bytes(uc.mem_read(esp + 4 + sz * i, sz)))[0]
+                  for i in range(libcalls.CRT_MATH[name])]
+            res = libcalls.crt_math(name, xs)
+            if fl:
+                try:
+                    res = struct.unpack('<f', struct.pack('<f', res))[0]
+                except OverflowError:
+                    res = math.copysign(float('inf'), res)
+            uc.mem_write(FLD_VAL, struct.pack('<d', res))
             uc.reg_write(UC_X86_REG_EIP, FLD_STUB); return True     # fld qword [FLD_VAL]; ret (to `ret`)
         stub = libcalls.x87_stub(name, BUILTIN_SLOT)
         if stub is not None:
