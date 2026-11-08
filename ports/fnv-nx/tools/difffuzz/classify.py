@@ -233,11 +233,32 @@ def _later_entry_reads(fn, passed, limit=20000):
                     addr = nxt
                     continue
                 if ins.mnemonic == 'jmp':
+                    # (difffuzz-20, eq-rest) a switch's jump table inside the function (`jmp [reg*4 + table]`): every
+                    # case is a path (0x00e03170 pushes edx in a case body, behind the table)
+                    for t in _jump_table(fn, ins):
+                        stack.append((t, written))
                     break
                 addr = nxt
                 continue
             addr = nxt
     return found
+
+
+def _jump_table(fn, ins):
+    """The case targets of `jmp dword ptr [index*4 + table]` when the table lies inside the function's own bytes:
+    consecutive dwords that point back into the function (the table ends at the first word that does not)."""
+    op = ins.operands[0] if ins.operands else None
+    if op is None or op.type != capstone.x86.X86_OP_MEM or op.mem.base != 0 or op.mem.scale != 4 or op.mem.index == 0:
+        return []
+    lo, hi = fn['address'], fn['address'] + len(fn['code'])
+    a, out = op.mem.disp & 0xffffffff, []
+    while lo <= a and a + 4 <= hi and len(out) < 256:
+        t = int.from_bytes(fn['code'][a - lo:a - lo + 4], 'little')
+        if not lo <= t < hi:
+            break
+        out.append(t)
+        a += 4
+    return out
 
 
 def is_dtor_name(sym):
@@ -295,6 +316,22 @@ def indefinite_word(x86_hex, arm_hex):
     return False
 
 
+def _guard_skipped(div, target, fn):
+    """The oracle made no call, the native made some, every private word the native read is a function-local static
+    or its guard (arm_local_static), a guard among them, and the exe code itself addresses a local static."""
+    st = getattr(target, 'local_statics', None)
+    if not st or div.get('x86') != 0 or not div.get('arm') or \
+            not any(n.startswith('_ZGVZ') for n in div.get('arm_private_syms') or ()):
+        return False
+    for ins in CSD.disasm(fn['code'], fn['address']):
+        for op in ins.operands:
+            if (op.type == capstone.x86.X86_OP_MEM and op.mem.base == 0 and op.mem.index == 0 and
+                    (op.mem.disp & 0xffffffff) in st) or \
+                    (op.type == capstone.x86.X86_OP_IMM and (op.imm & 0xffffffff) in st):
+                return True
+    return False
+
+
 def _static_only_store(div, target):
     """The record's own evidence for local-static: a mem-write whose differing bytes are all oracle-only stores to
     the unit's function-local statics, or one extra native call followed by the oracle's call there (the native's
@@ -302,9 +339,16 @@ def _static_only_store(div, target):
     if div.get('kind') == 'call-target' and div.get('x86') and div.get('arm_next') == div.get('x86') and \
             div.get('x86_next') != div.get('arm'):     # (x86_next == arm too: two calls swapped, V2 L1)
         return True     # the native makes one extra call (its own static's guarded initializer), then the oracle's
+    st = getattr(target, 'local_statics', None)
+    if div.get('kind') == 'call-args' and div.get('cls') == 'P' and st is not None:
+        # (difffuzz-20, eq-rest) a pointer argument that is the address of a function-local static: the oracle passes
+        # the static's image address, the native its own .bss copy (0x00aff100: `this` of the guarded constructor)
+        try:
+            return int.from_bytes(bytes.fromhex(div.get('x86') or ''), 'little') in st
+        except ValueError:
+            return False
     if div.get('kind') != 'mem-write' or div.get('only_x86') != div.get('ndiff'):
         return False
-    st = getattr(target, 'local_statics', None)
     addrs = [int(a, 16) for a in div.get('addrs') or ()]
     return bool(addrs) and st is not None and all(a in st for a in addrs)
 
@@ -754,6 +798,10 @@ def hint(pair, target, case, div, fn, max_steps):
             hits = check_rebind.bypassing_functions(str(obj)).get(target.orig_addr)
             if hits:
                 h['cause'] = 'split-global'; h['vars'] = hits; return h
+    if div.get('arm_local_static') and div.get('kind') == 'call-count' and _guard_skipped(div, target, fn):
+        # (difffuzz-20, eq-rest) the case's background has the oracle's static guard set, so it skips the one-time
+        # initializer, and the native's own guard (its .bss, zero) runs it: the native calls are that initializer
+        h['cause'] = 'local-static'; return h
     if div.get('arm_local_static') and _static_only_store(div, target):
         # evidence in the record: every differing byte is an oracle-only store into a function-local static the
         # native keeps in its .bss (S13b audit, V2 L1: the flag alone filed 344 call/error records, among them a
