@@ -187,6 +187,11 @@ POLICY = {
                                                  'destination)'),
     'oracle-vcall':   ('artifact', 'S13', False, 'the oracle faults on an indirect call the harness does not model '
                                                  '(S13 vftable modelling)'),
+    'native-vcall-unplanted': ('artifact', 'S13', False, 'the native calls a null word of a table in case memory that '
+                                                         'no vptr planting made a vftable, where the oracle calls a '
+                                                         'wild word of the same garbage (exe slot k against the '
+                                                         'native k + 1): each machine reads its own slot layout of '
+                                                         'memory with none (classify.native_unplanted_vcall)'),
     'x86-custom-cc':  ('artifact', 'S13', False, 'MSVC whole-program custom register convention not in units.json'),
     'msvc-inlined':   ('artifact', 'S13', False, 'MSVC inlined a callee the native calls out of line'),
     'runtime-equiv':  ('artifact', 'S13', False, 'the same runtime function under two addresses (before difffuzz-8)'),

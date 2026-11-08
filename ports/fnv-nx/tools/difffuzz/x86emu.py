@@ -365,18 +365,45 @@ class X86Engine:
     def _on_fp_clamp(self, uc, address, size, rec):
         """world.X87_CLAMP: before each instruction, the x87 registers lose what float (or double) arithmetic could
         not hold: a magnitude of 2**128 (2**1024) or more becomes inf, one below 2**-150 (2**-1075) becomes zero."""
-        hi, lo = (128, -150) if rec['kind'] == 'f32' else (1024, -1075)
+        if rec['kind'] == 'f32den':
+            hi, lo, nmin = 1 << 30, -149, -126         # denormal rounding only: no overflow, nothing flushed
+        else:
+            hi, lo = (128, -150) if rec['kind'] == 'f32' else (1024, -1075)
+            nmin = -126 if rec['kind'] == 'f32' else -1022
+        q = -1074 if rec['kind'] == 'f64' else -149
         for i in range(8):
             mant, se = uc.reg_read(UC_X86_REG_FP0 + i)
             ex = se & 0x7fff
             if not mant or ex == 0 or ex == 0x7fff:
                 continue
             e = ex - 16383
+            if rec['kind'] == 'f32den' and e < lo:
+                continue                                   # a double this small is not a float's: left alone
             if e >= hi:
                 uc.reg_write(UC_X86_REG_FP0 + i, (0x8000000000000000, (se & 0x8000) | 0x7fff))
                 rec['over'] = rec.get('over', 0) + 1
             elif e < lo:
                 uc.reg_write(UC_X86_REG_FP0 + i, (0, se & 0x8000))
+                rec['under'] = rec.get('under', 0) + 1
+            elif e < nmin:
+                # (bh_C, 0x00f92520) between the smallest normal and 2**-150 / 2**-1075 a float (double) is a denormal,
+                # a multiple of 2**-149 (2**-1074): gradual underflow keeps a few bits of it where the x87 stack holds
+                # all 24 / 53
+                sh = q - (e - 63)
+                if sh <= 0 or sh > 64:
+                    continue
+                n, rem = mant >> sh, mant & ((1 << sh) - 1)
+                half = 1 << (sh - 1)
+                if rem > half or (rem == half and n & 1):
+                    n += 1
+                if n == 0:
+                    uc.reg_write(UC_X86_REG_FP0 + i, (0, se & 0x8000))
+                else:
+                    bl = n.bit_length()
+                    nm, ne = (n << (64 - bl)) & 0xffffffffffffffff, bl - 1 + q + 16383
+                    if (nm, ne) == (mant, e + 16383):
+                        continue
+                    uc.reg_write(UC_X86_REG_FP0 + i, (nm, (se & 0x8000) | ne))
                 rec['under'] = rec.get('under', 0) + 1
             else:
                 continue
