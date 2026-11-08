@@ -27,7 +27,7 @@ for o, cs in {
     'F1': ('call-flow', 'native-extra-calls', 'native-early-exit', 'native-inlined', 'call-order', 'native-empty-callee',
            'native-empty-body', 'native-missing-free', 'array-new-check', 'falloff?', 'native-stale-result', 'literal-ret'),
     'F2': ('vptr-unpaired', 'vptr-differs', 'vptr-store', 'thunk-binding', 'canned-this', 'ctor-this', 'layout-offset',
-           'dyninit-no-atexit', 'native-vcall-oracle-direct', 'byvalue-arg-dtor'),
+           'dyninit-no-atexit', 'native-vcall-oracle-direct', 'byvalue-arg-dtor', 'vslot-shift', 'vslot-differs'),
     'F3': ('uninit-x86', 'uninit-arm', 'uninit-both', 'store-width', 'x86-only-store', 'native-only-store',
            'ilp32-pointer', 'ilp32-wrap', 'native-null-read', 'callee-saved', 'split-global', 'literal-store',
            'native-garbage-arg', 'arg-stack-vs-object', 'arg-other-buffer', 'native-address', 'native-wild-private',

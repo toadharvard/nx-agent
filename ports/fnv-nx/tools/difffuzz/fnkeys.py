@@ -106,6 +106,34 @@ def _old_callflow(rec):
     return (rec.get('divergence') or {}).get('kind') in ('call-count', 'call-target')
 
 
+def _hole_trace(rec):
+    """A saved native call trace with a call into a hole of the stub range traced twice (d21-holes): `name:<hex>`
+    or the code stub's original address, then the raw word."""
+    d = rec.get('divergence') or {}
+    ta = [str(t) for t in (d.get('arm_trace') or [])] + [str(d.get('arm')), str(d.get('arm_next'))]
+    for a, b in zip(ta, ta[1:]):
+        try:
+            vb = int(b, 16)
+            va = int(a[5:], 16) if a.startswith('name:') else int(a, 16) + 0x08000000
+        except ValueError:
+            continue
+        if va == vb:
+            return True
+    return False
+
+
+def _dtor_store(rec):
+    import re as _re
+    s = str(rec.get('symbol') or '')
+    return (rec.get('divergence') or {}).get('kind') == 'mem-write' and (
+        s.startswith(('??1', '??_G', '??_E')) or bool(_re.search(r'D[012]Ev$', s)))
+
+
+def _planted_call(rec):
+    return bool((rec.get('case') or {}).get('vptrs')) and \
+        (rec.get('divergence') or {}).get('kind') in ('call-target', 'call-count')
+
+
 def _statics(f):
     return f.ostatic or any(isinstance(n, str) and n.startswith(('_ZZ', '_ZGVZ')) for n in f.nrefs)
 
@@ -147,6 +175,18 @@ CHANGES = [
     Change('d20-malloc', 'functions whose oracle code calls the CRT malloc (0x00ecd1c7): it returns a fresh heap block '
            'like the game allocators (world.ALLOCATORS) and pairs with operator new / MemoryManager::Allocate by '
            'family (libcalls.FAMILY)', selects=_crt_malloc),
+    Change('d21-holes', 'cached divergences whose native trace has a call into a hole of the stub range traced '
+           'twice (the stub hook and the wild hook both fired: `name:<hex>` + `<hex>`, or a code stub outside .text '
+           'as its original address + the raw word): arm64emu traces it once, as the oracle does',
+           recheck=_hole_trace),
+    Change('d21-dtorvptr', 'cached mem-write divergences of destructors (??1, ??_G, ??_E, D0/D1/D2): the vptr words '
+           'of the destroyed object (an image vftable on the oracle, a native vtable address point natively, or '
+           'left as they were) are not compared, the rest of the memory is (runner.dtor_vptr_bytes)',
+           recheck=_dtor_store),
+    Change('d21-vslot', 'cached call divergences of cases with planted vptrs: a call-target where both machines '
+           'call slots of the planted vftable is no longer followed (it became call-count x86 0, falloff?) and is '
+           'vslot-shift / vslot-differs; a call-count whose native extra call is slot k of a vftable whose slot k+1 '
+           'the oracle ran for real is vslot-shift (runner.Pair.vslots, vslots_run)', recheck=_planted_call),
     Change('d24-pop', 'functions whose oracle code (or a same-unit function it runs) makes indirect calls, IAT calls '
            'included: an intercepted callee of unknown convention whose wrong pop sent the oracle on into argument '
            'words without a fault (wild calls) is learned too; every IAT slot is named by its import library '
