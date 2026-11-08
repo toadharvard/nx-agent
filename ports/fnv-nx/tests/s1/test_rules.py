@@ -2171,5 +2171,22 @@ check('REC1 x STAND4: STAND4 converts what the replace left (no static body, one
       _t4, ['__declspec(noinline) float Zero(); /* fnv-nx STAND4 0x00d571d0 */'],
       ['return 1.0f', 'return 0.0f', 'static __declspec'])
 
+# ---- S1-rules: VFPAD1 (MSVC pads a class's own vfptr to the class's alignment; LAYOUT gate vfpad rows)
+_VF = ('struct V16 { virtual ~V16(); unsigned int m10; hkVector4 m20; };\n'
+       'struct VD { FNVNX_D22(VD, virtual void v0() ;) /* fnv-nx D22 */\n    double m08; int* p; };\n'
+       'struct VS { virtual void f(); int a; char b[4]; };\n'
+       'struct VB : B { virtual void f(); hkVector4 m; };\n'
+       'struct VN { struct In { __m128 q; }; virtual void f(); In m; };\n'
+       'struct hkpSphereMotionD1E4 { virtual void f(); short m_s; hkVector4 unk10; };\n'
+       'class NF\n{\n  public:\n    typedef unsigned(__cdecl* RFN)(NF* p);\n    virtual ~NF();\n    RFN m_r; double d;\n};\n'
+       '#pragma pack(push, 4)\nstruct VP4 { virtual void f(); double d; };\n#pragma pack(pop)\n'
+       '#pragma pack(push, 8)\nstruct VP8 { virtual void f(); hkVector4 v; };\n#pragma pack(pop)\n')
+_vfo = run(s1.r_vfptr_pad, _VF)
+check('VFPAD1 puts FNVNX_VFPAD(member types) first in a no-base class with a vfptr (not D22\'s macro text, not pointers)',
+      _vfo, ['struct V16 { FNVNX_VFPAD(hkVector4) virtual', 'struct VD { FNVNX_VFPAD(double) FNVNX_D22',
+             'struct VP8 { FNVNX_VFPAD_PACK(8, hkVector4) virtual', 'class NF\n{ FNVNX_VFPAD(double)\n'],
+      ['struct VS { FNVNX', 'struct VB : B { FNVNX', 'struct VN { FNVNX', 'struct hkpSphereMotionD1E4 { FNVNX',
+       'struct VP4 { FNVNX', 'int*)'])
+
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

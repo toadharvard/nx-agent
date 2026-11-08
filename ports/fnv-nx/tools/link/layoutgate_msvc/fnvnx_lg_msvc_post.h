@@ -5,6 +5,10 @@
 #undef FNVNX_MSVC_BASE_END
 #undef FNVNX_MSVC_BASE_END_PACK
 #undef FNVNX_EBO2
+#undef FNVNX_VFPAD
+#undef FNVNX_VFPAD_PACK
 #define FNVNX_MSVC_BASE_END(...)
 #define FNVNX_MSVC_BASE_END_PACK(N, ...)
 #define FNVNX_EBO2
+#define FNVNX_VFPAD(...)
+#define FNVNX_VFPAD_PACK(N, ...)

@@ -405,6 +405,98 @@ def r_msvc_base_layout(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# -------------------------------------------------------------------------------------------------------- VFPAD1
+#
+# MSVC pads a class's own vfptr to the class's alignment: in a class with no base, a virtual function and a member
+# aligned to 8 (double, __int64) or 16 (__m128, hkVector4, ...), the first member sits at 8 or 16, while GCC puts it
+# right after the 4-byte vfptr (the LAYOUT gate's vfpad rows: hkaabbtree.cpp FUN_00d9c110_cls, whose members are
+# named by their exe offsets m10 / m14 / ... / m40, had m10 at 4 natively and at 16 under MSVC). VFPAD1 puts
+# FNVNX_VFPAD(<the member types>) first in such a body (FNVNX_VFPAD_PACK(N, ...) under an active `#pragma pack(N)`,
+# nothing for N <= 4): a zero-width bit-field aligned like the most aligned member type (fnvnx_compat.h). Pointers,
+# references, function pointers and the 4-byte-or-smaller builtins are left out of the list; a class whose members
+# use a type nested in it (declared after the filler), an anonymous union / struct or a nested class member is held
+# (VFPAD-HELD). VFPAD1_SRC holds the classes whose member offset names say the exe has no padding there (the gate's
+# vfpad-src rows: the source's own vfptr stands for a 4-aligned base's), counted as VFPAD-SRC.
+
+VFPAD1_SRC = {
+    # hkpspheremotion.cpp: hkReferencedObject's members flattened in (m_usMemSizeAndFlags at 4, ..., unk10 at 0x10)
+    'hkpSphereMotionD1E4',
+}
+VFPAD1_SMALL = re.compile(r'^(?:(?:const|volatile|mutable|signed|unsigned|short|int|long|char|bool|float|wchar_t|'
+                          r'__int8|__int16|__int32|BYTE|WORD|DWORD|UINT|INT|BOOL|LONG|ULONG|USHORT|UCHAR|FLOAT)\b\s*)+$')
+
+def _vfpad_types(flat, own):
+    """(member types for FNVNX_VFPAD, held) of a flattened class body: None when the class has no data member"""
+    _, nested = _members(flat, own)
+    types, held, any_data = [], False, False
+    # nested function-pointer typedefs (`typedef unsigned (*READFN)(...);`, which _members does not see): 4 bytes
+    fptrs = set(re.findall(r'\btypedef\b[^;]*?\(\s*(?:__\w+\s*)?\*\s*([A-Za-z_]\w*)\s*\)', flat))
+    masked = flat
+    for _ in range(4):
+        masked = re.sub(r'\((?:[^()]|\([^()]*\))*\)', '()', masked)        # FNVNX_D22(C, virtual ... ;) and calls
+    for stmt in re.split(r'[;}]', masked):
+        st = re.sub(r'^\s*(?:(?:public|private|protected)\s*:\s*|[A-Z][A-Z0-9_]*\s*\(\)\s*)+', '',
+                    stmt.replace('{', ' { ')).strip()                         # a `;`-less macro (FNVNX_D22) in front
+        if not st or st.startswith('#'): continue
+        if re.match(r'(?:struct|class|union)\b[^{]*\{\s*$', st) or re.match(r'(?:union|struct)\s*\{', st):
+            if re.match(r'(?:union|struct)\s*\{', st): held = True                 # anonymous aggregate
+            continue
+        if re.match(r'(?:struct|class|union)\b[^{]*\{', st):
+            held = True; continue                                                 # `struct X {...} m;`
+        if re.fullmatch(r'[A-Za-z_]\w*\s*(?:\[[^\]]*\]\s*)*(?:,\s*[A-Za-z_]\w*\s*(?:\[[^\]]*\]\s*)*)*', st):
+            held = True; continue                                                 # the declarators after `struct {...}`
+        if '(' in st or '{' in st: continue
+        if re.match(r'(?:typedef|using|friend|template|enum|static|static_assert|virtual|operator|explicit|inline|'
+                    r'public|private|protected)\b', st): continue
+        d0 = _split_args(st)[0] if ',' in st else st
+        m = re.match(r'^(.*?[\w>\s*&])\s*\b([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)(?::\s*\w+\s*)?(?:=.*)?$', d0, re.S)
+        if not m or not m.group(1).strip(): continue
+        t = m.group(1).strip()
+        any_data = True
+        if t.endswith(('*', '&')) or VFPAD1_SMALL.match(t) or t in fptrs: continue
+        if set(re.findall(r'[A-Za-z_]\w*', t)) & (nested | {own}):
+            held = True; continue
+        t = re.sub(r'^(?:(?:mutable|const|volatile)\s+)+', '', t)
+        if not re.fullmatch(r'[\w\s:<>,*&]+', t) or t.count('<') != t.count('>'):
+            held = True; continue
+        t = re.sub(r'\s+', ' ', t)
+        if t not in types: types.append(t)
+    return (types if any_data else None), held
+
+def r_vfptr_pad(path, text, stats):
+    """VFPAD1: MSVC's vfptr padding for a class with no base, a virtual function and a member aligned to 8 / 16 (see
+    above). Same line count."""
+    if 'virtual' not in text: return text
+    out, pos = [], 0
+    packs = _tail1_packs(text) if 'pack' in text else []
+    for o, c, k, h in prepare.scope_spans(text):
+        if k != 'class': continue
+        bare = prepare.HEAD_DECOR.sub(' ', prepare.TEMPLATE_PREFIX.sub('', h)).strip()
+        if not re.match(r'(?:class|struct)\b', bare) or BASE_CLAUSE.match(bare): continue
+        nm = re.match(r'(?:class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)', bare)
+        if not nm: continue
+        own = nm.group(1)
+        flat = _flat_body(text, o, c + 1)
+        if not re.search(r'\bvirtual\b', flat): continue
+        types, held = _vfpad_types(flat, own)
+        if not types: continue
+        if held:
+            stats['VFPAD-HELD'] += 1; continue
+        if own in VFPAD1_SRC:
+            stats['VFPAD-SRC'] += 1; continue
+        pk = None
+        for at, v in packs:
+            if at > o: break
+            pk = v
+        if pk is not None and pk <= 4: continue
+        out.append(text[pos:o + 1])
+        out.append(' FNVNX_VFPAD_PACK(%d, %s)' % (pk, ', '.join(types)) if pk is not None and pk < 16
+                   else ' FNVNX_VFPAD(%s)' % ', '.join(types))
+        pos = o + 1
+        stats['VFPAD1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- EBO1
 #
 # MSVC gives the empty base class optimization only to the first of several empty bases: in `struct D : A, B
@@ -4610,7 +4702,7 @@ def r_friend_class_visibility(path, text, stats):
     return ''.join(out)
 
 RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
-         r_msvc_base_layout, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
+         r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
 #
