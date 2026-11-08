@@ -79,6 +79,9 @@ _ZN12fnv_00632ec012FUN_00632ec0C1Ev standin  # 0x00632ec0 the Setting registry (
                       # call it through a call-only class with a named slot 0 (Reset), which D26 (b) does not rewrite, so
                       # Register ran D0 and deleted it. standins.c gives it a table with slot 1 = Register (S1-rules)
 _ZN10S_0045d22012FUN_0045d220Ev standin  # 0x0045d220 the other Setting registry (vftable 0x01018508), the same
+_ZN18FUN_00869f00_shell12FUN_00869f00Ejj standin  # 0x00869f00: its array's Allocate is called through a call-only class with a
+                      # named slot 0 (extradatalist.cpp AX), native slot 1 = D0: the static object was freed (initializers
+                      # 0x00fa1fc0/0x00fa1fe0). standins.c: slot 1 = slot 2 in its table (S1-rules: widen D26 (b))
 _ZN8NiTMap_S9RemoveKeyEj standin  # 0x00405430: NiTMap_S is a call-only declaration in the exe's slot order (v0 at 0,
                       # KeyToHashIndex 1); its receiver (TESForm's map 0x011c54c0, exe vftable 0x0101ca78) is the native
                       # NiTPointerMap with D1/D0 at 0/1, so slot 1 ran D0 and the bucket index faulted: the last skipped

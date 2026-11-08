@@ -214,6 +214,22 @@ void *fnv_standin_0045d220(void *self) {
     return self;
 }
 
+/* 0x00869f00 (this, a, b), the constructor of the static objects 0x011de924 and 0x011de898 (initializers 0x00fa1fc0 and
+ * 0x00fa1fe0): the exe stores the image vftable 0x0106ba6c and calls 0x006b3eb0, which allocates the object's array
+ * through `self->Allocate()`, declared in extradatalist.cpp as a call-only class with a NAMED slot 0 (v0, then
+ * Allocate: still native slot 1 after D26 (b), D0 of the minus-one table). The call deleted a static object
+ * (MemoryManager::Deallocate -> free of 0x011de924, _free_r read fault): 2 skipped initializers. The same body with
+ * a table whose slot 1 = slot 2 (as the registries above; S1-rules). */
+extern void fnv_array_init(void *self, uint32_t a, uint32_t b) __asm__("_Z12FUN_006b3eb0P2AX2UWS1_");
+extern const void *fnv_vt_869f00[] __asm__("__fnv_0106ba6c") __attribute__((visibility("hidden")));
+static void *fnv_array_vt[16];
+void *fnv_standin_00869f00(void *self, uint32_t a, uint32_t b) __asm__("_ZN18FUN_00869f00_shell12FUN_00869f00Ejj");
+void *fnv_standin_00869f00(void *self, uint32_t a, uint32_t b) {
+    *(void *volatile *)self = fnv_registry_vtable(fnv_array_vt, fnv_vt_869f00);
+    fnv_array_init(self, a, b);
+    return self;
+}
+
 
 /* 0x00405430 NiTMap_S::RemoveKey(key) (the AllForms-style map RemoveKey that TESForm's 0x00483c70 reaches from the
  * form constructor of the static form 0x011c9750, initializer 0x00f4ad10): NiTMap_S is a call-only declaration with
