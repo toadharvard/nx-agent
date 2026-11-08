@@ -82,22 +82,34 @@ def x_full(t, side):
             out.append(M('full: units without an object', 'bad', items=sorted(set(names))))
     b = re.search(r'^## Emulated boot\n(.*?)(?=^## |\Z)', t, re.M | re.S)
     if b:
-        bt = b.group(1)
-        w = re.search(r'^- WinMain entered: (yes|no)', bt, re.M | re.I)
-        items = {}
-        if w:
-            items['WinMain entered'] = w.group(1).lower() == 'yes'
-        gm = re.search(r'^- game milestones[^:]*: (.*?); last reached', t, re.M)
-        if gm:
-            for part in gm.group(1).split(', '):
-                p = part.rsplit(' ', 1)
-                if len(p) == 2 and p[1] in ('yes', 'no'):
-                    items[p[0]] = p[1] == 'yes'
-        if items:
-            out.append(M('full: boot milestones', 'good', items=items))
-        s = re.search(r'initializers skipped after a fault: ([\d,]+)', bt)
-        if s:
-            out.append(M('full: boot initializers skipped', 'value', num(s.group(1)), 'lower'))
+        # the raw boot, then the stub-fault boot (full_report.py stub_boot) as separate metrics; a stub boot run with
+        # the null device (FNVNX_STUB_NULLDEV=1, S5 a3b368ed) gets past the renderer, so its milestones are not
+        # comparable with one run without: its own metrics, "(nulldev)" in the name
+        raw, _, stub = b.group(1).partition('\nStub-fault boot (')
+        out += boot_metrics('full: boot', raw)
+        if stub:
+            nd = ' (nulldev)' if 'FNVNX_STUB_NULLDEV=1' in stub.split('\n', 1)[0] else ''
+            out += boot_metrics('full: stub boot' + nd, stub)
+    return out
+
+
+def boot_metrics(pre, bt):
+    """WinMain and the game milestones (good items), initializers skipped (lower) of one boot's lines"""
+    out, items = [], {}
+    w = re.search(r'^- WinMain entered: (yes|no)', bt, re.M | re.I)
+    if w:
+        items['WinMain entered'] = w.group(1).lower() == 'yes'
+    gm = re.search(r'^- game milestones[^:]*: (.*?); last reached', bt, re.M)
+    if gm:
+        for part in gm.group(1).split(', '):
+            p = part.rsplit(' ', 1)
+            if len(p) == 2 and p[1] in ('yes', 'no'):
+                items[p[0]] = p[1] == 'yes'
+    if items:
+        out.append(M(pre + ' milestones', 'good', items=items))
+    s = re.search(r'initializers skipped after a fault: ([\d,]+)', bt)
+    if s:
+        out.append(M(pre + ' initializers skipped', 'value', num(s.group(1)), 'lower'))
     return out
 
 
