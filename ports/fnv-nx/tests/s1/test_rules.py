@@ -1958,6 +1958,12 @@ check('RAWVT1 with a dtor slot K = 4: k < 4 stays, k > 4 shifts, k = 4 held',
       run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[2]')) + '|' + run(s1.r_raw_vtable_slots, _RW) + '|' +
       run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[4]')),
       ['(this))[2])', '(this))[FNVNX_D26_SLOT(6)])', '(this))[4])'])
+_json.dump({'format': 'fnvnx-d22/1', 'classes': [], 'dtor_slots': [{'class': 'Shell', 'slot': 4, 'file': 'src/ai/actor.cpp'}]},
+           open(os.path.join(_sk, 'slots', 'd22.json'), 'w')); prepare.__dict__['_fnvnx_d22_slots'] = None
+_SH = _WS.replace('TESWorldSpace', 'Shell')
+check('D22-SLOTK: a per-file dtor_slots row applies in that file only',
+      run(s1.r_vtable_dtor_slot, _SH, '/t/src/ai/actor.cpp') + '|' + run(s1.r_vtable_dtor_slot, _SH, '/t/src/ai/other.cpp'),
+      ['FNVNX_D22(Shell, virtual void v4();) /* fnv-nx D22 */', '|struct Shell\n{\n    FNVNX_D22(Shell, virtual void v0();)'])
 del os.environ['FNVNX_RECON']; prepare.__dict__['_fnvnx_d22'] = None; prepare.__dict__['_fnvnx_d22_slots'] = None
 # ---- S1-rules: EMPTY1 (R2 trap rank 32: treeengine's declared-only TagEmpty is the temporary TagText(""))
 _EM = ('struct TagText\n{\n    int w;\n    TagText(const char*);\n};\nextern const TagText TagEmpty;\n'
