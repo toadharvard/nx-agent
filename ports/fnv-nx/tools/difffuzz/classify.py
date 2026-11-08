@@ -513,6 +513,41 @@ def oracle_vcall(pair, case, max_steps):
     return False
 
 
+def native_unplanted_vcall(pair, case, div, max_steps):
+    """(bh_C, 0x0078a3e0) The native fetched from address 0 (`blr` of a word that is 0) where the oracle, at the same
+    point, made an indirect call (`call [reg+N]` / `call reg`) to a wild target: both read a slot of a table in case
+    memory that no vptr planting made a vftable, the oracle at exe slot k, the native at k + 1 (the Itanium
+    destructor pair), which is another word of the garbage. Not a null the port dereferences: each machine reads its
+    own slot layout of memory with no layout. Needs the oracle's next call after the native's last one."""
+    if div.get('kind') != 'error' or div.get('x86') is not None or div.get('arm') != 'fault:x:00000000':
+        return False
+    rx, ra, _ = pair.run(case, max_steps)
+    if rx.error or ra.error != 'fault:x:00000000':
+        return False
+    n = len(ra.calls)
+    if len(rx.calls) <= n:
+        return False
+    vfts = image_vftables()
+    for a in sorted(rx.writes):
+        if a % 4 == 0 and all(a + i in rx.writes for i in range(4)) and \
+                int.from_bytes(bytes(rx.writes[a + i] for i in range(4)), 'little') in vfts:
+            return False     # (0x00551180) the oracle built an object in this run: its vptr is a vftable the oracle's
+                             # world does not map, the native's table for that class lacks the slot: a defect
+    c = rx.calls[n]
+    if c.target < 0 or c.target in (getattr(pair.target, 'vt_slots', None) or ()) or \
+            c.target in pair.target.x86_code or getattr(c, 'ret_to', None) is None or 0x00401000 <= c.target < 0x00fdf000:
+        # an import, a planted slot, oracle code or any exe function (0x00551180: an object the exe constructor built
+        # holds a real vftable, whose slot the native table lacks: a defect): not a wild word of garbage
+        return False
+    import capstone
+    for a, code in pair.target.x86_code.items():
+        if a < c.ret_to <= a + len(code):
+            cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+            ins = [i for i in cs.disasm(code, a) if i.address + i.size == c.ret_to]
+            return bool(ins) and ins[0].mnemonic == 'call' and not ins[0].op_str.startswith('0x')
+    return False
+
+
 def msvc_inlined(target, div):
     """The native code calls X out of line where the oracle runs X's body inline (MSVC inlined it; the oracle's
     next call is one X itself makes): the native side would have to run X too. An oracle-model gap."""
@@ -865,6 +900,8 @@ def hint(pair, target, case, div, fn, max_steps):
         if str(div.get('x86', '')).startswith('fault:') and div.get('arm') is None and oracle_vcall(pair, case,
                                                                                                     max_steps):
             h['cause'] = 'oracle-vcall'; return h
+        if pair is not None and native_unplanted_vcall(pair, case, div, max_steps):
+            h['cause'] = 'native-vcall-unplanted'; return h
         one = 'x86' if div.get('arm') is None and str(div.get('x86', '')).startswith('fault:') else \
             'arm' if div.get('x86') is None and str(div.get('arm', '')).startswith('fault:') else None
         if one and pair is not None:
