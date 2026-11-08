@@ -5854,6 +5854,26 @@ def _d22_bases(bases):
 D22_CALLONLY_PLACEHOLDER = re.compile(
     r"^(?:v|vf|vfn|vt|vfunc|virt|virtual|slot|func|fn|unk|unknown|Unk_?|Unknown|Func|Virtual|Reserved|reserved|pad|Pad|"
     r"Slot|V|F)_?0+$|^\w*?Unknown_?0*$|^\w*_v0$|^v0_\w*$|^vfunc0\w*$|^Unk(?:nown)?0+\w*$", re.IGNORECASE)
+# R2 (D26 b, S2 seamcheck VCALL 0092acd0 / 00932b70): a letter and zeros (`s_000`, `a_000`, `r0`) is a placeholder too,
+# and a class that defines one of its members is converted as well, both only where the exe confirms it: the
+# `callonly_exe` rows of a d22.json (tools/rules/_r2_callonly_exe.py: every vftable the exe's calls through the class
+# reach has a deleting destructor at slot 0)
+D22_CALLONLY_EXE = re.compile(r"^[a-z]_?0+$", re.IGNORECASE)
+
+def _d22_callonly_exe(path, key):
+    """the class `key` of the file `path` is a `callonly_exe` row (above); the rows cached on prepare"""
+    st = prepare.__dict__.get('_fnvnx_d22_cxe')
+    if st is None:
+        import json
+        st = collections.defaultdict(set)
+        for f in _d22_files():
+            try: d = json.load(open(f))
+            except (OSError, ValueError): continue
+            if d.get('format') == 'fnvnx-d22/1':
+                for r in d.get('callonly_exe', ()): st[r['class']].add(r['file'])
+        prepare.__dict__['_fnvnx_d22_cxe'] = st
+    p = path.replace('\\', '/')
+    return any(p == r or p.endswith('/' + r) for r in st.get(key, ()))
 
 D22_EMPTY_BODY = re.compile(r'\{\s*(?:return\s+(?:[-+]?(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*|true|false|0\.0f?|nullptr|NULL)\s*;\s*)?\}\s*$')
 
@@ -5879,7 +5899,7 @@ def _d22_com(masked, c):
         if v[2] in D22_COM_MEMBER or D22_COM_CONV.search(masked[v[0]:v[1]]): return True
     return False
 
-def _d22_callonly(masked, c, unit=True, named_ok=False):
+def _d22_callonly(masked, c, unit=True, named_ok=False, exe_ok=False):
     """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above); named_ok: the
     slot is known from the exe (D22-SLOTK), so its member's name is not tested"""
     if c['bases'] or not c['first'] or len(c['virtuals']) < 2: return False
@@ -5888,7 +5908,8 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
                                masked):
         return False                                     # `~C();` defined in the file: a real destructor
     if not c['first'][2]: return False
-    if not named_ok and not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]):
+    if not named_ok and not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]) and \
+            not (exe_ok and D22_CALLONLY_EXE.match(c['first'][2])):
         # a numbered sequence `P_00(), P_01(), ...` (InitHolder 0x00aa2020's FUN_00aa2020_Impl, S2-bodies)
         m0 = re.match(r'^(\w*?_)0+$', c['first'][2])
         v1 = c['virtuals'][1][2] or ''
@@ -5911,7 +5932,7 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
     name = c['qual'][-1]
     members = {v[2] for v in c['virtuals'] if v[2]}
     for m in re.finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), masked):
-        if re.sub(r'\s+', '', m.group(1)) in members: return False
+        if re.sub(r'\s+', '', m.group(1)) in members and not exe_ok: return False
     return True
 
 def _d22_defines_none(masked, c):
@@ -6029,7 +6050,8 @@ def r_vtable_dtor_slot(path, text, stats):
             done[c['qual'][-1] + ('<>' if c['template'] else '')] = t[2]
             stats['D22-SLOTK'] += 1
             continue
-        callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc'))) and \
+        callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc')),
+                                                    exe_ok=_d22_callonly_exe(path, key)) and \
             not any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
                     for o in classes if o['bases'])
         if not callonly:
