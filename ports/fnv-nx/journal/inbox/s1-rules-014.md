@@ -47,6 +47,23 @@
     sizeof(Conv) is 16 natively (static_assert in a test compile).
   - The other pointer-to-member typedefs in the tree are a local (hkpwheelconstraintdata), unused
     (navmeshobstaclemanager), or already fixed by XINC1 (computersmenu).
-* **START (farms)**: please run `layoutgate` again on a head that has 6c9a8ee0 and VFPAD1. The whole-tree report
+* **Gate blocker: fatal header errors on the MSVC side** (51a3ea0f):
+  - The msvc target has no headers. Since cf669574, fnvnx_compat.h includes <cstddef>, and units include <string.h>.
+  - After that fatal error, clang stopped instantiating templates and dumped only part of each unit.
+    - Example: frondengine's _Vector_val lost its template base and came out as 4 bytes instead of 12.
+    - On 4 units the MSVC side had 190 records instead of 457.
+  - The fix: the native compiler's system dirs go in as -idirafter, and __cpp_sized_deallocation is defined.
+  - Consequence: the cf66957439a9 whole-tree report undercounts, and so will any run on a head without 51a3ea0f.
+* **cf66957439a9's 260 field rows, by cause**:
+  - 200 are hkpSphereMotionD1E4 (vfpad-src, 5 variant units).
+  - 46 are vfpad, which VFPAD1 covers: FUN_00d9c110_cls, FnvInner, FUN_00cb30d0_cls, Shape.
+  - 1 is the old filler artifact (tes.cpp FUN_0045ae50).
+  - The other 13 are memfnptr sites, now recons, or template-base artifacts that the fatal-error fix removes.
+* **vfpad-src fix**, recon/s1_hkpspheremotion_d1e4_base (45af45ee, 5 units):
+  - hkReferencedObject's vfptr and members move into a 4-aligned base, as the unit's own hkpSphereMotionD1E41 does.
+  - The native layout is unchanged; MSVC's now equals it. Field rows: 0 on the 5 units, and they compile.
+* **memfnptr fix 3**, recon/s1_niddsreader_fn170 (ff1640ca): ClsReader::m_fn170 becomes a 4-byte code pointer under
+  GCC (d174 at 0x174, checked with a static_assert).
+* **START (farms)**: please run `layoutgate` again on a head that has 51a3ea0f (and 6c9a8ee0, VFPAD1). The whole-tree report
   cf66957439a9 predates the filler fix, TAIL1-PACK and the new causes.
 * Next: vfpad-src classes (per-class base recons), and the remaining whole-tree causes from the new report.
