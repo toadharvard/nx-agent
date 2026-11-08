@@ -198,6 +198,10 @@ compile_one() {
   # shellcheck disable=SC2086
   local cc=$CXX flags=$FLAGS_STR defs
   case $src in *.c) cc=$CC; flags=$CFLAGS_STR ;; esac
+  # T1: FNVNX_UNIT_OBJCACHE=<dir>: through the content-addressed cache (tools/link/objcache.py cc), shared by the
+  # farms (tools/farm/linkcache.sh, branch unitobj/cache): a unit with the same compiler, command line, source and
+  # headers comes back as the object the first farm compiled; the paths are part of the key, so it is byte-exact
+  [ -n "${FNVNX_UNIT_OBJCACHE:-}" ] && cc="python3 -I $OBJCACHE_PY cc $cc"
   defs=$(awk -F'\t' -v s="$src" '$1 == s {print $2; exit}' "$OUT/defines.tsv")
   # shellcheck disable=SC2086
   local rc=0
@@ -219,6 +223,7 @@ compile_one() {
   return 0      # xargs stops at a child's exit 255 or a signal: one unit must never end the others' compiles
 }
 export -f compile_one
+export OBJCACHE_PY=$HERE/tools/link/objcache.py FNVNX_UNIT_OBJCACHE=${FNVNX_UNIT_OBJCACHE:-}
 xargs -a "$LIST" -P "$JOBS" -I{} bash -c 'compile_one "$@"' _ {}
 
 : > "$OUT/objects.tsv"

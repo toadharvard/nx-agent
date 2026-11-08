@@ -342,6 +342,47 @@ def compile(cxx, flags, src, obj, cwd, timeout=None):
     return r.returncode, r.stderr
 
 
+SRC_EXT = ('.cpp', '.cc', '.cxx', '.c', '.C')
+ARG_TAKES = {'-include', '-imacros', '-isystem', '-iquote', '-idirafter', '-I', '-D', '-U', '-x', '-MF', '-MT', '-MQ',
+             '-o', '-Xassembler', '-Xlinker', '-aux-info', '-imultilib', '-isysroot', '-iprefix', '-iwithprefix'}
+
+
+def cc_main(args):
+    """`objcache.py cc <compiler> <args...>`: one compile through the cache (T1: compile.sh's units, shared across
+    the farms; FNVNX_UNIT_OBJCACHE names the cache). The source is the argument that names an existing C/C++ file and
+    is no option's value; the object is -o's value. Anything else (no -o, no source, -E, -M without an object, a
+    pipe): the compiler runs as given. stderr and the exit status are the compiler's (or the cached ones)."""
+    if not args:
+        print('objcache cc: no compiler', file=sys.stderr)
+        return 2
+    cxx, rest = args[0], args[1:]
+    d = os.environ.get('FNVNX_UNIT_OBJCACHE')
+    if d is not None:
+        os.environ['FNVNX_LINK_OBJCACHE'] = d
+    obj, src, flags, i = None, None, [], 0
+    while i < len(rest):
+        t = rest[i]
+        if t == '-o' and i + 1 < len(rest):
+            obj = rest[i + 1]
+            i += 2
+            continue
+        if t in ARG_TAKES and i + 1 < len(rest):
+            flags += [t, rest[i + 1]]
+            i += 2
+            continue
+        if not t.startswith('-') and t.endswith(SRC_EXT) and os.path.isfile(t) and src is None:
+            src = t
+            i += 1
+            continue
+        flags.append(t)
+        i += 1
+    if obj is None or src is None or '-E' in flags or '-' in flags:
+        return subprocess.run([cxx] + rest).returncode
+    rc, err = compile(cxx, flags, src, obj, os.getcwd())
+    sys.stderr.write(err)
+    return rc
+
+
 def summary(tag=''):
     s = STATS
     n = s['hits'] + s['misses']
@@ -389,6 +430,8 @@ def prune(root, max_mb=8192):
 
 if __name__ == '__main__':
     a = sys.argv[1:]
+    if a and a[0] == 'cc':
+        sys.exit(cc_main(a[1:]))
     if not a or a[0] not in ('stat', 'prune'):
         sys.exit(__doc__)
     root = a[1] if len(a) > 1 else cache_dir()
