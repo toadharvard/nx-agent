@@ -104,6 +104,26 @@ if [ -z "$FAIL" ]; then
 	done
 fi
 
+# The link and guest are published at once, before the boot steps (orchestrator: S5 waited for bl1's 0e8b2eb845be
+# link while its once-per-machine warm/cold check relinked for 30 min): link/<c12> and link-head, as full_job.sh
+# publishes them (lib_job.sh publish_link: the link outputs, fixed objects, guest/fnvnx.elf; no boot/ - the stub
+# boot here is not the full farm's). A link/<c12> that exists already (a full farm's, with its boots) is left as it is.
+# BOOTLOOP_PUBLISH=0: nothing. The report published there is this placeholder; the bootloop report goes to
+# reports/<farm> as before.
+NOTE_PUB="not published"
+if [ -z "$FAIL" ] && [ "${BOOTLOOP_PUBLISH:-1}" = 1 ]; then
+	if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/link/$C12" > /dev/null 2>&1; then
+		NOTE_PUB="link/$C12 exists already (not replaced)"
+	else
+		NOTE_TREE="prepared on this bootloop machine at $C12"; NOTE_OBJS="compiled on this bootloop machine at $C12"; OBJ_COMMIT=""
+		printf '# bootloop %s: link and guest\n\n- published by bootloop_job.sh right after the guest, before its stub boot (the bootloop report: reports/<farm>/%s-bootloop.md)\n' \
+			"$C12" "$C12" > "$REPORT"
+		publish_link "$B" || NOTE_PUB="publishing link/$C12 FAILED"
+	fi
+	log "publish: $NOTE_PUB"
+	step "publish link"
+fi
+
 # The incremental link's equivalence check (owner order: the warm link must be byte-identical to a cold one; leq1's
 # job, here so it runs on the machine whose cache is in use): once per machine (bootloop/linkeq.done), on the first
 # iteration whose link took compiles from the cache, the link and guest are built again with an empty cache at the
@@ -254,7 +274,7 @@ if [ -n "${FNVNX_UNIT_OBJCACHE:-}" ] && [ -z "${FARM_WIP_BRANCH:-}" ] && [ "${LI
 fi
 
 printf '%s\n' "${STEPS[@]}" > "$F/steps.tsv"
-python3 -I - "$B" "$STUB" "$F/steps.tsv" "$REPORT" "$COMMIT" "$(( $(date +%s) - T0 ))" "${COLD:-?}" "$FAIL" \
+NOTE_PUB=$NOTE_PUB python3 -I - "$B" "$STUB" "$F/steps.tsv" "$REPORT" "$COMMIT" "$(( $(date +%s) - T0 ))" "${COLD:-?}" "$FAIL" \
 	"${BOOTLOOP_EMU_TIMEOUT:-300}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" "$NOTE_LINKEQ" "$LS_NOTE" "$NOTE_DET" <<'EOF'
 import json, os, sys
 B, stub, steps, report, commit, total, cold, fail, emu_s, wip, tb, linkeq, ls_note, det = sys.argv[1:15]
@@ -312,6 +332,7 @@ elif prep_kept:
 else:
     path = 'prepare ran%s' % ('' if comp_now is None else ', %s units compiled' % comp_now)
 L += ['- path: %s; link %s s, guest %s s' % (path, byst.get('link', {}).get('seconds'), byst.get('guest', {}).get('seconds'))]
+L += ['- link published: %s' % (os.environ.get('NOTE_PUB') or 'not published')]
 L += ['- iteration: %d s (%.1f min; target 15 min)%s' % (total, total / 60, '; cold: the first build on this machine' if cold == '1' else ''),
       '- stub boot: game milestones %d/%d; last reached: %s; null device: %s; EMU_TIMEOUT %s s' % (
           reached, len(ms), bs.get('milestone') or 'none', {'1': 'FNVNX_STUB_NULLDEV=1', '0': 'off'}.get(nd, '-'), emu_s),
