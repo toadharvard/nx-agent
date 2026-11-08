@@ -92,6 +92,7 @@ import config
 # Leaf registers: an intercepted call to an exe function that is a straight-line leaf writing neither ecx nor edx leaves them as the caller held them (retsrc.preserved), as MSVC's optimiser relies on (0x00d3ab60 writes only eax and cl; 0x00d3abc0 keeps its argument in edx over the call).
 # EQ memory group (tests/s13/test_eqmem.py): a function-local static of a class type / spelled with other back-references in its name pairs with its native `_ZZ` object, the address of a paired static is the same object, and the native's own guard of a paired static is no private read.
 # EQ thunk-forward (tests/s13/test_thunkfwd.py): a native garbage word forwarded to the jump target of an exe function that is one `jmp rel32` (declared without parameters) is an artifact.
+# EQ bh_C (tests/s13/test_bhc.py): fclose_nolock / Deallocate identities, deleting_d0 of synthesized vtables, pop ecx; ret closes a frame, vslot_entered (native-vslot-differs for a call-count), canned-null-deref through a register copy, the float-store x87 probes with the f32den denormal mode, native-vcall-unplanted.
 HARNESS = 'difffuzz-20'
 
 

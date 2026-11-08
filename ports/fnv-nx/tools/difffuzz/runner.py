@@ -564,6 +564,8 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
     if callee_conv is not None:
         for i, (cx, ca) in enumerate(zip(rx.calls, ra.calls)):
             cv = callee_conv(cx.target) if cx.target >= 0 and cx.target not in libcalls.NO_ARGS else None
+            if cx.target == 0x00aa4060 and ca.target != cx.target:
+                cv = None     # (bh_C) MemoryManager::Deallocate(this, p) against the native cdecl operator delete(p): same family, no `this`
             if cv is None:
                 continue
             skip = dummies(cx.target) if dummies else ()
@@ -718,6 +720,8 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
             fv = float_verdict(4, bx, ba)
             if fv.get('tolerant') and abs(struct.unpack('<f', bx)[0]) > 1e-30:
                 d['float_word'] = fv
+            elif not fv.get('tolerant'):
+                d['float_store'] = True      # (bh_C) both stored the whole word and it differs beyond the tolerance: classify reruns the x87 probes on it
         # (difffuzz-20, zero-sign) a word that is -0.0 on one machine and +0.0 on the other, both machines having
         # stored it (the effective maps above hold the sign byte only): the classifier reruns the x87 probes on it
         w0 = first & ~3
@@ -925,6 +929,10 @@ class Pair:
                     vs = self.vslots_run(case, rx, ra)
                     if vs:
                         d = dict(d, vslot=vs)
+                    else:
+                        vn = self.vslot_entered(case, rx, ra)
+                        if vn:
+                            d = dict(d, vslot_native=vn)
                     return rx, ra, d
                 d = dict(d, index=0)
             else:
@@ -1142,6 +1150,39 @@ class Pair:
                                     exe='%08x' % slots[ks[0]])
         return None
 
+    def vslot_entered(self, case, rx, ra):
+        """(bh_C, 0x00b004e0) A call-count where the oracle made no call: a virtual call through a planted vftable
+        ran the exe's slot function as code on the oracle (no call event), and the native entered, through the same
+        slot of its copy of the vftable, a different function of the unit (it made the extra calls). The native
+        vtable's slot holds another function than the exe's (D26 / vtables fix class: CompressedArchiveFile's slot 8
+        is 0x00afc060 in the exe, BSFile::Open 0x00aff300 natively), not a function the native inlined. Returns the
+        same dict as vslot_native, or None."""
+        t = self.target
+        ent = getattr(t.image, 'entries', {}) or {}
+        entered = {o: a for a, o in ent.items() if a in ra.blocks and o != t.orig_addr}
+        if not entered:
+            return None
+        pins = getattr(t, 'vt_pins', {}) or {}
+        for v in sorted(set(case.vptrs.values())):
+            b = pins.get(v) or b''
+            slots = list(struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4]))
+            ap = (getattr(t, 'vt_ap', {}) or {}).get(v)
+            if not slots or ap is None:
+                continue
+            for base, m in (getattr(t, 'vt_mem', {}) or {}).items():
+                if not base <= ap < base + len(m):
+                    continue
+                words = struct.unpack('<%dI' % ((len(m) - (ap - base)) // 4), m[ap - base:])
+                for j, w in enumerate(words[:len(slots) + 2]):
+                    o = ent.get(w)
+                    if o is None or o not in entered:
+                        continue
+                    ks = [k for k in (j - 1, j) if 0 <= k < len(slots) and slots[k] in rx.blocks and slots[k] != o]
+                    if len(ks) == 1:
+                        return dict(vft='%08x' % v, native_slot=j, exe_slot=ks[0], native='%08x' % o,
+                                    exe='%08x' % slots[ks[0]])
+        return None
+
     def vslots_run(self, case, rx, ra):
         """A call-count where the native makes more calls: its first call the oracle does not make is a planted
         slot k whose next slot k+1 is oracle code the x86 machine ran for real (a function of the unit: no call
@@ -1316,7 +1357,7 @@ class Pair:
                     # frame's own `add esp, N` going straight to the epilogue (pops, `ret`): then a stdcall callee
                     # is as likely (a COM call through a vtable: 00b7c7b0's `call eax; add esp, 0x20; ret 4`), and
                     # 0 is tried first, the pushes after it
-                    n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 0
+                    n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 1   # (bh_C) `pop ecx` is one byte: 0x00aa13e0's `call edx; pop ecx; ret` closes the frame
                     rest = after[n:].lstrip(b'\x5b\x5d\x5e\x5f')
                     if not n or rest[:1] not in (b'\xc2', b'\xc3'):
                         continue
