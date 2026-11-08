@@ -981,10 +981,13 @@ class Pair:
             a = todo[0]
             tgt = {getattr(c, 'ret_to', None): c.target for c in cur.calls}
             later = {b: guess(b, tgt) for b in todo[1:]}      # the later sites take their guess meanwhile
+            # the evidence at this site is judged up to the run's next site: beyond it, a later site's guess may
+            # be the one that is wrong (a count that swallows the later site's words ends clean too: no proof)
+            cap = next((i + 1 for i, c in enumerate(cur.calls) if todo[1:] and c.ret_to == todo[1]), None)
             cands = list(dict.fromkeys(first(a, tgt) + ([0] if a in cdecl else []) + counts(a) +
                                        ([] if a in cdecl else [0])))
             best = None
-            for n in cands:
+            for j, n in enumerate(cands):
                 if not any(fixed.values()) and not n and not any(later.values()):
                     continue                                  # the run that failed already
                 self.pops.update(fixed)
@@ -992,10 +995,12 @@ class Pair:
                 self.pops[a] = n
                 x = self._run(case, max_steps)
                 runs += 1
-                if clean(x[0]):
+                if clean(x[0]) and (cap is None or j == 0):
                     done = (x, {**fixed, **later, a: n})
                     break
                 sc = reach(x[0])
+                if cap is not None:
+                    sc = min(sc, cap)
                 if best is None or sc > best[0]:
                     best = (sc, n, x)
             if done or best is None:
@@ -1003,11 +1008,27 @@ class Pair:
             fixed[a] = best[1]
             cur = best[2][0]
         if done is None and fixed:
-            # every site seen is fixed: the run with all the counts set decides
+            # every site seen is fixed: the run with all the counts set decides; else each site in turn takes
+            # the counts again with the others as they are (a site fixed on a later site's guess's account)
             restore(fixed)
             x = self._run(case, max_steps)
+            runs += 1
             if clean(x[0]):
                 done = (x, fixed)
+            for a in list(fixed) if done is None else ():
+                tgt = {getattr(c, 'ret_to', None): c.target for c in x[0].calls}
+                for n in dict.fromkeys(first(a, tgt) + [0] + counts(a)):
+                    if n == fixed[a] or runs >= 96:
+                        continue
+                    self.pops.update(fixed)
+                    self.pops[a] = n
+                    y = self._run(case, max_steps)
+                    runs += 1
+                    if clean(y[0]):
+                        done = (y, {**fixed, a: n})
+                        break
+                if done:
+                    break
         if done is None:
             restore({})
             return None
