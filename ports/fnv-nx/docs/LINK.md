@@ -268,6 +268,16 @@ bridge of its argument moves, unless something else is wrong on x86 too (`this-n
 `cast-conflict`, `result-pointer-not-passed`); with nothing to move it is bound directly and listed. V1 counts
 1,517 pairs / 2,196 references on f13.
 
+Two prepare POST hooks fix the declarations behind the commonest real bugs of these classes (tools/rules/s2_bodies.py,
+EQ's fuzz rows at link/0540aff0d154): **POP2** moves the words a getter's reference pushes too many to the call on
+its result whose reference pushes them too few (`buffer->GetChangeFlags(2)` read as a bool ->
+`buffer->GetChangeFlags().FUN_004280f0(2)`; `R(D(a, x))` -> `R(D(a), x)`), decided from the words of the
+references and definitions in build/units.json; **THIS2** turns a free `__stdcall` caller that hands its own ecx to
+a thiscall callee (the exe's code, listed in `THIS2_SITES`) into a member of a shell, or a member caller's call into
+`((Shell*)this)->f(..)`. Both add the new decorated reference names to the unit's `symbols`, so the pairs are
+compared again and bridged where the decomp's parameter types differ. What they leave is counted in
+prepare_stats.tsv (`POP2-SKIP-*`, `THIS2-SKIP-*`) and listed in `<tree>/build/pop2_skipped.tsv`.
+
 Classes in the report: `edx-dummy`, `reg-shift` (same register file, other index), `int-float-param`
 (x86 tolerated an int/float swap in a 4-byte slot), `ret-regfile`, `sret-explicit` (one side returns an aggregate,
 the other passes the buffer pointer explicitly), `aggregate-param` / `ret-aggregate` (aggregates of different
@@ -524,9 +534,34 @@ classes alike, C need not be constructible). The typeinfo is built from `std::tr
 `__direct_bases`): per base its `type_info` symbol (`typeid`), offset (the folded constant `(B *)(C *)4096`, minus
 4096) and public-ness (`std::is_convertible<C *, B *>`); repeated bases in `std::tr2::bases<C>` set
 `__non_diamond_repeat_mask`; GCC's choice of `__class` / `__si` (one public non-virtual base at offset 0) / `__vmi`.
-A base typeinfo no object defines is probed in the next round. Classes with virtual bases (no constant offset; VTT,
-construction vtables, virtual thunks) and anonymous-namespace classes are not synthesized. Errors in the probe drop
-only the items GCC names (or the class), and the class moves to its next host.
+A base typeinfo no object defines is probed in the next round. Anonymous-namespace classes are not synthesized.
+Errors in the probe drop only the items GCC names (or the class), and the class moves to its next host.
+
+Retries on one host (link 9f865b0a: 78 trap stubs of D23's `special-unresolved:typeinfo-for` / `vtable-for` /
+`VTT-for`, all with a 4 KiB zero block standing in):
+* *Units that do not compile after the probe's standard headers* (their own `std::exception` / `std::bad_alloc`,
+  or a `using namespace std` swap that `<type_traits>` makes ambiguous: blk_00640000_od, blk_00ac0000_od_ob1_variant,
+  blk_00b00000_od_ob1_variant, blk_00e00000_o2, frondengine_ob1_variant): probed again with `HEAD_BARE`, the same
+  helpers from GCC's builtins (`__direct_bases`, `__bases`, `__is_convertible`) and a declared `std::type_info`,
+  no header. The emitted slot functions of such a host use it too.
+* *A class hidden by a function of the same name* (`void FUN_00405310(); struct FUN_00405310 {...};`, the decomp's
+  constructor/destructor shells): probed again by its elaborated name `struct ::C`, through a typedef.
+* *A class whose scope has only a placement `operator delete`* (V<k>'s implicit deleting destructor finds no usual
+  one): V<k> declares its own; only V<k>'s D0, which is renamed to C's, would call it.
+* *Classes the derived class cannot stand for* - virtual bases (the VTT and construction vtables of V<k> are not
+  C's) or a direct base repeated in the hierarchy (the cast that gives its offset is ambiguous): the key function
+  is defined in a probe of the host, `::C::~C() {}` and, for the virtual functions C declares, `auto ::C::f(T)
+  const -> decltype(((const ::C *)0)->f(dv<T>())) {}`, so GCC emits C's own vtable group, `_ZTT`, `_ZTC` (hidden)
+  and `_ZTI` (`key_group`). A class with only inline virtuals (no key function) gets its complete destructor
+  called by qualified name and its `typeid` taken there, so the same data comes out as COMDAT copies. Only the data
+  is taken; the functions keep their real names (bound like any slot). A base probed only because another class's
+  typeinfo or construction vtable names it gets only its typeinfo. Virtual thunks no object defines
+  (`_ZTv<fixed>_<vcall>_f`) are generated: `this += fixed`, `this += *(vptr + vcall)`, tail call. A class whose key
+  function its unit defines keeps its reason.
+* *What the emitted slot functions name* (`close_emitted`): their code can catch or throw a class whose key
+  function is defined nowhere, or keep a COMDAT typeinfo or vtable that names a base's typeinfo or a virtual thunk.
+  Such a typeinfo is probed on the same host (typeinfo only, the C++ runtime's `std::` classes excepted), thunks
+  are generated, and both are linked into the host's object, round after round for the bases they name.
 
 Output, one object per host unit (`vtables/zz_vt_<unit>.o`, linked after the compiled objects): weak `_ZTV`, `_ZTI`,
 `_ZTS` for names no compiled object defines, and the non-virtual thunks (`_ZTh[n]<k>_f`: `sub`/`add w0`, tail call
@@ -691,6 +726,22 @@ class) that no unit pairs: the exe's constructor at `<ctor>` (a native `??0` def
 capstone). A free vftable gets the shell in the map; one with a vtable already takes it as a displaced vtable, so
 the slot fill and the extended copies (below) reach it either way. `ctor_vftables.tsv`: each candidate and outcome.
 On link 9f865b0a's inputs: 390 pairs (7 new V rows, 383 displaced), 319 of them shorter than the exe's vftable.
+After `exe_pair`, `member_store_pairs` (link class 4, s5-003 round 2) does the same for the vptrs a constructor
+stores at a displacement: its members' (the renderer's RendererMap<N> at +0x610.., one-slot placeholders called at
+slot 1) and its secondary bases'. The exe constructor's last `mov dword ptr [reg+d], imm32` of an RTTI vftable per
+offset d (0 < d < 0x100000, not through esp / ebp, before the first `ret`: `exevft.ctor_member_vftables`) is paired
+with the native vtable its compiled `??0` stores at the same offset (`membervt.vptr_stores`: capstone over the
+AArch64 code, `this` through copies and `this + c`, GOT and ADRP/ADD vtable addresses, the last store per offset,
+or the class of the constructor called with `this + d`; a call clobbers x0..x18). The decomp's layouts are the
+exe's (D11), so offsets compare as they are. A primary vtable takes a free vftable in the map or joins it as a
+displaced vtable (extended by `exe_vtable_copies`); a secondary one stands for it in the slot fill only. Named
+exclusions (`membervt.RULES`), never anonymous skips: `shader-factory-global-constant-map`, NiShaderFactory's (and
+so NiD3DShaderFactory's) `NiTFixedStringMap<NiGlobalConstantEntry*>` at +0x8, whose extension makes WinMain's INI
+load (0x005e0200) loop in GetPrivateProfileIntA (S5). `member_vftables.tsv`: per (constructor, offset) the exe
+classes, base or member, the native vtable, both slot counts and the outcome. On link 9f865b0a's inputs: 651
+offsets in 245 constructors (83 members, 568 secondary bases); 388 already paired (252 by the map, 136 hand-stored
+image vftables), 206 new (19 displaced primaries, 187 secondaries for the slot fill), 1 excluded; 14 member vtables
+shorter than the exe's (the 6 RendererMaps: 1 slot for 7).
 
 **Slot fill.** `exe_slot_fill`, after the pairing: a native vtable slot that calls a trap stub (`vslot-unresolved`,
 a virtual function defined nowhere) is bound to `__fnv_<a>`, the native definition at the address `a` the exe's

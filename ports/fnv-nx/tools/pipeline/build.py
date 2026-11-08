@@ -1707,6 +1707,10 @@ def seed_link_out(b, r, out):
     r.metric('link_seeded', len(got))
 
 
+def objcache_on(env):
+    return env.get('FNVNX_LINK_OBJCACHE', 'default') not in ('', 'none', 'off', '0')
+
+
 class Link(Stage):
     name = 'link'
     deps = ('compile',)
@@ -1805,10 +1809,19 @@ class Link(Stage):
             t = time.time()
             b.sh([PY, '-I', fl, 'resolve'] + args, log, env=env, check=True)
             r.metric('link_resolve%d_s' % n, round(time.time() - t, 1))
+            ph = re.findall(r'resolve phases: (.*)', open(log, errors='replace').read())
+            for name, sec in re.findall(r'([\w+/() -]+?) ([\d.]+) s(?:,|$)', ph[-1] if ph else ''):
+                r.metric('link_resolve%d_phase_%s_s' % (n, re.sub(r'\W+', '_', name.strip()).strip('_')), float(sec))
             shutil.copyfile(os.path.join(out, 'stats.txt'), os.path.join(d, 'resolve%d.stats.txt' % n))
 
         # S2c's order: resolve (asks for layouts and vtables), probe (layouts + synthesized vtables/typeinfo),
-        # resolve again with both, apply, trial link
+        # resolve again with both, apply, trial link. build/link/out persists between runs: resolve 1 starts from the
+        # compiled objects only, without the previous run's synthesized objects (fnvlink.reset_synth)
+        gone = subprocess.run([PY, '-I', '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import fnvlink; '
+                               'print(" ".join(fnvlink.reset_synth(sys.argv[2])))', os.path.dirname(fl), out],
+                              capture_output=True, text=True)
+        if gone.stdout.strip():
+            r.note('previous run\'s synthesized objects dropped before resolve 1: ' + gone.stdout.strip())
         resolve(1)
         # fnvlink probe = the layout probe, then the vtable synthesis; run as its two documented halves (probe with
         # FNVNX_NO_VTABLES=1, then vtables) to time each
@@ -1887,6 +1900,22 @@ class Link(Stage):
             r.metric('link_bypassing_relocs', int(mm.group(3)) + int(mm.group(4)))
         else:
             r.note('check_rebind.py gave no result (exit %d, %s)' % (rrc, b.rel(rb)))
+        # T1, incremental link: the compile cache's use per step (tools/link/objcache.py) and the steps' own phases
+        ltext = open(log, errors='replace').read()
+        for tag, n_, h_, cs in re.findall(r'objcache (\w+): (\d+) compiles, (\d+) hits \(\d+ %\), \d+ compiled '
+                                          r'\(([\d.]+) s\)', ltext):
+            r.metric('link_objcache_%s_compiles' % tag, int(n_))
+            r.metric('link_objcache_%s_hits' % tag, int(h_))
+            r.metric('link_objcache_%s_compile_s' % tag, float(cs))
+        for step, body in re.findall(r'^(bodies|vtables) phases: (.*)$', ltext, re.M):
+            for name, sec in re.findall(r'([\w+/ -]+?) ([\d.]+) s(?:,|$)', body):
+                r.metric('link_%s_phase_%s_s' % (step, re.sub(r'\W+', '_', name.strip())), float(sec))
+        if 'VERIFY MISMATCH' in ltext:
+            r['status'] = 'warn'
+            r.note('objcache: a cached compile differs from a fresh one (FNVNX_LINK_OBJCACHE_VERIFY=1, see the log)')
+        oc = os.path.join(ROOT, 'tools', 'link', 'objcache.py')
+        if objcache_on(env):   # least recently used results above FNVNX_LINK_OBJCACHE_MAX_MB (default 8192) go
+            b.sh([PY, '-I', oc, 'prune'], log, env=env)
         m, classes = parse_stats(os.path.join(out, 'stats.txt'))
         ctext = open(clog, errors='replace').read()
         cm, cclasses = parse_check(ctext)

@@ -289,6 +289,69 @@ also missing from the `new` family, although free is in `delete`. On 8b233f99, a
 malloc in the oracle against new / Allocate / a constructor natively. malloc is now an allocator and in the `new`
 family. d20-malloc selects the functions whose oracle code calls it. Test: `tests/s13/test_crtmalloc.py`.
 
+**d21-f3mem (F3, the memory class; SCOPED = d21).** Four harness artifacts behind cached hard verdicts of
+native-null-read, callee-saved, store-width / x86-only-store, native-stub-data and float, found by replaying a random
+sample of 30 reproducers per cause on link 0540aff0d154 and reading the traces:
+- *builtins mapped the null page.* `libcalls.Mem` mapped any page a CRT builtin touched, so the oracle's
+  `memcpy(dst, NULL, 8)` (0x00401460) or `InterlockedDecrement((long*)0x84)` read zeros where GCC's inlined load or
+  the shim's `ldxr` faulted (00433b70, 00bb0de0). The real CRT faults there too. A builtin's access now raises
+  `libcalls.Fault` where the machine's own load or store would (`x86emu/arm64emu._bmem`: a page mapped already or
+  `world.mappable`), and the run ends with that fault on that machine;
+- *a lost callee-saved register did not trigger pop learning.* An intercepted call of unknown convention (wild or
+  unplanted) that pops its arguments, in an `ebp` frame: `mov esp, ebp` repairs esp, so nothing faulted, but the
+  `pop esi/edi/ebx` before it read the argument words (callee-saved x86=False arm=True; 0070f4e0, 00d55bd0).
+  `runner.Pair.run` now also learns the pops when the oracle's run is clean except `saved_ok`, and a learnt
+  combination must keep the callee-saved registers too (it need not repair an esp difference the run already had);
+- *the code-stub rewrite took data for code.* `arm64emu._codeptr` turned any stored word in [0x08000000,
+  0x09000000) into its original address, so a canned result 0x0805ddf1 that both machines stored became 0x0005ddf1
+  natively (store-width / x86-only-store with an 0x08 top byte: the InitializeRuntimeCallbackStatus* family). Only
+  a stub the image binds (`__fnv_<X>` in its symbols) is rewritten now;
+- *canned results pointed into a private range.* A canned eax / x0 word in 0x08000000..0x0c000000 (the native
+  image, its stubs) or 0x0e000000..0x0e100000 (the oracle's stub pages) read the native image's own bytes on the
+  native machine and background on the oracle (00ad7ab0: a float field through such a pointer). `Case.ret_bytes`
+  flips bit 30 of such a word (`world.canned_out_of_private`, mirrored in `causes._ret_bytes`), the same on both
+  machines.
+d21-f3mem rechecks the cached divergences these can explain differently (`fnkeys._f3_mem`: one machine faulted,
+callee-saved, a differing word in the code-stub range, a canned result word in a private range).
+Test: `tests/s13/test_f3mem.py` (each of the four fails on the harness before it).
+
+**d21: virtual calls and vtables (F2, SCOPED = d21).** A random sample of 240 cached records of the F2 causes
+(40 each of vptr-unpaired, vcall-garbage, vcall-stub-alias, deleting-dtor-flags, deleting-dtor-ret, oracle-vcall)
+replayed on link 0540aff0d154: 134 still diverge, none of the five triage causes under its own name any more. Three
+mechanisms, each fixed as a class:
+- **d21-dtorvptr** (47 of the 134). Every level of an MSVC destructor stores its class's image vftable, GCC's D1/D0
+  its own vtable address point, and either compiler drops the stores it proves dead. The final vptr word of a destroyed
+  object is representation: the oracle's vftable against the native's address point (unpaired: vptr-unpaired), or
+  against nothing (vptr-store, or x86-only-store when units.json does not name the vftable), or nothing against the
+  native's address point (native-only-store, hard), and the first difference hid every later one (a second vptr at
+  +0x6c, fields). In a destructor (`??1`, `??_G`, `??_E`, D0/D1/D2) compare drops those words
+  (`runner.dtor_vptr_bytes`: each side left the word or stored a whole vtable word, the oracle an exe RTTI vftable or
+  a kind-V one, the native a `_ZTV` address point, a synthesized group or a kind-V vftable) and compares the rest; the
+  words alone are soft `vptr-store`. Rechecks cached mem-write records of destructors.
+- **d21-holes** (18 + 2 of the 134, all of the live vcall-stub-alias). difffuzz-19 made the unused parts of the stub
+  range background memory with a wild-call hook, but the stub hook covers the whole range: a call into a hole was
+  traced twice natively (`name:<hex>` or the code stub's original address, then the raw word) and once on x86, so the
+  next call compared against the duplicate (call-flow, native-undefined, native-inlined, dyninit-no-atexit, call-count).
+  The stub hook leaves holes to the wild hook, and `world.A64_HOLES`, in both hook lists, is hooked once. Rechecks
+  cached records whose native trace has such a pair.
+- **d21-vslot** (8 of the 40 vptr-unpaired records). A call through the planted vftable where the native reaches
+  another slot of it was followed (adaptive follow loaded the oracle's slot function, the oracle ran it untraced), and
+  the record became `call-count x86 0` = falloff?. Such a call-target is not followed: compare marks the native's callee
+  `arm_vcall: planted`, `Pair.vslots` numbers both callees in the exe's slots, and classify gives `vslot-shift` (the
+  native's slot is the oracle's minus one: a declaration numbering its virtuals from a slot-0 placeholder or a
+  hand-indexed `vtbl[k]`, D26 b; 7 records, e.g. 0x00a4d210's call-only `NiObjectNET { Unk0; Unk1; GetRTTI; }` reaches
+  NiRefObject::DeleteThis 0x00cfcc20 for GetRTTI) or `vslot-differs` (another shift; 1, two slots). A call-count whose
+  native extra call is slot k while the oracle ran slot k+1 (unit code) is vslot-shift too (`vslots_run`, 0x00ee8690's
+  `vtbl[49]`). Both are real bugs of fix class `vtable-slots` (S1-rules with D26 b; F2 in owners.py). Rechecks cached
+  call records of cases with planted vptrs.
+Same sample after d21: still diverging 134 -> 120, hard 66 -> 43, of which 13 are now named real bugs (vslot-shift
+11, vslot-differs 2; 2 of them were "gone" before: adaptive follow ran the oracle's slot function for real and the
+runs then agreed); soft 40 -> 49 (vptr-store 46); oracle gaps 28 -> 28 (oracle-vcall 20: oracle-only faults at an
+indirect call through an unplanted object, each machine reading its own slot layout from fuzz bytes; uninit-both 7).
+Test: `tests/s13/test_d21.py`.
+
+**difffuzz-20: a full refresh (HARNESS = difffuzz-20, orchestrator decision on EQ's eq-003).** The d21 rows (F2: destructor vptr words, stub holes, planted slots; F3: builtin faults, callee-saved pop learning, bound-stub rewrite, canned results out of the private ranges) and d24-pop (F1: pop learning on a derail without a fault, IAT slots by import-library spelling, exe import thunks) change how every function is fuzzed, so every cache from before them is refreshed; the rows stay for later partial refreshes. F3b (native-stub-data) is part of this refresh: the AArch64 stub range reads and writes as background memory, as the same addresses do on the oracle, except the 16-byte slots of the named and vtable stubs the image binds, where a data access still faults (only a data symbol the link leaves unbound becomes a named stub; a pointer chase through background words that lands on a code-stub page, even exactly on a bound `__fnv_<X>`, is no longer a native fault). F1b (oracle-fault, native-early-exit): `classify.entry_register_reads` no longer takes MSVC padding (`lea ecx, [ecx]`, `mov edi, edi`) or value-free writes (`or r, -1`, `and r, 0`, `sbb r, r`) for custom register reads, `engine.calibrate_custom` pairs each custom register with the parameter whose pairing agrees on at least 7 of 8 fixed cases where the declared order does worse (0x00d58d40 takes its index in eax), the adaptive follow no longer loads an oracle callee that the native function (or a unit function it ran) calls out of line itself, or where the native called a vtable padding slot (it skipped the call or dispatched it, it did not inline it: bool bytes read as oracle faults inside the followed body) and runs a case again after its last load (it stopped after five, returning the run from before the fifth), the bool-repr probe also plants 1 in a background byte the oracle reads by itself and accepts a trial that leaves only a NaN sign or payload store, an oracle-only fault after a store into the oracle's own return-address slot is `oracle-frame-smash` (by design: a local array overrun by an out-of-range fuzzed count), and a trailing oracle-only copy constructor into the result buffer from a stack local plus that local's destructor is `nrvo-copy` (by design: MSVC /Od without NRVO; the local is the native's result buffer in the earlier calls).
+
 **difffuzz-19: a full refresh (HARNESS = difffuzz-19, orchestrator-approved in S1-fuzzB-002).** S1-fuzzB's untyped
 float results (`x86emu.x87_result_use`), its CRT_MATH builtins and engine's preference for a decorated spelling
 change verdicts that no key reflects, so every key changes once; the scoped rows d14..d18 are folded into it (their
@@ -497,6 +560,7 @@ Every real-bug cause belongs to exactly one fix class (`causes.FIX_CLASSES`). A 
 | `static-init` | S10 | `dyninit-no-atexit` | every dynamic initializer registers its destructor as the exe does (atexit) |
 | `call-abi` | S1b | `uninit-arm`, `native-garbage-arg`, `native-stale-result`, `callee-saved`, `sret-mismatch` | every call passes and preserves registers by the callee's MSVC convention (argument slots written, results not reused, callee-saved kept, sret as MSVC) |
 | `data-binding` | S2c | `native-stub-data`, `native-address`, `split-global`, `import-slot-called`, `call-args` | every data symbol and import binds to the exe object (no stub as data, no unit copy, no native address where the exe has an image address, bridges deliver the bytes) |
+| `vtable-slots` | S1-rules | `vslot-shift`, `vslot-differs` | every virtual call reaches the exe's slot: each declaration a caller dispatches through numbers its virtuals in D26's one minus-one order (d21-vslot) |
 | `vtables` | S2c | `vptr-unpaired`, `native-calls-data`, `thunk-binding`, `vslot-trap` | every image vftable pairs with a full native vtable of the static class (no short vtables, overrides bound to their this-adjusting thunks) |
 
 ## Lockstep (`lockstep.py`, D14)

@@ -92,8 +92,14 @@ POLICY = {
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
+    'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
+                                              'buffer and destroys the local, GCC constructs it there (copy '
+                                              'elision, allowed by C++), F1b'),
+    'oracle-frame-smash': ('by-design', '-', False, 'the oracle faults after a store into its own return-address '
+                                                    'slot: a local array overrun by an out-of-range fuzzed count (UB '
+                                                    'in C++; the exe corrupts its frame the same way), F1b'),
     # --- harness / oracle-model artefacts ----------------------------------------------------------------------------
-    'local-static':   ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
+    'local-static':  ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
                                                  '(fuzzed bytes), GCC in .bss (zero): not compared state'),
     'uninit-both':    ('artifact', 'S13', False, 'both machines read garbage: the fuzzed case is invalid for both'),
     'oracle-vcall':   ('artifact', 'S13', False, 'the oracle faults on an indirect call the harness does not model '
@@ -184,6 +190,14 @@ POLICY = {
                                                 'where the oracle has an image-window address: an unrebound '
                                                 'variable or table (or a literal: check the pointee)'),
     'vptr-unpaired':  ('real-bug', 'S2c', False, 'no kind-V row pairs the native vtable with the image vftable'),
+    'vslot-shift':    ('real-bug', 'S1-rules', True, 'a virtual call through the planted vftable reaches the exe\'s '
+                                                     'slot k-1 where the oracle calls slot k: the caller\'s class '
+                                                     'declaration numbers its virtuals from a slot-0 placeholder, '
+                                                     'not D22\'s minus-one order (D26 b: `virtual ~X()` for the '
+                                                     'placeholder; tests/s5/callonly_vt.py)'),
+    'vslot-differs':  ('real-bug', 'S1-rules', True, 'a virtual call through the planted vftable reaches another '
+                                                      'slot than the oracle\'s (not one lower): the caller\'s class '
+                                                      'declaration orders its virtuals otherwise than the exe'),
     'falloff?':       ('real-bug', 'S1', True, 'the native runs off a function end (FALL1)'),
     'after-native-undefined': ('real-bug', 'S1', True, 'the function calls a C++ name the link binds to nothing '
                                                        '(native-undefined): the native side gets a canned result '
@@ -306,6 +320,10 @@ FIX_CLASSES = {
     'vtables':       ('S2c', 'every image vftable pairs with a full native vtable of the static class (no short '
                              'vtables, overrides bound to their this-adjusting thunks)',
                       ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap')),
+    'vtable-slots':  ('S1-rules', 'every virtual call reaches the exe\'s slot: each declaration a caller dispatches '
+                                  'through numbers its virtuals in D26\'s one minus-one order (a `virtual ~X()` '
+                                  'where the exe has its deleting destructor, then the exe\'s slots in order)',
+                      ('vslot-shift', 'vslot-differs')),
 }
 FIX_CLASS_OF = {c: k for k, v in FIX_CLASSES.items() for c in v[2]}
 
@@ -417,6 +435,8 @@ def _rule_error(d, rec=None):
             if fa[1] < NULL_END:
                 return 'native-null-read'
     if a is None and isinstance(x, str):
+        if d.get('x86_frame_smash'):
+            return 'oracle-frame-smash'
         if x == 'exc:3':
             return 'oracle-trap'
         fx = _fault_addr(x)
@@ -1418,12 +1438,13 @@ def _alloc_result(k):
 
 
 def _ret_bytes(case, k):
+    import world             # plain module (no emulator): the same move out of the private ranges as Case.ret_bytes
     rets = case.get('rets') or []
     if k < len(rets) and rets[k] is not None:
-        return bytes.fromhex(rets[k]).ljust(16, b'\0')
+        return world.canned_out_of_private(bytes.fromhex(rets[k]).ljust(16, b'\0'))
     import random
     r = random.Random(((case.get('seed') or 0) * 1000003 + k) & 0xffffffff)
-    return bytes(r.getrandbits(8) for _ in range(16))
+    return world.canned_out_of_private(bytes(r.getrandbits(8) for _ in range(16)))
 
 
 def _canned_word(case, v, upto=64):

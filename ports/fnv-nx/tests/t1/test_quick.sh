@@ -49,6 +49,13 @@ mkdir -p "$G/ports/fnv-nx/tools/farm" "$T/jobs"; cp "$P/tools/farm/quick_job.sh"
 for j in full fuzz audit equiv sweep threads frames mem plat scenario boottrace; do
 	printf '#!/bin/sh\necho "$(date +%%s) %s" >> %s/order\nsleep 1\neval "out=\\${$#}"; printf "# %s\\n\\n- %s ok\\n" > "$out"\nexit ${RC_%s:-0}\n' "$j" "$T" "$j" "$j" "$j" >"$T/jobs/${j}_job.sh"
 done
+# the full_job stand-in leaves stage records like the pipeline's (PREPARE_STATUS=fail: the prepare stage failed)
+cat >>"$T/jobs/full_job.sh.pre" <<'SH'
+for st in prepare compile link guest; do mkdir -p "$FARM_HOME/full/build/$st"
+  s=ok; [ "$st" = prepare ] && s=${PREPARE_STATUS:-ok}
+  printf '{"status": "%s"}\n' "$s" >"$FARM_HOME/full/build/$st/stage.json"; done
+SH
+{ head -1 "$T/jobs/full_job.sh"; cat "$T/jobs/full_job.sh.pre"; tail -n +2 "$T/jobs/full_job.sh"; } >"$T/jobs/f.tmp" && mv "$T/jobs/f.tmp" "$T/jobs/full_job.sh"
 mkdir -p "$T/home/capture/k1"; cp -r "$T/store/index" "$T/home/capture/k1/"
 run_q() { FARM_HOME=$T/home QUICK_JOBS=$T/jobs bash "$G/ports/fnv-nx/tools/farm/quick_job.sh" "$1" "$T/q-$1.md" >"$T/q.log" 2>&1; }
 QUICK_BASE=$B run_q "$H1"
@@ -94,4 +101,8 @@ ok "and equiv runs again (not a pass before)" 'grep -q "^| equiv | ran | 0 " "$T
 ok "passing checks stay skipped" 'grep -q "^| fuzz | skipped: not affected" "$T/q-$D2.md"'
 run_q "$D3"
 ok "all passed: a docs-only head runs nothing" '! grep -q "| ran |" "$T/q-$D3.md"'
+# full_job exits 0 with a failed prepare stage: the build is failed, fuzz/audit/lane D skipped with the reason
+rm -rf "$T/home/quick"; PREPARE_STATUS=fail run_q "$D1"
+ok "failed stage: build reported failed with its stage" 'grep -q "^| build | ran | 2 .*the build failed: prepare: fail" "$T/q-$D1.md"'
+ok "failed stage: fuzz and lane D skipped" 'grep -q "^| fuzz | skipped: the build failed" "$T/q-$D1.md" && grep -q "^| threads | skipped: the build failed" "$T/q-$D1.md"'
 [ $fails = 0 ] && echo "test_quick: all ok" || { echo "test_quick: $fails failed"; exit 1; }

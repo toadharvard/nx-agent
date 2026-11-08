@@ -94,7 +94,11 @@ CLASSES = {
     'STAND5': 'platform',       # STAND2 for an in-class member body whose MSVC name the unit binds to another unit's address
     'STAND4': 'platform',       # STAND1/2 for a static free stand-in: the definition becomes an extern declaration of the bound name
     'STAND6': 'platform',       # STAND2 for a __declspec(noinline) stand-in, in any unit (MSVC never inlined it)
-    'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static)
+    'ADDRFN1': 'platform',     # a code address cast to void* takes the address symbol __fnv_<a> (a GCC asm label)
+    'POP2': 'neutral',          # POST hook: pop-mismatch chains, the words a getter leaves move to the call that pops them
+    'THIS2': 'neutral',         # POST hook: a caller that hands its ecx to a thiscall callee calls it on its object
+    'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static);
+                               # not neutral: MSVC then drops the static recipe functions only a harness referenced
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
     'INC1': 'neutral',          # quoted include spelled as the including directory's file (MSVC: no case)
     'ANON2': 'platform',        # raw storage for members with special functions in an anonymous struct of a union
@@ -136,11 +140,13 @@ CLASSES = {
     'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
-PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
+PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names', 'POP2': 'pop_chains',
+          'THIS2': 'this_members'}
 # POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
-POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1'}
+POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
+              'pop_chains': 'POP2', 'this_members': 'THIS2'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
@@ -626,9 +632,11 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     /EHs-c-, leave-out builds) makes the same choice, so their objects stay comparable."""
     ok, text = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant)
     if not ok and not plain and (tree / 'equiv_rules.txt').exists():
-        # STANDIN-RETRY: a stand-in variant chosen by the first error (the same choice for every caller)
+        # STANDIN-RETRY: stand-in variants for a unit that does not compile, in order (the same choice for every
+        # caller): the variant its first error names, then SDK-HIDE, then lean, then both
         extra = [d for pat, d in STANDIN_RETRIES if re.search(pat, text)]
-        tries = ([(lean, extra)] if extra else []) + ([(True, extra)] if not lean else [])
+        hide = extra + ['/DFNVNX_EQUIV_SDKHIDE=1']
+        tries = ([(lean, extra)] if extra else []) + [(lean, hide)] + ([(True, extra), (True, hide)] if not lean else [])
         for ln, ex in tries:
             ok2, text2 = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, ln, variant, ex)
             if ok2:
@@ -638,7 +646,11 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
 
 # STANDIN-RETRY: (first-error pattern, /D of a gate stand-in variant). A unit that forward-declares the SDK's own
 # `union _ULARGE_INTEGER;` meets the stand-in's class of that name (other units declare `class _ULARGE_INTEGER;`).
-STANDIN_RETRIES = [(r"'_ULARGE_INTEGER' : 'union' type redefinition", '/DFNVNX_EQUIV_ULARGE_UNION=1')]
+# A unit that includes <intrin.h> inside a namespace (hkadeltacompressedanimation's fnv_00e359f0) gets the barriers
+# declared there too; MSVC 2008 takes them and the compat's global extern "C" ones for two functions (C2668). The
+# retry includes <intrin.h> in the compat first (not for every unit: 140 of 382 intrinsic units break then).
+STANDIN_RETRIES = [(r"'_ULARGE_INTEGER' : 'union' type redefinition", '/DFNVNX_EQUIV_ULARGE_UNION=1'),
+                   (r"'_(?:ReadWrite|Read|Write)Barrier' : ambiguous call", '/DFNVNX_EQUIV_INTRIN=1')]
 
 
 def _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant, extra=()):

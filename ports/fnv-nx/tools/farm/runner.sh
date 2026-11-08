@@ -5,6 +5,8 @@
 #
 # Jobs: prepare | census | compile <k> <N> | <any tools/farm/<job>_job.sh with args after <commit>>.
 # WATCH=wip TRY_K=k TRY_N=n: a try farm (below) - the job runs on unmerged agent work instead of the integration head.
+# WIP_ONLY=<regex>: a try farm takes only the wip branches whose name matches (e.g. '^wip/d26$'); its reports name the
+# branch and the commit in their title.
 # Loop: wait for a new head of the integration branch of the public repository (read-only, no credentials), check out
 # the job scripts at that head, run the job, publish its report to branch `reports/<name>` of the private artifacts
 # repository, repeat. Several commits that land during one run collapse into the newest. The process exits by
@@ -93,6 +95,9 @@ next_wip() {  # prints "<sha> <branch>" of a wip branch of this farm that has no
     # retired wip branches point at an integration commit: nothing to try
     git -C "$NX" merge-base --is-ancestor "$sha" "origin/$BRANCH" 2>/dev/null && continue
     b=${ref#refs/heads/}
+    # WIP_ONLY=<regex>: only the wip branches whose name matches (try1of1 tested a stale wip/a03060db789a, taken first
+    # in ls-remote order, instead of wip/d26)
+    if [ -n "${WIP_ONLY:-}" ] && ! printf '%s\n' "$b" | grep -Eq -- "$WIP_ONLY"; then continue; fi
     python3 -c 'import sys,zlib; sys.exit(0 if zlib.crc32(sys.argv[1].encode()) % int(sys.argv[2]) == int(sys.argv[3]) - 1 else 1)' "$b" "$TRY_N" "$TRY_K" || continue
     grep -qx "$sha" "$FARM_HOME/$NAME.done" 2>/dev/null && continue
     echo "$sha $b"; break
@@ -109,7 +114,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
   if [ "$WATCH" = wip ]; then
     read -r H WB < <(next_wip) || true
     if [ -z "${H:-}" ]; then sleep 60; continue; fi
-    git -C "$NX" fetch -q https://github.com/toadharvard/fnv-nx-build "+refs/heads/$WB:refs/remotes/wip/${WB#wip/}" || { sleep 60; continue; }
+    git -C "$NX" fetch -q "$(git -C "$ARTIFACTS" remote get-url origin)" "+refs/heads/$WB:refs/remotes/wip/${WB#wip/}" || { sleep 60; continue; }
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "origin/$BRANCH" || { sleep 60; continue; }
     TAG="${WB//\//_}-"
   else
@@ -144,6 +149,11 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
   # a job's machine-readable summary (<report>.json, e.g. fuzz_job.sh's fnvnx-fuzz-summary/1) goes first, its report
   # second: a report on the branch always has its summary beside it when the job wrote one
   [ -f "$R" ] && [ $rc -eq 0 ] && [ -f "${R%.md}.json" ] && publish_report "${R%.md}.json"
+  # a try farm's report names what it tried: the wip branch and the commit, in its title line
+  if [ "$WATCH" = wip ] && [ -f "$R" ]; then
+    sed -i "1{/^#/s|\$| ($WB @ $H12)|;}" "$R"
+    head -1 "$R" | grep -q "^#" || sed -i "1i # $JOB ($WB @ $H12)\n" "$R"
+  fi
   [ -f "$R" ] && publish_report "$R"
   if [ "$WATCH" = wip ]; then echo "$H" >> "$FARM_HOME/$NAME.done"; else echo "$H" > "$LAST"; fi
   log "done $JOB at $H12 rc=$rc"

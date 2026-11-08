@@ -109,6 +109,7 @@ class Result:
         self.saved_ok = True     # callee-saved registers preserved
         self.noreturn = None            # the noreturn callee the run ended at (libcalls.NORETURN_X86)
         self.esp_ok = None              # the target returned with esp = entry + 4 + its own ret N
+        self.ret_smashed = False        # the target wrote its own return-address slot (a frame overrun, F1b)
 
 
 class X86Engine:
@@ -177,6 +178,12 @@ class X86Engine:
         for p in range(world.page_of(addr), addr + size, PAGE):
             self._map(p)
 
+    def _bmem(self, uc, r):
+        """Memory for a builtin: faults where this machine's own load or store would (libcalls.Fault)."""
+        return libcalls.Mem(uc, r.writes, self._ensure,
+                            check=lambda p, a: p in self.mapped or world.mappable(a, 'x86') or
+                            libcalls.uc_mapped(uc, a))
+
     def _on_unmapped(self, uc, access, address, size, value, data):
         if not world.mappable(address, 'x86') or not world.mappable(address + size - 1, 'x86'):
             self._fault = 'fault:%s:%08x' % ({20: 'w', 21: 'x'}.get(access, 'r'), address)
@@ -231,8 +238,15 @@ class X86Engine:
                 lo = int(a, 16) if isinstance(a, str) else a
                 hrd.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_read, user_data=world.BYTE_READS, begin=lo,
                                        end=lo + max(1, len(b)) - 1))
+        if world.BG_READS is not None:
+            for lo, hi in ((world.NULL_END, world.STACK[0]), (world.STACK[1], world.X86_PRIV[0]),
+                           (world.X86_PRIV[1], world.MAX)):
+                hrd.append(uc.hook_add(UC_HOOK_MEM_READ, self._on_bg_read, user_data=world.BG_READS, begin=lo,
+                                       end=hi - 1))
         start = start if start is not None else next(iter(self.text_funcs))
         esp0 = uc.reg_read(UC_X86_REG_ESP)
+        # no MSVC code writes its own return-address slot: a store there is a local buffer overrun (difffuzz-20)
+        hrs = uc.hook_add(UC_HOOK_MEM_WRITE, self._on_ret_slot, user_data=r, begin=esp0, end=esp0 + 3)
         self._fault = None
         try:
             uc.emu_start(start, world.SENTINEL, timeout=world.RUN_TIMEOUT_US, count=max_steps)
@@ -241,6 +255,7 @@ class X86Engine:
         finally:
             uc.hook_del(hb)
             uc.hook_del(hb2)
+            uc.hook_del(hrs)
             for h in hwild:
                 uc.hook_del(h)
             for h in hws:
@@ -291,6 +306,18 @@ class X86Engine:
     def _on_read(self, uc, access, address, size, value, log):
         log.setdefault(address, set()).add(size)
 
+    def _on_bg_read(self, uc, access, address, size, value, log):
+        e = log.setdefault(address, [set(), None])
+        e[0].add(size)
+        if size == 1 and e[1] is None:
+            try:
+                e[1] = bytes(uc.mem_read(address, 1))[0]
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _on_ret_slot(self, uc, access, address, size, value, r):
+        r.ret_smashed = True
+
     def _on_write(self, uc, access, address, size, value, r):
         for i in range(size):
             r.writes[address + i] = (value >> (8 * i)) & 0xff
@@ -304,8 +331,11 @@ class X86Engine:
         retaddr = world.u32(uc.mem_read(esp, 4))
         words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(16)]
         bname = libcalls.X86.get(address)
-        if bname is not None and self._builtin(uc, bname, esp, retaddr, words, r):
-            return
+        try:
+            if bname is not None and self._builtin(uc, bname, esp, retaddr, words, r):
+                return
+        except libcalls.Fault as e:              # the real CRT function faults there too (libcalls.Mem.check)
+            self._fault = e.args[0]; uc.emu_stop(); return
         code = self.follow(address) if self.follow and address not in libcalls.NORETURN_X86 else None
         if code:
             # the native object never calls this address (GCC inlined it, typically a header inline function MSVC
@@ -425,7 +455,10 @@ class X86Engine:
         ret = world.u32(uc.mem_read(esp, 4))
         words = [world.u32(uc.mem_read(esp + 4 + 4 * i, 4)) for i in range(16)]
         if name in libcalls.IMPORT_BUILTINS:
-            v = libcalls.run_import(name, libcalls.Mem(uc, r.writes, self._ensure), words)
+            try:
+                v = libcalls.run_import(name, self._bmem(uc, r), words)
+            except libcalls.Fault as e:
+                self._fault = e.args[0]; uc.emu_stop(); return
         else:
             k = len(r.calls)
             r.calls.append(Call(libcalls.import_id(name), [uc.reg_read(UC_X86_REG_ECX),
@@ -481,7 +514,7 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_EAX, v & 0xffffffff); uc.reg_write(UC_X86_REG_EDX, v >> 32)
             uc.reg_write(UC_X86_REG_ESP, esp + 4); uc.reg_write(UC_X86_REG_EIP, ret); return True
         try:
-            v = libcalls.run(name, libcalls.Mem(uc, r.writes, self._ensure), words)
+            v = libcalls.run(name, self._bmem(uc, r), words)
         except KeyError:
             return False
         except libcalls.TooLong:

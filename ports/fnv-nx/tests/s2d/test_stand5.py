@@ -125,5 +125,87 @@ class Stand5(unittest.TestCase):
         self.assertEqual(out.count('\n'), SRC.count('\n'))   # line numbers stay
 
 
+STL_SRC = '''namespace fnv_00a00100 {
+namespace std {
+template <class C> struct Buf
+{
+    void* file;
+    Buf* open(const char*, int);
+    Buf* close()
+    {
+        return open(0, 2);
+    }
+    int Size()
+    {
+        return 4;
+    }
+};
+template <class C> struct Out
+{
+    Buf<C> buf;
+    struct Sentry
+    {
+        Out& o;
+        Sentry(Out& s) : o(s)
+        {
+            o.buf.open(0, 1);
+        }
+    };
+    Out(const char* n) : buf()
+    {
+        buf.open(n, 2);
+    }
+};
+}
+}
+namespace other {
+template <class C> struct Buf2
+{
+    int Close()
+    {
+        return 1;
+    }
+};
+}
+'''
+
+
+class Stand5Stl(unittest.TestCase):
+    def test_unit_copies_of_the_stl(self):
+        """In the decomp's unit copies of the MSVC STL (`namespace fnv_<a> { namespace std`), members of class
+        templates, of classes nested in them and constructors with an initializer list become declarations when
+        every symbol of the copy's MSVC name binds an address another unit defines; an unbound member keeps its
+        body, and so does a template member outside such a copy."""
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'build'))
+            os.makedirs(os.path.join(d, 'src'))
+            units = {'units': [
+                {'source': 'src/a.cpp', 'flags': ['/O2'], 'functions': [], 'symbols': {
+                    '?close@?$Buf@D@std@fnv_00a00100@@QAEPAU123@XZ': '0x00406000',
+                    '??0Sentry@?$Out@D@std@fnv_00a00100@@QAE@AAU123@@Z': '0x00406100',
+                    '??0?$Out@D@std@fnv_00a00100@@QAE@PBD@Z': '0x00406200',
+                    '?Close@?$Buf2@D@other@@QAEHXZ': '0x00406300'}},
+                {'source': 'src/b.cpp', 'flags': ['/O2'], 'functions': [
+                    {'symbol': '?F%d@@YAXXZ' % i, 'address': '0x0040%d' % (6000 + 100 * i)} for i in range(4)],
+                 'symbols': {}}]}
+            json.dump(units, open(os.path.join(d, 'build', 'units.json'), 'w'))
+            path = os.path.join(d, 'src', 'a.cpp')
+            open(path, 'w').write(STL_SRC)
+            import s1_compile   # the rules cache units.json per process: read this test's
+            s1_compile._UNIT_SYMBOLS = s1_compile._UNIT_INFO = s1_compile._ALL_FUNCTIONS = None
+            s2_bodies._FUNCTION_NAMES.clear()
+            st = collections.Counter()
+            out = s2_bodies.r_stand_in_class_bodies(path, STL_SRC, st)
+        self.assertEqual(st['STAND5'], 3)
+        for decl in ('Buf* close(); /* fnv-nx STAND5', 'Sentry(Out& s); /* fnv-nx STAND5',
+                     'Out(const char* n); /* fnv-nx STAND5'):
+            self.assertIn(decl, out)
+        for gone in ('return open(0, 2);', 'o.buf.open(0, 1);', 'buf.open(n, 2);'):
+            self.assertNotIn(gone, out)
+        for keep in ('return 4;', 'return 1;'):
+            self.assertIn(keep, out)
+        self.assertEqual(out.count('\n'), STL_SRC.count('\n'))
+
+
 if __name__ == '__main__':
     unittest.main()

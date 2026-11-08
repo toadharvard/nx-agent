@@ -36,6 +36,7 @@ import struct
 import subprocess
 
 import elfsyms
+import objcache
 
 OBJDUMP = os.environ.get('OBJDUMP', 'aarch64-linux-gnu-objdump')
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
@@ -194,8 +195,7 @@ def probe_unit(tree, workdir, unit, types):
             break
         text, first = probe_source(os.path.join(tree, unit), [spell[t] for t in alive])
         open(src, 'w').write(text)
-        r = subprocess.run([CXX, *flags(tree), '-fno-ipa-icf', src, '-o', obj], cwd=tree, capture_output=True, text=True,
-                           errors='replace')
+        r = objcache.Result(*objcache.compile(CXX, [*flags(tree), '-fno-ipa-icf'], src, obj, cwd=tree))
         if os.environ.get('FNVNX_PROBE_DEBUG'):
             print(r.stderr[:3000])
         if r.returncode == 0:
@@ -332,4 +332,5 @@ def run(out, tree, jobs=4):
                                                                      '?' if l.pod is None else l.pod, POD_RULE))
     got = sum(1 for l in lay.values() if l)
     print('layouts: %d known, %d not nameable' % (got, len(lay) - got))
+    print(objcache.summary('layouts'), flush=True)
     print('classes:', dict(collections.Counter(l.cls for l in lay.values() if l)))
