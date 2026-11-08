@@ -1993,7 +1993,8 @@ check('D26 call-only: ... a step-2 sequence is not',
 _cl = tempfile.mkdtemp(); open(os.path.join(_cl, 'classlayout.tsv'), 'w').write(
     '# fnvnx-classlayout/1\nclass\tvftable\tkind\tdtor_slot\treason\tfile\tqualified\n'
     'Named\t01000000\tminus-one\t0\trtti\t\t\nHeapStandIn\t01000004\texe-order\t-1\tdefined-slot0\t\t\n'
-    'TESWorldSpace\t0103195c\tminus-one\t4\tvflag\t\t\nComX\t01000008\tcom\t-1\trtti-com\t\t\n')
+    'TESWorldSpace\t0103195c\tminus-one\t4\tvflag\t\t\nComX\t01000008\tcom\t-1\trtti-com\t\t\n'
+    'Named\t0100000c\texe-order\t-1\tsecondary off 8\t\t\t\t\n')
 os.environ['FNVNX_CLASSLAYOUT'] = os.path.join(_cl, 'classlayout.tsv'); prepare.__dict__['_fnvnx_classlayout'] = None
 check('D22-CL: minus-one, slot 0: a named first virtual converts (no placeholder name needed)',
       run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'Named').replace('v0()', 'Reset()')),
