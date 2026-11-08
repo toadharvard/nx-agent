@@ -6297,6 +6297,30 @@ def r_split_virtual_declarators(path, text, stats):
         text = text[:a] + rep + text[b:]
     return text
 
+# ---------------------------------------------------------------------------------------------------------- HKRO1
+#
+# Havok's hkReferencedObject declares, after its destructor, `getClassType()` and `calcContentStatistics(collector,
+# cls)`: every hkReferencedObject-derived exe vftable has 0x00c90350 / 0x00c90360 at slots 1 / 2 (R4 vtgate abi_check:
+# hkpWeldingViewer 010d1634 slot 3 is 0x00c90360; S2-bodies W32: 11 Havok tables one slot off from slot 2 on). 17 units
+# declare hkReferencedObject with the destructor only (9 have the full form, 12 the two without the destructor), so
+# their derived classes number every own virtual two slots early. HKRO1 adds the two declarations after the destructor
+# under GCC (FNVNX_HKRO1; empty under MSVC, whose objects stay as they are), with `void` parameter types (the unit may
+# not declare hkClass): declared-only slots, which the link fills from the exe's. Only a class named
+# hkReferencedObject whose virtuals are exactly its destructor.
+def r_hk_referenced_object_slots(path, text, stats):
+    """HKRO1: hkReferencedObject's two missing base virtuals after its destructor (see above)."""
+    if 'hkReferencedObject' not in text: return text
+    masked = d22_mask(text)
+    edits = []
+    for c in d22_classes(text, masked):
+        if c['qual'][-1] != 'hkReferencedObject': continue
+        if [v[2] for v in c['virtuals']] != ['~hkReferencedObject']: continue
+        edits.append(c['virtuals'][0][1])
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + ' FNVNX_HKRO1 /* fnv-nx HKRO1 */' + text[at:]
+    stats['HKRO1'] += len(edits)
+    return text
+
 # ---------------------------------------------------------------------------------------------------------- EMPTY1
 #
 # A placeholder object for an empty string (R2's trap list, rank 32: fnv_00b2d2e0::TagEmpty). The decomp writes the
@@ -6566,6 +6590,6 @@ REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_add
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_split_virtual_declarators, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
+              r_implicit_bound_destructors, r_split_virtual_declarators, r_hk_referenced_object_slots, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
               r_template_member_stand_ins, r_raw_vtable_slots, r_empty_string_objects]
 RULES += REFS_RULES
