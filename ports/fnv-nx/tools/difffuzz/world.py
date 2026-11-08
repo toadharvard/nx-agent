@@ -57,6 +57,24 @@ WILD_X86 = ((NULL_END, TEXT[0]), (TEXT[1], 0x0e000000), (0x0e100000, SENTINEL), 
 WILD_A64 = ((NULL_END, 0x08000000), (0x0c000000, SENTINEL), (SENTINEL + PAGE, MAX)) + A64_HOLES
 
 
+PRIVATE_FLIP = 0x40000000
+
+
+def canned_out_of_private(b):
+    """A canned call result whose eax / edx word (x0's halves) lies in either machine's private range is moved out
+    of it (bit 30 flipped: 0x0a08e901 -> 0x4a08e901, plain background on both). Those ranges are the harness's own
+    placement (the native image at 0x0a000000, its stubs, the x86 stub pages), not world memory: a result pointing
+    there read the native image's own bytes on the native and background on the oracle (F3: float returns,
+    store-width of 0x08xxxxxx words, native-stub-data). The same bytes on both machines; causes._ret_bytes mirrors it."""
+    b = bytearray(b)
+    for off in (0, 4):
+        if off + 4 <= len(b):
+            w = int.from_bytes(b[off:off + 4], 'little')
+            if A64_PRIV[0] <= w < A64_PRIV[1] or X86_PRIV[0] <= w < X86_PRIV[1]:
+                b[off:off + 4] = (w ^ PRIVATE_FLIP).to_bytes(4, 'little')
+    return bytes(b)
+
+
 def page_of(a):
     return a & ~(PAGE - 1)
 
@@ -110,9 +128,9 @@ class Case:
 
     def ret_bytes(self, k):
         if k < len(self.rets) and self.rets[k] is not None:
-            return bytes(self.rets[k]).ljust(16, b'\0')
+            return canned_out_of_private(bytes(self.rets[k]).ljust(16, b'\0'))
         r = random.Random((self.seed * 1000003 + k) & 0xffffffff)
-        return bytes(r.getrandbits(8) for _ in range(16))
+        return canned_out_of_private(bytes(r.getrandbits(8) for _ in range(16)))
 
     def to_json(self):
         d = dict(seed=self.seed, bg=self.bg, pad=self.pad.hex() if self.pad else None,
@@ -208,6 +226,11 @@ UNIFORM = False
 # {address: set of access sizes}; classify.py's bool-repr probe counts a byte only when the MSVC code read exactly
 # that byte with a 1-byte access (a bool), not when it is part of a pointer or integer word
 BYTE_READS = None
+# F1b (difffuzz-20): with BG_READS set to a dict, x86emu.run records every read outside the stack and the x86
+# private range as {address: [set of access sizes, the byte a 1-byte read saw]}: the bool-repr probe's bytes that
+# come from the random background (a bool global or a field behind a background pointer), which the case does not
+# plant
+BG_READS = None
 
 
 def stack_fill(seed, n):

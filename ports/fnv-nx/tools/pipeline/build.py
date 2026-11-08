@@ -2184,12 +2184,14 @@ class Boot(Stage):
 
     def fingerprint(self, b):
         img, bc = b.cfg['BOOT_IMAGE'], b.cfg['BOOT_CENSUS']
-        return ['boot-v3', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
+        ini = os.path.join(os.path.dirname(os.path.abspath(img)), 'Fallout_default.ini') if os.path.isfile(img) else ''
+        return ['boot-v4', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
                                      'tests/s5/milestones.txt',
                                      'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
                 up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
                 synth_inputs_id(b) if img == 'auto' else '',
-                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], b.cfg['EMU_BUDGET']]
+                file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], b.cfg['EMU_BUDGET'],
+                file_hash(ini) if ini and os.path.isfile(ini) else '']    # the ini mounted beside the image
 
     def outputs_present(self, b):
         return os.path.isfile(os.path.join(b.out, 'boot', 'emu.log'))
@@ -2212,6 +2214,12 @@ class Boot(Stage):
         r['image'] = b.rel(image) if image else 'none (all-zero data image)'
         if image:
             argv += ['--file', 'switch/fnv/FalloutNV.exe=' + image]
+            # the owner's Fallout_default.ini beside the exe (gamedata/exe holds both): without it the boot stops at
+            # the ini read (R4, recon4-013); S14's synthesized image has none beside it, so nothing changes there
+            ini = os.path.join(os.path.dirname(image), 'Fallout_default.ini')
+            if os.path.isfile(ini):
+                argv += ['--file', 'switch/fnv/Fallout_default.ini=' + ini]
+                r['ini'] = 'Fallout_default.ini beside the image'
         elog = os.path.join(d, 'emu.log')
         open(elog, 'w').close()
         tmo = int(b.cfg['EMU_TIMEOUT'])

@@ -119,6 +119,35 @@ IDirectInput8A *di()
 BOOL count_dev(LPCDIDEVICEINSTANCEA, LPVOID n) { ++*(int *)n; return DIENUM_CONTINUE; }
 } // namespace
 
+/* the exe's GUIDs in .text, unmapped in the port: g_text_key stands for one (garbage where it lies); the game build's
+ * fnvnx_image_const (toolchain/game/boot.cpp) gives its bytes from the exe file, here GUID_Key */
+GUID g_text_key;
+extern "C" const void *fnvnx_image_const(const void *p, uint32_t n, void *buf)
+{
+    if (p == &g_text_key && n == sizeof(GUID)) {
+        memcpy(buf, &GUID_Key, sizeof(GUID));
+        return buf;
+    }
+    return p;
+}
+
+TEST(input_dinput_format_guids_from_the_image)
+{
+    memset(&g_text_key, 0xCC, sizeof g_text_key);
+    IDirectInput8A *in = di();
+    IDirectInputDevice8A *k = nullptr;
+    CHECK_EQ(in->CreateDevice(GUID_SysKeyboard, &k, nullptr), DI_OK);
+    DIDATAFORMAT f = kbd_format();
+    for (int i = 0; i < 256; i++)
+        g_kbd_objs[i].pguid = &g_text_key;   /* a table pointing into the exe's .text, as c_dfDIKeyboard does */
+    CHECK_EQ(k->SetDataFormat(&f), DI_OK);
+    g_kbd_objs[0].pguid = &GUID_XAxis;   /* a real mismatch still fails (not optional) */
+    g_kbd_objs[0].dwType &= ~0x80000000u;
+    CHECK_EQ(k->SetDataFormat(&f), DIERR_INVALIDPARAM);
+    k->Release();
+    in->Release();
+}
+
 TEST(input_dinput_keyboard_immediate_and_buffered)
 {
     IDirectInput8A *in = di();

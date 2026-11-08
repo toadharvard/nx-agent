@@ -162,7 +162,27 @@ jq -r '.units[] | [.source, ([.flags[]? | select(startswith("/D")) | "-D" + .[2:
 # same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
 objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
             xargs -0 cat) | sha256sum | cut -c1-16)
-if [ "$(cat "$OUT/.objstamp" 2>/dev/null)" != "$objstamp" ]; then rm -f "$OUT"/*.o; echo "$objstamp" > "$OUT/.objstamp"; fi
+# One compile.sh at a time per object directory: a second run with other flags would delete the first one's objects
+# here (the stamp above) while it works (try1of1, D26: 2,499 units "failed (no error line)", 1,716 logs of 0 bytes,
+# i.e. compiles that had succeeded and then lost their object). COMPILE_LOCK_WAIT seconds (default 7200) to wait.
+exec 7>"$OUT/.compile.lock"
+flock -w "${COMPILE_LOCK_WAIT:-7200}" 7 || { echo "compile.sh: $OUT is locked by another compile.sh" >&2; exit 2; }
+if [ "$(cat "$OUT/.objstamp" 2>/dev/null)" != "$objstamp" ]; then
+  # Every object here is about to go, so every unit that had one is compiled again, not only the given list: the
+  # pipeline passes only the units it thinks stale, and its key does not see the plugins' bytes or the shim headers
+  # (try1of1, D26: it asked for 493, this wiped the other 2,485 objects and left them unbuilt: "failed (no error line)").
+  if [ -n "$LIST" ] && [ "$LIST" != "$OUT/units.list" ]; then
+    jq -r '.units[].source' "$TREE/build/units.json" | sort -u | while read -r s_; do
+      [ -f "$OUT/$(echo "$s_" | tr / _).o" ] && echo "$s_"
+    done > "$OUT/.wiped.list"
+    sort -u "$LIST" "$OUT/.wiped.list" > "$OUT/.rebuild.list"
+    echo "compile.sh: flags, plugins or shim headers changed: every object of $OUT is rebuilt ($(wc -l < "$OUT/.wiped.list") had one, $(wc -l < "$LIST") were asked for)" >&2
+    LIST=$OUT/.rebuild.list
+  else
+    echo "compile.sh: flags, plugins or shim headers changed: every object of $OUT is rebuilt" >&2
+  fi
+  rm -f "$OUT"/*.o "$OUT"/*.ok; echo "$objstamp" > "$OUT/.objstamp"
+fi
 
 compile_one() {
   local src=$1 base
@@ -175,11 +195,23 @@ compile_one() {
   case $src in *.c) cc=$CC; flags=$CFLAGS_STR ;; esac
   defs=$(awk -F'\t' -v s="$src" '$1 == s {print $2; exit}' "$OUT/defines.tsv")
   # shellcheck disable=SC2086
-  if (cd "$TREE" && timeout 900 $cc $flags $defs "$src" -o "$base.o.tmp") > "$base.log" 2>&1; then
-    mv "$base.o.tmp" "$base.o"
+  local rc=0
+  rm -f "$base.ok"
+  (cd "$TREE" && timeout 900 $cc $flags $defs "$src" -o "$base.o.tmp") > "$base.log" 2>&1 || rc=$?
+  if [ $rc = 0 ] && [ -s "$base.o.tmp" ]; then
+    mv "$base.o.tmp" "$base.o" && : > "$base.ok"      # .ok: this run compiled it (the end check below)
   else
     rm -f "$base.o.tmp" "$base.o"
+    # never a failure without a reason: what the compiler said, else how it ended
+    case $rc in
+      0)   why="exit 0 but no object (an empty or missing $base.o.tmp)" ;;
+      124) why="timeout: killed after 900 s" ;;
+      12[5-7]) why="timeout/exec failed (exit $rc): the compiler could not run" ;;
+      *)   if [ $rc -gt 128 ]; then why="killed by signal $((rc - 128)) (exit $rc)"; else why="exit $rc"; fi ;;
+    esac
+    echo "compile.sh: $src: $why" >> "$base.log"
   fi
+  return 0      # xargs stops at a child's exit 255 or a signal: one unit must never end the others' compiles
 }
 export -f compile_one
 xargs -a "$LIST" -P "$JOBS" -I{} bash -c 'compile_one "$@"' _ {}
@@ -187,7 +219,12 @@ xargs -a "$LIST" -P "$JOBS" -I{} bash -c 'compile_one "$@"' _ {}
 : > "$OUT/objects.tsv"
 while read -r src; do
   base="$OUT/$(echo "$src" | tr / _)"
-  if [ -f "$base.o" ]; then st=ok; else st=fail; fi
+  if [ -f "$base.o" ]; then st=ok; else st=fail
+    # a failed unit always says why (compile_one writes it; these are the cases it cannot see)
+    if [ -f "$base.ok" ]; then echo "compile.sh: $src: compiled in this run, then its object disappeared" >> "$base.log"
+    elif [ ! -f "$base.log" ]; then echo "compile.sh: $src: never compiled (the run ended before it)" > "$base.log"
+    elif ! grep -q . "$base.log"; then echo "compile.sh: $src: no object and an empty log" >> "$base.log"; fi
+  fi
   printf '%s\t%s\t%s\n' "$src" "$base.o" "$st" >> "$OUT/objects.tsv"
 done < "$LIST"
 echo "objects: $(grep -c $'\tok$' "$OUT/objects.tsv" || true) ok, $(grep -c $'\tfail$' "$OUT/objects.tsv" || true) failed"

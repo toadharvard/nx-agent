@@ -146,6 +146,13 @@ check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', 
 
 got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
 check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
+# DECL1-CONV: a stored / returned result keeps the decomp's declared type where it differs in kind from the platform's
+got = prepare.r_platform_protos('/x/src/c.cpp', '__declspec(dllimport) unsigned int __stdcall CreateMutexA(int, int, const void*);\n'
+                                'extern "C" char* __cdecl strrchr(const char* s, int c);\n'
+                                'void f(const char* n) { unsigned int m; m = CreateMutexA(0, 0, n); char* p = strrchr(n, 47);\n'
+                                '  g(CreateMutexA(0, 0, n)); }\n', Counter())
+check('DECL1-CONV a stored handle result is converted to the decomp type; one passed on is not', got,
+      ['m = ((unsigned int)CreateMutexA(0, 0, n));', 'char* p = ((char*)strrchr(n, 47));', 'g(CreateMutexA(0, 0, n));'])
 got = prepare.r_platform_protos('/x/src/v.cpp', 'int g();\nnamespace std {\nfloat abs(float);\n}\nfloat h(float x) { return std::abs(x); }\n', Counter())
 check('DECL1-STDABS a std::abs prototype becomes fnvnx_cmath/std_abs.h', got,
       ['#include "fnvnx_cmath/std_abs.h" /* fnv-nx DECL1 */', 'std::abs(x)'], ['float abs(float);', '<stdlib.h>'])
@@ -202,6 +209,29 @@ check('MATH1 next to the namespace\'s own extern "C" prototype: the copy stays (
 check('MATH1 in a namespace of its own: the overload stays',
       run(s1.r_math_overloads, 'namespace N {\ninline float fabs(float f)\n{\n    return f < 0 ? -f : f;\n}\n}\n'),
       ['return f < 0 ? -f : f;'], ['MATH1'])
+
+# ---- IFX1-SSE: a dropped `__if_not_exists(_mm_*)` prototype gets fnvnx_target_sse.h (MSVC's intrinsics in the gate)
+_ix = run(s1.r_if_exists, 'extern "C" {\n__if_not_exists(_mm_mul_ps)\n{\n    __m128 _mm_mul_ps(__m128 a, __m128 b);\n}\n}\n')
+check('IFX1-SSE a dropped SSE prototype includes fnvnx_target_sse.h', _ix,
+      ['#include "fnvnx_target_sse.h" /* fnv-nx IFX1 */'], ['_mm_mul_ps(__m128 a'])
+check('IFX1-SSE a kept body includes nothing',
+      run(s1.r_if_exists, '__if_not_exists(MyOwnThing)\n{\n    int MyOwnThing;\n}\n'), ['int MyOwnThing;'], ['fnvnx_target_sse'])
+
+# ---- CALL1-RET: a `return f(...);` statement is a call, not the file's own prototype of f
+_c1 = run(s1.r_win32_call_args, '#include "fnvnx_win32.h"\nint h(void* k, int c) {\n    return CallNextHookEx((void*)k, c, 0, 0);\n}\n')
+check('CALL1-RET a returned Win32 call gets its pointer arguments cast', _c1, ['CallNextHookEx((HHOOK)((void*)k)'])
+
+# ---- CALL1-NS: a call qualified by a namespace that only has DECL1's `using ::name;` is the platform function
+_c2 = run(s1.r_win32_call_args, '#include "fnvnx_win32.h"\nnamespace D {\nusing ::CallNextHookEx; /* fnv-nx DECL1 */\n}\n'
+          'int h(void* k, int c) {\n    return D::CallNextHookEx((void*)k, c, 0, 0);\n}\n')
+check('CALL1-NS a call qualified by a namespace with DECL1\'s using-declaration gets its casts', _c2,
+      ['D::CallNextHookEx((HHOOK)((void*)k)'])
+
+# ---- MATH1-OWN: a file's own static C math function, once MATH1 brings <math.h>, is renamed with its calls
+_m1 = run(s1.r_math_overloads, 'extern "C++"\n{\n    inline float __cdecl fabs(float _X)\n    {\n        return ((float)fabs((double)(_X)));\n    }\n}\n'
+          'static __forceinline float sqrtf(float x)\n{\n    return (float)sqrt(x);\n}\nfloat g(float s) { return 1.0f / sqrtf(s); }\n')
+check('MATH1-OWN the unit\'s own static sqrtf is renamed where <math.h> comes in', _m1,
+      ['#include <math.h> /* fnv-nx MATH1 */', 'static __forceinline float fnvnx_own_sqrtf(float x)', '1.0f / fnvnx_own_sqrtf(s)'])
 
 # ---- CTOR1
 check('CTOR1 explicit constructor call of a template class',
@@ -1357,6 +1387,11 @@ check('FINL1 a class template\'s member defined out of class keeps it (the class
           'template <class K, class E>\nclass DU\n{\n\tpublic:\n\t\tstatic __forceinline void __cdecl up(K& k, E& e);\n};\n'
           'template <class K, class E>\nvoid __cdecl DU<K, E>::up(K& k, E& e)\n{\n}\n'),
       ['static __forceinline void __cdecl up(K& k, E& e);'], ['FINL1'])
+check('FINL1 a class named after a nested __declspec(align(16)) keeps it on its defined constructor',
+      run(s1.r_forceinline_declarations,
+          'struct __declspec(align(16)) BS : R {\n    __declspec(nothrow) __forceinline BS() ;\n};\n'
+          '    __declspec(nothrow) BS::BS()  {\n    }\n'),
+      ['__declspec(nothrow) __forceinline BS() ;'], ['FINL1'])
 check('FINL1 headers are left alone',
       run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 
@@ -1461,23 +1496,64 @@ _ku2 = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'
 check('REC1-REPL with symbols: REC1-SYM still persists the binding', _json.dumps(_ku2) + str(dict(_st)),
       ['"?h@@YAXXZ": "0x00402000"', "'REC1-SYM': 1"])
 def _kfails(name, rec, text):
+    """a recon whose replace does not apply: rejected whole for the unit (no edit, no append), the prepare goes on"""
     os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', name)
-    _krecon(name, rec)
+    _krecon(name, rec, '/* appended body */\n')
+    prepare.__dict__['_fnvnx_recon_rejected'] = []
+    st = Counter()
     try:
-        s1.r_recon_bodies(_kp, text, Counter())
+        out = s1.r_recon_bodies(_kp, text, st)
     except RuntimeError as e:
         return 'raised: ' + str(e)
-    return 'no error'
-check('REC1-REPL an old that occurs twice fails the prepare',
+    rej = prepare.__dict__['_fnvnx_recon_rejected']
+    return ('unchanged ' if out == text else 'CHANGED ') + str(dict(st)) + ' ' + repr(rej)
+check('REC1-REPL an old that occurs twice: the recon is rejected, the prepare goes on',
       _kfails('k2', {'replace': [{'old': 'g()', 'new': 'h()'}]}, 'void a() { g(); }\nvoid b() { g(); }\n'),
-      ['raised: REC1-REPL', 'occurs 2 times'])
-check('REC1-REPL a missing old fails the prepare',
-      _kfails('k3', {'replace': [{'old': 'void q();', 'new': 'void r();'}]}, _ktext), ['raised: REC1-REPL', 'occurs 0 times'])
-check('REC1-REPL an old found only in the appended body fails (replace runs before the append)',
+      ['unchanged', "'REC1-REJECT': 1", ", 0, 2, 'g()')"], ['raised', 'appended body'])
+check('REC1-REPL a missing old: rejected',
+      _kfails('k3', {'replace': [{'old': 'void q();', 'new': 'void r();'}]}, _ktext), ['unchanged', "'REC1-REJECT': 1", ', 0, 0,'],
+      ['raised'])
+check('REC1-REPL an old found only in the appended body: rejected (replace runs before the append)',
       _kfails('k4', {'append': 'body.cpp', 'replace': [{'old': 'void f2()', 'new': 'void f3()'}]}, _ktext),
-      ['raised: REC1-REPL', 'occurs 0 times'])
-check('REC1-REPL a replace-only recon is a recon (no body, no symbols)',
-      _kfails('k5', {'replace': [{'old': 'void q();', 'new': 'x'}]}, _ktext), ['raised: REC1-REPL'])
+      ['unchanged', "'REC1-REJECT': 1"], ['raised', 'appended body'])
+check('REC1-REPL a replace-only recon is a recon (no body, no symbols): rejected the same way',
+      _kfails('k5', {'replace': [{'old': 'void q();', 'new': 'x'}]}, _ktext), ['unchanged', "'REC1-REJECT': 1"], ['raised'])
+check('REC1-REPL never half-applies: pair 0 matches, pair 1 does not -> nothing applied, no append',
+      _kfails('k6', {'append': 'body.cpp', 'replace': [{'old': 'void g();', 'new': 'void G();'},
+                                                        {'old': 'nowhere', 'new': 'x'}]}, _ktext),
+      ['unchanged', ", 1, 0, 'nowhere')"], ['raised', 'void G();', 'REC1-REPL\': 1'])
+check('REC1-REPL a malformed pair: rejected',
+      _kfails('k7', {'replace': [{'old': '', 'new': 'x'}]}, _ktext), ['unchanged', ', 0, -1,'], ['raised'])
+def _kdup(name, body, text):
+    os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', name)
+    _krecon(name, {'append': 'body.cpp'}, body)
+    prepare.__dict__['_fnvnx_recon_rejected'] = []
+    st = Counter(); out = s1.r_recon_bodies(_kp, text, st)
+    return ('appended ' if 'fnv-nx REC1' in out else 'unchanged ') + str(dict(st)) + ' ' + repr(prepare.__dict__['_fnvnx_recon_rejected'])
+_dt = 'struct E { int a; };\n// @fnv 0x00d2cac0\nstatic void __declspec(noinline)\n    Copy(E* d, const E* s, unsigned int n)\n{\n    d[0] = s[0];\n}\n'
+check('REC1-DUP-DEF an append that redefines a function the unit defines (split head): rejected, not appended',
+      _kdup('d1', '#if !defined(_MSC_VER)\nstatic void Copy(E* apDest, const E* apSource, unsigned int auiByteCount)\n{\n}\n#endif\n', _dt),
+      ['unchanged', "'REC1-REJECT': 1", '-2, ', 'Copy(E*,E*,unsignedint)'], ['appended'])
+check('REC1-DUP-DEF the same body when a rule left only the declaration: appended',
+      _kdup('d2', 'static void Copy(E* d, const E* s, unsigned int n)\n{\n}\n',
+            'struct E { int a; };\nstatic void Copy(E* d, const E* s, unsigned int n); /* fnv-nx STAND1 */\n'),
+      ['appended'], ['REC1-REJECT'])
+check('REC1-DUP-DEF an overload (other parameters) and a member of another class are not duplicates',
+      _kdup('d3', 'void Copy(E* d, int n)\n{\n}\nvoid F::Copy(E* d, const E* s, unsigned int n)\n{\n}\n', _dt),
+      ['appended'], ['REC1-REJECT'])
+check('REC1-DUP-DEF a definition inside the same namespace counts; another namespace does not',
+      _kdup('d4', 'namespace q {\nvoid g()\n{\n}\n}\n', 'namespace q {\nvoid g() { }\n}\nnamespace r {\nvoid h() { }\n}\n'),
+      ['unchanged', 'q::g()'], ['appended'])
+check('REC1-DUP-DEF ... and the same name in another namespace is appended',
+      _kdup('d5', 'namespace p {\nvoid g()\n{\n}\n}\n', 'namespace q {\nvoid g() { }\n}\n'), ['appended'], ['REC1-REJECT'])
+_kfails('k8', {'replace': [{'old': '', 'new': 'x'}]}, _ktext)   # one rejection for the report below
+os.makedirs(os.path.join(_rc, 'out', 'build'), exist_ok=True)
+_st = Counter()
+s1.add_recon_definitions(os.path.join(_rc, 'out'), _st)
+_rt = open(os.path.join(_rc, 'out', 'build', 'recon_rejected.tsv')).read()
+check('REC1-REPL the POST hook lists the rejected recons in build/recon_rejected.tsv',
+      _rt + str(dict(_st)), ['#recon dir', 'src/k.cpp', "'REC1-REJECTED-RECONS': 1"])
+prepare.__dict__['_fnvnx_recon_rejected'] = []
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)

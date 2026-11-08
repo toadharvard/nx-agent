@@ -252,6 +252,12 @@ extern "C" void *fnvnx_ws2_gethostbyname(const char *n) { W32_UNUSED(n); FNVNX_N
 extern "C" int fnvnx_ws2_gethostname(char *b, int n) { if (b && n > 0) b[0] = 0; return -1; }
 extern "C" int fnvnx_ws2_fdisset(UINT_PTR s, void *set) { W32_UNUSED(s); W32_UNUSED(set); return 0; }   /* __WSAFDIsSet: select never succeeds */
 
+/* ---- NVAPI: no nvapi.dll on the Switch. The exe's NvAPI_* entry points are `jmp [slot]` thunks into the
+ * table nvapi_QueryInterface fills at run time (0x009fead6, 0x009feae8, 0x009febd8; crt_symbols.tsv class thunk);
+ * with the library absent each returns NVAPI_API_NOT_INITIALIZED (-4) and the renderer takes its non-NVIDIA path
+ * (R2 recon2-002, R6 recon6-007). Any arguments, nothing written. */
+extern "C" int fnvnx_nvapi_not_initialized(void) { FNVNX_NOOP(); return -4; }
+
 /* ---- steam_api: no-op success (see the top) */
 extern "C" bool SteamAPI_Init(void) { FNVNX_NOOP(); return true; }   /* the platform lane: documented no-ops */
 extern "C" bool SteamAPI_IsSteamRunning(void) { return true; }
