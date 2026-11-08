@@ -77,7 +77,8 @@ def neg(e):
 _PLACEMENT = None
 
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
-STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
+STANDINS = os.environ.get("FNVNX_STANDINS") or os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
+# (FNVNX_STANDINS: another revision's file, for a guest that needs the table of its own time; tools/farm/s5boot_job.sh)
 TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding", "member-vtables",
                  "repair-lost-slot-one", "exe-slot-one-d0")
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
