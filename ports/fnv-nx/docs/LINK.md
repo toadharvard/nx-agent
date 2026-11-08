@@ -641,6 +641,19 @@ The gate: `classlayout.py <exe> -o <dir>/classlayout.tsv --link <link root>` che
 transform(exe table) slot by slot (classgate.tsv, causes shift / wrong / trap / pure / null / short; unmapped names
 are reported apart). The number of mismatching tables is driven to 0, like traps: 1,233 of 3,269 on 4264bfd7.
 
+The deleting-destructor test (exevft.deleting_dtor) reads the function's own first return: `ret 4` with the flags
+test before it. A byte search for `ret 4` ran into the next function (MagicCaster slot 9 ends `ret 8`); 157
+decisions changed with it (FNVNX_DELDTOR_STRICT=0: the old search).
+
+### ODR stand-ins (`odr.py`)
+
+Before resolve reads the objects, a plain global class whose COMDAT groups differ between units (vtable, typeinfo
+or an inline member: the decomp's unit-local `struct SpawnedSub`, `class SpawnedObject`, ...) and that the exe has
+no RTTI class of, gets per-unit vtable and typeinfo names, `<name>.fnvu<unit hash>`. Each unit's constructor then
+stores its own vtable. Members keep their names, so their bindings by name are untouched. Real game classes are
+left to VTFILL's single transform(exe) table. The pass writes out/odr.tsv and the copies to out/odr/; FNVNX_ODR=0
+turns it off.
+
 ## Vtable slots through the MSVC vftables (`vslots.py`, D12)
 
 `resolve --msvc-objs <dir>` (or `FNVNX_MSVC_OBJS`): `<dir>/u<index>.obj` are the pristine decomp's units compiled

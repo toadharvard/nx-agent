@@ -420,6 +420,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             units[f[0]].obj = f[1]
     have = [u for u in units.values() if u.obj]
     log('units: %d, with objects: %d' % (len(units), len(have)))
+    # ODR stand-ins (odr.py): a plain global class several units define differently (SpawnedSub, SpawnedObject, ...)
+    # gets per-unit names for its COMDAT groups before anything reads the objects; real exe RTTI classes are left
+    if exe != 'none' and os.environ.get('FNVNX_ODR', '1') != '0':
+        import odr
+        _ep = exevft.exe_path(None if exe in (None, '') else exe)
+        if _ep:
+            _ev = exevft.load(_ep, os.path.join(out, 'cache', 'exe_vftables.json'))
+            for k_, n_ in odr.rename(have, out, odr.exe_class_names(_ev), log).items():
+                pre_stats['odr-' + k_] += n_
 
     _phase('load units+objects')
     # MSVC side
