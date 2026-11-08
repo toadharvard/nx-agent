@@ -256,6 +256,10 @@ extern "C" LPVOID HeapAlloc(HANDLE h, DWORD flags, SIZE_T n)
 extern "C" LPVOID HeapReAlloc(HANDLE h, DWORD flags, LPVOID p, SIZE_T n)
 {
     W32_UNUSED(h);
+    if (!p) {   /* unlike realloc, a NULL block is an error */
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
     if (W32_DW(flags) & HEAP_REALLOC_IN_PLACE_ONLY)
         return usable(p) >= n ? p : NULL;
     size_t old = (W32_DW(flags) & HEAP_ZERO_MEMORY) ? usable(p) : 0;
@@ -278,6 +282,8 @@ extern "C" BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p)
 {
     W32_UNUSED(h);
     W32_UNUSED(flags);
+    if (!p)
+        return TRUE;
     int in = fnvnx_mem_enter(MEM_RA);
     if (in)
         fnvnx_mem_forget(MEMK_HEAP, p);
