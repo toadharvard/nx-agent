@@ -40,6 +40,7 @@ PORT = layout.PORT
 COLUMNS = ['unit', 'record', 'what', 'msvc', 'native', 'cause', 'boot']
 CLANG = os.environ.get('CLANG', 'clang++')
 
+
 Rec = collections.namedtuple('Rec', 'name size align fields bases vptr packed')
 # fields: [(offset or None for a bitfield, name, type)]; bases: [(offset, name, kind)]
 
@@ -48,7 +49,12 @@ def msvc_flags(tree):
     sse = os.environ.get('SSE2NEON') or os.path.join(PORT, 'ext', 'sse2neon')
     return ['--target=i686-pc-windows-msvc', '-std=gnu++17', '-fsyntax-only', '-fms-extensions', '-fshort-wchar',
             '-fsigned-char', '-U_MSC_VER', '-fms-compatibility-version=0', '-D__aarch64__', '-D__ILP32__',
-            '-Wno-everything', '-ferror-limit=0', '-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
+            '-Wno-everything', '-ferror-limit=0',
+            # the SIMD types as MSVC defines them (__m64 8/8, __m128 16/16, ...): the shim's SSE headers are
+            # sse2neon (AArch64) and stay out by their guards; their function bodies do not affect records
+            '-include', os.path.join(HERE, 'layoutgate_msvc', 'fnvnx_lg_msvc_types.h'),
+            '-DSSE2NEON_H', '-DFNVNX_SSE2NEON_H', '-DFNVNX_MMX_H',
+            '-include', os.path.join(PORT, 'shim', 'include', 'fnvnx_compat.h'),
             '-I' + os.path.join(PORT, 'shim', 'include'), '-I' + sse, '-I' + os.path.join(tree, 'include'),
             '-Xclang', '-fdump-record-layouts-complete']
 
