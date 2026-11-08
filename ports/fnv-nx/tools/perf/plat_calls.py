@@ -4,6 +4,9 @@ baseline (S4) the port's platform layer is checked against, call by call, up to 
 
     python3 -I tools/perf/plat_calls.py list [--out trace_list.txt]
     python3 -I tools/perf/plat_calls.py report <wine.tsv>... --out original_calls.json [--md original_calls.md]
+    python3 -I tools/perf/plat_calls.py list --guest [--exe E] [--original original_calls.json] --out guest_list.txt
+    python3 -I tools/perf/plat_calls.py report <guest.tsv> --exe E --out guest_calls.json
+    python3 -I tools/perf/plat_calls.py diff original_calls.json guest_calls.json --guest-list guest_list.txt --out d.json
 
 `list` writes a tools/lockstep/fnvtrace trace list with one `dll!Export` line per import: of the exe's own import
 directory with --exe (authoritative), else of platform/win32/imports.tsv (docs/RUNTIME.md). kernel32!CreateFileA keeps every
@@ -18,6 +21,9 @@ image's calls, not Wine's own) - tools/scenario/wine_scenario.sh sets both.
   APIs the exe imports and never called are listed too (calls 0). No argument bytes are written: strings behind
   pointer arguments are game-derived paths and names; only their count and the FNV-1a hashes of the first few
   (like platstat.cpp's keys) are kept.
+The guest side: `list --guest` names the same imports as guest symbols for emu_guest.py --trace-fn (the platform's
+functions carry the API names; hot ones left out), `report` reads that trace the same way, and `diff` compares the
+two in the original's boot order (fnvnx-plat-diff/1, metric = missing + other returns + guest only).
 Exit 0; 3 when no trace has an API call.
 """
 import argparse
@@ -100,7 +106,37 @@ def fnv1a(s):
     return '%08x' % h
 
 
+# hot APIs the guest list leaves out (a Python hook per call in the emulator; the original counts them)
+HOT = {'EnterCriticalSection', 'LeaveCriticalSection', 'TryEnterCriticalSection', 'InterlockedIncrement',
+       'InterlockedDecrement', 'InterlockedExchange', 'InterlockedExchangeAdd', 'InterlockedCompareExchange',
+       'TlsGetValue', 'TlsSetValue', 'GetLastError', 'SetLastError', 'HeapAlloc', 'HeapFree', 'HeapSize',
+       'HeapReAlloc', 'QueryPerformanceCounter', 'GetTickCount', 'timeGetTime', 'GetCurrentThreadId',
+       'GetCurrentThread', 'GetCurrentProcess', 'GetCurrentProcessId'}
+
+
+def guest_name(api):
+    """the guest's symbol of an import: the API name, binkw32's stdcall decoration (_BinkOpen@8) stripped"""
+    m = re.fullmatch(r'_(\w+)@\d+', api)
+    return m.group(1) if m else api
+
+
 def cmd_list(a):
+    if a.guest:
+        hot = set(HOT)
+        if a.original and os.path.isfile(a.original):
+            hot |= {r['api'].split('!', 1)[1] for r in json.load(open(a.original)).get('apis', [])
+                    if r.get('calls', 0) > a.hot}
+        names = []
+        for _slot, _dll, api, _prov in table(a.exe):
+            n = guest_name(api)
+            if not api.startswith('#') and api not in hot and n not in names:
+                names.append(n)
+        text = '# fnv-nx tools/perf/plat_calls.py list --guest: emu_guest.py --trace-fn @FILE\n' + '\n'.join(names) + '\n'
+        if a.out:
+            open(a.out, 'w').write(text)
+        else:
+            sys.stdout.write(text)
+        return 0
     seen, lines = set(), ['# fnv-nx tools/perf/plat_calls.py list: one dll!Export per IAT slot of imports.tsv']
     for _slot, dll, api, _prov in table(a.exe):
         if api.startswith('#'):
@@ -158,16 +194,18 @@ def parse(path, names):
 
 def cmd_report(a):
     imp = table(a.exe)
-    by_api = {}
+    by_api, alias = {}, {}
     for slot, dll, api, prov in imp:
         by_api.setdefault(api, (dll, prov, slot))
-    names = set(by_api)
+        alias.setdefault(guest_name(api), api)
+    names = set(by_api) | set(alias)
     total, merged, exact_all, seen = 0, {}, True, False
     for p in a.traces:
         st, det = parse(p, names)
         exact_all &= det
         for api, s in st.items():
             seen = True
+            api = api if api in by_api else alias[api]
             m = merged.setdefault(api, {'calls': 0, 'logged': 0, 'first_seq': None, 'first_tid': None, 'tids': set(),
                                         'ret': {'zero': 0, 'minus_one': 0, 'other': 0}, 'strings': [], 'exact': det})
             m['calls'] += max(s['count'], s['logged'])
@@ -210,12 +248,63 @@ def cmd_report(a):
     return 0 if seen else 3
 
 
+def cmd_diff(a):
+    """the original's calls (fnvnx-plat-calls/1 of the Wine run) against the guest's (the same schema from
+    emu_guest.py --trace-fn @<list --guest>): in the original's boot order, each API the guest never called, called
+    with other return classes, or called that the original never did. The first original API the guest lacks marks
+    where the guest's boot left the original's path (or where it stopped)."""
+    o = {r['api']: r for r in json.load(open(a.original))['apis']}
+    g = {r['api']: r for r in json.load(open(a.guest))['apis']}
+    traced = set(g) if not a.guest_list else None
+    if a.guest_list:
+        gl = {x.strip() for x in open(a.guest_list) if x.strip() and not x.startswith('#')}
+        traced = {k for k in o if guest_name(k.split('!', 1)[1]) in gl}
+    rows = []
+    for k, r in sorted(o.items(), key=lambda kv: (kv[1].get('order') is None, kv[1].get('order') or 0)):
+        if not r.get('calls') or k not in traced:
+            continue
+        gr = g.get(k, {})
+        if not gr.get('calls'):
+            rows.append({'api': k, 'order': r['order'], 'kind': 'missing', 'original': r['calls'], 'guest': 0})
+            continue
+        ocls = {c for c, n in r.get('ret', {}).items() if n}
+        gcls = {c for c, n in gr.get('ret', {}).items() if n}
+        if ocls and gcls and ocls != gcls:
+            rows.append({'api': k, 'order': r['order'], 'kind': 'returns', 'original': r['calls'], 'guest': gr['calls'],
+                         'ret_original': r['ret'], 'ret_guest': gr['ret']})
+    extra = [k for k, r in g.items() if r.get('calls') and not o.get(k, {}).get('calls')]
+    first = next((x for x in rows if x['kind'] == 'missing'), None)
+    j = {'schema': 'fnvnx-plat-diff/1', 'compared': len([k for k in o if o[k].get('calls') and k in traced]),
+         'missing': sum(x['kind'] == 'missing' for x in rows), 'returns': sum(x['kind'] == 'returns' for x in rows),
+         'guest_only': sorted(extra), 'first_missing': first, 'rows': rows}
+    j['metric'] = j['missing'] + j['returns'] + len(extra)
+    json.dump(j, open(a.out, 'w'), indent=1)
+    if a.md:
+        with open(a.md, 'w') as f:
+            f.write('# Win32 calls: original vs guest (fnvnx-plat-diff/1)\n\nmetric %d: %d of %d APIs the original calls '
+                    'never called by the guest, %d with other return classes, %d called by the guest only.\n\n'
+                    % (j['metric'], j['missing'], j['compared'], j['returns'], len(extra)))
+            if first:
+                f.write('First the guest lacks (original order %d): %s\n\n' % (first['order'], first['api']))
+            f.write('| order | api | kind | original calls | guest calls |\n|---|---|---|---|---|\n')
+            for x in rows:
+                f.write('| %d | %s | %s | %d | %d |\n' % (x['order'], x['api'], x['kind'], x['original'], x['guest']))
+            if extra:
+                f.write('\nGuest only: %s\n' % ', '.join(sorted(extra)))
+    print('plat_calls diff: metric %d (%d missing, %d returns, %d guest only)' % (j['metric'], j['missing'], j['returns'],
+                                                                                   len(extra)))
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest='cmd', required=True)
     p = sp.add_parser('list')
     p.add_argument('--out')
     p.add_argument('--exe', help='the exe: its own import directory instead of imports.tsv')
+    p.add_argument('--guest', action='store_true', help='names for emu_guest.py --trace-fn (hot APIs left out)')
+    p.add_argument('--original', help='--guest: also leave out the APIs this fnvnx-plat-calls/1 counts > --hot')
+    p.add_argument('--hot', type=int, default=20000)
     p.set_defaults(fn=cmd_list)
     p = sp.add_parser('report')
     p.add_argument('traces', nargs='+')
@@ -223,6 +312,13 @@ def main(argv=None):
     p.add_argument('--md')
     p.add_argument('--exe')
     p.set_defaults(fn=cmd_report)
+    p = sp.add_parser('diff')
+    p.add_argument('original')
+    p.add_argument('guest')
+    p.add_argument('--guest-list', help='the list --guest the guest was traced with (APIs outside it not compared)')
+    p.add_argument('--out', required=True)
+    p.add_argument('--md')
+    p.set_defaults(fn=cmd_diff)
     a = ap.parse_args(argv)
     return a.fn(a)
 

@@ -153,6 +153,44 @@ def main():
         ok('lockstep: API node dropped, its callback under the game caller',
            [c.name for c in mt] == ['A', 'B', 'C'] and [k.name for k in mt[0].kids] == ['B', 'C'],
            [(c.name, [k.name for k in c.kids]) for c in mt])
+    # the guest side: list --guest, a guest trace (platform names, binkw32 undecorated), diff in the original's order
+    with tempfile.TemporaryDirectory() as d:
+        exe = os.path.join(d, 'g.exe')
+        make_pe(exe, {'KERNEL32.dll': ['CreateFileA', 'Sleep', 'EnterCriticalSection', 'ReadFile'],
+                      'binkw32.dll': ['_BinkOpen@8']})
+        gl = os.path.join(d, 'glist.txt')
+        subprocess.run([sys.executable, '-I', TOOL, 'list', '--guest', '--exe', exe, '--out', gl], check=True)
+        names = [x.strip() for x in open(gl) if x.strip() and not x.startswith('#')]
+        ok('list --guest: platform names, hot left out, bink undecorated',
+           names == ['CreateFileA', 'Sleep', 'ReadFile', 'BinkOpen'], names)
+        wine = os.path.join(d, 'wine.tsv')
+        open(wine, 'w').write(call(1, 7, 'CreateFileA', 0x00ec1234) + 'ret\t1\t7\t0\tCreateFileA\t0x44\t0\n' +
+                              call(2, 7, 'ReadFile', 0x00ec1234) + 'ret\t2\t7\t0\tReadFile\t0x1\t0\n' +
+                              call(3, 7, '_BinkOpen@8', 0x00ec1234) + 'ret\t3\t7\t0\t_BinkOpen@8\t0x9000\t0\n' +
+                              call(4, 7, 'EnterCriticalSection', 0x00ec1234))
+        gtsv = os.path.join(d, 'guest.tsv')
+        g = 'call\t%d\t1\t0\t%s\t-\t' + '\t'.join(['0x0'] * 8) + '\t0x40000\t0x30001000\n'
+        open(gtsv, 'w').write(g % (1, 'CreateFileA') + 'ret\t1\t1\t0\tCreateFileA\t0xffffffff\n' +
+                              g % (2, 'BinkOpen') + 'ret\t2\t1\t0\tBinkOpen\t0x0\n' + g % (3, 'Sleep') +
+                              'ret\t3\t1\t0\tSleep\t0x0\n')
+        oj, gj, dj = (os.path.join(d, x) for x in ('o.json', 'g.json', 'd.json'))
+        for tr, out in ((wine, oj), (gtsv, gj)):
+            subprocess.run([sys.executable, '-I', TOOL, 'report', tr, '--exe', exe, '--out', out], check=True,
+                           capture_output=True)
+        ok('guest report: BinkOpen counted as binkw32!_BinkOpen@8',
+           {r['api']: r['calls'] for r in json.load(open(gj))['apis']}['binkw32!_BinkOpen@8'] == 1)
+        r = subprocess.run([sys.executable, '-I', TOOL, 'diff', oj, gj, '--guest-list', gl, '--out', dj, '--md', dj + '.md'],
+                           capture_output=True, text=True)
+        j = json.load(open(dj)) if os.path.isfile(dj) else {}
+        kinds = {x['api']: x['kind'] for x in j.get('rows', [])}
+        ok('diff: CreateFileA other returns, ReadFile missing (first), Bink returns, Sleep guest only, the hot API '
+           'not compared', r.returncode == 0 and kinds == {'kernel32!CreateFileA': 'returns', 'kernel32!ReadFile': 'missing',
+                                                          'binkw32!_BinkOpen@8': 'returns'} and
+           j['guest_only'] == ['kernel32!Sleep'] and j['first_missing']['api'] == 'kernel32!ReadFile' and
+           j['compared'] == 3 and j['metric'] == 4, (r.stdout + r.stderr, j))
+        _c, order = boot_trace.read_log(gtsv, 'guest')
+        ok('lockstep: guest API nodes (no original address) dropped', boot_trace.main_thread(order) == [],
+           [c.name for c in boot_trace.main_thread(order)])
     print('test_plat_calls: %d failed' % fails)
     return 1 if fails else 0
 

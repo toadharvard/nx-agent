@@ -78,9 +78,10 @@ def read_log(path, side):
                     orig = int(p[5], 16) if p[5] not in ("-", "") else None
                     caller = p[6 + nregs + 2] if side == "guest" and len(p) > 6 + nregs + 2 else ""
                     c = Call(seq, tid, depth, p[4], orig, regs, caller)
-                    # Wine: an API entry (a `dll!Export` list line, outside the game image: S4's plat baselines,
-                    # tools/perf/plat_calls.py) is not a game function; main_thread() leaves it out
-                    c.api = side == "wine" and orig is not None and not (0x00400000 <= orig < 0x02100000)
+                    # an API entry is not a game function; main_thread() leaves it out (S4's plat baselines,
+                    # tools/perf/plat_calls.py): Wine, a `dll!Export` list line (outside the game image); guest, a
+                    # platform function traced by name (no original address)
+                    c.api = (orig is not None and not (0x00400000 <= orig < 0x02100000)) if side == "wine" else orig is None
                     calls[seq] = c
                     order.append(c)
                 elif k == "ret":
