@@ -3569,9 +3569,12 @@ def code_refs(objpaths, cands):
 
 
 
+A64_RET = bytes.fromhex('c0035fd6')   # `ret`
+
+
 def code_defs(objpaths, cands):
     """Symbols of cands that some object defines with a body (a symbol in a .text section): the slot-0 functions code
-    defines directly. A placeholder no object defines, or a trap, is not one."""
+    defines directly. A placeholder no object defines, a trap, or an empty body (a bare `ret`) is not one."""
     hit = set()
     for p in objpaths:
         try:
@@ -3581,6 +3584,10 @@ def code_defs(objpaths, cands):
         for nm in cands:
             i = o.defs.get(nm)
             if i is not None and o.secnames[o.syms[i][5]].startswith('.text'):
+                _, value, size, _, _, shndx = o.syms[i]
+                sec = o.secs[shndx]
+                if size == len(A64_RET) and o.data[sec[4] + value: sec[4] + value + size] == A64_RET:
+                    continue   # `virtual void v00() {}` of a stand-in class (NiAVObject in tes.cpp): a placeholder, not a body
                 hit.add(nm)
     return hit
 

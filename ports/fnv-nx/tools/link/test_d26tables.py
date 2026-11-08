@@ -179,6 +179,20 @@ def main():
             '{"format":"fnvnx-d22/1","classes":[{"class":"BSNiAllocator","members":["Destroy"],"vftables":["010a2528"]}]}')
         lst, n = fnvlink.load_d22_list(d)
         check(lst == {0x010a2528} and n == 1 and fnvlink.load_d22_list(None) == (set(), 0), 'load_d22_list reads d22.json')
+        # an empty slot-0 body (`virtual void v00() {}` of a stand-in class) is a placeholder, not a defined slot 0
+        sfile = os.path.join(tmp, 'defs.S')
+        open(sfile, 'w').write(
+            '    .section .text._ZN4Stub3v00Ev,"axG",%progbits,_ZN4Stub3v00Ev,comdat\n'
+            '    .weak _ZN4Stub3v00Ev\n    .type _ZN4Stub3v00Ev, %function\n_ZN4Stub3v00Ev:\n    ret\n'
+            '    .size _ZN4Stub3v00Ev, .-_ZN4Stub3v00Ev\n'
+            '    .section .text._ZN4Real3v00Ev,"axG",%progbits,_ZN4Real3v00Ev,comdat\n'
+            '    .weak _ZN4Real3v00Ev\n    .type _ZN4Real3v00Ev, %function\n_ZN4Real3v00Ev:\n    mov w0, #1\n    ret\n'
+            '    .size _ZN4Real3v00Ev, .-_ZN4Real3v00Ev\n')
+        dobj = os.path.join(tmp, 'defs.o')
+        r = subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', sfile, '-o', dobj], capture_output=True, text=True)
+        check(r.returncode == 0, 'the code_defs fixture assembles %s' % r.stderr[:200])
+        check(fnvlink.code_defs([dobj], {'_ZN4Stub3v00Ev', '_ZN4Real3v00Ev', '_ZN5Nope3v00Ev'}) == {'_ZN4Real3v00Ev'},
+              'code_defs: a bare-ret slot 0 is a placeholder, a real body is a definition')
         tr = os.path.join(tmp, 'tree'); os.makedirs(os.path.join(tr, 'build'), exist_ok=True)
         open(os.path.join(tr, 'build', 'd22_applied.tsv'), 'w').write(
             'file\tclass\tmember\tkind\tvftables\n' 'a.cpp\tBSNiAllocator\tDestroy\tlisted\t010a2528\n'

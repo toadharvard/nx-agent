@@ -434,11 +434,18 @@ def best_alignment(names, d, exe_slots, symaddr, is_dtor=None):
 
 class Pair:
     """One native vtable paired with one exe vftable."""
-    __slots__ = ('v', 'cls', 'z', 'primary', 'c', 'addr', 'exe', 'n')
+    __slots__ = ('v', 'cls', 'z', 'primary', 'c', 'addr', 'exe', 'n', 'xcls')
 
-    def __init__(self, v, cls, z, primary, c, addr, exe):
+    def __init__(self, v, cls, z, primary, c, addr, exe, xcls=None):
         self.v, self.cls, self.z, self.primary, self.c, self.addr, self.exe = v, cls, z, primary, c, addr, exe
         self.n = len(addr)
+        self.xcls = xcls   # the exe RTTI class of the vftable, in the encoding of a class name (`9NiD3DPass`)
+
+
+def xclass_enc(td):
+    """'.?AVNiD3DPass@@' -> '9NiD3DPass' (simple names only: a namespaced or template class has no such encoding)."""
+    m = re.match(r'^\.\?A[VU]([A-Za-z_][A-Za-z_0-9]*)@@$', td or '')
+    return '%d%s' % (len(m.group(1)), m.group(1)) if m else None
 
 
 def class_of_ztv(z):
@@ -496,7 +503,8 @@ def build_pairs(link, exe, cache, log=print):
         d = exevft.dtor_pos(names, [x.word for x in slot_ents])
         cur = [x.sym for x in slot_ents]
         c, addr = best_alignment(cur, d, e.slots, symaddr, is_dtor)
-        pairs.append(Pair(v, class_of_ztv(z), z, note.startswith('primary'), c, addr, list(e.slots)))
+        pairs.append(Pair(v, class_of_ztv(z), z, note.startswith('primary'), c, addr, list(e.slots),
+                          xclass_enc(e.td) if e.off == 0 else None))
     if len(objs) > 64:
         objs.clear()
     return pairs, native, symaddr, exev
@@ -523,8 +531,11 @@ class Judge:
         self.is_delete_this = is_delete_this
         self.by_class = collections.defaultdict(list)
         self.by_slot = collections.defaultdict(list)   # exe function address -> pairs whose exe vftable holds it
+        self.by_xclass = collections.defaultdict(list)   # exe RTTI class -> pairs (a shell / copy table stands for it)
         for p in pairs:
             self.by_class[p.cls].append(p)
+            if p.xcls and p.xcls != p.cls:
+                self.by_xclass[p.xcls].append(p)
             for a in set(p.exe):
                 self.by_slot[a].append(p)
         self.cache = {}
@@ -563,6 +574,10 @@ class Judge:
         elif cls:
             cand = [p for p in self.by_class.get(cls, []) if p.primary] or self.by_class.get(cls, [])
             if not cand:
+                # the native table of an exe class can carry another name (a shell `FUN_00e7fea0` for NiD3DPass, a
+                # `__fnvnx_vmo_<V>` copy for NiStream): the pair whose exe vftable has the class's RTTI name
+                cand = [p for p in self.by_xclass.get(cls, []) if p.primary] or self.by_xclass.get(cls, [])
+            if not cand:
                 if cls_text(cls) in self.exe_classes:
                     # the class has an exe vftable and no native table: its objects keep the exe's order
                     v = 'ok' if k == j else 'mismatch'
@@ -576,8 +591,13 @@ class Judge:
         okc, badc = collections.Counter(), collections.Counter()
         first_bad = first_ok = None
         dthis = False
+        badv = []
         for p in cand:
             r, na, ea = judge_pair(p, j, k)
+            if r == 'bad' and j == 1 and k == 1 and p.c == 0 and ea and self.is_delete_this and self.is_delete_this(ea):
+                # `delete p` (GCC: the D0 at native slot 1) for the exe's `p->DeleteThis()` whose slot is the common
+                # `delete this` body: the same call (a class that overrides DeleteThis has another body there)
+                r = 'ok'
             if r == 'ok':
                 ok += 1
                 okc[p.cls] += 1
@@ -586,6 +606,7 @@ class Judge:
                 bad += 1
                 badc[p.cls] += 1
                 first_bad = first_bad or (na, ea)
+                badv.append(p.v)
                 if j == 1 and self.is_delete_this and ea and self.is_delete_this(ea):
                     dthis = True
         if ok + bad == 0:
@@ -593,6 +614,8 @@ class Judge:
         na, ea = (first_bad if bad else first_ok)
         top = ','.join(cls_text(c) for c, _ in (badc if bad else okc).most_common(3))
         note = 'agree=%d disagree=%d delta=%d %s' % (ok, bad, k - j, top)
+        if bad:
+            note += ' bad-vft=' + ','.join('%08x' % v for v in sorted(badv)[:4])
         if dthis:
             note += ' deletethis'
         if member:
@@ -731,6 +754,9 @@ def check_function(task):
         return 'unaligned:' + note.split(' ')[0], [], edges
     symof = _G['symof']
     sites = []
+    # a refcount release `if (!InterlockedDecrement(&o->rc)) o->DeleteThis()`: the slot-1 call right after an import call
+    release = {e[-1] for n_, e in enumerate(eev) if n_ and e[0] == 'V' and e[2] == 4 and eev[n_ - 1][0] == 'I'
+               and 0 < e[-1] - eev[n_ - 1][-1] <= 0x20}
     for ee, ne in pairs:
         this_based = ee[3] == 'this' and ne[3] == 'this' and ee[1] == 0 and ne[1] == 0
         cls = None
@@ -738,7 +764,7 @@ def check_function(task):
             cn = infer_class(ne[4], nev, symof)
             ce = infer_class(ee[4], eev, symof)
             cls = cn if cn and (ce is None or ce == cn) else ce if ce and cn is None else None
-        sites.append((nsym, addr, ee[-1], ne[-1], ee[2] // 4, ne[2] // 4, this_based, cls))
+        sites.append((nsym, addr, ee[-1], ne[-1], ee[2] // 4, ne[2] // 4, this_based, cls, ee[-1] in release))
     return 'aligned', sites, edges
 
 
@@ -801,7 +827,7 @@ def run_vcall(ctx):
     judge = Judge(pairs, exe_classes, lambda a: exevft.delete_this(exe, a))
     rows = []
     rcache = {}
-    for (nsym, addr, esite, nsite, j, k, this_based, cls) in sites:
+    for (nsym, addr, esite, nsite, j, k, this_based, cls, rel) in sites:
         how = 'inferred'
         cand = None
         if this_based:
@@ -810,6 +836,13 @@ def run_vcall(ctx):
                 rcache[addr] = receivers(addr, rev, symof, judge)
             cand = rcache[addr] or None
             cls = method_class(nsym)
+        if rel and not this_based and j == 1 and k == 1:
+            # the inferred receiver is a guess; the exe call is a release's DeleteThis, native `delete p` is the D0 when
+            # the receiver's pair is at 0 / 1, but not for a family whose pair is later (TESForm: native 1 is a
+            # placeholder), so without the receiver this stays unknown, not ok (honest verdicts)
+            rows.append(('vcall', nsym, '%08x' % addr, '%08x' % esite, '%x' % nsite, 'any', str(j), str(k), '', '',
+                         'unknown', 'release-delete-this'))
+            continue
         v, recv, nt, et, why = judge.site(j, k, cls, cand)
         if cls:
             why += ' by-' + how
