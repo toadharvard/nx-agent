@@ -3268,16 +3268,73 @@ FREE_SYM = '__fnvnx_vfree_%08x'   # exe slot -> a decomp free function: `this` d
 FREE_SLOT = re.compile(r'^\?FUN_[0-9a-f]{8}@@Y([AGI])')   # a global FUN_<a> and its MSVC convention (cdecl, stdcall, fastcall)
 
 
-def free_slot(a, nd, bridges, st):
+NAMED_FREE = re.compile(r'^\?[A-Za-z_]\w*@@YG')   # a named global __stdcall function (`?AllocateZeroedMemory@@YG...`)
+_FREE_ARITY = {}
+
+
+def named_free_drop(a, nd, exe_path):
+    """S2d (link af44165a: BSNiAllocator slot 1 0x00aa2240): the decomp declares the exe's member as a named global
+    __stdcall function, `AllocateZeroedMemory(unsigned&, unsigned&, ...)`; the exe's is a thiscall member whose `this`
+    is unused. A virtual call passes `this` in x0, so the free function read the allocator's vptr as its size. True
+    when the exe function's first return pops exactly 4 x the native's parameter count (`ret 0x1c`, 7 parameters:
+    `this` is not among them; a definition that takes the object as its first parameter pops one fewer) and the
+    parameters fit x0..x6. FNVNX_FREENAMED=0 turns it off."""
+    if not exe_path or os.environ.get('FNVNX_FREENAMED', '1') == '0':
+        return False
+    name = nd['sym'].name
+    if not NAMED_FREE.match(nd.get('msvc') or '') or not re.match(r'_Z\d+[A-Za-z_]', name):
+        return False
+    if name not in _FREE_ARITY:
+        n = None
+        try:
+            dem = subprocess.run([CXXFILT, name], capture_output=True, text=True).stdout.strip()
+            isg = sigs.parse_itanium(name, dem)
+            if isg is not None and isg.raw_params is not None:
+                n = len([p_ for p_ in isg.raw_params if p_ != 'void'])
+        except OSError:
+            pass
+        _FREE_ARITY[name] = n
+    n = _FREE_ARITY[name]
+    if n is None or n > 7:
+        return False
+    try:
+        import capstone
+    except ImportError:
+        return False
+    pe, data = exevft._text(exe_path)
+    try:
+        off = pe.rva_to_off(a - pe.image_base, 16)
+    except Exception:
+        return False
+    if off is None:
+        return False
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    for ins in md.disasm(data[off:off + 0x400], a):
+        if ins.mnemonic == 'int3':
+            return False
+        if ins.mnemonic == 'ret':
+            return (int(ins.op_str, 0) if ins.op_str else 0) == 4 * n
+    return False
+
+
+def free_slot(a, nd, bridges, st, exe_path=None):
     """S5's class 1 (s5-003): the decomp declares the exe's slot function as a global non-member (`__stdcall
     FUN_00e8b490(int *, int, int)`: its MSVC body ignores ecx), so a virtual call, which passes `this` in x0, hands
     it every argument one register early. Such a slot gets a bridge by the definition's MSVC convention: cdecl /
     stdcall drop `this` (x1..x7 -> x0..x6), fastcall (ecx = this, edx undefined on the x86 call, then the stack)
     inserts edx as 0 (x1..x6 -> x2..x7). Returns the bridge symbol, or None for any other definition."""
-    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
+    if nd is None or sigs.itanium_variant(nd['sym'].name):
         return None
+    named = False
+    if not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
+        if not named_free_drop(a, nd, exe_path):
+            return None
+        named = True
     m = FREE_SLOT.match(nd.get('msvc') or '')
-    if m:
+    if named:
+        mode = 'drop'
+        st['free-slot-named'] += 1
+    elif m:
         mode = 'edx' if m.group(1) == 'I' else 'drop'
     else:
         # R2 (vtgate 4264bfd7): an extern "C" stand-in, `@FUN_<a>@N` (fastcall: edx inserted) or `_FUN_<a>@N` /
@@ -3536,7 +3593,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             if vs is None:
                 return None, 'no %s at the address' % isig.variant
             return ADDR_SYM % a + ('' if vs is nd['sym'] else '_' + isig.variant), 'dtor'
-        fr = free_slot(a, nd, stubs, st) if not isig.variant else None
+        fr = free_slot(a, nd, stubs, st, exe_path) if not isig.variant else None
         if fr is not None:
             return fr, 'free function: %s' % fr
         if flags0_slot(isig, nd, ds, exe_path, a):
@@ -3840,7 +3897,7 @@ def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where, o
     in front of f's native entry; any other adjustor thunk stays a trap (never a guessed adjustment)."""
     nd = native.get(a)
     var = sigs.itanium_variant(nd['sym'].name) if nd else None
-    if nd is not None and var is None and free_slot(a, nd, bridges, st):
+    if nd is not None and var is None and free_slot(a, nd, bridges, st, exe_path):
         t = FREE_SYM % a   # a decomp free function (S5 class 1): this dropped / edx inserted
     elif nd is not None and var is None:
         t = ADDR_SYM % a
