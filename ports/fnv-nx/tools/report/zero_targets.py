@@ -30,6 +30,10 @@ Sources (the number each row shows):
                            full_job's package step embeds it); #12 frames over the budget, <h>-frames.json
                            (fnvnx-frames/1; only with a calibrated --scale). The lane's number is shown beside the
                            scenario's when both exist.
+Regressions column: the regression ratchet's ledger, <reports dir>/ratchet/ledger.json (tools/farm/ratchet.py,
+branch reports/ratchet): per target, the items of its ledger metrics that the last check found worse than their
+best (traps: "full: trap stubs"; link: "full: trial-link undefined"; fuzz: "fuzz <shard>: ..."; shaders:
+"sweep <shard>: ..."; D25 #n: "scenario D25 #n ..."); "-" without a ledger.
 Writes <out> and <out>.json (fnvnx-zero/1). Numbers and our own names only. Exit 0.
 """
 import argparse
@@ -195,6 +199,23 @@ LANES = {
 }
 
 
+RATCHET = {'traps': ('full: trap stubs',), 'link': ('full: trial-link undefined',), 'fuzz': ('fuzz ',),
+           'shaders': ('sweep ',)}
+
+
+def regressions(ledger, key):
+    """items regressed now among the ratchet metrics of a zero row (None without a ledger)"""
+    if ledger is None:
+        return None
+    pre = RATCHET.get(key) or (('scenario D25 %s ' % key,) if key.startswith('#') else ())
+    n = 0
+    for name, e in (ledger.get('metrics') or {}).items():
+        rg = e.get('regression')
+        if rg and not rg.get('wip') and any(name == p or name.startswith(p) for p in pre):
+            n += rg.get('items') or 1
+    return n
+
+
 def newest(R, fn, heads, start):
     """(index into heads, result) of the newest head at or after start (older) with a value"""
     for i in range(start, len(heads)):
@@ -220,6 +241,8 @@ def main():
         return 2
     R = Reports(a.reports)
     rows = []
+    led = load(os.path.join(a.reports, 'ratchet', 'ledger.json'))
+    led = led if isinstance(led, dict) and led.get('schema') == 'fnvnx-ratchet/1' else None
 
     def row(area, key, name, fn, extra=None):
         i, r = newest(R, fn, heads, 0)
@@ -243,6 +266,7 @@ def main():
                     j, pr = newest(R, extra, heads, k + 1)
                     if pr:
                         d.update(prev=pr[0], prev_head=heads[j], delta=er[0] - pr[0])
+        d['regressions'] = regressions(led, key)
         rows.append(d)
 
     srcs = {'traps': full_traps, 'link': full_link, 'fuzz': fuzz_hard, 'shaders': sweep_shaders}
@@ -257,7 +281,9 @@ def main():
     o.write('- measured %d of %d targets; sum %d; at zero: %d; stale (older head): %d\n' % (
         len(measured), len(rows), total, sum(1 for r in measured if r['value'] == 0),
         sum(1 for r in measured if r['stale'])))
-    o.write('\n| area | target | number | delta | head | source | note |\n|---|---|---:|---:|---|---|---|\n')
+    if led is not None:
+        o.write('- regressions (the ratchet ledger, ratchet/ledger.json): %d items\n' % sum(r['regressions'] or 0 for r in rows))
+    o.write('\n| area | target | number | delta | regressions | head | source | note |\n|---|---|---:|---:|---:|---|---|---|\n')
     for r in rows:
         v = '-' if r['value'] is None else str(r['value'])
         dl = '' if r['delta'] is None else ('%+d (vs %s)' % (r['delta'], r['prev_head']))
@@ -265,8 +291,9 @@ def main():
         note = r['note']
         if r.get('lane') and r['lane']['source'] != r['source']:
             note += ('; ' if note else '') + 'lane: %s at %s' % (r['lane']['value'], r['lane']['head'])
-        o.write('| %s | %s%s | %s | %s | %s | %s | %s |\n' % (
-            r['area'], (r['key'] + ' ') if r['area'] == 'D25' else '', r['target'], v, dl, hd,
+        o.write('| %s | %s%s | %s | %s | %s | %s | %s | %s |\n' % (
+            r['area'], (r['key'] + ' ') if r['area'] == 'D25' else '', r['target'], v, dl,
+            '-' if r['regressions'] is None else r['regressions'], hd,
             ', '.join(r['source'] or [])[:120] or '-', note.replace('|', '/')[:160]))
     o.close()
     json.dump({'schema': 'fnvnx-zero/1', 'head': heads[0], 'measured': len(measured), 'targets': len(rows),
