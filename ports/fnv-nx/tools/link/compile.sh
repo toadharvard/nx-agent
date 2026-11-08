@@ -26,6 +26,8 @@
 # different machines from the same tree are byte-identical (tools/farm/).
 # Objects are derived from the decomp: local output only, never committed.
 set -euo pipefail
+# a failure under set -e always names its line (full1: an exit 1 with no message cost a build)
+trap 'rc_=$?; echo "compile.sh: line $LINENO: exit $rc_" >&2' ERR
 PRINT_FLAGS=0
 if [ "${1:-}" = --print-flags ]; then PRINT_FLAGS=1; shift; fi
 TREE=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd)
@@ -173,7 +175,9 @@ if [ "$(cat "$OUT/.objstamp" 2>/dev/null)" != "$objstamp" ]; then
   # (try1of1, D26: it asked for 493, this wiped the other 2,485 objects and left them unbuilt: "failed (no error line)").
   if [ -n "$LIST" ] && [ "$LIST" != "$OUT/units.list" ]; then
     jq -r '.units[].source' "$TREE/build/units.json" | sort -u | while read -r s_; do
-      [ -f "$OUT/$(echo "$s_" | tr / _).o" ] && echo "$s_"
+      # if/fi, never `[ ] && echo`: under pipefail a last unit without an object ends the loop with status 1, and
+      # set -e then stops compile.sh with no message (full1 on c46cd30231d9: "exit 1" right after the order keys)
+      if [ -f "$OUT/$(echo "$s_" | tr / _).o" ]; then echo "$s_"; fi
     done > "$OUT/.wiped.list"
     sort -u "$LIST" "$OUT/.wiped.list" > "$OUT/.rebuild.list"
     echo "compile.sh: flags, plugins or shim headers changed: every object of $OUT is rebuilt ($(wc -l < "$OUT/.wiped.list") had one, $(wc -l < "$LIST") were asked for)" >&2
