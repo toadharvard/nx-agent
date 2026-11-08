@@ -2238,5 +2238,16 @@ check('RAWVT1-DYN: an undecided receiver -> FNVNX_RAWVT_DYN(vptr, k) and the hea
       _dyo, ['FNVNX_RAWVT_DYN((*(void***)raw), 7)', '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */'],
       ['FNVNX_RAWVT_DYN((*(void***)dev)'])
 
+# ---- S5-boot: VTM1 (a struct modelling an exe vftable gets one pointer after the destructor slot under GCC)
+_VM = ('namespace {\nstruct VTable\n{\n    void* f0;\n    void* f1;\n    void(__thiscall* f2)(void*);\n};\n'
+       'struct Obj\n{\n    VTable* vt;\n};\n}\n'
+       'struct ComVtbl { long (__stdcall* QueryInterface)(void*); void* f1; };\n'
+       'struct ShaderEntry { const char* f00; const char* f01; };\n'
+       'struct InitVt { void* f0; void* f1; };\nInitVt g_t = {0, 0};\n')
+_vmo = run(s1.r_vtable_model_pad, _VM)
+check('VTM1: the vftable model gets FNVNX_VTM1_PAD after f0 and the header; COM, a data struct, an initialised table do not',
+      _vmo, ['void* f0; FNVNX_VTM1_PAD /* fnv-nx VTM1 */', '#include "fnvnx_vtm.h" /* fnv-nx VTM1 */'],
+      ['QueryInterface)(void*); FNVNX', 'f00; FNVNX', 'struct InitVt { void* f0; FNVNX'])
+
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)
