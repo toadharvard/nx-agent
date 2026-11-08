@@ -220,15 +220,18 @@ def run_unit(tree, workdir, unit, boot):
     try:
         recs = msvc_layouts(tree, unit)
     except subprocess.TimeoutExpired:
-        return unit, [], 0, 0
+        return unit, [], 0, 0, []
     if not recs:
-        return unit, [], 0, 0
+        return unit, [], 0, 0, []
     nat = probe(tree, workdir, unit, list(recs.values()))
     rows = []
     for name, rec in recs.items():
         if name in nat:
             rows += compare(unit, rec, nat[name], boot)
-    return unit, rows, len(recs), len(nat)
+    # members, for the member check (a pack / ebo record placed inside another record)
+    members = [(unit, rec.name, off, nm, re.sub(r'^(?:const\s+|volatile\s+|struct\s+|class\s+)+', '', t).strip(), boot)
+               for rec in recs.values() for off, nm, t in rec.fields if off is not None and nm]
+    return unit, rows, len(recs), len(nat), members
 
 
 def main():
@@ -252,26 +255,40 @@ def main():
     allrows, seen, measured = [], {}, [0, 0]
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
         futs = [ex.submit(run_unit, tree, workdir, u, int(u in boot)) for u in units]
+        allmembers = []
         for f in concurrent.futures.as_completed(futs):
-            unit, rows, nm, nn = f.result()
+            unit, rows, nm, nn, mem = f.result()
             measured[0] += nm; measured[1] += nn
-            allrows += rows
-    allrows.sort()
+            allrows += rows; allmembers += mem
+    # the member check: a record whose layout differs only by its alignment under #pragma pack (pack) or by a zero
+    # native size (ebo) is harmless as a base; as a member it moves its neighbours when MSVC places it at an offset
+    # the native alignment does not allow (pack), or always (ebo: 1 byte under MSVC, 0 natively)
+    pack = {r[1]: int(r[4]) for r in allrows if r[2] == 'align' and int(r[3]) < int(r[4])}
+    ebo = {r[1] for r in allrows if r[2] == 'size' and str(r[4]) == '0'}
+    for unit, rec, off, nm, t, b in allmembers:
+        base = re.sub(r'\s*\[\d+\]$', '', t).split('::')[-1].strip()
+        if base in ebo:
+            allrows.append((unit, rec, 'member %s' % nm, off, '%s (native size 0)' % base, 'ebo-member', b))
+        elif base in pack and off % pack[base]:
+            allrows.append((unit, rec, 'member %s' % nm, off, '%s (native align %d)' % (base, pack[base]), 'pack-member', b))
+    allrows.sort(key=lambda r: tuple(str(x) for x in r))
     with open(a.out, 'w') as f:
         f.write('# fnvnx-layoutgate/1\n' + '\t'.join(COLUMNS) + '\n')
         for r in allrows:
             f.write('\t'.join(str(x) for x in r) + '\n')
     recs = collections.defaultdict(set)
     for r in allrows:
-        recs[(r[1], r[6])].add(r[2])
+        if not r[2].startswith('member'): recs[(r[1], r[6])].add(r[2])
     rb = {k[0] for k in recs if k[1] == 1}
     rr = {k[0] for k in recs if k[1] == 0} - rb
     fb = sum(1 for r in allrows if r[6] == 1 and r[2].startswith('field'))
     causes = collections.Counter(r[5] for r in allrows if r[2] == 'size' or r[2].startswith('field'))
+    mrows = [r for r in allrows if r[2].startswith('member')]
     summary = ('layoutgate: %d units, records msvc %d / probed %d; differing records %d (boot %d, rest %d), '
-               'differing field rows %d (boot %d); causes %s' %
+               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); causes %s' %
                (len(units), measured[0], measured[1], len(rb | rr), len(rb), len(rr),
-                sum(1 for r in allrows if r[2].startswith('field')), fb, dict(causes.most_common())))
+                sum(1 for r in allrows if r[2].startswith('field')), fb, len(mrows), sum(1 for r in mrows if r[6] == 1),
+                dict(causes.most_common())))
     print(summary, file=sys.stderr)
     open(a.out + '.summary', 'w').write(summary + '\n')
 
