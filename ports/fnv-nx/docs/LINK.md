@@ -971,6 +971,21 @@ RTTI class of the exe). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cac
   * 99 stores have no usable storing address: the function stores several vtables at one offset (a base's, then
     its own), or it has no `@fnv` annotation.
 
+  **D26 (c): a minus-one copy for every image vftable left at its image address** (`minus_one_copies`, on
+  wip/d26). An address that stays `__fnv_<V> = 0x<V>` while it is stored by hand (`hand_vptr_stores`) or is an
+  RTTI vftable referenced as data gets a strong copy `__fnvnx_vmo_<V>` in `bridges.S`, and `aliases.ld` binds
+  `__fnv_<V>` to the copy's address point (+8). The copy is in D22's minus-one order:
+  * offset-to-top (from the exe's COL, else the store's offset), then typeinfo 0;
+  * D1/D0 at slots 0/1 for exe slot 0 when it is the deleting destructor. The address map's G pair is used as it
+    is. A decomp `(this, flags)` definition gets flags stubs 0/1; it qualifies by its declaration, its `??_G` name,
+    or the exe's code shape (`exevft.deleting_dtor`: `ret 4` after a test of bit 0, which finds 121 of the 132
+    G rows). When exe slot 0 is not a destructor, slot 0 is a trap and exe slot 0 goes to slot 1;
+  * exe slot k at slot k + 1 (`exe_slot_target`, the same choice as the extended copies).
+  `out/vmo.tsv` lists the copies. `FNVNX_D26C=0` turns the pass off, so a boot can be compared with and without
+  it. On link 9f865b0a's inputs (offline) it makes 831 copies: 615 hand-stored + 239 RTTI-referenced candidates,
+  minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
+  slots.
+
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
 2,029 objects compiled (of 2,978 units; S1 census flags, `-O2`). 106,043 undefined (object, symbol) references:

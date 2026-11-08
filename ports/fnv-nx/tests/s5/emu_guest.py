@@ -78,7 +78,8 @@ _PLACEMENT = None
 
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
 STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
-TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding", "member-vtables")
+TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding", "member-vtables",
+                 "repair-lost-slot-one")
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
 
@@ -1115,6 +1116,8 @@ class Emu:
                 uc.mem_write(rt(a + off + 4 * k), struct.pack("<I", rt(nat) & 0xFFFFFFFF))
             st["filled"] += len(fills)
         self.extend_short_vtables(uc, objs, V, img, F, rt, st)
+        if getattr(self, "repair_slot_one", False):
+            self.repair_lost_slot_one(uc, objs, V, img, F, rt, link, st)
         if getattr(self, "image_minus_one", False):
             self.image_vptr_minus_one(uc, img, F, V, rt, st)
         self.vslot_thisless(uc, objs, V, rt, st)
@@ -1296,6 +1299,37 @@ class Emu:
             return 0x00401000 <= img.read32(a) < 0x00fdf000
         except Exception:
             return False
+
+    def repair_lost_slot_one(self, uc, objs, V, img, F, rt, link, st):
+        """table option repair-lost-slot-one: a link-extended vtable (fnvlink exe_vtable_copies) whose destructor
+        pair resolve had renamed to the address-bound body before exevft.dtor_pos looked for D1/D0 (both slot words
+        name `FUN_<a>`, so no pair is seen): the extension starts at exe slot 2 after the two words, and exe slot 1
+        is in neither layout (_ZTV17SettingPointerMap, 0x010121b4: StringHashTable::HashKey lost, TMapStandIn's
+        hash call ran the destructor). Recognised by word 0 == word 1 and words 2.. matching the exe's slot k (not
+        k - 1); word 1 gets the native of exe slot 1, which makes the table exe order throughout (the layout of the
+        call-only placeholders and of the image vftable). A stand-in for the link fix (dtor_pos on the slot
+        symbols before the renames)."""
+        done = set()
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            if (sym, off) in done or size - off < 12:
+                continue
+            done.add((sym, off))
+            n = min(12, (size - off) // 4)
+            w = [link(x) & 0xFFFFFFFF for x in struct.unpack(f"<{n}I", bytes(uc.mem_read(rt(a + off), 4 * n)))]
+            if not w[0] or w[0] != w[1]:
+                continue
+            ex = img.vtable_slots(exe_vt)
+            if len(ex) < 3 or ex[1] not in F:
+                continue
+            same = sum(1 for k in range(2, min(n, len(ex))) if F.get(ex[k]) == w[k])
+            shifted = sum(1 for k in range(2, min(n, len(ex))) if F.get(ex[k - 1]) == w[k])
+            if same <= shifted:
+                continue
+            uc.mem_write(rt(a + off + 4), struct.pack("<I", rt(F[ex[1]]) & 0xFFFFFFFF))
+            st["slot-one repaired"] += 1
+        print("   repair-lost-slot-one: %d link-extended vtables whose renamed destructor pair hid exe slot 1 get it "
+              "back in slot 1" % st["slot-one repaired"])
 
     def image_vptr_minus_one(self, uc, img, F, V, rt, st):
         """table option image-vptr-minus-one: the guest's references to an exe vftable that no native vtable is bound
@@ -2348,6 +2382,7 @@ def main(argv):
                 emu.member_vtables = bool(a.stub_faults) and "member-vtables" in fault_table_options(a.stub_faults)
                 emu.member_vtables_rx = fault_table_option_arg(a.stub_faults, "member-vtables") \
                     if emu.member_vtables else None
+                emu.repair_slot_one = bool(a.stub_faults) and "repair-lost-slot-one" in fault_table_options(a.stub_faults)
                 emu.image_minus_one = bool(a.stub_faults) and "image-vptr-minus-one" in fault_table_options(a.stub_faults)
                 emu.image_minus_one_rx = fault_table_option_arg(a.stub_faults, "image-vptr-minus-one") \
                     if emu.image_minus_one else None

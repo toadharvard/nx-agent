@@ -97,9 +97,19 @@ POLICY = {
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
+    'partial-return': ('by-design', '-', False, 'the oracle returns a byte / short in al / ax and the rest of eax is '
+                                                'what it held; the declared int result differs only there'),
+    'oracle-empty-call': ('by-design', '-', False, 'the oracle calls an exe function whose body is proven to do '
+                                                   'nothing (push ebp; mov ebp, esp; pop ebp; ret, exeempty.py: no '
+                                                   'store, no call, no register but ebp/esp written) and GCC drops '
+                                                   'the call; the traces are equal without those calls'),
     'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
                                               'buffer and destroys the local, GCC constructs it there (copy '
                                               'elision, allowed by C++), F1b'),
+    'nrvo-elision':   ('by-design', '-', False, 'one machine passes the hidden result buffer of the function as the object a '
+                                                'callee works on, the other a local of its own frame (named return '
+                                                'value optimisation on one side only; allowed by C++). The result '
+                                                'buffer is compared at the end, so a wrong copy still shows'),
     'oracle-frame-smash': ('by-design', '-', False, 'the oracle faults after a store into its own return-address '
                                                     'slot: a local array overrun by an out-of-range fuzzed count (UB '
                                                     'in C++; the exe corrupts its frame the same way), F1b'),
@@ -198,6 +208,10 @@ POLICY = {
                                                 'where the oracle has an image-window address: an unrebound '
                                                 'variable or table (or a literal: check the pointee)'),
     'vptr-unpaired':  ('real-bug', 'S2c', False, 'no kind-V row pairs the native vtable with the image vftable'),
+    'native-vslot-differs': ('real-bug', 'S2c', True, 'the native vtable of a planted class has, at the slot where the '
+                                                      'exe\'s vftable holds function Y, another exe function X, and '
+                                                      'the native called it (D26: the decomp class\'s virtual at '
+                                                      'that slot is not the exe\'s; the oracle ran Y)'),
     'vslot-shift':    ('real-bug', 'S1-rules', True, 'a virtual call through the planted vftable reaches the exe\'s '
                                                      'slot k-1 where the oracle calls slot k: the caller\'s class '
                                                      'declaration numbers its virtuals from a slot-0 placeholder, '
@@ -230,6 +244,9 @@ POLICY = {
                                                 'return-in-memory rules)'),
     'callee-saved':   ('real-bug', 'S1b', True, 'callee-saved registers clobbered: an ABI break'),
     'call-args':      ('real-bug', 'S2c', True, 'a bridge or definition delivers other argument bytes'),
+    'param-count':    ('real-bug', 'S1b', True, 'the exe function reads stack parameters its decomp declaration does '
+                                                'not have (every caller passes too few; the native reads what is '
+                                                'in its registers)'),
     'signedness':     ('real-bug', 'S1', True, 'the divergence goes when an input byte >= 0x80 loses its top bit'),
     'float':          ('real-bug', 'S1', True, 'a float difference beyond tolerance (inf/NaN on one side)'),
     # --- not decided from the record -------------------------------------------------------------------------------
@@ -333,13 +350,14 @@ FIX_CLASSES = {
                       ('dyninit-no-atexit',)),
     'call-abi':      ('S1b', 'every call passes and preserves registers by the callee\'s MSVC convention (argument '
                              'slots written, results not reused, callee-saved kept, sret as MSVC)',
-                      ('uninit-arm', 'native-garbage-arg', 'native-stale-result', 'callee-saved', 'sret-mismatch')),
+                      ('uninit-arm', 'native-garbage-arg', 'native-stale-result', 'callee-saved', 'sret-mismatch',
+                       'param-count')),
     'data-binding':  ('S2c', 'every data symbol and import binds to the exe object (no stub as data, no unit copy, '
                              'no native address where the exe has an image address, bridges deliver the bytes)',
                       ('native-stub-data', 'native-address', 'split-global', 'import-slot-called', 'call-args')),
     'vtables':       ('S2c', 'every image vftable pairs with a full native vtable of the static class (no short '
                              'vtables, overrides bound to their this-adjusting thunks)',
-                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap')),
+                      ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap', 'native-vslot-differs')),
     'vtable-slots':  ('S1-rules', 'every virtual call reaches the exe\'s slot: each declaration a caller dispatches '
                                   'through numbers its virtuals in D26\'s one minus-one order (a `virtual ~X()` '
                                   'where the exe has its deleting destructor, then the exe\'s slots in order)',
@@ -672,6 +690,27 @@ def iat_names():
     return _IAT
 
 
+def _rule_empty_call(d):
+    """oracle-empty-call: the call traces are equal once the calls to proven effect-free exe functions are removed
+    from both (at least one removed from the oracle's)."""
+    tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if d.get('kind') not in ('call-count', 'call-target') or not isinstance(tx, list) or not isinstance(ta, list):
+        return None
+    import exeempty
+    def strip(t):
+        out = []
+        for c in t:
+            try:
+                if exeempty.effect_free(int(str(c), 16)):
+                    continue
+            except ValueError:
+                pass
+            out.append(c)
+        return out
+    sx, sa = strip(tx), strip(ta)
+    return 'oracle-empty-call' if sx == sa and len(sx) < len(tx) else None
+
+
 def _rule_calls(d, rec=None):
     tx, ta = d.get('x86_trace'), d.get('arm_trace')
     if d.get('kind') == 'call-target':
@@ -818,6 +857,12 @@ def _rule_oracle_fault(d, rec):
         em = None
     if em and (fx or str(d.get('x86') or '').startswith('fault:')):
         return 'native-empty-callee'
+    try:
+        me = native_body(rec.get('source'), '__fnv_%08x' % int(rec.get('address') or '0', 16))
+    except (TypeError, ValueError):
+        me = None
+    if me is not None and _empty_body(me[0]) and (fx or str(d.get('x86') or '').startswith('fault:')):
+        return 'native-empty-body'      # the native function itself is a bare ret where the exe reads memory
     return None
 
 
@@ -1501,6 +1546,20 @@ def _alloc_result(k):
     return ALLOC_BASE + 0x1000 * (k % 0x400) + 0x10
 
 
+def _zero_stub_of_leaf(d):
+    """(S2 W6) every placeholder the native ran stands for an exe function that is itself a trivial leaf
+    (retsrc.trivial_leaf: straight-line, no call, no store outside its frame): not the native-zero-stub class; the
+    record goes on to the other rules (0x0065f820: 0x0065e750 returns an uninitialised al, 0x0065fd70 its argument)"""
+    exe = d.get('arm_zero_stub_exe') or ()
+    if not exe or '?' in exe:
+        return False
+    try:
+        import retsrc
+    except ImportError:
+        return False
+    return all(retsrc.trivial_leaf(int(a, 16)) for a in exe)
+
+
 def _ret_bytes(case, k):
     import world             # plain module (no emulator): the same move out of the private ranges as Case.ret_bytes
     rets = case.get('rets') or []
@@ -1533,7 +1592,9 @@ def _ctor_pair(case, vx, va, limit):
 
 
 _FACTS_CACHE = {}
-_ZERO_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0)}
+_ZERO_BODIES = {struct.pack('<II', 0x52800000, 0xd65f03c0), struct.pack('<II', 0x2a1f03e0, 0xd65f03c0),
+                # (F-uncls, difffuzz-20) a float / double placeholder: `movi v0.2s, #0; ret`, `movi d0, #0; ret`
+                struct.pack('<II', 0x0f000400, 0xd65f03c0), struct.pack('<II', 0x2f00e400, 0xd65f03c0)}
 
 
 def _object_facts(source):
@@ -1666,6 +1727,11 @@ def _rule_unclassified(d, rec, k):
         vx, va = _word(d['x86']), _word(d['arm'])
     except ValueError:
         return None
+    if d.get('arm_zero_stub') and not _zero_stub_of_leaf(d):
+        # (F-uncls, difffuzz-20) the native entered a function of its unit whose whole body is a placeholder that
+        # returns 0 (runner.zero_stubs): the exe's work there is not done, and what the function returns or stores
+        # from its result differs (0x00d57b20 stores 1.0 - 0.0 where the exe's FUN_00d571d0 returned 0.51)
+        return 'native-zero-stub'
     if k == 'mem-write':
         bx, ba = bytes.fromhex(d['x86']), bytes.fromhex(d['arm'])
         diff = [i for i in range(min(len(bx), len(ba))) if bx[i] != ba[i]]
@@ -1747,7 +1813,7 @@ def refine(rec, cause=None):
     elif k == 'mem-write':
         got = _rule_mem_write(d, rec)
     elif k in ('call-count', 'call-target'):
-        got = _rule_calls(d, rec)
+        got = _rule_empty_call(d) or _rule_calls(d, rec)
         if got in (None, 'native-inlined', 'native-early-exit', 'native-extra-calls'):
             got = _callflow(d, rec) or got
     if got is None and cause in (None, 'unclassified') and _with_effects(rec, 'unclassified') == 'unclassified':
