@@ -5900,9 +5900,60 @@ def r_bound_dtor_stand_ins(path, text, stats):
     stats['DTORB1'] += len(edits)
     return text
 
+# ---------------------------------------------------------------------------------------------------------- STAND7
+#
+# An out-of-class template member body that is a stand-in (S1-rules, from EQ: link 0540aff0d154 call-flow 00b2b910).
+# treeengine_ob1_variant.cpp defines `template <...> inline basic_string<...>& basic_string<...>::assign(const
+# basic_string&, unsigned, unsigned) { ... if (_Roff == 0x7f3f3f3f) {...; _Tidy(...)} ... }` only to reproduce the
+# frame MSVC /Ob1 reserves before it rolls the expansion back to a call. The unit binds
+# `?assign@?$basic_string@...` to 0x0044a580, the exe's assign, which another unit decompiles. GCC inlined the stand-in
+# and called _Tidy (0x0044a730) where the exe calls 0x0044a580 with the real arguments. STAND5 covers in-class bodies;
+# this one is out of class. STAND7 puts such a definition under `#ifdef _MSC_VER`: MSVC keeps its byte-match body, and
+# GCC sees only the class's declaration and calls the bound name, which the link binds to the exe's function. Only
+# where:
+# - the definition is `inline`, in an /Od /Ob1 unit (MSVC expanded it, then rolled the expansion back to the call the
+#   recipe records), and the unit binds exactly one decorated name of the member (`?m@?$C@`), to an address that is
+#   not tagged in the file and that another unit defines;
+# - no `@fnv` tag sits right above the definition.
+STAND7_DEF = re.compile(r'(?m)^[ \t]*template\s*<[^;{}]*>\s*(?:inline\s+)?[^;{}()]*?\b([A-Za-z_]\w*)\s*<[^;{}()]*>\s*::\s*'
+                        r'([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:const\s*)?\{')
+
+def r_template_member_stand_ins(path, text, stats):
+    """STAND7: an out-of-class template member stand-in whose MSVC name the unit binds elsewhere -> MSVC-only (above)."""
+    if not path.endswith('.cpp') or 'template' not in text: return text
+    syms = _unit_symbols(path)
+    info = _unit_info(path)
+    if not syms or info is None: return text
+    tagged = {int(a, 16) for a in FNV_TAG_ADDR.findall(text)}
+    elsewhere = None
+    edits = []
+    for m in STAND7_DEF.finditer(text):
+        cls, mem = m.group(1), m.group(2)
+        names = [k for k in syms if k.startswith('?%s@?$%s@' % (mem, cls))]
+        bound = {int(syms[k], 16) for k in names}
+        if not bound or bound & tagged: continue
+        # the evidence of a stand-in: an `inline` body in an /Od /Ob1 unit (/Ob1 expands inline functions), which MSVC
+        # still called out of line (the recipe binds the name); one instantiation (another one the unit uses would
+        # lose its definition under GCC)
+        if not re.search(r'\binline\b', m.group(0)) or not {'/Od', '/Ob1'} <= set(info[0]) or len(names) != 1:
+            stats['STAND7-GATE'] += 1; continue
+        if elsewhere is None: elsewhere = _all_unit_functions(path) - info[1]
+        if not bound <= elsewhere:
+            stats['STAND7-ADDR'] += 1; continue
+        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*\s*$', text[max(0, m.start() - 300):m.start()]):
+            continue
+        c = prepare.match_brace(text, m.end() - 1)
+        edits.append((m.start(), c))
+    if not edits: return text
+    for a, c in sorted(edits, reverse=True):
+        text = text[:a] + '#ifdef _MSC_VER /* fnv-nx STAND7 */\n' + text[a:c] + '\n#endif\n' + text[c:]
+    stats['STAND7'] += len(edits)
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins]
+              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
+              r_template_member_stand_ins]
 RULES += REFS_RULES

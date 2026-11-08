@@ -1778,6 +1778,29 @@ check('VLIT2 no vftable with that slot 0 at the offset: left as it is', _vlo,
       ['*(const char**)((char*)this + 0x10) = " rH";'])
 os.environ.pop('FNVNX_VLIT', None); prepare.__dict__['_fnvnx_vlit'] = None; s1._VLIT = _saved_vlit
 
+# ---- S1-rules: STAND7 (an out-of-class inline template member stand-in bound elsewhere -> MSVC only)
+_s7 = tempfile.mkdtemp(); os.makedirs(os.path.join(_s7, 'src')); os.makedirs(os.path.join(_s7, 'build'))
+_json.dump({'units': [{'source': 'src/u.cpp', 'flags': ['/MT', '/Od', '/Ob1'],
+                       'symbols': {'?assign@?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z': '0x0044a580'},
+                       'functions': [{'address': '0x00b2b910', 'symbol': '?f@@YAXXZ', 'size': 8}]},
+                      {'source': 'src/v.cpp', 'symbols': {}, 'functions': [{'address': '0x0044a580', 'symbol': '?assign@x', 'size': 8}]}]},
+           open(os.path.join(_s7, 'build', 'units.json'), 'w'))
+_S7 = ('template <class C, class T, class A>\ninline basic_string<C, T, A>& basic_string<C, T, A>::assign(const basic_string<C, T, A>& r,'
+       ' unsigned int o, unsigned int n)\n{\n    if (o == 0x7f3f3f3f) { _Tidy(true); }\n    return *this;\n}\n'
+       '// @fnv 0x00b2b910\nvoid f() {}\n')
+_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+_s7o = run(s1.r_template_member_stand_ins, _S7, os.path.join(_s7, 'src', 'u.cpp'))
+_json.dump({'units': [{'source': 'src/u.cpp', 'flags': ['/MT', '/O2'], 'symbols': {'?assign@?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z': '0x0044a580'},
+                       'functions': []}, {'source': 'src/v.cpp', 'symbols': {}, 'functions': [{'address': '0x0044a580', 'symbol': '?assign@x', 'size': 8}]}]},
+           open(os.path.join(_s7, 'build', 'units.json'), 'w'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+_s7b = run(s1.r_template_member_stand_ins, _S7, os.path.join(_s7, 'src', 'u.cpp'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('STAND7 an inline out-of-class template member bound to another unit\'s address: MSVC only', _s7o,
+      ['#ifdef _MSC_VER /* fnv-nx STAND7 */\ntemplate <class C', '    return *this;\n}\n#endif\n'])
+check('STAND7 not in an /Od /Ob1 unit: nothing', _s7b, [], ['STAND7'])
+
 # ---- S1-rules: DTORB1 (a destructor stand-in calls the address its ??1 is bound to, under GCC)
 _db = tempfile.mkdtemp(); os.makedirs(os.path.join(_db, 'src')); os.makedirs(os.path.join(_db, 'build'))
 _json.dump({'units': [{'source': 'src/u.cpp', 'symbols': {'??1S@@UAE@XZ': '0x004aa280', '??1T@@UAE@XZ': '0x004aa280'},
