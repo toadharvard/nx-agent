@@ -19,7 +19,9 @@ failing lines go, at most 8 rounds); bitfields and unnamed members are compared 
 Rows (COLUMNS): unit, record, what (size / align / field <name> / base <name>), msvc, native, cause, boot.
 The cause of a record is that of its first differing member, in order of offset (later members shift with it):
 ebo (an empty base / FNVNX_EBO filler), bitfield, long-double, wchar, bool, enum, align8 (an 8-byte scalar:
-double, long long, __int64, __m64), vptr (the record's or a base's vfptr), pack (a record MSVC packs below its
+double, long long, __int64, __m64), memfnptr (a pointer to member function: 8 bytes natively, 4 under MSVC),
+vfpad / vfpad-src (MSVC pads a record's own vfptr to the record's alignment > 4; -src: the members' offset names
+say the exe has no padding, see vfpad()), vptr (the record's or a base's vfptr), pack (a record MSVC packs below its
 members' alignment), or other. A record identical on both sides gives no row. The summary line (stderr and the
 .summary file next to the TSV) counts differing records and fields, boot set and the rest, unique by record name.
 """
@@ -49,7 +51,8 @@ def msvc_flags(tree):
     sse = os.environ.get('SSE2NEON') or os.path.join(PORT, 'ext', 'sse2neon')
     return ['--target=i686-pc-windows-msvc', '-std=gnu++17', '-fsyntax-only', '-fms-extensions', '-fshort-wchar',
             '-fsigned-char', '-U_MSC_VER', '-U_WIN32', '-U_WIN64', '-U_M_IX86', '-U_M_IX86_FP',
-            '-fms-compatibility-version=0',   # the native compile's branches: no Windows target macros '-D__aarch64__', '-D__ILP32__',
+            '-fms-compatibility-version=0',   # the native compile's branches: no Windows target macros
+            '-D__aarch64__', '-D__ILP32__',
             '-Wno-everything', '-ferror-limit=0',
             # the SIMD types as MSVC defines them (__m64 8/8, __m128 16/16, ...): the shim's SSE headers are
             # sse2neon (AArch64) and stay out by their guards; their function bodies do not affect records
@@ -133,7 +136,7 @@ def probe(tree, workdir, unit, recs):
     for _ in range(8):
         if not alive:
             break
-        lines = ['#include "%s"' % os.path.join(tree, unit), '#include <cstddef>']
+        lines = ['#include "%s"' % os.path.join(tree, unit), '#include <cstddef>', '#include <type_traits>']
         first = len(lines) + 1
         layout_of = []
         for i, r in enumerate(alive):
@@ -143,6 +146,10 @@ def probe(tree, workdir, unit, recs):
             vals += ['__builtin_offsetof(%s, %s)' % (q, f[1]) for f in fs]
             bs = [b for b in r.bases if b[2] != 'virtual base']
             vals += ['(unsigned)((char *)static_cast< ::%s *>((%s *)0x10000) - (char *)0x10000)' % (b[1], q) for b in bs]
+            # the member-function-pointer fields (bit j: field j < 32): 8 bytes natively (Itanium ptr + adj), 4 under
+            # MSVC for a single-inheritance class
+            vals.append('0u' + ''.join(' | (std::is_member_function_pointer<std::remove_all_extents<decltype(%s::%s)>'
+                                       '::type>::value ? %du : 0u)' % (q, f[1], 1 << j) for j, f in enumerate(fs[:32])))
             layout_of.append((r, fs, bs))
             lines.append('extern "C" const unsigned __fnvnx_lg_%d[] = {%s};' % (i, ', '.join(vals)))
         open(src, 'w').write('\n'.join(lines) + '\n')
@@ -152,10 +159,12 @@ def probe(tree, workdir, unit, recs):
             words = layout.symbol_words(obj, '__fnvnx_lg_')
             for i, (r, fs, bs) in enumerate(layout_of):
                 w = words.get('__fnvnx_lg_%d' % i)
-                if not w or len(w) < 2 + len(fs) + len(bs):
+                if not w or len(w) < 3 + len(fs) + len(bs):
                     continue
+                pmf = w[2 + len(fs) + len(bs)]
                 res[r.name] = (w[0], w[1], {f[1]: w[2 + j] for j, f in enumerate(fs)},
-                               {b[1]: w[2 + len(fs) + j] for j, b in enumerate(bs)})
+                               {b[1]: w[2 + len(fs) + j] for j, b in enumerate(bs)},
+                               {f[1] for j, f in enumerate(fs[:32]) if pmf >> j & 1})
             break
         bad = {int(n) - first for n in re.findall(r'%s:(\d+):\d+: error' % re.escape(os.path.basename(src)),
                                                   rr.stderr)}
@@ -166,12 +175,12 @@ def probe(tree, workdir, unit, recs):
     return res
 
 
-def cause_of(rec, what_name):
+def cause_of(rec, what_name, pmf=()):
     """the cause of a record's difference: the first member, in declaration order up to and including the first
     differing one (what_name; all members for a size-only difference), whose type or kind is a known ABI difference"""
     upto = next((i for i, f in enumerate(rec.fields) if f[1] == what_name), len(rec.fields) - 1)
     for f in rec.fields[:upto + 1]:
-        c = _cause_type(rec, f)
+        c = 'memfnptr' if f[1] and f[1] in pmf else _cause_type(rec, f)
         if c != 'other': return c
     return 'pack' if rec.packed else 'other'
 
@@ -188,12 +197,42 @@ def _cause_type(rec, f):
     return 'other'
 
 
+# a member named by its exe offset (the decomp convention: m10, unk3c, m_20, m_pad0e, field_1c)
+_OFFNAME = re.compile(r'^(?:m_)?(?:unk|field|pad|m)?_?([0-9A-Fa-f]{2,4})$')
+
+
+def offset_names(rec, foff):
+    """(members whose name gives their MSVC offset, ... their native offset): the exe's evidence"""
+    em = en = 0
+    for off, nm, _ in rec.fields:
+        m = _OFFNAME.match(nm or '')
+        if off is None or not m or nm not in foff:
+            continue
+        v = int(m.group(1), 16)
+        em += v == off
+        en += v == foff[nm]
+    return em, en
+
+
+def vfpad(rec, foff):
+    """MSVC pads a record's own vfptr (no base) to the record's alignment: the first member sits at alignof(record)
+    (8: a double / __int64 member, 16: __m128 / hkVector4), not at 4 as GCC places it. 'vfpad' when the members'
+    offset names agree with MSVC's (or say nothing) - the native layout is to follow; 'vfpad-src' when they agree
+    with the native one - the exe has no padding there (the source's own vfptr stands for a 4-aligned base's)."""
+    if rec.vptr != 0 or rec.bases or rec.align <= 4:
+        return ''
+    first = next((f for f in rec.fields if f[0] is not None and f[1]), None)
+    if not first or first[0] != rec.align or foff.get(first[1]) != 4:
+        return ''
+    em, en = offset_names(rec, foff)
+    return 'vfpad-src' if en > em else 'vfpad'
+
+
 def compare(unit, rec, nat, boot):
     """rows for one record: the first differing member decides the cause of the record."""
-    size, align, foff, boff = nat
+    size, align, foff, boff, pmf = nat
     diffs = []
-    if rec.vptr is not None and rec.fields and rec.fields[0][0] is not None and foff.get(rec.fields[0][1]) is not None:
-        pass
+    vp = vfpad(rec, foff)
     for off, nm, kind in rec.bases:
         if nm in boff and boff[nm] != off:
             diffs.append((off, 'base ' + nm, off, boff[nm], 'ebo' if kind != 'primary base' else 'vptr'))
@@ -201,10 +240,10 @@ def compare(unit, rec, nat, boot):
         if off is None or not nm or nm not in foff:
             continue
         if foff[nm] != off:
-            diffs.append((off, 'field ' + nm, off, foff[nm], cause_of(rec, nm)))
+            diffs.append((off, 'field ' + nm, off, foff[nm], vp or cause_of(rec, nm, pmf)))
     diffs.sort()
     rows = []
-    cause = diffs[0][4] if diffs else (cause_of(rec, '') if size != rec.size else '')
+    cause = diffs[0][4] if diffs else (vp or cause_of(rec, '', pmf) if size != rec.size else '')
     if size == 0 and rec.size == 1:
         cause = 'ebo'                     # a zero-size native class: the FNVNX_EBO2 filler alone (`char x[0]`)
     if size != rec.size:
