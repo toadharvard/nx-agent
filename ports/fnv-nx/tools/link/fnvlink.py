@@ -974,6 +974,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                             slotfill2.other_class_entry(isig, itanium(nd['sym'].name)):   # S2c-vt2
                         target = MSVC_ENTRY_SYM % addr
                         stats['msvc_entry_refs_itanium'] += 1
+                    if isig.variant == 'D0' and target == ADDR_SYM % addr and \
+                            sigs.itanium_variant(nd['sym'].name) is None and not deleting_native(nd, msvc):
+                        # GCC's deleting destructor D0 bound to a plain (destroy-only) body: the decomp's `~C` at
+                        # an address its unit binds `??1C` to (S5 round 5: _ZTV17SettingPointerMap's D0 ran
+                        # FUN_00404da0 and freed nothing). D0 = that body, then the global operator delete
+                        dl_ = global_delete(newdel_votes, native, providers)
+                        if dl_:
+                            target = D0DEL_SYM % addr
+                            bridges.setdefault(target, emit_d0_stub(target, ADDR_SYM % addr, dl_))
+                            stats['d0_on_plain_dtor'] += 1
                     defdecl = nd['msvc']
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
@@ -1458,6 +1468,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         if n.startswith('_ZTV'):
             by_cls[canon_it(n)].append(n)
     rebind, hand_rows = {}, []
+    vmo = {}   # D26 (c): image vftable -> its minus-one native copy (minus_one_copies)
     for a, sites in sorted(hand.items()):
         how = 'named vftable' if a in vmap else None
         if a not in vmap:
@@ -1554,6 +1565,26 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             vstats['exe-copy-' + k_] = n_
         for a in rebind:   # S2c-vt2: shifted secondary groups moved their address points (slotfill2.shifted)
             rebind[a] = vmap[a][:2]
+        if os.environ.get('FNVNX_D26C', '1') != '0':
+            # D26 (c): the image vftables that would stay at their image address - hand-stored (hand_vptr_stores)
+            # or an RTTI vftable referenced as data - get a minus-one native copy (minus_one_copies)
+            vmo_c = {}
+            for a, sites in hand.items():
+                if a not in vmap and a in used_addr:
+                    off = collections.Counter(o_ for _, _, _, o_ in sites).most_common(1)[0][0]
+                    vmo_c[a] = -exev[a].off if a in exev and exev[a].td else -off
+                    vstats['vmo-hand-stored'] += 1
+            for a, e_ in exev.items():
+                if e_.td and a not in vmap and a in used_addr and a not in vmo_c:
+                    vmo_c[a] = -e_.off
+                    vstats['vmo-rtti-referenced'] += 1
+            miss = [a for a in vmo_c if a not in exev_all]
+            if miss:
+                exev_all.update(exevft.plain_vftables(exe_path, miss, set(exev_all) | set(vmap) | set(vmo_c) |
+                                                      {a_ for (_, a_) in vnames}))
+            vmo, vst = minus_one_copies(vmo_c, exev_all, native, providers, exe_path, msvc, bridges, traps, out)
+            for k_, n_ in vst.items():
+                vstats['vmo-' + k_] = n_
     # primary image vftables several classes name (MSVC folds identical vftables: 0x01012120 is FUN_00404920's,
     # FUN_00404950's, ...): the map can give one native vtable; every class's own is listed, so a native vptr store
     # can be traced back to its image vftable (S13's vtable-store comparison)
@@ -1587,6 +1618,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 f.write('%s = %s + %d;\n' % (ADDR_SYM % a, rb_[0], rb_[1]))
                 stats['vtable_data_refs_rebound'] += 1
                 stats['vtable_data_refs_rebound_unrecognised'] += a not in rebind
+            elif a in vmo:
+                f.write('%s = %s + 8;\n' % (ADDR_SYM % a, vmo[a]))
+                stats['vtable_data_refs_minus_one_copy'] += 1
             else:
                 f.write('%s = 0x%08x;\n' % (ADDR_SYM % a, a))
         for line in sorted(set(alias_lines)):
@@ -2492,6 +2526,37 @@ def nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_vo
     return out
 
 
+D0DEL_SYM = '__fnvnx_d0del_%08x'   # D0 = the destroy-only body at the address, then operator delete
+
+
+def deleting_native(nd, msvc):
+    """The native definition at an address is itself a deleting destructor: Itanium D0, an MSVC `??_G` / `??_E`, or a
+    decomp (this, flags) function."""
+    if sigs.itanium_variant(nd['sym'].name) == 'D0':
+        return True
+    n = nd.get('msvc') or ''
+    return n.startswith(('??_G', '??_E')) or flags_param(msvc(n) if n else None)
+
+
+def global_delete(newdel_votes, native, providers):
+    """The global operator delete most units bind `??3@YAXPAX@Z` to (native or S4's provider), else None."""
+    dv = newdel_votes.get('??3@YAXPAX@Z')
+    da = dv.most_common(1)[0][0] if dv else None
+    if da is None:
+        return None
+    return ADDR_SYM % da if da in native else ((providers or {}).get(da) or (None,))[0]
+
+
+def emit_d0_stub(name, d1, dl):
+    """GCC's D0(this): d1(this); dl(this) (the deleting destructor of a class whose only native body destroys)."""
+    body = ['    stp x29, x30, [sp, #-32]!', '    mov x29, sp', '    str x19, [sp, #16]', '    mov w19, w0',
+            '    bl %s' % d1, '    mov w0, w19', '    ldr x19, [sp, #16]', '    ldp x29, x30, [sp], #32',
+            '    b %s' % dl]
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name] + body +
+                     ['    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
 def emit_sdd_stub(name, d1, dl):
     """MSVC's scalar deleting destructor `void *C::??_G(unsigned flags)`: d1(this); if (flags & 1) dl(this);
     return this."""
@@ -2912,6 +2977,42 @@ VTEXT_OBJ = 'zz_bridges.o'   # the extended vtables live in bridges.S (apply ass
 XTRAP = 'exe 0x%08x'
 
 
+def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where):
+    """The native word for exe vftable slot address a in a copy made from the exe (exe_vtable_copies' extra slots,
+    minus_one_copies' slots): `__fnv_<a>` where the address map has a plain native definition, the
+    deleting-destructor stub for a `??_G`, S4's provider, the target of a plain `jmp f` thunk, the exact form of a
+    constant leaf, else a trap stub reporting the exe address (traps[t] = (text, where)). Counts go to st."""
+    nd = native.get(a)
+    var = sigs.itanium_variant(nd['sym'].name) if nd else None
+    if nd is not None and var is None and free_slot(a, nd, bridges, st):
+        t = FREE_SYM % a   # a decomp free function (S5 class 1): this dropped / edx inserted
+    elif nd is not None and var is None:
+        t = ADDR_SYM % a
+        st['slots-native'] += 1
+    elif nd is not None and var == 'D0' and nd['variants'].get('D1') is not None:
+        t = GDEL_SYM % a
+        bridges.setdefault(t, emit_gdel_stub(t, ADDR_SYM % a, ADDR_SYM % a + (
+            '' if nd['variants']['D1'] is nd['sym'] else '_D1')))
+        st['slots-deleting-destructor'] += 1
+    elif nd is None and a in (providers or {}):
+        t = providers[a][0]
+        st['slots-provider'] += 1
+    elif nd is None and exe_path and (exevft.thunk(exe_path, a) or (1, 0))[0] == 0 and \
+            native.get(exevft.thunk(exe_path, a)[1]) is not None and \
+            sigs.itanium_variant(native[exevft.thunk(exe_path, a)[1]]['sym'].name) is None:
+        t = ADDR_SYM % exevft.thunk(exe_path, a)[1]   # a primary vtable: only `jmp f` (no adjustment)
+        st['slots-jump-thunk'] += 1
+    elif nd is None and exe_path and exevft.leaf_constant(exe_path, a) is not None:
+        t = CONST_SYM % a
+        bridges.setdefault(t, emit_const_stub(t, exevft.leaf_constant(exe_path, a)))
+        st['slots-leaf-constant'] += 1
+    else:
+        t = TRAP_SYM % int(hashlib.sha1((XTRAP % a).encode()).hexdigest()[:8], 16)
+        traps.setdefault(t, (XTRAP % a + (' (not compiled)' if nd is None else ' (%s)' % var), where))
+        st['slots-trap'] += 1
+    return t
+
+
 def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
                       providers=None, alt=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
@@ -2973,7 +3074,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         names = [ren.get(e.sym, e.sym) if e.sym else None for e in ents]
         ov = over.get((z, path), {})
         se = names[2:2 + n]
-        d = exevft.dtor_pos(se, [e.word for e in ents[2:2 + n]])
+        # the pair is looked for on the object's own symbols: after resolve's renames D1 and D0 can both be one
+        # native body (FUN_00404da0 for ~SettingPointerMap), which hid the pair and lost exe slot 1 (S5 round 5)
+        d = exevft.dtor_pos([e.sym for e in ents[2:2 + n]], [e.word for e in ents[2:2 + n]])
         nm = n - 1 if d is not None else n
         slots = max((exev[v].slots for v in vs), key=len) if vs else []
         if any(exev[v].slots != slots[:len(exev[v].slots)] for v in vs):
@@ -3012,34 +3115,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         extra = []
         for j in (range(nm, len(slots)) if extend else ()):
             a = slots[j]
-            nd = native.get(a)
-            var = sigs.itanium_variant(nd['sym'].name) if nd else None
-            if nd is not None and var is None and free_slot(a, nd, bridges, st):
-                t = FREE_SYM % a
-            elif nd is not None and var is None:
-                t = ADDR_SYM % a
-                st['slots-native'] += 1
-            elif nd is not None and var == 'D0' and nd['variants'].get('D1') is not None:
-                t = GDEL_SYM % a
-                bridges.setdefault(t, emit_gdel_stub(t, ADDR_SYM % a, ADDR_SYM % a + (
-                    '' if nd['variants']['D1'] is nd['sym'] else '_D1')))
-                st['slots-deleting-destructor'] += 1
-            elif nd is None and a in (providers or {}):
-                t = providers[a][0]
-                st['slots-provider'] += 1
-            elif nd is None and exe_path and (exevft.thunk(exe_path, a) or (1, 0))[0] == 0 and \
-                    native.get(exevft.thunk(exe_path, a)[1]) is not None and \
-                    sigs.itanium_variant(native[exevft.thunk(exe_path, a)[1]]['sym'].name) is None:
-                t = ADDR_SYM % exevft.thunk(exe_path, a)[1]   # a primary vtable: only `jmp f` (no adjustment)
-                st['slots-jump-thunk'] += 1
-            elif nd is None and exe_path and exevft.leaf_constant(exe_path, a) is not None:
-                t = CONST_SYM % a
-                bridges.setdefault(t, emit_const_stub(t, exevft.leaf_constant(exe_path, a)))
-                st['slots-leaf-constant'] += 1
-            else:
-                t = TRAP_SYM % int(hashlib.sha1((XTRAP % a).encode()).hexdigest()[:8], 16)
-                traps.setdefault(t, (XTRAP % a + (' (not compiled)' if nd is None else ' (%s)' % var), (z, 2 + j)))
-                st['slots-trap'] += 1
+            t = exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (z, 2 + j))
             extra.append('    .word %s' % t)
         # the primary vtable is the whole group: the extra slots go at its end
         lines = ['// %s from the exe vftable(s) %s: %d native slots + %d, %d slots per use (S2c-vt)' % (
@@ -3061,6 +3137,80 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         for r in rows:
             f.write('\t'.join(r) + '\n')
     return st
+
+
+VMO_SYM = '__fnvnx_vmo_%08x'   # D26 (c): minus-one native copy of an image vftable that stays at its image address
+
+
+def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None):
+    """D1 and D0 (native slots 0 and 1) for exe slot 0 at a0 when it is the deleting destructor: the address map's
+    Itanium pair (kind G), or flags stubs into a decomp definition of the `??_G` (its declaration takes the flags, its
+    MSVC name is `??_G`/`??_E`, or the exe's code has the shape: exevft.deleting_dtor); None when exe slot 0 is not
+    a destructor."""
+    nd = native.get(a0)
+    if nd is None:
+        return None
+    var = sigs.itanium_variant(nd['sym'].name)
+    if var == 'D0' and nd['variants'].get('D1') is not None:
+        st['slot0-dtor-pair'] += 1
+        return ADDR_SYM % a0 + ('' if nd['variants']['D1'] is nd['sym'] else '_D1'), ADDR_SYM % a0
+    if var == 'D1':   # destroys only: no deleting variant compiled
+        t = TRAP_SYM % int(hashlib.sha1((XTRAP % a0 + ' D0').encode()).hexdigest()[:8], 16)
+        traps.setdefault(t, (XTRAP % a0 + ' (D0 not compiled)', where))
+        st['slot0-d1-only'] += 1
+        return ADDR_SYM % a0, t
+    ds = msvc(nd['msvc']) if nd.get('msvc') else None
+    if var is None and (flags_param(ds) or (nd.get('msvc') or '').startswith(('??_G', '??_E')) or
+                        (exe_path and exevft.deleting_dtor(exe_path, a0))):
+        for fl in (0, 1):
+            bridges.setdefault(FLAG_SYM % (a0, fl), emit_flag_stub(FLAG_SYM % (a0, fl), ADDR_SYM % a0, fl))
+        st['slot0-flags-stubs'] += 1
+        return FLAG_SYM % (a0, 0), FLAG_SYM % (a0, 1)
+    return None
+
+
+def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, traps, out):
+    """D26 (c): every image vftable whose data symbol would stay at the image address (stored by hand into an
+    object's vptr, no native vtable mapped: hand_vptrs 'image') gets a strong native copy `__fnvnx_vmo_<V>` in
+    D22's minus-one order: offset-to-top (from the exe's COL, else the store's offset), typeinfo 0, D1/D0 for the
+    exe's deleting destructor at slot 0 (vmo_dtor_slots; a trap for D1 and exe slot 0 at slot 1 when slot 0 is
+    not a destructor), then exe slot k at native slot k + 1 (exe_slot_target). resolve binds `__fnv_<V>` to the
+    copy's address point, so every hand store, comparison and read of V becomes native. cands: {V: offset-to-top}.
+    Returns ({V: copy symbol}, counts); out/vmo.tsv lists every copy."""
+    st = collections.Counter()
+    got, rows = {}, []
+    for v in sorted(cands):
+        e = exev.get(v)
+        if e is None or not e.slots:
+            st['no-exe-slots'] += 1
+            continue
+        name = VMO_SYM % v
+        slots = list(e.slots)
+        n_trap = st['slots-trap']
+        pair = vmo_dtor_slots(slots[0], native, msvc, bridges, traps, st, (name, 2), exe_path)
+        if pair is None:
+            d1 = TRAP_SYM % int(hashlib.sha1((XTRAP % slots[0] + ' D1').encode()).hexdigest()[:8], 16)
+            traps.setdefault(d1, (XTRAP % slots[0] + ' (D1 at an exe slot 0 that is not a destructor)', (name, 2)))
+            st['slot0-not-a-destructor'] += 1
+            pair = (d1, exe_slot_target(slots[0], native, providers, exe_path, bridges, traps, st, (name, 3)))
+        words = list(pair) + [exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (name, 3 + k))
+                              for k, a in enumerate(slots[1:], 1)]
+        ott = cands[v]
+        lines = ['// %s: exe vftable %08x in the minus-one order, %d exe slots (D26 c)' % (name, v, len(slots)),
+                 '    .section .data.rel.ro.fnvnx_vmo.%08x,"aw"' % v, '    .p2align 3', '    .globl %s' % name,
+                 '    .hidden %s' % name, '    .type %s, %%object' % name, '%s:' % name,
+                 '    .word 0x%x' % (ott & 0xffffffff), '    .word 0'] + ['    .word %s' % w for w in words] + \
+                ['    .size %s, .-%s' % (name, name), '    .text']
+        bridges['zzvmo_%08x' % v] = '\n'.join(lines) + '\n'
+        got[v] = name
+        st['copies'] += 1
+        st['slots'] += len(words)
+        rows.append(('%08x' % v, str(ott), str(len(slots)), str(st['slots-trap'] - n_trap), words[0], words[1]))
+    with open(os.path.join(out, 'vmo.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#image vftable\toffset-to-top\texe slots\ttrap slots\tnative slot 0 (D1)\tnative slot 1 (D0)\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    return got, st
 
 
 def write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req=None, exe_req=None):
