@@ -38,5 +38,5 @@ ok "a miss: <unit>.o.d written where gcc -MD puts it, naming the header" 'grep -
 rm -f "$T/out"/*.o "$T/out"/*.o.d "$T/out"/*.ok
 CXX="aarch64-linux-gnu-g++ -MD" cc FNVNX_UNIT_OBJCACHE=$T/cache2
 ok "a hit: <unit>.o.d written from the recorded dependencies (the header too)" 'grep -q "include/k.h" "$T/out/src_a.cpp.o.d" && grep -q "src/a.cpp" "$T/out/src_a.cpp.o.d"'
-ok "build.py: a unit with no dependency file is compiled again, never kept" 'grep -q "if deps is None or any((mtime(p) is None or mtime(p) > ot) for p in deps):" "$P/tools/pipeline/build.py"'
+ok "build.py: a unit with no dependency file is compiled again, never kept" 'grep -q "if deps is None or any((mtime(p) is None or mtime(p) > ot) for p in deps) or not stamp_ok(base, src, deps):" "$P/tools/pipeline/build.py"'
 [ $fails = 0 ] && echo "test_unit_objcache: all ok" || { tail -n 20 "$T/cc.log"; echo "test_unit_objcache: $fails failed"; exit 1; }
