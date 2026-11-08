@@ -2023,6 +2023,14 @@ check('HKRO1 a destructor-only hkReferencedObject gets FNVNX_HKRO1 after its des
 check('HKRO1 not a full one, nor another class',
       run(s1.r_hk_referenced_object_slots, _HK.replace('void removeReference', 'virtual const void* GetClassType() const;\nvoid removeReference')) +
       run(s1.r_hk_referenced_object_slots, _HK.replace('hkReferencedObject', 'hkOther')), [], ['FNVNX_HKRO1'])
+# ---- S1-rules: TAIL1-PACK (the base filler under #pragma pack(N): MSVC's min(alignof(base), N); LAYOUT gate pack rows)
+_PK = ('struct B { virtual void f(); };\n#pragma pack(push, 1)\nstruct P : B { short a; };\n#pragma pack(pop)\n'
+       'struct Q : B { short a; };\n#pragma pack(push, 4)\n#pragma pack(push, 2)\nstruct R : B { int a; };\n#pragma pack(pop)\n'
+       'struct S : B { int a; };\n#pragma pack(pop)\n')
+_pko = run(s1.r_msvc_base_layout, _PK)
+check('TAIL1-PACK under pack(1) / nested push 2: FNVNX_MSVC_BASE_END_PACK(N, base); after the pops the plain filler',
+      _pko, ['struct P : B { FNVNX_MSVC_BASE_END_PACK(1, B)', 'struct Q : B { FNVNX_MSVC_BASE_END(B)',
+             'struct R : B { FNVNX_MSVC_BASE_END_PACK(2, B)', 'struct S : B { FNVNX_MSVC_BASE_END_PACK(4, B)'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')

@@ -349,11 +349,36 @@ def _qualified_top(name):
         elif c == ':' and depth == 0 and name[i + 1:i + 2] == ':': return True
     return False
 
+TAIL1_PACK = re.compile(r'^[ \t]*#[ \t]*pragma[ \t]+pack[ \t]*\(([^)]*)\)', re.M)
+
+def _tail1_packs(text):
+    """[(position, active #pragma pack value or None)] in order: the file's pack stack after each directive
+    (push / pop, with or without an identifier, and a bare value; `pack()` resets to the default)"""
+    out, stack, cur = [], [], None
+    for m in TAIL1_PACK.finditer(text):
+        args = [a.strip() for a in m.group(1).split(',') if a.strip()]
+        num = next((int(a, 0) for a in args if re.fullmatch(r'\d+|0x[0-9a-fA-F]+', a)), None)
+        if args and args[0] == 'push':
+            stack.append(cur)
+            if num is not None: cur = num
+        elif args and args[0] == 'pop':
+            cur = stack.pop() if stack else None
+        elif num is not None:
+            cur = num
+        elif not args:
+            cur = None
+        out.append((m.end(), cur))
+    return out
+
 def r_msvc_base_layout(path, text, stats):
     """TAIL1: derived class members start at sizeof(last base), like MSVC (see above). Classes with a virtual base
-    are left alone."""
+    are left alone. Under an active `#pragma pack(N)` of the file (N below 8) the filler is
+    FNVNX_MSVC_BASE_END_PACK(N, base): MSVC lays a base subobject out at min(alignof(base), N), while GCC's zero-width
+    bit-field of alignof(base) raised the class's alignment past the pack (the LAYOUT gate's pack rows:
+    hkReferencedObject.h's pack(1) classes were align 4 natively, 1 under MSVC)."""
     if ':' not in text: return text
     out, pos = [], 0
+    packs = _tail1_packs(text) if 'pack' in text else []
     for o, c, k, h in prepare.scope_spans(text):
         if k != 'class': continue
         bare = prepare.HEAD_DECOR.sub(' ', prepare.TEMPLATE_PREFIX.sub('', h)).strip()
@@ -367,7 +392,15 @@ def r_msvc_base_layout(path, text, stats):
         # (C++11 allows it before any qualified name, in a template or not); a `::` inside the template arguments
         # does not make the name qualified
         if _qualified_top(last) and not last.startswith('typename'): last = 'typename ' + last
-        out.append(text[pos:o + 1]); out.append(' FNVNX_MSVC_BASE_END(%s)' % last); pos = o + 1
+        pk = None
+        for at, v in packs:
+            if at > o: break
+            pk = v
+        if pk is not None and pk < 8:
+            out.append(text[pos:o + 1]); out.append(' FNVNX_MSVC_BASE_END_PACK(%d, %s)' % (pk, last)); pos = o + 1
+            stats['TAIL1-PACK'] += 1
+        else:
+            out.append(text[pos:o + 1]); out.append(' FNVNX_MSVC_BASE_END(%s)' % last); pos = o + 1
         stats['TAIL1'] += 1
     out.append(text[pos:])
     return ''.join(out)
@@ -385,7 +418,7 @@ def r_msvc_base_layout(path, text, stats):
 
 def _ebo_empty_class(text, o, c):
     """True when the class body text[o..c] declares no data member and nothing virtual."""
-    flat = re.sub(r'\bFNVNX_MSVC_BASE_END\s*\((?:[^()]|\([^()]*\))*\)', ' ', _flat_body(text, o, c))   # TAIL1's (no `;`)
+    flat = re.sub(r'\bFNVNX_MSVC_BASE_END(?:_PACK)?\s*\((?:[^()]|\([^()]*\))*\)', ' ', _flat_body(text, o, c))   # TAIL1's (no `;`)
     if re.search(r'\bvirtual\b', flat): return False
     flat = re.sub(r'\((?:[^()]|\([^()]*\))*\)', '()', flat)
     for st in re.split(r'[;{}]', flat):

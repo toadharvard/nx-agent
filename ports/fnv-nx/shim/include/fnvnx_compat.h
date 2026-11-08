@@ -165,6 +165,8 @@ template <> struct fnvnx_int_of_align<32> { typedef unsigned int type __attribut
 template <> struct fnvnx_int_of_align<64> { typedef unsigned int type __attribute__((aligned(64))); };
 template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribute__((aligned(128))); };
 #define FNVNX_MSVC_BASE_END(...) typename fnvnx_int_of_align<alignof(__VA_ARGS__)>::type : 0;
+/* under #pragma pack(N): MSVC places the base at min(alignof(base), N) (TAIL1-PACK) */
+#define FNVNX_MSVC_BASE_END_PACK(N, ...) typename fnvnx_int_of_align<(alignof(__VA_ARGS__) < (N) ? alignof(__VA_ARGS__) : (N))>::type : 0;
 #endif
 
 /* -fno-sized-deallocation (W41) stops GCC declaring the sized global operator delete. The decomp still calls

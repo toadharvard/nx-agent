@@ -47,6 +47,7 @@ template <> struct fnvnx_int_of_align<32> { typedef unsigned int type __attribut
 template <> struct fnvnx_int_of_align<64> { typedef unsigned int type __attribute__((aligned(64))); };
 template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribute__((aligned(128))); };
 #define FNVNX_MSVC_BASE_END(...) typename fnvnx_int_of_align<alignof(__VA_ARGS__)>::type : 0;
+#define FNVNX_MSVC_BASE_END_PACK(N, ...) typename fnvnx_int_of_align<(alignof(__VA_ARGS__) < (N) ? alignof(__VA_ARGS__) : (N))>::type : 0;
 #endif
 
 #define _In_
