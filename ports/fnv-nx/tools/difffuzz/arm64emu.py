@@ -90,12 +90,18 @@ class Arm64Engine:
         self.mapped.add(a64image.STACK_GUARD)
         # native vtable groups synthesized for planted vptrs (vtmodel.py: classes whose _ZTV the unit image does not
         # define), read only, in the private range
-        for base, data in sorted((vt_mem or {}).items()):
-            for p in range(world.page_of(base), base + len(data), PAGE):
+        # (EQ native-null-read, difffuzz-20) a group's page holds the same background the oracle reads past the end of
+        # its vftable (a call through a slot the exe's vftable does not have), not zeros that fault at call 0; one
+        # page past the last group is mapped for the same reason
+        self.vt_mem = vt_mem or {}
+        self.vt_pages = set()
+        for base, data in sorted(self.vt_mem.items()):
+            for p in range(world.page_of(base), base + len(data) + PAGE, PAGE):
                 if p not in self.mapped:
                     uc.mem_map(p, PAGE, UC_PROT_READ)
                     self.mapped.add(p)
-            uc.mem_write(base, data)
+                    self.vt_pages.add(p)
+        self._fill_vt()
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._on_unmapped)
         uc.hook_add(UC_HOOK_INTR, self._on_intr)
         self._trap_pcs = None
@@ -140,6 +146,12 @@ class Arm64Engine:
             self._fault = 'fault:%s:%08x' % ('w' if access == 17 else 'r', address & 0xffffffff)
             uc.emu_stop()
 
+    def _fill_vt(self):
+        for p in sorted(self.vt_pages):
+            self.uc.mem_write(p, self.world.page_a64(p))
+        for base, data in sorted(self.vt_mem.items()):
+            self.uc.mem_write(base, data)
+
     def reset(self, world_obj):
         """Forget the previous case's world pages and restore the image's writable data."""
         for p in self.dynamic:
@@ -147,6 +159,7 @@ class Arm64Engine:
             self.mapped.discard(p)
         self.dynamic = set()
         self.world = world_obj
+        self._fill_vt()
         for base, data in self.image.segments:
             if base >= self.image.data_start:
                 self.uc.mem_write(base, data)

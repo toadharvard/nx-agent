@@ -529,9 +529,13 @@ def hint(pair, target, case, div, fn, max_steps):
         # (vtmodel.py padding): a pairing gap of S2c, not this function's behaviour; tested
         # before `unplanted`, which would file it as oracle-vcall (S13b)
         h['cause'] = 'vptr-unpaired'; return h
-    if k == 'call-count' and any(s.get('shift') == -1 for s in div.get('vslot') or []):
+    if (k == 'call-count' or (k == 'call-target' and div.get('arm_vcall') == 'planted')) and \
+            any(s.get('shift') == -1 and (k == 'call-count' or s.get('ran')) for s in div.get('vslot') or []):
         # the native's extra call is planted slot k, the oracle ran slot k+1 (unit code) for real (Pair.vslots_run)
         h['cause'] = 'vslot-shift'; return h
+    if k == 'call-target' and div.get('vslot_native'):
+        # the native's vtable slot calls another exe function than the exe's vftable slot (runner.Pair.vslot_native)
+        h['cause'] = 'native-vslot-differs'; return h
     if k == 'call-target' and div.get('vcall') == 'planted' and div.get('arm_vcall') == 'planted':
         # both machines called a slot of the planted vftable, different slots (runner.Pair.vslots): the native
         # numbers this class's slots otherwise; one lower is D26 (b)'s call-only placeholder declaration (F2)

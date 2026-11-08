@@ -15,6 +15,7 @@ compare() returns the FIRST difference (so a reproducer stays minimal), or None:
   callee-saved x86 ebx/esi/edi/ebp or AArch64 x19..x29/sp not preserved (an ABI break, e.g. a bridge or asm)
 Timeouts on either side are inconclusive (not a divergence), both sides faulting is agreement.
 """
+import bisect
 import math
 import re
 import struct
@@ -519,6 +520,21 @@ class Pair:
                 got = self._learn_pop(case, max_steps, rx)
                 if got is not None:
                     rx, ra, d = got
+            if d and d['kind'] == 'error' and (ra.error or '').startswith('fault:') and rx.error is None and \
+                    self.adapted < 16:
+                # (EQ native-null-read, difffuzz-20) the native faulted inside its own copy of a function the oracle
+                # only called out (the unit defines `FUN_<X>`, the oracle's unit does not, so X was intercepted with
+                # a canned result): run the oracle's X for real, as the adaptive follow below does, and compare again
+                x = self._native_own_copy(rx, ra)
+                got = self.target.oracle_code(x) if x is not None and getattr(self.target, 'oracle_code', None) \
+                    else None
+                if got:
+                    self.target.x86_code[x] = got[0]
+                    for a_, b_ in got[1].items():
+                        self.pinned.setdefault(a_, b_)
+                    self.adapted += 1
+                    self.xe = None
+                    continue
             if not d or d['kind'] not in ('call-target', 'call-count') or self.adapted >= 16:
                 return rx, ra, d
             if d['kind'] == 'call-count':
@@ -540,6 +556,29 @@ class Pair:
                     # slot function for real) turned this into `call-count x86 0` = falloff? (F2 d21-vslot)
                     d['vslot'] = self.vslots(case, int(d['x86'], 16), int(d['arm'], 16))
                     return rx, ra, d
+                if d.get('vcall') == 'planted' and str(d.get('arm') or '').startswith('name:') and \
+                        x in (self.target.vt_slots if hasattr(self.target, 'vt_slots') else ()):
+                    # (EQ native-null-read, difffuzz-20) the oracle called slot X of a planted vftable and the native
+                    # a named stub (a virtual the link binds to no definition: `_ZN10NiAVObject4v003Ev`). A virtual
+                    # call is not an inlined X: following X ran the exe's body (`xor eax, eax`) against the stub's
+                    # canned result, and the native then dereferenced that result (00477560, 009abe40: null-read)
+                    return rx, ra, d
+                if d.get('arm_vcall') == 'planted' and d.get('vcall') != 'planted':
+                    # (F2b, difffuzz-20) the native called planted slot k and the oracle's call went to a function it
+                    # runs as code (no call event): slot k+1 of the same vftable. Following it turned the native's
+                    # slot into an inlined callee (0x005c12a0, 0x007aecb0: `call [edx+0x34]` natively reaches the
+                    # exe's slot 12, the oracle's slot 13 ran 0x007ac4f0 for real)
+                    vs = self.vslots_run(case, rx, ra)
+                    if vs:
+                        d['vslot'] = vs
+                        return rx, ra, d
+                if d.get('arm_vcall') != 'planted' and d.get('vcall') != 'planted':
+                    vn = self.vslot_native(case, rx, ra, d)
+                    if vn:
+                        # (F2b) the native called slot j of its copy of a planted vftable, a function the exe's slot
+                        # does not hold: a different callee on the native's vtable, not an inlined one
+                        d['vslot_native'] = vn
+                        return rx, ra, d
                 if str(d.get('arm') or '').startswith('name:__s13_vtpad_'):
                     # the native called through a padding slot of a planted vftable's native vtable (vptr-unpaired):
                     # a virtual call, not an inlined X (F1b: once the follow ran past five loads, 0x005d6d10's
@@ -563,6 +602,28 @@ class Pair:
             self.adapted += 1
             self.xe = None              # rebuilt with the larger code set
         return rx, ra, d
+
+    def _native_own_copy(self, rx, ra):
+        """The first call the oracle made past the native's calls (it faulted before making them) whose original
+        address X is outside the oracle code and whose native definition in the unit (a symbol named `FUN_<X>`) the
+        native run executed blocks in; None if there is none."""
+        img = self.target.image
+        syms = getattr(img, 'syms', None)
+        if not syms:
+            return None
+        starts = sorted(set(syms.values()))
+        cand = [c.target for c in rx.calls[len(ra.calls):] if c.target >= 0 and c.target not in self.target.x86_code]
+        if not cand:
+            return None
+        for x in cand:
+            tag = 'FUN_%08x' % x
+            for n, a in syms.items():
+                if tag in n and not n.startswith('__fnv_'):
+                    i = bisect.bisect_right(starts, a)
+                    hi = starts[i] if i < len(starts) else a + 0x10000
+                    if any(a <= b < hi for b in ra.blocks):
+                        return x
+        return None
 
     def _native_calls(self, x, ra):
         """Does the native definition of the target, or of a function of its unit the native run `ra` entered,
@@ -604,6 +665,40 @@ class Pair:
                 out.append(dict(vft='%08x' % v, x86=ix[:8], arm=ia[:8],
                                 shift=-1 if any(j == i - 1 for i in ix for j in ia) else None))
         return out
+
+    def vslot_native(self, case, rx, ra, d):
+        """A call-target whose native callee is no slot of the exe's planted vftables but sits in the native copy of
+        one (Target.vt_mem), at the slot where the exe's vftable holds a function the oracle called or ran as code:
+        the native vtable's slot calls another function than the exe's (D26 / vtables fix class; the exe slot is
+        j - 1 against an Itanium vtable with a second destructor slot, else j). Returns {vft, native_slot, exe_slot,
+        native, exe} or None."""
+        try:
+            ta = int(d['arm'], 16)
+        except (TypeError, ValueError, KeyError):
+            return None
+        t = self.target
+        pins = getattr(t, 'vt_pins', {}) or {}
+        ran = {c.target for c in rx.calls} | set(rx.blocks)
+        for v in sorted(set(case.vptrs.values())):
+            b = pins.get(v) or b''
+            slots = list(struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4]))
+            ap = (getattr(t, 'vt_ap', {}) or {}).get(v)
+            if not slots or ap is None or ta in slots:
+                continue
+            for base, m in (getattr(t, 'vt_mem', {}) or {}).items():
+                if not base <= ap < base + len(m):
+                    continue
+                words = struct.unpack('<%dI' % ((len(m) - (ap - base)) // 4), m[ap - base:])
+                orig = getattr(t, 'stub_orig', {}) or {}
+                for j, w in enumerate(words[:len(slots) + 2]):
+                    o = orig.get(w) or (w - 0x08000000 if 0x08400000 <= w < 0x09000000 else None)
+                    if o != ta:
+                        continue
+                    ks = [k for k in (j - 1, j) if 0 <= k < len(slots) and slots[k] in ran and slots[k] != ta]
+                    if len(ks) == 1:
+                        return dict(vft='%08x' % v, native_slot=j, exe_slot=ks[0], native='%08x' % ta,
+                                    exe='%08x' % slots[ks[0]])
+        return None
 
     def vslots_run(self, case, rx, ra):
         """A call-count where the native makes more calls: its first call the oracle does not make is a planted
