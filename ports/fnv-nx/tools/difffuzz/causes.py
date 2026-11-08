@@ -99,6 +99,10 @@ POLICY = {
                                                 'the exe gets away with; the port need not reproduce garbage'),
     'partial-return': ('by-design', '-', False, 'the oracle returns a byte / short in al / ax and the rest of eax is '
                                                 'what it held; the declared int result differs only there'),
+    'oracle-empty-call': ('by-design', '-', False, 'the oracle calls an exe function whose body is proven to do '
+                                                   'nothing (push ebp; mov ebp, esp; pop ebp; ret, exeempty.py: no '
+                                                   'store, no call, no register but ebp/esp written) and GCC drops '
+                                                   'the call; the traces are equal without those calls'),
     'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
                                               'buffer and destroys the local, GCC constructs it there (copy '
                                               'elision, allowed by C++), F1b'),
@@ -686,6 +690,27 @@ def iat_names():
     return _IAT
 
 
+def _rule_empty_call(d):
+    """oracle-empty-call: the call traces are equal once the calls to proven effect-free exe functions are removed
+    from both (at least one removed from the oracle's)."""
+    tx, ta = d.get('x86_trace'), d.get('arm_trace')
+    if d.get('kind') not in ('call-count', 'call-target') or not isinstance(tx, list) or not isinstance(ta, list):
+        return None
+    import exeempty
+    def strip(t):
+        out = []
+        for c in t:
+            try:
+                if exeempty.effect_free(int(str(c), 16)):
+                    continue
+            except ValueError:
+                pass
+            out.append(c)
+        return out
+    sx, sa = strip(tx), strip(ta)
+    return 'oracle-empty-call' if sx == sa and len(sx) < len(tx) else None
+
+
 def _rule_calls(d, rec=None):
     tx, ta = d.get('x86_trace'), d.get('arm_trace')
     if d.get('kind') == 'call-target':
@@ -832,6 +857,12 @@ def _rule_oracle_fault(d, rec):
         em = None
     if em and (fx or str(d.get('x86') or '').startswith('fault:')):
         return 'native-empty-callee'
+    try:
+        me = native_body(rec.get('source'), '__fnv_%08x' % int(rec.get('address') or '0', 16))
+    except (TypeError, ValueError):
+        me = None
+    if me is not None and _empty_body(me[0]) and (fx or str(d.get('x86') or '').startswith('fault:')):
+        return 'native-empty-body'      # the native function itself is a bare ret where the exe reads memory
     return None
 
 
@@ -1782,7 +1813,7 @@ def refine(rec, cause=None):
     elif k == 'mem-write':
         got = _rule_mem_write(d, rec)
     elif k in ('call-count', 'call-target'):
-        got = _rule_calls(d, rec)
+        got = _rule_empty_call(d) or _rule_calls(d, rec)
         if got in (None, 'native-inlined', 'native-early-exit', 'native-extra-calls'):
             got = _callflow(d, rec) or got
     if got is None and cause in (None, 'unclassified') and _with_effects(rec, 'unclassified') == 'unclassified':
