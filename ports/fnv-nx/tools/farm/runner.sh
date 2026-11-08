@@ -78,6 +78,8 @@ echo $$ > "$FARM_HOME/$NAME.pid"   # the runner itself (a watcher's kill -0 targ
 if [[ "$NAME" =~ ^qk[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}" "${RUNNER_CLAIM:=quick}"; fi
 # bl<k> (the bootloop farms, bootloop_job.sh): persistent, a 20 s poll (each takes the newest head when it is free)
 if [[ "$NAME" =~ ^bl[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}"; fi
+# linkcheck (linkcheck_job.sh, the head's link tools on a fixed base): persistent, a 20 s poll
+if [ "$JOB" = linkcheck ]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}"; fi
 PERSIST=${RUNNER_PERSIST:-0}; POLL=${RUNNER_POLL_S:-60}; CLAIM=${RUNNER_CLAIM:-}
 GAP=${RUNNER_MIN_GAP_S:-0}; LAST_START=0   # RUNNER_MIN_GAP_S: at least this many seconds between two job starts (a light
                                            # job hosted beside other work, e.g. `zero` on a busy integration branch)
@@ -93,6 +95,36 @@ claim() {  # claim <head>: true when this farm now holds quick/claim/<tag>/<head
   log "head ${1:0:12} is claimed by another farm of $CLAIM: skipped"; return 1
 }
 [ -d "$NX/.git" ] || git clone -q --filter=blob:none "$PUBLIC" "$NX"
+
+# RUNNER_GATE=linkcheck (T1, orchestrator: a head whose link tools crash at link time must not cost the full farms a
+# 40-75 min cycle): before the job, the head's link tools key (tools/farm/link_key.sh) is looked up in the linkcheck
+# farm's sidecars (reports/linkcheck/*-linkcheck.json, fnvnx-linkcheck/1). red: the head is skipped, with a short
+# report saying so; pass or error (linkcheck could not check): the job runs; no verdict yet: wait for it up to
+# RUNNER_GATE_WAIT_S (default 900 s), then run (a slow or absent linkcheck never stops the farms).
+gate() {   # gate <head>: true when the job may run on it
+  [ "${RUNNER_GATE:-}" = linkcheck ] || return 0
+  local key ref=refs/remotes/origin/reports/linkcheck end v f
+  key=$(bash "$NX/ports/fnv-nx/tools/farm/link_key.sh" "$NX" "$1" 2>/dev/null) || return 0
+  end=$(( $(date +%s) + ${RUNNER_GATE_WAIT_S:-900} ))
+  while :; do
+    v=""
+    if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/reports/linkcheck:$ref" 2>/dev/null; then
+      for f in $(git -C "$ARTIFACTS" grep -l "\"link_key\": \"$key\"" "$ref" -- '*-linkcheck.json' 2>/dev/null | sed "s|^$ref:||"); do
+        case "$(git -C "$ARTIFACTS" show "$ref:$f" | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("verdict",""))' 2>/dev/null)" in
+          red) v="red ${f%-linkcheck.json}"; break ;;
+          pass) v=pass ;;
+          error) [ -n "$v" ] || v=error ;;
+        esac
+      done
+    fi
+    case "$v" in
+      red*) GATE_RED=${v#red }; log "gate: linkcheck is RED for these link tools (key $key, report ${GATE_RED}): head ${1:0:12} skipped"; return 1 ;;
+      pass|error) log "gate: linkcheck $v for key $key"; return 0 ;;
+    esac
+    [ "$(date +%s)" -lt "$end" ] || { log "gate: no linkcheck verdict for key $key after ${RUNNER_GATE_WAIT_S:-900} s: running"; return 0; }
+    sleep 30
+  done
+}
 
 publish_report() {  # publish_report <file.md>: commit it and its <file>.json sidecar, if any, to reports/<NAME>
   local f=$1 rb=reports/$NAME wt=$FARM_HOME/reports-wt side=${1%.md}.json
@@ -191,6 +223,13 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     if [ "$GAP" -gt 0 ] && [ $(( $(date +%s) - LAST_START )) -lt "$GAP" ]; then sleep "$POLL"; continue; fi
     if ! claim "$H"; then echo "$H" > "$LAST"; sleep "$POLL"; continue; fi
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
+    GATE_RED=""
+    if ! gate "$H"; then
+      R=$FARM_HOME/out/${H:0:12}-$JOB.md; mkdir -p "$FARM_HOME/out"
+      { echo "# $JOB ${H:0:12} skipped: linkcheck RED"; echo
+        echo "- the head's link tools crashed on the linkcheck farm (reports/linkcheck/$GATE_RED-linkcheck.md): not built here"; } > "$R"
+      publish_report "$R"; echo "$H" > "$LAST"; sleep "$POLL"; continue
+    fi
   fi
   LAST_START=$(date +%s)
   [ "$PERSIST" = 1 ] && export FARM_DEADLINE=$(( $(date +%s) + ${RUNNER_JOB_S:-7200} - 300 ))
