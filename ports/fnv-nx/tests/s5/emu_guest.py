@@ -676,7 +676,82 @@ class Emu:
                 print(f"   cpu boost: {'FastLoad' if mode else 'Normal'}"
                       f"{'' if on else ' (off: boost_loading=0)'} (thread {self.cur.tid if self.cur else '?'})")
             return 0 if on else 1
+        if module == 11 and 4 <= fn <= 7:   # FNVNX_PLAT_VM_*: VirtualAlloc's address space (toolchain/host/host_vm.inc)
+            av = struct.unpack("<QQ", bytes(self.uc.mem_read(args, 16))) if nargs >= 2 and args else (0, 0)
+            return self.vm_call(fn, av[0], av[1])
         return 0xFFFFFFFFFFFFFF01
+
+    # -- the host's VM service (S4; the device: toolchain/host/host_vm.inc). Without it the guest's os_vm_* carve
+    # reservations from its heap and refuse every fixed address, and the game's VirtualReservationSearch (16 MiB steps
+    # down from 0xff000000) finds nothing. A reservation is address space only; commits map zeroed pages; decommits
+    # zero them (the memory stays, as the device's partial decommit); release unmaps what was committed.
+    VM_ALIGN, VM_NO_GO = 0x10000, (0x00400000, 0x02100000)
+
+    def vm_free(self, a, n):
+        if a + n > 0x100000000 or (a < self.VM_NO_GO[1] and a + n > self.VM_NO_GO[0]) or a < 0x10000:
+            return False
+        for b, e, _p in self.uc.mem_regions():
+            if a <= e and b < a + n:
+                return False
+        return all(not (a < ra + rs and ra < a + n) for ra, rs in getattr(self, "vm_resv", {}).items())
+
+    def vm_call(self, fn, a0, a1):
+        resv = self.vm_resv = getattr(self, "vm_resv", {})      # base -> size
+        mapped = self.vm_mapped = getattr(self, "vm_mapped", {})  # page -> base of its reservation
+        P = 0x1000
+        if fn == 4:   # reserve (hint or 0, size) -> address or 0; (0, 0) is the guest's probe
+            if not a1:
+                return 0
+            size = (a1 + self.VM_ALIGN - 1) & ~(self.VM_ALIGN - 1)
+            if a0:
+                a = a0 & ~(self.VM_ALIGN - 1)
+                if not self.vm_free(a, size):
+                    return 0
+            else:
+                a = next((c for c in range(0x80000000, 0x100000000 - size, self.VM_ALIGN * 16) if self.vm_free(c, size)), 0)
+                if not a:
+                    return 0
+            resv[a] = size
+            self.vm_stats = getattr(self, "vm_stats", [0, 0])
+            self.vm_stats[0] += 1
+            if self.vm_stats[0] <= 20:
+                print(f"   vm: reserve {a:#x} +{size:#x}{' (fixed)' if a0 else ''}")
+            return a
+        base = next((b for b, s in resv.items() if b <= a0 < b + s), None)
+        if fn == 7:   # release (address) -> 0
+            if base is None or a0 != base:
+                return 1
+            for pg in [p for p, b in mapped.items() if b == base]:
+                self.uc.mem_unmap(pg, P)
+                del mapped[pg]
+            del resv[base]
+            return 0
+        if base is None or a0 + a1 > base + resv[base]:
+            return 1
+        lo, hi = a0 & ~(P - 1), (a0 + a1 + P - 1) & ~(P - 1)
+        if fn == 5:   # commit (address, size) -> 0: map the pages not mapped yet (fresh pages read as zero)
+            pg = lo
+            while pg < hi:
+                if pg in mapped:
+                    pg += P
+                    continue
+                run = pg
+                while run < hi and run not in mapped:
+                    run += P
+                try:
+                    self.uc.mem_map(pg, run - pg, UC_PROT_READ | UC_PROT_WRITE)
+                except UcError:
+                    return 1
+                for q in range(pg, run, P):
+                    mapped[q] = base
+                pg = run
+            return 0
+        if fn == 6:   # decommit (address, size) -> 0: the contents are gone
+            for pg in range(lo, hi, P):
+                if pg in mapped:
+                    self.uc.mem_write(pg, bytes(P))
+            return 0
+        return 1
 
     # -- crash trace: PC/LR and the frame-record chain (x29), symbolized with --elf (S2's __fnv_<addr> aliases
     # give the original FalloutNV.exe address of each native function)
