@@ -1029,6 +1029,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             elif cls == 'import' and addr in import_syms:   # IAT slot: the slot's api, not the decomp's spelling
                 target = import_syms[addr]
                 stats['imports_bound'] += 1
+            elif cls == 'import' and addr in iat and iat[addr][1] != un and IDENT.match(iat[addr][1]):
+                # no export-table symbol for the slot (an api a platform module defines under its C name, e.g.
+                # d3dx9_38's D3DXCreateCubeTextureFromFileInMemory), but the unit spells it otherwise (declared
+                # without extern "C": _Z37D3DXCreate...): the reference goes to the api's C name, as a C-named
+                # reference to the same slot links by itself
+                target = iat[addr][1]
+                stats['imports_bound_by_api_name'] += 1
             if cls == 'unresolved' and un in vslots:
                 cls = 'vslot-unresolved'
             elif cls == 'unresolved' and isig.variant:
