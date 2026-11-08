@@ -117,6 +117,20 @@ def main():
     check(v == 'mismatch' and recv == 'Foo', 'this-based site: judged by the member function\'s class (Foo: mismatch)')
     v, *_ = S.Judge([agree]).site(9, 9)
     check(v == 'unknown', 'a slot no table has: unknown')
+    # a receiver class whose native table has another name (a shell, a __fnvnx_vmo_ copy) is found by the exe's RTTI class
+    sh = S.Pair(0x01000000, '12FUN_00401100', '_ZTV12FUN_00401100', True, 0, [exe[0], None, exe[1], exe[2], exe[3], exe[4]],
+                exe, S.xclass_enc('.?AVNiShell@@'))
+    check(S.xclass_enc('.?AVNiShell@@') == '7NiShell' and S.xclass_enc('.?AV?$T@H@@') is None, 'xclass_enc: simple names only')
+    v, recv, *_ = S.Judge([sh], {'NiShell'}).site(2, 3, '7NiShell')
+    check(v == 'ok' and recv == 'NiShell', 'class found by the exe RTTI name: judged against the shell\'s table (minus-one: ok)')
+    v, *_ = S.Judge([sh], {'NiShell'}).site(2, 2, '7NiShell')
+    check(v == 'mismatch', 'class found by the exe RTTI name: exe-order call against a minus-one table: mismatch')
+    # `delete p` (D0, native slot 1) for the exe's `p->DeleteThis()` (exe slot 1, the common `delete this` body)
+    dt = S.Judge([shifted], set(), lambda a: a == exe[1])
+    v, *_ = dt.site(1, 1, '3Bar')
+    check(v == 'ok', 'DeleteThis body at exe slot 1 = native D0 (slot 1): ok')
+    v, *_ = S.Judge([shifted], set(), lambda a: False).site(1, 1, '3Bar')
+    check(v == 'mismatch', 'slot 1 that is not the `delete this` body: still a mismatch')
 
     # --- an unalignable function: the exe has two different virtual calls, the native code one
     ex, nv = events([8, 16], [8], tmp)
