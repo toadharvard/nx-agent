@@ -25,3 +25,13 @@
   - A data read is excluded: blk_00cc0000 FUN_00cd9f10 reads `(int)m_ppVirtualMethodTable[7]`, a count (exe
     [[esi]+0x1c]).
   - prep_k: 17 sites in 13 units, all compile.
+* **Boot blocker, S5 link af44165ab2d8: FUN_00aa1420 freed the live allocator** (R4's NiAlloc corruption). Fixed in
+  68473f35.
+  - The cause: its call-site class S_00aa1420_Object was not converted by D22 call-only, because both of its virtuals
+    have out-of-class `inline ... {}` empty definitions. The call read [vptr+4], which is
+    BSNiAllocator::Destroy(1) in the minus-one table.
+  - The fix: an empty or constant-only out-of-class definition now counts as a placeholder, as an in-class `{}`
+    already did. The slot-0 placeholder's definition goes under FNVNX_D22_DROP (D22-DEFDROP).
+  - The compiled call reads [vptr+8]. On prep_k, 15 classes in 15 units are newly converted, and all compile.
+  - The commit message's "out-of-class ... definitions" phrase lost its backticked part to the shell; the text here
+    is the record.
