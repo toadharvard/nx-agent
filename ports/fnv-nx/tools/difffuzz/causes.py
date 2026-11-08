@@ -1329,7 +1329,8 @@ def native_ran(source, name, trace, exclude=()):
     for n in reach:
         if native_defines(source, n) is not False or n in exclude:
             continue                                     # unit-local (untraced), unknown, or called by the caller too
-        toks.add(n[6:] if n.startswith('__fnv_') and len(n) == 14 else 'name:' + n)
+        m = re.match(r'__fnv_([0-9a-f]{8})(?:_[CD][0-2])?$', n)   # __fnv_<addr>, or its secondary-base entry _C2 / _D2
+        toks.add(m.group(1) if m else 'name:' + n)
     return any(str(t) in toks for t in trace)
 
 
@@ -1542,6 +1543,12 @@ def _rule_callflow(d, rec):
         if (k == 'call-target' and '__fnv_%08x' % xa in cs and '%08x' % xa in (d.get('arm_entered') or ())
                 and a is not None and d.get('x86_next') == a):
             return 'oracle-callee-unloaded'
+    # (EQ, farm baseline 588863: 0x00905330 -> BSSimpleList::IsEmpty 0x008256d0) the oracle's last call is X, a
+    # callee the native's object only references (a provider of the unit image defines it): the native entered its
+    # __fnv_<X> block in this run (arm_entered) and ran it untraced, so the traces are equal but for that one call
+    if (k == 'call-count' and a is None and xa is not None and xa != addr and len(tx) == len(ta) + 1
+            and '%08x' % xa in (d.get('arm_entered') or ()) and '__fnv_%08x' % xa in (native_callees(src, addr) or ())):
+        return 'oracle-callee-unloaded'
     # a decomp-local stand-in for an original function defined elsewhere, with an empty body: tied to the divergence
     # when the oracle calls that original where the native diverges, or when the native stops early
     if x is not None:
