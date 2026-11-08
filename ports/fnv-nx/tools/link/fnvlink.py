@@ -1723,6 +1723,12 @@ def no_candidate_why(sites, ctor_classes):
     return 'candidates without a vtable'
 
 
+HV_BRACE = re.compile(r'[{}]')
+HV_ASSIGN = re.compile(r'^(?P<lhs>(?:[^=]|==)*?[^=!<>+\-*/%&|^])=(?!=)(?P<rhs>.*)$', re.S)
+HV_CAST = re.compile(r'\(\s*(?:const\s+|unsigned\s+|signed\s+|struct\s+|class\s+)*[\w:<>]+(?:\s*\*)*\s*\)')
+HV_NOISE = re.compile(r'[\s&()]')
+
+
 def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
     """Hand-written stores of image vftable addresses into vptrs in the unit sources: `x.vtbl = &DAT_010176f8;`,
     `*(void **)this = kVtbl_X;`, ... -> {address: [(unit, canonical class of the storing member function or
@@ -1752,18 +1758,20 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc):
         pos = 0
         for stmt in text.split(';'):
             start, pos = pos, pos + len(stmt) + 1
-            st = re.split(r'[{}]', stmt)[-1]
+            if '=' not in stmt:   # HV_ASSIGN needs one (T1: most statements; the same sites)
+                continue
+            st = HV_BRACE.split(stmt)[-1]
             spos = start + len(stmt) - len(st)   # where the statement itself begins (after the last brace)
-            m = re.match(r'^(?P<lhs>(?:[^=]|==)*?[^=!<>+\-*/%&|^])=(?!=)(?P<rhs>.*)$', st, re.S)
+            m = HV_ASSIGN.match(st)
             if not m:
                 continue
             rhs = m.group('rhs')
             while True:
-                r2 = re.sub(r'\(\s*(?:const\s+|unsigned\s+|signed\s+|struct\s+|class\s+)*[\w:<>]+(?:\s*\*)*\s*\)', '', rhs)
+                r2 = HV_CAST.sub('', rhs)
                 if r2 == rhs:
                     break
                 rhs = r2
-            rhs = re.sub(r'[\s&()]', '', rhs)
+            rhs = HV_NOISE.sub('', rhs)
             a = names.get(rhs)
             if a is None and DAT_NAME.match(rhs):   # a name units.json does not bind for this unit (S5 J-0109)
                 a = int(DAT_NAME.match(rhs).group(1), 16)
@@ -3485,11 +3493,27 @@ class CDecls:
             p = m.group(1).strip() + (' *' if m.group(3) else '')
         return self.ctype(p)
 
+    _IDENT = re.compile(r'[A-Za-z_]\w*\Z')
+    _CALLS = re.compile(r'(?<![\w.>:])([A-Za-z_]\w*)\s*\(')
+
+    def _sites(self, name):
+        """The matches of `(?<![\\w.>:])name\\s*\\(` in text order, as (start, end). For an identifier: one scan of the
+        text for every `ident(` (T1: find ran one scan of the whole unit per name, 12 s of resolve under the
+        profiler); the same matches, since an identifier match starts and ends at word boundaries."""
+        if not self._IDENT.match(name):
+            return [(m.start(), m.end()) for m in re.finditer(r'(?<![\w.>:])' + re.escape(name) + r'\s*\(', self.s)]
+        idx = getattr(self, '_calls', None)
+        if idx is None:
+            idx = self._calls = {}
+            for m in self._CALLS.finditer(self.s):
+                idx.setdefault(m.group(1), []).append((m.start(), m.end()))
+        return idx.get(name, [])
+
     def find(self, name):
         """[(result type, [parameter types])] of the declarations of the free function `name`, in text order."""
         out, s = [], self.s
-        for m in re.finditer(r'(?<![\w.>:])' + re.escape(name) + r'\s*\(', s):
-            depth, j = 0, m.end() - 1
+        for m_start, m_end in self._sites(name):
+            depth, j = 0, m_end - 1
             while j < len(s):
                 depth += {'(': 1, ')': -1}.get(s[j], 0)
                 if depth == 0:
@@ -3500,17 +3524,17 @@ class CDecls:
             tail = re.match(r'\s*(?:const\b\s*)?(?:throw\s*\([^()]*\)\s*)?([;{])', s[j + 1:])
             if not tail:
                 continue
-            inner = max((b for b in self.class_body if b[0] < m.start() < b[1]), default=None)
+            inner = max((b for b in self.class_body if b[0] < m_start < b[1]), default=None)
             if inner is not None and inner[2]:
                 continue                      # declared in a class body: a member, not the C function
-            k = max(s.rfind(c, 0, m.start()) for c in ';{}')
-            pre = re.sub(r'^\s*(?:(?:public|private|protected)\s*:(?!:))?', '', s[k + 1:m.start()])
+            k = max(s.rfind(c, 0, m_start) for c in ';{}')
+            pre = re.sub(r'^\s*(?:(?:public|private|protected)\s*:(?!:))?', '', s[k + 1:m_start])
             pre = ' '.join(DECL_SPEC.sub(' ', pre).split())
             words = set(re.findall(r'[A-Za-z_]\w*', pre))
             if not pre or not re.match(r'^[A-Za-z_][\w\s\*&:<>,]*$', pre) or words & NOT_A_TYPE or \
                     pre.endswith((':', ',')) or pre.startswith('template'):
                 continue                      # a call (`return f(x);`, `a = f(x);`, `case 1: f(x);`), a template
-            params = [self.param(x) for x in split_top(s[m.end():j])]
+            params = [self.param(x) for x in split_top(s[m_end:j])]
             out.append((self.ctype(pre), [x for x in params if x != 'void']))
         return out
 
