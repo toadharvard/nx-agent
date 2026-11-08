@@ -6280,6 +6280,14 @@ def apply(out, fixed):
         argfile = os.path.join(out, 'objcopy', name)
         if open(argfile).read().strip():
             r = subprocess.run([OBJCOPY, '@' + argfile, obj, dst], capture_output=True, text=True)
+            if r.returncode and '--rename-section=' in open(argfile).read():
+                # the m1 section renames (m1_compiled_renames) are only a placement: an objcopy they break (a second
+                # rename of one section, an --add-symbol naming the old section) must not drop the whole unit
+                log('objcopy failed for %s with the m1 renames, retried without: %s' % (base, r.stderr.strip()[:300]))
+                kept = [a for a in open(argfile).read().splitlines() if not a.startswith('--rename-section=')]
+                with open(argfile + '.nom1', 'w', encoding='utf-8', errors='surrogateescape') as f:
+                    f.write('\n'.join(kept) + '\n')
+                r = subprocess.run([OBJCOPY, '@' + argfile + '.nom1', obj, dst], capture_output=True, text=True)
             if r.returncode:
                 log('objcopy failed for %s: %s' % (base, r.stderr.strip()[:500]))
                 continue
