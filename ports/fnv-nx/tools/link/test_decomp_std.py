@@ -47,8 +47,11 @@ fnvlink.STD_EXPORTS[:] = [{'_ZNSt9exceptionD1Ev', '_ZSt9terminatev'}]
 check(fnvlink.decomp_std(n4, it(n4)), 'libstdc++ declares _Destroy but defines no such symbol: a decomp name')
 n5 = '_ZNSt6vectorIjSaIjEE5_XlenEv'    # the MSVC STL copy's thrower of a libstdc++ class
 check(fnvlink.decomp_std(n5, it(n5)), 'std::vector<T>::_Xlen: a decomp name')
-n6 = '_ZNSt8bad_castC1EPKc'            # MSVC's bad_cast(const char*)
-check(fnvlink.decomp_std(n6, it(n6)), 'std::bad_cast(const char*): a decomp name')
+n6 = '_ZNSt9exception6_RaiseEv'         # MSVC's exception::_Raise(), a member libstdc++ and platform/crt do not have
+check(n6 not in fnvlink.platform_std_names() and fnvlink.decomp_std(n6, it(n6)), 'std::exception::_Raise(): a decomp name')
+n6b = '_ZNSt8bad_castC1EPKc'           # MSVC's bad_cast(const char*): S4's platform/crt defines it now (msvc_std_names)
+check(n6b not in fnvlink.platform_std_names() or not fnvlink.decomp_std(n6b, it(n6b)),
+      'std::bad_cast(const char*): runtime once platform/crt defines it')
 check(not fnvlink.decomp_std('_ZSt9terminatev', it('_ZSt9terminatev')), 'an exported libstdc++ symbol: runtime')
 n7 = '_ZNSt9bad_allocC1EPKc'           # defined by platform/crt/msvc_std_names.cpp
 check(n7 in fnvlink.platform_std_names() and not fnvlink.decomp_std(n7, it(n7)), 'a platform/crt name: runtime')
