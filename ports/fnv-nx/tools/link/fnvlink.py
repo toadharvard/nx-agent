@@ -386,6 +386,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
     sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'), prune=True)   # the last link's parses (T1)
+    find_persist(os.path.join(out, 'cache', 'cdecls.marshal'))
     pre_stats = collections.Counter()
     tree = os.path.dirname(os.path.dirname(os.path.abspath(units_json)))   # <tree>/build/units.json
     renames = load_renames(UNITS_RENAMES if units_renames is None else units_renames, tree)
@@ -3490,7 +3491,21 @@ class CDecls:
     the decoration leaves untyped. Typedefs (plain ones, and function-pointer typedefs as `void *`) are expanded,
     class/struct/union/enum names get their tag (classify needs it), integer spellings are canonical."""
 
+    _LAZY = ('s', 'typedefs', 'tags', 'class_body')
+
     def __init__(self, text):
+        # T1: the parse is made on the first find() that the kept answers (find_persist) do not hold
+        self._text = text
+        self.key = hashlib.sha1(text.encode('utf-8', 'surrogateescape')).hexdigest()
+
+    def __getattr__(self, name):
+        if name in CDecls._LAZY:
+            self._parse()
+            return self.__dict__[name]
+        raise AttributeError(name)
+
+    def _parse(self):
+        text = self._text
         self.s = blank_noise(text)
         self.typedefs, self.tags = {}, {}
         self.class_body = []   # (open, close, is a class/struct/union body) of every brace pair
@@ -3552,6 +3567,18 @@ class CDecls:
 
     def find(self, name):
         """[(result type, [parameter types])] of the declarations of the free function `name`, in text order."""
+        m = _FIND['map']
+        if m is None:
+            return self._find(name)
+        k = self.key + '\0' + name
+        _FIND['used'].add(k)
+        got = m.get(k)
+        if got is None:
+            got = m[k] = [(r, list(ps)) for r, ps in self._find(name)]
+            _FIND['new'] += 1
+        return [(r, list(ps)) for r, ps in got]
+
+    def _find(self, name):
         out, s = [], self.s
         for m_start, m_end in self._sites(name):
             depth, j = 0, m_end - 1
@@ -3578,6 +3605,38 @@ class CDecls:
             params = [self.param(x) for x in split_top(s[m_end:j])]
             out.append((self.ctype(pre), [x for x in params if x != 'void']))
         return out
+
+
+_FIND = {'map': None, 'used': None, 'new': 0, 'path': None}
+
+
+def find_persist(path):
+    """Keep CDecls.find's answers per (text sha1, name) in path for the next link process (resolve 1 and 2, later
+    heads), under this file's sha256, pruned to the answers used (T1: CDecls parses and finds took ~15 s of resolve
+    under the profiler)."""
+    import atexit, marshal
+    if _FIND['path']:
+        return
+    code = hashlib.sha256(open(os.path.abspath(__file__), 'rb').read()).hexdigest()
+    try:
+        d = marshal.load(open(path, 'rb'))
+        m = d['finds'] if d.get('code') == code else {}
+    except (OSError, EOFError, ValueError, TypeError, KeyError):
+        m = {}
+    _FIND.update(map=m, used=set(), new=0, path=path, code=code)
+
+    def save():
+        used = _FIND['used']
+        if not _FIND['new'] and len(used) == len(_FIND['map']):
+            return
+        tmp = '%s.%d.tmp' % (path, os.getpid())
+        try:
+            with open(tmp, 'wb') as f:
+                marshal.dump({'code': code, 'finds': {k: _FIND['map'][k] for k in used if k in _FIND['map']}}, f)
+            os.replace(tmp, path)
+        except (OSError, ValueError):
+            pass
+    atexit.register(save)
 
 
 def c_name_sig(csig, decls):
