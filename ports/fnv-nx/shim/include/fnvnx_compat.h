@@ -189,8 +189,8 @@ struct fnvnx_new_tag {};
  * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
 template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (flags & 1) delete p; else p->~T(); }
 #define FNVNX_D22_CALL(p, m, ...) fnvnx_d22_vdtor((p), (__VA_ARGS__))
-/* DBUG1 (V1): a hand-indexed `vtbl[k]` of an exe slot k >= 1 behind a class's D1/D0 pair is native slot k + 1 (D26 minus-one);
- * MSVC keeps k */
+/* DBUG1 (V1): a hand-indexed `vtbl[k]` of an exe slot k past the receiver class's D1/D0 pair (slot 0 for most classes, 4 for
+ * the TESForm / Actor family) is native slot k + 1 (D26 minus-one); MSVC keeps k. Use it only past the pair. */
 #define FNVNX_VSLOT(k) ((k) + 1)
 #endif
 
