@@ -125,6 +125,9 @@ POLICY = {
                                                 'and then calls the deallocator); GCC calls the destructor, F(p, 0), '
                                                 'and a separate operator delete of the same p. The pair is the one '
                                                 'call; the arguments and the stores are compared'),
+    'call-order-unproven': ('triage', 'S13b', True, 'two adjacent calls are swapped and the exe does not show them to be '
+                                                    'the arguments of one call (exeempty.arg_blocks): a reordering of '
+                                                    'statements is a divergence, not an evaluation order'),
     'call-order-args': ('triage', 'S13b', True, 'the calls are in another order on the two machines (eval-order) and the '
                                                 'comparison after pairing them by callee still differs; the canned '
                                                 'results are numbered by call index, so a reordered callee got '

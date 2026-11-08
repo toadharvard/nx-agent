@@ -247,8 +247,19 @@ if d:
 for what, rets in (('statements', STMT2), ('statements that store', STORE2)):
     rx, ra = res([TA, TB], [TB, TA], rets=rets)
     d = runner.compare(cv, rx, ra, w, vcalls=vc)
-    check(d is not None and not (d.get('soft') and d.get('arg_order')) and not d.get('after_perm'),
-          'call-order: reordered %s: not softened by the argument rule (%s)' % (what, d and d.get('kind')))
+    check(d is not None and d['kind'] == 'call-target' and not d.get('soft') and d.get('call_order_unproven'),
+          'call-order: an adjacent swap of two %s stays hard, call_order_unproven (%s)' % (what, d))
+    if d:
+        check(hint_cause(d) == 'call-order-unproven', 'call-order: ... and is named call-order-unproven')
+rx, ra = res([TA, TB], [TB, TA], rets=ARGS3[:2])
+d = runner.compare(cv, rx, ra, w, vcalls=vc)
+check(d is not None and d.get('soft') and d.get('call_order'),
+      'call-order: an adjacent swap of an argument pair the exe shows is soft call_order (%s)' % d)
+rx, ra = res([TA, TB], [TB, TA])
+d = runner.compare(cv, rx, ra, w, vcalls=vc)
+check(d is not None and not d.get('soft') and d.get('call_order_unproven'),
+      'call-order: an adjacent swap with no return addresses stays hard (%s)' % d)
+check(causes.policy('call-order-unproven')[1:3] == ('S13b', True), 'call-order-unproven is triage, hard')
 check(causes.policy('call-order-args')[1:3] == ('S13b', True) and not causes.policy('call-order')[2],
       'call-order: policy (by-design soft; the args one hard)')
 

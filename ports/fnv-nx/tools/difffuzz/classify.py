@@ -696,6 +696,8 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'nan-bits'; return h
     if div.get('split_delete'):
         h['cause'] = 'split-delete'; return h
+    if div.get('call_order_unproven'):
+        h['cause'] = 'call-order-unproven'; return h
     if div.get('after_perm'):
         h['cause'] = 'call-order-args'; return h
     if div.get('arg_order'):
@@ -1136,7 +1138,10 @@ def _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=False):
                 ta.rets[i + 1] = ta.rets[i]
                 tb.rets[i] = tb.rets[i + 1]
                 if rerun(ta) and rerun(tb):
-                    return 'call-order'
+                    # (r4 uncls) a by-design evaluation order only when the exe shows the two calls are the
+                    # arguments of one call (their results pushed or moved before the consumer)
+                    import runner
+                    return 'call-order' if runner._is_arg_block(rx, i) else 'call-order-unproven'
         moved = canned_unaliased(base)
         if moved is not None and rerun(moved):
             return 'canned-alias'

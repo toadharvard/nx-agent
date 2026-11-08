@@ -317,6 +317,15 @@ def _destroys_params(calls, agg_ptrs):
         for c in calls)
 
 
+def _is_arg_block(rx, i):
+    """Calls i and i + 1 of the oracle are the argument block of one call, by the exe's code (exeempty.arg_blocks:
+    each result is pushed or moved to a register before the consuming call). False when the oracle's return addresses
+    or the code do not show it."""
+    import exeempty
+    rets = [getattr(c, 'ret_to', None) for c in rx.calls[i:i + 2]]
+    return None not in rets and len(rets) == 2 and exeempty.arg_blocks(rets) == [(0, 2)]
+
+
 def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
             garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
             agg_ptrs=None):
@@ -354,8 +363,11 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
     for i in range(min(len(tx), len(ta))):
         if i in swapped:
             continue
-        if tx[i] != ta[i] and i + 1 < min(len(tx), len(ta)) and tx[i] == ta[i + 1] and tx[i + 1] == ta[i]:
-            # two adjacent calls in swapped order: C++ leaves the evaluation order of operands open (call-order)
+        pair_swapped = tx[i] != ta[i] and i + 1 < min(len(tx), len(ta)) and tx[i] == ta[i + 1] and \
+            tx[i + 1] == ta[i]
+        if pair_swapped and _is_arg_block(rx, i):
+            # two adjacent calls in swapped order, and the exe shows they are the arguments of one call (their
+            # results are pushed or moved before the consumer): C++ leaves that evaluation order open (call-order)
             if soft is None:
                 soft = dict(kind='call-target', index=i, x86=_hex(tx[i]), arm=_hex(ta[i]), x86_next=_hex(tx[i + 1]),
                             arm_next=_hex(ta[i + 1]), soft=True, call_order=True)
@@ -377,6 +389,8 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
                      x86_trace=[_hex(t) for t in tx[:i + 1]], arm_trace=[_hex(t) for t in ta[:i + 1]],
                      x86_next=_hex(tx[i + 1]) if i + 1 < len(tx) else None,
                      arm_next=_hex(ta[i + 1]) if i + 1 < len(ta) else None)
+            if pair_swapped:
+                d['call_order_unproven'] = True     # (r4 uncls) a swap the exe does not show to be an argument list
             if vcalls is not None and tx[i] >= 0 and tx[i] not in vcalls[0]:
                 d['vcall'] = 'planted' if tx[i] in vcalls[1] else 'unplanted'
             if vcalls is not None and ta[i] >= 0 and ta[i] in vcalls[1] and ta[i] not in vcalls[0]:
