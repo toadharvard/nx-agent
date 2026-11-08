@@ -288,6 +288,30 @@ def thunk(path, addr):
     return None
 
 
+def this_thunk(path, addr):
+    """(imm32, target) of `mov ecx, imm32; jmp rel32` at addr: a member that takes a global object as its `this`
+    (a heap's free: `mov ecx, 0x011f6238; jmp FNV_MemoryManager::Free`) and passes its stack arguments on; else
+    None. Natively: x0 = imm32, then a tail branch (the other arguments are already where the target reads them)."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 10)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    b = data[off:off + 10]
+    if b[:1] != b'\xb9' or b[5:6] != b'\xe9':
+        return None
+    return (int.from_bytes(b[1:5], 'little'),
+            (addr + 10 + int.from_bytes(b[6:10], 'little', signed=True)) & 0xffffffff)
+
+
+def slot_index(exev):
+    """{address of a vftable slot: function address in it} over the exe's vftables (an `__imp_?...` name the recipe
+    placed on a vftable slot reads the slot's word)."""
+    return {v + 4 * j: w for v, e in exev.items() for j, w in enumerate(e.slots)}
+
+
 # ---- the vftable an exe constructor stores (S2c, S5 class 3: constructor-named vtables)
 
 CTOR_SPAN = 0x400   # bytes decoded from a constructor's entry (S5's stand-in reads the same span)

@@ -638,6 +638,9 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     pair_classes = collections.Counter()
     extern_text = collections.defaultdict(set)
     per_obj = {}
+    exe_path_ = exevft.exe_path(None if exe in (None, '') else exe) if exe != 'none' else None
+    exe_slots = exevft.slot_index(exevft.load(exe_path_, os.path.join(out, 'cache', 'exe_vftables.json'))) \
+        if exe_path_ else {}
     unbound = collections.defaultdict(set)   # source -> names left undefined (extern-text, import without a symbol)
     used_addr = set()
     data_defs, tls_defs, tls_addrs = [], [], set()
@@ -871,6 +874,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls, tier, note = 'unresolved', 'not-in-image/' + (tier or ''), '%08x is outside the image' % addr
                 addr = None
                 stats['refs_not_in_image'] += 1
+            if cls == 'import' and addr is not None and addr not in import_syms and addr not in iat and \
+                    exe != 'none':
+                # an `__imp_?...` name the recipe placed on a slot of an image vftable (BoneRecordArray::Free at
+                # 0x010c4cec, slot 2 of 0x010c4ce4): the reference is a call through that slot, so it binds to the
+                # function the exe's word holds (R2 recon2-006), by the same rules as a vslot
+                cls, tier, addr, target, note = vftable_import(
+                    u, un, isig, addr, native, providers, bridges, used_addr, stats, msvc, exe_slots, exe_path_,
+                    (cls, tier, addr, target, note))
             if addr is not None and cls == 'addr':
                 ak = kind_of_addr(addr)
                 if ak == 'data' and un in tls_undef:   # thread-local: native TLS in the image's .tls layout
@@ -2126,6 +2137,50 @@ def slot_msvc_sig(isig, ds):
     r.cv, r.cc, r.member, r.static, r.virtual = '', 'thiscall', True, False, True
     r.ret, r.raw_ret = ds.ret, ds.raw_ret
     return r
+
+
+THIS_SYM = '__fnvnx_vthis_%08x'   # an exe slot `mov ecx, imm32; jmp T`: x0 = imm32, then T (exevft.this_thunk)
+
+
+def emit_this_stub(name, imm, target):
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name,
+                      '    movz x0, #0x%x' % (imm & 0xffff), '    movk x0, #0x%x, lsl #16' % (imm >> 16),
+                      '    b %s' % target, '    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
+def vftable_import(u, un, isig, addr, native, providers, bridges, used_addr, stats, msvc, exe_slots, exe_path,
+                   keep):
+    """keep unless addr is a slot of an exe vftable (exe_slots {slot address: word}); then the word decides:
+    S4's provider (a `_purecall`); a native definition with as many parameters as the reference declares (a
+    declaration of another arity is no evidence: the decomp lost the argument); the thunk `mov ecx, imm32; jmp T`
+    to such a native T, as a stub that sets x0 = imm32 and branches to it."""
+    w = exe_slots.get(addr)
+    if w is None:
+        return keep
+    want = None if isig.params is None else len([p for p in isig.params if p != 'void'])
+
+    def arity_ok(a):
+        nd = native.get(a)
+        ds = msvc(nd['msvc']) if nd and nd.get('msvc') else None
+        if ds is None or ds.kind != 'func' or ds.raw_params is None or want is None:
+            return False
+        return len([p for p in ds.raw_params if p != 'void']) == want
+    if w not in native and w in providers:
+        stats['import_vftable_provider'] += 1
+        return 'provider', 'import/vftable-slot', w, providers[w][0], 'vftable slot %08x' % addr
+    if w in native and arity_ok(w):
+        stats['import_vftable_slot'] += 1
+        return 'addr', 'import/vftable-slot', w, None, None
+    th = exevft.this_thunk(exe_path, w) if exe_path else None   # also over a native of another arity
+    if th is not None and th[1] in native and arity_ok(th[1]):
+        name = THIS_SYM % w
+        bridges.setdefault(name, emit_this_stub(name, th[0], ADDR_SYM % th[1]))
+        used_addr.add(th[1])
+        stats['import_vftable_this_thunk'] += 1
+        return 'code', 'import/vftable-slot', th[1], name, 'vftable slot %08x, this = %08x' % (addr, th[0])
+    stats['import_vftable_left'] += 1
+    return keep
 
 
 CTHIS_SYM = '__fnvnx_cthis_%08x'   # an MSVC constructor called for its result: the C1, then return this
