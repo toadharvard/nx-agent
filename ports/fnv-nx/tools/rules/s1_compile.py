@@ -5728,9 +5728,92 @@ def r_placeholder_slots(path, text, stats):
     if n: stats['PHSLOT1'] += n
     return text
 
+# ---------------------------------------------------------------------------------------------------------- DTORB1
+#
+# A destructor stand-in whose MSVC name the recipe binds to another function (S1-rules, fuzz oracle-fault). The decomp
+# tags `X::~X() {}` with the address of X's scalar deleting destructor ??_G, and the unit binds `??1X` to another
+# address A: blk_004a0000_od.cpp's `FUN_004aa1e0::~FUN_004aa1e0() {}` at 0x004aa1e0 (??_GFUN_004aa1e0), where
+# `??1FUN_004aa1e0@@UAE@XZ` is bound to 0x004aa280, `FUN_004aa280::~FUN_004aa280`, which stores the vptrs and calls
+# 0x00438af0. MSVC's ??_G calls ??1X, so the exe runs A. GCC's D0 calls X's own D1, the empty stand-in, so the native
+# skipped A (the fuzz oracle faulted inside A on the planted object; the native returned). 65 tagged destructors in
+# the decomp have such a binding, 50 of them to a function of the same unit.
+# DTORB1 gives the stand-in's body, under GCC only, a call of A through the link's address symbol `__fnv_<A>` (the
+# native definition at A, `this` in x0). The original body follows, unreachable: FNVNX_DTORB_BEGIN(A) ...
+# FNVNX_DTORB_END expands to `{ __fnv_<A>(this); } if (0) {` ... `}`. MSVC expands both to nothing, so its objects
+# are unchanged. Only where:
+# - the tag is the unit's ??_GX (or ??_EX);
+# - X is defined in the file without bases and its data members are of built-in or pointer type (GCC's D1 destroys
+#   nothing after the body);
+# - A is a function of some unit whose MSVC name takes only `this` (`...@@[QUA]AE@XZ` / `...@@[QUA]AEXXZ`).
+_DTORB_FUNCS = None
+
+def _dtorb_functions(path):
+    """{address: MSVC symbol} of every function of build/units.json (cached on prepare)."""
+    got = prepare.__dict__.get('_fnvnx_dtorb_funcs')
+    if got is not None: return got
+    import json
+    out = {}
+    root, uj = prepare._units_json(path)
+    if uj:
+        for u in json.load(open(uj))['units']:
+            for f in u.get('functions') or ():
+                out.setdefault(int(f['address'], 16), f.get('symbol') or '')
+    prepare.__dict__['_fnvnx_dtorb_funcs'] = out
+    return out
+
+DTORB_DEF = re.compile(r'//[ \t]*@fnv[ \t]+0x([0-9a-fA-F]+)[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*'
+                       r'(?:(?:FNVNX_[A-Z0-9_]+|inline|__thiscall)\s+)*((?:[A-Za-z_]\w*::)*)([A-Za-z_]\w*)::~\3\s*\(\s*(?:void)?\s*\)\s*\{')
+DTORB_THIS_ONLY = re.compile(r'@@[QUA][AE]E(?:@|X)XZ$')
+DTORB_BUILTIN = re.compile(r'^\s*(?:(?:unsigned|signed|const|volatile|static)\s+)*(?:char|short|int|long|float|double|bool|'
+                           r'void|__int64|wchar_t|DWORD|WORD|BYTE|UINT|ULONG|LONG|BOOL)\b|\*')
+
+def _dtorb_plain_class(text, name):
+    """X is defined in text once, without bases, and every data member is of built-in or pointer type"""
+    ms = list(re.finditer(r'\b(?:struct|class)\s+%s\s*(:[^{;]*)?\{' % re.escape(name), text))
+    if len(ms) != 1 or ms[0].group(1): return False
+    o = ms[0].end() - 1
+    c = prepare.match_brace(text, o) - 1                                     # the closing brace
+    body = text[o + 1:c]
+    if '{' in body: return False
+    for decl in body.split(';'):
+        d = re.sub(r'^\s*(?:public|private|protected)\s*:', '', decl.strip()).strip()
+        if not d or '(' in d or d.startswith(('typedef', 'friend', 'using', 'enum')): continue
+        if not DTORB_BUILTIN.search(d): return False
+    return True
+
+def r_bound_dtor_stand_ins(path, text, stats):
+    """DTORB1: a tagged destructor stand-in whose ??1 the unit binds elsewhere calls the bound address under GCC."""
+    if '~' not in text or '@fnv' not in text or not path.endswith('.cpp'): return text
+    syms = _unit_symbols(path)
+    if not syms: return text
+    funcs = None
+    edits = []
+    for m in DTORB_DEF.finditer(text):
+        tag, name = int(m.group(1), 16), m.group(3)
+        bound = {int(v, 16) for k, v in syms.items() if k.startswith('??1%s@' % name)}
+        if len(bound) != 1: continue
+        a = next(iter(bound))
+        if a == tag: continue
+        if funcs is None: funcs = _dtorb_functions(path)
+        if not funcs.get(tag, '').startswith(('??_G%s@' % name, '??_E%s@' % name)):
+            stats['DTORB1-NOTAG'] += 1; continue
+        if not DTORB_THIS_ONLY.search(funcs.get(a, '')):
+            stats['DTORB1-TARGET'] += 1; continue
+        if not _dtorb_plain_class(text, name):
+            stats['DTORB1-CLASS'] += 1; continue
+        o = m.end() - 1
+        c = prepare.match_brace(text, o) - 1                                 # the closing brace
+        edits.append((o + 1, c, a))
+    if not edits: return text
+    for o, c, a in sorted(edits, reverse=True):
+        text = (text[:o] + ' FNVNX_DTORB_BEGIN(%08x) /* fnv-nx DTORB1 */' % a + text[o:c] + ' FNVNX_DTORB_END '
+                + text[c:])
+    stats['DTORB1'] += len(edits)
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots]
+              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins]
 RULES += REFS_RULES
