@@ -350,7 +350,9 @@ def write_requests(path, reqs):
     with open(path, 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#class\tspelling\twhy\thosts\n')
         for c, (sp, why, hosts) in sorted(reqs.items()):
-            f.write('%s\t%s\t%s\t%s\n' % (c, sp or '', ','.join(sorted(why)), ' '.join(hosts)))
+            # hosts are joined with '|': unit paths may hold spaces (src/fallout/region system/tesregion.cpp); split on
+            # spaces they were torn apart and the class ended "no host unit could name the class" (R2, ranks 454...)
+            f.write('%s\t%s\t%s\t%s\n' % (c, sp or '', ','.join(sorted(why)), '|'.join(hosts)))
 
 
 def load_requests(path):
@@ -361,7 +363,8 @@ def load_requests(path):
                 continue
             f = line.rstrip('\n').split('\t')
             if len(f) >= 4:
-                out[f[0]] = (f[1] or None, set(f[2].split(',')), f[3].split())
+                hosts = f[3].split('|') if '|' in f[3] or ' ' not in f[3] else f[3].split()   # older files: spaces
+                out[f[0]] = (f[1] or None, set(f[2].split(',')), [h for h in hosts if h])
     return out
 
 
