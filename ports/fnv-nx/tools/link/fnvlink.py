@@ -3699,7 +3699,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 st['exe-order-no-evidence-BSNiAllocator'] += 'BSNiAllocator' in z
                 exe_order.append((z, vs, why, path))
             if m1:
-                pair1 = vmo_dtor_slots(slots[0], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2), exe_path)
+                pair1 = vmo_dtor_slots(slots[0], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2), exe_path,
+                                       uncompiled=True)
                 if pair1 is None:
                     st['d26-slot0-not-a-destructor'] += 1
                     exe_order.append((z, vs, 'd26-slot0-not-a-destructor', path))
@@ -3713,7 +3714,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 and os.environ.get('FNVNX_D26T', '1') != '0' and not is_com(z, [e.sym for e in ents[2:2 + n]]):
             dp_ = family_dtor_pos(slots, fam)
             pair1 = vmo_dtor_slots(slots[dp_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + dp_),
-                                   exe_path) if dp_ else None
+                                   exe_path, uncompiled=True) if dp_ else None
             if pair1:
                 m1, dp = 'd26-family-dtor', dp_
                 gone = [x for x in exe_order if x[0] == z]
@@ -3992,17 +3993,31 @@ def family_dtor_pos(slots, fam):
     return None
 
 
-def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None):
+def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None, uncompiled=False):
     """D1 and D0 (native slots 0 and 1) for exe slot 0 at a0 when it is the deleting destructor: the address map's
     Itanium pair (kind G), or flags stubs into a decomp definition of the `??_G` (its declaration takes the flags, its
     MSVC name is `??_G`/`??_E`, or the exe's code has the shape: exevft.deleting_dtor); None when exe slot 0 is not
-    a destructor."""
+    a destructor. uncompiled (W45, the W30 / family rebuilds): a `??_G` no unit compiles (no native definition) whose
+    exe code has the exact `??_G` shape (exevft.deleting_dtor_callee: call ~C, flags test, call delete, ret 4; the
+    looser exevft.deleting_dtor can match a later function's `ret 4`) still gives the pair, as two traps reporting
+    the exe address, so the
+    table is rebuilt minus-one and exe slot k lands at k + 1 for its minus-one callers (FUN_00aa7400's 0x00aa77e0:
+    the exe-order table ran Deallocate where MemoryManager FUN_00aa3e40 calls Allocate). FNVNX_D26U=0 turns it off."""
     nd = native.get(a0)
     if nd is None and a0 in HK_SDD:   # W22: the Havok sized-free ??_G's stand-in, through the flags stubs
         for fl in (0, 1):
             bridges.setdefault(FLAG_SYM % (a0, fl), emit_flag_stub(FLAG_SYM % (a0, fl), ADDR_SYM % a0, fl))
         st['slot0-hk-sdd'] += 1
         return FLAG_SYM % (a0, 0), FLAG_SYM % (a0, 1)
+    if nd is None and uncompiled and exe_path and os.environ.get('FNVNX_D26U', '1') != '0' and \
+            exevft.deleting_dtor_callee(exe_path, a0) is not None:
+        pair = []
+        for v_ in ('D1', 'D0'):
+            t = TRAP_SYM % int(hashlib.sha1((XTRAP % a0 + ' ' + v_).encode()).hexdigest()[:8], 16)
+            traps.setdefault(t, (XTRAP % a0 + ' (%s of a deleting destructor not compiled)' % v_, where))
+            pair.append(t)
+        st['slot0-dtor-not-compiled'] += 1
+        return tuple(pair)
     if nd is None:
         return None
     var = sigs.itanium_variant(nd['sym'].name)

@@ -1062,6 +1062,12 @@ at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus
   with no evidence are
   counted as `exe-order-no-evidence`. A caller in the exe's order for the same class (BSNiAllocator's InitHolder
   0x00aa2020 loads offset 28) disagrees with a shifted table: S1 converts it first or together.
+  An exe slot 0 that is a `??_G` no unit compiles (no native definition, the exact shape of
+  exevft.deleting_dtor_callee) still gives the pair, as two traps for the exe address (W45, `slot0-dtor-not-compiled`,
+  `FNVNX_D26U=0` turns it off). Before, such a table counted as `d26-slot0-not-a-destructor` and stayed in the exe's
+  order, so `_ZTV12FUN_00aa7400` (ZeroOverheadHeap, `??_G` 0x00aa77e0) ran Deallocate where MemoryManager FUN_00aa3e40
+  calls Allocate (minus-one slot 3). Deallocate returned `this`, the pool constructor wrote its name over the heap's
+  vptr, and 4,551 initializers faulted at "vslot 3 of 0x063b8d58" (link 8111f58a).
 
   **A family whose destructor is not exe slot 0** (V2, seams triage of link 5fd996a4; `family_dtor_pos`,
   `FNVNX_D26F=0` turns it off). TESForm, the Actor / Projectile / TESActorBase family and their descendants have four
