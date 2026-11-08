@@ -113,6 +113,7 @@ def decode_x86(cv, call):
 
 def decode_a64(cv, call):
     out = {}
+    cv = getattr(cv, 'native_view', None) or cv     # behind an sret-explicit bridge (engine.callee_info_for)
     for v in cv.vals:
         buf = bytearray(v.size)
         ok = True

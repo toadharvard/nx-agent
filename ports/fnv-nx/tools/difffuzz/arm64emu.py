@@ -373,10 +373,15 @@ class Arm64Engine:
             return v - a64image.CODE_STUB if v in self._code_stub_set() else v
         return self.image.entries.get(v, v)
 
-    def _norm_bytes(self, b):
+    def _norm_bytes(self, b, base=None):
+        """base: the address of b[0] when b is copied data (libcalls.Mem.write data=True): a window is a code pointer
+        only at a 4-aligned address (r5-copywin); a stored value is scanned at every byte offset as before."""
         b = bytearray(b)
         i = 0
         while i + 4 <= len(b):
+            if base is not None and (base + i) & 3:
+                i += 1
+                continue
             w = int.from_bytes(b[i:i + 4], 'little')
             n = self._codeptr(w)
             if n == w and self.vtables:

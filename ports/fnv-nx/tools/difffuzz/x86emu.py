@@ -75,6 +75,10 @@ def x87_result_use(uc, retaddr, fret='int', depth=0):
         skip = 2
     elif b[0] in (0x59, 0x5b, 0x5d, 0x5e, 0x5f, 0xc9):     # pop ecx/ebx/ebp/esi/edi, leave
         skip = 1
+    elif b[0] in (0x50, 0x51, 0x52):    # push eax/ecx/edx: the float slot `push ecx; fstp dword [esp]` (difffuzz-20, r5)
+        skip = 1
+    elif b[:2] == b'\x83\xec':          # sub esp, imm8: the same slot reserved by `sub esp, 4; fstp [esp]`
+        skip = 3
     if skip:
         return x87_result_use(uc, retaddr + skip, fret, depth + 1)
     if b[0] in (0xc3, 0xc2):

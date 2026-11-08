@@ -339,6 +339,19 @@ class UnitCache:
                 out.add(libcalls.import_id(iat[tg]))
         return out
 
+    def sret_bridges(self):
+        """{(object, address)} the link bridged as sret-explicit only (out/abi.tsv, verdict `bridge`): the unit's
+        reference passes the callee's result buffer as an explicit pointer, the definition takes it hidden."""
+        if getattr(self, '_sretb', None) is None:
+            self._sretb = set()
+            p = config.LINK / 'out/abi.tsv'
+            if p.exists():
+                for line in open(p, encoding='utf-8', errors='replace'):
+                    f = line.rstrip('\n').split('\t')
+                    if len(f) > 6 and f[5] == 'bridge' and f[6] == 'sret-explicit':
+                        self._sretb.add((f[0], int(f[2], 16)))
+        return self._sretb
+
     def callee_info_for(self, source):
         refs = {}
         for _, u in self.by_source[source]:
@@ -365,6 +378,11 @@ class UnitCache:
                         got = convmod.Conv(name, src)
                     except Exception:  # noqa: BLE001
                         continue
+                    if name == refs.get(addr) and (source, addr) in self.sret_bridges():
+                        # the unit's reference declaration passes the result buffer explicitly and the link put an
+                        # sret-explicit bridge before the definition: the stub is called without that parameter
+                        drop = next((lab for lab, sp, off, _ in got.x86 if sp == 'stk' and off == 0), None)
+                        got.native_view = got.bridged_view(drop) if drop else None
                     try:                       # the callee's own custom register convention, when its code is known
                         import classify
                         f = self.x86_unit(dsrc, addr).funcs.get(addr) if dsrc else None
