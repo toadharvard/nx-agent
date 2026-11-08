@@ -58,6 +58,10 @@ import config
 # buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
 # read on a later path is a custom register, the oracle gets ST0 for a call the caller's unit declares float, and
 # native-zero-init / dtor-dead-store (by design) / thunk-binding relabel store-only divergences.
+# Uncls2: the leftovers get reruns that change one mechanism (all-zero garbage fill, equal results for adjacent calls of one callee,
+# 64-bit shift counts modulo 64, fsin/fcos/fsincos/fptan of an infinity giving the indefinite NaN, the native word in a planted vptr,
+# 4-aligned arguments for a pointer difference), a unit's pool copy of an unnamed vftable is compared with the exe's table, and a data
+# symbol the object keeps writable but the exe keeps read-only gets the exe's bytes pinned.
 # F-uncls: the garbage probe compares
 # the argument a call-args divergence names and probes random-background cases with the background pinned (an
 # uninitialised out-parameter of an intercepted callee is uninit-x86), pop learning tries the pushes right before a
