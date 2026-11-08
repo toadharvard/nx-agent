@@ -498,6 +498,19 @@ class Arm64Engine:
             self._fault = e.args[0]; uc.emu_stop(); return
         if name == '__stack_chk_fail':
             self._fault = 'stack-protector'; uc.emu_stop(); return
+        if target in libcalls.DELETES:
+            # (r4 uncls) operator delete(NULL), or the delete that follows the destructor half of a deleting
+            # destructor the oracle calls as one: no call (libcalls.delete_fold)
+            pc_ = r.calls[-1] if r.calls else None
+            fold = libcalls.delete_fold(uc.reg_read(XR[0]), pc_.target if pc_ else None,
+                                        pc_.args[0] if pc_ else None, pc_.args[1] & 0xffffffff if pc_ else None)
+            if fold:
+                if fold == 'null':
+                    r.null_deletes = getattr(r, 'null_deletes', 0) + 1
+                else:
+                    r.split_folds = getattr(r, 'split_folds', 0) + 1
+                uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+                return
         k = len(r.calls)
         if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
             self._fault = 'timeout'
@@ -513,7 +526,11 @@ class Arm64Engine:
         r.calls[-1].addr = address
         if world.STUB_OUT:
             self._zero_unwritten(uc, case, [r.calls[-1].args[i] for i in range(8)] + [r.calls[-1].x8])
-        if libcalls.noreturn_a64(name) or (name is None and target in libcalls.NORETURN_X86):
+        # (difffuzz-20, args class) a platform shim standing for a noreturn exe function ends the run as well:
+        # `fnvnx_xlength_error` is the native of std::_Xlen 0x00ec30b0 (it throws), a named stub whose original
+        # address maps to the exe function
+        if libcalls.noreturn_a64(name) or (target is not None and target in libcalls.NORETURN_X86 and
+                                           (name is None or address >= a64image.NAMED_STUB)):
             r.noreturn = name or libcalls.NORETURN_X86[target]   # never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
             return
