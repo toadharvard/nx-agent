@@ -22,9 +22,9 @@ OWNER = {}
 for o, cs in {
     'S1-rules': ('oracle-vcall', 'oracle-fault', 'oracle-callee-unloaded', 'unclassified', 'bool-repr', 'signedness',
                  'signedness?', 'shift-count', 'x86-custom-cc', 'msvc-inlined', 'stub-normalized', 'libc-variant',
-                 'literal-arg', 'runtime-equiv', 'stack-arg', 'oracle-frame-smash', 'partial-return'),
+                 'literal-arg', 'runtime-equiv', 'stack-arg', 'oracle-frame-smash', 'partial-return', 'cpuid-env'),
     'S2-bodies': ('native-undefined', 'after-native-undefined', 'native-stub-data', 'native-zero-stub', 'native-trap'),
-    'F1': ('call-flow', 'native-extra-calls', 'native-early-exit', 'native-inlined', 'call-order', 'native-empty-callee', 'oracle-empty-call',
+    'F1': ('call-flow', 'native-extra-calls', 'native-early-exit', 'native-inlined', 'call-order', 'call-order-unproven', 'call-order-args', 'native-empty-callee', 'oracle-empty-call',
            'native-empty-body', 'native-missing-free', 'nrvo-copy', 'dtor-split-delete', 'nrvo-elision', 'array-new-check', 'falloff?', 'native-stale-result', 'literal-ret',
            'param-count'),
     'F2': ('vptr-unpaired', 'vptr-differs', 'vptr-store', 'thunk-binding', 'canned-this', 'ctor-this', 'layout-offset',

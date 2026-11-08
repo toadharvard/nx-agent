@@ -6,6 +6,7 @@ undefined; a unit that defines them itself is left as it is. STL2 on a hand-writ
 setstate, basic_ios::init, a UseFacet with its widen, basic_ifstream::open and vector<float>'s ctor/dtor get bodies,
 calling only fnvnx_basic_ios_init and fnvnx_fiopen. Our own code only."""
 import collections
+import json
 import os
 import shutil
 import subprocess
@@ -163,7 +164,7 @@ def main():
                     ok('after: none undefined', not hits, hits)
     st = collections.Counter()
     out2 = s4_stl.r_stl_stream_bodies('src/t2.cpp', UNIT2, st)
-    ok('STL2: five bodies (the facet with its widen, the vector ctor with its dtor)', st['STL2'] == 5, (st, out2[len(UNIT2):]))
+    ok('STL2: seven bodies', st['STL2'] == 7, (st, out2[len(UNIT2):]))
     ok('STL2: vector fields all zeroed', 'auxiliary(0), allocatorAuxiliary(0), first(0), last(0), end(0)' in out2,
        out2[len(UNIT2):])
     ok('STL2: a second run adds nothing', s4_stl.r_stl_stream_bodies('src/t2.cpp', out2, collections.Counter()) == out2)
@@ -184,6 +185,59 @@ def main():
             ok('STL2 after: none, only the two platform calls',
                not any(k in s for s in res['after'] for k in want) and 'fnvnx_basic_ios_init' in res['after'] and
                'fnvnx_fiopen' in res['after'], res['after'])
+    # a recon for the unit (REC1, FNVNX_RECON) that covers a name: STL leaves that name to it
+    with tempfile.TemporaryDirectory() as rd:
+        os.makedirs(os.path.join(rd, 'r1'))
+        open(os.path.join(rd, 'r1', 'body.cpp'), 'w').write('void std::ios_base::setstate(int s) { state |= s; }\n')
+        json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/t2.cpp', 'append': 'body.cpp',
+                   'symbols': {'??1?$vector@MV?$allocator@M@std@@@std@@QAE@XZ': '0x00400000', '_ZSt4fillIPjjEvT_S1_RKT0_': '0x00400010'}},
+                  open(os.path.join(rd, 'r1', 'recon.json'), 'w'))
+        old = os.environ.get('FNVNX_RECON')
+        os.environ['FNVNX_RECON'] = rd
+        try:
+            st = collections.Counter()
+            o = s4_stl.r_stl_stream_bodies('/x/src/t2.cpp', UNIT2, st)
+            ok('recon covers setstate and ~vector: STL2 leaves both', st['STL2'] == 5 and st['STL-RECON'] == 2 and
+               'ios_base::setstate' not in o[len(UNIT2):] and '~vector' not in o[len(UNIT2):], (st, o[len(UNIT2):]))
+            st = collections.Counter()
+            o = s4_stl.r_stl_helper_bodies('/x/src/t.cpp', UNIT, st)
+            ok('a recon of another unit changes nothing', st['STL1'] == 5 and not st['STL-RECON'], st)
+            st = collections.Counter()
+            o = s4_stl.r_stl_helper_bodies('/x/src/t2.cpp', UNIT, st)
+            ok('STL1: the recon\'s fill symbol leaves fill', st['STL1'] == 4 and st['STL-RECON'] == 1, st)
+        finally:
+            if old is None:
+                os.environ.pop('FNVNX_RECON', None)
+            else:
+                os.environ['FNVNX_RECON'] = old
+    # a recon binding the facet only (R2's csvusefacet_char): STL2 keeps widen
+    with tempfile.TemporaryDirectory() as rd:
+        os.makedirs(os.path.join(rd, 'r1'))
+        json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/t2.cpp',
+                   'symbols': {'??$XUseFacet@D@std@@YAABU?$XCtype@D@0@ABULoc@@@Z': '0x00ad38d0'}},
+                  open(os.path.join(rd, 'r1', 'recon.json'), 'w'))
+        os.environ['FNVNX_RECON'] = rd
+        s4_stl._RECON_CACHE.clear()
+        try:
+            st = collections.Counter()
+            o = s4_stl.r_stl_stream_bodies('/x/src/t2.cpp', UNIT2, st)[len(UNIT2):]
+            ok('facet bound by a recon: STL2 leaves the facet, keeps widen',
+               'XUseFacet(const Loc&)' not in o and 'XCtype<_E>::widen' in o and st['STL-RECON'] == 1, (st, o))
+        finally:
+            os.environ.pop('FNVNX_RECON', None)
+            s4_stl._RECON_CACHE.clear()
+    # a name the unit's units.json symbols bind: left to the binding (nested std@fnv_ copies do not count)
+    with tempfile.TemporaryDirectory() as ur:
+        os.makedirs(os.path.join(ur, 'build'))
+        os.makedirs(os.path.join(ur, 'src'))
+        json.dump({'units': [{'source': 'src/t2.cpp', 'symbols': {
+            '??0?$vector@MV?$allocator@M@std@@@std@@QAE@XZ': '0x00449fd0',
+            '?setstate@?$basic_ios@DU?$char_traits@D@std@fnv_00ac9790@@@std@fnv_00ac9790@@QAEXH_N@Z': '0x00400020'}}]},
+                  open(os.path.join(ur, 'build', 'units.json'), 'w'))
+        st = collections.Counter()
+        o = s4_stl.r_stl_stream_bodies(os.path.join(ur, 'src', 't2.cpp'), UNIT2, st)
+        ok('bound ctor left to the binding, nested setstate ignored', st['STL-BOUND'] == 1 and st['STL2'] == 6 and
+           '::vector()' not in o[len(UNIT2):] and 'ios_base::setstate' in o[len(UNIT2):], (st, o[len(UNIT2):]))
     print('test_stl1: %d failed' % fails)
     return 1 if fails else 0
 

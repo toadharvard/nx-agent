@@ -42,6 +42,10 @@ rest; its exe vftable holds the same bodies. Checks:
   D0), binds to a stub: Nv's D1, then the global operator delete when flags bit 0 is set (R6);
 * Dd's D1, defined nowhere (MSVC folded ~Dd into ??_GDd, which the unit binds to a (this, flags) function), is
   `??_G(this, 0)` through the flag stub (S1-refs-004);
+* Eg's D1, defined nowhere, where the unit names ??_GEg at 0x4011e0 and no native body is there: the exe's ??_G is
+  `call 0x401190; test byte [esp+8], 1; je; call delete`, 0x401190 has a native plain destructor body (EgS), so D1 binds
+  to `__fnv_00401190` - not to the D1 of Hd, which merely shares the ??_G address (the aliasing of the identical-code
+  folding picked the wrong body), and without the exe the alias stays (W26);
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
   (c: the abi gap).
 """
@@ -54,6 +58,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import layout          # noqa: E402
+import exevft          # noqa: E402
 import test_exevft     # noqa: E402
 import vtables         # noqa: E402
 import vtmetric        # noqa: E402
@@ -78,6 +83,9 @@ struct Sh { virtual int p() { return 5; } int s; };         // a shell: its exe 
 struct Vk { virtual int kk(); virtual int k(int); virtual int kz(); virtual int kp(); virtual void kq(); int t; };
 void qbody(int);   // kq's body: a free cdecl function taking the slot's first (undeclared) argument
 struct Dd { ~Dd(); void *FUN_00401140(unsigned); int w; };   // ~Dd defined nowhere: MSVC folded it into ??_G
+struct Eg { ~Eg(); int w; };                         // ~Eg defined nowhere; the exe's ??_GEg at 0x4011e0 calls EgS's body
+struct Hd { ~Hd(); int w; };                         // shares the ??_G address; its own D1 is compiled (another body)
+struct EgS { void FUN_00401190(); int w; };          // the destroy body at 0x401190
 struct Ct { Ct(); int v; };                          // an MSVC constructor returns this
 struct CtShell { void *FUN_00401130(); };             // a unit that calls it for its result
 struct Pv { inline virtual int pa(); inline virtual int pb(); int pz; };   // defined nowhere; the recipe places both mid-function
@@ -103,6 +111,8 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'M *mk_m() { return new M; }\n'
                     'Ct::Ct() { v = 7; }\nvoid *use_ct(CtShell *p) { return p->FUN_00401130(); }\n'
                     'void *Dd::FUN_00401140(unsigned f) { return f ? this : 0; }\nvoid del_dd(Dd *p) { delete p; }\n'
+                    'void del_eg(Eg *p) { delete p; }\nHd::~Hd() { w = 0; }\nvoid EgS::FUN_00401190() { w = 1; }\n'
+                    'void del_hd(Hd *p) { delete p; }\n'
                     'Vb *mk_vb() { return new Vb; }\nDer *mk_der() { return new Der; }\n'
                     'int call_thk(ThkUse *p) { return p->FUN_00401110(); }\n'
                     'Nv::~Nv() { q = 0; }\nvoid game_free(void *p) { g_q = p != 0; }\n'
@@ -180,6 +190,11 @@ def main():
             0x4010d0: b'\x33\xc0\xc3',                              # xor eax, eax; ret
             0x4010f8: b'\xb9' + (0x500000).to_bytes(4, 'little') + b'\xe9' +
                       (0x4010f0 - 0x401102).to_bytes(4, 'little', signed=True),   # mov ecx, imm; jmp qbody
+            # ??_GEg: push esi; mov esi, ecx; call EgS body; test byte [esp+8], 1; je; push esi; call delete;
+            # add esp, 4; mov eax, esi; pop esi; ret 4
+            0x4011e0: b'\x56\x8b\xf1\xe8' + (0x401190 - 0x4011e8).to_bytes(4, 'little', signed=True) +
+                      b'\xf6\x44\x24\x08\x01\x74\x09\x56\xe8' +
+                      (0x401170 - 0x4011f6).to_bytes(4, 'little', signed=True) + b'\x83\xc4\x04\x8b\xc6\x5e\xc2\x04\x00',
             0x401110: b'\x83\xe9\x08\xe9' + (0x401100 - 0x401118).to_bytes(4, 'little', signed=True)})  # sub ecx, 8; jmp
         tree = os.path.join(t, 'tree')
         os.makedirs(os.path.join(tree, 'include'))
@@ -208,7 +223,8 @@ def main():
                 F(0x401178, '?call_nv@@YAPAXPAUNvUse@@@Z'), F(0x4011a0, '?g0@Vh@@UAEHXZ'),
                 F(0x4011a8, '?implh@Shell@@QAEHXZ'), F(0x4011c0, '?u0@Vu@@UAEHXZ'),
                 F(0x4011c8, '?c0@Vc@@UAEHXZ'),
-                F(0x4011d0, '?u1@Vu@@UAEHXZ'), F(0x4011d8, '?c1@Vc@@UAEHXZ')],
+                F(0x4011d0, '?u1@Vu@@UAEHXZ'), F(0x4011d8, '?c1@Vc@@UAEHXZ'),
+                F(0x401190, '?FUN_00401190@EgS@@QAEXXZ')],
              'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
                          '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp'],
                          '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk'],
@@ -219,7 +235,8 @@ def main():
                          '?pa@Pv@@UAEHXZ': '0x004010e8', '?pb@Pv@@UAEHXZ': '0x004010ec',
                          '__imp_?Free@Bi@@QAEXPAX@Z': '0x%08x' % where['Vi'], '??_7Vh@@6B@': '0x%08x' % where['Vh'],
                          '??_7Vu@@6B@': '0x%08x' % where['Vu'], '?hu@Vu@@UAEHXZ': '0x00401020',
-                         '??_7Vc@@6B@': '0x%08x' % where['Vc'], '?hc@Vc@@UAEHXZ': '0x00401020'}},
+                         '??_7Vc@@6B@': '0x%08x' % where['Vc'], '?hc@Vc@@UAEHXZ': '0x00401020',
+                         '??_GEg@@QAEPAXI@Z': '0x004011e0', '??_GHd@@QAEPAXI@Z': '0x004011e0'}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
                 F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {'?hh@Vh@@QAEHXZ': '0x00401020'}},
         ]}
@@ -336,6 +353,17 @@ def main():
         check(rd is not None and rd[2] == 'dtor-by-deldtor' and rd[5] == '__fnvnx_vflag_00401140_0',
               'Dd\'s D1 (defined nowhere; the unit binds ??_GDd to a (this, flags) function) -> ??_G(this, 0): %s'
               % (rd,))
+        re_, re0 = refs.get('_ZN2EgD1Ev'), res['none'][2].get('_ZN2EgD1Ev')
+        check(re_ is not None and re_[2] == 'dtor-by-exe-deldtor' and re_[4] == '00401190' and
+              re_[5] == '__fnv_00401190' and re0 is not None and re0[2] == 'ctor-dtor-alias' and
+              re0[5] == '_ZN2HdD1Ev',
+              'Eg\'s D1 (the exe\'s ??_GEg calls 0x401190, a native plain body) -> __fnv_00401190, not the D1 of Hd '
+              'that shares the ??_G address; without the exe the alias stays: %s / %s' % (re_, re0))
+        rh1 = refs.get('_ZN2HdD1Ev')
+        check(rh1 is None or rh1[2] not in ('dtor-by-exe-deldtor',), 'Hd\'s own D1 is untouched: %s' % (rh1,))
+        check(res['exe'][0] and exevft.deleting_dtor_callee(exe, 0x4011e0) == 0x401190 and
+              exevft.deleting_dtor_callee(exe, 0x401088) is None and exevft.deleting_dtor_callee(exe, 0x401170) is None,
+              'exevft.deleting_dtor_callee: 0x4011e0 -> 0x401190, a non-??_G shape -> None')
         rh, rh0 = refs.get('_ZN2Vh2hhEv'), res['none'][2].get('_ZN2Vh2hhEv')
         check(rh is not None and rh[2] == 'vslot-exe' and rh[5] == '__fnv_004011a8' and
               rh0 is not None and rh0[2] == 'code' and rh0[5] == '__fnv_00401020',

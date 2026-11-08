@@ -252,6 +252,8 @@ def reclassify(rec):
             pass
     if d['kind'] == 'call-target' and d.get('x86_next') and d.get('x86_next') == d.get('arm') and \
             d.get('arm_next') == d.get('x86'):
+        if d.get('call_order_unproven'):
+            return 'call-order-unproven'     # (r4 uncls) the exe does not show the pair to be an argument list
         return 'call-order'      # two adjacent calls swapped: C++ leaves the evaluation order of operands open
     if _causes is not None:
         return _causes.refine(rec, cause)       # record-level rules for what the probes left open

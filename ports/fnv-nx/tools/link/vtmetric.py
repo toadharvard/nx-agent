@@ -16,6 +16,10 @@ pairs with a native vtable (kind `V`):
 * `secondary-full-entry` (S2c-vt2) - secondary vftable slots bound to `__fnv_<a>` where the exe slot's function is
   one MSVC enters with `this` at that secondary base (the map's entry is `__fnvnx_msvc_<a>`): `this` arrives d bytes
   off; not part of `metric`;
+* `slot-one-delete-this` (W23) - primary tables with no destructor pair whose exe slot 0 is a deleting destructor and
+  whose native slot 1 still holds exe slot 1 = `DeleteThis() { delete this; }` (exevft.delete_this): the exe's slot
+  order where Itanium's D0 belongs, a loop on any native `delete`. fnvlink's d0_slot_fix drives it to 0 (not part
+  of `metric`);
 * `mispaired-primary` / `mispaired-secondary` - vftables whose native vtable is another class than the exe's RTTI
   class, where the native class is itself an RTTI class of the exe (by name, after demangling both sides; shells
   such as `FUN_<addr>` or the decomp's local reconstructions, which name no RTTI class, are not counted).
@@ -114,6 +118,7 @@ def measure(link, exe, rows_path=None):
     native, vrows = read_addrmap(os.path.join(out, 'addrmap.tsv'))
     renames = read_renames(os.path.join(out, 'refs.tsv'))
     symaddr = read_symaddr(os.path.join(out, 'addrmap.tsv'))
+    is_dtor = lambda a: native.get(a) == 'G' or exevft.deleting_dtor(exe, a)   # noqa: E731
     mism_pairs = collections.Counter()
     classes = read_class_rows(os.path.join(out, 'vtables', 'classes.tsv'))
     exev = exevft.scan(exe)
@@ -145,6 +150,15 @@ def measure(link, exe, rows_path=None):
         nmsvc = n - 1 if d is not None else n
         e = exev.get(v)
         per_v[v] = (z, note, n, nmsvc, e)
+        # W23: `delete p` calls Itanium slot 1. A primary table in the exe's slot order (no destructor pair) that
+        # holds exe slot 1 = `DeleteThis() { delete this; }` there loops on a native delete (S5 round 6)
+        if e is not None and e.td and ap == 8 and note.startswith('primary') and len(e.slots) >= 2 and d is None \
+                and (native.get(e.slots[0]) == 'G' or exevft.deleting_dtor(exe, e.slots[0])) \
+                and exevft.delete_this(exe, e.slots[1]) and not (n >= 2 and exevft.slot_one_is_d0(
+                    names[0], names[1])):
+            st['slot-one-delete-this'] += 1
+            rows.append(('%08x' % v, z, '1', '1', '%08x' % e.slots[1], '', names[1] if n >= 2 else '',
+                         'slot-one-delete-this'))
         znames.add(z)
         kind = 'primary' if note.startswith('primary') else 'secondary'
         st['v-%s' % kind] += 1
@@ -155,7 +169,7 @@ def measure(link, exe, rows_path=None):
         if e is not None:
             st['slot-vftables'] += 1
             cur = [x.sym for x in slot_ents]   # the symbols the fixed object names now (names: the units' own)
-            agree, bad = compare_slots(cur, d, e.slots, symaddr)
+            agree, bad = compare_slots(cur, d, e.slots, symaddr, is_dtor)
             st['slot-compared'] += agree + len(bad)
             if bad:
                 st['slot-vftables-mismatch'] += 1
@@ -300,22 +314,63 @@ def _pair_positions(names, d):
     return out
 
 
-def compare_slots(names, d, exe_slots, symaddr):
+def _align(addr, c, exe_slots):
+    agree, bad = 0, []
+    for k, a in enumerate(addr):
+        j = exevft.exe_slot_index(k, c)
+        if a is None or j < 2 or j >= len(exe_slots):
+            continue
+        if a == exe_slots[j]:
+            agree += 1
+        else:
+            bad.append((k, j, a, exe_slots[j]))
+    return agree, bad
+
+
+RENAMED_ADDR = re.compile(r'__fnv_([0-9a-f]{8})(_D1)?$')
+D0DEL = re.compile(r'__fnvnx_d0del_([0-9a-f]{8})$')
+
+
+def renamed_pairs(names, exe_slots, is_dtor=None):
+    """W31: the destructor pairs resolve's renames leave in a fixed object, by name only (no search over alignments:
+    a copy that starts one slot off must stay a mismatch). Positions i of: `__fnv_<a>` then `__fnvnx_d0del_<a>`;
+    `__fnv_<a>_D1` then `__fnv_<a>` (same a); `__fnvnx_vgdel_*` then a trap stub; two consecutive trap stubs at
+    slot 0 where the exe's slot 0 is a deleting destructor (is_dtor(address), when given: exevft.deleting_dtor)."""
+    out = []
+    for i in range(len(names) - 1):
+        a, b = names[i], names[i + 1]
+        if not a or not b:
+            continue
+        ma, mb = RENAMED_ADDR.match(a), RENAMED_ADDR.match(b)
+        md = D0DEL.match(b)
+        if (ma and not ma.group(2) and md and ma.group(1) == md.group(1)) or \
+                (ma and ma.group(2) and mb and not mb.group(2) and ma.group(1) == mb.group(1)):
+            out.append(i)
+        elif a.startswith('__fnvnx_vgdel_') and b.startswith(TRAP):
+            out.append(i)
+        elif i == 0 and a.startswith(TRAP) and b.startswith(TRAP) and exe_slots and is_dtor is not None \
+                and is_dtor(exe_slots[0]):
+            out.append(i)
+    return out
+
+
+def compare_slots(names, d, exe_slots, symaddr, is_dtor=None):
     """-> (agree, [(k, j, native address, exe address)] mismatches) for the alignment that agrees most: candidates are
-    d (exevft.dtor_pos, may be None), every flag-stub pair, and no pair at all; ties keep the earliest candidate.
-    Only exe slots j >= 2 are compared."""
+    d (exevft.dtor_pos, may be None), every flag-stub pair, the renamed pairs (renamed_pairs, W31) and no pair at
+    all; ties keep the earliest candidate. Only exe slots j >= 2 are compared.
+
+    W31: exe_vtable_copies reads the kept object's raw names, finds D1/D0 and starts a copy's extra slots at exe
+    slot nm = n - 1 (the minus-one layout); resolve then renames the pair in the fixed object to forms dtor_pos does
+    not read, and k = j showed as a tail of -1 mismatches (695 rows, 127 extended copies on link 3f7a6c35). A table
+    with no named pair is compared as before: a copy that genuinely starts one slot off stays reported."""
     addr = [slot_address(n, symaddr) for n in names]
     best = None
-    for c in [d] + [p for p in _pair_positions(names, d) if p != d] + ([None] if d is not None else []):
-        agree, bad = 0, []
-        for k, a in enumerate(addr):
-            j = exevft.exe_slot_index(k, c)
-            if a is None or j < 2 or j >= len(exe_slots):
-                continue
-            if a == exe_slots[j]:
-                agree += 1
-            else:
-                bad.append((k, j, a, exe_slots[j]))
+    cands = [d] + [p for p in _pair_positions(names, d) if p != d]
+    cands += [p for p in renamed_pairs(names, exe_slots, is_dtor) if p not in cands]
+    if d is not None:
+        cands.append(None)
+    for c in cands:
+        agree, bad = _align(addr, c, exe_slots)
         if best is None or agree > best[0]:
             best = (agree, bad)
     return best

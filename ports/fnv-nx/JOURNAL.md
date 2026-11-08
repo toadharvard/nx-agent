@@ -3607,3 +3607,23 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   arena crash that d009f9b fixes. The atestle set (S16 4181cc5) covers the 21 set-vacuous programs. A 22-shard
   program sweep and a cells replay are running.
 * **owner rules 1-11** recorded in tools/orch/README.md, among them the regression ratchet (T1).
+
+### J-0161 | 2026-11-08 | stream: orchestration | status: active | parent: J-0160
+
+* **full1 5fd996a4** (integration with D26): compile 2,978/2,978, link 85.7 % by address, 14,011 bridges,
+  trial-link undefined 607 -> 519, **guest trap stubs 155 -> 69**. R2's per-row table of the 155 rows on the
+  wip/d26 link: 45 fixed at head, 23 in flight, 77 in progress, 10 blocked, all owned; open 111 -> 97 by 10:20.
+* **boot, honest milestones** (S5): the renderer-init milestone now needs CreateDevice to return S_OK. Pre-D26
+  97deacd: 3/10 (winmain, ini-read, renderer-init on the null device), then InitRenderer +0x434, which D26
+  fixes. D26 line: 1/10 (winmain, 0 skipped initializers after the memory-manager stand-ins). The next blockers
+  are the INI loader faulting in IniCollection::FUN_00c44280 (S5, EQ fuzz) and D26 (b) shifting a D3D9 COM
+  interface (S1: exclude IUnknown-derived classes). D26 stays (owner: fix forward, no rollbacks, rule 12).
+* **emulator speed**: emu_start(count=) hooks every instruction (~9 MIPS); time slices (S5 2d1afaeb) take the
+  pre-D26 boot to renderer-init in 46 s instead of more than 540 s in the INI read.
+* **boot effort**: a discovery mode that records every fault and continues (S5); the blocker rows go to their
+  owners ahead of all other work; bootloop bl1 (T1) for warm per-head boots; full2 halves the time to the
+  next link; 12 equiv shards (eqs1..12) replace the 3 h single-shard eqa.
+* **shaders**: 1,809/1,809 programs pass, 0 vacuous in every set (atestle); the scene replay moved to sw31.
+* **MSVC gate**: open D24 0 and 0 unexplained at 9a303226 (EQ).
+* **owner rules 2, 11, 12** recorded: a full per-agent status in every message, the regression ratchet (T1,
+  96ebc537), fix forward.

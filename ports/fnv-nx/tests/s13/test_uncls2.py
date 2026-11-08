@@ -93,7 +93,10 @@ def test_corder():
     t, p, div, h = run_pair('?f@@YAXPAH@Z', code, nat, case, defsyms=[stub(CALLEE)],
                             info=Info(conv.Conv('?g@@YAPAHXZ', 'test')))
     check(div is not None and div['kind'] == 'mem-write', 'the results are used in swapped roles (%s)' % (div,))
-    check(h.get('cause') == 'call-order', 'equal results in either value agree: call-order (%s)' % (h.get('cause'),))
+    # (r4 uncls) equal results agree, but these are two statements (no consuming call takes both results: the exe's
+    # code does not show an argument list), so the order is not proven by-design: call-order-unproven, hard
+    check(h.get('cause') == 'call-order-unproven',
+          'equal results in either value agree, two statements: call-order-unproven (%s)' % (h.get('cause'),))
 
 
 def test_shift():

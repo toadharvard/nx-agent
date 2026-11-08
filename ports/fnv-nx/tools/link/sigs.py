@@ -139,6 +139,7 @@ INTS = [(re.compile(r'\bunsigned __int64\b'), 'unsigned long long'), (re.compile
         (re.compile(r'\bunsigned __int32\b'), 'unsigned int'), (re.compile(r'\b__int32\b'), 'int'),
         (re.compile(r'\bunsigned __int16\b'), 'unsigned short'), (re.compile(r'\b__int16\b'), 'short'),
         (re.compile(r'\bunsigned __int8\b'), 'unsigned char'), (re.compile(r'\b__int8\b'), 'char')]
+VEC4F = re.compile(r'\bfloat __vector\(4\)|\b__Float32x4_t\b')
 LIT_SUFFIX = re.compile(r'\b(\d+)(?:ull|ul|ll|u|l)\b', re.I)
 LIT_CAST = re.compile(r'\((?:unsigned |signed )?(?:char|short|int|long|long long|bool)\)(-?\d+)')
 SPACE_NONWORD = re.compile(r' (?=\W)|(?<=\W) ')
@@ -148,6 +149,7 @@ LONG = re.compile(r'\b(?<!long )long\b(?! long| double)')
 def _canon_type(t, level=0):
     t = t.replace('`anonymous namespace\'', '{anon}').replace('(anonymous namespace)', '{anon}')
     t = TAGS.sub('', t)
+    t = VEC4F.sub('__m128', t)   # GCC spells the MSVC __m128 as `float __vector(4)` or `__Float32x4_t`
     t = NOISE.sub('', t)
     for rx, rep in INTS:
         t = rx.sub(rep, t)
