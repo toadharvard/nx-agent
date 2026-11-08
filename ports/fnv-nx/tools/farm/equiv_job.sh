@@ -261,6 +261,13 @@ if [ ! -f "$W/tree.done" ]; then
   fi
   cp -al "$PT" "$W/tree"; touch "$W/tree.done"
 fi
+# attribution's prepared texts without a candidate (equiv.py attribute): kept under the sha256 of the prepare's record,
+# so they are reused exactly while every input of the prepare is the same; older records' texts are dropped
+if [ "${EQUIV_PREPARE_REUSE:-1}" = 1 ] && [ -f "$FARM_HOME/eqprep/deps.json" ]; then
+  RD=$FARM_HOME/eqprep/reduced/$(sha256sum < "$FARM_HOME/eqprep/deps.json" | cut -c1-24)
+  for o in "$FARM_HOME"/eqprep/reduced/*; do if [ -d "$o" ] && [ "$o" != "$RD" ]; then rm -rf "$o"; fi; done   # if/fi: set -e
+  mkdir -p "$RD"; export FNVNX_EQUIV_REDUCED=$RD
+fi
 # eqprep-end
 # the pristine rows from the objects (a published branch may carry no rows.jsonl; a unit without an object failed)
 step refp "$WK/refp.log"
