@@ -233,6 +233,12 @@ BYTE_READS = None
 BG_READS = None
 
 
+# difffuzz-20 (sign-outparam): with STUB_OUT set, the native run zeroes the stack words of a buffer it passes to an
+# intercepted call that still hold the planted fill (the native never wrote them), as the exe's real callee would have
+# filled or left them; classify.py's stub-outparam probe reruns an uninit-arm case that way
+STUB_OUT = False
+
+
 def stack_fill(seed, n):
     if UNIFORM:
         return bytes(n)

@@ -232,6 +232,34 @@ def msvc_inlined(target, div):
     return bool(callees) and xv in callees(a)
 
 
+def arg_narrow_top(target, fn, lab, i):
+    """(difffuzz-20, sign-args) May byte i of argument `lab` be widened by the oracle code? Only the top byte of a
+    1- or 2-byte value is (a char / short parameter; a declared-int parameter the exe reads through a 1- or 2-byte
+    [ebp+d] access over that byte). The sign bit of a float argument, or any bit of a 4-byte integer the exe reads
+    whole, is not a sign extension: clearing it changes a compare or a branch (0x00e30fb0, 0x00afd390, 0x00abb700)."""
+    conv = getattr(target, 'conv', None)
+    val = next((v for v in getattr(conv, 'vals', ()) if v.label == lab), None)
+    if val is None:
+        return True                     # unknown parameter: keep the earlier behaviour
+    if val.is_float or val.is_ptr:
+        return False
+    if val.size in (1, 2):
+        return i == val.size - 1
+    slot = next((off for l, sp, off, _ in conv.x86 if l == lab and sp == 'stk'), None)
+    if slot is None or val.size != 4 or val.kind != 'gpr':
+        return False
+    try:
+        for ins in CSD.disasm(fn['code'], fn['address']):
+            for op in ins.operands:
+                if op.type == capstone.x86.X86_OP_MEM and op.size in (1, 2) and \
+                        ins.reg_name(op.mem.base) == 'ebp' and not op.mem.index:
+                    if op.mem.disp - 8 + op.size - 1 == slot + i:
+                        return True
+    except capstone.CsError:
+        return False
+    return False
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
@@ -331,6 +359,18 @@ def hint(pair, target, case, div, fn, max_steps):
         rx1, ra1, _ = pair.run(alt, max_steps)
         h['_runs'] += 2
         ux, ua = _outcome(rx0) != _outcome(rx1), _outcome(ra0) != _outcome(ra1)
+        if ua and not ux:
+            # (difffuzz-20, sign-outparam) the garbage the native reads may be a buffer it passed to a callee the
+            # harness stubs (the real callee fills it; MSVC passed its own destination, GCC a temporary it copies
+            # back): zero the stack words of such buffers that the native never stored to and run both seeds again
+            world.STUB_OUT = True
+            try:
+                d0, d1 = pair.run(base, max_steps), pair.run(alt, max_steps)
+            finally:
+                world.STUB_OUT = False
+            h['_runs'] += 2
+            if _outcome(d0[1]) == _outcome(d1[1]) and _benign(d0[2]) and _benign(d1[2]):
+                h['cause'] = 'stub-outparam'; return h
         if ux or ua:
             h['cause'] = 'uninit-x86' if ux and not ua else 'uninit-arm' if ua and not ux else 'uninit-both'
             if ux and ua:
@@ -427,7 +467,7 @@ def hint(pair, target, case, div, fn, max_steps):
                     hits.append('%08x' % (a + i))
     for lab, b in list(case.args.items()):
         for i, x in enumerate(b):
-            if x >= 0x80 and len(hits) < 4 and h['_runs'] < 60:
+            if x >= 0x80 and len(hits) < 4 and h['_runs'] < 60 and arg_narrow_top(target, fn, lab, i):
                 trial = case.copy()
                 nb = bytearray(b); nb[i] &= 0x7f; trial.args[lab] = bytes(nb)
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
