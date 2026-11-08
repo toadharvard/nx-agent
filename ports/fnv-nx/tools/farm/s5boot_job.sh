@@ -14,6 +14,10 @@
 #   S5BOOT_EXTRA    more emu_guest.py arguments
 #   FNVNX_STUB_NULLDEV  1: CreateDevice succeeds headless without a GPU backend (farm_boot.sh; a guest built with
 #                   native_device.cpp's fnvnx_stub_nulldev)
+#   FARM_NATIVE_RENDER  1: the boot runs the real native device, not the null one: the native renderer injected into
+#                   the guest and the guest's nxgpu calls (ext_call module 10) answered by S6n's headless GL backend
+#                   (libnxgl.so, EGL surfaceless on Mesa); both built by farm_boot.sh on first use. The report then
+#                   carries CreateDevice's result and the presented frames (native-render / gpu / gpu-frame lines).
 #   EMU_TIMEOUT     seconds (default 3600); BUDGET instructions per thread slice (default 200000000: small slices let
 #                   the wall-clock limit end the run with its report)
 # The game install comes from tools/gamedata_fetch.sh (or FARM_GAME); the profile is tools/lockstep/profile.py's,
@@ -33,12 +37,13 @@ write_report() {
 	{
 		echo "# S5 stub boot $LC ($TAG)"
 		echo
-		echo "head ${COMMIT:0:12}; repair-lost-slot-one: ${S5BOOT_REPAIR:-0}; trace: ${S5BOOT_TRACE:-none}; $(( $(date +%s) - T0 ))s"
+		echo "head ${COMMIT:0:12}; native render: ${FARM_NATIVE_RENDER:-off}; repair-lost-slot-one: ${S5BOOT_REPAIR:-0}; trace: ${S5BOOT_TRACE:-none}; $(( $(date +%s) - T0 ))s"
 		echo
 		if [ -f "$L" ]; then
 			echo '```'
 			grep -E "STOPPED|initializers skipped|repair-lost" "$L" | tail -3 | cut -c1-220
 			grep -E "^milestone" "$L" | cut -c1-120
+			grep -E "^native-render	|^gpu	|^gpu-frame	|native-render: |fnvnx native renderer: |module 10 did not answer|CreateDevice" "$L" | cut -c1-200 | head -24
 			awk '/== trace/{c++} c>=1' "$L" | grep -E "^ +(pc|lr|#[0-9]|S10)" | head -14 | cut -c1-200
 			grep -E "^trap-table|^stubbed-fault|^skip-summary" "$L" | cut -c1-200 | head -40
 			[ -f "$W/trace.tsv" ] && { echo "trace events by function:"; awk -F'\t' '$1=="call"{n[$5]++} END{for(k in n) print n[k], k}' "$W/trace.tsv" | sort -rn | head -20; }
