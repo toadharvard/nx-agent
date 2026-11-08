@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # autoadopt.sh [interval_s] - the orchestrator's event loop without an LLM in it. Polls the stream branches
-# (claude/fnv-*) and wip/* every interval; on a moved stream branch it adopts it into the integration branch
+# (claude/fnv-*) and wip/* every interval; on a moved stream branch it adopts it into the integration branch Branches ending -wip (and stream subagent branches -vac/-large) are never adopted.
 # (adopt.sh) and pushes. It exits - waking the orchestrator - only when something needs a decision:
 #   * an adoption leaves conflicts (the stream must merge integration), or
 #   * a newly added inbox note asks for farms (a line with START), or a wip/* branch moved (try-farm request), or
@@ -8,7 +8,7 @@
 set -uo pipefail
 IV=${1:-120}; NX=${NX:-/home/user/nx-agent}; ST=${WATCH_STATE:-$HOME/.fnvnx-watch}; mkdir -p "$ST"
 H=$(cd "$(dirname "$0")" && pwd); I=claude/port-nsw-un6t9s
-snap() { git ls-remote https://github.com/toadharvard/nx-agent 'refs/heads/claude/fnv-*' 2>/dev/null
+snap() { git ls-remote https://github.com/toadharvard/nx-agent 'refs/heads/claude/fnv-*' 2>/dev/null | grep -v -e '-wip$' -e '-vac$' -e '-large$'
          git -C /home/user/fnv-nx-build ls-remote origin 'refs/heads/wip/*' 2>/dev/null; }
 [ -s "$ST/last" ] || snap | sort > "$ST/last"
 while :; do

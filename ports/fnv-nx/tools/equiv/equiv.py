@@ -64,6 +64,7 @@ CLASSES = {
     'COM1': 'neutral',          # renames a unit's own IUnknown copy (types only; the decomp's vtable slots kept)
     'SPEC1': 'neutral',         # early template<> declarations
     'STATIC1': 'neutral',       # internal -> external linkage of image-bound variables (MSVC may inline less)
+    'VFTBL1': 'neutral',        # the decomp's stand-in table for an exe vftable becomes a declaration (`&name` is the same symbol)
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
     'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
@@ -93,8 +94,13 @@ CLASSES = {
     'STAND3': 'platform',       # STAND2 for in-class / inline stand-ins, in /Od units without /Ob1 (MSVC inlines nothing)
     'STAND5': 'platform',       # STAND2 for an in-class member body whose MSVC name the unit binds to another unit's address
     'STAND4': 'platform',       # STAND1/2 for a static free stand-in: the definition becomes an extern declaration of the bound name
+    'PHSLOT1': 'platform',      # an empty `virtual void vNNN() {}` placeholder becomes declared-only (the exe slot fill binds it)
     'STAND6': 'platform',       # STAND2 for a __declspec(noinline) stand-in, in any unit (MSVC never inlined it)
-    'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static)
+    'ADDRFN1': 'platform',     # a code address cast to void* takes the address symbol __fnv_<a> (a GCC asm label)
+    'POP2': 'neutral',          # POST hook: pop-mismatch chains, the words a getter leaves move to the call that pops them
+    'THIS2': 'neutral',         # POST hook: a caller that hands its ecx to a thiscall callee calls it on its object
+    'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static);
+                               # not neutral: MSVC then drops the static recipe functions only a harness referenced
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
     'INC1': 'neutral',          # quoted include spelled as the including directory's file (MSVC: no case)
     'ANON2': 'platform',        # raw storage for members with special functions in an anonymous struct of a union
@@ -134,13 +140,17 @@ CLASSES = {
     'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
     'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor
+    'D22': 'neutral',          # FNVNX_D22 / FNVNX_D22_DROP: GCC declares the slot-0 virtual destructor, MSVC keeps the original declaration
+    'DTORB1': 'neutral',       # FNVNX_DTORB_BEGIN/END (empty under MSVC): a destructor stand-in calls the address its ??1 is bound to
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
-PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names'}
+PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names', 'POP2': 'pop_chains',
+          'THIS2': 'this_members'}
 # POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
-POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1'}
+POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
+              'pop_chains': 'POP2', 'this_members': 'THIS2'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
 # Leave-out groups for `attribute --hier --default-groups` (the gate's attribution): rules that interact sit in one
@@ -150,7 +160,7 @@ DEFAULT_GROUPS = {
     'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2 NSCALL1',
     'newdel': 'NEW1 NEW2 NEW3 NEW4 NEW5 CTOR1',
     'EXC1': 'EXC1',
-    'link': 'LINK1 STATIC1 BIND1',
+    'link': 'LINK1 STATIC1 VFTBL1 BIND1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
     'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
     'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 COND1 RSTR1 FINL1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
@@ -378,7 +388,16 @@ class Resolver:
                     if len({int(v, 16) for v in alts}) == 1:
                         syms[n] = next(iter(alts)); how['game'] += 1
                         continue
-                for k, what in ((var_key(n), 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
+                vk = var_key(n)
+                if vk:
+                    # the other linkage of a variable the unit itself binds: LINK1 names it by variable name inside
+                    # this unit's link, so the unit's own address decides even where another unit binds the same
+                    # name elsewhere (extradatalist.cpp: DAT_011977d8 at 0x011977d0)
+                    mine = {v for k2, v in syms.items() if var_key(k2) == vk}
+                    if len({int(v, 16) for v in mine}) == 1:
+                        syms[n] = next(iter(mine)); how['linkage-unit'] += 1
+                        continue
+                for k, what in ((vk, 'linkage'), (import_key(n), 'import'), (('key', key_free(n)), 'key')):
                     if k and len(self.by_key.get(k, ())) == 1:
                         syms[n] = hex(next(iter(self.by_key[k]))); how[what] += 1
                         break
@@ -626,9 +645,11 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
     /EHs-c-, leave-out builds) makes the same choice, so their objects stay comparable."""
     ok, text = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant)
     if not ok and not plain and (tree / 'equiv_rules.txt').exists():
-        # STANDIN-RETRY: a stand-in variant chosen by the first error (the same choice for every caller)
+        # STANDIN-RETRY: stand-in variants for a unit that does not compile, in order (the same choice for every
+        # caller): the variant its first error names, then SDK-HIDE, then lean, then both
         extra = [d for pat, d in STANDIN_RETRIES if re.search(pat, text)]
-        tries = ([(lean, extra)] if extra else []) + ([(True, extra)] if not lean else [])
+        hide = extra + ['/DFNVNX_EQUIV_SDKHIDE=1']
+        tries = ([(lean, extra)] if extra else []) + [(lean, hide)] + ([(True, extra), (True, hide)] if not lean else [])
         for ln, ex in tries:
             ok2, text2 = _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, ln, variant, ex)
             if ok2:
@@ -638,7 +659,11 @@ def compile_unit(decomp, tree, unit, obj, layout, plain=False, eh_off=False, lea
 
 # STANDIN-RETRY: (first-error pattern, /D of a gate stand-in variant). A unit that forward-declares the SDK's own
 # `union _ULARGE_INTEGER;` meets the stand-in's class of that name (other units declare `class _ULARGE_INTEGER;`).
-STANDIN_RETRIES = [(r"'_ULARGE_INTEGER' : 'union' type redefinition", '/DFNVNX_EQUIV_ULARGE_UNION=1')]
+# A unit that includes <intrin.h> inside a namespace (hkadeltacompressedanimation's fnv_00e359f0) gets the barriers
+# declared there too; MSVC 2008 takes them and the compat's global extern "C" ones for two functions (C2668). The
+# retry includes <intrin.h> in the compat first (not for every unit: 140 of 382 intrinsic units break then).
+STANDIN_RETRIES = [(r"'_ULARGE_INTEGER' : 'union' type redefinition", '/DFNVNX_EQUIV_ULARGE_UNION=1'),
+                   (r"'_(?:ReadWrite|Read|Write)Barrier' : ambiguous call", '/DFNVNX_EQUIV_INTRIN=1')]
 
 
 def _compile_unit(decomp, tree, unit, obj, layout, plain, eh_off, lean, variant, extra=()):
@@ -1111,20 +1136,43 @@ def cmd_attribute(a):
     lock = threading.Lock()
     edits = {}            # (file, candidate) -> path of the file prepared without the candidate, or None if the same
 
+    # T1: FNVNX_EQUIV_REDUCED=<dir>: the prepared texts without a candidate, kept between runs. tools/farm/equiv_job.sh
+    # names the directory after the sha256 of the traced record of the full prepare (every rule, equiv.py with its
+    # groups, every decomp file it read): the same record, the same texts; another record, another directory.
+    keep_dir = os.environ.get('FNVNX_EQUIV_REDUCED')
+
     def reduced(f, rid, ids):
         key = (f, rid)
         with lock:
             if key in edits:
                 return edits[key]
-        drop = {fn.__name__ for fn in rule_functions(ids)}
-        rules = [fn for fn in full if fn.__name__ not in drop]
-        text = prepared_text(a.decomp, f, rules)
+        kp = Path(keep_dir) / rid / (f + '.gz') if keep_dir else None
+        text = None
+        if kp is not None and kp.is_file():
+            try:
+                with gzip.open(kp, 'rt', encoding='utf-8', errors='surrogateescape') as h:
+                    text = h.read()
+            except (OSError, EOFError):
+                text = None
+        if text is None:
+            drop = {fn.__name__ for fn in rule_functions(ids)}
+            rules = [fn for fn in full if fn.__name__ not in drop]
+            text = prepared_text(a.decomp, f, rules)
+            if kp is not None:
+                kp.parent.mkdir(parents=True, exist_ok=True)
+                tmp = kp.with_name(kp.name + '.tmp%d.%d' % (os.getpid(), threading.get_ident()))
+                with gzip.open(tmp, 'wt', encoding='utf-8', errors='surrogateescape', compresslevel=3) as h:
+                    h.write(text)
+                os.replace(tmp, kp)
         path = None
         if text != (base / f).read_text(encoding='utf-8', errors='surrogateescape'):
-            path = work / 'cache' / rid / (f + '.gz')     # compressed: the cache spans every rule x header of the shard
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with gzip.open(path, 'wt', encoding='utf-8', errors='surrogateescape', compresslevel=3) as h:
-                h.write(text)
+            if kp is not None:
+                path = kp                                  # the kept file is the same gzip text
+            else:
+                path = work / 'cache' / rid / (f + '.gz')  # compressed: the cache spans every rule x header of the shard
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with gzip.open(path, 'wt', encoding='utf-8', errors='surrogateescape', compresslevel=3) as h:
+                    h.write(text)
         with lock:
             edits[key] = path
         return path

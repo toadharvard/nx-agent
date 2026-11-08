@@ -49,6 +49,25 @@ CoffSym = collections.namedtuple('CoffSym', 'name value secnum type storage')   
 Section = collections.namedtuple('Section', 'name size data_off reloc_off nreloc flags')
 
 
+_COFFS = {}
+_COFFS_LOCK = __import__('threading').Lock()
+
+
+def coff(path):
+    """Coff(path), parsed once per process for an unchanged file (path, size, mtime): bodies' passes read each
+    pristine object about five times (T1: 16,198 parses of 2,990 objects, 26 s of bodies' 76 under the profiler).
+    A Coff is not changed after its parse (its relocs/symbols_in tables fill in lazily, the same for every caller)."""
+    st = os.stat(path)
+    k = (path, st.st_size, st.st_mtime_ns)
+    with _COFFS_LOCK:
+        c = _COFFS.get(k)
+    if c is None:
+        c = Coff(path)
+        with _COFFS_LOCK:
+            c = _COFFS.setdefault(k, c)
+    return c
+
+
 class Coff:
     """i386 COFF object (plain or /bigobj). syms: {raw symbol index: CoffSym} (aux records skipped); defs: name ->
     index of its definition (external over static); weak: weak external name -> default symbol name; comdat_sel:
@@ -131,8 +150,20 @@ class Coff:
         return self.data[s.data_off:s.data_off + s.size] if s.data_off else bytes(s.size)
 
     def symbols_in(self, secnum):
-        return sorted((s.value, s.name) for s in self.syms.values() if s.secnum == secnum and s.storage in
-                      (SYM_CLASS_EXTERNAL, SYM_CLASS_STATIC) and s.name != self.secs[secnum].name)
+        """Sorted (value, name) of the symbols defined in a section. The symbols are grouped by section once and
+        each section's answer kept (T1: bodies' exe pass asked 387k times, each a scan of the whole table: 65 s of
+        135 under the profiler); the filter is the old one on that section's group, and every call gets a new list."""
+        got = self.__dict__.setdefault('_symsec_ans', {})
+        ans = got.get(secnum)
+        if ans is None:
+            groups = self.__dict__.get('_symsec')
+            if groups is None:
+                groups = self._symsec = {}
+                for sym in self.syms.values():
+                    groups.setdefault(sym.secnum, []).append(sym)
+            ans = got[secnum] = sorted((s.value, s.name) for s in groups.get(secnum, ()) if s.storage in
+                                       (SYM_CLASS_EXTERNAL, SYM_CLASS_STATIC) and s.name != self.secs[secnum].name)
+        return list(ans)
 
     def word_at(self, name, k):
         """(relocation target or None, dword) of the k-th dword of a defined symbol."""

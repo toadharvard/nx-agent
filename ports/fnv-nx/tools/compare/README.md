@@ -152,6 +152,15 @@ image moves when the inputs move by float rounding (V6n's SENS idea). A candidat
 evidence of a defect. On shaderpackage019, one frame (SM3016) is ill-conditioned, and the candidate matches the
 reference exactly there.
 
+Sparse instability needs several draws. Where a program amplifies rounding into saturated outputs (the `large`
+set: constants in [-1000, 1000]), its unstable pixels are isolated 0 <-> 255 flips, and each perturbation draw
+(and the candidate) flips a different sample of them. One draw then covers a quarter of the candidate's pixels,
+below permreport's 90 % share, and the frame reads as over. `perm.py --perturb 1e-5 --perturb-seed k` gives draw k;
+`permreport.py` takes `--pref <run k> --pmanifest <manifest k>` repeatedly and uses the union of the moved pixels.
+Measured on the 27 pixel programs of the large set that stayed over: the union of 8 draws holds 100 % of the
+candidate's pixels for 25, 16 draws all 27 (S16 decision: 16 draws). A program whose reference does not move under
+any draw keeps its verdict (NOLIGHT009 stayed over until its defect was fixed).
+
 ## Reference capture cache (T1-fastbench)
 
 The cell sweep (`tools/farm/sweep_job.sh`) spent ~90 % of each cell booting the original under Wine to capture a

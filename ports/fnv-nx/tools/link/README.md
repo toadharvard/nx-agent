@@ -21,6 +21,8 @@ Design, formats and measurements: [`../../docs/LINK.md`](../../docs/LINK.md).
 | `exevft.py` | The player's exe vftables through MSVC RTTI (class, COL offset, slots), the minus-one slot rule (S2c-vt, `resolve --exe`). |
 | `vtmetric.py` | S2c-vt's metric on a finished link: trap slots against the exe's, short and mispaired vftables (read-only). |
 | `test_exevft.py` | exevft on a synthetic PE (COL decoys, cache, the minus-one rule). |
+| `defshapes.py` | Census of the `code-defmissing` addresses synthesized vtables reference, by exe shape (thunk to native, ??_G with a sized or global free, plain function). |
+| `test_defshapes.py` | defshapes on a synthetic PE; the adjustor thunk layout gate (`thisadj.thunk_layout_ok`, `slot_otts`). |
 | `test_slotfill.py` | End-to-end slot fill from a synthetic exe: resolve --exe, apply, trial link, vtmetric. |
 | `test_vtables.py` | Secondary/synthesized vtables and the `??_G` D1/D0 table against GCC's own output and the linked image. |
 | `test_vslots.py` | Slot order and binding on hand-written classes compiled by MSVC 2008 (Wine) and GCC; image-slot stubs under qemu. |

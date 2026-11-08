@@ -15,9 +15,11 @@ Every `missing` row gets exactly one cause, first that applies:
    MSVC STL's `_X*` throwers, `operator new/delete`, CRT C names. The runtime (S4) provides these, not the decomp.
 2. `data` - not a function (bodies.py note): a static data member declared only. S2c's address map binds data.
 3. `name-mismatch` - an object of the link defines the same function under another decorated name: the same
-   member of the same class (class shells and unit namespaces relaxed) with the same number of parameters, but
-   other parameter spellings, cv, namespace or return type. The decomp has the body; the declaration the
-   referencing unit sees does not match it.
+   member of the same class (class shells and unit namespaces relaxed, also inside template arguments; the
+   template arguments themselves kept, since another instantiation is another function) with the same number of
+   parameters, but other parameter spellings, cv, namespace or return type. The decomp has the body; the
+   declaration the referencing unit sees does not match it. Detail `defined only as a GCC clone` when the only
+   such definition is an IPA clone (`.isra.0`): its signature is GCC's own, so nothing may alias it.
 4. `not-compiled` - the tree has a body for it (an out-of-line `C::f(` definition or an in-class body of C::f),
    but no object defines it: in a source that is not a unit, under `#if 0`, or in a class copy the referencing
    unit does not include.
@@ -98,6 +100,25 @@ def key_of(sig):
     return (cls, last, len(sig.params))
 
 
+UNIT_NS_IN = re.compile(r'\bfnv_[0-9a-f]{8}::')
+CLONE_SUFFIX = re.compile(r'\.(?:isra|constprop|part|cold|lto_priv)\.\d+')
+
+
+def inst_key_of(sig):
+    """key_of with the class's template arguments kept (canonical, unit namespaces inside them relaxed): the key
+    `name-mismatch` pairs on. Another instantiation of the same class template (`NiPointer<NiAVObject>` for
+    `NiPointer<NiLight>`) is another function, not the same one under another decoration."""
+    if sig is None or sig.kind != 'func' or not sig.qual or sig.params is None:
+        return None
+    qual = [q for q in sig.qual if not UNIT_NS.match(q)]
+    if not qual:
+        return None
+    last = UNIT_NS_IN.sub('', qual[-1])
+    cls = norm(UNIT_NS_IN.sub('', sigs.canon_type(qual[-2]))) if len(qual) >= 2 else None
+    # the enclosing scope stays: a unit's `fnv_<a>::LengthError` is no `vector_count_release::LengthError`
+    return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]))
+
+
 def is_crt(sig, dem):
     if CRT_SCOPE.match(dem):
         return 'std scope'
@@ -129,7 +150,7 @@ def object_defs(objdir):
     names = sorted(names)
     idx = collections.defaultdict(set)
     for n, d in zip(names, demangle(names)):
-        k = key_of(sigs.parse_itanium(n, d))
+        k = inst_key_of(sigs.parse_itanium(n, d))
         if k:
             idx[k].add(n)
     return idx
@@ -160,7 +181,10 @@ def masked_if0(text):
 
 
 OOL = re.compile(r'\b(\w+)\s*(?:<[^;{}()]*?>)?\s*::\s*(~?\w+|operator\s*[^\s(]+(?:\s*\[\])?)\s*\(')
-CLASS = re.compile(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?(\w+)[^;{(]*\{')
+# the name is followed by its template arguments (a specialization), `final` or a base list, then the body: a
+# template header `template <class T> class C {` would else take `T` for the class and swallow `> class C`
+CLASS = re.compile(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?(\w+)\s*(?:<[^;{}()]*?>)?\s*'
+                   r'(?:final\s*)?(?::[^;{(]*)?\{')
 INCLASS = re.compile(r'(?<![\w:.>])(~?\w+|operator\s*[^\s(]+)\s*\(([^;{}]*?)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?'
                      r'(?::[^;{]*)?\{')
 
@@ -236,10 +260,14 @@ def classify(rows, objidx, tbodies, units):
             cause, detail = 'crt-import', crt
         elif note.startswith('not a function') or (sig is not None and sig.kind == 'data'):
             cause, detail = 'data', 'static member or global declared only'
-        if cause is None and k:
-            other = sorted(n for n in objidx.get(k, ()) if n != name)
+        ik = inst_key_of(sig)
+        if cause is None and ik:
+            other = sorted(n for n in objidx.get(ik, ()) if n != name)
             if other:
-                cause, detail, ev = 'name-mismatch', 'defined as another decoration', ' '.join(other[:3])
+                plain = [n for n in other if not CLONE_SUFFIX.search(n)]
+                cause, ev = 'name-mismatch', ' '.join((plain or other)[:3])
+                detail = ('defined as another decoration' if plain else
+                          'defined only as a GCC clone (.isra/.constprop: its own signature, no alias target)')
         if cause is None and k and k[0]:
             hits = tbodies.get((k[0], k[1]), [])
             if hits:

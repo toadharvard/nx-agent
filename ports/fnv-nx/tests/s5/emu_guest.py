@@ -2341,8 +2341,8 @@ def main(argv):
     ap.add_argument("--trace-deref", type=int, default=32, help="--trace-fn: bytes dumped behind each pointer argument")
     ap.add_argument("--plat", action="store_true",
                     help="the platform lane's recorder on from the start (platform/win32/platstat.cpp's fnvnx_plat_on "
-                         "= 1 before the guest runs; its .bss is never cleared): 'plat: ...' lines for tools/perf/plat.py "
-                         "without relinking (needs --elf)")
+                         "= 1 at __libc_init_array, after runtime.c clears .bss, before every constructor): 'plat: ...' "
+                         "lines for tools/perf/plat.py without relinking (needs --elf)")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
@@ -2457,9 +2457,22 @@ def main(argv):
         if pa is None:
             print("   plat: off (no fnvnx_plat_on in the ELF: a guest without platstat.cpp, or no --elf)")
         else:
+            # runtime.c clears .bss (early_zero) before __libc_init_array: the flag is set at that call's first
+            # instruction (one shot), before every constructor and the game's initializers
             pa = pa - emu.link_base + emu.base if emu.relocatable else pa
-            emu.uc.mem_write(pa, struct.pack("<I", 1))
-            print("   plat: recorder on (fnvnx_plat_on at %#x)" % pa)
+            ia = getattr(emu, "code_syms", {}).get("__libc_init_array")
+            if ia is None:
+                emu.uc.mem_write(pa, struct.pack("<I", 1))
+                print("   plat: recorder on (fnvnx_plat_on at %#x, set before the run: no __libc_init_array)" % pa)
+            else:
+                ia = ia - emu.link_base + emu.base if emu.relocatable else ia
+                hk = {}
+
+                def plat_on(uc, addr, size, data):
+                    uc.mem_write(pa, struct.pack("<I", 1))
+                    uc.hook_del(hk["h"])
+                hk["h"] = emu.uc.hook_add(UC_HOOK_CODE, plat_on, begin=ia, end=ia)
+                print("   plat: recorder on (fnvnx_plat_on at %#x, set at __libc_init_array %#x)" % (pa, ia))
     try:
         rc = emu.run()
     except SystemExit as e:

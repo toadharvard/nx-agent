@@ -217,6 +217,7 @@ void fnvnx_init_locks_dtor(void *self);
 void *fnvnx_locale_init(void);                                         /* locale::_Init -> _Locimp* */
 void *fnvnx_locale_getgloballocale(void);                              /* locale::_Getgloballocale */
 void fnvnx_facet_register(void *facet);                                /* locale::facet::_Facet_Register */
+void fnvnx_facet_incref(void *facet);                                  /* locale::facet::_Incref */
 size_t fnvnx_cpplib_facet_count(void);
 void fnvnx_cpplib_facet_tidy(void);
 void fnvnx_locinfo_ctor(void *self, const void *locname_str);         /* _Locinfo::_Locinfo_ctor(this, const string&) */

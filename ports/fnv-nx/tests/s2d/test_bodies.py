@@ -494,6 +494,56 @@ class Exe(unittest.TestCase):
         self.assertEqual((got['_ZN4LockD1Ev'].cls, got['_ZN4LockD1Ev'].target), ('exe-addr', '__fnv_004010e0'))
 
 
+    def test_load_provider_params(self):
+        """crt_symbols.tsv identifications give S4's providers a parameter count: the object is not counted, a trailing
+        [note] is dropped, a row without a parameter list is not listed."""
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, 'crt.tsv')
+            with open(p, 'w') as fo:
+                fo.write('# address\tclass\tidentification\thow\tunits\tsrc\tprovider\n'
+                         '0x00401000\tcpplib\tstd::_Lockit::_Lockit(int)\tn\t2\t3\tfnvnx_lockit_ctor\n'
+                         '0x00401010\tcpplib\tstd::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)\ti\t1\t2\tx\n'
+                         '0x00401020\tcpplib\tstd::locale::_Getgloballocale() [locale::_Getfacet fallback, locale() _Incref]\ti\t2\t2\tx\n'
+                         '0x00401030\tcpplib\tstd::ios_base::_Ios_base_dtor\tn\t4\t4\tx\n'
+                         '0x00401040\tcpplib\tstd::bad_cast::bad_cast(const char*)\tn\t1\t1\tx\n'
+                         '0x00401050\tcpplib\tstd::map<int, int>::find(std::pair<int, int>)\tn\t1\t1\tx\n')
+            got = bodies.load_provider_params(p)
+        self.assertEqual(got, {0x401000: 1, 0x401010: 2, 0x401020: 0, 0x401040: 1, 0x401050: 1})
+
+    def test_exe_provider_shape(self):
+        """A constructor with a parameter the exe calls at an S4 provider's address (no unit defines it, so there is no
+        MSVC definition to compare) binds there when the provider's identification has as many parameters; a
+        reference with more does not."""
+        import struct
+        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'   # call ??0Lock(int); call ??0Wide(int, int); ret
+        obj = coff({'?f@@YAXXZ': (f, {1: '??0Lock@@QAE@H@Z', 6: '??0Wide@@QAE@HH@Z'})},
+                   ['??0Lock@@QAE@H@Z', '??0Wide@@QAE@HH@Z'])
+        F, P = 0x401000, 0x4010e0
+        text = bytearray(0x100)
+        text[0:len(f)] = f
+        struct.pack_into('<i', text, 1, P - (F + 5))
+        struct.pack_into('<i', text, 6, P - (F + 10))
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [{'symbol': '?f@@YAXXZ', 'address': '%x' % F}]}]}
+        rows = [bodies.Row('_ZN4LockC1Ei', 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row('_ZN4WideC1Eii', 'missing', None, None, 'src/a.cpp', 'no definition', None)]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as fo:
+                json.dump(units_j, fo)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
+            it.need([r.name for r in rows])
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', P: 'F'},
+                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms,
+                                  {P: 'fnvnx_lock_ctor'}, {P: 1})
+        got = {r.name: r for r in got}
+        self.assertEqual((got['_ZN4LockC1Ei'].cls, got['_ZN4LockC1Ei'].target), ('exe-addr', '__fnv_004010e0'))
+        self.assertEqual(got['_ZN4WideC1Eii'].cls, 'missing')
+
     def test_align_targets(self):
         """Call-order alignment: P (placed) calls the unplaced helper C, which MSVC inlined in the exe, then K
         (placed). C calls M, which no placed function calls: the exe's P calls M's address where C's call stood."""
@@ -632,8 +682,10 @@ class Exe(unittest.TestCase):
         obj = coff({'?f@@YAXXZ': (bytes(v), {7: ('?g_mm@@3UMM@@A', 0x06), 13: '?Free@MM@@QAEXPAX@Z'}),
                     '??_GC@@UAEPAXI@Z': (gd, {4: ('?g_mm2@@3UMM@@A', 0x06), 9: '?Free@MM@@QAEXPAX@Z'}),
                     '?s@@YAXXZ': (st, {4: '_stub_a', 10: '?Free@MM@@QAEXPAX@Z'}),
-                    '?t@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)}), '?t2@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)})},
-                   ['?g_mm@@3UMM@@A', '?g_mm2@@3UMM@@A', '?Free@MM@@QAEXPAX@Z', '_stub_a', '?g_two@@3HA'])
+                    '?t@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)}), '?t2@@YAXXZ': (two, {4: ('?g_two@@3HA', 0x06)}),
+                    '?t3@@YAXXZ': (two, {4: ('?ms_k@Pt@@2U1@B', 0x06)})},
+                   ['?g_mm@@3UMM@@A', '?g_mm2@@3UMM@@A', '?Free@MM@@QAEXPAX@Z', '_stub_a', '?g_two@@3HA',
+                    '?ms_k@Pt@@2U1@B'])
         F, GD, S, T, T2, VFT, FREE, STUB = 0x401000, 0x401040, 0x401080, 0x4010c0, 0x4010e0, 0x401100, 0x401140, 0x401180
         MM, TWO = 0x5f6238, 0x5f7000
         text = bytearray(b'\xcc' * 0x200)
@@ -654,9 +706,13 @@ class Exe(unittest.TestCase):
             struct.pack_into('<I', text, at + 4, word)
         struct.pack_into('<II', text, 0x100, GD, F)           # the image vftable of C: ??_G, then another slot
         text[0x140] = text[0x180] = 0xc3
+        T3, PTK = 0x4011a0, 0x5f8000   # a static data member's address taken (mov eax, [Pt::ms_k])
+        text[0x1a0:0x1a0 + len(two)] = two
+        struct.pack_into('<I', text, 0x1a4, PTK)
         udata = [{'source': 'src/a.cpp', 'functions': [
             {'symbol': '?f@@YAXXZ', 'address': '%x' % F}, {'symbol': '?s@@YAXXZ', 'address': '%x' % S},
-            {'symbol': '?t@@YAXXZ', 'address': '%x' % T}, {'symbol': '?t2@@YAXXZ', 'address': '%x' % T2}],
+            {'symbol': '?t@@YAXXZ', 'address': '%x' % T}, {'symbol': '?t2@@YAXXZ', 'address': '%x' % T2},
+            {'symbol': '?t3@@YAXXZ', 'address': '%x' % T3}],
             'symbols': {'??_7C@@6B@': '%x' % VFT}}]
         self.assertTrue(bodies.same_shape(bytes(v), f))
         self.assertFalse(bodies.same_shape(b'\x8b\x45\x08\xc3', b'\x8b\x4d\x08\xc3'))   # another register
@@ -669,9 +725,21 @@ class Exe(unittest.TestCase):
             strict = bodies.exe_call_targets(d, 0, udata[0], {'?g_mm@@3UMM@@A'}, exe, search=True)
             self.assertEqual(dict(strict), {})                        # bytes differ: not placed without loose
             cn = {'g_mm': {'src/b.cpp'}, 'g_mm2': {'src/b.cpp'}, 'stub_a': {'src/b.cpp'}, 'g_two': {'src/b.cpp'}}
-            rows = bodies.exe_data_pass(cn, os.path.join(d, 'x.exe'), d, udata, lambda a: a >= 0x500000)
+            pr = set()
+            rows = bodies.exe_data_pass(cn, os.path.join(d, 'x.exe'), d, udata, lambda a: a >= 0x500000,
+                                        placed_refs=pr)
+            # placed code references g_two (its sites disagree): decl-data must never give it zeros
+            self.assertIn('g_two', pr)
+            self.assertIn('g_mm', pr)
+            # declared-only C++ variables: matched by the parsed qualified name of the MSVC data name
+            msvc, _ = tables({'?ms_k@Pt@@2U1@B', '?g_two@@3HA'}, set())
+            mem = {'_ZN2Pt4ms_kE': (('Pt', 'ms_k'), {'src/b.cpp'}), '_ZN2Rt4ms_kE': (('Rt', 'ms_k'), {'src/b.cpp'})}
+            mrows = bodies.exe_data_pass({}, os.path.join(d, 'x.exe'), d, udata, lambda a: a >= 0x500000, mem, msvc)
+            self.assertEqual(bodies.pristine_data_names(d, 1, {'ms_k', 'zz'}), {'?ms_k@Pt@@2U1@B'})
         self.assertEqual({(r.name, r.cls, r.addr, r.target) for r in rows},
                          {('g_mm', 'exe-data', MM, '__fnv_005f6238'), ('g_mm2', 'exe-data', MM, '__fnv_005f6238')})
+        self.assertEqual({(r.name, r.cls, r.addr, r.target, r.units) for r in mrows},
+                         {('_ZN2Pt4ms_kE', 'exe-data', PTK, '__fnv_005f8000', 'src/b.cpp')})
         with tempfile.TemporaryDirectory() as d:
             refs = os.path.join(d, 'refs.tsv')
             open(refs, 'w').write('src/a.cpp\tg_mm\tunresolved\t\t\t\t\n'
@@ -724,6 +792,31 @@ class Exe(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, r.stderr)
 
 
+    def test_crt_rule_streambuf_lock(self):
+        """The decomp's basic_streambuf copies never define _Lock / _Unlock: MSVC's are `_Mylock._Lock()` on the
+        _Mutex at +4 (exe: `add ecx, 4; call 0x00ec3277` in the _Sentry_base constructor). The stub adds 4 to
+        `this` and tail-calls S4's mutex function; another class, or a member with parameters, is not the rule."""
+        def k(n, d):
+            return bodies.crt_rule(sigs.parse_itanium(n, d))
+        n = '_ZN12fnv_00ad47f03std15basic_streambufIcNS0_11char_traitsIcEEE5_LockEv'
+        d = 'fnv_00ad47f0::std::basic_streambuf<char, fnv_00ad47f0::std::char_traits<char> >::_Lock()'
+        self.assertEqual(k(n, d), ('mutex', 'fnvnx_mutex_lock', 'this + 4'))
+        n2 = n.replace('5_LockEv', '7_UnlockEv')
+        d2 = d.replace('_Lock()', '_Unlock()')
+        self.assertEqual(k(n2, d2), ('mutex', 'fnvnx_mutex_unlock', 'this + 4'))
+        self.assertIsNone(k('_ZN6Widget5_LockEv', 'Widget::_Lock()'))
+        rows = [bodies.Row(n, 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row(n2, 'missing', None, None, 'src/a.cpp', 'no definition', None)]
+        dem = {n: d, n2: d2}
+
+        def it(x):
+            return sigs.parse_itanium(x, dem[x])
+        got = bodies.crt_pass(rows, it)
+        self.assertEqual([r.cls for r in got], ['crt-rule', 'crt-rule'])
+        asm = bodies.emit_crt(got, it)
+        self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_lock', asm)
+        self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_unlock', asm)
+
     def test_code_only_externs(self):
         """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take
         it); one a code section names is."""
@@ -775,6 +868,154 @@ class Fold(unittest.TestCase):
                 self.assertNotEqual(r.cls, 'template-fold', n)
 
 
+class NotInImage(unittest.TestCase):
+    def test_not_in_image(self):
+        """A units.json address outside the image (0x0, 0x14, 0x65: values, not addresses) binds nothing: resolve
+        leaves the reference unresolved (a trap stub), never `__fnv_00000065`."""
+        for a in (0x0, 0x14, 0x65, 0x400fff):
+            self.assertFalse(fnvlink.in_image(a), hex(a))
+        for a in (0x401000, 0x00e9ecc0, 0x011f6238, 0x01272000):
+            self.assertTrue(fnvlink.in_image(a), hex(a))
+        with open(fnvlink.__file__) as fo:
+            src = fo.read()
+        self.assertIn("if addr is not None and cls == 'addr' and not in_image(addr):", src)
+        self.assertLess(src.index("and not in_image(addr):"), src.index("ak = kind_of_addr(addr)"))
+
+
+class UnitTarg(unittest.TestCase):
+    def test_unit_targ(self):
+        """A template member instantiated over a unit-local copy of a class (`Ptr<fnv_00401000::Item>`) binds to the
+        global instantiation's address only where the layout probe gives the class one size in both units (and no
+        template argument two sizes); a D1 also binds where the native build spells that address FUN_<a>(T*) or
+        C::FUN_<a>(). Definitions are never indexed under the relaxed key (a unit copy of the template)."""
+        units_j = {'units': [
+            {'source': 'src/def.cpp', 'functions': [
+                {'symbol': '??1?$Ptr@VItem@@@@QAE@XZ', 'address': '00406000'},             # Ptr<Item>::~Ptr()
+                {'symbol': '?Get@?$Ptr@VItem@@@@QBEPAVItem@@XZ', 'address': '00406100'},  # Ptr<Item>::Get()
+                {'symbol': '??1?$Ptr@VOther@@@@QAE@XZ', 'address': '00406200'},            # Ptr<Other>::~Ptr()
+                {'symbol': '??1?$Ptr@VNode@fnv_00402222@@@@QAE@XZ', 'address': '00406300'}], 'symbols': {}},
+            {'source': 'src/ref.cpp', 'functions': [], 'symbols': {}}]}
+        native = {0x00406000: 'F', 0x00406100: 'F', 0x00406200: 'F', 0x00406300: 'X'}
+        native_names = {0x00406000: '_Z12FUN_00406000PPc', 0x00406100: '_ZNK3PtrI4ItemE3GetEv',
+                        0x00406200: '_Z12FUN_00406200ii'}
+        layouts = {('src/ref.cpp', 'Ptr<fnv_00401000::Item>'): {4}, ('src/def.cpp', 'Ptr<Item>'): {4},
+                   ('src/ref.cpp', 'fnv_00401000::Item'): {8}, ('src/def.cpp', 'Item'): {8},
+                   ('src/ref.cpp', 'Ptr<fnv_00401000::Other>'): {4}, ('src/def.cpp', 'Ptr<Other>'): {4},
+                   ('src/ref.cpp', 'Ptr<fnv_00401000::Big>'): {4}, ('src/def.cpp', 'Ptr<Big>'): {4},
+                   ('src/ref.cpp', 'fnv_00401000::Big'): {12}, ('src/def.cpp', 'Big'): {16}}
+        units_j['units'][0]['functions'].append({'symbol': '??1?$Ptr@VBig@@@@QAE@XZ', 'address': '00406000'})
+        want = {'_ZN3PtrIN12fnv_004010004ItemEED1Ev': '00406000',    # D1 at FUN_00406000(char**): this only
+                '_ZNK3PtrIN12fnv_004010004ItemEE3GetEv': '00406100',  # a member at an F address
+                '_ZN3PtrIN12fnv_004010005OtherEED1Ev': None,           # FUN_00406200(int, int): not this only
+                '_ZN3PtrIN12fnv_004010003BigEED1Ev': None,             # the argument has two sizes
+                '_ZN3PtrIN12fnv_004010004NodeEED1Ev': None,            # no layout evidence (unsized)
+                '_ZN3PtrI4NodeED1Ev': None}                            # never another unit's copy
+        with tempfile.TemporaryDirectory() as d:
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as f:
+                json.dump(units_j, f)
+            units = fnvlink.load_units(uj)
+        allms = {n for u in units.values() for n in list(u.refs) + [n for _, n in u.defs]}
+        msvc, itanium = tables(allms, set(want) | set(native_names.values()))
+        cl = bodies.Classifier(units, native, msvc, itanium, None, ['src/def.cpp', 'src/ref.cpp'], layouts,
+                               native_names)
+        for n, a in want.items():
+            r = cl.classify(n, {'src/ref.cpp'})
+            if a:
+                self.assertEqual((r.cls, r.target), ('addr', '__fnv_' + a), n)
+                self.assertIn('via unit-targ', r.note, n)
+            else:
+                self.assertNotEqual(r.cls, 'addr', n)
+        # without the layout probe the tier binds nothing
+        bare = bodies.Classifier(units, native, msvc, itanium, None, ['src/def.cpp', 'src/ref.cpp'], None,
+                                 native_names)
+        self.assertNotEqual(bare.classify('_ZNK3PtrIN12fnv_004010004ItemEE3GetEv', {'src/ref.cpp'}).cls, 'addr')
+        self.assertEqual([t for t, _ in bodies.def_keys(msvc('??1?$Ptr@VNode@fnv_00402222@@@@QAE@XZ'))],
+                         ['shell', 'global'])
+        self.assertEqual(bodies.targ_types(['Ptr<fnv_00401000::Item*,4>', '{dtor}']),
+                         ['Ptr<fnv_00401000::Item*,4>', 'fnv_00401000::Item'])
+
+
+class CopyPairs(unittest.TestCase):
+    """copy-addr / copy_key / LayoutGate (s2d crt-import, not-compiled): a member of one unit-local copy of a class
+    binds to the address units.json gives the same member of another copy, only with one layout on both sides."""
+
+    class Gate:
+        def __init__(self, sizes):
+            self.sizes_ = sizes
+
+        def same(self, ref_units, ref_types, def_unit, def_types):
+            for u in ref_units:
+                for rt, dt in zip(ref_types, def_types):
+                    a, b = self.sizes_.get((u, rt)), self.sizes_.get((def_unit, dt))
+                    if a is None or b is None or a != b:
+                        return False, 'no'
+            return True, 'sizes'
+
+    def test_copy_addr(self):
+        units_j = {'units': [
+            {'source': 'src/def.cpp', 'functions': [
+                {'symbol': '?Flush@?$Os@D@std@fnv_00a00010@@QAEAAV123@XZ', 'address': '00405000'},
+                {'symbol': '?Put@?$Os@D@std@fnv_00a00010@@QAEAAV123@D@Z', 'address': '00405100'},
+                {'symbol': '?Put@?$Os@D@std@fnv_00a00030@@QAEAAV123@D@Z', 'address': '00405200'}],
+             'symbols': {}},
+            {'source': 'src/ref.cpp', 'functions': [], 'symbols': {}}]}
+        native = {0x00405000: 'F', 0x00405100: 'F', 0x00405200: 'F'}
+        with tempfile.TemporaryDirectory() as d:
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as f:
+                json.dump(units_j, f)
+            units = fnvlink.load_units(uj)
+        flush, put, other = ('_ZN12fnv_00a000203std2OsIcE5FlushEv', '_ZN12fnv_00a000203std2OsIcE3PutEc',
+                             '_ZN12fnv_00a000203std2OsIcE5FlushEi')
+        allms = {n for u in units.values() for _, n in u.defs}
+        msvc, itanium = tables(allms, {flush, put, other})
+        cl = bodies.Classifier(units, native, msvc, itanium, None, ['src/def.cpp', 'src/ref.cpp'])
+        self.assertEqual(bodies.copy_key(itanium(flush), variant=False),
+                         bodies.copy_key(msvc('?Flush@?$Os@D@std@fnv_00a00010@@QAEAAV123@XZ'), variant=False))
+        self.assertEqual(cl.by_copy(itanium(flush))[0], 0x00405000)
+        self.assertIsNone(cl.by_copy(itanium(put)))      # two copies at two addresses
+        self.assertIsNone(cl.by_copy(itanium(other)))    # another overload
+        self.assertEqual(bodies.copy_types(itanium(put)), ['fnv_00a00020::std::Os<char>'])
+        rows = [bodies.Row(n, 'missing', None, None, 'src/ref.cpp', 'x', None) for n in (flush, put)]
+        same = self.Gate({('src/ref.cpp', 'fnv_00a00020::std::Os<char>'): 56,
+                          ('src/def.cpp', 'fnv_00a00010::std::Os<char>'): 56})
+        got = {r.name: r for r in bodies.copy_addr_pass(rows, cl, itanium, same)}
+        self.assertEqual((got[flush].cls, got[flush].target), ('copy-addr', '__fnv_00405000'))
+        self.assertEqual(got[put].cls, 'missing')
+        differ = self.Gate({('src/ref.cpp', 'fnv_00a00020::std::Os<char>'): 1,
+                            ('src/def.cpp', 'fnv_00a00010::std::Os<char>'): 56})
+        r = bodies.copy_addr_pass(rows[:1], cl, itanium, differ)[0]
+        self.assertEqual(r.cls, 'missing')
+        self.assertIn('copy-addr 00405000', r.note)
+
+    def test_tree_inline_copy_rename(self):
+        """A global name whose body is in a unit copy of its class: renamed from the copy's emitted symbol when the
+        gate gives both one size; refused (stays missing) when the sizes differ."""
+        src = ('struct Mm { int a; void Free(void *); };\n'
+               'namespace fnv_00a1cb80 { struct Mm { int a; void Free(void *p) { a = (int)(long)p; } }; }\n'
+               'namespace fnv_00a1cb80 { void use(Mm *m) { m->Free(0); } }\n')
+        want = '_ZN2Mm4FreeEPv'
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'src'))
+            os.makedirs(os.path.join(d, 'include'))
+            with open(os.path.join(d, 'src', 'm.cpp'), 'w') as f:
+                f.write(src)
+            dem = {}
+
+            def it(n):
+                if n not in dem:
+                    dem.update(fnvlink.batch_demangle(fnvlink.CXXFILT, [n]))
+                return sigs.parse_itanium(n, dem[n])
+            rows = [bodies.Row(want, 'missing', None, None, 'src/r.cpp', '', None)]
+            ok = self.Gate({('src/r.cpp', 'Mm'): 4, ('src/m.cpp', 'fnv_00a1cb80::Mm'): 4})
+            path, roots, failed = bodies.synth_host(d, d, 'src/m.cpp', rows, it, True, gate=ok)
+            self.assertEqual((roots, failed), ({want}, {}))
+            no = self.Gate({('src/r.cpp', 'Mm'): 1, ('src/m.cpp', 'fnv_00a1cb80::Mm'): 4})
+            path, roots, failed = bodies.synth_host(d, d, 'src/m.cpp', rows, it, True, gate=no)
+            self.assertEqual(roots, set())
+            self.assertIn(want, failed)
+
 
 class Thunks(unittest.TestCase):
     def test_thunks(self):
@@ -813,20 +1054,37 @@ class AddrHost(unittest.TestCase):
                                   'src/a.cpp\t_ZN1Z1fEv\tcode\tunit/exact\t00401000\t__fnv_00401000\t\n')
             self.assertEqual(bodies.load_defmissing(refs), {0x004459e0: {'src/a.cpp', 'src/b.cpp'}})
             ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
-            names = ['??_GRec@@QAEPAXI@Z', '??_G?$L@H@@QAEPAXI@Z']
+            names = ['??_GRec@@QAEPAXI@Z', '??_G?$L@H@@QAEPAXI@Z', '??_GV@@UAEPAXI@Z']
             ms.need(names)
             line = bodies.gdel_line(0x004459e0, sigs.parse_msvc(names[0], ms[names[0]]))
             self.assertIn('extern "C" void *__fnv_004459e0(::Rec *p, unsigned int f)', line)
-            self.assertIn('if (f & 1) delete p; else p->::Rec::~Rec();', line)
+            self.assertIn('p->::Rec::~Rec(); if (f & 1) __fnvnx_gd::del(p, 0);', line)
+            self.assertNotIn('delete p', line)   # never a virtual delete-expression
             self.assertIsNone(bodies.gdel_line(0x00401000, sigs.parse_msvc(names[1], ms[names[1]])))
             gxx = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
             if gxx:
                 src = os.path.join(d, 'g.cpp')
-                open(src, 'w').write('struct Rec { int k; ~Rec(); };\n' + line + '\n')
-                r = subprocess.run([gxx, '-c', src, '-o', os.path.join(d, 'g.o')], capture_output=True, text=True)
+                open(src, 'w').write('struct Rec { int k; ~Rec(); };\n' + bodies.GDEL_HELPER + '\n' + line + '\n')
+                r = subprocess.run([gxx, '-std=gnu++17', '-c', src, '-o', os.path.join(d, 'g.o')],
+                                   capture_output=True, text=True)
                 self.assertEqual(r.returncode, 0, r.stderr[-400:])
                 nm = subprocess.run(['nm', os.path.join(d, 'g.o')], capture_output=True, text=True).stdout
                 self.assertIn('T __fnv_004459e0', nm)
+                self.assertIn('U _ZdlPv', nm)                      # no class delete: the global one
+                # R6 0x00ddeff0: a virtual destructor and the class's own sized operator delete: called directly
+                # with sizeof(C) after the non-virtual destructor, never through the vtable (D0)
+                lv = bodies.gdel_line(0x00ddeff0, sigs.parse_msvc(names[2], ms[names[2]]))
+                open(src, 'w').write('typedef __SIZE_TYPE__ size_t; void release(void *, size_t);\n'
+                                     'struct V { int a[21]; virtual ~V(); void operator delete(void *p, size_t n) '
+                                     '{ release(p, n); } };\n' + bodies.GDEL_HELPER + '\n' + lv + '\n')
+                r = subprocess.run([gxx, '-std=gnu++17', '-O1', '-c', src, '-o', os.path.join(d, 'v.o')],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-400:])
+                nm = subprocess.run(['nm', os.path.join(d, 'v.o')], capture_output=True, text=True).stdout
+                self.assertIn('release', nm)                       # the class's delete (inlined), not ::delete
+                self.assertNotIn('_ZdlPv', nm)
+                self.assertIn('U _ZN1VD1Ev', nm)                   # the destructor itself, not D0
+                self.assertNotIn('D0Ev', nm)
             asm = bodies.emit_addr_stubs({0x0046ffd0: '_ZNK7NiPoint2mlEf', 0x004459e0: '__fnv_004459e0'})
             self.assertIn('"__fnv_0046ffd0":\n    b "_ZNK7NiPoint2mlEf"', asm)
             self.assertNotIn('"__fnv_004459e0":', asm)

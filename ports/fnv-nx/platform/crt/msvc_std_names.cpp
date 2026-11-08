@@ -8,6 +8,9 @@
  *   StringBase / StringErrorBase spellings           out_of_range("invalid string position")
  *   std::exception::exception(), (const char *const &)  MSVC std::exception (vptr, _m_what, _m_doFree)
  *   std::bad_alloc::bad_alloc(const char *)         MSVC bad_alloc, catchable as std::bad_alloc
+ *   std::_Lockit(int) / ~_Lockit, _Locinfo::_Locinfo_ctor(_Locinfo *, const string &) / _Locinfo_dtor,
+ *   std::bad_cast(const char *), locale::facet::_Incref / facet_Register, locale::id::_Id_cnt
+ *                                                   the names R2's s2d/list/97deacd38aec traps under 'runtime'
  * All weak. Constructors return the object, as MSVC's do (callers that expect void ignore x0). */
 #include "fnvnx_msvcrt.h"
 
@@ -60,4 +63,24 @@ void *fnvnx_n_exc_c2s(void *self, const char *const *what) { return fnvnx_except
 /* std::bad_alloc(const char *) */
 WEAK void *fnvnx_n_bad_alloc_c1(void *self, const char *msg) AS("_ZNSt9bad_allocC1EPKc");
 void *fnvnx_n_bad_alloc_c1(void *self, const char *msg) { return fnvnx_bad_alloc_ctor(self, msg); }
+
+/* R2 s2d/list/97deacd38aec 'runtime' traps: the decomp's spellings of libcpmt entry points S4 implements */
+WEAK void *fnvnx_n_lockit_c1(void *self, int kind) AS("_ZNSt7_LockitC1Ei");
+void *fnvnx_n_lockit_c1(void *self, int kind) { fnvnx_lockit_ctor(self, kind); return self; }
+WEAK void fnvnx_n_lockit_d1(void *self) AS("_ZNSt7_LockitD1Ev");
+void fnvnx_n_lockit_d1(void *self) { fnvnx_lockit_dtor(self); }
+/* static _Locinfo_ctor(_Locinfo *, const rstd::basic_string<char> &): the decomp's MSVC string by reference */
+WEAK void fnvnx_n_locinfo_ctor(void *self, const void *name) AS(
+    "_ZNSt8_Locinfo13_Locinfo_ctorEPS_RKN4rstd12basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE");
+void fnvnx_n_locinfo_ctor(void *self, const void *name) { fnvnx_locinfo_ctor(self, name); }
+WEAK void fnvnx_n_locinfo_dtor(void *self) AS("_ZNSt8_Locinfo13_Locinfo_dtorEPS_");
+void fnvnx_n_locinfo_dtor(void *self) { fnvnx_locinfo_dtor(self); }
+WEAK void *fnvnx_n_bad_cast_c1(void *self, const char *msg) AS("_ZNSt8bad_castC1EPKc");
+void *fnvnx_n_bad_cast_c1(void *self, const char *msg) { return fnvnx_bad_cast_ctor(self, msg); }
+WEAK void fnvnx_n_facet_incref(void *f) AS("_ZNSt6locale5facet7_IncrefEv");
+void fnvnx_n_facet_incref(void *f) { fnvnx_facet_incref(f); }
+WEAK void fnvnx_n_facet_register(void *f) AS("_ZNSt6locale5facet14facet_RegisterEPS0_");
+void fnvnx_n_facet_register(void *f) { fnvnx_facet_register(f); }
+/* locale::id::_Id_cnt: the facet id counter (VC9: static int, starts at 0) */
+WEAK int fnvnx_n_id_cnt AS("_ZNSt6locale2id7_Id_cntE") = 0;
 }

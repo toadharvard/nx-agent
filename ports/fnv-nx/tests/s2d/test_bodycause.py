@@ -5,7 +5,7 @@ decomp content).
     python3 -I tests/s2d/test_bodycause.py       # needs c++filt, nm and aarch64-linux-gnu-g++ or g++
 
 Checks one name per cause: crt-import (std::, _Xran), data, name-mismatch (an object defines the member with
-another parameter spelling), not-compiled (a body in a source that is not a unit; a body under #if 0; an in-class
+another parameter spelling; a GCC clone only; never another instantiation of the class template), not-compiled (a body in a source that is not a unit; a body under #if 0; an in-class
 body), no-body (template-special, msvc-direct, other).
 """
 import os
@@ -32,6 +32,9 @@ ROWS = [  # Itanium name, note
     ('_ZN4ListIiED1Ev', 'special member of a template or unnamed class'),
     ('_ZN4Zork4PokeEv', 'MSVC calls it directly (pristine reference); was missing: no definition, address or body'),
     ('_Z8LonelyFnv', 'no definition, address or body'),
+    ('_ZN4BoxyIlE4SizeEv', 'no definition, address or body'),     # Boxy<long>::Size - objects have Boxy<int>
+    ('_ZN2Cl4MakeEPKc', 'no definition, address or body'),        # only Cl::Make(char const*).isra.0 exists
+    ('_ZN3ErrD1Ev', 'no definition, address or body'),            # Err::~Err - objects have Other::Err::~Err
 ]
 EXPECT = {
     '_ZNSt6vectorIiSaIiEE5_TidyEv': ('crt-import', 'std scope'),
@@ -44,6 +47,10 @@ EXPECT = {
     '_ZN4ListIiED1Ev': ('no-body', 'template-special'),
     '_ZN4Zork4PokeEv': ('no-body', 'msvc-direct'),
     '_Z8LonelyFnv': ('no-body', 'other'),
+    '_ZN4BoxyIlE4SizeEv': ('no-body', 'other'),
+    '_ZN3ErrD1Ev': ('no-body', 'other'),                          # another scope's class is no decoration of it
+    '_ZN2Cl4MakeEPKc': ('name-mismatch', 'defined only as a GCC clone (.isra/.constprop: its own signature, no '
+                                          'alias target)'),
 }
 
 
@@ -62,7 +69,12 @@ class Causes(unittest.TestCase):
             open(os.path.join(tree, 'include', 'q.h'), 'w').write(
                 'class Qux\n{\n  public:\n    int Top() { return 1; }\n    void Down();\n};\n')
             subprocess.run([GXX, '-c', '-x', 'c++', '-', '-o', os.path.join(objs, 'a.o')], check=True,
-                           input='struct Foo { void Set(int); };\nvoid Foo::Set(int) {}\n', text=True)
+                           input='struct Foo { void Set(int); };\nvoid Foo::Set(int) {}\n'
+                           'template <class T> struct Boxy { int Size(); };\n'
+                           'template <> int Boxy<int>::Size() { return 0; }\n'
+                           'extern "C" void make_clone() __asm__("_ZN2Cl4MakeEPKc.isra.0");\n'
+                           'extern "C" void make_clone() {}\n'
+                           'namespace Other { struct Err { ~Err(); }; Err::~Err() {} }\n', text=True)
             with open(os.path.join(out, 'bodies', 'bodies.tsv'), 'w') as f:
                 f.write('#name\tclass\taddress\ttarget\tunits\tnote\thost\n')
                 for n, note in ROWS:

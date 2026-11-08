@@ -334,6 +334,8 @@ if [ -n "${FUZZ_SETUP_ONLY:-}" ]; then
   exit 0
 fi
 t1=$(date +%s)
+SSTEPS=""; ss_t=$t1   # T1: seconds per setup step before the fuzzing (689 s of qk1's aec30808 fuzz, nothing fuzzed)
+sstep() { local now; now=$(date +%s); SSTEPS="$SSTEPS${SSTEPS:+, }$1 $((now - ss_t))s"; ss_t=$now; }
 
 # --- targets: modelled functions with both objects, this shard (the catalog is made above) ---------------------------
 (cd "$DF" && $PY - "$CAT" "$K" "$N" "${FUZZ_LIMIT:-0}" "$RUN/targets.jsonl" "$RUN/targets.json" <<'EOF'
@@ -382,6 +384,7 @@ print(counts)
 EOF
 ) > "$RUN/targets.log"
 log "targets: $(cat "$RUN/targets.json")"
+sstep targets
 
 # --- function keys and the verdict cache ---------------------------------------------------------------------------
 # A verdict stays valid while the function's key (fnkeys.py: oracle code, native code and relocations of it and of
@@ -389,6 +392,7 @@ log "targets: $(cat "$RUN/targets.json")"
 # branch fuzz/cache/<k>of<N> (this machine is its only writer); a new shard cache is seeded from the caches of any
 # other shard count, so changing N keeps the verdicts.
 (cd "$DF" && $PY fnkeys.py "$RUN/targets.jsonl" "$CAT" "$RUN/keys.json" > "$RUN/keys.log" 2>&1)
+sstep keys
 CACHE=$FARM_HOME/fuzzcache-${K}of${N}
 CB=fuzz/cache/${K}of${N}
 if [ ! -d "$CACHE/.git" ]; then
@@ -422,15 +426,26 @@ cache_commit() {  # cache_commit <message>
   done
   echo "fuzz_job: push of $CB failed (kept locally, pushed with the next chunk)" >&2
 }
+sstep cache
 (cd "$DF" && $PY fuzzcache.py todo "$CACHE" "$RUN/targets.jsonl" "$RUN/keys.json" "$RUN/todo.jsonl" \
   "$RUN/todo.json") > "$RUN/todo.log"
 log "cache: $(cat "$RUN/todo.json")"
+sstep todo
+log "setup steps: $SSTEPS"; echo "$SSTEPS" > "$RUN/setup_steps.txt"
 
 # --- campaign over the changed and new functions, in chunks (cache merged and pushed after each) ----------------
 CHUNK=${FUZZ_CHUNK:-200}; BUDGET=${FUZZ_BUDGET:-0}
 FUZZ_END=$(( t0 + ${FUZZ_MAX_S:-5400} ))
 if [ -n "${FARM_DEADLINE:-}" ] && [ "$FARM_DEADLINE" -lt "$FUZZ_END" ]; then FUZZ_END=$FARM_DEADLINE; fi
 FUZZ_END=$(( FUZZ_END - ${FUZZ_REPORT_S:-900} ))
+# FUZZ_LOOP_S: the fuzzing gets that many seconds from here, whatever the setup took (quick_job: FUZZ_MAX_S counted
+# from the job's start ended the loop before its first chunk on aec30808); still before FARM_DEADLINE's report
+if [ -n "${FUZZ_LOOP_S:-}" ]; then
+  FUZZ_END=$(( $(date +%s) + FUZZ_LOOP_S ))
+  if [ -n "${FARM_DEADLINE:-}" ] && [ $(( FARM_DEADLINE - ${FUZZ_REPORT_S:-900} )) -lt "$FUZZ_END" ]; then
+    FUZZ_END=$(( FARM_DEADLINE - ${FUZZ_REPORT_S:-900} ))
+  fi
+fi
 log "fuzzing stops at $(date -u -d "@$FUZZ_END" +%T) UTC (report deadline)"
 mkdir -p "$RUN/camp"; touch "$RUN/camp/results.jsonl"
 (cd "$DF" && $PY fuzzcache.py dropcrash "$RUN/camp") >> "$RUN/merge.log"
@@ -488,22 +503,30 @@ t2=$(date +%s)
 # --- attribution, verdicts of this head and cumulative, report -----------------------------------------------------
 ATT=$FARM_HOME/attrib-$L12          # stream attribution, once per link (every shard on this machine shares it)
 mkdir -p "$ATT"
+RSTEPS=""; rs_t=$(date +%s)   # T1: seconds per report step (the report took 1,324 s of qk1's fuzz on aec30808)
+rstep() { local now; now=$(date +%s); RSTEPS="$RSTEPS${RSTEPS:+, }$1 $((now - rs_t))s"; rs_t=$now; }
 if [ ! -s "$ATT/rules.json" ] || [ ! -s "$ATT/bridges.json" ]; then
   log "attribution (prepare rules, bridges)"
-  (cd "$DF" && nice $PY attrib.py rules "$ATT/rules.json.tmp" > "$ATT/attrib.log" 2>&1 \
+  # FNVNX_ATTRIB_CACHE: each unit's attribution kept for the next link (its two texts unchanged: the same result)
+  (cd "$DF" && FNVNX_ATTRIB_CACHE=$FARM_HOME/attrib-cache/rules.marshal nice $PY attrib.py rules "$ATT/rules.json.tmp" > "$ATT/attrib.log" 2>&1 \
     && nice $PY attrib.py bridges "$ATT/bridges.json.tmp" >> "$ATT/attrib.log" 2>&1 \
     && mv "$ATT/rules.json.tmp" "$ATT/rules.json" && mv "$ATT/bridges.json.tmp" "$ATT/bridges.json") || true
 fi
+rstep attribution
 (cd "$DF" && $PY fuzzcache.py view "$CACHE" "$RUN/targets.jsonl" "$RUN/keys.json" "$RUN/cum" \
   && $PY fuzzcache.py status "$CACHE" "$RUN/targets.jsonl" "$RUN/keys.json" "$COMMIT" "$RUN/status.json") \
   > "$RUN/view.log"
+rstep view+status
 for v in new cum; do
   d=$RUN/camp; [ $v = cum ] && d=$RUN/cum
   (cd "$DF" && $PY report.py "$d" --rules "$ATT/rules.json" --bridges "$ATT/bridges.json" \
     --out "$RUN/verdicts_$v" --hard-tsv "$RUN/hard_$v.tsv" > "$RUN/report_$v.log" 2>&1)
+  rstep "report.py $v"
 done
 # per-cause verdict classes of the cumulative campaign (S13b causes.py, fnvnx-causes/1): embedded in the report
 (cd "$DF" && $PY causes.py summary "$RUN/cum" --out "$RUN/causes_cum.json" > "$RUN/causes.log" 2>&1) || true
+rstep causes
+log "report steps: $RSTEPS"; echo "$RSTEPS" > "$RUN/report_steps.txt"
 t3=$(date +%s)
 
 $PY - "$RUN" "$REPORT" "$COMMIT" "$D12" "$K" "$N" "$NX86" "$ITERS" "$TIME" "$JOBS" "$((t1-t0))" "$((t2-t1))" \
@@ -554,7 +577,11 @@ out = ['# fuzz %s shard %s/%s%s' % (commit[:12], k, n, ' - HARNESS BROKEN' if br
        '- fuzzed this head: %s; executions %d (at most %s and %ss per function, %s jobs)' % (
            ', '.join('%s %d' % kv for kv in status.most_common()) or 'none', execs, iters, tm, jobs),
        '- cumulative (verdicts valid for this head): %d functions' % len(cum),
-       '- time: inputs %ss, fuzz %ss, report %ss' % (ts, tf, tr),
+       '- time: inputs %ss, fuzz %ss%s, report %ss%s' % (
+           ts, tf, (' (setup: %s)' % open(os.path.join(run, 'setup_steps.txt')).read().strip())
+           if os.path.isfile(os.path.join(run, 'setup_steps.txt')) else '', tr,
+           (' (%s)' % open(os.path.join(run, 'report_steps.txt')).read().strip())
+           if os.path.isfile(os.path.join(run, 'report_steps.txt')) else ''),
        '- reproducers: branch fuzz/cache/%sof%s (all), fuzz/%s/%sof%s (this head) of the artifacts repository' % (
            k, n, commit[:12], k, n), '']
 out += ['## Verdicts, new this head', ''] + table('new') + ['']

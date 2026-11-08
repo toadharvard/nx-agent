@@ -75,12 +75,23 @@ CLASSES = [
     (r'^tools/threads/variant\.sh$', ('threads', 'mem', 'plat')),
     (r'^tools/threads/', ('threads',)),
     (r'^tools/farm/', ('build',)),                    # link/full/compile jobs and their library
+    # fnvlink and the compile cache: this head's link and guest, so every check on them; never equiv (the MSVC
+    # build of the prepared tree; order_check.py reads compile.sh's defaults but no check here runs it), never the
+    # replay (nx_render on captures) - qk1 on aec30808 ran a cold equiv for 2.9 h on a link change
+    (r'^tools/link/', ('build', 'fuzz', 'audit', 'threads', 'frames', 'mem', 'plat', 'scenario')),
 ]
 # a change here invalidates every cached result of a check: quick_job runs it all (a full run on one machine is slow:
 # the farms' sharded run is the better tool)
 FULL = [
     (r'^toolchain/', 'the toolchain (every object, the guest and the boot)'),
     (r'^tools/fetch\.sh$', 'the pinned decomp, sse2neon, libnx (every key)'),
+]
+# a change here makes every cached result of ONE check cold (the files are part of each of its keys): on one
+# machine that check is its whole cold run (equiv: 2.9 h on qk1, aec30808), so quick_job leaves it to the check's
+# sharded farms, which publish the cache it seeds from next time; it is planned again on the next head
+# (QUICK_COLD_LOCAL=1 runs it here anyway)
+COLD = [
+    ('equiv', r'^tools/equiv/msvc/', 'the MSVC shim headers (forced into or on the include path of every unit)'),
 ]
 # version constants that are part of every key of one cache: a different value between base and head means that
 # cache is cold (the sharded farms refill it: the rule for a full run of that check)
@@ -119,7 +130,7 @@ def changed(repo, base, head):
 
 
 def plan(paths):
-    checks, why, full = {}, {}, []
+    checks, why, full, cold = {}, {}, [], {}
     for p in paths:
         for rx, cs in CLASSES:
             if re.search(rx, p):
@@ -132,6 +143,9 @@ def plan(paths):
         for rx, w in FULL:
             if re.search(rx, p):
                 full.append('%s: %s' % (p, w))
+        for c, rx, w in COLD:
+            if re.search(rx, p):
+                cold.setdefault(c, []).append('%s: %s' % (p, w))
     # fuzz, audit and the boot need the link of this head; equiv only the prepared tree (build's prepare step)
     # every change that rebuilds the guest can move the boot's first divergence
     if checks.get('build'):
@@ -141,7 +155,8 @@ def plan(paths):
         checks['build'] = True
         why.setdefault('build', []).append('(fuzz/audit need this head\'s link)')
     return {'files': len(paths), 'checks': {c: bool(checks.get(c)) for c in ALL},
-            'why': {c: sorted(set(v))[:20] for c, v in why.items()}, 'full': full}
+            'why': {c: sorted(set(v))[:20] for c, v in why.items()}, 'full': full,
+            'cold': {c: v[:20] for c, v in cold.items() if checks.get(c)}}
 
 
 def cover(store, limit=0):

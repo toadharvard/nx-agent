@@ -74,22 +74,37 @@ def match_paren(t, i):
 
 
 def split_args(s):
-    """Top-level comma split of an argument / parameter list text (without the parens)."""
-    out, depth, cur, k = [], 0, '', 0
-    while k < len(s):
+    """Top-level comma split of an argument / parameter list text (without the parens). Parens, brackets and braces
+    nest; `<` opens a template argument list only after a name and when a `>` closes it at the same depth before the
+    list ends (`std::pair<int, int>`), so `->`, `<<`, `>>`, `<=`, `>=` and a lone comparison (`a < b, c`) are not
+    brackets. (`f(a < b, c > d)` stays ambiguous, as it is to a C++ parser without knowing whether `a` is a template.)"""
+    out, depth, angle, cur, k = [], 0, [], '', 0
+    n = len(s)
+    while k < n:
         c = s[k]
         if c in '"\'':
             q, j = c, k + 1
-            while j < len(s) and s[j] != q:
+            while j < n and s[j] != q:
                 j += 2 if s[j] == '\\' else 1
             cur += s[k:j + 1]
             k = j + 1
             continue
-        if c in '(<[{':
+        two = s[k:k + 2]
+        if two in ('->', '<<', '<=', '>=') or (two == '>>' and not angle):
+            cur += two
+            k += 2
+            continue
+        if c in '([{':
             depth += 1
-        elif c in ')>]}':
+        elif c in ')]}':
             depth -= 1
-        if c == ',' and depth == 0:
+            while angle and angle[-1] > depth:
+                angle.pop()
+        elif c == '<' and re.search(r'\w\s*$', cur) and _closes_angle(s, k):
+            angle.append(depth)
+        elif c == '>' and angle and angle[-1] == depth:
+            angle.pop()
+        if c == ',' and depth == 0 and not angle:
             out.append(cur)
             cur = ''
         else:
@@ -98,6 +113,38 @@ def split_args(s):
     if cur.strip() or out:
         out.append(cur)
     return out
+
+
+def _closes_angle(s, k):
+    """True when the `<` at s[k] has a matching `>` at its own paren depth before that depth ends"""
+    depth, ang, j, n = 0, 1, k + 1, len(s)
+    while j < n:
+        c, two = s[j], s[j:j + 2]
+        if c in '"\'':
+            q, j = c, j + 1
+            while j < n and s[j] != q:
+                j += 2 if s[j] == '\\' else 1
+            j += 1
+            continue
+        if two in ('->', '<=', '>=', '<<'):
+            j += 2
+            continue
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+            if depth < 0:
+                return False
+        elif depth == 0 and c == '<' and re.search(r'\w\s*$', s[:j]):
+            ang += 1
+        elif depth == 0 and c == '>':
+            ang -= 1
+            if ang == 0:
+                return True
+        elif depth == 0 and c in ';{':
+            return False
+        j += 1
+    return False
 
 
 def sig_parts(sig):

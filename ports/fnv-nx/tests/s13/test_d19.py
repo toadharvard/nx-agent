@@ -60,7 +60,7 @@ def main():
     div = dict(kind='call-target', x86='41414140', arm='name:__s13_vtpad_01000000_9', vcall='unplanted', index=0)
     h = classify.hint(None, None, None, div, dict(code=b'\xc3', address=0x00401000), 0)
     check(h.get('cause') == 'vptr-unpaired', 'a vtpad slot is vptr-unpaired before oracle-vcall (%s)' % h)
-    check(fnkeys.HARNESS == 'difffuzz-19', 'HARNESS names the full refresh')
+    check(fnkeys.HARNESS.startswith('difffuzz-') and int(fnkeys.HARNESS.split('-')[1]) >= 19, 'HARNESS names the full refresh (19 or later)')
     # a custom-convention function whose case does not depend on garbage gets its real cause, not x86-custom-cc
     cc_or = bytes.fromhex('8b00' 'c3')                  # mov eax, [eax]; ret  (reads eax: a custom convention)
     cvc = conv.Conv('?f@@YAHPAH@Z', 'test')

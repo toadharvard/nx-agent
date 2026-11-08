@@ -82,7 +82,12 @@ def full_traps(R, h):
     text = open(ps[0], errors='replace').read()
     m = re.search(r'^\| undefined symbols \| category \| owner \|\n\|[-|]+\|\n((?:\|.*\|\n)*)', text, re.M)
     if not m:
-        return (0, ps[:1], 'no undefined symbols table (0 trap stubs, or the guest did not link)')
+        # 0 only for a guest that linked (its stage row ok/warn); a guest that failed or never ran measured nothing:
+        # the next older head with a value is used (dc5c0627023e's table showed 0 from c46cd30231d9, whose link failed)
+        g = re.search(r'^\| guest \| (\w+) \|', text, re.M)
+        if not g or g.group(1) not in ('ok', 'warn'):
+            return None
+        return (0, ps[:1], 'no undefined symbols table: the guest linked with 0 trap stubs')
     total = sum(num(r.split('|')[1].strip()) or 0 for r in m.group(1).splitlines())
     return (total, ps[:1], '')
 
