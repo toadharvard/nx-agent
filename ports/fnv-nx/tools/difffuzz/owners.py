@@ -32,8 +32,8 @@ for o, cs in {
     'F3': ('uninit-x86', 'uninit-arm', 'uninit-both', 'stub-outparam','store-width', 'x86-only-store', 'native-only-store',
            'ilp32-pointer', 'ilp32-wrap', 'native-null-read', 'callee-saved', 'split-global', 'literal-store',
            'native-garbage-arg', 'arg-stack-vs-object', 'arg-other-buffer', 'native-address', 'native-wild-private',
-           'local-static'),
-    'F4': ('nan-bits', 'x87-precision', 'division', 'float', 'float-tolerance', 'float->int'),
+           'local-static', 'vptr-bytes', 'vptr-pool', 'ptrdiff-unaligned'),
+    'F4': ('nan-bits', 'x87-precision', 'division', 'float', 'float-tolerance', 'float->int', 'x87-trig-inf'),
 }.items():
     for c in cs:
         OWNER[c] = o
