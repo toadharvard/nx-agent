@@ -171,7 +171,11 @@ def test_importcanned():
     import x86emu
     import inspect
     src = inspect.getsource(x86emu.X86Engine._on_import)
-    check("(v & ~0xff) | (case.ret_bytes(k)[0] & 1)" in src, 'the import path normalises the canned low byte')
+    # S1-rules d26-imp superseded R4 flow's normalisation: an import's canned result is the raw word on both machines
+    # (the native stub path skips imports: arm64emu._is_import)
+    import arm64emu
+    check("(v & ~0xff) | (case.ret_bytes(k)[0] & 1)" not in src and hasattr(arm64emu.Arm64Engine, '_is_import'),
+          'an import keeps its raw canned word on both machines (d26-imp)')
 
 
 for t in (test_dtorstore, test_const_marks, test_nrvocopy, test_pusharg, test_deletesplit, test_importcanned):

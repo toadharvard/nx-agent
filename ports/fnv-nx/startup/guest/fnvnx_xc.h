@@ -110,6 +110,13 @@ int fnvnx_xc_locate(const uint32_t *mem, uint32_t va_lo, uint32_t nwords, uint32
                     uint32_t group_lo, uint32_t group_hi, uint32_t min_hits, uint32_t *begin_va, uint32_t *end_va,
                     uint32_t *hits);
 
+/* The C initializer table __xi_a..__xi_z (_initterm runs it before __xc, MSVC's .CRT$XI*), which the linker places
+ * after __xc_z: from xc_end_va (the located __xc span's end), past at most 4 NULL words (__xc_z, __xi_a, padding), the
+ * run of code pointers up to the next NULL (__xi_z). [*begin_va, *end_va) may be empty. FNVNX_XC_E_NOTFOUND when
+ * xc_end_va is outside mem or no NULL ends the run. */
+int fnvnx_xi_locate(const uint32_t *mem, uint32_t va_lo, uint32_t nwords, uint32_t xc_end_va, uint32_t text_lo,
+                    uint32_t text_hi, uint32_t *begin_va, uint32_t *end_va);
+
 /* One line per counter and the samples, for the host log. Returns the length written (truncated to cap). */
 size_t fnvnx_xc_format_report(const fnvnx_xc_report *rep, char *buf, size_t cap);
 

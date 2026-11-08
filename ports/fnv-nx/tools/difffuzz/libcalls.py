@@ -147,14 +147,20 @@ class Mem:
         self.ensure(a, n)
         return bytes(self.uc.mem_read(a, n))
 
-    def write(self, a, b):
+    def write_data(self, a, b):
+        """write() of bytes that are a copy of memory or a string, not a stored value (memcpy, memmove, strcpy ..): a
+        native code pointer is recognised only at a 4-aligned address, not in every byte window (difffuzz-20,
+        r5-copywin: the bytes 00 00 00 0a of planted data read as the code stub 0x0a000000 at an odd offset)."""
+        self.write(a, b, True)
+
+    def write(self, a, b, data=False):
         if not b:
             return
         self._check(a, len(b), 'w')
         self.ensure(a, len(b))
         self.uc.mem_write(a, b)
         if self.norm:
-            b = self.norm(bytes(b))        # what the stored values stand for (native code pointers -> originals)
+            b = self.norm(bytes(b), a) if data else self.norm(bytes(b))   # what the stored values stand for (native code pointers -> originals)
         for i, x in enumerate(b):
             if any(lo <= a + i < hi for lo, hi in world.COMPARED):   # like the machines' write hooks
                 self.writes[a + i] = x
@@ -184,6 +190,11 @@ class TooLong(Exception):
     pass
 
 
+def _wd(m, a, b):
+    """m.write_data when the memory object has it (Mem), else m.write (test doubles)."""
+    return getattr(m, 'write_data', m.write)(a, b)
+
+
 def run(name, m, a):
     """Integer/pointer builtins: name, Mem, args (ints) -> result (int)."""
     if name == 'bswap':
@@ -197,7 +208,7 @@ def run(name, m, a):
     if name in ('memcpy', 'memmove', 'memset', 'memcmp', 'strncpy') and (a[2] & 0xffffffff) > MAX_LEN:
         raise TooLong(name)
     if name in ('memcpy', 'memmove'):
-        m.write(a[0], m.read(a[1], a[2])); return a[0]
+        _wd(m, a[0], m.read(a[1], a[2])); return a[0]
     if name in ('rep_movsd', 'rep_movsb'):
         # forward, element by element as the string instruction copies (an overlapping copy repeats the pattern)
         w = 4 if name == 'rep_movsd' else 1
@@ -206,7 +217,7 @@ def run(name, m, a):
             raise TooLong(name)
         d, s = a[0] & 0xffffffff, a[1] & 0xffffffff
         for i in range(n):
-            m.write(d + w * i, m.read(s + w * i, w))
+            _wd(m, d + w * i, m.read(s + w * i, w))
         return a[0]
     if name == 'memset':
         m.write(a[0], bytes([a[1] & 0xff]) * a[2]); return a[0]
@@ -234,11 +245,11 @@ def run(name, m, a):
                 return _cmp(p, q) & 0xffffffff
         return 0
     if name == 'strcpy':
-        m.write(a[0], m.cstr(a[1]) + b'\0'); return a[0]
+        _wd(m, a[0], m.cstr(a[1]) + b'\0'); return a[0]
     if name == 'strcat':
-        d = m.cstr(a[0]); m.write(a[0] + len(d), m.cstr(a[1]) + b'\0'); return a[0]
+        d = m.cstr(a[0]); _wd(m, a[0] + len(d), m.cstr(a[1]) + b'\0'); return a[0]
     if name == 'strncpy':
-        s = m.cstr(a[1])[:a[2]]; m.write(a[0], s + b'\0' * (a[2] - len(s))); return a[0]
+        s = m.cstr(a[1])[:a[2]]; _wd(m, a[0], s + b'\0' * (a[2] - len(s))); return a[0]
     if name in ('strchr', 'strrchr'):
         s = m.cstr(a[0]) + b'\0'
         c = a[1] & 0xff

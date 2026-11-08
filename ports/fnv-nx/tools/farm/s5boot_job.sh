@@ -20,7 +20,8 @@
 #                   the guest and the guest's nxgpu calls (ext_call module 10) answered by S6n's headless GL backend
 #                   (libnxgl.so, EGL surfaceless on Mesa); both built by farm_boot.sh on first use. The report then
 #                   carries CreateDevice's result and the presented frames (native-render / gpu / gpu-frame lines).
-#   EMU_TIMEOUT     seconds (default 3600); BUDGET instructions per thread slice (default 200000000: small slices let
+#   EMU_TIMEOUT     seconds (default 3600); BUDGET instructions per thread slice (default 0: time slices of SLICE_MS;
+#                   an instruction count costs about 10x. Before: 200000000, small slices let
 #                   the wall-clock limit end the run with its report)
 # The game install comes from tools/gamedata_fetch.sh (or FARM_GAME); the profile is tools/lockstep/profile.py's,
 # with the null device's name, as on every S5 boot. <report.md> holds only the stop, the milestones, the trace frames
@@ -113,7 +114,7 @@ if [ -n "${FARM_DEADLINE:-}" ]; then   # the runner's kill: end the boot in time
 	[ "$EMU_TIMEOUT" -gt 60 ] || fail "no time left before FARM_DEADLINE"
 fi
 log "boot $LC ($TAG), timeout ${EMU_TIMEOUT}s"
-BUDGET=${BUDGET:-200000000} FARM_FAULTS=$W/faults.txt FARM_PROFILE=$W/profile FARM_BOOTS=stub FARM_GAME=$GAME \
+BUDGET=${BUDGET:-0} FARM_FAULTS=$W/faults.txt FARM_PROFILE=$W/profile FARM_BOOTS=stub FARM_GAME=$GAME \
 	EMU_TIMEOUT=$EMU_TIMEOUT EMU_EXTRA="$EXTRA" \
 	timeout $(( EMU_TIMEOUT + 240 )) bash "$P/tests/s5/farm_boot.sh" "$LC" "$W/b" > "$W/boot.log" 2>&1
 NOTES+=("farm_boot exit $? (log boot.log)")

@@ -56,6 +56,20 @@ void fnv_standin_00aa3cc0(void *self, uint32_t block, uint32_t pool, const char 
     mm[0x129] = 1;
 }
 
+/* __fnvnx_cthis_00aa3880 (the MemoryManager constructor 0x00aa3880 with `this` returned), called by boot.cpp's
+ * construct_memory_manager() before the game's initializers. The game's own initializer 0x00fb66a0 (slot 7 of the exe's
+ * _xc table, before the Setting initializers from slot 57) runs the same constructor on the same object, as the exe
+ * does, once. Constructing twice was harmless while VirtualAlloc reservations failed (no pool existed), but with the
+ * host VM service the first run builds real pools (0x3000000 +0x600000 ...) and the second run, on a live manager,
+ * clears the pool tables (0x00aa6840) and zeroes [mm+0] before it frees the first run's holder 0x3000fe8 (the options
+ * of 0x00866690) with Deallocate 0x00aa4060: with [mm+0] == 0 and no table entry that goes to CRT free, which wrote
+ * into the guest's .text (30 more initializers skipped). So the early construction is redundant (initializers 0..6 do
+ * not allocate; anything the GCC initializers allocate before it goes through the CRT path, [mm+0] == 0, as in the
+ * exe's pre-construction window): skip it and leave the object to the game's initializer. Fix: delete
+ * construct_memory_manager() from boot.cpp (S5), then this stand-in and its table line. */
+void *fnv_standin_cthis_00aa3880(void *self) __asm__("__fnvnx_cthis_00aa3880");
+void *fnv_standin_cthis_00aa3880(void *self) { return self; }
+
 /* 0x00406d50 (dst, size, src): the exe's body is strcat_s (0x00ec6bd2) of src onto dst[size]; 0x00406d30 before it is
  * strcpy_s (0x00ec65a6). WinMain builds each INI path as strcpy_s(buf, 0x104, <My Games dir>) then
  * strcat_s(buf, 0x104, "FalloutPrefs.ini"). The decomp declares this one `FUN_00406d50(...)` and defines it nowhere,
@@ -277,4 +291,37 @@ void fnv_standin_00aa2020(void) {
     *holder = alloc;
     void **vt = *(void ***)alloc;
     ((void (*)(void *))vt[7 + 1])(alloc);
+}
+
+/* The INI settings load 0x005e0200 and its Open 0x005e0830 (the file name 0x004f8ac0, then slot 6 of the object's
+ * vftable, the file's Open with the bool), called on two kinds of collection: the INI collections (image vftable
+ * 0x0101772c: slot 5 = IniCollection::FUN_00c44280(IniSetting*), slot 6 = Open 0x00c43d60), whose native table is a
+ * D26 (c) minus-one table (exe slot k at k+1), and the registry collection (0x01082ed8, RegSettingCollection's native
+ * vtable), whose table is the exe's order with a D1 stub at slot 0 (a class with a placeholder in the destructor slot,
+ * as BSNiAllocator was). The native bodies read exe order (offset 24) in Open and minus-one (+32, +40) in 0x005e0200:
+ * each is right for one kind. On the INI collection Open ran exe slot 5 with the bool as its setting (null) and read
+ * [0 + 8]: the four faults that made 0x005e0200 return 0, so fallout.ini was never read; on the registry one
+ * 0x005e0200 called slot 10 of a 10-slot table (0). Both bodies here pick the slot by the vftable kind
+ * (S1-rules: D26 (b) must shift the Open declaration and RegSettingCollection's placeholder slot 0, then both go). */
+extern void fnv_file_setname(void *self, const char *name) __asm__("_ZN18FUN_004f8a60_class12FUN_004f8ac0Ei");
+extern const void *fnv_vt_regsetting[] __asm__("__fnv_01082ed8") __attribute__((visibility("hidden")));
+static void *fnv_exe_slot(void *self, int k) {
+    void **vt = *(void ***)self;
+    return vt[(const void *)vt == (const void *)fnv_vt_regsetting ? k : k + 1];
+}
+uint32_t fnv_standin_005e0830(void *self, const char *path, uint32_t flag) __asm__("_ZN12FUN_005e08304OpenEPKcb");
+uint32_t fnv_standin_005e0830(void *self, const char *path, uint32_t flag) {
+    fnv_file_setname(self, path);
+    return ((uint32_t (*)(void *, uint32_t))fnv_exe_slot(self, 6))(self, flag & 0xff);
+}
+/* 0x005e0200: Open(path, false); when it opened, exe slot 9 (the enumerator 0x0044f9c0: every registered Setting
+ * through slot 5) and exe slot 7. The memory context 9 (0x00404eb0) around it only labels allocations. */
+uint32_t fnv_standin_005e0200(void *self, const char *path) __asm__("_ZN11C5E0200File12FUN_005e0200EPKc");
+uint32_t fnv_standin_005e0200(void *self, const char *path) {
+    uint32_t ok = fnv_standin_005e0830(self, path, 0) & 0xff;
+    if (ok) {
+        ((void (*)(void *))fnv_exe_slot(self, 9))(self);
+        ((void (*)(void *))fnv_exe_slot(self, 7))(self);
+    }
+    return ok;
 }

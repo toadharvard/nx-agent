@@ -39,6 +39,11 @@ ctor-returns-this   # every constructor native (address map kind C) returns this
                       # Open tail-calls its slot 6 = 0. Returns false: the INI file did not open. On the player's exe
                       # it still faults: the tail call lands on _ZTIN12fnv_004d907012FUN_004d9070E (guest rodata), a
                       # slot read past the end of a native vtable (S2c, as 0x00a70b40)
+_ZN12FUN_005e08304OpenEPKcb standin  # 0x005e0830 Open: exe slot 6 through native offset 24, which the minus-one INI collection table
+                      # makes exe slot 5 (IniCollection::FUN_00c44280(IniSetting*) with the bool: null setting, four faults,
+                      # 0x005e0200 returned 0, no fallout.ini read). standins.c picks the slot by vftable kind (S1-rules: D26 (b))
+_ZN11C5E0200File12FUN_005e0200EPKc standin  # 0x005e0200: its +32/+40 calls are minus-one, but the registry collection's table
+                      # (0x01082ed8) is in the exe's order, 10 slots: slot 10 read 0. Same stand-in file, same cause
 0x00aa64d0            # RunThreadProc of the Serialized IO Thread (FUN_00aa7eb0): it tail-calls slot 2 of the IO thread's
                       # vtable _ZTV12FUN_00aa8410, BSThread::v2, a virtual defined nowhere (vslot trap; S1/S2). The
                       # thread ends at once
@@ -58,6 +63,10 @@ _Z12FUN_00c3c460v standin  # 0x00c3c460 (WinMain, via 0x00c3bd30): the decomp's 
                       # leaves MessageHandler::pHandler without a vptr; once the heaps work (MemoryHeap stand-in,
                       # heap_standin.c) the first AbstractHeap commit logs through it (slot 5 of a zeroed object).
                       # standins.c does what the exe does: new(8), MessageHandler 0x00c3bcf0(this, false) (S1)
+__fnvnx_cthis_00aa3880 standin  # boot.cpp's early MemoryManager construction: the game's initializer 0x00fb66a0
+                      # (xc slot 7) constructs it again; with the VM service the second run clears the live pool
+                      # tables and frees a pool block through CRT free (30 skips). standins.c skips the early run
+                      # (S5: delete construct_memory_manager from boot.cpp)
 _ZN18FUN_00aa3cc0_shell16CreateMemoryPoolEjjPc standin  # 0x00aa3cc0: a pool without memory (no fixed-hint
                       # reservation here) is freed through NiFree before Gamebryo's allocator exists, which skipped
                       # boot_banner (MemoryManager's constructor) once the game's heaps are used; the exe destroys it

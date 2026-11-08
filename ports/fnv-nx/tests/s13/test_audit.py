@@ -67,13 +67,24 @@ def main():
         a.writes, b.writes = dict((writes or ({}, {}))[0]), dict((writes or ({}, {}))[1])
         return a, b
     vc = ({0x00401000, 0x00402000, 0x00403000}, set())
+    # since r4 uncls a swap is soft call-order only where the exe shows the pair is one argument block
+    # (runner._is_arg_block); with no exe evidence (these synthetic calls have no return addresses) it stays hard
     rx, ra = res(([0x00402000, 0x00403000], [0x00403000, 0x00402000]))
     d = runner.compare(cv, rx, ra, w, vcalls=vc)
-    check(d is not None and d.get('soft') and d.get('call_order'), 'a swapped pair alone: soft call-order (%s)' % d)
-    rx, ra = res(([0x00402000, 0x00403000], [0x00403000, 0x00402000]), writes=({0x01000000: 1}, {0x01000000: 2}))
-    d = runner.compare(cv, rx, ra, w, vcalls=vc)
-    check(d is not None and d['kind'] == 'mem-write' and not d.get('soft'),
-          'a swapped pair, then a different store: the store is reported (%s)' % (d and d['kind']))
+    check(d is not None and not d.get('soft') and d.get('call_order_unproven'),
+          'a swapped pair the exe does not show as an argument block: hard, call_order_unproven (%s)' % d)
+    saved = runner._is_arg_block
+    runner._is_arg_block = lambda rx_, i: True          # the exe's evidence, as exeempty.arg_blocks would give it
+    try:
+        rx, ra = res(([0x00402000, 0x00403000], [0x00403000, 0x00402000]))
+        d = runner.compare(cv, rx, ra, w, vcalls=vc)
+        check(d is not None and d.get('soft') and d.get('call_order'), 'a proven swapped pair alone: soft call-order (%s)' % d)
+        rx, ra = res(([0x00402000, 0x00403000], [0x00403000, 0x00402000]), writes=({0x01000000: 1}, {0x01000000: 2}))
+        d = runner.compare(cv, rx, ra, w, vcalls=vc)
+        check(d is not None and d['kind'] == 'mem-write' and not d.get('soft'),
+              'a proven swapped pair, then a different store: the store is reported (%s)' % (d and d['kind']))
+    finally:
+        runner._is_arg_block = saved
     # dynamic evidence: a divergence carries the unit functions the native entered
     sys.path.insert(0, HERE)
     from test_d14 import build_image
