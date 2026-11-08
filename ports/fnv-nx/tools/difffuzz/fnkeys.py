@@ -76,12 +76,13 @@ HARNESS = 'difffuzz-20'
 
 
 class Facts:
-    __slots__ = ('symbol', 'ocalls', 'nrefs', 'oindirect', 'ostatic')
+    __slots__ = ('symbol', 'ocalls', 'nrefs', 'oindirect', 'ostatic', 'osg')
 
-    def __init__(self, symbol='', ocalls=(), nrefs=(), oindirect=False, ostatic=False):
+    def __init__(self, symbol='', ocalls=(), nrefs=(), oindirect=False, ostatic=False, osg=False):
         self.symbol, self.ocalls, self.nrefs = symbol or '', set(ocalls), set(nrefs)
         self.oindirect = oindirect      # the oracle code (or a same-unit function it runs) makes indirect calls
         self.ostatic = ostatic          # ... or refers to a function-local static or its guard (units.json names)
+        self.osg = osg                  # ... or refers to a string literal units.json names ($SG)
 
 
 class Change:
@@ -128,6 +129,10 @@ def _interlocked_slow(f):
 
 def _crt_malloc(f):
     return 0x00ecd1c7 in f.ocalls
+
+
+def _sg_literal(f):
+    return f.osg
 
 
 def _indirect(f):
@@ -269,8 +274,14 @@ CHANGES = [
            'call-count / call-target records, for callers of the exe\'s `jmp [__imp_X]` thunks (the import\'s bytes, '
            'or unknown and learned, instead of the placeholder definition\'s 0)', selects=_indirect,
            recheck=_old_callflow),
+    Change('d25-sg', 'functions whose oracle code (or a same-unit function it runs) refers to a string literal units.json '
+           'names ($SG): the oracle object numbers its $SG literals 43 higher than units.json (S11\'s force-included '
+           'header), so each was pinned and relocated at a neighbour\'s address; coffobj now maps object $SG<n> to '
+           'units.json $SG<n-d>, d found per unit by the exe\'s bytes (coffobj.sg_shift); and functions that refer '
+           'to read-only data units.json names: pinned tables now carry their relocations (code / data pointers, '
+           'the exe\'s word where the unit cannot place the target)', selects=_sg_literal),
 ]
-SCOPED = 'd24'
+SCOPED = 'd25'
 
 
 def harness_tag():
@@ -433,7 +444,7 @@ class Native:
         return out
 
 
-def oracle_closure(catalog_rows, indirect_out=None, static_addrs=None, static_out=None):
+def oracle_closure(catalog_rows, indirect_out=None, static_addrs=None, static_out=None, sg_addrs=None, sg_out=None):
     """{address: original addresses called (or tail-jumped to) by the function and the same-unit catalogued
     functions it reaches} - difffuzz runs the oracle's unit for real, so a callee's call is the caller's.
     indirect_out gets the addresses whose closure makes an indirect call."""
@@ -448,6 +459,8 @@ def oracle_closure(catalog_rows, indirect_out=None, static_addrs=None, static_ou
             if static_out is not None and static_addrs and any(int(t, 16) in static_addrs
                                                                for t in x.get('data_refs') or ()):
                 static_out.add(a)
+            if sg_out is not None and sg_addrs and any(int(t, 16) in sg_addrs for t in x.get('data_refs') or ()):
+                sg_out.add(a)
             for c in list(x.get('calls') or []) + list(x.get('tails') or []):
                 calls.add(int(c, 16))
                 y = by.get(c)
@@ -462,9 +475,33 @@ def change_tags(facts):
     return [c.tag for c in CHANGES if c.selects is not None and c.selects(facts)]
 
 
-def facts_of(t, ocl, nrefs, oind=(), ostat=()):
+def facts_of(t, ocl, nrefs, oind=(), ostat=(), osg=()):
     return Facts(t.get('symbol'), ocl.get(t['address'], ()), nrefs.get(t['address'], ()), t['address'] in oind,
-                 t['address'] in ostat)
+                 t['address'] in ostat, t['address'] in osg)
+
+
+def sg_literal_addrs():
+    """d25-sg: every address units.json gives a $SG string literal, and, when the exe loads, every units.json symbol
+    in a read-only section of the exe (the pinned read-only data whose relocations coffobj now applies)."""
+    out = set()
+    p = config.DECOMP / 'build' / 'units.json'
+    if not p.exists():
+        return out
+    ro = []
+    try:
+        import coffobj
+        exe = coffobj.exe_image()
+        if exe is not None:
+            ro = [(va, va + size) for va, size, flags, *_ in exe.sections
+                  if not flags & 0x80000000 and not flags & 0x20000020]   # not writable, not code
+    except Exception:  # noqa: BLE001
+        ro = []
+    for u in json.load(open(p))['units']:
+        for n, a in u['symbols'].items():
+            v = int(a, 16)
+            if n.startswith('$SG') or any(lo <= v < hi for lo, hi in ro):
+                out.add(v)
+    return out
 
 
 def local_static_bytes():
@@ -485,8 +522,8 @@ def compute(targets, catalog):
     """-> ({address: key}, {address: [change tags]}, number of units)"""
     cat = [json.loads(line) for line in open(catalog)]
     ohash = {r['address']: r['ohash'] for r in cat if 'ohash' in r}
-    oind, ostat = set(), set()
-    ocl = oracle_closure(cat, oind, local_static_bytes(), ostat)
+    oind, ostat, osg = set(), set(), set()
+    ocl = oracle_closure(cat, oind, local_static_bytes(), ostat, sg_literal_addrs(), osg)
     nat = Native(str(config.LINK))
     rn, defs = {}, {}
     for row in config.units_renames():
@@ -516,7 +553,7 @@ def compute(targets, catalog):
                 t['source'] + '\t'))
             if cd:
                 k += '|callee-renames:' + hashlib.sha1('\n'.join(cd).encode()).hexdigest()
-            tg = change_tags(facts_of(t, ocl, nrefs, oind, ostat))
+            tg = change_tags(facts_of(t, ocl, nrefs, oind, ostat, osg))
             if tg:
                 k += '|changes:' + ','.join(tg)
                 tags[t['address']] = tg
