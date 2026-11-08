@@ -349,12 +349,19 @@ HRESULT Device::SetDataFormat(LPCDIDATAFORMAT f)
     if (size & 3) return DIERR_INVALIDPARAM;
     Map *m = n ? (Map *)calloc(n, sizeof *m) : nullptr;
     if (n && !m) return DIERR_OUTOFMEMORY;
+    /* the game's rgodf tables (c_dfDIKeyboard 0x00ee6f10, c_dfDIMouse 0x00ee6e60) are themselves in the exe's .text,
+     * which the port does not map: read the whole array through fnvnx_image_const (p itself when mapped) */
+    if (n > 4096) { free(m); return DIERR_INVALIDPARAM; }
+    DIOBJECTDATAFORMAT *tbuf = n ? (DIOBJECTDATAFORMAT *)malloc(n * sizeof *tbuf) : nullptr;
+    if (n && !tbuf) { free(m); return DIERR_OUTOFMEMORY; }
+    const DIOBJECTDATAFORMAT *rgodf =
+        n ? (const DIOBJECTDATAFORMAT *)fnvnx_image_const(f->rgodf, n * (uint32_t)sizeof *tbuf, tbuf) : nullptr;
     int o2m[KEYS];
     bool used[KEYS];
     for (int i = 0; i < KEYS; i++) { o2m[i] = -1; used[i] = false; }
     uint32_t nm = 0;
     for (uint32_t i = 0; i < n; i++) {
-        const DIOBJECTDATAFORMAT &e = f->rgodf[i];
+        const DIOBJECTDATAFORMAT &e = rgodf[i];
         uint32_t t = DW(e.dwType), inst = (t >> 8) & 0xFFFF, ofs = DW(e.dwOfs);
         bool want_axis = (t & DIDFT_AXIS) != 0, want_button = (t & DIDFT_BUTTON) != 0;
         int found = -1;
@@ -371,16 +378,18 @@ HRESULT Device::SetDataFormat(LPCDIDATAFORMAT f)
         if (found < 0) {
             if (t & DIDFT_OPTIONAL) continue;
             free(m);
+            free(tbuf);
             return DIERR_INVALIDPARAM;
         }
         uint32_t width = (objs[found].type & DIDFT_AXIS) ? 4 : 1;
-        if (ofs + width > size) { free(m); return DIERR_INVALIDPARAM; }
+        if (ofs + width > size) { free(m); free(tbuf); return DIERR_INVALIDPARAM; }
         used[found] = true;
         o2m[found] = (int)nm;
         m[nm].ofs = ofs;
         m[nm].obj = found;
         nm++;
     }
+    free(tbuf);
     os_lock(&g_lock);
     free(map);
     map = m;
