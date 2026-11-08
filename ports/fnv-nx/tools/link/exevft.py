@@ -126,7 +126,7 @@ def load(path, cache):
 # ---- GCC vtable slot k -> exe vftable slot j (the slot fill, docs/LINK.md "Vftables from the player's exe")
 
 D1_SLOT = re.compile(r'(D[12]Ev$|_D[12]$|_d1$)')
-D0_SLOT = re.compile(r'(D0Ev$|_d0$)')
+D0_SLOT = re.compile(r'(D0Ev$|_D0$|_d0$)')
 
 
 def dtor_pos(names, words=None):
@@ -136,6 +136,10 @@ def dtor_pos(names, words=None):
     for i in range(len(names) - 1):
         a, b = names[i], names[i + 1]
         if a and b and D1_SLOT.search(a) and D0_SLOT.search(b):
+            return i
+        # a flags-stub pair into one decomp ??_G (`__fnvnx_vflag_<a>_0` / `_1`): what the binding makes of D1 / D0, so
+        # a table that already has it (Character at slots 4 / 5) is not taken for pair-less (V2, seams triage)
+        if a and b and a.startswith('__fnvnx_vflag_') and a.endswith('_0') and b == a[:-1] + '1':
             return i
     if words is not None:
         for i in range(len(names) - 1):
@@ -282,8 +286,37 @@ def deleting_dtor(path, addr):
     if off is None:
         return False
     b = data[off:off + 0x400]
+    if os.environ.get('FNVNX_DELDTOR_STRICT', '1') != '0':
+        end = _first_ret(b, addr)
+        if end is not None:
+            # the function's own first return (a linear sweep, not a byte search that runs into the next function:
+            # MagicCaster slot 9 0x008d0600 ends `ret 8` and the next `ret 4` was another function's): it must be
+            # `ret 4` with the flags test before it
+            i, imm, ncall = end
+            return imm == 4 and _FLAGS_TEST.search(b[:i]) is not None
     i = b.find(b'\xc2\x04\x00')
     return i > 0 and _FLAGS_TEST.search(b[:i]) is not None
+
+
+def _first_ret(b, addr):
+    """(byte offset, ret immediate, calls before it) of the first ret in the linear disassembly of b (immediate None
+    at int3 padding), or None (no capstone, or no ret in the decodable window)."""
+    try:
+        import capstone
+    except ImportError:
+        return None
+    if 'md0' not in _CS:
+        _CS['md0'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    ncall = 0
+    for ins in _CS['md0'].disasm(b, addr):
+        if ins.mnemonic == 'int3':
+            return ins.address - addr, None, ncall   # padding before any return: not a function with ret 4
+        if ins.mnemonic == 'call':
+            ncall += 1
+        elif ins.mnemonic in ('ret', 'retn'):
+            imm = int(ins.op_str, 0) if ins.op_str else 0
+            return ins.address - addr, imm, ncall
+    return None
 
 
 def deleting_dtor_callee(path, addr):

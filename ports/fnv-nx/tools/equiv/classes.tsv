@@ -8,6 +8,7 @@
 # class	declared	reason
 EH-ONLY	compiler	identical when both sides build with /EHs-c-: MSVC's EH frames and unwind states only; the target has its own EH model
 EH-ONLY+EXTERN-RELOAD	platform	EH frame only, plus one reload of an image-bound const (C++ linkage, LINK1): the same value
+EH-ONLY+DECORATION	platform	EH frame only, plus one call to the same function under another decoration (POP2 overload; the link binds by address)
 CRT-WRAPPER	platform	the CRT function where the exe calls the game's forwarding wrapper of it (the relocation pairs are checked)
 CRT-INLINE	platform	MSVC header's inline C++ overload where the exe calls the game's out-of-line copy of it (std::abs(float) 0x00408840 -> 0x00408860 = (float)fabs((double)x)); the same value for every input
 CRT-BINDING	platform	the CRT function bound where the decomp's namespace copy of it was (memset, free through its import slot): the same operation

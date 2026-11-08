@@ -91,7 +91,7 @@ def itanium_class(m):
 
 LOCAL_STATIC = re.compile(r'^\?(?:[^@?]+@\?\d+\?\?|\$S\d+@|\$TSS\d+@)')   # ?x@?1??f@@..., ?$S1@..., ?$TSS0@...
 # ?<var>@?<n>?<decorated function>@4<type>: a function-local static (value); ?$S<n>@ / ?$TSS<n>@: MSVC's guard word
-LOCAL_VALUE = re.compile(r'^\?([^@?$][^@?]*)@\?\d+\?(\?.+)@4[^@]*@?A$')
+LOCAL_VALUE = re.compile(r'^\?([^@?$][^@?]*)@\?\d+\?(\?.+?)@4.*A$')
 LOCAL_GUARD = re.compile(r'^\?\$(?:S|TSS)\d+@\?\d+\?(\?.+)@4IA$')
 
 
@@ -339,6 +339,19 @@ class UnitCache:
                 out.add(libcalls.import_id(iat[tg]))
         return out
 
+    def sret_bridges(self):
+        """{(object, address)} the link bridged as sret-explicit only (out/abi.tsv, verdict `bridge`): the unit's
+        reference passes the callee's result buffer as an explicit pointer, the definition takes it hidden."""
+        if getattr(self, '_sretb', None) is None:
+            self._sretb = set()
+            p = config.LINK / 'out/abi.tsv'
+            if p.exists():
+                for line in open(p, encoding='utf-8', errors='replace'):
+                    f = line.rstrip('\n').split('\t')
+                    if len(f) > 6 and f[5] == 'bridge' and f[6] == 'sret-explicit':
+                        self._sretb.add((f[0], int(f[2], 16)))
+        return self._sretb
+
     def callee_info_for(self, source):
         refs = {}
         for _, u in self.by_source[source]:
@@ -365,6 +378,11 @@ class UnitCache:
                         got = convmod.Conv(name, src)
                     except Exception:  # noqa: BLE001
                         continue
+                    if name == refs.get(addr) and (source, addr) in self.sret_bridges():
+                        # the unit's reference declaration passes the result buffer explicitly and the link put an
+                        # sret-explicit bridge before the definition: the stub is called without that parameter
+                        drop = next((lab for lab, sp, off, _ in got.x86 if sp == 'stk' and off == 0), None)
+                        got.native_view = got.bridged_view(drop) if drop else None
                     try:                       # the callee's own custom register convention, when its code is known
                         import classify
                         f = self.x86_unit(dsrc, addr).funcs.get(addr) if dsrc else None
@@ -467,6 +485,7 @@ class UnitCache:
         t = runner.Target(cv, orig_addr, code, img, self.stub_addrmap(img, source), self.callee_info_for(source),
                           statics - paired - guards)
         t.static_pairs, t.static_guards = pairs, guards
+        t.static_nguards = self._native_guards
         t.extra_pinned = dict(getattr(t, 'extra_pinned', {}) or {})
         for _, o, n in pairs:
             t.extra_pinned[o] = bytes(n)
@@ -623,24 +642,40 @@ class UnitCache:
                         rows.setdefault(n, a)
             self._static_names = (faddr, rows)
         faddr, rows = self._static_names
-        pairs, guards = [], set()
+        # (difffuzz-20, static-backref) inside a local static's name the function is decorated in its own scope, so
+        # its back-references can count differently (`SAAAV2@XZ` there, `SAAAV1@XZ` in the function's own symbol):
+        # when the exact spelling is unknown, the function whose symbol agrees with it up to the digits, if one does
+        norm = {}
+        for fs, fa_ in faddr.items():
+            norm.setdefault(re.sub(r'\d', '#', fs), set()).add(fa_)
+
+        def func_addr(fs):
+            if fs in faddr:
+                return faddr[fs]
+            c = norm.get(re.sub(r'\d', '#', fs), ())
+            return next(iter(c)) if len(c) == 1 else None
+        pairs, guards, nguards = [], set(), []
         for n, a in rows.items():
             if True:
                 g = LOCAL_GUARD.match(n)
-                if g and faddr.get(g.group(1)) in fn_names:
+                if g and func_addr(g.group(1)) in fn_names:
                     guards.update(range(int(a, 16), int(a, 16) + 4))
                     continue
                 m = LOCAL_VALUE.match(n)
                 if not m:
                     continue
                 var, func = m.group(1), m.group(2)
-                fa = faddr.get(func)
+                fa = func_addr(func)
                 for nn in fn_names.get(fa, ()):
                     base = '_ZZ' + nn[2:] + 'E' + str(len(var)) + var
                     cand = [x for x in (base, base + '_0') if x in img.syms]
                     if cand and img.sizes.get(cand[0]):
                         pairs.append((img.syms[cand[0]], int(a, 16), img.sizes[cand[0]]))
+                        gn = '_ZGV' + cand[0][2:]
+                        if gn in img.syms:      # the native's own guard of that static (its init protocol)
+                            nguards.append((img.syms[gn], img.sizes.get(gn) or 8))
                         break
+        self._native_guards = nguards
         self._static_pairs_key, self._static_pairs_val = key, (pairs, guards)
         return pairs, guards
 
@@ -754,7 +789,10 @@ class UnitCache:
             self.providers()
             for name, addr in self._prov_rows:       # every address of a name (memmove: 0x00ec44d0, 0x00ec7230)
                 b = libcalls.A64.get(name)
-                if (b in int_names or b in libcalls.CRT_MATH and not b.endswith('f')) and addr not in libcalls.X86:
+                # (difffuzz-20, flow) the `f` names too: the exe's ceilf / floorf / cosf / acosf wrappers
+                # (0x004e4430, 0x00406cc0, 0x004e4470, 0x004f6e40) are float functions GCC inlines (frintp), the
+                # oracle traced them as calls (11 native-inlined rows); x86emu._builtin reads their float argument
+                if (b in int_names or b in libcalls.CRT_MATH) and addr not in libcalls.X86:
                     libcalls.X86[addr] = b
 
     def pair(self, source, orig_addr):

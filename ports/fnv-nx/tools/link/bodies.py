@@ -59,7 +59,13 @@ in this order (first that applies):
    a class (s2d not-compiled): the emitted member of another copy (copy_key: unit namespaces removed, parameters and
    cv exact) is renamed to the wanted name when the layout probe (LayoutGate) gives both classes and their
    class-like parameters one size; names MSVC calls out of line (the vcall check's pristine reference) and
-   constructors / destructors are taken too, always through the gate; up to three hosts are tried.
+   constructors / destructors are taken too, always through the gate; up to three hosts are tried. The decomp's
+   own copy namespaces of `std` (COPY_NS_STD: `ac8parse::char_traits<T>`, declared-only, against the `std` copy of
+   the same file that has the bodies) count as copies of one class.
+   A library member a unit declares as an explicit specialization and defines nowhere (`template <> R C<A>::m(P);`,
+   the SPEC1 shape: `fnvnx_vc9::string::assign`) is instantiated explicitly (member_inst_line) in a unit that reaches
+   the body, the port's shim headers included, and declares no specialization of it (member_inst_hosts): GCC alone
+   leaves only a local `.isra` clone of such a member in the other units.
 1e. `copy-addr` (after exe-addr) - a member of a class copy whose same member of another copy (copy_key) units.json
    places at one address the native build defines, with one layout on both sides (LayoutGate): `__fnv_<addr>`.
 5c. `addr-host` - an exe address refs.tsv binds references to (`code-defmissing`) whose placing unit's object
@@ -78,7 +84,9 @@ in this order (first that applies):
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
    placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing), and
    the decomp's `basic_streambuf` copies' `_Lock()` / `_Unlock()` (CRT_MUTEX: `this + 4` is the std::_Mutex, S4's
-   fnvnx_mutex_lock / unlock).
+   fnvnx_mutex_lock / unlock), and the facet copies' `_Register()` / static `_Register(facet*)` (CRT_FACET: S4's
+   fnvnx_facet_register, MSVC's _Facet_Register at 0x00ec3599), and NiPointer<T>'s destructor for a T no unit
+   defines (CRT_NIPTR: a tail call to NiPointer<NiRefObject>'s; the same code on the NiRefObject base at 0).
    After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
 
@@ -103,6 +111,7 @@ import sys
 import sigs
 
 TRAPPED = ('unresolved', 'unresolved-ctor-dtor', 'ctor-dtor-trap')
+SHIM_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'shim'))
 ADDR_SYM = '__fnv_%08x'
 SHELL = re.compile(r'(?:_shell|_Shell|_SHELL)$')
 UNIT_NS = re.compile(r'^fnv_[0-9a-f]{8}$')            # the decomp's per-function namespaces (fnvlink.UNIT_NS)
@@ -627,6 +636,19 @@ CRT_THROW = {'_Xlen': ('_ZSt20__throw_length_errorPKc', '%s too long'),
 # two members and never define them (their `void* streamLock` is that first word).
 CRT_MUTEX = {'_Lock': 'fnvnx_mutex_lock', '_Unlock': 'fnvnx_mutex_unlock'}
 
+# MSVC's locale::facet::_Register() is `_Facet_Register(this)`: the facet goes on the list the CRT frees at exit
+# (0x00ec3599, crt_symbols.tsv: std::locale::facet::_Facet_Register, S4's fnvnx_facet_register(void *facet)). The
+# decomp's facet copies declare it as a static `_Register(facet*)` (blk_00ac0000_od_ob1_variant.cpp's
+# `fnv_00acfab0::facet`, called as `facet::_Register(_Pfmod)` in use_facet) or as the member `_Register()`, and define
+# neither. Either way the facet is the first argument (x0): a tail call.
+CRT_FACET = 'fnvnx_facet_register'
+
+# NiPointer<T>::~NiPointer() of a T the decomp only forward-declares (NiPointer<ProjectileAuxiliaryData>, inlined
+# everywhere in the exe): no unit can instantiate it. Every NiPointer<T> destructor is the same code, `if (m_pObject)
+# m_pObject->DecRefCount()` on the NiRefObject base, which Gamebryo classes hold at offset 0 (single inheritance): a
+# tail call to the NiPointer<NiRefObject> instantiation the units emit (W COMDAT). FNVNX_NIPTR=0 turns it off.
+CRT_NIPTR = '_ZN9NiPointerI11NiRefObjectED1Ev'
+
 
 def crt_rule(isig):
     """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('mutex', platform function, 'this + 4') for a
@@ -643,6 +665,13 @@ def crt_rule(isig):
         return ('ret', None, None)
     if last in CRT_MUTEX and not isig.params and re.match(r'basic_streambuf\b', isig.qual[-2]):
         return ('mutex', CRT_MUTEX[last], 'this + 4')
+    if last == '_Register' and isig.qual[-2] == 'facet' and (
+            not isig.params or (len(isig.params) == 1 and re.fullmatch(r'(?:\w+::)*facet\s*\*', isig.params[0].strip()))):
+        return ('facet', CRT_FACET, 'the facet')
+    if isig.qual[-1] == '{dtor}' and isig.variant in ('D1', 'D2') and not isig.params and \
+            re.fullmatch(r'NiPointer<.+>', isig.qual[-2]) and isig.qual[-2] != 'NiPointer<NiRefObject>' and \
+            len(isig.qual) == 2 and os.environ.get('FNVNX_NIPTR', '1') != '0':
+        return ('niptr', CRT_NIPTR, 'NiPointer<NiRefObject>')
     return None
 
 
@@ -654,6 +683,8 @@ def crt_pass(rows, itanium):
         if k:
             r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
                            else '%s(%s): the _Mutex member at +4' % (k[1], k[2]) if k[0] == 'mutex'
+                           else '%s(%s): MSVC\'s _Facet_Register' % (k[1], k[2]) if k[0] == 'facet'
+                           else 'the %s destructor (%s)' % (k[2], k[1]) if k[0] == 'niptr'
                            else 'placement delete: ret')
         out.append(r)
     return out
@@ -671,6 +702,8 @@ def emit_crt(rows, itanium):
             out += ['    ret']
         elif kind == 'mutex':
             out += ['    add x0, x0, #4', '    b ' + fn]
+        elif kind in ('facet', 'niptr'):
+            out += ['    b ' + fn]
         else:
             out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]
         out += ['    .size %s, .-%s' % (q, q)]
@@ -858,7 +891,7 @@ def emit_empty(rows):
     return '\n'.join(out) + '\n'
 
 
-def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=()):
+def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=(), minst=()):
     """Compile the host unit again with the `= default` lines (special-default) or with -fkeep-inline-functions
     (msvc-inline); keep only the wanted symbols. -> (object path or None, {names defined}, {name: why failed}).
     gate (inline): a LayoutGate. With it, an emitted member of another copy of the wanted name's class (copy_key:
@@ -866,7 +899,8 @@ def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=
     only such symbol and the gate gives both classes (and their class-like parameters) one size. Names in strict
     (tree-inline's own pairings across units: copies, constructors and destructors, names MSVC calls out of line)
     pass the gate for every pairing, also a body the host emits under the wanted name itself when the host is not a
-    referencing unit."""
+    referencing unit. minst (inline): the names member_inst_hosts chose a host for, instantiated explicitly
+    (member_inst_line) there."""
     import vtables
     want = {r.name for r in rows}
     ref_units = {r.name: [u for u in r.units.split(',') if u] for r in rows}
@@ -894,8 +928,10 @@ def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=
     else:
         items.append((0, 'anchor', 'extern "C" void __fnvnx_bd_anchor() {}'))
         for k, r in enumerate(sorted(rows, key=lambda r: r.name)):   # a class template's destructor: instantiated here
-            line = inst_line(itanium(r.name))
+            line = inst_line(itanium(r.name)) or (member_inst_line(itanium(r.name)) if r.name in minst else None)
             if line and line not in {it[2] for it in items}:
+                if INST_DECLVAL not in {it[2] for it in items} and 'fnvnx_declval_' in line:
+                    items.append((-1 - len(items), 'fwd', INST_DECLVAL))
                 for j, fw in enumerate(inst_fwd(itanium(r.name))):   # a pointee the host does not define
                     if fw not in {it[2] for it in items}:
                         items.append((-1 - len(items), 'fwd', fw))
@@ -1004,6 +1040,116 @@ def inst_line(isig):
     return 'template %s::~%s();' % ('::'.join(isig.qual[:-1]), base)
 
 
+INST_DECLVAL = 'template <class T> T&& fnvnx_declval_();'   # std::declval without the header (units define their own std)
+
+
+def member_inst_line(isig):
+    """`template decltype(...) C<args>::m(P) cv;` - the explicit instantiation of a member function (not a constructor
+    or destructor) of a class template instantiation, None for any other name. The return type is not in the Itanium
+    name; `decltype` of the call with the name's own parameter types gives it (the overload the call picks must be
+    the member itself, else the line does not compile and the host fails). The body is the template's own, from the
+    host's headers: what a unit sees where the unit declares no explicit specialization of the member."""
+    if isig is None or isig.kind != 'func' or isig.params is None or isig.variant or len(isig.qual) < 2:
+        return None
+    cls, name = isig.qual[-2], isig.qual[-1]
+    if '<' not in cls or not cls.endswith('>') or not re.fullmatch(r'[A-Za-z_]\w*', name):
+        return None
+    if any(UNIT_NS.match(q) or UNIT_NS_ANY.search(q) for q in isig.qual):
+        return None
+    if any(c in q for q in isig.qual[:-1] for c in '`\'({') or any('...' in p or '(' in p for p in isig.params):
+        return None
+    scope = '::'.join(isig.qual[:-1])
+    cv = (isig.cv + ' ') if isig.cv else ''
+    args = ', '.join(isig.params)
+    call = ', '.join('fnvnx_declval_<%s>()' % p for p in isig.params)
+    return 'template decltype(fnvnx_declval_<%s%s&>().%s(%s)) %s::%s(%s)%s;' % (
+        cv, scope, name, call, scope, name, args, (' ' + isig.cv) if isig.cv else '')
+
+
+SPEC_DECL = re.compile(r'template\s*<\s*>[^;{}]*?::\s*(\w+)\s*\(([^;{}]*)\)\s*(?:const\s*)?;')
+
+
+def top_commas(args):
+    """The number of parameters of a declaration's parameter text (top-level commas; `()` and `(void)` are none)."""
+    s = args.strip()
+    if not s or s == 'void':
+        return 0
+    depth = n = 0
+    for ch in s:
+        depth += ch in '<(['
+        depth -= ch in '>)]'
+        n += ch == ',' and depth == 0
+    return n + 1
+
+
+def member_inst_hosts(tree, rows, itanium, unit_sources, ref_units, shim=None, limit=5):
+    """{name: [host units]} for member_inst_line names. Evidence: a referencing unit declares the member as an explicit
+    specialization (`template <> R C<A>::m(P);`, MSVC's out-of-line instance of a library member, never defined in
+    the unit): GCC then instantiates it nowhere there, and every other unit that uses the member inlines it or keeps
+    only a local GCC clone (.isra), so no object defines the plain name. A body of the member in the headers (the
+    tree's, or `shim` = the port's shim directory: fnvnx_vc9.h) that a host reaches by its includes, a host that is no
+    referencing unit and declares no such specialization itself, the smallest include closure first."""
+    import bodycause
+    want = {}
+    for r in rows:
+        isg = itanium(r.name)
+        if member_inst_line(isg) is None:
+            continue
+        base = isg.qual[-2][:isg.qual[-2].index('<')]
+        base = base.split('::')[-1]
+        spec = False
+        for u in ref_units.get(r.name, ()):
+            try:
+                with open(os.path.join(tree, u), encoding='utf-8', errors='replace') as fh:
+                    raw = fh.read()
+            except OSError:
+                continue
+            spec = spec or any(m.group(1) == isg.qual[-1] and top_commas(m.group(2)) == len(isg.params)
+                               for m in SPEC_DECL.finditer(raw))
+        if spec:
+            want[r.name] = (base, isg.qual[-1])
+    if not want:
+        return {}
+    pairs = set(want.values())
+    found = bodycause.tree_bodies(tree, pairs)
+    shim_found = bodycause.tree_bodies(shim, pairs) if shim else {}
+    bodyfiles = {}
+    for n, k in want.items():
+        fl = {f for f, w in found.get(k, ()) if w.startswith('live')}
+        fl |= {os.path.join(shim, f) for f, w in shim_found.get(k, ()) if w.startswith('live')}
+        if fl:
+            bodyfiles[n] = fl
+    if not bodyfiles:
+        return {}
+    clo = include_closure(tree, sorted(unit_sources), extra=[os.path.join(shim, 'include')] if shim else ())
+    texts = {}
+
+    def declares(u, k):
+        if u not in texts:
+            try:
+                with open(os.path.join(tree, u), encoding='utf-8', errors='replace') as fh:
+                    texts[u] = fh.read()
+            except OSError:
+                texts[u] = ''
+        return any(m.group(1) == k[1] for m in SPEC_DECL.finditer(texts[u]))
+    out = {}
+    for n, fl in bodyfiles.items():
+        rus = set(ref_units.get(n, ()))
+        cand = [u for u in sorted(unit_sources) if u not in rus and fl & clo.get(u, {u}) and not declares(u, want[n])]
+        if cand:
+            out[n] = sorted(cand, key=lambda u: (len(clo[u]), u))[:limit]
+    return out
+
+def msvc_inline_retry(rows, failed):
+    """msvc-inline names whose host compiled but emitted nothing under the wanted name: tree-inline tries them next,
+    across the copies of the class (copy_key, through the layout gate). W44: the pristine u99 object
+    (tileimage_decl_variant.cpp) defines MSVC's `basic_string<char>::erase(unsigned, unsigned)`, and that unit emits
+    it only for its own copy `fnv_00b0e730::std::basic_string`; blk_00b00000_od_ob1_variant.cpp references the
+    global `std::basic_string` copy's and `fnv_00b0f410::std::basic_string`'s, declared there and defined nowhere."""
+    return {r.name for r in rows if r.cls == 'msvc-inline' and
+            failed.get(r.name, '').startswith('synth-failed (not emitted')}
+
+
 def inst_pointees(isig):
     """Class names the template arguments of an inst_line name use only as pointees (`NiTArray<ImageSpaceEffect*,
     NiTMallocInterface<ImageSpaceEffect*>>`): never as a value, a template argument of its own or a scope. The
@@ -1031,9 +1177,11 @@ BUILTIN_WORDS = frozenset('const volatile unsigned signed int long short char bo
 INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
 
 
-def include_closure(tree, files):
+def include_closure(tree, files, extra=()):
     """{file: set of the files it includes, itself included} for tree-relative `files`: quoted includes resolved
-    against the file's directory, include/, src/ and the tree root, else by basename; read once per file."""
+    against the file's directory, include/, src/ and the tree root, else by basename; read once per file. extra:
+    further directories (absolute) the quoted includes are looked up in last (the shim headers), their files named
+    by absolute path."""
     by_base = collections.defaultdict(list)
     for base in ('src', 'include'):
         for dp, _, fs in os.walk(os.path.join(tree, base)):
@@ -1056,7 +1204,10 @@ def include_closure(tree, files):
                         res.add(cand)
                         break
                 else:
-                    res.update(by_base.get(os.path.basename(m), ())[:1])
+                    hit = by_base.get(os.path.basename(m), ())[:1]
+                    if not hit:
+                        hit = [os.path.join(x, m) for x in extra if os.path.exists(os.path.join(x, m))][:1]
+                    res.update(hit)
             direct[rel] = res
         return direct[rel]
     out = {}
@@ -1165,17 +1316,34 @@ def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
 
 # ---------------------------------------------------------------------------------------------------- copy pairs
 
+# The decomp's own copy namespaces of `std`: a file that declares its traits class in a namespace of its own
+# (`ac8parse::char_traits<T>`: `_Copy_s` and `assign` declared, no body) and defines the same class in `std` (the MSVC
+# STL copy of the same file, `std::char_traits<E>` with both bodies). The namespace is the decomp's spelling of `std`,
+# so the two are copies of one class (copy_key); the layout gate then confirms the pairing. A name is listed only
+# for the shape found in the decomp tree (declared-only members in one namespace, the same members with bodies in
+# `std` of the same file); the other namespaces that listing finds are no rows (s1c10's exception destructors are
+# special-default, ImageReaderTypes::basic_string::_Tidy is no missing name), so they stay out.
+COPY_NS_STD = frozenset({'ac8parse'})
+COPY_NS_ANY = re.compile(r'(?<![\w:])(?:%s)::' % '|'.join(sorted(COPY_NS_STD)))
+
+
+def copy_ns(text):
+    """`ac8parse::char_traits<char>` -> `std::char_traits<char>` (COPY_NS_STD), in a qualified name or a type."""
+    return 'std' if text in COPY_NS_STD else COPY_NS_ANY.sub('std::', text)
+
+
 def copy_key(sig, variant=True):
     """The key the copies of one class share: the qualified name and the parameter types with every unit namespace
-    (`fnv_<a>::`) removed, parameters at sigs level 0 (exact spellings), the member's cv and (variant) the Itanium
-    ctor/dtor variant kept. The decomp's unit-local copies of a class (`fnv_00ad47f0::std::basic_ostream`,
-    `fnv_00ac9790::std::basic_ostream`) and the global class get one key; another class, overload or cv does not."""
+    (`fnv_<a>::`) removed and a COPY_NS_STD namespace spelled `std`, parameters at sigs level 0 (exact spellings),
+    the member's cv and (variant) the Itanium ctor/dtor variant kept. The decomp's unit-local copies of a class
+    (`fnv_00ad47f0::std::basic_ostream`, `fnv_00ac9790::std::basic_ostream`) and the global class get one key;
+    another class, overload or cv does not."""
     if sig is None or sig.kind != 'func' or sig.params is None or len(sig.qual) < 2:
         return None
-    qual = tuple(UNIT_NS_ANY.sub('', sigs.canon_type(q)) for q in sig.qual if not UNIT_NS.match(q))
+    qual = tuple(copy_ns(UNIT_NS_ANY.sub('', sigs.canon_type(q))) for q in sig.qual if not UNIT_NS.match(q))
     if len(qual) < 2:
         return None
-    params = tuple(UNIT_NS_ANY.sub('', sigs.canon_param(p, 0)) for p in sig.params)
+    params = tuple(copy_ns(UNIT_NS_ANY.sub('', sigs.canon_param(p, 0))) for p in sig.params)
     return (qual, params, sig.cv or '', (sig.variant or '') if variant else '')
 
 
@@ -2321,8 +2489,9 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         # body is still its body: tree-inline takes it, gated like a copy pair (strict)
         T.mark('vcall')
         direct = {n for n, why in failed.items() if why == VCALL_DIRECT}
-        vdone = set(vtargets) | (set(failed) - direct) | set(vnotes)
-        rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
+        inl_retry = msvc_inline_retry(rows, failed)
+        vdone = set(vtargets) | (set(failed) - direct - inl_retry) | set(vnotes)
+        rest = [r for r in rows if (r.cls == 'missing' or r.name in inl_retry) and r.name not in vdone and r.units]
         tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
         # a class template's destructor no object instantiates (the pointee is incomplete where it is referenced): the
         # template's own body, explicitly instantiated in a unit that names the arguments (inst_hosts)
@@ -2334,14 +2503,20 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                             {r.name: r.units.split(',') for r in inst_rows})
             for n_, hs_ in ih.items():
                 tin[n_] = hs_ + [h_ for h_ in tin.get(n_, []) if h_ not in hs_]
+        # a library member the unit declares as an explicit specialization and nothing instantiates (member_inst_hosts)
+        mem_rows = [r for r in rest if member_inst_line(itanium(r.name))]
+        mih = member_inst_hosts(tree, mem_rows, itanium, set(unit_names), {r.name: r.units.split(',') for r in mem_rows},
+                                SHIM_DIR) if mem_rows else {}
+        for n_, hs_ in mih.items():
+            tin[n_] = hs_ + [h_ for h_ in tin.get(n_, []) if h_ not in hs_]
         # tree-inline's pairings across units pass the layout gate: names MSVC calls directly, constructors and
         # destructors (found since the search spells them by the class name), and every copy-key rename
-        strict = direct | {n for n in tin if itanium(n).variant}
+        strict = direct | inl_retry | {n for n in tin if itanium(n).variant} | set(mih)
 
         def tone(job):
             h, rs, k = job
             try:
-                return h, k, synth_host(tree, work, h, rs, itanium, True, gate=gate, strict=strict)
+                return h, k, synth_host(tree, work, h, rs, itanium, True, gate=gate, strict=strict, minst=set(mih))
             except Exception as e:
                 return h, k, (None, set(), {r.name: 'synth-failed (%r)' % e for r in rs})
         tdone = {}

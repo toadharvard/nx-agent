@@ -3734,8 +3734,11 @@ def r_static_stand_ins(path, text, stats):
                 edits.append((d.start(), d.end(), d.group(1)))
     if not edits: return text
     out, pos = [], 0
+    keep = os.environ.get('FNVNX_RECON') and 'STAND4' in ''.join(e[2] for e in edits)
+    spans4 = prepare.__dict__.setdefault('_fnvnx_stand4_spans', {}).setdefault(os.path.abspath(path), []) if keep else None
     for a, b, r in sorted(edits):
         if a < pos: continue
+        if spans4 is not None and 'STAND4' in r: spans4.append((r, text[a:b]))   # REC1 matches on the text before this
         out.append(text[pos:a]); out.append(r); pos = b
     out.append(text[pos:])
     stats['STAND4'] += sum(1 for e in edits if 'STAND4' in e[2])
@@ -4220,6 +4223,14 @@ BIND1_REFS = [
     #   placeholder vector_error_message): the exe's ReserveItems 0x0065cfd0 calls 0x0065f640 (ThrowVectorTooLong,
     #   which pushes the exe's own message) at 0x0065d00e, where the pristine object calls this name
     ('src/staging/blk_00ac0000_od_ob1_variant.cpp', '?length_error@Vector12@@SAXXZ', '0x0065f640'),
+    # * W28 (top-down 44): MMAlloc::Allocate (blk_00aa0000_od_ob1_variant.cpp, exe 0x00aa3e40) reads the small-pool
+    #   table `if (n <= 0x3fc) pool = smallPools[n >> 2]`: the exe has `cmp [ebp+8], 0x3fc; shr edx, 2;
+    #   mov eax, [edx*4 + 0x011f67b8]` at 0x00aa3ee8 (and 0x00aa498b). The unit's pristine object relocates it (DIR32) in
+    #   a COMDAT function the exe compiled with GetHeapIndex inlined, so exe-data's byte match never finds the site.
+    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?smallPools@fnv_00aafc80@@3PAPAUDeallocPool@1@A', '0x011f67b8'),
+    # * W28 (top-down 109): LNode_af5480::AddTail (src/bssystem/archive.cpp; exe 0x00afcc10): `push 8;
+    #   mov ecx, 0x011f6238; call 0x00aa3e40` at 0x00afcc5c: the memory manager, as for g_memoryManager6b3c0.
+    ('src/bssystem/archive.cpp', '?g_memoryManager_af5480@fnv_00af5480@@3UMemoryManager_af5480@1@A', '0x011f6238'),
 ]
 
 def bind_units_data(data, stats, refs=BIND1_REFS):
@@ -5316,6 +5327,15 @@ def _recon_reject(r, d, src, bad, stats):
         msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
     sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its rows stay trap stubs\n' % (src, d, msg))
 
+def _rec1_unstand4(path, text):
+    """text with every STAND4 rewrite put back to the definition it replaced (None when STAND4 rewrote nothing here)."""
+    spans = prepare.__dict__.get('_fnvnx_stand4_spans', {}).get(os.path.abspath(path))
+    if not spans: return None
+    out = text
+    for marker, orig in spans:
+        if out.count(marker) == 1: out = out.replace(marker, orig)
+    return out if out != text else None
+
 def r_recon_bodies(path, text, stats):
     """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
     if not os.environ.get('FNVNX_RECON') or not path.endswith(('.cpp', '.c')): return text
@@ -5334,6 +5354,15 @@ def r_recon_bodies(path, text, stats):
             if not isinstance(old, str) or not old or not isinstance(new, str):
                 bad = (k, -1, 'needs a non-empty "old" and a "new" string'); break
             c = edited.count(old)
+            if c == 0:
+                # REC1 x STAND4: a recon is written against the decomp text, and STAND4 (which runs before REC1) turned a
+                # lone static stand-in into an extern declaration. Match on the text before STAND4 (its marker put back
+                # to the original definition), apply the pair there, and let STAND4 convert what is left of it.
+                un = _rec1_unstand4(path, edited)
+                if un is not None and un.count(old) == 1:
+                    edited = un.replace(old, new)
+                    edited = r_static_stand_ins(path, edited, stats)
+                    continue
             if c != 1:
                 bad = (k, c, old[:120]); break
             edited = edited.replace(old, new)
@@ -5680,6 +5709,139 @@ def d22_classes(text, masked=None):
                         first=virtuals[0] if virtuals else None, virtuals=virtuals, kind=m.group(1)))
     return out
 
+# ---- T1: d22_placeholder / _d22_callonly read a file through an index of its words (prepare speed) -----------------
+# A cold prepare spent 363 of 1,328 s in r_vtable_dtor_slot, nearly all in these two functions scanning whole files
+# with one regex per class and member name. Every match of their patterns starts at a maximal \w+ run equal to that
+# name (the lookbehinds forbid a word character before it; what follows the name cannot be one), so the patterns run
+# only in small windows at those runs. A window ends at the first ( ; { } ) after the name: no match of these
+# patterns crosses one before its final '('. d22_placeholder's text has spans blanked (_D22Rest): the runs a blank cuts
+# are candidates too, and its windows are read from the blanked text. A name that is not a plain identifier keeps the
+# whole-text scan. Same matches, in the same order (checked against re.finditer on the decomp's texts).
+_D22_WORD = re.compile(r'\w+')
+_D22_STOP = re.compile(r'[(;{})]')
+_D22_IDX = {}
+
+
+def _d22_index(text):
+    """(word -> run starts, stop-char positions, run starts, run ends) of one text object (a few kept)"""
+    e = _D22_IDX.get(id(text))
+    if e is not None and e[0] is text:
+        return e[1]
+    words, starts, ends = collections.defaultdict(list), [], []
+    for m in _D22_WORD.finditer(text):
+        words[m.group()].append(m.start())
+        starts.append(m.start())
+        ends.append(m.end())
+    if len(_D22_IDX) > 6:
+        _D22_IDX.clear()
+    _D22_IDX[id(text)] = (text, (words, [m.start() for m in _D22_STOP.finditer(text)], starts, ends))
+    return _D22_IDX[id(text)][1]
+
+
+class _D22Rest:
+    """text with the (merged) spans blanked, as d22_placeholder's `rest` was, read in pieces"""
+    def __init__(self, text, spans):
+        sp = []
+        for a, b in sorted(s for s in spans if s[1] > s[0]):
+            if sp and a <= sp[-1][1]:
+                sp[-1][1] = max(sp[-1][1], b)
+            else:
+                sp.append([a, b])
+        self.t, self.sp, self.sa = text, sp, [a for a, _ in sp]
+
+    def blanked(self, i):
+        k = bisect.bisect_right(self.sa, i) - 1
+        return k >= 0 and self.sp[k][0] <= i < self.sp[k][1]
+
+    def slice(self, lo, hi):
+        t, out, pos = self.t, [], lo
+        k = max(0, bisect.bisect_right(self.sa, lo) - 1)
+        while k < len(self.sp) and self.sp[k][0] < hi:
+            a, b = self.sp[k]
+            if b > pos:
+                a = max(a, pos)
+                if a > pos:
+                    out.append(t[pos:min(a, hi)])
+                if a < hi:
+                    out.append(' ' * (min(b, hi) - a))
+                pos = min(b, hi)
+            k += 1
+        if pos < hi:
+            out.append(t[pos:hi])
+        return ''.join(out)
+
+
+class _D22Match:
+    __slots__ = ('_s', '_e', '_g')
+
+    def __init__(self, s, e, g):
+        self._s, self._e, self._g = s, e, g
+
+    def start(self):
+        return self._s
+
+    def end(self):
+        return self._e
+
+    def group(self, i=0):
+        return self._g[i]
+
+
+def _d22_finditer(pattern, name, text, spans=()):
+    """re.finditer(pattern, text with spans blanked), where the pattern's first token after its one-character
+    lookbehind is the literal name"""
+    pat = re.compile(pattern)
+    if not _D22_WORD.fullmatch(name):
+        return list(pat.finditer(_D22Rest(text, spans).slice(0, len(text)) if spans else text))
+    words, stops, rs, re_ = _d22_index(text)
+    rest = _D22Rest(text, spans) if spans else None
+    cands = set()
+    if rest is None:
+        cands.update(words.get(name, ()))
+    else:
+        hit = set()     # runs a span touches: their pieces outside the spans
+        for a, b in rest.sp:
+            k = max(0, bisect.bisect_right(rs, a) - 1)
+            while k < len(rs) and rs[k] < b:
+                if re_[k] > a:
+                    hit.add(k)
+                k += 1
+        hit_starts = {rs[k] for k in hit}
+        cands.update(s0 for s0 in words.get(name, ()) if s0 not in hit_starts)
+        for k in hit:
+            i, r1 = rs[k], re_[k]
+            while i < r1:
+                while i < r1 and rest.blanked(i):
+                    i += 1
+                j = i
+                while j < r1 and not rest.blanked(j):
+                    j += 1
+                if j - i == len(name) and text[i:j] == name:
+                    cands.add(i)
+                i = j
+    out, last_end, n = [], -1, len(text)
+    for s0 in sorted(cands):
+        if s0 < last_end:
+            continue
+        k = bisect.bisect_left(stops, s0 + len(name))
+        while k < len(stops) and rest is not None and rest.blanked(stops[k]):
+            k += 1
+        hi = stops[k] + 1 if k < len(stops) else n
+        lo = max(0, s0 - 1)
+        w = rest.slice(lo, hi) if rest is not None else text[lo:hi]
+        m = pat.match(w, s0 - lo)
+        if m:
+            out.append(_D22Match(lo + m.start(), lo + m.end(), [m.group(i) for i in range(pat.groups + 1)]))
+            last_end = lo + m.end()
+    return out
+
+
+def _d22_search(pattern, name, text, spans=()):
+    """re.search on the same terms (the first match, or None)"""
+    ms = _d22_finditer(pattern, name, text, spans)
+    return ms[0] if ms else None
+
+
 def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     """the virtual declaration decl = (start, end, member, text) of class cls is a placeholder in this file: no
     definition outside the class, an inline body of one statement at most, and no other use of its name followed by
@@ -5690,14 +5852,15 @@ def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     if '{' in body:
         inner = body[body.find('{') + 1:body.rfind('}')]
         if len([s for s in inner.split(';') if s.strip()]) > 1 or '{' in inner: return False
-    rest = masked[:start] + ' ' * (end - start) + masked[end:]
-    for a, b in ignore:                         # other classes' virtual declarations of the same name
-        if (a, b) != (start, end): rest = rest[:a] + ' ' * (b - a) + rest[b:]
-    if re.search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), rest): return False
-    for u in re.finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), rest):
+    # the text without this declaration and other classes' virtual declarations of the same name, as spans blanked
+    # (T1: read through an index of the file's words, not rebuilt and scanned per name; _d22_finditer)
+    spans = [(start, end)] + [(a, b) for a, b in ignore if (a, b) != (start, end)]
+    rest = _D22Rest(masked, spans)
+    if _d22_search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), cls, masked, spans): return False
+    for u in _d22_finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), member, masked, spans):
         # an unqualified call reaches cls's member only from a member of cls or of a class deriving from it (S5-boot:
         # actor.cpp's CVShell::FUN_008805f0 calls its own base CVB's `v0(p)`; NiTMap_S's `v0` stayed unconverted)
-        qualified = re.search(r'(?:->|\.|::)\s*$', rest[max(0, u.start() - 8):u.start()])
+        qualified = re.search(r'(?:->|\.|::)\s*$', rest.slice(max(0, u.start() - 8), u.start()))
         if reach is not None and not qualified and not reach(u.start()):
             continue
         # a qualified call whose receiver's type resolves to a class outside the family (extradatalist.cpp:
@@ -5921,8 +6084,8 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
     slot is known from the exe (D22-SLOTK), so its member's name is not tested"""
     if c['bases'] or not c['first'] or len(c['virtuals']) < 2: return False
     if c['dtor'] and not c.get('dtor_decl'): return False
-    if c['dtor'] and re.search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~\s*%s\s*\(' % ((re.escape(c['qual'][-1]),) * 2),
-                               masked):
+    if c['dtor'] and _d22_search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~\s*%s\s*\(' % ((re.escape(c['qual'][-1]),) * 2),
+                                 c['qual'][-1], masked):
         return False                                     # `~C();` defined in the file: a real destructor
     if not c['first'][2]: return False
     if not named_ok and not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]) and not _d22_numbered(c):
@@ -5937,14 +6100,14 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
         # function nothing defines, a construction would need it. Only a class the file never uses as an object:
         # its name only as `C*`, `C&`, `C::`, in its own body or after `struct` / `class`
         nm = c['qual'][-1]
-        for u in re.finditer(r'(?<![\w~:])%s\b' % re.escape(nm), masked):
+        for u in _d22_finditer(r'(?<![\w~:])%s\b' % re.escape(nm), nm, masked):
             if c['open'] < u.start() < c['close']: continue
             if re.match(r'\s*(?:\*|&|::)', masked[u.end():u.end() + 4]): continue
             if re.search(r'(?:struct|class)\s+$', masked[max(0, u.start() - 12):u.start()]): continue
             return False
     name = c['qual'][-1]
     members = {v[2] for v in c['virtuals'] if v[2]}
-    for m in re.finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), masked):
+    for m in _d22_finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), name, masked):
         if re.sub(r'\s+', '', m.group(1)) in members: return False
     return True
 

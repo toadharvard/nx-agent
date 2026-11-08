@@ -3,6 +3,8 @@
 
 #include <stdlib.h>
 
+extern "C" uint64_t os_monotonic_ns(void);
+
 TEST(time_counters)
 {
     LARGE_INTEGER f, a, b;
@@ -230,4 +232,70 @@ TEST(modules_and_exports)
     CoCreateGuid(&g2);
     CHECK(memcmp(&g1, &g2, sizeof g1) != 0);
     CHECK_EQ(CoCreateInstance(&g1, NULL, 1, &g2, (LPVOID *)&x), REGDB_E_CLASSNOTREG);
+}
+
+/* many regions, created and released out of order, committed page by page (the game's MemoryPool::CommitPage): the
+ * region table stays sorted, every lookup finds its own region, the edges belong to the right one. Prints the time
+ * per page commit. */
+TEST(virtual_alloc_many_regions)
+{
+    enum { N = 300 };
+    char *r[N];
+    for (int i = 0; i < N; i++) {
+        r[i] = (char *)VirtualAlloc(NULL, 0x20000, MEM_RESERVE, PAGE_READWRITE);
+        CHECK(r[i] != NULL);
+    }
+    for (int i = 0; i < N; i += 3) {   /* release a third, out of order */
+        CHECK(VirtualFree(r[i], 0, MEM_RELEASE));
+        r[i] = NULL;
+    }
+    uint64_t t0 = os_monotonic_ns();
+    int bad = 0, commits = 0;
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = N - 1; i >= 0; i--) {
+            if (!r[i])
+                continue;
+            for (int pg = 0; pg < 0x20000; pg += 0x1000) {
+                char *p = (char *)VirtualAlloc(r[i] + pg, 0x1000, MEM_COMMIT, PAGE_READWRITE);
+                bad += p != r[i] + pg;
+                commits++;
+                if (p && pass == 0)
+                    p[0] = (char)i;
+            }
+        }
+    uint64_t t1 = os_monotonic_ns();
+    CHECK_EQ(bad, 0);
+    for (int i = 0; i < N; i++)
+        if (r[i]) {
+            MEMORY_BASIC_INFORMATION mi;
+            CHECK(VirtualQuery(r[i] + 0x1ffff, &mi, sizeof mi) == sizeof mi);
+            CHECK(mi.AllocationBase == r[i]);
+            CHECK_EQ(r[i][0x1f000], (char)i);
+        }
+    CHECK(VirtualAlloc(r[1] + 0x20000 - 0x1000, 0x2000, MEM_COMMIT, PAGE_READWRITE) == NULL);   /* past the end */
+    for (int i = 0; i < N; i++)
+        if (r[i])
+            CHECK(VirtualFree(r[i], 0, MEM_RELEASE));
+    printf("   virtual_alloc_many_regions: %d page commits, %.2f us each\n", commits,
+           (double)(t1 - t0) / 1000.0 / commits);
+}
+
+/* the commit limit, as Windows reports it: the heap constructor 0x00aa3880 exits when ullAvailPageFile < 512 MB */
+TEST(memory_status_page_file)
+{
+    MEMORYSTATUSEX ms;
+    memset(&ms, 0xcc, sizeof ms);
+    ms.dwLength = sizeof ms;
+    CHECK(GlobalMemoryStatusEx(&ms));
+    CHECK_EQ(ms.dwLength, sizeof ms);   /* 64 on the ILP32 guest */
+    CHECK(ms.ullTotalPhys > 0 && ms.ullAvailPhys <= ms.ullTotalPhys);
+    CHECK(ms.ullTotalPageFile >= ms.ullTotalPhys && ms.ullAvailPageFile <= ms.ullTotalPageFile);
+    CHECK(ms.ullAvailPageFile >= ms.ullAvailPhys + ms.ullTotalPhys / 2);
+    CHECK(ms.ullAvailPageFile >= 0x20000000ull);   /* the game's threshold */
+    CHECK(ms.ullTotalVirtual == 0x7FFE0000ull && ms.ullAvailVirtual <= ms.ullTotalVirtual);
+    CHECK_EQ(ms.ullAvailExtendedVirtual, 0);
+    CHECK(ms.dwMemoryLoad <= 100);
+    MEMORYSTATUS m;
+    GlobalMemoryStatus(&m);
+    CHECK(m.dwTotalPageFile >= m.dwTotalPhys && m.dwAvailPageFile >= m.dwAvailPhys);
 }

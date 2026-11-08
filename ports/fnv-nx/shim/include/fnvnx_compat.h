@@ -167,6 +167,15 @@ template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribu
 #define FNVNX_MSVC_BASE_END(...) typename fnvnx_int_of_align<alignof(__VA_ARGS__)>::type : 0;
 #endif
 
+/* -fno-sized-deallocation (W41) stops GCC declaring the sized global operator delete. The decomp still calls
+ * ::operator delete(p, n) explicitly in about 45 units (MSVC 2008 declared it), so declare it here; libsupc++ defines
+ * it (forwards to operator delete(void*)). Implicit delete-expressions stay unsized, as W41 wants. */
+#if defined(__cplusplus) && !defined(__cpp_sized_deallocation)
+#include <cstddef>
+void operator delete(void *, std::size_t) noexcept;
+void operator delete[](void *, std::size_t) noexcept;
+#endif
+
 /* prepare.py rule NEW5: first member of a class whose only scalar operator delete is the placement form; its deleting
  * destructor frees through the global ::operator delete(void*), the function MSVC 2008 called there. */
 #ifdef __cplusplus
@@ -192,6 +201,9 @@ struct fnvnx_new_tag {};
  * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
 template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (flags & 1) delete p; else p->~T(); }
 #define FNVNX_D22_CALL(p, m, ...) fnvnx_d22_vdtor((p), (__VA_ARGS__))
+/* DBUG1 (V1): a hand-indexed `vtbl[k]` of an exe slot k past the receiver class's D1/D0 pair (slot 0 for most classes, 4 for
+ * the TESForm / Actor family) is native slot k + 1 (D26 minus-one); MSVC keeps k. Use it only past the pair. */
+#define FNVNX_VSLOT(k) ((k) + 1)
 /* RAWVT1 (D26): a raw exe slot index on `this`; native vtables are minus-one */
 #define FNVNX_D26_SLOT(k) ((k) + 1)
 /* EMPTY1: a declared-only empty-string object is the temporary T("") the exe builds */

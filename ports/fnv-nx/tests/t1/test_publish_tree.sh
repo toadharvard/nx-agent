@@ -49,4 +49,13 @@ build "$T/bd" "$B" ok adopt; pub "$B"
 ok "an adopted tree: nothing" "! has $B"
 build "$T/bd" "$D"; pub "$D"
 ok "a second commit: published from the same worktree" "has $D && ARTIFACTS='$T/art' REPO='$T/art' bash '$P/tools/farm/fetch_tree.sh' '$D' '$T/got2' 5 > /dev/null 2>&1"
+# the recon set (recon.sh's RECON_ID) travels with the tree, and fetch_tree.sh with FETCH_TREE_RECON takes only a tree of
+# the same set (link 8111f58a's tree was prepared before two recon branches existed)
+E=$(printf 'f%.0s' $(seq 40)); build "$T/bd" "$E"; pub "$E" RECON_ID=r123
+ok "meta.json names the recon set" 'git -C "$T/origin.git" show "t/${E:0:12}:meta.json" | grep -q "\"recon\": \"r123\""'
+ft() { ARTIFACTS="$T/art" REPO="$T/art" bash "$P/tools/farm/fetch_tree.sh" "$E" "$T/got-$1" 5 > /dev/null 2> "$T/ft-$1.err"; }
+FETCH_TREE_RECON=r123 ft same; rs=$?
+FETCH_TREE_RECON=r999 ft other; ro=$?
+ft unset; ru=$?
+ok "FETCH_TREE_RECON: the same set taken, another refused at once (named), unset not checked" '[ $rs = 0 ] && [ $ro = 1 ] && grep -q "another recon set" "$T/ft-other.err" && [ $ru = 0 ]'
 [ $fails = 0 ] && echo "test_publish_tree: all ok" || { cat "$T/pub.log"; echo "test_publish_tree: $fails failed"; exit 1; }

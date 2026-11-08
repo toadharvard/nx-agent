@@ -12,6 +12,7 @@ starting there is a call: x0..x7, v0..v7 and x8 are recorded, x0/v0 get the cann
 for an indirect result), caller-saved registers get garbage, and execution resumes at LR. Bridges (tools/link
 `__fnvnx_br_*`) are real code in the image and run before the stub, so the stub sees the definition's convention.
 """
+import os
 import struct
 
 from unicorn import (Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_BLOCK, UC_HOOK_MEM_UNMAPPED, UC_HOOK_MEM_WRITE,
@@ -35,6 +36,20 @@ BRK = struct.pack('<I', 0xd4200000)
 # access there is the native using a data symbol the link left unbound (native-stub-data). Everything else in the
 # stub range, the code-stub region CODE_STUB + X included, is background as on the oracle (F3b)
 STUB_SLOT = 16
+_MSVC_ALIASES = {}
+
+
+def _msvc_aliases():
+    """{`__fnvnx_msvc_<addr>`: the _ZThn thunk it names} of the link's aliases.ld (empty without the link)."""
+    if not _MSVC_ALIASES:
+        try:
+            import config
+            _MSVC_ALIASES.update({k: v for k, v in a64image.load_aliases(
+                os.path.join(str(config.LINK), 'out', 'aliases.ld'))[1].items() if k.startswith('__fnvnx_msvc_')})
+        except Exception:  # noqa: BLE001
+            pass
+        _MSVC_ALIASES.setdefault('', None)
+    return _MSVC_ALIASES
 
 
 class Call:
@@ -254,7 +269,14 @@ class Arm64Engine:
     def entry(self, orig_addr):
         # an override of a secondary base's virtual: MSVC enters it with `this` at that base, so the native entry is
         # the link's __fnvnx_msvc_<addr> (GCC's _ZThn<d>_ thunk), not __fnv_<addr> (S2c thisadj, difffuzz-19)
-        t = self.image.syms.get('__fnvnx_msvc_%08x' % orig_addr)
+        name = '__fnvnx_msvc_%08x' % orig_addr
+        t = self.image.syms.get(name)
+        if t is None:
+            # (difffuzz-20, flow) the unit's image only has the aliases its own code references; the link's
+            # aliases.ld binds every such entry (0x0093ac20 = _ZThn164_N15PlayerCharacter13GetActorValue...: 11 farm
+            # rows entered the primary body with the secondary-base `this` MSVC passes)
+            tgt = _msvc_aliases().get(name)
+            t = self.image.syms.get(tgt) if tgt else None
         if t is not None:
             return t
         return next((n for n, o in self.image.entries.items() if o == orig_addr), None)
@@ -377,10 +399,15 @@ class Arm64Engine:
             return v - a64image.CODE_STUB if v in self._code_stub_set() else v
         return self.image.entries.get(v, v)
 
-    def _norm_bytes(self, b):
+    def _norm_bytes(self, b, base=None):
+        """base: the address of b[0] when b is copied data (libcalls.Mem.write data=True): a window is a code pointer
+        only at a 4-aligned address (r5-copywin); a stored value is scanned at every byte offset as before."""
         b = bytearray(b)
         i = 0
         while i + 4 <= len(b):
+            if base is not None and (base + i) & 3:
+                i += 1
+                continue
             w = int.from_bytes(b[i:i + 4], 'little')
             n = self._codeptr(w)
             if n == w and self.vtables:
@@ -429,6 +456,8 @@ class Arm64Engine:
     def _on_private_read(self, uc, access, address, size, value, r):
         if any(na <= address < na + n for na, _, n in getattr(self, 'static_pairs', ())):
             return                      # a paired local static: compared at the oracle's address instead
+        if any(na <= address < na + n for na, n in getattr(self, 'static_nguards', ())):
+            return                      # its guard: both machines start at zero (difffuzz-20, static-guard)
         r.private_reads += 1
         if len(r.private_addrs) < 32:
             r.private_addrs.add(address)
@@ -574,8 +603,11 @@ class Arm64Engine:
                 x0 = r.calls[-1].args[0] & 0xffffffff
             elif ch and ch[0][1][0] == 'x':
                 x0 = r.calls[-1].args[ch[0][1][1]] & 0xffffffff
-        elif ck == 'ref':
+        elif ck == 'ref' or k in world.REF_CALLS:
             x0 = world.ref_result(k)
+            if k in world.REF_CALLS:
+                self._ensure(x0, 16)
+                uc.mem_write(x0, rb[:16])
         elif ck == 'bool' or (ck == 'untyped' and not self._is_import(name, target)):
             # a real bool result is 0/1. An import is not normalised: x86emu._on_import gives it the raw canned
             # word (S1-rules d26-imp: TlsGetValue was 0xffffffff on x86, 0xffffff01 natively, so [ret + 4] faulted
@@ -583,6 +615,11 @@ class Arm64Engine:
             x0 = (x0 & ~0xff) | (rb[0] & 1)
         uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
+        if k in world.REF_CALLS:
+            # (r5 design) the canned object seen by value: a struct of floats comes back in s0..s3 (AAPCS64 HFA), the
+            # words the oracle loads through the pointer
+            for i in range(1, 4):
+                uc.reg_write(VR[i], int.from_bytes(rb[4 * i:4 * i + 4], 'little'))
         if cv is not None and cv.hidden and cv.ret is not None:
             # the MSVC side returns this value through memory: the same bytes here, wherever AAPCS64 puts them
             res = world.result_bytes(case, k, cv.ret.size)

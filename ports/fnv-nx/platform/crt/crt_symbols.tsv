@@ -72,6 +72,7 @@
 0x00ec34d4	cpplib	std::locale::_Getgloballocale() [locale::_Getfacet fallback, locale() _Incref]	i	2	2	fnvnx_locale_getgloballocale
 0x00ec3599	cpplib	std::locale::facet::_Facet_Register	n	1	1	fnvnx_facet_register
 0x00ec35d7	cpplib	std::_Locinfo::_Locinfo_dtor(_Locinfo*) [~_Locinfo]	i	1	2	fnvnx_locinfo_dtor
+0x00ec3685	crt	std::_Locimp::`scalar deleting destructor' (vftable 0x010f1ed8 slot 0; ~_Locimp is 0x00ec3648)	i	0	0	__fnv_00ec3685 (msvc_names.c: free only, the native _Locimp owns nothing)
 0x00ec36a6	cpplib	std::locale::_Init() [locale::locale()]	i	2	2	fnvnx_locale_init
 0x00ec3740	cpplib	std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)	i	1	2	fnvnx_locinfo_ctor
 0x00ec379c	cpplib	_Tolower(int, const _Ctypevec*)	i	1	2	fnvnx_tolower_ctype
@@ -83,6 +84,7 @@
 0x00ec3bf0	crt	_byteswap_uint64 [8-byte BSEndian swap]	i	1	1	fnvnx_byteswap_uint64
 0x00ec3d33	helper	__CxxFrameHandler3	n	4	0	implicit: GCC EH
 0x00ec408c	helper	__security_check_cookie	n	534	12	fnvnx_security_check_cookie
+0x00ec40ab	crt	type_info::`scalar deleting destructor' (vftable 0x010f1ee0 slot 0; ~type_info is 0x00ec409b)	i	0	0	__fnv_00ec40ab (msvc_names.c: free only)
 0x00ec43fb	helper	__RTDynamicCast	n	393	132	fnvnx_rt_dynamic_cast
 0x00ec44d0	crt	memcpy / memmove	n	98	263	libc: memmove (VC9's memcpy is overlap-safe)
 0x00ec4835	crt	memcmp	n	62	79	libc: memcmp
@@ -126,6 +128,9 @@
 0x00ec79a1	cpplib	std::exception::~exception()	i	6	9	fnvnx_exception_dtor
 0x00ec79b7	cpplib	std::exception::what() const (vftable slot 1 of the units' own std::exception copies; no unit names it)	i	0	0	fnvnx_exception_what
 0x00ec79c4	cpplib	std::bad_cast::bad_cast(const char*)	n	1	1	fnvnx_bad_cast_ctor
+0x00ec7a8a	crt	std::exception::`scalar deleting destructor' (vftable 0x010f1fa4 slot 0; (this, flags), ret 4)	i	0	0	__fnv_00ec7a8a (msvc_names.c: fnvnx_exception_dtor + FormHeap_Free when flags&1)
+0x00ec7aab	crt	std::bad_cast::`scalar deleting destructor' (vftable 0x010f1fc4 slot 0)	i	0	0	__fnv_00ec7aab (msvc_names.c)
+0x00ec7ad2	crt	std::bad_typeid::`scalar deleting destructor' (vftable 0x010f1fd0 slot 0; also __non_rtti_object 0x010f1fdc slot 0)	i	0	0	__fnv_00ec7ad2 (msvc_names.c)
 0x00ec7c56	crt	_invalid_parameter_noinfo	n	38	42	platform/crt: _invalid_parameter_noinfo
 0x00ec7c66	crt	memcpy_s	n	6	16	platform/crt: memcpy_s
 0x00ec7c6b	crt	memcpy_s, past its hot-patch prologue (8b ff 55 8b ec at 0x00ec7c66; the decomp binds this address, the exe never calls it)	n	7	7	platform/crt: memcpy_s
@@ -232,6 +237,7 @@
 0x00ecdf44	crt	__iob_func	i	1	1	platform/crt: __iob_func (fnvnx_iob[3], MSVC _iobuf layout)
 0x00ece104	helper	_except_handler3	n	1	0	none: SEH not reproduced
 0x00ece23e	crt	_mbstok (_tcstok under _MBCS): movie list tokenizer	i	1	1	fnvnx_mbstok
+0x00ece2fb	crt	std::bad_exception::`scalar deleting destructor' (vftable 0x010f20a8 slot 0)	i	0	0	__fnv_00ece2fb (msvc_names.c)
 0x00ee6d44	thunk	ws2_32 closesocket	i	1	2	fnvnx_ws2_* (see imports.tsv)
 0x00ee6d4a	thunk	ws2_32 socket	i	1	2	fnvnx_ws2_* (see imports.tsv)
 0x00ee6d50	thunk	ws2_32 WSAGetLastError	i	1	2	fnvnx_ws2_* (see imports.tsv)

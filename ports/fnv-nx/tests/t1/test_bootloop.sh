@@ -11,7 +11,7 @@ fails=0; ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$(
 # a stand-in source tree: the job's own scripts, a Makefile that writes stage records, a farm_boot.sh
 S=$T/src; Q=$S/ports/fnv-nx
 mkdir -p "$Q/tools/farm" "$Q/tests/s5" "$Q/toolchain/gcc" "$Q/toolchain/devkita64" "$Q/toolchain/cross" "$Q/toolchain/vorbis"
-for f in bootloop_job.sh lib_job.sh recon.sh linkcache.sh ratchet.py; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
+for f in bootloop_job.sh lib_job.sh recon.sh linkcache.sh ratchet.py boot_determinism.py; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
 for f in toolchain/sources.sh toolchain/gcc/build.sh toolchain/devkita64/x toolchain/cross/x toolchain/vorbis/build.sh; do echo x > "$Q/$f"; done
 printf '# pins\n' > "$Q/tools/fetch.sh"
 cat > "$Q/Makefile" <<'MK'
@@ -20,7 +20,7 @@ GOALS := $(MAKECMDGOALS)
 $(firstword $(MAKECMDGOALS)):
 	@echo "$(GOALS) FNVNX_STUB_NULLDEV=$${FNVNX_STUB_NULLDEV-unset}" >> $(CALLS)
 	@for s in $(if $(filter guest,$(GOALS)),fetch toolchain prepare compile link guest,toolchain); do mkdir -p $(BUILD_DIR)/$$s; \
-	  st=ok; [ "$$s" = "$${FAKE_FAIL:-}" ] && st=fail; \
+	  st=ok; [ "$$s" = "$${FAKE_FAIL:-}" ] && { st=fail; printf 'fnvlink: resolve\nTypeError: the stage-own error\n' > $(BUILD_DIR)/$$s/stage.log; }; \
 	  printf '{"status": "%s", "seconds": 3.5, "metrics": {"compile_built_now": 2, "link_objcache_bodies_hits": 9, "link_objcache_bodies_misses": 1, "prepare_reused": 1}, "artifacts": {"prefix": "/x"}}\n' $$st > $(BUILD_DIR)/$$s/stage.json; done
 	@[ -z "$(filter guest,$(GOALS))" ] || { touch $(BUILD_DIR)/compile/objects.tsv; mkdir -p $(BUILD_DIR)/guest $(BUILD_DIR)/link/out; \
 	  v=nso; case "$$FNVNX_LINK_OBJCACHE" in *linkeq-cache) echo cold >> $(CALLS); [ -n "$${FAKE_DIFF:-}" ] && v=other;; esac; \
@@ -36,7 +36,16 @@ import json, sys
 names = ["winmain", "ini-read", "renderer-init", "archive-list", "bsa-opened", "esm-header", "masters-loaded", "main-menu", "first-frame", "first-input"]
 ms = [{"name": n, "reached": i < 3} for i, n in enumerate(names)]
 json.dump({"milestones": ms, "milestone": "renderer-init", "stop": {"reason": "STOPPED: wall-clock"}}, open(sys.argv[1], "w"))' "$2/boot_summary_stub.json"
+# lockstep: the function trace EMU_EXTRA asks for (--trace-fn @list --trace-out <file>): A, then B with another receiver
+to=$(echo "$EMU_EXTRA" | sed -n 's/.*--trace-out \([^ ]*\).*/\1/p')
+echo "trace-out=${to:-none} list=$(echo "$EMU_EXTRA" | sed -n 's/.*--trace-fn @\([^ ]*\).*/\1/p')" >> "$CALLS"
+if [ -n "$to" ]; then
+	printf 'call\t1\t1\t0\tA\t00401000\t0x11f6238\t0x5\t0\t0\t0\t0\t0\t0\t0x3dfff000\t0x5000000\tWinMain [orig 0086a850]\n' > "$to"
+	rcv=0x22; [ -n "${FAKE_NONDET:-}" ] && rcv=$(printf '0x%x' $((RANDOM + 1)))   # FAKE_NONDET: another receiver each boot
+	printf 'call\t2\t1\t0\tB\t00402000\t%s\t0x5\t0\t0\t0\t0\t0\t0\t0x3dfff000\t0x5000000\tWinMain [orig 0086a850]\n' "$rcv" >> "$to"
+fi
 SH
+cp "$P/tests/s5/boot_trace.py" "$Q/tests/s5/"; echo '# stand-in emu_guest.py (its hash names the determinism check)' > "$Q/tests/s5/emu_guest.py"
 git -C "$S" init -q; git -C "$S" add -A; git -C "$S" -c user.name=t -c user.email=t@t commit -qm one; C1=$(git -C "$S" rev-parse HEAD)
 git init -q --bare "$T/art.git"; git clone -q "$T/art.git" "$T/art" 2>/dev/null
 run() {   # run <name> [VAR=value ...]
@@ -45,17 +54,41 @@ run() {   # run <name> [VAR=value ...]
 	  FARM_GAMEDATA=0 JOBS=2 FNVNX_STUB_NULLDEV=1 "$@"; mkdir -p "$T/ext"
 	  bash "$Q/tools/farm/bootloop_job.sh" "$C1" "$T/$n.md" > "$T/$n.log" 2>&1; echo $? > "$T/$n.rc" )
 }
+run nolock
+ok "no reference published yet: no lockstep, said so" 'grep -q "^- bt1: no trace/\* branch yet .*; coc: no scenario/original branch yet (S18)" $T/nolock.md && grep -q "^trace-out=none" $T/calls'
+rm -rf "$T/home"; : > "$T/calls"
+# the boot trace's reference: trace/<link12> with list.txt and the exe's Wine trace (A, C, B)
+( cd "$T/art" && git checkout -q --orphan tr && printf '00401000 A\n00402000 B\n00403000 C\n' > list.txt &&
+  { printf 'call\t1\t204\t0\tA\t00401000\t0x11f6238\t0\t0x5\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'
+    printf 'call\t2\t204\t0\tC\t00403000\t0x11f6238\t0\t0x5\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'
+    printf 'call\t3\t204\t0\tB\t00402000\t0x11f6238\t0\t0x5\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'; } > wine.tsv &&
+  xz wine.tsv && git add list.txt wine.tsv.xz && git -c user.name=t -c user.email=t@t commit -qm ref &&
+  git push -q origin HEAD:refs/heads/trace/aaaaaaaaaaaa ) > /dev/null 2>&1
+# S18's reference: scenario/original trace-coc (list3.txt with an API line, which only the exe traces); A then B
+( cd "$T/art" && git checkout -q --orphan so && git rm -rqf . && mkdir trace-coc &&
+  printf '00401000 A\n00402000 B\n00405000 E\n7b810000 kernel32!CreateFileA\n' > trace-coc/list3.txt &&
+  { printf 'call\t1\t204\t0\tA\t00401000\t0x11f6238\t0\t0x5\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'
+    printf 'call\t2\t204\t1\tkernel32!CreateFileA\t7b810000\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'
+    printf 'call\t3\t204\t0\tB\t00402000\t0x11f6238\t0\t0x5\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'; } > trace-coc/wine.tsv &&
+  xz trace-coc/wine.tsv && git add trace-coc && git -c user.name=t -c user.email=t@t commit -qm coc &&
+  git push -q origin HEAD:refs/heads/scenario/original ) > /dev/null 2>&1
 run first
+ok "lockstep: the guest traces the lists' union (image functions only), both references named" 'grep -q "^trace-out=$T/home/bootloop/stub_trace.tsv list=$T/home/bootloop/lockref/union.txt" $T/calls && [ "$(cut -d" " -f1 $T/home/bootloop/lockref/union.txt | tr "\n" " ")" = "00401000 00402000 00403000 00405000 " ] && grep -q "^- bt1: origin/trace/aaaaaaaaaaaa (3 functions); coc: origin/scenario/original (4 functions); the guest traced on 4 functions" $T/first.md'
+ok "against bt1: the divergences listed with their chains" 'sed -n "/^### against bt1/,/^### /p" $T/first.md | grep -q "^- 2 calls of the guest, 3 of the exe, 2 matched in order; 2 divergences listed (missing 1, arg 1); first: arg x0 in B" && grep -q "DIVERGENCES (the first 2)" $T/first.md && grep -q "guest: #2 B" $T/first.md'
+ok "against coc (S18): its list only, the API line left to the exe" 'sed -n "/^### against coc/,\$p" $T/first.md | grep -q "^- 2 calls of the guest, 2 of the exe, 2 matched in order; 1 divergences listed (arg 1); first: arg x0 in B"'
+ok "lockstep in the sidecar, per reference" 'python3 -c "import json,sys; l=json.load(open(sys.argv[1]))[\"lockstep\"][\"refs\"]; assert l[\"bt1\"][\"divergences\"]==2 and l[\"bt1\"][\"first\"]==\"B\" and l[\"coc\"][\"divergences\"]==1" $T/first.json'
 ok "the warm link is checked once against a cold link at the same paths: PASS" 'grep -q "^cold$" $T/calls && grep -q "incremental link check (warm == cold): PASS" $T/first.md && [ -f $T/home/bootloop/linkeq.done ] && [ ! -d $T/home/bootloop/build/link.warm ]'
 ok "first iteration: exit 0, cold, milestones 3/10, null device" '[ "$(cat $T/first.rc)" = 0 ] && grep -q "cold: the first build on this machine" $T/first.md && grep -q "game milestones 3/10; last reached: renderer-init; null device: FNVNX_STUB_NULLDEV=1" $T/first.md'
 ok "make: guest only, with FNVNX_STUB_NULLDEV unset (the farm exported it)" 'grep -q "^guest FNVNX_STUB_NULLDEV=unset" $T/calls && ! grep -q "census\|package" $T/calls'
 ok "the stub boot on the build's guest, nulldev=1, 300 s" 'grep -q "^boot stub nulldev=1 guest=$T/home/bootloop/build/guest timeout=300" $T/calls'
 ok "steps and stages with seconds; the stages ran" 'grep -q "^| build | [0-9]* |" $T/first.md && grep -q "^| stub boot | [0-9]* |" $T/first.md && grep -q "^| link | ok | ran | 3.5 | compile cache 9 hits, 1 misses |" $T/first.md && grep -q "^| compile | ok | ran | 3.5 | 2 units compiled now |" $T/first.md'
+ok "the path line: the tree kept, the units compiled now, link and guest seconds" 'grep -q "^- path: incremental: the tree kept, 2 units compiled; link 3.5 s, guest 3.5 s" $T/first.md'
 ok "sidecar fnvnx-bootloop/1" 'python3 -c "import json,sys; j=json.load(open(sys.argv[1])); assert j[\"schema\"]==\"fnvnx-bootloop/1\" and j[\"reached\"]==3 and j[\"of\"]==10 and j[\"cold\"] and \"stub boot\" in j[\"steps\"] and j[\"error\"] is None" $T/first.json'
 run second
 ok "second iteration: the same build directory, not cold, no second cold link" '[ "$(cat $T/second.rc)" = 0 ] && ! grep -q "cold:" $T/second.md && [ "$(grep -c "^cold$" $T/calls)" = 1 ] && grep -q "passed on this machine before" $T/second.md'
 run bad FAKE_FAIL=link
-ok "a failed stage: exit 1, FAIL names it, no boot" '[ "$(cat $T/bad.rc)" = 1 ] && sed -n 3p $T/bad.md | grep -q "^- FAIL: the link stage did not end ok/warn" && [ "$(grep -c "^boot " $T/calls)" = 2 ] && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"error\"]" $T/bad.json'
+ok "a failed stage: its own log tail in the report (not the job log)" 'grep -q "^- the link stage: " $T/bad.md && grep -q "^TypeError: the stage-own error" $T/bad.md'
+ok "a failed stage: exit 1, FAIL names it, no boot" '[ "$(cat $T/bad.rc)" = 1 ] && sed -n 3p $T/bad.md | grep -q "^- FAIL: the link stage did not end ok/warn" && ! grep -q "^boot " <(tail -n +$(grep -n "^guest " $T/calls | tail -1 | cut -d: -f1) $T/calls) && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"error\"]" $T/bad.json'
 python3 -I - "$P" "$T/first.md" "$T/first.json" <<'PY' > "$T/py.out" 2>&1
 import json, sys
 sys.path.insert(0, sys.argv[1] + '/tools/farm')
@@ -71,4 +104,9 @@ ok "the ratchet measures the bootloop's milestones (nulldev metrics)" 'grep -q "
 mv "$T/home/bootloop/linkeq.done" "$T/linkeq.done.first"; n0=$(grep -c "^boot " $T/calls)
 run diff FAKE_DIFF=1
 ok "warm != cold: exit 1, FAIL, warm outputs kept, no boot" '[ "$(cat $T/diff.rc)" = 1 ] && grep -q "^- FAIL: the incremental link differs from the cold link" $T/diff.md && [ -d $T/home/bootloop/build/link.warm ] && [ ! -f $T/home/bootloop/linkeq.done ] && [ "$(grep -c "^boot " $T/calls)" = "$n0" ]'
+# determinism: once per machine and emu_guest.py, the same stub boot twice; a boot that disagrees fails the job
+ok "determinism: the second stub boot agreed (a prefix: cut short by the clock), recorded once" 'grep -q "^- determinism (two identical stub boots): PASS: consistent" $T/first.md && ls $T/home/bootloop/determinism-*.done > /dev/null && grep -q "^- determinism (two identical stub boots): passed on this machine" $T/second.md'
+rm -f "$T"/home/bootloop/determinism-*.done; mv "$T/linkeq.done.first" "$T/home/bootloop/linkeq.done"
+run nondet FAKE_NONDET=1
+ok "two stub boots that disagree: exit 1, FAIL, not recorded" '[ "$(cat $T/nondet.rc)" = 1 ] && grep -q "^- FAIL: two identical stub boots disagree: FAIL: the function traces differ at line 2" $T/nondet.md && ! ls $T/home/bootloop/determinism-*.done > /dev/null 2>&1'
 [ $fails = 0 ] && echo "test_bootloop: all ok" || { tail -5 "$T"/*.log "$T/py.out"; cat "$T/calls"; echo "test_bootloop: $fails failed"; exit 1; }

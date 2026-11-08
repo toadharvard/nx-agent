@@ -113,9 +113,26 @@ POLICY = {
                                                  'those stores differently (no allocation returns the caller\'s own '
                                                  'object); equal with the results moved to the heap'),
     'ptrdiff-unaligned': ('by-design', '-', False, 'a pointer difference that is not a multiple of the element size: '
-                                                   'GCC folds (end - begin) / size * size to end - begin, MSVC keeps '
-                                                   'the division (UB in C++); equal with 4-aligned arguments'),
+                                                   'GCC divides exactly (or folds (end - begin) / size * size), MSVC '
+                                                   'keeps the idiv (UB in C++); equal with 4-aligned arguments or, '
+                                                   'for `sub; cdq; idiv K` in the exe, with the subtrahend word '
+                                                   'rounded to a multiple of K (r5design.ptrdiff_probe)'),
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
+    'dead-result':    ('by-design', '-', False, 'the target\'s integer / pointer result is read by no caller in the exe '
+                                                '(every call is followed by a write of eax, or by a bare return of '
+                                                'a wrapper whose callers do the same; the address is never taken): '
+                                                'eax at the return is scratch (r5design.result_dead)'),
+    'dead-init-call': ('by-design', '-', False, 'MSVC /Od calls a constructor that only stores through this into a '
+                                                'frame object whose every byte the caller then overwrites before any '
+                                                'read; GCC drops the dead initialisation (r5design.dead_init_site)'),
+    'local-index-range': ('by-design', '-', False, 'a variable index into a local array leaves the frame (it writes '
+                                                   'the caller\'s arguments, or wraps): the result moves with each '
+                                                   'compiler\'s frame layout; equal for every index inside the frame '
+                                                   '(r5design.frame_index_probe)'),
+    'canned-null-deref': ('artifact', 'S13', False, 'the oracle\'s wild indirect call got a canned 0 and the next '
+                                                    'instruction loads through eax; the native\'s declaration returns a '
+                                                    'reference, which the harness answers with a valid object; equal '
+                                                    'with that object on both machines (r5design.deref_after_call)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
     'partial-return': ('by-design', '-', False, 'the oracle returns a byte / short in al / ax and the rest of eax is '
@@ -160,6 +177,10 @@ POLICY = {
     # --- harness / oracle-model artefacts ----------------------------------------------------------------------------
     'local-static':  ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
                                                  '(fuzzed bytes), GCC in .bss (zero): not compared state'),
+    'thunk-forward':  ('artifact', 'S13', False, 'the exe function is a single `jmp rel32` (incremental-link thunk) and the '
+                                                 'decomp declares it without parameters: the arguments it forwards '
+                                                 'to its callee are not defined by the case (zero stack words on '
+                                                 'the oracle, unset registers natively)'),
     'uninit-both':    ('artifact', 'S13', False, 'both machines read garbage: the fuzzed case is invalid for both'),
     'stub-outparam':  ('artifact', 'S13', False, 'the native reads back a stack buffer it passed to a stubbed callee '
                                                  'that never filled it (GCC temporary + copy where MSVC passed its '
@@ -351,6 +372,12 @@ POLICY = {
     'oracle-callee-unloaded': ('artifact', 'S13', False, 'the oracle intercepts X (canned result) while the native '
                                                          'object defines X and runs its body: X is not in the '
                                                          'oracle\'s code set (unit membership / follow gap)'),
+    'throw-temp-dtor': ('by-design', '-', False, 'the native calls the destructor of a temporary right before the throw '
+                                                'the oracle ends the run at: GCC destroys the temporaries of a throw '
+                                                'expression before __cxa_throw, MSVC emits the same call after '
+                                                '_CxxThrowException (never run, the unwind map does it); the exe has '
+                                                'that call within a few instructions after the throw '
+                                                '(exeempty.calls_after_noreturn)'),
     'dyninit-no-atexit': ('real-bug', 'S10', False, 'the dynamic initializer registers the object\'s destructor '
                                                     'with atexit in the exe; the native initializer does not '
                                                     '(no fnvnx_xc_atexit): the destructor never runs at exit'),
@@ -1306,7 +1333,8 @@ def native_ran(source, name, trace, exclude=()):
     for n in reach:
         if native_defines(source, n) is not False or n in exclude:
             continue                                     # unit-local (untraced), unknown, or called by the caller too
-        toks.add(n[6:] if n.startswith('__fnv_') and len(n) == 14 else 'name:' + n)
+        m = re.match(r'__fnv_([0-9a-f]{8})(?:_[CD][0-2])?$', n)   # __fnv_<addr>, or its secondary-base entry _C2 / _D2
+        toks.add(m.group(1) if m else 'name:' + n)
     return any(str(t) in toks for t in trace)
 
 
@@ -1418,6 +1446,8 @@ def _libc_variant(x, a):
         return m is not None and n in (m, m + 'f')
     if base is not None and base == m:
         return True                                     # sprintf vs __sprintf_chk (_FORTIFY_SOURCE)
+    if n.startswith('__isoc23_') and n[9:] == m:
+        return True                                     # strtoul vs glibc's C23 redirect __isoc23_strtoul
     if m in MATH and n == m + 'f':
         return True                                     # atan vs atanf
     return (m, n) in LIBC_PAIRS
@@ -1477,6 +1507,13 @@ def _rule_callflow(d, rec):
     if x is not None and not ta and me is not None and _empty_body(me[0]):
         return 'native-empty-body'
     xa = _hex(x)
+    if k == 'call-target' and xa == 0x00ec7894 and a is not None and d.get('arm_next') == x and \
+            _hex(a) is not None:
+        # (difffuzz-20, flow) the native's one extra call before the throw is the destructor of a temporary the exe
+        # calls right after its _CxxThrowException 0x00ec7894 (dead code, run by the unwind map)
+        import exeempty
+        if _hex(a) in exeempty.calls_after_noreturn(addr, xa):
+            return 'throw-temp-dtor'
     if xa == ATEXIT:
         cs = native_callees(src, addr)
         if cs is not None and not cs & ATEXIT_NAMES:
@@ -1503,6 +1540,19 @@ def _rule_callflow(d, rec):
         if (k == 'call-target' and '__fnv_%08x' % xa in cs
                 and native_ran(src, '__fnv_%08x' % xa, seen, exclude=cs | others)):
             return 'oracle-callee-unloaded'
+        # (EQ, farm baseline 588863: 0x007d1bb0 StartMenu) runner's dynamic evidence: the native executed X's own
+        # __fnv_<X> entry block in this run (arm_entered) and its call here is the oracle's next one, so the one
+        # difference is the oracle's traced call of X, which the native ran untraced in its unit. A leaf X makes no
+        # traced call, so native_ran has nothing to go on; an early exit before X never enters it (V1 U1)
+        if (k == 'call-target' and '__fnv_%08x' % xa in cs and '%08x' % xa in (d.get('arm_entered') or ())
+                and a is not None and d.get('x86_next') == a):
+            return 'oracle-callee-unloaded'
+    # (EQ, farm baseline 588863: 0x00905330 -> BSSimpleList::IsEmpty 0x008256d0) the oracle's last call is X, a
+    # callee the native's object only references (a provider of the unit image defines it): the native entered its
+    # __fnv_<X> block in this run (arm_entered) and ran it untraced, so the traces are equal but for that one call
+    if (k == 'call-count' and a is None and xa is not None and xa != addr and len(tx) == len(ta) + 1
+            and '%08x' % xa in (d.get('arm_entered') or ()) and '__fnv_%08x' % xa in (native_callees(src, addr) or ())):
+        return 'oracle-callee-unloaded'
     # a decomp-local stand-in for an original function defined elsewhere, with an empty body: tied to the divergence
     # when the oracle calls that original where the native diverges, or when the native stops early
     if x is not None:

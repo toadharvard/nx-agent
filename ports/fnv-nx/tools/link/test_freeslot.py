@@ -46,7 +46,14 @@ def main():
           'a member keeps its binding')
     check(fnvlink.free_slot(0x00404000, nd('_Z6Helperi', '?Helper@@YAXH@Z'), br, st) is None,
           'a named free function is not in the class (S5 scope: FUN_<a>)')
-    check(st == collections.Counter({'free-slot-drop': 2, 'free-slot-edx': 1}), 'counts')
+    # R2 (vtgate 4264bfd7): extern "C" stand-ins, the native name is the plain C name
+    t4 = fnvlink.free_slot(0x00c73170, nd('FUN_00c73170', '@FUN_00c73170@12'), br, st)
+    check(t4 is not None and 'mov w1, #0' in br[t4], 'extern "C" __fastcall @FUN_<a>@N: edx inserted')
+    t5 = fnvlink.free_slot(0x00d2dd50, nd('FUN_00d2dd50', '_FUN_00d2dd50@16'), br, st)
+    check(t5 is not None and 'mov x0, x1' in br[t5], 'extern "C" __stdcall _FUN_<a>@N: this dropped')
+    check(fnvlink.free_slot(0x00d2dd60, nd('Other', '_FUN_00d2dd60@16'), br, st) is None,
+          'extern "C" MSVC name with another native name: not taken')
+    check(st == collections.Counter({'free-slot-drop': 3, 'free-slot-edx': 2}), 'counts')
     asm = shutil.which('aarch64-linux-gnu-as')
     if asm:
         d = tempfile.mkdtemp()

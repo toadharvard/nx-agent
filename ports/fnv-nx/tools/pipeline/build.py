@@ -114,11 +114,11 @@ CONFIG = [
                                        'fnv.nro restarts, so the placeholder is fine (NX1)'),
     ('TESTS', 'all', 'comma list of test suites to run (names in docs/BUILD.md), all, or none'),
     ('EMU_TIMEOUT', '3000', 'seconds for the emulated boot of the game guest (boot stage)'),
-    ('EMU_BUDGET', 'auto', 'instructions per scheduling slice of the emulated boot; auto: 0 (none: the slices are '
-                           'EMU_SLICE_MS long) when tests/s5/emu_guest.py has --slice-ms, else 6000000000 (S5\'s old '
-                           'value). An instruction count makes unicorn hook every instruction, about 10x slower (S5)'),
-    ('EMU_SLICE_MS', '2000', 'wall-clock ms per scheduling slice of the emulated boot (with an emu_guest.py that has '
-                             '--slice-ms)'),
+    ('EMU_BUDGET', 'auto', 'instructions per scheduling slice of the emulated boot; auto: 0 (threads switch at host '
+                           'calls, deterministically) when tests/s5/emu_guest.py has --hc-slice (S5 620572bc), else '
+                           '6000000000. An instruction count makes unicorn hook every instruction, about 10x slower'),
+    ('EMU_SLICE_MS', '', 'emu_guest.py --slice-ms (its fallback timer for a thread making no host call); empty: '
+                         'emu_guest.py\'s default (60 s). A short timer makes boots nondeterministic (S5)'),
     ('FORCE', '', 'comma list of stages to rerun even when cached (all = every stage)'),
     ('CLEAN_WORK', '1', '1: remove re-creatable work trees (clones, third-party build dirs) once their stage or test '
                         'suite succeeded; 0: keep them for faster reruns'),
@@ -1649,16 +1649,21 @@ def msvc_objs_id(b, key='MSVC_OBJS'):
 
 
 def emu_slicing(b):
-    """emu_guest.py's scheduling arguments for the boot stage: time slices (--budget 0 --slice-ms N) when this
-    emu_guest.py has --slice-ms (S5 2d1afaeb: emu_start(count=N) hooks every instruction, about 9 MIPS; the stub
-    boot reached archive-list in 46 s with slices, was still in the INI read at 540 s with a count), else the old
-    instruction count (--budget 0 there means no preemption at all). EMU_BUDGET other than auto is taken as given."""
+    """emu_guest.py's scheduling arguments for the boot stage. With an emu_guest.py that preempts at host calls
+    (S5 620572bc, --hc-slice: deterministic, and about 10x faster than an instruction count, which makes unicorn
+    hook every instruction): --budget 0 and emu_guest.py's own defaults; no timer of ours (its --slice-ms is now a
+    60 s fallback; EMU_SLICE_MS passes one only when set). Without it, the old instruction count 6e9: the timer
+    slices of 2d1afaeb..6da559aa were nondeterministic (emu_stop from the timer thread can leave the PC at the block
+    start, a resume re-runs instructions), and budget 0 on an older emu_guest.py means no preemption at all.
+    EMU_BUDGET other than auto is taken as given."""
     emu = os.path.join(ROOT, 'tests', 's5', 'emu_guest.py')
-    slices = '--slice-ms' in (open(emu, errors='replace').read() if os.path.isfile(emu) else '')
+    text = open(emu, errors='replace').read() if os.path.isfile(emu) else ''
+    hc = '--hc-slice' in text
     bud = b.cfg.get('EMU_BUDGET', 'auto')
     if bud == 'auto':
-        bud = '0' if slices else '6000000000'
-    return ['--budget', bud] + (['--slice-ms', b.cfg.get('EMU_SLICE_MS') or '2000'] if slices else [])
+        bud = '0' if hc else '6000000000'
+    sl = b.cfg.get('EMU_SLICE_MS') or ''
+    return ['--budget', bud] + (['--slice-ms', sl] if sl and '--slice-ms' in text else [])
 
 
 def link_exe(b):

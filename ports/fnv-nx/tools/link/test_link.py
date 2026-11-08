@@ -279,6 +279,13 @@ def main():
     check(r_[:3] == ('addr', 'gref/ident', 0x01000100), 'identifier-only data binding: %s' % (r_,))
     r_ = fnvlink.classify_ref('w', sigs.parse_itanium('w', None), fnvlink.KeyIndex(), gi, gi, set(), None, ident)
     check(r_[0] == 'ambiguous', 'identifier at two addresses is not guessed: %s' % (r_,))
+    # W44: the referencing unit's own symbols name one of them (font.cpp's pInstance)
+    r_ = fnvlink.classify_ref('w', sigs.parse_itanium('w', None), fnvlink.KeyIndex(), gi, gi, set(), None, ident,
+                              {'w': {0x01000300}})
+    check(r_[:3] == ('addr', 'unit/ident', 0x01000300), 'identifier the unit names once: %s' % (r_,))
+    r_ = fnvlink.classify_ref('w', sigs.parse_itanium('w', None), fnvlink.KeyIndex(), gi, gi, set(), None, ident,
+                              {'w': {0x01000200, 0x01000300}})
+    check(r_[0] == 'ambiguous', 'identifier the unit names at two addresses is not guessed: %s' % (r_,))
     v = abi.compare(SE['?e@M@@QAE_NPAU1@@Z'], SE['?e@@YI_NPAUB@@HPAUO@@@Z'])
     check(v.kind == 'bridge' and 'edx-dummy' in v.classes, 'thiscall M::f(M*) -> the same: %s %s'
           % (v.kind, v.classes))

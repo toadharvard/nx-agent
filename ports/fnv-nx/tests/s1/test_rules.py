@@ -1059,7 +1059,17 @@ s1.bind_units_data(_data, _c)
 s1.bind_units_data(_data, _c)
 check('BIND1 binds the stand-in names once, in their unit only', repr(_data) + ' %d' % _c['BIND1'],
       ["'?Allocate@MemoryManagerAA3880@@QAEPAXI@Z': '0x00aa3e40'", "'?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A': '0x011f6238'",
-       "'?entryNpos@@3IA': '0x010173f0'", "'symbols': {}}]} 3", "'?x@@3HA': '0x1'"])
+       "'?entryNpos@@3IA': '0x010173f0'", "'symbols': {}}]} 4", "'?x@@3HA': '0x1'",
+       "'?smallPools@fnv_00aafc80@@3PAPAUDeallocPool@1@A': '0x011f67b8'"])
+# W28: the memory manager of src/bssystem/archive.cpp (top-down 109) and the small-pool table (44) are bound in their units
+_c = Counter()
+_data = {'units': [{'source': 'src/bssystem/archive.cpp', 'symbols': {}}]}
+s1.bind_units_data(_data, _c)
+check('BIND1 binds archive.cpp\'s g_memoryManager_af5480 to the memory manager', repr(_data['units'][0]['symbols']),
+      ["'?g_memoryManager_af5480@fnv_00af5480@@3UMemoryManager_af5480@1@A': '0x011f6238'"])
+check('BIND1 rows are all well-formed (MSVC data names at image data addresses)',
+      repr([r for r in s1.BIND1_REFS if not (r[1].startswith('?') and r[2].startswith('0x') and
+                                              0x00401000 <= int(r[2], 16) < 0x02100000)]), ['[]'])
 
 # ---- NATIVE1 (render R3): the drop list's matching, shared by prepare's drop_native_units and tools/rules/native1.py
 _spec = importlib.util.spec_from_file_location('native1', os.path.join(HERE, '..', '..', 'tools', 'rules', 'native1.py'))
@@ -2114,6 +2124,44 @@ check('VFTBL1 a name no unit binds to an exe vftable stays', run(s1.r_vftable_st
 s1._VFT_NAMES = _saved_v
 check('VFTBL1 the committed list has the exe vftables 0x010ce838 and 0x0102e388',
       str({0x010ce838, 0x0102e388} <= s1._exe_vftable_addrs()), ['True'])
+
+# ---- REC1 x STAND4 (W6 widened STAND4 to lone static noinline stand-ins; STAND4 runs before REC1, so a recon whose
+# `replace` spans such a stand-in saw only the extern declaration and was rejected, 7 recons): the recon applies.
+# Our own snippet; the units.json is the STAND4 case's above.
+_r4 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_r4, 'recon', 'x'))
+_json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/u.cpp',
+            'replace': [{'old': 'static __declspec(noinline) float Zero()\n{\n    return 0.0f;\n}\nint Use() { return Zero(); }\n',
+                         'new': 'static __declspec(noinline) float Zero()\n{\n    return 1.0f;\n}\nint Use() { return Zero() + 1; }\n'},
+                        {'old': 'int Last() { return 9; }', 'new': 'int Last() { return 10; }'}]},
+           open(os.path.join(_r4, 'recon', 'x', 'recon.json'), 'w'))
+_u4 = os.path.join(_s4, 'src', 'u.cpp')
+_src4 = ('// @fnv 0x00401230\nint Real() { return 1; }\nstatic __declspec(noinline) float Zero()\n{\n    return 0.0f;\n}\nint Use() { return Zero(); }\n'
+         'int Last() { return 9; }\n')
+_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+_saved_env = os.environ.get('FNVNX_RECON')
+os.environ['FNVNX_RECON'] = os.path.join(_r4, 'recon')
+prepare.__dict__['_fnvnx_recon'] = None
+prepare.__dict__['_fnvnx_recon_rejected'] = []
+prepare.__dict__['_fnvnx_stand4_spans'] = {}
+_st = Counter()
+_t4 = s1.r_static_stand_ins(_u4, _src4, _st)          # as the rule order runs it: STAND4, then (later) REC1
+_n4 = _st['STAND4']
+_t4 = s1.r_recon_bodies(_u4, _t4, _st)
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+if _saved_env is None:
+    os.environ.pop('FNVNX_RECON', None)
+else:
+    os.environ['FNVNX_RECON'] = _saved_env
+check('REC1 x STAND4: the stand-in is rewritten before REC1 runs', str(_n4), ['1'])
+check('REC1 x STAND4: a recon whose replace spans the stand-in is applied, not rejected',
+      _t4 + str(dict(_st)) + repr(prepare.__dict__['_fnvnx_recon_rejected']),
+      ['return Zero() + 1;', 'int Last() { return 10; }', "'REC1-REPL': 2", '[]'],
+      ["'REC1-REJECT'", 'return Zero(); }'])
+check('REC1 x STAND4: STAND4 converts what the replace left (no static body, one declaration)',
+      _t4, ['__declspec(noinline) float Zero(); /* fnv-nx STAND4 0x00d571d0 */'],
+      ['return 1.0f', 'return 0.0f', 'static __declspec'])
 
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

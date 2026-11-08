@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "toolchain", "tools"))
 import elf2nso  # noqa: E402
 sys.path.insert(0, HERE)
 import datapath  # noqa: E402
+from emu_sanitize import SanitizeMixin  # noqa: E402
 
 from unicorn import UC_ARCH_ARM64, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, UC_PROT_EXEC, \
     UC_PROT_READ, UC_PROT_WRITE, Uc, UcError  # noqa: E402
@@ -84,6 +85,18 @@ TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "re
                  "repair-lost-slot-one", "exe-slot-one-d0")
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
+
+
+def hook_at(uc, addr, cb, user_data=None):
+    """a code hook at one address added while the emulation runs (a return address, a loop head): unicorn only checks
+    hooks when it translates a block, so a block already translated there would never call it. Drop that block so it
+    is translated again with the hook (emu_sanitize's return hooks missed most returns before this)."""
+    h = uc.hook_add(UC_HOOK_CODE, cb, user_data=user_data, begin=addr, end=addr)
+    try:
+        uc.ctl_remove_cache(addr, addr + 4)
+    except (AttributeError, UcError):
+        pass
+    return h
 
 def fault_table_options(path):
     """the TABLE_OPTIONS lines of a --stub-faults table"""
@@ -163,9 +176,13 @@ def exe_slot_plan(slots, exe_slots, natives):
 MILESTONES = os.path.join(HERE, "milestones.txt")
 
 
-def parse_milestones(path):
-    """--milestones table (tests/s5/milestones.txt): [(name, 'call'|'store', target)] in file order; a name may have
-    several lines (any one reaches it); '#' starts a comment."""
+MILE_GROUP = re.compile(r"(all|seq)(?::([\w-]+))?")
+MILE_MODS = ("main-thread",)
+
+
+def parse_milestone_specs(path):
+    """--milestones table (tests/s5/milestones.txt): [{name, group, kind, target, mods}] in file order. group is None
+    (a plain line: one way to the milestone) or ('all'|'seq', id): a part of a compound way. '#' starts a comment."""
     out = []
     with open(path) as fh:
         lines = fh.read().splitlines()
@@ -173,17 +190,31 @@ def parse_milestones(path):
         f = line.split("#", 1)[0].split()
         if not f:
             continue
+        group = None
+        if len(f) > 1 and MILE_GROUP.fullmatch(f[1]):
+            m = MILE_GROUP.fullmatch(f[1])
+            group = (m.group(1), m.group(2) or "")
+            del f[1]
+        mods = []
+        while len(f) > 3 and f[-1] in MILE_MODS:
+            mods.append(f.pop())
         ok = len(f) == 3 and re.fullmatch(r"[a-z][\w-]*", f[0]) and (
-            f[1] in ("call", "callok", "calltrue") and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
+            f[1] in ("call", "callok", "calltrue", "ret") and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
             f[1] == "store" and re.fullmatch(r"\*?0x[0-9a-fA-F]+(\+(0x[0-9a-fA-F]+|\d+))?", f[2]) or
             f[1] == "data" and f[2] in datapath.DATA_MILESTONES)
         if not ok:
-            raise ValueError(f"{path}:{k}: <name> call|callok|calltrue <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
-                             f"<name> data <{'|'.join(datapath.DATA_MILESTONES)}>")
-        if f[1].startswith("call") and f[2].startswith("re:"):
+            raise ValueError(f"{path}:{k}: <name> [all|seq[:id]] call|callok|calltrue|ret <0xORIG | re:REGEX> | "
+                             f"<name> [all|seq[:id]] store <0xADDR | *0xADDR+N> | "
+                             f"<name> [all|seq[:id]] data <{'|'.join(datapath.DATA_MILESTONES)}>  [main-thread]")
+        if f[1] in ("call", "callok", "calltrue", "ret") and f[2].startswith("re:"):
             re.compile(f[2][3:])
-        out.append(tuple(f))
+        out.append(dict(name=f[0], group=group, kind=f[1], target=f[2], mods=tuple(mods)))
     return out
+
+
+def parse_milestones(path):
+    """the table as [(name, kind, target)] in file order (the compound markers' parts too; see parse_milestone_specs)"""
+    return [(d["name"], d["kind"], d["target"]) for d in parse_milestone_specs(path)]
 
 
 def placement_table():
@@ -251,7 +282,7 @@ class Thread:
         self.resume_pc = None
 
 
-class Emu:
+class Emu(SanitizeMixin):
     def __init__(self, nso_path, root, verbose=False, load_base=None, game=None):
         with open(nso_path, "rb") as f:
             info = elf2nso.parse_nso(f.read())
@@ -313,7 +344,8 @@ class Emu:
     def rs(self, addr):
         out = bytearray()
         while True:
-            b = self.uc.mem_read(addr + len(out), 64)
+            a = addr + len(out)
+            b = self.uc.mem_read(a, min(64, 0x1000 - (a & 0xFFF)))   # never past the page: the next may be unmapped
             i = b.find(0)
             if i >= 0:
                 return (out + b[:i]).decode(errors="surrogateescape")   # the guest may pass any bytes
@@ -331,6 +363,8 @@ class Emu:
         return STACKS_TOP - STACK_SIZE * (tid - 1) - 0x100
 
     def on_bad(self, uc, access, addr, size, value, _):
+        if getattr(self, "img", None) is not None:   # --image-check: label the fault, the handling is unchanged
+            self.image_fault(access, addr, uc.reg_read(UC_ARM64_REG_PC), uc.reg_read(UC_ARM64_REG_LR))
         print(f"  invalid memory access type={access} addr={addr:#x} size={size} pc={uc.reg_read(UC_ARM64_REG_PC):#x}"
               f" thread={self.cur.tid if self.cur else '?'}")
         return False
@@ -352,6 +386,13 @@ class Emu:
             return
         uc.reg_write(UC_ARM64_REG_X0, res & U64)
         uc.reg_write(UC_ARM64_REG_PC, uc.reg_read(UC_ARM64_REG_LR))
+        # Deterministic preemption and stops: only here, at a host call's return (block() saves an exact context).
+        # A wall-clock limit or SIGTERM ends the run at the next host call; while other threads are ready, the thread
+        # yields after --hc-slice host calls (a count, so the same run switches at the same point every time).
+        if getattr(self, "stop_signal", None) or (
+                self.calls - getattr(self, "slice_calls0", 0) >= getattr(self, "hc_slice", 2000)
+                and any(x is not self.cur and x.state == "ready" for x in self.threads.values())):
+            self.block(("yield",), result=res & U64, stop=True)
 
     def block(self, wait, result=0, stop=True):
         t = self.cur
@@ -1130,7 +1171,7 @@ class Emu:
             fr.append((seq, sp, lr, label))
             state["live"] += 1
             if lr not in state["ret_hooks"]:
-                state["ret_hooks"][lr] = uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
+                state["ret_hooks"][lr] = hook_at(uc, lr, on_ret)
             if writes and state["whook"] is None:
                 state["whook"] = uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
         if len(targets) <= 256:
@@ -1810,7 +1851,7 @@ class Emu:
             pend.setdefault((self.cur.tid if self.cur else 0, lr), []).append((uc.reg_read(UC_ARM64_REG_X0) & 0xFFFFFFFF, m))
             if lr not in ret_hooks:
                 ret_hooks.add(lr)
-                uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
+                hook_at(uc, lr, on_ret)
         for a, m in members.items():
             uc.hook_add(UC_HOOK_CODE, on_entry, user_data=m, begin=a, end=a)
         self.member_vt_stats = st
@@ -1875,14 +1916,14 @@ class Emu:
             self.ret_this[tid] = st
             if ("this", lr) not in self.stub_returns:
                 self.stub_returns.add(("this", lr))
-                uc.hook_add(UC_HOOK_CODE, self.on_this_return, begin=lr, end=lr)
+                hook_at(uc, lr, self.on_this_return)
             return
         st = [g for g in self.stub_guards.get(tid, []) if g[0] >= sp]   # drop guards left by an unwind
         st.append((sp, uc.context_save(), lr, data[0], data[1]))
         self.stub_guards[tid] = st
         if lr not in self.stub_returns:   # the guard ends when its call returns (also after a tail call)
             self.stub_returns.add(lr)
-            uc.hook_add(UC_HOOK_CODE, self.on_stub_return, begin=lr, end=lr)
+            hook_at(uc, lr, self.on_stub_return)
 
     def alloc_near(self, size):
         """an RWX block after the guest image and the --inject objects, in branch range of the guest's code"""
@@ -2217,14 +2258,28 @@ class Emu:
     # boot cannot fake. 'call F' is reached when F's first instruction runs (F an original address 0x... or
     # 're:<regex>' over the ELF's code symbols, for native code such as the D3D9 device); 'store A' when a non-zero
     # word is written to the data-window address A; 'store *A+N' when one is written to (the pointer stored at A)+N.
+    # An event ("condition") belongs to one line; a line is a way to its milestone alone, or a part of an `all` / `seq`
+    # group (milestones.txt header). A milestone counts only when every one before it in the order is reached
+    # (self.miles); a hit without that is kept in self.mile_ooo, printed, and promoted only by a new hit.
     def install_milestones(self, path):
         self.miles, self.mile_order, self.mile_data = {}, [], {}
+        self.mile_ooo, self.mile_groups, self.mile_conds = {}, {}, []
         if getattr(self, "dp", None):   # tests may build an Emu without __init__
             self.dp.notify = self.on_mile_data
-        for name, kind, target in parse_milestones(path):
+        for d in parse_milestone_specs(path):
+            name, kind, target = d["name"], d["kind"], d["target"]
             if name not in self.mile_order:
                 self.mile_order.append(name)
-            if kind in ("call", "callok", "calltrue"):
+            grp = None
+            if d["group"]:
+                grp = self.mile_groups.setdefault((name,) + d["group"], {"name": name, "mode": d["group"][0],
+                                                                         "parts": [], "done": False})
+            cond = {"id": len(self.mile_conds), "name": name, "kind": kind, "target": target, "grp": grp,
+                    "main": "main-thread" in d["mods"], "idx": len(grp["parts"]) if grp else 0, "fired": False}
+            if grp:
+                grp["parts"].append(cond)
+            self.mile_conds.append(cond)
+            if kind in ("call", "callok", "calltrue", "ret"):
                 if target.startswith("re:"):
                     rx = re.compile(target[3:])
                     addrs = sorted({self.code_addr(n) for n in self.code_syms if rx.search(n)})
@@ -2232,108 +2287,139 @@ class Emu:
                     addrs = [a for a in [self.code_addr(target)] if a is not None]
                 for a in addrs:
                     if kind == "call":
-                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
-                    else:   # reached when the call returns success: callok w0 == 0 (an HRESULT), calltrue w0 & 0xff
-                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_callret, user_data=(name, kind), begin=a, end=a)
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=cond, begin=a, end=a)
+                    else:   # reached when the call returns: callok w0 == 0 (an HRESULT), calltrue w0 & 0xff, ret any
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_callret, user_data=cond, begin=a, end=a)
                 if not addrs:
                     print(f"   milestones: {name}: {target} is not in the link")
             elif kind == "data":
-                self.mile_data.setdefault(target, []).append(name)
+                self.mile_data.setdefault(target, []).append(cond)
             else:
                 m = re.fullmatch(r"(\*?)(0x[0-9a-fA-F]+)(?:\+(0x[0-9a-fA-F]+|\d+))?", target)
                 addr, off = int(m.group(2), 16), int(m.group(3) or "0", 0)
                 # The hook range starts STORE_REACH bytes below the word: a wider store (str x at want-4, a q store
                 # Unicorn splits into 8-byte pieces) covers it from below; stored_word keeps only full covers.
                 if m.group(1):
-                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_base, user_data=(name, target, addr, off),
+                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_base, user_data=(cond, addr, off),
                                      begin=addr - self.STORE_REACH, end=addr + 3)
                 else:
-                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, addr),
+                    self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(cond, addr),
                                      begin=addr - self.STORE_REACH, end=addr + 3)
         print(f"   milestones: {', '.join(self.mile_order)}")
+
+    def mile_fire(self, cond, how, at=None):
+        """a condition's event happened (now, in the running guest): a plain line hits its milestone; a group part
+        counts when its group allows (seq: the parts above it happened), and the milestone is hit when the group is
+        complete (and again by every later event of it, which is how an out-of-order hit recovers)"""
+        if cond["main"] and (self.cur.tid if self.cur else 1) != 1:
+            return
+        name, g = cond["name"], cond["grp"]
+        if name in self.miles:   # reached: nothing to add
+            return
+        if g is None:
+            self.mile_hit(name, how, at=at)
+            return
+        parts = g["parts"]
+        if g["mode"] == "seq" and not all(p["fired"] for p in parts[:cond["idx"]]):
+            return
+        cond["fired"] = True
+        if all(p["fired"] for p in parts):
+            g["done"] = True
+            self.mile_hit(name, how + (f" [{len(parts)} parts]" if len(parts) > 1 else ""), at=at)
+
+    def mile_missing(self, name):
+        i = self.mile_order.index(name)
+        return [p for p in self.mile_order[:i] if p not in self.miles]
 
     def mile_hit(self, name, how, at=None):
         if name in self.miles:
             return
+        missing = self.mile_missing(name)
         lr = self.uc.reg_read(UC_ARM64_REG_LR)
         where = self.sym(self.uc.reg_read(UC_ARM64_REG_PC) if at is None else at).split(" ", 1)[-1]
-        self.miles[name] = {"how": how, "where": where, "caller": self.sym(lr).split(" ", 1)[-1],
-                            "seq": len(self.miles) + 1, "host_calls": self.calls,
-                            "thread": self.cur.tid if self.cur else 1}
-        print(f"   milestone: {name} ({how} at {where}, caller {self.miles[name]['caller']})")
+        rec = {"how": how, "where": where, "caller": self.sym(lr).split(" ", 1)[-1], "host_calls": self.calls,
+               "thread": self.cur.tid if self.cur else 1}
+        if missing:
+            o = self.mile_ooo.get(name)
+            if o:   # recorded already: count it, keep the first hit's details
+                o["hits"] += 1
+                o["missing"] = missing
+                return
+            self.mile_ooo[name] = dict(rec, missing=missing, hits=1)
+            print(f"   milestone: {name} hit out of order (missing: {', '.join(missing)})"
+                  f" ({how} at {where}, caller {rec['caller']})")
+            return
+        rec["seq"] = len(self.miles) + 1
+        if name in self.mile_ooo:
+            rec["was_out_of_order"] = True
+            self.mile_ooo.pop(name)
+        self.miles[name] = rec
+        print(f"   milestone: {name} ({how} at {where}, caller {rec['caller']})")
 
     def on_mile_data(self, target, how):
-        for name in self.mile_data.get(target, ()):
-            self.mile_hit(name, f"data {how}")
+        for cond in self.mile_data.get(target, ()):
+            self.mile_fire(cond, f"data {how}")
 
-    def on_mile_call(self, uc, addr, size, name):
-        if name not in self.miles:
-            self.mile_hit(name, "call", at=addr)
+    def on_mile_call(self, uc, addr, size, cond):
+        self.mile_fire(cond, "call", at=addr)
 
-    def on_mile_callret(self, uc, addr, size, data):
-        """'callok' / 'calltrue' F: at F's entry, a one-shot hook on the return address checks the result there (the
-        same thread and stack pointer: a recursive or other thread's return does not count)"""
-        name, kind = data
-        if name in self.miles:
+    def on_mile_callret(self, uc, addr, size, cond):
+        """'callok' / 'calltrue' / 'ret' F: at F's entry, a one-shot hook on the return address checks the result
+        there (the same thread and stack pointer: a recursive or other thread's return does not count)"""
+        if cond["name"] in self.miles:
             return
         ret, sp = uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF, uc.reg_read(UC_ARM64_REG_SP)
         tid = self.cur.tid if getattr(self, "cur", None) else 1
         pend = self.__dict__.setdefault("mile_ret_pending", {})
         if ret not in pend:
             pend[ret] = []
-            self.uc.hook_add(UC_HOOK_CODE, self.on_mile_ret, user_data=ret, begin=ret, end=ret)
-        pend[ret].append((name, kind, sp, tid, addr))
+            hook_at(self.uc, ret, self.on_mile_ret, ret)
+        pend[ret].append((cond, sp, tid, addr))
 
     def on_mile_ret(self, uc, addr, size, ret):
         pend = self.mile_ret_pending.get(ret) or []
         sp = uc.reg_read(UC_ARM64_REG_SP)
         tid = self.cur.tid if getattr(self, "cur", None) else 1
         for e in list(pend):
-            name, kind, sp0, tid0, fn = e
+            cond, sp0, tid0, fn = e
             if tid0 != tid or sp0 != sp:
                 continue
             pend.remove(e)
-            x0 = uc.reg_read(UC_ARM64_REG_X0)
-            ok = (x0 & 0xFFFFFFFF) == 0 if kind == "callok" else (x0 & 0xFF) != 0
-            if ok and name not in self.miles:
-                self.mile_hit(name, f"{kind} (returned {x0 & 0xFFFFFFFF:#x})", at=fn)
-            elif not ok:
-                print(f"   milestone: {name} not reached: {self.sym(fn).split(' ', 1)[-1]} returned {x0 & 0xFFFFFFFF:#x}")
+            x0, kind = uc.reg_read(UC_ARM64_REG_X0), cond["kind"]
+            ok = kind == "ret" or ((x0 & 0xFFFFFFFF) == 0 if kind == "callok" else (x0 & 0xFF) != 0)
+            if ok:
+                self.mile_fire(cond, f"{kind} (returned {x0 & 0xFFFFFFFF:#x})", at=fn)
+            elif cond["name"] not in self.miles:
+                print(f"   milestone: {cond['name']} not reached: {self.sym(fn).split(' ', 1)[-1]} returned {x0 & 0xFFFFFFFF:#x}")
 
     def on_mile_store(self, uc, access, addr, size, value, data):
-        name, target, want = data
-        if name not in self.miles and self.stored_word(addr, size, value, want):
-            self.mile_hit(name, f"store {target}")
+        cond, want = data
+        if cond["name"] not in self.miles and self.stored_word(addr, size, value, want):
+            self.mile_fire(cond, f"store {cond['target']}")
 
     STORE_REACH = 12   # a 16-byte store at want-12 still covers the word at want
 
     def on_mile_base(self, uc, access, addr, size, value, data):
-        """a store to A of 'store *A+N': watch (the new pointer)+N, which may hold its value already. The object the
-        old pointer named is no longer watched (freed and reused memory must not count)."""
-        name, target, base, off = data
-        if name in self.miles or not (addr <= base < addr + size):
+        """a store to A of 'store *A+N': watch (the new pointer)+N for a store. The object the old pointer named is
+        no longer watched (freed and reused memory must not count). A value already there when the pointer is
+        stored does not count: only a store does."""
+        cond, base, off = data
+        if cond["name"] in self.miles or not (addr <= base < addr + size):
             return
         p = self.stored_word(addr, size, value, base, nonzero=False)
         if p is None:   # a store that covers only part of A: not a pointer store
             return
-        held = getattr(self, "mile_obj", {}).get(name)
+        held = cond.get("obj")
         if held and held[0] == p:
             return
         if held:
             uc.hook_del(held[1])
-            self.mile_obj.pop(name)
+            cond["obj"] = None
         if not p:
             return
-        try:
-            (cur,) = struct.unpack("<I", uc.mem_read(p + off, 4))
-        except UcError:
-            cur = 0
-        if cur:
-            self.mile_hit(name, f"store {target} (already set when the pointer was stored)")
-        else:
-            h = uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(name, target, p + off),
-                            begin=p + off - self.STORE_REACH, end=p + off + 3)
-            self.__dict__.setdefault("mile_obj", {})[name] = (p, h)
+        h = uc.hook_add(UC_HOOK_MEM_WRITE, self.on_mile_store, user_data=(cond, p + off),
+                        begin=p + off - self.STORE_REACH, end=p + off + 3)
+        cond["obj"] = (p, h)
 
     @staticmethod
     def stored_word(addr, size, value, want, nonzero=True):
@@ -2344,28 +2430,45 @@ class Emu:
         return (w if w or not nonzero else None)
 
     def milestone_lines(self):
-        """milestone <name> <reached|-> <how> <where> <caller>, in the table's order"""
+        """milestone <name> <reached|out-of-order|-> <how> <where> <caller> [missing: ...], in the table's order"""
         out = []
+        ooo = getattr(self, "mile_ooo", {})
         for n in getattr(self, "mile_order", []):
-            m = self.miles.get(n)
-            out.append(f"milestone\t{n}\t" + ("\t".join(["reached", m["how"], m["where"], m["caller"]]) if m else "-"))
+            m, o = self.miles.get(n), ooo.get(n)
+            if m:
+                out.append(f"milestone\t{n}\t" + "\t".join(["reached", m["how"], m["where"], m["caller"]]))
+            elif o:
+                out.append(f"milestone\t{n}\t" + "\t".join(["out-of-order", o["how"], o["where"], o["caller"],
+                                                          "missing: " + ",".join(o["missing"])]))
+            else:
+                out.append(f"milestone\t{n}\t-")
         return out
+
+    def milestone_summary(self):
+        """the summary's milestone fields: milestones (reached = in order and counted; an out-of-order hit has
+        out_of_order true, its missing prerequisites and reached false), milestone (the last reached), reached, of,
+        out_of_order (the hits that did not count)"""
+        order = getattr(self, "mile_order", [])
+        ooo = getattr(self, "mile_ooo", {})
+        reached = [n for n in order if n in self.miles]
+        return {
+            "milestones": [dict(name=n, reached=n in self.miles,
+                                **({"out_of_order": True, **ooo[n]} if n in ooo else self.miles.get(n, {})))
+                           for n in order],
+            "milestone": reached[-1] if reached else None,   # reached counts in order: the last is the boot's state
+            "reached": len(reached), "of": len(order),
+            "out_of_order": [dict(name=n, missing=ooo[n]["missing"], how=ooo[n]["how"]) for n in order if n in ooo],
+        }
 
     def summary(self, stop, rc=None):
         """the machine-readable boot summary (--summary-json): milestones in order, the highest reached, the stop"""
-        order = getattr(self, "mile_order", [])
-        reached = [n for n in order if n in self.miles]
-        best = None
-        for n in order:   # the last milestone in table order that was reached (later ones may come without earlier)
-            if n in self.miles:
-                best = n
+        mile = self.milestone_summary()
         msgs = [l.strip() for l in self.console.decode(errors="replace").splitlines()
                 if re.search(r"\[fnvnx\] (MessageBox|ExitProcess|FatalAppExit)", l)]
         tr = getattr(self, "last_trace", None)
         return {
             "schema": "fnvnx-boot-summary/1",
-            "milestones": [dict(name=n, reached=n in self.miles, **self.miles.get(n, {})) for n in order],
-            "milestone": best, "reached": len(reached), "of": len(order),
+            **mile,
             "winmain": "calling WinMain" in self.console.decode(errors="replace"),
             "stop": {"reason": stop, "exit_code": rc, "trace": tr, "messages": msgs[:20]},
             "initializers_skipped": len(getattr(self, "skipped", None) or []),
@@ -2514,16 +2617,12 @@ class Emu:
         uc.reg_write(UC_ARM64_REG_TPIDR_EL0, 0xDEAD0000)
         main.ctx, main.resume_pc, main.state, main.result = uc.context_save(), self.base, "ready", HOST_PAGE
         budget = getattr(self, "budget", 0)
-        slice_us = int(getattr(self, "slice_ms", 2000)) * 1000
+        slice_us = int(getattr(self, "slice_ms", 60000)) * 1000   # the fallback timer, see emu_start below
         import signal
         self.stop_signal = None
 
         def on_signal(sig, _frame):   # SIGTERM (timeout) or SIGALRM (--wall-seconds): end the run with its report
-            self.stop_signal = signal.Signals(sig).name
-            try:
-                uc.emu_stop()
-            except UcError:
-                pass
+            self.stop_signal = signal.Signals(sig).name   # taken at the next host call (on_code), or the slice's end
         for sig in (signal.SIGTERM, signal.SIGALRM):
             signal.signal(sig, on_signal)
         if getattr(self, "wall_seconds", 0):
@@ -2546,10 +2645,26 @@ class Emu:
             uc.reg_write(UC_ARM64_REG_X0, t.result & U64)
             t.state = "running"
             try:
-                # a time slice (timeout, a timer thread calls emu_stop): count= makes unicorn hook every
-                # instruction, about 10x slower (the INI read took more than 540 s with count=2e8, 46 s for the
-                # whole boot to past renderer-init with a timeout). count only when --budget is given explicitly.
-                uc.emu_start(t.resume_pc, RETURN_ADDR, timeout=slice_us, count=budget)
+                # Slices. count= makes unicorn hook every instruction (about 10x slower: the INI read took more than
+                # 540 s with count=2e8, the whole boot past renderer-init 46 s with a timeout), but a timer-stopped
+                # slice ends at a wall-clock-dependent instruction, so with another thread ready the switch point
+                # (and the boot) differs run to run (3 identical D26 boots: 2 stops, 1 deadlock). So: another thread
+                # ready -> an instruction count (deterministic switches); this thread alone -> a time slice (resuming
+                # the same thread is the same run wherever the stop lands).
+                # (A timer-stopped slice was tried too: unicorn's emu_stop from the timer thread can leave the PC at
+                # the start of the block, so resuming re-ran instructions - 4 identical boots, 3 outcomes. Preemption
+                # is at host calls now, see on_code; the timer is only a fallback for a guest that spins without
+                # making any.)
+                self.slice_calls0 = self.calls
+                if budget:
+                    uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
+                else:
+                    uc.emu_start(t.resume_pc, RETURN_ADDR, timeout=slice_us)
+                    if self.cur is t and self.calls == self.slice_calls0 and not self.stop_signal:
+                        self.timer_slices = getattr(self, "timer_slices", 0) + 1
+                        if self.timer_slices == 1:
+                            print(f"   scheduler: thread {t.tid} ran {slice_us // 1000} ms without a host call; the "
+                                  f"fallback timer stopped it (from here the run may not be deterministic)")
             except UcError as e:
                 if getattr(self, "collect_traps", False) and self.collect_trap():
                     t.result = uc.reg_read(UC_ARM64_REG_X0)
@@ -2634,7 +2749,10 @@ def main(argv):
     ap.add_argument("--budget", type=int, default=0,
                     help="instructions per scheduling slice (0, the default: none; slices are --slice-ms long. An "
                          "instruction count makes unicorn hook every instruction, about 10x slower)")
-    ap.add_argument("--slice-ms", type=int, default=2000, help="wall-clock length of a scheduling slice (ms)")
+    ap.add_argument("--slice-ms", type=int, default=60000, help="fallback timer (ms) for a thread that makes no host "
+                    "call; threads switch at host calls (--hc-slice)")
+    ap.add_argument("--hc-slice", type=int, default=2000,
+                    help="host calls per slice while other threads are ready (deterministic switch points)")
     ap.add_argument("--core3", action="store_true", help="the host's core 3 opt-in (fnvnx.ini core3=1)")
     ap.add_argument("--no-boost", action="store_true", help="the host's boost_loading=0")
     ap.add_argument("--stub-faults", metavar="FILE", help="functions (names or 0xORIG, one per line) that return 0 "
@@ -2669,6 +2787,12 @@ def main(argv):
                     help="discovery mode, measurement only: up to N faults outside initializers are recorded and the "
                          "faulting function returns 0 to its caller (a bad call is skipped), so one run lists every "
                          "blocker on the boot path ('discovered' lines)")
+    ap.add_argument("--alloc-check", action="store_true",
+                    help="measurement only: allocator sanitizer (emu_sanitize.py): mismatched family, double free, "
+                         "unknown or non-heap block frees ('alloc-check' lines)")
+    ap.add_argument("--image-check", action="store_true",
+                    help="measurement only: classify faults at exe image addresses (code used as data, unrelocated "
+                         "code pointers, RVAs as addresses; 'image-check' lines; needs the exe, --addrmap adds natives)")
     ap.add_argument("--stub-nulldev", action="store_true",
                     help="stub boots only (farm_boot.sh with FNVNX_STUB_NULLDEV=1): toolchain/game/native_device.cpp's "
                          "fnvnx_stub_nulldev = 1 at __libc_init_array, so CreateDevice succeeds on the null device "
@@ -2698,7 +2822,7 @@ def main(argv):
     emu = Emu(a.nso, root, load_base=a.load_base, game=a.game)
     if a.vm_service:
         emu.vm_service = True
-    emu.budget, emu.slice_ms = a.budget, a.slice_ms
+    emu.budget, emu.slice_ms, emu.hc_slice = a.budget, a.slice_ms, a.hc_slice
     emu.core3, emu.boost_loading = a.core3, not a.no_boost
     if a.elf:
         emu.load_symbols(a.elf)
@@ -2743,6 +2867,21 @@ def main(argv):
         addr, _, n = spec.partition(":")
         emu.install_watch(int(addr, 0), int(n, 0) if n else 4)
     emu.wall_seconds = a.wall_seconds
+    if a.alloc_check:
+        if getattr(emu, "code_syms", None):
+            emu.install_alloc_check()
+        else:
+            print("   alloc-check: off (needs --elf)")
+    if a.image_check:
+        exe = [src for name, _, src in (f.partition("=") for f in a.file) if name.lower().endswith(".exe")]
+        exe += [p for p in [emu.dp.resolve("/switch/fnv/FalloutNV.exe")] if not exe and os.path.isfile(p)]
+        exe += [p for p in (os.path.join(root, d, "FalloutNV.exe") for d in ("switch/fnv", "fnvnx/game"))
+                if not exe and os.path.exists(p)]
+        if exe:
+            emu.install_image_check(exe[0], a.addrmap)
+            print(f"   image-check: on ({exe[0]})")
+        else:
+            print("   image-check: off (needs the exe as --file or in the game install)")
     emu.discover_max, emu.discovered = a.discover, []
     if a.trace_fn:
         emu.install_trace_fn(a.trace_fn, a.trace_out or "trace_fn.tsv", writes=a.trace_writes, limit=a.trace_max,
@@ -2783,7 +2922,7 @@ def main(argv):
         print("   " + emu.console.decode(errors="replace").rstrip().replace("\n", "\n   "))
         if getattr(emu, "skipped", None) is not None:
             print(f"   initializers skipped after a fault: {len(emu.skipped)}")
-        for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.trap_table() + peeks() + emu.placements()
+        for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.alloc_lines() + emu.image_lines() + emu.trap_table() + peeks() + emu.placements()
                      + emu.milestone_lines() + emu.dp.lines()
                      + emu.vt_past_lines() + emu.watch_lines()):
             print(line)
@@ -2856,7 +2995,7 @@ def main(argv):
     if getattr(emu, "skipped", None) is not None:
         print(f"   initializers skipped after a fault: {len(emu.skipped)}")
     print("   " + out.rstrip().replace("\n", "\n   "))
-    for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.trap_table() + peeks() + emu.placements()
+    for line in (emu.skip_summary() + emu.stub_summary() + emu.discover_summary() + emu.alloc_lines() + emu.image_lines() + emu.trap_table() + peeks() + emu.placements()
                  + emu.milestone_lines() + emu.dp.lines()
                  + emu.vt_past_lines() + emu.watch_lines()):
         print(line)

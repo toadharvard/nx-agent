@@ -10,6 +10,7 @@ log() { echo "$(date -u +%FT%TZ) $(basename "$0"): $*"; }
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 export FARM_APT
 
+NEED_PIP="capstone==5.0.9 unicorn==2.1.4 pyelftools==0.33 mako"
 NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu liblz4-dev libnewlib-dev python3-mako"
 host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c
@@ -22,18 +23,58 @@ host_check() {   # commands (py:<module> for python modules) -> installed with a
 	done
 	[ -z "$missing" ] && return 0
 	if [ "${FARM_APT:-0}" = 1 ]; then
-		apt-get update -qq
+		# apt only for commands; the Python modules are pip's (the pinned versions the link and harness use)
+		if [ -n "$(printf '%s\n' $missing | grep -v '^py:')" ]; then
+			apt-get update -qq
+			# shellcheck disable=SC2086
+			DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $NEED_APT
+		fi
 		# shellcheck disable=SC2086
-		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $NEED_APT
-		python3 -m pip install -q --break-system-packages unicorn==2.1.4 pyelftools==0.33
-		return 0
+		python3 -m pip install -q --break-system-packages $NEED_PIP 2>/dev/null || python3 -m pip install -q $NEED_PIP
+		# T1: install, then check again: a host that still lacks one fails here, at setup (bl1 bea5a2ed failed at
+		# the link stage after 72 min: No module named 'capstone', which nothing installed)
+		local still=""
+		for c in $missing; do
+			case "$c" in
+				llvm-undname) command -v llvm-undname >/dev/null || command -v llvm-undname-18 >/dev/null || still="$still $c" ;;
+				py:*) python3 -I -c "import ${c#py:}" 2>/dev/null || still="$still $c" ;;
+				*) command -v "$c" >/dev/null || still="$still $c" ;;
+			esac
+		done
+		[ -z "$still" ] && return 0
+		echo "$(basename "$0"): still missing after installing:$still"
+		exit 1
 	fi
-	echo "$(basename "$0"): missing on this host:$missing (FARM_APT=1 installs: $NEED_APT; pip unicorn pyelftools)"
+	echo "$(basename "$0"): missing on this host:$missing (FARM_APT=1 installs: $NEED_APT; pip $NEED_PIP)"
 	exit 1
 }
+# every Python module the link and the boot import (tools/link: capstone in slotfill2, exevft, bodies, vslots,
+# membervt; unicorn, elftools in the emulator), at the versions the harness was run with
+LINK_PY="py:capstone py:unicorn py:elftools py:mako"
 
+hostcache() {   # hostcache fetch|publish <name> <key> <dir> [...]: tools/farm/hostcache.sh (HOSTCACHE=0: nothing)
+	[ "${HOSTCACHE:-1}" = 1 ] || return 1
+	ARTIFACTS=$ARTIFACTS bash "$(dirname "${BASH_SOURCE[0]}")/hostcache.sh" "$@" 2>> "$FARM_HOME/hostcache.log"
+}
+hostcache_publish_bg() {   # hostcache_publish_bg <name> <key> <dir> [--exclude sub ...]: once per key, in the background
+	[ "${HOSTCACHE:-1}" = 1 ] || return 0
+	[ -f "$FARM_HOME/hostcache-$1-$2.published" ] && return 0
+	( hostcache publish "$@" && touch "$FARM_HOME/hostcache-$1-$2.published" ) > /dev/null 2>&1 &
+	return 0
+}
 job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and the pinned checkouts (or FARM_EXT)
 	local repo=$1
+	if [ -z "${FARM_SRC:-}" ] && [ -n "${FARM_STABLE_SRC:-}" ]; then
+		# T1: one worktree at a fixed path for every commit of this job, checked out at each head. The link's compile
+		# cache keys on the command line and its paths (tools/link/objcache.py: an object names its paths), and the
+		# probes' flags name the port (-I<port>/shim/include): with a src-<commit12> worktree per head, full1's link
+		# had 0 cache hits of 2,420 compiles (5fd996a4127f, 1,756 s compiling). A checkout rewrites only the files
+		# that changed (their mtimes), so the rest stay as they were.
+		bash "$(dirname "${BASH_SOURCE[0]}")/worktree.sh" "$repo" "$FARM_STABLE_SRC" "$COMMIT" >/dev/null
+		git -C "$FARM_STABLE_SRC" checkout -q -f --detach "$COMMIT" && git -C "$FARM_STABLE_SRC" reset -q --hard "$COMMIT" \
+			|| { echo "the stable worktree $FARM_STABLE_SRC cannot be put at $COMMIT"; exit 1; }
+		FARM_SRC=$FARM_STABLE_SRC
+	fi
 	if [ -n "${FARM_SRC:-}" ]; then
 		SRC=$(cd "$FARM_SRC" && pwd)
 		[ "$(git -C "$SRC" rev-parse HEAD)" = "$(git -C "$SRC" rev-parse "$COMMIT^{commit}")" ] \
@@ -46,7 +87,18 @@ job_sources() {  # the commit's tools (worktree src-<commit12>, or FARM_SRC) and
 	COMMIT=$(git -C "$SRC" rev-parse HEAD)
 	C12=${COMMIT:0:12}
 	EXT=$FARM_HOME/ext
-	if [ -n "${FARM_EXT:-}" ]; then EXT=$(cd "$FARM_EXT" && pwd); else bash "$P/tools/fetch.sh" "$EXT" >/dev/null; fi
+	if [ -n "${FARM_EXT:-}" ]; then EXT=$(cd "$FARM_EXT" && pwd)
+	else
+		# T1: a fresh machine takes the pinned checkouts from the artifacts repository (tools/farm/hostcache.sh,
+		# keyed by tools/fetch.sh itself: the pins) instead of cloning them; fetch.sh then only checks them
+		local ek ext_restored=0
+		ek=$(sha256sum "$P/tools/fetch.sh" | cut -c1-16)
+		if [ "${HOSTCACHE:-1}" = 1 ] && [ ! -d "$EXT/fnv_decomp/.git" ]; then
+			hostcache fetch ext "$ek" "$EXT" && ext_restored=1
+		fi
+		bash "$P/tools/fetch.sh" "$EXT" >/dev/null
+		[ "$ext_restored" = 1 ] || hostcache_publish_bg ext "$ek" "$EXT"
+	fi
 	D12=$(sed -n 's/^pin fnv_decomp  *[^ ]*  *\([0-9a-f]\{12\}\).*/\1/p' "$P/tools/fetch.sh")
 	[ -d "$ARTIFACTS/.git" ] || git clone -q --no-checkout https://github.com/toadharvard/fnv-nx-build "$ARTIFACTS"
 }
@@ -77,7 +129,8 @@ job_inputs() {   # job_inputs <dir>: the prepare farm's tree of COMMIT and the c
 	mkdir -p "$d"
 	TREE=${FARM_TREE:-}; NOTE_TREE="local tree $TREE"; OBJ_COMMIT=""
 	if [ -z "$TREE" ]; then
-		if th=$(bash "$P/tools/farm/fetch_tree.sh" "$COMMIT" "$d/tree" "${FARM_TREE_WAIT:-1800}" 2>"$d/fetch_tree.log"); then
+		# only a tree prepared with this job's recon set (recon.sh's RECON_ID, when the job fetched it)
+		if th=$(FETCH_TREE_RECON=${RECON_ID-} bash "$P/tools/farm/fetch_tree.sh" "$COMMIT" "$d/tree" "${FARM_TREE_WAIT:-1800}" 2>"$d/fetch_tree.log"); then
 			TREE=$d/tree
 			# fetch_tree.sh takes t/<commit12>, or the rolling tree when its commit has the same prepare inputs
 			ref=refs/remotes/origin/t/$C12
@@ -344,11 +397,13 @@ except (OSError, ValueError):
 t = os.path.join(d, 'tree')      # prepared here (an adopted PREPARED= tree came from the artifacts repository)
 if r.get('status') in ('ok', 'warn') and pf.get('port_commit') == commit and not pf.get('port_dirty') and \
         str(pf.get('mode', '')).startswith('prepare.py') and os.path.isfile(os.path.join(t, 'build', 'units.json')):
-    print(t + '\t' + str(pf.get('decomp_commit') or 'unknown'))
+    print(t + '\t' + str(pf.get('decomp_commit') or 'unknown') + '\t' + str(pf.get('recon') or ''))
 EOF
 )
 	[ -n "$tr" ] || { NOTE_TREEPUB="not published: no prepared tree of $C12 in the build"; return 0; }
-	dc=${tr#*$'\t'}; tr=${tr%%$'\t'*}
+	tr=${tr%$'\t'*}; dc=${tr#*$'\t'}; tr=${tr%%$'\t'*}
+	# the recon set as recon.sh names it (RECON_ID: prepare_job.sh's meta.json and fetch_tree.sh compare that id)
+	rc_id=${RECON_ID-}
 	th=$(bash "$P/tools/farm/tree_hash.sh" "$tr")
 	set +e
 	(
@@ -370,8 +425,8 @@ EOF
 		rm -rf tree meta.json prepare.log
 		mkdir -p tree; rsync -rc --delete --exclude "*.o" "$tr/" tree/
 		cp "$bd/prepare/stage.log" prepare.log 2>/dev/null || echo "prepared by full_job (pipeline)" > prepare.log
-		printf '{"commit": "%s", "decomp_commit": "%s", "tree_hash": "%s", "reused": 0, "from": "full_job"}\n' \
-			"$COMMIT" "$dc" "$th" > meta.json
+		printf '{"commit": "%s", "decomp_commit": "%s", "tree_hash": "%s", "reused": 0, "from": "full_job", "recon": "%s"}\n' \
+			"$COMMIT" "$dc" "$th" "$rc_id" > meta.json
 		git add -f -A tree meta.json prepare.log
 		if git rev-parse -q --verify refs/remotes/origin/tree > /dev/null; then git reset -q --soft refs/remotes/origin/tree; fi
 		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 tree $th (full_job)" || true

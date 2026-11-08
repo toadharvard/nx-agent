@@ -1078,9 +1078,248 @@ def drop_native_units(out_root, stats, files):
     files['NATIVE1'] += len({u.get('source') for u in gone})
     json.dump(data, open(p, 'w'))
 
+class Memo:
+    """FNVNX_PREPARE_MEMO=<dir> (T1: after a rule change prepare must stay incremental): each rule's result per file,
+    keyed by (the rule's code, the file's path, the sha1 of the text it was given). The rule's code is its module
+    (tools/rules/<m>.py, or prepare.py for the core rules) plus prepare.py and tools/rules/_*.py, whose helpers
+    every rule may use. A rule whose code is unchanged gives back its recorded output and stats for the same input
+    text without running; a changed rule runs on every file, and the rules after it hit again wherever it left the
+    text as it was. Everything else the rules read is the context: every file opened for reading outside the output
+    tree, every directory listed (an audit hook records them; the union over the runs that built the memo), the
+    decomp's git head and the FNVNX_* environment. When any of it differs from the record, the memo is not used for
+    the run (every rule runs, and the memo is rebuilt). Texts are content-addressed blobs (only changed texts are
+    stored); entries and blobs not used by a run are dropped at its end. FNVNX_PREPARE_MEMO_VERIFY=1: every rule runs
+    and a recorded result that differs is reported (exit 3). Decomp-derived: the memo stays beside the tree."""
+    def __init__(self, d, src_root, out_root):
+        import hashlib, marshal, subprocess
+        self.h, self.marshal = hashlib, marshal
+        self.d, self.out_root = d, os.path.abspath(out_root)
+        os.makedirs(os.path.join(d, 'blobs'), exist_ok=True)
+        here = os.path.dirname(os.path.abspath(__file__))
+        self.here = here
+        common = b''.join(open(os.path.join(here, 'rules', n), 'rb').read() for n in sorted(os.listdir(os.path.join(here, 'rules')))
+                          if n.startswith('_') and n.endswith('.py'))
+        self.base = hashlib.sha1(b'prepare-memo-1\0' + common).hexdigest()
+        self.mod_ids, self.rule_ids = {}, {}
+        r = subprocess.run(['git', '-C', src_root, 'rev-parse', 'HEAD'], capture_output=True, text=True)
+        self.env = sorted([(k, v) for k, v in os.environ.items() if k.startswith('FNVNX_')
+                           and not k.startswith('FNVNX_PREPARE_MEMO')] + [('decomp_head', r.stdout.strip())])
+        self.read, self.listed = set(), set()
+        self.verify = os.environ.get('FNVNX_PREPARE_MEMO_VERIFY') == '1'
+        self.mismatch = []
+        self.hits = self.runs = self.impure_runs = 0
+        try:
+            ctx = marshal.load(open(os.path.join(d, 'ctx.marshal'), 'rb'))
+            self.map = marshal.load(open(os.path.join(d, 'map.marshal'), 'rb'))
+        except (OSError, ValueError, EOFError):
+            ctx, self.map = None, {}
+        self.valid = ctx is not None and ctx.get('env') == self.env and self._ctx_same(ctx)
+        self.ctx_files = dict(ctx['files']) if self.valid else {}
+        self.ctx_dirs = dict(ctx['dirs']) if self.valid else {}
+        if not self.valid:
+            self.map = {}
+        self.used = {}
+        self.blobs_used = set()
+        sys.addaudithook(self._audit)
+
+    def _fh(self, p):
+        try:
+            return self.h.sha1(open(p, 'rb').read()).hexdigest()
+        except OSError:
+            return None
+
+    def _names(self, d):
+        try:
+            return self.h.sha1('\0'.join(sorted(os.listdir(d))).encode('utf-8', 'surrogateescape')).hexdigest()
+        except OSError:
+            return None
+
+    def _ctx_same(self, ctx):
+        return all(self._fh(p) == h for p, h in ctx['files'].items()) and \
+            all(self._names(p) == h for p, h in ctx['dirs'].items())
+
+    def _audit(self, ev, args):
+        if ev == 'open' and args and isinstance(args[0], (str, bytes)):
+            mode = args[1] if len(args) > 1 and isinstance(args[1], str) else 'r'
+            if 'w' in mode or 'a' in mode or '+' in mode or 'x' in mode:
+                return
+            p = os.path.abspath(os.fsdecode(args[0]))
+            if not p.startswith(self.out_root + os.sep) and not p.startswith(os.path.abspath(self.d) + os.sep):
+                self.read.add(p)
+        elif ev in ('os.listdir', 'os.scandir') and args:
+            a = args[0]
+            if isinstance(a, (str, bytes)):
+                self.listed.add(os.path.abspath(os.fsdecode(a)))
+
+    def _module(self, f):
+        """(top-level name -> (source segment, names it references), impure names) of the module in file f"""
+        f = os.path.abspath(f)
+        if f in self.mod_ids:
+            return self.mod_ids[f]
+        import ast
+        src = open(f, encoding='utf-8', errors='surrogateescape').read()
+        tree = ast.parse(src)
+        top = {}
+        for node in tree.body:
+            seg = ast.get_source_segment(src, node) or ''
+            names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} | \
+                    {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)
+                     and isinstance(n.value, ast.Name) and n.value.id == 'prepare'}
+            defined = []
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined = [node.name]
+            elif isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                tg = node.targets if isinstance(node, ast.Assign) else [node.target]
+                defined = [n.id for t in tg for n in ast.walk(t) if isinstance(n, ast.Name)]
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                defined = [(a.asname or a.name).split('.')[0] for a in node.names]
+            for d in defined:
+                old = top.get(d)
+                top[d] = ((old[0] + '\n' if old else '') + seg, (old[1] if old else set()) | names)
+        glob = set(top) | {'prepare'}
+        impure = set()
+        MUT = {'append', 'add', 'update', 'setdefault', 'extend', 'insert', 'pop', 'popitem', 'clear', 'remove',
+               'discard', '__setitem__'}
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for n in ast.walk(node):
+                bad = isinstance(n, ast.Global)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in MUT:
+                    b = n.func.value
+                    while isinstance(b, (ast.Attribute, ast.Subscript)):
+                        b = b.value
+                    bad = bad or (isinstance(b, ast.Name) and b.id in glob)
+                if isinstance(n, (ast.Assign, ast.AugAssign)):
+                    for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                        if isinstance(t, (ast.Subscript, ast.Attribute)):
+                            b = t.value
+                            while isinstance(b, (ast.Attribute, ast.Subscript)):
+                                b = b.value
+                            bad = bad or (isinstance(b, ast.Name) and b.id in glob)
+                if bad:
+                    impure.add(node.name)
+                    break
+        self.mod_ids[f] = (top, impure, f)
+        return self.mod_ids[f]
+
+    def rule_id(self, rule):
+        """the rule's code: its function and, transitively, every top-level definition of its module it names
+        (prepare.<name> for prepare.py's helpers), plus tools/rules/_*.py. None for an impure rule (its closure
+        writes module or prepare state that a POST hook may read): it always runs."""
+        code = getattr(rule, '__code__', None)
+        if code is None:   # not a plain function: no closure to read, so it always runs
+            return None
+        key = (code.co_filename, rule.__name__)
+        if key in self.rule_ids:
+            return self.rule_ids[key]
+        top, impure, f = self._module(code.co_filename)
+        ptop, pimpure, _ = self._module(__file__)
+        if rule.__name__ not in top:   # defined in a way the closure cannot follow: always runs
+            self.rule_ids[key] = None
+            return None
+        seen, segs, todo, bad = set(), [], [('m', rule.__name__)], False
+        while todo:
+            where, n = todo.pop()
+            if (where, n) in seen:
+                continue
+            seen.add((where, n))
+            t, imp = (top, impure) if where == 'm' else (ptop, pimpure)
+            if n not in t:
+                continue
+            bad = bad or n in imp
+            seg, names = t[n]
+            segs.append('%s:%s\n%s' % (where, n, seg))
+            todo += [('m', x) for x in names if x in t] + [('p', x) for x in names if x in ptop and where == 'p' or
+                                                           (where == 'm' and x in ptop and x not in t)]
+        rid = None if bad else self.h.sha1((self.base + '\0'.join(sorted(segs))).encode('utf-8', 'surrogateescape')).hexdigest()[:20] + ':' + rule.__name__
+        self.rule_ids[key] = rid
+        return rid
+
+    def tsha(self, text):
+        return self.h.sha1(text.encode('utf-8', 'surrogateescape')).hexdigest()
+
+    def blob(self, k):
+        return os.path.join(self.d, 'blobs', k[:2], k)
+
+    def apply(self, rule, path, text, in_sha, stats):
+        """-> (text, sha, changed stat keys)"""
+        rid = self.rule_id(rule)
+        if rid is None:     # impure: runs every time (its side effects feed the POST hooks)
+            before = Counter(stats)
+            out = rule(path, text, stats)
+            self.impure_runs += 1
+            delta = [k for k in stats if stats[k] != before[k]]
+            return out, (self.tsha(out) if out is not text else in_sha), delta
+        key = (rid, path, in_sha)
+        got = self.map.get(key) if self.valid else None
+        if got is not None and not self.verify:
+            out_sha, delta = got
+            if out_sha != in_sha:
+                try:
+                    text = open(self.blob(out_sha), encoding='utf-8', errors='surrogateescape', newline='').read()
+                except OSError:
+                    got = None
+            if got is not None:
+                for k, v in delta:
+                    stats[k] += v
+                self.used[key] = got
+                if out_sha != in_sha:
+                    self.blobs_used.add(out_sha)
+                self.hits += 1
+                return text, out_sha, [k for k, v in delta if v]
+        before = Counter(stats)
+        out = rule(path, text, stats)
+        self.runs += 1
+        delta = tuple(sorted((k, stats[k] - before[k]) for k in stats if stats[k] != before[k]))
+        out_sha = self.tsha(out) if out is not text else in_sha
+        if self.verify and got is not None and tuple(got) != (out_sha, delta):
+            self.mismatch.append('%s %s' % (key[0], path))
+        if out_sha != in_sha:
+            b = self.blob(out_sha)
+            if not os.path.isfile(b):
+                os.makedirs(os.path.dirname(b), exist_ok=True)
+                with open(b + '.tmp', 'w', encoding='utf-8', errors='surrogateescape', newline='') as f:
+                    f.write(out)
+                os.replace(b + '.tmp', b)
+            self.blobs_used.add(out_sha)
+        self.used[key] = (out_sha, delta)
+        return out, out_sha, [k for k, v in delta if v]
+
+    def close(self):
+        files = dict(self.ctx_files)
+        for p in self.read:
+            if p not in files:
+                files[p] = self._fh(p)
+        dirs = dict(self.ctx_dirs)
+        for p in self.listed:
+            if p not in dirs:
+                dirs[p] = self._names(p)
+        files = {p: h for p, h in files.items() if h is not None}
+        dirs = {p: h for p, h in dirs.items() if h is not None}
+        for name, obj in (('map.marshal', self.used), ('ctx.marshal', {'env': self.env, 'files': files, 'dirs': dirs})):
+            with open(os.path.join(self.d, name + '.tmp'), 'wb') as f:
+                self.marshal.dump(obj, f)
+            os.replace(os.path.join(self.d, name + '.tmp'), os.path.join(self.d, name))
+        bd = os.path.join(self.d, 'blobs')
+        for sub in os.listdir(bd):
+            for n in os.listdir(os.path.join(bd, sub)):
+                if n not in self.blobs_used:
+                    os.remove(os.path.join(bd, sub, n))
+        imp = sorted({n for (m, n), r in self.rule_ids.items() if r is None})
+        print('prepare memo: %s; %d rule results reused, %d ran, %d impure runs (%s)%s' % (
+            'used' if self.valid else 'not used (the context changed or no memo yet)', self.hits, self.runs,
+            self.impure_runs, ', '.join(imp),
+            '; VERIFY: %d differ' % len(self.mismatch) if self.verify else ''), file=sys.stderr)
+        for m in self.mismatch[:20]:
+            print('prepare memo: VERIFY MISMATCH %s' % m, file=sys.stderr)
+
+
 def main():
     src_root, out_root = sys.argv[1], sys.argv[2]
     rules = RULES + load_stream_rules()
+    md = os.environ.get('FNVNX_PREPARE_MEMO', '')
+    memo = Memo(md, src_root, out_root) if md and md not in ('0', 'none', 'off') else None
     # FNVNX_PREPARE_SKIP="r_a,r_b": leave those rule functions out (to measure what a rule changes)
     skip = set(filter(None, os.environ.get('FNVNX_PREPARE_SKIP', '').split(',')))
     rules = [r for r in rules if r.__name__ not in skip]
@@ -1095,11 +1334,17 @@ def main():
                     shutil.copyfile(s, d); continue
                 with open(s, encoding='utf-8', errors='surrogateescape') as f:
                     text = orig = f.read()
-                for rule in rules:
-                    before = Counter(stats)
-                    text = rule(s, text, stats)
-                    for k in stats:
-                        if stats[k] != before[k]: files[k] += 1
+                if memo is not None:
+                    sha = memo.tsha(text)
+                    for rule in rules:
+                        text, sha, changed = memo.apply(rule, s, text, sha, stats)
+                        for k in changed: files[k] += 1
+                else:
+                    for rule in rules:
+                        before = Counter(stats)
+                        text = rule(s, text, stats)
+                        for k in stats:
+                            if stats[k] != before[k]: files[k] += 1
                 with open(d, 'w', encoding='utf-8', errors='surrogateescape') as f:
                     f.write(text)
     shutil.copytree(os.path.join(src_root, 'build'), os.path.join(out_root, 'build'), dirs_exist_ok=True)
@@ -1113,6 +1358,10 @@ def main():
         for k in sorted(stats):
             f.write('%s\t%d files\t%d edits\n' % (k, files[k], stats[k]))
     print(open(os.path.join(out_root, 'prepare_stats.tsv')).read(), end='')
+    if memo is not None:
+        memo.close()
+        if memo.mismatch:
+            sys.exit(3)
 
 if __name__ == '__main__':
     main()

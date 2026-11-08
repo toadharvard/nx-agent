@@ -33,7 +33,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 # shellcheck source=lib_job.sh
 . "$HERE/lib_job.sh"
 t0=$(date +%s)
-host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname qemu-aarch64 py:elftools py:mako meson ninja flex bison
+host_check git python3 make curl jq rsync dpkg-deb gcc g++ llvm-undname qemu-aarch64 $LINK_PY meson ninja flex bison
 job_sources "$REPO"
 RB=$FARM_HOME/race; LB=$RB/build; mkdir -p "$RB"
 fail_report() { printf '# threads (RACE=1) %s\n\n- verdict: not run\n- %s\n' "${COMMIT:0:12}" "$1" >"$REPORT"; echo "$REPORT"; exit 0; }

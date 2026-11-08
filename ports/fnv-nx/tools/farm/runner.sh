@@ -44,8 +44,35 @@ fi
 export ARTIFACTS=${ARTIFACTS:?no checkout of toadharvard/fnv-nx-build}
 mkdir -p "$FARM_HOME"; LOG=$FARM_HOME/$NAME.log; LAST=$FARM_HOME/$NAME.last
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$LOG"; }
-exec 9>"$FARM_HOME/$NAME.lock"
-if ! flock -n 9; then log "runner $NAME is already running (lock $FARM_HOME/$NAME.lock): this start exits"; exit 0; fi
+LOCK=$FARM_HOME/$NAME.lock
+lock_holders() {   # the pids (other than this shell) whose open files include the lock, one "pid cmdline" per line
+  local d p
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}; { [ "$p" = $$ ] || [ "$p" = "$BASHPID" ]; } && continue   # this runner, this scan
+    ls -l "$d/fd" 2>/dev/null | grep -qF -- "$LOCK" || continue
+    echo "$p $(tr '\0' ' ' < "$d/cmdline" 2>/dev/null | cut -c1-160)"
+  done
+}
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  # T1: a lock held only by orphans of a dead runner (a job's or a job's background child, which inherited the
+  # runner's fd 9: sw24 pid 10080, full1, bt1) blocks every restart. The holders are named; when none of them is a
+  # runner.sh, they are stopped and the lock taken again (RUNNER_LOCK_TAKEOVER=0: never, only named).
+  h=$(lock_holders 9>&-)   # (the scan and its children without the fd, or they list themselves)
+  if [ -n "$h" ] && ! printf '%s\n' "$h" | grep -q 'tools/farm/runner\.sh'; then
+    log "lock $LOCK held by orphans of a dead runner: $(printf '%s; ' "$h")"
+    if [ "${RUNNER_LOCK_TAKEOVER:-1}" = 1 ]; then
+      for p in $(printf '%s\n' "$h" | cut -d' ' -f1); do kill "$p" 2>/dev/null; done
+      sleep 3
+      for p in $(printf '%s\n' "$h" | cut -d' ' -f1); do kill -9 "$p" 2>/dev/null; done
+      flock -w 10 9 && log "orphans stopped; lock taken" || { log "lock still held: this start exits"; exit 0; }
+    else
+      log "RUNNER_LOCK_TAKEOVER=0: this start exits"; exit 0
+    fi
+  else
+    log "runner $NAME is already running (lock $LOCK, held by: $(printf '%s; ' "$h")): this start exits"; exit 0
+  fi
+fi
 echo $$ > "$FARM_HOME/$NAME.pid"   # the runner itself (a watcher's kill -0 target; the lock says it is alive)
 # qk<k> (the warm quick farms): persistent, a 20 s poll, claims shared under the tag "quick" (env still overrides)
 if [[ "$NAME" =~ ^qk[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}" "${RUNNER_CLAIM:=quick}"; fi
@@ -176,7 +203,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     census)  bash "$J/census_job.sh" "$H" "$R" ;;
     compile) bash "$J/compile_job.sh" "$H" "$1" "$2" "$R" ;;
     *)       bash "$J/${JOB}_job.sh" "$H" "$@" "$R" ;;
-  esac >> "$LOG" 2>&1
+  esac >> "$LOG" 2>&1 9>&-   # the job and its children never hold the runner's lock (an orphan would block restarts)
   rc=$?
   if [ $rc -ne 0 ]; then
     # the job's own report, when it wrote one, is kept under the FAILED title (its "- FAIL: ..." says why; T1)

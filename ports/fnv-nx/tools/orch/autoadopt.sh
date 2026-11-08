@@ -23,6 +23,8 @@ while :; do
           notes=$(comm -13 <(git ls-tree -r --name-only "origin/$I" -- ports/fnv-nx/journal/inbox/ | sort) \
                            <(git ls-tree -r --name-only "origin/$b" -- ports/fnv-nx/journal/inbox/ | sort))
           out=$(bash "$H/adopt.sh" "origin/$b" 2>&1); rc=$?
+          # rc=1: no merge base (a fresh shallow clone after a container restart). Deepen and retry once.
+          if [ $rc = 1 ]; then git fetch -q --deepen=3000 origin "$I" "$b" 2>/dev/null; out=$(bash "$H/adopt.sh" "origin/$b" 2>&1); rc=$?; fi
           echo "$(date -u +%FT%TZ) $b rc=$rc $(echo "$out" | head -1)" >> "$ST/log"
           if [ $rc = 3 ]; then key=$(echo "$out" | grep LEFT | sort | md5sum | cut -c1-12); cf="$ST/conflict_${b//\//_}"
             [ "$(cat "$cf" 2>/dev/null)" = "$key" ] || { echo "$key" > "$cf"; wake+=("conflict: $b"$'\n'"$out"); }

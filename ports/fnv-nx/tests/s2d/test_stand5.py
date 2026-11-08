@@ -285,5 +285,62 @@ class Stand5String(unittest.TestCase):
         self.assertEqual(out.count('\n'), STR_SRC.count('\n'))
 
 
+OVL_SRC = '''struct TextS
+{
+    char* text;
+    TextS(const char* p)
+    {
+        text = (char*)p;
+    }
+    TextS()
+    {
+        text = 0;
+    }
+    int Len()
+    {
+        return 3;
+    }
+    int Len(int k)
+    {
+        return k;
+    }
+};
+'''
+
+
+class Stand5Overloads(unittest.TestCase):
+    def test_only_the_overload_whose_name_is_bound(self):
+        """W44 (row 10, TextString::TextString()): a `()` member keeps its body when only its overloads with
+        parameters are bound elsewhere (their MSVC names share the `??0TextS@@` prefix), and an overload with
+        parameters keeps its body when only the `()` one is bound."""
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'build'))
+            os.makedirs(os.path.join(d, 'src'))
+            units = {'units': [
+                {'source': 'src/a.cpp', 'flags': ['/O2'], 'functions': [], 'symbols': {
+                    '??0TextS@@QAE@PBD@Z': '0x00407000', '??0TextS@@QAE@ABU0@@Z': '0x00407100',
+                    '?Len@TextS@@QAEHXZ': '0x00407200'}},
+                {'source': 'src/b.cpp', 'flags': ['/O2'], 'functions': [
+                    {'symbol': '?F%d@@YAXXZ' % i, 'address': '0x0040%d' % (7000 + 100 * i)} for i in range(3)],
+                 'symbols': {}}]}
+            json.dump(units, open(os.path.join(d, 'build', 'units.json'), 'w'))
+            path = os.path.join(d, 'src', 'a.cpp')
+            open(path, 'w').write(OVL_SRC)
+            import s1_compile
+            s1_compile._UNIT_SYMBOLS = s1_compile._UNIT_INFO = s1_compile._ALL_FUNCTIONS = None
+            s2_bodies._FUNCTION_NAMES.clear()
+            st = collections.Counter()
+            out = s2_bodies.r_stand_in_class_bodies(path, OVL_SRC, st)
+        self.assertEqual(st['STAND5'], 2)
+        self.assertIn('TextS(const char* p); /* fnv-nx STAND5', out)
+        self.assertIn('int Len(); /* fnv-nx STAND5', out)
+        for keep in ('text = 0;', 'return k;'):
+            self.assertIn(keep, out)
+        self.assertTrue(s2_bodies.msvc_void_params('??0TextString@@QAE@XZ'))
+        self.assertFalse(s2_bodies.msvc_void_params('??0TextString@@QAE@PBD@Z'))
+        self.assertFalse(s2_bodies.msvc_void_params('?Printf@@YAXPBDZZ'))
+        self.assertEqual(out.count('\n'), OVL_SRC.count('\n'))
+
+
 if __name__ == '__main__':
     unittest.main()

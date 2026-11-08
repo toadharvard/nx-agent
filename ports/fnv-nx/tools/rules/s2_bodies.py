@@ -97,6 +97,12 @@ def _unit_function_names(path):
     return _FUNCTION_NAMES.get(os.path.normpath(os.path.abspath(path)), set())
 
 
+def msvc_void_params(name):
+    """Whether an MSVC function name's parameter list is `()`: it ends in `XZ` (X = void, then the throw
+    specification Z); a list of parameters ends in `@` or `Z` (ellipsis) before that Z."""
+    return name.endswith('XZ')
+
+
 def r_stand_in_class_bodies(path, text, stats):
     """STAND5: an in-class body whose MSVC name the unit binds to another unit's function becomes a declaration."""
     if not path.endswith('.cpp'):
@@ -135,7 +141,11 @@ def r_stand_in_class_bodies(path, text, stats):
             prefix = '??0' + ('?$' + scope[0] + '@' if template else '@'.join(scope) + '@@')
         else:
             prefix = '?' + name + '@' + ('?$' + scope[0] + '@' if template else '@'.join(scope) + '@@')
-        bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
+        # only the spellings of this overload's parameter list: MSVC ends a `()` list in `XZ` (X = void, Z = no
+        # throw specification), any other list in `@Z` or `ZZ` (W44: tiletext.cpp's `TextString()` went because
+        # ??0TextString@@QAE@PBD@Z and the copy constructor's name bind 0x0040c0e0 / 0x004047f0)
+        void = m.group(4).strip() in ('', 'void')
+        bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix) and msvc_void_params(k) == void]
         if not bound or not all(a in elsewhere and a not in tagged for a in bound):
             continue
         if template and any(n.startswith(prefix) for n in own_names):

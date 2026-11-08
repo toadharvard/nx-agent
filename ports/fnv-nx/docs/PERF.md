@@ -1295,3 +1295,59 @@ the whole link.
 -O3 in A57 cycles (mid of throughput and one-call CPI, per function, summed): niquaternion 1,808 -> 1,808 (0 %),
 nimatrix3 1,574 -> 1,314 (-16.5 %), hkpgsk 843 -> 760 (-9.9 %). .text grows 0 / +21 % / +8 % (3,328 / 5,780 -> 7,020
 / 15,364 -> 16,612 bytes).
+
+## 13. 2026-11-08 re-measure (R2, links 439a6c7e150e and 77af4b16990e)
+
+Static numbers are from the guest ELFs of the two links (identical within 0.1 %; 439a's are given). Nothing here
+ran in the emulator, and no fuzzing was run. [M] = measured on that ELF or report; [E] = estimate.
+
+**Where the 22.9 M of 11.2 comes from.** It is the model total of 11.2's table, not a measurement. Every row is [E]
+except the native renderer's main side (2.34-5.64 M [M], render machine, `render/native/perf/emu_count.py` on the P6n
+streams). `docs/X86_FALLBACK.md` 5 quotes the total against 13.6 M (17.0 M cycles × IPC 0.8). No game frame has been
+instruction-counted.
+
+**Why no frame profile yet.** The deepest milestone in the reports is `archive-list`, 3/10 (full1 97deacd38aec,
+d1ed15e74620, stub-fault boot). The plain boots of d17625063785 and 77af4b16990e do not reach WinMain (memory-manager
+deadlock). The scenario bench (sc1) is at 0/31 steps on the guest. The only game-guest profiles (fnv-nx-build
+reports/perf1, `perf_job.sh`, 11-04) cover the first instruction to WinMain:
+- 13bec86ff831: player image, link 06857911, 242.9 M main-thread instructions [M]. It has exclusive counts only, top-40
+  rows, no call tree.
+- On this window, startup dominates: our loader/startup is 94.8 % of instructions (memset, early_zero, self_relocate),
+  newlib 3.1 %, trap stubs 0.8 %, game code 0.02 % (categorizer: R2 scratch `perf/categorize.py`).
+- These numbers describe startup, not a frame.
+
+The frame marker for when the boot gets there is `__fnv_0086e650` (MainLoop::FUN_0086e650, once per loop iteration,
+the `--frame` of section 4's frameprof.py). The farm wrapper is `tools/farm/perf_frame_job.sh <link> <start> <stop>
+<report>`. A one-frame window with start = stop = the marker needs an entry count in uctrace.py
+(`--start-count/--stop-count`). That change is not made: it waits for a boot that reaches a frame.
+
+**Re-measured rows (bottleneck table, 7, 8):**
+
+| row | 2026-11-04 | 2026-11-08 | status |
+|---|---|---|---|
+| stack protector | 7,396 functions protected, 2-4 % [E] | **0** `__stack_chk` symbols or references in either ELF: `-fno-stack-protector` (flags.sh, compile.sh) takes effect | [M], lever done |
+| GOT loads | 154,907, 4.66 per 100 instructions, 45,761 slots | **158,789** GOT-indirect `adrp+ldr` (3.16 per 100) vs 20,061 direct `adrp+add`; `.got` 0x30d04 = **49,985 slots** (195 KiB); 74 % of slots hold image addresses; the canary loads are gone. In the 15 hot_rows bodies: 8 loads (0.7 per 100) | [M] static; cycles 1-3 % [E] |
+| GOT lever | | D16 keeps `-fPIC` (by-address rebinding, relocatable guest). Visibility flags and linker relaxation don't help (ld does not relax ILP32 GOT loads, 7). The lever is still the post-link `adrp+ldr` -> `movz/movk` rewrite for image symbols (74 % of loads). It is a whole-program lever, not a hot-row one | [E] |
+| -mtune=cortex-a57 | missing in compile.sh | in compile.sh and on every compile path: game units, zz_vt/zz_bd (layout.game_flags), overrides, toolchain/game, render builds. zz_bridges.o is assembled. Only tests/s4/trapcheck.sh lacks it | [M] (build scripts; the ELF has no producer string); scheduling gain 0-3 % [E], hardware only |
+| our stubs, static | bridges < 0.5 % [E] | call sites (`bl` + tail `b`; `blr` unresolved): `__fnv_` single-`b` forwarders 13,936 (631 stubs, 1 instruction); abi bridges 7,137 (2,452, 4.4 instructions each); abi2 code bridges 5,425 (1,824, 42.3); vflag/vgdel 1,091 (595, 2.0); other vtable/ctor stubs 1,710 (754, 4.7); trap stubs 528 (406, 4.9); adjustor thunks 7 (3, 2.0). Total 29,834 of 637,858 call/branch sites (4.7 %; bridges 2.0 %). The 15 hot_rows bodies call none of them | [M] static; the dynamic share needs a frame |
+
+**EQ status of the 20 hottest functions** (11.4 / hot_rows names, from the fuzz verdict caches fuzz/cache/*of8).
+These are the decomp versions; the S15 overrides that the hot rows run are not what the harness fuzzes:
+- **9 EQ:** ClassifySphereAgainstPlane, NiBound getter 0043d450, NiBound::Update, UpdateWorldData, UpdateWorldLoc,
+  NiNode::UpdateTransformAndBounds, FindPassBucket, FindBucketIndex, GSK 00da8fb0.
+- **11 DIVERGES** (none soft-only):
+  - nan-bits/x87: Slerp, Slerp weight 00a6dc30, NormalizeQuaternion, FromRotationMatrix, GSK 00da8500.
+  - call-flow: cull worker 00a694e0, NiNode::UpdateDownwardPass.
+  - uninit-both: NiTransform compose, GSK 00da8820.
+  - Other classes: NiMatrix3 product 00a588a0 (signedness), GSK 00da8390 (bool-repr).
+- 12 verdicts are at 439a; 8 are older (588863052936, 8b233f99831a) and their keys may have changed since.
+- They belong to the EQ classes, not to perf. Any optimization of these functions has to be checked against the
+  same fuzz replay first.
+
+**Levers for when a frame exists:**
+1. uctrace entry counts, so the window is one frame.
+2. Skip the cache model before the window.
+3. Inclusive counts: a shadow stack in uctrace.py plus a column in perf_report.py.
+4. Raise the 40-row cap to about 400.
+5. Then run `frameprof.py --frame __fnv_0086e650` and `perf_frame_job.sh` on the first link whose boot reaches the
+   main loop.

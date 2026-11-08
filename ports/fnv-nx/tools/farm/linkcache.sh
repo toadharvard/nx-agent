@@ -31,7 +31,8 @@ seed)
 		log "no $BR yet: the cache fills from this machine's links"; exit 0
 	fi
 	mkdir -p "$DIR"
-	git -C "$ARTIFACTS" archive "refs/remotes/origin/$BR" | tar -x -C "$DIR" 2>/dev/null
+	# files this cache has already stay as they are (content-addressed results; a manifest here may list more variants)
+	git -C "$ARTIFACTS" archive "refs/remotes/origin/$BR" | tar -x --skip-old-files -C "$DIR" 2>/dev/null
 	log "seeded from $BR: $n -> $(count) results ($(git -C "$ARTIFACTS" log -1 --format=%s "refs/remotes/origin/$BR"))"
 	;;
 publish)
