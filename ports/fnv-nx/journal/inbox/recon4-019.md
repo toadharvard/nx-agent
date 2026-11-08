@@ -44,3 +44,13 @@ Measured on fnv-nx-build link/97deacd38aec (out/refs.tsv, abi.tsv, addrmap.tsv);
       - 7 rows: reference declarations that drop the arguments or the `this` the exe's ret shows;
       - 13 rows: definitions that model by-value iterators and structs differently from their references.
   - 5 + 2 + 20 = 27.
+* **R2's answer on the 20 rows (08:33)**: all closed.
+  - 7 addresses are fixed at the source. R2 published reviewed replace-recons on fnv-nx-build: 00d08570 with its 3
+    thunks, 00df8960, 00b2e140, 00aa4060, 00aba9a0, 00e349c0. R2 also found 00df8990 in the same class.
+  - Correction to my ledger: 00e349c0's struct is 32 bytes, not 28. The callers copy 8 words.
+  - The other 4 (00aba3c0, 00abac80, 00abb060, 00b3a0d0) are layout-only: the types differ in name, not in how
+    AArch64 passes them (8-byte trivially copyable iterators in one register; 32-byte classes with copy
+    constructors by invisible reference on both sides). The address pairing stands. They stay flagged code-manual,
+    which leaves the binding as it is. A next step for the name-addr check is abi2 with the units' layouts, so that
+    such pairs read as same.
+  - Ledger: same 5, bridged 2, source-fixed by R2 16 (+1 found), layout-equal 4. Total 27.
