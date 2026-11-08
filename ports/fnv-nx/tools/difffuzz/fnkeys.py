@@ -63,7 +63,8 @@ import config
 # uninitialised out-parameter of an intercepted callee is uninit-x86), pop learning tries the pushes right before a
 # call first (three call sites over branches), an integer result that the 24-bit x87 control word rerun reproduces
 # is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
-# placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return.
+# placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return; a placeholder of a trivial exe leaf is not
+# native-zero-stub (S2 W6).
 # flow2 (call-flow fresh sample): a `jmp rel32` incremental-link thunk pops what the function it jumps to pops (the
 # decomp's `void F(void)` placeholder said 0), a call into a function the tree does not define pops the `ret N` the
 # exe's function has, a clean run that ends in a tail call (the stub return) is no derail, the pushes of the entry

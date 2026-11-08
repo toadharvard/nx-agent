@@ -159,3 +159,39 @@ def returned_input(cv, addr):
                 if v is not None and v.kind == 'gpr' and v.is_ptr:
                     return lab
     return None
+
+
+def trivial_leaf(addr, limit=12):
+    """True when the exe function at addr is a straight-line leaf up to its `ret`: at most `limit` instructions, no
+    call, no jump, and no memory write other than through esp / ebp (its own frame). Such a function does no work
+    beyond its result (S2 W6: 0x0065e750 returns an uninitialised al, 0x0065fd70 its argument), so a native
+    placeholder for it is not the native-zero-stub class. None without the exe."""
+    pe = _pe()
+    if pe is None:
+        return None
+    import capstone
+    from capstone import x86_const as X
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    try:
+        code = pe.read(addr, 16 * limit)
+    except Exception:  # noqa: BLE001
+        return None
+    for n, ins in enumerate(md.disasm(code, addr)):
+        if n >= limit:
+            return False
+        g = set(ins.groups)
+        if X.X86_GRP_RET in g:
+            return True
+        if X.X86_GRP_CALL in g or X.X86_GRP_JUMP in g or X.X86_GRP_INT in g:
+            return False
+        if ins.mnemonic.startswith(('push', 'pop', 'leave')):
+            continue
+        for op in ins.operands:
+            if op.type == X.X86_OP_MEM and (op.access & capstone.CS_AC_WRITE):
+                base = ins.reg_name(op.mem.base) if op.mem.base else None
+                if base not in ('esp', 'ebp') or op.mem.segment:
+                    return False
+        if ins.mnemonic.startswith(('stos', 'movs', 'rep')):
+            return False
+    return False

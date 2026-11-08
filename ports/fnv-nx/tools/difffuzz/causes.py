@@ -1515,6 +1515,20 @@ def _alloc_result(k):
     return ALLOC_BASE + 0x1000 * (k % 0x400) + 0x10
 
 
+def _zero_stub_of_leaf(d):
+    """(S2 W6) every placeholder the native ran stands for an exe function that is itself a trivial leaf
+    (retsrc.trivial_leaf: straight-line, no call, no store outside its frame): not the native-zero-stub class; the
+    record goes on to the other rules (0x0065f820: 0x0065e750 returns an uninitialised al, 0x0065fd70 its argument)"""
+    exe = d.get('arm_zero_stub_exe') or ()
+    if not exe or '?' in exe:
+        return False
+    try:
+        import retsrc
+    except ImportError:
+        return False
+    return all(retsrc.trivial_leaf(int(a, 16)) for a in exe)
+
+
 def _ret_bytes(case, k):
     import world             # plain module (no emulator): the same move out of the private ranges as Case.ret_bytes
     rets = case.get('rets') or []
@@ -1682,7 +1696,7 @@ def _rule_unclassified(d, rec, k):
         vx, va = _word(d['x86']), _word(d['arm'])
     except ValueError:
         return None
-    if d.get('arm_zero_stub'):
+    if d.get('arm_zero_stub') and not _zero_stub_of_leaf(d):
         # (F-uncls, difffuzz-20) the native entered a function of its unit whose whole body is a placeholder that
         # returns 0 (runner.zero_stubs): the exe's work there is not done, and what the function returns or stores
         # from its result differs (0x00d57b20 stores 1.0 - 0.0 where the exe's FUN_00d571d0 returned 0.51)

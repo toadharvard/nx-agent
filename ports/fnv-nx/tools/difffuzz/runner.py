@@ -1046,6 +1046,19 @@ class Pair:
             hit = sorted(n for a, n in zs.items() if a in ra.blocks)
             if hit:
                 d['arm_zero_stub'] = hit[:4]       # F-uncls: the native ran a placeholder body that returns 0
+                # the exe functions those placeholders stand for (their __fnv_<X> entry, else the name's address):
+                # causes.py does not call a placeholder of a trivial exe leaf native-zero-stub (S2 W6, 0x0065f820)
+                ent = getattr(self.target.image, 'entries', {}) or {}
+                exe = []
+                for a, n in sorted(zs.items()):
+                    if a not in ra.blocks:
+                        continue
+                    o = ent.get(a)
+                    if o is None:
+                        m = re.search(r'(?<![0-9a-f])([0-9a-f]{8})(?![0-9a-f])', n)
+                        o = int(m.group(1), 16) if m else None
+                    exe.append('%08x' % o if o is not None else '?')
+                d['arm_zero_stub_exe'] = exe[:4]
         if d is not None and getattr(rx, 'ret_smashed', False):
             d['x86_frame_smash'] = True        # the oracle overran a local into its return-address slot (F1b)
         if d is not None and ra.private_reads:
