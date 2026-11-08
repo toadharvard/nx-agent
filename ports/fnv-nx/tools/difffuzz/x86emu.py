@@ -411,6 +411,11 @@ class X86Engine:
         eax = world.u32(rb, 0)
         cv = self._callee_conv(address)
         ccv = self._callee_conv(address, caller=True)
+        if kind == 'int' and ccv is not None and ccv.x86_ret == 'st0' and ccv.ret is not None and \
+                (cv is None or cv.x86_ret != 'st0'):
+            # the calling unit declares a float result the callee's definition does not (a void decl in the tree):
+            # the caller's code reads ST0 and the native reads v0 (the same canned bytes), so the oracle gets ST0
+            kind = 'f32' if ccv.ret.size == 4 else 'f64'
         ck = world.canned_kind((cv, ccv))
         if address in world.ALLOCATORS:
             eax = world.alloc_result(k)

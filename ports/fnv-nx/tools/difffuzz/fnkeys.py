@@ -55,7 +55,9 @@ import config
 # float width probes before it stays `float`.
 # slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. The signedness probe clears an argument byte only when the oracle can
 # widen it (not a float sign or a whole-read int), and an uninit-arm that vanishes once the unwritten stack words of
-# buffers passed to stubbed callees are zeroed is stub-outparam.
+# buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
+# read on a later path is a custom register, the oracle gets ST0 for a call the caller's unit declares float, and
+# native-zero-init / dtor-dead-store (by design) / thunk-binding relabel store-only divergences.
 HARNESS = 'difffuzz-20'
 
 
