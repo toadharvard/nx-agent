@@ -497,6 +497,7 @@ class UnitCache:
         t.oracle_callees = self.oracle_callees
         t.custom_cc = list(getattr(cv, 'custom', []) or [])
         t.vtables = self.vtable_map(img)
+        t.vtables_defined = self.vtable_map_defined(img)
         self.plant_model(t, cv, img, orig_addr)
         t.followed = self.preload(code, img, source)
         t.x86_code = code
@@ -772,6 +773,13 @@ class UnitCache:
             if orig is not None:
                 out.setdefault((a + 8) & 0xffffffff, orig)
         return out
+
+    def vtable_map_defined(self, image):
+        """{native address point: image vftable} of the kind-V address map rows whose vtable symbol the unit image
+        DEFINES (no stub, no class-name pairing): the vtable the link itself binds to that exe vftable. A returned
+        class identity is the same only by this pairing (R4, farm baseline 588863: vftable getters)."""
+        self.vtable_map(image)                     # loads self._vrows
+        return {(image.syms[sym] + off) & 0xffffffff: orig for orig, sym, off in self._vrows if sym in image.syms}
 
     def pinned(self, source, orig_addr):
         xu = self.x86_unit(source, orig_addr)

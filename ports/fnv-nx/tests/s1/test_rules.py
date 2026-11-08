@@ -2023,6 +2023,14 @@ check('HKRO1 a destructor-only hkReferencedObject gets FNVNX_HKRO1 after its des
 check('HKRO1 not a full one, nor another class',
       run(s1.r_hk_referenced_object_slots, _HK.replace('void removeReference', 'virtual const void* GetClassType() const;\nvoid removeReference')) +
       run(s1.r_hk_referenced_object_slots, _HK.replace('hkReferencedObject', 'hkOther')), [], ['FNVNX_HKRO1'])
+# ---- S1-rules: TAIL1-PACK (the base filler under #pragma pack(N): MSVC's min(alignof(base), N); LAYOUT gate pack rows)
+_PK = ('struct B { virtual void f(); };\n#pragma pack(push, 1)\nstruct P : B { short a; };\n#pragma pack(pop)\n'
+       'struct Q : B { short a; };\n#pragma pack(push, 4)\n#pragma pack(push, 2)\nstruct R : B { int a; };\n#pragma pack(pop)\n'
+       'struct S : B { int a; };\n#pragma pack(pop)\n')
+_pko = run(s1.r_msvc_base_layout, _PK)
+check('TAIL1-PACK under pack(1) / nested push 2: FNVNX_MSVC_BASE_END_PACK(N, base); after the pops the plain filler',
+      _pko, ['struct P : B { FNVNX_MSVC_BASE_END_PACK(1, B)', 'struct Q : B { FNVNX_MSVC_BASE_END(B)',
+             'struct R : B { FNVNX_MSVC_BASE_END_PACK(2, B)', 'struct S : B { FNVNX_MSVC_BASE_END_PACK(4, B)'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
@@ -2162,6 +2170,23 @@ check('REC1 x STAND4: a recon whose replace spans the stand-in is applied, not r
 check('REC1 x STAND4: STAND4 converts what the replace left (no static body, one declaration)',
       _t4, ['__declspec(noinline) float Zero(); /* fnv-nx STAND4 0x00d571d0 */'],
       ['return 1.0f', 'return 0.0f', 'static __declspec'])
+
+# ---- S1-rules: VFPAD1 (MSVC pads a class's own vfptr to the class's alignment; LAYOUT gate vfpad rows)
+_VF = ('struct V16 { virtual ~V16(); unsigned int m10; hkVector4 m20; };\n'
+       'struct VD { FNVNX_D22(VD, virtual void v0() ;) /* fnv-nx D22 */\n    double m08; int* p; };\n'
+       'struct VS { virtual void f(); int a; char b[4]; };\n'
+       'struct VB : B { virtual void f(); hkVector4 m; };\n'
+       'struct VN { struct In { __m128 q; }; virtual void f(); In m; };\n'
+       'struct hkpSphereMotionD1E4 { virtual void f(); short m_s; hkVector4 unk10; };\n'
+       'class NF\n{\n  public:\n    typedef unsigned(__cdecl* RFN)(NF* p);\n    virtual ~NF();\n    RFN m_r; double d;\n};\n'
+       '#pragma pack(push, 4)\nstruct VP4 { virtual void f(); double d; };\n#pragma pack(pop)\n'
+       '#pragma pack(push, 8)\nstruct VP8 { virtual void f(); hkVector4 v; };\n#pragma pack(pop)\n')
+_vfo = run(s1.r_vfptr_pad, _VF)
+check('VFPAD1 puts FNVNX_VFPAD(member types) first in a no-base class with a vfptr (not D22\'s macro text, not pointers)',
+      _vfo, ['struct V16 { FNVNX_VFPAD(hkVector4) virtual', 'struct VD { FNVNX_VFPAD(double) FNVNX_D22',
+             'struct VP8 { FNVNX_VFPAD_PACK(8, hkVector4) virtual', 'class NF\n{ FNVNX_VFPAD(double)\n'],
+      ['struct VS { FNVNX', 'struct VB : B { FNVNX', 'struct VN { FNVNX', 'struct hkpSphereMotionD1E4 { FNVNX',
+       'struct VP4 { FNVNX', 'int*)'])
 
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

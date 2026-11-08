@@ -37,7 +37,7 @@ FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
 W=$FARM_HOME/boot_trace; mkdir -p "$W" "$(dirname "$REPORT")"
 S5=$P/tests/s5
 T0=$(date +%s)
-NOTES=(); PHASES=(); FAILS=()
+NOTES=(); PHASES=(); FAILS=(); NOTRACE=""
 log() { echo "$(date -u +%FT%TZ) boot_trace_job: $*"; }
 phase() { PHASES+=("| $1 | $2 | $(( $(date +%s) - PT ))s |"); }
 fail() { FAILS+=("$*"); NOTES+=("FAILED: $*"); log "FAILED: $*"; write_report; exit 1; }
@@ -49,7 +49,11 @@ write_report() {
 		# T1: a stage that did not run or produced nothing fails the job, named on the report's first line under
 		# the title (bt1 0e2a4b160f9e read rc=0 with "guest 0 calls" and a compare traceback)
 		if [ ${#FAILS[@]} -gt 0 ]; then echo "- FAIL: $(IFS=';'; echo "${FAILS[*]}")"; echo; fi
-		echo "link: ${LC:-?}; game: ${GAMEDESC:-?}; $(( $(date +%s) - T0 ))s"
+		# a stub boot that never started is the link's state, not the job's (bt1 74a1c281..89d1e3a9: link-head 4aa2f953,
+		# 47 units uncompiled, standins.o's MessageHandler 0x00c3bcf0 missing, emu_guest.py exits before the first
+		# instruction): said here, rc 0, nothing published
+		if [ -n "$NOTRACE" ]; then echo "- NO TRACE: $NOTRACE"; echo; fi
+		echo "link: ${LC:-?}${LCSRC:+ ($LCSRC)}; game: ${GAMEDESC:-?}; $(( $(date +%s) - T0 ))s"
 		echo
 		echo "| phase | result | time |"; echo "|---|---|---|"
 		printf '%s\n' "${PHASES[@]}"
@@ -87,11 +91,12 @@ fi
 GAMEDESC="$(sha256sum "$GAME/FalloutNV.exe" | cut -c1-12), Data: $(ls "$GAME/Data" 2> /dev/null | wc -l) entries"
 LC=${TRACE_LINK:-}
 if [ -z "$LC" ]; then
-	if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/link/${COMMIT:0:12}" > /dev/null 2>&1; then LC=${COMMIT:0:12}
+	if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/link/${COMMIT:0:12}" > /dev/null 2>&1; then LC=${COMMIT:0:12}; LCSRC="this head's link"
 	else
 		git -C "$ARTIFACTS" fetch -q --depth 1 origin link-head || fail "fetch link-head"
 		LC=$(git -C "$ARTIFACTS" show FETCH_HEAD:meta.json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print((d.get("commit") or d.get("head") or "")[:12])')
 		[ -n "$LC" ] || fail "link-head has no commit in meta.json"
+		LCSRC="link-head: no link/${COMMIT:0:12} published"
 	fi
 fi
 phase "game + link" "link $LC"
@@ -116,6 +121,16 @@ boot() {   # boot <tag> <emu_guest extra args...>: the stub boot of link LC with
 	return $rc
 }
 stop_line() { grep -m1 '^STOPPED\|STOPPED:' "$W/$1/emu_stub.log" 2> /dev/null | cut -c1-200; }
+# no STOPPED line: the emulator ended before the boot ran (an --inject symbol the link lacks, a bad argument, a
+# traceback); its last line and exit code say why
+not_started() {
+	[ -z "$(stop_line "$1")" ] || return 1
+	local last; last=$(grep -v '^[[:space:]]*$' "$W/$1/emu_stub.log" 2> /dev/null | tail -1 | cut -c1-200)
+	echo "the stub boot of link $LC did not start (emu_guest.py exit $(cat "$W/$1/emu_stub.rc" 2> /dev/null || echo ?): ${last:-no emu_stub.log}; log $W/$1/emu_stub.log)"
+}
+no_trace() {   # no_trace <why>: the report says why there is no trace; rc 0; nothing published (a good trace/<link> stays)
+	NOTRACE="$*"; case "${LCSRC:-}" in link-head*) NOTRACE+="; the link is $LCSRC (a newer head's fix is not in it)" ;; esac; log "NO TRACE: $NOTRACE"; write_report; log "done: $REPORT"; exit 0
+}
 
 # ---- A: discovery --------------------------------------------------------------------------------------------------
 PT=$(date +%s)
@@ -127,6 +142,7 @@ python3 -I "$S5/boot_trace.py" fnlist --addrmap "$LINKDIR/out/addrmap.tsv" ${TRA
 if [ -n "${TRACE_ONLY:-}" ]; then
 	cp "$W/all.txt" "$W/list.txt"; phase discovery "TRACE_ONLY: $(wc -l < "$W/list.txt") functions"
 else
+	rm -f "$W/disc.tsv" "$W/list.txt" "$W/disc.txt"   # never the last run's discovery (bt1 74a1c281: 3M stale calls)
 	boot disc "--trace-fn @$W/all.txt --trace-max ${TRACE_DISC_MAX:-3000000} --trace-deref 0 --trace-out $W/disc.tsv"
 	python3 -I - "$W/disc.tsv" "$W/all.txt" "${TRACE_HOT:-2000}" > "$W/list.txt" 2> "$W/disc.txt" <<'EOF'
 import collections, sys
@@ -144,6 +160,7 @@ print(f"discovery: {sum(calls.values())} calls of {len(calls)} functions; {len(k
       f"{len(calls) - len(keep)} hot (> {hot} calls) dropped", file=sys.stderr)
 EOF
 	phase discovery "$(cat "$W/disc.txt"); guest stop: $(stop_line disc)"
+	why=$(not_started disc) && no_trace "$why"
 	if stop_line disc | grep -q 'wall-clock'; then
 		NOTES+=("WARN: discovery stopped by the wall-clock limit (EMU_TIMEOUT ${EMU_TIMEOUT:-5400} s) before TRACE_DISC_MAX (${TRACE_DISC_MAX:-3000000}) calls: the list is the part of the boot reached in that time")
 	fi
@@ -164,7 +181,9 @@ WR=""; [ "${TRACE_WRITES:-0}" = 1 ] && WR="--trace-writes"
 boot guest "--trace-fn @$W/list.txt $WR --trace-out $W/guest.tsv"; grc=$?
 gcalls=$(grep -c '^call' "$W/guest.tsv" 2> /dev/null); gcalls=${gcalls:-0}
 phase guest "$gcalls calls; stop: $(stop_line guest)"
-if [ "$gcalls" = 0 ]; then
+if [ "$gcalls" = 0 ] && why=$(not_started guest); then
+	no_trace "$why"
+elif [ "$gcalls" = 0 ]; then
 	soft_fail "the guest wrote no trace (farm_boot.sh exit $grc; $(tail -1 "$W/guest.log" 2> /dev/null | cut -c1-160); log $W/guest.log)"
 fi
 

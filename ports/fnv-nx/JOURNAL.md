@@ -3681,3 +3681,31 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
 * **orchestration**: owner rule 13 (layout changes checked whole against the exe before merge, flags batched,
   Sonnet workers). S2-bodies had been rc=3 since 11:42 (fnvnx_compat.h, fnvnx_equiv_fi.h), so D26DS and
   classlayout were not in integration. S2 is resolving it.
+
+### J-0164 | 2026-11-08 | stream: orchestration | status: active | parent: J-0163
+
+* **the usage limit**: every stream stopped at about 13:30 on the account's 5-hour limit (reset 14:20). Nothing was
+  pushed between 13:22 and 14:20.
+* **link failures on new link code**, fixed by the orchestrator:
+  * classlayout.build on vftables without RTTI (bl1 1103aab2, full3 74a1c281; a1de4f54);
+  * minus_one_copies' vmo.tsv row on tables shorter than 2 slots (cf669574 on bl1/full2/full3; 0e8b2eb8).
+  T1 builds a <10-minute `linkcheck` job, so a red link no longer reaches the full farms.
+* **compile**: W41 (-fno-sized-deallocation) dropped the sized global operator delete, which 45 units call
+  explicitly. 4aa2f953 compiled 2,931/2,978 (1,629 undefined, 1,191 trap stubs). fnvnx_compat.h now declares it
+  (cf669574), and cf669574 compiled **2,976/2,978** [M] (full3). The last 2 are zerooverheadheap (R2 f74dfa4d) and
+  magiccaster (S1 d7d4daeb), both fixed after cf669574.
+* **classlayout**: exevft.deleting_dtor ran past a function's own ret and found the next one's (S2 5306adf9). 157
+  of 3,269 rows change (120 minus-one -> exe-order).
+* **traps**: R2's newest list (77af) shows 68 traps, 10 open. By content at head, 0 are open: 7 fixed after 439a,
+  plus niptr, plus VecQ by abi_layout_equal (R4 97bfda0b). The next link confirms it.
+* **EQ, all 8 shards** (588863): 3,321 hard rows. Boot and Hot are classified to 0, with 24 real rows, all owned:
+  13 exe data tables (R4), the TESObjectREFR ctor table, Creature slots, CompressedArchiveFile slot 8, SpawnedSub
+  ODR, __readfsdword wiring (R4), 00aa7eb0 (R2). Cold: 2,494 left for the farms' next run with the a8d24b0a harness.
+* **hot functions**: 10 of R2's 11 diverging hot-20 functions are soft by policy; the cull worker 00a694e0 is a real
+  table defect (NiAVObject). integration's overrides.tsv is empty, so the S15 overrides are not linked; they stay out
+  until they are fuzzed clean (correctness first).
+* **layout gate** (S1, layoutgate.py): on the boot set (65 units, 4,993 MSVC records), 0 field offsets differ, 16
+  record-level differences (pack 12, EBO 4). TAIL1-PACK (3cb31c66) fixes the pack filler. The whole tree runs on nr1.
+* **perf** (R2, PERF.md section 13, static): the stack protector is off, -mtune=cortex-a57 is in, 158,789 GOT loads
+  (74 % image addresses), our call-site overhead is 4.7 % (bridges 2.0 %), and no game frame has been counted.
+* **x86 fallback (X1-fex)**: GO-with-limits at 29-42 agent-days; closed by owner decision (too expensive).

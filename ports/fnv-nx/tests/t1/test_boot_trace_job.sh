@@ -22,6 +22,11 @@ if [ -n "${FARM_GUEST_DIR:-}" ]; then [ -f "$FARM_GUEST_DIR/guest.nso" ] || { ec
 else mkdir -p "$out/guest"; echo nso > "$out/guest/guest.nso"; echo elf > "$out/guest/fnvnx.elf"; fi
 [ -n "${FARM_LINK_DIR:-}" ] || { mkdir -p "$out/link/out"; printf '0x401000\tf\n' > "$out/link/out/addrmap.tsv"; }
 to=$(echo "$EMU_EXTRA" | sed -n 's/.*--trace-out \([^ ]*\).*/\1/p')
+if [ "${FAKE_NOSTART:-}" = "$tag" ]; then   # emu_guest.py exits before the boot (bt1 74a1c281: link-head 4aa2f953)
+	printf '   inject: heap_standin.o\n--inject /tmp/x/standins.o: _ZN14MessageHandler12FUN_00c3bcf0Eb is not in the guest\n' > "$out/emu_stub.log"
+	echo 1 > "$out/emu_stub.rc"; exit 0
+fi
+echo "STOPPED: deadlock: {1: ('blocked', None)}" > "$out/emu_stub.log"; echo 0 > "$out/emu_stub.rc"
 [ "$tag" = disc ] && [ -n "${FAKE_WALL:-}" ] && echo "STOPPED: run stopped by SIGTERM (wall-clock limit) in thread ?" > "$out/emu_stub.log"
 if [ -n "$to" ] && [ "${FAKE_NOTRACE:-}" != "$tag" ]; then printf 'call\t1\t1\t0\tx\t0x401000\tf\n' > "$to"; fi
 exit 0
@@ -65,6 +70,15 @@ run cmpfail FAKE_CMPFAIL=1
 ok "compare fails: exit 1, FAIL" '[ "$(cat $T/cmpfail.rc)" = 1 ] && grep -q "^- FAIL: boot_trace.py compare" $T/cmpfail.md'
 run wall FAKE_WALL=1
 ok "discovery at the wall-clock limit: a WARN note, still exit 0" '[ "$(cat $T/wall.rc)" = 0 ] && grep -q "WARN: discovery stopped by the wall-clock limit" $T/wall.md'
+# the stub boot never started: NO TRACE with emu_guest.py's last line, rc 0, nothing published, and the last run's
+# discovery is not reused (bt1 74a1c281..89d1e3a9 read 3,000,000 stale discovery calls and then FAILed)
+mkdir -p "$T/home-nostart/boot_trace"; printf 'call\t1\t1\t0\tx\t0x401000\tf\n' > "$T/home-nostart/boot_trace/disc.tsv"
+git -C "$T/origin.git" update-ref -d "refs/heads/trace/${C:0:12}"
+run nostart FAKE_NOSTART=disc
+ok "the stub boot did not start: rc 0, NO TRACE under the title naming emu_guest.py's last line" '[ "$(cat $T/nostart.rc)" = 0 ] && sed -n 3p $T/nostart.md | grep -q "^- NO TRACE: the stub boot of link ${C:0:12} did not start (emu_guest.py exit 1: --inject .*FUN_00c3bcf0Eb is not in the guest" && ! grep -q "^- FAIL" $T/nostart.md'
+ok "... the stale discovery not used, no reference run, nothing published" '! grep -q "| discovery | discovery: 1 calls" $T/nostart.md && ! grep -q "| reference" $T/nostart.md && ! git -C $T/origin.git rev-parse -q --verify "trace/${C:0:12}" > /dev/null'
+run nostartg FAKE_NOSTART=guest
+ok "the guest boot did not start: NO TRACE, rc 0" '[ "$(cat $T/nostartg.rc)" = 0 ] && grep -q "^- NO TRACE: the stub boot of link" $T/nostartg.md'
 python3 -I "$P/tests/s5/boot_trace.py" compare "$T/none.tsv" "$T/none2.tsv" > "$T/real.out" 2>&1; rrc=$?
 ok "boot_trace.py compare, missing guest trace: exit 2, an error line, no traceback" '[ $rrc = 2 ] && grep -q "no guest trace" $T/real.out && ! grep -q Traceback $T/real.out'
 [ $fails = 0 ] && echo "test_boot_trace_job: all ok" || { for f in "$T"/*.log; do echo "== $f"; tail -5 "$f"; done; echo "test_boot_trace_job: $fails failed"; exit 1; }

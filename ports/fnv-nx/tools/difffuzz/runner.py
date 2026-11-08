@@ -449,7 +449,7 @@ def with_static_pairs(agg_ptrs, spairs):
 
 def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
             garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
-            agg_ptrs=None, spairs=None):
+            agg_ptrs=None, spairs=None, vtpair=None):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
     the planted vftables; a differing call to neither is an indirect call through memory the case did not plant
     (marked vcall='unplanted': an oracle-model gap, classify.py oracle-vcall)."""
@@ -491,6 +491,7 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
     elif perm is not None:
         # (r4 uncls) the same calls in another order, further apart than the adjacent swap below: pair each oracle
         # call with the native call of the same callee (occurrence by occurrence) and compare those; by design
+        ra.pre_perm_calls = ra.calls            # (difffuzz-20) _order_probe starts from the native's own order
         ra.calls = [ra.calls[j] for j in perm]
         ta = [c.target for c in ra.calls]
         rx.perm_aligned = True
@@ -563,6 +564,8 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
     if callee_conv is not None:
         for i, (cx, ca) in enumerate(zip(rx.calls, ra.calls)):
             cv = callee_conv(cx.target) if cx.target >= 0 and cx.target not in libcalls.NO_ARGS else None
+            if cx.target == 0x00aa4060 and ca.target != cx.target:
+                cv = None     # (bh_C) MemoryManager::Deallocate(this, p) against the native cdecl operator delete(p): same family, no `this`
             if cv is None:
                 continue
             skip = dummies(cx.target) if dummies else ()
@@ -622,6 +625,10 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
         px, pa = struct.unpack('<I', rx.ret[:4])[0], struct.unpack('<I', ra.ret[:4])[0]
         if codeptr is not None and codeptr(pa) == px:
             pass                                    # the same function, as a native code address
+        elif vtpair and vtpair.get(pa) == px:
+            # (R4, farm baseline 588863: vftable getters 0x00da0780, 0x00dfc400, 0x00dfe5e0, 0x00dfe9b0) the native
+            # returns the vtable the link pairs with the exe's vftable (an addrmap V row): the same class identity
+            pass
         elif readers and world.A64_PRIV[0] <= pa < world.A64_PRIV[1]:
             # a literal the native unit keeps in its own .rodata, the oracle at its image address: compare the
             # pointees (C strings)
@@ -717,6 +724,8 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
             fv = float_verdict(4, bx, ba)
             if fv.get('tolerant') and abs(struct.unpack('<f', bx)[0]) > 1e-30:
                 d['float_word'] = fv
+            elif not fv.get('tolerant'):
+                d['float_store'] = True      # (bh_C) both stored the whole word and it differs beyond the tolerance: classify reruns the x87 probes on it
         # (difffuzz-20, zero-sign) a word that is -0.0 on one machine and +0.0 on the other, both machines having
         # stored it (the effective maps above hold the sign byte only): the classifier reruns the x87 probes on it
         w0 = first & ~3
@@ -924,6 +933,10 @@ class Pair:
                     vs = self.vslots_run(case, rx, ra)
                     if vs:
                         d = dict(d, vslot=vs)
+                    else:
+                        vn = self.vslot_entered(case, rx, ra)
+                        if vn:
+                            d = dict(d, vslot_native=vn)
                     return rx, ra, d
                 d = dict(d, index=0)
             else:
@@ -992,6 +1005,18 @@ class Pair:
         arguments included. -> (ra, divergence, world) of that run, or None."""
         if rx.error or ra.error:
             return None
+        pre = getattr(ra, 'pre_perm_calls', None)
+        if pre is not None:
+            # (difffuzz-20) compare() already paired these calls by callee (_perm_align) and reordered ra.calls in place,
+            # so the probe saw equal traces and no region: start again from the order the native made them in
+            paired, ra.calls, ra.pre_perm_calls = ra.calls, pre, None
+            try:
+                got = self._order_probe(case, rx, ra, w, placement, max_steps, cmp_)
+            finally:
+                ra.pre_perm_calls = pre
+            if got is None:
+                ra.calls = paired
+            return got
         vc = self._vcalls()
         wild = _is_wild(vc)
         tx = [c.target for c in rx.calls]
@@ -1126,6 +1151,39 @@ class Pair:
                     ks = [k for k in (j - 1, j) if 0 <= k < len(slots) and slots[k] in ran and slots[k] != ta]
                     if len(ks) == 1:
                         return dict(vft='%08x' % v, native_slot=j, exe_slot=ks[0], native='%08x' % ta,
+                                    exe='%08x' % slots[ks[0]])
+        return None
+
+    def vslot_entered(self, case, rx, ra):
+        """(bh_C, 0x00b004e0) A call-count where the oracle made no call: a virtual call through a planted vftable
+        ran the exe's slot function as code on the oracle (no call event), and the native entered, through the same
+        slot of its copy of the vftable, a different function of the unit (it made the extra calls). The native
+        vtable's slot holds another function than the exe's (D26 / vtables fix class: CompressedArchiveFile's slot 8
+        is 0x00afc060 in the exe, BSFile::Open 0x00aff300 natively), not a function the native inlined. Returns the
+        same dict as vslot_native, or None."""
+        t = self.target
+        ent = getattr(t.image, 'entries', {}) or {}
+        entered = {o: a for a, o in ent.items() if a in ra.blocks and o != t.orig_addr}
+        if not entered:
+            return None
+        pins = getattr(t, 'vt_pins', {}) or {}
+        for v in sorted(set(case.vptrs.values())):
+            b = pins.get(v) or b''
+            slots = list(struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4]))
+            ap = (getattr(t, 'vt_ap', {}) or {}).get(v)
+            if not slots or ap is None:
+                continue
+            for base, m in (getattr(t, 'vt_mem', {}) or {}).items():
+                if not base <= ap < base + len(m):
+                    continue
+                words = struct.unpack('<%dI' % ((len(m) - (ap - base)) // 4), m[ap - base:])
+                for j, w in enumerate(words[:len(slots) + 2]):
+                    o = ent.get(w)
+                    if o is None or o not in entered:
+                        continue
+                    ks = [k for k in (j - 1, j) if 0 <= k < len(slots) and slots[k] in rx.blocks and slots[k] != o]
+                    if len(ks) == 1:
+                        return dict(vft='%08x' % v, native_slot=j, exe_slot=ks[0], native='%08x' % o,
                                     exe='%08x' % slots[ks[0]])
         return None
 
@@ -1303,7 +1361,7 @@ class Pair:
                     # frame's own `add esp, N` going straight to the epilogue (pops, `ret`): then a stdcall callee
                     # is as likely (a COM call through a vtable: 00b7c7b0's `call eax; add esp, 0x20; ret 4`), and
                     # 0 is tried first, the pushes after it
-                    n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 0
+                    n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 1   # (bh_C) `pop ecx` is one byte: 0x00aa13e0's `call edx; pop ecx; ret` closes the frame
                     rest = after[n:].lstrip(b'\x5b\x5d\x5e\x5f')
                     if not n or rest[:1] not in (b'\xc2', b'\xc3'):
                         continue
@@ -1537,7 +1595,8 @@ class Pair:
                            self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()),
                            self._vptr_words(), getattr(self.target.callee_info, 'caller_conv', None),
                            [(xa, placement[l], sz) for l, (xa, sz) in getattr(rx, 'agg_addr', {}).items()
-                            if l in placement], getattr(self.target, 'static_pairs', ()))
+                            if l in placement], getattr(self.target, 'static_pairs', ()),
+                           vtpair=getattr(self.target, 'vtables_defined', None))
         d = cmp_(ra, w)
         if d is not None and not d.get('soft') and (d['kind'] == 'call-target' or d.get('after_perm')):
             got = self._order_probe(case, rx, ra, w, placement, max_steps, cmp_)

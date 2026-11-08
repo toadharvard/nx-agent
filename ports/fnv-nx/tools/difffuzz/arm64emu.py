@@ -297,6 +297,7 @@ class Arm64Engine:
             uc.reg_write(VR[i], world.garbage32(case.seed, 400 + i) | (world.garbage32(case.seed, 500 + i) << 32))
         self._place_args(conv, case, placement, world.SP0 & ~0xf)
         uc.mem_write(TLS_BASE, bytes(TLS_SIZE))
+        uc.mem_write(libcalls.A64_TLS_ARRAY, struct.pack('<I', libcalls.A64_TLS_SLOT0))   # __readfsdword(0x2c)'s array
         uc.mem_write(EXC_BASE, bytes(EXC_SIZE))
         uc.reg_write(A.UC_ARM64_REG_TPIDR_EL0, TLS_BASE)
         uc.reg_write(A.UC_ARM64_REG_LR, world.SENTINEL)

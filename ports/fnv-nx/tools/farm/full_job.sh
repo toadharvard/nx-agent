@@ -88,7 +88,7 @@ art() { python3 -I -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.
 	"$TCB/toolchain/stage.json" "$1"; }
 stage_ok "$TCB" toolchain || { echo "toolchain stage failed, see $TCB/make.log"; tail -5 "$TCB/make.log"; exit 1; }
 ARGS=(FNVNX_TC="$(art prefix)" DEVKITPRO="$(art devkitpro)")
-[ -n "$(art cross_bin)" ] && ARGS+=(CROSS_BIN="$(art cross_bin)")
+XCB=$(usable_cross "$(art cross_bin)"); [ -n "$XCB" ] && ARGS+=(CROSS_BIN="$XCB")
 if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORBIS=none); fi
 
 # 2. The link (link_job.sh in this job's build directory; it publishes link/<commit12> already, without v1/: the
@@ -99,7 +99,7 @@ rm -rf "$V1" "$F/v1-run" "$F/v1-report.md"
 # Short waits for the prepare/compile farms' artifacts: when they are not there, this job prepares and compiles
 # locally (step 4) instead of waiting up to 1.5 h for them
 export FARM_TREE_WAIT=${FARM_TREE_WAIT:-300} FARM_OBJ_WAIT=${FARM_OBJ_WAIT:-300}
-CROSS_BIN="$(art cross_bin)" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
+CROSS_BIN="$XCB" LINK_BUILD=$F/build FARM_SRC=$SRC FARM_EXT=$EXT \
 	bash "$HERE/link_job.sh" "$COMMIT" "$F/link-$C12.md" > "$F/link_job.log" 2>&1 \
 	|| log "link_job.sh exited $?"
 # shellcheck disable=SC1090

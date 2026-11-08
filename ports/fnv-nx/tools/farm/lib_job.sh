@@ -11,19 +11,23 @@ if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FAR
 export FARM_APT
 
 NEED_PIP="capstone==5.0.9 unicorn==2.1.4 pyelftools==0.33 mako"
-NEED_APT="git python3 python3-pip make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu liblz4-dev libnewlib-dev python3-mako"
-host_check() {   # commands (py:<module> for python modules) -> installed with apt-get / pip when FARM_APT=1
+NEED_APT="git python3 python3-pip g++-aarch64-linux-gnu binutils-aarch64-linux-gnu make curl jq rsync dpkg gcc g++ llvm-18 qemu-user libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex cmake ninja-build meson gcc-13-plugin-dev-aarch64-linux-gnu liblz4-dev libnewlib-dev python3-mako"
+has_dep() {   # has_dep <command | py:<module> | gccplugin>: true when this host has it
+	case "$1" in
+		llvm-undname) command -v llvm-undname >/dev/null || command -v llvm-undname-18 >/dev/null ;;
+		py:*) python3 -I -c "import ${1#py:}" 2>/dev/null ;;
+		# the GCC plugin headers compile.sh's fnvnx_ftoi / fnvnx_order plugins build against: a package, not a command
+		# (linkcheck on sw14: compile.sh exit 2 at 0 s); apt installs it with NEED_APT
+		gccplugin) [ -f "$(aarch64-linux-gnu-g++ -print-file-name=plugin 2>/dev/null)/include/gcc-plugin.h" ] ;;
+		*) command -v "$1" >/dev/null ;;
+	esac
+}
+host_check() {   # commands (py:<module> for python modules, gccplugin) -> installed with apt-get / pip when FARM_APT=1
 	local missing="" c
-	for c in "$@"; do
-		case "$c" in
-			llvm-undname) command -v llvm-undname >/dev/null || command -v llvm-undname-18 >/dev/null || missing="$missing $c" ;;
-			py:*) python3 -I -c "import ${c#py:}" 2>/dev/null || missing="$missing $c" ;;
-			*) command -v "$c" >/dev/null || missing="$missing $c" ;;
-		esac
-	done
+	for c in "$@"; do has_dep "$c" || missing="$missing $c"; done
 	[ -z "$missing" ] && return 0
 	if [ "${FARM_APT:-0}" = 1 ]; then
-		# apt only for commands; the Python modules are pip's (the pinned versions the link and harness use)
+		# apt only for commands and packages; the Python modules are pip's (the pinned versions the link and harness use)
 		if [ -n "$(printf '%s\n' $missing | grep -v '^py:')" ]; then
 			apt-get update -qq
 			# shellcheck disable=SC2086
@@ -34,13 +38,7 @@ host_check() {   # commands (py:<module> for python modules) -> installed with a
 		# T1: install, then check again: a host that still lacks one fails here, at setup (bl1 bea5a2ed failed at
 		# the link stage after 72 min: No module named 'capstone', which nothing installed)
 		local still=""
-		for c in $missing; do
-			case "$c" in
-				llvm-undname) command -v llvm-undname >/dev/null || command -v llvm-undname-18 >/dev/null || still="$still $c" ;;
-				py:*) python3 -I -c "import ${c#py:}" 2>/dev/null || still="$still $c" ;;
-				*) command -v "$c" >/dev/null || still="$still $c" ;;
-			esac
-		done
+		for c in $missing; do has_dep "$c" || still="$still $c"; done
 		[ -z "$still" ] && return 0
 		echo "$(basename "$0"): still missing after installing:$still"
 		exit 1
@@ -48,9 +46,21 @@ host_check() {   # commands (py:<module> for python modules) -> installed with a
 	echo "$(basename "$0"): missing on this host:$missing (FARM_APT=1 installs: $NEED_APT; pip $NEED_PIP)"
 	exit 1
 }
+usable_cross() {   # usable_cross <toolchain cross_bin>: it, when its g++ has the GCC plugin headers; else nothing
+	# T1: toolchain/cross/packages.tsv (the pinned cross root) has no gcc-13-plugin-dev-aarch64-linux-gnu, so a
+	# toolchain whose cross tools are that root (a host with no system aarch64-linux-gnu-g++, or one restored from the
+	# host cache of such a host) cannot build compile.sh's plugins: linkcheck on sw14 ended at compile.sh exit 2 at
+	# 0 s. Without CROSS_BIN the build takes the system cross tools (host_check $LINK_PY installs them, the plugin
+	# headers included), which the pipeline accepts when they are the pinned build (build.py provide_cross).
+	local cb=$1 pd
+	[ -n "$cb" ] || return 0
+	pd=$("$cb/aarch64-linux-gnu-g++" -print-file-name=plugin 2>/dev/null) || pd=""
+	if [ -f "$pd/include/gcc-plugin.h" ]; then echo "$cb"
+	else log "the toolchain's cross tools $cb have no GCC plugin headers: the system cross tools instead" >&2; fi
+}
 # every Python module the link and the boot import (tools/link: capstone in slotfill2, exevft, bodies, vslots,
 # membervt; unicorn, elftools in the emulator), at the versions the harness was run with
-LINK_PY="py:capstone py:unicorn py:elftools py:mako"
+LINK_PY="py:capstone py:unicorn py:elftools py:mako aarch64-linux-gnu-g++ gccplugin"   # the system cross g++ and its GCC plugin headers: compile.sh's plugins (the link's probes too; usable_cross)
 
 hostcache() {   # hostcache fetch|publish <name> <key> <dir> [...]: tools/farm/hostcache.sh (HOSTCACHE=0: nothing)
 	[ "${HOSTCACHE:-1}" = 1 ] || return 1

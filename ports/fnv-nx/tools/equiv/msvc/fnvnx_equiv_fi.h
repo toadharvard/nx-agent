@@ -32,6 +32,10 @@ template <> struct fnvnx_int_of_align<4> { typedef unsigned int type; };
 template <> struct fnvnx_int_of_align<8> { typedef unsigned __int64 type; };
 template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_MSVC_BASE_END(...) fnvnx_int_of_align<__alignof(__VA_ARGS__)>::type : 0;
+#define FNVNX_MSVC_BASE_END_PACK(N, ...) fnvnx_int_of_align<(__alignof(__VA_ARGS__) < (N) ? __alignof(__VA_ARGS__) : (N))>::type : 0;
+/* VFPAD1: MSVC pads its own vfptr already */
+#define FNVNX_VFPAD(...)
+#define FNVNX_VFPAD_PACK(N, ...)
 #endif
 
 /* NEW5: under GCC a class-scope operator delete(void*) forwarding to ::operator delete; MSVC 2008 already called the
