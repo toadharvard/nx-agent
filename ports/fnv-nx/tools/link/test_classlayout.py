@@ -49,6 +49,19 @@ def main():
               'decide: IUnknown in the hierarchy -> com, even with a dtor shape')
     finally:
         cl.is_deldtor, cl.trivial = saved
+    # R4's VTFILL binding file (fnv-nx-build recon/vtbind): found under FNVNX_RECON by its header
+    import tempfile, fnvlink
+    d = tempfile.mkdtemp()
+    os.makedirs(os.path.join(d, 'vtbind'))
+    open(os.path.join(d, 'vtbind', 'bind.tsv'), 'w').write(
+        '# fnvnx-vtbind/1\n# exe_address\tkind\tsymbol\ttarget\tn\ttables\n00401130\tfn\t_ZN1A1fEv\t\t0\t2\n'
+        '00408b40\tadj\t__fnvnx_vadj_00408b40\t__fnv_00408c00\t8\t1\n')
+    open(os.path.join(d, 'other.tsv'), 'w').write('# something else\n00401000\tfn\tx\t\t0\t1\n')
+    vb = fnvlink.load_vtbind(d)
+    check(vb == {0x401130: ('fn', '_ZN1A1fEv', '', 0), 0x408b40: ('adj', '__fnvnx_vadj_00408b40', '__fnv_00408c00', 8)},
+          'load_vtbind: fn and adj rows from recon/vtbind: %s' % vb)
+    stub = fnvlink.emit_adj_stub('__fnvnx_vadj_00408b40', '__fnv_00408c00', 8)
+    check('sub w0, w0, #8' in stub and 'b __fnv_00408c00' in stub, 'an adj row becomes this -= n; b target')
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 
