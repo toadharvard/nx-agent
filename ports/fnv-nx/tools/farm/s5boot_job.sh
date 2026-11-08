@@ -14,6 +14,7 @@
 #   S5BOOT_TRACE    function names to trace, `,`-separated (emu_guest.py --trace-fn; calls and returns)
 #   S5BOOT_TRACE_MAX  at most this many trace events (default 2000000)
 #   S5BOOT_EXTRA    more emu_guest.py arguments
+#   S5BOOT_BOOTS    stub (default: the known-fault table and stand-ins) or raw (neither: the product path)
 #   FNVNX_STUB_NULLDEV  1: CreateDevice succeeds headless without a GPU backend (farm_boot.sh; a guest built with
 #                   native_device.cpp's fnvnx_stub_nulldev)
 #   FARM_NATIVE_RENDER  1: the boot runs the real native device, not the null one: the native renderer injected into
@@ -37,7 +38,8 @@ LC=${S5BOOT_LINK:-${COMMIT:0:12}}; TAG=${S5BOOT_TAG:-boot}
 W=$FARM_HOME/s5boot/$LC-$TAG; rm -rf "$W"; mkdir -p "$W" "$(dirname "$REPORT")"
 T0=$(date +%s); NOTES=()
 log() { echo "$(date -u +%FT%TZ) s5boot_job: $*"; }
-L=$W/b/emu_stub.log
+S5BOOT_BOOTS=${S5BOOT_BOOTS:-stub}   # raw: no stand-ins and no exe-vtables pass (the product path)
+L=$W/b/emu_$S5BOOT_BOOTS.log
 write_report() {
 	{
 		echo "# S5 stub boot $LC ($TAG)"
@@ -114,7 +116,7 @@ if [ -n "${FARM_DEADLINE:-}" ]; then   # the runner's kill: end the boot in time
 	[ "$EMU_TIMEOUT" -gt 60 ] || fail "no time left before FARM_DEADLINE"
 fi
 log "boot $LC ($TAG), timeout ${EMU_TIMEOUT}s"
-BUDGET=${BUDGET:-0} FARM_FAULTS=$W/faults.txt FARM_PROFILE=$W/profile FARM_BOOTS=stub FARM_GAME=$GAME \
+BUDGET=${BUDGET:-0} FARM_FAULTS=$W/faults.txt FARM_PROFILE=$W/profile FARM_BOOTS=$S5BOOT_BOOTS FARM_GAME=$GAME \
 	EMU_TIMEOUT=$EMU_TIMEOUT EMU_EXTRA="$EXTRA" \
 	timeout $(( EMU_TIMEOUT + 240 )) bash "$P/tests/s5/farm_boot.sh" "$LC" "$W/b" > "$W/boot.log" 2>&1
 NOTES+=("farm_boot exit $? (log boot.log)")
