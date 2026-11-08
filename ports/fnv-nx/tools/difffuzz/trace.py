@@ -35,14 +35,16 @@ def _a64_hook(uc, address, size, n):
 
 
 def attach(pair, target):
-    orig_run = pair.run
+    """Hook both engines of the pair's next run. The engines are built by pair.run itself (imports, vtable memory,
+    deleting flags and the rest of its setup included), so the traced run is the run that is reported."""
+    orig_x, orig_a = x86emu.X86Engine.__init__, arm64emu.Arm64Engine.__init__
+    pair.xe = pair.ae = None
 
-    def run(case, max_steps=200000):
-        w = world.World(case, target.x86_code, pair.pinned)
-        pair.xe = x86emu.X86Engine(w, target.x86_code, target.callee_info, getattr(target, 'follow', None))
-        pair.ae = arm64emu.Arm64Engine(w, target.image, target.stub_orig, getattr(target, 'vtables', None))
-        pair.xe.uc.hook_add(UC_HOOK_CODE, _x86_hook, user_data=[0])
-        pair.ae.uc.hook_add(UC_HOOK_CODE, _a64_hook, user_data=[0])
-        pair.run = orig_run
-        return orig_run(case, max_steps)
-    pair.run = run
+    def xinit(self, *a, **k):
+        orig_x(self, *a, **k)
+        self.uc.hook_add(UC_HOOK_CODE, _x86_hook, user_data=[0])
+
+    def ainit(self, *a, **k):
+        orig_a(self, *a, **k)
+        self.uc.hook_add(UC_HOOK_CODE, _a64_hook, user_data=[0])
+    x86emu.X86Engine.__init__, arm64emu.Arm64Engine.__init__ = xinit, ainit
