@@ -42,7 +42,7 @@ def t_keys():
 def t_compile():
     d = scenario.load_file(scenario.SCENARIOS)
     ids = [s["id"] for s in d["scenarios"]]
-    check("compile: five scenarios", ids == ["boot-menu", "newgame", "cells", "saveload", "quest"], str(ids))
+    check("compile: six scenarios", ids == ["boot-menu", "boot-cell", "newgame", "cells", "saveload", "quest"], str(ids))
     for s in d["scenarios"]:
         plan = scenario.compile_plan(d, s, allow_unresolved=True)
         ops = {st["op"] for st in plan["steps"]}

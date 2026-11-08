@@ -56,6 +56,47 @@
    ]
   },
   {
+   "id": "boot-cell",
+   "title": "boot to the main menu, then coc into a cell (the boot's first-cell milestone)",
+   "steps": [
+    {
+     "do": "until",
+     "milestone": "main-menu",
+     "timeout": "menu_timeout",
+     "wine_s": "menu_wine_s"
+    },
+    {
+     "do": "wait",
+     "s": 5
+    },
+    {
+     "do": "mark",
+     "name": "main-menu"
+    },
+    {
+     "do": "console",
+     "lines": [
+      "coc GSDocMitchellHouse"
+     ],
+     "cell": "GSDocMitchellHouse"
+    },
+    {
+     "do": "until",
+     "milestone": "first-cell",
+     "timeout": "cell_timeout",
+     "wine_s": "cell_wine_s"
+    },
+    {
+     "do": "wait",
+     "s": 10
+    },
+    {
+     "do": "mark",
+     "name": "first-cell"
+    }
+   ]
+  },
+  {
    "id": "newgame",
    "title": "new game through character creation to Goodsprings",
    "steps": [
