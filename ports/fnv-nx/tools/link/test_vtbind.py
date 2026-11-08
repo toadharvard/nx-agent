@@ -44,6 +44,14 @@ def main():
     ok('a thunk to no native and a deleting destructor shape need a recon',
        needs == [('00405000', 'function', '1'), ('00406000', 'deldtor', '1')], needs)
 
+    with tempfile.TemporaryDirectory() as d:
+        am = os.path.join(d, 'addrmap.tsv')
+        open(am, 'w').write('# addrmap\n00401000\tF\t__fnv_00401000\t_ZN1A1fEv\n'
+                            '00402000\tC\t__fnvnx_cthis_00402000\t_ZN1BC1Eb\n00403000\tD\t__fnv_00403000\tx\n')
+        nat = vtbind.load_natives(am)
+        ok('natives: F by its name, C by the link\'s cthis symbol, other kinds none',
+           nat == {0x00401000: '_ZN1A1fEv', 0x00402000: '__fnvnx_cthis_00402000'}, nat)
+
     cc, nm = shutil.which('aarch64-linux-gnu-gcc'), shutil.which('aarch64-linux-gnu-nm')
     if not (cc and nm):
         print('SKIP check: aarch64-linux-gnu-gcc / nm missing')

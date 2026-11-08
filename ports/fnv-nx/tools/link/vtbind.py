@@ -11,7 +11,7 @@ make: for every short row (the first native slot past a native table's end; one 
 from that slot, minus one for D26's destructor pair (exevft.exe_slot_index), to the exe table's end (exevft.scan's
 slot count; a word without a base relocation is not a slot, which drops string bytes past a table's end); for
 every null row the exe slot and the one before it. Each address is then
-  fn       the address map's native (kind F, or G for a bound deleting destructor)
+  fn       the address map's native (kind F, G for a bound deleting destructor, C's __fnvnx_cthis_<addr>)
   adj      an MSVC adjustor thunk (`sub ecx, n; jmp T`, exevft.thunk) whose target T has a native: VTFILL emits
            fnvlink's emit_adj_stub(ADJ_SYM % address, native of T, n)
   needs    none of these (a deleting destructor with its body inlined, a function no unit defines): a recon (REC1)
@@ -47,7 +47,9 @@ def load_vtgate(path):
 
 
 def load_natives(path):
-    """{exe address: native symbol} of the address map's functions (F) and bound deleting destructors (G)"""
+    """{exe address: native symbol} of the address map's functions (F), bound deleting destructors (G) and
+    constructor-shaped natives (C: the decomp's flag-taking "C1" that is the exe's deleting destructor; the slot takes
+    the link's own __fnvnx_cthis_<addr>, the address symbol, never the C1 name)"""
     out = {}
     for line in open(path):
         if line.startswith('#'):
@@ -55,6 +57,8 @@ def load_natives(path):
         f = line.rstrip('\n').split('\t')
         if len(f) > 3 and f[1] in ('F', 'G'):
             out.setdefault(int(f[0], 16), f[3] or f[2])
+        elif len(f) > 2 and f[1] == 'C':
+            out.setdefault(int(f[0], 16), f[2])
     return out
 
 
