@@ -1809,6 +1809,9 @@ class Link(Stage):
             t = time.time()
             b.sh([PY, '-I', fl, 'resolve'] + args, log, env=env, check=True)
             r.metric('link_resolve%d_s' % n, round(time.time() - t, 1))
+            ph = re.findall(r'resolve phases: (.*)', open(log, errors='replace').read())
+            for name, sec in re.findall(r'([\w+/() -]+?) ([\d.]+) s(?:,|$)', ph[-1] if ph else ''):
+                r.metric('link_resolve%d_phase_%s_s' % (n, re.sub(r'\W+', '_', name.strip()).strip('_')), float(sec))
             shutil.copyfile(os.path.join(out, 'stats.txt'), os.path.join(d, 'resolve%d.stats.txt' % n))
 
         # S2c's order: resolve (asks for layouts and vtables), probe (layouts + synthesized vtables/typeinfo),

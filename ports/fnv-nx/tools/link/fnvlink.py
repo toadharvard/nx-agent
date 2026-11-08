@@ -376,6 +376,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
     this tree, 'none': not used). exe: the player's FalloutNV.exe (None: FNVNX_EXE / PLAYER_EXE, 'none': not used):
     its RTTI pairs each image vftable with its own class's native vtable (exevft.py)."""
+    import time
+    _pt, _phases = [time.time()], []
+
+    def _phase(name):   # seconds per step (T1: what the incremental link has left to do)
+        now = time.time()
+        _phases.append('%s %.1f s' % (name, now - _pt[0]))
+        _pt[0] = now
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
     pre_stats = collections.Counter()
@@ -392,6 +399,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     have = [u for u in units.values() if u.obj]
     log('units: %d, with objects: %d' % (len(units), len(have)))
 
+    _phase('load units+objects')
     # MSVC side
     ms = DemangleCache(os.path.join(out, 'cache', 'msvc.tsv'), UNDNAME)
     allms = set()
@@ -457,6 +465,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     body_bind = bodies.load_bind(out)
     # ---- end S2d
 
+    _phase('msvc side')
     # Itanium side
     objsyms, itnames = {}, set()
     for u in have:
@@ -485,6 +494,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 if s.bind == 'global' and not s.comdat:
                     strong[s.name].append(u.source)
 
+    _phase('itanium side')
     # ---- definitions: original address -> native symbol in the defining object
     native = {}      # addr -> dict(unit, sym (elf Sym), variants {variant: Sym}, how)
     def_stats = collections.Counter()
@@ -606,6 +616,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             pre_stats['msvc_entry_no_thunk'] += 1
     pre_stats['msvc_entry_exe'] = len(sec_entries)
 
+    _phase('definitions/overrides')
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
     lay_of = abi2.lookup(layouts)   # unit -> type -> Layout, with the unit's unique `ns::type` for a bare name
@@ -775,6 +786,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             called_cache[u_.source] = {o_.syms[si][0] for i_ in range(len(o_.secs)) if o_.secs[i_][2] & 4
                                        for _, (si, typ, _) in o_.rel(i_).items() if typ in (21, 20)}   # P32
         return called_cache[u_.source]
+    _phase('references (1)')
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
     ecx_use = msvc_code_use(units_json, ms, msvc, renames)
     for u in have:
@@ -1200,6 +1212,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 have_def.add((sym.name, u.source))
                 stats['rebound_copies'] += 1
 
+    _phase('references')
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
     alias_lines += ['%s = 0x%08x;' % (TEXTADDR_SYM % a, a) for a in sorted(text_addrs)]
@@ -1315,6 +1328,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                   errors='surrogateescape') as f:   # rebound variables: apply retargets the object's own references
             f.write(''.join(n + '\n' for n in sorted(set(dd.values()))))
 
+    _phase('objcopy args')
     # ---- vftables
     # image vftables (primary `vftable' and secondary `vftable'{for `B'}) -> address point of the Itanium vtable of
     # the class of the same name, emitted by a compiled object or synthesized (vtables.py, docs/LINK.md "Vtables")
@@ -1369,6 +1383,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 for h_ in [unit] + hosts:
                     if h_ not in e[1]:
                         e[1].append(h_)
+    _phase('vftables')
     # ---- S2c: the player's exe (RTTI): every image vftable with its class and offset (exevft.py)
     exe_path = exevft.exe_path(None if exe in (None, '') else exe) if exe != 'none' else None
     exev = exevft.load(exe_path, os.path.join(out, 'cache', 'exe_vftables.json')) if exe_path else {}
@@ -1489,6 +1504,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                     'yes' if z and vmap[a_][0] == z[0] else 'no'))
                 stats['vftable_aliases'] += 1
 
+    _phase('exe rtti')
     # ---- data addresses: absolute symbols at the original address (the data image is mapped there, D3)
     with open(os.path.join(out, 'aliases.ld'), 'w') as f:
         f.write('/* fnv-nx link-by-address aliases (generated by tools/link/fnvlink.py; local output) */\n')
@@ -1509,6 +1525,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for line in sorted(set(alias_lines)):
             f.write(line + '\n')
 
+    _phase('data addresses')
     # ---- bridges
     # S5 (s5-002 item 4): an address map C row stands for an MSVC constructor, which returns this in eax; the
     # Itanium C1 returns void, so the row names a stub that returns this (all arguments in registers)
@@ -1541,6 +1558,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for unit, t in sorted(probe_req):
             f.write('%s\t%s\n' % (unit, t))
 
+    _phase('bridges')
     # ---- address map
     for a, names in load_extern_list(extern_list).items():
         extern_text.setdefault(a, set()).update(names)
@@ -1552,6 +1570,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows,
                                           adj_rows, gdel_rows)
 
+    _phase('address map')
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
                                          'code-defmissing', 'code-adjthunk', 'code-sddstub', 'extern-text', 'text-addr',
@@ -1656,6 +1675,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     lines += ['  %-6d %s' % (n, c) for c, n in pair_classes.most_common()]
     open(os.path.join(out, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
+    _phase('stats')
+    log('resolve phases: ' + ', '.join(_phases))
 
 
 VPTR_LHS = re.compile(r'(?i)(?:^|[^\w])(?:\w*_)?(?:vptr|vtbl|vtable|vftable|vfptr|vft|vftbl|vtab|vt)\w*\s*$')
