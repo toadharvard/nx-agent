@@ -249,9 +249,9 @@ source files naming them.
 | `0x0065de40` | body_unnamed | `unsigned int __thiscall FUN_0065d4e0_Pool::Alloc(unsigned int)` | 1 | 188 |
 | `0x008d0430` | body_named | `class PatrolActorPackageData * __thiscall LowProcess::GetCurrentPackageData(void)` | 6 | 227 |
 | `0x009fea2a` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009fead6` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009feae8` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009febd8` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
+| `0x009fead6` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
+| `0x009feae8` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
+| `0x009febd8` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
 | `0x00aa1750` | body_named | `unsigned int __thiscall NiFile::FileRead(void *, unsigned int)` | 3 | 4 |
 | `0x00aa1810` | body_unnamed | `unsigned int __thiscall FUN_00aff950_shell::FUN_00aa1810(void *, unsigned int)` | 2 | 2 |
 | `0x00aa7830` | body_named | `__thiscall fnv_00b044a0::BVecQ::~BVecQ(void)` | 12 | 23 |
@@ -406,7 +406,7 @@ static-object destructors that the source registers explicitly with `atexit`; `0
 | `0x00ec89e9` | crt | isalnum | n | 1 | 1 | libc: isalnum |
 | `0x00ec8a19` | crt | strncmp | n | 11 | 17 | libc: strncmp |
 | `0x00ec8d08` | crt | strtol | n | 3 | 5 | libc: strtol |
-| `0x00ec8d33` | crt | _itoa | i | 2 | 3 | platform/crt: _itoa |
+| `0x00ec8d33` | crt | strtoul (R1; was listed as _itoa) | i | 2 | 3 | libc: strtoul |
 | `0x00ec8d5f` | crt | strncpy_s | n | 13 | 25 | platform/crt: strncpy_s |
 | `0x00ec8feb` | crt | _strlwr_s | n | 2 | 2 | platform/crt: _strlwr_s |
 | `0x00ec9010` | crt | atan | n | 2 | 9 | libc: atan |

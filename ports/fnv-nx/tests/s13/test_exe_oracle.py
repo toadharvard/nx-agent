@@ -137,5 +137,25 @@ s = json.load(open(t / 'r.json'))
 check({x['branch']: x['verdict'] for x in s['records']}.get('recon/y') == 'not-accepted' and s['functions']['hard'] >= 1
       and 'fnvnx-recon-fuzz' in (t / 'r.md').read_text(), 'report: a hard divergence refuses the recon')
 
+# recon_fuzz.py queue: the recon fleet's fuzz-queue.tsv (rows name the containing exe functions)
+q = t / 'fuzz-queue.tsv'
+q.write_text('source\tname\tkind\texe_addresses\tconvention\tseed_hints\tnote\n'
+             'recon/x\t_ZN1A1fEv\tinline-confirm\t0x00401000\tmember\tseeds\t0x00401005 (in 0x00401000)\n'
+             'recon/y\t_ZN1B1gEv\tpending-fuzz:no-exe-copy\t\tmember\tfuzz the callers\tnone\n'
+             'recon/z\t_ZN1C1hEv\tinline-confirm\t0x00499000\tmember\tseeds\t\n')
+r = subprocess.run([sys.executable, str(TOOLS / 'recon_fuzz.py'), 'queue-units', str(q)], cwd=TOOLS, env=env,
+                   capture_output=True, text=True)
+check(r.returncode == 0 and r.stdout.strip() == '0', 'queue-units: the units of the queue\'s addresses (%s)' % (r.stdout or r.stderr)[-200:])
+r = subprocess.run([sys.executable, str(TOOLS / 'recon_fuzz.py'), 'queue', str(q), str(cat), str(t / 'qt.jsonl'),
+                    str(t / 'qp.json')], cwd=TOOLS, env=env, capture_output=True, text=True)
+qp = json.load(open(t / 'qp.json')) if r.returncode == 0 else []
+check(r.returncode == 0 and [json.loads(x)['address'] for x in open(t / 'qt.jsonl')] == ['00401000']
+      and 'error' in qp[1] and 'not_run' in qp[2]['functions'][0], 'queue: one target; no address / not in the tree reported (%s)' % r.stderr[-200:])
+r = subprocess.run([sys.executable, str(TOOLS / 'recon_fuzz.py'), 'report', str(t / 'qp.json'), str(camp),
+                    str(t / 'q.md'), str(t / 'q.json')], cwd=TOOLS, env=env, capture_output=True, text=True)
+qs = json.load(open(t / 'q.json')) if r.returncode == 0 else {}
+check([x['verdict'] for x in qs.get('records', [])] == ['fuzz-clean', 'not-accepted', 'not-accepted'],
+      'queue report: a row is fuzz-clean when its exe functions are (%s)' % [x['verdict'] for x in qs.get('records', [])])
+
 print('test_exe_oracle: %d failures' % len(FAIL))
 sys.exit(1 if FAIL else 0)

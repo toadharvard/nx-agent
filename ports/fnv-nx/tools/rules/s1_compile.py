@@ -870,9 +870,18 @@ def r_win32_call_args(path, text, stats):
     names = [n for n in sigs if n in text]
     if not names: return text
     # names the file still declares itself (C++ prototypes kept in a namespace) resolve to those: leave them
-    names = [n for n in names if not re.search(r'[\w\*&>]\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
+    # (a call statement `return CallNextHookEx(...);` is not a prototype: CALL1-RET)
+    names = [n for n in names if not re.search(r'[\w\*&>](?<!\breturn)(?<!\belse)(?<!\bcase)(?<!\bthrow)(?<!\bdo)'
+                                               r'\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
     if not names: return text
-    call = re.compile(r'(?<![\w.>:~])(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
+    # N::name( where namespace N only has DECL1's `using ::name;` is the platform function too (CALL1-NS:
+    # blk_00860000's InstalledPathDetail::RegOpenKeyExA)
+    aliased = {}
+    for am in re.finditer(r'\bnamespace\s+(\w+)\s*\{', text):
+        body = text[am.end():prepare.match_brace(text, am.end() - 1)]
+        for n in re.findall(r'\busing\s+::\s*(\w+)\s*;', body):
+            aliased.setdefault(n, set()).add(am.group(1))
+    call = re.compile(r'(?<![\w.>:~])((?:\w+\s*::\s*)?)(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
     bodies = []                                      # outermost function bodies, in order
     for o, c, k, _ in prepare.scope_spans(text):
         if k == 'function' and not (bodies and o < bodies[-1][1]): bodies.append((o, c))
@@ -880,6 +889,8 @@ def r_win32_call_args(path, text, stats):
     out, pos, bi = [], 0, 0
     for m in call.finditer(text):
         if m.start() < pos: continue
+        q = re.sub(r'\s*::\s*$', '', m.group(1))
+        if q and q not in aliased.get(m.group(2), ()): continue
         while bi < len(bodies) and bodies[bi][1] < m.start(): bi += 1
         if bi == len(bodies) or not bodies[bi][0] < m.start(): continue
         before = text[max(0, m.start() - 40):m.start()].rstrip()
@@ -887,9 +898,9 @@ def r_win32_call_args(path, text, stats):
         if prev and prev.group(1) not in ('return', 'case', 'else', 'do'): continue   # a declaration
         close = _call_end(text, m.end() - 1)
         args = _split_args(text[m.end():close - 1])
-        types = sigs[m.group(1)]
+        types = sigs[m.group(2)]
         if len(args) != len(types): continue
-        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(1), ())
+        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(2), ())
         new = []
         for i, (a, t) in enumerate(zip(args, types)):
             if t is None or not a.strip(): new.append(a); continue
@@ -1670,6 +1681,8 @@ INT32_TYPES = re.compile(r'^(?:const\s+|volatile\s+)*(?:(?:signed|unsigned)(?:\s
                          r'unsigned\s+long\s+int|__int32|size_t|DWORD|UINT|INT|LONG|ULONG|BOOL)(?:\s+const)?$')
 _UNIT_SYMBOLS = None
 
+_UNIT_PLACED = {}   # absolute unit source -> the decorated names its units.json `functions` place (_unit_symbols)
+
 def _unit_symbols(path):
     """{absolute unit source: {decorated name: address}}"""
     global _UNIT_SYMBOLS
@@ -1678,8 +1691,16 @@ def _unit_symbols(path):
         _UNIT_SYMBOLS = {}
         root, uj = prepare._units_json(path)
         if uj:
+            _UNIT_PLACED.clear()
             for u in json.load(open(uj))['units']:
-                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = u.get('symbols', {})
+                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = dict(u.get('symbols', {}))
+                _UNIT_PLACED[os.path.normpath(os.path.join(root, u['source']))] = {
+                    f['symbol'] for f in u.get('functions') or () if f.get('symbol')}
+            # BIND1's rows (a POST hook on units.json): the source rules see the bindings the link will have
+            for src, name, addr in BIND1_REFS + sorted(VLIT1_BINDS):
+                k = os.path.normpath(os.path.join(root, src))
+                if k in _UNIT_SYMBOLS:
+                    _UNIT_SYMBOLS[k].setdefault(name, addr)
     return _UNIT_SYMBOLS.get(os.path.normpath(os.path.abspath(path)))
 
 def _param_type(p):
@@ -2115,7 +2136,25 @@ def r_math_overloads(path, text, stats):
         have, pos = have or not in_ns, end
         stats['MATH1'] += 1
     out.append(text[pos:])
-    return ''.join(out)
+    text = ''.join(out)
+    return math_own_statics(text, stats) if have else text
+
+# MATH1-OWN: where MATH1 puts <math.h> in place of a copy, a `static` definition the file keeps of a C math function
+# (`static __forceinline float sqrtf(float x) { return (float)sqrt(x); }`, hkpboxboxcollisiondetection_rtm_variant)
+# now meets <math.h>'s extern "C" declaration of the same name: MSVC refuses it (C2375), GCC takes it only under
+# -fpermissive and then calls the C library function instead of the unit's own body. The definition and the file's
+# calls of it are renamed fnvnx_own_<name>: the unit's own function, on both compilers. One file in the tree today.
+
+MATH_OWN_STATIC = re.compile(r'^[ \t]*static\s+(?:(?:inline|__inline|__forceinline)\s+)*(?:float|double|long\s+double)\s+'
+                             r'(?:__cdecl\s+)?(%s)\s*\([^;{}()]*\)\s*\{' % '|'.join(sorted(
+                                 n for n in prepare.CRT_HEADERS['<math.h>'].split() if re.match(r'^[a-z]\w*$', n))), re.M)
+
+def math_own_statics(text, stats):
+    names = sorted(set(MATH_OWN_STATIC.findall(text)))
+    for n in names:
+        text = re.sub(r'(?<![\w.>:~])%s(?=\s*\()' % n, 'fnvnx_own_' + n, text)
+        stats['MATH1-OWN'] += 1
+    return text
 
 # ---------------------------------------------------------------------------------------------------------- SPEC2
 
@@ -3454,13 +3493,12 @@ def _stand_ins(path, text, stats, which):
         info = _unit_info(path)
         if info is None or set(info[0]) & STAND2_INLINING_FLAGS: return text
         elsewhere = _all_unit_functions(path) - info[1]
-    spans, edits = None, []
+    spans, edits, cands, tagged_prefixes = None, [], [], set()
     for m in STAND_DEF.finditer(text):
         q = re.sub(r'\s+', '', m.group(2))
         parts = q.split('::')
         if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS: continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', m.group(1) or ''): continue
-        if _stand_tagged(text, m.start()): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
         if any(k != 'namespace' for k, _ in chain): continue
@@ -3470,8 +3508,18 @@ def _stand_ins(path, text, stats, which):
         if len(parts) >= 2 and name == parts[-2]: prefix = '??0' + '@'.join(scope) + '@@'
         elif name.startswith('~'): prefix = '??1' + '@'.join(scope) + '@@'
         else: prefix = '?' + '@'.join([name] + scope) + '@@'
+        if _stand_tagged(text, m.start()):
+            tagged_prefixes.add(prefix); continue
+        cands.append((m, q, parts, name, prefix))
+    placed = _UNIT_PLACED.get(os.path.normpath(os.path.abspath(path)), ())
+    for m, q, parts, name, prefix in cands:
         if which == 'STAND1':
             if not any(k.startswith(prefix) and int(a, 16) in tagged for k, a in syms.items()): continue
+            # the unit's own recipe places this name and no tagged definition of the unit has it: it is the function,
+            # the tag sits on another one (R2: caravanmenu 0x0073b730, the tag is on TESCaravanCard::
+            # FUN_0073b730_card, units.json places NPCHandArrayInfo's). A tagged overload of the name keeps STAND1.
+            if prefix not in tagged_prefixes and any(k.startswith(prefix) for k in placed):
+                continue
         else:
             bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
             if not (bound and all(a in elsewhere and a not in tagged for a in bound)): continue
@@ -4046,6 +4094,24 @@ BIND1_REFS = [
     # (unit source, MSVC decorated name, address)
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?Allocate@MemoryManagerAA3880@@QAEPAXI@Z', '0x00aa3e40'),
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A', '0x011f6238'),
+    # Placeholder variables decl-data would give a zero copy (S2-bodies), each with the exe's bytes at the site the
+    # unit's pristine object references it:
+    # * RefSet6b3c0::Insert (the unit binds it to 0x00c68b50; Node6b3c0::operator new inlined): the exe has
+    #   `push 8; mov ecx, 0x011f6238; call 0x00aa3e40` at 0x00c68b63, where the pristine object relocates
+    #   g_memoryManager6b3c0 (DIR32) and MemoryManager6b3c0::Allocate (REL32): the memory manager and its Allocate.
+    ('src/fallout_shared/globalfunc_o2_variant.cpp', '?g_memoryManager6b3c0@@3UMemoryManager6b3c0@@A', '0x011f6238'),
+    ('src/fallout_shared/globalfunc_o2_variant.cpp', '?Allocate@MemoryManager6b3c0@@QAEPAXI@Z', '0x00aa3e40'),
+    # * ??_G of FUN_00ae8d10 (slot 0 of the vftable the unit binds, 0x010a3328 -> 0x00ae9060; MapBase8D10's
+    #   operator delete inlined): `if (flags & 1) { push this; mov ecx, 0x011f6238; call 0x00aa4060 }` at 0x00ae90cf.
+    ('src/staging/blk_00ae0000_od_ob1_variant.cpp', '?g_kMemoryManager8D10@@3UMemoryManager8D10@@A', '0x011f6238'),
+    ('src/staging/blk_00ae0000_od_ob1_variant.cpp', '?Deallocate@MemoryManager8D10@@QAEXPAX@Z', '0x00aa4060'),
+    # * OutlinedEntry's constructor 0x00aaec10 (`assign(rhs, 0, entryNpos)`): `mov edx, [0x010173f0]; push edx` at
+    #   0x00aaec6f, the .rdata word 0xffffffff (npos) other units bind as DAT_010173f0.
+    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?entryNpos@@3IA', '0x010173f0'),
+    # * Vector12::length_error (blk_00ac0000_od_ob1_variant.cpp, a static in-class stand-in throwing with the
+    #   placeholder vector_error_message): the exe's ReserveItems 0x0065cfd0 calls 0x0065f640 (ThrowVectorTooLong,
+    #   which pushes the exe's own message) at 0x0065d00e, where the pristine object calls this name
+    ('src/staging/blk_00ac0000_od_ob1_variant.cpp', '?length_error@Vector12@@SAXXZ', '0x0065f640'),
 ]
 
 def bind_units_data(data, stats, refs=BIND1_REFS):
@@ -4929,8 +4995,15 @@ def r_vfptr_empty_base(path, text, stats):
 # REC1-REPL (orchestrator, R1): `replace` edits code the unit already has, where an appended body cannot help (a
 # filler the unit's own calls bind to, a declaration whose arguments sit on the wrong call, an in-class body that is
 # not the exe's). Each pair is applied in order, before the append, to the text the rule receives; every `old` must
-# occur exactly once there, else the prepare fails (RuntimeError naming the recon and the pair): a recon written
-# for other text must never half-apply.
+# occur exactly once there. A recon written for other text must never half-apply: when any pair does not match exactly
+# once (or is malformed), the whole recon is rejected for that unit (no replace, no append, no symbols), so its rows
+# stay visible trap stubs, and the prepare goes on (orchestrator, R2: one stale recon must not block every build).
+# Each rejection is counted (REC1-REJECT), printed to stderr and listed in <out>/build/recon_rejected.tsv (recon dir,
+# unit, pair index, count, the start of `old`) by the POST hook.
+# REC1-DUP-DEF (orchestrator, R2): an append that would define a function the unit already defines (same namespace
+# path, qualified name and parameter types, at namespace scope) is rejected the same way (pair index -2), instead of
+# failing the compile with a redefinition. A recon that restored a body a rule had stripped (STAND1 with a split head)
+# then stops applying by itself once the rule keeps the body.
 
 def _recon_entries(path):
     """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
@@ -4969,6 +5042,77 @@ def _recon_entries(path):
         _RECON.append((r, os.path.dirname(f)))
     return _RECON
 
+# ---- REC1-DUP-DEF: function definitions at namespace scope, by a light scan (no preprocessor, no templates)
+_REC1_KW = {'if', 'while', 'for', 'switch', 'catch', 'return', 'sizeof', 'else', 'do', 'defined', 'decltype', 'alignof', 'case', 'new', 'delete'}
+def _rec1_strip(s):
+    s = re.sub(r'/\*.*?\*/', lambda m: re.sub(r'[^\n]', ' ', m.group(0)), s, flags=re.S)
+    s = re.sub(r'//[^\n]*', '', s)
+    s = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', s)
+    s = re.sub(r"'(?:\\.|[^'\\\n])*'", "''", s)
+    s = re.sub(r'^\s*#[^\n]*', '', s, flags=re.M)   # preprocessor lines
+    return s
+_REC1_HEAD = re.compile(r'((?:[A-Za-z_]\w*\s*::\s*)*(?:~?[A-Za-z_]\w*|operator\s*(?:\(\)|[^\s(]+)))\s*\(((?:[^;{}()]|\([^;{}()]*\))*)\)\s*(?:const\b\s*)?(?:throw\s*\(\s*\)\s*|noexcept\s*)?(?::[^;{}]*)?$')
+def _rec1_params(p):
+    p = re.sub(r'=[^,]*', '', p)                      # default arguments
+    out = []
+    for a in [x.strip() for x in p.split(',') if x.strip()]:
+        a = re.sub(r'\b(const|volatile|struct|class|enum|typename|register)\b', ' ', a)
+        a = re.sub(r'\s+', ' ', a).strip()
+        a = re.sub(r'\s*([*&])\s*', r'\1', a)
+        m = re.match(r'^(.*?[*&\s>])\s*([A-Za-z_]\w*)(\[[^\]]*\])?$', a)   # drop the parameter name
+        if m and m.group(1).strip() and not m.group(1).strip().endswith('::'): a = m.group(1).strip() + (m.group(3) or '')
+        out.append(a.replace(' ', ''))
+    return ','.join(x for x in out if x != 'void')
+def _rec1_defs(text):
+    """{(namespace path, qualified name, normalized params)} of function definitions at namespace scope (template
+    heads ignored: a template and its instantiation are one definition only when the text is the same)"""
+    s = _rec1_strip(text); out = set(); scope = []; last = 0
+    for m in re.finditer(r'[{};]', s):
+        p, ch = m.start(), m.group(0)
+        if ch == ';': last = p + 1; continue
+        if ch == '{':
+            head = s[last:p]
+            kind = 'blk'
+            mn = re.search(r'\bnamespace\s+([A-Za-z_]\w*)\s*$', head)
+            if mn: kind = ('ns', mn.group(1))
+            elif re.search(r'\bnamespace\s*$', head): kind = ('ns', '(anon)')
+            elif re.search(r'\bextern\s*""\s*$', head): kind = ('ns', '')
+            elif all(k != 'blk' for k in scope):
+                hm = _REC1_HEAD.search(head.rstrip())
+                if hm and not re.search(r'\b(struct|class|union|enum)\b[^()]*$', head[:hm.start()].split('\n')[-1] if hm else ''):
+                    name = re.sub(r'\s+', '', hm.group(1))
+                    if name.split('::')[-1] not in _REC1_KW and not re.search(r'=\s*$', head[:hm.start()]):
+                        ns = '::'.join(k[1] for k in scope if k[1])
+                        out.add((ns, name, _rec1_params(hm.group(2))))
+            scope.append(kind); last = p + 1
+        else:
+            if scope: scope.pop()
+            last = p + 1
+    return out
+def _rec1_full(d):
+    ns, name, params = d
+    return ((ns + '::') if ns else '') + name + '(' + params + ')'
+def _rec1_duplicates(text, body):
+    t = {_rec1_full(d) for d in _rec1_defs(text)}
+    return sorted(_rec1_full(d) for d in _rec1_defs(body) if _rec1_full(d) in t)
+
+
+def _recon_reject(r, d, src, bad, stats):
+    """REC1-REPL: record a recon rejected for unit src (bad = (pair index, count or -1, `old` start or reason)); the
+    POST hook writes the list to build/recon_rejected.tsv."""
+    import sys
+    k, c, what = bad
+    rej = prepare.__dict__.setdefault('_fnvnx_recon_rejected', [])
+    rej.append((d, src, k, c, what))
+    stats['REC1-REJECT'] += 1
+    if c == -2:
+        msg = 'the append defines what the unit already defines: %s' % what
+    elif c < 0:
+        msg = 'replace[%d] %s' % (k, what)
+    else:
+        msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
+    sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its rows stay trap stubs\n' % (src, d, msg))
+
 def r_recon_bodies(path, text, stats):
     """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
     if not os.environ.get('FNVNX_RECON') or not path.endswith(('.cpp', '.c')): return text
@@ -4981,18 +5125,26 @@ def r_recon_bodies(path, text, stats):
         if r['unit'] != src: continue
         if r.get('_skip'):
             stats[r['_skip']] += 1; continue
+        edited, bad = text, None
         for k, e in enumerate(r.get('replace') or []):
-            old, new = e.get('old'), e.get('new')
+            old, new = (e.get('old'), e.get('new')) if isinstance(e, dict) else (None, None)
             if not isinstance(old, str) or not old or not isinstance(new, str):
-                raise RuntimeError('REC1-REPL: %s: replace[%d] needs a non-empty "old" and a "new" string' % (d, k))
-            c = text.count(old)
+                bad = (k, -1, 'needs a non-empty "old" and a "new" string'); break
+            c = edited.count(old)
             if c != 1:
-                raise RuntimeError('REC1-REPL: %s (%s): replace[%d] "old" occurs %d times, not once: %r'
-                                   % (d, src, k, c, old[:120]))
-            text = text.replace(old, new)
-            stats['REC1-REPL'] += 1
+                bad = (k, c, old[:120]); break
+            edited = edited.replace(old, new)
+        if bad is not None:
+            _recon_reject(r, d, src, bad, stats); continue
+        body = None
         if r.get('append'):
             body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
+            dup = _rec1_duplicates(edited, body)
+            if dup:
+                _recon_reject(r, d, src, (-1, -2, ', '.join(dup)[:300]), stats); continue
+        stats['REC1-REPL'] += len(r.get('replace') or [])
+        text = edited
+        if body is not None:
             text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
             if not text.endswith('\n'): text += '\n'
             stats['REC1'] += len(r.get('functions', []))
@@ -5003,6 +5155,13 @@ def add_recon_definitions(out_root, stats, files=None):
     """POST hook: REC1's recipe entries (functions and symbols) in <out_root>/build/units.json."""
     import json
     _RECON = prepare.__dict__.get('_fnvnx_recon')
+    rej = prepare.__dict__.get('_fnvnx_recon_rejected') or []
+    if rej and os.path.isdir(os.path.join(out_root, 'build')):
+        with open(os.path.join(out_root, 'build', 'recon_rejected.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed, -2: append redefines)\told (start) or reason\n')
+            for row in rej:
+                f.write('\t'.join(str(x).replace('\t', ' ').replace('\n', '\\n') for x in row) + '\n')
+        stats['REC1-REJECTED-RECONS'] = len(rej)
     if not _RECON or not any(r.get('_applied') for r, _ in _RECON): return
     p = os.path.join(out_root, 'build', 'units.json')
     if not os.path.exists(p): return

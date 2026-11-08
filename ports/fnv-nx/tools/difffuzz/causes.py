@@ -43,6 +43,7 @@ import glob
 import json
 import math
 import os
+import re
 import struct
 import sys
 
@@ -74,6 +75,10 @@ POLICY = {
     'x87-precision':  ('by-design', '-', False, 'x87 80-bit intermediates vs IEEE single/double, within 4 ulp or '
                                                 'relative 1e-6/1e-12, or the native value equals the oracle\'s '
                                                 'unrounded x87 value'),
+    'x87-range':      ('by-design', '-', False, 'an x87 intermediate beyond the float range (|v| >= 2**128: the '
+                                                'x87 stack keeps a 15-bit exponent at every precision) that the '
+                                                'AArch64 float arithmetic overflows to inf/NaN; the record keeps the '
+                                                'instruction and exponent (classify.x87_probes)'),
     'division':       ('by-design', '-', False, 'x86 raises #DE (x/0, INT_MIN/-1) where sdiv/udiv give 0 / wrap: '
                                                 'the exe would crash on that input'),
     'deleting-dtor-ret': ('triage', 'S13', True, 'MSVC\'s scalar/vector deleting destructor returns this, the '
@@ -92,10 +97,19 @@ POLICY = {
     'shift-count':    ('by-design', '-', False, 'a shift count >= the operand width (UB in C++)'),
     'uninit-x86':     ('by-design', '-', False, 'the oracle\'s own result depends on garbage: undefined behaviour '
                                                 'the exe gets away with; the port need not reproduce garbage'),
+    'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
+                                              'buffer and destroys the local, GCC constructs it there (copy '
+                                              'elision, allowed by C++), F1b'),
+    'oracle-frame-smash': ('by-design', '-', False, 'the oracle faults after a store into its own return-address '
+                                                    'slot: a local array overrun by an out-of-range fuzzed count (UB '
+                                                    'in C++; the exe corrupts its frame the same way), F1b'),
     # --- harness / oracle-model artefacts ----------------------------------------------------------------------------
-    'local-static':   ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
+    'local-static':  ('artifact', 'S13', False, 'MSVC keeps a function-local static and its guard in the image '
                                                  '(fuzzed bytes), GCC in .bss (zero): not compared state'),
     'uninit-both':    ('artifact', 'S13', False, 'both machines read garbage: the fuzzed case is invalid for both'),
+    'stub-outparam':  ('artifact', 'S13', False, 'the native reads back a stack buffer it passed to a stubbed callee '
+                                                 'that never filled it (GCC temporary + copy where MSVC passed its '
+                                                 'destination)'),
     'oracle-vcall':   ('artifact', 'S13', False, 'the oracle faults on an indirect call the harness does not model '
                                                  '(S13 vftable modelling)'),
     'x86-custom-cc':  ('artifact', 'S13', False, 'MSVC whole-program custom register convention not in units.json'),
@@ -184,6 +198,14 @@ POLICY = {
                                                 'where the oracle has an image-window address: an unrebound '
                                                 'variable or table (or a literal: check the pointee)'),
     'vptr-unpaired':  ('real-bug', 'S2c', False, 'no kind-V row pairs the native vtable with the image vftable'),
+    'vslot-shift':    ('real-bug', 'S1-rules', True, 'a virtual call through the planted vftable reaches the exe\'s '
+                                                     'slot k-1 where the oracle calls slot k: the caller\'s class '
+                                                     'declaration numbers its virtuals from a slot-0 placeholder, '
+                                                     'not D22\'s minus-one order (D26 b: `virtual ~X()` for the '
+                                                     'placeholder; tests/s5/callonly_vt.py)'),
+    'vslot-differs':  ('real-bug', 'S1-rules', True, 'a virtual call through the planted vftable reaches another '
+                                                      'slot than the oracle\'s (not one lower): the caller\'s class '
+                                                      'declaration orders its virtuals otherwise than the exe'),
     'falloff?':       ('real-bug', 'S1', True, 'the native runs off a function end (FALL1)'),
     'after-native-undefined': ('real-bug', 'S1', True, 'the function calls a C++ name the link binds to nothing '
                                                        '(native-undefined): the native side gets a canned result '
@@ -218,6 +240,14 @@ POLICY = {
                                                   'early return or a branch on a field read differently'),
     'native-extra-calls': ('triage', 'S13b', True, 'the native makes the oracle\'s calls and more: a check the '
                                                    'oracle skips, or a call MSVC inlined into a loop'),
+    'native-zero-init': ('by-design', '-', False, 'the native only writes zero bytes the oracle leaves, into the object '
+                                                  'being constructed (this of a constructor, a fresh allocation): '
+                                                  'GCC value-initialises `T()` / `new T()` / `: Base()` of a class '
+                                                  'with an implicit constructor (zero, then the constructor), MSVC '
+                                                  '2008 runs the constructor only'),
+    'dtor-dead-store': ('by-design', '-', False, 'the oracle only zeroes bytes of the object a destructor (or a scalar '
+                                                 'deleting destructor wrapper) destroys: MSVC /Od keeps `m_p = 0` '
+                                                 'after a release, GCC drops stores to an object whose lifetime ends'),
     'store-width':    ('triage', 'S13b', True, 'the same bytes stored with another width: one side writes bytes '
                                                'the other leaves (a bool/char vs dword member, a padded struct copy)'),
     'native-only-store': ('triage', 'S13b', True, 'the native writes memory the oracle never writes'),
@@ -248,6 +278,10 @@ POLICY = {
                                                 'native destructor, unchecked), and the call-count difference at '
                                                 'the free hides the return value and writes. Triage until the '
                                                 'harness drops the oracle\'s trailing argument frees (S13b audit)'),
+    'callee-float-width': ('artifact', '-', False, 'the width (float or double) in which the harness hands an untyped '
+                                                     'callee\'s canned float result to the oracle\'s ST0 is a guess '
+                                                     'from the consuming x87 store; the other guess makes the '
+                                                     'machines agree (classify.x87_probes)'),
     'libc-variant':   ('artifact', 'S13', False, 'the same C library function under another entry: an MSVC x87 '
                                                  'intrinsic (_CIacos ...) or the double function vs libc or its '
                                                  'float variant, sprintf vs GCC\'s fortified __sprintf_chk, atof vs '
@@ -306,6 +340,10 @@ FIX_CLASSES = {
     'vtables':       ('S2c', 'every image vftable pairs with a full native vtable of the static class (no short '
                              'vtables, overrides bound to their this-adjusting thunks)',
                       ('vptr-unpaired', 'native-calls-data', 'thunk-binding', 'vslot-trap')),
+    'vtable-slots':  ('S1-rules', 'every virtual call reaches the exe\'s slot: each declaration a caller dispatches '
+                                  'through numbers its virtuals in D26\'s one minus-one order (a `virtual ~X()` '
+                                  'where the exe has its deleting destructor, then the exe\'s slots in order)',
+                      ('vslot-shift', 'vslot-differs')),
 }
 FIX_CLASS_OF = {c: k for k, v in FIX_CLASSES.items() for c in v[2]}
 
@@ -417,6 +455,8 @@ def _rule_error(d, rec=None):
             if fa[1] < NULL_END:
                 return 'native-null-read'
     if a is None and isinstance(x, str):
+        if d.get('x86_frame_smash'):
+            return 'oracle-frame-smash'
         if x == 'exc:3':
             return 'oracle-trap'
         fx = _fault_addr(x)
@@ -539,6 +579,14 @@ def _rule_mem_write(d, rec=None):
         return 'x87-precision'
     n, ox, oa = d.get('ndiff', 0), d.get('only_x86', 0), d.get('only_arm', 0)
     bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+    if rec is not None and n:
+        th = (_object_facts(rec.get('source')) or ({}, set()))[0]
+        if th.get('__fnv_' + str(rec.get('address') or '')):
+            return 'thunk-binding'      # the function's own `_ZThn<d>_` thunk: the oracle enters with the secondary base
+        if d.get('arm_zero_only') and oa == n and _zero_init_region(d, rec):
+            return 'native-zero-init'
+        if d.get('x86_zero_only') and ox == n and _dtor_this_region(d, rec):
+            return 'dtor-dead-store'
     if len(bx) >= 4 and len(ba) >= 4:
         if ww and all(_nan_generated(x, a) for x, a in ww):
             return 'nan-bits'
@@ -561,6 +609,42 @@ def _rule_mem_write(d, rec=None):
     if n and ox + oa == n and ox and oa:
         return 'store-width'
     return None
+
+
+def _zero_init_region(d, rec):
+    """Every listed differing byte lies in the object the function constructs: a fresh allocation block of the
+    harness (ALLOC_BASE..) or, for an MSVC constructor (??0), the `this` buffer."""
+    addrs = [int(a, 16) for a in d.get('addrs') or ()]
+    if not addrs:
+        return False
+    if all(ALLOC_BASE <= a < ALLOC_BASE + 0x400 * 0x1000 for a in addrs):
+        return True
+    if str(rec.get('symbol') or '').startswith('??0'):
+        this = _this_buffer(rec)
+        return this is not None and all(this <= a < this + 0x1000 for a in addrs)
+    return False
+
+
+def _this_buffer(rec):
+    """The address of the `this` buffer of a record: the case's `this` bytes when it lists them (a minimised case
+    drops arguments equal to the default), else the first argument buffer (world.BUF, Target.placement)."""
+    try:
+        return int.from_bytes(bytes.fromhex(rec['case']['args']['this']), 'little')
+    except (KeyError, ValueError, TypeError):
+        return BUFS[0] if isinstance(rec.get('case'), dict) else None
+
+
+_DTOR_SYM = re.compile(r'^\?\?(1|_G|_E)|[QU]AEPAX(I|_N)@Z$|D[012]Ev$')
+
+
+def _dtor_this_region(d, rec):
+    """A destructor (??1, ??_G, ??_E, an Itanium D0/D1/D2) or an MSVC scalar-deleting-destructor wrapper shape (a
+    member returning void* with one int / bool flag) whose differing bytes all lie in its `this` buffer."""
+    if not _DTOR_SYM.search(str(rec.get('symbol') or '')):
+        return False
+    addrs = [int(a, 16) for a in d.get('addrs') or ()]
+    this = _this_buffer(rec)
+    return bool(addrs) and this is not None and all(this <= a < this + 0x1000 for a in addrs)
 
 
 def _narrower(wide, narrow):
@@ -1418,12 +1502,13 @@ def _alloc_result(k):
 
 
 def _ret_bytes(case, k):
+    import world             # plain module (no emulator): the same move out of the private ranges as Case.ret_bytes
     rets = case.get('rets') or []
     if k < len(rets) and rets[k] is not None:
-        return bytes.fromhex(rets[k]).ljust(16, b'\0')
+        return world.canned_out_of_private(bytes.fromhex(rets[k]).ljust(16, b'\0'))
     import random
     r = random.Random(((case.get('seed') or 0) * 1000003 + k) & 0xffffffff)
-    return bytes(r.getrandbits(8) for _ in range(16))
+    return world.canned_out_of_private(bytes(r.getrandbits(8) for _ in range(16)))
 
 
 def _canned_word(case, v, upto=64):

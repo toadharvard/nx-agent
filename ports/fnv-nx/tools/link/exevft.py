@@ -275,9 +275,41 @@ def thunk(path, addr):
         return -b[2], rel(3)
     if b[:2] == b'\x81\xe9' and b[6:7] == b'\xe9':
         return int.from_bytes(b[2:6], 'little'), rel(6)
+    # this passed on the stack (a stdcall/cdecl member, R6 0x009fdd10): `sub|add dword ptr [esp+4], imm8|imm32;
+    # jmp`. Natively that first argument is in w0/x0 like ecx's this, so the adjustment is the same
+    if b[:4] == b'\x83\x6c\x24\x04' and b[5:6] == b'\xe9':
+        return b[4], rel(5)
+    if b[:4] == b'\x83\x44\x24\x04' and b[5:6] == b'\xe9':
+        return -b[4], rel(5)
+    if b[:4] == b'\x81\x6c\x24\x04' and b[8:9] == b'\xe9':
+        return int.from_bytes(b[4:8], 'little'), rel(8)
     if b[:1] == b'\xe9':
         return 0, rel(0)
     return None
+
+
+def this_thunk(path, addr):
+    """(imm32, target) of `mov ecx, imm32; jmp rel32` at addr: a member that takes a global object as its `this`
+    (a heap's free: `mov ecx, 0x011f6238; jmp FNV_MemoryManager::Free`) and passes its stack arguments on; else
+    None. Natively: x0 = imm32, then a tail branch (the other arguments are already where the target reads them)."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 10)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    b = data[off:off + 10]
+    if b[:1] != b'\xb9' or b[5:6] != b'\xe9':
+        return None
+    return (int.from_bytes(b[1:5], 'little'),
+            (addr + 10 + int.from_bytes(b[6:10], 'little', signed=True)) & 0xffffffff)
+
+
+def slot_index(exev):
+    """{address of a vftable slot: function address in it} over the exe's vftables (an `__imp_?...` name the recipe
+    placed on a vftable slot reads the slot's word)."""
+    return {v + 4 * j: w for v, e in exev.items() for j, w in enumerate(e.slots)}
 
 
 # ---- the vftable an exe constructor stores (S2c, S5 class 3: constructor-named vtables)
@@ -286,12 +318,10 @@ CTOR_SPAN = 0x400   # bytes decoded from a constructor's entry (S5's stand-in re
 _CS = {}
 
 
-def ctor_vftable(path, addr, starts):
-    """The vftable the x86 constructor at addr names: the immediate of its last `mov dword ptr [reg], imm32` (a base
-    register only: no index, no displacement, no segment - the vptr of the object the register holds) whose value is
-    in starts (vftable starts, e.g. scan()'s), decoded with capstone from addr up to its first `ret` / `ret N` (at
-    most CTOR_SPAN bytes). An inlined base constructor stores its own vftable first, so the last store is the most
-    derived class's. None without capstone, outside the image's sections, or when there is no such store."""
+def _ctor_stores(path, addr):
+    """The `mov dword ptr [reg+d], imm32` of the x86 function at addr up to its first `ret` / `ret N` (at most
+    CTOR_SPAN bytes), decoded with capstone: [(d, base register name, imm)] in order, for a base register only (no
+    index, no segment). None without capstone or outside the image's sections."""
     try:
         import capstone
         from capstone import x86 as cx
@@ -311,14 +341,55 @@ def ctor_vftable(path, addr, starts):
     if 'md' not in _CS:
         _CS['md'] = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
         _CS['md'].detail = True
-    last = None
-    for ins in _CS['md'].disasm(data[off:off + n], addr):
+    md, got = _CS['md'], []
+    for ins in md.disasm(data[off:off + n], addr):
         if ins.id == cx.X86_INS_RET:
             break
         if ins.id != cx.X86_INS_MOV or len(ins.operands) != 2:
             continue
         dst, src = ins.operands
         if dst.type == cx.X86_OP_MEM and dst.size == 4 and src.type == cx.X86_OP_IMM and dst.mem.base and \
-                not dst.mem.index and not dst.mem.disp and not dst.mem.segment and (src.imm & 0xffffffff) in starts:
-            last = src.imm & 0xffffffff
+                not dst.mem.index and not dst.mem.segment:
+            got.append((dst.mem.disp, md.reg_name(dst.mem.base), src.imm & 0xffffffff))
+    return got
+
+
+def ctor_vftable(path, addr, starts):
+    """The vftable the x86 constructor at addr names: the immediate of its last `mov dword ptr [reg], imm32` (a base
+    register only: no index, no displacement, no segment - the vptr of the object the register holds) whose value is
+    in starts (vftable starts, e.g. scan()'s), decoded with capstone from addr up to its first `ret` / `ret N` (at
+    most CTOR_SPAN bytes). An inlined base constructor stores its own vftable first, so the last store is the most
+    derived class's. None without capstone, outside the image's sections, or when there is no such store."""
+    last = None
+    for d, _, v in _ctor_stores(path, addr) or ():
+        if not d and v in starts:
+            last = v
     return last
+
+
+def vptr_store_seq(path, addr, starts):
+    """The vftables the x86 function at addr stores in its own object (`mov dword ptr [reg], imm32` with no
+    displacement, value in starts), in code order, a vftable stored twice in a row once. A constructor lists its
+    inlined bases before its own class (derived last), a destructor its own class first. [] without capstone or
+    outside the image."""
+    seq = []
+    for d, _, v in _ctor_stores(path, addr) or ():
+        if not d and v in starts and (not seq or seq[-1] != v):
+            seq.append(v)
+    return seq
+
+
+MEMBER_MAX = 0x100000   # S5's bound on a member's offset (emu_guest install_member_vtables)
+
+
+def ctor_member_vftables(path, addr, vftables):
+    """The vftables the x86 constructor at addr stores at a displacement: {d: the immediate of the last
+    `mov dword ptr [reg+d], imm32` with 0 < d < MEMBER_MAX whose value is in vftables}, the vptrs of its member
+    objects and secondary bases (the renderer's RendererMap<N> members at +0x610.., s5-003 round 2). The base
+    register is the object's (esp / ebp bases are the frame's, not counted). Same decoding as ctor_vftable; {}
+    without capstone or outside the image."""
+    got = {}
+    for d, base, v in _ctor_stores(path, addr) or ():
+        if 0 < d < MEMBER_MAX and base not in ('esp', 'ebp') and v in vftables:
+            got[d] = v
+    return got

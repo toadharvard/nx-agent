@@ -77,6 +77,8 @@ void qbody(int);   // kq's body: a free cdecl function taking the slot's first (
 struct Dd { ~Dd(); void *FUN_00401140(unsigned); int w; };   // ~Dd defined nowhere: MSVC folded it into ??_G
 struct Ct { Ct(); int v; };                          // an MSVC constructor returns this
 struct CtShell { void *FUN_00401130(); };             // a unit that calls it for its result
+struct Pv { inline virtual int pa(); inline virtual int pb(); int pz; };   // defined nowhere; the recipe places both mid-function
+struct Bi { void Free(void *); };   // the recipe's `__imp_?Free@Bi@@..` sits on a slot of an exe vftable
 struct S1 { virtual int s1(); int a; };
 struct S2 { virtual int s2(); int b; };          // s2 defined nowhere
 struct M : S1, S2 { int s1() override; int s2body(); int c; };
@@ -101,7 +103,8 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'Vb *mk_vb() { return new Vb; }\nDer *mk_der() { return new Der; }\n'
                     'int call_thk(ThkUse *p) { return p->FUN_00401110(); }\n'
                     'Nv::~Nv() { q = 0; }\nvoid game_free(void *p) { g_q = p != 0; }\n'
-                    'void *call_nv(NvUse *p) { return p->FUN_00401160(1); }\n'}
+                    'void *call_nv(NvUse *p) { return p->FUN_00401160(1); }\n'
+                    'Pv *mk_pv() { return new Pv; }\nvoid call_bi(Bi *p) { p->Free(0); }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
 
@@ -121,7 +124,7 @@ def run(cmd, **kw):
 
 def build_exe(rd, where):
     td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0')
-          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@')}
+          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@')}
 
     def chd(names):
         bs = [rd.words(td[n], 0, 0, 0xffffffff, 0, 0x40, 0) for n in names]
@@ -143,6 +146,10 @@ def build_exe(rd, where):
     # Sh: p, then Shell::impl's address and an address no compiled unit defines
     where['Sh'] = vft('.?AVSh@@', chd(['.?AVSh@@']), [0x4010b0, 0x401020, 0x401060])
     where['Vk'] = vft('.?AVVk@@', chd(['.?AVVk@@']), [0x4010c0, 0x4010c8, 0x4010d0, 0x4010e0, 0x4010f0])
+    # Pv: pa is a `_purecall` slot (the provider row), pb holds Shell::impl; Vi's slot 0 is a thunk
+    # `mov ecx, 0x00500000; jmp qbody` (a heap's free)
+    where['Pv'] = vft('.?AVPv@@', chd(['.?AVPv@@']), [0x4010e0, 0x401020])
+    where['Vi'] = vft('.?AVVi@@', chd(['.?AVVi@@']), [0x4010f8, 0x4010f0])
     hm = chd(['.?AUM@@'])
     where['M'] = vft('.?AUM@@', hm, [0x401120])
     col = rd.words(0, 8, 0, td['.?AUM@@'], hm)   # M's vftable {for S2} at +8: an adjustor thunk at 0x401110
@@ -160,6 +167,8 @@ def main():
         # .text: int3, except Vk::kz's body at 0x4010d0, `xor eax, eax; ret` (no unit defines it)
         test_exevft.make_pe(exe, lambda rd: build_exe(rd, where), {
             0x4010d0: b'\x33\xc0\xc3',                              # xor eax, eax; ret
+            0x4010f8: b'\xb9' + (0x500000).to_bytes(4, 'little') + b'\xe9' +
+                      (0x4010f0 - 0x401102).to_bytes(4, 'little', signed=True),   # mov ecx, imm; jmp qbody
             0x401110: b'\x83\xe9\x08\xe9' + (0x401100 - 0x401118).to_bytes(4, 'little', signed=True)})  # sub ecx, 8; jmp
         tree = os.path.join(t, 'tree')
         os.makedirs(os.path.join(tree, 'include'))
@@ -192,7 +201,9 @@ def main():
                          '??_7M@@6BS1@@@': '0x%08x' % where['M'], '??_7M@@6BS2@@@': '0x%08x' % where['M2'],
                          '?FUN_00401130@CtShell@@QAEPAXXZ': '0x00401130', '??_GDd@@QAEPAXI@Z': '0x00401140',
                          '?FUN_00401110@ThkUse@@QAEHXZ': '0x00401110', '?FUN_00401160@NvUse@@QAEPAXI@Z': '0x00401160',
-                         '??3@YAXPAX@Z': '0x00401170'}},
+                         '??3@YAXPAX@Z': '0x00401170', '??_7Pv@@6B@': '0x%08x' % where['Pv'],
+                         '?pa@Pv@@UAEHXZ': '0x004010e8', '?pb@Pv@@UAEHXZ': '0x004010ec',
+                         '__imp_?Free@Bi@@QAEXPAX@Z': '0x%08x' % where['Vi']}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
                 F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {}},
         ]}
@@ -285,6 +296,16 @@ def main():
               '__fnv_00401160' not in chk,
               'a call bound to the non-virtual ??_GNv (no GCC D0) -> a stub: D1, then the global delete if flags & 1: '
               '%s' % (rn,))
+        rpa, rpb = refs.get('_ZN2Pv2paEv'), refs.get('_ZN2Pv2pbEv')
+        check(rpa is not None and rpa[2] == 'vslot-exe' and rpa[5] == '_purecall' and
+              rpb is not None and rpb[2] == 'vslot-exe' and rpb[5] == '__fnv_00401020',
+              'Pv::pa / pb (extern-text: the recipe\'s addresses lie inside other functions) -> the exe slots: '
+              '_purecall provider, Shell::impl: %s %s' % (rpa, rpb))
+        rbi = refs.get('_ZN2Bi4FreeEPv')
+        check(rbi is not None and rbi[2] == 'code' and rbi[5] == '__fnvnx_vthis_004010f8' and
+              '__fnvnx_vthis_004010f8:\n    movz x0, #0x0\n    movk x0, #0x50, lsl #16\n    b __fnv_004010f0' in bridges_,
+              'an __imp_ name on slot 0 of an exe vftable holding `mov ecx, 0x500000; jmp qbody` -> x0 = 0x500000, '
+              'b qbody: %s' % (rbi,))
         rt0 = res['none'][2].get('_ZN6ThkUse12FUN_00401110Ev')
         check(rt0 is not None and rt0[2] == 'code-defmissing', 'without the exe: code-defmissing %s' % (rt0,))
         rc = refs.get('_ZN7CtShell12FUN_00401130Ev')

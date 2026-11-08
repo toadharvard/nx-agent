@@ -45,6 +45,31 @@ BASE = {'ax': 'eax', 'al': 'eax', 'ah': 'eax', 'cx': 'ecx', 'cl': 'ecx', 'ch': '
         'dh': 'edx', 'bx': 'ebx', 'bl': 'ebx', 'bh': 'ebx', 'si': 'esi', 'di': 'edi'}
 
 
+def _register_idiom(ins):
+    """An instruction capstone lists as reading a register whose value it does not use (difffuzz-20, F1b): 'nop'
+    for MSVC's alignment padding (`lea ecx, [ecx]`, `lea ebx, [ebx+0]`, `mov edi, edi`, `xchg r, r`), the register
+    for a write that ignores the old value (`or r, -1`, `and r, 0`); None otherwise. Taking them for reads made a
+    custom register argument of a register the function only overwrites."""
+    if ins.mnemonic.startswith('nop'):
+        return 'nop'
+    ops = ins.operands
+    if len(ops) != 2 or ops[0].type != capstone.x86.X86_OP_REG:
+        return None
+    r0 = ins.reg_name(ops[0].reg)
+    if ins.mnemonic == 'lea' and ops[1].type == capstone.x86.X86_OP_MEM:
+        m = ops[1].mem
+        if m.base == ops[0].reg and m.index == 0 and m.disp == 0 and m.segment == 0:
+            return 'nop'
+        return None
+    if ins.mnemonic in ('mov', 'xchg') and ops[1].type == capstone.x86.X86_OP_REG and ops[1].reg == ops[0].reg:
+        return 'nop'
+    if ops[1].type == capstone.x86.X86_OP_IMM and ops[0].size == 4:
+        v = ops[1].imm & 0xffffffff
+        if (ins.mnemonic == 'or' and v == 0xffffffff) or (ins.mnemonic == 'and' and v == 0):
+            return BASE.get(r0, r0)
+    return None
+
+
 def entry_register_reads(fn, conv):
     """Registers the oracle function reads before writing them on its entry path (straight line up to the first
     branch), excluding those its declared convention passes (ecx/edx) and the callee-saved pushes: a register
@@ -54,9 +79,15 @@ def entry_register_reads(fn, conv):
     for ins in CSD.disasm(fn['code'], fn['address']):
         if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
             continue                  # saving a callee-saved register / reserving a slot is not a use
-        if ins.mnemonic in ('xor', 'sub') and len(ins.operands) == 2 and ins.op_str.split(', ')[0] == \
+        if ins.mnemonic in ('xor', 'sub', 'sbb') and len(ins.operands) == 2 and ins.op_str.split(', ')[0] == \
                 ins.op_str.split(', ')[-1]:
             written.add(BASE.get(ins.op_str.split(', ')[0], ins.op_str.split(', ')[0]))
+            continue
+        idiom = _register_idiom(ins)
+        if idiom == 'nop':
+            continue
+        if idiom:
+            written.add(idiom)
             continue
         try:
             rr, ww = ins.regs_access()
@@ -72,7 +103,78 @@ def entry_register_reads(fn, conv):
         if capstone.CS_GRP_JUMP in ins.groups or capstone.CS_GRP_CALL in ins.groups or \
                 capstone.CS_GRP_RET in ins.groups:
             break
-    return reads          # in first-read order
+    for n in _later_entry_reads(fn, passed):
+        if n not in reads:
+            reads.append(n)
+    return reads          # in first-read order: the straight-line prefix first, then the later branches
+
+
+def _later_entry_reads(fn, passed, limit=20000):
+    """Registers some path from the entry reads before writing it (difffuzz-20, stores class): the straight-line
+    scan stops at the first branch, so a register argument first used on a later path (0x00db0e80 takes its second
+    pointer in edi and stores through it after a `jp`) was left out of the custom convention and the oracle stored
+    through garbage. Path-sensitive: (address, registers written so far) states over the function's own direct
+    jumps; a call clobbers eax/ecx/edx; an indirect jump or ret ends a path."""
+    insns = {i.address: i for i in CSD.disasm(fn['code'], fn['address'])}
+    lo, hi = fn['address'], fn['address'] + len(fn['code'])
+    found, seen = [], set()
+    stack = [(fn['address'], frozenset())]
+    steps = 0
+    while stack and steps < limit:
+        addr, written = stack.pop()
+        while addr in insns and (addr, written) not in seen and steps < limit:
+            seen.add((addr, written))
+            steps += 1
+            ins = insns[addr]
+            nxt = addr + ins.size
+            if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
+                addr = nxt
+                continue
+            if ins.mnemonic in ('xor', 'sub', 'sbb') and len(ins.operands) == 2 and \
+                    ins.op_str.split(', ')[0] == ins.op_str.split(', ')[-1]:
+                written = written | {BASE.get(ins.op_str.split(', ')[0], ins.op_str.split(', ')[0])}
+                addr = nxt
+                continue
+            idiom = _register_idiom(ins)
+            if idiom == 'nop':
+                addr = nxt
+                continue
+            if idiom:
+                written = written | {idiom}
+                addr = nxt
+                continue
+            try:
+                rr, ww = ins.regs_access()
+            except capstone.CsError:
+                break
+            for r in rr:
+                n = BASE.get(ins.reg_name(r), ins.reg_name(r))
+                if n in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi') and n not in written and n not in passed \
+                        and n not in found:
+                    found.append(n)
+            written = written | {BASE.get(ins.reg_name(r), ins.reg_name(r)) for r in ww}
+            if capstone.CS_GRP_RET in ins.groups:
+                break
+            if capstone.CS_GRP_CALL in ins.groups:
+                written = written | {'eax', 'ecx', 'edx'}
+                addr = nxt
+                continue
+            if capstone.CS_GRP_JUMP in ins.groups:
+                op = ins.operands[0] if ins.operands else None
+                tgt = op.imm if op is not None and op.type == capstone.x86.X86_OP_IMM else None
+                if tgt is not None and lo <= tgt < hi:
+                    if ins.mnemonic == 'jmp':
+                        addr = tgt
+                        continue
+                    stack.append((tgt, written))
+                    addr = nxt
+                    continue
+                if ins.mnemonic == 'jmp':
+                    break
+                addr = nxt
+                continue
+            addr = nxt
+    return found
 
 
 def is_dtor_name(sym):
@@ -113,6 +215,20 @@ def _outcome(r):
 
 
 _VFT = None
+
+
+def _benign(d):
+    """No divergence, or only a by-design one (soft, or NaN payload / sign bits): what a probe trial may leave
+    (F1b: 0x00c207a0's bool byte set to 1 leaves an x87 0xffc00000 vs AArch64 0x7fc00000 store)."""
+    if d is None or d.get('soft'):
+        return True
+    if d.get('kind') in ('mem-write', 'return'):
+        try:
+            bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+        except ValueError:
+            return False
+        return len(bx) == len(ba) and len(bx) >= 4 and _nan_only(bx, ba)
+    return False
 
 
 def _nan_only(bx, ba):
@@ -187,6 +303,106 @@ def msvc_inlined(target, div):
     return bool(callees) and xv in callees(a)
 
 
+def garbage_probe(pair, case, max_steps, h):
+    """(float class) The determinism probe below, for a case with a random background (it skips those: the seed that
+    changes the garbage also redraws the background pages): only the garbage changes (world.GARBAGE_XOR). A float
+    result computed from an uninitialised stack slot (0x00c70550: the native zero-initialises the struct, MSVC does
+    not) changes with the garbage on one machine only."""
+    base = case.copy()
+    base.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+    rx0, ra0, _ = pair.run(base, max_steps)
+    world.GARBAGE_XOR = 0x13572468
+    try:
+        rx1, ra1, _ = pair.run(base, max_steps)
+    finally:
+        world.GARBAGE_XOR = 0
+    h['_runs'] += 2
+    ux, ua = _outcome(rx0) != _outcome(rx1), _outcome(ra0) != _outcome(ra1)
+    if not (ux or ua):
+        return False
+    h['cause'] = 'uninit-x86' if ux and not ua else 'uninit-arm' if ua and not ux else 'uninit-both'
+    if ux and ua:
+        world.UNIFORM = True
+        try:
+            _, _, du = pair.run(base, max_steps)
+        finally:
+            world.UNIFORM = False
+        h['_runs'] += 1
+        h['uniform'] = 'agree' if du is None else du.get('kind')
+    return True
+
+
+def x87_probes(pair, case, div, max_steps, h):
+    """(float class) The compilers' evaluation methods, shown by rerunning the oracle until it agrees with the native:
+      x87-precision       the x87 control word at 24-bit precision (every x87 operation rounds to a float, as on
+                          AArch64): the whole difference is the 80/53-bit intermediate (an excess-precision
+                          cancellation shows up as a large ulp distance);
+      callee-float-width  the other guess of the width an untyped callee returns its float in (float or double: the
+                          consuming `fstp dword` / `fstp qword` cannot tell) - an artifact (0x00b4df80: a
+                          function-pointer call the native converts from d0);
+      x87-range           the 24-bit control word with every x87 register value beyond the float exponent range
+                          flushed to inf / zero (or the 53-bit one with the double range): the x87 stack keeps a
+                          15-bit exponent at every precision, so a float / double machine overflows or underflows
+                          where it does not (the record keeps which range and how many values it flushed).
+    None fires when the native uses arithmetic the oracle rerun does not model, or the difference has another cause."""
+    def rerun():
+        _, _, d = pair.run(case, max_steps)
+        h['_runs'] += 1
+        return _benign(d)
+    world.X87_CW = 0x007f
+    try:
+        if rerun():
+            h['cause'] = 'x87-precision'; h['x87_pc24'] = True
+            return True
+    finally:
+        world.X87_CW = 0x027f
+    world.X87_FLIP_WIDTH = True
+    try:
+        if rerun():
+            h['cause'] = 'callee-float-width'
+            return True
+    finally:
+        world.X87_FLIP_WIDTH = False
+    for kind, cw in (('f32', 0x007f), ('f64', 0x027f)):
+        rec = {'kind': kind}
+        world.X87_CLAMP, world.X87_CW = rec, cw
+        try:
+            ok = rerun()
+        finally:
+            world.X87_CLAMP, world.X87_CW = None, 0x027f
+        if ok and rec['n']:
+            h['cause'] = 'x87-range'
+            h['x87_range'] = {'range': kind, 'clamped': rec['n'], 'over': rec.get('over', 0), 'under': rec.get('under', 0),
+                              'after': '%08x' % rec['addr']}
+            return True
+def arg_narrow_top(target, fn, lab, i):
+    """(difffuzz-20, sign-args) May byte i of argument `lab` be widened by the oracle code? Only the top byte of a
+    1- or 2-byte value is (a char / short parameter; a declared-int parameter the exe reads through a 1- or 2-byte
+    [ebp+d] access over that byte). The sign bit of a float argument, or any bit of a 4-byte integer the exe reads
+    whole, is not a sign extension: clearing it changes a compare or a branch (0x00e30fb0, 0x00afd390, 0x00abb700)."""
+    conv = getattr(target, 'conv', None)
+    val = next((v for v in getattr(conv, 'vals', ()) if v.label == lab), None)
+    if val is None:
+        return True                     # unknown parameter: keep the earlier behaviour
+    if val.is_float or val.is_ptr:
+        return False
+    if val.size in (1, 2):
+        return i == val.size - 1
+    slot = next((off for l, sp, off, _ in conv.x86 if l == lab and sp == 'stk'), None)
+    if slot is None or val.size != 4 or val.kind != 'gpr':
+        return False
+    try:
+        for ins in CSD.disasm(fn['code'], fn['address']):
+            for op in ins.operands:
+                if op.type == capstone.x86.X86_OP_MEM and op.size in (1, 2) and \
+                        ins.reg_name(op.mem.base) == 'ebp' and not op.mem.index:
+                    if op.mem.disp - 8 + op.size - 1 == slot + i:
+                        return True
+    except capstone.CsError:
+        return False
+    return False
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
@@ -199,14 +415,27 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'native-undefined'; h['trap'] = div['arm'][5:]; return h
     if div.get('bool_repr'):
         h['cause'] = 'bool-repr'; return h
+    if div.get('nrvo_copy'):
+        h['cause'] = 'nrvo-copy'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
+    if div.get('vptr_store'):
+        # only a destructor's vptr resets differ (runner.dtor_vptr_bytes, F2 d21-dtorvptr): by design
+        h['cause'] = 'vptr-store'; return h
     if k in ('call-target', 'call-count') and any(str(x).startswith('name:__s13_vtpad_')
                                                   for x in [div.get('arm')] + list(div.get('arm_trace') or [])):
         # the native call went through a slot past the native vtable the link pairs with the planted vftable
         # (vtmodel.py padding): a pairing gap of S2c, not this function's behaviour; tested
         # before `unplanted`, which would file it as oracle-vcall (S13b)
         h['cause'] = 'vptr-unpaired'; return h
+    if k == 'call-count' and any(s.get('shift') == -1 for s in div.get('vslot') or []):
+        # the native's extra call is planted slot k, the oracle ran slot k+1 (unit code) for real (Pair.vslots_run)
+        h['cause'] = 'vslot-shift'; return h
+    if k == 'call-target' and div.get('vcall') == 'planted' and div.get('arm_vcall') == 'planted':
+        # both machines called a slot of the planted vftable, different slots (runner.Pair.vslots): the native
+        # numbers this class's slots otherwise; one lower is D26 (b)'s call-only placeholder declaration (F2)
+        sh = any(s.get('shift') == -1 for s in div.get('vslot') or [])
+        h['cause'] = 'vslot-shift' if sh else 'vslot-differs'; return h
     if k == 'call-target' and div.get('vcall') == 'unplanted':
         # an indirect call through memory the case did not plant (an object's vptr the fuzzer filled with bytes):
         # each machine reads its own slot layout (Itanium has two destructor slots), not a port divergence
@@ -264,6 +493,7 @@ def hint(pair, target, case, div, fn, max_steps):
             h['cause'] = 'oracle-vcall'; return h
     if k == 'callee-saved':
         h['cause'] = 'callee-saved'; return h
+    isfloat = False
     # determinism probes: only garbage changes (stack fill, non-argument registers, argument padding)
     if case.bg == 'zero':
         alt = case.copy(); alt.seed = case.seed ^ 0x13572468
@@ -273,6 +503,18 @@ def hint(pair, target, case, div, fn, max_steps):
         rx1, ra1, _ = pair.run(alt, max_steps)
         h['_runs'] += 2
         ux, ua = _outcome(rx0) != _outcome(rx1), _outcome(ra0) != _outcome(ra1)
+        if ua and not ux:
+            # (difffuzz-20, sign-outparam) the garbage the native reads may be a buffer it passed to a callee the
+            # harness stubs (the real callee fills it; MSVC passed its own destination, GCC a temporary it copies
+            # back): zero the stack words of such buffers that the native never stored to and run both seeds again
+            world.STUB_OUT = True
+            try:
+                d0, d1 = pair.run(base, max_steps), pair.run(alt, max_steps)
+            finally:
+                world.STUB_OUT = False
+            h['_runs'] += 2
+            if _outcome(d0[1]) == _outcome(d1[1]) and _benign(d0[2]) and _benign(d1[2]):
+                h['cause'] = 'stub-outparam'; return h
         if ux or ua:
             h['cause'] = 'uninit-x86' if ux and not ua else 'uninit-arm' if ua and not ux else 'uninit-both'
             if ux and ua:
@@ -294,9 +536,15 @@ def hint(pair, target, case, div, fn, max_steps):
         if fl:
             if fl.get('tolerant'):
                 h['cause'] = 'x87-precision' if any(m.startswith('f') for m in mn) else 'float-tolerance'
-            else:
-                h['cause'] = 'float'
-            return h
+                return h
+            # (float class, difffuzz-20) a float difference beyond the tolerance is not yet a float bug: the x87
+            # probes tell the two compilers' evaluation methods apart, and the probes below (bool byte, signedness)
+            # still run before `float` is the answer
+            isfloat = True
+            if pair is not None and case.bg != 'zero' and garbage_probe(pair, case, max_steps, h):
+                return h
+            if pair is not None and any(m.startswith('f') for m in mn) and x87_probes(pair, case, div, max_steps, h):
+                return h
     # bool representation probe: a byte that is neither 0 nor 1 read as bool (MSVC tests the whole byte, GCC may
     # test bit 0 only): set each such input byte to 1
     # S1-rules: only a byte the MSVC code reads by itself (a 1-byte access at that address, no wider access over it)
@@ -322,10 +570,51 @@ def hint(pair, target, case, div, fn, max_steps):
                 trial = case.copy()
                 nb = bytearray(b); nb[i] = 1; trial.mem[a] = bytes(nb)
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
-                if d is None:
+                if _benign(d):
                     bhits.append('%08x' % (a + i))
+    if not bhits and pair is not None and case.bg != 'zero' and h['_runs'] < 30:
+        # (F1b, difffuzz-20) the same for a byte of the random background the MSVC code reads by itself (a bool
+        # global the case does not plant, a field behind a background pointer): plant 1 there (0x00adb9f0,
+        # 0x0087b7c0)
+        bg = {}
+        world.BG_READS = bg
+        try:
+            pair.run(case, max_steps)
+        finally:
+            world.BG_READS = None
+        h['_runs'] += 1
+        planted = [(a, a + len(b)) for a, b in case.mem.items()]
+        for a in sorted(bg):
+            sizes, v = bg[a]
+            if len(bhits) >= 4 or h['_runs'] >= 30:
+                break
+            if sizes != {1} or v is None or v <= 1 or any(lo <= a < hi for lo, hi in planted) or \
+                    any(s > k for k in range(1, 8) for s in bg.get(a - k, (set(),))[0]):
+                continue
+            trial = case.copy()
+            trial.mem[a] = b'\x01'
+            _, _, d = pair.run(trial, max_steps); h['_runs'] += 1
+            if _benign(d):
+                bhits.append('%08x' % a)
     if bhits:
         h['cause'] = 'bool-repr'; h['bytes'] = bhits; return h
+    if isfloat:
+        # (float class) a smaller input byte that happens to remove a float difference proves no signedness (0x00a26b40:
+        # clearing the top bit of a stride byte changes which memory is read); only the bool byte above is evidence
+        h['cause'] = 'float'; return h
+    # (float class) an integer result computed through x87 float arithmetic and a fist / fistp: the 80/53-bit
+    # intermediates are amplified by the conversion (0x00e30fb0 NormalizeToUShort: 0xaac3 against 0xaac2); the oracle
+    # rerun at 24-bit precision agrees with the native
+    if pair is not None and not isfloat and k in ('return', 'mem-write') and (mn & {'fistp', 'fist', 'fisttp'}) and \
+            (mn & {'fadd', 'fsub', 'fmul', 'fdiv', 'faddp', 'fsubp', 'fmulp', 'fdivp', 'fsubr', 'fdivr'}):
+        world.X87_CW = 0x007f
+        try:
+            _, _, d = pair.run(case, max_steps)
+        finally:
+            world.X87_CW = 0x027f
+        h['_runs'] += 1
+        if _benign(d):
+            h['cause'] = 'x87-precision'; h['x87_pc24'] = True; return h
     # signedness probe: clear the top bit of each input byte >= 0x80
     # S1-rules (d19-sign): in memory only the top byte of a narrow read counts (a char read by itself, or the high
     # byte of a 2-byte read), as for bool-repr; a byte of a pointer or integer word is not widened (before: 434 of
@@ -345,7 +634,7 @@ def hint(pair, target, case, div, fn, max_steps):
                     hits.append('%08x' % (a + i))
     for lab, b in list(case.args.items()):
         for i, x in enumerate(b):
-            if x >= 0x80 and len(hits) < 4 and h['_runs'] < 60:
+            if x >= 0x80 and len(hits) < 4 and h['_runs'] < 60 and arg_narrow_top(target, fn, lab, i):
                 trial = case.copy()
                 nb = bytearray(b); nb[i] &= 0x7f; trial.args[lab] = bytes(nb)
                 _, _, d = pair.run(trial, max_steps); h['_runs'] += 1

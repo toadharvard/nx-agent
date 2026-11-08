@@ -17,12 +17,15 @@
  *  - the decomp forward-declares `class _ULARGE_INTEGER;`, the SDK's type is `union _ULARGE_INTEGER`: GCC accepts
  *    the key mismatch (-fpermissive) and the shim's union is that type; MSVC rejects it (C2011) and decorates the
  *    key, so here the SDK's union keeps its typedef names under another tag and _ULARGE_INTEGER is a class with the
- *    SDK union's members and layout;
+ *    SDK union's members and layout; a unit that forward-declares the SDK's own key (`union _ULARGE_INTEGER;`,
+ *    tesform) is built again with FNVNX_EQUIV_ULARGE_UNION, which keeps the SDK's union (equiv.py STANDIN-RETRY);
  *  - object-like SDK macros the shim does not define (winerror.h's ERROR_* codes, `small`, `hyper`, `Yield`,
  *    `_FILETIME_`) are undefined again: the decomp defines enumerators and types of those names;
- *  - SDK-HIDE: every SDK function and typedef name the target shim never names (equiv.py sdk_only_names) is read
- *    under another name (fnvnx_sdk_<name>): the decomp's own types and functions of those names (struct Arc,
- *    DragObject, typedef PCH, gethostname) do not collide with them, as they do not on the target;
+ *  - SDK-HIDE, for a unit that does not compile otherwise (equiv.py retries it with FNVNX_EQUIV_SDKHIDE): every SDK
+ *    name the target shim never names (equiv.py sdk_only_names) is read under another name (fnvnx_sdk_<name>), so
+ *    the decomp's own types and functions of those names (struct Arc, DragObject, typedef PCH, gethostname) do not
+ *    collide with them, as they do not on the target. Not for every unit: an SDK header a unit includes after
+ *    <windows.h> may use such a name (commctrl.h's LPSTREAM);
  *  - FNVNX_CS28 (rule CS28).
  */
 #ifndef FNVNX_EQUIV_WIN32_H
@@ -35,7 +38,9 @@
  * that collide with the decomp's own names. WIN32_LEAN_AND_MEAN leaves those headers out. */
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef FNVNX_EQUIV_ULARGE_UNION
 #define _ULARGE_INTEGER fnvnx_sdk_ULARGE_INTEGER
+#endif
 #define CreateEventA fnvnx_sdk_CreateEventA
 #define CreateMutexA fnvnx_sdk_CreateMutexA
 #define CreateSemaphoreA fnvnx_sdk_CreateSemaphoreA
@@ -46,9 +51,13 @@
 #define SendInput fnvnx_sdk_SendInput
 #define RegCreateKeyExA fnvnx_sdk_RegCreateKeyExA
 #define CoCreateInstance fnvnx_sdk_CoCreateInstance
-#include "fnvnx_equiv_sdkhide.h"     /* SDK-HIDE: SDK names the target shim never declares, renamed (generated) */
+#ifdef FNVNX_EQUIV_SDKHIDE                /* SDK-HIDE (a retry, equiv.py): SDK names the target shim never declares */
+#include "fnvnx_equiv_sdkhide.h"
+#endif
 #include "fnvnx_equiv_sdk_windows.h"  /* the SDK's <windows.h> (generated; msvc/windows.h stands in for it) */
+#ifdef FNVNX_EQUIV_SDKHIDE
 #include "fnvnx_equiv_sdkunhide.h"
+#endif
 #undef _ULARGE_INTEGER
 #undef CreateEventA
 #undef CreateMutexA
@@ -75,6 +84,7 @@
  * the decomp's own prototypes of those names. */
 #undef _tolower
 #undef _toupper
+#ifndef FNVNX_EQUIV_ULARGE_UNION
 class _ULARGE_INTEGER
 {
   public:
@@ -84,6 +94,8 @@ class _ULARGE_INTEGER
         ULONGLONG QuadPart;
     };
 };
+#endif  /* FNVNX_EQUIV_ULARGE_UNION (equiv.py's retry for a unit that declares `union _ULARGE_INTEGER;`): the SDK's
+         * union under its own tag, the key that unit uses */
 extern "C" {
 __declspec(dllimport) HANDLE WINAPI CreateEventA(void *, BOOL, BOOL, LPCSTR);
 __declspec(dllimport) HANDLE WINAPI CreateMutexA(void *, BOOL, LPCSTR);
@@ -95,11 +107,18 @@ __declspec(dllimport) DWORD WINAPI FormatMessageA(DWORD, LPCVOID, DWORD, DWORD, 
 __declspec(dllimport) UINT WINAPI SendInput(UINT, void *, int);
 __declspec(dllimport) LSTATUS WINAPI RegCreateKeyExA(HKEY, LPCSTR, DWORD, LPSTR, DWORD, REGSAM, void *, PHKEY, LPDWORD);
 __declspec(dllimport) HRESULT WINAPI CoCreateInstance(const GUID *, void *, DWORD, const GUID *, LPVOID *);
+/* declared by the target shim, by the SDK only in winternl.h (not part of <windows.h>): ntdll's import with the
+ * shim's parameter types (blk_00ee0000_o2's SEH unwinder) */
+__declspec(dllimport) void WINAPI RtlUnwind(PVOID, PVOID, PVOID, PVOID);
 }
 #else
-#include "fnvnx_equiv_sdkhide.h"     /* SDK-HIDE: SDK names the target shim never declares, renamed (generated) */
+#ifdef FNVNX_EQUIV_SDKHIDE                /* SDK-HIDE (a retry, equiv.py): SDK names the target shim never declares */
+#include "fnvnx_equiv_sdkhide.h"
+#endif
 #include "fnvnx_equiv_sdk_windows.h"  /* the SDK's <windows.h> (generated; msvc/windows.h stands in for it) */
+#ifdef FNVNX_EQUIV_SDKHIDE
 #include "fnvnx_equiv_sdkunhide.h"
+#endif
 #endif
 
 #ifdef __cplusplus

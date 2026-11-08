@@ -488,22 +488,29 @@ t2=$(date +%s)
 # --- attribution, verdicts of this head and cumulative, report -----------------------------------------------------
 ATT=$FARM_HOME/attrib-$L12          # stream attribution, once per link (every shard on this machine shares it)
 mkdir -p "$ATT"
+RSTEPS=""; rs_t=$(date +%s)   # T1: seconds per report step (the report took 1,324 s of qk1's fuzz on aec30808)
+rstep() { local now; now=$(date +%s); RSTEPS="$RSTEPS${RSTEPS:+, }$1 $((now - rs_t))s"; rs_t=$now; }
 if [ ! -s "$ATT/rules.json" ] || [ ! -s "$ATT/bridges.json" ]; then
   log "attribution (prepare rules, bridges)"
   (cd "$DF" && nice $PY attrib.py rules "$ATT/rules.json.tmp" > "$ATT/attrib.log" 2>&1 \
     && nice $PY attrib.py bridges "$ATT/bridges.json.tmp" >> "$ATT/attrib.log" 2>&1 \
     && mv "$ATT/rules.json.tmp" "$ATT/rules.json" && mv "$ATT/bridges.json.tmp" "$ATT/bridges.json") || true
 fi
+rstep attribution
 (cd "$DF" && $PY fuzzcache.py view "$CACHE" "$RUN/targets.jsonl" "$RUN/keys.json" "$RUN/cum" \
   && $PY fuzzcache.py status "$CACHE" "$RUN/targets.jsonl" "$RUN/keys.json" "$COMMIT" "$RUN/status.json") \
   > "$RUN/view.log"
+rstep view+status
 for v in new cum; do
   d=$RUN/camp; [ $v = cum ] && d=$RUN/cum
   (cd "$DF" && $PY report.py "$d" --rules "$ATT/rules.json" --bridges "$ATT/bridges.json" \
     --out "$RUN/verdicts_$v" --hard-tsv "$RUN/hard_$v.tsv" > "$RUN/report_$v.log" 2>&1)
+  rstep "report.py $v"
 done
 # per-cause verdict classes of the cumulative campaign (S13b causes.py, fnvnx-causes/1): embedded in the report
 (cd "$DF" && $PY causes.py summary "$RUN/cum" --out "$RUN/causes_cum.json" > "$RUN/causes.log" 2>&1) || true
+rstep causes
+log "report steps: $RSTEPS"; echo "$RSTEPS" > "$RUN/report_steps.txt"
 t3=$(date +%s)
 
 $PY - "$RUN" "$REPORT" "$COMMIT" "$D12" "$K" "$N" "$NX86" "$ITERS" "$TIME" "$JOBS" "$((t1-t0))" "$((t2-t1))" \
@@ -554,7 +561,8 @@ out = ['# fuzz %s shard %s/%s%s' % (commit[:12], k, n, ' - HARNESS BROKEN' if br
        '- fuzzed this head: %s; executions %d (at most %s and %ss per function, %s jobs)' % (
            ', '.join('%s %d' % kv for kv in status.most_common()) or 'none', execs, iters, tm, jobs),
        '- cumulative (verdicts valid for this head): %d functions' % len(cum),
-       '- time: inputs %ss, fuzz %ss, report %ss' % (ts, tf, tr),
+       '- time: inputs %ss, fuzz %ss, report %ss%s' % (ts, tf, tr, (' (%s)' % open(os.path.join(run, 'report_steps.txt')).read().strip())
+                                                      if os.path.isfile(os.path.join(run, 'report_steps.txt')) else ''),
        '- reproducers: branch fuzz/cache/%sof%s (all), fuzz/%s/%sof%s (this head) of the artifacts repository' % (
            k, n, commit[:12], k, n), '']
 out += ['## Verdicts, new this head', ''] + table('new') + ['']

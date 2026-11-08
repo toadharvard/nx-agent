@@ -36,6 +36,7 @@ import struct
 import subprocess
 
 import elfsyms
+import objcache
 
 OBJDUMP = os.environ.get('OBJDUMP', 'aarch64-linux-gnu-objdump')
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
@@ -49,6 +50,14 @@ SEMANTICS = ['-frounding-math', '-fsigned-char', '-fno-strict-aliasing', '-fwrap
              '-ffp-contract=off']   # compile.sh's MSVC-like semantics (J-0034): probes and emitted host code too
 PIC = ['-fPIC']   # compile.sh's GOT addressing of defined variables: emitted code
 POD_RULE = 'pod2'   # layouts.tsv column 10: the POD predicate the row was probed with (pod2: V1's, J-0147)
+# a type the probe could not name is written with this rule: it was also tried under the namespace the compiler
+# names when it knows exactly one (`::T` undeclared; did you mean `ns::T`); older unnameable rows are probed again
+UNNAMED_RULE = POD_RULE + '+ns'
+_NOT_A_TYPE = re.compile(r':(\d+):\d+: (?:error|note): (?:[\u2018\'](?:::)?[^\u2019\']+[\u2019\'] in namespace '
+                         r'[\u2018\']::[\u2019\'] does not name a type|expected a type, got)')
+_DID_YOU_MEAN = re.compile(r':(\d+):\d+: error: [\u2018\'](?:::)?(\w+)[\u2019\'] (?:has not been declared|was not '
+                           r'declared in this scope|does not name a type); did you mean [\u2018\']([\w:]+)[\u2019\']')
+_NAME_AT = r'(?:(?<=^)|(?<=[<,\s]))%s(?![\w])'   # a bare name in a type spelling (not after `::`)
 
 
 _GAME_FLAGS = {}
@@ -114,7 +123,7 @@ def probe_source(unit_path, types):
              '__has_trivial_destructor(T) && __is_trivially_assignable(T &, const T &); } }']
     first = len(lines) + 1
     for i, t in enumerate(types):
-        q = '::' + t
+        q = 'struct ::' + t[7:] if t.startswith('struct ') else '::' + t
         lines.append('extern "C" const unsigned __fnvnx_lay_%d[5] = {sizeof(%s), alignof(%s), '
                      '__fnvnx_probe::triv<%s>(), __is_empty(%s), __fnvnx_probe::pod<%s>()}; '
                      'extern "C" void __fnvnx_pas_%d(%s a) { __fnvnx_sink((void *)&a); }' % (i, q, q, q, q, q, i, q))
@@ -179,14 +188,14 @@ def probe_unit(tree, workdir, unit, types):
     base = unit.replace('/', '_')
     src, obj = os.path.join(workdir, base + '.probe.cpp'), os.path.join(workdir, base + '.probe.o')
     alive = list(types)
+    spell = {t: t for t in types}   # the name the probe source uses (a bare name: the one namespace that has it)
     res = {}
-    for _ in range(6):
+    for _ in range(8):
         if not alive:
             break
-        text, first = probe_source(os.path.join(tree, unit), alive)
+        text, first = probe_source(os.path.join(tree, unit), [spell[t] for t in alive])
         open(src, 'w').write(text)
-        r = subprocess.run([CXX, *flags(tree), '-fno-ipa-icf', src, '-o', obj], cwd=tree, capture_output=True, text=True,
-                           errors='replace')
+        r = objcache.Result(*objcache.compile(CXX, [*flags(tree), '-fno-ipa-icf'], src, obj, cwd=tree))
         if os.environ.get('FNVNX_PROBE_DEBUG'):
             print(r.stderr[:3000])
         if r.returncode == 0:
@@ -202,7 +211,33 @@ def probe_unit(tree, workdir, unit, types):
         bad = {b for b in bad if 0 <= b < len(alive)}
         if not bad:  # error elsewhere (the unit itself no longer compiles): give up on this unit
             break
-        alive = [t for i, t in enumerate(alive) if i not in bad]
+        # a C name's declaration read from the source loses the namespace it stands in (`RefBlockArgument` declared
+        # in `namespace fnv_00cc83b0`): GCC names the namespace when exactly one declares the name ("did you mean";
+        # several get "suggested alternatives") - such a type is probed again under that name
+        # a class whose name a function of the same name hides (`struct FUN_0040c0e0` and `FUN_0040c0e0(...)`) is
+        # named with its elaborated specifier, `struct ::T` (the class / struct tags are interchangeable there)
+        respelled = set()
+        for line in r.stderr.splitlines():
+            if not line.startswith(src):
+                continue
+            m = _DID_YOU_MEAN.search(line[len(src):])
+            if m:
+                # the bare name may be the type, its first component (`PacketMask::Bits`) or a template and its
+                # arguments (`Ref<SolverInfo>`, both in `ApplyForcesStepPrivate`): each is qualified in place
+                i, name, sug = int(m.group(1)) - first, m.group(2), m.group(3)
+                if i in bad and sug.endswith('::' + name) and not spell[alive[i]].startswith('struct '):
+                    new = re.sub(_NAME_AT % re.escape(name), sug, spell[alive[i]])
+                    if new != spell[alive[i]]:
+                        spell[alive[i]] = new
+                        respelled.add(i)
+                continue
+            m = _NOT_A_TYPE.search(line[len(src):])
+            if m:
+                i = int(m.group(1)) - first
+                if i in bad and i not in respelled and spell[alive[i]] == alive[i] and '<' not in alive[i]:
+                    spell[alive[i]] = 'struct ' + alive[i]
+                    respelled.add(i)
+        alive = [t for i, t in enumerate(alive) if i not in bad or i in respelled]
     for t in types:
         res.setdefault(t, None)
     return res
@@ -260,7 +295,8 @@ def load(path, tree=None):
             f = line.rstrip('\n').split('\t')
             if len(f) < 7:
                 continue
-            if tree is not None and (len(f) < 10 or f[7] != unit_key(tree, f[0]) or f[9] != POD_RULE):
+            if tree is not None and (len(f) < 10 or f[7] != unit_key(tree, f[0]) or
+                                     f[9] != (UNNAMED_RULE if f[2] == '-1' else POD_RULE)):
                 continue
             pod = int(f[8]) if len(f) > 9 and f[8] in ('0', '1') and f[9] == POD_RULE else None
             lay[(f[0], f[1])] = None if f[2] == '-1' else Layout(int(f[2]), int(f[3]), int(f[4]), int(f[5]), f[6], pod)
@@ -290,10 +326,11 @@ def run(out, tree, jobs=4):
         f.write('#unit\ttype\tsize\talign\ttrivial\tempty\tclass\tunit content key\tmsvc pod\tpod rule\n')
         for (u, t), l in sorted(lay.items()):
             if l is None:
-                f.write('%s\t%s\t-1\t0\t0\t0\t?\t%s\t?\t%s\n' % (u, t, unit_key(tree, u), POD_RULE))
+                f.write('%s\t%s\t-1\t0\t0\t0\t?\t%s\t?\t%s\n' % (u, t, unit_key(tree, u), UNNAMED_RULE))
             else:
                 f.write('%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n' % (u, t, *l[:5], unit_key(tree, u),
                                                                      '?' if l.pod is None else l.pod, POD_RULE))
     got = sum(1 for l in lay.values() if l)
     print('layouts: %d known, %d not nameable' % (got, len(lay) - got))
+    print(objcache.summary('layouts'), flush=True)
     print('classes:', dict(collections.Counter(l.cls for l in lay.values() if l)))

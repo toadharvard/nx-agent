@@ -52,14 +52,15 @@ note() { NOTES+=("$*"); log "$*"; }
 
 if [ -z "${FARM_APT:-}" ]; then if [ "$(id -u)" = 0 ]; then FARM_APT=1; else FARM_APT=0; fi; fi
 need=""
-for c in aarch64-linux-gnu-gcc git; do command -v "$c" > /dev/null || need="$need $c"; done
+for c in aarch64-linux-gnu-gcc aarch64-linux-gnu-g++ qemu-aarch64 git; do command -v "$c" > /dev/null || need="$need $c"; done
 [ "${SCENARIO_WINE:-1}" = 1 ] && for c in wine Xvfb xdotool; do command -v "$c" > /dev/null || need="$need $c"; done
 python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null || need="$need py"
 if [ -n "$need" ]; then
 	if [ "$FARM_APT" = 1 ]; then
 		dpkg --add-architecture i386; apt-get update -qq
 		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wine32:i386 wine gcc-mingw-w64-i686 xvfb xdotool \
-			x11-utils gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu git python3-pip > /dev/null || note "apt-get install failed"
+			x11-utils x11-apps imagemagick gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+			qemu-user git python3-pip > /dev/null || note "apt-get install failed"
 		python3 -m pip install -q --break-system-packages unicorn capstone pyelftools 2> /dev/null ||
 			python3 -m pip install -q unicorn capstone pyelftools || note "pip install failed"
 	else note "missing on this host:$need (FARM_APT=1 installs them)"; fi
@@ -274,7 +275,8 @@ if [ "${SCENARIO_PUBLISH:-1}" = 1 ] && [ -n "$LC" ] && [ -d "$ARTIFACTS/.git" ];
 		cp -f "$D"/plan.json "$D"/report.json "$D"/compare.json "$D"/threads.json "$D"/nx1.json "$D"/frames.json "$D"/feed.txt "$pub/$s/" 2> /dev/null
 		[ -d "$D/emu/kept" ] && cp -a "$D/emu/kept" "$pub/$s/guest-kept"
 		[ -d "$D/wine/profile" ] && cp -a "$D/wine/profile" "$pub/$s/wine-profile"
-		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$pub/$s/" 2> /dev/null
+		[ -d "$D/wine/shots" ] && cp -a "$D/wine/shots" "$pub/$s/wine-shots"
+		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$D/wine/original_opens.json" "$pub/$s/" 2> /dev/null
 		for f in "$D/emu/emu_stub.log" "$D/lin/boot.log" "$D/lin_profile.txt" "$D/guest.tsv" "$D/wine/wine.tsv"; do [ -f "$f" ] && xz -T0 -c "$f" > "$pub/$s/$(basename "$f").xz"; done
 	done
 	if git -C "$pub" add -A && git -C "$pub" -c user.name="fnvnx farm" -c user.email=farm@invalid commit -qm "scenarios $LC (head $C12)

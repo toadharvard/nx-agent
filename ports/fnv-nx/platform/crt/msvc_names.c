@@ -13,6 +13,10 @@
  *   FUN_00401460, FUN_00406d50        CopyMemoryBlock / AppendPreview (crt_symbols.tsv "needs body"): cdecl
  *                                     forwarders in the exe to 0x00ec44d0 memcpy (VC9's, overlap-safe: memmove)
  *                                     and 0x00ec6bd2 strcat_s, with the arguments in order
+ *   __fnv_00ec330b, __fnv_00ec78e0,   std::_Lockit::~_Lockit, std::exception::exception() and ~exception() by
+ *   __fnv_00ec79a1                    address (R6 recon6-007): units.json places them, no unit emits a body, and
+ *                                     paths that spell the address (exit thunks, vtable slots) missed
+ *                                     crt_symbols.tsv's providers, so they were trap stubs (code-defmissing)
  *   FreeBlockImp                      the decomp's name for `call [0x010b7eb0]`: that .rdata word is a vtable slot
  *                                     holding 0x00cb9cb0 = `mov ecx, 0x011f6238; jmp 0x00aa4060`, i.e.
  *                                     MemoryManager::Deallocate(p) on the global heap, which is FormHeap_Free
@@ -100,3 +104,8 @@ WEAK void FreeBlockImp(void *p)
     if (p && __fnv_00401030)
         __fnv_00401030(p);
 }
+
+/* R6 recon6-007: the CRT provider by address (thiscall: this in x0; the constructor returns this) */
+WEAK void __fnv_00ec330b(void *self) { fnvnx_lockit_dtor(self); }
+WEAK void *__fnv_00ec78e0(void *self) { return fnvnx_exception_ctor(self); }
+WEAK void __fnv_00ec79a1(void *self) { fnvnx_exception_dtor(self); }

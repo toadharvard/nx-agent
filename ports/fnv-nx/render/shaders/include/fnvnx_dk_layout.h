@@ -9,10 +9,15 @@
  *   sampler binding = D3D sampler register (ps s0..s15, vs s0..s3)
  *
  * VS driver UBO: vec4 posfix  (xy = half-pixel offset in NDC (-1/w, +1/h), applied * gl_Position.w;
- *                              z  = y scale, -1 for DkDeviceFlags_OriginUpperLeft)
+ *                              z  = y scale, -1 for DkDeviceFlags_OriginUpperLeft;
+ *                              w  = 0: the opaque zero, below)
  * PS driver UBO: vec4 fogcolor; vec4 fog (x mode 0 off/1 vertex/2 exp/3 exp2/4 linear, y start, z end,
  *                w density); ivec4 alpha (x = D3DCMPFUNC, 0 = alpha test off); vec4 alpharef (x, 0..1);
  *                vec4 texbem[16] (2 per stage: bump matrix 00,01,10,11; then lscale, loffset)
+ *                alpha.y = 0: the opaque zero.
+ * Opaque zero: a shader with relative constant reads XORs its def'd values with it at the start of main(),
+ * so the GLSL compiler treats them as run-time values (as WineD3D's uniforms) and cannot fold x * 0 -> 0.
+ * Hosts must write 0 there (every host clears the blocks).
  *
  * Vertex attribute locations: by D3DDECLUSAGE + usage index (fnvnx_dk_attrib_location).
  * VS->PS varying locations: by usage + index (fnvnx_dk_varying_location); PS < 3.0 reads the
