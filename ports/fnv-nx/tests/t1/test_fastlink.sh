@@ -24,7 +24,7 @@ $(firstword $(MAKECMDGOALS)):
 	@for s in $(if $(filter link guest,$(MAKECMDGOALS)),prepare compile link $(filter guest,$(MAKECMDGOALS)),fetch toolchain); do mkdir -p $(BUILD_DIR)/$$s; \
 	  printf '{"status": "ok", "ran": true, "seconds": 4.5, "summary": "%s done", "started": "%s", "artifacts": {"prefix": "/x"}}\n' $$s "$$(date +%s%N)" > $(BUILD_DIR)/$$s/stage.json; sleep 0.01; done
 	@[ -z "$(filter link,$(MAKECMDGOALS))" ] || { touch $(BUILD_DIR)/compile/objects.tsv; L=$(BUILD_DIR)/link; mkdir -p $$L/out/cache $$L/out/vtables $$L/fixed; \
-	  for f in aliases.ld refs.tsv abi.tsv addrmap.tsv layouts.tsv cache/msvc.tsv; do echo x > $$L/out/$$f; done; echo o > $$L/fixed/zz_bridges.o; echo s > $$L/summary.txt; }
+	  for f in aliases.ld refs.tsv abi.tsv addrmap.tsv layouts.tsv cache/msvc.tsv vtshift.tsv vmo.tsv stats; do echo x > $$L/out/$$f; done; mkdir -p $$L/out/probe; echo w > $$L/out/probe/work.cpp; echo o > $$L/fixed/zz_bridges.o; echo s > $$L/summary.txt; }
 	@[ -z "$(filter guest,$(MAKECMDGOALS))" ] || { mkdir -p $(BUILD_DIR)/guest; echo nso > $(BUILD_DIR)/guest/guest.nso; echo elf > $(BUILD_DIR)/guest/fnvnx.elf; }
 MK
 cat > "$Q/tests/s5/farm_boot.sh" <<'SH'
@@ -59,6 +59,7 @@ C2=$(commit tools/link/fnvlink.py v2); : > "$T/calls"; run first "$C2"
 ok "PASS on a tree with the head's prepare inputs and recon set" '[ "$(cat $T/first.rc)" = 0 ] && grep -q "^- verdict: PASS" $T/first.md && grep -q "^- tree: t/${C1:0:12}, the head.s prepare inputs and recon set (rc1)" $T/first.md'
 ok "make link, then make guest, then the stub boot (null device), in that order" '[ "$(cut -d" " -f1 $T/calls | tr "\n" " ")" = "fetch link guest boot " ] && grep -q "^boot stub nulldev=1 guest=$T/home/linkcheck/build/guest timeout=300" $T/calls'
 ok "link/<c12> and link-head published, before the boot (the step order)" 'haslink $C2 && git -C $T/art.git rev-parse -q --verify refs/heads/link-head > /dev/null && grep -q "^- link published: published: branch link/${C2:0:12}" $T/first.md && [ "$(grep -n "^| publish |" $T/first.md | cut -d: -f1)" -lt "$(grep -n "^| stub boot |" $T/first.md | cut -d: -f1)" ]'
+ok "the link's diagnostics travel with it (vtshift.tsv, vmo.tsv, stats), its work dirs not" 'for f in vtshift.tsv vmo.tsv stats; do git -C $T/art.git cat-file -e "link/${C2:0:12}:out/$f" || exit 1; done; ! git -C $T/art.git cat-file -e "link/${C2:0:12}:out/probe/work.cpp" 2>/dev/null'
 ok "the published guest ELF and the milestones line" 'git -C $T/art.git cat-file -e "link/${C2:0:12}:guest/fnvnx.elf" && grep -q "^- stub boot: game milestones 3/10; last reached: archive-list; FNVNX_STUB_NULLDEV=1, EMU_TIMEOUT 300 s; stop: STOPPED: deadlock" $T/first.md'
 # the same link tools and tree: that run's verdict and link, nothing built or published
 C3=$(commit README r2); : > "$T/calls"; run same "$C3"

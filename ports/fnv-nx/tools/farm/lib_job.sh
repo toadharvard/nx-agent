@@ -272,6 +272,11 @@ EOF
 		[ -f "$bd/link/out/typeinfo_pairs.tsv" ] && cp "$bd/link/out/typeinfo_pairs.tsv" out/
 		# S2c's slot fill from the player's exe: what was bound, and the gaps (trap slots left, with the reason)
 		for f in slot_fill.tsv slot_gaps.tsv; do [ -f "$bd/link/out/$f" ] && cp "$bd/link/out/$f" out/; done
+		# every other top-level diagnostic of the link (stats, bound_vftables.tsv, vtshift.tsv, vtext.tsv, vmo.tsv, ...;
+		# orchestrator: S2 needs them for the residual tables, and on 0e8b2eb8 the next head overwrote them before anyone
+		# fetched them): each regular file of link/out up to PUBLISH_DIAG_MAX_MB (default 32), the work dirs not
+		find "$bd/link/out" -maxdepth 1 -type f -size -"${PUBLISH_DIAG_MAX_MB:-32}"M -print0 2>/dev/null \
+			| while IFS= read -r -d '' f; do [ -e "out/$(basename "$f")" ] || cp "$f" out/; done
 		cp "$bd/link/out/cache/msvc.tsv" out/cache/
 		rsync -a --exclude probe/ "$bd/link/out/vtables/" out/vtables/   # the synthesized vtables, not the probe work dir
 		# S2d's tables (bodies.tsv: every trapped name's class and evidence; bind.tsv, synth.tsv, stats.txt), so a relink
