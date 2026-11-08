@@ -873,8 +873,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     ecx_use = msvc_code_use(units_json, ms, msvc, renames)
     for u in have:
         idx = KeyIndex()
+        uident = collections.defaultdict(set)   # ident over this unit's own symbols (classify_ref)
         for n, a in u.refs.items():
-            idx.add(msvc(n), a)
+            m_ = msvc(n)
+            idx.add(m_, a)
+            if m_.kind in ('data', 'cname') and m_.qual and m_.special is None and DATA_START <= a < DATA_END:
+                uident[m_.qual[-1]].add(a)
         for a, n in u.defs:
             idx.add(msvc(n), a)
         # variables this object defines at a data address: the data image holds the same object (docs/LINK.md)
@@ -901,12 +905,14 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 cls, tier, addr, target, note = 'addr', 'game/newdel', na, None, nm
                 stats['newdel_refs'] += 1
             else:
-                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident)
+                cls, tier, addr, target, note = classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident, uident)
                 if cls == 'native' and un in colliding:   # S5 class 2: never the unrelated body by name
                     cls, tier, addr = 'addr', 'name-addr/colliding', colliding[un]
                     stats['colliding_refs_by_address'] += 1
-                if tier == 'gref/ident':
+                if tier in ('gref/ident', 'unit/ident'):
                     stats['ident_' + cls] += 1
+                if tier == 'unit/ident':
+                    stats['ident_unit'] += 1
                 if cls == 'unresolved' and isig.qual and it[un] and (UNIT_NS.match(isig.qual[0]) or
                                                                      ptr_targ_copy(isig, it[un])):
                     # a unit-local namespaced copy of a class (`fnv_00650ea0::NiFixedString`, S13 J-0114): bound like
@@ -914,7 +920,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     # definition of the global name
                     st_ = UNIT_NS_ANY.sub('', it[un])
                     ts_ = sigs.parse_itanium(un, st_)
-                    r_ = classify_ref('', ts_, idx, gdef, gref, set(), msvc, ident) if ts_.qual else None
+                    r_ = classify_ref('', ts_, idx, gdef, gref, set(), msvc, ident, uident) if ts_.qual else None
                     if r_ and r_[0] not in ('unresolved', 'runtime'):
                         cls, tier, addr, target, note = r_[0], 'ns/' + (r_[1] or ''), r_[2], r_[3], r_[4]
                         stats['unit_ns_bound'] += 1
@@ -1837,7 +1843,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                   stats['colliding_fun_names'], stats['colliding_fun_defs'], stats['colliding_refs_by_address']),
               'calls of an IAT slot address bound to its import: %d' % stats['iat_calls'],
               'data references bound by identifier only (another scope or decorated type): %d; identifiers at several '
-              'addresses (left ambiguous): %d' % (stats['ident_addr'], stats['ident_ambiguous']),
+              'addresses (left ambiguous): %d, of the bound ones by the unit\'s own name: %d'
+              % (stats['ident_addr'], stats['ident_ambiguous'], stats['ident_unit']),
               'ecx-not-passed / this-not-passed pairs judged on the definition\'s MSVC code (--msvc-code/-objs): ecx '
               'unused, bridged: %d; used, flagged: %d; no code: %d' % (stats['ecx_code_unused'],
                                                                       stats['ecx_code_used'], stats['ecx_code_unknown']),
@@ -4496,11 +4503,14 @@ def decomp_std(un, isig):
     return bool(first) and first.group(0) not in STD_IDS[0]
 
 
-def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
+def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None, uident=None):
     """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller).
     ident: {data identifier: image addresses} - the last resort for a data reference (S5): the same identifier in
     another scope (the decomp's per-function namespaces) or with another decorated type (an array declared where
-    MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise."""
+    MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise. uident: the same map
+    over the referencing unit's own symbols only: an identifier at several image addresses binds to the one of
+    them the unit itself names (`unit/ident`; W44: font.cpp's FontTextManager::pInstance, whose unit names only
+    `?pInstance@FontManager@@2PAV1@A` = 0x011f33f8 among 0x011ccb78 / 0x011d8ce8 / 0x011f33f8)."""
     if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)) and not decomp_std(un, isig):
         return 'runtime', None, None, None, None
     if isig.kind == 'special':
@@ -4536,6 +4546,9 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
             a_ = ident[isig.qual[-1]]
             if len(a_) == 1:
                 return 'addr', 'gref/ident', next(iter(a_)), None, None
+            own = (uident or {}).get(isig.qual[-1], set()) & a_
+            if len(own) == 1:
+                return 'addr', 'unit/ident', next(iter(own)), None, None
             return 'ambiguous', 'gref/ident', None, None, ' '.join('%08x' % x for x in sorted(a_))
         return 'unresolved', None, None, None, None
     addrs = sorted(hit)
