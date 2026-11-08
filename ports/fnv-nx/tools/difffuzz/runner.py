@@ -1472,7 +1472,8 @@ class Pair:
             # derived class's vftable and then a base class's (exeempty.deleting_wrapper / dtor_chain)
             import exeempty
             a = getattr(self.target, 'orig_addr', None)
-            if a is None or not (exeempty.deleting_wrapper(a) or exeempty.dtor_chain(a)):
+            if a is None or not (exeempty.deleting_wrapper(a) or exeempty.dtor_chain(a) or
+                                 exeempty.dtor_via_callee(a)):
                 return None
         if getattr(self, '_vpw', None) is None:
             import classify
