@@ -48,7 +48,8 @@ Rec = collections.namedtuple('Rec', 'name size align fields bases vptr packed')
 def msvc_flags(tree):
     sse = os.environ.get('SSE2NEON') or os.path.join(PORT, 'ext', 'sse2neon')
     return ['--target=i686-pc-windows-msvc', '-std=gnu++17', '-fsyntax-only', '-fms-extensions', '-fshort-wchar',
-            '-fsigned-char', '-U_MSC_VER', '-fms-compatibility-version=0', '-D__aarch64__', '-D__ILP32__',
+            '-fsigned-char', '-U_MSC_VER', '-U_WIN32', '-U_WIN64', '-U_M_IX86', '-U_M_IX86_FP',
+            '-fms-compatibility-version=0',   # the native compile's branches: no Windows target macros '-D__aarch64__', '-D__ILP32__',
             '-Wno-everything', '-ferror-limit=0',
             # the SIMD types as MSVC defines them (__m64 8/8, __m128 16/16, ...): the shim's SSE headers are
             # sse2neon (AArch64) and stay out by their guards; their function bodies do not affect records
@@ -102,7 +103,7 @@ def parse_dump(text):
             continue
         if name.startswith(('__NS', 'fnvnx_', '__fnvnx', 'std::', '__gnu')):
             continue                                                  # the shim's and the compiler's own records
-        nat = max([layout_natural(t) for _, _, t in fields] + [1])
+        nat = max([layout_natural(t) for _, _, t in fields] + [4 if vptr is not None or bases else 1])
         out.setdefault(name, Rec(name, size, align, fields, bases, vptr, align < nat))
     return out
 
@@ -203,10 +204,13 @@ def compare(unit, rec, nat, boot):
     diffs.sort()
     rows = []
     cause = diffs[0][4] if diffs else (cause_of(rec, '') if size != rec.size else '')
+    if size == 0 and rec.size == 1:
+        cause = 'ebo'                     # a zero-size native class: the FNVNX_EBO2 filler alone (`char x[0]`)
     if size != rec.size:
         rows.append((unit, rec.name, 'size', rec.size, size, cause, boot))
     if align != rec.align:
-        rows.append((unit, rec.name, 'align', rec.align, align, cause or 'align8', boot))
+        rows.append((unit, rec.name, 'align', rec.align, align,
+                     cause or ('pack' if rec.packed or rec.align < align and size == rec.size else 'align8'), boot))
     for _, what, m, n, c in diffs:
         rows.append((unit, rec.name, what, m, n, cause, boot))
     return rows
