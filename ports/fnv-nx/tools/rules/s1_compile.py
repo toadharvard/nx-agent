@@ -6761,7 +6761,44 @@ RAWVT1_RECV_CAST = re.compile(r'\(\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*
                               r'([0-9]+|0[xX][0-9a-fA-F]+)\s*\]')
 
 
-def _rawvt_recv(path, masked, owners, stats):
+# The receivers RAWVT1-RECV cannot type from the source are decided against the exe (S1-rules, private recon branch
+# recon/s1_rawvt_sites: rawvt_sites.tsv, `# fnvnx-rawvt-sites/1`, unit / exe function / receiver / slot / decision /
+# evidence): at the exe's call site a thiscall (the receiver in ecx) is a C++ object, whose native table is minus-one
+# (decision shift); a stdcall with the receiver pushed is a COM interface (ok-com, left); later rows come from S5's
+# runtime vptr log. FNVNX_RAWVT_SITES or any rawvt_sites.tsv under FNVNX_RECON; cached on prepare.
+def _rawvt_sites():
+    got = prepare.__dict__.get('_fnvnx_rawvt_sites')
+    if got is not None: return got
+    files = [os.environ['FNVNX_RAWVT_SITES']] if os.environ.get('FNVNX_RAWVT_SITES') else []
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'rawvt_sites.tsv') for dp, _, ns in os.walk(top) if 'rawvt_sites.tsv' in ns)
+    got = {}
+    for f in files:
+        try: lines = open(f).read().splitlines()
+        except OSError: continue
+        if not lines or not lines[0].startswith('# fnvnx-rawvt-sites/1'): continue
+        for line in lines[1:]:
+            fs = line.split('\t')
+            if len(fs) < 5 or line.startswith('#'): continue
+            try: got[(fs[0].strip(), int(fs[1], 16), fs[2].strip(), int(fs[3], 0))] = fs[4].strip()
+            except ValueError: continue
+    prepare.__dict__['_fnvnx_rawvt_sites'] = got
+    return got
+
+
+def _rawvt_site_decision(path, masked, pos, var, k):
+    sites = _rawvt_sites()
+    if not sites: return None
+    tags = re.findall(r'@fnv\s+0x([0-9a-fA-F]{8})', masked[:pos])
+    if not tags: return None
+    p = path.replace('\\', '/')
+    i = p.rfind('/src/')
+    unit = p[i + 1:] if i >= 0 else p
+    return sites.get((unit, int(tags[-1], 16), var, k))
+
+
+def _rawvt_recv(path, masked, owners, stats, text=None):
     """[(start, end) of k] for RAWVT1-RECV (above)"""
     out = []
     for rx, kind in ((RAWVT1_RECV_MEM, 'mem'), (RAWVT1_RECV_CAST, 'cast')):
@@ -6777,11 +6814,15 @@ def _rawvt_recv(path, masked, owners, stats):
             for d in re.finditer(r'\b([A-Za-z_][\w:]*)\s*(?:<[^;{}()]*>)?\s*[*&]+\s*(?:const\s*)?%s\b' % re.escape(var), seg):
                 pass
             T = d.group(1).split('::')[-1] if d else None
-            if not T or T in ('void', 'char', 'int', 'unsigned', 'const'):
-                stats['RAWVT1-RECV-AMBIG'] += 1; continue
-            if D22_COM_NAME.match(T): stats['RAWVT1-RECV-COM'] += 1; continue
-            row = _classlayout_row(path, T)
-            if row is None: stats['RAWVT1-RECV-AMBIG'] += 1; continue
+            row = _classlayout_row(path, T) if T and T not in ('void', 'char', 'int', 'unsigned', 'const') else None
+            if T and D22_COM_NAME.match(T): stats['RAWVT1-RECV-COM'] += 1; continue
+            if row is None:
+                dec = _rawvt_site_decision(path, text or masked, m.start(), var, int(m.group(ki), 0))
+                if dec == 'shift' and _rawvt_mem_called(masked, m):
+                    out.append((m.start(ki), m.end(ki))); stats['RAWVT1-RECV-EXE'] += 1
+                elif dec and dec.startswith('ok'): stats['RAWVT1-RECV-OK'] += 1
+                else: stats['RAWVT1-RECV-AMBIG'] += 1
+                continue
             if row[0] != 'minus-one' or row[1] < 0: stats['RAWVT1-RECV-KEEP'] += 1; continue
             if int(m.group(ki), 0) <= row[1]: stats['RAWVT1-RECV-K'] += 1; continue
             if T in _rawvt_exe_order(): stats['RAWVT1-RECV-KEEP'] += 1; continue
@@ -6839,7 +6880,7 @@ def r_raw_vtable_slots(path, text, stats):
         edits.append((ka, kz, 'FNVNX_D26_SLOT(%s)' % text[ka:kz]))
         if tag != 'RAWVT1': stats[tag] += 1
     if recv_any:
-        edits += [(a, b, 'FNVNX_D26_SLOT(%s)' % text[a:b]) for a, b in _rawvt_recv(path, masked, owners, stats)]
+        edits += [(a, b, 'FNVNX_D26_SLOT(%s)' % text[a:b]) for a, b in _rawvt_recv(path, masked, owners, stats, text)]
     for a, b, rep in sorted(set(edits), reverse=True):
         text = text[:a] + rep + text[b:]
     stats['RAWVT1'] += len(edits)
