@@ -135,6 +135,7 @@ CLASSES = {
     'NEW5': 'neutral',          # FNVNX_GLOBAL_DELETE in a class whose only scalar delete is the placement form (MSVC: empty)
     'NSCALL1': 'neutral',       # unqualified call of N's own CRT-named prototype (bound only in N) -> N::name(
     'FINL1': 'neutral',         # __forceinline dropped from a body-less declaration the unit never defines (an ordinary call)
+    'VFPAD1': 'layout',        # FNVNX_VFPAD(types) (empty under MSVC): MSVC pads a class's own vfptr to the class's alignment
     'EBO2': 'layout',          # FNVNX_EBO2 (empty under MSVC): an empty base of a class introducing a vfptr goes after the vptr
     'REC1': 'neutral',         # D20: reconstructed bodies from fnv-nx-build recon/ appended (new functions); REC1-REPL: a recon's
                                # exact-text replace pairs, applied before the append (part of REC1; each pair is the recon's

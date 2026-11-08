@@ -167,6 +167,16 @@ template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribu
 #define FNVNX_MSVC_BASE_END(...) typename fnvnx_int_of_align<alignof(__VA_ARGS__)>::type : 0;
 /* under #pragma pack(N): MSVC places the base at min(alignof(base), N) (TAIL1-PACK) */
 #define FNVNX_MSVC_BASE_END_PACK(N, ...) typename fnvnx_int_of_align<(alignof(__VA_ARGS__) < (N) ? alignof(__VA_ARGS__) : (N))>::type : 0;
+/* VFPAD1: MSVC pads a class's own vfptr (no base) to the class's alignment, so its first member sits at
+ * alignof(class) (8 or 16), not at 4. The rule puts FNVNX_VFPAD(member types) first in such a body: a zero-width
+ * bit-field aligned like the most aligned member type moves the first member there (no other effect). */
+template <class... T> struct fnvnx_max_align { static const unsigned value = 1; };
+template <class H, class... T> struct fnvnx_max_align<H, T...> {
+    static const unsigned r = fnvnx_max_align<T...>::value;
+    static const unsigned value = alignof(H) > r ? alignof(H) : r;
+};
+#define FNVNX_VFPAD(...) typename fnvnx_int_of_align<fnvnx_max_align<__VA_ARGS__>::value>::type : 0;
+#define FNVNX_VFPAD_PACK(N, ...) typename fnvnx_int_of_align<(fnvnx_max_align<__VA_ARGS__>::value < (N) ? fnvnx_max_align<__VA_ARGS__>::value : (N))>::type : 0;
 #endif
 
 /* -fno-sized-deallocation (W41) stops GCC declaring the sized global operator delete. The decomp still calls

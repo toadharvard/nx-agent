@@ -48,6 +48,9 @@ template <> struct fnvnx_int_of_align<64> { typedef unsigned int type __attribut
 template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribute__((aligned(128))); };
 #define FNVNX_MSVC_BASE_END(...) typename fnvnx_int_of_align<alignof(__VA_ARGS__)>::type : 0;
 #define FNVNX_MSVC_BASE_END_PACK(N, ...) typename fnvnx_int_of_align<(alignof(__VA_ARGS__) < (N) ? alignof(__VA_ARGS__) : (N))>::type : 0;
+/* VFPAD1: MSVC pads its own vfptr already */
+#define FNVNX_VFPAD(...)
+#define FNVNX_VFPAD_PACK(N, ...)
 #endif
 
 #define _In_
