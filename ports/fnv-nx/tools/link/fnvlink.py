@@ -832,6 +832,33 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
                         cast = casts_of(u).get(isig.qual[-1])
+                    if not refdecl and (tier or '').startswith('name-addr') and not isig.variant and \
+                            nd['sym'].name.startswith('_Z') and un.startswith('_Z'):
+                        # S2 s2d-010 (2a): bound by the address in a Ghidra-style name, so no MSVC declaration of the
+                        # reference was found and nothing compared the pair. Both sides from their Itanium names
+                        # (name_addr_sigs: the same convention rules for both), then the ordinary verdict: a bridge
+                        # where the shapes differ and abi can map them, else flagged code-manual
+                        rs_, ds_ = name_addr_sigs(isig, itanium(nd['sym'].name))
+                        if rs_ is not None:
+                            v_ = abi.compare(rs_, ds_)
+                            # the conventions are guessed (Itanium has none): equal native argument shapes are the
+                            # same call whatever x86 says (B::f(int) vs f(B *, int)); a bridge is taken only when abi
+                            # derives one, any other difference is flagged for a decision, never guessed into moves
+                            if [c for _, c, _ in abi.a64_locations(rs_)] == [c for _, c, _ in abi.a64_locations(ds_)]:
+                                v_ = abi.Verdict()
+                            stats['name_addr_abi_' + v_.kind] += 1
+                            if v_.kind != 'same':
+                                abi_rows.append((u.source, un, '%08x' % addr, '(itanium) ' + un,
+                                                 '(itanium) ' + nd['sym'].name, v_.kind, ','.join(v_.classes),
+                                                 '; '.join('%s<-%s' % (d_, s_) for d_, s_, _, _ in v_.moves),
+                                                 '; '.join(v_.notes), it[un] or '', it[nd['sym'].name] or ''))
+                                abi_classes[(v_.kind, ','.join(v_.classes) or '-')] += 1
+                            if v_.kind == 'bridge':
+                                bn_ = abi.bridge_name(addr, un)
+                                bridges.setdefault(bn_, (target, v_, it[un] or un, it[nd['sym'].name] or nd['sym'].name))
+                                target, cls = bn_, 'code-bridge'
+                            elif v_.kind in ('manual', 'x86-inconsistent'):
+                                cls = 'code-manual'
                     if refdecl and (refdecl != defdecl or cast):
                         rs, ds = msvc(refdecl), msvc(defdecl)
                         # an undecorated C name carries no parameter types: read them from the declaring unit's
@@ -2857,6 +2884,30 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
                 best = s; break
     return 'addr', '%s/%s' % (scope, tier), a, None, best.text
 
+
+
+def name_addr_sigs(isig, dsig):
+    """(reference, definition) Sigs for abi.compare from two Itanium names (S2 s2d-010 2a: a name-addr pair has no
+    MSVC declaration on the reference side). Itanium carries neither the convention nor the return type of a
+    non-template function, so both sides follow one rule: a function in a class scope is a thiscall member (a
+    `fnv_<8 hex>` scope is the decomp's unit-local namespace, not a class), else cdecl; the result is taken as the
+    same on both sides. (None, None) when either is not a function."""
+    if isig is None or dsig is None or isig.kind != 'func' or dsig.kind != 'func':
+        return None, None
+    out = []
+    for s_ in (isig, dsig):
+        n = sigs.Sig('func', s_.name)
+        n.qual = list(s_.qual)
+        n.raw_params = list(s_.raw_params or [])
+        n.params = n.raw_params
+        scope = n.qual[:-1]
+        n.member = bool(scope) and not re.fullmatch(r'fnv_[0-9a-f]{8}', scope[-1])
+        n.cc = 'thiscall' if n.member else 'cdecl'
+        n.static = False
+        n.raw_ret = None
+        n.variant = None
+        out.append(n)
+    return out[0], out[1]
 
 def emit_tls(addrs):
     """Native TLS block in the layout of the image's .tls template (bridges.S): the decomp's __declspec(thread)
