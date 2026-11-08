@@ -343,6 +343,9 @@ def _static_only_store(div, target):
     if div.get('kind') == 'call-args' and div.get('cls') == 'P' and st is not None:
         # (difffuzz-20, eq-rest) a pointer argument that is the address of a function-local static: the oracle passes
         # the static's image address, the native its own .bss copy (0x00aff100: `this` of the guarded constructor)
+        # and the native's pointer is its own copy of a function-local static (runner's arm_arg_syms, EQ review)
+        if not any(n.startswith('_ZZ') for n in div.get('arm_arg_syms') or ()):
+            return False
         try:
             return int.from_bytes(bytes.fromhex(div.get('x86') or ''), 'little') in st
         except ValueError:

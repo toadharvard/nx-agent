@@ -111,7 +111,8 @@ def main():
     test_jumptab()
     test_guard()
     fn = dict(code=b'\xc3', address=0x00401000)
-    d = dict(kind='call-args', arg='this', cls='P', x86='e8811f01', arm='58121b0a', index=0, arm_local_static=True)
+    d = dict(kind='call-args', arg='this', cls='P', x86='e8811f01', arm='58121b0a', index=0, arm_local_static=True,
+             arm_arg_syms=['_ZZN11BSFileCache18GetRandomGeneratorEvE11s_fileCache'])
     h = cause(d, fn)
     check(h == 'local-static', 'this = a local static: local-static (%s)' % h)
     d2 = dict(d, x86='00901f01')
@@ -120,6 +121,10 @@ def main():
     d3 = dict(d, arm_local_static=False)
     h = cause(d3, fn)
     check(h != 'local-static', 'no private-static evidence on the native: stays (%s)' % h)
+    d4 = dict(d)
+    d4.pop('arm_arg_syms')
+    h = cause(d4, fn)
+    check(h != 'local-static', 'the native pointer is no local static of its own: stays (%s)' % h)
     print('FAIL' if FAIL else 'PASS')
     return 1 if FAIL else 0
 
