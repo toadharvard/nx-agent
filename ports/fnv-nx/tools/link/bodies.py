@@ -392,7 +392,7 @@ def pristine_bodies(objdir, nunits, wanted_tokens):
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:   # a damaged object must not stop the step
             continue
         for name, si in c.defs.items():
@@ -1334,7 +1334,7 @@ def pristine_externs(objdir, i, code_only=False):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p):
         return set()
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     ext = {s.name for s in c.syms.values() if s.secnum == 0 and s.storage == 2 and s.name.startswith('?')}
     if not code_only:
         return ext
@@ -1500,7 +1500,7 @@ def exe_call_targets(objdir, i, unit, wanted, exe, search=False, loose=False):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p) or not wanted:
         return {}
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     funcs = {}   # defined code symbol -> (section, start, body)
     for name, si in c.defs.items():
         sy = c.syms[si]
@@ -1589,7 +1589,7 @@ def object_call_seqs(objdir, i):
     p = os.path.join(objdir, 'u%d.obj' % i)
     if not os.path.exists(p):
         return {}
-    c = vslots.Coff(p)
+    c = vslots.coff(p)
     funcs = {}
     for name, si in c.defs.items():
         sy = c.syms[si]
@@ -1885,7 +1885,7 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data, members=None, msv
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:   # a damaged object must not stop the step
             continue
         for sy in c.syms.values():
@@ -1906,7 +1906,7 @@ def exe_data_pass(cnames, exe_path, msvc_objs, udata, is_data, members=None, msv
     if placed_refs is not None:   # referenced by code the exe has (a placed function's relocations)
         for i, ms_ in sorted(by_obj.items()):
             try:
-                c = vslots.Coff(os.path.join(msvc_objs, 'u%d.obj' % i))
+                c = vslots.coff(os.path.join(msvc_objs, 'u%d.obj' % i))
             except Exception:
                 continue
             body = {}   # defined function -> names its code references
@@ -1961,7 +1961,7 @@ def pristine_data_names(objdir, nunits, lasts):
         if not os.path.exists(p):
             continue
         try:
-            c = vslots.Coff(p)
+            c = vslots.coff(p)
         except Exception:
             continue
         for sy in c.syms.values():
