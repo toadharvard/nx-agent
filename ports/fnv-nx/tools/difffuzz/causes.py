@@ -43,6 +43,7 @@ import glob
 import json
 import math
 import os
+import re
 import struct
 import sys
 
@@ -232,6 +233,14 @@ POLICY = {
                                                   'early return or a branch on a field read differently'),
     'native-extra-calls': ('triage', 'S13b', True, 'the native makes the oracle\'s calls and more: a check the '
                                                    'oracle skips, or a call MSVC inlined into a loop'),
+    'native-zero-init': ('by-design', '-', False, 'the native only writes zero bytes the oracle leaves, into the object '
+                                                  'being constructed (this of a constructor, a fresh allocation): '
+                                                  'GCC value-initialises `T()` / `new T()` / `: Base()` of a class '
+                                                  'with an implicit constructor (zero, then the constructor), MSVC '
+                                                  '2008 runs the constructor only'),
+    'dtor-dead-store': ('by-design', '-', False, 'the oracle only zeroes bytes of the object a destructor (or a scalar '
+                                                 'deleting destructor wrapper) destroys: MSVC /Od keeps `m_p = 0` '
+                                                 'after a release, GCC drops stores to an object whose lifetime ends'),
     'store-width':    ('triage', 'S13b', True, 'the same bytes stored with another width: one side writes bytes '
                                                'the other leaves (a bool/char vs dword member, a padded struct copy)'),
     'native-only-store': ('triage', 'S13b', True, 'the native writes memory the oracle never writes'),
@@ -559,6 +568,14 @@ def _rule_mem_write(d, rec=None):
         return 'x87-precision'
     n, ox, oa = d.get('ndiff', 0), d.get('only_x86', 0), d.get('only_arm', 0)
     bx, ba = bytes.fromhex(d.get('x86') or ''), bytes.fromhex(d.get('arm') or '')
+    if rec is not None and n:
+        th = (_object_facts(rec.get('source')) or ({}, set()))[0]
+        if th.get('__fnv_' + str(rec.get('address') or '')):
+            return 'thunk-binding'      # the function's own `_ZThn<d>_` thunk: the oracle enters with the secondary base
+        if d.get('arm_zero_only') and oa == n and _zero_init_region(d, rec):
+            return 'native-zero-init'
+        if d.get('x86_zero_only') and ox == n and _dtor_this_region(d, rec):
+            return 'dtor-dead-store'
     if len(bx) >= 4 and len(ba) >= 4:
         if ww and all(_nan_generated(x, a) for x, a in ww):
             return 'nan-bits'
@@ -581,6 +598,42 @@ def _rule_mem_write(d, rec=None):
     if n and ox + oa == n and ox and oa:
         return 'store-width'
     return None
+
+
+def _zero_init_region(d, rec):
+    """Every listed differing byte lies in the object the function constructs: a fresh allocation block of the
+    harness (ALLOC_BASE..) or, for an MSVC constructor (??0), the `this` buffer."""
+    addrs = [int(a, 16) for a in d.get('addrs') or ()]
+    if not addrs:
+        return False
+    if all(ALLOC_BASE <= a < ALLOC_BASE + 0x400 * 0x1000 for a in addrs):
+        return True
+    if str(rec.get('symbol') or '').startswith('??0'):
+        this = _this_buffer(rec)
+        return this is not None and all(this <= a < this + 0x1000 for a in addrs)
+    return False
+
+
+def _this_buffer(rec):
+    """The address of the `this` buffer of a record: the case's `this` bytes when it lists them (a minimised case
+    drops arguments equal to the default), else the first argument buffer (world.BUF, Target.placement)."""
+    try:
+        return int.from_bytes(bytes.fromhex(rec['case']['args']['this']), 'little')
+    except (KeyError, ValueError, TypeError):
+        return BUFS[0] if isinstance(rec.get('case'), dict) else None
+
+
+_DTOR_SYM = re.compile(r'^\?\?(1|_G|_E)|[QU]AEPAX(I|_N)@Z$|D[012]Ev$')
+
+
+def _dtor_this_region(d, rec):
+    """A destructor (??1, ??_G, ??_E, an Itanium D0/D1/D2) or an MSVC scalar-deleting-destructor wrapper shape (a
+    member returning void* with one int / bool flag) whose differing bytes all lie in its `this` buffer."""
+    if not _DTOR_SYM.search(str(rec.get('symbol') or '')):
+        return False
+    addrs = [int(a, 16) for a in d.get('addrs') or ()]
+    this = _this_buffer(rec)
+    return bool(addrs) and this is not None and all(this <= a < this + 0x1000 for a in addrs)
 
 
 def _narrower(wide, narrow):

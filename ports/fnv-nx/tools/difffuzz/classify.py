@@ -103,7 +103,78 @@ def entry_register_reads(fn, conv):
         if capstone.CS_GRP_JUMP in ins.groups or capstone.CS_GRP_CALL in ins.groups or \
                 capstone.CS_GRP_RET in ins.groups:
             break
-    return reads          # in first-read order
+    for n in _later_entry_reads(fn, passed):
+        if n not in reads:
+            reads.append(n)
+    return reads          # in first-read order: the straight-line prefix first, then the later branches
+
+
+def _later_entry_reads(fn, passed, limit=20000):
+    """Registers some path from the entry reads before writing it (difffuzz-20, stores class): the straight-line
+    scan stops at the first branch, so a register argument first used on a later path (0x00db0e80 takes its second
+    pointer in edi and stores through it after a `jp`) was left out of the custom convention and the oracle stored
+    through garbage. Path-sensitive: (address, registers written so far) states over the function's own direct
+    jumps; a call clobbers eax/ecx/edx; an indirect jump or ret ends a path."""
+    insns = {i.address: i for i in CSD.disasm(fn['code'], fn['address'])}
+    lo, hi = fn['address'], fn['address'] + len(fn['code'])
+    found, seen = [], set()
+    stack = [(fn['address'], frozenset())]
+    steps = 0
+    while stack and steps < limit:
+        addr, written = stack.pop()
+        while addr in insns and (addr, written) not in seen and steps < limit:
+            seen.add((addr, written))
+            steps += 1
+            ins = insns[addr]
+            nxt = addr + ins.size
+            if ins.mnemonic == 'push' and ins.op_str in ('ebx', 'esi', 'edi', 'ebp', 'ecx'):
+                addr = nxt
+                continue
+            if ins.mnemonic in ('xor', 'sub', 'sbb') and len(ins.operands) == 2 and \
+                    ins.op_str.split(', ')[0] == ins.op_str.split(', ')[-1]:
+                written = written | {BASE.get(ins.op_str.split(', ')[0], ins.op_str.split(', ')[0])}
+                addr = nxt
+                continue
+            idiom = _register_idiom(ins)
+            if idiom == 'nop':
+                addr = nxt
+                continue
+            if idiom:
+                written = written | {idiom}
+                addr = nxt
+                continue
+            try:
+                rr, ww = ins.regs_access()
+            except capstone.CsError:
+                break
+            for r in rr:
+                n = BASE.get(ins.reg_name(r), ins.reg_name(r))
+                if n in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi') and n not in written and n not in passed \
+                        and n not in found:
+                    found.append(n)
+            written = written | {BASE.get(ins.reg_name(r), ins.reg_name(r)) for r in ww}
+            if capstone.CS_GRP_RET in ins.groups:
+                break
+            if capstone.CS_GRP_CALL in ins.groups:
+                written = written | {'eax', 'ecx', 'edx'}
+                addr = nxt
+                continue
+            if capstone.CS_GRP_JUMP in ins.groups:
+                op = ins.operands[0] if ins.operands else None
+                tgt = op.imm if op is not None and op.type == capstone.x86.X86_OP_IMM else None
+                if tgt is not None and lo <= tgt < hi:
+                    if ins.mnemonic == 'jmp':
+                        addr = tgt
+                        continue
+                    stack.append((tgt, written))
+                    addr = nxt
+                    continue
+                if ins.mnemonic == 'jmp':
+                    break
+                addr = nxt
+                continue
+            addr = nxt
+    return found
 
 
 def is_dtor_name(sym):

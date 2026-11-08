@@ -49,7 +49,9 @@ import config
 # padding and value-free writes are no custom-register reads, custom registers carry the parameter their calibrated
 # pairing agrees on, the adaptive follow skips a callee the native calls out of line itself and reruns after its
 # last load, the bool-repr probe covers background bytes and NaN-only remainders, a store into the oracle's return
-# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy.
+# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. Stores class: a register first
+# read on a later path is a custom register, the oracle gets ST0 for a call the caller's unit declares float, and
+# native-zero-init / dtor-dead-store (by design) / thunk-binding relabel store-only divergences.
 HARNESS = 'difffuzz-20'
 
 
