@@ -395,6 +395,22 @@ def _params_key(params):
     return tuple(p for p in ps if p != 'void')
 
 
+_PP_OPEN, _PP_CLOSE = re.compile(r'^[ \t]*#[ \t]*if'), re.compile(r'^[ \t]*#[ \t]*endif')
+
+
+def _conditional_depth(text, pos):
+    """How many #if blocks are open at `pos`. A definition inside one is not known to be the one GCC compiles: a
+    recon body defines the function under `#if defined(_MSC_VER)` and forwards it by assembler on the GCC side, so
+    a `static` there would turn the unit's own prototype (and its call) internal while the definition is external."""
+    depth = 0
+    for line in text[:pos].split('\n'):
+        if _PP_OPEN.match(line):
+            depth += 1
+        elif _PP_CLOSE.match(line):
+            depth = max(0, depth - 1)
+    return depth
+
+
 def r_harness_internal(path, text, stats):
     """HARN1: an untagged free definition whose name no unit references (a decomp harness) becomes static."""
     if not path.endswith(('.cpp', '.c')):
@@ -418,6 +434,9 @@ def r_harness_internal(path, text, stats):
         chain = prepare.scope_chain(spans, m.start(4))
         if any(k not in ('namespace', 'extern') for k, _ in chain):
             continue                          # members, local classes, bodies
+        if _conditional_depth(masked, m.start(4)):
+            bad.add(name)                     # maybe not this compiler's definition (a recon body's MSVC branch)
+            continue
         if (name in refs or foreign.get(name, set()) - {me} or name in HARN_KEEP_NAMES or name.startswith(('__fnv', '_fnvnx', 'fnvnx', 'FNVNX'))
                 or HARN_SKIP_HEAD.search(head) or not re.search(r'\w', head)):
             bad.add(name)
