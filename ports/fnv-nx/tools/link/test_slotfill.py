@@ -72,8 +72,10 @@ struct Agg { int a, b, c, d, e; };
 struct Vb { virtual ~Vb(); virtual int a(); virtual int b(); virtual int c(int); virtual int d(); virtual int f();
             virtual int e(); int x; };
 struct Der : Vb { int a() override; };
-struct Shell { int impl(); int impl2(Agg); int impl3(int, int); void *del(unsigned); int impl4(); int implh(); int y; };
+struct Shell { int impl(); int impl2(Agg); int impl3(int, int); void *del(unsigned); int impl4(); int implh(); int implw(); int y; };
 struct Vh { virtual int g0(); virtual int g1(); virtual int hh(); int q; };   // hh defined nowhere; another unit's reference names it
+struct Wh { virtual int w0(); virtual int w1(); virtual int hw(); int q; };   // hw defined nowhere; another unit's reference names it
+struct Wd : Wh { int w0() override; };                       // the exe's Wd overrides hw too; the decomp's Wd does not declare it
 struct Vu { virtual int u0(); virtual int u1(); virtual int hu(); int q; };   // hu defined nowhere; the unit's own recipe binds it, no code calls it
 struct Vc { inline virtual int c0(); inline virtual int c1(); inline virtual int hc(); int q; };   // hc defined nowhere; c0 calls Vc::hc() directly
 struct Vd { virtual int g(); virtual ~Vd(); int z; };      // key function g; ~Vd defined nowhere
@@ -120,6 +122,7 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'Pv *mk_pv() { return new Pv; }\nvoid call_bi(Bi *p) { p->Free(0); }\n'
                     'int Vu::u0() { return 10; }\nint Vu::u1() { return 11; }\nVu *mk_vu() { return new Vu; }\n'
                     'inline int Vc::c0() { return Vc::hc(); }\ninline int Vc::c1() { return 12; }\nVc *mk_vc() { return new Vc; }\n'
+                    'int Shell::implw() { return 16; }\nint Wh::w1() { return 17; }\nint Wh::w0() { return 13; }\nint Wd::w0() { return 14; }\nWh *mk_wh() { return new Wh; }\nWd *mk_wd() { return new Wd; }\n'
                     'int Vh::g0() { return 8; }\nint Shell::implh() { return 9; }\nVh *mk_vh() { return new Vh; }\n'}
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 8}   # noqa: E731
 
@@ -140,7 +143,7 @@ def run(cmd, **kw):
 
 def build_exe(rd, where):
     td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0')
-          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@', '.?AVVh@@', '.?AVVu@@', '.?AVVc@@')}
+          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@', '.?AVVh@@', '.?AVVu@@', '.?AVVc@@', '.?AVWh@@', '.?AVWd@@')}
 
     def chd(names):
         bs = [rd.words(td[n], 0, 0, 0xffffffff, 0, 0x40, 0) for n in names]
@@ -168,6 +171,9 @@ def build_exe(rd, where):
     where['Vi'] = vft('.?AVVi@@', chd(['.?AVVi@@']), [0x4010f8, 0x4010f0])
     # Vh: g0, then Shell::implh; the units.json of another unit names `Vh::hh` as a function at Shell::impl's address
     where['Vh'] = vft('.?AVVh@@', chd(['.?AVVh@@']), [0x4011a0, 0x4011a0, 0x4011a8])
+    # Wh, Wd (W32): both vtables name Wh::hw; the exe's Wh holds Shell::implh there, its Wd another function
+    where['Wh'] = vft('.?AVWh@@', chd(['.?AVWh@@']), [0x4011b0, 0x401180, 0x4011a8])
+    where['Wd'] = vft('.?AVWd@@', chd(['.?AVWd@@', '.?AVWh@@']), [0x4011b8, 0x401180, 0x401198])
     # Vu, Vc: u0 / c0, then Shell::implh (0x4011a8); the unit's own units.json entry names hu and hc as Shell::impl's
     where['Vu'] = vft('.?AVVu@@', chd(['.?AVVu@@']), [0x4011c0, 0x4011d0, 0x4011a8])
     where['Vc'] = vft('.?AVVc@@', chd(['.?AVVc@@']), [0x4011c8, 0x4011d8, 0x4011a8])
@@ -224,7 +230,8 @@ def main():
                 F(0x4011a8, '?implh@Shell@@QAEHXZ'), F(0x4011c0, '?u0@Vu@@UAEHXZ'),
                 F(0x4011c8, '?c0@Vc@@UAEHXZ'),
                 F(0x4011d0, '?u1@Vu@@UAEHXZ'), F(0x4011d8, '?c1@Vc@@UAEHXZ'),
-                F(0x401190, '?FUN_00401190@EgS@@QAEXXZ')],
+                F(0x401190, '?FUN_00401190@EgS@@QAEXXZ'), F(0x4011b0, '?w0@Wh@@UAEHXZ'), F(0x401180, '?w1@Wh@@UAEHXZ'),
+                F(0x4011b8, '?w0@Wd@@UAEHXZ'), F(0x401198, '?implw@Shell@@QAEHXZ')],
              'symbols': {'??_7Vb@@6B@': '0x%08x' % where['Vb'], '??_7Der@@6B@': '0x%08x' % where['Der'],
                          '??_7Vd@@6B@': '0x%08x' % where['Vd'], '??_7Vp@@6B@': '0x%08x' % where['Vp'],
                          '??_7Sh@@6B@': '0x%08x' % where['Sh'], '??_7Vk@@6B@': '0x%08x' % where['Vk'],
@@ -234,11 +241,12 @@ def main():
                          '??3@YAXPAX@Z': '0x00401170', '??_7Pv@@6B@': '0x%08x' % where['Pv'],
                          '?pa@Pv@@UAEHXZ': '0x004010e8', '?pb@Pv@@UAEHXZ': '0x004010ec',
                          '__imp_?Free@Bi@@QAEXPAX@Z': '0x%08x' % where['Vi'], '??_7Vh@@6B@': '0x%08x' % where['Vh'],
+                         '??_7Wh@@6B@': '0x%08x' % where['Wh'], '??_7Wd@@6B@': '0x%08x' % where['Wd'],
                          '??_7Vu@@6B@': '0x%08x' % where['Vu'], '?hu@Vu@@UAEHXZ': '0x00401020',
                          '??_7Vc@@6B@': '0x%08x' % where['Vc'], '?hc@Vc@@UAEHXZ': '0x00401020',
                          '??_GEg@@QAEPAXI@Z': '0x004011e0', '??_GHd@@QAEPAXI@Z': '0x004011e0'}},
             {'source': 'src/d.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [   # not compiled: d's body
-                F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {'?hh@Vh@@QAEHXZ': '0x00401020'}},
+                F(0x401060, '?dbody@Shell@@QAEHXZ')], 'symbols': {'?hh@Vh@@QAEHXZ': '0x00401020', '?hw@Wh@@QAEHXZ': '0x00401020'}},
         ]}
         import json
         json.dump(units, open(os.path.join(t, 'units.json'), 'w'))
@@ -387,6 +395,25 @@ def main():
         check(len(cf) == 1 and cf[0][4] == '__fnv_004011a8' and cf[0][5].startswith('per slot (exe vftable') and
               cf[0][7] == '_ZTV2Vc+8:2',
               'W20 (a) slot_fill.tsv lists the per-slot target: %s' % cf)
+        rw, rw0 = refs.get('_ZN2Wh2hwEv'), res['none'][2].get('_ZN2Wh2hwEv')
+        check(rw is not None and rw[2] == 'vslot-exe' and rw[5] == '__fnv_004011a8' and
+              rw0 is not None and rw0[2] == 'code' and rw0[5] == '__fnv_00401020',
+              'W32 Wh::hw (a gref name shared by Wh\'s and Wd\'s vtables): the declaring class\'s exe slot 0x4011a8 '
+              'decides the symbol, without the exe the name keeps its address: %s / %s' % (rw, rw0))
+        zbw = vtables.Obj(os.path.join(fixed, 'zz_bridges.o'))
+        we = zbw.ents('_ZTV2Wd') if '_ZTV2Wd' in zbw.defs else []
+        check(len(we) >= 5 and we[4].sym == '__fnv_00401198' and zbw.bind('_ZTV2Wd') == 'global',
+              'W32 Wd\'s vtable: a strong copy whose hw slot holds the exe Wd\'s override __fnv_00401198: %s' % (we,))
+        wb = vtables.Obj(os.path.join(fixed, 'src_a.cpp.o'))
+        wh = wb.ents('_ZTV2Wh') if '_ZTV2Wh' in wb.defs else []
+        check(len(wh) >= 5 and wh[4].sym == '__fnv_004011a8',
+              'W32 Wh\'s own vtable keeps the symbol\'s address: %s' % (wh,))
+        wf = [r for r in fill if r[2] == '_ZN2Wh2hwEv' and r[5].startswith('per slot')]
+        check(len(wf) == 1 and wf[0][4] == '__fnv_00401198' and wf[0][7] == '_ZTV2Wd+8:2',
+              'W32 slot_fill.tsv lists the per-slot target of Wd: %s' % wf)
+        wam = {l.split('\t')[0]: l.split('\t') for l in open(os.path.join(out, 'addrmap.tsv'))
+               if not l.startswith('#')}.get('%08x' % where['Wd'], [''] * 6)
+        check(wam[4] == 'zz_bridges.o', 'W32 the V row of Wd names the strong copy: %s' % wam[4])
         rk = refs.get('_ZN2Vk1kEi')
         check(rk is not None and rk[2] == 'vslot-exe' and rk[5].startswith('__fnvnx_br_004010c8_') and
               ('%s:\n    mov x0, x1\n    b __fnv_004010c8' % rk[5]) in bridges_,
@@ -419,9 +446,9 @@ def main():
         check(st['slot-mismatch'] == 0 and st['slot-compared'] >= 1,
               'vtmetric: no native slot differs from the exe\'s function (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
-        check(st0['slot-mismatch'] == 3 and st0['slot-mismatch-pairs'] == 1,
-              'vtmetric without the fill: Vh::hh, Vu::hu and Vc::hc (0x401020 against the exe\'s 0x4011a8) are the '
-              'mismatches (%s)' % dict(st0))
+        check(st0['slot-mismatch'] == 5 and st0['slot-mismatch-pairs'] == 2,
+              'vtmetric without the fill: Vh::hh, Vu::hu, Vc::hc and Wh::hw (0x401020 against the exe\'s 0x4011a8) '
+              'and Wd\'s hw (against 0x401198) are the mismatches (%s)' % dict(st0))
         check(st0['trap-slots'] == 19 and st0['trap-native-at-exe'] == 13 and st0['primary-shorter'] == 1,
               'vtmetric without the fill: 19 / 13, Sh short (%s)'
               % dict(st0))

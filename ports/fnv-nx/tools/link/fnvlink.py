@@ -2879,6 +2879,9 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     vtables of the object disagree or the exe's function cannot be bound, the name keeps its address (`hint_kept_*`).
     The hint rule also holds for a name the unit's own recipe binds (refs.tsv tier unit/*) that the object never calls
     (W20 (b): the name is only a slot).
+    A hint symbol serves the vtables of a class and of the classes derived from it (the decomp does not declare their
+    overrides), and ends at one address: each vtable whose exe vftables hold another single function in that slot gets
+    its own word in the copy (`hint_slot_over`; W32), whether the symbol was rebound, agreed or kept.
     call_hints: {source: {name: address}} (W20 (a)) vtable-slot names the unit's recipe binds (tier unit/*) that the
     object also calls directly: the address is right for those calls and the symbol keeps it. Each vtable slot that
     names the symbol where the exe vftables of that use agree on another function gets that function as a per-slot
@@ -3122,22 +3125,41 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             if un in hn:
                 st['hint_symbols'] += 1
                 a = next(iter(addrs)) if how else None
+                final = hs[un]   # the address the symbol ends at: the exe's when it is rebound, else the name's own
                 if a is None:
                     st['hint_kept_' + why.split(' (')[0].replace(' ', '_').replace('\'', '')] += 1
-                    continue
-                if a == hs[un]:
+                elif a == hs[un]:
                     st['hint_agrees'] += 1
-                    continue
-                tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]], 0, uvar)
-                if not tgt:
-                    st['hint_kept_exe_function_not_bindable'] += 1
-                    continue
-                changed.setdefault(u, {})[un] = tgt
-                addr_of[(u.source, un)] = a
-                rebound.add((u.source, un))
-                st['hint_rebound'] += 1
-                rows.append((os.path.basename(u.obj), u.source, un, '%08x' % a, tgt, 'exe vftable over the name\'s address '
-                             '%08x' % hs[un], why, ' '.join('%s+%d:%d' % (x[0], x[1], x[2]) for x in us)))
+                else:
+                    tgt, why = target_for(un, a, [ott_of(x[0], x[1]) for x in us if a in x[4]], 0, uvar)
+                    if not tgt:
+                        st['hint_kept_exe_function_not_bindable'] += 1
+                    else:
+                        changed.setdefault(u, {})[un] = tgt
+                        addr_of[(u.source, un)] = a
+                        rebound.add((u.source, un))
+                        final = a
+                        st['hint_rebound'] += 1
+                        rows.append((os.path.basename(u.obj), u.source, un, '%08x' % a, tgt, 'exe vftable over the '
+                                     'name\'s address %08x' % hs[un], why, ' '.join('%s+%d:%d' % (x[0], x[1], x[2])
+                                                                                  for x in us)))
+                for x in us if overrides is not None else ():
+                    # W32: one symbol serves the vtables of a class and of the classes derived from it, whose
+                    # overrides the decomp does not declare (NiTexture::Clone is NiObject's name in the shell's
+                    # vtable); the symbol ends at one address, a vtable whose exe vftables hold another function in
+                    # that slot gets its own word in the copy, as for a chint use or a trap-filled symbol
+                    b_ = next(iter(x[4])) if len(x[4]) == 1 else None
+                    if b_ is None or b_ == final:
+                        continue
+                    t2, why2 = target_for(un, b_, [ott_of(x[0], x[1])], 0, x[6])
+                    if not t2:
+                        st['hint_slot_kept_exe_function_not_bindable'] += 1
+                        continue
+                    overrides[(u.obj, x[0], x[1] // 4 + x[2])] = t2
+                    st['hint_slot_over'] += 1
+                    rows.append((os.path.basename(u.obj), u.source, un, '%08x' % b_, t2,
+                                 'per slot (exe vftable; the name ends at %08x)' % final, why2,
+                                 '%s+%d:%d' % (x[0], x[1], x[2])))
                 continue
             if how:
                 a = next(iter(addrs))
