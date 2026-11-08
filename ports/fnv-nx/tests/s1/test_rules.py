@@ -1981,6 +1981,14 @@ check('D22-EXEORDER: a class the link keeps in exe order (defined-slot0) keeps i
 check('D22-EXEORDER: ... another reason (multi-vtable) does not hold a class',
       run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'Other')), ['FNVNX_D22(Other'])
 del os.environ['FNVNX_EXE_ORDER']; prepare.__dict__['_fnvnx_exe_order'] = None
+check('D26 call-only: numbered sequences _v01/_v02, d000/d001, v000/v004/v008 are placeholders; v000/v002 is not (EQ G1)',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', '_v01()').replace('v1()', '_v02()')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'd000()').replace('v1()', 'd001()')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'w000()').replace('v1()', 'w004()').replace('void* Allocate', 'void* w008')),
+      ['FNVNX_D22(HeapStandIn, virtual void _v01();)', 'FNVNX_D22(HeapStandIn, virtual void d000();)',
+       'FNVNX_D22(HeapStandIn, virtual void w000();)'])
+check('D26 call-only: ... a step-2 sequence is not',
+      run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'w000()').replace('v1()', 'w002()')), [], ['FNVNX_D22'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
