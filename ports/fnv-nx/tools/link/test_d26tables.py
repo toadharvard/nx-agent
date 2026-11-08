@@ -126,6 +126,33 @@ def main():
         _, bu, _ = run(tmp, exe, g, exev, native, listed=set(), called={'_ZN4Used3v00Ev'}, defined=dfn)
         check('zzvtext__' + zb not in bu and 'zzvtext__ZTV3Foo' in bu,
               'unlisted: the named slot 0 stays in exe order, the call-only placeholder is still minus-one')
+        # V2 (seams triage): a family whose destructor is exe slot 2 (two placeholders before it). A pair-less table with the
+        # same two exe slots is minus-one from slot 2 (D1/D0 there, exe slot k at k + 1 after it), though its slot 0 is a
+        # name some code calls and the unit defines (the Actor / Projectile / TESForm family: destructor at exe slot 4)
+        exf = {V['A']: exevft.Vft('.?AVBaseF@@', 0, [], [A1, A2, A0, A1]),    # has a real pair at 2: the evidence
+               V['B']: exevft.Vft('.?AVKidF@@', 0, [], [A1, A2, A0, A1, A2]),  # pair-less, same prefix
+               V['C']: exevft.Vft('.?AVOddF@@', 0, [], [A2, A1, A0, A1]),      # pair-less, another prefix: no evidence
+               V['D']: exevft.Vft('.?AVNoDtorF@@', 0, [], [A1, A2, A1, A1])}   # same prefix, slot 2 no destructor
+        gf = {'_ZTV5BaseF': (t0.asm_group(tmp, 'fa', '_ZTV5BaseF', ['__fnv_00401010', '__fnv_00401020', '_ZN5BaseFD1Ev',
+                                                                     '_ZN5BaseFD0Ev', '__fnv_00401010']), V['A']),
+              '_ZTV4KidF': (t0.asm_group(tmp, 'fb', '_ZTV4KidF', ['_ZN4KidF3v00Ev', '_ZN4KidF3v01Ev']), V['B']),
+              '_ZTV4OddF': (t0.asm_group(tmp, 'fc', '_ZTV4OddF', ['__fnv_00401020', '__fnv_00401010']), V['C']),
+              '_ZTV8NoDtorF': (t0.asm_group(tmp, 'fd', '_ZTV8NoDtorF', ['__fnv_00401010', '__fnv_00401020']), V['D'])}
+        stf, brf, _ = run(tmp, exe, gf, exf, native, called={'_ZN4KidF3v00Ev'}, defined={'_ZN4KidF3v00Ev'})
+        w = words(brf, '_ZTV4KidF') if 'zzvtext__ZTV4KidF' in brf else []
+        check(w[2:] == ['__fnv_00401010', '__fnv_00401020', '__fnv_00401000_D1', '__fnv_00401000', '__fnv_00401'
+                        '010', '__fnv_00401020'] and stf['d26-minus-one-d26-family-dtor'] == 1,
+              'a pair-less table of a family with the destructor at exe slot 2: D1/D0 there, the rest at k + 1: %s' % w)
+        nomin = all('__fnv_00401000_D1' not in ''.join(brf.get('zzvtext_' + z, '')) for z in
+                    ('_ZTV4OddF', '_ZTV8NoDtorF', '_ZTV5BaseF'))
+        check(nomin and stf['d26-minus-one'] == 1,
+              'no evidence for the prefix, no destructor at the slot, or a pair already: no minus-one copy')
+        os.environ['FNVNX_D26F'] = '0'
+        try:
+            _, brf0, _ = run(tmp, exe, gf, exf, native, called={'_ZN4KidF3v00Ev'}, defined={'_ZN4KidF3v00Ev'})
+        finally:
+            del os.environ['FNVNX_D26F']
+        check('__fnv_00401000_D1' not in brf0.get('zzvtext__ZTV4KidF', ''), 'FNVNX_D26F=0 turns the family rule off')
         os.environ['FNVNX_D26T'] = '0'
         try:
             _, br0, _ = run(tmp, exe, g, exev, native, listed={V['B']})

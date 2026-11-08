@@ -1041,6 +1041,17 @@ at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus
   counted as `exe-order-no-evidence`. A caller in the exe's order for the same class (BSNiAllocator's InitHolder
   0x00aa2020 loads offset 28) disagrees with a shifted table: S1 converts it first or together.
 
+  **A family whose destructor is not exe slot 0** (V2, seams triage of link 5fd996a4; `family_dtor_pos`,
+  `FNVNX_D26F=0` turns it off). TESForm, the Actor / Projectile / TESActorBase family and their descendants have four
+  placeholder slots (exe 0..3: two nullsubs, 0x485340, 0x4853e0) before the deleting destructor at exe slot 4, so the
+  tables with a real pair (Actor, Character, PlayerCharacter, GrenadeProjectile) have D1/D0 at native 4/5 and exe slot k
+  at k + 1 after it. A pair-less table of the same exe prefix (Creature, MagicProjectile, TESActorBase, ...) stayed in
+  the exe's order (`d26-slot0-not-a-destructor`, or `d22-used` / `defined-slot0` from a nullsub name), so every
+  `Actor` caller's slot k + 1 reached the wrong slot (about 240 vcall sites, delta +1). The evidence is a table with a
+  pair at slot d whose exe slot d is a deleting destructor (`family_prefixes`: the exe slots before it are the family's
+  prefix); a pair-less table with that prefix and a deleting destructor at the same slot is rebuilt like W30's, with the
+  pair at d (`d26-family-dtor`). Not covered: multi-vtable groups (FlameProjectile, Character: `multi-vtable`).
+
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
 2,029 objects compiled (of 2,978 units; S1 census flags, `-O2`). 106,043 undefined (object, symbol) references:

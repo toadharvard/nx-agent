@@ -3581,6 +3581,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     c0.add(e_[2].sym)
         called = called_fn(c0)
         defined = defined_fn(c0) if defined_fn is not None else set()
+    fam = family_prefixes(want, by_obj, exev, exe_path) if exe_path else {}
     over = collections.defaultdict(dict)    # (z, kept path) -> {word index: target}
     for (path, z, i), t in (slot_over or {}).items():
         if rtti.where.get(z) and rtti.where[z][0].path == path:
@@ -3643,6 +3644,23 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         elif slots and len(pts) != 1 and d is None:
             exe_order.append((z, vs, 'multi-vtable', path))
             st['exe-order-multi-vtable'] += 1
+        # V2 (seams triage, link 5fd996a4): the Actor / Projectile / TESForm family has four placeholder slots before the
+        # deleting destructor (exe slot 4), so a pair-less table of it is minus-one from slot 4 (family_dtor_pos)
+        dp = 0
+        if slots and len(pts) == 1 and d is None and not m1 and fam and os.environ.get('FNVNX_D26F', '1') != '0' \
+                and os.environ.get('FNVNX_D26T', '1') != '0' and not is_com(z, [e.sym for e in ents[2:2 + n]]):
+            dp_ = family_dtor_pos(slots, fam)
+            pair1 = vmo_dtor_slots(slots[dp_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + dp_),
+                                   exe_path) if dp_ else None
+            if pair1:
+                m1, dp = 'd26-family-dtor', dp_
+                gone = [x for x in exe_order if x[0] == z]
+                for x in gone:
+                    st['exe-order-' + x[2]] -= 1
+                    if x[2] in EXE_ORDER_REASONS[:-1]:
+                        st['exe-order-no-evidence'] -= 1
+                        st['exe-order-no-evidence-BSNiAllocator'] -= 'BSNiAllocator' in z
+                exe_order[:] = [x for x in exe_order if x[0] != z]
         xs = {}   # word index -> exe slot word, for the symbols the unit leaves undefined (see the docstring)
         xt_ = (unbound or {}).get(u.source) or ()
         for k_ in range(n if slots and xt_ else 0):
@@ -3690,9 +3708,12 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                  '    .word 0x%x' % e.word for e, nmz in zip(ents, names)]
         extra = []
         if m1:
-            words = words[:2] + ['    .word %s' % w_ for w_ in pair1] + \
+            words = words[:2] + \
+                    ['    .word %s' % exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (z, 2 + k))
+                     for k, a in enumerate(slots[:dp])] + \
+                    ['    .word %s' % w_ for w_ in pair1] + \
                     ['    .word %s' % exe_slot_target(a, native, providers, exe_path, bridges, traps, st, (z, 3 + k))
-                     for k, a in enumerate(slots[1:], 1)]
+                     for k, a in enumerate(slots[dp + 1:], dp + 1)]
             extend, d0w, ov, shift = False, None, {}, None
             st['d26-minus-one'] += 1
             st['d26-minus-one-BSNiAllocator'] += 'BSNiAllocator' in z
@@ -3804,6 +3825,46 @@ def add_unit_shell_names(out, units_json, exe_path=None):
 
 
 VMO_SYM = '__fnvnx_vmo_%08x'   # D26 (c): minus-one native copy of an image vftable that stays at its image address
+
+
+def family_prefixes(want, by_obj, exev, exe_path):
+    """{exe slots before the destructor: its slot} of the tables that already have a D1/D0 pair at a slot past 0 whose
+    exe slot is a deleting destructor: the evidence that a family's placeholders come before its destructor (TESForm,
+    Actor, Projectile: exe slots 0..3 = nullsub, nullsub, ..., destructor at 4). Other tables of the same exe prefix
+    are minus-one from that slot (family_dtor_pos)."""
+    fam = {}
+    objs = {}
+    for (z, path), vs in want.items():
+        if path not in by_obj:
+            continue
+        try:
+            if path not in objs:
+                if len(objs) > 64:
+                    objs.clear()
+                objs[path] = vtables.Obj(path)
+            o = objs[path]
+            if z not in o.defs:
+                continue
+            ents = o.ents(z)
+            n = vtables.slots_at(ents, 8)
+            d = exevft.dtor_pos([e.sym for e in ents[2:2 + n]], [e.word for e in ents[2:2 + n]])
+        except (OSError, ValueError):
+            continue
+        if not d:
+            continue
+        for v in vs:
+            sl = exev[v].slots if v in exev else None
+            if sl is not None and len(sl) > d and exevft.deleting_dtor(exe_path, sl[d]):
+                fam[tuple(sl[:d])] = d
+    return fam
+
+
+def family_dtor_pos(slots, fam):
+    """The destructor slot (> 0) of a pair-less table whose exe slots before it are a family's placeholders, else None."""
+    for pre, d in fam.items():
+        if len(slots) > d and tuple(slots[:d]) == pre:
+            return d
+    return None
 
 
 def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None):
