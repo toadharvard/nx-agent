@@ -117,9 +117,11 @@ class SanitizeMixin:
         def tid():
             return self.cur.tid if self.cur is not None else 0
 
+        depth = max(1, int(__import__("os").environ.get("FNVNX_ALLOC_DEPTH", "3")))   # frames per record
+
         def stack(lr, fp):   # the call stack at the entry: lr, then the frame records at x29 (GCC keeps them)
             st = [lr & M32]
-            for _ in range(2):
+            for _ in range(depth - 1):
                 if not fp or fp & 7:
                     break
                 try:
