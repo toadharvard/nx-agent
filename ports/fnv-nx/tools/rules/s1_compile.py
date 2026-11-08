@@ -5814,6 +5814,23 @@ def _d22_list():
     prepare.__dict__['_fnvnx_d22'] = st
     return st
 
+def _d22_dtor_slots():
+    """{class simple name: k} - classes whose exe vftable holds the deleting destructor at slot k > 0 (slot 0 is a
+    trivial function: the TESForm family, k = 4, S2-bodies vtmetric 3f7a6c35). From the `dtor_slots` rows of every
+    d22.json (FNVNX_D22 / FNVNX_RECON; tools/rules/_d22_classes.py --dtor-slots). Cached on prepare."""
+    st = prepare.__dict__.get('_fnvnx_d22_slots')
+    if st is not None: return st
+    import json
+    st = {}
+    for f in _d22_files():
+        try: d = json.load(open(f))
+        except (OSError, ValueError): continue
+        if d.get('format') != 'fnvnx-d22/1': continue
+        for r in d.get('dtor_slots', ()):
+            if isinstance(r.get('slot'), int) and r['slot'] > 0: st[r['class'].split('::')[-1]] = r['slot']
+    prepare.__dict__['_fnvnx_d22_slots'] = st
+    return st
+
 def _d22_bases(bases):
     out = []
     for b in _split_bases(bases) if bases else ():
@@ -5862,15 +5879,16 @@ def _d22_com(masked, c):
         if v[2] in D22_COM_MEMBER or D22_COM_CONV.search(masked[v[0]:v[1]]): return True
     return False
 
-def _d22_callonly(masked, c, unit=True):
-    """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above)"""
+def _d22_callonly(masked, c, unit=True, named_ok=False):
+    """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above); named_ok: the
+    slot is known from the exe (D22-SLOTK), so its member's name is not tested"""
     if c['bases'] or not c['first'] or len(c['virtuals']) < 2: return False
     if c['dtor'] and not c.get('dtor_decl'): return False
     if c['dtor'] and re.search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~\s*%s\s*\(' % ((re.escape(c['qual'][-1]),) * 2),
                                masked):
         return False                                     # `~C();` defined in the file: a real destructor
     if not c['first'][2]: return False
-    if not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]):
+    if not named_ok and not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]):
         # a numbered sequence `P_00(), P_01(), ...` (InitHolder 0x00aa2020's FUN_00aa2020_Impl, S2-bodies)
         m0 = re.match(r'^(\w*?_)0+$', c['first'][2])
         v1 = c['virtuals'][1][2] or ''
@@ -5987,10 +6005,29 @@ def r_vtable_dtor_slot(path, text, stats):
             for m in calls[ph]: nc = nc[:m.start(2)] + ' ' * (m.end() - m.start(2)) + nc[m.end():]
             masked_nc[ph] = nc
         return calls[ph]
+    slots = _d22_dtor_slots()
     for c in classes:
         key = c['qual'][-1] + '<>' if c['template'] else '::'.join(c['qual'])
         if c['first'] and _d22_com(masked, c):
             if key in lst or (not c['bases'] and len(c['virtuals']) >= 2): stats['D22-COM'] += 1
+            continue
+        k = slots.get(c['qual'][-1])
+        if k and c['first'] and not c['bases']:
+            # D22-SLOTK: the exe's deleting destructor is at slot k (slot 0 a trivial function: the TESForm family,
+            # k = 4): the k-th virtual, not the first, becomes `virtual ~C()`; nothing at slot 0
+            if len(c['virtuals']) <= k or c['dtor']:
+                stats['D22-SLOTK-HELD'] += 1; continue
+            t = c['virtuals'][k]
+            ck = dict(c, first=t)
+            if not _d22_callonly(masked, ck, path.endswith(('.cpp', '.c', '.cxx', '.cc')), named_ok=True) or \
+                    any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
+                        for o in classes if o['bases']) or _d22_extern_use(path, t[2]) or \
+                    not d22_placeholder(masked, c['qual'][-1], t, vdecls[t[2]], reach(c['qual'][-1])):
+                stats['D22-SLOTK-HELD'] += 1; continue
+            edits.append((t[0], t[1], 'FNVNX_D22(%s, %s)' % (c['qual'][-1], t[3])))
+            applied[t[0]] = (key, t[2], 'slot%d' % k)
+            done[c['qual'][-1] + ('<>' if c['template'] else '')] = t[2]
+            stats['D22-SLOTK'] += 1
             continue
         callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc'))) and \
             not any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
@@ -6109,6 +6146,8 @@ POST.append(d22_write_applied)
 # - the enclosing class is not COM-shaped (D22-COM: a __stdcall / HRESULT virtual, QueryInterface / AddRef /
 #   Release, an SDK interface name; COM vtables have no destructor slot), as far as the file defines it;
 # - k > 0 (slot 0 is the deleting destructor: a call of it needs FNVNX_D22_CALL's form; counted RAWVT1-SLOT0);
+# - a class whose exe deleting destructor is at slot K > 0 (D22-SLOTK, the TESForm family) shifts only k > K
+#   (k < K: RAWVT1-BELOWK, k = K: RAWVT1-SLOT0);
 # - the class is not one whose table the link keeps in exe order (S2-bodies' exe_order_classes.tsv, read from
 #   FNVNX_EXE_ORDER or under FNVNX_RECON; RAWVT1-EXEORDER).
 RAWVT1_RX = re.compile(r'(\(\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*this\s*\)|'
@@ -6156,7 +6195,9 @@ def r_raw_vtable_slots(path, text, stats):
         if owner is None: stats['RAWVT1-FREE'] += 1; continue
         if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
             stats['RAWVT1-COM'] += 1; continue
-        if k == 0: stats['RAWVT1-SLOT0'] += 1; continue
+        K = _d22_dtor_slots().get(owner, 0)       # D22-SLOTK: the pair sits at K (TESForm family: 4)
+        if k == K: stats['RAWVT1-SLOT0'] += 1; continue
+        if k < K: stats['RAWVT1-BELOWK'] += 1; continue
         if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
         edits.append((m.start(2), m.end(2), 'FNVNX_D26_SLOT(%s)' % text[m.start(2):m.end(2)]))
     for a, b, rep in sorted(edits, reverse=True):

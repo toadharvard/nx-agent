@@ -82,6 +82,17 @@ def deleting(img, a, names, deletes):
     return ''
 
 
+def trivial(img, a):
+    """the function at a returns (ret / ret n) within 16 bytes before any call or jump: no destructor"""
+    b = img.code(a, 16)
+    for i, x in enumerate(b):
+        if x == 0xc3 or (x == 0xc2 and i + 2 < len(b)):
+            return True
+        if x in (0xe8, 0xe9, 0xeb, 0xff):
+            return False
+    return False
+
+
 def msvc_class(q):
     """`Inner@Outer@ns` -> 'ns::Outer::Inner'; a template `?$X@...` -> 'X<>'; None for other shapes"""
     if q.startswith('?$'):
@@ -188,6 +199,10 @@ def main():
                     help='also pair a class with the primary vftables the image\'s RTTI names it by (S1-rules: '
                          'stand-ins with a named slot 0 that carry the game\'s class name)')
     ap.add_argument('--only-new', help='an existing d22.json: write only classes it does not list')
+    ap.add_argument('--dtor-slots', action='store_true',
+                    help='write `dtor_slots` instead of classes: each RTTI class whose every primary vftable has a '
+                         'trivial slot 0 (a ret within 16 bytes, no call) and its deleting destructor at the same '
+                         'slot k > 0 (the TESForm family: k = 4)')
     a = ap.parse_args()
     img = Image(a.exe)
     units = json.load(open(os.path.join(a.decomp, 'build', 'units.json')))['units']
@@ -198,6 +213,22 @@ def main():
         for n, ad in u.get('symbols', {}).items():
             if DELETE_NAME.match(n):
                 deletes.add(int(ad, 16))
+    if a.dtor_slots:
+        rows, st = [], collections.Counter()
+        for c, vs in sorted(rtti_vftables(img).items()):
+            ks = set()
+            for v in vs:
+                s = [img.dword(v + 4 * i) for i in range(12)]
+                if not s[0] or not trivial(img, s[0]):
+                    ks.add(None); break
+                ks.add(next((i for i in range(1, 12) if s[i] and img.text(s[i]) and deleting(img, s[i], names, deletes)),
+                            None))
+            if len(ks) == 1 and None not in ks:
+                k = ks.pop(); st['k=%d' % k] += 1
+                rows.append({'class': c, 'slot': k, 'vftables': ['%08x' % v for v in sorted(vs)]})
+        json.dump({'format': 'fnvnx-d22/1', 'classes': [], 'dtor_slots': rows}, open(a.out, 'w'), indent=0)
+        print(dict(st))
+        return
     pair = pairings(units, a.addrmap)
     if a.rtti:
         for k, v in rtti_vftables(img).items():
