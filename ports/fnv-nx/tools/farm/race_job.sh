@@ -48,7 +48,7 @@ stage_ok "$TCB" toolchain || fail_report "toolchain stage failed ($TCB/make.log)
 art() { python3 -I -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.get("artifacts",{}).get(sys.argv[2]) or "")' \
 	"$TCB/toolchain/stage.json" "$1"; }
 ARGS=(FNVNX_TC="$(art prefix)" DEVKITPRO="$(art devkitpro)")
-[ -n "$(art cross_bin)" ] && ARGS+=(CROSS_BIN="$(art cross_bin)")
+XCB=$(usable_cross "$(art cross_bin)"); [ -n "$XCB" ] && ARGS+=(CROSS_BIN="$XCB")
 if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORBIS=none); fi
 export OBJ_PREFIX=cr
 job_inputs "$RB"
