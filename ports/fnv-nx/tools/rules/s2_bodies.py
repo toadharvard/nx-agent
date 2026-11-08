@@ -1109,3 +1109,189 @@ def pop_chains(out_root, stats, files=None):
 
 RULES = [r_stand_in_class_bodies, r_harness_internal, r_noinline_stand_ins]
 POST = [pop_chains]
+
+# ---------------------------------------------------------------------------------------------------------- THIS2
+#
+# THIS2 - a caller that hands its own ecx to a thiscall callee (S2-bodies, from EQ's fuzz rows `this-not-passed`).
+# The decomp declares the callee a free `__stdcall` function and the caller either a free `__stdcall` function too
+# (the Gamebryo GetViewerStrings overrides: `void __stdcall FUN_00c2b1b0(StrArr* pkStrings) { FUN_00c32f60(pkStrings);
+# ...`, a vtable slot that calls the base class's version first) or a member function. MSVC pushes the same words
+# for both conventions and the callee pops the same, so the x86 code is byte-identical; the callee reads `this` from
+# ecx, which still holds the caller's incoming ecx: the object. Natively the caller passes nothing in x0 for it.
+#
+# THIS2 makes the call a member call on the caller's object (S1b's XINC1 shapes A-C, decided here without patch
+# text):
+#   * free stdcall caller -> member of a shell `struct FUN_<caller>_this2 { <caller>; <callee>; };` declared on the
+#     definition's first line; the body's unqualified call then names the shell's member (`this` passed); the
+#     definition's units.json symbol becomes the member's (thiscall pops the same words);
+#   * member caller -> the call becomes `((FUN_<caller>_this2*)this)->callee(..)`.
+# The callee's new decorated reference name is added to the unit's units.json `symbols`, so the link compares it with
+# the definition (bridges for parameter types the decomp spelled differently, e.g. 0x00a57050's floats as ints).
+#
+# Gates: the site is in THIS2_SITES (x86 evidence below: the exe's caller code, read with capstone, writes no ecx and
+# calls nothing else between its entry and the call or tail jump to the callee); the unit's reference to the callee
+# is a free stdcall function whose definition is a non-static thiscall member popping the same stack words; the
+# body calls the callee once, unqualified; a free caller is `__stdcall` (a cdecl caller would change who pops); the
+# decorated names carry no name back-reference the inserted shell would shift. Line numbers stay.
+
+# caller -> callee. Evidence (FalloutNV.exe 1.4.0.525): every caller below starts `push esi; mov esi, [esp+8];
+# push edi; push esi; call <callee>` (the GetViewerStrings overrides: 0x00c2b1b0, 0x00c2b5d0, 0x00c2b920, 0x00bc31f0,
+# 0x00a44f40 ...), is `jmp <callee>` (0x00a6e540), or keeps ecx in esi before the call (0x00a497b0: `mov esi, ecx`).
+# The list is the `kept` rows of a scan of the this-not-passed rows with a free stdcall reference at link
+# 0540aff0d154 (36 of 79 calls; the others write ecx or call something first, and stay listed).
+THIS2_SITES = {
+    0x00a42f10: 0x00a576c0, 0x00a56b60: 0x00a576c0, 0x00a4d5a0: 0x00a57d10, 0x00a4d100: 0x00a576c0,
+    0x00a497b0: 0x00a57050, 0x00a46ac0: 0x00a576c0, 0x00a44f40: 0x00a57800, 0x00a6e540: 0x00a84c70,
+    0x00a99270: 0x00a9a730, 0x00c31210: 0x00c255b0, 0x00c30880: 0x00c32f60, 0x00c30740: 0x00c32f60,
+    0x00c2f490: 0x00c32f60, 0x00c2b920: 0x00c32f60, 0x00c2b820: 0x00c32f60, 0x00c2b6d0: 0x00c32f60,
+    0x00c2b5d0: 0x00c32f60, 0x00c2b4d0: 0x00c32f60, 0x00c2b3d0: 0x00c32f60, 0x00c2b2e0: 0x00c32f60,
+    0x00c2b1b0: 0x00c32f60, 0x00c2b0c0: 0x00c32f60, 0x00c2a260: 0x00c32f60, 0x00c29f00: 0x00c32f60,
+    0x00e14b30: 0x00e230f0, 0x00bc31f0: 0x00a576c0, 0x00bc3450: 0x00a576c0, 0x00bc3700: 0x00a576c0,
+    0x00e5c5b0: 0x00e5c540, 0x00e5c5d0: 0x00e5c540, 0x00e5c5f0: 0x00e5c540, 0x00e5c610: 0x00e5c540,
+    0x00e5c630: 0x00e5c540, 0x00e5c650: 0x00e5c540, 0x00e5c670: 0x00e5c540, 0x00e5c690: 0x00e5c540,
+}
+THIS2_NOTE = '/* fnv-nx THIS2: the caller passes its ecx */ '
+
+
+def _this2_member_name(name, fn, shell):
+    """The decorated name of free function `name` (parsed fn) as a thiscall member of `shell`, or None."""
+    if fn is None or fn.member or fn.cc != 'stdcall' or fn.name_refs or fn.scopes:
+        return None
+    return '?%s@%s@@QAE%s' % (fn.ident, shell, name[fn.head_end:])
+
+
+def _this2_site(text, caller, callee, u, words, why):
+    """-> (edits, (old def symbol, new def symbol) or None, [(new reference name, address)]) or None."""
+    pg = _pop_popgen()
+    shell = 'FUN_%08x_this2' % caller
+    dsym = [f['symbol'] for f in u.get('functions') or () if int(f['address'], 16) == caller]
+    refs = [(n, _msvcsig.parse(n)) for n, a in (u.get('symbols') or {}).items() if int(a, 16) == callee]
+    refs = [(n, f) for n, f in refs if f is not None and not f.member and f.cc == 'stdcall']
+    if len(dsym) != 1 or len(refs) != 1:
+        why['no single definition / free stdcall reference'] += 1
+        return None
+    rname, rf = refs[0]
+    if words.get(callee) is None or words[callee] != _msvcsig.stack_words(rf):
+        why['callee words differ'] += 1
+        return None
+    df = _msvcsig.parse(dsym[0])
+    if df is None:
+        why['definition name unparsed'] += 1
+        return None
+    tags = [m for m in s1_compile.FNV_TAG_ADDR.finditer(text) if int(m.group(1), 16) == caller]
+    if len(tags) != 1:
+        why['no single tag'] += 1
+        return None
+    masked = s1_compile._mask_code(text)
+    o = masked.find('{', tags[0].end())
+    hs = masked.find('\n', tags[0].end()) + 1
+    while 0 < hs < o and (not masked[hs:masked.find('\n', hs)].strip() or masked[hs:].lstrip().startswith('#')):
+        hs = masked.find('\n', hs) + 1                  # the head's first line: past comments and preprocessor lines
+    if not 0 < hs < o:
+        why['no definition head'] += 1
+        return None
+    head = text[hs:o]
+    c = prepare.match_brace(masked, o)
+    body = masked[o:c]
+    calls = list(re.finditer(r'(?<![\w~.>:])%s\s*\(' % re.escape(rf.ident), body))
+    if len(calls) != 1:
+        why['callee called %d times' % len(calls)] += 1
+        return None
+    proto = None
+    for m in re.finditer(r'(?:^|[;{}])\s*((?:extern\s+)?[^;{}()=]*?)\b(?:__stdcall\s+)%s\s*\(' % re.escape(rf.ident),
+                         masked[:hs]):
+        p = m.end() - 1
+        q = pg.match_paren(masked, p)
+        if q is not None and masked[q:q + 40].lstrip().startswith(';'):
+            proto = (re.sub(r'\bextern\b', '', text[m.start(1):m.end(1)]).strip(), text[p + 1:q - 1])
+    if proto is None or not proto[0]:
+        why['no __stdcall prototype of the callee'] += 1
+        return None
+    cdecl = '%s %s(%s);' % (proto[0], rf.ident, proto[1])
+    newref = _this2_member_name(rname, rf, shell)
+    if newref is None:
+        why['reference name not re-encodable'] += 1
+        return None
+    edits = []
+    if not df.member:
+        mh = re.match(r'(\s*)(.*?)\b(?:__stdcall\s+)%s\s*\((.*)\)\s*$' % re.escape(df.ident), head, re.S)
+        if mh is None or df.cc != 'stdcall' or re.search(r'\b(?:static|inline|template)\b', mh.group(2)):
+            why['caller head not a free __stdcall definition'] += 1
+            return None
+        newdef = _this2_member_name(dsym[0], df, shell)
+        if newdef is None:
+            why['definition name not re-encodable'] += 1
+            return None
+        ret = re.sub(r'\b(?:FNVNX_KEEP|__declspec\s*\(\s*\w+\s*\))\s*', '', mh.group(2)).strip()
+        struct = 'struct %s { %s %s(%s); %s }; ' % (shell, ret, df.ident, mh.group(3), cdecl)
+        edits.append((hs, o, mh.group(1) + THIS2_NOTE + struct + '%s%s::%s(%s)' % (
+            mh.group(2), shell, df.ident, mh.group(3)) + head[len(head.rstrip()):]))
+        return edits, (dsym[0], newdef), [(newref, '0x%08x' % callee)]
+    if df.static:
+        why['static member caller'] += 1
+        return None
+    edits.append((hs, hs, THIS2_NOTE + 'struct %s { %s }; ' % (shell, cdecl)))
+    a = o + calls[0].start()
+    edits.append((a, a, '((%s*)this)->' % shell))
+    return edits, None, [(newref, '0x%08x' % callee)]
+
+
+def this_members(out_root, stats, files=None):
+    """THIS2: a caller that hands its own ecx to a thiscall callee the decomp declares free: the call becomes a member
+    call on the caller's object (see above). A POST hook, like POP2."""
+    import json
+    p = os.path.join(out_root, 'build', 'units.json')
+    if not os.path.exists(p):
+        return
+    with open(p) as f:
+        data = json.load(f)
+    words = _pop_def_words(data['units'])
+    by_addr = {}
+    for u in data['units']:
+        for f in u.get('functions') or ():
+            by_addr.setdefault(int(f['address'], 16), u)
+    edits, why, changed = collections.defaultdict(list), collections.Counter(), False
+    for caller, callee in sorted(THIS2_SITES.items()):
+        u = by_addr.get(caller)
+        fp = os.path.join(out_root, u['source']) if u else None
+        if fp is None or not os.path.exists(fp):
+            why['caller not in the tree'] += 1
+            continue
+        with open(fp, encoding='utf-8', errors='surrogateescape') as f:
+            text = f.read()
+        got = _this2_site(text, caller, callee, u, words, why)
+        if got is None:
+            continue
+        ed, ren, refs = got
+        # one file at a time: every site's edits are positions in the file as prepare wrote it
+        edits[fp] += ed
+        if ren:
+            for f in u['functions']:
+                if int(f['address'], 16) == caller and f['symbol'] == ren[0]:
+                    f['symbol'] = ren[1]
+                    stats['THIS2-DEF'] += 1
+        for name, a in refs:
+            if name not in u['symbols']:
+                u['symbols'][name] = a
+                stats['THIS2-REF'] += 1
+        stats['THIS2'] += 1
+        changed = True
+    for fp, ed in sorted(edits.items()):
+        with open(fp, encoding='utf-8', errors='surrogateescape') as f:
+            text = f.read()
+        out, at = [], 0
+        for a, b, r in sorted(ed, key=lambda x: (x[0], x[1])):
+            out.append(text[at:a]); out.append(r); at = b
+        out.append(text[at:])
+        with open(fp, 'w', encoding='utf-8', errors='surrogateescape') as f:
+            f.write(''.join(out))
+        if files is not None:
+            files['THIS2'] += 1
+    if changed:
+        with open(p, 'w') as f:
+            json.dump(data, f)
+    for k, v in sorted(why.items()):
+        stats['THIS2-SKIP-' + re.sub(r'\W+', '-', k).strip('-')] += v
+
+
+POST.append(this_members)
