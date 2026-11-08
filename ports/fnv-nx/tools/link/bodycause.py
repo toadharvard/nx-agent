@@ -119,9 +119,14 @@ def inst_key_of(sig):
     return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]))
 
 
+UNIT_STD = re.compile(r'^fnv_[0-9a-f]{8}::(?:std|stdext)::')
+
+
 def is_crt(sig, dem):
     if CRT_SCOPE.match(dem):
-        return 'std scope'
+        # a unit's own copy of a std class (`fnv_<a>::std::basic_string`) is decomp-declared: classify() weighs it
+        # by the checks below first and keeps this class for the copies nothing in the tree or the objects defines
+        return None if UNIT_STD.match(dem) else 'std scope'
     if sig is not None and sig.qual:
         last = sig.qual[-1]
         if CRT_MEMBER.match(last):
@@ -279,6 +284,8 @@ def classify(rows, objidx, tbodies, units):
                 else:
                     detail = 'in a class copy or overload the referencing unit does not emit'
                 cause, ev = 'not-compiled', ' '.join(sorted({'%s(%s)' % h for h in hits})[:3])
+        if cause is None and UNIT_STD.match(dem):
+            cause, detail = 'crt-import', 'std scope (unit copy, no body in the tree)'
         if cause is None:
             cause = 'no-body'
             if 'template or unnamed' in note:
