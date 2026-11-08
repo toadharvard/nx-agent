@@ -415,20 +415,15 @@ extern "C" void fnvnx_ios_base_dtor(void *self)
     }
 }
 
-/* basic_ostream<char>::basic_ostream(basic_streambuf *sb, bool isstd) with MSVC's hidden "construct the virtual
- * base" flag: the library's standard ostream object in the image (only constructed and destroyed by the game, never
- * written to). Builds the MSVC layout so that the game's destructor (vbptr lookup, _Ios_base_dtor) works; the
- * ios_base / basic_ios vptrs stay NULL - there is no native vftable for them. */
-extern "C" void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase)
+/* basic_ios<char>::init(basic_streambuf *sb, bool isstd): ios_base::_Init (every field but the vptr, which the
+ * caller's constructor has set) with a new locale of the global locimp, then the stream buffer, no tie, fill ' ',
+ * badbit without a buffer, and _Addstd for a standard stream. For the decomp's unit copies of basic_istream (S4 STL2,
+ * tools/rules/s4_stl.py), whose ios_base has MSVC's layout. */
+extern "C" void fnvnx_basic_ios_init(void *self, void *strbuf, int isstd)
 {
-    static const int32_t vbtable[2] = { 0, (int32_t)offsetof(ostream, ios) };
-    ostream *o = (ostream *)self;
-    if (construct_vbase)
-        o->vbptr = vbtable;
-    basic_ios *io = &o->ios;
+    basic_ios *io = (basic_ios *)self;
     ios_base *b = &io->base;
     /* ios_base::_Init */
-    b->vptr = nullptr;
     b->_Ploc = nullptr;
     b->_Stdstr = 0;
     b->_Except = 0;
@@ -449,6 +444,20 @@ extern "C" void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int con
         b->_Mystate |= 4; /* badbit */
     if (isstd)
         fnvnx_ios_base_addstd(b);
+}
+
+/* basic_ostream<char>::basic_ostream(basic_streambuf *sb, bool isstd) with MSVC's hidden "construct the virtual
+ * base" flag: the library's standard ostream object in the image (only constructed and destroyed by the game, never
+ * written to). Builds the MSVC layout so that the game's destructor (vbptr lookup, _Ios_base_dtor) works; the
+ * ios_base / basic_ios vptrs stay NULL - there is no native vftable for them. */
+extern "C" void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase)
+{
+    static const int32_t vbtable[2] = { 0, (int32_t)offsetof(ostream, ios) };
+    ostream *o = (ostream *)self;
+    if (construct_vbase)
+        o->vbptr = vbtable;
+    o->ios.base.vptr = nullptr;
+    fnvnx_basic_ios_init(&o->ios, strbuf, isstd);
     return self;
 }
 

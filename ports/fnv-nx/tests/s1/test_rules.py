@@ -1986,5 +1986,32 @@ s1.r_placeholder_slots('/nonexistent/src/x.cpp', _ph, _st)
 check('PHSLOT1 stats', str(_st['PHSLOT1']), ['2'])
 check('PHSLOT1 idempotent', run(s1.r_placeholder_slots, _ph_out), [_ph_out])
 
+# ---- VFTBL1: a table the decomp defines for a name bound to an exe vftable becomes a declaration
+_VP = os.path.normpath(os.path.abspath('/nonexistent/src/x.cpp'))
+_saved_v = s1._VFT_NAMES
+_vt = ('struct VTable { void* entries[4]; };\nvoid __cdecl AgentRelease(void*);\nnamespace fnv_00d2eae0 {\n'
+       'static const VTable g_vtblAgent = {\n    {(void*)&AgentRelease, (void*)&AgentRelease, 0, 0}};\n'
+       'static const VTable g_vtblBase = {{(void*)&AgentRelease}};\nstatic const VTable g_vtblPlain = {{0}};\n'
+       'void f(void** o) { *o = (void*)&g_vtblAgent; *o = (void*)&g_vtblBase; *o = (void*)g_vtblPlain.entries[1]; }\n}\n'
+       'static const VTable g_vtblGlobal = {{(void*)&AgentRelease}};\nvoid g(void** o) { *o = (void*)&g_vtblGlobal; }\n')
+s1._VFT_NAMES = {_VP: {'g_vtblAgent': True, 'g_vtblBase': False, 'g_vtblPlain': True, 'g_vtblGlobal': False}}
+_vo = run(s1.r_vftable_standins, _vt)
+check('VFTBL1 a namespace table bound by its C name becomes an extern "C" declaration', _vo,
+      ['extern "C" { extern const VTable g_vtblAgent; }'], ['g_vtblAgent = {'])
+check('VFTBL1 a namespace table not bound by its plain name stays', _vo, ['static const VTable g_vtblBase = {{('])
+check('VFTBL1 a table read through entries[k] stays (x86 slot k is native slot k+1)', _vo,
+      ['static const VTable g_vtblPlain = {{0}};'])
+check('VFTBL1 a global table becomes a plain declaration', _vo, ['extern const VTable g_vtblGlobal;'],
+      ['g_vtblGlobal = {'])
+check('VFTBL1 idempotent', run(s1.r_vftable_standins, _vo), [_vo])
+_st = Counter()
+s1.r_vftable_standins('/nonexistent/src/x.cpp', _vt, _st)
+check('VFTBL1 stats', str(_st['VFTBL1']), ['2'])
+s1._VFT_NAMES = {}
+check('VFTBL1 a name no unit binds to an exe vftable stays', run(s1.r_vftable_standins, _vt), [_vt])
+s1._VFT_NAMES = _saved_v
+check('VFTBL1 the committed list has the exe vftables 0x010ce838 and 0x0102e388',
+      str({0x010ce838, 0x0102e388} <= s1._exe_vftable_addrs()), ['True'])
+
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

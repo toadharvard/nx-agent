@@ -100,11 +100,6 @@ WEAK int __isoc23_sscanf(const char *s, const char *fmt, ...)
 }
 WEAK long __isoc23_strtol(const char *s, char **end, int base) { return strtol(s, end, base); }
 WEAK unsigned long __isoc23_strtoul(const char *s, char **end, int base) { return strtoul(s, end, base); }
-/* glibc's errno accessor (units compiled against glibc headers, S9): newlib's errno of this thread. Not on a glibc
- * host (tests/s4): there errno itself is (*__errno_location()), so this one would call itself. */
-#if !defined(__GLIBC__)
-WEAK int *__errno_location(void) { return &errno; }
-#endif
 
 /* glibc's errno accessor: `errno` expands to (*__errno_location()) in the headers the stand-in compiler (S9) used for
  * the units that read errno (IdvFileError); newlib's errno is (*__errno()), the same thread's int. Only where newlib
@@ -125,6 +120,8 @@ WEAK void FreeBlockImp(void *p)
 /* R6 recon6-007: the CRT provider by address (thiscall: this in x0; the constructor returns this) */
 WEAK void __fnv_00ec330b(void *self) { fnvnx_lockit_dtor(self); }
 WEAK void *__fnv_00ec78e0(void *self) { return fnvnx_exception_ctor(self); }
+/* R2 (3f7a rank 94): exception(const char* const&) by address; the link names provider addresses __fnv_<addr> */
+WEAK void *__fnv_00ec78f1(void *self, const char *const *what) { return fnvnx_exception_ctor_str(self, what); }
 WEAK void __fnv_00ec79a1(void *self) { fnvnx_exception_dtor(self); }
 /* R2 recon2-015: exception::what() const (vftable slot 1 of std::exception; units with their own exception copy
    reference it, no unit places it) */

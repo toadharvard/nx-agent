@@ -7,12 +7,20 @@
 
 extern "C" BOOL QueryPerformanceCounter(LARGE_INTEGER *c)
 {
+    if (!c) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
     c->QuadPart = (LONGLONG)os_ticks();
     return TRUE;
 }
 
 extern "C" BOOL QueryPerformanceFrequency(LARGE_INTEGER *f)
 {
+    if (!f) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
     f->QuadPart = (LONGLONG)os_tick_freq();
     return TRUE;
 }
@@ -47,6 +55,13 @@ static void civil_from_days(int64_t z, int *y, unsigned *m, unsigned *d)
     *d = doy - (153 * mp + 2) / 5 + 1;
     *m = mp < 10 ? mp + 3 : mp - 9;
     *y = (int)(yy + (*m <= 2));
+}
+
+static int days_in_month(int64_t y, unsigned m)
+{
+    static const unsigned char n[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    return n[m - 1] + (m == 2 && leap);
 }
 
 static const int64_t FT_UNIX_EPOCH = 116444736000000000ll; /* 1970-01-01 in FILETIME units */
@@ -84,8 +99,9 @@ extern "C" BOOL FileTimeToSystemTime(const FILETIME *ft, LPSYSTEMTIME st)
 
 extern "C" BOOL SystemTimeToFileTime(const SYSTEMTIME *st, LPFILETIME ft)
 {
-    if (st->wMonth < 1 || st->wMonth > 12 || st->wDay < 1 || st->wDay > 31 || st->wHour > 23 ||
-        st->wMinute > 59 || st->wSecond > 59 || st->wMilliseconds > 999 || st->wYear < 1601) {
+    if (st->wMonth < 1 || st->wMonth > 12 || st->wDay < 1 || st->wHour > 23 ||
+        st->wMinute > 59 || st->wSecond > 59 || st->wMilliseconds > 999 || st->wYear < 1601 || st->wYear > 30827 ||
+        st->wDay > days_in_month(st->wYear, st->wMonth)) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
@@ -110,14 +126,46 @@ extern "C" BOOL FileTimeToLocalFileTime(const FILETIME *in, LPFILETIME out)
     return TRUE;
 }
 
+/* a TIME_ZONE_INFORMATION transition date as local seconds since 1970 in `year`: wYear != 0 is an absolute date,
+ * else wDay 1..5 is the n-th (5 = last) wDayOfWeek of wMonth */
+static int64_t tz_transition(int64_t year, const SYSTEMTIME *r)
+{
+    int day = r->wDay;
+    if (!r->wYear) {
+        int64_t d1 = days_from_civil(year, r->wMonth, 1);
+        int dow1 = (int)((d1 % 7 + 7 + 4) % 7);
+        day = 1 + (r->wDayOfWeek - dow1 + 7) % 7 + (day - 1) * 7;
+        while (day > days_in_month(year, r->wMonth))
+            day -= 7;
+    }
+    return days_from_civil(year, r->wMonth, (unsigned)day) * 86400 + r->wHour * 3600 + r->wMinute * 60 + r->wSecond;
+}
+
 extern "C" BOOL SystemTimeToTzSpecificLocalTime(LPTIME_ZONE_INFORMATION tz, const SYSTEMTIME *utc, LPSYSTEMTIME local)
 {
-    /* tz == NULL means the current zone; a specific zone is not supported (the game passes NULL) */
-    W32_UNUSED(tz);
     FILETIME ft;
-    if (!SystemTimeToFileTime(utc, &ft))
+    if (!utc || !local || !SystemTimeToFileTime(utc, &ft))
         return FALSE;
-    ft_to_st(w32_ft64(&ft) + (ULONGLONG)((int64_t)os_tz_offset_minutes() * 600000000ll), local);
+    int64_t off_min;   /* minutes to add to UTC */
+    if (!tz) {
+        off_min = os_tz_offset_minutes();   /* the current zone, as GetLocalTime applies it */
+    } else {
+        int64_t usecs = ((int64_t)w32_ft64(&ft) - FT_UNIX_EPOCH) / 10000000;
+        int64_t std_local = usecs - (int64_t)tz->Bias * 60;
+        off_min = -((int64_t)tz->Bias + tz->StandardBias);
+        if (tz->StandardDate.wMonth && tz->DaylightDate.wMonth) {
+            int y;
+            unsigned m, d;
+            civil_from_days(std_local >= 0 ? std_local / 86400 : -((-std_local + 86399) / 86400), &y, &m, &d);
+            int64_t begin = tz_transition(y, &tz->DaylightDate);  /* standard wall time */
+            int64_t end = tz_transition(y, &tz->StandardDate);    /* daylight wall time */
+            int64_t dst_local = usecs - ((int64_t)tz->Bias + tz->DaylightBias) * 60;
+            bool dst = begin < end ? (std_local >= begin && dst_local < end) : (std_local >= begin || dst_local < end);
+            if (dst)
+                off_min = -((int64_t)tz->Bias + tz->DaylightBias);
+        }
+    }
+    ft_to_st((ULONGLONG)((int64_t)w32_ft64(&ft) + off_min * 600000000ll), local);
     return TRUE;
 }
 

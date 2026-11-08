@@ -66,12 +66,14 @@ struct w32_obj *w32_obj_new(int type, size_t size, void (*destroy)(struct w32_ob
  * NULL, INVALID_HANDLE_VALUE or a pseudo handle. */
 HANDLE w32_handle_open(struct w32_obj *o);         /* the handle takes over one reference; NULL if full */
 struct w32_obj *w32_obj_get(HANDLE h, int type);   /* type 0: any; NULL + ERROR_INVALID_HANDLE if bad */
+struct w32_obj *w32_obj_get_ref(HANDLE h, int type); /* as w32_obj_get, plus a reference the caller drops */
 BOOL w32_handle_close(HANDLE h, int type);         /* type 0: any */
 void w32_obj_ref(struct w32_obj *o);
 void w32_obj_unref(struct w32_obj *o);
 /* object wait support (sync.cpp): global lock around all waitable state */
 extern os_lock_t w32_wait_lock;
 void w32_obj_signal_locked(struct w32_obj *o);     /* wake waiters of o; caller holds w32_wait_lock */
+void w32_mutexes_abandon_locked(DWORD tid);        /* a thread ended: its mutexes become abandoned */
 
 /* ---- threads (thread.cpp) */
 #define W32_PSEUDO_THREAD ((HANDLE)(LONG_PTR)-2)

@@ -59,7 +59,12 @@ def stub_boot(bd, clean):
     if stop is None:
         st = bs.get('stop') or {}
         stop = ' / '.join([st.get('reason') or 'no STOPPED line'] + (st.get('messages') or [])[:3])
-    L = ['', 'Stub-fault boot (tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18):', '',
+    try:   # full_job.sh 4b: FNVNX_STUB_NULLDEV of this boot (S5 a3b368ed: CreateDevice on the null device)
+        nd = open(os.path.join(bd, 'boot', 'stub', 'nulldev')).read().strip()
+    except OSError:
+        nd = ''
+    ndl = {'1': '; null device: FNVNX_STUB_NULLDEV=1', '0': '; null device: off'}.get(nd, '')
+    L = ['', 'Stub-fault boot (tests/s5/known_faults.txt, docs/TOOLCHAIN.md section 18%s):' % ndl, '',
          '- WinMain entered: %s; initializers skipped after a fault: %s' % ('yes' if winmain else 'NO', fmt(skips)),
          '- stop: %s' % clean(stop)]
     if bs.get('milestones'):

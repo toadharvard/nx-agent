@@ -38,19 +38,24 @@
 #                   farm boots it)
 #   PY              the Python with unicorn (default python3)
 #   VORBIS          the libvorbis prefix for build.sh; JOBS, SSE2NEON, DEVKITPRO passed to build.sh
-#   FARM_NATIVE_RENDER  a dir with tests/s5/native_render_inject.sh's outputs (nxrender_inject.o, libnxgl.so): every
+#   FARM_NATIVE_RENDER  1: build those inputs here (cached in $FARM_HOME/native_render-<key>; needs root for the
+#                   cross compiler on first use), or a dir with tests/s5/native_render_inject.sh's outputs (nxrender_inject.o, libnxgl.so): every
 #                   boot runs on the native renderer's engine path (tests/s5/native_render.py --native-render --gpu,
 #                   the stand-in for a LINK_OVERRIDES=render link), its frames as PNG in <out dir>/frames_<boot>/
 #   FARM_GAME       a game install (FalloutNV.exe, Data/, Fallout_default.ini), mounted in place at the guest's
 #                   sdmc:/switch/fnv (emu_guest.py --game, tests/s5/datapath.py); its FalloutNV.exe is the default image.
 #                   Without it the image alone is copied to sdmc:/switch/fnv. Never inside the repository.
+#   FNVNX_STUB_NULLDEV  1: the stub boot passes --stub-nulldev (CreateDevice succeeds headless without a GPU backend;
+#                   toolchain/game/native_device.cpp); a measurement mode for stub boots, never the product
 #   EMU_EXTRA       extra emu_guest.py arguments for every boot (word-split; e.g. --trace-fn ... --trace-out ...)
 #   EMU_PY          the emulator script (default tests/s5/emu_guest.py; S18: tools/scenario/emu_scenario.py, a wrapper
 #                   that takes the same arguments plus its own --scenario ...)
 #   FARM_PROFILE    a profile dir (Documents/..., AppData/...; tools/lockstep/profile.py) copied to the guest's
 #                   sdmc:/switch/fnv/user before each boot, so the first-run profile is not made (lockstep: same inputs)
 #   FARM_FAULTS     the stub boot's fault table (default tests/s5/known_faults.txt)
-#   EMU_TIMEOUT     seconds per boot (default 1200); BUDGET instructions per thread slice (default 200000000, as
+#   EMU_TIMEOUT     seconds per boot (default 1200); SLICE_MS wall-clock ms per thread slice (default 2000);
+#                   BUDGET instructions per slice (default 0: none - an instruction count makes unicorn hook every
+#                   instruction, about 10x slower; before: default 200000000, as
 #                   S5's local boots: the timeout's SIGTERM waits for the running unicorn slice, and with 6e9 a boot
 #                   ran 22 min past its timeout)
 # Runtime: under a minute per boot; the local guest link (f13) about 1.5 minutes. Inside D17's ten minutes.
@@ -71,7 +76,8 @@ fi
 ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
 C12=${COMMIT:0:12}
 BOOTS=${FARM_BOOTS:-raw slots stub}
-EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-200000000}
+EMU_TIMEOUT=${EMU_TIMEOUT:-1200}; BUDGET=${BUDGET:-0}; SLICE_MS=${SLICE_MS:-2000}
+NULLDEV_ARGS=(); [ "${FNVNX_STUB_NULLDEV:-0}" = 1 ] && NULLDEV_ARGS=(--stub-nulldev)
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 # The real install by default (orchestrator: every farm boots on the real Data/): when no FARM_GAME is given and the
@@ -188,6 +194,22 @@ if [ -n "$IMAGE" ] && [ -z "$GAME" ]; then   # with FARM_GAME the install's own 
   done
 fi
 EMU=("${EMU_PY:-$HERE/emu_guest.py}"); NR=${FARM_NATIVE_RENDER:-}
+if [ "$NR" = 1 ]; then
+  # build the native renderer's inputs here (tests/s5/native_render_inject.sh: the ILP32 object and the headless GL
+  # backend libnxgl.so, EGL surfaceless on Mesa), cached by the hash of their sources; under a minute when it builds
+  local_key=$( { cat "$HERE/native_render_inject.sh" "$HERE/menu_standins.c" "$ROOT/toolchain/game/native_device.cpp" \
+    "$ROOT/toolchain/game/null_d3d9.cpp" "$ROOT/tests/s6n/Makefile"; find "$ROOT/render/native" -type f \( -name '*.c' -o \
+    -name '*.cpp' -o -name '*.h' -o -name '*.glsl' -o -name '*.py' -o -name '*.sh' \) | sort | xargs cat; } 2>/dev/null | sha256sum | cut -c1-16)
+  NR=$FARM_HOME/native_render-$local_key
+  if [ ! -f "$NR/nxrender_inject.o" ] || [ ! -f "$NR/libnxgl.so" ]; then
+    command -v aarch64-linux-gnu-g++ >/dev/null || { [ "$(id -u)" = 0 ] && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+      g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libegl-dev >/dev/null 2>&1; }
+    [ -d "${SSE2NEON:-$ROOT/ext/sse2neon}" ] || bash "$ROOT/tools/fetch.sh" >/dev/null 2>&1 || true
+    log "native renderer inputs -> $NR"
+    bash "$HERE/native_render_inject.sh" "$NR" > "$OUT/native_render_inject.log" 2>&1 \
+      || { log "FARM_NATIVE_RENDER=1: native_render_inject.sh failed (log $OUT/native_render_inject.log)"; exit 1; }
+  fi
+fi
 [ -n "$NR" ] && EMU=("$HERE/native_render.py" --native-render "$NR/nxrender_inject.o" --gpu "$NR/libnxgl.so")
 boot() {   # boot <tag> [extra emu_guest.py args]
   local tag=$1; shift
@@ -200,7 +222,7 @@ boot() {   # boot <tag> [extra emu_guest.py args]
     mkdir -p "$root/switch/fnv/user" && cp -a "$FARM_PROFILE"/. "$root/switch/fnv/user/"
   fi
   timeout "$EMU_TIMEOUT" nice "$PY" -I "${EMU[@]}" "$GDIR/guest.nso" --elf "$GDIR/fnvnx.elf" "${NR_ARGS[@]}" \
-    --skip-faulting-init --root "$root" --budget "$BUDGET" "${IMGARG[@]}" "${GAMEFILES[@]}" \
+    --skip-faulting-init --root "$root" --budget "$BUDGET" --slice-ms "$SLICE_MS" "${IMGARG[@]}" "${GAMEFILES[@]}" \
     ${ADDRMAP:+--addrmap "$ADDRMAP"} --summary-json "$OUT/boot_summary_$tag.json" "$@" ${EMU_EXTRA:-} \
     > "$OUT/emu_$tag.log" 2>&1 || rc=$?
   rm -rf "$root"
@@ -216,7 +238,8 @@ for tag in $BOOTS; do
   case "$tag" in
     raw) boot raw ;;
     slots) boot slots --exe-vtables "${INJECT[@]}" ;;
-    stub) boot stub --stub-faults "${FARM_FAULTS:-$HERE/known_faults.txt}" "${INJECT[@]}" ;;
+    stub) boot stub --stub-faults "${FARM_FAULTS:-$HERE/known_faults.txt}" "${INJECT[@]}" \
+            "${NULLDEV_ARGS[@]}" ;;
     *) echo "farm_boot: unknown boot '$tag' (FARM_BOOTS: raw slots stub)" >&2; exit 1 ;;
   esac
 done

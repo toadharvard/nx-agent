@@ -28,10 +28,19 @@
 #include <stdlib.h>
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
 
+/* The lookup index of a parsed file (built once per parse or write, not per call: the engine reads its settings one
+ * key at a time, thousands of calls against files of ~1,500 lines, and a scan of every line per call cost minutes of
+ * emulation in the boot's INI phase). Names are ASCII-folded, as w32_stricmp compares; the first section of a name
+ * and the first key of a name in it win, as the scans did. */
+struct IniSection {
+    size_t first, end;                                    /* [header line, next header) */
+    std::unordered_map<std::string, std::string> values;  /* folded key -> value (trimmed, one pair of quotes off) */
+};
 struct IniFile {
     std::string host;
     std::vector<std::string> lines;
@@ -39,6 +48,8 @@ struct IniFile {
     bool exists = false;
     uint64_t size = 0;
     int64_t mtime = 0;
+    bool indexed = false;                                 /* index matches lines */
+    std::unordered_map<std::string, IniSection> index;    /* folded section name -> section */
 };
 
 os_lock_t g_ini_lock;
@@ -58,6 +69,15 @@ std::string trim(const std::string &s)
     while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\r'))
         e--;
     return s.substr(b, e - b);
+}
+
+std::string fold(const char *s)
+{
+    std::string r(s);
+    for (char &c : r)
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+    return r;
 }
 
 bool ieq(const std::string &a, const char *b) { return w32_stricmp(a.c_str(), b) == 0; }
@@ -93,6 +113,7 @@ bool load(IniFile *f)
 {
     os_stat_t st;
     if (os_stat(f->host.c_str(), &st) != 0 || st.is_dir) {
+        f->indexed = false;
         f->lines.clear();
         f->exists = false;
         f->size = 0;
@@ -102,6 +123,7 @@ bool load(IniFile *f)
     if (f->exists && st.size == f->size && st.mtime_us == f->mtime)
         return true;
     f->lines.clear();
+    f->indexed = false;
     f->exists = true;
     f->size = st.size;
     f->mtime = st.mtime_us;
@@ -156,11 +178,27 @@ bool save(IniFile *f)
 }
 
 /* cached file for a profile name; NULL + last error on a bad name. Caller holds g_ini_lock. */
+std::unordered_map<std::string, IniFile *> &ini_names()
+{
+    static std::unordered_map<std::string, IniFile *> &m = *new std::unordered_map<std::string, IniFile *>;
+    return m;
+}
+
 IniFile *open_ini(const char *name)
 {
     if (!name || !*name) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
+    }
+    /* a name that does not depend on the current directory (a drive, or no directory: C:\Windows) maps to the same
+     * host path every time: skip the path mapping on later calls */
+    bool fixed = strchr(name, ':') || (!strchr(name, '\\') && !strchr(name, '/'));
+    if (fixed) {
+        auto it = ini_names().find(name);
+        if (it != ini_names().end()) {
+            load(it->second);
+            return it->second;
+        }
     }
     std::string win = name;
     if (win.find('\\') == std::string::npos && win.find('/') == std::string::npos && win.find(':') == std::string::npos)
@@ -174,28 +212,58 @@ IniFile *open_ini(const char *name)
     for (IniFile *f : ini_cache())
         if (f->host == host) {
             load(f);
+            if (fixed)
+                ini_names()[name] = f;
             return f;
         }
     IniFile *f = new IniFile;
     f->host = host;
     load(f);
     ini_cache().push_back(f);
+    if (fixed)
+        ini_names()[name] = f;
     return f;
 }
 
-/* [first, end) line range of the first section called sec (first = header line), or false */
-bool find_section(const IniFile *f, const char *sec, size_t &first, size_t &end)
+void build_index(IniFile *f)
 {
-    std::string n;
-    for (size_t i = 0; i < f->lines.size(); i++)
-        if (section_of(f->lines[i], n) && ieq(n, sec)) {
-            first = i;
-            end = i + 1;
-            while (end < f->lines.size() && !section_of(f->lines[end], n))
-                end++;
-            return true;
+    if (f->indexed)
+        return;
+    f->index.clear();
+    IniSection *cur = NULL;
+    std::string n, k, v;
+    for (size_t i = 0; i < f->lines.size(); i++) {
+        if (section_of(f->lines[i], n)) {
+            if (cur)
+                cur->end = i;
+            auto r = f->index.emplace(fold(n.c_str()), IniSection{i, i + 1, {}});
+            cur = r.second ? &r.first->second : NULL;   /* a later section of the same name is never read */
+            continue;
         }
-    return false;
+        if (cur && key_of(f->lines[i], k, &v))
+            cur->values.emplace(fold(k.c_str()), v);    /* the first key of a name wins */
+    }
+    if (cur)
+        cur->end = f->lines.size();
+    f->indexed = true;
+}
+
+const IniSection *section_ix(IniFile *f, const char *sec)
+{
+    build_index(f);
+    auto it = f->index.find(fold(sec));   /* the caller's name as given, as the scans compared it */
+    return it == f->index.end() ? NULL : &it->second;
+}
+
+/* [first, end) line range of the first section called sec (first = header line), or false */
+bool find_section(IniFile *f, const char *sec, size_t &first, size_t &end)
+{
+    const IniSection *s = section_ix(f, sec);
+    if (!s)
+        return false;
+    first = s->first;
+    end = s->end;
+    return true;
 }
 
 /* copy a 0-terminated list (names separated by 0, final extra 0) with the truncation rule */
@@ -270,7 +338,7 @@ std::string ini_base(const char *file)
 }
 
 /* the port's value of sec/key when f is the engine's ini and does not switch the table off, else NULL */
-const char *port_default(const IniFile *f, const char *file, const char *sec, const char *key);
+const char *port_default(IniFile *f, const char *file, const char *sec, const char *key);
 
 DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, DWORD size, const char *file)
 {
@@ -301,12 +369,16 @@ DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, D
                         keys.push_back(k);
             r = copy_list(keys, buf, size);
         } else {
-            std::string k, v;
+            std::string v;
             bool found = false;
-            if (have)
-                for (size_t i = a + 1; i < b && !found; i++)
-                    if (key_of(f->lines[i], k, &v) && ieq(k, key))
-                        found = true;
+            if (have) {
+                const IniSection *s = section_ix(f, sec);
+                auto it = s->values.find(fold(key));
+                if (it != s->values.end()) {
+                    v = it->second;
+                    found = true;
+                }
+            }
             const char *pd = found ? NULL : port_default(f, file, sec, key);
             if (pd) {
                 v = pd;
@@ -326,7 +398,7 @@ DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, D
     return r;
 }
 
-const char *port_default(const IniFile *f, const char *file, const char *sec, const char *key)
+const char *port_default(IniFile *f, const char *file, const char *sec, const char *key)
 {
     std::string base = ini_base(file);
     if (base != "fallout.ini" && base != "fallout_default.ini")
@@ -337,12 +409,11 @@ const char *port_default(const IniFile *f, const char *file, const char *sec, co
             hit = &d;
     if (!hit)
         return NULL;
-    size_t a, b;
-    std::string k, v;
-    if (find_section(f, "fnvnx", a, b))
-        for (size_t i = a + 1; i < b; i++)
-            if (key_of(f->lines[i], k, &v) && ieq(k, "bPortDefaults"))
-                return atoi(v.c_str()) ? hit->val : NULL;
+    if (const IniSection *s = section_ix(f, "fnvnx")) {
+        auto it = s->values.find("bportdefaults");
+        if (it != s->values.end())
+            return atoi(it->second.c_str()) ? hit->val : NULL;
+    }
     return hit->val;
 }
 
@@ -416,6 +487,7 @@ extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, L
         for (IniFile *f : ini_cache())
             delete f;
         ini_cache().clear();
+        ini_names().clear();
         os_unlock(&g_ini_lock);
         return TRUE;
     }
@@ -461,6 +533,8 @@ extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, L
                 changed = true;
             }
         }
+        if (changed)
+            f->indexed = false;
         ok = changed ? save(f) : TRUE;
     }
     os_unlock(&g_ini_lock);

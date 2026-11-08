@@ -42,19 +42,46 @@ def git(repo, *a):
     return subprocess.run(['git', '-C', repo] + list(a), check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(tmp, commits, meta, avail):
+PREP = r'''import os, sys
+# stub prepare.py <decomp> <out>: PREP_FAIL=1 fails; else a tree whose content is PREP_TEXT
+if os.environ.get('PREP_FAIL'):
+    sys.exit(4)
+os.makedirs(os.path.join(sys.argv[2], 'build'))
+open(os.path.join(sys.argv[2], 'build', 'units.json'), 'w').write(os.environ.get('PREP_TEXT', 'u'))
+'''
+
+
+def tree_hash_of(text):
+    """tree_hash.sh of the stub's tree"""
+    d = tempfile.mkdtemp()
+    os.makedirs(os.path.join(d, 'build'))
+    open(os.path.join(d, 'build', 'units.json'), 'w').write(text)
+    h = subprocess.run(['bash', os.path.join(HERE, '..', '..', 'tools', 'farm', 'tree_hash.sh'), d],
+                       capture_output=True, text=True).stdout.strip()
+    subprocess.run(['rm', '-rf', d])
+    return h
+
+
+def run(tmp, commits, meta, avail, local=None):
+    """local: None (FUZZ_LOCAL_PREPARE=0, the published trees only) or the stub prepare.py's environment"""
     d = tempfile.mkdtemp(dir=tmp)
     farm, runp, link, here = (os.path.join(d, x) for x in ('farm', 'run', 'link', 'here'))
     for p in (farm, runp, link, here):
         os.makedirs(p)
     open(os.path.join(here, 'fetch_tree.sh'), 'w').write(STUB)
+    subprocess.run(['cp', os.path.join(HERE, '..', '..', 'tools', 'farm', 'tree_hash.sh'), here], check=True)
+    pp = os.path.join(d, 'p')
+    os.makedirs(os.path.join(pp, 'tools'))
+    open(os.path.join(pp, 'tools', 'prepare.py'), 'w').write(PREP)
     json.dump(meta, open(os.path.join(link, 'meta.json'), 'w'))
     calls = os.path.join(d, 'calls')
-    script = ('set -euo pipefail\nfail_report() { echo "FAILED: $2"; exit "$1"; }\n'
+    script = ('set -euo pipefail\nfail_report() { echo "FAILED: $2"; exit "$1"; }\nlog() { :; }\n'
               'L12=${LCOMMIT:0:12}\n' + block() + 'echo "NOTE $NOTE_TREE"\n')
     env = dict(os.environ, FARM_HOME=farm, RUN=runp, LINK=link, HERE=here, REPO=commits['repo'],
                LCOMMIT=commits['L'], ARTIFACTS=d, CALLS=calls, FUZZ_TREE_WAIT='7',
-               AVAIL=' '.join('%s=%s' % (commits[k][:12], h) for k, h in avail.items()))
+               AVAIL=' '.join('%s=%s' % (commits[k][:12], h) for k, h in avail.items()),
+               P=pp, DECOMP=os.path.join(d, 'decomp'), FUZZ_LOCAL_PREPARE='0' if local is None else '1')
+    env.update(local or {})
     env.pop('FUZZ_TREE', None)
     r = subprocess.run(['bash', '-c', script], capture_output=True, text=True, env=env)
     c = open(calls).read().split('\n') if os.path.exists(calls) else []
@@ -102,6 +129,20 @@ def main():
 
         r, calls = run(tmp, cs, {}, {})
         check(r.returncode == 3 and len(calls) == 2, 'a link without meta.json: L, then the wait on L')
+        # T1: nothing published (full1 prepares locally; fz1..fz8 on 97deacd38aec): prepared here
+        r, calls = run(tmp, cs, dict(meta, tree=''), {}, local={})
+        th = tree_hash_of('u')
+        check(r.returncode == 0 and 'prepared here from %s (no published tree;' % cs['L'][:12] in r.stdout and th in r.stdout
+              and not any(c.endswith(' 7') for c in calls), 'nothing published: the tree prepared here, no wait (%s)' % r.stdout.strip())
+        r, calls = run(tmp, cs, dict(meta, tree='prepare farm, tree hash %s' % th), {}, local={})
+        check(r.returncode == 0 and 'prepared here' in r.stdout, 'prepared here, the hash the link records: taken')
+        r, calls = run(tmp, cs, dict(meta, tree='prepare farm, tree hash %s' % th), {}, local={'PREP_TEXT': 'other'})
+        check(r.returncode == 3, 'prepared here with another hash than the link records: refused, rc %d' % r.returncode)
+        r, calls = run(tmp, cs, dict(meta, tree=''), {}, local={'PREP_FAIL': '1'})
+        check(r.returncode == 3 and 'none prepared here' in r.stdout and calls and calls[-1] == '%s 7' % cs['L'],
+              'prepare.py fails here: the wait for a published tree, then fail_report 3')
+        r, calls = run(tmp, cs, meta, {'L': 'efb9808e7d542f00'}, local={})
+        check(r.returncode == 0 and 'prepare farm tree of' in r.stdout, 'a published tree is still taken first')
     print('%d failed' % len(FAIL))
     return 1 if FAIL else 0
 

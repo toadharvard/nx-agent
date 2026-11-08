@@ -403,6 +403,9 @@ def compare(ref, dfn, lay_ref, lay_def, ecx_unused=False, why=None, _drop=None):
         elif abi.ret_carry(dret.cls, rret.cls) is not None:
             p.ret_fcvt = tuple(abi.ret_carry(dret.cls, rret.cls))   # chain_x87: FP through an integer result
             p.classes.append('ret-regfile')
+        elif abi.bool_from_int(ref, dfn) is not None:   # bool read from a char/int result: (value != 0)
+            p.ret_fcvt = abi.bool_from_int(ref, dfn)
+            p.classes.append('ret-bool-from-int')
         else:
             for vo in range(min(rret.size, dret.size)):
                 if locate(rr, vo)[:2] != (locate(dr, vo) or (None, None, 0))[:2]:

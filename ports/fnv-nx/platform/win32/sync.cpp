@@ -195,7 +195,15 @@ extern "C" PVOID InterlockedExchangePointer(PVOID volatile *p, PVOID v)
 
 /* ---- waitable objects */
 struct w32_event { struct w32_obj o; int manual, state; char *name; };
-struct w32_mutex { struct w32_obj o; DWORD owner; int count; char *name; };
+struct w32_mutex {
+    struct w32_obj o;
+    DWORD owner;
+    int count;
+    int abandoned;                 /* the owner exited without releasing: the next acquire reports WAIT_ABANDONED */
+    char *name;
+    struct w32_mutex *prev, *next; /* g_mutexes, guarded by w32_wait_lock */
+};
+static struct w32_mutex *g_mutexes;
 struct w32_sem { struct w32_obj o; LONG count, max; char *name; };
 
 /* named objects share one namespace, as in a Windows session */
@@ -217,6 +225,33 @@ static void unname(struct w32_obj *o)
 }
 
 static void obj_destroy(struct w32_obj *o) { unname(o); }
+
+static void mutex_destroy(struct w32_obj *o)
+{
+    struct w32_mutex *m = (struct w32_mutex *)o;
+    os_lock(&w32_wait_lock);
+    if (m->prev)
+        m->prev->next = m->next;
+    else if (g_mutexes == m)
+        g_mutexes = m->next;
+    if (m->next)
+        m->next->prev = m->prev;
+    os_unlock(&w32_wait_lock);
+    unname(o);
+}
+
+/* A thread that ends while it owns mutexes abandons them: they become free and the next waiter that acquires one
+ * gets WAIT_ABANDONED_0 + i. Called by the thread's exit with w32_wait_lock held. */
+void w32_mutexes_abandon_locked(DWORD tid)
+{
+    for (struct w32_mutex *m = g_mutexes; m; m = m->next)
+        if (m->owner == tid && m->count > 0) {
+            m->owner = 0;
+            m->count = 0;
+            m->abandoned = 1;
+            w32_obj_signal_locked(&m->o);
+        }
+}
 
 /* returns an existing object of that name (new reference) or NULL; registers o under name otherwise */
 static struct w32_obj *find_named(const char *name, int type)
@@ -278,9 +313,15 @@ extern "C" HANDLE CreateEventA(void *sa, BOOL manual, BOOL initial, LPCSTR name)
 extern "C" HANDLE CreateMutexA(void *sa, BOOL owned, LPCSTR name)
 {
     W32_UNUSED(sa);
-    struct w32_mutex *m = (struct w32_mutex *)w32_obj_new(W32_MUTEX, sizeof *m, obj_destroy);
+    struct w32_mutex *m = (struct w32_mutex *)w32_obj_new(W32_MUTEX, sizeof *m, mutex_destroy);
     if (!m)
         return NULL;
+    os_lock(&w32_wait_lock);
+    m->next = g_mutexes;
+    if (g_mutexes)
+        g_mutexes->prev = m;
+    g_mutexes = m;
+    os_unlock(&w32_wait_lock);
     if (owned) { /* only takes effect for a new mutex: an existing one is returned unowned */
         m->owner = w32_self()->tid;
         m->count = 1;
@@ -400,14 +441,23 @@ static int signaled(struct w32_obj *o, DWORD me)
     }
 }
 
-static void acquire(struct w32_obj *o, DWORD me)
+/* takes the object; returns 1 if it was an abandoned mutex (WAIT_ABANDONED_0 + i) */
+static int acquire(struct w32_obj *o, DWORD me)
 {
     switch (o->type) {
     case W32_EVENT: if (!((struct w32_event *)o)->manual) ((struct w32_event *)o)->state = 0; break;
-    case W32_MUTEX: { struct w32_mutex *m = (struct w32_mutex *)o; m->owner = me; m->count++; break; }
+    case W32_MUTEX: {
+        struct w32_mutex *m = (struct w32_mutex *)o;
+        int ab = m->abandoned;
+        m->abandoned = 0;
+        m->owner = me;
+        m->count++;
+        return ab;
+    }
     case W32_SEMAPHORE: ((struct w32_sem *)o)->count--; break;
     default: break;
     }
+    return 0;
 }
 
 static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t pc);
@@ -440,17 +490,23 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
         SetLastError(ERROR_INVALID_PARAMETER);
         return WAIT_FAILED;
     }
+    if (all)   /* the same handle twice cannot be acquired twice */
+        for (DWORD i = 1; i < n; i++)
+            for (DWORD j = 0; j < i; j++)
+                if (hs[i] == hs[j]) {
+                    SetLastError(ERROR_INVALID_PARAMETER);
+                    return WAIT_FAILED;
+                }
     struct w32_thread *self = w32_self();
     struct w32_obj *objs[MAXIMUM_WAIT_OBJECTS];
     struct w32_link links[MAXIMUM_WAIT_OBJECTS];
     for (DWORD i = 0; i < n; i++) {
-        objs[i] = w32_obj_get(hs[i], 0);
+        objs[i] = w32_obj_get_ref(hs[i], 0);   /* referenced under the handle lock: a CloseHandle cannot free it */
         if (!objs[i]) {
             for (DWORD j = 0; j < i; j++)
                 w32_obj_unref(objs[j]);
             return WAIT_FAILED;
         }
-        w32_obj_ref(objs[i]);
     }
     uint64_t deadline = ms == INFINITE ? 0 : os_monotonic_ns() + (uint64_t)ms * 1000000ull;
     DWORD res = WAIT_TIMEOUT;
@@ -464,9 +520,10 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
             while (k < n && signaled(objs[k], self->tid))
                 k++;
             if (k == n) {
-                for (DWORD i = 0; i < n; i++)
-                    acquire(objs[i], self->tid);
                 res = WAIT_OBJECT_0;
+                for (DWORD i = 0; i < n; i++)
+                    if (acquire(objs[i], self->tid) && res == WAIT_OBJECT_0)
+                        res = WAIT_ABANDONED + i;
                 break;
             }
         } else {
@@ -474,8 +531,7 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
             while (k < n && !signaled(objs[k], self->tid))
                 k++;
             if (k < n) {
-                acquire(objs[k], self->tid);
-                res = WAIT_OBJECT_0 + k;
+                res = (acquire(objs[k], self->tid) ? WAIT_ABANDONED : WAIT_OBJECT_0) + k;
                 break;
             }
         }

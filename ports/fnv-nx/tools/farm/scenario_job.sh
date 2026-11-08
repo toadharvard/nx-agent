@@ -110,6 +110,19 @@ export SCENARIO_CALLWATCH=${SCENARIO_CALLWATCH:-}
 SEP=(); [ -n "${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && SEP=(--patterns "$SCENARIO_SCRIPTERR_PATTERNS")
 [ -n "$SCENARIO_CALLWATCH${SEP[*]}" ] || note "no script-error config (scenario-cfg branch): #10 from the scof console log only"
 
+# ---- the private script-error config (D25 #10, R4's lane): game knowledge, so from the artifacts repository --------
+# SCENARIO_CALLWATCH (callwatch.py config) and SCENARIO_SCRIPTERR_PATTERNS (scripterr.py --patterns), else the files
+# callwatch.cfg / scripterr_patterns.tsv of branch scenario-cfg; without them #10 falls back to the scof console log
+if [ -z "${SCENARIO_CALLWATCH:-}${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && [ -d "$ARTIFACTS/.git" ] &&
+	git -C "$ARTIFACTS" fetch -q --depth 1 origin scenario-cfg 2> /dev/null; then
+	mkdir -p "$W/cfg"
+	git -C "$ARTIFACTS" show FETCH_HEAD:callwatch.cfg > "$W/cfg/callwatch.cfg" 2> /dev/null && SCENARIO_CALLWATCH=$W/cfg/callwatch.cfg
+	git -C "$ARTIFACTS" show FETCH_HEAD:scripterr_patterns.tsv > "$W/cfg/patterns.tsv" 2> /dev/null && SCENARIO_SCRIPTERR_PATTERNS=$W/cfg/patterns.tsv
+fi
+export SCENARIO_CALLWATCH=${SCENARIO_CALLWATCH:-}
+SEP=(); [ -n "${SCENARIO_SCRIPTERR_PATTERNS:-}" ] && SEP=(--patterns "$SCENARIO_SCRIPTERR_PATTERNS")
+[ -n "$SCENARIO_CALLWATCH${SEP[*]}" ] || note "no script-error config (scenario-cfg branch): #10 from the scof console log only"
+
 # ---- the trace list (lockstep) -----------------------------------------------------------------------------------
 LIST=${SCENARIO_TRACE_LIST:-}
 if [ -z "$LIST" ] && [ -n "$LC" ] && [ -d "$ARTIFACTS/.git" ] && git -C "$ARTIFACTS" fetch -q --depth 1 origin "trace/$LC" 2> /dev/null; then
@@ -150,6 +163,14 @@ for s in $IDS; do
 		X="--scenario $D/plan.json --scenario-out $D/emu"
 		[ "${SCENARIO_FRAMES:-1}" = 1 ] && X="$X --frames"
 		[ -n "$LIST" ] && X="$X --trace-fn @$LIST --trace-out $D/guest.tsv"
+		# S4's Win32 calls on the guest (tools/perf/plat_calls.py list --guest: the imports by their platform names,
+		# hot ones left out), compared with the original's after the Wine side (plat_diff); SCENARIO_PLAT_CALLS=0 off
+		if [ "${SCENARIO_PLAT_CALLS:-1}" = 1 ] && [ -f "$P/tools/perf/plat_calls.py" ] && [ -f "$GAME/FalloutNV.exe" ]; then
+			ORIGC=$(ls -t "$FARM_HOME"/scenario_ref/*/original_calls.json 2> /dev/null | head -1)
+			python3 -I "$P/tools/perf/plat_calls.py" list --guest --exe "$GAME/FalloutNV.exe" ${ORIGC:+--original "$ORIGC"} \
+				--out "$D/plat_glist.txt" > /dev/null 2>&1 &&
+				{ X="$X --trace-fn @$D/plat_glist.txt"; [ -n "$LIST" ] || X="$X --trace-out $D/guest.tsv"; }
+		fi
 		FARM_BOOTS=stub FARM_GAME=$GAME EMU_TIMEOUT=${EMU_TIMEOUT:-3600} EMU_PY=$SC/emu_scenario.py EMU_EXTRA="$X" \
 			FARM_GUEST_DIR=$GUESTDIR FARM_LINK_DIR=${LINKDIR:-} bash "$S5/farm_boot.sh" "$LC" "$D/emu" > "$D/farm_boot.log" 2>&1
 		[ -z "${LINKDIR:-}" ] && [ -d "$D/emu/link/out" ] && LINKDIR=$D/emu/link
@@ -167,6 +188,12 @@ for s in $IDS; do
 				rm -rf "$RC"; mkdir -p "$(dirname "$RC")"; cp -a "$D/wine" "$RC"
 			fi
 		fi
+	fi
+	if [ -s "$D/plat_glist.txt" ] && [ -s "$D/guest.tsv" ] && [ -s "$D/wine/original_calls.json" ]; then
+		python3 -I "$P/tools/perf/plat_calls.py" report "$D/guest.tsv" --exe "$GAME/FalloutNV.exe" --out "$D/guest_calls.json" \
+			> /dev/null 2>&1 &&
+			python3 -I "$P/tools/perf/plat_calls.py" diff "$D/wine/original_calls.json" "$D/guest_calls.json" \
+				--guest-list "$D/plat_glist.txt" --out "$D/plat_diff.json" --md "$D/plat_diff.md" > "$D/plat_diff.log" 2>&1
 	fi
 	CMP=""
 	if [ -n "$LIST" ] && [ -s "$D/guest.tsv" ] && [ -s "$D/wine/wine.tsv" ]; then
@@ -293,11 +320,13 @@ if [ "${SCENARIO_PUBLISH:-1}" = 1 ] && [ -n "$LC" ] && [ -d "$ARTIFACTS/.git" ];
 	for s in $IDS; do
 		D=$W/$s; [ -d "$D" ] || continue; mkdir -p "$pub/$s"
 		cp -f "$D"/scripterr.json "$D"/wine_scripterr.json "$pub/$s/" 2> /dev/null
-		cp -f "$D"/plan.json "$D"/report.json "$D"/compare.json "$D"/threads.json "$D"/nx1.json "$D"/frames.json "$D"/feed.txt "$pub/$s/" 2> /dev/null
+		cp -f "$D"/plan.json "$D"/report.json "$D"/compare.json "$D"/threads.json "$D"/nx1.json "$D"/frames.json "$D"/feed.txt \
+			"$D"/guest_calls.json "$D"/plat_diff.json "$D"/plat_diff.md "$pub/$s/" 2> /dev/null
 		[ -d "$D/emu/kept" ] && cp -a "$D/emu/kept" "$pub/$s/guest-kept"
 		[ -d "$D/wine/profile" ] && cp -a "$D/wine/profile" "$pub/$s/wine-profile"
 		[ -d "$D/wine/shots" ] && cp -a "$D/wine/shots" "$pub/$s/wine-shots"
-		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$D/wine/original_opens.json" "$pub/$s/" 2> /dev/null
+		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$D/wine/original_opens.json" \
+			"$D/wine/original_calls.json" "$D/wine/original_calls.md" "$pub/$s/" 2> /dev/null
 		for f in "$D/emu/emu_stub.log" "$D/lin/boot.log" "$D/lin_profile.txt" "$D/guest.tsv" "$D/wine/wine.tsv"; do [ -f "$f" ] && xz -T0 -c "$f" > "$pub/$s/$(basename "$f").xz"; done
 	done
 	if git -C "$pub" add -A && git -C "$pub" -c user.name="fnvnx farm" -c user.email=farm@invalid commit -qm "scenarios $LC (head $C12)

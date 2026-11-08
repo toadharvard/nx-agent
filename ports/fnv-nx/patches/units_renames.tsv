@@ -1365,6 +1365,9 @@ src/staging/blk_00e40000_o2.cpp	def	0x00e5c5b0	?FUN_00e5c5b0@@YGXH@Z	?FUN_00e5c5
 src/staging/blk_00e40000_o2.cpp	def	0x00e5c630	?FUN_00e5c630@@YGXH@Z	?FUN_00e5c630@FUN_00e5c630_s1b@@QAEXH@Z
 src/staging/blk_00e40000_o2.cpp	def	0x00e5c650	?FUN_00e5c650@fnv_00e5c650@@YGXH@Z	?FUN_00e5c650@FUN_00e5c650_s1b@fnv_00e5c650@@QAEXH@Z
 src/staging/blk_00e40000_o2.cpp	def	0x00e5c690	?CallWithGlobalObject@@YGXH@Z	?CallWithGlobalObject@FUN_00e5c690_s1b@@QAEXH@Z
+src/staging/blk_00e40000_o2.cpp	def	0x00e5c5f0	?FUN_00e5c5f0@@YGXH@Z	?FUN_00e5c5f0@FUN_00e5c5f0_s1b@@QAEPAXH@Z
+src/staging/blk_00e40000_o2.cpp	def	0x00e5c610	?FUN_00e5c610@fnv_00e5c610@@YGXH@Z	?FUN_00e5c610@FUN_00e5c610_s1b@fnv_00e5c610@@QAEPAXH@Z
+src/staging/blk_00e40000_o2.cpp	def	0x00e5c670	?FUN_00e5c670@fnv_00e5c670@@YGPAXPAX@Z	?FUN_00e5c670@FUN_00e5c670_s1b@fnv_00e5c670@@QAEPAXPAX@Z
 src/staging/blk_00e40000_o2.cpp	def	0x00e5c8a0	?FUN_00e5c8a0@@YAHPBD_NPAI@Z	?FUN_00e5c8a0@FUN_00e5c8a0_s1b@@QAEHPAX_N0@Z
 src/staging/blk_00e40000_o2.cpp	ref	0x00cb0a60	_FUN_00cb0a60	?FUN_00cb0a60@FUN_00e4e400_s1b@@QAEXXZ
 src/staging/blk_00e40000_o2.cpp	ref	0x00e535a0	?FUN_00e535a0@@YAXHH@Z	?FUN_00e535a0@@YAMHH@Z
@@ -1373,6 +1376,9 @@ src/staging/blk_00e40000_o2.cpp	ref	0x00e5c540	?FUN_00e5c540@@YGXHPAUGlobalObjec
 src/staging/blk_00e40000_o2.cpp	ref	0x00e5c540	?FUN_00e5c540@@YGXHPAUGlobalObjectO2_00d472a0@@@Z	?FUN_00e5c540@FUN_00e5c630_s1b@@QAEXHPAUGlobalObjectO2_00d472a0@@@Z
 src/staging/blk_00e40000_o2.cpp	ref	0x00e5c540	?FUN_00e5c540@@YGXHPAUGlobalObjectO2_00d472a0@@@Z	?FUN_00e5c540@FUN_00e5c690_s1b@@QAEXHPAUGlobalObjectO2_00d472a0@@@Z
 src/staging/blk_00e40000_o2.cpp	ref	0x00e5c540	?FUN_00e5c540@fnv_00e5c650@@YGXHPAUGlobalObjectO2_00d472a0@1@@Z	?FUN_00e5c540@FUN_00e5c650_s1b@fnv_00e5c650@@QAEXHPAUGlobalObjectO2_00d472a0@2@@Z
+src/staging/blk_00e40000_o2.cpp	ref	0x00e5c540	_FUN_00e5c540@8	?FUN_00e5c540@FUN_00e5c5f0_s1b@@QAEPAXHH@Z
+src/staging/blk_00e40000_o2.cpp	ref	0x00e5c540	_FUN_00e5c540@8	?FUN_00e5c540@FUN_00e5c610_s1b@fnv_00e5c610@@QAEPAXHPAUGlobalObjectO2_00d472a0@2@@Z
+src/staging/blk_00e40000_o2.cpp	ref	0x00e5c540	_FUN_00e5c540@8	?FUN_00e5c540@FUN_00e5c670_s1b@fnv_00e5c670@@QAEPAXPAX0@Z
 src/staging/blk_00e40000_o2.cpp	ref	0x00e5c7a0	?GetUnsignedValue@@YAHPBD_NPAI@Z	?FUN_00e5c7a0@FUN_00e5c8a0_s1b@@QAEHPAX_N0@Z
 src/staging/blk_00e60000_o2.cpp	ref	0x00e7d1b0	?FUN_00e7d1b0@@YAXXZ	?FUN_00e7d1b0@FUN_00e7d230_s1b@@QAEXXZ
 src/staging/blk_00e80000_o2.cpp	ref	0x00a53c30	_FUN_00a53c30@8	?FUN_00a53c30@FUN_00e8bd40_s1b@fnv_00e8bd40@@QAEDPAURecord@2@PAPAUItem@2@@Z
@@ -1400,3 +1406,5 @@ src/havok/animation/ragdoll/instance/hkaragdollinstance_gs_ehsc_nogs_noehsc_vari
 src/fallout/misc/garbagecollector.cpp	def	0x0040fc90	?QueryCurrentThread@GarbageCollector@@SAX_N@Z	?QueryCurrentThread@GarbageCollector@@SAKXZ
 src/fallout/misc/garbagecollector.cpp	ref	0x0040fc90	?QueryCurrentThread@GarbageCollector@@SAX_N@Z	?QueryCurrentThread@GarbageCollector@@SAKXZ
 src/fallout/interface/interfacemanager.cpp	ref	0x00716ae0	?GetByteAtOffset33@FUN_007e6620_Button@fnv_007e6620@@QAE_NXZ	?GetByteAtOffset33@FUN_007e6620_Button@fnv_007e6620@@QAEEXZ
+src/havok/common/serialize/data/util/hkdataobjectutil.cpp	ref	0x00dba6a0	?SetShiftedValue@DCIterator@@QAE?AU1@XZ	?SetShiftedValue@DCIterator@@QAEPAXPAX@Z
+src/havok/common/serialize/data/dict/hkdataobjectdict_ehsc_noehsc_variant.cpp	ref	0x00dba6a0	?getParent@hkDataClassX@@QBE?AV1@XZ	?getParent@hkDataClassX@@QBEPAXPAX@Z

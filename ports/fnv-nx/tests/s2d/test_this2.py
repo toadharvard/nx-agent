@@ -100,5 +100,34 @@ class This2(unittest.TestCase):
             s2_bodies.THIS2_SITES.update(saved)
 
 
+
+class TestThis2NamespaceNames(unittest.TestCase):
+    """THIS2 in a namespace: the shell enters MSVC's back-reference table after the identifier (0x00c2a960)."""
+
+    def test_backref_shifts(self):
+        import _msvcsig
+        n = '?FUN_00406000@fnv_00403500@@YGXPAUStrArr@1@@Z'
+        got = s2_bodies._this2_member_name(n, _msvcsig.parse(n), 'FUN_00403500_this2')
+        self.assertEqual(got, '?FUN_00406000@FUN_00403500_this2@fnv_00403500@@QAEXPAUStrArr@2@@Z')
+        g = _msvcsig.parse(got)
+        self.assertEqual(g.params, _msvcsig.parse(n).params)
+
+    def test_scope_without_backref(self):
+        import _msvcsig
+        n = '?FUN_00406000@fnv_00403500@@YGXH@Z'
+        self.assertEqual(s2_bodies._this2_member_name(n, _msvcsig.parse(n), 'S'),
+                         '?FUN_00406000@S@fnv_00403500@@QAEXH@Z')
+
+    def test_plain_unchanged(self):
+        import _msvcsig
+        n = '?FUN_00406000@@YGXPAUStrArr@@@Z'
+        self.assertEqual(s2_bodies._this2_member_name(n, _msvcsig.parse(n), 'S'), '?FUN_00406000@S@@QAEXPAUStrArr@@@Z')
+
+    def test_member_refused(self):
+        import _msvcsig
+        n = '?f@C@@QAEXH@Z'
+        self.assertIsNone(s2_bodies._this2_member_name(n, _msvcsig.parse(n), 'S'))
+
+
 if __name__ == '__main__':
     unittest.main()

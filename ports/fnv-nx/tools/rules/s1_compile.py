@@ -1567,6 +1567,104 @@ def r_image_statics(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- VFTBL1
+#
+# The decomp sometimes stands a table of its own in for an exe vftable: `static const VTable g_vtblAgent = {{(void*)
+# &AgentRelease, ...}};` for the vftable at 0x010ce838 (hkpBvTreeStreamAgent, RTTI `.?AVhkpBvTreeStreamAgent@@`), with
+# declared-only functions as the slots, and units.json binds the name to that address. The link renames the definition
+# to `__fnv_<address>` and aliases.ld assigns that symbol the native vtable's address point (hand_vptrs / vmap, else
+# the D26 (c) minus-one copy), which overrides the definition (tools/link/test_vtables.py); but the invented
+# initializer stays in the object, and the functions it names (AgentRelease, AgentFlush) are undefined names nothing
+# else references. VFTBL1 turns such a definition into a declaration, `extern const VTable g_vtblAgent;` (a namespace
+# one under C linkage like STATIC1's, where the name is bound as `_g_vtblAgent`), so that `&g_vtblAgent` is an
+# undefined reference bound by address like any other, and no initializer remains.
+# Only a name that units.json binds, at file scope, to an address in VFTBL1_SITES (exe vftables with an RTTI locator;
+# tools/rules/check_vftbl1.py checks each against the exe, and lists the units.json-bound initialised tables at other
+# exe vftables, which a new site must come from), defined with a brace initializer, and that the file
+# uses only through `&name`: a reader indexing `name.entries[k]` expects x86 slot k, and under D26 native slot k+1 is
+# exe slot k, so it is left as written. (Uninitialised `int DAT_<address>;` definitions need no rule: no initializer,
+# the link renames them the same way.)
+
+VFT_INIT = re.compile(r'^([ \t]*)(?:static\s+)?((?:const\s+|volatile\s+)*[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)'
+                      r'(?:\s*\[[^\]]*\])*)\s*=\s*\{', re.M)
+# The exe vftables (RTTI class) whose units.json-bound name the decomp defines with an initialised stand-in table
+VFTBL1_SITES = {
+    0x010ce838,   # .?AVhkpBvTreeStreamAgent@@ - g_vtblAgent, hkpbvtreestreamagent.cpp
+    0x0102e388,   # .?AVhkBaseObject@@ - g_vtblBase, hkpbvtreestreamagent.cpp
+    0x01030bf4,   # g_vtblShape, bstreenode_o2_variant.cpp
+    0x01030b0c,   # g_vtblSphereRep, bstreenode_o2_variant.cpp
+    0x01066c5c,   # g_vtblMultiSphere, bstreenode_o2_variant.cpp
+}
+_VFT_NAMES = None        # file -> {name: is it bound as a C name (`_name`)}
+
+def _exe_vftable_addrs():
+    return VFTBL1_SITES
+
+def _vftable_bound_names(path):
+    """{absolute file: {name: bound as a C name}} of data names a unit including the file binds to an exe vftable."""
+    global _VFT_NAMES
+    if _VFT_NAMES is not None: return _VFT_NAMES
+    import json
+    _VFT_NAMES = {}
+    root, uj = prepare._units_json(path)
+    if not uj: return _VFT_NAMES
+    vft = _exe_vftable_addrs()
+    inc = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+    for u in json.load(open(uj))['units']:
+        names = {}
+        for n, a in u.get('symbols', {}).items():
+            if int(a, 16) not in vft or n.startswith('??_7'): continue
+            m = DATA_NAME.match(n)
+            if m: names.setdefault(m.group(1), False)
+            elif n.startswith('_') and n[1:].isidentifier(): names[n[1:]] = True
+        if not names: continue
+        todo, seen = [os.path.normpath(os.path.join(root, u['source']))], set()
+        while todo:
+            f = todo.pop()
+            if f in seen or not os.path.isfile(f): continue
+            seen.add(f)
+            with open(f, encoding='utf-8', errors='surrogateescape') as h: t = h.read()
+            e = _VFT_NAMES.setdefault(f, {})
+            for n, c in names.items(): e[n] = e.get(n, False) or c
+            for i in inc.findall(t):
+                for base in (os.path.dirname(f), os.path.join(root, 'include')):
+                    g = os.path.normpath(os.path.join(base, i))
+                    if os.path.isfile(g): todo.append(g); break
+    return _VFT_NAMES
+
+def r_vftable_standins(path, text, stats):
+    """VFTBL1: a table the decomp defines for a name bound to an exe vftable becomes a declaration (see above)."""
+    if '=' not in text: return text
+    names = _vftable_bound_names(path).get(os.path.normpath(os.path.abspath(path)))
+    if not names: return text
+    bare = COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
+    spans, edits = None, []
+    for m in VFT_INIT.finditer(bare):
+        name = m.group(3)
+        if name not in names: continue
+        if re.search(r'\bextern\b', bare[bare.rfind('\n', 0, m.start()) + 1:m.start(2)]): continue
+        if spans is None: spans = prepare.scope_spans(bare)
+        chain = prepare.scope_chain(spans, m.start())
+        if any(k not in ('namespace', 'extern') for k, _ in chain): continue
+        namespaced = any(k == 'namespace' for k, _ in chain)
+        if namespaced and not names[name]: continue     # not bound by its plain name: C linkage would name another symbol
+        end = _decl_end(bare, m.end() - 1)
+        if end is None or '#' in bare[m.end():end]: continue
+        # every other use of the name takes its address: `vtbl = &name;`, `(void*)&name`
+        if any(not re.search(r'&\s*$', bare[:u.start()]) for u in re.finditer(r'(?<![\w:.>])%s\b' % re.escape(name), bare)
+               if not m.start(3) <= u.start() < m.end(3)):
+            continue
+        decl = bare[m.start(2):m.end(2)].rstrip()
+        new = m.group(1) + ('extern "C" { extern %s; }' if namespaced else 'extern %s;') % decl
+        edits.append((m.start(), end + 1, new))
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, r in edits:
+        out.append(text[pos:a]); out.append(r); pos = b
+        stats['VFTBL1'] += 1
+    out.append(text[pos:])
+    return ''.join(out)
+
 # ---------------------------------------------------------------------------------------------------------- FALL1
 #
 # Some decomp functions return a value on every path but the last: the body was reconstructed without its final
@@ -4467,7 +4565,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
          r_msvc_base_layout, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
