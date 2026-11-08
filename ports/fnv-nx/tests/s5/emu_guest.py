@@ -79,7 +79,7 @@ _PLACEMENT = None
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
 STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
 TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding", "member-vtables",
-                 "repair-lost-slot-one")
+                 "repair-lost-slot-one", "exe-slot-one-d0")
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
 
@@ -1118,6 +1118,8 @@ class Emu:
         self.extend_short_vtables(uc, objs, V, img, F, rt, st)
         if getattr(self, "repair_slot_one", False):
             self.repair_lost_slot_one(uc, objs, V, img, F, rt, link, st)
+        if getattr(self, "exe_slot_one_d0", False):
+            self.exe_slot_one_d0_fix(uc, objs, V, img, F, rt, link, st)
         if getattr(self, "image_minus_one", False):
             self.image_vptr_minus_one(uc, img, F, V, rt, st)
         self.vslot_thisless(uc, objs, V, rt, st)
@@ -1330,6 +1332,40 @@ class Emu:
             st["slot-one repaired"] += 1
         print("   repair-lost-slot-one: %d link-extended vtables whose renamed destructor pair hid exe slot 1 get it "
               "back in slot 1" % st["slot-one repaired"])
+
+    VT_D0_BASE = 0x0EA00000   # D0 thunks of exe_slot_one_d0_fix
+
+    def exe_slot_one_d0_fix(self, uc, objs, V, img, F, rt, link, st):
+        """table option exe-slot-one-d0: a native vtable in the exe's slot order whose slot 1 is NiRefObject::DeleteThis
+        (exe slot 0 the scalar deleting destructor, slot 1 DeleteThis) while native code compiled against a declared
+        virtual destructor (D1/D0 at slots 0/1) runs `delete p` through slot 1: DeleteThis, whose own `delete this`
+        goes through slot 1 again, a tail-call loop that never returns (GraphicsRenderer::Create's failure path,
+        object of _ZTV12FUN_00e754a0, ctor 0x00e754a0 declared by both GraphicsRenderer and FUN_00e754a0). Slot 1
+        gets a D0 thunk (exe slot 0's native with flags 1), which is what DeleteThis means in the exe too.
+        A stand-in for the decl fix (S2-bodies: one declaration per constructor) or a link-time D0 slot (S2c)."""
+        dt = self.code_syms.get("_ZN11NiRefObject10DeleteThisEv")
+        if dt is None:
+            return
+        dt = rt(dt) & 0xFFFFFFFF
+        uc.mem_map(self.VT_D0_BASE, 0x10000, UC_PROT_ALL)
+        at, done = self.VT_D0_BASE, set()
+        for exe_vt, sym, off in V:
+            a, size = objs[sym]
+            if (sym, off) in done or size - off < 8:
+                continue
+            done.add((sym, off))
+            ex = img.vtable_slots(exe_vt)
+            if len(ex) < 3 or ex[0] not in F or F.get(ex[1]) is None or rt(F[ex[1]]) & 0xFFFFFFFF != dt:
+                continue
+            (w1,) = struct.unpack("<I", bytes(uc.mem_read(rt(a + off + 4), 4)))
+            if w1 != dt or at + 24 > self.VT_D0_BASE + 0x10000:
+                continue
+            uc.mem_write(at, struct.pack("<IIIQ", 0x52800001 | (1 << 5), 0x58000050, 0xD61F0200,
+                                         rt(F[ex[0]]) & 0xFFFFFFFF))
+            uc.mem_write(rt(a + off + 4), struct.pack("<I", at))
+            at += 24
+            st["slot-one d0"] += 1
+        print("   exe-slot-one-d0: %d exe-order vtables whose slot 1 was DeleteThis get a D0 thunk there" % st["slot-one d0"])
 
     def image_vptr_minus_one(self, uc, img, F, V, rt, st):
         """table option image-vptr-minus-one: the guest's references to an exe vftable that no native vtable is bound
@@ -2383,6 +2419,7 @@ def main(argv):
                 emu.member_vtables_rx = fault_table_option_arg(a.stub_faults, "member-vtables") \
                     if emu.member_vtables else None
                 emu.repair_slot_one = bool(a.stub_faults) and "repair-lost-slot-one" in fault_table_options(a.stub_faults)
+                emu.exe_slot_one_d0 = bool(a.stub_faults) and "exe-slot-one-d0" in fault_table_options(a.stub_faults)
                 emu.image_minus_one = bool(a.stub_faults) and "image-vptr-minus-one" in fault_table_options(a.stub_faults)
                 emu.image_minus_one_rx = fault_table_option_arg(a.stub_faults, "image-vptr-minus-one") \
                     if emu.image_minus_one else None
