@@ -240,6 +240,32 @@ def _nrvo_copy(xcalls, ta, sret, convs):
     return None
 
 
+def _thisless(cv, labels):
+    """cv with the native registers of its parameters moved down one x register, `labels` (a `this` the callee's
+    exe code never reads) dropped: the layout of a call that went through a link adapter taking the member's
+    `this` away (the tree defines 0x00d315d0 as a member, the exe function is a free stdcall one, the unit's call
+    reaches it through `mov x0, x1; mov x1, x2; ...; b target`, so the registers recorded at the stub are the exe's
+    layout). None when a parameter lives anywhere but an x register, or does not follow the dropped one."""
+    import copy
+    new, dropped = {}, False
+    for lab, chunks in cv.a64.items():
+        if lab in labels:
+            dropped = True
+            new[lab] = chunks
+            continue
+        out = []
+        for voff, cont, coff, ln in chunks:
+            if cont[0] != 'x' or cont[1] < 1:
+                return None
+            out.append((voff, ('x', cont[1] - 1), coff, ln))
+        new[lab] = out
+    if not dropped:
+        return None
+    cv2 = copy.copy(cv)
+    cv2.a64 = new
+    return cv2
+
+
 def _destroys_params(calls, agg_ptrs):
     """True when `calls` is not empty and every call has, as its first word (ecx: `this`), an address inside the stack
     slot of a by-value aggregate parameter of the oracle's function (agg_ptrs: [(oracle address, native address,
@@ -344,6 +370,14 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             d = compare_args(cv, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                              garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
                              (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret)
+            if d and not d.get('soft') and cx.target >= 0:
+                ths = {l for l, sp, _o, _s in cv.x86 if sp == 'ecx' and l in skip}
+                cv2 = _thisless(cv, ths) if ths else None
+                if cv2 is not None and compare_args(
+                        cv2, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
+                        garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
+                        (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret) is None:
+                    d = None     # the registers at the stub are the exe's layout: the unit's call went through the adapter
             if d and (i in swapped or i + 1 in swapped):
                 # a swapped pair: the calls at i and i + 1 are different callees on the two machines, so compare
                 # each oracle call with the native call of the same callee

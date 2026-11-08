@@ -156,6 +156,27 @@ def test_compare():
                   'an argument the callee reads is compared (%s)' % ((div and (div['kind'], div.get('arg'))),))
 
 
+def test_thisless():
+    """The tree defines the callee as a member (`this` in ecx, p0 on the stack); the exe function reads only the stack
+    argument. The unit's call reaches it through an adapter that dropped `this`, so the registers at the stub are the
+    exe's layout (p0 in x0): equal to the oracle's argument. A value that differs in that layout stays a difference."""
+    callee = BASE + 0x1000
+    cvm = conv.Conv('?m@Foo@@QAEXH@Z', 'test')
+    cvf = conv.Conv('?f@@YAXXZ', 'test')
+    oracle = bytes.fromhex('6a05') + b'\xe8' + rel(BASE + 2, callee) + bytes.fromhex('c3')
+    exe({callee: bytes.fromhex('8b442404' 'c20400')})            # mov eax, [esp+4]; ret 4: reads p0, never ecx
+    for what, w0, w1, want_div in (('p0 in x0 (adapter layout)', 5, 9, False), ('p0 in x1 (member layout)', 9, 5, False),
+                                   ('another value in x0', 6, 9, True)):
+        arm = '\tstp x29, x30, [sp, #-16]!\n\tmov w0, #%d\n\tmov w1, #%d\n\tbl __fnv_%08x\n\tldp x29, x30, [sp], #16\n\tret\n' \
+              % (w0, w1, callee)
+        with tempfile.TemporaryDirectory() as d:
+            img = build_image(arm, d, [('__fnv_%08x' % callee, 0x08000000 + callee)])
+            p = runner.Pair(runner.Target(cvf, BASE, {BASE: oracle}, img, {}, Info({callee: cvm})), {})
+            rx, ra, div = p.run(world.Case(seed=3, args={}, mem={}))
+        check((div is not None) == want_div, '%s: %s (%s)' % (what, 'a difference' if want_div else 'equal',
+                                                              div and (div['kind'], div.get('arg'))))
+
+
 def test_noreturn():
     xlen = 0x00ec30b0
     cvf = conv.Conv('?f@@YAHXZ', 'test')
@@ -237,7 +258,7 @@ def test_cpuid():
 
 
 def main():
-    for t in (test_regcopy, test_unread, test_compare, test_noreturn, test_destroy, test_thunk, test_cpuid):
+    for t in (test_regcopy, test_unread, test_compare, test_thisless, test_noreturn, test_destroy, test_thunk, test_cpuid):
         try:
             t()
         except Exception as e:  # noqa: BLE001 - a missing mechanism fails the test (the head before the fix)
