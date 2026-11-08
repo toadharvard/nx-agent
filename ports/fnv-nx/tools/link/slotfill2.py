@@ -225,38 +225,69 @@ def _regno(cs, r):
 
 def _add_uses(code, at, base):
     """The uses of the register an `ldr wN, [xM, #got_lo12]` at code offset `at` loads, until it is redefined:
-    [(offset, imm)] when every one is `add wD|xD, wN|xN, #imm` (shift 0), else None."""
+    [(offset, imm)] when every one is `add wD|xD, wN|xN, #imm` (shift 0), else None. A register copy `mov wD, wN`
+    (W46: TESWorldSpace's ~FUN_00582e30 keeps the group in w1 and w0) makes wD a holder too, followed the same way.
+    A TLS descriptor call (`ldr wK, [x0, ...]; add w0, w0, #i; blr xK`, bhkCharacterController's ~FUN_00c705c0)
+    keeps every register but x0 and x30, as the TLSDESC ABI says."""
     cs = _cs()
     w, = struct.unpack_from('<I', code, at)
     if (w & 0xffc00000) != 0xb9400000:   # LDR (immediate, unsigned offset), 32-bit
         return None
-    n = w & 31
+    live = {w & 31}
     out = []
+    prev = []
     for ins in cs.disasm(bytes(code[at + 4:]), base + at + 4):
         rd, wr = ins.regs_access()
         reads = {_regno(cs, r) for r in rd}
         writes = {_regno(cs, r) for r in wr}
         word, = struct.unpack_from('<I', code, ins.address - base)
-        if n in reads:
-            if (word & 0x7fc00000) == 0x11000000 and (word >> 5) & 31 == n:   # ADD (immediate), shift 0
+        prev, p2 = prev[-1:] + [word], prev
+        if (word & 0xfffffc1f) == 0xd63f0000 and len(p2) == 2 and (p2[1] & 0xffc003ff) == 0x11000000 and \
+                (p2[0] & 0xffc003e0) == 0xb9400000 and (p2[0] & 31) == (word >> 5) & 31:   # TLSDESC call
+            live -= {0, 30}
+            if not live:
+                return out
+            continue
+        copied = None
+        if reads & live:
+            if (word & 0x7fc00000) == 0x11000000 and (word >> 5) & 31 in live:   # ADD (immediate), shift 0
                 out.append((ins.address - base, (word >> 10) & 0xfff))
+            elif (word & 0x7fe0ffe0) == 0x2a0003e0 and (word >> 16) & 31 in live:   # MOV wD, wN (ORR wD, wzr, wN)
+                copied = word & 31
             else:
                 return None
-        if n in writes:
+        live -= writes
+        if copied is not None:
+            live.add(copied)
+        if not live:
             return out
         g = set(ins.groups)
-        if 2 in g:   # CS_GRP_CALL (bl, blr): the call clobbers a caller-saved register
-            if n not in CALLEE_SAVED:
+        if 2 in g:   # CS_GRP_CALL (bl, blr): the call clobbers the caller-saved registers
+            live &= set(CALLEE_SAVED)
+            if not live:
                 return out
         elif 3 in g:   # CS_GRP_RET
             return out
-        elif 1 in g or 7 in g:   # any other jump while the register is live: not followed
+        elif 1 in g or 7 in g:   # any other jump while a holder is live: not followed
             return None
     return out
 
 
+def steps(v):
+    """A plan value as [(from byte offset, delta)]: one (from, delta) pair (S2c-vt2's primary extension) or, W46's
+    VTFILL2, several (every vtable of the group that grows inserts its words before the next one)."""
+    if not v:
+        return []
+    return [tuple(v)] if isinstance(v[0], int) else [tuple(x) for x in v]
+
+
+def moved(x, v):
+    """A byte offset into the group after the plan's insertions (offsets at or past each `from` move down)."""
+    return x + sum(d for f, d in steps(v) if x >= f)
+
+
 def shift_scan(path, plan):
-    """plan: {vtable name: (from byte offset, delta)}. -> (patches, problems): patches [(file offset, kind, value)]
+    """plan: {vtable name: (from byte offset, delta) or [(from, delta), ...] (steps)}. -> (patches, problems): patches [(file offset, kind, value)]
     (kind 'rela' = new addend at the RELA entry, 'add' = new 32-bit instruction word), problems {name: why}."""
     data = open(path, 'rb').read()
     if data[:4] != b'\x7fELF' or data[4] != 1:
@@ -291,10 +322,10 @@ def shift_scan(path, plan):
                     continue
                 if name not in plan:
                     continue
-                frm, delta = plan[name]
+                pv = plan[name]
                 if typ in (R_ABS32, R_PREL32, R_ADR_PG, R_ADD_LO12):
-                    if addend >= frm:
-                        patches.append((o + 8, 'rela', addend + delta))
+                    if moved(addend, pv) != addend:
+                        patches.append((o + 8, 'rela', moved(addend, pv)))
                 elif typ == R_GOT_PAGE:
                     pass
                 elif typ == R_GOT_LO12 and exe:
@@ -303,12 +334,12 @@ def shift_scan(path, plan):
                         problems[name] = 'GOT load at %s+%#x used other than by add' % (path.rsplit('/', 1)[-1], off)
                         continue
                     for at, imm in uses:
-                        if imm >= frm:
-                            if imm + delta > 0xfff:
+                        if moved(imm, pv) != imm:
+                            if moved(imm, pv) > 0xfff:
                                 problems[name] = 'add immediate past 4095'
                                 continue
                             w, = struct.unpack_from('<I', data, tgt[4] + at)
-                            patches.append((tgt[4] + at, 'add', (w & ~(0xfff << 10)) | ((imm + delta) << 10)))
+                            patches.append((tgt[4] + at, 'add', (w & ~(0xfff << 10)) | (moved(imm, pv) << 10)))
                 else:
                     problems[name] = 'relocation type %d' % typ
     return patches, problems
@@ -405,8 +436,21 @@ def place_extra(words, extra, shift, z=None, out=None):
 
 
 def shifted(ap, shift):
-    """An address point of the group after the shift."""
-    return ap + shift[1] if shift and ap >= shift[0] else ap
+    """An address point of the group after the shift (one (from, delta) pair or steps)."""
+    return moved(ap, shift)
+
+
+def shift_steps(z, plan, out, have, stats=None):
+    """W46 (VTFILL2): plan [(from, delta)] when every object referencing z can be patched for it, else None."""
+    ok, bad = shift_check({z: list(plan)}, _objects(out, have), stats)
+    return plan if z in ok else None
+
+
+def record_shift(z, plan, out):
+    """vtshift.tsv rows of a group shifted in several steps (one row per step; shift_fixed collects them)."""
+    with open(os.path.join(out, VTSHIFT), 'a') as f:
+        for frm, delta in plan:
+            f.write('%s\t%d\t%d\n' % (z, frm, delta))
 
 
 def shift_fixed(out, fixed):
@@ -417,7 +461,7 @@ def shift_fixed(out, fixed):
         for line in open(path, encoding='utf-8', errors='surrogateescape'):
             f = line.rstrip('\n').split('\t')
             if not line.startswith('#') and len(f) >= 3:
-                plan[f[0]] = (int(f[1]), int(f[2]))
+                plan.setdefault(f[0], []).append((int(f[1]), int(f[2])))
     if not plan:
         return 0, 0, 0
     objs = sorted(os.path.join(fixed, x) for x in os.listdir(fixed) if x.endswith('.o') and x != 'zz_bridges.o')
