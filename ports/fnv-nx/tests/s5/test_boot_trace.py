@@ -55,6 +55,31 @@ class Lockstep(unittest.TestCase):
         self.assertIsNone(r["first"])
         self.assertEqual(r["inlined"][("wine-only", "B")], 1)
 
+    def test_missing_and_extra_calls_listed(self):
+        """T1 (owner: the seams as a list): calls the exe makes and the guest does not, and the reverse, are
+        divergences in the list with both caller chains; the first divergence stays the first value difference"""
+        g = [guest_line(1, 0, "A", "00401000", [0x11f6238, 5]),
+             guest_line(2, 1, "X", "00409000", [0x11f6238, 1]),      # extra: the exe never calls X here
+             guest_line(3, 1, "C", "00403000", [0x11f6238, 7]),
+             guest_line(4, 1, "D", "00404000", [0x22, 9])]            # D's receiver differs
+        w = [wine_line(1, 0, "A", "00401000", 0x11f6238, [5]),
+             wine_line(2, 1, "C", "00403000", 0x11f6238, [7]),
+             wine_line(3, 1, "B", "00402000", 0x11f6238, [1]),       # missing: the guest never calls B
+             wine_line(4, 1, "B", "00402000", 0x11f6238, [2]),
+             wine_line(5, 1, "D", "00404000", 0x11f6238, [3])]
+        gg, ww = self.logs(g, w)
+        r = bt.compare(gg, ww, {})
+        kinds = [d["kind"] for d in r["divergences"]]
+        self.assertEqual(kinds[:2], ["extra", "missing"], kinds)
+        ex, mi = r["divergences"][0], r["divergences"][1]
+        self.assertEqual((ex["guest"].name, ex["wine"].name), ("X", "C"))
+        self.assertIn("and 1 more", mi["detail"])
+        self.assertEqual([c.name for c in bt.path(mi["wine"])], ["A", "B"])   # the exe's caller chain
+        self.assertEqual([c.name for c in bt.path(mi["guest"])], ["A", "D"])  # where the guest goes on
+        self.assertEqual(r["first"]["kind"].split()[0], "arg")
+        self.assertEqual(r["first"]["guest"].name, "D")
+        self.assertEqual(len(bt.compare(gg, ww, {}, limit=1)["divergences"]), 1)
+
     def test_image_argument_divergence(self):
         g = [guest_line(1, 0, "A", "00401000", [0x01082504, 5])]
         w = [wine_line(1, 0, "A", "00401000", 0x010824fc, [5])]
