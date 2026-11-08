@@ -3736,6 +3736,69 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         if extend and len(pts) != 1 and not shift:   # S2c-vt2: shifted secondary groups (slotfill2.shift_plan)
             st['skipped-secondary-vtables'] += 1
             extend = False
+        # VTFILL (orchestrator 2026-11-08 12:22): write the table as the gate expects it, transform(exe table) from
+        # classlayout's decision, slot by slot: D1 / D0 at the exe's deleting-destructor slot, exe_slot_target of every
+        # other exe slot (its native body, S4's _purecall, a flags / deleting stub); where that is only a trap and the
+        # native table has a real word at the same index, the native word stays (listed: vtfill-kept). Single address
+        # point only (a group with secondary bases keeps the builder's result: vtfill-skipped-secondary), never over a
+        # strong (key function) definition. FNVNX_VTFILL=0 turns it off.
+        if slots and lay and os.environ.get('FNVNX_VTFILL', '1') != '0':
+            dec_ = {(lay[v]['kind'], lay[v]['dtor_slot']) for v in vs if v in lay}
+            if len(dec_) == 1 and len(pts) != 1:
+                st['vtfill-skipped-secondary'] += 1
+            elif len(dec_) == 1:
+                kind_, k_ = next(iter(dec_))
+                raw_ = [e.sym for e in ents[2:2 + n]]
+                if kind_ == 'minus-one' and (is_com(z, raw_) or (0 <= k_ < len(raw_) and raw_[k_] and
+                                                                 raw_[k_] in (called or ()))):
+                    kind_ = 'exe-order'   # as prepare: COM by its slot names, a destructor slot named by code
+                if o.bind(z) != 'weak':
+                    st['vtfill-skipped-strong'] += 1
+                else:
+                    import classlayout as _cl
+                    expv = _cl.expected(dict(kind=kind_, dtor_slot=k_), slots)
+                    fill, i_, pair_ = [], 0, None
+                    cur = names[2:2 + n]
+                    while i_ < len(expv):
+                        x_ = expv[i_]
+                        if isinstance(x_, tuple):
+                            pair_ = vmo_dtor_slots(x_[1], native, msvc or (lambda n_: None), bridges, traps, st,
+                                                   (z, 2 + i_), exe_path)
+                            if pair_:
+                                fill += list(pair_)
+                            else:
+                                fill += [exe_slot_target(x_[1], native, providers, exe_path, bridges, traps, st,
+                                                         (z, 2 + i_))] * 2
+                                st['vtfill-dtor-no-stub'] += 1
+                            i_ += 2
+                            continue
+                        t_ = exe_slot_target(x_, native, providers, exe_path, bridges, traps, st, (z, 2 + i_))
+                        if t_.startswith('__fnvnx_vtrap_') and i_ < len(cur) and cur[i_] and \
+                                not cur[i_].startswith(('__fnvnx_vtrap_', '.reloc', '.section:')):
+                            t_ = cur[i_]
+                            st['vtfill-kept'] += 1
+                        elif t_.startswith('__fnvnx_vtrap_'):
+                            st['vtfill-trap'] += 1
+                        fill.append(t_)
+                        i_ += 1
+                    head_ = ['    .word 0x%x' % ents[0].word if not ents[0].sym else '    .word %s' % ents[0].sym,
+                             '    .word %s' % ents[1].sym if ents[1].sym else '    .word 0x%x' % ents[1].word]
+                    words_ = head_ + ['    .word %s' % w_ for w_ in fill]
+                    lines = ['// %s from the exe vftable(s) %s: VTFILL, %s%s, %d slots (classlayout)' % (
+                                 z, ' '.join('%08x' % v for v in sorted(vs)), kind_,
+                                 ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill)),
+                             '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3', '    .globl %s' % z,
+                             '    .type %s, %%object' % z, '%s:' % z] + words_ + ['    .size %s, .-%s' % (z, z), '    .text']
+                    bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
+                    st['vtfill-tables'] += 1
+                    st['vtfill-tables-' + kind_] += 1
+                    st['vtfill-slots'] += len(fill)
+                    for v, (z_, ap_, path_, note_) in list(vmap.items()):
+                        if z_ == z:
+                            vmap[v] = (z_, ap_, VTEXT_OBJ, note_ + ', VTFILL from the exe (%s)' % kind_)
+                    rows.append((z, os.path.basename(path), str(n), str(max(0, len(fill) - n)),
+                                 ' '.join('%08x' % v for v in sorted(vs)), '0'))
+                    continue
         if not extend and not ov and not d0w and not m1 and not xs:
             continue
         if o.bind(z) != 'weak':   # a key function's unit: its strong copy would be a second definition

@@ -51,6 +51,7 @@ def words(bridges, z):
 
 
 def main():
+    os.environ['FNVNX_VTFILL'] = '0'   # the builder's own checks; VTFILL's are in test_d0slot's VTFILL section
     # the heuristics' own checks: classlayout (the exe's decision, checked at the end) off
     os.environ['FNVNX_CLASSLAYOUT'] = '0'
     tmp = tempfile.mkdtemp(prefix='d26t-')

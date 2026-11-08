@@ -196,6 +196,7 @@ def build_exe(rd, where):
 
 
 def main():
+    os.environ['FNVNX_VTFILL'] = '0'   # the builder's own checks; VTFILL's are in test_d0slot's VTFILL section
     with tempfile.TemporaryDirectory() as t:
         t = os.environ.get("FNVNX_TEST_KEEP") or t
         exe = os.path.join(t, 'Synthetic.exe')
