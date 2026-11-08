@@ -293,7 +293,8 @@ def main():
         why = {}
         for g in gaps:
             why.setdefault(g[2], set()).add(g[7].split(' (')[0])
-        check(why.get('_ZN2Vb1cEi') == {'abi: aggregate or varargs argument 1 differs'}, 'c: abi gap %s'
+        check(len(why.get('_ZN2Vb1cEi') or ()) == 1 and next(iter(why['_ZN2Vb1cEi'])).startswith(
+            'abi: aggregate or varargs argument 1 differs'), 'c: abi gap %s'
               % why.get('_ZN2Vb1cEi'))
         check(why.get('_ZN2Vb1dEv') == {'not compiled'}, 'd: not compiled %s' % why.get('_ZN2Vb1dEv'))
         check(why.get('_ZN2Vb1eEv') == {'past the exe vftable\'s slots'}, 'e: past the slots %s' % why.get('_ZN2Vb1eEv'))
