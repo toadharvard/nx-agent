@@ -792,8 +792,30 @@ class Pair:
                 pro.add(x.address)
             elif not (x.mnemonic == 'sub' and x.op_str.startswith('esp,')):
                 break
+        # the end of the prologue: its `sub esp, frame` is the locals, not an argument block
+        pro_end = 0
+        for x in ins:
+            if x.mnemonic == 'push' and x.op_str in ('ebx', 'ebp', 'esi', 'edi') or \
+                    (x.mnemonic == 'mov' and x.op_str == 'ebp, esp'):
+                pro_end = x.address + x.size
+            elif x.mnemonic == 'sub' and x.op_str.startswith('esp, '):
+                pro_end = x.address + x.size
+                break
+            else:
+                break
         for x in reversed(ins[:i] if i is not None else []):
             if x.address in pro:
+                break
+            if x.mnemonic == 'sub' and x.op_str.startswith('esp, ') and x.address >= pro_end:
+                # (pops) an argument block built in place: `sub esp, 0xc; mov ecx, esp; mov [ecx], ...` (a Vec3 by
+                # value, 005c0bf0's `call eax` with a 12-byte argument): its words are on the stack at the call
+                try:
+                    v = int(x.op_str.split(', ')[1], 0)
+                except ValueError:
+                    v = 0
+                if 0 < v <= 0x40 and v % 4 == 0:
+                    n += v // 4
+                    continue
                 break
             if x.mnemonic == 'push':
                 n += 1
@@ -864,93 +886,133 @@ class Pair:
         """The oracle faulted after an intercepted call whose callee pops an unknown number of bytes (a call through
         a pointer the case planted or filled: no oracle code, no declaration) and whose caller does not clean up
         after it (callee-pops: stdcall/thiscall). With 0 popped, esp is off by the arguments and the oracle returns
-        to garbage (difffuzz-15: most `oracle-vcall` errors, fault:x:00000000). The counts for up to 3 such call
-        sites are searched jointly (each: the pushes before it, most first, then 0) for a clean run: no fault, a
-        balanced stack at the target's return (x86emu Result.esp_ok), and every intercepted call returning into
-        the loaded oracle code (a wrong count returns to an argument word, which then reads as a wild call).
-        Learned per call site for every later case. -> (rx, ra, d) of the clean run, or None."""
-        import itertools
-        sites, cdecl = [], set()
-        for c in rx.calls:
-            ra_ = getattr(c, 'ret_to', None)
-            if not getattr(c, 'pop_unknown', False) or ra_ is None or ra_ in sites or ra_ in self.pops_tried:
-                continue
-            if not self.xe._in_loaded(ra_):
-                continue                                    # a return to an argument word: a symptom, not a site
-            try:
-                after = bytes(self.xe.uc.mem_read(ra_, 8))
-            except Exception:  # noqa: BLE001
-                after = b''
-            if after[:2] in (b'\x83\xc4', b'\x81\xc4') or after[:1] == b'\x59':
-                # the caller adjusts esp right after: cdecl cleanup, nothing popped; unless the adjustment is the
-                # frame's own `add esp, N` going straight to the epilogue (pops, `ret`): then a stdcall callee
-                # is as likely (a COM call through a vtable: 00b7c7b0's `call eax; add esp, 0x20; ret 4`), and
-                # 0 is tried first, the pushes after it
-                n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 0
-                rest = after[n:].lstrip(b'\x5b\x5d\x5e\x5f')
-                if not n or rest[:1] not in (b'\xc2', b'\xc3'):
+        to garbage (difffuzz-15: most `oracle-vcall` errors, fault:x:00000000).
+
+        (pops, difffuzz-20) The sites are fixed one at a time in run order, however many there are (a function with
+        twelve planted `call [vslot]` sites has more combinations than any bound; the joint search of the first
+        three left the rest to a guess). For the first site not yet fixed, each candidate count (the exe's own
+        `ret N` if it says, the pushes right before the call with `sub esp, N` argument blocks included, then 0)
+        runs the case with the earlier sites fixed and the later ones at their guess. The evidence at the site is
+        how far the run goes before the first thing a wrong count there causes: a fault, or an intercepted call
+        that returns outside the loaded code (the `ret` popped an argument word and the word reads as one more
+        wild call). The count that goes farthest is kept (the first in the candidate order on a tie) and the run
+        goes on to the next site. Only a clean run ends the search: no fault, a balanced stack at the target's
+        return (x86emu Result.esp_ok) and every intercepted call returning into the loaded oracle code; a
+        combination that only ends the run is not accepted. Learned per call site for every later case.
+        -> (rx, ra, d) of the clean run, or None."""
+        entry_pops, entry_tried = dict(self.pops), set(self.pops_tried)
+        exe_pop = getattr(self.target.callee_info, 'exe_pop', None)
+        cdecl = set()
+
+        def unknown_sites(x):
+            """The call sites of this run whose callee pop is unknown and not tried before, in run order."""
+            out = []
+            for c in x.calls:
+                ra_ = getattr(c, 'ret_to', None)
+                if not getattr(c, 'pop_unknown', False) or ra_ is None or ra_ in out or ra_ in entry_tried:
                     continue
-                cdecl.add(ra_)
-            sites.append(ra_)
-        # (flow2) more than three unknown-pop sites (a case that plants a pointer in a loop: 0x00a64940's twelve
-        # `call [vftable slot]`): the first three are searched, the rest take their own push count (the commonest
-        # answer for a thiscall/stdcall site) so that the search can end clean; a wrong guess there only fails the run
-        cdecl.update(r for r in sites if self._delayed_cleanup(r))
-        rest, sites = sites[3:16], sites[:3]
-        if not sites:
-            return None
-        self.pops_tried.update(sites + rest)
-        # no push in the straight line before the call (the arguments pushed before a branch, 00e899a0): any count
-        # up to 6 words, each checked by clean()
+                if not self.xe._in_loaded(ra_):
+                    continue                                # a return to an argument word: a symptom, not a site
+                try:
+                    after = bytes(self.xe.uc.mem_read(ra_, 8))
+                except Exception:  # noqa: BLE001
+                    after = b''
+                if after[:2] in (b'\x83\xc4', b'\x81\xc4') or after[:1] == b'\x59':
+                    # the caller adjusts esp right after: cdecl cleanup, nothing popped; unless the adjustment is the
+                    # frame's own `add esp, N` going straight to the epilogue (pops, `ret`): then a stdcall callee
+                    # is as likely (a COM call through a vtable: 00b7c7b0's `call eax; add esp, 0x20; ret 4`), and
+                    # 0 is tried first, the pushes after it
+                    n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 0
+                    rest = after[n:].lstrip(b'\x5b\x5d\x5e\x5f')
+                    if not n or rest[:1] not in (b'\xc2', b'\xc3'):
+                        continue
+                    cdecl.add(ra_)
+                out.append(ra_)
+            cdecl.update(r for r in out if self._delayed_cleanup(r))
+            return out
+
         def counts(a):
-            # (F-uncls, difffuzz-20) the pushes right before the call first, then the walk across branches from the
-            # most down: the search is bounded (27 runs) and three sites with a branch each (0x00e68870: two
-            # `call edx` and a third) put the true counts beyond it in the descending order alone
+            # the pushes right before the call first, then the walk across branches from the most down
             top = self._pushes_before(a)
             if not top:
-                # (flow2) no push anywhere in the straight line before the call (a virtual call with ecx = this
-                # and nothing pushed, 0x00a5ff10's `call eax`): 0 first, then the old descending counts
+                # no push anywhere in the straight line before the call (a virtual call with ecx = this and nothing
+                # pushed, 0x00a5ff10's `call eax`): 0 first, then the old descending counts
                 return [0] + [4 * n for n in range(6, 0, -1)]
             near = min(self._pushes_before(a, strict=True), top)
             return ([4 * near] if near else []) + [4 * n for n in range(top, 0, -1) if n != near]
-        exe_pop = getattr(self.target.callee_info, 'exe_pop', None)
-        tgt = {getattr(c, 'ret_to', None): c.target for c in rx.calls}
 
-        def first(a):
+        def first(a, tgt):
             """The count to try first: the exe's own `ret N` of the function called (a CRT function the tree does
-            not define), else the pushes right before the call."""
+            not define)."""
             n = exe_pop(tgt[a]) if exe_pop and a in tgt else None
             return [] if n is None else [n]
-        cands = [first(a) + ([0] if a in cdecl else []) + counts(a) + ([] if a in cdecl else [0]) for a in sites]
-        cands = [list(dict.fromkeys(c)) for c in cands]
-        fixed = {a: (first(a) or [0 if a in cdecl else 4 * self._pushes_before(a, strict=True)])[0] for a in rest}
+
+        def guess(a, tgt):
+            return (first(a, tgt) or [0 if a in cdecl else 4 * self._pushes_before(a, strict=True)])[0]
 
         # a clean run that only kept callee-saved registers wrong (no fault) need not also fix an esp difference it
         # already had at the target's return (a custom convention's pop: F3, 0x00d55bd0); F1's derail (callee-saved
         # registers intact) must also balance esp
         need_esp = rx.error is not None or rx.esp_ok or rx.saved_ok is not False
 
-        def clean(got):
-            x = got[0]
+        def clean(x):
             return not (x.error or '').startswith('fault:') and (x.esp_ok or not need_esp) and \
-                x.saved_ok is not False and \
-                all(self._returns_into_code(c) for c in x.calls)
-        for combo in itertools.islice(itertools.product(*cands), 27):
-            if not any(combo):
-                continue
-            for a, n in zip(sites, combo):
+                x.saved_ok is not False and all(self._returns_into_code(c) for c in x.calls)
+
+        def reach(x):
+            """How far the run got before its first anomaly: the index of the first intercepted call that returns
+            outside the loaded code, else the call count when a fault ends it, else beyond."""
+            for i, c in enumerate(x.calls):
+                if not self._returns_into_code(c):
+                    return i
+            return len(x.calls) if (x.error or '').startswith('fault:') else len(x.calls) + 1
+
+        def restore(keep):
+            self.pops.clear()
+            self.pops.update(entry_pops)
+            self.pops.update({a: n for a, n in keep.items() if n})
+
+        fixed, cur, runs, done = {}, rx, 0, None
+        while runs < 96:
+            todo = [a for a in unknown_sites(cur) if a not in fixed]
+            if not todo:
+                break
+            self.pops_tried.update(todo)
+            a = todo[0]
+            tgt = {getattr(c, 'ret_to', None): c.target for c in cur.calls}
+            later = {b: guess(b, tgt) for b in todo[1:]}      # the later sites take their guess meanwhile
+            cands = list(dict.fromkeys(first(a, tgt) + ([0] if a in cdecl else []) + counts(a) +
+                                       ([] if a in cdecl else [0])))
+            best = None
+            for n in cands:
+                if not any(fixed.values()) and not n and not any(later.values()):
+                    continue                                  # the run that failed already
+                self.pops.update(fixed)
+                self.pops.update(later)
                 self.pops[a] = n
-            for a, n in fixed.items():
-                self.pops[a] = n
-            got = self._run(case, max_steps)
-            if clean(got):
-                for a, n in list(zip(sites, combo)) + list(fixed.items()):
-                    if not n:
-                        self.pops.pop(a, None)
-                return got
-        for a in sites + rest:
-            self.pops.pop(a, None)
-        return None
+                x = self._run(case, max_steps)
+                runs += 1
+                if clean(x[0]):
+                    done = (x, {**fixed, **later, a: n})
+                    break
+                sc = reach(x[0])
+                if best is None or sc > best[0]:
+                    best = (sc, n, x)
+            if done or best is None:
+                break
+            fixed[a] = best[1]
+            cur = best[2][0]
+        if done is None and fixed:
+            # every site seen is fixed: the run with all the counts set decides
+            restore(fixed)
+            x = self._run(case, max_steps)
+            if clean(x[0]):
+                done = (x, fixed)
+        if done is None:
+            restore({})
+            return None
+        restore(done[1])
+        return done[0]
 
     def _private_names(self, addrs):
         """Names of the native image's data symbols that hold these addresses."""
