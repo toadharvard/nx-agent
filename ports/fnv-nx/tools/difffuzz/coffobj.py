@@ -26,6 +26,64 @@ TLS_IMAGE_START = 0x01272000
 TLS_INDEX = 0x0126fd98
 _POOL_NEXT = LITERAL_POOL
 
+# (float class) The exe image the pinned literals are checked against: an object with .read(va, n) (exeimage.PE), set
+# by a test, else FNVNX_EXE when that file loads, else None (then nothing is checked: the order of the literals stays)
+EXE = None
+_EXE_TRIED = False
+
+
+def exe_image():
+    global EXE, _EXE_TRIED
+    if EXE is None and not _EXE_TRIED:
+        _EXE_TRIED = True
+        try:
+            import os
+            import config
+            import exeimage
+            if Path(config.EXE).exists():
+                EXE = exeimage.load_pe(config.EXE, not os.environ.get('FNVNX_EXE_ANY'))
+        except Exception:  # noqa: BLE001
+            EXE = None
+    return EXE
+
+
+def exe_literals(lit, exe=None, stats=None):
+    """{address: bytes} of pinned literals with the exe's bytes where they disagree. units.json maps several $SG
+    strings of one object to one address (26 of 37 overlaps matched neither literal), so a literal may sit where the
+    exe keeps other bytes and cover real constants behind it (0x00476b20). The union of a group of overlapping
+    literals below the synthetic pool is pinned as the exe's bytes; a lone literal that differs is only counted. Without the exe image nothing changes. `stats` (a dict) counts
+    {'differ': literals that differ from the exe, 'overlap': overlapping groups}."""
+    exe = exe if exe is not None else exe_image()
+    if exe is None:
+        return lit
+    stats = stats if stats is not None else {}
+    stats.setdefault('differ', 0); stats.setdefault('overlap', 0)
+    items = sorted((a, b) for a, b in lit.items() if a < LITERAL_POOL)
+    out = {a: b for a, b in lit.items() if a >= LITERAL_POOL}
+    groups, cur = [], None
+    for a, b in items:
+        if cur is not None and a < cur[1]:
+            cur[1] = max(cur[1], a + len(b)); cur[2].append((a, b))
+        else:
+            cur = [a, a + len(b), [(a, b)]]; groups.append(cur)
+    for lo, hi, members in groups:
+        try:
+            e = bytes(exe.read(lo, hi - lo))
+        except Exception:  # noqa: BLE001
+            for a, b in members:
+                out[a] = b
+            continue
+        if len(members) > 1:
+            stats['overlap'] += 1
+            stats['differ'] += sum(1 for a, b in members if e[a - lo:a - lo + len(b)] != b)
+            out[lo] = e
+        else:
+            a, b = members[0]
+            if e != b:
+                stats['differ'] += 1         # counted, not replaced: 3334 of 15143 pinned literals (tables whose
+            out[a] = b                       # relocated words the object holds as 0, ...), a wider verdict change
+    return out
+
 
 class Coff:
     def __init__(self, path):
@@ -203,7 +261,7 @@ class UnitImage:
                         blob = blob[:min(nxt) - s['value']] if nxt else blob
                         blob = blob[:4096]
                     out[base] = bytes(blob)
-        return out
+        return exe_literals(out)
 
     def writable_initial(self):
         """{original address: bytes}: initial values of writable data the unit defines at mapped addresses (a seed

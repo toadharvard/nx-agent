@@ -757,6 +757,11 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   (`D1Ev`/`D0Ev`, their address-bound forms) or, in an abstract class, as two adjacent zero words.
 * One undefined symbol is renamed once per object: every vtable of the object naming it must agree on the address,
   else the declaring class's vtable decides, else it stays a trap.
+* The synthesized vtable objects (`<unit>#vtables`, vtables.py) are objects of the loop like any compiled one, with
+  the same evidence (the exe vftable the vtable is paired with, the exe word at the slot). refs.tsv names them by
+  their own source, so the rewrite of the bound rows (`rewrite_refs`) matches that name, never the host unit's. A
+  symbol whose uses are bound only per slot (the vtables disagree on the address) keeps its refs.tsv row: the
+  words are in the extended copy (slot_fill.tsv `per slot`), and the row has one target column.
 * ABI (`slot_abi`): every argument the slot's declaration passes and the definition reads must arrive where the
   definition reads it, in the same register file (abi.a64_locations; a free definition takes the object as its
   first pointer parameter, a free definition without parameters reads nothing). A definition that reads more

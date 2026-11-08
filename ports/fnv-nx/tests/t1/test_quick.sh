@@ -29,6 +29,12 @@ assert 'scenario' in on(['tests/s5/emu_guest.py'])[0] and 'scenario' in on(['pla
 assert on(['tools/perf/plat.py'])[0] == ['plat'] and on(['tools/perf/linfeed.py'])[0] == ['frames']
 assert on(['tests/s15/test_plat_report.py'])[0] == ['plat']
 assert on(['tools/threads/variant.sh'])[0] == ['mem', 'plat', 'threads']
+# fnvlink: this head's link and guest lanes, never equiv or the replay (qk1 on aec30808: a cold equiv on a link change)
+assert on(['tools/link/bodies.py'])[0] == ['audit', 'boottrace', 'build', 'frames', 'fuzz', 'mem', 'plat', 'scenario',
+                                          'threads'], on(['tools/link/bodies.py'])
+# the MSVC shim headers: every unitcache key, equiv is cold (left to the eq farms)
+pc = q.plan(['tools/equiv/msvc/fnvnx_win32.h'])
+assert pc['checks']['equiv'] and list(pc['cold']) == ['equiv'] and not q.plan(['tools/equiv/equiv.py'])['cold'], pc
 print('plan ok')
 PY
 ok "plan classes" 'grep -q "plan ok" "$T/plan.txt"'
@@ -57,7 +63,9 @@ for st in prepare compile link guest; do mkdir -p "$FARM_HOME/full/build/$st"
 SH
 { head -1 "$T/jobs/full_job.sh"; cat "$T/jobs/full_job.sh.pre"; tail -n +2 "$T/jobs/full_job.sh"; } >"$T/jobs/f.tmp" && mv "$T/jobs/f.tmp" "$T/jobs/full_job.sh"
 mkdir -p "$T/home/capture/k1"; cp -r "$T/store/index" "$T/home/capture/k1/"
-run_q() { FARM_HOME=$T/home QUICK_JOBS=$T/jobs bash "$G/ports/fnv-nx/tools/farm/quick_job.sh" "$1" "$T/q-$1.md" >"$T/q.log" 2>&1; }
+# the artifacts repository is a local stand-in (never the real one): no equiv/cache branches until a case adds one
+git init -q --bare "$T/art.git"; git clone -q "$T/art.git" "$T/art" 2>/dev/null
+run_q() { ARTIFACTS=$T/art FARM_HOME=$T/home QUICK_JOBS=$T/jobs bash "$G/ports/fnv-nx/tools/farm/quick_job.sh" "$1" "$T/q-$1.md" >"$T/q.log" 2>&1; }
 QUICK_BASE=$B run_q "$H1"
 ok "render change: build + replay, the rest skipped" 'grep -q "^| equiv | skipped: not affected" "$T/q-$H1.md" && grep -q "^| replay | ran | 0 " "$T/q-$H1.md" && grep -q "^| build | ran | 0 " "$T/q-$H1.md"'
 ok "pass -> verified" '[ "$(cat "$T/home/quick/verified")" = "$H1" ] && grep -q "verdict: PASS" "$T/q-$H1.md"'
@@ -105,4 +113,21 @@ ok "all passed: a docs-only head runs nothing" '! grep -q "| ran |" "$T/q-$D3.md
 rm -rf "$T/home/quick"; PREPARE_STATUS=fail run_q "$D1"
 ok "failed stage: build reported failed with its stage" 'grep -q "^| build | ran | 2 .*the build failed: prepare: fail" "$T/q-$D1.md"'
 ok "failed stage: fuzz and lane D skipped" 'grep -q "^| fuzz | skipped: the build failed" "$T/q-$D1.md" && grep -q "^| threads | skipped: the build failed" "$T/q-$D1.md"'
+# a cold equiv (the MSVC shim headers): left to the eq farms, planned again on the next head; QUICK_COLD_LOCAL=1 runs it
+rm -rf "$T/home/quick"; run_q "$D3"
+mkdir -p "$G/ports/fnv-nx/tools/equiv/msvc"; echo x >"$G/ports/fnv-nx/tools/equiv/msvc/fnvnx_win32.h"; git -C "$G" add -A
+git -C "$G" -c user.name=t -c user.email=t@t commit -q -m c1; C1=$(git -C "$G" rev-parse HEAD)
+: >"$T/order"; run_q "$C1"
+ok "cold equiv: skipped, said why, not run" 'grep -q "^| equiv | skipped: cold cache (1 files every key reads): left to the eq farms" "$T/q-$C1.md" && grep -q "^- equiv: cold cache, left to its sharded farms (tools/equiv/msvc/fnvnx_win32.h" "$T/q-$C1.md" && ! grep -q "equiv" "$T/order"'
+ok "cold equiv: not recorded as a pass" 'grep -q "\"equiv\": \"skipped: cold cache" "$T/home/quick/status.json"'
+echo d >"$G/ports/fnv-nx/docs/a.md"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m c2; C2=$(git -C "$G" rev-parse HEAD)
+run_q "$C2"
+ok "the next head: still cold until the eq farms publish a warm cache (none here)" 'grep -q "^| equiv | skipped: cold cache (since ${C1:0:12}): the eq farms have not published" "$T/q-$C2.md"'
+# the eq farms publish a cache of C2 (after C1): the next head runs equiv here, from the warm cache
+( cd "$T/art" && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m "equiv object cache ${C2:0:12} shard 1/1: 10 objects" && git push -q origin HEAD:refs/heads/equiv/cache/1of1 ) 2>/dev/null
+echo e >"$G/ports/fnv-nx/docs/a.md"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m c3; C3=$(git -C "$G" rev-parse HEAD)
+run_q "$C3"
+ok "the eq farms' cache is of a later head: equiv runs here" 'grep -q "^| equiv | ran | 0 " "$T/q-$C3.md"'
+rm -rf "$T/home/quick"; run_q "$D3"; QUICK_COLD_LOCAL=1 run_q "$C1"
+ok "QUICK_COLD_LOCAL=1: the cold equiv runs here" 'grep -q "^| equiv | ran | 0 " "$T/q-$C1.md"'
 [ $fails = 0 ] && echo "test_quick: all ok" || { echo "test_quick: $fails failed"; exit 1; }
