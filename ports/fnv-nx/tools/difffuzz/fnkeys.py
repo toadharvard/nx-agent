@@ -44,7 +44,8 @@ import config
 # a derail and IAT / thunk pops, F2 destructor vptr words / stub holes / planted slots, F3 builtin faults /
 # callee-saved pop learning / bound-stub rewrite / canned results out of the private ranges) change how every
 # function is fuzzed, so no cache from before them is trusted. The d21 / d24 rows below stay for later partial
-# refreshes, as difffuzz-19's did.
+# refreshes, as difffuzz-19's did. F3b (native-stub-data): the AArch64 stub range is background memory, as on the
+# oracle, except the slots of the named / vtable stubs the image binds, where a data access still faults.
 HARNESS = 'difffuzz-20'
 
 
