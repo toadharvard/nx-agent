@@ -181,6 +181,14 @@ struct fnvnx_new_tag {};
 /* IDTOR1: a body-less destructor declaration for a class whose implicit destructor the recipe binds (GCC calls the
  * bound D1 by name instead of defining it inline); MSVC's implicit one already compiles to that call */
 #define FNVNX_IDTOR1(cls) public: ~cls();
+/* D22: a listed class's slot-0 placeholder virtual becomes its virtual destructor (GCC's D1/D0 where MSVC's ??_G
+ * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
+#define FNVNX_D22(C, ...) virtual ~C();
+#define FNVNX_D22_DROP(...)
+/* D26: a call of a converted slot-0 placeholder (MSVC: the deleting destructor ??_G(flags)) is a virtual destructor
+ * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
+template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (flags & 1) delete p; else p->~T(); }
+#define FNVNX_D22_CALL(p, m, ...) fnvnx_d22_vdtor((p), (__VA_ARGS__))
 #endif
 
 /* SAL annotations (sal.h) used without an include in pasted CRT prototypes */

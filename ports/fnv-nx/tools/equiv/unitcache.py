@@ -57,10 +57,49 @@ def names_hash(d):
     return h
 
 
+_ci = {}             # directory -> {lower-case name: [names]} (case-insensitive lookups)
+
+
+def _ci_path(p):
+    """p itself when it exists; else the one file whose path equals p up to letter case, component by component (the
+    compiler runs under Wine, which finds `<Windows.h>` as windows.h); None when there is none or more than one."""
+    if os.path.exists(p) or not os.path.isabs(p):
+        return p
+    cur = os.sep
+    for part in [x for x in p.split(os.sep) if x]:
+        nxt = os.path.join(cur, part)
+        if not os.path.exists(nxt):
+            if cur not in _ci:
+                try:
+                    names = os.listdir(cur)
+                except OSError:
+                    return None
+                m = {}
+                for x in names:
+                    m.setdefault(x.lower(), []).append(x)
+                _ci[cur] = m
+            got = _ci[cur].get(part.lower(), [])
+            if len(got) != 1:
+                return None
+            nxt = os.path.join(cur, got[0])
+        cur = nxt
+    return cur
+
+
 def win_to_posix(p):
+    """A path the compiler printed (/showIncludes) -> the file here. Z: is the root; another drive is the Wine
+    prefix's dosdevices link (C: -> $WINEPREFIX/drive_c: the SDK and CRT headers); letter case as Wine resolves it
+    (T1: such headers had no hashable path, so their units were never stored: 268 objects for a 496-unit shard).
+    A path that exists as printed is returned as before, so earlier cache entries keep their keys."""
+    q = p
     if len(p) > 2 and p[1] == ':' and p[0] in 'Zz':
-        p = p[2:]
-    return os.path.normpath(p.replace('\\', '/'))
+        q = p[2:]
+    elif len(p) > 2 and p[1] == ':' and p[0].isalpha():
+        pre = os.environ.get('WINEPREFIX') or os.path.join(os.path.expanduser('~'), '.wine')
+        dev = os.path.join(pre, 'dosdevices', p[0].lower() + ':')
+        q = (os.path.realpath(dev) if os.path.exists(dev) else dev) + '/' + p[2:].lstrip('\\/')
+    q = os.path.normpath(q.replace('\\', '/'))
+    return _ci_path(q) or q
 
 
 class Cache:
@@ -70,7 +109,7 @@ class Cache:
         self.anchors = sorted(((t, os.path.abspath(d)) for t, d in anchors), key=lambda x: -len(x[1]))
         self.salt = hashlib.sha256(('%s|%s' % (CACHE_V, '|'.join(file_hash(f) or '-' for f in compiler_files)))
                                    .encode()).hexdigest()
-        self.hits = self.misses = 0
+        self.hits = self.misses = self.unkeyed = 0
 
     def norm(self, s):
         for t, d in self.anchors:
@@ -133,7 +172,16 @@ class Cache:
         deps = sorted(set(deps))
         cmd, names = self._ident(args, inc_dirs)
         k = self._key(cmd, names, deps)
-        if k is None:
+        if k is None:   # a dependency this machine cannot read: not stored; the first few named in unkeyed.txt
+            self.unkeyed += 1
+            if self.unkeyed <= 20:
+                bad = next((d for d in deps if file_hash(self.denorm(d)) is None), '?')
+                try:
+                    self.root.mkdir(parents=True, exist_ok=True)
+                    with open(self.root / 'unkeyed.txt', 'a') as f:
+                        f.write('%s\t%s\n' % (source, bad))
+                except OSError:
+                    pass
             return text
         od = self.root / 'o'; od.mkdir(parents=True, exist_ok=True)
         tmp = od / ('%s.obj.tmp%d' % (k, os.getpid()))

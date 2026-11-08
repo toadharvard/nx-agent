@@ -3598,7 +3598,14 @@ def r_static_stand_ins(path, text, stats):
         if not re.search(r'\bstatic\b', lead): continue
         single = names0[name] == 1 and '__declspec' not in lead   # the rule as it was
         overload = not single and names[name] != 1
-        if not single and not overload: continue   # S5's single static noinline stand-ins: not this rule's
+        # A lone `static __declspec(noinline)` stand-in (W6-EQ, 0x00d57aa0 / 0x00d57b20: `static __declspec(noinline)
+        # float FUN_00d571d0() { return DAT_01030ff0; }`, whose name the unit binds to 0x00d571d0, a function the exe
+        # calls there): MSVC never inlines it, so every caller called the bound name, in any optimization flags. The
+        # same address gates apply, with `elsewhere` taken over all units for it (STAND6's argument). Other
+        # __declspec heads (align, naked, ...) and names with no address are still S5's.
+        noinline = (not single and re.search(r'\bnoinline\b', lead)
+                    and not re.search(r'__declspec\s*\(\s*(?!noinline)\w+', lead))
+        if not single and not overload and not noinline: continue
         if overload and re.search(r'(?m)^[ \t]*static\s+[^;{}()]*\b%s\s*\([^;{}]*\)\s*;' % re.escape(name), text): continue
         if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
@@ -3613,7 +3620,10 @@ def r_static_stand_ins(path, text, stats):
         prefix = '?' + '@'.join([name] + list(reversed(ns))) + '@@'
         bound = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
         if not bound or len(bound) != 1: continue
-        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged and single)): continue
+        if noinline:
+            if not (bound <= tagged or (info is not None and bound <= _all_unit_functions(path) - info[1] and not bound & tagged)):
+                continue
+        elif not (bound <= tagged or (bound <= elsewhere and not bound & tagged and single)): continue
         o = m.end() - 1
         c = prepare.match_brace(text, o)
         start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
@@ -3621,7 +3631,7 @@ def r_static_stand_ins(path, text, stats):
         head = re.sub(r'\bstatic\s+', '', text[start:o].rstrip(), count=1)
         edits.append((start, c, head + '; /* fnv-nx STAND4 0x%08x */' % next(iter(bound)) + nl[head.count('\n'):]))
         # the other declarations of the name lose `static` too (a first static declaration keeps the name internal)
-        for d in re.finditer(r'(?m)^([ \t]*)static\s+(?=[^;{}()]*\b%s\s*\([^;{}]*\)\s*;)' % re.escape(name), text):
+        for d in re.finditer(r'(?m)^([ \t]*)static\s+(?=(?:__declspec\s*\(\s*\w+\s*\)|[^;{}()])*\b%s\s*\([^;{}]*\)\s*;)' % re.escape(name), text):
             if d.start() < start or d.start() >= c:
                 edits.append((d.start(), d.end(), d.group(1)))
     if not edits: return text
@@ -5039,6 +5049,12 @@ def _recon_entries(path):
             r['_skip'] = 'REC1-STALE'
         elif any(fn.get('address') in defined for fn in r.get('functions', [])):
             r['_skip'] = 'REC1-DUP'
+            # reported like a rejection (recon_rejected.tsv, count -3): a recon written before another unit placed one of
+            # its functions loses its body and symbols silently otherwise (R2: the readbuf and parser839 recons of
+            # blk_00ac0000_od_ob1_variant.cpp, 7 + 2 traps back open on link 97deacd38aec)
+            dup = sorted(fn['address'] for fn in r.get('functions', []) if fn.get('address') in defined)
+            prepare.__dict__.setdefault('_fnvnx_recon_rejected', []).append(
+                (os.path.dirname(f), r['unit'], -1, -3, 'functions placed by another unit now: ' + ' '.join(dup)))
         _RECON.append((r, os.path.dirname(f)))
     return _RECON
 
@@ -5148,8 +5164,27 @@ def r_recon_bodies(path, text, stats):
             text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
             if not text.endswith('\n'): text += '\n'
             stats['REC1'] += len(r.get('functions', []))
+            # one per appended recon body: REC1 counts placed functions only, so the inline (D23 c) bodies, the
+            # GCC-only stand-ins and the re-issued recons (functions: []) were not counted at all (orchestrator, S2)
+            stats['REC1-APPEND'] += 1
         r['_applied'] = True
     return text
+
+def recon_retarget(u, rt):
+    """REC1-RETARGET: a recon whose replace pairs change the decoration of a function the unit's recipe already places
+    (a return type fixed from the exe: EQ/R2 0x008d1e50 GetNextObjectFloat, float -> void*, QAEMXZ -> QAEPAXXZ) moves
+    that recipe entry to the new decoration: {address, old, new}. Only when the unit places exactly `old` at `address`
+    (anything else is a miss, counted, and changes nothing); the unit's symbols binding of `old` follows. -> 1 or 0."""
+    a = rt.get('address', '').lower()
+    for f in u.get('functions', []):
+        if f['address'].lower() == a and f['symbol'] == rt.get('old') and rt.get('new'):
+            f['symbol'] = rt['new']
+            sy = u.setdefault('symbols', {})
+            if rt['old'] in sy:
+                sy.setdefault(rt['new'], sy.pop(rt['old']))
+            return 1
+    return 0
+
 
 def add_recon_definitions(out_root, stats, files=None):
     """POST hook: REC1's recipe entries (functions and symbols) in <out_root>/build/units.json."""
@@ -5158,7 +5193,7 @@ def add_recon_definitions(out_root, stats, files=None):
     rej = prepare.__dict__.get('_fnvnx_recon_rejected') or []
     if rej and os.path.isdir(os.path.join(out_root, 'build')):
         with open(os.path.join(out_root, 'build', 'recon_rejected.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed, -2: append redefines)\told (start) or reason\n')
+            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed, -2: append redefines, -3: placed elsewhere)\told (start) or reason\n')
             for row in rej:
                 f.write('\t'.join(str(x).replace('\t', ' ').replace('\n', '\\n') for x in row) + '\n')
         stats['REC1-REJECTED-RECONS'] = len(rej)
@@ -5178,6 +5213,10 @@ def add_recon_definitions(out_root, stats, files=None):
             for k, v in r.get('symbols', {}).items():
                 if k not in u.setdefault('symbols', {}):
                     u['symbols'][k] = v; m += 1
+            for rt in r.get('retarget_functions', []):     # REC1-RETARGET (see recon_retarget)
+                t = recon_retarget(u, rt)
+                stats['REC1-RETARGET' if t else 'REC1-RETARGET-MISS'] += 1
+                n += t
     if n or m:   # symbols persist on their own: a recon may only bind names to the exe's functions (R1: the Havok
         # agents DCD6A0Agent1..9, compared by address in FUN_00dcd4d0, must bind to the exe and get no body)
         stats['REC1-DEF'] += n
@@ -5362,9 +5401,316 @@ def r_implicit_bound_destructors(path, text, stats):
     stats['IDTOR1'] += len(edits)
     return text
 
+# ---------------------------------------------------------------------------------------------------------- D22
+#
+# D22 (docs/ARCHITECTURE.md): MSVC gives a virtual destructor one vftable slot (??_G(flags)); GCC gives it two (D1, D0),
+# and the link maps them by the minus-one rule. The decomp often declares a class's first virtual as a placeholder
+# (`virtual void v0();`, `virtual void Unk_00();`) where the exe's vftable has the deleting destructor in slot 0: under
+# GCC every later slot of that class (and of every caller declaring the same hierarchy) is then one off. D22 declares
+# `virtual ~C();` instead of the placeholder, under GCC only: FNVNX_D22(C, <the original declaration>) expands to the
+# original declaration under MSVC (tools/equiv/msvc/fnvnx_equiv_fi.h), so MSVC's objects are unchanged.
+# Which classes: the exe's vftables are needed (slot 0 is read from the image), so the list is exe-derived and
+# private: tools/rules/_d22_classes.py writes d22.json (fnvnx-d22/1) into fnv-nx-build branch recon/d22_vtable_dtor,
+# which tools/farm/recon.sh fetches into FNVNX_RECON with the recon bodies. Without it D22 does nothing.
+# A class is listed by its qualified name with the placeholder's member name; the rule rewrites, in every file, a
+# class of that qualified name whose first declared virtual is that member, has no base with virtual functions
+# (no base at all; so its first declared virtual is slot 0), declares no destructor, and whose placeholder is not
+# defined outside the class nor called by that name in the file (D22-CALLED / D22-DEFINED are counted, not
+# rewritten).
+
+D22_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)', re.S)
+D22_CLASS_HEAD = re.compile(r'\b(class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)'
+                            r'\s*(?:final\s*)?(:[^;{}]*)?$', re.S)
+D22_VIRTUAL = re.compile(r'\bvirtual\b')
+D22_TEMPLATE = re.compile(r'\btemplate\s*<[^;{}]*>\s*$', re.S)
+
+def d22_mask(text):
+    """text with comments and string / character literals blanked (same length, line breaks kept)"""
+    return D22_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+
+def d22_classes(text, masked=None):
+    """Every class / struct definition of text: dict(qual=[outer..., name], open, close, bases, template, dtor,
+    first=(start, end, member, decl) of the first declared virtual at the class's own depth, or None)."""
+    masked = masked if masked is not None else d22_mask(text)
+    spans = prepare.scope_spans(masked)
+    out = []
+    for i, (o, c, kind, head) in enumerate(spans):
+        if kind != 'class': continue
+        m = D22_CLASS_HEAD.search(masked[max(0, o - 600):o].rstrip())
+        if not m: continue
+        hs = max(0, o - 600) + m.start()
+        qual, own = [], []
+        for o2, c2, k2, h2 in spans:
+            if o2 >= o: break
+            if o2 < o < c2:
+                if k2 == 'namespace':
+                    nm = re.match(r'(?:inline\s+)?namespace\s+(\w+)', h2 or '')
+                    qual.append(nm.group(1) if nm else '{anon}')
+                elif k2 == 'class':
+                    hm = D22_CLASS_HEAD.search(masked[max(0, o2 - 600):o2].rstrip())
+                    qual.append(hm.group(2) if hm else '{?}')
+                elif k2 != 'extern':
+                    qual.append('{local}')
+        # the class's own depth: positions inside the body not inside a nested brace pair
+        nested = [(o2, c2) for o2, c2, _, _ in spans if o < o2 < c]
+        def own_depth(pos):
+            return not any(o2 < pos < c2 for o2, c2 in nested)
+        virtuals, dtor = [], False
+        name = m.group(2)
+        for dm in re.finditer(r'~\s*%s\s*\(' % re.escape(name), masked[o:c]):
+            if own_depth(o + dm.start()): dtor = True; break
+        skip_to = o + 1
+        for vm in D22_VIRTUAL.finditer(masked, o + 1, c):
+            if vm.start() < skip_to or not own_depth(vm.start()): continue
+            # the declaration runs to `;` at the class's depth, or to the end of its inline body
+            j, end = vm.end(), None
+            while j < c:
+                ch = masked[j]
+                if ch == ';': end = j + 1; break
+                if ch == '{':
+                    end = prepare.match_brace(masked, j); break
+                j += 1
+            if end is None: break
+            decl = masked[vm.start():end]
+            mm = re.search(r'(~?\s*[A-Za-z_]\w*|operator\s*[^\s(]+)\s*\(', decl)
+            ls = masked.rfind('\n', 0, vm.start()) + 1
+            pre = masked[ls:vm.start()]
+            start = vm.start()
+            if re.match(r'^\s*[A-Z_][A-Z0-9_]*(?:\s+[A-Z_][A-Z0-9_]*)*\s*$', pre) and pre.strip():
+                start = ls + len(pre) - len(pre.lstrip())                    # FNVNX_KEEP virtual ...
+            virtuals.append((start, end, re.sub(r'\s+', '', mm.group(1)) if mm else None, text[start:end]))
+            skip_to = end
+        out.append(dict(qual=qual + [name], open=o, close=c, head=hs, bases=(m.group(3) or '')[1:].strip(),
+                        template=bool(D22_TEMPLATE.search(masked[max(0, hs - 300):hs])), dtor=dtor,
+                        first=virtuals[0] if virtuals else None, virtuals=virtuals, kind=m.group(1)))
+    return out
+
+def d22_placeholder(masked, cls, decl, ignore=()):
+    """the virtual declaration decl = (start, end, member, text) of class cls is a placeholder in this file: no
+    definition outside the class, an inline body of one statement at most, and no other use of its name followed by
+    `(` (a call or another declaration)"""
+    start, end, member, src = decl
+    if not member or member.startswith(('~', 'operator')) or '"' in src or "'" in src: return False
+    body = masked[start:end]
+    if '{' in body:
+        inner = body[body.find('{') + 1:body.rfind('}')]
+        if len([s for s in inner.split(';') if s.strip()]) > 1 or '{' in inner: return False
+    rest = masked[:start] + ' ' * (end - start) + masked[end:]
+    for a, b in ignore:                         # other classes' virtual declarations of the same name
+        if (a, b) != (start, end): rest = rest[:a] + ' ' * (b - a) + rest[b:]
+    if re.search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), rest): return False
+    if re.search(r'(?<![\w~])%s\s*\(' % re.escape(member), rest): return False
+    return True
+
+def _d22_list():
+    """{class key: set(members)} from every d22.json under FNVNX_RECON (or the file FNVNX_D22); cached on prepare
+    (equiv.py loads the stream modules twice)"""
+    st = prepare.__dict__.get('_fnvnx_d22')
+    if st is not None: return st
+    files = []
+    if os.environ.get('FNVNX_D22') and os.path.isfile(os.environ['FNVNX_D22']): files.append(os.environ['FNVNX_D22'])
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'd22.json') for dp, _, ns in os.walk(top) if 'd22.json' in ns)
+    st = collections.defaultdict(set)
+    import json
+    for f in files:
+        try: d = json.load(open(f))
+        except (OSError, ValueError): continue
+        if d.get('format') != 'fnvnx-d22/1': continue
+        for c in d.get('classes', ()):
+            st[c['class']].update(c.get('members', ()))
+    prepare.__dict__['_fnvnx_d22'] = st
+    return st
+
+def _d22_bases(bases):
+    out = []
+    for b in _split_bases(bases) if bases else ():
+        b = re.sub(r'^(?:(?:public|protected|private|virtual)\s+)+', '', b.strip())
+        out.append(re.sub(r'\s*<.*', '<>', b).split('::')[-1].strip())
+    return out
+
+# D26 (b): a call-only placeholder declaration (S5 tests/s5/callonly_vt.py) takes the same FNVNX_D22 without a list:
+# a class with no base and no destructor that declares at least two virtuals, defines none of them in the file (no
+# inline body, no `C::member(` definition), and whose first virtual's name is a placeholder (v0, vf0, Unk_00,
+# ...Unknown0, Reserved0, ...). Code uses it only to dispatch on an object of a class it does not name, by the exe's
+# slot numbers (a class of the file that derives from it defines none of its own virtuals either: otherwise its
+# vtable and implicit destructor would need the undefined `~C`); under D26 every native receiver has D1/D0 at slots 0/1 (D22, the image vftables' minus-one copies),
+# so the declaration needs `virtual ~C()` where its slot-0 placeholder is. A placeholder called by name stays
+# (D22-USED: slot 0 is the deleting destructor, whose call needs another form).
+D22_CALLONLY_PLACEHOLDER = re.compile(
+    r"^(?:v|vf|vfn|vt|vfunc|virt|virtual|slot|func|fn|unk|unknown|Unk_?|Unknown|Func|Virtual|Reserved|reserved|pad|Pad|"
+    r"Slot|V|F)_?0+$|^\w*?Unknown_?0*$|^\w*_v0$|^v0_\w*$|^vfunc0\w*$|^Unk(?:nown)?0+\w*$", re.IGNORECASE)
+
+def _d22_callonly(masked, c):
+    """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above)"""
+    if c['bases'] or c['dtor'] or not c['first'] or len(c['virtuals']) < 2: return False
+    if not c['first'][2] or not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]): return False
+    if any('{' in masked[v[0]:v[1]] for v in c['virtuals']): return False
+    name = c['qual'][-1]
+    members = {v[2] for v in c['virtuals'] if v[2]}
+    for m in re.finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), masked):
+        if re.sub(r'\s+', '', m.group(1)) in members: return False
+    return True
+
+def _d22_defines_none(masked, c):
+    """class c defines no member function in the file (no body in the class, no `C::member(` definition) and
+    declares no destructor: GCC emits neither its vtable nor its destructor here"""
+    if c['dtor'] or '{' in masked[c['open'] + 1:c['close']]: return False
+    return not re.search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~?\s*[A-Za-z_]\w*\s*\([^;{}]*\)[^;{}]*\{'
+                         % re.escape(c['qual'][-1]), masked)
+
+D22_REF = re.compile(r'(?:::|->|\.)\s*(~?[A-Za-z_]\w*)\s*\(')
+D22_SRC_EXT = ('.cpp', '.c', '.h', '.inl', '.hpp', '.cxx', '.cc')
+
+D22_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]([^>"]+)[>"]', re.M)
+
+def _d22_tree_refs(path):
+    """The tree index for header edits, cached per tree root: (refs, includers) where refs = {member name: {file}}
+    of the files that define (`::m(`) or call (`->m(`, `.m(`) a member of that name, and includers(h) = the files
+    that include the header h, directly or through other headers (by lower-case basename, as the decomp's includes
+    resolve case-insensitively). A header's declaration is seen only by the units that include it."""
+    root, _ = prepare._units_json(path)
+    top = root or os.path.dirname(os.path.abspath(path))
+    cache = prepare.__dict__.setdefault('_fnvnx_d22_refs', {})
+    if top in cache: return cache[top]
+    refs = collections.defaultdict(set)
+    inc_by = collections.defaultdict(set)              # included basename -> files including it
+    base_of = collections.defaultdict(set)             # basename -> files of that name
+    for dp, _, fs in os.walk(os.path.join(top, 'src') if os.path.isdir(os.path.join(top, 'src')) else top):
+        for f in fs:
+            if not f.endswith(D22_SRC_EXT): continue
+            fp = os.path.abspath(os.path.join(dp, f))
+            try: s = open(fp, encoding='utf-8', errors='surrogateescape').read()
+            except OSError: continue
+            base_of[f.lower()].add(fp)
+            for m in D22_REF.finditer(s): refs[m.group(1)].add(fp)
+            for m in D22_INCLUDE.finditer(s): inc_by[os.path.basename(m.group(1).replace('\\', '/')).lower()].add(fp)
+    memo = {}
+    def includers(h):
+        h = os.path.abspath(h)
+        if h in memo: return memo[h]
+        seen, todo = set(), [os.path.basename(h).lower()]
+        done_b = set()
+        while todo:
+            b = todo.pop()
+            if b in done_b: continue
+            done_b.add(b)
+            for fp in inc_by.get(b, ()):
+                if fp not in seen:
+                    seen.add(fp)
+                    if not fp.endswith(('.cpp', '.c', '.cxx', '.cc')): todo.append(os.path.basename(fp).lower())
+        memo[h] = seen
+        return seen
+    cache[top] = (refs, includers)
+    return cache[top]
+
+def _d22_extern_use(path, member):
+    """a header's member name that a file including the header (directly or not) defines or calls (try1of1
+    4a15e91c: `NiPosData::LoadBinary` defined in niposdata.cpp lost its declaration in niposdata_local.h;
+    bgsprojectile.cpp called TESModelVTable::Slot0); .cpp declarations are the unit's own. A file that does not
+    include the header cannot see the edit (EQ vslot-shift: teswater_work.h's TESObjectREFR was held back because
+    unrelated files call some other class's vfn_0)"""
+    if path.endswith(('.cpp', '.c', '.cxx', '.cc')) or not member: return False
+    me = os.path.abspath(path)
+    refs, includers = _d22_tree_refs(path)
+    users = refs.get(member, ())
+    if not users: return False
+    inc = includers(me)
+    return any(f != me and f in inc for f in users)
+
+def r_vtable_dtor_slot(path, text, stats):
+    """D22: `virtual ~C();` for a listed class's slot-0 placeholder under GCC (above); a derived class's
+    re-declaration of that placeholder is dropped under GCC (it would append a slot)."""
+    lst = _d22_list()
+    if 'virtual' not in text: return text
+    masked = d22_mask(text)
+    classes = d22_classes(text, masked)
+    edits, done = [], {}                        # done: simple class name (or T<>) -> placeholder member
+    vdecls = collections.defaultdict(list)      # member -> spans of every virtual declaration of that name
+    for c in classes:
+        for v in c['virtuals']:
+            if v[2]: vdecls[v[2]].append((v[0], v[1]))
+    calls, masked_nc, needs = {}, {}, collections.defaultdict(list)
+    def statement_calls(ph):
+        # `EXPR->ph(flags);` as a statement: the deleting-destructor call D26 turns into FNVNX_D22_CALL
+        if ph not in calls:
+            calls[ph] = [m for m in re.finditer(r'(?<=[;{}\n])([ \t]*)((?:this|[A-Za-z_]\w*)(?:\s*(?:->|\.)\s*[A-Za-z_]\w*)*)'
+                                                r'\s*->\s*%s\s*\(\s*((?:0x)?[0-9]+[uU]?)\s*\)\s*;' % re.escape(ph), masked)]
+            nc = masked
+            for m in calls[ph]: nc = nc[:m.start(2)] + ' ' * (m.end() - m.start(2)) + nc[m.end():]
+            masked_nc[ph] = nc
+        return calls[ph]
+    for c in classes:
+        key = c['qual'][-1] + '<>' if c['template'] else '::'.join(c['qual'])
+        callonly = key not in lst and _d22_callonly(masked, c) and \
+            not any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
+                    for o in classes if o['bases'])
+        if not callonly:
+            if key not in lst or not c['first']: continue
+            if c['bases'] or c['dtor'] or c['first'][2] not in lst[key]: continue
+        if _d22_extern_use(path, c['first'][2]):
+            stats['D22-EXTERN'] += 1; continue
+        if not d22_placeholder(masked, c['qual'][-1], c['first'], vdecls[c['first'][2]]):
+            ph = c['first'][2]
+            if not (callonly and statement_calls(ph) and
+                    d22_placeholder(masked_nc[ph], c['qual'][-1], c['first'], vdecls[ph])):
+                stats['D22-USED'] += 1; continue
+            needs[ph].append(len(edits))
+        edits.append((c['first'][0], c['first'][1], 'FNVNX_D22(%s, %s)' % (c['qual'][-1], c['first'][3])))
+        done[c['qual'][-1] + ('<>' if c['template'] else '')] = c['first'][2]
+        stats['D22-CALLONLY' if callonly else 'D22'] += 1
+    drop = set()
+    for ph, idx in needs.items():
+        # the calls are rewritten only when every class of the file that declares a virtual `ph` has it converted
+        conv = {edits[i][0] for i in range(len(edits)) if edits[i][2].startswith('FNVNX_D22(')}
+        if all(v[0] in conv for cc in classes for v in cc['virtuals'] if v[2] == ph):
+            for m in calls[ph]:
+                edits.append((m.start(2), m.end(), 'FNVNX_D22_CALL(%s, %s, %s);' % (text[m.start(2):m.end(2)], ph,
+                                                                                  text[m.start(3):m.end(3)].strip())))
+                stats['D22-CALL'] += 1
+        else:
+            drop.update(idx)
+            stats['D22-USED'] += len(idx)
+    if drop:
+        for i in drop:
+            nm = re.match(r'FNVNX_D22\((\w+),', edits[i][2]).group(1)
+            done.pop(nm, None); done.pop(nm + '<>', None)
+            stats['D22-CALLONLY'] -= 1
+        edits = [e for i, e in enumerate(edits) if i not in drop]
+    here = {c['qual'][-1] + ('<>' if c['template'] else '') for c in classes}
+    for k, ms in lst.items():                   # listed classes defined in another file (a header)
+        sk = k.split('::')[-1]
+        if sk not in done and len(ms) == 1 and sk not in here: done.setdefault(sk, next(iter(ms)))
+    changed = True
+    while changed:                              # derived classes, through chains of derivation in the file
+        changed = False
+        for c in classes:
+            if not c['bases'] or not c['virtuals']: continue
+            mine = c['qual'][-1] + ('<>' if c['template'] else '')
+            for b in _d22_bases(c['bases']):
+                mem = done.get(b)
+                if not mem: continue
+                for v in c['virtuals']:
+                    if v[2] != mem or any(e[0] == v[0] for e in edits): continue
+                    if _d22_extern_use(path, v[2]):
+                        stats['D22-EXTERN'] += 1; continue
+                    if not d22_placeholder(masked, c['qual'][-1], v, vdecls[v[2]]):
+                        stats['D22-USED'] += 1; continue
+                    edits.append((v[0], v[1], 'FNVNX_D22_DROP(%s)' % v[3]))
+                    stats['D22-DERIVED'] += 1
+                    if mine not in done: done[mine] = mem; changed = True
+    if not edits: return text
+    out, pos = [], 0
+    for a, b, rep in sorted(edits):
+        if a < pos: continue
+        out.append(text[pos:a]); out.append(rep + ' /* fnv-nx D22 */'); pos = b
+    out.append(text[pos:])
+    return ''.join(out)
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors]
+              r_implicit_bound_destructors, r_vtable_dtor_slot]
 RULES += REFS_RULES

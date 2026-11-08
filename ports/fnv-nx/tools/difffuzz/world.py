@@ -197,7 +197,8 @@ class World:
         if TEXT[0] <= p < TEXT[1]:
             data = bytearray(b'\xcc' * PAGE)
         elif self.case.bg == 'rand' and not (STACK[0] <= p < STACK[1]):
-            data = bytearray(random.Random((self.case.seed << 20) ^ p).randbytes(PAGE))
+            data = bytearray(random.Random(((self.case.seed if BG_SEED is None else BG_SEED) << 20) ^ p)
+                             .randbytes(PAGE))
         else:
             data = bytearray(PAGE)
         for a, b in self._overlay_pages().get(p, ()):
@@ -232,6 +233,12 @@ BYTE_READS = None
 # come from the random background (a bool global or a field behind a background pointer), which the case does not
 # plant
 BG_READS = None
+# F-uncls (difffuzz-20): with BG_SEED set, the random background ('rand' cases) is that seed's, whatever the case's
+# own seed: classify.py's garbage probe changes the seed (stack fill, registers) and keeps the background
+BG_SEED = None
+# F-uncls: with EAX_TRACK set to a dict, x86emu.run records in it how the last instruction that wrote eax wrote it
+# ('full', or 1 / 2 for an al / ax write): classify.py's partial-return probe
+EAX_TRACK = None
 # (float class, difffuzz-20) x87 control word of the oracle run: 0x027f is the MSVC CRT default (53-bit mantissa). The
 # precision probe of classify.hint reruns a case with 0x007f (24-bit mantissa: every x87 operation rounds to a float,
 # as the AArch64 build does) to see whether the divergence is only the excess precision of x87 intermediates

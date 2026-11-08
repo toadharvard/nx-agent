@@ -171,9 +171,31 @@ def plain_vftables(path, addrs, starts):
     return out
 
 
+def string_at(path, addr, max_len=512):
+    """The text of the C string the exe stores at addr, else None: addr in a data section the loader maps (never
+    code), the byte before it a NUL (a string starts there: not the middle of one, nor a number), then 1..max_len
+    printable ASCII characters (tab / newline / carriage return too) up to a NUL. The evidence a `str_<addr>`
+    name needs (S2-bodies top-down 10 / 11): the name is a claim, the exe's bytes say whether it holds."""
+    pe, data = _text(path)
+    import fnvnx_pe
+    img = _IMG.get(path)
+    if img is None:
+        img = _IMG[path] = fnvnx_pe.Image(pe)
+    got = img.string(addr, max_len)
+    if not got or not got[0]:
+        return None
+    prev = img.read(addr - 1, 1)
+    if prev != b'\0':
+        return None
+    if any(not (0x20 <= c < 0x7f or c in (9, 10, 13)) for c in got[0]):
+        return None
+    return got[0].decode('latin-1')
+
+
 # ---- trivial leaf functions of the exe (S2c-vt): an exact native stub where no unit compiles the address
 
 _PE = {}
+_IMG = {}
 
 
 def _text(path):

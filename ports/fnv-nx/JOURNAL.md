@@ -3562,3 +3562,29 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   and S5.
 * **D26**: the source fixes are in (S1-rules, 14 units). wip/d26 686c576f is building on try1of1.
 * **budget**: hourly orchestrator check-ins; streams batch their messages hourly.
+
+### J-0159 | 2026-11-08 | stream: orchestration | status: active | parent: J-0158
+
+* **boot regression on 97deacd** (S5 stub boot): 3,458 skipped initializers (baseline 1), milestones 2/10
+  (baseline 3/10). One link-side class: fnvlink.exe_vtable_copies ran exevft.dtor_pos on post-rename slot names,
+  so a D1/D0 pair renamed to one native FUN_ was not seen and exe slot 1 was lost (SettingPointerMap: HashKey
+  replaced by the destructor; 91-113 tables of this shape, 86 already at 0540). An emulator-only repair of slot 1
+  gives 1 skip and 3/10 with no fault: renderer-init through Null_IDirect3D9::CreateDevice, the old
+  InitRenderer +0x434 fault gone. The product fix (S2-bodies 53042f17: raw-symbol pairing, D0 never runs a
+  destroy-only body; S1-rules c24a232: virtual ~C() for call-only header classes) lands only with D26, on
+  wip/d26 3f7a6c35, since slot-1 calls in exe order need D26 (b).
+* **try farms read wip/* from fnv-nx-build**: the streams pushed wip/d26 to nx-agent only, so try1of1 built the
+  stale 686c576f. The build repo's wip/d26 is fast-forwarded to 3f7a6c35; streams now push to both.
+* **eqa 9a303226** (MSVC gate, 1 shard): 2,988 units, 2,407 identical, 580 differ; functions 68,456 compared,
+  1,141 differ (EH-only 789, retarget 211, code 141).
+* **ABI class found** (S2-bodies 4b150828): thisadj and xexit read the exe only from FNVNX_EXE, which full_job
+  never set, so full1 had 0 secondary-base thunk bindings. 823 secondary entries; bodies/exevft/fnvlink read it
+  too, and the full_job export follows.
+* **incremental link** (T1): resolve 104 -> 57 s, exe pass 88 -> 23 s, vtables on a subset 95 -> 4 s warm; the
+  output is identical. LINKEQ runs on its own farm (leq1). The eq farms are retired: eqa is the equiv farm,
+  persistent, and its cache now keys SDK/CRT units (06e0e3e).
+* **top-down** (R2, 97deacd): 252 rows (181 functions, 71 data), owners s2-bodies 157 / recon 95, 1 hit in boots.
+  Every batch now accounts for every row taken (owner).
+* **decisions**: x87-range is a declared compiler class (per record, clamped rerun); SSE2NEON_PRECISE_MINMAX=1
+  for SSE parity; the 0xd0f300 placed caller binds the real body.
+* **open**: zero table and sc1 read stale reports (T1); fuzz baseline fz1..fz8 and boot_trace bt1 are running.

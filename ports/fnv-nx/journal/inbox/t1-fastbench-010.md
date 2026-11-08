@@ -21,5 +21,13 @@
   (SCENARIO_PROGRESS_S, SCENARIO_LINHOST_S). The scenario farm keeps its defaults.
 * **24d016a.** fuzz_job logs and reports the seconds of each report step: attribution, view+status, report.py
   new/cum, causes. The 1,324 s gets its breakdown on the next run, and then the slow step gets cached.
+* **c0a5146, the fuzz report's attribution.** attrib.py rules is the step that runs for every new link. On
+  31971038913d's tree it takes 392 s (profiled: 360 s difflib, 185 s regexes). Each unit's result is now kept
+  under sha256(attrib.py, pristine source, prepared source) in $FARM_HOME/attrib-cache: 1 s warm. The output is
+  byte-identical cold and warm; tests/t1/test_attrib_cache.py covers it.
+* **279f180, quick's fuzz fuzzed nothing.** FUZZ_MAX_S=600 counts from the job's start, but setup took 689 s, so
+  the loop ended before its first chunk: 0 of 38,822 pending functions fuzzed. fuzz_job's FUZZ_LOOP_S gives the
+  loop its own budget; quick uses 420 s. The setup steps (targets, keys, cache, todo) now report their seconds;
+  the keys of 68k functions are the likely cost, next once measured.
 * expected on a head like aec30808: about 172 min -> the longest of fuzz (about 35 min, of which 22 is report) and
   the build and guest lanes; under 20 min needs the fuzz report step cut. That comes after the farm numbers.
