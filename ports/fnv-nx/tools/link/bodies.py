@@ -896,6 +896,9 @@ def synth_host(tree, work, host, rows, itanium, inline=False, gate=None, strict=
         for k, r in enumerate(sorted(rows, key=lambda r: r.name)):   # a class template's destructor: instantiated here
             line = inst_line(itanium(r.name))
             if line and line not in {it[2] for it in items}:
+                for j, fw in enumerate(inst_fwd(itanium(r.name))):   # a pointee the host does not define
+                    if fw not in {it[2] for it in items}:
+                        items.append((-1 - len(items), 'fwd', fw))
                 items.append((k + 1, 'inst', line))
     # emitted bodies are game code: compile.sh's own flags (layout.game_flags: code generation, FTOI2, S12 order)
     flags = ('-ffunction-sections', '-fdata-sections') + (('-fkeep-inline-functions',) if inline else ())
@@ -1001,6 +1004,25 @@ def inst_line(isig):
     return 'template %s::~%s();' % ('::'.join(isig.qual[:-1]), base)
 
 
+def inst_pointees(isig):
+    """Class names the template arguments of an inst_line name use only as pointees (`NiTArray<ImageSpaceEffect*,
+    NiTMallocInterface<ImageSpaceEffect*>>`): never as a value, a template argument of its own or a scope. The
+    destructor body does not look inside them, so the host needs a declaration (`struct X;`), not a definition."""
+    if inst_line(isig) is None:
+        return []
+    cls = isig.qual[-2]
+    args = cls[cls.index('<'):]
+    out = []
+    for w in dict.fromkeys(ARG_WORDS.findall(args)):
+        if w in BUILTIN_WORDS or w == cls[:cls.index('<')]:
+            continue
+        occ = list(re.finditer(r'(?<![\w:])%s(?![\w:])' % re.escape(w), args))
+        if occ and len(occ) == len(re.findall(r'\b%s\b' % re.escape(w), args)) and \
+                all(re.match(r'\s*\*', args[m.end():]) and not args[m.end():].lstrip().startswith('::') for m in occ):
+            out.append(w)
+    return out
+
+
 ARG_WORDS = re.compile(r'[A-Za-z_]\w*')
 BUILTIN_WORDS = frozenset('const volatile unsigned signed int long short char bool float double void wchar_t '
                           'struct class enum'.split())
@@ -1056,7 +1078,7 @@ def inst_hosts(tree, rows, itanium, unit_sources, found, ref_units, limit=5):
     definition of every class the arguments name (the pointee is complete there); the referencing units are left
     out (they declare the destructor without a body: the pointee is incomplete there)."""
     import bodycause
-    want, bodyfiles = {}, {}
+    want, bodyfiles, ptrs = {}, {}, {}
     for r in rows:
         isg = itanium(r.name)
         c = bodycause.key_of(isg)
@@ -1069,6 +1091,7 @@ def inst_hosts(tree, rows, itanium, unit_sources, found, ref_units, limit=5):
         words = [w for w in dict.fromkeys(ARG_WORDS.findall(cls[cls.index('<'):])) if w not in BUILTIN_WORDS and
                  w != c[0]]
         want[r.name], bodyfiles[r.name] = words, fl
+        ptrs[r.name] = set(inst_pointees(isg))
     if not want:
         return {}
     alltok = sorted({w for ws in want.values() for w in ws}, key=len, reverse=True)
@@ -1095,12 +1118,17 @@ def inst_hosts(tree, rows, itanium, unit_sources, found, ref_units, limit=5):
             if u in rus:
                 continue
             reach = clo.get(u, {u})
-            if bodyfiles[n] & reach and all(not defs.get(w) or defs[w] & reach for w in ws) and \
-                    any(defs.get(w) for w in ws):
+            if bodyfiles[n] & reach and all(not defs.get(w) or defs[w] & reach for w in ws if w not in ptrs[n]) and \
+                    any(defs.get(w) for w in ws):   # a pointee needs a declaration only (inst_fwd)
                 cand.append(u)
         if cand:
             out[n] = sorted(cand, key=lambda u: (len(clo[u]), u))[:limit]
     return out
+
+
+def inst_fwd(isig):
+    """`struct X;` for each class inst_pointees names: what the host needs where it does not define X."""
+    return ['struct %s;' % w for w in inst_pointees(isig)]
 
 
 def tree_inline_hosts(tree, rows, itanium, unit_sources, layouts=None):
