@@ -62,6 +62,11 @@ def main():
           'load_vtbind: fn and adj rows from recon/vtbind: %s' % vb)
     stub = fnvlink.emit_adj_stub('__fnvnx_vadj_00408b40', '__fnv_00408c00', 8)
     check('sub w0, w0, #8' in stub and 'b __fnv_00408c00' in stub, 'an adj row becomes this -= n; b target')
+    open(os.path.join(d, 'vtbind', 'overrides.tsv'), 'w').write(
+        '# fnvnx-vtbind-override/1: x\n# table\texe_vftable\tslot\texe_function\tnative_symbol\tnative_now\tabi\n'
+        '_ZTV1A\t01010000\t5\t00401000\t_ZN1A1fEv\t__fnv_00402000\tsame-params\n'
+        '_ZTV1B\t01010100\t7\t00401100\t_ZN1B1gEi\t__fnv_00402100\tabi-check: () vs (int)\n')
+    check(fnvlink.load_vtfill_holds(d) == {('_ZTV1B', 7)}, 'load_vtfill_holds: only the abi-check rows are held')
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 
