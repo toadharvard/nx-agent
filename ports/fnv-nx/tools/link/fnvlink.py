@@ -3928,14 +3928,68 @@ GCC_THUNK_DTOR = re.compile(r'^_ZThn\d+_.*D([01])Ev$')
 
 
 VTFILL_HOLD = set()   # {(vtable symbol, slot index)}: load_vtfill_holds
+VTFILL_RELEASED = set()   # abi-check rows abi_releasable lets VTFILL write (FNVNX_ABIREL=0 keeps them held)
+ABI_INT_TYPES = {'bool', 'char', 'signed char', 'unsigned char', 'short', 'short int', 'unsigned short',
+                 'unsigned short int', 'int', 'signed', 'signed int', 'unsigned', 'unsigned int', 'long', 'long int',
+                 'unsigned long', 'unsigned long int', 'long long', 'unsigned long long', 'wchar_t', 'char16_t',
+                 'char32_t', 'size_t', 'std::size_t', 'ptrdiff_t', 'int8_t', 'uint8_t', 'int16_t', 'uint16_t',
+                 'int32_t', 'uint32_t', 'int64_t', 'uint64_t', 'intptr_t', 'uintptr_t', 'std::nullptr_t'}
+
+
+def abi_params(text):
+    """'(int, Foo<a, b>*, char const&)' -> ['int', 'Foo<a, b>*', 'char const&'] (top-level commas); None if no
+    parenthesised list."""
+    text = text.strip()
+    if not (text.startswith('(') and text.endswith(')')):
+        return None
+    out, cur, depth = [], '', 0
+    for c in text[1:-1]:
+        if c in '<([':
+            depth += 1
+        elif c in '>)]':
+            depth -= 1
+        if c == ',' and depth == 0:
+            out.append(cur.strip())
+            cur = ''
+        else:
+            cur += c
+    if cur.strip():
+        out.append(cur.strip())
+    return [] if out == ['void'] else out
+
+
+def abi_int_class(t):
+    """AAPCS64 ILP32: one parameter passed in a general register like an integer: pointers, references, member /
+    function pointers' plain-pointer form, integral types. Floats, vectors, by-value classes and enums the name
+    cannot show stay out."""
+    t = re.sub(r'\b(const|volatile)\b', ' ', t).strip()
+    t = ' '.join(t.split())
+    if t.endswith(('*', '&')) or '(*)' in t or '(&)' in t:
+        return True
+    return t in ABI_INT_TYPES
+
+
+def abi_releasable(abi):
+    """S1's rule (orchestrator-approved) for an `abi-check: (override) vs (slot)` row: VTFILL writes the override
+    when every parameter on both sides is integer-class (by position) and the override has no more parameters
+    than the slot (the extra slot arguments are ignored registers)."""
+    m = re.match(r'abi-check:\s*(\(.*\))\s+vs\s+(\(.*\))\s*$', abi)
+    if not m:
+        return False
+    ov, sl = abi_params(m.group(1)), abi_params(m.group(2))
+    if ov is None or sl is None or len(ov) > len(sl):
+        return False
+    return all(abi_int_class(t) for t in ov + sl)
 
 
 def load_vtfill_holds(top=None):
     """R4's overrides.tsv (fnvnx-vtbind-override/1, fnv-nx-build recon/vtbind) rows whose abi column starts with
-    `abi-check`: {(table, slot)} VTFILL keeps as compiled. The other rows need nothing: VTFILL writes the exe
+    `abi-check`: {(table, slot)} VTFILL keeps as compiled, except those abi_releasable passes (VTFILL_RELEASED,
+    stat vtbind-abi-released). The other rows need nothing: VTFILL writes the exe
     override's native in every slot it fills."""
     top = top or os.environ.get('FNVNX_RECON')
     out = set()
+    VTFILL_RELEASED.clear()
     if not top or not os.path.isdir(top):
         return out
     for dp, _, fs in os.walk(top):
@@ -3951,9 +4005,13 @@ def load_vtfill_holds(top=None):
             p = line.split('\t')
             if len(p) >= 7 and not line.startswith('#') and p[6].startswith('abi-check'):
                 try:
-                    out.add((p[0], int(p[2])))
+                    key = (p[0], int(p[2]))
                 except ValueError:
-                    pass
+                    continue
+                if os.environ.get('FNVNX_ABIREL', '1') != '0' and abi_releasable(p[6]):
+                    VTFILL_RELEASED.add(key)
+                else:
+                    out.add(key)
     return out
 
 
@@ -4224,6 +4282,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     VTFILL_HOLD.update(load_vtfill_holds())
     if VTFILL_HOLD:
         st['vtbind-hold-rows'] = len(VTFILL_HOLD)
+    if VTFILL_RELEASED:
+        st['vtbind-abi-released'] = len(VTFILL_RELEASED)
     lay = {}
     if exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0':
         import classlayout

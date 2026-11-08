@@ -65,8 +65,27 @@ def main():
     open(os.path.join(d, 'vtbind', 'overrides.tsv'), 'w').write(
         '# fnvnx-vtbind-override/1: x\n# table\texe_vftable\tslot\texe_function\tnative_symbol\tnative_now\tabi\n'
         '_ZTV1A\t01010000\t5\t00401000\t_ZN1A1fEv\t__fnv_00402000\tsame-params\n'
-        '_ZTV1B\t01010100\t7\t00401100\t_ZN1B1gEi\t__fnv_00402100\tabi-check: () vs (int)\n')
+        '_ZTV1B\t01010100\t7\t00401100\t_ZN1B1gEf\t__fnv_00402100\tabi-check: (float) vs (int)\n')
     check(fnvlink.load_vtfill_holds(d) == {('_ZTV1B', 7)}, 'load_vtfill_holds: only the abi-check rows are held')
+    # S1's release rule: integer-class parameters by position, override no longer than the slot
+    R = fnvlink.abi_releasable
+    check(R('abi-check: (int) vs (void*)') and R('abi-check: () vs (TESObjectREFR*)') and
+          R('abi-check: (int, void*, unsigned char, int, void*) vs (int, int, int, int, int)') and
+          R('abi-check: (unsigned int) vs (hkEntityD085*)') and R('abi-check: (Foo<a, b> const&) vs (int)'),
+          'abi_releasable: integer-class params, override not longer -> released')
+    check(not R('abi-check: (BaseFormComponent*) vs ()') and not R('abi-check: (void*, void*) vs (hkpWorld*)') and
+          not R('abi-check: (float) vs (int)') and not R('abi-check: (int) vs (double)') and
+          not R('abi-check: (NiPoint3) vs (int)') and not R('abi-check: (TESGrass*, Ns::Argument) vs (TESForm*, int)')
+          and not R('abi-check: odd'), 'abi_releasable: longer override, floats, by-value classes stay held')
+    with open(os.path.join(d, 'vtbind', 'overrides.tsv'), 'a') as f:
+        f.write('_ZTV1C\t01010200\t3\t00401200\t_ZN1C1hEi\t__fnv_00402200\tabi-check: (int) vs (void*)\n')
+    check(fnvlink.load_vtfill_holds(d) == {('_ZTV1B', 7)} and fnvlink.VTFILL_RELEASED == {('_ZTV1C', 3)},
+          'load_vtfill_holds: a releasable abi-check row is not held')
+    os.environ['FNVNX_ABIREL'] = '0'
+    try:
+        check(fnvlink.load_vtfill_holds(d) == {('_ZTV1B', 7), ('_ZTV1C', 3)}, 'FNVNX_ABIREL=0: every abi-check held')
+    finally:
+        del os.environ['FNVNX_ABIREL']
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0
 
