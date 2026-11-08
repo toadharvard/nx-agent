@@ -139,6 +139,10 @@ def _f3_mem(rec):
     return False
 
 
+def _old_callflow(rec):
+    return (rec.get('divergence') or {}).get('kind') in ('call-count', 'call-target')
+
+
 def _hole_trace(rec):
     """A saved native call trace with a call into a hole of the stub range traced twice (d21-holes): `name:<hex>`
     or the code stub's original address, then the raw word."""
@@ -226,8 +230,15 @@ CHANGES = [
            'call slots of the planted vftable is no longer followed (it became call-count x86 0, falloff?) and is '
            'vslot-shift / vslot-differs; a call-count whose native extra call is slot k of a vftable whose slot k+1 '
            'the oracle ran for real is vslot-shift (runner.Pair.vslots, vslots_run)', recheck=_planted_call),
+    Change('d24-pop', 'functions whose oracle code (or a same-unit function it runs) makes indirect calls, IAT calls '
+           'included: an intercepted callee of unknown convention whose wrong pop sent the oracle on into argument '
+           'words without a fault (wild calls) is learned too; every IAT slot is named by its import library '
+           'spelling and pops its stdcall bytes (the decomp\'s C++ spellings of an import popped 0); and cached '
+           'call-count / call-target records, for callers of the exe\'s `jmp [__imp_X]` thunks (the import\'s bytes, '
+           'or unknown and learned, instead of the placeholder definition\'s 0)', selects=_indirect,
+           recheck=_old_callflow),
 ]
-SCOPED = 'd21'
+SCOPED = 'd24'
 
 
 def harness_tag():

@@ -149,7 +149,7 @@ def main():
     check(d and d.get('vcall') == 'planted' and d.get('arm_vcall') == 'planted', 'compare: both callees planted')
     # scoped changes
     tags = [c.tag for c in fnkeys.CHANGES]
-    check(fnkeys.SCOPED == 'd21' and {'d21-holes', 'd21-dtorvptr', 'd21-vslot'} <= set(tags), 'd21 change rows')
+    check(int(fnkeys.SCOPED[1:]) >= 21 and {'d21-holes', 'd21-dtorvptr', 'd21-vslot'} <= set(tags), 'd21 change rows')
     rc = {c.tag: c.recheck for c in fnkeys.CHANGES}
     check(rc['d21-holes'](dict(divergence=dict(arm_trace=['00401000', 'name:9775ef7', '09775ef7']))) and
           rc['d21-holes'](dict(divergence=dict(arm='00115ef8', arm_next='08115ef8'))) and
