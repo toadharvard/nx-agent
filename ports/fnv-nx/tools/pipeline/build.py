@@ -1072,7 +1072,10 @@ class Prepare(Stage):
             t = os.path.abspath(b.cfg['PREPARED'])
             uj = os.path.join(t, 'build', 'units.json')
             st = os.stat(uj) if os.path.isfile(uj) else None
-            return ['prepare-adopt-v1', t, st and (st.st_size, st.st_mtime_ns), read_prepared_from(t)]
+            # the tree's content too (T1: a tree synced in place under the same prepared_from record kept every stage
+            # after it cached, with objects from the old content); about a second for the whole decomp
+            return ['prepare-adopt-v2', t, st and (st.st_size, st.st_mtime_ns), read_prepared_from(t),
+                    tree_content_id(t) if st else None]
         # the head is part of the key: a tree is always prepared from the commit the run's tools come from (J-0054);
         # an unchanged tree keeps its files' mtimes (sync_tree), so the stages after it stay cached
         return ['prepare-v3', rules_hash(), up_id(b, 'fetch'), os.environ.get('FNVNX_PREPARE_SKIP', ''), b.head,
@@ -1456,6 +1459,33 @@ class Compile(Stage):
                     mt[p] = None
             return mt[p]
 
+        # T1 (links 5ae3f0b13834, ef092d51de92 kept objects from before S1's RAWVT1-MEM): an object is kept only when its
+        # stamp <unit>.o.hash, written after its compile, still matches the content of its prepared source and of every
+        # dependency its .o.d names. A missing stamp, a changed byte in any of them: compiled again. Mtimes alone decide
+        # nothing any more (a copy, a cache hit or a clock can make an old object look new).
+        fh_ = {}
+
+        def fhash(p):
+            if p not in fh_:
+                try:
+                    with open(p if os.path.isabs(p) else os.path.join(tree, p), 'rb') as f_:
+                        fh_[p] = hashlib.sha256(f_.read()).hexdigest()
+                except OSError:
+                    fh_[p] = 'missing'
+            return fh_[p]
+
+        def input_stamp(src, deps):
+            h_ = hashlib.sha256()
+            for p_ in [src] + sorted(set(deps or ())):
+                h_.update(('%s\0%s\n' % (p_, fhash(p_))).encode('utf-8', 'surrogateescape'))
+            return '%s\n%s\n' % (fhash(src), h_.hexdigest())
+
+        def stamp_ok(base, src, deps):
+            try:
+                return open(base + '.o.hash').read() == input_stamp(src, deps)
+            except OSError:
+                return False
+
         # failed units are retried when one of their dependencies (from the .d GCC still writes when the error
         # comes after preprocessing) is newer than their log, when they have no .d, or when files were added to or
         # removed from the tree (a missing header may have appeared)
@@ -1475,7 +1505,7 @@ class Compile(Stage):
                 ot = os.stat(o).st_mtime_ns
                 # no dependency file: not known to be up to date, so compiled again (T1: the unit cache's objects had
                 # none, so every one looked current and link/ef092d51de92 kept objects from before S1's RAWVT1-MEM)
-                if deps is None or any((mtime(p) is None or mtime(p) > ot) for p in deps):
+                if deps is None or any((mtime(p) is None or mtime(p) > ot) for p in deps) or not stamp_ok(base, src, deps):
                     os.remove(o)
                     stale += 1
                 else:
@@ -1504,6 +1534,18 @@ class Compile(Stage):
                   'inputs not retried)' % (len(rebuild), kept, stale, known_fail))
             b.sh(['bash', os.path.join(ROOT, 'tools', 'link', 'compile.sh'), tree, obj, lst, b.jobs], r['log'],
                  env=b.env({'CXX': cxx + ' -MD', 'OPT': b.cfg['OPT']}), check=True)
+        # the stamps of what this run compiled: the source's and every dependency's content (see stamp_ok above)
+        fh_.clear()
+        for src in rebuild:
+            base = unit_base(obj, src)
+            if os.path.isfile(base + '.o'):
+                with open(base + '.o.hash', 'w') as f_:
+                    f_.write(input_stamp(src, parse_depfile(base + '.o.d') or []))
+            else:
+                try:
+                    os.remove(base + '.o.hash')
+                except OSError:
+                    pass
         ok, failed = [], []
         with open(os.path.join(d, 'objects.tsv'), 'w', errors='surrogateescape') as f:
             for src in units:

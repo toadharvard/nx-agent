@@ -260,18 +260,27 @@ try:
     units = sorted({u['source'] for u in json.load(open(os.path.join(tree, 'build', 'units.json')))['units']})
 except (OSError, ValueError, KeyError):
     sys.exit(0)
+import hashlib
 bad = []
 for u in units:
     o = os.path.join(obj, u.replace('/', '_') + '.o')
     s = os.path.join(tree, u)
-    if os.path.isfile(o) and os.path.isfile(s) and os.stat(o).st_mtime_ns < os.stat(s).st_mtime_ns:
+    if not (os.path.isfile(o) and os.path.isfile(s)):
+        continue
+    # build.py's stamp: the first line is the sha256 of the prepared source the object was compiled from (content,
+    # not mtime: link/5ae3f0b13834's object was older in content though not in time)
+    try:
+        stamp = open(o + '.hash').readline().strip()
+    except OSError:
+        stamp = ''
+    if stamp != hashlib.sha256(open(s, 'rb').read()).hexdigest():
         bad.append(u)
 if bad:
     print('%d (%s)' % (len(bad), ', '.join(bad[:5])))
 EOF
 )
 	if [ -n "$stale_objs" ]; then
-		NOTE_PUB="not published: stale objects, $stale_objs older than their prepared source"; log "publish_link: $NOTE_PUB"; return 0
+		NOTE_PUB="not published: stale objects, $stale_objs not compiled from their prepared source (stamp <unit>.o.hash)"; log "publish_link: $NOTE_PUB"; return 0
 	fi
 	# The subshell runs as a plain statement so that its set -e holds (inside `if ( ... )` bash ignores it), and it
 	# refuses to touch any checkout but the artifacts worktree: a failed `cd` must never commit elsewhere.
