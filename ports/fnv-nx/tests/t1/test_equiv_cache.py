@@ -152,5 +152,37 @@ class EquivCache(unittest.TestCase):
         self.assertEqual((tree / 'include/h.h').read_text(), 'int h;\n')
 
 
+class WinePaths(unittest.TestCase):
+    """win_to_posix: the paths MSVC prints under Wine resolve to the files here (a C: header, another letter case),
+    so a unit that includes them can be stored; an exact path is unchanged; an ambiguous one is not resolved."""
+
+    def test_drive_and_case(self):
+        import unitcache
+        t = tempfile.mkdtemp()
+        try:
+            d = os.path.join(t, 'pfx', 'drive_c', 'Program Files', 'SDK')
+            os.makedirs(d)
+            open(os.path.join(d, 'windows.h'), 'w').write('x')
+            os.makedirs(os.path.join(t, 'pfx', 'dosdevices'))
+            os.symlink('../drive_c', os.path.join(t, 'pfx', 'dosdevices', 'c:'))
+            old = os.environ.get('WINEPREFIX')
+            os.environ['WINEPREFIX'] = os.path.join(t, 'pfx')
+            unitcache._ci.clear()
+            want = os.path.join(d, 'windows.h')
+            self.assertEqual(unitcache.win_to_posix('C:\\Program Files\\SDK\\Windows.h'), want)
+            self.assertEqual(unitcache.win_to_posix('Z:' + want.replace('/', '\\')), want)
+            self.assertIsNotNone(unitcache.file_hash(unitcache.win_to_posix('c:\\PROGRAM FILES\\sdk\\WINDOWS.H')))
+            open(os.path.join(d, 'WINDOWS.h'), 'w').write('y')
+            unitcache._ci.clear()
+            self.assertIsNone(unitcache.file_hash(unitcache.win_to_posix('C:\\Program Files\\SDK\\Windows.H')))
+            self.assertEqual(unitcache.win_to_posix('C:\\Program Files\\SDK\\WINDOWS.h'), os.path.join(d, 'WINDOWS.h'))
+            if old is None:
+                os.environ.pop('WINEPREFIX')
+            else:
+                os.environ['WINEPREFIX'] = old
+        finally:
+            shutil.rmtree(t, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main()
