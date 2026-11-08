@@ -15,6 +15,8 @@ vftable's .text words. Checks:
 * leaf_constant() recognises the constant x86 leaves (`ret`, `ret N`, `xor eax, eax` / `mov al|eax, imm`, then a
   return) and nothing else;
 * load() caches the scan and reuses it;
+* string_at() (the evidence of a `str_<addr>` name): a printable NUL-terminated string that starts after a NUL, in a
+  data section; not the middle of a string, not binary data, not code, not an empty string;
 * plain_vftables() reads vftables without RTTI at given addresses, bounded by the next known start;
 * fnvlink.exe_slot_index (the minus-one rule): GCC's D1/D0 pair is MSVC's one deleting destructor.
 """
@@ -185,6 +187,23 @@ def main():
         check(got_l == [0, 1, 0x12345678, 'void', None, 0, None, 'void', 1, None, 0],
               'leaf_constant: xor eax / mov al + ret 4 / mov eax / ret 8 / not a leaf / xor al / int3 / /Od empty / '
               '/Od true / a broken frame / frame + xor: %s' % got_l)
+        # string_at: the evidence a `str_<addr>` name needs (top-down 10 / 11)
+        sa = os.path.join(tmp, 'Str.exe')
+        where_s = {}
+
+        def bs(rd):
+            rd.put(b'\x01\0', 1)
+            where_s['fmt'] = rd.put(b'--- %s ---\0', 1)
+            where_s['empty'] = rd.put(b'\0', 1)
+            where_s['bin'] = rd.put(b'ab\xf8\x80cd\0', 1)
+        make_pe(sa, bs)
+        a_ = where_s['fmt']
+        check(exevft.string_at(sa, a_) == '--- %s ---', 'string_at: a printable string after a NUL')
+        check(exevft.string_at(sa, a_ + 1) is None, 'string_at: the middle of a string is no start')
+        check(exevft.string_at(sa, where_s['empty']) is None, 'string_at: an empty string is no evidence')
+        check(exevft.string_at(sa, where_s['bin']) is None, 'string_at: binary bytes are no string')
+        check(exevft.string_at(sa, T(1)) is None, 'string_at: code is not data')
+        check(exevft.string_at(sa, 0x20000000) is None, 'string_at: an address the image does not map')
         # adjustor thunks: this in ecx, or on the stack (a stdcall/cdecl member: R6 0x009fdd10)
         thk = os.path.join(tmp, 'Thunks.exe')
 

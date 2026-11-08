@@ -207,5 +207,83 @@ class Stand5Stl(unittest.TestCase):
         self.assertEqual(out.count('\n'), STL_SRC.count('\n'))
 
 
+STR_SRC = '''namespace fnv_00a00200 {
+namespace std {
+template <class C, class Tr, class A> class basic_string
+{
+  public:
+    void _Tidy(bool, unsigned int);
+    basic_string& assign(const basic_string&, unsigned int, unsigned int);
+    static const unsigned int npos;
+    basic_string& operator=(const basic_string&);
+    ~basic_string();
+};
+}
+}
+namespace fnv_00a00300 {
+namespace std {
+template <class C, class Tr, class A> class basic_string
+{
+  public:
+    void _Tidy(bool built = false, unsigned n = 0)
+    {
+    }
+    basic_string& assign(const basic_string&, unsigned, unsigned);
+    basic_string& operator=(const basic_string&);
+    ~basic_string()
+    {
+        _Tidy(true, 0);
+    }
+};
+}
+}
+namespace fnv_00a00400 {
+namespace std {
+template <class C, class Tr, class A> class basic_string
+{
+  public:
+    basic_string& operator=(const basic_string&);
+    ~basic_string();
+};
+}
+}
+namespace other {
+template <class C, class Tr, class A> class basic_string
+{
+  public:
+    void _Tidy(bool, unsigned int);
+    ~basic_string();
+};
+}
+'''
+
+
+class Stand5String(unittest.TestCase):
+    def test_string_members_the_exe_inlined(self):
+        """The unit copies of basic_string declare `~basic_string()` and `operator=` and nothing defines them: the exe
+        inlined `_Tidy(true, 0)` and `assign(r, 0, npos)`. A copy gets each body only when it declares the helper (with
+        `npos`, or `-1` where the model has none); a copy without the helper, or outside a unit namespace, keeps its
+        declaration."""
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, 'build'))
+            os.makedirs(os.path.join(d, 'src'))
+            units = {'units': [{'source': 'src/a.cpp', 'flags': ['/O2'], 'functions': [], 'symbols': {'?x@@3HA': '0x1'}}]}
+            json.dump(units, open(os.path.join(d, 'build', 'units.json'), 'w'))
+            path = os.path.join(d, 'src', 'a.cpp')
+            open(path, 'w').write(STR_SRC)
+            import s1_compile
+            s1_compile._UNIT_SYMBOLS = s1_compile._UNIT_INFO = s1_compile._ALL_FUNCTIONS = None
+            s2_bodies._FUNCTION_NAMES.clear()
+            st = collections.Counter()
+            out = s2_bodies.r_stand_in_class_bodies(path, STR_SRC, st)
+        self.assertEqual(st['STAND5'], 3)
+        self.assertEqual(out.count('~basic_string() { _Tidy(true, 0); }'), 1)
+        self.assertIn('basic_string& operator=(const basic_string& _Right) { return assign(_Right, 0, npos); }', out)
+        self.assertIn('basic_string& operator=(const basic_string& _Right) { return assign(_Right, 0, -1); }', out)
+        self.assertIn('    basic_string& operator=(const basic_string&);\n    ~basic_string();\n};\n}\n}\nnamespace other',
+                      out)   # fnv_00a00400 (no helper) and `other` (no unit namespace): untouched
+        self.assertEqual(out.count('\n'), STR_SRC.count('\n'))
+
+
 if __name__ == '__main__':
     unittest.main()

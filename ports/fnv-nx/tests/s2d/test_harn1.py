@@ -91,6 +91,19 @@ int keep_caller(void)
 {
     return stub_b(7);
 }
+int Forwarded(int, ...);
+#if defined(_MSC_VER)
+int Forwarded(int a, ...)
+{
+    return stub_a(a);
+}
+#else
+__asm__(".globl _Z9Forwardedizz\\n");
+#endif
+int CallsForwarded(void)
+{
+    return Forwarded(1);
+}
 /*
 void in_comment()
 {
@@ -124,14 +137,14 @@ class Harn1(unittest.TestCase):
         for made in ('static int stub_caller(void);\n', 'static int stub_caller(void)\n{',
                      'static void __cdecl Entry_c(void)', 'static __declspec(noinline) void dummy_caller(void)',
                      'static void ns_caller()', 'static void UsesLate()', 'static void Late();',
-                     'static void Late()\n', 'static void Blocky()'):
+                     'static void Late()\n', 'static void Blocky()', 'static int CallsForwarded(void)'):
             self.assertIn(made, out)
         for kept in ('\nint FUN_00401000(int a, int b)\n', '    int Member(int k)', '\nint Referenced(int k)',
-                     '\ninline int Inl(', '\nvoid Later2()\n', '\nint Over(int a)\n{', '\nint keep_caller(void)',
+                     '\ninline int Inl(', '\nvoid Later2()\n', '\nint Over(int a)\n{', '\nint keep_caller(void)', 'int Forwarded(int, ...);\n#if', '\nint Forwarded(int a, ...)\n{',
                      'void in_comment()',
                      'extern "C" int stub_a(int);', '"int in_literal() {"'):
             self.assertIn(kept, out)
-        self.assertEqual(st['HARN1'], 9)
+        self.assertEqual(st['HARN1'], 10)
         self.assertEqual(out.count('\n'), SRC.count('\n'))   # line numbers stay
 
 

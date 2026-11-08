@@ -5,7 +5,7 @@
 #
 # In its shard:
 #   (b) programs: perm.py over all 16 packages of gamedata/shaders (1,809 unique), --shard k/N, once per parameter
-#       set (SWEEP_VARIANTS, default base zero neg large dxt atest fog). The reference is nxd9play under Wine. The
+#       set (SWEEP_VARIANTS, default base zero neg large dxt atest atestle fog). The reference is nxd9play under Wine. The
 #       candidate is nx_render translated, plus --families all. permreport gives the verdict and class per program
 #       and set. Per program also: uam's Maxwell instructions and GPRs (DKSH) and texture instructions (TGSI).
 #   (a) cells: cells.py over FalloutNV.esm (interiors, exteriors day and night), --shard k/N. Each scene: a fresh
@@ -189,7 +189,7 @@ cond() {
 programs() {
 	local v sdps=() f
 	for f in "$SDPDIR"/shaderpackage*.sdp; do sdps+=(--sdp "$f"); done
-	for v in ${SWEEP_VARIANTS:-base zero neg large dxt atest fog}; do
+	for v in ${SWEEP_VARIANTS:-base zero neg large dxt atest atestle fog}; do
 		[ -f "$S/perm/$v/rep/permreport.json" ] && continue      # done in an earlier pass of this head
 		deadline_ok 900 || { NOTES+=("programs: FARM_DEADLINE before variant $v"); return 0; }
 		log "programs: variant $v"

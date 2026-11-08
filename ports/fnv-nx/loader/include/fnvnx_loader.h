@@ -169,6 +169,12 @@ int fnvnx_image_load_relocs(fnvnx_image *img, const fnvnx_os *os);
 /* Apply base relocations when load_base != pe->image_base (loads the relocations first if needed). Without a
  * .reloc directory that is FNVNX_E_UNSUPPORTED; with load_base == image_base it does nothing. */
 int fnvnx_image_relocate(fnvnx_image *img, const fnvnx_os *os, uint32_t *applied);
+/* Store 0 in the image's TLS index word (the TLS directory's AddressOfIndex, the CRT's _tls_index), as the Windows
+ * loader does for the main module: code reaches __declspec(thread) data as ((char **)fs:[0x2c])[_tls_index], and
+ * the port's fs:[0x2c] (platform/win32/thread.cpp) has one slot. The file holds whatever the linker left there
+ * (FalloutNV.exe: not 0). *va = the word's address (0 without a TLS directory), *old = its value from the file.
+ * FNVNX_OK, also without a TLS directory; FNVNX_E_RANGE when the word is not in a mapped section. */
+int fnvnx_image_tls_index_reset(const fnvnx_image *img, uint32_t *va, uint32_t *old);
 /* Set the final protections (read-only for sections without IMAGE_SCN_MEM_WRITE). Call after all fixups. */
 int fnvnx_image_finalize(fnvnx_image *img, const fnvnx_os *os);
 void fnvnx_image_release(fnvnx_image *img, const fnvnx_os *os);   /* frees the reloc list only */

@@ -205,3 +205,27 @@ int fnvnx_image_vtable_slots(const fnvnx_image *img, uint32_t vftable, uint32_t 
     *n = k;
     return k ? FNVNX_OK : FNVNX_E_RANGE;
 }
+
+int fnvnx_image_tls_index_reset(const fnvnx_image *img, uint32_t *va, uint32_t *old) {
+    const fnvnx_pe *pe = img->pe;
+    const uint8_t *t;
+    uint8_t *w;
+    uint32_t ia;
+    if (va) *va = 0;
+    if (old) *old = 0;
+    if (pe->ndirs <= FNVNX_DIR_TLS || pe->dir[FNVNX_DIR_TLS].size < 24) return FNVNX_OK;
+    t = (const uint8_t *)fnvnx_image_ptr(img, img->load_base + pe->dir[FNVNX_DIR_TLS].rva, 24);
+    if (!t) return FNVNX_E_RANGE;
+    ia = fnvnx_rd32(t + 8);   /* AddressOfIndex (a VA at the preferred base; relocated with the image) */
+    if (!ia) return FNVNX_OK;
+    w = (uint8_t *)fnvnx_image_ptr(img, ia, 4);
+    if (!w && img->delta) {   /* not yet relocated: the preferred-base VA */
+        ia += img->delta;
+        w = (uint8_t *)fnvnx_image_ptr(img, ia, 4);
+    }
+    if (!w) return FNVNX_E_RANGE;
+    if (va) *va = ia;
+    if (old) *old = fnvnx_rd32(w);
+    w[0] = w[1] = w[2] = w[3] = 0;
+    return FNVNX_OK;
+}

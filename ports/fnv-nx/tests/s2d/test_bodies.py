@@ -494,6 +494,56 @@ class Exe(unittest.TestCase):
         self.assertEqual((got['_ZN4LockD1Ev'].cls, got['_ZN4LockD1Ev'].target), ('exe-addr', '__fnv_004010e0'))
 
 
+    def test_load_provider_params(self):
+        """crt_symbols.tsv identifications give S4's providers a parameter count: the object is not counted, a trailing
+        [note] is dropped, a row without a parameter list is not listed."""
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, 'crt.tsv')
+            with open(p, 'w') as fo:
+                fo.write('# address\tclass\tidentification\thow\tunits\tsrc\tprovider\n'
+                         '0x00401000\tcpplib\tstd::_Lockit::_Lockit(int)\tn\t2\t3\tfnvnx_lockit_ctor\n'
+                         '0x00401010\tcpplib\tstd::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)\ti\t1\t2\tx\n'
+                         '0x00401020\tcpplib\tstd::locale::_Getgloballocale() [locale::_Getfacet fallback, locale() _Incref]\ti\t2\t2\tx\n'
+                         '0x00401030\tcpplib\tstd::ios_base::_Ios_base_dtor\tn\t4\t4\tx\n'
+                         '0x00401040\tcpplib\tstd::bad_cast::bad_cast(const char*)\tn\t1\t1\tx\n'
+                         '0x00401050\tcpplib\tstd::map<int, int>::find(std::pair<int, int>)\tn\t1\t1\tx\n')
+            got = bodies.load_provider_params(p)
+        self.assertEqual(got, {0x401000: 1, 0x401010: 2, 0x401020: 0, 0x401040: 1, 0x401050: 1})
+
+    def test_exe_provider_shape(self):
+        """A constructor with a parameter the exe calls at an S4 provider's address (no unit defines it, so there is no
+        MSVC definition to compare) binds there when the provider's identification has as many parameters; a
+        reference with more does not."""
+        import struct
+        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'   # call ??0Lock(int); call ??0Wide(int, int); ret
+        obj = coff({'?f@@YAXXZ': (f, {1: '??0Lock@@QAE@H@Z', 6: '??0Wide@@QAE@HH@Z'})},
+                   ['??0Lock@@QAE@H@Z', '??0Wide@@QAE@HH@Z'])
+        F, P = 0x401000, 0x4010e0
+        text = bytearray(0x100)
+        text[0:len(f)] = f
+        struct.pack_into('<i', text, 1, P - (F + 5))
+        struct.pack_into('<i', text, 6, P - (F + 10))
+        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [{'symbol': '?f@@YAXXZ', 'address': '%x' % F}]}]}
+        rows = [bodies.Row('_ZN4LockC1Ei', 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row('_ZN4WideC1Eii', 'missing', None, None, 'src/a.cpp', 'no definition', None)]
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
+                fo.write(obj)
+            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
+                fo.write(pe(0x400000, 0x401000, bytes(text)))
+            uj = os.path.join(d, 'units.json')
+            with open(uj, 'w') as fo:
+                json.dump(units_j, fo)
+            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
+            it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
+            it.need([r.name for r in rows])
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', P: 'F'},
+                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms,
+                                  {P: 'fnvnx_lock_ctor'}, {P: 1})
+        got = {r.name: r for r in got}
+        self.assertEqual((got['_ZN4LockC1Ei'].cls, got['_ZN4LockC1Ei'].target), ('exe-addr', '__fnv_004010e0'))
+        self.assertEqual(got['_ZN4WideC1Eii'].cls, 'missing')
+
     def test_align_targets(self):
         """Call-order alignment: P (placed) calls the unplaced helper C, which MSVC inlined in the exe, then K
         (placed). C calls M, which no placed function calls: the exe's P calls M's address where C's call stood."""
@@ -741,6 +791,31 @@ class Exe(unittest.TestCase):
                                    capture_output=True, text=True)
                 self.assertEqual(r.returncode, 0, r.stderr)
 
+
+    def test_crt_rule_streambuf_lock(self):
+        """The decomp's basic_streambuf copies never define _Lock / _Unlock: MSVC's are `_Mylock._Lock()` on the
+        _Mutex at +4 (exe: `add ecx, 4; call 0x00ec3277` in the _Sentry_base constructor). The stub adds 4 to
+        `this` and tail-calls S4's mutex function; another class, or a member with parameters, is not the rule."""
+        def k(n, d):
+            return bodies.crt_rule(sigs.parse_itanium(n, d))
+        n = '_ZN12fnv_00ad47f03std15basic_streambufIcNS0_11char_traitsIcEEE5_LockEv'
+        d = 'fnv_00ad47f0::std::basic_streambuf<char, fnv_00ad47f0::std::char_traits<char> >::_Lock()'
+        self.assertEqual(k(n, d), ('mutex', 'fnvnx_mutex_lock', 'this + 4'))
+        n2 = n.replace('5_LockEv', '7_UnlockEv')
+        d2 = d.replace('_Lock()', '_Unlock()')
+        self.assertEqual(k(n2, d2), ('mutex', 'fnvnx_mutex_unlock', 'this + 4'))
+        self.assertIsNone(k('_ZN6Widget5_LockEv', 'Widget::_Lock()'))
+        rows = [bodies.Row(n, 'missing', None, None, 'src/a.cpp', 'no definition', None),
+                bodies.Row(n2, 'missing', None, None, 'src/a.cpp', 'no definition', None)]
+        dem = {n: d, n2: d2}
+
+        def it(x):
+            return sigs.parse_itanium(x, dem[x])
+        got = bodies.crt_pass(rows, it)
+        self.assertEqual([r.cls for r in got], ['crt-rule', 'crt-rule'])
+        asm = bodies.emit_crt(got, it)
+        self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_lock', asm)
+        self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_unlock', asm)
 
     def test_code_only_externs(self):
         """A name the pristine object names only in a vftable slot is not a direct call (the vcall class may take

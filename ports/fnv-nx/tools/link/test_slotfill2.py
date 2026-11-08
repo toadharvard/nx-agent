@@ -55,6 +55,28 @@ def shift_test():
         check(slotfill2.shifted(20, (12, 4)) == 24 and slotfill2.shifted(8, (12, 4)) == 8, 'shifted address points')
 
 
+def refs_rewrite_test():
+    """exe_slot_fill's refs.tsv rewrite reaches the rows of a synthesized `<unit>#vtables` object under its own name
+    (not its host's), and leaves the host's and other units' rows alone. Synthetic rows only."""
+    import tempfile
+    import fnvlink
+    rows = ['#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n',
+            'u.cpp\t_ZN1A1fEv\tvslot-unresolved\t\t\t__fnvnx_vtrap_00000001\t\n',
+            'u.cpp#vtables\t_ZN1A1fEv\tvslot-unresolved\t\t\t__fnvnx_vtrap_00000001\t\n',
+            'u.cpp#vtables\t_ZN1A1gEv\tvslot-unresolved\t\t\t__fnvnx_vtrap_00000002\t\n',
+            'v.cpp#vtables\t_ZN1A1fEv\tvslot-unresolved\t\t\t__fnvnx_vtrap_00000001\t\n']
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, 'refs.tsv')
+        open(p, 'w').write(''.join(rows))
+        n = fnvlink.rewrite_refs(p, {'u.cpp#vtables': {'_ZN1A1fEv': '__fnv_00401000'}},
+                                 {('u.cpp#vtables', '_ZN1A1fEv'): 0x401000})
+        got = [l.split('\t') for l in open(p)]
+    check(n == (1, 0), 'one row rewritten: %s' % (n,))
+    check(got[2][2:6] == ['vslot-exe', 'exe-slot', '00401000', '__fnv_00401000'], 'the #vtables row is bound: %s' % got[2])
+    check(got[1][2] == 'vslot-unresolved' and got[3][2] == 'vslot-unresolved' and got[4][2] == 'vslot-unresolved',
+          'the host\'s row, the other slot and the other unit stay traps')
+
+
 def main():
     native = {0x401000: {'msvc_entry': ('_ZThn8_N1M1fEv', 8)}, 0x402000: {}, 0x403000: {'msvc_entry': ('t', 12)}}
 
@@ -123,6 +145,7 @@ def main():
           'the definition\'s own name keeps the primary entry')
     check(not slotfill2.other_class_entry(p5('_ZN3CVB4FUN_Ei'), p5('_ZN7CVShell3getEi')),
           'another function name: not decided here')
+    refs_rewrite_test()
     shift_test()
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

@@ -243,6 +243,18 @@ class T02Runtime(unittest.TestCase):
                         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                         self.assertIn('expect_failures=0', r.stdout)
 
+    def test_tls_index_reset(self):
+        # the TLS directory's AddressOfIndex holds 0xFFBF8C85 on disk (gen_synth_pe.py, like the real exe); the
+        # loader stores 0, as Windows does for the main module (fs:[0x2c][_tls_index] has one slot in the port)
+        for cfg, moved in (('hints', False), ('reloc', False), ('reloc', True)):
+            with self.subTest(cfg=cfg, moved=moved):
+                r = loadcheck(cfg, moved=moved)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                line = next((l for l in r.stdout.splitlines() if l.startswith('tls_index=')), '')
+                st = stats_of(line)
+                self.assertNotEqual(st.get('tls_index', '0x00000000'), '0x00000000', line)
+                self.assertEqual((st.get('old'), st.get('now'), st.get('rc')), ('0xffbf8c85', '0x00000000', '0'), line)
+
     def test_precomputed_list(self):
         pe, fixups, _ = py_scan('hints')
         path = os.path.join(OUT, 'py_hints.bin')

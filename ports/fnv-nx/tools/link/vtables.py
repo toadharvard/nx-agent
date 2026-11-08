@@ -350,7 +350,9 @@ def write_requests(path, reqs):
     with open(path, 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#class\tspelling\twhy\thosts\n')
         for c, (sp, why, hosts) in sorted(reqs.items()):
-            f.write('%s\t%s\t%s\t%s\n' % (c, sp or '', ','.join(sorted(why)), ' '.join(hosts)))
+            # every host is followed by '|': unit paths may hold spaces (src/fallout/region system/tesregion.cpp); split on
+            # spaces they were torn apart and the class ended "no host unit could name the class" (R2, ranks 454...)
+            f.write('%s\t%s\t%s\t%s\n' % (c, sp or '', ','.join(sorted(why)), ''.join(h + '|' for h in hosts)))
 
 
 def load_requests(path):
@@ -361,7 +363,10 @@ def load_requests(path):
                 continue
             f = line.rstrip('\n').split('\t')
             if len(f) >= 4:
-                out[f[0]] = (f[1] or None, set(f[2].split(',')), f[3].split())
+                # every host ends in '|', so a single host with a space (src/fallout_shared/region system/tesregion.cpp) is
+                # not torn apart; a file without '|' is an older one (hosts split on spaces)
+                hosts = f[3].split('|') if '|' in f[3] else f[3].split()
+                out[f[0]] = (f[1] or None, set(f[2].split(',')), [h for h in hosts if h])
     return out
 
 
@@ -1243,7 +1248,14 @@ def run(out, tree, jobs=4):
 
     while todo and rounds < 8:
         rounds += 1
-        open_ = {c: [h for h in hs if h not in tried[c]][:3] for c, (_, hs) in todo.items()}
+        # a class's first host is the unit that referenced it (resolve lists referencing units first): the one most
+        # likely to see its declaration. It is probed before any other host, whatever batch it makes; the greedy choice
+        # among the next three hosts only orders the rest. With the greedy choice alone, a class whose own unit has few
+        # open classes can lose every round to larger hosts and is never probed there once the 8 rounds end
+        # (tests/s2d/test_vtreq_first_host.py). Link 97deacd38aec: stats say 8 probe rounds and 1,255 classes with no
+        # host; the cached probe batch of tesobjectclot.cpp holds its other 8 classes but not FUN_005155b0_Base144
+        open_ = {c: ([hs[0]] if hs and hs[0] not in tried[c] else [h for h in hs if h not in tried[c]][:3])
+                 for c, (_, hs) in todo.items()}
         open_ = {c: hs for c, hs in open_.items() if hs}
         assign = collections.defaultdict(list)
         while open_:   # greedy: the host unit that can take most of the open classes first

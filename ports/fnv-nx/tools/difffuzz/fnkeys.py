@@ -49,17 +49,47 @@ import config
 # padding and value-free writes are no custom-register reads, custom registers carry the parameter their calibrated
 # pairing agrees on, the adaptive follow skips a callee the native calls out of line itself and reruns after its
 # last load, the bool-repr probe covers background bytes and NaN-only remainders, a store into the oracle's return
-# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy.
+# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. Float class: x87_result_use follows
+# a jmp to the shared epilogue and knows fidiv / fist / fcomi / ftst / fsqrt consumers, overlapping pinned literals let
+# the exe bytes (when available) replace the union, and a float difference runs the garbage / bool / x87 control-word (24-bit) / x87-range / callee
+# float width probes before it stays `float`.
+# The signedness probe clears an argument byte only when the oracle can
+# widen it (not a float sign or a whole-read int), and an uninit-arm that vanishes once the unwritten stack words of
+# buffers passed to stubbed callees are zeroed is stub-outparam. Stores class: a register first
+# read on a later path is a custom register, the oracle gets ST0 for a call the caller's unit declares float, and
+# native-zero-init / dtor-dead-store (by design) / thunk-binding relabel store-only divergences.
+# Uncls2: the leftovers get reruns that change one mechanism (all-zero garbage fill, equal results for adjacent calls of one callee,
+# 64-bit shift counts modulo 64, fsin/fcos/fsincos/fptan of an infinity giving the indefinite NaN, the native word in a planted vptr,
+# 4-aligned arguments for a pointer difference), a unit's pool copy of an unnamed vftable is compared with the exe's table, and a data
+# symbol the object keeps writable but the exe keeps read-only gets the exe's bytes pinned.
+# F-uncls: the garbage probe compares
+# the argument a call-args divergence names and probes random-background cases with the background pinned (an
+# uninitialised out-parameter of an intercepted callee is uninit-x86), pop learning tries the pushes right before a
+# call first (three call sites over branches), an integer result that the 24-bit x87 control word rerun reproduces
+# is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
+# placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return; a placeholder of a trivial exe leaf is not
+# native-zero-stub (S2 W6).
+# flow2 (call-flow fresh sample): a `jmp rel32` incremental-link thunk pops what the function it jumps to pops (the
+# decomp's `void F(void)` placeholder said 0), a call into a function the tree does not define pops the `ret N` the
+# exe's function has, a clean run that ends in a tail call (the stub return) is no derail, the pushes of the entry
+# prologue are no arguments, a merged cdecl cleanup marks the earlier sites cdecl, and the pop search covers more than three sites.
+# Native-null-read class: a native fault inside the unit's own FUN_<X> the oracle only called out follows X in the oracle, native vtable groups read background past their last slot, and a planted slot answered by a named native stub is not followed.
+# Virtual-call class (F2b): a call-target where the native called planted slot k and the oracle's call went to slot k+1, a unit function it ran as code (no call event), is vslot-shift (Pair.vslots_run on call-target too), and a native callee that sits in the native copy of a planted vftable at a slot whose exe function the oracle ran is native-vslot-differs.
+# Oracle-fault class: calls to proven effect-free exe functions (exeempty.py) are no divergence (oracle-empty-call), an oracle-only fault of a bare-ret native is native-empty-body, and calibrate_custom tries up to 120 pairings.
+# Small address classes: a stored pinned-literal address is compared by its pointee (literal-store), the canned result of a callee whose exe code returns its `this` or first pointer argument is that input (retsrc.py, canned-this), the address of a by-value aggregate parameter is its stack slot on the oracle and the hidden pointer natively, a hidden result buffer against a frame local is nrvo-elision (by design), and a jump into the native vtable region is a wild call.
+# Small address classes: a stored pinned-literal address is compared by its pointee (literal-store), the canned result of a callee whose exe code returns its `this` or first pointer argument is that input (retsrc.py, canned-this), the address of a by-value aggregate parameter is its stack slot on the oracle and the hidden pointer natively, a hidden result buffer against a frame local is nrvo-elision (by design), and a jump into the native vtable region is a wild call.# Pops class: the pop search fixes the unknown-pop call sites one at a time in run order (the count that takes the run farthest before a fault or a return outside the code, a clean balanced run to end), and `_pushes_before` counts a `sub esp, N` argument block.
+# R4 flow (flow residue, tests/s13/test_r4flow.py): the scalar-deleting wrapper shape takes an int flag and an oracle-only 0x80000000 flag-word store is as dead as a zero one (dtor-dead-store), the nrvo-copy copy constructor may be a struct's (`ABU0`), `push ecx` is a call argument when the call's `add esp, N` consumes it, a one-byte argument above 1 is probed as a bool, an uninitialised out-parameter slot is probed on both machines (stub-outparam), an import's canned eax has the native's untyped low byte, an `extern "C" bool` declaration of the calling unit types the canned result, and a native `delete` after the D1 binding of a deleting wrapper is dtor-split-delete.
 HARNESS = 'difffuzz-20'
 
 
 class Facts:
-    __slots__ = ('symbol', 'ocalls', 'nrefs', 'oindirect', 'ostatic')
+    __slots__ = ('symbol', 'ocalls', 'nrefs', 'oindirect', 'ostatic', 'osg')
 
-    def __init__(self, symbol='', ocalls=(), nrefs=(), oindirect=False, ostatic=False):
+    def __init__(self, symbol='', ocalls=(), nrefs=(), oindirect=False, ostatic=False, osg=False):
         self.symbol, self.ocalls, self.nrefs = symbol or '', set(ocalls), set(nrefs)
         self.oindirect = oindirect      # the oracle code (or a same-unit function it runs) makes indirect calls
         self.ostatic = ostatic          # ... or refers to a function-local static or its guard (units.json names)
+        self.osg = osg                  # ... or refers to a string literal units.json names ($SG)
 
 
 class Change:
@@ -106,6 +136,15 @@ def _interlocked_slow(f):
 
 def _crt_malloc(f):
     return 0x00ecd1c7 in f.ocalls
+
+
+def _sg_literal(f):
+    return f.osg
+
+
+def _old_oracle_fault(rec):
+    d = rec.get('divergence') or {}
+    return d.get('kind') == 'error' and str(d.get('x86') or '').startswith('fault:') and d.get('arm') is None
 
 
 def _indirect(f):
@@ -247,8 +286,17 @@ CHANGES = [
            'call-count / call-target records, for callers of the exe\'s `jmp [__imp_X]` thunks (the import\'s bytes, '
            'or unknown and learned, instead of the placeholder definition\'s 0)', selects=_indirect,
            recheck=_old_callflow),
+    Change('d25-sg', 'functions whose oracle code (or a same-unit function it runs) refers to a string literal units.json '
+           'names ($SG): the oracle object numbers its $SG literals 43 higher than units.json (S11\'s force-included '
+           'header), so each was pinned and relocated at a neighbour\'s address; coffobj now maps object $SG<n> to '
+           'units.json $SG<n-d>, d found per unit by the exe\'s bytes (coffobj.sg_shift); and functions that refer '
+           'to read-only data units.json names: pinned tables now carry their relocations (code / data pointers, '
+           'the exe\'s word where the unit cannot place the target)', selects=_sg_literal),
+    Change('d26-imp', 'cached divergences where only the oracle faulted: a native call of an import gets the raw canned word as '
+           'on x86 (it was normalised as an untyped bool, 0xffffff01 against 0xffffffff for TlsGetValue, so [ret + 4] '
+           'faulted on x86 only)', recheck=_old_oracle_fault),
 ]
-SCOPED = 'd24'
+SCOPED = 'd26'
 
 
 def harness_tag():
@@ -411,7 +459,7 @@ class Native:
         return out
 
 
-def oracle_closure(catalog_rows, indirect_out=None, static_addrs=None, static_out=None):
+def oracle_closure(catalog_rows, indirect_out=None, static_addrs=None, static_out=None, sg_addrs=None, sg_out=None):
     """{address: original addresses called (or tail-jumped to) by the function and the same-unit catalogued
     functions it reaches} - difffuzz runs the oracle's unit for real, so a callee's call is the caller's.
     indirect_out gets the addresses whose closure makes an indirect call."""
@@ -426,6 +474,8 @@ def oracle_closure(catalog_rows, indirect_out=None, static_addrs=None, static_ou
             if static_out is not None and static_addrs and any(int(t, 16) in static_addrs
                                                                for t in x.get('data_refs') or ()):
                 static_out.add(a)
+            if sg_out is not None and sg_addrs and any(int(t, 16) in sg_addrs for t in x.get('data_refs') or ()):
+                sg_out.add(a)
             for c in list(x.get('calls') or []) + list(x.get('tails') or []):
                 calls.add(int(c, 16))
                 y = by.get(c)
@@ -440,9 +490,33 @@ def change_tags(facts):
     return [c.tag for c in CHANGES if c.selects is not None and c.selects(facts)]
 
 
-def facts_of(t, ocl, nrefs, oind=(), ostat=()):
+def facts_of(t, ocl, nrefs, oind=(), ostat=(), osg=()):
     return Facts(t.get('symbol'), ocl.get(t['address'], ()), nrefs.get(t['address'], ()), t['address'] in oind,
-                 t['address'] in ostat)
+                 t['address'] in ostat, t['address'] in osg)
+
+
+def sg_literal_addrs():
+    """d25-sg: every address units.json gives a $SG string literal, and, when the exe loads, every units.json symbol
+    in a read-only section of the exe (the pinned read-only data whose relocations coffobj now applies)."""
+    out = set()
+    p = config.DECOMP / 'build' / 'units.json'
+    if not p.exists():
+        return out
+    ro = []
+    try:
+        import coffobj
+        exe = coffobj.exe_image()
+        if exe is not None:
+            ro = [(va, va + size) for va, size, flags, *_ in exe.sections
+                  if not flags & 0x80000000 and not flags & 0x20000020]   # not writable, not code
+    except Exception:  # noqa: BLE001
+        ro = []
+    for u in json.load(open(p))['units']:
+        for n, a in u['symbols'].items():
+            v = int(a, 16)
+            if n.startswith('$SG') or any(lo <= v < hi for lo, hi in ro):
+                out.add(v)
+    return out
 
 
 def local_static_bytes():
@@ -463,8 +537,8 @@ def compute(targets, catalog):
     """-> ({address: key}, {address: [change tags]}, number of units)"""
     cat = [json.loads(line) for line in open(catalog)]
     ohash = {r['address']: r['ohash'] for r in cat if 'ohash' in r}
-    oind, ostat = set(), set()
-    ocl = oracle_closure(cat, oind, local_static_bytes(), ostat)
+    oind, ostat, osg = set(), set(), set()
+    ocl = oracle_closure(cat, oind, local_static_bytes(), ostat, sg_literal_addrs(), osg)
     nat = Native(str(config.LINK))
     rn, defs = {}, {}
     for row in config.units_renames():
@@ -494,7 +568,7 @@ def compute(targets, catalog):
                 t['source'] + '\t'))
             if cd:
                 k += '|callee-renames:' + hashlib.sha1('\n'.join(cd).encode()).hexdigest()
-            tg = change_tags(facts_of(t, ocl, nrefs, oind, ostat))
+            tg = change_tags(facts_of(t, ocl, nrefs, oind, ostat, osg))
             if tg:
                 k += '|changes:' + ','.join(tg)
                 tags[t['address']] = tg

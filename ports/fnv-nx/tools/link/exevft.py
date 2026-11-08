@@ -171,9 +171,31 @@ def plain_vftables(path, addrs, starts):
     return out
 
 
+def string_at(path, addr, max_len=512):
+    """The text of the C string the exe stores at addr, else None: addr in a data section the loader maps (never
+    code), the byte before it a NUL (a string starts there: not the middle of one, nor a number), then 1..max_len
+    printable ASCII characters (tab / newline / carriage return too) up to a NUL. The evidence a `str_<addr>`
+    name needs (S2-bodies top-down 10 / 11): the name is a claim, the exe's bytes say whether it holds."""
+    pe, data = _text(path)
+    import fnvnx_pe
+    img = _IMG.get(path)
+    if img is None:
+        img = _IMG[path] = fnvnx_pe.Image(pe)
+    got = img.string(addr, max_len)
+    if not got or not got[0]:
+        return None
+    prev = img.read(addr - 1, 1)
+    if prev != b'\0':
+        return None
+    if any(not (0x20 <= c < 0x7f or c in (9, 10, 13)) for c in got[0]):
+        return None
+    return got[0].decode('latin-1')
+
+
 # ---- trivial leaf functions of the exe (S2c-vt): an exact native stub where no unit compiles the address
 
 _PE = {}
+_IMG = {}
 
 
 def _text(path):
@@ -288,6 +310,30 @@ def thunk(path, addr):
     return None
 
 
+def this_thunk(path, addr):
+    """(imm32, target) of `mov ecx, imm32; jmp rel32` at addr: a member that takes a global object as its `this`
+    (a heap's free: `mov ecx, 0x011f6238; jmp FNV_MemoryManager::Free`) and passes its stack arguments on; else
+    None. Natively: x0 = imm32, then a tail branch (the other arguments are already where the target reads them)."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 10)
+    except Exception:
+        return None
+    if off is None:
+        return None
+    b = data[off:off + 10]
+    if b[:1] != b'\xb9' or b[5:6] != b'\xe9':
+        return None
+    return (int.from_bytes(b[1:5], 'little'),
+            (addr + 10 + int.from_bytes(b[6:10], 'little', signed=True)) & 0xffffffff)
+
+
+def slot_index(exev):
+    """{address of a vftable slot: function address in it} over the exe's vftables (an `__imp_?...` name the recipe
+    placed on a vftable slot reads the slot's word)."""
+    return {v + 4 * j: w for v, e in exev.items() for j, w in enumerate(e.slots)}
+
+
 # ---- the vftable an exe constructor stores (S2c, S5 class 3: constructor-named vtables)
 
 CTOR_SPAN = 0x400   # bytes decoded from a constructor's entry (S5's stand-in reads the same span)
@@ -341,6 +387,18 @@ def ctor_vftable(path, addr, starts):
         if not d and v in starts:
             last = v
     return last
+
+
+def vptr_store_seq(path, addr, starts):
+    """The vftables the x86 function at addr stores in its own object (`mov dword ptr [reg], imm32` with no
+    displacement, value in starts), in code order, a vftable stored twice in a row once. A constructor lists its
+    inlined bases before its own class (derived last), a destructor its own class first. [] without capstone or
+    outside the image."""
+    seq = []
+    for d, _, v in _ctor_stores(path, addr) or ():
+        if not d and v in starts and (not seq or seq[-1] != v):
+            seq.append(v)
+    return seq
 
 
 MEMBER_MAX = 0x100000   # S5's bound on a member's offset (emu_guest install_member_vtables)
