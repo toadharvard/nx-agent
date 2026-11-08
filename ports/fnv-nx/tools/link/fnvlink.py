@@ -3324,7 +3324,6 @@ def d26_minus_one_reason(z, v, raw_names, d, listed, called):
     it holds no D1/D0 pair, or None:
       'd22-list'             v is a vftable of a class in S1's D22 list (load_d22_list), and no code names slot 0
                              (D22-USED leaves the placeholder, and its callers number the slots as the exe does);
-      'callonly-placeholder' slot 0 is a D26 (b) call-only placeholder no code names (S1 declares `virtual ~C()`).
     A table with a pair is minus-one already; one with no evidence stays in the exe's order, which is what callers
     compiled against a dtor-less declaration use. called: symbols referenced from code (not vtables) by any object."""
     if d is not None:
@@ -3334,9 +3333,9 @@ def d26_minus_one_reason(z, v, raw_names, d, listed, called):
         return None
     if v in listed:
         return 'd22-list'
-    mem = itanium_member(s0)
-    if mem and D26B_PLACEHOLDER.match(mem):
-        return 'callonly-placeholder'
+    # A call-only placeholder name alone is no evidence: prepare's D22 / D26 (b) converts only the classes of S1's
+    # list (FNVNX_RECON d22.json; without it D22 does nothing), so an unlisted placeholder class's callers number
+    # the slots as the exe does. Shifting its table would break them.
     return None
 
 
