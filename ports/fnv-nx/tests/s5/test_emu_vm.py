@@ -28,6 +28,8 @@ def ok(name, cond, info=''):
 def main():
     e = emu_guest.Emu.__new__(emu_guest.Emu)
     e.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+    ok('off by default (opt-in until measured)', e.h_ext_call(11, 4, 0, 0) == 0xFFFFFFFFFFFFFF01)
+    e.vm_service = True
     e.uc.mem_map(0x40000000, 0x100000, UC_PROT_READ | UC_PROT_WRITE)   # stands in for the guest heap
     ARGS = 0x40000000
 
