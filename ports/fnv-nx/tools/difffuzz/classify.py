@@ -232,6 +232,80 @@ def msvc_inlined(target, div):
     return bool(callees) and xv in callees(a)
 
 
+def garbage_probe(pair, case, max_steps, h):
+    """(float class) The determinism probe below, for a case with a random background (it skips those: the seed that
+    changes the garbage also redraws the background pages): only the garbage changes (world.GARBAGE_XOR). A float
+    result computed from an uninitialised stack slot (0x00c70550: the native zero-initialises the struct, MSVC does
+    not) changes with the garbage on one machine only."""
+    base = case.copy()
+    base.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+    rx0, ra0, _ = pair.run(base, max_steps)
+    world.GARBAGE_XOR = 0x13572468
+    try:
+        rx1, ra1, _ = pair.run(base, max_steps)
+    finally:
+        world.GARBAGE_XOR = 0
+    h['_runs'] += 2
+    ux, ua = _outcome(rx0) != _outcome(rx1), _outcome(ra0) != _outcome(ra1)
+    if not (ux or ua):
+        return False
+    h['cause'] = 'uninit-x86' if ux and not ua else 'uninit-arm' if ua and not ux else 'uninit-both'
+    if ux and ua:
+        world.UNIFORM = True
+        try:
+            _, _, du = pair.run(base, max_steps)
+        finally:
+            world.UNIFORM = False
+        h['_runs'] += 1
+        h['uniform'] = 'agree' if du is None else du.get('kind')
+    return True
+
+
+def x87_probes(pair, case, div, max_steps, h):
+    """(float class) The compilers' evaluation methods, shown by rerunning the oracle until it agrees with the native:
+      x87-precision       the x87 control word at 24-bit precision (every x87 operation rounds to a float, as on
+                          AArch64): the whole difference is the 80/53-bit intermediate (an excess-precision
+                          cancellation shows up as a large ulp distance);
+      callee-float-width  the other guess of the width an untyped callee returns its float in (float or double: the
+                          consuming `fstp dword` / `fstp qword` cannot tell) - an artifact (0x00b4df80: a
+                          function-pointer call the native converts from d0);
+      x87-range           the 24-bit control word with every x87 register value beyond the float exponent range
+                          flushed to inf / zero (or the 53-bit one with the double range): the x87 stack keeps a
+                          15-bit exponent at every precision, so a float / double machine overflows or underflows
+                          where it does not (the record keeps which range and how many values it flushed).
+    None fires when the native uses arithmetic the oracle rerun does not model, or the difference has another cause."""
+    def rerun():
+        _, _, d = pair.run(case, max_steps)
+        h['_runs'] += 1
+        return _benign(d)
+    world.X87_CW = 0x007f
+    try:
+        if rerun():
+            h['cause'] = 'x87-precision'; h['x87_pc24'] = True
+            return True
+    finally:
+        world.X87_CW = 0x027f
+    world.X87_FLIP_WIDTH = True
+    try:
+        if rerun():
+            h['cause'] = 'callee-float-width'
+            return True
+    finally:
+        world.X87_FLIP_WIDTH = False
+    for kind, cw in (('f32', 0x007f), ('f64', 0x027f)):
+        rec = {'kind': kind}
+        world.X87_CLAMP, world.X87_CW = rec, cw
+        try:
+            ok = rerun()
+        finally:
+            world.X87_CLAMP, world.X87_CW = None, 0x027f
+        if ok and rec['n']:
+            h['cause'] = 'x87-range'
+            h['x87_range'] = {'range': kind, 'clamped': rec['n'], 'after': '%08x' % rec['addr']}
+            return True
+    return False
+
+
 def hint(pair, target, case, div, fn, max_steps):
     h = dict(_runs=0)
     mn = mnemonics(fn)
@@ -322,6 +396,7 @@ def hint(pair, target, case, div, fn, max_steps):
             h['cause'] = 'oracle-vcall'; return h
     if k == 'callee-saved':
         h['cause'] = 'callee-saved'; return h
+    isfloat = False
     # determinism probes: only garbage changes (stack fill, non-argument registers, argument padding)
     if case.bg == 'zero':
         alt = case.copy(); alt.seed = case.seed ^ 0x13572468
@@ -352,9 +427,15 @@ def hint(pair, target, case, div, fn, max_steps):
         if fl:
             if fl.get('tolerant'):
                 h['cause'] = 'x87-precision' if any(m.startswith('f') for m in mn) else 'float-tolerance'
-            else:
-                h['cause'] = 'float'
-            return h
+                return h
+            # (float class, difffuzz-20) a float difference beyond the tolerance is not yet a float bug: the x87
+            # probes tell the two compilers' evaluation methods apart, and the probes below (bool byte, signedness)
+            # still run before `float` is the answer
+            isfloat = True
+            if pair is not None and case.bg != 'zero' and garbage_probe(pair, case, max_steps, h):
+                return h
+            if pair is not None and any(m.startswith('f') for m in mn) and x87_probes(pair, case, div, max_steps, h):
+                return h
     # bool representation probe: a byte that is neither 0 nor 1 read as bool (MSVC tests the whole byte, GCC may
     # test bit 0 only): set each such input byte to 1
     # S1-rules: only a byte the MSVC code reads by itself (a 1-byte access at that address, no wider access over it)
@@ -408,6 +489,23 @@ def hint(pair, target, case, div, fn, max_steps):
                 bhits.append('%08x' % a)
     if bhits:
         h['cause'] = 'bool-repr'; h['bytes'] = bhits; return h
+    if isfloat:
+        # (float class) a smaller input byte that happens to remove a float difference proves no signedness (0x00a26b40:
+        # clearing the top bit of a stride byte changes which memory is read); only the bool byte above is evidence
+        h['cause'] = 'float'; return h
+    # (float class) an integer result computed through x87 float arithmetic and a fist / fistp: the 80/53-bit
+    # intermediates are amplified by the conversion (0x00e30fb0 NormalizeToUShort: 0xaac3 against 0xaac2); the oracle
+    # rerun at 24-bit precision agrees with the native
+    if pair is not None and not isfloat and k in ('return', 'mem-write') and (mn & {'fistp', 'fist', 'fisttp'}) and \
+            (mn & {'fadd', 'fsub', 'fmul', 'fdiv', 'faddp', 'fsubp', 'fmulp', 'fdivp', 'fsubr', 'fdivr'}):
+        world.X87_CW = 0x007f
+        try:
+            _, _, d = pair.run(case, max_steps)
+        finally:
+            world.X87_CW = 0x027f
+        h['_runs'] += 1
+        if _benign(d):
+            h['cause'] = 'x87-precision'; h['x87_pc24'] = True; return h
     # signedness probe: clear the top bit of each input byte >= 0x80
     # S1-rules (d19-sign): in memory only the top byte of a narrow read counts (a char read by itself, or the high
     # byte of a 2-byte read), as for bool-repr; a byte of a pointer or integer word is not widened (before: 434 of

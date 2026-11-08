@@ -49,7 +49,10 @@ import config
 # padding and value-free writes are no custom-register reads, custom registers carry the parameter their calibrated
 # pairing agrees on, the adaptive follow skips a callee the native calls out of line itself and reruns after its
 # last load, the bool-repr probe covers background bytes and NaN-only remainders, a store into the oracle's return
-# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy.
+# slot marks oracle-frame-smash, and an NRVO copy + destructor pair is nrvo-copy. Float class: x87_result_use follows
+# a jmp to the shared epilogue and knows fidiv / fist / fcomi / ftst / fsqrt consumers, overlapping pinned literals let
+# the shorter one win, and a float difference runs the garbage / bool / x87 control-word (24-bit) / x87-range / callee
+# float width probes before it stays `float`.
 HARNESS = 'difffuzz-20'
 
 

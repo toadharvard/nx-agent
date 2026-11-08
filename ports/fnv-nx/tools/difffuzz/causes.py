@@ -74,6 +74,10 @@ POLICY = {
     'x87-precision':  ('by-design', '-', False, 'x87 80-bit intermediates vs IEEE single/double, within 4 ulp or '
                                                 'relative 1e-6/1e-12, or the native value equals the oracle\'s '
                                                 'unrounded x87 value'),
+    'x87-range':      ('by-design', '-', False, 'an x87 intermediate beyond the float range (|v| >= 2**128: the '
+                                                'x87 stack keeps a 15-bit exponent at every precision) that the '
+                                                'AArch64 float arithmetic overflows to inf/NaN; the record keeps the '
+                                                'instruction and exponent (classify.x87_probes)'),
     'division':       ('by-design', '-', False, 'x86 raises #DE (x/0, INT_MIN/-1) where sdiv/udiv give 0 / wrap: '
                                                 'the exe would crash on that input'),
     'deleting-dtor-ret': ('triage', 'S13', True, 'MSVC\'s scalar/vector deleting destructor returns this, the '
@@ -262,6 +266,10 @@ POLICY = {
                                                 'native destructor, unchecked), and the call-count difference at '
                                                 'the free hides the return value and writes. Triage until the '
                                                 'harness drops the oracle\'s trailing argument frees (S13b audit)'),
+    'callee-float-width': ('artifact', '-', False, 'the width (float or double) in which the harness hands an untyped '
+                                                     'callee\'s canned float result to the oracle\'s ST0 is a guess '
+                                                     'from the consuming x87 store; the other guess makes the '
+                                                     'machines agree (classify.x87_probes)'),
     'libc-variant':   ('artifact', 'S13', False, 'the same C library function under another entry: an MSVC x87 '
                                                  'intrinsic (_CIacos ...) or the double function vs libc or its '
                                                  'float variant, sprintf vs GCC\'s fortified __sprintf_chk, atof vs '
