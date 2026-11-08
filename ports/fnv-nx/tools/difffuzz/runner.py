@@ -16,6 +16,7 @@ compare() returns the FIRST difference (so a reproducer stays minimal), or None:
 Timeouts on either side are inconclusive (not a divergence), both sides faulting is agreement.
 """
 import math
+import re
 import struct
 import time
 
@@ -191,7 +192,7 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
 
 
 def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
-            garbage=None, codeptr=None, vcalls=None, ignore=()):
+            garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
     the planted vftables; a differing call to neither is an indirect call through memory the case did not plant
     (marked vcall='unplanted': an oracle-model gap, classify.py oracle-vcall)."""
@@ -237,6 +238,8 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
                      arm_next=_hex(ta[i + 1]) if i + 1 < len(ta) else None)
             if vcalls is not None and tx[i] >= 0 and tx[i] not in vcalls[0]:
                 d['vcall'] = 'planted' if tx[i] in vcalls[1] else 'unplanted'
+            if vcalls is not None and ta[i] >= 0 and ta[i] in vcalls[1] and ta[i] not in vcalls[0]:
+                d['arm_vcall'] = 'planted'      # the native's callee is a planted slot too (Pair.vslots)
             return d
     if one_error:
         return dict(kind='error', x86=ex, arm=ea)
@@ -332,6 +335,17 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             # .bss (not compared). Not a divergence of the function itself; reported for the static-state audit.
             soft = soft or dict(kind='local-static', soft=True, addr='%08x' % diff[0], ndiff=len(diff))
             diff = []
+    if wx != wa and diff and vptr_words is not None:
+        drop = dtor_vptr_bytes(diff, wx, wa, *vptr_words)
+        if drop:
+            # a destructor's vptr resets (F2 d21-dtorvptr): each level of an MSVC destructor stores its class's
+            # image vftable, GCC's D1/D0 its own vtable address point, and either compiler drops the stores it
+            # proves dead (the object dies). The final vptr word of a destroyed object is representation, not
+            # behaviour: not compared, and the rest of the object is (it hid later differences behind vptr-store /
+            # vptr-unpaired / native-only-store / x86-only-store at the vptr word)
+            soft = soft or dict(kind='mem-write', soft=True, vptr_store=True, addr='%08x' % min(drop),
+                                ndiff=len(drop))
+            diff = [k for k in diff if k not in drop]
     if wx != wa and diff:
         first = diff[0]
         d = dict(kind='mem-write', addr='%08x' % first, ndiff=len(diff),
@@ -350,6 +364,30 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     if not rx.saved_ok or not ra.saved_ok:
         return dict(kind='callee-saved', x86=rx.saved_ok, arm=ra.saved_ok)
     return soft
+
+
+DTOR_ITANIUM = re.compile(r'D[012]Ev$')
+
+
+def dtor_vptr_bytes(diff, wx, wa, is_vftable, is_native_vtable):
+    """The differing bytes of a destructor's final memory that are vptr words: aligned words where each machine
+    either left the initial bytes or stored a whole vtable word (the oracle an image vftable, the native its own
+    vtable address point or the image vftable a kind-V row maps it to), and at least one of them stored."""
+    out, dset = set(), set(diff)
+    for wd in sorted({k & ~3 for k in diff}):
+        ks = range(wd, wd + 4)
+        sides = []
+        for wmap, ok in ((wx, is_vftable), (wa, lambda v: is_native_vtable(v) or is_vftable(v))):
+            got = [wmap.get(k) for k in ks]
+            if all(b is None for b in got):
+                sides.append('init')
+            elif all(b is not None for b in got) and ok(int.from_bytes(bytes(got), 'little')):
+                sides.append('vt')
+            else:
+                sides.append(None)
+        if None not in sides and 'vt' in sides:
+            out.update(k for k in ks if k in dset)
+    return out
 
 
 def _read(uc, w, a, n):
@@ -412,10 +450,19 @@ class Pair:
                 na = {c.target for c in ra.calls}
                 x = next((c.target for c in rx.calls if c.target >= 0 and c.target not in na), None)
                 if x is None:
+                    vs = self.vslots_run(case, rx, ra)
+                    if vs:
+                        d = dict(d, vslot=vs)
                     return rx, ra, d
                 d = dict(d, index=0)
             else:
                 x = int(d['x86'], 16) if not d['x86'].startswith(('name:', 'imp:')) else None
+                if d.get('vcall') == 'planted' and d.get('arm_vcall') == 'planted':
+                    # both machines called through the planted vftable, different slots: the native dispatched by
+                    # another slot number, it did not inline the oracle's callee. Following it (running the oracle's
+                    # slot function for real) turned this into `call-count x86 0` = falloff? (F2 d21-vslot)
+                    d['vslot'] = self.vslots(case, int(d['x86'], 16), int(d['arm'], 16))
+                    return rx, ra, d
             if x is not None and x in [c.target for c in ra.calls][d['index']:]:
                 return rx, ra, d        # the native makes that call later: the calls differ in order (00740980)
             get = getattr(self.target, 'oracle_code', None)
@@ -428,6 +475,43 @@ class Pair:
             self.adapted += 1
             self.xe = None              # rebuilt with the larger code set
         return rx, ra, d
+
+    def vslots(self, case, tx, ta):
+        """Where the two callees of a planted-slot call-target sit in the planted vftables (exe slot numbers):
+        {vft, x86: [k], arm: [k]} per vftable holding both, `shift` -1 when the native's callee is the slot just
+        before the oracle's (D26 b: a call-only declaration with a placeholder where the exe has its deleting
+        destructor numbers every later slot one lower than D22's minus-one layout)."""
+        out = []
+        pins = getattr(self.target, 'vt_pins', {}) or {}
+        for v in sorted(set(case.vptrs.values())):
+            b = pins.get(v) or b''
+            slots = list(struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4]))
+            ix = [k for k, s in enumerate(slots) if s == tx]
+            ia = [k for k, s in enumerate(slots) if s == ta]
+            if ix and ia:
+                out.append(dict(vft='%08x' % v, x86=ix[:8], arm=ia[:8],
+                                shift=-1 if any(j == i - 1 for i in ix for j in ia) else None))
+        return out
+
+    def vslots_run(self, case, rx, ra):
+        """A call-count where the native makes more calls: its first call the oracle does not make is a planted
+        slot k whose next slot k+1 is oracle code the x86 machine ran for real (a function of the unit: no call
+        event there). The native dispatched one slot lower (D26 b), e.g. 00ee8690's hand-indexed `vtbl[49]`."""
+        tx = [c.target for c in rx.calls]
+        i = next((j for j, c in enumerate(ra.calls) if j >= len(tx) or c.target != tx[j]), None)
+        if i is None:
+            return None
+        ta = ra.calls[i].target
+        pins = getattr(self.target, 'vt_pins', {}) or {}
+        out = []
+        for v in sorted(set(case.vptrs.values())):
+            b = pins.get(v) or b''
+            slots = list(struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4]))
+            ks = [k for k, s in enumerate(slots[:-1]) if s == ta and slots[k + 1] in self.target.x86_code
+                  and slots[k + 1] in rx.blocks]
+            if ks:
+                out.append(dict(vft='%08x' % v, x86=[k + 1 for k in ks[:8]], arm=ks[:8], shift=-1, ran=True))
+        return out or None
 
     def _pushes_before(self, retaddr):
         """Pushes in the straight-line code before the call that returns to retaddr (back to the previous call,
@@ -532,6 +616,27 @@ class Pair:
             self._vc, self._vc_key = (direct, getattr(self.target, 'vt_slots', set())), key
         return self._vc
 
+    def _vptr_words(self):
+        """(is image vftable, is native vtable address) for compare()'s destructor vptr words, or None when the
+        target is no destructor (F2 d21-dtorvptr)."""
+        name = getattr(self.target.conv, 'name', '') or ''
+        if not (name.startswith(('??1', '??_G', '??_E')) or DTOR_ITANIUM.search(name)):
+            return None
+        if getattr(self, '_vpw', None) is None:
+            import classify
+            vft = set(classify.image_vftables()) | set(getattr(self.target, 'exe_vfts', ()) or ())
+            vft |= set((getattr(self.target, 'vtables', {}) or {}).values())
+            img = self.target.image
+            rng = [(a, a + (img.sizes.get(n) or 0)) for n, a in img.syms.items() if n.startswith('_ZTV')]
+            rng += [(a, a + 16) for a, n in img.stubs.items() if str(n).startswith('_ZTV')]
+            nat = set(getattr(self.target, 'vtables', {}) or {})
+            import vtmodel
+
+            def is_native(v):
+                return v in nat or vtmodel.VT_BASE <= v < vtmodel.VT_END or any(lo <= v < hi for lo, hi in rng)
+            self._vpw = (vft.__contains__, is_native)
+        return self._vpw
+
     def _run(self, case, max_steps):
         deleting_flags(self.target.conv, case)
         w = world.World(case, self.target.x86_code, self.pinned)
@@ -560,7 +665,8 @@ class Pair:
                                 (lambda a, n: _read(self.xe.uc, w, a, n), lambda a, n: _read(self.ae.uc, w, a, n)),
                                 getattr(self.target, 'dummies', None),
                                 (world.garbage_words(case.seed, 'x86'), world.garbage_words(case.seed, 'a64')),
-                                self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()))
+                                self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()),
+                                self._vptr_words())
         if d is not None:
             # dynamic evidence for causes.py (S13b: oracle-callee-unloaded): the original addresses of the unit's
             # functions the native actually entered in this run (their __fnv_<X> entry blocks were executed)
