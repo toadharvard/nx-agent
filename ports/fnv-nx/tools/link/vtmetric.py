@@ -77,8 +77,11 @@ def read_renames(path):
             continue
         f = line.rstrip('\n').split('\t')
         if len(f) >= 6 and f[5]:
+            if f[0].endswith('#vtables'):   # the synthesized vtable object of a host unit: zz_vt_<host>.o
+                out['zz_vt_' + obj_name(f[0][:-len('#vtables')])][f[5]] = f[1]
+                continue
             out[obj_name(f[0])][f[5]] = f[1]
-            out['zz_vt_' + obj_name(f[0])][f[5]] = f[1]
+            out['zz_vt_' + obj_name(f[0])].setdefault(f[5], f[1])
     return out
 
 
@@ -239,9 +242,9 @@ def measure(link, exe, rows_path=None):
 # does not place is skipped, so a trap stub never counts (trap-slots has those). Where the destructor pair is not
 # found by name (`__fnvnx_vflag_<a>_0|1` flag stubs bind a pair of exe slots as often as a destructor), the
 # alignment with the most agreeing slots decides: the exe is the evidence, not the spelling.
-FLAG_PAIR = re.compile(r'__fnvnx_vflag_[0-9a-f]{8}_([01])$')
+FLAG_PAIR = re.compile(r'__fnvnx_vflag[3c]?_[0-9a-f]{8}_([01])$')
 ADDR_NAME = re.compile(r'__fnv(?:nx_msvc)?_([0-9a-f]{8})(?:_(?:D[012]|d[01]))?$')
-ADDR_STUB = re.compile(r'__fnvnx_v(?:flag|gdel|free|const|adj)_([0-9a-f]{8})(?:_\d)?$')
+ADDR_STUB = re.compile(r'__fnvnx_v(?:flag[3c]?|gdel|free|const|adj)_([0-9a-f]{8})(?:_\d)?$')
 
 
 def read_symaddr(path):
@@ -274,6 +277,11 @@ def slot_address(name, symaddr):
 
 
 def _pair_positions(names, d):
+    """The slots a destructor pair (D1 then D0) can start at, by what the fixed object's names say: the pair given
+    (d), a flag-stub pair (_0, _1), a slot followed by a D0-named one (the link binds D1 to an address-bound name or a
+    flag stub and leaves the class's own `...D0Ev`, or `__fnv_<a>_D0`, as it was), and two adjacent slots with the
+    same symbol (D1 and D0 bound to the one function the exe's single deleting destructor is). compare_slots lets the
+    exe decide between them."""
     out = []
     if d is not None:
         out.append(d)
@@ -283,6 +291,11 @@ def _pair_positions(names, d):
             continue
         fa, fb = FLAG_PAIR.match(a), FLAG_PAIR.match(b)
         if fa and fb and fa.group(1) == '0' and fb.group(1) == '1':
+            out.append(i)
+        elif not exevft.D0_SLOT.search(a) and (exevft.D0_SLOT.search(b) or b.endswith('_D0')
+                                               or (fb and fb.group(1) == '1' and fa is None)):
+            out.append(i)
+        elif a == b:
             out.append(i)
     return out
 

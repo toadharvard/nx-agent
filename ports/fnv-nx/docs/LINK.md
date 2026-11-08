@@ -992,6 +992,13 @@ none or the function cannot be bound (`hint_kept_*`). Tests: `test_exevft.py` (s
   `zz_bridges.o`, note "minus-one copy of the exe vftable"), so EQ's vtable pairing and `vtmetric` see the vftables of
   classes the decomp declares without virtual members (vtmetric's `no-polymorphic-view`: 164 primary + 7 secondary on
   link 0540aff0, 163 of them referenced as data) and none keeps `__fnv_<V> = 0x<V>` while a unit stores it.
+  W19 (option A): the candidates are every RTTI exe vftable no V row stands for, referenced as data or not
+  (`vmo_candidates`; `FNVNX_D26C_ALL=0` restores the referenced-only selection), offset-to-top from the COL. On a
+  secondary vftable a slot that is an MSVC adjustor thunk (`sub ecx, n; jmp f`, through at most two more thunks) gets
+  a stub (`__fnvnx_vadj_<a>`, destructor slot 0: `__fnvnx_vadjd_<a>_0|1` into f's D1/D0 or flags stubs) only when
+  the summed n is exactly the COL offset and f has a native definition (`vmo_adjustor`); any other adjusting thunk
+  stays a visible trap. On link 0540aff0's inputs (simulated from addrmap.tsv and the exe's RTTI): 746 copies, all
+  with exe slots, 47 beyond the referenced-only 699.
   `out/vmo.tsv` lists the copies. `FNVNX_D26C=0` turns the pass off, so a boot can be compared with and without
   it. On link 9f865b0a's inputs (offline) it makes 831 copies: 615 hand-stored + 239 RTTI-referenced candidates,
   minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
