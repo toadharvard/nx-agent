@@ -126,6 +126,16 @@ def main():
         check(exevft.deleting_dtor(pe_, 0x401000), 'FNVNX_DELDTOR_STRICT=0: the old byte search (the false positive)')
     finally:
         del os.environ['FNVNX_DELDTOR_STRICT']
+    # D22-USED counts a placeholder slot code calls by name, never a real destructor (link 0e8b2eb8's HighProcess shell)
+    NP = fnvlink.named_placeholder
+    called = {'_ZN12FUN_008d98e0D1Ev', '_ZN3Foo3v00Ev'}
+    check(not NP('_ZN12FUN_008d98e0D1Ev', called) and NP('_ZN3Foo3v00Ev', called) and not NP('_ZN3Foo3v00Ev', set())
+          and not NP(None, called), 'named_placeholder: a called D1 is no placeholder; a called v00 is')
+    os.environ['FNVNX_D22DTOR'] = '0'
+    try:
+        check(NP('_ZN12FUN_008d98e0D1Ev', called), 'FNVNX_D22DTOR=0: a called D1 counts as before')
+    finally:
+        del os.environ['FNVNX_D22DTOR']
     # hand_ambiguous_names: a stand-in name whose stores write several image vftables does not pick a native vtable
     V = exevft.Vft
     hand = {0x10a1458: [('u1.cpp', 'StandIn', 0x401000, 0)], 0x1070660: [('u2.cpp', 'StandIn', 0x402000, 0)],

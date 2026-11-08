@@ -2156,6 +2156,19 @@ def _hv_cache(path):
         return code, {}
 
 
+def named_placeholder(sym, called):
+    """D22-USED: the destructor slot's symbol is a placeholder (`v00`, `s_000`) that code calls by name, so prepare
+    keeps the declaration and the table stays in exe order. A real destructor (D0 / D1 / D2: HighProcess's
+    `FUN_008d98e0::~FUN_008d98e0()`, called by name from the derived destructors) is no placeholder: a minus-one
+    table already, whoever calls it (link 0e8b2eb8: 4 process tables, 1,940 shifted slots). FNVNX_D22DTOR=0 counts
+    it as before."""
+    if not sym or sym not in (called or ()):
+        return False
+    if os.environ.get('FNVNX_D22DTOR', '1') != '0' and (sigs.itanium_variant(sym) or '').startswith('D'):
+        return False
+    return True
+
+
 def hand_ambiguous_names(hand, exev):
     """hand_vptr_stores' sites {a: [(unit, cls, fa, off)]} -> {(a, cls, off)} whose class name cannot pick the native
     vtable: the name's stores at that offset write two or more image vftables (one class has one vftable per offset;
@@ -4020,7 +4033,7 @@ def d26_classify(z, v, raw_names, d, listed, called, defined=(), slot0_deldtor=F
     s0 = raw_names[0] if raw_names else None
     if is_com(z, raw_names):
         return 'com'
-    if s0 and s0 in (called or ()):
+    if named_placeholder(s0, called):
         return 'd22-used'
     if v in listed:
         return 'd22-list'
@@ -4487,7 +4500,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 raw_ = [e.sym for e in ents[2:2 + n]]
                 if kind_ == 'minus-one' and is_com(z, raw_):
                     kind_ = 'com'   # IUnknown's slots by name (the hierarchy descriptor may not name IUnknown)
-                elif kind_ == 'minus-one' and 0 <= k_ < len(raw_) and raw_[k_] and raw_[k_] in (called or ()):
+                elif kind_ == 'minus-one' and 0 <= k_ < len(raw_) and named_placeholder(raw_[k_], called):
                     kind_ = 'd22-used'   # code names the destructor slot: prepare keeps the declaration (D22-USED)
                 if kind_ == 'minus-one' and 0 <= k_ < len(slots):
                     pair1 = vmo_dtor_slots(slots[k_], native, msvc or (lambda n_: None), bridges, traps, st, (z, 2 + k_),
@@ -4570,8 +4583,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
             elif len(dec_) == 1:
                 kind_, k_ = next(iter(dec_))
                 raw_ = [e.sym for e in ents[2:2 + n]]
-                if kind_ == 'minus-one' and (is_com(z, raw_) or (0 <= k_ < len(raw_) and raw_[k_] and
-                                                                 raw_[k_] in (called or ()))):
+                if kind_ == 'minus-one' and (is_com(z, raw_) or (0 <= k_ < len(raw_) and
+                                                                 named_placeholder(raw_[k_], called))):
                     kind_ = 'exe-order'   # as prepare: COM by its slot names, a destructor slot named by code
                 if o.bind(z) != 'weak':
                     st['vtfill-skipped-strong'] += 1
