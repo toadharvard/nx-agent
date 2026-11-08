@@ -1989,6 +1989,22 @@ check('D26 call-only: numbered sequences _v01/_v02, d000/d001, v000/v004/v008 ar
        'FNVNX_D22(HeapStandIn, virtual void w000();)'])
 check('D26 call-only: ... a step-2 sequence is not',
       run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'w000()').replace('v1()', 'w002()')), [], ['FNVNX_D22'])
+# ---- S1-rules: D22-CL (the exe decides: S2's classlayout.tsv, orchestrator 2026-11-08)
+_cl = tempfile.mkdtemp(); open(os.path.join(_cl, 'classlayout.tsv'), 'w').write(
+    '# fnvnx-classlayout/1\nclass\tvftable\tkind\tdtor_slot\treason\tfile\tqualified\n'
+    'Named\t01000000\tminus-one\t0\trtti\t\t\nHeapStandIn\t01000004\texe-order\t-1\tdefined-slot0\t\t\n'
+    'TESWorldSpace\t0103195c\tminus-one\t4\tvflag\t\t\nComX\t01000008\tcom\t-1\trtti-com\t\t\n')
+os.environ['FNVNX_CLASSLAYOUT'] = os.path.join(_cl, 'classlayout.tsv'); prepare.__dict__['_fnvnx_classlayout'] = None
+check('D22-CL: minus-one, slot 0: a named first virtual converts (no placeholder name needed)',
+      run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'Named').replace('v0()', 'Reset()')),
+      ['FNVNX_D22(Named, virtual void Reset();)'])
+check('D22-CL: exe-order and com keep the declaration, even a placeholder one',
+      run(s1.r_vtable_dtor_slot, _CO) + run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'ComX')), [], ['FNVNX_D22'])
+check('D22-CL: minus-one, slot 4: the fifth virtual', run(s1.r_vtable_dtor_slot, _WS),
+      ['FNVNX_D22(TESWorldSpace, virtual void v4();)'], ['virtual void v0();) /* fnv-nx D22'])
+check('D22-CL: RAWVT1 leaves an exe-order class in exe order', run(s1.r_raw_vtable_slots, _RV.replace('Coll', 'HeapStandIn')),
+      [], ['FNVNX_D26_SLOT'])
+del os.environ['FNVNX_CLASSLAYOUT']; prepare.__dict__['_fnvnx_classlayout'] = None
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
