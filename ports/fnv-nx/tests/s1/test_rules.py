@@ -874,6 +874,35 @@ check('STAND2 drops a stand-in of an address another unit defines (/Od)', got,
 check('STAND2 leaves units MSVC compiled with auto-inlining', got_o2, ['delete[] p', 'int Free(int a)\n{'], ['STAND2'])
 check('STAND2 keeps the line count', 'lines %d' % got.count('\n'), ['lines %d' % _STAND2_SRC.count('\n')])
 
+# ---- STAND4, lone static noinline stand-ins (W6-EQ: hkpcylindershape 0x00d57aa0 / 0x00d57b20; units.json of its own)
+_s4 = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s4, 'src')); os.makedirs(os.path.join(_s4, 'build'))
+_S4SYMS = {'?Zero@@YAMXZ': '0x00d571d0', '?Same@ns@@YAMXZ': '0x00d571d0', '?Tagged@@YAHXZ': '0x00401230',
+           '?Mine@@YAHXZ': '0x00401240', '?Aligned@@YAHXZ': '0x00d571d0'}
+_json.dump({'units': [
+    {'source': 'src/u.cpp', 'flags': ['/MT', '/O2'], 'symbols': _S4SYMS, 'functions': [{'address': '0x00401230'}]},
+    {'source': 'src/other.cpp', 'flags': ['/MT', '/Od'], 'symbols': {}, 'functions': [{'address': '0x00d571d0'}]}]},
+    open(os.path.join(_s4, 'build', 'units.json'), 'w'))
+_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
+got = run(s1.r_static_stand_ins,
+          'static __declspec(noinline) float Zero()\n{\n    return 0.0f;\n}\n'
+          'namespace ns {\nstatic __declspec(noinline) float Same()\n{\n    return G;\n}\n}\n'
+          '// @fnv 0x00401230\nint Real()\n{\n    return 1;\n}\n'
+          'static __declspec(noinline) int Tagged()\n{\n    return 2;\n}\n'
+          'static __declspec(noinline) int Mine()\n{\n    return 3;\n}\n'
+          'static __declspec(noinline) __declspec(align(16)) int Aligned()\n{\n    return 4;\n}\n'
+          'static __declspec(noinline) int NoAddress()\n{\n    return 5;\n}\n',
+          os.path.join(_s4, 'src', 'u.cpp'))
+s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
+check('STAND4 a lone static noinline stand-in bound to an address another unit defines (any flags)', got,
+      ['__declspec(noinline) float Zero(); /* fnv-nx STAND4 0x00d571d0 */',
+       '__declspec(noinline) float Same(); /* fnv-nx STAND4 0x00d571d0 */',
+       '__declspec(noinline) int Tagged(); /* fnv-nx STAND4 0x00401230 */'],
+      ['return 0.0f', 'return G', 'return 2'])
+check('STAND4 keeps a noinline stand-in whose address nobody else defines, other declspecs, unbound names', got,
+      ['return 3;', 'return 4;', 'return 5;'])
+
 # ---- STAND3 (a units.json of its own: an /Od unit, an /O2 unit and the decompiled addresses of a third)
 _s3 = tempfile.mkdtemp()
 os.makedirs(os.path.join(_s3, 'src')); os.makedirs(os.path.join(_s3, 'build'))
