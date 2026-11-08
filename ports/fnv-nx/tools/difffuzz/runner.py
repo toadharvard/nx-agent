@@ -22,6 +22,7 @@ import struct
 import time
 
 import libcalls
+import retsrc
 import world
 import x86emu
 import arm64emu
@@ -239,6 +240,15 @@ def _nrvo_copy(xcalls, ta, sret, convs):
     return None
 
 
+def _destroys_params(calls, agg_ptrs):
+    """True when `calls` is not empty and every call has, as its first word (ecx: `this`), an address inside the stack
+    slot of a by-value aggregate parameter of the oracle's function (agg_ptrs: [(oracle address, native address,
+    size)]): the callee-side destruction of a by-value parameter that Itanium leaves to the caller."""
+    return bool(calls) and bool(agg_ptrs) and all(
+        c.target >= 0 and c.args and any(xa <= c.args[0] < xa + max(sz, 1) for xa, _na, sz in agg_ptrs)
+        for c in calls)
+
+
 def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
             garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
             agg_ptrs=None):
@@ -305,10 +315,12 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
         tx = tx[:len(ta)]
         soft = soft or dict(kind='nrvo-copy', x86=len(tx) + 2, arm=len(ta), nrvo_copy=True, soft=True)
     dealloc = {a for a, f in fam.items() if f == 'delete'} | {0x00aa4060}
-    if len(tx) > len(ta) and all(t in dealloc for t in tx[len(ta):]) and \
-            any(str(getattr(v, 'cls', '')).startswith('AGG:') for v in conv.vals):
+    if len(tx) > len(ta) and any(str(getattr(v, 'cls', '')).startswith('AGG:') for v in conv.vals) and \
+            (all(t in dealloc for t in tx[len(ta):]) or _destroys_params(rx.calls[len(ta):], agg_ptrs)):
         # MSVC destroys an aggregate passed by value in the callee (its buffer freed on the way out), Itanium in the
-        # caller: the trailing oracle-only frees are by design and the rest is compared (S13b byvalue-arg-dtor)
+        # caller: the trailing oracle-only frees are by design and the rest is compared (S13b byvalue-arg-dtor).
+        # (difffuzz-20, args class) The same for the destructor itself: every trailing oracle-only call has the
+        # address of a by-value parameter as its `this` (`lea ecx, [ebp+8]; call ~T`)
         pass
     elif len(tx) != len(ta):
         return dict(kind='call-count', x86=len(tx), arm=len(ta), x86_trace=[_hex(t) for t in tx],
@@ -319,6 +331,12 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             if cv is None:
                 continue
             skip = dummies(cx.target) if dummies else ()
+            if cx.target >= 0:
+                # (difffuzz-20, args class) an input the callee's exe code cannot read is not an argument: a `this`
+                # in ecx the code never reads, a stack parameter it never pushes or reads
+                un = retsrc.unread_labels(cv, cx.target)
+                if un:
+                    skip = set(skip) | un
             if (getattr(cv, 'name', '') or '').startswith(('??_G', '??_E')):
                 # an MSVC deleting destructor (this, flags) is the Itanium D0 / D1 natively (this only, D7): the
                 # flags are the variant, not an argument
@@ -1064,11 +1082,38 @@ class Pair:
             self._vc, self._vc_key = (direct, getattr(self.target, 'vt_slots', set())), key
         return self._vc
 
+    def _unnamed_deleting_dtor(self):
+        """(difffuzz-20, args class) The decomp names some scalar-deleting destructors `FUN_<addr>(unsigned flags)`
+        (0x004facf0): `this` and one integer parameter, a pointer result, and a direct call of a destructor by name
+        (the exe: `call ~T; test flags, 1; je; push this; call delete; mov eax, this`). Its destroyed object is a
+        destructor's, like `??_G`'s."""
+        t = self.target
+        cv = t.conv
+        vals = [v for v in cv.vals if v.label != 'this']
+        if not any(v.label == 'this' for v in cv.vals) or len(vals) != 1 or vals[0].cls not in ('I32', 'U32') or \
+                cv.ret is None or not cv.ret.is_ptr:
+            return False
+        get, info = getattr(t, 'oracle_callees', None), t.callee_info
+        conv_of = getattr(info, 'conv', None)
+        if get is None or conv_of is None:
+            return False
+        for c in get(t.orig_addr):
+            if c < 0:
+                continue
+            try:
+                n = getattr(conv_of(c), 'name', '') or ''
+            except Exception:  # noqa: BLE001
+                continue
+            if n.startswith(('??1', '??_G', '??_E')) or DTOR_ITANIUM.search(n):
+                return True
+        return False
+
     def _vptr_words(self):
         """(is image vftable, is native vtable address) for compare()'s destructor vptr words, or None when the
         target is no destructor (F2 d21-dtorvptr)."""
         name = getattr(self.target.conv, 'name', '') or ''
-        if not (name.startswith(('??1', '??_G', '??_E')) or DTOR_ITANIUM.search(name)):
+        if not (name.startswith(('??1', '??_G', '??_E')) or DTOR_ITANIUM.search(name)) and \
+                not self._unnamed_deleting_dtor():
             return None
         if getattr(self, '_vpw', None) is None:
             import classify

@@ -23,6 +23,20 @@ STUB_ADDR = re.compile(r'^__fnv(?:nx_br)?_([0-9a-f]{8})')
 _C_DECORATED = re.compile(r'^__imp__([A-Za-z_]\w*)@(\d+)$')
 
 
+def _indirect_thunk(cs, code, addr, limit=8):
+    """True when the function's first instructions are straight-line register / memory moves that end in an indirect
+    `jmp reg` / `jmp [mem]` with no `ret`, `call` or branch before it: a virtual-call or vtable thunk, whose stack
+    bytes are the jump target's."""
+    for n, ins in enumerate(cs.disasm(code, addr)):
+        if n >= limit:
+            return False
+        if ins.mnemonic == 'jmp':
+            return not ins.op_str.startswith('0x') and n > 0
+        if ins.mnemonic not in ('mov', 'lea', 'movzx', 'movsx', 'xchg'):
+            return False
+    return False
+
+
 def import_identity(counts, spellings):
     """(name, stdcall bytes) of one IAT slot from every `__imp_` spelling units.json gives it (F1-callflow).
 
@@ -207,6 +221,13 @@ class UnitCache:
                 import capstone
                 cs = self.__dict__.setdefault('_cs', capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32))
                 pops = set()
+                if _indirect_thunk(cs, f['code'], addr):
+                    # (difffuzz-20, args class) a virtual-call thunk `mov ecx, [ecx+x]; mov eax, [ecx]; jmp [eax+y]`
+                    # (0x00c91270): the stack bytes are those of whichever function the slot holds. The `ret N` the
+                    # linear scan finds past its padding belongs to the next function; the pop is learned from the run
+                    cache[addr] = None
+                    self.__dict__.setdefault('_thunk_unknown', set()).add(addr)
+                    return None
                 for ins in cs.disasm(f['code'], addr):
                     if ins.mnemonic == 'ret':
                         pops.add(int(ins.op_str, 0) if ins.op_str else 0)

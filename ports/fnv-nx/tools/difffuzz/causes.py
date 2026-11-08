@@ -89,6 +89,11 @@ POLICY = {
     'call-order':     ('by-design', '-', False, 'two adjacent calls swapped: C++ leaves operand evaluation order open'),
     'vptr-store':     ('by-design', '-', False, 'a dead vptr store GCC drops (D7: objects hold Itanium vptrs); in a '
                                                 'destructor MSVC resets the vptr to the base vftable, GCC does not'),
+    'cpuid-env':      ('by-design', '-', False, 'the oracle stores / returns what `cpuid` answered (it is shown: the '
+                                                'bytes change when the oracle\'s cpuid answers change); AArch64 has '
+                                                'no CPUID and the port answers with the fixed values of '
+                                                'shim/include/fnvnx_asm.h (docs/ASM.md), a CPU-defined result on '
+                                                'the exe too'),
     'array-new-check': ('by-design', '-', False, 'GCC checks new[]\'s count for overflow, MSVC 2008 does not'),
     'ilp32-pointer':  ('by-design', '-', False, 'an address computed past 4 GiB (wraparound on x86): needs a pointer '
                                                 'the exe never holds'),
