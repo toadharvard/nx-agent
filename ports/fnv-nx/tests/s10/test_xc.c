@@ -159,6 +159,18 @@ static void test_locate(void) {
     CHECK(fnvnx_xc_run_image_order(k_table, K_N, mem + (span_b - va) / 4, n, GLO, GHI, 0, NULL, &rep) == 0);
     CHECK(rep.image_slots == 13 && rep.image_null == 1 && rep.image_missing == 6 && rep.called == 6);
     CHECK(strcmp(g_log, "a1 b1 a2 b2 a3 late ") == 0);
+    /* __xi after __xc_z (loader-seam audit): past __xc_z and __xi_a, the two CRT C initializers, up to __xi_z */
+    uint32_t xb = 0, xe = 0;
+    CHECK(fnvnx_xi_locate(mem, va, k, span_e, TLO, THI, &xb, &xe) == FNVNX_XC_OK);
+    CHECK(xb == va + 4 * (xc_z + 2) && xe == xb + 8);
+    CHECK(mem[(xb - va) / 4] == 0x00ec5000 && mem[(xe - va) / 4] == 0);
+    CHECK(fnvnx_xi_locate(mem, va, xc_z + 3, span_e, TLO, THI, &xb, &xe) == FNVNX_XC_E_NOTFOUND);  /* no __xi_z */
+    CHECK(fnvnx_xi_locate(mem, va, k, va + 4 * k, TLO, THI, &xb, &xe) == FNVNX_XC_E_NOTFOUND);
+    CHECK(fnvnx_xi_locate(mem, va, k, va + 2, TLO, THI, &xb, &xe) == FNVNX_XC_E_ARG);
+    {   /* an empty table: __xc_z, __xi_a, __xi_z */
+        uint32_t m2[6] = {0x00f40010u, 0, 0, 0, 0, 0x01200000u};
+        CHECK(fnvnx_xi_locate(m2, va, 6, va + 4, TLO, THI, &xb, &xe) == FNVNX_XC_OK && xb == xe);
+    }
 }
 
 /* ---- termination -------------------------------------------------------------------------------------- */

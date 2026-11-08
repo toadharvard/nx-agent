@@ -1224,6 +1224,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                     bridges.setdefault(bn, (target, v, ms[refdecl] or refdecl, ms[defdecl] or defdecl))
                                     target = bn
                                     cls = 'code-bridge'
+                                elif v.kind == 'manual' and abi_manual_trap(v) and \
+                                        ('%08x' % addr, un) in abi_layout_equal():
+                                    # proved layout-equal (tools/link/abi_layout_equal.tsv): the direct binding stays
+                                    stats['abi_layout_equal'] += 1
                                 elif v.kind == 'manual' and abi_manual_trap(v):
                                     # D24: nothing binds across an aggregate / result-pointer difference without a
                                     # bridge; the reference stays a trap stub (cause abi-manual in the D23 list)
@@ -2436,6 +2440,24 @@ def exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, alt=None):
 
 
 ABI_MANUAL_TRAP = ('sret-explicit', 'ret-aggregate', 'aggregate-param')
+
+
+_ABI_LAYOUT_EQUAL = None
+
+
+def abi_layout_equal(path=None):
+    """{(address %08x, reference symbol)} of tools/link/abi_layout_equal.tsv: manual pairs proved layout-equal"""
+    global _ABI_LAYOUT_EQUAL
+    if _ABI_LAYOUT_EQUAL is None or path:
+        p = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'abi_layout_equal.tsv')
+        s = set()
+        if os.path.isfile(p):
+            for line in open(p):
+                f = line.rstrip('\n').split('\t')
+                if len(f) >= 2 and not line.startswith('#') and re.fullmatch(r'[0-9a-f]{8}', f[0]):
+                    s.add((f[0], f[1]))
+        _ABI_LAYOUT_EQUAL = s
+    return _ABI_LAYOUT_EQUAL
 
 
 def abi_manual_trap(v):
