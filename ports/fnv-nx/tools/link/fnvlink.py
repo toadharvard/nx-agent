@@ -2834,12 +2834,18 @@ def free_slot(a, nd, bridges, st):
     it every argument one register early. Such a slot gets a bridge by the definition's MSVC convention: cdecl /
     stdcall drop `this` (x1..x7 -> x0..x6), fastcall (ecx = this, edx undefined on the x86 call, then the stack)
     inserts edx as 0 (x1..x6 -> x2..x7). Returns the bridge symbol, or None for any other definition."""
-    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'_Z\d+FUN_[0-9a-f]{8}', nd['sym'].name):
+    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
         return None
     m = FREE_SLOT.match(nd.get('msvc') or '')
-    if not m:
-        return None
-    mode = 'edx' if m.group(1) == 'I' else 'drop'
+    if m:
+        mode = 'edx' if m.group(1) == 'I' else 'drop'
+    else:
+        # R2 (vtgate 4264bfd7): an extern "C" stand-in, `@FUN_<a>@N` (fastcall: edx inserted) or `_FUN_<a>@N` /
+        # `_FUN_<a>` (stdcall / cdecl: this dropped), whose native name is the plain C name (00c73170, 00d2dd50)
+        mc = re.match(r'^([@_])(FUN_[0-9a-f]{8})(?:@\d+)?$', nd.get('msvc') or '')
+        if not mc or nd['sym'].name != mc.group(2):
+            return None
+        mode = 'edx' if mc.group(1) == '@' else 'drop'
     name = FREE_SYM % a
     if name not in bridges:
         if mode == 'drop':
