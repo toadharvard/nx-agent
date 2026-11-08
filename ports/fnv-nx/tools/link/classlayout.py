@@ -134,6 +134,8 @@ def build(exe, exev=None):
     for va in sorted(exev):
         v = exev[va]
         kind, k, why, ev = decide(exe, v)
+        if v.off:
+            why = 'secondary off %d %s' % (v.off, why)   # S1's loader skips these: the class decision is the primary's
         cls, q = simple_name(v.td)
         rows.append(dict(cls=cls, vftable=va, kind=kind, dtor_slot=k, reason=why, file='',
                          qualified=q if q != cls else '', evidence=ev, slots=len(v.slots), off=v.off))
@@ -221,17 +223,64 @@ def sym_addr(sym, names):
     return None, 'unmapped'
 
 
-def native_tables(link):
-    """{exe vftable: (object path, group symbol, address point byte offset)} from the addrmap's V rows."""
-    out = {}
+def native_tables(link, exev=None, names=None):
+    """{exe vftable: [(object path, group symbol, address point byte offset, source)]}: every native table that stands
+    for an exe vftable, not only the address map's choice. Sources: the addrmap's V rows; out/vtext.tsv (each copy
+    the link wrote, with its exe vftables); else, for the strong copies in zz_bridges.o that no V row names, the exe
+    vftable that shares most slot targets (at least half of the first 32 named slots, measurement only). Test case
+    #1 (S5, link 8111f58a): NiDX9Renderer 010ee4bc's V row names the sister copy fnv_00e75a70, while the unit's
+    objects get _ZTV12FUN_00e754a0, which lost exe slot 1."""
+    import vtables
+    out = collections.defaultdict(list)
+    seen = set()
     for line in open(os.path.join(link, 'out', 'addrmap.tsv')):
         p = line.rstrip('\n').split('\t')
         if len(p) < 7 or p[1] != 'V':
             continue
         try:
-            out[int(p[0], 16)] = (os.path.join(link, 'fixed', p[4]), p[2], int(p[6] or 8))
+            t = (os.path.join(link, 'fixed', p[4]), p[2], int(p[6] or 8))
+            out[int(p[0], 16)].append(t + ('V',))
+            seen.add((t[0], t[1]))
         except ValueError:
             continue
+    br = os.path.join(link, 'fixed', 'zz_bridges.o')
+    vt = os.path.join(link, 'out', 'vtext.tsv')
+    if os.path.isfile(vt):
+        for line in open(vt):
+            if line.startswith('#'):
+                continue
+            p = line.rstrip('\n').split('\t')
+            if len(p) < 5:
+                continue
+            for v in p[4].split():
+                if (br, p[0]) not in seen:
+                    out[int(v, 16)].append((br, p[0], 8, 'vtext'))
+            seen.add((br, p[0]))
+        return out
+    if exev is None or names is None or not os.path.isfile(br):
+        return out
+    by_addr = collections.defaultdict(set)
+    for va, v in exev.items():
+        for a in v.slots[:32]:
+            by_addr[a].add(va)
+    o = vtables.Obj(br)
+    for z in o.defs:
+        if not z.startswith('_ZTV') or (br, z) in seen:
+            continue
+        try:
+            ents = o.ents(z)
+            n = vtables.slots_at(ents, 8)
+        except (KeyError, ValueError, IndexError):
+            continue
+        addrs = [sym_addr(e.sym, names)[0] for e in ents[2:2 + n][:32]]
+        addrs = [a for a in addrs if a is not None]
+        if len(addrs) < 2:
+            continue
+        votes = collections.Counter(v for a in set(addrs) for v in by_addr.get(a, ()))
+        if votes:
+            v, c = votes.most_common(1)[0]
+            if c * 2 >= len(set(addrs)):
+                out[v].append((br, z, 8, 'bridges-match'))
     return out
 
 
@@ -259,17 +308,20 @@ def gate(link, exe, layout, exev):
     """-> (summary Counter, [bad slot rows])."""
     import vtables
     names = native_names(link)
-    tabs = native_tables(link)
+    tabs = native_tables(link, exev, names)
     st = collections.Counter()
     bad = []
     objs = {}
     purecall = {a for a in (0x00ec60fa,)}
-    for va, row in sorted(layout.items()):
-        st['tables'] += 1
-        if va not in tabs or va not in exev:
-            st['ungated-no-native-table'] += 1
+    st['tables'] = len(layout)
+    pairs = [(va, t) for va in sorted(layout) for t in tabs.get(va, [])]
+    st['ungated-no-native-table'] = sum(1 for va in layout if not tabs.get(va) or va not in exev)
+    bad_v = set()
+    for va, (path, z, ap, src) in pairs:
+        row = layout[va]
+        if va not in exev:
             continue
-        path, z, ap = tabs[va]
+        st['native-tables-' + src] += 1
         try:
             o = objs.get(path)
             if o is None:
@@ -284,6 +336,7 @@ def gate(link, exe, layout, exev):
             continue
         st['gated'] += 1
         exp = expected(row, exev[va].slots)
+        nb = len(bad)
         tab_bad = 0
         for j, want in enumerate(exp):
             if j >= len(nat):
@@ -309,12 +362,16 @@ def gate(link, exe, layout, exev):
             bad.append((va, row['cls'], row['kind'], j, sym or '', '%08x' % wa, cat))
             st['slot-' + cat] += 1
             tab_bad += 1
+        bad[nb:] = [b + (z, src) for b in bad[nb:]]
         if tab_bad:
-            st['mismatch-tables'] += 1
+            st['mismatch-native-tables'] += 1
             st['mismatch-slots'] += tab_bad
             st['mismatch-tables-' + row['kind']] += 1
+            bad_v.add(va)
         else:
-            st['ok'] += 1
+            st['ok-native-tables'] += 1
+    st['mismatch-tables'] = len(bad_v)
+    st['ok'] = len({va for va, _ in pairs if va in exev}) - len(bad_v)
     return st, bad
 
 
@@ -340,9 +397,10 @@ def main(argv=None):
         st, bad = gate(a.link, a.exe, lay, exev)
         gp = a.gate or os.path.join(os.path.dirname(os.path.abspath(a.out)), 'classgate.tsv')
         with open(gp, 'w') as f:
-            f.write('# fnvnx-classgate/1\n# vftable\tclass\tkind\tnative_slot\tnative_symbol\texe_target\tcause\n')
+            f.write('# fnvnx-classgate/1\n# vftable\tclass\tkind\tnative_slot\tnative_symbol\texe_target\tcause'
+                    '\tnative_table\tsource\n')
             for r in bad:
-                f.write('%08x\t%s\t%s\t%d\t%s\t%s\t%s\n' % r)
+                f.write('%08x\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n' % r)
         print('classgate: tables %d, gated %d, ok %d, mismatch-tables %d, mismatch-slots %d' % (
             st['tables'], st['gated'], st['ok'], st['mismatch-tables'], st['mismatch-slots']))
         for k in sorted(st):
