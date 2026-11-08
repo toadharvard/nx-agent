@@ -558,12 +558,20 @@ class Arm64Engine:
                 x0 = r.calls[-1].args[0] & 0xffffffff
             elif ch and ch[0][1][0] == 'x':
                 x0 = r.calls[-1].args[ch[0][1][1]] & 0xffffffff
-        elif ck == 'ref':
+        elif ck == 'ref' or k in world.REF_CALLS:
             x0 = world.ref_result(k)
+            if k in world.REF_CALLS:
+                self._ensure(x0, 16)
+                uc.mem_write(x0, rb[:16])
         elif ck in ('bool', 'untyped'):
             x0 = (x0 & ~0xff) | (rb[0] & 1)            # a real bool result is 0/1
         uc.reg_write(XR[0], x0)
         uc.reg_write(VR[0], int.from_bytes(rb[:16], 'little'))
+        if k in world.REF_CALLS:
+            # (r5 design) the canned object seen by value: a struct of floats comes back in s0..s3 (AAPCS64 HFA), the
+            # words the oracle loads through the pointer
+            for i in range(1, 4):
+                uc.reg_write(VR[i], int.from_bytes(rb[4 * i:4 * i + 4], 'little'))
         if cv is not None and cv.hidden and cv.ret is not None:
             # the MSVC side returns this value through memory: the same bytes here, wherever AAPCS64 puts them
             res = world.result_bytes(case, k, cv.ret.size)

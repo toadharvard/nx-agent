@@ -466,6 +466,8 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
         # MSVC's deleting destructor returns this, the Itanium D0 it stands for returns nothing (by design,
         # causes.py deleting-dtor-ret): not compared, so the stores after it are (difffuzz-14)
         rx.ret = ra.ret = None
+    if world.RET_DEAD:
+        rx.ret = ra.ret = None                # (r5 design) r5design.result_dead: no caller in the exe reads eax
     nx, na = getattr(rx, 'noreturn', None), getattr(ra, 'noreturn', None)
     if bool(nx) != bool(na):
         # one machine ended at a call that never returns after the same calls, the other returned (difffuzz-14)
@@ -615,10 +617,13 @@ def literal_store_words(diff, wx, wa, readers, w):
 DTOR_ITANIUM = re.compile(r'D[012]Ev$')
 
 
-def dtor_vptr_bytes(diff, wx, wa, is_vftable, is_native_vtable):
+def dtor_vptr_bytes(diff, wx, wa, is_vftable, is_native_vtable, oracle_defers=True):
     """The differing bytes of a destructor's final memory that are vptr words: aligned words where each machine
     either left the initial bytes or stored a whole vtable word (the oracle an image vftable, the native its own
-    vtable address point or the image vftable a kind-V row maps it to), and at least one of them stored."""
+    vtable address point or the image vftable a kind-V row maps it to), and at least one of them stored.
+    (r5 design) A word the oracle left alone while the native stored one counts only when `oracle_defers`: the exe
+    shows that the oracle's destructor leaves the vptr to the base destructor it calls last
+    (exeempty.dtor_defers_vptr)."""
     out, dset = set(), set(diff)
     for wd in sorted({k & ~3 for k in diff}):
         ks = range(wd, wd + 4)
@@ -626,7 +631,7 @@ def dtor_vptr_bytes(diff, wx, wa, is_vftable, is_native_vtable):
         for wmap, ok in ((wx, is_vftable), (wa, lambda v: is_native_vtable(v) or is_vftable(v))):
             got = [wmap.get(k) for k in ks]
             if all(b is None for b in got):
-                sides.append('init')
+                sides.append('init' if wmap is not wx or oracle_defers else None)
             elif all(b is not None for b in got) and ok(int.from_bytes(bytes(got), 'little')):
                 sides.append('vt')
             else:
@@ -1261,7 +1266,12 @@ class Pair:
 
             def is_native(v):
                 return v in nat or vtmodel.VT_BASE <= v < vtmodel.VT_END or any(lo <= v < hi for lo, hi in rng)
-            self._vpw = (vft.__contains__, is_native)
+            # (r5 design) the oracle may leave the vptr word alone only where the exe shows its destructor leaves it
+            # to the base destructor it calls last; without the exe nothing can be judged and the old rule stands
+            import exeempty
+            a = getattr(self.target, 'orig_addr', None)
+            defers = True if exeempty._pe() is None or a is None else exeempty.dtor_defers_vptr(a)
+            self._vpw = (vft.__contains__, is_native, defers)
         return self._vpw
 
     def _run(self, case, max_steps):

@@ -483,6 +483,13 @@ class X86Engine:
             uc.reg_write(UC_X86_REG_ESP, esp + 4)
             uc.reg_write(UC_X86_REG_EIP, retaddr)
             return
+        if retaddr in world.SKIP_RETS:
+            # (r5 design) a call the exe shows to be dead (world.SKIP_RETS): not made, not traced
+            info = self.callee_info(address)
+            pop = info[0] if info else (self.pop_override.get(retaddr) or 0)
+            uc.reg_write(UC_X86_REG_ESP, esp + 4 + pop)
+            uc.reg_write(UC_X86_REG_EIP, retaddr)
+            return
         k = len(r.calls)
         if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
             self._fault = 'timeout'
@@ -532,8 +539,13 @@ class X86Engine:
                 n = next(off for l_, sp, off, sz in getattr(cv, 'x86_declared', cv.x86) if l_ == lab) // 4
                 if 2 + n < len(r.calls[-1].args):
                     eax = r.calls[-1].args[2 + n]
-        elif ck == 'ref':
+        elif ck == 'ref' or k in world.REF_CALLS:
             eax = world.ref_result(k)
+            if k in world.REF_CALLS:
+                # (r5 design) the object holds the canned bytes: what the oracle loads through the result is what
+                # the native receives in its result register (the unit declares it by value)
+                self._ensure(eax, 16)
+                uc.mem_write(eax, rb[:16])
         elif ck in ('bool', 'untyped'):
             eax = (eax & ~0xff) | (rb[0] & 1)          # a real bool result is 0/1 (MSVC tests al, GCC bit 0)
         if cv is not None and cv.hidden and cv.ret is not None:

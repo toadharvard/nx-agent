@@ -1000,6 +1000,12 @@ def hint(pair, target, case, div, fn, max_steps):
         if big and hits:
             h['cause'] = 'shift-count'; h['args'] = big; return h
     if k == 'call-count' and pair is not None:
+        # (r5 design) a constructor call whose every store the caller overwrites (dead-init-call)
+        import r5design
+        c = r5design.dead_init_probe(pair, case, div, max_steps, h)
+        if c:
+            h['cause'] = c; return h
+    if k == 'call-count' and pair is not None:
         # (uncls2) a call that only runs on garbage: the same uniform-fill probe (0x00a82d90)
         c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=True)
         if c:
@@ -1027,6 +1033,18 @@ def hint(pair, target, case, div, fn, max_steps):
             h['cause'] = 'layout-offset'; h['shift'] = d; return h
     if k in ('return', 'mem-write', 'call-args') and pair is not None:
         c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h)
+        if c:
+            h['cause'] = c; return h
+    if k in ('return', 'mem-write', 'call-args') and pair is not None:
+        # (r5 design) mechanisms the exe's own code has to show (r5design.py): dead-result, local-index-range,
+        # ptrdiff-unaligned, x87-range of a float argument
+        import r5design
+        c = r5design.value_probes(pair, target, case, div, fn, max_steps, h)
+        if c:
+            h['cause'] = c; return h
+    if k == 'error' and pair is not None:
+        import r5design
+        c = r5design.null_deref_probe(pair, case, div, max_steps, h)
         if c:
             h['cause'] = c; return h
     h['cause'] = 'unclassified'

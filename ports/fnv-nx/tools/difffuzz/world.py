@@ -254,6 +254,17 @@ X87_CLAMP = None
 # narrowed or a float widened. classify's width probe reruns the case with the other guess
 X87_FLIP_WIDTH = False
 
+# (r5 design, difffuzz-20) probe switches of r5design.py, each set for one rerun of a divergence:
+#  SKIP_RETS  oracle return addresses of calls the oracle engine does not make (not traced, nothing run): a constructor
+#             call whose every store the caller overwrites before any read (r5design.dead_init_site)
+#  REF_CALLS  indices k of intercepted calls whose canned result is world.ref_result(k) on both machines: a wild call
+#             whose result the oracle dereferences at once (r5design.deref_after_call)
+#  RET_DEAD   the integer / pointer result of the target is not compared: no caller in the exe reads eax
+#             (r5design.result_dead)
+SKIP_RETS = frozenset()
+REF_CALLS = frozenset()
+RET_DEAD = False
+
 # (uncls2, difffuzz-20) probe switches, each set by classify.hint for one rerun of a divergence:
 #  SHIFT_MASK   the 64-bit shift helpers (_allshl / _allshr) take the count modulo 64, as an AArch64 `lsl x, x, x`
 #               does; MSVC's helper gives 0 / the sign for a count of 64 or more (a shift UB in C++)
