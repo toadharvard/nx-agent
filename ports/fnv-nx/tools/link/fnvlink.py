@@ -1664,6 +1664,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         vstats['d22-list-vftables'] = len(d22_listed)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
+        vstats['exe-order-shell-names'] = add_unit_shell_names(out, units_json, exe_path)
         for a in rebind:   # S2c-vt2: shifted secondary groups moved their address points (slotfill2.shifted)
             rebind[a] = vmap[a][:2]
         if os.environ.get('FNVNX_D26C', '1') != '0':
@@ -3754,6 +3755,52 @@ def write_exe_order(out, exe_order, exev, alt=None):
         f.write('#class\tvftable\treason\tnative vtable symbol\n')
         for r in sorted(rows):
             f.write('\t'.join(r) + '\n')
+
+
+def add_unit_shell_names(out, units_json, exe_path=None):
+    """Add to out/exe_order_classes.tsv the class names units.json gives the same exe vftables (S1-rules' RAWVT1
+    matches the class that owns the member doing `(*(void***)this)[k]`, often a decomp shell): a `??_7<C>...@@6B@`
+    symbol at a listed vftable, and a constructor `??0<C>@...` whose x86 code stores a listed vftable last
+    (exevft.ctor_vftable). Each row keeps the vftable's reason; the native vtable column says `units.json`.
+    Returns the number of rows added."""
+    p = os.path.join(out, 'exe_order_classes.tsv')
+    if not units_json or not os.path.exists(p) or not os.path.exists(units_json):
+        return 0
+    rows, reason = set(), {}
+    for line in open(p, encoding='utf-8'):
+        if line.startswith('#'):
+            continue
+        f = line.rstrip('\n').split('\t')
+        if len(f) >= 4:
+            rows.add(tuple(f[:4]))
+            reason.setdefault(int(f[1], 16), f[2])
+    if not reason:
+        return 0
+    data = json.load(open(units_json))
+    add = set()
+    for u in data.get('units', ()):
+        for n, a in (u.get('symbols') or {}).items():
+            m = re.match(r'\?\?_7([A-Za-z_]\w*)@', n)
+            v = int(a, 16) if isinstance(a, str) else None
+            if m and v in reason:
+                add.add((m.group(1), '%08x' % v, reason[v], 'units.json'))
+        for fn in (u.get('functions') or ()):
+            m = re.match(r'\?\?0([A-Za-z_]\w*)@', fn.get('symbol', ''))
+            if not m or not exe_path:
+                continue
+            try:
+                v = exevft.ctor_vftable(exe_path, int(fn['address'], 16), set(reason))
+            except Exception:
+                v = None
+            if v in reason:
+                add.add((m.group(1), '%08x' % v, reason[v], 'units.json'))
+    new = add - rows
+    if new:
+        with open(p, 'w', encoding='utf-8') as f:
+            f.write('#class\tvftable\treason\tnative vtable symbol\n')
+            for r in sorted(rows | new):
+                f.write('\t'.join(r) + '\n')
+    return len(new)
 
 
 VMO_SYM = '__fnvnx_vmo_%08x'   # D26 (c): minus-one native copy of an image vftable that stays at its image address
