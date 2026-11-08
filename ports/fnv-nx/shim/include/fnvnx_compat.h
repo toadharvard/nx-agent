@@ -189,6 +189,10 @@ struct fnvnx_new_tag {};
  * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
 template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (flags & 1) delete p; else p->~T(); }
 #define FNVNX_D22_CALL(p, m, ...) fnvnx_d22_vdtor((p), (__VA_ARGS__))
+/* DTORB1: a destructor stand-in calls the address the recipe binds its ??1 to (the link's __fnv_<a>), the
+ * original body unreachable */
+#define FNVNX_DTORB_BEGIN(a) { extern void fnvnx_dtorb_##a(void*) __asm__("__fnv_" #a); fnvnx_dtorb_##a((void*)this); } if (0) {
+#define FNVNX_DTORB_END }
 #endif
 
 /* SAL annotations (sal.h) used without an include in pasted CRT prototypes */
