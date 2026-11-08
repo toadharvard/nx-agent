@@ -64,6 +64,7 @@ import config
 # call first (three call sites over branches), an integer result that the 24-bit x87 control word rerun reproduces
 # is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
 # placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return.
+# Native-null-read class: a native fault inside the unit's own FUN_<X> the oracle only called out follows X in the oracle, native vtable groups read background past their last slot, and a planted slot answered by a named native stub is not followed.
 HARNESS = 'difffuzz-20'
 
 

@@ -15,6 +15,7 @@ compare() returns the FIRST difference (so a reproducer stays minimal), or None:
   callee-saved x86 ebx/esi/edi/ebp or AArch64 x19..x29/sp not preserved (an ABI break, e.g. a bridge or asm)
 Timeouts on either side are inconclusive (not a divergence), both sides faulting is agreement.
 """
+import bisect
 import math
 import re
 import struct
@@ -519,6 +520,21 @@ class Pair:
                 got = self._learn_pop(case, max_steps, rx)
                 if got is not None:
                     rx, ra, d = got
+            if d and d['kind'] == 'error' and (ra.error or '').startswith('fault:') and rx.error is None and \
+                    self.adapted < 16:
+                # (EQ native-null-read, difffuzz-20) the native faulted inside its own copy of a function the oracle
+                # only called out (the unit defines `FUN_<X>`, the oracle's unit does not, so X was intercepted with
+                # a canned result): run the oracle's X for real, as the adaptive follow below does, and compare again
+                x = self._native_own_copy(rx, ra)
+                got = self.target.oracle_code(x) if x is not None and getattr(self.target, 'oracle_code', None) \
+                    else None
+                if got:
+                    self.target.x86_code[x] = got[0]
+                    for a_, b_ in got[1].items():
+                        self.pinned.setdefault(a_, b_)
+                    self.adapted += 1
+                    self.xe = None
+                    continue
             if not d or d['kind'] not in ('call-target', 'call-count') or self.adapted >= 16:
                 return rx, ra, d
             if d['kind'] == 'call-count':
@@ -539,6 +555,13 @@ class Pair:
                     # another slot number, it did not inline the oracle's callee. Following it (running the oracle's
                     # slot function for real) turned this into `call-count x86 0` = falloff? (F2 d21-vslot)
                     d['vslot'] = self.vslots(case, int(d['x86'], 16), int(d['arm'], 16))
+                    return rx, ra, d
+                if d.get('vcall') == 'planted' and str(d.get('arm') or '').startswith('name:') and \
+                        x in (self.target.vt_slots if hasattr(self.target, 'vt_slots') else ()):
+                    # (EQ native-null-read, difffuzz-20) the oracle called slot X of a planted vftable and the native
+                    # a named stub (a virtual the link binds to no definition: `_ZN10NiAVObject4v003Ev`). A virtual
+                    # call is not an inlined X: following X ran the exe's body (`xor eax, eax`) against the stub's
+                    # canned result, and the native then dereferenced that result (00477560, 009abe40: null-read)
                     return rx, ra, d
                 if str(d.get('arm') or '').startswith('name:__s13_vtpad_'):
                     # the native called through a padding slot of a planted vftable's native vtable (vptr-unpaired):
@@ -563,6 +586,28 @@ class Pair:
             self.adapted += 1
             self.xe = None              # rebuilt with the larger code set
         return rx, ra, d
+
+    def _native_own_copy(self, rx, ra):
+        """The first call the oracle made past the native's calls (it faulted before making them) whose original
+        address X is outside the oracle code and whose native definition in the unit (a symbol named `FUN_<X>`) the
+        native run executed blocks in; None if there is none."""
+        img = self.target.image
+        syms = getattr(img, 'syms', None)
+        if not syms:
+            return None
+        starts = sorted(set(syms.values()))
+        cand = [c.target for c in rx.calls[len(ra.calls):] if c.target >= 0 and c.target not in self.target.x86_code]
+        if not cand:
+            return None
+        for x in cand:
+            tag = 'FUN_%08x' % x
+            for n, a in syms.items():
+                if tag in n and not n.startswith('__fnv_'):
+                    i = bisect.bisect_right(starts, a)
+                    hi = starts[i] if i < len(starts) else a + 0x10000
+                    if any(a <= b < hi for b in ra.blocks):
+                        return x
+        return None
 
     def _native_calls(self, x, ra):
         """Does the native definition of the target, or of a function of its unit the native run `ra` entered,
