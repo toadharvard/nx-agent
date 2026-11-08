@@ -240,6 +240,7 @@ tb = int(tb)
 total = int(total)
 rd = lambda p: json.load(open(p)) if os.path.isfile(p) else None
 stages = []
+failed_stages = []
 for s in ('fetch', 'toolchain', 'prepare', 'compile', 'link', 'guest'):
     sp = os.path.join(B, s, 'stage.json')
     r = rd(sp) or {}
@@ -254,6 +255,14 @@ for s in ('fetch', 'toolchain', 'prepare', 'compile', 'link', 'guest'):
         extra = 'compile cache %d hits, %d misses' % (hits, miss) if hits or miss else ''
     if s == 'prepare' and 'prepare_reused' in m:
         extra = 'kept (inputs identical)' if m['prepare_reused'] else 'prepare.py ran'
+    if r.get('status') == 'fail':   # the failing stage's own error and log tail (not the job log's apt output)
+        tail = list(r.get('log_tail') or [])
+        lp = r.get('log') or os.path.join(B, s, 'stage.log')
+        if not os.path.isabs(lp):
+            lp = os.path.join(os.path.dirname(B), lp) if not os.path.isfile(lp) else lp
+        if os.path.isfile(lp):
+            tail = [l.rstrip('\n') for l in open(lp, errors='replace').readlines()[-40:]]
+        failed_stages.append((s, r.get('error') or r.get('summary') or '', tail))
     stages.append({'stage': s, 'status': r.get('status', 'none'), 'run': 'ran' if ran else ('cached' if r else '-'),
                    'seconds': r.get('seconds') if ran else 0, 'note': extra if ran else ''})
 st = [l.rstrip('\n').split('\t') for l in open(steps) if '\t' in l]
@@ -265,6 +274,8 @@ nd = open(os.path.join(stub, 'nulldev')).read().strip() if os.path.isfile(os.pat
 L = ['# bootloop %s%s' % (commit[:12], (' (%s)' % wip) if wip else ''), '']
 if fail:
     L += ['- FAIL: %s' % fail, '']
+    for s_, err, tail in failed_stages:
+        L += ['- the %s stage: %s' % (s_, err[:300] or 'no error recorded'), '', '```'] + [t[:300] for t in tail] + ['```', '']
 L += ['- iteration: %d s (%.1f min; target 15 min)%s' % (total, total / 60, '; cold: the first build on this machine' if cold == '1' else ''),
       '- stub boot: game milestones %d/%d; last reached: %s; null device: %s; EMU_TIMEOUT %s s' % (
           reached, len(ms), bs.get('milestone') or 'none', {'1': 'FNVNX_STUB_NULLDEV=1', '0': 'off'}.get(nd, '-'), emu_s),
