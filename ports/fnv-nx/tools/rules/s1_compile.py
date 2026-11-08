@@ -3734,8 +3734,11 @@ def r_static_stand_ins(path, text, stats):
                 edits.append((d.start(), d.end(), d.group(1)))
     if not edits: return text
     out, pos = [], 0
+    keep = os.environ.get('FNVNX_RECON') and 'STAND4' in ''.join(e[2] for e in edits)
+    spans4 = prepare.__dict__.setdefault('_fnvnx_stand4_spans', {}).setdefault(os.path.abspath(path), []) if keep else None
     for a, b, r in sorted(edits):
         if a < pos: continue
+        if spans4 is not None and 'STAND4' in r: spans4.append((r, text[a:b]))   # REC1 matches on the text before this
         out.append(text[pos:a]); out.append(r); pos = b
     out.append(text[pos:])
     stats['STAND4'] += sum(1 for e in edits if 'STAND4' in e[2])
@@ -4220,6 +4223,14 @@ BIND1_REFS = [
     #   placeholder vector_error_message): the exe's ReserveItems 0x0065cfd0 calls 0x0065f640 (ThrowVectorTooLong,
     #   which pushes the exe's own message) at 0x0065d00e, where the pristine object calls this name
     ('src/staging/blk_00ac0000_od_ob1_variant.cpp', '?length_error@Vector12@@SAXXZ', '0x0065f640'),
+    # * W28 (top-down 44): MMAlloc::Allocate (blk_00aa0000_od_ob1_variant.cpp, exe 0x00aa3e40) reads the small-pool
+    #   table `if (n <= 0x3fc) pool = smallPools[n >> 2]`: the exe has `cmp [ebp+8], 0x3fc; shr edx, 2;
+    #   mov eax, [edx*4 + 0x011f67b8]` at 0x00aa3ee8 (and 0x00aa498b). The unit's pristine object relocates it (DIR32) in
+    #   a COMDAT function the exe compiled with GetHeapIndex inlined, so exe-data's byte match never finds the site.
+    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?smallPools@fnv_00aafc80@@3PAPAUDeallocPool@1@A', '0x011f67b8'),
+    # * W28 (top-down 109): LNode_af5480::AddTail (src/bssystem/archive.cpp; exe 0x00afcc10): `push 8;
+    #   mov ecx, 0x011f6238; call 0x00aa3e40` at 0x00afcc5c: the memory manager, as for g_memoryManager6b3c0.
+    ('src/bssystem/archive.cpp', '?g_memoryManager_af5480@fnv_00af5480@@3UMemoryManager_af5480@1@A', '0x011f6238'),
 ]
 
 def bind_units_data(data, stats, refs=BIND1_REFS):
@@ -5316,6 +5327,15 @@ def _recon_reject(r, d, src, bad, stats):
         msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
     sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its rows stay trap stubs\n' % (src, d, msg))
 
+def _rec1_unstand4(path, text):
+    """text with every STAND4 rewrite put back to the definition it replaced (None when STAND4 rewrote nothing here)."""
+    spans = prepare.__dict__.get('_fnvnx_stand4_spans', {}).get(os.path.abspath(path))
+    if not spans: return None
+    out = text
+    for marker, orig in spans:
+        if out.count(marker) == 1: out = out.replace(marker, orig)
+    return out if out != text else None
+
 def r_recon_bodies(path, text, stats):
     """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
     if not os.environ.get('FNVNX_RECON') or not path.endswith(('.cpp', '.c')): return text
@@ -5334,6 +5354,15 @@ def r_recon_bodies(path, text, stats):
             if not isinstance(old, str) or not old or not isinstance(new, str):
                 bad = (k, -1, 'needs a non-empty "old" and a "new" string'); break
             c = edited.count(old)
+            if c == 0:
+                # REC1 x STAND4: a recon is written against the decomp text, and STAND4 (which runs before REC1) turned a
+                # lone static stand-in into an extern declaration. Match on the text before STAND4 (its marker put back
+                # to the original definition), apply the pair there, and let STAND4 convert what is left of it.
+                un = _rec1_unstand4(path, edited)
+                if un is not None and un.count(old) == 1:
+                    edited = un.replace(old, new)
+                    edited = r_static_stand_ins(path, edited, stats)
+                    continue
             if c != 1:
                 bad = (k, c, old[:120]); break
             edited = edited.replace(old, new)
