@@ -247,7 +247,10 @@ X87_CW = 0x027f
 # that type to inf (overflow) or zero (underflow) before each instruction, as float / double arithmetic would have
 # done: the x87 stack keeps a 15-bit exponent at every precision. classify.x87_probes reruns a case that way (with the
 # control word at 24 / 53 bits) to see whether the divergence is only the missing overflow / underflow; the dict also
-# receives {'n': values clamped, 'addr': the first instruction after which one was}
+# receives {'n': values clamped, 'addr': the first instruction after which one was}. Values between the smallest normal
+# and 2**-150 (2**-1075) are rounded to the denormal grid of the type (gradual underflow); kind 'f32den' does only that
+# for floats (53-bit control word, no overflow clamp, nothing flushed): a float product that goes denormal feeding double
+# arithmetic (bh_C, 0x00f92520)
 X87_CLAMP = None
 # the width an intercepted callee of unknown type returns its float in is guessed from the code that consumes ST0
 # (x86emu.x87_result_use: fstp dword -> f32, fstp qword -> f64); the consumer cannot tell a float result from a double

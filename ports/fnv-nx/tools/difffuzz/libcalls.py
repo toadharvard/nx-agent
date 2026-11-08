@@ -86,6 +86,9 @@ EQUIV = {'_Znwm': 0x00401000, '_Znwj': 0x00401000, '_Znam': 0x00401000, '_Znaj':
          'fnvnx_xc_atexit': 0x00ec658f, 'atexit': 0x00ec658f, 'fnvnx_xc_cxa_atexit': 0x00ec658f,
          # a throw: MSVC's _CxxThrowException(object, ThrowInfo), natively the platform's _CxxThrowException or the
          # Itanium throw / rethrow of a C++ `throw` GCC compiled (difffuzz-14); std::_Xlen = __throw_length_error
+         # the decomp names the CRT's locking _fclose (0x00ec9907) `_fclose_nolock` at both of BSFile's call sites
+         # (BSFile::Open 0x00aff443, Close 0x00affd3c): natively platform/crt's lock-free close, the same role (S13b, bh_C)
+         'fnvnx_iob_fclose_nolock': 0x00ec9907,
          '__cxa_throw': 0x00ec7894, '__cxa_rethrow': 0x00ec7894, 'fnvnx_cxx_throw_exception': 0x00ec7894,
          '_ZSt20__throw_length_errorPKc': 0x00ec30b0}
 NO_ARGS = {0x00401000, 0x00401030, 0x00aa1460, 0x00ec43fb, 0x00ec658f, 0x00aa3e40, 0x00ecd291, 0x00ec7894, 0x00ec30b0}
@@ -111,6 +114,7 @@ def noreturn_a64(name):
 # the game's operator new / delete (MSVC inlined the operator; MemoryManager::Allocate 0x00aa3e40, CRT free
 # 0x00ecd291); the arguments are not compared
 FAMILY = {0x00401000: 'new', 0x00aa3e40: 'new', 0x00ecd1c7: 'new', 0x00401030: 'delete', 0x00aa1460: 'delete',
+          0x00aa4060: 'delete',
           0x00ecd291: 'delete'}   # 0x00ecd1c7 CRT malloc (S1-rules d20-malloc)
 
 

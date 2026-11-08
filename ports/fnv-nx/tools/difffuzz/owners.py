@@ -20,7 +20,7 @@ import sys
 
 OWNER = {}
 for o, cs in {
-    'S1-rules': ('oracle-vcall', 'oracle-fault', 'oracle-callee-unloaded', 'unclassified', 'bool-repr', 'signedness',
+    'S1-rules': ('oracle-vcall', 'native-vcall-unplanted', 'oracle-fault', 'oracle-callee-unloaded', 'unclassified', 'bool-repr', 'signedness',
                  'signedness?', 'shift-count', 'x86-custom-cc', 'msvc-inlined', 'stub-normalized', 'libc-variant',
                  'literal-arg', 'runtime-equiv', 'stack-arg', 'oracle-frame-smash', 'partial-return', 'cpuid-env'),
     'S2-bodies': ('native-undefined', 'after-native-undefined', 'native-stub-data', 'native-zero-stub', 'native-trap'),

@@ -333,6 +333,7 @@ class Model:
         ap, mem, stubs, done, by_name, nstub = {}, st['mem'], st['stubs'], st['done'], st['by_name'], st['nstub']
         alias = self.aliases()
         cur = st['cur']
+        d0_of = st.setdefault('d0_of', {})     # {compiler-generated D0 name: original address of the D1 stub before it}
 
         def resolve(name):
             for _ in range(3):
@@ -354,6 +355,8 @@ class Model:
             m = ADDR_ANY.match(name)
             if m:
                 st['orig'][a] = int(m.group(1), 16)
+            elif name in d0_of:
+                st['orig'][a] = d0_of[name]
             elif name in self.native_addrs():
                 # defined in another object: the slot's function at its original address (difffuzz-19; it traced as
                 # an anonymous named stub, never equal to the oracle's slot target: S13b vcall-stub-alias)
@@ -372,6 +375,7 @@ class Model:
             if g is None:
                 continue
             words = g[0]
+            d0_of.update(deleting_d0(words))
             n = native_slots(words, apoff)
             want = len(self.slots(v)) + 2          # Itanium: one destructor slot more than MSVC, a spare
             # the vtable at the address point, then (when the link pairs V with a shorter native vtable, e.g. a
@@ -395,6 +399,25 @@ class Model:
         st['cur'] = cur
         stub_orig.update(st['orig'])
         return ap, dict(mem), dict(stubs)
+
+
+D1_STUB = re.compile(r'^__fnv_([0-9a-f]{8})_D1$')
+
+
+def deleting_d0(words):
+    """{D0 symbol: original address} for the vtable words (symbol names / ints) where a synthesized vtable binds the
+    complete-object destructor slot to the D1 stub of the exe's deleting destructor `??_G` at X (`__fnv_X_D1`) and
+    leaves the next slot, the deleting D0, to the compiler's weak `_ZN..D0Ev` (it runs D1, then operator delete): that
+    D0 stands for X, the exe's scalar deleting destructor in the slot the oracle calls (difffuzz-20, bh_C 0x00af2230:
+    it traced as an anonymous named stub, never equal to the oracle's 0x00afc680)."""
+    out = {}
+    for i in range(1, len(words)):
+        w, p = words[i], words[i - 1]
+        if isinstance(w, str) and isinstance(p, str) and w.endswith('D0Ev') and w.startswith('_Z'):
+            m = D1_STUB.match(p)
+            if m:
+                out[w] = int(m.group(1), 16)
+    return out
 
 
 ARGCLASS = re.compile(r'^(?:const\s+)?(?:class|struct)\s+([A-Za-z_][\w:]*)\s*(?:const\s*)?[*&]\s*(?:const)?$')

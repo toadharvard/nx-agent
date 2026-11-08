@@ -420,6 +420,15 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             units[f[0]].obj = f[1]
     have = [u for u in units.values() if u.obj]
     log('units: %d, with objects: %d' % (len(units), len(have)))
+    # ODR stand-ins (odr.py): a plain global class several units define differently (SpawnedSub, SpawnedObject, ...)
+    # gets per-unit names for its COMDAT groups before anything reads the objects; real exe RTTI classes are left
+    if exe != 'none' and os.environ.get('FNVNX_ODR', '1') != '0':
+        import odr
+        _ep = exevft.exe_path(None if exe in (None, '') else exe)
+        if _ep:
+            _ev = exevft.load(_ep, os.path.join(out, 'cache', 'exe_vftables.json'))
+            for k_, n_ in odr.rename(have, out, odr.exe_class_names(_ev), log).items():
+                pre_stats['odr-' + k_] += n_
 
     _phase('load units+objects')
     # MSVC side
@@ -4843,7 +4852,8 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
         got[v] = name
         st['copies'] += 1
         st['slots'] += len(words)
-        rows.append(('%08x' % v, str(ott), str(len(slots)), str(st['slots-trap'] - n_trap), words[0], words[1]))
+        rows.append(('%08x' % v, str(ott), str(len(slots)), str(st['slots-trap'] - n_trap),
+                     *(list(words[:2]) + ['', ''])[:2]))   # a classlayout exe-order table can have < 2 slots
     with open(os.path.join(out, 'vmo.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#image vftable\toffset-to-top\texe slots\ttrap slots\tnative slot 0 (D1)\tnative slot 1 (D0)\n')
         for r in rows:
