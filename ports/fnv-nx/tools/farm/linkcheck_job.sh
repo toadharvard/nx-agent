@@ -58,6 +58,7 @@ steps = [s.split('\t') for s in sys.argv[13:]]
 c12 = commit[:12]
 word = {'pass': 'PASS', 'red': 'RED', 'error': 'ERROR (not checked)'}[verdict]
 L = ['# linkcheck %s' % c12, '', '- verdict: %s%s' % (word, ': ' + why if why else ''),
+     ] + (['- COMPILE-ALL: ' + os.environ['COMPILE_ALL']] if os.environ.get('COMPILE_ALL') else []) + [
      '- link tools key: `%s`%s' % (key, ' (checked at %s: the verdict is that run\'s)' % same if same else ''),
      '- base: %s' % base, '- time: %s s%s' % (total, '; cold: the first build on this machine' if cold == '1' else ''), '']
 stages = []
@@ -82,7 +83,7 @@ if os.path.isfile(detail) and os.path.getsize(detail):
     L += ['```', open(detail, errors='replace').read().rstrip('\n'), '```', '']
 open(rep, 'w').write('\n'.join(L))
 json.dump({'format': 'fnvnx-linkcheck/1', 'commit': commit, 'verdict': verdict, 'why': why, 'link_key': key,
-           'same_as': same or None, 'seconds': int(total), 'cold': cold == '1', 'stages': stages},
+           'same_as': same or None, 'compile_all': os.environ.get('COMPILE_ALL') or None, 'seconds': int(total), 'cold': cold == '1', 'stages': stages},
           open(side, 'w'), indent=1)
 EOF
 	log "linkcheck $C12: $VERDICT${WHY:+ ($WHY)}"
@@ -95,6 +96,26 @@ export FARM_STABLE_SRC=${FARM_STABLE_SRC:-$FARM_HOME/linkcheck-src}
 job_sources "$REPO"
 LKEY=$(link_key "$SRC" "$COMMIT")
 step sources
+
+# COMPILE-ALL (orchestrator: see a head that invalidates every unit before the farms take it; a warning, never a
+# gate): the files of this head that change what every compile reads (the force-included shim headers, compile.sh's
+# flags, the static and census flags, the toolchain), against the last head this farm saw (several heads may land
+# between two runs). Said on every head, the same-key shortcut included.
+CA_PATHS=(ports/fnv-nx/shim/include ports/fnv-nx/tools/link/compile.sh ports/fnv-nx/tools/static/flags.sh
+	ports/fnv-nx/tools/census.sh ports/fnv-nx/toolchain)
+COMPILE_ALL=""
+PREV=$(cat "$F/last_head" 2>/dev/null || true)
+if [ -n "$PREV" ] && [ "$PREV" != "$COMMIT" ] && git -C "$SRC" cat-file -e "$PREV^{commit}" 2>/dev/null; then
+	ca=$(git -C "$SRC" diff --name-only "$PREV" "$COMMIT" -- "${CA_PATHS[@]}" | sed 's|^ports/fnv-nx/||')
+	if [ -n "$ca" ]; then
+		nca=$(echo "$ca" | wc -l); more=""
+		if [ "$nca" -gt 8 ]; then more=" (+$((nca - 8)) more)"; fi
+		COMPILE_ALL="$(echo "$ca" | head -8 | tr '\n' ' ' | sed 's/ $//')$more changed since ${PREV:0:12}: every unit compiles again (probe and bodies caches cold)"
+		log "COMPILE-ALL: $COMPILE_ALL"
+	fi
+fi
+echo "$COMMIT" > "$F/last_head"
+export COMPILE_ALL
 
 # a key checked already: its verdict, at once (a head that changed no link tool costs seconds)
 if [ -f "$F/keys/$LKEY" ] && [ "${LINKCHECK_AGAIN:-0}" != 1 ]; then

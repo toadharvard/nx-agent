@@ -12,6 +12,7 @@ mkdir -p "$Q/tools/farm" "$Q/tools/link" "$Q/toolchain/gcc" "$Q/toolchain/devkit
 for f in linkcheck_job.sh link_key.sh lib_job.sh linkcache.sh fetch_tree.sh tree_hash.sh; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
 for f in toolchain/sources.sh toolchain/gcc/build.sh toolchain/devkita64/x toolchain/cross/x toolchain/vorbis/build.sh; do echo x > "$Q/$f"; done
 printf '# pins\n' > "$Q/tools/fetch.sh"; echo 'v1' > "$Q/tools/link/fnvlink.py"; echo readme > "$Q/README"
+mkdir -p "$Q/shim/include"; echo '#define A 1' > "$Q/shim/include/fnvnx_compat.h"
 cat > "$Q/Makefile" <<'MK'
 # stand-in: records the goals and variables; ok records for fetch toolchain, or prepare compile link for `link`;
 # FAKE_FAIL=link: the link stage fails with a traceback in its log
@@ -53,6 +54,7 @@ ok "the sidecar: fnvnx-linkcheck/1, pass, the stage table" '[ "$(side first verd
 # a head that changes no link tool: the verdict of the first, no build
 echo more > "$Q/README"; git -C "$S" commit -qam two -c user.name=t -c user.email=t@t 2>/dev/null || git -C "$S" -c user.name=t -c user.email=t@t commit -qam two
 C2=$(git -C "$S" rev-parse HEAD); : > "$T/calls"; run same "$C2"
+ok "a head that changes no compile-all input: no COMPILE-ALL line" '! grep -q "COMPILE-ALL" $T/same.md'
 ok "same link tools: the earlier verdict, no make link" '[ "$(cat $T/same.rc)" = 0 ] && grep -q "^- verdict: PASS: the link tools are those of ${C1:0:12}" $T/same.md && ! grep -q "^link" $T/calls && [ "$(side same same_as)" = "$C1" ]'
 # a head that changes fnvlink, and its link fails: RED with the traceback, exit 0
 echo v2 > "$Q/tools/link/fnvlink.py"; git -C "$S" -c user.name=t -c user.email=t@t commit -qam three; C3=$(git -C "$S" rev-parse HEAD)
@@ -60,6 +62,10 @@ echo v2 > "$Q/tools/link/fnvlink.py"; git -C "$S" -c user.name=t -c user.email=t
 ok "a failing link: RED with its error, exit 0, not cold" '[ "$(cat $T/red.rc)" = 0 ] && sed -n 3p $T/red.md | grep -q "^- verdict: RED: IndexError: list index out of range" && ! grep -q "cold:" $T/red.md'
 ok "... the traceback in the report, not make's tail" 'grep -q "in minus_one_copies" $T/red.md && grep -q "^Traceback (most recent call last):" $T/red.md && ! grep -q "make: \*\*\*" $T/red.md'
 ok "... the sidecar says red; the key keeps red for the next head with these tools" '[ "$(side red verdict)" = red ] && grep -q " red$" $T/home/linkcheck/keys/*'
+# a head that changes the force-included header: COMPILE-ALL names it (a warning; the job runs as usual)
+echo '#define B 2' >> "$Q/shim/include/fnvnx_compat.h"; git -C "$S" -c user.name=t -c user.email=t@t commit -qam four; C4=$(git -C "$S" rev-parse HEAD)
+run ca "$C4"
+ok "a shim header change: COMPILE-ALL under the verdict, in the sidecar, the job still runs" 'sed -n 4p $T/ca.md | grep -q "^- COMPILE-ALL: shim/include/fnvnx_compat.h changed since ${C3:0:12}: every unit compiles again" && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"compile_all\"]" $T/ca.json && grep -q "^- verdict: PASS" $T/ca.md'
 # no base: ERROR, not checked (the gate does not hold a head on it)
 rm -rf "$T/home"; git -C "$T/art.git" update-ref -d "refs/heads/t/${X:0:12}"; git -C "$T/art" update-ref -d "refs/remotes/origin/t/${X:0:12}" 2>/dev/null; run nobase "$C3"
 ok "no base: ERROR (not checked), exit 0, the sidecar error" '[ "$(cat $T/nobase.rc)" = 0 ] && grep -q "^- verdict: ERROR (not checked): no base" $T/nobase.md && [ "$(side nobase verdict)" = error ] && ! ls $T/home/linkcheck/keys/* > /dev/null 2>&1'
