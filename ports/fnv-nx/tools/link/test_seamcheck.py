@@ -76,6 +76,160 @@ def pair(cls, native_addrs, exe_slots, c=None, primary=True):
     return S.Pair(0x01000000, cls, '_ZTV' + cls, primary, c, native_addrs, exe_slots)
 
 
+NEW, CTOR = 0x401800, 0x401900          # operator new and a constructor (addrmap kind C) of the snippets
+VFT, VBASE = 0x01100000, 0x01100100     # the constructor's vftable (class Der, derived from Base) and Base's
+GLOB, FNPTR, IAT = 0x01200000, 0x01200010, 0x00fdf0ac
+
+
+def x86_function(src, at, tmp):
+    """The intel-syntax x86 source assembled and linked at `at` -> (events, facts) of seamcheck, or None without
+    binutils for i386."""
+    if not (shutil.which('as') and shutil.which('ld')):
+        return None
+    sp, op, bp = (os.path.join(tmp, n) for n in ('f.s', 'f.o', 'f.bin'))
+    open(sp, 'w').write('.intel_syntax noprefix\n.text\n.globl f\nf:\n' + src + '\n')
+    try:
+        subprocess.run(['as', '--32', '-o', op, sp], check=True, capture_output=True)
+        subprocess.run(['ld', '-m', 'elf_i386', '-Ttext=0x%x' % at, '-e', 'f', '--oformat', 'binary', '-o', bp, op],
+                       check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    code = open(bp, 'rb').read()
+    insns = S.x86_disasm(lambda a, n: code[a - at:a - at + n] or None, at)
+    info = {}
+    ev = S.x86_events(insns, at, info=info)
+    return ev, S._slim(info)
+
+
+def crossed_pairs(tmp):
+    """GCC lays out neighbouring virtual calls in another order (switch arms): pairing by address order crosses
+    them. Native = exe + 1 at every site (a table with the D1/D0 pair); repair_crossed re-pairs by target."""
+    exe = [0x401100 + 0x100 * i for i in range(8)]
+    shifted = S.Pair(0x01000000, '3Bar', '_ZTV3Bar', True, 0, [exe[0], None] + exe[1:], exe)
+    judge = S.Judge([shifted])
+
+    def judge_one(s):
+        return judge.site(s[4], s[5], '3Bar'), ()
+    for xo, no, what in (([8, 12], [16, 12], 'two neighbours (vfn_8c / vfn_90 kind)'),
+                         ([8, 20, 16], [12, 20, 24], 'a switch: exe 2/5/4 -> native 3/6/5')):
+        ex, nv = events(xo, no, tmp)
+        st, pairs, _ = S.align(ex, nv)
+        sites = [('f', 0x401000, a[-1], b[-1], a[2] // 4, b[2] // 4, False, None, None, None, False) for a, b in pairs]
+        judged = [judge_one(x) for x in sites]
+        before = sum(1 for x in judged if x[0][0] != 'ok')
+        n = S.repair_crossed(sites, judged, judge_one)
+        check(st == 'aligned' and before == 2 and n == 1 and all(x[0][0] == 'ok' for x in judged) and
+              all(s[5] == s[4] + 1 for s in sites), 'crossed pair repaired: %s (%s)' % (what, [(s[4], s[5]) for s in sites]))
+    # a real mismatch is not "repaired": the targets do not cross
+    ex, nv = events([8, 12], [8, 12], tmp)
+    _, pairs, _ = S.align(ex, nv)
+    sites = [('f', 0x401000, a[-1], b[-1], a[2] // 4, b[2] // 4, False, None, None, None, False) for a, b in pairs]
+    judged = [judge_one(x) for x in sites]
+    check(S.repair_crossed(sites, judged, judge_one) == 0 and all(x[0][0] == 'mismatch' for x in judged),
+          'uncrossed minus-one sites stay mismatches')
+
+
+def receiver_inference(tmp):
+    """Infer (sources a-d), site_set, param_types and the native GOT globals on hand-made snippets."""
+    from exevft import Vft
+    fns = {
+        # (a) new + constructor, the result is the receiver of slot 2
+        0x402000: 'push 0x14\ncall 0x%x\nadd esp, 4\nmov ecx, eax\ncall 0x%x\nmov esi, eax\nmov eax, [esi]\n'
+                  'call dword ptr [eax+8]\nret' % (NEW, CTOR),
+        # (b) a global set from a constructed object, read back through a getter
+        0x402100: 'push 0x14\ncall 0x%x\nadd esp, 4\nmov ecx, eax\ncall 0x%x\nmov dword ptr [0x%x], eax\nret'
+                  % (NEW, CTOR, GLOB),
+        0x402200: 'mov eax, dword ptr [0x%x]\nret' % GLOB,
+        0x402300: 'call 0x402200\nmov ecx, eax\nmov edx, [ecx]\ncall dword ptr [edx+4]\nret',
+        # (b) an import's result kept in a function pointer; the object it makes is an external (COM) object
+        0x402400: 'mov esi, dword ptr [0x%x]\npush 0\ncall esi\nmov dword ptr [0x%x], eax\nret' % (IAT, FNPTR),
+        0x402500: 'call dword ptr [0x%x]\nmov esi, eax\nmov eax, [esi]\npush esi\ncall dword ptr [eax+8]\nret' % FNPTR,
+        # (b) an argument: the only caller passes a constructed object; ebp is a general register here
+        0x402600: 'push 0x14\ncall 0x%x\nadd esp, 4\nmov ecx, eax\ncall 0x%x\npush eax\nmov ecx, esi\n'
+                  'call 0x402700\nret' % (NEW, CTOR),
+        0x402700: 'push ebx\npush ebp\nmov ebp, dword ptr [esp+0xc]\nmov eax, [ebp]\npush ebp\nmov ecx, [eax+0x10]\n'
+                  'call ecx\npop ebp\npop ebx\nret 4',
+    }
+    got = {}
+    for a, src in fns.items():
+        r = x86_function(src, a, tmp)
+        if r is None:
+            print('SKIP: receiver inference (no i386 binutils)')
+            return
+        got[a] = r
+    symof = {CTOR: '_ZN3DerC1Ev', 0x402600: '_ZN3Foo3runEv', 0x402700: '_ZN3Bar4takeEP4Base'}
+    exev = {VFT: Vft('.?AVDer@@', 0, [('.?AVDer@@', 0), ('.?AVBase@@', 0)], [0x403000 + 0x10 * i for i in range(6)]),
+            VBASE: Vft('.?AVBase@@', 0, [('.?AVBase@@', 0)], [0x403000 + 0x10 * i for i in range(6)])}
+    der = S.Pair(VFT, '3Der', '_ZTV3Der', True, None, list(exev[VFT].slots), list(exev[VFT].slots))
+    base = S.Pair(VBASE, '4Base', '_ZTV4Base', True, None, list(exev[VBASE].slots), list(exev[VBASE].slots))
+    judge = S.Judge([der, base])
+    finfo = {a: r[1] for a, r in got.items()}
+
+    def infer(on='abcd', fi=finfo):
+        return S.Infer(fi, symof, {CTOR: 'C'}, exev, lambda a: VFT if a == CTOR else None, judge, on, (0xfdf000, 0xfdf100))
+
+    def site(a):
+        e = [x for x in got[a][0] if x[0] == 'V'][0]
+        return e, infer().resolve(a, e[4], e[-1])
+
+    e, (ev, src) = site(0x402000)
+    check(ev == frozenset([('dyn', VFT)]) and 'ctor' in src, 'infer (a): new + constructor -> the vftable it stores')
+    check(infer('').resolve(0x402000, e[4], e[-1])[0] is None, 'infer: no sources, no class')
+    pairs, order = infer().candidates(ev)
+    check(pairs == [der] and not order, 'infer: a dyn class is judged by its own pair only')
+    check(S.site_set(2, 2, pairs, order, 'ctor')[0] == 'ok', 'site_set: slot 2 = slot 2 on Der: ok')
+    v, recv, _, _, note = S.site_set(2, 3, pairs, order, 'ctor')
+    check(v == 'mismatch' and recv == 'Der' and 'by-ctor' in note, 'site_set: slot 2 / 3 on Der: mismatch')
+    e, (ev, src) = site(0x402300)
+    check(ev == frozenset([('dyn', VFT)]) and {'global', 'ret', 'ctor'} <= src,
+          'infer (b): getter -> global -> constructed object (%s)' % sorted(src))
+    # honesty: one store of an unknown value makes the global unknown
+    r = x86_function('mov dword ptr [0x%x], esi\nret' % GLOB, 0x402800, tmp)
+    fi = dict(finfo)
+    fi[0x402800] = r[1]
+    check(infer(fi=fi).resolve(0x402300, e[4], e[-1])[0] is None, 'infer (b): an unknown store -> unknown')
+    e, (ev, src) = site(0x402500)
+    check(ev == frozenset([('ext',)]), 'infer (b): an import\'s result through a function pointer -> external')
+    pairs, order = infer().candidates(ev)
+    check(S.site_set(2, 3, pairs, order, 'ext')[0] == 'mismatch' and S.site_set(2, 2, pairs, order, 'ext')[0] == 'ok',
+          'site_set: an external object keeps the exe order (2/3 mismatch, 2/2 ok)')
+    e, (ev, src) = site(0x402700)
+    check(e[4] == ('arg', 1) and e[2] == 0x10, 'x86: ebp without a frame is a register (arg 1, slot 4)')
+    check(ev == frozenset([('dyn', VFT)]) and 'arg' in src, 'infer (b): an argument from the only caller')
+    # (c) a static type is judged by every class whose RTTI hierarchy holds it
+    c = infer().candidates(frozenset([('st', '4Base')]))
+    check(c and set(map(id, c[0])) == {id(der), id(base)}, 'infer (c): static Base -> Base and Der')
+    c = infer('abd').candidates(frozenset([('st', '4Base')]))
+    check(c and c[0] == [base], 'infer: without (c) a static type is its own table')
+    v = S.site_set(2, 3, [der, base], [], 'member')
+    check(v[0] == 'mismatch' and v[1] == 'Base,Der', 'site_set: the receiver column lists every class')
+    # (d) the C++ type of a parameter from the mangled name
+    ev, src = infer().native('_ZN3Bar4takeEP4Base', ('arg', 1))
+    check(ev == frozenset([('st', '4Base')]) and 'argtype' in src, 'infer (d): parameter type from the mangled name')
+    check(S.param_types('_ZN3Foo3barEPKS_RS_') == ['3Foo', '3Foo'], 'param_types: substitutions')
+    check(S.param_types('_ZN13MemoryManager4SizeEPKv') == [None], 'param_types: const void *')
+    check(S.param_types('_ZN3FooC1Eii') == [None, None] and S.param_types('_Z3foov') == [],
+          'param_types: constructor, void')
+    check(S.msvc_td('N3foo3BarE') == ['.?AVBar@foo@@', '.?AUBar@foo@@'], 'msvc_td: namespaced')
+
+    # (d) native: a GOT-loaded global function pointer is no virtual call; a global object's vcall is
+    if shutil.which('aarch64-linux-gnu-as'):
+        src = ('.text\n.globl f\n.type f,%function\nf:\nstp x29,x30,[sp,#-16]!\n'
+               'adrp x1, :got:g\nldr w1, [x1, #:got_lo12:g]\nldr w1, [x1]\nblr x1\n'
+               'adrp x0, :got:obj\nldr w0, [x0, #:got_lo12:obj]\nldr w1, [x0]\nldr w1, [x1, #8]\nblr x1\n'
+               'ldp x29,x30,[sp],#16\nret\n.size f,.-f\n')
+        sp, op = os.path.join(tmp, 'g.s'), os.path.join(tmp, 'g.o')
+        open(sp, 'w').write(src)
+        subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', '-o', op, sp], check=True, capture_output=True)
+        rt = {}
+        code, rels = S.native_function(vtables.Obj(op), ['f'], None, rt)
+        nv = S.a64_events(code, rels, lambda n: {'obj': GLOB}.get(n), rt)
+        check([x[0] for x in nv] == ['I', 'V'] and nv[1][4] == ('ga', GLOB) and nv[1][2] == 8,
+              'a64: GOT function pointer call is indirect, the global object\'s call virtual (%s)' % (nv,))
+        nv = S.a64_events(code, rels, lambda n: None)
+        check([x[0] for x in nv] == ['V', 'V'], 'a64: without relocation types, the old reading')
+
+
 def main():
     if S.capstone is None or not shutil.which('aarch64-linux-gnu-as'):
         print('SKIP: capstone or aarch64-linux-gnu-as missing')
@@ -166,6 +320,9 @@ def main():
     check(S.method_class('_ZN13IniCollection12FUN_00c44280EP10IniSetting') == '13IniCollection', 'method_class: plain')
     check(S.method_class('_ZN3foo3Bar3bazEv') == 'N3foo3BarE', 'method_class: namespaced')
     check(S.method_class('_Z12FUN_00401020v') is None, 'method_class: free function')
+
+    crossed_pairs(tmp)
+    receiver_inference(tmp)
 
     shutil.rmtree(tmp, ignore_errors=True)
     print('%d failure(s)' % len(FAILS))
