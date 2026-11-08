@@ -40,6 +40,7 @@ Our own code; it reads logs and names only addresses.
 import argparse
 import collections
 import json
+import os
 import re
 import sys
 
@@ -52,12 +53,13 @@ TRACE_FORMAT = "fnvtrace-2"   # 2: both sides boot with tools/lockstep/profile.p
 # ---- the logs ------------------------------------------------------------------------------------------------------
 class Call:
     __slots__ = ("seq", "tid", "depth", "name", "orig", "regs", "ret", "deref", "writes", "kids", "parent", "lost",
-                 "caller")
+                 "caller", "api")
 
     def __init__(self, seq, tid, depth, name, orig, regs, caller=""):
         self.seq, self.tid, self.depth, self.name, self.orig, self.regs = seq, tid, depth, name, orig, regs
         self.ret, self.deref, self.writes, self.kids, self.parent, self.lost = None, {}, {}, [], None, False
         self.caller = caller
+        self.api = False
 
 
 def read_log(path, side):
@@ -77,6 +79,10 @@ def read_log(path, side):
                     orig = int(p[5], 16) if p[5] not in ("-", "") else None
                     caller = p[6 + nregs + 2] if side == "guest" and len(p) > 6 + nregs + 2 else ""
                     c = Call(seq, tid, depth, p[4], orig, regs, caller)
+                    # an API entry is not a game function; main_thread() leaves it out (S4's plat baselines,
+                    # tools/perf/plat_calls.py): Wine, a `dll!Export` list line (outside the game image); guest, a
+                    # platform function traced by name (no original address)
+                    c.api = (orig is not None and not (0x00400000 <= orig < 0x02100000)) if side == "wine" else orig is None
                     calls[seq] = c
                     order.append(c)
                 elif k == "ret":
@@ -111,8 +117,8 @@ def main_thread(order):
     tid = order[0].tid
     roots, stack = [], []
     for c in order:
-        if c.tid != tid:
-            continue
+        if c.tid != tid or getattr(c, "api", False):
+            continue   # an API entry's own calls (callbacks) attach to the game function around it
         while stack and stack[-1].depth >= c.depth:
             stack.pop()
         if stack:
@@ -121,7 +127,7 @@ def main_thread(order):
         else:
             roots.append(c)
         stack.append(c)
-    return [c for c in order if c.tid == tid]
+    return [c for c in order if c.tid == tid and not getattr(c, "api", False)]
 
 
 # ---- calling conventions from the MSVC decorated name --------------------------------------------------------------
@@ -404,6 +410,12 @@ def fmt_call(c, side):
 
 
 def cmd_compare(a):
+    # T1: a side with no trace is an error that names it, not a traceback (bt1 0e2a4b160f9e: the guest wrote none)
+    for side, tp in (("guest", a.guest), ("wine", a.wine)):
+        if not os.path.isfile(tp) or os.path.getsize(tp) == 0:
+            print(f"compare: no {side} trace ({tp} {'is empty' if os.path.isfile(tp) else 'does not exist'})",
+                  file=sys.stderr)
+            return 2
     _, g_order = read_log(a.guest, "guest")
     _, w_order = read_log(a.wine, "wine")
     g, w = main_thread(g_order), main_thread(w_order)
@@ -512,7 +524,9 @@ def cmd_diff(a):
     a.guest, a.wine = a.guest_tsv, a.ref_tsv
     a.resync, a.context = 64, 8
     out = a.json
-    cmd_compare(a)
+    rc = cmd_compare(a)
+    if rc:
+        return rc
     if out:
         r = json.load(open(out))
         return 1 if r.get("first") else 0

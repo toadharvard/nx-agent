@@ -61,6 +61,9 @@ class Result:
 
 
 class Arm64Engine:
+    _fill = None                         # the planted stack fill of the running case (world.scrub_dead_frames)
+    _fn_starts = None                    # addresses of the image's function symbols, built on first use
+
     def __init__(self, world_obj, image, stub_orig, vtables=None, vt_mem=None):
         self.vtables = vtables or {}
         self.callee_conv = None          # original address -> Conv of the callee definition (set by runner.Pair)
@@ -263,7 +266,8 @@ class Arm64Engine:
         if native is None:
             r.error = 'no-native-entry'
             return r
-        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + world.stack_fill(case.seed ^ 0xa5, 0x1000))
+        self._fill = world.stack_fill(case.seed ^ 0xa5, 0x1000)
+        uc.mem_write(world.SP0 - 0x8000, bytes(0x7000) + self._fill)
         uc.mem_write(world.SP0, bytes(world.STACK[1] - world.SP0))
         for i in range(31):
             uc.reg_write(XR[i], world.garbage32(case.seed, 200 + i) | (world.garbage32(case.seed, 300 + i) << 32))
@@ -430,6 +434,11 @@ class Arm64Engine:
             r.private_addrs.add(address)
 
     def _on_cov(self, uc, address, size, r):
+        if world.STUB_OUT and self._fill is not None:
+            if self._fn_starts is None:
+                self._fn_starts = set(getattr(self.image, 'syms', {}).values())
+            if address in self._fn_starts:
+                world.scrub_dead_frames(uc, uc.reg_read(A.UC_ARM64_REG_SP), self._fill)
         r.blocks.add(address)
 
     def _on_wild(self, uc, address, size, user):
@@ -498,6 +507,19 @@ class Arm64Engine:
             self._fault = e.args[0]; uc.emu_stop(); return
         if name == '__stack_chk_fail':
             self._fault = 'stack-protector'; uc.emu_stop(); return
+        if target in libcalls.DELETES:
+            # (r4 uncls) operator delete(NULL), or the delete that follows the destructor half of a deleting
+            # destructor the oracle calls as one: no call (libcalls.delete_fold)
+            pc_ = r.calls[-1] if r.calls else None
+            fold = libcalls.delete_fold(uc.reg_read(XR[0]), pc_.target if pc_ else None,
+                                        pc_.args[0] if pc_ else None, pc_.args[1] & 0xffffffff if pc_ else None)
+            if fold:
+                if fold == 'null':
+                    r.null_deletes = getattr(r, 'null_deletes', 0) + 1
+                else:
+                    r.split_folds = getattr(r, 'split_folds', 0) + 1
+                uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+                return
         k = len(r.calls)
         if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
             self._fault = 'timeout'
@@ -513,7 +535,11 @@ class Arm64Engine:
         r.calls[-1].addr = address
         if world.STUB_OUT:
             self._zero_unwritten(uc, case, [r.calls[-1].args[i] for i in range(8)] + [r.calls[-1].x8])
-        if libcalls.noreturn_a64(name) or (name is None and target in libcalls.NORETURN_X86):
+        # (difffuzz-20, args class) a platform shim standing for a noreturn exe function ends the run as well:
+        # `fnvnx_xlength_error` is the native of std::_Xlen 0x00ec30b0 (it throws), a named stub whose original
+        # address maps to the exe function
+        if libcalls.noreturn_a64(name) or (target is not None and target in libcalls.NORETURN_X86 and
+                                           (name is None or address >= a64image.NAMED_STUB)):
             r.noreturn = name or libcalls.NORETURN_X86[target]   # never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
             return

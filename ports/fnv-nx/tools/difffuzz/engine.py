@@ -23,6 +23,20 @@ STUB_ADDR = re.compile(r'^__fnv(?:nx_br)?_([0-9a-f]{8})')
 _C_DECORATED = re.compile(r'^__imp__([A-Za-z_]\w*)@(\d+)$')
 
 
+def _indirect_thunk(cs, code, addr, limit=8):
+    """True when the function's first instructions are straight-line register / memory moves that end in an indirect
+    `jmp reg` / `jmp [mem]` with no `ret`, `call` or branch before it: a virtual-call or vtable thunk, whose stack
+    bytes are the jump target's."""
+    for n, ins in enumerate(cs.disasm(code, addr)):
+        if n >= limit:
+            return False
+        if ins.mnemonic == 'jmp':
+            return not ins.op_str.startswith('0x') and n > 0
+        if ins.mnemonic not in ('mov', 'lea', 'movzx', 'movsx', 'xchg'):
+            return False
+    return False
+
+
 def import_identity(counts, spellings):
     """(name, stdcall bytes) of one IAT slot from every `__imp_` spelling units.json gives it (F1-callflow).
 
@@ -207,6 +221,13 @@ class UnitCache:
                 import capstone
                 cs = self.__dict__.setdefault('_cs', capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32))
                 pops = set()
+                if _indirect_thunk(cs, f['code'], addr):
+                    # (difffuzz-20, args class) a virtual-call thunk `mov ecx, [ecx+x]; mov eax, [ecx]; jmp [eax+y]`
+                    # (0x00c91270): the stack bytes are those of whichever function the slot holds. The `ret N` the
+                    # linear scan finds past its padding belongs to the next function; the pop is learned from the run
+                    cache[addr] = None
+                    self.__dict__.setdefault('_thunk_unknown', set()).add(addr)
+                    return None
                 for ins in cs.disasm(f['code'], addr):
                     if ins.mnemonic == 'ret':
                         pops.add(int(ins.op_str, 0) if ins.op_str else 0)
@@ -380,12 +401,35 @@ class UnitCache:
                         got = convmod.Conv(refs[addr], source)
                     except Exception:  # noqa: BLE001
                         got = None
+                    if got is None:
+                        got = self._c_bool_decl(source, refs[addr])
                 self._callee[key] = got
             return self._callee[key]
         info.exe_pop = self.exe_ret_pop
         info.conv = conv_of
         info.caller_conv = caller_conv_of
         return info
+
+    def _c_bool_decl(self, source, name):
+        """(R4 flow) A C-linkage name (`_FUN_00401500`) carries no types, so the calling unit's declaration of the callee
+        is unknown and its bool result was not 0/1 on the oracle (MSVC tests al, GCC bit 0): read the declaration from
+        the unit's prepared source, `extern "C" bool __cdecl FUN_00401500();`. Returns a conv for `bool f(void)`
+        (only its result is used for the caller's side of a canned result), else None."""
+        if not name.startswith('_') or name.startswith('?'):
+            return None
+        ident = name[1:].split('@')[0]
+        cache = self.__dict__.setdefault('_cbool', {})
+        if source not in cache:
+            try:
+                cache[source] = open(str(config.TREE / source), encoding='utf-8', errors='replace').read()
+            except OSError:
+                cache[source] = ''
+        if not re.search(r'extern\s+"C"\s+bool\s+(?:__\w+\s+)?%s\s*\(' % re.escape(ident), cache[source]):
+            return None
+        try:
+            return convmod.Conv('?%s@@YA_NXZ' % ident, source)
+        except Exception:  # noqa: BLE001
+            return None
 
     def target(self, source, orig_addr):
         xu = self.x86_unit(source, orig_addr)
@@ -737,6 +781,166 @@ class UnitCache:
 
 CALIB_CASES = 8
 CALIB_MAX = 120
+CALIB_ROUNDS = 3
+
+
+def calib_float_noise(rx, ra, d):
+    """A calibration case that only differs in float representation agrees on the pairing (difffuzz-20, calib-float).
+    A vector routine (SSE normalize / cross: 0x00dacf10, 0x00d5b440, 0x00cd6120, 0x00da9210) differs on almost every
+    fuzzed input by a NaN payload or sign (x87 / SSE indefinite 0xffc00000 against the AArch64 default NaN) or by an
+    ulp of an rsqrt / rcp, whichever pairing runs, so the 7-of-8 bar of `calibrate_custom` was never reached and the
+    declared order stayed. Only the pairing choice looks at this: the verdicts of the real runs are untouched.
+    True when no run faulted, every differing byte is a store both machines made, and every differing aligned word
+    is two NaNs or two normal floats within causes._float_close's tolerance (the pairs the float causes accept); a
+    soft record agrees as well."""
+    import causes
+    if d.get('soft'):
+        return True
+    if rx.error or ra.error or d.get('kind') not in ('mem-write', 'return'):
+        return False
+    if d['kind'] == 'return' and not (d.get('float') or {}).get('tolerant'):
+        return False
+    wx, wa = rx.writes, ra.writes
+    words = set()
+    for k in set(wx) | set(wa):
+        if wx.get(k) != wa.get(k):
+            if k not in wx or k not in wa:
+                return False
+            words.add(k & ~3)
+    for w in words:
+        if not all(k in wx and k in wa for k in range(w, w + 4)):
+            return False
+        bx = bytes(wx[k] for k in range(w, w + 4))
+        ba = bytes(wa[k] for k in range(w, w + 4))
+        if not causes._float_close(bx, ba)[0] and not _cancellation_residue(bx, ba):
+            return False
+    return True
+
+
+def _cancellation_residue(bx, ba):
+    """Two float words that are both zero or normal and differ by at most 1e-6 in absolute value: the residue of a
+    cancellation (0.0 against 1.6e-18 after a normalize of nearly equal vectors) that a relative tolerance does not
+    accept. An integer word is a denormal float (0 against 5), so it never qualifies."""
+    import math
+    import struct
+    fx, fa = struct.unpack('<f', bx)[0], struct.unpack('<f', ba)[0]
+    if math.isnan(fx) or math.isnan(fa) or math.isinf(fx) or math.isinf(fa):
+        return False
+
+    def plain(f):
+        return f == 0 or abs(f) >= 1.1754943508222875e-38
+    return plain(fx) and plain(fa) and abs(fx - fa) <= 1e-6
+
+
+def calib_vptr_noise(pair, case, d):
+    """A calibration case whose only difference is a byte or part of a planted vptr word that the code copies as
+    data agrees on the pairing (difffuzz-20, calib-vptr): the oracle holds the image vftable there, the native the
+    Itanium address point, and a byte copied from the word differs although the same object is read (0x00d409b0
+    copies `src->val` at offset 2 of the word). The same probe as classify's `vptr-bytes` (world.VPTR_NATIVE), only
+    for the pairing choice."""
+    if d.get('kind') != 'mem-write' or d.get('soft') or not case.vptrs:
+        return False
+    import classify
+    world.VPTR_NATIVE = True
+    try:
+        return classify._benign(pair.run(case)[2])
+    finally:
+        world.VPTR_NATIVE = False
+
+
+def calib_touch(pair, case):
+    """(difffuzz-20, calib-touch) One case on both machines with every read and write of the argument buffers
+    recorded: (rx, ra, divergence, oracle set, native set), each set holding (kind, dword address) of the shared
+    buffers. The buffers sit at the same addresses on both machines, so the sets compare directly. Runs
+    `Pair._run` (no adaptive follow) after one `Pair.run` has made the engines."""
+    from unicorn import UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE, UC_MEM_WRITE
+    lo, hi = world.BUF, world.BUF + world.NBUF * world.BUF_SIZE
+
+    def hook(uc, access, address, size, value, acc):
+        k = 'w' if access == UC_MEM_WRITE else 'r'
+        for a in range(address >> 2, ((address + size - 1) >> 2) + 1):
+            acc.add((k, a))
+    sets = []
+    for eng in (pair.xe, pair.ae):
+        acc = set()
+        sets.append((eng, eng.uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, hook, user_data=acc,
+                                          begin=lo, end=hi - 1), acc))
+    try:
+        rx, ra, d = pair._run(case, 200000)
+    finally:
+        for eng, h, _ in sets:
+            eng.uc.hook_del(h)
+    return rx, ra, d, sets[0][2], sets[1][2]
+
+
+def calib_touch_score(pair, cases):
+    """(mean Jaccard of the oracle's and the native's buffer accesses over the cases where either touches a buffer,
+    number of such cases) for the register assignment now set on the pair's conv."""
+    js = []
+    for c in cases:
+        try:
+            _, _, _, sx, sa = calib_touch(pair, c)
+        except Exception:  # noqa: BLE001
+            js.append(0.0)
+            continue
+        u = sx | sa
+        if u:
+            js.append(len(sx & sa) / len(u))
+    return (sum(js) / len(js) if js else None), len(js)
+
+
+def calib_agree_strict(rx, ra, d):
+    """A case agrees for the pairing choice when there is no divergence and, if both machines faulted, they faulted
+    the same way (access kind and address): a fault address comes from the register that carried the pointer, so
+    two machines that read the same wild word agree on it and two that read different parameters do not."""
+    if d:
+        return False
+    return not (rx.error and ra.error and rx.error != ra.error)
+
+
+def calib_touch_pick(pair, cv, regs, cands, cases, declared, keep=0.75, margin=0.25):
+    """Choose the pairing by what the oracle touches in the argument buffers (difffuzz-20, calib-touch). Pairing
+    scores of `calibrate_custom` say nothing when every case ends in a fault on both machines (00dbcdd0: object in
+    edi, count in eax; the declared eax = p0, edi = p1 faulted on both machines in 8 of 8 cases) or when a lasting
+    difference spoils every pairing (00d6e280, four registers, 120 pairings). The native side is the ground truth:
+    AAPCS passes the declared parameters in order, so the buffers the native reads and writes are the ones the
+    declared parameters point to. For each pairing the oracle runs the same cases; its set of (read / write, dword)
+    of the argument buffers is compared with the native's. Pairing score = strict agreement fraction + mean
+    Jaccard of those sets. The declared order stays unless it touches the buffers differently (mean below `keep`)
+    and another pairing scores `margin` more with a mean of at least `keep` and above the declared one's.
+    Nothing is learned from a function whose cases touch no buffer."""
+    cv.with_registers(regs, dict(zip(declared, regs)))
+    pair.run(cases[0])
+    dj, nev = calib_touch_score(pair, cases)
+    if nev == 0 or dj is None or dj >= keep:
+        return declared
+
+    def total(cand):
+        cv.with_registers(regs, dict(zip(cand, regs)))
+        j, n = calib_touch_score(pair, cases)
+        if n == 0 or j is None:
+            return -1.0, None
+        ok = 0
+        for c in cases:
+            try:
+                rx_, ra_, d = pair.run(c)
+                if d and (calib_float_noise(rx_, ra_, d) or calib_vptr_noise(pair, c, d)):
+                    d = None
+                ok += calib_agree_strict(rx_, ra_, d)
+            except Exception:  # noqa: BLE001
+                pass
+        return ok / len(cases) + j, j
+    base, _ = total(declared)
+    best, bt, bj = declared, base, dj
+    for cand in cands:
+        if cand == declared:
+            continue
+        tot, j = total(cand)
+        if j is not None and tot > bt:
+            best, bt, bj = cand, tot, j
+    if best != declared and bj >= keep and bj > dj and bt >= base + margin:
+        return best
+    return declared
 
 
 def calibrate_custom(pair, t, globals_=()):
@@ -771,7 +975,9 @@ def calibrate_custom(pair, t, globals_=()):
         n = bad = 0
         for c in cases:
             try:
-                _, _, d = pair.run(c)
+                rx_, ra_, d = pair.run(c)
+                if d and (calib_float_noise(rx_, ra_, d) or calib_vptr_noise(pair, c, d)):
+                    d = None
             except Exception:  # noqa: BLE001
                 d = True
             n += not d
@@ -786,6 +992,35 @@ def calibrate_custom(pair, t, globals_=()):
     best = max(scores, key=lambda c: (scores[c], c == declared))
     if best != declared and scores[best] < need:
         best = declared
+    else:
+        # several pairings at the top score: the cases do not tell them apart (0x00d6c3c0: six pairings agree on
+        # all 8 cases, the zero or random buffers of its pointer parameters look alike to the vector code), and
+        # the first in permutation order was taken. Run fresh cases on the tied pairings only, up to
+        # CALIB_ROUNDS more rounds, and keep the ones that agree on the most (difffuzz-20, calib-tie).
+        tied = [c for c in cands if scores.get(c) == scores[best]]
+        for _ in range(CALIB_ROUNDS if len(tied) > 1 else 0):
+            extra = [gen.fresh() for _ in range(CALIB_CASES)]
+            more = {}
+            for cand in tied:
+                cv.with_registers(regs, dict(zip(cand, regs)))
+                more[cand] = 0
+                for c in extra:
+                    try:
+                        rx_, ra_, d = pair.run(c)
+                        if d and (calib_float_noise(rx_, ra_, d) or calib_vptr_noise(pair, c, d)):
+                            d = None
+                    except Exception:  # noqa: BLE001
+                        d = True
+                    more[cand] += not d
+            top = max(more.values())
+            tied = [c for c in tied if more[c] == top]
+            if len(tied) == 1:
+                break
+        best = declared if declared in tied else tied[0]
+    if best == declared and (scores[declared] == CALIB_CASES or scores[declared] < CALIB_CASES - 1):
+        # the fresh cases cannot tell the pairings apart (both machines fault the same way, or nothing agrees):
+        # what each pairing makes the oracle touch in the argument buffers is compared with what the native touches
+        best = calib_touch_pick(pair, cv, regs, cands, cases, declared)
     cv.with_registers(regs, dict(zip(best, regs)))
     t.x86_code.clear(); t.x86_code.update(saved[0])
     pair.pinned.clear(); pair.pinned.update(saved[1])

@@ -276,7 +276,7 @@ for x in (c.group(1) if c else '', (m.get('objects_commit') or '') if h else '')
         print(x)
 EOF
 )
-    want_th=${LT[0]:-}; th=""; TREE_FROM=""
+    want_th=${LT[0]:-}; th=""; TREE_FROM=""; TREE_HOW=""
     cands=("$LCOMMIT")
     for x in "${LT[@]:1}"; do
       full=$(git -C "$REPO" rev-parse -q --verify "$x^{commit}" 2>/dev/null) || continue
@@ -291,20 +291,40 @@ EOF
       fi
       th=$t; TREE_FROM=$c; break
     done
+    if [ -z "$th" ] && [ "${FUZZ_LOCAL_PREPARE:-1}" = 1 ]; then
+      # T1: no published tree (full1 prepares locally; fz1..fz8 stopped on 97deacd38aec): prepare it here from the
+      # link commit's own prepare.py and the decomp its pins fetch (about 10 min), checked against the tree hash the
+      # link records when it records one. FUZZ_LOCAL_PREPARE=0 waits for a published tree instead.
+      log "no published tree for $L12: preparing it here"
+      rm -rf "$TREE.local"; tp0=$(date +%s)
+      if python3 "$P/tools/prepare.py" "$DECOMP" "$TREE.local" > "$RUN/prepare_local.log" 2>&1; then
+        t=$(bash "$HERE/tree_hash.sh" "$TREE.local")
+        if [ -z "$want_th" ] || [ "${t:0:${#want_th}}" = "$want_th" ] || [ "${want_th:0:${#t}}" = "$t" ]; then
+          rm -rf "$TREE"; mv "$TREE.local" "$TREE"; th=$t; TREE_FROM=$LCOMMIT
+          echo "prepared here from ${LCOMMIT:0:12}: hash $t ($(( $(date +%s) - tp0 )) s)" >> "$RUN/fetch_tree.log"
+          TREE_HOW="local:$(( $(date +%s) - tp0 ))s"
+        else
+          echo "prepared here: hash $t, the link was made on $want_th" >> "$RUN/fetch_tree.log"; rm -rf "$TREE.local"
+        fi
+      else
+        echo "prepare.py here failed (exit $?, $RUN/prepare_local.log)" >> "$RUN/fetch_tree.log"; rm -rf "$TREE.local"
+      fi
+    fi
     if [ -z "$th" ]; then
       th=$(ARTIFACTS=$ARTIFACTS REPO=$REPO FARM_HOME=$FARM_HOME bash "$HERE/fetch_tree.sh" "$LCOMMIT" "$TREE" \
            "${FUZZ_TREE_WAIT:-1800}" 2>> "$RUN/fetch_tree.log") \
-        || fail_report 3 "no prepared tree for the link commit $L12, the tree it records or its objects commit (see fetch_tree.log)"
+        || fail_report 3 "no prepared tree for the link commit $L12, the tree it records or its objects commit, and none prepared here (see fetch_tree.log)"
       # the tree waited for is checked like the candidates (V1 F1: a mismatched t/<L12> was taken here)
       if [ -n "$want_th" ] && [ "${th:0:${#want_th}}" != "$want_th" ] && [ "${want_th:0:${#th}}" != "$th" ]; then
         fail_report 3 "the prepared tree of $L12 has hash $th, the link was made on $want_th (see fetch_tree.log)"
       fi
       TREE_FROM=$LCOMMIT
     fi
-    echo "$th ${TREE_FROM:0:12}" > "$TREE.done"
+    echo "$th ${TREE_FROM:0:12} $TREE_HOW" > "$TREE.done"
   fi
-  read -r th TREE_FROM < "$TREE.done"
-  NOTE_TREE="prepare farm tree of ${TREE_FROM:-$L12} (tree hash $th)"
+  read -r th TREE_FROM TREE_HOW < "$TREE.done"
+  if [ -n "${TREE_HOW:-}" ]; then NOTE_TREE="prepared here from ${TREE_FROM:-$L12} (no published tree; ${TREE_HOW#local:}; tree hash $th)"
+  else NOTE_TREE="prepare farm tree of ${TREE_FROM:-$L12} (tree hash $th)"; fi
 fi
 
 # --- the player's FalloutNV.exe (private branch gamedata/exe, sha256 pinned, lib_job.sh): its RTTI vftables are the

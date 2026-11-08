@@ -73,6 +73,22 @@ struct w32_obj *w32_obj_get(HANDLE h, int type)
     return o;
 }
 
+/* w32_obj_get that takes a reference while the table is locked (a concurrent CloseHandle cannot free the object) */
+struct w32_obj *w32_obj_get_ref(HANDLE h, int type)
+{
+    os_lock(&g_handle_lock);
+    uint32_t i = slot_of(h);
+    struct w32_obj *o = i ? g_slots[i].o : NULL;
+    if (o && o->magic == W32_MAGIC && (!type || o->type == type))
+        w32_obj_ref(o);
+    else
+        o = NULL;
+    os_unlock(&g_handle_lock);
+    if (!o)
+        SetLastError(ERROR_INVALID_HANDLE);
+    return o;
+}
+
 BOOL w32_handle_close(HANDLE h, int type)
 {
     os_lock(&g_handle_lock);

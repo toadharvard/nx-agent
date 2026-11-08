@@ -235,6 +235,7 @@ const short *fnvnx_msvc_ctype_table(void);                             /* MSVC "
 void fnvnx_ios_base_addstd(void *ios);                                 /* ios_base::_Addstd */
 void fnvnx_ios_base_dtor(void *ios);                                   /* ios_base::_Ios_base_dtor */
 void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase); /* basic_ostream<char> */
+void fnvnx_basic_ios_init(void *self, void *strbuf, int isstd);        /* basic_ios<char>::init */
 void *fnvnx_fiopen(const char *name, int mode, int prot);              /* std::_Fiopen -> struct _iobuf * */
 
 /* ---- S4b: _CxxThrowException data (MSVC x86 EH tables in the image: absolute 32-bit addresses) */
