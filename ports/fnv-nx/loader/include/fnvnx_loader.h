@@ -181,6 +181,10 @@ int fnvnx_image_relocate(fnvnx_image *img, const fnvnx_os *os, uint32_t *applied
  * (FalloutNV.exe: not 0). *va = the word's address (0 without a TLS directory), *old = its value from the file.
  * FNVNX_OK, also without a TLS directory; FNVNX_E_RANGE when the word is not in a mapped section. */
 int fnvnx_image_tls_index_reset(const fnvnx_image *img, uint32_t *va, uint32_t *old);
+/* the TLS directory's callbacks (AddressOfCallBacks, a 0-terminated array of VAs): their current values in out (up
+ * to cap), the count in *n. Windows calls each with (hModule, DLL_PROCESS_ATTACH, NULL) before the entry point; after
+ * the code-pointer fixups a value is the native function's address, else still the x86 one */
+int fnvnx_image_tls_callbacks(const fnvnx_image *img, uint32_t *out, uint32_t cap, uint32_t *n);
 /* Set the final protections (read-only for sections without IMAGE_SCN_MEM_WRITE). Call after all fixups. */
 int fnvnx_image_finalize(fnvnx_image *img, const fnvnx_os *os);
 void fnvnx_image_release(fnvnx_image *img, const fnvnx_os *os);   /* frees the reloc list only */

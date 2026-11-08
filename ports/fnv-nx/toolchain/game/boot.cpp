@@ -283,10 +283,39 @@ static int load_image(void) {
            n, as.applied, as.trapped, as.mismatched);
     fnvnx_image_finalize(&img, &os);
     fnvnx_guest_thread_tls_hook();   /* main thread: image .tls template -> __fnvnx_tls_image */
+    {   /* TLS callbacks: the Windows loader calls each with (hModule, DLL_PROCESS_ATTACH, NULL) before the entry point.
+         * FalloutNV.exe's list is empty; a callback the fixups made native is called, an x86 one is reported */
+        uint32_t cbs[16], ncb = 0;
+        fnvnx_image_tls_callbacks(&img, cbs, 16, &ncb);
+        printf("fnvnx boot: TLS callbacks: %" PRIu32 "\n", ncb);
+        for (uint32_t k = 0; k < ncb && k < 16; k++) {
+            if (cbs[k] >= 0x00401000u && cbs[k] < 0x00fdf000u) {
+                printf("fnvnx boot: TLS callback %#010" PRIx32 " has no native definition: not called\n", cbs[k]);
+                continue;
+            }
+            ((void (*)(void *, uint32_t, void *))(uintptr_t)cbs[k])((void *)(uintptr_t)0x00400000u, 1, nullptr);
+        }
+    }
     return 0;
 }
 
 static void memory_manager_state(const char *when);
+
+/* WinMain's lpCmdLine, as Windows' CRT startup gives it: GetCommandLineA past the program name (quoted or not) and
+ * the blanks after it ("" with no arguments; the platform's command line is "C:\...\FalloutNV.exe" args) */
+extern "C" char *GetCommandLineA(void);
+static const char *winmain_cmdline(void) {
+    const char *p = GetCommandLineA();
+    if (!p) return "";
+    if (*p == '"') {
+        for (p++; *p && *p != '"'; p++) {}
+        if (*p == '"') p++;
+    } else {
+        while (*p && *p != ' ' && *p != '\t') p++;
+    }
+    while (*p == ' ' || *p == '\t') p++;
+    return p;
+}
 
 extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers it over main (a Havok unit defines main) */
     printf("fnvnx boot: static initialisers done, %u trap hits (%u distinct)\n", g_trap_hits, g_trap_distinct);
@@ -301,7 +330,7 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
     printf("fnvnx boot: first-run profile: mask %u\n", fnvnx_first_run_profile());   /* the launcher's files */
     printf("fnvnx boot: calling WinMain\n");
     g_trap_phase = 1;
-    int r = __fnv_0086a850(0x00400000u, 0, (unsigned)(uintptr_t)"", 1 /* SW_SHOWNORMAL */);
+    int r = __fnv_0086a850(0x00400000u, 0, (unsigned)(uintptr_t)winmain_cmdline(), 1 /* SW_SHOWNORMAL */);
     printf("fnvnx boot: WinMain returned %d\n", r);
     return r;
 }

@@ -255,6 +255,14 @@ class T02Runtime(unittest.TestCase):
                 self.assertNotEqual(st.get('tls_index', '0x00000000'), '0x00000000', line)
                 self.assertEqual((st.get('old'), st.get('now'), st.get('rc')), ('0xffbf8c85', '0x00000000', '0'), line)
 
+    def test_tls_callbacks_listed(self):
+        # gen_synth_pe.py's TLS directory has one callback (TLSCB, in .text): the loader lists it, as the Windows
+        # loader would call it before the entry point
+        r = loadcheck('hints')
+        line = next((l for l in r.stdout.splitlines() if l.startswith('tls_callbacks=')), '')
+        st = stats_of(line)
+        self.assertEqual((st.get('tls_callbacks'), st.get('first'), st.get('rc')), ('1', '0x00403100', '0'), line)
+
     def test_map_code_read_only(self):
         # FNVNX_MAP_CODE (the loader-seam audit: .text readable as data, as on Windows): code sections map with the
         # file's bytes, read-only, and the code-pointer scan, imports and fixups come out exactly as without it

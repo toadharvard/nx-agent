@@ -311,6 +311,11 @@ int main(int argc, char **argv) {
         r = fnvnx_image_tls_index_reset(&img, &tva, &told);
         if (tva && r == FNVNX_OK) memcpy(&tnow, (const void *)((uintptr_t)tva + img.bias), 4);
         printf("tls_index=0x%08x old=0x%08x now=0x%08x rc=%d\n", tva, told, tnow, r);
+        {
+            uint32_t cbs[8], ncb = 0;
+            int cr = fnvnx_image_tls_callbacks(&img, cbs, 8, &ncb);
+            printf("tls_callbacks=%u first=0x%08x rc=%d\n", ncb, ncb ? cbs[0] : 0, cr);
+        }
     }
     if ((r = fnvnx_image_load_relocs(&img, &os))) { fprintf(stderr, "relocs: %s\n", fnvnx_strerror(r)); return 5; }
     stat_set("relocs", img.nrelocs);

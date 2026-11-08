@@ -234,3 +234,24 @@ int fnvnx_image_tls_index_reset(const fnvnx_image *img, uint32_t *va, uint32_t *
     w[0] = w[1] = w[2] = w[3] = 0;
     return FNVNX_OK;
 }
+
+int fnvnx_image_tls_callbacks(const fnvnx_image *img, uint32_t *out, uint32_t cap, uint32_t *n) {
+    const fnvnx_pe *pe = img->pe;
+    const uint8_t *t;
+    uint32_t cb, k;
+    *n = 0;
+    if (pe->ndirs <= FNVNX_DIR_TLS || pe->dir[FNVNX_DIR_TLS].size < 24) return FNVNX_OK;
+    t = (const uint8_t *)fnvnx_image_ptr(img, img->load_base + pe->dir[FNVNX_DIR_TLS].rva, 24);
+    if (!t) return FNVNX_E_RANGE;
+    cb = fnvnx_rd32(t + 12);   /* AddressOfCallBacks (a VA at the preferred base) */
+    if (!cb) return FNVNX_OK;
+    if (!fnvnx_image_ptr(img, cb, 4) && img->delta) cb += img->delta;
+    for (k = 0; k < 4096; k++) {
+        const uint8_t *w = (const uint8_t *)fnvnx_image_ptr(img, cb + 4 * k, 4);
+        if (!w) return FNVNX_E_RANGE;
+        if (!fnvnx_rd32(w)) return FNVNX_OK;
+        if (*n < cap && out) out[*n] = fnvnx_rd32(w);
+        (*n)++;
+    }
+    return FNVNX_E_FORMAT;   /* no terminator */
+}
