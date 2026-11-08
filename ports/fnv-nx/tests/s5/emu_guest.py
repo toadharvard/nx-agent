@@ -1065,6 +1065,44 @@ class Emu(SanitizeMixin):
             self.watch_log.append((self.watch_n, a, n, value & (1 << 8 * n) - 1, pc, lr))
         self.uc.hook_add(UC_HOOK_MEM_WRITE, on_write, begin=addr, end=addr + size - 1)
 
+    # -- --probe SYM+OFF:xN[,xM..] (or @FILE, one per line): at that instruction, before it runs, log the registers and
+    # the symbol each value lies in (a vptr resolves to its _ZTV / __fnv_ / __fnvnx_vmo_ table, an exe image address
+    # stays an exe address). One line per hit, at most --probe-max hits per site:
+    #   probe <site> <tid> <reg> <value> <symbol of value>
+    def install_probes(self, specs, limit=4):
+        names = {}
+        for a, ns in zip(self.sym_addrs, self.sym_names):
+            for n in ns:
+                names.setdefault(n, a)
+        items = []
+        for spec in specs:
+            lines = open(spec[1:]).read().split() if spec.startswith("@") else spec.split(";")
+            items += [x for x in lines if x.strip() and not x.startswith("#")]
+        hits = {}
+        n_ok = 0
+        for it in items:
+            where, _, regs = it.partition(":")
+            sym, _, off = where.partition("+")
+            if sym not in names:
+                print(f"   probe: {sym}: no such symbol")
+                continue
+            la = names[sym] + (int(off, 16) if off else 0)
+            rt = la - self.link_base + self.base if self.relocatable else la
+            regl = [r.strip() for r in regs.split(",") if r.strip()]
+
+            def cb(uc, addr, size, ud, regl=regl, label=it):
+                k = hits.get(label, 0)
+                if k >= limit:
+                    return
+                hits[label] = k + 1
+                tid = self.cur.tid if self.cur is not None else 0
+                for r in regl:
+                    v = uc.reg_read(UC_ARM64_REG_X0 + int(r[1:])) & 0xffffffff
+                    print(f"probe\t{label}\t{tid}\t{r}\t{v:#x}\t{self.sym(v)}")
+            self.uc.hook_add(UC_HOOK_CODE, cb, begin=rt, end=rt)
+            n_ok += 1
+        print(f"   probe: {n_ok} sites")
+
     # -- --trace-fn: function-boundary trace (the guest side of the lockstep trace, tests/s5/boot_trace.py). One TSV
     # line per event, written as it happens (a fault keeps everything before it):
     #   call <seq> <tid> <depth> <name> <orig|-> <x0..x7> <sp> <lr> <caller symbol>
@@ -2776,6 +2814,9 @@ def main(argv):
     ap.add_argument("--vm-service", action="store_true",
                     help="answer the host VM service (FNVNX_PLAT_VM_*: fixed-address VirtualAlloc reservations, as the "
                     "device's toolchain/host/host_vm.inc); default off, FNVNX_EMU_VM=1 also turns it on")
+    ap.add_argument("--probe", action="append", default=[], metavar="SYM+OFF:xN",
+                    help="log registers (and the symbol their value lies in) when an instruction runs; @FILE for a list")
+    ap.add_argument("--probe-max", type=int, default=4, help="--probe: hits logged per site")
     ap.add_argument("--trace-fn", action="append", default=[], metavar="NAMES",
                     help="function-boundary trace: symbols, 0xORIG or re:REGEX, comma-separated (args, return; "
                     "install_trace_fn)")
@@ -2883,6 +2924,8 @@ def main(argv):
         else:
             print("   image-check: off (needs the exe as --file or in the game install)")
     emu.discover_max, emu.discovered = a.discover, []
+    if a.probe:
+        emu.install_probes(a.probe, a.probe_max)
     if a.trace_fn:
         emu.install_trace_fn(a.trace_fn, a.trace_out or "trace_fn.tsv", writes=a.trace_writes, limit=a.trace_max,
                            deref=a.trace_deref)
