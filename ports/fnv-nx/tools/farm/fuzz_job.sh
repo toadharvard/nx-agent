@@ -492,7 +492,8 @@ RSTEPS=""; rs_t=$(date +%s)   # T1: seconds per report step (the report took 1,3
 rstep() { local now; now=$(date +%s); RSTEPS="$RSTEPS${RSTEPS:+, }$1 $((now - rs_t))s"; rs_t=$now; }
 if [ ! -s "$ATT/rules.json" ] || [ ! -s "$ATT/bridges.json" ]; then
   log "attribution (prepare rules, bridges)"
-  (cd "$DF" && nice $PY attrib.py rules "$ATT/rules.json.tmp" > "$ATT/attrib.log" 2>&1 \
+  # FNVNX_ATTRIB_CACHE: each unit's attribution kept for the next link (its two texts unchanged: the same result)
+  (cd "$DF" && FNVNX_ATTRIB_CACHE=$FARM_HOME/attrib-cache/rules.marshal nice $PY attrib.py rules "$ATT/rules.json.tmp" > "$ATT/attrib.log" 2>&1 \
     && nice $PY attrib.py bridges "$ATT/bridges.json.tmp" >> "$ATT/attrib.log" 2>&1 \
     && mv "$ATT/rules.json.tmp" "$ATT/rules.json" && mv "$ATT/bridges.json.tmp" "$ATT/bridges.json") || true
 fi
