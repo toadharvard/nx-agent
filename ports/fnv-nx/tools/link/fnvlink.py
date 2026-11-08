@@ -83,6 +83,11 @@ DYN_SYM = re.compile(r'^__fnvnx_(dyninit|dynexit)_([0-9a-f]{8})$')   # startup n
 # platform/crt/heap.c) is the same int *(void) (R2 trap loop, rank 1192)
 GAME_RENAMES = {'__cxa_atexit': 'fnvnx_xc_cxa_atexit', '__errno_location': '_errno'}
 ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
+# `str_<addr>`: the decomp's name for a C string of the image (`extern const char str_0109dca0[];`). Unlike the Ghidra
+# names above it binds only where the exe holds a string at that address (exevft.string_at): units.json names the
+# strings the pristine object emitted, and the two that only an inline function uses (MSVC inlined it away, so no
+# symbol) stayed unresolved (top-down 10 / 11: a zero-filled data stub stood for the format string)
+STR_IN_NAME = re.compile(r'^str_([0-9a-f]{8})$')
 FUNC_SPANS = ([], [])   # sorted starts and their ends of units.json functions with a size (set by resolve)
 
 
@@ -881,6 +886,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if vsb is not None and (un in vslots or (cls == 'unresolved' and isig.variant in ('D1', 'D2'))):
                 cls, tier, addr, target, note = vsb.classify(u.host or u.source, u.obj, un, isig, native, def_at,
                                                              (cls, tier, addr, target, note))
+            if cls == 'unresolved' and isig.kind == 'data' and isig.qual and exe_path_ and \
+                    STR_IN_NAME.match(isig.qual[-1]) and \
+                    exevft.string_at(exe_path_, int(isig.qual[-1][4:], 16)) is not None:
+                # S2d (top-down 10 / 11): a string name whose address holds a C string in the exe
+                cls, tier, addr, target = 'addr', 'name-addr/str', int(isig.qual[-1][4:], 16), None
+                stats['str_name_addr_refs'] += 1
             if cls == 'unresolved' and body_data_addr(body_bind, un) is not None:
                 # S2d exe-data: a placeholder variable at the image address the exe's code uses for it; bound like
                 # any address (data, an IAT slot GCC calls, TLS)
