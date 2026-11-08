@@ -193,7 +193,7 @@ void fnvnx_guest_thread_tls_hook(void) {
 }
 }
 
-/* Constants of the exe in sections the loader does not map (.text): read from the file (platform/include/
+/* Constants of the exe in sections the loader does not map (.text before FNVNX_MAP_CODE; now a fallback): read from the file (platform/include/
  * fnvnx_win32_ext.h fnvnx_image_const). Mapped addresses, and anything outside the image's sections, stay as they are. */
 static const fnvnx_pe *g_pe;
 static const fnvnx_image *g_img;
@@ -234,7 +234,10 @@ static int load_image(void) {
     printf("fnvnx boot: %s: image base %#" PRIx32 ", %u sections%s\n", k_exe, pe.image_base, pe.nsections,
            pe.wrapped ? " (SteamStub-wrapped: code probes will not match)" : "");
     static fnvnx_image img;
-    rc = fnvnx_image_map(&img, &pe, &os, pe.image_base, 0, 0x00400000u, 0x02100000u, 0);
+    /* the headers and .text too, read-only, as Windows maps them (loader-seam audit): the game reads constant tables,
+     * GUIDs and DirectInput formats it keeps in .text, and MZ/PE headers through GetModuleHandle(NULL); a branch to
+     * x86 code still faults (never executable), and the code-pointer scan skips both (FNVNX_MAPPING_SKIP) */
+    rc = fnvnx_image_map(&img, &pe, &os, pe.image_base, 0, 0x00400000u, 0x02100000u, FNVNX_MAP_HEADERS | FNVNX_MAP_CODE);
     if (rc) { printf("fnvnx boot: STOP: image_map: %s\n", fnvnx_strerror(rc)); return -1; }
     g_img = &img;
     {   /* _tls_index = 0, as the Windows loader stores for the main module: fs:[0x2c][_tls_index] is the image TLS

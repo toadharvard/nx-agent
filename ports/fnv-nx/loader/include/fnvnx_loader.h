@@ -124,7 +124,10 @@ typedef struct fnvnx_mapping {
     uint32_t va, size;        /* current VA (load_base + rva), page-rounded size */
     uint32_t file_bytes;      /* bytes copied from the file, the rest is zero (.bss) */
     unsigned prot, sec;       /* final protection; section index or 0xffff for the headers */
+    unsigned code;            /* 1: a code section mapped read-only as data (FNVNX_MAP_CODE); scanners skip it */
 } fnvnx_mapping;
+/* a mapping the code-pointer scanners and data lookups leave alone: the headers and code sections */
+#define FNVNX_MAPPING_SKIP(m) ((m)->sec == 0xffffu || (m)->code)
 
 typedef struct fnvnx_image {
     const fnvnx_pe *pe;
@@ -139,6 +142,9 @@ typedef struct fnvnx_image {
 } fnvnx_image;
 
 #define FNVNX_MAP_HEADERS 1u      /* also map the header page at load_base, read-only */
+#define FNVNX_MAP_CODE 2u         /* also map code sections (.text) read-only, never executable: their bytes read as
+                                     data as on Windows (constant tables, GUIDs, DirectInput formats the game keeps
+                                     in .text); a branch there still faults. Not scanned for code pointers. */
 
 /* Map every section that is neither code nor discardable at load_base + rva (host: + bias). All of it must lie in
  * [window_lo, window_hi) (current VAs). load_base is normally pe->image_base. */

@@ -30,13 +30,17 @@ int fnvnx_image_map(fnvnx_image *img, const fnvnx_pe *pe, const fnvnx_os *os, ui
     for (i = 0; i < pe->nsections; i++) {
         const fnvnx_section *s = &pe->sec[i];
         fnvnx_mapping *m;
-        if (s->characteristics & (FNVNX_SCN_CNT_CODE | FNVNX_SCN_MEM_EXECUTE | FNVNX_SCN_DISCARDABLE)) continue;
+        int code = (s->characteristics & (FNVNX_SCN_CNT_CODE | FNVNX_SCN_MEM_EXECUTE)) != 0;
+        if (s->characteristics & FNVNX_SCN_DISCARDABLE) continue;
+        if (code && !(flags & FNVNX_MAP_CODE)) continue;
         m = &img->map[img->nmapped++];
         m->va = load_base + s->rva;
         m->size = page_up(vsize_eff(s));
         m->file_bytes = s->raw_size < vsize_eff(s) ? s->raw_size : vsize_eff(s);
-        m->prot = FNVNX_PROT_R | ((s->characteristics & FNVNX_SCN_MEM_WRITE) ? FNVNX_PROT_W : 0);
+        m->prot = code ? FNVNX_PROT_R
+                       : FNVNX_PROT_R | ((s->characteristics & FNVNX_SCN_MEM_WRITE) ? FNVNX_PROT_W : 0);
         m->sec = i;
+        m->code = (unsigned)code;
     }
     for (i = 0; i < img->nmapped; i++) {
         const fnvnx_mapping *m = &img->map[i];
@@ -130,7 +134,8 @@ int fnvnx_image_load_relocs(fnvnx_image *img, const fnvnx_os *os) {
                 uint32_t type = e >> 12, va = img->load_base + page + (e & 0xfffu);
                 if (type == 0) continue;                       /* IMAGE_REL_BASED_ABSOLUTE: padding */
                 if (type != 3) { r = FNVNX_E_UNSUPPORTED; goto out; }  /* only HIGHLOW in an x86 image */
-                if (!fnvnx_image_ptr(img, va, 4)) continue;    /* .text and other unmapped sections */
+                if (!fnvnx_image_ptr(img, va, 4) || img->map[find_mapping(img, va)].code)
+                    continue;    /* .text (unmapped, or mapped read-only as data: FNVNX_MAP_CODE) and unmapped sections */
                 if (pass) img->relocs[n] = va;
                 n++;
             }

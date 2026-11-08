@@ -196,6 +196,7 @@ int main(int argc, char **argv) {
             window_lo = (uint32_t)strtoul(s, NULL, 0);
             window_hi = (uint32_t)strtoul(colon + 1, NULL, 0);
         } else if (!strcmp(a, "--headers")) flags |= FNVNX_MAP_HEADERS;
+        else if (!strcmp(a, "--map-code")) flags |= FNVNX_MAP_CODE;
         else if (!strcmp(a, "--no-relocs")) scan_flags |= FNVNX_SCAN_NO_RELOCS;
         else if (!strcmp(a, "--no-index")) scan_flags |= FNVNX_SCAN_NO_INDEX;
         else if (!strcmp(a, "--trap")) use_trap = 1;
@@ -243,12 +244,27 @@ int main(int argc, char **argv) {
         return 5;
     }
     stat_set("sections_mapped", img.nmapped);
+    if (flags & FNVNX_MAP_CODE) {   /* code sections read as data: the file's bytes, read-only, never executable */
+        unsigned k, ncode = 0, match = 1, prot_ok = 1;
+        for (k = 0; k < img.nmapped; k++) {
+            const fnvnx_mapping *m = &img.map[k];
+            if (!m->code) continue;
+            ncode++;
+            prot_ok &= m->prot == FNVNX_PROT_R;
+            uint8_t *want = (uint8_t *)malloc(m->file_bytes ? m->file_bytes : 1);
+            if (!want || fnvnx_pe_read_rva(&pe, &os, pe.sec[m->sec].rva, want, m->file_bytes) ||
+                memcmp(want, fnvnx_image_ptr(&img, m->va, m->file_bytes), m->file_bytes))
+                match = 0;
+            free(want);
+        }
+        printf("code_map=%u match=%u prot_r=%u\n", ncode, match, prot_ok);
+    }
     {   /* are the sections we use plain? */
         unsigned k;
         for (k = 0; k < img.nmapped; k++) {
             fnvnx_section_stats ss;
             unsigned sec = img.map[k].sec;
-            if (sec == 0xffff || !strcmp(pe.sec[sec].name, ".rsrc")) continue;
+            if (FNVNX_MAPPING_SKIP(&img.map[k]) || !strcmp(pe.sec[sec].name, ".rsrc")) continue;
             if (fnvnx_pe_section_stats(&pe, &os, sec, &ss)) return 3;
             printf("section %-8s raw=0x%x zeros=%u chi2=%llu plain=%d\n", pe.sec[sec].name, ss.bytes, ss.zeros,
                    (unsigned long long)ss.chi2, ss.plain);
