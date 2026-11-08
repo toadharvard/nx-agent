@@ -102,6 +102,10 @@ POLICY = {
     'nrvo-copy':      ('by-design', '-', False, 'MSVC without NRVO copies the named result into the hidden result '
                                               'buffer and destroys the local, GCC constructs it there (copy '
                                               'elision, allowed by C++), F1b'),
+    'nrvo-elision':   ('by-design', '-', False, 'one machine passes the hidden result buffer of the function as the object a '
+                                                'callee works on, the other a local of its own frame (named return '
+                                                'value optimisation on one side only; allowed by C++). The result '
+                                                'buffer is compared at the end, so a wrong copy still shows'),
     'oracle-frame-smash': ('by-design', '-', False, 'the oracle faults after a store into its own return-address '
                                                     'slot: a local array overrun by an out-of-range fuzzed count (UB '
                                                     'in C++; the exe corrupts its frame the same way), F1b'),

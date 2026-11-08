@@ -63,7 +63,7 @@ import config
 # uninitialised out-parameter of an intercepted callee is uninit-x86), pop learning tries the pushes right before a
 # call first (three call sites over branches), an integer result that the 24-bit x87 control word rerun reproduces
 # is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
-# placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return.
+# placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return. Small address classes: a stored pinned-literal address is compared by its pointee (literal-store), the canned result of a callee whose exe code returns its `this` or first pointer argument is that input (retsrc.py, canned-this), the address of a by-value aggregate parameter is its stack slot on the oracle and the hidden pointer natively, a hidden result buffer against a frame local is nrvo-elision (by design), and a jump into the native vtable region is a wild call.
 HARNESS = 'difffuzz-20'
 
 
