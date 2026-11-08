@@ -1692,6 +1692,21 @@ if _shutil.which('aarch64-linux-gnu-g++'):
     _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x', 'c++',
                           '-'], input=''.join(_mD2) + _cc, capture_output=True, text=True)
     check('D26 call-only output: h->v0(1) deletes through slot 1 (D0, +4)', _r.stderr or _r.stdout, [', 4]'], ['error'])
+# a header's declaration whose member another file defines or calls is left alone (try1of1 4a15e91c)
+_th = tempfile.mkdtemp(); os.makedirs(os.path.join(_th, 'src')); os.makedirs(os.path.join(_th, 'build'))
+_json.dump({'units': []}, open(os.path.join(_th, 'build', 'units.json'), 'w'))
+open(os.path.join(_th, 'src', 'user.cpp'), 'w').write('void g(HeapStandIn* h) { h->v1(); }\n')
+prepare.__dict__.pop('_fnvnx_d22_refs', None)
+check('D26 a header declaration: another file calling a later member does not block it (same layout everywhere)',
+      run(s1.r_vtable_dtor_slot, _CO, os.path.join(_th, 'src', 'x.h')), ['FNVNX_D22(HeapStandIn'])
+open(os.path.join(_th, 'src', 'user.cpp'), 'w').write('void g(HeapStandIn* h) { h->v0(); }\n')
+prepare.__dict__.pop('_fnvnx_d22_refs', None)
+check('D26 a header declaration whose placeholder another file calls or defines: nothing (D22-EXTERN)',
+      run(s1.r_vtable_dtor_slot, _CO, os.path.join(_th, 'src', 'x.h')), [], ['FNVNX_D22'])
+prepare.__dict__.pop('_fnvnx_d22_refs', None)
+check('D26 a placeholder call with a non-literal argument is not a destructor call',
+      run(s1.r_vtable_dtor_slot, _CO.replace('virtual void v0();', 'virtual void* v0(void*);') +
+          'void g(HeapStandIn* h, void* r) { h->v0(r); }\n'), [], ['FNVNX_D22'])
 check('D26 call-only: a named first virtual is not a placeholder',
       run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'GetName()')), [], ['FNVNX_D22'])
 if _shutil.which('aarch64-linux-gnu-g++'):

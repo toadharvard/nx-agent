@@ -5441,6 +5441,36 @@ def _d22_defines_none(masked, c):
     return not re.search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~?\s*[A-Za-z_]\w*\s*\([^;{}]*\)[^;{}]*\{'
                          % re.escape(c['qual'][-1]), masked)
 
+D22_REF = re.compile(r'(?:::|->|\.)\s*(~?[A-Za-z_]\w*)\s*\(')
+D22_SRC_EXT = ('.cpp', '.c', '.h', '.inl', '.hpp', '.cxx', '.cc')
+
+def _d22_tree_refs(path):
+    """{member name: {files}} of the tree that holds path: the files that define (`::m(`) or call (`->m(`, `.m(`)
+    a member of that name. A header's declaration is seen by every unit that includes it, so a D22 edit there needs
+    the name unused in every other file (try1of1 4a15e91c: `NiPosData::LoadBinary` defined in niposdata.cpp lost
+    its declaration in niposdata_local.h; bgsprojectile.cpp called TESModelVTable::Slot0). Cached per tree root."""
+    root, _ = prepare._units_json(path)
+    top = root or os.path.dirname(os.path.abspath(path))
+    cache = prepare.__dict__.setdefault('_fnvnx_d22_refs', {})
+    if top in cache: return cache[top]
+    refs = collections.defaultdict(set)
+    for dp, _, fs in os.walk(os.path.join(top, 'src') if os.path.isdir(os.path.join(top, 'src')) else top):
+        for f in fs:
+            if not f.endswith(D22_SRC_EXT): continue
+            fp = os.path.abspath(os.path.join(dp, f))
+            try: s = open(fp, encoding='utf-8', errors='surrogateescape').read()
+            except OSError: continue
+            for m in D22_REF.finditer(s): refs[m.group(1)].add(fp)
+    cache[top] = refs
+    return refs
+
+def _d22_extern_use(path, member):
+    """a header's member name that another file of the tree defines or calls (above); .cpp declarations are the
+    unit's own"""
+    if path.endswith(('.cpp', '.c', '.cxx', '.cc')) or not member: return False
+    me = os.path.abspath(path)
+    return any(f != me for f in _d22_tree_refs(path).get(member, ()))
+
 def r_vtable_dtor_slot(path, text, stats):
     """D22: `virtual ~C();` for a listed class's slot-0 placeholder under GCC (above); a derived class's
     re-declaration of that placeholder is dropped under GCC (it would append a slot)."""
@@ -5458,7 +5488,7 @@ def r_vtable_dtor_slot(path, text, stats):
         # `EXPR->ph(flags);` as a statement: the deleting-destructor call D26 turns into FNVNX_D22_CALL
         if ph not in calls:
             calls[ph] = [m for m in re.finditer(r'(?<=[;{}\n])([ \t]*)((?:this|[A-Za-z_]\w*)(?:\s*(?:->|\.)\s*[A-Za-z_]\w*)*)'
-                                                r'\s*->\s*%s\s*\(([^();{}]+)\)\s*;' % re.escape(ph), masked)]
+                                                r'\s*->\s*%s\s*\(\s*((?:0x)?[0-9]+[uU]?)\s*\)\s*;' % re.escape(ph), masked)]
             nc = masked
             for m in calls[ph]: nc = nc[:m.start(2)] + ' ' * (m.end() - m.start(2)) + nc[m.end():]
             masked_nc[ph] = nc
@@ -5471,6 +5501,8 @@ def r_vtable_dtor_slot(path, text, stats):
         if not callonly:
             if key not in lst or not c['first']: continue
             if c['bases'] or c['dtor'] or c['first'][2] not in lst[key]: continue
+        if _d22_extern_use(path, c['first'][2]):
+            stats['D22-EXTERN'] += 1; continue
         if not d22_placeholder(masked, c['qual'][-1], c['first'], vdecls[c['first'][2]]):
             ph = c['first'][2]
             if not (callonly and statement_calls(ph) and
@@ -5513,6 +5545,8 @@ def r_vtable_dtor_slot(path, text, stats):
                 if not mem: continue
                 for v in c['virtuals']:
                     if v[2] != mem or any(e[0] == v[0] for e in edits): continue
+                    if _d22_extern_use(path, v[2]):
+                        stats['D22-EXTERN'] += 1; continue
                     if not d22_placeholder(masked, c['qual'][-1], v, vdecls[v[2]]):
                         stats['D22-USED'] += 1; continue
                     edits.append((v[0], v[1], 'FNVNX_D22_DROP(%s)' % v[3]))
