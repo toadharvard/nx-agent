@@ -3897,6 +3897,36 @@ VTFILL_REAL = ('__fnvnx_vtrap_', '.reloc', '.section:')
 GCC_THUNK_DTOR = re.compile(r'^_ZThn\d+_.*D([01])Ev$')
 
 
+VTFILL_HOLD = set()   # {(vtable symbol, slot index)}: load_vtfill_holds
+
+
+def load_vtfill_holds(top=None):
+    """R4's overrides.tsv (fnvnx-vtbind-override/1, fnv-nx-build recon/vtbind) rows whose abi column starts with
+    `abi-check`: {(table, slot)} VTFILL keeps as compiled. The other rows need nothing: VTFILL writes the exe
+    override's native in every slot it fills."""
+    top = top or os.environ.get('FNVNX_RECON')
+    out = set()
+    if not top or not os.path.isdir(top):
+        return out
+    for dp, _, fs in os.walk(top):
+        if 'overrides.tsv' not in fs:
+            continue
+        try:
+            lines = open(os.path.join(dp, 'overrides.tsv')).read().split('\n')
+        except OSError:
+            continue
+        if not lines or not lines[0].startswith('# fnvnx-vtbind-override/1'):
+            continue
+        for line in lines[1:]:
+            p = line.split('\t')
+            if len(p) >= 7 and not line.startswith('#') and p[6].startswith('abi-check'):
+                try:
+                    out.add((p[0], int(p[2])))
+                except ValueError:
+                    pass
+    return out
+
+
 def vtfill_block(expv, cur, z, base, off, native, providers, exe_path, msvc, bridges, traps, st, vtbind=None):
     """VTFILL's words of one vtable of a group (classlayout.expected's list expv) -> [native symbol]. base: the word
     index of the vtable's address point in the group (2 for the primary), for the trap reports. cur: the vtable's
@@ -3961,7 +3991,13 @@ def vtfill_block(expv, cur, z, base, off, native, providers, exe_path, msvc, bri
             elif kb == 'fn' and sb:
                 t = sb
                 st['vtfill%s-vtbind-fn' % sfx] += 1
-        if t.startswith('__fnvnx_vtrap_') and i < len(cur) and cur[i] and not cur[i].startswith(VTFILL_REAL):
+        if (z, i) in VTFILL_HOLD and i < len(cur) and cur[i] and t != cur[i]:
+            # R4 (recon/vtbind overrides.tsv, abi-check): the exe's derived override and the slot's declaration take
+            # other parameters; writing the override would pass the callers' arguments to the wrong shape, so the
+            # compiled word stays until the class is declared right (listed: vtfill-abi-hold)
+            t = cur[i]
+            st['vtfill%s-abi-hold' % sfx] += 1
+        elif t.startswith('__fnvnx_vtrap_') and i < len(cur) and cur[i] and not cur[i].startswith(VTFILL_REAL):
             t = cur[i]
             st['vtfill%s-kept' % sfx] += 1
         elif t.startswith('__fnvnx_vtrap_'):
@@ -4134,6 +4170,10 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     # the heuristics below (d26_classify, family_dtor_pos) remain only for tables it does not decide
     vtbind = load_vtbind()   # R4's address -> native / adjustor binding for VTFILL's otherwise-trap slots
     st['vtbind-rows'] = len(vtbind)
+    VTFILL_HOLD.clear()
+    VTFILL_HOLD.update(load_vtfill_holds())
+    if VTFILL_HOLD:
+        st['vtbind-hold-rows'] = len(VTFILL_HOLD)
     lay = {}
     if exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0':
         import classlayout
