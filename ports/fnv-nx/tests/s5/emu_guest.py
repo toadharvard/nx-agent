@@ -172,13 +172,13 @@ def parse_milestones(path):
         if not f:
             continue
         ok = len(f) == 3 and re.fullmatch(r"[a-z][\w-]*", f[0]) and (
-            f[1] == "call" and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
+            f[1] in ("call", "callok", "calltrue") and (re.fullmatch(r"0x[0-9a-fA-F]+", f[2]) or f[2].startswith("re:")) or
             f[1] == "store" and re.fullmatch(r"\*?0x[0-9a-fA-F]+(\+(0x[0-9a-fA-F]+|\d+))?", f[2]) or
             f[1] == "data" and f[2] in datapath.DATA_MILESTONES)
         if not ok:
-            raise ValueError(f"{path}:{k}: <name> call <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
+            raise ValueError(f"{path}:{k}: <name> call|callok|calltrue <0xORIG | re:REGEX> | <name> store <0xADDR | *0xADDR+N> | "
                              f"<name> data <{'|'.join(datapath.DATA_MILESTONES)}>")
-        if f[1] == "call" and f[2].startswith("re:"):
+        if f[1].startswith("call") and f[2].startswith("re:"):
             re.compile(f[2][3:])
         out.append(tuple(f))
     return out
@@ -689,7 +689,7 @@ class Emu:
         for line in out.splitlines():
             f = line.split()
             if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats",
-                                                                 "fnvnx_plat_on"):
+                                                                 "fnvnx_plat_on", "fnvnx_stub_nulldev"):
                 self.data_syms[f[2]] = int(f[0], 16)
             if len(f) == 3 and f[1] in "tTwW":
                 a = int(f[0], 16)
@@ -1990,14 +1990,17 @@ class Emu:
         for name, kind, target in parse_milestones(path):
             if name not in self.mile_order:
                 self.mile_order.append(name)
-            if kind == "call":
+            if kind in ("call", "callok", "calltrue"):
                 if target.startswith("re:"):
                     rx = re.compile(target[3:])
                     addrs = sorted({self.code_addr(n) for n in self.code_syms if rx.search(n)})
                 else:
                     addrs = [a for a in [self.code_addr(target)] if a is not None]
                 for a in addrs:
-                    self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
+                    if kind == "call":
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_call, user_data=name, begin=a, end=a)
+                    else:   # reached when the call returns success: callok w0 == 0 (an HRESULT), calltrue w0 & 0xff
+                        self.uc.hook_add(UC_HOOK_CODE, self.on_mile_callret, user_data=(name, kind), begin=a, end=a)
                 if not addrs:
                     print(f"   milestones: {name}: {target} is not in the link")
             elif kind == "data":
@@ -2032,6 +2035,36 @@ class Emu:
     def on_mile_call(self, uc, addr, size, name):
         if name not in self.miles:
             self.mile_hit(name, "call", at=addr)
+
+    def on_mile_callret(self, uc, addr, size, data):
+        """'callok' / 'calltrue' F: at F's entry, a one-shot hook on the return address checks the result there (the
+        same thread and stack pointer: a recursive or other thread's return does not count)"""
+        name, kind = data
+        if name in self.miles:
+            return
+        ret, sp = uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF, uc.reg_read(UC_ARM64_REG_SP)
+        tid = self.cur.tid if getattr(self, "cur", None) else 1
+        pend = self.__dict__.setdefault("mile_ret_pending", {})
+        if ret not in pend:
+            pend[ret] = []
+            self.uc.hook_add(UC_HOOK_CODE, self.on_mile_ret, user_data=ret, begin=ret, end=ret)
+        pend[ret].append((name, kind, sp, tid, addr))
+
+    def on_mile_ret(self, uc, addr, size, ret):
+        pend = self.mile_ret_pending.get(ret) or []
+        sp = uc.reg_read(UC_ARM64_REG_SP)
+        tid = self.cur.tid if getattr(self, "cur", None) else 1
+        for e in list(pend):
+            name, kind, sp0, tid0, fn = e
+            if tid0 != tid or sp0 != sp:
+                continue
+            pend.remove(e)
+            x0 = uc.reg_read(UC_ARM64_REG_X0)
+            ok = (x0 & 0xFFFFFFFF) == 0 if kind == "callok" else (x0 & 0xFF) != 0
+            if ok and name not in self.miles:
+                self.mile_hit(name, f"{kind} (returned {x0 & 0xFFFFFFFF:#x})", at=fn)
+            elif not ok:
+                print(f"   milestone: {name} not reached: {self.sym(fn).split(' ', 1)[-1]} returned {x0 & 0xFFFFFFFF:#x}")
 
     def on_mile_store(self, uc, access, addr, size, value, data):
         name, target, want = data
@@ -2375,6 +2408,10 @@ def main(argv):
     ap.add_argument("--trace-writes", action="store_true", help="--trace-fn also logs the callees' memory writes")
     ap.add_argument("--trace-max", type=int, default=1_000_000, help="--trace-fn: at most this many calls")
     ap.add_argument("--trace-deref", type=int, default=32, help="--trace-fn: bytes dumped behind each pointer argument")
+    ap.add_argument("--stub-nulldev", action="store_true",
+                    help="stub boots only (farm_boot.sh with FNVNX_STUB_NULLDEV=1): toolchain/game/native_device.cpp's "
+                         "fnvnx_stub_nulldev = 1 at __libc_init_array, so CreateDevice succeeds on the null device "
+                         "without a GPU backend (the engine runs headless past its renderer init; nothing is drawn)")
     ap.add_argument("--plat", action="store_true",
                     help="the platform lane's recorder on from the start (platform/win32/platstat.cpp's fnvnx_plat_on "
                          "= 1 at __libc_init_array, after runtime.c clears .bss, before every constructor): 'plat: ...' "
@@ -2510,6 +2547,22 @@ def main(argv):
                     uc.hook_del(hk["h"])
                 hk["h"] = emu.uc.hook_add(UC_HOOK_CODE, plat_on, begin=ia, end=ia)
                 print("   plat: recorder on (fnvnx_plat_on at %#x, set at __libc_init_array %#x)" % (pa, ia))
+    if a.stub_nulldev:
+        na = getattr(emu, "data_syms", {}).get("fnvnx_stub_nulldev")
+        ia = getattr(emu, "code_syms", {}).get("__libc_init_array")
+        if na is None or ia is None:
+            print("   stub-nulldev: off (no fnvnx_stub_nulldev in the ELF: a guest without native_device.cpp's flag)")
+        else:
+            na = na - emu.link_base + emu.base if emu.relocatable else na
+            ia = ia - emu.link_base + emu.base if emu.relocatable else ia
+            hn = {}
+
+            def nulldev_on(uc, addr, size, data):
+                uc.mem_write(na, struct.pack("<I", 1))
+                uc.hook_del(hn["h"])
+            hn["h"] = emu.uc.hook_add(UC_HOOK_CODE, nulldev_on, begin=ia, end=ia)
+            print("   stub-nulldev: on (fnvnx_stub_nulldev at %#x): CreateDevice succeeds headless without a GPU backend"
+                  % na)
     try:
         rc = emu.run()
     except SystemExit as e:
