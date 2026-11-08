@@ -673,6 +673,12 @@ def hint(pair, target, case, div, fn, max_steps):
                 h['cause'] = 'x87-precision'; h['x87_pc24'] = True
                 h['int_float_close'] = int_float_close(div.get('x86'), div.get('arm'))
                 return h
+        if div.get('zero_sign') and pair is not None and any(m.startswith('f') for m in mn) and \
+                x87_probes(pair, case, div, max_steps, h):
+            # (difffuzz-20, zero-sign) -0.0 against +0.0: an x87 intermediate beyond the float range keeps its sign
+            # until the store rounds it (0x00c206b0: -4.5e-44 * 4.5e-44 = -2e-87, then + 0.0 stays negative); the
+            # rerun that clamps such values (x87-range) is the evidence, not the equal numeric value
+            return h
         if fl:
             if fl.get('tolerant'):
                 h['cause'] = 'x87-precision' if any(m.startswith('f') for m in mn) else 'float-tolerance'
@@ -854,12 +860,35 @@ def pool_vftable_stores(rx, ra, pinned):
     return True
 
 
+def canned_unaliased(case):
+    """(difffuzz-20, canned-alias) The case with every canned call result whose low word points into the argument
+    buffers (world.BUF .. +0x10000) moved to a private heap address, one per call; None when no result does. The
+    fuzzer draws 30 % of the canned words as pointers into the buffers, so an allocator or getter callee "returns"
+    memory inside the object the function builds and then writes: the two compilers order the stores to the object
+    and through that pointer differently (GCC assumes they do not alias), which no real allocation does."""
+    out, n = [], 0
+    for i in range(max(8, len(case.rets))):
+        b = case.ret_bytes(i)
+        w = int.from_bytes(b[:4], 'little')
+        if world.BUF <= w < world.BUF + 0x10000:
+            w = world.HEAP + 0x10000 + 0x1000 * i
+            b = w.to_bytes(4, 'little') + b[4:]
+            n += 1
+        out.append(b)
+    if not n:
+        return None
+    t = case.copy()
+    t.rets = out
+    return t
+
+
 def _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=False):
     """(uncls2, difffuzz-20) What is left after every other probe: each one reruns the case with one mechanism changed
     and names the cause only when the two machines then agree (`_benign`).
       uninit-*       every garbage word 0 on both machines (world.UNIFORM): the outcome of a machine moves with the
                      fill but not between two random fills (a bool test of an unwritten byte is 1 for 255 of 256
                      fills, so the seed probe above saw nothing)
+      canned-alias   every canned result that points into the argument buffers moved to the heap (world.HEAP)
       call-order     two adjacent calls of one callee that return the same value: the machines used the two results
                      in swapped roles (C++ leaves the evaluation order of operands open)
       shift-count    the 64-bit shift helpers take the count modulo 64 (world.SHIFT_MASK)
@@ -903,6 +932,9 @@ def _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=False):
                 tb.rets[i] = tb.rets[i + 1]
                 if rerun(ta) and rerun(tb):
                     return 'call-order'
+        moved = canned_unaliased(base)
+        if moved is not None and rerun(moved):
+            return 'canned-alias'
         for flag, cause in (('SHIFT_MASK', 'shift-count'), ('TRIG_INF', 'x87-trig-inf')):
             setattr(world, flag, True)
             try:

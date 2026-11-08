@@ -737,6 +737,55 @@ class UnitCache:
 
 CALIB_CASES = 8
 CALIB_MAX = 120
+CALIB_ROUNDS = 3
+
+
+def calib_float_noise(rx, ra, d):
+    """A calibration case that only differs in float representation agrees on the pairing (difffuzz-20, calib-float).
+    A vector routine (SSE normalize / cross: 0x00dacf10, 0x00d5b440, 0x00cd6120, 0x00da9210) differs on almost every
+    fuzzed input by a NaN payload or sign (x87 / SSE indefinite 0xffc00000 against the AArch64 default NaN) or by an
+    ulp of an rsqrt / rcp, whichever pairing runs, so the 7-of-8 bar of `calibrate_custom` was never reached and the
+    declared order stayed. Only the pairing choice looks at this: the verdicts of the real runs are untouched.
+    True when no run faulted, every differing byte is a store both machines made, and every differing aligned word
+    is two NaNs or two normal floats within causes._float_close's tolerance (the pairs the float causes accept); a
+    soft record agrees as well."""
+    import causes
+    if d.get('soft'):
+        return True
+    if rx.error or ra.error or d.get('kind') not in ('mem-write', 'return'):
+        return False
+    if d['kind'] == 'return' and not (d.get('float') or {}).get('tolerant'):
+        return False
+    wx, wa = rx.writes, ra.writes
+    words = set()
+    for k in set(wx) | set(wa):
+        if wx.get(k) != wa.get(k):
+            if k not in wx or k not in wa:
+                return False
+            words.add(k & ~3)
+    for w in words:
+        if not all(k in wx and k in wa for k in range(w, w + 4)):
+            return False
+        bx = bytes(wx[k] for k in range(w, w + 4))
+        ba = bytes(wa[k] for k in range(w, w + 4))
+        if not causes._float_close(bx, ba)[0] and not _cancellation_residue(bx, ba):
+            return False
+    return True
+
+
+def _cancellation_residue(bx, ba):
+    """Two float words that are both zero or normal and differ by at most 1e-6 in absolute value: the residue of a
+    cancellation (0.0 against 1.6e-18 after a normalize of nearly equal vectors) that a relative tolerance does not
+    accept. An integer word is a denormal float (0 against 5), so it never qualifies."""
+    import math
+    import struct
+    fx, fa = struct.unpack('<f', bx)[0], struct.unpack('<f', ba)[0]
+    if math.isnan(fx) or math.isnan(fa) or math.isinf(fx) or math.isinf(fa):
+        return False
+
+    def plain(f):
+        return f == 0 or abs(f) >= 1.1754943508222875e-38
+    return plain(fx) and plain(fa) and abs(fx - fa) <= 1e-6
 
 
 def calibrate_custom(pair, t, globals_=()):
@@ -771,7 +820,9 @@ def calibrate_custom(pair, t, globals_=()):
         n = bad = 0
         for c in cases:
             try:
-                _, _, d = pair.run(c)
+                rx_, ra_, d = pair.run(c)
+                if d and calib_float_noise(rx_, ra_, d):
+                    d = None
             except Exception:  # noqa: BLE001
                 d = True
             n += not d
@@ -786,6 +837,31 @@ def calibrate_custom(pair, t, globals_=()):
     best = max(scores, key=lambda c: (scores[c], c == declared))
     if best != declared and scores[best] < need:
         best = declared
+    else:
+        # several pairings at the top score: the cases do not tell them apart (0x00d6c3c0: six pairings agree on
+        # all 8 cases, the zero or random buffers of its pointer parameters look alike to the vector code), and
+        # the first in permutation order was taken. Run fresh cases on the tied pairings only, up to
+        # CALIB_ROUNDS more rounds, and keep the ones that agree on the most (difffuzz-20, calib-tie).
+        tied = [c for c in cands if scores.get(c) == scores[best]]
+        for _ in range(CALIB_ROUNDS if len(tied) > 1 else 0):
+            extra = [gen.fresh() for _ in range(CALIB_CASES)]
+            more = {}
+            for cand in tied:
+                cv.with_registers(regs, dict(zip(cand, regs)))
+                more[cand] = 0
+                for c in extra:
+                    try:
+                        rx_, ra_, d = pair.run(c)
+                        if d and calib_float_noise(rx_, ra_, d):
+                            d = None
+                    except Exception:  # noqa: BLE001
+                        d = True
+                    more[cand] += not d
+            top = max(more.values())
+            tied = [c for c in tied if more[c] == top]
+            if len(tied) == 1:
+                break
+        best = declared if declared in tied else tied[0]
     cv.with_registers(regs, dict(zip(best, regs)))
     t.x86_code.clear(); t.x86_code.update(saved[0])
     pair.pinned.clear(); pair.pinned.update(saved[1])
