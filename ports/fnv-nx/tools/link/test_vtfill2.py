@@ -16,6 +16,7 @@ Foo : P, B1 (at +8), B2 (at +16), hand-assembled (aarch64-linux-gnu-as, ILP32) a
   calls the primary vtable `secondary {for X} at +0` (TESWorldSpace) is filled too;
 * D26 (c) copies follow classlayout: an exe-order class (hkThreadMemory 0x010cacd0) in the exe's order;
 * slotfill2's GOT-load scan follows `mov wD, wN` and TLS descriptor calls (TESWorldSpace, bhkCharacterController).
+* V rows only for the secondaries: the primary pairs with the class's off-0 exe vftable (FNVNX_VTPRIM=0 off).
 FNVNX_VTFILL2=0 leaves the group to the builder (vtfill-skipped-secondary), FNVNX_VMOCL=0 the D26 (c) copies.
 
     python3 tools/link/test_vtfill2.py
@@ -227,6 +228,27 @@ def main():
                                         tempfile.mkdtemp(dir=tmp), None, exe, {}, None, lambda n: None)
         check(words(br4, z) == w and st4['vtfill2-primary-at-0-rows'] == 1 and vmap4[V2][1] == ap2 + 8,
               'VTFILL2: a primary vtable the V row calls `secondary ... at +0` is filled too')
+
+        # V rows only for the secondary vtables (TESActorBase's _ZTV12FUN_005f75e0): the primary is the class's off-0
+        # exe vftable, found through the secondaries' class (FNVNX_VTPRIM)
+        def secs_only(env):
+            os.environ.update(env)
+            try:
+                vm = {V1: (z, ap1, obj, 'secondary {for B1} at +8'), V2: (z, ap2, obj, 'secondary {for B2} at +16')}
+                b = {}
+                s = fnvlink.exe_vtable_copies(exev, vm, types.SimpleNamespace(where={}),
+                                              [types.SimpleNamespace(obj=obj, source=z)], {}, {}, native, b,
+                                              tempfile.mkdtemp(dir=tmp), None, exe, {}, None, lambda n: None)
+            finally:
+                for k in env:
+                    del os.environ[k]
+            return s, b
+        st8, br8 = secs_only({})
+        check(words(br8, z) == w and st8['vtfill-primary-by-class'] == 1,
+              'VTFILL2: only secondary V rows -> the primary pairs by class: %s' % {k: v for k, v in st8.items()
+                                                                                     if 'vtfill' in k})
+        st9, br9 = secs_only({'FNVNX_VTPRIM': '0'})
+        check(not st9['vtfill-primary-by-class'], 'FNVNX_VTPRIM=0: no pairing by class')
 
         # D26 (c) copies follow classlayout (hkThreadMemory 0x010cacd0: exe-order, the minus-one copy moved slot 3)
         VX = 0x01010300
