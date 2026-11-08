@@ -144,6 +144,16 @@ def dtor_pos(names, words=None):
     return None
 
 
+def slot_one_is_d0(s0, s1):
+    """The native slots 0 / 1 (symbols as the object has them after resolve's renames) already are a destructor pair:
+    D1 / D0 names, a flags-stub pair (`__fnvnx_vflag_<a>_0` / `_1`), a deleting stub, or one body bound to both."""
+    if not s1:
+        return False
+    return bool(D0_SLOT.search(s1) or s1.endswith('_D0') or s1.startswith(('__fnvnx_d0del_', '__fnvnx_vgdel_')) or
+                (s0 and s0 == s1) or (s0 and s1.endswith('_1') and s1[:-1] == s0[:-1] and s0.endswith('_0') and
+                                      '__fnvnx_vflag' in s0))
+
+
 def exe_slot_index(k, d):
     """The minus-one rule: MSVC has one deleting destructor where GCC has D1 and D0 (at d, d + 1), so GCC slot k
     is exe slot k up to D1, D0 shares D1's slot, and every later slot is one lower."""
@@ -274,6 +284,25 @@ def deleting_dtor(path, addr):
     b = data[off:off + 0x400]
     i = b.find(b'\xc2\x04\x00')
     return i > 0 and _FLAGS_TEST.search(b[:i]) is not None
+
+
+_DELETE_THIS = re.compile(
+    rb'(?:\x85\xc9[\x74\x75][\x01-\x7f])?\x8b\x01(?:\x8b\x10\x6a\x01\xff\xd2|\x6a\x01\xff\x10)(?:\xc3|\xc2\x00\x00)')
+
+
+def delete_this(path, addr):
+    """True when the x86 function at addr is `void DeleteThis() { delete this; }` as MSVC compiles it: [`test ecx, ecx;
+    jz`] `mov eax, [ecx]; [mov edx, [eax];] push 1; call [eax] | edx; ret`, i.e. exactly a call of vftable slot 0 (the
+    scalar deleting destructor) with flags 1 and nothing else. Natively that function is one `delete this`, which GCC
+    dispatches through the Itanium D0 slot (native slot 1): a native vtable in the exe's slot order that holds this
+    function in slot 1 sends `delete this` back into it, a loop (S5 round 6, link 97deacd38aec). The exe is the
+    evidence: only a function with this exact body counts, never its name or position."""
+    pe, data = _text(path)
+    try:
+        off = pe.rva_to_off(addr - pe.image_base, 16)
+    except Exception:
+        return False
+    return off is not None and _DELETE_THIS.match(data[off:off + 16]) is not None
 
 
 def thunk(path, addr):

@@ -1010,6 +1010,18 @@ at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus
   minus 23 with no exe slots. That is 12,256 slots: 10,647 native, 614 flag-stub pairs, 67 G pairs, 96 trap
   slots.
 
+  **A D0 in native slot 1 of a table in the exe's slot order** (W23, `d0_slot_fix` in `exe_vtable_copies`;
+  `FNVNX_D0SLOT=0` turns it off). A native `delete p` through a declaration with a virtual destructor calls Itanium
+  slot 1. A native vtable with no D1/D0 pair (the decomp declares a placeholder `virtual void BaseVirtual();` where
+  the exe has the ??_G; `_ZTV12FUN_00e754a0`, ctor 0x00e754a0, which GraphicsRenderer also declares with a virtual
+  destructor) is built or extended in the exe's order, so slot 1 holds exe slot 1. When that is
+  `DeleteThis() { delete this; }` (`exevft.delete_this`: the exe's bytes, a call of vftable slot 0 with flags 1) the
+  native `delete this` goes through slot 1 again, forever (S5 round 6, link 97deacd38aec). Slot 1 becomes the D0 of
+  exe slot 0 (`vmo_dtor_slots`: the Itanium D0, or the flags-1 stub), which is what DeleteThis does in the exe.
+  Nothing else moves: a full shift to D26's order would break every caller compiled against the same table in the exe's
+  order (the call-only placeholders, e.g. the renderer's slot 54), which D26 (a)/(b) convert in S1-rules, not here.
+  vtmetric's `slot-one-delete-this` counts the tables still in that shape (96 on link 0540aff0; the fix's target is 0).
+
 ## Measurements (decomp `87eb9373`, 2026-11-03)
 
 2,029 objects compiled (of 2,978 units; S1 census flags, `-O2`). 106,043 undefined (object, symbol) references:
