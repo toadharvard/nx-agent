@@ -285,6 +285,20 @@ if fail:
     L += ['- FAIL: %s' % fail, '']
     for s_, err, tail in failed_stages:
         L += ['- the %s stage: %s' % (s_, err[:300] or 'no error recorded'), '', '```'] + [t[:300] for t in tail] + ['```', '']
+# the path this head took (orchestrator: a head that changes only the link must not prepare or compile)
+byst = {x['stage']: x for x in stages}
+comp_now = None
+cr = rd(os.path.join(B, 'compile', 'stage.json')) or {}
+if byst.get('compile', {}).get('run') == 'ran':
+    comp_now = (cr.get('metrics') or {}).get('compile_built_now')
+prep_kept = byst.get('prepare', {}).get('run') == 'cached' or byst.get('prepare', {}).get('note', '').startswith('kept')
+if prep_kept and not comp_now:
+    path = 'link-only: the tree kept, nothing compiled'
+elif prep_kept:
+    path = 'incremental: the tree kept, %s units compiled' % comp_now
+else:
+    path = 'prepare ran%s' % ('' if comp_now is None else ', %s units compiled' % comp_now)
+L += ['- path: %s; link %s s, guest %s s' % (path, byst.get('link', {}).get('seconds'), byst.get('guest', {}).get('seconds'))]
 L += ['- iteration: %d s (%.1f min; target 15 min)%s' % (total, total / 60, '; cold: the first build on this machine' if cold == '1' else ''),
       '- stub boot: game milestones %d/%d; last reached: %s; null device: %s; EMU_TIMEOUT %s s' % (
           reached, len(ms), bs.get('milestone') or 'none', {'1': 'FNVNX_STUB_NULLDEV=1', '0': 'off'}.get(nd, '-'), emu_s),
@@ -324,7 +338,7 @@ open(report, 'w').write('\n'.join(L) + '\n')
 json.dump({'schema': 'fnvnx-bootloop/1', 'commit': commit, 'seconds': total, 'cold': cold == '1', 'error': fail or None,
            'steps': {n: int(s) for n, s in st}, 'stages': stages, 'nulldev': nd or None,
            'milestones': [[m.get('name'), bool(m.get('reached'))] for m in ms], 'reached': reached, 'of': len(ms),
-           'last': bs.get('milestone'), 'linkeq': linkeq or None, 'determinism': det or None,
+           'last': bs.get('milestone'), 'linkeq': linkeq or None, 'determinism': det or None, 'path': path,
            'lockstep': dict({'note': ls_note}, refs=lsum)},
           open(report[:-3] + '.json' if report.endswith('.md') else report + '.json', 'w'), indent=1)
 EOF
