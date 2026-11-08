@@ -1021,6 +1021,22 @@ def hint(pair, target, case, div, fn, max_steps):
         c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=True)
         if c:
             h['cause'] = c; return h
+    if k in ('call-target', 'call-count') and pair is not None and h['_runs'] < 40:
+        # (difffuzz-20, stub-flow) a call sequence that depends on a stack word an intercepted callee should have
+        # filled (a count or flag read back into a local or a dead parameter slot, 0x00a3d370): the words the code
+        # never stored to are 0 on both machines (world.STUB_OUT), under two garbage seeds. Both must then run to
+        # the end and agree; a rerun that faults on both machines is no evidence (_benign sees no divergence)
+        world.STUB_OUT = True
+        try:
+            alt = case.copy(); alt.seed = case.seed ^ 0x13572468
+            alt.rets = [case.ret_bytes(i) for i in range(max(8, len(case.rets)))]
+            base = case.copy(); base.rets = list(alt.rets)
+            runs = [pair.run(c, max_steps) for c in (base, alt)]
+        finally:
+            world.STUB_OUT = False
+        h['_runs'] += 2
+        if all(_benign(d_) and not rx_.error and not ra_.error for rx_, ra_, d_ in runs):
+            h['cause'] = 'stub-outparam'; return h
     if k in ('call-target', 'call-count'):
         h['cause'] = 'call-flow'; return h
     if hits:
