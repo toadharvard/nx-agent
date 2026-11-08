@@ -259,3 +259,22 @@ _Bool fnv_standin_00405430(NiTMapS *m, uint32_t key) {
     m->count--;
     return 1;
 }
+
+/* 0x00aa2020 InitHolder (from 0x00aa3050 and 0x00866690): Gamebryo's allocator holder. The exe allocates 4 bytes from
+ * the memory manager (0x00aa3e40 on 0x011f6238), stores the block at 0x011f6080, puts the allocator that 0x009fd0f0
+ * returns (on the options object [0x011f6118]) in it and tail-calls the allocator's exe slot 7 (Initialize, [vptr+0x1c])
+ * with the allocator as this. The native body calls native slot 7: its declaration is a call-only class in the exe's
+ * order that D26 (b) does not shift (a named slot 0), while BSNiAllocator's table is minus-one (the stand-in above),
+ * so it ran exe slot 6 and faulted in _malloc_usable_size_r (D26 stub boot, link 3f7a6c35e923, right after WinMain
+ * starts). The same body with exe slot 7 at native slot 8 (S1-rules: widen D26 (b) to named slot-0 declarations). */
+extern void *fnv_mm_allocate_this(void *mm, uint32_t size) __asm__("_ZN20MemoryManagerStandIn12FUN_00aa3e40Ej");
+extern void *fnv_options_allocator(void *options) __asm__("_ZN29FnvCpu_FUN_009fd0f0_CpuObject12FUN_009fd0f0Ev");
+void fnv_standin_00aa2020(void) __asm__("InitHolder");
+void fnv_standin_00aa2020(void) {
+    void **holder = fnv_mm_allocate_this((void *)(uintptr_t)0x011f6238u, 4);
+    *(void ***)(uintptr_t)0x011f6080u = holder;
+    void *alloc = fnv_options_allocator(*(void **)(uintptr_t)0x011f6118u);
+    *holder = alloc;
+    void **vt = *(void ***)alloc;
+    ((void (*)(void *))vt[7 + 1])(alloc);
+}
