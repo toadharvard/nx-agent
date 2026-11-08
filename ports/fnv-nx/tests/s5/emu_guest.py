@@ -86,6 +86,18 @@ TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "re
 TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
 
+
+def hook_at(uc, addr, cb, user_data=None):
+    """a code hook at one address added while the emulation runs (a return address, a loop head): unicorn only checks
+    hooks when it translates a block, so a block already translated there would never call it. Drop that block so it
+    is translated again with the hook (emu_sanitize's return hooks missed most returns before this)."""
+    h = uc.hook_add(UC_HOOK_CODE, cb, user_data=user_data, begin=addr, end=addr)
+    try:
+        uc.ctl_remove_cache(addr, addr + 4)
+    except (AttributeError, UcError):
+        pass
+    return h
+
 def fault_table_options(path):
     """the TABLE_OPTIONS lines of a --stub-faults table"""
     return {line.split("#", 1)[0].split()[0] for line in open(path)
@@ -1159,7 +1171,7 @@ class Emu(SanitizeMixin):
             fr.append((seq, sp, lr, label))
             state["live"] += 1
             if lr not in state["ret_hooks"]:
-                state["ret_hooks"][lr] = uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
+                state["ret_hooks"][lr] = hook_at(uc, lr, on_ret)
             if writes and state["whook"] is None:
                 state["whook"] = uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
         if len(targets) <= 256:
@@ -1839,7 +1851,7 @@ class Emu(SanitizeMixin):
             pend.setdefault((self.cur.tid if self.cur else 0, lr), []).append((uc.reg_read(UC_ARM64_REG_X0) & 0xFFFFFFFF, m))
             if lr not in ret_hooks:
                 ret_hooks.add(lr)
-                uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
+                hook_at(uc, lr, on_ret)
         for a, m in members.items():
             uc.hook_add(UC_HOOK_CODE, on_entry, user_data=m, begin=a, end=a)
         self.member_vt_stats = st
@@ -1904,14 +1916,14 @@ class Emu(SanitizeMixin):
             self.ret_this[tid] = st
             if ("this", lr) not in self.stub_returns:
                 self.stub_returns.add(("this", lr))
-                uc.hook_add(UC_HOOK_CODE, self.on_this_return, begin=lr, end=lr)
+                hook_at(uc, lr, self.on_this_return)
             return
         st = [g for g in self.stub_guards.get(tid, []) if g[0] >= sp]   # drop guards left by an unwind
         st.append((sp, uc.context_save(), lr, data[0], data[1]))
         self.stub_guards[tid] = st
         if lr not in self.stub_returns:   # the guard ends when its call returns (also after a tail call)
             self.stub_returns.add(lr)
-            uc.hook_add(UC_HOOK_CODE, self.on_stub_return, begin=lr, end=lr)
+            hook_at(uc, lr, self.on_stub_return)
 
     def alloc_near(self, size):
         """an RWX block after the guest image and the --inject objects, in branch range of the guest's code"""
@@ -2361,7 +2373,7 @@ class Emu(SanitizeMixin):
         pend = self.__dict__.setdefault("mile_ret_pending", {})
         if ret not in pend:
             pend[ret] = []
-            self.uc.hook_add(UC_HOOK_CODE, self.on_mile_ret, user_data=ret, begin=ret, end=ret)
+            hook_at(self.uc, ret, self.on_mile_ret, ret)
         pend[ret].append((cond, sp, tid, addr))
 
     def on_mile_ret(self, uc, addr, size, ret):

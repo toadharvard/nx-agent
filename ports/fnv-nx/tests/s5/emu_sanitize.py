@@ -209,6 +209,13 @@ class SanitizeMixin:
             if lr not in ac["rets"]:
                 ac["rets"].add(lr)
                 uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
+                # a hook added after the block at lr was translated (a loop head the code reached before) is not
+                # called until that block is retranslated: the frame would stay on the stack, later calls from the
+                # same site would look like tail calls and every allocation below it "nested" (never recorded)
+                try:
+                    uc.ctl_remove_cache(lr, lr + 4)
+                except (UcError, AttributeError):
+                    pass
 
         def on_ret(uc, addr, size, _):
             fr = ac["frames"].get(tid())
@@ -246,7 +253,8 @@ class SanitizeMixin:
                         # heaps from one memalign block), not a block: containment there is the design
                         if qrec and qrec[2] < (1 << 20) and n < (1 << 20) and \
                                 q < res + max(n, 1) and res < q + max(qrec[2], 1):
-                            finding("overlap", res, fam, label, st, qrec)
+                            finding("overlap", res, fam, label, st,
+                                    qrec[:4] + (None, f"live block {q:#x}, {qrec[2]} bytes; this one {n}",))
                             break
                 if res not in ac["live"]:
                     bisect.insort(starts, res)
