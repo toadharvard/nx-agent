@@ -614,6 +614,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
     stats = collections.Counter(pre_stats)
+    stats['libstdcxx_identifiers'] = len(std_identifiers(os.path.join(out, 'cache')))   # decomp_std's view
     byclass = collections.Counter()
     # the game's operator new/delete for GCC's global forms: the unit's own binding of the MSVC name, else the one
     # most units use
@@ -3155,12 +3156,54 @@ def disambiguate_defs(names, m, itanium):
     return c or names
 
 
+STD_IDS = []   # [set] of every identifier libstdc++'s headers declare (std_identifiers); empty: not known
+
+
+def std_identifiers(cache_dir=None):
+    """The identifiers in GCC's libstdc++ headers (`#include <bits/stdc++.h>` preprocessed with $CXX, default
+    aarch64-linux-gnu-g++), cached in <cache_dir>/libstdcxx_ids.txt. Empty when the compiler is not there: every
+    std:: name then stays `runtime`, as before."""
+    if STD_IDS:
+        return STD_IDS[0]
+    path = os.path.join(cache_dir, 'libstdcxx_ids.txt') if cache_dir else None
+    ids = set()
+    if path and os.path.exists(path):
+        ids = set(open(path).read().split())
+    else:
+        try:
+            r = subprocess.run([os.environ.get('CXX', 'aarch64-linux-gnu-g++'), '-std=gnu++17', '-E', '-x', 'c++', '-'],
+                               input='#include <bits/stdc++.h>\n', capture_output=True, text=True, timeout=300)
+            if r.returncode == 0:
+                ids = set(re.findall(r'\b[A-Za-z_]\w*\b', r.stdout))
+        except (OSError, subprocess.SubprocessError):
+            ids = set()
+        if ids and path:
+            os.makedirs(cache_dir, exist_ok=True)
+            open(path, 'w').write('\n'.join(sorted(ids)) + '\n')
+    STD_IDS.append(ids)
+    return ids
+
+
+def decomp_std(un, isig):
+    """A `std::` name (_ZNSt / _ZSt) whose first component after std:: libstdc++ does not declare: the decomp's own
+    class or function in namespace std (std::StandardLibrarySingletonObject, std::StringBase::_Xlen, std::_Lockit,
+    std::FUN_00ad5770, ...). libstdc++ defines none of them, so they are classified like any other decomp name
+    (units.json, bodies' exe-addr / crt-rule) instead of being left to the runtime (topdown rank 2/3, d1ed15e7)."""
+    if not un.startswith(('_ZNSt', '_ZSt')) or not STD_IDS or not STD_IDS[0]:
+        return False
+    q = getattr(isig, 'qual', None) or []
+    if len(q) < 2 or q[0] != 'std':
+        return False
+    first = re.match(r'[A-Za-z_]\w*', q[1])
+    return bool(first) and first.group(0) not in STD_IDS[0]
+
+
 def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
     """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller).
     ident: {data identifier: image addresses} - the last resort for a data reference (S5): the same identifier in
     another scope (the decomp's per-function namespaces) or with another decorated type (an array declared where
     MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise."""
-    if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)):
+    if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)) and not decomp_std(un, isig):
         return 'runtime', None, None, None, None
     if isig.kind == 'special':
         return ('native' if un in anydef else 'special-unresolved'), None, None, None, isig.special
