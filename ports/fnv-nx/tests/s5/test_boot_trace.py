@@ -80,6 +80,25 @@ class Lockstep(unittest.TestCase):
         self.assertEqual(r["first"]["guest"].name, "D")
         self.assertEqual(len(bt.compare(gg, ww, {}, limit=1)["divergences"]), 1)
 
+    def test_wide_resync_after_control(self):
+        """T1: no common call within --resync, but one further on: a control divergence, then the walk goes on
+        (the later calls are compared: their argument difference is found)"""
+        g = [guest_line(1, 0, "A", "00401000", [0x11f6238, 5])]
+        w = [wine_line(1, 0, "A", "00401000", 0x11f6238, [5])]
+        seq = 2
+        for k in range(5):       # the guest's own five, then the common Z
+            g.append(guest_line(seq, 1, "G%d" % k, "%08x" % (0x00500000 + k), [0x11f6238])); seq += 1
+        g.append(guest_line(seq, 1, "Z", "00409000", [0x22, 1]))
+        for k in range(8):       # the exe's own eight, then Z with another receiver
+            w.append(wine_line(2 + k, 1, "W%d" % k, "%08x" % (0x00600000 + k), 0x11f6238, [1]))
+        w.append(wine_line(10, 1, "Z", "00409000", 0x11f6238, [1]))
+        gg, ww = self.logs(g, w)
+        r = bt.compare(gg, ww, {}, resync=10)   # the level is too short for anchors; Z is 5 + 8 = 13 away
+        kinds = [d["kind"] for d in r["divergences"]]
+        self.assertEqual(kinds[0], "control")
+        self.assertIn("resynced 5 guest and 8 exe calls on", r["divergences"][0]["detail"])
+        self.assertTrue(any(d["guest"].name == "Z" and d["kind"].startswith("arg") for d in r["divergences"]), kinds)
+
     def test_image_argument_divergence(self):
         g = [guest_line(1, 0, "A", "00401000", [0x01082504, 5])]
         w = [wine_line(1, 0, "A", "00401000", 0x010824fc, [5])]
