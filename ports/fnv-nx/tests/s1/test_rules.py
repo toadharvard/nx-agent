@@ -1494,6 +1494,8 @@ prepare.__dict__['_fnvnx_recon'] = None
 _st = Counter()
 _ro2 = s1.r_recon_bodies(_hp, 'void f() {}\n', _st)
 check('REC1 an address the recipe already defines: skipped (REC1-DUP)', _ro2 + str(dict(_st)), ['REC1-DUP'], ['H::H()'])
+check('REC1-DUP is reported as rejected (count -3, the placed address)',
+      repr(prepare.__dict__.get('_fnvnx_recon_rejected')), ["-3, 'functions placed by another unit now: 0x00401010'"])
 # a recon with only `symbols` (names bound to the exe's functions, no body): the bindings persist (R1, Havok agents)
 os.makedirs(os.path.join(_rc, 'recon', 'r2'))
 _json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/h.cpp', 'symbols': {'?Agent1@@YAXXZ': '0x00dcd6a0'}},

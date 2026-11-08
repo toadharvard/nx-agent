@@ -5039,6 +5039,12 @@ def _recon_entries(path):
             r['_skip'] = 'REC1-STALE'
         elif any(fn.get('address') in defined for fn in r.get('functions', [])):
             r['_skip'] = 'REC1-DUP'
+            # reported like a rejection (recon_rejected.tsv, count -3): a recon written before another unit placed one of
+            # its functions loses its body and symbols silently otherwise (R2: the readbuf and parser839 recons of
+            # blk_00ac0000_od_ob1_variant.cpp, 7 + 2 traps back open on link 97deacd38aec)
+            dup = sorted(fn['address'] for fn in r.get('functions', []) if fn.get('address') in defined)
+            prepare.__dict__.setdefault('_fnvnx_recon_rejected', []).append(
+                (os.path.dirname(f), r['unit'], -1, -3, 'functions placed by another unit now: ' + ' '.join(dup)))
         _RECON.append((r, os.path.dirname(f)))
     return _RECON
 
@@ -5174,7 +5180,7 @@ def add_recon_definitions(out_root, stats, files=None):
     rej = prepare.__dict__.get('_fnvnx_recon_rejected') or []
     if rej and os.path.isdir(os.path.join(out_root, 'build')):
         with open(os.path.join(out_root, 'build', 'recon_rejected.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
-            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed, -2: append redefines)\told (start) or reason\n')
+            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed, -2: append redefines, -3: placed elsewhere)\told (start) or reason\n')
             for row in rej:
                 f.write('\t'.join(str(x).replace('\t', ' ').replace('\n', '\\n') for x in row) + '\n')
         stats['REC1-REJECTED-RECONS'] = len(rej)
