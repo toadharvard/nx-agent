@@ -353,9 +353,30 @@ def compare(guest, wine, units, resync=64, context=8, limit=50):
                     if best:
                         break
                 if best is None:
+                    # T1: a wider resync (the nearest common call within WIDE on both sides, by original address),
+                    # so one control divergence does not end the level: the calls after it are compared too
+                    pos = {}
+                    for k in range(j, min(len(w), j + WIDE)):
+                        pos.setdefault(w[k].orig, k)
+                    for di in range(min(len(g) - i, WIDE)):
+                        k = pos.get(g[i + di].orig)
+                        if k is not None and (best is None or di + (k - j) < sum(best)):
+                            best = (di, k - j)
+                        if best is not None and di >= sum(best):
+                            break
                     add("control", cg, cw, f"no common call within {resync}: guest {cg.name} ({cg.orig:#010x}), "
-                                           f"the exe {cw.name} ({cw.orig:#010x})")
-                    return
+                                           f"the exe {cw.name} ({cw.orig:#010x})"
+                        + (f"; resynced {best[0]} guest and {best[1]} exe calls on" if best else
+                           f"; none within {WIDE} either"))
+                    if best is None:
+                        return
+                    di, dj = best
+                    for c in g[i:i + di]:
+                        inlined[("guest-only", c.name)] += 1
+                    for c in w[j:j + dj]:
+                        inlined[("wine-only", c.name)] += 1
+                    i, j = i + di, j + dj
+                    continue
                 di, dj = best
                 g_only = [c for c in g[i:i + di] if not noop(c)]
                 for c in g[i:i + di]:
@@ -408,6 +429,7 @@ def compare(guest, wine, units, resync=64, context=8, limit=50):
                    ("nothing to compare: no guest call of these functions" if not groots else "no divergence"))}
 
 
+WIDE = 2048    # the wider resync after a control divergence (calls per side)
 NO_PARAMS = re.compile(r"^_Z\d+\w+?v$")   # free function, no parameters (Itanium: ...v)
 RUNTIME_CALLER = re.compile(r"^(_Znw|_Zna|_Zdl|_Zda|operator new|operator delete)")
 NOOP_IF_ARG1_NULL = {0x00aa4060, 0x00401030}   # MemoryManager::Deallocate(mm, NULL), FormHeap_Free(NULL)
