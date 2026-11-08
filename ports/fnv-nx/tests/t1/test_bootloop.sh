@@ -36,7 +36,15 @@ import json, sys
 names = ["winmain", "ini-read", "renderer-init", "archive-list", "bsa-opened", "esm-header", "masters-loaded", "main-menu", "first-frame", "first-input"]
 ms = [{"name": n, "reached": i < 3} for i, n in enumerate(names)]
 json.dump({"milestones": ms, "milestone": "renderer-init", "stop": {"reason": "STOPPED: wall-clock"}}, open(sys.argv[1], "w"))' "$2/boot_summary_stub.json"
+# lockstep: the function trace EMU_EXTRA asks for (--trace-fn @list --trace-out <file>): A, then B with another receiver
+to=$(echo "$EMU_EXTRA" | sed -n 's/.*--trace-out \([^ ]*\).*/\1/p')
+echo "trace-out=${to:-none} list=$(echo "$EMU_EXTRA" | sed -n 's/.*--trace-fn @\([^ ]*\).*/\1/p')" >> "$CALLS"
+if [ -n "$to" ]; then
+	printf 'call\t1\t1\t0\tA\t00401000\t0x11f6238\t0x5\t0\t0\t0\t0\t0\t0\t0x3dfff000\t0x5000000\tWinMain [orig 0086a850]\n' > "$to"
+	printf 'call\t2\t1\t0\tB\t00402000\t0x22\t0x5\t0\t0\t0\t0\t0\t0\t0x3dfff000\t0x5000000\tWinMain [orig 0086a850]\n' >> "$to"
+fi
 SH
+cp "$P/tests/s5/boot_trace.py" "$Q/tests/s5/"
 git -C "$S" init -q; git -C "$S" add -A; git -C "$S" -c user.name=t -c user.email=t@t commit -qm one; C1=$(git -C "$S" rev-parse HEAD)
 git init -q --bare "$T/art.git"; git clone -q "$T/art.git" "$T/art" 2>/dev/null
 run() {   # run <name> [VAR=value ...]
@@ -45,7 +53,19 @@ run() {   # run <name> [VAR=value ...]
 	  FARM_GAMEDATA=0 JOBS=2 FNVNX_STUB_NULLDEV=1 "$@"; mkdir -p "$T/ext"
 	  bash "$Q/tools/farm/bootloop_job.sh" "$C1" "$T/$n.md" > "$T/$n.log" 2>&1; echo $? > "$T/$n.rc" )
 }
+run nolock
+ok "no trace/* branch yet: no lockstep, said so" 'grep -q "^- no reference: no trace/\* branch" $T/nolock.md && grep -q "^trace-out=none" $T/calls'
+rm -rf "$T/home"; : > "$T/calls"
+# the boot trace's reference: trace/<link12> with list.txt and the exe's Wine trace (A, C, B)
+( cd "$T/art" && git checkout -q --orphan tr && printf '00401000 A\n00402000 B\n00403000 C\n' > list.txt &&
+  { printf 'call\t1\t204\t0\tA\t00401000\t0x11f6238\t0\t0x5\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'
+    printf 'call\t2\t204\t0\tC\t00403000\t0x11f6238\t0\t0x5\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'
+    printf 'call\t3\t204\t0\tB\t00402000\t0x11f6238\t0\t0x5\t0\t0\t0\t0\t0\t0\t0\t0x31fe00\t0x401013\n'; } > wine.tsv &&
+  xz wine.tsv && git add list.txt wine.tsv.xz && git -c user.name=t -c user.email=t@t commit -qm ref &&
+  git push -q origin HEAD:refs/heads/trace/aaaaaaaaaaaa ) > /dev/null 2>&1
 run first
+ok "lockstep: the boot traces the reference's list, the divergences listed with their chains" 'grep -q "^trace-out=$T/home/bootloop/stub_trace.tsv list=$T/home/bootloop/lockref/[0-9a-f]\{12\}/list.txt" $T/calls && grep -q "^- reference origin/trace/aaaaaaaaaaaa (3 functions)" $T/first.md && grep -q "^- 2 calls of the guest, 3 of the exe, 2 matched in order; 2 divergences listed (missing 1, arg 1); first: arg x0 in B" $T/first.md && grep -q "DIVERGENCES (the first 2)" $T/first.md && grep -q "guest: #2 B" $T/first.md'
+ok "lockstep in the sidecar" 'python3 -c "import json,sys; l=json.load(open(sys.argv[1]))[\"lockstep\"]; assert l[\"divergences\"]==2 and l[\"first\"]==\"B\"" $T/first.json'
 ok "the warm link is checked once against a cold link at the same paths: PASS" 'grep -q "^cold$" $T/calls && grep -q "incremental link check (warm == cold): PASS" $T/first.md && [ -f $T/home/bootloop/linkeq.done ] && [ ! -d $T/home/bootloop/build/link.warm ]'
 ok "first iteration: exit 0, cold, milestones 3/10, null device" '[ "$(cat $T/first.rc)" = 0 ] && grep -q "cold: the first build on this machine" $T/first.md && grep -q "game milestones 3/10; last reached: renderer-init; null device: FNVNX_STUB_NULLDEV=1" $T/first.md'
 ok "make: guest only, with FNVNX_STUB_NULLDEV unset (the farm exported it)" 'grep -q "^guest FNVNX_STUB_NULLDEV=unset" $T/calls && ! grep -q "census\|package" $T/calls'

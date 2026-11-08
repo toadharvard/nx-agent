@@ -36,6 +36,7 @@ REPORT=$(cd "$(dirname "$REPORT")" && pwd)/$(basename "$REPORT")
 # shellcheck source=lib_job.sh
 . "$HERE/lib_job.sh"
 T0=$(date +%s); ST=$T0; STEPS=()
+STUB_TRACE=$FARM_HOME/bootloop/stub_trace.tsv; rm -f "$STUB_TRACE"   # the stub boot's function trace (lockstep)
 step() { local n; n=$(date +%s); STEPS+=("$1	$((n - ST))"); ST=$n; }   # step <name>: seconds since the last step
 F=$FARM_HOME/bootloop; B=$F/build; mkdir -p "$F"
 FAIL=""
@@ -117,16 +118,53 @@ print(int(sum(v for k, v in m.items() if k.startswith("link_objcache_") and k.en
 	step "linkeq (once)"
 fi
 
+# Lockstep at function granularity (owner: the seams as a list): the stub boot traces the function entries of the
+# boot trace's list (tools/farm/boot_trace_job.sh, branch trace/<link12> of the artifacts repository: list.txt and
+# the exe's Wine trace wine.tsv.xz of that list; the newest one), and tests/s5/boot_trace.py compare lists the first
+# BOOTLOOP_LOCKSTEP_N (50) divergences with both caller chains. The reference is fetched once per trace commit
+# ($F/lockref/<sha12>). No trace branch yet: no lockstep, said so. BOOTLOOP_LOCKSTEP=0: off.
+LS_EXTRA=""; LS_NOTE="off"; RF=""
+if [ -z "$FAIL" ] && [ "${BOOTLOOP_LOCKSTEP:-1}" = 1 ]; then
+	LS_NOTE="no reference: no trace/* branch in the artifacts repository yet (boot_trace_job.sh publishes them)"
+	if git -C "$ARTIFACTS" fetch -q --depth 1 origin "+refs/heads/trace/*:refs/remotes/origin/trace/*" 2>/dev/null; then
+		ref=$(git -C "$ARTIFACTS" for-each-ref --sort=-committerdate --format='%(refname:short) %(objectname)' \
+			'refs/remotes/origin/trace/' | head -1)
+		if [ -n "$ref" ]; then
+			RF=$F/lockref/${ref#* }; RF=${RF:0:$(( ${#F} + 21 ))}
+			if [ ! -f "$RF/.done" ]; then
+				rm -rf "$F/lockref"; mkdir -p "$RF"
+				git -C "$ARTIFACTS" archive "${ref#* }" list.txt wine.tsv.xz 2>/dev/null | tar -x -C "$RF" 2>/dev/null \
+					&& xz -df "$RF/wine.tsv.xz" && [ -s "$RF/list.txt" ] && [ -s "$RF/wine.tsv" ] && touch "$RF/.done"
+			fi
+			if [ -f "$RF/.done" ]; then
+				LS_EXTRA="--trace-fn @$RF/list.txt --trace-out $STUB_TRACE"
+				LS_NOTE="reference ${ref%% *} ($(grep -vc '^#' "$RF/list.txt") functions)"
+			else LS_NOTE="reference ${ref%% *} could not be read"; RF=""; fi
+		fi
+	fi
+fi
 STUB=$F/stub; rm -rf "$STUB"
 if [ -z "$FAIL" ]; then
 	NULLDEV=${BOOTLOOP_NULLDEV:-1}; mkdir -p "$STUB"; echo "$NULLDEV" > "$STUB/nulldev"
 	FNVNX_STUB_NULLDEV=$NULLDEV FARM_LINK_DIR=$B/link FARM_GUEST_DIR=$B/guest FARM_BOOTS=stub \
-		EMU_EXTRA="${BOOTLOOP_EMU_EXTRA:-}" FARM_UNITS="$B/prepare/tree/build/units.json" \
+		EMU_EXTRA="${BOOTLOOP_EMU_EXTRA:-}${LS_EXTRA:+ $LS_EXTRA}" FARM_UNITS="$B/prepare/tree/build/units.json" \
 		EMU_TIMEOUT="${BOOTLOOP_EMU_TIMEOUT:-300}" \
 		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" ${GAME_EXE:+"$GAME_EXE"} > "$F/stub_boot.log" 2>&1 \
 		|| log "farm_boot.sh (stub boot) exited $?"
 	[ -f "$STUB/boot_summary_stub.json" ] || FAIL="the stub boot wrote no summary (see $F/stub_boot.log)"
 	step "stub boot"
+fi
+rm -f "$F/lockstep.txt" "$F/lockstep.json"
+if [ -n "$LS_EXTRA" ] && [ -z "$FAIL" ]; then
+	if [ -s "$STUB_TRACE" ]; then
+		U=$B/prepare/tree/build/units.json; [ -f "$U" ] || U=""
+		python3 -I "$P/tests/s5/boot_trace.py" compare "$STUB_TRACE" "$RF/wine.tsv" ${U:+--units "$U"} \
+			--max-div "${BOOTLOOP_LOCKSTEP_N:-50}" --json "$F/lockstep.json" > "$F/lockstep.txt" 2>&1 \
+			|| LS_NOTE="$LS_NOTE; boot_trace.py compare exited $? (see the block)"
+	else
+		LS_NOTE="$LS_NOTE; the stub boot wrote no function trace"
+	fi
+	step lockstep
 fi
 # the linkcache back to the artifacts repository when the link compiled something new (LINKCACHE_PUBLISH=0: not)
 if [ -z "$FAIL" ] && [ "${LINKCACHE:-1}" = 1 ] && [ "${LINKCACHE_PUBLISH:-1}" = 1 ] && [ -z "${FARM_WIP_BRANCH:-}" ]; then
@@ -136,9 +174,9 @@ fi
 
 printf '%s\n' "${STEPS[@]}" > "$F/steps.tsv"
 python3 -I - "$B" "$STUB" "$F/steps.tsv" "$REPORT" "$COMMIT" "$(( $(date +%s) - T0 ))" "${COLD:-?}" "$FAIL" \
-	"${BOOTLOOP_EMU_TIMEOUT:-300}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" "$NOTE_LINKEQ" <<'EOF'
+	"${BOOTLOOP_EMU_TIMEOUT:-300}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" "$NOTE_LINKEQ" "$LS_NOTE" <<'EOF'
 import json, os, sys
-B, stub, steps, report, commit, total, cold, fail, emu_s, wip, tb, linkeq = sys.argv[1:13]
+B, stub, steps, report, commit, total, cold, fail, emu_s, wip, tb, linkeq, ls_note = sys.argv[1:14]
 tb = int(tb)
 total = int(total)
 rd = lambda p: json.load(open(p)) if os.path.isfile(p) else None
@@ -182,11 +220,27 @@ L += ['- iteration: %d s (%.1f min; target 15 min)%s' % (total, total / 60, '; c
 if ms:
     L += ['', '- game milestones: %s; last reached: %s' % (
         ', '.join('%s %s' % (m.get('name'), 'yes' if m.get('reached') else 'no') for m in ms), bs.get('milestone') or 'none')]
+F = os.path.dirname(B)
+lsj = rd(os.path.join(F, 'lockstep.json')) or {}
+lst = os.path.join(F, 'lockstep.txt')
+L += ['', '## Lockstep: the boot\'s function entries against the exe under Wine', '', '- %s' % ls_note]
+if lsj:
+    kinds = {}
+    for d in lsj.get('divergences') or []:
+        kinds[d['kind'].split()[0]] = kinds.get(d['kind'].split()[0], 0) + 1
+    L += ['- %s calls of the guest, %s of the exe, %s matched in order; %d divergences listed (%s); first: %s' % (
+        lsj.get('guest_calls'), lsj.get('wine_calls'), lsj.get('matched'), len(lsj.get('divergences') or []),
+        ', '.join('%s %d' % kv for kv in sorted(kinds.items(), key=lambda kv: -kv[1])) or 'none',
+        ('%s in %s' % (lsj['first']['kind'], lsj['first']['function'])) if lsj.get('first') else 'none')]
+if os.path.isfile(lst):
+    L += ['', '```'] + [l.rstrip('\n')[:400] for l in open(lst, errors='replace')][:200] + ['```']
 open(report, 'w').write('\n'.join(L) + '\n')
 json.dump({'schema': 'fnvnx-bootloop/1', 'commit': commit, 'seconds': total, 'cold': cold == '1', 'error': fail or None,
            'steps': {n: int(s) for n, s in st}, 'stages': stages, 'nulldev': nd or None,
            'milestones': [[m.get('name'), bool(m.get('reached'))] for m in ms], 'reached': reached, 'of': len(ms),
-           'last': bs.get('milestone'), 'linkeq': linkeq or None},
+           'last': bs.get('milestone'), 'linkeq': linkeq or None,
+           'lockstep': {'note': ls_note, 'matched': lsj.get('matched'), 'divergences': len(lsj.get('divergences') or []),
+                        'first': (lsj.get('first') or {}).get('function')} if lsj else {'note': ls_note}},
           open(report[:-3] + '.json' if report.endswith('.md') else report + '.json', 'w'), indent=1)
 EOF
 log "bootloop $C12: $(sed -n 3p "$REPORT")"
