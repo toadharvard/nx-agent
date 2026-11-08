@@ -22,7 +22,9 @@ $(firstword $(MAKECMDGOALS)):
 	@for s in $(if $(filter guest,$(GOALS)),fetch toolchain prepare compile link guest,toolchain); do mkdir -p $(BUILD_DIR)/$$s; \
 	  st=ok; [ "$$s" = "$${FAKE_FAIL:-}" ] && st=fail; \
 	  printf '{"status": "%s", "seconds": 3.5, "metrics": {"compile_built_now": 2, "link_objcache_bodies_hits": 9, "link_objcache_bodies_misses": 1, "prepare_reused": 1}, "artifacts": {"prefix": "/x"}}\n' $$st > $(BUILD_DIR)/$$s/stage.json; done
-	@[ -z "$(filter guest,$(GOALS))" ] || { touch $(BUILD_DIR)/compile/objects.tsv; mkdir -p $(BUILD_DIR)/guest; echo nso > $(BUILD_DIR)/guest/guest.nso; }
+	@[ -z "$(filter guest,$(GOALS))" ] || { touch $(BUILD_DIR)/compile/objects.tsv; mkdir -p $(BUILD_DIR)/guest $(BUILD_DIR)/link/out; \
+	  v=nso; case "$$FNVNX_LINK_OBJCACHE" in *linkeq-cache) echo cold >> $(CALLS); [ -n "$${FAKE_DIFF:-}" ] && v=other;; esac; \
+	  echo $$v > $(BUILD_DIR)/guest/guest.nso; echo map > $(BUILD_DIR)/link/out/addrmap.tsv; }
 $(wordlist 2,9,$(MAKECMDGOALS)):
 	@:
 MK
@@ -44,13 +46,14 @@ run() {   # run <name> [VAR=value ...]
 	  bash "$Q/tools/farm/bootloop_job.sh" "$C1" "$T/$n.md" > "$T/$n.log" 2>&1; echo $? > "$T/$n.rc" )
 }
 run first
+ok "the warm link is checked once against a cold link at the same paths: PASS" 'grep -q "^cold$" $T/calls && grep -q "incremental link check (warm == cold): PASS" $T/first.md && [ -f $T/home/bootloop/linkeq.done ] && [ ! -d $T/home/bootloop/build/link.warm ]'
 ok "first iteration: exit 0, cold, milestones 3/10, null device" '[ "$(cat $T/first.rc)" = 0 ] && grep -q "cold: the first build on this machine" $T/first.md && grep -q "game milestones 3/10; last reached: renderer-init; null device: FNVNX_STUB_NULLDEV=1" $T/first.md'
 ok "make: guest only, with FNVNX_STUB_NULLDEV unset (the farm exported it)" 'grep -q "^guest FNVNX_STUB_NULLDEV=unset" $T/calls && ! grep -q "census\|package" $T/calls'
 ok "the stub boot on the build's guest, nulldev=1, 480 s" 'grep -q "^boot stub nulldev=1 guest=$T/home/bootloop/build/guest timeout=480" $T/calls'
 ok "steps and stages with seconds; the stages ran" 'grep -q "^| build | [0-9]* |" $T/first.md && grep -q "^| stub boot | [0-9]* |" $T/first.md && grep -q "^| link | ok | ran | 3.5 | compile cache 9 hits, 1 misses |" $T/first.md && grep -q "^| compile | ok | ran | 3.5 | 2 units compiled now |" $T/first.md'
 ok "sidecar fnvnx-bootloop/1" 'python3 -c "import json,sys; j=json.load(open(sys.argv[1])); assert j[\"schema\"]==\"fnvnx-bootloop/1\" and j[\"reached\"]==3 and j[\"of\"]==10 and j[\"cold\"] and \"stub boot\" in j[\"steps\"] and j[\"error\"] is None" $T/first.json'
 run second
-ok "second iteration: the same build directory, not cold" '[ "$(cat $T/second.rc)" = 0 ] && ! grep -q "cold:" $T/second.md && [ "$(grep -c "^guest " $T/calls)" = 2 ]'
+ok "second iteration: the same build directory, not cold, no second cold link" '[ "$(cat $T/second.rc)" = 0 ] && ! grep -q "cold:" $T/second.md && [ "$(grep -c "^cold$" $T/calls)" = 1 ] && grep -q "passed on this machine before" $T/second.md'
 run bad FAKE_FAIL=link
 ok "a failed stage: exit 1, FAIL names it, no boot" '[ "$(cat $T/bad.rc)" = 1 ] && sed -n 3p $T/bad.md | grep -q "^- FAIL: the link stage did not end ok/warn" && [ "$(grep -c "^boot " $T/calls)" = 2 ] && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"error\"]" $T/bad.json'
 python3 -I - "$P" "$T/first.md" "$T/first.json" <<'PY' > "$T/py.out" 2>&1
@@ -65,4 +68,7 @@ assert ms['bootloop: stub boot (nulldev) milestones reached'].value == 3
 print('py ok')
 PY
 ok "the ratchet measures the bootloop's milestones (nulldev metrics)" 'grep -q "^py ok" $T/py.out'
+mv "$T/home/bootloop/linkeq.done" "$T/linkeq.done.first"; n0=$(grep -c "^boot " $T/calls)
+run diff FAKE_DIFF=1
+ok "warm != cold: exit 1, FAIL, warm outputs kept, no boot" '[ "$(cat $T/diff.rc)" = 1 ] && grep -q "^- FAIL: the incremental link differs from the cold link" $T/diff.md && [ -d $T/home/bootloop/build/link.warm ] && [ ! -f $T/home/bootloop/linkeq.done ] && [ "$(grep -c "^boot " $T/calls)" = "$n0" ]'
 [ $fails = 0 ] && echo "test_bootloop: all ok" || { tail -5 "$T"/*.log "$T/py.out"; cat "$T/calls"; echo "test_bootloop: $fails failed"; exit 1; }

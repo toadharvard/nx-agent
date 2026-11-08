@@ -81,6 +81,41 @@ if [ -z "$FAIL" ]; then
 	done
 fi
 
+# The incremental link's equivalence check (owner order: the warm link must be byte-identical to a cold one; leq1's
+# job, here so it runs on the machine whose cache is in use): once per machine (bootloop/linkeq.done), on the first
+# iteration whose link took compiles from the cache, the link and guest are built again with an empty cache at the
+# same paths, and guest.nso and addrmap.tsv must have the same sha256. A FAIL keeps the warm outputs as
+# link.warm / guest.warm, boots the cold ones (the reference), and fails the job; every later iteration checks again
+# until one passes. BOOTLOOP_LINKEQ=0: never. About a cold link (once).
+NOTE_LINKEQ=""
+if [ -z "$FAIL" ] && [ "${BOOTLOOP_LINKEQ:-1}" = 1 ] && [ ! -f "$F/linkeq.done" ]; then
+	hits=$(python3 -I -c 'import json, sys
+m = json.load(open(sys.argv[1])).get("metrics", {})
+print(int(sum(v for k, v in m.items() if k.startswith("link_objcache_") and k.endswith("_hits"))))' "$B/link/stage.json" 2>/dev/null || echo 0)
+	if [ "${hits:-0}" -gt 0 ]; then
+		warm=$(cd "$B" && sha256sum guest/guest.nso link/out/addrmap.tsv)
+		rm -rf "$B/link.warm" "$B/guest.warm"; mv "$B/link" "$B/link.warm"; mv "$B/guest" "$B/guest.warm"
+		EQC=$F/linkeq-cache; rm -rf "$EQC"
+		# shellcheck disable=SC2086
+		FNVNX_LINK_OBJCACHE=$EQC make -C "$P" guest BUILD_DIR="$B" EXT="$EXT" JOBS="$JOBS" TESTS=none "${ARGS[@]}" \
+			${BOOTLOOP_MAKE_ARGS:-} > "$F/linkeq.log" 2>&1 || true
+		rm -rf "$EQC"
+		cold=$(cd "$B" && sha256sum guest/guest.nso link/out/addrmap.tsv 2>/dev/null || echo "no cold outputs")
+		{ echo "commit $COMMIT; warm link: $hits compiles from the cache"; echo "warm:"; echo "$warm"; echo "cold:"; echo "$cold"; } > "$F/linkeq.txt"
+		if [ "$warm" = "$cold" ]; then
+			NOTE_LINKEQ="PASS: warm == cold (guest.nso, addrmap.tsv sha256; $hits cached compiles)"
+			rm -rf "$B/link.warm" "$B/guest.warm"; cp "$F/linkeq.txt" "$F/linkeq.done"
+		else
+			NOTE_LINKEQ="FAIL: warm != cold (bootloop/linkeq.txt; link.warm and guest.warm kept)"
+			FAIL="the incremental link differs from the cold link ($NOTE_LINKEQ)"
+		fi
+		echo "$NOTE_LINKEQ" >> "$F/linkeq.txt"; log "LINKEQ: $NOTE_LINKEQ"
+	else
+		NOTE_LINKEQ="not yet: this link took nothing from the cache (cold); the next iteration checks"
+	fi
+	step "linkeq (once)"
+fi
+
 STUB=$F/stub; rm -rf "$STUB"
 if [ -z "$FAIL" ]; then
 	NULLDEV=${BOOTLOOP_NULLDEV:-1}; mkdir -p "$STUB"; echo "$NULLDEV" > "$STUB/nulldev"
@@ -100,9 +135,9 @@ fi
 
 printf '%s\n' "${STEPS[@]}" > "$F/steps.tsv"
 python3 -I - "$B" "$STUB" "$F/steps.tsv" "$REPORT" "$COMMIT" "$(( $(date +%s) - T0 ))" "${COLD:-?}" "$FAIL" \
-	"${BOOTLOOP_EMU_TIMEOUT:-480}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" <<'EOF'
+	"${BOOTLOOP_EMU_TIMEOUT:-480}" "${FARM_WIP_BRANCH:-}" "${TB:-0}" "$NOTE_LINKEQ" <<'EOF'
 import json, os, sys
-B, stub, steps, report, commit, total, cold, fail, emu_s, wip, tb = sys.argv[1:12]
+B, stub, steps, report, commit, total, cold, fail, emu_s, wip, tb, linkeq = sys.argv[1:13]
 tb = int(tb)
 total = int(total)
 rd = lambda p: json.load(open(p)) if os.path.isfile(p) else None
@@ -135,6 +170,9 @@ if fail:
 L += ['- iteration: %d s (%.1f min; target 15 min)%s' % (total, total / 60, '; cold: the first build on this machine' if cold == '1' else ''),
       '- stub boot: game milestones %d/%d; last reached: %s; null device: %s; EMU_TIMEOUT %s s' % (
           reached, len(ms), bs.get('milestone') or 'none', {'1': 'FNVNX_STUB_NULLDEV=1', '0': 'off'}.get(nd, '-'), emu_s),
+      '- incremental link check (warm == cold): %s' % (linkeq or 'passed on this machine before (bootloop/linkeq.done)'
+                                                      if os.path.isfile(os.path.join(os.path.dirname(B), 'linkeq.done')) or linkeq
+                                                      else 'off'),
       '- stop: %s' % ' / '.join([str(stop.get('reason') or '-')] + [str(x) for x in (stop.get('messages') or [])[:2]])[:300],
       '', '| step | seconds |', '|---|---:|'] + ['| %s | %s |' % (n, s) for n, s in st] + [
       '', '| stage | status | run | seconds | note |', '|---|---|---|---:|---|'] + [
@@ -147,7 +185,7 @@ open(report, 'w').write('\n'.join(L) + '\n')
 json.dump({'schema': 'fnvnx-bootloop/1', 'commit': commit, 'seconds': total, 'cold': cold == '1', 'error': fail or None,
            'steps': {n: int(s) for n, s in st}, 'stages': stages, 'nulldev': nd or None,
            'milestones': [[m.get('name'), bool(m.get('reached'))] for m in ms], 'reached': reached, 'of': len(ms),
-           'last': bs.get('milestone')},
+           'last': bs.get('milestone'), 'linkeq': linkeq or None},
           open(report[:-3] + '.json' if report.endswith('.md') else report + '.json', 'w'), indent=1)
 EOF
 log "bootloop $C12: $(sed -n 3p "$REPORT")"
