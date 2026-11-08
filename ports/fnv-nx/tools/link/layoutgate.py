@@ -31,6 +31,7 @@ import collections
 import concurrent.futures
 import os
 import re
+import struct
 import subprocess
 import sys
 
@@ -157,6 +158,20 @@ def msvc_layouts(tree, unit):
     return parse_dump(r.stdout)
 
 
+class ProbeFailed(Exception):
+    pass
+
+
+def _words(obj):
+    """layout.symbol_words of the probe object, None when it is empty or not a readable ELF object"""
+    try:
+        if os.path.getsize(obj) < 52:
+            return None
+        return layout.symbol_words(obj, '__fnvnx_lg_')
+    except (OSError, ValueError, IndexError, struct.error):
+        return None
+
+
 def probe(tree, workdir, unit, recs):
     """{record: (size, align, {field: off}, {base: off})} from the native compile of a probe of the unit."""
     base = unit.replace('/', '_')
@@ -190,7 +205,17 @@ def probe(tree, workdir, unit, recs):
         fl = [f if f != '-O2' else '-O0' for f in layout.flags(tree)] + ['-fno-access-control', '-Wno-invalid-offsetof']
         rr = objcache.Result(*objcache.compile(layout.CXX, fl, src, obj, cwd=tree))
         if rr.returncode == 0:
-            words = layout.symbol_words(obj, '__fnvnx_lg_')
+            words = _words(obj)
+            if words is None:
+                # an empty / truncated object with exit 0 (af034f14 on sw30: a 0-byte object, struct.error): once
+                # more without the object cache, then the unit is probe-failed
+                d = subprocess.run([layout.CXX, *fl, src, '-o', obj], cwd=tree, capture_output=True, text=True,
+                                   errors='replace')
+                words = _words(obj) if d.returncode == 0 else None
+                if words is None:
+                    size = os.path.getsize(obj) if os.path.exists(obj) else -1
+                    raise ProbeFailed('object %d bytes after a direct compile (exit %d): %s'
+                                      % (size, d.returncode, (d.stderr or rr.stderr).strip()[-300:].replace('\n', ' | ')))
             for i, (r, fs, bs) in enumerate(layout_of):
                 w = words.get('__fnvnx_lg_%d' % i)
                 if not w or len(w) < 3 + len(fs) + len(bs):
@@ -294,6 +319,14 @@ def compare(unit, rec, nat, boot):
 
 def run_unit(tree, workdir, unit, boot):
     try:
+        return _run_unit(tree, workdir, unit, boot)
+    except Exception as e:  # noqa: BLE001 - one unit never stops the run: it is reported as probe-failed
+        return unit, [(unit, '-', 'probe-failed', '-', '%s: %s' % (type(e).__name__, str(e)[:400].replace('\t', ' ')),
+                       'probe-failed', boot)], 0, 0, []
+
+
+def _run_unit(tree, workdir, unit, boot):
+    try:
         recs = msvc_layouts(tree, unit)
     except subprocess.TimeoutExpired:
         return unit, [], 0, 0, []
@@ -364,17 +397,20 @@ def main():
     ebo2 -= {(r[0], r[1]) for r in allrows if r[2] not in ('size', 'align') and not r[2].startswith('member')}
     recs = collections.defaultdict(set)
     for r in allrows:
-        if not r[2].startswith('member') and (r[0], r[1]) not in ebo2: recs[(r[1], r[6])].add(r[2])
+        if not r[2].startswith(('member', 'probe-failed')) and (r[0], r[1]) not in ebo2: recs[(r[1], r[6])].add(r[2])
+    failed = sorted({r[0] for r in allrows if r[2] == 'probe-failed'})
     rb = {k[0] for k in recs if k[1] == 1}
     rr = {k[0] for k in recs if k[1] == 0} - rb
     fb = sum(1 for r in allrows if r[6] == 1 and r[2].startswith('field'))
     causes = collections.Counter(r[5] for r in allrows if r[2] == 'size' or r[2].startswith('field'))
     mrows = [r for r in allrows if r[2].startswith('member')]
     summary = ('layoutgate: %d units, records msvc %d / probed %d; differing records %d (boot %d, rest %d), '
-               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); ebo2 bases %d; causes %s' %
+               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); ebo2 bases %d; causes %s%s' %
                (len(units), measured[0], measured[1], len(rb | rr), len(rb), len(rr),
                 sum(1 for r in allrows if r[2].startswith('field')), fb, len(mrows), sum(1 for r in mrows if r[6] == 1),
-                len({k[1] for k in ebo2}), dict(causes.most_common())))
+                len({k[1] for k in ebo2}), dict(causes.most_common()),
+                '; probe-failed %d (%s)' % (len(failed), ', '.join(failed[:10]) + (' ...' if len(failed) > 10 else ''))
+                if failed else ''))
     print(summary, file=sys.stderr)
     open(a.out + '.summary', 'w').write(summary + '\n')
 
