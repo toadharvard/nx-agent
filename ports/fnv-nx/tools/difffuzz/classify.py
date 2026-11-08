@@ -1005,8 +1005,10 @@ def hint(pair, target, case, div, fn, max_steps):
         c = r5design.dead_init_probe(pair, case, div, max_steps, h)
         if c:
             h['cause'] = c; return h
-    if k == 'call-count' and pair is not None:
-        # (uncls2) a call that only runs on garbage: the same uniform-fill probe (0x00a82d90)
+    if k in ('call-count', 'call-target') and pair is not None:
+        # (uncls2) a call that only runs on garbage: the same uniform-fill probe (0x00a82d90). (r5-calltarget) A
+        # call-target too: the call a branch on an unwritten local picks (0x006e1670: `len`, the out-parameter of a
+        # stubbed callee, against `limit`) moves with the fill, and both machines agree on an all-zero one
         c = _uncls2_probes(pair, case, div, fn, mn, max_steps, h, only_uniform=True)
         if c:
             h['cause'] = c; return h
