@@ -1857,5 +1857,20 @@ check('determinism: all rules give the same output under PYTHONHASHSEED 1, 2, 3'
       [], ['error', ' | '])
 _shutil.rmtree(_dd, ignore_errors=True)
 
+# ---- PHSLOT1
+_ph = ('struct Shell\n{\n    virtual void v000()\n    {}\n    virtual void v00c()\n    {}\n'
+       '    virtual void v058(Shell*);\n    virtual void Named()\n    {}\n    virtual int v003()\n    {}\n'
+       '    virtual void v004()\n    { g(); }\n};\n')
+_ph_out = run(s1.r_placeholder_slots, _ph)
+check('PHSLOT1 empty placeholder bodies become declarations',
+      _ph_out, ['virtual void v000();', 'virtual void v00c();', 'virtual void v058(Shell*);'],
+      ['virtual void v000()\n', 'virtual void v00c()\n'])
+check('PHSLOT1 a named virtual, a non-void placeholder and a placeholder with a body stay',
+      _ph_out, ['virtual void Named()\n    {}', 'virtual int v003()\n    {}', 'virtual void v004()\n    { g(); }'])
+_st = Counter()
+s1.r_placeholder_slots('/nonexistent/src/x.cpp', _ph, _st)
+check('PHSLOT1 stats', str(_st['PHSLOT1']), ['2'])
+check('PHSLOT1 idempotent', run(s1.r_placeholder_slots, _ph_out), [_ph_out])
+
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

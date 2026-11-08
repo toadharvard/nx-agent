@@ -5708,9 +5708,29 @@ def r_vtable_dtor_slot(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
+# ---------------------------------------------------------------------------------------------------------- PHSLOT1
+#
+# The decomp's reconstructed classes (a shell standing for a class of the exe) list the exe vftable's slots as
+# placeholders `virtual void vNNN()`. Most only declare them; some write `{}` after them, an empty body that is no
+# function of the game: NiAVObject (magicprojectile.cpp) defines v000..v057 that way, so its native vtable names
+# `_ZN10NiAVObject4v003Ev`, a `ret`, where the exe's slot 3 is 0x00acbb70 (`xor eax, eax; ret`, a native function
+# of the address map) and virtual callers get whatever x0 held (EQ difffuzz records 0x00477560, 0x009abe40). A
+# declared-only slot is a trap stub, which exe_slot_fill (fnvlink.py) binds to the exe slot's function; an empty
+# stand-in is not a trap, so the fill never looked at it. The body is dropped: `virtual void vNNN();`. Only the
+# placeholder names (v + three hex digits) with an empty void body; a named virtual with `{}` is the decomp's own
+# knowledge and stays.
+PHSLOT1_RX = re.compile(r'^([ \t]*virtual[ \t]+void[ \t]+v[0-9A-Fa-f]{3}\(\))[ \t]*\r?\n[ \t]*\{\}[ \t]*$', re.M)
+
+def r_placeholder_slots(path, text, stats):
+    """PHSLOT1: `virtual void vNNN()` followed by an empty body -> declared only (see above)."""
+    if 'virtual void v' not in text: return text
+    text, n = PHSLOT1_RX.subn(r'\1;', text)
+    if n: stats['PHSLOT1'] += n
+    return text
+
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_vtable_dtor_slot]
+              r_implicit_bound_destructors, r_vtable_dtor_slot, r_placeholder_slots]
 RULES += REFS_RULES
