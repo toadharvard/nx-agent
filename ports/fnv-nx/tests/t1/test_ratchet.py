@@ -146,6 +146,30 @@ def main():
            and rg['traps'] == 0 and '| regressions |' in zm and '- regressions (the ratchet ledger' in zm)
         ratchet.main(['accept', '--ledger', led, 'scenario D25 #3 (5 scenarios)'])
         ok('accept: the metric dropped', 'scenario D25 #3 (5 scenarios)' not in L())
+        # S5's timer slices (2d1afaeb..6da559aa) booted nondeterministically: a head whose emu_guest.py has them
+        # gets its boot metrics listed as not compared (neither advance nor regress); the others are compared
+        em = os.path.join(repo, 'ports', 'fnv-nx', 'tests', 's5')
+        os.makedirs(em)
+        open(os.path.join(em, 'emu_guest.py'), 'w').write('ap.add_argument("--slice-ms")\n')
+        g('add', '-A'); g('commit', '-qm', 'timer slices')
+        U = g('rev-parse', 'HEAD')
+        before = L()['full: boot milestones']
+        ru = check('full', U, full_md(U, traps=(80, 10), undef=300, objs=2905, skipped=99,
+                                      milestones={'winmain': 'no', 'ini-read': 'no'}))
+        ok('timer-sliced emulator: the boot metrics not compared, the others are', 'unreliable: the emulated boots' in ru
+           and not ru.startswith('- REGRESSION') and L()['full: boot milestones'] == before and
+           L()['full: boot initializers skipped']['best'] == 30 and L()['full: trap stubs']['head'] == H[4][:12])
+        bl = check('bootloop', U, '# bootloop\n', side={'schema': 'fnvnx-bootloop/1', 'nulldev': '1', 'reached': 9,
+                                                       'milestones': [['winmain', True]] * 1, 'error': None})
+        ok('timer-sliced emulator: a bootloop report changes nothing', 'unreliable' in bl and
+           'bootloop: stub boot (nulldev) milestones reached' not in L())
+        open(os.path.join(em, 'emu_guest.py'), 'w').write('ap.add_argument("--slice-ms")\nap.add_argument("--hc-slice")\n')
+        g('add', '-A'); g('commit', '-qm', 'host-call preemption')
+        V = g('rev-parse', 'HEAD')
+        rv = check('full', V, full_md(V, traps=(80, 10), undef=300, objs=2905, skipped=99,
+                                      milestones={'winmain': 'yes', 'ini-read': 'yes'}))
+        ok('host-call preemption (620572bc): boot metrics compared again', 'unreliable' not in rv and
+           '- full: boot initializers skipped: 99 now, 30 at' in rv)
         nj = check('quick', H[5], '# quick\n')
         ok('a job without metrics: a REGRESSIONS section that says so', '- none: this report has no ratchet metrics' in nj)
     finally:

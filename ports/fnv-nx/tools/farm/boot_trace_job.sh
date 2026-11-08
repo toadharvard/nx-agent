@@ -27,6 +27,10 @@
 # prefix setup (2 min warm); C and D a few minutes. Local test on a short run: TRACE_DISC_MAX=50000
 # TRACE_WINE_S=60 FARM_GAME=<exe-only install> (docs: tools/lockstep/README.md).
 set -uo pipefail
+# the boots schedule as emu_guest.py does by default (S5 620572bc: threads switch at host calls, deterministic);
+# no instruction count or timer slicing of ours, not even one the farm's environment carries (the timer slices
+# of 2d1afaeb..6da559aa were nondeterministic). EMU_BUDGET: the raw boot's, tools/pipeline/build.py emu_slicing.
+unset BUDGET SLICE_MS EMU_BUDGET EMU_SLICE_MS
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 P=$(cd "$(dirname "$0")/../.." && pwd)
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}

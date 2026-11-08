@@ -28,6 +28,10 @@
 # unicorn; for TESTS=all also qemu-user, cmake, meson, ninja-build. FARM_APT=1 installs them (root).
 set -euo pipefail
 unset FNVNX_STUB_NULLDEV   # the stub boot (4b) sets it for itself only; never the raw boot or the product (S5 a3b368ed)
+# the boots schedule as emu_guest.py does by default (S5 620572bc: threads switch at host calls, deterministic);
+# no instruction count or timer slicing of ours, not even one the farm's environment carries (the timer slices
+# of 2d1afaeb..6da559aa were nondeterministic). EMU_BUDGET: the raw boot's, tools/pipeline/build.py emu_slicing.
+unset BUDGET SLICE_MS EMU_BUDGET EMU_SLICE_MS
 COMMIT=${1:?commit}; REPORT=${2:?report.md}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../../.." && pwd)
