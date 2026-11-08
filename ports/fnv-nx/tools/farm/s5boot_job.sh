@@ -12,6 +12,8 @@
 #   S5BOOT_TRACE    function names to trace, `,`-separated (emu_guest.py --trace-fn; calls and returns)
 #   S5BOOT_TRACE_MAX  at most this many trace events (default 2000000)
 #   S5BOOT_EXTRA    more emu_guest.py arguments
+#   FNVNX_STUB_NULLDEV  1: CreateDevice succeeds headless without a GPU backend (farm_boot.sh; a guest built with
+#                   native_device.cpp's fnvnx_stub_nulldev)
 #   EMU_TIMEOUT     seconds (default 3600); BUDGET instructions per thread slice (default 200000000: small slices let
 #                   the wall-clock limit end the run with its report)
 # The game install comes from tools/gamedata_fetch.sh (or FARM_GAME); the profile is tools/lockstep/profile.py's,
