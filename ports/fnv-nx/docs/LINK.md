@@ -268,6 +268,16 @@ bridge of its argument moves, unless something else is wrong on x86 too (`this-n
 `cast-conflict`, `result-pointer-not-passed`); with nothing to move it is bound directly and listed. V1 counts
 1,517 pairs / 2,196 references on f13.
 
+Two prepare POST hooks fix the declarations behind the commonest real bugs of these classes (tools/rules/s2_bodies.py,
+EQ's fuzz rows at link/0540aff0d154): **POP2** moves the words a getter's reference pushes too many to the call on
+its result whose reference pushes them too few (`buffer->GetChangeFlags(2)` read as a bool ->
+`buffer->GetChangeFlags().FUN_004280f0(2)`; `R(D(a, x))` -> `R(D(a), x)`), decided from the words of the
+references and definitions in build/units.json; **THIS2** turns a free `__stdcall` caller that hands its own ecx to
+a thiscall callee (the exe's code, listed in `THIS2_SITES`) into a member of a shell, or a member caller's call into
+`((Shell*)this)->f(..)`. Both add the new decorated reference names to the unit's `symbols`, so the pairs are
+compared again and bridged where the decomp's parameter types differ. What they leave is counted in
+prepare_stats.tsv (`POP2-SKIP-*`, `THIS2-SKIP-*`) and listed in `<tree>/build/pop2_skipped.tsv`.
+
 Classes in the report: `edx-dummy`, `reg-shift` (same register file, other index), `int-float-param`
 (x86 tolerated an int/float swap in a 4-byte slot), `ret-regfile`, `sret-explicit` (one side returns an aggregate,
 the other passes the buffer pointer explicitly), `aggregate-param` / `ret-aggregate` (aggregates of different
