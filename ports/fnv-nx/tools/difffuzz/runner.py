@@ -1318,7 +1318,7 @@ class Pair:
                     # frame's own `add esp, N` going straight to the epilogue (pops, `ret`): then a stdcall callee
                     # is as likely (a COM call through a vtable: 00b7c7b0's `call eax; add esp, 0x20; ret 4`), and
                     # 0 is tried first, the pushes after it
-                    n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 0
+                    n = 3 if after[:2] == b'\x83\xc4' else 6 if after[:2] == b'\x81\xc4' else 1   # (bh_C) `pop ecx` is one byte: 0x00aa13e0's `call edx; pop ecx; ret` closes the frame
                     rest = after[n:].lstrip(b'\x5b\x5d\x5e\x5f')
                     if not n or rest[:1] not in (b'\xc2', b'\xc3'):
                         continue
