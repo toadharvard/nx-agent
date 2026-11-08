@@ -837,9 +837,11 @@ def run_vcall(ctx):
             cand = rcache[addr] or None
             cls = method_class(nsym)
         if rel and not this_based and j == 1 and k == 1:
-            # the inferred receiver is a guess; the exe call is a release's DeleteThis, native `delete p` is the D0
+            # the inferred receiver is a guess; the exe call is a release's DeleteThis, native `delete p` is the D0 when
+            # the receiver's pair is at 0 / 1, but not for a family whose pair is later (TESForm: native 1 is a
+            # placeholder), so without the receiver this stays unknown, not ok (honest verdicts)
             rows.append(('vcall', nsym, '%08x' % addr, '%08x' % esite, '%x' % nsite, 'any', str(j), str(k), '', '',
-                         'ok', 'release-delete-this'))
+                         'unknown', 'release-delete-this'))
             continue
         v, recv, nt, et, why = judge.site(j, k, cls, cand)
         if cls:
