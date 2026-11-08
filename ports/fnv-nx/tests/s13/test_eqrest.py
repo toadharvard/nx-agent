@@ -6,10 +6,14 @@
   jumptab      classify.entry_register_reads follows the cases of a switch jump table inside the function: a register
                a case body reads before writing it (edx pushed behind `jmp [eax*4 + table]`) is a custom register
                (0x00e03170)
+  leaf-regs    an intercepted call to an exe leaf that writes neither ecx nor edx leaves them as the caller held them (MSVC
+               keeps a value in edx over `call 0x00d3ab60`, which writes only eax and cl); a callee that writes edx
+               still clobbers it (0x00d3abc0)
   guard-skip   a call-count where the oracle's static guard is set (no calls) and the native's own guard runs the
                initializer: local-static (0x00aff100)
 """
 import os
+import struct
 import sys
 import tempfile
 
@@ -17,9 +21,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'difffuzz'))
 os.environ.setdefault('FNVNX_DFWORK', tempfile.mkdtemp(prefix='eqrest'))
 
+sys.path.insert(0, HERE)
 import classify   # noqa: E402
 import conv       # noqa: E402
+import retsrc     # noqa: E402
+import runner     # noqa: E402
 import world      # noqa: E402
+from test_d14 import build_image, call_rel, stub  # noqa: E402
+from test_uncls import Info  # noqa: E402
 
 FAIL = []
 
@@ -65,7 +74,40 @@ def test_guard():
     check(cause(d, fn2) != 'local-static', 'the exe code touches no local static: stays')
 
 
+class FakePE:
+    def __init__(self, blobs):
+        img = bytearray(b'\xcc' * 0x3000)
+        for a, b in blobs.items():
+            img[a - 0x00401000:a - 0x00401000 + len(b)] = b
+        self.code = bytes(img)
+
+    def section_of(self, va):
+        return (0x00401000, len(self.code), 0x20000000, self.code) if 0x00401000 <= va < 0x00404000 else None
+
+
+def test_leafregs():
+    CALLEE = 0x00402000
+    # void f(int *p): int *q = p; g(p); *q = 7        (q is kept in edx over the call)
+    code = bytes.fromhex('8b542404' '52') + call_rel(0x00401000 + 5, CALLEE) + bytes.fromhex('83c404' 'c70207000000' 'c3')
+    nat = ('\tstp x29, x30, [sp, #-32]!\n\tstr x19, [sp, #16]\n\tmov w19, w0\n\tbl __fnv_00402000\n\tmov w1, #7\n'
+           '\tstr w1, [x19]\n\tldr x19, [sp, #16]\n\tldp x29, x30, [sp], #32\n\tret\n')
+    case = world.Case(seed=3, args={'p0': struct.pack('<I', world.BUF + 0x40)})
+    for name, leaf, want in (('a leaf that writes eax only', bytes.fromhex('8b442404' 'c700' '00000000' 'c3'), True),
+                             ('a leaf that writes edx', bytes.fromhex('8b442404' '33d2' 'c3'), False)):
+        retsrc._PE[:] = [FakePE({CALLEE: leaf})]
+        retsrc._PRES.clear() if hasattr(retsrc, '_PRES') else None
+        with tempfile.TemporaryDirectory() as d:
+            cv = conv.Conv('?f@@YAXPAH@Z', 'test')
+            t = runner.Target(cv, 0x00401000, {0x00401000: code}, build_image(nat, d, [stub(CALLEE)]), {},
+                              Info(conv.Conv('?g@@YAXPAH@Z', 'test')))
+            rx, ra, div = runner.Pair(t, {}).run(case)
+        check((div is None) == want, '%s: %s (%s)' % (name, 'edx kept, the machines agree' if want else 'edx clobbered, a '
+                                                      'difference stays', div and div['kind']))
+    retsrc._PE[:] = [None]
+
+
 def main():
+    test_leafregs()
     test_jumptab()
     test_guard()
     fn = dict(code=b'\xc3', address=0x00401000)
