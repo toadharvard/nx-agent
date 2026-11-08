@@ -1890,6 +1890,33 @@ check('D26 call-only: ... not when the file uses the class as an object, nor in 
       run(s1.r_vtable_dtor_slot, _CE.replace('return 0;', 'return v + 1;')), [], ['FNVNX_D22(Q'])
 check('D26 call-only: a named first virtual is not a placeholder',
       run(s1.r_vtable_dtor_slot, _CO.replace('v0()', 'GetName()')), [], ['FNVNX_D22'])
+# S5-boot (link 3f7a6c35e923, 0x00e7bc90): a COM interface has no destructor slot; D22 / D26 leave it alone
+_COM = ('struct D3DShell\n{\n    virtual void v0();\n    virtual void v1();\n'
+        '    virtual unsigned int __stdcall GetAdapterModeCount(unsigned int a, int f);\n};\n'
+        'unsigned f(D3DShell* d) { return d->GetAdapterModeCount(0, 22); }\n')
+import collections as _collections
+_comst = _collections.Counter()
+check('D26 COM: a class with a __stdcall virtual is not converted', s1.r_vtable_dtor_slot('/x/src/a.cpp', _COM, _comst) +
+      run(s1.r_vtable_dtor_slot, _COM.replace('unsigned int __stdcall', 'HRESULT')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('v1()', 'AddRef()')) +
+      run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'IDirect3D9')), [], ['FNVNX_D22'])
+check('D26 COM: counted D22-COM', str(dict(_comst)), ["'D22-COM': 1"])
+# S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
+_UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
+             'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
+check('D26 call-only: an unqualified call in an unrelated class member does not block it',
+      run(s1.r_vtable_dtor_slot, _UQ), ['FNVNX_D22(HeapStandIn, virtual void v0();)'])
+check('D26 call-only: ... an unqualified call in a member of a derived class does',
+      run(s1.r_vtable_dtor_slot, _UQ.replace('struct CVS : CVB', 'struct CVS : HeapStandIn')), [],
+      ['FNVNX_D22(HeapStandIn'])
+# S5-boot (modelloader_activator_declarations.h BGSOpenCloseForm): a body-less non-virtual `~C();` gives way
+_DT = _CO.replace('    virtual void* Allocate(unsigned n);\n', '    virtual void* Allocate(unsigned n);\n    HeapStandIn();\n    ~HeapStandIn();\n')
+check('D26 call-only: a body-less `~C();` is dropped under GCC (D22-DTOR)', run(s1.r_vtable_dtor_slot, _DT),
+      ['FNVNX_D22(HeapStandIn, virtual void v0();)', 'FNVNX_D22_DROP(~HeapStandIn();)'])
+check('D26 call-only: ... not when the file defines it, nor a virtual or inline one',
+      run(s1.r_vtable_dtor_slot, _DT + 'HeapStandIn::~HeapStandIn() {}\n') +
+      run(s1.r_vtable_dtor_slot, _DT.replace('    ~HeapStandIn();', '    virtual ~HeapStandIn();')) +
+      run(s1.r_vtable_dtor_slot, _DT.replace('    ~HeapStandIn();', '    ~HeapStandIn() {}')), [], ['FNVNX_D22(HeapStandIn'])
 if _shutil.which('aarch64-linux-gnu-g++'):
     _mD = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h')) if l.startswith('#define FNVNX_D22')]
     _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x', 'c++',

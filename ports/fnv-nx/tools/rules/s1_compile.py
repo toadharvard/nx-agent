@@ -5544,10 +5544,18 @@ def d22_classes(text, masked=None):
         nested = [(o2, c2) for o2, c2, _, _ in spans if o < o2 < c]
         def own_depth(pos):
             return not any(o2 < pos < c2 for o2, c2 in nested)
-        virtuals, dtor = [], False
+        virtuals, dtor, dtor_decl = [], False, None
         name = m.group(2)
         for dm in re.finditer(r'~\s*%s\s*\(' % re.escape(name), masked[o:c]):
-            if own_depth(o + dm.start()): dtor = True; break
+            if own_depth(o + dm.start()):
+                if dtor: dtor_decl = None; break
+                dtor = True
+                # a body-less, non-virtual `~C();` alone on its line (D26 (b): it gives way to `virtual ~C()`)
+                ls = masked.rfind('\n', 0, o + dm.start()) + 1
+                le = masked.find('\n', o + dm.start())
+                le = c if le < 0 or le > c else le
+                if re.match(r'^[ \t]*~\s*%s\s*\(\s*(?:void\s*)?\)\s*;[ \t]*$' % re.escape(name), masked[ls:le]):
+                    dtor_decl = (ls + len(masked[ls:le]) - len(masked[ls:le].lstrip()), le)
         skip_to = o + 1
         for vm in D22_VIRTUAL.finditer(masked, o + 1, c):
             if vm.start() < skip_to or not own_depth(vm.start()): continue
@@ -5570,11 +5578,11 @@ def d22_classes(text, masked=None):
             virtuals.append((start, end, re.sub(r'\s+', '', mm.group(1)) if mm else None, text[start:end]))
             skip_to = end
         out.append(dict(qual=qual + [name], open=o, close=c, head=hs, bases=(m.group(3) or '')[1:].strip(),
-                        template=bool(D22_TEMPLATE.search(masked[max(0, hs - 300):hs])), dtor=dtor,
+                        template=bool(D22_TEMPLATE.search(masked[max(0, hs - 300):hs])), dtor=dtor, dtor_decl=dtor_decl,
                         first=virtuals[0] if virtuals else None, virtuals=virtuals, kind=m.group(1)))
     return out
 
-def d22_placeholder(masked, cls, decl, ignore=()):
+def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     """the virtual declaration decl = (start, end, member, text) of class cls is a placeholder in this file: no
     definition outside the class, an inline body of one statement at most, and no other use of its name followed by
     `(` (a call or another declaration)"""
@@ -5588,8 +5596,42 @@ def d22_placeholder(masked, cls, decl, ignore=()):
     for a, b in ignore:                         # other classes' virtual declarations of the same name
         if (a, b) != (start, end): rest = rest[:a] + ' ' * (b - a) + rest[b:]
     if re.search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), rest): return False
-    if re.search(r'(?<![\w~])%s\s*\(' % re.escape(member), rest): return False
+    for u in re.finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), rest):
+        # an unqualified call reaches cls's member only from a member of cls or of a class deriving from it (S5-boot:
+        # actor.cpp's CVShell::FUN_008805f0 calls its own base CVB's `v0(p)`; NiTMap_S's `v0` stayed unconverted)
+        if reach is not None and not re.search(r'(?:->|\.|::)\s*$', rest[max(0, u.start() - 8):u.start()]) \
+                and not reach(u.start()):
+            continue
+        return False
     return True
+
+D22_MEMBER_DEF = re.compile(r'(?<![\w~:])([A-Za-z_]\w*)\s*(?:<[^;{}()]*>\s*)?::\s*~?\s*[A-Za-z_]\w*\s*\([^;{}]*\)[^;{}]*\{')
+
+def d22_reach(masked, classes):
+    """reach(cls) -> callable(pos): could an unqualified call at pos name a member of class cls? Only inside a
+    member of cls or of a class of the file deriving from it (an inline body in the class, or an out-of-class
+    `Y::f(...) { }` definition); not in a free function or another class's member."""
+    owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
+    for m in D22_MEMBER_DEF.finditer(masked):
+        b = m.end() - 1
+        try: e = prepare.match_brace(masked, b)
+        except Exception: e = None
+        if e: owners.append((b, e, m.group(1)))
+    owners.sort(key=lambda t: t[0] - t[1])          # innermost (shortest) span first
+    derived = collections.defaultdict(set)
+    for c in classes:
+        for b in _d22_bases(c['bases']): derived[b.replace('<>', '')].add(c['qual'][-1])
+    def reach(cls):
+        fam, todo = {cls}, [cls]
+        while todo:
+            for d in derived.get(todo.pop(), ()):
+                if d not in fam: fam.add(d); todo.append(d)
+        def f(pos):
+            for a, z, nm in owners:
+                if a < pos < z: return nm in fam
+            return False
+        return f
+    return reach
 
 def _d22_list():
     """{class key: set(members)} from every d22.json under FNVNX_RECON (or the file FNVNX_D22); cached on prepare
@@ -5627,15 +5669,46 @@ def _d22_bases(bases):
 # vtable and implicit destructor would need the undefined `~C`); under D26 every native receiver has D1/D0 at slots 0/1 (D22, the image vftables' minus-one copies),
 # so the declaration needs `virtual ~C()` where its slot-0 placeholder is. A placeholder called by name stays
 # (D22-USED: slot 0 is the deleting destructor, whose call needs another form).
+# An unqualified call `ph(` counts as a use only inside a member of the class or of a class of the file deriving from
+# it (actor.cpp's CVShell::FUN_008805f0 calls its own CVB's `v0(p)`, which held NiTMap_S back). A class that declares
+# only a body-less, non-virtual `~C();` (no definition in the file, none called or defined by a header's includers)
+# is call-only as well; its `~C();` goes under GCC, FNVNX_D22_DROP (D22-DTOR: modelloader_activator_declarations.h's
+# BGSOpenCloseForm, whose tesobjectdoor_decls.h copy D26 already converts).
 D22_CALLONLY_PLACEHOLDER = re.compile(
     r"^(?:v|vf|vfn|vt|vfunc|virt|virtual|slot|func|fn|unk|unknown|Unk_?|Unknown|Func|Virtual|Reserved|reserved|pad|Pad|"
     r"Slot|V|F)_?0+$|^\w*?Unknown_?0*$|^\w*_v0$|^v0_\w*$|^vfunc0\w*$|^Unk(?:nown)?0+\w*$", re.IGNORECASE)
 
 D22_EMPTY_BODY = re.compile(r'\{\s*(?:return\s+(?:[-+]?(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*|true|false|0\.0f?|nullptr|NULL)\s*;\s*)?\}\s*$')
 
+# COM interfaces (S5-boot, link 3f7a6c35e923: the adapter-mode list ctor 0x00e7bc90 dispatched on the IDirect3D9 at
+# [vptr+108] / [vptr+72] where the exe reads +104 / +68, so EnumAdapterModes ran GetAdapterDisplayMode): an
+# IUnknown-shaped vtable has QueryInterface / AddRef / Release at slots 0..2 and no destructor slot, whatever its
+# receiver, and the native D3D / DInput / DSound objects keep that ABI. D22 / D26 leave alone a class with a
+# `__stdcall` virtual (MSVC's C++ virtuals are __thiscall; COM methods are __stdcall: STDMETHOD, WINAPI, ...) or one
+# returning HRESULT / taking REFIID, a
+# virtual QueryInterface / AddRef / Release, or an SDK interface name (IUnknown, IDirect*, IDXGI*, IXAudio*, ...).
+# Counted D22-COM.
+D22_COM_CONV = re.compile(r'\b(?:__stdcall|_stdcall|STDMETHOD\w*|STDMETHODCALLTYPE|WINAPI|CALLBACK|APIENTRY|PASCAL|'
+                          r'__RPC_\w+|NTAPI|HRESULT|REFIID)\b')
+D22_COM_MEMBER = {'QueryInterface', 'AddRef', 'Release'}
+D22_COM_NAME = re.compile(r'^(?:I(?:Unknown|Direct\w*|DXGI\w*|XAudio\w*|D3D\w*|DInput\w*|DSound\w*|Dispatch|ClassFactory|'
+                          r'Stream|Storage|Persist\w*|Moniker|EnumVARIANT|MMDevice\w*|Audio\w*|KsPropertySet|'
+                          r'Wbem\w*|XACT\w*|Xact\w*)|LPDIRECT\w*|LPUNKNOWN)$')
+
+def _d22_com(masked, c):
+    """class c is (or stands for) a COM interface: see above"""
+    if D22_COM_NAME.match(c['qual'][-1]): return True
+    for v in c['virtuals']:
+        if v[2] in D22_COM_MEMBER or D22_COM_CONV.search(masked[v[0]:v[1]]): return True
+    return False
+
 def _d22_callonly(masked, c, unit=True):
     """D26 (b): class c of d22_classes is a call-only placeholder declaration in this file (above)"""
-    if c['bases'] or c['dtor'] or not c['first'] or len(c['virtuals']) < 2: return False
+    if c['bases'] or not c['first'] or len(c['virtuals']) < 2: return False
+    if c['dtor'] and not c.get('dtor_decl'): return False
+    if c['dtor'] and re.search(r'(?<![\w~:])%s\s*(?:<[^;{}()]*>\s*)?::\s*~\s*%s\s*\(' % ((re.escape(c['qual'][-1]),) * 2),
+                               masked):
+        return False                                     # `~C();` defined in the file: a real destructor
     if not c['first'][2] or not D22_CALLONLY_PLACEHOLDER.match(c['first'][2]): return False
     # an empty inline body (`virtual void f00() {}`) or one that only returns a constant (`{ return 0; }`) is a
     # placeholder too, not a definition (EQ, link 0540aff0: tesobjectrefr.cpp's FUN_00567f40_class, 19 such slots;
@@ -5737,6 +5810,8 @@ def r_vtable_dtor_slot(path, text, stats):
         for v in c['virtuals']:
             if v[2]: vdecls[v[2]].append((v[0], v[1]))
     calls, masked_nc, needs = {}, {}, collections.defaultdict(list)
+    reach = d22_reach(masked, classes)
+    dtor_drops = {}                             # first-virtual start -> span of the class's `~C();` (dropped)
     def statement_calls(ph):
         # `EXPR->ph(flags);` as a statement: the deleting-destructor call D26 turns into FNVNX_D22_CALL
         if ph not in calls:
@@ -5748,21 +5823,27 @@ def r_vtable_dtor_slot(path, text, stats):
         return calls[ph]
     for c in classes:
         key = c['qual'][-1] + '<>' if c['template'] else '::'.join(c['qual'])
+        if c['first'] and _d22_com(masked, c):
+            if key in lst or (not c['bases'] and len(c['virtuals']) >= 2): stats['D22-COM'] += 1
+            continue
         callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc'))) and \
             not any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
                     for o in classes if o['bases'])
         if not callonly:
             if key not in lst or not c['first']: continue
             if c['bases'] or c['dtor'] or c['first'][2] not in lst[key]: continue
-        if _d22_extern_use(path, c['first'][2]):
+        if _d22_extern_use(path, c['first'][2]) or \
+                (callonly and c['dtor'] and _d22_extern_use(path, '~' + c['qual'][-1])):
             stats['D22-EXTERN'] += 1; continue
-        if not d22_placeholder(masked, c['qual'][-1], c['first'], vdecls[c['first'][2]]):
+        rc = reach(c['qual'][-1])
+        if not d22_placeholder(masked, c['qual'][-1], c['first'], vdecls[c['first'][2]], rc):
             ph = c['first'][2]
             if not (callonly and statement_calls(ph) and
-                    d22_placeholder(masked_nc[ph], c['qual'][-1], c['first'], vdecls[ph])):
+                    d22_placeholder(masked_nc[ph], c['qual'][-1], c['first'], vdecls[ph], rc)):
                 stats['D22-USED'] += 1; continue
             needs[ph].append(len(edits))
         edits.append((c['first'][0], c['first'][1], 'FNVNX_D22(%s, %s)' % (c['qual'][-1], c['first'][3])))
+        if callonly and c['dtor']: dtor_drops[c['first'][0]] = c['dtor_decl']
         done[c['qual'][-1] + ('<>' if c['template'] else '')] = c['first'][2]
         stats['D22-CALLONLY' if callonly else 'D22'] += 1
     drop = set()
@@ -5783,6 +5864,12 @@ def r_vtable_dtor_slot(path, text, stats):
             done.pop(nm, None); done.pop(nm + '<>', None)
             stats['D22-CALLONLY'] -= 1
         edits = [e for i, e in enumerate(edits) if i not in drop]
+    for e in list(edits):
+        # D22-DTOR: the class's own body-less `~C();` goes under GCC (`virtual ~C()` declares it now)
+        if e[0] in dtor_drops and e[2].startswith('FNVNX_D22('):
+            a, b = dtor_drops[e[0]]
+            edits.append((a, b, 'FNVNX_D22_DROP(%s)' % text[a:b]))
+            stats['D22-DTOR'] += 1
     here = {c['qual'][-1] + ('<>' if c['template'] else '') for c in classes}
     for k, ms in lst.items():                   # listed classes defined in another file (a header)
         sk = k.split('::')[-1]
@@ -5791,7 +5878,7 @@ def r_vtable_dtor_slot(path, text, stats):
     while changed:                              # derived classes, through chains of derivation in the file
         changed = False
         for c in classes:
-            if not c['bases'] or not c['virtuals']: continue
+            if not c['bases'] or not c['virtuals'] or _d22_com(masked, c): continue
             mine = c['qual'][-1] + ('<>' if c['template'] else '')
             for b in _d22_bases(c['bases']):
                 mem = done.get(b)
@@ -5800,7 +5887,7 @@ def r_vtable_dtor_slot(path, text, stats):
                     if v[2] != mem or any(e[0] == v[0] for e in edits): continue
                     if _d22_extern_use(path, v[2]):
                         stats['D22-EXTERN'] += 1; continue
-                    if not d22_placeholder(masked, c['qual'][-1], v, vdecls[v[2]]):
+                    if not d22_placeholder(masked, c['qual'][-1], v, vdecls[v[2]], reach(c['qual'][-1])):
                         stats['D22-USED'] += 1; continue
                     edits.append((v[0], v[1], 'FNVNX_D22_DROP(%s)' % v[3]))
                     stats['D22-DERIVED'] += 1
