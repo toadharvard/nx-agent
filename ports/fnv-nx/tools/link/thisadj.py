@@ -73,6 +73,43 @@ def secondary_entries(path):
     return {a: min(o) for a, o in offs.items() if 0 not in o}
 
 
+_OTTS = {}
+
+
+def slot_otts(path, name):
+    """{offset-to-top} of the native vtables (`_ZTV` groups of the ELF32 object at path) that name the symbol `name` in
+    a slot: 0 for a primary vtable, -d for the vtable of the base subobject at d. Empty when no vtable of the object
+    names it (a direct call), the path is missing, or the object cannot be read. This is the native layout's own
+    statement of how far the subobject `this` of a slot call sits from the object an x86 adjustor thunk expects."""
+    if not path:
+        return set()
+    if path not in _OTTS:
+        found = collections.defaultdict(set)
+        try:
+            import vtables
+            o = vtables.Obj(path)
+            for z in sorted(o.defs):
+                if not z.startswith('_ZTV'):
+                    continue
+                ents = o.ents(z)
+                pts = vtables.address_points(ents)
+                for i, e in enumerate(ents):
+                    below = [ott for ap, ott in pts if ap <= 4 * i]
+                    if e.sym and below and not e.sym.startswith(('_ZTI', '.')):
+                        found[e.sym].add(below[-1])
+        except Exception:
+            found = {}
+        _OTTS[path] = found
+    return set(_OTTS[path].get(name, ()))
+
+
+def thunk_layout_ok(n, otts):
+    """The x86 immediate n of an adjustor thunk (`sub ecx, n`) may stand for the native this-adjustment of a vtable
+    slot only where the native layout agrees: every vtable naming the slot sits at offset-to-top -n. A slot no native
+    vtable names (otts empty) has no layout to contradict: a call by address passes the exe's own `this`."""
+    return all(-o == n for o in otts)
+
+
 def thunk_name(primary, d):
     """Itanium name of the non-virtual this-adjusting thunk by d of the member function `primary` (_ZN.. / _ZNK..)."""
     if not primary.startswith('_ZN'):
