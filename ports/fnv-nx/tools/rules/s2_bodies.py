@@ -623,7 +623,11 @@ def r_noinline_stand_ins(path, text, stats):
 # The new overload is declared without a body (and without inline / __forceinline), so the moved call reaches the exe
 # function through the new decorated name the link binds; the stand-in stays for the calls POP2 leaves alone (STAND3,
 # 5 and 6 skip operators, forceinline and non-/Od units, so none of them touches it; a body with its own `@fnv` tag is a
-# decompiled function and stays skipped). The POST hook adds the new decorated reference names to the unit's units.json `symbols`
+# decompiled function and stays skipped).
+# A call whose receiver is cast to a class written with namespaces (`((N::BGSLoadFormBuffer*)x)->GetChangeFlags(m)`,
+# `reinterpret_cast<N::C*>(x)->`, tesobjectrefr.cpp 0x00562660) names that class: its donor and its result class's
+# `operator bool` are looked up in exactly that class, where the name-hiding rule above would let a global class with
+# a member of the same name (BGSSaveFormBuffer::GetChangeFlags) hide the namespace's. The POST hook adds the new decorated reference names to the unit's units.json `symbols`
 # (D's name without the moved parameter codes, R's with them), so the link compares and binds them like the
 # decomp's own. Line numbers stay. Families left alone are counted (POP2-SKIP-<why>) and listed with their reason
 # in <tree>/build/pop2_skipped.tsv, the sites done in <tree>/build/pop2_sites.tsv (derived, local only).
@@ -795,8 +799,9 @@ def _pop_sites(text, refs, why):
                     continue
                 before = seg[:m.start()].rstrip()
                 qualified = before.endswith(('.', '->', '::'))
-                site = _pop_site(seg, o, m.start(), p, e, dn, _PopVisible(refs, vis, None if qualified else own),
-                                 pg, why, text)
+                vw = _PopVisible(refs, vis, None if qualified else own)
+                vw.cast = _pop_cast(before) if qualified else None
+                site = _pop_site(seg, o, m.start(), p, e, dn, vw, pg, why, text)
                 if site:
                     tags = list(s1_compile.FNV_TAG_ADDR.finditer(text, max(0, o - 2000), o))
                     site['caller'] = tags[-1].group(1).lower().zfill(8) if tags else '-'
@@ -810,10 +815,24 @@ class _PopVisible:
     decomp declares one `Holder` per namespace)."""
 
     def __init__(self, refs, vis, own=None):
-        self.refs, self.vis, self.own = refs, vis, own
+        self.refs, self.vis, self.own, self.cast = refs, vis, own, None
+
+    def named(self, name, scopes):
+        """The references of name in exactly the class MSVC's scopes name (innermost first), as a per-function
+        namespace the call sees allows."""
+        return [r for r in self.refs.get(name, ()) if r.fn.scopes == scopes
+                and all(sc in self.vis for sc in scopes if UNIT_NS_HEAD.match(sc))]
 
     def donor(self, name):
-        """The references an unqualified call of name in a member of class `own` can be (its own class's)."""
+        """The references an unqualified call of name in a member of class `own` can be (its own class's); for a
+        receiver cast to a written class (`((N::C*)x)->D(..)`) those of exactly that class."""
+        if self.cast:
+            cls, quals = self.cast
+            return [r for r in self.refs.get(name, ()) if r.fn.scopes[0] == cls
+                    and r.fn.scopes[1:1 + len(quals)] == quals
+                    and all(sc in self.vis for sc in r.fn.scopes[1 + len(quals):] if UNIT_NS_HEAD.match(sc))
+                    and all(UNIT_NS_HEAD.match(sc) for sc in r.fn.scopes[1 + len(quals):])
+                    and all(sc in self.vis for sc in r.fn.scopes if UNIT_NS_HEAD.match(sc))]
         rs = self.get(name)
         return [r for r in rs if r.fn.scopes[0] in self.own] if self.own else rs
 
@@ -831,6 +850,23 @@ class _PopVisible:
 
     def __contains__(self, name):
         return bool(self.get(name))
+
+
+_POP_CAST = (re.compile(r'\(\s*(?:const\s+)?((?:[A-Za-z_]\w*\s*::\s*)+)([A-Za-z_]\w*)\s*\*\s*\)\s*[\w.>-]+\s*\)\s*(?:->|\.)$'),
+             re.compile(r'(?:reinterpret_cast|static_cast)\s*<\s*(?:const\s+)?((?:[A-Za-z_]\w*\s*::\s*)+)([A-Za-z_]\w*)\s*\*\s*>'
+                        r'\s*\([^()]*\)\s*(?:->|\.)$'))
+
+
+def _pop_cast(before):
+    """(class, qualifiers innermost first) when the receiver of the call that follows `before` is a pointer cast to a
+    class written with namespaces (`((N::C*)x)->`, `reinterpret_cast<N::C*>(x)->`), else None: the written class is
+    the receiver's, whatever other classes of the name the unit has."""
+    for rx in _POP_CAST:
+        m = rx.search(before)
+        if m:
+            q = [x.strip() for x in m.group(1).split('::') if x.strip()]
+            return m.group(2), q[::-1]
+    return None
 
 
 def _pop_site(seg, base, ds, p, e, dn, refs, pg, why, text):
@@ -905,7 +941,8 @@ def _pop_site(seg, base, ds, p, e, dn, refs, pg, why, text):
                 if r.fn.ret_class is None:
                     rc = None
                     break
-                rc += [x for x in refs.get('operator bool', ()) if x.fn.scopes == r.fn.ret_class]
+                rc += [x for x in (refs.named('operator bool', r.fn.ret_class) if refs.cast else
+                                   refs.get('operator bool', ())) if x.fn.scopes == r.fn.ret_class]
             if not rc:
                 if rc is not None and any(r.fn.ret_class for r in dc):
                     why['no operator bool reference'] += 1

@@ -190,6 +190,31 @@ void F(Buf* b)
         g();
 }
 }  // namespace fnv_00403700
+struct SaveBuf
+{
+    int Flags();
+};
+namespace fnv_00403800 {
+namespace N {
+struct FormMask
+{
+    unsigned int m;
+    operator bool() const;
+};
+struct Buf
+{
+    FormMask Flags(unsigned int);
+};
+}
+// @fnv 0x00403800
+void F(N::Buf* b)
+{
+    if (((N::Buf*)b)->Flags(0x8000020))
+        g();
+    if (reinterpret_cast<N::Buf*>(b)->Flags(3))
+        g();
+}
+}  // namespace fnv_00403800
 '''
 
 UNITS_INLINE = {'units': [
@@ -198,6 +223,9 @@ UNITS_INLINE = {'units': [
         '??BFormMask@fnv_00403500@@QBE_NXZ': '0x00402000',
         '?Flags@Buf@fnv_00403700@@QBE?AUFormMask@2@I@Z': '0x00401000',
         '??BFormMask@fnv_00403700@@QBE_NXZ': '0x00402000',
+        '?Flags@SaveBuf@@QAEHXZ': '0x00401200',
+        '?Flags@Buf@N@fnv_00403800@@QAE?AUFormMask@23@I@Z': '0x00401000',
+        '??BFormMask@N@fnv_00403800@@QBE_NXZ': '0x00402000',
         '?Active@Tes@@QAEPAUCell@@PAX@Z': '0x00404100', '?Activate@Cell@@QAEXXZ': '0x00405100'}},
     UNITS['units'][1],
 ]}
@@ -312,7 +340,9 @@ class Pop2(unittest.TestCase):
             self.assertIn('t->Active()->Activate(p);', out)                      # a named receiver, inline body
             self.assertIn('void Activate(void* p);', out)
             self.assertIn('if (b->Flags(8))', out)                               # tagged body: skipped
-            self.assertEqual(stats['POP2'], 2)
+            self.assertIn('if (((N::Buf*)b)->Flags().FUN_00402000(0x8000020))', out)    # a cast names the class
+            self.assertIn('if (reinterpret_cast<N::Buf*>(b)->Flags().FUN_00402000(3))', out)
+            self.assertEqual(stats['POP2'], 4)
             self.assertEqual(stats['POP2-SKIP-R-declaration-inline-body-no'], 1)
             syms = json.load(open(os.path.join(d, 'build', 'units.json')))['units'][0]['symbols']
             self.assertEqual(syms.get('?FUN_00402000@FormMask@fnv_00403500@@QBE_NI@Z'), '0x00402000')
