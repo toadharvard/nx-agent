@@ -7,6 +7,8 @@ passes its first real argument there. retsrc.edx_unread proves from the exe that
   X1 never touches edx: unread        X2 reads edx: read
   X3 overwrites edx before reading: unread     X4 writes only dl, then reads edx: read
   X5 jumps to a leaf that reads edx: read      X6 jumps to one that does not: unread
+  X7 calls a leaf that reads edx with the incoming edx live: read (EQ review: an untouched edx is forwarded)
+  X8 calls a leaf that does not: unread        X9 an indirect call with edx live: not known (None)
 """
 import os
 import sys
@@ -48,6 +50,10 @@ def main():
     for name, leaf, want in (('X5', leaf_read, False), ('X6', leaf_none, True)):
         main_ = bytes.fromhex('e9') + (0x20 - 5).to_bytes(4, 'little', signed=True) + b'\xc3'
         cases.append((name, pad(main_, 0x20) + leaf, want))
+    for name, leaf, want in (('X7', leaf_read, False), ('X8', leaf_none, True)):
+        main_ = bytes.fromhex('e8') + (0x20 - 5).to_bytes(4, 'little', signed=True) + b'\xc3'
+        cases.append((name, pad(main_, 0x20) + leaf, want))
+    cases.append(('X9', bytes.fromhex('ffd0' 'c3'), None))     # call eax; ret
     fails = 0
     for name, code, want in cases:
         got = run(code)

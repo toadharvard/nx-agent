@@ -445,9 +445,22 @@ def _edx_unread(addr, depth):
             if m in ('ret', 'retn'):
                 break
             if m == 'call':
-                # a call does not read the incoming edx: MSVC sets up a callee's registers itself (a callee that
-                # reads edx gets it set by the caller, never forwarded unchanged from the entry; a forwarding thunk
-                # ends in a jmp, below)
+                # a call clobbers edx; while the incoming edx is still live it is forwarded, so the call reads it
+                # when its direct callee reads edx at entry (EQ review: MSVC's custom conventions can pass an
+                # untouched edx on), and may read it when the callee is indirect or cannot be followed
+                if live:
+                    o = ops[0] if ops else None
+                    if o is not None and o.type == capstone.x86.X86_OP_MEM and o.mem.base == 0 and \
+                            o.mem.index == 0 and (lambda q: q is not None and not q[2] & 0x20000000)(
+                                pe.section_of(o.mem.disp & 0xffffffff)):
+                        live = False                # an import through its IAT slot (stdcall Win32: no edx)
+                        a = nxt
+                        continue
+                    if not (o is not None and o.type == capstone.x86.X86_OP_IMM) or depth <= 0:
+                        return None
+                    sub = edx_unread(ops[0].imm & 0xffffffff, depth - 1)
+                    if sub is not True:
+                        return sub
                 live = False
                 a = nxt
                 continue
