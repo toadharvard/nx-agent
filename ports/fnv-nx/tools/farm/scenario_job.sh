@@ -297,7 +297,8 @@ if [ "${SCENARIO_PUBLISH:-1}" = 1 ] && [ -n "$LC" ] && [ -d "$ARTIFACTS/.git" ];
 		[ -d "$D/emu/kept" ] && cp -a "$D/emu/kept" "$pub/$s/guest-kept"
 		[ -d "$D/wine/profile" ] && cp -a "$D/wine/profile" "$pub/$s/wine-profile"
 		[ -d "$D/wine/shots" ] && cp -a "$D/wine/shots" "$pub/$s/wine-shots"
-		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$D/wine/original_opens.json" "$pub/$s/" 2> /dev/null
+		cp -f "$D/wine/console.txt" "$D/wine/progress.json" "$D/wine/original_opens.json" \
+			"$D/wine/original_calls.json" "$D/wine/original_calls.md" "$pub/$s/" 2> /dev/null
 		for f in "$D/emu/emu_stub.log" "$D/lin/boot.log" "$D/lin_profile.txt" "$D/guest.tsv" "$D/wine/wine.tsv"; do [ -f "$f" ] && xz -T0 -c "$f" > "$pub/$s/$(basename "$f").xz"; done
 	done
 	if git -C "$pub" add -A && git -C "$pub" -c user.name="fnvnx farm" -c user.email=farm@invalid commit -qm "scenarios $LC (head $C12)
