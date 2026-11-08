@@ -1956,6 +1956,14 @@ check('RAWVT1 with a dtor slot K = 4: k < 4 stays, k > 4 shifts, k = 4 held',
       run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[4]')),
       ['(this))[2])', '(this))[FNVNX_D26_SLOT(6)])', '(this))[4])'])
 del os.environ['FNVNX_RECON']; prepare.__dict__['_fnvnx_d22'] = None; prepare.__dict__['_fnvnx_d22_slots'] = None
+# ---- S1-rules: EMPTY1 (R2 trap rank 32: treeengine's declared-only TagEmpty is the temporary TagText(""))
+_EM = ('struct TagText\n{\n    int w;\n    TagText(const char*);\n};\nextern const TagText TagEmpty;\n'
+       'TagText g(bool s) { return s ? TagText("x") : TagEmpty; }\n')
+check('EMPTY1 a declared-only empty-string object -> FNVNX_EMPTY1(T, name)', run(s1.r_empty_string_objects, _EM),
+      [': FNVNX_EMPTY1(TagText, TagEmpty); }', 'extern const TagText TagEmpty;'])
+check('EMPTY1 not when the file defines it, or T has no const char* constructor',
+      run(s1.r_empty_string_objects, _EM + 'const TagText TagEmpty("");\n') +
+      run(s1.r_empty_string_objects, _EM.replace('TagText(const char*);', 'TagText(int);')), [], ['FNVNX_EMPTY1'])
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
