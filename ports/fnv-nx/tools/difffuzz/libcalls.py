@@ -43,6 +43,7 @@ STUB_SIZE = 0x40                  # bytes per slot (x86emu.BUILTIN_STUB .. BUILT
 # _CI* -> (cdecl CRT_MATH name it calls, operands taken from the x87 stack)
 CI_FORMS = {'CIpow': ('pow', 2), 'CIfmod': ('fmod', 2), 'CIexp': ('exp', 1), 'CIatan': ('atan', 1),
             'CIasin': ('asin', 1), 'CIacos': ('acos', 1), 'CItan': ('tan', 1)}
+A64_TLS_ARRAY, A64_TLS_SLOT0 = 0x0b900000 + 0xff00, 0x0b900000 + 0x4000   # inside arm64emu.TLS_BASE's block
 CRT_ADDR = {}
 for _a, _n in X86.items():
     CRT_ADDR.setdefault(_n, _a)
@@ -68,6 +69,9 @@ A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp'
             # GCC's thread-safe local statics (MSVC 2008: a plain guard bit, no call): single-threaded semantics
             '__cxa_guard_acquire': 'guard_acquire', '__cxa_guard_release': 'guard_release',
             '__cxa_guard_abort': 'guard_abort',
+            # (EQ, farm baseline 588863: 0x00a5b5a0) MSVC's fs-segment intrinsic: the exe reads fs:[off] inline (no
+            # call), the native calls platform/win32/thread.cpp's __readfsdword, which the unit image does not link
+            '__readfsdword': 'readfsdword',
             # the exception object of a GCC `throw` (difffuzz-14): MSVC builds it in the thrower's stack frame (not
             # compared), natively a private block (not compared either); the throw itself ends the run (NORETURN)
             '__cxa_allocate_exception': 'cxa_alloc_exc', '__cxa_free_exception': 'cxa_free_exc'})
@@ -266,6 +270,13 @@ def run(name, m, a):
     if name == 'tolower':
         c = a[0] & 0xffffffff
         return c + 32 if 65 <= c <= 90 else c
+    if name == 'readfsdword':
+        # the TEB the x86 engine maps (x86emu.TEB): fs:[0x2c] is ThreadLocalStoragePointer, a slot array whose slot 0
+        # points into a zeroed per-thread block; here the same in the AArch64 engine's private TLS block
+        # (arm64emu.TLS_BASE, zeroed each run, not compared), as thread.cpp's fnvnx_tls_array() does natively
+        if (a[0] & 0xffffffff) == 0x2c:
+            return A64_TLS_ARRAY       # its slot 0 = A64_TLS_SLOT0, written by Arm64Engine.run with the zeroed block
+        return 0
     if name == 'guard_acquire':
         return 0 if m.read(a[0], 1)[0] else 1
     if name == 'guard_release':
