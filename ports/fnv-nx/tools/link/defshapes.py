@@ -69,6 +69,27 @@ def sdd(path, addr):
     return d, 'other'
 
 
+HK_ROUTER = 0xc85750   # the Havok heap router the sized ??_G calls first (hkostream.cpp's unit)
+# after the call to D: test byte [esp+8], 1; je +0x15; call router; <_SIZED>; (je lands) mov eax, esi; pop esi; ret 4
+_SDD_TAIL = bytes.fromhex('8bc65ec20400')
+
+
+def sdd_sized_exact(path, addr):
+    """D, the destructor's address, when the exe at addr is exactly the whole Havok sized-free ??_G
+    (`push esi; mov esi, ecx; call D; test byte [esp+8], 1; je L; call 0xc85750; movzx edx, word [esi+4]; mov ecx,
+    [eax+0x10]; mov eax, [ecx]; mov eax, [eax+8]; push edx; push esi; call eax; L: mov eax, esi; pop esi; ret 4`);
+    else None. Read from the exe at the call, never from a stored table (W22)."""
+    b = _bytes(path, addr, 15 + 5 + len(_SIZED) + len(_SDD_TAIL))
+    if b is None or len(b) < 15 + 5 + len(_SIZED) + len(_SDD_TAIL):
+        return None
+    s = sdd(path, addr)
+    if s is None or s[1] != 'sized' or b[14] != 5 + len(_SIZED):
+        return None
+    if _rel(b, 15, addr) != HK_ROUTER or b[20 + len(_SIZED):] != _SDD_TAIL:
+        return None
+    return s[0]
+
+
 def classify(path, addr, native):
     """-> (shape, detail)"""
     n, t, hops = 0, addr, 0
