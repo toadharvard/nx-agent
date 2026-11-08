@@ -229,7 +229,7 @@ def _nrvo_copy(xcalls, ta, sret, convs):
     # a copy constructor under some name of the callee, a destructor under some name of the other (one address can
     # carry several classes' names in a unit, 0x004037d0 has two destructor spellings); the argument flow below ties
     # them together
-    ok = any(re.match(r'^\?\?0[^@]+(?:@[^@]+)*@@QAE@ABV0@@Z$', n) for n in names(cc.target)) and \
+    ok = any(re.match(r'^\?\?0[^@]+(?:@[^@]+)*@@QAE@AB[UV]0@@Z$', n) for n in names(cc.target)) and \
         any(n.startswith('??1') for n in names(dd.target))
     if not ok:
         return None
@@ -266,15 +266,6 @@ def _perm_align(tx, ta, vcalls):
     if max(abs(i - j) for i, j in enumerate(order)) > 8:
         return None
     return order
-
-
-def _empty_marker(w, k):
-    """Byte k lies in an aligned dword the oracle stored as 0x80000000: the capacity / flags word of an empty Havok
-    array (size 0, DONT_DEALLOCATE), which a destructor of the array's owner resets after the release."""
-    b = k & ~3
-    m = b'\x00\x00\x00\x80'
-    # a byte the effective writes leave out equals the memory it was stored over (a zero byte over zero)
-    return w.get(b + 3) == 0x80 and all(w.get(b + i, m[i]) == m[i] for i in range(4))
 
 
 def compare(*a, **kw):
@@ -490,8 +481,14 @@ def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, rea
             d['arm_zero_only'] = True      # the native only zeroes bytes the oracle leaves (value-initialisation)
         if diff and all(k not in wa and wx.get(k) == 0 for k in diff):
             d['x86_zero_only'] = True      # the oracle only zeroes bytes the native leaves (a dead store in a dtor)
-        if diff and all(k not in wa and (wx.get(k) == 0 or _empty_marker(wx, k)) for k in diff):
-            d['x86_reset_only'] = True     # ... or stores the 0x80000000 "empty array" marker (R4 uncls: 0x00cd27f0)
+        elif diff and all(k not in wa and (wx.get(k) == 0 or (wx.get(k) == 0x80 and k % 4 == 3 and
+                                                             all((wx[k - i] if k - i in wx else
+                                                                  w.page(world.page_of(k - i))[k - i - world.page_of(k - i)]) == 0
+                                                                 for i in (1, 2, 3))))
+                          for k in diff):
+            # (R4 flow) or sets an hkArray capacity word to 0x80000000 (DONT_DEALLOCATE_FLAG, `mov [esi+0x4c],
+            # 0x80000000` at 0x00d08f80): the same dead store of a destroyed member, constant bytes only
+            d['x86_const_only'] = True
         # float stores: compare the aligned words as floats
         if all(k in wx and k in wa for k in range(first & ~3, (first & ~3) + 4)):
             bx = bytes(wx[k] for k in range(first & ~3, (first & ~3) + 4))

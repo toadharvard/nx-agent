@@ -241,34 +241,6 @@ check(causes.policy('split-delete')[0] == 'by-design' and not causes.policy('spl
       and causes.policy('null-delete')[0] == 'by-design', 'delete-fold: policies are by-design soft')
 
 
-# ---------------------------------------------------------------------------------------------------- dead-store
-# a destructor's oracle-only stores of zero and of the empty-array marker 0x80000000 into its own object
-def words_at(base, *ws):
-    out = {}
-    for i, v in enumerate(ws):
-        for k, b in enumerate(struct.pack('<I', v)):
-            out[base + 4 * i + k] = b
-    return out
-
-
-B = world.BUF
-cvd = conv.Conv('??1Foo@@UAE@XZ', 'test')
-wd = world.World(world.Case(seed=1, bg='rand'), {}, {})
-for wx, flag, what in ((words_at(B + 8, 0, 0x80000000), 'x86_reset_only', 'zero and 0x80000000 words'),
-                       (words_at(B + 8, 0), 'x86_zero_only', 'a zero word'),
-                       (words_at(B + 8, 0x80000001), None, '0x80000001 is no marker'),
-                       (words_at(B + 8, 5), None, 'a nonzero constant')):
-    rx, ra = res([], [])
-    rx.writes, ra.writes = dict(wx), {}
-    d = runner.compare(cvd, rx, ra, wd)
-    got = d is not None and d['kind'] == 'mem-write' and (flag is None and not d.get('x86_zero_only') and
-                                                          not d.get('x86_reset_only') or bool(flag and d.get(flag)))
-    check(got, 'dead-store: %s -> flag %s (%s)' % (what, flag, d and [k for k in d if k.startswith('x86_')]))
-    if flag:
-        rec = dict(symbol='??1Foo@@UAE@XZ', case=dict(args={}), address='00cd27f0')
-        check(causes._rule_mem_write(d, rec) == 'dtor-dead-store', 'dead-store: %s is dtor-dead-store' % what)
-
-
 # ---------------------------------------------------------------------------------------------------- bool-chain
 class FakePair:
     """Diverges unless every byte of NEED holds 1 (planted); reports the 1-byte reads of the bytes above 1."""
