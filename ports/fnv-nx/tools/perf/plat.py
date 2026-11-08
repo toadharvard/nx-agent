@@ -3,7 +3,7 @@
 and input mapping failures), from the "plat: ..." lines of platform/win32/platstat.cpp and the boot's import lines.
 tools/perf/PLAT.md.
 
-    python3 -I tools/perf/plat.py <log>... [--elf guest.elf] --out report.md
+    python3 -I tools/perf/plat.py <log>... [--elf guest.elf] [--original original_opens.json] --out report.md
 
 Sources:
   plat: <class> <name> caller 0x<pc>[ <detail>]               first occurrence (n = 1 until a count line)
@@ -15,6 +15,10 @@ Metric (the lane's, lower is better): distinct unimplemented entries (unimpl nam
 + distinct failed opens (by path hash) + distinct decode failures + distinct unmapped inputs (by detail). Distinct
 by name / path / detail, not by caller, so it does not move when a relink moves code. No-op entries (documented
 Switch no-ops) are listed and not counted.
+--original: the original's failed opens on the same scenario (fnvnx-plat-original/1, tools/perf/plat_wine.py from
+a Wine run traced at kernel32!CreateFileA). A failed open whose path class and path hash the original's run also
+shows failing is listed separately as `also fails in the original` and left out of the metric; the metric without
+the baseline is reported next to it (metric_all), so nothing drops out silently.
 --elf maps callers to function start addresses (nm; tools/threads/report.py's Symbols). Writes <report.md> and
 <report>.json (fnvnx-plat/1). Exit 0; 3 when no log has platform or import lines.
 """
@@ -81,6 +85,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('logs', nargs='+')
     ap.add_argument('--elf')
+    ap.add_argument('--original')
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
     sym = Symbols(a.elf)
@@ -117,12 +122,26 @@ def main():
         e['sites'].add(fn(caller))
         if detail:
             e['details'].add(detail)
-    metric = {'unimpl': len(by['unimpl']) + len(noexp), 'open': len(opens), 'decode': len(by['decode']),
+    orig, orig_note = set(), None
+    if a.original:
+        try:
+            oj = json.load(open(a.original))
+            if oj.get('schema') == 'fnvnx-plat-original/1':
+                orig = {(f['class'], f['hash']) for f in oj.get('failed_opens', [])}
+                orig_note = '%s (%d opens traced, %d distinct failed)' % (os.path.basename(a.original),
+                                                                        oj.get('opens', 0), len(orig))
+        except (OSError, ValueError):
+            orig_note = None
+    for k, o in opens.items():
+        o['in_original'] = (o['cls'], k) in orig
+    in_orig = sum(1 for o in opens.values() if o['in_original'])
+    metric = {'unimpl': len(by['unimpl']) + len(noexp), 'open': len(opens) - in_orig, 'decode': len(by['decode']),
               'input': len(by['input'])}
     total = sum(metric.values())
     head = {'schema': 'fnvnx-plat/1', 'metric': total, 'parts': metric, 'unimpl_entries': len(by['unimpl']),
             'imports_no_export': sorted(noexp), 'imports': imports, 'noop_entries': len(by['noop']),
             'open_by_class': {}, 'ci_yes': sum(1 for o in opens.values() if o['ci'] == 'yes'),
+            'open_in_original': in_orig, 'metric_all': total + in_orig, 'original': orig_note,
             'logs': [os.path.basename(p) for p in a.logs]}
     for o in opens.values():
         head['open_by_class'][o['cls'] or '?'] = head['open_by_class'].get(o['cls'] or '?', 0) + 1
@@ -134,6 +153,9 @@ def main():
             'input %d; no-op entries %d (not counted)\n' % (total, metric['unimpl'], len(by['unimpl']), len(noexp),
                                                            metric['open'], metric['decode'], metric['input'],
                                                            len(by['noop'])))
+    if a.original:
+        w.write('- baseline: %s; failed opens that also fail in the original: %d (listed, not counted); metric '
+                'without the baseline %d\n' % (orig_note or 'unreadable: nothing subtracted', in_orig, total + in_orig))
     if imports:
         w.write('- imports: %d slots, %d resolved, %d unresolved\n' % imports)
     if opens:
@@ -155,18 +177,24 @@ def main():
     if noexp:
         w.write('\n## imports with no export\n\n' + ''.join('- %s\n' % n for n in sorted(noexp)))
     if opens:
-        w.write('\n## failed opens\n\n| path hash | class | error | ci | calls | entries | caller functions |\n'
-                '|---|---|---:|---|---:|---|---|\n')
-        for k, o in sorted(opens.items(), key=lambda kv: (kv[1]['cls'], -kv[1]['calls'])):
-            w.write('| %s | %s | %s | %s | %d | %s | %s |\n' % (k, o['cls'], o['err'], o['ci'], o['calls'],
-                                                              ', '.join(sorted(o['apis'])), ', '.join(sorted(o['sites'])[:3])))
+        for title, sel in (('failed opens', False), ('failed opens that also fail in the original (not counted)', True)):
+            rows_ = sorted(((k, o) for k, o in opens.items() if o['in_original'] == sel),
+                           key=lambda kv: (kv[1]['cls'], -kv[1]['calls']))
+            if not rows_:
+                continue
+            w.write('\n## %s\n\n| path hash | class | error | ci | calls | entries | caller functions |\n'
+                    '|---|---|---:|---|---:|---|---|\n' % title)
+            for k, o in rows_:
+                w.write('| %s | %s | %s | %s | %d | %s | %s |\n' % (k, o['cls'], o['err'], o['ci'], o['calls'],
+                                                                  ', '.join(sorted(o['apis'])),
+                                                                  ', '.join(sorted(o['sites'])[:3])))
     table('decode', 'audio decode failures', 'decoder and detail')
     table('input', 'unmapped inputs', 'mapping and input')
     table('noop', 'documented no-ops (not counted)', 'entry')
     w.close()
     head['unimpl_list'] = sorted(by['unimpl'])
-    head['open_list'] = [{'path': k, 'class': o['cls'], 'err': o['err'], 'ci': o['ci'], 'calls': o['calls']}
-                         for k, o in opens.items()]
+    head['open_list'] = [{'path': k, 'class': o['cls'], 'err': o['err'], 'ci': o['ci'], 'calls': o['calls'],
+                          'in_original': o['in_original']} for k, o in opens.items()]
     json.dump(head, open(a.out[:-3] + '.json' if a.out.endswith('.md') else a.out + '.json', 'w'), indent=1)
     print('plat: metric %d (unimpl %d, open %d, decode %d, input %d)' % (total, metric['unimpl'], metric['open'],
                                                                        metric['decode'], metric['input']))

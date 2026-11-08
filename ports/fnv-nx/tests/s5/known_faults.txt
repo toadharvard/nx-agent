@@ -23,6 +23,12 @@ rebind-colliding    # a global free function FUN_<X> defined by an unrelated bod
                     # helper under this tag") takes the by-name references meant for X: the display modes' bits per
                     # pixel came from a DXT block-size helper (0 for X8R8G8B8), so renderer init rejected every mode.
                     # Each such definition branches to the address's native (S2c: resolve these by address)
+member-vtables NiTPointerMap|NiTMap@|NiTPrimitiveArray  # member subobjects' native vtables (decomp placeholder templates such as the renderer's RendererMap<N>)
+                    # are as short as declared and bound to nothing; the exe's constructor names each member's vftable
+                    # ([reg+d] stores), so when the native constructor returns, short member vptrs get extended copies
+                    # (RendererPacketMap called slot 1 of a one-slot vtable). Only these containers: on all 657 members,
+                    # and with NiD3DShaderFactory's NiTFixedStringMap<NiGlobalConstantEntry*> (+0x8) alone, the INI
+                    # settings load (0x005e0200) loops (open). S2c: pair member vtables at link time
 ctor-returns-this   # every constructor native (address map kind C) returns this: an MSVC constructor is called as a
                     # function (0x00aa20b0: value = p->FUN_00aa2200(); the OSGlobals and NiGlobalStringTable
                     # constructors before), and an Itanium constructor returns nothing (S2c: C bridges return this)

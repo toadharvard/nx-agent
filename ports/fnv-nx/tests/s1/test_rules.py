@@ -146,6 +146,13 @@ check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', 
 
 got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
 check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
+# DECL1-CONV: a stored / returned result keeps the decomp's declared type where it differs in kind from the platform's
+got = prepare.r_platform_protos('/x/src/c.cpp', '__declspec(dllimport) unsigned int __stdcall CreateMutexA(int, int, const void*);\n'
+                                'extern "C" char* __cdecl strrchr(const char* s, int c);\n'
+                                'void f(const char* n) { unsigned int m; m = CreateMutexA(0, 0, n); char* p = strrchr(n, 47);\n'
+                                '  g(CreateMutexA(0, 0, n)); }\n', Counter())
+check('DECL1-CONV a stored handle result is converted to the decomp type; one passed on is not', got,
+      ['m = ((unsigned int)CreateMutexA(0, 0, n));', 'char* p = ((char*)strrchr(n, 47));', 'g(CreateMutexA(0, 0, n));'])
 got = prepare.r_platform_protos('/x/src/v.cpp', 'int g();\nnamespace std {\nfloat abs(float);\n}\nfloat h(float x) { return std::abs(x); }\n', Counter())
 check('DECL1-STDABS a std::abs prototype becomes fnvnx_cmath/std_abs.h', got,
       ['#include "fnvnx_cmath/std_abs.h" /* fnv-nx DECL1 */', 'std::abs(x)'], ['float abs(float);', '<stdlib.h>'])
@@ -209,6 +216,22 @@ check('IFX1-SSE a dropped SSE prototype includes fnvnx_target_sse.h', _ix,
       ['#include "fnvnx_target_sse.h" /* fnv-nx IFX1 */'], ['_mm_mul_ps(__m128 a'])
 check('IFX1-SSE a kept body includes nothing',
       run(s1.r_if_exists, '__if_not_exists(MyOwnThing)\n{\n    int MyOwnThing;\n}\n'), ['int MyOwnThing;'], ['fnvnx_target_sse'])
+
+# ---- CALL1-RET: a `return f(...);` statement is a call, not the file's own prototype of f
+_c1 = run(s1.r_win32_call_args, '#include "fnvnx_win32.h"\nint h(void* k, int c) {\n    return CallNextHookEx((void*)k, c, 0, 0);\n}\n')
+check('CALL1-RET a returned Win32 call gets its pointer arguments cast', _c1, ['CallNextHookEx((HHOOK)((void*)k)'])
+
+# ---- CALL1-NS: a call qualified by a namespace that only has DECL1's `using ::name;` is the platform function
+_c2 = run(s1.r_win32_call_args, '#include "fnvnx_win32.h"\nnamespace D {\nusing ::CallNextHookEx; /* fnv-nx DECL1 */\n}\n'
+          'int h(void* k, int c) {\n    return D::CallNextHookEx((void*)k, c, 0, 0);\n}\n')
+check('CALL1-NS a call qualified by a namespace with DECL1\'s using-declaration gets its casts', _c2,
+      ['D::CallNextHookEx((HHOOK)((void*)k)'])
+
+# ---- MATH1-OWN: a file's own static C math function, once MATH1 brings <math.h>, is renamed with its calls
+_m1 = run(s1.r_math_overloads, 'extern "C++"\n{\n    inline float __cdecl fabs(float _X)\n    {\n        return ((float)fabs((double)(_X)));\n    }\n}\n'
+          'static __forceinline float sqrtf(float x)\n{\n    return (float)sqrt(x);\n}\nfloat g(float s) { return 1.0f / sqrtf(s); }\n')
+check('MATH1-OWN the unit\'s own static sqrtf is renamed where <math.h> comes in', _m1,
+      ['#include <math.h> /* fnv-nx MATH1 */', 'static __forceinline float fnvnx_own_sqrtf(float x)', '1.0f / fnvnx_own_sqrtf(s)'])
 
 # ---- CTOR1
 check('CTOR1 explicit constructor call of a template class',
@@ -969,7 +992,7 @@ s1.bind_units_data(_data, _c)
 s1.bind_units_data(_data, _c)
 check('BIND1 binds the stand-in names once, in their unit only', repr(_data) + ' %d' % _c['BIND1'],
       ["'?Allocate@MemoryManagerAA3880@@QAEPAXI@Z': '0x00aa3e40'", "'?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A': '0x011f6238'",
-       "'symbols': {}}]} 2", "'?x@@3HA': '0x1'"])
+       "'?entryNpos@@3IA': '0x010173f0'", "'symbols': {}}]} 3", "'?x@@3HA': '0x1'"])
 
 # ---- NATIVE1 (render R3): the drop list's matching, shared by prepare's drop_native_units and tools/rules/native1.py
 _spec = importlib.util.spec_from_file_location('native1', os.path.join(HERE, '..', '..', 'tools', 'rules', 'native1.py'))

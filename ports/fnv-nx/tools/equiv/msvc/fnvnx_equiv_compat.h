@@ -11,6 +11,12 @@
 /* CRT-NOCPPOVL: the target CRT has no C++ template overloads of the secure functions (strcpy_s(char (&)[N], src),
  * strcat_s, sprintf_s, ...); MSVC 2008 declares them in C++ unless this is 0. A unit that keeps its own template of
  * that form next to DECL1's `using ::strcat_s;` (archive.cpp's fnv_00afad00) was ambiguous under MSVC only. */
+/* CRT-NOSAL: the target CRT has no SAL annotations. With attribute SAL (MSVC's default since VC8) sal.h brings in
+ * codeanalysis/sourceannotations.h, whose namespace vc_attributes a unit's own copy of it then defines twice
+ * (hkpspherecapsuleagent_rtm_variant). Annotations generate no code (SAL1's verdict). */
+#ifndef _USE_ATTRIBUTES_FOR_SAL
+#define _USE_ATTRIBUTES_FOR_SAL 0
+#endif
 #ifndef _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES
 #define _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES 0
 #endif
@@ -19,10 +25,21 @@ extern "C" {
 #endif
 void *__cdecl _alloca(unsigned int);                  /* malloc.h; an intrinsic */
 #pragma intrinsic(_alloca)
+#ifdef FNVNX_EQUIV_INTRIN   /* equiv.py's retry for a unit that includes <intrin.h> inside a namespace: here first,
+                             * so that one (#pragma once) adds nothing and every call finds these */
+#ifdef __cplusplus
+}
+#endif
+#include <intrin.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+#else
 void _ReadWriteBarrier(void);                         /* intrin.h; compiler barriers, intrinsics */
 void _ReadBarrier(void);
 void _WriteBarrier(void);
 #pragma intrinsic(_ReadWriteBarrier, _ReadBarrier, _WriteBarrier)
+#endif
 void __cdecl operator_delete_sized(void *, unsigned int);   /* the decomp's spelling (engine functions) */
 void __cdecl _operator_delete_sized(void *, unsigned int);
 #ifdef __cplusplus
@@ -38,6 +55,13 @@ void __cdecl operator delete(void *);
 void __cdecl operator delete[](void *);
 #endif
 /* _CxxThrowException and _ThrowInfo: predefined by the MSVC C++ front end (nothing to declare) */
+/* ANON2-ALIGN: ANON2 (platform) declares a union member as raw storage, `alignas(T) unsigned char m[sizeof(T)]`.
+ * MSVC 2008 has no alignas, and its __declspec(align) takes only a literal (`__alignof(T)` is refused), so the gate
+ * reads it without the alignment. A layout that the alignment changed would show as a code difference; in the two
+ * ANON2 units (extradatalist, nipoint3interpolator) none does: what differs there is declared classes only. */
+#ifndef alignas
+#define alignas(T)
+#endif
 /* ENUM1-FWD: fnvnx_compat.h's `: int` base of an opaque enum declaration; MSVC 2008 has no opaque declarations, its
  * forward declaration `enum X;` (the decomp's own spelling) declares the same int-based type */
 #define FNVNX_ENUM_INT

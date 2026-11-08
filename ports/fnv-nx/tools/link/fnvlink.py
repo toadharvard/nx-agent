@@ -52,9 +52,10 @@ import thisadj  # noqa: E402  (S2c-abi: MSVC entries of secondary-base overrides
 import vacall   # noqa: E402  (S2c-abi: call-site argument types of variadic references)
 import xexit    # noqa: E402  (S2c-abi: native stand-ins of the exe's exit thunks)
 import slotfill2  # noqa: E402  (S2c-vt2: slot fill rules)
+import membervt  # noqa: E402  (S2-bodies class 4: member vtables)
 
 DATA_START = 0x00fdf000          # first address of the image's .rdata/.data/.bss (J-0002)
-DATA_END = 0x0200c612
+DATA_END = 0x014089e4            # end of the image: .reloc 0x01340000 + 0xc89e4 (FalloutNV.exe 1.4.0.525)
 UNDNAME = os.environ.get('UNDNAME') or next((p for p in ('llvm-undname-18', 'llvm-undname')
                                              if any(os.access(os.path.join(d, p), os.X_OK)
                                                     for d in os.environ.get('PATH', '').split(':'))), 'llvm-undname')
@@ -323,11 +324,51 @@ def is_data_addr(a):
     return kind_of_addr(a) == 'data'
 
 
+IMAGE_FIRST = 0x00401000   # the exe's first section (.text); nothing the decomp names lives below it
+
+
+def in_image(a):
+    """An address the exe maps (first section .. DATA_END + a page, kind_of_addr's range): a units.json value
+    outside it (0x0, 0x14, 0x65 for three `g_target_*` anchors) is not where anything lives."""
+    return IMAGE_FIRST <= a < DATA_END + 0x1000
+
+
 def body_data_addr(body_bind, un):
     """S2d `exe-data` (bodies.py): the image address bodies/bind.tsv gives a placeholder variable, else None."""
     cls, target = body_bind.get(un, ('', ''))
     m = re.match(r'^__fnv_([0-9a-f]{8})$', target or '')
     return int(m.group(1), 16) if cls == 'body-exe-data' and m else None
+
+
+ADDR_NAME = re.compile(r'^__fnv_[0-9a-f]{8}$')
+
+
+def provider_or_addr(a, native, providers):
+    """The symbol generated code (exit thunks, stubs) calls for exe address a: `__fnv_<a>` where the native build
+    defines a, else S4's provider when crt_symbols.tsv has one, else `__fnv_<a>` (a visible trap) (R4 recon4-014)."""
+    if a not in native and a in (providers or {}):
+        return providers[a][0]
+    return ADDR_SYM % a
+
+
+def reset_synth(out):
+    """Before the first resolve of a link run: drop the previous run's synthesized objects from what resolve loads -
+    out/bodies/ (bodies.py's objects, synth.tsv and bind.tsv; nothing there is a cache) and vtables/synth.tsv (the
+    probe cache, vtables/cache.json, stays). build/link/out persists between runs, so resolve 1 used to load them:
+    names only those stale objects defined counted as native, so this run's bodies / vtables step skipped them and
+    rewrote its lists without them, and resolve 2 left them undefined. Consecutive runs alternated (links 0540aff0
+    and d1ed15e7: 497 constructors / destructors native -> unresolved, 85 zz_vt and 37 zz_bd objects). Returns what
+    was removed."""
+    gone = []
+    b = os.path.join(out, 'bodies')
+    if os.path.isdir(b):
+        shutil.rmtree(b)
+        gone.append('bodies/')
+    v = os.path.join(out, 'vtables', 'synth.tsv')
+    if os.path.exists(v):
+        os.remove(v)
+        gone.append('vtables/synth.tsv')
+    return gone
 
 
 def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None, override_lib=None,
@@ -813,6 +854,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 # S2d exe-data: a placeholder variable at the image address the exe's code uses for it; bound like
                 # any address (data, an IAT slot GCC calls, TLS)
                 cls, tier, addr, target = 'addr', 'body/exe-data', body_data_addr(body_bind, un), None
+            if addr is not None and cls == 'addr' and not in_image(addr):
+                # S2d (R6 recon6-007): a units.json "address" outside the image (`?g_target_00d53c90@@3HA` at
+                # 0x00000065: a value the recipe recorded, not where the variable lives) is no evidence: the name
+                # stays unresolved, a visible trap, never `__fnv_00000065`
+                cls, tier, note = 'unresolved', 'not-in-image/' + (tier or ''), '%08x is outside the image' % addr
+                addr = None
+                stats['refs_not_in_image'] += 1
             if addr is not None and cls == 'addr':
                 ak = kind_of_addr(addr)
                 if ak == 'data' and un in tls_undef:   # thread-local: native TLS in the image's .tls layout
@@ -1055,7 +1103,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     if sh_ is not None and (sh_[0] != 'thiscall' or sh_[2] in native):
                         cls, target = 'text-callback', XEXIT_SYM % addr
                         if target not in bridges:
-                            bridges[target] = xexit.emit(target, sh_, lambda a_: ADDR_SYM % a_)
+                            bridges[target] = xexit.emit(target, sh_, lambda a_: provider_or_addr(a_, native, providers))
                             used_addr.update([sh_[1], sh_[2]] if sh_[0] == 'thiscall' else [sh_[1]])
                         stats['xexit_' + sh_[0]] += 1
                     else:
@@ -1083,6 +1131,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             elif cls == 'import' and addr in import_syms:   # IAT slot: the slot's api, not the decomp's spelling
                 target = import_syms[addr]
                 stats['imports_bound'] += 1
+            if cls == 'unresolved' and ADDR_NAME.match(un) and int(un[6:], 16) in providers and \
+                    int(un[6:], 16) not in native:
+                # a reference spelled `__fnv_<a>` (recon / decomp text naming the address) where S4 provides a: the
+                # provider, as for every other reference to a (R4 recon4-014)
+                addr = int(un[6:], 16)
+                cls, target = 'provider', providers[addr][0]
+                stats['addr_name_provider'] += 1
             if cls == 'unresolved' and un in vslots:
                 cls = 'vslot-unresolved'
             elif cls == 'unresolved' and isig.variant:
@@ -1390,6 +1445,10 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         # constructor stores; a vftable another native vtable already stands for takes them as displaced ones
         ctor_pairs = ctor_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out)
         exe_pair(exe_cls, vmap, rtti, by_cls, vstats, out, exe_alt)
+        # S2-bodies class 4: the vtables a constructor stores in its members, by the exe constructor's [reg+d] stores
+        for k_, vs_ in member_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out,
+                                          {u.source: u.obj for u in have}).items():
+            ctor_pairs.setdefault(k_, set()).update(vs_)
         for a in rebind:
             rebind[a] = vmap[a][:2]
         # the slots of virtual functions defined nowhere: the native definition at the exe slot's address
@@ -1809,6 +1868,138 @@ def ctor_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out):
         rows.append((z, '%08x' % a, '' if v is None else '%08x' % v, how))
     with open(os.path.join(out, 'ctor_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#native vtable\tconstructor\texe vftable it stores\toutcome\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    return got
+
+
+BOUND_CALLEE = re.compile(r'__fnv(?:nx_cthis)?_([0-9a-f]{8})(?:_C[12])?')
+
+
+def member_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out, obj_of, rules=None):
+    """S2-bodies class 4 (s5-003 round 2): member vtables. A constructor stores one vptr per polymorphic member
+    subobject and secondary base, and so does the exe's: `mov dword ptr [reg+d], imm32` of an RTTI vftable
+    (exevft.ctor_member_vftables; S5's emulator stand-in counts 313 constructors, 888 offsets). The decomp's members
+    are often placeholder classes (the renderer's RendererMap<N> at +0x610..: one slot, bound to nothing, called at
+    slot 1). For every native `??0` definition at an exe constructor's address, the native vptr at the same offset
+    d (membervt.vptr_stores: the last vtable stored at this+d, or the class of the constructor called with this+d)
+    is paired with the exe vftable stored there:
+      * a primary vtable (offset-to-top 0) takes a free vftable in vmap, else joins it as a displaced vtable (alt),
+        so exe_vtable_copies extends it with the exe's slots either way (as ctor_store_pairs does);
+      * a secondary vtable (a member's or the constructor's own secondary base) only stands for the vftable in the
+        slot fill.
+    The decomp's layouts are the exe's (D11's static_asserts), so the offsets are compared as they are. A pairing a
+    named rule excludes (membervt.RULES: NiD3DShaderFactory's NiTFixedStringMap member) is listed and not made.
+    member_vftables.tsv: one row per (constructor, offset) with the outcome.
+    -> {(group, address point): {exe vftable}} for exe_slot_fill."""
+    rules = membervt.RULES if rules is None else rules
+    vfts = set(exev)
+    starts = {w for w, e in exev.items() if e.td and e.off == 0}
+    rows, got = [], collections.defaultdict(set)
+    objs, pts_cache, short = {}, {}, set()
+
+    def pts_of(z):
+        if z not in pts_cache:
+            ents = rtti.ents(z) or []
+            pts_cache[z] = (ents, dict(vtables.address_points(ents)))
+        return pts_cache[z]
+
+    def callee_vtable(name):
+        m = BOUND_CALLEE.fullmatch(name)
+        if m:
+            nd_ = native.get(int(m.group(1), 16))
+            name = nd_['sym'].name if nd_ else ''
+        z = membervt.ctor_class_vtable(name, rtti.where)
+        if z is None:
+            return None
+        p = [p_ for p_, ott in vtables.address_points(rtti.ents(z) or []) if ott == 0]
+        return (z, p[0]) if p else None
+    def is_ctor(name):   # a constructor by its Itanium name, or bound to the address of a native `??0`
+        m = BOUND_CALLEE.fullmatch(name)
+        if m:
+            return (native.get(int(m.group(1), 16), {}).get('msvc') or '').startswith('??0')
+        return bool(membervt.CTOR_NAME.fullmatch(name))
+    for a in sorted(native):
+        nd = native[a]
+        if not (nd.get('msvc') or '').startswith('??0') or not nd.get('unit'):
+            continue
+        m = exevft.ctor_member_vftables(exe_path, a, vfts)
+        if not m:
+            continue
+        vstats['member-vt-constructors'] += 1
+        cv = exevft.ctor_vftable(exe_path, a, starts)
+        ctd = exev[cv].td if cv in exev else None
+        path = obj_of.get(nd['unit'])
+        nat = {}
+        if path:
+            if path not in objs:
+                objs.clear()   # natives are sorted by address, mostly unit by unit: keep one object
+                try:
+                    objs[path] = vtables.Obj(path)
+                except (OSError, ValueError):
+                    objs[path] = None
+            if objs[path] is not None:
+                nat = membervt.vptr_stores(objs[path], nd['sym'].name, is_ctor)
+        for d in sorted(m):
+            v = m[d]
+            e = exev[v]
+            z = ap = None
+            nslots = nm = None
+            ev = nat.get(d)
+            rule = membervt.excluded(ctd, e.td, rules)
+            if ev and ev[0] == 'vt':
+                z, ap = ev[1], ev[2]
+            elif ev:
+                zp = callee_vtable(ev[1])
+                if zp:
+                    z, ap = zp
+            if rule:
+                how = 'excluded: rule ' + rule.name
+            elif path is None:
+                how = 'no object'
+            elif ev is None:
+                how = 'no native vptr store at the offset'
+            elif z is None:
+                how = 'callee constructs no class with a vtable (%s)' % ev[1]
+            elif z not in rtti.where:
+                b = BOUND_CALLEE.fullmatch(z)   # a hand-written vptr bound to its image vftable (D26 c)
+                how = 'native vtable not defined' if not b else 'stores the image vftable itself' if \
+                    int(b.group(1), 16) == v else 'stores another image vftable'
+            elif ap not in pts_of(z)[1]:
+                how = 'not an address point'
+            else:
+                ents, pts = pts_of(z)
+                nslots = vtables.slots_at(ents, ap)
+                dp = exevft.dtor_pos([x.sym for x in ents[ap // 4:ap // 4 + nslots]],
+                                     [x.word for x in ents[ap // 4:ap // 4 + nslots]])
+                nm = nslots - 1 if dp is not None else nslots
+                if vmap.get(v, (None, None))[:2] == (z, ap):
+                    how = 'same'
+                elif pts[ap]:
+                    how = 'paired as secondary (slot fill only)'
+                elif v not in vmap:
+                    vmap[v] = (z, ap, rtti.where[z][0].path, 'primary, the member vftable constructor %08x stores at '
+                               '+%#x' % (a, d))
+                    how = 'paired'
+                else:
+                    if all(x[:2] != (z, ap) for x in alt.get(v, ())):
+                        alt[v].append((z, ap, rtti.where[z][0].path, 'primary'))
+                    how = 'paired as displaced (%s)' % vmap[v][0]
+                got[(z, ap)].add(v)
+                if not pts[ap] and len(e.slots) > nm:
+                    short.add((z, ap, v))
+            # the constructor's own secondary base (its class's vftable at that COL offset) or a member object
+            kind = 'base' if ctd and e.td == ctd and e.off == d else 'member'
+            vstats['member-vt-%s-offsets' % kind] += 1
+            vstats['member-vt-' + how.split(' (')[0].split(':')[0].replace(' ', '-')] += 1
+            if how.startswith('excluded'):
+                vstats['member-vt-excluded-' + rule.name] += 1
+            rows.append(('%08x' % a, ctd or '', '%#x' % d, kind, '%08x' % v, e.td or '', z or '',
+                         '' if ap is None else str(ap), '' if nm is None else str(nm), str(len(e.slots)), how))
+    vstats['member-vt-short'] = len(short)   # primary pairs whose native vtable has fewer slots than the exe's
+    with open(os.path.join(out, 'member_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#constructor\tits exe class\toffset\tbase or member\texe vftable\texe class\tnative vtable\t'
+                'address point\tnative slots (D1/D0 once)\texe slots\toutcome\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
     return got

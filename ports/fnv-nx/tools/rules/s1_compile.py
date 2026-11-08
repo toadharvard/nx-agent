@@ -870,9 +870,18 @@ def r_win32_call_args(path, text, stats):
     names = [n for n in sigs if n in text]
     if not names: return text
     # names the file still declares itself (C++ prototypes kept in a namespace) resolve to those: leave them
-    names = [n for n in names if not re.search(r'[\w\*&>]\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
+    # (a call statement `return CallNextHookEx(...);` is not a prototype: CALL1-RET)
+    names = [n for n in names if not re.search(r'[\w\*&>](?<!\breturn)(?<!\belse)(?<!\bcase)(?<!\bthrow)(?<!\bdo)'
+                                               r'\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
     if not names: return text
-    call = re.compile(r'(?<![\w.>:~])(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
+    # N::name( where namespace N only has DECL1's `using ::name;` is the platform function too (CALL1-NS:
+    # blk_00860000's InstalledPathDetail::RegOpenKeyExA)
+    aliased = {}
+    for am in re.finditer(r'\bnamespace\s+(\w+)\s*\{', text):
+        body = text[am.end():prepare.match_brace(text, am.end() - 1)]
+        for n in re.findall(r'\busing\s+::\s*(\w+)\s*;', body):
+            aliased.setdefault(n, set()).add(am.group(1))
+    call = re.compile(r'(?<![\w.>:~])((?:\w+\s*::\s*)?)(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
     bodies = []                                      # outermost function bodies, in order
     for o, c, k, _ in prepare.scope_spans(text):
         if k == 'function' and not (bodies and o < bodies[-1][1]): bodies.append((o, c))
@@ -880,6 +889,8 @@ def r_win32_call_args(path, text, stats):
     out, pos, bi = [], 0, 0
     for m in call.finditer(text):
         if m.start() < pos: continue
+        q = re.sub(r'\s*::\s*$', '', m.group(1))
+        if q and q not in aliased.get(m.group(2), ()): continue
         while bi < len(bodies) and bodies[bi][1] < m.start(): bi += 1
         if bi == len(bodies) or not bodies[bi][0] < m.start(): continue
         before = text[max(0, m.start() - 40):m.start()].rstrip()
@@ -887,9 +898,9 @@ def r_win32_call_args(path, text, stats):
         if prev and prev.group(1) not in ('return', 'case', 'else', 'do'): continue   # a declaration
         close = _call_end(text, m.end() - 1)
         args = _split_args(text[m.end():close - 1])
-        types = sigs[m.group(1)]
+        types = sigs[m.group(2)]
         if len(args) != len(types): continue
-        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(1), ())
+        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(2), ())
         new = []
         for i, (a, t) in enumerate(zip(args, types)):
             if t is None or not a.strip(): new.append(a); continue
@@ -1679,7 +1690,12 @@ def _unit_symbols(path):
         root, uj = prepare._units_json(path)
         if uj:
             for u in json.load(open(uj))['units']:
-                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = u.get('symbols', {})
+                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = dict(u.get('symbols', {}))
+            # BIND1's rows (a POST hook on units.json): the source rules see the bindings the link will have
+            for src, name, addr in BIND1_REFS + sorted(VLIT1_BINDS):
+                k = os.path.normpath(os.path.join(root, src))
+                if k in _UNIT_SYMBOLS:
+                    _UNIT_SYMBOLS[k].setdefault(name, addr)
     return _UNIT_SYMBOLS.get(os.path.normpath(os.path.abspath(path)))
 
 def _param_type(p):
@@ -2115,7 +2131,25 @@ def r_math_overloads(path, text, stats):
         have, pos = have or not in_ns, end
         stats['MATH1'] += 1
     out.append(text[pos:])
-    return ''.join(out)
+    text = ''.join(out)
+    return math_own_statics(text, stats) if have else text
+
+# MATH1-OWN: where MATH1 puts <math.h> in place of a copy, a `static` definition the file keeps of a C math function
+# (`static __forceinline float sqrtf(float x) { return (float)sqrt(x); }`, hkpboxboxcollisiondetection_rtm_variant)
+# now meets <math.h>'s extern "C" declaration of the same name: MSVC refuses it (C2375), GCC takes it only under
+# -fpermissive and then calls the C library function instead of the unit's own body. The definition and the file's
+# calls of it are renamed fnvnx_own_<name>: the unit's own function, on both compilers. One file in the tree today.
+
+MATH_OWN_STATIC = re.compile(r'^[ \t]*static\s+(?:(?:inline|__inline|__forceinline)\s+)*(?:float|double|long\s+double)\s+'
+                             r'(?:__cdecl\s+)?(%s)\s*\([^;{}()]*\)\s*\{' % '|'.join(sorted(
+                                 n for n in prepare.CRT_HEADERS['<math.h>'].split() if re.match(r'^[a-z]\w*$', n))), re.M)
+
+def math_own_statics(text, stats):
+    names = sorted(set(MATH_OWN_STATIC.findall(text)))
+    for n in names:
+        text = re.sub(r'(?<![\w.>:~])%s(?=\s*\()' % n, 'fnvnx_own_' + n, text)
+        stats['MATH1-OWN'] += 1
+    return text
 
 # ---------------------------------------------------------------------------------------------------------- SPEC2
 
@@ -4046,6 +4080,24 @@ BIND1_REFS = [
     # (unit source, MSVC decorated name, address)
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?Allocate@MemoryManagerAA3880@@QAEPAXI@Z', '0x00aa3e40'),
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A', '0x011f6238'),
+    # Placeholder variables decl-data would give a zero copy (S2-bodies), each with the exe's bytes at the site the
+    # unit's pristine object references it:
+    # * RefSet6b3c0::Insert (the unit binds it to 0x00c68b50; Node6b3c0::operator new inlined): the exe has
+    #   `push 8; mov ecx, 0x011f6238; call 0x00aa3e40` at 0x00c68b63, where the pristine object relocates
+    #   g_memoryManager6b3c0 (DIR32) and MemoryManager6b3c0::Allocate (REL32): the memory manager and its Allocate.
+    ('src/fallout_shared/globalfunc_o2_variant.cpp', '?g_memoryManager6b3c0@@3UMemoryManager6b3c0@@A', '0x011f6238'),
+    ('src/fallout_shared/globalfunc_o2_variant.cpp', '?Allocate@MemoryManager6b3c0@@QAEPAXI@Z', '0x00aa3e40'),
+    # * ??_G of FUN_00ae8d10 (slot 0 of the vftable the unit binds, 0x010a3328 -> 0x00ae9060; MapBase8D10's
+    #   operator delete inlined): `if (flags & 1) { push this; mov ecx, 0x011f6238; call 0x00aa4060 }` at 0x00ae90cf.
+    ('src/staging/blk_00ae0000_od_ob1_variant.cpp', '?g_kMemoryManager8D10@@3UMemoryManager8D10@@A', '0x011f6238'),
+    ('src/staging/blk_00ae0000_od_ob1_variant.cpp', '?Deallocate@MemoryManager8D10@@QAEXPAX@Z', '0x00aa4060'),
+    # * OutlinedEntry's constructor 0x00aaec10 (`assign(rhs, 0, entryNpos)`): `mov edx, [0x010173f0]; push edx` at
+    #   0x00aaec6f, the .rdata word 0xffffffff (npos) other units bind as DAT_010173f0.
+    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?entryNpos@@3IA', '0x010173f0'),
+    # * Vector12::length_error (blk_00ac0000_od_ob1_variant.cpp, a static in-class stand-in throwing with the
+    #   placeholder vector_error_message): the exe's ReserveItems 0x0065cfd0 calls 0x0065f640 (ThrowVectorTooLong,
+    #   which pushes the exe's own message) at 0x0065d00e, where the pristine object calls this name
+    ('src/staging/blk_00ac0000_od_ob1_variant.cpp', '?length_error@Vector12@@SAXXZ', '0x0065f640'),
 ]
 
 def bind_units_data(data, stats, refs=BIND1_REFS):
