@@ -631,6 +631,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
     stats = collections.Counter(pre_stats)
     stats['libstdcxx_identifiers'] = len(std_identifiers(os.path.join(out, 'cache')))   # decomp_std's view
+    stats['libstdcxx_symbols'] = len(std_exports(os.path.join(out, 'cache')))
     byclass = collections.Counter()
     # the game's operator new/delete for GCC's global forms: the unit's own binding of the MSVC name, else the one
     # most units use
@@ -3396,12 +3397,74 @@ def std_identifiers(cache_dir=None):
     return ids
 
 
+STD_EXPORTS = []   # [set] of every global symbol libstdc++ defines (std_exports); empty: not known
+STD_PLATFORM = []  # [set] of the std:: names platform/crt defines under an asm label (platform_std_names)
+CRT_DIR = os.path.normpath(os.path.join(HERE, '..', '..', 'platform', 'crt'))
+
+
+def std_exports(cache_dir=None):
+    """Every global symbol the toolchain's libstdc++ defines (`nm -g --defined-only` of its libstdc++.a and of the
+    shared library next to it; $CXX -print-file-name finds both), cached in <cache_dir>/libstdcxx_syms.txt. A std::
+    name referenced and undefined in an object is one the unit's own headers did not instantiate, so only a library
+    symbol can satisfy it. Empty when the compiler or nm is not there (decomp_std then relies on the identifiers)."""
+    if STD_EXPORTS:
+        return STD_EXPORTS[0]
+    path = os.path.join(cache_dir, 'libstdcxx_syms.txt') if cache_dir else None
+    syms = set()
+    if path and os.path.exists(path):
+        syms = set(open(path).read().split())
+    else:
+        cxx = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
+        nm = os.environ.get('NM', cxx[:-len('g++')] + 'nm' if cxx.endswith('g++') else 'nm')
+        for lib, flags in (('libstdc++.a', ['-g']), ('libstdc++.so', ['-D'])):
+            try:
+                p = subprocess.run([cxx, '-print-file-name=' + lib], capture_output=True, text=True, timeout=60)
+                f = p.stdout.strip()
+                if p.returncode or not os.path.isabs(f) or not os.path.exists(f):
+                    continue
+                r = subprocess.run([nm] + flags + ['--defined-only', os.path.realpath(f)], capture_output=True,
+                                   text=True, timeout=300, errors='replace')
+            except (OSError, subprocess.SubprocessError):
+                continue
+            for line in r.stdout.splitlines():
+                w = line.split()
+                if len(w) == 3:
+                    syms.add(w[2].split('@')[0])
+        if syms and path:
+            os.makedirs(cache_dir, exist_ok=True)
+            open(path, 'w').write('\n'.join(sorted(syms)) + '\n')
+    STD_EXPORTS.append(syms)
+    return syms
+
+
+def platform_std_names():
+    """The std:: names platform/crt defines (S4's msvc_std_names.cpp: asm labels spelled as string literals) - they
+    stay with the runtime link, whoever the libstdc++ is."""
+    if not STD_PLATFORM:
+        names = set()
+        if os.path.isdir(CRT_DIR):
+            for f in sorted(os.listdir(CRT_DIR)):
+                if f.endswith(('.c', '.cpp', '.h')):
+                    names |= set(re.findall(r'"(_ZN?K?St\w+)"', open(os.path.join(CRT_DIR, f), errors='replace').read()))
+        STD_PLATFORM.append(names)
+    return STD_PLATFORM[0]
+
+
 def decomp_std(un, isig):
-    """A `std::` name (_ZNSt / _ZSt) whose first component after std:: libstdc++ does not declare: the decomp's own
-    class or function in namespace std (std::StandardLibrarySingletonObject, std::StringBase::_Xlen, std::_Lockit,
-    std::FUN_00ad5770, ...). libstdc++ defines none of them, so they are classified like any other decomp name
-    (units.json, bodies' exe-addr / crt-rule) instead of being left to the runtime (topdown rank 2/3, d1ed15e7)."""
-    if not un.startswith(('_ZNSt', '_ZSt')) or not STD_IDS or not STD_IDS[0]:
+    """A `std::` name (_ZNSt / _ZSt) that libstdc++ cannot provide: the decomp's own class or function in namespace
+    std (std::StandardLibrarySingletonObject, std::StringBase::_Xlen, std::_Lockit, std::FUN_00ad5770, ...), or an
+    MSVC STL helper or member it declares without a body (std::_Destroy<T>(T*), std::swap<T>(T&, T&) with a
+    `void` result, std::fill, std::vector<T>::_Xlen, std::locale::facet::_Incref, std::bad_cast(const char*), ...).
+    Two tests, either one: libstdc++'s headers do not declare the first component after std:: (the identifiers,
+    std_identifiers), or the name is not a symbol of the toolchain's libstdc++ (std_exports) and platform/crt does
+    not define it (platform_std_names). They are classified like any other decomp name (units.json, bodies'
+    exe-addr / crt-rule) instead of being left to the runtime (topdown rank 2/3 on d1ed15e7; the second test:
+    rows 1047-1154 on 0540aff0d154)."""
+    if not un.startswith(('_ZNSt', '_ZSt')):
+        return False
+    if STD_EXPORTS and STD_EXPORTS[0] and un not in STD_EXPORTS[0] and un not in platform_std_names():
+        return True
+    if not STD_IDS or not STD_IDS[0]:
         return False
     q = getattr(isig, 'qual', None) or []
     if len(q) < 2 or q[0] != 'std':
