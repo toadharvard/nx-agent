@@ -89,6 +89,50 @@ if [ -z "${FARM_GAME:-}" ]; then
 fi
 [ -f "$GAME/FalloutNV.exe" ] || fail "no FalloutNV.exe in $GAME"
 GAMEDESC="$(sha256sum "$GAME/FalloutNV.exe" | cut -c1-12), Data: $(ls "$GAME/Data" 2> /dev/null | wc -l) entries"
+
+# ---- TRACE_SITES=<branch>:<file> (T1, rawvt-wine; orchestrator: the receiver's vptr at S1's raw-slot sites from the
+# ORIGINAL game, not from our boot): only the Wine pass. tools/lockstep/rawvt_sites.py list turns S1's sites table
+# (e.g. recon/s1_rawvt_sites:rawvt_wine_sites.tsv) into fnvtrace site lines (`@addr reg`: the slot load, or every
+# indirect call's slot load in exe_fn), wine_trace.sh runs the exe TRACE_WINE_S seconds with them
+# (FNVTRACE_SITEMAX hits logged per site, default 8), rawvt_sites.py report writes the vptr per site with its
+# vftable's RTTI class (or "outside the image": COM / DLL) and the sites never reached. Published to
+# reports/rawvt-wine/<c12>.tsv of the artifacts repository (game-derived: never here). No link, no guest.
+if [ -n "${TRACE_SITES:-}" ]; then
+	PT=$(date +%s)
+	sb=${TRACE_SITES%%:*}; sf=${TRACE_SITES#*:}
+	git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$sb:refs/remotes/origin/$sb" 2> /dev/null || fail "fetch $sb"
+	git -C "$ARTIFACTS" show "refs/remotes/origin/$sb:$sf" > "$W/sites.tsv" || fail "no $sf on $sb"
+	python3 -I "$P/tools/lockstep/rawvt_sites.py" list "$W/sites.tsv" "$GAME/FalloutNV.exe" "$W/sites.list" "$W/sites.map" \
+		> "$W/sites.txt" 2>&1 || fail "rawvt_sites.py list (see $W/sites.txt)"
+	phase sites "$(tail -1 "$W/sites.txt")"
+	PT=$(date +%s); rm -f "$W/sites-wine.tsv"
+	export FNVTRACE_SITEMAX=${FNVTRACE_SITEMAX:-8}
+	bash "$P/tools/lockstep/wine_trace.sh" "$GAME" "$FARM_HOME/boot_trace_wine" "$W/sites.list" "$W/sites-wine.tsv" "${TRACE_WINE_S:-300}" \
+		> "$W/wine_trace.log" 2>&1 || NOTES+=("wine_trace.sh exit $? (log $W/wine_trace.log)")
+	[ -f "$W/sites-wine.tsv" ] || soft_fail "the Wine run wrote no log (log $W/wine_trace.log)"
+	phase reference "$(tail -2 "$W/wine_trace.log" | tr '\n' ' ' | cut -c1-200)"
+	PT=$(date +%s)
+	if [ -f "$W/sites-wine.tsv" ] && python3 -I "$P/tools/lockstep/rawvt_sites.py" report "$W/sites.tsv" "$GAME/FalloutNV.exe" \
+			"$W/sites.map" "$W/sites-wine.tsv" "$W/rawvt-wine.tsv" > "$W/sites-report.txt" 2>&1; then
+		phase report "$(tail -1 "$W/sites-report.txt")"
+		g=$W/rawvt.git; rm -rf "$g"; c12=${COMMIT:0:12}; url=$(git -C "$ARTIFACTS" remote get-url origin)
+		git init -q "$g"
+		if git -C "$g" fetch -q "$url" refs/heads/reports/rawvt-wine 2> /dev/null; then git -C "$g" checkout -q -b w FETCH_HEAD
+		else git -C "$g" checkout -q --orphan w; fi
+		cp "$W/rawvt-wine.tsv" "$g/$c12.tsv"
+		if git -C "$g" add "$c12.tsv" && git -C "$g" -c user.name="fnvnx farm" -c user.email=farm@invalid commit -qm "rawvt-wine $c12 ($TRACE_SITES)" &&
+				git -C "$g" push -q "$url" "HEAD:refs/heads/reports/rawvt-wine" 2> "$W/push.log"; then
+			NOTES+=("published reports/rawvt-wine/$c12.tsv ($(tail -1 "$W/sites-report.txt"))")
+		else soft_fail "publishing reports/rawvt-wine/$c12.tsv failed (log $W/push.log)"; fi
+		rm -rf "$g"
+	else
+		soft_fail "rawvt_sites.py report failed (see $W/sites-report.txt)"
+	fi
+	LC="- (TRACE_SITES: no link)"
+	write_report; log "done: $REPORT"
+	if [ ${#FAILS[@]} -gt 0 ]; then exit 1; fi
+	exit 0
+fi
 LC=${TRACE_LINK:-}
 if [ -z "$LC" ]; then
 	if git -C "$ARTIFACTS" ls-remote --exit-code origin "refs/heads/link/${COMMIT:0:12}" > /dev/null 2>&1; then LC=${COMMIT:0:12}; LCSRC="this head's link"
