@@ -3493,13 +3493,12 @@ def _stand_ins(path, text, stats, which):
         info = _unit_info(path)
         if info is None or set(info[0]) & STAND2_INLINING_FLAGS: return text
         elsewhere = _all_unit_functions(path) - info[1]
-    spans, edits = None, []
+    spans, edits, cands, tagged_prefixes = None, [], [], set()
     for m in STAND_DEF.finditer(text):
         q = re.sub(r'\s+', '', m.group(2))
         parts = q.split('::')
         if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS: continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', m.group(1) or ''): continue
-        if _stand_tagged(text, m.start()): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
         if any(k != 'namespace' for k, _ in chain): continue
@@ -3509,11 +3508,17 @@ def _stand_ins(path, text, stats, which):
         if len(parts) >= 2 and name == parts[-2]: prefix = '??0' + '@'.join(scope) + '@@'
         elif name.startswith('~'): prefix = '??1' + '@'.join(scope) + '@@'
         else: prefix = '?' + '@'.join([name] + scope) + '@@'
+        if _stand_tagged(text, m.start()):
+            tagged_prefixes.add(prefix); continue
+        cands.append((m, q, parts, name, prefix))
+    placed = _UNIT_PLACED.get(os.path.normpath(os.path.abspath(path)), ())
+    for m, q, parts, name, prefix in cands:
         if which == 'STAND1':
             if not any(k.startswith(prefix) and int(a, 16) in tagged for k, a in syms.items()): continue
-            # the unit's own recipe places this name: it is the function, whatever carries the tag (R2: caravanmenu
-            # 0x0073b730, the tag sits on TESCaravanCard::FUN_0073b730_card, units.json places NPCHandArrayInfo's)
-            if any(k.startswith(prefix) for k in _UNIT_PLACED.get(os.path.normpath(os.path.abspath(path)), ())):
+            # the unit's own recipe places this name and no tagged definition of the unit has it: it is the function,
+            # the tag sits on another one (R2: caravanmenu 0x0073b730, the tag is on TESCaravanCard::
+            # FUN_0073b730_card, units.json places NPCHandArrayInfo's). A tagged overload of the name keeps STAND1.
+            if prefix not in tagged_prefixes and any(k.startswith(prefix) for k in placed):
                 continue
         else:
             bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
