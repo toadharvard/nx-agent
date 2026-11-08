@@ -1683,6 +1683,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for k_, vs_ in member_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out,
                                           {u.source: u.obj for u in have}).items():
             ctor_pairs.setdefault(k_, set()).update(vs_)
+        # W47: the shells no pass paired, by the vptr stores of any function bound to an exe address (factories,
+        # stand-in constructors without a `??0` name, inlined decomp constructors): bound_store_pairs
+        for k_, vs_ in bound_store_pairs(exev, vmap, rtti, native, exe_path, exe_alt, vstats, out,
+                                         {u.source: u.obj for u in have}, ctor_pairs).items():
+            ctor_pairs.setdefault(k_, set()).update(vs_)
         for a in rebind:
             rebind[a] = vmap[a][:2]
         # the slots of virtual functions defined nowhere: the native definition at the exe slot's address
@@ -2281,6 +2286,140 @@ def store_seq_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out, obj_of
             vstats['seq-vt-' + how.split(' (')[0].split(':')[0].replace(' ', '-')] += 1
             rows.append((z, '%08x' % a, kind, '%d/%d' % (len(ns), len(exs)), '%08x' % v, how))
     with open(os.path.join(out, 'seq_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+        f.write('#native vtable\tfunction\tkind\tnative/exe stores\texe vftable\toutcome\n')
+        for r in rows:
+            f.write('\t'.join(r) + '\n')
+    return got
+
+
+def _prefix_ok(exev, vs):
+    """The exe vftables vs agree slot by slot (each one's slots a prefix of the others')."""
+    vs = sorted(vs)
+    return all(exev[a].slots[:len(exev[b].slots)] == exev[b].slots[:len(exev[a].slots)]
+               for i, a in enumerate(vs) for b in vs[i + 1:])
+
+
+def bound_store_pairs(exev, vmap, rtti, native, exe_path, alt, vstats, out, obj_of, taken=()):
+    """W47: shell vtables by the stores of any bound function. A decomp stand-in's vtable that no pass paired (no
+    `??_7` name, not `_ZTV<n>FUN_<ctor>`, no `??0` / `??1` at the function storing it: `_ZTV12FUN_0050adf0`, the
+    `CreateObject` / `Clone` factories of the staging blocks) is still stored into objects by natively compiled code:
+    a function F that the address map binds to exe address X materialises `_ZTV<z>+8` and stores it at [xN] (this,
+    the result of `operator new`, or a copy; membervt.vt_store_seq, which also takes in the stores of the decomp's
+    own out-of-line constructors F calls that no exe address binds - the exe inlined them). The exe function at X
+    stores its vftables at [reg] (exevft.vptr_store_seq). The two lists are paired by position:
+      * as many stores on both sides: one pair per position;
+      * one native vtable and one exe vftable, each stored one or more times: that pair;
+      * else a constructor (`??0`) pairs its last stores, a destructor (`??1`, `??_G`, `??_E`) its first; any other
+        function pairs nothing (`counts differ`).
+    A vtable is paired only when every function agrees on its vftable, or on vftables that agree slot by slot (one a
+    prefix of the other); else it is a conflict and stays unpaired. A vtable another pass paired (vmap, alt, taken)
+    is left. A free vftable takes the vtable in vmap; one that has a vtable takes it as a displaced one (alt), so
+    exe_vtable_copies (VTFILL) writes it as transform(exe table) either way, and never over a strong definition.
+    bound_vftables.tsv: one row per (function, pair) with the outcome. FNVNX_BSTORE=0 turns the pass off.
+    -> {(group, address point): {exe vftable}} for exe_slot_fill."""
+    got = collections.defaultdict(set)
+    if os.environ.get('FNVNX_BSTORE', '1') == '0':
+        return got
+    bound = {e[0] for e in vmap.values()} | {x[0] for zs in alt.values() for x in zs} | {k[0] for k in taken}
+    starts = {w for w, e in exev.items() if e.td and e.off == 0}
+    names = set()
+    for nd in native.values():
+        names.add(nd['sym'].name)
+        names.update(s.name for s in (nd.get('variants') or {}).values())
+    prim = {}
+
+    def primary(z):
+        if z not in prim:
+            prim[z] = {p for p, ott in vtables.address_points(rtti.ents(z) or []) if ott == 0} if z in rtti.where \
+                else set()
+        return prim[z]
+    objs, cand = {}, []
+    for a in sorted(native):
+        nd = native[a]
+        path = obj_of.get(nd.get('unit'))
+        if not path:
+            continue
+        if path not in objs:
+            objs.clear()   # natives are sorted by address, mostly unit by unit: keep one object
+            try:
+                objs[path] = vtables.Obj(path)
+            except (OSError, ValueError):
+                objs[path] = None
+        o = objs[path]
+        sym = nd['sym'].name
+        if o is None or sym not in o.defs:
+            continue
+        _, value, size, typ, _, shndx = o.syms[o.defs[sym]]
+        if typ != 2 or shndx >= len(o.secs):
+            continue
+        def local_ctor(c):   # the decomp's own out-of-line constructor, in this object, bound to no exe address
+            return c not in names and c in o.defs and bool(membervt.CTOR_NAME.fullmatch(c))
+        if not any(value <= off < value + size and (o.syms[r[0]][0].startswith('_ZTV') or local_ctor(o.syms[r[0]][0]))
+                   for off, r in o.rel(shndx).items()):
+            continue   # names no vtable and calls no such constructor (most functions): the cheap test first
+        memo, depth = {}, [0]
+
+        def expand(c):
+            if not local_ctor(c) or depth[0] > 2:
+                return None
+            if c not in memo:
+                memo[c] = []
+                depth[0] += 1
+                memo[c] = membervt.vt_store_seq(o, c, expand)
+                depth[0] -= 1
+            return memo[c]
+        ns = [(z, ap) for z, ap in membervt.vt_store_seq(o, sym, expand) if ap in primary(z)]
+        if not any(z not in bound for z, _ in ns):
+            continue
+        exs = exevft.vptr_store_seq(exe_path, a, starts)
+        kind = seq_kind(a, nd)
+        if not exs:
+            vstats['bstore-vt-no-exe-store'] += 1
+            rows_ = [(z, '%08x' % a, kind or '-', '%d/0' % len(ns), '', 'no exe store') for z, _ in ns if z not in bound]
+            cand.append((a, kind, ns, exs, [], rows_))
+            continue
+        if len(ns) == len(exs):
+            pairs = list(zip(ns, exs))
+        elif len(set(ns)) == 1 and len(set(exs)) == 1:
+            pairs = [(ns[0], exs[0])]
+        elif kind == 'ctor':
+            pairs = [(ns[-1], exs[-1])]
+        elif kind == 'dtor':
+            pairs = [(ns[0], exs[0])]
+        else:
+            pairs = []
+            vstats['bstore-vt-counts-differ'] += 1
+        cand.append((a, kind, ns, exs, pairs, [] if pairs else [
+            (z, '%08x' % a, kind or '-', '%d/%d' % (len(ns), len(exs)), '', 'counts differ')
+            for z, _ in ns if z not in bound]))
+    claim = collections.defaultdict(lambda: collections.defaultdict(list))
+    for a, kind, ns, exs, pairs, _ in cand:
+        for (z, ap), v in pairs:
+            if z not in bound:
+                claim[(z, ap)][v].append(a)
+    rows = []
+    for a, kind, ns, exs, pairs, extra in cand:
+        rows += extra
+        for (z, ap), v in pairs:
+            if z in bound and (z, ap) not in claim:
+                how = 'bound'
+            elif len(claim[(z, ap)]) > 1 and not _prefix_ok(exev, claim[(z, ap)]):
+                how = 'conflict: %s' % ' '.join('%08x' % x for x in sorted(claim[(z, ap)]))
+            elif v in vmap and vmap[v][:2] == (z, ap) or any(x[:2] == (z, ap) for x in alt.get(v, ())):
+                how = 'same'
+            elif v not in vmap:
+                vmap[v] = (z, ap, rtti.where[z][0].path, 'primary, the vftable the exe function %08x stores in the '
+                           'same position as the native one (bound stores)' % a)
+                how = 'paired'
+                got[(z, ap)].add(v)
+            else:
+                alt[v].append((z, ap, rtti.where[z][0].path, 'primary'))
+                how = 'paired as displaced (%s)' % vmap[v][0]
+                got[(z, ap)].add(v)
+            vstats['bstore-vt-' + how.split(' (')[0].split(':')[0].replace(' ', '-')] += 1
+            rows.append((z, '%08x' % a, kind or '-', '%d/%d' % (len(ns), len(exs)), '%08x' % v, how))
+    vstats['bstore-vt-tables'] = len(got)
+    with open(os.path.join(out, 'bound_vftables.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#native vtable\tfunction\tkind\tnative/exe stores\texe vftable\toutcome\n')
         for r in rows:
             f.write('\t'.join(r) + '\n')
