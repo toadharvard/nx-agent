@@ -40,3 +40,8 @@ These come from the owner and bind every orchestrator session, including one tha
    it, so each check-in verifies it is running.
 10. **wip branches.** Try farms read `wip/*` from toadharvard/fnv-nx-build. A stream that pushes a wip branch pushes
     it to both remotes, fast-forward only.
+11. **Ratchet: what works stays working.** Every working item is recorded per metric with the head that first
+    reached it: identical functions (eqa), passing fuzz functions, boot milestones and skips, passing shader
+    programs, trap and undefined counts, D25 counts. Every farm report checks the newest head against that ledger.
+    A regression makes the report's first line `- REGRESSION`. The commit that caused it is fixed or reverted
+    before the next merge of the same area. T1 owns tools/farm/ratchet.py.
