@@ -251,6 +251,12 @@ braces.
   body has them (76, among them the `GetChangeFlags` family of the pilot in 27 files); free functions (38); the donor's
   surplus differs from the receiver's deficit (30: one call shares its words with two others); side effects in moved
   arguments (19); conflicting hunks (26); paths with blanks (10).
+- POP2 (S2-bodies, tools/rules/s2_bodies.py; a prepare POST hook, no patch text): the chain fix as a rule, decided
+  from units.json's decorated names (the reference's words against the definition's) instead of popscan, with the
+  declarations found by MSVC's scopes in the unit or a local header (the `GetChangeFlags` family and the per-function
+  namespaces popgen left manual), and the S1b patches already applied when it runs. It also takes the explicit
+  `.operator bool()` spelling and literal type / name back-references in the moved codes. THIS2 is XINC1's shapes
+  A-C for the callers listed in `THIS2_SITES` (exe evidence: ecx untouched up to the call).
 
 S13b's `native-garbage-arg` hand-offs (131 functions) are mostly these: 30 are sites of these patches, 52 are
 `fewer-donor` / `fewer-other` callers still open, 4 call only `more` / `fewer-unread` callees, and 45 have no

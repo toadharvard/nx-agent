@@ -376,8 +376,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
     this tree, 'none': not used). exe: the player's FalloutNV.exe (None: FNVNX_EXE / PLAYER_EXE, 'none': not used):
     its RTTI pairs each image vftable with its own class's native vtable (exevft.py)."""
+    import time
+    _pt, _phases = [time.time()], []
+
+    def _phase(name):   # seconds per step (T1: what the incremental link has left to do)
+        now = time.time()
+        _phases.append('%s %.1f s' % (name, now - _pt[0]))
+        _pt[0] = now
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
     os.makedirs(os.path.join(out, 'objcopy'), exist_ok=True)
+    sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'), prune=True)   # the last link's parses (T1)
     pre_stats = collections.Counter()
     tree = os.path.dirname(os.path.dirname(os.path.abspath(units_json)))   # <tree>/build/units.json
     renames = load_renames(UNITS_RENAMES if units_renames is None else units_renames, tree)
@@ -392,6 +400,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     have = [u for u in units.values() if u.obj]
     log('units: %d, with objects: %d' % (len(units), len(have)))
 
+    _phase('load units+objects')
     # MSVC side
     ms = DemangleCache(os.path.join(out, 'cache', 'msvc.tsv'), UNDNAME)
     allms = set()
@@ -457,6 +466,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     body_bind = bodies.load_bind(out)
     # ---- end S2d
 
+    _phase('msvc side')
     # Itanium side
     objsyms, itnames = {}, set()
     for u in have:
@@ -485,6 +495,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 if s.bind == 'global' and not s.comdat:
                     strong[s.name].append(u.source)
 
+    _phase('itanium side')
     # ---- definitions: original address -> native symbol in the defining object
     native = {}      # addr -> dict(unit, sym (elf Sym), variants {variant: Sym}, how)
     def_stats = collections.Counter()
@@ -606,6 +617,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             pre_stats['msvc_entry_no_thunk'] += 1
     pre_stats['msvc_entry_exe'] = len(sec_entries)
 
+    _phase('definitions/overrides')
     # ---- references
     layouts = {k: v for k, v in layout.load(os.path.join(out, 'layouts.tsv'), tree).items() if v is not None}
     lay_of = abi2.lookup(layouts)   # unit -> type -> Layout, with the unit's unique `ns::type` for a bare name
@@ -614,6 +626,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     refs_out = open(os.path.join(out, 'refs.tsv'), 'w', encoding='utf-8', errors='surrogateescape')
     refs_out.write('#object\tundefined\tclass\ttier\taddress\ttarget\tnote\n')
     stats = collections.Counter(pre_stats)
+    stats['libstdcxx_identifiers'] = len(std_identifiers(os.path.join(out, 'cache')))   # decomp_std's view
     byclass = collections.Counter()
     # the game's operator new/delete for GCC's global forms: the unit's own binding of the MSVC name, else the one
     # most units use
@@ -783,6 +796,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             called_cache[u_.source] = {o_.syms[si][0] for i_ in range(len(o_.secs)) if o_.secs[i_][2] & 4
                                        for _, (si, typ, _) in o_.rel(i_).items() if typ in (21, 20)}   # P32
         return called_cache[u_.source]
+    _phase('references (1)')
     # S2b-vslots: slots of GCC vtables bound through the MSVC 2008 vftables (vslots.py; --msvc-objs / FNVNX_MSVC_OBJS)
     ecx_use = msvc_code_use(units_json, ms, msvc, renames)
     for u in have:
@@ -1208,6 +1222,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 have_def.add((sym.name, u.source))
                 stats['rebound_copies'] += 1
 
+    _phase('references')
     # ---- per object objcopy args: renames, address symbols for the definitions it holds, localize duplicates
     alias_lines, localize = [], collections.defaultdict(list)
     alias_lines += ['%s = 0x%08x;' % (TEXTADDR_SYM % a, a) for a in sorted(text_addrs)]
@@ -1323,6 +1338,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                   errors='surrogateescape') as f:   # rebound variables: apply retargets the object's own references
             f.write(''.join(n + '\n' for n in sorted(set(dd.values()))))
 
+    _phase('objcopy args')
     # ---- vftables
     # image vftables (primary `vftable' and secondary `vftable'{for `B'}) -> address point of the Itanium vtable of
     # the class of the same name, emitted by a compiled object or synthesized (vtables.py, docs/LINK.md "Vtables")
@@ -1377,6 +1393,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 for h_ in [unit] + hosts:
                     if h_ not in e[1]:
                         e[1].append(h_)
+    _phase('vftables')
     # ---- S2c: the player's exe (RTTI): every image vftable with its class and offset (exevft.py)
     exe_path = exevft.exe_path(None if exe in (None, '') else exe) if exe != 'none' else None
     exev = exevft.load(exe_path, os.path.join(out, 'cache', 'exe_vftables.json')) if exe_path else {}
@@ -1497,6 +1514,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                                     'yes' if z and vmap[a_][0] == z[0] else 'no'))
                 stats['vftable_aliases'] += 1
 
+    _phase('exe rtti')
     # ---- data addresses: absolute symbols at the original address (the data image is mapped there, D3)
     with open(os.path.join(out, 'aliases.ld'), 'w') as f:
         f.write('/* fnv-nx link-by-address aliases (generated by tools/link/fnvlink.py; local output) */\n')
@@ -1517,6 +1535,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for line in sorted(set(alias_lines)):
             f.write(line + '\n')
 
+    _phase('data addresses')
     # ---- bridges
     # S5 (s5-002 item 4): an address map C row stands for an MSVC constructor, which returns this in eax; the
     # Itanium C1 returns void, so the row names a stub that returns this (all arguments in registers)
@@ -1549,6 +1568,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         for unit, t in sorted(probe_req):
             f.write('%s\t%s\n' % (unit, t))
 
+    _phase('bridges')
     # ---- address map
     for a, names in load_extern_list(extern_list).items():
         extern_text.setdefault(a, set()).update(names)
@@ -1560,6 +1580,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows,
                                           adj_rows, gdel_rows)
 
+    _phase('address map')
     # ---- stats
     resolved = sum(byclass[c] for c in ('code', 'code-bridge', 'code-manual', 'data', 'code-pending',
                                          'code-defmissing', 'code-adjthunk', 'code-sddstub', 'extern-text', 'text-addr',
@@ -1664,6 +1685,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     lines += ['  %-6d %s' % (n, c) for c, n in pair_classes.most_common()]
     open(os.path.join(out, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
+    _phase('stats')
+    log('resolve phases: ' + ', '.join(_phases))
 
 
 VPTR_LHS = re.compile(r'(?i)(?:^|[^\w])(?:\w*_)?(?:vptr|vtbl|vtable|vftable|vfptr|vft|vftbl|vtab|vt)\w*\s*$')
@@ -3155,12 +3178,54 @@ def disambiguate_defs(names, m, itanium):
     return c or names
 
 
+STD_IDS = []   # [set] of every identifier libstdc++'s headers declare (std_identifiers); empty: not known
+
+
+def std_identifiers(cache_dir=None):
+    """The identifiers in GCC's libstdc++ headers (`#include <bits/stdc++.h>` preprocessed with $CXX, default
+    aarch64-linux-gnu-g++), cached in <cache_dir>/libstdcxx_ids.txt. Empty when the compiler is not there: every
+    std:: name then stays `runtime`, as before."""
+    if STD_IDS:
+        return STD_IDS[0]
+    path = os.path.join(cache_dir, 'libstdcxx_ids.txt') if cache_dir else None
+    ids = set()
+    if path and os.path.exists(path):
+        ids = set(open(path).read().split())
+    else:
+        try:
+            r = subprocess.run([os.environ.get('CXX', 'aarch64-linux-gnu-g++'), '-std=gnu++17', '-E', '-x', 'c++', '-'],
+                               input='#include <bits/stdc++.h>\n', capture_output=True, text=True, timeout=300)
+            if r.returncode == 0:
+                ids = set(re.findall(r'\b[A-Za-z_]\w*\b', r.stdout))
+        except (OSError, subprocess.SubprocessError):
+            ids = set()
+        if ids and path:
+            os.makedirs(cache_dir, exist_ok=True)
+            open(path, 'w').write('\n'.join(sorted(ids)) + '\n')
+    STD_IDS.append(ids)
+    return ids
+
+
+def decomp_std(un, isig):
+    """A `std::` name (_ZNSt / _ZSt) whose first component after std:: libstdc++ does not declare: the decomp's own
+    class or function in namespace std (std::StandardLibrarySingletonObject, std::StringBase::_Xlen, std::_Lockit,
+    std::FUN_00ad5770, ...). libstdc++ defines none of them, so they are classified like any other decomp name
+    (units.json, bodies' exe-addr / crt-rule) instead of being left to the runtime (topdown rank 2/3, d1ed15e7)."""
+    if not un.startswith(('_ZNSt', '_ZSt')) or not STD_IDS or not STD_IDS[0]:
+        return False
+    q = getattr(isig, 'qual', None) or []
+    if len(q) < 2 or q[0] != 'std':
+        return False
+    first = re.match(r'[A-Za-z_]\w*', q[1])
+    return bool(first) and first.group(0) not in STD_IDS[0]
+
+
 def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
     """-> (class, tier, address, target, note). class 'addr' = an address was found (refined by the caller).
     ident: {data identifier: image addresses} - the last resort for a data reference (S5): the same identifier in
     another scope (the decomp's per-function namespaces) or with another decorated type (an array declared where
     MSVC saw a pointer, cv), bound when exactly one address carries it, 'ambiguous' otherwise."""
-    if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)):
+    if RUNTIME.match(un) and not (NEWDEL_ANY.match(un) and not NEWDEL_STD.match(un)) and not decomp_std(un, isig):
         return 'runtime', None, None, None, None
     if isig.kind == 'special':
         return ('native' if un in anydef else 'special-unresolved'), None, None, None, isig.special

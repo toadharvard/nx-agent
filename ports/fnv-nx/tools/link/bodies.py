@@ -95,6 +95,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import sys
 
 import sigs
@@ -1838,12 +1839,29 @@ def emit_gdel(addrs):
     return '\n'.join(out) + '\n'
 
 
+class Phases:
+    """Seconds per step of run(), printed at the end (T1: where the link's time goes, for the incremental link)."""
+    def __init__(self):
+        self.t, self.got = time.time(), []
+
+    def mark(self, name):
+        now = time.time()
+        self.got.append((name, now - self.t))
+        self.t = now
+
+    def line(self):
+        return 'bodies phases: ' + ', '.join('%s %.1f s' % g for g in self.got)
+
+
 def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synth=True, exe_path=None):
     import fnvlink
+    import objcache
+    T = Phases()
     units_json = units_json or os.path.join(tree, 'build', 'units.json')
     bdir = os.path.join(out, 'bodies')
     os.makedirs(bdir, exist_ok=True)
     os.makedirs(os.path.join(out, 'cache'), exist_ok=True)
+    sigs.persist(os.path.join(out, 'cache', 'sigs.marshal'))   # the parses of the last link process (T1)
     trapped = load_trapped(os.path.join(out, 'refs.tsv'), names_txt)
     native = load_native(os.path.join(out, 'addrmap.tsv'))
     units = fnvlink.load_units(units_json)
@@ -1877,6 +1895,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     cl = Classifier(units, native, msvc, itanium, bodies, unit_names, load_type_sizes(out),
                     load_native_names(os.path.join(out, 'addrmap.tsv')))
     rows = [cl.classify(n, us) for n, us in sorted(trapped.items())]
+    T.mark('load+classify')
 
     exe_vars = set()   # variables placed exe code references whose address exe-data did not find
     if msvc_objs and exe_path:
@@ -1896,6 +1915,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         rows = [bym_[r.name] if r.name in bym_ else r for r in rows]
         rows += [r for r in got_ if r.name not in have_]
         exe_vars -= {r.name for r in got_}
+        T.mark('exe-pass')
     gate = None
     if synth:   # its stubs are emitted with the synthesized objects
         # a member of another copy of the class at an exe address, one layout on both sides (layout probe)
@@ -1920,6 +1940,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 rows.append(Row(n, 'decl-data', None, None, ','.join(sorted(us)),
                                 'zero-initialized definition of the declared variable (no exe address)', sorted(us)[0]))
 
+    T.mark('copy/gdel/crt/decl passes')
     synth_rows, failed, vnotes = [], {}, {}
     if synth:
         work = os.path.join(bdir, 'work')
@@ -1945,6 +1966,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                     dst = os.path.join(bdir, 'zz_bd_%s%s.o' % (h.replace('/', '_'), '_i' if inl else ''))
                     os.replace(path, dst)
                     synth_rows.append((h, dst, len(roots)))
+        T.mark('synth-host')
         # virtual functions GCC calls directly (an object member, `a->m.f()`) where MSVC called through the vptr
         cand = {r.name: r for r in rows if r.cls == 'missing' and r.note == 'no definition, address or body'
                 and r.units and vcall_line(0, itanium(r.name))}
@@ -1995,6 +2017,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         # copy of C): that unit hosts them, compiled with -fkeep-inline-functions like msvc-inline
         # a name MSVC calls out of line (the vcall check's pristine reference) is no vcall, but the decomp's inline
         # body is still its body: tree-inline takes it, gated like a copy pair (strict)
+        T.mark('vcall')
         direct = {n for n, why in failed.items() if why == VCALL_DIRECT}
         vdone = set(vtargets) | (set(failed) - direct) | set(vnotes)
         rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
@@ -2034,6 +2057,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
             vnotes.pop(n, None)
         rows = [r._replace(cls='tree-inline', host=tdone[r.name], note='inline body in ' + tdone[r.name])
                 if r.name in tdone else r for r in rows]
+        T.mark('tree-inline')
         gd = [r for r in rows if r.cls == 'gdel']
         if gd:
             s_path, o_path = os.path.join(bdir, 'gdel.S'), os.path.join(bdir, 'zz_bd_gdel.o')
@@ -2066,6 +2090,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
                 return h, items, addr_host(tree, work, h, sorted(items), msvc, ita_defs)
             except Exception as e:
                 return h, items, ([], {}, {a: 'addr-host failed (%r)' % e for a, _ in items})
+        T.mark('gdel+defmissing')
         atargets = {}
         with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
             for h, items, (objs, got, fail) in ex.map(aone, sorted(aby.items())):
@@ -2084,6 +2109,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
             as_ = os.environ.get('AS', 'aarch64-linux-gnu-as')
             if subprocess.run([as_, '-mabi=ilp32', s_path, '-o', o_path], capture_output=True).returncode == 0:
                 synth_rows.append((unit_names[0], o_path, len(atargets)))
+        T.mark('addr-host')
         thunks = load_thunks(os.path.join(out, 'refs.tsv'))
         if thunks:
             s_path, o_path = os.path.join(bdir, 'thunks.S'), os.path.join(bdir, 'zz_bd_thunks.o')
@@ -2148,6 +2174,9 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     lines.append('synthesized objects: %d' % len(synth_rows))
     open(os.path.join(bdir, 'stats.txt'), 'w').write('\n'.join(lines) + '\n')
     print('\n'.join(lines), file=sys.stderr)
+    T.mark('emit+write')
+    print(T.line(), file=sys.stderr)
+    print(objcache.summary('bodies'), file=sys.stderr, flush=True)
     return rows
 
 
