@@ -4852,7 +4852,8 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
         got[v] = name
         st['copies'] += 1
         st['slots'] += len(words)
-        rows.append(('%08x' % v, str(ott), str(len(slots)), str(st['slots-trap'] - n_trap), words[0], words[1]))
+        rows.append(('%08x' % v, str(ott), str(len(slots)), str(st['slots-trap'] - n_trap),
+                     *(list(words[:2]) + ['', ''])[:2]))   # a classlayout exe-order table can have < 2 slots
     with open(os.path.join(out, 'vmo.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#image vftable\toffset-to-top\texe slots\ttrap slots\tnative slot 0 (D1)\tnative slot 1 (D0)\n')
         for r in rows:
