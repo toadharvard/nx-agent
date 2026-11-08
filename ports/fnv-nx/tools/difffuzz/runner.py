@@ -152,13 +152,15 @@ def _nan(b):
     return False
 
 
-def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=None, alias=None):
+def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=None, alias=None, agg_ptrs=None,
+                 result_buf=None):
     """First logical argument the two sides pass differently to the same callee (pointers to their own stack
     frames are equal by definition: the frames differ by design). skip: definition labels the caller does not pass
     (S2's edx dummies); gx/ga: garbage words planted on each machine - an oracle argument that is oracle garbage is
     noise (the original caller passed whatever its registers held), a native one that is native garbage while the
     oracle's is not stays a divergence (marked arm_garbage)."""
     dx, da = decode_x86(cv, cx), decode_a64(cv, ca)
+    soft_d = None
     pushed = getattr(cx, 'pushed', None)
     beyond = {lab for lab, space, off, size in cv.x86 if space == 'stk' and pushed is not None and off >= pushed}
     for v in cv.vals:
@@ -175,6 +177,17 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
             continue        # each machine's own stack frame (also through an int parameter that carries a pointer)
         if v.size == 4 and alias is not None and (px, pa) == alias:
             continue        # the oracle's NRVO local is the native's result buffer (F1b nrvo-copy)
+        if v.size == 4 and agg_ptrs and any(xa <= px < xa + sz and pa - px == na - xa and na <= pa < na + sz
+                                            for xa, na, sz in agg_ptrs):
+            continue        # the address of the caller's by-value aggregate parameter: its stack slot on the oracle,
+                            # the hidden pointer to the caller's copy natively (Itanium passes a non-trivially
+                            # copyable class by invisible reference): the same object at the same offset
+        if v.size == 4 and result_buf is not None and ((px == result_buf and _in_stack(pa)) or
+                                                         (pa == result_buf and _in_stack(px))):
+            # the function's hidden result buffer on one side, a local of the frame on the other: NRVO on one
+            # machine only (nrvo-elision). Kept going (soft); the result buffer itself is compared at the end
+            soft_d = soft_d or dict(arg=v.label, cls=v.cls, x86=bx.hex(), arm=ba.hex(), soft=True, nrvo_elided=True)
+            continue
         if v.size == 4 and px in gx:
             continue
         if v.size == 4 and codeptr is not None and codeptr(pa) == px:
@@ -191,7 +204,7 @@ def compare_args(cv, cx, ca, rdx=None, rda=None, skip=(), gx=(), ga=(), codeptr=
         if v.cls in ('F32', 'F64') and _nan(bx) and _nan(ba):
             d.update(soft=True, nan_bits=True)   # x87 real indefinite 0xffc00000 vs AArch64 default NaN 0x7fc00000
         return d
-    return None
+    return soft_d
 
 
 def _nrvo_copy(xcalls, ta, sret, convs):
@@ -227,7 +240,8 @@ def _nrvo_copy(xcalls, ta, sret, convs):
 
 
 def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
-            garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None):
+            garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
+            agg_ptrs=None):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
     the planted vftables; a differing call to neither is an indirect call through memory the case did not plant
     (marked vcall='unplanted': an oracle-model gap, classify.py oracle-vcall)."""
@@ -311,14 +325,14 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
                 skip = set(skip) | {v.label for v in cv.vals if v.label != 'this'}
             d = compare_args(cv, cx, ca, readers[0] if readers else None, readers[1] if readers else None, skip,
                              garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                             (nrvo, sret) if nrvo is not None else None)
+                             (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret)
             if d and (i in swapped or i + 1 in swapped):
                 # a swapped pair: the calls at i and i + 1 are different callees on the two machines, so compare
                 # each oracle call with the native call of the same callee
                 cx2, ca2 = rx.calls[i], ra.calls[i + 1 if i + 1 in swapped else i - 1]
                 d = compare_args(cv, cx2, ca2, readers[0] if readers else None, readers[1] if readers else None,
                                  skip, garbage[0] if garbage else (), garbage[1] if garbage else (), codeptr,
-                                 (nrvo, sret) if nrvo is not None else None)
+                                 (nrvo, sret) if nrvo is not None else None, agg_ptrs, sret)
             if d:
                 d.update(kind='call-args', index=i, target=_hex(cx.target), callee=cv.name)
                 if d.get('soft'):
@@ -382,6 +396,13 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             # .bss (not compared). Not a divergence of the function itself; reported for the static-state audit.
             soft = soft or dict(kind='local-static', soft=True, addr='%08x' % diff[0], ndiff=len(diff))
             diff = []
+    if wx != wa and diff and readers:
+        lit = literal_store_words(diff, wx, wa, readers, w)
+        if lit:
+            # a stored literal address: the oracle's pinned pool copy, the native unit's own .rodata copy (difffuzz-20,
+            # literal-store). The addresses differ by design; the pointees (what the field means) are compared, and a
+            # word whose pointees differ stays in the diff (with pointee_x86 / pointee_arm)
+            diff = [k for k in diff if k not in lit]
     if wx != wa and diff and vptr_words is not None:
         drop = dtor_vptr_bytes(diff, wx, wa, *vptr_words)
         if drop:
@@ -415,6 +436,33 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     if not rx.saved_ok or not ra.saved_ok:
         return dict(kind='callee-saved', x86=rx.saved_ok, arm=ra.saved_ok)
     return soft
+
+
+LIT_POOL = (0x02f00000, 0x03000000)       # coffobj.LITERAL_POOL: literals units.json does not name
+
+
+def literal_store_words(diff, wx, wa, readers, w):
+    """Bytes of `diff` in aligned words where the oracle stored an address of its literal pool and the native an
+    address in its private image (its own copy of the literal) and the pointees are equal: a C string, or for an
+    empty one the first 8 raw bytes (a __real@ constant). Representation, not behaviour."""
+    out = set()
+    for g in sorted({k & ~3 for k in diff}):
+        ks = range(g, g + 4)
+        pg = w.page(world.page_of(g))        # `effective` drops a byte equal to the world's initial one
+        base = [pg[k - world.page_of(g)] for k in ks]
+        vx = struct.unpack('<I', bytes(wx.get(k, b_) for k, b_ in zip(ks, base)))[0]
+        va = struct.unpack('<I', bytes(wa.get(k, b_) for k, b_ in zip(ks, base)))[0]
+        if not (LIT_POOL[0] <= vx < LIT_POOL[1] and world.A64_PRIV[0] <= va < world.A64_PRIV[1]):
+            continue
+        sx, sa = _cstr(readers[0], vx), _cstr(readers[1], va)
+        if sx == sa and sx is not None and not sx:
+            try:
+                sx, sa = readers[0](vx, 8), readers[1](va, 8)
+            except Exception:  # noqa: BLE001
+                continue
+        if sx is not None and sx == sa:
+            out.update(k for k in ks if k in diff)
+    return out
 
 
 DTOR_ITANIUM = re.compile(r'D[012]Ev$')
@@ -916,7 +964,9 @@ class Pair:
                                 getattr(self.target, 'dummies', None),
                                 (world.garbage_words(case.seed, 'x86'), world.garbage_words(case.seed, 'a64')),
                                 self.ae._codeptr, self._vcalls(), getattr(self.target, 'static_guards', ()),
-                                self._vptr_words(), getattr(self.target.callee_info, 'caller_conv', None))
+                                self._vptr_words(), getattr(self.target.callee_info, 'caller_conv', None),
+                                [(xa, placement[l], sz) for l, (xa, sz) in getattr(rx, 'agg_addr', {}).items()
+                                 if l in placement])
         if d is not None:
             # dynamic evidence for causes.py (S13b: oracle-callee-unloaded): the original addresses of the unit's
             # functions the native actually entered in this run (their __fnv_<X> entry blocks were executed)

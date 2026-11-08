@@ -21,6 +21,7 @@ from unicorn import arm64_const as A
 import world
 import a64image
 import libcalls
+import retsrc
 
 PAGE = world.PAGE
 TLS_BASE, TLS_SIZE = 0x0b900000, 0x00010000   # inside the AArch64 private range (faults as data elsewhere)
@@ -211,7 +212,10 @@ class Arm64Engine:
                 (a64image.CODE_STUB, a64image.CODE_STUB + world.TEXT[0]),
                 (pg(a64image.CODE_STUB + world.TEXT[1]), a64image.NAMED_STUB),
                 (pg(top + 16), vtmodel.VT_STUBS),
-                (pg(max(self.image.end, a64image.A64_BASE)), TLS_BASE)]
+                (pg(max(self.image.end, a64image.A64_BASE)), TLS_BASE),
+                # the synthesized vtable region: data to read, never code; a jump there is the wild call the oracle
+                # makes of the same address (difffuzz-20: it faulted natively, fault:x:0bd7f08d, native-wild-private)
+                (vtmodel.VT_BASE, vtmodel.VT_END)]
             self._holes = [(lo, hi) for lo, hi in h if lo < hi]
         return self._holes
 
@@ -530,6 +534,13 @@ class Arm64Engine:
             x0 = world.alloc_result(k)
         elif world.returns_this((cv, ccv)):
             x0 = r.calls[-1].args[0] & 0xffffffff      # this (x0), as the oracle gets ecx (difffuzz-19)
+        elif target is not None and target >= 0 and retsrc.returned_input(cv, target) is not None:
+            lab = retsrc.returned_input(cv, target)    # the exe's callee returns an input (difffuzz-20, canned-this)
+            ch = cv.a64.get(lab) or []
+            if lab == 'this':
+                x0 = r.calls[-1].args[0] & 0xffffffff
+            elif ch and ch[0][1][0] == 'x':
+                x0 = r.calls[-1].args[ch[0][1][1]] & 0xffffffff
         elif ck == 'ref':
             x0 = world.ref_result(k)
         elif ck in ('bool', 'untyped'):

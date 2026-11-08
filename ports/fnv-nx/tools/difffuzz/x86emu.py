@@ -21,6 +21,7 @@ from unicorn.x86_const import (UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX, U
                                UC_X86_REG_FS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES, UC_X86_REG_FPCW,
                                UC_X86_REG_FPSW, UC_X86_REG_FP0)
 import libcalls
+import retsrc
 import world
 
 PAGE = world.PAGE
@@ -237,6 +238,7 @@ class X86Engine:
                                  UC_X86_REG_EDI, UC_X86_REG_EBP)):
             uc.reg_write(reg, world.garbage32(case.seed, i))
         self._place_args(conv, case, placement, world.SP0, ret_stub)
+        r.agg_addr = self.agg_addr
         saved = [uc.reg_read(x) for x in (UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP)]
         hb = uc.hook_add(UC_HOOK_BLOCK, self._on_block, user_data=(case, r), begin=world.TEXT[0],
                          end=world.TEXT[1] - 1)
@@ -327,6 +329,10 @@ class X86Engine:
             frame[o:o + len(d)] = d
         esp = (esp - len(frame)) & ~0xf
         esp -= 4
+        # where each by-value aggregate lives (the native passes a hidden pointer to its copy: runner.compare_args)
+        self.agg_addr = {lab: (esp + 4 + off, size) for lab, space, off, size in conv.x86
+                         if space == 'stk' and lab != 'sret' and
+                         next(x for x in conv.vals if x.label == lab).kind not in ('gpr', 'fpr')}
         uc.mem_write(esp + 4, bytes(frame))
         uc.mem_write(esp, struct.pack('<I', ret_stub))
         uc.reg_write(UC_X86_REG_ESP, esp)
@@ -457,6 +463,14 @@ class X86Engine:
             eax = world.alloc_result(k)
         elif world.returns_this((cv, ccv)):
             eax = r.calls[-1].args[0]                  # this (ecx), as the native gets x0 (difffuzz-19)
+        elif retsrc.returned_input(cv, address) is not None:
+            lab = retsrc.returned_input(cv, address)   # the exe's callee returns an input (difffuzz-20, canned-this)
+            if lab == 'this':
+                eax = r.calls[-1].args[0]
+            else:
+                n = next(off for l_, sp, off, sz in getattr(cv, 'x86_declared', cv.x86) if l_ == lab) // 4
+                if 2 + n < len(r.calls[-1].args):
+                    eax = r.calls[-1].args[2 + n]
         elif ck == 'ref':
             eax = world.ref_result(k)
         elif ck in ('bool', 'untyped'):

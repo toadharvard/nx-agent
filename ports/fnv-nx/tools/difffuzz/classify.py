@@ -518,6 +518,8 @@ def hint(pair, target, case, div, fn, max_steps):
         h['cause'] = 'bool-repr'; return h
     if div.get('nrvo_copy'):
         h['cause'] = 'nrvo-copy'; return h
+    if div.get('nrvo_elided'):
+        h['cause'] = 'nrvo-elision'; return h
     if div.get('nan_bits'):
         h['cause'] = 'nan-bits'; return h
     if div.get('vptr_store'):
