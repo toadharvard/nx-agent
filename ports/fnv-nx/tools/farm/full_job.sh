@@ -150,6 +150,24 @@ if [ "${UNITCACHE:-1}" = 1 ]; then
 	export FNVNX_UNIT_OBJCACHE=${FNVNX_UNIT_OBJCACHE:-$FARM_HOME/unitobj}
 	LINKCACHE_BRANCH=unitobj/cache LINKCACHE_SEED_MIN=1000000000 bash "$HERE/linkcache.sh" seed "$FNVNX_UNIT_OBJCACHE" >> "$F/linkcache.log" 2>&1 || true
 else unset FNVNX_UNIT_OBJCACHE; fi
+# 3c. A local prepare publishes its tree right after prepare, not after the link (orchestrator: fastlink links a
+# head only on a published tree with its prepare inputs and recon set, so S1's rule heads waited ~45 min for step 5c):
+# `make prepare` alone first (the main build below finds it cached), then lib_job.sh publish_tree in the background
+# while the build goes on (the tree is only read from now on); step 5c waits for it. FULL_EARLY_TREE=0: as before.
+# step-3c-begin
+TREEPUB_PID=""
+if [ $INPUTS = 1 ] && [ -z "$TREE" ] && [ "${FULL_EARLY_TREE:-1}" = 1 ]; then
+	# shellcheck disable=SC2086
+	make -C "$P" prepare BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS=none "${ARGS[@]}" ${FARM_MAKE_ARGS:-} \
+		> "$F/make-prepare-$C12.log" 2>&1 || log "make prepare exited $? (the main build runs it again)"
+	if stage_ok "$F/build" prepare; then
+		( publish_tree "$F/build" || NOTE_TREEPUB="publish_tree exited $?"; echo "$NOTE_TREEPUB" > "$F/treepub-$C12.txt" ) \
+			> "$F/treepub-$C12.log" 2>&1 &
+		TREEPUB_PID=$!
+		log "prepared tree: publishing t/$C12 in the background (pid $TREEPUB_PID)"
+	fi
+fi
+# step-3c-end
 # shellcheck disable=SC2086
 make -C "$P" BOOT=1 BUILD_DIR="$F/build" EXT="$EXT" JOBS="$JOBS" TESTS="${TESTS:-none}" "${ARGS[@]}" \
 	${FARM_MAKE_ARGS:-} > "$F/make-$C12.log" 2>&1 || rc=$?
@@ -317,7 +335,10 @@ fi
 if [ -n "$NOTE_LINKEQ" ]; then echo "- incremental link check (LINKEQ): $NOTE_LINKEQ" >> "$REPORT"; fi
 # 5c. The prepared tree as t/<commit12> when no prepare farm published one (the fuzz farms fetch it for the link
 # commit; T1), before link/<commit12>, so a fuzz farm that sees the link finds its tree. Never fails the job.
-if [ $INPUTS = 1 ]; then publish_tree "$F/build" || NOTE_TREEPUB="publish_tree exited $?"; else NOTE_TREEPUB="not published (no tree or no objects)"; fi
+if [ -n "$TREEPUB_PID" ]; then
+	wait "$TREEPUB_PID" 2>/dev/null || true
+	NOTE_TREEPUB="$(cat "$F/treepub-$C12.txt" 2>/dev/null || echo "the early publish wrote no note (see $F/treepub-$C12.log)") (right after prepare)"
+elif [ $INPUTS = 1 ]; then publish_tree "$F/build" || NOTE_TREEPUB="publish_tree exited $?"; else NOTE_TREEPUB="not published (no tree or no objects)"; fi
 echo "- prepared tree: $NOTE_TREEPUB" >> "$REPORT"
 log "prepared tree: $NOTE_TREEPUB"
 if [ $INPUTS = 1 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
