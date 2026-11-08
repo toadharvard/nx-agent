@@ -34,6 +34,7 @@ ROWS = [  # Itanium name, note
     ('_Z8LonelyFnv', 'no definition, address or body'),
     ('_ZN4BoxyIlE4SizeEv', 'no definition, address or body'),     # Boxy<long>::Size - objects have Boxy<int>
     ('_ZN2Cl4MakeEPKc', 'no definition, address or body'),        # only Cl::Make(char const*).isra.0 exists
+    ('_ZN2DdD1Ev', 'no definition, address or body'),             # only Dd's D0 is defined: no decoration of D1
     ('_ZN3ErrD1Ev', 'no definition, address or body'),            # Err::~Err - objects have Other::Err::~Err
     ('_ZN12fnv_000000013std3Str5eraseEjj', 'no definition, address or body'),   # unit copy; tree body in a header
     ('_ZN12fnv_000000023std3Str6assignEj', 'no definition, address or body'),   # unit copy; objects have assign(int)
@@ -55,6 +56,7 @@ EXPECT = {
                                                            'does not emit'),
     '_ZN12fnv_000000023std3Str6assignEj': ('name-mismatch', 'defined as another decoration'),
     '_ZN12fnv_000000033std3Str4zorkEv': ('crt-import', 'std scope (unit copy, no body in the tree)'),
+    '_ZN2DdD1Ev': ('no-body', 'other'),
     '_ZN3ErrD1Ev': ('no-body', 'other'),                          # another scope's class is no decoration of it
     '_ZN2Cl4MakeEPKc': ('name-mismatch', 'defined only as a GCC clone (.isra/.constprop: its own signature, no '
                                           'alias target)'),
@@ -82,6 +84,7 @@ class Causes(unittest.TestCase):
                            'template <> int Boxy<int>::Size() { return 0; }\n'
                            'extern "C" void make_clone() __asm__("_ZN2Cl4MakeEPKc.isra.0");\n'
                            'extern "C" void make_clone() {}\n'
+                           'extern "C" void dd_d0() __asm__("_ZN2DdD0Ev");\nextern "C" void dd_d0() {}\n'
                            'namespace std { struct Str { void assign(int); }; void Str::assign(int) {} }\n'
                            'namespace Other { struct Err { ~Err(); }; Err::~Err() {} }\n', text=True)
             with open(os.path.join(out, 'bodies', 'bodies.tsv'), 'w') as f:

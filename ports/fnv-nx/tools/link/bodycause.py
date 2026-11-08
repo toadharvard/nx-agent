@@ -116,7 +116,10 @@ def inst_key_of(sig):
     last = UNIT_NS_IN.sub('', qual[-1])
     cls = norm(UNIT_NS_IN.sub('', sigs.canon_type(qual[-2]))) if len(qual) >= 2 else None
     # the enclosing scope stays: a unit's `fnv_<a>::LengthError` is no `vector_count_release::LengthError`
-    return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]))
+    # a deleting destructor (D0) is no other decoration of the complete / base one (D1 / D2), nor a constructor of
+    # another variant group: only C1/C2 and D1/D2 pair
+    grp = {'D0': 'D0', 'D1': 'D', 'D2': 'D', 'C1': 'C', 'C2': 'C'}.get(sig.variant or '', '')
+    return (cls, last, len(sig.params), tuple(UNIT_NS_IN.sub('', q) for q in qual[:-2]), grp)
 
 
 UNIT_STD = re.compile(r'^fnv_[0-9a-f]{8}::(?:std|stdext)::')
