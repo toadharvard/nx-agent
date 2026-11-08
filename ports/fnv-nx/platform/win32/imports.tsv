@@ -159,7 +159,7 @@
 0x00fdf3c0	binkw32	BinkCopyToBufferRect	1	-	S6 (video)
 0x00fdf3c8	d3d9	D3DPERF_SetOptions	1	-	S6
 0x00fdf3d0	d3dx9_38	D3DXLoadSurfaceFromSurface	1	-	S6
-0x00fdf3d4	d3dx9_38	? (d3dx9; decomp: ImportedFunction)	1	ImportedFunction	S6
+0x00fdf3d4	d3dx9_38	D3DXSaveTextureToFileA	1	ImportedFunction	S6
 0x00fdf3d8	d3dx9_38	D3DXAssembleShader	1	-	S6
 0x00fdf3dc	d3dx9_38	D3DXAssembleShaderFromFileA	1	-	S6
 0x00fdf3e0	d3dx9_38	D3DXCompileShaderFromFileA	1	-	S6
