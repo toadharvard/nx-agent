@@ -4,7 +4,9 @@ hand-written units (no decomp content).
 
     python3 tools/link/test_colliding.py     # needs aarch64-linux-gnu-{g++,ld,objcopy}, llvm-undname, c++filt
 
-* src/nat.cpp defines the native at 0x00501000 (a member, `Fmt::FUN_00501000`);
+* src/nat.cpp defines the native at 0x00501000 (a static member, `Fmt::FUN_00501000`: the same native argument
+  shape as the `(int)` reference, so the name-addr ABI check finds nothing to flag; a thiscall member would get
+  code-manual, f in x0 where the member expects this);
 * src/col.cpp keeps an unrelated noinline helper under the global name `FUN_00501000(int)` and calls it; a variant
   unit (src/col_v.cpp) defines the same helper again;
 * src/use.cpp references `FUN_00501000(int)` with no binding in its recipe (the plain linker would bind it by name);
@@ -29,7 +31,8 @@ FNVLINK = os.path.join(HERE, 'fnvlink.py')
 CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
 HELPER = '__attribute__((noinline)) int FUN_00501000(int f) { return f == 1 ? 8 : 16; }\n'
 SRC = {
-    'src/nat.cpp': 'struct Fmt { int FUN_00501000(int); int b; };\nint Fmt::FUN_00501000(int f) { return b * f; }\n',
+    'src/nat.cpp': 'struct Fmt { static int FUN_00501000(int); static int b; };\nint Fmt::b = 3;\n'
+                   'int Fmt::FUN_00501000(int f) { return b * f; }\n',
     'src/col.cpp': HELPER + 'int blocks(int f) { return FUN_00501000(f) + 1; }\n',
     'src/col_v.cpp': HELPER + 'int blocks_v(int f) { return FUN_00501000(f) + 2; }\n',
     'src/use.cpp': 'int FUN_00501000(int);\nint FUN_00502000(int);\nint FUN_00505000(int);\n'
@@ -38,7 +41,7 @@ SRC = {
 }
 F = lambda a, s: {'address': '0x%08x' % a, 'symbol': s, 'size': 16}   # noqa: E731
 UNITS = {'units': [
-    {'source': 'src/nat.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x501000, '?FUN_00501000@Fmt@@QAEHH@Z')],
+    {'source': 'src/nat.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x501000, '?FUN_00501000@Fmt@@SAHH@Z')],
      'symbols': {}},
     {'source': 'src/col.cpp', 'compiler': 'sp1', 'flags': [], 'functions': [F(0x503000, '?blocks@@YAHH@Z')],
      'symbols': {}},
