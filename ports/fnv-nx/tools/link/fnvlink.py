@@ -1676,8 +1676,8 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             extern_text.pop(a, None)
         else:
             extern_text.setdefault(a, set())
-    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, vmap, extern_text, providers, cthis_rows,
-                                          adj_rows, gdel_rows)
+    amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, dict(vmap, **vmo_vrows(vmo, vmap, exev_all)),
+                                          extern_text, providers, cthis_rows, adj_rows, gdel_rows)
 
     _phase('address map')
     # ---- stats
@@ -3204,6 +3204,23 @@ def vmo_dtor_slots(a0, native, msvc, bridges, traps, st, where, exe_path=None):
         st['slot0-flags-stubs'] += 1
         return FLAG_SYM % (a0, 0), FLAG_SYM % (a0, 1)
     return None
+
+
+def vmo_vrows(vmo, vmap, exev):
+    """D26 (c) V rows: {image vftable: (copy symbol, address point 8, bridge object, note)} for every minus-one copy of
+    an exe vftable no native vtable stands for (the class is declared without virtual members, or has no secondary
+    base: vtmetric's `no-polymorphic-view` and `no-secondary-base`). The address map then pairs the vftable with the
+    copy (EQ's vtable pairing, vtmetric's slot comparison). The copy is the Itanium layout of the exe vftable
+    (minus-one order), so the address point is word 2."""
+    rows = {}
+    for v, name in vmo.items():
+        if v in vmap:
+            continue
+        e = exev.get(v)
+        rows[v] = (name, 8, VTEXT_OBJ, '%s, minus-one copy of the exe vftable (D26 c)%s' % (
+            'secondary' if e is not None and e.off else 'primary',
+            ", the exe's RTTI class %s" % e.td[4:].rstrip('@') if e is not None and e.td else ''))
+    return rows
 
 
 def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, traps, out):
