@@ -146,6 +146,16 @@ check('DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched', 
 
 got = prepare.r_platform_protos('/x/src/w.cpp', 'extern "C" size_t __cdecl wcslen(const wchar_t* s);\nint g();\n', Counter())
 check('DECL1 a <wchar.h> prototype becomes the header', got, ['#include <wchar.h> /* fnv-nx DECL1 */\nint g();'], ['wcslen'])
+# DECL1-CONV: a stored / returned result keeps the decomp's declared type where it differs in kind from the platform's
+got = prepare.r_platform_protos('/x/src/c.cpp', '__declspec(dllimport) unsigned int __stdcall CreateMutexA(int, int, const void*);\n'
+                                'extern "C" char* __cdecl strrchr(const char* s, int c);\n'
+                                'void f(const char* n) { unsigned int m; m = CreateMutexA(0, 0, n); char* p = strrchr(n, 47);\n'
+                                '  g(CreateMutexA(0, 0, n)); }\n', Counter())
+check('DECL1-CONV a stored handle result is converted to the decomp type; one passed on is not', got,
+      ['m = ((unsigned int)CreateMutexA(0, 0, n));', 'char* p = ((char*)strrchr(n, 47));', 'g(CreateMutexA(0, 0, n));'])
+got = prepare.r_platform_protos('/x/src/v.cpp', 'int g();\nnamespace std {\nfloat abs(float);\n}\nfloat h(float x) { return std::abs(x); }\n', Counter())
+check('DECL1-STDABS a std::abs prototype becomes fnvnx_cmath/std_abs.h', got,
+      ['#include "fnvnx_cmath/std_abs.h" /* fnv-nx DECL1 */', 'std::abs(x)'], ['float abs(float);', '<stdlib.h>'])
 
 # ---- STL2: units with the real container headers use the VC9-layout shim
 _stl2 = ('// std::string in a comment\n#include <string>\n#include <vector>\nnamespace std {\ntemplate <> class allocator<E>\n'
@@ -199,6 +209,29 @@ check('MATH1 next to the namespace\'s own extern "C" prototype: the copy stays (
 check('MATH1 in a namespace of its own: the overload stays',
       run(s1.r_math_overloads, 'namespace N {\ninline float fabs(float f)\n{\n    return f < 0 ? -f : f;\n}\n}\n'),
       ['return f < 0 ? -f : f;'], ['MATH1'])
+
+# ---- IFX1-SSE: a dropped `__if_not_exists(_mm_*)` prototype gets fnvnx_target_sse.h (MSVC's intrinsics in the gate)
+_ix = run(s1.r_if_exists, 'extern "C" {\n__if_not_exists(_mm_mul_ps)\n{\n    __m128 _mm_mul_ps(__m128 a, __m128 b);\n}\n}\n')
+check('IFX1-SSE a dropped SSE prototype includes fnvnx_target_sse.h', _ix,
+      ['#include "fnvnx_target_sse.h" /* fnv-nx IFX1 */'], ['_mm_mul_ps(__m128 a'])
+check('IFX1-SSE a kept body includes nothing',
+      run(s1.r_if_exists, '__if_not_exists(MyOwnThing)\n{\n    int MyOwnThing;\n}\n'), ['int MyOwnThing;'], ['fnvnx_target_sse'])
+
+# ---- CALL1-RET: a `return f(...);` statement is a call, not the file's own prototype of f
+_c1 = run(s1.r_win32_call_args, '#include "fnvnx_win32.h"\nint h(void* k, int c) {\n    return CallNextHookEx((void*)k, c, 0, 0);\n}\n')
+check('CALL1-RET a returned Win32 call gets its pointer arguments cast', _c1, ['CallNextHookEx((HHOOK)((void*)k)'])
+
+# ---- CALL1-NS: a call qualified by a namespace that only has DECL1's `using ::name;` is the platform function
+_c2 = run(s1.r_win32_call_args, '#include "fnvnx_win32.h"\nnamespace D {\nusing ::CallNextHookEx; /* fnv-nx DECL1 */\n}\n'
+          'int h(void* k, int c) {\n    return D::CallNextHookEx((void*)k, c, 0, 0);\n}\n')
+check('CALL1-NS a call qualified by a namespace with DECL1\'s using-declaration gets its casts', _c2,
+      ['D::CallNextHookEx((HHOOK)((void*)k)'])
+
+# ---- MATH1-OWN: a file's own static C math function, once MATH1 brings <math.h>, is renamed with its calls
+_m1 = run(s1.r_math_overloads, 'extern "C++"\n{\n    inline float __cdecl fabs(float _X)\n    {\n        return ((float)fabs((double)(_X)));\n    }\n}\n'
+          'static __forceinline float sqrtf(float x)\n{\n    return (float)sqrt(x);\n}\nfloat g(float s) { return 1.0f / sqrtf(s); }\n')
+check('MATH1-OWN the unit\'s own static sqrtf is renamed where <math.h> comes in', _m1,
+      ['#include <math.h> /* fnv-nx MATH1 */', 'static __forceinline float fnvnx_own_sqrtf(float x)', '1.0f / fnvnx_own_sqrtf(s)'])
 
 # ---- CTOR1
 check('CTOR1 explicit constructor call of a template class',
@@ -399,7 +432,7 @@ got = run(s1.r_opaque_enums, 'enum DIALOGUE_TYPE;\nenum DIALOGUE_TYPE\n{\n    A 
           os.path.join(_e, 'src', 'b.cpp'))
 s1._OPAQUE_NAMES = None
 check('ENUM1 opaque enum gets int as its base, and so does its definition', got,
-      ['enum DIALOGUE_TYPE : int;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE : int;', 'enum Other { B };'])
+      ['enum DIALOGUE_TYPE FNVNX_ENUM_INT;', 'enum DIALOGUE_TYPE : int\n{', 'enum WIDE FNVNX_ENUM_INT;', 'enum Other { B };'])
 s1._OPAQUE_NAMES = None
 check('ENUM1 a definition int cannot hold keeps its form',
       run(s1.r_opaque_enums, 'enum WIDE { W = 0x80000000 };\n', os.path.join(_e, 'src', 'c.cpp')), ['enum WIDE { W'])
@@ -734,6 +767,43 @@ check('STAND1 drops the stand-ins of tagged addresses', got,
        'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b); /* fnv-nx STAND1 */', '/* fnv-nx STAND1: V::Make is'],
       ['__declspec(noinline) V*\n/*', 'FUN_00632ec0::FUN_00632ec0()\n{}'])
 
+# STAND1 keeps a tagged definition whose own name the unit binds to its address, with pragmas, a type declaration
+# or a whole type between the tag and the head, or a head over two lines (R6 0x004ab230, 0x0087ce70, 0x00660400, 0x00a8a200;
+# R1 0x0046ffd0); an untagged stand-in after such a tagged function still goes
+_s = tempfile.mkdtemp()
+os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
+_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {
+    '?Get@Bip@@QAEPAHH@Z': '0x00401000', '?Map@@YAPAU?$M@H@@XZ': '0x00401010', '?Next@@YAPAU?$L@H@@PAU1@@Z': '0x00401020',
+    '?Set@Cls@@QAEXXZ': '0x00401030', '?Stand@Cls@@QAEXXZ': '0x00401030', '?Pool@@YAXXZ': '0x00401060'}}]},
+           open(os.path.join(_s, 'build', 'units.json'), 'w'))
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+got = run(s1.r_stand_in_definitions,
+          '// @fnv 0x00401000\n#pragma optimize("", off)\n#pragma optimize("y", off)\nint* Bip::Get(int i)\n{\n    return p + i;\n}\n'
+          '#pragma optimize("", on)\n// @fnv 0x00401010\nM<int>* __cdecl\n    Map()\n{\n    return &g;\n}\n'
+          '// @fnv 0x00401020\ntemplate <class T> struct L;\nL<int>* Next(L<int>* a)\n{\n    return a->n;\n}\n'
+          '// @fnv 0x00401030\ntemplate <> struct A<void*>\n{\n    static void __cdecl Free(void**);\n};\n'
+          'void __thiscall Cls::Set()\n{\n    *(int*)this = 1;\n}\nvoid Cls::Stand()\n{\n}\n'
+          '// @fnv 0x00401060\ntemplate <class T> struct P\n{\n    struct E\n    {\n        E* next;\n    };\n    static E* ms;\n};\n'
+          'void Pool()\n{\n    pooled = 1;\n}\n',
+          os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
+_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {
+    '?Find@@YAPAUA@@PAU1@H@Z': '0x00401040', '?Find@@YAPAUB@@PAU1@H@Z': '0x00401040',
+    '?Pick@@YAHH@Z': '0x00401050', '?Pick@@YAHN@Z': '0x00401050'}}]}, open(os.path.join(_s, 'build', 'units.json'), 'w'))
+got4 = run(s1.r_static_stand_ins,
+           '// @fnv 0x00401040\nstatic __declspec(noinline) A* Find(A* a, int n)\n{\n    return a + n;\n}\n'
+           'static __declspec(noinline) B* Find(B* b,\n                                    int n)\n{\n    return b->pick(n);\n}\n'
+           '// @fnv 0x00401050\nstatic int Pick(int k)\n{\n    return k;\n}\nstatic int Pick(double d);\n'
+           'static int Pick(double d)\n{\n    return 2;\n}\n', os.path.join(_s, 'src', 'staging', 'u.cpp'))
+s1._UNIT_SYMBOLS = _saved
+check('STAND4 an untagged static overload of a tagged address becomes an extern declaration (R6 0x00cb3d10)', got4,
+      ['__declspec(noinline) B* Find(B* b,\n                                    int n); /* fnv-nx STAND4 0x00401040 */',
+       'return a + n;', 'return 2;', 'static int Pick(double d);'], ['b->pick(n)'])
+check('STAND1 keeps tagged definitions behind pragmas, declarations, a type or a two-line head', got,
+      ['return p + i;', 'return &g;', 'return a->n;', '*(int*)this = 1;', 'pooled = 1;',
+       '/* fnv-nx STAND1: Cls::Stand is the function at the tagged address */'], ['fnv-nx STAND1: Bip', 'Map();'])
+
 # ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
 _s = tempfile.mkdtemp()
 os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
@@ -922,7 +992,7 @@ s1.bind_units_data(_data, _c)
 s1.bind_units_data(_data, _c)
 check('BIND1 binds the stand-in names once, in their unit only', repr(_data) + ' %d' % _c['BIND1'],
       ["'?Allocate@MemoryManagerAA3880@@QAEPAXI@Z': '0x00aa3e40'", "'?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A': '0x011f6238'",
-       "'symbols': {}}]} 2", "'?x@@3HA': '0x1'"])
+       "'?entryNpos@@3IA': '0x010173f0'", "'symbols': {}}]} 3", "'?x@@3HA': '0x1'"])
 
 # ---- NATIVE1 (render R3): the drop list's matching, shared by prepare's drop_native_units and tools/rules/native1.py
 _spec = importlib.util.spec_from_file_location('native1', os.path.join(HERE, '..', '..', 'tools', 'rules', 'native1.py'))
@@ -1312,6 +1382,16 @@ check('FINL1 body-less declarations of functions the unit does not define lose _
 check('FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)',
       _o, ['__forceinline int get(int i) const;', '__forceinline int put(int i);',
            'static __forceinline void d(X* x, int n, Pod);'])
+check('FINL1 a class template\'s member defined out of class keeps it (the class, not the template parameter)',
+      run(s1.r_forceinline_declarations,
+          'template <class K, class E>\nclass DU\n{\n\tpublic:\n\t\tstatic __forceinline void __cdecl up(K& k, E& e);\n};\n'
+          'template <class K, class E>\nvoid __cdecl DU<K, E>::up(K& k, E& e)\n{\n}\n'),
+      ['static __forceinline void __cdecl up(K& k, E& e);'], ['FINL1'])
+check('FINL1 a class named after a nested __declspec(align(16)) keeps it on its defined constructor',
+      run(s1.r_forceinline_declarations,
+          'struct __declspec(align(16)) BS : R {\n    __declspec(nothrow) __forceinline BS() ;\n};\n'
+          '    __declspec(nothrow) BS::BS()  {\n    }\n'),
+      ['__declspec(nothrow) __forceinline BS() ;'], ['FINL1'])
 check('FINL1 headers are left alone',
       run(s1.r_forceinline_declarations, 'struct A { __forceinline ~A(); };\n', '/nonexistent/src/x.h'), [], ['FINL1'])
 
@@ -1387,6 +1467,70 @@ s1.add_recon_definitions(os.path.join(_rc, 'dec'), _st)
 _ru = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
 check('REC1 symbols-only recon: bindings persist, no body', _json.dumps(_ru) + _ro3 + str(dict(_st)),
       ['"?Agent1@@YAXXZ": "0x00dcd6a0"', "'REC1-SYM': 1"], ['fnv-nx REC1: reconstructed'])
+# REC1-REPL: `replace` pairs edit the unit's own text, in order, before the append; each `old` exactly once
+_kp = os.path.join(_rc, 'dec', 'src', 'k.cpp')
+_ku = {'units': [{'source': 'src/k.cpp', 'functions': [], 'symbols': {}}]}
+def _krecon(name, rec, body=None):
+    os.makedirs(os.path.join(_rc, 'recon', name))
+    rec = dict({'format': 'fnvnx-recon/1', 'unit': 'src/k.cpp'}, **rec)
+    _json.dump(rec, open(os.path.join(_rc, 'recon', name, 'recon.json'), 'w'))
+    if body is not None:
+        open(os.path.join(_rc, 'recon', name, 'body.cpp'), 'w').write(body)
+    prepare.__dict__['_fnvnx_recon'] = None
+_ktext = 'void g();\nvoid f() { g(); }\n'
+_json.dump(_ku, open(os.path.join(_rc, 'dec', 'build', 'units.json'), 'w'))
+os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', 'k1')
+_krecon('k1', {'append': 'body.cpp', 'symbols': {'?h@@YAXXZ': '0x00402000'},
+               'replace': [{'old': 'void f() { g(); }', 'new': 'void f() { h(); }'},
+                           {'old': 'void g();', 'new': 'void g();\nvoid h();'}]},
+        '/* appended */ void f2() { g(); }\n')
+_st = Counter()
+_ko = s1.r_recon_bodies(_kp, _ktext, _st)
+check('REC1-REPL the pairs apply in order, then the body is appended',
+      _ko + str(dict(_st)), ['void g();\nvoid h();\nvoid f() { h(); }', 'fnv-nx REC1', '/* appended */ void f2() { g(); }',
+                             "'REC1-REPL': 2"], ['void f() { g(); }'])
+check('REC1-REPL applied before the append: the appended body is not edited',
+      _ko[_ko.index('fnv-nx REC1'):], ['void f2() { g(); }'], ['h()'])
+s1.add_recon_definitions(os.path.join(_rc, 'dec'), _st)
+_ku2 = _json.load(open(os.path.join(_rc, 'dec', 'build', 'units.json')))['units'][0]
+check('REC1-REPL with symbols: REC1-SYM still persists the binding', _json.dumps(_ku2) + str(dict(_st)),
+      ['"?h@@YAXXZ": "0x00402000"', "'REC1-SYM': 1"])
+def _kfails(name, rec, text):
+    """a recon whose replace does not apply: rejected whole for the unit (no edit, no append), the prepare goes on"""
+    os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon', name)
+    _krecon(name, rec, '/* appended body */\n')
+    prepare.__dict__['_fnvnx_recon_rejected'] = []
+    st = Counter()
+    try:
+        out = s1.r_recon_bodies(_kp, text, st)
+    except RuntimeError as e:
+        return 'raised: ' + str(e)
+    rej = prepare.__dict__['_fnvnx_recon_rejected']
+    return ('unchanged ' if out == text else 'CHANGED ') + str(dict(st)) + ' ' + repr(rej)
+check('REC1-REPL an old that occurs twice: the recon is rejected, the prepare goes on',
+      _kfails('k2', {'replace': [{'old': 'g()', 'new': 'h()'}]}, 'void a() { g(); }\nvoid b() { g(); }\n'),
+      ['unchanged', "'REC1-REJECT': 1", ", 0, 2, 'g()')"], ['raised', 'appended body'])
+check('REC1-REPL a missing old: rejected',
+      _kfails('k3', {'replace': [{'old': 'void q();', 'new': 'void r();'}]}, _ktext), ['unchanged', "'REC1-REJECT': 1", ', 0, 0,'],
+      ['raised'])
+check('REC1-REPL an old found only in the appended body: rejected (replace runs before the append)',
+      _kfails('k4', {'append': 'body.cpp', 'replace': [{'old': 'void f2()', 'new': 'void f3()'}]}, _ktext),
+      ['unchanged', "'REC1-REJECT': 1"], ['raised', 'appended body'])
+check('REC1-REPL a replace-only recon is a recon (no body, no symbols): rejected the same way',
+      _kfails('k5', {'replace': [{'old': 'void q();', 'new': 'x'}]}, _ktext), ['unchanged', "'REC1-REJECT': 1"], ['raised'])
+check('REC1-REPL never half-applies: pair 0 matches, pair 1 does not -> nothing applied, no append',
+      _kfails('k6', {'append': 'body.cpp', 'replace': [{'old': 'void g();', 'new': 'void G();'},
+                                                        {'old': 'nowhere', 'new': 'x'}]}, _ktext),
+      ['unchanged', ", 1, 0, 'nowhere')"], ['raised', 'void G();', 'REC1-REPL\': 1'])
+check('REC1-REPL a malformed pair: rejected',
+      _kfails('k7', {'replace': [{'old': '', 'new': 'x'}]}, _ktext), ['unchanged', ', 0, -1,'], ['raised'])
+os.makedirs(os.path.join(_rc, 'out', 'build'), exist_ok=True)
+_st = Counter()
+s1.add_recon_definitions(os.path.join(_rc, 'out'), _st)
+_rt = open(os.path.join(_rc, 'out', 'build', 'recon_rejected.tsv')).read()
+check('REC1-REPL the POST hook lists the rejected recons in build/recon_rejected.tsv',
+      _rt + str(dict(_st)), ['#recon dir', 'k7', 'src/k.cpp', "'REC1-REJECTED-RECONS': 1"])
+prepare.__dict__['_fnvnx_recon_rejected'] = []
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)

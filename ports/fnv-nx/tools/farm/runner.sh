@@ -5,6 +5,8 @@
 #
 # Jobs: prepare | census | compile <k> <N> | <any tools/farm/<job>_job.sh with args after <commit>>.
 # WATCH=wip TRY_K=k TRY_N=n: a try farm (below) - the job runs on unmerged agent work instead of the integration head.
+# WIP_ONLY=<regex>: a try farm takes only the wip branches whose name matches (e.g. '^wip/d26$'); its reports name the
+# branch and the commit in their title.
 # Loop: wait for a new head of the integration branch of the public repository (read-only, no credentials), check out
 # the job scripts at that head, run the job, publish its report to branch `reports/<name>` of the private artifacts
 # repository, repeat. Several commits that land during one run collapse into the newest. The process exits by
@@ -19,6 +21,7 @@
 #                      (setsid -w nohup ... &: -w, or under a shell with job control setsid forks and $! is a
 #                      parent that exits at once), and let the check-in start it again when it is gone
 #   RUNNER_POLL_S=<s>  seconds between looks at the integration head (default 60)
+#   RUNNER_MIN_GAP_S=<s> at least this long between two job starts (a light job hosted beside other work: `zero`)
 #   RUNNER_CLAIM=<tag> farms sharing a tag split the heads: before a job, a farm pushes the branch
 #                      quick/claim/<tag>/<head12> of the artifacts repository with a commit of its own; a farm whose push
 #                      is refused (another holds it) skips that head. Several warm farms thus verify consecutive heads
@@ -47,6 +50,8 @@ echo $$ > "$FARM_HOME/$NAME.pid"   # the runner itself (a watcher's kill -0 targ
 # qk<k> (the warm quick farms): persistent, a 20 s poll, claims shared under the tag "quick" (env still overrides)
 if [[ "$NAME" =~ ^qk[0-9]+$ ]]; then : "${RUNNER_PERSIST:=1}" "${RUNNER_POLL_S:=20}" "${RUNNER_CLAIM:=quick}"; fi
 PERSIST=${RUNNER_PERSIST:-0}; POLL=${RUNNER_POLL_S:-60}; CLAIM=${RUNNER_CLAIM:-}
+GAP=${RUNNER_MIN_GAP_S:-0}; LAST_START=0   # RUNNER_MIN_GAP_S: at least this many seconds between two job starts (a light
+                                           # job hosted beside other work, e.g. `zero` on a busy integration branch)
 claim() {  # claim <head>: true when this farm now holds quick/claim/<tag>/<head12> (or claims are off)
   [ -n "$CLAIM" ] || return 0
   local b=quick/claim/$CLAIM/${1:0:12} g=$FARM_HOME/claim.git c
@@ -90,6 +95,9 @@ next_wip() {  # prints "<sha> <branch>" of a wip branch of this farm that has no
     # retired wip branches point at an integration commit: nothing to try
     git -C "$NX" merge-base --is-ancestor "$sha" "origin/$BRANCH" 2>/dev/null && continue
     b=${ref#refs/heads/}
+    # WIP_ONLY=<regex>: only the wip branches whose name matches (try1of1 tested a stale wip/a03060db789a, taken first
+    # in ls-remote order, instead of wip/d26)
+    if [ -n "${WIP_ONLY:-}" ] && ! printf '%s\n' "$b" | grep -Eq -- "$WIP_ONLY"; then continue; fi
     python3 -c 'import sys,zlib; sys.exit(0 if zlib.crc32(sys.argv[1].encode()) % int(sys.argv[2]) == int(sys.argv[3]) - 1 else 1)' "$b" "$TRY_N" "$TRY_K" || continue
     grep -qx "$sha" "$FARM_HOME/$NAME.done" 2>/dev/null && continue
     echo "$sha $b"; break
@@ -106,7 +114,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
   if [ "$WATCH" = wip ]; then
     read -r H WB < <(next_wip) || true
     if [ -z "${H:-}" ]; then sleep 60; continue; fi
-    git -C "$NX" fetch -q https://github.com/toadharvard/fnv-nx-build "+refs/heads/$WB:refs/remotes/wip/${WB#wip/}" || { sleep 60; continue; }
+    git -C "$NX" fetch -q "$(git -C "$ARTIFACTS" remote get-url origin)" "+refs/heads/$WB:refs/remotes/wip/${WB#wip/}" || { sleep 60; continue; }
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "origin/$BRANCH" || { sleep 60; continue; }
     TAG="${WB//\//_}-"
   else
@@ -117,9 +125,11 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
       age=$(( $(date +%s) - $(stat -c %Y "$LAST" 2>/dev/null || echo 0) ))
       if [ "$REPEAT" -le 0 ] || [ "$age" -lt "$REPEAT" ]; then sleep "$POLL"; continue; fi
     fi
+    if [ "$GAP" -gt 0 ] && [ $(( $(date +%s) - LAST_START )) -lt "$GAP" ]; then sleep "$POLL"; continue; fi
     if ! claim "$H"; then echo "$H" > "$LAST"; sleep "$POLL"; continue; fi
     git -C "$NX" fetch -q origin "$BRANCH" && git -C "$NX" checkout -q --detach "$H" || { sleep 60; continue; }
   fi
+  LAST_START=$(date +%s)
   [ "$PERSIST" = 1 ] && export FARM_DEADLINE=$(( $(date +%s) + ${RUNNER_JOB_S:-7200} - 300 ))
   H12=${H:0:12}; R=$FARM_HOME/out/$TAG$H12-$JOB.md; mkdir -p "$FARM_HOME/out"; rm -f "${R%.md}.json"
   J=$NX/ports/fnv-nx/tools/farm
@@ -139,6 +149,11 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
   # a job's machine-readable summary (<report>.json, e.g. fuzz_job.sh's fnvnx-fuzz-summary/1) goes first, its report
   # second: a report on the branch always has its summary beside it when the job wrote one
   [ -f "$R" ] && [ $rc -eq 0 ] && [ -f "${R%.md}.json" ] && publish_report "${R%.md}.json"
+  # a try farm's report names what it tried: the wip branch and the commit, in its title line
+  if [ "$WATCH" = wip ] && [ -f "$R" ]; then
+    sed -i "1{/^#/s|\$| ($WB @ $H12)|;}" "$R"
+    head -1 "$R" | grep -q "^#" || sed -i "1i # $JOB ($WB @ $H12)\n" "$R"
+  fi
   [ -f "$R" ] && publish_report "$R"
   if [ "$WATCH" = wip ]; then echo "$H" >> "$FARM_HOME/$NAME.done"; else echo "$H" > "$LAST"; fi
   log "done $JOB at $H12 rc=$rc"

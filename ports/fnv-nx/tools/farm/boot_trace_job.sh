@@ -88,6 +88,10 @@ if [ -z "$LC" ]; then
 fi
 phase "game + link" "link $LC"
 
+# the same first-run profile on both sides (tools/lockstep/profile.py); the guest's with its null device's name
+python3 -I "$P/tools/lockstep/profile.py" "$GAME/Fallout_default.ini" "$W/profile_guest" --device "fnv-nx null D3D9 device" \
+	> "$W/profile.log" 2>&1 || fail "profile.py (log $W/profile.log)"
+export FARM_PROFILE=$W/profile_guest
 boot() {   # boot <tag> <emu_guest extra args...>: the stub boot of link LC with a trace
 	local tag=$1; shift
 	rm -rf "$W/$tag"

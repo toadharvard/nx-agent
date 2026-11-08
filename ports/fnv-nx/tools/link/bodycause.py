@@ -15,9 +15,11 @@ Every `missing` row gets exactly one cause, first that applies:
    MSVC STL's `_X*` throwers, `operator new/delete`, CRT C names. The runtime (S4) provides these, not the decomp.
 2. `data` - not a function (bodies.py note): a static data member declared only. S2c's address map binds data.
 3. `name-mismatch` - an object of the link defines the same function under another decorated name: the same
-   member of the same class (class shells and unit namespaces relaxed) with the same number of parameters, but
-   other parameter spellings, cv, namespace or return type. The decomp has the body; the declaration the
-   referencing unit sees does not match it.
+   member of the same class (class shells and unit namespaces relaxed, also inside template arguments; the
+   template arguments themselves kept, since another instantiation is another function) with the same number of
+   parameters, but other parameter spellings, cv, namespace or return type. The decomp has the body; the
+   declaration the referencing unit sees does not match it. Detail `defined only as a GCC clone` when the only
+   such definition is an IPA clone (`.isra.0`): its signature is GCC's own, so nothing may alias it.
 4. `not-compiled` - the tree has a body for it (an out-of-line `C::f(` definition or an in-class body of C::f),
    but no object defines it: in a source that is not a unit, under `#if 0`, or in a class copy the referencing
    unit does not include.
@@ -30,6 +32,10 @@ With --traps, trap stubs bodies.py never classifies are listed too, from out/ref
 address the native build references but no unit compiles), `thunk` (a this-adjusting thunk of a function defined
 nowhere), `runtime` / `import` / other refs classes as they are. --closed: files of names (one per line, or a JSON
 list) that rules not yet in this link close (measured offline); they are left out.
+
+`unresolved` C placeholders get the detail `c <function|variable> <live|harness-only>` (placeholder_uses): whether
+GCC calls the name, and whether any code that uses it is reachable in its object; harness-only names are used only
+by the decomp's convention callers and unplaced variant copies, which nothing in the guest reaches.
 
 `code-defmissing` (`__fnv_<addr>` stubs: callers bound to an address units.json places whose unit emits no
 body; home = the placing unit), `platform` (TLS / runtime data names). `fun-addr`: an unresolved C placeholder named after an exe address (`FUN_<addr>`). Every row gets an owner
@@ -94,6 +100,24 @@ def key_of(sig):
     return (cls, last, len(sig.params))
 
 
+UNIT_NS_IN = re.compile(r'\bfnv_[0-9a-f]{8}::')
+CLONE_SUFFIX = re.compile(r'\.(?:isra|constprop|part|cold|lto_priv)\.\d+')
+
+
+def inst_key_of(sig):
+    """key_of with the class's template arguments kept (canonical, unit namespaces inside them relaxed): the key
+    `name-mismatch` pairs on. Another instantiation of the same class template (`NiPointer<NiAVObject>` for
+    `NiPointer<NiLight>`) is another function, not the same one under another decoration."""
+    if sig is None or sig.kind != 'func' or not sig.qual or sig.params is None:
+        return None
+    qual = [q for q in sig.qual if not UNIT_NS.match(q)]
+    if not qual:
+        return None
+    last = UNIT_NS_IN.sub('', qual[-1])
+    cls = norm(UNIT_NS_IN.sub('', sigs.canon_type(qual[-2]))) if len(qual) >= 2 else None
+    return (cls, last, len(sig.params))
+
+
 def is_crt(sig, dem):
     if CRT_SCOPE.match(dem):
         return 'std scope'
@@ -125,7 +149,7 @@ def object_defs(objdir):
     names = sorted(names)
     idx = collections.defaultdict(set)
     for n, d in zip(names, demangle(names)):
-        k = key_of(sigs.parse_itanium(n, d))
+        k = inst_key_of(sigs.parse_itanium(n, d))
         if k:
             idx[k].add(n)
     return idx
@@ -232,10 +256,14 @@ def classify(rows, objidx, tbodies, units):
             cause, detail = 'crt-import', crt
         elif note.startswith('not a function') or (sig is not None and sig.kind == 'data'):
             cause, detail = 'data', 'static member or global declared only'
-        if cause is None and k:
-            other = sorted(n for n in objidx.get(k, ()) if n != name)
+        ik = inst_key_of(sig)
+        if cause is None and ik:
+            other = sorted(n for n in objidx.get(ik, ()) if n != name)
             if other:
-                cause, detail, ev = 'name-mismatch', 'defined as another decoration', ' '.join(other[:3])
+                plain = [n for n in other if not CLONE_SUFFIX.search(n)]
+                cause, ev = 'name-mismatch', ' '.join((plain or other)[:3])
+                detail = ('defined as another decoration' if plain else
+                          'defined only as a GCC clone (.isra/.constprop: its own signature, no alias target)')
         if cause is None and k and k[0]:
             hits = tbodies.get((k[0], k[1]), [])
             if hits:
@@ -326,6 +354,128 @@ def other_traps(out, traps, have, tree):
     return rows
 
 
+def _run(*cmd):
+    return subprocess.run(list(cmd), capture_output=True, text=True, errors='surrogateescape').stdout
+
+
+def object_undefs(objdir):
+    """Every name some object of objdir references from outside its definition (an undefined symbol). The link's
+    synthesized objects (`zz_*.o`: a host unit compiled again, everything but the kept symbols undefined) count only
+    with the names their relocations use."""
+    names = sorted(f for f in os.listdir(objdir) if f.endswith('.o'))
+    plain = [os.path.join(objdir, f) for f in names if not f.startswith('zz_')]
+    synth = [os.path.join(objdir, f) for f in names if f.startswith('zz_')]
+    out = set()
+    for k in range(0, len(plain), 200):
+        for line in _run('nm', '-u', '-P', *plain[k:k + 200]).splitlines():
+            p = line.split()
+            if len(p) >= 2 and p[1] in 'Uuw' and not p[0].endswith(':'):
+                out.add(p[0])
+    for k in range(0, len(synth), 200):
+        for line in _run('readelf', '-rW', *synth[k:k + 200]).splitlines():
+            f = line.split()
+            if len(f) >= 5 and f[2].startswith('R_AARCH64'):
+                out.add(f[4])
+    return out
+
+
+def placeholder_uses(obj, names, undefs):
+    """How one GCC object uses the C placeholders in names -> {name: (shape, reach)}. shape: `function` when a
+    CALL26/JUMP26 names it, else `variable`. reach: `live` when a function that references it is reachable in the
+    object from a root (a placed `__fnv_` definition, a symbol another object references, anything an allocated
+    non-code section such as a vtable or init array references), else `harness-only`: only code nothing reaches
+    uses it (the decomp's convention callers `stub_caller() { return f(stub_a()); }` and unplaced variant copies)."""
+    secs, sflags, syms, binds = {}, {}, collections.defaultdict(list), {}
+    for line in _run('readelf', '-SW', obj).splitlines():
+        g = re.match(r'\s*\[\s*(\d+)\]\s+(\S+)\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+(\S*)', line)
+        if g:
+            secs[g.group(2)] = int(g.group(1))
+            sflags[int(g.group(1))] = (g.group(2), g.group(3))
+    for line in _run('readelf', '-sW', obj).splitlines():
+        f = line.split()
+        if len(f) >= 8 and f[0].rstrip(':').isdigit() and f[6].isdigit() and f[3] in ('FUNC', 'OBJECT'):
+            syms[int(f[6])].append((int(f[1], 16), int(f[2]), f[7]))
+            binds[f[7]] = f[4]
+    canon = {}
+    for lst in syms.values():
+        for v, _, nm in lst:   # aliases at one address (C1/C2, __fnv_<addr>) are one node
+            canon[nm] = min((n2 for v2, _, n2 in lst if v2 == v), key=lambda x: (len(x), x))
+
+    def at(si, off):
+        for v, sz, nm in syms.get(si, ()):
+            if v <= off < v + max(sz, 1):
+                return canon[nm]
+        return None
+    edges, roots, called = collections.defaultdict(set), set(), set()
+    sec = None
+    for line in _run('readelf', '-rW', obj).splitlines():
+        m = re.match(r"Relocation section '\.rela(\S+)'", line)
+        if m:
+            sec = m.group(1)
+            continue
+        f = line.split()
+        if len(f) < 5 or not f[2].startswith('R_AARCH64'):
+            continue
+        tgt = f[4]
+        if tgt in secs and len(f) >= 7:   # a section symbol + addend: the symbol defined there
+            tgt = at(secs[tgt], int(f[6], 16)) or tgt
+        tgt = canon.get(tgt, tgt)
+        if tgt in names and f[2].endswith(('CALL26', 'JUMP26')):
+            called.add(tgt)
+        nm, fl = sflags.get(secs.get(sec), ('', ''))
+        if nm.startswith(('.debug', '.eh_frame', '.comment', '.note')):
+            continue
+        if 'X' not in fl:
+            if 'A' in fl:
+                roots.add(tgt)
+            continue
+        edges[at(secs.get(sec), int(f[0], 16)) or '?' + nm].add(tgt)
+    for nm, b in binds.items():
+        if nm.startswith('__fnv') or (b in ('GLOBAL', 'WEAK') and nm in undefs):
+            roots.add(canon.get(nm, nm))
+    seen, todo = set(), list(roots)
+    while todo:
+        x = todo.pop()
+        if x not in seen:
+            seen.add(x)
+            todo += list(edges.get(x, ()))
+            b = re.sub(r'\.(?:constprop|isra|part)\.\d+$', '', x)
+            if b != x:
+                todo.append(b)
+    out = {}
+    for n in names:
+        users = [s for s, ts in edges.items() if n in ts]
+        if users:
+            out[n] = ('function' if n in called else 'variable', 'live' if any(u in seen for u in users)
+                      else 'harness-only')
+    return out
+
+
+def placeholder_details(rows, objdir):
+    """`unresolved` trap rows of unmangled names (decomp placeholders): detail `<shape> <reach>` from
+    placeholder_uses over the referencing units' objects (`c function harness-only`, `c variable live`)."""
+    want = collections.defaultdict(set)
+    for r in rows:
+        if r['cause'] == 'unresolved' and not r['name'].startswith('_Z'):
+            for u in r['units'].split(','):
+                want[u].add(r['name'])
+    if not want:
+        return
+    undefs = object_undefs(objdir)
+    got = collections.defaultdict(list)
+    for u, names in sorted(want.items()):
+        o = os.path.join(objdir, u.replace('/', '_') + '.o')
+        if os.path.exists(o):
+            for n, v in placeholder_uses(o, names, undefs).items():
+                got[n].append(v)
+    for r in rows:
+        if r['name'] in got:
+            vs = got[r['name']]
+            shape = 'function' if any(s == 'function' for s, _ in vs) else 'variable'
+            reach = 'live' if any(x == 'live' for _, x in vs) else 'harness-only'
+            r['detail'] = 'c %s %s' % (shape, reach)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('out')
@@ -365,6 +515,7 @@ def main(argv=None):
         r['home'] = sorted(r['units'].split(','))[0] if r['units'] else ''
     if traps:
         res += other_traps(a.out, traps, {r['name'] for r in res}, a.tree)
+        placeholder_details(res, a.objdir)
     res = [r for r in res if r['name'] not in closed]
     for r in res:
         r['owner'] = 'recon' if r['cause'] in ('no-body', 'extern-text', 'fun-addr', 'code-defmissing') else 's2-bodies'
@@ -376,9 +527,10 @@ def main(argv=None):
             fh.write('\t'.join([r['name'], r['dem'], r['cause'], r['detail'], r['evidence'],
                                 '1' if r['name'] in traps else ('0' if traps else ''), r['units'], r['owner'],
                                 str(r['shard']), r['home']]) + '\n')
-    tot = collections.Counter((r['cause'], r['detail'] if r['cause'] in CAUSES else '') for r in res)
-    trp = collections.Counter((r['cause'], r['detail'] if r['cause'] in CAUSES else '') for r in res
-                              if r['name'] in traps)
+    def sub(r):   # the detail a summary line counts: the cause classes', and the C placeholders' shape and reach
+        return r['detail'] if r['cause'] in CAUSES or r['detail'].startswith('c ') else ''
+    tot = collections.Counter((r['cause'], sub(r)) for r in res)
+    trp = collections.Counter((r['cause'], sub(r)) for r in res if r['name'] in traps)
     lines = ['names: %d (trap stubs %s); closed offline and left out: %d' % (
         len(res), sum(trp.values()) if traps else '-', len(closed))]
     for c in sorted({k for k, _ in tot}, key=lambda c: (c not in CAUSES, CAUSES.index(c) if c in CAUSES else 0, c)):

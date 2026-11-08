@@ -18,7 +18,7 @@ mkdir -p "$FARM_HOME" "$(dirname "$REPORT")"
 
 # 1. The port's tools at that commit, as a detached worktree outside the main checkout.
 SRC=$FARM_HOME/src-${COMMIT:0:12}
-if [ ! -d "$SRC" ]; then git -C "$REPO" worktree add --detach "$SRC" "$COMMIT" >/dev/null; fi
+bash "$(dirname "$0")/worktree.sh" "$REPO" "$SRC" "$COMMIT" >/dev/null
 P=$SRC/ports/fnv-nx
 
 # 2. Pinned third-party checkouts.

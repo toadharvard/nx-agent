@@ -236,7 +236,9 @@ def t_report(tmp):
     summ = {"stop": {"reason": "STOPPED: scenario complete"}, "stubbed_faults": 2, "initializers_skipped": 1,
             "peak_heap_bytes": 500 << 20, "milestone": "first-cell",
             "file_faults": [{"call": "open", "path": "switch/fnv/Custom.ini", "errno": 2},
-                            {"call": "open", "path": "switch/fnv/Data/Missing.bsa", "errno": 2}],
+                            {"call": "open", "path": "switch/fnv/Data/Missing.bsa", "errno": 2},
+                            {"call": "remove", "path": "switch/fnv/Warnings.txt", "errno": "ENOENT"},
+                            {"call": "stat", "path": "switch/fnv/X.txt", "errno": "ENOENT"}],
             "scenario": {"steps_done": len(plan["steps"]), "complete": True, "marks": [{"name": "in-cell"}],
                          "gate_timeouts": [{"step": 3, "what": "Saves/x", "seconds": 5}],
                          "root": os.path.join(g, "kept"),
@@ -266,11 +268,17 @@ def t_report(tmp):
     got = {k: T[k]["count"] for k in want}
     check("report: every target measured", r["measured"] == 12, str({k: T[k]["measured"] for k in T}))
     check("report: counts", got == want, f"{got} != {want}")
+    check("report: existence probes counted apart", T["4"]["detail"]["probes"] == 2)
     check("report: scenario's own unknown command is not a game error", T["10"]["detail"]["scenario_command_errors"])
     md = scenario.report_md(r)
     check("report md: no game text", "SCRIPTS" not in md and "Missing.bsa" not in md and "12/12" in md, md[:400])
     rp = os.path.join(tmp, "rep", "r.json")
     json.dump(r, open(rp, "w"))
+    se = os.path.join(tmp, "rep", "scripterr.json")
+    json.dump({"schema": "fnvnx-scripterr/1", "metric": 4, "distinct": 6, "in_original": 2, "groups": []}, open(se, "w"))
+    r2 = scenario.report(plan, g, w, cmp_, thr, nx1, scripterr=se)
+    check("report: scripterr.py's metric is #10", r2["targets"]["10"]["count"] == 4 and
+          r2["targets"]["10"]["detail"]["source"] == "scripterr.py", str(r2["targets"]["10"]))
     empty = scenario.report(plan, os.path.join(tmp, "nothing"), nx1=nx1)
     m = scenario.metric([r, empty])
     check("metric: targets measured in any scenario", m["measured"] == 12 and m["targets"][1]["measured_in"] == 1, str(m["measured"]))

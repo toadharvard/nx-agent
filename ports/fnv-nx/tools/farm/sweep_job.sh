@@ -85,7 +85,7 @@ setup() {
 	NXR=$W/nx_render-${CAND:0:12}
 	if [ ! -x "$NXR/nx_render" ]; then
 		local src=$W/src-${CAND:0:12}
-		[ -d "$src" ] || git -C "$P" worktree add -q --detach "$src" "$CAND" || fail "worktree"
+		bash "$P/tools/farm/worktree.sh" "$P" "$src" "$CAND" || fail "worktree"
 		make -C "$src/ports/fnv-nx/tests/s6n" OUT="$NXR" "$NXR/nx_render" >"$W/nx_render-${CAND:0:12}.log" 2>&1 || fail "nx_render"
 		git -C "$P" worktree remove --force "$src" 2>/dev/null || rm -rf "$src"
 	fi
@@ -165,19 +165,26 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" &&
 # 1e-5): their captures again with every float input perturbed, rendered by the reference only; permreport.py then
 # calls a program ill when the candidate's differing pixels lie where the perturbed reference moved
 cond() {
-	local v=$1 o=$2 rep=$3 cand=$4 gate=$5
+	local v=$1 o=$2 rep=$3 cand=$4 gate=$5 k args=()
+	local nd=${SWEEP_COND_DRAWS:-16}   # perturbation draws; the moved pixels are their union (permreport.py)
 	python3 -I -c "import json,sys;r=json.load(open(sys.argv[1]));print(''.join(x['hash']+'\n' for x in r['rows'] if x['class']=='over'),end='')" \
 		"$o/$rep/permreport.json" >"$o/$rep.over.txt" 2>/dev/null || return 0
 	[ -s "$o/$rep.over.txt" ] || return 0
-	if [ ! -f "$W/sweep-pcaps/$v/manifest.json" ] || ! cmp -s "$o/$rep.over.txt" "$W/sweep-pcaps/$v/over.txt"; then
-		rm -rf "$W/sweep-pcaps/$v" "$o/pref"
-		python3 -I "$CMP/perm.py" build "${sdps[@]}" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/sweep-pcaps/$v" \
-			--variant "$v" --programs "$o/$rep.over.txt" --perturb 1e-5 >"$o/pperm.log" 2>&1 || return 0
+	if [ ! -f "$W/sweep-pcaps/$v/over.txt" ] || ! cmp -s "$o/$rep.over.txt" "$W/sweep-pcaps/$v/over.txt"; then
+		rm -rf "$W/sweep-pcaps/$v" "$o"/pref*; mkdir -p "$W/sweep-pcaps/$v"
+		for k in $(seq 1 "$nd"); do
+			python3 -I "$CMP/perm.py" build "${sdps[@]}" --asm "$SH/s6b_asm" --sdp2dksh "$SH/sdp2dksh" --out "$W/sweep-pcaps/$v/d$k" \
+				--variant "$v" --programs "$o/$rep.over.txt" --perturb 1e-5 --perturb-seed "$k" >"$o/pperm.log" 2>&1 || continue
+			python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/pref$k" "$W/sweep-pcaps/$v/d$k"/*.nxd9 >"$o/pref.log" 2>&1
+		done
 		cp "$o/$rep.over.txt" "$W/sweep-pcaps/$v/over.txt"
-		python3 -I "$CMP/replay.py" ref --exe "$BIN/nxd9play.exe" --prefix "$PFX" --out "$o/pref" "$W/sweep-pcaps/$v"/*.nxd9 >"$o/pref.log" 2>&1
 	fi
+	for k in $(seq 1 "$nd"); do
+		[ -d "$o/pref$k" ] && [ -f "$W/sweep-pcaps/$v/d$k/manifest.json" ] && args+=(--pref "$o/pref$k" --pmanifest "$W/sweep-pcaps/$v/d$k/manifest.json")
+	done
+	[ ${#args[@]} -gt 0 ] || return 0
 	python3 -I "$CMP/permreport.py" --manifest "$W/sweep-caps/manifest.json" --gate "$o/$gate/capgate.json" --ref "$o/ref" \
-		--out "$o/$rep" --cand "$o/$cand" --pref "$o/pref" --pmanifest "$W/sweep-pcaps/$v/manifest.json" >/dev/null 2>&1
+		--out "$o/$rep" --cand "$o/$cand" "${args[@]}" >/dev/null 2>&1
 }
 programs() {
 	local v sdps=() f
@@ -199,7 +206,7 @@ programs() {
 		cond "$v" "$o" rep cand gate
 		[ "$FAMILIES" = 1 ] && cond "$v" "$o" rep_fam fam gate_fam
 		cp "$W/sweep-caps/manifest.json" "$o/manifest.json"
-		rm -rf "$o/ref" "$o/cand" "$o/fam" "$o/pref" "$W/sweep-caps" "$W/sweep-pcaps"   # images: not kept
+		rm -rf "$o/ref" "$o/cand" "$o/fam" "$o"/pref* "$W/sweep-caps" "$W/sweep-pcaps"   # images: not kept
 	done
 	python3 -I "$CMP/sweep_report.py" programs --shard-dir "$S" --shaders "$SHD" ${UAM:+--uam "$UAM"} --out "$S/programs.tsv" \
 		>"$S/programs.log" 2>&1 || NOTES+=("programs.tsv failed (log $S/programs.log)")

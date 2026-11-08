@@ -150,9 +150,9 @@ struct Graph;
     unsigned long Release() override;
 #define DISPATCH_STUBS                                                                                        \
     HR GetTypeInfoCount(unsigned *n) override { if (n) *n = 0; return S_OK_; }                               \
-    HR GetTypeInfo(unsigned, uint32_t, void **) override { return E_NOTIMPL_; }                              \
-    HR GetIDsOfNames(const void *, void *, unsigned, uint32_t, long *) override { return E_NOTIMPL_; }       \
-    HR Invoke(long, const void *, uint32_t, uint16_t, void *, void *, void *, unsigned *) override { return E_NOTIMPL_; }
+    HR GetTypeInfo(unsigned, uint32_t, void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }                              \
+    HR GetIDsOfNames(const void *, void *, unsigned, uint32_t, long *) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }       \
+    HR Invoke(long, const void *, uint32_t, uint16_t, void *, void *, void *, unsigned *) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
 
 struct Control final : IMediaControl_ {
     Graph *g;
@@ -161,10 +161,10 @@ struct Control final : IMediaControl_ {
     HR Pause() override;
     HR Stop() override;
     HR GetState(long ms, long *state) override;
-    HR RenderFile(void *) override { return E_NOTIMPL_; }
-    HR AddSourceFilter(void *, void **) override { return E_NOTIMPL_; }
-    HR get_FilterCollection(void **) override { return E_NOTIMPL_; }
-    HR get_RegFilterCollection(void **) override { return E_NOTIMPL_; }
+    HR RenderFile(void *) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+    HR AddSourceFilter(void *, void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+    HR get_FilterCollection(void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+    HR get_RegFilterCollection(void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
     HR StopWhenReady() override { return Stop(); }
 };
 struct Event final : IMediaEvent_ {
@@ -184,10 +184,10 @@ struct Position final : IMediaPosition_ {
     HR put_CurrentPosition(REFTIME t) override;
     HR get_CurrentPosition(REFTIME *t) override;
     HR get_StopTime(REFTIME *t) override { return get_Duration(t); }
-    HR put_StopTime(REFTIME) override { return E_NOTIMPL_; }
+    HR put_StopTime(REFTIME) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
     HR get_PrerollTime(REFTIME *t) override { if (!t) return E_POINTER_; *t = 0; return S_OK_; }
     HR put_PrerollTime(REFTIME) override { return S_OK_; }
-    HR put_Rate(double r) override { return r == 1.0 ? S_OK_ : E_NOTIMPL_; }
+    HR put_Rate(double r) override { return r == 1.0 ? S_OK_ : (FNVNX_UNIMPL(), E_NOTIMPL_); }
     HR get_Rate(double *r) override { if (!r) return E_POINTER_; *r = 1.0; return S_OK_; }
     HR CanSeekForward(long *c) override { if (!c) return E_POINTER_; *c = -1; return S_OK_; }
     HR CanSeekBackward(long *c) override { if (!c) return E_POINTER_; *c = -1; return S_OK_; }
@@ -267,16 +267,16 @@ struct Graph final : IGraphBuilder_ {
             }
         return E_FAIL_;
     }
-    HR EnumFilters(void **) override { return E_NOTIMPL_; }
-    HR FindFilterByName(const uint16_t *, void **) override { return E_NOTIMPL_; }
-    HR ConnectDirect(Unk *, Unk *, const void *) override { return E_NOTIMPL_; }
-    HR Reconnect(Unk *) override { return E_NOTIMPL_; }
+    HR EnumFilters(void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+    HR FindFilterByName(const uint16_t *, void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+    HR ConnectDirect(Unk *, Unk *, const void *) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+    HR Reconnect(Unk *) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
     HR Disconnect(Unk *) override { return S_OK_; }
     HR SetDefaultSyncSource() override { return S_OK_; }
-    HR Connect(Unk *, Unk *) override { return E_NOTIMPL_; }
+    HR Connect(Unk *, Unk *) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
     HR Render(Unk *pin) override;
-    HR RenderFile(const uint16_t *, const uint16_t *) override { return E_NOTIMPL_; }
-    HR AddSourceFilter(const uint16_t *, const uint16_t *, void **) override { return E_NOTIMPL_; }
+    HR RenderFile(const uint16_t *, const uint16_t *) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+    HR AddSourceFilter(const uint16_t *, const uint16_t *, void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
     HR SetLogFile(uintptr_t) override { return S_OK_; }
     HR Abort() override { return S_OK_; }
     HR ShouldOperationContinue() override { return S_OK_; }
@@ -346,6 +346,8 @@ HR Graph::Render(Unk *pin)
     file_size = (size_t)total;
     have_dec = mp3dec_ex_open_buf(&dec, file, file_size, MP3D_SEEK_TO_SAMPLE) == 0 && dec.info.hz && dec.info.channels;
     if (!have_dec) {
+        if (fnvnx_plat_on)   /* the platform lane: an MP3 that minimp3 cannot open */
+            fnvnx_plat_note(FNVNX_PLAT_DECODE, "dshow::mp3_open", FNVNX_PLAT_RA, "minimp3");
         os_unlock(&lock);
         return VFW_E_CANNOT_RENDER_;
     }

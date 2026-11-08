@@ -108,7 +108,7 @@ def r_if_exists(path, text, stats):
     """IFX1: resolve __if_exists / __if_not_exists statically (see above); the kept body replaces the construct,
     line breaks are preserved."""
     if '__if_' not in text: return text
-    root, pos = _roots(path), 0
+    root, pos, sse = _roots(path), 0, False
     while True:
         m = IFX_HEAD.search(text, pos)
         if not m: break
@@ -118,6 +118,9 @@ def r_if_exists(path, text, stats):
         class_view = '\n'.join(p[0] for p in parts)
         name_view = '\n'.join(p[1] for p in parts)
         keep = _exists(m.group(2), class_view, name_view, sys_headers) != bool(m.group(1))
+        # IFX1-SSE: a declaration dropped because the target's sse2neon has the name: say where it comes from
+        sse = sse or (bool(m.group(1)) and not keep and re.match(r'\s*(?:__m128[id]?|__m64|_mm_\w+|_MM_\w+)\s*$',
+                                                                  m.group(2)) is not None)
         head, body = text[m.start():m.end()], text[m.end():end - 1]
         nl = lambda s: '\n' * s.count('\n')
         if keep:
@@ -127,6 +130,9 @@ def r_if_exists(path, text, stats):
         text = text[:m.start()] + repl + text[end:]
         pos = m.start() + 1
         stats['IFX1'] += 1
+    if sse:
+        stats['IFX1-SSE'] += 1
+        text = '#include "fnvnx_target_sse.h" /* fnv-nx IFX1 */\n' + text
     return text
 
 # ---------------------------------------------------------------------------------------------------------- SAL1
@@ -864,9 +870,18 @@ def r_win32_call_args(path, text, stats):
     names = [n for n in sigs if n in text]
     if not names: return text
     # names the file still declares itself (C++ prototypes kept in a namespace) resolve to those: leave them
-    names = [n for n in names if not re.search(r'[\w\*&>]\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
+    # (a call statement `return CallNextHookEx(...);` is not a prototype: CALL1-RET)
+    names = [n for n in names if not re.search(r'[\w\*&>](?<!\breturn)(?<!\belse)(?<!\bcase)(?<!\bthrow)(?<!\bdo)'
+                                               r'\s+%s\s*\([^;{}]*\)\s*;' % n, text)]
     if not names: return text
-    call = re.compile(r'(?<![\w.>:~])(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
+    # N::name( where namespace N only has DECL1's `using ::name;` is the platform function too (CALL1-NS:
+    # blk_00860000's InstalledPathDetail::RegOpenKeyExA)
+    aliased = {}
+    for am in re.finditer(r'\bnamespace\s+(\w+)\s*\{', text):
+        body = text[am.end():prepare.match_brace(text, am.end() - 1)]
+        for n in re.findall(r'\busing\s+::\s*(\w+)\s*;', body):
+            aliased.setdefault(n, set()).add(am.group(1))
+    call = re.compile(r'(?<![\w.>:~])((?:\w+\s*::\s*)?)(%s)\s*\(' % '|'.join(sorted(names, key=len, reverse=True)))
     bodies = []                                      # outermost function bodies, in order
     for o, c, k, _ in prepare.scope_spans(text):
         if k == 'function' and not (bodies and o < bodies[-1][1]): bodies.append((o, c))
@@ -874,6 +889,8 @@ def r_win32_call_args(path, text, stats):
     out, pos, bi = [], 0, 0
     for m in call.finditer(text):
         if m.start() < pos: continue
+        q = re.sub(r'\s*::\s*$', '', m.group(1))
+        if q and q not in aliased.get(m.group(2), ()): continue
         while bi < len(bodies) and bodies[bi][1] < m.start(): bi += 1
         if bi == len(bodies) or not bodies[bi][0] < m.start(): continue
         before = text[max(0, m.start() - 40):m.start()].rstrip()
@@ -881,9 +898,9 @@ def r_win32_call_args(path, text, stats):
         if prev and prev.group(1) not in ('return', 'case', 'else', 'do'): continue   # a declaration
         close = _call_end(text, m.end() - 1)
         args = _split_args(text[m.end():close - 1])
-        types = sigs[m.group(1)]
+        types = sigs[m.group(2)]
         if len(args) != len(types): continue
-        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(1), ())
+        refs = getattr(prepare, 'DECL1_REFS', {}).get(path, {}).get(m.group(2), ())
         new = []
         for i, (a, t) in enumerate(zip(args, types)):
             if t is None or not a.strip(): new.append(a); continue
@@ -1673,7 +1690,12 @@ def _unit_symbols(path):
         root, uj = prepare._units_json(path)
         if uj:
             for u in json.load(open(uj))['units']:
-                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = u.get('symbols', {})
+                _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = dict(u.get('symbols', {}))
+            # BIND1's rows (a POST hook on units.json): the source rules see the bindings the link will have
+            for src, name, addr in BIND1_REFS + sorted(VLIT1_BINDS):
+                k = os.path.normpath(os.path.join(root, src))
+                if k in _UNIT_SYMBOLS:
+                    _UNIT_SYMBOLS[k].setdefault(name, addr)
     return _UNIT_SYMBOLS.get(os.path.normpath(os.path.abspath(path)))
 
 def _param_type(p):
@@ -2109,7 +2131,25 @@ def r_math_overloads(path, text, stats):
         have, pos = have or not in_ns, end
         stats['MATH1'] += 1
     out.append(text[pos:])
-    return ''.join(out)
+    text = ''.join(out)
+    return math_own_statics(text, stats) if have else text
+
+# MATH1-OWN: where MATH1 puts <math.h> in place of a copy, a `static` definition the file keeps of a C math function
+# (`static __forceinline float sqrtf(float x) { return (float)sqrt(x); }`, hkpboxboxcollisiondetection_rtm_variant)
+# now meets <math.h>'s extern "C" declaration of the same name: MSVC refuses it (C2375), GCC takes it only under
+# -fpermissive and then calls the C library function instead of the unit's own body. The definition and the file's
+# calls of it are renamed fnvnx_own_<name>: the unit's own function, on both compilers. One file in the tree today.
+
+MATH_OWN_STATIC = re.compile(r'^[ \t]*static\s+(?:(?:inline|__inline|__forceinline)\s+)*(?:float|double|long\s+double)\s+'
+                             r'(?:__cdecl\s+)?(%s)\s*\([^;{}()]*\)\s*\{' % '|'.join(sorted(
+                                 n for n in prepare.CRT_HEADERS['<math.h>'].split() if re.match(r'^[a-z]\w*$', n))), re.M)
+
+def math_own_statics(text, stats):
+    names = sorted(set(MATH_OWN_STATIC.findall(text)))
+    for n in names:
+        text = re.sub(r'(?<![\w.>:~])%s(?=\s*\()' % n, 'fnvnx_own_' + n, text)
+        stats['MATH1-OWN'] += 1
+    return text
 
 # ---------------------------------------------------------------------------------------------------------- SPEC2
 
@@ -2934,14 +2974,16 @@ def _fits_int(body):
     return True
 
 def r_opaque_enums(path, text, stats):
-    """ENUM1: `enum X;` -> `enum X : int;`, and `enum X {` -> `enum X : int {` for those names (see above)."""
+    """ENUM1: `enum X;` -> `enum X FNVNX_ENUM_INT;`, and `enum X {` -> `enum X : int {` for those names (see above).
+    FNVNX_ENUM_INT is `: int` (fnvnx_compat.h); in the S11 gate it is empty: MSVC 2008 has no opaque declaration,
+    and its own forward declaration `enum X;` is the same type, underlying int (ENUM1-FWD)."""
     if 'enum' not in text: return text
     names = _opaque_enum_names(path)
     if not names: return text
     def decl(m):
         if m.group(2) not in names: return m.group(0)
         stats['ENUM1'] += 1
-        return m.group(1) + ' : int' + m.group(3)
+        return m.group(1) + ' FNVNX_ENUM_INT' + m.group(3)
     def defn(m):
         if m.group(1) not in names: return m.group(0)
         if not _fits_int(text[m.end():text.find('}', m.end())]): return m.group(0)   # int cannot hold it: as it was
@@ -3388,6 +3430,45 @@ def _all_unit_functions(path):
         _ALL_FUNCTIONS = set().union(*(fs for _, fs in _UNIT_INFO.values())) if _UNIT_INFO else set()
     return _ALL_FUNCTIONS
 
+# The tag of a definition: `// @fnv 0x<a>` above its head, with only blank, comment and preprocessor lines (the
+# unit's `#pragma optimize`) and type declarations in between: `template <class T> struct L;`, or a whole
+# `template <> struct M<void*> { static void __cdecl F(void**); };` (one level of nested braces). The head may span
+# lines (a return type over two lines, `static void __declspec(noinline)` above the name): STAND_DEF matches from its
+# last line. Seen as untagged, a tagged definition whose own name the unit binds to its address was dropped as its own
+# stand-in (R6: 0x004ab230 BipedAnim::GetBoneNode, 0x0087ce70, 0x00660400, 0x00a8a200; R1: 0x0046ffd0).
+STAND_TAG = re.compile(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n')
+STAND_GAP_ITEM = re.compile(r'\s+|//[^\n]*|/\*.*?\*/|#[^\n]*|(?:template\s*<[^;{}]*>\s*)?(?:struct|class|union|enum)\s+'
+                            r'[\w:<>, \t*]+?\s*(?::[^;{}]*)?(?:;|\{(?:[^{}]|\{[^{}]*\})*\}\s*;)', re.S)
+
+def _stand_head(text, at, lines=3):
+    """Start of the line where the head of the definition matched at `at` begins: up to `lines` lines above, while
+    the line above is part of a declaration (not blank, a comment, a preprocessor line or the end of a statement)."""
+    start = text.rfind('\n', 0, at) + 1
+    for _ in range(lines):
+        if start == 0: break
+        ls = text.rfind('\n', 0, start - 1) + 1
+        prev = text[ls:start].strip()
+        if not prev or prev.startswith(('#', '//', '/*')) or prev.endswith((';', '}', '{', '*/')): break
+        start = ls
+    return start
+
+def _stand_gap_only(gap):
+    """gap holds only what may sit between a tag and its definition (STAND_GAP_ITEM)."""
+    i = 0
+    while i < len(gap):
+        m = STAND_GAP_ITEM.match(gap, i)
+        if not m or m.end() == i: return False
+        i = m.end()
+    return True
+
+def _stand_tagged(text, at):
+    """The definition whose head STAND_DEF matched at `at` carries its own `@fnv` tag (see above)."""
+    for h in sorted({_stand_head(text, at), text.rfind('\n', 0, at) + 1, at}):
+        window = text[max(0, h - 2000):h]
+        tags = list(STAND_TAG.finditer(window))
+        if tags and _stand_gap_only(window[tags[-1].end():]): return True
+    return False
+
 def r_stand_in_definitions(path, text, stats):
     """STAND1: drop untagged definitions bound to the address of a tagged definition in the same unit (see above)."""
     return _stand_ins(path, text, stats, 'STAND1')
@@ -3413,8 +3494,7 @@ def _stand_ins(path, text, stats, which):
         parts = q.split('::')
         if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS: continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', m.group(1) or ''): continue
-        before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
         if any(k != 'namespace' for k, _ in chain): continue
@@ -3470,6 +3550,17 @@ def _stand_ins(path, text, stats, which):
 # call is a call of the decorated name that the link binds. Same gates as STAND1 (an address tagged in the unit) or
 # STAND2 (an address only other units define, in a unit without /O1 /O2 /Ox /Ob2), for an untagged free function at
 # namespace scope; not inline, not a template, not overloaded in the unit (one definition of the name).
+#
+# An overload is converted too when every spelling of the name binds one address that the unit tags and the unit
+# has no other `static` declaration of the name (R6 class 5): hkpworldoperationutil.cpp tags its static
+# FindItemForThreshold at 0x00cb3d10 and defines a second static FindItemForThreshold(S00cb5100_World*, ...) that
+# calls `pick`, which MSVC called as 0x00cb3d10 too (both spellings bound there). Such an overload's head may carry
+# `__declspec(noinline)` (STAND4_DEF); a single static noinline definition stays (S5's register-allocation
+# stand-ins).
+
+STAND4_DEF = re.compile(r'^[ \t]*((?:(?:__declspec\s*\(\s*\w+\s*\)|[\w:<>,\*&]+)[ \t\*&]+)*?)'
+                        r'((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
+                        r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?::[^;{}]*)?\{', re.M)
 
 def r_static_stand_ins(path, text, stats):
     """STAND4: a static free stand-in bound to a decompiled address becomes an extern declaration (above)."""
@@ -3481,18 +3572,24 @@ def r_static_stand_ins(path, text, stats):
     elsewhere = set() if info is None or set(info[0]) & STAND2_INLINING_FLAGS else _all_unit_functions(path) - info[1]
     spans, edits, names = None, [], collections.Counter()
     defs = []
-    for m in STAND_DEF.finditer(text):
+    names0 = collections.Counter()   # the definitions STAND_DEF sees (heads without __declspec)
+    for m in STAND4_DEF.finditer(text):
         q = re.sub(r'\s+', '', m.group(2))
         if '::' in q or q in NOT_FUNCTIONS or q in CXX_KEYWORDS: continue
         names[q] += 1
+        names0[q] += '__declspec' not in (m.group(1) or '')
         defs.append((m, q))
     for m, name in defs:
         lead = m.group(1) or ''
-        if names[name] != 1 or not re.search(r'\bstatic\b', lead): continue
+        if not re.search(r'\bstatic\b', lead): continue
+        single = names0[name] == 1 and '__declspec' not in lead   # the rule as it was
+        overload = not single and names[name] != 1
+        if not single and not overload: continue   # S5's single static noinline stand-ins: not this rule's
+        if overload and re.search(r'(?m)^[ \t]*static\s+[^;{}()]*\b%s\s*\([^;{}]*\)\s*;' % re.escape(name), text): continue
         if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
         if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
         before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
@@ -3502,7 +3599,7 @@ def r_static_stand_ins(path, text, stats):
         prefix = '?' + '@'.join([name] + list(reversed(ns))) + '@@'
         bound = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
         if not bound or len(bound) != 1: continue
-        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged)): continue
+        if not (bound <= tagged or (bound <= elsewhere and not bound & tagged and single)): continue
         o = m.end() - 1
         c = prepare.match_brace(text, o)
         start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
@@ -3626,7 +3723,7 @@ def r_inline_stand_ins(path, text, stats):
         if re.match(r'\s*(?:return|else|case|new|delete|throw|goto)\b', lead): continue
         if re.search(r'\b(?:virtual|static|template|__forceinline|FNV_FORCEINLINE|constexpr)\b', lead): continue
         before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before): continue
+        if _stand_tagged(text, m.start()): continue
         if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
         if spans is None: spans = prepare.scope_spans(text)
         chain = prepare.scope_chain(spans, m.start())
@@ -3983,6 +4080,24 @@ BIND1_REFS = [
     # (unit source, MSVC decorated name, address)
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?Allocate@MemoryManagerAA3880@@QAEPAXI@Z', '0x00aa3e40'),
     ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A', '0x011f6238'),
+    # Placeholder variables decl-data would give a zero copy (S2-bodies), each with the exe's bytes at the site the
+    # unit's pristine object references it:
+    # * RefSet6b3c0::Insert (the unit binds it to 0x00c68b50; Node6b3c0::operator new inlined): the exe has
+    #   `push 8; mov ecx, 0x011f6238; call 0x00aa3e40` at 0x00c68b63, where the pristine object relocates
+    #   g_memoryManager6b3c0 (DIR32) and MemoryManager6b3c0::Allocate (REL32): the memory manager and its Allocate.
+    ('src/fallout_shared/globalfunc_o2_variant.cpp', '?g_memoryManager6b3c0@@3UMemoryManager6b3c0@@A', '0x011f6238'),
+    ('src/fallout_shared/globalfunc_o2_variant.cpp', '?Allocate@MemoryManager6b3c0@@QAEPAXI@Z', '0x00aa3e40'),
+    # * ??_G of FUN_00ae8d10 (slot 0 of the vftable the unit binds, 0x010a3328 -> 0x00ae9060; MapBase8D10's
+    #   operator delete inlined): `if (flags & 1) { push this; mov ecx, 0x011f6238; call 0x00aa4060 }` at 0x00ae90cf.
+    ('src/staging/blk_00ae0000_od_ob1_variant.cpp', '?g_kMemoryManager8D10@@3UMemoryManager8D10@@A', '0x011f6238'),
+    ('src/staging/blk_00ae0000_od_ob1_variant.cpp', '?Deallocate@MemoryManager8D10@@QAEXPAX@Z', '0x00aa4060'),
+    # * OutlinedEntry's constructor 0x00aaec10 (`assign(rhs, 0, entryNpos)`): `mov edx, [0x010173f0]; push edx` at
+    #   0x00aaec6f, the .rdata word 0xffffffff (npos) other units bind as DAT_010173f0.
+    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?entryNpos@@3IA', '0x010173f0'),
+    # * Vector12::length_error (blk_00ac0000_od_ob1_variant.cpp, a static in-class stand-in throwing with the
+    #   placeholder vector_error_message): the exe's ReserveItems 0x0065cfd0 calls 0x0065f640 (ThrowVectorTooLong,
+    #   which pushes the exe's own message) at 0x0065d00e, where the pristine object calls this name
+    ('src/staging/blk_00ac0000_od_ob1_variant.cpp', '?length_error@Vector12@@SAXXZ', '0x0065f640'),
 ]
 
 def bind_units_data(data, stats, refs=BIND1_REFS):
@@ -4773,7 +4888,11 @@ def r_forceinline_declarations(path, text, stats):
         cls, body = None, ''
         if inner is not None:
             if inner[2] != 'class': continue                         # a declaration inside a function or namespace
-            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\([^)]*\)\s*)?([A-Za-z_]\w*)', inner[3] or '')
+            head = re.sub(r'\btemplate\s*<[^{};]*?>\s*(?=(?:class|struct|union)\b)', ' ', inner[3] or '')
+            # the class's own name, not a template parameter's (`template <class KEYD3, ...> class DispatchUtilD3`:
+            # hkpbvtreeagent, hkgpmesh lost the keyword on members their units define out of class)
+            # `struct __declspec(align(16)) BigSolver`: the declspec's own parentheses nest (hkgpmesh 0x00e1f4e0)
+            hm = re.search(r'\b(?:class|struct|union)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)', head)
             if not hm: continue
             cls, body = hm.group(1), text[inner[0]:inner[1]]
             if name.lstrip('~') != name and name[1:] != cls: continue
@@ -4854,10 +4973,19 @@ def r_vfptr_empty_base(path, text, stats):
 # private artifacts repository (fnv-nx-build branch recon/<unit>), never here. REC1 applies what a prepare run is
 # given: FNVNX_RECON names a directory holding recon.json files (one per recon, in subdirectories or at its top):
 #   {"format": "fnvnx-recon/1", "unit": <source>, "decomp_commit": <sha>, "append": <file next to recon.json>,
-#    "functions": [{address, symbol, size}], "symbols": {decorated name: address}}
+#    "functions": [{address, symbol, size}], "symbols": {decorated name: address},
+#    "replace": [{"old": <exact text>, "new": <text>}]}
 # The text rule appends the body to its unit; the POST hook add_recon_definitions adds the functions and symbols to
 # the prepared build/units.json. A recon whose decomp_commit is not the checkout's, or whose addresses a unit already
 # defines, is skipped (REC1-STALE / REC1-DUP). Without FNVNX_RECON (or with no recon in it) REC1 does nothing.
+# REC1-REPL (orchestrator, R1): `replace` edits code the unit already has, where an appended body cannot help (a
+# filler the unit's own calls bind to, a declaration whose arguments sit on the wrong call, an in-class body that is
+# not the exe's). Each pair is applied in order, before the append, to the text the rule receives; every `old` must
+# occur exactly once there. A recon written for other text must never half-apply: when any pair does not match exactly
+# once (or is malformed), the whole recon is rejected for that unit (no replace, no append, no symbols), so its rows
+# stay visible trap stubs, and the prepare goes on (orchestrator, R2: one stale recon must not block every build).
+# Each rejection is counted (REC1-REJECT), printed to stderr and listed in <out>/build/recon_rejected.tsv (recon dir,
+# unit, pair index, count, the start of `old`) by the POST hook.
 
 def _recon_entries(path):
     """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
@@ -4886,7 +5014,8 @@ def _recon_entries(path):
             r = json.load(open(f))
         except (OSError, ValueError):
             continue
-        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not (r.get('append') or r.get('symbols')):
+        if r.get('format') != 'fnvnx-recon/1' or not r.get('unit') or not (r.get('append') or r.get('symbols')
+                                                                             or r.get('replace')):
             continue   # a recon with only `symbols` binds names to the exe's functions and adds no body
         if head and r.get('decomp_commit') and r['decomp_commit'] != head:
             r['_skip'] = 'REC1-STALE'
@@ -4894,6 +5023,20 @@ def _recon_entries(path):
             r['_skip'] = 'REC1-DUP'
         _RECON.append((r, os.path.dirname(f)))
     return _RECON
+
+def _recon_reject(r, d, src, bad, stats):
+    """REC1-REPL: record a recon rejected for unit src (bad = (pair index, count or -1, `old` start or reason)); the
+    POST hook writes the list to build/recon_rejected.tsv."""
+    import sys
+    k, c, what = bad
+    rej = prepare.__dict__.setdefault('_fnvnx_recon_rejected', [])
+    rej.append((d, src, k, c, what))
+    stats['REC1-REJECT'] += 1
+    if c < 0:
+        msg = 'replace[%d] %s' % (k, what)
+    else:
+        msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
+    sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its rows stay trap stubs\n' % (src, d, msg))
 
 def r_recon_bodies(path, text, stats):
     """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
@@ -4907,6 +5050,19 @@ def r_recon_bodies(path, text, stats):
         if r['unit'] != src: continue
         if r.get('_skip'):
             stats[r['_skip']] += 1; continue
+        edited, bad = text, None
+        for k, e in enumerate(r.get('replace') or []):
+            old, new = (e.get('old'), e.get('new')) if isinstance(e, dict) else (None, None)
+            if not isinstance(old, str) or not old or not isinstance(new, str):
+                bad = (k, -1, 'needs a non-empty "old" and a "new" string'); break
+            c = edited.count(old)
+            if c != 1:
+                bad = (k, c, old[:120]); break
+            edited = edited.replace(old, new)
+        if bad is not None:
+            _recon_reject(r, d, src, bad, stats); continue
+        stats['REC1-REPL'] += len(r.get('replace') or [])
+        text = edited
         if r.get('append'):
             body = open(os.path.join(d, r['append']), encoding='utf-8', errors='surrogateescape').read()
             text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
@@ -4919,6 +5075,13 @@ def add_recon_definitions(out_root, stats, files=None):
     """POST hook: REC1's recipe entries (functions and symbols) in <out_root>/build/units.json."""
     import json
     _RECON = prepare.__dict__.get('_fnvnx_recon')
+    rej = prepare.__dict__.get('_fnvnx_recon_rejected') or []
+    if rej and os.path.isdir(os.path.join(out_root, 'build')):
+        with open(os.path.join(out_root, 'build', 'recon_rejected.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
+            f.write('#recon dir\tunit\treplace index\tcount (-1: malformed)\told (start) or reason\n')
+            for row in rej:
+                f.write('\t'.join(str(x).replace('\t', ' ').replace('\n', '\\n') for x in row) + '\n')
+        stats['REC1-REJECTED-RECONS'] = len(rej)
     if not _RECON or not any(r.get('_applied') for r, _ in _RECON): return
     p = os.path.join(out_root, 'build', 'units.json')
     if not os.path.exists(p): return

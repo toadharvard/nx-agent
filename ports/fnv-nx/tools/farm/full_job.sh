@@ -134,7 +134,9 @@ rm -rf "$STUB"
 if [ $INPUTS = 1 ] && stage_ok "$F/build" boot && [ -f "$F/build/guest/guest.nso" ]; then
 	log "stub-fault boot (tests/s5/farm_boot.sh)"
 	IMG=${GAME_EXE:-$F/build/boot/synth/synth.exe}; [ -f "$IMG" ] || IMG=""
-	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub \
+	# EMU_EXTRA=--plat (R4, recon4-013): the platform lane's data (unimplemented calls, failed opens, decode and input
+	# failures) from every full job's boot path
+	FARM_LINK_DIR=$F/build/link FARM_GUEST_DIR=$F/build/guest FARM_BOOTS=stub EMU_EXTRA="${FULL_EMU_EXTRA:---plat}" \
 		FARM_UNITS="${TREE:+$TREE/build/units.json}" PY="${PY:-python3}" EMU_TIMEOUT="${EMU_TIMEOUT:-3000}" \
 		bash "$P/tests/s5/farm_boot.sh" "$COMMIT" "$STUB" $IMG > "$F/stub_boot-$C12.log" 2>&1 \
 		|| log "farm_boot.sh (stub boot) exited $?"
@@ -171,12 +173,50 @@ fi
 t1=$(date +%s)
 
 # 5. Report, then the link outputs again with the guest ELF and the boot reports.
-python3 -I "$P/tools/farm/full_report.py" "$F/build" "$REPORT" --commit "$COMMIT" --make-rc "$rc" \
-	--since "$(date -u -d "@$t0" +%Y%m%d-%H%M%S)" --seconds $((t1 - t0)) --inputs "tree: $NOTE_TREE" "objects: $NOTE_OBJS" \
-	"pristine MSVC objects: $(if [ -n "$PR" ]; then echo "branch msvc/pristine/$D12"; else echo "none (zero data image)"; fi)" \
-	--hide FARM_HOME="$FARM_HOME" SRC="$SRC" EXT="$EXT" TOOLCHAIN="$TCB" ARTIFACTS="$ARTIFACTS" \
-	${FNVNX_TC:+FNVNX_TC="$FNVNX_TC"} ${DEVKITPRO:+DEVKITPRO="$DEVKITPRO"} ${PRISTINE_OBJS:+PRISTINE_OBJS="$PRISTINE_OBJS"} \
-	HOME="$HOME" > /dev/null
+# The report always renders (try1of1, 2026-11-07: the commit under test's older full_report.py rejected --since and the
+# job lost its whole report): the tool is this job's own copy ($HERE, the same checkout as full_job.sh, not the
+# commit's $P); an option it rejects ("unrecognized arguments") is dropped and it runs again; if it still fails, a
+# minimal report (commit, make exit, the stage table from the build's stage.json files, the tool's error) stands in.
+# Everything after this step appends to whichever report there is.
+# step-5-begin
+REPORT_TOOL=${FULL_REPORT_TOOL:-$HERE/full_report.py}
+RARGS=("$F/build" "$REPORT" --commit "$COMMIT" --make-rc "$rc" --since "$(date -u -d "@$t0" +%Y%m%d-%H%M%S)"
+	--seconds $((t1 - t0)) --inputs "tree: $NOTE_TREE" "objects: $NOTE_OBJS"
+	"pristine MSVC objects: $(if [ -n "$PR" ]; then echo "branch msvc/pristine/$D12"; else echo "none (zero data image)"; fi)"
+	--hide FARM_HOME="$FARM_HOME" SRC="$SRC" EXT="$EXT" TOOLCHAIN="$TCB" ARTIFACTS="$ARTIFACTS"
+	${FNVNX_TC:+FNVNX_TC="$FNVNX_TC"} ${DEVKITPRO:+DEVKITPRO="$DEVKITPRO"} ${PRISTINE_OBJS:+PRISTINE_OBJS="$PRISTINE_OBJS"}
+	HOME="$HOME")
+REPORT_RC=0
+python3 -I "$REPORT_TOOL" "${RARGS[@]}" > "$F/full_report.log" 2>&1 || REPORT_RC=$?
+if [ "$REPORT_RC" != 0 ] && grep -q 'unrecognized arguments' "$F/full_report.log"; then
+	drop=$(sed -n 's/.*unrecognized arguments: //p' "$F/full_report.log" | tr ' ' '\n' | grep '^--' || true)
+	KEEP=(); skipval=0
+	for a in "${RARGS[@]}"; do
+		if [ "$skipval" = 1 ]; then skipval=0; case "$a" in --*) ;; *) continue ;; esac; fi
+		if grep -qxF -- "$a" <<<"$drop"; then skipval=1; continue; fi
+		KEEP+=("$a")
+	done
+	log "full_report.py rejected: $(echo $drop); running it without them"
+	REPORT_RC=0; python3 -I "$REPORT_TOOL" "${KEEP[@]}" > "$F/full_report.log" 2>&1 || REPORT_RC=$?
+fi
+if [ "$REPORT_RC" != 0 ] || [ ! -s "$REPORT" ]; then
+	log "full_report.py failed (exit $REPORT_RC): minimal report"
+	python3 -I - "$F/build" "$REPORT" "$COMMIT" "$rc" "$((t1 - t0))" "$F/full_report.log" <<'PY' || printf '# full build %s\n\n- make exit %s; the report tool failed\n' "${COMMIT:0:12}" "$rc" > "$REPORT"
+import glob, json, os, sys
+b, out, commit, rc, secs, logf = sys.argv[1:7]
+L = ['# full build %s' % commit[:12], '', '- commit: `%s`; make exit %s; %d min' % (commit, rc, int(secs) // 60),
+     '- the report tool failed, this is the minimal report: %s' % (open(logf, errors='replace').read().strip().splitlines() or ['?'])[-1][:300],
+     '', '| stage | status | summary |', '|---|---|---|']
+for p in sorted(glob.glob(os.path.join(b, '*', 'stage.json'))):
+    try:
+        r = json.load(open(p))
+    except (OSError, ValueError):
+        continue
+    L.append('| %s | %s | %s |' % (os.path.basename(os.path.dirname(p)), r.get('status'), str(r.get('summary') or r.get('error') or '')[:160].replace('|', '/')))
+open(out, 'w').write('\n'.join(L) + '\n')
+PY
+fi
+# step-5-end
 {
 	if [ -f "$V1/report.md" ]; then
 		printf -- '- V1-link audits: %s (details: link/%s/v1/report.md)\n' "$NOTE_V1" "$C12"
@@ -196,5 +236,28 @@ NRO_RC=0
 if [ $INPUTS = 1 ]; then publish_nro "$F/build" || NRO_RC=$?; else NOTE_NRO="not published (no tree or no objects)"; fi
 echo "- device package: $NOTE_NRO" >> "$REPORT"
 log "device package: $NOTE_NRO"
+# 6b. D25 #11: docs/NRO_CHECKLIST.md as checks on this package (tools/report/nro_check.py). On the build directory,
+# so the guest ELF and this boot's summary make memory.peak measurable; --commit makes a package left by an earlier
+# commit fail `provenance`. The table goes into the report, fnvnx-nrocheck/1 into the report's sidecar under
+# "nrocheck" (zero_targets.py #11 reads <h>-full.json; runner.sh publishes the sidecar). Seconds; never fails the job.
+# step-6b-begin
+rm -f "$F/nrocheck.md" "$F/nrocheck.json"
+if [ -d "$F/build/package/sd" ]; then
+	python3 -I "$P/tools/report/nro_check.py" "$F/build" --commit "$COMMIT" --out "$F/nrocheck.md" > /dev/null 2>&1 \
+		|| log "nro_check.py exited $?"
+	# (if, not `[ -f ] &&`: the block must end with status 0 under set -e whatever the checker left)
+	if [ -f "$F/nrocheck.md" ]; then { echo; sed '1s/^# /## /' "$F/nrocheck.md"; } >> "$REPORT"; fi
+	if [ -f "$F/nrocheck.json" ]; then python3 -I - "$F/nrocheck.json" "${REPORT%.md}.json" <<'PY' || log "nrocheck sidecar merge failed"
+import json, sys
+try:
+    d = json.load(open(sys.argv[2]))
+except (OSError, ValueError):
+    d = {}
+d['nrocheck'] = json.load(open(sys.argv[1]))
+json.dump(d, open(sys.argv[2], 'w'), indent=1)
+PY
+	fi
+fi
+# step-6b-end
 echo "$REPORT"
 [ "$NRO_RC" -ne 2 ] || { echo "full_job.sh: publishing nro/$C12 failed" >&2; exit 3; }

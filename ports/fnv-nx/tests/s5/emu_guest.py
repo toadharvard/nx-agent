@@ -78,8 +78,8 @@ _PLACEMENT = None
 
 STUB_ACTIONS = r"return0|return-this|(use-)?malloc:x[0-7]|standin"
 STANDINS = os.path.join(HERE, "standins.c")   # the 'standin' action's definitions
-TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding")
-TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one",)   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
+TABLE_OPTIONS = ("exe-vtables", "ctor-returns-this", "image-vptr-minus-one", "rebind-colliding", "member-vtables")
+TABLE_OPTIONS_WITH_ARG = ("image-vptr-minus-one", "member-vtables")   # an optional second word (its class filter)   # whole-boot stand-ins a --stub-faults table can switch on, one word per line
 
 
 def fault_table_options(path):
@@ -687,7 +687,8 @@ class Emu:
         self.data_syms = {}
         for line in out.splitlines():
             f = line.split()
-            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats"):
+            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats",
+                                                                 "fnvnx_plat_on"):
                 self.data_syms[f[2]] = int(f[0], 16)
             if len(f) == 3 and f[1] in "tTwW":
                 a = int(f[0], 16)
@@ -1076,6 +1077,7 @@ class Emu:
             return
         img, objs, F, V = self.exe_vt
         self.exe_vt = None
+        self.vt_objs = objs   # _ZTV symbol -> (link address, size)
         rt = (lambda v: v - self.link_base + self.base) if self.relocatable else (lambda v: v)
         link = (lambda v: v - self.base + self.link_base) if self.relocatable else (lambda v: v)
         import collections
@@ -1116,6 +1118,8 @@ class Emu:
         if getattr(self, "image_minus_one", False):
             self.image_vptr_minus_one(uc, img, F, V, rt, st)
         self.vslot_thisless(uc, objs, V, rt, st)
+        if getattr(self, "member_vtables", False):
+            self.install_member_vtables(uc, img, F, rt, st)
         self.exe_vt_stats = dict(st)
         print("   exe-vtables: %d bound vtables (%d aligned with the exe's, %d with a destructor pair, %d left: "
               "their native slots disagree with the exe's): %d of %d trap slots filled from the exe's vftable"
@@ -1169,6 +1173,7 @@ class Emu:
             st["vtables extended"] += 1
             self.vt_bound[at + off] = (exe_vt, exe_slots, at + len(new))
             at = (at + len(new) + 7) & ~7
+        self.vt_ext_next = at   # member-vtables continues here
         # every reference to a moved address point: GOT entries, data words (statically built objects' vptrs, VTTs),
         # and adrp/add pairs in the code (a constructor's own vptr store)
         for w, places in got_at.items():
@@ -1501,6 +1506,7 @@ class Emu:
             f = line.rstrip("\n").split("\t")
             if len(f) > 3 and f[1] == "C":
                 ctors.add(int(f[0], 16))
+        self.ctor_origs = ctors
         pairs = []
         for sym in objs:
             m = re.fullmatch(r"_ZTV\d+FUN_([0-9a-f]{8})", sym)
@@ -1527,6 +1533,123 @@ class Emu:
                 pairs.append((last, sym, 8))
         print(f"   exe-vtables: {len(pairs)} constructor-named native vtables paired by their constructor's vptr store")
         return pairs
+
+    def install_member_vtables(self, uc, img, F, rt, st):
+        """table option member-vtables: member subobjects with their own vtable (the renderer's RendererMap<N> maps at
+        +0x610, +0x890, ...) get the native vtable of a decomp placeholder template, as short as declared and bound to
+        no exe vftable; RendererPacketMap called slot 1 (Bucket) on a one-slot vtable and jumped to 0. The exe's
+        constructor names each member's vftable: its last `mov dword ptr [reg+d], imm32` of a vftable per offset d.
+        When the native constructor returns, each such member whose vptr is a native vtable shorter than the exe's
+        gets an extended copy (its prefix and slots, then the native of exe slot k for every k past them), cached per
+        (native vtable, exe vftable). A stand-in for S2c's binder (pair member vtables by the constructor's stores)."""
+        rx = re.compile(self.member_vtables_rx) if getattr(self, "member_vtables_rx", None) else None
+
+        def rtti(vt):
+            r = img.string(img.read32(img.read32(vt - 4) + 12) + 8, 512)
+            return r[0].decode("latin-1") if r else ""
+        members = {}   # runtime ctor entry -> {offset: exe vftable}
+        for orig in sorted(getattr(self, "ctor_origs", ())):
+            code = img.pe.read_rva(orig - img.pe.image_base, 0x400)
+            if not code:
+                continue
+            code = bytes(code)
+            m = {}
+            for k in range(len(code) - 10):
+                if code[k] in (0xC3, 0xC2) and k and code[k - 1] in (0x5E, 0x5F, 0x5B, 0x5D, 0xC9, 0x59):
+                    break
+                if code[k] == 0xC7 and code[k + 1] in (0x40, 0x41, 0x42, 0x43, 0x46, 0x47):
+                    d, imm = code[k + 2], struct.unpack_from("<I", code, k + 3)[0]
+                elif code[k] == 0xC7 and code[k + 1] in (0x80, 0x81, 0x82, 0x83, 0x86, 0x87):
+                    d, imm = struct.unpack_from("<II", code, k + 2)
+                else:
+                    continue
+                if 0 < d < 0x100000 and 0x00fdf000 <= imm < 0x01200000 and self.is_exe_vftable(img, imm):
+                    m[d] = imm
+            if rx:
+                m = {d: v for d, v in m.items() if rx.search(rtti(v))}
+            a = self.code_addr(f"0x{orig:08x}")
+            if m and a is not None:
+                members[a] = m
+        if not members:
+            return
+        cache, pend = {}, {}
+        ext_end = self.VT_EXT_BASE + self.VT_EXT_SIZE
+        import bisect
+        spans = sorted((rt(a) & 0xFFFFFFFF, (rt(a) + n) & 0xFFFFFFFF) for a, n in self.vt_objs.values())
+        vt_lo, vt_hi = [x for x, _ in spans], [y for _, y in spans]
+
+        def ext_copy(point, exe_vt):
+            key = (point, exe_vt)
+            if key in cache:
+                return cache[key]
+            cache[key] = None
+            exe_slots = img.vtable_slots(exe_vt)
+            n, words, slots = 0, [], []
+            while n < 512:
+                (w,) = struct.unpack("<I", bytes(uc.mem_read(point + 4 * n, 4)))
+                lk = w - self.base + self.link_base if self.relocatable and self.base <= w < self.base + self.size else w
+                sn = self.slot_name(lk)
+                if sn is None:
+                    break
+                words.append(w)
+                slots.append((sn[0], sn[1], lk))
+                n += 1
+            fills, status = exe_slot_plan(slots, exe_slots, F)   # GCC's D1/D0 pair: exe slot k at k+1
+            shift = 1 if status == "dtor" else 0
+            if n == 0 or status == "misaligned" or n >= len(exe_slots) + shift:
+                return None
+            for k, nat in fills:
+                words[k] = rt(nat) & 0xFFFFFFFF
+            for k in range(n, len(exe_slots) + shift):
+                nat = F.get(exe_slots[k - shift])
+                words.append(rt(nat) & 0xFFFFFFFF if nat is not None else 0)
+            blob = bytes(uc.mem_read(point - 8, 8)) + struct.pack(f"<{len(words)}I", *words)
+            at = getattr(self, "vt_ext_next", None)
+            if at is None or at + len(blob) > ext_end:
+                st["member vtables region full"] += 1
+                return None
+            uc.mem_write(at, blob)
+            self.vt_ext_next = (at + len(blob) + 7) & ~7
+            self.vt_ext_copies = getattr(self, "vt_ext_copies", []) + [(at, at + len(blob), f"member of {exe_vt:#x}")]
+            cache[key] = at + 8
+            st["member vtables extended"] += 1
+            return at + 8
+
+        def on_ret(uc, addr, size, _):
+            fr = pend.get((self.cur.tid if self.cur else 0, addr))
+            if not fr:
+                return
+            this, m = fr.pop()
+            for d, exe_vt in m.items():
+                try:
+                    (v,) = struct.unpack("<I", bytes(uc.mem_read((this + d) & 0xFFFFFFFF, 4)))
+                except UcError:
+                    continue
+                if not (self.base <= v < self.base + self.size) or v in self.vt_bound:   # bound: the main pass's
+                    continue
+                j = bisect.bisect_right(vt_lo, v) - 1   # only an address point inside a native _ZTV object
+                if j < 0 or not (vt_lo[j] + 8 <= v < vt_hi[j]):
+                    continue
+                c = ext_copy(v, exe_vt)
+                if c:
+                    uc.mem_write((this + d) & 0xFFFFFFFF, struct.pack("<I", c))
+                    st["member vptrs moved"] += 1
+                    if st["member vptrs moved"] <= 40:
+                        print(f"   member-vtables: {self.sym(addr)} this {this:#x}+{d:#x}: {self.sym(v)} -> copy "
+                              f"for {exe_vt:#x} {rtti(exe_vt)[:60]}")
+        ret_hooks = set()
+
+        def on_entry(uc, addr, size, m):
+            lr = uc.reg_read(UC_ARM64_REG_LR)
+            pend.setdefault((self.cur.tid if self.cur else 0, lr), []).append((uc.reg_read(UC_ARM64_REG_X0) & 0xFFFFFFFF, m))
+            if lr not in ret_hooks:
+                ret_hooks.add(lr)
+                uc.hook_add(UC_HOOK_CODE, on_ret, begin=lr, end=lr)
+        for a, m in members.items():
+            uc.hook_add(UC_HOOK_CODE, on_entry, user_data=m, begin=a, end=a)
+        self.member_vt_stats = st
+        print(f"   member-vtables: {len(members)} constructors store {sum(len(m) for m in members.values())} member "
+              f"vftables; their short native vtables are extended when the constructor returns")
 
     def install_rebind_colliding(self, addrmap, elf):
         """table option rebind-colliding: a global free function named FUN_<X> whose definition is not the address
@@ -2132,8 +2255,13 @@ class Emu:
                     self.exit_code = uc.reg_read(UC_ARM64_REG_X0)
                     self.tp_after = uc.reg_read(UC_ARM64_REG_TPIDR_EL0)
                     break
-                self.trace("instruction budget exhausted")
-                raise SystemExit(f"thread {t.tid} ran out of instruction budget at {uc.reg_read(UC_ARM64_REG_PC):#x}")
+                # the budget is a time slice, not a hang detector (the wall-clock limit is): a long single-threaded
+                # phase (the INI settings load re-parses the file after each write) ends its slice and goes on
+                self.budget_slices = getattr(self, "budget_slices", 0) + 1
+                t.result = uc.reg_read(UC_ARM64_REG_X0)
+                t.ctx, t.state, t.resume_pc = uc.context_save(), "ready", uc.reg_read(UC_ARM64_REG_PC)
+                self.cur = None
+                continue
         return self.exit_code
 
 
@@ -2177,11 +2305,23 @@ def main(argv):
     ap.add_argument("--trace-writes", action="store_true", help="--trace-fn also logs the callees' memory writes")
     ap.add_argument("--trace-max", type=int, default=1_000_000, help="--trace-fn: at most this many calls")
     ap.add_argument("--trace-deref", type=int, default=32, help="--trace-fn: bytes dumped behind each pointer argument")
+    ap.add_argument("--plat", action="store_true",
+                    help="the platform lane's recorder on from the start (platform/win32/platstat.cpp's fnvnx_plat_on "
+                         "= 1 at __libc_init_array, after runtime.c clears .bss, before every constructor): 'plat: ...' "
+                         "lines for tools/perf/plat.py without relinking (needs --elf)")
     ap.add_argument("--peek", action="append", default=[], metavar="ADDR[:SIZE]",
                     help="print guest memory at ADDR (SIZE bytes, default 4) when the run ends")
     a = ap.parse_args(argv)
     root = a.root or tempfile.mkdtemp(prefix="fnvnx-emu-")
     sd = datapath.DataPath(root, a.game)
+    # the card holds the guest itself, as on the device (sdlayout.h FNVNX_SD_GUEST): os_fs_case_insensitive() probes
+    # it against GUEST.NSO, and without it the probe was a file fault of every boot
+    card_guest = os.path.join(root, "switch", "fnv", "guest.nso")
+    if os.path.isdir(os.path.dirname(card_guest)) and not os.path.lexists(card_guest):
+        try:
+            os.symlink(os.path.abspath(a.nso), card_guest)
+        except OSError:
+            shutil.copyfile(a.nso, card_guest)
     for spec in a.file:
         name, _, src = spec.partition("=")
         dst = sd.resolve("/" + name.lstrip("/"))   # the guest's view: fnvnx/game and switch/fnv are the game dir
@@ -2205,6 +2345,9 @@ def main(argv):
                 print("   exe-vtables: off (needs --addrmap and the exe as --file)")
             else:
                 emu.install_exe_vtables(a.addrmap, exe[0], a.elf)
+                emu.member_vtables = bool(a.stub_faults) and "member-vtables" in fault_table_options(a.stub_faults)
+                emu.member_vtables_rx = fault_table_option_arg(a.stub_faults, "member-vtables") \
+                    if emu.member_vtables else None
                 emu.image_minus_one = bool(a.stub_faults) and "image-vptr-minus-one" in fault_table_options(a.stub_faults)
                 emu.image_minus_one_rx = fault_table_option_arg(a.stub_faults, "image-vptr-minus-one") \
                     if emu.image_minus_one else None
@@ -2274,6 +2417,27 @@ def main(argv):
         print(f"STOPPED: {why}")
         write_summary(f"STOPPED: {why}")
         return 1
+    if a.plat:
+        pa = getattr(emu, "data_syms", {}).get("fnvnx_plat_on")
+        if pa is None:
+            print("   plat: off (no fnvnx_plat_on in the ELF: a guest without platstat.cpp, or no --elf)")
+        else:
+            # runtime.c clears .bss (early_zero) before __libc_init_array: the flag is set at that call's first
+            # instruction (one shot), before every constructor and the game's initializers
+            pa = pa - emu.link_base + emu.base if emu.relocatable else pa
+            ia = getattr(emu, "code_syms", {}).get("__libc_init_array")
+            if ia is None:
+                emu.uc.mem_write(pa, struct.pack("<I", 1))
+                print("   plat: recorder on (fnvnx_plat_on at %#x, set before the run: no __libc_init_array)" % pa)
+            else:
+                ia = ia - emu.link_base + emu.base if emu.relocatable else ia
+                hk = {}
+
+                def plat_on(uc, addr, size, data):
+                    uc.mem_write(pa, struct.pack("<I", 1))
+                    uc.hook_del(hk["h"])
+                hk["h"] = emu.uc.hook_add(UC_HOOK_CODE, plat_on, begin=ia, end=ia)
+                print("   plat: recorder on (fnvnx_plat_on at %#x, set at __libc_init_array %#x)" % (pa, ia))
     try:
         rc = emu.run()
     except SystemExit as e:
@@ -2285,7 +2449,7 @@ def main(argv):
     out = emu.console.decode(errors="replace")
     tp_ok = getattr(emu, "tp_after", None) == 0xDEAD0000
     print(f"== guest at {emu.base:#010x} (link base {emu.link_base:#x}, {('pinned' if emu.pinned else 'relocatable') if emu.relocatable else 'fixed'}): rc={rc:#x} host_calls={emu.calls} threads={len(emu.threads)} "
-          f"switches={emu.ctx_switches} blocking_waits={emu.addr_waits} tpidr_el0 restored={tp_ok}")
+          f"switches={emu.ctx_switches} budget_slices={getattr(emu, 'budget_slices', 0)} blocking_waits={emu.addr_waits} tpidr_el0 restored={tp_ok}")
     for line in emu.debug:
         print(f"   [debug] {line}")
     if getattr(emu, "skipped", None) is not None:

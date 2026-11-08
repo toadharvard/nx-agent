@@ -68,8 +68,29 @@ RTYPE = {"IDirect3DSurface9": "D3DRTYPE_SURFACE", "IDirect3DTexture9": "D3DRTYPE
          "IDirect3DVertexBuffer9": "D3DRTYPE_VERTEXBUFFER", "IDirect3DIndexBuffer9": "D3DRTYPE_INDEXBUFFER"}
 
 
+# entry points whose effect is GPU work or GPU data: on the null device nothing executes them, so each call is an
+# unimplemented path of the guest's own frames (D25 #3 #5; tools/perf/PLAT.md). With the native renderer linked the
+# engine's replaced functions no longer reach them; a call that still does is a draw, clear or copy nobody performs.
+UNIMPL = {
+    "IDirect3DDevice9": {"DrawPrimitive", "DrawIndexedPrimitive", "DrawPrimitiveUP", "DrawIndexedPrimitiveUP",
+                         "DrawRectPatch", "DrawTriPatch", "Clear", "StretchRect", "ColorFill", "UpdateSurface",
+                         "UpdateTexture", "GetRenderTargetData", "GetFrontBufferData", "ProcessVertices", "Present"},
+    "IDirect3DSwapChain9": {"Present", "GetFrontBufferData"},
+    "IDirect3DSurface9": {"GetDC", "ReleaseDC"},
+}
+
+
+BACKBUFFER_VIEWS = {("IDirect3DDevice9", "GetBackBuffer"), ("IDirect3DDevice9", "GetRenderTarget"),
+                    ("IDirect3DDevice9", "GetDepthStencilSurface"), ("IDirect3DDevice9", "GetSwapChain"),
+                    ("IDirect3DDevice9Ex", "GetBackBuffer"), ("IDirect3DDevice9Ex", "GetRenderTarget"),
+                    ("IDirect3DDevice9Ex", "GetDepthStencilSurface"), ("IDirect3DDevice9Ex", "GetSwapChain"),
+                    ("IDirect3DSwapChain9", "GetBackBuffer"), ("IDirect3DSwapChain9Ex", "GetBackBuffer")}
+
+
 def body(iface, ret, name, args):
     lines = []
+    if name in UNIMPL.get(iface, ()):
+        lines.append(f'NULL_UNIMPL("{iface}::{name}");')
     outs = [(t, n) for t, n in args if IFACE_OUT.search(t)]
     setters = [f"o->{FIELDS[n]} = (uint32_t){n};" for t, n in args if n in FIELDS and "*" not in t]
     for t, n in outs:
@@ -77,7 +98,22 @@ def body(iface, ret, name, args):
         if cls[5:] not in ifaces:
             lines.append(f"if ({n}) *{n} = nullptr;")
             continue
-        lines.append(f"if ({n}) {{ auto *o = new {cls}(); o->inherit(this); {' '.join(setters)} *{n} = o; }}")
+        extra = ""
+        if iface in ("IDirect3D9", "IDirect3D9Ex") and name in ("CreateDevice", "CreateDeviceEx"):
+            # the device keeps its back buffer's size and format (the present parameters; 0 / UNKNOWN in windowed
+            # mode mean the window's and the display's: the null mode)
+            pp = [m for u, m in args if "D3DPRESENT_PARAMETERS" in u][0]
+            extra = (f"if ({pp}) {{ o->w = {pp}->BackBufferWidth ? {pp}->BackBufferWidth : 1280; "
+                     f"o->h = {pp}->BackBufferHeight ? {pp}->BackBufferHeight : 720; "
+                     f"o->fmt = {pp}->BackBufferFormat != D3DFMT_UNKNOWN ? (uint32_t){pp}->BackBufferFormat : "
+                     f"(uint32_t)D3DFMT_X8R8G8B8; }}")
+        elif (iface, name) in BACKBUFFER_VIEWS:
+            # the back buffer, render target 0, the swap chain and the auto depth buffer are the device's size; the
+            # renderer reads their desc (S5-boot: Format 0 left NiDX9Renderer without a back-buffer pixel format)
+            extra = "o->w = w; o->h = h; " + ("o->fmt = (uint32_t)D3DFMT_D24S8;" if name == "GetDepthStencilSurface"
+                                              else "o->fmt = fmt;")
+        fill = " ".join(x for x in (" ".join(setters), extra) if x)
+        lines.append(f"if ({n}) {{ auto *o = new {cls}(); o->inherit(this); {fill} *{n} = o; }}")
     for t, n in args:
         base = t.replace("const", "").replace("*", "").strip()
         if t.endswith("*") and "const" not in t and base in DESC_FILL and name.startswith("Get"):
@@ -92,8 +128,10 @@ def body(iface, ret, name, args):
         lines.append("if (ppbData) *ppbData = (char *)scratch() + OffsetToLock;")
     special = {
         ("IDirect3D9", "GetAdapterCount"): "return 1;",
-        ("IDirect3D9", "GetAdapterModeCount"): "return NULL_MODES;",
-        ("IDirect3D9", "EnumAdapterModes"): "if (Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;",
+        # the modes of the asked display format only, as D3D9 lists them: modes for every format gave the
+        # renderer's mode list (0x00e7b7d0, per format) one duplicate per format (S5-boot lockstep)
+        ("IDirect3D9", "GetAdapterModeCount"): "return Adapter == 0 && Format == D3DFMT_X8R8G8B8 ? (UINT)NULL_MODES : 0;",
+        ("IDirect3D9", "EnumAdapterModes"): "if (Adapter != 0 || Format != D3DFMT_X8R8G8B8 || Mode >= NULL_MODES) return D3DERR_INVALIDCALL; if (pMode) null_enum_mode(Mode, pMode); return S_OK;",
         ("IDirect3D9", "GetAdapterDisplayMode"): "if (pMode) null_mode(pMode); return S_OK;",
         ("IDirect3D9", "GetDeviceCaps"): "if (pCaps) null_caps(pCaps); return S_OK;",
         ("IDirect3D9", "GetAdapterIdentifier"): "if (pIdentifier) { memset(pIdentifier, 0, sizeof *pIdentifier); strcpy(pIdentifier->Driver, \"fnvnx-null\"); strcpy(pIdentifier->Description, \"fnv-nx null D3D9 device\"); pIdentifier->VendorId = 0x10de; pIdentifier->DeviceId = 0x0391; } return S_OK;",
@@ -185,6 +223,13 @@ o = ["/* null_d3d9.cpp - GENERATED by toolchain/game/gen_null_d3d9.py from shim/
      ""]
 
 defs = []
+# the platform lane's recorder (platform/include/fnvnx_win32_ext.h, platform/win32/platstat.cpp): weak, so a guest
+# without it links and the marks are inert; one load per call while recording is off
+o += ["extern \"C\" volatile int fnvnx_plat_on __attribute__((weak));",
+      "extern \"C\" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail) __attribute__((weak));",
+      "#define NULL_UNIMPL(n) do { if (&fnvnx_plat_on && fnvnx_plat_on && fnvnx_plat_note) \\",
+      "    fnvnx_plat_note(0 /* FNVNX_PLAT_UNIMPL */, n, (unsigned)(unsigned long)__builtin_return_address(0), \"null device: not executed\"); } while (0)",
+      ""]
 # toolchain/game/native_device.cpp (weak: only the native-render guest has it): nx::Renderer comes up with the device
 o += ["extern \"C\" HRESULT fnvnx_d3d9_device_created(const void *present_params, void *device) __attribute__((weak));", ""]
 o += ["struct Null_" + n + ";" for n in ifaces] + [""]

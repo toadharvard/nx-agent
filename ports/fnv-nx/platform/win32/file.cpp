@@ -57,8 +57,11 @@ extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share, void *sa, 
     W32_UNUSED(sa);
     W32_UNUSED(tmpl);
     char host[W32_PATH_MAX];
-    if (!map_or_fail(name, host))
+    if (!map_or_fail(name, host)) {
+        if (fnvnx_plat_on && name)   /* the platform lane (platstat.cpp) */
+            fnvnx_plat_open_failed(name, NULL, GetLastError(), FNVNX_PLAT_RA, "CreateFileA");
         return INVALID_HANDLE_VALUE;
+    }
     access = W32_DW(access);
     int of = 0;
     if (access & (GENERIC_READ | 0x0001 /* FILE_READ_DATA */ | 0x10000000 /* GENERIC_ALL */))
@@ -96,6 +99,8 @@ extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share, void *sa, 
         fail_os(fd, host);
         if (fd == -OS_EEXIST)
             SetLastError(ERROR_FILE_EXISTS);
+        else if (fnvnx_plat_on)   /* CREATE_NEW on an existing file is an answer, not a failed open */
+            fnvnx_plat_open_failed(name, host, GetLastError(), FNVNX_PLAT_RA, "CreateFileA");
         return INVALID_HANDLE_VALUE;
     }
     struct w32_file *f = (struct w32_file *)w32_obj_new(W32_FILE, sizeof *f, file_destroy);

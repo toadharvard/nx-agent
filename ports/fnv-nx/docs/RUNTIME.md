@@ -249,9 +249,9 @@ source files naming them.
 | `0x0065de40` | body_unnamed | `unsigned int __thiscall FUN_0065d4e0_Pool::Alloc(unsigned int)` | 1 | 188 |
 | `0x008d0430` | body_named | `class PatrolActorPackageData * __thiscall LowProcess::GetCurrentPackageData(void)` | 6 | 227 |
 | `0x009fea2a` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009fead6` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009feae8` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
-| `0x009febd8` | body_unnamed | `NVAPI-like GPU query (renderer.cpp), likely NVIDIA lib` | 1 | 1 |
+| `0x009fead6` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
+| `0x009feae8` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
+| `0x009febd8` | thunk | `NVAPI entry: jmp [nvapi_QueryInterface slot]; fnvnx_nvapi_not_initialized (-4, R6 recon6-007)` | 1 | 1 |
 | `0x00aa1750` | body_named | `unsigned int __thiscall NiFile::FileRead(void *, unsigned int)` | 3 | 4 |
 | `0x00aa1810` | body_unnamed | `unsigned int __thiscall FUN_00aff950_shell::FUN_00aa1810(void *, unsigned int)` | 2 | 2 |
 | `0x00aa7830` | body_named | `__thiscall fnv_00b044a0::BVecQ::~BVecQ(void)` | 12 | 23 |
@@ -336,7 +336,7 @@ static-object destructors that the source registers explicitly with `atexit`; `0
 | `0x00ec3599` | cpplib | std::locale::facet::_Facet_Register | n | 1 | 1 | next: MSVC C++ library internal |
 | `0x00ec35d7` | cpplib | libcpmt void(void*) - unidentified (_Locinfo_dtor?) | u | 1 | 2 | next: MSVC C++ library internal |
 | `0x00ec36a6` | cpplib | libcpmt int() - unidentified (locale::_Getgloballocale?) | u | 2 | 2 | next: MSVC C++ library internal |
-| `0x00ec3740` | cpplib | std::_Locinfo::_Locinfo_ctor(_Locinfo*, const char*) | i | 1 | 2 | next: MSVC C++ library internal |
+| `0x00ec3740` | cpplib | std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&) | i | 1 | 2 | next: MSVC C++ library internal |
 | `0x00ec379c` | cpplib | _Tolower(int, const _Ctypevec*) | i | 1 | 2 | next: MSVC C++ library internal |
 | `0x00ec38a9` | cpplib | _Getctype() | i | 1 | 1 | next: MSVC C++ library internal |
 | `0x00ec3909` | cpplib | _Toupper(int, const _Ctypevec*) | i | 1 | 2 | next: MSVC C++ library internal |
@@ -406,7 +406,7 @@ static-object destructors that the source registers explicitly with `atexit`; `0
 | `0x00ec89e9` | crt | isalnum | n | 1 | 1 | libc: isalnum |
 | `0x00ec8a19` | crt | strncmp | n | 11 | 17 | libc: strncmp |
 | `0x00ec8d08` | crt | strtol | n | 3 | 5 | libc: strtol |
-| `0x00ec8d33` | crt | _itoa | i | 2 | 3 | platform/crt: _itoa |
+| `0x00ec8d33` | crt | strtoul (R1; was listed as _itoa) | i | 2 | 3 | libc: strtoul |
 | `0x00ec8d5f` | crt | strncpy_s | n | 13 | 25 | platform/crt: strncpy_s |
 | `0x00ec8feb` | crt | _strlwr_s | n | 2 | 2 | platform/crt: _strlwr_s |
 | `0x00ec9010` | crt | atan | n | 2 | 9 | libc: atan |
@@ -773,7 +773,7 @@ and VC9's library layout. `conf.`: h high, m medium, l low.
 | `0x00ec3599` | `locale::facet::_Facet_Register` | (named) | h | `fnvnx_facet_register` |
 | `0x00ec35d7` | `_Locinfo::_Locinfo_dtor(_Locinfo*)` | body of `~_Locinfo` before the 4 string members | h | `fnvnx_locinfo_dtor` |
 | `0x00ec36a6` | `locale::_Init()` | `locale()`: `_Ptr = _Init()` in `ios_base::_Init` | h | `fnvnx_locale_init` |
-| `0x00ec3740` | `_Locinfo::_Locinfo_ctor` | (inferred by S4) | h | `fnvnx_locinfo_ctor` |
+| `0x00ec3740` | `_Locinfo::_Locinfo_ctor(this, const string&)` | (inferred by S4; the string argument: R2, the byte-matched 0x00ad3ca0) | h | `fnvnx_locinfo_ctor` |
 | `0x00ec379c` / `0x00ec3909` | `_Tolower` / `_Toupper(int, const _Ctypevec*)` | `ctype<char>::do_tolower/upper` with `this+8` | h | `fnvnx_tolower_ctype` / `fnvnx_toupper_ctype` |
 | `0x00ec38a9` | `_Getctype()` | returns a 16-byte `_Ctypevec` by value | h | `fnvnx_getctype` |
 | `0x00ec3a75` | `basic_ostream<char>(streambuf*, bool)` + MSVC's vbase flag | the libcpmt standard ostream at 0x0126fc10 (filebuf at 0x0126fbc0, 0x50 bytes before), args (sb, 0, 1); its dtor 0x00ace2d0 reads the vbptr | m | `fnvnx_ostream_ctor` |

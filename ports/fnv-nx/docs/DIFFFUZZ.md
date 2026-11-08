@@ -289,6 +289,41 @@ also missing from the `new` family, although free is in `delete`. On 8b233f99, a
 malloc in the oracle against new / Allocate / a constructor natively. malloc is now an allocator and in the `new`
 family. d20-malloc selects the functions whose oracle code calls it. Test: `tests/s13/test_crtmalloc.py`.
 
+**d21: virtual calls and vtables (F2, SCOPED = d21).** A random sample of 240 cached records of the F2 causes
+(40 each of vptr-unpaired, vcall-garbage, vcall-stub-alias, deleting-dtor-flags, deleting-dtor-ret, oracle-vcall)
+replayed on link 0540aff0d154: 134 still diverge, none of the five triage causes under its own name any more. Three
+mechanisms, each fixed as a class:
+- **d21-dtorvptr** (47 of the 134). Every level of an MSVC destructor stores its class's image vftable, GCC's D1/D0
+  its own vtable address point, and either compiler drops the stores it proves dead. The final vptr word of a destroyed
+  object is representation: the oracle's vftable against the native's address point (unpaired: vptr-unpaired), or
+  against nothing (vptr-store, or x86-only-store when units.json does not name the vftable), or nothing against the
+  native's address point (native-only-store, hard), and the first difference hid every later one (a second vptr at
+  +0x6c, fields). In a destructor (`??1`, `??_G`, `??_E`, D0/D1/D2) compare drops those words
+  (`runner.dtor_vptr_bytes`: each side left the word or stored a whole vtable word, the oracle an exe RTTI vftable or
+  a kind-V one, the native a `_ZTV` address point, a synthesized group or a kind-V vftable) and compares the rest; the
+  words alone are soft `vptr-store`. Rechecks cached mem-write records of destructors.
+- **d21-holes** (18 + 2 of the 134, all of the live vcall-stub-alias). difffuzz-19 made the unused parts of the stub
+  range background memory with a wild-call hook, but the stub hook covers the whole range: a call into a hole was
+  traced twice natively (`name:<hex>` or the code stub's original address, then the raw word) and once on x86, so the
+  next call compared against the duplicate (call-flow, native-undefined, native-inlined, dyninit-no-atexit, call-count).
+  The stub hook leaves holes to the wild hook, and `world.A64_HOLES`, in both hook lists, is hooked once. Rechecks
+  cached records whose native trace has such a pair.
+- **d21-vslot** (8 of the 40 vptr-unpaired records). A call through the planted vftable where the native reaches
+  another slot of it was followed (adaptive follow loaded the oracle's slot function, the oracle ran it untraced), and
+  the record became `call-count x86 0` = falloff?. Such a call-target is not followed: compare marks the native's callee
+  `arm_vcall: planted`, `Pair.vslots` numbers both callees in the exe's slots, and classify gives `vslot-shift` (the
+  native's slot is the oracle's minus one: a declaration numbering its virtuals from a slot-0 placeholder or a
+  hand-indexed `vtbl[k]`, D26 b; 7 records, e.g. 0x00a4d210's call-only `NiObjectNET { Unk0; Unk1; GetRTTI; }` reaches
+  NiRefObject::DeleteThis 0x00cfcc20 for GetRTTI) or `vslot-differs` (another shift; 1, two slots). A call-count whose
+  native extra call is slot k while the oracle ran slot k+1 (unit code) is vslot-shift too (`vslots_run`, 0x00ee8690's
+  `vtbl[49]`). Both are real bugs of fix class `vtable-slots` (S1-rules with D26 b; F2 in owners.py). Rechecks cached
+  call records of cases with planted vptrs.
+Same sample after d21: still diverging 134 -> 120, hard 66 -> 43, of which 13 are now named real bugs (vslot-shift
+11, vslot-differs 2; 2 of them were "gone" before: adaptive follow ran the oracle's slot function for real and the
+runs then agreed); soft 40 -> 49 (vptr-store 46); oracle gaps 28 -> 28 (oracle-vcall 20: oracle-only faults at an
+indirect call through an unplanted object, each machine reading its own slot layout from fuzz bytes; uninit-both 7).
+Test: `tests/s13/test_d21.py`.
+
 **difffuzz-19: a full refresh (HARNESS = difffuzz-19, orchestrator-approved in S1-fuzzB-002).** S1-fuzzB's untyped
 float results (`x86emu.x87_result_use`), its CRT_MATH builtins and engine's preference for a decorated spelling
 change verdicts that no key reflects, so every key changes once; the scoped rows d14..d18 are folded into it (their
@@ -497,6 +532,7 @@ Every real-bug cause belongs to exactly one fix class (`causes.FIX_CLASSES`). A 
 | `static-init` | S10 | `dyninit-no-atexit` | every dynamic initializer registers its destructor as the exe does (atexit) |
 | `call-abi` | S1b | `uninit-arm`, `native-garbage-arg`, `native-stale-result`, `callee-saved`, `sret-mismatch` | every call passes and preserves registers by the callee's MSVC convention (argument slots written, results not reused, callee-saved kept, sret as MSVC) |
 | `data-binding` | S2c | `native-stub-data`, `native-address`, `split-global`, `import-slot-called`, `call-args` | every data symbol and import binds to the exe object (no stub as data, no unit copy, no native address where the exe has an image address, bridges deliver the bytes) |
+| `vtable-slots` | S1-rules | `vslot-shift`, `vslot-differs` | every virtual call reaches the exe's slot: each declaration a caller dispatches through numbers its virtuals in D26's one minus-one order (d21-vslot) |
 | `vtables` | S2c | `vptr-unpaired`, `native-calls-data`, `thunk-binding`, `vslot-trap` | every image vftable pairs with a full native vtable of the static class (no short vtables, overrides bound to their this-adjusting thunks) |
 
 ## Lockstep (`lockstep.py`, D14)
@@ -560,3 +596,22 @@ pointee (the native literal has another address): reported under `unclassified`.
 Indirect calls (vtable calls through fuzzed objects) are not modelled yet (functions with indirect calls are left
 out); callee side effects through pointer arguments are not
 modelled (canned results only); x87 transcendental helpers beyond the d14-math set are intercepted, not executed.
+
+## Exe-image oracle (FNVNX_ORACLE=exe; D23 b)
+
+A function the decomp lacks has no pristine MSVC object, so the default oracle cannot run it. With `FNVNX_ORACLE=exe`
+(`tools/difffuzz/exeimage.py`) the x86 side runs the function's bytes straight from the player's FalloutNV.exe
+(`FNVNX_EXE`, sha256 pinned), at its address, under the same emulator, seeds, probes and comparison. Extents come
+from the prepared tree's build/units.json (`FNVNX_TREE`), where REC1 appended the recon functions, and
+`catalog.py` and `engine.UnitCache` use that table in this mode. The bytes are final, so nothing is relocated.
+Relocation records for the harness's own uses (seeds from referenced data, callee discovery, preload) are recovered
+from the image: DIR32 from its base-relocation table, REL32 for each `call` / `jmp` rel32 out of the function
+(capstone). Read-only targets are pinned on both machines (up to 4 KiB each), writable ones seed the fuzzer.
+Check: on 1,493 decomp functions of 150 random units, the image's code equals the MSVC-object oracle's relocated
+code. The only differences are the 64 functions whose string-literal operands the COFF oracle moves into its
+synthetic pool (0x2f0xxxxx); in the image they are the real .rdata addresses. Every relocation the COFF side
+resolves to an image address is recovered.
+`tools/farm/recon_fuzz_job.sh <commit> <recon branches|all>` (runner job `recon_fuzz`) fuzzes the recons'
+functions this way against `<commit>`'s link and reports per function clean / hard / soft / not run, and per recon
+`fuzz-clean` (the fnvnx-recon-fuzz/1 record that recon.json's `"accept": "fuzz"` cites; `recon_fuzz.py`). Tests:
+tests/s13/test_exe_oracle.py (a synthetic PE32).

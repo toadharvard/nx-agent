@@ -219,7 +219,7 @@ void *fnvnx_locale_getgloballocale(void);                              /* locale
 void fnvnx_facet_register(void *facet);                                /* locale::facet::_Facet_Register */
 size_t fnvnx_cpplib_facet_count(void);
 void fnvnx_cpplib_facet_tidy(void);
-void fnvnx_locinfo_ctor(void *self, const char *locname);              /* _Locinfo::_Locinfo_ctor */
+void fnvnx_locinfo_ctor(void *self, const void *locname_str);         /* _Locinfo::_Locinfo_ctor(this, const string&) */
 void fnvnx_locinfo_dtor(void *self);                                   /* _Locinfo::_Locinfo_dtor */
 typedef struct {                                                       /* _Ctypevec, 16 bytes on ILP32 */
     uint32_t _Hand;

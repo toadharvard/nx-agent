@@ -119,6 +119,10 @@ inline __attribute__((always_inline)) unsigned long _exception_code(void) { retu
  * (S13: an inlined local duplicate differs from the function the address binds to). */
 #define FNVNX_KEEP __attribute__((used, noinline))
 
+/* The base of an opaque enum declaration (prepare.py ENUM1: the decomp's MSVC forward declaration `enum X;` becomes
+ * `enum X FNVNX_ENUM_INT;`). The S11 gate defines it empty: MSVC's own `enum X;` is that declaration there. */
+#define FNVNX_ENUM_INT : int
+
 /* MSVC binds a C-style cast to a non-const reference to a temporary ((T&)Make(x)); prepare.py RCAST1 wraps the
  * temporary in fnvnx_lvalue, which hands back the same object (alive to the end of the full expression). */
 #ifdef __cplusplus

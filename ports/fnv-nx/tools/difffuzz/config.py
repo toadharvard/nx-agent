@@ -5,6 +5,9 @@ Environment variables (defaults are the developer VM's scratch layout):
   FNVNX_DECOMP     pristine fnv_decomp checkout (build/units.json, read only)
   FNVNX_X86OBJ     MSVC 2008 objects of the pristine decomp, one per unit: u<index in units.json>.obj (S11's
                    equivalence build); with FNVNX_ORACLE=clang the stand-in objects made by `difffuzz.py oracle-clang`
+  FNVNX_ORACLE     msvc (default), clang, or exe: the functions' bytes straight from the player's FalloutNV.exe
+                   (exeimage.py; extents from FNVNX_TREE's build/units.json, so recon functions are included)
+  FNVNX_EXE        that FalloutNV.exe (1.4.0.525, sha256 checked; agent-only, never committed)
   FNVNX_TREE       prepared tree (tools/prepare.py output) the AArch64 objects were compiled from
   FNVNX_A64OBJ     ':'-separated directories of AArch64 ILP32 objects (tools/link/compile.sh layout), first hit wins
   FNVNX_DFWORK     work directory (per-unit images, corpora, results)
@@ -29,6 +32,7 @@ PORT = HERE.parent.parent
 DECOMP = Path(os.environ.get('FNVNX_DECOMP', SCR / 'ext/fnv_decomp'))
 X86OBJ = Path(os.environ.get('FNVNX_X86OBJ', SCR / 's13/x86obj'))
 ORACLE = os.environ.get('FNVNX_ORACLE', 'msvc')
+EXE = Path(os.environ.get('FNVNX_EXE', SCR / 'gamedata/exe/FalloutNV.exe'))
 TREE = Path(os.environ.get('FNVNX_TREE', SCR / 's2c/fresh/tree'))
 A64OBJ = [Path(p) for p in os.environ.get('FNVNX_A64OBJ', '%s:%s' % (SCR / 's13/obj', SCR / 's2c/fresh/obj2')).split(':')
           if p]
