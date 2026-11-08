@@ -1161,6 +1161,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                                 pass
                 elif ak == 'text' and addr in providers:   # CRT/library code S4 implements, import thunks
                     cls = 'provider'; target = providers[addr][0]
+                elif ak == 'text' and addr in adj_rows and not thisadj.thunk_layout_ok(
+                        adj_rows[addr][0], thisadj.slot_otts(u.obj, un)):
+                    # W15: a vtable slot whose native layout puts the subobject elsewhere than the thunk's x86
+                    # immediate (the decomp's small shell classes): the stub would hand the target a `this` that is
+                    # off by the difference. Stays a visible trap; x86-convention callers keep the stub
+                    cls = 'code-adjthunk-layout'
+                    target = TRAP_SYM % int(hashlib.sha1(un.encode('utf-8', 'surrogateescape')).hexdigest()[:8], 16)
+                    if target not in traps:
+                        traps[target] = (un, vtables.slot_of(u.obj, un))
+                    stats['adjustor_thunk_layout_trap'] += 1
                 elif ak == 'text' and addr in adj_rows:   # an MSVC adjustor thunk: its stub (adjustor_thunks)
                     cls = 'code-adjthunk'; target = ADDR_SYM % addr
                     stats['adjustor_thunk_refs'] += 1
