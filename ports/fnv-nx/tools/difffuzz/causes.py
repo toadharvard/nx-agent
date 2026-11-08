@@ -111,6 +111,25 @@ POLICY = {
                                                 'the exe gets away with; the port need not reproduce garbage'),
     'partial-return': ('by-design', '-', False, 'the oracle returns a byte / short in al / ax and the rest of eax is '
                                                 'what it held; the declared int result differs only there'),
+    'split-delete':   ('by-design', '-', False, 'MSVC calls the exe\'s scalar deleting destructor F(p, 1), which frees p '
+                                                'itself (exeempty.deleting_wrapper: it tests bit 0 of its argument '
+                                                'and then calls the deallocator); GCC calls the destructor, F(p, 0), '
+                                                'and a separate operator delete of the same p. The pair is the one '
+                                                'call; the arguments and the stores are compared'),
+    'eval-order':     ('by-design', '-', False, 'the two machines make the same calls in another order (C++ leaves the '
+                                                'evaluation order of unsequenced operands open: MSVC evaluates the '
+                                                'arguments of a call right to left, GCC left to right); each oracle '
+                                                'call is compared with the native call of the same callee, the stores '
+                                                'and the result are compared as usual'),
+    'eval-order-args': ('triage', 'S13b', True, 'the calls are in another order on the two machines (eval-order) and the '
+                                                'comparison after pairing them by callee still differs; the canned '
+                                                'results are numbered by call index, so a reordered callee got '
+                                                'another value and the arguments it feeds differ for that reason: '
+                                                'not decided'),
+    'null-delete':    ('by-design', '-', False, 'a call of operator delete (0x00401030, the sized 0x00aa1460) with a '
+                                                'null pointer, which returns at once in the exe (0x00aa4060 `cmp '
+                                                '[ebp+8], 0; jne`, 0x00aa1460 `test eax, eax; je`); GCC drops a '
+                                                'delete of a pointer it knows is null'),
     'oracle-empty-call': ('by-design', '-', False, 'the oracle calls an exe function whose body is proven to do '
                                                    'nothing (push ebp; mov ebp, esp; pop ebp; ret, exeempty.py: no '
                                                    'store, no call, no register but ebp/esp written) and GCC drops '
@@ -275,7 +294,8 @@ POLICY = {
                                                   'with an implicit constructor (zero, then the constructor), MSVC '
                                                   '2008 runs the constructor only'),
     'dtor-dead-store': ('by-design', '-', False, 'the oracle only zeroes bytes of the object a destructor (or a scalar '
-                                                 'deleting destructor wrapper) destroys: MSVC /Od keeps `m_p = 0` '
+                                                 'deleting destructor wrapper) destroys (or stores the empty-array '
+                                                 'marker 0x80000000 there): MSVC /Od keeps `m_p = 0` '
                                                  'after a release, GCC drops stores to an object whose lifetime ends'),
     'store-width':    ('triage', 'S13b', True, 'the same bytes stored with another width: one side writes bytes '
                                                'the other leaves (a bool/char vs dword member, a padded struct copy)'),
@@ -615,7 +635,7 @@ def _rule_mem_write(d, rec=None):
             return 'thunk-binding'      # the function's own `_ZThn<d>_` thunk: the oracle enters with the secondary base
         if d.get('arm_zero_only') and oa == n and _zero_init_region(d, rec):
             return 'native-zero-init'
-        if d.get('x86_zero_only') and ox == n and _dtor_this_region(d, rec):
+        if (d.get('x86_zero_only') or d.get('x86_reset_only')) and ox == n and _dtor_this_region(d, rec):
             return 'dtor-dead-store'
     if len(bx) >= 4 and len(ba) >= 4:
         if ww and all(_nan_generated(x, a) for x, a in ww):

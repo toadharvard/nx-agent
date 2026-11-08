@@ -239,7 +239,57 @@ def _nrvo_copy(xcalls, ta, sret, convs):
     return None
 
 
-def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
+def _perm_align(tx, ta, vcalls):
+    """(r4 uncls, eval-order) The native's call index for each oracle call when the two traces are permutations of one
+    another (the same calls, in another order), else None. Calls through memory the case did not plant (garbage
+    targets) count as one kind. C++ leaves the evaluation order of unsequenced operands open: MSVC evaluates the
+    arguments of a call right to left, GCC left to right (0x0060bb40: PtrCat(&d), Unchecked(&a), Unchecked(&b) in
+    one argument list; 0x008287e0)."""
+    if len(tx) != len(ta) or tx == ta or len(tx) < 2:
+        return None
+
+    def key(t):
+        if vcalls is not None and t >= 0 and t not in vcalls[0] and t not in vcalls[1]:
+            return 'wild'
+        return t
+    kx, ka = [key(t) for t in tx], [key(t) for t in ta]
+    if sorted(map(str, kx)) != sorted(map(str, ka)):
+        return None
+    pos = {}
+    for j, k in enumerate(ka):
+        pos.setdefault(k, []).append(j)
+    used, order = {}, []
+    for k in kx:
+        n = used.get(k, 0)
+        order.append(pos[k][n])
+        used[k] = n + 1
+    if max(abs(i - j) for i, j in enumerate(order)) > 8:
+        return None
+    return order
+
+
+def _empty_marker(w, k):
+    """Byte k lies in an aligned dword the oracle stored as 0x80000000: the capacity / flags word of an empty Havok
+    array (size 0, DONT_DEALLOCATE), which a destructor of the array's owner resets after the release."""
+    b = k & ~3
+    m = b'\x00\x00\x00\x80'
+    # a byte the effective writes leave out equals the memory it was stored over (a zero byte over zero)
+    return w.get(b + 3) == 0x80 and all(w.get(b + i, m[i]) == m[i] for i in range(4))
+
+
+def compare(*a, **kw):
+    """_compare, plus (r4 uncls) a mark on a hard divergence found after the calls were paired by callee instead of by
+    position (`_perm_align`): the canned results are numbered by call index, so a reordered callee got another value
+    and the arguments it feeds differ for that reason (eval-order-args, not decided)."""
+    rx = a[1] if len(a) > 1 else kw['rx']
+    rx.perm_aligned = False
+    d = _compare(*a, **kw)
+    if d and not d.get('soft') and getattr(rx, 'perm_aligned', False):
+        d['after_perm'] = True
+    return d
+
+
+def _compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, readers=None, dummies=None,
             garbage=None, codeptr=None, vcalls=None, ignore=(), vptr_words=None, caller_conv=None,
             agg_ptrs=None):
     """vcalls: (direct, planted) - the original addresses the oracle code calls or jumps to directly, and the slots of
@@ -252,12 +302,26 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
     # common prefix is what led there (difffuzz-19: a native call through a vtpad slot where the oracle called the
     # exe's slot, then faulted on the canned result, was an oracle-side error, not vptr-unpaired)
     one_error = (ex is None) != (ea is None)
+    soft = None
+    if getattr(ra, 'split_folds', 0) or getattr(rx, 'null_deletes', 0) != getattr(ra, 'null_deletes', 0):
+        # (r4 uncls) a delete GCC drops (null pointer) or folds into the deleting-destructor call (split-delete): the
+        # engines left those calls out of the traces (libcalls.delete_fold); kept as a soft note
+        soft = dict(kind='call-count', x86=len(rx.calls), arm=len(ra.calls), soft=True,
+                    split_delete=bool(getattr(ra, 'split_folds', 0)),
+                    null_delete=getattr(rx, 'null_deletes', 0) != getattr(ra, 'null_deletes', 0))
     tx = [c.target for c in rx.calls]
     ta = [c.target for c in ra.calls]
+    perm = _perm_align(tx, ta, vcalls) if not one_error else None
+    if perm is not None:
+        # (r4 uncls) the same calls in another order, further apart than the adjacent swap below: pair each oracle
+        # call with the native call of the same callee (occurrence by occurrence) and compare those; by design
+        ra.calls = [ra.calls[j] for j in perm]
+        ta = [c.target for c in ra.calls]
+        rx.perm_aligned = True
+        soft = soft or dict(kind='call-count', x86=len(tx), arm=len(ta), soft=True, eval_order=True)
     fam = libcalls.FAMILY
     # D21 (coverage first): a by-design or harness-made difference does not end the comparison; the first one is
     # kept and returned only when nothing hard follows (`soft`)
-    soft = None
     swapped = set()
     for i in range(min(len(tx), len(ta))):
         if i in swapped:
@@ -319,7 +383,8 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             if cv is None:
                 continue
             skip = dummies(cx.target) if dummies else ()
-            if (getattr(cv, 'name', '') or '').startswith(('??_G', '??_E')):
+            if (getattr(cv, 'name', '') or '').startswith(('??_G', '??_E')) or \
+                    __import__('exeempty').deleting_wrapper(cx.target & 0xffffffff):
                 # an MSVC deleting destructor (this, flags) is the Itanium D0 / D1 natively (this only, D7): the
                 # flags are the variant, not an argument
                 skip = set(skip) | {v.label for v in cv.vals if v.label != 'this'}
@@ -425,6 +490,8 @@ def compare(conv, rx, ra, w, sret=None, local_statics=(), callee_conv=None, read
             d['arm_zero_only'] = True      # the native only zeroes bytes the oracle leaves (value-initialisation)
         if diff and all(k not in wa and wx.get(k) == 0 for k in diff):
             d['x86_zero_only'] = True      # the oracle only zeroes bytes the native leaves (a dead store in a dtor)
+        if diff and all(k not in wa and (wx.get(k) == 0 or _empty_marker(wx, k)) for k in diff):
+            d['x86_reset_only'] = True     # ... or stores the 0x80000000 "empty array" marker (R4 uncls: 0x00cd27f0)
         # float stores: compare the aligned words as floats
         if all(k in wx and k in wa for k in range(first & ~3, (first & ~3) + 4)):
             bx = bytes(wx[k] for k in range(first & ~3, (first & ~3) + 4))
@@ -1069,7 +1136,12 @@ class Pair:
         target is no destructor (F2 d21-dtorvptr)."""
         name = getattr(self.target.conv, 'name', '') or ''
         if not (name.startswith(('??1', '??_G', '??_E')) or DTOR_ITANIUM.search(name)):
-            return None
+            # (r4 uncls) a destructor under another name: the exe's scalar deleting wrapper, or a body that stores a
+            # derived class's vftable and then a base class's (exeempty.deleting_wrapper / dtor_chain)
+            import exeempty
+            a = getattr(self.target, 'orig_addr', None)
+            if a is None or not (exeempty.deleting_wrapper(a) or exeempty.dtor_chain(a)):
+                return None
         if getattr(self, '_vpw', None) is None:
             import classify
             vft = set(classify.image_vftables()) | set(getattr(self.target, 'exe_vfts', ()) or ())

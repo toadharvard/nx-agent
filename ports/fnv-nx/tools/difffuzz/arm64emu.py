@@ -491,6 +491,19 @@ class Arm64Engine:
             self._fault = e.args[0]; uc.emu_stop(); return
         if name == '__stack_chk_fail':
             self._fault = 'stack-protector'; uc.emu_stop(); return
+        if target in libcalls.DELETES:
+            # (r4 uncls) operator delete(NULL), or the delete that follows the destructor half of a deleting
+            # destructor the oracle calls as one: no call (libcalls.delete_fold)
+            pc_ = r.calls[-1] if r.calls else None
+            fold = libcalls.delete_fold(uc.reg_read(XR[0]), pc_.target if pc_ else None,
+                                        pc_.args[0] if pc_ else None, pc_.args[1] & 0xffffffff if pc_ else None)
+            if fold:
+                if fold == 'null':
+                    r.null_deletes = getattr(r, 'null_deletes', 0) + 1
+                else:
+                    r.split_folds = getattr(r, 'split_folds', 0) + 1
+                uc.reg_write(A.UC_ARM64_REG_PC, uc.reg_read(A.UC_ARM64_REG_LR))
+                return
         k = len(r.calls)
         if k >= MAX_CALLS:                    # intercepted calls run no instructions: bound them like steps
             self._fault = 'timeout'
