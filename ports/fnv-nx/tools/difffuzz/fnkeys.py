@@ -64,6 +64,10 @@ import config
 # call first (three call sites over branches), an integer result that the 24-bit x87 control word rerun reproduces
 # is x87-precision, a consistent read-offset shift is layout-offset, a run that entered a zero
 # placeholder body is native-zero-stub, stack words read past the declaration are param-count, and a result that differs only above an al / ax write is partial-return.
+# flow2 (call-flow fresh sample): a `jmp rel32` incremental-link thunk pops what the function it jumps to pops (the
+# decomp's `void F(void)` placeholder said 0), a call into a function the tree does not define pops the `ret N` the
+# exe's function has, a clean run that ends in a tail call (the stub return) is no derail, the pushes of the entry
+# prologue are no arguments, a merged cdecl cleanup marks the earlier sites cdecl, and the pop search covers more than three sites.
 # Native-null-read class: a native fault inside the unit's own FUN_<X> the oracle only called out follows X in the oracle, native vtable groups read background past their last slot, and a planted slot answered by a named native stub is not followed.
 # Virtual-call class (F2b): a call-target where the native called planted slot k and the oracle's call went to slot k+1, a unit function it ran as code (no call event), is vslot-shift (Pair.vslots_run on call-target too), and a native callee that sits in the native copy of a planted vftable at a slot whose exe function the oracle ran is native-vslot-differs.
 # Small address classes: a stored pinned-literal address is compared by its pointee (literal-store), the canned result of a callee whose exe code returns its `this` or first pointer argument is that input (retsrc.py, canned-this), the address of a by-value aggregate parameter is its stack slot on the oracle and the hidden pointer natively, a hidden result buffer against a frame local is nrvo-elision (by design), and a jump into the native vtable region is a wild call.

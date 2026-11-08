@@ -784,7 +784,17 @@ class Pair:
         ins = list(cs.disasm(code, a))
         i = next((k for k, x in enumerate(ins) if x.address + x.size == retaddr and x.mnemonic == 'call'), None)
         n = 0
+        # (flow2) the entry prologue's `push ebx/ebp/esi/edi` are the function's saved registers, not arguments of
+        # a call the walk reaches back to (0x00a64940: every call counted five)
+        pro = set()
+        for x in ins:
+            if x.mnemonic == 'push' and x.op_str in ('ebx', 'ebp', 'esi', 'edi'):
+                pro.add(x.address)
+            elif not (x.mnemonic == 'sub' and x.op_str.startswith('esp,')):
+                break
         for x in reversed(ins[:i] if i is not None else []):
+            if x.address in pro:
+                break
             if x.mnemonic == 'push':
                 n += 1
             elif x.mnemonic.startswith('j') and x.mnemonic != 'jmp' and not strict:
@@ -796,6 +806,34 @@ class Pair:
                     (x.op_str.startswith('esp,') and x.mnemonic in ('add', 'sub', 'mov', 'lea', 'and')):
                 break
         return min(n, 8)
+
+    def _delayed_cleanup(self, retaddr):
+        """The caller cleans up after the call later than right after it: MSVC merges the `add esp, N` of
+        consecutive cdecl calls (0x00a64940: `call; ...; call; add esp, 0x50`). True when, going on in a straight
+        line (calls and conditional branches passed, a `pop`, `ret`, `leave` or `jmp` ends it), an `add esp, N`
+        frees more than the words pushed since the call: some earlier call left its arguments, and this one may be
+        it. A hint for the order the pops are tried in (cdecl: 0 first); the clean-run check decides."""
+        import capstone
+        for a, code in self.target.x86_code.items():
+            if a <= retaddr < a + len(code):
+                break
+        else:
+            return False
+        cs = getattr(Pair, '_cs', None) or capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        pushed = 0
+        for k, x in enumerate(cs.disasm(code[retaddr - a:], retaddr)):
+            if k > 80 or x.mnemonic in ('pop', 'ret', 'leave', 'jmp'):
+                break
+            if x.mnemonic == 'push':
+                pushed += 1
+            elif x.mnemonic == 'add' and x.op_str.startswith('esp, '):
+                try:
+                    return int(x.op_str.split(', ')[1], 0) > 4 * pushed
+                except ValueError:
+                    return False
+            elif x.mnemonic == 'sub' and x.op_str.startswith('esp,'):
+                break
+        return False
 
     def _derailed(self, rx):
         """The oracle ran on after an intercepted call of unknown convention with its stack off, without faulting
@@ -810,8 +848,17 @@ class Pair:
             return False
         if rx.esp_ok is False:
             return True
-        return any(getattr(c, 'ret_to', None) is not None and not self.xe._in_loaded(c.ret_to)
-                   for c in calls[k + 1:])
+        return any(not self._returns_into_code(c) for c in calls[k + 1:])
+
+    def _returns_into_code(self, c):
+        """The intercepted call returns into the oracle's code, or into the epilogue stub after a tail `jmp` to a
+        callee whose pop is known (difffuzz-20, flow2: 0x00e971d0 ends `jmp 0x00e89b70` and 0x00e89b70 tail-calls
+        0x00e89840: that call returns to the stub, which a derail's wild call does too, but a derail's callee has
+        no known pop). Without this a clean run read as a derail and _learn_pop discarded the true pops."""
+        r = getattr(c, 'ret_to', None)
+        if r is None or self.xe._in_loaded(r):
+            return True
+        return x86emu.STUBS <= r < x86emu.STUBS + 0x40 and not getattr(c, 'pop_unknown', False)
 
     def _learn_pop(self, case, max_steps, rx):
         """The oracle faulted after an intercepted call whose callee pops an unknown number of bytes (a call through
@@ -845,20 +892,38 @@ class Pair:
                     continue
                 cdecl.add(ra_)
             sites.append(ra_)
-        sites = sites[:3]
+        # (flow2) more than three unknown-pop sites (a case that plants a pointer in a loop: 0x00a64940's twelve
+        # `call [vftable slot]`): the first three are searched, the rest take their own push count (the commonest
+        # answer for a thiscall/stdcall site) so that the search can end clean; a wrong guess there only fails the run
+        cdecl.update(r for r in sites if self._delayed_cleanup(r))
+        rest, sites = sites[3:16], sites[:3]
         if not sites:
             return None
-        self.pops_tried.update(sites)
+        self.pops_tried.update(sites + rest)
         # no push in the straight line before the call (the arguments pushed before a branch, 00e899a0): any count
         # up to 6 words, each checked by clean()
         def counts(a):
             # (F-uncls, difffuzz-20) the pushes right before the call first, then the walk across branches from the
             # most down: the search is bounded (27 runs) and three sites with a branch each (0x00e68870: two
             # `call edx` and a third) put the true counts beyond it in the descending order alone
-            top = self._pushes_before(a) or 6
+            top = self._pushes_before(a)
+            if not top:
+                # (flow2) no push anywhere in the straight line before the call (a virtual call with ecx = this
+                # and nothing pushed, 0x00a5ff10's `call eax`): 0 first, then the old descending counts
+                return [0] + [4 * n for n in range(6, 0, -1)]
             near = min(self._pushes_before(a, strict=True), top)
             return ([4 * near] if near else []) + [4 * n for n in range(top, 0, -1) if n != near]
-        cands = [([0] if a in cdecl else []) + counts(a) + ([] if a in cdecl else [0]) for a in sites]
+        exe_pop = getattr(self.target.callee_info, 'exe_pop', None)
+        tgt = {getattr(c, 'ret_to', None): c.target for c in rx.calls}
+
+        def first(a):
+            """The count to try first: the exe's own `ret N` of the function called (a CRT function the tree does
+            not define), else the pushes right before the call."""
+            n = exe_pop(tgt[a]) if exe_pop and a in tgt else None
+            return [] if n is None else [n]
+        cands = [first(a) + ([0] if a in cdecl else []) + counts(a) + ([] if a in cdecl else [0]) for a in sites]
+        cands = [list(dict.fromkeys(c)) for c in cands]
+        fixed = {a: (first(a) or [0 if a in cdecl else 4 * self._pushes_before(a, strict=True)])[0] for a in rest}
 
         # a clean run that only kept callee-saved registers wrong (no fault) need not also fix an esp difference it
         # already had at the target's return (a custom convention's pop: F3, 0x00d55bd0); F1's derail (callee-saved
@@ -869,19 +934,21 @@ class Pair:
             x = got[0]
             return not (x.error or '').startswith('fault:') and (x.esp_ok or not need_esp) and \
                 x.saved_ok is not False and \
-                all(self.xe._in_loaded(c.ret_to) for c in x.calls if getattr(c, 'ret_to', None) is not None)
+                all(self._returns_into_code(c) for c in x.calls)
         for combo in itertools.islice(itertools.product(*cands), 27):
             if not any(combo):
                 continue
             for a, n in zip(sites, combo):
                 self.pops[a] = n
+            for a, n in fixed.items():
+                self.pops[a] = n
             got = self._run(case, max_steps)
             if clean(got):
-                for a, n in zip(sites, combo):
+                for a, n in list(zip(sites, combo)) + list(fixed.items()):
                     if not n:
                         self.pops.pop(a, None)
                 return got
-        for a in sites:
+        for a in sites + rest:
             self.pops.pop(a, None)
         return None
 

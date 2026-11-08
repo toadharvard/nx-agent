@@ -445,7 +445,14 @@ class X86Engine:
             return
         rb = case.ret_bytes(k)
         info = self.callee_info(address)
-        pop, kind = info if info else (self.pop_override.get(retaddr, 0), x87_result_use(uc, retaddr, self._fret))
+        if info:
+            pop, kind = info
+        else:
+            pop = self.pop_override.get(retaddr)
+            if pop is None:              # (flow2) not learned: what the exe's function there pops (CRT cdecl: 0)
+                f = getattr(self.callee_info, 'exe_pop', None)
+                pop = (f(address) if f else None) or 0
+            kind = x87_result_use(uc, retaddr, self._fret)
         if not info:
             r.calls[-1].pop_unknown = True
             if world.X87_FLIP_WIDTH and kind in ('f32', 'f64'):
