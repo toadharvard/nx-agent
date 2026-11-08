@@ -281,6 +281,11 @@ fi
 	fi
 } >> "$REPORT"
 if [ -n "$NOTE_LINKEQ" ]; then echo "- incremental link check (LINKEQ): $NOTE_LINKEQ" >> "$REPORT"; fi
+# 5c. The prepared tree as t/<commit12> when no prepare farm published one (the fuzz farms fetch it for the link
+# commit; T1), before link/<commit12>, so a fuzz farm that sees the link finds its tree. Never fails the job.
+if [ $INPUTS = 1 ]; then publish_tree "$F/build" || NOTE_TREEPUB="publish_tree exited $?"; else NOTE_TREEPUB="not published (no tree or no objects)"; fi
+echo "- prepared tree: $NOTE_TREEPUB" >> "$REPORT"
+log "prepared tree: $NOTE_TREEPUB"
 if [ $INPUTS = 1 ]; then publish_link "$F/build"; else NOTE_PUB="not published (no tree or no objects)"; fi
 echo "- link outputs: $NOTE_PUB" >> "$REPORT"
 # 6. The device package (NX1): fnv.nro + the SD tree on the private branch nro/<commit12>.
