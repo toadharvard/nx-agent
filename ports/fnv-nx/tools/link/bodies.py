@@ -154,6 +154,37 @@ def load_native_names(addrmap_tsv):
     return res
 
 
+CRT_SYMBOLS_TSV = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'platform',
+                                                'crt', 'crt_symbols.tsv'))
+
+
+def load_provider_params(crt_symbols_tsv=None):
+    """platform/crt/crt_symbols.tsv -> {address: parameter count} of the rows whose identification (S4's reading of the
+    exe function) spells a C++ parameter list: `std::_Lockit::_Lockit(int)` -> 1 (the object is not counted),
+    `std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)` -> 2, `std::locale::_Getgloballocale() [note]` -> 0.
+    A trailing `[note]` is dropped first; a row with no parameter list is not listed."""
+    res = {}
+    path = crt_symbols_tsv or CRT_SYMBOLS_TSV
+    if not os.path.exists(path):
+        return res
+    for line in open(path, encoding='utf-8', errors='surrogateescape'):
+        f = line.rstrip('\n').split('\t')
+        if line.startswith('#') or len(f) < 7 or not f[0].startswith('0x'):
+            continue
+        m = re.search(r'\((.*)\)\s*(?:const)?\s*$', re.sub(r'\s*\[.*\]\s*$', '', f[2]))
+        if not m:
+            continue
+        s, depth, n = m.group(1).strip(), 0, 0
+        if s and s != 'void':
+            n = 1
+            for ch in s:
+                depth += ch in '<('
+                depth -= ch in '>)'
+                n += ch == ',' and depth == 0
+        res[int(f[0], 16)] = n
+    return res
+
+
 def load_providers(addrmap_tsv):
     """addrmap.tsv -> {address: provider} of the F addresses S4's runtime implements (note `provider: <name>`):
     the platform's own definition of the exe function at that address (platform/crt/crt_symbols.tsv)."""
@@ -1494,10 +1525,13 @@ def load_synth(out):
     return res
 
 
-def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None):
+def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None,
+             provider_params=None):
     """`exe-addr`: a name still missing (or about to get a synthesized special member) whose MSVC counterpart the
     referencing unit's pristine object calls: bound to the address the exe's call at that site reaches, when every
-    site agrees and the native build defines it with the right kind."""
+    site agrees and the native build defines it with the right kind. provider_params: {address: parameter count} of
+    S4's providers (load_provider_params): a provider's address no unit defines has no MSVC definition to compare, so
+    its identification's parameter count stands for the shape (the provider takes the object first, then these)."""
     exe = Pe(exe_path)
     udata = json.load(open(units_json))['units']
     idx_of = collections.defaultdict(list)
@@ -1539,6 +1573,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
             return True   # S4's runtime implements the exe's function there, taking the object (void *self)
         member = bool(rs.member)
         rparams = [p_ for p_ in rs.params if p_ != '...']
+        if a in (providers or {}) and a in (provider_params or {}) and not def_names.get(a):
+            return provider_params[a] == len(rparams)
         for n_ in def_names.get(a, ()):
             d_ = msvc(n_) if n_.startswith('?') else None
             if d_ is None or d_.kind != 'func' or d_.params is None:
@@ -1916,7 +1952,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
     exe_vars = set()   # variables placed exe code references whose address exe-data did not find
     if msvc_objs and exe_path:
         rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
-                        load_providers(os.path.join(out, 'addrmap.tsv')))
+                        load_providers(os.path.join(out, 'addrmap.tsv')), load_provider_params())
         # placeholder variables the exe's code addresses: bound to that image address (before decl-data)
         have_ = {r.name for r in rows}
         # declared-only C++ variables (static data members, unit namespaces' globals) the same way, before decl-data
