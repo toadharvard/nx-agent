@@ -989,6 +989,38 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
                         cast = casts_of(u).get(isig.qual[-1])
+                    if not refdecl and (tier or '').startswith('name-addr') and not isig.variant and \
+                            nd['sym'].name.startswith('_Z') and un.startswith('_Z'):
+                        # S2 s2d-010 (2a): bound by the address in a Ghidra-style name, so no MSVC declaration of the
+                        # reference was found and nothing compared the pair. Both sides from their Itanium names
+                        # (name_addr_sigs: the same convention rules for both), then the ordinary verdict: a bridge
+                        # where the shapes differ and abi can map them, else flagged code-manual
+                        rs_, ds_ = name_addr_sigs(isig, itanium(nd['sym'].name))
+                        dm_ = msvc(defdecl) if defdecl else None
+                        if rs_ is not None and dm_ is not None and dm_.kind == 'func' and dm_.raw_params is not None:
+                            # the definition's own MSVC declaration carries its real convention (a __fastcall with an
+                            # unused edx: 0x00b5ade0); only the reference side is guessed
+                            ds_ = dm_
+                        if rs_ is not None:
+                            v_ = abi.compare(rs_, ds_)
+                            # the conventions are guessed (Itanium has none): equal native argument shapes are the
+                            # same call whatever x86 says (B::f(int) vs f(B *, int)); a bridge is taken only when abi
+                            # derives one, any other difference is flagged for a decision, never guessed into moves
+                            if [c for _, c, _ in abi.a64_locations(rs_)] == [c for _, c, _ in abi.a64_locations(ds_)]:
+                                v_ = abi.Verdict()
+                            stats['name_addr_abi_' + v_.kind] += 1
+                            if v_.kind != 'same':
+                                abi_rows.append((u.source, un, '%08x' % addr, '(itanium) ' + un,
+                                                 '(itanium) ' + nd['sym'].name, v_.kind, ','.join(v_.classes),
+                                                 '; '.join('%s<-%s' % (d_, s_) for d_, s_, _, _ in v_.moves),
+                                                 '; '.join(v_.notes), it[un] or '', it[nd['sym'].name] or ''))
+                                abi_classes[(v_.kind, ','.join(v_.classes) or '-')] += 1
+                            if v_.kind == 'bridge':
+                                bn_ = abi.bridge_name(addr, un)
+                                bridges.setdefault(bn_, (target, v_, it[un] or un, it[nd['sym'].name] or nd['sym'].name))
+                                target, cls = bn_, 'code-bridge'
+                            elif v_.kind in ('manual', 'x86-inconsistent'):
+                                cls = 'code-manual'
                     if refdecl and (refdecl != defdecl or cast):
                         rs, ds = msvc(refdecl), msvc(defdecl)
                         # an undecorated C name carries no parameter types: read them from the declaring unit's
@@ -1220,6 +1252,13 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             elif cls == 'import' and addr in import_syms:   # IAT slot: the slot's api, not the decomp's spelling
                 target = import_syms[addr]
                 stats['imports_bound'] += 1
+            elif cls == 'import' and addr in iat and iat[addr][1] != un and IDENT.match(iat[addr][1]):
+                # no export-table symbol for the slot (an api a platform module defines under its C name, e.g.
+                # d3dx9_38's D3DXCreateCubeTextureFromFileInMemory), but the unit spells it otherwise (declared
+                # without extern "C": _Z37D3DXCreate...): the reference goes to the api's C name, as a C-named
+                # reference to the same slot links by itself
+                target = iat[addr][1]
+                stats['imports_bound_by_api_name'] += 1
             if cls == 'unresolved' and ADDR_NAME.match(un) and int(un[6:], 16) in providers and \
                     int(un[6:], 16) not in native:
                 # a reference spelled `__fnv_<a>` (recon / decomp text naming the address) where S4 provides a: the
@@ -3884,6 +3923,30 @@ def classify_ref(un, isig, idx, gdef, gref, anydef, msvc, ident=None):
                 best = s; break
     return 'addr', '%s/%s' % (scope, tier), a, None, best.text
 
+
+
+def name_addr_sigs(isig, dsig):
+    """(reference, definition) Sigs for abi.compare from two Itanium names (S2 s2d-010 2a: a name-addr pair has no
+    MSVC declaration on the reference side). Itanium carries neither the convention nor the return type of a
+    non-template function, so both sides follow one rule: a function in a class scope is a thiscall member (a
+    `fnv_<8 hex>` scope is the decomp's unit-local namespace, not a class), else cdecl; the result is taken as the
+    same on both sides. (None, None) when either is not a function."""
+    if isig is None or dsig is None or isig.kind != 'func' or dsig.kind != 'func':
+        return None, None
+    out = []
+    for s_ in (isig, dsig):
+        n = sigs.Sig('func', s_.name)
+        n.qual = list(s_.qual)
+        n.raw_params = list(s_.raw_params or [])
+        n.params = n.raw_params
+        scope = n.qual[:-1]
+        n.member = bool(scope) and not re.fullmatch(r'fnv_[0-9a-f]{8}', scope[-1])
+        n.cc = 'thiscall' if n.member else 'cdecl'
+        n.static = False
+        n.raw_ret = None
+        n.variant = None
+        out.append(n)
+    return out[0], out[1]
 
 def emit_tls(addrs):
     """Native TLS block in the layout of the image's .tls template (bridges.S): the decomp's __declspec(thread)

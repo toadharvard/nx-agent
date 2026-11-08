@@ -100,11 +100,6 @@ WEAK int __isoc23_sscanf(const char *s, const char *fmt, ...)
 }
 WEAK long __isoc23_strtol(const char *s, char **end, int base) { return strtol(s, end, base); }
 WEAK unsigned long __isoc23_strtoul(const char *s, char **end, int base) { return strtoul(s, end, base); }
-/* glibc's errno accessor (units compiled against glibc headers, S9): newlib's errno of this thread. Not on a glibc
- * host (tests/s4): there errno itself is (*__errno_location()), so this one would call itself. */
-#if !defined(__GLIBC__)
-WEAK int *__errno_location(void) { return &errno; }
-#endif
 
 /* glibc's errno accessor: `errno` expands to (*__errno_location()) in the headers the stand-in compiler (S9) used for
  * the units that read errno (IdvFileError); newlib's errno is (*__errno()), the same thread's int. Only where newlib
