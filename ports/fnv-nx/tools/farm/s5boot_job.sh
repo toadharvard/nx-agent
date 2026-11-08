@@ -67,10 +67,16 @@ if [ -n "${S5BOOT_TRACE:-}" ]; then
 	tr ',' '\n' <<< "$S5BOOT_TRACE" > "$W/trace_list.txt"
 	EXTRA="$EXTRA --trace-fn @$W/trace_list.txt --trace-out $W/trace.tsv --trace-max ${S5BOOT_TRACE_MAX:-2000000}"
 fi
-log "boot $LC ($TAG), timeout ${EMU_TIMEOUT:-3600}s"
+EMU_TIMEOUT=${EMU_TIMEOUT:-3600}
+if [ -n "${FARM_DEADLINE:-}" ]; then   # the runner's kill: end the boot in time to publish and report (5 min)
+	left=$(( FARM_DEADLINE - $(date +%s) - 300 ))
+	[ "$left" -lt "$EMU_TIMEOUT" ] && { NOTES+=("EMU_TIMEOUT cut from $EMU_TIMEOUT to $left s by FARM_DEADLINE"); EMU_TIMEOUT=$left; }
+	[ "$EMU_TIMEOUT" -gt 60 ] || fail "no time left before FARM_DEADLINE"
+fi
+log "boot $LC ($TAG), timeout ${EMU_TIMEOUT}s"
 BUDGET=${BUDGET:-200000000} FARM_FAULTS=$W/faults.txt FARM_PROFILE=$W/profile FARM_BOOTS=stub FARM_GAME=$GAME \
-	EMU_TIMEOUT=${EMU_TIMEOUT:-3600} EMU_EXTRA="$EXTRA" \
-	timeout $(( ${EMU_TIMEOUT:-3600} + 900 )) bash "$P/tests/s5/farm_boot.sh" "$LC" "$W/b" > "$W/boot.log" 2>&1
+	EMU_TIMEOUT=$EMU_TIMEOUT EMU_EXTRA="$EXTRA" \
+	timeout $(( EMU_TIMEOUT + 240 )) bash "$P/tests/s5/farm_boot.sh" "$LC" "$W/b" > "$W/boot.log" 2>&1
 NOTES+=("farm_boot exit $? (log boot.log)")
 
 # ---- publish (private): the boot log and the trace -----------------------------------------------------------------
