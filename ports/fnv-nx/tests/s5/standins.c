@@ -97,10 +97,15 @@ extern void *fnv_abstractheap_base(void *self, uint32_t reserve, uint32_t commit
 extern void fnv_heap_initialize_slots(void *self) __asm__("__fnv_00aa8dd0");
 void *fnv_standin_00aa78a0(void *self, uint32_t reserve, uint32_t commit, const char *name, _Bool flag)
     __asm__("_ZN12fnv_00aa78a010MemoryHeapC1EjjPKcb");
+/* D26 (b, c): the heap callers are declared with a virtual destructor now (InitializeSlots' allocator call moved from
+ * slot 12 to 13), so the object carries the link's minus-one table, not the exe's vftable: with 0x010a28fc slot 13 was
+ * exe slot 13, the allocation returned 0 and InitializeSlots exited the guest before WinMain (link 3f7a6c35e923). */
+extern const void *fnv_memoryheap_vtable[] __asm__("_ZTVN12fnv_00aa78a010MemoryHeapE")
+    __attribute__((visibility("hidden")));   /* a direct adrp/add: --inject has no GOT relocations */
 void *fnv_standin_00aa78a0(void *self, uint32_t reserve, uint32_t commit, const char *name, _Bool flag) {
     unsigned char *p = self;
     fnv_abstractheap_base(self, reserve, commit, name, 0x10000);
-    *(volatile uint32_t *)p = 0x010a28fcu;
+    *(const void *volatile *)p = &fnv_memoryheap_vtable[2];   /* the address point: after offset-to-top and RTTI */
     p[0x20f0] = flag;
     p[0x20f1] = 0;
     fnv_heap_initialize_slots(self);
