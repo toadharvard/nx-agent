@@ -5154,6 +5154,9 @@ def r_recon_bodies(path, text, stats):
             text = text.rstrip('\n') + '\n\n/* fnv-nx REC1: reconstructed bodies (D20, fnv-nx-build recon/) */\n' + body
             if not text.endswith('\n'): text += '\n'
             stats['REC1'] += len(r.get('functions', []))
+            # one per appended recon body: REC1 counts placed functions only, so the inline (D23 c) bodies, the
+            # GCC-only stand-ins and the re-issued recons (functions: []) were not counted at all (orchestrator, S2)
+            stats['REC1-APPEND'] += 1
         r['_applied'] = True
     return text
 

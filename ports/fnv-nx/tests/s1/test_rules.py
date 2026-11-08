@@ -1479,7 +1479,9 @@ os.environ.pop('FNVNX_RECON', None)
 check('REC1 without FNVNX_RECON: nothing', run(s1.r_recon_bodies, '// @fnv 0x00401000\nvoid f() {}\n', _hp), [], ['REC1'])
 os.environ['FNVNX_RECON'] = os.path.join(_rc, 'recon')
 prepare.__dict__['_fnvnx_recon'] = None
-_ro = run(s1.r_recon_bodies, '// @fnv 0x00401000\nvoid f() {}\n', _hp)
+_sta = Counter()
+_ro = s1.r_recon_bodies(_hp, '// @fnv 0x00401000\nvoid f() {}\n', _sta)
+check('REC1-APPEND counts each appended recon body', str(dict(_sta)), ["'REC1-APPEND': 1"])
 check('REC1 appends the unit\'s reconstructed body', _ro, ['void f() {}', 'fnv-nx REC1', 'H::H() { Init(); }'])
 check('REC1 other units untouched', run(s1.r_recon_bodies, 'int g;\n', os.path.join(_rc, 'dec', 'src', 'o.cpp')),
       [], ['REC1'])
