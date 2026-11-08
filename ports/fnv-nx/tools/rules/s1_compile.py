@@ -5151,6 +5151,22 @@ def r_recon_bodies(path, text, stats):
         r['_applied'] = True
     return text
 
+def recon_retarget(u, rt):
+    """REC1-RETARGET: a recon whose replace pairs change the decoration of a function the unit's recipe already places
+    (a return type fixed from the exe: EQ/R2 0x008d1e50 GetNextObjectFloat, float -> void*, QAEMXZ -> QAEPAXXZ) moves
+    that recipe entry to the new decoration: {address, old, new}. Only when the unit places exactly `old` at `address`
+    (anything else is a miss, counted, and changes nothing); the unit's symbols binding of `old` follows. -> 1 or 0."""
+    a = rt.get('address', '').lower()
+    for f in u.get('functions', []):
+        if f['address'].lower() == a and f['symbol'] == rt.get('old') and rt.get('new'):
+            f['symbol'] = rt['new']
+            sy = u.setdefault('symbols', {})
+            if rt['old'] in sy:
+                sy.setdefault(rt['new'], sy.pop(rt['old']))
+            return 1
+    return 0
+
+
 def add_recon_definitions(out_root, stats, files=None):
     """POST hook: REC1's recipe entries (functions and symbols) in <out_root>/build/units.json."""
     import json
@@ -5178,6 +5194,10 @@ def add_recon_definitions(out_root, stats, files=None):
             for k, v in r.get('symbols', {}).items():
                 if k not in u.setdefault('symbols', {}):
                     u['symbols'][k] = v; m += 1
+            for rt in r.get('retarget_functions', []):     # REC1-RETARGET (see recon_retarget)
+                t = recon_retarget(u, rt)
+                stats['REC1-RETARGET' if t else 'REC1-RETARGET-MISS'] += 1
+                n += t
     if n or m:   # symbols persist on their own: a recon may only bind names to the exe's functions (R1: the Havok
         # agents DCD6A0Agent1..9, compared by address in FUN_00dcd4d0, must bind to the exe and get no body)
         stats['REC1-DEF'] += n
