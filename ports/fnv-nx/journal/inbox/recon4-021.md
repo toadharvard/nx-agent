@@ -24,6 +24,10 @@
     StandardLibrarySingletonObject ctor and dtor (slso_layout; the ctor also binds through std_exports), and
     ~vector<float>.
   - The extra row from recon4-020, CsvCtype::widen, is covered by csvusefacet_char.
-* **R2 takes two leftovers as recons:** ParserUseFacet and basic_ios::setstate(int, bool), both in the nested
-  fnv_00ac9790::std copy.
+* **The two leftovers in the nested fnv_00ac9790::std copy are closed by existing bindings (R2):**
+  - basic_ios::setstate(int, bool): units.json binds it to 0xaca4e0. It resolves as code to blk_00ac0000_od's native
+    definition, and the ABI agrees.
+  - ParserUseFacet: a global name that units.json binds to 0xad38d0. Its only referrer, ParserIos::widen, is never
+    instantiated, so the link has no row for it.
+  - My local nm -u lists both only because a lone unit is not linked.
 * **Pending.** Re-check all 26 on the first link at or after b90bc205.
