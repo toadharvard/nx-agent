@@ -3709,3 +3709,30 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
 * **perf** (R2, PERF.md section 13, static): the stack protector is off, -mtune=cortex-a57 is in, 158,789 GOT loads
   (74 % image addresses), our call-site overhead is 4.7 % (bridges 2.0 %), and no game frame has been counted.
 * **x86 fallback (X1-fex)**: GO-with-limits at 29-42 agent-days; closed by owner decision (too expensive).
+
+### J-0165 | 2026-11-08 | stream: orchestration | status: active | parent: J-0164
+
+* **first link with VTFILL, VTFILL2 and classlayout**: 0e8b2eb8. bl1 published it by hand at 17:16, from the warm
+  copies; bootloop now publishes right after guest (T1 22f66360). full3 measured it:
+  * **compile 2,978/2,978**, the first full compile today;
+  * link ok: 85.2 % by address, 16,847 bridges, **461 undefined**;
+  * guest: **5 symbols on trap stubs** (4aa2f953 had 1,191);
+  * boot: WinMain entered, 3,475 initializers skipped, then a write-protect fault.
+* **boot regression on it, 1/10** (S5): MemoryHeap's table came out exe-order. Cause: VTFILL's D22-USED downgrade
+  ("slot 0 named by code -> exe-order") fired on real destructors called by name. That also hit 604 process
+  shells (>= 8,427 of the gate's 17,787 shifted slots). Fix: bebcbdef (named_placeholder skips D0/D1/D2). bl1
+  restarted on af44165a through the link-only path, with the warm==cold check skipped.
+* **measured on 0e8b2eb8** (S2):
+  * vtgate: 1,029 of 3,269 exe vftables bad, 20,309 slots (17,787 shift);
+  * seamcheck --vcall: 20,702 matched / 926 mismatched / 15,780 unknown (5fd996a4: 1,278 mismatched);
+  * COM: 43/43 ok;
+  * the DELDTOR_STRICT flips are confirmed by their callers.
+  The earlier static estimates (about 400 slots, about 203 skips) did not see the D22-USED bug, so from now on
+  only link measurements count.
+* **layout gate**: cf669574 had 247 records / 260 fields. 11a6f7cd: 50 records / 206 fields (boot 0). 5e94e04e:
+  4 records / 207 fields, but that run reused an old tree without S1's recons. The job now re-execs its own
+  commit's copy (80aaf93d), and af034f14 is running on nr1.
+* **EQ**: Boot and Hot classified to 0. Hard functions on 4aa2f953: 2,690. The re-fuzz of only the hard functions
+  (decision (b)) runs on the first link with today's fixes.
+* **infrastructure**: linkcheck (T1, sw14) is not green yet: the base tree and the plugin headers are fixed. The
+  link stage is 32-73 min; the probe takes 1,163 s with 0 cache hits, which is T1's next item.
