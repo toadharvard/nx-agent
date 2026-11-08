@@ -660,4 +660,4 @@ resolves to an image address is recovered.
 `tools/farm/recon_fuzz_job.sh <commit> <recon branches|all>` (runner job `recon_fuzz`) fuzzes the recons'
 functions this way against `<commit>`'s link and reports per function clean / hard / soft / not run, and per recon
 `fuzz-clean` (the fnvnx-recon-fuzz/1 record that recon.json's `"accept": "fuzz"` cites; `recon_fuzz.py`). Tests:
-tests/s13/test_exe_oracle.py (a synthetic PE32).
+tests/s13/test_exe_oracle.py (a synthetic PE32). Pops class (EQ, `tests/s13/test_pops.py`): `runner._learn_pop` fixes the unknown-pop call sites one at a time in run order, however many (the count that takes the run farthest before a fault or an intercepted call returning outside the loaded code; only a clean run with a balanced stack ends it), and `_pushes_before` counts a `sub esp, N` argument block as N/4 words (0x00818310, 0x005c0bf0 pass a struct by value that way).
