@@ -102,3 +102,23 @@ tools/scenario/scenarios.json `boot-cell` (menu, then `coc GSDocMitchellHouse`) 
 tools/scenario/emu_scenario.py (`EMU_PY` in tests/s5/farm_boot.sh). Threads the original starts between
 masters-loaded and first-cell: one BSThread (BuildCompiledFileList, re-opens the ESM) and audio threads per music
 file; none during the menu or the cell load (the cell's assets come from the open archives; IO workers already run).
+
+## Second route: New Game (trace-newgame)
+
+The same markers hold on boot -> menu -> New -> confirm (the dialog "Start a new game?", Yes) -> Doc Mitchell's
+wake-up scene (931,631 calls). The new-game run shows each marker below; the coc run's seq is given for comparison:
+
+| marker | new game | coc |
+|---|---|---|
+| 0x0046fb50 MarkGameSettingsLoaded (1 call) | 340654 | 340463 |
+| 0x007cb7d0 InitStartMenu (1) | 369411 | 369573 |
+| 0x007cbaf0 StartMenuInit (1) | 370430 | 370593 |
+| 0x00851d90 ProcessQueuedSaveLoad (frame head) | 370986 | 371149 |
+| 0x00849b10 FormReconstructionMap (1) | 650953 | 616701 |
+| 0x00852d20 LoadCellReferences (1) | 650954 | 616702 |
+| 0x00950290 PlayerCharacter::UpdateCameraMode | 723454 | 691975 |
+| 0x00778b10 HUDMainMenu::RefreshTargetDisplay | 743400 | 696109 |
+| 0x00627980 BoundaryOwner::BuildWalls (1) | 730064 | 698696 |
+
+Under Wine with the tracer, the original crashed a few seconds after reaching the cell on this route; that may be the
+tracer, not the game (unverified). Both traces are on fnv-nx-build `scenario/original` (TRACES.md).
