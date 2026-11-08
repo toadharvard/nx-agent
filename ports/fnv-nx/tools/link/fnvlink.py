@@ -914,6 +914,16 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                             slotfill2.other_class_entry(isig, itanium(nd['sym'].name)):   # S2c-vt2
                         target = MSVC_ENTRY_SYM % addr
                         stats['msvc_entry_refs_itanium'] += 1
+                    if isig.variant == 'D0' and target == ADDR_SYM % addr and \
+                            sigs.itanium_variant(nd['sym'].name) is None and not deleting_native(nd, msvc):
+                        # GCC's deleting destructor D0 bound to a plain (destroy-only) body: the decomp's `~C` at
+                        # an address its unit binds `??1C` to (S5 round 5: _ZTV17SettingPointerMap's D0 ran
+                        # FUN_00404da0 and freed nothing). D0 = that body, then the global operator delete
+                        dl_ = global_delete(newdel_votes, native, providers)
+                        if dl_:
+                            target = D0DEL_SYM % addr
+                            bridges.setdefault(target, emit_d0_stub(target, ADDR_SYM % addr, dl_))
+                            stats['d0_on_plain_dtor'] += 1
                     defdecl = nd['msvc']
                     cast = None
                     if refdecl and isig.qual and msvc(refdecl).kind == 'func' and not msvc(refdecl).member:
@@ -2248,6 +2258,37 @@ def nonvirtual_deldtors(def_at, native, units, objsyms, msvc, itanium, newdel_vo
     return out
 
 
+D0DEL_SYM = '__fnvnx_d0del_%08x'   # D0 = the destroy-only body at the address, then operator delete
+
+
+def deleting_native(nd, msvc):
+    """The native definition at an address is itself a deleting destructor: Itanium D0, an MSVC `??_G` / `??_E`, or a
+    decomp (this, flags) function."""
+    if sigs.itanium_variant(nd['sym'].name) == 'D0':
+        return True
+    n = nd.get('msvc') or ''
+    return n.startswith(('??_G', '??_E')) or flags_param(msvc(n) if n else None)
+
+
+def global_delete(newdel_votes, native, providers):
+    """The global operator delete most units bind `??3@YAXPAX@Z` to (native or S4's provider), else None."""
+    dv = newdel_votes.get('??3@YAXPAX@Z')
+    da = dv.most_common(1)[0][0] if dv else None
+    if da is None:
+        return None
+    return ADDR_SYM % da if da in native else ((providers or {}).get(da) or (None,))[0]
+
+
+def emit_d0_stub(name, d1, dl):
+    """GCC's D0(this): d1(this); dl(this) (the deleting destructor of a class whose only native body destroys)."""
+    body = ['    stp x29, x30, [sp, #-32]!', '    mov x29, sp', '    str x19, [sp, #16]', '    mov w19, w0',
+            '    bl %s' % d1, '    mov w0, w19', '    ldr x19, [sp, #16]', '    ldp x29, x30, [sp], #32',
+            '    b %s' % dl]
+    return '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2', '    .globl %s' % name,
+                      '    .hidden %s' % name, '    .type %s, %%function' % name, '%s:' % name] + body +
+                     ['    .size %s, .-%s' % (name, name), '    .text']) + '\n'
+
+
 def emit_sdd_stub(name, d1, dl):
     """MSVC's scalar deleting destructor `void *C::??_G(unsigned flags)`: d1(this); if (flags & 1) dl(this);
     return this."""
@@ -2749,7 +2790,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         names = [ren.get(e.sym, e.sym) if e.sym else None for e in ents]
         ov = over.get((z, path), {})
         se = names[2:2 + n]
-        d = exevft.dtor_pos(se, [e.word for e in ents[2:2 + n]])
+        # the pair is looked for on the object's own symbols: after resolve's renames D1 and D0 can both be one
+        # native body (FUN_00404da0 for ~SettingPointerMap), which hid the pair and lost exe slot 1 (S5 round 5)
+        d = exevft.dtor_pos([e.sym for e in ents[2:2 + n]], [e.word for e in ents[2:2 + n]])
         nm = n - 1 if d is not None else n
         slots = max((exev[v].slots for v in vs), key=len) if vs else []
         if any(exev[v].slots != slots[:len(exev[v].slots)] for v in vs):
