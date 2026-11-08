@@ -5983,6 +5983,10 @@ def r_vtable_dtor_slot(path, text, stats):
             if key in lst or (not c['bases'] and len(c['virtuals']) >= 2): stats['D22-COM'] += 1
             continue
         k = slots.get(c['qual'][-1])
+        if not k and c['first'] and _rawvt_exe_order().get(c['qual'][-1], set()) & D22_EXE_ORDER_REASONS:
+            # D22-EXEORDER (S2-bodies seamcheck V3 / V4): the link keeps this class's table in exe order, so its
+            # callers keep the exe's numbering
+            stats['D22-EXEORDER'] += 1; continue
         if k and c['first'] and not c['bases']:
             # D22-SLOTK: the exe's deleting destructor is at slot k (slot 0 a trivial function: the TESForm family,
             # k = 4): the k-th virtual, not the first, becomes `virtual ~C()`; nothing at slot 0
@@ -6000,9 +6004,23 @@ def r_vtable_dtor_slot(path, text, stats):
             done[c['qual'][-1] + ('<>' if c['template'] else '')] = t[2]
             stats['D22-SLOTK'] += 1
             continue
-        callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc'))) and \
-            not any(c['qual'][-1] in _d22_bases(o['bases']) and not _d22_defines_none(masked, o)
-                    for o in classes if o['bases'])
+        callonly = key not in lst and _d22_callonly(masked, c, path.endswith(('.cpp', '.c', '.cxx', '.cc')))
+        inline_dtor = False
+        if callonly:
+            blockers = [o for o in classes if o['bases'] and c['qual'][-1] in _d22_bases(o['bases'])
+                        and not _d22_defines_none(masked, o)]
+            if blockers:
+                # D22-INLINE (S2-bodies seamcheck V4: TerrainBase in hkpphysicssystem.cpp): a derived class of the file
+                # defines members, so its destructor would call the base's undefined `~C`. When no such class declares
+                # the placeholder member itself, the base takes an inline empty `virtual ~C() {}` under GCC
+                # (FNVNX_D22I): the derived destructors call it, the slots stay minus-one.
+                ph0 = c['first'][2]
+                if any(v[2] == ph0 for o in blockers for v in o['virtuals']) or \
+                        re.search(r'(?<![\w~])%s\s*\(' % re.escape(ph0),
+                                  ''.join(masked[o['open']:o['close']] for o in blockers)):
+                    callonly = False
+                else:
+                    inline_dtor = True
         if not callonly:
             if key not in lst or not c['first']: continue
             if c['bases'] or c['dtor'] or c['first'][2] not in lst[key]: continue
@@ -6016,15 +6034,17 @@ def r_vtable_dtor_slot(path, text, stats):
                     d22_placeholder(masked_nc[ph], c['qual'][-1], c['first'], vdecls[ph], rc)):
                 stats['D22-USED'] += 1; continue
             needs[ph].append(len(edits))
-        edits.append((c['first'][0], c['first'][1], 'FNVNX_D22(%s, %s)' % (c['qual'][-1], c['first'][3])))
+        edits.append((c['first'][0], c['first'][1], '%s(%s, %s)' % ('FNVNX_D22I' if inline_dtor else 'FNVNX_D22',
+                                                                       c['qual'][-1], c['first'][3])))
         applied[c['first'][0]] = (key, c['first'][2], 'callonly' if callonly else 'listed')
+        if inline_dtor: stats['D22-INLINE'] += 1
         if callonly and c['dtor']: dtor_drops[c['first'][0]] = c['dtor_decl']
         done[c['qual'][-1] + ('<>' if c['template'] else '')] = c['first'][2]
         stats['D22-CALLONLY' if callonly else 'D22'] += 1
     drop = set()
     for ph, idx in needs.items():
         # the calls are rewritten only when every class of the file that declares a virtual `ph` has it converted
-        conv = {edits[i][0] for i in range(len(edits)) if edits[i][2].startswith('FNVNX_D22(')}
+        conv = {edits[i][0] for i in range(len(edits)) if edits[i][2].startswith(('FNVNX_D22(', 'FNVNX_D22I('))}
         if all(v[0] in conv for cc in classes for v in cc['virtuals'] if v[2] == ph):
             for m in calls[ph]:
                 edits.append((m.start(2), m.end(), 'FNVNX_D22_CALL(%s, %s, %s);' % (text[m.start(2):m.end(2)], ph,
@@ -6035,13 +6055,13 @@ def r_vtable_dtor_slot(path, text, stats):
             stats['D22-USED'] += len(idx)
     if drop:
         for i in drop:
-            nm = re.match(r'FNVNX_D22\((\w+),', edits[i][2]).group(1)
+            nm = re.match(r'FNVNX_D22I?\((\w+),', edits[i][2]).group(1)
             done.pop(nm, None); done.pop(nm + '<>', None)
             stats['D22-CALLONLY'] -= 1
         edits = [e for i, e in enumerate(edits) if i not in drop]
     for e in list(edits):
         # D22-DTOR: the class's own body-less `~C();` goes under GCC (`virtual ~C()` declares it now)
-        if e[0] in dtor_drops and e[2].startswith('FNVNX_D22('):
+        if e[0] in dtor_drops and e[2].startswith(('FNVNX_D22(', 'FNVNX_D22I(')):
             a, b = dtor_drops[e[0]]
             edits.append((a, b, 'FNVNX_D22_DROP(%s)' % text[a:b]))
             stats['D22-DTOR'] += 1
@@ -6075,7 +6095,7 @@ def r_vtable_dtor_slot(path, text, stats):
     rel = path.replace('\\', '/')[i + 1:] if i >= 0 else os.path.basename(path)
     for a, b, rep in sorted(edits):
         if a < pos: continue
-        if a in applied and rep.startswith(('FNVNX_D22(', 'FNVNX_D22_DROP(')):
+        if a in applied and rep.startswith(('FNVNX_D22(', 'FNVNX_D22I(', 'FNVNX_D22_DROP(')):
             rec.append((rel,) + applied[a])
         out.append(text[pos:a]); out.append(rep + ' /* fnv-nx D22 */'); pos = b
     out.append(text[pos:])
@@ -6163,15 +6183,22 @@ def _rawvt_exe_order():
     top = os.environ.get('FNVNX_RECON')
     if top and os.path.isdir(top):
         files += sorted(os.path.join(dp, 'exe_order_classes.tsv') for dp, _, ns in os.walk(top) if 'exe_order_classes.tsv' in ns)
-    got = set()
+    got = {}
     for f in files:
         try:
             for line in open(f):
                 if line.startswith('#') or not line.strip(): continue
-                got.add(line.split('\t')[0].strip().split('::')[-1])
+                fs = line.rstrip('\n').split('\t')
+                if fs[0] in ('class',): continue                      # a header row
+                got.setdefault(fs[0].strip().split('::')[-1], set()).add(fs[2].strip() if len(fs) > 2 else '')
         except OSError: continue
     prepare.__dict__['_fnvnx_exe_order'] = got
     return got
+
+# reasons of exe_order_classes.tsv for which a declaration of that class must keep the exe's slot numbers (D22 / D26
+# do not convert it): the link keeps the table in exe order because slot 0 is a defined function (BSNiAllocator::
+# Destroy, TESLeveledList, ListBox<>, Tile3D...) or is not a destructor at all
+D22_EXE_ORDER_REASONS = {'defined-slot0', 'd26-slot0-not-a-destructor', 'd22-used', 'com'}
 
 def r_raw_vtable_slots(path, text, stats):
     """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above)."""

@@ -1837,8 +1837,11 @@ check('D26 call-only: one virtual only, a defined virtual, a base, a called plac
       run(s1.r_vtable_dtor_slot, _CO + 'void HeapStandIn::v1() {}\n') +
       run(s1.r_vtable_dtor_slot, _CO.replace('struct HeapStandIn\n', 'struct HeapStandIn : B\n')) +
       run(s1.r_vtable_dtor_slot, _CO + 'void g(HeapStandIn* h) { h->v0(); }\n') +
-      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v1() {}\n};\n'),
+      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v0() {}\n};\n'),
       [], ['FNVNX_D22'])
+check('D22-INLINE: a derived class that defines other members -> the base takes FNVNX_D22I (inline empty ~C)',
+      run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v1() {}\n};\n'),
+      ['FNVNX_D22I(HeapStandIn, virtual void v0();)'])
 check('D26 call-only: a derived class that defines none of its virtuals does not block it',
       run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    virtual void v1();\n};\n'),
       ['FNVNX_D22(HeapStandIn, virtual void v0();)'])
@@ -1964,6 +1967,14 @@ check('EMPTY1 a declared-only empty-string object -> FNVNX_EMPTY1(T, name)', run
 check('EMPTY1 not when the file defines it, or T has no const char* constructor',
       run(s1.r_empty_string_objects, _EM + 'const TagText TagEmpty("");\n') +
       run(s1.r_empty_string_objects, _EM.replace('TagText(const char*);', 'TagText(int);')), [], ['FNVNX_EMPTY1'])
+_eo2 = tempfile.mkdtemp(); open(os.path.join(_eo2, 'exe_order_classes.tsv'), 'w').write(
+    'class\tvftable\treason\tsymbol\nHeapStandIn\t0101cd04\tdefined-slot0\t_ZTV1X\nOther\t01\tmulti-vtable\t_ZTV1Y\n')
+os.environ['FNVNX_EXE_ORDER'] = os.path.join(_eo2, 'exe_order_classes.tsv'); prepare.__dict__['_fnvnx_exe_order'] = None
+check('D22-EXEORDER: a class the link keeps in exe order (defined-slot0) keeps its callers\' numbering',
+      run(s1.r_vtable_dtor_slot, _CO), [], ['FNVNX_D22'])
+check('D22-EXEORDER: ... another reason (multi-vtable) does not hold a class',
+      run(s1.r_vtable_dtor_slot, _CO.replace('HeapStandIn', 'Other')), ['FNVNX_D22(Other'])
+del os.environ['FNVNX_EXE_ORDER']; prepare.__dict__['_fnvnx_exe_order'] = None
 # S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
 _UQ = _CO + ('struct CVB\n{\n    virtual int v0(int p);\n    virtual int g(int p);\n};\n'
              'struct CVS : CVB\n{\n    int h(int p);\n};\nint CVS::h(int p) { return v0(p); }\n')
