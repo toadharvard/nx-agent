@@ -892,5 +892,109 @@ class HandVptrsTest(unittest.TestCase):
             self.assertNotIn("00401234", rows)
 
 
+class SanitizeTest(unittest.TestCase):
+    """emu_sanitize.py (emu_guest.py --alloc-check, --image-check): small Unicorn code tests"""
+    PTR = 0x40000010
+    CODE, MARK, STK = 0x10000, 0x11000, 0x20000
+    # movz w0,#0x4000,lsl 16 ; movk w0,#0x10 ; ret   /   ret
+    ALLOC = [0x52A80000, 0x72800200, 0xD65F03C0]
+    RET = [0xD65F03C0]
+
+    def emu(self, syms):
+        sys.path.insert(0, HERE)
+        import emu_guest
+        from unicorn import UC_ARCH_ARM64, UC_MODE_ARM, Uc
+        e = emu_guest.Emu.__new__(emu_guest.Emu)
+        e.uc = uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        uc.mem_map(self.CODE, 0x2000)
+        uc.mem_map(self.STK, 0x1000)
+        e.cur, e.relocatable, e.base, e.link_base, e.heap = None, False, 0, 0, 0x40000000
+        e.sym = lambda a: "%#x f_%x+0x0" % (a, a)
+        e.code_syms = {}
+        for i, (name, words) in enumerate(syms.items()):
+            at = self.CODE + 0x100 * i
+            uc.mem_write(at, b"".join(struct.pack("<I", w) for w in words))
+            e.code_syms[name] = at
+        uc.mem_write(self.MARK, struct.pack("<I", 0xD503201F) * 4)   # nop; the call returns here
+        return e
+
+    def call(self, e, name, x0=0):
+        from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_SP, UC_ARM64_REG_X0, UC_ARM64_REG_X29
+        uc = e.uc
+        uc.reg_write(UC_ARM64_REG_X0, x0)
+        uc.reg_write(UC_ARM64_REG_X29, 0)
+        uc.reg_write(UC_ARM64_REG_SP, self.STK + 0x800)
+        uc.reg_write(UC_ARM64_REG_LR, self.MARK)
+        uc.emu_start(e.code_syms[name], self.MARK + 4)
+        return uc.reg_read(UC_ARM64_REG_X0)
+
+    def alloc_emu(self):
+        e = self.emu({"malloc": self.ALLOC, "free": self.RET, "_ZdlPv": self.RET})
+        e.install_alloc_check()
+        self.assertEqual(self.call(e, "malloc", 16), self.PTR)
+        return e
+
+    def test_mismatched_free(self):
+        e = self.alloc_emu()
+        self.call(e, "_ZdlPv", self.PTR)   # malloc'd, freed by operator delete
+        row = e.alloc_lines()[0].split("\t")
+        self.assertEqual(row[:5], ["alloc-check", "mismatch", "new:_ZdlPv", "libc:malloc", "0x40000010"])
+        self.assertEqual(e.alloc_lines()[1].split("\t")[:3], ["alloc-check-summary", "1", "mismatch"])
+        self.call(e, "free", 0)   # a null free is fine
+        self.assertEqual(len([l for l in e.alloc_lines() if l.startswith("alloc-check\t")]), 1)
+
+    def test_double_free_and_unknown(self):
+        e = self.alloc_emu()
+        self.call(e, "free", self.PTR)
+        self.assertEqual([l for l in e.alloc_lines() if l.startswith("alloc-check\t")], [])
+        self.call(e, "free", self.PTR)
+        self.call(e, "free", 0x40000999)   # in the heap, never allocated
+        self.call(e, "free", 0x1234)       # not in the heap
+        kinds = [l.split("\t")[1] for l in e.alloc_lines() if l.startswith("alloc-check\t")]
+        self.assertEqual(kinds, ["double-free", "unknown-block", "non-heap"])
+        self.assertIn("first freed by libc:free", e.alloc_lines()[0])
+
+    def test_nested_alloc_keeps_outer_family(self):
+        # operator new calls malloc by bl: the block belongs to new
+        from unicorn.arm64_const import UC_ARM64_REG_LR
+        e = self.emu({"_Znwm": [0xA9BF7BFD, 0x94000000 | 0x3FC0, 0xA8C17BFD, 0xD65F03C0],   # stp x29,x30,[sp,-16]!; bl +0xFF00 (patched); ldp; ret
+                      "malloc": self.ALLOC, "_ZdlPv": self.RET})
+        disp = (e.code_syms["malloc"] - (e.code_syms["_Znwm"] + 4)) >> 2
+        e.uc.mem_write(e.code_syms["_Znwm"] + 4, struct.pack("<I", 0x94000000 | disp & 0x3FFFFFF))
+        e.install_alloc_check()
+        self.assertEqual(self.call(e, "_Znwm", 8), self.PTR)
+        self.call(e, "_ZdlPv", self.PTR)
+        self.assertEqual([l for l in e.alloc_lines() if l.startswith("alloc-check\t")], [])
+
+    def image_emu(self):
+        e = self.emu({})
+        e.set_image_ranges(0x400000, 0x1200000, [(".text", 0x401000, 0x900000, True), (".rdata", 0x900000, 0xA00000, False),
+                                                  (".data", 0xA00000, 0x1200000, False)], {0x401234: "_Z3foov"})
+        e.uc.hook_add(__import__("unicorn").UC_HOOK_MEM_INVALID, e.on_bad)
+        return e
+
+    def fault(self, e, word, x1):
+        from unicorn import UcError
+        from unicorn.arm64_const import UC_ARM64_REG_X1
+        e.uc.mem_write(self.CODE, struct.pack("<I", word))
+        e.uc.reg_write(UC_ARM64_REG_X1, x1)
+        with self.assertRaises(UcError):
+            e.uc.emu_start(self.CODE, self.CODE + 4)
+
+    def test_image_check_classifies(self):
+        e = self.image_emu()
+        self.fault(e, 0xD63F0020, 0x401234)   # blr x1: an unrelocated code pointer
+        self.fault(e, 0xD63F0020, 0x3000)     # blr x1: an RVA (0x3000 + 0x400000 is .text)
+        self.fault(e, 0xB9400022, 0x500000)   # ldr w2,[x1]: code read as data
+        self.fault(e, 0xB9000022, 0x500000)   # str w2,[x1]
+        self.fault(e, 0xB9400022, 0x400800)   # the headers: no section
+        self.fault(e, 0xB9400022, 0x7000000)  # beyond the image: not the image's
+        rows = [l.split("\t") for l in e.image_lines() if l.startswith("image-check\t")]
+        self.assertEqual([r[1] for r in rows], ["fetch-text", "rva-as-address", "code-read", "code-write", "no-section"])
+        self.assertEqual(rows[0][2:4], ["0x00401234", ".text"])
+        self.assertEqual(rows[0][-1], "native=_Z3foov")
+        self.assertEqual(rows[1][2], "0x00003000")
+
+
 if __name__ == "__main__":
     unittest.main()
