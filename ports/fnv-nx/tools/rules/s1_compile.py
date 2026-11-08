@@ -1681,6 +1681,8 @@ INT32_TYPES = re.compile(r'^(?:const\s+|volatile\s+)*(?:(?:signed|unsigned)(?:\s
                          r'unsigned\s+long\s+int|__int32|size_t|DWORD|UINT|INT|LONG|ULONG|BOOL)(?:\s+const)?$')
 _UNIT_SYMBOLS = None
 
+_UNIT_PLACED = {}   # absolute unit source -> the decorated names its units.json `functions` place (_unit_symbols)
+
 def _unit_symbols(path):
     """{absolute unit source: {decorated name: address}}"""
     global _UNIT_SYMBOLS
@@ -1689,8 +1691,11 @@ def _unit_symbols(path):
         _UNIT_SYMBOLS = {}
         root, uj = prepare._units_json(path)
         if uj:
+            _UNIT_PLACED.clear()
             for u in json.load(open(uj))['units']:
                 _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = dict(u.get('symbols', {}))
+                _UNIT_PLACED[os.path.normpath(os.path.join(root, u['source']))] = {
+                    f['symbol'] for f in u.get('functions') or () if f.get('symbol')}
             # BIND1's rows (a POST hook on units.json): the source rules see the bindings the link will have
             for src, name, addr in BIND1_REFS + sorted(VLIT1_BINDS):
                 k = os.path.normpath(os.path.join(root, src))
@@ -3506,6 +3511,10 @@ def _stand_ins(path, text, stats, which):
         else: prefix = '?' + '@'.join([name] + scope) + '@@'
         if which == 'STAND1':
             if not any(k.startswith(prefix) and int(a, 16) in tagged for k, a in syms.items()): continue
+            # the unit's own recipe places this name: it is the function, whatever carries the tag (R2: caravanmenu
+            # 0x0073b730, the tag sits on TESCaravanCard::FUN_0073b730_card, units.json places NPCHandArrayInfo's)
+            if any(k.startswith(prefix) for k in _UNIT_PLACED.get(os.path.normpath(os.path.abspath(path)), ())):
+                continue
         else:
             bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
             if not (bound and all(a in elsewhere and a not in tagged for a in bound)): continue
