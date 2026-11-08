@@ -84,7 +84,8 @@ in this order (first that applies):
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
    placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing), and
    the decomp's `basic_streambuf` copies' `_Lock()` / `_Unlock()` (CRT_MUTEX: `this + 4` is the std::_Mutex, S4's
-   fnvnx_mutex_lock / unlock).
+   fnvnx_mutex_lock / unlock), and the facet copies' `_Register()` / static `_Register(facet*)` (CRT_FACET: S4's
+   fnvnx_facet_register, MSVC's _Facet_Register at 0x00ec3599).
    After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
 
@@ -634,6 +635,13 @@ CRT_THROW = {'_Xlen': ('_ZSt20__throw_length_errorPKc', '%s too long'),
 # two members and never define them (their `void* streamLock` is that first word).
 CRT_MUTEX = {'_Lock': 'fnvnx_mutex_lock', '_Unlock': 'fnvnx_mutex_unlock'}
 
+# MSVC's locale::facet::_Register() is `_Facet_Register(this)`: the facet goes on the list the CRT frees at exit
+# (0x00ec3599, crt_symbols.tsv: std::locale::facet::_Facet_Register, S4's fnvnx_facet_register(void *facet)). The
+# decomp's facet copies declare it as a static `_Register(facet*)` (blk_00ac0000_od_ob1_variant.cpp's
+# `fnv_00acfab0::facet`, called as `facet::_Register(_Pfmod)` in use_facet) or as the member `_Register()`, and define
+# neither. Either way the facet is the first argument (x0): a tail call.
+CRT_FACET = 'fnvnx_facet_register'
+
 
 def crt_rule(isig):
     """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('mutex', platform function, 'this + 4') for a
@@ -650,6 +658,9 @@ def crt_rule(isig):
         return ('ret', None, None)
     if last in CRT_MUTEX and not isig.params and re.match(r'basic_streambuf\b', isig.qual[-2]):
         return ('mutex', CRT_MUTEX[last], 'this + 4')
+    if last == '_Register' and isig.qual[-2] == 'facet' and (
+            not isig.params or (len(isig.params) == 1 and re.fullmatch(r'(?:\w+::)*facet\s*\*', isig.params[0].strip()))):
+        return ('facet', CRT_FACET, 'the facet')
     return None
 
 
@@ -661,6 +672,7 @@ def crt_pass(rows, itanium):
         if k:
             r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
                            else '%s(%s): the _Mutex member at +4' % (k[1], k[2]) if k[0] == 'mutex'
+                           else '%s(%s): MSVC\'s _Facet_Register' % (k[1], k[2]) if k[0] == 'facet'
                            else 'placement delete: ret')
         out.append(r)
     return out
@@ -678,6 +690,8 @@ def emit_crt(rows, itanium):
             out += ['    ret']
         elif kind == 'mutex':
             out += ['    add x0, x0, #4', '    b ' + fn]
+        elif kind == 'facet':
+            out += ['    b ' + fn]
         else:
             out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]
         out += ['    .size %s, .-%s' % (q, q)]
@@ -1113,6 +1127,15 @@ def member_inst_hosts(tree, rows, itanium, unit_sources, ref_units, shim=None, l
         if cand:
             out[n] = sorted(cand, key=lambda u: (len(clo[u]), u))[:limit]
     return out
+
+def msvc_inline_retry(rows, failed):
+    """msvc-inline names whose host compiled but emitted nothing under the wanted name: tree-inline tries them next,
+    across the copies of the class (copy_key, through the layout gate). W44: the pristine u99 object
+    (tileimage_decl_variant.cpp) defines MSVC's `basic_string<char>::erase(unsigned, unsigned)`, and that unit emits
+    it only for its own copy `fnv_00b0e730::std::basic_string`; blk_00b00000_od_ob1_variant.cpp references the
+    global `std::basic_string` copy's and `fnv_00b0f410::std::basic_string`'s, declared there and defined nowhere."""
+    return {r.name for r in rows if r.cls == 'msvc-inline' and
+            failed.get(r.name, '').startswith('synth-failed (not emitted')}
 
 
 def inst_pointees(isig):
@@ -2454,8 +2477,9 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
         # body is still its body: tree-inline takes it, gated like a copy pair (strict)
         T.mark('vcall')
         direct = {n for n, why in failed.items() if why == VCALL_DIRECT}
-        vdone = set(vtargets) | (set(failed) - direct) | set(vnotes)
-        rest = [r for r in rows if r.cls == 'missing' and r.name not in vdone and r.units]
+        inl_retry = msvc_inline_retry(rows, failed)
+        vdone = set(vtargets) | (set(failed) - direct - inl_retry) | set(vnotes)
+        rest = [r for r in rows if (r.cls == 'missing' or r.name in inl_retry) and r.name not in vdone and r.units]
         tin = tree_inline_hosts(tree, rest, itanium, set(unit_names), load_layouts(out))
         # a class template's destructor no object instantiates (the pointee is incomplete where it is referenced): the
         # template's own body, explicitly instantiated in a unit that names the arguments (inst_hosts)
@@ -2475,7 +2499,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
             tin[n_] = hs_ + [h_ for h_ in tin.get(n_, []) if h_ not in hs_]
         # tree-inline's pairings across units pass the layout gate: names MSVC calls directly, constructors and
         # destructors (found since the search spells them by the class name), and every copy-key rename
-        strict = direct | {n for n in tin if itanium(n).variant} | set(mih)
+        strict = direct | inl_retry | {n for n in tin if itanium(n).variant} | set(mih)
 
         def tone(job):
             h, rs, k = job
