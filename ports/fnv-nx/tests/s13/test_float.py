@@ -5,9 +5,9 @@ harness artifacts or the compilers' evaluation methods, on hand-written code (no
   consumers  x86emu.x87_result_use: the code a call returns to reads ST0 through a `jmp` to the shared epilogue
              (`return virtual_call()`, 0x0086a050) or through fidiv / fistp / fcomip / fucomp / ftst / fsqrt (0x00893530
              `fidiv dword [ebp-4]`); before, the oracle read an empty x87 stack (0.0) where the native has the canned bytes
-  overlap    world.World: pinned literals that overlap (units.json maps several $SG strings of an object to one
-             address, so a 64-byte wrong string covered the __real@ constants behind it, 0x00476b20) - the shorter
-             one is written last and wins
+  overlap    coffobj.exe_literals: a pinned literal that differs from the exe at its address (units.json maps
+             several $SG strings of an object to one address, so a 64-byte wrong string covered the __real@ constants
+             behind it, 0x00476b20) is replaced by the exe's bytes, the union of overlapping ones too; no exe, no change
   boolfloat  classify.hint: a float result that depends on a bool byte other than 0/1 is bool-repr, not float
              (0x008786b0: GCC tests bit 0, MSVC the byte); before, the float branch returned before the probe
   precision  classify.x87_probes: the oracle rerun with the x87 control word at 24-bit precision agrees with the
@@ -77,17 +77,40 @@ def test_consumers():
         check(got == want, '%s: %s (want %s)' % (what, got, want))
 
 
+class FakeExe:
+    def __init__(self, mem):
+        self.mem = mem
+
+    def read(self, va, n):
+        return bytes(self.mem[va + k] for k in range(n))     # KeyError outside the image
+
+
 def test_overlap():
+    import coffobj
     base = 0x01012058
-    pinned = {base + 8: struct.pack('<d', 0.0), base + 24: struct.pack('<d', 1.0),
-              base: b'Interface\\Icons\\Message Icons\\glow_message_vaultboy_neutral.dds\0'}    # wrong, longer, last
-    w = world.World(world.Case(seed=1), {}, pinned)
-    got = w.initial(base + 24, 8)
-    check(got == struct.pack('<d', 1.0), '1.0 behind the longer string survives: %s' % got.hex())
-    check(w.initial(base + 8, 8) == bytes(8), '0.0 inside the string survives')
-    check(w.initial(base, 8) == b'Interfac', 'the string keeps the bytes the constants do not cover')
-    w2 = world.World(world.Case(seed=1), {}, {0x01012002: b'XY', 0x01012000: b'abcdef'})
-    check(w2.initial(0x01012000, 6) == b'abXYef', 'a short literal inside a long one wins')
+    exe = FakeExe({base + k: v for k, v in enumerate(b'%s %s\0\0\0' + struct.pack('<d', 0.0) + bytes(8) +
+                                                       struct.pack('<d', 1.0) + bytes(64))})
+    wrong = b'Interface\\Icons\\Message Icons\\glow_message_vaultboy_neutral.dds\0'
+    lit = {base: wrong, base + 8: struct.pack('<d', 0.0), base + 24: struct.pack('<d', 1.0), 0x02f00000: b'pool'}
+    stats = {}
+    got = coffobj.exe_literals(lit, exe, stats)
+    check(got[base] == exe.read(base, len(got[base])) and got[base][24:32] == struct.pack('<d', 1.0), 'overlapping literals: the exe bytes over their union')
+    check(got[0x02f00000] == b'pool' and stats['overlap'] == 1 and stats['differ'] == 1,
+          'the pool literal stays, one group, one literal differs (%s)' % stats)
+    lit2 = {0x01012000: b'good', 0x01012010: b'bad!'}
+    exe2 = FakeExe({0x01012000 + k: v for k, v in enumerate(b'good' + bytes(12) + b'real')})
+    got = coffobj.exe_literals(lit2, exe2, {})
+    st2 = {}
+    got = coffobj.exe_literals(lit2, exe2, st2)
+    check(got == lit2 and st2['differ'] == 1, 'a lone literal that differs from the exe is counted, not replaced')
+    got = coffobj.exe_literals({0x01012000: b'good', 0x01013000: b'x'}, exe2, {})
+    check(got[0x01013000] == b'x', 'an address the exe does not map keeps the literal')
+    saved, saved_tried = coffobj.EXE, coffobj._EXE_TRIED
+    coffobj.EXE, coffobj._EXE_TRIED = None, True
+    try:
+        check(coffobj.exe_literals(lit) is lit, 'without the exe image nothing changes')
+    finally:
+        coffobj.EXE, coffobj._EXE_TRIED = saved, saved_tried
 
 
 def run_hint(sym, oracle, body, args, mem=None):

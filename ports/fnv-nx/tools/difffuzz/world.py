@@ -165,10 +165,7 @@ class World:
     def _overlay_pages(self):
         if self._ov is None:
             ov = {}
-            # a pinned literal laid over another one (units.json maps several $SG strings of one object to the same
-            # address, so a longer wrong string overlapped the __real@ constants behind it, 0x00476b20): the shorter,
-            # exact one is written last and wins
-            pinned = sorted(self.pinned.items(), key=lambda kv: -len(kv[1]))
+            pinned = self.pinned.items()
             for src in (self.text_code.items(), self.case.mem.items(), pinned):
                 for a, b in src:
                     for p in range(page_of(a), a + len(b), PAGE):
