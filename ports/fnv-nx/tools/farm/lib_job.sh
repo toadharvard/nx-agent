@@ -129,7 +129,8 @@ job_inputs() {   # job_inputs <dir>: the prepare farm's tree of COMMIT and the c
 	mkdir -p "$d"
 	TREE=${FARM_TREE:-}; NOTE_TREE="local tree $TREE"; OBJ_COMMIT=""
 	if [ -z "$TREE" ]; then
-		if th=$(bash "$P/tools/farm/fetch_tree.sh" "$COMMIT" "$d/tree" "${FARM_TREE_WAIT:-1800}" 2>"$d/fetch_tree.log"); then
+		# only a tree prepared with this job's recon set (recon.sh's RECON_ID, when the job fetched it)
+		if th=$(FETCH_TREE_RECON=${RECON_ID-} bash "$P/tools/farm/fetch_tree.sh" "$COMMIT" "$d/tree" "${FARM_TREE_WAIT:-1800}" 2>"$d/fetch_tree.log"); then
 			TREE=$d/tree
 			# fetch_tree.sh takes t/<commit12>, or the rolling tree when its commit has the same prepare inputs
 			ref=refs/remotes/origin/t/$C12
@@ -396,11 +397,13 @@ except (OSError, ValueError):
 t = os.path.join(d, 'tree')      # prepared here (an adopted PREPARED= tree came from the artifacts repository)
 if r.get('status') in ('ok', 'warn') and pf.get('port_commit') == commit and not pf.get('port_dirty') and \
         str(pf.get('mode', '')).startswith('prepare.py') and os.path.isfile(os.path.join(t, 'build', 'units.json')):
-    print(t + '\t' + str(pf.get('decomp_commit') or 'unknown'))
+    print(t + '\t' + str(pf.get('decomp_commit') or 'unknown') + '\t' + str(pf.get('recon') or ''))
 EOF
 )
 	[ -n "$tr" ] || { NOTE_TREEPUB="not published: no prepared tree of $C12 in the build"; return 0; }
-	dc=${tr#*$'\t'}; tr=${tr%%$'\t'*}
+	tr=${tr%$'\t'*}; dc=${tr#*$'\t'}; tr=${tr%%$'\t'*}
+	# the recon set as recon.sh names it (RECON_ID: prepare_job.sh's meta.json and fetch_tree.sh compare that id)
+	rc_id=${RECON_ID-}
 	th=$(bash "$P/tools/farm/tree_hash.sh" "$tr")
 	set +e
 	(
@@ -422,8 +425,8 @@ EOF
 		rm -rf tree meta.json prepare.log
 		mkdir -p tree; rsync -rc --delete --exclude "*.o" "$tr/" tree/
 		cp "$bd/prepare/stage.log" prepare.log 2>/dev/null || echo "prepared by full_job (pipeline)" > prepare.log
-		printf '{"commit": "%s", "decomp_commit": "%s", "tree_hash": "%s", "reused": 0, "from": "full_job"}\n' \
-			"$COMMIT" "$dc" "$th" > meta.json
+		printf '{"commit": "%s", "decomp_commit": "%s", "tree_hash": "%s", "reused": 0, "from": "full_job", "recon": "%s"}\n' \
+			"$COMMIT" "$dc" "$th" "$rc_id" > meta.json
 		git add -f -A tree meta.json prepare.log
 		if git rev-parse -q --verify refs/remotes/origin/tree > /dev/null; then git reset -q --soft refs/remotes/origin/tree; fi
 		git -c user.name=fnv-nx-farm -c user.email=farm@invalid commit -qm "$C12 tree $th (full_job)" || true
