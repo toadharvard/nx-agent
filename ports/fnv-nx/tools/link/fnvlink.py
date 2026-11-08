@@ -1658,7 +1658,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         d22_listed = set(d22_listed) | d22_applied
         ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
                                 exe_path, providers, exe_alt, msvc, d22_listed,
-                                lambda c_: code_refs([u.obj for u in have], c_))
+                                lambda c_: code_refs([u.obj for u in have], c_), unbound=unbound)
         vstats['d22-list-files'] = d22_files
         vstats['d22-list-vftables'] = len(d22_listed)
         for k_, n_ in ext.items():
@@ -3455,7 +3455,7 @@ def code_refs(objpaths, cands):
 
 
 def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
-                      providers=None, alt=None, msvc=None, listed=None, called_fn=None):
+                      providers=None, alt=None, msvc=None, listed=None, called_fn=None, unbound=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
     kept object has them (its slot symbols renamed as resolve renames them in that object), then exe slot j for every
     j past the native slots (the minus-one rule): `__fnv_<a>` where the address map has a plain native definition,
@@ -3466,7 +3466,12 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     move) whose words are plain or ABS32 relocations against global symbols. Callers reach the extra slots through
     their own class's declaration, as the image vftable word would take them. The same copy carries the per-slot
     targets of exe_slot_fill (slot_over: one symbol whose vtables in an object disagree on the exe address), for the
-    kept copy of the group (the first in link order), secondary vtables included. Returns the counts."""
+    kept copy of the group (the first in link order), secondary vtables included. A word that still names a symbol
+    the unit leaves undefined (unbound: extern-text addresses nothing defines, the exe slot fill left it: BaseFormComponent's
+    Init / CopyFromBase / CompareWithBase, whose recipe addresses lie inside FUN_00402d30) takes the exe slot's word
+    (exe_slot_target: S4's `_purecall` where the exe slot is the CRT's pure virtual, `__fnv_<a>` of a native
+    definition, else a trap stub reporting the exe address) when the exe vftables the group stands for agree on it
+    (`xt-slots`). Returns the counts."""
     st = collections.Counter()
     slotfill2.shift_reset(out)   # S2c-vt2: no shifted secondary groups yet (vtshift.tsv)
     by_obj = {u.obj: u for u in have}
@@ -3523,7 +3528,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         n = vtables.slots_at(ents, 8)
         ren = per_obj.get(u.source) or {}
         names = [ren.get(e.sym, e.sym) if e.sym else None for e in ents]
-        ov = over.get((z, path), {})
+        ov = dict(over.get((z, path), {}))
         se = names[2:2 + n]
         # the pair is looked for on the object's own symbols: after resolve's renames D1 and D0 can both be one
         # native body (FUN_00404da0 for ~SettingPointerMap), which hid the pair and lost exe slot 1 (S5 round 5)
@@ -3554,11 +3559,20 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 if pair1 is None:
                     st['d26-slot0-not-a-destructor'] += 1
                     m1 = None
+        xs = {}   # word index -> exe slot word, for the symbols the unit leaves undefined (see the docstring)
+        xt_ = (unbound or {}).get(u.source) or ()
+        for k_ in range(n if slots and xt_ else 0):
+            e_ = ents[2 + k_]
+            if e_.sym and e_.sym in xt_ and e_.sym not in ren and e_.sym.startswith('_ZN') and (2 + k_) not in ov \
+                    and sigs.itanium_variant(e_.sym) is None:
+                j_ = exevft.exe_slot_index(k_, d)
+                if j_ < len(slots):
+                    xs[2 + k_] = slots[j_]
         shift = slotfill2.shift_plan(z, pts, n, nm, slots, out, have, st) if extend and len(pts) != 1 else None
         if extend and len(pts) != 1 and not shift:   # S2c-vt2: shifted secondary groups (slotfill2.shift_plan)
             st['skipped-secondary-vtables'] += 1
             extend = False
-        if not extend and not ov and not d0w and not m1:
+        if not extend and not ov and not d0w and not m1 and not xs:
             continue
         if o.bind(z) != 'weak':   # a key function's unit: its strong copy would be a second definition
             st['skipped-strong'] += 1
@@ -3566,6 +3580,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
             continue
         for i, t in ov.items():
             names[i] = t
+        for i, a_ in xs.items():
+            names[i] = exe_slot_target(a_, native, providers, exe_path, bridges, traps, st, (z, i), off=None)
+            st['xt-slots'] += 1
         bad = None
         for e, nmz in zip(ents, names):
             if e.sym is None:
@@ -3619,7 +3636,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 vmap[v] = (z_, slotfill2.shifted(ap_, shift), VTEXT_OBJ, note_ + (', extended from the exe (+%d slots)' % len(extra) if extra
                                                         else ', slots per use from the exe'))
         rows.append((z, os.path.basename(path), str(n), str(len(extra)), ' '.join('%08x' % v for v in sorted(vs)),
-                     str(len(ov))))
+                     str(len(ov) + len(xs))))
     with open(os.path.join(out, 'vtext.tsv'), 'w', encoding='utf-8', errors='surrogateescape') as f:
         f.write('#vtable\tobject the words came from\tnative slots\tslots added\texe vftables\tslots per use\n')
         for r in rows:

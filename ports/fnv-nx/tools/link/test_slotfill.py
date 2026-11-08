@@ -91,6 +91,10 @@ struct EgS { void FUN_00401190(); int w; };          // the destroy body at 0x40
 struct Ct { Ct(); int v; };                          // an MSVC constructor returns this
 struct CtShell { void *FUN_00401130(); };             // a unit that calls it for its result
 struct Pv { inline virtual int pa(); inline virtual int pb(); int pz; };   // defined nowhere; the recipe places both mid-function
+struct Bf { inline virtual int bi(); inline virtual int bc(); int bz; };   // BaseFormComponent: defined nowhere, pure in the exe
+struct Bd1 : Bf { int z1; };   // inherit both: the exe's vftables hold other functions (Bd1, Bd2) than each other's
+struct Bd2 : Bf { int z2; };
+struct Bd3 : Bf { int z3; };   // bi's exe body is compiled by no unit: the exe slot still decides (a trap stub), never an undefined name
 struct Bi { void Free(void *); };   // the recipe's `__imp_?Free@Bi@@..` sits on a slot of an exe vftable
 struct S1 { virtual int s1(); int a; };
 struct S2 { virtual int s2(); int b; };          // s2 defined nowhere
@@ -119,7 +123,7 @@ SRC = {'src/a.cpp': '#include "h.h"\nVb::~Vb() {}\nint Vb::a() { return 1; }\nin
                     'int call_thk(ThkUse *p) { return p->FUN_00401110(); }\n'
                     'Nv::~Nv() { q = 0; }\nvoid game_free(void *p) { g_q = p != 0; }\n'
                     'void *call_nv(NvUse *p) { return p->FUN_00401160(1); }\n'
-                    'Pv *mk_pv() { return new Pv; }\nvoid call_bi(Bi *p) { p->Free(0); }\n'
+                    'Pv *mk_pv() { return new Pv; }\nBd1 *mk_b1() { return new Bd1; }\nBd2 *mk_b2() { return new Bd2; }\nBd3 *mk_b3() { return new Bd3; }\nvoid call_bi(Bi *p) { p->Free(0); }\n'
                     'int Vu::u0() { return 10; }\nint Vu::u1() { return 11; }\nVu *mk_vu() { return new Vu; }\n'
                     'inline int Vc::c0() { return Vc::hc(); }\ninline int Vc::c1() { return 12; }\nVc *mk_vc() { return new Vc; }\n'
                     'int Shell::implw() { return 16; }\nint Wh::w1() { return 17; }\nint Wh::w0() { return 13; }\nint Wd::w0() { return 14; }\nWh *mk_wh() { return new Wh; }\nWd *mk_wd() { return new Wd; }\n'
@@ -143,7 +147,7 @@ def run(cmd, **kw):
 
 def build_exe(rd, where):
     td = {n: rd.put(struct.pack('<II', 0x0101d000, 0) + n.encode() + b'\0')
-          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@', '.?AVVh@@', '.?AVVu@@', '.?AVVc@@', '.?AVWh@@', '.?AVWd@@')}
+          for n in ('.?AVVb@@', '.?AVDer@@', '.?AVVd@@', '.?AVVp@@', '.?AVSh@@', '.?AVVk@@', '.?AUM@@', '.?AVPv@@', '.?AVVi@@', '.?AVVh@@', '.?AVVu@@', '.?AVVc@@', '.?AVWh@@', '.?AVWd@@', '.?AVBf@@', '.?AVBd1@@', '.?AVBd2@@', '.?AVBd3@@')}
 
     def chd(names):
         bs = [rd.words(td[n], 0, 0, 0xffffffff, 0, 0x40, 0) for n in names]
@@ -177,6 +181,11 @@ def build_exe(rd, where):
     # Vu, Vc: u0 / c0, then Shell::implh (0x4011a8); the unit's own units.json entry names hu and hc as Shell::impl's
     where['Vu'] = vft('.?AVVu@@', chd(['.?AVVu@@']), [0x4011c0, 0x4011d0, 0x4011a8])
     where['Vc'] = vft('.?AVVc@@', chd(['.?AVVc@@']), [0x4011c8, 0x4011d8, 0x4011a8])
+    # Bf: both virtuals pure; Bd1 / Bd2 (derived, inheriting both names) hold real functions, different per class
+    where['Bf'] = vft('.?AVBf@@', chd(['.?AVBf@@']), [0x4010e0, 0x4010e0])
+    where['Bd1'] = vft('.?AVBd1@@', chd(['.?AVBd1@@', '.?AVBf@@']), [0x401020, 0x401028])
+    where['Bd2'] = vft('.?AVBd2@@', chd(['.?AVBd2@@', '.?AVBf@@']), [0x401010, 0x4011a8])
+    where['Bd3'] = vft('.?AVBd3@@', chd(['.?AVBd3@@', '.?AVBf@@']), [0x401060, 0x401020])
     hm = chd(['.?AUM@@'])
     where['M'] = vft('.?AUM@@', hm, [0x401120])
     col = rd.words(0, 8, 0, td['.?AUM@@'], hm)   # M's vftable {for S2} at +8: an adjustor thunk at 0x401110
@@ -239,7 +248,9 @@ def main():
                          '?FUN_00401130@CtShell@@QAEPAXXZ': '0x00401130', '??_GDd@@QAEPAXI@Z': '0x00401140',
                          '?FUN_00401110@ThkUse@@QAEHXZ': '0x00401110', '?FUN_00401160@NvUse@@QAEPAXI@Z': '0x00401160',
                          '??3@YAXPAX@Z': '0x00401170', '??_7Pv@@6B@': '0x%08x' % where['Pv'],
-                         '?pa@Pv@@UAEHXZ': '0x004010e8', '?pb@Pv@@UAEHXZ': '0x004010ec',
+                         '??_7Bf@@6B@': '0x%08x' % where['Bf'], '??_7Bd1@@6B@': '0x%08x' % where['Bd1'],
+                         '??_7Bd2@@6B@': '0x%08x' % where['Bd2'], '??_7Bd3@@6B@': '0x%08x' % where['Bd3'], '?bi@Bf@@UAEHXZ': '0x00401022',
+                         '?bc@Bf@@UAEHXZ': '0x00401029', '?pa@Pv@@UAEHXZ': '0x004010e8', '?pb@Pv@@UAEHXZ': '0x004010ec',
                          '__imp_?Free@Bi@@QAEXPAX@Z': '0x%08x' % where['Vi'], '??_7Vh@@6B@': '0x%08x' % where['Vh'],
                          '??_7Wh@@6B@': '0x%08x' % where['Wh'], '??_7Wd@@6B@': '0x%08x' % where['Wd'],
                          '??_7Vu@@6B@': '0x%08x' % where['Vu'], '?hu@Vu@@UAEHXZ': '0x00401020',
@@ -342,6 +353,19 @@ def main():
               rpb is not None and rpb[2] == 'vslot-exe' and rpb[5] == '__fnv_00401020',
               'Pv::pa / pb (extern-text: the recipe\'s addresses lie inside other functions) -> the exe slots: '
               '_purecall provider, Shell::impl: %s %s' % (rpa, rpb))
+        # Bf::bi / bc (extern-text, defined nowhere, pure in Bf's own exe vftable): the derived classes inherit both and
+        # the exe holds real functions in their vftables, different per class. Bd1, Bd2: the per-slot targets; Bd3's
+        # slot 0 is a body no unit compiles, so the fill leaves it and the copy takes the exe slot (a trap stub)
+        import re as re_
+        blk = lambda z_: (re_.search(r'%s:\n((?:    \.word [^\n]*\n)+)' % z_, bridges_) or [None, ''])[1].split('\n')  # noqa: E731
+        w1, w2, w3 = blk('_ZTV3Bd1'), blk('_ZTV3Bd2'), blk('_ZTV3Bd3')
+        check(any('__fnv_00401020' in x for x in w1[2:3]) and any('__fnv_00401028' in x for x in w1[3:4]) and
+              any('__fnv_00401010' in x for x in w2[2:3]) and any('__fnv_004011a8' in x for x in w2[3:4]),
+              'Bd1 / Bd2: Bf::bi and bc take the exe functions of each class (per slot): %s %s' % (w1, w2))
+        check(len(w3) > 3 and 'vtrap' in w3[2] and '__fnv_00401020' in w3[3] and
+              all('_ZN2Bf2' not in x for x in w3),
+              'Bd3: Bf::bi (the exe body no unit compiles) -> a trap stub for the exe address, Bf::bc -> the exe '
+              'function; no undefined Bf name is left in the copy: %s' % (w3,))
         rbi = refs.get('_ZN2Bi4FreeEPv')
         check(rbi is not None and rbi[2] == 'code' and rbi[5] == '__fnvnx_vthis_004010f8' and
               '__fnvnx_vthis_004010f8:\n    movz x0, #0x0\n    movk x0, #0x50, lsl #16\n    b __fnv_004010f0' in bridges_,
@@ -440,9 +464,11 @@ def main():
         st = vtmetric.measure(_link_dir(t, out, fixed), exe)
         # W19: the fixture's unreferenced RTTI vftable 0x00fdf38c (exe slot 0 not a destructor, one slot) now has a
         # minus-one copy and a V row: its D1 and its slot 0 are traps (one with a native at the exe slot), +2
-        check(st['trap-slots'] == 9 and st['trap-native-at-exe'] == 3 and st['primary-shorter'] == 0,
-              'vtmetric: 9 trap slots left (Sh\'s extension holds one, the unreferenced vftable\'s copy two), 3 with a '
-              'native at the exe slot, no short primary (%s)' % dict(st))
+        # Bf's own exe vftable (pure slots) is unreferenced too: its minus-one copy's slot 0 is a trap with a native at
+        # the exe address (the fixture's 0x4010e0 is also Vk::kp's), and Bd3's slot 0 the exe body no unit compiles
+        check(st['trap-slots'] == 11 and st['trap-native-at-exe'] == 4 and st['primary-shorter'] == 0,
+              'vtmetric: 11 trap slots left (Sh\'s extension holds one, the unreferenced vftables\' copies three, '
+              'Bd3\'s slot 0), 4 with a native at the exe slot, no short primary (%s)' % dict(st))
         check(st['slot-mismatch'] == 0 and st['slot-compared'] >= 1,
               'vtmetric: no native slot differs from the exe\'s function (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)

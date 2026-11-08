@@ -796,7 +796,12 @@ vftable holds in that slot (class `vslot-exe`, tier `exe-slot`), when the addres
   wins over GCC's weak COMDAT copies. It holds the kept copy's words with resolve's renames for that object, the
   per-slot words above, and, for a primary vtable shorter than the exe's (a single-vtable group: no secondary
   address point moves), the exe's remaining slots: `__fnv_<a>`, the deleting-destructor stub for a `??_G`, else a
-  trap stub naming the exe address. Groups that hold a local or non-ABS32 relocation, or a strong (key-function)
+  trap stub naming the exe address. A word that still names a symbol its unit leaves undefined (extern-text
+  addresses nothing defines: `BaseFormComponent::Init` / `CopyFromBase` / `CompareWithBase`, whose recipe addresses
+  0x00402d40/60/70 lie inside FUN_00402d30) takes the exe slot's word the same way (`xt-slots`): `_purecall` where
+  the exe slot is the CRT's pure virtual (only BaseFormComponent's own vftable 0x01011d68 is: every derived class's
+  vftable holds real functions there), `__fnv_<a>` of a native definition, else a trap stub for the exe address;
+  only where the exe vftables the group stands for agree. Groups that hold a local or non-ABS32 relocation, or a strong (key-function)
   definition, are not copied. The V rows name zz_bridges.o; `vtext.tsv` names the object the words came from,
   which apply's typeinfo pairing takes as the vtable's object.
 * Outputs: `slot_fill.tsv` (object, symbol, address, target, how chosen, ABI verdict, the uses), `slot_gaps.tsv`
