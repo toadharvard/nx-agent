@@ -73,6 +73,10 @@ ALLOC_TABLE = [
     *[("new", "free", n, [n], 0, None) for n in
       ("_ZdlPv", "_ZdaPv", "_ZdlPvm", "_ZdaPvm", "_ZdlPvj", "_ZdaPvj", "_ZdlPvRKSt9nothrow_t",
        "_ZdaPvRKSt9nothrow_t")],
+    # the game's operator new/delete overloads with a heap argument (operator new(size_t, Heap&, size_t), the decomp's
+    # S00cb39d0_S_00aa3e40: MemoryManager): a block made through them is otherwise an unknown block when freed
+    ("new", "alloc", "new(heap)", ["_ZnwmR20S00cb39d0_S_00aa3e40m"], 0, None),
+    ("new", "free", "delete(heap)", ["_ZdlPvR20S00cb39d0_S_00aa3e40m"], 0, None),
     # platform/win32 shims (VirtualAlloc/VirtualFree reserve the game heaps' regions, not blocks: not tracked)
     ("win32", "alloc", "HeapAlloc", ["HeapAlloc"], 2, None),
     ("win32", "realloc", "HeapReAlloc", ["HeapReAlloc"], 2, 3),
