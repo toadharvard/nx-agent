@@ -426,6 +426,25 @@ class Arm64Engine:
             return
         self._on_stub(uc, address, size, user, wild=True)
 
+    def _zero_unwritten(self, uc, case, ptrs):
+        """STUB_OUT: for each argument that points into the stack, the words of the next 0x100 bytes that still equal
+        the planted fill (the native code never stored there) become 0."""
+        base = world.SP0 - 0x1000
+        fill = world.stack_fill(case.seed ^ 0xa5, 0x1000)
+        for v in ptrs:
+            v &= 0xffffffff
+            if not (world.STACK[0] <= v < world.STACK[1]):
+                continue
+            for a in range(v & ~3, min(v + 0x100, world.SP0, world.STACK[1]) & ~3, 4):
+                if a < base:
+                    continue
+                try:
+                    cur = bytes(uc.mem_read(a, 4))
+                except UcError:
+                    break
+                if cur == fill[a - base:a - base + 4]:
+                    uc.mem_write(a, bytes(4))
+
     def _on_stub(self, uc, address, size, user, wild=False):
         case, r = user
         if not wild and any(lo <= address < hi for lo, hi in self.holes()):
@@ -468,6 +487,8 @@ class Arm64Engine:
         r.calls.append(Call(target, [uc.reg_read(XR[i]) for i in range(8)], [uc.reg_read(VR[i]) for i in range(8)],
                             uc.reg_read(A.UC_ARM64_REG_X8), stk))
         r.calls[-1].addr = address
+        if world.STUB_OUT:
+            self._zero_unwritten(uc, case, [r.calls[-1].args[i] for i in range(8)] + [r.calls[-1].x8])
         if libcalls.noreturn_a64(name) or (name is None and target in libcalls.NORETURN_X86):
             r.noreturn = name or libcalls.NORETURN_X86[target]   # never returns: the run ends here (difffuzz-14)
             uc.emu_stop()
