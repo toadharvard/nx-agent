@@ -101,8 +101,31 @@ run() {   # run <check> <cmd...>: time, exit status, report path, in $R/<check>.
 	return $rc
 }
 skip() { echo "$2" >"$R/$1.skip"; }
+build_verdict() {   # full_job exits 0 once its report is written: the build passes only when its stages did
+	# (qk1 on 78435e5a: prepare failed, the check said 0, fuzz then took a stale link). prepare, compile, link and
+	# guest must be ok/warn in the build directory and the report's provenance must not FAIL; else build.rc = 2.
+	[ "$(cat "$R/build.rc" 2>/dev/null)" = 0 ] || return 0
+	local why
+	why=$(python3 -I - "$FARM_HOME/full/build" "$R/build.md" <<'PY'
+import json, os, sys
+b, md = sys.argv[1], sys.argv[2]
+bad = []
+for st in ('prepare', 'compile', 'link', 'guest'):
+    try:
+        r = json.load(open(os.path.join(b, st, 'stage.json')))
+    except (OSError, ValueError):
+        bad.append('%s: no record' % st); continue
+    if r.get('status') not in ('ok', 'warn'):
+        bad.append('%s: %s' % (st, r.get('status')))
+if os.path.isfile(md) and any(l.startswith('- provenance: FAIL') for l in open(md, errors='replace')):
+    bad.append('provenance FAIL')
+print('; '.join(bad))
+PY
+)
+	if [ -n "$why" ]; then echo 2 >"$R/build.rc"; echo "the build failed: $why" >"$R/build.why"; log "build: $why"; fi
+}
 lane_a() {
-	if on build; then run build bash "$J/full_job.sh" "$COMMIT"; else skip build "not affected"; fi
+	if on build; then run build bash "$J/full_job.sh" "$COMMIT"; build_verdict; else skip build "not affected"; fi
 	if [ -f "$R/build.rc" ] && [ "$(cat "$R/build.rc")" != 0 ]; then   # lane D would run an older build's guest
 		for c in threads frames mem plat scenario boottrace; do skip $c "the build failed"; done
 	else lane_d & fi   # the emulator lanes need this build; they run beside fuzz and audit
@@ -115,6 +138,11 @@ lane_a() {
 	[ -n "$tr" ] && [ -f "$tr/build/units.json" ] || tr=$fb/prepare/tree
 	if [ -f "$R/build.rc" ] && [ "$(cat "$R/build.rc")" = 0 ] && [ -f "$tr/build/units.json" ] && [ -d "$fb/link/fixed" ]; then
 		export FUZZ_TREE=$tr FUZZ_LINK_DIR=$fb/link FUZZ_LINK_COMMIT=$COMMIT
+	fi
+	if [ "$(cat "$R/build.rc" 2>/dev/null || echo 0)" != 0 ]; then   # no link of this head: not someone else's
+		on fuzz && skip fuzz "the build failed" || skip fuzz "not affected"
+		on audit && skip audit "the build failed" || skip audit "not affected"
+		wait; return
 	fi
 	if on fuzz; then
 		FUZZ_MAX_S=${FUZZ_MAX_S:-600} FUZZ_REPORT_S=${FUZZ_REPORT_S:-120} run fuzz bash "$J/fuzz_job.sh" "$COMMIT" 1 1
@@ -190,7 +218,7 @@ for c in ('build', 'equiv', 'fuzz', 'audit', 'replay', 'threads', 'frames', 'mem
         rows.append((c, 'not run (lane skipped)', '-', '-', ''))
     else:
         ok &= rc == '0'
-        rows.append((c, 'ran', rc, rd(c + '.s') or '?', headline(rd(c + '.md'))))
+        rows.append((c, 'ran', rc, rd(c + '.s') or '?', rd(c + '.why') or headline(rd(c + '.md'))))
 full = plan.get('full') or []
 verdict = 'FULL RUN NEEDED' if full else ('PASS (every selected check exited 0)' if ok else 'FAIL')
 o = open(out, 'w')
