@@ -2513,7 +2513,8 @@ class Emu:
         uc.reg_write(UC_ARM64_REG_LR, RETURN_ADDR)
         uc.reg_write(UC_ARM64_REG_TPIDR_EL0, 0xDEAD0000)
         main.ctx, main.resume_pc, main.state, main.result = uc.context_save(), self.base, "ready", HOST_PAGE
-        budget = getattr(self, "budget", 400_000_000)
+        budget = getattr(self, "budget", 0)
+        slice_us = int(getattr(self, "slice_ms", 2000)) * 1000
         import signal
         self.stop_signal = None
 
@@ -2545,7 +2546,10 @@ class Emu:
             uc.reg_write(UC_ARM64_REG_X0, t.result & U64)
             t.state = "running"
             try:
-                uc.emu_start(t.resume_pc, RETURN_ADDR, count=budget)
+                # a time slice (timeout, a timer thread calls emu_stop): count= makes unicorn hook every
+                # instruction, about 10x slower (the INI read took more than 540 s with count=2e8, 46 s for the
+                # whole boot to past renderer-init with a timeout). count only when --budget is given explicitly.
+                uc.emu_start(t.resume_pc, RETURN_ADDR, timeout=slice_us, count=budget)
             except UcError as e:
                 if getattr(self, "collect_traps", False) and self.collect_trap():
                     t.result = uc.reg_read(UC_ARM64_REG_X0)
@@ -2627,7 +2631,10 @@ def main(argv):
     ap.add_argument("--load-base", type=lambda v: int(v, 0), help="where to map a relocatable guest")
     ap.add_argument("--skip-faulting-init", action="store_true",
                     help="trace mode: return 0 from an initializer that faults (needs --elf)")
-    ap.add_argument("--budget", type=int, default=400_000_000, help="instructions per scheduling slice")
+    ap.add_argument("--budget", type=int, default=0,
+                    help="instructions per scheduling slice (0, the default: none; slices are --slice-ms long. An "
+                         "instruction count makes unicorn hook every instruction, about 10x slower)")
+    ap.add_argument("--slice-ms", type=int, default=2000, help="wall-clock length of a scheduling slice (ms)")
     ap.add_argument("--core3", action="store_true", help="the host's core 3 opt-in (fnvnx.ini core3=1)")
     ap.add_argument("--no-boost", action="store_true", help="the host's boost_loading=0")
     ap.add_argument("--stub-faults", metavar="FILE", help="functions (names or 0xORIG, one per line) that return 0 "
@@ -2691,7 +2698,7 @@ def main(argv):
     emu = Emu(a.nso, root, load_base=a.load_base, game=a.game)
     if a.vm_service:
         emu.vm_service = True
-    emu.budget = a.budget
+    emu.budget, emu.slice_ms = a.budget, a.slice_ms
     emu.core3, emu.boost_loading = a.core3, not a.no_boost
     if a.elf:
         emu.load_symbols(a.elf)
