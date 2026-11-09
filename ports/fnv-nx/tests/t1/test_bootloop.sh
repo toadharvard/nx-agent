@@ -11,14 +11,14 @@ fails=0; ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$(
 # a stand-in source tree: the job's own scripts, a Makefile that writes stage records, a farm_boot.sh
 S=$T/src; Q=$S/ports/fnv-nx
 mkdir -p "$Q/tools/farm" "$Q/tests/s5" "$Q/toolchain/gcc" "$Q/toolchain/devkita64" "$Q/toolchain/cross" "$Q/toolchain/vorbis"
-for f in bootloop_job.sh lib_job.sh recon.sh linkcache.sh ratchet.py boot_determinism.py; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
+for f in bootloop_job.sh lib_job.sh recon.sh linkcache.sh ratchet.py boot_determinism.py fetch_tree.sh tree_hash.sh; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
 for f in toolchain/sources.sh toolchain/gcc/build.sh toolchain/devkita64/x toolchain/cross/x toolchain/vorbis/build.sh; do echo x > "$Q/$f"; done
 printf '# pins\n' > "$Q/tools/fetch.sh"
 cat > "$Q/Makefile" <<'MK'
 # stand-in: records the goals and writes ok records for the stages of `guest`; FAKE_FAIL=<stage> fails that one
 GOALS := $(MAKECMDGOALS)
 $(firstword $(MAKECMDGOALS)):
-	@echo "$(GOALS) FNVNX_STUB_NULLDEV=$${FNVNX_STUB_NULLDEV-unset}" >> $(CALLS)
+	@echo "$(GOALS) FNVNX_STUB_NULLDEV=$${FNVNX_STUB_NULLDEV-unset} PREPARED=$(PREPARED)" >> $(CALLS)
 	@for s in $(if $(filter guest,$(GOALS)),fetch toolchain prepare compile link guest,toolchain); do mkdir -p $(BUILD_DIR)/$$s; \
 	  st=ok; [ "$$s" = "$${FAKE_FAIL:-}" ] && { st=fail; printf 'fnvlink: resolve\nTypeError: the stage-own error\n' > $(BUILD_DIR)/$$s/stage.log; }; \
 	  printf '{"status": "%s", "seconds": 3.5, "metrics": {"compile_built_now": 2, "link_objcache_bodies_hits": 9, "link_objcache_bodies_misses": 1, "prepare_reused": 1}, "artifacts": {"prefix": "/x"}}\n' $$st > $(BUILD_DIR)/$$s/stage.json; done
@@ -105,9 +105,21 @@ ok "the ratchet measures the bootloop's milestones (nulldev metrics)" 'grep -q "
 mv "$T/home/bootloop/linkeq.done" "$T/linkeq.done.first"; n0=$(grep -c "^boot " $T/calls)
 run diff FAKE_DIFF=1
 ok "warm != cold: exit 1, FAIL, warm outputs kept, no boot" '[ "$(cat $T/diff.rc)" = 1 ] && grep -q "^- FAIL: the incremental link differs from the cold link" $T/diff.md && [ -d $T/home/bootloop/build/link.warm ] && [ ! -f $T/home/bootloop/linkeq.done ] && [ "$(grep -c "^boot " $T/calls)" = "$n0" ]'
-# determinism: once per machine and emu_guest.py, the same stub boot twice; a boot that disagrees fails the job
+# determinism: once per machine and emu_guest.py, the same stub boot twice; a boot that disagrees is a WARN, once
 ok "determinism: the second stub boot agreed (a prefix: cut short by the clock), recorded once" 'grep -q "^- determinism (two identical stub boots): PASS: consistent" $T/first.md && ls $T/home/bootloop/determinism-*.done > /dev/null && grep -q "^- determinism (two identical stub boots): passed on this machine" $T/second.md'
 rm -f "$T"/home/bootloop/determinism-*.done; mv "$T/linkeq.done.first" "$T/home/bootloop/linkeq.done"
 run nondet FAKE_NONDET=1
-ok "two stub boots that disagree: exit 1, FAIL, not recorded" '[ "$(cat $T/nondet.rc)" = 1 ] && grep -q "^- FAIL: two identical stub boots disagree: FAIL: the function traces differ at line 2" $T/nondet.md && ! ls $T/home/bootloop/determinism-*.done > /dev/null 2>&1'
+ok "two stub boots that disagree: a WARN (exit 0, no FAIL), recorded once per emulator version, not passed" '[ "$(cat $T/nondet.rc)" = 0 ] && ! grep -q "^- FAIL" $T/nondet.md && grep -q "^- determinism (two identical stub boots): WARN: two identical stub boots disagree (emu_guest.py [0-9a-f]*, checked once): FAIL: the function traces differ at line 2" $T/nondet.md && ls $T/home/bootloop/determinism-*.failed > /dev/null && ! ls $T/home/bootloop/determinism-*.done > /dev/null 2>&1'
+: > "$T/calls"; run nondet2 FAKE_NONDET=1
+ok "... not run again for that emulator version (one stub boot), the earlier WARN repeated" '[ "$(grep -c "^boot " $T/calls)" = 1 ] && grep -q "(not checked again)" $T/nondet2.md'
+# a published tree with the head's prepare inputs and recon set: synced into the build's own tree path and adopted (no
+# prepare here; orchestrator: bl1's prepare was 51-52 min of each cycle)
+( cd "$T/art" && git checkout -q --orphan tt && git rm -rqf . 2> /dev/null; mkdir -p tree/build tree/src && echo '{"units": []}' > tree/build/units.json &&
+  echo 'int f();' > tree/src/a.cpp && th=$(bash "$Q/tools/farm/tree_hash.sh" tree) &&
+  echo "{\"commit\": \"$C1\", \"decomp_commit\": \"$C1\", \"tree_hash\": \"$th\", \"recon\": \"\"}" > meta.json && git add -A &&
+  git -c user.name=t -c user.email=t@t commit -qm tree && git push -q origin "HEAD:refs/heads/t/${C1:0:12}" ) > /dev/null 2>&1
+: > "$T/calls"; run adopt
+ok "a published tree with the head's prepare inputs: synced into the build's tree path and adopted, said" 'grep -q "^- tree: t/${C1:0:12}, the head.s prepare inputs and recon set" $T/adopt.md && grep -q "^guest .* PREPARED=$T/home/bootloop/build/prepare/tree$" $T/calls && grep -q "int f();" $T/home/bootloop/build/prepare/tree/src/a.cpp && grep -q "\"port_commit\": \"$C1\"" $T/home/bootloop/build/prepare/prepared_from.json'
+run noadopt BOOTLOOP_TREE=0
+ok "BOOTLOOP_TREE=0: prepared here, no PREPARED" 'grep -q "^- tree: prepared here" $T/noadopt.md && grep "^guest " $T/calls | tail -1 | grep -q "PREPARED=$"'
 [ $fails = 0 ] && echo "test_bootloop: all ok" || { tail -5 "$T"/*.log "$T/py.out"; cat "$T/calls"; echo "test_bootloop: $fails failed"; exit 1; }
