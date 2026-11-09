@@ -341,16 +341,16 @@ def run_unit(tree, workdir, unit, boot):
         return _run_unit(tree, workdir, unit, boot)
     except Exception as e:  # noqa: BLE001 - one unit never stops the run: it is reported as probe-failed
         return unit, [(unit, '-', 'probe-failed', '-', '%s: %s' % (type(e).__name__, str(e)[:400].replace('\t', ' ')),
-                       'probe-failed', boot)], 0, 0, [], []
+                       'probe-failed', boot)], 0, 0, [], [], []
 
 
 def _run_unit(tree, workdir, unit, boot):
     try:
         recs = msvc_layouts(tree, unit)
     except subprocess.TimeoutExpired:
-        return unit, [], 0, 0, [], []
+        return unit, [], 0, 0, [], [], []
     if not recs:
-        return unit, [], 0, 0, [], []
+        return unit, [], 0, 0, [], [], []
     nat = probe(tree, workdir, unit, list(recs.values()))
     rows = []
     for name, rec in recs.items():
@@ -372,7 +372,40 @@ def _run_unit(tree, workdir, unit, boot):
             rows.append((unit, '-', 'rawvcall', '-', 'check failed: %s' % e, 'rawvcall', boot))
     # the native layouts, for the cross-unit (ODR) check: one class name, several definitions in the tree
     layouts = [(unit, name, nat[name][0], nat[name][2], boot) for name in recs if name in nat]
-    return unit, rows, len(recs), len(nat), members, layouts
+    return unit, rows, len(recs), len(nat), members, layouts, memory_uses(tree, unit, recs)
+
+
+_USE_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|//[^\n]*|/\*.*?\*/', re.S)
+
+
+def memory_uses(tree, unit, recs):
+    """[(class, kind)]: the places in the unit where a class's own layout decides memory (orchestrator
+    2026-11-09, the short stand-ins): a record of the unit holds it by value (member, member array, base: a derived
+    class's ctor / vtable build it there), or the unit's text allocates it (`new C`, `sizeof(C)`: operator new /
+    memcpy / memset sizes) or declares an object or array of it (a local, a static, a global)"""
+    names = {n.split('::')[-1] for n in recs}
+    out = set()
+    for rec in recs.values():
+        for b in rec.bases:
+            out.add((b[1].split('::')[-1], 'base'))
+        for off, nm, t in rec.fields:
+            t0 = re.sub(r'^(?:const\s+|volatile\s+|struct\s+|class\s+)+', '', t or '').strip()
+            t0 = re.sub(r'\s*\[\d+\]$', '', t0)
+            if t0 and '*' not in t0 and '&' not in t0 and t0.split('::')[-1] in names:
+                out.add((t0.split('::')[-1], 'member'))
+    try:
+        text = _USE_MASK.sub(' ', open(os.path.join(tree, unit), errors='replace').read())
+    except OSError:
+        return sorted(out)
+    for n in names:
+        if not re.match(r'[A-Za-z_]\w*$', n) or n not in text: continue
+        e = re.escape(n)
+        if re.search(r'\bnew\s+(?:\([^()]*\)\s*)?(?:class\s+|struct\s+)?%s\b(?!\s*[*&])' % e, text): out.add((n, 'new'))
+        if re.search(r'\bsizeof\s*\(\s*(?:class\s+|struct\s+)?%s\s*\)' % e, text): out.add((n, 'sizeof'))
+        # an object or array (an `extern` declaration allocates nothing)
+        if re.search(r'(?<![\w:<,.>*&~])(?<!extern )(?:static\s+|const\s+)*%s\s+[A-Za-z_]\w*\s*(?:\[|;|=|\{)' % e, text):
+            out.add((n, 'object'))
+    return sorted(out)
 
 
 def main():
@@ -396,9 +429,10 @@ def main():
     allrows, seen, measured = [], {}, [0, 0]
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
         futs = [ex.submit(run_unit, tree, workdir, u, int(u in boot)) for u in units]
-        allmembers, alllayouts = [], []
+        allmembers, alllayouts, alluses = [], [], set()
         for f in concurrent.futures.as_completed(futs):
-            unit, rows, nm, nn, mem, lay = f.result()
+            unit, rows, nm, nn, mem, lay, uses = f.result()
+            alluses |= {(unit, c, k) for c, k in uses}
             measured[0] += nm; measured[1] += nn
             allrows += rows; allmembers += mem; alllayouts += lay
     # the ODR check (S5 data boot a9d9f9103325: SetParent 0x00a59d00 reads child+0x18 as m_pkParent, the object built
@@ -433,6 +467,24 @@ def main():
                 allrows.append((unit, name, 'odr field %s' % fld, ref_off, own_off, 'odr', b))
             elif size != msize:
                 allrows.append((unit, name, 'odr size', msize, size, 'odr', b))
+    # the short stand-ins (orchestrator 2026-11-09): a unit's definition of an exe class smaller than the class's
+    # largest definition in the tree is harmless as long as only pointers to it are used; where its size decides memory
+    # (memory_uses: a by-value member or base, new / sizeof, an object or array) the unit builds or copies an object
+    # of the wrong size. One row per (unit, class), cause short, naming the uses; empty stand-ins count too.
+    full = collections.defaultdict(int)
+    own = {}
+    for unit, name, size, foff, b in alllayouts:
+        if rtti and name.split('::')[-1] not in rtti: continue
+        full[name] = max(full[name], size)
+        own[(unit, name.split('::')[-1])] = (name, size, b)
+    uses_by = collections.defaultdict(set)
+    for unit, c, k in alluses: uses_by[(unit, c)].add(k)
+    for (unit, c), kinds in sorted(uses_by.items()):
+        o = own.get((unit, c))
+        if o is None: continue
+        name, size, b = o
+        if size < full[name]:
+            allrows.append((unit, name, 'short %s' % '/'.join(sorted(kinds)), full[name], size, 'short', b))
     # the member check: a record whose layout differs only by its alignment under #pragma pack (pack) or by a zero
     # native size (ebo) is harmless as a base; as a member it moves its neighbours when MSVC places it at an offset
     # the native alignment does not allow (pack), or always (ebo: 1 byte under MSVC, 0 natively)
@@ -471,10 +523,11 @@ def main():
     mrows = [r for r in allrows if r[2].startswith('member')]
     summary = ('layoutgate: %d units, records msvc %d / probed %d; differing records %d (boot %d, rest %d), '
                'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); ebo2 bases %d; odr classes %d; '
-               'raw vcalls not under the m1 test: %d; causes %s%s' %
+               'raw vcalls not under the m1 test: %d; short stand-ins allocated/embedded: %d (classes %d); causes %s%s' %
                (len(units), measured[0], measured[1], len(rb | rr), len(rb), len(rr),
                 sum(1 for r in allrows if r[2].startswith('field')), fb, len(mrows), sum(1 for r in mrows if r[6] == 1),
-                len({k[1] for k in ebo2}), len(odr), sum(1 for r in allrows if r[5] == 'rawvcall'), dict(causes.most_common()),
+                len({k[1] for k in ebo2}), len(odr), sum(1 for r in allrows if r[5] == 'rawvcall'),
+                sum(1 for r in allrows if r[5] == 'short'), len({r[1] for r in allrows if r[5] == 'short'}), dict(causes.most_common()),
                 '; probe-failed %d (%s)' % (len(failed), ', '.join(failed[:10]) + (' ...' if len(failed) > 10 else ''))
                 if failed else ''))
     print(summary, file=sys.stderr)
