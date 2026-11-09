@@ -48,5 +48,24 @@ for what, extra, want in (('minus-one shifts (exe 1 -> native 2), COM not, a K=4
     got = subprocess.run([exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
     ok = got == want
     print('%-75s %s' % (what, 'ok' if ok else 'FAIL (%s)' % got)); fails += not ok
+# RAWVT1-DEL0: the exe's slot-0 call ??_G(flags): flag 1 -> D0 (slot 1) on a minus-one table, flag 0 -> D1, an exe table
+# -> its own slot 0 with the flag
+D0SRC = r'''#include "fnvnx_rawvt.h"
+#include <cstdio>
+static int log_ = 0;
+static void d1(void*) { log_ = 1; } static void d0(void*) { log_ = 2; } static void* g(void*, unsigned f) { log_ = 10 + f; return 0; }
+extern "C" { __attribute__((section(".data.rel.ro.fnvnx_m1"), used)) void* m1[] = {(void*)d1, (void*)d0}; }
+void* ex[] = {(void*)g};
+int main() { void* a = m1; void* b = ex; void* o1 = &a; void* o2 = &b;
+  FNVNX_RAWVT_DEL0(o1, 1); int x = log_; FNVNX_RAWVT_DEL0(o1, 0); int y = log_; FNVNX_RAWVT_DEL0(o2, 1); int z = log_;
+  printf("%d %d %d\n", x, y, z); }
+'''
+open(os.path.join(t, 'd0.cpp'), 'w').write(D0SRC)
+exe = os.path.join(t, 'd0')
+r = subprocess.run(['g++', '-O1', '-D__thiscall=', '-I', INC, os.path.join(t, 'd0.cpp'), '-Wl,-T,' + os.path.join(t, 'd.ld'), '-o', exe],
+                   capture_output=True, text=True)
+got = subprocess.run([exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
+ok = got == '2 1 11'
+print('%-75s %s' % ('DEL0: flag 1 reaches D0, flag 0 D1, an exe table its own ??_G', 'ok' if ok else 'FAIL (%s)' % got)); fails += not ok
 print('%d failed' % fails)
 sys.exit(1 if fails else 0)

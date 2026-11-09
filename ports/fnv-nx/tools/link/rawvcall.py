@@ -23,7 +23,7 @@ import layout   # noqa: E402
 
 _STMT = re.compile(r'^\s*\[([^\]]+):(\d+):\d+\]\s*(.*?);?\s*$')
 _FUNC = re.compile(r'^;; Function (.+?) \(')
-COVERED = re.compile(r'FNVNX_(?:D26_SLOT|D22_CALL|RAWVT_DYN|RAWVT_DYNOFF|VSLOT)|fnv-nx RAWVT1-KEEP|fnv-nx VTM1')
+COVERED = re.compile(r'FNVNX_(?:D26_SLOT|D22_CALL|RAWVT_DYN|RAWVT_DYNOFF|RAWVT_DYNK|RAWVT_DEL0|VSLOT)|fnv-nx RAWVT1-KEEP|fnv-nx VTM1')
 
 
 def _strip_loc(s):
@@ -154,8 +154,8 @@ def check_unit(tree, unit, workdir):
         if off is None:
             rows.append((unit, fn, line, 'dyn', 'covered')); continue
         if off == 0:
-            # slot 0 (the exe's deleting destructor ??_G(flags)): natively D1, right for flag 0 - reported apart
-            rows.append((unit, fn, line, 0, 'dtor0')); continue
+            # slot 0 (the exe's deleting destructor ??_G(flags)): covered by FNVNX_RAWVT_DEL0 (flag 1 -> D0); else raw
+            pass
         if src not in lines:
             try:
                 lines[src] = open(src if os.path.isabs(src) else os.path.join(tree, src), errors='replace').read().splitlines()

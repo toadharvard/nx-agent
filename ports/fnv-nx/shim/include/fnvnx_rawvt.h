@@ -12,6 +12,7 @@
 #define FNVNX_RAWVT_DYN(vp, k) (vp)[(k)]
 #define FNVNX_RAWVT_DYNOFF(vp, off) (off)
 #define FNVNX_RAWVT_DYNK(vp, k) (k)
+#define FNVNX_RAWVT_DEL0(o, flag) ((void *(__thiscall *)(void *, unsigned))(*(void ***)(o))[0])((void *)(o), (unsigned)(flag))
 #else
 #ifdef __cplusplus
 extern "C" {
@@ -49,6 +50,18 @@ static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
 #define FNVNX_RAWVT_DYN(vp, k) (vp)[(k) + fnvnx_rawvt_m1((const void *)(vp), (unsigned)(k))]
 /* a slot index in pointer arithmetic on the vptr, `*(*(long**)p + 7)`: k + 0/1 */
 #define FNVNX_RAWVT_DYNK(vp, k) ((k) + fnvnx_rawvt_m1((const void *)(vp), (unsigned)(k)))
+/* a call of the exe's slot 0, the deleting destructor ??_G(flags): natively a minus-one table has D1 (destroy) at 0
+ * and D0 (destroy and free) at 1, so flag bit 1 goes to D0; any other table keeps the exe's call */
+static inline void *fnvnx_rawvt_del0(void *o, unsigned flag)
+{
+    void **vp = *(void ***)o;
+    if ((flag & 1) && fnvnx_rawvt_m1((const void *)vp, 1)) {
+        ((void (*)(void *))vp[1])(o);
+        return o;
+    }
+    return ((void *(*)(void *, unsigned))vp[0])(o, flag);
+}
+#define FNVNX_RAWVT_DEL0(o, flag) fnvnx_rawvt_del0((void *)(o), (unsigned)(flag))
 /* the byte-offset spelling `(char*)*(void**)x + off` (off = 4 * slot): off + 4 when the table is minus-one */
 #define FNVNX_RAWVT_DYNOFF(vp, off) ((off) + 4 * fnvnx_rawvt_m1((const void *)(vp), (unsigned)(off) / 4))
 #endif
