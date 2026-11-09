@@ -268,9 +268,14 @@ def leaf_constant(path, addr):
     return None
 
 
+# the /Od `mov r32, [ebp+8] / [esp+n]; and r32, 1` idiom in any register (BSList<BSSemaphore*>'s ??_G 0x00aa8950 uses
+# edx: the eax-only form missed it, and the strict deleting_dtor flipped its four tables to exe order)
+_FLAGS_REG = b'|'.join(re.escape(bytes([0x8b, 0x45 + 8 * r_, 0x08, 0x83, 0xe0 + r_, 0x01])) + b'|' +
+                       re.escape(bytes([0x8b, 0x44 + 8 * r_, 0x24])) + b'[\\x04-\\x20]' +
+                       re.escape(bytes([0x83, 0xe0 + r_, 0x01])) for r_ in (0, 1, 2, 3, 6, 7))
 _FLAGS_TEST = re.compile(
-    rb'\xf6\x44\x24[\x04-\x20]\x01|\xf6\x45\x08\x01|\xf6[\xc0-\xc7]\x01|\xa8\x01|\x8b\x45\x08\x83\xe0\x01|'
-    rb'\x8b\x44\x24[\x04-\x20]\x83\xe0\x01')
+    rb'\xf6\x44\x24[\x04-\x20]\x01|\xf6\x45\x08\x01|\xf6[\xc0-\xc7]\x01|\xa8\x01|\xf7[\xc0-\xc7]\x01\x00\x00\x00|' +
+    _FLAGS_REG)
 
 
 def deleting_dtor(path, addr):

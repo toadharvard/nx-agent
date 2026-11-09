@@ -1749,6 +1749,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if units_json else set()
         vstats['d22-applied-vftables'] = len(d22_applied)
         d22_listed = set(d22_listed) | d22_applied
+        vstats['alias-displaced-primaries'] = alias_alt(vnames, vmap, by_cls, rtti, exe_alt)
         ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
                                 exe_path, providers, exe_alt, msvc, d22_listed,
                                 lambda c_: code_refs([u.obj for u in have], c_), unbound=unbound,
@@ -1757,6 +1758,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         vstats['d22-list-vftables'] = len(d22_listed)
         for k_, n_ in ext.items():
             vstats['exe-copy-' + k_] = n_
+        vstats['m1-compiled-sections'] = m1_compiled_renames(have, objsyms, out, collections.Counter())
         vstats['exe-order-shell-names'] = add_unit_shell_names(out, units_json, exe_path)
         for a in rebind:   # S2c-vt2: shifted secondary groups moved their address points (slotfill2.shifted)
             rebind[a] = vmap[a][:2]
@@ -2154,6 +2156,64 @@ def _hv_cache(path):
         return code, (d['units'] if d.get('code') == code else {})
     except (OSError, EOFError, ValueError, TypeError, KeyError):
         return code, {}
+
+
+M1_SECTION = 'fnvnx_m1'   # S1 / orchestrator 2026-11-08: the minus-one tables, between __fnvnx_m1_start / _end (guest.ld)
+
+
+def m1_section(minus_one, other='fnvnx_vtext', k=0):
+    """The .data.rel.ro.<name> prefix of a bridges.S table: minus-one tables with the destructor pair at slot k = 0
+    go into the m1 range S1's runtime slot rule tests a vptr against, k = 4 (the TESForm family) into the m1k4 range
+    (S1 shifts those slots past 4 only), any other k stays out of both (toolchain/guest/guest.ld). FNVNX_M1=0: every
+    table where it was."""
+    if minus_one and os.environ.get('FNVNX_M1', '1') != '0' and k in (0, 4):
+        return (M1_SECTION if k == 0 else M1_SECTION + 'k4') + ('.vmo' if other == 'fnvnx_vmo' else '')
+    return other
+
+
+def m1_compiled_renames(have, objsyms, out, st):
+    """The compiled vtable groups whose primary has GCC's destructor pair (D1 / D0, or the flags pair a binding
+    makes of it: exevft.dtor_pos): their section goes into the m1 range too, by an objcopy --rename-section appended
+    to the object's .args (every object that defines the group, so whichever COMDAT copy the linker keeps is in the
+    range). -> renamed sections."""
+    if os.environ.get('FNVNX_M1', '1') == '0':
+        return 0
+    n = 0
+    for u in have:
+        if not any(s_.name.startswith('_ZTV') and s_.shndx and s_.bind != 'local' for s_ in objsyms.get(u.source, ())):
+            continue
+        try:
+            o = vtables.Obj(u.obj)
+        except (OSError, ValueError):
+            continue
+        ren = []
+        for z in sorted(x for x in o.defs if x.startswith('_ZTV') and o.bind(x) != 'local'):
+            shndx = o.syms[o.defs[z]][5]
+            if shndx >= len(o.secnames):
+                continue
+            sec = o.secnames[shndx]
+            if not sec.startswith('.data.rel.ro') or M1_SECTION in sec:
+                continue
+            ents = o.ents(z) or []
+            pts = vtables.address_points(ents)
+            if not pts:
+                continue
+            ap = pts[0][0] // 4
+            nslots = vtables.slots_at(ents, pts[0][0])
+            prim = ents[ap:ap + nslots]
+            k_ = exevft.dtor_pos([e.sym for e in prim], [e.word for e in prim])
+            if k_ not in (0, 4):
+                continue
+            new = '.data.rel.ro.%s.%s' % (m1_section(True, k=k_), sec[len('.data.rel.ro.'):] if sec.startswith('.data.rel.ro.')
+                                          else z)
+            ren.append('--rename-section=%s=%s' % (sec, new))
+        if ren:
+            with open(os.path.join(out, 'objcopy', os.path.basename(u.obj) + '.args'), 'a', encoding='utf-8',
+                      errors='surrogateescape') as f:
+                f.write('\n'.join(sorted(set(ren))) + '\n')
+            n += len(set(ren))
+    st['m1-compiled-sections'] = n
+    return n
 
 
 def named_placeholder(sym, called):
@@ -3268,16 +3328,73 @@ FREE_SYM = '__fnvnx_vfree_%08x'   # exe slot -> a decomp free function: `this` d
 FREE_SLOT = re.compile(r'^\?FUN_[0-9a-f]{8}@@Y([AGI])')   # a global FUN_<a> and its MSVC convention (cdecl, stdcall, fastcall)
 
 
-def free_slot(a, nd, bridges, st):
+NAMED_FREE = re.compile(r'^\?[A-Za-z_]\w*@@YG')   # a named global __stdcall function (`?AllocateZeroedMemory@@YG...`)
+_FREE_ARITY = {}
+
+
+def named_free_drop(a, nd, exe_path):
+    """S2d (link af44165a: BSNiAllocator slot 1 0x00aa2240): the decomp declares the exe's member as a named global
+    __stdcall function, `AllocateZeroedMemory(unsigned&, unsigned&, ...)`; the exe's is a thiscall member whose `this`
+    is unused. A virtual call passes `this` in x0, so the free function read the allocator's vptr as its size. True
+    when the exe function's first return pops exactly 4 x the native's parameter count (`ret 0x1c`, 7 parameters:
+    `this` is not among them; a definition that takes the object as its first parameter pops one fewer) and the
+    parameters fit x0..x6. FNVNX_FREENAMED=0 turns it off."""
+    if not exe_path or os.environ.get('FNVNX_FREENAMED', '1') == '0':
+        return False
+    name = nd['sym'].name
+    if not NAMED_FREE.match(nd.get('msvc') or '') or not re.match(r'_Z\d+[A-Za-z_]', name):
+        return False
+    if name not in _FREE_ARITY:
+        n = None
+        try:
+            dem = subprocess.run([CXXFILT, name], capture_output=True, text=True).stdout.strip()
+            isg = sigs.parse_itanium(name, dem)
+            if isg is not None and isg.raw_params is not None:
+                n = len([p_ for p_ in isg.raw_params if p_ != 'void'])
+        except OSError:
+            pass
+        _FREE_ARITY[name] = n
+    n = _FREE_ARITY[name]
+    if n is None or n > 7:
+        return False
+    try:
+        import capstone
+    except ImportError:
+        return False
+    pe, data = exevft._text(exe_path)
+    try:
+        off = pe.rva_to_off(a - pe.image_base, 16)
+    except Exception:
+        return False
+    if off is None:
+        return False
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    for ins in md.disasm(data[off:off + 0x400], a):
+        if ins.mnemonic == 'int3':
+            return False
+        if ins.mnemonic == 'ret':
+            return (int(ins.op_str, 0) if ins.op_str else 0) == 4 * n
+    return False
+
+
+def free_slot(a, nd, bridges, st, exe_path=None):
     """S5's class 1 (s5-003): the decomp declares the exe's slot function as a global non-member (`__stdcall
     FUN_00e8b490(int *, int, int)`: its MSVC body ignores ecx), so a virtual call, which passes `this` in x0, hands
     it every argument one register early. Such a slot gets a bridge by the definition's MSVC convention: cdecl /
     stdcall drop `this` (x1..x7 -> x0..x6), fastcall (ecx = this, edx undefined on the x86 call, then the stack)
     inserts edx as 0 (x1..x6 -> x2..x7). Returns the bridge symbol, or None for any other definition."""
-    if nd is None or sigs.itanium_variant(nd['sym'].name) or not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
+    if nd is None or sigs.itanium_variant(nd['sym'].name):
         return None
+    named = False
+    if not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
+        if not named_free_drop(a, nd, exe_path):
+            return None
+        named = True
     m = FREE_SLOT.match(nd.get('msvc') or '')
-    if m:
+    if named:
+        mode = 'drop'
+        st['free-slot-named'] += 1
+    elif m:
         mode = 'edx' if m.group(1) == 'I' else 'drop'
     else:
         # R2 (vtgate 4264bfd7): an extern "C" stand-in, `@FUN_<a>@N` (fastcall: edx inserted) or `_FUN_<a>@N` /
@@ -3358,6 +3475,97 @@ def rewrite_refs(path, by_src, addr_of, rebound=()):
             fo.write(line)
     os.replace(path + '.tmp', path)
     return n, nx
+
+
+_CTOR_DTOR = re.compile(r'^(C[123]|D[012])')
+
+
+def caller_class(sym):
+    """The vtable symbol of a member function's class (`_ZN3Foo3barEv` -> _ZTV3Foo, `_ZN2ns3FooC1Ev` ->
+    _ZTVN2ns3FooE), None for anything else (free functions, templates, local names)."""
+    if not sym.startswith('_ZN'):
+        return None
+    i, parts = 3, []
+    while i < len(sym) and sym[i] in 'KVR':
+        i += 1
+    while i < len(sym):
+        if _CTOR_DTOR.match(sym[i:]):
+            return _vt_name(parts)
+        m = re.match(r'\d+', sym[i:])
+        if not m:
+            return None
+        n = int(m.group())
+        j = i + len(m.group())
+        parts.append(sym[i:j + n])
+        i = j + n
+        if i < len(sym) and sym[i] == 'E':
+            return _vt_name(parts[:-1])
+    return None
+
+
+def _vt_name(parts):
+    if not parts:
+        return None
+    return '_ZTV' + parts[0] if len(parts) == 1 else '_ZTVN' + ''.join(parts) + 'E'
+
+
+def direct_call_slot_binds(have, changed, addr_of, per_obj, rebound, traps, rows):
+    """W48 (link b7b866ef, raw boot: `virtual function defined nowhere: _ZN6BSFile7GetSizeEv`): GCC devirtualizes a call
+    in a constructor (or a method of a final class) into a direct `bl` to the slot's name. When that name is a trap in
+    the object (the object's own vtables disagree on it, or it has none) but the calling function's class has a
+    vtable the slot fill bound the name in (any object: a unit's `#vtables` object holds the synthesized ones), the
+    call is that class's slot: the symbol gets that target. Callers of several classes must agree. FNVNX_W48=0: off.
+    -> names bound."""
+    if os.environ.get('FNVNX_W48', '1') == '0':
+        return 0
+    by_vt = collections.defaultdict(set)   # (symbol, vtable) -> {(target, exe address)}
+    for r in rows:
+        for use in r[7].split():
+            by_vt[(r[2], use.split('+')[0])].add((r[4], int(r[3], 16)))
+    n = 0
+    for u in have:
+        ren = per_obj.get(u.source) or {}
+        trapped = {un for un, t in ren.items() if t in traps and un not in changed.get(u, {})}
+        if not trapped:
+            continue
+        try:
+            o = vtables.Obj(u.obj)
+        except (OSError, ValueError):
+            continue
+        callers = collections.defaultdict(set)   # name -> {caller class}
+        for i_ in range(len(o.secs)):
+            if not o.secs[i_][2] & 4:
+                continue
+            sec = o.secnames[i_]
+            fn = sec[len('.text.'):] if sec.startswith('.text.') else None
+            # a unit built without -ffunction-sections (archive.cpp's FUN_00af7eb0 constructor sits in `.text`):
+            # the call's function is the FUNC symbol whose range holds the offset
+            funcs = None
+            for off_, (si, typ, _) in o.rel(i_).items():
+                nm = o.syms[si][0]
+                if typ not in (21, 20) or nm not in trapped:
+                    continue
+                f_ = fn
+                if f_ is None or caller_class(f_) is None:
+                    if funcs is None:
+                        funcs = sorted((s_[1], s_[2], s_[0]) for s_ in o.syms
+                                       if s_[5] == i_ and s_[3] == 2 and s_[0])
+                    f_ = next((n_ for v_, z_, n_ in funcs if v_ <= off_ < v_ + max(z_, 1)), None)
+                callers[nm].add(caller_class(f_) if f_ else None)
+        for un, cls in callers.items():
+            if None in cls:
+                continue
+            got = set()
+            for c in cls:
+                got |= by_vt.get((un, c), set())
+            if len(got) != 1:
+                continue
+            tgt, a = next(iter(got))
+            changed.setdefault(u, {})[un] = tgt
+            addr_of[(u.source, un)] = a
+            rebound.add((u.source, un))
+            n += 1
+    return n
 
 
 def bodies_slot_renames(have, changed, addr_of, per_obj, rebound, undefined):
@@ -3536,7 +3744,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
             if vs is None:
                 return None, 'no %s at the address' % isig.variant
             return ADDR_SYM % a + ('' if vs is nd['sym'] else '_' + isig.variant), 'dtor'
-        fr = free_slot(a, nd, stubs, st) if not isig.variant else None
+        fr = free_slot(a, nd, stubs, st, exe_path) if not isig.variant else None
         if fr is not None:
             return fr, 'free function: %s' % fr
         if flags0_slot(isig, nd, ds, exe_path, a):
@@ -3774,6 +3982,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     # The thunk adjusts `this` and calls the same function the slot holds: it takes the host's binding.
     st['bodies_slot_bound'] += bodies_slot_renames(have, changed, addr_of, per_obj, rebound,
                                                    lambda u: [x.name for x in elfsyms.symbols(u.obj) if x.shndx == 0])
+    st['direct_call_slot_bound'] += direct_call_slot_binds(have, changed, addr_of, per_obj, rebound, traps, rows)
     # apply the renames: the .redefine files and refs.tsv rows of the objects that changed
     bound_refs = bound_refs_x = 0
     by_src = {u.source: m for u, m in changed.items()}
@@ -3840,7 +4049,7 @@ def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where, o
     in front of f's native entry; any other adjustor thunk stays a trap (never a guessed adjustment)."""
     nd = native.get(a)
     var = sigs.itanium_variant(nd['sym'].name) if nd else None
-    if nd is not None and var is None and free_slot(a, nd, bridges, st):
+    if nd is not None and var is None and free_slot(a, nd, bridges, st, exe_path):
         t = FREE_SYM % a   # a decomp free function (S5 class 1): this dropped / edx inserted
     elif nd is not None and var is None:
         t = ADDR_SYM % a
@@ -4341,6 +4550,70 @@ def vtfill2_group(z, path, vs, ents, names, pts, n, fill, ov, xs, o, vmap, exev,
     return words, shift, nsec
 
 
+PLAIN_MAX = 64
+
+
+def plain_vtfill(exev, vmap, alt, exe_path, vt_on):
+    """W49 (link b7b866ef, S5 null-device boot: SetAt 00a642a0 reads exe slots 2 / 3 of ShaderMap's 4-slot table, a trap
+    and a 0): a primary V row (or a displaced primary, alt) whose exe vftable has no RTTI (exevft.plain_vftables: the
+    shader maps' 0x010af6cc) is extended like an RTTI one, its end the slot before the next deleting destructor (a
+    vftable holds one, at its destructor slot; with no COL between them the scan runs into the neighbours: 0x010ade18
+    reads 35 slots, five tables of 7), at most PLAIN_MAX. -> (exev with those vftables' slots cut and an RTTI-less
+    marker kept, count). FNVNX_VTPLAIN=0: exev unchanged."""
+    if not vt_on or os.environ.get('FNVNX_VTPLAIN', '1') == '0':
+        return exev, 0
+    cand = {v for v, (z, ap, path, note) in vmap.items()
+            if v in exev and not exev[v].td and note.startswith('primary') and ap == 8}
+    cand |= {v for v, zs in (alt or {}).items() if v in exev and not exev[v].td and
+             any(kind == 'primary' and ap == 8 for _, ap, _, kind in zs)}
+    if not cand:
+        return exev, 0
+    out = dict(exev)
+    n = 0
+    for v in sorted(cand):
+        slots = list(exev[v].slots[:PLAIN_MAX])
+        for i in range(1, len(slots)):
+            if exevft.deleting_dtor(exe_path, slots[i]):
+                slots = slots[:i]
+                break
+        if not slots:
+            continue
+        out[v] = exevft.Vft(PLAIN_TD % v, 0, [], slots)
+        n += 1
+    return out, n
+
+
+PLAIN_TD = '.fnvnx-plain-%08x'   # a stand-in type descriptor: the vftable is extended, it has no RTTI class
+
+
+def alias_alt(vnames, vmap, by_cls, rtti, alt):
+    """W49: the other classes the units name for one primary image vftable (vftable_aliases.tsv: MSVC folded them, or
+    a decomp shell of the same class - ShaderMap and NiTStringPointerMap<ShaderBufferRecord*> on 0x010af6cc) join the
+    V row's as displaced primaries (alt), so exe_vtable_copies gives their native vtables the exe's slots too. ->
+    count added. FNVNX_VTPLAIN=0: none."""
+    if os.environ.get('FNVNX_VTPLAIN', '1') == '0':
+        return 0
+    named = collections.defaultdict(set)
+    for (n_, a_), (cls_, base_, _) in vnames.items():
+        if base_ is None:
+            named[a_].add(cls_)
+    n = 0
+    for a_, clss in named.items():
+        if len(clss) < 2 or a_ not in vmap:
+            continue
+        for cls_ in sorted(clss):
+            zs = sorted(by_cls.get(cls_, []))
+            if not zs or zs[0] == vmap[a_][0] or zs[0] not in rtti.where:
+                continue
+            pts = [p for p, ott in vtables.address_points(rtti.ents(zs[0]) or []) if ott == 0]
+            if pts[:1] != [8]:
+                continue
+            if all(x[0] != zs[0] for x in alt.get(a_, ())):
+                alt[a_].append((zs[0], 8, rtti.where[zs[0]][0].path, 'primary'))
+                n += 1
+    return n
+
+
 def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
                       providers=None, alt=None, msvc=None, listed=None, called_fn=None, unbound=None, defined_fn=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
@@ -4366,6 +4639,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     vt_on = bool(exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0' and
                  os.environ.get('FNVNX_VTFILL', '1') != '0' and os.environ.get('FNVNX_VTFILL2', '1') != '0')
     vt_only, vt_main = set(), set()   # (z, path) of a `secondary ... at +0` V row / of a primary one
+    exev_rtti = exev
+    exev, n_plain = plain_vtfill(exev, vmap, alt, exe_path, vt_on)
+    st['plain-vftables-filled'] = n_plain
     for v, (z, ap, path, note) in vmap.items():
         # only vftables with RTTI: their end is the next COL pointer; a plain one (exevft.plain_vftables) may run on
         # into an unnamed neighbour, so it only fills slots the native vtable has (exe_slot_fill)
@@ -4436,8 +4712,15 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     lay = {}
     if exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0':
         import classlayout
-        lrows = classlayout.build(exe_path, exev)
+        lrows = classlayout.build(exe_path, exev_rtti)
         lay = {r['vftable']: r for r in lrows}
+        # W49: the plain vftables plain_vtfill extended get the same decision for VTFILL (classlayout.tsv, which
+        # prepare and S1 read, stays the RTTI vftables')
+        for v_ in (v_ for v_ in exev if v_ not in exev_rtti or exev[v_] is not exev_rtti[v_]):
+            if (exev[v_].td or '').startswith('.fnvnx-plain-'):
+                kind_, k_, why_, _ = classlayout.decide(exe_path, exev[v_])
+                lay[v_] = dict(cls='', vftable=v_, kind=kind_, dtor_slot=k_, reason='plain: ' + why_)
+                st['classlayout-plain-rows'] += 1
         if out and os.path.isdir(out):
             classlayout.write_layout(lrows, os.path.join(out, 'classlayout.tsv'))
         st['classlayout-rows'] = len(lrows)
@@ -4607,7 +4890,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                         lines = ['// %s from the exe vftable(s) %s: VTFILL%s, %s%s, %d slots (classlayout)' % (
                                      z, ' '.join('%08x' % v for v in sorted(vs)), '2 (%d secondary)' % nsec if g2 else '',
                                      kind_, ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill)),
-                                 '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3',
+                                 '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(kind_ == 'minus-one', k=k_), z),
+                                 '    .p2align 3',
                                  '    .globl %s' % z, '    .type %s, %%object' % z, '%s:' % z] + words_ + \
                                 ['    .size %s, .-%s' % (z, z), '    .text']
                         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
@@ -4686,7 +4970,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
         # the primary vtable is the whole group: the extra slots go at its end
         lines = ['// %s from the exe vftable(s) %s: %d native slots + %d, %d slots per use (S2c-vt)' % (
                      z, ' '.join('%08x' % v for v in sorted(vs)), n, len(extra), len(ov)),
-                 '    .section .data.rel.ro.fnvnx_vtext.%s,"aw"' % z, '    .p2align 3', '    .globl %s' % z,
+                 '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(bool(m1), k=dp), z), '    .p2align 3',
+                 '    .globl %s' % z,
                  '    .type %s, %%object' % z, '%s:' % z] + slotfill2.place_extra(words, extra, shift, z, out) + ['    .size %s, .-%s' % (z, z), '    .text']
         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
         st['d26-minus-one-tables' if m1 else ('extended' if extra else 'copied-per-slot')] += 1
@@ -4983,7 +5268,11 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
         lines = ['// %s: exe vftable %08x in the %s order, %d exe slots (D26 c)' % (
                      name, v, 'classlayout %s' % row['kind'] if row is not None and pair is None else 'minus-one',
                      len(slots)),
-                 '    .section .data.rel.ro.fnvnx_vmo.%08x,"aw"' % v, '    .p2align 3', '    .globl %s' % name,
+                 '    .section .data.rel.ro.%s.%08x,"aw"' % (
+                     m1_section(not (row is not None and pair is None and row['kind'] != 'minus-one'), 'fnvnx_vmo',
+                                k=row['dtor_slot'] if row is not None and pair is None and row['kind'] == 'minus-one'
+                                else 0), v),
+                 '    .p2align 3', '    .globl %s' % name,
                  '    .hidden %s' % name, '    .type %s, %%object' % name, '%s:' % name,
                  '    .word 0x%x' % (ott & 0xffffffff), '    .word 0'] + ['    .word %s' % w for w in words] + \
                 ['    .size %s, .-%s' % (name, name), '    .text']
@@ -6158,6 +6447,14 @@ def apply(out, fixed):
         argfile = os.path.join(out, 'objcopy', name)
         if open(argfile).read().strip():
             r = subprocess.run([OBJCOPY, '@' + argfile, obj, dst], capture_output=True, text=True)
+            if r.returncode and '--rename-section=' in open(argfile).read():
+                # the m1 section renames (m1_compiled_renames) are only a placement: an objcopy they break (a second
+                # rename of one section, an --add-symbol naming the old section) must not drop the whole unit
+                log('objcopy failed for %s with the m1 renames, retried without: %s' % (base, r.stderr.strip()[:300]))
+                kept = [a for a in open(argfile).read().splitlines() if not a.startswith('--rename-section=')]
+                with open(argfile + '.nom1', 'w', encoding='utf-8', errors='surrogateescape') as f:
+                    f.write('\n'.join(kept) + '\n')
+                r = subprocess.run([OBJCOPY, '@' + argfile + '.nom1', obj, dst], capture_output=True, text=True)
             if r.returncode:
                 log('objcopy failed for %s: %s' % (base, r.stderr.strip()[:500]))
                 continue

@@ -1844,7 +1844,7 @@ check('D26 call-only: the slot-0 placeholder becomes FNVNX_D22 (no list)', _coo,
       ['FNVNX_D22(HeapStandIn, virtual void v0();) /* fnv-nx D22 */', 'virtual void v1();'])
 check('D26 call-only: one virtual only, a defined virtual, a base, a called placeholder, a derived class: nothing',
       run(s1.r_vtable_dtor_slot, 'struct A\n{\n    virtual void v0();\n};\n') +
-      run(s1.r_vtable_dtor_slot, _CO + 'void HeapStandIn::v1() {}\n') +
+      run(s1.r_vtable_dtor_slot, _CO + 'int g_v1;\nvoid HeapStandIn::v1() { g_v1 = 1; }\n') +
       run(s1.r_vtable_dtor_slot, _CO.replace('struct HeapStandIn\n', 'struct HeapStandIn : B\n')) +
       run(s1.r_vtable_dtor_slot, _CO + 'void g(HeapStandIn* h) { h->v0(); }\n') +
       run(s1.r_vtable_dtor_slot, _CO + 'struct D : HeapStandIn\n{\n    void v0() {}\n};\n'),
@@ -2187,6 +2187,67 @@ check('VFPAD1 puts FNVNX_VFPAD(member types) first in a no-base class with a vfp
              'struct VP8 { FNVNX_VFPAD_PACK(8, hkVector4) virtual', 'class NF\n{ FNVNX_VFPAD(double)\n'],
       ['struct VS { FNVNX', 'struct VB : B { FNVNX', 'struct VN { FNVNX', 'struct hkpSphereMotionD1E4 { FNVNX',
        'struct VP4 { FNVNX', 'int*)'])
+
+# ---- S5-boot: RAWVT1-MEM (the vptr as a data member; BSDiscBootSystemUtility::Initialize recursed, link af44165ab2d8)
+_RM = ('class BSDisc\n{\n  public:\n    void** m_ppVirtualMethodTable;\n    int n;\n    void Init();\n    void Count();\n};\n'
+       'typedef void(__thiscall* DestroyFn)(BSDisc*);\n'
+       'void BSDisc::Init()\n{\n    ((DestroyFn)m_ppVirtualMethodTable[2])(this);\n}\n'
+       'void BSDisc::Count()\n{\n    int c = (int)m_ppVirtualMethodTable[7];\n    n = c;\n}\n'
+       'struct Ren { void f(); int pad; };\nvoid Ren::f()\n{\n    void** vtbl = *(void***)this;\n'
+       '    ((void (__thiscall*)(void*, int))vtbl[0x1a])(this, 1);\n}\n'
+       'struct Vv { virtual void g(); void** vtable; void h(); };\nvoid Vv::h()\n{\n    ((DestroyFn)vtable[3])(0);\n}\n')
+_rmo = run(s1.r_raw_vtable_slots, _RM)
+check('RAWVT1-MEM: a called slot of the vptr member / a local *(void***)this gets FNVNX_D26_SLOT; a data read and a '
+      'member of a class with virtuals do not',
+      _rmo, ['m_ppVirtualMethodTable[FNVNX_D26_SLOT(2)]', 'vtbl[FNVNX_D26_SLOT(0x1a)]'],
+      ['m_ppVirtualMethodTable[FNVNX_D26_SLOT(7)]', 'vtable[FNVNX_D26_SLOT(3)]'])
+
+# ---- S5-boot: D22 call-only with empty out-of-class definitions (FUN_00aa1420's S_00aa1420_Object, NiAlloc corruption)
+_OC = ('struct S_00aa1420_Object\n{\n    virtual void S_00aa1420_v0();\n    virtual void S_00aa1420_v1(int* a, int b);\n};\n\n'
+       'inline void S_00aa1420_Object::S_00aa1420_v0()\n{}\n\ninline void S_00aa1420_Object::S_00aa1420_v1(int* a, int b)\n{}\n\n'
+       'struct H { S_00aa1420_Object* m_00; };\nvoid f(H* h) { int v; h->m_00->S_00aa1420_v1(&v, 1); }\n')
+check('D22 call-only: empty out-of-class definitions are placeholders; slot 0\'s definition goes under FNVNX_D22_DROP',
+      run(s1.r_vtable_dtor_slot, _OC),
+      ['FNVNX_D22(S_00aa1420_Object, virtual void S_00aa1420_v0();)',
+       'FNVNX_D22_DROP(inline void S_00aa1420_Object::S_00aa1420_v0()\n{})',
+       'inline void S_00aa1420_Object::S_00aa1420_v1(int* a, int b)\n{}'])
+
+# ---- S5-boot: RAWVT1-RECV (another receiver whose class has a minus-one classlayout row)
+import tempfile as _tf
+_clf = _tf.NamedTemporaryFile('w', suffix='.tsv', delete=False)
+_clf.write('# fnvnx-classlayout/1\nclass\tvftable\tkind\tdtor_slot\treason\tfile\tqualified\tevidence\tslots\n'
+           'BSExtraData\t0x01\tminus-one\t0\t-\t\tBSExtraData\t-\t-\nIDevX\t0x02\tcom\t-1\t-\t\tIDevX\t-\t-\n'); _clf.close()
+_save_cl = os.environ.get('FNVNX_CLASSLAYOUT'); os.environ['FNVNX_CLASSLAYOUT'] = _clf.name
+prepare.__dict__.pop('_fnvnx_classlayout', None)
+_RR = ('typedef bool(__thiscall* CmpFn)(BSExtraData*, BSExtraData*);\n'
+       'bool f(BSExtraData* apExtra, BSExtraData* w, void* raw)\n{\n'
+       '    if (((CmpFn)apExtra->m_ppVirtualMethodTable[1])(apExtra, w)) return 1;\n'
+       '    return ((CmpFn)((void**)raw)[1])(0, 0);\n}\n'
+       'void g(Shell* s)\n{\n    ((CmpFn)s->vtable[2])(0, 0);\n}\n')
+check('RAWVT1-RECV: a receiver with a minus-one classlayout row gets FNVNX_D26_SLOT; one without a row does not',
+      run(s1.r_raw_vtable_slots, _RR), ['apExtra->m_ppVirtualMethodTable[FNVNX_D26_SLOT(1)]'], ['s->vtable[FNVNX'])
+if _save_cl is None: os.environ.pop('FNVNX_CLASSLAYOUT', None)
+else: os.environ['FNVNX_CLASSLAYOUT'] = _save_cl
+prepare.__dict__.pop('_fnvnx_classlayout', None)
+
+# ---- S5-boot: RAWVT1-DYN (an undecided receiver: the slot is chosen at run time, fnvnx_rawvt.h)
+_DY = ('typedef int(__thiscall* F)(void*);\nint f(void* raw, IDirect3DDevice9* dev)\n{\n'
+       '    int a = ((F)(*(void***)raw)[7])(raw);\n    return a + ((F)(*(void***)dev)[3])(dev);\n}\n')
+_dyo = run(s1.r_raw_vtable_slots, _DY)
+check('RAWVT1-DYN: an undecided receiver -> FNVNX_RAWVT_DYN(vptr, k) and the header; a COM name stays',
+      _dyo, ['FNVNX_RAWVT_DYN((*(void***)raw), 7)', '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */'],
+      ['FNVNX_RAWVT_DYN((*(void***)dev)'])
+
+# ---- S5-boot: VTM1 (a struct modelling an exe vftable gets one pointer after the destructor slot under GCC)
+_VM = ('namespace {\nstruct VTable\n{\n    void* f0;\n    void* f1;\n    void(__thiscall* f2)(void*);\n};\n'
+       'struct Obj\n{\n    VTable* vt;\n};\n}\n'
+       'struct ComVtbl { long (__stdcall* QueryInterface)(void*); void* f1; };\n'
+       'struct ShaderEntry { const char* f00; const char* f01; };\n'
+       'struct InitVt { void* f0; void* f1; };\nInitVt g_t = {0, 0};\n')
+_vmo = run(s1.r_vtable_model_pad, _VM)
+check('VTM1: the vftable model gets FNVNX_VTM1_PAD after f0 and the header; COM, a data struct, an initialised table do not',
+      _vmo, ['void* f0; FNVNX_VTM1_PAD /* fnv-nx VTM1 */', '#include "fnvnx_vtm.h" /* fnv-nx VTM1 */'],
+      ['QueryInterface)(void*); FNVNX', 'f00; FNVNX', 'struct InitVt { void* f0; FNVNX'])
 
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

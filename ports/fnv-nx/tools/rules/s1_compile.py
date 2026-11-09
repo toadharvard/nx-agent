@@ -5980,6 +5980,9 @@ def d22_placeholder(masked, cls, decl, ignore=(), reach=None):
     # the text without this declaration and other classes' virtual declarations of the same name, as spans blanked
     # (T1: read through an index of the file's words, not rebuilt and scanned per name; _d22_finditer)
     spans = [(start, end)] + [(a, b) for a, b in ignore if (a, b) != (start, end)]
+    # an empty out-of-class definition of the member is a placeholder as well (D22 drops it under GCC)
+    spans += [(d.start(), d.end()) for d in _d22_out_of_class_defs(masked, cls)
+              if d.group('mem') == member and D22_EMPTY_BODY.search(d.group(0))]
     rest = _D22Rest(masked, spans)
     if _d22_search(r'(?<![\w~])%s\s*::\s*%s\s*\(' % (re.escape(cls), re.escape(member)), cls, masked, spans): return False
     for u in _d22_finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), member, masked, spans):
@@ -6220,7 +6223,16 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
     # S2-bodies' PHSLOT1 makes the empty ones declarations as well)
     if any('{' in masked[v[0]:v[1]] and not (unit and D22_EMPTY_BODY.search(masked[v[0]:v[1]])) for v in c['virtuals']):
         return False                                     # (a header's includers could build the class: .cpp only)
-    if any('{' in masked[v[0]:v[1]] for v in c['virtuals']):
+    name = c['qual'][-1]
+    members = {v[2] for v in c['virtuals'] if v[2]}
+    # S5-boot (link af44165ab2d8, NiAlloc corruption): an out-of-class definition with an empty body
+    # (`inline void S_00aa1420_Object::S_00aa1420_v1(...) {}`) is a placeholder too, as an empty inline body is
+    outside = []
+    for m in _d22_out_of_class_defs(masked, name):
+        if m.group('mem') not in members: continue
+        if not (unit and D22_EMPTY_BODY.search(m.group(0))): return False
+        outside.append(m)
+    if outside or any('{' in masked[v[0]:v[1]] for v in c['virtuals']):
         # with inline bodies GCC can build the class (its vtable from those bodies); once `virtual ~C()` is the key
         # function nothing defines, a construction would need it. Only a class the file never uses as an object:
         # its name only as `C*`, `C&`, `C::`, in its own body or after `struct` / `class`
@@ -6230,11 +6242,19 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
             if re.match(r'\s*(?:\*|&|::)', masked[u.end():u.end() + 4]): continue
             if re.search(r'(?:struct|class)\s+$', masked[max(0, u.start() - 12):u.start()]): continue
             return False
-    name = c['qual'][-1]
-    members = {v[2] for v in c['virtuals'] if v[2]}
+    spans = [(m.start(), m.end()) for m in outside]
     for m in _d22_finditer(r'(?<![\w~])%s\s*(?:<[^;{}()]*>\s*)?::\s*(~?\s*[A-Za-z_]\w*)\s*\(' % re.escape(name), name, masked):
+        if any(a <= m.start() < b for a, b in spans): continue
         if re.sub(r'\s+', '', m.group(1)) in members: return False
     return True
+
+
+def _d22_out_of_class_defs(masked, name):
+    """the out-of-class definitions `[inline] T C::member(...) [const] { ... }` of class `name` whose body has no
+    nested brace (the whole definition in group 0, the member in 'mem')"""
+    return re.finditer(r'(?m)^[ \t]*(?:inline[ \t]+|__forceinline[ \t]+)?[\w:<>*& \t]*?(?<![\w~])%s[ \t]*::[ \t]*'
+                       r'(?P<mem>[A-Za-z_]\w*)[ \t]*\((?:[^()]|\([^()]*\))*\)[ \t]*(?:const[ \t]*)?\s*\{[^{}]*\}'
+                       % re.escape(name), masked)
 
 def _d22_defines_none(masked, c):
     """class c defines no member function in the file (no body in the class, no `C::member(` definition) and
@@ -6452,6 +6472,19 @@ def r_vtable_dtor_slot(path, text, stats):
             stats['D22-CALLONLY'] -= 1
         edits = [e for i, e in enumerate(edits) if i not in drop]
     for e in list(edits):
+        # D22-DEFDROP: a converted placeholder is `virtual ~C()` under GCC now (every path: call-only, listed,
+        # classlayout); its empty out-of-class definition goes too (S5 link 17f5b96e33fe: tesobjectcell.cpp's
+        # hkpEntityListener::FUN_004f0000 and blk_00b00000_od.cpp's BSWin32TaskletManager::vf00 stayed defined)
+        cm = re.match(r'FNVNX_D22I?\((\w+), (.*)\)$', e[2], re.S)
+        if not cm: continue
+        mm = re.search(r'([A-Za-z_]\w*)\s*\(', cm.group(2))
+        if not mm: continue
+        for d in _d22_out_of_class_defs(masked, cm.group(1)):
+            if d.group('mem') == mm.group(1) and D22_EMPTY_BODY.search(d.group(0)) and \
+                    not any(x[0] == d.start() for x in edits):
+                edits.append((d.start(), d.end(), 'FNVNX_D22_DROP(%s)' % text[d.start():d.end()].strip('\n')))
+                stats['D22-DEFDROP'] += 1
+    for e in list(edits):
         # D22-DTOR: the class's own body-less `~C();` goes under GCC (`virtual ~C()` declares it now)
         if e[0] in dtor_drops and e[2].startswith(('FNVNX_D22(', 'FNVNX_D22I(')):
             a, b = dtor_drops[e[0]]
@@ -6668,12 +6701,227 @@ def _rawvt_exe_order():
 # Destroy, TESLeveledList, ListBox<>, Tile3D...) or is not a destructor at all
 D22_EXE_ORDER_REASONS = {'defined-slot0', 'd26-slot0-not-a-destructor', 'd22-used', 'com'}
 
+# RAWVT1-MEM (S5-boot, link af44165ab2d8: the heap ctor dyninit 00fb66a0 overflowed the stack): the decomp also models
+# the vptr as the class's first data member, `void** m_ppVirtualMethodTable;` (or vtable / vtbl / m_vtbl / m_pVtbl /
+# vptr), and indexes it on `this`: BSDiscBootSystemUtility::Initialize (0x00af3aa0) calls m_ppVirtualMethodTable[2],
+# exe slot 2 = BSSystemUtility::Destroy 0x00af3250 (exe [edx+8] at 0x00af3aaf); natively [vptr+8] is slot 2 of the
+# minus-one table, Initialize itself. The same index on such a member, bare or `this->`, inside a member function of
+# its class, or on a local initialised from `*(void***)this` / `*reinterpret_cast<void***>(this)`, gets
+# FNVNX_D26_SLOT(k) under RAWVT1's conditions. Not when the class in the file declares a virtual function (its first
+# data member is then not the vptr), the name is a local or parameter of another kind (RAWVT1-MEM-LOCAL), or the slot
+# read is not called (RAWVT1-MEM-DATA: a cast to a builtin type, no call of the variable it is stored in).
+RAWVT1_MEMBERS = r'(?:m_ppVirtualMethodTable|vtable|vtbl|m_vtbl|m_pVtbl|vptr|_vtable)'
+RAWVT1_MEM_RX = re.compile(r'(?<![\w.>:])((?:this\s*->\s*)?(%s)\s*\[\s*)([0-9]+|0[xX][0-9a-fA-F]+)(\s*\])' % RAWVT1_MEMBERS)
+RAWVT1_THIS_VPTR = re.compile(r'^\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*this\s*\)|'
+                              r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*\(?\s*this\s*\)?)\s*;')
+
+
+def _rawvt_mem_ok(masked, body_open, pos, name):
+    """True when `name` at pos is the object's vptr: not declared in the function before pos, or declared as a local
+    initialised from *(void***)this"""
+    seg = masked[body_open:pos]
+    sig_start = masked.rfind('\n', 0, body_open)
+    head = masked[max(0, sig_start - 400):body_open]
+    if re.search(r'[\w*&>\s]\b%s\s*[,)]' % re.escape(name), head[head.rfind('('):] if '(' in head else ''):
+        return False                                                       # a parameter of that name
+    d = None
+    for d in re.finditer(r'\b(?:void\s*\*\s*\*|void\s*\*\s*const\s*\*|auto|[A-Za-z_]\w*\s*\*+)\s*%s\s*(=|;|\[)'
+                         % re.escape(name), seg):
+        pass
+    if d is None:
+        return True
+    if d.group(1) != '=':
+        return False
+    return bool(RAWVT1_THIS_VPTR.match(seg[d.end():d.end() + 120]))
+
+
+_RAWVT_BUILTIN = re.compile(r'^\s*(?:(?:const|unsigned|signed|int|long|short|char|bool|float|double|void|'
+                            r'size_t|DWORD|UINT|INT|BOOL)\b\s*\**\s*)+$')
+
+
+def _rawvt_mem_called(masked, m):
+    """True when the slot read at m is called: under a cast to a function pointer or a typedef'd type (not a builtin:
+    blk_00cc0000's FUN_00cd9f10 reads `(int)m_ppVirtualMethodTable[7]`, a count behind a data pointer, exe
+    [[esi]+0x1c] * 48), or stored in a variable that the function then calls"""
+    before = masked[max(0, m.start() - 200):m.start()]
+    before = before[max(before.rfind(';'), before.rfind('{'), before.rfind('}')) + 1:]
+    c = re.search(r'(?:reinterpret_cast\s*<((?:[^<>]|<[^<>]*>)*)>|\(((?:[^()]|\([^()]*\))*)\))\s*\(?\s*$', before)
+    if c:
+        t = c.group(1) or c.group(2)
+        return '(' in t or not _RAWVT_BUILTIN.match(t)
+    v = re.search(r'([A-Za-z_]\w*)\s*=\s*$', before)
+    if v:
+        after = masked[m.end():m.end() + 600]
+        return bool(re.search(r'(?:\b%s\s*\)?\s*\(|\(\s*\([^()]*\)\s*%s\s*\)\s*\()' % (re.escape(v.group(1)), re.escape(v.group(1))), after))
+    return False
+
+
+# RAWVT1-RECV (S5-boot, orchestrator: close the raw-slot class over the tree): the same index on another receiver X
+# (`X->vtbl[k]`, `X.m_ppVirtualMethodTable[k]`, `(*(void***)X)[k]`) gets FNVNX_D26_SLOT(k) when X is declared in the
+# function before it as `T* X` / `T& X` and T has a minus-one classlayout row whose destructor slot K is below k, and
+# the slot read is called. A receiver without a row (void*, the D3D / COM-like shells) is RAWVT1-RECV-AMBIG, a COM
+# name RAWVT1-RECV-COM, k <= K RAWVT1-RECV-K, an exe-order row RAWVT1-RECV-KEEP.
+RAWVT1_RECV_MEM = re.compile(r'(?<![\w.>])([A-Za-z_]\w*)\s*(?:->|\.)\s*%s\s*\[\s*([0-9]+|0[xX][0-9a-fA-F]+)\s*\]'
+                             % RAWVT1_MEMBERS)
+RAWVT1_RECV_CAST = re.compile(r'\(\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*([A-Za-z_]\w*)\s*\)|'
+                              r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*\(?\s*([A-Za-z_]\w*)\s*\)?)\s*\)\s*\[\s*'
+                              r'([0-9]+|0[xX][0-9a-fA-F]+)\s*\]')
+
+
+# The receivers RAWVT1-RECV cannot type from the source are decided against the exe (S1-rules, private recon branch
+# recon/s1_rawvt_sites: rawvt_sites.tsv, `# fnvnx-rawvt-sites/1`, unit / exe function / receiver / slot / decision /
+# evidence): at the exe's call site a thiscall (the receiver in ecx) is a C++ object, whose native table is minus-one
+# (decision shift); a stdcall with the receiver pushed is a COM interface (ok-com, left); later rows come from S5's
+# runtime vptr log. FNVNX_RAWVT_SITES or any rawvt_sites.tsv under FNVNX_RECON; cached on prepare.
+def _rawvt_sites():
+    got = prepare.__dict__.get('_fnvnx_rawvt_sites')
+    if got is not None: return got
+    files = [os.environ['FNVNX_RAWVT_SITES']] if os.environ.get('FNVNX_RAWVT_SITES') else []
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'rawvt_sites.tsv') for dp, _, ns in os.walk(top) if 'rawvt_sites.tsv' in ns)
+    got = {}
+    for f in files:
+        try: lines = open(f).read().splitlines()
+        except OSError: continue
+        if not lines or not lines[0].startswith('# fnvnx-rawvt-sites/1'): continue
+        for line in lines[1:]:
+            fs = line.split('\t')
+            if len(fs) < 5 or line.startswith('#'): continue
+            try: got[(fs[0].strip(), int(fs[1], 16), fs[2].strip(), int(fs[3], 0))] = fs[4].strip()
+            except ValueError: continue
+    prepare.__dict__['_fnvnx_rawvt_sites'] = got
+    return got
+
+
+def _rawvt_site_decision(path, masked, pos, var, k):
+    sites = _rawvt_sites()
+    if not sites: return None
+    tags = re.findall(r'@fnv\s+0x([0-9a-fA-F]{8})', masked[:pos])
+    if not tags: return None
+    p = path.replace('\\', '/')
+    i = p.rfind('/src/')
+    unit = p[i + 1:] if i >= 0 else p
+    return sites.get((unit, int(tags[-1], 16), var, k))
+
+
+def _rawvt_recv(path, masked, owners, stats, text=None):
+    """[(start, end) of k] for RAWVT1-RECV (above)"""
+    out = []
+    for rx, kind in ((RAWVT1_RECV_MEM, 'mem'), (RAWVT1_RECV_CAST, 'cast')):
+        for m in rx.finditer(masked):
+            var = m.group(1) if kind == 'mem' else (m.group(1) or m.group(2))
+            if var == 'this': continue
+            ki = 2 if kind == 'mem' else 3
+            body = next((a for a, z, nm in owners if a < m.start() < z), None)
+            seg = masked[body if body is not None else max(0, m.start() - 3000):m.start()]
+            if body is not None:
+                seg = masked[max(0, masked.rfind('\n', 0, max(0, body - 300))):m.start()]   # with the parameters
+            d = None
+            for d in re.finditer(r'\b([A-Za-z_][\w:]*)\s*(?:<[^;{}()]*>)?\s*[*&]+\s*(?:const\s*)?%s\b' % re.escape(var), seg):
+                pass
+            T = d.group(1).split('::')[-1] if d else None
+            row = _classlayout_row(path, T) if T and T not in ('void', 'char', 'int', 'unsigned', 'const') else None
+            if T and D22_COM_NAME.match(T): stats['RAWVT1-RECV-COM'] += 1; continue
+            if row is None:
+                dec = _rawvt_site_decision(path, text or masked, m.start(), var, int(m.group(ki), 0))
+                if dec == 'shift' and _rawvt_mem_called(masked, m):
+                    out.append((m.start(ki), m.end(ki))); stats['RAWVT1-RECV-EXE'] += 1
+                elif dec and dec.startswith('ok'): stats['RAWVT1-RECV-OK'] += 1
+                elif _rawvt_mem_called(masked, m):
+                    # RAWVT1-DYN: decided at run time by where the vptr points (fnvnx_rawvt.h)
+                    vp = (text or masked)[m.start():m.end()].rsplit('[', 1)[0].rstrip()
+                    out.append((m.start(), m.end(), 'FNVNX_RAWVT_DYN(%s, %s)' % (vp, m.group(ki))))
+                    stats['RAWVT1-DYN'] += 1
+                else: stats['RAWVT1-RECV-AMBIG'] += 1
+                continue
+            if row[0] != 'minus-one' or row[1] < 0: stats['RAWVT1-RECV-KEEP'] += 1; continue
+            if int(m.group(ki), 0) <= row[1]: stats['RAWVT1-RECV-K'] += 1; continue
+            if T in _rawvt_exe_order(): stats['RAWVT1-RECV-KEEP'] += 1; continue
+            if not _rawvt_mem_called(masked, m): stats['RAWVT1-RECV-DATA'] += 1; continue
+            out.append((m.start(ki), m.end(ki)))
+            stats['RAWVT1-RECV'] += 1
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------- VTM1
+#
+# S5-boot (link 0829588572d1, an endless loop in the heap ctor dyninit): bsgamedatasystemutility.cpp's
+# FUN_00af39e0_shell::CallVirtualMethod2 (0x00af39e0) calls `reinterpret_cast<Obj*>(this)->vt->f2(this)`, exe
+# [edx+8] = slot 2 (0x00af3a00), through `struct VTable { void* f0; void* f1; void(__thiscall* f2)(void*); }`; the
+# object's native table (_ZTV12FUN_00af3980) is minus-one, so native +8 is CallVirtualMethod2 itself. A struct that
+# models an exe vftable (every member a pointer, at least two, the first named f0 / fn0 / vf0 / vfunc00 / v0 /
+# slot0 / ..., or the struct named *vt* / *vtable* / *vtbl* with numbered members) gets FNVNX_VTM1_PAD (fnvnx_vtm.h:
+# one pointer under GCC) after the entry of the destructor slot K: K from a classlayout class named in the struct's
+# name (the longest), else 0; none when that class is not minus-one, or when the struct is COM-shaped (__stdcall,
+# HRESULT, QueryInterface / AddRef / Release) (VTM1-COM / VTM1-KEEP).
+VTM1_STRUCT = re.compile(r'\bstruct\s+([A-Za-z_]\w*)\s*\{([^{}]*)\}')
+VTM1_FIRST = re.compile(r'^(?:f|fn|vf|vfn|vfunc|v|slot|func|pfn|m_pfn)_?0+$', re.I)
+
+
+def _vtm1_members(body):
+    """[(end offset of the declaration's `;` in body, member name)] when every declaration is a pointer, else None"""
+    out = []
+    for m in re.finditer(r'[^;]*;', body):
+        d = m.group(0).strip().rstrip(';').strip()
+        if not d or d.startswith('//'): continue
+        fp = re.search(r'\(\s*(?:__\w+\s*)?\*\s*(?:const\s*)?([A-Za-z_]\w*)\s*\)\s*\(', d)
+        if fp: out.append((m.end(), fp.group(1))); continue
+        vp = re.fullmatch(r'(?:const\s+)?[\w:<>]+\s*\*+\s*(?:const\s*)?([A-Za-z_]\w*)', d, re.S)
+        if vp: out.append((m.end(), vp.group(1))); continue
+        return None
+    return out
+
+
+def r_vtable_model_pad(path, text, stats):
+    """VTM1: a struct modelling an exe vftable gets FNVNX_VTM1_PAD after its destructor slot's entry (see above)."""
+    if 'struct' not in text: return text
+    edits = []
+    cl = _classlayout()
+    names = sorted({n for (n, f) in cl if len(n) >= 4}, key=len, reverse=True) if cl else []
+    for m in VTM1_STRUCT.finditer(text):
+        name, body = m.group(1), m.group(2)
+        if 'FNVNX_VTM1_PAD' in body: continue
+        mem = _vtm1_members(body)
+        if not mem or len(mem) < 2: continue
+        # the struct's name says it is a vftable (VTable / Vtbl / _vt / vftable); a D3D / device model stays (COM)
+        if not re.search(r'(?:v(?:table|tbl|ftable)|_vt$|^vt$|(?<=[a-z0-9])Vt$|_VT$)', name, re.I): continue
+        if re.search(r'D3D|Device|Direct|Dx', name): stats['VTM1-COM'] += 1; continue
+        if not (VTM1_FIRST.match(mem[0][1]) or re.search(r'\d', mem[0][1])): continue
+        if D22_COM_CONV.search(body) or any(n in D22_COM_MEMBER for _, n in mem):
+            stats['VTM1-COM'] += 1; continue
+        if re.search(r'\b%s\b[^;(){}]*=\s*\{' % re.escape(name), text):
+            stats['VTM1-INIT'] += 1; continue           # a table defined with a positional initializer: data, not a model
+        K = 0
+        owner = next((n for n in names if n in name), None)
+        if owner:
+            row = _classlayout_row(path, owner)
+            if row and (row[0] != 'minus-one' or row[1] < 0): stats['VTM1-KEEP'] += 1; continue
+            if row: K = row[1]
+        if K >= len(mem) - 1: continue
+        at = m.start(2) + mem[K][0]
+        edits.append(at)
+        stats['VTM1'] += 1
+    if not edits: return text
+    for at in sorted(edits, reverse=True):
+        text = text[:at] + ' FNVNX_VTM1_PAD /* fnv-nx VTM1 */' + text[at:]
+    if 'fnvnx_vtm.h' not in text:
+        text = '#include "fnvnx_vtm.h" /* fnv-nx VTM1 */\n' + text
+    return text
+
+RULES.insert(RULES.index(r_vfptr_pad) + 1, r_vtable_model_pad)
+
+
 def r_raw_vtable_slots(path, text, stats):
-    """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above)."""
-    if 'this' not in text or '***' not in text.replace(' ', ''): return text
+    """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above); RAWVT1-MEM: the same on the vptr
+    modelled as a data member."""
+    pass
+    if '***' not in text.replace(' ', '') and not re.search(RAWVT1_MEMBERS + r'\s*\[', text): return text
     masked = d22_mask(text)
     hits = [m for m in RAWVT1_RX.finditer(masked)]
-    if not hits: return text
+    mem = [m for m in RAWVT1_MEM_RX.finditer(masked)]
+    recv_any = RAWVT1_RECV_MEM.search(masked) or RAWVT1_RECV_CAST.search(masked)
+    if not hits and not mem and not recv_any: return text
     classes = d22_classes(text, masked)
     owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
     for m in D22_MEMBER_DEF.finditer(masked):
@@ -6685,8 +6933,19 @@ def r_raw_vtable_slots(path, text, stats):
     by_name = collections.defaultdict(list)
     for c in classes: by_name[c['qual'][-1]].append(c)
     edits = []
-    for m in hits:
-        k = int(m.group(2), 0)
+    cands = [(m, m.start(2), m.end(2), 'RAWVT1') for m in hits]
+    for m in mem:
+        own = next(((a, nm) for a, z, nm in owners if a < m.start() < z), None)
+        if own is None: stats['RAWVT1-MEM-FREE'] += 1; continue
+        if any(re.search(r'\bvirtual\b', masked[c['open']:c['close']]) for c in by_name.get(own[1], ())):
+            stats['RAWVT1-MEM-VIRT'] += 1; continue
+        if not _rawvt_mem_ok(masked, own[0], m.start(), m.group(2)):
+            stats['RAWVT1-MEM-LOCAL'] += 1; continue
+        if not _rawvt_mem_called(masked, m):
+            stats['RAWVT1-MEM-DATA'] += 1; continue
+        cands.append((m, m.start(3), m.end(3), 'RAWVT1-MEM'))
+    for m, ka, kz, tag in cands:
+        k = int(masked[ka:kz], 0)
         owner = next((nm for a, z, nm in owners if a < m.start() < z), None)
         if owner is None: stats['RAWVT1-FREE'] += 1; continue
         if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
@@ -6698,8 +6957,14 @@ def r_raw_vtable_slots(path, text, stats):
         if k == K: stats['RAWVT1-SLOT0'] += 1; continue
         if k < K: stats['RAWVT1-BELOWK'] += 1; continue
         if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
-        edits.append((m.start(2), m.end(2), 'FNVNX_D26_SLOT(%s)' % text[m.start(2):m.end(2)]))
-    for a, b, rep in sorted(edits, reverse=True):
+        edits.append((ka, kz, 'FNVNX_D26_SLOT(%s)' % text[ka:kz]))
+        if tag != 'RAWVT1': stats[tag] += 1
+    if recv_any:
+        rv = _rawvt_recv(path, masked, owners, stats, text)
+        edits += [(e[0], e[1], e[2]) if len(e) == 3 else (e[0], e[1], 'FNVNX_D26_SLOT(%s)' % text[e[0]:e[1]]) for e in rv]
+        if any(len(e) == 3 for e in rv) and 'fnvnx_rawvt.h' not in text:
+            edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
+    for a, b, rep in sorted(set(edits), reverse=True):
         text = text[:a] + rep + text[b:]
     stats['RAWVT1'] += len(edits)
     return text
