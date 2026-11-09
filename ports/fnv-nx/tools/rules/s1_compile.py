@@ -6922,6 +6922,9 @@ RULES.insert(RULES.index(r_vfptr_pad) + 1, r_vtable_model_pad)
 _RAWVT_ANY_TYPE = r'(?:const\s+)?(?:void\s*\*|int|unsigned(?:\s+int)?|unsigned\s+long|long|DWORD|UINT|uintptr_t|char\s*\*|\w+_Fn|FARPROC|PVOID)'
 _RAWVT_ANY_IDX = re.compile(r'\(\s*\*\s*(?:\(\s*' + _RAWVT_ANY_TYPE + r'\s*\*\s*\*\s*\)|reinterpret_cast\s*<\s*' +
                             _RAWVT_ANY_TYPE + r'\s*\*\s*\*\s*>)\s*|\(\s*\(\s*void\s*\*\s*\*\s*\)\s*\*\s*\(\s*void\s*\*\s*\*\s*\)\s*')
+# a cast to a pointer to a function pointer, `*(void(__thiscall**)(void*))(` or `*(Fn*)(` / `*(Fn**)(` (Fn a typedef)
+_RAWVT_ANY_FNPP = re.compile(r'\*\s*\(\s*(?:[^()]*\(\s*(?:__\w+\s*)?\*\s*\*\s*\)\s*\((?:[^()]|\([^()]*\))*\)|'
+                             r'[A-Za-z_]\w*(?:Fn|Func|Proc|Callback|Method|Slot|Handler|Thunk|_t)\w*\s*\*{1,2})\s*\)\s*\(')
 # the vptr as an integer: *(int*)(*(int*)X + off) - a byte offset on the first word read as int
 _RAWVT_ANY_INT = re.compile(r'(\*\s*\(\s*(?:int|unsigned(?:\s+int)?|DWORD|uintptr_t)\s*\*\s*\)\s*\(\s*)\*\s*\(\s*'
                             r'(?:int|unsigned(?:\s+int)?|DWORD|uintptr_t)\s*\*\s*\)\s*')
@@ -6978,6 +6981,21 @@ def _rawvt_any(masked, text, stats):
         recv = text[m.end():e].strip()
         out.append((e + r.start(1), e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
         stats['RAWVT1-ANY-INT'] += 1
+    # the slot address as integer arithmetic under a cast to a function-pointer pointer (ninode.cpp 0x00a5db30:
+    # `(*(void(__thiscall**)(void*))(*(int*)this + 0xbc))(this)`, `(*(...)(*pParent + 0xfc))(pParent)`, pParent an int*)
+    for m in _RAWVT_ANY_FNPP.finditer(masked):
+        i = m.end()
+        n = re.match(r'\s*\*\s*(?:\(\s*(?:const\s+)?(?:int|unsigned(?:\s+int)?|DWORD|uintptr_t|long)\s*\*\s*\)\s*)?', masked[i:])
+        if not n or '*' not in n.group(0): continue
+        e = _rawvt_operand(masked, i + n.end())
+        if e is None: continue
+        r = re.match(r'\s*\+\s*(0[xX][0-9a-fA-F]+|[0-9]+)\s*\)', masked[e:])
+        if not r: continue
+        off = int(r.group(1), 0)
+        if off % 4 or off == 0: continue
+        recv = text[i + n.end():e].strip()
+        out.append((e + r.start(1), e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
+        stats['RAWVT1-ANY-FNPP'] += 1
     for m in _RAWVT_ANY_OFF.finditer(masked):
         e = _rawvt_operand(masked, m.end())
         if e is None: continue
@@ -7008,7 +7026,7 @@ def r_raw_vtable_slots(path, text, stats):
     mem = [m for m in RAWVT1_MEM_RX.finditer(masked)]
     recv_any = RAWVT1_RECV_MEM.search(masked) or RAWVT1_RECV_CAST.search(masked)
     if not hits and not mem and not recv_any and not _RAWVT_ANY_IDX.search(masked) and not _RAWVT_ANY_OFF.search(masked) \
-            and not _RAWVT_ANY_INT.search(masked):
+            and not _RAWVT_ANY_INT.search(masked) and not _RAWVT_ANY_FNPP.search(masked):
         return text
     classes = d22_classes(text, masked)
     owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
