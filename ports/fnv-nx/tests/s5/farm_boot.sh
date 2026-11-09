@@ -237,7 +237,7 @@ boot() {   # boot <tag> [extra emu_guest.py args]
 }
 for tag in $BOOTS; do
   case "$tag" in
-    raw) boot raw ;;
+    raw) boot raw "${NULLDEV_ARGS[@]}" ;;   # FNVNX_STUB_NULLDEV=1: the null device without stand-ins
     slots) boot slots --exe-vtables "${INJECT[@]}" ;;
     stub) boot stub --stub-faults "${FARM_FAULTS:-$HERE/known_faults.txt}" "${INJECT[@]}" \
             "${NULLDEV_ARGS[@]}" ;;
