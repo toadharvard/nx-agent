@@ -7259,6 +7259,226 @@ def r_raw_vtable_slots(path, text, stats):
     stats['RAWVT1'] += sum(1 for e in edits if e[1] > e[0])
     return text
 
+# ---------------------------------------------------------------------------------------------------------- RAWVT1-SSA
+#
+# The raw vcalls that the text forms above miss (S1-rules, orchestrator 2026-11-09: rawvcall must report 0 over the
+# tree). rawvcall.py finds them by meaning, in GCC's SSA dump: an indirect call through *(*(X) + off) with X the
+# first argument. Its raw rows go into a site list, rawvt_ssa.tsv (`# fnvnx-rawvt-ssa/1`; unit / source line with
+# whitespace collapsed / byte offset), under FNVNX_RECON (recon/s1_rawvt_sites) or at FNVNX_RAWVT_SSA. On each
+# listed line:
+# - slot 0 called with (X, an integer flag) is the exe's ??_G(flags): the call statement becomes
+#   FNVNX_RAWVT_DEL0(X, flag), which sends flag 1 to D0 on a minus-one table;
+# - slot 0 called with anything else is no deleting destructor: slot 0 does not shift (RAWVT1-KEEP slot0-not-dtor);
+# - any other slot: the literal whose value is off / 4 (a slot index) or off (a byte offset) on the line, or on the
+#   three lines before it, gets the m1 test on X's first word: FNVNX_RAWVT_DYNK(*(void**)(X), k) or
+#   FNVNX_RAWVT_DYNOFF(*(void**)(X), off). X is the call's first argument, copied only when it has no side effect.
+# - a field of a vftable-model struct (offset `field`) is VTM1's: counted as RAWVT1-SSA-FIELD.
+def _rawvt_ssa_sites():
+    got = prepare.__dict__.get('_fnvnx_rawvt_ssa')
+    if got is not None: return got
+    files = [os.environ['FNVNX_RAWVT_SSA']] if os.environ.get('FNVNX_RAWVT_SSA') else []
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += sorted(os.path.join(dp, 'rawvt_ssa.tsv') for dp, _, ns in os.walk(top) if 'rawvt_ssa.tsv' in ns)
+    got = collections.defaultdict(dict)
+    for f in files:
+        try: lines = open(f).read().splitlines()
+        except OSError: continue
+        if not lines or not lines[0].startswith('# fnvnx-rawvt-ssa/1'): continue
+        for line in lines[1:]:
+            fs = line.split('\t')
+            if len(fs) < 3 or line.startswith('#'): continue
+            got[fs[0].strip()][' '.join(fs[1].split())] = fs[2].strip()
+    prepare.__dict__['_fnvnx_rawvt_ssa'] = got
+    return got
+
+
+_SSA_LIT = re.compile(r'(?<![\w.])((?:0x[0-9A-Fa-f]+|\d+)(?:\s*[/*]\s*(?:0x[0-9A-Fa-f]+|\d+|sizeof\s*\(\s*void\s*\*\s*\)))?)(?![\w.])')
+
+
+def _ssa_val(e):
+    e = re.sub(r'sizeof\s*\(\s*void\s*\*\s*\)', '4', e)
+    try: return int(eval(re.sub(r'/', '//', e), {'__builtins__': {}}))
+    except Exception: return None
+
+
+def _ssa_call_after(t, i):
+    """(open, close or None) of the argument list of the call whose callee holds position i: the first `(` right
+    after a `)` that closes a group opened before i"""
+    depth = 0
+    for j in range(i, len(t)):
+        c = t[j]
+        if c in '([': depth += 1
+        elif c in ')]':
+            depth -= 1
+            if depth < 0:
+                k = j + 1
+                while k < len(t) and t[k] in ' \t': k += 1
+                if k < len(t) and t[k] == '(': return k, _ssa_close(t, k)
+                if c == ']': depth = 0
+        elif c == ';': return None
+    return None
+
+
+def _ssa_close(t, k):
+    d = 0
+    for j in range(k, len(t)):
+        if t[j] == '(': d += 1
+        elif t[j] == ')':
+            d -= 1
+            if d == 0: return j
+    return None
+
+
+def _ssa_args(t, a, z):
+    """the top-level arguments of the list t[a] .. t[z] (the parens)"""
+    out, d, s = [], 0, a + 1
+    for j in range(a + 1, z):
+        c = t[j]
+        if c in '([{': d += 1
+        elif c in ')]}': d -= 1
+        elif c == ',' and d == 0: out.append(t[s:j].strip()); s = j + 1
+    out.append(t[s:z].strip())
+    return out
+
+
+def _ssa_callee_start(t, a):
+    """the start of the postfix expression that ends just before position a (the call's `(`)"""
+    j = a - 1
+    while j >= 0 and t[j] in ' \t': j -= 1
+    while j >= 0:
+        if t[j] in ')]':
+            op, cl, d = '(' if t[j] == ')' else '[', t[j], 0
+            while j >= 0:
+                if t[j] == cl: d += 1
+                elif t[j] == op:
+                    d -= 1
+                    if d == 0: break
+                j -= 1
+            j -= 1
+        elif re.match(r'\w', t[j]):
+            while j >= 0 and re.match(r'\w', t[j]): j -= 1
+        else:
+            break
+        k = j
+        while k >= 0 and t[k] in ' \t': k -= 1
+        cm = re.search(r'\b(?:reinterpret_cast|static_cast|const_cast)\s*<[^<>;]*>\s*$', t[:k + 1])
+        if cm: return cm.start()
+        if k >= 1 and t[k - 1:k + 1] in ('->', '::'): j = k - 2; continue
+        if k >= 0 and t[k] == '.': j = k - 1; continue
+        if k >= 0 and (t[k] in ')]' or re.match(r'\w', t[k])) and t[j + 1] in '[': j = k; continue
+        return j + 1
+    return j + 1
+
+
+def r_rawvt_ssa(path, text, stats):
+    """RAWVT1-SSA: rawvcall's raw sites by meaning (see above)."""
+    sites = _rawvt_ssa_sites()
+    if not sites: return text
+    p = path.replace('\\', '/')
+    i = p.rfind('/src/')
+    unit = p[i + 1:] if i >= 0 else p
+    want = sites.get(unit)
+    if not want: return text
+    lines = text.split('\n')
+    starts, n = [], 0
+    for ln in lines: starts.append(n); n += len(ln) + 1
+    edits = []
+    for li, ln in enumerate(lines):
+        off = want.get(' '.join(ln.split()))
+        if off is None or 'FNVNX_' in ln or 'RAWVT1-KEEP' in ln: continue
+        base = starts[li]
+        if off == 'field':
+            # `tbl->f(` with tbl a side-effect-free path: FNVNX_RAWVT_FIELD(tbl, f)( - a __stdcall field is COM's
+            fm = None
+            for fm in re.finditer(r'((?:\bthis|\b[A-Za-z_]\w*)(?:\s*(?:->|\.)\s*[A-Za-z_]\w*)*)\s*->\s*([A-Za-z_]\w*)\s*\(', ln):
+                pass
+            if fm is None: stats['RAWVT1-SSA-HELD'] += 1; continue
+            f = fm.group(2)
+            if re.search(r'__stdcall\s*\*\s*%s\s*\)' % re.escape(f), text) or f in ('QueryInterface', 'AddRef', 'Release'):
+                edits.append((base + len(ln.rstrip()), base + len(ln.rstrip()), ' /* fnv-nx RAWVT1-KEEP com-stdcall */'))
+                stats['RAWVT1-SSA-COM'] += 1; continue
+            edits.append((base + fm.start(), base + fm.end() - 1, 'FNVNX_RAWVT_FIELD(%s, %s)' % (fm.group(1), f)))
+            stats['RAWVT1-SSA-FIELD'] += 1
+            continue
+        try: off = int(off)
+        except ValueError: continue
+        base = starts[li]
+        if '__stdcall' in ln or 'STDMETHOD' in ln:
+            # a stdcall with the receiver pushed: a COM interface, whose table keeps the exe's order
+            edits.append((base + len(ln.rstrip()), base + len(ln.rstrip()), ' /* fnv-nx RAWVT1-KEEP com-stdcall */'))
+            stats['RAWVT1-SSA-COM'] += 1
+            continue
+        if off == 0:
+            # the call of this line: its last argument list at statement level
+            cand = None
+            for m in re.finditer(r'\(', ln):
+                z = _ssa_close(ln, m.start())
+                if z is None: continue
+                cs = _ssa_callee_start(ln, m.start())
+                if cs < m.start() and re.fullmatch(r'\s*;?\s*', ln[z + 1:]) and re.fullmatch(r'\s*(?:return\s+)?', ln[:cs]):
+                    cand = (cs, m.start(), z); break
+            if cand is None: stats['RAWVT1-SSA-HELD'] += 1; continue
+            cs, a, z = cand
+            args = _ssa_args(ln, a, z)
+            if len(args) == 2 and _ssa_val(args[1]) is not None and not re.match(r'\s*return\b', ln):
+                edits.append((base + cs, base + z + 1, 'FNVNX_RAWVT_DEL0(%s, %s)' % (args[0], args[1])))
+                stats['RAWVT1-SSA-DEL0'] += 1
+            else:
+                edits.append((base + len(ln.rstrip()), base + len(ln.rstrip()), ' /* fnv-nx RAWVT1-KEEP slot0-not-dtor */'))
+                stats['RAWVT1-SSA-SLOT0'] += 1
+            continue
+        done = False
+        # a slot pointer set on an earlier line (`void** applySlot = pass->vtable + 30;`): a name of the callee
+        am = next((mm.start() for mm in re.finditer(r'\(', ln) if _ssa_close(ln, mm.start()) is not None and
+                   re.fullmatch(r'\s*;?\s*', ln[_ssa_close(ln, mm.start()) + 1:])), len(ln))
+        callee_names = set(re.findall(r'[A-Za-z_]\w*', ln[:am]))
+        for lj in range(li, max(-1, li - 7), -1):
+            src = lines[lj]
+            if lj != li:
+                am = re.match(r'\s*(?:[\w:<>]+[\s*&]+)?([A-Za-z_]\w*)\s*=[^=]', src)
+                if not am or am.group(1) not in callee_names: continue
+            for m in _SSA_LIT.finditer(src):
+                v = _ssa_val(m.group(1))
+                if v is None or v not in (off // 4, off) or (v == off // 4 and off % 4): continue
+                pre = src[:m.start()].rstrip()
+                if not (pre.endswith('[') or pre.endswith('+')): continue
+                if pre.endswith('+') and re.search(r'\(\s*char\s*\*\s*\)\s*\w+\s*\+$', pre) and v == off // 4: continue
+                # the call: its first argument
+                if lj == li:
+                    ca = _ssa_call_after(src, m.end())
+                else:
+                    ca = None
+                    for mm in re.finditer(r'\(', ln):
+                        z = _ssa_close(ln, mm.start())
+                        if z is not None and re.fullmatch(r'\s*;?\s*', ln[z + 1:]) and _ssa_callee_start(ln, mm.start()) < mm.start():
+                            ca = (mm.start(), z); break
+                if not ca or ca[1] is None:
+                    # the arguments continue on the next lines
+                    if lj == li and ca and ca[1] is None:
+                        x = src[ca[0] + 1:].split(',')[0].strip()
+                    else:
+                        continue
+                else:
+                    x = _ssa_args(ln if lj != li else src, ca[0], ca[1])[0]
+                if not x or re.search(r'\+\+|--|[^=!<>]=[^=]|\w\s*\(', re.sub(r'\b(?:reinterpret_cast|static_cast|const_cast)\s*<[^<>]*>\s*\(', '(', x)):
+                    continue
+                mac = 'FNVNX_RAWVT_DYNK' if v == off // 4 else 'FNVNX_RAWVT_DYNOFF'
+                b = starts[lj]
+                edits.append((b + m.start(1), b + m.end(1), '%s(*(void **)(%s), %s)' % (mac, x, m.group(1))))
+                stats['RAWVT1-SSA'] += 1
+                done = True
+                break
+            if done: break
+        if not done: stats['RAWVT1-SSA-HELD'] += 1
+    if not edits: return text
+    for a, b, rep in sorted(set(edits), reverse=True):
+        text = text[:a] + rep + text[b:]
+    if 'fnvnx_rawvt.h' not in text:
+        text = '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n' + text
+    return text
+
+
 # ---------------------------------------------------------------------------------------------------------- PHSLOT1
 #
 # The decomp's reconstructed classes (a shell standing for a class of the exe) list the exe vftable's slots as
@@ -7417,5 +7637,5 @@ REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_add
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
               r_implicit_bound_destructors, r_split_virtual_declarators, r_hk_referenced_object_slots, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
-              r_template_member_stand_ins, r_raw_vtable_slots, r_empty_string_objects]
+              r_template_member_stand_ins, r_raw_vtable_slots, r_rawvt_ssa, r_empty_string_objects]
 RULES += REFS_RULES

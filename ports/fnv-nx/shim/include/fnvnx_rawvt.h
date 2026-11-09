@@ -13,6 +13,7 @@
 #define FNVNX_RAWVT_DYNOFF(vp, off) (off)
 #define FNVNX_RAWVT_DYNK(vp, k) (k)
 #define FNVNX_RAWVT_DEL0(o, flag) ((void *(__thiscall *)(void *, unsigned))(*(void ***)(o))[0])((void *)(o), (unsigned)(flag))
+#define FNVNX_RAWVT_FIELD(vt, f) ((vt)->f)
 #else
 #ifdef __cplusplus
 extern "C" {
@@ -64,5 +65,9 @@ static inline void *fnvnx_rawvt_del0(void *o, unsigned flag)
 #define FNVNX_RAWVT_DEL0(o, flag) fnvnx_rawvt_del0((void *)(o), (unsigned)(flag))
 /* the byte-offset spelling `(char*)*(void**)x + off` (off = 4 * slot): off + 4 when the table is minus-one */
 #define FNVNX_RAWVT_DYNOFF(vp, off) ((off) + 4 * fnvnx_rawvt_m1((const void *)(vp), (unsigned)(off) / 4))
+/* a field f of a struct that models the vftable, `obj->vt->f(obj, ...)`: the slot of f's offset, with the m1 test
+ * (vt must have no side effects; it is read more than once) */
+#define FNVNX_RAWVT_FIELD(vt, f) \
+    ((__typeof__((vt)->f))((void *const *)(vt))[FNVNX_RAWVT_DYNK((vt), __builtin_offsetof(__typeof__(*(vt)), f) / sizeof(void *))])
 #endif
 #endif

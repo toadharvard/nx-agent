@@ -2249,5 +2249,31 @@ check('VTM1: the vftable model gets FNVNX_VTM1_PAD after f0 and the header; COM,
       _vmo, ['void* f0; FNVNX_VTM1_PAD /* fnv-nx VTM1 */', '#include "fnvnx_vtm.h" /* fnv-nx VTM1 */'],
       ['QueryInterface)(void*); FNVNX', 'f00; FNVNX', 'struct InitVt { void* f0; FNVNX'])
 
+# ---- S1-rules: RAWVT1-SSA (rawvcall's raw sites from the SSA dump, by line text, rewritten by meaning)
+_SS = ('struct VT { void* p0[3]; void (__thiscall* f3)(void*, int); };\nstruct R { VT* vt; };\n'
+       'void a(void* p) {\n    ((void(__thiscall*)(void*, int))(*((void***)p))[7])(p, 1);\n}\n'
+       'void b(void* p) {\n    void** vt = (void**)*p;\n    reinterpret_cast<V0>(vt[0])(p, 0);\n}\n'
+       'void c(void* cv, void* buf) {\n    ((void(__thiscall*)(void*, void*))(*((int**)cv))[0])(cv, buf);\n}\n'
+       'void d(R* r) {\n    r->vt->f3(r, 2);\n}\n'
+       'void e(char* t) {\n    ((void(__thiscall*)(void*, float))(*(void**)(*(int*)((char*)t + 0xe0) + 12)))((char*)t + 0xe0, 1.f);\n}\n'
+       'void f(void* o) {\n    ((void(__stdcall*)(int*, int))vt[0x38 / 4])(o, 0);\n}\n')
+_sst = os.path.join(tempfile.mkdtemp(), 'rawvt_ssa.tsv')
+with open(_sst, 'w') as _fh:
+    _fh.write('# fnvnx-rawvt-ssa/1\n')
+    for _l, _o in (('((void(__thiscall*)(void*, int))(*((void***)p))[7])(p, 1);', 28), ('reinterpret_cast<V0>(vt[0])(p, 0);', 0),
+                   ('((void(__thiscall*)(void*, void*))(*((int**)cv))[0])(cv, buf);', 0), ('r->vt->f3(r, 2);', 'field'),
+                   ('((void(__thiscall*)(void*, float))(*(void**)(*(int*)((char*)t + 0xe0) + 12)))((char*)t + 0xe0, 1.f);', 12),
+                   ('((void(__stdcall*)(int*, int))vt[0x38 / 4])(o, 0);', 56)):
+        _fh.write('src/x.cpp\t%s\t%s\n' % (_l, _o))
+os.environ['FNVNX_RAWVT_SSA'] = _sst
+prepare.__dict__.pop('_fnvnx_rawvt_ssa', None)
+check('RAWVT1-SSA: index -> DYNK on the first argument, slot 0 with an int flag -> DEL0, other slot 0 kept, a model field '
+      '-> FNVNX_RAWVT_FIELD, a byte offset -> DYNOFF, a stdcall kept (COM)', run(s1.r_rawvt_ssa, _SS),
+      ['[FNVNX_RAWVT_DYNK(*(void **)(p), 7)])(p, 1);', '    FNVNX_RAWVT_DEL0(p, 0);',
+       '(cv, buf); /* fnv-nx RAWVT1-KEEP slot0-not-dtor */', 'FNVNX_RAWVT_FIELD(r->vt, f3)(r, 2);',
+       '+ FNVNX_RAWVT_DYNOFF(*(void **)((char*)t + 0xe0), 12)', '(o, 0); /* fnv-nx RAWVT1-KEEP com-stdcall */',
+       '#include "fnvnx_rawvt.h"'], ['0xe0, 12)', 'DYNOFF(*(void **)((char*)t + 0xe0), 0xe0)'])
+os.environ.pop('FNVNX_RAWVT_SSA'); prepare.__dict__.pop('_fnvnx_rawvt_ssa', None)
+
 print('%d failed' % len(FAILS))
 sys.exit(1 if FAILS else 0)

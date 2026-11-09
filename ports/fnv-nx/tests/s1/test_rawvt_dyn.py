@@ -67,5 +67,22 @@ r = subprocess.run(['g++', '-O1', '-D__thiscall=', '-I', INC, os.path.join(t, 'd
 got = subprocess.run([exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
 ok = got == '2 1 11'
 print('%-75s %s' % ('DEL0: flag 1 reaches D0, flag 0 D1, an exe table its own ??_G', 'ok' if ok else 'FAIL (%s)' % got)); fails += not ok
+# FNVNX_RAWVT_FIELD: a field of a vftable-model struct, called through the m1 test (f2 = exe slot 2 -> native 3)
+FSRC = r'''#include "fnvnx_rawvt.h"
+#include <cstdio>
+typedef int (*Fn)(int);
+static int s0(int) { return 0; } static int s1(int) { return 1; } static int s2(int) { return 2; } static int s3(int) { return 3; }
+struct VT { void* f0; void* f1; Fn f2; };
+extern "C" { __attribute__((section(".data.rel.ro.fnvnx_m1"), used)) void* m1[] = {(void*)s0, (void*)s1, (void*)s2, (void*)s3}; }
+void* ex[] = {(void*)s0, (void*)s1, (void*)s2, (void*)s3};
+int main() { VT* a = (VT*)m1; VT* b = (VT*)ex; printf("%d %d\n", FNVNX_RAWVT_FIELD(a, f2)(0), FNVNX_RAWVT_FIELD(b, f2)(0)); }
+'''
+open(os.path.join(t, 'f.cpp'), 'w').write(FSRC)
+exe = os.path.join(t, 'f')
+r = subprocess.run(['g++', '-O1', '-I', INC, os.path.join(t, 'f.cpp'), '-Wl,-T,' + os.path.join(t, 'd.ld'), '-o', exe],
+                   capture_output=True, text=True)
+got = subprocess.run([exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
+ok = got == '3 2'
+print('%-75s %s' % ('FIELD: a model field shifts on a minus-one table, not on an exe table', 'ok' if ok else 'FAIL (%s)' % got)); fails += not ok
 print('%d failed' % fails)
 sys.exit(1 if fails else 0)
