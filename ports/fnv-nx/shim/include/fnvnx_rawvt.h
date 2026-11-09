@@ -32,6 +32,37 @@ extern const unsigned long __fnvnx_m1k_count __attribute__((weak, visibility("hi
 #endif
 /* slot 0 never shifts: an exe call of slot 0 is ??_G(flags); natively slot 0 is the complete destructor D1 (= flag 0)
  * and slot 1 the deleting D0, so the unshifted call is right for flag 0 and leaks for flag 1 - never frees wrongly */
+#if defined(__aarch64__)
+/* the bounds by PC-relative address (adrp/add), not through GOT words: a vptr is stored by its constructor the same
+ * way (adrp/add, the run-time address), while a GOT word or any other stored address keeps the link-time value when
+ * the image runs at another address than it was linked for (S2: link 7f0f8526, the emulator's load offset; the
+ * SetParent "Worl" stop). An undefined weak symbol's address equals that of __fnvnx_m1_none, which is never defined.
+ * The {start, end} words of __fnvnx_m1k_ranges are stored addresses: they get the load delta, the PC-relative
+ * address of the table minus a stored word that holds it. */
+extern char __fnvnx_m1_none[] __attribute__((weak, visibility("hidden")));
+#define FNVNX_PCREL(sym) __extension__({ unsigned long long a_; \
+    __asm__(".weak " #sym "\n\t.hidden " #sym "\n\tadrp %0, " #sym "\n\tadd %0, %0, :lo12:" #sym : "=r"(a_)); \
+    (unsigned long)a_; })
+static const struct fnvnx_m1k_range *const fnvnx_m1k_ranges_word __attribute__((used)) = __fnvnx_m1k_ranges;
+static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
+{
+    unsigned long v = (unsigned long)vp, s, e;
+    if (k == 0) return 0;
+    s = FNVNX_PCREL(__fnvnx_m1_start); e = FNVNX_PCREL(__fnvnx_m1_end);
+    if (v - s < e - s) return 1;
+    s = FNVNX_PCREL(__fnvnx_m1k4_start); e = FNVNX_PCREL(__fnvnx_m1k4_end);
+    if (v - s < e - s) return k > 4;
+    if (FNVNX_PCREL(__fnvnx_m1k_count) != FNVNX_PCREL(__fnvnx_m1_none)) {
+        const struct fnvnx_m1k_range *r = (const struct fnvnx_m1k_range *)FNVNX_PCREL(__fnvnx_m1k_ranges);
+        unsigned long i, n = *(const volatile unsigned long *)FNVNX_PCREL(__fnvnx_m1k_count);
+        unsigned long d = (unsigned long)r - (unsigned long)*(const struct fnvnx_m1k_range *const volatile *)&fnvnx_m1k_ranges_word;
+        for (i = 0; i < n; i++)
+            if (v - (r[i].start + d) < r[i].end - r[i].start)
+                return k > r[i].k;
+    }
+    return 0;
+}
+#else
 static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
 {
     if (k == 0) return 0;
@@ -48,6 +79,7 @@ static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
     return 0;
 }
 /* the indexed expression keeps its type: (vp)[k + 0/1] */
+#endif
 #define FNVNX_RAWVT_DYN(vp, k) (vp)[(k) + fnvnx_rawvt_m1((const void *)(vp), (unsigned)(k))]
 /* a slot index in pointer arithmetic on the vptr, `*(*(long**)p + 7)`: k + 0/1 */
 #define FNVNX_RAWVT_DYNK(vp, k) ((k) + fnvnx_rawvt_m1((const void *)(vp), (unsigned)(k)))
