@@ -1574,6 +1574,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     vmap, vstats = vtables.vftable_map(vnames, rtti, canon_it)
     hand = hand_vptr_stores(os.path.dirname(os.path.dirname(os.path.abspath(units_json))), real, vnames, msvc,
                             canon_msvc, os.path.join(out, 'cache', 'hvs.marshal'))
+    hand_vptr_confirm(hand, exevft.exe_path(None if exe in (None, '') else exe) if exe != 'none' else None, vstats)
     # the class constructed (or destroyed) at a storing function's address, by every name units.json gives it
     # (`??0X`, `??1X`, `??_GX`, `??_EX` in any unit): a decomp shell storing an image vtable is often the
     # constructor another unit names properly (S5 J-0102: 750 hand-stored vptrs had no native vtable on f13)
@@ -1731,7 +1732,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
         # the image vftables the units name that have no RTTI in the exe (no COL): their slots, bounded by the next
         # known vftable
         exev_all = dict(exev)
-        exev_all.update(exevft.plain_vftables(exe_path, [v for v in vmap if v not in exev],
+        exev_all.update(exevft.plain_vftables(exe_path, [v for v in set(vmap) | set(hand) if v not in exev],
                                               set(exev) | set(vmap) | {a_ for (_, a_) in vnames}))
         vstats['exe-plain-vftables'] = len(exev_all) - len(exev)
         global VTFILL_ITANIUM
@@ -2091,6 +2092,8 @@ def no_candidate_why(sites, ctor_classes):
 
 
 HV_BRACE = re.compile(r'[{}]')
+HV_RCAST = re.compile(r'\b(?:reinterpret|static|const)_cast\s*<[^<>]*(?:<[^<>]*>[^<>]*)*>')
+HV_FIELD_LHS = re.compile(r'^[\w\s\[\]().*+/<>:-]+$')   # W53: an lvalue spelled with names, members, indexes, casts
 HV_ASSIGN = re.compile(r'^(?P<lhs>(?:[^=]|==)*?[^=!<>+\-*/%&|^])=(?!=)(?P<rhs>.*)$', re.S)
 HV_CAST = re.compile(r'\(\s*(?:const\s+|unsigned\s+|signed\s+|struct\s+|class\s+)*[\w:<>]+(?:\s*\*)*\s*\)')
 HV_NOISE = re.compile(r'[\s&()]')
@@ -2114,6 +2117,8 @@ def _hv_unit(text, names, known, near):
         if not m:
             continue
         rhs = m.group('rhs')
+        if os.environ.get('FNVNX_HVFIELD', '1') != '0':
+            rhs = HV_RCAST.sub('', rhs)   # W53: `reinterpret_cast<int>(&DAT_010bcdc8)`
         while True:
             r2 = HV_CAST.sub('', rhs)
             if r2 == rhs:
@@ -2134,7 +2139,14 @@ def _hv_unit(text, names, known, near):
             off = int(mo.group(1), 0) * (4 if mo.re is DEREFK_LHS else 1)
         if not (a in known or VPTR_LHS.search(lhs) or DEREF_LHS.match(lhs) or
                 ((DEREF1_LHS.match(lhs) or (mo and off)) and near[0] <= a <= near[1])):
-            continue
+            # W53 (cc_census, a9d9f910): a field store of an image address next to the named vftables
+            # (`m_6c = &DAT_010b52a0`, `p[0x6c / 4] = (int)&DAT_…`, `*(int**)((char*)this + 0x6c) = &DAT_…`) is a
+            # tentative site (offset None): hand_vptr_confirm keeps it when the exe function stores that address
+            # at an object offset itself
+            if near[0] <= a <= near[1] and HV_FIELD_LHS.match(lhs) and os.environ.get('FNVNX_HVFIELD', '1') != '0':
+                off = None
+            else:
+                continue
         cls, fn, hpos_ = None, -1, 0
         for k, (hpos, hcls) in enumerate(heads):
             if hpos > spos:
@@ -2289,6 +2301,52 @@ def hand_ambiguous_names(hand, exev):
                 continue
             out.add((a, cls, off))
     return out
+
+
+def vftable_head(exe_path, a, d):
+    """W53: the image words at a look like the vftable of a subobject at offset d: slot 0 is a deleting destructor
+    (d = 0), or an adjustor thunk of exactly d in front of one (`sub ecx, d; jmp ??_G`). A callback table stored in
+    a field has neither."""
+    import struct as _st
+    try:
+        pe, data = exevft._text(exe_path)
+        off = pe.rva_to_off(a - pe.image_base, 4)
+    except Exception:
+        return False
+    if off is None:
+        return False
+    w0 = _st.unpack_from('<I', data, off)[0]
+    if d == 0:
+        return bool(exevft.deleting_dtor(exe_path, w0))
+    t = exevft.thunk(exe_path, w0)
+    return bool(t and t[0] == d and exevft.deleting_dtor(exe_path, t[1]))
+
+
+def hand_vptr_confirm(hand, exe_path, st=None):
+    """W53: hand_vptr_stores' tentative sites (offset None) stay only where the exe function at the site's @fnv
+    address stores that image address into an object field itself (`mov dword ptr [reg+d], imm32`, a base register
+    that is not esp / ebp); d becomes the site's offset. Without the exe or the function's address they are dropped.
+    -> hand, changed in place."""
+    for a in list(hand):
+        keep = []
+        for unit, cls, fa, off in hand[a]:
+            if off is not None:
+                keep.append((unit, cls, fa, off))
+                continue
+            ds = sorted({d for d, b, v in (exevft._ctor_stores(exe_path, fa) or ()) if v == a and
+                         b not in ('esp', 'ebp')}) if exe_path and fa is not None else []
+            ds = [d for d in ds if vftable_head(exe_path, a, d)]
+            if ds:
+                keep.append((unit, cls, fa, ds[0]))
+                if st is not None:
+                    st['hand-written-field-confirmed'] += 1
+            elif st is not None:
+                st['hand-written-field-dropped'] += 1
+        if keep:
+            hand[a] = keep
+        else:
+            del hand[a]
+    return hand
 
 
 def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc, cache_path=None):
