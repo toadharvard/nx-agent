@@ -3376,17 +3376,67 @@ def named_free_drop(a, nd, exe_path):
     __stdcall function, `AllocateZeroedMemory(unsigned&, unsigned&, ...)`; the exe's is a thiscall member whose `this`
     is unused. A virtual call passes `this` in x0, so the free function read the allocator's vptr as its size. True
     when the exe function's first return pops exactly 4 x the native's parameter count (`ret 0x1c`, 7 parameters:
-    `this` is not among them; a definition that takes the object as its first parameter pops one fewer) and the
-    parameters fit x0..x6. FNVNX_FREENAMED=0 turns it off."""
+    `this` is not among them; a definition that takes the object as its first parameter pops one fewer).
+    W52 (cc_census, a9d9f910: 22 slots): also a namespace-scope or static-member __stdcall (`?F@ns@@YG`, `?F@C@@SG`)
+    whose native symbol keeps the MSVC nesting (not wrapped into a shell class), a by-value struct return (its hidden
+    pointer is popped too: 4 x (n + 1)), and more than 7 parameters (the bridge moves the stack ones). Not for a COM
+    table (its __stdcall callers push the object; exe_slot_target passes com). FNVNX_FREENAMED=0 turns it off."""
     if not exe_path or os.environ.get('FNVNX_FREENAMED', '1') == '0':
         return False
     name = nd['sym'].name
-    if not NAMED_FREE.match(nd.get('msvc') or '') or not re.match(r'_Z\d+[A-Za-z_]', name):
+    ms = nd.get('msvc') or ''
+    if NAMED_FREE.match(ms) and re.match(r'_Z\d+[A-Za-z_]', name):
+        pass
+    elif os.environ.get('FNVNX_FREENS', '1') != '0' and NAMED_STD.match(ms) and name.startswith('_Z') and \
+            msvc_depth(ms) is not None and msvc_depth(ms) == itanium_depth(name):
+        pass
+    else:
         return False
     n = _native_arity(name)
-    if n is None or n > 7:
+    if n is None or n > 15:
         return False
-    return _first_ret_pop(a, exe_path) == 4 * n
+    return _first_ret_pop(a, exe_path) == 4 * (n + (1 if msvc_sret(ms) else 0))
+
+
+NAMED_STD = re.compile(r'^\?[A-Za-z_]\w*(?:@[A-Za-z_]\w*)*@@(?:YG|[CDKLST]G)')   # free / namespace / static __stdcall
+
+
+def msvc_depth(msvc):
+    """Name components of an MSVC function name (`?F@ns@C@@...` -> 3); None for template / special names."""
+    if not msvc or not msvc.startswith('?') or msvc.startswith('??') or '?$' in msvc.split('@@', 1)[0]:
+        return None
+    return len(msvc[1:].split('@@', 1)[0].split('@'))
+
+
+def itanium_depth(sym):
+    """Name components of an Itanium function symbol (`_Z3fooi` -> 1, `_ZN2ns1C1fEv` -> 3); None for templates and
+    special names."""
+    if not sym.startswith('_Z'):
+        return None
+    i = 2
+    if i < len(sym) and sym[i] == 'N':
+        i += 1
+        while i < len(sym) and sym[i] in 'KVRO':
+            i += 1
+        n = 0
+        while i < len(sym) and sym[i] != 'E':
+            m = re.match(r'\d+', sym[i:])
+            if not m:
+                return None
+            i += len(m.group()) + int(m.group())
+            n += 1
+        return n or None
+    return 1 if re.match(r'\d+', sym[i:]) else None
+
+
+def msvc_sret(msvc):
+    """A by-value class / struct return in an MSVC function name (the convention letter is followed by U / V)."""
+    i = (msvc or '').find('@@')
+    if i < 0:
+        return False
+    t = msvc[i + 2:]
+    t = t[2:] if t[:1] == 'Y' or t[:1] in 'CDKLST' else t[3:]
+    return t.startswith(('U', 'V', '?AU', '?AV', '?BU', '?BV'))
 
 
 def named_free_edx(a, nd, exe_path):
@@ -3446,7 +3496,7 @@ def _first_ret_pop(a, exe_path):
     return None
 
 
-def free_slot(a, nd, bridges, st, exe_path=None):
+def free_slot(a, nd, bridges, st, exe_path=None, com=False):
     """S5's class 1 (s5-003): the decomp declares the exe's slot function as a global non-member (`__stdcall
     FUN_00e8b490(int *, int, int)`: its MSVC body ignores ecx), so a virtual call, which passes `this` in x0, hands
     it every argument one register early. Such a slot gets a bridge by the definition's MSVC convention: cdecl /
@@ -3456,7 +3506,7 @@ def free_slot(a, nd, bridges, st, exe_path=None):
         return None
     named = None
     if not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
-        if named_free_drop(a, nd, exe_path):
+        if not com and named_free_drop(a, nd, exe_path):
             named = 'drop'
         elif named_free_edx(a, nd, exe_path):
             named = 'edx'
@@ -3475,10 +3525,20 @@ def free_slot(a, nd, bridges, st, exe_path=None):
         if not mc or nd['sym'].name != mc.group(2):
             return None
         mode = 'edx' if mc.group(1) == '@' else 'drop'
+    if com and mode == 'drop':
+        st['free-slot-com-kept'] += 1   # a COM caller pushes the object: the free function's first parameter is it
+        return None
     name = FREE_SYM % a
     if name not in bridges:
         if mode == 'drop':
             body = ['    mov x%d, x%d' % (r, r + 1) for r in range(7)]
+            n_ = _native_arity(nd['sym'].name)
+            if n_ is not None and n_ > 7:
+                # W52: the caller's 8th native argument is on the stack: x7 from [sp], then each stack argument one
+                # slot down (AAPCS64 ILP32: 8-byte slots; the incoming argument area is the callee's)
+                body.append('    ldr x7, [sp]')
+                body += ['    ldr x16, [sp, #%d]\n    str x16, [sp, #%d]' % (8 * (i + 1), 8 * i) for i in range(n_ - 8)]
+                st['free-slot-drop-stack'] += 1
         else:
             body = ['    mov x%d, x%d' % (r, r - 1) for r in range(7, 1, -1)] + ['    mov w1, #0']
         bridges[name] = '\n'.join(['    .section .text.%s,"ax",%%progbits' % name, '    .p2align 2',
@@ -4111,6 +4171,9 @@ def vmo_adjustor(a, off, native, exe_path, plain=True):
     return None
 
 
+COM_TABLES = set()   # W52: the vtables VTFILL writes in COM order (exe_slot_target: no drop bridge there)
+
+
 def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where, off=None):
     """The native word for exe vftable slot address a in a copy made from the exe (exe_vtable_copies' extra slots,
     minus_one_copies' slots): `__fnv_<a>` where the address map has a plain native definition, the
@@ -4121,7 +4184,8 @@ def exe_slot_target(a, native, providers, exe_path, bridges, traps, st, where, o
     in front of f's native entry; any other adjustor thunk stays a trap (never a guessed adjustment)."""
     nd = native.get(a)
     var = sigs.itanium_variant(nd['sym'].name) if nd else None
-    if nd is not None and var is None and free_slot(a, nd, bridges, st, exe_path):
+    com = bool(where) and where[0] in COM_TABLES
+    if nd is not None and var is None and free_slot(a, nd, bridges, st, exe_path, com):
         t = FREE_SYM % a   # a decomp free function (S5 class 1): this dropped / edx inserted
     elif nd is not None and var is None:
         t = ADDR_SYM % a
@@ -4941,6 +5005,8 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                 if kind_ == 'minus-one' and (is_com(z, raw_) or (0 <= k_ < len(raw_) and
                                                                  named_placeholder(raw_[k_], called))):
                     kind_ = 'exe-order'   # as prepare: COM by its slot names, a destructor slot named by code
+                if kind_ == 'com' or is_com(z, raw_):
+                    COM_TABLES.add(z)   # W52: its __stdcall callers push the object (free_slot: no drop bridge)
                 if o.bind(z) != 'weak':
                     st['vtfill-skipped-strong'] += 1
                 else:
@@ -4959,9 +5025,10 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                     if len(pts) == 1 or g2 is not None:
                         words_, shift2, nsec = (head_ + ['    .word %s' % w_ for w_ in fill], None, 0) if g2 is None \
                             else g2
-                        lines = ['// %s from the exe vftable(s) %s: VTFILL%s, %s%s, %d slots (classlayout)' % (
+                        lines = ['// %s from the exe vftable(s) %s: VTFILL%s, %s%s, %d slots (classlayout)%s' % (
                                      z, ' '.join('%08x' % v for v in sorted(vs)), '2 (%d secondary)' % nsec if g2 else '',
-                                     kind_, ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill)),
+                                     kind_, ' at %d' % k_ if kind_ == 'minus-one' else '', len(fill),
+                                     ' COM' if z in COM_TABLES else ''),
                                  '    .section .data.rel.ro.%s.%s,"aw"' % (m1_section(kind_ == 'minus-one', k=k_), z),
                                  '    .p2align 3',
                                  '    .globl %s' % z, '    .type %s, %%object' % z, '%s:' % z] + words_ + \
