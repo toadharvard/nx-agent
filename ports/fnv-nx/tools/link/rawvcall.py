@@ -120,13 +120,17 @@ def _vslot(defs, callee):
     m = re.fullmatch(r'\*(\w+)', d) or re.fullmatch(r'MEM\[\([^)]*\)\s*(\w+)\]', d)
     if not m:
         return None
-    p = defs.get(m.group(1), '')
+    p = defs.get(_base(defs, m.group(1)), '')       # through a cast: (void (**)(void *)) _2, _2 = _1 + 188
+    q = re.fullmatch(r'\(.*\)\s*(\w+)', p)
+    while q and q.group(1) in defs:
+        p = defs[q.group(1)]
+        q = re.fullmatch(r'\(.*\)\s*(\w+)', p)
     x0 = _first_word(defs, m.group(1))
     if x0:
         return (x0, 0)
     q = re.fullmatch(r'(\w+)\s*\+\s*(\d+)', p)
     if q:
-        x = _first_word(defs, q.group(1))
+        x = _first_word(defs, q.group(1)) or _first_word(defs, _base(defs, q.group(1)))
         return (x, int(q.group(2))) if x else None
     q = re.fullmatch(r'(\w+)\s*\+\s*(\w+)', p)
     if q:
