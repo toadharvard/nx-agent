@@ -396,7 +396,13 @@ def main():
     by = collections.defaultdict(list)
     for unit, name, size, foff, b in alllayouts:
         if rtti and name.split('::')[-1] not in rtti: continue      # an exe class (classlayout row), not a local shell
+        if not foff: continue                                         # an empty stand-in (`struct NiNode;`-like shell)
         by[name].append((unit, size, foff, b))
+    import json
+    with open(a.out + '.layouts', 'w') as lf:
+        for name, defs in sorted(by.items()):
+            for unit, size, foff, b in defs:
+                lf.write(json.dumps([name, unit, size, foff]) + '\n')
     for name, defs in by.items():
         if len(defs) < 2: continue
         keyed = collections.Counter((d[1], tuple(sorted(d[2].items()))) for d in defs)
