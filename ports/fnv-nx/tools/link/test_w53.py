@@ -13,6 +13,7 @@
 import collections
 import os
 import sys
+import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -44,6 +45,34 @@ def hand_of(got):
     return h
 
 
+TWO = '''
+struct FUN_00b91a40 { void* primaryVTable; char pad[0x68]; void* secondaryVTable; FUN_00b91a40(); };
+extern int DAT_010b5140;
+extern int DAT_010b511c;
+// @fnv 0x00b91a40
+FUN_00b91a40::FUN_00b91a40()
+{
+    primaryVTable = &DAT_010b5140;
+    secondaryVTable = &DAT_010b511c;
+}
+'''
+
+
+def two_stores(exe):
+    """hand_vptr_stores end to end: one function storing two image tables (FUN_00b91a40: 010b5140 at 0, 010b511c
+    at +0x6c), both tentative, both keep the function's address and are confirmed at their own offsets."""
+    import tempfile
+    t = tempfile.mkdtemp(prefix='w53-')
+    os.makedirs(os.path.join(t, 'src'))
+    open(os.path.join(t, 'src', 'x.cpp'), 'w').write(TWO)
+    sig = lambda n: types.SimpleNamespace(kind='data', qual=[n[1:].split('@')[0]])
+    u = types.SimpleNamespace(source='src/x.cpp', refs={'?DAT_010b5140@@3HA': 0x010b5140,
+                                                         '?DAT_010b511c@@3HA': 0x010b511c})
+    hand = fnvlink.hand_vptr_stores(t, [u], {}, sig, lambda c: c)
+    fnvlink.hand_vptr_confirm(hand, exe)
+    return {a: sorted(x[3] for x in v) for a, v in hand.items()}
+
+
 def main():
     got = fnvlink._hv_unit(TEXT, {}, set(), NEAR)
     check(any(a == 0x010b52a0 and off is None and fa == 0x00b91cb0 for a, _, _, fa, off in got),
@@ -70,6 +99,9 @@ def main():
         fnvlink.hand_vptr_confirm(hf, exe)
         check(hf.get(0x010b52a0) == [('u', 'FUN_00b91cb0_class', 0x00b91cb0, 0x6c)],
               'outside the named-vftable window: still a tentative site, confirmed by the exe')
+        got2 = two_stores(exe)
+        check(got2.get(0x010b5140) == [0] and got2.get(0x010b511c) == [0x6c],
+              'two tables stored by one function: both kept, at 0 and +0x6c: %s' % got2)
         check(fnvlink.vftable_head(exe, 0x010b5140, 0) and not fnvlink.vftable_head(exe, 0x010b5140, 0x6c),
               'vftable_head: 010b5140 is a primary table (slot 0 a deleting destructor), not one at +0x6c')
     print('%d failed' % len(FAILS))
