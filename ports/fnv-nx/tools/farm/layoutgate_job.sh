@@ -28,8 +28,12 @@ fi
 mkdir -p "$FARM_HOME" "$(dirname "$REPORT")"
 
 # 1. The port's tools at that commit (a detached worktree outside the main checkout), sse2neon for the native flags.
-SRC=$FARM_HOME/src-$C12
-bash "$HERE/worktree.sh" "$REPO" "$SRC" "$COMMIT" >/dev/null
+# LAYOUTGATE_TOOLS_COMMIT: the gate's tools from another commit (a fix not yet in the head whose tree is measured)
+TOOLS=${LAYOUTGATE_TOOLS_COMMIT:-$COMMIT}
+git -C "$REPO" cat-file -e "$TOOLS^{commit}" 2>/dev/null || git -C "$REPO" fetch -q origin "$TOOLS" 2>/dev/null || \
+  git -C "$REPO" fetch -q origin claude/fnv-s1-rules 2>/dev/null || true
+SRC=$FARM_HOME/src-${TOOLS:0:12}
+bash "$HERE/worktree.sh" "$REPO" "$SRC" "$TOOLS" >/dev/null
 P=$SRC/ports/fnv-nx
 # the commit's own job script: runner.sh runs the farm checkout's copy, which may be older than <commit> (5e94e04e5a61
 # ran a copy without the recon-set tree check and took a tree prepared before three recons existed)

@@ -11,6 +11,7 @@
 #if defined(_MSC_VER) && !defined(__clang__) || defined(FNVNX_STATIC_MSVC)
 #define FNVNX_RAWVT_DYN(vp, k) (vp)[(k)]
 #define FNVNX_RAWVT_DYNOFF(vp, off) (off)
+#define FNVNX_RAWVT_DYNK(vp, k) (k)
 #else
 #ifdef __cplusplus
 extern "C" {
@@ -27,8 +28,11 @@ extern const unsigned long __fnvnx_m1k_count __attribute__((weak, visibility("hi
 #ifdef __cplusplus
 }
 #endif
+/* slot 0 never shifts: an exe call of slot 0 is ??_G(flags); natively slot 0 is the complete destructor D1 (= flag 0)
+ * and slot 1 the deleting D0, so the unshifted call is right for flag 0 and leaks for flag 1 - never frees wrongly */
 static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
 {
+    if (k == 0) return 0;
     if ((unsigned long)vp - (unsigned long)__fnvnx_m1_start < (unsigned long)__fnvnx_m1_end - (unsigned long)__fnvnx_m1_start)
         return 1;
     if ((unsigned long)vp - (unsigned long)__fnvnx_m1k4_start < (unsigned long)__fnvnx_m1k4_end - (unsigned long)__fnvnx_m1k4_start)
@@ -43,6 +47,8 @@ static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
 }
 /* the indexed expression keeps its type: (vp)[k + 0/1] */
 #define FNVNX_RAWVT_DYN(vp, k) (vp)[(k) + fnvnx_rawvt_m1((const void *)(vp), (unsigned)(k))]
+/* a slot index in pointer arithmetic on the vptr, `*(*(long**)p + 7)`: k + 0/1 */
+#define FNVNX_RAWVT_DYNK(vp, k) ((k) + fnvnx_rawvt_m1((const void *)(vp), (unsigned)(k)))
 /* the byte-offset spelling `(char*)*(void**)x + off` (off = 4 * slot): off + 4 when the table is minus-one */
 #define FNVNX_RAWVT_DYNOFF(vp, off) ((off) + 4 * fnvnx_rawvt_m1((const void *)(vp), (unsigned)(off) / 4))
 #endif

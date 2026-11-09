@@ -153,6 +153,9 @@ def check_unit(tree, unit, workdir):
     for fn, src, line, off, _ in scan_dump(dumps[0]):
         if off is None:
             rows.append((unit, fn, line, 'dyn', 'covered')); continue
+        if off == 0:
+            # slot 0 (the exe's deleting destructor ??_G(flags)): natively D1, right for flag 0 - reported apart
+            rows.append((unit, fn, line, 0, 'dtor0')); continue
         if src not in lines:
             try:
                 lines[src] = open(src if os.path.isabs(src) else os.path.join(tree, src), errors='replace').read().splitlines()
@@ -160,8 +163,16 @@ def check_unit(tree, unit, workdir):
                 lines[src] = []
         text = '\n'.join(lines[src][max(0, line - 3):line + 1])
         if off == 'field':
-            # a vftable-model struct's field: VTM1 padded the struct (the unit carries FNVNX_VTM1_PAD)
+            # a vftable-model struct's field: VTM1 padded the struct (the unit carries FNVNX_VTM1_PAD); a COM-shaped
+            # model (QueryInterface / AddRef / Release / __stdcall members, a D3D call) keeps its slots: ok-com
             whole = '\n'.join(lines[src])
+            call = lines[src][line - 1] if 0 < line <= len(lines[src]) else ''
+            fm = re.search(r'->\s*(\w+)\s*\(', call)
+            if fm:
+                sd = re.search(r'struct\s+\w+\s*\{[^{}]*\b%s\b[^{}]*\}' % re.escape(fm.group(1)), whole)
+                if fm.group(1) in ('QueryInterface', 'AddRef', 'Release') or \
+                        (sd and re.search(r'QueryInterface|AddRef|Release|__stdcall|STDMETHOD|HRESULT', sd.group(0))):
+                    rows.append((unit, fn, line, off, 'ok-com')); continue
             rows.append((unit, fn, line, off, 'covered' if 'FNVNX_VTM1_PAD' in whole or COVERED.search(text) else 'raw'))
             continue
         rows.append((unit, fn, line, off, 'covered' if COVERED.search(text) else 'raw'))
@@ -182,7 +193,9 @@ def main():
         for r in check_unit(os.path.abspath(a.tree), u, wd):
             print('\t'.join(str(x) for x in r))
             n += r[4] == 'raw'
-    print('raw vcalls not under the m1 test: %d' % n, file=sys.stderr)
+            d0 = locals().get('d0', 0) + (r[4] == 'dtor0')
+    print('raw vcalls not under the m1 test: %d; slot-0 (deleting destructor) calls: %d' % (n, locals().get('d0', 0)),
+          file=sys.stderr)
 
 
 if __name__ == '__main__':

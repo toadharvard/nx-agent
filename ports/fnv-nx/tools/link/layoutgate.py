@@ -364,8 +364,10 @@ def _run_unit(tree, workdir, unit, boot):
     if RAWVCALL:
         try:
             for u, fn, line, off, st in rawvcall.check_unit(tree, unit, workdir):
-                if st != 'covered':
+                if st == 'raw':
                     rows.append((unit, fn, 'rawvcall line %s' % line, off, st, 'rawvcall', boot))
+                elif st != 'covered':
+                    rows.append((unit, fn, 'rawvcall line %s' % line, off, st, st, boot))
         except Exception as e:  # noqa: BLE001
             rows.append((unit, '-', 'rawvcall', '-', 'check failed: %s' % e, 'rawvcall', boot))
     # the native layouts, for the cross-unit (ODR) check: one class name, several definitions in the tree
@@ -424,8 +426,8 @@ def main():
             if (size, tuple(sorted(foff.items()))) == (msize, tuple(sorted(mf.items()))): continue
             diff = [(f, mf[f], foff[f]) for f in foff if f in mf and mf[f] != foff[f]]
             if diff:
-                f, a, c = min(diff, key=lambda x: x[2])
-                allrows.append((unit, name, 'odr field %s' % f, a, c, 'odr', b))
+                fld, ref_off, own_off = min(diff, key=lambda x: x[2])
+                allrows.append((unit, name, 'odr field %s' % fld, ref_off, own_off, 'odr', b))
             elif size != msize:
                 allrows.append((unit, name, 'odr size', msize, size, 'odr', b))
     # the member check: a record whose layout differs only by its alignment under #pragma pack (pack) or by a zero
