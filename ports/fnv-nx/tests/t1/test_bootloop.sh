@@ -110,6 +110,7 @@ ok "determinism: the second stub boot agreed (a prefix: cut short by the clock),
 rm -f "$T"/home/bootloop/determinism-*.done; mv "$T/linkeq.done.first" "$T/home/bootloop/linkeq.done"
 run nondet FAKE_NONDET=1
 ok "two stub boots that disagree: a WARN (exit 0, no FAIL), recorded once per emulator version, not passed" '[ "$(cat $T/nondet.rc)" = 0 ] && ! grep -q "^- FAIL" $T/nondet.md && grep -q "^- determinism (two identical stub boots): WARN: two identical stub boots disagree (emu_guest.py [0-9a-f]*, checked once): FAIL: the function traces differ at line 2" $T/nondet.md && ls $T/home/bootloop/determinism-*.failed > /dev/null && ! ls $T/home/bootloop/determinism-*.done > /dev/null 2>&1'
+ok "... its evidence published: both traces and the boot settings on s5boot/<c12>-determinism, named in the report" 'for f in README.txt a/stub_trace.tsv.xz b/stub_trace.tsv.xz; do git --git-dir=$T/art.git cat-file -e "s5boot/${C1:0:12}-determinism:$f" || exit 1; done && grep -q "the two traces: branch s5boot/${C1:0:12}-determinism" $T/nondet.md'
 : > "$T/calls"; run nondet2 FAKE_NONDET=1
 ok "... not run again for that emulator version (one stub boot), the earlier WARN repeated" '[ "$(grep -c "^boot " $T/calls)" = 1 ] && grep -q "(not checked again)" $T/nondet2.md'
 # a published tree with the head's prepare inputs and recon set: synced into the build's own tree path and adopted (no
