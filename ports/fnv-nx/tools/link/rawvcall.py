@@ -150,9 +150,13 @@ def check_unit(tree, unit, workdir):
         return [(unit, '-', 0, '-', 'compile-failed')]
     lines = {}
     rows = []
-    for fn, src, line, off, _ in scan_dump(dumps[0]):
-        if off is None:
-            rows.append((unit, fn, line, 'dyn', 'covered')); continue
+    for fn, src, line0, off, _ in scan_dump(dumps[0]):
+        rel = os.path.relpath(src, tree) if os.path.isabs(src) else src
+        line_id = line0 if rel == unit else '%s:%d' % (rel, line0)     # a call in a header: its file and line
+        line = line0
+        if off is None or os.path.basename(src) == 'fnvnx_rawvt.h':
+            # a run-time offset, or the m1 helper's own call (fnvnx_rawvt_del0's D0 / vp[0](o, flag))
+            rows.append((unit, fn, line_id, 'dyn' if off is None else off, 'covered')); continue
         if off == 0:
             # slot 0 (the exe's deleting destructor ??_G(flags)): covered by FNVNX_RAWVT_DEL0 (flag 1 -> D0); else raw
             pass
@@ -172,10 +176,10 @@ def check_unit(tree, unit, workdir):
                 sd = re.search(r'struct\s+\w+\s*\{[^{}]*\b%s\b[^{}]*\}' % re.escape(fm.group(1)), whole)
                 if fm.group(1) in ('QueryInterface', 'AddRef', 'Release') or \
                         (sd and re.search(r'QueryInterface|AddRef|Release|__stdcall|STDMETHOD|HRESULT', sd.group(0))):
-                    rows.append((unit, fn, line, off, 'ok-com')); continue
-            rows.append((unit, fn, line, off, 'covered' if 'FNVNX_VTM1_PAD' in whole or COVERED.search(text) else 'raw'))
+                    rows.append((unit, fn, line_id, off, 'ok-com')); continue
+            rows.append((unit, fn, line_id, off, 'covered' if 'FNVNX_VTM1_PAD' in whole or COVERED.search(text) else 'raw'))
             continue
-        rows.append((unit, fn, line, off, 'covered' if COVERED.search(text) else 'raw'))
+        rows.append((unit, fn, line_id, off, 'covered' if COVERED.search(text) else 'raw'))
     for f in os.listdir(d):
         os.remove(os.path.join(d, f))
     os.rmdir(d)
@@ -185,17 +189,29 @@ def check_unit(tree, unit, workdir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--tree', required=True)
+    ap.add_argument('--sites', help='write the raw rows as a rawvt_ssa.tsv site list (RAWVT1-SSA) here')
     ap.add_argument('units', nargs='+')
     a = ap.parse_args()
+    sites = []
     wd = tempfile.mkdtemp()
     n = 0
     for u in a.units:
         for r in check_unit(os.path.abspath(a.tree), u, wd):
             print('\t'.join(str(x) for x in r))
             n += r[4] == 'raw'
-            d0 = locals().get('d0', 0) + (r[4] == 'dtor0')
-    print('raw vcalls not under the m1 test: %d; slot-0 (deleting destructor) calls: %d' % (n, locals().get('d0', 0)),
-          file=sys.stderr)
+            if r[4] == 'raw':
+                f, ln = (str(r[2]).rsplit(':', 1) + [None])[:2] if ':' in str(r[2]) else (u, r[2])
+                try:
+                    t = open(os.path.join(a.tree, f), errors='replace').read().splitlines()[int(ln) - 1]
+                    sites.append((f, ' '.join(t.split()), r[3]))
+                except (OSError, IndexError, ValueError):
+                    pass
+    if a.sites:
+        with open(a.sites, 'w') as fh:
+            fh.write('# fnvnx-rawvt-ssa/1\tunit\tsource line (whitespace collapsed)\tbyte offset or field\n')
+            for s in sorted(set(sites)):
+                fh.write('%s\t%s\t%s\n' % s)
+    print('raw vcalls not under the m1 test: %d' % n, file=sys.stderr)
 
 
 if __name__ == '__main__':
