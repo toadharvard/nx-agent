@@ -3476,6 +3476,87 @@ def rewrite_refs(path, by_src, addr_of, rebound=()):
     return n, nx
 
 
+_CTOR_DTOR = re.compile(r'^(C[123]|D[012])')
+
+
+def caller_class(sym):
+    """The vtable symbol of a member function's class (`_ZN3Foo3barEv` -> _ZTV3Foo, `_ZN2ns3FooC1Ev` ->
+    _ZTVN2ns3FooE), None for anything else (free functions, templates, local names)."""
+    if not sym.startswith('_ZN'):
+        return None
+    i, parts = 3, []
+    while i < len(sym) and sym[i] in 'KVR':
+        i += 1
+    while i < len(sym):
+        if _CTOR_DTOR.match(sym[i:]):
+            return _vt_name(parts)
+        m = re.match(r'\d+', sym[i:])
+        if not m:
+            return None
+        n = int(m.group())
+        j = i + len(m.group())
+        parts.append(sym[i:j + n])
+        i = j + n
+        if i < len(sym) and sym[i] == 'E':
+            return _vt_name(parts[:-1])
+    return None
+
+
+def _vt_name(parts):
+    if not parts:
+        return None
+    return '_ZTV' + parts[0] if len(parts) == 1 else '_ZTVN' + ''.join(parts) + 'E'
+
+
+def direct_call_slot_binds(have, changed, addr_of, per_obj, rebound, traps, rows):
+    """W48 (link b7b866ef, raw boot: `virtual function defined nowhere: _ZN6BSFile7GetSizeEv`): GCC devirtualizes a call
+    in a constructor (or a method of a final class) into a direct `bl` to the slot's name. When that name is a trap in
+    the object (the object's own vtables disagree on it, or it has none) but the calling function's class has a
+    vtable the slot fill bound the name in (any object: a unit's `#vtables` object holds the synthesized ones), the
+    call is that class's slot: the symbol gets that target. Callers of several classes must agree. FNVNX_W48=0: off.
+    -> names bound."""
+    if os.environ.get('FNVNX_W48', '1') == '0':
+        return 0
+    by_vt = collections.defaultdict(set)   # (symbol, vtable) -> {(target, exe address)}
+    for r in rows:
+        for use in r[7].split():
+            by_vt[(r[2], use.split('+')[0])].add((r[4], int(r[3], 16)))
+    n = 0
+    for u in have:
+        ren = per_obj.get(u.source) or {}
+        trapped = {un for un, t in ren.items() if t in traps and un not in changed.get(u, {})}
+        if not trapped:
+            continue
+        try:
+            o = vtables.Obj(u.obj)
+        except (OSError, ValueError):
+            continue
+        callers = collections.defaultdict(set)   # name -> {caller class}
+        for i_ in range(len(o.secs)):
+            if not o.secs[i_][2] & 4:
+                continue
+            sec = o.secnames[i_]
+            fn = sec[len('.text.'):] if sec.startswith('.text.') else None
+            for _, (si, typ, _) in o.rel(i_).items():
+                nm = o.syms[si][0]
+                if typ in (21, 20) and nm in trapped:
+                    callers[nm].add(caller_class(fn) if fn else None)
+        for un, cls in callers.items():
+            if None in cls:
+                continue
+            got = set()
+            for c in cls:
+                got |= by_vt.get((un, c), set())
+            if len(got) != 1:
+                continue
+            tgt, a = next(iter(got))
+            changed.setdefault(u, {})[un] = tgt
+            addr_of[(u.source, un)] = a
+            rebound.add((u.source, un))
+            n += 1
+    return n
+
+
 def bodies_slot_renames(have, changed, addr_of, per_obj, rebound, undefined):
     """W28: for each synthesized body object (`<host>#bodies<n>`) the names it leaves undefined that the slot fill bound in
     the host's objects (`changed`: {unit: {symbol: target}}, addr_of {(source, symbol): exe address}) get the same
@@ -3890,6 +3971,7 @@ def exe_slot_fill(exev, exe_cls, vmap, by_cls, rtti, have, per_obj, traps, nativ
     # The thunk adjusts `this` and calls the same function the slot holds: it takes the host's binding.
     st['bodies_slot_bound'] += bodies_slot_renames(have, changed, addr_of, per_obj, rebound,
                                                    lambda u: [x.name for x in elfsyms.symbols(u.obj) if x.shndx == 0])
+    st['direct_call_slot_bound'] += direct_call_slot_binds(have, changed, addr_of, per_obj, rebound, traps, rows)
     # apply the renames: the .redefine files and refs.tsv rows of the objects that changed
     bound_refs = bound_refs_x = 0
     by_src = {u.source: m for u, m in changed.items()}
