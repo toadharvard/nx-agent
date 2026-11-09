@@ -203,7 +203,8 @@ def main():
                 f, ln = (str(r[2]).rsplit(':', 1) + [None])[:2] if ':' in str(r[2]) else (u, r[2])
                 try:
                     t = open(os.path.join(a.tree, f), errors='replace').read().splitlines()[int(ln) - 1]
-                    sites.append((f, ' '.join(t.split()), r[3]))
+                    if len(' '.join(t.split())) > 8:
+                        sites.append((f, ' '.join(t.split()), r[3]))
                 except (OSError, IndexError, ValueError):
                     pass
     if a.sites:

@@ -7445,9 +7445,11 @@ def r_rawvt_ssa(path, text, stats):
     for ln in lines: starts.append(n); n += len(ln) + 1
     edits = []
     for li, ln in enumerate(lines):
-        off = want.get(' '.join(ln.split()))
+        key = ' '.join(ln.split())
+        off = want.get(key) if len(key) > 8 else None      # a blank or tiny line is no call site
         if off is None or 'FNVNX_' in ln or 'RAWVT1-KEEP' in ln: continue
         base = starts[li]
+        ext = '\n'.join(lines[li:li + 4])
         if off == 'field':
             # `tbl->f(` with tbl a side-effect-free path: FNVNX_RAWVT_FIELD(tbl, f)( - a __stdcall field is COM's
             fm = None
@@ -7470,17 +7472,18 @@ def r_rawvt_ssa(path, text, stats):
             stats['RAWVT1-SSA-COM'] += 1
             continue
         if off == 0:
-            # the call of this line: its last argument list at statement level
+            # the call of this line: its last argument list at statement level (the arguments may go on over
+            # the next lines: ext)
             cand = None
             for m in re.finditer(r'\(', ln):
-                z = _ssa_close(ln, m.start())
+                z = _ssa_close(ext, m.start())
                 if z is None: continue
                 cs = _ssa_callee_start(ln, m.start())
-                if cs < m.start() and re.fullmatch(r'\s*;?\s*', ln[z + 1:]) and re.fullmatch(r'\s*(?:return\s+)?', ln[:cs]):
+                if cs < m.start() and re.match(r'\s*;?\s*(?:\n|$)', ext[z + 1:]) and re.fullmatch(r'\s*(?:return\s+)?', ln[:cs]):
                     cand = (cs, m.start(), z); break
             if cand is None: stats['RAWVT1-SSA-HELD'] += 1; continue
             cs, a, z = cand
-            args = _ssa_args(ln, a, z)
+            args = _ssa_args(ext, a, z)
             if len(args) == 2 and _ssa_val(args[1]) is not None and not re.match(r'\s*return\b', ln):
                 edits.append((base + cs, base + z + 1, 'FNVNX_RAWVT_DEL0(%s, %s)' % (args[0], args[1])))
                 stats['RAWVT1-SSA-DEL0'] += 1
@@ -7516,7 +7519,8 @@ def r_rawvt_ssa(path, text, stats):
                 if not ca or ca[1] is None:
                     # the arguments continue on the next lines
                     if lj == li and ca and ca[1] is None:
-                        x = src[ca[0] + 1:].split(',')[0].strip()
+                        z2 = _ssa_close(ext, ca[0])
+                        x = _ssa_args(ext, ca[0], z2)[0] if z2 is not None else src[ca[0] + 1:].split(',')[0].strip()
                     else:
                         continue
                 else:
