@@ -3473,9 +3473,18 @@ def _native_arity(name):
     return _FREE_ARITY[name]
 
 
-def _first_ret_pop(a, exe_path):
-    """The bytes the x86 function at a pops at its first `ret` (0 for a plain `ret`), None without capstone, outside
-    the image, or before an int3."""
+_RET_POP = {}
+
+
+def _first_ret_pop(a, exe_path, depth=0):
+    """The bytes the x86 function at a pops at its first `ret` (0 for a plain `ret`), scanning up to 0x4000 bytes.
+    W52b (cc_census): a frameless tail jump (no push / sub esp / mov ebp before it) decides it instead. `jmp <address>`
+    takes that function's count; an indirect `jmp` (an import, a vtable slot) passes through the stack arguments it
+    touches, 4 x the highest `[esp + 4k]`. None without capstone, outside the image, or at an int3 first
+    (FNVNX_POPTAIL=0: the first `ret` within 0x400 bytes, as before)."""
+    key = (a, exe_path, depth)
+    if key in _RET_POP:
+        return _RET_POP[key]
     try:
         import capstone
     except ImportError:
@@ -3487,13 +3496,57 @@ def _first_ret_pop(a, exe_path):
         return None
     if off is None:
         return None
+    tail = os.environ.get('FNVNX_POPTAIL', '1') != '0'
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-    for ins in md.disasm(data[off:off + 0x400], a):
-        if ins.mnemonic == 'int3':
-            return None
+    res, frame, top = None, False, 0
+    for ins in md.disasm(data[off:off + (0x4000 if tail else 0x400)], a):
+        m, op = ins.mnemonic, ins.op_str
+        if m == 'int3':
+            break
+        if m == 'ret':
+            res = int(op, 0) if op else 0
+            break
+        if not tail:
+            continue
+        if m == 'push' or (m == 'sub' and op.startswith('esp')) or (m == 'mov' and op.startswith('ebp, esp')):
+            frame = True
+        if not frame:
+            for k in re.findall(r'\[esp \+ (0x[0-9a-f]+|\d+)\]', op):
+                top = max(top, int(k, 0) // 4)
+        if m == 'jmp' and not frame:
+            if re.fullmatch(r'0x[0-9a-f]+', op) and depth < 3:
+                res = _first_ret_pop(int(op, 16), exe_path, depth + 1)
+            else:
+                res = 4 * top
+            break
+    _RET_POP[key] = res
+    return res
+
+
+def no_return(a, exe_path):
+    """True when the x86 function at a reaches an int3 before any ret, its last call / jmp a call (a reporter that
+    never returns: its arguments' layout cannot matter to a caller)."""
+    try:
+        import capstone
+    except ImportError:
+        return False
+    pe, data = exevft._text(exe_path)
+    try:
+        off = pe.rva_to_off(a - pe.image_base, 16)
+    except Exception:
+        return False
+    if off is None:
+        return False
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    last = None   # the last call / jmp: an int3 after a call (not a tail jmp) is the end of a non-returning body
+    for ins in md.disasm(data[off:off + 0x4000], a):
         if ins.mnemonic == 'ret':
-            return int(ins.op_str, 0) if ins.op_str else 0
-    return None
+            return False
+        if ins.mnemonic == 'int3':
+            return last == 'call'
+        if ins.mnemonic in ('call', 'jmp'):
+            last = ins.mnemonic
+    return False
 
 
 def free_slot(a, nd, bridges, st, exe_path=None, com=False):
