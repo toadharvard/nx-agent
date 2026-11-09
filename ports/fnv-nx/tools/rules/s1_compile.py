@@ -6249,12 +6249,42 @@ def _d22_callonly(masked, c, unit=True, named_ok=False):
     return True
 
 
+_D22_OOC = {}
+
+
 def _d22_out_of_class_defs(masked, name):
-    """the out-of-class definitions `[inline] T C::member(...) [const] { ... }` of class `name` whose body has no
-    nested brace (the whole definition in group 0, the member in 'mem')"""
-    return re.finditer(r'(?m)^[ \t]*(?:inline[ \t]+|__forceinline[ \t]+)?[\w:<>*& \t]*?(?<![\w~])%s[ \t]*::[ \t]*'
-                       r'(?P<mem>[A-Za-z_]\w*)[ \t]*\((?:[^()]|\([^()]*\))*\)[ \t]*(?:const[ \t]*)?\s*\{[^{}]*\}'
-                       % re.escape(name), masked)
+    r"""the out-of-class definitions `[inline] T C::member(...) [const] { ... }` of class `name` whose body has no
+    nested brace (the whole definition in group 0, the member in 'mem').
+    T1 (prepare 16 -> 52 min on bl1: r_vtable_dtor_slot 75 -> 1,840 s): the pattern is anchored at a line start and
+    was tried at every line of the file for every class. A match's `name` is a whole word on the line it starts (the
+    prefix `[\w:<>*& \t]*?` crosses no newline, `(?<![\w~])` and `[ \t]*::` bound the word), so only the starts of
+    the lines holding the word `name` (the file's word index, _d22_index) are tried, in order, a start inside the
+    previous match skipped: the matches re.finditer gives, found without the scan. A name that is not a plain
+    identifier keeps the scan."""
+    pat = _D22_OOC.get(name)
+    if pat is None:
+        if len(_D22_OOC) > 4096:
+            _D22_OOC.clear()
+        pat = _D22_OOC[name] = re.compile(
+            r'(?m)^[ \t]*(?:inline[ \t]+|__forceinline[ \t]+)?[\w:<>*& \t]*?(?<![\w~])%s[ \t]*::[ \t]*'
+            r'(?P<mem>[A-Za-z_]\w*)[ \t]*\((?:[^()]|\([^()]*\))*\)[ \t]*(?:const[ \t]*)?\s*\{[^{}]*\}'
+            % re.escape(name))
+    if not re.fullmatch(r'[A-Za-z_]\w*', name):
+        return pat.finditer(masked)
+    return _d22_ooc_matches(pat, masked, _d22_index(masked)[0].get(name, ()))
+
+
+def _d22_ooc_matches(pat, masked, pos):
+    last, done = 0, -1
+    for p in pos:
+        ls = masked.rfind('\n', 0, p) + 1
+        if ls < last or ls == done:
+            continue
+        done = ls
+        m = pat.match(masked, ls)
+        if m:
+            yield m
+            last = m.end()
 
 def _d22_defines_none(masked, c):
     """class c defines no member function in the file (no body in the class, no `C::member(` definition) and
