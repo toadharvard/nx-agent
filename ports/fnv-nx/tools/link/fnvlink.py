@@ -1845,6 +1845,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
                 f.write(bridges[bn]); continue
             target, v, rtext, dtext = bridges[bn]
             f.write(abi.emit_bridge(bn, target, v, 'ref: %s | def: %s' % (rtext, dtext)))
+        f.write(emit_m1k_ranges(bridges, stats))
         f.write(emit_traps(traps))
         f.write(emit_xtraps(xtraps))
         f.write(emit_tls(tls_addrs))
@@ -2169,6 +2170,42 @@ def m1_section(minus_one, other='fnvnx_vtext', k=0):
     if minus_one and os.environ.get('FNVNX_M1', '1') != '0' and k in (0, 4):
         return (M1_SECTION if k == 0 else M1_SECTION + 'k4') + ('.vmo' if other == 'fnvnx_vmo' else '')
     return other
+
+
+M1K = {}   # W51: minus-one tables whose destructor pair sits at k not in {0, 4}: symbol -> (k, bridges key)
+
+
+def m1k_note(sym, key, minus_one, k):
+    """W51 (S1's RAWVT1-ANY, fnvnx_rawvt.h): a minus-one table written with its destructor pair at k outside {0, 4}
+    lies in neither fast range; it is listed in __fnvnx_m1k_ranges (emit_m1k_ranges) so FNVNX_RAWVT_DYN shifts only
+    its slots past k. FNVNX_M1K=0: none listed."""
+    if minus_one and k not in (0, 4) and os.environ.get('FNVNX_M1K', '1') != '0' and \
+            os.environ.get('FNVNX_M1', '1') != '0':
+        M1K[sym] = (k, key)
+
+
+def emit_m1k_ranges(bridges, st=None):
+    """W51: `__fnvnx_m1k_ranges[] = {start, end, k}` (address point to the table's last word) for the tables m1k_note
+    listed, and `__fnvnx_m1k_count`; every table's words are counted in its bridges.S text."""
+    rows = []
+    for sym, (k, key) in sorted(M1K.items()):
+        text = bridges.get(key)
+        if not isinstance(text, str) or ('\n%s:\n' % sym) not in text:
+            continue
+        body = text.split('\n%s:\n' % sym, 1)[1].split('    .size', 1)[0]
+        n = sum(1 for l in body.splitlines() if l.strip().startswith('.word'))
+        if n <= 2:
+            continue
+        rows.append('    .word %s + 8, %s + %d, %d' % (sym, sym, 4 * n, k))
+    if st is not None:
+        st['m1k-ranges'] = len(rows)
+    out = ['    .section .data.rel.ro.fnvnx_m1k_ranges,"aw"', '    .p2align 2',
+           '    .globl __fnvnx_m1k_ranges', '    .hidden __fnvnx_m1k_ranges', '    .type __fnvnx_m1k_ranges, %object',
+           '__fnvnx_m1k_ranges:'] + (rows or ['    .word 0, 0, 0']) + \
+          ['    .size __fnvnx_m1k_ranges, .-__fnvnx_m1k_ranges',
+           '    .globl __fnvnx_m1k_count', '    .hidden __fnvnx_m1k_count', '    .type __fnvnx_m1k_count, %object',
+           '__fnvnx_m1k_count:', '    .word %d' % len(rows), '    .size __fnvnx_m1k_count, 4', '    .text']
+    return '\n'.join(out) + '\n'
 
 
 def m1_compiled_renames(have, objsyms, out, st):
@@ -4930,6 +4967,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                                  '    .globl %s' % z, '    .type %s, %%object' % z, '%s:' % z] + words_ + \
                                 ['    .size %s, .-%s' % (z, z), '    .text']
                         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
+                        m1k_note(z, 'zzvtext_' + z, kind_ == 'minus-one', k_)
                         st['vtfill-tables'] += 1
                         st['vtfill-tables-' + kind_] += 1
                         st['vtfill-slots'] += len(fill)
@@ -5009,6 +5047,7 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
                  '    .globl %s' % z,
                  '    .type %s, %%object' % z, '%s:' % z] + slotfill2.place_extra(words, extra, shift, z, out) + ['    .size %s, .-%s' % (z, z), '    .text']
         bridges['zzvtext_' + z] = '\n'.join(lines) + '\n'
+        m1k_note(z, 'zzvtext_' + z, bool(m1), dp)
         st['d26-minus-one-tables' if m1 else ('extended' if extra else 'copied-per-slot')] += 1
         st['slots-added'] += len(extra)
         st['slots-per-use'] += len(ov)
@@ -5312,6 +5351,8 @@ def minus_one_copies(cands, exev, native, providers, exe_path, msvc, bridges, tr
                  '    .word 0x%x' % (ott & 0xffffffff), '    .word 0'] + ['    .word %s' % w for w in words] + \
                 ['    .size %s, .-%s' % (name, name), '    .text']
         bridges['zzvmo_%08x' % v] = '\n'.join(lines) + '\n'
+        m1k_note(name, 'zzvmo_%08x' % v, not (row is not None and pair is None and row['kind'] != 'minus-one'),
+                 row['dtor_slot'] if row is not None and pair is None and row['kind'] == 'minus-one' else 0)
         got[v] = name
         st['copies'] += 1
         st['slots'] += len(words)
