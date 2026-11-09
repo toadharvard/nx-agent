@@ -6,6 +6,7 @@
 * _hv_unit takes `m_6c = &DAT_010b52a0;` in a function annotated @fnv 0x00b91cb0 as a tentative site (offset None);
 * hand_vptr_confirm keeps it at offset 0x6c: the exe function stores 0x010b52a0 at [reg+0x6c], and the table's slot 0
   is an adjustor of 0x6c in front of a deleting destructor;
+* outside the window around the named vftables (link 7f0f8526) the site is still taken;
 * a tentative site whose table head does not fit its offset is dropped, and so is every one without the exe;
   FNVNX_HVFIELD=0: no tentative sites.
 """
@@ -64,6 +65,11 @@ def main():
         fnvlink.hand_vptr_confirm(h, exe, st)
         check(h.get(0x010b52a0) == [('u', 'FUN_00b91cb0_class', 0x00b91cb0, 0x6c)],
               'exe store at +0x6c, adjustor head: kept at 0x6c: %s' % h.get(0x010b52a0))
+        far = fnvlink._hv_unit(TEXT, {}, set(), (0x01010000, 0x01090000))
+        hf = hand_of(far)
+        fnvlink.hand_vptr_confirm(hf, exe)
+        check(hf.get(0x010b52a0) == [('u', 'FUN_00b91cb0_class', 0x00b91cb0, 0x6c)],
+              'outside the named-vftable window: still a tentative site, confirmed by the exe')
         check(fnvlink.vftable_head(exe, 0x010b5140, 0) and not fnvlink.vftable_head(exe, 0x010b5140, 0x6c),
               'vftable_head: 010b5140 is a primary table (slot 0 a deleting destructor), not one at +0x6c')
     print('%d failed' % len(FAILS))

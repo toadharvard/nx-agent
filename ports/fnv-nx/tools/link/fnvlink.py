@@ -2126,10 +2126,13 @@ def _hv_unit(text, names, known, near):
             rhs = r2
         rhs = HV_NOISE.sub('', rhs)
         a = names.get(rhs)
+        far = False   # W53: a DAT_ name outside the window: only a tentative (exe-confirmed) site may use it
         if a is None and DAT_NAME.match(rhs):   # a name units.json does not bind for this unit (S5 J-0109)
             a = int(DAT_NAME.match(rhs).group(1), 16)
-            if not (kind_of_addr(a) == 'data' and near[0] <= a <= near[1]):
+            if not kind_of_addr(a) == 'data':
                 a = None
+            elif not near[0] <= a <= near[1]:
+                far = True
         if a is None:
             continue
         lhs = m.group('lhs').strip()
@@ -2137,13 +2140,15 @@ def _hv_unit(text, names, known, near):
         mo = DEREFN_LHS.match(lhs) or DEREFK_LHS.match(lhs)
         if mo:
             off = int(mo.group(1), 0) * (4 if mo.re is DEREFK_LHS else 1)
-        if not (a in known or VPTR_LHS.search(lhs) or DEREF_LHS.match(lhs) or
-                ((DEREF1_LHS.match(lhs) or (mo and off)) and near[0] <= a <= near[1])):
+        if far or not (a in known or VPTR_LHS.search(lhs) or DEREF_LHS.match(lhs) or
+                       ((DEREF1_LHS.match(lhs) or (mo and off)) and near[0] <= a <= near[1])):
             # W53 (cc_census, a9d9f910): a field store of an image address next to the named vftables
             # (`m_6c = &DAT_010b52a0`, `p[0x6c / 4] = (int)&DAT_…`, `*(int**)((char*)this + 0x6c) = &DAT_…`) is a
             # tentative site (offset None): hand_vptr_confirm keeps it when the exe function stores that address
             # at an object offset itself
-            if near[0] <= a <= near[1] and HV_FIELD_LHS.match(lhs) and os.environ.get('FNVNX_HVFIELD', '1') != '0':
+            # (any data-image address: the exe's own store and the table head decide, hand_vptr_confirm; the window
+            # around the named vftables left out 010b0e9c / 010b511c / 010b5140 on link 7f0f8526)
+            if kind_of_addr(a) == 'data' and HV_FIELD_LHS.match(lhs) and os.environ.get('FNVNX_HVFIELD', '1') != '0':
                 off = None
             else:
                 continue
