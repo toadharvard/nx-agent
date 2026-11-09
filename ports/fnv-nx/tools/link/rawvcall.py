@@ -163,8 +163,16 @@ def check_unit(tree, unit, workdir):
                 lines[src] = []
         text = '\n'.join(lines[src][max(0, line - 3):line + 1])
         if off == 'field':
-            # a vftable-model struct's field: VTM1 padded the struct (the unit carries FNVNX_VTM1_PAD)
+            # a vftable-model struct's field: VTM1 padded the struct (the unit carries FNVNX_VTM1_PAD); a COM-shaped
+            # model (QueryInterface / AddRef / Release / __stdcall members, a D3D call) keeps its slots: ok-com
             whole = '\n'.join(lines[src])
+            call = lines[src][line - 1] if 0 < line <= len(lines[src]) else ''
+            fm = re.search(r'->\s*(\w+)\s*\(', call)
+            if fm:
+                sd = re.search(r'struct\s+\w+\s*\{[^{}]*\b%s\b[^{}]*\}' % re.escape(fm.group(1)), whole)
+                if fm.group(1) in ('QueryInterface', 'AddRef', 'Release') or \
+                        (sd and re.search(r'QueryInterface|AddRef|Release|__stdcall|STDMETHOD|HRESULT', sd.group(0))):
+                    rows.append((unit, fn, line, off, 'ok-com')); continue
             rows.append((unit, fn, line, off, 'covered' if 'FNVNX_VTM1_PAD' in whole or COVERED.search(text) else 'raw'))
             continue
         rows.append((unit, fn, line, off, 'covered' if COVERED.search(text) else 'raw'))

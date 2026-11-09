@@ -6672,12 +6672,12 @@ def r_empty_string_objects(path, text, stats):
 #   (k < K: RAWVT1-BELOWK, k = K: RAWVT1-SLOT0);
 # - the class is not one whose table the link keeps in exe order (S2-bodies' exe_order_classes.tsv, read from
 #   FNVNX_EXE_ORDER or under FNVNX_RECON; RAWVT1-EXEORDER).
-RAWVT1_KNUM = r'(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\s*/\s*4)?'   # a slot, or a byte offset / 4 (`0x128 / 4`)
+RAWVT1_KNUM = r'(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\s*/\s*(?:4|sizeof\s*\(\s*void\s*\*\s*\)))?'   # a slot, or a byte offset / 4 (`0x128 / 4`)
 
 
 def _kval(t):
     """the slot number of a RAWVT1_KNUM text"""
-    m = re.fullmatch(r'\s*(0[xX][0-9a-fA-F]+|[0-9]+)\s*(?:/\s*4)?\s*', t)
+    m = re.fullmatch(r'\s*(0[xX][0-9a-fA-F]+|[0-9]+)\s*(?:/\s*(?:4|sizeof\s*\(\s*void\s*\*\s*\)))?\s*', t)
     v = int(m.group(1), 0)
     return v // 4 if '/' in t else v
 
@@ -6753,7 +6753,7 @@ def _rawvt_mem_called(masked, m):
     """True when the slot read at m is called: under a cast to a function pointer or a typedef'd type (not a builtin:
     blk_00cc0000's FUN_00cd9f10 reads `(int)m_ppVirtualMethodTable[7]`, a count behind a data pointer, exe
     [[esi]+0x1c] * 48), or stored in a variable that the function then calls"""
-    if re.match(r'\s*\(', masked[m.end():m.end() + 4]):
+    if re.match(r'\s*(?:\)\s*)*\(', masked[m.end():m.end() + 12]):
         return True                                       # `vtbl[26](object, ...)`: the slot is called directly
     before = masked[max(0, m.start() - 200):m.start()]
     before = before[max(before.rfind(';'), before.rfind('{'), before.rfind('}')) + 1:]
@@ -6773,7 +6773,7 @@ def _rawvt_mem_called(masked, m):
 # function before it as `T* X` / `T& X` and T has a minus-one classlayout row whose destructor slot K is below k, and
 # the slot read is called. A receiver without a row (void*, the D3D / COM-like shells) is RAWVT1-RECV-AMBIG, a COM
 # name RAWVT1-RECV-COM, k <= K RAWVT1-RECV-K, an exe-order row RAWVT1-RECV-KEEP.
-RAWVT1_RECV_MEM = re.compile(r'(?<![\w.>])([A-Za-z_]\w*)\s*(?:->|\.)\s*%s\s*\[\s*(%s)\s*\]'
+RAWVT1_RECV_MEM = re.compile(r'(?<![\w.>])([A-Za-z_]\w*(?:\s*(?:->|\.)\s*[A-Za-z_]\w*)*?)\s*(?:->|\.)\s*%s\s*\[\s*(%s)\s*\]'
                              % (RAWVT1_MEMBERS, RAWVT1_KNUM))
 RAWVT1_RECV_CAST = re.compile(r'\(\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*([A-Za-z_]\w*)\s*\)|'
                               r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*\(?\s*([A-Za-z_]\w*)\s*\)?)\s*\)\s*\[\s*'
@@ -7067,6 +7067,34 @@ def _rawvt_any(masked, text, stats):
         recv = text[i + n.end():e].strip()
         out.append((a, e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
         stats['RAWVT1-ANY-ARITH'] += 1
+    # (e) a cast around the vptr before the index: ((Fn*)vt)[49], ((T**)(*(void***)this))[49], ((T**) * (void***)p)[108],
+    # ((Fn*)m_ppVirtualMethodTable)[83]
+    for m in re.finditer(r'\(\s*\(\s*(?:[A-Za-z_][\w\s]*?\*{1,2}|[^()]*\(\s*(?:__\w+\s*)?\*\s*\*\s*\)\s*\((?:[^()]|\([^()]*\))*\))\s*\)\s*', masked):
+        i = m.end()
+        e = _rawvt_operand(masked, i)
+        if e is None: continue
+        vexp = masked[i:e]
+        if not (re.search(r'\*\s*\(\s*' + _RAWVT_ANY_TYPE + r'\s*\*\s*\*|reinterpret_cast\s*<[^>]*\*\s*\*\s*\*?\s*>', vexp) or
+                re.fullmatch(r'\s*(?:this\s*->\s*)?' + RAWVT1_MEMBERS + r'\s*', vexp)):
+            continue
+        r = re.match(r'\s*\)\s*\[\s*(%s)\s*\]' % RAWVT1_KNUM, masked[e:])
+        if not r: continue
+        a, b = m.start(), e + r.end()
+        if 'FNVNX_' in text[a:b]: continue
+        out.append((a, b, 'FNVNX_RAWVT_DYN(%s, %s)' % (text[a:e + r.start()].rstrip() + ')', r.group(1))))
+        stats['RAWVT1-ANY-CASTVP'] += 1
+    # (f) pointer arithmetic on the vptr: *(*(long**)p + 7), *((void***)*(void**)&s + 12), (*(int**)r + 0x44 / 4)
+    for m in re.finditer(r'\*\s*\(\s*(?:\*\s*\(\s*' + _RAWVT_ANY_TYPE + r'\s*\*\s*\*\s*\)|\(\s*' + _RAWVT_ANY_TYPE +
+                         r'\s*\*\s*\*\s*\*?\s*\)\s*\*\s*\(\s*void\s*\*\s*\*\s*\))\s*', masked):
+        e = _rawvt_operand(masked, m.end())
+        if e is None: continue
+        r = re.match(r'\s*\+\s*(%s)\s*\)' % RAWVT1_KNUM, masked[e:])
+        if not r: continue
+        if _kval(r.group(1)) == 0: continue
+        if not _rawvt_mem_called(masked, _M(m.start(), e + r.end())): stats['RAWVT1-ANY-PTR-DATA'] += 1; continue
+        recv = text[m.end():e].strip()
+        out.append((e + r.start(1), e + r.end(1), 'FNVNX_RAWVT_DYNK(*(void**)(%s), %s)' % (recv, r.group(1))))
+        stats['RAWVT1-ANY-PTR'] += 1
     for m in _RAWVT_ANY_OFF.finditer(masked):
         e = _rawvt_operand(masked, m.end())
         if e is None: continue
@@ -7079,7 +7107,7 @@ def _rawvt_any(masked, text, stats):
         tail = masked[e + r.end():e + r.end() + 12]
         head = masked[max(0, m.start() - 80):m.start()]
         cast = re.search(r'\(\s*([A-Za-z_]\w*)\s*\*\s*\)\s*\(?\s*$', head)
-        called = re.match(r'\s*\)\s*\)\s*\(', tail) or (cast and re.search(r'Fn|Func|Proc|Callback|Method|Slot|Handler|Thunk', cast.group(1)))
+        called = re.match(r'\s*(?:\)\s*)+\(', tail) or (cast and re.search(r'Fn|Func|Proc|Callback|Method|Slot|Handler|Thunk', cast.group(1)))
         if not called: stats['RAWVT1-ANY-OFF-DATA'] += 1; continue
         recv = text[m.end():e].strip()
         out.append((e + r.start(1), e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
@@ -7119,7 +7147,7 @@ def r_raw_vtable_slots(path, text, stats):
         own = next(((a, nm) for a, z, nm in owners if a < m.start() < z), None)
         if own is None:
             seg = masked[max(0, m.start() - 3000):m.start()]
-            if re.search(r'\b%s\s*=\s*\*\s*(?:\(\s*void\s*\*\s*\*\s*\*\s*\)|reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>)'
+            if re.search(r'\b%s\s*=\s*\*\s*(?:\(\s*[A-Za-z_][\w\s]*\*\s*\*\s*\*?\s*\)|reinterpret_cast\s*<\s*[A-Za-z_][\w\s]*\*\s*\*\s*\*?\s*>)'
                          % re.escape(m.group(2)), seg) and _rawvt_mem_called(masked, m):
                 dyn.append((m.start(), m.end(), 'FNVNX_RAWVT_DYN(%s, %s)' % (m.group(2), m.group(3))))
                 stats['RAWVT1-MEM-DYN'] += 1; continue
@@ -7135,7 +7163,7 @@ def r_raw_vtable_slots(path, text, stats):
             # run-time choice (FNVNX_RAWVT_DYN)
             seg = masked[own[0]:m.start()]
             loc = None
-            for loc in re.finditer(r'\b%s\s*=\s*\*\s*(?:\(\s*void\s*\*\s*\*\s*\*\s*\)|reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>)'
+            for loc in re.finditer(r'\b%s\s*=\s*\*\s*(?:\(\s*[A-Za-z_][\w\s]*\*\s*\*\s*\*?\s*\)|reinterpret_cast\s*<\s*[A-Za-z_][\w\s]*\*\s*\*\s*\*?\s*>)'
                                    % re.escape(m.group(2)), seg):
                 pass
             if loc and _rawvt_mem_called(masked, m):
