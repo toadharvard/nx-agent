@@ -3329,6 +3329,8 @@ FREE_SLOT = re.compile(r'^\?FUN_[0-9a-f]{8}@@Y([AGI])')   # a global FUN_<a> and
 
 
 NAMED_FREE = re.compile(r'^\?[A-Za-z_]\w*@@YG')   # a named global __stdcall function (`?AllocateZeroedMemory@@YG...`)
+# W50: a named global (or namespace-scope) __fastcall function (`?SetChildAt@fnv_00a93ea0@@YIX...`)
+NAMED_FAST = re.compile(r'^\?[A-Za-z_]\w*(?:@[A-Za-z_]\w*)*@@YI')
 _FREE_ARITY = {}
 
 
@@ -3344,6 +3346,33 @@ def named_free_drop(a, nd, exe_path):
     name = nd['sym'].name
     if not NAMED_FREE.match(nd.get('msvc') or '') or not re.match(r'_Z\d+[A-Za-z_]', name):
         return False
+    n = _native_arity(name)
+    if n is None or n > 7:
+        return False
+    return _first_ret_pop(a, exe_path) == 4 * n
+
+
+def named_free_edx(a, nd, exe_path):
+    """W50 (link beaa825a, S5 null-device boot: SetChildAt 00a93ea0 entered with a code address as the index and a
+    pointer into the node as the child): the decomp declares the exe's thiscall member as a named __fastcall free
+    function, `fnv_00a93ea0::SetChildAt(NiNode*, int, unsigned, NiAVObject*)` (ecx = the object, edx a placeholder,
+    then the stack). Code calls it through an ABI bridge, but VTFILL put the bare definition in NiNode's slot: a
+    virtual call passes (this, index, child), one register early from the second argument on. True when the MSVC
+    name is a global / namespace-scope __fastcall (`@@YI`), the native takes 2..8 parameters, and the exe function's
+    first return pops exactly the stack ones, 4 x (n - 2). The slot then gets the edx bridge. FNVNX_FREEEDX=0 turns
+    it off."""
+    if not exe_path or os.environ.get('FNVNX_FREEEDX', '1') == '0':
+        return False
+    name = nd['sym'].name
+    if not NAMED_FAST.match(nd.get('msvc') or '') or not name.startswith('_Z'):
+        return False
+    n = _native_arity(name)
+    if n is None or n < 2 or n > 8:
+        return False
+    return _first_ret_pop(a, exe_path) == 4 * (n - 2)
+
+
+def _native_arity(name):
     if name not in _FREE_ARITY:
         n = None
         try:
@@ -3354,27 +3383,30 @@ def named_free_drop(a, nd, exe_path):
         except OSError:
             pass
         _FREE_ARITY[name] = n
-    n = _FREE_ARITY[name]
-    if n is None or n > 7:
-        return False
+    return _FREE_ARITY[name]
+
+
+def _first_ret_pop(a, exe_path):
+    """The bytes the x86 function at a pops at its first `ret` (0 for a plain `ret`), None without capstone, outside
+    the image, or before an int3."""
     try:
         import capstone
     except ImportError:
-        return False
+        return None
     pe, data = exevft._text(exe_path)
     try:
         off = pe.rva_to_off(a - pe.image_base, 16)
     except Exception:
-        return False
+        return None
     if off is None:
-        return False
+        return None
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
     for ins in md.disasm(data[off:off + 0x400], a):
         if ins.mnemonic == 'int3':
-            return False
+            return None
         if ins.mnemonic == 'ret':
-            return (int(ins.op_str, 0) if ins.op_str else 0) == 4 * n
-    return False
+            return int(ins.op_str, 0) if ins.op_str else 0
+    return None
 
 
 def free_slot(a, nd, bridges, st, exe_path=None):
@@ -3385,15 +3417,18 @@ def free_slot(a, nd, bridges, st, exe_path=None):
     inserts edx as 0 (x1..x6 -> x2..x7). Returns the bridge symbol, or None for any other definition."""
     if nd is None or sigs.itanium_variant(nd['sym'].name):
         return None
-    named = False
+    named = None
     if not re.match(r'(?:_Z\d+)?FUN_[0-9a-f]{8}', nd['sym'].name):
-        if not named_free_drop(a, nd, exe_path):
+        if named_free_drop(a, nd, exe_path):
+            named = 'drop'
+        elif named_free_edx(a, nd, exe_path):
+            named = 'edx'
+        else:
             return None
-        named = True
     m = FREE_SLOT.match(nd.get('msvc') or '')
     if named:
-        mode = 'drop'
-        st['free-slot-named'] += 1
+        mode = named
+        st['free-slot-named' + ('' if named == 'drop' else '-edx')] += 1
     elif m:
         mode = 'edx' if m.group(1) == 'I' else 'drop'
     else:
