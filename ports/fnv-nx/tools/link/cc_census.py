@@ -345,6 +345,8 @@ def census(out, units, exe, predict=False):
                     raw = words[a].get((kind, 'raw'), 0)
                     if need == 'none':
                         outs.append('ok')
+                    elif need == 'unknown' and pop is None and exe and no_return(exe, a):
+                        outs.append('noreturn')
                     elif need == 'unknown':
                         outs.append('unknown' if raw else 'handled')
                     elif raw and predict and predicted(a, r, ms, kind, exe):
@@ -356,6 +358,7 @@ def census(out, units, exe, predict=False):
                 out_ = next((o for o in outs if o.startswith('mismatch')), None) or \
                     next((o for o in outs if o == 'unknown'), None) or \
                     next((o for o in outs if o == 'fixed-by-rules'), None) or \
+                    next((o for o in outs if o == 'noreturn'), None) or \
                     ('handled' if 'handled' in outs else 'ok')
             else:
                 if do is None:
@@ -376,6 +379,11 @@ def census(out, units, exe, predict=False):
 def exevft_pop(exe, a):
     import fnvlink
     return fnvlink._first_ret_pop(a, exe)
+
+
+def no_return(exe, a):
+    import fnvlink
+    return fnvlink.no_return(a, exe)
 
 
 def main():
