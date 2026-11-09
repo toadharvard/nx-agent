@@ -4,6 +4,10 @@ Host compiler; the section and its bounds come from a linker script as S2's link
 import os, shutil, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 INC = os.path.join(HERE, '..', '..', 'shim', 'include')
+# RAWVT_ARCH=aarch64: the same checks built for aarch64 (the PC-relative bounds path) and run under qemu-aarch64
+ARCH = os.environ.get('RAWVT_ARCH', 'host')
+CXX = 'aarch64-linux-gnu-g++' if ARCH == 'aarch64' else 'g++'
+RUN = ['qemu-aarch64'] if ARCH == 'aarch64' else []
 if not shutil.which('g++'):
     print('skipped: g++ missing'); sys.exit(0)
 t = tempfile.mkdtemp()
@@ -44,8 +48,8 @@ fails = 0
 for what, extra, want in (('minus-one shifts (exe 1 -> native 2), COM not, a K=4 table only after 4', ['-DWITH_M1', '-Wl,-T,' + os.path.join(t, 'd.ld')], '1 11 11 1 48\n11 1'),
                           ('no bounds in the link (an exe-order table): nothing shifts', [], '1 11 11 1 44\n11 1')):
     exe = os.path.join(t, 'd')
-    r = subprocess.run(['g++', '-O2', '-I', INC, os.path.join(t, 'd.cpp'), *extra, '-o', exe], capture_output=True, text=True)
-    got = subprocess.run([exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
+    r = subprocess.run([CXX, *(['-static'] if ARCH == 'aarch64' else []), '-O2', '-I', INC, os.path.join(t, 'd.cpp'), *extra, '-o', exe], capture_output=True, text=True)
+    got = subprocess.run([*RUN, exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
     ok = got == want
     print('%-75s %s' % (what, 'ok' if ok else 'FAIL (%s)' % got)); fails += not ok
 # RAWVT1-DEL0: the exe's slot-0 call ??_G(flags): flag 1 -> D0 (slot 1) on a minus-one table, flag 0 -> D1, an exe table
@@ -62,9 +66,9 @@ int main() { void* a = m1; void* b = ex; void* o1 = &a; void* o2 = &b;
 '''
 open(os.path.join(t, 'd0.cpp'), 'w').write(D0SRC)
 exe = os.path.join(t, 'd0')
-r = subprocess.run(['g++', '-O1', '-D__thiscall=', '-I', INC, os.path.join(t, 'd0.cpp'), '-Wl,-T,' + os.path.join(t, 'd.ld'), '-o', exe],
+r = subprocess.run([CXX, *(['-static'] if ARCH == 'aarch64' else []), '-O1', '-D__thiscall=', '-I', INC, os.path.join(t, 'd0.cpp'), '-Wl,-T,' + os.path.join(t, 'd.ld'), '-o', exe],
                    capture_output=True, text=True)
-got = subprocess.run([exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
+got = subprocess.run([*RUN, exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
 ok = got == '2 1 11'
 print('%-75s %s' % ('DEL0: flag 1 reaches D0, flag 0 D1, an exe table its own ??_G', 'ok' if ok else 'FAIL (%s)' % got)); fails += not ok
 # FNVNX_RAWVT_FIELD: a field of a vftable-model struct, called through the m1 test (f2 = exe slot 2 -> native 3)
@@ -79,10 +83,12 @@ int main() { VT* a = (VT*)m1; VT* b = (VT*)ex; printf("%d %d\n", FNVNX_RAWVT_FIE
 '''
 open(os.path.join(t, 'f.cpp'), 'w').write(FSRC)
 exe = os.path.join(t, 'f')
-r = subprocess.run(['g++', '-O1', '-I', INC, os.path.join(t, 'f.cpp'), '-Wl,-T,' + os.path.join(t, 'd.ld'), '-o', exe],
+r = subprocess.run([CXX, *(['-static'] if ARCH == 'aarch64' else []), '-O1', '-I', INC, os.path.join(t, 'f.cpp'), '-Wl,-T,' + os.path.join(t, 'd.ld'), '-o', exe],
                    capture_output=True, text=True)
-got = subprocess.run([exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
+got = subprocess.run([*RUN, exe], capture_output=True, text=True).stdout.strip() if r.returncode == 0 else r.stderr[-300:]
 ok = got == '3 2'
 print('%-75s %s' % ('FIELD: a model field shifts on a minus-one table, not on an exe table', 'ok' if ok else 'FAIL (%s)' % got)); fails += not ok
-print('%d failed' % fails)
+print('%s: %d failed' % (ARCH, fails))
+if ARCH == 'host' and shutil.which('aarch64-linux-gnu-g++') and shutil.which('qemu-aarch64'):
+    fails += subprocess.run([sys.executable, os.path.abspath(__file__)], env=dict(os.environ, RAWVT_ARCH='aarch64')).returncode
 sys.exit(1 if fails else 0)
