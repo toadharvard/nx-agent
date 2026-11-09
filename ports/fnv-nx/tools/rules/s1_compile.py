@@ -6720,7 +6720,7 @@ D22_EXE_ORDER_REASONS = {'defined-slot0', 'd26-slot0-not-a-destructor', 'd22-use
 # FNVNX_D26_SLOT(k) under RAWVT1's conditions. Not when the class in the file declares a virtual function (its first
 # data member is then not the vptr), the name is a local or parameter of another kind (RAWVT1-MEM-LOCAL), or the slot
 # read is not called (RAWVT1-MEM-DATA: a cast to a builtin type, no call of the variable it is stored in).
-RAWVT1_MEMBERS = r'(?:m_ppVirtualMethodTable|vtable|vtbl|m_vtbl|m_pVtbl|vptr|_vtable)'
+RAWVT1_MEMBERS = r'(?:m_ppVirtualMethodTable|vtable|vtbl|m_vtbl|m_pVtbl|vptr|_vtable|vt|pVtbl|pVtable|m_pVtable|vfptr|__vfptr)'
 RAWVT1_MEM_RX = re.compile(r'(?<![\w.>:])((?:this\s*->\s*)?(%s)\s*\[\s*)(%s)(\s*\])' % (RAWVT1_MEMBERS, RAWVT1_KNUM))
 RAWVT1_THIS_VPTR = re.compile(r'^\s*\*\s*(?:reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>\s*\(\s*this\s*\)|'
                               r'\(\s*void\s*\*\s*\*\s*\*\s*\)\s*\(?\s*this\s*\)?)\s*;')
@@ -7013,6 +7013,51 @@ def _rawvt_any(masked, text, stats):
         recv = text[i + n.end():e].strip()
         out.append((e + r.start(1), e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
         stats['RAWVT1-ANY-FNPP'] += 1
+    # (a) any local initialised from a vptr read, `void** v = *(void***)this;` / `= (void**)*(void**)x;` / `= *(T***)x;`
+    for d in re.finditer(r'\b([A-Za-z_]\w*)\s*=\s*(?:\(\s*void\s*\*\s*\*\s*\)\s*)?\*\s*(?:\(\s*' + _RAWVT_ANY_TYPE +
+                         r'\s*\*\s*\*?\s*\)|reinterpret_cast\s*<\s*' + _RAWVT_ANY_TYPE + r'\s*\*\s*\*?\s*>)\s*', masked):
+        name = d.group(1)
+        if re.fullmatch(RAWVT1_MEMBERS, name): continue                     # RAWVT1-MEM's
+        e = _rawvt_operand(masked, d.end())
+        if e is None or not re.match(r'\s*\)?\s*;', masked[e:]): continue
+        end = masked.find('}', e)
+        body = masked[e:end if end > 0 else len(masked)]
+        for u in re.finditer(r'(?<![\w.>])(%s)\s*\[\s*(%s)\s*\]' % (re.escape(name), RAWVT1_KNUM), body):
+            a, b = e + u.start(), e + u.end()
+            if 'FNVNX_' in text[a:b]: continue
+            if not _rawvt_mem_called(masked, _M(a, b)): stats['RAWVT1-ANY-LOCAL-DATA'] += 1; continue
+            out.append((a, b, 'FNVNX_RAWVT_DYN(%s, %s)' % (name, u.group(2))))
+            stats['RAWVT1-ANY-LOCAL'] += 1
+    # (b) the vptr read cast to an array of function pointers: ((Fn*)*(void***)this)[81], reinterpret_cast<Fn*>(*self)[k]
+    for m in re.finditer(r'(\(\s*\(\s*[A-Za-z_]\w*\s*\*\s*\)\s*\*\s*\(\s*' + _RAWVT_ANY_TYPE + r'\s*\*\s*\*?\s*\)\s*)|'
+                         r'(reinterpret_cast\s*<\s*[A-Za-z_]\w*\s*\*\s*>\s*\(\s*\*\s*)', masked):
+        e = _rawvt_operand(masked, m.end())
+        if e is None: continue
+        r = re.match(r'\s*\)\s*\[\s*(%s)\s*\]' % RAWVT1_KNUM, masked[e:])
+        if not r: continue
+        a, b = m.start(), e + r.end()
+        if 'FNVNX_' in text[a:b]: continue
+        vp = text[a:e + r.start()].rstrip() + ')'
+        out.append((a, b, 'FNVNX_RAWVT_DYN(%s, %s)' % (vp, r.group(1))))
+        stats['RAWVT1-ANY-CASTIDX'] += 1
+    # (d) the slot address as integer arithmetic under any pointer cast that is called:
+    # ((F) *(int**)(*(int*)this + 0x48))(...), *(void**)(*(int*)((char*)this + 0xe0) + 12), (*(VFn*)((*(int*)this) + 0xc8))
+    for m in re.finditer(r'\*\s*\(\s*(?:[A-Za-z_][\w\s]*?\*{1,2}|[^()]*\(\s*(?:__\w+\s*)?\*\s*\*\s*\)\s*\((?:[^()]|\([^()]*\))*\))\s*\)\s*\(\s*\(?\s*', masked):
+        i = m.end()
+        n = re.match(r'\s*\*\s*(?:\(\s*(?:const\s+)?(?:int|unsigned(?:\s+int)?|DWORD|uintptr_t|long)\s*\*\s*\)\s*)?', masked[i:])
+        if not n or '*' not in n.group(0): continue
+        e = _rawvt_operand(masked, i + n.end())
+        if e is None: continue
+        r = re.match(r'\s*\)?\s*\+\s*(0[xX][0-9a-fA-F]+|[0-9]+)\s*\)', masked[e:])
+        if not r: continue
+        off = int(r.group(1), 0)
+        if off % 4 or off == 0: continue
+        a = e + r.start(1)
+        if 'FNVNX_' in text[m.start():e + r.end()]: continue
+        if not _rawvt_mem_called(masked, _M(m.start(), e + r.end())): stats['RAWVT1-ANY-ARITH-DATA'] += 1; continue
+        recv = text[i + n.end():e].strip()
+        out.append((a, e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
+        stats['RAWVT1-ANY-ARITH'] += 1
     for m in _RAWVT_ANY_OFF.finditer(masked):
         e = _rawvt_operand(masked, m.end())
         if e is None: continue
@@ -7030,7 +7075,11 @@ def _rawvt_any(masked, text, stats):
         recv = text[m.end():e].strip()
         out.append((e + r.start(1), e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
         stats['RAWVT1-ANY-OFF'] += 1
-    return out
+    keep = []                                              # one edit per span: the forms overlap (FNPP / ARITH / OFF)
+    for e in sorted(set(out), key=lambda x: (x[0], -x[1])):
+        if keep and e[0] < keep[-1][1]: continue
+        keep.append(e)
+    return keep
 
 
 def r_raw_vtable_slots(path, text, stats):
