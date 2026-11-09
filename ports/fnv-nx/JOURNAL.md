@@ -3736,3 +3736,13 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   (decision (b)) runs on the first link with today's fixes.
 * **infrastructure**: linkcheck (T1, sw14) is not green yet: the base tree and the plugin headers are fixed. The
   link stage is 32-73 min; the probe takes 1,163 s with 0 cache hits, which is T1's next item.
+
+### J-0166 | 2026-11-09 | stream: orchestration,farms | status: wip | parent: J-0165
+
+* **decided (owner)** - Stop every farm and the fuzzing.
+* **did** - Archived all 44 farm sessions: prep, farm1-5, eq1-6, try1-4, fz1-26, link1, full1 (st1-st4 were already archived, J-0134).
+  - Disabled every scheduled check-in, including the farms' own reminders. No trigger is enabled now.
+  - Stopped the local push_wip.sh.
+  - Artifact branches, reports and caches stay in the private repo. HANDOFF.md section 3 tells how to recreate the farms if ever wanted.
+* **scope** - This covers the first account only. The farms named in J-0149..J-0165 (bl1, full2, full3, sw13, sw14, nr1) belong to the resumed orchestrator in the other account and were not touched.
+* **left** - The first account's S2d, S12 and S13b stream sessions are idle. Their results are on their branches.
