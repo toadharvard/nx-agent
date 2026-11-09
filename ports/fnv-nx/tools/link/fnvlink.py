@@ -2406,7 +2406,9 @@ def hand_vptr_stores(tree, real, vnames, msvc, canon_msvc, cache_path=None):
         # the storing function's class and address only count for a function that stores one vftable at that
         # offset (a destructor resetting its own and then its base's vftable stores two)
         one = len(per_fn[(fn, off)]) == 1
-        out[a].append((unit, cls if one else None, fa if one else None, off))
+        # W53: a tentative site (offset None) keeps its function's address however many it shares: the exe store
+        # at that address decides its offset (hand_vptr_confirm); FUN_00b91a40 stores 010b511c and 010b5140
+        out[a].append((unit, cls if one else None, fa if (one or off is None) else None, off))
     return out
 
 
