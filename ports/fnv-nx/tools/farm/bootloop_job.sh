@@ -262,7 +262,7 @@ fi
 # themselves, else the shorter a prefix of the longer. A FAIL fails the job (checked again next iteration).
 # BOOTLOOP_DETERMINISM=0: never.
 NOTE_DET=""
-EMUH=$(sha256sum "$P/tests/s5/emu_guest.py" 2>/dev/null | cut -c1-12)
+EMUH=$(cat "$P/tests/s5/emu_guest.py" "$HERE/boot_determinism.py" 2>/dev/null | sha256sum | cut -c1-12)   # the emulator and the comparison: either changed, checked again
 if [ -z "$FAIL" ] && [ "${BOOTLOOP_DETERMINISM:-1}" = 1 ] && [ -n "$EMUH" ] && [ ! -f "$F/determinism-$EMUH.done" ] \
 		&& [ ! -f "$F/determinism-$EMUH.failed" ]; then
 	STUB2=$F/stub2; rm -rf "$STUB2"; mkdir -p "$STUB2"; T2=${STUB_TRACE%.tsv}-2.tsv; rm -f "$T2"
