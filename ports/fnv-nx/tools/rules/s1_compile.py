@@ -6308,7 +6308,36 @@ def _d22_tree_refs(path):
     cache[top] = (refs, includers)
     return cache[top]
 
-def _d22_extern_use(path, member):
+def _d22_spec_only(path, member, cls, users):
+    """every use of member in users is a member of an explicit specialization `template <> class cls<A>` that the
+    header itself declares (nitmapbase_decls.h's NiTMapBase<DFALL<...>, ...>::Destructor(unsigned) in
+    nitmapbase.inl is that class's own member, not the primary template's slot-0 placeholder: S5, 8deb903cbe85,
+    GetAt's Hash call read native slot 1 = D0)"""
+    try: hdr = d22_mask(open(path, encoding='utf-8', errors='surrogateescape').read())
+    except OSError: return False
+    norm = lambda a: re.sub(r'\s+', '', a)
+    specs = set()
+    for m in re.finditer(r'\btemplate\s*<\s*>\s*(?:class|struct)\s+%s\s*<' % re.escape(cls), hdr):
+        a, d, j = m.end(), 1, m.end()
+        while j < len(hdr) and d:
+            d += {'<': 1, '>': -1}.get(hdr[j], 0); j += 1
+        specs.add(norm(hdr[a:j - 1]))
+    if not specs: return False
+    for f in users:
+        try: t = d22_mask(open(f, encoding='utf-8', errors='surrogateescape').read())
+        except OSError: return False
+        for m in re.finditer(r'(?<![\w~])%s\s*\(' % re.escape(member), t):
+            w = t[max(0, m.start() - 400):m.start()]
+            qs = list(re.finditer(r'\b%s\s*<' % re.escape(cls), w))
+            if not qs: return False
+            a, d, j = qs[-1].end(), 1, qs[-1].end()
+            while j < len(w) and d:
+                d += {'<': 1, '>': -1}.get(w[j], 0); j += 1
+            if d or not re.fullmatch(r'\s*::\s*', w[j:]) or norm(w[a:j - 1]) not in specs: return False
+    return True
+
+
+def _d22_extern_use(path, member, cls=None):
     """a header's member name that a file including the header (directly or not) defines or calls (try1of1
     4a15e91c: `NiPosData::LoadBinary` defined in niposdata.cpp lost its declaration in niposdata_local.h;
     bgsprojectile.cpp called TESModelVTable::Slot0); .cpp declarations are the unit's own. A file that does not
@@ -6318,8 +6347,8 @@ def _d22_extern_use(path, member):
     me = os.path.abspath(path)
     refs, includers = _d22_tree_refs(path)
     inc = includers(me)
-    users = refs.get(member, ())
-    if any(f != me and f in inc for f in users): return True
+    users = [f for f in refs.get(member, ()) if f != me and f in inc]
+    if users and not (cls and _d22_spec_only(path, member, cls, users)): return True
     # an unqualified call in an including file (magiccaster.cpp's members call `SpellCast(...)` of the
     # magiccaster_match.h MagicCaster that D22-CL converted at the exe's dtor slot 9: the unit stopped compiling,
     # full3 74a1c281). The files' texts are read once per tree (cached with the index).
@@ -6384,7 +6413,8 @@ def r_vtable_dtor_slot(path, text, stats):
             ck = dict(c, first=t)
             blockers = [o for o in classes if o['bases'] and c['qual'][-1] in _d22_bases(o['bases'])
                         and not _d22_defines_none(masked, o)]
-            if any(v[2] == t[2] for o in blockers for v in o['virtuals']) or _d22_extern_use(path, t[2]) or \
+            if any(v[2] == t[2] for o in blockers for v in o['virtuals']) or \
+                    _d22_extern_use(path, t[2], c['qual'][-1] if c['template'] else None) or \
                     not _d22_callonly(masked, ck, path.endswith(('.cpp', '.c', '.cxx', '.cc')), named_ok=True) or \
                     not d22_placeholder(masked, c['qual'][-1], t, vdecls[t[2]], reach(c['qual'][-1])):
                 stats['D22-CL-HELD'] += 1; continue
