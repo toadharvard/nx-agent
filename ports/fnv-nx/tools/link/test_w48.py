@@ -5,6 +5,7 @@
 
 * C's constructor calls B::g() (GCC devirtualizes `g()` in a constructor: a `bl _ZN1B1gEv`); the name is a trap in the
   object, and the fill bound it in C's vtable (a `#vtables` row): the object's symbol gets that target;
+* the same object built without -ffunction-sections: the caller is found by the FUNC symbol's range;
 * a free function calling the trapped name decides nothing (no class): left alone;
 * callers of two classes whose vtables disagree: left alone; FNVNX_W48=0: nothing.
 """
@@ -46,11 +47,12 @@ def check(cond, what):
         FAILS.append(what)
 
 
-def build(t, name, src):
+def build(t, name, src, fsec=True):
     cp = os.path.join(t, name + '.cpp')
     open(cp, 'w').write(src)
     op = os.path.join(t, name + '.o')
-    subprocess.run([CXX, '-mabi=ilp32', '-O1', '-ffunction-sections', '-c', cp, '-o', op], check=True)
+    subprocess.run([CXX, '-mabi=ilp32', '-O1'] + (['-ffunction-sections'] if fsec else []) + ['-c', cp, '-o', op],
+                   check=True)
     return Unit(source='src/%s.cpp' % name, obj=op)
 
 
@@ -88,6 +90,9 @@ def main():
     check(n == 0 and not ch, 'C and D disagree: left a trap')
     n, ch = run(a, [row('_ZTV1C', 0x401000)])
     check(n == 1 and ch.get('_ZN1B1gEv') == '__fnv_00401000', 'only C has a row: its target')
+    a2 = build(t, 'a2', SRC, fsec=False)
+    n, ch = run(a2, [row('_ZTV1C', 0x401000), row('_ZTV1D', 0x401000)])
+    check(n == 1 and ch.get('_ZN1B1gEv') == '__fnv_00401000', 'no -ffunction-sections (all in .text): by symbol range')
     n, ch = run(f, [row('_ZTV1B', 0x401000)])
     check(n == 0, 'a free caller decides nothing')
     n, ch = run(a, [row('_ZTV1C', 0x401000), row('_ZTV1D', 0x401000)], {'FNVNX_W48': '0'})

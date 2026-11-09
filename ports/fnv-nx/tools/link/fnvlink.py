@@ -1749,6 +1749,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
             if units_json else set()
         vstats['d22-applied-vftables'] = len(d22_applied)
         d22_listed = set(d22_listed) | d22_applied
+        vstats['alias-displaced-primaries'] = alias_alt(vnames, vmap, by_cls, rtti, exe_alt)
         ext = exe_vtable_copies(exev_all, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over,
                                 exe_path, providers, exe_alt, msvc, d22_listed,
                                 lambda c_: code_refs([u.obj for u in have], c_), unbound=unbound,
@@ -3537,10 +3538,20 @@ def direct_call_slot_binds(have, changed, addr_of, per_obj, rebound, traps, rows
                 continue
             sec = o.secnames[i_]
             fn = sec[len('.text.'):] if sec.startswith('.text.') else None
-            for _, (si, typ, _) in o.rel(i_).items():
+            # a unit built without -ffunction-sections (archive.cpp's FUN_00af7eb0 constructor sits in `.text`):
+            # the call's function is the FUNC symbol whose range holds the offset
+            funcs = None
+            for off_, (si, typ, _) in o.rel(i_).items():
                 nm = o.syms[si][0]
-                if typ in (21, 20) and nm in trapped:
-                    callers[nm].add(caller_class(fn) if fn else None)
+                if typ not in (21, 20) or nm not in trapped:
+                    continue
+                f_ = fn
+                if f_ is None or caller_class(f_) is None:
+                    if funcs is None:
+                        funcs = sorted((s_[1], s_[2], s_[0]) for s_ in o.syms
+                                       if s_[5] == i_ and s_[3] == 2 and s_[0])
+                    f_ = next((n_ for v_, z_, n_ in funcs if v_ <= off_ < v_ + max(z_, 1)), None)
+                callers[nm].add(caller_class(f_) if f_ else None)
         for un, cls in callers.items():
             if None in cls:
                 continue
@@ -4539,6 +4550,70 @@ def vtfill2_group(z, path, vs, ents, names, pts, n, fill, ov, xs, o, vmap, exev,
     return words, shift, nsec
 
 
+PLAIN_MAX = 64
+
+
+def plain_vtfill(exev, vmap, alt, exe_path, vt_on):
+    """W49 (link b7b866ef, S5 null-device boot: SetAt 00a642a0 reads exe slots 2 / 3 of ShaderMap's 4-slot table, a trap
+    and a 0): a primary V row (or a displaced primary, alt) whose exe vftable has no RTTI (exevft.plain_vftables: the
+    shader maps' 0x010af6cc) is extended like an RTTI one, its end the slot before the next deleting destructor (a
+    vftable holds one, at its destructor slot; with no COL between them the scan runs into the neighbours: 0x010ade18
+    reads 35 slots, five tables of 7), at most PLAIN_MAX. -> (exev with those vftables' slots cut and an RTTI-less
+    marker kept, count). FNVNX_VTPLAIN=0: exev unchanged."""
+    if not vt_on or os.environ.get('FNVNX_VTPLAIN', '1') == '0':
+        return exev, 0
+    cand = {v for v, (z, ap, path, note) in vmap.items()
+            if v in exev and not exev[v].td and note.startswith('primary') and ap == 8}
+    cand |= {v for v, zs in (alt or {}).items() if v in exev and not exev[v].td and
+             any(kind == 'primary' and ap == 8 for _, ap, _, kind in zs)}
+    if not cand:
+        return exev, 0
+    out = dict(exev)
+    n = 0
+    for v in sorted(cand):
+        slots = list(exev[v].slots[:PLAIN_MAX])
+        for i in range(1, len(slots)):
+            if exevft.deleting_dtor(exe_path, slots[i]):
+                slots = slots[:i]
+                break
+        if not slots:
+            continue
+        out[v] = exevft.Vft(PLAIN_TD % v, 0, [], slots)
+        n += 1
+    return out, n
+
+
+PLAIN_TD = '.fnvnx-plain-%08x'   # a stand-in type descriptor: the vftable is extended, it has no RTTI class
+
+
+def alias_alt(vnames, vmap, by_cls, rtti, alt):
+    """W49: the other classes the units name for one primary image vftable (vftable_aliases.tsv: MSVC folded them, or
+    a decomp shell of the same class - ShaderMap and NiTStringPointerMap<ShaderBufferRecord*> on 0x010af6cc) join the
+    V row's as displaced primaries (alt), so exe_vtable_copies gives their native vtables the exe's slots too. ->
+    count added. FNVNX_VTPLAIN=0: none."""
+    if os.environ.get('FNVNX_VTPLAIN', '1') == '0':
+        return 0
+    named = collections.defaultdict(set)
+    for (n_, a_), (cls_, base_, _) in vnames.items():
+        if base_ is None:
+            named[a_].add(cls_)
+    n = 0
+    for a_, clss in named.items():
+        if len(clss) < 2 or a_ not in vmap:
+            continue
+        for cls_ in sorted(clss):
+            zs = sorted(by_cls.get(cls_, []))
+            if not zs or zs[0] == vmap[a_][0] or zs[0] not in rtti.where:
+                continue
+            pts = [p for p, ott in vtables.address_points(rtti.ents(zs[0]) or []) if ott == 0]
+            if pts[:1] != [8]:
+                continue
+            if all(x[0] != zs[0] for x in alt.get(a_, ())):
+                alt[a_].append((zs[0], 8, rtti.where[zs[0]][0].path, 'primary'))
+                n += 1
+    return n
+
+
 def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, out, slot_over=None, exe_path=None,
                       providers=None, alt=None, msvc=None, listed=None, called_fn=None, unbound=None, defined_fn=None):
     """S2c-vt: a primary native vtable shorter than the exe's vftable gets an extended copy: the group's words as the
@@ -4564,6 +4639,9 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     vt_on = bool(exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0' and
                  os.environ.get('FNVNX_VTFILL', '1') != '0' and os.environ.get('FNVNX_VTFILL2', '1') != '0')
     vt_only, vt_main = set(), set()   # (z, path) of a `secondary ... at +0` V row / of a primary one
+    exev_rtti = exev
+    exev, n_plain = plain_vtfill(exev, vmap, alt, exe_path, vt_on)
+    st['plain-vftables-filled'] = n_plain
     for v, (z, ap, path, note) in vmap.items():
         # only vftables with RTTI: their end is the next COL pointer; a plain one (exevft.plain_vftables) may run on
         # into an unnamed neighbour, so it only fills slots the native vtable has (exe_slot_fill)
@@ -4634,8 +4712,15 @@ def exe_vtable_copies(exev, vmap, rtti, have, per_obj, traps, native, bridges, o
     lay = {}
     if exe_path and exev and os.environ.get('FNVNX_CLASSLAYOUT', '1') != '0':
         import classlayout
-        lrows = classlayout.build(exe_path, exev)
+        lrows = classlayout.build(exe_path, exev_rtti)
         lay = {r['vftable']: r for r in lrows}
+        # W49: the plain vftables plain_vtfill extended get the same decision for VTFILL (classlayout.tsv, which
+        # prepare and S1 read, stays the RTTI vftables')
+        for v_ in (v_ for v_ in exev if v_ not in exev_rtti or exev[v_] is not exev_rtti[v_]):
+            if (exev[v_].td or '').startswith('.fnvnx-plain-'):
+                kind_, k_, why_, _ = classlayout.decide(exe_path, exev[v_])
+                lay[v_] = dict(cls='', vftable=v_, kind=kind_, dtor_slot=k_, reason='plain: ' + why_)
+                st['classlayout-plain-rows'] += 1
         if out and os.path.isdir(out):
             classlayout.write_layout(lrows, os.path.join(out, 'classlayout.tsv'))
         st['classlayout-rows'] = len(lrows)
