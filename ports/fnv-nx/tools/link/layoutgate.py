@@ -38,11 +38,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import layout   # noqa: E402
+import rawvcall  # noqa: E402
 import objcache  # noqa: E402
 
 PORT = layout.PORT
 COLUMNS = ['unit', 'record', 'what', 'msvc', 'native', 'cause', 'boot']
 CLANG = os.environ.get('CLANG', 'clang++')
+RAWVCALL = os.environ.get('LAYOUTGATE_RAWVCALL', '1') == '1'
 
 
 Rec = collections.namedtuple('Rec', 'name size align fields bases vptr packed')
@@ -357,6 +359,15 @@ def _run_unit(tree, workdir, unit, boot):
     # members, for the member check (a pack / ebo record placed inside another record)
     members = [(unit, rec.name, off, nm, re.sub(r'^(?:const\s+|volatile\s+|struct\s+|class\s+)+', '', t).strip(), boot)
                for rec in recs.values() for off, nm, t in rec.fields if off is not None and nm]
+    # the raw-vcall check (rawvcall.py): an indirect call through *(*(X) + off) with X the first argument, not under
+    # the m1 test or a prepare decision
+    if RAWVCALL:
+        try:
+            for u, fn, line, off, st in rawvcall.check_unit(tree, unit, workdir):
+                if st != 'covered':
+                    rows.append((unit, fn, 'rawvcall line %s' % line, off, st, 'rawvcall', boot))
+        except Exception as e:  # noqa: BLE001
+            rows.append((unit, '-', 'rawvcall', '-', 'check failed: %s' % e, 'rawvcall', boot))
     # the native layouts, for the cross-unit (ODR) check: one class name, several definitions in the tree
     layouts = [(unit, name, nat[name][0], nat[name][2], boot) for name in recs if name in nat]
     return unit, rows, len(recs), len(nat), members, layouts
@@ -445,7 +456,7 @@ def main():
     ebo2 -= {(r[0], r[1]) for r in allrows if r[2] not in ('size', 'align') and not r[2].startswith('member')}
     recs = collections.defaultdict(set)
     for r in allrows:
-        if not r[2].startswith(('member', 'probe-failed', 'odr')) and (r[0], r[1]) not in ebo2: recs[(r[1], r[6])].add(r[2])
+        if not r[2].startswith(('member', 'probe-failed', 'odr', 'rawvcall')) and (r[0], r[1]) not in ebo2: recs[(r[1], r[6])].add(r[2])
     failed = sorted({r[0] for r in allrows if r[2] == 'probe-failed'})
     rb = {k[0] for k in recs if k[1] == 1}
     rr = {k[0] for k in recs if k[1] == 0} - rb
@@ -454,10 +465,11 @@ def main():
     odr = {r[1] for r in allrows if r[5] == 'odr'}
     mrows = [r for r in allrows if r[2].startswith('member')]
     summary = ('layoutgate: %d units, records msvc %d / probed %d; differing records %d (boot %d, rest %d), '
-               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); ebo2 bases %d; odr classes %d; causes %s%s' %
+               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); ebo2 bases %d; odr classes %d; '
+               'raw vcalls not under the m1 test: %d; causes %s%s' %
                (len(units), measured[0], measured[1], len(rb | rr), len(rb), len(rr),
                 sum(1 for r in allrows if r[2].startswith('field')), fb, len(mrows), sum(1 for r in mrows if r[6] == 1),
-                len({k[1] for k in ebo2}), len(odr), dict(causes.most_common()),
+                len({k[1] for k in ebo2}), len(odr), sum(1 for r in allrows if r[5] == 'rawvcall'), dict(causes.most_common()),
                 '; probe-failed %d (%s)' % (len(failed), ', '.join(failed[:10]) + (' ...' if len(failed) > 10 else ''))
                 if failed else ''))
     print(summary, file=sys.stderr)

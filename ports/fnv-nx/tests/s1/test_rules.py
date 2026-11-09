@@ -1967,7 +1967,7 @@ _RW = _RV.replace('Coll', 'TESWorldSpace')
 check('RAWVT1 with a dtor slot K = 4: k < 4 stays, k > 4 shifts, k = 4 held',
       run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[2]')) + '|' + run(s1.r_raw_vtable_slots, _RW) + '|' +
       run(s1.r_raw_vtable_slots, _RW.replace('[6]', '[4]')),
-      ['(this))[2])', '(this))[FNVNX_D26_SLOT(6)])', '(this))[4])'])
+      ['(this))[2] /* fnv-nx RAWVT1-KEEP belowk */)', '(this))[FNVNX_D26_SLOT(6)])', '(this))[4] /* fnv-nx RAWVT1-KEEP slot0 */)'])
 _json.dump({'format': 'fnvnx-d22/1', 'classes': [], 'dtor_slots': [{'class': 'Shell', 'slot': 4, 'file': 'src/ai/actor.cpp'}]},
            open(os.path.join(_sk, 'slots', 'd22.json'), 'w')); prepare.__dict__['_fnvnx_d22_slots'] = None
 _SH = _WS.replace('TESWorldSpace', 'Shell')

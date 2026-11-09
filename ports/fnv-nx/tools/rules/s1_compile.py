@@ -6822,12 +6822,13 @@ def _rawvt_recv(path, masked, owners, stats, text=None):
                 pass
             T = d.group(1).split('::')[-1] if d else None
             row = _classlayout_row(path, T) if T and T not in ('void', 'char', 'int', 'unsigned', 'const') else None
-            if T and D22_COM_NAME.match(T): stats['RAWVT1-RECV-COM'] += 1; continue
+            if T and D22_COM_NAME.match(T): stats['RAWVT1-RECV-COM'] += 1; out.append((m.end(), m.end(), ' /* fnv-nx RAWVT1-KEEP com */')); continue
             if row is None:
                 dec = _rawvt_site_decision(path, text or masked, m.start(), var, int(m.group(ki), 0))
                 if dec == 'shift' and _rawvt_mem_called(masked, m):
                     out.append((m.start(ki), m.end(ki))); stats['RAWVT1-RECV-EXE'] += 1
-                elif dec and dec.startswith('ok'): stats['RAWVT1-RECV-OK'] += 1
+                elif dec and dec.startswith('ok'):
+                    stats['RAWVT1-RECV-OK'] += 1; out.append((m.end(), m.end(), ' /* fnv-nx RAWVT1-KEEP %s */' % dec))
                 elif _rawvt_mem_called(masked, m):
                     # RAWVT1-DYN: decided at run time by where the vptr points (fnvnx_rawvt.h)
                     vp = (text or masked)[m.start():m.end()].rsplit('[', 1)[0].rstrip()
@@ -6835,9 +6836,9 @@ def _rawvt_recv(path, masked, owners, stats, text=None):
                     stats['RAWVT1-DYN'] += 1
                 else: stats['RAWVT1-RECV-AMBIG'] += 1
                 continue
-            if row[0] != 'minus-one' or row[1] < 0: stats['RAWVT1-RECV-KEEP'] += 1; continue
-            if int(m.group(ki), 0) <= row[1]: stats['RAWVT1-RECV-K'] += 1; continue
-            if T in _rawvt_exe_order(): stats['RAWVT1-RECV-KEEP'] += 1; continue
+            if row[0] != 'minus-one' or row[1] < 0: stats['RAWVT1-RECV-KEEP'] += 1; out.append((m.end(), m.end(), ' /* fnv-nx RAWVT1-KEEP keep */')); continue
+            if int(m.group(ki), 0) <= row[1]: stats['RAWVT1-RECV-K'] += 1; out.append((m.end(), m.end(), ' /* fnv-nx RAWVT1-KEEP k */')); continue
+            if T in _rawvt_exe_order(): stats['RAWVT1-RECV-KEEP'] += 1; out.append((m.end(), m.end(), ' /* fnv-nx RAWVT1-KEEP keep */')); continue
             if not _rawvt_mem_called(masked, m): stats['RAWVT1-RECV-DATA'] += 1; continue
             out.append((m.start(ki), m.end(ki)))
             stats['RAWVT1-RECV'] += 1
@@ -7019,7 +7020,7 @@ def r_raw_vtable_slots(path, text, stats):
     owners.sort(key=lambda t: t[0] - t[1])
     by_name = collections.defaultdict(list)
     for c in classes: by_name[c['qual'][-1]].append(c)
-    edits = []
+    edits, keeps = [], []
     cands = [(m, m.start(2), m.end(2), 'RAWVT1') for m in hits]
     for m in mem:
         own = next(((a, nm) for a, z, nm in owners if a < m.start() < z), None)
@@ -7036,14 +7037,14 @@ def r_raw_vtable_slots(path, text, stats):
         owner = next((nm for a, z, nm in owners if a < m.start() < z), None)
         if owner is None: stats['RAWVT1-FREE'] += 1; continue
         if D22_COM_NAME.match(owner) or any(_d22_com(masked, c) for c in by_name.get(owner, ()) if c['first']):
-            stats['RAWVT1-COM'] += 1; continue
+            stats['RAWVT1-COM'] += 1; keeps.append((m.end(), 'RAWVT1-COM')); continue
         cl = _classlayout_row(path, owner)
         if cl is not None and (cl[0] != 'minus-one' or cl[1] < 0):
-            stats['RAWVT1-CL-KEEP'] += 1; continue
+            stats['RAWVT1-CL-KEEP'] += 1; keeps.append((m.end(), 'RAWVT1-CL-KEEP')); continue
         K = cl[1] if cl is not None else (_d22_dtor_slot(path, owner) or 0)   # D22-SLOTK: the pair sits at K
-        if k == K: stats['RAWVT1-SLOT0'] += 1; continue
-        if k < K: stats['RAWVT1-BELOWK'] += 1; continue
-        if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
+        if k == K: stats['RAWVT1-SLOT0'] += 1; keeps.append((m.end(), 'RAWVT1-SLOT0')); continue
+        if k < K: stats['RAWVT1-BELOWK'] += 1; keeps.append((m.end(), 'RAWVT1-BELOWK')); continue
+        if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; keeps.append((m.end(), 'RAWVT1-EXEORDER')); continue   # the link kept its table in exe order
         edits.append((ka, kz, 'FNVNX_D26_SLOT(%s)' % text[ka:kz]))
         if tag != 'RAWVT1': stats[tag] += 1
     if recv_any:
@@ -7059,9 +7060,10 @@ def r_raw_vtable_slots(path, text, stats):
         edits += keep
         if keep and 'fnvnx_rawvt.h' not in text and not any(e[2].startswith('#include "fnvnx_rawvt.h"') for e in edits):
             edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
-    for a, b, rep in sorted(set(edits), reverse=True):
+    edits += [(a, a, ' /* fnv-nx RAWVT1-KEEP %s */' % r[7:].lower()) for a, r in keeps]
+    for a, b, rep in sorted(set(edits), key=lambda e: (e[0], e[1]), reverse=True):
         text = text[:a] + rep + text[b:]
-    stats['RAWVT1'] += len(edits)
+    stats['RAWVT1'] += sum(1 for e in edits if e[1] > e[0])
     return text
 
 # ---------------------------------------------------------------------------------------------------------- PHSLOT1
