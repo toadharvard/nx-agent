@@ -6753,6 +6753,8 @@ def _rawvt_mem_called(masked, m):
     """True when the slot read at m is called: under a cast to a function pointer or a typedef'd type (not a builtin:
     blk_00cc0000's FUN_00cd9f10 reads `(int)m_ppVirtualMethodTable[7]`, a count behind a data pointer, exe
     [[esi]+0x1c] * 48), or stored in a variable that the function then calls"""
+    if re.match(r'\s*\(', masked[m.end():m.end() + 4]):
+        return True                                       # `vtbl[26](object, ...)`: the slot is called directly
     before = masked[max(0, m.start() - 200):m.start()]
     before = before[max(before.rfind(';'), before.rfind('{'), before.rfind('}')) + 1:]
     c = re.search(r'(?:reinterpret_cast\s*<((?:[^<>]|<[^<>]*>)*)>|\(((?:[^()]|\([^()]*\))*)\))\s*\(?\s*$', before)
@@ -6876,6 +6878,8 @@ def _vtm1_members(body):
     for m in re.finditer(r'[^;]*;', body):
         d = m.group(0).strip().rstrip(';').strip()
         if not d or d.startswith('//'): continue
+        pa = re.fullmatch(r'(?:unsigned\s+)?(?:char|int|void\s*\*)\s+((?:pad|unk|_pad|gap)\w*)\s*\[[^\]]+\]', d)
+        if pa: out.append((m.start(), '#pad')); continue          # a gap of slots (`char pad0[0x13c];`)
         fp = re.search(r'\(\s*(?:__\w+\s*)?\*\s*(?:const\s*)?([A-Za-z_]\w*)\s*\)\s*\(', d)
         if fp: out.append((m.end(), fp.group(1))); continue
         vp = re.fullmatch(r'(?:const\s+)?[\w:<>]+\s*\*+\s*(?:const\s*)?([A-Za-z_]\w*)', d, re.S)
@@ -6898,7 +6902,8 @@ def r_vtable_model_pad(path, text, stats):
         # the struct's name says it is a vftable (VTable / Vtbl / _vt / vftable); a D3D / device model stays (COM)
         if not re.search(r'(?:v(?:table|tbl|ftable)|_vt$|^vt$|(?<=[a-z0-9])Vt$|_VT$)', name, re.I): continue
         if re.search(r'D3D|Device|Direct|Dx', name): stats['VTM1-COM'] += 1; continue
-        if not (VTM1_FIRST.match(mem[0][1]) or re.search(r'\d', mem[0][1])): continue
+        if mem[0][1] != '#pad' and not (VTM1_FIRST.match(mem[0][1]) or re.search(r'\d', mem[0][1])): continue
+        if mem[0][1] == '#pad' and not any(n != '#pad' for _, n in mem): continue
         if D22_COM_CONV.search(body) or any(n in D22_COM_MEMBER for _, n in mem):
             stats['VTM1-COM'] += 1; continue
         if re.search(r'\b%s\b[^;(){}]*=\s*\{' % re.escape(name), text):
@@ -6909,8 +6914,12 @@ def r_vtable_model_pad(path, text, stats):
             row = _classlayout_row(path, owner)
             if row and (row[0] != 'minus-one' or row[1] < 0): stats['VTM1-KEEP'] += 1; continue
             if row: K = row[1]
-        if K >= len(mem) - 1: continue
-        at = m.start(2) + mem[K][0]
+        if mem[0][1] == '#pad':
+            if K: stats['VTM1-HELD'] += 1; continue
+            at = m.start(2) + len(body) - len(body.lstrip())                # before the leading gap: every slot +4
+        else:
+            if K >= len(mem) - 1: continue
+            at = m.start(2) + mem[K][0]
         edits.append(at)
         stats['VTM1'] += 1
     if not edits: return text
@@ -7108,7 +7117,13 @@ def r_raw_vtable_slots(path, text, stats):
     cands = [(m, m.start(2), m.end(2), 'RAWVT1') for m in hits]
     for m in mem:
         own = next(((a, nm) for a, z, nm in owners if a < m.start() < z), None)
-        if own is None: stats['RAWVT1-MEM-FREE'] += 1; continue
+        if own is None:
+            seg = masked[max(0, m.start() - 3000):m.start()]
+            if re.search(r'\b%s\s*=\s*\*\s*(?:\(\s*void\s*\*\s*\*\s*\*\s*\)|reinterpret_cast\s*<\s*void\s*\*\s*\*\s*\*\s*>)'
+                         % re.escape(m.group(2)), seg) and _rawvt_mem_called(masked, m):
+                dyn.append((m.start(), m.end(), 'FNVNX_RAWVT_DYN(%s, %s)' % (m.group(2), m.group(3))))
+                stats['RAWVT1-MEM-DYN'] += 1; continue
+            stats['RAWVT1-MEM-FREE'] += 1; continue
         if any(re.search(r'\bvirtual\b', masked[c['open']:c['close']]) for c in by_name.get(own[1], ())):
             stats['RAWVT1-MEM-VIRT'] += 1; continue
         if not _rawvt_mem_ok(masked, own[0], m.start(), m.group(2)):
