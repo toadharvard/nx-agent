@@ -7119,6 +7119,44 @@ def _rawvt_any(masked, text, stats):
     return keep
 
 
+# RAWVT1-DEL0 (orchestrator: the exe's slot-0 calls ??_G(flags) must reach D0 for flag 1): a statement
+# `CALLEE(obj, flag);` whose callee reads slot 0 of obj's vtable - any spelling: (*(void***)obj)[0], *(void**)*(void**)obj,
+# **(void***)obj, vt[0] / *vt with vt a vptr of obj, ... - becomes FNVNX_RAWVT_DEL0(obj, flag) (fnvnx_rawvt.h). Only an
+# integer flag (a literal or a name); `(cover, buffer)` is no destructor call (combatstate.cpp, left).
+_DEL0_STMT = re.compile(r'(?m)^([ \t]*)((?:reinterpret_cast\s*<[^<>;]*>\s*)?\((?:[^;()]|\((?:[^;()]|\((?:[^;()]|\([^;()]*\))*\))*\))*\)|'
+                        r'[A-Za-z_]\w*\s*\[\s*0\s*\])\s*\(\s*([^,();]+?)\s*,\s*([A-Za-z_]\w*|[0-9]+[uU]?|true|false)\s*\)\s*;')
+
+
+def _del0_callee(callee, obj, local_vptrs):
+    """True when the callee text reads slot 0 of obj's vtable (no other slot)"""
+    c = re.sub(r'/\*.*?\*/', ' ', callee)
+    if re.search(r'\[\s*(?!0\s*\])[^\]]+\]|\+\s*(?:0[xX][0-9a-fA-F]*[1-9a-fA-F]|[1-9])', c): return False
+    base = re.sub(r'^\(\s*(?:void\s*\*|[A-Za-z_]\w*\s*\*)\s*\)\s*', '', obj.strip())
+    names = {base} | {v for v, o in local_vptrs.items() if o == base}
+    hit = any(re.search(r'(?<![\w.>])%s(?![\w])' % re.escape(n), c) for n in names if n)
+    derefs = c.count('*') - len(re.findall(r'\*\s*\)', c))
+    vn = [v for v, o in local_vptrs.items() if o == base]
+    return hit and (derefs >= 2 or '[0]' in c.replace(' ', '') or any(re.search(r'\*\s*%s\b|%s\s*\[' % (v, v), c) for v in vn))
+
+
+def _rawvt_del0(masked, text, stats):
+    local = {m.group(1): re.sub(r'\s+', '', m.group(2)).strip('()')
+             for m in re.finditer(r'\b([A-Za-z_]\w*)\s*=\s*\*\s*(?:\([^()]*\*\s*\*\s*\*?\s*\)|reinterpret_cast\s*<[^<>]*>)\s*\(?\s*([A-Za-z_]\w*)\s*\)?\s*;', masked)}
+    out = []
+    for m in _DEL0_STMT.finditer(masked):
+        callee, obj, flag = m.group(2), m.group(3), m.group(4)
+        if re.fullmatch(r'[A-Za-z_]\w*', flag) and flag not in ('true', 'false') and not re.search(
+                r'\b(?:int|unsigned|bool|char|short|long|BOOL|UINT|DWORD|uint32_t|int32_t|uint8_t)\s+(?:\w+\s*,\s*)*%s\b'
+                % re.escape(flag), masked[max(0, m.start() - 4000):m.start()]):
+            continue                                         # a flag of another type: no destructor call
+        if 'FNVNX_RAWVT_DEL0' in callee or re.search(r'FNVNX_RAWVT_DYN\w*\([^)]*,\s*(?!0\b)', text[m.start(2):m.end(2)]): continue
+        if not _del0_callee(callee, obj, local): continue
+        if re.search(r'\b(?:QueryInterface|AddRef|Release)\b|__stdcall', callee): continue
+        out.append((m.start(2), m.end(), 'FNVNX_RAWVT_DEL0(%s, %s);' % (text[m.start(3):m.end(3)].strip(), flag)))
+        stats['RAWVT1-DEL0'] += 1
+    return out
+
+
 def r_raw_vtable_slots(path, text, stats):
     """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above); RAWVT1-MEM: the same on the vptr
     modelled as a data member."""
@@ -7204,6 +7242,14 @@ def r_raw_vtable_slots(path, text, stats):
         stats['RAWVT1-ANY-OVERLAP'] += len(anyv) - len(keep)
         edits += keep
         if keep and 'fnvnx_rawvt.h' not in text and not any(e[2].startswith('#include "fnvnx_rawvt.h"') for e in edits):
+            edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
+    del0 = _rawvt_del0(masked, text, stats)
+    if del0:
+        # the whole call statement: drop the slot edits inside it (the KEEP / DYN ones of its slot-0 read)
+        edits = [e for e in edits if not any(a <= e[0] and e[1] <= b for a, b, _ in del0)]
+        keeps = [k for k in keeps if not any(a <= k[0] <= b for a, b, _ in del0)]
+        edits += del0
+        if 'fnvnx_rawvt.h' not in text:
             edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
     edits += [(a, a, ' /* fnv-nx RAWVT1-KEEP %s */' % r[7:].lower()) for a, r in keeps]
     inc = [e for e in edits if e[2].startswith('#include "fnvnx_rawvt.h"')]
