@@ -10,6 +10,7 @@
 #define FNVNX_RAWVT_H
 #if defined(_MSC_VER) && !defined(__clang__) || defined(FNVNX_STATIC_MSVC)
 #define FNVNX_RAWVT_DYN(vp, k) (vp)[(k)]
+#define FNVNX_RAWVT_DYNOFF(vp, off) (off)
 #else
 #ifdef __cplusplus
 extern "C" {
@@ -31,5 +32,7 @@ static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
 }
 /* the indexed expression keeps its type: (vp)[k + 0/1] */
 #define FNVNX_RAWVT_DYN(vp, k) (vp)[(k) + fnvnx_rawvt_m1((const void *)(vp), (unsigned)(k))]
+/* the byte-offset spelling `(char*)*(void**)x + off` (off = 4 * slot): off + 4 when the table is minus-one */
+#define FNVNX_RAWVT_DYNOFF(vp, off) ((off) + 4 * fnvnx_rawvt_m1((const void *)(vp), (unsigned)(off) / 4))
 #endif
 #endif
