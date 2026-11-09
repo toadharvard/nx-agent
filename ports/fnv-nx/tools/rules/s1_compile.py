@@ -6912,16 +6912,86 @@ def r_vtable_model_pad(path, text, stats):
 RULES.insert(RULES.index(r_vfptr_pad) + 1, r_vtable_model_pad)
 
 
+# RAWVT1-ANY (S2 / S5 boot a9d9f9103325: niavobject.cpp 0x00a59c90 `(*(int**)this)[42]` and
+# `(*(int**)(*(int**)((char*)this + 0x18)))[63](parent)`, 0x00a59d00 SetParent `(char*)*(void**)pkOldParent + 0xe8`, all
+# unshifted on minus-one NiNode tables): the other spellings of a raw slot read - the vptr through any pointer-to-pointer
+# cast `(*(T**)X)[k]` on any receiver expression, and the byte offset `(char*)*(T**)X + off` - get the run-time choice
+# of fnvnx_rawvt.h (FNVNX_RAWVT_DYN / FNVNX_RAWVT_DYNOFF), right for a minus-one table, a COM object and an exe table
+# alike. Only a slot that is called (a cast to a function pointer or typedef'd type, or a variable then called).
+_RAWVT_ANY_TYPE = r'(?:const\s+)?(?:void\s*\*|int|unsigned(?:\s+int)?|unsigned\s+long|long|DWORD|UINT|uintptr_t|char\s*\*|\w+_Fn|FARPROC|PVOID)'
+_RAWVT_ANY_IDX = re.compile(r'\(\s*\*\s*\(\s*' + _RAWVT_ANY_TYPE + r'\s*\*\s*\*\s*\)\s*')
+_RAWVT_ANY_OFF = re.compile(r'\(\s*(?:const\s+)?(?:unsigned\s+)?char\s*\*\s*\)\s*\*\s*\(\s*' + _RAWVT_ANY_TYPE +
+                            r'\s*(?:\*\s*){1,2}\)\s*')
+
+
+def _rawvt_operand(t, i):
+    """the end of the receiver operand starting at t[i]: an identifier (this, a name, x->y chains) or a balanced (...)"""
+    while i < len(t) and t[i] in ' \t': i += 1
+    if i < len(t) and t[i] == '(':
+        d = 0
+        for j in range(i, len(t)):
+            if t[j] == '(': d += 1
+            elif t[j] == ')':
+                d -= 1
+                if d == 0: return j + 1
+        return None
+    m = re.match(r'[A-Za-z_]\w*(?:\s*(?:->|\.)\s*[A-Za-z_]\w*)*', t[i:])
+    return i + m.end() if m else None
+
+
+class _M:
+    def __init__(self, a, b): self._a, self._b = a, b
+    def start(self, *g): return self._a
+    def end(self, *g): return self._b
+
+
+def _rawvt_any(masked, text, stats):
+    out = []
+    for m in _RAWVT_ANY_IDX.finditer(masked):
+        e = _rawvt_operand(masked, m.end())
+        if e is None: continue
+        r = re.match(r'\s*\)\s*\[\s*([0-9]+|0[xX][0-9a-fA-F]+)\s*\]', masked[e:])
+        if not r: continue
+        recv = text[m.end():e].strip()
+        if re.match(r'\(\s*\*\s*\(\s*void\s*\*\s*\*\s*\*', masked[m.start():]) and re.fullmatch(r'\(?\s*[A-Za-z_]\w*\s*\)?', recv):
+            continue                                     # (*(void***)x)[k] on a name: RAWVT1 / RAWVT1-RECV
+        a, b = m.start(), e + r.end()
+        if 'FNVNX_' in text[a:b]: continue
+        if not _rawvt_mem_called(masked, _M(a, b)): stats['RAWVT1-ANY-DATA'] += 1; continue
+        vp = text[a:e + r.start(1)].rsplit('[', 1)[0].rstrip()
+        out.append((a, b, 'FNVNX_RAWVT_DYN(%s, %s)' % (vp, r.group(1))))
+        stats['RAWVT1-ANY'] += 1
+    for m in _RAWVT_ANY_OFF.finditer(masked):
+        e = _rawvt_operand(masked, m.end())
+        if e is None: continue
+        r = re.match(r'\s*\+\s*(0[xX][0-9a-fA-F]+|[0-9]+)\b', masked[e:])
+        if not r: continue
+        off = int(r.group(1), 0)
+        if off % 4 or off == 0: continue
+        # only a called slot: `(*(Fn*)(... + off))(...)` or a cast to a function-pointer type name (a field read
+        # through a pointer member, `*(float*)((char*)*(void**)((char*)this + 0x6c) + 0x10)`, is data)
+        tail = masked[e + r.end():e + r.end() + 12]
+        head = masked[max(0, m.start() - 80):m.start()]
+        cast = re.search(r'\(\s*([A-Za-z_]\w*)\s*\*\s*\)\s*\(?\s*$', head)
+        called = re.match(r'\s*\)\s*\)\s*\(', tail) or (cast and re.search(r'Fn|Func|Proc|Callback|Method|Slot|Handler|Thunk', cast.group(1)))
+        if not called: stats['RAWVT1-ANY-OFF-DATA'] += 1; continue
+        recv = text[m.end():e].strip()
+        out.append((e + r.start(1), e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
+        stats['RAWVT1-ANY-OFF'] += 1
+    return out
+
+
 def r_raw_vtable_slots(path, text, stats):
     """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above); RAWVT1-MEM: the same on the vptr
     modelled as a data member."""
     pass
-    if '***' not in text.replace(' ', '') and not re.search(RAWVT1_MEMBERS + r'\s*\[', text): return text
+    if '**' not in text.replace(' ', '') and not re.search(RAWVT1_MEMBERS + r'\s*\[', text): return text
     masked = d22_mask(text)
     hits = [m for m in RAWVT1_RX.finditer(masked)]
     mem = [m for m in RAWVT1_MEM_RX.finditer(masked)]
     recv_any = RAWVT1_RECV_MEM.search(masked) or RAWVT1_RECV_CAST.search(masked)
-    if not hits and not mem and not recv_any: return text
+    if not hits and not mem and not recv_any and not _RAWVT_ANY_IDX.search(masked) and not _RAWVT_ANY_OFF.search(masked):
+        return text
     classes = d22_classes(text, masked)
     owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
     for m in D22_MEMBER_DEF.finditer(masked):
@@ -6959,6 +7029,13 @@ def r_raw_vtable_slots(path, text, stats):
         if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
         edits.append((ka, kz, 'FNVNX_D26_SLOT(%s)' % text[ka:kz]))
         if tag != 'RAWVT1': stats[tag] += 1
+    anyv = _rawvt_any(masked, text, stats) if '**' in masked.replace(' ', '') else []
+    if anyv:
+        taken = [(a, b) for a, b, _ in edits]
+        anyv = [e for e in anyv if not any(a < e[1] and e[0] < b for a, b in taken)]
+        edits += anyv
+        if 'fnvnx_rawvt.h' not in text:
+            edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
     if recv_any:
         rv = _rawvt_recv(path, masked, owners, stats, text)
         edits += [(e[0], e[1], e[2]) if len(e) == 3 else (e[0], e[1], 'FNVNX_D26_SLOT(%s)' % text[e[0]:e[1]]) for e in rv]
