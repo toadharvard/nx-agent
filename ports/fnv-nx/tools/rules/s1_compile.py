@@ -6919,7 +6919,11 @@ RULES.insert(RULES.index(r_vfptr_pad) + 1, r_vtable_model_pad)
 # of fnvnx_rawvt.h (FNVNX_RAWVT_DYN / FNVNX_RAWVT_DYNOFF), right for a minus-one table, a COM object and an exe table
 # alike. Only a slot that is called (a cast to a function pointer or typedef'd type, or a variable then called).
 _RAWVT_ANY_TYPE = r'(?:const\s+)?(?:void\s*\*|int|unsigned(?:\s+int)?|unsigned\s+long|long|DWORD|UINT|uintptr_t|char\s*\*|\w+_Fn|FARPROC|PVOID)'
-_RAWVT_ANY_IDX = re.compile(r'\(\s*\*\s*\(\s*' + _RAWVT_ANY_TYPE + r'\s*\*\s*\*\s*\)\s*')
+_RAWVT_ANY_IDX = re.compile(r'\(\s*\*\s*(?:\(\s*' + _RAWVT_ANY_TYPE + r'\s*\*\s*\*\s*\)|reinterpret_cast\s*<\s*' +
+                            _RAWVT_ANY_TYPE + r'\s*\*\s*\*\s*>)\s*|\(\s*\(\s*void\s*\*\s*\*\s*\)\s*\*\s*\(\s*void\s*\*\s*\*\s*\)\s*')
+# the vptr as an integer: *(int*)(*(int*)X + off) - a byte offset on the first word read as int
+_RAWVT_ANY_INT = re.compile(r'(\*\s*\(\s*(?:int|unsigned(?:\s+int)?|DWORD|uintptr_t)\s*\*\s*\)\s*\(\s*)\*\s*\(\s*'
+                            r'(?:int|unsigned(?:\s+int)?|DWORD|uintptr_t)\s*\*\s*\)\s*')
 _RAWVT_ANY_OFF = re.compile(r'\(\s*(?:const\s+)?(?:unsigned\s+)?char\s*\*\s*\)\s*\*\s*\(\s*' + _RAWVT_ANY_TYPE +
                             r'\s*(?:\*\s*){1,2}\)\s*')
 
@@ -6953,7 +6957,8 @@ def _rawvt_any(masked, text, stats):
         r = re.match(r'\s*\)\s*\[\s*([0-9]+|0[xX][0-9a-fA-F]+)\s*\]', masked[e:])
         if not r: continue
         recv = text[m.end():e].strip()
-        if re.match(r'\(\s*\*\s*\(\s*void\s*\*\s*\*\s*\*', masked[m.start():]) and re.fullmatch(r'\(?\s*[A-Za-z_]\w*\s*\)?', recv):
+        if re.match(r'\(\s*\*\s*(?:\(|reinterpret_cast\s*<)\s*void\s*\*\s*\*\s*\*', masked[m.start():]) and \
+                re.fullmatch(r'\(?\s*[A-Za-z_]\w*\s*\)?', recv):
             continue                                     # (*(void***)x)[k] on a name: RAWVT1 / RAWVT1-RECV
         a, b = m.start(), e + r.end()
         if 'FNVNX_' in text[a:b]: continue
@@ -6961,6 +6966,17 @@ def _rawvt_any(masked, text, stats):
         vp = text[a:e + r.start(1)].rsplit('[', 1)[0].rstrip()
         out.append((a, b, 'FNVNX_RAWVT_DYN(%s, %s)' % (vp, r.group(1))))
         stats['RAWVT1-ANY'] += 1
+    for m in _RAWVT_ANY_INT.finditer(masked):
+        e = _rawvt_operand(masked, m.end())
+        if e is None: continue
+        r = re.match(r'\s*\+\s*(0[xX][0-9a-fA-F]+|[0-9]+)\s*\)', masked[e:])
+        if not r: continue
+        off = int(r.group(1), 0)
+        if off % 4 or off == 0: continue
+        if not _rawvt_mem_called(masked, _M(m.start(), e + r.end())): stats['RAWVT1-ANY-INT-DATA'] += 1; continue
+        recv = text[m.end():e].strip()
+        out.append((e + r.start(1), e + r.end(1), 'FNVNX_RAWVT_DYNOFF(*(void**)(%s), %s)' % (recv, r.group(1))))
+        stats['RAWVT1-ANY-INT'] += 1
     for m in _RAWVT_ANY_OFF.finditer(masked):
         e = _rawvt_operand(masked, m.end())
         if e is None: continue
@@ -6985,12 +7001,13 @@ def r_raw_vtable_slots(path, text, stats):
     """RAWVT1: a raw exe slot index on `this` -> FNVNX_D26_SLOT(k) (see above); RAWVT1-MEM: the same on the vptr
     modelled as a data member."""
     pass
-    if '**' not in text.replace(' ', '') and not re.search(RAWVT1_MEMBERS + r'\s*\[', text): return text
+    if '*' not in text: return text
     masked = d22_mask(text)
     hits = [m for m in RAWVT1_RX.finditer(masked)]
     mem = [m for m in RAWVT1_MEM_RX.finditer(masked)]
     recv_any = RAWVT1_RECV_MEM.search(masked) or RAWVT1_RECV_CAST.search(masked)
-    if not hits and not mem and not recv_any and not _RAWVT_ANY_IDX.search(masked) and not _RAWVT_ANY_OFF.search(masked):
+    if not hits and not mem and not recv_any and not _RAWVT_ANY_IDX.search(masked) and not _RAWVT_ANY_OFF.search(masked) \
+            and not _RAWVT_ANY_INT.search(masked):
         return text
     classes = d22_classes(text, masked)
     owners = [(c['open'], c['close'], c['qual'][-1]) for c in classes]
@@ -7029,17 +7046,18 @@ def r_raw_vtable_slots(path, text, stats):
         if owner in _rawvt_exe_order(): stats['RAWVT1-EXEORDER'] += 1; continue   # the link kept its table in exe order
         edits.append((ka, kz, 'FNVNX_D26_SLOT(%s)' % text[ka:kz]))
         if tag != 'RAWVT1': stats[tag] += 1
-    anyv = _rawvt_any(masked, text, stats) if '**' in masked.replace(' ', '') else []
-    if anyv:
-        taken = [(a, b) for a, b, _ in edits]
-        anyv = [e for e in anyv if not any(a < e[1] and e[0] < b for a, b in taken)]
-        edits += anyv
-        if 'fnvnx_rawvt.h' not in text:
-            edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
     if recv_any:
         rv = _rawvt_recv(path, masked, owners, stats, text)
         edits += [(e[0], e[1], e[2]) if len(e) == 3 else (e[0], e[1], 'FNVNX_D26_SLOT(%s)' % text[e[0]:e[1]]) for e in rv]
         if any(len(e) == 3 for e in rv) and 'fnvnx_rawvt.h' not in text:
+            edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
+    anyv = _rawvt_any(masked, text, stats) if '*' in masked else []
+    if anyv:
+        taken = [(a, b) for a, b, _ in edits if b > a]
+        keep = [e for e in anyv if not any(a < e[1] and e[0] < b for a, b in taken)]
+        stats['RAWVT1-ANY-OVERLAP'] += len(anyv) - len(keep)
+        edits += keep
+        if keep and 'fnvnx_rawvt.h' not in text and not any(e[2].startswith('#include "fnvnx_rawvt.h"') for e in edits):
             edits.append((0, 0, '#include "fnvnx_rawvt.h" /* fnv-nx RAWVT1-DYN */\n'))
     for a, b, rep in sorted(set(edits), reverse=True):
         text = text[:a] + rep + text[b:]
