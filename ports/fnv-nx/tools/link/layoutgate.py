@@ -426,8 +426,8 @@ def main():
             if (size, tuple(sorted(foff.items()))) == (msize, tuple(sorted(mf.items()))): continue
             diff = [(f, mf[f], foff[f]) for f in foff if f in mf and mf[f] != foff[f]]
             if diff:
-                f, a, c = min(diff, key=lambda x: x[2])
-                allrows.append((unit, name, 'odr field %s' % f, a, c, 'odr', b))
+                fld, ref_off, own_off = min(diff, key=lambda x: x[2])
+                allrows.append((unit, name, 'odr field %s' % fld, ref_off, own_off, 'odr', b))
             elif size != msize:
                 allrows.append((unit, name, 'odr size', msize, size, 'odr', b))
     # the member check: a record whose layout differs only by its alignment under #pragma pack (pack) or by a zero
