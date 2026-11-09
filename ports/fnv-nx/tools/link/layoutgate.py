@@ -317,21 +317,38 @@ def compare(unit, rec, nat, boot):
     return rows
 
 
+def _rtti_classes():
+    """the exe's RTTI class names (S2's classlayout.tsv: FNVNX_CLASSLAYOUT, or any under FNVNX_RECON), or empty"""
+    files = [os.environ['FNVNX_CLASSLAYOUT']] if os.environ.get('FNVNX_CLASSLAYOUT') else []
+    top = os.environ.get('FNVNX_RECON')
+    if top and os.path.isdir(top):
+        files += [os.path.join(dp, 'classlayout.tsv') for dp, _, ns in os.walk(top) if 'classlayout.tsv' in ns]
+    out = set()
+    for f in files:
+        try:
+            for line in open(f):
+                if not line.startswith('#') and not line.startswith('class\t'):
+                    out.add(line.split('\t', 1)[0].split('::')[-1])
+        except OSError:
+            pass
+    return out
+
+
 def run_unit(tree, workdir, unit, boot):
     try:
         return _run_unit(tree, workdir, unit, boot)
     except Exception as e:  # noqa: BLE001 - one unit never stops the run: it is reported as probe-failed
         return unit, [(unit, '-', 'probe-failed', '-', '%s: %s' % (type(e).__name__, str(e)[:400].replace('\t', ' ')),
-                       'probe-failed', boot)], 0, 0, []
+                       'probe-failed', boot)], 0, 0, [], []
 
 
 def _run_unit(tree, workdir, unit, boot):
     try:
         recs = msvc_layouts(tree, unit)
     except subprocess.TimeoutExpired:
-        return unit, [], 0, 0, []
+        return unit, [], 0, 0, [], []
     if not recs:
-        return unit, [], 0, 0, []
+        return unit, [], 0, 0, [], []
     nat = probe(tree, workdir, unit, list(recs.values()))
     rows = []
     for name, rec in recs.items():
@@ -340,7 +357,9 @@ def _run_unit(tree, workdir, unit, boot):
     # members, for the member check (a pack / ebo record placed inside another record)
     members = [(unit, rec.name, off, nm, re.sub(r'^(?:const\s+|volatile\s+|struct\s+|class\s+)+', '', t).strip(), boot)
                for rec in recs.values() for off, nm, t in rec.fields if off is not None and nm]
-    return unit, rows, len(recs), len(nat), members
+    # the native layouts, for the cross-unit (ODR) check: one class name, several definitions in the tree
+    layouts = [(unit, name, nat[name][0], nat[name][2], boot) for name in recs if name in nat]
+    return unit, rows, len(recs), len(nat), members, layouts
 
 
 def main():
@@ -364,11 +383,40 @@ def main():
     allrows, seen, measured = [], {}, [0, 0]
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
         futs = [ex.submit(run_unit, tree, workdir, u, int(u in boot)) for u in units]
-        allmembers = []
+        allmembers, alllayouts = [], []
         for f in concurrent.futures.as_completed(futs):
-            unit, rows, nm, nn, mem = f.result()
+            unit, rows, nm, nn, mem, lay = f.result()
             measured[0] += nm; measured[1] += nn
-            allrows += rows; allmembers += mem
+            allrows += rows; allmembers += mem; alllayouts += lay
+    # the ODR check (S5 data boot a9d9f9103325: SetParent 0x00a59d00 reads child+0x18 as m_pkParent, the object built
+    # by another unit's definition of the class had a name pointer there): the same class name defined in several
+    # units with different native layouts - a size, or a field both define at different offsets. One row per unit
+    # whose layout is not the most common one (cause odr), naming the field and the two offsets.
+    rtti = _rtti_classes()
+    by = collections.defaultdict(list)
+    for unit, name, size, foff, b in alllayouts:
+        if rtti and name.split('::')[-1] not in rtti: continue      # an exe class (classlayout row), not a local shell
+        if not foff: continue                                         # an empty stand-in (`struct NiNode;`-like shell)
+        by[name].append((unit, size, foff, b))
+    import json
+    with open(a.out + '.layouts', 'w') as lf:
+        for name, defs in sorted(by.items()):
+            for unit, size, foff, b in defs:
+                lf.write(json.dumps([name, unit, size, foff]) + '\n')
+    for name, defs in by.items():
+        if len(defs) < 2: continue
+        keyed = collections.Counter((d[1], tuple(sorted(d[2].items()))) for d in defs)
+        if len(keyed) < 2: continue
+        (msize, mf), _ = keyed.most_common(1)[0]
+        mf = dict(mf)
+        for unit, size, foff, b in defs:
+            if (size, tuple(sorted(foff.items()))) == (msize, tuple(sorted(mf.items()))): continue
+            diff = [(f, mf[f], foff[f]) for f in foff if f in mf and mf[f] != foff[f]]
+            if diff:
+                f, a, c = min(diff, key=lambda x: x[2])
+                allrows.append((unit, name, 'odr field %s' % f, a, c, 'odr', b))
+            elif size != msize:
+                allrows.append((unit, name, 'odr size', msize, size, 'odr', b))
     # the member check: a record whose layout differs only by its alignment under #pragma pack (pack) or by a zero
     # native size (ebo) is harmless as a base; as a member it moves its neighbours when MSVC places it at an offset
     # the native alignment does not allow (pack), or always (ebo: 1 byte under MSVC, 0 natively)
@@ -397,18 +445,19 @@ def main():
     ebo2 -= {(r[0], r[1]) for r in allrows if r[2] not in ('size', 'align') and not r[2].startswith('member')}
     recs = collections.defaultdict(set)
     for r in allrows:
-        if not r[2].startswith(('member', 'probe-failed')) and (r[0], r[1]) not in ebo2: recs[(r[1], r[6])].add(r[2])
+        if not r[2].startswith(('member', 'probe-failed', 'odr')) and (r[0], r[1]) not in ebo2: recs[(r[1], r[6])].add(r[2])
     failed = sorted({r[0] for r in allrows if r[2] == 'probe-failed'})
     rb = {k[0] for k in recs if k[1] == 1}
     rr = {k[0] for k in recs if k[1] == 0} - rb
     fb = sum(1 for r in allrows if r[6] == 1 and r[2].startswith('field'))
     causes = collections.Counter(r[5] for r in allrows if r[2] == 'size' or r[2].startswith('field'))
+    odr = {r[1] for r in allrows if r[5] == 'odr'}
     mrows = [r for r in allrows if r[2].startswith('member')]
     summary = ('layoutgate: %d units, records msvc %d / probed %d; differing records %d (boot %d, rest %d), '
-               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); ebo2 bases %d; causes %s%s' %
+               'differing field rows %d (boot %d); pack / ebo members at risk %d (boot %d); ebo2 bases %d; odr classes %d; causes %s%s' %
                (len(units), measured[0], measured[1], len(rb | rr), len(rb), len(rr),
                 sum(1 for r in allrows if r[2].startswith('field')), fb, len(mrows), sum(1 for r in mrows if r[6] == 1),
-                len({k[1] for k in ebo2}), dict(causes.most_common()),
+                len({k[1] for k in ebo2}), len(odr), dict(causes.most_common()),
                 '; probe-failed %d (%s)' % (len(failed), ', '.join(failed[:10]) + (' ...' if len(failed) > 10 else ''))
                 if failed else ''))
     print(summary, file=sys.stderr)
