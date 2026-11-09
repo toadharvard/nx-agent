@@ -279,6 +279,30 @@ if [ -z "$FAIL" ] && [ "${BOOTLOOP_DETERMINISM:-1}" = 1 ] && [ -n "$EMUH" ] && [
 		*) NOTE_DET="WARN: two identical stub boots disagree (emu_guest.py $EMUH, checked once): $NOTE_DET"
 		   echo "$NOTE_DET" > "$F/determinism-$EMUH.failed" ;;
 	esac
+	# the evidence for S5 (orchestrator: the two traces were deleted with the check): both function traces, both stub
+	# boots' logs and summaries and the boot's settings, to branch s5boot/<c12>-determinism of the artifacts
+	# repository (game-derived: never here)
+	if [ ! -f "$F/determinism-$EMUH.done" ]; then
+		EV=$F/det-evidence; rm -rf "$EV"; mkdir -p "$EV/a" "$EV/b"
+		[ -f "$STUB_TRACE" ] && xz -T0 -c "$STUB_TRACE" > "$EV/a/stub_trace.tsv.xz"
+		[ -f "$T2" ] && xz -T0 -c "$T2" > "$EV/b/stub_trace.tsv.xz"
+		for f in emu_stub.log boot_summary_stub.json summary.txt; do
+			[ -f "$STUB/$f" ] && cp "$STUB/$f" "$EV/a/"; [ -f "$STUB2/$f" ] && cp "$STUB2/$f" "$EV/b/"
+		done
+		{ echo "commit $COMMIT"; echo "emu_guest.py sha256 $EMUH"; echo "verdict: $NOTE_DET"
+		  echo "both boots: tests/s5/farm_boot.sh $COMMIT <out> ${GAME_EXE:+<player exe>} with FARM_BOOTS=stub FNVNX_STUB_NULLDEV=$NULLDEV"
+		  echo "  FARM_LINK_DIR=$B/link FARM_GUEST_DIR=$B/guest EMU_TIMEOUT=${BOOTLOOP_EMU_TIMEOUT:-300}"
+		  echo "  EMU_EXTRA a: ${BOOTLOOP_EMU_EXTRA:-}${LS_EXTRA:+ $LS_EXTRA}"
+		  echo "  EMU_EXTRA b: ${BOOTLOOP_EMU_EXTRA:-}${LS_EXTRA:+ ${LS_EXTRA/$STUB_TRACE/$T2}}"
+		  echo "  guest.nso sha256 $(sha256sum "$B/guest/guest.nso" 2>/dev/null | cut -c1-64)"; } > "$EV/README.txt"
+		g=$F/det.git; rm -rf "$g"; url=$(git -C "$ARTIFACTS" remote get-url origin)
+		if git init -q "$g" && cp -a "$EV"/. "$g"/ && git -C "$g" add -A && \
+				git -C "$g" -c user.name="fnvnx farm" -c user.email=farm@invalid commit -qm "bootloop determinism evidence ${COMMIT:0:12}" && \
+				git -C "$g" push -q -f "$url" "HEAD:refs/heads/s5boot/${COMMIT:0:12}-determinism" 2> "$F/det-push.log"; then
+			NOTE_DET="$NOTE_DET; the two traces: branch s5boot/${COMMIT:0:12}-determinism"
+		else NOTE_DET="$NOTE_DET; publishing the traces failed (log $F/det-push.log)"; fi
+		rm -rf "$g" "$EV"
+	fi
 	rm -rf "$STUB2" "$T2"
 	step "determinism (once)"
 elif [ -f "$F/determinism-$EMUH.failed" ]; then
