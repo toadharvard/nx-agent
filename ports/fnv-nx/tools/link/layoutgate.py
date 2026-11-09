@@ -424,7 +424,10 @@ def main():
         mf = dict(mf)
         for unit, size, foff, b in defs:
             if (size, tuple(sorted(foff.items()))) == (msize, tuple(sorted(mf.items()))): continue
-            diff = [(f, mf[f], foff[f]) for f in foff if f in mf and mf[f] != foff[f]]
+            # a filler name (pad / padding / unk00 / _pdbpad_1 / reserved) is no field of the class: two stand-ins
+            # that pad in different places do not disagree on it
+            diff = [(f, mf[f], foff[f]) for f in foff if f in mf and mf[f] != foff[f] and
+                    not re.fullmatch(r'_?(?:pd[bp])?pad\w*|padding\w*|unk[0-9A-Fa-fx_]*|reserved\w*|_?pdbpad_\d+', f)]
             if diff:
                 fld, ref_off, own_off = min(diff, key=lambda x: x[2])
                 allrows.append((unit, name, 'odr field %s' % fld, ref_off, own_off, 'odr', b))
