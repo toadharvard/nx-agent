@@ -44,7 +44,7 @@ GAME_HEAPS = {"new", "mm", "ni"}
 #   realloc  a = old pointer, b = size
 ALLOC_TABLE = [
     # the game's MemoryManager (thiscall: x0 = this)
-    ("mm", "alloc", "MM::Allocate", ["0x00aa3e40"], 1, None),
+    ("mm", "alloc", "MM::Allocate", ["0x00aa3e40", "0x00aa4030"], 1, None),   # 00aa4030: the file/line variant
     ("mm", "free", "MM::Deallocate", ["0x00aa4060"], 1, None),
     ("mm", "realloc", "MM::Reallocate", ["0x00aa4150"], 1, 2),
     # Gamebryo NiMalloc / NiFree and the aligned and realloc forms
