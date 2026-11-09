@@ -27,8 +27,11 @@ extern const unsigned long __fnvnx_m1k_count __attribute__((weak, visibility("hi
 #ifdef __cplusplus
 }
 #endif
+/* slot 0 never shifts: an exe call of slot 0 is ??_G(flags); natively slot 0 is the complete destructor D1 (= flag 0)
+ * and slot 1 the deleting D0, so the unshifted call is right for flag 0 and leaks for flag 1 - never frees wrongly */
 static inline unsigned fnvnx_rawvt_m1(const void *vp, unsigned k)
 {
+    if (k == 0) return 0;
     if ((unsigned long)vp - (unsigned long)__fnvnx_m1_start < (unsigned long)__fnvnx_m1_end - (unsigned long)__fnvnx_m1_start)
         return 1;
     if ((unsigned long)vp - (unsigned long)__fnvnx_m1k4_start < (unsigned long)__fnvnx_m1k4_end - (unsigned long)__fnvnx_m1k4_start)

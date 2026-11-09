@@ -364,8 +364,10 @@ def _run_unit(tree, workdir, unit, boot):
     if RAWVCALL:
         try:
             for u, fn, line, off, st in rawvcall.check_unit(tree, unit, workdir):
-                if st != 'covered':
+                if st == 'raw':
                     rows.append((unit, fn, 'rawvcall line %s' % line, off, st, 'rawvcall', boot))
+                elif st != 'covered':
+                    rows.append((unit, fn, 'rawvcall line %s' % line, off, st, st, boot))
         except Exception as e:  # noqa: BLE001
             rows.append((unit, '-', 'rawvcall', '-', 'check failed: %s' % e, 'rawvcall', boot))
     # the native layouts, for the cross-unit (ODR) check: one class name, several definitions in the tree

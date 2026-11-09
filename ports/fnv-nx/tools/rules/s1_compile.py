@@ -7124,7 +7124,11 @@ def r_raw_vtable_slots(path, text, stats):
                 dyn.append((m.start(), m.end(), 'FNVNX_RAWVT_DYN(%s, %s)' % (m.group(2), m.group(3))))
                 stats['RAWVT1-MEM-DYN'] += 1; continue
             stats['RAWVT1-MEM-FREE'] += 1; continue
-        if any(re.search(r'\bvirtual\b', masked[c['open']:c['close']]) for c in by_name.get(own[1], ())):
+        # the classes of that name that declare the member (a file can hold several: namespaces, middlehighprocess.cpp's
+        # three Proc); held only when every one of them declares a virtual (the member is then not the vptr)
+        decl = [c for c in by_name.get(own[1], ()) if re.search(r'\b%s\s*(?:\[[^\]]*\])?\s*;' % re.escape(m.group(2)),
+                                                          masked[c['open']:c['close']])]
+        if decl and all(re.search(r'\bvirtual\b', masked[c['open']:c['close']]) for c in decl):
             stats['RAWVT1-MEM-VIRT'] += 1; continue
         if not _rawvt_mem_ok(masked, own[0], m.start(), m.group(2)):
             # a local vptr of another object, `void** vtbl = *(void***)obj;` (hkpworld.cpp, tileshader.cpp): the
