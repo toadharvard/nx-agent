@@ -3538,10 +3538,20 @@ def direct_call_slot_binds(have, changed, addr_of, per_obj, rebound, traps, rows
                 continue
             sec = o.secnames[i_]
             fn = sec[len('.text.'):] if sec.startswith('.text.') else None
-            for _, (si, typ, _) in o.rel(i_).items():
+            # a unit built without -ffunction-sections (archive.cpp's FUN_00af7eb0 constructor sits in `.text`):
+            # the call's function is the FUNC symbol whose range holds the offset
+            funcs = None
+            for off_, (si, typ, _) in o.rel(i_).items():
                 nm = o.syms[si][0]
-                if typ in (21, 20) and nm in trapped:
-                    callers[nm].add(caller_class(fn) if fn else None)
+                if typ not in (21, 20) or nm not in trapped:
+                    continue
+                f_ = fn
+                if f_ is None or caller_class(f_) is None:
+                    if funcs is None:
+                        funcs = sorted((s_[1], s_[2], s_[0]) for s_ in o.syms
+                                       if s_[5] == i_ and s_[3] == 2 and s_[0])
+                    f_ = next((n_ for v_, z_, n_ in funcs if v_ <= off_ < v_ + max(z_, 1)), None)
+                callers[nm].add(caller_class(f_) if f_ else None)
         for un, cls in callers.items():
             if None in cls:
                 continue
