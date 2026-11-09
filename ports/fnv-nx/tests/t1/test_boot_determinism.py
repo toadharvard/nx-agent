@@ -45,6 +45,20 @@ try:
     boot(B, trace=('A', 'X', 'C'))
     rc, out = run(A, B)
     ok('a different function trace: FAIL at line 2', rc == 1 and 'line 2' in out)
+    # a `ret` line's last column is --trace-fn's elapsed wall time (S5: 9b1f9490e4e6 differed only there): ignored
+    boot(B)
+    for d, ns in ((A, 164352), (B, 150121)):
+        with open(os.path.join(d, 'trace.tsv'), 'a') as f:
+            f.write('ret\t3\t1\t0\tA\t0x5\t%d\n' % ns)
+    rc, out = run(A, B)
+    ok('ret lines that differ only in their timing column: PASS', rc == 0 and out.startswith('PASS'))
+    with open(os.path.join(B, 'trace.tsv'), 'a') as f:
+        f.write('ret\t4\t1\t0\tB\t0x6\t1\n')
+    with open(os.path.join(A, 'trace.tsv'), 'a') as f:
+        f.write('ret\t4\t1\t0\tB\t0x7\t1\n')
+    rc, out = run(A, B)
+    ok('ret lines with another return value: still FAIL', rc == 1)
+    boot(A); boot(B)
     boot(A, stop='STOPPED: run stopped by SIGTERM (wall-clock limit)', reached=2, trace=('A', 'B'))
     boot(B, reached=4, trace=('A', 'B', 'C', 'D'))
     rc, out = run(A, B)

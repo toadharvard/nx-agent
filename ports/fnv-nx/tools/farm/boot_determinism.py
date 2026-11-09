@@ -37,7 +37,16 @@ def cut_short(summary):
 
 
 def lines(p):
-    return [l for l in open(p, errors='replace')] if p and os.path.isfile(p) else None
+    """the trace's lines, timings out: a `ret` line's last column is --trace-fn's elapsed wall time in ns (S5:
+    s5boot/9b1f9490e4e6-determinism differed only there, 164352 vs 150121 at line 4; the boots were the same)"""
+    if not (p and os.path.isfile(p)):
+        return None
+    out = []
+    for l in open(p, errors='replace'):
+        if l.startswith('ret\t'):
+            l = l.rstrip('\n').rsplit('\t', 1)[0] + '\n'
+        out.append(l)
+    return out
 
 
 def first_diff(a, b):
