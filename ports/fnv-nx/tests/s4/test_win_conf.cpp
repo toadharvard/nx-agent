@@ -253,7 +253,7 @@ TEST(wc_window_lifecycle_messages)
     CHECK_STR(buf, "WinConfClass");
     CHECK(FindWindowA("WINCONFCLASS", NULL) == h);
     CHECK(FindWindowA(NULL, "Title") == h);
-    CHECK(FindWindowA((LPCSTR)(uintptr_t)atom, NULL) == NULL);   /* an atom must not be dereferenced */
+    CHECK(FindWindowA((LPCSTR)(uintptr_t)atom, NULL) == h);      /* MSDN: the class may be given as an atom */
 
     HWND h2 = CreateWindowExA(0, (LPCSTR)(uintptr_t)atom, "viaatom", 0, 0, 0, 1, 1, NULL, NULL, NULL, NULL);
     CHECK(h2 != NULL);
@@ -380,9 +380,9 @@ TEST(wc_window_longs_and_metrics)
     fnvnx_set_display_size(1920, 1080);
     RECT r;
     CHECK(GetClientRect(h, &r));
-    CHECK_EQ(r.left, 0); CHECK_EQ(r.top, 0); CHECK_EQ(r.right, 1920); CHECK_EQ(r.bottom, 1080);
+    CHECK_EQ(r.left, 0); CHECK_EQ(r.top, 0); CHECK_EQ(r.right, 100); CHECK_EQ(r.bottom, 50);   /* the window's own size, not the display's */
     CHECK(GetWindowRect(h, &r));
-    CHECK_EQ(r.right - r.left, 1920);
+    CHECK_EQ(r.right - r.left, 100);
     CHECK(!GetClientRect(NULL, &r));
     CHECK_EQ(GetSystemMetrics(SM_CXSCREEN), 1920);
     CHECK_EQ(GetSystemMetrics(SM_CYSCREEN), 1080);
@@ -392,6 +392,8 @@ TEST(wc_window_longs_and_metrics)
     r.left = 10; r.top = 20; r.right = 110; r.bottom = 220;
     CHECK(AdjustWindowRect(&r, 0x80000000u, FALSE));        /* a popup has no frame */
     CHECK_EQ(r.right - r.left, 100); CHECK_EQ(r.bottom - r.top, 200);
+    CHECK(GetActiveWindow() == NULL);                       /* a window that was never shown is not active */
+    ShowWindow(h, 5);
     CHECK(GetActiveWindow() == h && GetForegroundWindow() == h);
     CHECK(SetForegroundWindow(h));
     CHECK(DestroyWindow(h));

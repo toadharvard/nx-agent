@@ -1158,11 +1158,3 @@ extern "C" BOOL GetUserNameA(LPSTR buf, LPDWORD size)
     *size = sizeof name;   /* NUL included */
     return TRUE;
 }
-
-/* window classes keep only their name and procedure (window.cpp): every class long reads 0 */
-extern "C" DWORD GetClassLongA(HWND h, int index)
-{
-    W32_UNUSED(h);
-    W32_UNUSED(index);
-    return 0;
-}
