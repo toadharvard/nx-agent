@@ -20,6 +20,7 @@ extern "C" {
 HRESULT fnvnx_dsound_com_factory(const GUID *iid, void **out);
 HRESULT fnvnx_dinput_com_factory(const GUID *iid, void **out);
 HRESULT fnvnx_dshow_com_factory(const GUID *iid, void **out);   /* platform/audio/dshow.cpp */
+HRESULT fnvnx_dshow_mapper_factory(const GUID *iid, void **out);
 int fnvnx_ov_open_callbacks();
 int fnvnx_ov_clear();
 int fnvnx_ov_info();
@@ -113,6 +114,8 @@ extern "C" void fnvnx_audio_input_register(void)
     fnvnx_register_com_class(&CLSID_DirectInput8, fnvnx_dinput_com_factory);
     static const GUID clsid_filter_graph = {0xe436ebb3, 0x524f, 0x11ce, {0x9f, 0x53, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
     fnvnx_register_com_class(&clsid_filter_graph, fnvnx_dshow_com_factory);   /* DirectShow: the game's music */
+    static const GUID clsid_filter_mapper = {0xe436ebb2, 0x524f, 0x11ce, {0x9f, 0x53, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
+    fnvnx_register_com_class(&clsid_filter_mapper, fnvnx_dshow_mapper_factory);   /* IFilterMapper: the installed filters */
 }
 
 __attribute__((constructor(FNVNX_INIT_MODULES))) static void fnvnx_audio_input_ctor(void) { fnvnx_audio_input_register(); }
