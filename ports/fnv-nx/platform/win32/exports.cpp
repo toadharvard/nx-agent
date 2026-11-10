@@ -14,7 +14,17 @@ int fnvnx_ws2_WSACleanup(void);
 int fnvnx_ws2_WSAGetLastError(void);
 UINT_PTR fnvnx_ws2_socket(int, int, int);
 int fnvnx_ws2_closesocket(UINT_PTR);
-int fnvnx_ws2_fail(void);
+void fnvnx_ws2_WSASetLastError(int);
+int fnvnx_ws2_bind(UINT_PTR, const void *, int);
+int fnvnx_ws2_listen(UINT_PTR, int);
+UINT_PTR fnvnx_ws2_accept(UINT_PTR, void *, int *);
+int fnvnx_ws2_connect(UINT_PTR, const void *, int);
+int fnvnx_ws2_send(UINT_PTR, const char *, int, int);
+int fnvnx_ws2_recv(UINT_PTR, char *, int, int);
+int fnvnx_ws2_setsockopt(UINT_PTR, int, int, const char *, int);
+int fnvnx_ws2_ioctlsocket(UINT_PTR, long, unsigned long *);
+int fnvnx_ws2_select(int, void *, void *, void *, const void *);
+int fnvnx_ws2_WSAAsyncSelect(UINT_PTR, HWND, UINT, long);
 unsigned short fnvnx_ws2_htons(unsigned short);
 unsigned short fnvnx_ws2_ntohs(unsigned short);
 unsigned long fnvnx_ws2_inet_addr(const char *);
@@ -152,12 +162,12 @@ const exp g_exports[] = {
     { "ws2_32", "closesocket", (void *)&fnvnx_ws2_closesocket }, { "ws2_32", "htons", (void *)&fnvnx_ws2_htons },
     { "ws2_32", "ntohs", (void *)&fnvnx_ws2_ntohs }, { "ws2_32", "inet_addr", (void *)&fnvnx_ws2_inet_addr },
     { "ws2_32", "inet_ntoa", (void *)&fnvnx_ws2_inet_ntoa }, { "ws2_32", "gethostbyname", (void *)&fnvnx_ws2_gethostbyname },
-    { "ws2_32", "gethostname", (void *)&fnvnx_ws2_gethostname }, { "ws2_32", "bind", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "listen", (void *)&fnvnx_ws2_fail }, { "ws2_32", "accept", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "connect", (void *)&fnvnx_ws2_fail }, { "ws2_32", "send", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "recv", (void *)&fnvnx_ws2_fail }, { "ws2_32", "setsockopt", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "ioctlsocket", (void *)&fnvnx_ws2_fail }, { "ws2_32", "WSAAsyncSelect", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "select", (void *)&fnvnx_ws2_fail }, { "ws2_32", "__WSAFDIsSet", (void *)&fnvnx_ws2_fdisset },
+    { "ws2_32", "gethostname", (void *)&fnvnx_ws2_gethostname }, { "ws2_32", "bind", (void *)&fnvnx_ws2_bind },
+    { "ws2_32", "listen", (void *)&fnvnx_ws2_listen }, { "ws2_32", "accept", (void *)&fnvnx_ws2_accept },
+    { "ws2_32", "connect", (void *)&fnvnx_ws2_connect }, { "ws2_32", "send", (void *)&fnvnx_ws2_send },
+    { "ws2_32", "recv", (void *)&fnvnx_ws2_recv }, { "ws2_32", "setsockopt", (void *)&fnvnx_ws2_setsockopt },
+    { "ws2_32", "ioctlsocket", (void *)&fnvnx_ws2_ioctlsocket }, { "ws2_32", "WSAAsyncSelect", (void *)&fnvnx_ws2_WSAAsyncSelect },
+    { "ws2_32", "select", (void *)&fnvnx_ws2_select }, { "ws2_32", "WSASetLastError", (void *)&fnvnx_ws2_WSASetLastError }, { "ws2_32", "__WSAFDIsSet", (void *)&fnvnx_ws2_fdisset },
     E("steam_api", SteamAPI_Init), E("steam_api", SteamAPI_IsSteamRunning), E("steam_api", SteamAPI_Shutdown),
     E("steam_api", SteamAPI_RunCallbacks), E("steam_api", SteamAPI_RegisterCallback),
     E("steam_api", SteamAPI_UnregisterCallback), E("steam_api", SteamUser), E("steam_api", SteamFriends),
