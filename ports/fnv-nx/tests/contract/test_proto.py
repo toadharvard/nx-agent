@@ -57,18 +57,18 @@ check('array ptr', sig('?y@@YAXPAY02HH@Z')[1], ['i', 'i'])
 check('lvalue ref', sig('?z@@YAXAAHH@Z')[1], ['i', 'i'])
 check('rvalue ref', sig('?z@@YAX$$QAHH@Z')[1], ['i', 'i'])
 
-facts = {'fn': {0x10: {}, 0x20: {}, 0x30: {}, 0x40: {}, 0x50: {}, 0x60: {}, 0x70: {}, 0x80: {}}}
+universe = {0x10: 'decomp', 0x20: 'decomp', 0x30: 'decomp', 0x40: 'decomp', 0x50: 'decomp', 0x60: 'eh-unwind', 0x70: 'decomp', 0x80: 'decomp'}
 n1 = {'fn': {0x10: {'n1': True, 'why': '', 'sym': '?a@@YAXXZ'}, 0x20: {'n1': False, 'why': 'bytes differ'}, 0x30: {'n1': True, 'why': '', 'sym': '?b@@YAXXZ'},
              0x40: {'n1': True, 'why': '', 'sym': '?c@@YAXXZ'}, 0x50: {'n1': True, 'why': '', 'sym': '?d@@YAXXZ'},
              0x70: {'n1': True, 'why': '', 'sym': '??_EC@@UAEPAXI@Z'}, 0x80: {'n1': True, 'why': '', 'sym': '??_EC@@UAEPAXI@Z'}}}
 n3 = {0x10: ('ok', []), 0x30: ('ok', []), 0x40: ('ok', [0x50]), 0x50: ('variable shift', []), 0x70: ('ok', []), 0x80: ('ok+E', [])}
-out = bodysel.decide(facts, n1, {0x30: 'call different'}, n3)
+out = bodysel.decide(universe, n1, {0x30: 'call different'}, n3)
 check('native', out[0x10], ['NATIVE', 'N1 N2 N3 N4'])
 check('n1', out[0x20][1], 'N1: bytes differ')
 check('n2', out[0x30][1], 'N2: gate call different')
 check('n4', out[0x40][1], 'N4: an inlined callee is not NATIVE')
 check('n3', out[0x50][1], 'N3: variable shift')
-check('outside', out[0x60][1], 'not a decomp function')
+check('outside', out[0x60][1], 'not a decomp function (eh-unwind)')
 check('vector dtor', out[0x70][1], 'N3: ??_E without the vector branch of __sdd')
 check('vector dtor ok', out[0x80][0], 'NATIVE')
 print('ok' if ok else 'FAILED')
