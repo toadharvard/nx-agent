@@ -37,7 +37,7 @@ static void rec_to_state(const Rec *r, NxFfpPsState *st, NxFfpPsInputs *in)
 }
 
 /* texel(stage,type,coord): smooth, bounded in [0,1], same formula in oracle.py (type 1 ignores coord[2]) */
-static void texel(uint32_t stage, uint32_t type, const float c[3], float out[4])
+__attribute__((unused)) static void texel(uint32_t stage, uint32_t type, const float c[3], float out[4])
 {
     for (int k = 0; k < 4; k++) {
         double x = 0.37 * stage + 0.23 * type + 0.11 * k + 0.53 * c[0] + 0.29 * c[1] + (type == 1 ? 0.0 : 0.17 * c[2]);

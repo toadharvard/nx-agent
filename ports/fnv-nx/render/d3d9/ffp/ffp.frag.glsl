@@ -49,7 +49,7 @@ uint ffp_norm_arg_sel(uint a) { uint s = a & 15u; return s > 6u ? 7u : s; }
 uint ffp_norm_textype(uint t) { return (t >= 1u && t <= 3u) ? t : 0u; }
 
 uint ffp_used(uint op) {              // bit0 arg1, bit1 arg2, bit2 arg0
-    if (op == SEL1) return 1u;
+    if (op == SEL1 || op == PREMOD) return 1u;   // PREMODULATE: documented S = Arg1
     if (op == SEL2) return 2u;
     if (op == MADD || op == LERP) return 7u;
     if (op >= MOD) return 3u;
