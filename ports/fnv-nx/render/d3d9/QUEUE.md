@@ -34,8 +34,8 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 
 | id | task | depends | state |
 |---|---|---|---|
-| T1 | RD1 spec json + test_spec | - | running |
-| T2 | gen: journaling wrapper (one C++ source, builds for i686-mingw and ILP32/-m32) + stream writer; self-test around a generated echo implementation with -m32 | T1 | |
+| T1 | RD1 spec json + test_spec | - | done: 497 methods, 53 structs, 88 length rules, test 0 failures |
+| T2 | gen: journaling wrapper (one C++ source, builds for i686-mingw and ILP32/-m32) + stream writer; self-test around a generated echo implementation with -m32 | T1 | running |
 | T3 | gen: replayer (stream -> calls on an implementation, compares det outs) + comparator (stream vs stream, masks `pix`) | T1 | |
 | T4 | rec: Wine recorder DLL (all d3d9.dll exports), ENV adaptor, shadow lock memory; round trip under Wine on tools/compare synth captures | T2, E1 | |
 | E1 | env: ENV table (caps, adapter, modes, format x role), each line justified; request owner approval through the orchestrator | - | lead |
@@ -51,7 +51,10 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | D7 | dev: swap chains, Present, Reset, device-lost contract, queries, cursor, gamma, palettes, clip status, patches per ENV | D2, B2 | |
 | F1 | ffp: pixel stage (one program + CPU reference) | - | running |
 | F2 | ffp: vertex stage (transform, 4-matrix blending, lighting, material sources, texgen, texture transforms, fog, point size) | - | |
-| S1 | shaders: RD4 universe gate from the census; fix each failing class by rule | census | |
+| S1 | shaders: RD4 legality table with sources + universe gate (census: 1011 of 1147 ok) | census | running |
+| S3 | shaders: fix the failing classes one root cause per task; remove the CTAB dependency | S1 | |
+| R1 | runtime translator (orchestrator decision 2026-11-10): MojoShader + uam built for Horizon LP64 host module, cache by bytecode hash, pre-filled cache from the player's packages; translate off the main thread | S1 | |
+| R2 | measure on AArch64: NSO size, instructions per shader (first estimate on x86-64: 2.90 MB; 143 ms per game shader, uam = 99.9 % of it: 0.16 s of 116 s is bytecode -> GLSL) | R1 | |
 | S2 | shaders: VS epilogue additions (user clip planes, point size), flat/smooth variants, pack format keyed by bytecode hash | S1 | |
 | V1 | check: Wine d3d9 conformance sources recorded through T4, replayed by T3 on the device (G-REPLAY) | T3, T4, D* | |
 | V2 | check: sweep cells re-recorded with T4; G-STREAM in the guest; G-PIXEL through nx backend GL | T4, D5 | |
@@ -60,9 +63,9 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 
 ## Open points to report (no closing rule yet / owner decision)
 
-1. Bytecode reaching Create*Shader must be in the offline pack: needs a static proof that every Create*Shader
-   argument derives from the shader package files (L1/L3 data flow), or the D3DX compile/assemble imports'
-   reachability by graph (R10a). Without it "never on the console" is an assumption.
+1. CLOSED 2026-11-10: L1 showed the compile/assemble/cache paths are reachable (l1-contract-004), so the translator
+   runs on the console for any bytecode (task R1); d3dx9_38.dll is lifted (L3) and loaded by L5, the boundary is
+   exactly d3d9.dll; render/nine/d3dx is deleted after the lifted D3DX passes the stream check.
 2. ENV table (caps, formats, MSAA, Ex availability): owner approval (R10b).
 3. `pix` outputs (occlusion query counts, render-target read-back) cannot be equal across GPUs: the stream check
    masks them and injects the recorded value in check runs only.
