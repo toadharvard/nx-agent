@@ -45,7 +45,7 @@ bytecode --> front end (frontend.c) --> reflection JSON / CTAB    <- stable
 * **Layout contract** (`fnvnx_dk_layout.h`, mirrored in the patch):
   UBO 0 = float constants `vec4 c[256]` by register; UBO 1 = `ivec4 i[16]` + `bool b[16]` (std140,
   bools at byte 256 + 16n); UBO 2 = driver constants; sampler binding = sampler register; vertex
-  attribute location by usage/index; VS->PS varying location by usage/index (fog at 18).
+  attribute location and VS->PS varying location by the total declaration-set rule below (fog at 18).
 * **D3D9 conventions** in the `glsldk` profile: VS epilogue `gl_Position.xy += posfix.xy * w` (half-pixel,
   driver sets `(-1/w, +1/h)`) and `gl_Position.y *= posfix.z` (y flip, -1 with OriginUpperLeft); depth is
   left in D3D's [0,1] (device uses DepthZeroToOne); vPos = `gl_FragCoord.xy - 0.5`; PS epilogue for alpha
@@ -63,6 +63,21 @@ bytecode --> front end (frontend.c) --> reflection JSON / CTAB    <- stable
   (`dk_relc`), as WineD3D and Nine load them into the constant file; `texkill` tests xyzw from ps_2_0 on (xyz in
   ps_1_x), as both do. Measured on the sweep's failing programs (S16, sweep 74a18a60420e, local replay): zero
   set 171 over -> 0, atest 28 -> 1, neg 5 -> 1, large 43 -> 38, no program newly over in any set.
+
+## Location rule (vertex inputs, VS->PS varyings): total over usage 0..13 x index 0..15
+
+Limits (uam: `nv_attributes.h` `NvAttrib_Generic(0..31)`, slot 31 = clip vertex in `compiler_iface.cpp`; Maxwell fetch): **16** vertex attribute
+locations, **31** usable varying locations (0..30). 224 (usage, index) pairs cannot map injectively, so the slot is a function of the program's
+declaration set (`fnvnx_dk_assign`, `fnvnx_dk_layout.h`, proof there): a pair with a canonical slot (the old tables) keeps it; the other declared
+pairs, in ascending (usage, index), take the free slots in ascending order. A legal program (<= 16 inputs, <= 12 varyings) always fits.
+Design choice: no run-time remap. VS inputs: the rule over the VS's own dcls; the reflection JSON lists each dcl's location and the device
+binds the stream element with the same (usage, index) to it. Varyings: both stages of a draw are translated with the same link set L
+(`fnvnx_shader_opts.link_pairs`, `sdp2dksh --link U:I,...`, part of the variant key); with canonical pairs only (the FFP programs, nearly all real
+shaders) L is irrelevant and one translation serves every pairing. A PS-read POSITION0/PSIZE0 is a varying copy the VS writes only if in L.
+Consequences for consumers: pairs that had a location keep it, so `d3d9_exec.cpp` `AttribLocation()`, `n1/`, `ffp.vert/frag.glsl`
+(COLOR0=0, COLOR1=1, TEXCOORDn=2+n, fog=18) are unchanged and correct for canonical shaders. A full redesign would make `AttribLocation()` read the
+reflection JSON `inputs[].location` (needed for TEXCOORD8..15, POSITION1.., PSIZE, FOG, DEPTH, SAMPLE, TESSFACTOR, POSITIONT inputs) and make the
+device compute L per VS/PS pair when either stage has a non-canonical varying.
 
 ## API (`include/fnvnx_shaders.h`)
 
