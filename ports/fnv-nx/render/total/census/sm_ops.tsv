@@ -59,6 +59,9 @@ vs_1_1	regtype	r_max=r11	ok		asm
 vs_1_1	regtype	v_max=v15	ok		asm
 vs_1_1	addr	c[a0.x+n]	ok		asm
 vs_1_1	addr	c[a0.x]	ok		asm
+vs_1_1	addr	c[a0.x+n]@ctab-covering	ok		asm
+vs_1_1	addr	c[a0.x+n]@ctab-other-regs	ok		asm
+vs_1_1	addr	c[a0.x+n]@ctab-straddle	ok		asm
 vs_2_0	opcode	mov	ok		asm
 vs_2_0	opcode	add	ok		asm
 vs_2_0	opcode	sub	ok		asm
@@ -116,7 +119,7 @@ vs_2_0	srcmod	absneg@mov	ok	legal=?	asm
 vs_2_0	srcmod	absneg@mad.s2	ok	legal=?	asm
 vs_2_0	srcmod	not	ok	legal=?	asm
 vs_2_0	dstmod	sat@mov	ok	legal=?	asm
-vs_2_0	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0117/x.asm:9: Partial precision result mod in non-pixel shader	hand
+vs_2_0	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0120/x.asm:9: Partial precision result mod in non-pixel shader	hand
 vs_2_0	usage	0:position0@input	ok		asm
 vs_2_0	usage	1:blendweight0@input	ok		asm
 vs_2_0	usage	2:blendindices0@input	ok		asm
@@ -126,7 +129,7 @@ vs_2_0	usage	5:texcoord0@input	ok		asm
 vs_2_0	usage	6:tangent0@input	ok		asm
 vs_2_0	usage	7:binormal0@input	ok		asm
 vs_2_0	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 8 index 0;)		asm
-vs_2_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0127/x.asm:3: Expected usage index	hand
+vs_2_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0130/x.asm:3: Expected usage index	hand
 vs_2_0	usage	10:color0@input	ok		asm
 vs_2_0	usage	11:fog0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 11 index 0;)		asm
 vs_2_0	usage	12:depth0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 12 index 0;)		asm
@@ -157,6 +160,10 @@ vs_2_0	addr	c[a0.x+n]	ok		asm
 vs_2_0	addr	c[a0.x]	ok		asm
 vs_2_0	addr	c[aL+n]	ok		asm
 vs_2_0	addr	c[a0.x+n]@aL-loop	ok	legal=?	asm
+vs_2_0	addr	c[a0.x+n]@ctab-covering	ok		asm
+vs_2_0	addr	c[a0.x+n]@ctab-other-regs	ok		asm
+vs_2_0	addr	c[a0.x+n]@ctab-straddle	ok		asm
+vs_2_0	addr	c[aL+n]@ctab-other-regs	ok		asm
 vs_2_x	opcode	mov	ok		asm
 vs_2_x	opcode	add	ok		asm
 vs_2_x	opcode	sub	ok		asm
@@ -220,7 +227,7 @@ vs_2_x	srcmod	absneg@mov	ok	legal=?	asm
 vs_2_x	srcmod	absneg@mad.s2	ok	legal=?	asm
 vs_2_x	srcmod	not	ok	legal=?	asm
 vs_2_x	dstmod	sat@mov	ok	legal=?	asm
-vs_2_x	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0221/x.asm:9: Partial precision result mod in non-pixel shader	hand
+vs_2_x	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0228/x.asm:9: Partial precision result mod in non-pixel shader	hand
 vs_2_x	usage	0:position0@input	ok		asm
 vs_2_x	usage	1:blendweight0@input	ok		asm
 vs_2_x	usage	2:blendindices0@input	ok		asm
@@ -230,7 +237,7 @@ vs_2_x	usage	5:texcoord0@input	ok		asm
 vs_2_x	usage	6:tangent0@input	ok		asm
 vs_2_x	usage	7:binormal0@input	ok		asm
 vs_2_x	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 8 index 0;)		asm
-vs_2_x	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0231/x.asm:3: Expected usage index	hand
+vs_2_x	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0238/x.asm:3: Expected usage index	hand
 vs_2_x	usage	10:color0@input	ok		asm
 vs_2_x	usage	11:fog0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 11 index 0;)		asm
 vs_2_x	usage	12:depth0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 12 index 0;)		asm
@@ -285,6 +292,10 @@ vs_2_x	addr	c[a0.x+n]	ok		asm
 vs_2_x	addr	c[a0.x]	ok		asm
 vs_2_x	addr	c[aL+n]	ok		asm
 vs_2_x	addr	c[a0.x+n]@aL-loop	ok	legal=?	asm
+vs_2_x	addr	c[a0.x+n]@ctab-covering	ok		asm
+vs_2_x	addr	c[a0.x+n]@ctab-other-regs	ok		asm
+vs_2_x	addr	c[a0.x+n]@ctab-straddle	ok		asm
+vs_2_x	addr	c[aL+n]@ctab-other-regs	ok		asm
 vs_3_0	opcode	mov	ok		asm
 vs_3_0	opcode	add	ok		asm
 vs_3_0	opcode	sub	ok		asm
@@ -348,7 +359,7 @@ vs_3_0	srcmod	absneg@mov	ok		asm
 vs_3_0	srcmod	absneg@mad.s2	ok		asm
 vs_3_0	srcmod	not	ok	legal=?	asm
 vs_3_0	dstmod	sat@mov	ok	legal=?	asm
-vs_3_0	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 84))	legal=? asm: /home/user/work/l6/sm/cases/c0349/x.asm:10: Partial precision result mod in non-pixel shader	hand
+vs_3_0	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 84))	legal=? asm: /home/user/work/l6/sm/cases/c0360/x.asm:10: Partial precision result mod in non-pixel shader	hand
 vs_3_0	usage	0:position0@input	ok		asm
 vs_3_0	usage	1:blendweight0@input	ok		asm
 vs_3_0	usage	2:blendindices0@input	ok		asm
@@ -358,7 +369,7 @@ vs_3_0	usage	5:texcoord0@input	ok		asm
 vs_3_0	usage	6:tangent0@input	ok		asm
 vs_3_0	usage	7:binormal0@input	ok		asm
 vs_3_0	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 8 index 0;)		asm
-vs_3_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0359/x.asm:4: Expected usage index	hand
+vs_3_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0370/x.asm:4: Expected usage index	hand
 vs_3_0	usage	10:color0@input	ok		asm
 vs_3_0	usage	11:fog0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 11 index 0;)		asm
 vs_3_0	usage	12:depth0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 12 index 0;)		asm
@@ -372,7 +383,7 @@ vs_3_0	usage	5:texcoord0@output	ok		asm
 vs_3_0	usage	6:tangent0@output	ok	legal=?	asm
 vs_3_0	usage	7:binormal0@output	ok	legal=?	asm
 vs_3_0	usage	8:tessfactor0@output	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 8 index 0;)		asm
-vs_3_0	usage	9:positiont0@output	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 9 index 0;)	legal=? asm: /home/user/work/l6/sm/cases/c0373/x.asm:4: Expected usage index	hand
+vs_3_0	usage	9:positiont0@output	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 9 index 0;)	legal=? asm: /home/user/work/l6/sm/cases/c0384/x.asm:4: Expected usage index	hand
 vs_3_0	usage	10:color0@output	ok		asm
 vs_3_0	usage	11:fog0@output	ok		asm
 vs_3_0	usage	12:depth0@output	ok		asm
@@ -381,8 +392,8 @@ vs_3_0	usage	texcoord15@v15	translate_fail(mojoshader-glsldk: glsldk: no attribu
 vs_3_0	usage	texcoord11@o11	ok		asm
 vs_3_0	sampler	2d:texldl	ok		asm
 vs_3_0	sampler	2d:s15	ok		asm
-vs_3_0	sampler	cube:texldl	translate_fail(front end: reserved bits in DCL dword aren't zero (pos 40))	asm: /home/user/work/l6/sm/cases/c0382/x.asm:6: reserved bits in DCL dword aren't zero	hand
-vs_3_0	sampler	cube:s15	translate_fail(front end: reserved bits in DCL dword aren't zero (pos 40))	asm: /home/user/work/l6/sm/cases/c0383/x.asm:6: reserved bits in DCL dword aren't zero	hand
+vs_3_0	sampler	cube:texldl	translate_fail(front end: reserved bits in DCL dword aren't zero (pos 40))	asm: /home/user/work/l6/sm/cases/c0393/x.asm:6: reserved bits in DCL dword aren't zero	hand
+vs_3_0	sampler	cube:s15	translate_fail(front end: reserved bits in DCL dword aren't zero (pos 40))	asm: /home/user/work/l6/sm/cases/c0394/x.asm:6: reserved bits in DCL dword aren't zero	hand
 vs_3_0	sampler	volume:texldl	ok		asm
 vs_3_0	sampler	volume:s15	ok		asm
 vs_3_0	regtype	v	ok		asm
@@ -437,6 +448,10 @@ vs_3_0	addr	v[aL+n]	ok		asm
 vs_3_0	addr	v[a0.x]	ok	legal=?	asm
 vs_3_0	addr	o[aL]	ok		asm
 vs_3_0	addr	o[a0.x]	ok	legal=?	asm
+vs_3_0	addr	c[a0.x+n]@ctab-covering	ok		asm
+vs_3_0	addr	c[a0.x+n]@ctab-other-regs	ok		asm
+vs_3_0	addr	c[a0.x+n]@ctab-straddle	ok		asm
+vs_3_0	addr	c[aL+n]@ctab-other-regs	ok		asm
 ps_1_1	opcode	add	ok		asm
 ps_1_1	opcode	sub	ok		asm
 ps_1_1	opcode	mad	ok		asm
@@ -447,7 +462,7 @@ ps_1_1	opcode	dp3	ok		asm
 ps_1_1	opcode	cnd	ok	hand:substring not found	asm
 ps_1_1	opcode	nop	ok		asm
 ps_1_1	opcode	tex	ok		asm
-ps_1_1	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0448/x.asm:3: Unknown instruction 'texcoord'	hand
+ps_1_1	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0463/x.asm:3: Unknown instruction 'texcoord'	hand
 ps_1_1	opcode	texkill	ok		asm
 ps_1_1	opcode	texbem	ok		asm
 ps_1_1	opcode	texbeml	ok		asm
@@ -503,7 +518,7 @@ ps_1_2	opcode	dp3	ok		asm
 ps_1_2	opcode	cnd	ok	hand:substring not found	asm
 ps_1_2	opcode	nop	ok		asm
 ps_1_2	opcode	tex	ok		asm
-ps_1_2	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0504/x.asm:3: Unknown instruction 'texcoord'	hand
+ps_1_2	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0519/x.asm:3: Unknown instruction 'texcoord'	hand
 ps_1_2	opcode	texkill	ok		asm
 ps_1_2	opcode	texbem	ok		asm
 ps_1_2	opcode	texbeml	ok		asm
@@ -521,7 +536,7 @@ ps_1_2	opcode	dp4	ok		asm
 ps_1_2	opcode	texreg2rgb	translate_fail(mojoshader-glsldk: TEXREG2RGB unimplemented in glsl profile;)		asm
 ps_1_2	opcode	texdp3	translate_fail(mojoshader-glsldk: TEXDP3 unimplemented in glsl profile;)		asm
 ps_1_2	opcode	texdp3tex	translate_fail(mojoshader-glsldk: TEXDP3TEX unimplemented in glsl profile;)		asm
-ps_1_2	opcode	texm3x3	translate_fail(front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36))	asm: /home/user/work/l6/sm/cases/c0522/x.asm:8: TEXM3X3 needs a 3D or Cubemap sampler	hand
+ps_1_2	opcode	texm3x3	translate_fail(front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36))	asm: /home/user/work/l6/sm/cases/c0537/x.asm:8: TEXM3X3 needs a 3D or Cubemap sampler	hand
 ps_1_2	srcmod	neg@mov	ok		asm
 ps_1_2	srcmod	neg@mad.s2	ok		asm
 ps_1_2	srcmod	abs@mov	ok		asm
@@ -565,7 +580,7 @@ ps_1_3	opcode	dp3	ok		asm
 ps_1_3	opcode	cnd	ok	hand:substring not found	asm
 ps_1_3	opcode	nop	ok		asm
 ps_1_3	opcode	tex	ok		asm
-ps_1_3	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0566/x.asm:3: Unknown instruction 'texcoord'	hand
+ps_1_3	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0581/x.asm:3: Unknown instruction 'texcoord'	hand
 ps_1_3	opcode	texkill	ok		asm
 ps_1_3	opcode	texbem	ok		asm
 ps_1_3	opcode	texbeml	ok		asm
@@ -583,7 +598,7 @@ ps_1_3	opcode	dp4	ok		asm
 ps_1_3	opcode	texreg2rgb	translate_fail(mojoshader-glsldk: TEXREG2RGB unimplemented in glsl profile;)		asm
 ps_1_3	opcode	texdp3	translate_fail(mojoshader-glsldk: TEXDP3 unimplemented in glsl profile;)		asm
 ps_1_3	opcode	texdp3tex	translate_fail(mojoshader-glsldk: TEXDP3TEX unimplemented in glsl profile;)		asm
-ps_1_3	opcode	texm3x3	translate_fail(front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36))	asm: /home/user/work/l6/sm/cases/c0584/x.asm:8: TEXM3X3 needs a 3D or Cubemap sampler	hand
+ps_1_3	opcode	texm3x3	translate_fail(front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36))	asm: /home/user/work/l6/sm/cases/c0599/x.asm:8: TEXM3X3 needs a 3D or Cubemap sampler	hand
 ps_1_3	opcode	texm3x2depth	translate_fail(mojoshader-glsldk: TEXM3X2DEPTH unimplemented in glsl profile;)		asm
 ps_1_3	srcmod	neg@mov	ok		asm
 ps_1_3	srcmod	neg@mad.s2	ok		asm
@@ -703,7 +718,7 @@ ps_2_0	opcode	texldb	ok		asm
 ps_2_0	opcode	dcl	ok		asm
 ps_2_0	opcode	def	ok		asm
 ps_2_0	opcode	lit	ok	legal=?	asm
-ps_2_0	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c0704/x.asm:8: opcode 'DST' not available in this shader type.	hand
+ps_2_0	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c0719/x.asm:8: opcode 'DST' not available in this shader type.	hand
 ps_2_0	opcode	expp	ok	legal=?	asm
 ps_2_0	opcode	logp	ok	legal=?	asm
 ps_2_0	opcode	sgn	ok	legal=?	asm
@@ -718,20 +733,20 @@ ps_2_0	srcmod	abs@mov	ok	legal=?	asm
 ps_2_0	srcmod	abs@mad.s2	ok	legal=?	asm
 ps_2_0	srcmod	absneg@mov	ok	legal=?	asm
 ps_2_0	srcmod	absneg@mad.s2	ok	legal=?	asm
-ps_2_0	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0719/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0720/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0721/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0722/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0723/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0724/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0725/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0726/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0727/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0728/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0729/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0730/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0731/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_0	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0732/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0734/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0735/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0736/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0737/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0738/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0739/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0740/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0741/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0742/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0743/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0744/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0745/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0746/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0747/x.asm:0: illegal source mod for this Shader Model.	hand
 ps_2_0	dstmod	sat@mov	ok		asm
 ps_2_0	dstmod	sat@texld	ok		asm
 ps_2_0	dstmod	sat@add	ok		asm
@@ -802,7 +817,7 @@ ps_2_x	opcode	dsx	ok		asm
 ps_2_x	opcode	dsy	ok		asm
 ps_2_x	opcode	texldd	ok		asm
 ps_2_x	opcode	setp_gt	ok		asm
-ps_2_x	opcode	breakp	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:37(6): error: if-statement condition must be scalar boolean)	asm: /home/user/work/l6/sm/cases/c0803/x.asm:11: Swizzle specified for scalar register	hand
+ps_2_x	opcode	breakp	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:37(6): error: if-statement condition must be scalar boolean)	asm: /home/user/work/l6/sm/cases/c0818/x.asm:11: Swizzle specified for scalar register	hand
 ps_2_x	opcode	break	ok		asm
 ps_2_x	opcode	break_gt	ok		asm
 ps_2_x	opcode	call	ok		asm
@@ -820,7 +835,7 @@ ps_2_x	opcode	ret	ok		asm
 ps_2_x	opcode	defb	ok		asm
 ps_2_x	opcode	defi	ok		asm
 ps_2_x	opcode	lit	ok	legal=?	asm
-ps_2_x	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c0821/x.asm:8: opcode 'DST' not available in this shader type.	hand
+ps_2_x	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c0836/x.asm:8: opcode 'DST' not available in this shader type.	hand
 ps_2_x	opcode	expp	ok	legal=?	asm
 ps_2_x	opcode	logp	ok	legal=?	asm
 ps_2_x	opcode	sgn	ok	legal=?	asm
@@ -836,20 +851,20 @@ ps_2_x	srcmod	abs@mad.s2	ok	legal=?	asm
 ps_2_x	srcmod	absneg@mov	ok	legal=?	asm
 ps_2_x	srcmod	absneg@mad.s2	ok	legal=?	asm
 ps_2_x	srcmod	not	ok	legal=?	asm
-ps_2_x	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0837/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0838/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0839/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0840/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0841/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0842/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0843/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0844/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0845/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0846/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0847/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0848/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0849/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_2_x	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0850/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0852/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0853/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0854/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0855/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0856/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0857/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0858/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0859/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0860/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0861/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0862/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0863/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0864/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0865/x.asm:0: illegal source mod for this Shader Model.	hand
 ps_2_x	dstmod	sat@mov	ok		asm
 ps_2_x	dstmod	sat@texld	ok		asm
 ps_2_x	dstmod	sat@add	ok		asm
@@ -894,7 +909,7 @@ ps_2_x	regtype	aL	ok		asm
 ps_2_x	regtype	l0	ok		asm
 ps_2_x	regtype	p0	ok		asm
 ps_2_x	regtype	p0:neg	ok		asm
-ps_2_x	regtype	p0:swz	ok	asm: /home/user/work/l6/sm/cases/c0895/x.asm:8: Swizzle specified for scalar register	hand
+ps_2_x	regtype	p0:swz	ok	asm: /home/user/work/l6/sm/cases/c0910/x.asm:8: Swizzle specified for scalar register	hand
 ps_2_x	opcode	if_gt	ok		asm
 ps_2_x	opcode	break_gt	ok		asm
 ps_2_x	opcode	setp_gt	ok		asm
@@ -913,14 +928,14 @@ ps_2_x	opcode	setp_eq	ok		asm
 ps_2_x	opcode	if_ne	ok		asm
 ps_2_x	opcode	break_ne	ok		asm
 ps_2_x	opcode	setp_ne	ok		asm
-ps_2_x	opcode	callnz@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:39(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0914/x.asm:8: Swizzle specified for scalar register	hand
-ps_2_x	opcode	if@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:34(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0915/x.asm:8: Swizzle specified for scalar register	hand
-ps_2_x	srcmod	not@if.p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:34(7): error: operand of `!' must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0916/x.asm:8: Swizzle specified for scalar register	hand
+ps_2_x	opcode	callnz@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:39(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0929/x.asm:8: Swizzle specified for scalar register	hand
+ps_2_x	opcode	if@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:34(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0930/x.asm:8: Swizzle specified for scalar register	hand
+ps_2_x	srcmod	not@if.p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:34(7): error: operand of `!' must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0931/x.asm:8: Swizzle specified for scalar register	hand
 ps_2_x	regtype	c_max=c31	ok		asm
 ps_2_x	regtype	r_max=r11	ok		asm
 ps_2_x	regtype	b15	ok		asm
 ps_2_x	regtype	i15	ok		asm
-ps_2_x	addr	c[aL+n]	translate_fail(front end: Relative addressing in pixel shader version < 3.0 (pos 100))	legal=? asm: /home/user/work/l6/sm/cases/c0921/x.asm:10: Relative addressing in pixel shader version < 3.0	hand
+ps_2_x	addr	c[aL+n]	translate_fail(front end: Relative addressing in pixel shader version < 3.0 (pos 100))	legal=? asm: /home/user/work/l6/sm/cases/c0936/x.asm:10: Relative addressing in pixel shader version < 3.0	hand
 ps_3_0	opcode	abs	ok		asm
 ps_3_0	opcode	add	ok		asm
 ps_3_0	opcode	cmp	ok		asm
@@ -954,7 +969,7 @@ ps_3_0	opcode	dsx	ok		asm
 ps_3_0	opcode	dsy	ok		asm
 ps_3_0	opcode	texldd	ok		asm
 ps_3_0	opcode	setp_gt	ok		asm
-ps_3_0	opcode	breakp	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:36(6): error: if-statement condition must be scalar boolean)	asm: /home/user/work/l6/sm/cases/c0955/x.asm:11: Swizzle specified for scalar register	hand
+ps_3_0	opcode	breakp	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:36(6): error: if-statement condition must be scalar boolean)	asm: /home/user/work/l6/sm/cases/c0970/x.asm:11: Swizzle specified for scalar register	hand
 ps_3_0	opcode	break	ok		asm
 ps_3_0	opcode	break_gt	ok		asm
 ps_3_0	opcode	call	ok		asm
@@ -973,7 +988,7 @@ ps_3_0	opcode	defb	ok		asm
 ps_3_0	opcode	defi	ok		asm
 ps_3_0	opcode	texldl	ok		asm
 ps_3_0	opcode	lit	ok	legal=?	asm
-ps_3_0	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c0974/x.asm:8: opcode 'DST' not available in this shader type.	hand
+ps_3_0	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c0989/x.asm:8: opcode 'DST' not available in this shader type.	hand
 ps_3_0	opcode	expp	ok	legal=?	asm
 ps_3_0	opcode	logp	ok	legal=?	asm
 ps_3_0	opcode	sgn	ok	legal=?	asm
@@ -989,20 +1004,20 @@ ps_3_0	srcmod	abs@mad.s2	ok		asm
 ps_3_0	srcmod	absneg@mov	ok		asm
 ps_3_0	srcmod	absneg@mad.s2	ok		asm
 ps_3_0	srcmod	not	ok	legal=?	asm
-ps_3_0	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0990/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0991/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0992/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0993/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0994/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0995/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0996/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0997/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0998/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0999/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1000/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1001/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1002/x.asm:0: illegal source mod for this Shader Model.	hand
-ps_3_0	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1003/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1005/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1006/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1007/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1008/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1009/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1010/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1011/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1012/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1013/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1014/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1015/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1016/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1017/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1018/x.asm:0: illegal source mod for this Shader Model.	hand
 ps_3_0	dstmod	sat@mov	ok		asm
 ps_3_0	dstmod	sat@texld	ok		asm
 ps_3_0	dstmod	sat@add	ok		asm
@@ -1019,7 +1034,7 @@ ps_3_0	usage	5:texcoord0@input	ok		asm
 ps_3_0	usage	6:tangent0@input	ok	legal=?	asm
 ps_3_0	usage	7:binormal0@input	ok	legal=?	asm
 ps_3_0	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 8 index 0;)	legal=?	asm
-ps_3_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 9 index 0;)	legal=? asm: /home/user/work/l6/sm/cases/c1020/x.asm:2: Expected usage index	hand
+ps_3_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 9 index 0;)	legal=? asm: /home/user/work/l6/sm/cases/c1035/x.asm:2: Expected usage index	hand
 ps_3_0	usage	10:color0@input	ok		asm
 ps_3_0	usage	11:fog0@input	ok		asm
 ps_3_0	usage	12:depth0@input	ok	legal=?	asm
@@ -1060,7 +1075,7 @@ ps_3_0	regtype	aL	ok		asm
 ps_3_0	regtype	l0	ok		asm
 ps_3_0	regtype	p0	ok		asm
 ps_3_0	regtype	p0:neg	ok		asm
-ps_3_0	regtype	p0:swz	ok	asm: /home/user/work/l6/sm/cases/c1061/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	regtype	p0:swz	ok	asm: /home/user/work/l6/sm/cases/c1076/x.asm:8: Swizzle specified for scalar register	hand
 ps_3_0	regtype	vPos	ok		asm
 ps_3_0	regtype	vFace	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:32(2): error: value of type float cannot be assigned to variable of type vec4)		asm
 ps_3_0	regtype	v9	ok		asm
@@ -1082,16 +1097,17 @@ ps_3_0	opcode	setp_eq	ok		asm
 ps_3_0	opcode	if_ne	ok		asm
 ps_3_0	opcode	break_ne	ok		asm
 ps_3_0	opcode	setp_ne	ok		asm
-ps_3_0	opcode	callnz@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:38(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1083/x.asm:8: Swizzle specified for scalar register	hand
-ps_3_0	opcode	if@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:33(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1084/x.asm:8: Swizzle specified for scalar register	hand
-ps_3_0	srcmod	not@if.p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:33(7): error: operand of `!' must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1085/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	opcode	callnz@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:38(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1098/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	opcode	if@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:33(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1099/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	srcmod	not@if.p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:33(7): error: operand of `!' must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1100/x.asm:8: Swizzle specified for scalar register	hand
 ps_3_0	regtype	c_max=c223	ok		asm
 ps_3_0	regtype	r_max=r31	ok		asm
 ps_3_0	regtype	v_max=v9	ok		asm
 ps_3_0	regtype	b15	ok		asm
 ps_3_0	regtype	i15	ok		asm
-ps_3_0	regtype	vFace.x	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:32(2): error: value of type float cannot be assigned to variable of type vec4)	asm: /home/user/work/l6/sm/cases/c1091/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	regtype	vFace.x	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:32(2): error: value of type float cannot be assigned to variable of type vec4)	asm: /home/user/work/l6/sm/cases/c1106/x.asm:8: Swizzle specified for scalar register	hand
 ps_3_0	regtype	vFace@cmp	ok		asm
 ps_3_0	regtype	vPos.xy	ok		asm
+ps_3_0	addr	c[aL+n]@ctab-other-regs	ok		asm
 ps_3_0	addr	c[aL+n]	ok		asm
 ps_3_0	addr	v[aL]	ok		asm
