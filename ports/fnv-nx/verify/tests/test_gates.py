@@ -3,6 +3,7 @@
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Uses temp git repositories."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -153,8 +154,9 @@ def small_repo(gates=None, link=None):
     """Repo with the small verify subset, a pure gate and a selftests gate over link/, on branch main."""
     r = tmp("repo")
     git(r, "init", "-b", "main")
+    os.makedirs(os.path.join(r, "ports/fnv-nx/verify"))
     for f in SMALL:
-        shutil.copy(os.path.join(VERIFY, f), os.path.join(r, "ports/fnv-nx/verify/") if os.path.isdir(os.path.join(r, "ports/fnv-nx/verify")) else _mk(r, f))
+        shutil.copy(os.path.join(VERIFY, f), os.path.join(r, "ports/fnv-nx/verify", f))
     put(r, "ports/fnv-nx/verify/gates.json", json.dumps(gates or two_gates()))
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
     for k, v in (link or {}).items():
@@ -162,10 +164,6 @@ def small_repo(gates=None, link=None):
     git(r, "add", "-A")
     git(r, "commit", "-m", "base")
     return r
-
-def _mk(r, f):
-    os.makedirs(os.path.join(r, "ports/fnv-nx/verify"))
-    return os.path.join(r, "ports/fnv-nx/verify/")
 
 def two_gates():
     v = "ports/fnv-nx/verify/"
@@ -184,7 +182,6 @@ def branch(r, name, files, base="main", delete=()):
     git(r, "checkout", "main")
 
 LINE = r"^L1 (green|red) [0-9a-f]{40} [0-9.]+s gates:\d+ over_budget:(True|False)$"
-import re  # noqa: E402
 
 r = small_repo()
 vd = tmp("verdicts")
@@ -232,7 +229,7 @@ check("l1 merge: dropping a gate is blocked by the ratchet", rc == 2 and "ratche
 # ---- l1 verdict with the real verify directory
 r = tmp("repo-real")
 git(r, "init", "-b", "main")
-shutil.copytree(VERIFY, os.path.join(r, "ports/fnv-nx/verify"), ignore=shutil.ignore_patterns("__pycache__"))
+shutil.copytree(VERIFY, os.path.join(r, "ports/fnv-nx/verify"), ignore=shutil.ignore_patterns("__pycache__", "test_gates.py"))  # this test would recurse into itself
 git(r, "add", "-A")
 git(r, "commit", "-m", "verify")
 vd = tmp("verdicts")

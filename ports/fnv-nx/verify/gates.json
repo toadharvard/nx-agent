@@ -1,0 +1,33 @@
+{
+ "format": "fnvnx-gates/1",
+ "gates": [
+  {
+   "name": "pure",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_pure.py",
+    "ports/fnv-nx/contract",
+    "ports/fnv-nx/link",
+    "ports/fnv-nx/rules",
+    "ports/fnv-nx/lift"
+   ],
+   "result": "pure.json"
+  },
+  {
+   "name": "selftests",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_tests.py",
+    "ports/fnv-nx/verify",
+    "ports/fnv-nx/farm",
+    "ports/fnv-nx/contract",
+    "ports/fnv-nx/link",
+    "ports/fnv-nx/rules",
+    "ports/fnv-nx/lift"
+   ],
+   "result": "selftests.json"
+  }
+ ]
+}
