@@ -88,6 +88,7 @@ The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/
   - Use add_repo (read) or plain git/https.
   - Mirror what the build depends on into fnv-nx-build `tools/*` branches so the farms are reproducible.
   - This does not widen the Legal limits.
+- **Merges into the clean branch `claude/fnv-nx-clean`** happen only on a green L1 verdict: incremental link plus whole-binary gates, ≤5 min, run in the background. A red verdict blocks the merge. The clean branch never holds a state that violates the rules. This overrides "merges do not wait" for that branch. The old integration branch keeps its old rule.
 - **Threads:** real parallelism across cores is required. Running one guest thread at a time is rejected. Memory-ordering correctness comes from a class-closing rule.
 - **Native-body proof:** the static criteria N1-N4 only, with no SMT pass on hot code.
 - **Floating point uses plain IEEE semantics.** FP follows ordinary IEEE binary32/binary64 semantics of the source types, natively, in both native and lifted code. Bit-equality with the exe's x87 80-bit results is not required.
