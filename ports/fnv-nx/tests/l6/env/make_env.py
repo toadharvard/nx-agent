@@ -66,7 +66,9 @@ def main():
     if fails: return 1
     pin = {}; os.makedirs(OUT, exist_ok=True)
     for name in want:
-        w, h = PROFILES[name]; x = replay.Xvfb(w, h); env = replay.wine_env(W + "/pfx", x.display); lock = replay.prefix_lock(W + "/pfx")
+        w, h = PROFILES[name]; os.environ["S16_DISPLAY"] = ":%d" % (180 + os.getpid() % 40)   # a display number of our own: another session's Xvfb on the same number made the server die and Wine run on a foreign screen
+        x = replay.Xvfb(w, h); env = replay.wine_env(W + "/pfx", x.display); lock = replay.prefix_lock(W + "/pfx"); import time; time.sleep(1)
+        check(x.p.poll() is None, f"{name}: Xvfb {x.display} did not stay up")
         try:
             reg = prefix(env); res = []
             for k in (1, 2):
@@ -81,6 +83,7 @@ def main():
         finally:
             x.close()
         a, b = (open(t, "rb").read() for t, _ in res)
+        dmrow = next(l for l in a.decode().splitlines() if l.startswith("GetAdapterDisplayMode(0)")); check(f"Width={w:x} Height={h:x} " in dmrow, f"{name}: display mode is not {w}x{h}: {dmrow}")
         check(a == b, f"{name}: two runs differ (determinism)"); rows = a.decode().splitlines()
         n, ne, nr, same, nenv = xcheck(res[0][1], rows, spec)
         check(same and ne == nr, f"{name}: stream vs answers ({ne} vs {nr} records)")

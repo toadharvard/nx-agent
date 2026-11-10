@@ -34,6 +34,7 @@ void nx_ffp_decl_from_elements(const D3DVERTEXELEMENT9* e, NxFfpVsDecl* out); //
 bool nx_env_decltype_supported(uint32_t type);             // ENV (caps DeclTypes): declared here, defined by the environment module
 
 // ---- shaders: bytecode copy, hash, parsed interface (res_sm.h)
+uint64_t nx_shader_hash(const void* bytecode, size_t n);   // == fnvnx_shader_hash (FNV-1a 64), see res_shader.cpp
 struct NxShaderCore : NxObj {
     uint32_t* code = nullptr; uint32_t nbytes = 0; uint64_t hash = 0; NxSmIface iface;
     ~NxShaderCore() { nxd3d_free(code); }
