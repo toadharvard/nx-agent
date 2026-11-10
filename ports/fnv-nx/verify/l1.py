@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 1 error.
+"""L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 4 blocked: env, 1 error.
   verdict  --repo R --commit C --verdicts VDIR [--budget-s 300]
            verdict.py run with the gates file OF THAT COMMIT (ports/fnv-nx/verify/gates.json read from C's tree), then store.
   merge    --repo R --into BRANCH --from REF --verdicts VDIR [--budget-s 300]
@@ -8,6 +8,9 @@
            re-derives the tree and moves BRANCH only on green. The gates file is the one in the MERGE RESULT tree (a branch
            cannot drop gates): the ratchet's previous verdict is the stored green verdict of BRANCH's current tree, if any;
            otherwise this is the bootstrap case and `bootstrap: no previous verdict` is printed.
+Both run `envcheck.py check` FIRST against the verify/env.json OF THAT COMMIT/TREE; on a mismatch they print `blocked: env` and the
+mismatch lines, exit 4, run no gate and store nothing. The verdict carries "env_id" (sha256 of that env.json); merge only accepts a
+stored verdict with the env_id of the merge tree's env.json.
 Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool>`; merge adds `merged <commit>` or `blocked: <reason>`."""
 import contextlib
 import io
@@ -18,9 +21,11 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import envcheck  # noqa: E402
 import verdict  # noqa: E402
 
 GATES = "ports/fnv-nx/verify/gates.json"
+ENV = "ports/fnv-nx/verify/env.json"
 
 def _opts(a, extra=()):
     return verdict._opts(a, dict({"--repo": 0, "--verdicts": 0, "--budget-s": 1}, **{k: 0 for k in extra}))
@@ -37,10 +42,22 @@ def _gates_file(repo, rev, td):
         fh.write(p.stdout)
     return path
 
-def _check(repo, commit, vdir, budget, gates, td):
+def _env(repo, rev):
+    """(env_id, mismatch lines) of this machine against the env.json of REV's tree (a missing file is a mismatch)."""
+    p = subprocess.run(["git", "-C", repo, "show", "%s:%s" % (rev, ENV)], capture_output=True)
+    if p.returncode:
+        return None, ["env: %s: want a declared environment in %s, have none" % (ENV, rev)]
+    doc = json.loads(p.stdout)
+    return envcheck.env_id(doc), envcheck.check(doc)
+
+def _blocked_env(bad):
+    print("\n".join(["blocked: env"] + bad))
+    return 4
+
+def _check(repo, commit, vdir, budget, gates, td, env_id):
     """verdict.py run + store for COMMIT; returns the stored verdict dict."""
     outp = os.path.join(td, "verdict.json")
-    args = ["--repo", repo, "--commit", commit, "--gates", gates, "--out", outp]
+    args = ["--repo", repo, "--commit", commit, "--gates", gates, "--out", outp, "--env-id", env_id]
     if budget is not None:
         args += ["--budget-s", budget]
     verdict.cmd_run(args)
@@ -50,8 +67,11 @@ def _check(repo, commit, vdir, budget, gates, td):
 
 def cmd_verdict(a):
     o = _opts(a, ("--commit",))
+    env_id, bad = _env(o["--repo"], o["--commit"])
+    if bad:
+        return _blocked_env(bad)
     with tempfile.TemporaryDirectory() as td:
-        v = _check(o["--repo"], o["--commit"], o["--verdicts"], o.get("--budget-s"), _gates_file(o["--repo"], o["--commit"], td), td)
+        v = _check(o["--repo"], o["--commit"], o["--verdicts"], o.get("--budget-s"), _gates_file(o["--repo"], o["--commit"], td), td, env_id)
     print(_line(v))
     return 0 if v["verdict"] == "green" else 2
 
@@ -67,16 +87,19 @@ def cmd_merge(a):
     if rc:
         raise verdict.Err("git merge-tree: " + err)
     tree = out.splitlines()[0]
+    env_id, bad = _env(repo, tree)
+    if bad:
+        return _blocked_env(bad)
     with tempfile.TemporaryDirectory() as td:
         gates = _gates_file(repo, tree, td)
         vpath = os.path.join(vdir, tree + ".json")
         if not os.path.isfile(vpath):
             cand = verdict._git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp="l1 candidate merge of %s\n" % o["--from"])
-            v = _check(repo, cand, vdir, o.get("--budget-s"), gates, td)
+            v = _check(repo, cand, vdir, o.get("--budget-s"), gates, td, env_id)
         else:
             v = json.load(open(vpath))
         print(_line(v))
-        args = ["--repo", repo, "--into", o["--into"], "--from", o["--from"], "--verdicts", vdir, "--gates", gates]
+        args = ["--repo", repo, "--into", o["--into"], "--from", o["--from"], "--verdicts", vdir, "--gates", gates, "--env-id", env_id]
         prev = os.path.join(vdir, verdict._git_ok(repo, "rev-parse", old + "^{tree}") + ".json")
         pv = None
         if os.path.isfile(prev):

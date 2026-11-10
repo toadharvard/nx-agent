@@ -102,7 +102,7 @@ def _gate_result(g, out_dir, rc):
     return "green", u, c, ""
 
 def cmd_run(a):
-    o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1})
+    o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1, "--env-id": 1})
     spec = _load(o["--gates"], "gates")
     gates = spec.get("gates") if isinstance(spec, dict) and spec.get("format") == "fnvnx-gates/1" else None
     if not isinstance(gates, list) or not all(isinstance(g, dict) and isinstance(g.get("name"), str) and g.get("argv")
@@ -136,6 +136,8 @@ def cmd_run(a):
     v = {"format": "fnvnx-verdict/1", "commit": commit, "tree": tree, "gates_sha256": _sha(o["--gates"]), "gates": res,
          "seconds": total, "over_budget": total > float(o.get("--budget-s", "300")),
          "verdict": "green" if res and all(r["status"] == "green" and r["certified"] == r["universe"] for r in res) else "red"}
+    if "--env-id" in o:
+        v["env_id"] = o["--env-id"]  # sha256 of the env.json the verdict was computed in (envcheck.py id)
     open(o["--out"], "wb").write(cas.canon(v) + b"\n")
     for r in res:
         print("%-5s %-24s %d/%d %s" % (r["status"], r["name"], r["certified"], r["universe"], r["reason"][:120]))
@@ -165,7 +167,7 @@ def cmd_store(a):
     return 0
 
 def cmd_merge(a):
-    o = _opts(a, {"--repo": 0, "--into": 0, "--from": 0, "--verdicts": 0, "--gates": 0, "--prev-verdict": 1, "--message-prefix": 1})
+    o = _opts(a, {"--repo": 0, "--into": 0, "--from": 0, "--verdicts": 0, "--gates": 0, "--prev-verdict": 1, "--message-prefix": 1, "--env-id": 1})
     repo, ref = o["--repo"], "refs/heads/" + o["--into"]
     old = _git_ok(repo, "rev-parse", "--verify", ref)
     src = _git_ok(repo, "rev-parse", "--verify", o["--from"] + "^{commit}")
@@ -187,6 +189,8 @@ def cmd_merge(a):
         raise Err("blocked: verdict file holds tree %s, merge tree is %s" % (v["tree"], tree), 2)
     if v["gates_sha256"] != _sha(o["--gates"]):
         raise Err("blocked: verdict was made with a different gates file", 2)
+    if "--env-id" in o and v.get("env_id") != o["--env-id"]:
+        raise Err("blocked: verdict was computed in another environment (env_id %s, merge tree %s)" % (v.get("env_id"), o["--env-id"]), 2)
     if "--prev-verdict" in o:
         prev = _load(o["--prev-verdict"], "previous verdict")
         _check_verdict(prev)

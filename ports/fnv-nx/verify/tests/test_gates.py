@@ -158,6 +158,7 @@ def small_repo(gates=None, link=None):
     for f in SMALL:
         shutil.copy(os.path.join(VERIFY, f), os.path.join(r, "ports/fnv-nx/verify", f))
     put(r, "ports/fnv-nx/verify/gates.json", json.dumps(gates or two_gates()))
+    shutil.copy(os.path.join(VERIFY, "env.json"), os.path.join(r, "ports/fnv-nx/verify/env.json"))
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
     for k, v in (link or {}).items():
         put(r, k, v)
@@ -225,6 +226,55 @@ before = git(r, "rev-parse", "main")
 rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "drop", "--verdicts", vd)
 check("l1 merge: dropping a gate is blocked by the ratchet", rc == 2 and "ratchet" in out + err and "selftests" in out + err
       and git(r, "rev-parse", "main") == before, (rc, line, out, err))
+
+# ---- environment of the verdict (envcheck first, env_id in the verdict, merge needs the same env_id)
+ENVF = os.path.join(VERIFY, "env.json")
+sys.path.insert(0, VERIFY)
+import envcheck  # noqa: E402
+want_id = envcheck.env_id(json.load(open(ENVF)))
+r = small_repo()
+vd = tmp("verdicts")
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+tree = git(r, "rev-parse", "main^{tree}")
+check("l1 verdict: stored verdict carries env_id of the commit's env.json", rc == 0 and json.load(open(os.path.join(vd, tree + ".json")))
+      .get("env_id") == want_id, (rc, line, out, err))
+
+def doctored(**kw):
+    doc = json.load(open(ENVF))
+    doc["packages"]["coreutils"] = "0.0-doctored"
+    doc.update(kw)
+    return json.dumps(doc)
+
+r = small_repo()
+branch(r, "badenv", {"ports/fnv-nx/verify/env.json": doctored()})
+vd = tmp("verdicts")
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "badenv", "--verdicts", vd)
+check("l1 verdict: mismatching env.json -> blocked: env, exit 4, no gate run, nothing stored", rc == 4 and out.startswith("blocked: env\n")
+      and "env: package coreutils: want 0.0-doctored, have " in out and not line and os.listdir(vd) == [], (rc, out, err, os.listdir(vd)))
+r = small_repo()
+git(r, "rm", "-q", "ports/fnv-nx/verify/env.json")
+git(r, "commit", "-m", "no env")
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+check("l1 verdict: commit without env.json -> blocked: env, exit 4", rc == 4 and "blocked: env" in out and os.listdir(vd) == [], (rc, out, err))
+
+r = small_repo()
+vd = tmp("verdicts")
+branch(r, "feat", {"ports/fnv-nx/link/ok.py": CLEAN})
+branch(r, "feat-env", {"ports/fnv-nx/verify/env.json": doctored()})
+before = git(r, "rev-parse", "main")
+rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "feat-env", "--verdicts", vd)
+check("l1 merge: env.json of the merge tree mismatches -> blocked: env, exit 4, ref and store untouched",
+      rc == 4 and "blocked: env" in out and git(r, "rev-parse", "main") == before and os.listdir(vd) == [], (rc, out, err))
+rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd)
+check("l1 merge: green merge in the declared environment", rc == 0 and "merged " in out, (rc, out, err))
+git(r, "update-ref", "refs/heads/main", before)
+vf = os.path.join(vd, git(r, "merge-tree", "--write-tree", "main", "feat").splitlines()[0] + ".json")
+v = json.load(open(vf))
+v["env_id"] = "0" * 64
+json.dump(v, open(vf, "w"))
+rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd)
+check("l1 merge: a stored green verdict of another env_id does not count", rc == 2 and "another environment" in out
+      and git(r, "rev-parse", "main") == before, (rc, out, err))
 
 # ---- l1 verdict with the real verify directory
 r = tmp("repo-real")

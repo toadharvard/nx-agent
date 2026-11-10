@@ -180,8 +180,6 @@ def t_ar_header_bytes():
 
 
 def t_ar_matches_gnu():
-    if not shutil.which("ar"):
-        return True, ""
     src = put(b"x", "m.txt")
     lib = src + ".a"
     subprocess.run(["ar", "rcD", lib, src], check=True)
@@ -291,22 +289,17 @@ def t_debug_ok_and_corrupt():
 
 
 def real_compiler():
-    for cc, extra in (("x86_64-w64-mingw32-gcc", []), ("i686-w64-mingw32-gcc", []),
-                      ("clang", ["--target=x86_64-pc-windows-msvc", "-mincremental-linker-compatible"])):
-        if shutil.which(cc):
-            src = put(b"int f(int x){return x+1;}\n", "q.c")
-            r = subprocess.run([cc] + extra + ["-c", src, "-o", src + ".t.o"], capture_output=True)
-            if r.returncode == 0:
-                return cc, extra
-    return None
+    """The declared COFF-capable compiler (verify/env.json programs: clang); its absence is a failure, never a skip."""
+    cc, extra = "clang", ["--target=x86_64-pc-windows-msvc", "-mincremental-linker-compatible"]
+    src = put(b"int f(int x){return x+1;}\n", "q.c")
+    r = subprocess.run([cc] + extra + ["-c", src, "-o", src + ".t.o"], capture_output=True)
+    if r.returncode:
+        raise RuntimeError("declared compiler %s cannot produce COFF: %s" % (cc, r.stderr[-200:]))
+    return cc, extra
 
 
 def t_real():
-    rc = real_compiler()
-    if rc is None:
-        print("NOTE no COFF-capable compiler: real-object case skipped")
-        return True, ""
-    cc, extra = rc
+    cc, extra = real_compiler()
     src = put(b"int f(int x){return x+1;}\n", "q.c")
     outs, libs = [], []
     for i, epoch in enumerate(("1000000000", "1700000000")):
