@@ -2,7 +2,7 @@
 #pragma once
 #include "d9impl.gen.h"
 #include <stdio.h>
-extern const char* g_part; extern int g_checks[8], g_fails[8]; extern int g_part_i;
+extern const char* g_ctx; extern const char* g_part; extern int g_checks[8], g_fails[8]; extern int g_part_i;
 void t_part(const char* name);
 bool t_check(bool ok, const char* what, const char* file, int line);
 #define CHECK(c) t_check((c), #c, __FILE__, __LINE__)
@@ -14,6 +14,7 @@ struct TEnv { NxDirect3D9* d3d; NxDevice9* dev; };
 TEnv t_env(uint32_t auto_depth = 1, uint32_t behavior = D3DCREATE_MIXED_VERTEXPROCESSING, uint32_t w = 640, uint32_t h = 480);
 template <class T> T* t_child(const TEnv& e, uint32_t pool = D3DPOOL_DEFAULT) { T* o = new T; o->asChild(e.dev, pool); return o; }
 NxSurface9* t_surface(const TEnv& e, uint32_t usage, uint32_t w, uint32_t h);   // device child with a GetDesc
+NxSurface9* t_subsurface(const TEnv& e, NxObj* container, uint32_t usage, uint32_t w, uint32_t h);  // a level: refcount is the container's
 NxVertexDeclaration9* t_decl(const TEnv& e);
 struct TTracker : IUnknown {  // private-data IUnknown: `alive()` = the tracked object has not been destroyed
     int refs = 1;

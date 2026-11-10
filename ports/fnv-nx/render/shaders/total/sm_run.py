@@ -80,5 +80,5 @@ def run(rows, build, deps, work, jobs=4):
     for i, e in enc.items(): out[i] = e
     for h, idx in byhash.items():
         st = ("ok", "") if t[h][0] and u[h][0] else ("translate_fail", t[h][1]) if not t[h][0] else ("uam_fail", detail.get(h, u[h][1]))
-        for i in idx: out[i] = st
+        for i in idx: out[i] = st; rows[i]["_bin"] = uniq[h]
     return out

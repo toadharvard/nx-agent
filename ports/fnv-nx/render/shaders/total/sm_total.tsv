@@ -194,7 +194,7 @@ ps_1_1|writemask|dp3@.xyz	ok
 ps_1_1|swizzle|mov@.none	ok			
 ps_1_1|swizzle|mov@.w	ok			
 ps_1_1|swizzle|mov@.a	ok			
-ps_1_1|ps1tex|tex@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_1|ps1tex|tex@ctab=none	ok			
 ps_1_1|ps1tex|tex@ctab=1d	ok			
 ps_1_1|ps1tex|tex@ctab=2d	ok			
 ps_1_1|ps1tex|tex@ctab=cube	ok			
@@ -205,20 +205,20 @@ ps_1_1|ps1tex|texbeml@ctab=none	ok
 ps_1_1|ps1tex|texbeml@ctab=2d	ok			
 ps_1_1|ps1tex|texm3x2tex@ctab=none	ok			
 ps_1_1|ps1tex|texm3x2tex@ctab=2d	ok			
-ps_1_1|ps1tex|texm3x3pad@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_1|ps1tex|texm3x3pad@ctab=none	ok			
 ps_1_1|ps1tex|texm3x3pad@ctab=cube	ok			
 ps_1_1|ps1tex|texm3x3pad@ctab=volume	ok			
-ps_1_1|ps1tex|texm3x3spec@ctab=none	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_1|ps1tex|texm3x3spec@ctab=cube	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_1|ps1tex|texm3x3spec@ctab=volume	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_1|ps1tex|texm3x3tex@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_1|ps1tex|texm3x3spec@ctab=none	ok			
+ps_1_1|ps1tex|texm3x3spec@ctab=cube	ok			
+ps_1_1|ps1tex|texm3x3spec@ctab=volume	ok			
+ps_1_1|ps1tex|texm3x3tex@ctab=none	ok			
 ps_1_1|ps1tex|texm3x3tex@ctab=cube	ok			
 ps_1_1|ps1tex|texm3x3tex@ctab=volume	ok			
-ps_1_1|ps1tex|texm3x3vspec@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_1|ps1tex|texm3x3vspec@ctab=none	ok			
 ps_1_1|ps1tex|texm3x3vspec@ctab=cube	ok			
 ps_1_1|ps1tex|texm3x3vspec@ctab=volume	ok			
-ps_1_1|ps1tex|texreg2ar@ctab=none	translate_fail	emitter missing: texreg2ar	mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;	
-ps_1_1|ps1tex|texreg2ar@ctab=2d	translate_fail	emitter missing: texreg2ar	mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;	
+ps_1_1|ps1tex|texreg2ar@ctab=none	ok			
+ps_1_1|ps1tex|texreg2ar@ctab=2d	ok			
 ps_1_1|ps1tex|texcoord	ok			
 ps_1_1|ps1tex|texm3x2pad	ok			
 ps_1_1|coissue|add	ok			
@@ -321,10 +321,10 @@ ps_1_2|operand|sub@src1=v	ok
 ps_1_2|operand|sub@src1=t	ok			
 ps_1_2|operand|sub@dst=t	ok			
 ps_1_2|opcode|texcoord	ok			
-ps_1_2|opcode|texdp3	translate_fail	emitter missing: texdp3	mojoshader-glsldk: TEXDP3 unimplemented in glsl profile;	
+ps_1_2|opcode|texdp3	ok			
 ps_1_2|opcode|texkill	ok			
 ps_1_2|opcode|texm3x2pad	ok			
-ps_1_2|opcode|texm3x3	translate_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36)	
+ps_1_2|opcode|texm3x3	ok			
 ps_1_2|regidx|src:c0	ok			
 ps_1_2|regidx|src:c7	ok			
 ps_1_2|regidx|src:r0	ok			
@@ -472,7 +472,7 @@ ps_1_2|writemask|dp3@.xyz	ok
 ps_1_2|swizzle|mov@.none	ok			
 ps_1_2|swizzle|mov@.w	ok			
 ps_1_2|swizzle|mov@.a	ok			
-ps_1_2|ps1tex|tex@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_2|ps1tex|tex@ctab=none	ok			
 ps_1_2|ps1tex|tex@ctab=1d	ok			
 ps_1_2|ps1tex|tex@ctab=2d	ok			
 ps_1_2|ps1tex|tex@ctab=cube	ok			
@@ -481,32 +481,32 @@ ps_1_2|ps1tex|texbem@ctab=none	ok
 ps_1_2|ps1tex|texbem@ctab=2d	ok			
 ps_1_2|ps1tex|texbeml@ctab=none	ok			
 ps_1_2|ps1tex|texbeml@ctab=2d	ok			
-ps_1_2|ps1tex|texdp3tex@ctab=none	translate_fail	emitter missing: texdp3tex	mojoshader-glsldk: TEXDP3TEX unimplemented in glsl profile;	
-ps_1_2|ps1tex|texdp3tex@ctab=1d	translate_fail	emitter missing: texdp3tex	mojoshader-glsldk: TEXDP3TEX unimplemented in glsl profile;	
+ps_1_2|ps1tex|texdp3tex@ctab=none	ok			
+ps_1_2|ps1tex|texdp3tex@ctab=1d	ok			
 ps_1_2|ps1tex|texm3x2tex@ctab=none	ok			
 ps_1_2|ps1tex|texm3x2tex@ctab=2d	ok			
-ps_1_2|ps1tex|texm3x3pad@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_2|ps1tex|texm3x3pad@ctab=none	ok			
 ps_1_2|ps1tex|texm3x3pad@ctab=cube	ok			
 ps_1_2|ps1tex|texm3x3pad@ctab=volume	ok			
-ps_1_2|ps1tex|texm3x3spec@ctab=none	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_2|ps1tex|texm3x3spec@ctab=cube	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_2|ps1tex|texm3x3spec@ctab=volume	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_2|ps1tex|texm3x3tex@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_2|ps1tex|texm3x3spec@ctab=none	ok			
+ps_1_2|ps1tex|texm3x3spec@ctab=cube	ok			
+ps_1_2|ps1tex|texm3x3spec@ctab=volume	ok			
+ps_1_2|ps1tex|texm3x3tex@ctab=none	ok			
 ps_1_2|ps1tex|texm3x3tex@ctab=cube	ok			
 ps_1_2|ps1tex|texm3x3tex@ctab=volume	ok			
-ps_1_2|ps1tex|texm3x3vspec@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_2|ps1tex|texm3x3vspec@ctab=none	ok			
 ps_1_2|ps1tex|texm3x3vspec@ctab=cube	ok			
 ps_1_2|ps1tex|texm3x3vspec@ctab=volume	ok			
-ps_1_2|ps1tex|texreg2ar@ctab=none	translate_fail	emitter missing: texreg2ar	mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;	
-ps_1_2|ps1tex|texreg2ar@ctab=2d	translate_fail	emitter missing: texreg2ar	mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;	
-ps_1_2|ps1tex|texreg2gb@ctab=none	translate_fail	emitter missing: texreg2gb	mojoshader-glsldk: TEXREG2GB unimplemented in glsl profile;	
-ps_1_2|ps1tex|texreg2gb@ctab=2d	translate_fail	emitter missing: texreg2gb	mojoshader-glsldk: TEXREG2GB unimplemented in glsl profile;	
-ps_1_2|ps1tex|texreg2rgb@ctab=none	translate_fail	emitter missing: texreg2rgb	mojoshader-glsldk: TEXREG2RGB unimplemented in glsl profile;	
-ps_1_2|ps1tex|texreg2rgb@ctab=2d	translate_fail	emitter missing: texreg2rgb	mojoshader-glsldk: TEXREG2RGB unimplemented in glsl profile;	
+ps_1_2|ps1tex|texreg2ar@ctab=none	ok			
+ps_1_2|ps1tex|texreg2ar@ctab=2d	ok			
+ps_1_2|ps1tex|texreg2gb@ctab=none	ok			
+ps_1_2|ps1tex|texreg2gb@ctab=2d	ok			
+ps_1_2|ps1tex|texreg2rgb@ctab=none	ok			
+ps_1_2|ps1tex|texreg2rgb@ctab=2d	ok			
 ps_1_2|ps1tex|texcoord	ok			
-ps_1_2|ps1tex|texdp3	translate_fail	emitter missing: texdp3	mojoshader-glsldk: TEXDP3 unimplemented in glsl profile;	
+ps_1_2|ps1tex|texdp3	ok			
 ps_1_2|ps1tex|texm3x2pad	ok			
-ps_1_2|ps1tex|texm3x3	translate_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36)	
+ps_1_2|ps1tex|texm3x3	ok			
 ps_1_2|coissue|add	ok			
 ps_1_2|coissue|cmp	ok			
 ps_1_2|coissue|cnd	ok			
@@ -609,11 +609,11 @@ ps_1_3|operand|sub@src1=v	ok
 ps_1_3|operand|sub@src1=t	ok			
 ps_1_3|operand|sub@dst=t	ok			
 ps_1_3|opcode|texcoord	ok			
-ps_1_3|opcode|texdp3	translate_fail	emitter missing: texdp3	mojoshader-glsldk: TEXDP3 unimplemented in glsl profile;	
+ps_1_3|opcode|texdp3	ok			
 ps_1_3|opcode|texkill	ok			
-ps_1_3|opcode|texm3x2depth	translate_fail	emitter missing: texm3x2depth	mojoshader-glsldk: TEXM3X2DEPTH unimplemented in glsl profile;	
+ps_1_3|opcode|texm3x2depth	ok			
 ps_1_3|opcode|texm3x2pad	ok			
-ps_1_3|opcode|texm3x3	translate_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36)	
+ps_1_3|opcode|texm3x3	ok			
 ps_1_3|regidx|src:c0	ok			
 ps_1_3|regidx|src:c7	ok			
 ps_1_3|regidx|src:r0	ok			
@@ -761,7 +761,7 @@ ps_1_3|writemask|dp3@.xyz	ok
 ps_1_3|swizzle|mov@.none	ok			
 ps_1_3|swizzle|mov@.w	ok			
 ps_1_3|swizzle|mov@.a	ok			
-ps_1_3|ps1tex|tex@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_3|ps1tex|tex@ctab=none	ok			
 ps_1_3|ps1tex|tex@ctab=1d	ok			
 ps_1_3|ps1tex|tex@ctab=2d	ok			
 ps_1_3|ps1tex|tex@ctab=cube	ok			
@@ -770,33 +770,33 @@ ps_1_3|ps1tex|texbem@ctab=none	ok
 ps_1_3|ps1tex|texbem@ctab=2d	ok			
 ps_1_3|ps1tex|texbeml@ctab=none	ok			
 ps_1_3|ps1tex|texbeml@ctab=2d	ok			
-ps_1_3|ps1tex|texdp3tex@ctab=none	translate_fail	emitter missing: texdp3tex	mojoshader-glsldk: TEXDP3TEX unimplemented in glsl profile;	
-ps_1_3|ps1tex|texdp3tex@ctab=1d	translate_fail	emitter missing: texdp3tex	mojoshader-glsldk: TEXDP3TEX unimplemented in glsl profile;	
+ps_1_3|ps1tex|texdp3tex@ctab=none	ok			
+ps_1_3|ps1tex|texdp3tex@ctab=1d	ok			
 ps_1_3|ps1tex|texm3x2tex@ctab=none	ok			
 ps_1_3|ps1tex|texm3x2tex@ctab=2d	ok			
-ps_1_3|ps1tex|texm3x3pad@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_3|ps1tex|texm3x3pad@ctab=none	ok			
 ps_1_3|ps1tex|texm3x3pad@ctab=cube	ok			
 ps_1_3|ps1tex|texm3x3pad@ctab=volume	ok			
-ps_1_3|ps1tex|texm3x3spec@ctab=none	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_3|ps1tex|texm3x3spec@ctab=cube	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_3|ps1tex|texm3x3spec@ctab=volume	uam_fail	glsl: texm3x3spec emitter syntax error	glsl-compile: syntax error, unexpected ')'	
-ps_1_3|ps1tex|texm3x3tex@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_3|ps1tex|texm3x3spec@ctab=none	ok			
+ps_1_3|ps1tex|texm3x3spec@ctab=cube	ok			
+ps_1_3|ps1tex|texm3x3spec@ctab=volume	ok			
+ps_1_3|ps1tex|texm3x3tex@ctab=none	ok			
 ps_1_3|ps1tex|texm3x3tex@ctab=cube	ok			
 ps_1_3|ps1tex|texm3x3tex@ctab=volume	ok			
-ps_1_3|ps1tex|texm3x3vspec@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_3|ps1tex|texm3x3vspec@ctab=none	ok			
 ps_1_3|ps1tex|texm3x3vspec@ctab=cube	ok			
 ps_1_3|ps1tex|texm3x3vspec@ctab=volume	ok			
-ps_1_3|ps1tex|texreg2ar@ctab=none	translate_fail	emitter missing: texreg2ar	mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;	
-ps_1_3|ps1tex|texreg2ar@ctab=2d	translate_fail	emitter missing: texreg2ar	mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;	
-ps_1_3|ps1tex|texreg2gb@ctab=none	translate_fail	emitter missing: texreg2gb	mojoshader-glsldk: TEXREG2GB unimplemented in glsl profile;	
-ps_1_3|ps1tex|texreg2gb@ctab=2d	translate_fail	emitter missing: texreg2gb	mojoshader-glsldk: TEXREG2GB unimplemented in glsl profile;	
-ps_1_3|ps1tex|texreg2rgb@ctab=none	translate_fail	emitter missing: texreg2rgb	mojoshader-glsldk: TEXREG2RGB unimplemented in glsl profile;	
-ps_1_3|ps1tex|texreg2rgb@ctab=2d	translate_fail	emitter missing: texreg2rgb	mojoshader-glsldk: TEXREG2RGB unimplemented in glsl profile;	
+ps_1_3|ps1tex|texreg2ar@ctab=none	ok			
+ps_1_3|ps1tex|texreg2ar@ctab=2d	ok			
+ps_1_3|ps1tex|texreg2gb@ctab=none	ok			
+ps_1_3|ps1tex|texreg2gb@ctab=2d	ok			
+ps_1_3|ps1tex|texreg2rgb@ctab=none	ok			
+ps_1_3|ps1tex|texreg2rgb@ctab=2d	ok			
 ps_1_3|ps1tex|texcoord	ok			
-ps_1_3|ps1tex|texdp3	translate_fail	emitter missing: texdp3	mojoshader-glsldk: TEXDP3 unimplemented in glsl profile;	
-ps_1_3|ps1tex|texm3x2depth	translate_fail	emitter missing: texm3x2depth	mojoshader-glsldk: TEXM3X2DEPTH unimplemented in glsl profile;	
+ps_1_3|ps1tex|texdp3	ok			
+ps_1_3|ps1tex|texm3x2depth	ok			
 ps_1_3|ps1tex|texm3x2pad	ok			
-ps_1_3|ps1tex|texm3x3	translate_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36)	
+ps_1_3|ps1tex|texm3x3	ok			
 ps_1_3|coissue|add	ok			
 ps_1_3|coissue|cmp	ok			
 ps_1_3|coissue|cnd	ok			
@@ -813,7 +813,7 @@ ps_1_4|operand|add@src0=r	ok
 ps_1_4|operand|add@src0=c	ok			
 ps_1_4|operand|add@src1=r	ok			
 ps_1_4|operand|add@src1=v	ok			
-ps_1_4|opcode|bem	translate_fail	emitter missing: bem	mojoshader-glsldk: BEM unimplemented in glsl profile;	
+ps_1_4|opcode|bem	ok			
 ps_1_4|opcode|cmp	ok			
 ps_1_4|operand|cmp@src0=r	ok			
 ps_1_4|operand|cmp@src0=c	ok			
@@ -868,7 +868,7 @@ ps_1_4|operand|sub@src0=c	ok
 ps_1_4|operand|sub@src1=r	ok			
 ps_1_4|operand|sub@src1=v	ok			
 ps_1_4|opcode|texcrd	ok			
-ps_1_4|opcode|texdepth	translate_fail	emitter missing: texdepth	mojoshader-glsldk: TEXDEPTH unimplemented in glsl profile;	
+ps_1_4|opcode|texdepth	ok			
 ps_1_4|opcode|texkill	ok			
 ps_1_4|regidx|src:c0	ok			
 ps_1_4|regidx|src:c7	ok			
@@ -1083,14 +1083,14 @@ ps_1_4|swizzle|mov@.x	ok
 ps_1_4|swizzle|mov@.y	ok			
 ps_1_4|swizzle|mov@.z	ok			
 ps_1_4|swizzle|mov@.w	ok			
-ps_1_4|ps1tex|texld14@ctab=none	contract_fail	sampler type input: ps_1_x sampler type is the bound texture's, the translator has no input for it (CTAB-less default is a guess)	type input missing	
+ps_1_4|ps1tex|texld14@ctab=none	ok			
 ps_1_4|ps1tex|texld14@ctab=1d	ok			
 ps_1_4|ps1tex|texld14@ctab=2d	ok			
 ps_1_4|ps1tex|texld14@ctab=cube	ok			
 ps_1_4|ps1tex|texld14@ctab=volume	ok			
-ps_1_4|ps1tex|bem	translate_fail	emitter missing: bem	mojoshader-glsldk: BEM unimplemented in glsl profile;	
+ps_1_4|ps1tex|bem	ok			
 ps_1_4|ps1tex|texcrd	ok			
-ps_1_4|ps1tex|texdepth	translate_fail	emitter missing: texdepth	mojoshader-glsldk: TEXDEPTH unimplemented in glsl profile;	
+ps_1_4|ps1tex|texdepth	ok			
 ps_1_4|phase|phase+texld-r	ok			
 ps_1_4|phase|phase+v	ok			
 ps_1_4|phase|phase+texcrd2	ok			
@@ -1374,7 +1374,7 @@ ps_2_0|dstmod|sat@dp4	ok
 ps_2_0|dstmod|pp@dp4	ok			
 ps_2_0|dstmod|sat@exp	ok			
 ps_2_0|dstmod|pp@exp	ok			
-ps_2_0|dstmod|sat@frc	translate_fail	front end: _sat on frc/sincos refused (ps)	front end: FRC destination can't use saturate modifier (pos 52)	
+ps_2_0|dstmod|sat@frc	ok			
 ps_2_0|dstmod|pp@frc	ok			
 ps_2_0|dstmod|sat@log	ok			
 ps_2_0|dstmod|pp@log	ok			
@@ -1408,7 +1408,7 @@ ps_2_0|dstmod|sat@rcp	ok
 ps_2_0|dstmod|pp@rcp	ok			
 ps_2_0|dstmod|sat@rsq	ok			
 ps_2_0|dstmod|pp@rsq	ok			
-ps_2_0|dstmod|sat@sincos	translate_fail	front end: _sat on frc/sincos refused (ps)	front end: SINCOS destination can't use saturate modifier (pos 52)	
+ps_2_0|dstmod|sat@sincos	ok			
 ps_2_0|dstmod|pp@sincos	ok			
 ps_2_0|dstmod|sat@sub	ok			
 ps_2_0|dstmod|pp@sub	ok			
@@ -1454,7 +1454,7 @@ ps_2_0|writemask|mov@oDepth0.all	ok
 ps_2_0|writemask|sincos@.x	ok			
 ps_2_0|writemask|sincos@.y	ok			
 ps_2_0|writemask|sincos@.xy	ok			
-ps_2_0|writemask|sincos@.xyz	translate_fail	front end: sincos .xyz write mask refused (MS vs masking page allows it, sincos page does not)	front end: SINCOS write mask must be .x or .y or .xy (pos 52)	conflict
+ps_2_0|writemask|sincos@.xyz	ok			conflict
 ps_2_0|swizzle|mov@.none	ok			
 ps_2_0|swizzle|mov@.x	ok			
 ps_2_0|swizzle|mov@.y	ok			
@@ -1525,8 +1525,8 @@ ps_2_0|sampler|volume:texldb:s0	ok
 ps_2_0|sampler|volume:texldb:s15	ok			
 ps_2_0|sampler|2d:texldp:s0	ok			
 ps_2_0|sampler|2d:texldp:s15	ok			
-ps_2_0|sampler|cube:texldp:s0	translate_fail	glsl: texldp with cube sampler	mojoshader-glsldk: TEXLDP on a cubemap;	
-ps_2_0|sampler|cube:texldp:s15	translate_fail	glsl: texldp with cube sampler	mojoshader-glsldk: TEXLDP on a cubemap;	
+ps_2_0|sampler|cube:texldp:s0	ok			
+ps_2_0|sampler|cube:texldp:s15	ok			
 ps_2_0|sampler|volume:texldp:s0	ok			
 ps_2_0|sampler|volume:texldp:s15	ok			
 ps_2_0|def|def:c0	ok			
@@ -1551,10 +1551,10 @@ ps_2_x|opcode|break_gt	ok
 ps_2_x|opcode|break_le	ok			
 ps_2_x|opcode|break_lt	ok			
 ps_2_x|opcode|break_ne	ok			
-ps_2_x|opcode|breakp	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_2_x|opcode|breakp	ok			
 ps_2_x|opcode|call	ok			
 ps_2_x|opcode|callnz_bool	ok			
-ps_2_x|opcode|callnz_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_2_x|opcode|callnz_pred	ok			
 ps_2_x|opcode|cmp	ok			
 ps_2_x|operand|cmp@src0=v	ok			
 ps_2_x|operand|cmp@src0=c	ok			
@@ -1631,7 +1631,7 @@ ps_2_x|opcode|if_gt	ok
 ps_2_x|opcode|if_le	ok			
 ps_2_x|opcode|if_lt	ok			
 ps_2_x|opcode|if_ne	ok			
-ps_2_x|opcode|if_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_2_x|opcode|if_pred	ok			
 ps_2_x|opcode|label	ok			
 ps_2_x|opcode|log	ok			
 ps_2_x|operand|log@src0=v	ok			
@@ -1858,7 +1858,7 @@ ps_2_x|dstmod|sat@dsy	ok
 ps_2_x|dstmod|pp@dsy	ok			
 ps_2_x|dstmod|sat@exp	ok			
 ps_2_x|dstmod|pp@exp	ok			
-ps_2_x|dstmod|sat@frc	translate_fail	front end: _sat on frc/sincos refused (ps)	front end: FRC destination can't use saturate modifier (pos 52)	
+ps_2_x|dstmod|sat@frc	ok			
 ps_2_x|dstmod|pp@frc	ok			
 ps_2_x|dstmod|sat@log	ok			
 ps_2_x|dstmod|pp@log	ok			
@@ -1892,7 +1892,7 @@ ps_2_x|dstmod|sat@rcp	ok
 ps_2_x|dstmod|pp@rcp	ok			
 ps_2_x|dstmod|sat@rsq	ok			
 ps_2_x|dstmod|pp@rsq	ok			
-ps_2_x|dstmod|sat@sincos	translate_fail	front end: _sat on frc/sincos refused (ps)	front end: SINCOS destination can't use saturate modifier (pos 52)	
+ps_2_x|dstmod|sat@sincos	ok			
 ps_2_x|dstmod|pp@sincos	ok			
 ps_2_x|dstmod|sat@sub	ok			
 ps_2_x|dstmod|pp@sub	ok			
@@ -1940,7 +1940,7 @@ ps_2_x|writemask|mov@oDepth0.all	ok
 ps_2_x|writemask|sincos@.x	ok			
 ps_2_x|writemask|sincos@.y	ok			
 ps_2_x|writemask|sincos@.xy	ok			
-ps_2_x|writemask|sincos@.xyz	translate_fail	front end: sincos .xyz write mask refused (MS vs masking page allows it, sincos page does not)	front end: SINCOS write mask must be .x or .y or .xy (pos 52)	conflict
+ps_2_x|writemask|sincos@.xyz	ok			conflict
 ps_2_x|swizzle|mov@.x	ok			
 ps_2_x|swizzle|mov@.y	ok			
 ps_2_x|swizzle|mov@.z	ok			
@@ -2487,14 +2487,14 @@ ps_2_x|sampler|volume:texldb:s0	ok
 ps_2_x|sampler|volume:texldb:s15	ok			
 ps_2_x|sampler|2d:texldd:s0	ok			
 ps_2_x|sampler|2d:texldd:s15	ok			
-ps_2_x|sampler|cube:texldd:s0	uam_fail	glsl: texldd with cube/volume sampler (Grad function missing)	glsl-compile: no function with name 'textureCubeGrad'	
-ps_2_x|sampler|cube:texldd:s15	uam_fail	glsl: texldd with cube/volume sampler (Grad function missing)	glsl-compile: no function with name 'textureCubeGrad'	
-ps_2_x|sampler|volume:texldd:s0	uam_fail	glsl: texldd with cube/volume sampler (Grad function missing)	glsl-compile: no function with name 'texture3DGrad'	
-ps_2_x|sampler|volume:texldd:s15	uam_fail	glsl: texldd with cube/volume sampler (Grad function missing)	glsl-compile: no function with name 'texture3DGrad'	
+ps_2_x|sampler|cube:texldd:s0	ok			
+ps_2_x|sampler|cube:texldd:s15	ok			
+ps_2_x|sampler|volume:texldd:s0	ok			
+ps_2_x|sampler|volume:texldd:s15	ok			
 ps_2_x|sampler|2d:texldp:s0	ok			
 ps_2_x|sampler|2d:texldp:s15	ok			
-ps_2_x|sampler|cube:texldp:s0	translate_fail	glsl: texldp with cube sampler	mojoshader-glsldk: TEXLDP on a cubemap;	
-ps_2_x|sampler|cube:texldp:s15	translate_fail	glsl: texldp with cube sampler	mojoshader-glsldk: TEXLDP on a cubemap;	
+ps_2_x|sampler|cube:texldp:s0	ok			
+ps_2_x|sampler|cube:texldp:s15	ok			
 ps_2_x|sampler|volume:texldp:s0	ok			
 ps_2_x|sampler|volume:texldp:s15	ok			
 ps_2_x|flow|break	ok			
@@ -2504,10 +2504,10 @@ ps_2_x|flow|break_gt	ok
 ps_2_x|flow|break_le	ok			
 ps_2_x|flow|break_lt	ok			
 ps_2_x|flow|break_ne	ok			
-ps_2_x|flow|breakp	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_2_x|flow|breakp	ok			
 ps_2_x|flow|call	ok			
 ps_2_x|flow|callnz_bool	ok			
-ps_2_x|flow|callnz_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_2_x|flow|callnz_pred	ok			
 ps_2_x|flow|else	ok			
 ps_2_x|flow|endif	ok			
 ps_2_x|flow|endrep	ok			
@@ -2518,7 +2518,7 @@ ps_2_x|flow|if_gt	ok
 ps_2_x|flow|if_le	ok			
 ps_2_x|flow|if_lt	ok			
 ps_2_x|flow|if_ne	ok			
-ps_2_x|flow|if_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_2_x|flow|if_pred	ok			
 ps_2_x|flow|label=l0	ok			
 ps_2_x|flow|label=l15	ok			
 ps_2_x|flow|rep	ok			
@@ -2530,7 +2530,7 @@ ps_2_x|nest|ifc-depth-24	ok
 ps_2_x|nest|rep-depth-1	ok			
 ps_2_x|nest|rep-depth-4	ok			
 ps_2_x|nest|call-depth-1	ok			
-ps_2_x|nest|call-depth-4	uam_fail	glsl: forward call to a later-defined subroutine has no prototype	glsl-compile: no function with name 'ps_l1'	
+ps_2_x|nest|call-depth-4	ok			
 ps_2_x|def|def:c0	ok			
 ps_2_x|def|def:c31	ok			
 ps_2_x|defi|defi:i0:max	ok			
@@ -2566,10 +2566,10 @@ ps_3_0|opcode|break_gt	ok
 ps_3_0|opcode|break_le	ok			
 ps_3_0|opcode|break_lt	ok			
 ps_3_0|opcode|break_ne	ok			
-ps_3_0|opcode|breakp	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_3_0|opcode|breakp	ok			
 ps_3_0|opcode|call	ok			
 ps_3_0|opcode|callnz_bool	ok			
-ps_3_0|opcode|callnz_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_3_0|opcode|callnz_pred	ok			
 ps_3_0|opcode|cmp	ok			
 ps_3_0|operand|cmp@src0=v	ok			
 ps_3_0|operand|cmp@src0=c	ok			
@@ -2661,7 +2661,7 @@ ps_3_0|opcode|if_gt	ok
 ps_3_0|opcode|if_le	ok			
 ps_3_0|opcode|if_lt	ok			
 ps_3_0|opcode|if_ne	ok			
-ps_3_0|opcode|if_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_3_0|opcode|if_pred	ok			
 ps_3_0|opcode|label	ok			
 ps_3_0|opcode|log	ok			
 ps_3_0|operand|log@src0=v	ok			
@@ -2981,21 +2981,21 @@ ps_3_0|srcmod|abs@sub.s0	ok
 ps_3_0|srcmod|abs@sub.s1	ok			
 ps_3_0|srcmod|absneg@sub.s0	ok			
 ps_3_0|srcmod|absneg@sub.s1	ok			
-ps_3_0|srcmod|neg@texld.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
-ps_3_0|srcmod|abs@texld.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
-ps_3_0|srcmod|absneg@texld.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
-ps_3_0|srcmod|neg@texldb.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
-ps_3_0|srcmod|abs@texldb.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
-ps_3_0|srcmod|absneg@texldb.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
+ps_3_0|srcmod|neg@texld.s0	ok			
+ps_3_0|srcmod|abs@texld.s0	ok			
+ps_3_0|srcmod|absneg@texld.s0	ok			
+ps_3_0|srcmod|neg@texldb.s0	ok			
+ps_3_0|srcmod|abs@texldb.s0	ok			
+ps_3_0|srcmod|absneg@texldb.s0	ok			
 ps_3_0|srcmod|neg@texldd.s0	ok			
 ps_3_0|srcmod|abs@texldd.s0	ok			
 ps_3_0|srcmod|absneg@texldd.s0	ok			
 ps_3_0|srcmod|neg@texldl.s0	ok			
 ps_3_0|srcmod|abs@texldl.s0	ok			
 ps_3_0|srcmod|absneg@texldl.s0	ok			
-ps_3_0|srcmod|neg@texldp.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
-ps_3_0|srcmod|abs@texldp.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
-ps_3_0|srcmod|absneg@texldp.s0	translate_fail	front end: ps_3_0 texld coordinate with source modifier refused	front end: TEXLD src0 must have no modifiers (pos 64)	
+ps_3_0|srcmod|neg@texldp.s0	ok			
+ps_3_0|srcmod|abs@texldp.s0	ok			
+ps_3_0|srcmod|absneg@texldp.s0	ok			
 ps_3_0|dstmod|sat@abs	ok			
 ps_3_0|dstmod|pp@abs	ok			
 ps_3_0|dstmod|sat@add	ok			
@@ -3016,7 +3016,7 @@ ps_3_0|dstmod|sat@dsy	ok
 ps_3_0|dstmod|pp@dsy	ok			
 ps_3_0|dstmod|sat@exp	ok			
 ps_3_0|dstmod|pp@exp	ok			
-ps_3_0|dstmod|sat@frc	translate_fail	front end: _sat on frc/sincos refused (ps)	front end: FRC destination can't use saturate modifier (pos 52)	
+ps_3_0|dstmod|sat@frc	ok			
 ps_3_0|dstmod|pp@frc	ok			
 ps_3_0|dstmod|sat@log	ok			
 ps_3_0|dstmod|pp@log	ok			
@@ -3050,7 +3050,7 @@ ps_3_0|dstmod|sat@rcp	ok
 ps_3_0|dstmod|pp@rcp	ok			
 ps_3_0|dstmod|sat@rsq	ok			
 ps_3_0|dstmod|pp@rsq	ok			
-ps_3_0|dstmod|sat@sincos	translate_fail	front end: _sat on frc/sincos refused (ps)	front end: SINCOS destination can't use saturate modifier (pos 52)	
+ps_3_0|dstmod|sat@sincos	ok			
 ps_3_0|dstmod|pp@sincos	ok			
 ps_3_0|dstmod|sat@sub	ok			
 ps_3_0|dstmod|pp@sub	ok			
@@ -3100,7 +3100,7 @@ ps_3_0|writemask|mov@oDepth0.all	ok
 ps_3_0|writemask|sincos@.x	ok			
 ps_3_0|writemask|sincos@.y	ok			
 ps_3_0|writemask|sincos@.xy	ok			
-ps_3_0|writemask|sincos@.xyz	translate_fail	front end: sincos .xyz write mask refused (MS vs masking page allows it, sincos page does not)	front end: SINCOS write mask must be .x or .y or .xy (pos 52)	conflict
+ps_3_0|writemask|sincos@.xyz	ok			conflict
 ps_3_0|swizzle|mov@.x	ok			
 ps_3_0|swizzle|mov@.y	ok			
 ps_3_0|swizzle|mov@.z	ok			
@@ -3677,10 +3677,10 @@ ps_3_0|sampler|volume:texldb:s0	ok
 ps_3_0|sampler|volume:texldb:s15	ok			
 ps_3_0|sampler|2d:texldd:s0	ok			
 ps_3_0|sampler|2d:texldd:s15	ok			
-ps_3_0|sampler|cube:texldd:s0	uam_fail	glsl: texldd with cube/volume sampler (Grad function missing)	glsl-compile: no function with name 'textureCubeGrad'	
-ps_3_0|sampler|cube:texldd:s15	uam_fail	glsl: texldd with cube/volume sampler (Grad function missing)	glsl-compile: no function with name 'textureCubeGrad'	
-ps_3_0|sampler|volume:texldd:s0	uam_fail	glsl: texldd with cube/volume sampler (Grad function missing)	glsl-compile: no function with name 'texture3DGrad'	
-ps_3_0|sampler|volume:texldd:s15	uam_fail	glsl: texldd with cube/volume sampler (Grad function missing)	glsl-compile: no function with name 'texture3DGrad'	
+ps_3_0|sampler|cube:texldd:s0	ok			
+ps_3_0|sampler|cube:texldd:s15	ok			
+ps_3_0|sampler|volume:texldd:s0	ok			
+ps_3_0|sampler|volume:texldd:s15	ok			
 ps_3_0|sampler|2d:texldl:s0	ok			
 ps_3_0|sampler|2d:texldl:s15	ok			
 ps_3_0|sampler|cube:texldl:s0	ok			
@@ -3689,8 +3689,8 @@ ps_3_0|sampler|volume:texldl:s0	ok
 ps_3_0|sampler|volume:texldl:s15	ok			
 ps_3_0|sampler|2d:texldp:s0	ok			
 ps_3_0|sampler|2d:texldp:s15	ok			
-ps_3_0|sampler|cube:texldp:s0	translate_fail	glsl: texldp with cube sampler	mojoshader-glsldk: TEXLDP on a cubemap;	
-ps_3_0|sampler|cube:texldp:s15	translate_fail	glsl: texldp with cube sampler	mojoshader-glsldk: TEXLDP on a cubemap;	
+ps_3_0|sampler|cube:texldp:s0	ok			
+ps_3_0|sampler|cube:texldp:s15	ok			
 ps_3_0|sampler|volume:texldp:s0	ok			
 ps_3_0|sampler|volume:texldp:s15	ok			
 ps_3_0|flow|break	ok			
@@ -3700,10 +3700,10 @@ ps_3_0|flow|break_gt	ok
 ps_3_0|flow|break_le	ok			
 ps_3_0|flow|break_lt	ok			
 ps_3_0|flow|break_ne	ok			
-ps_3_0|flow|breakp	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_3_0|flow|breakp	ok			
 ps_3_0|flow|call	ok			
 ps_3_0|flow|callnz_bool	ok			
-ps_3_0|flow|callnz_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_3_0|flow|callnz_pred	ok			
 ps_3_0|flow|else	ok			
 ps_3_0|flow|endif	ok			
 ps_3_0|flow|endloop	ok			
@@ -3715,9 +3715,9 @@ ps_3_0|flow|if_gt	ok
 ps_3_0|flow|if_le	ok			
 ps_3_0|flow|if_lt	ok			
 ps_3_0|flow|if_ne	ok			
-ps_3_0|flow|if_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+ps_3_0|flow|if_pred	ok			
 ps_3_0|flow|label=l0	ok			
-ps_3_0|flow|label=l2047	translate_fail	front end: label index above 15 refused (sm3 allows 0..2047)	front end: label register number must be <= 15 (pos 52)	
+ps_3_0|flow|label=l2047	ok			
 ps_3_0|flow|loop	ok			
 ps_3_0|flow|rep	ok			
 ps_3_0|flow|ret	ok			
@@ -3730,8 +3730,8 @@ ps_3_0|nest|rep-depth-4	ok
 ps_3_0|nest|loop-depth-1	ok			
 ps_3_0|nest|loop-depth-4	ok			
 ps_3_0|nest|call-depth-1	ok			
-ps_3_0|nest|call-depth-4	uam_fail	glsl: forward call to a later-defined subroutine has no prototype	glsl-compile: no function with name 'ps_l1'	
-ps_3_0|flow|label-max-l2047	translate_fail	front end: label index above 15 refused (sm3 allows 0..2047)	front end: label register number must be <= 15 (pos 52)	
+ps_3_0|nest|call-depth-4	ok			
+ps_3_0|flow|label-max-l2047	ok			
 ps_3_0|def|def:c0	ok			
 ps_3_0|def|def:c223	ok			
 ps_3_0|defi|defi:i0:max	ok			
@@ -3800,8 +3800,8 @@ vs_1_1|operand|expp@dst=oT	ok
 vs_1_1|opcode|frc	ok			
 vs_1_1|operand|frc@src0=r	ok			
 vs_1_1|operand|frc@src0=c	ok			
-vs_1_1|operand|frc@dst=oFog	translate_fail	front end: frc .x write mask refused in vs_1_1	front end: FRC writemask must be .y or .xy for shader model 1.x (pos 64)	
-vs_1_1|operand|frc@dst=oPts	translate_fail	front end: frc .x write mask refused in vs_1_1	front end: FRC writemask must be .y or .xy for shader model 1.x (pos 64)	
+vs_1_1|operand|frc@dst=oFog	ok			
+vs_1_1|operand|frc@dst=oPts	ok			
 vs_1_1|operand|frc@dst=oD	ok			
 vs_1_1|operand|frc@dst=oT	ok			
 vs_1_1|opcode|lit	ok			
@@ -4042,10 +4042,10 @@ vs_1_1|writemask|expp@.y	ok
 vs_1_1|writemask|expp@.z	ok			
 vs_1_1|writemask|expp@.w	ok			
 vs_1_1|writemask|expp@.all	ok			undet
-vs_1_1|writemask|frc@.x	translate_fail	front end: frc .x write mask refused in vs_1_1	front end: FRC writemask must be .y or .xy for shader model 1.x (pos 64)	
+vs_1_1|writemask|frc@.x	ok			
 vs_1_1|writemask|frc@.y	ok			
 vs_1_1|writemask|frc@.xy	ok			
-vs_1_1|writemask|frc@.all	translate_fail	front end: frc .x write mask refused in vs_1_1	front end: FRC writemask must be .y or .xy for shader model 1.x (pos 64)	undet
+vs_1_1|writemask|frc@.all	ok			undet
 vs_1_1|writemask|log@.x	ok			
 vs_1_1|writemask|log@.y	ok			
 vs_1_1|writemask|log@.z	ok			
@@ -4058,10 +4058,10 @@ vs_1_1|writemask|logp@.w	ok
 vs_1_1|writemask|logp@.all	ok			undet
 vs_1_1|writemask|m3x2@.xy	ok			
 vs_1_1|writemask|m3x3@.xyz	ok			
-vs_1_1|writemask|m3x4@.xyz	translate_fail	front end: matrix-op write mask rule differs from the table	front end: M3X4 writemask must be .xyzw (pos 64)	
+vs_1_1|writemask|m3x4@.xyz	ok			
 vs_1_1|writemask|m3x4@.all	ok			undet
 vs_1_1|writemask|m4x3@.xyz	ok			
-vs_1_1|writemask|m4x4@.xyz	translate_fail	front end: matrix-op write mask rule differs from the table	front end: M4X4 writemask must be full (pos 64)	
+vs_1_1|writemask|m4x4@.xyz	ok			
 vs_1_1|writemask|m4x4@.all	ok			undet
 vs_1_1|writemask|rcp@.x	ok			
 vs_1_1|writemask|rcp@.y	ok			
@@ -4825,10 +4825,10 @@ vs_2_0|writemask|logp@.w	ok
 vs_2_0|writemask|logp@.all	ok			undet
 vs_2_0|writemask|m3x2@.xy	ok			
 vs_2_0|writemask|m3x3@.xyz	ok			
-vs_2_0|writemask|m3x4@.xyz	translate_fail	front end: matrix-op write mask rule differs from the table	front end: M3X4 writemask must be .xyzw (pos 64)	
+vs_2_0|writemask|m3x4@.xyz	ok			
 vs_2_0|writemask|m3x4@.all	ok			undet
 vs_2_0|writemask|m4x3@.xyz	ok			
-vs_2_0|writemask|m4x4@.xyz	translate_fail	front end: matrix-op write mask rule differs from the table	front end: M4X4 writemask must be full (pos 64)	
+vs_2_0|writemask|m4x4@.xyz	ok			
 vs_2_0|writemask|m4x4@.all	ok			undet
 vs_2_0|writemask|pow@.x	ok			
 vs_2_0|writemask|pow@.y	ok			
@@ -4848,7 +4848,7 @@ vs_2_0|writemask|rsq@.all	ok			undet
 vs_2_0|writemask|sincos@.x	ok			
 vs_2_0|writemask|sincos@.y	ok			
 vs_2_0|writemask|sincos@.xy	ok			
-vs_2_0|writemask|sincos@.xyz	translate_fail	front end: sincos .xyz write mask refused (MS vs masking page allows it, sincos page does not)	front end: SINCOS write mask must be .x or .y or .xy (pos 64)	conflict
+vs_2_0|writemask|sincos@.xyz	ok			conflict
 vs_2_0|swizzle|mov@.x	ok			
 vs_2_0|swizzle|mov@.y	ok			
 vs_2_0|swizzle|mov@.z	ok			
@@ -5259,7 +5259,7 @@ vs_2_x|opcode|break_ne	ok
 vs_2_x|opcode|breakp	ok			
 vs_2_x|opcode|call	ok			
 vs_2_x|opcode|callnz_bool	ok			
-vs_2_x|opcode|callnz_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+vs_2_x|opcode|callnz_pred	ok			
 vs_2_x|opcode|crs	ok			
 vs_2_x|operand|crs@src0=r	ok			
 vs_2_x|operand|crs@src0=c	ok			
@@ -5677,10 +5677,10 @@ vs_2_x|writemask|logp@.w	ok
 vs_2_x|writemask|logp@.all	ok			undet
 vs_2_x|writemask|m3x2@.xy	ok			
 vs_2_x|writemask|m3x3@.xyz	ok			
-vs_2_x|writemask|m3x4@.xyz	translate_fail	front end: matrix-op write mask rule differs from the table	front end: M3X4 writemask must be .xyzw (pos 64)	
+vs_2_x|writemask|m3x4@.xyz	ok			
 vs_2_x|writemask|m3x4@.all	ok			undet
 vs_2_x|writemask|m4x3@.xyz	ok			
-vs_2_x|writemask|m4x4@.xyz	translate_fail	front end: matrix-op write mask rule differs from the table	front end: M4X4 writemask must be full (pos 64)	
+vs_2_x|writemask|m4x4@.xyz	ok			
 vs_2_x|writemask|m4x4@.all	ok			undet
 vs_2_x|writemask|pow@.x	ok			
 vs_2_x|writemask|pow@.y	ok			
@@ -5700,7 +5700,7 @@ vs_2_x|writemask|rsq@.all	ok			undet
 vs_2_x|writemask|sincos@.x	ok			
 vs_2_x|writemask|sincos@.y	ok			
 vs_2_x|writemask|sincos@.xy	ok			
-vs_2_x|writemask|sincos@.xyz	translate_fail	front end: sincos .xyz write mask refused (MS vs masking page allows it, sincos page does not)	front end: SINCOS write mask must be .x or .y or .xy (pos 64)	conflict
+vs_2_x|writemask|sincos@.xyz	ok			conflict
 vs_2_x|swizzle|mov@.x	ok			
 vs_2_x|swizzle|mov@.y	ok			
 vs_2_x|swizzle|mov@.z	ok			
@@ -6271,7 +6271,7 @@ vs_2_x|flow|break_ne	ok
 vs_2_x|flow|breakp	ok			
 vs_2_x|flow|call	ok			
 vs_2_x|flow|callnz_bool	ok			
-vs_2_x|flow|callnz_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+vs_2_x|flow|callnz_pred	ok			
 vs_2_x|flow|else	ok			
 vs_2_x|flow|endif	ok			
 vs_2_x|flow|endloop	ok			
@@ -6298,7 +6298,7 @@ vs_2_x|nest|rep-depth-4	ok
 vs_2_x|nest|loop-depth-1	ok			
 vs_2_x|nest|loop-depth-4	ok			
 vs_2_x|nest|call-depth-1	ok			
-vs_2_x|nest|call-depth-4	uam_fail	glsl: forward call to a later-defined subroutine has no prototype	glsl-compile: no function with name 'vs_l1'	
+vs_2_x|nest|call-depth-4	ok			
 vs_2_x|def|def:c0	ok			
 vs_2_x|def|def:c255	ok			
 vs_2_x|defi|defi:i0:max	ok			
@@ -6350,7 +6350,7 @@ vs_3_0|opcode|break_ne	ok
 vs_3_0|opcode|breakp	ok			
 vs_3_0|opcode|call	ok			
 vs_3_0|opcode|callnz_bool	ok			
-vs_3_0|opcode|callnz_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+vs_3_0|opcode|callnz_pred	ok			
 vs_3_0|opcode|crs	ok			
 vs_3_0|operand|crs@src0=r	ok			
 vs_3_0|operand|crs@src0=c	ok			
@@ -6536,12 +6536,12 @@ vs_3_0|operand|sge@src1=v	ok
 vs_3_0|operand|sge@src1=c	ok			
 vs_3_0|operand|sge@src1=aL	ok			
 vs_3_0|operand|sge@dst=o	ok			
-vs_3_0|opcode|sgn	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 92)	
+vs_3_0|opcode|sgn	ok			
 vs_3_0|opcode|sgn@3src	ok			conflict
-vs_3_0|operand|sgn@src0=r	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 92)	
-vs_3_0|operand|sgn@src0=c	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 92)	
-vs_3_0|operand|sgn@src0=aL	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 128)	
-vs_3_0|operand|sgn@dst=o	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 104)	
+vs_3_0|operand|sgn@src0=r	ok			
+vs_3_0|operand|sgn@src0=c	ok			
+vs_3_0|operand|sgn@src0=aL	ok			
+vs_3_0|operand|sgn@dst=o	ok			
 vs_3_0|opcode|sincos	ok			
 vs_3_0|operand|sincos@src0=r	ok			
 vs_3_0|operand|sincos@src0=c	ok			
@@ -6695,9 +6695,9 @@ vs_3_0|srcmod|abs@sge.s0	ok
 vs_3_0|srcmod|abs@sge.s1	ok			
 vs_3_0|srcmod|absneg@sge.s0	ok			
 vs_3_0|srcmod|absneg@sge.s1	ok			
-vs_3_0|srcmod|neg@sgn.s0	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 92)	
-vs_3_0|srcmod|abs@sgn.s0	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 92)	
-vs_3_0|srcmod|absneg@sgn.s0	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 92)	
+vs_3_0|srcmod|neg@sgn.s0	ok			
+vs_3_0|srcmod|abs@sgn.s0	ok			
+vs_3_0|srcmod|absneg@sgn.s0	ok			
 vs_3_0|srcmod|neg@sincos.s0	ok			
 vs_3_0|srcmod|abs@sincos.s0	ok			
 vs_3_0|srcmod|absneg@sincos.s0	ok			
@@ -6740,7 +6740,7 @@ vs_3_0|dstmod|sat@pow	ok
 vs_3_0|dstmod|sat@rcp	ok			
 vs_3_0|dstmod|sat@rsq	ok			
 vs_3_0|dstmod|sat@sge	ok			
-vs_3_0|dstmod|sat@sgn	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 92)	
+vs_3_0|dstmod|sat@sgn	ok			
 vs_3_0|dstmod|sat@slt	ok			
 vs_3_0|dstmod|sat@sub	ok			
 vs_3_0|writemask|mov@r0.w	ok			
@@ -6802,10 +6802,10 @@ vs_3_0|writemask|logp@.w	ok
 vs_3_0|writemask|logp@.all	ok			undet
 vs_3_0|writemask|m3x2@.xy	ok			
 vs_3_0|writemask|m3x3@.xyz	ok			
-vs_3_0|writemask|m3x4@.xyz	translate_fail	front end: matrix-op write mask rule differs from the table	front end: M3X4 writemask must be .xyzw (pos 76)	
+vs_3_0|writemask|m3x4@.xyz	ok			
 vs_3_0|writemask|m3x4@.all	ok			undet
 vs_3_0|writemask|m4x3@.xyz	ok			
-vs_3_0|writemask|m4x4@.xyz	translate_fail	front end: matrix-op write mask rule differs from the table	front end: M4X4 writemask must be full (pos 76)	
+vs_3_0|writemask|m4x4@.xyz	ok			
 vs_3_0|writemask|m4x4@.all	ok			undet
 vs_3_0|writemask|pow@.x	ok			
 vs_3_0|writemask|pow@.y	ok			
@@ -6825,7 +6825,7 @@ vs_3_0|writemask|rsq@.all	ok			undet
 vs_3_0|writemask|sincos@.x	ok			
 vs_3_0|writemask|sincos@.y	ok			
 vs_3_0|writemask|sincos@.xy	ok			
-vs_3_0|writemask|sincos@.xyz	translate_fail	front end: sincos .xyz write mask refused (MS vs masking page allows it, sincos page does not)	front end: SINCOS write mask must be .x or .y or .xy (pos 76)	conflict
+vs_3_0|writemask|sincos@.xyz	ok			conflict
 vs_3_0|swizzle|mov@.x	ok			
 vs_3_0|swizzle|mov@.y	ok			
 vs_3_0|swizzle|mov@.z	ok			
@@ -7342,10 +7342,10 @@ vs_3_0|pred|sge@(p0)	ok
 vs_3_0|pred|sge@(!p0)	ok			
 vs_3_0|pred|sge@(p0.w)	ok			
 vs_3_0|pred|sge@(!p0.y)	ok			
-vs_3_0|pred|sgn@(p0)	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 112)	
-vs_3_0|pred|sgn@(!p0)	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 112)	
-vs_3_0|pred|sgn@(p0.w)	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 112)	
-vs_3_0|pred|sgn@(!p0.y)	translate_fail	front end: one-source sgn (vs_3_0 form) refused	front end: Reserved bit #2 in source token must be one (pos 112)	
+vs_3_0|pred|sgn@(p0)	ok			
+vs_3_0|pred|sgn@(!p0)	ok			
+vs_3_0|pred|sgn@(p0.w)	ok			
+vs_3_0|pred|sgn@(!p0.y)	ok			
 vs_3_0|pred|sincos@(p0)	ok			
 vs_3_0|pred|sincos@(!p0)	ok			
 vs_3_0|pred|sincos@(p0.w)	ok			
@@ -7421,8 +7421,8 @@ vs_3_0|dcl|in:v15	ok
 vs_3_0|dcl|out:o11	ok			
 vs_3_0|sampler|2d:texldl:s0	ok			
 vs_3_0|sampler|2d:texldl:s3	ok			
-vs_3_0|sampler|cube:texldl:s0	translate_fail	front end: vs_3_0 dcl_cube/dcl_volume sampler refused (reserved-bit mask)	front end: reserved bits in DCL dword aren't zero (pos 40)	
-vs_3_0|sampler|cube:texldl:s3	translate_fail	front end: vs_3_0 dcl_cube/dcl_volume sampler refused (reserved-bit mask)	front end: reserved bits in DCL dword aren't zero (pos 40)	
+vs_3_0|sampler|cube:texldl:s0	ok			
+vs_3_0|sampler|cube:texldl:s3	ok			
 vs_3_0|sampler|volume:texldl:s0	ok			
 vs_3_0|sampler|volume:texldl:s3	ok			
 vs_3_0|flow|break	ok			
@@ -7435,7 +7435,7 @@ vs_3_0|flow|break_ne	ok
 vs_3_0|flow|breakp	ok			
 vs_3_0|flow|call	ok			
 vs_3_0|flow|callnz_bool	ok			
-vs_3_0|flow|callnz_pred	uam_fail	glsl: predicate p0 used as vector condition (if/callnz/breakp pred)	glsl-compile: if-statement condition must be scalar boolean	
+vs_3_0|flow|callnz_pred	ok			
 vs_3_0|flow|else	ok			
 vs_3_0|flow|endif	ok			
 vs_3_0|flow|endloop	ok			
@@ -7449,7 +7449,7 @@ vs_3_0|flow|if_lt	ok
 vs_3_0|flow|if_ne	ok			
 vs_3_0|flow|if_pred	ok			
 vs_3_0|flow|label=l0	ok			
-vs_3_0|flow|label=l2047	translate_fail	front end: label index above 15 refused (sm3 allows 0..2047)	front end: label register number must be <= 15 (pos 76)	
+vs_3_0|flow|label=l2047	ok			
 vs_3_0|flow|loop	ok			
 vs_3_0|flow|rep	ok			
 vs_3_0|flow|ret	ok			
@@ -7462,8 +7462,8 @@ vs_3_0|nest|rep-depth-4	ok
 vs_3_0|nest|loop-depth-1	ok			
 vs_3_0|nest|loop-depth-4	ok			
 vs_3_0|nest|call-depth-1	ok			
-vs_3_0|nest|call-depth-4	uam_fail	glsl: forward call to a later-defined subroutine has no prototype	glsl-compile: no function with name 'vs_l1'	
-vs_3_0|flow|label-max-l2047	translate_fail	front end: label index above 15 refused (sm3 allows 0..2047)	front end: label register number must be <= 15 (pos 76)	
+vs_3_0|nest|call-depth-4	ok			
+vs_3_0|flow|label-max-l2047	ok			
 vs_3_0|def|def:c0	ok			
 vs_3_0|def|def:c255	ok			
 vs_3_0|defi|defi:i0:max	ok			

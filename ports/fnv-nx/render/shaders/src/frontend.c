@@ -167,6 +167,10 @@ int fnvnx_frontend_parse(const void *bc, size_t n, const unsigned char *link, ui
     for (int i = 0; i < pd->sampler_count; i++) {
         const MOJOSHADER_sampler *m = &pd->samplers[i];
         const char *t = m->type == MOJOSHADER_SAMPLER_CUBE ? "cube" : m->type == MOJOSHADER_SAMPLER_VOLUME ? "volume" : "2d";
+        if (!is_vs && pd->major_ver < 2)    /* ps_1_x: no dcl, the type is data (fnvnx_dk_layout.h): all three samplers + the stage's type word */
+            sb_printf(&s, "%s\n    {\"reg\": %d, \"type\": \"bound\", \"binding\": %d, \"binding_cube\": %d, \"binding_volume\": %d, \"type_word\": %d, \"texbem\": %s}",
+                      i ? "," : "", m->index, m->index, FNVNX_DK_SAMP_CUBE_BASE + m->index, FNVNX_DK_SAMP_VOLUME_BASE + m->index, m->index, m->texbem ? "true" : "false");
+        else
         sb_printf(&s, "%s\n    {\"reg\": %d, \"type\": \"%s\", \"binding\": %d, \"texbem\": %s}", i ? "," : "", m->index, t, m->index, m->texbem ? "true" : "false");
     }
     sb_printf(&s, "%s]", pd->sampler_count ? "\n  " : "");

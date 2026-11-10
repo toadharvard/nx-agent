@@ -9,6 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 TOT = os.path.join(ROOT, "render", "shaders", "total")
 sys.path.insert(0, TOT)
 import sm_universe, sm_run, sm_classes
+import tempfile, shutil, subprocess
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--build", required=True); ap.add_argument("--classes", action="store_true")
@@ -20,7 +21,14 @@ def main():
     T = json.load(open(os.path.join(TOT, "sm_table.json")))
     rows = sm_universe.rows()
     res = sm_run.run(rows, host, deps, a.work or os.path.join(a.build, "total_work"), a.jobs)
-    res = [("contract_fail", "type input missing") if (st == "ok" and r.get("needs_input")) else (st, d) for r, (st, d) in zip(rows, res)]
+    def has_input(r):   # a row whose result depends on the bound texture's type passes only when the translation takes that type as DATA:
+        d = tempfile.mkdtemp(prefix="smin")   # the reflection must report the stage as "type": "bound" with its driver-block type word
+        try:
+            subprocess.run([os.path.join(host, "sdp2dksh"), "-o", d, "--glsl", "--no-dksh", "--blob", r["_bin"]], capture_output=True)
+            js = [json.load(open(os.path.join(d, f))) for f in os.listdir(d) if f.endswith(".json")]
+            return any(s.get("type") == "bound" and "type_word" in s for j in js for s in j.get("samplers", []))
+        finally: shutil.rmtree(d, ignore_errors=True)
+    res = [("contract_fail", "type input missing") if (st == "ok" and r.get("needs_input") and not has_input(r)) else (st, d) for r, (st, d) in zip(rows, res)]
     cls = [None if st == "ok" else (sm_classes.INPUT if st == "contract_fail" else sm_classes.classify(r, st, d)) for r, (st, d) in zip(rows, res)]
     with open(a.out, "w") as o:
         o.write("row\tstatus\tclass\tdetail\ttag\n")

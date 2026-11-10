@@ -3,6 +3,7 @@
 // vertex list does). ZENABLE default depends on the creation parameters (MS: D3DZB_TRUE iff EnableAutoDepthStencil), marked 0xDEAD here.
 #pragma once
 #include "t_common.h"
+#include <initializer_list>
 static inline uint32_t FB(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 struct TRs { uint32_t k; uint32_t def; const char* blk; };
 #define R(n, d, b) {D3DRS_##n, (uint32_t)(d), b}

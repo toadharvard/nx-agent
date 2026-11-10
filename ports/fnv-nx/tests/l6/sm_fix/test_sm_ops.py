@@ -123,4 +123,11 @@ for model in ("vs_2_x", "vs_3_0"):
     hdr = "dcl_position o0\ndcl_texcoord0 o1\n" if model == "vs_3_0" else ""
     out = "mov o0, c20\nmov o1, r0\n" if model == "vs_3_0" else "mov oPos, c20\nmov oT0, r0\n"
     S.case("calldepth4.%s" % model, model + "\n" + hdr + CH + out + "ret\n" + LAB, V0 + CC, want, ps=False)
+# ---- relative constant addressing needs no CTAB: c[a0 + n] / c[aL + n] read c[0..N) of the stage, N = 256 (vs) / 224 (ps), 0 outside
+RC = "".join(cst(n, n * 1.0, 100.0 + n, 0.0, 0.0) for n in (10, 11, 12, 222, 223, 224, 225))
+S.case("relc.vs_2_0.a0", vs("vs_2_0", "mov r1, c1\nmova a0.x, r1.x\nmov r0, c[a0.x + 10]\n"), V0 + RC + cst(1, 2.0, 0, 0, 0), (12.0, 112.0, 0.0, 0.0), ps=False)
+S.case("relc.vs.limit256", vs("vs_3_0", "mov r1, c1\nmova a0.x, r1.x\nmov r0, c[a0.x + 10]\n"), V0 + RC + cst(255, 7, 8, 9, 10) + cst(1, 245.0, 0, 0, 0), (7.0, 8.0, 9.0, 10.0), ps=False)
+S.case("relc.vs.beyond256", vs("vs_3_0", "mov r1, c1\nmova a0.x, r1.x\nmov r0, c[a0.x + 10]\n"), V0 + RC + cst(1, 246.0, 0, 0, 0), (0.0, 0.0, 0.0, 0.0), ps=False)
+S.case("relc.ps_3_0.limit224", "ps_3_0\ndefi i0, 3, 0, 1, 0\nmov r0, c0\nloop aL, i0\nadd r0, r0, c[aL + 222]\nendloop\nmov oC0, r0\n", cst(0, 0, 0, 0, 0) + RC,
+       (222.0 + 223.0, 322.0 + 323.0, 0.0, 0.0))                   # aL = 0, 1, 2: c222 + c223 + (c224 is outside the ps file: 0)
 S.done()
