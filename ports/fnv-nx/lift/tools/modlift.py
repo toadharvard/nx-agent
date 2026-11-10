@@ -254,6 +254,9 @@ def run(path):
     nrr = codemap.nr_rows(NR, res, nrname, seedn)
     open(outd + '/noreturn.tsv', 'w').write(hd.rstrip() + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in nrr))
     open(outd + '/outside.tsv', 'w').write(hd.rstrip() + '; columns: entry, instruction, target outside the executable spans (the lifted jump faults)\n' + ''.join('%08x\t%08x\t%08x\n' % x for x in outside))
+    ins_ = [r for r, v in rvals if intext(r)]; outr = sum(1 for r in ins_ if not (covP[r - T0] or covC[r - T0]))
+    print('rule 1: relocated in-span values: %d sites, %d distinct, not entries %d (before = after = %d entries from pointers); reloc sites lying in the span: %d (inside reached ranges %d, outside every range %d)' % (
+        len(rvals), len({v for r, v in rvals}), len(unent), len({v for r, v in rvals}), len(ins_), len(ins_) - outr, outr))
     print('closure: entries %d -> %d in %d rounds; new by cause %s; outside-span direct targets %d (%d distinct, %d rows in outside.tsv)' % (n_before, len(E), rounds, dict(sorted(closure_new.items())), len(outside), len({t for e, a, t in outside}), len(outside)))
     print('ranges.tsv %d rows, noreturn.tsv %d rows, range-sum vs extent mismatches %d' % (len(rg), len(nrr), bad))
     # ---- totality gate
@@ -265,6 +268,9 @@ def run(path):
     if RL is None: why.append('no .reloc: pointers into executable bytes cannot be enumerated')
     if cert != len(targets): why.append('%d targets without a completed descent' % (len(targets) - cert))
     if lvp: why.append('%d direct branches of proven code leave the executable spans' % len(lvp))
+    unent = sorted({v for r, v in rvals if v not in ent})        # rule 1 check: every relocated in-span value is an entry
+    if unent: why.append('%d relocated in-span values are not entries' % len(unent))
+    if len(targets) != len(E): why.append('gate universe %d != universe.tsv rows %d' % (len(targets), len(E)))
     if viol: why.append('%d in-span direct targets are not entries (closure not reached)' % len(viol))
     if bad: why.append('%d entries whose ranges do not sum to the extent' % bad)
     if eh.unknown: why.append('%d frame-handler stubs with unknown FuncInfo magic' % eh.unknown)

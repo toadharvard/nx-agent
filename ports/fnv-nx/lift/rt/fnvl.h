@@ -8,10 +8,10 @@ typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]
 /* x87 stack slot (R8): a value with its source format until the first arithmetic use. k: 0 empty, 1 F64 (v = double bits), 2 F32 (v = raw pattern),
    3/4/5 I16/I32/I64 (v = the integer sign-extended to 64 bits), 6 M80 (v = significand, e = sign<<15|exp). rt/fnvl_x87.h */
 struct fv { u64 v; u32 e; u32 k; };
-struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; u32 ra; u32 fex; fv fx[8]; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6). r[] is only the save area of the
+struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6). r[] is only the save area of the
    entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README).
    x87 (W13): fx[8] are the PHYSICAL registers (carriers; k==0 is the empty tag), ftop the TOP, fcw the control word, fex the exception status bits that the host FPSR cannot
-   hold (invalid + stack fault of an overflow/underflow). `st` and `ftag` are the pre-R8 double stack and tag word: unused, kept so the offsets of the other fields hold. */
+   hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). `st` and `ftag` are the pre-R8 double stack and tag word: unused, kept so the offsets of the other fields hold. */
 /* FNVL_FLAGS_IO (test/instest.py): the arithmetic flags, DF and the x87 condition bits also travel in c->fl / c->fc.
    fl: the EFLAGS bit positions (CF 0, PF 2, AF 4, ZF 6, SF 7, DF 10, OF 11); fc: C0 bit 8, C2 bit 10, C3 bit 14. */
 #ifdef FNVL_FLAGS_IO
@@ -107,3 +107,24 @@ static inline void sse_fpcr(u32 mx){ static const unsigned char m[4]={0,2,1,3}; 
 static inline int sse_sat(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
 static inline u64 sse_sad(const u8*a,const u8*b){ u32 s=0; for(int i=0;i<8;i++) s+=a[i]>b[i]?a[i]-b[i]:b[i]-a[i]; return s; }
 static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=(u32)(s.b[i]>>7)<<i; return r; }
+/* ---- Integer / system helpers (W14). ---- */
+/* more hardware exception codes for fnvl_raise(code, at); rt/seh.c maps them (the case in its status mapping is the runtime owner's):
+   FNVL_PRIV 6  STATUS_PRIVILEGED_INSTRUCTION 0xC0000096, a fault: ExceptionAddress = Context.Eip = at
+   FNVL_BOUNDS 7  STATUS_ARRAY_BOUNDS_EXCEEDED 0xC000008C (bound, `int 5`), a fault: Eip = at
+   FNVL_INTO 8  STATUS_INTEGER_OVERFLOW 0xC0000095 (into, `int 4`), a trap: ExceptionAddress = at, Context.Eip = at+1
+   FNVL_ASSERT 9  STATUS_ASSERTION_FAILURE 0xC0000420 (`int 0x2c`): ExceptionAddress = Context.Eip = at
+   `int 3` / `int 0x2d` use FNVL_BP with at = the address of the byte after the opcode byte (see f_sys.py). A #GP from a software interrupt whose gate has DPL 0
+   is fnvl_raise_av(0, 0xFFFFFFFF, at). */
+#define FNVL_PRIV 6
+#define FNVL_BOUNDS 7
+#define FNVL_INTO 8
+#define FNVL_ASSERT 9
+extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void); void fnvl_raise_av(u32 access, u32 addr, u32 at); }
+/* EFLAGS image of pushfd: the arithmetic flags and DF of the lifted state, bit 1, IF (9) set, AC and ID from c->eflx, everything else 0.
+   popfd loads CF PF AF ZF SF DF OF; AC and ID are kept in c->eflx; TF/IF/IOPL/NT/RF/VM/VIF/VIP changes are ignored (user mode cannot change them). */
+#define EFL_PUSH() ((u32)((cf&1)|2u|((pf&1)<<2)|((af&1)<<4)|((zf&1)<<6)|((sf&1)<<7)|0x200u|((df&1)<<10)|((of&1)<<11)|(c->eflx&0x240000u)))
+#define EFL_POP(v_) do{ u32 f_=(v_); cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c->eflx=f_&0x240000u; }while(0)
+/* aam/aad/aaa/aas/daa/das are generated inline; segment selector values of a Win32 x86 user process (as in rt/seh.c's CONTEXT) */
+#define SEL_CS 0x1bu
+#define SEL_DS 0x23u
+#define SEL_FS 0x3bu

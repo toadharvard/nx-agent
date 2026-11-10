@@ -172,7 +172,8 @@ def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
         sinks.add(('X', cond, sk) if cond else sk)
 
     def addc(cond, key):
-        return tuple(sorted(set(cond) | {key}))
+        # only the latest hand-back is kept: activating a sink when only the latest callee returns (not the whole chain) over-approximates
+        return (key,)
     while work:
         a, T, S, P = work.pop()
         if (a, T, S, P) in seen:

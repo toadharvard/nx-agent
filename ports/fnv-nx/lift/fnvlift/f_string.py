@@ -1,15 +1,15 @@
 """String instructions with optional rep/repe/repne prefix.
-Quirk kept from the PoC: movsd/stosd etc. are taken whenever operand 0 is memory (or there are no operands),
-so SSE `movsd [mem], xmm` is decided here too; with a register first operand dispatch falls through to SSE."""
+All of movs/stos/lods/scas/cmps in b/w/d forms, with rep/repe/repne. A form with an xmm operand (SSE2 movsd, cmpsd) falls through to SSE.
+(The PoC took them by `operand 0 is memory`, which missed scas/lods/cmps with a register first operand.)"""
 from capstone import x86 as X
 from .core import op, SKIP, MASK
 
 
-@op('movsb', 'movsw', 'movsd', 'stosb', 'stosw', 'stosd', 'scasb', 'cmpsb', 'lodsb', 'lodsd')
+@op(*[k + w for k in ('movs', 'stos', 'lods', 'scas', 'cmps') for w in 'bwd'])
 def h_string(cx, ins):
     m, ops, pfx, em = cx.m, cx.ops, cx.pfx, cx.em
-    if not (not ops or ops[0].type == X.X86_OP_MEM) or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('xmm') for o in ops):
-        return SKIP     # SSE2 movsd [mem], xmm has an xmm operand; the string forms never do
+    if any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('xmm') for o in ops):
+        return SKIP     # SSE2 movsd/cmpsd have an xmm operand; the string forms never do
     zsp = cx.zsp
     w = {'b': 8, 'w': 16, 'd': 32}[m[-1]]
     st = 'u32 st=df?-%du:%du;' % (w // 8, w // 8)

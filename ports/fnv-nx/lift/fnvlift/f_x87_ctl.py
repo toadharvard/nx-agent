@@ -174,12 +174,20 @@ def fix_lines(cx, a, n0):
         L[i] = t
 
 
+def fold_fcw_bracket(cx, ins):
+    """TODO(R8, E1 fold): recognise the MSVC bracket `fnstcw [a]; ...; or ah,0xc; fldcw [b]; fistp m; fldcw [a]` inside the function and emit one truncating
+    store (fisttp semantics) without touching the host rounding mode. Not implemented: the control word is honoured dynamically, which is correct without the fold."""
+    return False
+
+
 # ---- control and status instructions (b0 d8..df); returns True when handled ----
 def ctl(cx, ins, b0, mr, g):
     em = cx.em
     top = '((ft0-%d)&7)' % cx.xdp if cx.xm == 's' else 'c->ftop'
     if mr < 0xc0:
         if b0 == 0xd9 and g == 5:
+            if fold_fcw_bracket(cx, ins):
+                return True
             em('FLDCW(M16(%s));' % cx.ea(ins, cx.ops[0]))
         elif b0 == 0xd9 and g == 7:
             em('M16(%s)=c->fcw;' % cx.ea(ins, cx.ops[0]))

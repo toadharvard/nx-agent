@@ -197,7 +197,7 @@ def report(a, sel, run, forest, res, syms, t0):
             if v == 'equal': y2 = y - 4 * tr; nx += x; na += y2; nd += dd; ndisp += nc; ntr += tr; pr.append(y2 / x)
         if pr: ratios[r] = statistics.median(pr)
     print('chains selected %d, run %d, functions covered %d; runs %d: equal %d, different %d, skipped %d (%s)' % (len(sel), len(run), len(syms), sum(c.values()), c['equal'], c['different'] + c['harness'], sum(v for k, v in c.items() if k.startswith('skip')), '; '.join('%s %d' % kv for kv in sorted(c.items()) if kv[0].startswith('skip'))))
-    for d in diffs[:5]: print('  DIFF ' + d[:190])
+    for d in diffs[:int(os.environ.get('CHAIN_DIFFS', 5))]: print('  DIFF ' + d[:190])
     print('features (chains in run; runs equal/diff/skip): ' + '; '.join('%s %d (%d/%d/%d)' % (ft, sum(1 for r in run if ft in forest[r]['f']), fe[ft]['equal'], fe[ft]['diff'], fe[ft]['skip']) for ft in ('tail', 'retn', 'recursion', 'jumptable', 'chkstk')))
     sx = sum(v[1] for v in (G['ent'][f] for f in syms)); sa = sum(im.sym[s][1] for s in syms.values())
     if nx: print('executed insns, equal runs: x86 %d, A64 lifted %d + dispatcher %d (x%.2f lifted only, x%.2f total; trace calls subtracted), median per chain x%.2f; dispatcher %.1f insns per call (%d calls); bytes: x86 %d, A64 %d (x%.2f)' % (nx, na, nd, na / nx, (na + nd) / nx, statistics.median(ratios.values()), nd / max(ndisp, 1), ndisp, sx, sa, sa / sx))

@@ -19,7 +19,7 @@ import argparse, hashlib, importlib, json, os, re, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, '..'))
 import z3
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-import universe, defects
+import universe, defects, rewrite
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 RFO = z3.BitVec('rflags_other', 32)
@@ -79,7 +79,9 @@ def check(conds, assume, args):
 def prove_one(mod, F, code, key, args):
     """-> (result, note, certificate extras)"""
     base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base) if F.faults else base
-    drv = False; M = mod.model_post(code, PRE); D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
+    drv = False; M = mod.model_post(code, PRE); memo = {}
+    M = {k: (rewrite.narrow_div(v, memo) if not isinstance(v, dict) else {n: rewrite.narrow_div(t, memo) for n, t in v.items()}) for k, v in M.items()}
+    D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
     if not any(b in (0x64, 0x65) for b in code[:defects.prefix_skip(code)]) and any(b in (0x64, 0x65) for b in code[:4]):
         # model_sail.py takes a 0x64/0x65 ModRM/SIB/opcode byte among the first four bytes for an FS/GS prefix and adds a free fs_base/gs_base to every address;
         # with no segment prefix the base is 0 (flat), so those free variables are set to 0 in the model terms
