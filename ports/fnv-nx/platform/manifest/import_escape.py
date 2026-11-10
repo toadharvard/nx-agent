@@ -39,11 +39,11 @@ HEADER = """\
 # escape: one letter per bridge `args` letter (q = one letter): n = pointer not captured (no copy outlives the call,
 #   not returned); r = may be returned (or derived pointer returned), otherwise not captured; e = escapes / unknown.
 #   Integer and floating slots are n. Vararg: fixed slots then literal `*e`. A missing row means all-e.
-# n is LLVM's `nocapture` after inter-procedural inference on the whole linked platform module (%s).
+# n is LLVM's `nocapture` after inter-procedural inference on the whole linked platform module (pipeline line below).
 #   Thread-safety note: a function that hands the pointer to another thread necessarily stores it somewhere
 #   (queue, global, heap object, pthread_create argument, OS call) and is therefore not nocapture, hence e.
 # Assumptions: volatile accesses are plain memory accesses for capture purposes (they copy no pointers); an integer
-#   parameter is not a pointer; platform/os/os_posix.c stands in for os_horizon.c; pointers are not smuggled into
+#   parameter is not a pointer; the backend line below names the OS backend analysed; pointers are not smuggled into
 #   integers that outlive the call (inttoptr/ptrtoint chains are not followed for integer parameters).
 """
 
