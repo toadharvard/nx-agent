@@ -98,6 +98,12 @@ if [ "${FNVNX_SDD:-0}" = 1 ]; then
   # also hides the read from the N3 verdict below. With keep, a function that reads an unassigned local gets the
   # verdict `uninit` / `uninit-mem` and is not a native body; nothing is invented for it.
   FLAGS+=(-fplugin-arg-fnvnx_order-uninit=keep)
+  # R9 TSO-MAP (MASTER_PLAN4): every access to memory that is not a proven local of the function is ordered
+  # (acquire load / release store), in every unit: mode=tso. The earlier contract (volatile as the mark, the
+  # whole-program key list, wait-loop polls, relaxed refcounts) guessed which accesses are shared and is not used:
+  # refcount=full, and no key list is read or discovered (ORDER_KEYS=unit below).
+  FLAGS+=(-fplugin-arg-fnvnx_order-mode=tso -fplugin-arg-fnvnx_order-refcount=full)
+  ORDER_KEYS=unit
   # N3 (toolchain/pi, MASTER_PLAN4 R1): each object carries, per function, the verdict "inside the portable subset",
   # its inline tree and the record types it touches (section .fnvnx.n3). It changes no code.
   PI_SO=$(CXX=$CXX bash "$HERE/toolchain/pi/build.sh" "$OUT/.pi") \

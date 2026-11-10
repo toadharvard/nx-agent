@@ -2,9 +2,10 @@
  * types it touches (MASTER_PLAN4 R1 N3 / N4, R7).
  *
  * Two readings of every function:
- *   early   right after SSA is built, before any optimization: the function's own body as the source wrote it.
- *           The verdict and the types come from here (an optimizer may delete a use of an unassigned local, which
- *           is exactly the undefined behaviour the verdict is about).
+ *   early   right after the CFG is built, before any optimization and before the other plugins of the flag set
+ *           (ordering, float-to-int) rewrite accesses: the function's own body as the source wrote it. The verdict
+ *           and the types come from here; locals in registers are read once more as soon as SSA exists (an
+ *           optimizer may delete a use of an unassigned local, which is exactly what the verdict is about).
  *   late    just before RTL expansion: what is emitted. The inlined bodies come from here: GCC keeps the scope of
  *           every inlined function in the block tree of the function it was inlined into, also without debug info.
  *
@@ -68,7 +69,7 @@
 
 int plugin_is_GPL_compatible;
 
-struct facts { std::string verdict; std::set<std::string> types; bool emitted; };
+struct facts { std::string verdict; std::set<std::string> types; bool emitted, mem; };
 static std::map<std::string, facts> early;       /* by assembler name of the function */
 static std::vector<std::string> lines;
 static std::set<std::string> all_thunks;          /* every thunk of the unit, listed before code generation */
@@ -106,6 +107,15 @@ static tree walk_types(tree *tp, int *, void *data)
   std::set<std::string> *types = (std::set<std::string> *)((walk_stmt_info *)data)->info;
   if (TREE_CODE(*tp) == COMPONENT_REF) note_type(TREE_TYPE(TREE_OPERAND(*tp, 0)), *types);
   else if (TREE_CODE(*tp) == MEM_REF) note_type(TREE_TYPE(*tp), *types);
+  return NULL_TREE;
+}
+
+/* a volatile access, read off the operands (before SSA the statement's own flag is not computed yet) */
+static tree walk_volatile(tree *tp, int *walk_subtrees, void *)
+{
+  if (TYPE_P(*tp)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_CODE(*tp) == ADDR_EXPR) { *walk_subtrees = 0; return NULL_TREE; }      /* taking the address is no access */
+  if ((REFERENCE_CLASS_P(*tp) || DECL_P(*tp)) && TREE_THIS_VOLATILE(*tp)) return *tp;
   return NULL_TREE;
 }
 
@@ -276,23 +286,23 @@ static std::string join(const std::set<std::string> &v)
 }
 
 namespace {
-const pass_data early_data = { GIMPLE_PASS, "fnvnx_pi_early", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
-struct early_pass : gimple_opt_pass {
-  early_pass(gcc::context *c) : gimple_opt_pass(early_data, c) {}
+/* the function's own body, twice: right after the CFG is built, before any other plugin of the flag set has touched
+   it (they are loaded before this one, so their passes at the same place run after this one), and once more when
+   SSA exists, only for locals in registers */
+const pass_data cfg_data = { GIMPLE_PASS, "fnvnx_pi_cfg", OPTGROUP_NONE, TV_NONE, PROP_cfg, 0, 0, 0, 0 };
+struct cfg_pass : gimple_opt_pass {
+  cfg_pass(gcc::context *c) : gimple_opt_pass(cfg_data, c) {}
   unsigned int execute(function *fun) override
   {
-    bool r_asm = false, r_vol = false, r_div = false, r_shift = false, r_uninit = false;
+    bool r_asm = false, r_vol = false, r_div = false, r_shift = false;
     facts f; f.emitted = false;
     basic_block bb;
-    FOR_EACH_BB_FN(bb, fun) {
-      for (gphi_iterator pi = gsi_start_phis(bb); !gsi_end_p(pi); gsi_next(&pi))
-        for (unsigned i = 0; i < gimple_phi_num_args(pi.phi()); i++)
-          if (uninit_use(gimple_phi_arg_def(pi.phi(), i))) r_uninit = true;
+    FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
         gimple *st = gsi_stmt(gsi);
         if (is_gimple_debug(st) || gimple_clobber_p(st)) continue;      /* an end-of-life mark is no access */
         if (gimple_code(st) == GIMPLE_ASM) r_asm = true;
-        if (gimple_has_volatile_ops(st)) r_vol = true;
+        if (gimple_has_volatile_ops(st) || walk_gimple_op(st, walk_volatile, NULL)) r_vol = true;
         if (is_gimple_assign(st)) {
           tree_code c = gimple_assign_rhs_code(st);
           bool cst2 = gimple_num_ops(st) > 2 && TREE_CODE(gimple_assign_rhs2(st)) == INTEGER_CST;
@@ -301,22 +311,45 @@ struct early_pass : gimple_opt_pass {
                || c == ROUND_MOD_EXPR) && INTEGRAL_TYPE_P(TREE_TYPE(gimple_assign_lhs(st))) && !cst2) r_div = true;
           if ((c == LSHIFT_EXPR || c == RSHIFT_EXPR || c == LROTATE_EXPR || c == RROTATE_EXPR) && !cst2) r_shift = true;
         }
-        ssa_op_iter it; tree use;
-        FOR_EACH_SSA_TREE_OPERAND(use, st, it, SSA_OP_USE)
-          if (uninit_use(use)) r_uninit = true;
         walk_stmt_info wi; memset(&wi, 0, sizeof wi); wi.info = &f.types;
         walk_gimple_op(st, walk_types, &wi);
       }
-    }
     tree fn = fun->decl;
     for (tree p = DECL_ARGUMENTS(fn); p; p = DECL_CHAIN(p)) note_type(TREE_TYPE(p), f.types);
     unsigned ix; tree v;
     FOR_EACH_LOCAL_DECL(fun, ix, v) note_type(TREE_TYPE(v), f.types);
+    /* `uninit` (a local in a register) is decided on SSA and comes before uninit-mem in the order of reasons */
     f.verdict = r_asm ? "asm" : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
               : r_vol ? "volatile" : arg_unreadable.count(source_name(fn)) ? "argorder"
-              : r_div ? "div" : r_shift ? "shift" : r_uninit ? "uninit"
-              : unproven_memory_read(fun) ? "uninit-mem" : "ok";
+              : r_div ? "div" : r_shift ? "shift" : "";
+    f.mem = unproven_memory_read(fun);
+    free_dominance_info(CDI_DOMINATORS);
     early[asmname(fn)] = f;
+    return 0;
+  }
+};
+
+const pass_data early_data = { GIMPLE_PASS, "fnvnx_pi_early", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
+struct early_pass : gimple_opt_pass {
+  early_pass(gcc::context *c) : gimple_opt_pass(early_data, c) {}
+  unsigned int execute(function *fun) override
+  {
+    std::map<std::string, facts>::iterator e = early.find(asmname(fun->decl));
+    if (e == early.end()) { error("N3: function %qD reached SSA but was never read after the CFG", fun->decl); return 0; }
+    if (!e->second.verdict.empty()) return 0;
+    bool r_uninit = false;
+    basic_block bb;
+    FOR_EACH_BB_FN(bb, fun) {
+      for (gphi_iterator pi = gsi_start_phis(bb); !gsi_end_p(pi); gsi_next(&pi))
+        for (unsigned i = 0; i < gimple_phi_num_args(pi.phi()); i++)
+          if (uninit_use(gimple_phi_arg_def(pi.phi(), i))) r_uninit = true;
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+        ssa_op_iter it; tree use;
+        FOR_EACH_SSA_TREE_OPERAND(use, gsi_stmt(gsi), it, SSA_OP_USE)
+          if (uninit_use(use)) r_uninit = true;
+      }
+    }
+    e->second.verdict = r_uninit ? "uninit" : e->second.mem ? "uninit-mem" : "ok";
     return 0;
   }
 };
@@ -386,6 +419,12 @@ static void finish_unit(void *, void *)
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
   if (!plugin_default_version_check(ver, &gcc_version)) return 1;
+  register_pass_info pc;
+  pc.pass = new cfg_pass(g);
+  pc.reference_pass_name = "cfg";
+  pc.ref_pass_instance_number = 1;
+  pc.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pc);
   register_pass_info pe;
   pe.pass = new early_pass(g);
   pe.reference_pass_name = "ssa";
