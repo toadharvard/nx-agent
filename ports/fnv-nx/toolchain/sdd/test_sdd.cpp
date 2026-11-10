@@ -29,3 +29,18 @@ int use_j(J* p) { return p->inl2() + p->inl3(p); }
 extern "C" void arr_free(void*);
 struct VB : A { int vb; static void operator delete[](void* p) { arr_free(p); } ~VB(); };
 VB::~VB() {}
+// the shapes cl was asked about (MSVC 2008 SP1 /O2, the array branch of ??_E, block = array - 4):
+//   no operator delete[] in scope, or placement forms only, even with a scalar operator delete of the class:
+//     call ??3@YAXPAX@Z (the GLOBAL operator delete(void*));   (void*): the member;   (void*, size_t): the member,
+//     with sizeof(the class).  A class aligned to 8: the count is still the 4 bytes before the array.
+extern "C" void heap_free(void*, int);
+struct HK : A { int hk;                       // Havok's allocator macro
+  void* operator new(__SIZE_TYPE__, void* p) { return p; } void* operator new[](__SIZE_TYPE__, void* p) { return p; }
+  void operator delete(void* p) { heap_free(p, 1); } void operator delete(void*, void*) {} void operator delete[](void*, void*) {}
+  ~HK(); };
+HK::~HK() {}
+struct SZ : A { int sz; void operator delete[](void* p, __SIZE_TYPE__ n) { heap_free(p, (int)n); } ~SZ(); };
+SZ::~SZ() {}
+struct A8 { virtual ~A8(); double d; int i; };
+A8::~A8() {}
+A8* new_a8(int n) { return new A8[n]; }

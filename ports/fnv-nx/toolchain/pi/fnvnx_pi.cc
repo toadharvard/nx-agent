@@ -367,10 +367,21 @@ struct late_pass : gimple_opt_pass {
   {
     std::set<std::string> inl;
     inlined_blocks(DECL_INITIAL(fun->decl), inl);
+    /* the function itself, or - for a copy the optimizer made of one (constprop, isra, part, ...) - the function
+       it was copied from: by the declaration's origin, never by the spelling of the symbol (a static
+       initializer's own symbol has the file name in it, dots and all) */
     std::string name = asmname(fun->decl), clone;
-    size_t dot = name.find('.');
-    if (dot != std::string::npos) { clone = name.substr(dot + 1); name = name.substr(0, dot); }
     std::map<std::string, facts>::iterator e = early.find(name);
+    for (tree o = fun->decl; e == early.end() && DECL_ABSTRACT_ORIGIN(o) && DECL_ABSTRACT_ORIGIN(o) != o
+         && TREE_CODE(DECL_ABSTRACT_ORIGIN(o)) == FUNCTION_DECL;) {
+      o = DECL_ABSTRACT_ORIGIN(o);
+      if (!DECL_ASSEMBLER_NAME_SET_P(o)) continue;
+      std::string on = asmname(o);
+      if ((e = early.find(on)) != early.end()) {
+        clone = name.compare(0, on.size() + 1, on + ".") == 0 ? name.substr(on.size() + 1) : name;
+        name = on;
+      }
+    }
     if (e == early.end()) {
       /* a this-adjusting thunk: made by the compiler, an adjustment and a jump */
       if (!DECL_LANG_SPECIFIC(fun->decl) || !DECL_THUNK_P(fun->decl))

@@ -90,10 +90,13 @@ static const char *asmname(tree d)
   return *n == '*' ? n + 1 : n;
 }
 
+static std::set<tree> ap_set;                        /* the `<table>.fnvnx_ap<off>` declarations */
+
 static bool is_table(tree v)
 {
   /* by symbol, not by DECL_VIRTUAL_P: a hand-declared `extern void* const t[] __asm__("_ZTV...")` is the table too */
   if (!v || !VAR_P(v) || !DECL_ASSEMBLER_NAME_SET_P(v)) return false;
+  if (ap_set.count(v)) return false;                 /* an address point's own symbol, already final */
   const char *n = asmname(v);
   return !strncmp(n, "_ZTV", 4) || !strncmp(n, "_ZTC", 4);
 }
@@ -133,6 +136,7 @@ static tree ap_decl(tree vt, HOST_WIDE_INT off)
     DECL_EXTERNAL(d) = 1; TREE_PUBLIC(d) = 1; DECL_ARTIFICIAL(d) = 1; DECL_IGNORED_P(d) = 1; TREE_READONLY(d) = 1;
     DECL_VISIBILITY(d) = DECL_VISIBILITY(vt); DECL_VISIBILITY_SPECIFIED(d) = DECL_VISIBILITY_SPECIFIED(vt);
     TREE_USED(d) = 1;
+    ap_set.insert(d);
   }
   /* the table itself is no longer named: keep it written out where it is defined */
   mark_decl_referenced(vt);
@@ -155,9 +159,12 @@ static bool key_method_hook(void)
         DECL_VIRTUAL_P(f) = 0;
         DECL_VINDEX(f) = NULL_TREE;
         DECL_PRESERVE_P(f) = 1;          /* written out wherever its body is: the slot function calls it by name */
-        /* ??_E frees an array with the operator delete[] of the class's own scope: looked up now, by the front
-           end (the class is not complete yet, so by name in its members and bases): the usual (void*) form, else
-           (void*, size_t); null = the global one */
+        /* ??_E frees an array as cl's does (toolchain/sdd/test_sdd.py has the pinned cl's own code for each shape):
+           with the usual operator delete[] of the class's own scope - (void*), else (void*, size_t), which gets
+           sizeof(the class) - looked up now by the front end (the class is not complete yet, so by name in its
+           members and bases); and when the scope has none, or only placement forms (Havok's allocator macro),
+           with the GLOBAL operator delete(void*), ??3@YAXPAX@Z: not delete[], and not the class's own scalar
+           operator delete. null = that global one */
         if (!array_delete.count(t)) {
           tree found = NULL_TREE, sized = NULL_TREE;
           tree fns = lookup_fnfields(t, ovl_op_identifier(false, VEC_DELETE_EXPR), 1, tf_none);
@@ -171,7 +178,6 @@ static bool key_method_hook(void)
               else if (n == 3 && same_type_p(TREE_VALUE(TREE_CHAIN(TYPE_ARG_TYPES(TREE_TYPE(fn)))), size_type_node)) sized = fn;
             }
           if (!found) found = sized;
-          if (fns && fns != error_mark_node && !found) error("SDD2: %qT declares operator delete[] but no usual form", t);
           array_delete[t] = found;
           if (found) mark_used(found);
         }
@@ -179,10 +185,16 @@ static bool key_method_hook(void)
   return orig_key_method_may_be_inline();
 }
 
+/* COOKIE1: the count before an array made by new[] is one size_t for every element type, as in the exe (cl:
+   `mov eax, [esi-4]` / `lea edi, [esi-4]` in ??_E of a class aligned to 8). The Itanium default pads the cookie to
+   the element's alignment, so the block of such an array would start 8 bytes before it, not 4. */
+static tree cookie_size_hook(tree) { return size_in_bytes(sizetype); }
+
 static void start_unit(void *, void *)
 {
   orig_key_method_may_be_inline = targetm.cxx.key_method_may_be_inline;
   targetm.cxx.key_method_may_be_inline = key_method_hook;
+  targetm.cxx.get_cookie_size = cookie_size_hook;
 }
 
 /* the complete / deleting variant of the destructor that fn is a variant of */
@@ -216,7 +228,7 @@ static tree sdd_decl(tree vt, tree e)
   std::map<tree, tree>::iterator ad = array_delete.find(TYPE_MAIN_VARIANT(cls));
   if (ad == array_delete.end())
     { error("SDD2: table %qD: class %qT was never seen being completed", vt, cls); return NULL_TREE; }
-  t.vdel = ad->second ? asmname(ad->second) : "_ZdaPv";                        /* ::operator delete[](void*) */
+  t.vdel = ad->second ? asmname(ad->second) : "_ZdlPv";                        /* ::operator delete(void*), as cl */
   t.vdel_sized = ad->second && list_length(TYPE_ARG_TYPES(TREE_TYPE(ad->second))) > 2;   /* (void*, size_t), void */
   if (DECL_THUNK_P(e)) {
     if (!DECL_THIS_THUNK_P(e)) { error("SDD2: table %qD: a result-adjusting thunk to a destructor", vt); return NULL_TREE; }
@@ -230,6 +242,10 @@ static tree sdd_decl(tree vt, tree e)
   thunks[n] = t;
   tree d = build_decl(UNKNOWN_LOCATION, FUNCTION_DECL, get_identifier(n.c_str()), TREE_TYPE(e));
   SET_DECL_ASSEMBLER_NAME(d, get_identifier(n.c_str()));
+  /* for the fnvnx_names plugin: whose ??_E this is, and the thunk's adjustment */
+  DECL_ATTRIBUTES(d) = tree_cons(get_identifier("fnvnx_sdd"),
+      tree_cons(NULL_TREE, d1, tree_cons(NULL_TREE, build_int_cst(integer_type_node, t.fixed),
+      build_tree_list(NULL_TREE, t.virt ? integer_one_node : integer_zero_node))), NULL_TREE);
   DECL_EXTERNAL(d) = 1; TREE_PUBLIC(d) = 1; DECL_ARTIFICIAL(d) = 1; DECL_IGNORED_P(d) = 1; TREE_USED(d) = 1;
   /* GCC's walks over table entries expect a member function of the class, with a node */
   DECL_CONTEXT(d) = DECL_CONTEXT(d1);
@@ -478,7 +494,7 @@ static void finish_unit(void *, void *)
             "\tbl\t%s\n\tb\t3b\n4:\ttbz\tw21, #0, 9f\n",
             f.d0.c_str(), (long)f.size, f.d1.c_str());
     if (f.vdel_sized)
-      fprintf(asm_out_file, "\tldr\tw1, [x20, -4]\n\tldr\tw9, =%ld\n\tmul\tw1, w1, w9\n\tadd\tw1, w1, #4\n", (long)f.size);
+      fprintf(asm_out_file, "\tldr\tw1, =%ld\n", (long)f.size);          /* cl passes the element's size */
     fprintf(asm_out_file,
             "\tsub\tw0, w20, #4\n\tbl\t%s\n"
             "9:\tmov\tx0, x19\n\tldp\tx19, x20, [sp, 16]\n\tldp\tx21, x22, [sp, 32]\n\tldp\tx29, x30, [sp], 48\n"

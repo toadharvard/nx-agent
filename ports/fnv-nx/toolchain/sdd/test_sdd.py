@@ -82,14 +82,23 @@ def main():
     check('??_E flags 0: the destructor; flags 1: the deleting destructor; returns this',
           'tst w1, #3 bne 1f bl _ZN1MD1Ev b 9f 1: mov w20, w0 tbnz w21, #1, 2f bl _ZN1MD0Ev b 9f' in th
           and '9: mov x0, x19' in th, th)
-    check('??_E flags 2: n = the word before the array, elements last first, then operator delete[] on bit 0',
+    check('??_E flags 2: n = the word before the array, elements last first, then the global operator delete on bit 0 (cl: ??3)',
           '2: ldr w22, [x20, -4] 3: cbz w22, 4f sub w22, w22, #1 ldr w9, =16 madd w0, w22, w9, w20 bl _ZN1MD1Ev b 3b '
-          '4: tbz w21, #0, 9f sub w0, w20, #4 bl _ZdaPv' in th, th)
+          '4: tbz w21, #0, 9f sub w0, w20, #4 bl _ZdlPv' in th, th)
     th2 = flat(body(s, '_ZThn8_N1MD1Ev.fnvnx_sdd'))
     check('??_E of the second base: the thunk for flags 0, the adjusted object otherwise',
           'bl _ZThn8_N1MD1Ev b 9f 1: ldr w9, =-8 add w0, w0, w9 mov w20, w0 tbnz w21, #1, 2f bl _ZN1MD0Ev' in th2, th2)
     th3 = flat(body(s, '_ZN2VBD1Ev.fnvnx_sdd'))
     check("??_E frees with the class's own operator delete[]", 'ldr w9, =12 madd' in th3 and 'bl _ZN2VBdaEPv' in th3, th3)
+    th4 = flat(body(s, '_ZN2HKD1Ev.fnvnx_sdd'))
+    check('placement delete[] only (and a scalar operator delete of the class): the global operator delete, as cl',
+          'tbz w21, #0, 9f sub w0, w20, #4 bl _ZdlPv' in th4 and '_ZN2HKdlEPv' not in th4.split('2: ldr w22')[1], th4)
+    th5 = flat(body(s, '_ZN2SZD1Ev.fnvnx_sdd'))
+    check('sized delete[]: the member, with the size of one element (cl passes sizeof(the class))',
+          re.search(r'tbz w21, #0, 9f ldr w1, =12 sub w0, w20, #4 bl _ZN2SZdaEPv[jm]', th5), th5)
+    na = flat(body(s, '_Z6new_a8i'))
+    check('COOKIE1: the array of a class aligned to 8 starts 4 bytes into its block',
+          re.search(r'add w\d+, w\d+, #?4\b', na) and not re.search(r'add w\d+, w\d+, #?8\b', na), na)
     check('no deleting destructor in any table', not re.search(r'\.word\s+\S*D0Ev', s))
     check('deleting destructors are written out', '_ZN1MD0Ev:' in s and '_ZN1BD0Ev:' in s)
     vm = re.findall(r'\.ascii\s+"(_ZTV1M[^"]*)"', s)
