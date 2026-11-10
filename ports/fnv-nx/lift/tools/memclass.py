@@ -108,7 +108,15 @@ def pusharg(F, x):
             return None
         if mn(F.ins[k]) == 'call':
             a, b = F.sp.get(k), F.sp.get(x)
-            return (k, (a - b + 4) // 4) if a is not None and b is not None and a - b + 4 >= 4 and not F.multi else None
+            if a is None or b is None or F.multi:
+                a, b, j = 0, 0, x                        # fall back to the local chain: sum the known stack deltas from the push to the call
+                while j != k:
+                    q = F.ins[j]; mq = mn(q); cp = W.callpop(F, j) if mq == 'call' else None
+                    d = -4 if mq == 'push' else 4 if mq == 'pop' else (q.operands[1].imm * (1 if mq == 'add' else -1) if mq in ('add', 'sub') and rn(q, q.operands[0]) == 'esp' and q.operands[1].type == X.X86_OP_IMM else None) if mq in ('add', 'sub') and rn(q, q.operands[0]) == 'esp' else 0
+                    if d is None or (cp and cp[0] != 'c'):
+                        return None
+                    a += d + (cp[1] if cp else 0); j = F.succ[j][0]
+            return (k, (b - a - 4) // 4) if b - a - 4 >= 0 else None
         if mn(F.ins[k]) in ('pop', 'ret', 'jmp') or mn(F.ins[k])[0] == 'j':
             return None
     return None
@@ -129,24 +137,24 @@ def fcoord(F, a, p):
     return None if v is None else v + p.mem.disp
 
 
-def flow(F, x0, regs, saved, entry=False, spill=False):
+def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
     """sinks of the frame / parameter address held in regs after x0 (or at entry): set of ('S',) ('R',) ('I',) ('U',) ('M', n) ('A', callee, param)."""
     sinks, seen = set(), set()
-    work = [(x0, frozenset(regs), frozenset())] if entry else [(s, frozenset(regs), frozenset()) for s in F.succ[x0]]
+    work = [(x0, frozenset(regs), frozenset(slots0))] if entry else [(s, frozenset(regs), frozenset(slots0)) for s in F.succ[x0]]
     while work:
         a, T, S = work.pop()
         if (a, T, S) in seen:
             continue
         seen.add((a, T, S))
         if len(seen) > 400:
-            sinks.add(('U',)); break
+            sinks.add(('U', 'limit')); break
         i = F.ins[a]; m = mn(i); o = i.operands; N = set(T); NS = set(S)
         reg = lambda p: base(i.reg_name(p.reg)) if p.type == X.X86_OP_REG else None
         mc = [fcoord(F, a, p) for p in o]
         if S and m not in ('mov', 'push', 'cmp', 'test') and any(c in S for c in mc if c is not None):
-            sinks.add(('U',))
+            sinks.add(('U', 'slot-use'))
         if m == 'call' or (m == 'jmp' and (a in F.tails or not F.succ[a])):
-            for r in sorted(T):
+            for r in sorted(T & set(REGS)):
                 if m == 'jmp' or r in ('eax', 'ecx', 'edx') or target(F, a)[0] != 'A':
                     sinks.add(sink(F, a, r))
             N = set() if m == 'jmp' else N - {'eax', 'ecx', 'edx'}
@@ -157,7 +165,7 @@ def flow(F, x0, regs, saved, entry=False, spill=False):
         elif m == 'push' and (reg(o[0]) in T or (mc[0] is not None and mc[0] in S)):
             pa = None if a in saved else pusharg(F, a)
             if a not in saved:
-                sinks.add(('U',) if pa is None else sink(F, pa[0], 's%d' % pa[1]))
+                sinks.add(('U', 'pusharg') if pa is None else sink(F, pa[0], 's%d' % pa[1]))
         elif m in ('mov', 'lea') and o[0].type == X.X86_OP_REG and base(i.reg_name(o[0].reg)) is not None:
             d = reg(o[0])
             src = reg(o[1]) if o[1].type == X.X86_OP_REG else None
@@ -176,7 +184,7 @@ def flow(F, x0, regs, saved, entry=False, spill=False):
             elif spill and mc[0] is not None:
                 NS.add(mc[0])
             elif mm.base and i.reg_name(mm.base) in ('esp', 'ebp') and not mm.index:
-                sinks.add(('U',))
+                sinks.add(('U', 'spill'))
             else:
                 sinks.add(('S',))
         elif m in ('cmp', 'test'):
@@ -187,11 +195,11 @@ def flow(F, x0, regs, saved, entry=False, spill=False):
             for k, p in enumerate(o):
                 r = reg(p)
                 if r in T and p.access & 1 and not (k == 0 and m in ('add', 'sub', 'and', 'or', 'inc', 'dec', 'xor') and (len(o) < 2 or o[1].type == X.X86_OP_IMM)):
-                    sinks.add(('U',))
+                    sinks.add(('U', 'use:' + m))
                 elif r in T and p.access & 2 and k == 0 and not p.access & 1:
                     N.discard(r)
             if 'eax' in T and m in IMPL:
-                sinks.add(('U',))
+                sinks.add(('U', 'implicit-eax'))
         if N or NS:
             work += [(s, frozenset(N), frozenset(NS)) for s in F.succ[a]]
     return sinks
@@ -317,21 +325,22 @@ def analyze(args):
                 allstack = allstack or ix is not None
         if kind not in FUNK and (any(p.type == X.X86_OP_MEM and p.mem.base and i.reg_name(p.mem.base) in ('esp', 'ebp') and not p.mem.index and p.access & 3 and s is None and F.bp.get(x) is None for p in o)):
             allstack = True
-    events = []
-    for x, c, idx, dst in frame_events(F):
-        sk = sorted(flow(F, x, [dst], saved)) if dst else [('U',)]
-        if c is not None and c >= 4 and not fun:
-            allstack = True
-        events.append((c, idx, sk))
+    fe = frame_events(F)
+    allstack = allstack or (not fun and any(c is not None and c >= 4 for x, c, idx, dst, sl in fe))
+    evflows = lambda sp_: [(c, idx, sorted(flow(F, x, [dst], saved, False, sp_)) if dst else sorted(flow(F, x, [], saved, False, True, [sl])) if sl is not None and sp_ else [('U', 'spill' if sl is not None else 'push/store-esp')]) for x, c, idx, dst, sl in fe]
+    events = evflows(False)
+    base_ok = not fun and not F.multi and not cidx and not any(f[3] == 'u' for f in fr)
+    if base_ok and any(sk for c, idx, sk in events) and all(all(t == ('U', 'spill') for t in sk) for c, idx, sk in events):
+        events = evflows(True)               # closed under the assumption that frame slots are private; verified by the re-run
     summ = {}
-    spill = not fun and not F.multi and not cidx and not any(e[2] for e in events) and not any(f[3] == 'u' for f in fr)
+    spill = base_ok and not any(e[2] for e in events)
     if not fun:
         for r in livein(F, saved):
             summ[r] = sorted(flow(F, F.a, [r], saved, True, spill))
         for x, d, par in srcs:
             if d is None:
                 pa = pusharg(F, x)
-                sk = [('U',)] if pa is None else [sink(F, pa[0], 's%d' % pa[1])]
+                sk = [('U', 'pusharg')] if pa is None else [sink(F, pa[0], 's%d' % pa[1])]
             else:
                 sk = sorted(flow(F, x, [d], saved, False, spill))
             summ[par] = sorted(set(summ.get(par, [])) | set(sk))
@@ -414,7 +423,7 @@ def main():
     # ---- frame contamination per owning function
     def verdict(sk):
         r = [s for s in sk if s[0] in 'SRIU'] + [s for s in sk if s[0] == 'M'] + [s for s in sk if s[0] == 'A' and isbad(s[1], s[2])]
-        return sorted({'stored' if s[0] == 'S' else 'returned' if s[0] == 'R' else 'indirect' if s[0] == 'I' else 'unknown' if s[0] == 'U' else 'import:' + s[1] if s[0] == 'M' else 'callee' for s in r})
+        return sorted({'stored' if s[0] == 'S' else 'returned' if s[0] == 'R' else 'indirect' if s[0] == 'I' else 'unknown:' + s[1] if s[0] == 'U' else 'import:' + s[1] if s[0] == 'M' else 'callee' for s in r})
     fro = defaultdict(list)
     for f in sorted(R):
         for p in (par.get(f, []) if kind[f] in FUNK else [f]):
@@ -434,13 +443,15 @@ def main():
             bnd.update(c if not fun else (bp + c if bp is not None else 0) for x, ls, w, role, c in r['fr'] if role in 'alorp')
         frame[g] = (sorted(bnd), evs, whole)
     res_t, per, lost = Counter(), {}, Counter()
-    nescf, reasons, rule2, rulef = 0, Counter(), Counter(), Counter()
+    nescf, reasons, rule2, rulef, ureasons = 0, Counter(), Counter(), Counter(), Counter()
     for g in sorted(R):
         bnd, evs, whole = frame[g]
         anyv = [e for e in evs if e[2]]
         if anyv:
             nescf += 1
             reasons[(sorted(r for e in anyv for r in e[2])[0]).split(':')[0]] += 1
+            for r in sorted({r for e in anyv for r in e[2] if r.startswith('unknown')}):
+                ureasons[r[8:].split(':')[0]] += 1
 
     def contam(g, c, final):
         bnd, evs, whole = frame[g]
@@ -520,6 +531,7 @@ def main():
         sum(1 for a in order if R[a]['why']), sum(1 for a in order if R[a]['why'] and kind[a] not in FUNK), dict(sorted(rs.items())), res_t['funclet-parent-unknown']))
     print('frames with an escaping address: %d of %d; first reason: %s; frames flagged whole-frame (computed offsets / epochs): %d; entries taking their arg-area address: %d' % (
         nescf, len(frame), dict(sorted(reasons.items())), sum(1 for g in frame if frame[g][2]), sum(1 for a in R if R[a]['allstack'])))
+    print('  unknown-sink reasons (frames): ' + ' '.join('%s=%d' % kv for kv in sorted(ureasons.items(), key=lambda kv: (-kv[1], kv[0]))[:10]))
     print('parameter summaries: %d non-escaping, %d escaping; fixed-point rounds %d' % (npar['ok'], npar['esc'], rounds))
     print('top imports by accesses lost: ' + ' '.join('%s=%d' % kv for kv in sorted(lost.items(), key=lambda kv: (-kv[1], kv[0]))[:15]))
     print('atomics: lock %d xchg-mem %d cmpxchg %d xadd %d; tls displacements: %s' % (fl['lock'], fl['xchg'], fl['cmpxchg'], fl['xadd'], ' '.join('%s=%d' % kv for kv in sorted(fl.items()) if kv[0].startswith('tls:'))[:150]))

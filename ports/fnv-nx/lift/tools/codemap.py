@@ -273,3 +273,31 @@ def ptrclass(U):
     L = ['pointer targets %d: (a) code %d [%s], (b) data %d, (c) UNDETERMINED %d' % (len(sites), cnt['a'], ', '.join('%s %d' % kv for kv in sorted(why.items()) if kv[0][0] == 'a'), cnt['b'], cnt['c'])]
     L += ['  (c) %6d  %s' % (n, p) for p, n in sorted(grp.items(), key=lambda kv: (-kv[1], kv[0]))[:10]]
     return L, cnt['c']
+
+# ---- NORETURN: least fixed point over entries
+NRIMP = {'ExitProcess', 'ExitThread', '_exit', 'exit', 'abort', '_amsg_exit', '_CxxThrowException', 'longjmp'}      # imports documented as never returning
+def nr_sites(U, imports):
+    """({`call [iat]` insn addresses}, {`jmp [iat]` insn addresses}) whose IAT slot imports a documented never-returning function."""
+    slots = {a for a, n in imports.items() if n.split('!')[-1] in NRIMP}; calls = set(); jmps = set()
+    for r in U.relocs:
+        if U.intext(r) and U.u32(r) in slots and U.intext(r - 2):
+            b = U.text[r - 2 - U.T0:r - U.T0]
+            if b == b'\xff\x15': calls.add(r - 2)
+            elif b == b'\xff\x25': jmps.add(r - 2)
+    return calls, jmps
+def noreturn_lfp(E, trav, seeds):
+    """N = least set such that an entry is in N iff no path of its descent reaches a ret, every path ends in a call to a member of N, a call/jmp to a
+    never-returning import, `ud`, a fault, an infinite loop or a tail jump (or fall-through) into a member of N, and no path ends in an unknown
+    indirect jump. trav(e, N) -> (extent, deps, ends): ends holds 'ret' | 'bad' | 'ud' | 'fault' | 'nrimp' | 'callN' | entry addresses (tail edges).
+    Returns (N, {entry: (extent, deps, ends)} computed with the final N)."""
+    N = set(seeds); res = {}; uses = {}; dirty = set(E)
+    while dirty:
+        new = []
+        for e in sorted(dirty):
+            ext, deps, ends = trav(e, N); res[e] = (ext, deps, ends)
+            for x in deps: uses.setdefault(x, set()).add(e)
+            if e not in N and 'ret' not in ends and 'bad' not in ends and all(x in N for x in ends if isinstance(x, int)): new.append(e)
+        dirty = set()
+        for e in new: N.add(e)
+        for e in new: dirty |= uses.get(e, set())
+    return N, res

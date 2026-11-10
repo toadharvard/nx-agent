@@ -341,7 +341,7 @@ def track(F):
 
 
 def frame_events(F):
-    """frame-address events: (insn, coordinate or None, indexed, destination register or None). coordinate = esp-entry-relative offset."""
+    """frame-address events: (insn, coordinate or None, indexed, destination register or None, frame slot written or None)."""
     track(F)
     out = []
     for x in sorted(F.ins):
@@ -349,13 +349,14 @@ def frame_events(F):
         r0 = rn(i, o[0]) if o else None; r1 = rn(i, o[1]) if len(o) > 1 else None
         if m == 'lea' and o[1].mem.base and i.reg_name(o[1].mem.base) in ('esp', 'ebp') and r0 not in ('esp', 'ebp'):
             bs = i.reg_name(o[1].mem.base); v = s if bs == 'esp' else b
-            out.append((x, None if v is None else v + o[1].mem.disp, bool(o[1].mem.index), r0))
+            out.append((x, None if v is None else v + o[1].mem.disp, bool(o[1].mem.index), r0, None))
         elif m == 'mov' and r1 in ('esp', 'ebp') and o[0].type == X.X86_OP_REG and r0 not in ('esp', 'ebp'):
-            out.append((x, s if r1 == 'esp' else b, False, r0))
+            out.append((x, s if r1 == 'esp' else b, False, r0, None))
         elif m == 'push' and r0 in ('esp', 'ebp') and (r0 == 'esp' or b is not None):
-            out.append((x, s if r0 == 'esp' else b, False, None))
+            out.append((x, s if r0 == 'esp' else b, False, None, None))
         elif m == 'mov' and r1 in ('esp', 'ebp') and o[0].type == X.X86_OP_MEM and not (o[0].mem.segment and i.reg_name(o[0].mem.segment) == 'fs'):
-            out.append((x, s if r1 == 'esp' else b, False, None))
+            mm = o[0].mem; v = s if mm.base and i.reg_name(mm.base) == 'esp' else b if mm.base and i.reg_name(mm.base) == 'ebp' else None
+            out.append((x, s if r1 == 'esp' else b, False, None, None if v is None or mm.index or F.multi else v + mm.disp))
     return out
 
 

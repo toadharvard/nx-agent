@@ -47,18 +47,20 @@ def ir_sha():
     if _irsha is None: _irsha = hashlib.sha256(open(IR, 'rb').read()).hexdigest()
     return _irsha
 
-def run_isla(code):
+def run_isla(code, timeout=600):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present"""
     if not os.path.exists(IR): raise RuntimeError('missing %s: run proof/sail_build.sh' % IR)
     args = list(SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
-    key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'])).encode()).hexdigest()
+    key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []))).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)
     if os.path.exists(base + '.out') and os.path.exists(base + '.err'): return open(base + '.out').read(), open(base + '.err').read()
     cb = '#x' + code.ljust(16, b'\0')[::-1].hex()
-    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', '600', 'x86_fetch_decode_execute', '()',
+    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', str(timeout), 'x86_fetch_decode_execute', '()',
            '-I', 'code_base=#x%012x' % ADDR, '-I', 'code_bytes=' + cb, '-I', 'rip=#x%016x' % ADDR] + args + ['-D', 'p', '--traces', '--error-traces', '-s']
     env = dict(os.environ, LD_LIBRARY_PATH=Z3LIB + ':' + os.environ.get('LD_LIBRARY_PATH', ''))
-    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    try: r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout + 20)     # isla's own --timeout is not honoured while z3 is busy
+    except subprocess.TimeoutExpired:
+        return 'Error Timeout\n(trace\n  (write-reg |Final result| nil (_ poison)))\n', 'hard timeout %ds\n' % (timeout + 20)
     if r.returncode not in (0, 1): raise RuntimeError('isla failed (%d): %s' % (r.returncode, r.stderr[-400:]))
     open(base + '.out.tmp', 'w').write(r.stdout); open(base + '.err.tmp', 'w').write(r.stderr)
     os.replace(base + '.err.tmp', base + '.err'); os.replace(base + '.out.tmp', base + '.out')

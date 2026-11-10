@@ -13,7 +13,7 @@ from collections import Counter, deque
 from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
-import pemod, ehtables
+import pemod, ehtables, codemap
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
 PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']
 CN = {1: 'code-proven', 2: 'code-candidate', 3: 'pe-header-data', 4: 'padding', 5: 'non-code'}
@@ -115,27 +115,34 @@ def run(path):
         while queue: descend(queue.popleft())
         ch = tail_pass() + eh.scan()
         if not queue and not ch: break
-    # ---- per-entry extents (a path ends at another entry, ret, indirect jmp, ud or the span end)
-    E = es(); exts = {}; edges = {}; cnt = {}
-    for e in E:
-        ext = []; seen = set(); ed = set(); n_ud = n_xf = n_mf = 0; st = [e]
+    # ---- per-entry descents under NORETURN (a path ends at another entry, ret, indirect jmp, ud, the span end, or a call to a never-returning callee)
+    E = es(); cnt = {}; udinfo = {}; RET = ('ret', 'retf', 'iret', 'iretd'); nrcall, nrjmp = codemap.nr_sites(X_, imports)
+    def trav(e, N):
+        ext = []; seen = set(); deps = set(); ends = set(); n_ud = n_xf = n_mf = 0; uds = []; st = [(e, 0)]
         while st:
-            a = st.pop()
+            a, prev = st.pop()
             while True:
                 if a in seen: break
-                if a != e and a in ent: ed.add(a); break
-                if a in ud: n_ud += 1; break
-                if a in xf: n_xf += 1; break
-                di = dec.get(a)
-                if di is None: break
-                seen.add(a); ext.append(a); n_mf += a in misfit
-                if a in calltg: ed.add(calltg[a])
-                st.extend(t for t in di[4] if intext(t))
-                if not di[3]: break
-                a += di[0]
-        exts[e] = ext; edges[e] = ed; cnt[e] = (n_ud, n_xf, n_mf)
+                if a != e and a in ent: deps.add(a); ends.add(a); break
+                if a in ud or a in xf or a not in dec:
+                    ends.add('ud'); n_ud += a in ud; n_xf += a in xf; uds.append((a, prev)); break
+                seen.add(a); ext.append(a); di = dec[a]; n_mf += a in misfit; mn = di[1]
+                if mn in RET: ends.add('ret'); break
+                ct = calltg.get(a)
+                if ct is not None: deps.add(ct)
+                if a in nrcall or (ct is not None and ct in N): ends.add('callN'); break
+                if mn == 'jmp' and not di[4]: ends.add('nrimp' if a in nrjmp else 'bad'); break
+                st.extend((t, a) for t in di[4] if intext(t))
+                if not di[3]:
+                    if not di[4]: ends.add('fault')
+                    break
+                prev = a; a += di[0]
+        cnt[e] = (n_ud, n_xf, n_mf); udinfo[e] = uds
+        return ext, deps, ends
+    NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent))
+    exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
     # ---- provenance: proven roots + control-transfer consumers (jump tables, vptr-store runs) found in proven code
-    proven = set(); pset = set(); stored = {}
+    proven = set(); pset = set(); stored = {}; vptr = set()
     for r in sorted(r for r in relocs if intext(r)):             # data addresses that decoded code stores into memory (`mov [m], imm32`)
         v = u32(r)
         if v not in rset: continue
@@ -143,11 +150,18 @@ def run(path):
             a = r - k
             if a in dec and a + dec[a][0] > r:
                 i = next(md.disasm(text[a - T0:a - T0 + 15], a, 1))
-                if i.mnemonic == 'mov' and i.operands[0].type == X.X86_OP_MEM and i.operands[1].type == X.X86_OP_IMM and a + i.imm_offset == r: stored.setdefault(v, []).append(a)
+                if i.mnemonic == 'mov' and i.operands[0].type == X.X86_OP_MEM and i.operands[1].type == X.X86_OP_IMM and a + i.imm_offset == r:
+                    stored.setdefault(v, []).append(a)
+                    if i.operands[0].mem.disp == 0 and i.operands[0].mem.base and not i.operands[0].mem.index: vptr.add(v)      # `mov [reg], imm32`: an object's first dword
                 break
     def runs(t, bound):
+        """slots of a vptr-store / jump-table run: relocated dwords up to the next stored address, cut at the first slot that cannot be a code pointer
+        (value outside the executable spans, or its descent hits ud / a relocation misfit)."""
         s = []; q = t
-        while q in rset and (q == t or not bound(q)): s.append(q); q += 4
+        while q in rset and (q == t or not bound(q)):
+            w = u32(q)
+            if not (intext(w) and w in ent and not cnt[w][0] and not cnt[w][2]): break
+            s.append(q); q += 4
         return s
     work = sorted(roots); donejt = set(); donevt = set()
     while True:
@@ -160,7 +174,7 @@ def run(path):
             if a in pset and T not in donejt:
                 donejt.add(T); new += [u32(q) for q in runs(T, lambda q: q in stored) if intext(u32(q))]
         for v, sites in sorted(stored.items()):
-            if v not in donevt and any(a in pset for a in sites):
+            if v not in donevt and v in vptr and any(a in pset for a in sites):
                 donevt.add(v); new += [u32(q) for q in runs(v, lambda q: q in stored) if intext(u32(q))]
         new = [w for w in new if w in ent and w not in proven]
         if not new: break
@@ -174,7 +188,7 @@ def run(path):
             if pv: covP[o:o + sz] = b'\1' * sz
             else: covC[o:o + sz] = b'\1' * sz; cand_insn.add(a)
             if not own[o]: own[o:o + sz] = array('I', [e]) * sz
-    cand_only = len(cand_insn - pset)
+    cand_only = len(cand_insn - pset); mcand = Counter(dec[a][1] for a in cand_insn - pset)
     pe = bytearray(TN)
     for va, ln, lab in pemod.pe_ranges(M):
         if max(va, T0) < min(va + ln, T1): pe[max(va, T0) - T0:min(va + ln, T1) - T0] = b'\1' * (min(va + ln, T1) - max(va, T0))
@@ -217,7 +231,7 @@ def run(path):
         pk = next(k for k in PRI if k in ent[e]); n_ud, n_xf, n_mf = cnt[e]; kc[pk] += 1
         fl = ['proven' if e in proven else 'candidate'] + sorted(ent[e] - {pk}) + (['first-ud'] if e in ud else []) + ['%s=%d' % kv for kv in (('ud', n_ud), ('xf', n_xf), ('reloc-misfit', n_mf)) if kv[1]]
         out.append('%08x\t%s\t%d\t%s' % (e, pk, sum(dec[a][0] for a in exts[e]), ','.join(fl)))
-    open(outd + '/universe.tsv', 'w').write('\n'.join(out) + '\n')
+    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the preferred image base (not RVAs); columns: entry, kind, extent bytes, flags\n' % M.base + '\n'.join(out) + '\n')
     # ---- totality gate
     targets = {v for r, v in rvals} | set(XC) | ({M.base + M.entry} if M.entry else set()) | {t for t in callers if intext(t)} | set(tailsrc) | {t for t, ks in ent.items() if ks & {'tls', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}}
     cert = sum(1 for t in targets if t in ent and (t in dec or t in ud or t in xf))
@@ -246,12 +260,34 @@ def run(path):
     exs = [n for n, a, z, ro in M.xs]; green = not why
     print('%s: sections %d (executable %d: %s), reloc %s (%d fixups), imports %d, exports code %d (data %d) forwarders %d, entry rva %x' % (os.path.basename(path), len(M.secs), len(exs), ' '.join(exs[:4]) + (' ...' if len(exs) > 4 else ''), 'yes' if RL is not None else 'NO', len(relocs), len(imports), len(XC), len(XD), XFW, M.entry))
     print('\n'.join(fi[:3]))
+    print('README: addresses in universe.tsv/codemap.tsv are absolute VAs at the preferred image base 0x%08x (RVA = VA - base)' % M.base)
+    nri = sorted({n.split('!')[-1] for n in imports.values()} & codemap.NRIMP)
+    print('noreturn entries %d (seeds: thrower %s; never-returning imports present: %s; call sites %d, jmp sites %d)' % (len(NR), 'yes' if eh.thrower in ent else 'no', ' '.join(nri) or 'none', len(nrcall), len(nrjmp)))
+    pu = [e for e in E if e in proven and cnt[e][0]]; why_ud = Counter()
+    def udwhy(u, p):
+        if p == 0: return 'entry-itself'
+        d = dec.get(p); k = 'fallthrough' if p + d[0] == u else 'branch-target'
+        return k + '-of-' + d[1] if k == 'branch-target' else k + '-after-' + d[1]
+    for e in pu:
+        for u, p in udinfo[e]: why_ud[udwhy(u, p)] += 1
+    print('proven entries still with ud: %d; ud paths by cause: %s; first: %s' % (len(pu), dict(sorted(why_ud.items())), ' '.join('%08x@%08x:%s' % (e, udinfo[e][0][0], udwhy(*udinfo[e][0])) for e in pu[:10])))
+    tc = Counter()
+    for e in E:
+        ss = set(exts[e]); pv = 'proven' if e in proven else 'candidate'
+        for a in exts[e]:
+            for t in dec[a][4]:
+                if t in ent: tc[pv, 'entry'] += 1
+                elif not intext(t): tc[pv, 'outside-spans'] += 1
+                else: tc[pv, 'label-in-own-extent' if t in ss else 'target-undecodable'] += 1
+    print('direct jmp/jcc targets of reached insns: %s' % '; '.join('%s %s=%d' % (k[0], k[1], n) for k, n in sorted(tc.items())))
     print('entries %d (proven %d, candidate %d): %s' % (len(E), len(proven), len(E) - len(proven), dict(sorted(kc.items()))))
     print('entries with ud %d (candidate %d), candidate entries whose first instruction is ud %d, with xf %d, with reloc-misfit %d' % (
         sum(1 for e in E if cnt[e][0]), sum(1 for e in E if cnt[e][0] and e not in proven), sum(1 for e in E if e in ud and e not in proven), sum(1 for e in E if cnt[e][1]), sum(1 for e in E if cnt[e][2])))
     print('instructions: proven %d, candidate-only %d; ud sites %d, xf sites %d, misfit %d; vtable runs proven %d, jump tables proven %d' % (len(pset), cand_only, len(ud), len(xf), len(misfit), len(donevt), len(donejt)))
     print('bytes of %d: %s' % (TN - cc[7], ', '.join('%s %d' % (CN[c], cc[c]) for c in sorted(CN))))
     print('pointer targets %d: (a) proven code %d, (b) data-read or PE-directory %d, (c) other %d; direct targets leaving spans: proven %d, candidate %d (in image %d)' % (len(pt), na, nb, nc, len(lvp), len(lv) - len(lvp), sum(1 for a, t in lv if img(t))))
+    cm = {k: n for k, n in mcand.items() if k not in mp}
+    print('mnemonics only in candidate-only code: %d mnemonics, %d instructions (of %d candidate-only); top 30: %s' % (len(cm), sum(cm.values()), cand_only, ' '.join('%s=%d' % kv for kv in sorted(cm.items(), key=lambda kv: (-kv[1], kv[0]))[:30])))
     print('mnemonics in proven code not in the exe universe (%d%s): %s' % (len([k for k in mp if k not in exe_mn]), '' if exe_mn else ', exe list missing', ' '.join('%s=%d' % kv for kv in new_mn)))
     open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': len(targets), 'certified': cert, 'uncertified': len(targets) - cert}) + '\n')
     print('gate l3.codemap.%s: %s (targets %d, certified %d)%s' % (name, 'green' if green else 'red', len(targets), cert, ''.join('; RED: ' + w for w in why)))
