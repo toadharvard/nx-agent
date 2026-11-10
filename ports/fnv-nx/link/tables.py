@@ -8,7 +8,9 @@ stage emits only data:
 
   image_ptrs.S   one pair of words per relocated code pointer of the data image (vftable slots, callbacks,
                  __xc ...): the image address and `__fnv_<target>`.  The loader stores the native address there.
-                 A target with no body is an undefined symbol: the link fails until BODYSEL gives it a body.
+                 Invariant, not a decision: every target has a guest entry (R5) and every native body passed
+                 N1, so an unresolved `__fnv_<target>` here means "N1/certificate violated: tool defect".
+                 Expected count 0; the selector, not the linker, decides bodies.
   vtsites.tsv    unit, address-point symbol `_ZTV<C>.fnvnx_ap<off>` (one relocation per sub-vtable, emitted by
                  L2's compiler plugin), exe vftable address (contract/vtid.py, R6).  The link rebinds that
                  symbol of that unit to the address; no code is rewritten.
