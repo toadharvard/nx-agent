@@ -35,7 +35,7 @@ import verdict  # noqa: E402
 
 GATE_MAX = 1 << 20
 REG = ["gate_data.py", "gate_call.py", "gate_vcall.py", "gate_xc.py", "registry.py", "gatefile.py", "store.py"]
-TOOLS = {"exefacts": ["exefacts.py", "store.py"], "n1": ["n1.py", "gatefile.py", "store.py"], "objfacts": ["objfacts.py", "store.py"],
+TOOLS = {"exefacts": ["exefacts.py", "store.py"], "n1": ["n1.py", "exefacts.py", "gatefile.py", "store.py"], "objfacts": ["objfacts.py", "store.py"],
          "registry": REG, "bodysel": ["bodysel.py", "gatefile.py", "store.py"], "proto": ["proto.py", "store.py"]}
 C = "/in/contract/"
 
