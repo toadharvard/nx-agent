@@ -1,17 +1,17 @@
 /* waveout.cpp - winmm waveOut (the Bink video DLL's audio path) on the DirectSound mixer.
  *
- * One device (id 0, also WAVE_MAPPER) = the mixer's sink (48 kHz stereo). Each open handle owns one mixer voice
- * over a private ring in the handle's own format (8/16-bit, 1/2 ch, any rate), so format conversion and rate
- * conversion are the mixer's (the DirectSound path). A feeder pass copies queued blocks into the ring (honouring
- * BEGINLOOP/ENDLOOP), counts the source frames the voice consumed (play-cursor deltas, clamped to what was
- * written), silences consumed ring space, completes blocks and starts/stops the voice (it plays only while there
- * is unconsumed data and the device is not paused). The pass runs inside every API call that changes state and
- * every 2 ms on a feeder thread. Callbacks run on a separate delivery thread holding no lock, in queue order.
+ * One device (id 0, also WAVE_MAPPER) = the mixer's sink (48 kHz stereo). Each open handle owns one mixer
+ * pull-source voice in the handle's own format (8/16-bit, 1/2 ch, any rate), so format and rate conversion are the
+ * mixer's. The mixer PULLS: while rendering it calls pull() for exactly the source frames its resampler needs
+ * (mixer.h), pull() copies them from the queued WAVEHDR blocks in order (BEGINLOOP/ENDLOOP/dwLoops honoured;
+ * paused = 0 frames), adds them to the exact consumed-frame position (waveOutGetPosition) and completes a block at
+ * the very frame its last frame is pulled. Nothing depends on thread timing or on how the sink splits its
+ * renders. Completed headers go to the delivery thread, which calls back with no lock held, in completion order.
  *
- * Assumptions: the feeder runs at least once per ring lap (ring >= 1 s of source, >= 4096 frames); a block length
- * is truncated to whole frames; CALLBACK_THREAD posts to the layer's one message queue (the thread id is not
- * used: window.cpp has a single process-wide queue). One lock (g_lock) guards all device state; the mixer's own
- * lock is only ever taken after it, the callback queue lock after both. */
+ * Locks: g_lock guards the handle list; each handle's wlock guards its queue/position and is taken by pull()
+ * inside the mixer's render lock, so a holder of wlock never calls the mixer or takes g_lock (order: g_lock >
+ * mixer lock > wlock > g_qlock). A block's length must be whole frames (else MMSYSERR_INVALPARAM). CALLBACK_THREAD
+ * posts to the layer's one message queue (no PostThreadMessageA exists, the thread id is not used). */
 #include "../win32/w32.h"
 #include <dsound.h>
 #include "backend.h"
@@ -37,15 +37,16 @@ enum { CB_WINDOW = 1, CB_THREAD = 2, CB_FUNC = 3, CB_EVENT = 5 };
 enum { WOM_OPEN = 0x3BB, WOM_CLOSE = 0x3BC, WOM_DONE = 0x3BD };
 
 struct node {
-    node *next; nx_wavehdr *h; uint32_t frames, off, flags, loops; uint64_t end; bool fed;
+    node *next; nx_wavehdr *h; uint32_t frames, off, flags, loops; bool fed;
 };
 struct cbinfo { unsigned kind; uintptr_t target, inst; };
 struct wo {
-    wo *next; uintptr_t id; mix_format fmt; uint8_t *ring; uint32_t ring_frames, silence, vol;
+    wo *next; uintptr_t id; mix_format fmt; uint32_t vol;
     mix_voice *voice; cbinfo cb;
+    os_lock_t wlock;                        /* guards everything below */
     node *head, *tail, *cur, *loop_begin;
-    uint64_t wr, rd, loop_fed; uint32_t cursor_last, loops_left;
-    bool paused, playing, loop_active;
+    uint64_t pulled, loop_fed; uint32_t loops_left;
+    bool paused, loop_active;
 };
 struct msg { msg *next; cbinfo cb; uintptr_t hwo; UINT m; uintptr_t p1; };
 
@@ -111,33 +112,23 @@ void apply_gain(wo *w)
     mixer_voice_set_gain(w->voice, l, r);
 }
 
-void ring_copy(wo *w, uint64_t at, const uint8_t *src, uint32_t frames, bool silent)
+/* Hand out up to `frames` frames into dst (may be NULL with 0: drain), completing every block that is exhausted;
+ * wlock held. Blocks complete in order; the blocks of a loop complete together when the loop ends. */
+size_t advance(wo *w, uint8_t *dst, size_t frames)
 {
-    const uint32_t b = w->fmt.block;
-    while (frames) {
-        uint32_t pos = (uint32_t)(at % w->ring_frames), n = w->ring_frames - pos;
-        if (n > frames) n = frames;
-        if (silent) memset(w->ring + (size_t)pos * b, w->silence, (size_t)n * b);
-        else { memcpy(w->ring + (size_t)pos * b, src, (size_t)n * b); src += (size_t)n * b; }
-        at += n; frames -= n;
-    }
-}
-
-void fill(wo *w)
-{
-    uint64_t space = w->ring_frames - (w->wr - w->rd);
-    while (space && w->cur) {
-        node *n = w->cur;
+    size_t got = 0;
+    while (node *n = w->cur) {
         if (n->off == 0 && !w->loop_active && (n->flags & H_BEGIN)) {
             w->loop_active = true; w->loop_begin = n; w->loops_left = n->loops ? n->loops : 1; w->loop_fed = 0;
         }
-        uint32_t k = n->frames - n->off;
-        if (k > space) k = (uint32_t)space;
-        if (k) {
-            ring_copy(w, w->wr, (const uint8_t *)n->h->lpData + (size_t)n->off * w->fmt.block, k, false);
-            n->off += k; w->wr += k; space -= k; w->loop_fed += k;
+        if (n->off < n->frames) {
+            size_t k = n->frames - n->off;
+            if (k > frames - got) k = frames - got;
+            if (!k) break;
+            memcpy(dst + got * w->fmt.block, (const uint8_t *)n->h->lpData + (size_t)n->off * w->fmt.block, k * w->fmt.block);
+            n->off += (uint32_t)k; got += k; w->pulled += k; w->loop_fed += k;
+            if (n->off < n->frames) break;
         }
-        if (n->off < n->frames) break;
         if (w->loop_active && (n->flags & H_END)) {
             if (w->loops_left > 1 && w->loop_fed > 0) {
                 w->loops_left--; w->loop_fed = 0;
@@ -147,58 +138,35 @@ void fill(wo *w)
             }
             w->loop_active = false;
         }
-        n->fed = true; n->end = w->wr;
+        n->fed = true;
         w->cur = n->next;
+        while (w->head && w->head->fed && !(w->loop_active && w->head == w->loop_begin)) {
+            node *d = w->head;
+            w->head = d->next;
+            if (!w->head) w->tail = NULL;
+            d->h->dwFlags = (d->h->dwFlags & ~(uint32_t)H_QUEUE) | H_DONE;
+            post(w->cb, w->id, WOM_DONE, (uintptr_t)d->h);
+            free(d);
+        }
     }
+    return got;
 }
 
-/* the feeder pass of one handle; g_lock held */
-void pass(wo *w)
+/* the mixer's stream callback: runs under the mixer's render lock (must not call the mixer) */
+size_t pull(void *user, void *dst, size_t frames)
 {
-    const uint32_t cur = mixer_voice_play_cursor(w->voice) / w->fmt.block;
-    uint64_t delta = (cur + w->ring_frames - w->cursor_last) % w->ring_frames;
-    w->cursor_last = cur;
-    if (delta > w->wr - w->rd) delta = w->wr - w->rd;
-    ring_copy(w, w->rd, NULL, (uint32_t)delta, true);
-    w->rd += delta;
-    fill(w);
-    while (w->head && w->head->fed && w->head->end <= w->rd && !(w->loop_active && w->head == w->loop_begin)) {
-        node *n = w->head;
-        w->head = n->next;
-        if (!w->head) w->tail = NULL;
-        n->h->dwFlags = (n->h->dwFlags & ~(uint32_t)H_QUEUE) | H_DONE;
-        post(w->cb, w->id, WOM_DONE, (uintptr_t)n->h);
-        free(n);
-    }
-    const bool want = !w->paused && w->wr > w->rd;
-    if (want && !w->playing) {
-        w->cursor_last = (uint32_t)(w->rd % w->ring_frames);
-        mixer_voice_set_cursor(w->voice, w->cursor_last * w->fmt.block);
-        mixer_voice_play(w->voice, 1);
-        w->playing = true;
-    } else if (!want && w->playing) {
-        mixer_voice_stop(w->voice);
-        w->playing = false;
-    }
-}
-
-void feeder_loop(void *)
-{
-    for (;;) {
-        os_lock(&g_lock);
-        for (wo *w = g_list; w; w = w->next) pass(w);
-        os_unlock(&g_lock);
-        os_sleep_ns(2000000);
-    }
+    wo *w = (wo *)user;
+    os_lock(&w->wlock);
+    size_t got = w->paused ? 0 : advance(w, (uint8_t *)dst, frames);
+    os_unlock(&w->wlock);
+    return got;
 }
 
 void start_threads()   /* g_lock held */
 {
     if (g_threads) return;
-    /* both threads live for the process; their os_thread records are never freed (the thread reads its own) */
+    /* the thread lives for the process; its os_thread record is never freed (the thread reads its own) */
     os_thread *t = os_thread_create(deliver_loop, NULL, 512 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));
-    if (t) os_thread_start(t);
-    t = os_thread_create(feeder_loop, NULL, 512 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));
     if (t) os_thread_start(t);
     g_threads = 1;
 }
@@ -229,12 +197,9 @@ bool is_device(uintptr_t v) { return v == 0 || v == 0xFFFFFFFFu; }
 
 extern "C" {
 
-/* test hook and callers' barrier: run the feeder pass now, then wait until every queued callback has returned */
+/* test hook and callers' barrier: wait until every queued callback has returned */
 void fnvnx_waveout_service(void)
 {
-    os_lock(&g_lock);
-    for (wo *w = g_list; w; w = w->next) pass(w);
-    os_unlock(&g_lock);
     for (int i = 0; i < 20000; i++) {
         os_lock(&g_qlock);
         bool idle = !g_qhead && !__atomic_load_n(&g_inflight, __ATOMIC_SEQ_CST);
@@ -310,14 +275,10 @@ UINT waveOutOpen(void **phwo, UINT dev, const void *pwfx, uintptr_t cb, uintptr_
     wo *w = (wo *)calloc(1, sizeof *w);
     if (!w) return NOMEM;
     w->fmt = mf;
-    w->ring_frames = mf.rate > 4096 ? mf.rate : 4096;
-    w->silence = mf.bits == 8 ? 0x80 : 0;
-    w->ring = (uint8_t *)malloc((size_t)w->ring_frames * mf.block);
-    if (w->ring) memset(w->ring, w->silence, (size_t)w->ring_frames * mf.block);
-    w->voice = w->ring ? mixer_voice_create(&mf, w->ring, w->ring_frames * mf.block) : NULL;
-    if (!w->voice) { free(w->ring); free(w); return NOMEM; }
     w->vol = 0xFFFFFFFFu;
     w->cb = {kind, cb, inst};
+    w->voice = mixer_voice_create_stream(&mf, pull, w);
+    if (!w->voice) { free(w); return NOMEM; }
     os_lock(&g_lock);
     do { g_next_id = (g_next_id + 1) & 0x0FFFFFFF; } while (g_next_id < 0x100 || find((void *)g_next_id));
     w->id = g_next_id;
@@ -326,6 +287,7 @@ UINT waveOutOpen(void **phwo, UINT dev, const void *pwfx, uintptr_t cb, uintptr_
     start_threads();
     *phwo = (void *)w->id;
     post(w->cb, w->id, WOM_OPEN, 0);
+    mixer_voice_play(w->voice, 0);
     os_unlock(&g_lock);
     return OK;
 }
@@ -335,13 +297,15 @@ UINT waveOutClose(void *h)
     os_lock(&g_lock);
     wo *w = find(h);
     if (!w) { os_unlock(&g_lock); return INVALHANDLE; }
-    if (w->head) { os_unlock(&g_lock); return STILLPLAYING; }
+    os_lock(&w->wlock);
+    bool busy = w->head != NULL;
+    os_unlock(&w->wlock);
+    if (busy) { os_unlock(&g_lock); return STILLPLAYING; }
     for (wo **pp = &g_list; *pp; pp = &(*pp)->next)
         if (*pp == w) { *pp = w->next; break; }
     mixer_voice_destroy(w->voice);
     post(w->cb, w->id, WOM_CLOSE, 0);
     os_unlock(&g_lock);
-    free(w->ring);
     free(w);
     return OK;
 }
@@ -378,16 +342,19 @@ UINT waveOutWrite(void *h, void *hdr, UINT cb)
     nx_wavehdr *p = (nx_wavehdr *)hdr;
     if (rc == OK && !(p->dwFlags & H_PREP)) rc = UNPREPARED;
     if (rc == OK && (p->dwFlags & H_QUEUE)) rc = STILLPLAYING;
+    if (rc == OK && p->dwBufferLength % w->fmt.block) rc = INVALPARAM;   /* must be block-aligned (MSDN) */
     node *n = rc == OK ? (node *)calloc(1, sizeof *n) : NULL;
     if (rc == OK && !n) rc = NOMEM;
     if (rc == OK) {
         n->h = p; n->frames = p->lpData ? p->dwBufferLength / w->fmt.block : 0;
         n->flags = p->dwFlags & (H_BEGIN | H_END); n->loops = p->dwLoops;
         p->dwFlags = (p->dwFlags | H_QUEUE) & ~(uint32_t)H_DONE;
+        os_lock(&w->wlock);
         if (w->tail) w->tail->next = n; else w->head = n;
         w->tail = n;
         if (!w->cur) w->cur = n;
-        pass(w);
+        advance(w, NULL, 0);   /* a zero-length block completes at once */
+        os_unlock(&w->wlock);
     }
     os_unlock(&g_lock);
     return rc;
@@ -397,7 +364,7 @@ UINT waveOutPause(void *h)
 {
     os_lock(&g_lock);
     wo *w = find(h);
-    if (w) { w->paused = true; pass(w); }
+    if (w) { os_lock(&w->wlock); w->paused = true; os_unlock(&w->wlock); }
     os_unlock(&g_lock);
     return w ? OK : INVALHANDLE;
 }
@@ -406,7 +373,7 @@ UINT waveOutRestart(void *h)
 {
     os_lock(&g_lock);
     wo *w = find(h);
-    if (w) { w->paused = false; pass(w); }
+    if (w) { os_lock(&w->wlock); w->paused = false; os_unlock(&w->wlock); }
     os_unlock(&g_lock);
     return w ? OK : INVALHANDLE;
 }
@@ -416,8 +383,7 @@ UINT waveOutReset(void *h)
     os_lock(&g_lock);
     wo *w = find(h);
     if (w) {
-        if (w->playing) mixer_voice_stop(w->voice);
-        w->playing = false;
+        os_lock(&w->wlock);
         while (w->head) {
             node *n = w->head;
             w->head = n->next;
@@ -427,9 +393,9 @@ UINT waveOutReset(void *h)
         }
         w->tail = w->cur = w->loop_begin = NULL;
         w->loop_active = w->paused = false;
-        w->wr = w->rd = 0; w->cursor_last = 0;
-        memset(w->ring, w->silence, (size_t)w->ring_frames * w->fmt.block);
-        mixer_voice_set_cursor(w->voice, 0);
+        w->pulled = 0;
+        os_unlock(&w->wlock);
+        mixer_voice_set_cursor(w->voice, 0);   /* the resampler window restarts */
     }
     os_unlock(&g_lock);
     return w ? OK : INVALHANDLE;
@@ -441,12 +407,14 @@ UINT waveOutGetPosition(void *h, void *out, UINT cb)
     wo *w = find(h);
     UINT rc = !w ? INVALHANDLE : (!out || cb < sizeof(nx_mmtime)) ? INVALPARAM : OK;
     if (rc == OK) {
-        pass(w);
+        os_lock(&w->wlock);
+        const uint64_t pos = w->pulled;
+        os_unlock(&w->wlock);
         nx_mmtime *t = (nx_mmtime *)out;
         memset(&t->u, 0, sizeof t->u);
-        if (t->wType == 1) t->u.v = (uint32_t)(w->rd * 1000 / w->fmt.rate);
-        else if (t->wType == 2) t->u.v = (uint32_t)w->rd;
-        else { t->wType = 4; t->u.v = (uint32_t)(w->rd * w->fmt.block); }
+        if (t->wType == 1) t->u.v = (uint32_t)(pos * 1000 / w->fmt.rate);
+        else if (t->wType == 2) t->u.v = (uint32_t)pos;
+        else { t->wType = 4; t->u.v = (uint32_t)(pos * w->fmt.block); }
     }
     os_unlock(&g_lock);
     return rc;

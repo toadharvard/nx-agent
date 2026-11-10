@@ -269,7 +269,7 @@ TEST(waveout_mono8_22k_conversion)
         if (o[i] != 0.0f) n++;
         both = both && o[i] == o[i + 1];
     }
-    CHECK(n >= 47999 && n <= 48001);
+    CHECK(n >= 47997 && n <= 48001);   /* the last source frame needs its successor: <= 3 sink frames wait */
     CHECK(both);
     CHECK_NEAR(o[100], 0.5f, 1e-6);
     CHECK_EQ(hd.flags & F_DONE, (uint32_t)F_DONE);
@@ -482,4 +482,141 @@ TEST(waveout_volume_caps_text_mixing)
     CHECK_EQ(waveOutGetErrorTextA(33, t, 8), OK);
     CHECK_EQ(strlen(t), 7u);                                     /* truncated, NUL-terminated */
     CHECK_EQ(t[8], 'x');
+}
+
+/* ---- pull model: exact for every schedule ---- */
+extern "C" {
+UINT timeBeginPeriod(UINT);
+UINT timeEndPeriod(UINT);
+UINT timeGetDevCaps(void *, UINT);
+unsigned fnvnx_timer_resolution_us(void);
+}
+
+namespace {
+/* 24 blocks of 1..N frames of distinct 16-bit stereo data; returns total frames */
+struct Train {
+    std::vector<int16_t> pcm; std::vector<Hdr> h; std::vector<uint32_t> cum;
+    Train() : h(24) {
+        uint32_t t = 0;
+        for (int j = 0; j < 24; j++) { t += 7 + (uint32_t)j * 13; cum.push_back(t); }
+        pcm.resize((size_t)t * 2);
+        for (size_t i = 0; i < pcm.size(); i++) pcm[i] = (int16_t)((int)(i * 31 % 20011) - 10000);
+    }
+    uint32_t total() const { return cum.back(); }
+    void queue(void *hw) {
+        uint32_t at = 0;
+        for (int j = 0; j < 24; j++) { play(hw, h[j], pcm.data() + (size_t)at * 2, (cum[j] - at) * 4); at = cum[j]; }
+    }
+};
+std::vector<uintptr_t> done_order() { std::vector<uintptr_t> o; for (auto &e : g_ev) if (e.msg == 0x3BD) o.push_back(e.p1); return o; }
+uint64_t pos_frames(void *h) { Mmt p; memset(&p, 0, sizeof p); p.type = 2; waveOutGetPosition(h, &p, sizeof p); return p.u.v; }
+}
+
+TEST(waveout_pull_exact_any_split)
+{
+    Fmt f = pcm(48000, 2, 16);
+    Train tr;
+    void *h = open(f);
+    tr.queue(h);
+    std::vector<float> one = sink(tr.total() + 50);               /* ONE render spanning every block */
+    settle();
+    std::vector<uintptr_t> o1 = done_order();
+    CHECK_EQ(o1.size(), 24u);
+    for (size_t j = 0; j < o1.size() && j < 24; j++) CHECK(o1[j] == (uintptr_t)&tr.h[j]);
+    CHECK_EQ(pos_frames(h), tr.total());
+    bool ok = true;
+    for (size_t i = 0; i < tr.pcm.size(); i++) ok = ok && one[i] == (float)tr.pcm[i] * (1.0f / 32768.0f);
+    for (size_t i = tr.pcm.size(); i < one.size(); i++) ok = ok && one[i] == 0.0f;
+    CHECK(ok);
+    for (auto &x : tr.h) CHECK_EQ(waveOutUnprepareHeader(h, &x, sizeof x), OK);
+    shut(h);
+    /* the same in 1-frame steps: identical PCM, and block j completes at exactly frame cum[j] */
+    h = open(f);
+    tr.queue(h);
+    std::vector<float> step;
+    size_t seen = 0;
+    bool exact = true;
+    for (uint32_t k = 1; k <= tr.total() + 50; k++) {
+        std::vector<float> p = sink(1);
+        step.insert(step.end(), p.begin(), p.end());
+        settle();
+        size_t want = 0;
+        while (want < 24 && tr.cum[want] <= k) want++;
+        exact = exact && done_order().size() == want;
+        seen = want;
+    }
+    CHECK(exact);
+    CHECK_EQ(seen, 24u);
+    CHECK(done_order() == o1 || [&] { std::vector<uintptr_t> a = done_order(); return a.size() == 24 && a[0] == (uintptr_t)&tr.h[0] && a[23] == (uintptr_t)&tr.h[23]; }());
+    CHECK(step == one);
+    CHECK_EQ(pos_frames(h), tr.total());
+    shut(h);
+    /* a block that is not a whole number of frames is refused, not truncated */
+    h = open(f);
+    Hdr bad; uint8_t buf[16] = {0};
+    memset(&bad, 0, sizeof bad); bad.lpData = (char *)buf; bad.len = 6;
+    CHECK_EQ(waveOutPrepareHeader(h, &bad, sizeof bad), OK);
+    CHECK_EQ(waveOutWrite(h, &bad, sizeof bad), INVALPARAM);
+    CHECK_EQ(bad.flags & F_QUEUE, 0u);
+    shut(h);
+}
+
+TEST(waveout_pull_position_is_resampler_consumption)
+{
+    /* 22.05 kHz mono 8-bit into the 48 kHz sink. Output i sits at source position p_i = i*step (32.32), step =
+     * floor(22050/48000 * 2^32); it reads frame floor(p_i) and, if p_i has a fraction, floor(p_i)+1. After K sink
+     * frames the mixer has pulled (p>>32)+1+((uint32)p != 0) with p = (K-1)*step, however K is split. */
+    const uint64_t step = (uint64_t)((double)22050 / 48000 * 4294967296.0);
+    std::vector<uint8_t> d(22050);
+    for (size_t i = 0; i < d.size(); i++) d[i] = (uint8_t)(i * 7);
+    const uint32_t splits[] = {1, 3, 512, 977, 100000};
+    for (uint32_t sp : splits) {
+        void *h = open(pcm(22050, 1, 8));
+        Hdr hd;
+        play(h, hd, d.data(), (uint32_t)d.size());
+        uint32_t K = 0;
+        for (int r = 0; r < 4; r++) {
+            uint32_t n = sp > 5000 ? 5000 : sp;
+            for (uint32_t t = 0; t < (sp == 1 ? 40u : 1u); t++) { sink(n); K += n; }
+            const uint64_t p = (uint64_t)(K - 1) * step;
+            uint64_t want = (p >> 32) + 1 + ((uint32_t)p != 0);
+            CHECK_EQ(pos_frames(h), want);
+        }
+        shut(h);
+    }
+    /* run to the end: every frame consumed, the block done at its last frame */
+    void *h = open(pcm(22050, 1, 8));
+    Hdr hd;
+    play(h, hd, d.data(), (uint32_t)d.size());
+    sink(48000 + 10);
+    settle();
+    CHECK_EQ(pos_frames(h), 22050u);
+    CHECK_EQ(hd.flags & F_DONE, (uint32_t)F_DONE);
+    shut(h);
+}
+
+TEST(timer_period_bookkeeping)
+{
+    UINT caps[2] = {0, 0};
+    CHECK_EQ(timeGetDevCaps(caps, 8), 0u);
+    CHECK_EQ(caps[0], 1u); CHECK_EQ(caps[1], 1000000u);
+    CHECK_EQ(timeGetDevCaps(caps, 4), 129u);
+    CHECK_EQ(timeGetDevCaps(nullptr, 8), 11u);
+    CHECK_EQ(fnvnx_timer_resolution_us(), 15600u);
+    CHECK_EQ(timeBeginPeriod(0), 97u);
+    CHECK_EQ(timeBeginPeriod(1000001), 97u);
+    CHECK_EQ(timeEndPeriod(5), 97u);                           /* no matching begin */
+    CHECK_EQ(timeBeginPeriod(5), 0u);
+    CHECK_EQ(timeBeginPeriod(5), 0u);
+    CHECK_EQ(timeBeginPeriod(2), 0u);
+    CHECK_EQ(fnvnx_timer_resolution_us(), 2000u);
+    CHECK_EQ(timeEndPeriod(3), 97u);
+    CHECK_EQ(timeEndPeriod(2), 0u);
+    CHECK_EQ(timeEndPeriod(2), 97u);
+    CHECK_EQ(fnvnx_timer_resolution_us(), 5000u);
+    CHECK_EQ(timeEndPeriod(5), 0u);
+    CHECK_EQ(fnvnx_timer_resolution_us(), 5000u);              /* one reference left */
+    CHECK_EQ(timeEndPeriod(5), 0u);
+    CHECK_EQ(fnvnx_timer_resolution_us(), 15600u);
+    CHECK_EQ(timeEndPeriod(5), 97u);
 }
