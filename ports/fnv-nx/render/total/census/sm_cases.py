@@ -207,8 +207,8 @@ def cases():
                 R("b0", "defb b0, true\nif b0\nmov r0, c0\nendif"); R("i0", "defi i0, 4, 0, 1, 0\nrep i0\nadd r0, r0, c0\nendrep")
                 R("aL", "defi i0, 4, 0, 1, 0\nloop aL, i0\nmov r0, c[aL + 2]\nendloop")
                 R("l0", "call l0\n@E@\nret\nlabel l0\nmov r0, c0\nret")
-                R("b0:def_by_ctab", "if b0\nmov r0, c0\nendif")
-                R("i0:def_by_ctab", "rep i0\nadd r0, r0, c0\nendrep")
+                R("b0:no-defb", "if b0\nmov r0, c0\nendif")
+                R("i0:no-defi", "rep i0\nadd r0, r0, c0\nendrep")
             if m in ("vs_2_x", "vs_3_0"):
                 R("p0", "setp_gt p0, r1, r2\n(p0) mov r0, c0"); R("p0:neg", "setp_gt p0, r1, r2\n(!p0) mov r0, c0")
                 R("p0:swz", "setp_gt p0, r1, r2\n(p0.w) mov r0, c0")
@@ -238,7 +238,7 @@ def cases():
                 if m == "ps_3_0":
                     R("vPos", "mov r0, vPos", "dcl vPos.xy"); R("vFace", "mov r0, vFace", "dcl vFace")
                     R("v9", "mov r0, v9", "dcl_texcoord9 v9")
-        extra_rows(m, add)
+        extra_rows(m, add); more_rows(m, add)
         # relative addressing
         pa = lambda f, t, d="", lg="y": add(m, "addr", f, shell(m, t, decls=d), lg)
         if v:
@@ -294,5 +294,24 @@ def extra_rows(m, add):
         add(m, "regtype", "vFace.x", shell(m, "mov r0, vFace.x", decls="dcl vFace"))
         add(m, "regtype", "vFace@cmp", shell(m, "cmp r0, vFace, r1, r2", decls="dcl vFace"))
         add(m, "regtype", "vPos.xy", shell(m, "mov r0.xy, vPos.xy", decls="dcl vPos.xy"))
+
+def more_rows(m, add):
+    v = isvs(m); sm2p = m[3] != "1"
+    if not v and sm2p:
+        lg = "y" if m == "ps_3_0" else "?"
+        add(m, "srcmod", "neg@texld.coord", shell(m, "texld r0, -r1, s0", decls="dcl_2d s0"), lg)
+        add(m, "srcmod", "abs@texld.coord", shell(m, "texld r0, r1_abs, s0", decls="dcl_2d s0"), "?")
+        add(m, "srcmod", "swizzle@texld.coord", shell(m, "texld r0, r1.yxzw, s0", decls="dcl_2d s0"), lg)
+        add(m, "srcmod", "swizzle@texld.sampler-src", shell(m, "texld r0, r1, s0.xyzw", decls="dcl_2d s0"), "?")
+    if m in ("vs_2_0", "vs_2_x", "vs_3_0", "ps_2_x", "ps_3_0"):
+        add(m, "opcode", "if@temp-written-in-branch-only", shell(m, "defb b0, true\nif b0\nmov r5, c0\nendif\nmov r0, r5"), "?")
+        add(m, "opcode", "rep@temp-written-in-loop", shell(m, "defi i0, 4, 0, 1, 0\nrep i0\nmov r5, c0\nendrep\nmov r0, r5"), "?")
+        add(m, "opcode", "call@label-used-in-and-out-of-loop", shell(m, "defi i0, 4, 0, 1, 0\ncall l0\nloop aL, i0\ncall l0\nendloop\n@E@\nret\nlabel l0\nadd r0, r0, c0\nret"), "?")
+    if m in ("ps_1_1", "ps_1_2", "ps_1_3"):
+        add(m, "opcode", "tex@ctab-cube-sampler", shell(m, "// ctab: s0 sampler 0 1 object samplercube 1 1\ntex t0\nmov r0, t0"), "y")
+        add(m, "opcode", "tex@ctab-volume-sampler", shell(m, "// ctab: s0 sampler 0 1 object sampler3d 1 1\ntex t0\nmov r0, t0"), "y")
+    if m == "ps_1_4":
+        add(m, "opcode", "texld@ctab-cube-sampler", shell(m, "// ctab: s0 sampler 0 1 object samplercube 1 1\ntexld r0, t0\n"), "y")
+        add(m, "opcode", "texld@ctab-volume-sampler", shell(m, "// ctab: s0 sampler 0 1 object sampler3d 1 1\ntexld r0, t0\n"), "y")
 
 def dz_dw(k): return k in ("dz", "dw")
