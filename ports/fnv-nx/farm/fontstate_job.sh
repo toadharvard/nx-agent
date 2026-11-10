@@ -36,8 +36,11 @@ wineboot -i > "$W/wineboot.log" 2>&1; rc=$?; wineserver -w
 NOTES+=("wineboot -i rc $rc, prefix $(du -sh "$WINEPREFIX" | cut -f1)")
 
 # 1. font files: every directory named fonts under a wine directory of the distribution, and the prefix's Fonts
-mapfile -t WDIRS < <(find /usr/share/wine /usr/lib/wine /usr/lib/i386-linux-gnu/wine /usr/lib/x86_64-linux-gnu/wine /opt \
-	-type d -iname fonts 2> /dev/null | sort)
+# (the directories of the installed wine packages themselves: dpkg -L of every package whose name starts with wine,
+# libwine or fonts-wine)
+mapfile -t WDIRS < <(dpkg-query -W -f '${Package}:${Architecture}\n' 'wine*' 'libwine*' 'fonts-wine*' 2> /dev/null |
+	while read -r p; do dpkg -L "$p" 2> /dev/null; done | while read -r f; do [ -d "$f" ] && echo "$f"; done |
+	grep -i '/fonts$' | sort -u)
 : > "$O/files.sha256"
 for d in "${WDIRS[@]}"; do
 	dst=$O/wine-fonts$d; mkdir -p "$dst"; cp -aL "$d/." "$dst/"
