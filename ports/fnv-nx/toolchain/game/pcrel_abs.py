@@ -8,7 +8,8 @@ target.
     pcrel_abs.py <linked elf> <readelf> <nm> <response file of objects | object...> [--out list.tsv]
 
 Prints "pc-relative references to absolute symbols: N in M objects (K symbols)" and, with --out, one line per
-site (object, section offset, type, symbol). Exit status 0 either way; build.sh pins the guest when N > 0."""
+site (object, section offset, type, symbol). A second stdout line, "pc-relative relocations examined: N", counts
+every relocation of those kinds in all objects, whether or not its symbol is absolute. Exit status 0 either way; build.sh pins the guest when N > 0."""
 import argparse
 import collections
 import subprocess
@@ -44,7 +45,7 @@ def main(argv):
     a = ap.parse_args(argv)
     absyms = absolute_symbols(a.nm, a.elf)
     objs = list(objects(a.objects))
-    sites, per_obj, syms = [], collections.Counter(), set()
+    sites, per_obj, syms, examined = [], collections.Counter(), set(), 0
     for i in range(0, len(objs), 200):
         r = subprocess.run([a.readelf, "-rW"] + objs[i:i + 200], capture_output=True, text=True)
         cur = objs[i] if len(objs[i:i + 200]) == 1 else None
@@ -60,11 +61,14 @@ def main(argv):
             if len(f) >= 5 and f[2].startswith("R_AARCH64_"):
                 t = f[2][10:]
                 t = t[4:] if t.startswith("P32_") else t
+                if t in PCREL:
+                    examined += 1
                 if t in PCREL and f[4] in absyms:
                     sites.append((cur, sec, f[0], t, f[4]))
                     per_obj[cur] += 1
                     syms.add(f[4])
     print(f"pc-relative references to absolute symbols: {len(sites)} in {len(per_obj)} objects ({len(syms)} symbols)")
+    print(f"pc-relative relocations examined: {examined}")
     if a.out:
         with open(a.out, "w") as f:
             f.write("# object\tsection\toffset\ttype\tsymbol\n")

@@ -7,7 +7,7 @@ CFLAGS  ?= -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 WARN     = -std=c99 -Wall -Wextra -Wshadow -Wconversion -Wno-sign-conversion -Werror
 ILP32_CC ?= aarch64-linux-gnu-gcc
 
-SRC  = src/pe.c src/sha256.c src/image.c src/imports.c src/codeptr.c src/deldtor.c src/trap.c
+SRC  = src/pe.c src/sha256.c src/image.c src/imports.c src/codeptr.c src/deldtor.c src/trap.c src/identity.c
 HOST = host/fnvnx_host.c
 INC  = -Iinclude -Isrc -Ihost
 

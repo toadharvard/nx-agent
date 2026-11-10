@@ -56,7 +56,7 @@ extern "C" void fnvnx_waitgraph_autostart(unsigned limit_ms)
     g_limit_ns = (uint64_t)(limit_ms ? limit_ms : 10000) * 1000000ull;
     g_period_ms = 1000;
     g_auto_pending = 1;
-    __atomic_store_n(&w32_wg_on, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&w32_wg_on, 1, __ATOMIC_SEQ_CST);
 }
 #ifndef FNVNX_THREADS_DUMP_S
 #define FNVNX_THREADS_DUMP_S 10
@@ -64,7 +64,7 @@ extern "C" void fnvnx_waitgraph_autostart(unsigned limit_ms)
 
 static void reg(struct w32_thread *t)
 {
-    if (__builtin_expect(g_auto_pending, 0) && __atomic_exchange_n(&g_auto_pending, 0, __ATOMIC_ACQ_REL))
+    if (__builtin_expect(g_auto_pending, 0) && __atomic_exchange_n(&g_auto_pending, 0, __ATOMIC_SEQ_CST))
         start_scanner();   /* outside every lock: the first blocking wait of an autostarted guest */
     if (t->wg_slot)
         return;
@@ -91,8 +91,8 @@ void w32_wg_forget(struct w32_thread *t)
     os_unlock(&g_reg);
 }
 
-static void rec_open(struct w32_thread *t) { __atomic_store_n(&t->wait.seq, t->wait.seq + 1, __ATOMIC_RELAXED); __atomic_thread_fence(__ATOMIC_RELEASE); }
-static void rec_close(struct w32_thread *t) { __atomic_store_n(&t->wait.seq, t->wait.seq + 1, __ATOMIC_RELEASE); }
+static void rec_open(struct w32_thread *t) { __atomic_store_n(&t->wait.seq, t->wait.seq + 1, __ATOMIC_SEQ_CST); __atomic_thread_fence(__ATOMIC_SEQ_CST); }
+static void rec_close(struct w32_thread *t) { __atomic_store_n(&t->wait.seq, t->wait.seq + 1, __ATOMIC_SEQ_CST); }
 
 void w32_wg_cs_begin(struct w32_thread *t, LPCRITICAL_SECTION cs, uint32_t pc)
 {
@@ -210,10 +210,10 @@ extern "C" void fnvnx_waitgraph_scan(void)
         struct w32_thread *t = g_slot[s];
         if (!t)
             continue;
-        uint32_t a = __atomic_load_n(&t->wait.seq, __ATOMIC_ACQUIRE);
+        uint32_t a = __atomic_load_n(&t->wait.seq, __ATOMIC_SEQ_CST);
         struct w32_wait_rec r = t->wait;
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        uint32_t b = __atomic_load_n(&t->wait.seq, __ATOMIC_RELAXED);
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+        uint32_t b = __atomic_load_n(&t->wait.seq, __ATOMIC_SEQ_CST);
         if (a != b || (a & 1) || !r.kind)
             continue;
         struct node *x = &v[nv++];
@@ -228,7 +228,7 @@ extern "C" void fnvnx_waitgraph_scan(void)
             if (r.kind == W32_WG_CS) {
                 x->type[k] = 0;
                 x->owner[k] = (DWORD)(uintptr_t)__atomic_load_n(&((LPCRITICAL_SECTION)r.obj[k])->OwningThread,
-                                                                __ATOMIC_RELAXED);
+                                                                __ATOMIC_SEQ_CST);
             } else {
                 struct w32_obj *o = (struct w32_obj *)r.obj[k];
                 x->type[k] = o->type;
@@ -336,13 +336,13 @@ static void scanner(void *arg)
 {
     W32_UNUSED(arg);
     uint64_t next_dump = os_monotonic_ns() + FNVNX_THREADS_DUMP_S * 1000000000ull;
-    while (__atomic_load_n(&g_run, __ATOMIC_ACQUIRE)) {
-        for (unsigned left = g_period_ms; left && __atomic_load_n(&g_run, __ATOMIC_ACQUIRE);) {
+    while (__atomic_load_n(&g_run, __ATOMIC_SEQ_CST)) {
+        for (unsigned left = g_period_ms; left && __atomic_load_n(&g_run, __ATOMIC_SEQ_CST);) {
             unsigned step = left > 50 ? 50 : left;
             os_sleep_ns((uint64_t)step * 1000000ull);
             left -= step;
         }
-        if (__atomic_load_n(&g_run, __ATOMIC_ACQUIRE))
+        if (__atomic_load_n(&g_run, __ATOMIC_SEQ_CST))
             fnvnx_waitgraph_scan();
         if (g_sink == NULL && os_monotonic_ns() >= next_dump) {   /* a lane's guest: periodic flush */
             fnvnx_threads_flush();
@@ -371,7 +371,7 @@ extern "C" void fnvnx_waitgraph_start(unsigned limit_ms, unsigned period_ms, fnv
     g_limit_ns = (uint64_t)(limit_ms ? limit_ms : 10000) * 1000000ull;
     g_period_ms = period_ms;
     g_auto_pending = 0;
-    __atomic_store_n(&w32_wg_on, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&w32_wg_on, 1, __ATOMIC_SEQ_CST);
     start_scanner();
 }
 
@@ -379,7 +379,7 @@ extern "C" void fnvnx_waitgraph_stop(void)
 {
     if (!g_scanner)
         return;
-    __atomic_store_n(&g_run, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_run, 0, __ATOMIC_SEQ_CST);
     os_thread_join(g_scanner);
     os_thread_free(g_scanner);
     g_scanner = NULL;

@@ -30,6 +30,46 @@ static ds3d_vec norm(ds3d_vec a, ds3d_vec fallback)
     return l > 1e-12f ? scale(a, 1.0f / l) : fallback;
 }
 
+void ds3d_source_merge(ds3d_source *d, const ds3d_source *s, unsigned m)
+{
+    if (m & DS3D_S_POS) d->pos = s->pos;
+    if (m & DS3D_S_VEL) d->vel = s->vel;
+    if (m & DS3D_S_CONE_ANGLES) { d->cone_inside = s->cone_inside; d->cone_outside = s->cone_outside; }
+    if (m & DS3D_S_CONE_ORIENT) d->cone_orient = s->cone_orient;
+    if (m & DS3D_S_CONE_VOLUME) d->cone_outside_volume = s->cone_outside_volume;
+    if (m & DS3D_S_MIN) d->min_distance = s->min_distance;
+    if (m & DS3D_S_MAX) d->max_distance = s->max_distance;
+    if (m & DS3D_S_MODE) d->mode = s->mode;
+}
+
+void ds3d_listener_merge(ds3d_listener *d, const ds3d_listener *s, unsigned m)
+{
+    if (m & DS3D_L_POS) d->pos = s->pos;
+    if (m & DS3D_L_VEL) d->vel = s->vel;
+    if (m & DS3D_L_ORIENT) { d->front = s->front; d->top = s->top; }
+    if (m & DS3D_L_DISTANCE) d->distance_factor = s->distance_factor;
+    if (m & DS3D_L_ROLLOFF) d->rolloff = s->rolloff;
+    if (m & DS3D_L_DOPPLER) d->doppler = s->doppler;
+}
+
+static int in_range(float v, float lo, float hi) { return v >= lo && v <= hi; }   /* false for NaN */
+
+int ds3d_source_valid(const ds3d_source *s)
+{
+    return s->cone_inside <= 360 && s->cone_outside <= 360 && s->cone_inside <= s->cone_outside &&
+           s->cone_outside_volume >= -10000 && s->cone_outside_volume <= 0 && s->min_distance > 0.0f &&
+           s->max_distance > 0.0f && s->mode <= DS3D_MODE_DISABLE;
+}
+
+int ds3d_listener_valid(const ds3d_listener *l)
+{
+    if (!in_range(l->distance_factor, 1.17549435e-38f, 3.402823466e+38f) || !in_range(l->rolloff, 0.0f, 10.0f) ||
+        !in_range(l->doppler, 0.0f, 10.0f))
+        return 0;
+    ds3d_vec c = cross(l->front, l->top);
+    return len(l->front) > 0.0f && len(l->top) > 0.0f && (c.x != 0.0f || c.y != 0.0f || c.z != 0.0f);
+}
+
 void ds3d_listener_default(ds3d_listener *l)
 {
     l->pos = l->vel = v3(0, 0, 0);

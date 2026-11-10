@@ -491,75 +491,21 @@ errno_t _makepath_s(char *out, size_t n, const char *drive, const char *dir, con
     return 0;
 }
 
-/* ---- formatting. The format language is the C99 one of the target libc; MSVC-only conversions the
- * engine uses are mapped first: %I64d/%I64u/%I64x -> %lld..., %I32 -> nothing. */
-static const char *msvc_fmt(const char *fmt, char *buf, size_t n)
-{
-    if (!strstr(fmt, "%"))
-        return fmt;
-    if (!strstr(fmt, "I64") && !strstr(fmt, "I32"))
-        return fmt;
-    size_t o = 0;
-    int in_spec = 0;
-    for (const char *p = fmt; *p; p++) {
-        if (o + 4 >= n)
-            return fmt; /* too long to rewrite: use as is */
-        if (!in_spec) {
-            buf[o++] = *p;
-            if (*p == '%')
-                in_spec = 1;
-            continue;
-        }
-        if (*p == '%' && p[-1] == '%') { /* "%%" */
-            buf[o++] = *p;
-            in_spec = 0;
-            continue;
-        }
-        if (p[0] == 'I' && p[1] == '6' && p[2] == '4') {
-            buf[o++] = 'l';
-            buf[o++] = 'l';
-            p += 2;
-            continue;
-        }
-        if (p[0] == 'I' && p[1] == '3' && p[2] == '2') {
-            p += 2;
-            continue;
-        }
-        buf[o++] = *p;
-        if (strchr("diouxXeEfgGaAcspn", *p))
-            in_spec = 0;
-    }
-    buf[o] = 0;
-    return buf;
-}
+/* ---- formatting: MSVCRT.DLL's format language, one engine (msvcrt_exports.cpp): writes at most n characters (no
+ * terminator), returns the full length; buf may be NULL when n is 0. */
+int fnvnx_msvc_format(char *buf, size_t n, const char *fmt, va_list ap);
 
 int _vsnprintf(char *buf, size_t n, const char *fmt, va_list ap)
 {
-    char fb[512];
-    char tmp[4096];
-    fmt = msvc_fmt(fmt, fb, sizeof fb);
-    va_list ap2;
-    va_copy(ap2, ap);
-    int len = vsnprintf(tmp, sizeof tmp, fmt, ap2);
-    va_end(ap2);
+    if (!fmt || (!buf && n)) {
+        errno = FNVNX_EINVAL;
+        return -1;
+    }
+    int len = fnvnx_msvc_format(buf, n, fmt, ap);
     if (len < 0)
         return -1;
-    if ((size_t)len >= sizeof tmp) {
-        char *big = (char *)malloc((size_t)len + 1);
-        if (!big)
-            return -1;
-        vsnprintf(big, (size_t)len + 1, fmt, ap);
-        size_t c = (size_t)len < n ? (size_t)len : n;
-        memcpy(buf, big, c);
-        if ((size_t)len < n)
-            buf[len] = 0;
-        free(big);
-    } else {
-        size_t c = (size_t)len < n ? (size_t)len : n;
-        memcpy(buf, tmp, c);
-        if ((size_t)len < n)
-            buf[len] = 0;
-    }
+    if ((size_t)len < n)
+        buf[len] = 0;
     return (size_t)len <= n ? len : -1; /* len == n: no terminator; longer: truncated, -1 */
 }
 
@@ -572,11 +518,7 @@ int _snprintf(char *buf, size_t n, const char *fmt, ...)
     return r;
 }
 
-int _vscprintf(const char *fmt, va_list ap)
-{
-    char fb[512];
-    return vsnprintf(NULL, 0, msvc_fmt(fmt, fb, sizeof fb), ap);
-}
+int _vscprintf(const char *fmt, va_list ap) { return fmt ? fnvnx_msvc_format(NULL, 0, fmt, ap) : -1; }
 
 int _scprintf(const char *fmt, ...)
 {
@@ -593,13 +535,13 @@ int vsprintf_s(char *buf, size_t n, const char *fmt, va_list ap)
         invalid("vsprintf_s");
         return -1;
     }
-    char fb[512];
-    int len = vsnprintf(buf, n, msvc_fmt(fmt, fb, sizeof fb), ap);
+    int len = fnvnx_msvc_format(buf, n, fmt, ap);
     if (len < 0 || (size_t)len >= n) {
         buf[0] = 0;
         invalid("vsprintf_s");
         return -1;
     }
+    buf[len] = 0;
     return len;
 }
 
@@ -618,18 +560,20 @@ int _vsnprintf_s(char *buf, size_t n, size_t count, const char *fmt, va_list ap)
         invalid("_vsnprintf_s");
         return -1;
     }
-    char fb[512];
     size_t lim = count == _TRUNCATE || count + 1 > n ? n : count + 1;
-    int len = vsnprintf(buf, lim, msvc_fmt(fmt, fb, sizeof fb), ap);
+    int len = fnvnx_msvc_format(buf, lim, fmt, ap);
     if (len < 0)
         return -1;
     if ((size_t)len >= lim) {
-        if (count == _TRUNCATE || count + 1 <= n)
+        if (count == _TRUNCATE || count + 1 <= n) {
+            buf[lim - 1] = 0;
             return -1; /* truncated as asked */
+        }
         buf[0] = 0;
         invalid("_vsnprintf_s");
         return -1;
     }
+    buf[len] = 0;
     return len;
 }
 

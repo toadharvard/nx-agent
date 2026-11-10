@@ -3,18 +3,44 @@
  * The authoritative name of every IAT slot of FalloutNV.exe is in the exe's own import directory (the decomp
  * names some slots inconsistently, docs/RUNTIME.md). The loader/link step reads that directory and asks
  * fnvnx_win32_lookup_export(dll, name) for each slot; NULL means "not provided" (d3d9 -> the device's module,
- * DirectInput/DirectSound/XInput/vorbisfile -> S7's registered modules). D3DX (render/nine/d3dx) is listed here by
+ * DirectInput/DirectSound/XInput -> S7's registered modules). D3DX (render/nine/d3dx) is listed here by
  * weak reference. */
 #include "w32.h"
 #include "fnvnx_mmio.h"
 
 extern "C" {
+/* platform/win32/gdi32.cpp */
+HDC CreateCompatibleDC(HDC);
+BOOL DeleteDC(HDC);
+HBITMAP CreateCompatibleBitmap(HDC, int, int);
+HBITMAP CreateDIBSection(HDC, const void *, UINT, void **, HANDLE, DWORD);
+HGDIOBJ SelectObject(HDC, HGDIOBJ);
+int GetDIBits(HDC, HBITMAP, UINT, UINT, void *, void *, UINT);
+COLORREF GetPixel(HDC, int, int);
+COLORREF SetPixel(HDC, int, int, COLORREF);
+BOOL StretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
+int SetStretchBltMode(HDC, int);
+int GetDeviceCaps(HDC, int);
+HDC GetDC(HWND);
+int ReleaseDC(HWND, HDC);
+HDC BeginPaint(HWND, void *);
+BOOL EndPaint(HWND, const void *);
 int fnvnx_ws2_WSAStartup(WORD, void *);
 int fnvnx_ws2_WSACleanup(void);
 int fnvnx_ws2_WSAGetLastError(void);
 UINT_PTR fnvnx_ws2_socket(int, int, int);
 int fnvnx_ws2_closesocket(UINT_PTR);
-int fnvnx_ws2_fail(void);
+void fnvnx_ws2_WSASetLastError(int);
+int fnvnx_ws2_bind(UINT_PTR, const void *, int);
+int fnvnx_ws2_listen(UINT_PTR, int);
+UINT_PTR fnvnx_ws2_accept(UINT_PTR, void *, int *);
+int fnvnx_ws2_connect(UINT_PTR, const void *, int);
+int fnvnx_ws2_send(UINT_PTR, const char *, int, int);
+int fnvnx_ws2_recv(UINT_PTR, char *, int, int);
+int fnvnx_ws2_setsockopt(UINT_PTR, int, int, const char *, int);
+int fnvnx_ws2_ioctlsocket(UINT_PTR, long, unsigned long *);
+int fnvnx_ws2_select(int, void *, void *, void *, const void *);
+int fnvnx_ws2_WSAAsyncSelect(UINT_PTR, HWND, UINT, long);
 unsigned short fnvnx_ws2_htons(unsigned short);
 unsigned short fnvnx_ws2_ntohs(unsigned short);
 unsigned long fnvnx_ws2_inet_addr(const char *);
@@ -33,24 +59,31 @@ void *SteamFriends(void);
 void *SteamUtils(void);
 void *SteamApps(void);
 void *SteamUserStats(void);
-/* bink.cpp */
-void *BinkOpen(const char *, unsigned);
-void BinkClose(void *);
-int BinkDoFrame(void *);
-void BinkNextFrame(void *);
-int BinkWait(void *);
-int BinkPause(void *, int);
-int BinkCopyToBufferRect(void *, void *, int, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned,
-                         unsigned);
-void *BinkOpenDirectSound(unsigned long);
-int BinkSetSoundSystem(void *, unsigned long);
 /* window.cpp, not in the shim headers */
 int GetWindowTextA(HWND, LPSTR, int);
 int GetClassNameA(HWND, LPSTR, int);
 BOOL EnumDisplayDevicesA(LPCSTR, DWORD, void *, DWORD);
+/* resource.cpp */
 BOOL InitCommonControlsEx(const void *);
 void *ImageList_LoadImageA(HINSTANCE, LPCSTR, int, int, DWORD, UINT, UINT);
 BOOL ImageList_Destroy(void *);
+int ImageList_GetImageCount(void *);
+BOOL ImageList_GetIconSize(void *, int *, int *);
+void *FindResourceA(HMODULE, LPCSTR, LPCSTR);
+void *FindResourceExA(HMODULE, LPCSTR, LPCSTR, WORD);
+void *LoadResource(HMODULE, void *);
+void *LockResource(void *);
+DWORD SizeofResource(HMODULE, void *);
+BOOL FreeResource(void *);
+BOOL EnumResourceNamesA(HMODULE, LPCSTR, BOOL (*)(HMODULE, LPCSTR, LPSTR, LONG_PTR), LONG_PTR);
+/* winmm waveOut (platform/audio/waveout.cpp) */
+#define FNVNX_WAVEOUT_EXPORTS(X)                                                                            \
+    X(waveOutOpen) X(waveOutClose) X(waveOutPrepareHeader) X(waveOutUnprepareHeader) X(waveOutWrite)         \
+    X(waveOutPause) X(waveOutRestart) X(waveOutReset) X(waveOutSetVolume) X(waveOutGetVolume)                \
+    X(waveOutGetPosition) X(waveOutGetNumDevs) X(waveOutGetDevCapsA) X(waveOutGetErrorTextA)
+#define FNVNX_WAVEOUT_DECL(f) void f(void) __attribute__((weak));   /* tests/s4 does not link platform/audio */
+FNVNX_WAVEOUT_EXPORTS(FNVNX_WAVEOUT_DECL)
+#undef FNVNX_WAVEOUT_DECL
 }
 
 /* d3dx9_38.dll: render/nine/d3dx, linked into both guests (toolchain/game/build.sh D3D9=null, render/nine/game
@@ -78,6 +111,17 @@ FNVNX_D3DX_EXPORTS(FNVNX_D3DX_DECL)
 extern "C" __attribute__((weak)) HRESULT D3DXSaveTextureToFileA(const char *, int, void *, const void *)
 {
     return (HRESULT)0x8876086Cu;
+}
+
+/* user32 window functions without a declaration in the shim (platform/win32/window.cpp) */
+extern "C" {
+HWND GetTopWindow(HWND);
+BOOL IsWindowVisible(HWND);
+DWORD GetWindowThreadProcessId(HWND, LPDWORD);
+BOOL UnregisterClassA(LPCSTR, HINSTANCE);
+HCURSOR SetCursor(HCURSOR);
+BOOL SetDoubleClickTime(UINT);
+DWORD SetClassLongA(HWND, int, LONG);
 }
 
 namespace {
@@ -133,9 +177,17 @@ const exp g_exports[] = {
     U(ScreenToClient), U(SendInput), U(SendMessageA), U(SetCapture), U(SetCursorPos), U(SetFocus),
     U(SetForegroundWindow), U(SetWindowLongA), U(SetWindowPos), U(SetWindowTextA), U(SetWindowsHookExA),
     U(ShowCursor), U(ShowWindow), U(SwapMouseButton), U(TranslateMessage), U(UnhookWindowsHookEx),
+    U(GetTopWindow), U(IsWindowVisible), U(GetWindowThreadProcessId), U(UnregisterClassA), U(SetClassLongA),
     U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA), U(GetClassLongA),
+    U(SetCursor), U(SetDoubleClickTime),
     E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
-    E("gdi32", GetStockObject), E("gdi32", DeleteObject),
+    E("comctl32", ImageList_GetImageCount), E("comctl32", ImageList_GetIconSize),
+    K(FindResourceA), K(FindResourceExA), K(LoadResource), K(LockResource), K(SizeofResource), K(FreeResource),
+    K(EnumResourceNamesA),
+    E("gdi32", GetStockObject), E("gdi32", DeleteObject), E("gdi32", CreateCompatibleDC), E("gdi32", DeleteDC),
+    E("gdi32", CreateCompatibleBitmap), E("gdi32", CreateDIBSection), E("gdi32", SelectObject), E("gdi32", GetDIBits),
+    E("gdi32", GetPixel), E("gdi32", SetPixel), E("gdi32", StretchBlt), E("gdi32", SetStretchBltMode),
+    E("gdi32", GetDeviceCaps), E("user32", GetDC), E("user32", ReleaseDC), E("user32", BeginPaint), E("user32", EndPaint),
     E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA),
     E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA), E("advapi32", GetUserNameA),
     E("shell32", CommandLineToArgvW), E("shell32", ShellExecuteA), E("shell32", SHGetFolderPathA),
@@ -147,17 +199,22 @@ const exp g_exports[] = {
     E("winmm", mmioGetInfo), E("winmm", mmioSetInfo), E("winmm", mmioAdvance), E("winmm", mmioFlush),
     E("winmm", mmioDescend), E("winmm", mmioAscend), E("winmm", mmioCreateChunk), E("winmm", mmioSendMessage),
     E("winmm", mmioStringToFOURCCA),
+    E("winmm", waveOutOpen), E("winmm", waveOutClose), E("winmm", waveOutPrepareHeader),
+    E("winmm", waveOutUnprepareHeader), E("winmm", waveOutWrite), E("winmm", waveOutPause),
+    E("winmm", waveOutRestart), E("winmm", waveOutReset), E("winmm", waveOutSetVolume),
+    E("winmm", waveOutGetVolume), E("winmm", waveOutGetPosition), E("winmm", waveOutGetNumDevs),
+    E("winmm", waveOutGetDevCapsA), E("winmm", waveOutGetErrorTextA),
     { "ws2_32", "WSAStartup", (void *)&fnvnx_ws2_WSAStartup }, { "ws2_32", "WSACleanup", (void *)&fnvnx_ws2_WSACleanup },
     { "ws2_32", "WSAGetLastError", (void *)&fnvnx_ws2_WSAGetLastError }, { "ws2_32", "socket", (void *)&fnvnx_ws2_socket },
     { "ws2_32", "closesocket", (void *)&fnvnx_ws2_closesocket }, { "ws2_32", "htons", (void *)&fnvnx_ws2_htons },
     { "ws2_32", "ntohs", (void *)&fnvnx_ws2_ntohs }, { "ws2_32", "inet_addr", (void *)&fnvnx_ws2_inet_addr },
     { "ws2_32", "inet_ntoa", (void *)&fnvnx_ws2_inet_ntoa }, { "ws2_32", "gethostbyname", (void *)&fnvnx_ws2_gethostbyname },
-    { "ws2_32", "gethostname", (void *)&fnvnx_ws2_gethostname }, { "ws2_32", "bind", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "listen", (void *)&fnvnx_ws2_fail }, { "ws2_32", "accept", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "connect", (void *)&fnvnx_ws2_fail }, { "ws2_32", "send", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "recv", (void *)&fnvnx_ws2_fail }, { "ws2_32", "setsockopt", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "ioctlsocket", (void *)&fnvnx_ws2_fail }, { "ws2_32", "WSAAsyncSelect", (void *)&fnvnx_ws2_fail },
-    { "ws2_32", "select", (void *)&fnvnx_ws2_fail }, { "ws2_32", "__WSAFDIsSet", (void *)&fnvnx_ws2_fdisset },
+    { "ws2_32", "gethostname", (void *)&fnvnx_ws2_gethostname }, { "ws2_32", "bind", (void *)&fnvnx_ws2_bind },
+    { "ws2_32", "listen", (void *)&fnvnx_ws2_listen }, { "ws2_32", "accept", (void *)&fnvnx_ws2_accept },
+    { "ws2_32", "connect", (void *)&fnvnx_ws2_connect }, { "ws2_32", "send", (void *)&fnvnx_ws2_send },
+    { "ws2_32", "recv", (void *)&fnvnx_ws2_recv }, { "ws2_32", "setsockopt", (void *)&fnvnx_ws2_setsockopt },
+    { "ws2_32", "ioctlsocket", (void *)&fnvnx_ws2_ioctlsocket }, { "ws2_32", "WSAAsyncSelect", (void *)&fnvnx_ws2_WSAAsyncSelect },
+    { "ws2_32", "select", (void *)&fnvnx_ws2_select }, { "ws2_32", "WSASetLastError", (void *)&fnvnx_ws2_WSASetLastError }, { "ws2_32", "__WSAFDIsSet", (void *)&fnvnx_ws2_fdisset },
     E("steam_api", SteamAPI_Init), E("steam_api", SteamAPI_IsSteamRunning), E("steam_api", SteamAPI_Shutdown),
     E("steam_api", SteamAPI_RunCallbacks), E("steam_api", SteamAPI_RegisterCallback),
     E("steam_api", SteamAPI_UnregisterCallback), E("steam_api", SteamUser), E("steam_api", SteamFriends),
@@ -166,11 +223,7 @@ const exp g_exports[] = {
     FNVNX_D3DX_EXPORTS(FNVNX_D3DX_ENTRY)
 #undef FNVNX_D3DX_ENTRY
     E("d3dx9_38", D3DXSaveTextureToFileA),
-    /* binkw32: the IAT's stdcall decorations, and the plain names for GetProcAddress */
-#define B(f, bytes) { "binkw32", "_" #f "@" #bytes, (void *)&f }, E("binkw32", f)
-    B(BinkOpen, 8), B(BinkClose, 4), B(BinkDoFrame, 4), B(BinkNextFrame, 4), B(BinkWait, 4), B(BinkPause, 8),
-    B(BinkCopyToBufferRect, 44), B(BinkOpenDirectSound, 4), B(BinkSetSoundSystem, 8),
-#undef B
+    /* binkw32.dll and libvorbisfile.dll are not provided here: they are loaded as translated PE images */
 };
 #undef E
 #undef K
@@ -189,6 +242,7 @@ int dll_eq(const char *a, const char *b)
 } // namespace
 
 extern "C" void *fnvnx_registered_module_export(const char *dll, const char *proc);   // module.cpp
+extern "C" void *fnvnx_msvcrt_lookup(const char *name);                                // crt/msvcrt_exports.cpp
 
 /* DLLs the exe imports under another module's name: GalaxyWrp.dll (GOG's build) wraps the Steam API with the
  * same export names; WSOCK32 (Winsock 1.1) forwards to ws2_32 */
@@ -209,7 +263,9 @@ extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
     for (const exp &e : g_exports)
         if (e.fn && !strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
             return e.fn;
-    /* not an S4 export: modules registered at run time (S7's dsound/dinput8/xinput/vorbisfile) */
+    if (dll && dll_eq(dll, "msvcrt"))
+        return fnvnx_msvcrt_lookup(name);
+    /* not an S4 export: modules registered at run time (S7's dsound/dinput8/xinput) */
     return dll ? fnvnx_registered_module_export(dll, name) : NULL;
 }
 

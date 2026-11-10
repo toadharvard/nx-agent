@@ -102,7 +102,6 @@ for f in "${SRCS[@]}"; do
 	extra=""
 	case "$f" in
 		*/audio/backend.cpp) extra="-D__SWITCH__" ;;          # selects the "audren" backend (guest glue)
-		*/audio/vorbisfile.cpp) extra="$VFLAGS" ;;
 		*/loader/src/*) extra="-I$ROOT/loader/include -I$ROOT/loader/src" ;;
 		*/game/boot.cpp) extra="-I$ROOT/loader/include" ;;
 		*/game/native_device.cpp) extra="-I$ROOT/render/native/include -I$ROOT/render/native/front -I$ROOT/render/native/n1 -fno-exceptions -fno-rtti -fno-threadsafe-statics" ;;
