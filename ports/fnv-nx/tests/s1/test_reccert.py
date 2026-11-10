@@ -132,30 +132,61 @@ def main():
           rc.rules_hash('r_b,r_a') == rc.rules_hash('r_a,r_b') and rc.rules_hash('r_a') != rc.rules_hash(''))
     del os.environ['FNVNX_PREPARE_SKIP']
 
-    # stamp: the unit's compile and the placed functions' match decide
-    objs = os.path.join(root, 'objects.tsv'); mdir = os.path.join(root, 'match'); os.makedirs(mdir)
-    def report(mismatches): json.dump({'units': [{'source': 'src/h.cpp', 'functions': 2, 'matched_functions': 2 - len(mismatches),
-                                                  'mismatches': mismatches}]}, open(os.path.join(mdir, 'src_h.cpp.json'), 'w'))
-    def cert(): return json.load(open(os.path.join(rdir, 'recon.json'))).get('cert')
+    # the certifying run names what it applied
     write(recon)
+    os.environ['FNVNX_RECON_CERTIFY'] = '1'
+    out, st = apply(root)
+    check('the certifying run counts the recon it applied by name', st['REC-SITE/r1/applied'] == 1, dict(st))
+    del os.environ['FNVNX_RECON_CERTIFY']
+    # stamp: applied + the unit's compile + a report that compared the unit + the placed functions not mismatched
+    objs = os.path.join(root, 'objects.tsv'); mdir = os.path.join(root, 'match'); os.makedirs(mdir)
+    stats = os.path.join(root, 'stats.tsv')
+    def report(mismatches, status=None):
+        json.dump({'units': [{'source': 'src/h.cpp', 'functions': 2, 'matched_functions': 2 - len(mismatches),
+                              'status': status or ('mismatch' if mismatches else 'ok'), 'mismatches': mismatches}]},
+                  open(os.path.join(mdir, 'm.json'), 'w'))
+    def cert(): return json.load(open(os.path.join(rdir, 'recon.json'))).get('cert')
+    def stamp(): return rc.stamp(os.path.join(root, 'recon'), stats, objs, mdir)
+    open(stats, 'w').write('REC-SITE/r1/applied\t1 files\t1 edits\n')
     open(objs, 'w').write('src/h.cpp\t/x/h.o\tfail\n'); report([])
-    rc.stamp(os.path.join(root, 'recon'), objs, mdir)
+    stamp()
     check('stamp: the unit does not compile -> no certificate', cert() is None, cert())
     open(objs, 'w').write('src/h.cpp\t/x/h.o\tok\n'); report([{'address': '0x00401010', 'why': 'bytes'}])
-    rc.stamp(os.path.join(root, 'recon'), objs, mdir)
+    stamp()
     check('stamp: a placed function mismatches -> no certificate', cert() is None, cert())
     report([{'address': '0x00409999'}])
-    cur, n, rows = rc.stamp(os.path.join(root, 'recon'), objs, mdir, now='2026-11-10T00:00:00Z')
-    check('stamp: compiles and its placed functions match -> certified for this rule set',
+    cur, n, rows = stamp()
+    check('stamp: applied, compiles, compared, its placed functions equal -> certified for this rule set',
           cert() and cert()['rules'] == rc.rules_hash() and cert()['compiles'] is True and n['certified'] == 1, cert())
+    before = open(os.path.join(rdir, 'recon.json')).read(); stamp()
+    check('stamping twice changes nothing', open(os.path.join(rdir, 'recon.json')).read() == before)
     out, st = apply(root)
     check('the stamped recon is applied', 'H::H()' in out and st['REC1'] == 1, dict(st))
-    os.remove(os.path.join(mdir, 'src_h.cpp.json'))
-    rc.stamp(os.path.join(root, 'recon'), objs, mdir)
-    check('stamp: no match report -> the certificate is withdrawn', cert() is None, cert())
-    write(dict(recon, functions=[]))
-    rc.stamp(os.path.join(root, 'recon'), objs, mdir)
-    check('stamp: a recon that places no function is certified by the compile', cert() and cert()['match'] == 'no placed function', cert())
+    json.dump({'units': [{'source': 'src/h.cpp', 'status': 'compile-failed'}]}, open(os.path.join(mdir, 'm.json'), 'w'))
+    stamp()
+    check('stamp: a report that did not compare the unit (compile-failed, no mismatches key) certifies nothing', cert() is None, cert())
+    report([]); open(stats, 'w').write('')
+    stamp()
+    check('stamp: prepare did not apply the recon -> no certificate', cert() is None, cert())
+    open(stats, 'w').write('REC-SITE/r1/applied\t1 files\t1 edits\n')
+    os.remove(os.path.join(mdir, 'm.json'))
+    stamp()
+    check('stamp: no match report -> no certificate, also for a recon that places no function', cert() is None, cert())
+    write(dict(recon, functions=[])); report([])
+    stamp()
+    check('stamp: a recon that places no function is certified when its unit was compared',
+          cert() and cert()['match'].startswith('no placed function'), cert())
+    # pristine-overlay: the recon on the pristine unit, units.json cut to the recon's unit with its recipe entry
+    write(recon)
+    open(os.path.join(root, 'dec', 'src', 'h.cpp'), 'w').write('// @fnv 0x00401000\nvoid f() {}\n')
+    open(os.path.join(root, 'dec', 'src', 'o.cpp'), 'w').write('int o;\n')
+    ov = os.path.join(root, 'ov')
+    n_units, rej = rc.pristine_overlay(os.path.join(root, 'dec'), os.path.join(root, 'recon'), ov)
+    uj = json.load(open(os.path.join(ov, 'build', 'units.json')))['units']
+    check('pristine-overlay: the unit with the body, the recipe entry added, other files linked',
+          n_units == 1 and not rej and 'H::H() {}' in open(os.path.join(ov, 'src', 'h.cpp')).read()
+          and any(f['address'] == '0x00401010' for f in uj[0]['functions']) and os.path.islink(os.path.join(ov, 'src', 'o.cpp')),
+          (n_units, rej, uj))
     patch_cert(root)
     print('test_reccert: %s' % ('FAILED %d' % len(FAILS) if FAILS else 'ok'))
     return 1 if FAILS else 0
