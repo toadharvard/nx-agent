@@ -9,14 +9,17 @@ MAGIC = (0x19930520, 0x19930521, 0x19930522)
 EXC_CODE = 0xE06D7363           # the thrower is the function whose code copies the EXCEPTION_RECORD template starting with this code
 RE_STUB = re.compile(rb'(?=\xb8(.{4})\xe9(.{4}))', re.S)
 RE_PUSHH = re.compile(rb'(?=\x68(.{4})\x64(?:\xa1|\xff\x35)\x00\x00\x00\x00)', re.S)
-OUT = '/home/user/l3facts/ehtables.json'
 h = lambda a: '0x%08x' % a
 def le(b): return int.from_bytes(b, 'little')
 
 class EH:
     def __init__(s, X):
         s.X = X; s.fi = {}; s.stubs = {}; s.noise = Counter(); s.sites = {}; s.scopes = {}; s.helpers = {}; s.seenh = set()
-        s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.thrower = None
+        s.unknown = 0; s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.thrower = None
+
+    def mk(s, a, n, ref):
+        """EH structures that lie in an executable section (merged .rdata) are data named by the relocation at ref."""
+        if n > 0 and s.X.intext(a): s.X.mark(a, n, ref)
 
     def emit(s, tgt, kind, site, parent=None):
         if site not in s.sites: s.emitted += 1
@@ -55,13 +58,16 @@ class EH:
             a = X.T0 + m.start()
             if a in s.seenstub or X.cov[m.start()] != 1 or (a + 1) not in X.rset: continue
             imm = le(m[1])
-            if X.sec(imm) is None or X.intext(imm): continue
+            if not X.isdata(imm): continue
             s.seenstub.add(a); tgt = (a + 10 + int.from_bytes(m[2], 'little', signed=True)) & 0xffffffff
-            if X.u32(imm) not in MAGIC: s.noise[tgt] += 1; continue
+            if X.u32(imm) not in MAGIC: s.noise[tgt] += 1; s.unknown += X.u32(imm) >> 4 == 0x1993052; continue
             s.stubs[a] = (imm, tgt); n += 1
             if imm not in s.fi:
                 r = s.fi[imm] = s.parse_fi(imm)
                 if 'err' in r: continue
+                s.mk(imm, 28 + 4 * MAGIC.index(r['magic']), a + 1); s.mk(X.u32(imm + 8), 8 * r['maxState'], imm + 8); s.mk(X.u32(imm + 16), 20 * len(r['tries']), imm + 16)
+                s.mk(X.u32(imm + 24), 8 * len(r['ipmap']), imm + 24)
+                for i, (rng, hs) in enumerate(r['tries']): s.mk(X.u32(X.u32(imm + 16) + 20 * i + 16), 16 * len(hs), X.u32(imm + 16) + 20 * i + 16)
                 for to, act, site in r['unwind']:
                     if act: s.emit(act, 'eh-unwind', site)
                 for rng, hs in r['tries']:
@@ -80,12 +86,12 @@ class EH:
             s.seenh.add(p)
             if s.is_stub(H): continue
             q = m.start() - 5
-            if q >= 0 and X.text[q] == 0x68 and X.cov[q] == 1 and (p - 4) in X.rset and X.sec(X.u32(p - 4)) not in (None, '.text'): s.add_scope(X.u32(p - 4), H, p - 5)
+            if q >= 0 and X.text[q] == 0x68 and X.cov[q] == 1 and (p - 4) in X.rset and X.isdata(X.u32(p - 4)): s.add_scope(X.u32(p - 4), H, p - 5)
             else: s.helpers[X.entry_of(p)] = H
         for hp, H in sorted(s.helpers.items()):
             for site in X.callers.get(hp, ()):
                 for q in (site - 5, site - 7):                   # push S; call  /  push S; push imm8; call
-                    if X.text[q - X.T0] == 0x68 and X.cov[q - X.T0] == 1 and (q + 1) in X.rset and X.sec(X.u32(q + 1)) not in (None, '.text') and (q + 5 == site or X.text[q + 5 - X.T0] == 0x6a):
+                    if X.text[q - X.T0] == 0x68 and X.cov[q - X.T0] == 1 and (q + 1) in X.rset and X.isdata(X.u32(q + 1)) and (q + 5 == site or X.text[q + 5 - X.T0] == 0x6a):
                         s.add_scope(X.u32(q + 1), H, q); break
 
     def add_scope(s, S, H, site):
@@ -103,7 +109,7 @@ class EH:
                 b = R + 12 * len(recs); enc, flt, hnd = u(b), u(b + 4), u(b + 8)
                 if (b + 8) not in X.rset or not X.intext(hnd) or (flt and ((b + 4) not in X.rset or not X.intext(flt))) or not (enc >= 0xfffffffe or enc < len(recs) + 1): break
                 recs.append((enc, flt, hnd, b))
-            sc['ver'] = ver; sc['recs'] = recs
+            sc['ver'] = ver; sc['recs'] = recs; s.mk(S, (16 if v4 else 0) + 12 * len(recs), min(sc['sites']) + 1)
             if not recs: sc['err'] = 'no records'
             for enc, flt, hnd, b in recs:
                 if flt: s.emit(flt, 'seh-filter', b + 4)
@@ -124,19 +130,25 @@ class EH:
             cts.append((u(ct), u(ct + 4), u(ct + 20), cp, ct + 24))
         return {'addr': S, 'attrs': u(S), 'unwind': u(S + 4), 'unwind_site': S + 4, 'cta': cta, 'types': cts}
 
+    def iat_calls(s):
+        """addresses of `call [iat]` instructions whose IAT slot imports _CxxThrowException (the thrower lives in another module)."""
+        X = s.X; thr = {a for a, n in X.imports.items() if n.endswith('!_CxxThrowException') or '_CxxThrowException' in n}
+        return sorted(r - 2 for r in X.relocs if X.intext(r) and X.u32(r) in thr and X.cov[r - 2 - X.T0] == 1) if thr else []
+
     def scan_throw(s):
         X = s.X
         if s.thrower is None:
             for r in X.relocs:
-                if X.intext(r) and X.cov[r - X.T0] == 2 and X.sec(X.u32(r)) not in (None, '.text') and X.u32(X.u32(r)) == EXC_CODE: s.thrower = X.entry_of(r); break
-        for site in X.callers.get(s.thrower, ()):
+                if X.intext(r) and X.cov[r - X.T0] == 2 and X.isdata(X.u32(r)) and X.u32(X.u32(r)) == EXC_CODE: s.thrower = X.entry_of(r); break
+        for site in list(X.callers.get(s.thrower, ())) + s.iat_calls():
             for p in range(site - 16, site - 4):
-                if X.text[p - X.T0] == 0x68 and X.cov[p - X.T0] == 1 and (p + 1) in X.rset and X.sec(X.u32(p + 1)) not in (None, '.text'):
+                if X.text[p - X.T0] == 0x68 and X.cov[p - X.T0] == 1 and (p + 1) in X.rset and X.isdata(X.u32(p + 1)):
                     S = X.u32(p + 1)
                     if S in s.throws: break
                     r = s.parse_ti(S)
                     if r:
-                        s.throws[S] = r
+                        s.throws[S] = r; s.mk(S, 16, p + 1); s.mk(r['cta'], 4 + 4 * len(r['types']), S + 12)
+                        for k, t in enumerate(r['types']): s.mk(X.u32(r['cta'] + 4 + 4 * k), 28, r['cta'] + 4 + 4 * k); s.mk(t[1], 8 + len(X.cstr(t[1] + 8)) + 1, X.u32(r['cta'] + 4 + 4 * k) + 4)
                         if r['unwind']: s.emit(r['unwind'], 'eh-throw', r['unwind_site'])
                         for t in r['types']:
                             if t[3]: s.emit(t[3], 'eh-throw', t[4])
@@ -188,7 +200,7 @@ class EH:
             t = s.throws[a]; J['throwinfo'].append({'addr': h(a), 'attrs': t['attrs'], 'unwind': h(t['unwind']) if t['unwind'] else 0,
                 'types': [{'type': h(ty), 'size': sz, 'copy': h(cp) if cp else 0} for _, ty, sz, cp, _ in t['types']]})
         J['conts'] = {h(k): h(v) for k, v in sorted(s.conts.items())}
-        os.makedirs(os.path.dirname(OUT), exist_ok=True); json.dump(J, open(OUT, 'w'), indent=1, sort_keys=True)
+        json.dump(J, open(X.outdir + '/ehtables.json', 'w'), indent=1, sort_keys=True)
         L = []; bm = Counter(r['magic'] for r in s.fi.values()); L.append('FuncInfo found %d parsed %d failed %d; by magic %s' % (len(s.fi), len(ok), len(bad), {h(k): v for k, v in sorted(bm.items())}))
         if bad: L.append('  failed: ' + ' '.join('%x:%s' % kv for kv in sorted(bad.items())[:5]))
         tys = {ty for r in ok.values() for _, hs in r['tries'] for _, ty, *_ in hs if ty}; thr = {t[1] for r in s.throws.values() for t in r['types']}
@@ -204,7 +216,7 @@ class EH:
         L.append('functions owning a FuncInfo %d, of which decomp %d; FuncInfo without a referenced stub %d' % (len(owners), sum(1 for o in owners if o in X.fsize), sum(1 for a in ok if not fiown[a])))
         scan = set()
         for nm, va, vs, ro, rs in X.secs:
-            if nm == '.text': continue
+            if X.intext(va): continue
             for mg in MAGIC:
                 b = mg.to_bytes(4, 'little'); i = X.d.find(b, ro, ro + min(vs, rs))
                 while i >= 0:

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """R3 byte accounting of .text (used by universe.py; U is the universe module). Every byte is exactly one class:
 1 instruction of a decomp function, 2 instruction of a non-decomp entry, 3 table/data named by a relocation, 4 padding,
-5 dead code inside a decomp function, 6 dead code in a gap (no entry, no relocation names it), 0 unexplained (build error).
+5 dead code inside a decomp function, 6 dead code in a gap (no entry, no relocation names it), 8 data named by a PE data directory,
+7 hole between executable sections (not part of the universe), 0 unexplained (build error).
 Dead = a run no path reaches that decodes completely from its first byte (no bytes left over), ends at a terminator or at the
 next reached byte, has relocated fields only at instruction operand fields, and has no relocated dword (from a live site) and no
-call pointing into it. Output: /home/user/l3facts/codemap.tsv (start, length, class, owner entry or referencing relocation)."""
+call pointing into it. Output: <outdir>/codemap.tsv (start, length, class, owner entry or referencing relocation)."""
 import re, bisect
 from collections import Counter
-OUT = '/home/user/l3facts/codemap.tsv'
-CLS = {1: 'entry-decomp', 2: 'entry-nondecomp', 3: 'data-reloc', 4: 'padding', 5: 'dead-decomp', 6: 'dead-gap', 0: 'UNEXPLAINED'}
+CLS = {7: 'hole', 8: 'data-pe-header', 1: 'entry-decomp', 2: 'entry-nondecomp', 3: 'data-reloc', 4: 'padding', 5: 'dead-decomp', 6: 'dead-gap', 0: 'UNEXPLAINED'}
 TERM = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}
 
 def split_runs(U, runs):
@@ -65,8 +65,8 @@ def finish(U):
         if st == 'dead': cls[s:e] = (b'\5' if U.dmap[s] else b'\6') * (e - s)
         else: bad.append((s, e, st))
     cc = Counter(cls); L = []
-    L.append('R3 bytes of .text %d: entry-decomp %d, entry-nondecomp %d, data-by-reloc %d, padding %d, dead-decomp %d, dead-gap %d, UNEXPLAINED %d' % (
-        U.TN, cc[1], cc[2], cc[3], cc[4], cc[5], cc[6], cc[0]))
+    L.append('R3 bytes of executable sections %d: entry-decomp %d, entry-nondecomp %d, data-by-reloc %d, data-pe-header %d, padding %d, dead-decomp %d, dead-gap %d, UNEXPLAINED %d' % (
+        U.TN - cc[7], cc[1], cc[2], cc[3], cc[8], cc[4], cc[5], cc[6], cc[0]))
     dr = Counter(); db = Counter()
     for s, e, st in res:
         k = 'decomp' if U.dmap[s] else 'gap'; dr[k, st == 'dead'] += 1; db[k, st == 'dead'] += e - s
@@ -77,7 +77,7 @@ def finish(U):
         ' '.join('%x' % r for r, v in U.rvals if U.T0 + s <= v < U.T0 + e)[:40] or '-'))
     # ---- codemap.tsv
     OWNL = sorted(a for a in U.entries if a not in U.parent); rows = []
-    for c in (1, 2, 5, 3, 4, 6, 0):
+    for c in (1, 2, 5, 3, 8, 4, 6, 0):
         for m in re.finditer(bytes([c]) + b'+', bytes(cls)):
             s, e = m.span()
             if c in (1, 2, 5):
@@ -90,9 +90,9 @@ def finish(U):
                 x = s
                 for y in range(s + 1, e + 1):
                     if y == e or U.tref[y] != U.tref[x]: rows.append((x, y - x, 3, 'reloc:%08x' % U.tref[x])); x = y
-            else: rows.append((s, e - s, c, '-'))
+            else: rows.append((s, e - s, c, '-' if c != 8 else 'pe-header'))
     rows.sort()
-    open(OUT, 'w').write(''.join('%08x\t%d\t%s\t%s\n' % (U.T0 + s, n, CLS[c], o) for s, n, c, o in rows))
+    open(U.outdir + '/codemap.tsv', 'w').write(''.join('%08x\t%d\t%s\t%s\n' % (U.T0 + s, n, CLS[c], o) for s, n, c, o in rows))
     L.append('codemap.tsv: %d runs' % len(rows))
     return L, cc[0], cls
 
@@ -132,3 +132,127 @@ def consumers(U, eh):
     L.append('ptr-only entries %d: consumer transfers control %d (%s); RESIDUAL consumer unknown %d (%s)' % (len(po), len(ctl), ', '.join('%s %d' % kv for kv in sorted(cs_.items())), len(po) - len(ctl), ', '.join('%s %d' % kv for kv in sorted(rs.items()))))
     L.append('  residual class: entry-nondecomp (must decode; checked: %d undecodable, %d bad-decode, %d mid-insn => build error if any)' % (sum(1 for k, r in U.rejects.values() if k == 'undecodable'), len(U.bad_entries), sum(1 for k, r in U.rejects.values() if k != 'undecodable')))
     return L
+
+# ---- consumer rules moved out of universe.py
+def set_dataformat(U, q):
+    """call address if the reloc site q is `push imm32` whose call (within 12 insns) is `call reg`, reg loaded from [m+0x2c]
+    (IDirectInputDevice::SetDataFormat, method 11); False if not; None if the site is not reached yet."""
+    o = q - U.T0; X = U.X
+    if not U.cov[o]: return None
+    while U.cov[o] != 1: o -= 1
+    ins = next(U.md.disasm(U.text[o:o + 15], U.T0 + o, 1))
+    if ins.mnemonic != 'push' or U.T0 + o + ins.imm_offset != q: return False
+    ld = set()
+    for g in U.md.disasm(U.text[o + ins.size:o + ins.size + 120], U.T0 + o + ins.size):
+        op = g.operands
+        if g.mnemonic == 'mov' and len(op) == 2 and op[0].type == X.X86_OP_REG and op[1].type == X.X86_OP_MEM and op[1].mem.disp == 0x2c: ld.add(op[0].reg)
+        elif g.mnemonic == 'call': return g.address if op[0].type == X.X86_OP_REG and op[0].reg in ld else False
+        elif g.mnemonic in ('ret', 'jmp') or g.mnemonic[0] == 'j': return False
+    return False
+def dfmt(U, r, v, final):
+    """r is the rgodf field of a DIDATAFORMAT record (dwSize 0x18, dwObjSize 0x10, [dwFlags, dwDataSize, dwNumObjs, rgodf]) whose every code
+    reference is `push rec` for IDirectInputDevice::SetDataFormat: DirectInput reads DIOBJECTDATAFORMAT[dwNumObjs] through rgodf (data).
+    -> True proven (object marked class 3); 'wait' consumer not yet reached; None rule does not apply."""
+    rec = r - 0x14; rs = U.sec(rec); u32 = U.u32
+    if rs in (None, '.text') or u32(rec) != 0x18 or u32(rec + 4) != 0x10 or not U.intext(v) or rec not in U.cref: return None
+    ds, n = u32(rec + 12), u32(rec + 16); ln = 16 * n
+    if not 0 < n <= 0x100 or v + ln > U.T1 or any(U.cov[v - U.T0:v - U.T0 + ln]): return None
+    for k in range(n):
+        g, ofs = u32(v + 16 * k), u32(v + 16 * k + 4)
+        if (g and (v + 16 * k not in U.rset or U.sec(g) not in ('.rdata', '.data'))) or ofs >= ds: return None
+    cs = [set_dataformat(U, q) for q in U.cref[rec]]
+    if None in cs: return None if final else 'wait'
+    if not all(cs): return None
+    U.mark(v, ln, r); U.dinfo['didataformat'] += 1; ng = sum(1 for q in U.relocs if v <= q < v + ln)
+    U.datarec.append((rec, v, n, ln, sorted(cs), ng, r)); return True
+
+# ---- strict (module) pointer classification: a pointer into executable bytes is code only on control-transfer evidence, data only on
+# data-read evidence; everything else is undetermined and never becomes an entry.
+STRF = {n: a for a, ns in (((0,), 'LoadLibraryA GetModuleHandleA OutputDebugStringA CreateFileA lstrlenA strlen _strdup atoi atof fopen_s'), ((1,), 'GetProcAddress'),
+        ((0, 1), 'strcmp _stricmp stricmp strncmp _strnicmp lstrcmpA lstrcmpiA lstrcpyA lstrcatA strcpy strcat strstr strchr sprintf wsprintfA printf fopen sscanf'),
+        ((1, 2), 'MessageBoxA'), ((2,), 'sprintf_s')) for n in ns.split()}
+WIDE = {'LoadLibraryW': (0,), 'GetModuleHandleW': (0,), 'OutputDebugStringW': (0,), 'lstrcmpW': (0, 1), 'wcscmp': (0, 1), '_wcsicmp': (0, 1), 'wcslen': (0,), 'wcscpy': (0, 1)}
+def callee(U, o, limit=16):
+    """(n pushes before the first call after text offset o, import name or kind of that call)."""
+    X = U.X; n = 0
+    for g in U.md.disasm(U.text[o:o + 160], U.T0 + o):
+        limit -= 1
+        if g.mnemonic == 'push': n += 1
+        elif g.mnemonic == 'call':
+            op = g.operands[0]
+            if op.type == X.X86_OP_MEM and not op.mem.base and not op.mem.index: return n, U.imports.get(op.mem.disp & 0xffffffff, 'indirect-abs')
+            return n, 'direct' if op.type == X.X86_OP_IMM else 'indirect'
+        elif g.mnemonic in ('ret', 'jmp') or g.mnemonic[0] == 'j' or limit < 0: return n, 'none'
+    return n, 'none'
+def string_arg(U, r, ins, v):
+    """size in bytes of the string at v if `push v` is argument k of a call to an import that reads that argument as a string."""
+    if ins.mnemonic != 'push' or U.cov[v - U.T0]: return None
+    n, c = callee(U, r - U.T0 - ins.imm_offset + ins.size); nm = c.split('!')[-1]
+    wide = n in WIDE.get(nm, ()); 
+    if not (wide or n in STRF.get(nm, ())): return None
+    e = v - U.T0
+    while e + 1 < U.TN and U.V[e] and (U.text[e:e + 2] != b'\0\0' if wide else U.text[e]): e += 2 if wide else 1
+    return e - (v - U.T0) + (2 if wide else 1)
+def vstore(U, t):
+    """True if code stores the data address t into memory (`mov [m], imm32`): t is an object's vptr, its slots are called through."""
+    if t in U.vok: return True
+    for q in U.cref.get(t, ()):
+        o = q - U.T0
+        if U.cov[o] != 2: continue
+        while U.cov[o] != 1: o -= 1
+        i = next(U.md.disasm(U.text[o:o + 15], U.T0 + o, 1)); X = U.X
+        if i.mnemonic == 'mov' and i.operands[0].type == X.X86_OP_MEM and i.operands[1].type == X.X86_OP_IMM and U.T0 + o + i.imm_offset == q: U.vok.add(t); return True
+    return False
+def ptr_run(U, t):
+    """the relocated-dword run started at t is a vtable: every slot into executable bytes is a code entry; the run is class-3 data when it lies in .text."""
+    s = []; q = t
+    while q in U.rset: s.append(q); q += 4
+    if U.intext(t): U.mark(t, 4 * len(s), t)
+    U.tstarts.add(t); U.dinfo['vtable_runs'] += 1
+    for q in s:
+        U.settled.add(q); U.vsites.add(q)
+        if U.intext(U.u32(q)): U.ptr_target(U.u32(q), q)
+    return len(s)
+def strict_pass(U, final, eh):
+    new = 0
+    for r, v in U.rvals:
+        if r in U.settled: continue
+        if r in eh.sites or r in U.tslots: U.settled.add(r); continue
+        k, ins = U.site_kind(r)
+        if k == 'tbl': U.settled.add(r); continue
+        if k == 'other': U.dinfo['other_site'] += 1; U.rejects[v] = ('other-site', r); U.settled.add(r); continue
+        if k == 'disp' and ins.mnemonic != 'lea':
+            U.disp_ref(r, v, ins, final); U.settled.add(r); new += 1; continue
+        if k == 'imm':
+            n = string_arg(U, r, ins, v)
+            if n: U.mark(v, n, r); U.dinfo['string_arg'] += 1; U.settled.add(r); new += 1; continue
+        if k == 'slot':
+            if not final: continue
+            if r in U.deadops: U.dinfo['slot_in_dead_operand'] += 1; U.settled.add(r); continue
+        t = U.cont.get(r) if k in ('data', 'slot') else None
+        if t is not None and vstore(U, t): new += ptr_run(U, t) > 0
+        elif U.cov[v - U.T0] == 1 or U.tbl[v - U.T0]: U.settled.add(r)
+    return new
+def shape(U, ins):
+    X = U.X; return ','.join({X.X86_OP_REG: 'r', X.X86_OP_MEM: 'm', X.X86_OP_IMM: 'i'}.get(o.type, '?') for o in ins.operands)
+def ptrclass(U):
+    """pointer targets (distinct relocated values into executable bytes): (a) code, (b) data, (c) undetermined, with the 10 largest (c) groups."""
+    sites = {}
+    for r, v in U.rvals: sites.setdefault(v, []).append(r)
+    cnt = Counter(); grp = Counter(); why = Counter()
+    for v in sorted(sites):
+        ss = sites[v]; ctl = [r for r in ss if r in U.vsites or r in U.eh_sites or r in U.tslots]
+        if ctl or v in U.entries: cnt['a'] += 1; why['a:control-consumer' if ctl else 'a:entry'] += 1
+        elif U.tbl[v - U.T0] or U.pedat[v - U.T0]: cnt['b'] += 1; why['b:data-extent'] += 1
+        elif U.cov[v - U.T0] == 1: cnt['a'] += 1; why['a:direct-flow'] += 1
+        else:
+            cnt['c'] += 1; r = ss[0]; k, ins = U.site_kind(r)
+            if k == 'tbl': p = 'table-slot loaded by ' + U.tcons.get(r, 'data')
+            elif ins is None: p = '%s-site %s' % (k, 'in-vtable-run-unproven' if r in U.cont else 'no-container')
+            else:
+                o = r - U.T0 - (ins.imm_offset if k == 'imm' else ins.disp_offset) + ins.size
+                p = '%s %s >%s' % (ins.mnemonic, shape(U, ins), callee(U, o)[1] if ins.mnemonic == 'push' else '-')
+            grp[p] += 1
+    L = ['pointer targets %d: (a) code %d [%s], (b) data %d, (c) UNDETERMINED %d' % (len(sites), cnt['a'], ', '.join('%s %d' % kv for kv in sorted(why.items()) if kv[0][0] == 'a'), cnt['b'], cnt['c'])]
+    L += ['  (c) %6d  %s' % (n, p) for p, n in sorted(grp.items(), key=lambda kv: (-kv[1], kv[0]))[:10]]
+    return L, cnt['c']

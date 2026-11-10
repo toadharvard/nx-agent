@@ -191,6 +191,9 @@ def reg_escapes(F, x, r):
             if m != 'call':
                 continue
         kill = False
+        if (m == 'lea' and any(p.type == X.X86_OP_MEM and r in (i.reg_name(p.mem.base) if p.mem.base else '', i.reg_name(p.mem.index) if p.mem.index else '') for p in o)) or \
+                (r == 'eax' and m in P.IMPL):
+            return True
         for k, p in enumerate(o):
             if p.type == X.X86_OP_REG and P.core.SUB.get(i.reg_name(p.reg), (0,))[0] == r:
                 if p.access & 1 and not (m in ('cmp', 'test') or fs and m == 'mov' and k == 1 and False) and not (fs and k == 1 and m == 'mov'):
@@ -415,8 +418,10 @@ def main():
     print('import call sites (direct + via thunk): ' + ' '.join('%s=%d' % kv for kv in sorted(imp.items()) if ck(kv[0])))
     offs = [(x, w, a) for a, r in sorted(good.items()) for x, w in r['offs']]
     tl = pc['tls'] + pc['tls-derived']
-    print('tls check (no function stores/passes on an address derived from fs:[0x2c]): %s; offending sites %d  %s' % (
-        'PASSED' if not offs else 'FAILED', len(offs), ' '.join('%08x(%s)' % (x, w) for x, w, a in offs[:5])))
+    hard = [o for o in offs if not o[1].startswith('call with')]
+    print('tls check (no function stores/passes on an address derived from fs:[0x2c]): %s; offending sites %d = %d left in eax/ecx/edx at a call (callee use not analysed) + %d store/push/return/other' % (
+        'PASSED' if not offs else 'FAILED', len(offs), len(offs) - len(hard), len(hard)))
+    print('  first call-left: %s;  first other: %s' % (' '.join('%08x' % x for x, w, a in offs if w.startswith('call with'))[:80], ' '.join('%08x(%s)' % (x, w) for x, w, a in hard[:4])))
     plain = pc['stack-local'] + pc['ro-iat'] + pc['ro-rdata'] + pc['ro-text'] + (0 if offs else tl)
     print('plain-eligible accesses %d of %d (%.1f %%)  [stack-local %d + ro-const %d; tls (%d) and tls-derived (%d) excluded; +%d stack-unk in escape-free functions; +%d args-in/out]' % (
         plain, nacc, 100.0 * plain / max(nacc, 1), pc['stack-local'], plain - pc['stack-local'], pc['tls'], pc['tls-derived'], unkok, pc['stack-args-in'] + pc['stack-args-out']))

@@ -2,7 +2,7 @@
 """W10-A: whole-program static analysis of the floating-point control state of FalloutNV.exe (x87 CW, MXCSR, status
 readers, x87 stack depth). Count-only on stdout; site lists under /home/user/l3facts/fpmodes/. Sound = over-approximate:
 anything not decided is reported as unknown. Inputs: FNVNX_EXE, /home/user/l3facts/universe.tsv (read-only)."""
-import os, sys, hashlib, time, itertools
+import os, sys, hashlib, time, itertools, bisect
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -51,6 +51,7 @@ def load_universe():
     raw = open(UNI, 'rb').read()
     rows = [(int(f[0], 16), int(f[2]), f[1]) for f in (ln.split('\t') for ln in raw.decode().splitlines()) if len(f) >= 3 and f[2].isdigit() and int(f[2]) > 0]
     KINDS.update((a, k) for a, e, k in rows)
+    EST[:] = sorted((a, e) for a, e, k in rows)
     return raw, rows
 
 
@@ -506,9 +507,10 @@ def eaxscan(F):
     return rd, sorted(cl)
 
 
-def depth1(F, tabl, ov):
+def depth1(F, tabl, ov, start=None):
     """one forward x87 depth dataflow. ov: assumed result delta per unknown-callee site. -> dict (+ 'sites')"""
-    d0 = {F.a: 0}; work = [F.a]; conf = set(); mx = mi = 0; rets = set(); unk = ind = 0; x87 = False; sites = []; indpos = []
+    start = F.a if start is None else start
+    d0 = {start: 0}; work = [start]; conf = set(); mx = mi = 0; rets = set(); unk = ind = 0; x87 = False; sites = []; indpos = []
     while work:
         a = work.pop(); d = d0[a]; i = F.ins[a]; m = mn(i); e = 0
         if isx87(m):
@@ -538,15 +540,31 @@ def depth1(F, tabl, ov):
         for t in F.tails.get(a, ()):
             if t in UNC:
                 sites.append(a)
-            rets.add(None if nd is None else nd + (ov.get(a, 0) if t in UNC else tabl.get(t, 0)))
+            rets.add(None if nd is None else nd + (ov.get(a, 0) if t in UNC else tabl.get(t, 0) if t in KINDS else tailret(t, tabl)))
         for s_ in F.succ[a]:
             if s_ not in d0:
                 d0[s_] = nd; work.append(s_)
             elif d0[s_] != nd and d0[s_] is not None and nd is not None:
                 conf.add((s_, d0[s_], nd))
     rd = sorted(r for r in rets if r is not None)
-    return dict(x87=x87, conf=sorted(conf)[:3], nconf=len(conf) + (len(set(rd)) > 1), mx=mx, mi=mi, ret=rd[0] if len(set(rd)) == 1 else 0,
+    return dict(x87=x87, conf=sorted(conf)[:3], nconf=len(conf) + (len(set(rd)) > 1) + (mi < 0 and F.kind == 'decomp'), mx=mx, mi=mi, ret=rd[0] if len(set(rd)) == 1 else 0,
                 nodepth=bool(unk), ind=ind, sites=sites, inddep=sum(1 for a in indpos if x87 and F.succ[a] and isx87(mn(F.ins[F.succ[a][0]]))))
+
+
+TC, EST = {}, []              # tailret cache, sorted (start, ext) of all entries
+
+
+def tailret(t, tabl):
+    """net depth change at return of the code starting at t, a jump target inside another entry (not an entry start)."""
+    if t in TC:
+        return TC[t]
+    TC[t] = 0
+    k = bisect.bisect_right(EST, (t, M32)) - 1
+    if k >= 0 and t < EST[k][0] + EST[k][1] + 512:
+        F = Fn(EST[k][0], EST[k][1], KINDS[EST[k][0]])
+        if F.ok and t in F.ins:
+            TC[t] = depth1(F, tabl, {}, t)['ret']
+    return TC[t]
 
 
 def depth(F, tabl):
@@ -554,13 +572,13 @@ def depth(F, tabl):
     r = depth1(F, tabl, {})
     r['status'] = 'static'
     st = sorted(set(r['sites']))
-    if r['nconf'] and 0 < len(st) <= 10:
-        for combo in sorted(itertools.product((0, 1), repeat=len(st)), key=sum):
+    if r['nconf'] and 0 < len(st) <= 12:
+        for combo in itertools.islice(sorted(itertools.product((0, 1), repeat=len(st)), key=sum), 600):
             r2 = depth1(F, tabl, dict(zip(st, combo)))
             if not r2['nconf']:
                 r2['status'] = 'inferred'; r = r2; break
     if r['nconf']:
-        r['status'] = 'conflict' if len(st) <= 10 else 'conflict-undecided'
+        r['status'] = 'conflict' if len(st) <= 12 else 'conflict-undecided'
     r['ret'] = r['ret'] if r['status'] != 'conflict' else 0
     return r
 
