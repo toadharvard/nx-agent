@@ -54,3 +54,12 @@ def table_c(syms, phf=None):
         out.append('const u32 fnvl_ntab = %d;' % len(phf['slots']))
         out.append('const u16 fnvl_g[] = {%s};' % ','.join(map(str, phf['g'])))
     return '\n'.join(out) + '\n'
+
+
+def table_asm(syms, phf):
+    """position-independent dispatcher table for rt.c -DFNVL_PHF_REL (tools/liftall.py): AArch64 assembly, section .rodata.fnvl_disp.
+    slot i = {u32 key, s32 L_sym - fnvl_disp_table} (empty slot: key 0xffffffff), then fnvl_g[] (u16). No absolute code address appears."""
+    out = ['.section .rodata.fnvl_disp,"a"', '.balign 8', '.globl fnvl_disp_table', 'fnvl_disp_table:']
+    out += [' .long 0x%x, %s - fnvl_disp_table' % (a, syms[a]) if a is not None else ' .long 0xffffffff, 0' for a in phf['slots']]
+    out += ['.globl fnvl_g', '.balign 2', 'fnvl_g:'] + [' .short %d' % g for g in phf['g']]
+    return '\n'.join(out) + '\n'

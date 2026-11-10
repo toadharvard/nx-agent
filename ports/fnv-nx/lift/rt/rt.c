@@ -15,7 +15,22 @@ __attribute__((weak, noinline)) void fnvl_raise(u32 code, u32 at) { __asm__ vola
 __attribute__((weak, noinline)) void fnvl_trace(u32 entry, u32 esp) { __asm__ volatile("" :: "r"(entry), "r"(esp) : "memory"); }
 static void fnvl_miss(void) {}
 
-#ifdef FNVL_PHF
+#ifdef FNVL_PHF_REL
+/* Position-independent table (tools/liftall.py): slots {key, offset of the body from fnvl_disp_table}, hash parameters as for FNVL_PHF. An address without a
+   slot (not an entry, or an entry the lifter has no body for) resolves to fnvl_nobody (rt/enter.c), which raises #UD for it: the address is passed in c->ra
+   (the dispatcher's callers hold the thread's struct cpu in x27: lifted frames and fnvl_enter; c->ra is at offset 320, checked by rt/enter.c). */
+extern const u32 fnvl_disp_table[];
+extern const u16 fnvl_g[];
+extern void fnvl_nobody(void);
+void (*fnvl_dispatch(u32 a))(void)
+{
+    u32 i = ((a ^ fnvl_g[(a * FNVL_K1) >> (32 - FNVL_NBITS)]) * FNVL_K2) >> (32 - FNVL_TBITS);
+    const u32 *s = fnvl_disp_table + 2 * i;
+    if (s[0] == a) return (void (*)(void))((const char *)fnvl_disp_table + (int)s[1]);
+    u32 *cp; __asm__("mov %w0, w27" : "=r"(cp)); cp[80] = a;
+    return fnvl_nobody;
+}
+#elif defined(FNVL_PHF)
 /* Generated perfect hash (bench/phf.py): bucket = (a*K1)>>(32-NBITS); idx = ((a ^ g[bucket]) * K2) >> (32-TBITS); the slot holds the key, so a
    pointer that is not an entry is caught by the compare (cannot happen for a relocated pointer: the table is total by construction). */
 extern const u16 fnvl_g[];
