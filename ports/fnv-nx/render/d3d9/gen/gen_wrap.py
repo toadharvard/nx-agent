@@ -24,7 +24,7 @@ def generate(spec, raw, out):
     C += ids[2:] + T.structs(spec)
     body = []
     for n in names:
-        H.append(f"class W_{n} : public {n} {{ public: D9Obj *o; {n} *r; W_{n}(D9Obj *o_) : o(o_), r(({n} *)o_->real) {{}}")
+        H.append(f"class W_{n} final : public {n} {{ public: D9Obj *o; {n} *r; W_{n}(D9Obj *o_) : o(o_), r(({n} *)o_->real) {{}}")
         for m in by[n]:
             H.append(f"  {m['ret']} STDMETHODCALLTYPE {m['name']}({', '.join(q['ctype'] + ' ' + q['name'] for q in m['params'])}) override;")
             L, u = Meth(spec, names, m).emit(); body += L; used |= {(n, p) for p in u}; man.append(f"M {n} {m['slot']} {m['name']}")

@@ -4,13 +4,13 @@
  2 builds (g++ -m32) wrapper + stream runtime + a generated ECHO implementation + DRIVER (gen_echo.py) that calls every method of every interface;
  3 runs it twice (determinism), decodes the stream with d9s1_read.py and compares every record/item with the plan's expected stream (enc.py);
  4 mutation checks: one input / one echo output byte / one handle changed -> the comparison must fail.   Exit != 0 on any failure."""
-import hashlib, json, os, subprocess, sys, tempfile, concurrent.futures as cf
+import hashlib, json, os, shutil, subprocess, sys, tempfile, concurrent.futures as cf
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 GEN = os.path.join(ROOT, "render", "d3d9", "gen"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json"); INC = os.path.join(ROOT, "shim", "include")
 sys.path.insert(0, HERE)
 import plan as P, enc, gen_echo, d9s1_read as R                      # noqa: E402
-fails = []; counts = {}
+fails = []; counts = {}; TMP = None
 
 
 def check(name, ok, msg=""):
@@ -51,7 +51,7 @@ def compare(exp, act, spec, label):
 
 
 def main():
-    raw = open(SPEC, "rb").read(); spec = json.loads(raw); tmp = tempfile.mkdtemp(prefix="d9wrap_")
+    raw = open(SPEC, "rb").read(); spec = json.loads(raw); tmp = tempfile.mkdtemp(prefix="d9wrap_"); global TMP; TMP = tmp
     # 1 generator + fail-closed check
     r = sh([sys.executable, "-I", os.path.join(GEN, "gen_wrap.py"), tmp]); check("generator runs", r.returncode == 0, r.stderr[-300:])
     bad = json.loads(raw); bad["methods"][5]["params"] = bad["methods"][5]["params"] + [{"name": "zz", "kind": "bogus", "dir": "in", "byref": False, "ctype": "int"}]
@@ -109,7 +109,7 @@ def main():
 
 
 def finish():
-    detected = [k for k in counts if k.startswith("mutation")]
+    if TMP and not os.environ.get("D9WRAP_KEEP"): shutil.rmtree(TMP, ignore_errors=True)
     print("checks: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
     for f in fails[:40]: print("FAIL", f)
     print(f"RESULT: {'FAIL' if fails else 'PASS'} ({len(fails)} failures)"); sys.exit(1 if fails else 0)
