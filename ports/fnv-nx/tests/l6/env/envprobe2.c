@@ -13,6 +13,7 @@ int main(int argc, char** argv) {
     if (argc < 2 || !(g_out = fopen(argv[1], "wb"))) return 3;
     g_d = Direct3DCreate9(D3D_SDK_VERSION); if (!g_d) return 1;
     if (FAILED(Direct3DCreate9Ex(D3D_SDK_VERSION, &g_dx))) g_dx = NULL;
+    if (argc > 2) { fclose(g_out); return 0; }   /* `pin`: adapter creation only (GL strings are in the WINEDEBUG trace) */
     env_misc(); envq_all();
     env_dev();
     fclose(g_out); return 0;

@@ -59,7 +59,7 @@ static void one(int op, int n, unsigned a0, unsigned a1, unsigned a2, unsigned a
     case 11: ret = C9(g_d, CheckDeviceFormatConversion, a[0], (D3DDEVTYPE)a[1], (D3DFORMAT)a[2], (D3DFORMAT)a[3]); break;
     case 12: fl.Size = sizeof fl; fl.Format = (D3DFORMAT)a[1]; fl.ScanLineOrdering = (D3DSCANLINEORDERING)a[2]; ret = CX(x, GetAdapterModeCountEx, a[0], &fl); break;
     case 13: fl.Size = sizeof fl; fl.Format = (D3DFORMAT)a[1]; fl.ScanLineOrdering = (D3DSCANLINEORDERING)a[2]; ret = CX(x, EnumAdapterModesEx, a[0], &fl, a[3], &dx); PRS(ob, D3DDISPLAYMODEEX, dx); break;
-    case 14: dx.Size = a[1] ? (a[1] == 1 ? sizeof dx : a[1] == 2 ? 16 : 0) : 24; ret = CX(x, GetAdapterDisplayModeEx, a[0], &dx, &rot);
+    case 14: dx.Size = a[1]; ret = CX(x, GetAdapterDisplayModeEx, a[0], &dx, &rot);
         { char t[64]; PRS(ob, D3DDISPLAYMODEEX, dx); sprintf(t, " rot=%x", (unsigned)rot); if (rot != (D3DDISPLAYROTATION)0xCDCDCDCDu) strcat(ob, t); } break;
     case 15: ret = CX(x, GetAdapterLUID, a[0], &luid); PRS(ob, LUID, luid); break;
     case 16: { IDirect3D9* t = ENV_CREATE9(a[0]); ret = t != NULL; if (t) C9(t, Release); } break;

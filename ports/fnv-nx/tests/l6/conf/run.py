@@ -13,7 +13,7 @@ import d9s1 as R, replay  # noqa: E402
 W = os.environ.get("CONF_WORK", "/home/user/work/l6/conf"); TMO = int(os.environ.get("CONF_TIMEOUT", "600"))
 SPECF = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json"); spec = json.load(open(SPECF))
 TESTS = (os.environ.get("CONF_TESTS") or "stateblock,device,d3d9ex,visual").split(",")
-SUM = re.compile(r"(\d+) tests executed \((\d+) marked as todo, (\d+) as flaky, (\d+) failures\), (\d+) skipped")
+SUM = re.compile(r"(\d+) tests executed \((\d+) marked as todo, (\d+) as flaky, (\d+) failures?\), (\d+) skipped")
 fails = []
 
 

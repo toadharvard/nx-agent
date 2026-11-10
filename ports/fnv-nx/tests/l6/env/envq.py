@@ -35,8 +35,8 @@ QBITS = [0x8000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000]
 ADP_ADAPTER_FMT_SMALL = [X8, R5, X1]
 # (name, [per-argument domain: list of values or a domain name])
 D = dict(FMT=FMT, DEVT=DEVT, DEVTX=DEVT + DEVT_BAD, RTYPE=RTYPE, RTYPEX=RTYPE + RTYPE_BAD, MSAA=MSAA, USAGE_ALL=USAGE_ALL, PAIRS=PAIRS, WIN=[0, 1],
-         A0=[0], HAL=[1], X8=[X8], FMT_AD=[X8, R5, X1], SMALLRT=[1, 3, 4, 5, 6], RT2=[1, 3], USM3=[0, 1, 2], UNI=[0, 1, 3, 5, 6, 7], AFLAG=[0, 2], DISP4=[X8, R5, X1, 35],
-         SCAN=[0, 1, 2, 3], NZ=[0, 1, 2, 5], FMT12=[21, 22, 23, 75, 80, fcc("DXT1"), fcc("INTZ"), fcc("NULL"), 114, 0, fcc("ZZZZ"), 113],
+         A0=[0], HAL=[1], X8=[X8], FMT_AD=[X8, R5, X1], SMALLRT=[1, 3, 4, 5, 6], RT2=[1, 3], USM3=[0, 1, 2], UNI=[0, 1, 3, 5, 6, 7], AFLAG=[0] + [1 << i for i in range(32)] + [0xffffffff], DISP4=[X8, R5, X1, 35],
+         SCAN=[0, 1, 2, 3, 0x7fffffff], NZ=[0, 1, 2, 5, 0xffffffff], SZ=[0x18, 0x10, 0, 0x1c, 0xffffffff], FMT12=[21, 22, 23, 75, 80, fcc("DXT1"), fcc("INTZ"), fcc("NULL"), 114, 0, fcc("ZZZZ"), 113],
          USM=[0, 1, 2, 3, 0x40000 | 1, 0x20000, 0x10000, 0x200, 0x400, 0x400 | 1], FMT_SM=[0, 21, 22, 23, 75, 80, fcc("DXT1"), 0x7fffffff],
          OORA=[1, 2, 0x7fffffff, 0xffffffff], SDK=[0, 1, 0x1f, 0x20, 0x21, 0x80000020, 0xffffffff])
 Q = []   # (op, [domains])
@@ -53,14 +53,14 @@ Q += [("CheckDepthStencilMatch", [["A0"], ["HAL"], ["X8"], ["FMT"], ["FMT"]]), (
       ("CheckDepthStencilMatch", [["A0"], ["DEVTX"], ["X8"], ["FMT12"], ["FMT12"]])]
 Q += [("CheckDeviceMultiSampleType", [["A0"], ["HAL"], ["FMT"], ["WIN"], ["MSAA"]]), ("CheckDeviceMultiSampleType", [["A0"], ["DEVTX"], ["FMT_SM"], ["WIN"], ["MSAA"]])]
 Q += [("CheckDeviceFormatConversion", [["A0"], ["HAL"], ["FMT"], ["FMT"]]), ("CheckDeviceFormatConversion", [["A0"], ["DEVTX"], ["FMT12"], ["FMT12"]])]
-Q += [("GetAdapterModeCountEx", [["A0"], ["FMT"], ["SCAN"]]), ("EnumAdapterModesEx", [["A0"], ["FMT"], ["SCAN"], ["NZ"]]), ("GetAdapterDisplayModeEx", [["A0"], ["NZ"]]),
+Q += [("GetAdapterModeCountEx", [["A0"], ["FMT"], ["SCAN"]]), ("EnumAdapterModesEx", [["A0"], ["FMT"], ["SCAN"], ["NZ"]]), ("GetAdapterDisplayModeEx", [["A0"], ["SZ"]]),
       ("GetAdapterLUID", [["A0"]])]
 # out-of-range adapter ordinals: every method, a representative argument slice (the ordinal test is the first statement of each Wine function)
 Q += [("GetAdapterIdentifier", [["OORA"], ["AFLAG"]]), ("GetAdapterMonitor", [["OORA"]]), ("GetAdapterDisplayMode", [["OORA"]]), ("GetAdapterModeCount", [["OORA"], ["FMT_AD"]]),
       ("EnumAdapterModes", [["OORA"], ["FMT_AD"], ["NZ"]]), ("GetDeviceCaps", [["OORA"], ["DEVTX"]]), ("CheckDeviceType", [["OORA"], ["HAL"], ["DISP4"], ["FMT12"], ["WIN"]]),
       ("CheckDeviceFormat", [["OORA"], ["HAL"], ["X8"], ["USM"], ["SMALLRT"], ["FMT12"]]), ("CheckDepthStencilMatch", [["OORA"], ["HAL"], ["X8"], ["FMT12"], ["FMT12"]]),
       ("CheckDeviceMultiSampleType", [["OORA"], ["HAL"], ["FMT12"], ["WIN"], ["MSAA"]]), ("CheckDeviceFormatConversion", [["OORA"], ["HAL"], ["FMT12"], ["FMT12"]]),
-      ("GetAdapterModeCountEx", [["OORA"], ["FMT_AD"], ["SCAN"]]), ("EnumAdapterModesEx", [["OORA"], ["FMT_AD"], ["SCAN"], ["NZ"]]), ("GetAdapterDisplayModeEx", [["OORA"], ["NZ"]]),
+      ("GetAdapterModeCountEx", [["OORA"], ["FMT_AD"], ["SCAN"]]), ("EnumAdapterModesEx", [["OORA"], ["FMT_AD"], ["SCAN"], ["NZ"]]), ("GetAdapterDisplayModeEx", [["OORA"], ["SZ"]]),
       ("GetAdapterLUID", [["OORA"]])]
 Q += [("Direct3DCreate9", [["SDK"]]), ("Direct3DCreate9Ex", [["SDK"]])]
 OPS = ["GetAdapterCount", "GetAdapterIdentifier", "GetAdapterMonitor", "GetAdapterDisplayMode", "GetAdapterModeCount", "EnumAdapterModes", "GetDeviceCaps", "CheckDeviceType",

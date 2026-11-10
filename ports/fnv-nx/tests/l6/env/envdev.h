@@ -43,7 +43,7 @@ static void dev_mem(IDirect3DDevice9* d, unsigned id) {   /* accounting: create 
 static void env_dev(void) {
     static const DWORD BEH[] = { D3DCREATE_HARDWARE_VERTEXPROCESSING, D3DCREATE_SOFTWARE_VERTEXPROCESSING, D3DCREATE_MIXED_VERTEXPROCESSING, D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE };
     D3DDISPLAYMODE dm; unsigned win, bi, var, id = 0; static char ob[8192]; HRESULT hr;
-    C9(g_d, GetAdapterDisplayMode, 0, &dm);
+    { unsigned z = 0, r; static char o2[256]; memset(&dm, SENT, sizeof dm); r = C9(g_d, GetAdapterDisplayMode, 0, &dm); o2[0] = 0; PRS(o2, D3DDISPLAYMODE, dm); row(3, 1, &z, r, o2); }
     for (win = 0; win < 2; win++) for (bi = 0; bi < 4; bi++) for (var = 0; var < 6; var++) {
         D3DPRESENT_PARAMETERS pp; IDirect3DDevice9* dev = NULL; HWND w = mkwin(dm.Width, dm.Height); memset(&pp, 0, sizeof pp); id++;
         pp.Windowed = win; pp.hDeviceWindow = w; pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
