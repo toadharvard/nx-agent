@@ -157,20 +157,26 @@ template<class T> static inline T shl_(T a, T c, unsigned w) { return c >= w ? (
 template<class T> static inline T lshr_(T a, T c, unsigned w) { return c >= w ? (T)0 : (T)(a >> c); }
 template<class T> static inline T ashr_(T a, T c, unsigned w, T m) { T s = (a >> (w - 1)) & 1; if (c >= w) return s ? m : (T)0; T r = a >> c; if (s) r |= m ^ (m >> c); return r; }
 '''
-SIG = ','.join('[[maybe_unused]] u32& ' + r for r in REGS + FLAGS) + ',u32& eip'
+XIN = ('df', 'flo', 'fs_base', 'gs_base')          # other pre-state: DF (1 bit), the other EFLAGS bits (32, masked), segment bases
+SIG = ','.join('[[maybe_unused]] u32& ' + r for r in REGS + FLAGS + XIN) + ',u32& eip'
+FAULTS = {1: 'DE', 2: 'BP', 3: 'UD'}
+INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32}
 
 class Form:
-    def __init__(s, key, next_eip):
-        s.key, s.regs, s.flags, s.undef, s.stores = key, [], [], {}, []
-        s.eip = C(next_eip, 32); s.pend = {}
+    def __init__(s, key, addr, size):
+        s.key, s.regs, s.flags, s.undef, s.stores, s.faults, s.addr = key, [], [], {}, [], [], addr
+        s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
-    def reg(s, name, v): assert v.w == 32; s.regs.append((name, v)); s.pend[name] = v
-    def flag(s, name, v, when=None): assert v.w == 1 and name in FLAGS; s.flags.append((name, v, when))
+    def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
+    def flag(s, name, v, when=None): assert v.w == 1 and name in FLAGS + ('df',); s.flags.append((name, v, when))
+    def setflo(s, v): assert v.w == 32; s.flo = v
     def undefined(s, name, sdm): s.undef[name] = sdm
     def store(s, addr, v): s.stores.append((addr, v))
+    def fault(s, code, cond): assert cond.w == 1; s.faults.append((code, cond))
     def roots(s):
-        return [v for _, v in s.regs] + [v for _, v, _ in s.flags] + [w for _, _, w in s.flags if w is not None] + \
-               [x for st in s.stores for x in st] + [s.eip]
+        return [v for _, v, _ in s.regs] + [w for _, _, w in s.regs if w is not None] + [v for _, v, _ in s.flags] + \
+               [w for _, _, w in s.flags if w is not None] + [x for st in s.stores for x in st] + [c for _, c in s.faults] + \
+               ([s.flo] if s.flo is not None else []) + [s.eip]
     def serialize(s):
         """canonical DAG text (hash input of the certificates)"""
         ids, out = {}, []
@@ -179,35 +185,54 @@ class Form:
             a = [go(c) for c in n.a]; ids[id(n)] = i = len(ids)
             out.append('n%d=%s/%d %s %s' % (i, n.op, n.w, ','.join('n%d' % j for j in a), n.x if n.x is not None else ''))
             return i
-        for r, v in s.regs: out.append('reg %s n%d' % (r, go(v)))
-        for f, v, w in s.flags: out.append('flag %s n%d %s' % (f, go(v), 'n%d' % go(w) if w is not None else '-'))
+        nw = lambda w: 'n%d' % go(w) if w is not None else '-'
+        for r, v, w in s.regs: out.append('reg %s n%d %s' % (r, go(v), nw(w)))
+        for f, v, w in s.flags: out.append('flag %s n%d %s' % (f, go(v), nw(w)))
         for f in sorted(s.undef): out.append('undef ' + f)
         for a, v in s.stores: out.append('store n%d n%d' % (go(a), go(v)))
-        out.append('eip n%d' % go(s.eip))
+        for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
+        if s.flo is not None: out.append('flo n%d' % go(s.flo))
+        out.append('eip n%d @%x' % (go(s.eip), s.addr))
         return '\n'.join(out)
     def sha(s): return hashlib.sha256(s.serialize().encode()).hexdigest()
-    def post(s):
-        """z3 post-state: {'regs','flags','mem','eip','defined'} over the pre-state variables"""
+    def fault_term(s):
         import z3
-        regs = {r: z3.BitVec(r, 32) for r in REGS}; flags = {f: z3.BitVec(f, 1) for f in FLAGS}
-        defined = {f: z3.BoolVal(f not in s.undef) for f in FLAGS}
-        for r, v in s.regs: regs[r] = to_smt(v)
+        r = z3.BitVecVal(0, 8)
+        for k, c in reversed(s.faults): r = z3.If(to_smt(c) == 1, z3.BitVecVal(k, 8), r)
+        return r
+    def post(s):
+        """z3 post-state over the pre-state variables.  {'regs','flags'(six+df),'flo','mem','eip','defined'(flags),'rdefined'(regs),'fault'}.
+        On a fault the state is unchanged and eip = the instruction address (fields are guarded by fault == 0)."""
+        import z3
+        regs = {r: z3.BitVec(r, 32) for r in REGS}; flags = {f: z3.BitVec(f, 1) for f in FLAGS + ('df',)}
+        defined = {f: z3.BoolVal(f not in s.undef) for f in flags}; rdef = {r: z3.BoolVal(True) for r in REGS}
+        for r, v, w in s.regs:
+            regs[r] = to_smt(v)
+            if w is not None: rdef[r] = to_smt(w) == 1
         for f, v, w in s.flags:
             flags[f] = to_smt(v)
             if w is not None: defined[f] = to_smt(w) == 1
-        mem = mem_array()
+        mem = mem_array(); flo = to_smt(s.flo) if s.flo is not None else z3.BitVec('flo', 32)
         for a, v in s.stores:
             sv = to_smt(v)
             for i in range(v.w // 8): mem = z3.Store(mem, to_smt(a) + i, z3.Extract(8 * i + 7, 8 * i, sv))
-        return {'regs': regs, 'flags': flags, 'mem': mem, 'eip': to_smt(s.eip), 'defined': defined}
+        eip = to_smt(s.eip); ft = s.fault_term()
+        if s.faults:
+            nf = ft == 0; g = lambda new, old: z3.If(nf, new, old)
+            regs = {r: g(regs[r], z3.BitVec(r, 32)) for r in regs}; flags = {f: g(flags[f], z3.BitVec(f, 1)) for f in flags}
+            flo = g(flo, z3.BitVec('flo', 32)); mem = g(mem, mem_array()); eip = g(eip, z3.BitVecVal(s.addr, 32))
+        return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft}
+    def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
     def to_c(s, fname):
         e = Emit(s.roots()); L = []
-        L.append('static void %s(%s) {' % (fname, SIG))
+        L.append('static u32 %s(%s) {' % (fname, SIG))
         for u in sorted(e.used): L.append('  const u32 in_%s = %s;' % (u, u))
         for n in e.order:
             if id(n) in e.names: L.append('  const %s %s = %s;' % (T(n.w), e.names[id(n)], e.ex(n)))
-        for r, v in s.regs: L.append('  %s = %s;' % (r, e.ref(v)))
+        for k, c in s.faults: L.append('  if (%s) { eip = %s; return %d; }' % (e.ref(c), K(s.addr, 32), k))
+        for r, v, _ in s.regs: L.append('  %s = %s;' % (r, e.ref(v)))
         for f, v, _ in s.flags: L.append('  %s = %s;' % (f, e.ref(v)))
+        if s.flo is not None: L.append('  flo = %s;' % e.ref(s.flo))
         for a, v in s.stores: L.append('  M%d(%s) = %s;' % (v.w, e.ref(a), e.ref(v)))
-        L.append('  eip = %s;\n}' % e.ref(s.eip))
+        L.append('  eip = %s;\n  return 0;\n}' % e.ref(s.eip))
         return '\n'.join(L)
