@@ -259,7 +259,7 @@ stage(d, store, docs, "b1", None, [("/in", src)], b1)
 rc, out, err = tool("provenance", "--store", store, "--docs", docs)
 check("provenance: missing class exit 1", rc == 1 and "class" in err, (rc, out, err))
 check("sandbox: class field accepted, bad class rejected, part of key",
-      (sandbox.check_doc(json.load(open(os.path.join(docs, "b1.json")))) is None or True)
+      sandbox.check_doc(dict(json.load(open(os.path.join(docs, "b1.json"))), **{"class": "build"})) is None
       and sandbox.key_of(dict(json.load(open(os.path.join(docs, "b1.json"))), **{"class": "build"}))
       != sandbox.key_of(dict(json.load(open(os.path.join(docs, "b1.json"))), **{"class": "verification"})))
 try:
