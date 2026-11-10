@@ -3798,3 +3798,34 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - Tables as data and static BODYSEL.
   - The clean branch is created at P0 exit.
 * **next** - L7 PERF starts at the first measured frame.
+
+### J-0169 | 2026-11-10 | stream: orchestration | status: paused | parent: J-0168
+
+* **decided (owner)** - Stop all token-spending work: every lead and every Sonnet worker. Only machine computation on the farms continues.
+* **did**
+  - Sent all six leads the stop order: push WIP with an inbox note (state, half-done items, next step), hand L4 ready farm jobs as START lines, then go idle.
+  - L4 launches the farm queue, then idles:
+    - the patched GCC 13.3 (ILP32 MSVC data model) and the unified recompile shards;
+    - REC-CERT recertification;
+    - cl build_tree plus namegate over all 2,978 units;
+    - D3D9 recordings of the original with a cell;
+    - the deep lifter bench;
+    - fuzz/equiv baselines.
+* **state at pause**
+  - The clean branch `claude/fnv-nx-clean` is green and holds L4 verify, L1 contract and L5 platform. The MERGER session is idle.
+  - L1: n1 68,657/68,657 and bodysel total; it waits for L2 objects for the first real BODYSEL.
+  - L2: SDD2, Π, TSO, DISPATCH1, NAMES1, COOKIE1 and REC-CERT done. Pending: the patched compiler, the unified recompile, and moving GCC-only inserts to cl equivalents.
+  - L3:
+    - 358/393 integer encodings proven against patched Sail;
+    - ~130 FP/SIMD mnemonics to certify (FP-SMT, K, SDM);
+    - the class (a) memory share is 64.2 %;
+    - the dispatcher fast path and EH on the exe tables are pending.
+  - L5: about 267/440 imports total, about 30 tasks left.
+  - L6: translator 7,538/7,538, device methods 297/497, virtual clocks for stream equality pending.
+* **next** - On resume, read the farm results, then follow the critical path:
+  1. the patched GCC;
+  2. the unified recompile;
+  3. BODYSEL;
+  4. lifted bodies into the link (EH, FP certificates);
+  5. boot to the main menu;
+  6. the first frame.
