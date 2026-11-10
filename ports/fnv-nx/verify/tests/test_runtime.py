@@ -83,10 +83,13 @@ def main():
                 size += os.path.getsize(os.path.join(STORE, "obj", e["h"][:2], e["h"] + (".x" if e["x"] else "")))
     TIMES["files"], TIMES["MB"] = n, round(size / 1e6, 1)
     # closure == ldd
-    ldd = run(["ldd", real]).stdout
+    import sysconfig
+    ldd = ""
+    for f in [real] + sorted(os.path.join(r, n) for r, _, ns in os.walk(sysconfig.get_config_var("DESTSHARED")) for n in ns if n.endswith(".so")):
+        ldd += run(["ldd", f]).stdout
     want = {os.path.realpath(m) for m in re.findall(r"=> (/\S+)", ldd)} | {os.path.realpath(m) for m in re.findall(r"^\s*(/\S+) \(", ldd, re.M)}
     got = {os.path.realpath(i["at"]) for i in r1["inputs"] if cas.manifest(i["tree"], STORE).get("t") == "f"} - {real}
-    check("loader closure equals ldd (real files)", want == got, "only ldd %s; only runtime %s" % (sorted(want - got), sorted(got - want)))
+    check("loader closure (interpreter + extension modules) equals ldd (real files)", want == got, "only ldd %s; only runtime %s" % (sorted(want - got), sorted(got - want)))
     # stage
     args = ["stage", "--store", STORE, "--runtime", WORK + "/runtime.json", "--name", "rt-probe", "--class", "verification",
             "--input", "/in=" + WORK + "/in", "--output", "/out", "-o", WORK + "/stage.json", "--", "/in/calc.py"]
