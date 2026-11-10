@@ -3839,3 +3839,23 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - tables A–E: first ELF, then menu/frame, green conditions, native step, load per lead;
   - the critical path, with a proposal to split L3 into L3a and L3b.
 * **running** - REC/PATCH certification of 7200c194 (lc1), D3D9 docked recording (full1), Sail build plus proofs (l3c).
+
+### J-0171 | 2026-11-10 | stream: orchestration,farms | status: paused | parent: J-0170
+
+* **found** (token-free farm runs; L4 summary at 10:10Z; all results in fnv-nx-build)
+  - **REC/PATCH certification on L2 7200c194** (branch cert/7200c194d825):
+    - reconstructions: 473/491 certified;
+    - patches: 668/892 certified;
+    - GCC: 648/652 units;
+    - MSVC on pristine with the overlay: 345/354.
+    - certs.json is not yet in the source tree; L2 puts it there before the unified recompile.
+  - **Sail form proofs** (l3-lift/bench sail-proof.txt):
+    - 511/607 keys proven;
+    - DSL mismatch 13, model defect 20, model gap 58, timeout 5;
+    - the Sail build is not reproducible from L3's script on a clean farm (3 manual steps).
+  - **D3D9 recordings of the original** (handheld and docked): cell reached, 765 distinct shader bytecodes, all created in one frame. Run-to-run is not deterministic without virtual clocks.
+* **next on resume**
+  - Merge L4 aa3dc55e and 736579b1 through the MERGER.
+  - L2 puts certs.json into the tree, then the unified recompile.
+  - L3 first fixes the 13 DSL mismatches and makes the Sail build reproducible.
+  - Then follow docs/PLAN_FIRST_ELF.md.
