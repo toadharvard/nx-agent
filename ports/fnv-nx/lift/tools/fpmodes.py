@@ -76,7 +76,7 @@ def decode(a, ext, kind='decomp'):
             else:
                 s = [n] + ([o[0].imm & M32] if m[0] == 'j' or m.startswith('loop') else [])
             succ[x] = [t for t in s if t in ins]
-            out = [t for t in s if t not in ins and (m[0] == 'j' or m.startswith('loop'))]
+            out = [t for t in s if t not in ins and (m[0] == 'j' or m.startswith('loop') or t == n)]
             if out and (m != 'jmp' or o[0].type == X.X86_OP_IMM):
                 tails[x] = out
         far = [t for ts in tails.values() for t in ts if hi <= t < a + ext + 512 and KINDS.get(t) not in STARTS]

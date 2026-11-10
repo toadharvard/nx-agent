@@ -315,7 +315,7 @@ for v, n, rf in arrays:           # an array read through an index register exte
     if e > v + n: mark(v + n, e - v - n, rf); dinfo['array_ext_bytes'] += e - v - n
 # ---- extents / features / output
 for v, ss in psites.items():
-    if 'ptr' in kinds[v] and len(kinds[v]) > 1 and all(x in eh.sites for x in ss): kinds[v].discard('ptr')
+    if v in kinds and 'ptr' in kinds[v] and len(kinds[v]) > 1 and all(x in eh.sites for x in ss): kinds[v].discard('ptr')
 rows = []; kc = Counter(); kany = Counter(); fe = Counter(); extsum = 0
 for a in sorted(entries):
     pk = next(k for k in PRI if k in kinds[a]); isd = a in fsize; xs = extent_insns(a); ex = sum(insns[x][0] for x in xs); ft = 0
