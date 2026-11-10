@@ -19,9 +19,10 @@
  * so the GLSL compiler treats them as run-time values (as WineD3D's uniforms) and cannot fold x * 0 -> 0.
  * Hosts must write 0 there (every host clears the blocks).
  *
- * Vertex attribute locations: by D3DDECLUSAGE + usage index (fnvnx_dk_attrib_location).
- * VS->PS varying locations: by usage + index (fnvnx_dk_varying_location); PS < 3.0 reads the
- * fog factor at location 18 (x).
+ * Vertex attribute locations and VS->PS varying locations: ONE total rule, fnvnx_dk_assign() below, a pure function of the
+ * set of (usage, index) pairs a program declares (see "Location rule"). The fixed tables fnvnx_dk_attrib_location /
+ * fnvnx_dk_varying_location are its CANONICAL part (pairs that keep their slot whatever else is declared); PS < 3.0
+ * reads the fog factor at location 18 (x), the canonical slot of FOG0.
  *
  * Mirrored in mojoshader.patch (dk_attrib_location / dk_varying_location); keep in sync.
  */
@@ -78,6 +79,53 @@ static inline int fnvnx_dk_varying_location(int usage, int index)
     case FNVNX_USAGE_PSIZE:        return (index >= 1 && index < 3) ? 28 + index : -1;
     }
     return -1;
+}
+
+/* ---- Location rule (total over usage 0..13, index 0..15) ----------------------------------------------------------
+ * Hardware limits (uam source: nv_attributes.h NvAttrib_Generic(0..31), compiler_iface.cpp CLIPVERTEX = Generic(31);
+ * Maxwell vertex fetch has 16 attributes): 16 vertex attribute locations (0..15); 31 usable generic varying locations
+ * (0..30; 31 is the clip-vertex slot). D3D9 allows at most 16 VS inputs (v0..v15) and 12 VS outputs / PS inputs (SM3),
+ * and 224 (usage, index) pairs exist, so no fixed map is injective: the slot is a function of the program's DECLARATION SET.
+ *
+ * Rule: let S be the set of declared pairs (|S| <= slots, no duplicates). (1) a pair with a canonical slot (the tables above,
+ * unchanged since the first release) gets it. (2) the remaining pairs, in ascending (usage, index) order, get the free slots
+ * (those not taken by (1)) in ascending order. Proof: (1) is injective (the canonical map is), (2) is injective and disjoint
+ * from (1) by construction, and slots - |canonical in S| >= |S| - |canonical in S| slots are free, so every pair gets one.
+ * Stage agreement: both stages of a draw apply the rule to the SAME set L = (VS outputs without POSITION0/PSIZE0) U
+ * (PS inputs); a stage compiled alone uses its own set, which gives the same locations whenever every pair of L is
+ * canonical (fixed-function and nearly all real programs), so only draws with non-canonical varyings need a per-L variant
+ * (pure data, no run-time decision): fnvnx_shader_opts.link_pairs = L. VS POSITION0 / PSIZE0 live in gl_Position /
+ * gl_PointSize; a PS that declares them reads a varying copy, which the VS writes only when they are in link_pairs.
+ * VS inputs use the VS's own declared inputs: the device binds a stream element to the location the reflection JSON
+ * lists for the dcl with the same (usage, index). */
+#define FNVNX_DK_KIND_ATTRIB   0
+#define FNVNX_DK_KIND_VARYING  1
+#define FNVNX_DK_ATTRIB_SLOTS  16
+#define FNVNX_DK_VARYING_SLOTS 31
+#define FNVNX_DK_PAIR(usage, index) ((unsigned char)((usage) * 16 + (index)))   /* usage 0..13, index 0..15 */
+
+/* loc[k] = location of pairs[k] (a FNVNX_DK_PAIR). Returns 0, or -1 if the set is not a legal declaration set
+ * (duplicate pair, usage > 13, more pairs than slots): the D3D9 validator rejects such a program. */
+static inline int fnvnx_dk_assign(int kind, const unsigned char *pairs, int n, signed char *loc)
+{
+    const int slots = kind == FNVNX_DK_KIND_ATTRIB ? FNVNX_DK_ATTRIB_SLOTS : FNVNX_DK_VARYING_SLOTS;
+    unsigned char taken[32] = { 0 }; int i, j, p, slot = 0;
+    if (n > slots) return -1;
+    for (i = 0; i < n; i++) {
+        if (pairs[i] / 16 > 13) return -1;
+        for (j = 0; j < i; j++) if (pairs[j] == pairs[i]) return -1;
+        loc[i] = (signed char)(kind == FNVNX_DK_KIND_ATTRIB ? fnvnx_dk_attrib_location(pairs[i] / 16, pairs[i] % 16)
+                                                            : fnvnx_dk_varying_location(pairs[i] / 16, pairs[i] % 16));
+        if (loc[i] >= 0) taken[(int)loc[i]] = 1;
+    }
+    for (p = 0; p < 224; p++)                                         /* ascending (usage, index) */
+        for (i = 0; i < n; i++)
+            if (pairs[i] == p && loc[i] < 0) {
+                while (slot < slots && taken[slot]) slot++;
+                if (slot >= slots) return -1;                         /* unreachable: see the proof */
+                loc[i] = (signed char)slot++;
+            }
+    return 0;
 }
 
 #endif

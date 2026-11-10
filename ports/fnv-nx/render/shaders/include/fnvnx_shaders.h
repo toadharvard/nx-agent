@@ -44,6 +44,12 @@ enum {
 typedef struct fnvnx_shader_opts {
     uint32_t flags;
     const char *backend;               /* NULL = default ("mojoshader-glsldk") */
+    /* Varying link set L of the draw (fnvnx_dk_layout.h, "Location rule"): FNVNX_DK_PAIR(usage, index) of every VS output
+     * (except POSITION0/PSIZE0) and every PS input of the VS/PS pair; both stages are translated with the same L. NULL = none:
+     * the stage's own declarations (identical result when all its pairs are canonical). A PS-read POSITION0/PSIZE0 must be in L
+     * for the VS to write its varying copy. Part of the variant key. */
+    const unsigned char *link_pairs;
+    uint32_t n_link_pairs;
 } fnvnx_shader_opts;
 
 typedef struct fnvnx_shader_stats {

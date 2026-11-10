@@ -7,9 +7,10 @@
 
 static char *mojo_emit(const void *bc, size_t n, const fnvnx_reflection *refl, char *err, size_t errlen)
 {
-    (void)refl;
+    MOJOSHADER_glsldkSetLocations(refl->attrib_loc, refl->varying_loc, refl->copy);
     const MOJOSHADER_parseData *pd = MOJOSHADER_parse(MOJOSHADER_PROFILE_GLSLDK, "main",
         (const unsigned char *)bc, (unsigned int)n, NULL, 0, NULL, 0, NULL, NULL, NULL);
+    MOJOSHADER_glsldkSetLocations(NULL, NULL, NULL);
     if (!pd) { snprintf(err, errlen, "out of memory"); return NULL; }
     if (pd->error_count > 0) {
         size_t k = (size_t)snprintf(err, errlen, "mojoshader-glsldk:");
