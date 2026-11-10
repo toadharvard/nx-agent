@@ -78,10 +78,25 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
 - **R2, form certificates.** The semantics of every instruction form (mnemonic x operand class x width x prefix) is
   written once in a bit-vector DSL (`fnvlift/dsl.py`). The DSL emits (a) the C the lifter pastes (unsigned
   fixed-width operations only, no UB by construction) and (b) an SMT term. The SMT term is proven equal, for all
-  inputs, to the Sail x86 model (rems-project/sail-x86-from-acl2, executed symbolically by isla; mirrored on
-  fnv-nx-build `tools/sail-x86`). Sail is the only reference (owner decision 2026-11-10): there is no second line. A
-  form the model does not contain is reported to the orchestrator as a list, not closed another way. A form the exe
-  uses without a certificate is a build error. `instest` (Unicorn) and the bench verify; they
+  inputs, to the form's reference. A form the exe uses without a certificate is a build error. References, one per
+  class (resolution of 2026-11-10; the class of every mnemonic is in `sail_coverage.tsv`):
+  - `sail`: the Sail x86 model (sail-x86-from-acl2 under isla, compatibility mode with flat segments = IA-32;
+    mirrored on fnv-nx-build `tools/sail-x86`) for the integer, control and string forms. Two model defects (ROR
+    carry; rotate count modulo width on 8/16-bit operands) are fixed by a local patch that is checked against the
+    pinned x86 host exhaustively for 8 and 16 bits. Where the DSL defines more than the model (SAR carry, rotate
+    overflow at count 0), the certificate is "the DSL refines the model" plus the SDM sentence.
+  - `fp-smt`: x87 and SSE floating-point arithmetic, compares and float<->float conversions against the SMT
+    FloatingPoint theory (IEEE 754), with the rounding mode and FTZ/DAZ: exactly R8.
+  - `k`: integer SIMD, MMX, SSE moves and shuffles, `bswap`, `xlatb` against the K x86-64 semantics
+    (kframework/X86-64-semantics).
+  - `sdm`: float->int (E1), compare flag mapping (E2), x87 control and state (`fnstsw`, `fldcw`, `fnstenv`,
+    `fnsave`, `frstor`), `cpuid`, `rdtsc`: a reference module written once from the SDM in the same logic, checked
+    against the pinned x86 host exhaustively where the input space allows (16 and 32 bits). Assumption A3 for this
+    remainder, stated plainly: the reference was transcribed from the SDM and exhaustively compared with the host
+    where that is possible.
+  - `table`: `rcp*`/`rsqrt*`: the 2^32 table of the reference CPU is the specification.
+  Assumption recorded: memory forms are proven for pre-states where the model raises no segment-limit fault; on the
+  flat 4 GiB segments of the real process an address wraps modulo 2^32, which is what the lifted code does. `instest` (Unicorn) and the bench verify; they
   prove nothing.
 - **R3, code map.** Every byte of `.text` of every lifted module is an instruction of an entry, alignment, or a
   table named by a relocation (`tools/universe.py`); anything else is a build error. There are no trap codes.
