@@ -3746,3 +3746,24 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - Artifact branches, reports and caches stay in the private repo. HANDOFF.md section 3 tells how to recreate the farms if ever wanted.
 * **scope** - This covers the first account only. The farms named in J-0149..J-0165 (bl1, full2, full3, sw13, sw14, nr1) belong to the resumed orchestrator in the other account and were not touched.
 * **left** - The first account's S2d, S12 and S13b stream sessions are idle. Their results are on their branches.
+
+### J-0167 | 2026-11-10 | stream: orchestration | status: active | parent: J-0166
+
+* **decided (owner)**
+  - Universal, correct-by-construction fixes instead of per-item patches.
+  - Work is organized as Fable leads with Sonnet workers.
+  - The plan is MASTER_PLAN3, private, at fnv-nx-build `plan/master3`. Its super-rule: the contract comes from the exe, and a native body earns its place, otherwise the body is lifted from the exe's x86 bytes.
+* **found**
+  - Four audits plus reconciliation against the 11-09 farm reports (head e1ca6b02): about 480 rows, of which 66 closed, 164 open, 225 unverified and 16 audit-wrong.
+  - Lifter PoC: 1,000 of 1,025 exe functions equal to x86 on every input, with 0 real divergences. 98.94 % of decomp functions are liftable.
+* **did** - Started four leads (P0/P1), each on its own branch:
+  - L4 VERIFY: fast loop, warm==cold every head, farm fleet. Branch `claude/fnv-l4-verify`.
+  - L1 CONTRACT: exefacts, VT-ID, PROTO, gates. Branch `claude/fnv-l1-contract`.
+  - L3 LIFT: lifter, ABI glue, BODYSEL, deep bench. Branch `claude/fnv-l3-lift`.
+  - L2 SOURCE: SDD1, flags, one recompile. Branch `claude/fnv-l2-source`.
+* **provisional (owner may override)**
+  - Lifted bodies are allowed for cold code.
+  - SDD1 replaces D7/D22/D26, and the recon fleet is closed.
+  - The clean branch is created after P0.
+  - At most 12 farms.
+* **next** - L5 PLATFORM and L6 RENDER start at the P0 gate. L7 PERF starts after the first measured frame.
