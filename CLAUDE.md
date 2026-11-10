@@ -109,3 +109,6 @@ The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/
   - Rumble is on, through the game's own controller vibration.
   - Docked output is 1080p, handheld 720p.
   - Frame pacing on the 60 Hz panel is decided from the first measured frame.
+  - Packaging is deferred until the game runs in the emulator.
+    - The final package is the game's own installed title: an NSP with its own title id, NPDM (32-bit address space), NACP and icon, packed with the owner's console keys.
+    - Development runs use an Atmosphere exefs override.
