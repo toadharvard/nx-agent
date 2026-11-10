@@ -161,907 +161,17 @@
  },
  "conflicts": [
   {
-   "id": "ps:6",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:7",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:9",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:10",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:11",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:14",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:15",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:19",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:20",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:21",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:22",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:23",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:24",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:25",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:26",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:27",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:28",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:29",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:30",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:31",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:32",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:33",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:35",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:36",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:37",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:38",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:39",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:40",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:41",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:42",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:43",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:44",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:45",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
    "id": "ps:47",
    "kind": "opcode_models",
    "ms": [
     "ps_2_x",
     "ps_3_0"
    ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
+   "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
    "vkd3d": [
     "ps_2_0",
     "ps_2_x",
     "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:48",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:64",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:66",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:68",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:69",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
    ],
    "wine": [
     "ps_1_1",
@@ -1080,7 +190,7 @@
     "ps_1_2",
     "ps_1_3"
    ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
+   "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
    "vkd3d": [
     "ps_1_1",
     "ps_1_2",
@@ -1089,1239 +199,13 @@
    "wine": [
     "ps_1_1",
     "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:71",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
     "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
    ]
   },
   {
-   "id": "ps:72",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:73",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:74",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:76",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:77",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:80",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:82",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:83",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:84",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:85",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:86",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:87",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_4"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_4"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:88",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:89",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_4"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_4"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:90",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:91",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:92",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:93",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:94",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:95",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:96",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:65533",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_4"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "ps_1_4"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "vs:18",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:25",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:26",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:27",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:28",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:29",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:30",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:32",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:33",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:34",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:35",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:36",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:37",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:38",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:39",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:40",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:41",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:42",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:43",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:44",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:45",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:46",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:47",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:48",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:94",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:95",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "vs:96",
-   "kind": "opcode_models",
-   "ms": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "note": "sources disagree on the model set of this opcode; universe uses the UNION",
-   "vkd3d": [
-    "vs_2_x",
-    "vs_3_0"
-   ],
-   "wine": [
-    "vs_1_1",
-    "vs_2_0",
-    "vs_2_x",
-    "vs_3_0"
-   ]
-  },
-  {
-   "id": "ps:12",
-   "kind": "opcode_models",
-   "ms": [],
-   "note": "no MS instruction page for this opcode in this stage",
-   "vkd3d": [],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:13",
-   "kind": "opcode_models",
-   "ms": [],
-   "note": "no MS instruction page for this opcode in this stage",
-   "vkd3d": [],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:17",
-   "kind": "opcode_models",
-   "ms": [],
-   "note": "no MS instruction page for this opcode in this stage",
-   "vkd3d": [],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:75",
-   "kind": "opcode_models",
-   "ms": [],
-   "note": "no MS instruction page for this opcode in this stage",
-   "vkd3d": [],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:78",
-   "kind": "opcode_models",
-   "ms": [],
-   "note": "no MS instruction page for this opcode in this stage",
-   "vkd3d": [],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:79",
-   "kind": "opcode_models",
-   "ms": [],
-   "note": "no MS instruction page for this opcode in this stage",
-   "vkd3d": [],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "vs_2_0:p",
-   "kind": "register",
-   "ms_src": "MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x",
-   "note": "wine_only count=1",
-   "wine": "asmparser.c vs_2_reg_allowed"
-  },
-  {
-   "id": "vs_2_x:p",
-   "kind": "register",
-   "ms_src": "MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x",
-   "note": "wine_only count=1",
-   "wine": "asmparser.c vs_2_reg_allowed"
-  },
-  {
-   "id": "vs_3_0:p",
-   "kind": "register",
-   "ms_src": "MS:dx9-graphics-reference-asm-vs-registers-vs-3-0",
-   "note": "wine_only count=1",
-   "wine": "asmparser.c vs_3_reg_allowed"
-  },
-  {
-   "id": "ps_2_0:r",
-   "kind": "register",
-   "ms_src": "MS:dx9-graphics-reference-asm-ps-registers-ps-2-0/2-x",
-   "note": "count_ms=12 wine=32",
-   "wine": "asmparser.c ps_2_0_reg_allowed"
-  },
-  {
-   "id": "ps_2_0:i",
-   "kind": "register",
-   "ms_src": "MS:dx9-graphics-reference-asm-ps-registers-ps-2-0/2-x",
-   "note": "wine_only count=16",
-   "wine": "asmparser.c ps_2_0_reg_allowed"
-  },
-  {
-   "id": "ps_2_0:b",
-   "kind": "register",
-   "ms_src": "MS:dx9-graphics-reference-asm-ps-registers-ps-2-0/2-x",
-   "note": "wine_only count=16",
-   "wine": "asmparser.c ps_2_0_reg_allowed"
-  },
-  {
-   "id": "ps_2_x:p",
-   "kind": "register",
-   "ms_src": "MS:dx9-graphics-reference-asm-ps-registers-ps-2-0/2-x",
-   "note": "wine_only count=1",
-   "wine": "asmparser.c ps_2_x_reg_allowed"
-  },
-  {
-   "id": "ps_3_0:p",
-   "kind": "register",
-   "ms_src": "MS:dx9-graphics-reference-asm-ps-registers-ps-3-0",
-   "note": "wine_only count=1",
-   "wine": "asmparser.c ps_3_reg_allowed"
+   "id": "vs:sgn@vs_3_0",
+   "kind": "operand_count",
+   "note": "MS sgn---vs syntax has 3 sources in all versions; vkd3d d3dbc.c: sgn has 1 source in 3_0; universe has both forms"
   },
   {
    "id": "vs_3_0:v[a0.x]",
@@ -2784,39 +668,39 @@
    "kind": "opcode",
    "model": "ps_2_0",
    "rule": "CreatePixelShader: opcode lit not in the ps_2_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set)",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
    "status": "illegal"
   },
   {
    "feature": "dst",
    "kind": "opcode",
    "model": "ps_2_0",
-   "rule": "",
-   "source": "MS: no ps page for dst; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode dst not in the ps_2_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "expp",
    "kind": "opcode",
    "model": "ps_2_0",
-   "rule": "",
-   "source": "MS: no ps page for expp; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode expp not in the ps_2_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "logp",
    "kind": "opcode",
    "model": "ps_2_0",
-   "rule": "",
-   "source": "MS: no ps page for logp; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode logp not in the ps_2_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "sgn",
    "kind": "opcode",
    "model": "ps_2_0",
    "rule": "CreatePixelShader: opcode sgn not in the ps_2_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set)",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
    "status": "illegal"
   },
   {
@@ -3048,39 +932,39 @@
    "kind": "opcode",
    "model": "ps_2_x",
    "rule": "CreatePixelShader: opcode lit not in the ps_2_x instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no lit in the instruction set)",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
    "status": "illegal"
   },
   {
    "feature": "dst",
    "kind": "opcode",
    "model": "ps_2_x",
-   "rule": "",
-   "source": "MS: no ps page for dst; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode dst not in the ps_2_x instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "expp",
    "kind": "opcode",
    "model": "ps_2_x",
-   "rule": "",
-   "source": "MS: no ps page for expp; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode expp not in the ps_2_x instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "logp",
    "kind": "opcode",
    "model": "ps_2_x",
-   "rule": "",
-   "source": "MS: no ps page for logp; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode logp not in the ps_2_x instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "sgn",
    "kind": "opcode",
    "model": "ps_2_x",
    "rule": "CreatePixelShader: opcode sgn not in the ps_2_x instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no sgn in the instruction set)",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
    "status": "illegal"
   },
   {
@@ -3376,39 +1260,39 @@
    "kind": "opcode",
    "model": "ps_3_0",
    "rule": "CreatePixelShader: opcode lit not in the ps_3_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set)",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
    "status": "illegal"
   },
   {
    "feature": "dst",
    "kind": "opcode",
    "model": "ps_3_0",
-   "rule": "",
-   "source": "MS: no ps page for dst; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode dst not in the ps_3_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "expp",
    "kind": "opcode",
    "model": "ps_3_0",
-   "rule": "",
-   "source": "MS: no ps page for expp; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode expp not in the ps_3_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "logp",
    "kind": "opcode",
    "model": "ps_3_0",
-   "rule": "",
-   "source": "MS: no ps page for logp; wine wined3d ps_opcode_table lists it unrestricted; vkd3d ps table omits it",
-   "status": "conflict"
+   "rule": "CreatePixelShader: opcode logp not in the ps_3_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
   },
   {
    "feature": "sgn",
    "kind": "opcode",
    "model": "ps_3_0",
    "rule": "CreatePixelShader: opcode sgn not in the ps_3_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set)",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
    "status": "illegal"
   },
   {
@@ -4746,7 +2630,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/abs---ps (instruction page 'abs', version table)",
    "tm": "abs {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:add": {
    "alu": true,
@@ -4785,7 +2669,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/bem---ps (instruction page 'bem', version table)",
    "tm": "texld r0, t0\ntexld r2, t1\nbem {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:break": {
    "d": null,
@@ -4796,21 +2680,11 @@
    ],
    "needs": "defi",
    "num": "BREAK",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 44,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/break---ps (instruction page 'break', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:break_eq": {
    "cmp": "eq",
@@ -4822,16 +2696,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -4839,7 +2703,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_eq {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:break_ge": {
    "cmp": "ge",
@@ -4851,16 +2715,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -4868,7 +2722,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_ge {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:break_gt": {
    "cmp": "gt",
@@ -4880,16 +2734,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -4897,7 +2741,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_gt {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:break_le": {
    "cmp": "le",
@@ -4909,16 +2753,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -4926,7 +2760,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_le {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:break_lt": {
    "cmp": "lt",
@@ -4938,16 +2772,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -4955,7 +2779,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_lt {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:break_ne": {
    "cmp": "ne",
@@ -4967,16 +2791,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -4984,7 +2798,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_ne {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:breakp": {
    "d": null,
@@ -4995,23 +2809,13 @@
    ],
    "needs": "defi+setp",
    "num": "BREAKP",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "ps_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 96,
    "s": [
     "Pp"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-p---ps (instruction page 'breakp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreakp {S0}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:call": {
    "d": null,
@@ -5021,23 +2825,13 @@
     "ps_3_0"
    ],
    "num": "CALL",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "ps_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 25,
    "s": [
     "L"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/call---ps (instruction page 'call', version table)",
    "tm": "call l0\n@E@\nret\nlabel l0\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:callnz_bool": {
    "d": null,
@@ -5048,16 +2842,6 @@
    ],
    "needs": "defb",
    "num": "CALLNZ",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 26,
    "s": [
     "L",
@@ -5065,7 +2849,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/callnz-bool---ps (instruction page 'callnz_bool', version table)",
    "tm": "callnz l0, {S1}\n@E@\nret\nlabel l0\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:callnz_pred": {
    "d": null,
@@ -5076,16 +2860,6 @@
    ],
    "needs": "setp",
    "num": "CALLNZ",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 26,
    "s": [
     "L",
@@ -5093,7 +2867,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/callnz-pred---ps (instruction page 'callnz_pred', version table)",
    "tm": "callnz l0, {S1}\n@E@\nret\nlabel l0\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:cmp": {
    "d": "D",
@@ -5115,10 +2889,21 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/cmp---ps (instruction page 'cmp', version table)",
    "tm": "cmp {D}, {S0}, {S1}, {S2}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:cnd": {
    "d": "D",
+   "fix": {
+    "ps_1_1": {
+     "0": "r0.a"
+    },
+    "ps_1_2": {
+     "0": "r0.a"
+    },
+    "ps_1_3": {
+     "0": "r0.a"
+    }
+   },
    "mk": "any",
    "models": [
     "ps_1_1",
@@ -5135,7 +2920,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/cnd---ps (instruction page 'cnd', version table)",
    "tm": "cnd {D}, {S0}, {S1}, {S2}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:crs": {
    "d": "D",
@@ -5153,7 +2938,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/crs---ps (instruction page 'crs', version table)",
    "tm": "crs {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:dcl": {
    "d": null,
@@ -5168,7 +2953,7 @@
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/dcl---ps (version table)",
    "tm": "dcl",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:dcl_samplertype": {
    "d": null,
@@ -5183,7 +2968,7 @@
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/dcl-samplertype---ps (version table)",
    "tm": "dcl_samplertype",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:dcl_usage": {
    "d": null,
@@ -5196,7 +2981,7 @@
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/dcl-usage---ps (version table)",
    "tm": "dcl_usage",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:def": {
    "d": null,
@@ -5243,7 +3028,7 @@
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/defi---ps (version table)",
    "tm": "defi",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:dp2add": {
    "d": "D",
@@ -5262,11 +3047,15 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/dp2add---ps (instruction page 'dp2add', version table)",
    "tm": "dp2add {D}, {S0}, {S1}, {S2}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:dp3": {
    "d": "D",
    "mk": "any",
+   "mk_ps1": [
+    "",
+    ".xyz"
+   ],
    "models": [
     "ps_1_1",
     "ps_1_2",
@@ -5305,7 +3094,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/dp4---ps (instruction page 'dp4', version table)",
    "tm": "dp4 {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:dsx": {
    "d": "D",
@@ -5321,7 +3110,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/dsx---ps (instruction page 'dsx', version table)",
    "tm": "dsx {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:dsy": {
    "d": "D",
@@ -5337,7 +3126,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/dsy---ps (instruction page 'dsy', version table)",
    "tm": "dsy {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:else": {
    "d": null,
@@ -5348,21 +3137,11 @@
    ],
    "needs": "defb",
    "num": "ELSE",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 42,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/else---ps (instruction page 'else', version table)",
    "tm": "if {B0}\n{BODY}\nelse\n{BODY2}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:endif": {
    "d": null,
@@ -5373,21 +3152,11 @@
    ],
    "needs": "defb",
    "num": "ENDIF",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 43,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/endif---ps (instruction page 'endif', version table)",
    "tm": "if {B0}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:endloop": {
    "d": null,
@@ -5397,17 +3166,11 @@
    ],
    "needs": "defi",
    "num": "ENDLOOP",
-   "opcount_diff": {
-    "ps_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 29,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/endloop---ps (instruction page 'endloop', version table)",
    "tm": "loop aL, {I0}\n{BODY}\nendloop",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:endrep": {
    "d": null,
@@ -5418,21 +3181,11 @@
    ],
    "needs": "defi",
    "num": "ENDREP",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 39,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/endrep---ps (instruction page 'endrep', version table)",
    "tm": "rep {I0}\n{BODY}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:exp": {
    "d": "D",
@@ -5449,7 +3202,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/exp---ps (instruction page 'exp', version table)",
    "tm": "exp {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:frc": {
    "d": "D",
@@ -5466,7 +3219,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/frc---ps (instruction page 'frc', version table)",
    "tm": "frc {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:if_bool": {
    "d": null,
@@ -5477,23 +3230,13 @@
    ],
    "needs": "defb",
    "num": "IF",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "ps_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 40,
    "s": [
     "B"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-bool---ps (instruction page 'if_bool', version table)",
    "tm": "if {S0}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:if_eq": {
    "cmp": "eq",
@@ -5504,16 +3247,6 @@
     "ps_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -5521,7 +3254,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
    "tm": "if_eq {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:if_ge": {
    "cmp": "ge",
@@ -5532,16 +3265,6 @@
     "ps_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -5549,7 +3272,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
    "tm": "if_ge {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:if_gt": {
    "cmp": "gt",
@@ -5560,16 +3283,6 @@
     "ps_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -5577,7 +3290,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
    "tm": "if_gt {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:if_le": {
    "cmp": "le",
@@ -5588,16 +3301,6 @@
     "ps_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -5605,7 +3308,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
    "tm": "if_le {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:if_lt": {
    "cmp": "lt",
@@ -5616,16 +3319,6 @@
     "ps_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -5633,7 +3326,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
    "tm": "if_lt {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:if_ne": {
    "cmp": "ne",
@@ -5644,16 +3337,6 @@
     "ps_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -5661,7 +3344,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
    "tm": "if_ne {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:if_pred": {
    "d": null,
@@ -5672,23 +3355,13 @@
    ],
    "needs": "setp",
    "num": "IF",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "ps_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 40,
    "s": [
     "Pp"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---ps (instruction page 'if_pred', version table)",
    "tm": "if {S0}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:label": {
    "d": null,
@@ -5698,23 +3371,13 @@
     "ps_3_0"
    ],
    "num": "LABEL",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "ps_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 30,
    "s": [
     "L"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/label---ps (instruction page 'label', version table)",
    "tm": "call l{LBL}\n@E@\nret\nlabel l{LBL}\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:log": {
    "d": "D",
@@ -5731,7 +3394,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/log---ps (instruction page 'log', version table)",
    "tm": "log {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:loop": {
    "d": null,
@@ -5741,12 +3404,6 @@
    ],
    "needs": "defi",
    "num": "LOOP",
-   "opcount_diff": {
-    "ps_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 27,
    "s": [
     "AL",
@@ -5754,7 +3411,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/loop---ps (instruction page 'loop', version table)",
    "tm": "loop aL, {S1}\n{BODY}\nendloop",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:lrp": {
    "d": "D",
@@ -5796,7 +3453,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)",
    "tm": "m3x2 {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:m3x3": {
    "d": "D",
@@ -5815,7 +3472,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/m3x3---ps (instruction page 'm3x3', version table)",
    "tm": "m3x3 {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:m3x4": {
    "d": "D",
@@ -5834,7 +3491,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/m3x4---ps (instruction page 'm3x4', version table)",
    "tm": "m3x4 {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:m4x3": {
    "d": "D",
@@ -5853,7 +3510,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/m4x3---ps (instruction page 'm4x3', version table)",
    "tm": "m4x3 {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:m4x4": {
    "d": "D",
@@ -5872,7 +3529,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/m4x4---ps (instruction page 'm4x4', version table)",
    "tm": "m4x4 {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:mad": {
    "d": "D",
@@ -5913,7 +3570,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/max---ps (instruction page 'max', version table)",
    "tm": "max {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:min": {
    "d": "D",
@@ -5931,7 +3588,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/min---ps (instruction page 'min', version table)",
    "tm": "min {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:mov": {
    "alu": true,
@@ -5991,36 +3648,6 @@
     "ps_3_0"
    ],
    "num": "NOP",
-   "opcount_diff": {
-    "ps_1_1": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_1_2": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_1_3": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_1_4": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_2_0": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 0,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/nop---ps (instruction page 'nop', version table)",
@@ -6042,7 +3669,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/nrm---ps (instruction page 'nrm', version table)",
    "tm": "nrm {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:phase": {
    "d": null,
@@ -6051,17 +3678,11 @@
     "ps_1_4"
    ],
    "num": "PHASE",
-   "opcount_diff": {
-    "ps_1_4": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 65533,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/phase---ps (instruction page 'phase', version table)",
    "tm": "texld r0, t0\nphase\nmov r0, r0",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:pow": {
    "d": "D",
@@ -6079,7 +3700,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/pow---ps (instruction page 'pow', version table)",
    "tm": "pow {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:rcp": {
    "d": "D",
@@ -6096,7 +3717,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/rcp---ps (instruction page 'rcp', version table)",
    "tm": "rcp {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:rep": {
    "d": null,
@@ -6107,23 +3728,13 @@
    ],
    "needs": "defi",
    "num": "REP",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "ps_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 38,
    "s": [
     "I"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/rep---ps (instruction page 'rep', version table)",
    "tm": "rep {S0}\n{BODY}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:ret": {
    "d": null,
@@ -6133,21 +3744,11 @@
     "ps_3_0"
    ],
    "num": "RET",
-   "opcount_diff": {
-    "ps_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "ps_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 28,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/ret---ps (instruction page 'ret', version table)",
    "tm": "call l0\n@E@\nret\nlabel l0\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:rsq": {
    "d": "D",
@@ -6164,7 +3765,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/rsq---ps (instruction page 'rsq', version table)",
    "tm": "rsq {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:setp_eq": {
    "cmp": "eq",
@@ -6182,7 +3783,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
    "tm": "setp_eq {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:setp_ge": {
    "cmp": "ge",
@@ -6200,7 +3801,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
    "tm": "setp_ge {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:setp_gt": {
    "cmp": "gt",
@@ -6218,7 +3819,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
    "tm": "setp_gt {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:setp_le": {
    "cmp": "le",
@@ -6236,7 +3837,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
    "tm": "setp_le {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:setp_lt": {
    "cmp": "lt",
@@ -6254,7 +3855,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
    "tm": "setp_lt {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:setp_ne": {
    "cmp": "ne",
@@ -6272,10 +3873,13 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
    "tm": "setp_ne {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:sincos": {
    "d": "D",
+   "dr": [
+    "r"
+   ],
    "mk": "x_y_xy",
    "models": [
     "ps_2_0",
@@ -6283,29 +3887,19 @@
     "ps_3_0"
    ],
    "num": "SINCOS",
-   "opcount_diff": {
-    "ps_2_0": {
-     "mine": 4,
-     "wine": 2
-    },
-    "ps_2_x": {
-     "mine": 4,
-     "wine": 2
-    },
-    "ps_3_0": {
-     "mine": 4,
-     "wine": 2
-    }
-   },
    "opnum": 37,
    "s": [
     "Ss",
     "Sc",
     "Sc"
    ],
+   "s3": [
+    "Ss"
+   ],
    "source": "MS:dx9-graphics-reference-asm-instructions/sincos---ps (instruction page 'sincos', version table)",
    "tm": "sincos {D}, {S0}, {S1}, {S2}",
-   "xref": "conflict"
+   "tm3": "sincos {D}, {S0}",
+   "xref": "agree"
   },
   "ps:sub": {
    "d": "D",
@@ -6338,27 +3932,13 @@
     "ps_1_3"
    ],
    "num": "TEX",
-   "opcount_diff": {
-    "ps_1_1": {
-     "mine": 1,
-     "wine": 2
-    },
-    "ps_1_2": {
-     "mine": 1,
-     "wine": 2
-    },
-    "ps_1_3": {
-     "mine": 1,
-     "wine": 2
-    }
-   },
    "opnum": 66,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/tex---ps (instruction page 'tex', version table)",
    "st": null,
    "tex": true,
    "tm": "tex {D}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texbem": {
    "d": "T",
@@ -6396,7 +3976,7 @@
    "st": "2d",
    "tex": true,
    "tm": "tex t0\ntexbeml {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texcoord": {
    "d": "T",
@@ -6407,25 +3987,11 @@
     "ps_1_3"
    ],
    "num": "TEXCOORD",
-   "opcount_diff": {
-    "ps_1_1": {
-     "mine": 1,
-     "wine": 2
-    },
-    "ps_1_2": {
-     "mine": 1,
-     "wine": 2
-    },
-    "ps_1_3": {
-     "mine": 1,
-     "wine": 2
-    }
-   },
    "opnum": 64,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/texcoord---ps (instruction page 'texcoord', version table)",
    "tm": "texcoord {D}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texcrd": {
    "d": "Rr",
@@ -6440,7 +4006,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/texcrd---ps (instruction page 'texcrd', version table)",
    "tm": "texcrd {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texdepth": {
    "d": "Rr",
@@ -6453,7 +4019,7 @@
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/texdepth---ps (instruction page 'texdepth', version table)",
    "tm": "texdepth {D}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texdp3": {
    "d": "T",
@@ -6469,7 +4035,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/texdp3---ps (instruction page 'texdp3', version table)",
    "tm": "tex t0\ntexdp3 {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texdp3tex": {
    "d": "T",
@@ -6487,7 +4053,7 @@
    "st": "1d",
    "tex": true,
    "tm": "tex t0\ntexdp3tex {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texkill": {
    "d": null,
@@ -6520,14 +4086,15 @@
     "ps_3_0"
    ],
    "num": "TEXLD",
-   "opnum": null,
+   "opnum": 66,
    "s": [
     "S",
     "Sm"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/texld---ps-2-0 (instruction page 'texld', version table)",
    "tex": true,
-   "tm": "texld {D}, {S0}, {S1}"
+   "tm": "texld {D}, {S0}, {S1}",
+   "xref": "agree"
   },
   "ps:texld14": {
    "d": "Rr",
@@ -6536,14 +4103,15 @@
     "ps_1_4"
    ],
    "num": "TEXLD",
-   "opnum": null,
+   "opnum": 66,
    "s": [
     "X"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/texld---ps-1-4 (instruction page 'texld', version table)",
    "st": null,
    "tex": true,
-   "tm": "texld {D}, {S0}"
+   "tm": "texld {D}, {S0}",
+   "xref": "agree"
   },
   "ps:texldb": {
    "ctrl": 2,
@@ -6555,14 +4123,15 @@
     "ps_3_0"
    ],
    "num": "TEXLD",
-   "opnum": null,
+   "opnum": 66,
    "s": [
     "S",
     "Sm"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/texldb---ps (instruction page 'texldb', version table)",
    "tex": true,
-   "tm": "texldb {D}, {S0}, {S1}"
+   "tm": "texldb {D}, {S0}, {S1}",
+   "xref": "agree"
   },
   "ps:texldd": {
    "d": "Dr",
@@ -6582,7 +4151,7 @@
    "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-2-x (instruction list)",
    "tex": true,
    "tm": "texldd {D}, {S0}, {S1}, {S2}, {S3}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texldl": {
    "d": "Dr",
@@ -6599,7 +4168,7 @@
    "source": "MS:dx9-graphics-reference-asm-instructions/texldl---ps (instruction page 'texldl', version table)",
    "tex": true,
    "tm": "texldl {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texldp": {
    "ctrl": 1,
@@ -6611,14 +4180,15 @@
     "ps_3_0"
    ],
    "num": "TEXLD",
-   "opnum": null,
+   "opnum": 66,
    "s": [
     "S",
     "Sm"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/texldp---ps (instruction page 'texldp', version table)",
    "tex": true,
-   "tm": "texldp {D}, {S0}, {S1}"
+   "tm": "texldp {D}, {S0}, {S1}",
+   "xref": "agree"
   },
   "ps:texm3x2depth": {
    "d": "T",
@@ -6633,7 +4203,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/texm3x2depth---ps (instruction page 'texm3x2depth', version table)",
    "tm": "tex t0\ntexm3x2pad t1, t0\ntexm3x2depth {D}, t0",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texm3x2pad": {
    "d": "T",
@@ -6650,7 +4220,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/texm3x2pad---ps (instruction page 'texm3x2pad', version table)",
    "tm": "tex t0\ntexm3x2pad t1, t0\ntexm3x2tex t2, t0",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texm3x2tex": {
    "d": "T",
@@ -6669,7 +4239,7 @@
    "st": "2d",
    "tex": true,
    "tm": "tex t0\ntexm3x2pad t1, t0\ntexm3x2tex {D}, t0",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texm3x3": {
    "d": "T",
@@ -6686,7 +4256,7 @@
    "source": "MS:dx9-graphics-reference-asm-instructions/texm3x3---ps (instruction page 'texm3x3', version table)",
    "st": "3d_or_cube",
    "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3 {D}, t0",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texm3x3pad": {
    "d": "T",
@@ -6705,7 +4275,7 @@
    "st": "3d_or_cube",
    "tex": true,
    "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3tex t3, t0",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texm3x3spec": {
    "d": "T",
@@ -6725,7 +4295,7 @@
    "st": "3d_or_cube",
    "tex": true,
    "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3spec {D}, t0, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texm3x3tex": {
    "d": "T",
@@ -6744,7 +4314,7 @@
    "st": "3d_or_cube",
    "tex": true,
    "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3tex {D}, t0",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texm3x3vspec": {
    "d": "T",
@@ -6763,7 +4333,7 @@
    "st": "3d_or_cube",
    "tex": true,
    "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3vspec {D}, t0",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texreg2ar": {
    "d": "T",
@@ -6782,7 +4352,7 @@
    "st": "2d",
    "tex": true,
    "tm": "tex t0\ntexreg2ar {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "ps:texreg2gb": {
    "d": "T",
@@ -6818,7 +4388,7 @@
    "st": "2d",
    "tex": true,
    "tm": "tex t0\ntexreg2rgb {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:abs": {
    "d": "D",
@@ -6835,7 +4405,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/abs---vs (instruction page 'abs', version table)",
    "tm": "abs {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:add": {
    "alu": true,
@@ -6866,21 +4436,11 @@
    ],
    "needs": "defi",
    "num": "BREAK",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 44,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/break---vs (instruction page 'break', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:break_eq": {
    "cmp": "eq",
@@ -6892,16 +4452,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -6909,7 +4459,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_eq {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:break_ge": {
    "cmp": "ge",
@@ -6921,16 +4471,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -6938,7 +4478,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_ge {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:break_gt": {
    "cmp": "gt",
@@ -6950,16 +4490,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -6967,7 +4497,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_gt {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:break_le": {
    "cmp": "le",
@@ -6979,16 +4509,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -6996,7 +4516,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_le {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:break_lt": {
    "cmp": "lt",
@@ -7008,16 +4528,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -7025,7 +4535,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_lt {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:break_ne": {
    "cmp": "ne",
@@ -7037,16 +4547,6 @@
    ],
    "needs": "defi",
    "num": "BREAKC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 45,
    "s": [
     "Sr",
@@ -7054,7 +4554,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreak_ne {S0}, {S1}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:breakp": {
    "d": null,
@@ -7065,23 +4565,13 @@
    ],
    "needs": "defi+setp",
    "num": "BREAKP",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 96,
    "s": [
     "Pp"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/breakp---vs (instruction page 'breakp', version table)",
    "tm": "rep {I0}\n{BODY}\nbreakp {S0}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:call": {
    "d": null,
@@ -7092,27 +4582,13 @@
     "vs_3_0"
    ],
    "num": "CALL",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 25,
    "s": [
     "L"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/call---vs (instruction page 'call', version table)",
    "tm": "call l0\n@E@\nret\nlabel l0\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:callnz_bool": {
    "d": null,
@@ -7124,20 +4600,6 @@
    ],
    "needs": "defb",
    "num": "CALLNZ",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 26,
    "s": [
     "L",
@@ -7145,7 +4607,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/callnz-bool---vs (instruction page 'callnz_bool', version table)",
    "tm": "callnz l0, {S1}\n@E@\nret\nlabel l0\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:callnz_pred": {
    "d": null,
@@ -7156,16 +4618,6 @@
    ],
    "needs": "setp",
    "num": "CALLNZ",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 26,
    "s": [
     "L",
@@ -7173,7 +4625,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/callnz-pred---vs (instruction page 'callnz_pred', version table)",
    "tm": "callnz l0, {S1}\n@E@\nret\nlabel l0\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:crs": {
    "d": "D",
@@ -7191,7 +4643,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/crs---vs (instruction page 'crs', version table)",
    "tm": "crs {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:dcl_samplertype": {
    "d": null,
@@ -7251,7 +4703,7 @@
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/defb---vs (version table)",
    "tm": "defb",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:defi": {
    "d": null,
@@ -7266,11 +4718,15 @@
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/defi---vs (version table)",
    "tm": "defi",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:dp3": {
    "d": "D",
    "mk": "any",
+   "mk_ps1": [
+    "",
+    ".xyz"
+   ],
    "models": [
     "vs_1_1",
     "vs_2_0",
@@ -7335,25 +4791,11 @@
    ],
    "needs": "defb",
    "num": "ELSE",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 42,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/else---vs (instruction page 'else', version table)",
    "tm": "if {B0}\n{BODY}\nelse\n{BODY2}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:endif": {
    "d": null,
@@ -7365,25 +4807,11 @@
    ],
    "needs": "defb",
    "num": "ENDIF",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 43,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/endif---vs (instruction page 'endif', version table)",
    "tm": "if {B0}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:endloop": {
    "d": null,
@@ -7395,25 +4823,11 @@
    ],
    "needs": "defi",
    "num": "ENDLOOP",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 29,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/endloop---vs (instruction page 'endloop', version table)",
    "tm": "loop aL, {I0}\n{BODY}\nendloop",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:endrep": {
    "d": null,
@@ -7425,25 +4839,11 @@
    ],
    "needs": "defi",
    "num": "ENDREP",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 39,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/endrep---vs (instruction page 'endrep', version table)",
    "tm": "rep {I0}\n{BODY}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:exp": {
    "d": "D",
@@ -7509,27 +4909,13 @@
    ],
    "needs": "defb",
    "num": "IF",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 40,
    "s": [
     "B"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-bool---vs (instruction page 'if_bool', version table)",
    "tm": "if {S0}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:if_eq": {
    "cmp": "eq",
@@ -7540,16 +4926,6 @@
     "vs_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -7557,7 +4933,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
    "tm": "if_eq {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:if_ge": {
    "cmp": "ge",
@@ -7568,16 +4944,6 @@
     "vs_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -7585,7 +4951,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
    "tm": "if_ge {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:if_gt": {
    "cmp": "gt",
@@ -7596,16 +4962,6 @@
     "vs_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -7613,7 +4969,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
    "tm": "if_gt {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:if_le": {
    "cmp": "le",
@@ -7624,16 +4980,6 @@
     "vs_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -7641,7 +4987,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
    "tm": "if_le {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:if_lt": {
    "cmp": "lt",
@@ -7652,16 +4998,6 @@
     "vs_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -7669,7 +5005,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
    "tm": "if_lt {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:if_ne": {
    "cmp": "ne",
@@ -7680,16 +5016,6 @@
     "vs_3_0"
    ],
    "num": "IFC",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 41,
    "s": [
     "Sr",
@@ -7697,7 +5023,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
    "tm": "if_ne {S0}, {S1}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:if_pred": {
    "d": null,
@@ -7708,23 +5034,13 @@
    ],
    "needs": "setp",
    "num": "IF",
-   "opcount_diff": {
-    "vs_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 40,
    "s": [
     "Pp"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)",
    "tm": "if {S0}\n{BODY}\nendif",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:label": {
    "d": null,
@@ -7735,27 +5051,13 @@
     "vs_3_0"
    ],
    "num": "LABEL",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 30,
    "s": [
     "L"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/label---vs (instruction page 'label', version table)",
    "tm": "call l{LBL}\n@E@\nret\nlabel l{LBL}\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:lit": {
    "d": "D",
@@ -7821,20 +5123,6 @@
    ],
    "needs": "defi",
    "num": "LOOP",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_2_x": {
-     "mine": 2,
-     "wine": 1
-    },
-    "vs_3_0": {
-     "mine": 2,
-     "wine": 1
-    }
-   },
    "opnum": 27,
    "s": [
     "AL",
@@ -7842,7 +5130,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/loop---vs (instruction page 'loop', version table)",
    "tm": "loop aL, {S1}\n{BODY}\nendloop",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:lrp": {
    "d": "D",
@@ -7861,7 +5149,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/lrp---vs (instruction page 'lrp', version table)",
    "tm": "lrp {D}, {S0}, {S1}, {S2}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:m3x2": {
    "d": "D",
@@ -8055,7 +5343,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/mova---vs (instruction page 'mova', version table)",
    "tm": "mova {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:mul": {
    "d": "D",
@@ -8087,24 +5375,6 @@
     "vs_3_0"
    ],
    "num": "NOP",
-   "opcount_diff": {
-    "vs_1_1": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_2_0": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 0,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/nop---vs (instruction page 'nop', version table)",
@@ -8126,7 +5396,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/nrm---vs (instruction page 'nrm', version table)",
    "tm": "nrm {D}, {S0}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:pow": {
    "d": "D",
@@ -8144,7 +5414,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/pow---vs (instruction page 'pow', version table)",
    "tm": "pow {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:rcp": {
    "d": "D",
@@ -8174,27 +5444,13 @@
    ],
    "needs": "defi",
    "num": "REP",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_2_x": {
-     "mine": 1,
-     "wine": 0
-    },
-    "vs_3_0": {
-     "mine": 1,
-     "wine": 0
-    }
-   },
    "opnum": 38,
    "s": [
     "I"
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/rep---vs (instruction page 'rep', version table)",
    "tm": "rep {S0}\n{BODY}\nendrep",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:ret": {
    "d": null,
@@ -8205,25 +5461,11 @@
     "vs_3_0"
    ],
    "num": "RET",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_2_x": {
-     "mine": 0,
-     "wine": -1
-    },
-    "vs_3_0": {
-     "mine": 0,
-     "wine": -1
-    }
-   },
    "opnum": 28,
    "s": [],
    "source": "MS:dx9-graphics-reference-asm-instructions/ret---vs (instruction page 'ret', version table)",
    "tm": "call l0\n@E@\nret\nlabel l0\n{BODY}\nret",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:rsq": {
    "d": "D",
@@ -8259,7 +5501,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
    "tm": "setp_eq {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:setp_ge": {
    "cmp": "ge",
@@ -8277,7 +5519,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
    "tm": "setp_ge {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:setp_gt": {
    "cmp": "gt",
@@ -8295,7 +5537,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
    "tm": "setp_gt {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:setp_le": {
    "cmp": "le",
@@ -8313,7 +5555,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
    "tm": "setp_le {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:setp_lt": {
    "cmp": "lt",
@@ -8331,7 +5573,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
    "tm": "setp_lt {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:setp_ne": {
    "cmp": "ne",
@@ -8349,7 +5591,7 @@
    ],
    "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
    "tm": "setp_ne {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   },
   "vs:sge": {
    "d": "D",
@@ -8379,32 +5621,25 @@
     "vs_3_0"
    ],
    "num": "SGN",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 4,
-     "wine": 2
-    },
-    "vs_2_x": {
-     "mine": 4,
-     "wine": 2
-    },
-    "vs_3_0": {
-     "mine": 4,
-     "wine": 2
-    }
-   },
    "opnum": 34,
    "s": [
     "S",
     "Tmp",
     "Tmp"
    ],
+   "s3": [
+    "S"
+   ],
    "source": "MS:dx9-graphics-reference-asm-instructions/sgn---vs (instruction page 'sgn', version table)",
    "tm": "sgn {D}, {S0}, {S1}, {S2}",
-   "xref": "conflict"
+   "tm3": "sgn {D}, {S0}",
+   "xref": "agree"
   },
   "vs:sincos": {
    "d": "D",
+   "dr": [
+    "r"
+   ],
    "mk": "x_y_xy",
    "models": [
     "vs_2_0",
@@ -8412,29 +5647,19 @@
     "vs_3_0"
    ],
    "num": "SINCOS",
-   "opcount_diff": {
-    "vs_2_0": {
-     "mine": 4,
-     "wine": 2
-    },
-    "vs_2_x": {
-     "mine": 4,
-     "wine": 2
-    },
-    "vs_3_0": {
-     "mine": 4,
-     "wine": 2
-    }
-   },
    "opnum": 37,
    "s": [
     "Ss",
     "Sc",
     "Sc"
    ],
+   "s3": [
+    "Ss"
+   ],
    "source": "MS:dx9-graphics-reference-asm-instructions/sincos---vs (instruction page 'sincos', version table)",
    "tm": "sincos {D}, {S0}, {S1}, {S2}",
-   "xref": "conflict"
+   "tm3": "sincos {D}, {S0}",
+   "xref": "agree"
   },
   "vs:slt": {
    "d": "D",
@@ -8489,7 +5714,7 @@
    "source": "MS:dx9-graphics-reference-asm-instructions/texldl---vs (instruction page 'texldl', version table)",
    "tex": true,
    "tm": "texldl {D}, {S0}, {S1}",
-   "xref": "conflict"
+   "xref": "agree"
   }
  },
  "ref_commits": {

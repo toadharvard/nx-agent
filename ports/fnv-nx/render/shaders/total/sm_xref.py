@@ -17,11 +17,11 @@ def wine_ops(root):
     out = {}
     for st, tab in (("vs", "vs_opcode_table"), ("ps", "ps_opcode_table")):
         body = s[s.index(tab + "[]"):]; body = body[:body.index("};")]
-        for m in re.finditer(r"\{WINED3D_SM1_OP_(\w+),\s*(\d+),\s*(\d+),\s*\w+,\s*([^,]+),\s*([^}]+?)\s*\}", body):
+        for m in re.finditer(r"\{WINED3D_SM1_OP_(\w+),\s*(\d+),\s*(\d+),\s*\w+,\s*(WINED3D_SHADER_VERSION\(\d,\s*\d\)|0),\s*(WINED3D_SHADER_VERSION\(\d,\s*\d\)|-1|0)\s*\}", body):
             def ver(x):
-                x = x.strip(); k = re.match(r"WINED3D_SHADER_VERSION\((\d),(\d)\)", x)
+                x = x.strip(); k = re.match(r"WINED3D_SHADER_VERSION\((\d),\s*(\d)\)", x)
                 return (int(k.group(1)), int(k.group(2))) if k else None
-            out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)) - 1, ver(m.group(4)), ver(m.group(5))))
+            out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)) - int(m.group(2)), ver(m.group(4)), ver(m.group(5))))
     return out, en
 
 def vkd3d_ops(root):
@@ -39,9 +39,9 @@ def vkd3d_ops(root):
 def models_of(entries, stage):
     return sorted({m for m in MODELS if m[:2] == stage for (_, _, lo, hi) in entries if in_range(m, lo, hi)}, key=MODELS.index)
 
-REGNAME = {"TEMP": "r", "INPUT": "v", "CONST": "c", "ADDR": "a", "TEXTURE": "t", "RASTOUT": "rastout", "ATTROUT": "oD", "OUTPUT": "o",
+REGNAME = {"TEMP": "r", "INPUT": "v", "CONST": "c", "ADDR": "a0", "TEXTURE": "t", "RASTOUT": "rastout", "ATTROUT": "oD", "OUTPUT": "o",
            "TEXCRDOUT": "oT", "CONSTINT": "i", "COLOROUT": "oC", "DEPTHOUT": "oDepth", "SAMPLER": "s", "CONSTBOOL": "b", "LOOP": "aL",
-           "MISCTYPE": "misc", "LABEL": "l", "PREDICATE": "p"}
+           "MISCTYPE": "misc", "LABEL": "l", "PREDICATE": "p0"}
 def wine_regs(root):
     """-> {table_name: {regtype: (count|None, reladdr)}} from d3dcompiler_43/asmparser.c allowed_reg_type tables"""
     s = open(os.path.join(root, "dlls/d3dcompiler_43/asmparser.c")).read()

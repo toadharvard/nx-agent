@@ -16,6 +16,8 @@ ALU = {k: O(k.upper(), "D", ["S"] * n, k + " {D}, " + ", ".join("{S%d}" % i for 
        for k, n in dict(mov=1, add=2, sub=2, mad=3, mul=2, dp3=2, dp4=2, min=2, max=2, slt=2, sge=2, frc=1, lrp=3, abs=1, crs=2, cmp=3, cnd=3,
                         dsx=1, dsy=1, nrm=1, lit=1, dst=2, dp2add=3).items()}
 ALU["mov"]["alu"] = ALU["add"]["alu"] = True
+ALU["cnd"]["fix"] = {"ps_1_1": {0: "r0.a"}, "ps_1_2": {0: "r0.a"}, "ps_1_3": {0: "r0.a"}}     # MS cnd---ps: versions 1_1 to 1_3, src0 must be r0.a
+ALU["dp3"]["mk_ps1"] = ["", ".xyz"]                                                           # MS ps-registers-modifiers-write-mask: 1_0-1_3 dp3 only .rgb/.rgba
 for k in ("rcp", "rsq", "exp", "log", "expp", "logp"): ALU[k] = O(k.upper(), "D", ["Ss"], k + " {D}, {S0}", mk="single")
 ALU["pow"] = O("POW", "D", ["Ss", "Ss"], "pow {D}, {S0}, {S1}", mk="single")
 ALU["crs"]["mk"] = "xyz"; ALU["frc"]["mk"] = "x_y_xy_vs1"; ALU["dp3"]["mk"] = "any"; ALU["dp2add"]["s"] = ["S", "S", "Ss"]
@@ -23,8 +25,8 @@ ALU["nop"] = O("NOP", None, [], "nop"); ALU["nop"]["alu"] = False
 ALU["mova"] = O("MOVA", "A0", ["S"], "mova {D}, {S0}", mk="xy_any")
 for k, n, mk in (("m4x4", 4, "xyz_or_all"), ("m4x3", 4, "xyz"), ("m3x4", 3, "xyz_or_all"), ("m3x3", 3, "xyz"), ("m3x2", 3, "xy")):
     ALU[k] = O(k.upper(), "D", ["S", "Sc"], k + " {D}, {S0}, {S1}", mk=mk, matrix=int(k[1]))
-ALU["sgn"] = O("SGN", "D", ["S", "Tmp", "Tmp"], "sgn {D}, {S0}, {S1}, {S2}")
-ALU["sincos"] = O("SINCOS", "D", ["Ss", "Sc", "Sc"], "sincos {D}, {S0}, {S1}, {S2}", mk="x_y_xy")
+ALU["sgn"] = O("SGN", "D", ["S", "Tmp", "Tmp"], "sgn {D}, {S0}, {S1}, {S2}", s3=["S"], tm3="sgn {D}, {S0}")         # vs_3_0: sgn dst, src
+ALU["sincos"] = O("SINCOS", "D", ["Ss", "Sc", "Sc"], "sincos {D}, {S0}, {S1}, {S2}", mk="x_y_xy", s3=["Ss"], tm3="sincos {D}, {S0}", dr=["r"])   # vs_3_0/ps_3_0: sincos dst, src
 SETP = {"setp_" + c: O("SETP", "P0", ["S", "S"], "setp_%s {D}, {S0}, {S1}" % c, mk="any", cmp=c) for c in "gt lt ge le eq ne".split()}
 CMPS = "gt lt ge le eq ne".split()
 FLOW = {
