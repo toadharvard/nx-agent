@@ -2,30 +2,30 @@
  *
  * MSVC gives a virtual destructor one vftable slot, the scalar deleting destructor ??_G(this, flags): run the
  * destructor, and free the object when flags bit 0 is set. GCC gives it two (the complete destructor D1 and the
- * deleting destructor D0), so every later slot is one further. This plugin keeps the front end's own classes,
- * destructors, operator delete lookup and lazy definition of implicit destructors, and changes only the table and
- * the calls through it:
+ * deleting destructor D0), so every later slot is one further.
  *
- *   tables   in every _ZTV / _ZTC initializer the D1 / D0 pair of entries becomes ONE entry, the function
- *            `<D1 entry>.fnvnx_sdd`(this, flags): flags & 1 ? D0(this) : D1(this); returns this. Emitted here as a
- *            COMDAT function next to the table. The table shrinks by one slot per pair.
- *   numbers  when a class is complete (the hook the front end calls for every class, instantiated ones included,
- *            before any member function body of it is parsed) each virtual function's index becomes its slot in
- *            the shrunk table: position in the class's BINFO_VIRTUALS minus the deleting destructors before it. So
- *            everything the front end derives from the index is in exe numbering already: virtual calls, pointers
- *            to virtual member functions (constants, comparisons, template arguments), debug info.
- *   calls    a virtual destructor call passes flags 0, a delete-expression flags 1, both through the pair's one
- *            slot. (The deleting destructor's index is its slot plus a mark, which is how the two are told apart.)
- *   address points
- *            every `&table + off` in code and in VTTs becomes `&table.fnvnx_ap<off>` (off = the front end's
- *            offset), a symbol defined next to the table at the address point's place in the shrunk table. So each
- *            sub-table has its own symbol and relocation (VTSYM1), and nothing in the compiler computes with a
- *            stale offset: the optimizers cannot look through the symbol.
+ * GCC already has a destructor variant that is not virtual: when it clones a destructor, the base-object variant D2
+ * gets DECL_VIRTUAL_P = 0 and no index (cp/class.cc build_clone). This plugin does the same to D0, for every class,
+ * at the one point where that is still possible: finish_struct_1 calls the target hook key_method_may_be_inline for
+ * each class with a vptr after its destructor variants exist (check_bases_and_members) and before its virtual
+ * functions get slots (layout_class_type). From there on the front end itself builds everything with one slot:
+ * BINFO_VIRTUALS, virtual indexes, vtables, thunks, VTTs, construction vtables, pointers to virtual members,
+ * constant folding and devirtualization all agree, because none of them ever saw a second slot.
  *
- * Rewritten calls are plain indirect calls and -fno-devirtualize is required (GCC's devirtualization reads tables
- * by the front end's slot numbers; MSVC 2008 did not devirtualize either); calls the front end resolved statically
- * stay direct calls of D1 / D0 or of the method.
- * Anything this plugin sees and cannot place is a compile error.
+ * What is left is to give that slot MSVC's meaning:
+ *
+ *   tables   every table entry that is D1 (or a this-adjusting thunk to D1) becomes `<entry>.fnvnx_sdd`(this, flags):
+ *            flags & 1 ? D0(this adjusted as the thunk adjusts it) : entry(this); returns this. A COMDAT function
+ *            emitted in each unit that emits such a table. D0 is kept wherever its body exists.
+ *   calls    a virtual call of the destructor's slot passes flags 0. A delete-expression, which the front end now
+ *            compiles to a direct call of the static type's D0, becomes a call through the object's slot with
+ *            flags 1 (for an object of exactly the static type that is the same function).
+ *   address points (VTSYM1)
+ *            every `&table + off` in code and in VTTs becomes `&table.fnvnx_ap<off>`, a symbol defined next to the
+ *            table, so each sub-table has its own symbol and relocation. Done just before RTL expansion: GIMPLE
+ *            keeps the address an invariant until then, and GCC's own analyses read the original form.
+ *
+ * Anything this plugin sees and cannot place is a compile error; a D0 found in a table is one (the hook was missed).
  */
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -49,7 +49,7 @@
 #include "fold-const.h"
 #include "stor-layout.h"
 #include "tree-cfg.h"
-#include "debug.h"
+#include "target.h"
 #include <map>
 #include <set>
 #include <string>
@@ -57,12 +57,9 @@
 
 int plugin_is_GPL_compatible;
 
-struct table {
-  std::vector<std::pair<long, long> > aps;       /* address points: front-end byte offset -> byte offset now */
-};
-static std::map<std::string, table> tables;      /* tables defined in this unit, by assembler name */
+struct sdd_fn { std::string entry, d0; HOST_WIDE_INT fixed; bool virt; HOST_WIDE_INT voff; };
 static std::map<std::string, tree> ap_decls;
-static std::map<std::string, std::pair<std::string, std::string> > thunks;   /* name -> (D1 entry, D0 entry) */
+static std::map<std::string, sdd_fn> thunks;     /* <entry>.fnvnx_sdd -> what it calls */
 
 static const char *asmname(tree d) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)); }
 
@@ -115,46 +112,41 @@ static tree ap_decl(tree vt, HOST_WIDE_INT off)
   return d;
 }
 
-/* ---------------------------------------------------------------------------------------------- numbers */
+/* ---------------------------------------------------------------------------------------------- one slot */
 
-static const unsigned HOST_WIDE_INT D0_MARK = 1u << 20;   /* a deleting destructor's index: its pair's slot + this */
+static bool (*orig_key_method_may_be_inline)(void);
 
-static void renumber(tree t)
+/* finish_struct_1, between check_bases_and_members and layout_class_type: the class's deleting destructor is not
+   virtual, like its base-object destructor */
+static bool key_method_hook(void)
 {
-  HOST_WIDE_INT i = 0, d0 = 0;
-  for (tree v = BINFO_VIRTUALS(TYPE_BINFO(t)); v; v = TREE_CHAIN(v), i++) {
-    tree f = BV_FN(v);
-    if (!f || TREE_CODE(f) != FUNCTION_DECL || !DECL_VINDEX(f) || TREE_CODE(DECL_VINDEX(f)) != INTEGER_CST) continue;
-    HOST_WIDE_INT want;
-    if (DECL_DELETING_DESTRUCTOR_P(f)) { want = i - 1 - d0 + (HOST_WIDE_INT)D0_MARK; d0++; }
-    else want = i - d0;
-    if (!tree_fits_shwi_p(DECL_VINDEX(f)) || tree_to_shwi(DECL_VINDEX(f)) != want)
-      DECL_VINDEX(f) = build_int_cst(TREE_TYPE(DECL_VINDEX(f)), want);
-  }
-}
-
-static const struct gcc_debug_hooks *orig_hooks;
-static struct gcc_debug_hooks my_hooks;
-
-/* rest_of_type_compilation: the end of finish_struct_1, for parsed and instantiated classes alike */
-static void type_decl_hook(tree decl, int local)
-{
-  tree t = decl ? TREE_TYPE(decl) : NULL_TREE;
-  if (t && CLASS_TYPE_P(t) && COMPLETE_TYPE_P(t) && TYPE_BINFO(t) && t == TYPE_MAIN_VARIANT(t)) renumber(t);
-  orig_hooks->type_decl(decl, local);
+  tree t = current_class_type;
+  if (t && CLASS_TYPE_P(t))
+    for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
+      if (TREE_CODE(f) == FUNCTION_DECL && DECL_DELETING_DESTRUCTOR_P(f) && DECL_VINDEX(f)) {
+        DECL_VIRTUAL_P(f) = 0;
+        DECL_VINDEX(f) = NULL_TREE;
+        DECL_PRESERVE_P(f) = 1;          /* written out wherever its body is: the slot function calls it by name */
+      }
+  return orig_key_method_may_be_inline();
 }
 
 static void start_unit(void *, void *)
 {
-  orig_hooks = debug_hooks;
-  my_hooks = *debug_hooks;
-  my_hooks.type_decl = type_decl_hook;
-  debug_hooks = &my_hooks;
+  orig_key_method_may_be_inline = targetm.cxx.key_method_may_be_inline;
+  targetm.cxx.key_method_may_be_inline = key_method_hook;
+}
+
+/* the complete / deleting variant of the destructor that fn is a variant of */
+static tree dtor_variant(tree fn, bool deleting)
+{
+  tree abs = DECL_CLONED_FUNCTION_P(fn) ? DECL_CLONED_FUNCTION(fn) : fn, c;
+  FOR_EACH_CLONE(c, abs)
+    if (deleting ? DECL_DELETING_DESTRUCTOR_P(c) : DECL_COMPLETE_DESTRUCTOR_P(c)) return c;
+  return NULL_TREE;
 }
 
 /* ---------------------------------------------------------------------------------------------- tables */
-
-enum kind { K_OTHER, K_D1, K_D0, K_RTTI };
 
 static tree entry_fn(tree v)
 {
@@ -163,100 +155,46 @@ static tree entry_fn(tree v)
   return NULL_TREE;
 }
 
-static kind entry_kind(tree v)
+/* the entry `e` (D1 or a thunk to it) as MSVC's ??_G */
+static tree sdd_decl(tree vt, tree e)
 {
-  STRIP_NOPS(v);
-  if (TREE_CODE(v) == ADDR_EXPR && VAR_P(TREE_OPERAND(v, 0)) && DECL_ASSEMBLER_NAME_SET_P(TREE_OPERAND(v, 0))
-      && !strncmp(asmname(TREE_OPERAND(v, 0)), "_ZTI", 4)) return K_RTTI;
-  tree f = entry_fn(v);
-  if (!f) return K_OTHER;
-  if (DECL_THUNK_P(f)) f = THUNK_TARGET(f);
-  if (DECL_COMPLETE_DESTRUCTOR_P(f)) return K_D1;
-  if (DECL_DELETING_DESTRUCTOR_P(f)) return K_D0;
-  return K_OTHER;
-}
-
-/* the slots of deleting destructors in class table vt, from the class's base graph */
-static void binfo_d0(tree binfo, tree vt, std::set<long> &rm, std::set<tree> &seen, HOST_WIDE_INT esz)
-{
-  if (!seen.insert(binfo).second) return;
-  HOST_WIDE_INT off;
-  tree e = BINFO_VTABLE(binfo);
-  if (e && table_ref(e, &off) == vt && off >= 0) {
-    long i = off / esz;
-    for (tree v = BINFO_VIRTUALS(binfo); v; v = TREE_CHAIN(v), i++)
-      if (DECL_DELETING_DESTRUCTOR_P(BV_FN(v))) rm.insert(i);
+  tree d1 = DECL_THUNK_P(e) ? THUNK_TARGET(e) : e;
+  tree d0 = dtor_variant(d1, true);
+  if (!d0) { error("SDD2: table %qD: destructor %qD has no deleting variant", vt, d1); return NULL_TREE; }
+  sdd_fn t;
+  t.entry = asmname(e); t.d0 = asmname(d0); t.fixed = 0; t.virt = false; t.voff = 0;
+  if (DECL_THUNK_P(e)) {
+    if (!DECL_THIS_THUNK_P(e)) { error("SDD2: table %qD: a result-adjusting thunk to a destructor", vt); return NULL_TREE; }
+    t.fixed = THUNK_FIXED_OFFSET(e);
+    if (tree vo = THUNK_VIRTUAL_OFFSET(e)) {
+      if (TREE_CODE(vo) != INTEGER_CST) { error("SDD2: table %qD: thunk %qD is not finished", vt, e); return NULL_TREE; }
+      t.virt = true; t.voff = tree_to_shwi(vo);
+    }
   }
-  tree b;
-  for (unsigned i = 0; BINFO_BASE_ITERATE(binfo, i, b); i++) binfo_d0(b, vt, rm, seen, esz);
-}
-
-static tree thunk_decl(tree e1, tree e0)
-{
-  std::string n = std::string(asmname(e1)) + ".fnvnx_sdd";
-  thunks[n] = std::make_pair(std::string(asmname(e1)), std::string(asmname(e0)));
-  tree d = build_decl(UNKNOWN_LOCATION, FUNCTION_DECL, get_identifier(n.c_str()), TREE_TYPE(e1));
+  std::string n = t.entry + ".fnvnx_sdd";
+  thunks[n] = t;
+  tree d = build_decl(UNKNOWN_LOCATION, FUNCTION_DECL, get_identifier(n.c_str()), TREE_TYPE(e));
   SET_DECL_ASSEMBLER_NAME(d, get_identifier(n.c_str()));
   DECL_EXTERNAL(d) = 1; TREE_PUBLIC(d) = 1; DECL_ARTIFICIAL(d) = 1; DECL_IGNORED_P(d) = 1; TREE_USED(d) = 1;
-  for (tree e : { e1, e0 })
-    if (cgraph_node *c = cgraph_node::get(e)) { c->force_output = 1; mark_decl_referenced(e); }
+  /* GCC's walks over table entries expect a member function of the class, with a node */
+  DECL_CONTEXT(d) = DECL_CONTEXT(d1);
+  cgraph_node::get_create(d);
   return d;
 }
 
-static void shrink_table(tree vt)
+static void retarget_table(tree vt)
 {
   tree init = DECL_INITIAL(vt);
   if (!init || TREE_CODE(init) != CONSTRUCTOR) return;
-  HOST_WIDE_INT esz = int_size_in_bytes(TREE_TYPE(TREE_TYPE(vt)));
-  std::vector<tree> vals;
-  unsigned HOST_WIDE_INT ix; tree idx, val;
-  FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(init), ix, idx, val) {
-    if (idx && (!tree_fits_uhwi_p(idx) || tree_to_uhwi(idx) != ix)) { error("SDD2: table %qD has a sparse initializer", vt); return; }
-    vals.push_back(val);
+  unsigned HOST_WIDE_INT ix; constructor_elt *ce;
+  FOR_EACH_VEC_SAFE_ELT(CONSTRUCTOR_ELTS(init), ix, ce) {
+    tree e = entry_fn(ce->value);
+    if (!e) continue;
+    tree f = DECL_THUNK_P(e) ? THUNK_TARGET(e) : e;
+    if (DECL_DELETING_DESTRUCTOR_P(f)) { error("SDD2: table %qD entry %d is a deleting destructor", vt, (int)ix); continue; }
+    if (!DECL_COMPLETE_DESTRUCTOR_P(f)) continue;
+    if (tree d = sdd_decl(vt, e)) ce->value = fold_convert(TREE_TYPE(ce->value), build_fold_addr_expr(d));
   }
-  std::set<long> rm;
-  bool own = !strncmp(asmname(vt), "_ZTV", 4);
-  if (own) {
-    std::set<tree> seen;
-    binfo_d0(TYPE_BINFO(DECL_CONTEXT(vt)), vt, rm, seen, esz);
-    /* the two views of the table must agree wherever an entry names its destructor */
-    for (size_t i = 0; i < vals.size(); i++)
-      /* (an entry that names no function says nothing: pure virtual, or the zero of a lost primary base) */
-      if ((entry_kind(vals[i]) == K_D0 && !rm.count((long)i))
-          || (rm.count((long)i) && entry_fn(vals[i]) && entry_fn(vals[i]) != abort_fndecl && entry_kind(vals[i]) != K_D0))
-        { tree f = entry_fn(vals[i]);
-          error("SDD2: table %qD entry %d (%s): the class's base graph says %s, the initializer %s", vt, (int)i,
-                f ? asmname(f) : "not a function", rm.count((long)i) ? "deleting destructor" : "other",
-                entry_kind(vals[i]) == K_D0 ? "deleting destructor" : "other"); return; }
-  } else {
-    for (size_t i = 0; i < vals.size(); i++) {
-      if (entry_kind(vals[i]) == K_D0) rm.insert((long)i);
-      if (entry_fn(vals[i]) == abort_fndecl) { error("SDD2: construction table %qD has a pure virtual entry", vt); return; }
-    }
-  }
-  table &t = tables[asmname(vt)];
-  vec<constructor_elt, va_gc> *ne = NULL;
-  long removed = 0;
-  for (size_t i = 0; i < vals.size(); i++) {
-    if (rm.count((long)i)) { removed++; continue; }
-    tree v = vals[i];
-    if (i > 0 && entry_kind(vals[i - 1]) == K_RTTI) t.aps.push_back(std::make_pair((long)(i * esz), (long)((i - removed) * esz)));
-    if (rm.count((long)i + 1)) {
-      tree e1 = entry_fn(v), e0 = entry_fn(vals[i + 1]);
-      if (!e1 != !e0 || (e1 == abort_fndecl) != (e0 == abort_fndecl))
-        { error("SDD2: table %qD entry %d: a destructor pair of two different kinds", vt, (int)i); return; }
-      if (e1 && e1 != abort_fndecl)
-        v = fold_convert(TREE_TYPE(v), build_fold_addr_expr(thunk_decl(e1, e0)));
-    }
-    CONSTRUCTOR_APPEND_ELT(ne, size_int(i - removed), v);
-  }
-  if (!removed) return;
-  tree at = build_array_type(TREE_TYPE(TREE_TYPE(vt)), build_index_type(size_int(vals.size() - removed - 1)));
-  TREE_TYPE(vt) = at;
-  DECL_INITIAL(vt) = build_constructor(at, ne);
-  TREE_CONSTANT(DECL_INITIAL(vt)) = 1; TREE_STATIC(DECL_INITIAL(vt)) = 1;
-  DECL_SIZE(vt) = NULL_TREE; DECL_SIZE_UNIT(vt) = NULL_TREE;
-  layout_decl(vt, 0);
 }
 
 /* VTT entries: `&table + off` -> `&table.fnvnx_ap<off>` */
@@ -268,15 +206,13 @@ static void retarget_vtt(tree vtt)
   FOR_EACH_VEC_SAFE_ELT(CONSTRUCTOR_ELTS(init), ix, ce) {
     HOST_WIDE_INT off;
     tree vt = table_ref(ce->value, &off);
-    if (!vt) { error("SDD2: VTT %qD entry %d is not a table address point", vtt, (int)ix); continue; }
+    if (!vt || off < 0) { error("SDD2: VTT %qD entry %d is not a table address point", vtt, (int)ix); continue; }
     ce->value = fold_convert(TREE_TYPE(ce->value), build_fold_addr_expr(ap_decl(vt, off)));
   }
 }
 
 static void ipa_start(void *, void *)
 {
-  /* GCC's own devirtualization reads tables by the front end's slot numbers */
-  if (flag_devirtualize) { error("SDD2: compile with %<-fno-devirtualize%>"); return; }
   varpool_node *n;
   std::vector<tree> tabs, vtts;
   FOR_EACH_DEFINED_VARIABLE(n) {
@@ -285,7 +221,7 @@ static void ipa_start(void *, void *)
     else if (VAR_P(v) && DECL_ASSEMBLER_NAME_SET_P(v) && !strncmp(asmname(v), "_ZTT", 4)) vtts.push_back(v);
   }
   for (tree v : vtts) retarget_vtt(v);
-  for (tree v : tabs) shrink_table(v);
+  for (tree v : tabs) retarget_table(v);
 }
 
 /* ---------------------------------------------------------------------------------------------- code */
@@ -310,34 +246,78 @@ static tree walk_op(tree *tp, int *walk_subtrees, void *data)
   return NULL_TREE;
 }
 
-/* index `tok` of a virtual call on class cls (already a slot of the shrunk table): *flags 1 for a deleting
-   destructor (marked), 0 for a complete destructor, else -1 */
-static bool decode_slot(tree cls, unsigned HOST_WIDE_INT tok, unsigned HOST_WIDE_INT *slot, int *flags)
+/* a call through the destructor's slot: fp(obj, flags), fp's type MSVC's ??_G */
+static void slot_call(gimple_stmt_iterator *gsi, gcall *call, tree fp, tree obj, int flags)
 {
-  *flags = -1;
-  if (tok >= D0_MARK) { tok -= D0_MARK; *flags = 1; }
-  *slot = tok;
-  unsigned HOST_WIDE_INT i = 0, d0 = 0;
-  for (tree v = BINFO_VIRTUALS(TYPE_BINFO(TYPE_MAIN_VARIANT(cls))); v; v = TREE_CHAIN(v), i++) {
-    tree f = BV_FN(v);
-    if (DECL_DELETING_DESTRUCTOR_P(f)) { d0++; continue; }
-    if (i - d0 == tok) {
-      if (*flags == 1) return DECL_COMPLETE_DESTRUCTOR_P(f);
-      if (DECL_COMPLETE_DESTRUCTOR_P(f)) *flags = 0;
-      return true;
-    }
-  }
-  return false;
+  tree fnt = build_function_type_list(ptr_type_node, TREE_TYPE(obj), unsigned_type_node, NULL_TREE);
+  tree p = make_ssa_name(build_pointer_type(fnt));
+  gimple *g = gimple_build_assign(p, NOP_EXPR, fp);
+  gimple_set_location(g, gimple_location(call));
+  gsi_insert_before(gsi, g, GSI_SAME_STMT);
+  gcall *nc = gimple_build_call(p, 2, obj, build_int_cst(unsigned_type_node, flags));
+  gimple_set_location(nc, gimple_location(call));
+  gimple_call_set_nothrow(nc, gimple_call_nothrow_p(call));
+  gimple_move_vops(nc, call);
+  gsi_replace(gsi, nc, true);
 }
 
 namespace {
-const pass_data sdd_data = { GIMPLE_PASS, "fnvnx_sdd", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
-struct sdd_pass : gimple_opt_pass {
-  sdd_pass(gcc::context *c) : gimple_opt_pass(sdd_data, c) {}
+/* early, on SSA: destructor calls get MSVC's form before any pass looks at them */
+const pass_data calls_data = { GIMPLE_PASS, "fnvnx_sdd_calls", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
+struct calls_pass : gimple_opt_pass {
+  calls_pass(gcc::context *c) : gimple_opt_pass(calls_data, c) {}
   unsigned int execute(function *fun) override
   {
     basic_block bb;
     HOST_WIDE_INT psz = POINTER_SIZE / BITS_PER_UNIT;
+    FOR_EACH_BB_FN(bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+        gimple *st = gsi_stmt(gsi);
+        if (!is_gimple_call(st) || gimple_call_internal_p(st)) continue;
+        gcall *call = as_a<gcall *>(st);
+        tree fn = gimple_call_fn(call);
+        if (fn && TREE_CODE(fn) == OBJ_TYPE_REF) {
+          /* a virtual call: of the destructor's slot? */
+          tree cls = obj_type_ref_class(fn);
+          tree v = BINFO_VIRTUALS(TYPE_BINFO(TYPE_MAIN_VARIANT(cls)));
+          if (!tree_fits_uhwi_p(OBJ_TYPE_REF_TOKEN(fn))) { error_at(gimple_location(st), "SDD2: a virtual call without a slot"); continue; }
+          for (unsigned HOST_WIDE_INT i = tree_to_uhwi(OBJ_TYPE_REF_TOKEN(fn)); v && i; i--) v = TREE_CHAIN(v);
+          if (!v) { error_at(gimple_location(st), "SDD2: a virtual call whose slot is not in its class %qT", cls); continue; }
+          if (!DECL_COMPLETE_DESTRUCTOR_P(BV_FN(v))) continue;
+          if (gimple_call_num_args(call) != 1) { error_at(gimple_location(st), "SDD2: a virtual destructor call with %d arguments", (int)gimple_call_num_args(call)); continue; }
+          slot_call(&gsi, call, OBJ_TYPE_REF_EXPR(fn), gimple_call_arg(call, 0), 0);
+          continue;
+        }
+        tree d0 = gimple_call_fndecl(call);
+        if (!d0 || !DECL_LANG_SPECIFIC(d0) || !DECL_DELETING_DESTRUCTOR_P(d0)) continue;
+        tree d1 = dtor_variant(d0, false);
+        if (!d1 || !DECL_VINDEX(d1)) continue;                       /* not a virtual destructor */
+        if (TREE_CODE(DECL_VINDEX(d1)) != INTEGER_CST || gimple_call_num_args(call) != 1)
+          { error_at(gimple_location(st), "SDD2: a deleting destructor call that cannot be placed"); continue; }
+        /* a delete-expression: through the object's own slot, flags 1 */
+        tree obj = gimple_call_arg(call, 0);
+        tree vp = make_ssa_name(ptr_type_node);
+        gimple *g1 = gimple_build_assign(vp, build2(MEM_REF, ptr_type_node, obj, build_int_cst(ptr_type_node, 0)));
+        gimple_set_vuse(g1, gimple_vuse(st)); gimple_set_location(g1, gimple_location(st));
+        gsi_insert_before(&gsi, g1, GSI_SAME_STMT);
+        tree fp = make_ssa_name(ptr_type_node);
+        gimple *g2 = gimple_build_assign(fp, build2(MEM_REF, ptr_type_node, vp,
+                                                    build_int_cst(ptr_type_node, tree_to_shwi(DECL_VINDEX(d1)) * psz)));
+        gimple_set_vuse(g2, gimple_vuse(st)); gimple_set_location(g2, gimple_location(st));
+        gsi_insert_before(&gsi, g2, GSI_SAME_STMT);
+        slot_call(&gsi, call, fp, obj, 1);
+      }
+    return 0;
+  }
+};
+
+/* late, just before expansion: address points by their own symbols */
+const pass_data ap_data = { GIMPLE_PASS, "fnvnx_sdd_ap", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
+struct ap_pass : gimple_opt_pass {
+  ap_pass(gcc::context *c) : gimple_opt_pass(ap_data, c) {}
+  unsigned int execute(function *fun) override
+  {
+    basic_block bb;
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
         gimple *st = gsi_stmt(gsi);
@@ -355,38 +335,6 @@ struct sdd_pass : gimple_opt_pass {
         walk_stmt_info wi; memset(&wi, 0, sizeof wi); wi.info = &changed;
         walk_gimple_op(st, walk_op, &wi);
         if (changed) update_stmt(st);
-        if (!is_gimple_call(st) || !gimple_call_fn(st) || TREE_CODE(gimple_call_fn(st)) != OBJ_TYPE_REF) continue;
-        tree ref = gimple_call_fn(st);
-        tree cls = obj_type_ref_class(ref);
-        unsigned HOST_WIDE_INT slot; int flags;
-        if (!tree_fits_uhwi_p(OBJ_TYPE_REF_TOKEN(ref)) || !decode_slot(cls, tree_to_uhwi(OBJ_TYPE_REF_TOKEN(ref)), &slot, &flags)) {
-          error_at(gimple_location(st), "SDD2: a virtual call whose slot is not in its class %qT", cls);
-          continue;
-        }
-        gcall *call = as_a<gcall *>(st);
-        tree obj = OBJ_TYPE_REF_OBJECT(ref);
-        tree vp = make_ssa_name(ptr_type_node);
-        gimple *g1 = gimple_build_assign(vp, build2(MEM_REF, ptr_type_node, obj, build_int_cst(ptr_type_node, 0)));
-        gimple_set_vuse(g1, gimple_vuse(st)); gimple_set_location(g1, gimple_location(st));
-        gsi_insert_before(&gsi, g1, GSI_SAME_STMT);
-        tree fnt = gimple_call_fntype(call);
-        if (flags >= 0)
-          fnt = build_function_type_list(ptr_type_node, TREE_TYPE(obj), unsigned_type_node, NULL_TREE);
-        tree fp = make_ssa_name(build_pointer_type(fnt));
-        gimple *g2 = gimple_build_assign(fp, build2(MEM_REF, TREE_TYPE(fp), vp, build_int_cst(ptr_type_node, slot * psz)));
-        gimple_set_vuse(g2, gimple_vuse(st)); gimple_set_location(g2, gimple_location(st));
-        gsi_insert_before(&gsi, g2, GSI_SAME_STMT);
-        if (flags < 0) {
-          gimple_call_set_fn(call, fp);
-          update_stmt(call);
-        } else {
-          if (gimple_call_num_args(call) != 1) { error_at(gimple_location(st), "SDD2: a virtual destructor call with %d arguments", (int)gimple_call_num_args(call)); continue; }
-          gcall *nc = gimple_build_call(fp, 2, gimple_call_arg(call, 0), build_int_cst(unsigned_type_node, flags));
-          gimple_set_location(nc, gimple_location(st));
-          gimple_call_set_nothrow(nc, gimple_call_nothrow_p(call));
-          gimple_move_vops(nc, call);
-          gsi_replace(&gsi, nc, true);
-        }
       }
     return 0;
   }
@@ -400,38 +348,57 @@ static void finish_unit(void *, void *)
   varpool_node *n;
   FOR_EACH_DEFINED_VARIABLE(n) {
     tree vt = n->decl;
-    if (!is_table(vt) || !TREE_ASM_WRITTEN(vt)) continue;
+    if (!is_table(vt) || !TREE_ASM_WRITTEN(vt) || !DECL_INITIAL(vt) || TREE_CODE(DECL_INITIAL(vt)) != CONSTRUCTOR) continue;
     const char *base = asmname(vt);
-    std::map<std::string, table>::iterator it = tables.find(base);
-    if (it == tables.end()) { error("SDD2: table %qD was written out but never seen", vt); continue; }
-    for (std::pair<long, long> ap : it->second.aps) {
-      std::string s = std::string(base) + ".fnvnx_ap" + std::to_string(ap.first);
-      fprintf(asm_out_file, "\t%s\t%s\n\t.type\t%s, %%object\n\t.set\t%s, %s+%ld\n",
-              DECL_WEAK(vt) ? ".weak" : TREE_PUBLIC(vt) ? ".globl" : ".local", s.c_str(), s.c_str(), s.c_str(), base, ap.second);
-      if (DECL_VISIBILITY(vt) == VISIBILITY_HIDDEN) fprintf(asm_out_file, "\t.hidden\t%s\n", s.c_str());
+    HOST_WIDE_INT esz = int_size_in_bytes(TREE_TYPE(TREE_TYPE(vt)));
+    unsigned HOST_WIDE_INT ix; tree idx, val; bool after_rtti = false;
+    /* an address point is the entry after a sub-table's RTTI slot */
+    FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(DECL_INITIAL(vt)), ix, idx, val) {
+      if (after_rtti) {
+        std::string s = std::string(base) + ".fnvnx_ap" + std::to_string((long long)(ix * esz));
+        fprintf(asm_out_file, "\t%s\t%s\n\t.type\t%s, %%object\n\t.set\t%s, %s+%ld\n",
+                DECL_WEAK(vt) ? ".weak" : TREE_PUBLIC(vt) ? ".globl" : ".local", s.c_str(), s.c_str(), s.c_str(), base, (long)(ix * esz));
+        if (DECL_VISIBILITY(vt) == VISIBILITY_HIDDEN) fprintf(asm_out_file, "\t.hidden\t%s\n", s.c_str());
+      }
+      tree v = val;
+      STRIP_NOPS(v);
+      after_rtti = TREE_CODE(v) == ADDR_EXPR && VAR_P(TREE_OPERAND(v, 0)) && DECL_ASSEMBLER_NAME_SET_P(TREE_OPERAND(v, 0))
+                   && !strncmp(asmname(TREE_OPERAND(v, 0)), "_ZTI", 4);
     }
   }
-  for (std::map<std::string, std::pair<std::string, std::string> >::iterator t = thunks.begin(); t != thunks.end(); ++t) {
+  for (std::map<std::string, sdd_fn>::iterator t = thunks.begin(); t != thunks.end(); ++t) {
     const char *nm = t->first.c_str();
+    const sdd_fn &f = t->second;
     fprintf(asm_out_file,
             "\t.section\t.text.%s,\"axG\",%%progbits,%s,comdat\n\t.align\t2\n\t.weak\t%s\n\t.type\t%s, %%function\n%s:\n"
             "\t.cfi_startproc\n\tstp\tx29, x30, [sp, -32]!\n\t.cfi_def_cfa_offset 32\n\t.cfi_offset 29, -32\n\t.cfi_offset 30, -24\n"
             "\tmov\tx29, sp\n\tstr\tx19, [sp, 16]\n\t.cfi_offset 19, -16\n\tmov\tx19, x0\n\ttbnz\tw1, #0, 1f\n"
-            "\tbl\t%s\n\tb\t2f\n1:\tbl\t%s\n2:\tmov\tx0, x19\n\tldr\tx19, [sp, 16]\n\tldp\tx29, x30, [sp], 32\n"
-            "\t.cfi_restore 30\n\t.cfi_restore 29\n\t.cfi_restore 19\n\t.cfi_def_cfa_offset 0\n\tret\n\t.cfi_endproc\n\t.size\t%s, .-%s\n",
-            nm, nm, nm, nm, nm, t->second.first.c_str(), t->second.second.c_str(), nm, nm);
+            "\tbl\t%s\n\tb\t2f\n1:\n", nm, nm, nm, nm, nm, f.entry.c_str());
+    /* the deleting destructor takes the object the thunk would hand to the complete one */
+    if (f.fixed) fprintf(asm_out_file, "\tldr\tw9, =%ld\n\tadd\tw0, w0, w9\n", (long)f.fixed);
+    if (f.virt) fprintf(asm_out_file, "\tldr\tw9, [x0]\n\tldr\tw10, =%ld\n\tadd\tw9, w9, w10\n\tldr\tw9, [x9]\n\tadd\tw0, w0, w9\n", (long)f.voff);
+    fprintf(asm_out_file,
+            "\tbl\t%s\n2:\tmov\tx0, x19\n\tldr\tx19, [sp, 16]\n\tldp\tx29, x30, [sp], 32\n"
+            "\t.cfi_restore 30\n\t.cfi_restore 29\n\t.cfi_restore 19\n\t.cfi_def_cfa_offset 0\n\tret\n\t.ltorg\n\t.cfi_endproc\n\t.size\t%s, .-%s\n",
+            f.d0.c_str(), nm, nm);
   }
 }
 
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
   if (!plugin_default_version_check(ver, &gcc_version)) return 1;
-  register_pass_info pi;
-  pi.pass = new sdd_pass(g);
-  pi.reference_pass_name = "ssa";
-  pi.ref_pass_instance_number = 1;
-  pi.pos_op = PASS_POS_INSERT_AFTER;
-  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pi);
+  register_pass_info pc;
+  pc.pass = new calls_pass(g);
+  pc.reference_pass_name = "ssa";
+  pc.ref_pass_instance_number = 1;
+  pc.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pc);
+  register_pass_info pa;
+  pa.pass = new ap_pass(g);
+  pa.reference_pass_name = "optimized";
+  pa.ref_pass_instance_number = 1;
+  pa.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pa);
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);

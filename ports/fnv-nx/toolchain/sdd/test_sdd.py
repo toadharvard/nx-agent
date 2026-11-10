@@ -4,7 +4,8 @@
     python3 toolchain/sdd/test_sdd.py
 
 Compiles test_sdd.cpp (plain C++) with the plugin and checks the assembly: table contents in exe order, the slot each
-virtual call loads, destructor flags, pointers to virtual members, address-point symbols. Skips without the cross
+virtual call loads, destructor flags, pointers to virtual members, address-point symbols. The game's flag set (-fno-devirtualize)
+stays on. Skips without the cross
 compiler and its plugin headers.
 """
 import os
@@ -54,9 +55,6 @@ def main():
         check('compiles', r.returncode == 0, r.stderr[:3000])
         if r.returncode != 0: return 1
         s = open(out).read()
-        r2 = subprocess.run([cxx, '-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-fno-sized-deallocation', '-fplugin=' + so,
-                             '-S', '-o', os.devnull, os.path.join(HERE, 'test_sdd.cpp')], capture_output=True, text=True)
-        check('devirtualization on is refused', r2.returncode != 0 and 'fno-devirtualize' in r2.stderr, r2.stderr[:300])
     # struct A { virtual int f(); virtual ~A(); virtual int g(); }: slots f 0, ??_G 1, g 2
     check('table M: exe order, one destructor slot, the secondary table too',
           words(s, '_ZTV1M') == ['0', '_ZTI1M', '_ZN1A1fEv', '_ZN1MD1Ev.fnvnx_sdd', '_ZN1A1gEv', '_ZN1M1kEv', '_ZN1M4lastEv',
@@ -74,14 +72,18 @@ def main():
     uj = re.findall(r'ldr\s+w\d+, \[x\d+, (\d+)\]', body(s, '_Z5use_jP1J'))
     check('inline member bodies: g() slot 2, J::w() slot 3', uj == ['8', '12'], str(uj))
     sets = dict(re.findall(r'\.set\s+(\S+), (\S+)\n', s))
-    check('address points: own symbols at their place in the shrunk table',
-          sets.get('_ZTV1M.fnvnx_ap8') == '_ZTV1M+8' and sets.get('_ZTV1M.fnvnx_ap40') == '_ZTV1M+36', str(sets))
+    check('address points: own symbols', sets.get('_ZTV1M.fnvnx_ap8') == '_ZTV1M+8' and sets.get('_ZTV1M.fnvnx_ap36') == '_ZTV1M+36', str(sets))
     ctor = body(s, '_ZN1MC2Ev')
     check('constructor: one relocation per address point, no immediate',
-          len(re.findall(r':got_lo12:_ZTV1M\.fnvnx_ap(?:8|40)\]', ctor)) == 2 and ':got:_ZTV1M\n' not in ctor, ctor)
+          len(re.findall(r':got_lo12:_ZTV1M\.fnvnx_ap(?:8|36)\]', ctor)) == 2 and ':got:_ZTV1M\n' not in ctor, ctor)
     th = body(s, '_ZN1MD1Ev.fnvnx_sdd')
     check('??_G: flags bit 0 picks the deleting destructor, returns this',
-          re.search(r'tbnz\s+w1, #0, 1f\n\s+bl\s+_ZN1MD1Ev\n\s+b\s+2f\n1:\s+bl\s+_ZN1MD0Ev\n2:\s+mov\s+x0, x19', th), th)
+          re.search(r'tbnz\s+w1, #0, 1f\n\s+bl\s+_ZN1MD1Ev\n\s+b\s+2f\n1:\n\s+bl\s+_ZN1MD0Ev\n2:\s+mov\s+x0, x19', th), th)
+    th2 = body(s, '_ZThn8_N1MD1Ev.fnvnx_sdd')
+    check('??_G of the second base: the thunk for flags 0, the adjusted object for flags 1',
+          re.search(r'bl\s+_ZThn8_N1MD1Ev\n\s+b\s+2f\n1:\n\s+ldr\s+w9, =-8\n\s+add\s+w0, w0, w9\n\s+bl\s+_ZN1MD0Ev\n', th2), th2)
+    check('no deleting destructor in any table', not re.search(r'\.word\s+\S*D0Ev', s))
+    check('deleting destructors are written out', '_ZN1MD0Ev:' in s and '_ZN1BD0Ev:' in s)
     print('test_sdd: %s' % ('FAILED %d' % len(FAILS) if FAILS else 'ok'))
     return 1 if FAILS else 0
 

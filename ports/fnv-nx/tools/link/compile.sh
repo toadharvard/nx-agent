@@ -81,6 +81,20 @@ FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugi
         -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
         -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR" -fplugin-arg-fnvnx_order-assign="$ORDER_ASSIGN")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
+# FNVNX_SDD=1 (SDD2, toolchain/sdd): one vtable slot per virtual destructor, as MSVC's ??_G, and one symbol per
+# vtable address point. The fnvnx_sdd plugin makes the deleting destructor non-virtual inside the front end, so GCC
+# itself builds every table, index and member pointer with one slot. -DFNVNX_SDD makes the raw-slot macros of the
+# shim (VSLOT, D26_SLOT, RAWVT, VTM1) the identity. -fno-devirtualize: MSVC 2008 kept every virtual call of an object
+# of unknown dynamic type virtual, so the exe's functions have those calls and the vcall gate pairs them one to one
+# (65 units: functions whose call count differs from the exe 532 -> 425, paired sites at delta 0 3,643 -> 4,617);
+# a speculative direct call would also go to a unit-local alias, past the link's by-address binding. A layout flag:
+# objects with and without it must never mix. Default 0 until the one full recompile (M6).
+SDD_SO=""
+if [ "${FNVNX_SDD:-0}" = 1 ]; then
+  SDD_SO=$(CXX=$CXX bash "$HERE/toolchain/sdd/build.sh" "$OUT/.sdd") \
+    || { echo "compile.sh: the fnvnx_sdd plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
+  FLAGS+=(-DFNVNX_SDD=1 -fno-devirtualize -fplugin="$SDD_SO")
+fi
 # AB_FLAGS: extra flags appended after all of the above, so they win (e.g. -fstrict-aliasing against the parity set).
 # For A/B measurements only (tools/perf/unit_ab.sh, docs/PERF.md 11.8), never for a build that runs; unset = no
 # change.
@@ -167,7 +181,7 @@ jq -r '.units[] | [.source, ([.flags[]? | select(startswith("/D")) | "-D" + .[2:
   "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
 # Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
 # same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
-objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
+objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO" $SDD_SO; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
             xargs -0 cat) | sha256sum | cut -c1-16)
 # One compile.sh at a time per object directory: a second run with other flags would delete the first one's objects
 # here (the stamp above) while it works (try1of1, D26: 2,499 units "failed (no error line)", 1,716 logs of 0 bytes,
