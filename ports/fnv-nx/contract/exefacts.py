@@ -15,6 +15,7 @@ Facts (pickle, one dict):
   vft       {vftable_va: (rtti_name, col_offset, [slot targets], col_va)}
   ptrs      [(va, target)]   every relocated code pointer held in data (slots, callbacks, __xc ...)
   xc        [target ...]     the C++ initializer table, in order
+  fn        {va: F}          (F['cleanup'] = [(call site, bytes the caller pops right after the call; 0 = none)])
   fn        {va: F}          F as returned by analyze() plus 'live' (interprocedural) and 'sym', 'decomp'
 """
 import argparse, bisect, collections, hashlib, json, pickle, struct, sys
@@ -27,7 +28,7 @@ ALL = (1 << len(REGS)) - 1
 _SUB = {'al': 'eax', 'ah': 'eax', 'ax': 'eax', 'cl': 'ecx', 'ch': 'ecx', 'cx': 'ecx', 'dl': 'edx', 'dh': 'edx',
         'dx': 'edx', 'bl': 'ebx', 'bh': 'ebx', 'bx': 'ebx', 'si': 'esi', 'di': 'edi', 'bp': 'ebp'}
 _SUB.update({r: r for r in REGS})
-VERSION = 5
+VERSION = 6
 CALLEE_SAVED = BIT['ebx'] | BIT['esi'] | BIT['edi'] | BIT['ebp']
 
 
@@ -201,13 +202,14 @@ class Analyzer:
         ins = {}          # addr -> [size, reads, writes, succs, calltarget/None]
         work = [a]
         F = dict(a=a, size=size, ret=set(), calls=[], tails=[], icalls=[], itails=[], stores=[], vrefs=[],
-                 data=[], codeptrs=[], imports=[], jt=[], fs=0, x87=0, bad=0)
+                 data=[], codeptrs=[], imports=[], jt=[], cleanup=[], fs=0, x87=0, bad=0)
         pend = {}         # reg bit -> vftable loaded by `mov reg, imm`
         last = {}         # reg id -> displacement of the last `mov reg, [reg2+disp]`
         while work:
             p = work.pop()
             if p in ins or not (lo <= p < hi):
                 continue
+            prev_call = None
             for i in md.disasm(d[traw + p - t0:traw + hi - t0], p):
                 p = i.address
                 if p in ins:
@@ -230,7 +232,19 @@ class Analyzer:
                     F['fs'] = 1
                 if X.X86_GRP_FPU in i.groups:
                     F['x87'] = 1
+                if prev_call is not None:      # caller clean-up right after a call: `add esp, n` or `pop ecx`
+                    if iid == X.X86_INS_ADD and ops[0].type == X.X86_OP_REG and ops[0].reg == X.X86_REG_ESP and ops[1].type == X.X86_OP_IMM:
+                        F['cleanup'].append((prev_call, ops[1].imm))
+                        prev_call = None
+                    elif iid == X.X86_INS_POP and ops[0].type == X.X86_OP_REG and ops[0].reg == X.X86_REG_ECX:
+                        F['cleanup'].append((prev_call, 4))
+                        prev_call = None
+                    else:
+                        if iid != X.X86_INS_CALL:
+                            F['cleanup'].append((prev_call, 0))
+                        prev_call = None
                 if iid == X.X86_INS_CALL:
+                    prev_call = p
                     o = ops[0]
                     if o.type == X.X86_OP_IMM:
                         ct = o.imm & 0xffffffff
