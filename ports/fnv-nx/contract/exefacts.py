@@ -4,7 +4,7 @@
     exefacts.py --exe FalloutNV.exe --units units.json --out facts.pkl [--jobs N]
 
 Everything a boundary needs is a fact of the exe: base relocations, imports, RTTI vftables, and per function
-the `ret N` set, registers live on entry, direct and indirect calls, vptr stores (in order, with base and
+the `ret N` set, direct and indirect calls, vptr stores (in order, with base and
 displacement), data references and code pointers.  The output is exe-derived: it stays in the container or in
 fnv-nx-build, never in this repository (docs/ARCHITECTURE.md, Legal).
 
@@ -16,21 +16,13 @@ Facts (pickle, one dict):
             decomp names has (its `??_7` symbol, 0, slots, 0)
   ptrs      [(va, target)]   every relocated code pointer held in data (slots, callbacks, __xc ...)
   xc        [target ...]     the C++ initializer table, in order
-  fn        {va: F}          (F['cleanup'] = [(call site, bytes the caller pops right after the call; 0 = none)])
-  fn        {va: F}          F as returned by analyze() plus 'live' (interprocedural) and 'sym', 'decomp'
+  fn        {va: F}          F as returned by analyze() plus 'sym', 'decomp', 'unit'
 """
 import argparse, bisect, collections, hashlib, json, pickle, struct, sys
 import capstone
 from capstone import x86_const as X
 
-REGS = ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi', 'ebp')
-BIT = {r: 1 << i for i, r in enumerate(REGS)}
-ALL = (1 << len(REGS)) - 1
-_SUB = {'al': 'eax', 'ah': 'eax', 'ax': 'eax', 'cl': 'ecx', 'ch': 'ecx', 'cx': 'ecx', 'dl': 'edx', 'dh': 'edx',
-        'dx': 'edx', 'bl': 'ebx', 'bh': 'ebx', 'bx': 'ebx', 'si': 'esi', 'di': 'edi', 'bp': 'ebp'}
-_SUB.update({r: r for r in REGS})
-VERSION = 7
-CALLEE_SAVED = BIT['ebx'] | BIT['esi'] | BIT['edi'] | BIT['ebp']
+VERSION = 8
 
 
 class Image:
@@ -203,42 +195,28 @@ class Analyzer:
         self.vft = vft
         self.md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
         self.md.detail = True
-        self.rb = {}
-        for i in range(1, X.X86_REG_ENDING):
-            n = self.md.reg_name(i)
-            if n in _SUB:
-                self.rb[i] = BIT[_SUB[n]]
         self.t0, self.ts = img.text
         self.traw = img.secs['.text'][2]
-
-    def _mask(self, ids):
-        m = 0
-        for i in ids:
-            m |= self.rb.get(i, 0)
-        return m
 
     def analyze(self, a, size, bound):
         """size: decomp size or 0 (then the function ends before `bound`, the next known entry)."""
         img, md = self.img, self.md
         lo, hi = a, (a + size if size else bound)
         d, t0, traw, relocs = img.d, self.t0, self.traw, img.relocs
-        ins = {}          # addr -> [size, reads, writes, succs, calltarget/None]
+        ins = {}          # addr -> size
         work = [a]
         F = dict(a=a, size=size, ret=set(), calls=[], tails=[], icalls=[], itails=[], stores=[], vrefs=[],
-                 data=[], codeptrs=[], imports=[], jt=[], cleanup=[], fs=0, x87=0, bad=0)
+                 data=[], codeptrs=[], imports=[], jt=[], fs=0, x87=0, bad=0)
         pend = {}         # reg bit -> vftable loaded by `mov reg, imm`
         last = {}         # reg id -> displacement of the last `mov reg, [reg2+disp]`
         while work:
             p = work.pop()
             if p in ins or not (lo <= p < hi):
                 continue
-            prev_call = None
             for i in md.disasm(d[traw + p - t0:traw + hi - t0], p):
                 p = i.address
                 if p in ins:
                     break
-                rd, wr = i.regs_access()
-                R, W = self._mask(rd), self._mask(wr)
                 ops = i.operands
                 nx = p + i.size
                 succ = [nx]
@@ -255,19 +233,7 @@ class Analyzer:
                     F['fs'] = 1
                 if X.X86_GRP_FPU in i.groups:
                     F['x87'] = 1
-                if prev_call is not None:      # caller clean-up right after a call: `add esp, n` or `pop ecx`
-                    if iid == X.X86_INS_ADD and ops[0].type == X.X86_OP_REG and ops[0].reg == X.X86_REG_ESP and ops[1].type == X.X86_OP_IMM:
-                        F['cleanup'].append((prev_call, ops[1].imm))
-                        prev_call = None
-                    elif iid == X.X86_INS_POP and ops[0].type == X.X86_OP_REG and ops[0].reg == X.X86_REG_ECX:
-                        F['cleanup'].append((prev_call, 4))
-                        prev_call = None
-                    else:
-                        if iid != X.X86_INS_CALL:
-                            F['cleanup'].append((prev_call, 0))
-                        prev_call = None
                 if iid == X.X86_INS_CALL:
-                    prev_call = p
                     o = ops[0]
                     if o.type == X.X86_OP_IMM:
                         ct = o.imm & 0xffffffff
@@ -283,7 +249,6 @@ class Analyzer:
                     else:
                         F['icalls'].append((p, 'reg', i.op_str, last.get(o.reg)))
                         ct = -1
-                    W |= BIT['eax'] | BIT['ecx'] | BIT['edx']
                     last = {}
                     pend = {}
                 elif iid == X.X86_INS_JMP:
@@ -323,26 +288,8 @@ class Analyzer:
                         succ.append(t)
                     else:
                         F['tails'].append((p, t))
-                elif iid == X.X86_INS_PUSH and ops[0].type == X.X86_OP_REG:
-                    b = self.rb.get(ops[0].reg, 0)
-                    R &= ~b
-                    if b:
-                        ins.setdefault(('push', p), b)
                 elif len(ops) == 2 and ops[0].type == X.X86_OP_REG:
                     o0, o1 = ops
-                    b = self.rb.get(o0.reg, 0)
-                    same = o1.type == X.X86_OP_REG and o1.reg == o0.reg
-                    if same and iid in (X.X86_INS_XOR, X.X86_INS_SUB, X.X86_INS_SBB, X.X86_INS_PXOR, X.X86_INS_XORPS):
-                        R &= ~b
-                    elif same and iid == X.X86_INS_MOV:
-                        R &= ~b
-                        W &= ~b
-                    elif o1.type == X.X86_OP_IMM and ((iid == X.X86_INS_OR and o1.imm & 0xffffffff == 0xffffffff)
-                                                      or (iid == X.X86_INS_AND and o1.imm == 0)) and o0.size == 4:
-                        R &= ~b
-                    if iid == X.X86_INS_LEA and o1.mem.base == o0.reg and not o1.mem.index and not o1.mem.disp:
-                        R &= ~b               # padding nop
-                        W &= ~b
                     if iid == X.X86_INS_MOV:
                         if o1.type == X.X86_OP_MEM and o1.mem.index == 0 and o1.mem.base:
                             last[o0.reg] = o1.mem.disp
@@ -367,11 +314,6 @@ class Analyzer:
                         rv = [(r_, v_) for r_, v_ in rv if v_ != v]
                     elif ops[1].type == X.X86_OP_REG and ops[1].reg in pend:
                         F['stores'].append((p, 'reg', base + ('+' + idx if idx else ''), m.disp, pend[ops[1].reg]))
-                    elif ops[1].type == X.X86_OP_REG and m.base in (X.X86_REG_ESP, X.X86_REG_EBP) and not m.index:
-                        b = self.rb.get(ops[1].reg, 0) & CALLEE_SAVED   # saving one to the frame is weak evidence, like push
-                        R &= ~b
-                        if b:
-                            ins[('push', p)] = b
                 for r_, v_ in rv:
                     if v_ == jt_base:
                         continue
@@ -384,7 +326,7 @@ class Analyzer:
                             F['imports'].append((p, v_, 'ref'))
                     else:
                         F['data'].append((p, v_))
-                ins[p] = [i.size, R, W, succ, ct]
+                ins[p] = i.size
                 if not succ or succ[0] != nx:
                     work.extend(succ)
                     break
@@ -394,36 +336,9 @@ class Analyzer:
             else:
                 if lo <= p < hi and p not in ins:
                     F['bad'] = 1      # undecodable bytes on a reached path
-        # forward "still holds its entry value on some path" analysis
-        pushes = {k[1]: v for k, v in ins.items() if isinstance(k, tuple)}
-        addrs = sorted(k for k in ins if not isinstance(k, tuple))
-        IN = dict.fromkeys(addrs, 0)
-        if a in IN:
-            IN[a] = ALL
-        chg = True
-        while chg:
-            chg = False
-            for p in addrs:
-                out = IN[p] & ~ins[p][2]
-                for s in ins[p][3]:
-                    if s in IN and out & ~IN[s]:
-                        IN[s] |= out
-                        chg = True
-        live = push = ic = 0
-        callin = collections.Counter()
-        for p in addrs:
-            sz, R, W, succ, ct = ins[p]
-            live |= R & IN[p]
-            push |= pushes.get(p, 0) & IN[p]
-            if ct is not None:
-                if ct == -1:
-                    ic |= IN[p]
-                else:
-                    callin[ct] |= IN[p]
-        for p, t in F['tails']:
-            callin[t] |= IN.get(p, 0)
-        F.update(n=len(addrs), bytes=sum(ins[p][0] for p in addrs), end=(max(p + ins[p][0] for p in addrs) if addrs else a),
-                 local=live, pushin=push, icin=ic, callin=dict(callin), ret=tuple(sorted(F['ret'])))
+        addrs = sorted(ins)
+        F.update(n=len(addrs), bytes=sum(ins[p] for p in addrs), end=(max(p + ins[p] for p in addrs) if addrs else a),
+                 ret=tuple(sorted(F['ret'])))
         return F
 
 
@@ -438,27 +353,6 @@ def _init(exe, units):
 
 def _run(job):
     return [_AN.analyze(*j) for j in job]
-
-
-def interprocedural_live(fn):
-    """live(F) = local(F) | U over direct calls and tail jumps (live(target) & entry-valued-at-site)."""
-    for F in fn.values():
-        # a body that reads five or more registers before writing them captures a context (CRT failure paths);
-        # it takes no register arguments
-        F['ctx'] = bin(F['local']).count('1') >= 5
-        F['live'] = 0 if F['ctx'] else F['local']
-    chg = True
-    while chg:
-        chg = False
-        for F in fn.values():
-            v = F['live']
-            for t, m in F['callin'].items():
-                T = fn.get(t)
-                if T is not None and not F['ctx']:
-                    v |= T['live'] & m
-            if v != F['live']:
-                F['live'] = v
-                chg = True
 
 
 def build(exe, units, jobs=4, log=print):
@@ -512,7 +406,6 @@ def build(exe, units, jobs=4, log=print):
         F['decomp'] = a in dec
         F['sym'] = dec[a][1] if a in dec else ''
         F['unit'] = dec[a][2] if a in dec else ''
-    interprocedural_live(fn)
     meta = dict(version=VERSION, exe_sha256=img.sha256, tool_sha256=hashlib.sha256(open(__file__, 'rb').read()).hexdigest(),
                 relocs=len(img.relocs), vftables=len(vft), vftables_rtti=len(rtti), functions=len(fn), decomp=len(dec), ptrs=len(ptrs),
                 xc=len(xc), xc_va=xc_va, imports=len(img.imports))
