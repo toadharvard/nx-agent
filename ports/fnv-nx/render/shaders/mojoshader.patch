@@ -364,7 +364,7 @@ index e456c07..878d552 100644
      if ((len+2) >= bufsize)
          fail(ctx, "BUG: internal buffer is too small");
 diff --git a/profiles/mojoshader_profile_glsl.c b/profiles/mojoshader_profile_glsl.c
-index 319e3cb..9978442 100644
+index 319e3cb..b81d6c3 100644
 --- a/profiles/mojoshader_profile_glsl.c
 +++ b/profiles/mojoshader_profile_glsl.c
 @@ -27,6 +27,87 @@ static inline const char *get_GLSL_register_string(Context *ctx,
@@ -1080,7 +1080,7 @@ index 319e3cb..9978442 100644
  #if SUPPORT_PROFILE_GLSLES
                      if (support_glsles(ctx))
                          break; // GLSL ES does not have gl_FogFragCoord
-@@ -1022,7 +1519,17 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+@@ -1022,7 +1519,13 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
                          push_output(ctx, &ctx->globals);
  #if SUPPORT_PROFILE_GLSLES
                          if (support_glsles(ctx))
@@ -1090,16 +1090,12 @@ index 319e3cb..9978442 100644
 +#if SUPPORT_PROFILE_GLSLDK
 +                            dk_layout(ctx, lay, sizeof (lay), 0, usage, index);
 +#endif
-+                            // fnv-nx: the varying is a vec4 on both stages (the ps declares vec4); the scalar register is its .x
-+                            output_line(ctx, "%s%s highp vec4 io_%i_%i;", lay, qualifier_out, usage, index);
-+                            output_line(ctx, "#define %s io_%i_%i.x", var, usage, index);
-+                            pop_output(ctx);
-+                            return;
++                            output_line(ctx, "%s%s highp float io_%i_%i;", lay, qualifier_out, usage, index);
 +                        }
                          else
  #endif
                          output_line(ctx, "varying float io_%i_%i;", usage, index);
-@@ -1056,7 +1563,13 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+@@ -1056,10 +1559,22 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
              {
  #if SUPPORT_PROFILE_GLSLES
                  if (support_glsles(ctx))
@@ -1114,7 +1110,16 @@ index 319e3cb..9978442 100644
                  else
  #endif
                  output_line(ctx, "varying vec4 io_%i_%i;", usage, index);
-@@ -1085,7 +1598,17 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
++#if SUPPORT_PROFILE_GLSLDK
++                // fnv-nx: FOG (and PSIZE) outputs are scalar registers; the varying stays a vec4 (the ps declares vec4)
++                if (support_glsldk(ctx) && ((usage == MOJOSHADER_USAGE_FOG) || (usage == MOJOSHADER_USAGE_POINTSIZE)))
++                    output_line(ctx, "#define %s io_%i_%i.x", var, usage, index);
++                else
++#endif
+                 output_line(ctx, "#define %s io_%i_%i", var, usage, index);
+             } // if
+             else
+@@ -1085,7 +1600,17 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
  
          // samplers DCLs get handled in emit_GLSL_sampler().
  
@@ -1133,7 +1138,7 @@ index 319e3cb..9978442 100644
          {
              failf(ctx, "centroid unsupported in %s profile", ctx->profile->name);
              return;
-@@ -1123,6 +1646,11 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+@@ -1123,6 +1648,11 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
              usage_str = "gl_FragDepth";
  
          // !!! FIXME: can you actualy have a texture register with COLOR usage?
@@ -1145,7 +1150,7 @@ index 319e3cb..9978442 100644
          else if ((regtype == REG_TYPE_TEXTURE) || (regtype == REG_TYPE_INPUT))
          {
  #if SUPPORT_PROFILE_GLSLES
-@@ -1175,6 +1703,16 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+@@ -1175,6 +1705,16 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
                  pop_output(ctx);
                  return;
              } // if
@@ -1162,7 +1167,7 @@ index 319e3cb..9978442 100644
              else if (mt == MISCTYPE_TYPE_POSITION)
              {
                  push_output(ctx, &ctx->globals);
-@@ -1205,14 +1743,31 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+@@ -1205,14 +1745,31 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
          {
  #if SUPPORT_PROFILE_GLSLES
              if (support_glsles(ctx))
@@ -1195,7 +1200,7 @@ index 319e3cb..9978442 100644
              output_line(ctx, "#define %s %s%s%s%s", var, usage_str,
                          arrayleft, index_str, arrayright);
          } // else
-@@ -1234,6 +1789,17 @@ void emit_GLSL_MOV(Context *ctx)
+@@ -1234,6 +1791,17 @@ void emit_GLSL_MOV(Context *ctx)
  {
      char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
      char code[128];
@@ -1213,7 +1218,7 @@ index 319e3cb..9978442 100644
      make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s", src0);
      output_line(ctx, "%s", code);
  } // emit_GLSL_MOV
-@@ -1275,8 +1841,72 @@ void emit_GLSL_MUL(Context *ctx)
+@@ -1275,8 +1843,72 @@ void emit_GLSL_MUL(Context *ctx)
      output_line(ctx, "%s", code);
  } // emit_GLSL_MUL
  
@@ -1286,7 +1291,7 @@ index 319e3cb..9978442 100644
      const int vecsize = vecsize_from_writemask(ctx->dest_arg.writemask);
      char cast[16] = { '\0' };
      if (vecsize != 1)
-@@ -1290,6 +1920,9 @@ void emit_GLSL_RCP(Context *ctx)
+@@ -1290,6 +1922,9 @@ void emit_GLSL_RCP(Context *ctx)
  
  void emit_GLSL_RSQ(Context *ctx)
  {
@@ -1296,7 +1301,7 @@ index 319e3cb..9978442 100644
      const int vecsize = vecsize_from_writemask(ctx->dest_arg.writemask);
      char cast[16] = { '\0' };
      if (vecsize != 1)
-@@ -1334,8 +1967,34 @@ void emit_GLSL_DP4(Context *ctx)
+@@ -1334,8 +1969,34 @@ void emit_GLSL_DP4(Context *ctx)
      emit_GLSL_dotprod(ctx, src0, src1, "");
  } // emit_GLSL_DP4
  
@@ -1331,7 +1336,7 @@ index 319e3cb..9978442 100644
      char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
      char src1[64]; make_GLSL_srcarg_string_masked(ctx, 1, src1, sizeof (src1));
      char code[128];
-@@ -1345,6 +2004,9 @@ void emit_GLSL_MIN(Context *ctx)
+@@ -1345,6 +2006,9 @@ void emit_GLSL_MIN(Context *ctx)
  
  void emit_GLSL_MAX(Context *ctx)
  {
@@ -1341,7 +1346,7 @@ index 319e3cb..9978442 100644
      char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
      char src1[64]; make_GLSL_srcarg_string_masked(ctx, 1, src1, sizeof (src1));
      char code[128];
-@@ -1403,6 +2065,9 @@ void emit_GLSL_EXP(Context *ctx)
+@@ -1403,6 +2067,9 @@ void emit_GLSL_EXP(Context *ctx)
  
  void emit_GLSL_LOG(Context *ctx)
  {
@@ -1351,7 +1356,7 @@ index 319e3cb..9978442 100644
      char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
      char code[128];
      make_GLSL_destarg_assign(ctx, code, sizeof (code), "log2(%s)", src0);
-@@ -1419,6 +2084,19 @@ void emit_GLSL_LIT_helper(Context *ctx)
+@@ -1419,6 +2086,19 @@ void emit_GLSL_LIT_helper(Context *ctx)
      ctx->glsl_generated_lit_helper = 1;
  
      push_output(ctx, &ctx->helpers);
@@ -1371,7 +1376,7 @@ index 319e3cb..9978442 100644
      output_line(ctx, "vec4 LIT(const vec4 src)");
      output_line(ctx, "{"); ctx->indent++;
      output_line(ctx,   "float power = clamp(src.w, -%s, %s);",maxp,maxp);
-@@ -1431,16 +2109,60 @@ void emit_GLSL_LIT_helper(Context *ctx)
+@@ -1431,16 +2111,60 @@ void emit_GLSL_LIT_helper(Context *ctx)
      output_line(ctx,   "}");
      output_line(ctx,   "return retval;"); ctx->indent--;
      output_line(ctx, "}");
@@ -1432,7 +1437,7 @@ index 319e3cb..9978442 100644
      output_line(ctx, "%s", code);
  } // emit_GLSL_LIT
  
-@@ -1453,9 +2175,14 @@ void emit_GLSL_DST(Context *ctx)
+@@ -1453,9 +2177,14 @@ void emit_GLSL_DST(Context *ctx)
      char src1_w[64]; make_GLSL_srcarg_string_w(ctx, 1, src1_w, sizeof (src1_w));
  
      char code[128];
@@ -1447,7 +1452,7 @@ index 319e3cb..9978442 100644
      output_line(ctx, "%s", code);
  } // emit_GLSL_DST
  
-@@ -1577,6 +2304,17 @@ void emit_GLSL_LOOP(Context *ctx)
+@@ -1577,6 +2306,17 @@ void emit_GLSL_LOOP(Context *ctx)
      assert(ctx->source_args[0].regnum == 0);  // in case they add aL1 someday.
      output_line(ctx, "{");
      ctx->indent++;
@@ -1465,7 +1470,7 @@ index 319e3cb..9978442 100644
      output_line(ctx, "const int aLend = %s.x + %s.y;", var, var);
      output_line(ctx, "for (int aL = %s.y; aL < aLend; aL += %s.z) {", var, var);
      ctx->indent++;
-@@ -1587,6 +2325,10 @@ void emit_GLSL_RET(Context *ctx)
+@@ -1587,6 +2327,10 @@ void emit_GLSL_RET(Context *ctx)
      // thankfully, the MSDN specs say a RET _has_ to end a function...no
      //  early returns. So if you hit one, you know you can safely close
      //  a high-level function.
@@ -1476,7 +1481,7 @@ index 319e3cb..9978442 100644
      ctx->indent--;
      output_line(ctx, "}");
      output_blank_line(ctx);
-@@ -1668,6 +2410,20 @@ void emit_GLSL_ABS(Context *ctx)
+@@ -1668,6 +2412,20 @@ void emit_GLSL_ABS(Context *ctx)
  
  void emit_GLSL_NRM(Context *ctx)
  {
@@ -1497,7 +1502,7 @@ index 319e3cb..9978442 100644
      char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
      char code[128];
      make_GLSL_destarg_assign(ctx, code, sizeof (code), "normalize(%s)", src0);
-@@ -1801,11 +2557,36 @@ void emit_GLSL_DEFI(Context *ctx)
+@@ -1801,11 +2559,36 @@ void emit_GLSL_DEFI(Context *ctx)
      pop_output(ctx);
  } // emit_GLSL_DEFI
  
@@ -1535,7 +1540,7 @@ index 319e3cb..9978442 100644
      output_line(ctx, "if (any(lessThan(%s.xyz, vec3(0.0)))) discard;", dst);
  } // emit_GLSL_TEXKILL
  
-@@ -1854,8 +2635,25 @@ void emit_GLSL_TEXLD(Context *ctx)
+@@ -1854,8 +2637,25 @@ void emit_GLSL_TEXLD(Context *ctx)
  
      else if (!shader_version_atleast(ctx, 2, 0))
      {
@@ -1563,7 +1568,7 @@ index 319e3cb..9978442 100644
          return;
      } // else if
  
-@@ -2202,6 +3000,19 @@ void emit_GLSL_TEXM3X3VSPEC(Context *ctx)
+@@ -2202,6 +3002,19 @@ void emit_GLSL_TEXM3X3VSPEC(Context *ctx)
  
  void emit_GLSL_EXPP(Context *ctx)
  {
