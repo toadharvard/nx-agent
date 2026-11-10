@@ -127,9 +127,21 @@ TEST(command_line)
     LocalFree(argv);
 }
 
+extern "C" void fnvnx_registry_set_path(const char *host_path);
+extern "C" void fnvnx_registry_reset_for_test(void);
+
 TEST(registry_in_memory)
 {
+    char hive[1200];
+    snprintf(hive, sizeof hive, "%s/misc.hiv", s4_root());
+    remove(hive);
+    fnvnx_registry_set_path(hive);
+    fnvnx_registry_reset_for_test();
     HKEY k;
+    /* the tree starts empty: the installer keys are created by whoever needs them */
+    CHECK_EQ(RegCreateKeyExA(HKEY_LOCAL_MACHINE, "Software\\Bethesda Softworks\\FalloutNV", 0, NULL, 0, 0xF003F, NULL, &k, NULL), ERROR_SUCCESS);
+    CHECK_EQ(RegSetValueExA(k, "Installed Path", 0, REG_SZ, (const BYTE *)"C:\\FalloutNV\\", 14), ERROR_SUCCESS);
+    RegCloseKey(k);
     CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Bethesda Softworks\\FalloutNV", 0, 0x20019, &k), ERROR_SUCCESS);
     char buf[MAX_PATH];
     DWORD type = 0, len = sizeof buf;
@@ -141,7 +153,7 @@ TEST(registry_in_memory)
     CHECK_EQ(RegCloseKey(k), ERROR_SUCCESS);
     CHECK_EQ(RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Nothing", 0, 0, &k), ERROR_FILE_NOT_FOUND);
     DWORD disp = 0;
-    CHECK_EQ(RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\FNVNX", 0, NULL, 0, 0, NULL, &k, &disp), ERROR_SUCCESS);
+    CHECK_EQ(RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\FNVNX", 0, NULL, 0, 0xF003F, NULL, &k, &disp), ERROR_SUCCESS);
     CHECK_EQ(disp, REG_CREATED_NEW_KEY);
     DWORD v = 7;
     CHECK_EQ(RegSetValueExA(k, "n", 0, REG_DWORD, (const BYTE *)&v, sizeof v), ERROR_SUCCESS);
