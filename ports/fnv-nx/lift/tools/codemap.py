@@ -220,11 +220,14 @@ def ptr_run(U, t):
     s = []; q = t
     while q in U.rset and (q == t or not vstore(U, q)): s.append(q); q += 4
     if U.intext(t) and (t - 4) in U.rset and rtti(U, U.u32(t - 4), t - 4): U.mark(t - 4, 4, t - 4)
-    for q in s:
-        if U.intext(U.u32(q)) and rtti(U, U.u32(q), q): U.mark(q, 4, q); U.settled.add(q); continue
+    for k, q in enumerate(s):
+        w = U.u32(q)
+        if U.intext(w) and rtti(U, w, q): U.mark(q, 4, q); U.settled.add(q); continue
+        if U.intext(w):
+            U.ptr_target(w, q)
+            if U.rejects.get(w, (0, 0))[1] == q: U.rejects.pop(w); U.dinfo['vtable_run_ends_at_non_code'] += 1; s = s[:k]; break    # a slot that cannot be code ends the run
         if U.intext(t): U.mark(q, 4, t)
         U.settled.add(q); U.vsites.add(q)
-        if U.intext(U.u32(q)): U.ptr_target(U.u32(q), q)
     U.tstarts.add(t); U.dinfo['vtable_runs'] += 1
     return len(s)
 def strict_pass(U, final, eh):

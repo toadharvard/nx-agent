@@ -79,7 +79,7 @@ def decode(a, ext, kind='decomp'):
             out = [t for t in s if t not in ins and (m[0] == 'j' or m.startswith('loop') or t == n)]
             if out and (m != 'jmp' or o[0].type == X.X86_OP_IMM):
                 tails[x] = out
-        far = [t for ts in tails.values() for t in ts if hi <= t < a + ext + 512 and KINDS.get(t) not in STARTS]
+        far = [t for x, ts in tails.items() for t in ts if t != x + ins[x].size and hi <= t < a + ext + 512 and KINDS.get(t) not in STARTS]
         if kind != 'decomp' and far:
             hi = max(far) + 16; continue
         return ins, succ, tails
@@ -576,13 +576,13 @@ def depth(F, tabl):
     r = depth1(F, tabl, {})
     r['status'] = 'static'
     st = sorted(set(r['sites']))
-    if r['nconf'] and 0 < len(st) <= 12:
-        for combo in itertools.islice(sorted(itertools.product((0, 1), repeat=len(st)), key=sum), 600):
+    if r['nconf'] and 0 < len(st) <= 10:
+        for combo in itertools.islice(sorted(itertools.product((0, 1), repeat=len(st)), key=sum), 150):
             r2 = depth1(F, tabl, dict(zip(st, combo)))
             if not r2['nconf']:
                 r2['status'] = 'inferred'; r = r2; break
     if r['nconf']:
-        r['status'] = 'conflict' if len(st) <= 12 else 'conflict-undecided'
+        r['status'] = 'conflict' if len(st) <= 10 else 'conflict-undecided'
     r['ret'] = r['ret'] if r['status'] != 'conflict' else 0
     return r
 
