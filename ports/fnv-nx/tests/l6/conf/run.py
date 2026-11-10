@@ -61,6 +61,8 @@ pfx = W + "/pfx"; lock = replay.prefix_lock(pfx); x = replay.Xvfb(); env = repla
 penv = dict(env, WINEDLLOVERRIDES=env["WINEDLLOVERRIDES"] + ";d3d9=n,b")
 try:
     if not os.path.isfile(pfx + "/system.reg"): subprocess.run(["wineboot", "-i"], env=env, timeout=900); subprocess.run(["wineserver", "-w"], env=env)
+    for k, v in (("Debugger", "false"), ("Auto", "1")):   # a crashing test must end the process, not wait for winedbg on a headless host
+        subprocess.run(["wine", "reg", "add", r"HKLM\Software\Microsoft\Windows NT\CurrentVersion\AeDebug", "/v", k, "/t", "REG_SZ", "/d", v, "/f"], env=env, capture_output=True)
     for t in TESTS:
         d = f"{W}/runs/{t}"; shutil.rmtree(d, ignore_errors=True)
         for n in ("plain", "A", "B"):   # plain: exe alone (no d3d9.dll beside it); A/B: exe + our proxy d3d9.dll
