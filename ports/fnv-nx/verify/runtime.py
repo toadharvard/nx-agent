@@ -3,6 +3,7 @@
 python script on it. The sandbox has no host /usr, so the interpreter is a content-hashed input (runtime_id is in the key).
 
     runtime.py python --store S [--python P] [--site PKG]... -o runtime.json
+    runtime.py tool --store S --exe AT... [--tree DIR]... -o toolrt.json
     runtime.py stage --store S --runtime runtime.json --name N --class build|verification [--input AT=HOST]... [--output D]...
                      [--env K=V]... [--cwd D] -o stage.json -- SCRIPT args...
 
@@ -22,6 +23,12 @@ python script on it. The sandbox has no host /usr, so the interpreter is a conte
  (d) each --site PKG (top-level name): importlib.util.find_spec in the target with `-s` (user-site is off: not found = error).
      Its package directory (or module file) is covered by (c), or else added at its real path.
 Output: {"format":"fnvnx-runtime/1","python","version","inputs":[{"at","tree"}] sorted,"env","runtime_id":cas.stage_key(inputs)}.
+`tool` is the same for any native tool (a compiler driver): each --exe AT is placed at the path AT as the tool looks it up (a
+symlink name such as /usr/aarch64-linux-gnu/bin/as keeps its name; the content is the resolved file), alone with the other exes of
+its directory in a directory input (so PATH can name it); its loader closure is rule (b). Each --tree DIR is ingested whole at
+DIR; every x86-64 ET_EXEC/ET_DYN ELF file in it is a further root of the closure (other ELF files, e.g. foreign-arch objects, are
+data). The caller names the exes and trees (unitstage.gcc_set derives them from the compiler's own -print-* output).
+Output: {"format","kind":"tool","exes","inputs","env":{},"runtime_id"}.
 `stage` writes the "fnvnx-stage/1" document (+ "tool":"python"): argv = [python,-s,-B]+given, env = runtime env + TZ=UTC LC_ALL=C
 SOURCE_DATE_EPOCH=0 COLUMNS=80 PATH=<interpreter dir> + given. PYTHONNOUSERSITE is left out of the stage env (toolflags allows only
 PYTHONHASHSEED/PYTHONDONTWRITEBYTECODE; -s does the same job). sandbox.check_doc rejects the key "tool", so a second file
@@ -191,6 +198,41 @@ def build(store, python, sites):
     return {"format": FORMAT, "python": real, "version": info["version"], "inputs": inputs, "env": dict(ENV),
             "runtime_id": cas.stage_key(inputs)}
 
+def build_tool(store, exes, trees):
+    """Tool runtime (see the docstring): exes = [AT], trees = [DIR]."""
+    def loadable(p):
+        h = open(p, "rb").read(20)
+        return h[:4] == b"\x7fELF" and struct.unpack_from("<HH", h, 16) in ((2, 62), (3, 62))
+    ats = sorted({os.path.normpath(os.path.abspath(e)) for e in exes})
+    tdirs = sorted({os.path.normpath(os.path.abspath(t)) for t in trees})
+    for t in tdirs:
+        if not os.path.isdir(os.path.realpath(t)):
+            raise RtError("--tree %s is not a directory" % t)
+    tmp, src, roots = tempfile.mkdtemp(prefix="rt-tool-"), {t: os.path.realpath(t) for t in tdirs}, []
+    try:
+        for at in ats:
+            if not os.path.isfile(os.path.realpath(at)):
+                raise RtError("--exe %s is not a file" % at)
+            if os.path.dirname(at) in tdirs:
+                raise RtError("--exe %s lies directly in --tree %s" % (at, os.path.dirname(at)))
+            d = src.setdefault(os.path.dirname(at), os.path.join(tmp, str(len(src))))
+            os.makedirs(d, exist_ok=True)
+            shutil.copy2(os.path.realpath(at), os.path.join(d, os.path.basename(at)))
+            roots.append(os.path.realpath(at))
+        for t in tdirs:
+            roots += [p for p in (os.path.join(r, f) for r, _, fs in os.walk(os.path.realpath(t)) for f in fs)
+                      if os.path.isfile(p) and not os.path.islink(p) and loadable(p)]
+        tops = list(src)
+        libs = closure(roots, tops)
+        src.update({at: f for at, f in libs.items() if not any(under(at, t) for t in tops)})
+        for a in src:
+            if any(b != a and under(a, b) for b in src):
+                raise RtError("inputs nest: %s" % a)
+        inputs = [{"at": at, "tree": cas.ingest(s, store)} for at, s in sorted(src.items())]
+    finally:
+        shutil.rmtree(tmp)
+    return {"format": FORMAT, "kind": "tool", "exes": ats, "inputs": inputs, "env": {}, "runtime_id": cas.stage_key(inputs)}
+
 def make_stage(a):
     rt = json.load(open(a["runtime"]))
     py = rt["python"]
@@ -212,7 +254,7 @@ def parse(argv):
         p.add_argument(n, dest=n.lstrip("-"), default="/work" if n == "--cwd" else None)
     p.add_argument("--class", dest="cls")
     p.add_argument("--python", default=sys.executable)
-    for n in ("site", "input", "output", "env"):
+    for n in ("site", "input", "output", "env", "exe", "tree"):
         p.add_argument("--" + n, action="append", default=[])
     a = vars(p.parse_args(argv[:k]))
     a["input"] = [tuple(x.split("=", 1)) for x in a["input"]]
@@ -229,6 +271,10 @@ def main(argv):
             doc = build(a["store"], a["python"], a["site"])
             open(a["o"], "wb").write(json.dumps(doc, sort_keys=True, indent=1).encode() + b"\n")
             print("runtime %s: %d inputs" % (doc["runtime_id"], len(doc["inputs"])))
+        elif argv[:1] == ["tool"] and a["exe"]:
+            doc = build_tool(a["store"], a["exe"], a["tree"])
+            open(a["o"], "wb").write(json.dumps(doc, sort_keys=True, indent=1).encode() + b"\n")
+            print("toolrt %s: %d inputs" % (doc["runtime_id"], len(doc["inputs"])))
         elif argv[:1] == ["stage"] and a["runtime"] and a["name"] and a["cls"] in ("build", "verification") and a["argv"]:
             make_stage(a)
         else:
