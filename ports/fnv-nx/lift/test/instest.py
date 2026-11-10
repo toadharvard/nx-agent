@@ -256,8 +256,21 @@ def gen_state(E, i, att):
         if r2.random() < .3:
             if r2.random() < .5: xm[k] = xm[k] & ~(0xffffffff << 32 * r2.randrange(4)) | r2.choice((0x7f800001, 0x7fc00000, 0xffc00000, 0xff800005, 0x7fa00001, 0x7fffffff)) << 32 * r2.randrange(4)
             else: xm[k] = xm[k] & ~(2 ** 64 - 1 << 64 * r2.randrange(2)) | r2.choice(NANS + [0xfff0000000000007, 0x7ff4000000000000]) << 64 * r2.randrange(2)
+    # Unicorn/QEMU propagates NaNs of SSE arithmetic by the x87 rule (a QNaN beats an SNaN, else the larger significand); Intel SDM table 4-7 (and
+    # the hardware) takes the FIRST operand.  The oracle cannot judge two different NaNs in one lane, so such lanes are made identical (register
+    # source) or the destination NaNs are dropped (memory source).  fnvl.h implements the SDM rule; see the W6 report.
+    b_, ops_ = E['base'], E['ins'].operands
+    if len(b_) == 5 and b_[:3] in ('add', 'sub', 'mul', 'div') and b_[3:] in ('ss', 'sd', 'ps', 'pd') and len(ops_) == 2 and ops_[0].type == 1:
+        w_ = 32 if b_[3:] in ('ss', 'ps') else 64; e_, m_ = (0xff, (1 << 23) - 1) if w_ == 32 else (0x7ff, (1 << 52) - 1); mk_ = (1 << w_) - 1
+        isn = lambda v: (v >> (w_ - 1 - (8 if w_ == 32 else 11))) & e_ == e_ and v & m_
+        dn_ = int(E['ins'].reg_name(ops_[0].reg)[3:]); sn_ = int(E['ins'].reg_name(ops_[1].reg)[3:]) if ops_[1].type == 1 else None
+        for k in range(128 // w_):
+            dq_, sq_ = xm[dn_] >> k * w_ & mk_, (xm[sn_] >> k * w_ & mk_) if sn_ is not None else 0
+            if sn_ is None and isn(dq_): xm[dn_] = xm[dn_] & ~(mk_ << k * w_) | (0x3f800000 if w_ == 32 else 0x3ff0000000000000) << k * w_
+            elif sn_ is not None and isn(dq_) and isn(sq_): xm[sn_] = xm[sn_] & ~(mk_ << k * w_) | dq_ << k * w_
     mm = [r2.getrandbits(64) if r2.random() < .5 else int.from_bytes(bytes(r2.choice((0, 1, 0x7f, 0x80, 0xff, r2.getrandbits(8))) for _ in range(8)), 'little') for _ in range(8)]
-    mxcsr = 0x1f80 if r2.random() < .5 else 0x1f80 | r2.getrandbits(2) << 13 | r2.getrandbits(1) << 15 | r2.getrandbits(1) << 6
+    # RC and DAZ are generated; FTZ is not: Unicorn never flushes a tiny SSE result to zero (checked: mulss 1e-30*1e-10 with MXCSR.FTZ), so it cannot judge it
+    mxcsr = 0x1f80 if r2.random() < .5 else 0x1f80 | r2.getrandbits(2) << 13 | r2.getrandbits(1) << 6
     return dict(mm=mm, mxcsr=mxcsr, regs=regs, fl=r.getrandbits(32) & 0xcd5, ftop=top, valid=sum(1 << ((top + k) & 7) for k in range(d)), st=[dv() for _ in range(8)],
                 fcw=r.choice((0x27f, 0x7f, 0xa7f, 0xe7f, 0x37f)), fc=r.getrandbits(1) << 8 | r.getrandbits(1) << 10 | r.getrandbits(1) << 14,
                 xmm=xm, wk=((E['addr'] * 31 + i + 1000003 * att) & 0x7fffffff, i % 3))

@@ -200,7 +200,7 @@ class EH:
             len(recs), sum(1 for r in recs if r[1]), len(recs), sum(1 for r in recs if not r[1]), ' '.join(h(k) for k in sorted(s.helpers))))
         L.append('thrower (_CxxThrowException, by EXCEPTION_RECORD template) %s; ThrowInfo %d (pmfnUnwind %d, copyFunction %d); catch continuations %d' % ('%x' % (s.thrower or 0), len(s.throws), sum(1 for t in s.throws.values() if t['unwind']),
             len({t[3] for r in s.throws.values() for t in r['types'] if t[3]}), len(s.conts)))
-        L.append('frame-handler targets (stubs with FuncInfo): ' + ', '.join('%s x%d' % (k, v) for k, v in J['frame_handlers'].items()) + '; mov-eax/jmp noise (not FuncInfo): ' + ', '.join('%x x%d' % kv for kv in s.noise.most_common(4)))
+        L.append('frame-handler targets (stubs with FuncInfo): ' + ', '.join('%s x%d' % (k, v) for k, v in J['frame_handlers'].items()) + '; mov-eax/jmp stubs whose target is not FuncInfo: ' + (', '.join('%x x%d' % kv for kv in s.noise.most_common(4)) or 'none'))
         L.append('functions owning a FuncInfo %d, of which decomp %d; FuncInfo without a referenced stub %d' % (len(owners), sum(1 for o in owners if o in X.fsize), sum(1 for a in ok if not fiown[a])))
         scan = set()
         for nm, va, vs, ro, rs in X.secs:
@@ -210,9 +210,13 @@ class EH:
                 while i >= 0:
                     if (i - ro) % 4 == 0: scan.add(va + i - ro)
                     i = X.d.find(b, i + 1, ro + min(vs, rs))
-        miss = sorted(scan - set(s.fi)); mx = [a for a in miss if refs.get(a)]
-        L.append('cross-check: .rdata/.data magic scan %d, walk %d, scan-only %d (referenced by a reloc %d) e.g. %s' % (len(scan), len(s.fi), len(miss), len(mx), ' '.join('%x' % a for a in miss[:5])))
-        if miss: L.append('  scan-only gap: unreferenced by any stub (code-immediate magic in data tables or FuncInfo pushed by code the descent does not reach)')
+        miss = sorted(scan - set(s.fi)); tmpl = set()
+        for r in X.relocs:
+            v = X.u32(r)
+            for a in miss:
+                if a - 0x30 <= v < a: tmpl.add(a)
+        L.append('cross-check: .rdata/.data magic scan %d, walk %d, scan-only %d: %s' % (len(scan), len(s.fi), len(miss), ' '.join('%x%s' % (a, '(EXCEPTION_RECORD template)' if a in tmpl else '(unreferenced)') for a in miss[:5])))
+        if miss: L.append('  gap: scan-only hits are the ExceptionInformation[0] magic of EXCEPTION_RECORD templates (copied by the thrower / used by the filter), not FuncInfo; no stub points at them')
         return L
 
 if __name__ == '__main__':

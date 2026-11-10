@@ -5,7 +5,7 @@ Vector ops are emitted as `{ [u32 mx=c->mxcsr;] xmm_t d_=DEST, s_=SOURCE, r_=d_;
 aliasing operands are safe; an mm operand is an xmm_t whose low half is c->mm[k]."""
 import re
 from capstone import x86 as X
-from .core import op, fallback, Unsupported
+from .core import op, fallback, Unsupported, SKIP
 
 SSE = {}
 REG, MEM, IMM = X.X86_OP_REG, X.X86_OP_MEM, X.X86_OP_IMM
@@ -228,6 +228,13 @@ def h_cvtsi2(cx, ins, d0, s1):
 def h_cvt2si(cx, ins, d0, s1):
     f = 'f' if 'ss2si' in cx.m else 'd'
     cx.em('{ u32 mx=c->mxcsr; xmm_t s_=%s; %s }' % (vsrc(cx, ins, s1), cx.wr(ins, d0, 'sse_f2i((double)sse_daz(s_.%s[0],mx),%s)' % (f, '3' if 'cvtt' in cx.m else '(mx>>13)&3'))))
+
+
+@op('cvtss2si', 'cvttss2si', 'cvtsd2si', 'cvttsd2si')
+def h_cvt2si_mem(cx, ins):      # r32, m32/m64: no xmm operand, so the fallback would not see it
+    if cx.ops[1].type != MEM:
+        return SKIP
+    h_cvt2si(cx, ins, cx.ops[0], cx.ops[1])
 
 
 @sse_op('cvtss2sd')

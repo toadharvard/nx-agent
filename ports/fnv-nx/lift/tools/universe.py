@@ -15,12 +15,11 @@ pe = struct.unpack_from('<I', d, 0x3c)[0]; nsec = struct.unpack_from('<H', d, pe
 base = struct.unpack_from('<I', d, pe + 52)[0]; secs = []; o = pe + 24 + struct.unpack_from('<H', d, pe + 20)[0]
 for i in range(nsec):
     nm = d[o:o + 8].rstrip(b'\0').decode(); vs, va, rs, ro = struct.unpack_from('<IIII', d, o + 8); secs.append((nm, base + va, vs, ro, rs)); o += 40
-def off(a):
+def loc(a):
     for nm, va, vs, ro, rs in secs:
-        if va <= a < va + vs and a - va < rs: return ro + a - va
-def sec(a):
-    for nm, va, vs, ro, rs in secs:
-        if va <= a < va + vs and a - va < rs: return nm
+        if va <= a < va + vs and a - va < rs: return nm, ro + a - va
+def off(a): return (loc(a) or (0, None))[1]
+def sec(a): return (loc(a) or (None,))[0]
 def u32(a):
     x = off(a); return struct.unpack_from('<I', d, x)[0] if x is not None else 0
 def dirent(i): return struct.unpack_from('<II', d, pe + 24 + 96 + 8 * i)
@@ -49,18 +48,16 @@ cov = bytearray(TN)                       # 1 = insn start, 2 = insn interior
 tbl = bytearray(TN)                       # 1 = jump/index table data
 insns = {}                                # addr -> (size, mnem, feat, fall, targets)
 entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw', 'inner', 'ptr', 'orphan']
-tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); midptr = set()
-dataintext = set(); bad_entries = set(); queue = deque()
-lone = set(); callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set(); skind = {}
+tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
+lone = set(); arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
 EXOTIC = set('aaa aas daa das aam aad arpl bound in out insb insd outsb outsd sldt hlt lcall ljmp popal pushal iretd retf into salc'.split())
 EXO = {'hlt', 'rdmsr', 'wrmsr', 'lgdt', 'lidt', 'sgdt', 'sidt', 'ltr', 'str', 'invd', 'wbinvd', 'lmsw', 'smsw', 'clts', 'rdpmc', 'invlpg', 'ud2', 'iret', 'iretd', 'syscall', 'sysret', 'sysexit', 'bound', 'arpl', 'into', 'sldt', 'lldt', 'verr', 'verw'}
+FM = {'in': 512, 'insb': 512, 'insw': 512, 'insd': 512, 'out': 1024, 'outsb': 1024, 'outsw': 1024, 'outsd': 1024, 'cli': 2048, 'sti': 4096, 'rdtsc': 8192, 'cpuid': 16384}
 SSEG = {148, 149, 150, 151, 152, 153, 154, 132, 133, 134}
-
 def indec(a):
     i = bisect.bisect_right(fstarts, a) - 1
     return funcs[i] if i >= 0 and a < funcs[i][0] + funcs[i][1] else None
-
 def add_entry(a, kind, src=None):
     if not intext(a): return
     f = indec(a)
@@ -74,10 +71,7 @@ def add_entry(a, kind, src=None):
     if not f and a not in entries and cov[a - T0] == 2: dinfo['overlap_' + kind] += 1; return
     if a not in entries: entries[a] = None; kinds[a] = set(); queue.append(a)
     kinds[a].add(kind)
-    if src is not None and kind not in ('call', 'tail'): esite.setdefault(a, src)
-
-def emit(a, kind, site): add_entry(a, kind, site)
-
+    if src is not None and kind != 'tail': esite.setdefault(a, src)
 def walk(start, lo, hi, dec):
     """descent from start within [lo,hi) -> (ok, new insns, refs, tables)."""
     out = {}; refs = []; tabs = []; ok = True; work = [start]
@@ -103,13 +97,7 @@ def walk(start, lo, hi, dec):
                 gs = ins.groups
                 if SSEG.intersection(gs): feat |= 128
                 if 143 in gs: feat |= 256
-                if mn in ('in', 'insb', 'insw', 'insd'): feat |= 512
-                elif mn in ('out', 'outsb', 'outsw', 'outsd'): feat |= 1024
-                elif mn == 'cli': feat |= 2048
-                elif mn == 'sti': feat |= 4096
-                elif mn == 'rdtsc': feat |= 8192
-                elif mn == 'cpuid': feat |= 16384
-                elif mn in EXO: feat |= 32768
+                feat |= FM.get(mn, 32768 if mn in EXO else 0)
                 if mn in ('sysenter', 'syscall') or (mn == 'int' and ops[0].imm in (0x2e, 0x80)): feat |= 8
                 if mn == 'jmp':
                     fall = False; op = ops[0]
@@ -135,7 +123,6 @@ def walk(start, lo, hi, dec):
                 break
             if stop: break
     return ok, out, refs, tabs
-
 def table(ins, trail, lo, hi, dec, tabs):
     a = ins.address; T = ins.operands[0].mem.disp & 0xffffffff; D = None; nidx = 0
     ok = lambda v: (lo <= v < hi) if dec else intext(v)
@@ -160,7 +147,6 @@ def table(ins, trail, lo, hi, dec, tabs):
         if not ent: return ()
     tabs.append((T, 4 * len(ent))); tstarts.add(T); tslots.update(T + 4 * k for k in range(len(ent)))
     return tuple(ent)
-
 def commit(res):
     ok, out, refs, tabs = res
     for a, v in out.items():
@@ -169,16 +155,13 @@ def commit(res):
         if intext(t): n = min(n, T1 - t); tbl[t - T0:t - T0 + n] = b'\1' * n
     for r in refs:
         if r[0] == 'call': callers.setdefault(r[1], []).append(r[2])
-        add_entry(r[1], r[0], r[2] if r[0] == 'tail' and len(r) > 2 else None)
-
+        add_entry(r[1], r[0], r[2] if len(r) > 2 else None)
 def drain():
     while queue:
         a = queue.popleft(); f = indec(a)
         res = walk(a, f[0], f[0] + f[1], True) if f else walk(a, T0, T1, False); commit(res)
         if not res[0]: bad_entries.add(a)
-
 def site_kind(r):
-    """where the relocated dword sits: data / tbl (inside table bytes) / slot (no instruction) / disp / imm / other."""
     if not intext(r): return 'data', None
     o = r - T0
     if not cov[o]: return ('tbl' if tbl[o] else 'slot'), None
@@ -188,9 +171,7 @@ def site_kind(r):
     if T0 + s0 + ins.disp_offset == r and ins.disp_size == 4: return 'disp', ins
     if T0 + s0 + ins.imm_offset == r and ins.imm_size == 4: return 'imm', ins
     return 'other', ins
-
 def ptr_target(v, r):
-    """a pointer into .text found at reloc site r: -> new entries (0/1)."""
     if v in tstarts or tbl[v - T0]: return 0
     psites.setdefault(v, []).append(r)
     if v in entries: kinds[v].add('ptr'); return 0
@@ -200,9 +181,7 @@ def ptr_target(v, r):
     res = walk(v, T0, T1, False)
     if not res[0]: rejects[v] = ('undecodable', r); return 0
     entries[v] = None; kinds[v] = {'ptr'}; esite[v] = r; commit(res); drain(); return 1
-
 def disp_ref(r, v, ins, final):
-    """reloc'd displacement of a memory operand into .text: table / constant data, never an entry."""
     op = next(o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.disp & 0xffffffff == v)
     if cov[v - T0]: dinfo['disp_into_code'] += 1; return 1
     if op.mem.index and op.mem.scale == 4:
@@ -213,14 +192,15 @@ def disp_ref(r, v, ins, final):
             for k, e in enumerate(ent):
                 if cov[e - T0] != 2: ptr_target(e, v + 4 * k)
             return 1
-    n = min(max(op.size, 1), T1 - v); tbl[v - T0:v - T0 + n] = b'\1' * n; dinfo['disp_data'] += 1; return 1
-
+    n = min(max(op.size, 1), T1 - v); tbl[v - T0:v - T0 + n] = b'\1' * n; dinfo['disp_data'] += 1
+    if op.mem.index or op.mem.base: arrays.append((v, n))
+    return 1
 def ptr_pass(data, final, eh):
     new = 0
     for r, v in rvals:
         if r in settled or intext(r) == data: continue
         if data and r in eh.sites: settled.add(r); continue
-        k, ins = skind.get(r) or site_kind(r)
+        k, ins = site_kind(r)
         if k == 'slot' and not final: continue
         if k == 'slot':
             nb = lambda q: q in rset and intext(u32(q)) and not cov[q - T0] or tbl[q - T0]
@@ -231,14 +211,12 @@ def ptr_pass(data, final, eh):
         elif k == 'disp': disp_ref(r, v, ins, final); settled.add(r); new += 1
         else: dinfo['other_site'] += 1; rejects[v] = ('other-site', r); settled.add(r)
     return new
-
 def classify():
     cls = bytearray(dmap)
     for a, v in insns.items():
         if not dmap[a - T0]: cls[a - T0:a - T0 + v[0]] = b'\2' * v[0]
     for m in re.finditer(rb'\x01+', bytes(tbl)): cls[m.start():m.end()] = b'\3' * (m.end() - m.start())
     return cls
-
 def padrun(x, e):
     """True if text[x:e] is entirely padding instructions."""
     while x < e:
@@ -249,7 +227,6 @@ def padrun(x, e):
                   or (g.mnemonic == 'mov' and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg)) and x + g.size <= e: x += g.size
         else: return False
     return True
-
 def pad_split(cls):
     """mark padding (4) at gap edges; -> unexplained runs [(start, end)] (offsets)."""
     runs = []
@@ -267,7 +244,6 @@ def pad_split(cls):
         cls[s:p] = b'\4' * (p - s); cls[q:e] = b'\4' * (e - q)
         if p < q: runs.append((p, q))
     return runs
-
 def orphan_pass(runs):
     """a gap that decodes cleanly end to end and ends in ret/jmp or runs into reached code: code nothing references; one entry per terminator-delimited piece."""
     n = 0
@@ -280,7 +256,6 @@ def orphan_pass(runs):
             res = walk(a, T0, T1, False)
             if res[1]: entries[a] = None; kinds[a] = {'orphan'}; commit(res); n += 1
     return n
-
 # ---- seeds and fixed point
 for a, s in funcs: entries[a] = None; kinds[a] = {'decomp'}
 add_entry(base + struct.unpack_from('<I', d, pe + 40)[0], 'entry')
@@ -299,12 +274,12 @@ def extent_insns(a):
     f = indec(a); lo, hi = (f[0], f[0] + f[1]) if f else (T0, T1); seen = []; st = [a]; ss = set()
     while st:
         x = st.pop()
-        if x in ss or x not in insns or not (lo <= x < hi) or (x != a and not f and (x in entries or dmap[x - T0])): continue
+        if x in ss or x not in insns or not (lo <= x < hi) or (x != a and a not in fsize and (x in entries or (not f and dmap[x - T0]))): continue
         ss.add(x); seen.append(x); sz, mn, feat, fall, tg = insns[x]; st.extend(tg)
         if fall: st.append(x + sz)
     return seen
 X_ = SimpleNamespace(d=d, secs=secs, text=text, T0=T0, T1=T1, cov=cov, insns=insns, rset=rset, u32=u32, sec=sec, intext=intext, callers=callers,
-                     indec=indec, emit=emit, relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize=fsize)
+                     indec=indec, emit=add_entry, relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize=fsize)
 def owner(a):
     f = indec(a)
     if f: return f[0]
@@ -323,54 +298,43 @@ for rnd in range(30):
         if fin: break
         fin = True
 OWN[:] = sorted(entries)
+for v, n in arrays:           # an array read through an index register extends over the uncovered bytes that follow its first element
+    e = v + n
+    while e < T1 and not cov[e - T0] and not tbl[e - T0]: e += 1
+    while e > v + n and text[e - T0 - 1] in (0xCC, 0x90): e -= 1
+    if e > v + n: tbl[v + n - T0:e - T0] = b'\1' * (e - v - n); dinfo['array_ext_bytes'] += e - v - n
 cls = classify(); runs = pad_split(cls)
-
 # ---- extents / features / output
 for v, ss in psites.items():
     if 'ptr' in kinds[v] and len(kinds[v]) > 1 and all(x in eh.sites for x in ss): kinds[v].discard('ptr')
-def extent(a):
-    f = fsize.get(a); par = parent.get(a); lo, hi = (a, a + f) if f else ((par, par + fsize[par]) if par else (T0, T1)); seen = set(); st = [a]; tot = 0; ft = 0
-    while st:
-        x = st.pop()
-        if x in seen or x not in insns or not (lo <= x < hi): continue
-        if not f and x != a and (x in entries or (not par and dmap[x - T0])): continue
-        seen.add(x); sz, mn, feat, fall, tg = insns[x]; tot += sz; ft |= feat; st.extend(tg)
-        if fall: st.append(x + sz)
-    return tot, ft
-rows = []; kc = Counter(); kany = Counter(); fe = {True: Counter(), False: Counter()}; extsum = 0
+rows = []; kc = Counter(); kany = Counter(); fe = Counter(); extsum = 0
 for a in sorted(entries):
-    pk = next(k for k in PRI if k in kinds[a]); isd = a in fsize; ex, ft = extent(a); kc[pk] += 1; kany.update(kinds[a])
+    pk = next(k for k in PRI if k in kinds[a]); isd = a in fsize; xs = extent_insns(a); ex = sum(insns[x][0] for x in xs); ft = 0
+    for x in xs: ft |= insns[x][2]
+    kc[pk] += 1; kany.update(kinds[a])
     if not isd and a not in parent: extsum += ex
-    for i, nm in enumerate(FEATS):
-        if ft >> i & 1: fe[isd][nm] += 1
-    fl = sorted(kinds[a] - {pk}) + [nm for i, nm in enumerate(FEATS) if ft >> i & 1] + (['baddecode'] if a in bad_entries else []) + (['parent=%08x' % parent[a]] if a in parent else [])
+    fts = [nm for i, nm in enumerate(FEATS) if ft >> i & 1]; fe.update((nm, isd) for nm in fts)
+    fl = sorted(kinds[a] - {pk}) + fts + (['baddecode'] if a in bad_entries else []) + (['parent=%08x' % parent[a]] if a in parent else [])
     rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, ex), ','.join(fl) or '-'))
 os.makedirs(os.path.dirname(OUT), exist_ok=True); open(OUT, 'w').write('\n'.join(rows) + '\n')
-# decomp bytes no instruction reaches: padding-aware (same rules as the unexplained pass)
-cd = bytearray(b'\5' * TN)
+cd = bytearray(b'\5' * TN)         # decomp bytes no instruction reaches (padding-aware, same pad rules as the unexplained pass)
 for a, s in funcs:
     for i in range(a - T0, a - T0 + s):
         if not cov[i] and not tbl[i]: cd[i] = 0
 druns = pad_split(cd); uf = len({indec(T0 + s)[0] for s, e in druns}); ub = sum(e - s for s, e in druns)
 midf = len({s for t, s in midsrc if s is not None and indec(s)})
-dc = Counter(); nc = Counter(); fi = {True: Counter(), False: Counter()}; exo = []
-for a, v in insns.items():
-    isd = bool(dmap[a - T0]); (dc if isd else nc)[v[1]] += 1
-    if v[1] in EXOTIC: exo.append(a)
-    for i, nm in enumerate(FEATS):
-        if v[2] >> i & 1: fi[isd][nm] += 1
+exo = sorted(a for a, v in insns.items() if v[1] in EXOTIC)
 cc = Counter(cls); hist = Counter()
 for s, e in runs: hist[next(b for b in (1, 2, 4, 8, 16, 32, 64, 256, 1024, 1 << 30) if e - s <= b)] += 1
 nonde = [a for a in entries if a not in fsize]
 print('\n'.join(eh.finish(entries)))
-print('text %d bytes (%08x-%08x), decomp funcs %d, HIGHLOW relocs %d' % (TN, T0, T1, len(funcs), len(relocs)))
-print('bytes: decomp %d, nondecomp-code %d, table %d, padding %d, unexplained %d' % (cc[1], cc[2], cc[3], cc[4], cc[0]))
+print('text %d bytes (%08x-%08x), decomp funcs %d, relocs %d; bytes: decomp %d, nondecomp-code %d, table %d, padding %d, unexplained %d' % (TN, T0, T1, len(funcs), len(relocs), cc[1], cc[2], cc[3], cc[4], cc[0]))
 print('unexplained: %d runs, %d bytes; size hist (<=N): %s' % (len(runs), sum(e - s for s, e in runs), dict(sorted(hist.items()))))
 print('entries %d; per primary kind: %s' % (len(entries), dict(kc)))
 print('entries carrying kind (any): %s' % {k: kany[k] for k in PRI if k in kany})
 print('non-decomp entries %d (inner %d); sum of extents %d; unique non-decomp code bytes %d; bad-decode entries %d' % (len(nonde), len(parent), extsum, cc[2], len(bad_entries)))
-print('use sites: %s; lone reloc dwords in gaps %d' % (dict(dinfo), len(lone)))
-print('rejected pointers (not entries): %s' % dict(Counter(k for k, r in rejects.values())))
+print('use sites: %s; lone reloc dwords in gaps %d; rejected pointers %s' % (dict(dinfo), len(lone), dict(Counter(k for k, r in rejects.values()))))
+print('entries with feature (decomp/non): ' + ' '.join('%s=%d/%d' % (nm, fe[nm, True], fe[nm, False]) for nm in FEATS if fe[nm, True] or fe[nm, False]))
 dk = Counter(); dex = []
 for s0, e0 in druns:
     ins = list(md.disasm(text[s0:e0], T0 + s0)); clean = sum(i.size for i in ins) == e0 - s0
@@ -381,13 +345,11 @@ for s0, e0 in druns:
     if not clean or any(i.mnemonic in EXOTIC for i in ins): dex.append((T0 + s0, e0 - s0))
 print('decomp bytes no path reaches, not padding: %d funcs, %d bytes, %d runs; mid-decomp jumps %d, calls %d' % (uf, ub, len(druns), midf, len(midcall)))
 print('  by structure (runs/bytes): ' + '; '.join('%s %d/%d' % (k, dk[k, 0], dk[k, 1]) for k in sorted({k for k, _ in dk})) + '; undecodable/exotic: ' + ' '.join('%x+%d' % x for x in dex[:5]))
-print('only in non-decomp: ' + (' '.join('%s=%d' % (k, v) for k, v in sorted(nc.items()) if k not in dc and k in EXOTIC) or '-'))
 print('exotic mnemonics in reached code: %s' % (dict(Counter(insns[a][1] for a in exo)) or 0))
-for x in sorted(exo)[:30]:
-    cand = [e for e in OWN[max(0, bisect.bisect_right(OWN, x) - 40):bisect.bisect_right(OWN, x)] if x in set(extent_insns(e))]
-    e = cand[-1] if cand else None
-    print('  %08x %s in entry %s kind %s via %s' % (x, insns[x][1], '%08x' % e if e else '-', next((k for k in PRI if e and k in kinds[e]), '-'), '%08x' % esite[e] if e in esite and esite[e] else '-'))
-tot = 0
+for x in exo[:30]:
+    e = next((e for e in reversed(OWN[max(0, bisect.bisect_right(OWN, x) - 40):bisect.bisect_right(OWN, x)]) if x in set(extent_insns(e))), None)
+    pk = next((k for k in PRI if e and k in kinds[e]), '-')
+    print('  %08x %s in entry %s kind %s via %s@%s' % (x, insns[x][1], '%08x' % e if e else '-', pk, 'site', '%08x' % esite[e] if e in esite and esite[e] else '-'))
 for s0, e0 in runs:
     refs = [r for r, v in rvals if T0 + s0 <= v < T0 + e0] + [c for t, cs in callers.items() if T0 + s0 <= t < T0 + e0 for c in cs]
     print('  unexplained %08x len %d: %s refs %s' % (T0 + s0, e0 - s0, text[s0:s0 + 8].hex(), ' '.join('%x' % r for r in refs[:3]) or '-'))
