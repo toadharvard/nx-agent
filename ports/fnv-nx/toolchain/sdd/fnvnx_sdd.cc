@@ -9,9 +9,13 @@
  *   tables   in every _ZTV / _ZTC initializer the D1 / D0 pair of entries becomes ONE entry, the function
  *            `<D1 entry>.fnvnx_sdd`(this, flags): flags & 1 ? D0(this) : D1(this); returns this. Emitted here as a
  *            COMDAT function next to the table. The table shrinks by one slot per pair.
- *   calls    every virtual call (OBJ_TYPE_REF) loads slot `k - (deleting destructors before k)` of its class's
- *            table; a virtual destructor call passes flags 0, a delete-expression flags 1. The slot number comes
- *            from the class's own BINFO_VIRTUALS, the list the table was built from.
+ *   numbers  when a class is complete (the hook the front end calls for every class, instantiated ones included,
+ *            before any member function body of it is parsed) each virtual function's index becomes its slot in
+ *            the shrunk table: position in the class's BINFO_VIRTUALS minus the deleting destructors before it. So
+ *            everything the front end derives from the index is in exe numbering already: virtual calls, pointers
+ *            to virtual member functions (constants, comparisons, template arguments), debug info.
+ *   calls    a virtual destructor call passes flags 0, a delete-expression flags 1, both through the pair's one
+ *            slot. (The deleting destructor's index is its slot plus a mark, which is how the two are told apart.)
  *   address points
  *            every `&table + off` in code and in VTTs becomes `&table.fnvnx_ap<off>` (off = the front end's
  *            offset), a symbol defined next to the table at the address point's place in the shrunk table. So each
@@ -45,6 +49,7 @@
 #include "fold-const.h"
 #include "stor-layout.h"
 #include "tree-cfg.h"
+#include "debug.h"
 #include <map>
 #include <set>
 #include <string>
@@ -108,6 +113,43 @@ static tree ap_decl(tree vt, HOST_WIDE_INT off)
   mark_decl_referenced(vt);
   if (varpool_node *n2 = varpool_node::get(vt)) n2->force_output = 1;
   return d;
+}
+
+/* ---------------------------------------------------------------------------------------------- numbers */
+
+static const unsigned HOST_WIDE_INT D0_MARK = 1u << 20;   /* a deleting destructor's index: its pair's slot + this */
+
+static void renumber(tree t)
+{
+  HOST_WIDE_INT i = 0, d0 = 0;
+  for (tree v = BINFO_VIRTUALS(TYPE_BINFO(t)); v; v = TREE_CHAIN(v), i++) {
+    tree f = BV_FN(v);
+    if (!f || TREE_CODE(f) != FUNCTION_DECL || !DECL_VINDEX(f) || TREE_CODE(DECL_VINDEX(f)) != INTEGER_CST) continue;
+    HOST_WIDE_INT want;
+    if (DECL_DELETING_DESTRUCTOR_P(f)) { want = i - 1 - d0 + (HOST_WIDE_INT)D0_MARK; d0++; }
+    else want = i - d0;
+    if (!tree_fits_shwi_p(DECL_VINDEX(f)) || tree_to_shwi(DECL_VINDEX(f)) != want)
+      DECL_VINDEX(f) = build_int_cst(TREE_TYPE(DECL_VINDEX(f)), want);
+  }
+}
+
+static const struct gcc_debug_hooks *orig_hooks;
+static struct gcc_debug_hooks my_hooks;
+
+/* rest_of_type_compilation: the end of finish_struct_1, for parsed and instantiated classes alike */
+static void type_decl_hook(tree decl, int local)
+{
+  tree t = decl ? TREE_TYPE(decl) : NULL_TREE;
+  if (t && CLASS_TYPE_P(t) && COMPLETE_TYPE_P(t) && TYPE_BINFO(t) && t == TYPE_MAIN_VARIANT(t)) renumber(t);
+  orig_hooks->type_decl(decl, local);
+}
+
+static void start_unit(void *, void *)
+{
+  orig_hooks = debug_hooks;
+  my_hooks = *debug_hooks;
+  my_hooks.type_decl = type_decl_hook;
+  debug_hooks = &my_hooks;
 }
 
 /* ---------------------------------------------------------------------------------------------- tables */
@@ -268,19 +310,22 @@ static tree walk_op(tree *tp, int *walk_subtrees, void *data)
   return NULL_TREE;
 }
 
-/* slot `tok` of class cls: the slot after the deleting destructors before it are gone; *flags 0 / 1 for a
-   complete / deleting destructor, else -1 */
-static bool new_slot(tree cls, unsigned HOST_WIDE_INT tok, unsigned HOST_WIDE_INT *slot, int *flags)
+/* index `tok` of a virtual call on class cls (already a slot of the shrunk table): *flags 1 for a deleting
+   destructor (marked), 0 for a complete destructor, else -1 */
+static bool decode_slot(tree cls, unsigned HOST_WIDE_INT tok, unsigned HOST_WIDE_INT *slot, int *flags)
 {
+  *flags = -1;
+  if (tok >= D0_MARK) { tok -= D0_MARK; *flags = 1; }
+  *slot = tok;
   unsigned HOST_WIDE_INT i = 0, d0 = 0;
   for (tree v = BINFO_VIRTUALS(TYPE_BINFO(TYPE_MAIN_VARIANT(cls))); v; v = TREE_CHAIN(v), i++) {
     tree f = BV_FN(v);
-    if (i == tok) {
-      *flags = DECL_COMPLETE_DESTRUCTOR_P(f) ? 0 : DECL_DELETING_DESTRUCTOR_P(f) ? 1 : -1;
-      *slot = tok - d0 - (*flags == 1 ? 1 : 0);
+    if (DECL_DELETING_DESTRUCTOR_P(f)) { d0++; continue; }
+    if (i - d0 == tok) {
+      if (*flags == 1) return DECL_COMPLETE_DESTRUCTOR_P(f);
+      if (DECL_COMPLETE_DESTRUCTOR_P(f)) *flags = 0;
       return true;
     }
-    if (DECL_DELETING_DESTRUCTOR_P(f)) d0++;
   }
   return false;
 }
@@ -314,7 +359,7 @@ struct sdd_pass : gimple_opt_pass {
         tree ref = gimple_call_fn(st);
         tree cls = obj_type_ref_class(ref);
         unsigned HOST_WIDE_INT slot; int flags;
-        if (!tree_fits_uhwi_p(OBJ_TYPE_REF_TOKEN(ref)) || !new_slot(cls, tree_to_uhwi(OBJ_TYPE_REF_TOKEN(ref)), &slot, &flags)) {
+        if (!tree_fits_uhwi_p(OBJ_TYPE_REF_TOKEN(ref)) || !decode_slot(cls, tree_to_uhwi(OBJ_TYPE_REF_TOKEN(ref)), &slot, &flags)) {
           error_at(gimple_location(st), "SDD2: a virtual call whose slot is not in its class %qT", cls);
           continue;
         }
@@ -387,6 +432,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   pi.ref_pass_instance_number = 1;
   pi.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pi);
+  register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
