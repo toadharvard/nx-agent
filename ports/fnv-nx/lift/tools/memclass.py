@@ -389,37 +389,40 @@ def main():
             owner.setdefault(x, a)
     par = parents_map(rows)
     # ---- parameter summaries: greatest fixed point (start non-escaping, remove on evidence)
-    bad, rev, rf = set(), defaultdict(list), defaultdict(list)
+    bad, rev, rf = {}, defaultdict(list), defaultdict(list)
+    CAUSE = {'S': 'stored', 'R': 'returned', 'I': 'indirect', 'M': 'import', 'U': 'unknown'}
     for f in sorted(R):
         for p, sk in sorted(R[f]['summ'].items()):
             if p == 'fwd':
                 for t in sk:
                     rf[t].append(f)
                 continue
-            for s in sk:
-                if s[0] != 'A':
-                    bad.add((f, p))
-                elif s[1] not in R or (R[s[1]]['allstack'] and s[2][0] == 's'):
-                    bad.add((f, p))
+            for s_ in sk:
+                if s_[0] != 'A':
+                    bad.setdefault((f, p), CAUSE[s_[0]])
+                elif s_[1] not in R:
+                    bad.setdefault((f, p), 'callee-undecoded')
+                elif R[s_[1]]['allstack'] and s_[2][0] == 's':
+                    bad.setdefault((f, p), 'callee-allstack')
                 else:
-                    rev[(s[1], s[2])].append((f, p))
-    for f in sorted(R):
+                    rev[(s_[1], s_[2])].append((f, p))
         if R[f]['allstack']:
             for p in sorted(R[f]['summ']):
                 if p[0] == 's':
-                    bad.add((f, p))
+                    bad.setdefault((f, p), 'allstack')
     work, rounds = sorted(bad), 0
     while work:
         rounds += 1; nxt = []
         for g, q in work:
             for d in rev.get((g, q), []) + [(f, q) for f in rf.get(g, [])]:
                 if d not in bad:
-                    bad.add(d); nxt.append(d)
+                    bad[d] = bad[(g, q)]; nxt.append(d)
         work = sorted(nxt)
 
     def isbad(t, p, seen=()):
         return t not in R or (t, p) in bad or (R[t]['allstack'] and p[0] == 's') or any(isbad(u, p, seen + (t,)) for u in R[t]['summ'].get('fwd', []) if u not in seen and u != t)
     npar = Counter(('esc' if (f, p) in bad else 'ok') for f in sorted(R) for p in sorted(R[f]['summ']) if p != 'fwd')
+    pcause = Counter(bad[k] for k in sorted(bad) if k[1] in R[k[0]]['summ'])
     # ---- frame contamination per owning function
     def verdict(sk):
         r = [s for s in sk if s[0] in 'SRIU'] + [s for s in sk if s[0] == 'M'] + [s for s in sk if s[0] == 'A' and isbad(s[1], s[2])]
@@ -532,7 +535,7 @@ def main():
     print('frames with an escaping address: %d of %d; first reason: %s; frames flagged whole-frame (computed offsets / epochs): %d; entries taking their arg-area address: %d' % (
         nescf, len(frame), dict(sorted(reasons.items())), sum(1 for g in frame if frame[g][2]), sum(1 for a in R if R[a]['allstack'])))
     print('  unknown-sink reasons (frames): ' + ' '.join('%s=%d' % kv for kv in sorted(ureasons.items(), key=lambda kv: (-kv[1], kv[0]))[:10]))
-    print('parameter summaries: %d non-escaping, %d escaping; fixed-point rounds %d' % (npar['ok'], npar['esc'], rounds))
+    print('parameter summaries: %d non-escaping, %d escaping (root causes: %s); fixed-point rounds %d' % (npar['ok'], npar['esc'], ' '.join('%s=%d' % kv for kv in sorted(pcause.items())), rounds))
     print('top imports by accesses lost: ' + ' '.join('%s=%d' % kv for kv in sorted(lost.items(), key=lambda kv: (-kv[1], kv[0]))[:15]))
     print('atomics: lock %d xchg-mem %d cmpxchg %d xadd %d; tls displacements: %s' % (fl['lock'], fl['xchg'], fl['cmpxchg'], fl['xadd'], ' '.join('%s=%d' % kv for kv in sorted(fl.items()) if kv[0].startswith('tls:'))[:150]))
     ck = lambda n: n.startswith('Interlocked') or n.endswith('CriticalSection') or n in ('TlsGetValue', 'TlsSetValue', 'TlsAlloc', 'CreateThread')

@@ -322,7 +322,7 @@ for v, n, rf in arrays:           # an array read through an index register exte
     while e < T1 and not cov[e - T0] and not tbl[e - T0]: e += 1
     while e > v + n and text[e - T0 - 1] in (0xCC, 0x90): e -= 1
     if e > v + n: mark(v + n, e - v - n, rf); dinfo['array_ext_bytes'] += e - v - n
-cls0 = Counter(classify()); NRN, NRI, NRB = codemap.exe_noreturn(U, eh.thrower)        # NORETURN: unreach what only flows after a call that never returns
+NRN, NRI, NRB = codemap.exe_noreturn(U, eh.thrower)        # NORETURN: unreach what only flows after a call that never returns
 # ---- extents / features / output
 for v, ss in psites.items():
     if v in kinds and 'ptr' in kinds[v] and len(kinds[v]) > 1 and all(x in eh.sites for x in ss): kinds[v].discard('ptr')
@@ -341,7 +341,7 @@ def gate(green, TNu, why):
     print('gate l3.codemap%s: %s (certified %d of %d, uncertified %d, rejected pointers %d, bad-decode entries %d)%s' % ('.' + NAME if STRICT else '', 'green' if green else 'red', TNu - unexpl, TNu, unexpl, len(rejects), len(bad_entries), ''.join('; RED: ' + w for w in why)))
     sys.exit(0 if green else 1)
 CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
-if not STRICT: print('noreturn: %d entries never return (seeds: thrower %s); %d instructions / %d bytes only flowed after such calls and are no longer reached; bytes moved out of entry code: %s' % (NRN, 'yes' if eh.thrower in entries else 'no', NRI, NRB, {k: cc[k] - cls0[k] for k in (4, 5, 6, 0, 3) if cc[k] != cls0[k]}))
+if not STRICT: print('noreturn: %d entries never return (seeds: thrower %s); %d instructions / %d bytes (decomp %d, non-decomp %d) only flowed after such calls and are no longer reached; entry set unchanged (%d)' % (NRN, 'yes' if eh.thrower in entries else 'no', NRI, NRB[0], NRB[1], NRB[0] - NRB[1], len(entries)))
 if not STRICT:
     midf = len({s for t, s in midsrc if s is not None and indec(s)}); nonde = [a for a in entries if a not in fsize]
     exo = sorted(a for a, v in insns.items() if v[1] in EXOTIC)

@@ -334,7 +334,7 @@ def exe_noreturn(U, thrower):
     E = sorted(ent); N, res = noreturn_lfp(E, trav, {thrower} & set(ent)); keep = bytearray(U.TN)
     for e in E:
         for a in res[e][0]: keep[a - T0] = 1
-    gone = [a for a in sorted(ins) if not keep[a - T0]]; nb = 0
+    gone = [a for a in sorted(ins) if not keep[a - T0]]; nb = nbd = 0
     for a in gone:
-        sz = ins[a][0]; nb += sz; U.cov[a - T0:a - T0 + sz] = bytes(sz); del ins[a]
-    return len(N), len(gone), nb
+        sz = ins[a][0]; nb += sz; nbd += sz * U.dmap[a - T0]; U.cov[a - T0:a - T0 + sz] = bytes(sz); del ins[a]
+    return len(N), len(gone), (nb, nbd)
