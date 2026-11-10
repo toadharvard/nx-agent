@@ -84,6 +84,9 @@ def main():
           re.search(r'bl\s+_ZThn8_N1MD1Ev\n\s+b\s+2f\n1:\n\s+ldr\s+w9, =-8\n\s+add\s+w0, w0, w9\n\s+bl\s+_ZN1MD0Ev\n', th2), th2)
     check('no deleting destructor in any table', not re.search(r'\.word\s+\S*D0Ev', s))
     check('deleting destructors are written out', '_ZN1MD0Ev:' in s and '_ZN1BD0Ev:' in s)
+    vm = re.findall(r'\.ascii\s+"(_ZTV1M[^"]*)"', s)
+    check('table map: one line per address point with its base path',
+          vm == ['_ZTV1M\\t8\\t0\\t1M\\t1M\\n', '_ZTV1M\\t36\\t8\\t1M\\t1M;2S2\\n'], str(vm))
     print('test_sdd: %s' % ('FAILED %d' % len(FAILS) if FAILS else 'ok'))
     return 1 if FAILS else 0
 

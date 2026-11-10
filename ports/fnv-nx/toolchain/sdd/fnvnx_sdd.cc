@@ -25,6 +25,13 @@
  *            table, so each sub-table has its own symbol and relocation. Done just before RTL expansion: GIMPLE
  *            keeps the address an invariant until then, and GCC's own analyses read the original form.
  *
+ *   table map (for the link, L1 CONTRACT)
+ *            every emitted `_ZTV<C>` is described in the object's own section .fnvnx.vtmap (not loaded), one text
+ *            line per address point:  _ZTV<C> <TAB> offset <TAB> vptr offset in C <TAB> C <TAB> base path
+ *            where C and the path (from C down to the base subobject whose table it is, `;`-separated) are Itanium
+ *            type strings. The MSVC name of the same sub-table (??_7C@@6B...@) is paired with it by class and vptr
+ *            offset from the MSVC-side dump of the same source.
+ *
  * Anything this plugin sees and cannot place is a compile error; a D0 found in a table is one (the hook was missed).
  */
 #include "gcc-plugin.h"
@@ -343,6 +350,33 @@ struct ap_pass : gimple_opt_pass {
 
 /* ---------------------------------------------------------------------------------------------- output */
 
+/* the base subobjects of t whose table is the sub-table of vt at byte offset off: the first in the base graph */
+static tree ap_binfo(tree binfo, tree vt, HOST_WIDE_INT off, std::set<tree> &seen)
+{
+  if (!seen.insert(binfo).second) return NULL_TREE;
+  HOST_WIDE_INT o;
+  tree e = BINFO_VTABLE(binfo);
+  if (e && table_ref(e, &o) == vt && o == off) return binfo;
+  tree b;
+  for (unsigned i = 0; BINFO_BASE_ITERATE(binfo, i, b); i++)
+    if (tree r = ap_binfo(b, vt, off, seen)) return r;
+  return NULL_TREE;
+}
+
+static void vtmap_line(tree vt, HOST_WIDE_INT off)
+{
+  if (strncmp(asmname(vt), "_ZTV", 4)) return;
+  tree t = DECL_CONTEXT(vt);
+  std::set<tree> seen;
+  tree b = ap_binfo(TYPE_BINFO(t), vt, off, seen);
+  if (!b) { error("SDD2: table %qD: no base subobject owns the address point at %d", vt, (int)off); return; }
+  std::string path;
+  for (tree p = b; p; p = BINFO_INHERITANCE_CHAIN(p))
+    path = std::string(mangle_type_string(BINFO_TYPE(p))) + (path.empty() ? "" : ";") + path;
+  fprintf(asm_out_file, "\t.ascii\t\"%s\\t%ld\\t%ld\\t%s\\t%s\\n\"\n", asmname(vt), (long)off,
+          (long)tree_to_shwi(BINFO_OFFSET(b)), mangle_type_string(t), path.c_str());
+}
+
 static void finish_unit(void *, void *)
 {
   varpool_node *n;
@@ -353,8 +387,10 @@ static void finish_unit(void *, void *)
     HOST_WIDE_INT esz = int_size_in_bytes(TREE_TYPE(TREE_TYPE(vt)));
     unsigned HOST_WIDE_INT ix; tree idx, val; bool after_rtti = false;
     /* an address point is the entry after a sub-table's RTTI slot */
+    std::vector<HOST_WIDE_INT> aps;
     FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(DECL_INITIAL(vt)), ix, idx, val) {
       if (after_rtti) {
+        aps.push_back(ix * esz);
         std::string s = std::string(base) + ".fnvnx_ap" + std::to_string((long long)(ix * esz));
         fprintf(asm_out_file, "\t%s\t%s\n\t.type\t%s, %%object\n\t.set\t%s, %s+%ld\n",
                 DECL_WEAK(vt) ? ".weak" : TREE_PUBLIC(vt) ? ".globl" : ".local", s.c_str(), s.c_str(), s.c_str(), base, (long)(ix * esz));
@@ -365,6 +401,9 @@ static void finish_unit(void *, void *)
       after_rtti = TREE_CODE(v) == ADDR_EXPR && VAR_P(TREE_OPERAND(v, 0)) && DECL_ASSEMBLER_NAME_SET_P(TREE_OPERAND(v, 0))
                    && !strncmp(asmname(TREE_OPERAND(v, 0)), "_ZTI", 4);
     }
+    fprintf(asm_out_file, "\t.pushsection\t.fnvnx.vtmap,\"\",%%progbits\n");
+    for (HOST_WIDE_INT a : aps) vtmap_line(vt, a);
+    fprintf(asm_out_file, "\t.popsection\n");
   }
   for (std::map<std::string, sdd_fn>::iterator t = thunks.begin(); t != thunks.end(); ++t) {
     const char *nm = t->first.c_str();
