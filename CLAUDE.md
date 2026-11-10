@@ -54,3 +54,29 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
   - Keep gamedata/ and toolchain-* unless they must go to free space; they can be restored.
 - These orders don't widen the Legal limits: game data and decomp-derived artifacts never go into the public
   repository, there are no secrets in commits, and no PRs.
+
+## Owner order of 2026-11-10: rules that close the class, never patches (binding, overrides any plan or brief)
+
+The owner's words: "Каждое решение должно быть без падений и эвристик. Только на правилах, закрывающих весь класс задач."
+
+Every fnv-nx solution is a rule that closes the whole class of problems, with a proof argument and stated assumptions.
+
+Forbidden:
+- **Placeholders and failure paths:**
+  - stubs, no-ops, stand-ins, placeholders, trap paths, "stop with a report";
+  - runtime fallbacks triggered by a crash.
+- **Decisions without proof:**
+  - measure-then-skip decisions, e.g. "count the C++ throws under Wine; if 0, do not implement EH";
+  - sampling used as proof, e.g. "recompute 2 % of keys cold";
+  - guesses from names, text or regexes.
+- **Point fixes:**
+  - per-item, per-site or hand-written lists standing in for a rule;
+  - fixing things "one by one".
+- **Selection from test results.** Fuzzing, boots and scenarios verify a rule; they never decide anything. The choice between a native and a lifted body is made statically by rule, before any run.
+- **Missing implementations relabelled as "policy",** e.g. skipping Bink, a Steam/Winsock no-op, or the null device as a product path.
+
+If no class-closing rule is known for some part, the session reports it to the orchestrator. It does not patch around it.
+
+The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), once it is published. Until then:
+- **MASTER_PLAN3 applies only where it does not contradict this order.**
+- **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
