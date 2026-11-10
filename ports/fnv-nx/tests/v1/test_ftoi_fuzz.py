@@ -44,6 +44,14 @@ def main(argv):
         print('plugin does not build: ' + r.stderr.strip()[-300:])
         return 2
     so = r.stdout.strip().splitlines()[-1]
+    # the direct float -> enum cast is not the exe's language (MSVC 2008: error C2440): an error, never a guess
+    direct = os.path.join(work, 'enum_direct.cpp')
+    with open(direct, 'w') as f:
+        f.write('enum E { A, B };\nE g(float x) { return (E)x; }\nE h(float x) { return (E)(int)x; }\n')
+    r = sh(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-O2', '-fplugin=' + so, '-S', '-o', os.devnull, direct])
+    if r.returncode == 0 or r.stderr.count('FTOI:') != 1:
+        print('FAIL: a direct float -> enum conversion must be exactly one FTOI error: ' + r.stderr[-300:])
+        return 1
     r = sh(['gcc', '-O1', '-I' + SRC, '-o', os.path.join(work, 'ref'), os.path.join(SRC, 'ref.c')])
     if r.returncode:
         print('ref.c: ' + r.stderr[-300:])
