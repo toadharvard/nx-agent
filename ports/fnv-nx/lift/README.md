@@ -46,6 +46,25 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   `image address -> X_<addr>`, a minimal perfect hash over the entry set with a last-target cache per call site.
   The table is total by construction; native code reaches the same dispatcher through L2's plugin at every indirect
   call and jump.
+### Guest registers and control transfer (the rule every lifted body follows)
+
+- The eight guest registers live in fixed callee-saved host registers (GCC global register variables, w19..w26), the
+  `struct cpu` pointer in x27. Lifted code never copies registers in or out; native code preserves them by the AAPCS;
+  a host fault inside lifted code finds the exact guest register state in the host context.
+- `call` pushes the image return address NXT, calls the callee's `X_` entry as a C call, and on return compares the
+  address the callee actually returned to (`c->ra`, set by every `ret` from the popped word) with NXT. Equal: go on.
+- Not equal, or any indirect `jmp`, is a **non-local transfer** to address t, resolved by one loop that every
+  lifted function has: (1) if the guest stack pointer is above this activation's entry esp, the activation is gone:
+  return to the C caller with `c->ra = t` still pending; (2) if t is one of this function's own labels (return
+  points, EH continuations, SEH handlers and filters, jump-table targets): `goto` it; (3) otherwise call the entry
+  of t through the dispatcher on top of this frame and repeat with what it returns. This one rule covers tail
+  jumps, `push addr; ret`, helpers that return with a changed esp (`__chkstk`, `_alloca_probe`), `longjmp`, and the
+  exe's own unwinder jumping into a handler or a catch continuation of an outer live frame.
+- Exceptions (R4): a faulting instruction (#DE, #UD, `int3`, access violation taken by the host) builds the
+  EXCEPTION_RECORD and CONTEXT from the guest registers and runs the dispatch the OS would run: walk `fs:[0]`, call
+  each handler (lifted exe code) on the guest stack. `RtlUnwind` and continuation are non-local transfers as above.
+
+
 - Every address has both entries. `__fnv_<A>` (AAPCS): the native body, or the entry bridge (arguments -> ecx/edx
   and the guest stack by the exe prototype, `L_<A>`, result from eax / edx:eax / ST0). `X_<A>` (x86 state): the
   lifted body, or the exit bridge (arguments from the guest stack by the same prototype, the native call, result
