@@ -244,6 +244,9 @@ class Plan:
             for p in c["m"]["params"]:
                 if p["kind"] == "handle" and p["dir"] == "out" and p["own"] == "addref" and c["hr"] == 0 and c["outs"][p["name"]] and p["iface"] != "$riid":
                     self.call(c["m"], c["this"]); break
+        cs = next(c for c in self.calls[first:] if c["iface"] == "IDirect3DDevice9" and c["m"]["name"] == "SetRenderState")      # a nested call: the "runtime" calls back
+        n = self.call(M[("IDirect3DSurface9", "GetDesc")], self.inst["IDirect3DSurface9"]); n["nested_in"] = cs["k"]; n["depth"] = 1
+        t = self.call(next(e for i, e in ex if e["name"] == "D3DPERF_GetStatus"), 0, export=next(i for i, e in ex if e["name"] == "D3DPERF_GetStatus")); t["thread"] = 1
         for o in sorted(self.objs.values(), key=lambda x: -x.num):
             for _ in range(o.rc):
                 if o.rc > 0: self.call(M[(o.iface, "Release")], o.num)

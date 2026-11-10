@@ -2,7 +2,7 @@
 """T-FFP-VS: D3D9 fixed-function vertex pipeline (render/d3d9/ffp/ffp_vs_*, ffp.vert.glsl). Run: python3 test_ffp_vs.py [--no-gl] [--quick]
  (a) CPU reference (ffp_vs_ref.c + ffp_vs_state.c) vs the independent float64 oracle (oracle.py): hand-computed anchors,
      the structured sweep (every value of every enumeration x random bases) and >= 20000 random full states.
-     Tolerance |ref - oracle| <= 3e-4 * max(1, |oracle|): the only difference is float32 vs float64 rounding of chains of
+     Tolerance |ref - oracle| <= 1e-4 * max(1, |oracle|): the only difference is float32 vs float64 rounding of chains of
      <= ~40 flops incl. powf/expf/sqrtf (<= 2e-6 each, times pow exponents <= 40 and the matrix condition number of
      the generated, well-conditioned matrices); semantic differences are >= 1e-2 on this data.
  (b) ffp.vert.glsl (plain and NX_FFP_FLAT) through glslangValidator and uam.
@@ -16,7 +16,7 @@ FFP = os.path.join(HERE, "../../../render/d3d9/ffp")
 OUT = os.environ.get("FFP_VS_OUT", "/tmp/claude-0/ffpvs")
 os.makedirs(OUT, exist_ok=True)
 UAM = os.environ.get("UAM", "/home/user/work/l6/sm/deps/uam/build/uam")
-TOLA = 3e-4
+TOLA = 1e-4
 NAMES = ["pos%d" % i for i in range(4)] + ["c0_%d" % i for i in range(4)] + ["c1_%d" % i for i in range(4)] + \
         ["tex%d.%d" % (s, i) for s in range(8) for i in range(4)] + ["fog", "psize"] + ["clip%d" % i for i in range(6)]
 

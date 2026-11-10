@@ -80,7 +80,7 @@ def main():
     streams = {}
     for v in variants:
         exe = os.path.join(tmp, f"exe_{v}")
-        r = sh(["g++", "-m32", "-o", exe] + [os.path.join(tmp, x) for x in ("gen.o", "st.o", f"echo_{v}.o")]); check(f"link {v}", r.returncode == 0, r.stderr[-300:])
+        r = sh(["g++", "-m32", "-pthread", "-o", exe] + [os.path.join(tmp, x) for x in ("gen.o", "st.o", f"echo_{v}.o")]); check(f"link {v}", r.returncode == 0, r.stderr[-300:])
         for run in (1, 2):
             if v != "base" and run == 2: continue
             out = os.path.join(tmp, f"{v}_{run}.d9s"); r = sh([exe, out]); check(f"run {v}", r.returncode == 0, f"rc {r.returncode} {r.stderr[-200:]}")
