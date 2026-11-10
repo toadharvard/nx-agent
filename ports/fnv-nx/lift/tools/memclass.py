@@ -540,7 +540,7 @@ def main():
             if s_[0] == 'R':
                 lv, c = 2, 'returned'
             if lv == 2:
-                r.append(c if c != 'unk:' + (s_[1].split(':')[0] if s_[0] == 'U' else '') else 'unknown:' + s_[1])
+                r.append('unknown:' + s_[1] if s_[0] == 'U' else c)
         return sorted(set(r))
     fro = defaultdict(list)
     for f in sorted(R):
