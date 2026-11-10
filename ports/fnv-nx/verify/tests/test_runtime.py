@@ -16,7 +16,7 @@ VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 
-BASE = tempfile.mkdtemp(dir="/root/l4" if os.path.isdir("/root/l4") else os.path.expanduser("~"), prefix="rt-test-")  # own dir per run: files run concurrently
+BASE = tempfile.mkdtemp(dir="/root/l4" if os.path.isdir("/root/l4") else os.path.expanduser("~"), prefix="rt-")  # short: the PT_INTERP probe below needs BASE + "/i" within 27 bytes  # own dir per run: files run concurrently
 atexit.register(shutil.rmtree, BASE, ignore_errors=True)
 STORE = BASE + "/store"
 WORK = BASE + "/work"
@@ -187,8 +187,8 @@ def loader_rule():
         old_i = b"/lib64/ld-linux-x86-64.so.2\0"
         check("probe executable has the usual PT_INTERP", old_i in data)
         bad = d + "/badinterp"
-        open(d + "/i", "wb").write(hdr(1, 1, 3))
-        new_i = (d + "/i").encode()  # must fit the 27 bytes of the original string
+        open(BASE + "/i", "wb").write(hdr(1, 1, 3))
+        new_i = (BASE + "/i").encode()  # must fit the 27 bytes of the original string
         open(bad, "wb").write(data.replace(old_i, new_i + b"\0" * (len(old_i) - len(new_i))))
         os.chmod(bad, 0o755)
         runtime.DEFAULT_DIRS = [d + "/w64", "/lib64"]
