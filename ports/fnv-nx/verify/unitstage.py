@@ -5,29 +5,32 @@ recompiled when nothing it reads changed.
     unitstage.py build --store S --toolrt toolrt.json --cxx /abs/g++ --src-root HOST@/src --include HOST@/inc/0 ...
                        --unit REL.cpp ... --flags-file FLAGS.json --report R.json [--jobs N] [--cold]
     unitstage.py gcc-set --cxx /abs/g++       print the --exe/--tree arguments of `runtime.py tool` for that compiler
-RULE: an object file is a function of exactly the compiler (content), the flags, the unit's source and the header files it includes.
-  DEPS stage    inputs: the tool runtime (runtime.py tool), the whole source root at /src, the include roots at /inc/0.. ;
-                ONE invocation: `g++ FLAGS -M -MT x -MF /out/deps.d /src/UNIT` (no -MG: a missing header is an error, rc != 0).
-                parse_deps() turns deps.d into a sorted list: a pure function of the text (make rule syntax: backslash-newline
-                continuations, `\\ ` and `\\#` escapes with doubled-backslash rules, `$$`), run by this runner, outside the sandbox.
-  COMPILE stage inputs: the same tool runtime + ONLY the listed files, each at its original path (/src/.., /inc/N/..), as a filtered
-                tree whose manifest is built from the CAS manifests (no file content is copied); `g++ FLAGS -c -o /out/unit.o`.
-  The compile key changes iff a file the unit really reads (or its content, or the flags/compiler) changes.
-Soundness: the DEPS stage sees the full trees, so its include resolution is the real one. Every file the real resolution opened is
-  in the list; the COMPILE stage sees a subset with those files at the same paths. An include search probes directories in order:
-  a probe that FAILED in the full tree (absent in an earlier include dir) fails in the subset too, and a file absent from the list was
-  not opened, and cannot be opened by the subset run because it does not exist there. A new file earlier in the search path changes
-  the DEPS result (so the list and the key). Symlinks inside a tree are followed inside the tree (link and target both kept).
-OPEN GAP (measured, tests/test_unitstage.py): `__has_include("h")` reads the PRESENCE of h. GCC 13 `-M` does not list a header that is
-  only probed, so the COMPILE stage sees it absent and takes the other branch: the object differs from a full-tree compile. No exact
-  GCC mechanism was found (-H, -MD, -E list included files only; a text scan is not acceptable). Not closed here.
-Flags appended by this tool: -I/inc/N (in order), -frandom-seed=<sha256 of the unit path>, -ffile-prefix-map for /src and each
-  /inc/N (no host or sandbox path in the object), -Werror=date-time. Both stage documents must pass toolflags.check_doc (violation =
-  error). Caller flags may not contain -I*, -o, -c, -E, -S, -M*. Sandbox paths are fixed, so keys are host-independent. Documents are
-  kept at STORE/stage-docs/<aa>/<key>.json. --cold runs a stage again and fails if the result differs from the stored one.
-Report "fnvnx-unitstage/1": per unit deps_key, deps_status (hit|run), deps_rc, deps_seconds, files (closure size), compile_key,
-  compile_status (hit|run|skipped), compile_rc, compile_seconds, object (tree hash of /out), status (ok|deps-failed|compile-failed),
-  error (stderr tail); totals. Exit 0 all ok, 2 some unit failed, 1 usage/flags error.
+RULE: what a preprocessor run reads is exactly (1) the CONTENT of the files it opens and (2) the EXISTENCE answers for the paths it
+  probes (#include search, __has_include, __has_include_next). A stage is given both, exactly.
+  PP stage  `g++ FLAGS -E -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
+            of the source root (/src) and the include roots (/inc/0..), see unitview.py: every name of the real tree, real content
+            only for the files of a set C (the closure), every other file a placeholder `#error fnvnx: file outside the declared
+            closure`. The key is f(name trees, content of C, compiler, flags).
+  CC stage  `g++ FLAGS -fpreprocessed -c -o /out/unit.o /in/unit.ii`, inputs: the tool runtime and unit.ii. The key is f(preprocessed
+            text, compiler, flags): a comment-only header edit re-runs PP for the units that read it, CC is a hit.
+Closure discovery (this runner, outside the sandbox, a pure function of stage results): C0 = a hint (STORE/hints/<sha256 unit>.json,
+  the last accepted closure of that unit path) or, without one, every file (the view is the real tree). Run PP. Failure: if the
+  compiler printed the placeholder's own #error for files not in C (parsed from the `FILE:L:C: error:` prefix of that message), add
+  them to C and run again (each pass adds >= 1 file: terminates); any other failure is the unit's real error, reported, nothing
+  stored as success (no hint). Success: D = files of deps.d (resolved like the kernel does, symlinks followed, `..` on the real
+  directory). If D != C run again with C = D (the minimal view) and require deps == D and the SAME unit.ii hash (else exit 1 with both
+  hashes); the accepted result is the run on the view of D. ARGUMENT that the hint never changes the result: the accepted run opened
+  only files of D, all real, and saw the true name tree, so every include search and probe got the answer it gets on the real tree and
+  every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
+  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
+  #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
+Flags appended by this tool: -I/inc/N (PP only), -frandom-seed=<sha256 of the unit path>, -ffile-prefix-map for /src and each /inc/N,
+  -Werror=date-time (the macros expand at PP). Both stage documents must pass toolflags.check_doc. Caller flags may not contain -I*,
+  -o, -c, -E, -S, -M*. Sandbox paths are fixed, so keys are host-independent; line markers of unit.ii hold only /src, /inc/N paths.
+  Documents are kept at STORE/stage-docs/<aa>/<key>.json. --cold runs a stage again and fails if the result differs.
+Report "fnvnx-unitstage/2": per unit status (ok|pp-failed|cc-failed), closure (sandbox paths of real files), files, pp_key, pp_status
+  (hit if every iteration hit), pp_seconds, pp_iterations, ii_bytes, cc_key, cc_status (hit|run|skipped), cc_seconds, object (tree hash
+  of /out), name_tree_id (hash of the placeholder-only views = the pure name trees), error; totals. Exit 0 ok, 2 a unit failed, 1 usage.
 """
 import argparse
 import concurrent.futures
@@ -43,78 +46,28 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
-FORMAT = "fnvnx-unitstage/1"
+import unitview  # noqa: E402
+from unitview import UnitError, parse_deps  # noqa: E402,F401
+FORMAT = "fnvnx-unitstage/2"
 ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80"}
+PP_TAIL = ["-E", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
 
-class UnitError(Exception):
-    pass
-def parse_deps(text):
-    """Sorted, normalized, unique prerequisites of the single rule `x: ...` in text (GCC -MT x output)."""
-    toks, cur, have, closed, i, n = [], [], False, False, 0, len(text)
 
-    def flush():
-        nonlocal cur, have
-        toks.extend(["".join(cur)] * have)
-        cur, have = [], False
+def result_file(store, key, name):
+    return cas._obj(store, cas.manifest(sandbox._load(store, key)["outputs"]["/out"], store)["entries"][name])
 
-    def add(s):
-        nonlocal have
-        if closed:
-            raise UnitError("deps.d: second rule or text after the rule")
-        cur.append(s)
-        have = True
-    while i < n:
-        c = text[i]
-        if c == "\\":
-            j = i
-            while j < n and text[j] == "\\":
-                j += 1
-            k, nxt = j - i, text[j:j + 1]
-            if nxt in (" ", "\t", "\n", "#"):
-                if k // 2:
-                    add("\\" * (k // 2))
-                if k % 2 == 0:
-                    i = j
-                    continue
-                if nxt == "\n":
-                    flush()
-                else:
-                    add(nxt)
-                i = j + 1
-                continue
-            add("\\" * k)
-            i = j
-        elif c == "$":
-            if text[i + 1:i + 2] != "$":
-                raise UnitError("deps.d: single $")
-            add("$")
-            i += 2
-        elif c in " \t":
-            flush()
-            i += 1
-        elif c == "\n":
-            flush()
-            closed = True
-            i += 1
-        elif c == "#":
-            raise UnitError("deps.d: unescaped #")
-        else:
-            add(c)
-            i += 1
-    flush()
-    if not toks or toks[0] != "x:":
-        raise UnitError("deps.d: not a rule for target x")
-    out = set()
-    for t in toks[1:]:
-        if not t.startswith("/"):
-            raise UnitError("deps.d: relative path %r" % t)
-        out.add(posixpath.normpath(t))
-    return sorted(out)
-def _out_file(store, res, name):
-    return cas._obj(store, cas.manifest(res["outputs"]["/out"], store)["entries"][name])
 
-def deps_of(store, deps_key):
-    return parse_deps(open(_out_file(store, sandbox._load(store, deps_key), "deps.d")).read())
+def hint_path(store, rel):
+    return os.path.join(store, "hints", hashlib.sha256(rel.encode()).hexdigest() + ".json")
+
+
+def write_hint(store, rel, paths):
+    p = hint_path(store, rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = "%s.tmp-%d" % (p, os.getpid())
+    open(tmp, "w").write(json.dumps(sorted(paths)))
+    os.replace(tmp, p)
+
 
 def gcc_set(cxx):
     """(exes, trees) for runtime.py tool, defined by the compiler's own answers: -print-prog-name=cc1plus (libexec dir),
@@ -134,55 +87,6 @@ def gcc_set(cxx):
     trees = sorted({t for t in cands if os.path.isdir(t)})
     trees = [t for t in trees if not any(u != t and (t + "/").startswith(u.rstrip("/") + "/") for u in trees)]
     return [norm(cxx), norm(q("-print-prog-name=as"))], trees
-
-def _entry(store, root, path, cache):
-    e = {"t": "d", "h": root}
-    for p in path.split("/"):
-        if e["t"] != "d" or p not in cache.setdefault(e["h"], cas.manifest(e["h"], store))["entries"]:
-            raise UnitError("closure file %s is not in the ingested tree" % path)
-        e = cache[e["h"]]["entries"][p]
-    return e
-
-def closure_paths(store, root, rels, cache):
-    """Tree-relative files and symlinks the kernel reads to open RELS (links followed inside the tree)."""
-    out, todo = set(), [(r, 0) for r in rels]
-    while todo:
-        rel, depth = todo.pop()
-        cur, parts = "", rel.split("/")
-        if depth > 16:
-            raise UnitError("symlink loop at " + rel)
-        for k, p in enumerate(parts):
-            nxt = cur + "/" + p if cur else p
-            e = _entry(store, root, nxt, cache)
-            if e["t"] == "l":
-                real = posixpath.normpath(posixpath.join(cur, e["to"]))
-                if e["to"].startswith("/") or real.startswith(".."):
-                    raise UnitError("symlink %s leaves the tree" % nxt)
-                out.add(nxt)
-                todo.append(("/".join([real] + parts[k + 1:]), depth + 1))
-                break
-            cur = nxt
-        else:
-            if e["t"] != "f":
-                raise UnitError("%s is not a file" % rel)
-            out.add(cur)
-    return out
-
-def subtree(store, root, rels, cache):
-    """Hash of the tree holding only RELS of tree ROOT (entries copied from the manifests, no content is touched)."""
-    paths = closure_paths(store, root, rels, cache)
-
-    def build(prefix, names):
-        entries = {}
-        for name in sorted({p.split("/")[0] for p in names}):
-            sub = [p.split("/", 1)[1] for p in names if p.startswith(name + "/")]
-            full = (prefix + "/" if prefix else "") + name
-            entries[name] = {"t": "d", "h": build(full, sub)} if sub else _entry(store, root, full, cache)
-        data = cas.canon({"format": cas.FORMAT, "entries": entries})
-        h = hashlib.sha256(data).hexdigest()
-        cas._put(store, "tree", h + ".json", data)
-        return h
-    return build("", sorted(paths))
 
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
@@ -217,11 +121,13 @@ class Build:
             if at != want:
                 raise UnitError("%s: sandbox path must be %s" % (spec, want))
             self.roots.append((at, cas.ingest(host, self.store)))
+        names = [(at, unitview.view(self.store, t, (), self.cache)) for at, t in self.roots]
+        self.name_tree_id = hashlib.sha256(cas.canon(names)).hexdigest()
 
-    def doc(self, kind, rel, inputs, tail, out):
+    def doc(self, kind, rel, inputs, tail, src, inc=True):
         seed = hashlib.sha256(rel.encode()).hexdigest()
-        argv = [self.cxx] + ["-I" + at for at, _ in self.roots[1:]] + self.flags + ["-frandom-seed=" + seed, "-Werror=date-time"]
-        argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + ["/src/" + rel]
+        argv = [self.cxx] + ["-I" + at for at, _ in self.roots[1:] if inc] + self.flags + ["-frandom-seed=" + seed, "-Werror=date-time"]
+        argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
                "env": dict(ENV, PATH=os.path.dirname(self.cxx)), "outputs": ["/out"],
                "inputs": sorted(self.rt["inputs"] + [{"at": at, "tree": t} for at, t in inputs], key=lambda i: i["at"])}
@@ -230,48 +136,99 @@ class Build:
             raise UnitError("toolflags: " + "; ".join("%s %s" % (r, d) for r, d, _ in v))
         return doc
 
-    def unit(self, rel):
-        e = {"unit": rel, "status": "ok", "compile_status": "skipped", "object": None}
-        d = self.doc("deps", rel, self.roots, ["-M", "-MT", "x", "-MF", "/out/deps.d"], "/out")
-        e["deps_key"], res, e["deps_status"], e["deps_seconds"] = run_stage(self.store, d, self.cold)
-        e["deps_rc"] = res["rc"]
-        if res["rc"]:
-            e["status"], e["error"] = "deps-failed", self.tail(res)
-            return e
-        deps = deps_of(self.store, e["deps_key"])
-        e["files"] = len(deps)
-        per = {at: [] for at, _ in self.roots}
-        for p in deps:
-            at = next((a for a in per if p.startswith(a + "/")), None)
-            if at:
-                per[at].append(p[len(at) + 1:])
+    def real(self, path, strict=True):
+        """Sandbox path of the regular file the kernel opens for sandbox path PATH, or None (not in a root / not resolvable)."""
+        for at, t in self.roots:
+            if path.startswith(at + "/"):
+                try:
+                    return at + "/" + unitview.resolve(self.store, t, path[len(at) + 1:], self.cache)
+                except (UnitError, KeyError):
+                    if strict:
+                        raise
+        return None
+
+    def pp(self, rel, files):
+        """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
+        ins = [(at, t if files is None else unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")],
+                                                          self.cache)) for at, t in self.roots]
+        return run_stage(self.store, self.doc("pp", rel, ins, PP_TAIL, "/src/" + rel), self.cold)
+
+    def stderr(self, res):
+        return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store))).read()
+
+    def deps(self, key):
+        out = set()
+        for p in parse_deps(open(result_file(self.store, key, "deps.d")).read()):
+            r = self.real(p)
+            if r:
+                out.add(r)
             elif not any(p.startswith(i["at"].rstrip("/") + "/") or p == i["at"] for i in self.rt["inputs"]):
-                raise UnitError("%s: dependency %s is in no declared input" % (rel, p))
-        sub = [(at, subtree(self.store, t, per[at], self.cache)) for at, t in self.roots]
-        c = self.doc("compile", rel, sub, ["-c", "-o", "/out/unit.o"], "/out")
-        e["compile_key"], res, e["compile_status"], e["compile_seconds"] = run_stage(self.store, c, self.cold)
-        e["compile_rc"] = res["rc"]
+                raise UnitError("dependency %s is in no declared input" % p)
+        return out
+
+    def unit(self, rel):
+        e = {"unit": rel, "status": "ok", "cc_status": "skipped", "object": None, "name_tree_id": self.name_tree_id, "pp_iterations": 0,
+             "pp_seconds": 0.0}
+        files, expect, ran = None, None, False
+        try:
+            hint = json.load(open(hint_path(self.store, rel)))
+            files = {r for r in (self.real(p, False) for p in hint) if r} | {"/src/" + rel}
+        except (OSError, ValueError, TypeError):
+            pass
+        while True:
+            key, res, st, sec = self.pp(rel, files)
+            e["pp_iterations"] += 1
+            e["pp_seconds"] = round(e["pp_seconds"] + sec, 3)
+            ran = ran or st == "run"
+            e["pp_key"], e["pp_rc"], e["pp_status"] = key, res["rc"], "run" if ran else "hit"
+            if res["rc"]:
+                if expect:
+                    raise UnitError("internal: minimal view of %s fails after the run it was derived from: %s" % (rel, self.stderr(res)[-300:]))
+                miss = {r for r in (self.real(p, False) for p in unitview.placeholder_paths(self.stderr(res))) if r}
+                if files is None or not miss or miss <= files:
+                    e["status"], e["error"] = "pp-failed", self.stderr(res)[-300:]
+                    return e
+                files = files | miss
+                continue
+            d, h = self.deps(key), cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"]["h"]
+            if expect and (d, h) != expect:
+                raise UnitError("internal: %s: minimal view differs from the first run (deps %d vs %d, unit.ii %s vs %s)"
+                                % (rel, len(d), len(expect[0]), h, expect[1]))
+            if d == files:
+                break
+            expect, files = (d, h), d
+        e["closure"], e["files"] = sorted(files), len(files)
+        ii = cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"]
+        e["ii_bytes"] = os.path.getsize(cas._obj(self.store, ii))
+        tdata = cas.canon({"format": cas.FORMAT, "entries": {"unit.ii": dict(ii, x=0)}})
+        tree = hashlib.sha256(tdata).hexdigest()
+        cas._put(self.store, "tree", tree + ".json", tdata)
+        c = self.doc("cc", rel, [("/in", tree)], ["-fpreprocessed", "-c", "-o", "/out/unit.o"], "/in/unit.ii", inc=False)
+        e["cc_key"], res, e["cc_status"], e["cc_seconds"] = run_stage(self.store, c, self.cold)
+        e["cc_rc"] = res["rc"]
         if res["rc"]:
-            e["status"], e["error"] = "compile-failed", self.tail(res)
-        e["object"] = None if res["rc"] else res["outputs"]["/out"]
+            e["status"], e["error"] = "cc-failed", self.stderr(res)[-300:]
+            return e
+        e["object"] = res["outputs"]["/out"]
+        write_hint(self.store, rel, files)
         return e
 
-    def tail(self, res):
-        return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store))).read()[-300:]
 
 def build_cmd(a):
     t0 = time.time()
     b = Build(a)
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
         units = list(ex.map(b.unit, a.unit))
-    tot = {"units": len(units), "ok": sum(u["status"] == "ok" for u in units), "failed": sum(u["status"] != "ok" for u in units),
-           "deps_hit": sum(u["deps_status"] == "hit" for u in units), "deps_run": sum(u["deps_status"] == "run" for u in units),
-           "compile_hit": sum(u["compile_status"] == "hit" for u in units), "compile_run": sum(u["compile_status"] == "run" for u in units),
-           "seconds": round(time.time() - t0, 2)}
+    n = lambda k, v: sum(u.get(k) == v for u in units)  # noqa: E731
+    tot = {"units": len(units), "ok": n("status", "ok"), "failed": sum(u["status"] != "ok" for u in units), "pp_hit": n("pp_status", "hit"),
+           "pp_run": n("pp_status", "run"), "cc_hit": n("cc_status", "hit"), "cc_run": n("cc_status", "run"),
+           "pp_iterations": sum(u["pp_iterations"] for u in units), "ii_bytes": sum(u.get("ii_bytes", 0) for u in units),
+           "name_tree_id": b.name_tree_id, "seconds": round(time.time() - t0, 2)}
     rep = {"format": FORMAT, "units": {u["unit"]: u for u in units}, "totals": tot}
     open(a.report, "w").write(json.dumps(rep, sort_keys=True, indent=1) + "\n")
     print(json.dumps(tot, sort_keys=True))
     return 0 if not tot["failed"] else 2
+
 
 def main(argv):
     try:

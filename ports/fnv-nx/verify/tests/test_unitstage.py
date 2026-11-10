@@ -236,7 +236,7 @@ def main():
     rc, r13, _ = build(["u/e.cpp", "u/e2.cpp"], name="r13")
     e, e2_ = (unit(r13, "u/e.cpp"), unit(r13, "u/e2.cpp")) if r13 else ({}, {})
     check("a genuine #error is the unit's error, not looped (no hint: 1 iteration)", rc == 2 and e.get("status") == "pp-failed"
-          and "boom_from_header" in e["error"] and e["pp_iterations"] == 1 and "boom_in_unit" in e2.get("error", "") and e2["pp_iterations"] == 1, e)
+          and "boom_from_header" in e["error"] and e["pp_iterations"] == 1 and "boom_in_unit" in e2_.get("error", "") and e2_["pp_iterations"] == 1, e)
     unitstage.write_hint(STORE, "u/e.cpp", ["/src/u/e.cpp"])
     rc, r14, _ = build(["u/e.cpp"], name="r14")
     e = unit(r14, "u/e.cpp") if r14 else {}
