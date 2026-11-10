@@ -82,7 +82,12 @@ static std::map<tree, tree> array_delete;        /* class -> the operator delete
 static std::map<std::string, tree> ap_decls;
 static std::map<std::string, sdd_fn> thunks;     /* <entry>.fnvnx_sdd -> what it calls */
 
-static const char *asmname(tree d) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)); }
+/* the symbol as the assembler sees it (a user label `__asm__("x")` is stored as "*x") */
+static const char *asmname(tree d)
+{
+  const char *n = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+  return *n == '*' ? n + 1 : n;
+}
 
 static bool is_table(tree v)
 {

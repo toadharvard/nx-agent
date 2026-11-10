@@ -69,9 +69,15 @@ int plugin_is_GPL_compatible;
 struct facts { std::string verdict; std::set<std::string> types; bool emitted; };
 static std::map<std::string, facts> early;       /* by assembler name of the function */
 static std::vector<std::string> lines;
+static std::set<std::string> all_thunks;          /* every thunk of the unit, listed before code generation */
+static std::set<std::string> thunk_rows;          /* thunks that went through the passes */
 static std::map<std::string, std::string> emitted_rest;   /* emitted function -> "verdict\tinlined", for its aliases */
 
-static const char *asmname(tree d) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)); }
+static const char *asmname(tree d)
+{
+  const char *n = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+  return *n == '*' ? n + 1 : n;
+}
 
 static void inlined_blocks(tree block, std::set<std::string> &out)
 {
@@ -237,6 +243,7 @@ struct late_pass : gimple_opt_pass {
       if (!DECL_LANG_SPECIFIC(fun->decl) || !DECL_THUNK_P(fun->decl))
         { error("N3: function %qD is emitted but was never read early", fun->decl); return 0; }
       lines.push_back(name + "\\tok\\t" + join(inl) + "\\tthunk\\t");
+      thunk_rows.insert(name);
       return 0;
     }
     e->second.emitted = true;
@@ -246,6 +253,13 @@ struct late_pass : gimple_opt_pass {
     return 0;
   }
 };
+}
+
+static void ipa_start(void *, void *)
+{
+  cgraph_node *n;
+  FOR_EACH_FUNCTION(n)
+    if (n->thunk && n->definition) all_thunks.insert(asmname(n->decl));
 }
 
 static void finish_unit(void *, void *)
@@ -261,6 +275,10 @@ static void finish_unit(void *, void *)
       if (r != emitted_rest.end())
         fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", asmname(n->decl), r->second.c_str());
     }
+  /* a thunk the back end wrote directly (an adjustment and a jump, no GIMPLE body) */
+  for (std::set<std::string>::iterator t = all_thunks.begin(); t != all_thunks.end(); ++t)
+    if (!thunk_rows.count(*t))
+      fprintf(asm_out_file, "\t.ascii\t\"%s\\tok\\t\\tthunk\\t\\n\"\n", t->c_str());
   for (std::map<std::string, facts>::iterator e = early.begin(); e != early.end(); ++e)
     if (!e->second.emitted)
       fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t\\tinline\\t%s\\n\"\n", e->first.c_str(), e->second.verdict.c_str(),
@@ -283,6 +301,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   pl.ref_pass_instance_number = 1;
   pl.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pl);
+  register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
 }
