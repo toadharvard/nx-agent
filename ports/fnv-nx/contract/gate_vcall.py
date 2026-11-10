@@ -5,14 +5,17 @@ Both sides are sorted; equal lengths are compared pairwise.  Several native copi
 """
 import collections
 
+import store
+
 NAME = 'vcall'
 ORDER = ('equal', 'delta_0_or_4', 'count_differs', 'other')   # best .. worst
 
 
 def run(facts, obj, link):
     copies = collections.defaultdict(list)
-    for (_, a), v in obj.items():
-        if a != 'ztv' and a in facts['fn']:
+    for k, v in obj.items():
+        a = k[1]
+        if store.is_function_key(k) and a in facts['fn']:
             copies[a].append(sorted(v[4]))
     counts, rows, delta = collections.Counter(), [], collections.Counter()
     for a, vs in sorted(copies.items()):

@@ -1,11 +1,13 @@
 """gate_xc - does every C++ static initializer (facts['xc']) have an address-bound native function? (L1 CONTRACT)"""
 import collections
 
+import store
+
 NAME = 'xc'
 
 
 def run(facts, obj, link):
-    bound = {a for (_, a) in obj if a != 'ztv'}
+    bound = {k[1] for k in obj if store.is_function_key(k)}
     counts, rows = collections.Counter(), []
     for a in facts['xc']:
         if a in bound:
