@@ -43,7 +43,7 @@ def meta_one(a):
 
 
 def load_meta(a):
-    src = b''.join(open(os.path.join(a.lifter, p), 'rb').read() for p in sorted(['fnvlift/core.py', 'fnvlift/f_flow.py', 'fnvlift/f_int.py', 'rt/fnvl.h']))
+    src = b''.join(open(os.path.join(a.lifter, p), 'rb').read() for p in sorted(['fnvlift/core.py', 'fnvlift/f_flow.py', 'fnvlift/f_int.py', 'fnvlift/f_x87.py', 'fnvlift/f_x87_ctl.py', 'rt/fnvl.h', 'rt/fnvl_x87.h']))
     f = '%s/meta-%s.pkl' % (a.work, hashlib.sha1(src + open(__file__, 'rb').read() + str(os.stat(a.universe).st_mtime).encode()).hexdigest()[:12])
     if os.path.exists(f): return pickle.load(open(f, 'rb'))
     t0 = time.time()
@@ -145,10 +145,10 @@ def link(a, objs, syms, flags, ldextra=()):
     d = a.work; h = phf.build(list(syms)) if a.dispatch == 'phf' else None
     open(d + '/tab.c', 'w').write(phf.table_c(syms, h)); open(d + '/libc.S', 'w').write(LIBC)
     df = ['-DFNVL_PHF', '-DFNVL_K1=%du' % h['k1'], '-DFNVL_K2=%du' % h['k2'], '-DFNVL_NBITS=%d' % h['nbits'], '-DFNVL_TBITS=%d' % h['tbits']] if h else []
-    for src, extra in (('%s/rt/rt.c' % a.lifter, df), (d + '/tab.c', []), (d + '/libc.S', [])):
+    for src, extra in (('%s/rt/rt.c' % a.lifter, df), ('%s/rt/x87.c' % a.lifter, ['-I', '%s/rt' % a.lifter]), (d + '/tab.c', []), (d + '/libc.S', [])):
         subprocess.check_call(['aarch64-linux-gnu-gcc'] + CF + extra + [src, '-o', '%s/%s.o' % (d, os.path.basename(src)[:-2])])
     elf = d + '/chain.elf'; open(d + '/objs.txt', 'w').write('\n'.join(sorted(objs)))
-    r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % 0xE0000000, '-e', '0', '-o', elf] + list(ldextra) + [d + '/rt.o', d + '/tab.o', d + '/libc.o'] + sorted(objs), capture_output=True, text=True)
+    r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % 0xE0000000, '-e', '0', '-o', elf] + list(ldextra) + [d + '/rt.o', d + '/x87.o', d + '/tab.o', d + '/libc.o'] + sorted(objs), capture_output=True, text=True)
     if r.returncode: sys.exit('link failed: ' + r.stderr[:300])
     return elf
 

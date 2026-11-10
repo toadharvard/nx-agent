@@ -128,7 +128,7 @@ def analyze(cx, img):
                 return False
             A[a] = nd
             cx.xmax = max(cx.xmax, d, nd)
-            todo.extend((s, nd) for s in succs(cx, a, ins, m))
+            todo.extend((s, nd) for s in succs(cx, a, ins, m) if s in I)
         rest = [a for a in sorted(I) if a not in D]               # labels only reached from outside (funclet entries, address-taken)
         if not rest:
             return True
