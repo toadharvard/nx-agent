@@ -40,7 +40,9 @@ Code pointers in the running process are **native** addresses (D3: the image's c
 - `call rel32` to entry B: a direct C call of `X_<B>(c)`, the x86-ABI entry of B. `X_<B>` is `L_<B>` itself when B's
   body is lifted, or the generated exit bridge when B's body is native.
 - `call reg` / `call [mem]`: `fnvl_icall(c, target)`. The target is a native address; a table maps native entry
-  address -> x86-ABI entry (`X_<addr>`). A miss is a report with the call site, never a guess.
+  address -> x86-ABI entry (`X_<addr>`). The table is total by construction: every code pointer the process can hold
+  is a `__fnv_<addr>` of the universe, an import, or a native-only entry the platform registers, and each of them
+  has an `X_` entry. The build fails if any address of the universe lacks one.
 - Every address has both entries. `__fnv_<A>` (AAPCS): the native body, or the entry bridge (arguments -> ecx/edx
   and the guest stack by the exe prototype, `L_<A>`, result from eax / edx:eax / ST0). `X_<A>` (x86 state): the
   lifted body, or the exit bridge (arguments from the guest stack by the same prototype, the native call, result
@@ -58,11 +60,25 @@ by the control word, done by `rt/x87.c` and tested bit for bit against QEMU's so
 A double-based fast path is an optimization on top (allowed where it is provably equal: operands and result in the
 normal double range, precision 24 or 53) and is checked against the exact model, not against hope.
 
-Declared platform classes (results allowed to differ from one x86 CPU to another, so they cannot be bit-equal to
-"the" x86): the approximate SSE instructions `rcpps`/`rsqrtps`/`rsqrtss` (we return the correctly rounded value,
-which is inside Intel's documented error bound) and the x87 transcendentals (`fsin`, `fcos`, `fsincos`, `fptan`,
-`fpatan`, `fyl2x`, ...; correctly rounded libm value at the control word's precision). The bench compares these
-with their documented bounds; everything else is bit-exact.
+Instructions whose result Intel does not define bit by bit (`rcpps`/`rsqrtps`/`rsqrtss`: a table inside the CPU):
+the rule is "equal to the reference CPU on every input". The 2^32 single-precision inputs are enumerated on the x86
+farm host and the lifted implementation is compared on all of them. The x87 transcendentals (`fsincos` and the CRT's
+`fsin`, `fyl2x`, ...) cannot be enumerated; their rule is open and reported to the orchestrator.
+
+## Faults and exceptions (owner order 2026-11-10)
+
+No trap paths. Whatever the x86 code does on the CPU, the lifted code does:
+- a hardware fault of the instruction (divide error, `int3`, access violation is the host's own fault) raises the
+  same SEH exception through the thread's `fs:[0]` chain, which the lifted frames build exactly as the exe does;
+- `rt/seh.c` is the dispatcher the exe expects from the OS: it walks `fs:[0]`, calls each handler (lifted code of
+  the exe: `__except_handler3/4`, `__CxxFrameHandler3`, which interpret the exe's own scope tables and FuncInfo),
+  and performs the unwind (`RtlUnwind`) those handlers ask for. The exe's EH machinery is lifted code like any
+  other, so FuncInfo, try maps, catchable types, rethrow and local destructors run from the exe's own tables;
+- native frames in between: the entry and exit bridges link a native frame into the chain in both directions
+  (a registration whose handler runs the native unwinder for that frame), so a throw crosses lifted and native
+  frames in any order.
+Proof: every FuncInfo and scope table of the exe is parsed (`tools/ehtables.py`, 0 unparsed), and the bench throws
+through every function that has one, comparing the unwind actions with the x86 execution.
 
 ## Entries: the universe
 
