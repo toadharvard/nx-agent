@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Tests for verify/runtime.py (python runtime as sandbox inputs + stage documents). Plain script: exit 0 on pass,
-one PASS/FAIL line per case. Needs root (sandbox). Store: /root/l4/rt-test."""
+one PASS/FAIL line per case. Needs root (sandbox). Scratch: a fresh mkdtemp under /root/l4 (or ~), removed at exit."""
+import atexit
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +16,8 @@ VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 
-BASE = "/root/l4/rt-test"
+BASE = tempfile.mkdtemp(dir="/root/l4" if os.path.isdir("/root/l4") else os.path.expanduser("~"), prefix="rt-")  # short: the PT_INTERP probe below needs BASE + "/i" within 27 bytes  # own dir per run: files run concurrently
+atexit.register(shutil.rmtree, BASE, ignore_errors=True)
 STORE = BASE + "/store"
 WORK = BASE + "/work"
 PY = [sys.executable, "-I"]
@@ -184,8 +187,8 @@ def loader_rule():
         old_i = b"/lib64/ld-linux-x86-64.so.2\0"
         check("probe executable has the usual PT_INTERP", old_i in data)
         bad = d + "/badinterp"
-        open(d + "/i", "wb").write(hdr(1, 1, 3))
-        new_i = (d + "/i").encode()  # must fit the 27 bytes of the original string
+        open(BASE + "/i", "wb").write(hdr(1, 1, 3))
+        new_i = (BASE + "/i").encode()  # must fit the 27 bytes of the original string
         open(bad, "wb").write(data.replace(old_i, new_i + b"\0" * (len(old_i) - len(new_i))))
         os.chmod(bad, 0o755)
         runtime.DEFAULT_DIRS = [d + "/w64", "/lib64"]

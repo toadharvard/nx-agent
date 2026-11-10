@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Tests for verify/unitstage.py (L0: one translation unit = PP stage on name-complete views + CC stage on the preprocessed
 text) and for `runtime.py tool`. Plain script: exit 0 on pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-g++ 13.
-Store: /root/l4/unit-test (same filesystem as the hardlinks)."""
+Scratch: a fresh mkdtemp under /root/l4 (or ~, same filesystem as the hardlinks), removed at exit."""
 import argparse
+import atexit
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -16,7 +18,8 @@ sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 import unitstage  # noqa: E402
 
-BASE = "/root/l4/unit-test"
+BASE = tempfile.mkdtemp(dir="/root/l4" if os.path.isdir("/root/l4") else os.path.expanduser("~"), prefix="unit-test-")  # own dir per run: files run concurrently
+atexit.register(shutil.rmtree, BASE, ignore_errors=True)
 STORE, WORK, TOOLRT = BASE + "/store", BASE + "/work", BASE + "/toolrt.json"
 CXX = "/usr/bin/aarch64-linux-gnu-g++"
 PY = [sys.executable, "-I"]
