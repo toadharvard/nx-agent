@@ -94,7 +94,7 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
   runs in both.
 - Direct3DCreate9Ex exists as in the reference environment; the Ex interfaces are implemented in full.
 - GetAvailableTextureMem: Wine's accounting formula with the profile's video memory = the Switch GPU budget from L5
-  (asked 2026-11-10); the original is recorded under Wine with the same value (registry VideoMemorySize).
+  = 960 MiB for both profiles (L5 estimate 2026-11-10: 3285 pool - 2048 guest window - 93 code - 64 host - 32 audio/input - 87 shader cache and translator; one constant shared with L5's ENV_TRUTH row D5, may be revised); the original is recorded under Wine with the same value (registry VideoMemorySize).
 
 ## More tasks
 
