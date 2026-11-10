@@ -22,6 +22,41 @@ d = proto.declared('?h@@YGHHN@Z')
 check('stdcall int,double', (d['cc'], d['words']), ('stdcall', 3))
 check('data symbol', proto.declared('?x@@3HA'), None)
 
+def sig(sym):
+    d = proto.declared(sym)
+    return (d['ret'], d['args'], d['regs'], d['words'], d['varargs'], d['sret']) if d else None
+
+
+check('void', sig('?a@@YAXXZ'), ('v', [], [], 0, False, False))
+check('int', sig('?b@@YAHH@Z'), ('i', ['i'], [''], 1, False, False))
+check('ptr ret', sig('?c@@YAPAHXZ')[0], 'i')
+check('ref ret', sig('?d@@YAAAHXZ')[0], 'i')
+check('bool ret', sig('?e@@YA_NXZ')[0], 'i')
+check('float ret', sig('?f@@YAMXZ')[0], 'f')
+check('double ret', sig('?g@@YANXZ')[0], 'd')
+check('int64 ret', sig('?h@@YA_JXZ')[0], 'q')
+check('uint64 ret', sig('?h@@YA_KXZ')[0], 'q')
+check('struct ret', sig('?i@@YA?AUPoint@@XZ'), ('m?', [], [], 0, False, True))
+check('class ret', sig('?i@@YA?AVBox@@H@Z')[0], 'm?')
+check('arg classes', sig('?j@@YAXH_JMN@Z'), ('v', ['i', 'q', 'f', 'd'], ['', '', '', ''], 6, False, False))
+check('struct arg', sig('?k@@YAXUPoint@@H@Z'), ('v', ['s?', 'i'], ['', ''], None, False, False))
+check('fastcall', sig('?m@@YIXHMPAHH@Z'), ('v', ['i', 'f', 'i', 'i'], ['ecx', '', 'edx', ''], 2, False, False))
+check('thiscall', sig('?n@Foo@@QAEHH_J@Z'), ('i', ['i', 'q'], ['', ''], 3, False, False))
+check('varargs', sig('?o@@YAHPBDZZ'), ('i', ['i'], [''], 1, True, False))
+check('fnptr arg', sig('?p@@YAXP6AHH@ZH@Z'), ('v', ['i', 'i'], ['', ''], 2, False, False))
+check('fnptr varargs arg', sig('?q@@YAXP6AHHZZH@Z')[1], ['i', 'i'])
+check('backref', sig('?r@@YAXPAH_J01@Z'), ('v', ['i', 'q', 'i', 'q'], ['', '', '', ''], 6, False, False))
+check('backref struct', sig('?s@@YAXUPoint@@0@Z')[1:4:2], (['s?', 's?'], None))
+check('template arg', sig('?t@@YAXV?$vec@H@@@Z')[1], ['s?'])
+check('template ptr arg', sig('?u@@YAXPAV?$vec@H@@H@Z')[1], ['i', 'i'])
+check('enum arg', sig('?v@@YAXW4Color@@@Z')[1], ['i'])
+check('backref after fnptr', sig('?w@@YAXP6AXH@ZH0@Z')[3], None)
+check('fastcall sret', sig('?x@@YI?AUPoint@@H@Z')[3], None)
+check('ctor', sig('??0Foo@@QAE@XZ')[:2], ('n', []))
+check('array ptr', sig('?y@@YAXPAY02HH@Z')[1], ['i', 'i'])
+check('lvalue ref', sig('?z@@YAXAAHH@Z')[1], ['i', 'i'])
+check('rvalue ref', sig('?z@@YAX$$QAHH@Z')[1], ['i', 'i'])
+
 facts = {'fn': {0x10: {}, 0x20: {}, 0x30: {}, 0x40: {}, 0x50: {}, 0x60: {}}}
 n1 = {'fn': {0x10: {'n1': True, 'why': ''}, 0x20: {'n1': False, 'why': 'bytes differ'}, 0x30: {'n1': True, 'why': ''},
              0x40: {'n1': True, 'why': ''}, 0x50: {'n1': True, 'why': ''}}}
