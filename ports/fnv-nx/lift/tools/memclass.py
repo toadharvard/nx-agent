@@ -338,7 +338,7 @@ def analyze(args):
             else:
                 cls = 'heap/other'
         C[(cls, ls, wk)] += 1
-    return a, dict(offs=offs[:5], n=len(ins) - len(skip), C=C, fl=fl, imp=imp, tlsd=tlsd, fpass=fpass, bad=bad, acc=len(acc))
+    return a, dict(offs=offs[:5], n=len(ins) - len(skip), C=C, fl=fl, imp=imp, tlsd=tlsd, fpass=fpass, bad=bad, acc=len(acc), nm=len({t[0] for t in acc}))
 
 
 def fcls(c, bnd, T, tall, cidx, fpass):
@@ -391,8 +391,8 @@ def main():
     for a, r in good.items():
         tot.update(r['C']); fl.update(r['fl']); imp.update(r['imp'])
     nacc = sum(tot.values())
-    print('entries decoded %d (undecodable %d); instructions (each address counted once, %d duplicate address-entry pairs dropped) %d; memory accesses %d (loads %d, stores %d)' % (
-        len(good), len(res) - len(good), sum(len(v) for v in skip.values()), nins, nacc, sum(v for k, v in tot.items() if k[1] == 'L'), sum(v for k, v in tot.items() if k[1] == 'S')))
+    print('entries decoded %d (undecodable %d); instructions (each address counted once, %d duplicate address-entry pairs dropped) %d, with a memory operand (explicit or implicit) %d; memory accesses %d (loads %d, stores %d)' % (
+        len(good), len(res) - len(good), sum(len(v) for v in skip.values()), nins, sum(r['nm'] for r in good.values()), nacc, sum(v for k, v in tot.items() if k[1] == 'L'), sum(v for k, v in tot.items() if k[1] == 'S')))
     print('%-15s %9s %9s %6s   widths 1/2/4/8/10/16/other (loads | stores)' % ('class', 'loads', 'stores', 'share'))
     pc = {}
     for c in ORDER:
