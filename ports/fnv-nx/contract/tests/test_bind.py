@@ -69,6 +69,14 @@ check('bodysel shape', bodysel.decide({0x50: 'f'}, dict(fn={0x50: dict(n1=True, 
 units = dict(units=[dict(source='a/b.c'), dict(source='x.c'), dict(source='y.c'), dict(source='dir/u.cpp')])
 check('unit index', bind.unit_indices(units, ['a_b.c.o', 'dir_u.cpp.o']), {'a_b.c.o': 0, 'dir_u.cpp.o': 3})
 raises('missing unit', bind.unit_indices, units, ['nope.o'])
+# one address, rows in two objects: the object of the unit the N1 certificate records decides; no row there = no verdict
+R3 = dict(n3={('a_b.c.o', 0x10): ('ok', [0x20]), ('dir_u.cpp.o', 0x10): ('asm', []), ('a_b.c.o', 0x20): ('ok', []),
+              ('dir_u.cpp.o', 0x30): ('ok', []), ('a_b.c.o', 0x99): ('ok', [])})
+N3 = dict(fn={0x10: dict(unit=3), 0x20: dict(unit=0), 0x30: dict(unit=0)})
+check('n3 by address', bind.n3_by_address(R3, N3, units), {0x10: ('asm', []), 0x20: ('ok', [])})
+d0 = tempfile.mkdtemp()
+bind.write_n3(os.path.join(d0, 'n3.tsv'), {0x20: ('ok', []), 0x10: ('ok+E', [0x30, 0x20])})
+check('n3.tsv', open(os.path.join(d0, 'n3.tsv')).read(), '00000010\tok+E\t00000030\t00000020\n00000020\tok\n')
 obj = {('dir_u.cpp.o', 'ztv'): {}, ('dir_u.cpp.o', 'sympair'): rows[:3], ('dir_u.cpp.o', 'vtpair'): [('_ZTV1A', 8, '??_7A@@6B@', 0)],
        ('dir_u.cpp.o', 'n3'): [('_Z1fv', 'ok', (), '', ('1R',))],
        ('a_b.c.o', 'ztv'): {}, ('a_b.c.o', 'sympair'): [], ('a_b.c.o', 'vtpair'): [], ('a_b.c.o', 'n3'): [],

@@ -108,6 +108,21 @@ def bind_all(obj, n1, units):
     return res
 
 
+def n3_by_address(res, n1, units):
+    """{exe address: (verdict, [inlined exe addresses])}: bodysel.decide's `n3`.  One exe address can have rows in
+    several objects (inline functions).  The exe's copy is the one the N1 certificate records: n1['fn'][a]['unit'].
+    Only the row of that unit's object counts, so the result is a function of the address.  An address whose unit's
+    object has no row has no verdict (bodysel: LIFTED)."""
+    ui = unit_indices(units, sorted({ob for ob, _ in res['n3']}))
+    return {a: tuple(v) for (ob, a), v in res['n3'].items() if a in n1['fn'] and n1['fn'][a]['unit'] == ui[ob]}
+
+
+def write_n3(path, n3):
+    with open(path, 'w', newline='\n') as fh:
+        for a, (v, inl) in sorted(n3.items()):
+            fh.write('\t'.join(['%08x' % a, v] + ['%08x' % x for x in inl]) + '\n')
+
+
 def counts(res):
     c = collections.Counter(u[3] for u in res['unbound_sym'])
     h = collections.Counter(v for v, _ in res['n3'].values())
@@ -120,9 +135,13 @@ def main():
     ap = argparse.ArgumentParser()
     for n in ('obj', 'n1', 'units', 'out'):
         ap.add_argument('--' + n, required=True)
+    ap.add_argument('--n3-out', help='n3.tsv for bodysel.py --n3: address, verdict, inlined addresses')
     a = ap.parse_args()
     try:
-        res = bind_all(store.load(a.obj, 'obj'), store.load(a.n1, 'n1'), json.load(open(a.units)))
+        n1, units = store.load(a.n1, 'n1'), json.load(open(a.units))
+        res = bind_all(store.load(a.obj, 'obj'), n1, units)
+        if a.n3_out:
+            write_n3(a.n3_out, n3_by_address(res, n1, units))
     except ValueError as e:
         print('bind: ' + str(e), file=sys.stderr)
         sys.exit(1)
