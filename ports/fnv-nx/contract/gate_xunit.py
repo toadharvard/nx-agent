@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gate_xunit - no name of the game binds across a unit boundary (condition of N1's per-unit symbol scope).
 
-    gate_xunit.py --objects <dir of game objects> [--generated <dir of generated/platform objects>]
+    gate_xunit.py --objects <dir of game objects> --nm <aarch64 nm> [--generated <dir of generated/platform objects>]
 
 N1 proves `symbol -> address` is a function inside one unit.  That is only usable if the link resolves a
 game name inside its unit, by address, and never globally by name.  So over the game objects:
@@ -21,10 +21,10 @@ import gatefile
 LINE = re.compile(r'(\S+?\.o):(?:[0-9a-f]+ )?\s*(\S) (\S+)$')
 
 
-def scan(files):
+def scan(files, nm):
     defs, undef = collections.defaultdict(set), collections.defaultdict(set)
     for i in range(0, len(files), 200):
-        out = subprocess.run(['aarch64-linux-gnu-nm', '-A', '-g'] + files[i:i + 200], capture_output=True, text=True).stdout
+        out = subprocess.run([nm, '-A', '-g'] + files[i:i + 200], capture_output=True, text=True).stdout
         for ln in out.splitlines():
             m = LINE.match(ln)
             if m and not m[3].startswith(('__fnv_', '__fnvnx')):
@@ -36,8 +36,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--objects', required=True)
     ap.add_argument('--generated')
+    ap.add_argument('--nm', required=True, help='path of the aarch64 nm (no PATH lookup)')
     a = ap.parse_args()
-    defs, undef = scan(sorted(glob.glob(os.path.join(a.objects, '*.o'))))
+    defs, undef = scan(sorted(glob.glob(os.path.join(a.objects, '*.o'))), a.nm)
     c = collections.Counter()
     bad = []
     for name, obs in sorted(defs.items()):

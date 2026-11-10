@@ -422,9 +422,14 @@ def main():
     ap.add_argument('--units', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--vft-out', help='also write the sorted list of vftable addresses (input of objfacts_one.py)')
     a = ap.parse_args()
     facts = build(a.exe, a.units, a.jobs, log=lambda s: print(s, file=sys.stderr))
     store.save(a.out, 'facts', facts)
+    if a.vft_out:
+        with open(a.vft_out, 'w') as fh:
+            json.dump(sorted(facts['vft']), fh, separators=(',', ':'))
+            fh.write('\n')
     print(json.dumps(facts['meta'], indent=1))
 
 

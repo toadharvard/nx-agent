@@ -3,6 +3,10 @@
 
     objfacts.py --link <link dir with out/addrmap.tsv and fixed/*.o> --facts facts.json --out obj.json [--jobs N]
 
+This file is the shared code and the one-step convenience.  The L4 stage sandbox runs it in two stages instead
+(same functions, same bytes): objfacts_one.py (one object -> <object>.obj.json, store kind `objone`) and
+objfacts_merge.py (a directory of those -> obj.json, kind `obj`).
+
 Per native function that the address map binds to an exe address:
   vt     [(insn_off, symbol, addend, base, store_off)]  vtable-pointer values the function materializes.
          symbol is `_ZTV...` or `__fnv_<vftable>`; addend is what the code adds to the GOT value; base is
@@ -37,13 +41,24 @@ def _n(s):
     return int(s, 0) if s else 0
 
 
-def load_addrmap(link):
+def load_addrmap_tsv(path, only=None):
+    """{(object basename, symbol): exe address}; `only`: keep the rows of that one object basename."""
     amap = {}
-    for ln in open(os.path.join(link, 'out', 'addrmap.tsv')):
-        p = ln.rstrip('\n').split('\t')
-        if p[0][:1] != '#' and len(p) > 4 and p[3] and p[4]:
-            amap[(p[4], p[3])] = int(p[0], 16)
+    with open(path) as fh:
+        for ln in fh:
+            p = ln.rstrip('\n').split('\t')
+            if p[0][:1] != '#' and len(p) > 4 and p[3] and p[4] and (only is None or p[4] == only):
+                amap[(p[4], p[3])] = int(p[0], 16)
     return amap
+
+
+def load_addrmap(link):
+    return load_addrmap_tsv(os.path.join(link, 'out', 'addrmap.tsv'))
+
+
+def init_disasm():
+    global _md
+    _md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
 
 
 def scan_function(code, relocs, vftset):
@@ -215,8 +230,8 @@ def scan_object(path, amap, vftset):
 
 
 def _init(link, vftset):
-    global _md, _amap, _vft
-    _md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
+    global _amap, _vft
+    init_disasm()
     _amap = load_addrmap(link)
     _vft = vftset
 
@@ -239,6 +254,12 @@ def build(link, vftset, jobs=4):
     return out
 
 
+def summary(out):
+    fns = [v for k, v in out.items() if k[1] != 'ztv']
+    return 'native functions with an exe address: %d; with vtable values: %d; vtable sites: %d (not stored plainly: %d)' % (
+        len(fns), sum(1 for v in fns if v[0]), sum(len(v[0]) for v in fns), sum(1 for v in fns for s in v[0] if s[3] is None))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--link', required=True)
@@ -249,9 +270,7 @@ def main():
     F = store.load(a.facts, 'facts')
     out = build(a.link, set(F['vft']), a.jobs)
     store.save(a.out, 'obj', out)
-    fns = [v for k, v in out.items() if k[1] != 'ztv']
-    print('native functions with an exe address: %d; with vtable values: %d; vtable sites: %d (not stored plainly: %d)' % (
-        len(fns), sum(1 for v in fns if v[0]), sum(len(v[0]) for v in fns), sum(1 for v in fns for s in v[0] if s[3] is None)))
+    print(summary(out))
 
 
 if __name__ == '__main__':
