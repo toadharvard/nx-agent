@@ -57,6 +57,7 @@
 #include "tree-ssa-operands.h"
 #include "tree-ssanames.h"
 #include "stringpool.h"
+#include "attribs.h"
 #include "cgraph.h"
 #include "varasm.h"
 #include "output.h"
@@ -304,6 +305,9 @@ static tree walk_op(tree *tp, int *walk_subtrees, void *data)
 static void slot_call(gimple_stmt_iterator *gsi, gcall *call, tree fp, tree obj, int flags)
 {
   tree fnt = build_function_type_list(ptr_type_node, TREE_TYPE(obj), unsigned_type_node, NULL_TREE);
+  /* ??_E is a member function: __thiscall in the exe's contract (CC1, read by the fnvnx_dispatch plugin) */
+  fnt = build_type_attribute_variant(fnt, tree_cons(get_identifier("fnvnx_cc"),
+          build_tree_list(NULL_TREE, build_string(5, "this")), TYPE_ATTRIBUTES(fnt)));
   tree p = make_ssa_name(build_pointer_type(fnt));
   gimple *g = gimple_build_assign(p, NOP_EXPR, fp);
   gimple_set_location(g, gimple_location(call));

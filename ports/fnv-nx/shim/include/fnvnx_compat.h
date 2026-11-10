@@ -30,10 +30,20 @@
 
 /* Calling conventions: AArch64 has one. Argument-order mismatches that x86 hid (fastcall with a
  * dummy EDX parameter called as thiscall, ...) are fixed by generated bridges, not here. */
+#ifdef FNVNX_SDD
+/* CC1: the x86 calling convention of a declaration is a fact of the exe's contract (the MSVC name encodes it, a
+ * bridge to a lifted body needs it). It changes no AArch64 code, so it is kept as an attribute that the
+ * fnvnx_dispatch plugin registers, on the function type, where MSVC's keyword stood. */
+#define __cdecl __attribute__((fnvnx_cc("cdecl")))
+#define __stdcall __attribute__((fnvnx_cc("std")))
+#define __fastcall __attribute__((fnvnx_cc("fast")))
+#define __thiscall __attribute__((fnvnx_cc("this")))
+#else
 #define __cdecl
 #define __stdcall
 #define __fastcall
 #define __thiscall
+#endif
 #define __clrcall
 #define _cdecl
 #define _stdcall

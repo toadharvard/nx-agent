@@ -48,12 +48,23 @@ def main():
         check('%s: no indirect call without a site check' % f,
               len(re.findall(r'\b(?:blr|br)\s+x\d+', b)) == n and len(re.findall(r'\bcmp\s+w\d+, w\d+', b)) >= n, b)
     hit = re.sub(r'\s+', ' ', body(s, '_Z2c1PFiiEi'))
-    check('hit path: load key, compare, branch, load entry',
-          re.search(r'ldr w\d+, \[x\d+, #:lo12:\.LANCHOR0\] cmp w\d+, w0 bne \.L\d+ ldr w\d+, \[x\d+, 4\]', hit), hit)
-    check('a direct call is untouched', re.sub(r'\s+', ' ', body(s, '_Z2c6i')).strip() == '.LFB5: .cfi_startproc b _Z6directi'
-          or '_Z6directi' in body(s, '_Z2c6i') and 'fnvnx_dispatch' not in body(s, '_Z2c6i'))
-    check('one two-word site per indirect call', len(re.findall(r'^fnvnx_site\.\d+:', s, re.M)) == 6
-          or s.count('.zero\t48') + s.count('.zero\t8') >= 1, '')
+    check('hit path: ONE 64-bit load of the site, compare the low half, branch, shift',
+          re.search(r'ldr (x\d+), \[x\d+, #:lo12:\.LANCHOR0\] cmp w0, w\d+ bne \.L\d+ lsr x\d+, \1, 32', hit)
+          and len(re.findall(r'\bldr\b[^\n]*LANCHOR0', body(s, '_Z2c1PFiiEi'))) == 1, hit)
+    check('a direct call is untouched', '_Z6directi' in body(s, '_Z2c6i') and 'fnvnx_dispatch' not in body(s, '_Z2c6i'))
+    sites = re.findall(r'^fnvnx_site\.\d+:\n\t\.zero\t8$', s, re.M)
+    calls = len(re.findall(r'\bbl\s+fnvnx_dispatch\b', s))
+    check('one 8-byte zero site per indirect call', len(sites) == calls == 11, '%d sites, %d calls' % (len(sites), calls))
+    def desc(f):
+        m = re.search(r'adrp\s+x\d+, (\.LC\d+)', body(s, f))
+        m = m and re.search(r'^%s:\n\t\.string\t"([^"]*)"' % re.escape(m.group(1)), s, re.M)
+        return m.group(1) if m else None
+    shapes = {'_Z2c1PFiiEi': 'stack:i:i', '_Z2c2P1Ai': 'this:i:i,i', '_Z2c3P1A': 'this:i:i,i',
+              '_Z2d1PFviifE': 'fast:v:i,i,f', '_Z2d2PFxdxE': 'stack:q:d,q',
+              '_Z2d3PF2V3S_2P23BigcES_S0_S1_': 'stack:a12:s12h,s8g,s32r,i', '_Z2d4PF3Big2NTERS0_': 'stack:m32:s4r',
+              '_Z2d5P1BMS_FifdE': 'this:i:i,f,d'}
+    for f, want_d in shapes.items():
+        check('%s: descriptor %s' % (f, want_d), desc(f) == want_d, repr(desc(f)))
     print('test_dispatch: %s' % ('FAILED %d' % len(fails) if fails else 'ok'))
     return 1 if fails else 0
 
