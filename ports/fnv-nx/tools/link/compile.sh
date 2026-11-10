@@ -89,7 +89,7 @@ if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
 # (65 units: functions whose call count differs from the exe 532 -> 425, paired sites at delta 0 3,643 -> 4,617);
 # a speculative direct call would also go to a unit-local alias, past the link's by-address binding. A layout flag:
 # objects with and without it must never mix. Default 0 until the one full recompile (M6).
-SDD_SO=""; PI_SO=""
+SDD_SO=""; PI_SO=""; DISPATCH_SO=""
 if [ "${FNVNX_SDD:-0}" = 1 ]; then
   SDD_SO=$(CXX=$CXX bash "$HERE/toolchain/sdd/build.sh" "$OUT/.sdd") \
     || { echo "compile.sh: the fnvnx_sdd plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
@@ -109,6 +109,11 @@ if [ "${FNVNX_SDD:-0}" = 1 ]; then
   PI_SO=$(CXX=$CXX bash "$HERE/toolchain/pi/build.sh" "$OUT/.pi") \
     || { echo "compile.sh: the fnvnx_pi plugin does not build" >&2; exit 2; }
   FLAGS+=(-fplugin="$PI_SO")
+  # DISPATCH1 (toolchain/dispatch): code pointer values stay the exe's addresses, so every indirect call checks its
+  # own two-word site and otherwise asks the runtime's fnvnx_dispatch(exe address, site) for the entry to call.
+  DISPATCH_SO=$(CXX=$CXX bash "$HERE/toolchain/dispatch/build.sh" "$OUT/.dispatch") \
+    || { echo "compile.sh: the fnvnx_dispatch plugin does not build" >&2; exit 2; }
+  FLAGS+=(-fplugin="$DISPATCH_SO")
 fi
 # AB_FLAGS: extra flags appended after all of the above, so they win (e.g. -fstrict-aliasing against the parity set).
 # For A/B measurements only (tools/perf/unit_ab.sh, docs/PERF.md 11.8), never for a build that runs; unset = no
@@ -192,11 +197,15 @@ for f in "${FLAGS[@]}"; do
   case $f in -std=gnu++17) CFLAGS+=(-std=gnu99) ;; -fpermissive|-Wno-narrowing|-fplugin=*|-fplugin-arg-*) ;; *) CFLAGS+=("$f") ;; esac
 done
 export CC CFLAGS_STR="${CFLAGS[*]}"
-jq -r '.units[] | [.source, ([.flags[]? | select(startswith("/D")) | "-D" + .[2:]] | join(" "))] | @tsv' \
+# A unit the recipe builds with /fp:fast tells the N3 plugin so (FNVNX_SDD=1): there the source does not fix the
+# exe's floating-point semantics, and the plugin puts its functions that use floating point outside the subset.
+FPFAST_ARG=""; [ "${FNVNX_SDD:-0}" = 1 ] && FPFAST_ARG="-fplugin-arg-fnvnx_pi-fpfast"
+jq -r --arg fpfast "$FPFAST_ARG" '.units[] | [.source, (([.flags[]? | select(startswith("/D")) | "-D" + .[2:]]
+    + (if $fpfast != "" and ([.flags[]? | select(. == "/fp:fast")] | length) > 0 then [$fpfast] else [] end)) | join(" "))] | @tsv' \
   "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
 # Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
 # same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
-objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO" $SDD_SO $PI_SO; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
+objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO" $SDD_SO $PI_SO $DISPATCH_SO; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
             xargs -0 cat) | sha256sum | cut -c1-16)
 # One compile.sh at a time per object directory: a second run with other flags would delete the first one's objects
 # here (the stamp above) while it works (try1of1, D26: 2,499 units "failed (no error line)", 1,716 logs of 0 bytes,

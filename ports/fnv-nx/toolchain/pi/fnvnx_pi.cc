@@ -20,6 +20,8 @@
  *              setjmp    calls setjmp
  *              varargs   the definition takes variable arguments
  *              volatile  a volatile access
+ *              fpfast    the unit is built with /fp:fast (a fact of the recipe, plugin argument `fpfast`) and
+ *                        the body has a floating-point operand: the source does not fix what the exe computes
  *              argorder  a call with side effects in two or more arguments whose order cannot be read out of an
  *                        object (see "argument order" below)
  *              div       an integer division or remainder by a non-constant (x86 traps where AArch64 gives 0)
@@ -71,6 +73,7 @@ int plugin_is_GPL_compatible;
 
 struct facts { std::string verdict; std::set<std::string> types; bool emitted, mem; };
 static std::map<std::string, facts> early;       /* by assembler name of the function */
+static bool unit_fpfast;                           /* the recipe builds this unit with /fp:fast */
 static std::vector<std::string> lines;
 static std::set<std::string> all_thunks;          /* every thunk of the unit, listed before code generation */
 static std::set<std::string> thunk_rows;          /* thunks that went through the passes */
@@ -294,7 +297,7 @@ struct cfg_pass : gimple_opt_pass {
   cfg_pass(gcc::context *c) : gimple_opt_pass(cfg_data, c) {}
   unsigned int execute(function *fun) override
   {
-    bool r_asm = false, r_vol = false, r_div = false, r_shift = false;
+    bool r_asm = false, r_vol = false, r_div = false, r_shift = false, r_fp = false;
     facts f; f.emitted = false;
     basic_block bb;
     FOR_EACH_BB_FN(bb, fun)
@@ -313,6 +316,9 @@ struct cfg_pass : gimple_opt_pass {
         }
         walk_stmt_info wi; memset(&wi, 0, sizeof wi); wi.info = &f.types;
         walk_gimple_op(st, walk_types, &wi);
+        if (unit_fpfast)
+          for (unsigned k = 0; k < gimple_num_ops(st); k++)
+            if (gimple_op(st, k) && TREE_TYPE(gimple_op(st, k)) && SCALAR_FLOAT_TYPE_P(TREE_TYPE(gimple_op(st, k)))) r_fp = true;
       }
     tree fn = fun->decl;
     for (tree p = DECL_ARGUMENTS(fn); p; p = DECL_CHAIN(p)) note_type(TREE_TYPE(p), f.types);
@@ -320,7 +326,7 @@ struct cfg_pass : gimple_opt_pass {
     FOR_EACH_LOCAL_DECL(fun, ix, v) note_type(TREE_TYPE(v), f.types);
     /* `uninit` (a local in a register) is decided on SSA and comes before uninit-mem in the order of reasons */
     f.verdict = r_asm ? "asm" : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
-              : r_vol ? "volatile" : arg_unreadable.count(source_name(fn)) ? "argorder"
+              : r_vol ? "volatile" : r_fp ? "fpfast" : arg_unreadable.count(source_name(fn)) ? "argorder"
               : r_div ? "div" : r_shift ? "shift" : "";
     f.mem = unproven_memory_read(fun);
     free_dominance_info(CDI_DOMINATORS);
@@ -419,6 +425,8 @@ static void finish_unit(void *, void *)
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
   if (!plugin_default_version_check(ver, &gcc_version)) return 1;
+  for (int i = 0; i < info->argc; i++)
+    if (!strcmp(info->argv[i].key, "fpfast")) unit_fpfast = true;
   register_pass_info pc;
   pc.pass = new cfg_pass(g);
   pc.reference_pass_name = "cfg";
