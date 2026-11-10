@@ -4,7 +4,14 @@
 Input: sys_names.tsv (dll, name) from pemanifest.py and a directory of export
 specification files of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec),
 which give every export's calling convention and argument slots.
-Output rows: dll, name, ordinal, conv, ret, args, native_symbol
+Output rows: dll, name, ordinal, conv, ret, args, native_symbol, bind
+  bind  sym    native_symbol is a defined external symbol of the platform objects (checked against the
+               symbol list given as the 4th argument: `nm --defined-only -g` names, one per line)
+        lookup the implementation has internal linkage or is the C library's: its address is
+               fnvnx_win32_lookup_export(dll, name) at load time (native_symbol is then `-`)
+        l3     provided by the lifter runtime under native_symbol
+        data   the slot holds the address of an object: fnvnx_win32_lookup_export(dll, name)
+        none   no implementation yet: a build that needs this row must fail
   conv  stdcall | cdecl | vararg | thiscall (this in ecx) | data (the slot is the address of an object)
   ret   v | i | q | f | d      (a spec file does not state the return type: `i` is written
                                 unless RET below names the function; the list is closed by
@@ -14,7 +21,7 @@ Output rows: dll, name, ordinal, conv, ret, args, native_symbol
 A name missing from its spec file, a forward to another DLL that cannot be followed,
 or an unknown argument type is an error: the table is total or the script fails.
 
-Usage: bridgetable.py sys_names.tsv <spec-dir> out.tsv
+Usage: bridgetable.py sys_names.tsv <spec-dir> out.tsv <defined-symbols.txt> <msvcrt_exports.cpp>
 """
 import os, re, sys
 
@@ -95,7 +102,9 @@ def native(dll, name):
     return name
 
 
-def main(names, spec_dir, out):
+def main(names, spec_dir, out, symfile, crt_table):
+    syms = set(open(symfile).read().split())
+    crt = set(re.findall(r'R\("([^"]+)",', open(crt_table).read()))
     rows, errors = [], []
     for line in open(names):
         dll, name = line.rstrip("\n").split("\t")[:2]
@@ -103,7 +112,7 @@ def main(names, spec_dir, out):
             sig = {"SteamAPI_RegisterCallback": "ii", "SteamAPI_UnregisterCallback": "i"}.get(name, "")
             ret = "v" if name in ("SteamAPI_Shutdown", "SteamAPI_RunCallbacks", "SteamAPI_RegisterCallback",
                                   "SteamAPI_UnregisterCallback") else "i"
-            rows.append((dll, name, "", "cdecl", ret, sig, name))
+            rows.append((dll, name, "", "cdecl", ret, sig, name, "sym" if name in syms else "none"))
             continue
         try:
             real, ordn, conv, args = resolve(spec_dir, dll, name)
@@ -111,9 +120,18 @@ def main(names, spec_dir, out):
             errors.append("%s!%s: %s" % (dll, name, e))
             continue
         ret = RET.get((dll, real), "i")
-        rows.append((dll, real, ordn, conv, ret, args, native(dll, real)))
+        sym = native(dll, real)
+        if sym.startswith("fnvl_"):
+            bind = "l3"
+        elif conv == "data":
+            sym, bind = "-", ("data" if real in crt else "l3" if real == "_adjust_fdiv" else "none")
+        elif dll == "msvcrt.dll":
+            sym, bind = "-", ("lookup" if real in crt else "none")
+        else:
+            bind = "sym" if sym in syms else "none"
+        rows.append((dll, real, ordn, conv, ret, args, sym, bind))
     with open(out, "w") as f:
-        f.write("dll\tname\tordinal\tconv\tret\targs\tnative_symbol\n")
+        f.write("dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n")
         for r in rows:
             f.write("\t".join(r) + "\n")
     for e in errors:
@@ -123,4 +141,4 @@ def main(names, spec_dir, out):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:6])
