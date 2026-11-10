@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Code universe of FalloutNV.exe: recursive descent from decomp starts, entry point, call/tail targets, reloc'd
-pointers; jump tables; byte classification of .text. Output: /home/user/l3facts/universe.tsv + count-only stdout."""
+pointers (entry unless a consumer rule proves data); jump tables; R3 byte accounting of .text (codemap.py), entry-set
+comparison (reconcile.py). Output: /home/user/l3facts/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
 import os, re, sys, struct, bisect, capstone
 from types import SimpleNamespace
 import ehtables, codemap, reconcile

@@ -42,36 +42,52 @@ def memslot(i, o, sz):
     return ('s', m.disp, sz) if b == 'esp' else ('b', m.disp, sz) if b == 'ebp' else ('g', m.disp & M32) if b is None else None
 
 
-def decode(a, ext):
-    try:
-        ins, tb, tk = core.explore(IMG, a, a + ext, IMG.bytes(a, ext))
-    except Exception:
-        return None
-    succ, tails = {}, {}
-    for x, i in ins.items():
-        m = mn(i); n = x + i.size; o = i.operands
-        if m == 'jmp':
-            s = [o[0].imm & M32] if o[0].type == X.X86_OP_IMM else tb.get(x, list(tk))
-        elif m in RETS:
-            s = []
-        else:
-            s = [n] + ([o[0].imm & M32] if m[0] == 'j' or m.startswith('loop') else [])
-        succ[x] = [t for t in s if t in ins]
-        out = [t for t in s if t not in ins]
-        if out and (m[0] == 'j' or m.startswith('loop')):
-            tails[x] = out
-        elif m == 'jmp' and o[0].type == X.X86_OP_IMM and out:
-            tails[x] = out
-    return ins, succ, tails
+KINDS = {}                  # entry -> kind (set before forking workers)
+STARTS = {'decomp', 'call', 'entry', 'tail', 'export', 'tls'}
+
+
+def load_universe():
+    raw = open(UNI, 'rb').read()
+    rows = [(int(f[0], 16), int(f[2]), f[1]) for f in (ln.split('\t') for ln in raw.decode().splitlines()) if len(f) >= 3 and f[2].isdigit() and int(f[2]) > 0]
+    KINDS.update((a, k) for a, e, k in rows)
+    return raw, rows
+
+
+def decode(a, ext, kind='decomp'):
+    """recursive descent over [a, a+ext). Non-decomp extents are byte sums, not spans: the range is widened (up to +512) while a
+    jump leaves it towards a target that is not another function start, and on undecodable tails."""
+    hi = a + ext
+    for _ in range(40):
+        try:
+            ins, tb, tk = core.explore(IMG, a, hi, IMG.bytes(a, hi - a))
+        except Exception:
+            if kind == 'decomp' or hi >= a + ext + 512:
+                return None
+            hi += 16; continue
+        succ, tails = {}, {}
+        for x, i in ins.items():
+            m = mn(i); n = x + i.size; o = i.operands
+            if m == 'jmp':
+                s = [o[0].imm & M32] if o[0].type == X.X86_OP_IMM else tb.get(x, list(tk))
+            elif m in RETS:
+                s = []
+            else:
+                s = [n] + ([o[0].imm & M32] if m[0] == 'j' or m.startswith('loop') else [])
+            succ[x] = [t for t in s if t in ins]
+            out = [t for t in s if t not in ins and (m[0] == 'j' or m.startswith('loop'))]
+            if out and (m != 'jmp' or o[0].type == X.X86_OP_IMM):
+                tails[x] = out
+        far = [t for ts in tails.values() for t in ts if hi <= t < a + ext + 512 and KINDS.get(t) not in STARTS]
+        if kind != 'decomp' and far:
+            hi = max(far) + 16; continue
+        return ins, succ, tails
+    return None
 
 
 class Fn:
     def __init__(s, a, ext, kind):
-        s.a, s.kind, s.memo, s.steps = a, kind, {}, 0
-        r = decode(a, ext)
-        for pad in (8, 32, 128, 512):            # non-decomp extents are byte sums, not spans: rescue truncated tails
-            if r is None and kind != 'decomp':
-                r = decode(a, ext + pad)
+        s.a, s.kind, s.memo, s.steps, s.w = a, kind, {}, 0, 2
+        r = decode(a, ext, kind)
         s.ok = r is not None
         if not r:
             return
@@ -165,7 +181,7 @@ def srcval(F, p, i, o, dep):
     if o.type == X.X86_OP_REG:
         b, sh, bits = core.SUB.get(i.reg_name(o.reg), (None, 0, 0))
         return val(F, p, ('r', b), dep) if b and sh == 0 else {('?', 'hireg')}
-    l = memslot(i, o, 2 if o.size < 4 else 4)
+    l = memslot(i, o, min(o.size, F.w))
     if l is None:
         return {('?', 'ptr')}
     return {('glob', l[1])} if l[0] == 'g' else val(F, p, l, dep)
@@ -334,7 +350,7 @@ def classify(vs, mx):
     ts = sorted(set(v[1:3] for v in vs if v[0] == 't'))
     other = [v for v in vs if v[0] not in 'ct']
     if len(cs) == len(vs) and cs:
-        return 'constant', ','.join('%04x' % v[1] for v in cs), [v[1] for v in cs]
+        return 'constant', ','.join('%04x' % (v[1] & (M32 if mx else 0xffff)) for v in cs), []
     if len(ts) == 1 and len(vs) == 1 or (ts and len({t for t in ts}) == 1 and not cs and not other):
         A, O = ts[0]
         if A == M32 and O == 0:
@@ -547,7 +563,7 @@ def work(args):
             if op.type == X.X86_OP_MEM and not op.mem.base and not op.mem.index and not op.mem.segment and (op.access & 2 or m.startswith(WSTORE)):
                 r['absw'].append((op.mem.disp & M32, x, o[1].imm & M32 if len(o) > 1 and m == 'mov' and o[1].type == X.X86_OP_IMM else -1))
         if m in ('fldcw', 'ldmxcsr'):
-            mx = m == 'ldmxcsr'; l = memslot(i, o[0], 4 if mx else 2)
+            mx = m == 'ldmxcsr'; F.w = 4 if mx else 2; l = memslot(i, o[0], F.w)
             if l is None:
                 r['sites'].append((m, x, 'unknown', 'ptr', '')); continue
             if l[0] == 'g':
@@ -607,12 +623,7 @@ def callargs(args):
 
 def main():
     t0 = time.time()
-    raw = open(UNI, 'rb').read()
-    rows = []
-    for ln in raw.decode().splitlines():
-        f = ln.split('\t')
-        if len(f) >= 3 and f[2].isdigit() and int(f[2]) > 0:
-            rows.append((int(f[0], 16), int(f[2]), f[1]))
+    raw, rows = load_universe()
     print('fpmodes: exe sha256 %s  universe.tsv md5 %s  entries %d' % (hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:12], hashlib.md5(raw).hexdigest()[:12], len(rows)))
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
@@ -641,7 +652,7 @@ def main():
             callers[t].add(a)
     dep = {a: r['dep'] for a, r in res.items() if r and r['dep']}
     for wave in range(10):                       # fixed point of callee return depth
-        new = {a: d['ret'] for a, d in dep.items() if d['ret']}
+        new = {a: d['ret'] for a, d in dep.items() if d['ret'] and not d['nconf'] and not d['nodepth']}
         if new == T and wave:
             break
         ch = {a for a in set(new) | set(T) if new.get(a, 0) != T.get(a, 0)}
@@ -666,7 +677,7 @@ def main():
     for a in sorted(res):
         for w in (res[a]['absw'] if res[a] else ()):
             absw[w[0]].append(w[1:] + (a,))
-    cw = Counter(); consts = set(); mxc = Counter(); mconsts = set(); br = Counter(); pcc = Counter(); gl = {}; unk = defaultdict(list); setters = set()
+    bl = []; cw = Counter(); consts = set(); mxc = Counter(); mconsts = set(); br = Counter(); pcc = Counter(); gl = {}; unk = defaultdict(list); setters = set()
     for s, a in sites.values():
         m, x, c, det, ex = s
         mxm = m == 'ldmxcsr'
@@ -683,6 +694,8 @@ def main():
             gl.setdefault(int(det, 16), []).append(x)
         if c == 'unknown':
             unk[(mxm, det)].append(x)
+            if not mxm and det in ('alias', 'partial', 'budget'):
+                bl.append(x)
             if 'arg' in det.split(','):
                 setters.add(a)
     L.append('fldcw classes: ' + ' '.join('%s=%d' % kv for kv in sorted(cw.items())))
@@ -693,6 +706,7 @@ def main():
         L.append('fldcw global %08x: %d site(s); direct writers %d (consts %s; any non-const %s)' % (g, len(xs), len(w), sorted({'%x' % x[1] for x in w if x[1] >= 0}), any(x[1] < 0 for x in w)))
     for (mxm, why), xs in sorted(unk.items()):
         L.append('unknown %s [%s]: %d  e.g. %s' % ('ldmxcsr' if mxm else 'fldcw', why, len(xs), ' '.join('%08x' % x for x in xs[:5])))
+    L.append('  of the unknown fldcw: %d are alias/partial/budget cases (pattern fnstcw..fistp..fldcw present in their function, unproven)' % len(bl))
     L.append('MXCSR ldmxcsr classes: ' + ' '.join('%s=%d' % kv for kv in sorted(mxc.items())) + '  constants: ' + ' '.join('%08x' % v for v in sorted(mconsts)))
     # CRT setters / readers and their callers
     K = set(setters) | {a for s, a in sites.values() if s[0] in ('fnclex', 'fclex', 'fninit', 'finit') and crt(a)} | {a for s, a in sites.values() if s[2] == 'status-escapes' and crt(a) and ext[a] < 400}
@@ -723,6 +737,7 @@ def main():
     cf = sorted(a for a, d in ds.items() if d['nconf'])
     L.append('x87 depth: entries using x87=%d; static depth everywhere=%d; join/ret conflict=%d; unknown(frstor/fldenv)=%d; undecodable entries=%d' % (
         len(ds), sum(1 for d in ds.values() if not d['nconf'] and not d['nodepth']), len(cf), sum(d['nodepth'] for d in ds.values()), len(bad)))
+    L.append('  conflicted entries by kind: ' + ' '.join('%s=%d' % kv for kv in sorted(Counter(kind[a] for a in cf).items())) + '; min<0 by kind: ' + ' '.join('%s=%d' % kv for kv in sorted(Counter(kind[a] for a, d in ds.items() if d['mi'] < 0).items())))
     L.append('  conflicts first10: ' + ' '.join('%08x' % a for a in cf[:10]))
     L.append('  max depth (relative to entry)=%d  entries>8=%d  entries popping inputs (min<0)=%d  entries with net ret depth: %s' % (
         max([d['mx'] for d in ds.values()] + [0]), sum(1 for d in ds.values() if d['mx'] > 8), sum(1 for d in ds.values() if d['mi'] < 0), dict(sorted(Counter(d['ret'] for d in dep.values()).items()))))

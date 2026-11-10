@@ -125,7 +125,7 @@ def consumers(U, eh):
     def scat(r):                                 # consumer category of one pointer site
         if r in sc: return sc[r]
         m = U.tcons.get(r)
-        return 'ctl:indexed-' + m if m in ('call', 'jmp') else 'res:indexed-load' if m else 'res:slot-in-unreached-text'
+        return 'ctl:indexed-' + m if m in ('call', 'jmp') else 'res:indexed-load' if m else 'res:address-taken-by-code' if U.cov[r - U.T0] == 2 else 'res:slot-in-unreached-text'
     po = [a for a in sorted(U.entries) if U.kinds[a] == {'ptr'} and a not in U.fsize]; cl = {a: [scat(r) for r in U.psites.get(a, ())] for a in po}
     ctl = [a for a in po if any(k.startswith(('ctl', 'data')) for k in cl[a])]; cs_ = Counter(k for a in ctl for k in sorted({k for k in cl[a] if k.startswith('ctl')})[:1])
     rs = Counter(sorted(k for k in cl[a] if k.startswith('res'))[0] for a in po if a not in set(ctl))
