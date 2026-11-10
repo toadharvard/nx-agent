@@ -64,7 +64,7 @@ def shift(c):
 @handler('rcl', 'rcr')
 def rotc(c):
     F, m, d = c.F, c.m, c.ops[0]; a, w = rd(d), d.w; W = w + 1; n32 = count(c); nz = ~eq(n32, 0)
-    x = concat(V('cf', 1), a); k = urem(trunc(n32, W), C(W, W))
+    x = concat(V('cf', 1), a); k = urem(zext(n32, W) if W > 32 else trunc(n32, W), C(W, W))
     r2 = (shl(x, k) | lshr(x, C(W, W) - k)) if m == 'rcl' else (lshr(x, k) | shl(x, C(W, W) - k))
     r = trunc(r2, w); cf = msb(r2)
     of = msb(r) ^ cf if m == 'rcl' else msb(r) ^ bit(r, w - 2)

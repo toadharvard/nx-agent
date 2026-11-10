@@ -6,7 +6,7 @@ Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when
 `when` on a register/flag write = the SDM defines the value only when `when` holds; df / flo (other EFLAGS bits) are state the
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
 import sys, os
-LIFT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'); sys.path.insert(0, LIFT)
+LIFT = os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'); sys.path.insert(0, LIFT)
 if 'fnvlift' not in sys.modules:       # only fnvlift/dsl.py is needed: a stub package keeps the proofs independent of the lifter's f_*.py (fnvlift/__init__ imports them all)
     import types; _pkg = types.ModuleType('fnvlift'); _pkg.__path__ = [os.path.join(LIFT, 'fnvlift')]; sys.modules['fnvlift'] = _pkg
 from fnvlift.dsl import *

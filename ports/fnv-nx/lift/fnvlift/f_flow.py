@@ -90,6 +90,7 @@ def raise_site(cx, code):
     (ContinueExecution) with esp restored; the loop then continues there. The instruction's own address is a label of the loop (retry)."""
     cx.nonlocal_ = True
     cx.raises.add(cx.a)
+    cx.raises.add(cx.nxt)       # #BP reports the address after the int3 as Context.Eip
     return 'SYNC_OUT; REGS(); fnvl_raise(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (code, cx.a)
 
 

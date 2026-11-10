@@ -75,9 +75,9 @@ class Arm(T.World):
         sp = st['regs'][4]; s.ensure(sp, 4, False); uc.mem_write(sp, struct.pack('<I', SENT))
         uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, ac, a, n, v, ud: None if T.HARN <= a < T.HARN_END else s.writes.add((a & 0xffffffff, n)))
         s.writes.clear()
-        uc.mem_write(s.CPU, struct.pack('<13I', *st['regs'], 0, 0, 0, 0x27f, 0) + b'\0' * 4 + b'\0' * 64 + b'\0' * 128 + struct.pack('<II', 0, 0x1f80) + b'\0' * 64 + b'\0' * 4)
+        uc.mem_write(s.CPU, struct.pack('<13I', *st['regs'], st.get('fs', 0), 0, 0, 0x27f, 0) + b'\0' * 4 + b'\0' * 64 + b'\0' * 128 + struct.pack('<II', 0, 0x1f80) + b'\0' * 64 + b'\0' * 4)
         s.im, s.n, s.nl, s.nd, s.nt, s.nr, s.ntr, s.trace, s.ev = im, 0, 0, 0, 0, 0, 0, [], None
-        s.sp = {im.sym[k][0]: k for k in ('fnvl_trace', 'fnvl_raise_ud', 'fnvl_raise', 'fnvl_dispatch')}
+        s.sp = {im.sym[k][0]: k for k in ('fnvl_trace', 'fnvl_raise_ud', 'fnvl_raise', 'fnvl_dispatch', 'fnvl_os_unhandled') if k in im.sym}
         s.rng = sorted(im.rt)
         uc.hook_add(UC_HOOK_CODE, s.code)
         uc.reg_write(UC_ARM64_REG_X0, s.CPU); uc.reg_write(UC_ARM64_REG_X1, im.sym['L_%08x' % root][0]); uc.reg_write(UC_ARM64_REG_SP, s.ASTACK); uc.reg_write(UC_ARM64_REG_X30, s.RETPAD)
@@ -88,7 +88,7 @@ class Arm(T.World):
         elif status == 'ok' and uc.reg_read(UC_ARM64_REG_PC) != s.RETPAD: status = 'budget'
         b = bytes(uc.mem_read(s.CPU, 324)); ftop, ftag = struct.unpack_from('<2I', b, 36); stv = struct.unpack_from('<8d', b, 56)
         return dict(status=status, regs=list(struct.unpack_from('<8I', b)), n=s.n, nl=s.nl, nd=s.nd, ndisp=s.nr, ntr=s.ntr, trace=s.trace, ftop=ftop & 7,
-                    st0=stv[ftop & 7] if ftag >> (ftop & 7) & 1 else None, ra=struct.unpack_from('<I', b, 320)[0], mem=s.written() if status == 'ok' else {})
+                    st0=stv[ftop & 7] if ftag >> (ftop & 7) & 1 else None, ra=struct.unpack_from('<I', b, 320)[0], mem=s.written() if status == 'ok' or status.startswith('unhandled') else {})
 
     def code(s, uc, a, size, ud):
         s.n += 1
@@ -99,6 +99,8 @@ class Arm(T.World):
         if k == 'fnvl_trace': s.trace.append((uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff, uc.reg_read(UC_ARM64_REG_X1) & 0xffffffff)); s.ntr += 1
         elif k == 'fnvl_dispatch': s.nr += 1
         elif k == 'fnvl_raise_ud': s.ev = 'fnvl_raise_ud(%x)' % (uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff); uc.emu_stop()
+        elif k == 'fnvl_os_unhandled':
+            r = uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff; s.ensure(r, 16, False); s.ev = 'unhandled(%x@%x)' % tuple(struct.unpack('<2I', bytes(uc.mem_read(r, 4)) + bytes(uc.mem_read(r + 12, 4)))); uc.emu_stop()
         elif k == 'fnvl_raise': s.ev = 'fnvl_raise(%d,%x)' % (uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff, uc.reg_read(UC_ARM64_REG_X1) & 0xffffffff); uc.emu_stop()
         i = bisect.bisect_right(s.rng, a) - 1
         if i >= 0 and a < s.im.rt[s.rng[i]][1] and s.im.rt[s.rng[i]][0] == 'fnvl_dispatch': s.nd += 1
