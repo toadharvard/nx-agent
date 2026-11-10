@@ -205,7 +205,7 @@ expect("wine inner rules apply", doc("wine", WARGV + ["/Zi"], WENV, dict(CLDECL,
 expect("wine no WINEDEBUG", doc("wine", WARGV, env_with(WINEPREFIX="/out/wp"), dict(CLDECL, wine_tool="msvc-cl")),
        ["env-missing"])
 expect("wine WINEPREFIX outside", doc("wine", WARGV, env_with(WINEDEBUG="-all", WINEPREFIX="/root/.wine"),
-                                      dict(CLDECL, wine_tool="msvc-cl")), ["env-path"])
+                                      dict(CLDECL, wine_tool="msvc-cl")), ["env-value"])
 expect("wine WINEPREFIX under input ok", doc("wine", WARGV, env_with(WINEDEBUG="-all", WINEPREFIX="/tc/wp"),
                                              dict(CLDECL, wine_tool="msvc-cl")), [])
 
@@ -274,7 +274,8 @@ case("cli usage exit 1", run()[0] == 1 and run("bogus")[0] == 1 and run("check")
 rc, out = run("policy")
 case("cli policy table", rc == 0 and "gcc" in out and "UNVERIFIED" in out and "reproducible-builds.org" in out, out[:200])
 pg = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "puregate.py"), "check",
-                     os.path.join(VERIFY, "toolflags.py")], capture_output=True, text=True)
+                     os.path.join(VERIFY, "toolflags.py"), os.path.join(VERIFY, "toolflags_policy.py")],
+                    capture_output=True, text=True)
 case("toolflags passes puregate", pg.returncode == 0, pg.stdout[-300:])
 
 shutil.rmtree(TMP, ignore_errors=True)
