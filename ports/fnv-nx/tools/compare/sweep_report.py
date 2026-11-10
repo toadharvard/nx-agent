@@ -5,8 +5,8 @@
     sweep_report.py shard     --shard-dir <S> --head <commit> --k K --n N [--cand C] [--notes TEXT] --out <json> --md <md>
     sweep_report.py aggregate --dirs <dir of <k>of<N> results>... [--all-programs <sdp2dksh dir>] --out <json> --md <md>
 
-programs   one row per program of the shard: name, hash, stage, model, per parameter set its class on both paths
-           (translated, families: pass / over / ill / vacuous), the worst class, and uam's numbers: Maxwell
+programs   one row per program of the shard: name, hash, stage, model, per parameter set its class on the translated path
+           (pass / over / ill / vacuous), the worst class, and uam's numbers: Maxwell
            instructions, GPRs (DKSH), texture instructions (TGSI, with --uam), and ns per covered pixel on the
            handheld model (render/native/perf/gpu_cost.py: Maxwell / 256 lanes, texture x 1.5 / 16 TMU, at 384 MHz)
 shard      the shard's results (programs.tsv, scenes/*.json, done.tsv) as one JSON and a summary.md
@@ -35,7 +35,7 @@ def programs(a):
     import gpu_cost
     rows = {}
     for v in sorted(os.listdir(os.path.join(a.shard_dir, 'perm'))):
-        for path, col in (('rep/permreport.json', 'translated'), ('rep_fam/permreport.json', 'families')):
+        for path, col in (('rep/permreport.json', 'translated'),):   # families column removed 2026-11-10
             p = os.path.join(a.shard_dir, 'perm', v, path)
             if not os.path.isfile(p):
                 continue
@@ -172,7 +172,6 @@ def md(o):
     L = [f"# {o['title']}", ''] + head + ['',
          '## Failure classes', '',
          f"- programs (translated, worst over the parameter sets): {o['program_classes_translated']}",
-         f"- programs (--families all): {o['program_classes_families']}",
          f"- programs exercised by some set but drawing nothing in another: {o.get('programs_vacuous_in_some_set')}",
          f"- scenes by the class of the first divergence: {o['first_divergence_by_scenes']}",
          f"- draws from the first divergence on, by its class: {o['first_divergence_by_draws']}", '',
