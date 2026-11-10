@@ -14,7 +14,7 @@ Rule (gate `ld`): the output has no undefined symbol, weak ones included.  The l
 `--unresolved-symbols=ignore-all` so that the link completes and the whole set is computed, not the first error:
 undefined = names some input references without defining (weak references included) minus the names the output
 defines (the linker's own resolution: other inputs and the symbols the linker script provides).  The output
-must be ET_DYN.  With one or more
+must carry the linker's PIE mark (DT_FLAGS_1 DF_1_PIE).  With one or more
 undefined symbols the stage writes `undefined.tsv`, removes the ELF and fails: an ELF with an unresolved
 reference is never an output.
 
@@ -81,8 +81,20 @@ def symbols(path):
 
 
 def is_pie(path):
+    """The linker's own mark of a position-independent executable: DT_FLAGS_1 has DF_1_PIE.  (e_type is not the
+    witness: GNU ld writes ET_EXEC for a PIE whose first segment is linked at a non-zero address.)"""
     with open(path, 'rb') as fh:
-        return struct.unpack_from('<H', fh.read(18), 16)[0] == 3
+        d = fh.read()
+    phoff, = struct.unpack_from('<I', d, 28)
+    phentsize, phnum = struct.unpack_from('<HH', d, 42)
+    for i in range(phnum):
+        typ, off, _, _, filesz = struct.unpack_from('<IIIII', d, phoff + i * phentsize)
+        if typ == 2:
+            for o in range(off, off + filesz, 8):
+                tag, val = struct.unpack_from('<II', d, o)
+                if tag == 0x6ffffffb:
+                    return bool(val & 0x08000000)
+    return False
 
 
 def undefined(referenced, out_syms):
@@ -139,7 +151,7 @@ def main():
         sys.exit('ld: the linker failed (exit %d)' % r.returncode)
     if not is_pie(elf):
         os.remove(elf)
-        sys.exit('ld: the output is not position independent (ET_DYN)')
+        sys.exit('ld: the output is not position independent (no DF_1_PIE)')
     refs = {n for p in ins for n, df in symbols(p) if not df}
     names = {n for p in ins for n, _ in symbols(p)}
     bad = undefined(refs, symbols(elf))

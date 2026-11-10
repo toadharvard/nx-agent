@@ -39,7 +39,13 @@ s = ld.symbols(p)
 check('symbols', s, [('abs', True), ('defined', True), ('missing', False), ('weak_missing', False)])
 check('undefined', ld.undefined({'missing', 'weak_missing', 'script_sym', 'defined'}, [('defined', True), ('script_sym', True), ('missing', False)]),
       ['missing', 'weak_missing'])
-check('not pie', ld.is_pie(p), True)     # the synthetic file is e_type 3
+check('no dynamic segment: not pie', ld.is_pie(p), False)
+for flags, want in ((0x08000000, True), (1, False)):
+    ph = struct.pack('<IIIIIIII', 2, 52 + 32, 0, 0, 16, 16, 6, 4)
+    dyn = struct.pack('<IIII', 0x6ffffffb, flags, 0, 0)
+    hdr = b'\x7fELF' + bytes([1, 1, 1, 0]) + bytes(8) + struct.pack('<HHIIIIIHHHHHH', 2, 183, 1, 0, 52, 0, 0, 52, 32, 1, 40, 0, 0)
+    open(os.path.join(d, 'pie.elf'), 'wb').write(hdr + ph + dyn)
+    check('pie flag %x' % flags, ld.is_pie(os.path.join(d, 'pie.elf')), want)
 # hidden symbols become local in a link: still a definition; a plain local is not
 hid = elf([('h', 1, 0, 2)])
 i = hid.index(struct.pack('<BBH', 2, 0, 1), 52 + 16)
