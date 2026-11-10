@@ -80,3 +80,19 @@ If no class-closing rule is known for some part, the session reports it to the o
 The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), once it is published. Until then:
 - **MASTER_PLAN3 applies only where it does not contradict this order.**
 - **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
+
+## Owner decisions of 2026-11-10 (do not re-ask)
+
+- **Threads:** real parallelism across cores is required. Running one guest thread at a time is rejected. Memory-ordering correctness comes from a class-closing rule.
+- **Native-body proof:** the static criteria N1-N4 only, with no SMT pass on hot code.
+- **One fixed reference CPU model:**
+  - x87 transcendentals return the correctly rounded true value at the fcw precision and rounding;
+  - rcp/rsqrt use the reference CPU's exhaustive 2^32 table from a pinned farm host;
+  - cpuid returns the reference CPU's fixed answer, and rdtsc reads the platform's monotonic timer.
+- **Performance metric:** executed instructions per frame, main thread and each worker, counted deterministically in the emulator. The budget comes from 45 fps at 1.02 GHz with a stated IPC assumption.
+- **Switch product decisions:**
+  - The game's own Xbox-controller layout maps 1:1 onto the Switch buttons.
+  - The system software keyboard handles all text entry.
+  - Rumble is on, through the game's own controller vibration.
+  - Docked output is 1080p, handheld 720p.
+  - Frame pacing on the 60 Hz panel is decided from the first measured frame.
