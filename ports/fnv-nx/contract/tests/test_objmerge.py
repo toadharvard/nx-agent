@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Synthetic check of objfacts_merge (invented entries, no game data): sorted union, byte equality, duplicate key rejected."""
-import os, subprocess, sys, shutil
+import os, subprocess, sys, shutil, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
@@ -20,9 +20,7 @@ def fn(tag):
 
 a = {('a.o', 0x10): fn(1), ('a.o', 'ztv'): {'_ZTVa': [(8, 0, ['f', None])]}}
 b = {('b.o', 0x20): fn(2), ('b.o', 'ztv'): {}}
-d = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_scratch_objmerge')   # fixed place: no entropy
-shutil.rmtree(d, ignore_errors=True)
-os.makedirs(d)
+d = tempfile.mkdtemp()
 os.makedirs(d + '/in')
 store.save(d + '/in/b.o.obj.json', 'objone', b)
 store.save(d + '/in/a.o.obj.json', 'objone', a)
