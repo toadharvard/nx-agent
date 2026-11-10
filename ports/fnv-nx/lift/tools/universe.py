@@ -9,6 +9,7 @@ from array import array
 from collections import Counter, deque
 from capstone import x86 as X
 ARGV = sys.argv[1:]; MOD = ARGV[ARGV.index('--module') + 1] if '--module' in ARGV else None; STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
+if STRICT: import modlift; sys.exit(modlift.run(MOD))      # module mode: separate engine (every relocated pointer into executable bytes is an entry)
 EXE = MOD or os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
 FUNCS = os.environ.get('FNVNX_FUNCS', None if STRICT else '/home/user/l3facts/funcs.tsv')
 NAME = os.path.splitext(os.path.basename(MOD))[0].lower() if STRICT else ''
@@ -356,6 +357,10 @@ if not STRICT:
         print('  %08x %s in entry %s kind %s via site@%s' % (x, insns[x][1], '%08x' % e if e else '-', next((k for k in PRI if e and k in kinds[e]), '-'), '%08x' % esite[e] if e in esite and esite[e] else '-'))
     print('\n'.join(codemap.consumers(U, eh)))
     print('\n'.join(reconcile.run(U)))
+    pts = sorted({v for r, v in rvals}); ne = [v for v in pts if v not in entries]; dfr = [(x[1], x[1] + x[3]) for x in datarec]
+    print('relocated pointer targets in .text: %d, entries %d, NOT entries %d: %s' % (len(pts), len(pts) - len(ne), len(ne), dict(sorted(Counter(
+        'didataformat-blob' if any(x <= v < y for x, y in dfr) else 'data-by-reloc' if tbl[v - T0] else 'inside-other-insn' if cov[v - T0] == 2 else 'insn-start-not-entry' if cov[v - T0] == 1 else 'unreached' for v in ne).items()))))
+    if '--mnemonics' in ARGV: open(OUTD + '/exe_mnemonics.tsv', 'w').write(''.join('%s\t%d\n' % kv for kv in sorted(Counter(v[1] for v in insns.values()).items())))
     gate(not unexpl and not bad_entries and not rejects, TN, [])
 # ---- module report
 midf = 0; why = []; TNu = TN - cc[7]; exs = [n for n, a, z, ro in M.xs]

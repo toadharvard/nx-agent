@@ -166,12 +166,12 @@ def run(path):
         if not new: break
         work = new
     # ---- coverage, classes, ownership
-    covP = bytearray(TN); covC = bytearray(TN); own = array('I', bytes(4 * TN)); cand_insn = set(); mnP = Counter()
+    covP = bytearray(TN); covC = bytearray(TN); own = array('I', bytes(4 * TN)); cand_insn = set()
     for e in E:
         pv = e in proven
         for a in exts[e]:
             sz = dec[a][0]; o = a - T0
-            if pv: covP[o:o + sz] = b'\1' * sz; mnP[dec[a][1]] += a not in mnP and 0 or 0
+            if pv: covP[o:o + sz] = b'\1' * sz
             else: covC[o:o + sz] = b'\1' * sz; cand_insn.add(a)
             if not own[o]: own[o:o + sz] = array('I', [e]) * sz
     cand_only = len(cand_insn - pset)
@@ -245,7 +245,7 @@ def run(path):
     fi = eh.finish(ent)
     exs = [n for n, a, z, ro in M.xs]; green = not why
     print('%s: sections %d (executable %d: %s), reloc %s (%d fixups), imports %d, exports code %d forwarders %d, entry rva %x' % (os.path.basename(path), len(M.secs), len(exs), ' '.join(exs[:4]) + (' ...' if len(exs) > 4 else ''), 'yes' if RL is not None else 'NO', len(relocs), len(imports), len(XC), XFW, M.entry))
-    print(fi[0]); print('  ' + fi[3] if len(fi) > 3 else '')
+    print('\n'.join(fi[:3]))
     print('entries %d (proven %d, candidate %d): %s' % (len(E), len(proven), len(E) - len(proven), dict(sorted(kc.items()))))
     print('entries with ud %d (candidate %d), candidate entries whose first instruction is ud %d, with xf %d, with reloc-misfit %d' % (
         sum(1 for e in E if cnt[e][0]), sum(1 for e in E if cnt[e][0] and e not in proven), sum(1 for e in E if e in ud and e not in proven), sum(1 for e in E if cnt[e][1]), sum(1 for e in E if cnt[e][2])))
