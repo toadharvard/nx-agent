@@ -137,8 +137,9 @@ class Emit:
         if o == 'udiv': return '(%s ? %s / %s : %s)' % (a[1], a[0], a[1], M)
         if o == 'urem': return '(%s ? %s %% %s : %s)' % (a[1], a[0], a[1], a[0])
         sw = n.a[0].w if n.a else 0
+        if o in ('eq', 'ult', 'slt') and n.a[0] is n.a[1]: return '(u32)%d' % (o == 'eq')       # x == x / x < x (and -Wtautological-compare)
         if o == 'eq': return '(u32)(%s == %s)' % tuple(a)
-        if o == 'ult': return '(u32)(%s < %s)' % tuple(a)
+        if o == 'ult': return '(u32)0' if n.a[1].op == 'const' and n.a[1].x == 0 else '(u32)(%s < %s)' % tuple(a)      # x < 0 is false (and -Wtype-limits)
         if o == 'slt': S = K(1 << (sw - 1), sw); return '(u32)((%s ^ %s) < (%s ^ %s))' % (a[0], S, a[1], S)
         if o == 'ite': return '(%s ? %s : %s)' % tuple(a)
         if o == 'zext': return '((%s)%s)' % (t, a[0])
