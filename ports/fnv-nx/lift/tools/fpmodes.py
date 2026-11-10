@@ -2,7 +2,7 @@
 """W10-A: whole-program static analysis of the floating-point control state of FalloutNV.exe (x87 CW, MXCSR, status
 readers, x87 stack depth). Count-only on stdout; site lists under /home/user/l3facts/fpmodes/. Sound = over-approximate:
 anything not decided is reported as unknown. Inputs: FNVNX_EXE, /home/user/l3facts/universe.tsv (read-only)."""
-import os, sys, hashlib, time
+import os, sys, hashlib, time, itertools
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -17,6 +17,7 @@ M32 = 0xffffffff
 IMG = fnvlift.Image(EXE)
 T = {}                      # entry -> net x87 depth change at return (nonzero only), set before each wave
 KNOWN = set()
+UNC = set()                 # entries with an undecidable depth conflict: callers treat their result class as unknown
 EAXLIVE = set()             # entries that may read eax at entry (LTCG register args), set before the status pass
 RETS = ('ret', 'retf', 'int3', 'hlt', 'ud2')
 FSAFE = ('fld', 'fild', 'fxch', 'fst', 'fstp', 'fist', 'fistp', 'fisttp', 'fld1', 'fldz', 'wait', 'fwait', 'fnop')
@@ -505,9 +506,9 @@ def eaxscan(F):
     return rd, sorted(cl)
 
 
-def depth(F, tabl):
-    """forward x87 depth dataflow. -> dict"""
-    d0 = {F.a: 0}; work = [F.a]; conf = []; mx = mi = 0; rets = set(); unk = ind = 0; x87 = False; indpos = []
+def depth1(F, tabl, ov):
+    """one forward x87 depth dataflow. ov: assumed result delta per unknown-callee site. -> dict (+ 'sites')"""
+    d0 = {F.a: 0}; work = [F.a]; conf = set(); mx = mi = 0; rets = set(); unk = ind = 0; x87 = False; sites = []; indpos = []
     while work:
         a = work.pop(); d = d0[a]; i = F.ins[a]; m = mn(i); e = 0
         if isx87(m):
@@ -520,28 +521,48 @@ def depth(F, tabl):
         elif m == 'call':
             o = i.operands[0]
             if o.type == X.X86_OP_IMM:
-                e = tabl.get(o.imm & M32, 0)
+                t = o.imm & M32
+                if t in UNC:
+                    sites.append(a); e = ov.get(a, 0)
+                else:
+                    e = tabl.get(t, 0)
             elif not (o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index):
-                ind += 1; indpos.append(a)
+                ind += 1; indpos.append(a); sites.append(a); e = ov.get(a, 0)
         nd = None if d is None else d + e
-        if nd is not None:
-            mx = max(mx, nd); mi = min(mi, nd)
         if nd is None:
             unk = 1
-        if m in RETS or not F.succ[a] and a not in F.tails:
-            if m == 'ret' or m == 'retf':
-                rets.add(nd)
+        else:
+            mx = max(mx, nd); mi = min(mi, nd)
+        if m in ('ret', 'retf'):
+            rets.add(nd)
         for t in F.tails.get(a, ()):
-            rets.add(None if nd is None else nd + tabl.get(t, 0))
-        for s in F.succ[a]:
-            if s not in d0:
-                d0[s] = nd; work.append(s)
-            elif d0[s] != nd and d0[s] is not None and nd is not None:
-                conf.append((s, d0[s], nd))
-    rd = [r for r in rets if r is not None]
-    ind_dep = sum(1 for a in indpos if x87 and F.succ[a] and isx87(mn(F.ins[F.succ[a][0]])))
-    return dict(x87=x87, conf=sorted(set(conf))[:3], nconf=len(set(conf)) + (len(rd) > 1), mx=mx, mi=mi, ret=rd[0] if len(rd) == 1 else (max(rd, key=abs) if rd else 0),
-                unk=unk, ind=ind, inddep=ind_dep, retconf=len(rd) > 1, nodepth=bool(unk))
+            if t in UNC:
+                sites.append(a)
+            rets.add(None if nd is None else nd + (ov.get(a, 0) if t in UNC else tabl.get(t, 0)))
+        for s_ in F.succ[a]:
+            if s_ not in d0:
+                d0[s_] = nd; work.append(s_)
+            elif d0[s_] != nd and d0[s_] is not None and nd is not None:
+                conf.add((s_, d0[s_], nd))
+    rd = sorted(r for r in rets if r is not None)
+    return dict(x87=x87, conf=sorted(conf)[:3], nconf=len(conf) + (len(set(rd)) > 1), mx=mx, mi=mi, ret=rd[0] if len(set(rd)) == 1 else 0,
+                nodepth=bool(unk), ind=ind, sites=sites, inddep=sum(1 for a in indpos if x87 and F.succ[a] and isx87(mn(F.ins[F.succ[a][0]]))))
+
+
+def depth(F, tabl):
+    """static depth with unknown-callee result classes (indirect calls, callees with a depth conflict) inferred if all-zero fails."""
+    r = depth1(F, tabl, {})
+    r['status'] = 'static'
+    st = sorted(set(r['sites']))
+    if r['nconf'] and 0 < len(st) <= 10:
+        for combo in sorted(itertools.product((0, 1), repeat=len(st)), key=sum):
+            r2 = depth1(F, tabl, dict(zip(st, combo)))
+            if not r2['nconf']:
+                r2['status'] = 'inferred'; r = r2; break
+    if r['nconf']:
+        r['status'] = 'conflict' if len(st) <= 10 else 'conflict-undecided'
+    r['ret'] = r['ret'] if r['status'] != 'conflict' else 0
+    return r
 
 
 def work(args):
@@ -651,12 +672,14 @@ def main():
         for t in (r['calls'] if r else ()):
             callers[t].add(a)
     dep = {a: r['dep'] for a, r in res.items() if r and r['dep']}
+    stable = False
     for wave in range(10):                       # fixed point of callee return depth
-        new = {a: d['ret'] for a, d in dep.items() if d['ret'] and not d['nconf'] and not d['nodepth']}
-        if new == T and wave:
-            break
-        ch = {a for a in set(new) | set(T) if new.get(a, 0) != T.get(a, 0)}
-        T.clear(); T.update(new)
+        new = {a: d['ret'] for a, d in dep.items() if d['ret'] and not d['status'].startswith('conflict') and not d['nodepth']}
+        newu = {a for a, d in dep.items() if d['status'].startswith('conflict') or d['nodepth']}
+        if new == T and newu == UNC and wave:
+            stable = True; break
+        ch = {a for a in set(new) | set(T) if new.get(a, 0) != T.get(a, 0)} | (newu ^ UNC)
+        T.clear(); T.update(new); UNC.clear(); UNC.update(newu)
         todo = sorted({c for a in ch for c in callers.get(a, ()) if c in res and res[c]})
         with Pool(3) as p2:
             for a, d in p2.imap(work, [(a, ext[a], kind[a], 'depth') for a in todo], chunksize=50):
@@ -734,15 +757,16 @@ def main():
     for k in ('fstenv', 'fsave', 'fxsave', 'fclex', 'wait', 'stmxcsr'):
         L.append('%s sites: %d in %d entries  e.g. %s' % (k, len(misc[k]), len({a for _, a in misc[k]}), ' '.join('%08x(%08x)' % v for v in misc[k][:3])))
     ds = {a: d for a, d in dep.items() if d['x87']}
-    cf = sorted(a for a, d in ds.items() if d['nconf'])
-    L.append('x87 depth: entries using x87=%d; static depth everywhere=%d; join/ret conflict=%d; unknown(frstor/fldenv)=%d; undecodable entries=%d' % (
-        len(ds), sum(1 for d in ds.values() if not d['nconf'] and not d['nodepth']), len(cf), sum(d['nodepth'] for d in ds.values()), len(bad)))
-    L.append('  conflicted entries by kind: ' + ' '.join('%s=%d' % kv for kv in sorted(Counter(kind[a] for a in cf).items())) + '; min<0 by kind: ' + ' '.join('%s=%d' % kv for kv in sorted(Counter(kind[a] for a, d in ds.items() if d['mi'] < 0).items())))
-    L.append('  conflicts first10: ' + ' '.join('%08x' % a for a in cf[:10]))
-    L.append('  max depth (relative to entry)=%d  entries>8=%d  entries popping inputs (min<0)=%d  entries with net ret depth: %s' % (
+    sc2 = Counter(d['status'] for d in ds.values())
+    cf = sorted(a for a, d in ds.items() if d['status'].startswith('conflict') or d['nodepth'])
+    L.append('x87 depth: entries using x87=%d; static (all unknown call results 0)=%d; static only after inferring unknown-callee result class=%d (via indirect call %d); '
+             'conflict=%d (undecided %d); frstor/fldenv unknown=%d; undecodable entries=%d' % (len(ds), sc2['static'], sc2['inferred'], sum(1 for d in ds.values() if d['status'] == 'inferred' and d['ind']),
+             sc2['conflict'] + sc2['conflict-undecided'], sc2['conflict-undecided'], sum(d['nodepth'] for d in ds.values()), len(bad)))
+    L.append('  conflicted entries by kind: ' + ' '.join('%s=%d' % kv for kv in sorted(Counter(kind[a] for a in cf).items())) + '; first10: ' + ' '.join('%08x' % a for a in cf[:10]))
+    L.append('  max depth (relative to entry)=%d  entries>8=%d  entries consuming st inputs (min<0)=%d  net ret depth histogram: %s' % (
         max([d['mx'] for d in ds.values()] + [0]), sum(1 for d in ds.values() if d['mx'] > 8), sum(1 for d in ds.values() if d['mi'] < 0), dict(sorted(Counter(d['ret'] for d in dep.values()).items()))))
-    L.append('  x87 entries with indirect (non-IAT) call=%d; indirect call immediately followed by x87 insn=%d entries; callee ret-depth waves stable=%s' % (
-        sum(1 for d in ds.values() if d['ind']), sum(1 for d in ds.values() if d['inddep']), True))
+    L.append('  x87 entries with an indirect (non-IAT) call=%d; indirect call immediately followed by x87 insn=%d entries; ret-depth fixpoint stable=%s' % (
+        sum(1 for d in ds.values() if d['ind']), sum(1 for d in ds.values() if d['inddep']), stable))
     L.append('files: %s  runtime %.0fs' % (OUT, time.time() - t0))
     print('\n'.join(L))
     with open(OUT + '/sites.tsv', 'w') as f:
@@ -752,7 +776,7 @@ def main():
     with open(OUT + '/depth.tsv', 'w') as f:
         for a in sorted(ds):
             d = ds[a]
-            f.write('%08x\tmax=%d\tmin=%d\tret=%d\tconf=%d\tunk=%d\tind=%d\t%s\n' % (a, d['mx'], d['mi'], d['ret'], d['nconf'], d['unk'], d['ind'], ' '.join('%08x:%s/%s' % c for c in d['conf'])))
+            f.write('%08x\t%s\tmax=%d\tmin=%d\tret=%d\tconf=%d\tind=%d\t%s\n' % (a, d['status'], d['mx'], d['mi'], d['ret'], d['nconf'], d['ind'], ' '.join('%08x:%s/%s' % c for c in d['conf'])))
     with open(OUT + '/crt_calls.tsv', 'w') as f:
         for tgt, x, a, ar in cs:
             f.write('%08x\t%08x\tentry=%08x\ta1=%s\ta2=%s\n' % (tgt, x, a, *['?' if v is None else '%x' % v for v in ar]))

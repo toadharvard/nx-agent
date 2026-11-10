@@ -54,9 +54,9 @@ class EH:
         for m in RE_STUB.finditer(X.text):
             a = X.T0 + m.start()
             if a in s.seenstub or X.cov[m.start()] != 1 or (a + 1) not in X.rset: continue
-            imm = le(m.group(1))
+            imm = le(m[1])
             if X.sec(imm) is None or X.intext(imm): continue
-            s.seenstub.add(a); tgt = (a + 10 + int.from_bytes(m.group(2), 'little', signed=True)) & 0xffffffff
+            s.seenstub.add(a); tgt = (a + 10 + int.from_bytes(m[2], 'little', signed=True)) & 0xffffffff
             if X.u32(imm) not in MAGIC: s.noise[tgt] += 1; continue
             s.stubs[a] = (imm, tgt); n += 1
             if imm not in s.fi:
@@ -75,13 +75,13 @@ class EH:
     def scan_seh(s):
         X = s.X; s.sorted_stubs = sorted(set(s.stubs) | s.seenstub)
         for m in RE_PUSHH.finditer(X.text):
-            p = X.T0 + m.start(); H = le(m.group(1))
+            p = X.T0 + m.start(); H = le(m[1])
             if p in s.seenh or X.cov[m.start()] != 1 or (p + 1) not in X.rset or not X.intext(H) or X.cov[H - X.T0] != 1: continue
             s.seenh.add(p)
             if s.is_stub(H): continue
             q = m.start() - 5
             if q >= 0 and X.text[q] == 0x68 and X.cov[q] == 1 and (p - 4) in X.rset and X.sec(X.u32(p - 4)) not in (None, '.text'): s.add_scope(X.u32(p - 4), H, p - 5)
-            else: s.helpers[X.owner(p)] = H
+            else: s.helpers[X.entry_of(p)] = H
         for hp, H in sorted(s.helpers.items()):
             for site in X.callers.get(hp, ()):
                 for q in (site - 5, site - 7):                   # push S; call  /  push S; push imm8; call
@@ -128,7 +128,7 @@ class EH:
         X = s.X
         if s.thrower is None:
             for r in X.relocs:
-                if X.intext(r) and X.cov[r - X.T0] == 2 and X.sec(X.u32(r)) not in (None, '.text') and X.u32(X.u32(r)) == EXC_CODE: s.thrower = X.owner(r); break
+                if X.intext(r) and X.cov[r - X.T0] == 2 and X.sec(X.u32(r)) not in (None, '.text') and X.u32(X.u32(r)) == EXC_CODE: s.thrower = X.entry_of(r); break
         for site in X.callers.get(s.thrower, ()):
             for p in range(site - 16, site - 4):
                 if X.text[p - X.T0] == 0x68 and X.cov[p - X.T0] == 1 and (p + 1) in X.rset and X.sec(X.u32(p + 1)) not in (None, '.text'):

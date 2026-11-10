@@ -2,7 +2,7 @@
 """Code universe of FalloutNV.exe: recursive descent from decomp starts, entry point, call/tail targets, reloc'd
 pointers (entry unless a consumer rule proves data); jump tables; R3 byte accounting of .text (codemap.py), entry-set
 comparison (reconcile.py). Output: /home/user/l3facts/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
-import os, re, sys, struct, bisect, capstone
+import os, re, sys, json, struct, bisect, capstone
 from types import SimpleNamespace
 import ehtables, codemap, reconcile
 from array import array
@@ -52,7 +52,7 @@ tref = array('I', bytes(4 * TN))          # relocation (site) that names each da
 insns = {}                                # addr -> (size, mnem, feat, fall, targets)
 entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw', 'inner', 'ptr']
 tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
-tcons = {}; straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
+jtab = set(); tcons = {}; straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
 EXOTIC = set('aaa aas daa das aam aad arpl bound in out insb insd outsb outsd sldt hlt lcall ljmp popal pushal iretd retf into salc'.split())
 EXO = {'hlt', 'rdmsr', 'wrmsr', 'lgdt', 'lidt', 'sgdt', 'sidt', 'ltr', 'str', 'invd', 'wbinvd', 'lmsw', 'smsw', 'clts', 'rdpmc', 'invlpg', 'ud2', 'iret', 'iretd', 'syscall', 'sysret', 'sysexit', 'bound', 'arpl', 'into', 'sldt', 'lldt', 'verr', 'verw'}
@@ -111,7 +111,7 @@ def walk(start, lo, hi, dec):
                     fall = False; op = ops[0]
                     if op.type == X.X86_OP_IMM: tg = (op.imm & 0xffffffff,)
                     elif op.type == X.X86_OP_MEM and op.mem.scale == 4 and op.mem.index and (a + ins.disp_offset) in rset:
-                        tg = table(ins, trail, lo, hi, dec, tabs)
+                        tg = table(ins, trail, lo, hi, dec, tabs); jtab.add(a)
                         if not tg: feat |= 2
                     else: feat |= 1 if op.type == X.X86_OP_REG else 2
                 elif mn in ('ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'): fall = False
@@ -164,6 +164,14 @@ def commit(res):
     for r in refs:
         if r[0] == 'call': callers.setdefault(r[1], []).append(r[2])
         add_entry(r[1], r[0], r[2] if len(r) > 2 else None)
+def tail_pass():
+    """direct jmp/jcc targets (not table jumps) that leave the containing entry extent [entry, next entry) and land on an insn start become `tail` entries."""
+    es = sorted(entries); n = 0
+    for a in sorted(a for a, v in insns.items() if v[4] and not dmap[a - T0] and a not in jtab):
+        o = es[bisect.bisect_right(es, a) - 1]
+        for t in insns[a][4]:
+            if intext(t) and t in insns and t not in entries and not dmap[t - T0] and es[bisect.bisect_right(es, t) - 1] != o: add_entry(t, 'tail', a); n += 1
+    return n
 def drain():
     while queue:
         a = queue.popleft(); f = indec(a)
@@ -314,20 +322,24 @@ def extent_insns(a):
     return seen
 X_ = SimpleNamespace(d=d, secs=secs, text=text, T0=T0, T1=T1, cov=cov, insns=insns, rset=rset, u32=u32, sec=sec, intext=intext, callers=callers,
                      indec=indec, emit=add_entry, relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize=fsize)
-def owner(a):
+def entry_of(a):
     f = indec(a)
     if f: return f[0]
     i = bisect.bisect_right(OWN, a) - 1; return OWN[i]
 OWN = []
-X_.owner = owner
+X_.entry_of = entry_of
+def NS(): return SimpleNamespace(PRI=PRI, T0=T0, TN=TN, X=X, bad_entries=bad_entries, callers=callers, classify=classify, cov=cov, cref=cref, datarec=datarec, dmap=dmap,
+                                  entries=entries, fsize=fsize, funcs=funcs, indec=indec, intext=intext, kinds=kinds, md=md, pad_split=pad_split, parent=parent, psites=psites,
+                                  rejects=rejects, relocs=relocs, rset=rset, rvals=rvals, sec=sec, tcons=tcons, text=text, tref=tref, tslots=tslots)   # state for codemap/reconcile
 eh = ehtables.EH(X_)
 fin = False
 for rnd in range(30):
     OWN[:] = sorted(entries); n0 = (len(entries), len(insns), len(tslots), len(tstarts))
-    if fin: deadops = codemap.analyse(sys.modules[__name__], codemap.split_runs(sys.modules[__name__], pad_split(classify())))[1]   # relocated operands of dead code are no references
+    if fin: deadops = codemap.analyse(NS(), codemap.split_runs(NS(), pad_split(classify())))[1]   # relocated operands of dead code are no references
     ch = ptr_pass(False, fin, eh); drain()
     OWN[:] = sorted(entries); ch += eh.scan(); drain()
     ch += ptr_pass(True, fin, eh); drain()
+    ch += tail_pass(); drain()
     if (len(entries), len(insns), len(tslots), len(tstarts)) == n0 and not ch:
         if fin: break
         fin = True
@@ -350,7 +362,7 @@ for a in sorted(entries):
     fl = sorted(kinds[a] - {pk}) + fts + (['baddecode'] if a in bad_entries else []) + (['parent=%08x' % parent[a]] if a in parent else [])
     rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, ex), ','.join(fl) or '-'))
 os.makedirs(os.path.dirname(OUT), exist_ok=True); open(OUT, 'w').write('\n'.join(rows) + '\n')
-U = sys.modules[__name__]; CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
+U = NS(); CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
 midf = len({s for t, s in midsrc if s is not None and indec(s)}); nonde = [a for a in entries if a not in fsize]
 exo = sorted(a for a, v in insns.items() if v[1] in EXOTIC)
 print('\n'.join(eh.finish(entries)))
@@ -359,12 +371,15 @@ print('\n'.join(CL))
 print('entries %d; per primary kind: %s' % (len(entries), dict(kc)))
 print('entries carrying kind (any): %s' % {k: kany[k] for k in PRI if k in kany})
 print('non-decomp entries %d (inner %d); sum of extents %d; unique non-decomp code bytes %d; bad-decode entries %d' % (len(nonde), len(parent), extsum, cc[2], len(bad_entries)))
-print('use sites: %s; insns straddling a decomp size %s; rejected pointers %s' % (dict(dinfo), ' '.join('%x' % a for a in sorted(straddle)) or 0, dict(Counter(k for k, r in rejects.values()))))
+print('use sites: %s; insns straddling a decomp size %s; rejected pointers %s' % (dict(sorted(dinfo.items())), ' '.join('%x' % a for a in sorted(straddle)) or 0, dict(sorted(Counter(k for k, r in rejects.values()).items()))))
 print('entries with feature (decomp/non): ' + ' '.join('%s=%d/%d' % (nm, fe[nm, True], fe[nm, False]) for nm in FEATS if fe[nm, True] or fe[nm, False]))
-print('exotic mnemonics in reached code: %s' % (dict(Counter(insns[a][1] for a in exo)) or 0))
+print('exotic mnemonics in reached code: %s' % (dict(sorted(Counter(insns[a][1] for a in exo).items())) or 0))
 for x in exo[:6]:
     e = next((e for e in reversed(OWN[max(0, bisect.bisect_right(OWN, x) - 40):bisect.bisect_right(OWN, x)]) if x in set(extent_insns(e))), None)
     print('  %08x %s in entry %s kind %s via site@%s' % (x, insns[x][1], '%08x' % e if e else '-', next((k for k in PRI if e and k in kinds[e]), '-'), '%08x' % esite[e] if e in esite and esite[e] else '-'))
 print('\n'.join(codemap.consumers(U, eh)))
 print('\n'.join(reconcile.run(U)))
-sys.exit(1 if unexpl or bad_entries or rejects else 0)
+green = not unexpl and not bad_entries and not rejects
+open('/home/user/l3facts/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap', 'status': 'green' if green else 'red', 'universe': TN, 'certified': TN - unexpl, 'uncertified': unexpl}) + '\n')
+print('gate l3.codemap: %s (certified %d of %d, uncertified %d, rejected pointers %d, bad-decode entries %d)' % ('green' if green else 'red', TN - unexpl, TN, unexpl, len(rejects), len(bad_entries)))
+sys.exit(0 if green else 1)
