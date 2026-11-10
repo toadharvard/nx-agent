@@ -25,6 +25,28 @@ HDC GetDC(HWND);
 int ReleaseDC(HWND, HDC);
 HDC BeginPaint(HWND, void *);
 BOOL EndPaint(HWND, const void *);
+/* platform/win32/gdifont.cpp */
+int GetObjectA(HGDIOBJ, int, void *);
+int GetObjectW(HGDIOBJ, int, void *);
+HFONT CreateFontIndirectA(const void *);
+HFONT CreateFontIndirectW(const void *);
+BOOL GetTextMetricsA(HDC, void *);
+BOOL GetTextMetricsW(HDC, void *);
+int GetTextFaceA(HDC, int, char *);
+int GetTextFaceW(HDC, int, void *);
+int GetTextCharset(HDC);
+UINT GetTextCharsetInfo(HDC, void *, DWORD);
+DWORD GetFontLanguageInfo(HDC);
+BOOL TranslateCharsetInfo(DWORD *, void *, DWORD);
+DWORD GetGlyphOutlineA(HDC, UINT, UINT, void *, DWORD, void *, const void *);
+DWORD GetGlyphOutlineW(HDC, UINT, UINT, void *, DWORD, void *, const void *);
+COLORREF SetTextColor(HDC, COLORREF);
+COLORREF SetBkColor(HDC, COLORREF);
+int SetBkMode(HDC, int);
+UINT SetTextAlign(HDC, UINT);
+int SetMapMode(HDC, int);
+BOOL MoveToEx(HDC, int, int, void *);
+HGDIOBJ GetCurrentObject(HDC, UINT);
 int fnvnx_ws2_WSAStartup(WORD, void *);
 int fnvnx_ws2_WSACleanup(void);
 int fnvnx_ws2_WSAGetLastError(void);
@@ -187,6 +209,12 @@ const exp g_exports[] = {
     E("gdi32", GetStockObject), E("gdi32", DeleteObject), E("gdi32", CreateCompatibleDC), E("gdi32", DeleteDC),
     E("gdi32", CreateCompatibleBitmap), E("gdi32", CreateDIBSection), E("gdi32", SelectObject), E("gdi32", GetDIBits),
     E("gdi32", GetPixel), E("gdi32", SetPixel), E("gdi32", StretchBlt), E("gdi32", SetStretchBltMode),
+    E("gdi32", GetObjectA), E("gdi32", GetObjectW), E("gdi32", CreateFontIndirectA), E("gdi32", CreateFontIndirectW),
+    E("gdi32", GetTextMetricsA), E("gdi32", GetTextMetricsW), E("gdi32", GetTextFaceA), E("gdi32", GetTextFaceW),
+    E("gdi32", GetTextCharset), E("gdi32", GetTextCharsetInfo), E("gdi32", GetFontLanguageInfo),
+    E("gdi32", TranslateCharsetInfo), E("gdi32", GetGlyphOutlineA), E("gdi32", GetGlyphOutlineW),
+    E("gdi32", SetTextColor), E("gdi32", SetBkColor), E("gdi32", SetBkMode), E("gdi32", SetTextAlign),
+    E("gdi32", SetMapMode), E("gdi32", MoveToEx), E("gdi32", GetCurrentObject),
     E("gdi32", GetDeviceCaps), E("user32", GetDC), E("user32", ReleaseDC), E("user32", BeginPaint), E("user32", EndPaint),
     E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA),
     E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA), E("advapi32", GetUserNameA),
