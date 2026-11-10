@@ -22,7 +22,7 @@ def body(asm, sym):
 
 
 def main():
-    cxx = shutil.which('aarch64-linux-gnu-g++')
+    cxx = shutil.which(os.environ.get('CXX') or 'aarch64-linux-gnu-g++')   # the compiler the plugins are built for
     if not cxx:
         print('skip: no aarch64-linux-gnu-g++'); return 0
     base = [cxx, '-mabi=ilp32', '-std=gnu++17', '-O2', '-fwrapv', '-fno-strict-aliasing', '-S']

@@ -41,7 +41,7 @@ def words(asm, sym):
 
 
 def main():
-    cxx = shutil.which('aarch64-linux-gnu-g++')
+    cxx = shutil.which(os.environ.get('CXX') or 'aarch64-linux-gnu-g++')   # the compiler the plugins are built for
     if not cxx:
         print('skip: no aarch64-linux-gnu-g++'); return 0
     with tempfile.TemporaryDirectory() as td:
