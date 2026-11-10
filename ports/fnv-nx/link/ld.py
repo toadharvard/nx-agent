@@ -94,9 +94,15 @@ def undefined(referenced, out_syms):
 def inputs(dirs):
     out, seen = [], {}
     for top in dirs:
-        found = []
-        for root, _, files in sorted(os.walk(top)):
-            found += [os.path.join(root, f) for f in files if f.endswith(('.o', '.a'))]
+        found, todo = [], [top]
+        while todo:
+            cur = todo.pop()
+            for f in sorted(os.listdir(cur)):
+                q = os.path.join(cur, f)
+                if os.path.isdir(q):
+                    todo.append(q)
+                elif f.endswith(('.o', '.a')):
+                    found.append(q)
         for p in sorted(found, key=lambda p: os.path.relpath(p, top)):
             b = os.path.basename(p)
             if b in seen:
