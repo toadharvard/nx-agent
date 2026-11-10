@@ -1,0 +1,209 @@
+/* fnvnx_pi - N3: per function, is its code inside the portable subset Π, what is inlined into it, which record
+ * types it touches (MASTER_PLAN4 R1 N3 / N4, R7).
+ *
+ * Two readings of every function:
+ *   early   right after SSA is built, before any optimization: the function's own body as the source wrote it.
+ *           The verdict and the types come from here (an optimizer may delete a use of an unassigned local, which
+ *           is exactly the undefined behaviour the verdict is about).
+ *   late    just before RTL expansion: what is emitted. The inlined bodies come from here: GCC keeps the scope of
+ *           every inlined function in the block tree of the function it was inlined into, also without debug info.
+ *
+ * One text line per function body, in the object's own section .fnvnx.n3 (not loaded):
+ *
+ *     symbol <TAB> verdict <TAB> inlined <TAB> kind <TAB> types
+ *
+ *   symbol   the assembler name of the function; for a GCC clone (`f.constprop.0`, `.isra`, `.part`) the name of
+ *            the function it was made from
+ *   verdict  `ok`, or the first reason the function's own body is outside Π, in this fixed order:
+ *              asm       an asm statement
+ *              setjmp    calls setjmp
+ *              varargs   the definition takes variable arguments
+ *              volatile  a volatile access
+ *              div       an integer division or remainder by a non-constant (x86 traps where AArch64 gives 0)
+ *              shift     a shift or rotate by a non-constant count (x86 masks the count, C leaves it undefined)
+ *              uninit    a use of a local that no path has assigned
+ *            The verdict of the emitted code is this one and those of everything in `inlined` (N4's closure).
+ *   inlined  `,`-separated assembler names of every function whose body is inlined into this one, transitively
+ *   kind     empty for an emitted function; the clone suffix for an emitted clone; `thunk` for a this-adjusting
+ *            thunk; `inline` for a body this unit saw but did not emit on its own (its verdict is needed by the
+ *            functions it is inlined into); `sdd` for a destructor-slot function (written by toolchain/sdd)
+ *   types    `,`-separated Itanium type strings of the record types whose fields the body accesses or that its
+ *            parameters and locals have
+ *
+ * Not decided here: facts of the exe (EH tables at the address), layouts against cl (R7 is checked on `types`), and
+ * the evaluation order of call arguments, which the fnvnx_order plugin fixes at MSVC's order for every call.
+ */
+#include "gcc-plugin.h"
+#include "plugin-version.h"
+#include "cp/cp-tree.h"
+#include "context.h"
+#include "tree-pass.h"
+#include "function.h"
+#include "basic-block.h"
+#include "gimple-expr.h"
+#include "gimple.h"
+#include "gimple-iterator.h"
+#include "gimple-walk.h"
+#include "ssa.h"
+#include "tree-ssanames.h"
+#include "cgraph.h"
+#include "output.h"
+#include "calls.h"
+#include "tree-inline.h"
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+int plugin_is_GPL_compatible;
+
+struct facts { std::string verdict; std::set<std::string> types; bool emitted; };
+static std::map<std::string, facts> early;       /* by assembler name of the function */
+static std::vector<std::string> lines;
+
+static const char *asmname(tree d) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)); }
+
+static void inlined_blocks(tree block, std::set<std::string> &out)
+{
+  for (; block; block = BLOCK_CHAIN(block)) {
+    if (inlined_function_outer_scope_p(block)) {
+      tree fn = block_ultimate_origin(block);
+      if (fn && TREE_CODE(fn) == FUNCTION_DECL) out.insert(asmname(fn));
+    }
+    inlined_blocks(BLOCK_SUBBLOCKS(block), out);
+  }
+}
+
+static void note_type(tree t, std::set<std::string> &types)
+{
+  while (t && (POINTER_TYPE_P(t) || TREE_CODE(t) == ARRAY_TYPE)) t = TREE_TYPE(t);
+  if (!t || !RECORD_OR_UNION_TYPE_P(t)) return;
+  t = TYPE_MAIN_VARIANT(t);
+  if (!TYPE_NAME(t) || !CLASS_TYPE_P(t)) { types.insert("<unnamed>"); return; }
+  types.insert(mangle_type_string(t));
+}
+
+static tree walk_types(tree *tp, int *, void *data)
+{
+  std::set<std::string> *types = (std::set<std::string> *)((walk_stmt_info *)data)->info;
+  if (TREE_CODE(*tp) == COMPONENT_REF) note_type(TREE_TYPE(TREE_OPERAND(*tp, 0)), *types);
+  else if (TREE_CODE(*tp) == MEM_REF) note_type(TREE_TYPE(*tp), *types);
+  return NULL_TREE;
+}
+
+static bool uninit_use(tree op)
+{
+  /* a variable of the source: a temporary the compiler or a plugin made has no source-level value to miss, and a
+     copy of an unassigned source variable into one shows the source variable's own use. An object of an empty
+     class has no bits to be unassigned. */
+  if (TREE_CODE(op) != SSA_NAME || !SSA_NAME_IS_DEFAULT_DEF(op)) return false;
+  tree v = SSA_NAME_VAR(op);
+  return v && VAR_P(v) && DECL_NAME(v) && !DECL_ARTIFICIAL(v) && !DECL_HARD_REGISTER(v) && !is_empty_type(TREE_TYPE(op));
+}
+
+static std::string join(const std::set<std::string> &v)
+{
+  std::string r;
+  for (std::set<std::string>::const_iterator i = v.begin(); i != v.end(); ++i) r += (i == v.begin() ? "" : ",") + *i;
+  return r;
+}
+
+namespace {
+const pass_data early_data = { GIMPLE_PASS, "fnvnx_pi_early", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
+struct early_pass : gimple_opt_pass {
+  early_pass(gcc::context *c) : gimple_opt_pass(early_data, c) {}
+  unsigned int execute(function *fun) override
+  {
+    bool r_asm = false, r_vol = false, r_div = false, r_shift = false, r_uninit = false;
+    facts f; f.emitted = false;
+    basic_block bb;
+    FOR_EACH_BB_FN(bb, fun) {
+      for (gphi_iterator pi = gsi_start_phis(bb); !gsi_end_p(pi); gsi_next(&pi))
+        for (unsigned i = 0; i < gimple_phi_num_args(pi.phi()); i++)
+          if (uninit_use(gimple_phi_arg_def(pi.phi(), i))) r_uninit = true;
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+        gimple *st = gsi_stmt(gsi);
+        if (is_gimple_debug(st) || gimple_clobber_p(st)) continue;      /* an end-of-life mark is no access */
+        if (gimple_code(st) == GIMPLE_ASM) r_asm = true;
+        if (gimple_has_volatile_ops(st)) r_vol = true;
+        if (is_gimple_assign(st)) {
+          tree_code c = gimple_assign_rhs_code(st);
+          bool cst2 = gimple_num_ops(st) > 2 && TREE_CODE(gimple_assign_rhs2(st)) == INTEGER_CST;
+          if ((c == TRUNC_DIV_EXPR || c == TRUNC_MOD_EXPR || c == EXACT_DIV_EXPR || c == FLOOR_DIV_EXPR
+               || c == CEIL_DIV_EXPR || c == ROUND_DIV_EXPR || c == FLOOR_MOD_EXPR || c == CEIL_MOD_EXPR
+               || c == ROUND_MOD_EXPR) && INTEGRAL_TYPE_P(TREE_TYPE(gimple_assign_lhs(st))) && !cst2) r_div = true;
+          if ((c == LSHIFT_EXPR || c == RSHIFT_EXPR || c == LROTATE_EXPR || c == RROTATE_EXPR) && !cst2) r_shift = true;
+        }
+        ssa_op_iter it; tree use;
+        FOR_EACH_SSA_TREE_OPERAND(use, st, it, SSA_OP_USE)
+          if (uninit_use(use)) r_uninit = true;
+        walk_stmt_info wi; memset(&wi, 0, sizeof wi); wi.info = &f.types;
+        walk_gimple_op(st, walk_types, &wi);
+      }
+    }
+    tree fn = fun->decl;
+    for (tree p = DECL_ARGUMENTS(fn); p; p = DECL_CHAIN(p)) note_type(TREE_TYPE(p), f.types);
+    unsigned ix; tree v;
+    FOR_EACH_LOCAL_DECL(fun, ix, v) note_type(TREE_TYPE(v), f.types);
+    f.verdict = r_asm ? "asm" : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
+              : r_vol ? "volatile" : r_div ? "div" : r_shift ? "shift" : r_uninit ? "uninit" : "ok";
+    early[asmname(fn)] = f;
+    return 0;
+  }
+};
+
+const pass_data late_data = { GIMPLE_PASS, "fnvnx_pi_late", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
+struct late_pass : gimple_opt_pass {
+  late_pass(gcc::context *c) : gimple_opt_pass(late_data, c) {}
+  unsigned int execute(function *fun) override
+  {
+    std::set<std::string> inl;
+    inlined_blocks(DECL_INITIAL(fun->decl), inl);
+    std::string name = asmname(fun->decl), clone;
+    size_t dot = name.find('.');
+    if (dot != std::string::npos) { clone = name.substr(dot + 1); name = name.substr(0, dot); }
+    std::map<std::string, facts>::iterator e = early.find(name);
+    if (e == early.end()) {
+      /* a this-adjusting thunk: made by the compiler, an adjustment and a jump */
+      if (!DECL_LANG_SPECIFIC(fun->decl) || !DECL_THUNK_P(fun->decl))
+        { error("N3: function %qD is emitted but was never read early", fun->decl); return 0; }
+      lines.push_back(name + "\\tok\\t" + join(inl) + "\\tthunk\\t");
+      return 0;
+    }
+    e->second.emitted = true;
+    inl.erase(name);
+    lines.push_back(name + "\\t" + e->second.verdict + "\\t" + join(inl) + "\\t" + clone + "\\t" + join(e->second.types));
+    return 0;
+  }
+};
+}
+
+static void finish_unit(void *, void *)
+{
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.n3,\"\",%%progbits\n");
+  for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", lines[i].c_str());
+  for (std::map<std::string, facts>::iterator e = early.begin(); e != early.end(); ++e)
+    if (!e->second.emitted)
+      fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t\\tinline\\t%s\\n\"\n", e->first.c_str(), e->second.verdict.c_str(),
+              join(e->second.types).c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
+int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
+{
+  if (!plugin_default_version_check(ver, &gcc_version)) return 1;
+  register_pass_info pe;
+  pe.pass = new early_pass(g);
+  pe.reference_pass_name = "ssa";
+  pe.ref_pass_instance_number = 1;
+  pe.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pe);
+  register_pass_info pl;
+  pl.pass = new late_pass(g);
+  pl.reference_pass_name = "optimized";
+  pl.ref_pass_instance_number = 1;
+  pl.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pl);
+  register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
+  return 0;
+}

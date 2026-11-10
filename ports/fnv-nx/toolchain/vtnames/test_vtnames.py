@@ -59,6 +59,47 @@ r = run("aarch64-linux-gnu", os.path.join(tmp, "out2.txt"))
 check(r.returncode != 0 and "fnvnx_vtnames: target is not the Microsoft" in r.stderr,
       "aarch64 must fail with plugin error: " + r.stderr[-300:])
 
+# ---- sympair= / members= ----
+sp_src = os.path.join(here, "test_sympair.cpp")
+spf, mbf = os.path.join(tmp, "sp.txt"), os.path.join(tmp, "mb.txt")
+r = subprocess.run([clang, "-target", "i686-pc-windows-msvc", "-fsyntax-only", "-std=c++17",
+                    "-fplugin=" + so, "-fplugin-arg-fnvnx_vtnames-sympair=" + spf,
+                    "-fplugin-arg-fnvnx_vtnames-members=" + mbf, sp_src],
+                   capture_output=True, text=True)
+check(r.returncode == 0, "sympair run failed: " + r.stderr[-500:])
+spl = open(spf).read().splitlines() if os.path.exists(spf) else []
+mbl = open(mbf).read().splitlines() if os.path.exists(mbf) else []
+check(spl == sorted(set(spl)) and mbl == sorted(set(mbl)), "sympair/members sorted and unique")
+sp = [l.split("\t") for l in spl]
+check(all(len(c) == 4 for c in sp), "sympair has 4 columns")
+def has(ita, kind, dr, name):
+    f = [c for c in sp if c[0] == ita]
+    return (len(f) == 1 and f[0][2] == kind and f[0][3] == dr
+            and f[0][1].startswith("?") and name in f[0][1])
+check("_Z3addii\t?add@@YAHHH@Z\tfunc\tdef" in spl, "add def")
+check("_Z6calleei\t?callee@@YAHH@Z\tfunc\tref" in spl, "callee ref")
+check(has("_Z10def_global", "data", "def", "def_global"), "global def")
+check(has("_Z10ext_global", "data", "ref", "ext_global"), "extern global ref")
+check(has("_ZN1S2sfEi", "func", "def", "sf"), "static member")
+check(has("_ZN1S2vfEv", "func", "def", "vf"), "virtual member defined out of line")
+for v in ("C1", "C2"):
+    check(has("_ZN1S%sEv" % v, "ctor", "def", "S"), "ctor " + v)
+for v in ("D0", "D1", "D2"):
+    check(has("_ZN1S%sEv" % v, "dtor", "def", "S"), "dtor " + v)
+check(has("_ZN4Imp3D1Ev", "dtor", "ref", "Imp3"), "dtor ref via delete")
+check(has("_Z5twiceIiET_S0_", "func", "def", "twice"), "template instance")
+check(not any("anon_fn" in c[0] or "stat_fn" in c[0] for c in sp), "anonymous namespace / static emitted")
+check(len([c for c in sp if "twice" in c[0]]) == 1, "template pattern emitted")
+check("1S\t_ZN1SD1Ev\tdeclared" in mbl, "S dtor declared")
+check("6Holder\t_ZN6HolderD1Ev\timplicit" in mbl, "Holder implicit dtor")
+check(not any(l.startswith("4Imp2\t_ZN4Imp2D") for l in mbl), "Imp2 must not have a dtor")
+check(not any(l.startswith("1S\t_ZN1S1gEv") or l.startswith("1S\t_Z3add") for l in mbl),
+      "undeclared member present")
+r = subprocess.run([clang, "-target", "aarch64-linux-gnu", "-fsyntax-only", "-std=c++17",
+                    "-fplugin=" + so, "-fplugin-arg-fnvnx_vtnames-sympair=" + spf, sp_src],
+                   capture_output=True, text=True)
+check(r.returncode != 0, "sympair on non-MS target must fail")
+
 shutil.rmtree(tmp, ignore_errors=True)
 if fails:
     for f in fails:

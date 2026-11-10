@@ -476,6 +476,8 @@ static void finish_unit(void *, void *)
             "\t.cfi_restore 30\n\t.cfi_restore 29\n\t.cfi_restore 19\n\t.cfi_restore 20\n\t.cfi_restore 21\n\t.cfi_restore 22\n"
             "\t.cfi_def_cfa_offset 0\n\tret\n\t.ltorg\n\t.cfi_endproc\n\t.size\t%s, .-%s\n",
             f.vdel.c_str(), nm, nm);
+    /* its N3 line (toolchain/pi): written by rule, with the vector branch, so `ok+E` */
+    fprintf(asm_out_file, "\t.pushsection\t.fnvnx.n3,\"\",%%progbits\n\t.ascii\t\"%s\\tok+E\\t\\tsdd\\t\\n\"\n\t.popsection\n", nm);
   }
 }
 
