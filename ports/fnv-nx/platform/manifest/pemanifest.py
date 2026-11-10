@@ -11,7 +11,10 @@ GetModuleHandle*, GetProcAddress, CoCreateInstance) with the constant string or
 GUID operand when the bytes before the call push one. A site without a constant
 is reported as `dynamic`: the implementation must be total over all names anyway.
 
-Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir>
+Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir> [contract-only.dll,...]
+(contract-only: a module present in the directory whose exports are implemented by
+contract under ENV-TRUTH instead of being lifted; it is not loaded, so its own imports
+are not part of the manifest.)
 Output (exe-derived; keep out of the public repository):
   imports.tsv   module, dll, name|#ordinal, slot_va, code_refs, data_refs
   closure.tsv   module, role (root|static|absent), imports, exports
@@ -114,7 +117,8 @@ class Mod:
                 yield site, nm, " ".join(ops) if ops else "dynamic"
 
 
-def main(d, root, out):
+def main(d, root, out, contract=""):
+    contract = {c.lower() for c in contract.split(",") if c}
     files = {f.lower(): os.path.join(d, f) for f in os.listdir(d)
              if f.lower().endswith((".exe", ".dll"))}
     mods, absent, todo = {}, set(), [root.lower()]
@@ -122,7 +126,7 @@ def main(d, root, out):
         n = todo.pop()
         if n in mods or n in absent:
             continue
-        if n not in files:
+        if n not in files or n in contract:
             absent.add(n)
             continue
         m = mods[n] = Mod(files[n])
@@ -143,10 +147,10 @@ def main(d, root, out):
                 fd.write("%s\t0x%08x\t%s\t%s\n" % (n, site, nm, op))
             fc.write("%s\t%s\t%d\t%d\n" % (n, "root" if n == root.lower() else "static", len(m.imports), m.exports))
         for n in sorted(absent):
-            fc.write("%s\tabsent\t-\t-\n" % n)
+            fc.write("%s\t%s\t-\t-\n" % (n, "contract-only" if n in contract else "absent"))
         for n in sorted(set(files) - set(mods)):
             fc.write("%s\tnot-in-static-closure\t-\t-\n" % n)
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])
