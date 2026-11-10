@@ -125,6 +125,8 @@ def _setup_root(doc, root, run):
     for f in ("null", "zero"):
         open(root + "/dev/" + f, "w").close()
         _bind_ro("/dev/" + f, root + "/dev/" + f, ro=False)
+    os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing)
+    _mount("tmpfs", root + "/dev/shm", "tmpfs", 0, "mode=1777")
     for f in ("urandom", "random"):   # a constant: entropy read from a device is a function of the sandbox version
         with open(root + "/dev/" + f, "wb") as g:
             for n in range(32768):

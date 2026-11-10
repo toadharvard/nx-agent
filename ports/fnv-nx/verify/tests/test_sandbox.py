@@ -179,8 +179,8 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     kv = dict(l.split("=", 1) for l in lines if "=" in l)
     mounts_bad = [l for l in lines if l.startswith("EXISTS")]
     check("3a host paths absent", rc == 0 and not mounts_bad, str(lines[:10]))
-    check("3b hostname fnvnx, pid 1, dev={null,zero,random,urandom}, tmp writable",
-          kv.get("hostname") == "fnvnx" and kv.get("pid") == "1" and kv.get("ls_dev") == "null random urandom zero " and kv.get("tmp") == "y",
+    check("3b hostname fnvnx, pid 1, dev={null,zero,random,urandom,shm}, tmp writable",
+          kv.get("hostname") == "fnvnx" and kv.get("pid") == "1" and kv.get("ls_dev") == "null random shm urandom zero " and kv.get("tmp") == "y",
           str(kv))
     check("3c network: only down lo, nothing up, connect fails",
           kv.get("netdev") == "lo " and kv.get("ifup") == "[]" and kv.get("nc_rc_nonzero") != "0", str(kv))
