@@ -38,7 +38,7 @@ class Echo:
         P, hr = m["params"], m["ret_kind"] == "hresult"; outs = [p for p in P if p["dir"] != "in"]; rk = m["ret_kind"]
         cnt = len(outs) + (0 if rk == "void" else 1); ret = m["ret"]; L = []
         if iface and (iface, m["name"]) in PROF: return self.prof_body(m, iface)
-        L.append(f"EB b; E_load(b, {cnt}); (void)b;")
+        L.append(f"EB b; E_load(b, {cnt}); (void)b; {{ unsigned sk = g_k; echo_nested(sk); g_k = sk; }}" if iface else f"EB b; E_load(b, {cnt}); (void)b;")
         if rk != "void": L.append(f"uint32_t e_ret = *(const uint32_t *)b.p[{cnt - 1}]; ")
         for j, p in enumerate(outs):
             n, k = p["name"], p["kind"]; w = "((int32_t)e_ret >= 0)" if p.get("when") == "ok" and hr else "true"
@@ -121,16 +121,17 @@ class Echo:
         elif rk == "handle": D.append(f"void *r = (void *){call}; O[{c['retv']}] = r;")
         elif rk == "float": D.append(f"float r = {call}; uint32_t rb; memcpy(&rb, &r, 4); if (rb != {c['retv'] & 0xFFFFFFFF}u) ++g_ret_fail;")
         else: D.append(f"uint32_t r = (uint32_t)(uintptr_t){call}; if (r != {c['retv'] & 0xFFFFFFFF}u) ++g_ret_fail;")
+        if c.get("thread"): return ["{ std::thread th([&] {"] + D + post + ["} }); th.join(); }"]
         return D + post + ["}"]
 
     def render(self):
         self.build_blob(); pl, spec = self.pl, self.spec; o = []
-        o += ['#include "d9wrap.gen.h"', "#include <stdio.h>", f"static const unsigned NOBJ = {len(pl.objs) + 2}, NSLOT = {pl.slot + 1}; static unsigned g_k; static unsigned long g_ident_fail, g_ret_fail, g_fwd_fail;",
+        o += ['#include "d9wrap.gen.h"', "#include <stdio.h>", "#include <thread>", f"static const unsigned NOBJ = {len(pl.objs) + 2}, NSLOT = {pl.slot + 1}; static unsigned g_k; static unsigned long g_ident_fail, g_ret_fail, g_fwd_fail;",
               "static void *O[NOBJ]; static void *g_eobj[NOBJ]; static unsigned char g_arena[NSLOT][65536];",
               "extern const unsigned char kBlob[]; extern const unsigned kOff[];", "struct EB { const unsigned char *p[16]; unsigned n[16]; };",
               "static void E_load(EB &b, unsigned cnt) { const unsigned char *q = kBlob + kOff[g_k]; for (unsigned i = 0; i < cnt; i++) { unsigned len = *(const unsigned *)q; b.p[i] = q + 4; b.n[i] = len; q += 4 + ((len + 3) & ~3u); } }",
               "static void E_arena(unsigned s) { for (unsigned j = 0; j < 65536; j++) g_arena[s][j] = (s * 31 + j * 7) & 255; }",
-              "static void *echo_obj(unsigned num, unsigned iface);", "void d9port_dc_pixels(void *hdc, uint32_t, uint32_t, uint32_t, void *dst, size_t n) { for (size_t i = 0; i < n; i++) ((unsigned char *)dst)[i] = ((uintptr_t)hdc * 3 + i * 11) & 255; }",
+              "static void *echo_obj(unsigned num, unsigned iface);", "static void echo_nested(unsigned k) { switch (k) {" + "".join(f"case {n['nested_in']}: " + " ".join(self.drive(n)) + " break;" for n in pl.calls if "nested_in" in n) + "default: break; } }", "void d9port_dc_pixels(void *hdc, uint32_t, uint32_t, uint32_t, void *dst, size_t n) { for (size_t i = 0; i < n; i++) ((unsigned char *)dst)[i] = ((uintptr_t)hdc * 3 + i * 11) & 255; }",
               f"static const unsigned char kShader[] = {{{hexs(SHADER)}}}, kDecl[] = {{{hexs(DECL)}}};"]
         descs = {}
         for ob in pl.objs.values():
@@ -153,7 +154,8 @@ class Echo:
         o.append("static void sink(void *ctx, const void *p, size_t n) { fwrite(p, 1, n, (FILE *)ctx); }")
         o.append("static const unsigned kBlobLen = %d;" % len(self.blob))
         o.append("int main(int argc, char **argv) { FILE *f = fopen(argv[1], \"wb\"); d9s_open(sink, f, d9wrap_spec_sha256);")
-        for c in pl.calls: o += self.drive(c)
+        for c in pl.calls:
+            if "nested_in" not in c: o += self.drive(c)
         o.append('fclose(f); printf("DRIVER calls=%u ident_fail=%lu ret_fail=%lu fwd_fail=%lu\\n", ' + str(len(pl.calls)) + ', g_ident_fail, g_ret_fail, g_fwd_fail); return 0; }')
         o.append("const unsigned kOff[] = {" + ",".join(map(str, self.offs)) + "};")
         o.append("const unsigned char kBlob[] = {" + hexs(self.blob) + "};")

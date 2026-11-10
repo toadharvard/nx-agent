@@ -19,7 +19,11 @@ class Enc:
         self.oid, self.nid, self.tid, self.ntok, self.seq = {}, 0, {}, 0, 0
 
     def run(self):
-        for c in self.pl.calls: self.record(c)
+        for c in self.pl.calls:
+            if "nested_in" in c: continue
+            for n in self.pl.calls:
+                if n.get("nested_in") == c["k"]: self.record(n)
+            self.record(c)
         return bytes(self.out)
 
     # ---- body primitives
@@ -122,7 +126,7 @@ class Enc:
             self.hdr(d["cls"] if d else 0, ok and d["onu"])
             if ok and d["onu"]: self.buf(lock_img(d, True))
         ret = [thisid] if m["name"] == "Release" and c["iface"] and c["retv"] == 0 else []
-        hd = struct.pack("<7I", 0, self.seq, 0, (self.names.index(c["iface"]) if c["iface"] else 0xFFFF) | (m["slot"] << 16 if c["iface"] else c["export"] << 16), thisid, 0, len(self.new))
+        hd = struct.pack("<7I", 0, self.seq, c.get("thread", 0), (self.names.index(c["iface"]) if c["iface"] else 0xFFFF) | (m["slot"] << 16 if c["iface"] else c["export"] << 16), thisid, c.get("depth", 0), len(self.new))
         for i, f in self.new: hd += struct.pack("<2I", i, f)
         hd += struct.pack("<I", len(ret)) + b"".join(struct.pack("<I", x) for x in ret)
         rec = bytearray(hd) + self.b; rec[0:4] = struct.pack("<I", len(rec)); self.out += rec; self.seq += 1

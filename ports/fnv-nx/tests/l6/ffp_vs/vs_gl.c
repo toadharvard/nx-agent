@@ -48,6 +48,9 @@ int main(int argc, char **argv)
     glBindBuffer(GL_UNIFORM_BUFFER, ubo[2]); glBufferData(GL_UNIFORM_BUFFER, sizeof g_palette, NULL, GL_DYNAMIC_DRAW); glBindBufferBase(GL_UNIFORM_BUFFER, NX_FFP_VS_PALETTE_BINDING, ubo[2]);
     glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, xfb); glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, 64 * 4, NULL, GL_DYNAMIC_READ);
     glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, xfb);
+    GLuint fbo, rb;                                   /* surfaceless: a complete 1x1 framebuffer is still required */
+    glGenRenderbuffers(1, &rb); glBindRenderbuffer(GL_RENDERBUFFER, rb); glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, 1, 1);
+    glGenFramebuffers(1, &fbo); glBindFramebuffer(GL_FRAMEBUFFER, fbo); glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb);
     glEnable(GL_RASTERIZER_DISCARD);
 
     FILE *f = fopen(argv[1], "rb"); VsRec r; int n = 0, bad = 0; double maxrel = 0;
@@ -64,7 +67,10 @@ int main(int argc, char **argv)
         glVertexAttrib4fv(3, in.normal); glVertexAttrib4fv(4, in.color0); glVertexAttrib4fv(5, in.color1);
         for (int s = 0; s < 8; s++) glVertexAttrib4fv(6 + s, in.tex[s]);
         float ps[4] = { in.psize, 0, 0, 1 }; glVertexAttrib4fv(14, ps);
+        GLuint q; glGenQueries(1, &q); glBeginQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN, q);
         glBeginTransformFeedback(GL_POINTS); glDrawArrays(GL_POINTS, 0, 1); glEndTransformFeedback();
+        glEndQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN); GLuint pw = 9; glGetQueryObjectuiv(q, GL_QUERY_RESULT, &pw); glDeleteQueries(1, &q);
+        if (pw != 1) { printf("  case %d: transform feedback wrote %u primitives (GL error 0x%x)\n", n, pw, glGetError()); bad++; n++; continue; }
         glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, xfb); glGetBufferSubData(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 55 * 4, got);
         /* xfb layout: position4 color0 4 color1 4 tex 32 fog4 psize clip6 -> flat order of out_flat */
         float g[OUT_WORDS]; memcpy(g, got, 44 * 4); g[44] = got[44]; g[45] = got[48]; memcpy(g + 46, got + 49, 24);
