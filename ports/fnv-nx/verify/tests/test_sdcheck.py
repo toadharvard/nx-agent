@@ -107,7 +107,11 @@ def main():
            mutate=lambda sd: write(sd + "/switch/fnv/data/A.bsa", b"q"))
     expect("name with colon", 2, ["name-violation", "a:b.txt"], extra_game=[("Data/a:b.txt", b"1")])
     expect("trailing dot", 2, ["name-violation", "x.dot."], extra_game=[("Data/x.dot.", b"1")])
-    expect("name too long", 2, ["name-violation"], extra_game=[("Data/" + "n" * 256, b"1")])
+    sys.path.insert(0, os.path.dirname(HERE))
+    import sdcheck  # the OS caps names at 255 bytes, so the 255-unit rule is tested on the function
+    case("name 255 units ok, 256 violation", sdcheck.name_violation("Data/" + "n" * 255) is None
+         and sdcheck.name_violation("Data/" + "n" * 256) is not None
+         and sdcheck.name_violation("Data/" + "\U0001F600" * 128) is not None)
     expect("name with colon ok on exfat", 0, ["GREEN"], extra_game=[("Data/a:b.txt", b"1")], fs="exfat")
     big = 2 ** 32 - 1
     for label, size, fs, rc_want, words in (
