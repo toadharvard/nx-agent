@@ -56,6 +56,9 @@ if [ -n "${RECCERT_CXX:-}" ]; then CXX=$RECCERT_CXX; else
     || die "toolchain/msvcmodel/build.sh failed: $(tail -1 "$W/gcc-build.log" | cut -c1-200)"
 fi
 [ -x "$CXX" ] || die "no compiler: '$CXX' is not executable"; export CXX
+# One compiler for the whole tree: the .c units go through the gcc driver of the same build as $CXX (compile.sh's CC
+# default is the distribution's gcc, whose data model under -mabi=ilp32 is not the patched one).
+CC=${CXX%g++}gcc; [ "$CC" != "$CXX" ] && [ -x "$CC" ] || die "no C driver next to $CXX ('$CC')"; export CC
 CXXV=$("$CXX" --version | head -1); CC1=$(sha256sum "$("$CXX" -print-prog-name=cc1plus)" | cut -d' ' -f1) || die "no cc1plus of $CXX"
 log "commit $C12 skip='${SKIP}' rules hash $H src=$SRC decomp=${DCOMMIT:0:12} jobs=$JOBS cxx=$CXXV"; bash "$P/tools/farm/equiv_job.sh" --toolchain > "$W/toolchain.log" 2>&1 && rc=0 || rc=$?
 [ "$(tail -1 "$W/toolchain.log" | cut -c1-11)" = "toolchain: " ] || die "no toolchain (rc=$rc): $(tail -1 "$W/toolchain.log" | cut -c1-200)"
