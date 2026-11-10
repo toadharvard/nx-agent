@@ -3,7 +3,8 @@
 pointers; jump tables; byte classification of .text. Output: /home/user/l3facts/universe.tsv + count-only stdout."""
 import os, re, sys, struct, bisect, capstone
 from types import SimpleNamespace
-import ehtables
+import ehtables, codemap, reconcile
+from array import array
 from collections import Counter, deque
 from capstone import x86 as X
 EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
@@ -46,15 +47,19 @@ dmap = bytearray(TN)                      # 1 = inside decomp range
 for a, s in funcs: dmap[a - T0:a - T0 + s] = b'\1' * s
 cov = bytearray(TN)                       # 1 = insn start, 2 = insn interior
 tbl = bytearray(TN)                       # 1 = jump/index table data
+tref = array('I', bytes(4 * TN))          # relocation (site) that names each data byte
 insns = {}                                # addr -> (size, mnem, feat, fall, targets)
-entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw', 'inner', 'ptr', 'orphan']
+entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw', 'inner', 'ptr']
 tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
-lone = set(); arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
+straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
 EXOTIC = set('aaa aas daa das aam aad arpl bound in out insb insd outsb outsd sldt hlt lcall ljmp popal pushal iretd retf into salc'.split())
 EXO = {'hlt', 'rdmsr', 'wrmsr', 'lgdt', 'lidt', 'sgdt', 'sidt', 'ltr', 'str', 'invd', 'wbinvd', 'lmsw', 'smsw', 'clts', 'rdpmc', 'invlpg', 'ud2', 'iret', 'iretd', 'syscall', 'sysret', 'sysexit', 'bound', 'arpl', 'into', 'sldt', 'lldt', 'verr', 'verw'}
 FM = {'in': 512, 'insb': 512, 'insw': 512, 'insd': 512, 'out': 1024, 'outsb': 1024, 'outsw': 1024, 'outsd': 1024, 'cli': 2048, 'sti': 4096, 'rdtsc': 8192, 'cpuid': 16384}
 SSEG = {148, 149, 150, 151, 152, 153, 154, 132, 133, 134}
+def mark(a, n, ref):
+    """class-3 bytes [a, a+n) named by the relocation at site ref."""
+    n = min(n, T1 - a); tbl[a - T0:a - T0 + n] = b'\1' * n; tref[a - T0:a - T0 + n] = array('I', [ref]) * n
 def indec(a):
     i = bisect.bisect_right(fstarts, a) - 1
     return funcs[i] if i >= 0 and a < funcs[i][0] + funcs[i][1] else None
@@ -87,8 +92,10 @@ def walk(start, lo, hi, dec):
                     break
                 if cov[a - T0] == 2: break
             n = 0; stop = False; o = a - T0
-            for ins in md.disasm(text[o:min(o + 192, hi - T0)], a):
+            for ins in md.disasm(text[o:min(o + 192, hi - T0 + (14 if dec else 0), TN)], a):   # an insn that starts inside a decomp range belongs to it in full
                 a = ins.address; m = ins.mnemonic; mn = m.split()[-1]; nxt = a + ins.size; n += ins.size; ops = ins.operands
+                if a >= hi: break
+                if nxt > hi and dec: dmap[hi - T0:nxt - T0] = b'\1' * (nxt - hi); straddle.add(a)
                 feat = 0; tg = (); fall = True; px = ins.prefix
                 if px[1] == 0x64: feat |= 4
                 if px[0] == 0xf0: feat |= 16
@@ -124,11 +131,11 @@ def walk(start, lo, hi, dec):
             if stop: break
     return ok, out, refs, tabs
 def table(ins, trail, lo, hi, dec, tabs):
-    a = ins.address; T = ins.operands[0].mem.disp & 0xffffffff; D = None; nidx = 0
+    a = ins.address; T = ins.operands[0].mem.disp & 0xffffffff; D = None; nidx = 0; D_site = 0
     ok = lambda v: (lo <= v < hi) if dec else intext(v)
     for p in reversed(trail):
         o = p.operands
-        if D is None and p.mnemonic == 'movzx' and len(o) == 2 and o[1].type == X.X86_OP_MEM and o[1].size == 1 and (p.address + p.disp_offset) in rset: D = o[1].mem.disp & 0xffffffff
+        if D is None and p.mnemonic == 'movzx' and len(o) == 2 and o[1].type == X.X86_OP_MEM and o[1].size == 1 and (p.address + p.disp_offset) in rset: D = o[1].mem.disp & 0xffffffff; D_site = p.address + p.disp_offset
         if not nidx and p.mnemonic == 'cmp' and len(o) == 2 and o[1].type == X.X86_OP_IMM and 0 <= o[1].imm < 256: nidx = o[1].imm + 1
     ent = []
     if D is not None:
@@ -139,20 +146,20 @@ def table(ins, trail, lo, hi, dec, tabs):
             v = u32(T + 4 * k)
             if (T + 4 * k) not in rset or not ok(v): return ()
             ent.append(v)
-        tabs.append((D, nidx)); tstarts.add(D)
+        tabs.append((D, nidx, D_site)); tstarts.add(D)
     else:
         t = T
         while t in rset and ok(u32(t)) and not (intext(t) and cov[t - T0]):
             ent.append(u32(t)); t += 4
         if not ent: return ()
-    tabs.append((T, 4 * len(ent))); tstarts.add(T); tslots.update(T + 4 * k for k in range(len(ent)))
+    tabs.append((T, 4 * len(ent), a + ins.disp_offset)); tstarts.add(T); tslots.update(T + 4 * k for k in range(len(ent)))
     return tuple(ent)
 def commit(res):
     ok, out, refs, tabs = res
     for a, v in out.items():
         insns[a] = v; o = a - T0; cov[o] = 1; cov[o + 1:o + v[0]] = b'\2' * (v[0] - 1)
-    for t, n in tabs:
-        if intext(t): n = min(n, T1 - t); tbl[t - T0:t - T0 + n] = b'\1' * n
+    for t, n, rf in tabs:
+        if intext(t): mark(t, n, rf)
     for r in refs:
         if r[0] == 'call': callers.setdefault(r[1], []).append(r[2])
         add_entry(r[1], r[0], r[2] if len(r) > 2 else None)
@@ -188,35 +195,72 @@ def disp_ref(r, v, ins, final):
         t = v; ent = []
         while t in rset and intext(u32(t)) and not cov[t - T0] and (t == v or t not in tstarts): ent.append(u32(t)); t += 4
         if ent:
-            tbl[v - T0:v - T0 + 4 * len(ent)] = b'\1' * (4 * len(ent)); tstarts.add(v); tslots.update(v + 4 * k for k in range(len(ent))); dinfo['disp_tables'] += 1
+            mark(v, 4 * len(ent), r); tstarts.add(v); tslots.update(v + 4 * k for k in range(len(ent))); dinfo['disp_tables'] += 1
             for k, e in enumerate(ent):
                 if cov[e - T0] != 2: ptr_target(e, v + 4 * k)
             return 1
-    n = min(max(op.size, 1), T1 - v); tbl[v - T0:v - T0 + n] = b'\1' * n; dinfo['disp_data'] += 1
-    if op.mem.index or op.mem.base: arrays.append((v, n))
+    n = min(max(op.size, 1), T1 - v); mark(v, n, r); dinfo['disp_data'] += 1
+    if op.mem.index or op.mem.base: arrays.append((v, n, r))
     return 1
+cref = {}                                 # value -> relocated sites in .text that load it
+for r in relocs:
+    if intext(r): cref.setdefault(u32(r), []).append(r)
+def set_dataformat(q):
+    """call address if the reloc site q is `push imm32` whose call (within 12 insns) is `call reg`, reg loaded from [m+0x2c]
+    (IDirectInputDevice::SetDataFormat, method 11); False if not; None if the site is not reached yet."""
+    o = q - T0
+    if not cov[o]: return None
+    while cov[o] != 1: o -= 1
+    ins = next(md.disasm(text[o:o + 15], T0 + o, 1))
+    if ins.mnemonic != 'push' or T0 + o + ins.imm_offset != q: return False
+    ld = set()
+    for g in md.disasm(text[o + ins.size:o + ins.size + 120], T0 + o + ins.size):
+        op = g.operands
+        if g.mnemonic == 'mov' and len(op) == 2 and op[0].type == X.X86_OP_REG and op[1].type == X.X86_OP_MEM and op[1].mem.disp == 0x2c: ld.add(op[0].reg)
+        elif g.mnemonic == 'call': return g.address if op[0].type == X.X86_OP_REG and op[0].reg in ld else False
+        elif g.mnemonic in ('ret', 'jmp') or g.mnemonic[0] == 'j': return False
+    return False
+def dfmt(r, v, final):
+    """r is the rgodf field of a DIDATAFORMAT record (dwSize 0x18, dwObjSize 0x10, [dwFlags, dwDataSize, dwNumObjs, rgodf]) whose every code
+    reference is `push rec` for IDirectInputDevice::SetDataFormat: DirectInput reads DIOBJECTDATAFORMAT[dwNumObjs] through rgodf (data).
+    -> True proven (object marked class 3); 'wait' consumer not yet reached; None rule does not apply."""
+    rec = r - 0x14; rs = sec(rec)
+    if rs in (None, '.text') or u32(rec) != 0x18 or u32(rec + 4) != 0x10 or not intext(v) or rec not in cref: return None
+    ds, n = u32(rec + 12), u32(rec + 16); ln = 16 * n
+    if not 0 < n <= 0x100 or v + ln > T1 or any(cov[v - T0:v - T0 + ln]): return None
+    for k in range(n):
+        g, ofs = u32(v + 16 * k), u32(v + 16 * k + 4)
+        if (g and (v + 16 * k not in rset or sec(g) not in ('.rdata', '.data'))) or ofs >= ds: return None
+    cs = [set_dataformat(q) for q in cref[rec]]
+    if None in cs: return None if final else 'wait'
+    if not all(cs): return None
+    mark(v, ln, r); dinfo['didataformat'] += 1; ng = sum(1 for q in relocs if v <= q < v + ln)
+    datarec.append((rec, v, n, ln, sorted(cs), ng, r)); return True
 def ptr_pass(data, final, eh):
     new = 0
     for r, v in rvals:
         if r in settled or intext(r) == data: continue
         if data and r in eh.sites: settled.add(r); continue
+        if data:
+            g = dfmt(r, v, final)
+            if g == 'wait': continue
+            if g: settled.add(r); new += 1; continue
         k, ins = site_kind(r)
         if k == 'slot' and not final: continue
         if k == 'slot':
-            nb = lambda q: q in rset and intext(u32(q)) and not cov[q - T0] or tbl[q - T0]
-            if not (nb(r + 4) or nb(r - 4)): lone.add(r); continue   # a lone reloc'd dword in a gap: operand of unreached code, not a table
-            dinfo['slot_unattached'] += 1; tbl[r - T0:r - T0 + 4] = b'\1\1\1\1'
+            if r in deadops: dinfo['slot_in_dead_operand'] += 1; settled.add(r); continue   # operand field of dead code: not a reference
+            dinfo['slot_table'] += 1; mark(r, 4, r)                                          # otherwise a relocated pointer slot in unreached bytes
         if k in ('data', 'imm', 'slot'): new += ptr_target(v, r); settled.add(r)
         elif k == 'tbl': settled.add(r)
         elif k == 'disp': disp_ref(r, v, ins, final); settled.add(r); new += 1
         else: dinfo['other_site'] += 1; rejects[v] = ('other-site', r); settled.add(r)
     return new
+ONES = int.from_bytes(b'\1' * TN, 'little'); TAB = bytes([0] + [1] * 255)
 def classify():
-    cls = bytearray(dmap)
-    for a, v in insns.items():
-        if not dmap[a - T0]: cls[a - T0:a - T0 + v[0]] = b'\2' * v[0]
-    for m in re.finditer(rb'\x01+', bytes(tbl)): cls[m.start():m.end()] = b'\3' * (m.end() - m.start())
-    return cls
+    """per-byte class: 1 insn of a decomp function, 2 insn of another entry, 3 relocation-named data; 0 = not (yet) explained."""
+    D, M, T = int.from_bytes(dmap, 'little'), int.from_bytes(bytes(cov).translate(TAB), 'little'), int.from_bytes(tbl, 'little')
+    dinfo['table_over_insn'] = bin(M & T).count('1')
+    return bytearray(((D & M) | ((M & (D ^ ONES)) << 1) | ((T & (M ^ ONES)) * 3)).to_bytes(TN, 'little'))
 def padrun(x, e):
     """True if text[x:e] is entirely padding instructions."""
     while x < e:
@@ -244,18 +288,6 @@ def pad_split(cls):
         cls[s:p] = b'\4' * (p - s); cls[q:e] = b'\4' * (e - q)
         if p < q: runs.append((p, q))
     return runs
-def orphan_pass(runs):
-    """a gap that decodes cleanly end to end and ends in ret/jmp or runs into reached code: code nothing references; one entry per terminator-delimited piece."""
-    n = 0
-    for s, e in runs:
-        ins = list(md.disasm(text[s:e], T0 + s))
-        if not ins or sum(i.size for i in ins) != e - s or any(i.mnemonic in EXOTIC for i in ins) or not (ins[-1].mnemonic in ('ret', 'retf', 'jmp') or cov[e] == 1): continue
-        starts = [T0 + s] + [i.address + i.size for i in ins[:-1] if i.mnemonic in ('ret', 'retf', 'jmp', 'int3') and i.address + i.size < T0 + e]
-        for a in starts:
-            if a in entries or cov[a - T0]: continue
-            res = walk(a, T0, T1, False)
-            if res[1]: entries[a] = None; kinds[a] = {'orphan'}; commit(res); n += 1
-    return n
 # ---- seeds and fixed point
 for a, s in funcs: entries[a] = None; kinds[a] = {'decomp'}
 add_entry(base + struct.unpack_from('<I', d, pe + 40)[0], 'entry')
@@ -290,20 +322,19 @@ eh = ehtables.EH(X_)
 fin = False
 for rnd in range(30):
     OWN[:] = sorted(entries); n0 = (len(entries), len(insns), len(tslots), len(tstarts))
+    if fin: deadops = codemap.analyse(sys.modules[__name__], codemap.split_runs(sys.modules[__name__], pad_split(classify())))[1]   # relocated operands of dead code are no references
     ch = ptr_pass(False, fin, eh); drain()
     OWN[:] = sorted(entries); ch += eh.scan(); drain()
     ch += ptr_pass(True, fin, eh); drain()
-    cls = classify(); n = orphan_pass(pad_split(cls)) if fin else 0; drain()
-    if (len(entries), len(insns), len(tslots), len(tstarts)) == n0 and not ch and not n:
+    if (len(entries), len(insns), len(tslots), len(tstarts)) == n0 and not ch:
         if fin: break
         fin = True
 OWN[:] = sorted(entries)
-for v, n in arrays:           # an array read through an index register extends over the uncovered bytes that follow its first element
+for v, n, rf in arrays:           # an array read through an index register extends over the uncovered bytes that follow its first element
     e = v + n
     while e < T1 and not cov[e - T0] and not tbl[e - T0]: e += 1
     while e > v + n and text[e - T0 - 1] in (0xCC, 0x90): e -= 1
-    if e > v + n: tbl[v + n - T0:e - T0] = b'\1' * (e - v - n); dinfo['array_ext_bytes'] += e - v - n
-cls = classify(); runs = pad_split(cls)
+    if e > v + n: mark(v + n, e - v - n, rf); dinfo['array_ext_bytes'] += e - v - n
 # ---- extents / features / output
 for v, ss in psites.items():
     if 'ptr' in kinds[v] and len(kinds[v]) > 1 and all(x in eh.sites for x in ss): kinds[v].discard('ptr')
@@ -317,39 +348,21 @@ for a in sorted(entries):
     fl = sorted(kinds[a] - {pk}) + fts + (['baddecode'] if a in bad_entries else []) + (['parent=%08x' % parent[a]] if a in parent else [])
     rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, ex), ','.join(fl) or '-'))
 os.makedirs(os.path.dirname(OUT), exist_ok=True); open(OUT, 'w').write('\n'.join(rows) + '\n')
-cd = bytearray(b'\5' * TN)         # decomp bytes no instruction reaches (padding-aware, same pad rules as the unexplained pass)
-for a, s in funcs:
-    for i in range(a - T0, a - T0 + s):
-        if not cov[i] and not tbl[i]: cd[i] = 0
-druns = pad_split(cd); uf = len({indec(T0 + s)[0] for s, e in druns}); ub = sum(e - s for s, e in druns)
-midf = len({s for t, s in midsrc if s is not None and indec(s)})
+U = sys.modules[__name__]; CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
+midf = len({s for t, s in midsrc if s is not None and indec(s)}); nonde = [a for a in entries if a not in fsize]
 exo = sorted(a for a, v in insns.items() if v[1] in EXOTIC)
-cc = Counter(cls); hist = Counter()
-for s, e in runs: hist[next(b for b in (1, 2, 4, 8, 16, 32, 64, 256, 1024, 1 << 30) if e - s <= b)] += 1
-nonde = [a for a in entries if a not in fsize]
 print('\n'.join(eh.finish(entries)))
-print('text %d bytes (%08x-%08x), decomp funcs %d, relocs %d; bytes: decomp %d, nondecomp-code %d, table %d, padding %d, unexplained %d' % (TN, T0, T1, len(funcs), len(relocs), cc[1], cc[2], cc[3], cc[4], cc[0]))
-print('unexplained: %d runs, %d bytes; size hist (<=N): %s' % (len(runs), sum(e - s for s, e in runs), dict(sorted(hist.items()))))
+print('text %d bytes (%08x-%08x), decomp funcs %d, relocs %d; mid-decomp jumps %d, calls %d' % (TN, T0, T1, len(funcs), len(relocs), midf, len(midcall)))
+print('\n'.join(CL))
 print('entries %d; per primary kind: %s' % (len(entries), dict(kc)))
 print('entries carrying kind (any): %s' % {k: kany[k] for k in PRI if k in kany})
 print('non-decomp entries %d (inner %d); sum of extents %d; unique non-decomp code bytes %d; bad-decode entries %d' % (len(nonde), len(parent), extsum, cc[2], len(bad_entries)))
-print('use sites: %s; lone reloc dwords in gaps %d; rejected pointers %s' % (dict(dinfo), len(lone), dict(Counter(k for k, r in rejects.values()))))
+print('use sites: %s; insns straddling a decomp size %s; rejected pointers %s' % (dict(dinfo), ' '.join('%x' % a for a in sorted(straddle)) or 0, dict(Counter(k for k, r in rejects.values()))))
 print('entries with feature (decomp/non): ' + ' '.join('%s=%d/%d' % (nm, fe[nm, True], fe[nm, False]) for nm in FEATS if fe[nm, True] or fe[nm, False]))
-dk = Counter(); dex = []
-for s0, e0 in druns:
-    ins = list(md.disasm(text[s0:e0], T0 + s0)); clean = sum(i.size for i in ins) == e0 - s0
-    p0 = s0 - 1
-    while p0 >= 0 and cov[p0] == 2: p0 -= 1
-    term = p0 >= 0 and cov[p0] == 1 and not insns[T0 + p0][3]
-    k = ('dead-after-terminator' if term else 'dead-other') if clean else 'undecodable'; dk[k, 0] += 1; dk[k, 1] += e0 - s0
-    if not clean or any(i.mnemonic in EXOTIC for i in ins): dex.append((T0 + s0, e0 - s0))
-print('decomp bytes no path reaches, not padding: %d funcs, %d bytes, %d runs; mid-decomp jumps %d, calls %d' % (uf, ub, len(druns), midf, len(midcall)))
-print('  by structure (runs/bytes): ' + '; '.join('%s %d/%d' % (k, dk[k, 0], dk[k, 1]) for k in sorted({k for k, _ in dk})) + '; undecodable/exotic: ' + ' '.join('%x+%d' % x for x in dex[:5]))
 print('exotic mnemonics in reached code: %s' % (dict(Counter(insns[a][1] for a in exo)) or 0))
-for x in exo[:30]:
+for x in exo[:6]:
     e = next((e for e in reversed(OWN[max(0, bisect.bisect_right(OWN, x) - 40):bisect.bisect_right(OWN, x)]) if x in set(extent_insns(e))), None)
-    pk = next((k for k in PRI if e and k in kinds[e]), '-')
-    print('  %08x %s in entry %s kind %s via %s@%s' % (x, insns[x][1], '%08x' % e if e else '-', pk, 'site', '%08x' % esite[e] if e in esite and esite[e] else '-'))
-for s0, e0 in runs:
-    refs = [r for r, v in rvals if T0 + s0 <= v < T0 + e0] + [c for t, cs in callers.items() if T0 + s0 <= t < T0 + e0 for c in cs]
-    print('  unexplained %08x len %d: %s refs %s' % (T0 + s0, e0 - s0, text[s0:s0 + 8].hex(), ' '.join('%x' % r for r in refs[:3]) or '-'))
+    print('  %08x %s in entry %s kind %s via site@%s' % (x, insns[x][1], '%08x' % e if e else '-', next((k for k in PRI if e and k in kinds[e]), '-'), '%08x' % esite[e] if e in esite and esite[e] else '-'))
+print('\n'.join(codemap.consumers(U, eh)))
+print('\n'.join(reconcile.run(U)))
+sys.exit(1 if unexpl or bad_entries or rejects else 0)
