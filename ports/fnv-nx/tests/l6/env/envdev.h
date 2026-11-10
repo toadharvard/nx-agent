@@ -6,7 +6,7 @@ static const EnvLeaf LEAVES_PP[] = { PPL(BackBufferWidth), PPL(BackBufferHeight)
     PPL(Windowed), PPL(EnableAutoDepthStencil), PPL(AutoDepthStencilFormat), PPL(Flags), PPL(FullScreen_RefreshRateInHz), PPL(PresentationInterval) };
 static const EnvLeaf LEAVES_CP[] = { { "AdapterOrdinal", 0, 4, 'i' }, { "DeviceType", 4, 4, 'i' }, { "BehaviorFlags", 12, 4, 'i' } };
 static void drow(const char* name, unsigned a0, unsigned a1, unsigned a2, unsigned ret, const char* outs) { fprintf(g_out, "%s(%x,%x,%x)\t%x\t%s\n", name, a0, a1, a2, ret, outs); g_rows++; }
-static HWND mkwin(int w, int h) { return CreateWindowA("STATIC", "envprobe2", WS_OVERLAPPEDWINDOW, 0, 0, w, h, NULL, NULL, NULL, NULL); }
+static HWND mkwin(int w, int h) { return CreateWindowA("STATIC", "envprobe2", WS_POPUP, 0, 0, w, h, NULL, NULL, NULL, NULL); }
 static void dev_common(IDirect3DDevice9* dev, unsigned id, int isex) {
     static char ob[16384]; D3DCAPS9 caps; D3DDISPLAYMODE dm; D3DDEVICE_CREATION_PARAMETERS cp; D3DRASTER_STATUS rs; unsigned hr; memset(&caps, SENT, sizeof caps); memset(&dm, SENT, sizeof dm);
     hr = IDirect3DDevice9_GetDeviceCaps(dev, &caps); ob[0] = 0; PRS(ob, D3DCAPS9, caps); drow("DEV.GetDeviceCaps", id, 0, 0, hr, ob);
