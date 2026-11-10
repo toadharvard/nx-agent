@@ -13,8 +13,15 @@
  *                              w  = 0: the opaque zero, below)
  * PS driver UBO: vec4 fogcolor; vec4 fog (x mode 0 off/1 vertex/2 exp/3 exp2/4 linear, y start, z end,
  *                w density); ivec4 alpha (x = D3DCMPFUNC, 0 = alpha test off); vec4 alpharef (x, 0..1);
- *                vec4 texbem[16] (2 per stage: bump matrix 00,01,10,11; then lscale, loffset)
+ *                vec4 texbem[16] (2 per stage: bump matrix 00,01,10,11; then lscale, loffset);
+ *                uvec4 stype[2] (byte offset FNVNX_DK_PS_STYPE_OFFSET = 320, appended: nothing before it moved; block size 352)
  *                alpha.y = 0: the opaque zero.
+ * ps_1_x sampler dimensionality is DATA: ps_1_x has no dcl, the type is that of the texture bound at draw time (and the CTAB is D3DX
+ * metadata, not part of the D3D9 contract). Every ps_1_x stage n that samples declares three samplers, 2D at binding n, CUBE at
+ * FNVNX_DK_SAMP_CUBE_BASE + n (8 + n), VOLUME at FNVNX_DK_SAMP_VOLUME_BASE + n (16 + n) (the numbering ffp.frag.glsl uses), and selects
+ * by the stage's type word stype[n / 4][n % 4] = FNVNX_DK_STYPE_2D / _CUBE / _VOLUME. The host binds the bound texture at the slot of
+ * its dimensionality and writes the word; unused dimensionalities of a stage may point at any texture (never read). A zeroed block
+ * means 2D everywhere (the former behaviour). ps_2_0 and later declare their types (dcl_2d/cube/volume) and ignore the words.
  * Opaque zero: a shader with relative constant reads XORs its def'd values with it at the start of main(),
  * so the GLSL compiler treats them as run-time values (as WineD3D's uniforms) and cannot fold x * 0 -> 0.
  * Hosts must write 0 there (every host clears the blocks).
@@ -37,6 +44,15 @@
 #define FNVNX_DK_NUM_BOOL    16
 #define FNVNX_DK_BOOL_OFFSET 256  /* bytes, inside UBO 1 */
 #define FNVNX_DK_FOG_VARYING 18
+#define FNVNX_DK_PS_STYPE_OFFSET   320  /* bytes, inside the PS driver block: uvec4 stype[2], stage n at word n */
+#define FNVNX_DK_STYPE_2D          0
+#define FNVNX_DK_STYPE_CUBE        1
+#define FNVNX_DK_STYPE_VOLUME      2
+#define FNVNX_DK_SAMP_CUBE_BASE    8    /* ps_1_x: stage n's CUBE sampler binding is 8 + n, its VOLUME one 16 + n */
+#define FNVNX_DK_SAMP_VOLUME_BASE  16
+#define FNVNX_DK_PS_DRIVER_SIZE    352
+#define FNVNX_DK_MAX_FLOAT_VS      256  /* relative constant reads c[a0 + n] / c[aL + n]: c[0..N) of the stage, 0 outside */
+#define FNVNX_DK_MAX_FLOAT_PS      224
 
 /* D3DDECLUSAGE values (same numbering as MOJOSHADER_usage) */
 enum {
