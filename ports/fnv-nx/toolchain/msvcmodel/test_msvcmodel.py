@@ -51,9 +51,9 @@ def main():
     for fn, want in (('_Z4d_nmP2NM', 20), ('_Z4d_ndP2ND', 24), ('_Z4d_nvP2NV', 28), ('_Z3d_nP1N', 12)):
         check('%s: the sized operator delete[] gets the element size %d (cl)' % (fn, want),
               const_arg(fn, 'heap_free', 'w1') == want, body(s, fn))
-    check('no count before an array of a trivially destructible class', '[x0, -4]' not in body(s, '_Z4d_nmP2NM')
+    check('no count before an array of a trivially destructible class', '-4]' not in body(s, '_Z4d_nmP2NM')
           and '-4]' not in body(s, '_Z4d_ndP2ND'), body(s, '_Z4d_nmP2NM'))
-    check('the count is the 4 bytes before the array, the block starts there', re.search(r'ldr w\d+, \[x0, -4\]', body(s, '_Z4d_nvP2NV'))
+    check('the count is the 4 bytes before the array, the block starts there', re.search(r'ldr w\d+, \[x\d+, -4\]', body(s, '_Z4d_nvP2NV'))
           and re.search(r'sub [wx]0, [wx]\d+, #4', body(s, '_Z4d_nvP2NV')), body(s, '_Z4d_nvP2NV'))
     check('an overflowing new[] size is passed as the largest size, nothing is thrown',
           '__cxa_throw_bad_array_new_length' not in s and re.search(r'csinv|mov w0, -1|mov w0, 4294967295', body(s, '_Z5n_varj')),

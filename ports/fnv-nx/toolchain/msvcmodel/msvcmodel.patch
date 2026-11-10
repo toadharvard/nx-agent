@@ -16,6 +16,18 @@
  
  #define PCC_BITFIELD_TYPE_MATTERS	1
  
+--- a/gcc/cp/call.cc
++++ b/gcc/cp/call.cc
+@@ -5096,7 +5096,8 @@
+   if (size_check != NULL_TREE)
+     {
+       tree errval = TYPE_MAX_VALUE (sizetype);
+-      if (cxx_dialect >= cxx11 && flag_exceptions)
++      /* fnv-nx msvcmodel: see build_new_1 (init.cc).  */
++      if (cxx_dialect >= cxx11 && flag_exceptions && POINTER_SIZE != 32)
+ 	errval = throw_bad_array_new_length ();
+       *size = fold_build3 (COND_EXPR, sizetype, size_check,
+ 			   original_size, errval);
 --- a/gcc/cp/class.cc
 +++ b/gcc/cp/class.cc
 @@ -5856,6 +5856,13 @@

@@ -33,22 +33,30 @@ if [ ! -f "$P/.msvcmodel-$STAMP" ]; then
   tar -xJf gcc-$V.tar.xz -C src --strip-components=1
   patch -d src -p1 < "$HERE/msvcmodel.patch"
   cd build
+  # The header directories are the compiler's own defaults for a cross compiler with a sysroot: the C++ library
+  # under <prefix>/aarch64-linux-gnu/include/c++/13 (so --with-gcc-major-version-only, as the distribution), the
+  # target's C headers in <prefix>/aarch64-linux-gnu/include, then /usr/include. <prefix>/aarch64-linux-gnu/include
+  # is made a link to the distribution's /usr/aarch64-linux-gnu/include below, which gives the distribution
+  # compiler's list in its order. --with-local-prefix names a directory that does not exist: the distribution's
+  # cross compiler has no /usr/local/include in its list.
   ../src/configure --target=aarch64-linux-gnu --prefix="$P" --program-prefix=aarch64-linux-gnu- \
     --enable-languages=c,c++ --disable-bootstrap --disable-multilib --enable-plugin --disable-nls \
     --enable-checking=release --disable-werror --with-system-zlib --enable-multiarch \
-    --with-sysroot=/ --includedir=/usr/aarch64-linux-gnu/include \
-    --with-gxx-include-dir=/usr/aarch64-linux-gnu/include/c++/13 \
+    --with-gcc-major-version-only --with-sysroot=/ --with-local-prefix="$P/no-local" \
     --with-as=/usr/bin/aarch64-linux-gnu-as --with-ld=/usr/bin/aarch64-linux-gnu-ld \
     --with-pkgversion="fnv-nx msvcmodel $STAMP" > configure.log 2>&1
   make -j"${JOBS:-$(nproc)}" all-gcc > make.log 2>&1
   make install-gcc > install.log 2>&1
+  mkdir -p "$P/aarch64-linux-gnu"
+  rm -rf "$P/aarch64-linux-gnu/include"
+  ln -s /usr/aarch64-linux-gnu/include "$P/aarch64-linux-gnu/include"
   touch "$P/.msvcmodel-$STAMP"
 fi
 CXX=$P/bin/aarch64-linux-gnu-g++
 # the include search list must be the distribution compiler's, but for the compiler's own directory
 list() { echo | "$1" -mabi=ilp32 -xc++ -E -v - 2>&1 | sed -n '/#include <...> search starts here/,/End of search list/p' \
          | sed '1d;$d' | while read -r d; do readlink -m "$d"; done | grep -v '/lib/gcc' ; }
-if [ "$(list "$CXX")" != "$(list aarch64-linux-gnu-g++)" ]; then
+if [ -z "$(list "$CXX")" ] || [ "$(list "$CXX")" != "$(list aarch64-linux-gnu-g++)" ]; then
   echo "build.sh: the include search list differs from the distribution compiler's:" >&2
   diff <(list "$CXX") <(list aarch64-linux-gnu-g++) >&2 || true
   exit 3

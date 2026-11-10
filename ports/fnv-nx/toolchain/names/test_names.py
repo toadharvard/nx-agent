@@ -86,12 +86,16 @@ def main():
     check('the only unnamed rows: 4 nested-scope statics, 4 destructor thunks of classes with virtual bases',
           unnamed == ['unnamed:destructor thunk in a class with virtual bases'] * 4 + ['unnamed:local scope number'] * 4, kinds.get('unnamed'))
     missing = want - got
-    check('cl names the plugin does not produce are exactly the stated holes', missing == set(HOLES),
-          {'unexpected': sorted(missing - set(HOLES)), 'now matching': sorted(set(HOLES) - missing)})
+    # the game's compiler (toolchain/msvcmodel) has the exe's size_t: that hole is closed there
+    msvcmodel = '??2@YAPAXI@Z' in got
+    holes = {n: w for n, w in HOLES.items() if not (msvcmodel and w == 'size_t')}
+    check('cl names the plugin does not produce are exactly the stated holes', missing == set(holes),
+          {'unexpected': sorted(missing - set(holes)), 'now matching': sorted(set(holes) - missing)})
     extra = got - set(expect)
     # the plugin's side of the size_t and function-type holes (4 + ::operator delete[] the SDD function calls + f8)
     check('names of the plugin that cl does not have are the same holes seen from GCC',
-          sorted(extra) == sorted(['??2@YAPAXK@Z', '??2Mem@@SAPAXK@Z', '??2Mem@@SAPAXKH@Z', '??_UMem@@SAPAXK@Z', '??_U@YAPAXK@Z',
+          sorted(extra) == sorted((['??_U@YAPAXI@Z'] if msvcmodel else
+                                   ['??2@YAPAXK@Z', '??2Mem@@SAPAXK@Z', '??2Mem@@SAPAXKH@Z', '??_UMem@@SAPAXK@Z', '??_U@YAPAXK@Z']) + [
                                    '?f8@@YAXP6AXH@ZP6AHUS@@PAVC@@@Z0P6AXPAH@Z5Q6AXH@Z@Z',
                                    # GCC's own: D1's ??_G (cl wrote only ??_E here), delete[] called by the ??_E bodies
                                    '??_GD1@@UAEPAXI@Z', '??_V@YAXPAX@Z']), sorted(extra))
@@ -109,7 +113,7 @@ def main():
     check('every ??_7 of cl is an address point', {n for n in expect if n.startswith('??_7')} <= names_vt,
           sorted({n for n in expect if n.startswith('??_7')} - names_vt))
     print('test_names: %s (%d rows, %d names equal to cl\'s, %d stated holes)'
-          % ('FAILED %d' % len(fails) if fails else 'ok', len(rows), len(got & set(expect)), len(HOLES)))
+          % ('FAILED %d' % len(fails) if fails else 'ok', len(rows), len(got & set(expect)), len(holes)))
     return 1 if fails else 0
 
 
