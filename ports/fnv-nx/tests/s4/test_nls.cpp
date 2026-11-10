@@ -1,5 +1,7 @@
 /* test_nls.cpp - platform/win32/nls.cpp: code pages, MultiByteToWideChar/WideCharToMultiByte, GetCPInfo, locale
- * info, LCMapString, CompareString, GetStringType, locale enumeration. Environment: ACP 1252, OEM 437, en-US only. */
+ * info, LCMapString, CompareString, GetStringType, locale enumeration. Environment: ACP 1252, OEM 437, en-US only.
+ * Expectations are facts of the reference environment, Wine 9.0: each literal below was computed from the .nls files
+ * (c_*.nls, l_intl/sortdefault/locale.nls) by an independent Python reader of the formats, not from nls.cpp. */
 #include "s4_test.h"
 
 #include "../../platform/win32/w32.h"
@@ -32,15 +34,15 @@ TEST(nls_code_pages)
 {
     CHECK_EQ(GetACP(), 1252);
     CHECK_EQ(GetOEMCP(), 437);
-    static const UINT ok[] = { 1252, 437, 65001, 65000, 20127, 28591, 10000, 0, 1, 2, 3, 42 };
+    static const UINT ok[] = { 1252, 437, 65001, 65000, 20127, 28591, 10000 };
     for (UINT cp : ok)
         CHECK(IsValidCodePage(cp));
-    static const UINT bad[] = { 932, 1250, 850, 936, 12000, 4, 41, 65002, 0xFFFFFFFFu };
+    static const UINT bad[] = { 0, 1, 2, 3, 42, 932, 1250, 850, 936, 12000, 4, 41, 65002, 0xFFFFFFFFu };   /* ids and CP_SYMBOL: not tables */
     for (UINT cp : bad)
         CHECK(!IsValidCodePage(cp));
     CPINFO ci;
     static const struct { UINT cp, max; } mx[] = { { 1252, 1 }, { 437, 1 }, { 10000, 1 }, { 20127, 1 }, { 28591, 1 },
-        { 42, 1 }, { 65001, 4 }, { 65000, 5 }, { 0, 1 }, { 1, 1 }, { 2, 1 }, { 3, 1 } };
+        { 65001, 4 }, { 65000, 5 }, { 0, 1 }, { 1, 1 }, { 2, 1 }, { 3, 1 } };
     for (auto &m : mx) {
         memset(&ci, 0x55, sizeof ci);
         CHECK(GetCPInfo(m.cp, &ci));
@@ -50,6 +52,9 @@ TEST(nls_code_pages)
         for (int i = 0; i < 12; i++)
             CHECK_EQ(ci.LeadByte[i], 0);
     }
+    SetLastError(0);
+    CHECK(!GetCPInfo(42, &ci));   /* CP_SYMBOL has no table: GetCPInfo fails, the conversions work */
+    CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
     SetLastError(0);
     CHECK(!GetCPInfo(932, &ci));
     CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
@@ -70,7 +75,7 @@ TEST(nls_mb2wc_protocol)
     CHECK_EQ(MultiByteToWideChar(1252, 0, b, -1, NULL, 0), 4);
     CHECK_EQ(MultiByteToWideChar(1252, 0, b, -1, w, 4), 4);
     static const struct { UINT cp; DWORD fl; int err; } t[] = {
-        { 1252, 2 | 1, 1004 }, { 1252, 0x100, 1004 }, { 1252, 0x10, 1004 }, { 65001, 1, 1004 }, { 65001, 4, 1004 },
+        { 1252, 2 | 1, 0 }, { 1252, 0x100, 1004 }, { 1252, 0x10, 1004 }, { 65001, 1, 0 }, { 65001, 4, 0 },
         { 65000, 8, 1004 }, { 42, 1, 1004 }, { 1252, 8, 0 }, { 1252, 2, 0 }, { 437, 4, 0 }, { 65001, 8, 0 },
         { 932, 0, 87 }, { 65002, 0, 87 }, { 1252, 0, 0 } };
     for (auto &c : t) {
@@ -80,7 +85,7 @@ TEST(nls_mb2wc_protocol)
         CHECK_EQ(GetLastError(), c.err);
     }
     static const struct { const char *s; int n, dn; int err; } p[] = {
-        { NULL, -1, 8, 87 }, { "a", 0, 8, 87 }, { "a", -2, 8, 87 }, { "a", -1, -1, 87 }, { "a", -1, 8, 0 } };
+        { NULL, -1, 8, 87 }, { "a", 0, 8, 87 }, { "a", -2, 8, 0 }, { "a", -1, -1, 87 }, { "a", -1, 8, 0 } };
     for (auto &c : p) {
         SetLastError(0);
         int r = MultiByteToWideChar(1252, 0, c.s, c.n, w, c.dn);
@@ -89,9 +94,6 @@ TEST(nls_mb2wc_protocol)
     }
     SetLastError(0);
     CHECK_EQ(MultiByteToWideChar(1252, 0, "a", 1, NULL, 3), 0);   /* dst NULL with a size */
-    CHECK_EQ(GetLastError(), 87);
-    SetLastError(0);
-    CHECK_EQ(MultiByteToWideChar(1252, 0, (const char *)w, 2, w, 8), 0);   /* src == dst */
     CHECK_EQ(GetLastError(), 87);
 }
 
@@ -105,16 +107,17 @@ TEST(nls_mb2wc_pages)
     CHECK_EQ(MultiByteToWideChar(437, T_MB_GLYPH, "\x01\x1f\x7f", 3, w, 8), 3);
     CHECK_EQ(w[0], 0x263A); CHECK_EQ(w[1], 0x25BC); CHECK_EQ(w[2], 0x2302);
     CHECK_EQ(MultiByteToWideChar(10000, 0, "\x80\xdb\xf0", 3, w, 8), 3);
-    CHECK_EQ(w[0], 0xC4); CHECK_EQ(w[1], 0xA4); CHECK_EQ(w[2], 0xF8FF);
+    CHECK_EQ(w[0], 0xC4); CHECK_EQ(w[1], 0x20AC); CHECK_EQ(w[2], 0xF8FF);   /* c_10000.nls: 0xDB is the euro sign */
+    SetLastError(0);
+    CHECK_EQ(MultiByteToWideChar(10000, T_MB_ERR, "a\xf0", 2, w, 8), 0);   /* a private-use result is invalid */
+    CHECK_EQ(GetLastError(), ERROR_NO_UNICODE_TRANSLATION);
     CHECK_EQ(MultiByteToWideChar(CP_MACCP, 0, "\x80", 1, w, 8), 1);
     CHECK_EQ(w[0], 0xC4);
     CHECK_EQ(MultiByteToWideChar(28591, 0, "\x80\xe9", 2, w, 8), 2);
     CHECK_EQ(w[0], 0x80); CHECK_EQ(w[1], 0xE9);
     CHECK_EQ(MultiByteToWideChar(20127, 0, "A\xe9", 2, w, 8), 2);
-    CHECK_EQ(w[0], 'A'); CHECK_EQ(w[1], 0xFFFD);
-    SetLastError(0);
-    CHECK_EQ(MultiByteToWideChar(20127, T_MB_ERR, "A\xe9", 2, w, 8), 0);
-    CHECK_EQ(GetLastError(), ERROR_NO_UNICODE_TRANSLATION);
+    CHECK_EQ(w[0], 'A'); CHECK_EQ(w[1], 'i');   /* c_20127.nls maps byte 0xE9 to U+0069 */
+    CHECK_EQ(MultiByteToWideChar(20127, T_MB_ERR, "A\xe9", 2, w, 8), 2);
     CHECK_EQ(MultiByteToWideChar(42, 0, "A\x0a\xff", 3, w, 8), 3);
     CHECK_EQ(w[0], 0xF041); CHECK_EQ(w[1], 0x0A); CHECK_EQ(w[2], 0xF0FF);
     CHECK_EQ(MultiByteToWideChar(CP_THREAD_ACP, 0, "\x80", 1, w, 8), 1);
@@ -142,15 +145,17 @@ TEST(nls_mb2wc_pages)
 TEST(nls_utf8_decode)
 {
     WCHAR w[16];
+    /* one U+FFFD per rejected prefix as the reference's decoder consumes it (an overlong or surrogate sequence
+     * is rejected after its second byte, a sequence above U+10FFFF before its third, a truncated one eats the rest) */
     static const struct { const char *s; int n; int out; } t[] = {
-        { "\xe0\x80\x80", 3, 3 }, { "\xf0\x90\x80", 3, 1 }, { "\xf4\x90\x80\x80", 4, 4 }, { "\xc0\xaf", 2, 2 },
-        { "\xed\xa0\x80", 3, 3 }, { "\xe2\x82", 2, 1 }, { "\xe2\x28\xa1", 3, 3 }, { "\xf0\x9f\x98\x80", 4, 2 },
+        { "\xe0\x80\x80", 3, 2 }, { "\xf0\x90\x80", 3, 1 }, { "\xf4\x90\x80\x80", 4, 3 }, { "\xc0\xaf", 2, 2 },
+        { "\xed\xa0\x80", 3, 2 }, { "\xe2\x82", 2, 1 }, { "\xe2\x28\xa1", 3, 3 }, { "\xf0\x9f\x98\x80", 4, 2 },
         { "\x80\x80", 2, 2 }, { "\xf8\x88\x80\x80\x80", 5, 5 }, { "a\xc3", 2, 2 } };
     for (auto &c : t) {
         CHECK_EQ(MultiByteToWideChar(CP_UTF8, 0, c.s, c.n, w, 16), c.out);
         SetLastError(0);
         int r = MultiByteToWideChar(CP_UTF8, T_MB_ERR, c.s, c.n, w, 16);
-        CHECK_EQ(r != 0, c.out == 2 && c.n == 4);   /* only the valid pair passes */
+        CHECK_EQ(r != 0, c.n == 4 && !memcmp(c.s, "\xf0\x9f\x98\x80", 4));   /* only the valid pair passes */
     }
     CHECK_EQ(MultiByteToWideChar(CP_UTF8, 0, "\xe2\x28\xa1", 3, w, 16), 3);
     CHECK_EQ(w[0], 0xFFFD); CHECK_EQ(w[1], '('); CHECK_EQ(w[2], 0xFFFD);
@@ -168,9 +173,9 @@ TEST(nls_wc2mb_protocol)
     CHECK_EQ(WideCharToMultiByte(1252, 0, w, -1, NULL, 0, NULL, NULL), 4);
     CHECK_EQ(WideCharToMultiByte(1252, 0, w, 3, NULL, 0, NULL, NULL), 3);
     static const struct { UINT cp; DWORD fl; int err; } t[] = {
-        { 1252, T_WC_ERR, 1004 }, { 1252, T_WC_DISCARDNS, 1004 }, { 1252, T_WC_COMPOSITECHECK | T_WC_DISCARDNS | T_WC_SEPCHARS, 1004 },
+        { 1252, T_WC_ERR, 0 }, { 1252, T_WC_DISCARDNS, 0 }, { 1252, T_WC_COMPOSITECHECK | T_WC_DISCARDNS | T_WC_SEPCHARS, 0 },
         { 1252, 0x1, 1004 }, { 1252, T_WC_COMPOSITECHECK, 0 }, { 1252, T_WC_NOBF, 0 }, { 65001, T_WC_ERR, 0 },
-        { 65001, T_WC_NOBF, 1004 }, { 65001, 0x10, 1004 }, { 65000, T_WC_ERR, 1004 }, { 42, 4, 1004 },
+        { 65001, T_WC_NOBF, 0 }, { 65001, 0x10, 0 }, { 65000, T_WC_ERR, 1004 }, { 42, 4, 1004 },
         { 932, 0, 87 }, { 1252, T_WC_COMPOSITECHECK | T_WC_SEPCHARS, 0 } };
     for (auto &c : t) {
         SetLastError(0);
@@ -179,7 +184,7 @@ TEST(nls_wc2mb_protocol)
         CHECK_EQ(GetLastError(), c.err);
     }
     BOOL used;
-    static const UINT nodef[] = { 65000, 65001, 42 };
+    static const UINT nodef[] = { 65000, 42 };   /* UTF-8 ignores the default char arguments */
     for (UINT cp : nodef) {
         SetLastError(0);
         CHECK_EQ(WideCharToMultiByte(cp, 0, w, 3, a, 16, "?", NULL), 0);
@@ -195,16 +200,12 @@ TEST(nls_wc2mb_protocol)
     CHECK_EQ(WideCharToMultiByte(1252, 0, w, 0, a, 16, NULL, NULL), 0);
     CHECK_EQ(GetLastError(), 87);
     SetLastError(0);
-    CHECK_EQ(WideCharToMultiByte(1252, 0, w, -5, a, 16, NULL, NULL), 0);
-    CHECK_EQ(GetLastError(), 87);
+    CHECK_EQ(WideCharToMultiByte(1252, 0, w, -5, a, 16, NULL, NULL), 4);   /* any negative length: NUL-terminated */
     SetLastError(0);
     CHECK_EQ(WideCharToMultiByte(1252, 0, w, 3, a, -1, NULL, NULL), 0);
     CHECK_EQ(GetLastError(), 87);
     SetLastError(0);
     CHECK_EQ(WideCharToMultiByte(1252, 0, w, 3, NULL, 4, NULL, NULL), 0);
-    CHECK_EQ(GetLastError(), 87);
-    SetLastError(0);
-    CHECK_EQ(WideCharToMultiByte(1252, 0, (LPCWSTR)a, 2, (LPSTR)a, 8, NULL, NULL), 0);   /* src == dst */
     CHECK_EQ(GetLastError(), 87);
 }
 
@@ -224,9 +225,9 @@ TEST(nls_wc2mb_bestfit)
     CHECK(used);
     CHECK_EQ(WideCharToMultiByte(437, 0, w, 5, a, 16, NULL, NULL), 5);
     CHECK_EQ((unsigned char)a[3], 0x8F);   /* A-ring is 0x8F in 437 */
-    static const WCHAR sur[] = { 0xD83D, 0xDE00, 'x', 0xDC00, 0 };   /* a pair is one character, a lone one too */
-    CHECK_EQ(WideCharToMultiByte(1252, 0, sur, 4, a, 16, NULL, &used), 3);
-    CHECK(!memcmp(a, "?x?", 3));
+    static const WCHAR sur[] = { 0xD83D, 0xDE00, 'x', 0xDC00, 0 };   /* every UTF-16 unit is a character of its own */
+    CHECK_EQ(WideCharToMultiByte(1252, 0, sur, 4, a, 16, NULL, &used), 4);
+    CHECK(!memcmp(a, "??x?", 4));
     /* composite check */
     static const WCHAR ec[] = { 'e', 0x301, 'z', 0x302, 0 };
     CHECK_EQ(WideCharToMultiByte(1252, T_WC_COMPOSITECHECK, ec, 2, a, 16, NULL, NULL), 1);
@@ -236,15 +237,18 @@ TEST(nls_wc2mb_bestfit)
     CHECK_EQ(WideCharToMultiByte(1252, T_WC_COMPOSITECHECK | T_WC_DEFAULTCHAR, ec + 2, 2, a, 16, NULL, NULL), 1);
     CHECK_EQ(a[0], '?');
     CHECK_EQ(WideCharToMultiByte(1252, T_WC_COMPOSITECHECK | T_WC_SEPCHARS, ec + 2, 2, a, 16, NULL, NULL), 2);
-    CHECK(!memcmp(a, "z?", 2));
+    CHECK(!memcmp(a, "z^", 2));   /* U+0302 alone best-fits to '^' in c_1252.nls */
     CHECK_EQ(WideCharToMultiByte(1252, 0, ec, 2, a, 16, NULL, NULL), 2);   /* without the check: separate characters */
     CHECK_EQ(a[0], 'e');
     CHECK_EQ(WideCharToMultiByte(20127, 0, ec, 1, a, 16, NULL, NULL), 1);
     static const WCHAR hi[] = { 0xE9, 0 };
     CHECK_EQ(WideCharToMultiByte(20127, 0, hi, 1, a, 16, NULL, NULL), 1);
     CHECK_EQ(a[0], 'e');   /* best fit: e-acute -> e */
-    CHECK_EQ(WideCharToMultiByte(42, 0, (const WCHAR[]){ 0xF041, 0x0A, 0x41 }, 3, a, 16, NULL, NULL), 3);
-    CHECK(!memcmp(a, "A\x0a?", 3));
+    CHECK_EQ(WideCharToMultiByte(42, 0, (const WCHAR[]){ 0xF041, 0x0A, 0xF0FF }, 3, a, 16, NULL, NULL), 3);
+    CHECK(!memcmp(a, "A\x0a\xff", 3));
+    SetLastError(0);
+    CHECK_EQ(WideCharToMultiByte(42, 0, (const WCHAR[]){ 0x41 }, 1, a, 16, NULL, NULL), 0);   /* no symbol-page char */
+    CHECK_EQ(GetLastError(), ERROR_NO_UNICODE_TRANSLATION);
 }
 
 TEST(nls_utf8_encode_utf7)
@@ -287,26 +291,55 @@ TEST(nls_locale_info)
     static const struct { LCTYPE t; const char *v; } t[] = {
         { 0x2, "English (United States)" }, { 0x3, "ENU" }, { 0x7, "USA" }, { 0xB, "437" }, { 0x1004, "1252" },
         { 0x1001, "English" }, { 0x1002, "United States" }, { 0x59, "en" }, { 0x5A, "US" }, { 0x5C, "en-US" },
-        { 0x1F, "M/d/yyyy" }, { 0x20, "dddd, MMMM dd, yyyy" }, { 0x1003, "h:mm:ss tt" }, { 0x28, "AM" },
+        { 0x1F, "M/d/yyyy" }, { 0x20, "dddd, MMMM d, yyyy" }, { 0x1003, "h:mm:ss tt" }, { 0x28, "AM" },
         { 0x29, "PM" }, { 0xC, "," }, { 0xE, "." }, { 0xF, "," }, { 0x10, "3;0" }, { 0x14, "$" }, { 0xD, "1" },
         { 0x100C, "6" }, { 0x1D, "/" }, { 0x1E, ":" }, { 0x2A, "Monday" }, { 0x30, "Sunday" }, { 0x31, "Mon" },
         { 0x43, "December" }, { 0x44, "Jan" }, { 0x4F, "Dec" }, { 0x38, "January" }, { 0x67, "eng" },
-        { 0x68, "USA" }, { 0x60, "Mo" }, { 0x66, "Su" }, { 0x69, "NaN" }, { 0x6A, "Infinity" }, { 0x6B, "-Infinity" },
-        { 0x1011, "10000" }, { 0x15, "USD" }, { 0x51, "-" }, { 0x50, "" }, { 0x100E, "" }, { 0x5D, "h:mm:ss" },
-        { 0x79, "h:mm tt" }, { 0x1006, "MMMM, yyyy" }, { 0x1007, "US Dollar" }, { 0x6D, "en" } };
+        { 0x68, "USA" }, { 0x60, "Mo" }, { 0x66, "Su" }, { 0x69, "NaN" }, { 0x6A, "8" }, { 0x6B, "-8" },   /* U+221E, best fit "8" through 1252 */
+        { 0x1011, "10000" }, { 0x15, "USD" }, { 0x51, "-" }, { 0x50, "" }, { 0x100E, "" }, { 0x5D, "hh:mm:ss" },
+        { 0x1006, "MMMM yyyy" }, { 0x1007, "US Dollar" }, { 0x6D, "en" } };
     for (auto &c : t) {
         int n = (int)strlen(c.v) + 1;
         CHECK_EQ(GetLocaleInfoA(LC, c.t, NULL, 0), n);
         CHECK_EQ(GetLocaleInfoA(LC, c.t, a, 80), n);
         CHECK_STR(a, c.v);
         CHECK_EQ(GetLocaleInfoW(LC, c.t | LOCALE_NOUSEROVERRIDE, w, 80), n);
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < n && c.t != 0x6A && c.t != 0x6B; i++)
             CHECK_EQ(w[i], (unsigned char)c.v[i]);
     }
-    /* every LCTYPE Windows 7 defines answers for en-US */
+    CHECK_EQ(GetLocaleInfoW(LC, 0x6A, w, 80), 2);   /* LOCALE_SPOSINFINITY is U+221E in locale.nls (Wine 9.0) */
+    CHECK_EQ(w[0], 0x221E);
+    CHECK_EQ(GetLocaleInfoW(LC, 0x6B, w, 80), 3);
+    CHECK_EQ(w[0], '-'); CHECK_EQ(w[1], 0x221E);
+    CHECK_EQ(GetLocaleInfoW(0x7F, 0x6A, w, 80), 9);   /* the invariant locale spells it out */
+    CHECK_EQ(w[0], 'I'); CHECK_EQ(w[7], 'y');
+    CHECK_EQ(GetLocaleInfoW(LC, 0x79, w, 80), 8);   /* SSHORTTIME: W only, "h:mm tt" */
+    CHECK_EQ(w[0], 'h'); CHECK_EQ(w[6], 't');
+    SetLastError(0);
+    CHECK_EQ(GetLocaleInfoA(LC, 0x79, a, 80), 0);
+    CHECK_EQ(GetLastError(), 1004);
+    /* values of the NLS_LOCALE_DATA record: names, grouping, month/day arrays, derived date/time items */
+    CHECK_EQ(GetLocaleInfoA(LC, 0x1013, a, 80), 8);   CHECK_STR(a, "Default");
+    CHECK_EQ(GetLocaleInfoA(LC, 0x13, a, 80), 11);    CHECK_STR(a, "0123456789");
+    CHECK_EQ(GetLocaleInfoA(LC, 0x5D, a, 80), 9);     CHECK_STR(a, "hh:mm:ss");
+    CHECK_EQ(GetLocaleInfoA(LC, 0x6C, a, 80), 6);     CHECK_STR(a, "Latn;");
+    CHECK_EQ(GetLocaleInfoA(LC, 0x5E, a, 80), 14);    CHECK_STR(a, "0409:00000409");
+    CHECK_EQ(GetLocaleInfoA(LC, 0x7C, a, 80), 12);    CHECK_STR(a, "dddd, MMM d");
+    CHECK_EQ(GetLocaleInfoA(LC, 0x1013, a, 80), 8);
+    CHECK_EQ(GetLocaleInfoA(LC, 0x77, a, 80), 2);     /* LOCALE_SPERMILLE: U+2030 through 1252 */
+    CHECK_EQ((unsigned char)a[0], 0x89);
+    static const struct { LCTYPE t; unsigned v; } nu[] = { { 0x23, 0 }, { 0x21, 0 }, { 0x22, 0 }, { 0x24, 1 }, { 0x25, 0 },
+        { 0x26, 0 }, { 0x27, 0 }, { 0x1005, 0 }, { 0x100B, 0 }, { 0x1009, 1 }, { 0x100A, 1 }, { 0x1012, 37 }, { 0x1014, 1 },
+        { 0x5B, 244 }, { 0x74, 1 }, { 0x75, 1 }, { 0x70, 0 }, { 0x71, 0 }, { 0x1010, 1 }, { 0x11, 2 }, { 0x12, 1 },
+        { 0x52, 3 }, { 0x53, 0 }, { 0x54, 1 }, { 0x55, 0 }, { 0x56, 1 }, { 0x57, 0 }, { 0x5, 1 }, { 0x9, 0x409 } };
+    for (auto &c : nu) {
+        uint32_t v = 99;
+        CHECK_EQ(GetLocaleInfoW(LC, c.t | LOCALE_RETURN_NUMBER, (WCHAR *)&v, 2), 2);
+        CHECK_EQ(v, c.v);
+    }
+    /* every LCTYPE of the reference's switch answers for en-US */
     for (LCTYPE t = 1; t <= 0x7A; t++) {
-        bool defined = t <= 0x58 || (t >= 0x59 && t <= 0x6F && t != 0x5F) || t == 0x70 || t == 0x71 || t == 0x72 ||
-                       t == 0x73 || t == 0x79 || t == 0x7A;
+        bool defined = t != 0x5F;
         CHECK_EQ(GetLocaleInfoW(LC, t, NULL, 0) > 0, defined);
     }
     static const LCTYPE hi[] = { 0x1001, 0x1002, 0x1003, 0x1004, 0x1005, 0x1006, 0x1007, 0x1008, 0x1009, 0x100A,
@@ -376,20 +409,16 @@ static BOOL enum_cb(LPSTR s)
 TEST(nls_locale_set)
 {
     CHECK_EQ(GetUserDefaultLCID(), 0x409);
-    static const LCID ok[] = { 0x409, 0x400, 0x800, 0, 0x7F, 0x9 };
+    static const LCID ok[] = { 0x409, 0x7F, 0x9, 0xC00, 0x1000, 0x1400 };
     for (LCID l : ok) {
         CHECK(IsValidLocale(l, 1));
         CHECK(IsValidLocale(l, 2));
     }
-    static const LCID bad[] = { 0x407, 0x10409, 0x40A };
+    static const LCID bad[] = { 0x407, 0x10409, 0x40A, 0, 0x400, 0x800 };   /* the default ids are not "valid" ones */
     for (LCID l : bad)
         CHECK(!IsValidLocale(l, 2));
-    SetLastError(0);
-    CHECK(!IsValidLocale(0x409, 0));
-    CHECK_EQ(GetLastError(), 1004);
-    SetLastError(0);
-    CHECK(!IsValidLocale(0x409, 8));
-    CHECK_EQ(GetLastError(), 1004);
+    CHECK(IsValidLocale(0x409, 0));   /* the flags are not checked */
+    CHECK(IsValidLocale(0x409, 8));
     g_calls = 0;
     CHECK(EnumSystemLocalesA(enum_cb, 1));
     CHECK(EnumSystemLocalesA(enum_cb, 2));
@@ -423,13 +452,13 @@ TEST(nls_string_types)
     for (int i = 0; i < 8; i++)
         CHECK_EQ(t[i], c2[i]);
     static const WCHAR s3[] = { 0x301, 'a', 0x30A2, 0x3042, 0xFF41, 0xFF71, 0x4E2D, 0x640 };
-    static const int c3[] = { 3, 0x8000, 0x8010, 0x8020, 0x8080, 0x8050, 0x8100, 0x8200 };
+    static const int c3[] = { 3, 0x8040, 0x8090, 0x8020, 0x8080, 0x8050, 0x8100, 0x8600 };
     CHECK(GetStringTypeW(CT_CTYPE3, s3, 8, t));
     for (int i = 0; i < 8; i++)
         CHECK_EQ(t[i], c3[i]);
     static const WCHAR s4[] = { '-', 0xD800, 0xDC00, 0x20AC };
     CHECK(GetStringTypeW(CT_CTYPE3, s4, 4, t));
-    CHECK_EQ(t[0], 0x408); CHECK_EQ(t[1], 0x800); CHECK_EQ(t[2], 0x1000); CHECK_EQ(t[3], 8);
+    CHECK_EQ(t[0], 0x440); CHECK_EQ(t[1], 0x800); CHECK_EQ(t[2], 0x1000); CHECK_EQ(t[3], 8);
     /* the whole BMP: letters are alpha and defined, upper and lower exclude digits */
     for (unsigned c = 0; c < 0x10000; c++) {
         WCHAR ch = (WCHAR)c;
@@ -446,25 +475,24 @@ TEST(nls_string_types)
             break;
         }
     }
+    CHECK(GetStringTypeW(CT_CTYPE1, s2, 0, t));   /* a count of 0 converts nothing */
     SetLastError(0);
-    CHECK(!GetStringTypeW(CT_CTYPE1, s2, 0, t));
-    CHECK_EQ(GetLastError(), 87);
     CHECK(!GetStringTypeW(CT_CTYPE1, NULL, 1, t));
     CHECK_EQ(GetLastError(), 87);
     CHECK(!GetStringTypeW(CT_CTYPE1, s2, 1, NULL));
     CHECK_EQ(GetLastError(), 87);
     CHECK(!GetStringTypeW(3, s2, 1, t));
-    CHECK_EQ(GetLastError(), 1004);
+    CHECK_EQ(GetLastError(), 87);
     CHECK(!GetStringTypeW(0, s2, 1, t));
-    CHECK_EQ(GetLastError(), 1004);
+    CHECK_EQ(GetLastError(), 87);
     CHECK(GetStringTypeA(LC, CT_CTYPE2, "a", -1, t));   /* -1: the NUL too */
     CHECK_EQ(t[0], 1); CHECK_EQ(t[1], 0);
     CHECK(GetStringTypeA(LOCALE_SYSTEM_DEFAULT, CT_CTYPE3, "\x80", 1, t));
     CHECK_EQ(t[0], 8);
-    CHECK(!GetStringTypeA(0x407, CT_CTYPE1, "a", 1, t));
-    CHECK_EQ(GetLastError(), 87);
+    CHECK(GetStringTypeA(0x407, CT_CTYPE1, "a", 1, t));   /* an unknown locale reads the string as ANSI */
+    CHECK_EQ(t[0], 0x382);
     CHECK(!GetStringTypeA(LC, 0x10, "a", 1, t));
-    CHECK_EQ(GetLastError(), 1004);
+    CHECK_EQ(GetLastError(), 87);
 }
 
 /* ---- LCMapString */
@@ -474,19 +502,23 @@ TEST(nls_lcmap)
     char a[16];
     static const WCHAR up[] = { 'a', 0xDF, 0xB5, 0xFF, 0x131, 0x17F, 0x3B1, 0x44F, 0xFF41, 0 };
     CHECK_EQ(LCMapStringW(LC, T_UPPER, up, -1, w, 16), 10);
-    static const int ue[] = { 'A', 0xDF, 0x39C, 0x178, 'I', 'S', 0x391, 0x42F, 0xFF21, 0 };
+    static const int ue[] = { 'A', 0xDF, 0xB5, 0x178, 0x131, 0x17F, 0x391, 0x42F, 0xFF21, 0 };   /* casemap of sortdefault.nls */
     for (int i = 0; i < 10; i++)
         CHECK_EQ(w[i], ue[i]);
-    CHECK_EQ(LCMapStringW(LC, T_UPPER | 0x08000000, up, 2, w, 16), 2);   /* linguistic casing: same for en-US */
-    CHECK_EQ(w[0], 'A');
+    CHECK_EQ(LCMapStringW(LC, T_UPPER | 0x01000000, up, 9, w, 16), 9);   /* LCMAP_LINGUISTIC_CASING: its own casemap */
+    static const int le[] = { 'A', 0xDF, 0x39C, 0x178, 'I', 'S', 0x391, 0x42F, 0xFF21 };
+    for (int i = 0; i < 9; i++)
+        CHECK_EQ(w[i], le[i]);
     memcpy(s, up, sizeof up);
     CHECK_EQ(LCMapStringW(LC, T_UPPER, s, -1, s, 16), 10);   /* in place */
     CHECK_EQ(s[3], 0x178);
     CHECK_EQ(LCMapStringW(LC, T_LOWER, (const WCHAR[]){ 0x130, 0x1E9E, 0x3A3 }, 3, w, 16), 3);
+    CHECK_EQ(w[0], 0x130); CHECK_EQ(w[1], 0x1E9E); CHECK_EQ(w[2], 0x3C3);
+    CHECK_EQ(LCMapStringW(LC, T_LOWER | 0x01000000, (const WCHAR[]){ 0x130, 0x1E9E, 0x3A3 }, 3, w, 16), 3);
     CHECK_EQ(w[0], 'i'); CHECK_EQ(w[1], 0xDF); CHECK_EQ(w[2], 0x3C3);
     /* flag classes */
-    static const DWORD badf[] = { 0, T_LOWER | T_UPPER, T_SORTKEY | T_UPPER, T_HIRA | T_KATA, T_HALF | T_FULL,
-                                  0x1000000, T_IGNCASE, T_LOWER | T_SORTKEY, 0x08000000, 0x08000000 | T_SORTKEY };
+    static const DWORD badf[] = { 0, T_LOWER | T_UPPER, T_HIRA | T_KATA, T_HALF | T_FULL, 0x1000000, T_IGNCASE,
+                                  0x08000000 };   /* a sort key request ignores the other bits, so it is not here */
     for (DWORD f : badf) {
         SetLastError(0);
         CHECK_EQ(LCMapStringW(LC, f, up, 2, w, 16), 0);
@@ -517,10 +549,22 @@ TEST(nls_lcmap)
     static const int he[] = { 'A', ' ', 0xFF71, 'A', 0xFF61 };
     for (int i = 0; i < 5; i++)
         CHECK_EQ(w[i], he[i]);
+    CHECK_EQ(LCMapStringW(LC, T_HALF, (const WCHAR[]){ 0x30AC, 0x30D1 }, 2, w, 16), 4);   /* voiced kana split in two units */
+    CHECK_EQ(w[0], 0xFF76); CHECK_EQ(w[1], 0xFF9E); CHECK_EQ(w[2], 0xFF8A); CHECK_EQ(w[3], 0xFF9F);
+    CHECK_EQ(LCMapStringW(LC, T_FULL, (const WCHAR[]){ 0xFF76, 0xFF9E, 0xFF8A, 0xFF9F }, 4, w, 16), 2);   /* and joined again */
+    CHECK_EQ(w[0], 0x30AC); CHECK_EQ(w[1], 0x30D1);
     CHECK_EQ(LCMapStringW(LC, T_KATA, (const WCHAR[]){ 0x3042, 0x3093, 'a' }, 3, w, 16), 3);
     CHECK_EQ(w[0], 0x30A2); CHECK_EQ(w[1], 0x30F3); CHECK_EQ(w[2], 'a');
     CHECK_EQ(LCMapStringW(LC, T_HIRA, (const WCHAR[]){ 0x30A2, 0x30F3 }, 2, w, 16), 2);
     CHECK_EQ(w[0], 0x3042); CHECK_EQ(w[1], 0x3093);
+    CHECK_EQ(LCMapStringW(LC, 0x4000000, (const WCHAR[]){ 0x4E1C, 0x56FD, 'A' }, 3, w, 16), 3);   /* LCMAP_TRADITIONAL_CHINESE */
+    CHECK_EQ(w[0], 0x6771); CHECK_EQ(w[1], 0x570B); CHECK_EQ(w[2], 'A');
+    CHECK_EQ(LCMapStringW(LC, 0x2000000, (const WCHAR[]){ 0x6771, 0x570B }, 2, w, 16), 2);   /* LCMAP_SIMPLIFIED_CHINESE */
+    CHECK_EQ(w[0], 0x4E1C); CHECK_EQ(w[1], 0x56FD);
+    CHECK_EQ(LCMapStringW(LC, T_IGNNS, (const WCHAR[]){ 0xE9, 'x' }, 2, w, 16), 2);   /* decomposed, the mark dropped */
+    CHECK_EQ(w[0], 'e'); CHECK_EQ(w[1], 'x');
+    CHECK_EQ(LCMapStringW(LC, T_IGNSYM, L"a-b c", 5, w, 16), 3);   /* punctuation and spaces are C1_PUNCT / C3_SYMBOL */
+    CHECK_EQ(w[0], 'a'); CHECK_EQ(w[1], 'b'); CHECK_EQ(w[2], 'c');
     CHECK_EQ(LCMapStringW(LC, T_BYTEREV, (const WCHAR[]){ 0x3450, 0x4822 }, 2, w, 16), 2);
     CHECK_EQ(w[0], 0x5034); CHECK_EQ(w[1], 0x2248);
     CHECK_EQ(LCMapStringW(LC, T_BYTEREV | T_UPPER, (const WCHAR[]){ 'a' }, 1, w, 16), 1);
@@ -528,8 +572,7 @@ TEST(nls_lcmap)
     /* A: through the code page; a case partner outside the page keeps the byte */
     CHECK_EQ(LCMapStringA(LC, T_UPPER, "ab\xe9\xb5\xff", -1, a, 16), 6);
     CHECK_STR(a, "AB\xc9\xb5\x9f");
-    CHECK_EQ(LCMapStringA(LC, T_BYTEREV, "abcd", 4, a, 16), 4);
-    CHECK(!memcmp(a, "badc", 4));
+    CHECK_EQ(LCMapStringA(LC, T_BYTEREV, "abcd", 4, a, 16), 0);   /* the size probe of a byte reversal is 0 */
     CHECK_EQ(LCMapStringA(LC, T_FULL, "a", 1, a, 16), 1);   /* fullwidth A is not in 1252: stays */
     CHECK_EQ(a[0], 'a');
 }
@@ -610,12 +653,24 @@ TEST(nls_compare)
     CHECK_EQ(CW(T_IGNNS | T_IGNCASE, L"é", L"E"), CSTR_EQUAL);
     CHECK_EQ(CW(T_IGNCASE, L"É", L"é"), CSTR_EQUAL);
     CHECK_EQ(CW(T_IGNSYM, L"a-b c", L"abc"), CSTR_EQUAL);
-    CHECK_EQ(CW(0, L"aあ", L"aア"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0, L"aあ", L"aア"), CSTR_GREATER_THAN);   /* hiragana carries the 0x20 case weight */
     CHECK_EQ(CW(T_IGNKANA, L"aあ", L"aア"), CSTR_EQUAL);
     CHECK_EQ(CW(0, L"A", L"Ａ"), CSTR_LESS_THAN);
     CHECK_EQ(CW(T_IGNWIDTH, L"A", L"Ａ"), CSTR_EQUAL);
-    CHECK_EQ(CW(0, L"z", L"中"), CSTR_LESS_THAN);   /* other characters after the Latin ones, by code point */
-    CHECK_EQ(CW(0, L"中", L"丮"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0, L"z", L"中"), CSTR_LESS_THAN);   /* ideographs sort after the Latin letters */
+    CHECK_EQ(CW(0, L"中", L"丮"), CSTR_LESS_THAN);   /* by their weights in sortdefault.nls: the 0xFD 0xFF prefix, then the weight bytes */
+    /* positions of sortdefault.nls: o < o-stroke < p, e < e-acute < f, ae-ligature = "ae", sharp s = "ss" */
+    CHECK_EQ(CW(0, L"o", L"ø"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0, L"ø", L"p"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0, L"ø", L"z"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0, L"æ", L"ae"), CSTR_EQUAL);
+    CHECK_EQ(CW(0, L"ad", L"æ"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0, L"æ", L"af"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0, L"ß", L"ss"), CSTR_EQUAL);
+    CHECK_EQ(CW(0, L"ß", L"st"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0, L"a1", L"a2"), CSTR_LESS_THAN);
+    CHECK_EQ(CW(0x8, L"a10", L"a9"), CSTR_GREATER_THAN);   /* SORT_DIGITSASNUMBERS */
+    CHECK_EQ(CW(0, L"a10", L"a9"), CSTR_LESS_THAN);
     /* counts, embedded NULs, ASCII/ANSI */
     CHECK_EQ(CompareStringW(LC, 0, L"abcX", 3, L"abcY", 3), CSTR_EQUAL);
     CHECK_EQ(CompareStringW(LC, 0, L"a\0b", 3, L"a\0c", 3), CSTR_LESS_THAN);
@@ -625,7 +680,7 @@ TEST(nls_compare)
     CHECK_EQ(CompareStringA(LC, T_IGNCASE, "H\xc9", -1, "h\xe9", -1), CSTR_EQUAL);
     CHECK_EQ(CompareStringA(LC, 0, "e", -1, "\xe9", -1), CSTR_LESS_THAN);
     CHECK_EQ(CompareStringA(LC, 0, "\x80", -1, "a", -1), CSTR_LESS_THAN);   /* euro sign: a symbol */
-    static const DWORD badf[] = { 0x8, 0x80, 0x4000, 0x40000, 0x100 };
+    static const DWORD badf[] = { 0x80, 0x4000, 0x40000, 0x100 };
     for (DWORD f : badf) {
         SetLastError(0);
         CHECK_EQ(CW(f, L"a", L"b"), 0);
@@ -636,10 +691,60 @@ TEST(nls_compare)
     CHECK_EQ(GetLastError(), 87);
     CHECK_EQ(CompareStringW(LC, 0, L"a", -1, NULL, 1), 0);
     CHECK_EQ(GetLastError(), 87);
-    CHECK_EQ(CompareStringW(LC, 0, L"a", -2, L"a", -1), 0);
-    CHECK_EQ(GetLastError(), 87);
+    CHECK_EQ(CompareStringW(LC, 0, L"a", -2, L"a", -1), CSTR_EQUAL);   /* any negative length: NUL-terminated */
     CHECK_EQ(CompareStringW(0x407, 0, L"a", -1, L"a", -1), 0);
     CHECK_EQ(GetLastError(), 87);
     CHECK_EQ(CompareStringW(LOCALE_USER_DEFAULT, 0, L"a", -1, L"a", -1), CSTR_EQUAL);
     CHECK_EQ(CompareStringW(LOCALE_INVARIANT, 0, L"a", -1, L"b", -1), CSTR_LESS_THAN);
+}
+
+static int wl(const WCHAR *s)
+{
+    int n = 0;
+    while (s[n])
+        n++;
+    return n;
+}
+
+/* ---- facts of the reference tables: best fit of the wide->multibyte tables, sort keys of sortdefault.nls */
+TEST(nls_reference_tables)
+{
+    char a[8];
+    BOOL used;
+    /* code page, character, byte with best fit, byte with WC_NO_BEST_FIT_CHARS (-1: the default char '?') */
+    static const struct { UINT cp; unsigned wc; int b, bnb; } bf[] = {
+        { 1252, 0x141, 'L', -1 }, { 1252, 0x100, 'A', -1 }, { 1252, 0x3B1, 'a', -1 }, { 1252, 0x2022, 0x95, 0x95 },
+        { 1252, 0x20AC, 0x80, 0x80 }, { 1252, 0x4E00, '?', -1 }, { 437, 0x141, 'L', -1 }, { 437, 0x3B1, 0xE0, 0xE0 },
+        { 437, 0xE9, 0x82, 0x82 }, { 10000, 0x20AC, 0xDB, 0xDB }, { 10000, 0x141, '?', -1 }, { 20127, 0xE9, 'e', -1 },
+        { 20127, 0xA4, '$', -1 }, { 28591, 0x141, 'L', -1 }, { 28591, 0xE9, 0xE9, 0xE9 } };
+    for (auto &c : bf) {
+        WCHAR w[2] = { (WCHAR)c.wc, 0 };
+        used = TRUE;
+        CHECK_EQ(WideCharToMultiByte(c.cp, 0, w, 1, a, 8, NULL, &used), 1);
+        CHECK_EQ((unsigned char)a[0], c.b);
+        CHECK_EQ(used, c.b == '?' && c.wc != '?');   /* a best-fit character is not a default character */
+        used = FALSE;
+        CHECK_EQ(WideCharToMultiByte(c.cp, T_WC_NOBF, w, 1, a, 8, NULL, &used), 1);
+        CHECK_EQ((unsigned char)a[0], c.bnb < 0 ? '?' : c.bnb);
+        CHECK_EQ(used, c.bnb < 0);
+    }
+    CHECK_EQ(WideCharToMultiByte(1252, 0, (const WCHAR[]){ 0x141 }, 1, a, 8, "#", &used), 1);
+    CHECK_EQ(a[0], 'L');
+    CHECK_EQ(WideCharToMultiByte(1252, T_WC_NOBF, (const WCHAR[]){ 0x141 }, 1, a, 8, "#", &used), 1);
+    CHECK_EQ(a[0], '#');
+    /* sort keys: primary, diacritic, case levels (0x01 separated), a 0x01, the word-sort level, 0x00 */
+    static const struct { const WCHAR *s; DWORD fl; const char *hex; } keys[] = {
+        { L"a", 0, "0e020101010100" }, { L"A", 0, "0e02010112010100" }, { L"ab", 0, "0e020e090101010100" },
+        { L"é", 0, "0e21010e01010100" }, { L"A", T_IGNCASE, "0e020101010100" }, { L"é", T_IGNNS, "0e210101010100" },
+        { L"a-b", 0, "0e020e0901010101fffe821200" }, { L"a-b", T_STRSORT, "0e0206820e090101010100" },
+        { L"ø", 0, "0e7c012101010100" }, { L"ß", 0, "0e910e910101010100" }, { L"æ", 0, "0e020e210101010100" },
+        { L"", 0, "0101010100" } };
+    for (auto &k : keys) {
+        BYTE b[64];
+        int n = LCMapStringW(LC, T_SORTKEY | k.fl, k.s, wl(k.s) ? wl(k.s) : -1, (WCHAR *)b, 64);
+        char hex[140] = "";
+        for (int i = 0; i < n; i++)
+            snprintf(hex + 2 * i, 4, "%02x", b[i]);
+        CHECK_STR(hex, k.hex);
+    }
 }

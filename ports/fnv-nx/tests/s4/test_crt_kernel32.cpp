@@ -62,7 +62,7 @@ TEST(crt_k32_multibyte_to_wide_utf8)
     SetLastError(0);
     CHECK_EQ(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bad, 4, w, 8), 0);
     CHECK_EQ(GetLastError(), ERROR_NO_UNICODE_TRANSLATION);
-    CHECK_EQ(MultiByteToWideChar(CP_UTF8, 0, "\xed\xa0\x80", 3, NULL, 0), 3);   /* an encoded surrogate: one per maximal subpart */
+    CHECK_EQ(MultiByteToWideChar(CP_UTF8, 0, "\xed\xa0\x80", 3, NULL, 0), 2);   /* an encoded surrogate: rejected after ED A0, then 80 alone */
 }
 
 TEST(crt_k32_wide_to_multibyte)
@@ -91,9 +91,9 @@ TEST(crt_k32_wide_to_multibyte)
     char b[16];
     CHECK_EQ(WideCharToMultiByte(CP_UTF8, 0, u, -1, b, 16, NULL, NULL), 14);
     CHECK_STR(b, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\xef\xbf\xbd");
-    SetLastError(0);
-    CHECK_EQ(WideCharToMultiByte(CP_UTF8, 0, u, -1, b, 16, NULL, &used), 0);
-    CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
+    used = FALSE;
+    CHECK_EQ(WideCharToMultiByte(CP_UTF8, 0, u, -1, b, 16, NULL, &used), 14);   /* the reference accepts it, used = a lone surrogate was replaced */
+    CHECK(used);
     CHECK_EQ(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, u, -1, b, 16, NULL, NULL), 0);
     CHECK_EQ(GetLastError(), ERROR_NO_UNICODE_TRANSLATION);
     /* every 1252 byte round-trips */
@@ -156,7 +156,7 @@ TEST(crt_k32_lcmapstring)
     CHECK_EQ(w[5], 0);
     CHECK_EQ(LCMapStringW(0x0409, LCMAP_LOWERCASE, L"\u0178\u0130Q", 3, w, 3), 3);
     CHECK_EQ(w[0], 0xFF);
-    CHECK_EQ(w[1], 'i');
+    CHECK_EQ(w[1], 0x130);   /* U+0130 has no lower-case partner in the non-linguistic casemap */
     CHECK_EQ(w[2], 'q');
     /* sort keys order as CompareString: a < A < ab < B */
     BYTE k1[32], k2[32], k3[32], k4[32];
@@ -164,14 +164,15 @@ TEST(crt_k32_lcmapstring)
     int n2 = LCMapStringA(0x0409, LCMAP_SORTKEY, "A", -1, (char *)k2, 32);
     int n3 = LCMapStringA(0x0409, LCMAP_SORTKEY, "ab", -1, (char *)k3, 32);
     int n4 = LCMapStringW(0x0409, LCMAP_SORTKEY, L"B", -1, (WCHAR *)k4, 32);
-    CHECK_EQ(n1, 11);   /* 3 bytes primary, 3 diacritic, 1 case, 4 separators/terminator per level */
-    CHECK_EQ(LCMapStringA(0x0409, LCMAP_SORTKEY, "a", -1, NULL, 0), 11);
-    CHECK_EQ(n2, 11);
-    CHECK_EQ(n4, 11);
-    CHECK_EQ(n3, 18);
-    CHECK(memcmp(k1, k2, 11) < 0);
-    CHECK(memcmp(k2, k3, 11) < 0);
-    CHECK(memcmp(k3, k4, 11) < 0);
+    CHECK_EQ(n1, 7);   /* script+primary, 01, 01, 01, 01, 00: only the case level of "A" is non-default (0x12) */
+    CHECK_EQ(LCMapStringA(0x0409, LCMAP_SORTKEY, "a", -1, NULL, 0), 7);
+    CHECK_EQ(n2, 8);
+    CHECK_EQ(n4, 8);
+    CHECK_EQ(n3, 9);
+    CHECK(!memcmp(k1, "\x0e\x02\x01\x01\x01\x01\x00", 7));
+    CHECK(memcmp(k1, k2, 7) < 0);
+    CHECK(memcmp(k2, k3, 8) < 0);
+    CHECK(memcmp(k3, k4, 8) < 0);
     CHECK_EQ(LCMapStringA(0x0409, LCMAP_SORTKEY, "ab", -1, (char *)k3, 8), 0);
     CHECK_EQ(GetLastError(), ERROR_INSUFFICIENT_BUFFER);
 }
@@ -208,7 +209,7 @@ TEST(crt_k32_string_types)
     CHECK_EQ(t[7], C1_ALPHA | C1_LOWER | C1_DEFINED);
     /* 1252 bytes classify as their Unicode character: euro is punctuation, S-caron an upper-case letter */
     CHECK(GetStringTypeA(0x0409, CT_CTYPE1, "\x80\x8a\xa0\xd7", 4, t));
-    CHECK_EQ(t[0], C1_PUNCT | C1_DEFINED);
+    CHECK_EQ(t[0], C1_DEFINED);   /* the euro sign is a currency symbol: defined only */
     CHECK_EQ(t[1], C1_ALPHA | C1_UPPER | C1_DEFINED);
     CHECK_EQ(t[2], C1_SPACE | C1_BLANK | C1_DEFINED);
     CHECK_EQ(t[3], C1_PUNCT | C1_DEFINED);
@@ -223,7 +224,7 @@ TEST(crt_k32_string_types)
     CHECK_EQ(t[0], 1);   /* C2_LEFTTORIGHT */
     SetLastError(0);
     CHECK(!GetStringTypeW(0x10, L"a", 1, t));
-    CHECK_EQ(GetLastError(), ERROR_INVALID_FLAGS);
+    CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
 }
 
 static int g_enum_calls;
