@@ -54,3 +54,45 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
   - Keep gamedata/ and toolchain-* unless they must go to free space; they can be restored.
 - These orders don't widen the Legal limits: game data and decomp-derived artifacts never go into the public
   repository, there are no secrets in commits, and no PRs.
+
+## Owner order of 2026-11-10: rules that close the class, never patches (binding, overrides any plan or brief)
+
+The owner's words: "Каждое решение должно быть без падений и эвристик. Только на правилах, закрывающих весь класс задач."
+
+Every fnv-nx solution is a rule that closes the whole class of problems, with a proof argument and stated assumptions.
+
+Forbidden:
+- **Placeholders and failure paths:**
+  - stubs, no-ops, stand-ins, placeholders, trap paths, "stop with a report";
+  - runtime fallbacks triggered by a crash.
+- **Decisions without proof:**
+  - measure-then-skip decisions, e.g. "count the C++ throws under Wine; if 0, do not implement EH";
+  - sampling used as proof, e.g. "recompute 2 % of keys cold";
+  - guesses from names, text or regexes.
+- **Point fixes:**
+  - per-item, per-site or hand-written lists standing in for a rule;
+  - fixing things "one by one".
+- **Selection from test results.** Fuzzing, boots and scenarios verify a rule; they never decide anything. The choice between a native and a lifted body is made statically by rule, before any run.
+- **Missing implementations relabelled as "policy",** e.g. skipping Bink, a Steam/Winsock no-op, or the null device as a product path.
+
+If no class-closing rule is known for some part, the session reports it to the orchestrator. It does not patch around it.
+
+The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), once it is published. Until then:
+- **MASTER_PLAN3 applies only where it does not contradict this order.**
+- **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
+
+## Owner decisions of 2026-11-10 (do not re-ask)
+
+- **Threads:** real parallelism across cores is required. Running one guest thread at a time is rejected. Memory-ordering correctness comes from a class-closing rule.
+- **Native-body proof:** the static criteria N1-N4 only, with no SMT pass on hot code.
+- **One fixed reference CPU model:**
+  - x87 transcendentals return the correctly rounded true value at the fcw precision and rounding;
+  - rcp/rsqrt use the reference CPU's exhaustive 2^32 table from a pinned farm host;
+  - cpuid returns the reference CPU's fixed answer, and rdtsc reads the platform's monotonic timer.
+- **Performance metric:** executed instructions per frame, main thread and each worker, counted deterministically in the emulator. The budget comes from 45 fps at 1.02 GHz with a stated IPC assumption.
+- **Switch product decisions:**
+  - The game's own Xbox-controller layout maps 1:1 onto the Switch buttons.
+  - The system software keyboard handles all text entry.
+  - Rumble is on, through the game's own controller vibration.
+  - Docked output is 1080p, handheld 720p.
+  - Frame pacing on the 60 Hz panel is decided from the first measured frame.
