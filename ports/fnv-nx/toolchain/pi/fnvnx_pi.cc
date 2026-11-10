@@ -22,6 +22,10 @@
  *              div       an integer division or remainder by a non-constant (x86 traps where AArch64 gives 0)
  *              shift     a shift or rotate by a non-constant count (x86 masks the count, C leaves it undefined)
  *              uninit    a use of a local that no path has assigned
+ *              uninit-mem  a read of a local that lives in memory (address taken, or an aggregate) that is not
+ *                        dominated by a store to the whole variable or to exactly the bytes read. Conservative:
+ *                        a call given the variable's address proves nothing (a flow analysis with out-parameter
+ *                        summaries will narrow this)
  *            The verdict of the emitted code is this one and those of everything in `inlined` (N4's closure).
  *   inlined  `,`-separated assembler names of every function whose body is inlined into this one, transitively
  *   kind     empty for an emitted function; the clone suffix for an emitted clone; `thunk` for a this-adjusting
@@ -31,7 +35,8 @@
  *            parameters and locals have
  *
  * Not decided here: facts of the exe (EH tables at the address), layouts against cl (R7 is checked on `types`), and
- * the evaluation order of call arguments, which the fnvnx_order plugin fixes at MSVC's order for every call.
+ * the evaluation order of call arguments, which the fnvnx_order plugin fixes at MSVC's order for every call
+ * (its lemma is a gate of its own).
  */
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -50,6 +55,10 @@
 #include "output.h"
 #include "calls.h"
 #include "tree-inline.h"
+#include "dominance.h"
+#include "tree-dfa.h"
+#include "tree-cfg.h"
+#include "fold-const.h"
 #include <map>
 #include <set>
 #include <string>
@@ -102,6 +111,64 @@ static bool uninit_use(tree op)
   return v && VAR_P(v) && DECL_NAME(v) && !DECL_ARTIFICIAL(v) && !DECL_HARD_REGISTER(v) && !is_empty_type(TREE_TYPE(op));
 }
 
+/* a local of the source that lives in memory (its address is taken, or it is an aggregate) */
+static tree memory_local(tree ref)
+{
+  tree b = get_base_address(ref);
+  return b && VAR_P(b) && !is_global_var(b) && !is_gimple_reg(b) && DECL_NAME(b) && !DECL_ARTIFICIAL(b)
+         && !is_empty_type(TREE_TYPE(b)) ? b : NULL_TREE;
+}
+
+struct mem_access { gimple *st; tree ref; };
+struct mem_walk { std::vector<mem_access> *reads; gimple *st; };
+
+static tree walk_reads(tree *tp, int *walk_subtrees, void *data)
+{
+  walk_stmt_info *wi = (walk_stmt_info *)data;
+  mem_walk *w = (mem_walk *)wi->info;
+  if (TREE_CODE(*tp) == ADDR_EXPR || TYPE_P(*tp)) { *walk_subtrees = 0; return NULL_TREE; }   /* &x reads nothing */
+  if (wi->is_lhs) return NULL_TREE;
+  if ((REFERENCE_CLASS_P(*tp) || DECL_P(*tp)) && memory_local(*tp)) {
+    mem_access a = { w->st, *tp };
+    w->reads->push_back(a);
+    *walk_subtrees = 0;
+  }
+  return NULL_TREE;
+}
+
+/* R-MEMLOCAL (conservative): a read of a memory local must be dominated by a store to the whole variable or to
+   exactly the bytes read. A call that is handed the variable's address proves nothing here. */
+static bool unproven_memory_read(function *fun)
+{
+  std::vector<mem_access> reads, writes;
+  basic_block bb;
+  renumber_gimple_stmt_uids(fun);
+  FOR_EACH_BB_FN(bb, fun)
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+      gimple *st = gsi_stmt(gsi);
+      if (is_gimple_debug(st) || gimple_clobber_p(st)) continue;
+      tree lhs = gimple_get_lhs(st);
+      if (lhs && TREE_CODE(lhs) != SSA_NAME && memory_local(lhs)) { mem_access a = { st, lhs }; writes.push_back(a); }
+      mem_walk w = { &reads, st };
+      walk_stmt_info wi; memset(&wi, 0, sizeof wi); wi.info = &w;
+      walk_gimple_op(st, walk_reads, &wi);
+    }
+  if (reads.empty()) return false;
+  calculate_dominance_info(CDI_DOMINATORS);
+  for (size_t r = 0; r < reads.size(); r++) {
+    tree var = memory_local(reads[r].ref);
+    bool proven = false;
+    for (size_t w = 0; w < writes.size() && !proven; w++) {
+      if (memory_local(writes[w].ref) != var) continue;
+      if (writes[w].ref != var && !operand_equal_p(writes[w].ref, reads[r].ref, 0)) continue;
+      basic_block wb = gimple_bb(writes[w].st), rb = gimple_bb(reads[r].st);
+      proven = wb == rb ? gimple_uid(writes[w].st) < gimple_uid(reads[r].st) : dominated_by_p(CDI_DOMINATORS, rb, wb);
+    }
+    if (!proven) return true;
+  }
+  return false;
+}
+
 static std::string join(const std::set<std::string> &v)
 {
   std::string r;
@@ -147,7 +214,8 @@ struct early_pass : gimple_opt_pass {
     unsigned ix; tree v;
     FOR_EACH_LOCAL_DECL(fun, ix, v) note_type(TREE_TYPE(v), f.types);
     f.verdict = r_asm ? "asm" : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
-              : r_vol ? "volatile" : r_div ? "div" : r_shift ? "shift" : r_uninit ? "uninit" : "ok";
+              : r_vol ? "volatile" : r_div ? "div" : r_shift ? "shift" : r_uninit ? "uninit"
+              : unproven_memory_read(fun) ? "uninit-mem" : "ok";
     early[asmname(fn)] = f;
     return 0;
   }

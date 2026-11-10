@@ -48,6 +48,11 @@ def main():
         ('_Z2asi', ''): ['asm', '', ''],
         ('_ZL2cpii', 'constprop.0'): ['ok', '', ''],                   # a clone, under the function's own name
         ('_Z5usecpi', ''): ['ok', '', ''],
+        ('_Z2m1v', ''): ['ok', '', '1Q'],
+        ('_Z2m2v', ''): ['uninit-mem', '', '1Q'],
+        ('_Z2m3v', ''): ['uninit-mem', '', '1Q'],
+        ('_Z2m4i', ''): ['uninit-mem', '', '1Q'],
+        ('_Z2m5v', ''): ['ok', '', '1Q'],
         ('_ZN1KC2Ev', ''): ['ok', '', '1K'],
         ('_ZN1KD2Ev', ''): ['ok', '', '1K'],
         ('_ZN1KC1Ev', 'alias'): ['ok', '', '1K'],                      # the same body under its other symbol

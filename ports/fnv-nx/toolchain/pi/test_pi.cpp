@@ -15,3 +15,10 @@ int usecp(int a) { return cp(a, 3) + cp(a + 1, 3); }
 struct K { int k; K(); ~K(); };
 K::K() : k(1) {}
 K::~K() {}
+struct Q { int a; int b; };
+void fill(Q*);
+int m1() { Q q; q.a = 1; return q.a; }            // the bytes read are stored first
+int m2() { Q q; q.a = 1; return q.b; }            // other bytes
+int m3() { Q q; fill(&q); return q.a; }           // a call proves nothing (conservative)
+int m4(int c) { Q q; if (c) q.a = 1; return q.a; }   // not on every path
+int m5() { Q q = Q(); return q.b; }               // the whole variable
