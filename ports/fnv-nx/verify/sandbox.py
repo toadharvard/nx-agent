@@ -2,7 +2,8 @@
 """Hermetic build sandbox (rule R12 BUILD-PURE): a stage sees ONLY its declared inputs, so its outputs are a
 function of the stage key. Needs root, Linux x86-64. Stage document "fnvnx-stage/1":
   {"format","stage","argv":[abs tool, args], "cwd","env":{COMPLETE env},"inputs":[{"at","tree"}],"outputs":[dirs]}
-  optional "class": "build" | "verification" (part of the key; verdict.py provenance requires it).
+  optional "class": "build" | "verification" (part of the key; verdict.py provenance requires it); optional "tool"
+  (the declared tool kind toolflags.py checks; part of the key).
 key = cas.stage_key(document + {"sandbox": {sandbox.py sha256, cas.py sha256}}). Results: STORE/keys/<key>/result.json.
 Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked from the CAS and bound read-only;
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
@@ -10,7 +11,9 @@ stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; s
 Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open_channels":
   wall_clock           clock_gettime/time/statx show real time (vDSO). PR_SET_TSC=SIGSEGV + seccomp on the clock syscalls
                        was tried: dynamic date/python/gcc/make crash at startup (SIGSEGV), coarse clocks stay readable. Dropped.
-  entropy              getrandom is closed (ENOSYS, no /dev/urandom), but AT_RANDOM and RDRAND still give fresh bytes.
+  entropy              getrandom is closed (ENOSYS) and /dev/urandom, /dev/random are a constant 1 MiB file (so os.urandom
+                       and Python's multiprocessing import work and return the same bytes in every run), but AT_RANDOM and
+                       RDRAND still give fresh bytes.
   cpu_count_scheduling sched_getaffinity/nproc show the host CPUs; order of parallel children is not controlled.
   kernel_version       uname shows the host kernel release.
   memory_size          sysinfo shows the host memory size.
@@ -65,7 +68,7 @@ def check_doc(doc):
           and isinstance(doc.get("argv"), list) and doc["argv"] and all(isinstance(a, str) for a in doc["argv"])
           and doc["argv"][0].startswith("/") and isinstance(doc.get("cwd"), str) and doc["cwd"].startswith("/")
           and isinstance(doc.get("env"), dict) and isinstance(doc.get("inputs"), list)
-          and isinstance(doc.get("outputs"), list) and set(doc) - {"class"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
           and doc.get("class", "build") in ("build", "verification"))
     if not ok:
         raise SbxError("malformed stage document")
@@ -122,6 +125,11 @@ def _setup_root(doc, root, run):
     for f in ("null", "zero"):
         open(root + "/dev/" + f, "w").close()
         _bind_ro("/dev/" + f, root + "/dev/" + f, ro=False)
+    for f in ("urandom", "random"):   # a constant: entropy read from a device is a function of the sandbox version
+        with open(root + "/dev/" + f, "wb") as g:
+            for n in range(32768):
+                g.write(hashlib.sha256(b"fnvnx-sandbox-urandom/1:%d" % n).digest())
+        os.chmod(root + "/dev/" + f, 0o444)
     _mount("tmpfs", root + "/tmp", "tmpfs", 0, "mode=1777")
     _c(libc.syscall(155, root.encode(), (root + "/oldroot").encode()), "pivot_root")
     os.chdir("/")
