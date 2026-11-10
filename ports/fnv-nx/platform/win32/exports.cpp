@@ -9,6 +9,22 @@
 #include "fnvnx_mmio.h"
 
 extern "C" {
+/* platform/win32/gdi32.cpp */
+HDC CreateCompatibleDC(HDC);
+BOOL DeleteDC(HDC);
+HBITMAP CreateCompatibleBitmap(HDC, int, int);
+HBITMAP CreateDIBSection(HDC, const void *, UINT, void **, HANDLE, DWORD);
+HGDIOBJ SelectObject(HDC, HGDIOBJ);
+int GetDIBits(HDC, HBITMAP, UINT, UINT, void *, void *, UINT);
+COLORREF GetPixel(HDC, int, int);
+COLORREF SetPixel(HDC, int, int, COLORREF);
+BOOL StretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
+int SetStretchBltMode(HDC, int);
+int GetDeviceCaps(HDC, int);
+HDC GetDC(HWND);
+int ReleaseDC(HWND, HDC);
+HDC BeginPaint(HWND, void *);
+BOOL EndPaint(HWND, const void *);
 int fnvnx_ws2_WSAStartup(WORD, void *);
 int fnvnx_ws2_WSACleanup(void);
 int fnvnx_ws2_WSAGetLastError(void);
@@ -61,6 +77,14 @@ BOOL EnumDisplayDevicesA(LPCSTR, DWORD, void *, DWORD);
 BOOL InitCommonControlsEx(const void *);
 void *ImageList_LoadImageA(HINSTANCE, LPCSTR, int, int, DWORD, UINT, UINT);
 BOOL ImageList_Destroy(void *);
+/* winmm waveOut (platform/audio/waveout.cpp) */
+#define FNVNX_WAVEOUT_EXPORTS(X)                                                                            \
+    X(waveOutOpen) X(waveOutClose) X(waveOutPrepareHeader) X(waveOutUnprepareHeader) X(waveOutWrite)         \
+    X(waveOutPause) X(waveOutRestart) X(waveOutReset) X(waveOutSetVolume) X(waveOutGetVolume)                \
+    X(waveOutGetPosition) X(waveOutGetNumDevs) X(waveOutGetDevCapsA) X(waveOutGetErrorTextA)
+#define FNVNX_WAVEOUT_DECL(f) void f(void) __attribute__((weak));   /* tests/s4 does not link platform/audio */
+FNVNX_WAVEOUT_EXPORTS(FNVNX_WAVEOUT_DECL)
+#undef FNVNX_WAVEOUT_DECL
 }
 
 /* d3dx9_38.dll: render/nine/d3dx, linked into both guests (toolchain/game/build.sh D3D9=null, render/nine/game
@@ -88,6 +112,15 @@ FNVNX_D3DX_EXPORTS(FNVNX_D3DX_DECL)
 extern "C" __attribute__((weak)) HRESULT D3DXSaveTextureToFileA(const char *, int, void *, const void *)
 {
     return (HRESULT)0x8876086Cu;
+}
+
+/* user32 window functions without a declaration in the shim (platform/win32/window.cpp) */
+extern "C" {
+HWND GetTopWindow(HWND);
+BOOL IsWindowVisible(HWND);
+DWORD GetWindowThreadProcessId(HWND, LPDWORD);
+BOOL UnregisterClassA(LPCSTR, HINSTANCE);
+DWORD SetClassLongA(HWND, int, LONG);
 }
 
 namespace {
@@ -143,9 +176,13 @@ const exp g_exports[] = {
     U(ScreenToClient), U(SendInput), U(SendMessageA), U(SetCapture), U(SetCursorPos), U(SetFocus),
     U(SetForegroundWindow), U(SetWindowLongA), U(SetWindowPos), U(SetWindowTextA), U(SetWindowsHookExA),
     U(ShowCursor), U(ShowWindow), U(SwapMouseButton), U(TranslateMessage), U(UnhookWindowsHookEx),
+    U(GetTopWindow), U(IsWindowVisible), U(GetWindowThreadProcessId), U(UnregisterClassA), U(SetClassLongA),
     U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA), U(GetClassLongA),
     E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
-    E("gdi32", GetStockObject), E("gdi32", DeleteObject),
+    E("gdi32", GetStockObject), E("gdi32", DeleteObject), E("gdi32", CreateCompatibleDC), E("gdi32", DeleteDC),
+    E("gdi32", CreateCompatibleBitmap), E("gdi32", CreateDIBSection), E("gdi32", SelectObject), E("gdi32", GetDIBits),
+    E("gdi32", GetPixel), E("gdi32", SetPixel), E("gdi32", StretchBlt), E("gdi32", SetStretchBltMode),
+    E("gdi32", GetDeviceCaps), E("user32", GetDC), E("user32", ReleaseDC), E("user32", BeginPaint), E("user32", EndPaint),
     E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA),
     E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA), E("advapi32", GetUserNameA),
     E("shell32", CommandLineToArgvW), E("shell32", ShellExecuteA), E("shell32", SHGetFolderPathA),
@@ -157,6 +194,11 @@ const exp g_exports[] = {
     E("winmm", mmioGetInfo), E("winmm", mmioSetInfo), E("winmm", mmioAdvance), E("winmm", mmioFlush),
     E("winmm", mmioDescend), E("winmm", mmioAscend), E("winmm", mmioCreateChunk), E("winmm", mmioSendMessage),
     E("winmm", mmioStringToFOURCCA),
+    E("winmm", waveOutOpen), E("winmm", waveOutClose), E("winmm", waveOutPrepareHeader),
+    E("winmm", waveOutUnprepareHeader), E("winmm", waveOutWrite), E("winmm", waveOutPause),
+    E("winmm", waveOutRestart), E("winmm", waveOutReset), E("winmm", waveOutSetVolume),
+    E("winmm", waveOutGetVolume), E("winmm", waveOutGetPosition), E("winmm", waveOutGetNumDevs),
+    E("winmm", waveOutGetDevCapsA), E("winmm", waveOutGetErrorTextA),
     { "ws2_32", "WSAStartup", (void *)&fnvnx_ws2_WSAStartup }, { "ws2_32", "WSACleanup", (void *)&fnvnx_ws2_WSACleanup },
     { "ws2_32", "WSAGetLastError", (void *)&fnvnx_ws2_WSAGetLastError }, { "ws2_32", "socket", (void *)&fnvnx_ws2_socket },
     { "ws2_32", "closesocket", (void *)&fnvnx_ws2_closesocket }, { "ws2_32", "htons", (void *)&fnvnx_ws2_htons },
