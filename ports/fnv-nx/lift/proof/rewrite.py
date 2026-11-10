@@ -17,7 +17,9 @@ def narrow_div(t, memo=None):
     k = K.get(t.decl().kind() if z3.is_app(t) else None)
     if k and r.num_args() == 2 and r.arg(0).size() >= 16:
         a, b = r.arg(0), r.arg(1); W = a.size(); n = W // 2
-        if is_ext(a, n, k == 's') and is_ext(b, n, k == 's'):
+        zx = is_ext(a, n, False) and is_ext(b, n, False)          # both operands non-negative extensions: sdiv = udiv
+        if zx and k == 's': k = 'u'
+        if zx or (k == 's' and is_ext(a, n, True) and is_ext(b, n, True)):
             x, y = z3.Extract(n - 1, 0, a), z3.Extract(n - 1, 0, b); zero = z3.BitVecVal(0, n)
             if k == 'u': r = z3.If(y == 0, z3.simplify(z3.substitute(r, (b, z3.BitVecVal(0, W)))), z3.ZeroExt(W - n, z3.UDiv(x, y)))
             else:

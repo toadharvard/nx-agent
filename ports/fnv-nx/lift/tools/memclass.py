@@ -134,6 +134,12 @@ def pusharg(F, x):
     return None
 
 
+def imp_val(name, q):
+    """level of parameter q of an import from the table: n = 0, r = 1, e = 2 (missing entry, register parameter or no table: e)."""
+    st = IMPESC.get(name, '')
+    return {'n': 0, 'r': 1, 'e': 2}.get(st[int(q[1:])] if q[0] == 's' and int(q[1:]) < len(st) else 'e', 2)
+
+
 def sink(F, x, par):
     """sink of the value passed in parameter par at the call / tail jump x: ('A', callee, par) | ('M', import, par) | ('I',)."""
     t = target(F, x)
@@ -179,7 +185,7 @@ def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
         if (a, T, S, P) in seen:
             continue
         seen.add((a, T, S, P))
-        if len(seen) > 400:
+        if len(seen) > 1000:
             sinks.add(('U', 'limit'))
             break
         i = F.ins[a]
@@ -201,7 +207,7 @@ def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
                 if r in REGS and (m == 'jmp' or r in ('eax', 'ecx', 'edx') or tg[0] not in ('A',)):
                     sk = sink(F, a, r)
                     emit(cond, sk)
-                    if m == 'call' and tg[0] in ('A', 'M'):
+                    if m == 'call' and (tg[0] == 'A' or (tg[0] == 'M' and imp_val(tg[1], r) < 2)):    # an import that already escapes it needs no hand-back
                         retc.add(addc(cond, (skey(sk), r)))
             for k, cond in sorted(P):
                 if k == a:
@@ -221,7 +227,7 @@ def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
                     else:
                         sk = sink(F, pa[0], 's%d' % pa[1])
                         emit(cond, sk)
-                        if sk[0] in ('A', 'M'):
+                        if sk[0] == 'A' or (sk[0] == 'M' and imp_val(sk[1], sk[2]) < 2):
                             NP.add((pa[0], addc(cond, (skey(sk), sk[2]))))
         elif m in ('mov', 'lea') and o[0].type == X.X86_OP_REG and base(i.reg_name(o[0].reg)) is not None:
             d = reg(o[0])
@@ -466,13 +472,9 @@ def main():
         """old=True reproduces the previous rule set: a returned parameter counts as escaping and there is no conditional flow."""
         val, cause = {}, {}
 
-        def impv(name, q):
-            st = IMPESC.get(name, '')
-            return {'n': 0, 'r': 1, 'e': 2}.get(st[int(q[1:])] if q[0] == 's' and int(q[1:]) < len(st) else 'e', 2)
-
         def getv(t, q, seen=()):
             if isinstance(t, str) and t.startswith('imp:'):
-                return impv(t[4:], q)
+                return imp_val(t[4:], q)
             t = int(t, 16) if isinstance(t, str) else t
             if t not in R or (R[t]['allstack'] and q[0] == 's'):
                 return 2
