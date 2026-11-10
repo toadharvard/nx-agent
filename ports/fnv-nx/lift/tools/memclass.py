@@ -123,8 +123,14 @@ def pusharg(F, x):
 
 
 def sink(F, x, par):
+    """sink of the value passed in parameter par at the call / tail jump x: ('A', callee, par) | ('M', import, par) | ('I',)."""
     t = target(F, x)
-    return t + (par,) if t[0] == 'A' else t
+    return t + (par,) if t[0] in ('A', 'M') else t
+
+
+def skey(sk):
+    """summary key of a call sink: callee address, or 'imp:Name' for an import."""
+    return sk[1] if sk[0] == 'A' else 'imp:' + sk[1]
 
 
 def fcoord(F, a, p):
@@ -138,68 +144,109 @@ def fcoord(F, a, p):
 
 
 def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
-    """sinks of the frame / parameter address held in regs after x0 (or at entry): set of ('S',) ('R',) ('I',) ('U',) ('M', n) ('A', callee, param)."""
+    """Sinks of a frame / parameter address held in regs after x0 (or at entry).
+    Sink = ('S',) stored to non-frame memory | ('R',) returned in eax | ('I',) indirect call | ('U', why) not understood |
+           ('M', import, par) / ('A', callee, par) passed as parameter par of an import / direct callee |
+           ('X', cond, sink): the inner sink applies only if one of the (callee, par) pairs in cond may RETURN its parameter.
+    Conditional return flow: after a direct call that received the tracked value in (callee, par), eax holds the same frame
+    address iff the callee's summary for par is `returned` (or worse); the flow continues with eax under that condition.
+    State: tracked registers / private frame slots, each with its condition; pending = pushed arguments awaiting their call."""
     sinks, seen = set(), set()
-    work = [(x0, frozenset(regs), frozenset(slots0), frozenset())] if entry else [(s, frozenset(regs), frozenset(slots0), frozenset()) for s in F.succ[x0]]
+    T0 = frozenset((r, ()) for r in regs)
+    S0 = frozenset((c, ()) for c in slots0)
+    work = [(x0, T0, S0, frozenset())] if entry else [(s, T0, S0, frozenset()) for s in F.succ[x0]]
+
+    def emit(cond, sk):
+        sinks.add(('X', cond, sk) if cond else sk)
+
+    def addc(cond, key):
+        return tuple(sorted(set(cond) | {key}))
     while work:
         a, T, S, P = work.pop()
         if (a, T, S, P) in seen:
             continue
         seen.add((a, T, S, P))
         if len(seen) > 400:
-            sinks.add(('U', 'limit')); break
-        i = F.ins[a]; m = mn(i); o = i.operands; N = set(T); NS = set(S); NP = set(P)
+            sinks.add(('U', 'limit'))
+            break
+        i = F.ins[a]
+        m = mn(i)
+        o = i.operands
+        N, NS, NP = set(T), set(S), set(P)
         reg = lambda p: base(i.reg_name(p.reg)) if p.type == X.X86_OP_REG else None
         mc = [fcoord(F, a, p) for p in o]
-        if S and m not in ('mov', 'push', 'cmp', 'test') and any(c in S for c in mc if c is not None):
-            sinks.add(('U', 'slot-use'))
+        conds = lambda r: [c for q, c in T if q == r]                       # conditions under which register r holds the value
+        sconds = lambda co: [c for q, c in S if q == co]                    # same for a private frame slot
+        if S and m not in ('mov', 'push', 'cmp', 'test'):
+            for co in mc:
+                for c in (sconds(co) if co is not None else []):
+                    emit(c, ('U', 'slot-use'))
         if m == 'call' or (m == 'jmp' and (a in F.tails or not F.succ[a])):
-            for r in sorted(T & set(REGS)):
-                if m == 'jmp' or r in ('eax', 'ecx', 'edx') or target(F, a)[0] != 'A':
-                    sinks.add(sink(F, a, r))
-            N = set() if m == 'jmp' else N - {'eax', 'ecx', 'edx'}
+            tg = target(F, a)
+            retc = set()
+            for r, cond in sorted(T):
+                if r in REGS and (m == 'jmp' or r in ('eax', 'ecx', 'edx') or tg[0] not in ('A',)):
+                    sk = sink(F, a, r)
+                    emit(cond, sk)
+                    if m == 'call' and tg[0] in ('A', 'M'):
+                        retc.add(addc(cond, (skey(sk), r)))
+            for k, cond in sorted(P):
+                if k == a:
+                    retc.add(cond)
+            NP = {(k, c) for k, c in NP if k != a}
+            N = set() if m == 'jmp' else {(r, c) for r, c in N if r not in ('eax', 'ecx', 'edx')} | {('eax', c) for c in retc}
         elif m in ('ret', 'retf'):
-            if 'eax' in T:
-                sinks.add(('R',))
+            for c in conds('eax'):
+                emit(c, ('R',))
             N = set()
-        elif m == 'push' and (reg(o[0]) in T or (mc[0] is not None and mc[0] in S)):
-            pa = None if a in saved else pusharg(F, a)
+        elif m == 'push' and (conds(reg(o[0])) or (mc[0] is not None and sconds(mc[0]))):
             if a not in saved:
-                sinks.add(('U', 'pusharg') if pa is None else sink(F, pa[0], 's%d' % pa[1]))
+                pa = pusharg(F, a)
+                for cond in (conds(reg(o[0])) if o[0].type == X.X86_OP_REG else []) + (sconds(mc[0]) if mc[0] is not None else []):
+                    if pa is None:
+                        emit(cond, ('U', 'pusharg'))
+                    else:
+                        sk = sink(F, pa[0], 's%d' % pa[1])
+                        emit(cond, sk)
+                        if sk[0] in ('A', 'M'):
+                            NP.add((pa[0], addc(cond, (skey(sk), sk[2]))))
         elif m in ('mov', 'lea') and o[0].type == X.X86_OP_REG and base(i.reg_name(o[0].reg)) is not None:
             d = reg(o[0])
-            src = reg(o[1]) if o[1].type == X.X86_OP_REG else None
-            if m == 'mov' and o[1].type == X.X86_OP_REG and src in T:
-                N.add(d)
-            elif m == 'lea' and ((o[1].mem.base and base(i.reg_name(o[1].mem.base)) in T) or (o[1].mem.index and base(i.reg_name(o[1].mem.index)) in T)):
-                N.add(d)
-            elif m == 'mov' and mc[1] is not None and mc[1] in S:
-                N.add(d)
-            elif o[0].size == 4:
-                N.discard(d)
-        elif m == 'mov' and o[0].type == X.X86_OP_MEM and len(o) > 1 and reg(o[1]) in T:
+            add = []
+            if m == 'mov' and o[1].type == X.X86_OP_REG:
+                add = conds(reg(o[1]))
+            elif m == 'lea':
+                add = (conds(base(i.reg_name(o[1].mem.base))) if o[1].mem.base else []) + (conds(base(i.reg_name(o[1].mem.index))) if o[1].mem.index else [])
+            elif m == 'mov' and mc[1] is not None:
+                add = sconds(mc[1])
+            if add or o[0].size == 4:
+                N = {(r, c) for r, c in N if r != d} | {(d, c) for c in add}
+        elif m == 'mov' and o[0].type == X.X86_OP_MEM and len(o) > 1 and conds(reg(o[1])):
             mm = o[0].mem
-            if mm.segment and i.reg_name(mm.segment) == 'fs':
-                pass
-            elif spill and mc[0] is not None:
-                NS.add(mc[0])
-            elif mm.base and i.reg_name(mm.base) in ('esp', 'ebp') and not mm.index:
-                sinks.add(('U', 'spill'))
-            else:
-                sinks.add(('S',))
+            for cond in conds(reg(o[1])):
+                if mm.segment and i.reg_name(mm.segment) == 'fs':
+                    pass
+                elif spill and mc[0] is not None:
+                    NS = {(q, c) for q, c in NS if q != mc[0]} | {(mc[0], cond)}
+                elif mm.base and i.reg_name(mm.base) in ('esp', 'ebp') and not mm.index:
+                    emit(cond, ('U', 'spill'))
+                else:
+                    emit(cond, ('S',))
         elif m in ('cmp', 'test'):
             pass
-        elif m == 'mov' and o[0].type == X.X86_OP_MEM and mc[0] is not None and mc[0] in S:
-            NS.discard(mc[0])
+        elif m == 'mov' and o[0].type == X.X86_OP_MEM and mc[0] is not None and sconds(mc[0]):
+            NS = {(q, c) for q, c in NS if q != mc[0]}
         else:
             for k, p in enumerate(o):
                 r = reg(p)
-                if r in T and p.access & 1 and not (k == 0 and m in ('add', 'sub', 'and', 'or', 'inc', 'dec', 'xor') and (len(o) < 2 or o[1].type == X.X86_OP_IMM)):
-                    sinks.add(('U', 'use:' + m))
-                elif r in T and p.access & 2 and k == 0 and not p.access & 1:
-                    N.discard(r)
-            if 'eax' in T and m in IMPL:
-                sinks.add(('U', 'implicit-eax'))
+                if conds(r) and p.access & 1 and not (k == 0 and m in ('add', 'sub', 'and', 'or', 'inc', 'dec', 'xor') and (len(o) < 2 or o[1].type == X.X86_OP_IMM)):
+                    for c in conds(r):
+                        emit(c, ('U', 'use:' + m))
+                elif conds(r) and p.access & 2 and k == 0 and not p.access & 1:
+                    N = {(q, c) for q, c in N if q != r}
+            if m in IMPL:
+                for c in conds('eax'):
+                    emit(c, ('U', 'implicit-eax'))
         if N or NS or NP:
             work += [(s, frozenset(N), frozenset(NS), frozenset(NP)) for s in F.succ[a]]
     return sinks
