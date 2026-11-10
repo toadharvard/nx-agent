@@ -14,9 +14,17 @@
  *
  * What is left is to give that slot MSVC's meaning:
  *
- *   tables   every table entry that is D1 (or a this-adjusting thunk to D1) becomes `<entry>.fnvnx_sdd`(this, flags):
- *            flags & 1 ? D0(this adjusted as the thunk adjusts it) : entry(this); returns this. A COMDAT function
- *            emitted in each unit that emits such a table. D0 is kept wherever its body exists.
+ *   tables   every table entry that is D1 (or a this-adjusting thunk to D1) becomes `<entry>.fnvnx_sdd`(this, flags),
+ *            MSVC's ??_E, which returns this:
+ *              flags 0   entry(this)                                     the destructor
+ *              flags 1   D0(object)                                      ??_G: destroy and operator delete
+ *              flags 2/3 for the n elements before which the word n lies, last first: D1(element);
+ *                        with bit 0, operator delete[](block)            the vector deleting destructor
+ *            (object = this adjusted as the thunk adjusts it; operator delete[] = the one the class's scope lookup
+ *            finds, asked of the front end when the class is completed). A COMDAT function emitted in each unit
+ *            that emits such a table. D0 is kept wherever its body exists.
+ *            The array cookie is GCC's own for a class aligned to at most 4: one word, the element count, right
+ *            before the first element, and the block starts at that word.
  *   calls    a virtual call of the destructor's slot passes flags 0. A delete-expression, which the front end now
  *            compiles to a direct call of the static type's D0, becomes a call through the object's slot with
  *            flags 1 (for an object of exactly the static type that is the same function).
@@ -64,7 +72,13 @@
 
 int plugin_is_GPL_compatible;
 
-struct sdd_fn { std::string entry, d0; HOST_WIDE_INT fixed; bool virt; HOST_WIDE_INT voff; };
+struct sdd_fn {
+  std::string entry, d0, d1;          /* the table entry, the class's deleting and complete destructors */
+  HOST_WIDE_INT fixed; bool virt; HOST_WIDE_INT voff;   /* the entry's this adjustment, when it is a thunk */
+  HOST_WIDE_INT size;                 /* sizeof the class: the element size of an array of it */
+  std::string vdel; bool vdel_sized;  /* the class's operator delete[] */
+};
+static std::map<tree, tree> array_delete;        /* class -> the operator delete[] its scope lookup finds */
 static std::map<std::string, tree> ap_decls;
 static std::map<std::string, sdd_fn> thunks;     /* <entry>.fnvnx_sdd -> what it calls */
 
@@ -135,6 +149,26 @@ static bool key_method_hook(void)
         DECL_VIRTUAL_P(f) = 0;
         DECL_VINDEX(f) = NULL_TREE;
         DECL_PRESERVE_P(f) = 1;          /* written out wherever its body is: the slot function calls it by name */
+        /* ??_E frees an array with the operator delete[] of the class's own scope: looked up now, by the front
+           end (the class is not complete yet, so by name in its members and bases): the usual (void*) form, else
+           (void*, size_t); null = the global one */
+        if (!array_delete.count(t)) {
+          tree found = NULL_TREE, sized = NULL_TREE;
+          tree fns = lookup_fnfields(t, ovl_op_identifier(false, VEC_DELETE_EXPR), 1, tf_none);
+          if (fns == error_mark_node) error("SDD2: %qT: operator delete[] is ambiguous", t);
+          else if (fns)
+            for (lkp_iterator it(BASELINK_FUNCTIONS(fns)); it; ++it) {
+              tree fn = *it;
+              if (TREE_CODE(fn) != FUNCTION_DECL) continue;
+              int n = list_length(TYPE_ARG_TYPES(TREE_TYPE(fn)));
+              if (n == 2) found = fn;
+              else if (n == 3 && same_type_p(TREE_VALUE(TREE_CHAIN(TYPE_ARG_TYPES(TREE_TYPE(fn)))), size_type_node)) sized = fn;
+            }
+          if (!found) found = sized;
+          if (fns && fns != error_mark_node && !found) error("SDD2: %qT declares operator delete[] but no usual form", t);
+          array_delete[t] = found;
+          if (found) mark_used(found);
+        }
       }
   return orig_key_method_may_be_inline();
 }
@@ -169,8 +203,15 @@ static tree sdd_decl(tree vt, tree e)
   tree d1 = DECL_THUNK_P(e) ? THUNK_TARGET(e) : e;
   tree d0 = dtor_variant(d1, true);
   if (!d0) { error("SDD2: table %qD: destructor %qD has no deleting variant", vt, d1); return NULL_TREE; }
+  tree cls = DECL_CONTEXT(d1);
   sdd_fn t;
-  t.entry = asmname(e); t.d0 = asmname(d0); t.fixed = 0; t.virt = false; t.voff = 0;
+  t.entry = asmname(e); t.d0 = asmname(d0); t.d1 = asmname(d1); t.fixed = 0; t.virt = false; t.voff = 0;
+  t.size = tree_to_shwi(TYPE_SIZE_UNIT(cls));
+  std::map<tree, tree>::iterator ad = array_delete.find(TYPE_MAIN_VARIANT(cls));
+  if (ad == array_delete.end())
+    { error("SDD2: table %qD: class %qT was never seen being completed", vt, cls); return NULL_TREE; }
+  t.vdel = ad->second ? asmname(ad->second) : "_ZdaPv";                        /* ::operator delete[](void*) */
+  t.vdel_sized = ad->second && list_length(TYPE_ARG_TYPES(TREE_TYPE(ad->second))) > 2;   /* (void*, size_t), void */
   if (DECL_THUNK_P(e)) {
     if (!DECL_THIS_THUNK_P(e)) { error("SDD2: table %qD: a result-adjusting thunk to a destructor", vt); return NULL_TREE; }
     t.fixed = THUNK_FIXED_OFFSET(e);
@@ -409,18 +450,32 @@ static void finish_unit(void *, void *)
   for (std::map<std::string, sdd_fn>::iterator t = thunks.begin(); t != thunks.end(); ++t) {
     const char *nm = t->first.c_str();
     const sdd_fn &f = t->second;
+    /* x19 = this as passed (the result), x20 = the complete object, w21 = flags, w22 = elements left */
     fprintf(asm_out_file,
             "\t.section\t.text.%s,\"axG\",%%progbits,%s,comdat\n\t.align\t2\n\t.weak\t%s\n\t.type\t%s, %%function\n%s:\n"
-            "\t.cfi_startproc\n\tstp\tx29, x30, [sp, -32]!\n\t.cfi_def_cfa_offset 32\n\t.cfi_offset 29, -32\n\t.cfi_offset 30, -24\n"
-            "\tmov\tx29, sp\n\tstr\tx19, [sp, 16]\n\t.cfi_offset 19, -16\n\tmov\tx19, x0\n\ttbnz\tw1, #0, 1f\n"
-            "\tbl\t%s\n\tb\t2f\n1:\n", nm, nm, nm, nm, nm, f.entry.c_str());
-    /* the deleting destructor takes the object the thunk would hand to the complete one */
+            "\t.cfi_startproc\n\tstp\tx29, x30, [sp, -48]!\n\t.cfi_def_cfa_offset 48\n\t.cfi_offset 29, -48\n\t.cfi_offset 30, -40\n"
+            "\tmov\tx29, sp\n\tstp\tx19, x20, [sp, 16]\n\tstp\tx21, x22, [sp, 32]\n"
+            "\t.cfi_offset 19, -32\n\t.cfi_offset 20, -24\n\t.cfi_offset 21, -16\n\t.cfi_offset 22, -8\n"
+            "\tmov\tx19, x0\n\tmov\tw21, w1\n\ttst\tw1, #3\n\tbne\t1f\n"
+            "\tbl\t%s\n\tb\t9f\n1:\n", nm, nm, nm, nm, nm, f.entry.c_str());
+    /* flags 1 or 2: the complete object, as the thunk would hand it on */
     if (f.fixed) fprintf(asm_out_file, "\tldr\tw9, =%ld\n\tadd\tw0, w0, w9\n", (long)f.fixed);
     if (f.virt) fprintf(asm_out_file, "\tldr\tw9, [x0]\n\tldr\tw10, =%ld\n\tadd\tw9, w9, w10\n\tldr\tw9, [x9]\n\tadd\tw0, w0, w9\n", (long)f.voff);
     fprintf(asm_out_file,
-            "\tbl\t%s\n2:\tmov\tx0, x19\n\tldr\tx19, [sp, 16]\n\tldp\tx29, x30, [sp], 32\n"
-            "\t.cfi_restore 30\n\t.cfi_restore 29\n\t.cfi_restore 19\n\t.cfi_def_cfa_offset 0\n\tret\n\t.ltorg\n\t.cfi_endproc\n\t.size\t%s, .-%s\n",
-            f.d0.c_str(), nm, nm);
+            "\tmov\tw20, w0\n\ttbnz\tw21, #1, 2f\n\tbl\t%s\n\tb\t9f\n"
+            /* ??_E: an array made by new[]. The element count is the word before it (MSVC and GCC alike); destroy
+               from the last element down, then operator delete[] on the block when flags bit 0 is set */
+            "2:\tldr\tw22, [x20, -4]\n3:\tcbz\tw22, 4f\n\tsub\tw22, w22, #1\n\tldr\tw9, =%ld\n\tmadd\tw0, w22, w9, w20\n"
+            "\tbl\t%s\n\tb\t3b\n4:\ttbz\tw21, #0, 9f\n",
+            f.d0.c_str(), (long)f.size, f.d1.c_str());
+    if (f.vdel_sized)
+      fprintf(asm_out_file, "\tldr\tw1, [x20, -4]\n\tldr\tw9, =%ld\n\tmul\tw1, w1, w9\n\tadd\tw1, w1, #4\n", (long)f.size);
+    fprintf(asm_out_file,
+            "\tsub\tw0, w20, #4\n\tbl\t%s\n"
+            "9:\tmov\tx0, x19\n\tldp\tx19, x20, [sp, 16]\n\tldp\tx21, x22, [sp, 32]\n\tldp\tx29, x30, [sp], 48\n"
+            "\t.cfi_restore 30\n\t.cfi_restore 29\n\t.cfi_restore 19\n\t.cfi_restore 20\n\t.cfi_restore 21\n\t.cfi_restore 22\n"
+            "\t.cfi_def_cfa_offset 0\n\tret\n\t.ltorg\n\t.cfi_endproc\n\t.size\t%s, .-%s\n",
+            f.vdel.c_str(), nm, nm);
   }
 }
 

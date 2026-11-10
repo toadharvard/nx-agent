@@ -26,3 +26,6 @@ int use_tt(TT<int>* p) { return p->inl(p); }
 void del_tt(TT<int>* p) { delete p; }
 struct J : A { int inl2() { return g(); } virtual int w(); int inl3(J* o) { return o->w(); } };
 int use_j(J* p) { return p->inl2() + p->inl3(p); }
+extern "C" void arr_free(void*);
+struct VB : A { int vb; static void operator delete[](void* p) { arr_free(p); } ~VB(); };
+VB::~VB() {}

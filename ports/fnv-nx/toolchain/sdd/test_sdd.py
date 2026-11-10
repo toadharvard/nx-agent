@@ -77,11 +77,19 @@ def main():
     check('constructor: one relocation per address point, no immediate',
           len(re.findall(r':got_lo12:_ZTV1M\.fnvnx_ap(?:8|36)\]', ctor)) == 2 and ':got:_ZTV1M\n' not in ctor, ctor)
     th = body(s, '_ZN1MD1Ev.fnvnx_sdd')
-    check('??_G: flags bit 0 picks the deleting destructor, returns this',
-          re.search(r'tbnz\s+w1, #0, 1f\n\s+bl\s+_ZN1MD1Ev\n\s+b\s+2f\n1:\n\s+bl\s+_ZN1MD0Ev\n2:\s+mov\s+x0, x19', th), th)
-    th2 = body(s, '_ZThn8_N1MD1Ev.fnvnx_sdd')
-    check('??_G of the second base: the thunk for flags 0, the adjusted object for flags 1',
-          re.search(r'bl\s+_ZThn8_N1MD1Ev\n\s+b\s+2f\n1:\n\s+ldr\s+w9, =-8\n\s+add\s+w0, w0, w9\n\s+bl\s+_ZN1MD0Ev\n', th2), th2)
+    flat = lambda x: re.sub(r'\s+', ' ', re.sub(r'^\s*\.cfi.*$', '', x, flags=re.M))
+    th = flat(body(s, '_ZN1MD1Ev.fnvnx_sdd'))
+    check('??_E flags 0: the destructor; flags 1: the deleting destructor; returns this',
+          'tst w1, #3 bne 1f bl _ZN1MD1Ev b 9f 1: mov w20, w0 tbnz w21, #1, 2f bl _ZN1MD0Ev b 9f' in th
+          and '9: mov x0, x19' in th, th)
+    check('??_E flags 2: n = the word before the array, elements last first, then operator delete[] on bit 0',
+          '2: ldr w22, [x20, -4] 3: cbz w22, 4f sub w22, w22, #1 ldr w9, =16 madd w0, w22, w9, w20 bl _ZN1MD1Ev b 3b '
+          '4: tbz w21, #0, 9f sub w0, w20, #4 bl _ZdaPv' in th, th)
+    th2 = flat(body(s, '_ZThn8_N1MD1Ev.fnvnx_sdd'))
+    check('??_E of the second base: the thunk for flags 0, the adjusted object otherwise',
+          'bl _ZThn8_N1MD1Ev b 9f 1: ldr w9, =-8 add w0, w0, w9 mov w20, w0 tbnz w21, #1, 2f bl _ZN1MD0Ev' in th2, th2)
+    th3 = flat(body(s, '_ZN2VBD1Ev.fnvnx_sdd'))
+    check("??_E frees with the class's own operator delete[]", 'ldr w9, =12 madd' in th3 and 'bl _ZN2VBdaEPv' in th3, th3)
     check('no deleting destructor in any table', not re.search(r'\.word\s+\S*D0Ev', s))
     check('deleting destructors are written out', '_ZN1MD0Ev:' in s and '_ZN1BD0Ev:' in s)
     vm = re.findall(r'\.ascii\s+"(_ZTV1M[^"]*)"', s)
