@@ -13,7 +13,7 @@ gcc's HOST_GCC_PROGS/HOST_GCC_FILES. The trees also get a listing digest (an ext
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
 tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
-git verdict.py,l1.py,test_gates; ldd,true test_runtime. Python modules: capstone, unicorn (icount.py, test_icount, test_runtime)."""
+git verdict.py,l1.py,test_gates; ldd,true test_runtime. Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts)."""
 import argparse
 import ctypes
 import hashlib
@@ -35,7 +35,7 @@ PROGRAMS = ["strace", "busybox", "gcc", "aarch64-linux-gnu-g++", "aarch64-linux-
 UNIT_CC = "aarch64-linux-gnu-g++"  # the unit stage ingests its trees whole
 HOST_GCC_PROGS = ["cc1", "collect2"]  # gcc -print-prog-name=: what the host gcc runs for the static probe / -fsyntax-only
 HOST_GCC_FILES = ["libc.a", "crt1.o", "libgcc.a", "libgcc_eh.a"]  # gcc -print-file-name=: what `gcc -static` links
-PY_MODULES = ["capstone", "unicorn"]
+PY_MODULES = {"capstone": "capstone", "unicorn": "unicorn", "pyelftools": "elftools"}   # distribution -> import name
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
 def env_id(doc):
@@ -146,7 +146,7 @@ def snapshot():
     def loads(roots, trees=()):
         for at in runtime.closure(sorted(roots), list(trees)):
             add(at)
-    py, mods = os.path.realpath(sys.executable), [os.path.dirname(__import__(m).__file__) for m in PY_MODULES]
+    py, mods = os.path.realpath(sys.executable), [os.path.dirname(__import__(PY_MODULES[m]).__file__) for m in sorted(PY_MODULES)]
     dyn = sysconfig.get_config_var("DESTSHARED")
     roots = [py] + [f for d in [dyn] + mods for f in runtime.elf_files(d, runtime.ident(py))]
     loads(roots, [os.path.dirname(os.__file__), os.path.dirname(os.path.dirname(py))] + mods)
@@ -169,7 +169,7 @@ def snapshot():
             add(subprocess.run([gcc, flag + n], capture_output=True, text=True).stdout.strip())
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
-            "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in PY_MODULES}},
+            "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)}},
             "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}}
 
 def main(argv):
