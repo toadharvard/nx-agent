@@ -326,7 +326,7 @@ NRN, NRI, NRB, NRR = codemap.exe_noreturn(U, eh.thrower)        # NORETURN: unre
 # ---- extents / features / output
 for v, ss in psites.items():
     if v in kinds and 'ptr' in kinds[v] and len(kinds[v]) > 1 and all(x in eh.sites for x in ss): kinds[v].discard('ptr')
-rows = []; rgs = []; rbad = rdec = 0; kc = Counter(); kany = Counter(); fe = Counter(); extsum = 0
+rows = []; rgs = []; rbad = rdec = eclo = 0; kc = Counter(); kany = Counter(); fe = Counter(); extsum = 0
 for a in sorted(entries):
     pk = next(k for k in PRI if k in kinds[a]); isd = a in fsize; xs = extent_insns(a); ex = sum(insns[x][0] for x in xs); ft = 0
     for x in xs: ft |= insns[x][2]
@@ -335,11 +335,13 @@ for a in sorted(entries):
     fts = [nm for i, nm in enumerate(FEATS) if ft >> i & 1]; fe.update((nm, isd) for nm in fts)
     fl = sorted(kinds[a] - {pk}) + fts + (['baddecode'] if a in bad_entries else []) + (['parent=%08x' % parent[a]] if a in parent else [])
     rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, ex), ','.join(fl) or '-'))
+    if not isd: ss_ = set(xs); eclo += sum(1 for x in xs for t in insns[x][4] if intext(t) and t not in entries and t not in ss_)       # closure check (report only)
     rg = codemap.ranges(xs, lambda x: insns[x][0]); rgs.append('%08x\t%s' % (a, codemap.rng_str(rg))); s_ = sum(y - x for x, y in rg); rbad += (s_ != ex) if not isd else (s_ > fsize[a] + 15); rdec += isd
 os.makedirs(os.path.dirname(OUT), exist_ok=True); HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % base
 open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the SUM of the bytes the entry reaches (not a contiguous span; decomp rows: the declared function size), see ranges.tsv\n' + '\n'.join(rows) + '\n')
 open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rgs) + '\n')
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
+print('closure check: direct jmp/jcc targets of non-decomp entries inside the span that are neither entries nor in the entry\'s own extent: %d' % eclo)
 print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches %d (non-decomp rows: equality; %d decomp rows: sum <= declared size)' % (len(rgs), len(NRR), rbad, rdec))
 def gate(green, TNu, why):
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')
