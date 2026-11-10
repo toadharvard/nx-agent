@@ -4,6 +4,8 @@
  * the same counter S8's __rdtsc replacement reads, so code that calibrates rdtsc against QPC (Havok's
  * hkStopwatch) gets an exact ratio. On the host it is a 10 MHz monotonic counter. */
 #include "w32.h"
+#include <stdlib.h>
+#include <string.h>
 
 extern "C" BOOL QueryPerformanceCounter(LARGE_INTEGER *c)
 {
@@ -29,8 +31,71 @@ static uint64_t g_boot_ns; /* GetTickCount starts at an arbitrary value on Windo
 
 extern "C" DWORD GetTickCount(void) { return W32_DW((DWORD)((os_monotonic_ns() - g_boot_ns) / 1000000ull)); }
 extern "C" DWORD timeGetTime(void) { return GetTickCount(); }
-extern "C" UINT timeBeginPeriod(UINT p) { W32_UNUSED(p); return 0; }
-extern "C" UINT timeEndPeriod(UINT p) { W32_UNUSED(p); return 0; }
+/* timer resolution: the device range is 1..1000000 ms (timeGetDevCaps); timeBeginPeriod(p) adds one reference to
+ * period p, timeEndPeriod(p) removes one of the same p (TIMERR_NOCANDO when there is none); the effective
+ * resolution is the smallest period with references, else the default 15.6 ms. */
+enum { TIMERR_NOERROR_ = 0, TIMERR_NOCANDO_ = 97, TIMERR_STRUCT_ = 129, TIME_PERIOD_MIN = 1, TIME_PERIOD_MAX = 1000000 };
+struct tperiod { UINT ms, refs; };
+static os_lock_t g_tp_lock;
+static tperiod *g_tp;
+static size_t g_tp_n;
+
+extern "C" UINT timeGetDevCaps(void *ptc, UINT cbtc)
+{
+    if (!ptc)
+        return 11; /* MMSYSERR_INVALPARAM */
+    if (cbtc < 2 * sizeof(UINT))
+        return TIMERR_STRUCT_;
+    UINT c[2] = {TIME_PERIOD_MIN, TIME_PERIOD_MAX};
+    memcpy(ptc, c, sizeof c);
+    return TIMERR_NOERROR_;
+}
+
+extern "C" UINT timeBeginPeriod(UINT p)
+{
+    if (p < TIME_PERIOD_MIN || p > TIME_PERIOD_MAX)
+        return TIMERR_NOCANDO_;
+    UINT rc = TIMERR_NOERROR_;
+    os_lock(&g_tp_lock);
+    size_t i = 0;
+    while (i < g_tp_n && g_tp[i].ms != p) i++;
+    if (i < g_tp_n)
+        g_tp[i].refs++;
+    else {
+        tperiod *n = (tperiod *)realloc(g_tp, (g_tp_n + 1) * sizeof *n);
+        if (n) { g_tp = n; g_tp[g_tp_n++] = {p, 1}; }
+        else rc = TIMERR_NOCANDO_;
+    }
+    os_unlock(&g_tp_lock);
+    return rc;
+}
+
+extern "C" UINT timeEndPeriod(UINT p)
+{
+    UINT rc = TIMERR_NOCANDO_;
+    os_lock(&g_tp_lock);
+    for (size_t i = 0; i < g_tp_n; i++)
+        if (g_tp[i].ms == p) {
+            if (--g_tp[i].refs == 0)
+                g_tp[i] = g_tp[--g_tp_n];
+            rc = TIMERR_NOERROR_;
+            break;
+        }
+    os_unlock(&g_tp_lock);
+    return rc;
+}
+
+/* effective sleep/timer granularity in microseconds, for Sleep-style waits */
+extern "C" unsigned fnvnx_timer_resolution_us(void)
+{
+    unsigned best = 15600;
+    os_lock(&g_tp_lock);
+    for (size_t i = 0; i < g_tp_n; i++)
+        if (g_tp[i].ms * 1000u < best)
+            best = g_tp[i].ms * 1000u;
+    os_unlock(&g_tp_lock);
+    return best;
+}
 
 /* civil date <-> days since 1970-01-01 (H. Hinnant's algorithms) */
 static int64_t days_from_civil(int64_t y, unsigned m, unsigned d)

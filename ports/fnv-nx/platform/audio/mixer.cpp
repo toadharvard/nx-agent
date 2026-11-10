@@ -23,6 +23,13 @@ struct mix_voice {
     mix_notify_fn notify_fn;
     void *notify_ctx;
     fnvnx_reverb *reverb;   /* SetFX I3DL2: the voice's own reverb, before its gains */
+    /* pull-source voice (mixer_voice_create_stream): data points at sbuf, which holds the source frames
+     * [sbase, sbase+scount) (indices relative to pos, rebased after every render); frames is 0xFFFFFFFF */
+    mix_stream_fn stream;
+    void *stream_user;
+    uint8_t *sbuf;
+    size_t scap;          /* bytes allocated */
+    uint64_t sbase, scount;
 };
 
 static os_lock_t g_lock;
@@ -104,6 +111,21 @@ mix_voice *mixer_voice_create(const mix_format *fmt, uint8_t *data, uint32_t siz
     return v;
 }
 
+mix_voice *mixer_voice_create_stream(const mix_format *fmt, mix_stream_fn fn, void *user)
+{
+    if (!fn || !fmt->block)
+        return NULL;
+    mix_voice *v = mixer_voice_create(fmt, NULL, 0);
+    if (!v)
+        return NULL;
+    os_lock(&g_lock);
+    v->stream = fn;
+    v->stream_user = user;
+    v->frames = 0xFFFFFFFFu;
+    os_unlock(&g_lock);
+    return v;
+}
+
 void mixer_voice_destroy(mix_voice *v)
 {
     if (!v)
@@ -114,6 +136,7 @@ void mixer_voice_destroy(mix_voice *v)
     os_unlock(&g_lock);
     fnvnx_reverb_destroy(v->reverb);
     free(v->notify);
+    free(v->sbuf);
     free(v);
 }
 
@@ -121,9 +144,10 @@ void mixer_voice_set_format(mix_voice *v, const mix_format *fmt)
 {
     os_lock(&g_lock);
     v->fmt = *fmt;
-    v->frames = fmt->block ? v->size / fmt->block : 0;
+    v->frames = v->stream ? 0xFFFFFFFFu : fmt->block ? v->size / fmt->block : 0;
     v->freq = fmt->rate;
     v->pos = 0;
+    v->sbase = v->scount = 0;
     os_unlock(&g_lock);
 }
 
@@ -212,6 +236,8 @@ void mixer_voice_set_cursor(mix_voice *v, uint32_t off)
     uint32_t f = v->fmt.block ? off / v->fmt.block : 0;
     if (f >= v->frames)
         f = 0;
+    if (v->stream)
+        f = 0, v->sbase = v->scount = 0;   /* a stream restarts: the window is dropped */
     v->pos = (uint64_t)f << 32;
     os_unlock(&g_lock);
 }
@@ -274,18 +300,64 @@ static void fire_crossed(mix_voice *v, uint32_t a, uint32_t b, uint32_t wraps)
     }
 }
 
+/* Pull exactly the source frames this render needs: output i reads frame floor(p_i) and, when p_i has a
+ * fraction, floor(p_i)+1, with p_i = pos + i*step. So the window ends at (p_last>>32)+1+(frac(p_last)!=0), and
+ * everything below floor(pos) is dropped (frames the resampler skips are still pulled). The window is a pure
+ * function of pos/step/frames: the pulled total after K output frames from 0 is
+ * (p>>32)+1+((uint32)p!=0) with p=(K-1)*step, independent of how the K frames are split into calls.
+ * False when nothing can be rendered. */
+static bool stream_fill(mix_voice *v, uint32_t frames, uint64_t step)
+{
+    const uint64_t p = v->pos + (uint64_t)(frames - 1) * step;
+    const uint64_t need_end = (p >> 32) + 1 + ((uint32_t)p != 0), lo = v->pos >> 32, blk = v->fmt.block;
+    uint64_t end = v->sbase + v->scount;
+    if (lo > v->sbase) {   /* drop what is behind the cursor */
+        if (lo < end)
+            memmove(v->sbuf, v->sbuf + (lo - v->sbase) * blk, (size_t)((end - lo) * blk));
+        v->scount = lo < end ? end - lo : 0;
+        v->sbase = lo < end ? lo : end;
+        end = v->sbase + v->scount;
+    }
+    if (need_end > end) {
+        const uint64_t want = need_end - end;
+        if ((v->scount + want) * blk > v->scap) {
+            uint8_t *n = (uint8_t *)realloc(v->sbuf, (size_t)((v->scount + want) * blk));
+            if (!n)
+                return false;
+            v->sbuf = n;
+            v->scap = (size_t)((v->scount + want) * blk);
+        }
+        size_t got = v->stream(v->stream_user, v->sbuf + v->scount * blk, (size_t)want);
+        v->scount += got > want ? want : got;
+    }
+    v->data = v->sbuf;
+    return true;
+}
+
 static void mix_voice_into(mix_voice *v, float *out, uint32_t frames, float gl, float gr)
 {
     const uint64_t step = (uint64_t)((double)v->freq * v->doppler / g_rate * 4294967296.0);
     const uint64_t end = (uint64_t)v->frames << 32;
     const unsigned stereo = v->fmt.channels >= 2;
     uint32_t a = play_bytes(v), wraps = 0;
+    if (v->stream && !stream_fill(v, frames, step))
+        return;
     for (uint32_t i = 0; i < frames; i++) {
         uint32_t f = (uint32_t)(v->pos >> 32);
         float t = (float)(uint32_t)v->pos * (1.0f / 4294967296.0f);
         uint32_t f1 = f + 1;
         int have1 = 1;
-        if (f1 >= v->frames) {
+        if (v->stream) {
+            /* the window holds [sbase, sbase+scount): f and, unless t == 0 (weight 0), f+1 must be in it;
+             * otherwise the stream has run dry: silence from here, the cursor stays (the voice stays alive) */
+            if (f < v->sbase || f - v->sbase >= v->scount || ((uint32_t)v->pos && f1 - v->sbase >= v->scount))
+                break;
+            f -= (uint32_t)v->sbase;
+            f1 -= (uint32_t)v->sbase;
+            have1 = (uint32_t)v->pos != 0;
+            if (!have1)
+                f1 = f;
+        } else if (f1 >= v->frames) {
             if (v->looping) f1 = 0;
             else have1 = 0;
         }
@@ -294,7 +366,7 @@ static void mix_voice_into(mix_voice *v, float *out, uint32_t frames, float gl, 
         out[2 * i] += (l0 + (l1 - l0) * t) * gl;
         out[2 * i + 1] += (r0 + (r1 - r0) * t) * gr;
         v->pos += step;
-        if (v->pos >= end) {
+        if (!v->stream && v->pos >= end) {
             if (v->looping) {
                 while (v->pos >= end)
                     v->pos -= end;
@@ -309,6 +381,11 @@ static void mix_voice_into(mix_voice *v, float *out, uint32_t frames, float gl, 
             }
         }
     }
+    if (v->stream) {
+        v->pos -= v->sbase << 32;   /* rebase: pos and the window shift together */
+        v->sbase = 0;
+        return;
+    }
     fire_crossed(v, a, play_bytes(v), wraps);
 }
 
@@ -317,7 +394,7 @@ void mixer_render_f32(float *out, uint32_t frames)
     memset(out, 0, (size_t)frames * MIX_OUT_CHANNELS * sizeof(float));
     os_lock(&g_lock);
     for (mix_voice *v = g_voices; v; v = v->next) {
-        if (!(v->playing && v->data && v->frames && v->freq))
+        if (!(v->playing && (v->data || v->stream) && v->frames && v->freq))
             continue;
         const float gl = v->gl * g_master, gr = v->gr * g_master;
         if (!v->reverb) {

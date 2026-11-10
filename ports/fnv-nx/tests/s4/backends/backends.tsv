@@ -7,15 +7,6 @@ advapi32	RegCreateKeyExA	logic	platform/win32/services.cpp	in-process registry w
 advapi32	RegOpenKeyExA	logic	platform/win32/services.cpp	in-process registry with the install keys	
 advapi32	RegQueryValueExA	logic	platform/win32/services.cpp	in-process registry with the install keys	
 advapi32	RegSetValueExA	logic	platform/win32/services.cpp	in-process registry with the install keys	
-binkw32	_BinkClose@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
-binkw32	_BinkCopyToBufferRect@44	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
-binkw32	_BinkDoFrame@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
-binkw32	_BinkNextFrame@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
-binkw32	_BinkOpen@8	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
-binkw32	_BinkOpenDirectSound@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
-binkw32	_BinkPause@8	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
-binkw32	_BinkSetSoundSystem@8	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
-binkw32	_BinkWait@4	policy	platform/win32/bink.cpp	skip movies	policy (orchestrator, s4-001): skip movies - BinkOpen NULL, the game logs and goes on
 comctl32	ImageList_Destroy	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 comctl32	ImageList_LoadImageA	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
 comctl32	InitCommonControlsEx	logic	platform/win32/window.cpp	in-process window/message model; keys and pointer from the host input	
@@ -197,12 +188,6 @@ kernel32	WriteFile	device	platform/win32/file.cpp	host fs (fs_* host calls, sdmc
 kernel32	WritePrivateProfileStringA	device	platform/win32/ini.cpp	host fs (fs_* host calls, sdmc:)	
 kernel32	lstrcatA	device	platform/win32/module.cpp	in-process tables; output to the host log	
 kernel32	lstrcpyA	device	platform/win32/module.cpp	in-process tables; output to the host log	
-libvorbisfile	ov_clear	device	platform/audio/vorbisfile.cpp	libvorbisfile linked into the guest (VORBIS prefix)	
-libvorbisfile	ov_info	device	platform/audio/vorbisfile.cpp	libvorbisfile linked into the guest (VORBIS prefix)	
-libvorbisfile	ov_open_callbacks	device	platform/audio/vorbisfile.cpp	libvorbisfile linked into the guest (VORBIS prefix)	
-libvorbisfile	ov_pcm_total	device	platform/audio/vorbisfile.cpp	libvorbisfile linked into the guest (VORBIS prefix)	
-libvorbisfile	ov_read	device	platform/audio/vorbisfile.cpp	libvorbisfile linked into the guest (VORBIS prefix)	
-libvorbisfile	ov_seekable	device	platform/audio/vorbisfile.cpp	libvorbisfile linked into the guest (VORBIS prefix)	
 ole32	CoCreateInstance	logic	platform/win32/services.cpp	COM class table (S7 dsound/dinput)	
 ole32	CoFreeUnusedLibraries	logic	platform/win32/services.cpp	COM class table (S7 dsound/dinput)	
 ole32	CoInitialize	logic	platform/win32/services.cpp	COM class table (S7 dsound/dinput)	

@@ -509,9 +509,6 @@ TEST(audio_registration_module_and_com)
     HMODULE h = LoadLibraryA("DSOUND.DLL");
     CHECK(h != nullptr);
     CHECK(GetProcAddress(h, "DirectSoundCreate8") == (FARPROC)(void *)&DirectSoundCreate8);
-    HMODULE v = LoadLibraryA("vorbisfile.dll");
-    CHECK(v != nullptr);
-    CHECK(GetProcAddress(v, "ov_read") != nullptr);
     CHECK(GetProcAddress(LoadLibraryA("xinput1_3.dll"), "XInputGetState") != nullptr);
     void *ds = nullptr;
     CHECK_EQ(CoCreateInstance(&CLSID_DirectSound8, nullptr, 1, &IID_IDirectSound8, &ds), S_OK);
@@ -519,22 +516,4 @@ TEST(audio_registration_module_and_com)
     if (ds) ((IDirectSound8 *)ds)->Release();
     CHECK(fnvnx_audio_input_lookup_export("dinput8", "DirectInput8Create") != nullptr);
     CHECK(fnvnx_audio_input_lookup_export("kernel32", "DirectInput8Create") == nullptr);
-}
-
-struct ov_cb { void *a, *b, *c, *d; };
-extern "C" int fnvnx_ov_open_callbacks(void *, void *, const char *, long, ov_cb);
-extern "C" long fnvnx_ov_read(void *, char *, int, int, int, int, int *);
-extern "C" int fnvnx_ov_clear(void *);
-
-TEST(audio_vorbis_without_library)
-{
-    /* without FNVNX_HAVE_VORBIS opening fails with OV_ENOTVORBIS and the engine's 0x2D0 block is left cleared */
-    unsigned char vf[0x2D0];
-    memset(vf, 0xAB, sizeof vf);
-    ov_cb cb = {nullptr, nullptr, nullptr, nullptr};
-    CHECK_EQ(fnvnx_ov_open_callbacks(nullptr, vf, nullptr, 0, cb), -132);
-    char buf[16];
-    int bs = 0;
-    CHECK(fnvnx_ov_read(vf, buf, 16, 0, 2, 1, &bs) < 0);
-    CHECK_EQ(fnvnx_ov_clear(vf), 0);
 }

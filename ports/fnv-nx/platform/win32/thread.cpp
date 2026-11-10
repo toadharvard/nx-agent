@@ -43,24 +43,52 @@ extern "C" HANDLE GetCurrentThread(void) { return W32_PSEUDO_THREAD; }
 extern "C" HANDLE GetCurrentProcess(void) { return W32_PSEUDO_PROCESS; }
 extern "C" DWORD GetCurrentProcessId(void) { return os_process_id(); }
 
-/* ---- TlsAlloc: a global bitmap of 1088 slots, values in the per-thread block */
+/* ---- TlsAlloc: a global bitmap of 1088 slots, values in the per-thread block.
+ * Zero-initialisation in every thread without stopping any: each slot has a global generation, bumped by every
+ * TlsAlloc of it; a thread's cell for the slot is valid only while the thread's recorded generation (kept in
+ * tls_ext after the values) equals the global one, otherwise the slot reads as 0 and the first TlsSetValue
+ * re-zeroes and stamps it. Fresh threads record 0, and generations of allocated slots are >= 1. */
 static os_lock_t g_tls_lock;
 static uint32_t g_tls_used[W32_TLS_SLOTS / 32];
+static uint32_t g_tls_gen[W32_TLS_SLOTS];
 #define TLS_OUT_OF_INDEXES_ ((DWORD)0xFFFFFFFF)
+#ifndef ERROR_NOACCESS
+#define ERROR_NOACCESS 998L
+#endif
+#define TLS_EXT_VALUES (W32_TLS_SLOTS - 64)
+
+static bool tls_is_used(DWORD i)
+{
+    return (__atomic_load_n(&g_tls_used[i / 32], __ATOMIC_ACQUIRE) >> (i % 32)) & 1u;
+}
+
+/* the calling thread's cell for allocated slot i; NULL: reads as 0 (not stamped yet, or no memory when creating) */
+static void **tls_cell(struct w32_thread *t, DWORD i, bool create)
+{
+    if (!t->tls_ext) {
+        if (!create || !(t->tls_ext = (void **)calloc(TLS_EXT_VALUES + W32_TLS_SLOTS, sizeof(void *))))
+            return NULL;
+    }
+    void **cell = i < 64 ? &t->tls[i] : &t->tls_ext[i - 64];
+    uintptr_t *stamp = (uintptr_t *)&t->tls_ext[TLS_EXT_VALUES + i];
+    uint32_t g = __atomic_load_n(&g_tls_gen[i], __ATOMIC_ACQUIRE);
+    if (*stamp != g) {
+        if (!create)
+            return NULL;
+        *cell = NULL;
+        *stamp = g;
+    }
+    return cell;
+}
 
 extern "C" DWORD TlsAlloc(void)
 {
     os_lock(&g_tls_lock);
     for (DWORD i = 0; i < W32_TLS_SLOTS; i++)
         if (!(g_tls_used[i / 32] & (1u << (i % 32)))) {
-            g_tls_used[i / 32] |= 1u << (i % 32);
+            __atomic_add_fetch(&g_tls_gen[i], 1, __ATOMIC_RELEASE);
+            __atomic_or_fetch(&g_tls_used[i / 32], 1u << (i % 32), __ATOMIC_RELEASE);
             os_unlock(&g_tls_lock);
-            /* Windows zeroes the slot in every thread; threads created later start at zero anyway */
-            struct w32_thread *t = w32_self();
-            if (i < 64)
-                t->tls[i] = NULL;
-            else if (t->tls_ext)
-                t->tls_ext[i - 64] = NULL;
             return i;
         }
     os_unlock(&g_tls_lock);
@@ -70,15 +98,14 @@ extern "C" DWORD TlsAlloc(void)
 
 extern "C" BOOL TlsFree(DWORD i)
 {
-    if (i >= W32_TLS_SLOTS) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
+    bool was_used = false;
+    if (i < W32_TLS_SLOTS) {
+        os_lock(&g_tls_lock);
+        was_used = tls_is_used(i);
+        __atomic_and_fetch(&g_tls_used[i / 32], ~(1u << (i % 32)), __ATOMIC_RELEASE);
+        os_unlock(&g_tls_lock);
     }
-    os_lock(&g_tls_lock);
-    bool was_used = (g_tls_used[i / 32] >> (i % 32)) & 1u;
-    g_tls_used[i / 32] &= ~(1u << (i % 32));
-    os_unlock(&g_tls_lock);
-    if (!was_used) {   /* freeing a slot that is not allocated fails */
+    if (!was_used) {   /* out of range, or a slot that is not allocated */
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
@@ -88,34 +115,30 @@ extern "C" BOOL TlsFree(DWORD i)
 extern "C" LPVOID TlsGetValue(DWORD i)
 {
     struct w32_thread *t = w32_self();
-    if (i < 64) {
-        t->last_error = ERROR_SUCCESS;
-        return t->tls[i];
-    }
     if (i >= W32_TLS_SLOTS) {
         t->last_error = ERROR_INVALID_PARAMETER;
         return NULL;
     }
     t->last_error = ERROR_SUCCESS;
-    return t->tls_ext ? t->tls_ext[i - 64] : NULL;
+    if (!tls_is_used(i))
+        return NULL;
+    void **cell = tls_cell(t, i, false);
+    return cell ? *cell : NULL;
 }
 
 extern "C" BOOL TlsSetValue(DWORD i, LPVOID v)
 {
     struct w32_thread *t = w32_self();
-    if (i < 64) {
-        t->tls[i] = v;
-        return TRUE;
-    }
-    if (i >= W32_TLS_SLOTS) {
+    if (i >= W32_TLS_SLOTS || !tls_is_used(i)) {
         t->last_error = ERROR_INVALID_PARAMETER;
         return FALSE;
     }
-    if (!t->tls_ext && !(t->tls_ext = (void **)calloc(W32_TLS_SLOTS - 64, sizeof(void *)))) {
+    void **cell = tls_cell(t, i, true);
+    if (!cell) {
         t->last_error = ERROR_NOT_ENOUGH_MEMORY;
         return FALSE;
     }
-    t->tls_ext[i - 64] = v;
+    *cell = v;
     return TRUE;
 }
 
@@ -178,7 +201,11 @@ extern "C" unsigned long __readfsdword(unsigned long off)
     case 0x34: return t->last_error;                              /* LastErrorValue */
     default:
         if (off >= 0xE10 && off < 0xE10 + 64 * 4 && !(off & 3))  /* TlsSlots[64] */
-            return (unsigned long)(uintptr_t)t->tls[(off - 0xE10) / 4];
+        {
+            DWORD i = (off - 0xE10) / 4;
+            void **cell = tls_is_used(i) ? tls_cell(t, i, false) : NULL;
+            return (unsigned long)(uintptr_t)(cell ? *cell : NULL);
+        }
         w32_log("__readfsdword(0x%lx): unsupported TEB offset, returning 0", off);
         FNVNX_UNIMPL();
         return 0;
@@ -186,6 +213,7 @@ extern "C" unsigned long __readfsdword(unsigned long off)
 }
 
 /* ---- thread objects */
+#define STACK_SIZE_PARAM_IS_A_RESERVATION_ 0x00010000
 
 /* Set by the game layer (toolchain/game/boot.cpp): the placement role of a new thread from its start routine and
  * argument, OS_THREAD_ROLE(r) or -1 (default placement); see toolchain/host/placement.h. */
@@ -250,6 +278,10 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
                                LPDWORD tid_out)
 {
     W32_UNUSED(sa);
+    if (flags & ~(DWORD)(CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION_)) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
     struct w32_thread_obj *t =
         (struct w32_thread_obj *)w32_obj_new(W32_THREAD, sizeof(struct w32_thread_obj), thread_destroy);
     if (!t)
@@ -291,20 +323,29 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
     return w32_handle_open(&t->o);
 }
 
+/* handle -> thread object. NULL with *bad == 0: the pseudo handle of a thread CreateThread did not start (the
+ * main thread); NULL with *bad == 1: invalid handle (ERROR_INVALID_HANDLE set) */
+static struct w32_thread_obj *thread_resolve(HANDLE h, int *bad)
+{
+    *bad = 0;
+    if (h == W32_PSEUDO_THREAD)
+        return (struct w32_thread_obj *)w32_self()->self_obj;
+    struct w32_thread_obj *t = (struct w32_thread_obj *)w32_obj_get(h, W32_THREAD);
+    *bad = t == NULL;
+    return t;
+}
 static struct w32_thread_obj *thread_of(HANDLE h)
 {
-    if (h == W32_PSEUDO_THREAD) {
-        struct w32_thread *self = w32_self();
-        return self->self_obj ? (struct w32_thread_obj *)self->self_obj : NULL;
-    }
-    return (struct w32_thread_obj *)w32_obj_get(h, W32_THREAD);
+    int bad;
+    return thread_resolve(h, &bad);
 }
 
 extern "C" DWORD ResumeThread(HANDLE h)
 {
-    struct w32_thread_obj *t = thread_of(h);
+    int bad;
+    struct w32_thread_obj *t = thread_resolve(h, &bad);
     if (!t)
-        return (DWORD)-1;
+        return bad ? (DWORD)-1 : 0;   /* the main thread is never suspended: previous count 0 */
     os_lock(&w32_wait_lock);
     int prev = t->suspend_count;
     if (prev > 0)
@@ -326,9 +367,10 @@ extern "C" DWORD ResumeThread(HANDLE h)
 
 extern "C" DWORD SuspendThread(HANDLE h)
 {
-    struct w32_thread_obj *t = thread_of(h);
+    int bad;
+    struct w32_thread_obj *t = thread_resolve(h, &bad);
     if (!t)
-        return (DWORD)-1;
+        return bad ? (DWORD)-1 : 0;   /* the main thread: no suspension state, previous count 0 */
     os_lock(&w32_wait_lock);
     int prev = t->suspend_count++;
     int running = t->started && !t->done;
@@ -351,13 +393,17 @@ extern "C" DWORD SuspendThread(HANDLE h)
 
 extern "C" BOOL GetExitCodeThread(HANDLE h, LPDWORD code)
 {
-    struct w32_thread_obj *t = thread_of(h);
-    if (!t) {
-        if (h == W32_PSEUDO_THREAD && code) {   /* a thread the game did not start (the main thread): running */
-            *code = STILL_ACTIVE;
-            return TRUE;
-        }
+    int bad;
+    struct w32_thread_obj *t = thread_resolve(h, &bad);
+    if (bad)
+        return FALSE;                    /* ERROR_INVALID_HANDLE set by the lookup */
+    if (!code) {                         /* Windows probes the output in the kernel */
+        SetLastError(ERROR_NOACCESS);
         return FALSE;
+    }
+    if (!t) {   /* a thread the game did not start (the main thread): running */
+        *code = STILL_ACTIVE;
+        return TRUE;
     }
     os_lock(&w32_wait_lock);
     *code = t->done ? t->exit_code : STILL_ACTIVE;
@@ -382,21 +428,38 @@ extern "C" void ExitThread(DWORD code)
     os_thread_exit();
 }
 
+/* priority/ideal processor of threads CreateThread did not start (per host thread) */
+static __thread int g_main_prio;
+static __thread int g_main_cpu = -1;
+
 extern "C" BOOL SetThreadPriority(HANDLE h, int prio)
 {
-    if (h == W32_PSEUDO_THREAD)
-        return os_thread_set_priority(NULL, prio) == 0;
-    struct w32_thread_obj *t = thread_of(h);
-    if (!t)
+    int bad;
+    struct w32_thread_obj *t = thread_resolve(h, &bad);
+    if (bad)
         return FALSE;
-    t->prio = prio;
-    return os_thread_set_priority(t->os, prio) == 0;
+    if (!(prio == -15 || (prio >= -2 && prio <= 2) || prio == 15)) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    if (os_thread_set_priority(t ? t->os : NULL, prio)) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    if (t)
+        t->prio = prio;
+    else
+        g_main_prio = prio;
+    return TRUE;
 }
 
 extern "C" int GetThreadPriority(HANDLE h)
 {
-    struct w32_thread_obj *t = h == W32_PSEUDO_THREAD ? NULL : thread_of(h);
-    return t ? t->prio : THREAD_PRIORITY_NORMAL;
+    int bad;
+    struct w32_thread_obj *t = thread_resolve(h, &bad);
+    if (bad)
+        return 0x7FFFFFFF;   /* THREAD_PRIORITY_ERROR_RETURN */
+    return t ? t->prio : g_main_prio;
 }
 
 extern "C" BOOL SetThreadPriorityBoost(HANDLE h, BOOL disable)
@@ -422,16 +485,23 @@ extern "C" DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask)
 
 extern "C" DWORD SetThreadIdealProcessor(HANDLE h, DWORD cpu)
 {
-    struct w32_thread_obj *t = h == W32_PSEUDO_THREAD ? NULL : thread_of(h);
-    if (h != W32_PSEUDO_THREAD && !t)
+    int bad;
+    struct w32_thread_obj *t = thread_resolve(h, &bad);
+    if (bad)
         return (DWORD)-1;
-    DWORD prev = t && t->cpu >= 0 ? (DWORD)t->cpu : 0;
-    if (cpu == 0xFFFFFFFFu || cpu == (DWORD)-1) /* MAXIMUM_PROCESSORS query */
+    int cur = t ? t->cpu : g_main_cpu;
+    DWORD prev = cur >= 0 ? (DWORD)cur : 0;
+    if (cpu == 32)   /* MAXIMUM_PROCESSORS: a query */
         return prev;
-    int c = (int)(cpu % os_cpu_count());
+    if (cpu >= (DWORD)os_cpu_count()) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return (DWORD)-1;
+    }
     if (t)
-        t->cpu = c;
-    os_thread_set_affinity(t ? t->os : NULL, c, 0); /* a preference: the mask stays */
+        t->cpu = (int)cpu;
+    else
+        g_main_cpu = (int)cpu;
+    os_thread_set_affinity(t ? t->os : NULL, (int)cpu, 0); /* a preference: the mask stays */
     return prev;
 }
 

@@ -52,7 +52,7 @@ int fnvnx_dksh_validate(const void *dksh, size_t n, fnvnx_shader_stage stage, ch
 
 int fnvnx_shader_translate(const void *bc, size_t n, const fnvnx_shader_opts *opts, fnvnx_shader_result *r)
 {
-    static const fnvnx_shader_opts defaults = { 0, NULL };
+    static const fnvnx_shader_opts defaults = { 0, NULL, NULL, 0 };
     if (!opts) opts = &defaults;
     memset(r, 0, sizeof(*r));
     r->stage = FNVNX_STAGE_UNKNOWN;
@@ -65,7 +65,7 @@ int fnvnx_shader_translate(const void *bc, size_t n, const fnvnx_shader_opts *op
     if (!be) { snprintf(r->error, sizeof r->error, "unknown backend '%s'", opts->backend); return 0; }
 
     fnvnx_reflection refl;
-    if (fnvnx_frontend_parse(bc, n, &refl, &r->reflection_json, r->error, sizeof r->error)) return 0;
+    if (fnvnx_frontend_parse(bc, n, opts->link_pairs, opts->n_link_pairs, &refl, &r->reflection_json, r->error, sizeof r->error)) return 0;
     r->stage = refl.stage; r->major = refl.major; r->minor = refl.minor;
     r->stats.d3d_instructions = refl.d3d_instructions;
 

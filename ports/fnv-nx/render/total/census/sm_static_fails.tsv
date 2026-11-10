@@ -1,0 +1,44 @@
+file	line	message	class	reachable_in_glsldk_path	note
+mojoshader.c	458	relative addressing unsupported without a CTAB	limit	n	glsldk branch (glsldk_rel_const) bypasses it when there is no CTAB; reachable only if a CTAB exists and the glsldk branch is skipped
+mojoshader.c	462	Relative addressing of dest tokens is unsupported	conditional	n	non-glsldk #else branch; glsldk handles o[aL] (census ok)
+mojoshader.c	481	Partial precision result mod in non-pixel shader	conditional	y	_pp in vs_2_0+/vs_3_0 (legal=?)
+mojoshader.c	487	Centroid result mod in non-pixel shader	conditional	y	centroid outside ps
+mojoshader.c	753	Relative addressing in pixel shader version < 3.0	conditional	y	c[aL] in ps_2_x (legal=?)
+mojoshader.c	830	relative addressing unsupported without a CTAB	limit	n	glsldk branch (glsldk_rel_const) bypasses it when there is no CTAB; reachable only if a CTAB exists and the glsldk branch is skipped
+mojoshader.c	858	relative addressing of indeterminate array	conditional	?	relative c[] with a CTAB: census rows c[a0.x+n]@ctab-* all passed
+mojoshader.c	908	illegal source mod for this Shader Model.	conditional	y	bias/sign/comp/x2 in ps_2_0+ (legal=?)
+mojoshader.c	943	Temp register r%d used uninitialized	conditional	y	whole-register flow-insensitive check; see rows if@temp-written-in-branch-only, rep@temp-written-in-loop
+mojoshader.c	1230	reserved bits in DCL dword aren't zero	bug	y	vs_3_0 sampler dcl: reserved_mask 0x0FFFFFFF covers texture-type bit 27, so dcl_cube is refused (census: vs_3_0 cube)
+mojoshader.c	1617	CALL to this label must be wrapped in LOOP/ENDLOOP	rejects-valid	y	one label called both inside and outside LOOP/ENDLOOP
+mojoshader.c	1619	CALL to this label must not be wrapped in LOOP/ENDLOOP	rejects-valid	y	same label, other order
+mojoshader.c	1960	TEXM3X2TEX needs a 2D sampler	conditional	y	same, without CTAB
+mojoshader.c	1998	%s needs a 3D or Cubemap sampler	rejects-valid	y	texm3x3/texm3x3tex etc. without a CTAB sampler declaration; sampler type cannot be derived from the opcode
+mojoshader.c	2051	TEXLD src0 must have no modifiers	rejects-valid	y	sm2+ texld coordinate with negate/abs; ps_3_0 neg is legal
+mojoshader.c	2055	TEXLD src1 must have no modifiers	conditional	y	sampler operand modifiers
+mojoshader.c	2067	TEXLD src0 must not swizzle	conditional	y	ps_2_0/2_x texld coordinate swizzle (legal=? for sm2); ps_3_0 passes
+mojoshader.c	2069	TEXLD src1 must not swizzle	conditional	y	sampler operand swizzle
+mojoshader.c	2178	coissue instruction in Shader Model >= 2.0	limit	y	coissue bit (ps_1_x only): not exercised by the census, see README
+mojoshader.c	2183	opcode '%s' not available in this shader type.	conditional	y	dst in ps (legal=?), vertex-only/pixel-only table in mojoshader_internal.h
+mojoshader.c	2303	Shader Model %u.%u is currently unsupported.	rejects-valid	y	versions other than 1.1-1.4, 2.0, 2.1, 3.0 (vs_1_0, ps_1_0, *_2_sw, *_3_sw are not in the SM1-3 model list of the census)
+profiles/mojoshader_profile_glsl.c	49	glsldk: no attribute location for usage %d index %d	limit	y	vs input usages psize, tessfactor, positiont, fog, depth, sample, and texcoord index 15 have no location in fnvnx_dk_layout.h
+profiles/mojoshader_profile_glsl.c	70	glsldk: no varying location for usage %d index %d	limit	y	vs_3_0 output / ps_3_0 input usages position, psize, tessfactor, positiont, sample have no location
+profiles/mojoshader_profile_glsl.c	166	Too many source args	limit	?	internal buffer limit
+profiles/mojoshader_profile_glsl.c	216	predicated destinations unsupported	limit	n	guarded by !support_glsldk
+profiles/mojoshader_profile_glsl.c	228	operation string too large	limit	?	internal 256-byte statement buffer
+profiles/mojoshader_profile_glsl.c	357	Too many source args	limit	?	internal buffer limit
+profiles/mojoshader_profile_glsl.c	407	SRCMOD_DZ unsupported	conditional	y	generic source path; ps_1_4 texld/texcrd _dz/_dw take another path (census ok)
+profiles/mojoshader_profile_glsl.c	412	SRCMOD_DW unsupported	conditional	y	same
+profiles/mojoshader_profile_glsl.c	1008	Relative addressing of input registers not supported.	limit	n	non-glsldk branch; glsldk uses dk_finalize_relative (v[aL] ok)
+profiles/mojoshader_profile_glsl.c	1544	centroid unsupported in %s profile	conditional	n	non-glsldk branch
+profiles/mojoshader_profile_glsl.c	1662	BUG: unhandled misc register	limit	?	misc register types other than vPos/vFace
+profiles/mojoshader_profile_glsl.c	1668	unknown pixel shader attribute register	limit	?	unknown input register type
+profiles/mojoshader_profile_glsl.c	1701	centroid on a built-in input	conditional	y	centroid on vPos/vFace dcl (not legal)
+profiles/mojoshader_profile_glsl.c	2586	TEXLDP on a cubemap	rejects-valid	y	texldp with a cube sampler (ps_2_0, ps_2_x, ps_3_0)
+profiles/mojoshader_profile_glsl.c	2669	TEXREG2AR unimplemented in glsl profile	unimplemented	y	ps_1_1-1_3
+profiles/mojoshader_profile_glsl.c	2670	TEXREG2GB unimplemented in glsl profile	unimplemented	y	ps_1_1-1_3
+profiles/mojoshader_profile_glsl.c	2987	TEXREG2RGB unimplemented in glsl profile	unimplemented	y	ps_1_2-1_3
+profiles/mojoshader_profile_glsl.c	2988	TEXDP3TEX unimplemented in glsl profile	unimplemented	y	ps_1_2-1_3
+profiles/mojoshader_profile_glsl.c	2989	TEXM3X2DEPTH unimplemented in glsl profile	unimplemented	y	ps_1_3
+profiles/mojoshader_profile_glsl.c	2990	TEXDP3 unimplemented in glsl profile	unimplemented	y	ps_1_2-1_3
+profiles/mojoshader_profile_glsl.c	3025	TEXDEPTH unimplemented in glsl profile	unimplemented	y	ps_1_4
+profiles/mojoshader_profile_glsl.c	3032	BEM unimplemented in glsl profile	unimplemented	y	ps_1_4

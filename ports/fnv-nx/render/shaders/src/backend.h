@@ -27,6 +27,9 @@ typedef struct fnvnx_reflection {
     uint32_t d3d_instructions;
     /* the parsed form the front end used; opaque to backends that lift their own IR */
     const void *frontend_parse;
+    /* location rule result (fnvnx_dk_assign) indexed by FNVNX_DK_PAIR; -1 = not declared; copy: VS writes a varying copy of POSITION0/PSIZE0 */
+    signed char attrib_loc[224], varying_loc[224];
+    unsigned char copy[224];
 } fnvnx_reflection;
 
 typedef struct fnvnx_glsl_backend {
@@ -38,7 +41,7 @@ typedef struct fnvnx_glsl_backend {
 extern const fnvnx_glsl_backend fnvnx_backend_mojoshader_glsldk;
 
 /* frontend.c */
-int fnvnx_frontend_parse(const void *bc, size_t n, fnvnx_reflection *refl, char **json, char *err, size_t errlen);
+int fnvnx_frontend_parse(const void *bc, size_t n, const unsigned char *link, uint32_t nlink, fnvnx_reflection *refl, char **json, char *err, size_t errlen);
 void fnvnx_frontend_release(fnvnx_reflection *refl);
 
 /* dk.cpp */

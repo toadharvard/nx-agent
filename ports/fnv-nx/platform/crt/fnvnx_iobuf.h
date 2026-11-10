@@ -86,8 +86,10 @@ typedef struct _iobuf _iobuf;
 #define _O_TEMPORARY FNVNX_O_TEMPORARY
 #endif
 
-/* the standard streams: __iob_func()[0..2] = stdin, stdout, stderr (32-byte stride on ILP32, as MSVC's _iob) */
-extern struct _iobuf fnvnx_iob[3];
+/* the standard streams (the exported _iob array): __iob_func()[0..2] = stdin, stdout, stderr (32-byte stride on ILP32, as MSVC's _iob) */
+#define FNVNX_IOB_COUNT 20 /* MSVCRT.DLL's _iob has 20 entries; [0..2] are the standard streams, the rest stay zero */
+extern struct _iobuf fnvnx_iob[FNVNX_IOB_COUNT];
+int fnvnx_isatty(int fd);
 struct _iobuf *__iob_func(void);
 
 /* ---- stdio on _iobuf (the CRT functions of the same name without the fnvnx_iob_ prefix) */
