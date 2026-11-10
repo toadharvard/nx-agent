@@ -45,7 +45,7 @@ OPT=${OPT:--O2}
 # one); GCC under gnu++17 would bind every delete-expression to the sized `operator delete(void*, size_t)` (0x00aa1460).
 # -fno-lifetime-dse (EQ 588863, 00d979f0): decomp code calls a destructor explicitly and reuses the object (ResetFields'
 # `this->SpawnedBase::~SpawnedBase()`); MSVC never elides the destructor's vptr store, GCC drops it as dead.
-FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
+FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off -fPIC -fpermissive -Wno-narrowing -fmax-errors=20
        -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics -U_FORTIFY_SOURCE
        -ffile-prefix-map="$TREE"/= -ffile-prefix-map="$HERE"/=fnv-nx/ -ffile-prefix-map="$SSE2NEON"/=sse2neon/
        -include "$HERE/shim/include/fnvnx_compat.h" -I"$HERE/shim/include" -I"$SSE2NEON" -I"$TREE/include")

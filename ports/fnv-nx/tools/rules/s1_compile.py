@@ -1790,96 +1790,6 @@ def r_vftable_standins(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-# ---------------------------------------------------------------------------------------------------------- FALL1
-#
-# Some decomp functions return a value on every path but the last: the body was reconstructed without its final
-# return. MSVC then returned whatever eax held; GCC treats flowing off the end as unreachable and emits no epilogue,
-# so on AArch64 the code runs into the next function (S13: PathingLocation::HasValidTriangle 004ff7e0). FALL1 puts
-# `__builtin_trap()` at the end of every non-void function whose last statement is not a return / throw: where the
-# end is unreachable it is dead code, where it is reached the game stops there with a trap instead of executing the
-# next function. (What MSVC returned there has to be read from the x86 code per site; S1b patches can replace a trap.)
-
-FALL_SKIP_RET = re.compile(r'^(?:extern\s*"C\+?\+?"\s*|(?:FNVNX_KEEP|inline|static|virtual|explicit|extern|constexpr|'
-                           r'__forceinline|__inline|friend)\s+|template\s*<[^{};]*>\s*)+')
-FALL_DECLARATOR = re.compile(r'((?:::)?(?:[A-Za-z_]\w*(?:\s*<(?:[^<>;{}()]|<(?:[^<>;{}()]|<[^<>;{}()]*>)*>)*>)?\s*::\s*)*'
-                             r'(?:~?[A-Za-z_]\w*|operator\s*(?:\(\)|[^\s(]+)))\s*\(')
-FALL_END = re.compile(r'(?:\breturn\b[^;]*;|\bthrow\b[^;]*;|__builtin_trap\s*\(\s*\)\s*;|__builtin_unreachable\s*\(\s*\)\s*;|'
-                      r'\b(?:abort|exit|_exit|ExitProcess|ExitThread|terminate|_CxxThrowException|__CxxThrowException|'
-                      r'FUN_00ec7894)\s*\([^;]*\)\s*;)\s*$')
-
-def _last_statement(body):
-    """The last statement at the top level of a function body (after the last `;` or `}` that closes one)."""
-    depth, last, q, i = 0, 0, None, 0
-    while i < len(body):
-        c = body[i]
-        if q:
-            if c == '\\': i += 1
-            elif c == q: q = None
-        elif c in '"\'': q = c
-        elif c in '({[': depth += 1
-        elif c in ')]': depth -= 1
-        elif c == '}':
-            depth -= 1
-            if depth == 0: last = i + 1
-        elif c == ';' and depth == 0 and i + 1 < len(body.rstrip()):
-            last = i + 1
-        i += 1
-    return body[last:].strip()
-
-def r_falloff_traps(path, text, stats):
-    """FALL1: `__builtin_trap()` at the end of non-void functions that do not end in a return (see above)."""
-    if '{' not in text: return text
-    spans = prepare.scope_spans(text)
-    edits, func_end = [], -1
-    for o, c, k, h in spans:
-        if k != 'function' or o < func_end: continue        # only outermost function bodies
-        func_end = c
-        head = prepare.HEAD_DECOR.sub(' ', prepare.HEAD_NOISE.sub('', h)).strip()
-        head = re.sub(r'^(?:\s*(?:public|private|protected)\s*:(?!:))+', '', head).strip()   # access label
-        m = None
-        for mm in FALL_DECLARATOR.finditer(head):
-            m = mm                                          # the declarator is the first name followed by `(`
-            break
-        if not m: continue
-        ret = FALL_SKIP_RET.sub('', head[:m.start()]).strip()
-        ret = prepare.HEAD_DECOR.sub(' ', ret).strip()
-        name = m.group(1)
-        if not ret or re.search(r'(?:^|\W)(?:if|while|for|switch|catch|return|else|do|sizeof)$', ret): continue
-        ret = re.sub(r'\b(?:__thiscall|__cdecl|__stdcall|__fastcall|__clrcall|WINAPI|CALLBACK|APIENTRY|NTAPI|WINAPIV|'
-                     r'STDMETHODCALLTYPE|__declspec|FNV_\w+|FNVNX_\w+|FORCEINLINE|NOINLINE)\b', ' ', ret).strip()
-        # linkage / storage / function specifiers are not part of the return type: `extern "C" void f(void)` is void
-        # (S1b found FALL1 trapping all 10,957 XC1 dyninit/dynexit functions without this)
-        ret = re.sub(r'(?:\bextern\s*)?"C\+?\+?"|\b(?:extern|static|inline|virtual|explicit|friend|constexpr|'
-                     r'__inline|__forceinline)\b', ' ', ret)
-        ret = re.sub(r'\s+', ' ', ret).strip()
-        if re.fullmatch(r'(?:const\s+|volatile\s+)*void', ret) or 'operator' in name and not ret: continue
-        # the head window can start inside a long parameter list: then the first "declarator" is a base or member in
-        # a constructor's mem-initializer list, or a name inside the parameters, and `ret` is parameter text (S1b:
-        # FUN_00a7b630::FUN_00a7b630, ImageSpaceModifierInstanceDRB ctor). Constructors return nothing; a real
-        # return type has no `)` and no `,` outside template brackets.
-        if re.search(r'\)\s*:(?!:)', head[:m.end()]): continue
-        flat = ret
-        while True:
-            nflat = re.sub(r'<[^<>]*>', '', flat)
-            if nflat == flat: break
-            flat = nflat
-        if re.search(r'[),]', flat): continue
-        if re.search(r'[=,(]$', ret) or ret.endswith(('return', 'new', 'delete')): continue   # an expression
-        if not re.search(r'[A-Za-z_]', ret): continue
-        if re.search(r'\\[ \t]*\n', text[o:c]): continue          # inside a #define (continued lines)
-        body = COMMENT.sub(' ', text[o + 1:c]).rstrip()
-        # the last top-level statement must be the return (`if (x) return 1;` at the end still falls off);
-        # an empty body falls off too (`virtual T* V0() {}`)
-        if body and FALL_END.match(_last_statement(body)): continue
-        edits.append((c, ' __builtin_trap(); /* fnv-nx FALL1 */ '))
-        stats['FALL1'] += 1
-    if not edits: return text
-    out, pos = [], 0
-    for at, s in edits:
-        out.append(text[pos:at]); out.append(s); pos = at
-    out.append(text[pos:])
-    return ''.join(out)
-
 # ---------------------------------------------------------------------------------------------------------- DUPINT1
 #
 # The decomp sometimes declares the same function twice in one unit, differing only in an integer parameter's type
@@ -4701,8 +4611,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_falloff_traps,
-         r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
+RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
 #
@@ -5532,6 +5441,9 @@ def r_recon_bodies(path, text, stats):
             # GCC-only stand-ins and the re-issued recons (functions: []) were not counted at all (orchestrator, S2)
             stats['REC1-APPEND'] += 1
         r['_applied'] = True
+        if os.environ.get('FNVNX_RECON_CERTIFY') == '1':
+            # the certifying run names every recon it applied (prepare_stats.tsv; reccert.py stamp requires the row)
+            stats['REC-SITE/%s/applied' % os.path.relpath(d, os.environ['FNVNX_RECON']).replace(os.sep, '/')] += 1
     return text
 
 def recon_retarget(u, rt):

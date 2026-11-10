@@ -286,8 +286,7 @@ def r_dbug1(path, text, stats):
 def r_ret1(path, text, stats):
     """RET1: the evident return of non-void functions that end without one (patches/ret1_*.s1b): the trailing
     expression statement on each fall-through path becomes `return <it>;` where MSVC compiles that to the same code,
-    i.e. the x86 function already returned that value (eax / ST0 left by it); prepare's FALL1 trap stays behind it,
-    unreachable."""
+    i.e. the x86 function already returned that value (eax / ST0 left by it)."""
     return apply_sites(path, text, stats, 'RET1')
 
 

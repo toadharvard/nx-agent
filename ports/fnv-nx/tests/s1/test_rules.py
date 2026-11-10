@@ -39,34 +39,6 @@ def run(rule, text, path='/nonexistent/src/x.cpp'):
 
 TRAP = '__builtin_trap()'
 
-# ---- FALL1
-check('FALL1 non-void without final return gets a trap',
-      run(s1.r_falloff_traps, 'int f(int x)\n{\n    if (x) return 1;\n}\n'), [TRAP])
-check('FALL1 empty non-void body gets a trap',
-      run(s1.r_falloff_traps, 'struct S\n{\n    virtual const char* V0()\n    {}\n};\n'), [TRAP])
-check('FALL1 extern "C" void function: no trap (XC1 initializers)',
-      run(s1.r_falloff_traps, 'extern "C" void __fnvnx_dyninit_00f35430(void) { g_x = 1; }\n'), (), [TRAP])
-check('FALL1 extern "C" int function without return: trap',
-      run(s1.r_falloff_traps, 'extern "C" int f(void) { g_x = 1; }\n'), [TRAP])
-check('FALL1 void with calling convention / keep macro: no trap',
-      run(s1.r_falloff_traps, 'FNVNX_KEEP void __thiscall A::f(int a)\n{\n    g(a);\n}\n'), (), [TRAP])
-check('FALL1 FNV_FORCEINLINE void member: no trap',
-      run(s1.r_falloff_traps, 'struct L\n{\n    FNV_FORCEINLINE void Unlock()\n    {\n        n = 0;\n    }\n};\n'),
-      (), [TRAP])
-check('FALL1 constructor after access label: no trap',
-      run(s1.r_falloff_traps, 'class B\n{\n  public:\n    B(bool b)\n    {\n        v = b;\n    }\n};\n'), (), [TRAP])
-check('FALL1 void member of a class template with two nested template arguments: no trap',
-      run(s1.r_falloff_traps, 'FNVNX_KEEP void L<A<unsigned int>,P<B> >::AddTail(const P<B>& e)\n{\n    n = 1;\n}\n'),
-      (), [TRAP])
-check('FALL1 int member of the same template: trap',
-      run(s1.r_falloff_traps, 'int L<A<unsigned int>,P<B> >::Count()\n{\n    n = 1;\n}\n'), [TRAP])
-check('FALL1 ends in return: no trap',
-      run(s1.r_falloff_traps, 'int f()\n{\n    return 3;\n}\n'), (), [TRAP])
-check('FALL1 class with declarations only, after a long comment: no trap',
-      run(s1.r_falloff_traps, '// ' + 'x' * 290 + ' (360 source path: a/b.cpp).\n// more\n\nstruct S\n{\n'
-          '    unsigned int __thiscall Read(void* p, unsigned int n);\n};\n'), (), [TRAP])
-check('FALL1 inside a #define: untouched',
-      run(s1.r_falloff_traps, '#define OPS(T) \\\n    T& operator=(T* p) \\\n    { \\\n        m = p; \\\n    }\n'), (), [TRAP])
 
 # ---- ALLOC1
 check('ALLOC1 untagged file-scope operator new[] dropped',
@@ -553,8 +525,6 @@ check('SSE2 drops a local intrinsic definition at namespace scope, same line cou
 check('SSE4 (_mm_x)( after a name keeps them apart',
       prepare.r_sse_qualified('x.cpp', 'T(_mm_load_ss)(p); f((_mm_add_ps)(a, b));\n', Counter()),
       ['T _mm_load_ss(p); f(_mm_add_ps(a, b));'])
-check('FALL1 _CRT_ALIGN(16) in a union head is a class head, not a function',
-      run(s1.r_falloff_traps, 'typedef union __declspec(intrin_type) _CRT_ALIGN(16) Q\n{\n    float f[4];\n} Q;\n'), (), [TRAP])
 check('SSE1 qualified elaborated __m128 references (`union ::__m128`)',
       prepare.r_sse_local_types('x.cpp', 'typedef union ::__m128 hkQuadReal;\nunion :: __m128;\nvoid f(struct N::__m128i* p);\n'
                                 'union __m128_like { int a; };\n', Counter()),
