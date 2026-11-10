@@ -36,8 +36,11 @@ CACHE_FORMAT = "fnvnx-selftests-cache/1"
 def run_one(path, timeout):
     """(passed, seconds)"""
     t0 = time.time()
+    # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
+    # would otherwise share this gate's result cache and outputs)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
     p = subprocess.Popen([sys.executable, "-I", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+                         stderr=subprocess.DEVNULL, start_new_session=True, env=env)
     try:
         ok = p.wait(timeout=timeout) == 0
     except subprocess.TimeoutExpired:
