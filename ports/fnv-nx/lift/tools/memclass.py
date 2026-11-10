@@ -342,6 +342,10 @@ def analyze(args):
                    why=F.why, bpv=bpv[0] if len(bpv) == 1 else None, offs=offs[:5], undecoded=not F.ok)
 
 
+def hx(v):
+    return int(v, 16) if isinstance(v, str) else v
+
+
 def parents_map(rows):
     par = {}
     for a, e, k in rows:
@@ -351,11 +355,11 @@ def parents_map(rows):
     d = json.load(open(W.EHJ))
     for fi in d['funcinfo']:
         for st, u in fi['unwind']:
-            par.setdefault(int(u, 16), []).extend(int(o, 16) for o in fi['owners'])
+            par.setdefault(hx(u), []).extend(hx(o) for o in fi['owners'])
     for sc in d['scopes']:
         for rec in sc['records']:
             for v in rec[1:]:
-                par.setdefault(int(v, 16), []).extend(int(o, 16) for o in sc['owners'])
+                par.setdefault(hx(v), []).extend(hx(o) for o in sc['owners'])
     return {a: sorted(set(v)) for a, v in par.items()}
 
 

@@ -172,8 +172,19 @@ def unwrap(v):
 # ---------------------------------------------------------------------------------------------- one path -> z3
 class Path: pass
 
+def consts(t):
+    """names of the uninterpreted constants in a z3 term"""
+    seen, out, st = set(), set(), [t]
+    while st:
+        e = st.pop()
+        if e.get_id() in seen: continue
+        seen.add(e.get_id())
+        if z3.is_const(e) and e.decl().kind() == z3.Z3_OP_UNINTERPRETED: out.add(e.decl().name())
+        st.extend(e.children())
+    return out
+
 def run_path(tag, trace, pre, seg_adj, fault=False):
-    env = Env(tag); P = Path(); P.pc = []
+    env = Env(tag); P = Path(); P.pc = []; P.side = []
     his = {r: z3.BitVec(r + '_hi', 32) for r in GPR}
     rfl_other = z3.BitVec('rflags_other', 32)
     bits = []
@@ -187,7 +198,10 @@ def run_path(tag, trace, pre, seg_adj, fault=False):
         h = ev[0]
         if h == 'declare-const': env.decl(ev[1], ev[2])
         elif h == 'define-const': env.v[ev[1]] = env.ev(ev[2])
-        elif h == 'assert': P.pc.append(env.ev(ev[1]))
+        elif h == 'assert':
+            t = env.ev(ev[1]); fv = consts(t)
+            if fv and all(c.startswith(tag + '_') for c in fv): P.side.append(t)       # constrains only a free (undefined/nondeterministic) value
+            else: P.pc.append(t)
         elif h in ('branch', 'cycle', 'define-enum', 'branch-address'): pass
         elif h == 'read-reg':
             r = regname(ev[1]); v = unwrap(ev[3])
@@ -236,5 +250,7 @@ def model_post(code, pre):
     paths = [run_path('p%d' % i, tr, pre, seg_adj) for i, (_, tr) in enumerate(ok)]
     ret = {'regs': {r: merge(paths, lambda p: p.regs[r]) for r in pre['regs']}, 'flags': {f: merge(paths, lambda p: p.flags[f]) for f in FLAGBIT},
             'mem': merge(paths, lambda p: p.mem), 'eip': merge(paths, lambda p: p.eip)}
-    if faults: ret['assume'] = z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, seg_adj, True).pc for i, tr in enumerate(faults)]))
+    asm = [s for p in paths for s in p.side]
+    if faults: asm.append(z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, seg_adj, True).pc for i, tr in enumerate(faults)])))
+    if asm: ret['assume'] = z3.And(*asm)
     return ret

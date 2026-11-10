@@ -20,6 +20,7 @@ def gen_state(root, i):
         regs.append(0x30000000 + (r.getrandbits(16) << 4) + (0 if r.random() < .75 else r.getrandbits(4)) if t < .5 else
                     r.choice((0, 1, 2, 3, 4, 5, 7, 8, 15, 16, 0xff, 0xffff, 0x7fffffff, 0x80000000, 0xffffffff, r.getrandbits(4))) if t < .7 else r.getrandbits(32))
     regs[4] = ESP_TOP - 4 * r.randrange(16, 512)
+    if root == 0xec8660: regs[0] = r.choice((1, 0x10, 0xff, 0xfff, 0x1000, 0x1001, 0x2345, 0x5000, 0x12000, r.randrange(1, 0x8000)))   # __chkstk: eax = bytes to allocate
     return dict(regs=regs, wk=((root * 31 + i + 1000003) & 0x7fffffff, i % 3))
 
 

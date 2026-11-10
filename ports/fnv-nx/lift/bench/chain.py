@@ -8,9 +8,9 @@ import argparse, collections, hashlib, multiprocessing as mp, os, pickle, statis
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 G = {}
-EXCL = ('indcall', 'import', 'jmp-indirect-untabled', 'fs')
+EXCL = ('indcall', 'import', 'jmp-indirect-untabled', 'fs', 'rcp-rsqrt')   # rcp-rsqrt: the reference-CPU tables are the runtime owner's, not linked here
 CHKSTK = 0xec8660                      # __chkstk / _alloca_probe: returns with a changed esp
-LIBC = ('.text\n.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
+LIBC = ('.text\n.globl fnvl_rcp32\nfnvl_rcp32: ret\n.globl fnvl_rsqrt32\nfnvl_rsqrt32: ret\n.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memmove\nmemmove: cmp x0,x1\n b.ls 3f\n add x3,x0,x2\n add x1,x1,x2\n1: cbz x2,2f\n ldrb w4,[x1,#-1]!\n strb w4,[x3,#-1]!\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '3: mov x3,x0\n4: cbz x2,2b\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 4b\n')
@@ -37,14 +37,14 @@ def lift_args(a):
 def meta_one(a):
     L = G['L']
     try:
-        t, m = L.lift(G['img'], **lift_args(a)); return a, None, m['calls'], m['tails'], tuple(m['kinds']), m['n']
+        t, m = L.lift(G['img'], **lift_args(a)); return a, None, m['calls'], m['tails'], tuple(m['kinds']) + (('rcp-rsqrt',) if 'fnvl_rcp32' in t or 'fnvl_rsqrt32' in t else ()), m['n']
     except L.Unsupported as e: return a, str(e)[:60], (), (), (), 0
     except Exception as e: return a, 'error ' + type(e).__name__, (), (), (), 0
 
 
 def load_meta(a):
     src = b''.join(open(os.path.join(a.lifter, p), 'rb').read() for p in sorted(['fnvlift/core.py', 'fnvlift/f_flow.py', 'fnvlift/f_int.py', 'rt/fnvl.h']))
-    f = '%s/meta-%s.pkl' % (a.work, hashlib.sha1(src + str(os.stat(a.universe).st_mtime).encode()).hexdigest()[:12])
+    f = '%s/meta-%s.pkl' % (a.work, hashlib.sha1(src + open(__file__, 'rb').read() + str(os.stat(a.universe).st_mtime).encode()).hexdigest()[:12])
     if os.path.exists(f): return pickle.load(open(f, 'rb'))
     t0 = time.time()
     with mp.get_context('fork').Pool(a.jobs) as p: res = {r[0]: r[1:] for r in p.imap_unordered(meta_one, sorted(G['ent']), 300)}
@@ -105,6 +105,8 @@ def select(a, meta, ent):
         if ft == 'chkstk': cand = sorted(cand, key=lambda r: (CHKSTK not in meta[r][1], r))[:max(20, a.cap)]; cand = sorted(cand)
         extra[ft] = (len(cand), spread(cand, max(a.cap, 20) if ft == 'chkstk' else a.cap))
     sel = list(dict.fromkeys(pick + [r for ft in extra for r in extra[ft][1]]))
+    q, d, w = closure(CHKSTK, meta, ent)       # the changed-esp helper as a root of its own (20 seeds: different sizes), few real roots call it
+    if q: forest[CHKSTK] = dict(q=q, depth=d, f={'chkstk'}); sel.append(CHKSTK)
     return acc, why, forest, sel, extra
 
 
@@ -145,7 +147,7 @@ def link(a, objs, syms, flags):
     df = ['-DFNVL_PHF', '-DFNVL_K1=%du' % h['k1'], '-DFNVL_K2=%du' % h['k2'], '-DFNVL_NBITS=%d' % h['nbits'], '-DFNVL_TBITS=%d' % h['tbits']] if h else []
     for src, extra in (('%s/rt/rt.c' % a.lifter, df), (d + '/tab.c', []), (d + '/libc.S', [])):
         subprocess.check_call(['aarch64-linux-gnu-gcc'] + CF + extra + [src, '-o', '%s/%s.o' % (d, os.path.basename(src)[:-2])])
-    elf = d + '/chain.elf'
+    elf = d + '/chain.elf'; open(d + '/objs.txt', 'w').write('\n'.join(sorted(objs)))
     r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % 0xE0000000, '-e', '0', '-o', elf, d + '/rt.o', d + '/tab.o', d + '/libc.o'] + sorted(objs), capture_output=True, text=True)
     if r.returncode: sys.exit('link failed: ' + r.stderr[:300])
     return elf
@@ -180,7 +182,7 @@ def main():
     objs, syms, bad, flags = compile_all(a, funcs)
     G['im'] = chrun.Image(link(a, objs, syms, flags)); print('built %d functions (%d do not compile: %s) in %.0fs' % (len(syms), len(bad), dict(collections.Counter(bad.values()).most_common(3)), time.time() - t0))
     run = [r for r in sel if all(f in syms for f in forest[r]['q'])]
-    with mp.get_context('fork').Pool(a.jobs) as p: res = dict(p.imap_unordered(work, [(r, set(forest[r]['q']), a.seeds) for r in run], 1))
+    with mp.get_context('fork').Pool(a.jobs) as p: res = dict(p.imap_unordered(work, [(r, set(forest[r]['q']), 20 if r == CHKSTK else a.seeds) for r in run], 1))
     report(a, sel, run, forest, res, syms, t0)
 
 
@@ -198,7 +200,7 @@ def report(a, sel, run, forest, res, syms, t0):
     for d in diffs[:5]: print('  DIFF ' + d[:190])
     print('features (chains in run; runs equal/diff/skip): ' + '; '.join('%s %d (%d/%d/%d)' % (ft, sum(1 for r in run if ft in forest[r]['f']), fe[ft]['equal'], fe[ft]['diff'], fe[ft]['skip']) for ft in ('tail', 'retn', 'recursion', 'jumptable', 'chkstk')))
     sx = sum(v[1] for v in (G['ent'][f] for f in syms)); sa = sum(im.sym[s][1] for s in syms.values())
-    if nx: print('executed insns, equal runs: x86 %d, A64 lifted %d (x%.2f; trace calls subtracted), median per chain x%.2f; dispatch %d insns in %d calls (%.1f per dispatch); bytes: x86 %d, A64 %d (x%.2f)' % (nx, na, na / nx, statistics.median(ratios.values()), nd, ndisp, nd / max(ndisp, 1), sx, sa, sa / sx))
+    if nx: print('executed insns, equal runs: x86 %d, A64 lifted %d + dispatcher %d (x%.2f lifted only, x%.2f total; trace calls subtracted), median per chain x%.2f; dispatcher %.1f insns per call (%d calls); bytes: x86 %d, A64 %d (x%.2f)' % (nx, na, nd, na / nx, (na + nd) / nx, statistics.median(ratios.values()), nd / max(ndisp, 1), ndisp, sx, sa, sa / sx))
     print('time %.0fs' % (time.time() - t0))
 
 
