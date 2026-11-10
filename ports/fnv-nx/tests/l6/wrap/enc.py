@@ -125,7 +125,9 @@ class Enc:
             if ok: self.w(d["tokid"])
             self.hdr(d["cls"] if d else 0, ok and d["onu"])
             if ok and d["onu"]: self.buf(lock_img(d, True))
-        ret = [thisid] if m["name"] == "Release" and c["iface"] and c["retv"] == 0 else []
+        ret = []   # final Release: the object's whole family (container + levels sharing its count) that the stream has named
+        if m["name"] == "Release" and c["iface"] and c["retv"] == 0:
+            bx = self.pl.objs[this].box; ret = sorted({thisid} | {self.oid[n] for n, o2 in self.pl.objs.items() if o2.box is bx and n in self.oid})
         hd = struct.pack("<7I", 0, self.seq, c.get("thread", 0), (self.names.index(c["iface"]) if c["iface"] else 0xFFFF) | (m["slot"] << 16 if c["iface"] else c["export"] << 16), thisid, c.get("depth", 0), len(self.new))
         for i, f in self.new: hd += struct.pack("<2I", i, f)
         hd += struct.pack("<I", len(ret)) + b"".join(struct.pack("<I", x) for x in ret)

@@ -16,8 +16,11 @@ arena_write = lambda k, j: (j * 5 + 3 + k) & 255
 
 
 class Obj:
+    """A level/face surface or volume shares its container's reference count (D3D9: Release on it returns the container's): both objects hold the same `box`."""
+    rc = property(lambda s: s.box[0], lambda s, v: s.box.__setitem__(0, v))
+
     def __init__(s, num, iface, creator):
-        s.num, s.iface, s.rc, s.tall, s.tv, s.pd, s.parent, s.key, s.creator = num, iface, 0, None, {}, {}, None, (0, 0), creator
+        s.box = [0]; s.num, s.iface, s.rc, s.tall, s.tv, s.pd, s.parent, s.key, s.creator = num, iface, 0, None, {}, {}, None, (0, 0), creator
         s.usage = {"CreateRenderTarget": 1, "CreateDepthStencilSurface": 2}.get(creator, 0)
 
 
@@ -169,7 +172,7 @@ class Plan:
         if key not in self.cache:
             no = self.new_obj(iface, m["name"], 0); self.cache[key] = no.num
             if iface in ("IDirect3DSurface9", "IDirect3DVolume9") and o and o.iface.endswith("Texture9"):
-                no.parent = o.num; no.key = (a["FaceType"], a["Level"]) if "FaceType" in a else (a["Level"], 0)
+                no.parent = o.num; no.box = o.box; no.key = (a["FaceType"], a["Level"]) if "FaceType" in a else (a["Level"], 0)
         self.objs[self.cache[key]].rc += 1
         return self.cache[key]
 

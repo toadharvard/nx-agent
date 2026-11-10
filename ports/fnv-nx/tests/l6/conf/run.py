@@ -58,7 +58,7 @@ def analyse(path):
 
 allm = {(m["iface"], m["slot"]): m["name"] for m in spec["methods"]}
 rows, called, nondet = [], set(), []
-pfx = W + "/pfx"; lock = replay.prefix_lock(pfx); x = replay.Xvfb(); env = replay.wine_env(pfx, x.display); env["LP_NUM_THREADS"] = "2"
+pfx = os.environ.get("CONF_PFX", W + "/pfx"); lock = replay.prefix_lock(pfx); x = replay.Xvfb(); env = replay.wine_env(pfx, x.display); env["LP_NUM_THREADS"] = "2"
 penv = dict(env, WINEDLLOVERRIDES=env["WINEDLLOVERRIDES"] + ";d3d9=n,b")
 try:
     if not os.path.isfile(pfx + "/system.reg"): subprocess.run(["wineboot", "-i"], env=env, timeout=900); subprocess.run(["wineserver", "-w"], env=env)

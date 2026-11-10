@@ -73,6 +73,21 @@ class Meth:
             if "in_when" in p: self.a("  }")
             self.a("}")
 
+    # ---- D9REC_TRACE: one line before forwarding every Lock*/Unlock*/GetDC/ReleaseDC and one after (d9s_tr is a no-op unless d9s_trace)
+    def tr_args(self):
+        f, a = [], []
+        for q in self.P:
+            n, k = q["name"], q["kind"]
+            if q["byref"] or k in ("buffer", "locked", "handle", "ohandle"):
+                if k == "struct" and q["struct"] in ("RECT", "D3DBOX"): f.append(f"{n}=%s"); a.append(f"d9s_boxs((const void *){n}, {4 if q['struct'] == 'RECT' else 6})")
+                continue
+            if k in ("value", "enum", "flags"): f.append(f"{n}=%x"); a.append(f"(unsigned)(uint32_t){n}")
+        return ("".join(" " + x for x in f), "".join(", " + x for x in a))
+
+    def trace(self, tag, extra_f="", extra_a=""):
+        f, a = self.tr_args(); nm = f"{self.iface}::{self.m['name']}"
+        self.a(f'if (d9s_trace) d9s_tr("d9rec: {tag} {nm} this=%p id=%u{f}{extra_f}", (void *)this, o ? o->id : 0u{a}{extra_a});')
+
     # ---- locks
     def lock_pre(self, p):
         L, sh, c = p["lock"], p["lock"]["shape"], self.cpre
@@ -100,6 +115,7 @@ class Meth:
             s2 = f" d9_l.spitch = (size_t){n}->{pit[1]};" if sh == "box" else ""
             self.a(f"  if (d9_c) {{ d9_l.base = (uintptr_t){n}->{pf[0]}; d9_l.pitch = (size_t){n}->{pit[0]};{s2} d9_l.rows = d9g_rows(d9_fmt, d9_h); "
                    f"d9_l.rowbytes = d9g_rowbytes(d9_fmt, d9_w); d9_l.depth = {'d9_d' if sh == 'box' else 1}; }}")
+        self.a("  if (d9s_trace) { " + "d9s_tr(\"d9rec: < %s::%s hr=%08x ptr=%p pitch=%u spitch=%u bytes=%u\", \"" + self.iface + "\", \"" + self.m["name"] + "\", (unsigned)d9_ret, (void *)d9_l.base, (unsigned)d9_l.pitch, (unsigned)d9_l.spitch, d9_c ? (unsigned)d9s_image(d9_l, 0) : 0u); }")
         self.a("  d9_rec.hdr(0, d9_c); if (d9_c) d9_rec.tokn(d9_l.base);")
         for f in pit:
             fc = p.get("field_cls", {}).get(f)
@@ -107,6 +123,7 @@ class Meth:
             self.a(f"  d9_rec.hdr({CLS[fc]}, d9_c); if (d9_c) d9_rec.w((uint32_t){n}->{f});")
         if p["cls"] != "by:taint": self.err(f"locked param {n}: class {p['cls']} has no emitter")
         self.a(f"  d9_rec.hdr(d9_lcls, d9_c && d9_onl); if (d9_c && d9_onl) d9_rec.img(d9_l);")
+        self.a("  if (d9s_trace && d9_c) d9s_tr(\"d9rec: = snapshot of the lock bytes done\");")
         self.a("  if (d9_c) d9s_lock_add(o, d9_l); }")
 
     def closes(self):
@@ -138,7 +155,10 @@ class Meth:
         self.inputs()
         if "closes" in m:
             k = self.closes()
-            self.a(f"uint32_t d9_k0 = {k[0]}, d9_k1 = {k[1]}; D9Lk *d9_lk = d9s_lock_find(o, d9_k0, d9_k1); if (d9_lk && d9_lk->onunlock) d9s_lock_snap(d9_lk);")
+            self.a(f"uint32_t d9_k0 = {k[0]}, d9_k1 = {k[1]}; D9Lk *d9_lk = d9s_lock_find(o, d9_k0, d9_k1);")
+            self.trace(">", " lock=%s snap=%u", ', d9_lk ? "open" : "NONE", d9_lk && d9_lk->onunlock ? (unsigned)d9s_image(*d9_lk, 0) : 0u')
+            self.a("if (d9_lk && d9_lk->onunlock) d9s_lock_snap(d9_lk);")
+            self.trace("=", " snapshot taken, calling the real call")
         args, frees = [], []
         for q in P:
             n = q["name"]
@@ -156,6 +176,7 @@ class Meth:
         if any(q.get("iface") == "$riid" for q in P):
             if len(guid) != 1: self.err("$riid without exactly one REFIID param")
             self.a(f"int d9_ifx = d9s_iid_iface(&{guid[0]['name']});")
+        if locks: self.trace(">", " k0=%u k1=%u, calling the real call", ", d9_k0, d9_k1")
         call = f"r->{m['name']}({', '.join(args)})" if self.export is None else f"d9_real({', '.join(args)})"
         if rk == "void": self.a(call + ";")
         elif rk == "handle": self.a(f"{ret} d9_r = {call}; {ret} d9_ret = ({ret})d9s_wrap_out(d9_r, {self.ifx(m['iface'])});")
@@ -168,6 +189,7 @@ class Meth:
                 kk = self.child_keys(q)
                 if kk: self.a(f"if ({n} && *{n}) d9s_child(*{n}, o, {kk[0]}, {kk[1]});")
         self.hooks(guid)
+        if "closes" in m: self.trace("<", " hr=%08x", ", (unsigned)d9_ret")
         if rk != "void":
             self.a(f"d9_rec.hdr({CLS[m['ret_cls']]}, 1);")
             self.a({"hresult": "d9_rec.w((uint32_t)d9_ret);", "enum": "d9_rec.w((uint32_t)d9_ret);", "value": "d9_rec.w((uint32_t)d9_ret);", "float": "d9_rec.w(d9s_fbits(d9_ret));",

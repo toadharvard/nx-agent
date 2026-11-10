@@ -11,7 +11,8 @@ struct D9Lk { uint32_t k0, k1; uintptr_t base; size_t pitch, rowbytes, rows, spi
 struct D9Pd { unsigned char guid[16]; int iunk; D9Pd *next; };
 struct D9Tv { uint32_t k0, k1; int v; D9Tv *next; };
 struct D9W { void *w; D9Obj *o; D9W *hnext, *onext; void (*del)(void *); int iface; };
-struct D9Obj { void *real; uint32_t id; int iface; D9Obj *hnext; D9W *ws; D9Obj *parent; uint32_t k0, k1; int tall; D9Tv *tv; D9Lk *locks; D9Pd *pds; };
+struct D9Obj { void *real; uint32_t id; int iface; D9Obj *hnext; D9W *ws; D9Obj *parent; uint32_t k0, k1; int tall; D9Tv *tv; D9Lk *locks; D9Pd *pds;
+              D9Obj *kids, *knext; /* sub-resources handed out by this container (their Release is the container's) */ };
 struct D9SField { uint8_t kind; uint16_t off, size, count; const D9SDesc *sub; };   /* kind 0 raw bytes, 1 token, 2 pad (zeros), 3 nested struct */
 struct D9SDesc { const D9SField *f; unsigned n; };
 
@@ -24,13 +25,16 @@ int d9g_level_idx(int iface);                                /* which of the loc
 int d9g_qtype_cls(uint32_t qtype);                           /* class of GetData for a D3DQUERYTYPE (0 det, 1 env, 2 pix) */
 enum { D9P_LENGTH, D9P_FMT, D9P_WIDTH, D9P_HEIGHT, D9P_DEPTH, D9P_LEVELS, D9P_USAGE, D9P_POOL, D9P_SHADER_BYTES, D9P_DECL_BYTES, D9P_DATA_SIZE, D9P_QTYPE };
 
+extern int d9s_trace;                                                 /* D9REC_TRACE=1: one stderr line before and after every Lock/Unlock/GetDC/ReleaseDC call (and its result) */
+void d9s_tr(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+const char *d9s_boxs(const void *p, int n);                           /* "NULL" or the n int words of a RECT/D3DBOX, for the trace */
 void d9s_open(D9Sink w, void *ctx, const unsigned char sha256[32]);   /* once, before the first wrapped call */
 D9Obj *d9s_obj(const void *wrapper);                                  /* object of a wrapper; unknown non-NULL pointers become foreign */
 void *d9s_real(const void *wrapper);
 void *d9s_wrap_out(void *real, int iface);                            /* the unique wrapper of real for interface iface */
 void d9s_child(void *childw, D9Obj *parent, uint32_t k0, uint32_t k1);
 D9Lk *d9s_lock_add(D9Obj *o, const D9Lk &l);
-D9Lk *d9s_lock_find(D9Obj *o, uint32_t k0, uint32_t k1);
+D9Lk *d9s_lock_find(D9Obj *o, uint32_t k0, uint32_t k1);              /* a lock's identity is (container, k0, k1): see d9s_lock_root */
 void d9s_lock_snap(D9Lk *l);                                          /* reads the extent now (before the real Unlock) */
 void d9s_lock_del(D9Obj *o, D9Lk *l);
 int d9s_taint(D9Obj *o, uint32_t k0, uint32_t k1);                    /* 1 = pix, 0 = det */
@@ -44,7 +48,7 @@ size_t d9s_image(const D9Lk &l, unsigned char *dst);                  /* packed 
 
 struct D9Rec {
     D9Obj *self; unsigned iface, slot, depth, thread; unsigned char *b; size_t n, cap; struct Fx { size_t off; int kind; uintptr_t v; } *fx; unsigned nfx, capfx;
-    D9Obj *ret[4]; unsigned nret;
+    D9Obj **ret; unsigned nret, capret;   /* objects whose life ends with this call: the family of the released object */
     D9Rec(unsigned iface, unsigned slot, D9Obj *self);
     ~D9Rec();
     void put(const void *p, size_t k);   void pad();

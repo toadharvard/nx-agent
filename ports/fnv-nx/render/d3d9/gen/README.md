@@ -17,7 +17,7 @@ original stream" is an exact check of everything above the D3D9 boundary.
 ## Rules (all derived from the spec; none per item)
 - Observational: arguments and results are forwarded unchanged. Only out handle pointers are zeroed before the call (spec README) and replaced by wrappers after.
 - COM identity: one object per real pointer, wrappers per interface it was seen as; `$riid` outputs take the interface of the IID.
-  A final Release (returns 0) retires the id and frees the wrappers. Pointers the wrapper never made pass through as foreign objects.
+  A final Release (returns 0) retires the id and frees the wrappers. Pointers the wrapper never made pass through as foreign objects. A level/face surface or volume shares its container's reference count, so its final Release retires the container and all its levels (the whole family dies in one record, no stale registry entry survives pointer reuse); open locks are keyed by (container, level, face), so a level locked through the texture and unlocked through its surface (or the reverse) is one lock.
 - `this.<prop>` is read from the real object (GetDesc/GetLevelDesc/GetLevelCount/GetFunction/GetDeclaration/GetDataSize/GetType, `gen_tab.PROPSRC`);
   these queries are not recorded. A rule using a property without a source fails the generator.
 - Taint (by:taint): a level is pix iff its usage has RENDERTARGET/DEPTHSTENCIL (or AUTOGENMIPMAP at level >= 1), or an effect of a succeeded call made it pix

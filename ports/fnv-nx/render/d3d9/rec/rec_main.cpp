@@ -16,7 +16,7 @@ static HANDLE g_file = INVALID_HANDLE_VALUE;
 static unsigned char g_buf[1 << 20];
 static size_t g_len;
 static volatile LONG g_init;   /* 0 new, 1 running, 2 done */
-static bool g_werr;
+static bool g_werr, g_sync;   /* g_sync: D9REC_FLUSH=1, write through after every record (a crash then loses nothing) */
 
 static void out_flush() {
     size_t o = 0;
@@ -34,6 +34,7 @@ static void sink(void *, const void *p, size_t n) {   /* called with the runtime
     if (n > sizeof g_buf - g_len) out_flush();
     if (n > sizeof g_buf) { size_t s = g_len; (void)s; const unsigned char *q = (const unsigned char *)p; while (n) { size_t c = n < sizeof g_buf ? n : sizeof g_buf; memcpy(g_buf, q, c); g_len = c; out_flush(); q += c; n -= c; } return; }
     memcpy(g_buf + g_len, p, n); g_len += n;
+    if (g_sync) { out_flush(); return; }
     if (n >= 20 && memcmp(p, "D9S1", 4)) {   /* a record (the 44-byte file header starts with the magic): flush after a presenting method */
         uint32_t w3; memcpy(&w3, (const char *)p + 12, 4);
         for (const auto &e : d9rec_present) if ((w3 & 0xFFFF) == e.iface && (w3 >> 16) == e.slot) { out_flush(); break; }
@@ -62,6 +63,8 @@ static void ensure() {   /* once: real DLL, output file, runtime */
     if (!n || n >= MAX_PATH) strcpy(p, "d9rec.d9s");
     g_file = CreateFileA(p, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (g_file == INVALID_HANDLE_VALUE) fprintf(stderr, "d9rec: cannot create %s (error %lu): nothing is recorded\n", p, (unsigned long)GetLastError());
+    { char t[8]; DWORD k = GetEnvironmentVariableA("D9REC_FLUSH", t, sizeof t); g_sync = k > 0 && k < sizeof t && t[0] != '0'; }
+    { char t[8]; DWORD k = GetEnvironmentVariableA("D9REC_TRACE", t, sizeof t); d9s_trace = k > 0 && k < sizeof t && t[0] != '0'; }
     d9s_open(sink, NULL, d9wrap_spec_sha256);
     out_flush();
     InterlockedExchange(&g_init, 2);

@@ -14,7 +14,8 @@ A stream is comparable only with the same `d3d9_spec.json` (sha256 in the header
 - `slot` = vtable slot (`method.slot`). Exports are recorded with iface 0xFFFF and `this`=0.
 - Object ids: 1,2,3,... assigned by first appearance while reading the file in order (inside a record: header `this`, then the
   body in order). 0 = NULL. An id is retired when the wrapper sees the object's final Release (Release returned 0): the id is
-  never reused, and the real pointer, if the runtime hands it out again, gets a new id. Foreign pointers (a pointer the wrapper never
+  never reused, a level/face surface or volume handed out by a texture/cube/volume texture shares its container's reference count (a Release on it
+  returns the container's), so the final Release of any of them retires the container and every level object the stream named, in one record, and the real pointer, if the runtime hands it out again, gets a new id. Foreign pointers (a pointer the wrapper never
   created, e.g. a QueryInterface for an unknown IID) get an id with iface 0xFFFF and are passed through unwrapped.
 - Token ids (`TOK`, for ohandle values and ptr fields): 1,2,.. by first appearance of the raw value in the stream; 0 = raw 0.
   Lock pointers/HDCs are *fresh*: every successful Lock/GetDC gets a new token even if the raw value was seen; the matching
@@ -60,7 +61,9 @@ HDR(ret_cls, rec=1), then W (hresult/enum/value/float, raw 4 bytes), TOK (ohandl
      pointer; rect/box = rows(fmt,h) rows of rowbytes(fmt,w) bytes per slice (d slices, 1 for rect), packed, pitch not recorded; dc = same
      extent read from the DC via the port hook `d9port_dc_pixels`.
 ## CLOSE (only methods with `closes`: Unlock, UnlockRect, UnlockBox, ReleaseDC)
-The open lock is found by `lock.match` (lock param value == unlock param value; no pairs = the object's single lock).
+The open lock is found by `lock.match` (lock param value == unlock param value; no pairs = the object's single lock). The lock's identity is the sub-resource
+(container, level, face): a lock taken through a level surface/volume (whose key words are those of the GetSurfaceLevel/GetCubeMapSurface/GetVolumeLevel call
+that produced it) is found by an unlock through the container and the reverse.
   a) HDR(det, rec=found AND SUCCEEDED(hr)) TOK (token of the lock; forgotten afterwards);
   b) HDR(class as at lock time, rec & on_unlock-at-lock-time) BUF: the extent read just before the real Unlock is forwarded.
 
