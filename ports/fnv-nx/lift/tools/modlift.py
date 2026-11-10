@@ -4,7 +4,9 @@ as code or data: EVERY relocated dword whose value lies in an executable section
 callbacks, EH/SEH targets and the closure under direct call / tail-jump targets. Each entry has its own recursive descent; entries may
 overlap. A path ends at ret / indirect jmp / another entry / `ud` (bytes that do not decode: the lifted body raises #UD) / the end of the
 executable span. Provenance: `proven` = reachable by direct flow from entry point, exports, TLS, EH tables or from a pointer whose consumer
-transfers control (vptr-store run, jump table); `candidate` = known only as a relocated pointer target. Gate: totality of targets.
+transfers control (vptr-store run, jump table); `candidate` = known only as a relocated pointer target. The entry set is CLOSED under the direct call/jmp/jcc targets of every entry (proven or candidate): an in-span target
+not reached by the jumping entry's own descent is an entry (kind call/tail, candidate if only candidates reach it, `first-ud` when its bytes do not decode, overlap
+allowed); targets outside the executable spans get no entry and are listed in outside.tsv. Gate: totality of targets, red if the closure is not reached.
 Output: /home/user/l3facts/<module>/{universe.tsv,codemap.tsv,ehtables.json,gate_codemap.json}."""
 import os, re, sys, json, bisect
 from array import array
@@ -111,12 +113,8 @@ def run(path):
             for t in dec[a][4]:
                 if intext(t) and t not in ent and not (o <= t < nx): add(t, 'tail'); tailsrc[t] = a; n += 1
         return n
-    while True:
-        while queue: descend(queue.popleft())
-        ch = tail_pass() + eh.scan()
-        if not queue and not ch: break
     # ---- per-entry descents under NORETURN (a path ends at another entry, ret, indirect jmp, ud, the span end, or a call to a never-returning callee)
-    E = es(); cnt = {}; udinfo = {}; RET = ('ret', 'retf', 'iret', 'iretd'); nrcall, nrjmp, nrname = codemap.nr_sites(X_, imports)
+    cnt = {}; udinfo = {}; RET = ('ret', 'retf', 'iret', 'iretd'); nrcall, nrjmp, nrname = codemap.nr_sites(X_, imports)
     def trav(e, N):
         ext = []; seen = set(); deps = set(); ends = set(); n_ud = n_xf = n_mf = 0; uds = []; st = [(e, 0)]
         while st:
@@ -139,8 +137,25 @@ def run(path):
                 prev = a; a += di[0]
         cnt[e] = (n_ud, n_xf, n_mf); udinfo[e] = uds
         return ext, deps, ends
-    NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent))
-    seedn = {eh.thrower} & set(ent); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
+    # ---- closure: the entry set is closed under the direct control transfers of EVERY entry (proven or candidate)
+    clos = {}; closure_new = Counter(); rounds = 0; n_before = 0
+    while True:
+        while True:
+            while queue: descend(queue.popleft())
+            ch = tail_pass() + eh.scan()
+            if not queue and not ch: break
+        E = es(); NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent)); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
+        rounds += 1; n_before = n_before or len(E); viol = {}
+        for e in E:
+            ss = set(exts[e])
+            for a in exts[e]:
+                for t in dec[a][4] + ((calltg[a],) if a in calltg else ()):
+                    if intext(t) and t not in ent and t not in ss: viol.setdefault(t, 'call' if calltg.get(a) == t else 'tail')
+        if not viol or rounds > 30: break
+        for t, k in sorted(viol.items()):
+            closure_new['first-ud' if t in ud or t in xf else 'mid-instruction' if cov[t - T0] == 2 else 'other'] += 1; clos[t] = k; add(t, k)
+    seedn = {eh.thrower} & set(ent)
+    outside = sorted({(e, a, t) for e in E for a in exts[e] for t in dec[a][4] + ((calltg[a],) if a in calltg else ()) if not intext(t)})
     # ---- provenance: proven roots + control-transfer consumers (jump tables, vptr-store runs) found in proven code
     proven = set(); pset = set(); stored = {}; vptr = set()
     for r in sorted(r for r in relocs if intext(r)):             # data addresses that decoded code stores into memory (`mov [m], imm32`)
@@ -238,9 +253,11 @@ def run(path):
     open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
     nrr = codemap.nr_rows(NR, res, nrname, seedn)
     open(outd + '/noreturn.tsv', 'w').write(hd.rstrip() + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in nrr))
+    open(outd + '/outside.tsv', 'w').write(hd.rstrip() + '; columns: entry, instruction, target outside the executable spans (the lifted jump faults)\n' + ''.join('%08x\t%08x\t%08x\n' % x for x in outside))
+    print('closure: entries %d -> %d in %d rounds; new by cause %s; outside-span direct targets %d (%d distinct, %d rows in outside.tsv)' % (n_before, len(E), rounds, dict(sorted(closure_new.items())), len(outside), len({t for e, a, t in outside}), len(outside)))
     print('ranges.tsv %d rows, noreturn.tsv %d rows, range-sum vs extent mismatches %d' % (len(rg), len(nrr), bad))
     # ---- totality gate
-    targets = {v for r, v in rvals} | set(XC) | ({M.base + M.entry} if M.entry else set()) | {t for t in callers if intext(t)} | set(tailsrc) | {t for t, ks in ent.items() if ks & {'tls', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}}
+    targets = {v for r, v in rvals} | set(XC) | ({M.base + M.entry} if M.entry else set()) | {t for t in callers if intext(t)} | set(tailsrc) | set(clos) | {t for t, ks in ent.items() if ks & {'tls', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}}
     cert = sum(1 for t in targets if t in ent and (t in dec or t in ud or t in xf))
     lv = [(a, t) for a, t in sorted(leaves)]; lvp = [x for x in lv if x[0] in pset]
     img = lambda t: M.sec(t) is not None
@@ -248,6 +265,7 @@ def run(path):
     if RL is None: why.append('no .reloc: pointers into executable bytes cannot be enumerated')
     if cert != len(targets): why.append('%d targets without a completed descent' % (len(targets) - cert))
     if lvp: why.append('%d direct branches of proven code leave the executable spans' % len(lvp))
+    if viol: why.append('%d in-span direct targets are not entries (closure not reached)' % len(viol))
     if bad: why.append('%d entries whose ranges do not sum to the extent' % bad)
     if eh.unknown: why.append('%d frame-handler stubs with unknown FuncInfo magic' % eh.unknown)
     # ---- information: pointer targets by old classes, mnemonics
