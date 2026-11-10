@@ -51,7 +51,7 @@ tref = array('I', bytes(4 * TN))          # relocation (site) that names each da
 insns = {}                                # addr -> (size, mnem, feat, fall, targets)
 entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw', 'inner', 'ptr']
 tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
-straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
+tcons = {}; straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
 EXOTIC = set('aaa aas daa das aam aad arpl bound in out insb insd outsb outsd sldt hlt lcall ljmp popal pushal iretd retf into salc'.split())
 EXO = {'hlt', 'rdmsr', 'wrmsr', 'lgdt', 'lidt', 'sgdt', 'sidt', 'ltr', 'str', 'invd', 'wbinvd', 'lmsw', 'smsw', 'clts', 'rdpmc', 'invlpg', 'ud2', 'iret', 'iretd', 'syscall', 'sysret', 'sysexit', 'bound', 'arpl', 'into', 'sldt', 'lldt', 'verr', 'verw'}
@@ -197,6 +197,7 @@ def disp_ref(r, v, ins, final):
         if ent:
             mark(v, 4 * len(ent), r); tstarts.add(v); tslots.update(v + 4 * k for k in range(len(ent))); dinfo['disp_tables'] += 1
             for k, e in enumerate(ent):
+                tcons.setdefault(v + 4 * k, ins.mnemonic)
                 if cov[e - T0] != 2: ptr_target(e, v + 4 * k)
             return 1
     n = min(max(op.size, 1), T1 - v); mark(v, n, r); dinfo['disp_data'] += 1

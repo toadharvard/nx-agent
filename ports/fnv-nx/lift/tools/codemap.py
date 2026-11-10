@@ -122,10 +122,13 @@ def consumers(U, eh):
     for rec, v, n, ln, cs, ng, r in sorted(U.datarec):
         L.append('  DIDATAFORMAT %08x rgodf=%08x: %d x16 = %d bytes read as data; consumer IDirectInputDevice::SetDataFormat (call [vtbl+0x2c]) at %s; %d relocated pguid fields inside' % (
             rec, v, n, ln, ' '.join('%x' % c for c in cs), ng))
-    by = {}
-    for r, v in dsites: by.setdefault(v, []).append(sc[r])
-    po = [a for a in U.entries if U.kinds[a] == {'ptr'} and a not in U.fsize]; ctl = [a for a in po if any(k.startswith(('ctl', 'data')) for k in by.get(a, ()))]
-    rs = Counter(sorted(k for k in by.get(a, ['res:text-slot']) if k.startswith('res') or k == 'res:text-slot')[0] for a in po if a not in set(ctl))
-    L.append('ptr-only entries %d: consumer evidenced (control) %d; RESIDUAL consumer unknown %d (%s): kept as entries (class entry-nondecomp), decode check: %d undecodable, %d bad' % (
-        len(po), len(ctl), len(po) - len(ctl), ', '.join('%s %d' % kv for kv in sorted(rs.items())), len(U.rejects), len(U.bad_entries)))
+    def scat(r):                                 # consumer category of one pointer site
+        if r in sc: return sc[r]
+        m = U.tcons.get(r)
+        return 'ctl:indexed-' + m if m in ('call', 'jmp') else 'res:indexed-load' if m else 'res:slot-in-unreached-text'
+    po = [a for a in sorted(U.entries) if U.kinds[a] == {'ptr'} and a not in U.fsize]; cl = {a: [scat(r) for r in U.psites.get(a, ())] for a in po}
+    ctl = [a for a in po if any(k.startswith(('ctl', 'data')) for k in cl[a])]; cs_ = Counter(k for a in ctl for k in sorted({k for k in cl[a] if k.startswith('ctl')})[:1])
+    rs = Counter(sorted(k for k in cl[a] if k.startswith('res'))[0] for a in po if a not in set(ctl))
+    L.append('ptr-only entries %d: consumer transfers control %d (%s); RESIDUAL consumer unknown %d (%s)' % (len(po), len(ctl), ', '.join('%s %d' % kv for kv in sorted(cs_.items())), len(po) - len(ctl), ', '.join('%s %d' % kv for kv in sorted(rs.items()))))
+    L.append('  residual class: entry-nondecomp (must decode; checked: %d undecodable, %d bad-decode, %d mid-insn => build error if any)' % (sum(1 for k, r in U.rejects.values() if k == 'undecodable'), len(U.bad_entries), sum(1 for k, r in U.rejects.values() if k != 'undecodable')))
     return L

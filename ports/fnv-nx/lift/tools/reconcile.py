@@ -22,25 +22,26 @@ def run(U):
             if x in k: return 'eh' if x.startswith(('eh', 'xc')) else 'vtable-slot' if x == 'slot' else 'data-ptr'
         return 'code-stored-ptr' if a in cp else 'other'
     pk = lambda a: next(k for k in U.PRI if k in U.kinds[a])
-    ts = sorted(TH); te = {a: fn[a]['end'] for a in TH}
-    def inside(a):
-        i = bisect.bisect_right(ts, a) - 1; return i >= 0 and ts[i] != a and a < te[ts[i]]
+    dts = sorted(a for a in TH if fn[a]['decomp']); nts = sorted(a for a in TH if not fn[a]['decomp'])
+    def inside(a, ts):
+        i = bisect.bisect_right(ts, a) - 1; return i >= 0 and ts[i] != a and a < fn[ts[i]]['end']
+    def where(a): return 'decomp' if inside(a, dts) else 'non-decomp' if inside(a, nts) else 'none'
     os_, to = sorted(OU - TH), sorted(TH - OU); L = []
     L.append('reconcile vs l1-contract/mp4: theirs %d (decomp %d), ours %d (decomp %d), common %d, only-ours %d, only-theirs %d' % (
         len(TH), sum(1 for a in TH if fn[a]['decomp']), len(OU), len(U.funcs), len(OU & TH), len(os_), len(to)))
-    why = {'inner': 'label in the interior of a decomp function (ptr/eh/tail target); they keep the function as one unit',
-           'eh-cont': 'catch-continuation label (mov eax,imm;ret) in a function body; they have no continuation entries',
-           'ptr': 'pointer slot in .text/CRT region outside their function universe', 'call': 'call target in the CRT region their scan does not enter',
-           'entry': 'PE entry point (CRT startup), outside their function universe'}
+    why = {'inner': 'label inside a decomp function (ptr/eh/tail/cont target); they keep the function as one unit',
+           'eh-cont': 'catch-continuation label (mov eax,imm; ret target) inside a decomp function; they list only the funclets',
+           'ptr': 'target of a relocated slot stored in .text (dispatch table); they take data-section pointers only',
+           'call': 'call target from code they do not scan (CRT / non-decomp tails)', 'entry': 'PE entry point (CRT startup)'}
     c = Counter(pk(a) for a in os_)
     for k, n in c.most_common():
-        xs = [a for a in os_ if pk(a) == k]
-        L.append('  only-ours %-8s %5d (%d inside one of their functions): %s | %s' % (k, n, sum(1 for a in xs if inside(a)), ' '.join('%x' % a for a in xs[:3]), why.get(k, '?')))
+        xs = [a for a in os_ if pk(a) == k]; w = Counter(where(a) for a in xs)
+        L.append('  only-ours %-7s %5d (inside their decomp fn %d, non-decomp fn %d, none %d): %s | %s' % (k, n, w['decomp'], w['non-decomp'], w['none'], ' '.join('%x' % a for a in xs[:3]), why.get(k, '?')))
     c = Counter(tk(a) for a in to)
     for k, n in c.most_common():
         xs = [a for a in to if tk(a) == k]
-        L.append('  only-theirs %-6s %4d (size 0 in theirs: %d; insn start in our extents: %d): %s | %s' % (k, n, sum(1 for a in xs if fn[a]['size'] == 0), sum(1 for a in xs if U.cov[a - U.T0] == 1) if all(U.intext(a) for a in xs) else -1,
-            ' '.join('%x' % a for a in xs[:3]), 'jmp/tail target: our non-decomp walk follows an unconditional jmp into the callee as the same extent, they list it as a function' if k == 'tail' else '?'))
+        L.append('  only-theirs %-8s %4d (size 0 in theirs: %d; insn start in our extents: %d): %s | %s' % (k, n, sum(1 for a in xs if fn[a]['size'] == 0), sum(1 for a in xs if U.cov[a - U.T0] == 1) if all(U.intext(a) for a in xs) else -1,
+            ' '.join('%x' % a for a in xs[:3]), {'tail': 'jmp target: our non-decomp walk follows an unconditional jmp into the callee as the same extent, they list it as a function', 'data-ptr': 'relocated rgodf pointers of DIDATAFORMAT records: data (class 3) by consumer rule, they take them as functions'}.get(k, '?')))
     cs = Counter(tk(a) for a in TH & OU)
     L.append('  common by their kind: %s' % dict(cs.most_common()))
     return L

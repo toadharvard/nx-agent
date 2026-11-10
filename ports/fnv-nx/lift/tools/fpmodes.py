@@ -16,6 +16,8 @@ OUT = '/home/user/l3facts/fpmodes'
 M32 = 0xffffffff
 IMG = fnvlift.Image(EXE)
 T = {}                      # entry -> net x87 depth change at return (nonzero only), set before each wave
+KNOWN = set()
+EAXLIVE = set()             # entries that may read eax at entry (LTCG register args), set before the status pass
 RETS = ('ret', 'retf', 'int3', 'hlt', 'ud2')
 FSAFE = ('fld', 'fild', 'fxch', 'fst', 'fstp', 'fist', 'fistp', 'fisttp', 'fld1', 'fldz', 'wait', 'fwait', 'fnop')
 PUSH = set('fld fild fld1 fldz fldpi fldl2e fldl2t fldlg2 fldln2 fbld fsincos fptan fxtract fdecstp'.split())
@@ -67,6 +69,9 @@ class Fn:
     def __init__(s, a, ext, kind):
         s.a, s.kind, s.memo, s.steps = a, kind, {}, 0
         r = decode(a, ext)
+        for pad in (8, 32, 128, 512):            # non-decomp extents are byte sums, not spans: rescue truncated tails
+            if r is None and kind != 'decomp':
+                r = decode(a, ext + pad)
         s.ok = r is not None
         if not r:
             return
@@ -126,23 +131,30 @@ def entryval(F, loc):
 
 
 def val(F, addr, loc, dep=0):
-    """value set of loc just before the instruction at addr."""
+    """value set of loc just before the instruction at addr (iterative over pass-through steps)."""
     key = (addr, loc)
     if key in F.memo:
         return F.memo[key]
     F.memo[key] = set()
-    F.steps += 1
-    if F.steps > 20000 or dep > 14:
-        res = {('?', 'budget')}
-    else:
-        ps = F.preds.get(addr, ())
-        res = set()
-        if addr == F.a:
-            res |= entryval(F, loc)
+    res, seen, work = set(), set(), [(addr, loc)]
+    while work:
+        a, l = work.pop()
+        if (a, l) in seen:
+            continue
+        seen.add((a, l)); F.steps += 1
+        if F.steps > 300000 or dep > 12:
+            res.add(('?', 'budget')); break
+        ps = F.preds.get(a, ())
+        if a == F.a:
+            res |= entryval(F, l)
         elif not ps:
-            res |= {('?', 'noreach')}
+            res.add(('?', 'noreach'))
         for p in ps:
-            res |= step(F, p, loc, dep + 1)
+            r = step(F, p, l, dep + 1)
+            if type(r) is tuple:
+                work.append(r[1:])
+            else:
+                res |= r
     F.memo[key] = res
     return res
 
@@ -164,21 +176,22 @@ def step(F, p, loc, dep):
     i = F.ins[p]; m = mn(i); o = i.operands; k = loc[0]
     if m == 'call':
         if k == 'r':
-            return {('?', 'call')} if loc[1] in ('eax', 'ecx', 'edx') else val(F, p, loc, dep)
-        if k == 'b' and loc[1] < 0 and not F.taken:
-            return val(F, p, loc, dep)
+            return {('?', 'call')} if loc[1] in ('eax', 'ecx', 'edx') else ('go', p, loc)
+        cc = coord(F, p, loc, 0)
+        if cc is not None and cc >= F.sp[p] and not aliased(F, cc, loc[2]):
+            return ('go', p, loc)
         return {('?', 'call')}
     if k == 'b' and m == 'mov' and o[0].type == X.X86_OP_REG and i.reg_name(o[0].reg) == 'ebp' and o[1].type == X.X86_OP_REG and i.reg_name(o[1].reg) == 'esp':
-        return val(F, p, ('s',) + loc[1:], dep)
+        return ('go', p, ('s',) + loc[1:])
     try:
         W = {core.SUB[i.reg_name(r)][0] for r in i.regs_access()[1] if i.reg_name(r) in core.SUB}
     except Exception:
         return {('?', 'regs')}
     if k == 'r':
         if loc[1] not in W:
-            return val(F, p, loc, dep)
+            return ('go', p, loc)
         if m == 'pop':
-            return val(F, p, ('s', 0, 4), dep)
+            return ('go', p, ('s', 0, 4))
         if o[0].type != X.X86_OP_REG or core.SUB.get(i.reg_name(o[0].reg), (0,))[0] != loc[1] or len(o) > 2:
             return {('?', 'def:' + m)}
         _, sh, bits = core.SUB[i.reg_name(o[0].reg)]
@@ -207,19 +220,25 @@ def step(F, p, loc, dep):
     if m == 'push':                                   # writes [esp_after+0 .. +4)
         if k == 's' and loc[1] < 4 and loc[1] + loc[2] > 0:
             return srcval(F, p, i, o[0], dep) if loc[1] == 0 else {('?', 'partial')}
-        return val(F, p, nl, dep)
+        return ('go', p, nl)
     if m == 'pushfd':
-        return {('?', 'pushf')} if (k == 's' and loc[1] < 4) else val(F, p, nl, dep)
+        return {('?', 'pushf')} if (k == 's' and loc[1] < 4) else ('go', p, nl)
+    cc = coord(F, p, loc, d)
     for j, op in enumerate(o):
         if op.type != X.X86_OP_MEM or not ((op.access & 2) or m.startswith(WSTORE) or m.startswith(('movs', 'stos'))):
             continue
         l2 = memslot(i, op, op.size)
         sz = op.size or 108
-        if l2 is None or (l2[0] != 'g' and l2[0] != k):
-            if F.taken or l2 is not None:
-                return {('?', 'alias')}
+        if l2 and l2[0] == 'g':
             continue
-        if l2[0] == 'g':
+        if not (l2 and l2[0] == k):                       # other base / indexed / pointer store
+            bs = i.reg_name(op.mem.base) if op.mem.base else None
+            if bs in ('esp', 'ebp') and not op.mem.index:
+                c2 = coord(F, p, (bs[1], op.mem.disp, sz), 0, True)
+                if cc is None or c2 is None or (c2 + sz > cc and cc + loc[2] > c2):
+                    return {('?', 'alias')}
+            elif bs in ('esp', 'ebp') or (cc is None and F.taken) or (cc is not None and aliased(F, cc, loc[2])):
+                return {('?', 'alias')}
             continue
         if l2[1] + sz <= kb or kb + loc[2] <= l2[1]:
             continue
@@ -234,9 +253,69 @@ def step(F, p, loc, dep):
         if m in ('or', 'and', 'xor', 'add', 'sub'):
             return comb(val(F, p, nl, dep), srcval(F, p, i, o[1], dep))
         return {('?', 'st:' + m)}
-    if any(mn(i).startswith(s) for s in ('movs', 'stos')) and F.taken:
-        return {('?', 'alias')}
-    return val(F, p, nl, dep)
+    return ('go', p, nl)
+
+
+def norm(F):
+    """F.sp/F.bp: esp / ebp offset (rel. entry esp) before each insn; F.tc: address-taken frame coordinates. Valid only if every
+    ret sees esp offset 0 and joins agree; else F.nok False (callers fall back to the whole-function F.taken flag)."""
+    if hasattr(F, 'nok'):
+        return F.nok
+    sp, bp, F.tc, F.tall, ok, work = {F.a: 0}, {F.a: None}, set(), False, True, [F.a]
+    while work and ok:
+        a = work.pop(); s0, b0 = sp[a], bp[a]; i = F.ins[a]; m = mn(i); o = i.operands; s1, b1 = s0, b0
+        r0 = i.reg_name(o[0].reg) if o and o[0].type == X.X86_OP_REG else None
+        r1 = i.reg_name(o[1].reg) if len(o) > 1 and o[1].type == X.X86_OP_REG else None
+        if m in ('push', 'pushfd'):
+            s1 = s0 - 4
+            if r0 in ('esp', 'ebp') and (r0 == 'esp' or b0 is not None):
+                F.tc.add(s0 if r0 == 'esp' else b0)
+        elif m in ('pop', 'popfd'):
+            s1 = s0 + 4
+            b1 = None if r0 == 'ebp' else b0
+        elif m == 'leave':
+            ok = b0 is not None; s1 = (b0 or 0) + 4; b1 = None
+        elif m == 'mov' and r0 == 'esp':
+            ok = r1 == 'ebp' and b0 is not None; s1 = b0
+        elif m == 'mov' and r0 == 'ebp':
+            b1 = s0 if r1 == 'esp' else None
+        elif m in ('add', 'sub') and r0 == 'esp':
+            ok = o[1].type == X.X86_OP_IMM; s1 = s0 + (o[1].imm if m == 'add' else -o[1].imm) if ok else 0
+        elif m in ('ret', 'retf'):
+            ok = s0 == 0
+        elif m in ('pushal', 'popal', 'enter') or (r0 == 'esp' and m not in ('cmp', 'test')):
+            ok = False
+        elif r0 == 'ebp' and m not in ('cmp', 'test'):
+            b1 = None
+        if m == 'lea' and o[1].mem.base:
+            bs = i.reg_name(o[1].mem.base)
+            if bs == 'esp' or (bs == 'ebp' and b0 is not None):
+                F.tall = F.tall or bool(o[1].mem.index)
+                F.tc.add((s0 if bs == 'esp' else b0) + o[1].mem.disp)
+        elif m == 'mov' and r1 in ('esp', 'ebp') and r0 != 'ebp' and (r1 == 'esp' or b0 is not None):
+            F.tc.add(s0 if r1 == 'esp' else b0)
+        for t in F.succ[a]:
+            if t not in sp:
+                sp[t], bp[t] = s1, b1; work.append(t)
+            elif sp[t] != s1:
+                ok = False
+            elif bp[t] != b1 and bp[t] is not None:
+                bp[t] = None; work.append(t)
+    F.sp, F.bp, F.nok = sp, bp, ok
+    return ok
+
+
+def coord(F, p, loc, d, before=False):
+    """normalised frame coordinate of loc (esp/ebp slot); loc is relative to the state after p unless before (d = esp delta of p)."""
+    if not norm(F) or p not in F.sp:
+        return None
+    if loc[0] == 's':
+        return F.sp[p] + (0 if before else d) + loc[1]
+    return None if F.bp[p] is None else F.bp[p] + loc[1]
+
+
+def aliased(F, c, sz):
+    return F.tall or (F.taken if not norm(F) else any(c <= t < c + sz for t in F.tc))
 
 
 def forced(A, O):
@@ -315,11 +394,14 @@ def statclass(F, x):
             rd = {core.SUB[i.reg_name(r)][0] for r in i.regs_access()[0] if i.reg_name(r) in core.SUB}
         except Exception:
             return 'status-escapes', 'regs'
-        if m in ('ret', 'retf', 'call') or a in F.tails:
+        if m == 'call':
+            if (lo or ah == 1) and o[0].type == X.X86_OP_IMM and ((o[0].imm & M32) in EAXLIVE or (o[0].imm & M32) not in KNOWN):
+                return 'status-escapes', 'call-reads-eax'
+            lo = ah = 0                               # ABI assumption: a call clobbers eax (callee does not read it)
+        elif m in ('ret', 'retf') or a in F.tails:
             if lo or ah == 1:
-                return 'status-escapes', 'call' if m == 'call' else 'ret/tail'
-            if m != 'call' and a not in F.succ.get(a, ()) and not F.succ[a]:
-                continue
+                return 'status-escapes', 'ret/tail'
+            continue
         if fl:                                            # flags loaded raw from ah by sahf
             if m[0] == 'j' and m != 'jmp' or m.startswith(('set', 'cmov')):
                 c = m[1:] if m[0] == 'j' else m[3:] if m.startswith('set') else m[4:]
@@ -370,6 +452,41 @@ def statclass(F, x):
         if not F.succ[a] and (lo or ah == 1) and m not in ('ret', 'retf'):
             return 'status-escapes', 'end/tail'
     return 'cc-only', ''
+
+
+IMPL = {'mul', 'imul', 'div', 'idiv', 'cdq', 'cwde', 'cwd', 'cbw', 'lodsb', 'lodsw', 'lodsd', 'stosb', 'stosw', 'stosd', 'scasb', 'scasw', 'scasd',
+        'xchg', 'cmpxchg', 'xadd', 'lahf', 'sahf', 'xlatb', 'cpuid', 'rdtsc', 'in', 'out', 'fnstsw', 'aaa', 'aas', 'daa', 'das', 'aam', 'aad'}
+
+
+def eaxscan(F):
+    """(reads eax before writing it on some path, direct callees/tails reached with eax unwritten, unknown)"""
+    seen, work, rd, cl = set(), [F.a], False, set()
+    while work and not rd:
+        a = work.pop()
+        if a in seen:
+            continue
+        seen.add(a); i = F.ins[a]; m = mn(i); o = i.operands
+        if m == 'call' or m == 'jmp' and a in F.tails:
+            t = o[0]
+            if t.type == X.X86_OP_IMM:
+                cl.add(t.imm & M32)
+            elif m == 'jmp' and not (t.type == X.X86_OP_MEM and not t.mem.base and not t.mem.index):
+                rd = True
+            if m == 'call' or a in F.tails and not F.succ[a]:
+                continue
+        if m in ('ret', 'retf'):
+            continue
+        if m in IMPL or 'ax' in i.op_str or 'al' in i.op_str or 'ah' in i.op_str:
+            try:
+                r, w = [{i.reg_name(x) for x in g} for g in i.regs_access()[:2]]
+            except Exception:
+                rd = True; break
+            if r & {'eax', 'ax', 'al', 'ah'} and not (m in ('xor', 'sub') and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg):
+                rd = True; break
+            if 'eax' in w or 'ax' in w and 0:
+                continue
+        work += F.succ[a]
+    return rd, sorted(cl)
 
 
 def depth(F, tabl):
@@ -445,17 +562,23 @@ def work(args):
         elif m in ('frstor', 'fldenv', 'fxrstor'):
             r['sites'].append((m, x, 'unknown', 'env-load', ''))
         elif m in ('fnstsw', 'fstsw'):
-            c, why = statclass(F, x)
-            r['sites'].append((m, x, c, why, ''))
+            r['sites'].append((m, x, 'pending', '', ''))
         elif m in ('fnstenv', 'fstenv', 'fnsave', 'fsave', 'fxsave', 'fnclex', 'fclex', 'stmxcsr', 'wait', 'fwait'):
             r['sites'].append((m, x, 'seen', '', ''))
     if gotx87 or r['calls'] or F.tails:
         r['calls'] |= {t for ts in F.tails.values() for t in ts}
         r['dep'] = depth(F, T)
     r['calls'] = sorted(r['calls'])
+    r['eax'] = eaxscan(F)
     if any(s[3] == 'arg' or s[3].startswith('arg') for s in r['sites']):
         pass
     return a, r
+
+
+def statpass(args):
+    a, ext, kind, xs = args
+    F = Fn(a, ext, kind)
+    return [(x,) + statclass(F, x) for x in xs] if F.ok else []
 
 
 def callargs(args):
@@ -497,6 +620,21 @@ def main():
         for a, r in pool.imap(work, [(a, e, k, 'all') for a, e, k in rows], chunksize=200):
             res[a] = r
     bad = sorted(a for a in res if res[a] is None)
+    KNOWN.update(a for a in res if res[a])
+    live = {a for a, r in res.items() if r and r['eax'][0]}
+    for _ in range(50):
+        nl = {a for a, r in res.items() if r and a not in live and any(c in live or c not in KNOWN for c in r['eax'][1])}
+        if not nl:
+            break
+        live |= nl
+    EAXLIVE.update(live | set(bad))
+    pend = defaultdict(list)
+    for a in sorted(res):
+        for sdef in (res[a]['sites'] if res[a] else ()):
+            if sdef[2] == 'pending':
+                pend[a].append(sdef[1])
+    with Pool(3) as pst:
+        stat = {x: (c, why) for lst in pst.imap(statpass, [(a, ext[a], kind[a], xs) for a, xs in sorted(pend.items())], chunksize=20) for x, c, why in lst}
     callers = defaultdict(set)
     for a, r in res.items():
         for t in (r['calls'] if r else ()):
@@ -517,6 +655,8 @@ def main():
     sites = {}
     for a in sorted(res):
         for s in (res[a]['sites'] if res[a] else ()):
+            if s[2] == 'pending':
+                s = (s[0], s[1]) + stat.get(s[1], ('status-escapes', 'undecided')) + ('',)
             sites.setdefault(s[1], (s, a))
     crt = lambda a: kind[a] not in ('decomp', 'inner')
     L = []
@@ -531,6 +671,8 @@ def main():
         m, x, c, det, ex = s
         mxm = m == 'ldmxcsr'
         cl = c if c in ('global', 'unknown') else c.split('(')[0] if c.startswith('constant') else c
+        if m not in ('fldcw', 'ldmxcsr', 'fninit', 'finit', 'frstor', 'fldenv', 'fxrstor'):
+            continue
         (mxc if mxm else cw)[cl] += 1
         if c == 'constant':
             (mconsts if mxm else consts).update(int(v, 16) for v in det.split(','))
@@ -540,7 +682,7 @@ def main():
         if c == 'global':
             gl.setdefault(int(det, 16), []).append(x)
         if c == 'unknown':
-            unk[(mxm, det.split(',')[0] if det else '')].append(x)
+            unk[(mxm, det)].append(x)
             if 'arg' in det.split(','):
                 setters.add(a)
     L.append('fldcw classes: ' + ' '.join('%s=%d' % kv for kv in sorted(cw.items())))
