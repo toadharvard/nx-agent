@@ -10,15 +10,31 @@
 # No ILP32 libc exists on hosts, so the tests run LP64; DWORD/LONG are 64-bit there, which the code handles
 # (W32_DW masks). -fshort-wchar matches the game build (WCHAR is 16-bit).
 
+# FreeType of the reference environment (Ubuntu 24.04: 2.13.2+dfsg-1ubuntu0.2 with its patches), unpacked by
+# platform/win32/tools/fetch_freetype.sh <dir-with-the-two-tarballs> into the git-ignored ext/freetype. Built here with the
+# modules of upstream modules.cfg (+ gxvalid/otvalid of the Debian patch) and the default ftoption.h + the Debian
+# patch's FT_CONFIG_OPTION_SUBPIXEL_RENDERING; bundled zlib (gzip), lzw; no libpng / system zlib / brotli / bzip2 /
+# harfbuzz (the Debian package links them for PCF.gz, PNG strikes, WOFF2, bzip2'd fonts: formats of no font in the
+# reference set, see the font-format check in tests/s4/test_gdifont.cpp).
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ROOT := $(abspath $(HERE)/../..)
 P := $(ROOT)/platform
 OUT ?= $(HERE)/build
+FT := $(ROOT)/ext/freetype
+FNVNX_FONT_REF ?= /home/user/gd/fontref
+FNVNX_FONT_HOST ?= /home/user/gd/fonts/deb/usr/share/fonts
+FT_SRCS := base/ftsystem base/ftinit base/ftdebug base/ftbase base/ftbbox base/ftbdf base/ftbitmap base/ftcid \
+    base/ftfstype base/ftgasp base/ftglyph base/ftgxval base/ftmm base/ftotval base/ftpatent base/ftpfr base/ftstroke \
+    base/ftsynth base/fttype1 base/ftwinfnt autofit/autofit bdf/bdf cff/cff cid/type1cid pcf/pcf pfr/pfr psaux/psaux \
+    pshinter/pshinter psnames/psmodule raster/raster sdf/sdf sfnt/sfnt smooth/smooth svg/svg truetype/truetype \
+    type1/type1 type42/type42 winfonts/winfnt gzip/ftgzip lzw/ftlzw bzip2/ftbzip2 cache/ftcache gxvalid/gxvalid \
+    otvalid/otvalid
+FT_CFLAGS := -O2 -w -DFT2_BUILD_LIBRARY -I$(FT)/include -I$(FT)/src
 
 CC ?= gcc
 CXX ?= g++
 FLAGS := -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar -pthread \
-         -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3
+         -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
@@ -35,6 +51,14 @@ $(OUT)/%.c.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_) -c $< -o $@
 
+$(FT)/include/ft2build.h:
+	@echo "FreeType: run platform/win32/tools/fetch_freetype.sh <dir-with-the-two-tarballs> (ext/freetype is missing)"; exit 1
+$(OUT)/freetype/%.o: $(FT)/src/%.c $(FT)/include/ft2build.h
+	@mkdir -p $(dir $@)
+	$(CC) $(FT_CFLAGS) -c $< -o $@
+$(OUT)/libfreetype.a: $(patsubst %,$(OUT)/freetype/%.o,$(FT_SRCS))
+	rm -f $@ && ar rcs $@ $^
+
 # platform/win32/nls_tables.inc is generated from the reference NLS data (Wine 9.0 nls/*.nls, LGPL; mirrored in the
 # private fnv-nx-build branch tools/nls) and is not part of this repository: NLS_DIR=<directory with the .nls files>.
 NLS_DIR ?= /home/user/gd/nls
@@ -47,11 +71,11 @@ $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@
 
-$(OUT)/s4_tests: $(OBJS)
-	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
+$(OUT)/s4_tests: $(OBJS) $(OUT)/libfreetype.a
+	$(CXX) $(CXXFLAGS_) $(OBJS) $(OUT)/libfreetype.a -o $@ -lm
 
 test: $(OUT)/s4_tests
-	rm -rf $(OUT)/root && FNVNX_ROOT=$(OUT)/root $(OUT)/s4_tests
+	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root $(OUT)/s4_tests
 
 # ---- i386 (-m32) build: the ILP32 data model with a host libc. /usr/include/asm is the multilib packages' symlink,
 # missing when a cross compiler replaced them; the x86-64 asm headers serve i386 too.
@@ -79,8 +103,13 @@ $(M32OUT)/%.c.o: $(ROOT)/%.c
 $(M32OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -std=gnu++17 $(M32FLAGS) -c $< -o $@
-$(M32OUT)/s4_m32: $(M32_OBJS)
-	$(CXX) -m32 -pthread $^ -o $@ -lm
+$(M32OUT)/freetype/%.o: $(FT)/src/%.c $(FT)/include/ft2build.h
+	@mkdir -p $(dir $@)
+	$(CC) -m32 $(FT_CFLAGS) -c $< -o $@
+$(M32OUT)/libfreetype.a: $(patsubst %,$(M32OUT)/freetype/%.o,$(FT_SRCS))
+	rm -f $@ && ar rcs $@ $^
+$(M32OUT)/s4_m32: $(M32_OBJS) $(M32OUT)/libfreetype.a
+	$(CXX) -m32 -pthread $(M32_OBJS) $(M32OUT)/libfreetype.a -o $@ -lm
 m32: $(M32OUT)/s4_m32
 	rm -rf $(M32OUT)/root && FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32
 iat: $(M32OUT)/s4_m32
@@ -107,7 +136,7 @@ XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
 XFLAGS := -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
-          -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3
+          -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
 ilp32:
 	@set -e; for f in $(PLAT_C); do echo "ilp32 cc  $${f#$(ROOT)/}"; $(XCC) -std=gnu11 $(XFLAGS) $$f; done
 	@set -e; for f in $(PLAT_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done

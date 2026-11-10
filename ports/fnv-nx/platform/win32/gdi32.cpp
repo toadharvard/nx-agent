@@ -20,6 +20,7 @@
  * surface, are left untouched. Mono (1bpp DDB) source: 0 -> text colour, 1 -> background colour (black, white: the
  * DC defaults); colour -> mono DDB: pixels equal to the source background colour become 1. */
 #include "w32.h"
+#include "gdi_int.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -103,6 +104,7 @@ struct obj {
     HWND hwnd;
     uint32_t bmp, brush, pen, font, pal;
     uint32_t own;
+    void *fdata;                             /* font: LOGFONTW copy (gdifont.cpp) */
 };
 struct slot { obj *o; uint32_t gen; };
 slot g_slots[65536];
@@ -141,6 +143,7 @@ void release(uint32_t h)
     obj *o = g_slots[idx].o;
     if (!o) return;
     free(o->bits);
+    free(o->fdata);
     free(o);
     g_slots[idx].o = NULL;
     g_slots[idx].gen = (g_slots[idx].gen % 4095) + 1;
@@ -706,4 +709,41 @@ extern "C" BOOL EndPaint(HWND hw, const void *psv)
     if (!d || d->kind != K_PAINT || d->hwnd != hw) return FALSE;
     free_dc((uint32_t)(uintptr_t)ps->hdc, d);
     return TRUE;
+}
+
+/* ---- interface for gdifont.cpp (gdi_int.h): object queries and font objects */
+extern "C" int gdi_obj_info(void *h, struct gdi_objinfo *oi)
+{
+    Lk l;
+    init_stock();
+    obj *o = get(h, 0);
+    memset(oi, 0, sizeof *oi);
+    oi->stock = -1;
+    if (!o) return 0;
+    oi->kind = o->type;
+    if (o->stock) oi->stock = (int)((uint32_t)(uintptr_t)h & 0xFFFF) - 1;
+    oi->w = o->w; oi->h = o->h; oi->bpp = o->bpp; oi->pitch = o->pitch; oi->nct = o->nct;
+    oi->dib = o->dib; oi->topdown = o->td; oi->bits = o->bits;
+    oi->color = o->color; memcpy(oi->mask, o->mask, sizeof oi->mask); oi->hollow = o->hollow;
+    oi->payload = o->fdata;
+    return 1;
+}
+extern "C" uint32_t gdi_dc_font(void *hd)
+{
+    Lk l;
+    init_stock();
+    obj *d = get(hd, T_DC);
+    return d ? d->font : 0;
+}
+extern "C" void *gdi_font_create(const void *lf92)
+{
+    Lk l;
+    init_stock();
+    obj *o = NULL;
+    uint32_t h = alloc(T_FONT, &o);
+    if (!h) return NULL;
+    o->fdata = malloc(92);
+    if (!o->fdata) { release(h); return NULL; }
+    memcpy(o->fdata, lf92, 92);
+    return (void *)(uintptr_t)h;
 }
