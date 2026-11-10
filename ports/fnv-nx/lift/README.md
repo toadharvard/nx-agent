@@ -56,11 +56,10 @@ Code pointers in the running process are **native** addresses (D3: the image's c
 - **R2, form certificates.** The semantics of every instruction form (mnemonic x operand class x width x prefix) is
   written once in a bit-vector DSL (`fnvlift/dsl.py`). The DSL emits (a) the C the lifter pastes (unsigned
   fixed-width operations only, no UB by construction) and (b) an SMT term. The SMT term is proven equal, for all
-  inputs, to two other records of the same form (owner decision 2026-11-10; the Sail model's repositories are not
-  attached): (1) the Intel SDM pseudo-code written in the same logic by an independent author who does not see the
-  DSL forms (`proof/sdm/`), and (2) VEX IR (pyvex). The pinned x86 host is a third check, exhaustive where the input
-  space can be enumerated. Assumption A3, stated plainly: the SDM pseudo-code was transcribed correctly, supported
-  by two independent records and VEX. A form on which the three do not agree is a build error. A form the exe uses without a certificate is a build error. `instest` (Unicorn) and the bench verify; they
+  inputs, to the Sail x86 model (rems-project/sail-x86-from-acl2, executed symbolically by isla; mirrored on
+  fnv-nx-build `tools/sail-x86`). Sail is the only reference (owner decision 2026-11-10): there is no second line. A
+  form the model does not contain is reported to the orchestrator as a list, not closed another way. A form the exe
+  uses without a certificate is a build error. `instest` (Unicorn) and the bench verify; they
   prove nothing.
 - **R3, code map.** Every byte of `.text` of every lifted module is an instruction of an entry, alignment, or a
   table named by a relocation (`tools/universe.py`); anything else is a build error. There are no trap codes.
