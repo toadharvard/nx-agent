@@ -142,6 +142,11 @@ rc, r, e = tests(d, extra=("--timeout-s", "15"))
 check("tests: timeout is a failure", rc != 0 and r["uncertified"] == ["verify/tests/test_slow.py"] and r["certified"] == 1,
       (rc, r, e))
 
+d = tmp("tests-env")
+put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os.environ if k.startswith('GATE_')] else 0)\n")
+rc, r, e = tests(d)
+check("tests: a test file does not see the gate's GATE_* variables", rc == 0 and r["certified"] == 1, (rc, r, e))
+
 # ---- gates.json
 spec = json.load(open(os.path.join(VERIFY, "gates.json")))
 byname = {g["name"]: g for g in spec["gates"]}
