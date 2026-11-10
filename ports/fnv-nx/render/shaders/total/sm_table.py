@@ -36,8 +36,11 @@ def build(a):
             try: vt = sm_docs.version_table(page, cache)
             except Exception: vt = None
             if not vt: continue
+            nvt = {l.lower().replace(" ", "_"): v for l, v in vt.items()}
             for key, label in variants:
-                if label not in vt: continue
+                label = label.lower().replace(" ", "_")
+                if label not in nvt: continue
+                vt = nvt
                 keys = [key.replace("*", c) for c in CMPS] if key.endswith("*") else [key]
                 for k in keys:
                     shp = dict(D[k]); put(st, k, shp["num"], set(vt[label]) & MOD_ALL, "%s%s (instruction page '%s', version table)" % (MS, "instructions/" + page, label), shp)
