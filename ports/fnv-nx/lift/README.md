@@ -30,19 +30,22 @@ default `/home/user/l3facts`).
 - The guest stack is ordinary guest memory; `esp` points into a per-thread region inside the 32-bit space.
 - Falling into bytes the descent did not decode is a build error, not a run-time trap.
 
-## Calls
+## Calls and code pointers (R3, resolution of 2026-11-10: the dispatcher everywhere)
 
-Code pointers in the running process are **native** addresses (D3: the image's code pointers are rewritten through
-.reloc). The lifter keeps that true:
+The image is mapped read-only at its own addresses. A code pointer in memory is always an **image address**; no word
+of the image is ever rewritten (vtable slots, EH tables and jump tables included), so every read of a pointer as data
+(comparison, hash, table copy) is right by construction.
 
-- An immediate or a data word that .reloc marks and that points into `.text` becomes the symbol `__fnv_<addr>`,
-  the native-ABI entry of that address.
-- `call rel32` to entry B: a direct C call of `X_<B>(c)`, the x86-ABI entry of B. `X_<B>` is `L_<B>` itself when B's
-  body is lifted, or the generated exit bridge when B's body is native.
-- `call reg` / `call [mem]`: `fnvl_icall(c, target)`. The target is a native address; a table maps native entry
-  address -> x86-ABI entry (`X_<addr>`). The table is total by construction: every code pointer the process can hold
-  is a `__fnv_<addr>` of the universe, an import, or a native-only entry the platform registers, and each of them
-  has an `X_` entry. The build fails if any address of the universe lacks one.
+- Every target of a relocated pointer into an executable section has a guest entry. Its body is the lift of the code
+  from that address; an undecodable byte on a path raises the same #UD the CPU raises (R4). Whether a pointer is
+  "code or data" is never decided: a data pointer's entry is simply never called. Byte classes: reached instruction,
+  not code.
+- `call rel32` to entry B: a direct C call of `X_<B>(c)`, the x86-ABI entry of B (`L_<B>` when B's body is lifted,
+  the generated exit bridge when it is native).
+- `call reg` / `call [mem]` / `jmp reg` / `ret` to an address other than the pushed one: the dispatcher
+  `image address -> X_<addr>`, a minimal perfect hash over the entry set with a last-target cache per call site.
+  The table is total by construction; native code reaches the same dispatcher through L2's plugin at every indirect
+  call and jump.
 - Every address has both entries. `__fnv_<A>` (AAPCS): the native body, or the entry bridge (arguments -> ecx/edx
   and the guest stack by the exe prototype, `L_<A>`, result from eax / edx:eax / ST0). `X_<A>` (x86 state): the
   lifted body, or the exit bridge (arguments from the guest stack by the same prototype, the native call, result
