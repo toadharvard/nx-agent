@@ -12,7 +12,8 @@ Facts (pickle, one dict):
   meta      sha256 of the exe and of this file, counts
   base, secs{name: (va, vsize, raw_off, raw_size)}, relocs[sorted va]
   imports   {iat_slot_va: (dll, name)}
-  vft       {vftable_va: (rtti_name, col_offset, [slot targets], col_va)}
+  vft       {vftable_va: (rtti_name, col_offset, [slot targets], col_va)}; a vftable without RTTI that the
+            decomp names has (its `??_7` symbol, 0, slots, 0)
   ptrs      [(va, target)]   every relocated code pointer held in data (slots, callbacks, __xc ...)
   xc        [target ...]     the C++ initializer table, in order
   fn        {va: F}          (F['cleanup'] = [(call site, bytes the caller pops right after the call; 0 = none)])
@@ -28,7 +29,7 @@ ALL = (1 << len(REGS)) - 1
 _SUB = {'al': 'eax', 'ah': 'eax', 'ax': 'eax', 'cl': 'ecx', 'ch': 'ecx', 'cx': 'ecx', 'dl': 'edx', 'dh': 'edx',
         'dx': 'edx', 'bl': 'ebx', 'bh': 'ebx', 'bx': 'ebx', 'si': 'esi', 'di': 'edi', 'bp': 'ebp'}
 _SUB.update({r: r for r in REGS})
-VERSION = 6
+VERSION = 7
 CALLEE_SAVED = BIT['ebx'] | BIT['esi'] | BIT['edi'] | BIT['ebp']
 
 
@@ -149,6 +150,28 @@ def rtti_vftables(img):
         if slots:
             vft[r + 4] = (name, img.u32(col + 4), slots, col)
     return vft
+
+
+def named_vftables(img, units, vft):
+    """Add the vftables the decomp names (`??_7...` in units.json) that carry no RTTI: (symbol, 0, slots, 0)."""
+    names = {}
+    for un in units['units']:
+        for sym, a in un.get('symbols', {}).items():
+            if sym.startswith('??_7'):
+                names.setdefault(int(a, 16), sym)
+    starts = set(vft) | set(names)
+    out = dict(vft)
+    for v, sym in names.items():
+        if v in vft:
+            continue
+        slots = []
+        a = v
+        while a in img.rset and img.intext(img.u32(a)) and (a == v or a not in starts):
+            slots.append(img.u32(a))
+            a += 4
+        if slots:
+            out[v] = (sym, 0, slots, 0)
+    return out
 
 
 def data_code_pointers(img):
@@ -407,10 +430,10 @@ class Analyzer:
 _AN = None
 
 
-def _init(exe):
+def _init(exe, units):
     global _AN
     img = Image(exe)
-    _AN = Analyzer(img, rtti_vftables(img))
+    _AN = Analyzer(img, named_vftables(img, json.load(open(units)), rtti_vftables(img)))
 
 
 def _run(job):
@@ -441,10 +464,11 @@ def interprocedural_live(fn):
 def build(exe, units, jobs=4, log=print):
     import multiprocessing
     img = Image(exe)
-    vft = rtti_vftables(img)
+    u = json.load(open(units))
+    rtti = rtti_vftables(img)
+    vft = named_vftables(img, u, rtti)
     ptrs = data_code_pointers(img)
     xc, xc_va = xc_table(img, ptrs)
-    u = json.load(open(units))
     dec = {}
     for un in u['units']:
         for f in un['functions']:
@@ -457,7 +481,7 @@ def build(exe, units, jobs=4, log=print):
     for _, v in ptrs:
         todo.add(v)
     rnd = 0
-    with multiprocessing.Pool(jobs, _init, (exe,)) as pool:
+    with multiprocessing.Pool(jobs, _init, (exe, units)) as pool:
         while todo:
             rnd += 1
             starts = sorted(set(known) | todo | set(fn))
@@ -490,7 +514,7 @@ def build(exe, units, jobs=4, log=print):
         F['unit'] = dec[a][2] if a in dec else ''
     interprocedural_live(fn)
     meta = dict(version=VERSION, exe_sha256=img.sha256, tool_sha256=hashlib.sha256(open(__file__, 'rb').read()).hexdigest(),
-                relocs=len(img.relocs), vftables=len(vft), functions=len(fn), decomp=len(dec), ptrs=len(ptrs),
+                relocs=len(img.relocs), vftables=len(vft), vftables_rtti=len(rtti), functions=len(fn), decomp=len(dec), ptrs=len(ptrs),
                 xc=len(xc), xc_va=xc_va, imports=len(img.imports))
     return dict(meta=meta, base=img.base, secs=img.secs, relocs=img.relocs, imports=img.imports, vft=vft, ptrs=ptrs,
                 xc=xc, fn=fn)
