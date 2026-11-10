@@ -9,16 +9,12 @@ stage emits only data:
   image_ptrs.S   one pair of words per relocated code pointer of the data image (vftable slots, callbacks,
                  __xc ...): the image address and `__fnv_<target>`.  The loader stores the native address there.
                  A target with no body is an undefined symbol: the link fails until BODYSEL gives it a body.
-  vtid.ld        `__fnvt_<vftable>_<addend> = <vftable> - <addend>;` one absolute symbol per bound
-                 (vftable, addend): a `_ZTV` GOT reference rebound to it makes the code's `+ addend` land on the
-                 exe vftable.
-  vtsites.tsv    object, `_ZTV` symbol, addend, vftable, how: 'symbol' (rebind the reference), 'subtable' (the
-                 symbol carries several sub-vtables whose exe distances differ from the Itanium ones: needs one
-                 relocation per sub-vtable from the compiler side, L2; counted only, no code is rewritten),
-                 'lift' (the value is not formed by a plain add).
+  vtsites.tsv    unit, address-point symbol `_ZTV<C>.fnvnx_ap<off>` (one relocation per sub-vtable, emitted by
+                 L2's compiler plugin), exe vftable address (contract/vtid.py, R6).  The link rebinds that
+                 symbol of that unit to the address; no code is rewritten.
   tables.json    counts only.
 
-image_ptrs.S, vtid.ld and vtsites.tsv are exe-derived: container and fnv-nx-build only.
+image_ptrs.S and vtsites.tsv are exe-derived: container and fnv-nx-build only.
 """
 import argparse, collections, json, os, pickle
 
@@ -42,26 +38,6 @@ def image_pointers(facts, have):
     return [(a, t, t in have, 'slot' if a in slot else 'xc' if a in xcs else 'ptr') for a, t in facts['ptrs']]
 
 
-def site_plan(bind):
-    """{(object, symbol, addend): (vftable, how, base, immediate)}"""
-    g = collections.defaultdict(dict)
-    for (ob, sym, add), v in bind.items():
-        g[(ob, sym)][add] = v
-    out = {}
-    for (ob, sym), d in g.items():
-        known = [x for x in d if x is not None]
-        a0 = min(known) if known else 0
-        base = d[a0] - a0 if known else 0
-        for add, v in d.items():
-            if add is None:                      # the value is not formed by a plain add: no site to rewrite
-                out[(ob, sym, -1)] = (v, 'lift', 0, 0)
-                continue
-            imm = v - base
-            how = 'symbol' if imm == add else 'subtable'
-            out[(ob, sym, add)] = (v, how, base, imm)
-    return out
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--facts', required=True)
@@ -79,19 +55,14 @@ def main():
         for addr, t, ok, kind in ptrs:
             fh.write('    .word 0x%08x, __fnv_%08x\n' % (addr, t))
         fh.write('    .word 0, 0\n')
-    plan = site_plan(bind)
-    with open(os.path.join(a.out, 'vtid.ld'), 'w') as fh:
-        for base, add in sorted({(p[2], k[2]) if p[1] == 'symbol' else (p[2], 0) for k, p in plan.items()}):
-            fh.write('__fnvt_%08x_%d = 0x%08x;\n' % ((base + add) & 0xffffffff, add, base))
     with open(os.path.join(a.out, 'vtsites.tsv'), 'w') as fh:
-        for (ob, sym, add), (v, how, base, imm) in sorted(plan.items()):
-            fh.write('%s\t%s\t%d\t%08x\t%s\t%d\n' % (ob, sym, add, v, how, imm))
+        for (unit, ztv, off), v in sorted(bind.items()):
+            fh.write('%s\t%s.fnvnx_ap%d\t%08x\n' % (unit, ztv, off, v))
     c = collections.Counter()
     for addr, t, ok, kind in ptrs:
         c['%s words: %s' % (kind, 'body' if ok else 'NO BODY')] += 1
     c['distinct targets without a body'] = len({t for _, t, ok, _ in ptrs if not ok})
-    for p in plan.values():
-        c['vtable sites: ' + p[1]] += 1
+    c['vtable address points rebound'] = len(bind)
     json.dump(dict(c), open(os.path.join(a.out, 'tables.json'), 'w'), indent=1, sort_keys=True)
     for k, v in sorted(c.items()):
         print('%7d  %s' % (v, k))
