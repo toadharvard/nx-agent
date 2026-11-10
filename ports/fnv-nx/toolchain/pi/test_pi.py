@@ -48,6 +48,10 @@ def main():
         ('_Z2asi', ''): ['asm', '', ''],
         ('_ZL2cpii', 'constprop.0'): ['ok', '', ''],                   # a clone, under the function's own name
         ('_Z5usecpi', ''): ['ok', '', ''],
+        ('_ZN1KC2Ev', ''): ['ok', '', '1K'],
+        ('_ZN1KD2Ev', ''): ['ok', '', '1K'],
+        ('_ZN1KC1Ev', 'alias'): ['ok', '', '1K'],                      # the same body under its other symbol
+        ('_ZN1KD1Ev', 'alias'): ['ok', '', '1K'],
     }
     fails = 0
     for k, w in want.items():

@@ -202,10 +202,14 @@ private:
         for (CXXCtorType T : {Ctor_Complete, Ctor_Base})
           add(ND, Loc, GlobalDecl(CD, T), GlobalDecl(CD, T), "ctor", Def);
       } else if (auto *DD = dyn_cast<CXXDestructorDecl>(FD)) {
-        // D1/D2/D0 are paired with the MS mangler's Dtor_Complete (?1),
-        // Dtor_Base and Dtor_Deleting (?_G); MSVC has no base-object dtor.
-        for (CXXDtorType T : {Dtor_Complete, Dtor_Base, Dtor_Deleting})
-          add(ND, Loc, GlobalDecl(DD, T), GlobalDecl(DD, T), "dtor", Def);
+        // D2 <-> ??1 and D0 <-> ??_G. D1, the complete-object destructor: MSVC
+        // has one (??_D, the vbase destructor) only for a class with virtual
+        // bases; for any other class the complete destructor IS ??1.
+        bool VB = DD->getParent()->getNumVBases() != 0;
+        add(ND, Loc, GlobalDecl(DD, Dtor_Complete),
+            GlobalDecl(DD, VB ? Dtor_Complete : Dtor_Base), "dtor", Def);
+        add(ND, Loc, GlobalDecl(DD, Dtor_Base), GlobalDecl(DD, Dtor_Base), "dtor", Def);
+        add(ND, Loc, GlobalDecl(DD, Dtor_Deleting), GlobalDecl(DD, Dtor_Deleting), "dtor", Def);
       } else {
         add(ND, Loc, GlobalDecl(FD), GlobalDecl(FD), "func", Def);
       }

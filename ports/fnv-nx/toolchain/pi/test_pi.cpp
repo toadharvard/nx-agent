@@ -12,3 +12,6 @@ int un(int c) { int x; if (c) x = 1; return x; }
 int as(int a) { __asm__("" : "+r"(a)); return a; }
 __attribute__((noinline)) static int cp(int a, int b) { return a * b + a; }
 int usecp(int a) { return cp(a, 3) + cp(a + 1, 3); }
+struct K { int k; K(); ~K(); };
+K::K() : k(1) {}
+K::~K() {}

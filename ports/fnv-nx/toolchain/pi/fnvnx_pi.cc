@@ -25,7 +25,7 @@
  *            The verdict of the emitted code is this one and those of everything in `inlined` (N4's closure).
  *   inlined  `,`-separated assembler names of every function whose body is inlined into this one, transitively
  *   kind     empty for an emitted function; the clone suffix for an emitted clone; `thunk` for a this-adjusting
- *            thunk; `inline` for a body this unit saw but did not emit on its own (its verdict is needed by the
+ *            thunk; `alias` for another symbol of an emitted body (same line otherwise); `inline` for a body this unit saw but did not emit on its own (its verdict is needed by the
  *            functions it is inlined into); `sdd` for a destructor-slot function (written by toolchain/sdd)
  *   types    `,`-separated Itanium type strings of the record types whose fields the body accesses or that its
  *            parameters and locals have
@@ -60,6 +60,7 @@ int plugin_is_GPL_compatible;
 struct facts { std::string verdict; std::set<std::string> types; bool emitted; };
 static std::map<std::string, facts> early;       /* by assembler name of the function */
 static std::vector<std::string> lines;
+static std::map<std::string, std::string> emitted_rest;   /* emitted function -> "verdict\tinlined", for its aliases */
 
 static const char *asmname(tree d) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)); }
 
@@ -173,6 +174,7 @@ struct late_pass : gimple_opt_pass {
     e->second.emitted = true;
     inl.erase(name);
     lines.push_back(name + "\\t" + e->second.verdict + "\\t" + join(inl) + "\\t" + clone + "\\t" + join(e->second.types));
+    if (clone.empty()) emitted_rest[name] = e->second.verdict + "\\t" + join(inl) + "\\talias\\t" + join(e->second.types);
     return 0;
   }
 };
@@ -182,6 +184,15 @@ static void finish_unit(void *, void *)
 {
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.n3,\"\",%%progbits\n");
   for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", lines[i].c_str());
+  /* another symbol of the same body (the complete-object constructor / destructor of a class without virtual
+     bases is its base-object one): the body's line again, under the alias */
+  cgraph_node *n;
+  FOR_EACH_FUNCTION(n)
+    if (n->alias && n->get_alias_target()) {
+      std::map<std::string, std::string>::iterator r = emitted_rest.find(asmname(n->ultimate_alias_target()->decl));
+      if (r != emitted_rest.end())
+        fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", asmname(n->decl), r->second.c_str());
+    }
   for (std::map<std::string, facts>::iterator e = early.begin(); e != early.end(); ++e)
     if (!e->second.emitted)
       fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t\\tinline\\t%s\\n\"\n", e->first.c_str(), e->second.verdict.c_str(),
