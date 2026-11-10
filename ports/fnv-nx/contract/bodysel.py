@@ -4,7 +4,8 @@
     bodysel.py --facts facts.pkl --n1 n1.pkl --gates <dir with bodysel.tsv of registry.py> [--n3 n3.tsv] --out bodysel.tsv
 
 Inputs are static facts only: the exe fact base, the N1 certificate, the object gates of N2 and L2's compiler
-plugin verdict for N3 (address <tab> ok|reason <tab> inlined callee addresses...).  No fuzz, boot or scenario
+plugin verdict for N3 (address <tab> ok|ok+E|reason <tab> inlined callee addresses...; `ok+E`: the body is a
+`__sdd` that implements the vector branch, flags & 2, of `??_E`).  No fuzz, boot or scenario
 output is read: the argument list is the whole key of this stage (R13).
   N1  byte identity with the exe under one symbol map            (n1.py)
   N2  object gates on every site: data, call, vcall               (registry.py rows; a row = not N2)
@@ -32,8 +33,11 @@ def decide(facts, n1, gate_rows, n3):
             out[a] = ['LIFTED', 'N2: gate ' + gate_rows[a]]
         elif a not in n3:
             out[a] = ['LIFTED', 'N3: no verdict']
-        elif n3[a][0] != 'ok':
+        elif n3[a][0] not in ('ok', 'ok+E'):
             out[a] = ['LIFTED', 'N3: ' + n3[a][0]]
+        elif N['sym'].startswith('??_E') and n3[a][0] != 'ok+E':
+            # the exe function is a vector deleting destructor (flags & 2); the native __sdd must implement it
+            out[a] = ['LIFTED', 'N3: ??_E without the vector branch of __sdd']
         else:
             out[a] = ['NATIVE', 'N1 N2 N3']
     chg = True                      # N4: greatest fixed point
