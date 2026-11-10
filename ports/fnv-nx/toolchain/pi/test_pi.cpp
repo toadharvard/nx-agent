@@ -22,3 +22,9 @@ int m2() { Q q; q.a = 1; return q.b; }            // other bytes
 int m3() { Q q; fill(&q); return q.a; }           // a call proves nothing (conservative)
 int m4(int c) { Q q; if (c) q.a = 1; return q.a; }   // not on every path
 int m5() { Q q = Q(); return q.b; }               // the whole variable
+int ga(); int gb(); int two(int, int); struct W { int w(int, int); W& self(); };
+int o1() { return two(ga(), gb()); }              // readable: two calls of different functions
+int o2() { return two(ga(), ga()); }              // the same function twice: not readable from an object
+int o3(int i) { return two(i++, ga()); }          // an effect that is not a call
+int o4() { return two(ga(), 1); }                 // one argument with an effect: no question of order
+int o5(W& x) { return x.self().w(ga(), 2); }      // the object counts

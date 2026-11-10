@@ -19,6 +19,8 @@
  *              setjmp    calls setjmp
  *              varargs   the definition takes variable arguments
  *              volatile  a volatile access
+ *              argorder  a call with side effects in two or more arguments whose order cannot be read out of an
+ *                        object (see "argument order" below)
  *              div       an integer division or remainder by a non-constant (x86 traps where AArch64 gives 0)
  *              shift     a shift or rotate by a non-constant count (x86 masks the count, C leaves it undefined)
  *              uninit    a use of a local that no path has assigned
@@ -34,9 +36,9 @@
  *   types    `,`-separated Itanium type strings of the record types whose fields the body accesses or that its
  *            parameters and locals have
  *
- * Not decided here: facts of the exe (EH tables at the address), layouts against cl (R7 is checked on `types`), and
- * the evaluation order of call arguments, which the fnvnx_order plugin fixes at MSVC's order for every call
- * (its lemma is a gate of its own).
+ * Not decided here: facts of the exe (EH tables at the address) and layouts against cl (R7 is checked on `types`).
+ * The evaluation order of call arguments is fixed at MSVC's by the fnvnx_order plugin; the sites its lemma is
+ * checked on are written to section .fnvnx.argorder.
  */
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -117,6 +119,90 @@ static bool uninit_use(tree op)
   return v && VAR_P(v) && DECL_NAME(v) && !DECL_ARTIFICIAL(v) && !DECL_HARD_REGISTER(v) && !is_empty_type(TREE_TYPE(op));
 }
 
+/* ---- argument order (the lemma of rule ORDER-ARGS, toolchain/order): every call whose arguments (the object of a
+   member call included) have side effects in two or more of them is written down before genericization, as the
+   source has it:
+       function <TAB> callee <TAB> a0|a1|...      each a_k: the `,`-separated callees of the calls inside argument k
+   in section .fnvnx.argorder. The gate reads the same calls out of the MSVC object of the function and checks that
+   their order there is the one the order plugin makes GCC use. A site where that cannot be read from an object -
+   an argument whose effect is not only calls of named functions, or two arguments calling the same function -
+   puts the function outside Π (`argorder`): a static rule, no site is skipped. */
+static std::vector<std::string> arg_sites;
+static std::set<std::string> arg_unreadable;      /* functions (the declaration's symbol) with such a site */
+
+/* the function a call or an aggregate-initializing call names, else null */
+static tree callee_of(tree t)
+{
+  if (TREE_CODE(t) == CALL_EXPR) return cp_get_callee_fndecl_nofold(t);
+  tree f = AGGR_INIT_EXPR_FN(t);
+  if (f && TREE_CODE(f) == ADDR_EXPR) f = TREE_OPERAND(f, 0);
+  return f && TREE_CODE(f) == FUNCTION_DECL ? f : NULL_TREE;
+}
+
+struct arg_effects { std::vector<std::string> calls; bool other; };
+
+static tree walk_effects(tree *tp, int *walk_subtrees, void *data)
+{
+  arg_effects *e = (arg_effects *)data;
+  tree t = *tp;
+  if (TYPE_P(t)) { *walk_subtrees = 0; return NULL_TREE; }
+  switch (TREE_CODE(t)) {
+    case CALL_EXPR: case AGGR_INIT_EXPR: {
+      tree fn = callee_of(t);
+      if (fn && DECL_NAME(fn) && !fndecl_built_in_p(fn)) e->calls.push_back(asmname(fn));
+      else e->other = true;
+      break;
+    }
+    case MODIFY_EXPR: case INIT_EXPR: case PREINCREMENT_EXPR: case PREDECREMENT_EXPR: case POSTINCREMENT_EXPR:
+    case POSTDECREMENT_EXPR: case THROW_EXPR: case NEW_EXPR: case VEC_NEW_EXPR: case DELETE_EXPR: case VEC_DELETE_EXPR:
+    case TARGET_EXPR: case VA_ARG_EXPR: case STMT_EXPR:
+      /* a TARGET_EXPR is the temporary a call's result is built in: its initializer is walked, it is no effect */
+      if (TREE_CODE(t) != TARGET_EXPR) e->other = true;
+      break;
+    default:
+      if (TREE_THIS_VOLATILE(t) && !DECL_P(t)) e->other = true;
+  }
+  return NULL_TREE;
+}
+
+static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
+{
+  tree t = *tp;
+  if (TYPE_P(t)) { *walk_subtrees = 0; return NULL_TREE; }
+  if (TREE_CODE(t) != CALL_EXPR && TREE_CODE(t) != AGGR_INIT_EXPR) return NULL_TREE;
+  std::vector<tree> args;
+  if (TREE_CODE(t) == CALL_EXPR) for (int i = 0; i < call_expr_nargs(t); i++) args.push_back(CALL_EXPR_ARG(t, i));
+  else for (int i = 0; i < aggr_init_expr_nargs(t); i++) args.push_back(AGGR_INIT_EXPR_ARG(t, i));
+  int with = 0;
+  for (size_t i = 0; i < args.size(); i++) if (args[i] && TREE_SIDE_EFFECTS(args[i])) with++;
+  if (with < 2) return NULL_TREE;
+  tree fn = callee_of(t);
+  std::string row = std::string((const char *)data) + "\\t" + (fn && DECL_NAME(fn) ? asmname(fn) : "*") + "\\t";
+  bool readable = true;
+  std::set<std::string> seen;
+  for (size_t i = 0; i < args.size(); i++) {
+    arg_effects e; e.other = false;
+    if (args[i] && TREE_SIDE_EFFECTS(args[i])) {
+      cp_walk_tree_without_duplicates(&args[i], walk_effects, &e);
+      if (e.other || e.calls.empty()) readable = false;
+      for (size_t k = 0; k < e.calls.size(); k++) if (!seen.insert(e.calls[k]).second) readable = false;
+    }
+    if (i) row += "|";
+    for (size_t k = 0; k < e.calls.size(); k++) row += (k ? "," : "") + e.calls[k];
+  }
+  if (readable) arg_sites.push_back(row);
+  else arg_unreadable.insert((const char *)data);
+  return NULL_TREE;
+}
+
+static void pre_genericize(void *gcc_data, void *)
+{
+  tree fn = (tree)gcc_data;
+  if (!fn || TREE_CODE(fn) != FUNCTION_DECL || !DECL_SAVED_TREE(fn)) return;
+  std::string name = asmname(fn);
+  cp_walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
+}
+
 /* a local of the source that lives in memory (its address is taken, or it is an aggregate) */
 static tree memory_local(tree ref)
 {
@@ -175,6 +261,13 @@ static bool unproven_memory_read(function *fun)
   return false;
 }
 
+/* the symbol of the declaration a body was parsed under (a constructor / destructor variant: its declaration) */
+static std::string source_name(tree fn)
+{
+  if (DECL_LANG_SPECIFIC(fn) && DECL_CLONED_FUNCTION_P(fn)) fn = DECL_CLONED_FUNCTION(fn);
+  return asmname(fn);
+}
+
 static std::string join(const std::set<std::string> &v)
 {
   std::string r;
@@ -220,7 +313,8 @@ struct early_pass : gimple_opt_pass {
     unsigned ix; tree v;
     FOR_EACH_LOCAL_DECL(fun, ix, v) note_type(TREE_TYPE(v), f.types);
     f.verdict = r_asm ? "asm" : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
-              : r_vol ? "volatile" : r_div ? "div" : r_shift ? "shift" : r_uninit ? "uninit"
+              : r_vol ? "volatile" : arg_unreadable.count(source_name(fn)) ? "argorder"
+              : r_div ? "div" : r_shift ? "shift" : r_uninit ? "uninit"
               : unproven_memory_read(fun) ? "uninit-mem" : "ok";
     early[asmname(fn)] = f;
     return 0;
@@ -284,6 +378,9 @@ static void finish_unit(void *, void *)
       fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t\\tinline\\t%s\\n\"\n", e->first.c_str(), e->second.verdict.c_str(),
               join(e->second.types).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.argorder,\"\",%%progbits\n");
+  for (size_t i = 0; i < arg_sites.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", arg_sites[i].c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
 }
 
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
@@ -301,6 +398,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   pl.ref_pass_instance_number = 1;
   pl.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pl);
+  register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize, NULL);
   register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;

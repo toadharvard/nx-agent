@@ -30,6 +30,8 @@ def main():
         if r.returncode != 0:
             print('FAIL compiles', r.stderr[:2000]); return 1
         s = open(out).read()
+    s2 = s[s.index('.fnvnx.argorder'):]
+    s2 = s2[:s2.index('.popsection')]
     sec = s[s.index('.fnvnx.n3'):]
     rows = {}
     for l in re.findall(r'\.ascii\s+"(.*)\\n"', sec[:sec.index('.popsection')]):
@@ -53,6 +55,11 @@ def main():
         ('_Z2m3v', ''): ['uninit-mem', '', '1Q'],
         ('_Z2m4i', ''): ['uninit-mem', '', '1Q'],
         ('_Z2m5v', ''): ['ok', '', '1Q'],
+        ('_Z2o1v', ''): ['ok', '', ''],
+        ('_Z2o2v', ''): ['argorder', '', ''],
+        ('_Z2o3i', ''): ['argorder', '', ''],
+        ('_Z2o4v', ''): ['ok', '', ''],
+        ('_Z2o5R1W', ''): ['ok', '', '1W'],
         ('_ZN1KC2Ev', ''): ['ok', '', '1K'],
         ('_ZN1KD2Ev', ''): ['ok', '', '1K'],
         ('_ZN1KC1Ev', 'alias'): ['ok', '', '1K'],                      # the same body under its other symbol
@@ -67,6 +74,11 @@ def main():
     if set(rows) != set(want):
         fails += 1
         print('FAIL rows', sorted(set(rows) ^ set(want)))
+    ao = re.findall(r'\.ascii\s+"(.*)\\n"', s2)
+    wantao = ['_Z2o1v\\t_Z3twoii\\t_Z2gav|_Z2gbv', '_Z2o5R1W\\t_ZN1W1wEii\\t_ZN1W4selfEv|_Z2gav|']
+    if ao != wantao:
+        fails += 1
+        print('FAIL argorder rows', ao)
     print('test_pi: %s' % ('FAILED %d' % fails if fails else 'ok'))
     return 1 if fails else 0
 
