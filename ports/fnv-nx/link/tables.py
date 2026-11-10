@@ -12,9 +12,10 @@ stage emits only data:
   vtid.ld        `__fnvt_<vftable>_<addend> = <vftable> - <addend>;` one absolute symbol per bound
                  (vftable, addend): a `_ZTV` GOT reference rebound to it makes the code's `+ addend` land on the
                  exe vftable.
-  vtsites.tsv    object, `_ZTV` symbol, addend, vftable, how: 'symbol' (rebind the reference), 'imm' (the symbol
-                 carries several sub-vtables whose exe distances differ from the Itanium ones: rebind to the
-                 lowest addend's base and rewrite the other `add` immediates), 'lift' (not encodable).
+  vtsites.tsv    object, `_ZTV` symbol, addend, vftable, how: 'symbol' (rebind the reference), 'subtable' (the
+                 symbol carries several sub-vtables whose exe distances differ from the Itanium ones: needs one
+                 relocation per sub-vtable from the compiler side, L2; counted only, no code is rewritten),
+                 'lift' (the value is not formed by a plain add).
   tables.json    counts only.
 
 image_ptrs.S, vtid.ld and vtsites.tsv are exe-derived: container and fnv-nx-build only.
@@ -56,7 +57,7 @@ def site_plan(bind):
                 out[(ob, sym, -1)] = (v, 'lift', 0, 0)
                 continue
             imm = v - base
-            how = 'symbol' if imm == add else 'imm' if -4096 < imm < 4096 else 'lift'
+            how = 'symbol' if imm == add else 'subtable'
             out[(ob, sym, add)] = (v, how, base, imm)
     return out
 

@@ -3,15 +3,17 @@
 
     vtid.py --facts facts.pkl --obj objfacts.pkl --units units.json --out vtid.pkl [--list N]
 
-A key is (object, `_ZTV` symbol, addend): one sub-vtable of one class as one unit sees it.  Two independent
-routes bind a key to an exe vftable, and they must agree:
+A key is (object, `_ZTV` symbol, addend): one sub-vtable of one class as one unit sees it.  Route N is the
+binding rule; P and S are set comparisons that verify it and must agree with it:
 
   P  position: in a function whose native and exe stores have the same shape (same count per object offset),
      the k-th native store at an offset is the k-th exe store at that offset.  Then, with the keys known so
      far as anchors, a function of a different shape binds a key when exactly one order-preserving embedding
      of its native stores into the exe stores exists.
-  N  name: the unit's own MSVC symbol `??_7Class@@6B...@` (units.json gives its exe address); the sub-vtable is
-     chosen by the offset the Itanium address point and the exe's COL both carry.
+  N  identity by the compiler (the rule): L2 emits, per unit, the pair Itanium `_ZTV` name <-> MSVC
+     `??_7Class@@6B...@` names of each polymorphic class (--pairs: object <tab> _ZTV symbol <tab> ??_7 symbol).
+     units.json gives the address of the unit's `??_7`; the sub-vtable is the one whose COL offset equals the
+     Itanium offset-to-top of the address point.  No name is translated here.  Without --pairs N binds nothing.
 
   S  slots: the one exe vftable whose slot targets are the exe addresses of the functions the native
      sub-vtable holds (through the address map), allowing the one-slot shift of a doubled destructor.
@@ -24,30 +26,6 @@ that hold the key.  Output is exe- and decomp-derived: container and fnv-nx-buil
 import argparse, collections, json, pickle, re
 
 STK = ('esp', 'ebp')
-NAME = re.compile(r'(\d+)')
-
-
-def itanium_class(sym):
-    """`_ZTV3Foo` -> ['Foo']; `_ZTVN1A1BE` -> ['A', 'B']; templates and anything else -> None."""
-    s = sym[4:]
-    nested = s.startswith('N')
-    if nested:
-        s = s[1:]
-    parts = []
-    while s and s[0].isdigit():
-        m = NAME.match(s)
-        n = int(m.group(1))
-        parts.append(s[m.end():m.end() + n])
-        s = s[m.end() + n:]
-    if (nested and s != 'E') or (not nested and s) or not parts:
-        return None
-    return parts
-
-
-def msvc_vftable_prefix(parts):
-    return '??_7' + '@'.join(reversed(parts)) + '@@6B'
-
-
 BR = re.compile(r'__fnv(?:nx_br|nx_vflag)?_([0-9a-f]{8})')
 
 
@@ -100,17 +78,14 @@ def embeddings(nat, exe, known, limit=2):
     return out
 
 
-def solve(facts, obj, units, amap):
+def solve(facts, obj, units, amap, pairs):
     fn, vft = facts['fn'], facts['vft']
     unit_of = {}
     usym = {}
-    gname = collections.defaultdict(set)
     for un in units['units']:
         ob = un['source'].replace('/', '_') + '.o'
         d = {s: int(a, 16) for s, a in un.get('symbols', {}).items() if s.startswith('??_7')}
         usym[ob] = d
-        for s, a in d.items():
-            gname[s].add(a)
     ztv = {k[0]: v for k, v in obj.items() if k[1] == 'ztv'}
     gz = collections.defaultdict(set)
     for ob, d in ztv.items():
@@ -177,21 +152,17 @@ def solve(facts, obj, units, amap):
                                 known[K] = V
                                 chg = True
     P = {K: set(v) for K, v in eq.items() if v}
-    # route N
+    # route N: the compiler's own pair (object, `_ZTV` symbol) -> MSVC `??_7...@@6B...@` names, from L2
     Nn = {}
     for K in keys:
         ob, sym, add = K
-        parts = itanium_class(sym)
-        if parts is None or add is None:
+        if add is None:
             continue
         pts = {x[0]: x[1] for x in (ztv.get(ob, {}).get(sym) or (next(iter(gz[sym])) if len(gz.get(sym, ())) == 1 else ()))}
         if add not in pts:
             continue
-        off = pts[add]
-        pre = msvc_vftable_prefix(parts)
-        c = {a for s, a in usym.get(ob, {}).items() if s.startswith(pre) and a in vft and vft[a][1] == off}
-        if not c:
-            c = {a for s, aa in gname.items() if s.startswith(pre) for a in aa if a in vft and vft[a][1] == off}
+        c = {usym[ob][m] for m in pairs.get((ob, sym), ()) if m in usym.get(ob, {})}
+        c = {a for a in c if a in vft and vft[a][1] == pts[add]}
         if len(c) == 1:
             Nn[K] = next(iter(c))
     # route S: the exe vftable whose slots are the functions the native sub-vtable holds
@@ -277,12 +248,19 @@ def main():
     ap.add_argument('--obj', required=True)
     ap.add_argument('--units', required=True)
     ap.add_argument('--link', required=True, help='link dir (out/addrmap.tsv)')
+    ap.add_argument('--pairs', help='L2: object, _ZTV symbol, ??_7 symbol per line')
     ap.add_argument('--out')
     ap.add_argument('--list', type=int, default=0)
     a = ap.parse_args()
     facts = pickle.load(open(a.facts, 'rb'))
     import objfacts
-    R = solve(facts, pickle.load(open(a.obj, 'rb')), json.load(open(a.units)), objfacts.load_addrmap(a.link))
+    pairs = collections.defaultdict(set)
+    if a.pairs:
+        for ln in open(a.pairs):
+            p = ln.rstrip('\n').split('\t')
+            if len(p) >= 3:
+                pairs[(p[0], p[1])].add(p[2])
+    R = solve(facts, pickle.load(open(a.obj, 'rb')), json.load(open(a.units)), objfacts.load_addrmap(a.link), pairs)
     c, fbad = report(R, facts, a.list)
     if a.out:
         pickle.dump(dict(bind=R['bind'], verdict=R['verdict'], P=R['P'], N=R['N'], S=R['S'], bodysel=sorted(fbad)), open(a.out, 'wb'), protocol=4)
