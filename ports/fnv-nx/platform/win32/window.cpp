@@ -4,11 +4,11 @@
  * Model: one desktop (GetSystemMetrics SM_CXSCREEN x SM_CYSCREEN) is the root of the window tree; every window is
  * a record (class, procedure, styles, text, extra bytes, window rectangle in screen coordinates, z-ordered children).
  * The client rectangle is derived from the styles by ncrule(), the one rule AdjustWindowRectEx also uses.
- * SendMessage calls the window procedure directly, PostMessage queues; the input stream (S7) injects messages and
- * key state through fnvnx_post_message / fnvnx_set_key_state, and the renderer (S6) sets the display size.
+ * The queues, SendMessage/PostMessage/PeekMessage, input, hooks and the cursor are in msgqueue.cpp (shared: window_int.h);
+ * the input stream (S7) injects key state through fnvnx_set_key_state, the renderer (S6) sets the display size.
  * Locking: g_ui_lock guards the tree, is never held across a window procedure call and is not recursive; the *_l
  * helpers expect it held. */
-#include "w32.h"
+#include "window_int.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -441,22 +441,85 @@ static void zorder_l(window *w, HWND after)
     insert_after_l(p, w, a);
 }
 
-/* ---- activation */
-extern "C" LRESULT SendMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
+/* ---- what msgqueue.cpp needs from the tree (window_int.h) */
+static bool vis_chain_l(window *w)
 {
-    window *win = wnd(h);
-    if (!win)
-        return 0;
-    return win->proc ? win->proc(h, m, w, l) : DefWindowProcA(h, m, w, l);
+    for (window *p = w; p && p != &g_desk; p = p->parent)
+        if (!(p->style & S_VISIBLE)) return false;
+    return true;
 }
+extern "C" int fnwin_info_get(HWND h, fnwin_info *o)
+{
+    os_lock(&g_ui_lock);
+    ui_init_l();
+    window *w = wnd_l(h);
+    if (w) {
+        o->style = w->style; o->exstyle = w->exstyle; o->cstyle = w->cls->style;
+        o->tid = w == &g_desk ? GetCurrentThreadId() : w->tid;
+        o->wr = w->wr; o->cr = client_l(w);
+        o->parent = (w->parent && w->parent != &g_desk) ? (HWND)w->parent : NULL;
+        o->paint = w->paint; o->proc = w->proc;
+    }
+    os_unlock(&g_ui_lock);
+    return w != NULL;
+}
+static bool in_rect(const RECT &r, int x, int y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
+extern "C" HWND fnwin_from_point(int x, int y)
+{
+    os_lock(&g_ui_lock);
+    ui_init_l();
+    window *p = &g_desk, *hit = NULL;
+    for (;;) {   /* the topmost visible child whose window rectangle holds the point, level by level */
+        window *n = NULL;
+        for (window *c = p->first; c && !n; c = c->next)
+            if ((c->style & S_VISIBLE) && !(c->style & S_MINIMIZE) && in_rect(c->wr, x, y)) n = c;
+        if (!n) break;
+        hit = p = n;
+        if (!in_rect(client_l(n), x, y)) break;
+    }
+    os_unlock(&g_ui_lock);
+    return (HWND)hit;
+}
+extern "C" HWND fnwin_next_paint(DWORD tid, HWND filter)
+{
+    os_lock(&g_ui_lock);
+    window *r = NULL;
+    for (window *w = g_all; w && !r; w = w->all)
+        if (w->tid == tid && w->paint && (!filter || (HWND)w == filter) && vis_chain_l(w)) r = w;
+    os_unlock(&g_ui_lock);
+    return (HWND)r;
+}
+extern "C" HWND fnwin_active(void) { os_lock(&g_ui_lock); HWND h = (HWND)g_active; os_unlock(&g_ui_lock); return h; }
+extern "C" void fnwin_set_active(HWND h)
+{
+    os_lock(&g_ui_lock);
+    g_active = wnd_l(h) && h != (HWND)&g_desk ? (window *)h : NULL;
+    os_unlock(&g_ui_lock);
+}
+extern "C" int fnwin_toplevels(HWND *out, int max)
+{
+    os_lock(&g_ui_lock);
+    ui_init_l();
+    int n = 0;
+    for (window *c = g_desk.first; c && n < max; c = c->next)
+        out[n++] = (HWND)c;
+    os_unlock(&g_ui_lock);
+    return n;
+}
+
+/* ---- activation */
 static void activate(window *w)   /* w is a top-level window */
 {
     os_lock(&g_ui_lock);
     window *old = g_active;
-    g_active = w;
     os_unlock(&g_ui_lock);
     if (old == w)
         return;
+    if (fnmq_hook(5 /* WH_CBT */, 5 /* HCBT_ACTIVATE */, (WPARAM)(uintptr_t)w, 0))
+        return;   /* the hook refuses the activation */
+    os_lock(&g_ui_lock);
+    g_active = w;
+    os_unlock(&g_ui_lock);
     HWND hw = (HWND)w, ho = (HWND)old;
     if (old) {
         SendMessageA(ho, M_NCACTIVATE, 0, 0);
@@ -583,7 +646,6 @@ static BOOL set_pos(window *w, HWND after, int x, int y, int cx, int cy, UINT fl
 }
 
 /* ---- creation and destruction */
-static void purge_queue(HWND h);
 static void destroy_rec(window *w, bool skip_destroy);
 static BOOL show_impl(window *w, int cmd, bool keep_vis);
 
@@ -722,7 +784,7 @@ static void destroy_rec(window *w, bool skip_destroy)
     if (g_active == w) g_active = NULL;
     w->cls->nwin--;
     os_unlock(&g_ui_lock);
-    purge_queue(hw);
+    fnmq_purge(hw);
     w->magic = 0;
     free(w->text); free(w->extra);
     free(w);
@@ -873,15 +935,85 @@ extern "C" HWND FindWindowA(LPCSTR cls, LPCSTR title)
     return r;
 }
 
+/* WM_NCHITTEST: HTNOWHERE outside the window, HTCLIENT in the client area; in the frame the edge or corner of a
+ * sizing border, the caption, the menu bar, else HTBORDER */
+static int hit_test(window *w, int x, int y)
+{
+    os_lock(&g_ui_lock);
+    RECT r = w->wr, c = client_l(w);
+    DWORD st = w->style;
+    nc_t n = ncrule(st, w->exstyle, false);
+    os_unlock(&g_ui_lock);
+    if (!in_rect(r, x, y))
+        return 0;
+    if (in_rect(c, x, y) || w == &g_desk)
+        return 1;
+    int cap = (st & S_CAPTION) == S_CAPTION ? GetSystemMetrics(4) : 0, ft = n.t - cap;
+    bool l = x < r.left + n.l, rt = x >= r.right - n.r, t = y < r.top + ft, b = y >= r.bottom - n.b;
+    if (st & S_THICK) {
+        if (t && l) return 13;
+        if (t && rt) return 14;
+        if (b && l) return 16;
+        if (b && rt) return 17;
+        if (l) return 10;
+        if (rt) return 11;
+        if (t) return 12;
+        if (b) return 15;
+    }
+    if (!l && !rt && !t && !b && y < c.top)
+        return y < r.top + ft + cap ? 2 /* HTCAPTION */ : 5 /* HTMENU */;
+    return 18;   /* HTBORDER */
+}
 extern "C" LRESULT DefWindowProcA(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     window *win = wnd(h);
     switch (m) {
     case WM_CLOSE: DestroyWindow(h); return 0;
     case M_NCCREATE: return TRUE;      /* creation goes on */
-    case 0x0014: return 1;             /* WM_ERASEBKGND: handled */
+    case 0x0011: case 0x0013: return TRUE;   /* WM_QUERYENDSESSION, WM_QUERYOPEN */
+    case 0x0014: {                     /* WM_ERASEBKGND: the class brush erases (no device context here); no brush: not erased */
+        if (!win) return 0;
+        os_lock(&g_ui_lock);
+        HBRUSH bg = win->cls->bg;
+        os_unlock(&g_ui_lock);
+        return bg != NULL;
+    }
     case 0x0021: return 1;             /* WM_MOUSEACTIVATE: MA_ACTIVATE */
-    case 0x0084: return 1;             /* WM_NCHITTEST: HTCLIENT */
+    case 0x0084: return win ? hit_test(win, (int)(short)(l & 0xFFFF), (int)(short)((l >> 16) & 0xFFFF)) : 0;
+    case 0x0218: return TRUE;          /* WM_POWERBROADCAST */
+    case M_ACTIVATE:                   /* activated and not minimized: the window takes the keyboard focus */
+        if ((w & 0xFFFF) != 0 && ((w >> 16) & 0xFFFF) == 0) SetFocus(h);
+        return 0;
+    case 0x0020: {                     /* WM_SETCURSOR: the parent first, then the class cursor (client) or the arrow */
+        if (!win) return 0;
+        os_lock(&g_ui_lock);
+        window *par = win->parent != &g_desk ? win->parent : NULL;
+        HCURSOR c = (l & 0xFFFF) == 1 ? win->cls->cursor : fnmq_arrow_cursor();
+        os_unlock(&g_ui_lock);
+        if (par && SendMessageA((HWND)par, m, w, l)) return TRUE;
+        if (c) fnmq_set_cursor(c);
+        return c != NULL;
+    }
+    case 0x0112:                       /* WM_SYSCOMMAND */
+        switch (w & 0xFFF0) {
+        case 0xF060: SendMessageA(h, WM_CLOSE, 0, 0); break;   /* SC_CLOSE */
+        case 0xF020: ShowWindow(h, 6); break;                  /* SC_MINIMIZE */
+        case 0xF030: ShowWindow(h, 3); break;                  /* SC_MAXIMIZE */
+        case 0xF120: ShowWindow(h, 9); break;                  /* SC_RESTORE */
+        }
+        return 0;
+    case 0x0104:                       /* WM_SYSKEYDOWN: Alt+F4 closes */
+        if (w == 0x73 && (l & (1 << 29))) SendMessageA(h, 0x0112, 0xF060, 0);
+        return 0;
+    case M_NCDESTROY: {                /* the window text goes */
+        char *t = win ? dup_str("") : NULL;
+        if (!t) return 0;
+        os_lock(&g_ui_lock);
+        free(win->text);
+        win->text = t;
+        os_unlock(&g_ui_lock);
+        return 0;
+    }
     case M_NCACTIVATE: return TRUE;
     case M_PAINT: fnvnx_window_validate(h); return 0;   /* BeginPaint + EndPaint */
     case M_NCCALCSIZE: {               /* the client rectangle is the window rectangle less the non-client area */
@@ -929,93 +1061,6 @@ extern "C" LRESULT DefWindowProcA(HWND h, UINT m, WPARAM w, LPARAM l)
     default: return 0;
     }
 }
-
-/* ---- message queue (one per process: the engine pumps on its main thread) */
-#define QCAP 256
-static MSG g_queue[QCAP];
-static unsigned g_qhead, g_qtail;
-static int g_quit_pending, g_quit_code;   /* PostQuitMessage is a flag, not a queued message */
-
-static void purge_queue(HWND h)
-{
-    os_lock(&g_ui_lock);
-    unsigned out = g_qhead;
-    for (unsigned i = g_qhead; i != g_qtail; i++)
-        if (g_queue[i % QCAP].hwnd != h)
-            g_queue[out++ % QCAP] = g_queue[i % QCAP];
-    g_qtail = out;
-    os_unlock(&g_ui_lock);
-}
-
-static int post(HWND h, UINT m, WPARAM w, LPARAM l)
-{
-    os_lock(&g_ui_lock);
-    int ok = g_qtail - g_qhead < QCAP;
-    if (ok) {
-        MSG *q = &g_queue[g_qtail++ % QCAP];
-        memset(q, 0, sizeof *q);
-        q->hwnd = h;
-        q->message = m;
-        q->wParam = w;
-        q->lParam = l;
-        q->time = GetTickCount();
-    }
-    os_unlock(&g_ui_lock);
-    return ok;
-}
-
-extern "C" BOOL PostMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
-{
-    if (h && h != (HWND)(uintptr_t)0xFFFF && !wnd(h)) {   /* 0xFFFF is HWND_BROADCAST */
-        SetLastError(1400);
-        return FALSE;
-    }
-    return post(h, m, w, l);
-}
-extern "C" void fnvnx_post_message(HWND h, UINT m, WPARAM w, LPARAM l) { post(h ? h : fnvnx_main_window(), m, w, l); }
-extern "C" void PostQuitMessage(int code)
-{
-    os_lock(&g_ui_lock);
-    g_quit_pending = 1;
-    g_quit_code = code;
-    os_unlock(&g_ui_lock);
-}
-
-extern "C" BOOL PeekMessageA(LPMSG msg, HWND h, UINT lo, UINT hi, UINT remove)
-{
-    os_lock(&g_ui_lock);
-    BOOL got = FALSE;
-    for (unsigned i = g_qhead; i != g_qtail; i++) {
-        MSG *q = &g_queue[i % QCAP];
-        if (h && q->hwnd != h)
-            continue;
-        if ((lo || hi) && (q->message < lo || q->message > hi))
-            continue;
-        *msg = *q;
-        if (remove & PM_REMOVE) {
-            for (unsigned j = i; j != g_qhead; j--)
-                g_queue[j % QCAP] = g_queue[(j - 1) % QCAP];
-            g_qhead++;
-        }
-        got = TRUE;
-        break;
-    }
-    /* WM_QUIT comes last, once the queue holds nothing else, and never for a window filter */
-    if (!got && g_quit_pending && !h && (!(lo || hi) || (lo <= WM_QUIT && WM_QUIT <= hi))) {
-        memset(msg, 0, sizeof *msg);
-        msg->message = WM_QUIT;
-        msg->wParam = (WPARAM)g_quit_code;
-        msg->time = GetTickCount();
-        if (remove & PM_REMOVE)
-            g_quit_pending = 0;
-        got = TRUE;
-    }
-    os_unlock(&g_ui_lock);
-    return got;
-}
-
-extern "C" BOOL TranslateMessage(const MSG *m) { W32_UNUSED(m); return FALSE; }
-extern "C" LRESULT DispatchMessageA(const MSG *m) { return m && m->hwnd ? SendMessageA(m->hwnd, m->message, m->wParam, m->lParam) : 0; }
 
 extern "C" BOOL ShowWindow(HWND h, int cmd)
 {
@@ -1364,14 +1409,8 @@ extern "C" int GetSystemMetrics(int i)
 }
 
 /* ---- cursor and keys */
-static int g_cursor_count;
-static LONG g_cx, g_cy;
 static volatile uint8_t g_keys[256];
 
-extern "C" int ShowCursor(BOOL show) { return show ? ++g_cursor_count : --g_cursor_count; }
-extern "C" BOOL SetCursorPos(int x, int y) { g_cx = x; g_cy = y; return TRUE; }
-extern "C" void fnvnx_set_cursor_pos(int x, int y) { g_cx = x; g_cy = y; }
-extern "C" BOOL GetCursorPos(LPPOINT p) { if (!p) return FALSE; p->x = g_cx; p->y = g_cy; return TRUE; }
 extern "C" BOOL ClipCursor(const RECT *r) { W32_UNUSED(r); return TRUE; }
 extern "C" HWND SetCapture(HWND h) { W32_UNUSED(h); return NULL; }
 extern "C" BOOL ReleaseCapture(void) { return TRUE; }
@@ -1415,73 +1454,7 @@ extern "C" short GetKeyState(int vk)
         return 0;
     return (short)((g_keys[vk] ? 0x8000 : 0) | g_toggle[vk]);
 }
-extern "C" UINT GetDoubleClickTime(void) { return 500; }
 extern "C" BOOL SwapMouseButton(BOOL s) { BOOL old = g_swap_buttons != 0; g_swap_buttons = s != 0; return old; }
-
-/* INPUT is 28 bytes in the 32-bit guest: type, then a 24-byte union (MOUSEINPUT / KEYBDINPUT) */
-extern "C" UINT SendInput(UINT n, void *in, int sz)
-{
-    if (sz != 28 || (n && !in)) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-    const uint8_t *p = (const uint8_t *)in;
-    for (UINT i = 0; i < n; i++, p += 28) {
-        uint32_t type, flags;
-        uint16_t vk;
-        memcpy(&type, p, 4);
-        if (type != 1 /* INPUT_KEYBOARD */)
-            continue;
-        memcpy(&vk, p + 4, 2);
-        memcpy(&flags, p + 12, 4);
-        if (vk < 256)
-            fnvnx_set_key_state(vk, !(flags & 2 /* KEYEVENTF_KEYUP */));
-    }
-    return n;
-}
-
-/* hooks: accepted and never called (the game installs a keyboard hook to block the Windows key); each gets its own
- * handle so that unhooking twice fails as on Windows */
-static int g_hooks[8];
-extern "C" HHOOK SetWindowsHookExA(int id, HOOKPROC f, HINSTANCE m, DWORD t)
-{
-    W32_UNUSED(id); W32_UNUSED(m); W32_UNUSED(t);
-    if (!f) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return NULL;
-    }
-    os_lock(&g_ui_lock);
-    HHOOK r = NULL;
-    for (int i = 0; i < 8 && !r; i++)
-        if (!g_hooks[i]) {
-            g_hooks[i] = 1;
-            r = (HHOOK)&g_hooks[i];
-        }
-    os_unlock(&g_ui_lock);
-    if (!r)
-        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-    return r;
-}
-extern "C" BOOL UnhookWindowsHookEx(HHOOK h)
-{
-    os_lock(&g_ui_lock);
-    BOOL ok = FALSE;
-    for (int i = 0; i < 8; i++)
-        if (h == (HHOOK)&g_hooks[i] && g_hooks[i]) {
-            g_hooks[i] = 0;
-            ok = TRUE;
-        }
-    os_unlock(&g_ui_lock);
-    if (!ok)
-        SetLastError(ERROR_INVALID_PARAMETER);
-    return ok;
-}
-extern "C" LRESULT CallNextHookEx(HHOOK h, int c, WPARAM w, LPARAM l) { W32_UNUSED(h); W32_UNUSED(c); W32_UNUSED(w); W32_UNUSED(l); return 0; }
-
-/* resources: opaque non-null tokens (GDI objects live in gdi32.cpp) */
-static int g_res_dummy[4];
-extern "C" HICON LoadIconA(HINSTANCE i, LPCSTR n) { W32_UNUSED(i); W32_UNUSED(n); return (HICON)&g_res_dummy[0]; }
-extern "C" HCURSOR LoadCursorA(HINSTANCE i, LPCSTR n) { W32_UNUSED(i); W32_UNUSED(n); return (HCURSOR)&g_res_dummy[1]; }
 
 /* IAT slots named in round 5 of S5 (imports.tsv): the display device list, common controls */
 /* DISPLAY_DEVICEA: one primary display attached to the desktop */

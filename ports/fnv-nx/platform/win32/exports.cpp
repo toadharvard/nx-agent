@@ -120,6 +120,8 @@ HWND GetTopWindow(HWND);
 BOOL IsWindowVisible(HWND);
 DWORD GetWindowThreadProcessId(HWND, LPDWORD);
 BOOL UnregisterClassA(LPCSTR, HINSTANCE);
+HCURSOR SetCursor(HCURSOR);
+BOOL SetDoubleClickTime(UINT);
 DWORD SetClassLongA(HWND, int, LONG);
 }
 
@@ -178,6 +180,7 @@ const exp g_exports[] = {
     U(ShowCursor), U(ShowWindow), U(SwapMouseButton), U(TranslateMessage), U(UnhookWindowsHookEx),
     U(GetTopWindow), U(IsWindowVisible), U(GetWindowThreadProcessId), U(UnregisterClassA), U(SetClassLongA),
     U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA), U(GetClassLongA),
+    U(SetCursor), U(SetDoubleClickTime),
     E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
     E("gdi32", GetStockObject), E("gdi32", DeleteObject), E("gdi32", CreateCompatibleDC), E("gdi32", DeleteDC),
     E("gdi32", CreateCompatibleBitmap), E("gdi32", CreateDIBSection), E("gdi32", SelectObject), E("gdi32", GetDIBits),

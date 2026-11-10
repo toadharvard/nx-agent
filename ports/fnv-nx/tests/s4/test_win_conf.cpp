@@ -480,7 +480,7 @@ TEST(wc_send_input)
     memcpy(in[0], &type, 4); memcpy(in[0] + 4, &vk, 2);
     memcpy(in[1], &type, 4); memcpy(in[1] + 4, &vk, 2);
     uint32_t up = 2;
-    memcpy(in[1] + 12, &up, 4);                            // KEYEVENTF_KEYUP
+    memcpy(in[1] + 8, &up, 4);                             // KEYEVENTF_KEYUP: KEYBDINPUT.dwFlags is at offset 8 of the record (MSDN)
     CHECK_EQ(SendInput(1, in[0], 28), 1);
     CHECK((unsigned short)GetAsyncKeyState(0x7A) == 0x8001u);
     CHECK_EQ(SendInput(1, in[1], 28), 1);
