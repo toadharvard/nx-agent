@@ -1,5 +1,13 @@
 # fnv-nx native renderer (stream S6n-native-render)
 
+> **Superseded in part (2026-11-10).** The owner order and decisions of 2026-11-10 in the repository's CLAUDE.md, and MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), override this document where they conflict.
+> - **D7, D22 and D26 (destructor slot order):** replaced by SDD1.
+> - **D18 (frame target):** now a 45 fps gate, 60 a stretch; perf is counted in executed instructions.
+> - **D23/D24 (bodies):** native or lifted, decided by N1-N4.
+> - **Removed:** stand-ins, null device, recon fleet and the heuristic slot stack.
+> - **Render:** no dynamic resolution and no reduced presets. Docked output is 1080p, handheld 720p.
+
+
 Re-evaluation of D6 (a Direct3D 9 front end over deko3d, [`RENDER.md`](RENDER.md)) against a **native renderer**:
 replace Gamebryo's `NiDX9Renderer` and the render-time half of Bethesda's `bsshader` with code written directly on
 deko3d, keep the scene graph, culling and game logic. Numbers are measured on the decomp (`ext/fnv_decomp`, same
