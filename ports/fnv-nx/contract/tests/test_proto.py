@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """proto.declared and bodysel.decide on invented symbols and addresses."""
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'contract'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import proto, bodysel
 
 ok = True

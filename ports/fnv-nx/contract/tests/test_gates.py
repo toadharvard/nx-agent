@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Synthetic check of every verdict of the four contract gates (invented addresses, no game data)."""
-import os, sys, tempfile
+import os, sys, shutil
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'contract'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import gate_data, gate_call, gate_vcall, gate_xc
 
 fails = []
@@ -26,7 +26,9 @@ def verdicts(r):
     return dict((a, v) for a, v, _ in r['rows']), r['counts']
 
 
-tmp = tempfile.mkdtemp()
+tmp = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_scratch_gates')   # fixed place: no entropy
+shutil.rmtree(tmp, ignore_errors=True)
+os.makedirs(tmp)
 os.makedirs(tmp + '/out')
 with open(tmp + '/out/aliases.ld', 'w') as fh:
     for a in (0x1000, 0x1100, 0x1500):
@@ -96,4 +98,5 @@ check('xc fail', r['fail'], ['missing_decomp', 'missing_other'])
 for f in fails:
     print('FAIL', f)
 print('test_gates: %s' % ('FAIL' if fails else 'ok'))
+shutil.rmtree(tmp, ignore_errors=True)
 sys.exit(1 if fails else 0)

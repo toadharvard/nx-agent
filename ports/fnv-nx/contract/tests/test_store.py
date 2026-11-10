@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Synthetic check of store.py (round trip, byte stability) and gatefile.py (invented data, no game data)."""
-import json, os, sys, tempfile
+import json, os, sys, shutil
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'contract'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import gatefile, store
 
-d = tempfile.mkdtemp()
+d = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_scratch_store')   # fixed place: no entropy
+shutil.rmtree(d, ignore_errors=True)
+os.makedirs(d)
 F = dict(a=16, size=4, ret=(0,), calls=[(16, 32)], tails=[], icalls=[(16, 'reg', 'eax', None)], itails=[], stores=[],
          vrefs=[], data=[(17, 64)], codeptrs=[], imports=[], jt=[], fs=0, x87=0, bad=0, n=1, bytes=4, end=20, decomp=True,
          sym='f', unit='u.c')
@@ -43,4 +45,6 @@ assert list(r) == sorted(r) and r['format'] == 'fnvnx-gate/1' and r['status'] ==
 assert r['uncertified'] == sorted(r['uncertified'])
 gatefile.write('t', 3, 3, [], 'x')
 assert json.load(open(d + '/t.json'))['status'] == 'green'
+shutil.rmtree(d, ignore_errors=True)
+print('ok')
 print('ok')
