@@ -17,14 +17,15 @@ The gate modules are imported by name in the table below (no dynamic import).
 Outputs in --out:
   gates.json    {gate: {'counts': ..., 'fail_rows': n}}   counts only, no timing
   bodysel.tsv   address <tab> gate <tab> verdict <tab> detail           exe-derived: fnv-nx-build only, sorted, LF
-and, when GATE_OUT is set, one gate file per gate (gatefile.py): `n2_data`, `n2_call`, `n2_vcall`, `xc` with
-universe = functions judged, certified = those whose verdict is not in the gate's `fail` list, uncertified = the
-hex addresses of the failing ones.
+
+These are NOT failure gates.  A function with a row is not N2; bodysel.py turns it into LIFTED, which is a
+legal outcome.  The counts are a metric (share of native bodies) and an input of BODYSEL: this tool writes no
+gate file.  The verdict is red only on a violated invariant (bodysel totality, xunit, rtti, pcrel, link).
 """
 import argparse, json, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gate_data, gate_call, gate_vcall, gate_xc, gatefile, store
+import gate_data, gate_call, gate_vcall, gate_xc, store
 
 ORDER = ('data', 'call', 'vcall', 'xc')
 GATES = {'data': (gate_data, 'n2_data'), 'call': (gate_call, 'n2_call'), 'vcall': (gate_vcall, 'n2_vcall'),
@@ -54,8 +55,6 @@ def main():
         r = m.run(facts, obj, a.link)
         summary[g] = dict(counts=r['counts'], fail_rows=len(r['rows']))
         rows += [(addr, g, v, d) for addr, v, d in r['rows']]
-        gatefile.write(fname, r['judged'], r['judged'] - len(r['rows']), ['%08x' % addr for addr, _, _ in r['rows']],
-                       json.dumps(r['counts'], sort_keys=True))
         print('%-6s %s fail_rows=%d' % (g, json.dumps(r['counts'], sort_keys=True), len(r['rows'])))
     with open(os.path.join(a.out, 'gates.json'), 'w', newline='\n') as fh:
         json.dump(summary, fh, indent=1, sort_keys=True)

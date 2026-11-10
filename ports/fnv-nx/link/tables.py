@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
-"""link stage `tables` - vtables as data (L1 CONTRACT, M2).  No compile, no probe.
+"""link stage `tables` - vtables as data (L1 CONTRACT, R6 and the R3 resolution on code pointers).
 
     tables.py --facts facts.json --vtid vtid.json --universe universe.tsv --out <dir>
 
-The exe's vftables stay where they are in the data image; an object's vptr is the exe vftable address.  So the
-stage emits only data:
+The exe's vftables stay where they are in the data image and KEEP their words: a slot holds the exe address of
+its function.  No code pointer of the image is rewritten (vftable slots, EH tables, jump tables, callbacks):
+every indirect call or jump goes through the dispatcher "exe address -> guest entry" (L3; in native code through
+L2's compiler plugin).  An object's vptr is the exe vftable address.  So the stage emits only:
 
-  image_ptrs.S   one pair of words per relocated code pointer of the data image (vftable slots, callbacks,
-                 __xc ...): the image address and `__fnv_<target>`.  The loader stores the native address there.
-                 Invariant, not a decision: every target has a guest entry (R5) and every native body passed
-                 N1, so an unresolved `__fnv_<target>` here means "N1/certificate violated: tool defect".
-                 Expected count 0; the selector, not the linker, decides bodies.
   vtsites.tsv    unit, address-point symbol `_ZTV<C>.fnvnx_ap<off>` (one relocation per sub-vtable, emitted by
                  L2's compiler plugin), exe vftable address (contract/vtid.py, R6).  The link rebinds that
                  symbol of that unit to the address; no code is rewritten.
   tables.json    counts only.
 
-image_ptrs.S and vtsites.tsv are exe-derived: container and fnv-nx-build only.
+Invariant checked here: every relocated word of the image whose value lies in an executable section is either a
+code entry of the universe (it then has a guest entry: the universe is BODYSEL's domain) or one of the words
+L3's codemap classes as data placed in .text.  A violation is "universe/certificate violated: tool defect".
+
+vtsites.tsv is exe-derived: container and fnv-nx-build only.
 """
 import argparse, collections, json, os, sys
 
@@ -62,17 +63,12 @@ def main():
     bind = store.load(a.vtid, 'vtid')['bind']
     os.makedirs(a.out, exist_ok=True)
     ptrs, data = image_pointers(facts, load_universe(a.universe))
-    with open(os.path.join(a.out, 'image_ptrs.S'), 'w') as fh:
-        fh.write('    .section .rodata.fnvnx_image_ptrs,"a"\n    .p2align 2\n    .globl fnvnx_image_ptrs\nfnvnx_image_ptrs:\n')
-        for addr, t, kind in ptrs:
-            fh.write('    .word 0x%08x, __fnv_%08x\n' % (addr, t))
-        fh.write('    .word 0, 0\n')
     with open(os.path.join(a.out, 'vtsites.tsv'), 'w') as fh:
         for (unit, ztv, off), v in sorted(bind.items()):
             fh.write('%s\t%s.fnvnx_ap%d\t%08x\n' % (unit, ztv, off, v))
     c = collections.Counter()
     for addr, t, kind in ptrs:
-        c['%s words rewritten to a native entry' % kind] += 1
+        c['%s words holding a code entry (kept; dispatched by address)' % kind] += 1
     c['words that point at data in .text (kept as image addresses)'] = len(data)
     c['vtable address points rebound'] = len(bind)
     json.dump(dict(c), open(os.path.join(a.out, 'tables.json'), 'w'), indent=1, sort_keys=True)

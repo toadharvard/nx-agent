@@ -20,6 +20,7 @@ Kinds (the explicit per-file encoding):
                        vt keys "unit\\tsymbol"
   obj    objfacts.py   keys "object basename\\t%08x" (function) or "object basename\\tztv"; function value
                        (vt [tuples], data set, calls set, other set, vcall list), ztv value {symbol: [tuples]}
+  objone objfacts_one.py  the same encoding as `obj`, for the entries of one object (one file per object)
   vtid   vtid.py       bind keys "unit\\t_ZTV symbol\\toffset" (offset decimal), errors [tuples]
   eh     ehfacts.py    funcinfo/stubs/owner/kind keys decimal address; unwind_at, catch_at sorted lists (sets in memory)
 """
@@ -148,7 +149,7 @@ def _eh_dec(o):
     return r
 
 
-KINDS = dict(facts=(_facts_enc, _facts_dec), n1=(_n1_enc, _n1_dec), obj=(_obj_enc, _obj_dec),
+KINDS = dict(facts=(_facts_enc, _facts_dec), n1=(_n1_enc, _n1_dec), obj=(_obj_enc, _obj_dec), objone=(_obj_enc, _obj_dec),
              vtid=(_vtid_enc, _vtid_dec), eh=(_eh_enc, _eh_dec))
 
 
