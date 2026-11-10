@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests for verify/runtime.py (python runtime as sandbox inputs + stage documents). Plain script: exit 0 on pass,
-one PASS/FAIL/SKIP line per case. Needs root (sandbox). Store: /root/l4/rt-test."""
+one PASS/FAIL line per case. Needs root (sandbox). Store: /root/l4/rt-test."""
 import json
 import os
 import re
@@ -132,8 +132,8 @@ def main():
     json.dump(d2, open(WORK + "/miss.json", "w"))
     p = sbx("run", "--store", STORE, WORK + "/miss.json")
     check("import of a module outside the runtime fails in the sandbox", p.returncode != 0 and '"rc":0' not in p.stdout.replace(" ", ""), p.stdout[-300:])
-    # site package
-    if run(["python3", "-s", "-c", "import capstone"]).returncode == 0:
+    # site package (capstone is part of the declared environment: its absence is a failure, not a skip)
+    if True:
         p = rt("python", "--store", STORE, "--python", real, "--site", "capstone", "-o", WORK + "/runtime-cs.json")
         check("build runtime with --site capstone", p.returncode == 0, p.stdout[-400:])
         a2 = ["stage", "--store", STORE, "--runtime", WORK + "/runtime-cs.json", "--name", "rt-capstone", "--class", "verification",
@@ -141,13 +141,71 @@ def main():
         rt(*a2)
         p = sbx("run", "--store", STORE, WORK + "/stage-cs.run.json", "--result", WORK + "/res-cs.json")
         check("import capstone works inside the sandbox", p.returncode == 0 and json.load(open(WORK + "/res-cs.json"))["rc"] == 0, p.stdout[-300:])
-    else:
-        print("SKIP capstone cases (python3 -c 'import capstone' fails here)")
+
+
+def hdr(cls, data, machine, etype=3):
+    """A minimal ELF header (no program headers) of the given EI_CLASS/EI_DATA/e_machine."""
+    import struct
+    e = "<" if data == 1 else ">"
+    ident = b"\x7fELF" + bytes([cls, data, 1]) + b"\0" * 9
+    return ident + struct.pack(e + "HHI", etype, machine, 1) + b"\0" * 64
+
+
+def loader_rule():
+    """The dynamic loader skips candidates of another class/encoding/machine and goes on (ld.so(8))."""
+    import runtime
+    d = BASE + "/loader"
+    shutil.rmtree(d, ignore_errors=True)
+    for n in ("w32", "w64", "wbe", "warm", "only32"):
+        os.makedirs(d + "/" + n)
+    libc = os.path.realpath("/lib/x86_64-linux-gnu/libc.so.6")
+    exe = os.path.realpath("/usr/bin/true")
+    for n, h in (("w32", hdr(1, 1, 3)), ("wbe", hdr(2, 2, 62)), ("warm", hdr(2, 1, 183)), ("only32", hdr(1, 1, 3))):
+        open("%s/%s/libc.so.6" % (d, n), "wb").write(h)
+    shutil.copy(libc, d + "/w64/libc.so.6")
+    check("ident: x86-64 / i386 / big-endian / arm64 differ", len({runtime.ident(p) for p in
+          (libc, d + "/w32/libc.so.6", d + "/wbe/libc.so.6", d + "/warm/libc.so.6")}) == 4)
+    old = (runtime.conf_dirs, runtime.DEFAULT_DIRS)
+    runtime.conf_dirs, runtime.DEFAULT_DIRS = (lambda *a: []), [d + "/w64", "/lib64"]
+    try:
+        out = runtime.closure([exe], [], (d + "/w32", d + "/wbe", d + "/warm"))
+        check("wrong-arch candidates earlier in the search order are skipped, the x86-64 one is chosen",
+              sorted(out) == ["/lib64/ld-linux-x86-64.so.2", d + "/w64/libc.so.6"], str(out)[:300])
+        runtime.DEFAULT_DIRS = [d + "/only32"]
+        try:
+            runtime.closure([exe], [], (d + "/w32", d + "/wbe", d + "/warm"))
+            check("only wrong-arch candidates: error", False, "no error")
+        except runtime.RtError as e:
+            m = str(e)
+            check("only wrong-arch candidates: error names the library and the directories searched",
+                  "libc.so.6" in m and d + "/w32" in m and d + "/only32" in m, m)
+        # PT_INTERP: the loader file must be of the object's class too
+        data = open(exe, "rb").read()
+        old_i = b"/lib64/ld-linux-x86-64.so.2\0"
+        check("probe executable has the usual PT_INTERP", old_i in data)
+        bad = d + "/badinterp"
+        open(d + "/i", "wb").write(hdr(1, 1, 3))
+        new_i = (d + "/i").encode()  # must fit the 27 bytes of the original string
+        open(bad, "wb").write(data.replace(old_i, new_i + b"\0" * (len(old_i) - len(new_i))))
+        os.chmod(bad, 0o755)
+        runtime.DEFAULT_DIRS = [d + "/w64", "/lib64"]
+        try:
+            runtime.closure([bad], [], (d + "/w64",))
+            check("PT_INTERP of another class: error", False, "no error")
+        except runtime.RtError as e:
+            check("PT_INTERP of another class: error", "PT_INTERP" in str(e), str(e))
+    finally:
+        runtime.conf_dirs, runtime.DEFAULT_DIRS = old
+    # roots: a foreign-arch ELF file in a --site package directory or a tool tree is data, not a root of the closure
+    open(d + "/w32/data.so", "wb").write(hdr(1, 1, 3))
+    check("elf_files(want) leaves foreign-arch files out", runtime.elf_files(d + "/w32", runtime.ident(libc)) == []
+          and runtime.elf_files(d + "/w64", runtime.ident(libc)) == [d + "/w64/libc.so.6"])
 
 
 if os.geteuid() != 0:
-    print("SKIP: needs root")
-    sys.exit(0)
+    print("FAIL prerequisites: need root (declared environment uid 0)")
+    sys.exit(1)
+loader_rule()
 main()
 print("TIMES " + json.dumps(TIMES, sort_keys=True))
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
