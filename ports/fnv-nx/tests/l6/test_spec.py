@@ -2,6 +2,7 @@
 """tests/l6/test_spec.py: checks render/d3d9/spec/d3d9_spec.json against the shim headers and the SDK.
 Run: python3 -I tests/l6/test_spec.py    (exit != 0 on any failure; prints counts, plus every unresolved item)"""
 import json, os, re, subprocess, sys, tempfile
+sys.dont_write_bytecode = True
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SPEC = os.path.join(ROOT, "render", "d3d9", "spec")
@@ -89,7 +90,7 @@ def main():
                 for fld in ("len", "off"):
                     if fld in p or fld == "len":
                         for e in X.check(p.get(fld, ""), pn, consts, post=p["dir"] != "in"): fail("buffers", f"{pid}.{fld}: {e}")
-                if p.get("canon") and p["canon"].get("as") != "ohandle": fail("buffers", f"{pid}: canon")
+                if p.get("canon") and (p["canon"].get("as") not in ("ohandle", "handle") or (p["canon"]["as"] == "handle" and p["canon"].get("iface") not in ifaces)): fail("buffers", f"{pid}: canon")
                 if p.get("canon"):
                     for e in X.check(p["canon"]["when"], pn, consts): fail("buffers", f"{pid}.canon: {e}")
             if k == "locked":

@@ -5,7 +5,7 @@ x86 SDK rules, which AArch64-ILP32 reproduces: every pointer/HANDLE/HWND/long is
 import os, re
 
 INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "shim", "include")
-HDRS = ("d3d9types.h", "d3d9caps.h")
+HDRS = ("d3d9types.h", "d3d9caps.h", "d3d9.h")
 WIN_STRUCTS = ("GUID", "POINT", "RECT", "PALETTEENTRY", "RGNDATAHEADER", "RGNDATA", "LUID")
 # base type -> (size, signed, kind)
 BASE = {}
@@ -66,7 +66,7 @@ def body_of(t, start):
 
 def load():
     t = {f: text(f) for f in HDRS + ("fnvnx_win32.h",)}
-    allt = t["d3d9types.h"] + t["d3d9caps.h"]
+    allt = "\n".join(t[h] for h in HDRS)
     consts = {}
     for m in re.finditer(r"#define\s+(\w+)\s+([0-9xXa-fA-F() <>|+*-]+?)[LlUu]*\s*$", allt, re.M):
         try: consts[m.group(1)] = int(eval(re.sub(r"(?<=[0-9a-fA-F])[LlUu]+\b", "", m.group(2)), {}, {}))

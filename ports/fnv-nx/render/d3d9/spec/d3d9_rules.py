@@ -7,7 +7,7 @@ def F(fam, d=None): return {"kind": "flags", "flags": fam, "d": d}
 def H(null=False, iface=None, d=None): return {"kind": "handle", "null": null, "iface": iface, "d": d}
 def S(null=False, d=None, struct=None): return {"kind": "struct", "null": null, "d": d, "struct": struct}
 def O(os, null=False, d=None): return {"kind": "ohandle", "os": os, "null": null, "d": d}
-def V(size=4, d=None): return {"kind": "value", "size": size, "d": d}
+def V(size=4, d=None, in_when=None): return {"kind": "value", "size": size, "d": d, "in_when": in_when}
 def B(elem, ln, off=None, null=False, d=None, canon=None):
     return {"kind": "buffer", "elem": elem, "len": ln, "off": off, "null": null, "d": d, "canon": canon}
 def L(shape, unlock, match=(), **ex): return {"kind": "locked", "d": "out", "lock": dict(shape=shape, unlock=unlock, match=[list(m) for m in match], **ex)}
@@ -33,9 +33,9 @@ RULES = {
     "QueryInterface": {"ppvObj": H(True, "$riid", "out")},
     "GetContainer": {"ppContainer": H(True, "$riid", "out")},
     "SetPrivateData": {"data": B(1, "data_size", canon={"when": "band(flags,D3DSPD_IUNKNOWN)", "as": "ohandle"}), "flags": F("D3DSPD")},
-    "GetPrivateData": {"pData": B(1, "if(nonnull(pData),ok(*pSizeOfData@out),0)", null=True, d="out"), "pSizeOfData": V(4, "inout")},
-    "GetFunction": {"pData": B(1, "if(nonnull(pData),ok(this.shader_bytes),0)", null=True, d="out"), "pSizeOfData": V(4, "inout")},
-    "GetDeclaration": {"pDecl": B(8, "if(nonnull(pDecl),ok(this.decl_bytes),0)", null=True, d="out"), "pNumElements": V(4, "inout")},
+    "GetPrivateData": {"pData": B(1, "if(nonnull(pData),ok(*pSizeOfData@out),0)", null=True, d="out", canon={"when": "pd_iunknown(refguid)", "as": "ohandle"}), "pSizeOfData": V(4, "inout")},
+    "GetFunction": {"pData": B(1, "if(nonnull(pData),ok(this.shader_bytes),0)", null=True, d="out"), "pSizeOfData": V(4, "inout", "nonnull(pData)")},
+    "GetDeclaration": {"pDecl": B(8, "if(nonnull(pDecl),ok(this.decl_bytes),0)", null=True, d="out"), "pNumElements": V(4, "out")},
     "CreateVertexDeclaration": {"elements": B("D3DVERTEXELEMENT9", "decl_bytes(elements)")},
     "CreateVertexShader": {"byte_code": B(4, "sm_bytes(byte_code)")},
     "CreatePixelShader": {"byte_code": B(4, "sm_bytes(byte_code)")},
@@ -54,8 +54,8 @@ RULES = {
                                "data": B(1, "if(primitive_count,vertex_count*stride,0)", off="min_vertex_idx*stride")},
     "DrawRectPatch": {"segment_count": B(4, "16"), "patch_info": S(True)},
     "DrawTriPatch": {"segment_count": B(4, "12"), "patch_info": S(True)},
-    "CheckResourceResidency": {"resources": B(4, "resource_count*4", canon={"when": "1", "as": "handle", "iface": "IDirect3DResource9"})},
-    "SetConvolutionMonoKernel": {"rows": B(4, "width*4", null=True), "columns": B(4, "height*4", null=True)},
+    "CheckResourceResidency": {"resources": B(4, "resource_count*4", d="in", canon={"when": "1", "as": "handle", "iface": "IDirect3DResource9"})},
+    "SetConvolutionMonoKernel": {"rows": B(4, "width*4", null=True, d="in"), "columns": B(4, "height*4", null=True, d="in")},
     "SetVertexShaderConstantF": {"data": B(4, "count*16")}, "SetPixelShaderConstantF": {"data": B(4, "count*16")},
     "SetVertexShaderConstantI": {"data": B(4, "count*16")}, "SetPixelShaderConstantI": {"data": B(4, "count*16")},
     "SetVertexShaderConstantB": {"data": B(4, "count*4")}, "SetPixelShaderConstantB": {"data": B(4, "count*4")},
@@ -65,10 +65,11 @@ RULES = {
     "ProcessVertices": {"Flags": F("D3DPV")}, "SetCursorPosition": {"Flags": F("D3DCURSOR")},
     "GetAdapterIdentifier": {"Flags": F("D3DENUM")}, "Issue": {"dwIssueFlags": F("D3DISSUE")},
     "GetData": {"pData": B(1, "ok0(min(dwSize,this.data_size))", null=True, d="out"), "dwGetDataFlags": F("D3DGETDATA")},
+    "GetAdapterDisplayModeEx": {"mode": S(d="inout")}, "GetDisplayModeEx": {"mode": S(d="inout")},
     "GetFVF": {"pFVF": F("D3DFVF", "out")},
-    "RegisterSoftwareDevice": {"pInitializeFunction": O("function pointer")},
-    "CreateDevice": {"BehaviorFlags": F("D3DCREATE"), **PP_IN}, "CreateDeviceEx": {"flags": F("D3DCREATE"), **PP_IN, "mode": S(True)},
-    "Reset": PP_IN, "ResetEx": {**PP_IN, "mode": S(True)}, "CreateAdditionalSwapChain": PP_IN,
+    "RegisterSoftwareDevice": {"pInitializeFunction": O("function pointer", d="in")},
+    "CreateDevice": {"BehaviorFlags": F("D3DCREATE"), **PP_IN}, "CreateDeviceEx": {"flags": F("D3DCREATE"), **PP_IN, "mode": S(True, "inout")},
+    "Reset": PP_IN, "ResetEx": {**PP_IN, "mode": S(True, "inout")}, "CreateAdditionalSwapChain": PP_IN,
     "AddDirtyRect": {"dirty_rect": S(True)}, "AddDirtyBox": {"dirty_box": S(True)},
     "UpdateSurface": {"src_rect": S(True), "dst_point": S(True)}, "ColorFill": {"rect": S(True)},
     "StretchRect": {"src_rect": S(True), "dst_rect": S(True)},
@@ -86,7 +87,6 @@ RULES = {
     "VolumeTexture9.LockBox": {"locked_box": L("box", "UnlockBox", [("level", "Level")], box="box", **pixels("box_w(box,lvl(this.width,level))", "box_h(box,lvl(this.height,level))", "box_d(box,lvl(this.depth,level))"), **lock_expr("flags")), "flags": F("D3DLOCK"), "box": S(True)},
 }
 RULES["IndexBuffer9.Lock"] = RULES["VertexBuffer9.Lock"]
-for _k in ("CubeTexture9.GetLevelDesc", "Texture9.GetLevelDesc"): RULES.setdefault(_k, {})
 NAME_FIX = {"GetFunction": ["pData"], "GetDeclaration": ["pDecl"], "GetLight": [None, "pLight"], "DrawIndexedPrimitive": ["PrimitiveType"]}
 NEW = {"CreateDevice", "CreateDeviceEx", "CreateAdditionalSwapChain", "CreateTexture", "CreateVolumeTexture", "CreateCubeTexture",
        "CreateVertexBuffer", "CreateIndexBuffer", "CreateRenderTarget", "CreateDepthStencilSurface", "CreateOffscreenPlainSurface",
