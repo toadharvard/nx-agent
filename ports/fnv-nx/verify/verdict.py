@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """L4 verdict: gate certificates, merge gate, build/verification separation, rule-defect queue. stdlib only.
 Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 2 red/blocked, 3 merge conflict.
-  run         --repo R --commit C --gates GATES.json --out V.json [--budget-s 300]
-              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_COMMIT), in file order. A gate writes
+  run         --repo R --commit C --gates GATES.json --out V.json [--budget-s 300] [--env-id H] [--cache DIR]
+              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_COMMIT [+ GATE_CACHE]), in file order.
+              Gate contract for the environment: GATE_OUT (result directory), GATE_COMMIT (commit under test) and, when --cache is
+              given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
+              GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
+              arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
               {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[<=50 ids],"detail"} at GATE_OUT/<result>.
               Gate green iff exit 0, valid result, name equal, status green and certified == universe (completeness of
               certificates, not a run counter; certified > universe is invalid). Verdict green iff >=1 gate and all gates green.
@@ -102,7 +106,7 @@ def _gate_result(g, out_dir, rc):
     return "green", u, c, ""
 
 def cmd_run(a):
-    o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1, "--env-id": 1})
+    o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1, "--env-id": 1, "--cache": 1})
     spec = _load(o["--gates"], "gates")
     gates = spec.get("gates") if isinstance(spec, dict) and spec.get("format") == "fnvnx-gates/1" else None
     if not isinstance(gates, list) or not all(isinstance(g, dict) and isinstance(g.get("name"), str) and g.get("argv")
@@ -115,6 +119,11 @@ def cmd_run(a):
     work = tempfile.mkdtemp(prefix="verdict-")
     wt = os.path.join(work, "wt")
     _git_ok(o["--repo"], "worktree", "add", "--detach", wt, commit)
+    genv = dict(os.environ, GATE_COMMIT=commit)
+    genv.pop("GATE_CACHE", None)
+    if "--cache" in o:
+        genv["GATE_CACHE"] = os.path.abspath(o["--cache"])
+        os.makedirs(genv["GATE_CACHE"], exist_ok=True)
     res, t_all = [], time.time()
     try:
         for g in gates:
@@ -122,7 +131,7 @@ def cmd_run(a):
             os.makedirs(out)
             t0 = time.time()
             try:
-                rc = subprocess.run(g["argv"], cwd=wt, env=dict(os.environ, GATE_OUT=out, GATE_COMMIT=commit),
+                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out),
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
                 st, u, c, why = _gate_result(g, out, rc)
             except OSError as e:

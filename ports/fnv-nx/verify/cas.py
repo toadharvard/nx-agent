@@ -67,6 +67,12 @@ def _put(store, kind, name, data=None, mode=0o444):
 
 def _ingest_file(path, store, x):
     st = os.lstat(path)
+    if store is None:  # hash only: nothing is written
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for b in iter(lambda: f.read(1 << 20), b""):
+                h.update(b)
+        return h.hexdigest()
     d = os.path.join(store, "obj")
     os.makedirs(d, exist_ok=True)
     tmp = os.path.join(d, ".tmp-%d-%s" % (os.getpid(), os.urandom(6).hex()))
@@ -101,7 +107,7 @@ def _ingest_file(path, store, x):
             os.unlink(tmp)
         raise
 
-def _entry(path, rel, store, excl, used):
+def _entry(path, rel, store, excl, used, skip=()):
     st = os.lstat(path)
     m = st.st_mode
     if stat.S_ISLNK(m):
@@ -116,10 +122,13 @@ def _entry(path, rel, store, excl, used):
             if r in excl:
                 used.add(r)
                 continue
-            entries[_text(name, "file name in " + path)] = _entry(os.path.join(path, name), r, store, excl, used)
+            if name in skip:
+                continue
+            entries[_text(name, "file name in " + path)] = _entry(os.path.join(path, name), r, store, excl, used, skip)
         data = canon({"format": FORMAT, "entries": entries})
         h = hashlib.sha256(data).hexdigest()
-        _put(store, "tree", h + ".json", data)
+        if store is not None:
+            _put(store, "tree", h + ".json", data)
         return {"t": "d", "h": h}
     raise CasError("unsupported file type (not file/dir/symlink): %s" % path)
 
@@ -134,6 +143,12 @@ def ingest(path, store, exclude=()):
     data = canon(e)
     _put(store, "tree", hashlib.sha256(data).hexdigest() + ".json", data)
     return hashlib.sha256(data).hexdigest()
+
+def tree_hash(path, skip=()):
+    """The hash ingest(path, STORE) returns, computed without a store (nothing is written, so no mtime or object is involved).
+    SKIP: entry names left out wherever they occur (e.g. "__pycache__"); the result then differs from ingest's by design."""
+    e = _entry(path, "", None, set(), set(), frozenset(skip))
+    return e["h"] if e["t"] == "d" else hashlib.sha256(canon(e)).hexdigest()
 
 def manifest(h, store):
     p = os.path.join(store, "tree", h[:2], h + ".json")
