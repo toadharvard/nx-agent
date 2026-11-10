@@ -20,6 +20,8 @@ spec = importlib.util.spec_from_file_location('s1_compile', os.path.join(TOOLS, 
 s1 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(s1)
 
+os.environ['FNVNX_RECON_CERTIFY'] = '1'      # REC1's own mechanics; the certificate rule is tests/s1/test_reccert.py
+
 FAILS = []
 
 

@@ -5331,12 +5331,31 @@ def r_vfptr_empty_base(path, text, stats):
 # occur exactly once there. A recon written for other text must never half-apply: when any pair does not match exactly
 # once (or is malformed), the whole recon is rejected for that unit (no replace, no append, no symbols), so its rows
 # stay visible trap stubs, and the prepare goes on (orchestrator, R2: one stale recon must not block every build).
+# REC-CERT (orchestrator, 2026-11-10; tools/rules/reccert.py): a recon is applied only when its recon.json has a
+# certificate for the rule set of this prepare (the unit compiled with it and its placed functions matched, on a
+# farm, under exactly these rules). Any other recon is skipped (REC-NOCERT); FNVNX_RECON_CERTIFY=1 is the certifying
+# run, which applies them all so that they can be compiled and matched. A unit that fails to compile because of a
+# recon cannot exist: the checks above stay as the recon format's own, they are no longer what keeps a build whole.
 # Each rejection is counted (REC1-REJECT), printed to stderr and listed in <out>/build/recon_rejected.tsv (recon dir,
 # unit, pair index, count, the start of `old`) by the POST hook.
 # REC1-DUP-DEF (orchestrator, R2): an append that would define a function the unit already defines (same namespace
 # path, qualified name and parameter types, at namespace scope) is rejected the same way (pair index -2), instead of
 # failing the compile with a redefinition. A recon that restored a body a rule had stripped (STAND1 with a split head)
 # then stops applying by itself once the rule keeps the body.
+
+def _reccert():
+    import importlib.util
+    m = prepare.__dict__.get('_fnvnx_reccert')
+    if m is None:
+        spec = importlib.util.spec_from_file_location('fnvnx_reccert', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reccert.py'))
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        prepare.__dict__['_fnvnx_reccert'] = m
+    return m
+
+def _rules_hash():
+    h = prepare.__dict__.get('_fnvnx_rules_hash')
+    if h is None: h = prepare.__dict__['_fnvnx_rules_hash'] = _reccert().rules_hash()
+    return h
 
 def _recon_entries(path):
     """[(recon dict, directory)] valid for the decomp checkout that holds path (cached on the prepare module:
@@ -5378,6 +5397,10 @@ def _recon_entries(path):
             dup = sorted(fn['address'] for fn in r.get('functions', []) if fn.get('address') in defined)
             prepare.__dict__.setdefault('_fnvnx_recon_rejected', []).append(
                 (os.path.dirname(f), r['unit'], -1, -3, 'functions placed by another unit now: ' + ' '.join(dup)))
+        elif os.environ.get('FNVNX_RECON_CERTIFY') != '1' and not _reccert().certified(r, _rules_hash()):
+            # REC-CERT (tools/rules/reccert.py): no certificate for this rule set, so the text it was written
+            # against is not known to be the text here. Not applied; its functions go the general way.
+            r['_skip'] = 'REC-NOCERT'
         _RECON.append((r, os.path.dirname(f)))
     return _RECON
 
