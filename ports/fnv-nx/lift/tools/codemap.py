@@ -301,3 +301,40 @@ def noreturn_lfp(E, trav, seeds):
         for e in new: N.add(e)
         for e in new: dirty |= uses.get(e, set())
     return N, res
+def exe_noreturn(U, thrower):
+    """exe pipeline: compute N over the converged entry set, then unreach the instructions that only flow after a call to a member of N (entries are unchanged).
+    -> (|N|, removed instructions, removed bytes)."""
+    ins = U.insns; ent = U.entries; fs = U.fsize; T0, T1 = U.T0, U.T1; RET = ('ret', 'retf', 'iret', 'iretd')
+    calltg = {a: t for t, ss in sorted(U.callers.items()) for a in ss}; nrcall, nrjmp = nr_sites(U, U.imports)
+    def trav(e, N):
+        f = U.indec(e); lo, hi = (f[0], f[0] + f[1]) if f else (T0, T1); dec = e in fs
+        ext = []; seen = set(); deps = set(); ends = set(); st = [e]
+        while st:
+            a = st.pop()
+            while True:
+                if a in seen: break
+                if not (lo <= a < hi) or (a != e and not dec and a in ent):
+                    if a in ent: deps.add(a); ends.add(a)
+                    else: ends.add('bad')
+                    break
+                di = ins.get(a)
+                if di is None: ends.add('bad'); break
+                seen.add(a); ext.append(a); mn = di[1]
+                if mn in RET: ends.add('ret'); break
+                ct = calltg.get(a)
+                if ct is not None: deps.add(ct)
+                if a in nrcall or (ct is not None and ct in N): ends.add('callN'); break
+                if mn == 'jmp' and not di[4]: ends.add('nrimp' if a in nrjmp else 'bad'); break
+                st.extend(di[4])
+                if not di[3]:
+                    if not di[4]: ends.add('fault')
+                    break
+                a += di[0]
+        return ext, deps, ends
+    E = sorted(ent); N, res = noreturn_lfp(E, trav, {thrower} & set(ent)); keep = bytearray(U.TN)
+    for e in E:
+        for a in res[e][0]: keep[a - T0] = 1
+    gone = [a for a in sorted(ins) if not keep[a - T0]]; nb = 0
+    for a in gone:
+        sz = ins[a][0]; nb += sz; U.cov[a - T0:a - T0 + sz] = bytes(sz); del ins[a]
+    return len(N), len(gone), nb
