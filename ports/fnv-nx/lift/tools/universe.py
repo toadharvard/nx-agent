@@ -51,7 +51,7 @@ insns = {}                                # addr -> (size, mnem, feat, fall, tar
 entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw', 'inner', 'ptr', 'orphan']
 tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); midptr = set()
 dataintext = set(); bad_entries = set(); queue = deque()
-callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set(); skind = {}
+lone = set(); callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set(); skind = {}
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
 EXOTIC = set('aaa aas daa das aam aad arpl bound in out insb insd outsb outsd sldt hlt lcall ljmp popal pushal iretd retf into salc'.split())
 EXO = {'hlt', 'rdmsr', 'wrmsr', 'lgdt', 'lidt', 'sgdt', 'sidt', 'ltr', 'str', 'invd', 'wbinvd', 'lmsw', 'smsw', 'clts', 'rdpmc', 'invlpg', 'ud2', 'iret', 'iretd', 'syscall', 'sysret', 'sysexit', 'bound', 'arpl', 'into', 'sldt', 'lldt', 'verr', 'verw'}
@@ -222,7 +222,10 @@ def ptr_pass(data, final, eh):
         if data and r in eh.sites: settled.add(r); continue
         k, ins = skind.get(r) or site_kind(r)
         if k == 'slot' and not final: continue
-        if k == 'slot': dinfo['slot_unattached'] += 1; tbl[r - T0:r - T0 + 4] = b'\1\1\1\1'
+        if k == 'slot':
+            nb = lambda q: q in rset and intext(u32(q)) and not cov[q - T0] or tbl[q - T0]
+            if not (nb(r + 4) or nb(r - 4)): lone.add(r); continue   # a lone reloc'd dword in a gap: operand of unreached code, not a table
+            dinfo['slot_unattached'] += 1; tbl[r - T0:r - T0 + 4] = b'\1\1\1\1'
         if k in ('data', 'imm', 'slot'): new += ptr_target(v, r); settled.add(r)
         elif k == 'tbl': settled.add(r)
         elif k == 'disp': disp_ref(r, v, ins, final); settled.add(r); new += 1
@@ -270,7 +273,7 @@ def orphan_pass(runs):
     n = 0
     for s, e in runs:
         ins = list(md.disasm(text[s:e], T0 + s))
-        if not ins or sum(i.size for i in ins) != e - s or not (ins[-1].mnemonic in ('ret', 'retf', 'jmp') or cov[e] == 1): continue
+        if not ins or sum(i.size for i in ins) != e - s or any(i.mnemonic in EXOTIC for i in ins) or not (ins[-1].mnemonic in ('ret', 'retf', 'jmp') or cov[e] == 1): continue
         starts = [T0 + s] + [i.address + i.size for i in ins[:-1] if i.mnemonic in ('ret', 'retf', 'jmp', 'int3') and i.address + i.size < T0 + e]
         for a in starts:
             if a in entries or cov[a - T0]: continue
@@ -366,9 +369,18 @@ print('unexplained: %d runs, %d bytes; size hist (<=N): %s' % (len(runs), sum(e 
 print('entries %d; per primary kind: %s' % (len(entries), dict(kc)))
 print('entries carrying kind (any): %s' % {k: kany[k] for k in PRI if k in kany})
 print('non-decomp entries %d (inner %d); sum of extents %d; unique non-decomp code bytes %d; bad-decode entries %d' % (len(nonde), len(parent), extsum, cc[2], len(bad_entries)))
-print('use sites: %s; decomp walks with bad decode %d' % (dict(dinfo), 0))
+print('use sites: %s; lone reloc dwords in gaps %d' % (dict(dinfo), len(lone)))
 print('rejected pointers (not entries): %s' % dict(Counter(k for k, r in rejects.values())))
-print('decomp unreached non-padding: %d funcs %d bytes in %d runs; mid-decomp jumps %d, calls %d' % (uf, ub, len(druns), midf, len(midcall)))
+dk = Counter(); dex = []
+for s0, e0 in druns:
+    ins = list(md.disasm(text[s0:e0], T0 + s0)); clean = sum(i.size for i in ins) == e0 - s0
+    p0 = s0 - 1
+    while p0 >= 0 and cov[p0] == 2: p0 -= 1
+    term = p0 >= 0 and cov[p0] == 1 and not insns[T0 + p0][3]
+    k = ('dead-after-terminator' if term else 'dead-other') if clean else 'undecodable'; dk[k, 0] += 1; dk[k, 1] += e0 - s0
+    if not clean or any(i.mnemonic in EXOTIC for i in ins): dex.append((T0 + s0, e0 - s0))
+print('decomp bytes no path reaches, not padding: %d funcs, %d bytes, %d runs; mid-decomp jumps %d, calls %d' % (uf, ub, len(druns), midf, len(midcall)))
+print('  by structure (runs/bytes): ' + '; '.join('%s %d/%d' % (k, dk[k, 0], dk[k, 1]) for k in sorted({k for k, _ in dk})) + '; undecodable/exotic: ' + ' '.join('%x+%d' % x for x in dex[:5]))
 print('only in non-decomp: ' + (' '.join('%s=%d' % (k, v) for k, v in sorted(nc.items()) if k not in dc and k in EXOTIC) or '-'))
 print('exotic mnemonics in reached code: %s' % (dict(Counter(insns[a][1] for a in exo)) or 0))
 for x in sorted(exo)[:30]:
