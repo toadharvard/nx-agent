@@ -69,3 +69,16 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 2. ENV table (caps, formats, MSAA, Ex availability): owner approval (R10b).
 3. `pix` outputs (occlusion query counts, render-target read-back) cannot be equal across GPUs: the stream check
    masks them and injects the recorded value in check runs only.
+
+## Orchestrator decisions on shader translation (2026-11-10)
+
+- Every program of shaderpackage*.sdp is translated offline; the filled cache (keyed by bytecode hash) is a required
+  build artifact of the release, built by a farm, part of the build key.
+- A cache miss translates synchronously inside Create*Shader (the D3D9 contract: the call returns a ready shader);
+  the result is stored on SD. No deferred drawing. Parallelism only inside one translation.
+- Consequence for the translator: everything a program depends on beyond its bytecode must be DATA (driver UBO), or
+  a finite set of variants all produced at Create time: fog and alpha test (already uniforms), ps_1_x sampler
+  dimension (taken from the bound texture), flat shading, clip planes, point size.
+- Measure once the recorder exists (task M1, with L4's counter): (a) where the game calls Create*Shader (start and
+  loading, or gameplay frames), (b) cache misses on a standard install, (c) instructions per uam translation.
+- A direct bytecode -> Maxwell code backend without GLSL/NIR is an L7 lever, only by measurement, only hash-equal.
