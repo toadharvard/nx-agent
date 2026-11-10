@@ -1,4 +1,4 @@
-/* waveout.cpp - winmm waveOut (the Bink video DLL's audio path) on the DirectSound mixer.
+/* waveout.cpp - winmm waveOut (a DLL's audio path) on the DirectSound mixer.
  *
  * One device (id 0, also WAVE_MAPPER) = the mixer's sink (48 kHz stereo). Each open handle owns one mixer
  * pull-source voice in the handle's own format (8/16-bit, 1/2 ch, any rate), so format and rate conversion are the

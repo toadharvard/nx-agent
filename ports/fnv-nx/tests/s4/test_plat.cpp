@@ -1,6 +1,6 @@
 /* test_plat.cpp - the platform lane's recorder (platform/win32/platstat.cpp, tools/perf/PLAT.md): failed opens
  * through CreateFileA, the CRT's fopen and _open (path class, error, the case-insensitive scan, no path printed),
- * unimplemented and no-op stand-ins (BinkOpen, SteamUser, DebugBreak), decode and input notes, distinct counting by
+ * unimplemented and no-op stand-ins (SteamUser, DebugBreak), decode and input notes, distinct counting by
  * caller, the flush lines and the summary. Recording is stopped at the end. */
 #include "s4_test.h"
 
@@ -15,7 +15,6 @@ static bool has(const char *s) { return g_lines.find(s) != std::string::npos; }
 
 extern "C" void *SteamUser(void);
 extern "C" int fnvnx_open(const char *path, int oflag, int pmode);   /* platform/crt/iob.c (lowio _open) */
-typedef void *(*bink_open_fn)(const char *, unsigned);
 /* an unimplemented stand-in, as platform code marks one (FNVNX_UNIMPL: the plat lane's D25 #3 count) */
 extern "C" __attribute__((noinline)) void *plat_test_unimpl(void)
 {
@@ -52,27 +51,21 @@ TEST(plat_lane_opens_stubs_counts)
     CHECK(has("plat: open _open caller 0x"));
     CHECK(has(" ini err "));
     CHECK(!has("Missing - Meshes"));            /* no path is printed */
-    /* stand-ins: an unimplemented entry (plat_test_unimpl), BinkOpen, SteamUser and DebugBreak (documented no-ops:
-     * BinkOpen's NULL is the missing-movie path the exe null-tests, V1 BINK-1) */
-    bink_open_fn bo = (bink_open_fn)fnvnx_win32_lookup_export("binkw32.dll", "_BinkOpen@8");
-    CHECK(bo != NULL);
+    /* stand-ins: an unimplemented entry (plat_test_unimpl), SteamUser and DebugBreak (documented no-ops) */
     for (int i = 0; i < 3; i++) CHECK(plat_test_unimpl() == NULL);   /* one call site: one distinct entry, 3 calls */
-    CHECK(bo("movie.bik", 0) == NULL);
     CHECK(SteamUser() == NULL);
     DebugBreak();
-    fnvnx_plat_note(FNVNX_PLAT_DECODE, "ov_open_callbacks", 0x1234, "ov -132");
+    fnvnx_plat_note(FNVNX_PLAT_DECODE, "decode_item", 0x1234, "decode -132");
     fnvnx_plat_note(FNVNX_PLAT_INPUT, "fnvnx_hid_usage_to_dik", 0, "hid usage 112");
     fnvnx_plat_note(FNVNX_PLAT_INPUT, "fnvnx_hid_usage_to_dik", 0, "hid usage 112");
     fnvnx_plat_counts(d, c);
     CHECK_EQ(d[FNVNX_PLAT_UNIMPL] - d0[FNVNX_PLAT_UNIMPL], 1ull);
     CHECK_EQ(c[FNVNX_PLAT_UNIMPL] - c0[FNVNX_PLAT_UNIMPL], 3ull);
-    CHECK_EQ(d[FNVNX_PLAT_NOOP] - d0[FNVNX_PLAT_NOOP], 3ull);
+    CHECK_EQ(d[FNVNX_PLAT_NOOP] - d0[FNVNX_PLAT_NOOP], 2ull);
     CHECK_EQ(d[FNVNX_PLAT_DECODE] - d0[FNVNX_PLAT_DECODE], 1ull);
     CHECK_EQ(d[FNVNX_PLAT_INPUT] - d0[FNVNX_PLAT_INPUT], 1ull);
     CHECK_EQ(c[FNVNX_PLAT_INPUT] - c0[FNVNX_PLAT_INPUT], 2ull);
     CHECK(has("plat: unimpl plat_test_unimpl caller 0x"));
-    CHECK(has("plat: noop BinkOpen caller 0x"));
-    CHECK(!has("plat: unimpl BinkOpen"));
     CHECK(has("plat: noop SteamUser caller 0x"));
     CHECK(has("plat: noop DebugBreak caller 0x"));
     fnvnx_plat_flush();

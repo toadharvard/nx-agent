@@ -1,6 +1,5 @@
 /* register.cpp - hooks S7's DLL replacements into the runtime (S4):
- *   modules  dsound, dinput8, xinput1_3 (also xinput1_4/9_1_0 aliases), vorbisfile (also libvorbisfile,
- *            the IAT's name)  -> LoadLibrary/GetProcAddress
+ *   modules  dsound, dinput8, xinput1_3 (also xinput1_4/9_1_0 aliases)  -> LoadLibrary/GetProcAddress
  *   COM      CLSID_DirectSound8, CLSID_DirectSound, CLSID_DirectInput8, CLSID_FilterGraph              -> CoCreateInstance
  *   IAT      fnvnx_audio_input_lookup_export(dll, name) for the loader's import resolution (the S4 export
  *            table, fnvnx_win32_lookup_export, does not consult registered modules; see AUDIO_INPUT.md).
@@ -21,16 +20,6 @@ HRESULT fnvnx_dsound_com_factory(const GUID *iid, void **out);
 HRESULT fnvnx_dinput_com_factory(const GUID *iid, void **out);
 HRESULT fnvnx_dshow_com_factory(const GUID *iid, void **out);   /* platform/audio/dshow.cpp */
 HRESULT fnvnx_dshow_mapper_factory(const GUID *iid, void **out);
-int fnvnx_ov_open_callbacks();
-int fnvnx_ov_clear();
-int fnvnx_ov_info();
-int fnvnx_ov_seekable();
-int fnvnx_ov_pcm_total();
-int fnvnx_ov_time_total();
-int fnvnx_ov_read();
-int fnvnx_ov_pcm_seek();
-int fnvnx_ov_pcm_tell();
-int fnvnx_ov_time_seek();
 }
 
 namespace {
@@ -48,16 +37,6 @@ const exp g_exports[] = {
     X("xinput1_3", "XInputGetDSoundAudioDeviceGuids", XInputGetDSoundAudioDeviceGuids),
     X("xinput1_3", "XInputGetBatteryInformation", XInputGetBatteryInformation),
     X("xinput1_3", "XInputGetKeystroke", XInputGetKeystroke),
-    X("vorbisfile", "ov_open_callbacks", fnvnx_ov_open_callbacks),
-    X("vorbisfile", "ov_clear", fnvnx_ov_clear),
-    X("vorbisfile", "ov_info", fnvnx_ov_info),
-    X("vorbisfile", "ov_seekable", fnvnx_ov_seekable),
-    X("vorbisfile", "ov_pcm_total", fnvnx_ov_pcm_total),
-    X("vorbisfile", "ov_time_total", fnvnx_ov_time_total),
-    X("vorbisfile", "ov_read", fnvnx_ov_read),
-    X("vorbisfile", "ov_pcm_seek", fnvnx_ov_pcm_seek),
-    X("vorbisfile", "ov_pcm_tell", fnvnx_ov_pcm_tell),
-    X("vorbisfile", "ov_time_seek", fnvnx_ov_time_seek),
 };
 
 const char *base(const char *p)
@@ -89,7 +68,6 @@ FARPROC find(const char *dll, const char *name)
 FARPROC r_dsound(const char *n) { return find("dsound", n); }
 FARPROC r_dinput8(const char *n) { return find("dinput8", n); }
 FARPROC r_xinput(const char *n) { return find("xinput1_3", n); }
-FARPROC r_vorbisfile(const char *n) { return find("vorbisfile", n); }
 
 int g_done;
 } // namespace
@@ -107,8 +85,6 @@ extern "C" void fnvnx_audio_input_register(void)
     fnvnx_register_module("xinput1_3.dll", r_xinput);
     fnvnx_register_module("xinput1_4.dll", r_xinput);
     fnvnx_register_module("xinput9_1_0.dll", r_xinput);
-    fnvnx_register_module("vorbisfile.dll", r_vorbisfile);
-    fnvnx_register_module("libvorbisfile.dll", r_vorbisfile);   /* the exe's IAT spelling */
     fnvnx_register_com_class(&CLSID_DirectSound8, fnvnx_dsound_com_factory);
     fnvnx_register_com_class(&CLSID_DirectSound, fnvnx_dsound_com_factory);
     fnvnx_register_com_class(&CLSID_DirectInput8, fnvnx_dinput_com_factory);
