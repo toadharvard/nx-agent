@@ -10,6 +10,10 @@ output is read: the argument list is the whole key of this stage (R13).
   N2  object gates on every site: data, call, vcall               (registry.py rows; a row = not N2)
   N3  GIMPLE inside the portable subset                           (L2 plugin; no verdict = not N3)
   N4  closure: everything inlined into f is NATIVE                (greatest fixed point over N3's inline lists)
+A native body that references data or a symbol with no exe address cannot pass N1/N2 (its relocations are not
+the exe's), so it is LIFTED here; a lifted body refers to exe addresses only by construction.  The link
+therefore has no "unresolved" decision of its own: an unresolved reference there is an assert,
+"N1/certificate violated: tool defect", expected 0 times.
 The selector is total: every code address of the fact base gets NATIVE with its certificate, or LIFTED with
 the first reason.  Incompleteness costs speed, never correctness.
 """
