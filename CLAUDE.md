@@ -77,7 +77,7 @@ Forbidden:
 
 If no class-closing rule is known for some part, the session reports it to the orchestrator. It does not patch around it.
 
-The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), once it is published. Until then:
+The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/MASTER_PLAN4.md, published 2026-11-10). Where it conflicts with an older plan:
 - **MASTER_PLAN3 applies only where it does not contradict this order.**
 - **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
 
@@ -85,8 +85,15 @@ The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), once 
 
 - **Threads:** real parallelism across cores is required. Running one guest thread at a time is rejected. Memory-ordering correctness comes from a class-closing rule.
 - **Native-body proof:** the static criteria N1-N4 only, with no SMT pass on hot code.
+- **Floating point uses plain IEEE semantics.** FP follows ordinary IEEE binary32/binary64 semantics of the source types, natively, in both native and lifted code. Bit-equality with the exe's x87 80-bit results is not required.
+  - These stay exact by rule:
+    - float-to-int conversions, the MSVC `_ftol`/`fistp` semantics;
+    - NaN behaviour of comparisons;
+    - integer results of FP code;
+    - FP bit patterns;
+    - the rcp/rsqrt table.
+  - Transcendentals return the correctly rounded value at the operand type.
 - **One fixed reference CPU model:**
-  - x87 transcendentals return the correctly rounded true value at the fcw precision and rounding;
   - rcp/rsqrt use the reference CPU's exhaustive 2^32 table from a pinned farm host;
   - cpuid returns the reference CPU's fixed answer, and rdtsc reads the platform's monotonic timer.
 - **Performance metric:** executed instructions per frame, main thread and each worker, counted deterministically in the emulator. The budget comes from 45 fps at 1.02 GHz with a stated IPC assumption.
