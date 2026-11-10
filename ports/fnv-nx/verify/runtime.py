@@ -50,6 +50,7 @@ import sandbox  # noqa: E402
 
 FORMAT = "fnvnx-runtime/1"
 ENV = {"PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"}
+X86_64 = (2, 1, 62)  # EI_CLASS ELFCLASS64, EI_DATA ELFDATA2LSB, EM_X86_64
 DEFAULT_DIRS = ["/lib", "/usr/lib", "/lib64", "/usr/lib64"]
 INFO = ("import sys,os,json,sysconfig,importlib.util\n"
         "r={'prefix':sys.prefix,'exec_prefix':sys.exec_prefix,'path':sys.path,'version':sys.version,"
@@ -60,6 +61,14 @@ INFO = ("import sys,os,json,sysconfig,importlib.util\n"
 
 class RtError(Exception):
     pass
+
+def ident(path):
+    """None if not an ELF file; else (EI_CLASS, EI_DATA, e_machine). Two ELF objects can load each other only if these are equal."""
+    with open(path, "rb") as f:
+        h = f.read(20)
+    if h[:4] != b"\x7fELF" or len(h) < 20:
+        return None
+    return h[4], h[5], struct.unpack_from("<H" if h[5] == 1 else ">H", h, 18)[0]
 
 def elf(path):
     """None if not an ELF file; else (interp or None, needed [str], rpath [str], runpath [str]) of an x86-64 ELF64 LE file."""
@@ -126,16 +135,20 @@ def closure(roots, trees, chain0=()):
         if info is None:
             raise RtError("%s: not an ELF file" % path)
         interp, needed, rpath, runpath = info
+        want = ident(path)
         if interp and interp not in out and not any(under(interp, t) for t in trees):
+            if ident(interp) != want:
+                raise RtError("PT_INTERP %s of %s: missing or not of the same ELF class/encoding/machine" % (interp, path))
             out[interp] = os.path.realpath(interp)
         base = os.path.dirname(path)
         rp = tuple(origin(rpath, base)) if not runpath else ()
         dirs = list(rp) + list(chain) + origin(runpath, base) + cdirs + DEFAULT_DIRS
         for n in needed:
             cand = [n] if "/" in n else [os.path.join(d, n) for d in dirs]
-            hit = next((c for c in cand if os.path.isfile(c)), None)
+            # like ld.so: a candidate of another class/data encoding/machine is skipped and the search goes on
+            hit = next((c for c in cand if os.path.isfile(c) and ident(c) == want), None)
             if hit is None:
-                raise RtError("unresolved DT_NEEDED %s of %s" % (n, path))
+                raise RtError("unresolved DT_NEEDED %s of %s: no ELF of class/data/machine %s in %s" % (n, path, want, ", ".join(dict.fromkeys(os.path.dirname(c) for c in cand))))
             if not any(under(hit, t) for t in trees):
                 out[hit] = os.path.realpath(hit)
             todo.append((hit, tuple(chain) + rp))
@@ -144,8 +157,10 @@ def closure(roots, trees, chain0=()):
 def is_elf(p):
     return os.path.isfile(p) and not os.path.islink(p) and open(p, "rb").read(4) == b"\x7fELF"
 
-def elf_files(d):
-    return sorted(os.path.join(r, f) for r, ds, fs in os.walk(d) if "__pycache__" not in r for f in fs if is_elf(os.path.join(r, f)))
+def elf_files(d, want):
+    """ELF files under D that are loadable by an object of ident WANT; ELF files of another class/encoding/machine are data."""
+    return sorted(os.path.join(r, f) for r, ds, fs in os.walk(d) if "__pycache__" not in r for f in fs
+                  if is_elf(os.path.join(r, f)) and ident(os.path.join(r, f)) == want)
 
 def ingest_tree(d, store):
     ex = []
@@ -160,6 +175,7 @@ def build(store, python, sites):
     if p.returncode:
         raise RtError("cannot query %s: %s" % (real, p.stderr.strip()[-300:]))
     info = json.loads(p.stdout)
+    want = ident(real)
     trees = sorted({e for e in info["path"] if e.startswith("/") and os.path.lexists(e)})
     extra, roots = {}, []
     for n in sites:
@@ -172,10 +188,10 @@ def build(store, python, sites):
             loc = os.path.realpath(loc)
             if not any(under(loc, t) for t in trees):
                 extra[loc] = loc
-            roots += elf_files(loc) if os.path.isdir(loc) else [loc] * is_elf(loc)
+            roots += elf_files(loc, want) if os.path.isdir(loc) else [loc] * (is_elf(loc) and ident(loc) == want)
     dyn = info["dynload"]
     if dyn and os.path.isdir(dyn) and any(under(dyn, t) for t in trees):
-        roots += elf_files(dyn)
+        roots += elf_files(dyn, want)
     kept = [t for t in trees if not any(t != u and under(t, u) for u in trees)]
     for e in kept:
         if os.path.islink(e):
@@ -202,7 +218,7 @@ def build_tool(store, exes, trees):
     """Tool runtime (see the docstring): exes = [AT], trees = [DIR]."""
     def loadable(p):
         h = open(p, "rb").read(20)
-        return h[:4] == b"\x7fELF" and struct.unpack_from("<HH", h, 16) in ((2, 62), (3, 62))
+        return ident(p) == X86_64 and struct.unpack_from("<H", h, 16)[0] in (2, 3)
     ats = sorted({os.path.normpath(os.path.abspath(e)) for e in exes})
     tdirs = sorted({os.path.normpath(os.path.abspath(t)) for t in trees})
     for t in tdirs:
