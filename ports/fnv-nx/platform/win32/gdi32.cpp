@@ -104,6 +104,7 @@ struct obj {
     HWND hwnd;
     uint32_t bmp, brush, pen, font, pal;
     uint32_t own;
+    int32_t ts[7];                           /* DC text state, GDI_TS_* (gdi_int.h) */
     void *fdata;                             /* font: LOGFONTW copy (gdifont.cpp) */
 };
 struct slot { obj *o; uint32_t gen; };
@@ -329,6 +330,7 @@ uint32_t new_dc(int kind, HWND hw)
     uint32_t hd = alloc(T_DC, &d);
     if (!hd) return 0;
     d->kind = kind; d->hwnd = hw; d->smode = 1;
+    d->ts[GDI_TS_BKCOLOR] = 0xFFFFFF; d->ts[GDI_TS_BKMODE] = 2; d->ts[GDI_TS_MAPMODE] = 1;   /* white, OPAQUE, MM_TEXT */
     d->brush = stock_h(0); d->pen = stock_h(7); d->font = stock_h(13); d->pal = stock_h(15);
     if (kind == K_MEM) {
         obj *b = NULL;
@@ -746,4 +748,22 @@ extern "C" void *gdi_font_create(const void *lf92)
     if (!o->fdata) { release(h); return NULL; }
     memcpy(o->fdata, lf92, 92);
     return (void *)(uintptr_t)h;
+}
+extern "C" int gdi_dc_state(void *hd, int field, int set, int32_t value, int32_t *prev)
+{
+    Lk l;
+    init_stock();
+    obj *d = get(hd, T_DC);
+    if (!d || field < 0 || field >= 7) return 0;
+    if (prev) *prev = d->ts[field];
+    if (set) d->ts[field] = value;
+    return 1;
+}
+extern "C" uint32_t gdi_dc_object(void *hd, int kind)
+{
+    Lk l;
+    init_stock();
+    obj *d = get(hd, T_DC);
+    if (!d) return 0;
+    return kind == GDIK_BITMAP ? d->bmp : kind == GDIK_BRUSH ? d->brush : kind == GDIK_PEN ? d->pen : kind == GDIK_FONT ? d->font : kind == GDIK_PALETTE ? d->pal : 0;
 }

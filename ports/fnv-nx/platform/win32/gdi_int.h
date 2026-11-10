@@ -19,6 +19,10 @@ struct gdi_objinfo {
 extern "C" {
 int gdi_obj_info(void *handle, struct gdi_objinfo *oi);   /* 1 = ok */
 uint32_t gdi_dc_font(void *hdc);                          /* the font handle selected into the DC, 0 = bad DC */
+/* DC text state: one 32-bit value per field; set != 0 stores value; *prev receives the old one. 0 = bad DC. */
+enum { GDI_TS_TEXTCOLOR, GDI_TS_BKCOLOR, GDI_TS_BKMODE, GDI_TS_ALIGN, GDI_TS_MAPMODE, GDI_TS_POSX, GDI_TS_POSY };
+int gdi_dc_state(void *hdc, int field, int set, int32_t value, int32_t *prev);
+uint32_t gdi_dc_object(void *hdc, int gdik);              /* the DC's selected object of that kind, 0 = none / bad DC */
 void *gdi_font_create(const void *logfontw92);            /* new font object holding a copy, NULL on failure */
 }
 #endif

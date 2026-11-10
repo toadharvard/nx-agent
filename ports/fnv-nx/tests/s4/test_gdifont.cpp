@@ -230,3 +230,102 @@ TEST(text_gdifont_reference)   /* named to run after heap_destroy_frees_all_and_
     s4_checks += g_checks;
     s4_failures += g_fails;
 }
+
+extern "C" {
+COLORREF SetTextColor(HDC, COLORREF);
+COLORREF SetBkColor(HDC, COLORREF);
+int SetBkMode(HDC, int);
+UINT SetTextAlign(HDC, UINT);
+int SetMapMode(HDC, int);
+BOOL MoveToEx(HDC, int, int, void *);
+HGDIOBJ GetCurrentObject(HDC, UINT);
+int GetObjectW(HGDIOBJ, int, void *);
+HFONT CreateFontIndirectA(const void *);
+BOOL DeleteObject(HGDIOBJ);
+}
+TEST(text_dc_state_and_getobject)
+{
+    const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
+    if (!ref || !host) { printf("gdifont: reference not available\n"); CHECK(false); return; }
+    fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str());
+    HDC dc = CreateCompatibleDC(NULL), bad = (HDC)(uintptr_t)0x12345;
+    CHECK_EQ(SetTextColor(dc, 0x112233) & 0xffffffffu, 0);            /* defaults: black text, white background, OPAQUE */
+    CHECK_EQ(SetTextColor(dc, 0x445566) & 0xffffffffu, 0x112233);
+    CHECK_EQ(SetBkColor(dc, 0x010203) & 0xffffffffu, 0xFFFFFF);
+    CHECK_EQ(SetBkColor(dc, 0) & 0xffffffffu, 0x010203);
+    CHECK_EQ(SetBkMode(dc, 1), 2);
+    CHECK_EQ(SetBkMode(dc, 2), 1);
+    CHECK_EQ(SetBkMode(dc, 7), 0);
+    CHECK_EQ(SetBkMode(dc, 1), 2);                                    /* the invalid mode was not stored */
+    CHECK_EQ(SetTextAlign(dc, 6 | 24), 0);
+    CHECK_EQ(SetTextAlign(dc, 0), 6 | 24);
+    CHECK_EQ(SetMapMode(dc, 8), 1);
+    CHECK_EQ(SetMapMode(dc, 1), 8);
+    CHECK_EQ(SetMapMode(dc, 0), 0);
+    CHECK_EQ(SetMapMode(dc, 9), 0);
+    CHECK_EQ(SetMapMode(dc, 1), 1);
+    int32_t pt[2] = { -1, -1 };
+    CHECK(MoveToEx(dc, 5, -7, pt));
+    CHECK(pt[0] == 0 && pt[1] == 0);
+    CHECK(MoveToEx(dc, 1, 2, pt));
+    CHECK(pt[0] == 5 && pt[1] == -7);
+    CHECK(MoveToEx(dc, 0, 0, NULL));
+    CHECK((SetTextColor(bad, 0) & 0xffffffffu) == 0xffffffffu);
+    CHECK((SetBkColor(bad, 0) & 0xffffffffu) == 0xffffffffu);
+    CHECK_EQ(SetBkMode(bad, 1), 0);
+    CHECK((SetTextAlign(bad, 0) & 0xffffffffu) == 0xffffffffu);
+    CHECK_EQ(SetMapMode(bad, 1), 0);
+    CHECK(!MoveToEx(bad, 0, 0, pt));
+    CHECK(GetCurrentObject(bad, 6) == NULL);
+    CHECK(GetCurrentObject(dc, 6) == GetStockObject(13));              /* SYSTEM_FONT, BLACK_PEN, WHITE_BRUSH, DEFAULT_PALETTE */
+    CHECK(GetCurrentObject(dc, 1) == GetStockObject(7));
+    CHECK(GetCurrentObject(dc, 2) == GetStockObject(0));
+    CHECK(GetCurrentObject(dc, 5) == GetStockObject(15));
+    CHECK(GetCurrentObject(dc, 7) != NULL);
+    CHECK(GetCurrentObject(dc, 3) == NULL);
+    /* GetObject: fonts (created, A and W), brushes, pens, bitmaps, the size protocol */
+    uint8_t lfa[60] = { 0 }, out[128];
+    int32_t hgt = -20;
+    memcpy(lfa, &hgt, 4);
+    lfa[23] = 1;
+    strcpy((char *)lfa + 28, "Tahoma");
+    HFONT hf = CreateFontIndirectA(lfa);
+    CHECK(hf != NULL);
+    CHECK_EQ(GetObjectA(hf, 0, NULL), 60);
+    CHECK_EQ(GetObjectW(hf, 0, NULL), 92);
+    CHECK_EQ(GetObjectA(hf, 60, out), 60);
+    CHECK(!memcmp(out, lfa, 60));
+    CHECK_EQ(GetObjectA(hf, 10, out), 10);
+    CHECK_EQ(GetObjectW(hf, 200, out), 92);
+    CHECK(out[28] == 'T' && out[29] == 0 && out[30] == 'a');
+    CHECK(SelectObject(dc, hf) == GetStockObject(13));
+    CHECK(GetCurrentObject(dc, 6) == hf);
+    char face[32];
+    CHECK_EQ(GetTextFaceA(dc, sizeof face, face), 6);
+    CHECK_STR(face, "Tahoma");
+    uint8_t tm[64];
+    CHECK(GetTextMetricsA(dc, tm));
+    CHECK_EQ(rd32(tm, 0) - rd32(tm, 12), 20);                         /* height - internal leading = |lfHeight| */
+    SelectObject(dc, GetStockObject(13));
+    CHECK(DeleteObject(hf));
+    CHECK_EQ(GetObjectA(hf, 60, out), 0);
+    CHECK_EQ(GetObjectA(GetStockObject(4), 0, NULL), 12);              /* BLACK_BRUSH: BS_SOLID, 0 */
+    memset(out, 0xAA, sizeof out);
+    CHECK_EQ(GetObjectA(GetStockObject(0), 12, out), 12);              /* WHITE_BRUSH */
+    CHECK(rd32(out, 0) == 0 && rd32(out, 4) == 0xFFFFFF && rd32(out, 8) == 0);
+    CHECK_EQ(GetObjectA(GetStockObject(5), 4, out), 4);                /* NULL_BRUSH, partial copy */
+    CHECK_EQ(rd32(out, 0), 1);
+    CHECK_EQ(GetObjectA(GetStockObject(6), 16, out), 16);              /* WHITE_PEN: LOGPEN is 16 bytes */
+    CHECK(rd32(out, 0) == 0 && rd32(out, 4) == 0 && rd32(out, 12) == 0xFFFFFF);
+    CHECK_EQ(GetObjectA(GetStockObject(8), 16, out), 16);              /* NULL_PEN */
+    CHECK_EQ(rd32(out, 0), 5);
+    CHECK_EQ(GetObjectA(GetStockObject(6), 8, out), 0);
+    HGDIOBJ bm = GetCurrentObject(dc, 7);
+    int bsz = GetObjectA(bm, 0, NULL);
+    CHECK_EQ(bsz, (int)(16 + 4 + sizeof(void *) + (sizeof(void *) == 8 ? 4 : 0)));
+    CHECK_EQ(GetObjectA(bm, bsz, out), bsz);
+    CHECK(rd32(out, 4) == 1 && rd32(out, 8) == 1 && out[16] == 1 && out[18] == 1);   /* the DC's 1x1 mono bitmap */
+    CHECK_EQ(GetObjectA(bm, bsz - 1, out), 0);
+    CHECK_EQ(GetObjectA((HGDIOBJ)(uintptr_t)0x12345, 60, out), 0);
+    DeleteDC(dc);
+}

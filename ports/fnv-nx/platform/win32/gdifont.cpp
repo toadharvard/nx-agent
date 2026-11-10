@@ -963,11 +963,11 @@ extern "C" int GetObjectW(HGDIOBJ h, int cb, void *buf)
     case GDIK_FONT: { LF lf; if (!lf_of(h, &lf)) return 0; memcpy(tmp, &lf, 92); size = 92; if (!buf) return size; break; }
     case GDIK_BRUSH: put32(tmp, oi.hollow ? 1 : 0); put32(tmp + 4, ((oi.color & 0xff) << 16) | (oi.color & 0xff00) | ((oi.color >> 16) & 0xff)); size = 12; if (!buf) return size; break;
     case GDIK_PEN:
-        if (!buf) return 12;
-        if (cb < 12) return 0;
-        put32(tmp, oi.hollow ? 5 : 0); put32(tmp + 8, ((oi.color & 0xff) << 16) | (oi.color & 0xff00) | ((oi.color >> 16) & 0xff));
-        memcpy(buf, tmp, 12);
-        return 12;
+        if (!buf) return 16;   /* LOGPEN: style, width POINT, colour */
+        if (cb < 16) return 0;
+        put32(tmp, oi.hollow ? 5 : 0); put32(tmp + 12, ((oi.color & 0xff) << 16) | (oi.color & 0xff00) | ((oi.color >> 16) & 0xff));
+        memcpy(buf, tmp, 16);
+        return 16;
     case GDIK_PALETTE: if (!buf) return 2; if (cb < 2) return 0; put16((uint8_t *)buf, (uint16_t)(oi.nct ? oi.nct : 20)); return 2;
     case GDIK_BITMAP: {
         struct BM { int32_t type, w, h, wb; uint16_t planes, bpp; void *bits; };
@@ -1142,3 +1142,39 @@ static DWORD get_outline(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, vo
 }
 extern "C" DWORD GetGlyphOutlineA(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, void *buf, const void *mat) { return get_outline(hdc, ch, format, gm, size, buf, mat, true); }
 extern "C" DWORD GetGlyphOutlineW(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, void *buf, const void *mat) { return get_outline(hdc, ch, format, gm, size, buf, mat, false); }
+
+/* ---- DC text state (stored on the DC object in gdi32.cpp). Each returns the previous value and fails on a bad DC.
+ * SetMapMode stores and returns any of the eight modes; coordinate transforms other than MM_TEXT are a later stage. */
+static uint32_t dc_swap(HDC hdc, int field, uint32_t v, uint32_t fail)
+{
+    int32_t prev = 0;
+    if (!gdi_dc_state(hdc, field, 1, (int32_t)v, &prev)) { SetLastError(ERROR_INVALID_HANDLE); return fail; }
+    return (uint32_t)prev;
+}
+extern "C" COLORREF SetTextColor(HDC hdc, COLORREF c) { return W32_DW(dc_swap(hdc, GDI_TS_TEXTCOLOR, (uint32_t)c, GERR)); }
+extern "C" COLORREF SetBkColor(HDC hdc, COLORREF c) { return W32_DW(dc_swap(hdc, GDI_TS_BKCOLOR, (uint32_t)c, GERR)); }
+extern "C" int SetBkMode(HDC hdc, int mode)
+{
+    if (mode != 1 && mode != 2) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }   /* TRANSPARENT, OPAQUE */
+    return (int)dc_swap(hdc, GDI_TS_BKMODE, (uint32_t)mode, 0);
+}
+extern "C" UINT SetTextAlign(HDC hdc, UINT align) { return dc_swap(hdc, GDI_TS_ALIGN, align, GERR); }
+extern "C" int SetMapMode(HDC hdc, int mode)
+{
+    int32_t prev = 0;
+    if (!gdi_dc_state(hdc, GDI_TS_MAPMODE, 0, 0, &prev)) { SetLastError(ERROR_INVALID_HANDLE); return 0; }
+    if (mode < 1 || mode > 8) return 0;   /* MM_TEXT .. MM_ANISOTROPIC */
+    return (int)dc_swap(hdc, GDI_TS_MAPMODE, (uint32_t)mode, 0);
+}
+extern "C" BOOL MoveToEx(HDC hdc, int x, int y, void *prev_point)
+{
+    int32_t px = 0, py = 0;
+    if (!gdi_dc_state(hdc, GDI_TS_POSX, 1, x, &px) || !gdi_dc_state(hdc, GDI_TS_POSY, 1, y, &py)) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+    if (prev_point) { memcpy(prev_point, &px, 4); memcpy((uint8_t *)prev_point + 4, &py, 4); }   /* POINT: two 32-bit LONGs */
+    return TRUE;
+}
+extern "C" HGDIOBJ GetCurrentObject(HDC hdc, UINT type)
+{
+    int k = type == 1 ? GDIK_PEN : type == 2 ? GDIK_BRUSH : type == 5 ? GDIK_PALETTE : type == 6 ? GDIK_FONT : type == 7 ? GDIK_BITMAP : 0;   /* OBJ_* */
+    return (HGDIOBJ)(uintptr_t)(k ? gdi_dc_object(hdc, k) : 0);
+}
