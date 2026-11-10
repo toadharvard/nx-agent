@@ -77,16 +77,29 @@ Forbidden:
 
 If no class-closing rule is known for some part, the session reports it to the orchestrator. It does not patch around it.
 
-The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), once it is published. Until then:
+The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/MASTER_PLAN4.md, published 2026-11-10). Where it conflicts with an older plan:
 - **MASTER_PLAN3 applies only where it does not contradict this order.**
 - **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
 
+- **Downloads are authorized.** The owner's words, 2026-11-10: "Я разрешаю все что угодно качать".
+  - Any fnv-nx session may clone or download any public external code, tools, formal models, packages or datasets the work needs. Examples: rems-project/isla, isla-snapshots, sail-x86-from-acl2, acl2/acl2, LLVM, CORE-MATH, MPFR.
+  - Use add_repo (read) or plain git/https.
+  - Mirror what the build depends on into fnv-nx-build `tools/*` branches so the farms are reproducible.
+  - This does not widen the Legal limits.
+- **Merges into the clean branch `claude/fnv-nx-clean`** happen only on a green L1 verdict: incremental link plus whole-binary gates, ≤5 min, run in the background. A red verdict blocks the merge. The clean branch never holds a state that violates the rules. This overrides "merges do not wait" for that branch. The old integration branch keeps its old rule.
 - **Threads:** real parallelism across cores is required. Running one guest thread at a time is rejected. Memory-ordering correctness comes from a class-closing rule.
 - **Native-body proof:** the static criteria N1-N4 only, with no SMT pass on hot code.
+- **Floating point uses plain IEEE semantics.** FP follows ordinary IEEE binary32/binary64 semantics of the source types, natively, in both native and lifted code. Bit-equality with the exe's x87 80-bit results is not required.
+  - These stay exact by rule:
+    - float-to-int conversions, the MSVC `_ftol`/`fistp` semantics;
+    - NaN behaviour of comparisons;
+    - integer results of FP code;
+    - FP bit patterns;
+    - the rcp/rsqrt table.
+  - Transcendentals return the correctly rounded value at the operand type.
 - **One fixed reference CPU model:**
-  - x87 transcendentals return the correctly rounded true value at the fcw precision and rounding;
   - rcp/rsqrt use the reference CPU's exhaustive 2^32 table from a pinned farm host;
   - cpuid returns the reference CPU's fixed answer, and rdtsc reads the platform's monotonic timer.
 - **Performance metric:** executed instructions per frame, main thread and each worker, counted deterministically in the emulator. The budget comes from 45 fps at 1.02 GHz with a stated IPC assumption.
