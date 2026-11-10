@@ -22,7 +22,7 @@ uint32_t nx_ffp_norm_textype(uint32_t t) { return (t >= 1u && t <= 3u) ? t : 0u;
 /* argument slots an op reads: bit0 arg1, bit1 arg2, bit2 arg0 (wined3d_ffp_get_fs_settings args[]) */
 static uint32_t ffp_used(uint32_t op)
 {
-    if (op == NX_FFP_TOP_SELECTARG1) return 1u;
+    if (op == NX_FFP_TOP_SELECTARG1 || op == NX_FFP_TOP_PREMODULATE) return 1u;   /* PREMODULATE: documented S = Arg1 */
     if (op == NX_FFP_TOP_SELECTARG2) return 2u;
     if (op == NX_FFP_TOP_MULTIPLYADD || op == NX_FFP_TOP_LERP) return 7u;
     if (op >= NX_FFP_TOP_MODULATE) return 3u;

@@ -32,7 +32,7 @@ int main(int argc, char **argv)
         return 0;
     }
     /* sweep */
-    static const uint32_t used[27] = {0,0,1,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,7,7};
+    static const uint32_t used[27] = {0,0,1,2,3,3,3,3,3,3,3,3,3,3,3,3,3,1,3,3,3,3,3,3,3,7,7};
     for (uint32_t s0mode = 0; s0mode < 2; s0mode++)
     for (uint32_t chan = 0; chan < 2; chan++)
     for (uint32_t op = 1; op <= 26; op++) {
