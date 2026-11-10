@@ -7,7 +7,8 @@ Certified: items with zero puregate violations. All DIRs are checked in ONE pure
 uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0 (nothing to certify yet), said in "detail".
 The universe is the STAGE-TOOL directories only (contract link rules lift). verify/ and farm/ are NOT stage tools: the
 sandbox, the tracer and the farm scripts legitimately read the host (clock, processes, directory listings), so they are
-outside this gate; their correctness is the business of the "selftests" gate.
+outside this gate; their correctness is the business of the "selftests" gate. Files below a directory named `tests` are test
+code, not stage tools: they are outside the universe too (the "selftests" gate runs them; they may use temp directories).
 Exit 0 iff the result is green."""
 import json
 import os
@@ -29,8 +30,9 @@ def main(argv):
                 why = "puregate failed (exit %d): %s" % (p.returncode, p.stderr.strip()[-200:])
             else:
                 doc = json.load(open(js))
-                seen = sorted(os.path.normpath(f) for f in doc["files"])
-                bad = {os.path.normpath(v["file"]) for v in doc["violations"]}
+                stage = lambda f: "tests" not in os.path.normpath(f).split(os.sep)[:-1]
+                seen = sorted(os.path.normpath(f) for f in doc["files"] if stage(f))
+                bad = {os.path.normpath(v["file"]) for v in doc["violations"] if stage(v["file"])}
     unc = [f for f in seen if f in bad]
     if why:
         status, detail = "red", why

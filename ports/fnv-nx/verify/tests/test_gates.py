@@ -86,6 +86,13 @@ rc, r, e = pure(d)
 check("pure: shell file is an uncertified item", rc != 0 and r["status"] == "red" and r["universe"] == 1
       and r["certified"] == 0 and r["uncertified"] == ["link/run.sh"], (rc, r, e))
 
+d = tmp("pure-tests")
+put(d, "link/a.py", CLEAN)
+put(d, "link/tests/test_a.py", BAD)
+rc, r, e = pure(d)
+check("pure: files below tests/ are outside the universe", rc == 0 and r["status"] == "green"
+      and (r["universe"], r["certified"]) == (1, 1), (rc, r, e))
+
 d = tmp("pure-import")
 put(d, "link/a.py", "import b\n")
 put(d, "link/b.py", CLEAN)
@@ -380,6 +387,132 @@ keys1 = sorted(os.listdir(cdir)) if os.path.isdir(cdir) else []
 rc2, line2, out2, err2 = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
 check("l1 verdict: gates get GATE_CACHE=VDIR/cache; same tree again reuses the keyed selftests result", rc == 0 and rc2 == 0
       and len(keys1) == 1 and sorted(os.listdir(cdir)) == keys1 and re.match(LINE, line2), (rc, rc2, keys1, out, err, out2, err2))
+
+# ---- l1 merge --remote: the remote branch moves only from BASE to the judged merge commit, atomically
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import l1 as l1mod  # noqa: E402
+
+def l1_inproc(*a, hook=None):
+    """l1.main in this process (so a hook can stand in for the verdict step); returns (rc, stdout)."""
+    orig = l1mod._check
+    if hook:
+        def patched(*x, **k):
+            hook()
+            return orig(*x, **k)
+        l1mod._check = patched
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = l1mod.main(list(a))
+    finally:
+        l1mod._check = orig
+    return rc, buf.getvalue()
+
+def remote_setup(*feats):
+    r = small_repo()
+    bare = tmp("bare") + "/r.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True)
+    git(r, "remote", "add", "origin", bare)
+    git(r, "push", "-q", "origin", "main")
+    git(r, "fetch", "-q", "origin")
+    for n in feats:
+        branch(r, n, {"ports/fnv-nx/link/%s.py" % n: CLEAN})
+    other = tmp("other")
+    subprocess.run(["git", "clone", "-q", bare, other], check=True)
+    return r, bare, other
+
+def push_other(other, name):
+    put(other, "ports/fnv-nx/link/%s.py" % name, CLEAN)
+    git(other, "add", "-A")
+    git(other, "commit", "-m", name)
+    git(other, "push", "-q", "origin", "main")
+    return git(other, "rev-parse", "HEAD")
+
+M = ("merge", "--into", "main", "--verdicts")
+
+r, bare, other = remote_setup("feat")
+vd = tmp("verdicts")
+base = git(r, "rev-parse", "main")
+feat = git(r, "rev-parse", "feat")
+rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--remote", "origin")
+new = git(bare, "rev-parse", "main")
+check("push: green -> remote main is the merge commit, parents (BASE, REF), local refs follow, line printed",
+      rc == 0 and new != base and git(bare, "rev-parse", new + "^1") == base and git(bare, "rev-parse", new + "^2") == feat
+      and git(r, "rev-parse", "main") == new and git(r, "rev-parse", "refs/remotes/origin/main") == new
+      and out.splitlines()[-1] == "merged %s pushed origin/main" % new and "L1 green" in out, (rc, out, new, base))
+
+r, bare, other = remote_setup("feat")
+vd = tmp("verdicts")
+base = git(r, "rev-parse", "main")
+moved = []
+def move():
+    moved.append(push_other(other, "racer"))
+rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--remote", "origin", hook=move)
+check("push: remote moved after the fetch -> exit 5, remote keeps the other commit, local untouched",
+      rc == 5 and "blocked: moved (origin/main is no longer %s)" % base[:12] in out and git(bare, "rev-parse", "main") == moved[0]
+      and git(r, "rev-parse", "main") == base and git(r, "rev-parse", "refs/remotes/origin/main") == base, (rc, out, moved))
+# retry: local branch must be brought to the remote tip by the caller; the verdict is for the NEW tree
+tree_old = git(r, "merge-tree", "--write-tree", base, "feat").splitlines()[0]
+git(r, "fetch", "-q", "origin")
+git(r, "update-ref", "refs/heads/main", moved[0])
+rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--remote", "origin")
+new = git(bare, "rev-parse", "main")
+tree_new = git(bare, "rev-parse", new + "^{tree}")
+check("push: retry after exit 5 merges onto the new tip and judges the new tree",
+      rc == 0 and git(bare, "rev-parse", new + "^1") == moved[0] and tree_new != tree_old
+      and os.path.isfile(os.path.join(vd, tree_new + ".json")) and "L1 green %s" % tree_new in out, (rc, out))
+
+r, bare, other = remote_setup()
+vd = tmp("verdicts")
+branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD})
+base = git(r, "rev-parse", "main")
+rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "bad", "--verdicts", vd, "--remote", "origin")
+check("push: red verdict -> remote and local untouched", rc == 2 and git(bare, "rev-parse", "main") == base and git(r, "rev-parse", "main") == base, (rc, out))
+
+r, bare, other = remote_setup("c1")
+vd = tmp("verdicts")
+git(r, "checkout", "-q", "-b", "c2", "main")
+put(r, "ports/fnv-nx/link/c1.py", CLEAN + "# other\n")
+git(r, "add", "-A")
+git(r, "commit", "-m", "c2")
+git(r, "checkout", "-q", "main")
+base = git(r, "rev-parse", "main")
+git(r, "merge", "-q", "--no-edit", "c1")
+git(r, "push", "-q", "origin", "main")
+base = git(r, "rev-parse", "main")
+rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "c2", "--verdicts", vd, "--remote", "origin")
+check("push: conflict -> exit 3, remote untouched", rc == 3 and git(bare, "rev-parse", "main") == base, (rc, out))
+
+r, bare, other = remote_setup("feat")
+vd = tmp("verdicts")
+remote_tip = git(bare, "rev-parse", "main")
+put(r, "ports/fnv-nx/link/loc.py", CLEAN)
+git(r, "add", "-A")
+git(r, "commit", "-m", "local only")
+loc = git(r, "rev-parse", "main")
+rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--remote", "origin")
+check("push: local branch differs from the remote tip -> blocked, nothing moves",
+      rc == 2 and "blocked: local branch differs from origin/main" in out and git(bare, "rev-parse", "main") == remote_tip
+      and git(r, "rev-parse", "main") == loc, (rc, out))
+
+r, bare, other = remote_setup("feat")
+vd = tmp("verdicts")
+base = git(r, "rev-parse", "main")
+rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd)
+new = git(r, "rev-parse", "main")
+check("push: no --remote -> old behaviour, last line says local only", rc == 0 and new != base and git(bare, "rev-parse", "main") == base
+      and out.splitlines()[-1] == "merged %s local only" % new, (rc, out, err))
+
+r, bare, other = remote_setup("feat")
+vd = tmp("verdicts")
+base = git(r, "rev-parse", "main")
+git(r, "config", "remote.origin.pushurl", os.path.join(ROOT, "no-such-remote.git"))
+rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--remote", "origin")
+tree = git(r, "merge-tree", "--write-tree", base, "feat").splitlines()[0]
+check("push: push to a nonexistent URL -> exit 6, nothing changed, green verdict kept",
+      rc == 6 and "blocked: push failed: " in out and git(bare, "rev-parse", "main") == base and git(r, "rev-parse", "main") == base
+      and git(r, "rev-parse", "refs/remotes/origin/main") == base and os.path.isfile(os.path.join(vd, tree + ".json")), (rc, out))
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print("%d failed" % len(FAILED))
