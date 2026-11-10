@@ -51,20 +51,36 @@ Code pointers in the running process are **native** addresses (D3: the image's c
   (int32, int64, float, double, aggregate by value with size and AAPCS class), result class (void, int32, int64,
   float, double, aggregate in eax[:edx], hidden-pointer aggregate).
 
-## x87: exact, then fast
+## Plan of record: MASTER_PLAN4 (rules R2, R3, R4, R5, R8, R9)
 
-MSVC 2008 x86 does all floating point in x87, and Direct3D 9 puts the thread into 24-bit precision, so the
-precision control, rounding control, the extended exponent range and 64-bit integer loads are all on the game's
-normal path. The lifted model is therefore the x87 itself: 80-bit values in `struct cpu`, every operation rounded
-by the control word, done by `rt/x87.c` and tested bit for bit against QEMU's softfloat (Unicorn).
-A double-based fast path is an optimization on top (allowed where it is provably equal: operands and result in the
-normal double range, precision 24 or 53) and is checked against the exact model, not against hope.
+- **R2, form certificates.** The semantics of every instruction form (mnemonic x operand class x width x prefix) is
+  written once in a bit-vector DSL (`fnvlift/dsl.py`). The DSL emits (a) the C the lifter pastes (unsigned
+  fixed-width operations only, no UB by construction) and (b) an SMT term. The SMT term is proven equal to the
+  formal x86 model (Sail x86 through isla; SDM pseudo-code in the same logic where the model lacks a form) for all
+  inputs. A form the exe uses without a certificate is a build error. `instest` (Unicorn) and the bench verify; they
+  prove nothing.
+- **R3, code map.** Every byte of `.text` of every lifted module is an instruction of an entry, alignment, or a
+  table named by a relocation (`tools/universe.py`); anything else is a build error. There are no trap codes.
+- **R8, floating point is IEEE of the source types.** x87 and SSE arithmetic runs natively in binary64/binary32;
+  the x87 precision control is ignored (owner decision). An x87 stack value is an SSA local when the depth is static
+  and carries its source format (f32, f64, i16/i32/i64, m80) until the first arithmetic, so copies keep their bits
+  and `fild`/`fistp m64` pairs are exact; a function with a non-static depth gets a dynamic stack of the same
+  carriers. Exact, bit for bit, with a form certificate: E1 float -> int (`fist(p)`, `cvt(t)*2si`; 0x80000000 on NaN
+  and out of range; the `fldcw ... fistp ... fldcw` bracket is proven inside the function and folded), E2
+  comparisons and SSE min/max, E3 bit copies, E4 the rcp/rsqrt table and `fprem`, `frndint`, `fabs`, `fchs`,
+  `fxtract`. `rt/x87.c` (80-bit, integer-only) serves only the m80 forms: `fld`/`fstp tbyte`, `fbld`/`fbstp`.
+- **R9, memory order.** Guest threads run in parallel. Every memory access has a class by static rule: (a) a guest
+  stack slot whose address provably does not leave the function is a plain load/store; (b) everything else is
+  `ldar`/`stlr`, with an alignment test and a complete second path (`ldr` + `dmb ishld`, `dmb ishst` + `str`) for
+  unaligned addresses; `xchg` with memory and the Interlocked imports are `ldaxr`/`stlxr` loops. Extensions L-STACK
+  (slot promoted to a host register), L-RO (constant address in a read-only section), L-TLS.
+- **Modules.** The lifter is applied to every non-system PE of the game (the exe, binkw32 and the rest).
 
 ### One reference CPU model (owner decision 2026-11-10)
 
 Everything that depends on the machine follows one fixed model, the same at every site:
 - x87 transcendentals (`fsin`, `fcos`, `fsincos`, `fptan`, `fpatan`, `f2xm1`, `fyl2x`, `fyl2xp1`, `fscale`): the
-  correctly rounded true value at the precision and rounding mode of the current control word. Gate: a
+  correctly rounded true value in binary64 (a correctly rounding libm). Gate: a
   high-precision reference (MPFR) on a grid, the boundaries and the special values. Agreement with the farm's x86
   host within 1 ulp is information, not a gate.
 - `rcpps`, `rcpss`, `rsqrtps`, `rsqrtss`: the reference CPU's table, equal on all 2^32 inputs, enumerated on the x86

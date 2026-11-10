@@ -37,6 +37,15 @@ static u128 rnd(u128 x, int N, u32 s, u32 rc, u32 *inex, u32 *inc)
 	return q + *inc;
 }
 
+/* Underflow is tininess after rounding: tiny (sh > 0 = exponent below the normal range) unless rounding the
+   p-bit significand with an unbounded exponent carries it up to the minimum normal. */
+static int tiny(u64 m, u64 lo, int d0, int sh, int p, u32 s, u32 rc)
+{
+	u32 i, c;
+	if (!sh) return 0;
+	return !(sh == 1 && (rnd((u128)m << 64 | lo, 64 + d0, s, rc, &i, &c) >> p));
+}
+
 /* Round (m:lo) * 2^(e-BIAS-63) (m normalized, lo = extra low bits, sticky folded into lo) to the control word's
    precision with the extended exponent range; denormal results round on the precision grid (as QEMU/x87). */
 static fnvl_f80 rpack(u32 s, int e, u64 m, u64 lo, u32 fcw, u32 *fsw)
@@ -47,7 +56,7 @@ static fnvl_f80 rpack(u32 s, int e, u64 m, u64 lo, u32 fcw, u32 *fsw)
 	*fsw &= ~C1;
 	if (e >= 0x7FFF) goto ovf;
 	q = rnd((u128)m << 64 | lo, 64 + d0 + sh, s, rc, &inex, &inc);
-	if (inex) *fsw |= PE | (sh ? UE : 0);
+	if (inex) *fsw |= PE | (tiny(m, lo, d0, sh, p, s, rc) ? UE : 0);
 	if (inc) *fsw |= C1;
 	if (sh) { m = (u64)q << d0; return mk(s, m >> 63, m); }
 	if (q >> p) { q >>= 1; e++; }
@@ -117,12 +126,12 @@ static fnvl_f80 muldiv(fnvl_f80 a, fnvl_f80 b, u32 dv, u32 fcw, u32 *fsw)
 	if (x.k == K_BAD || y.k == K_BAD) return indef(fsw);
 	if (ISNAN(x.k) || ISNAN(y.k)) return nan2(a, x, b, y, fsw);
 	s = x.s ^ y.s;
+	if (dv && y.k == K_ZERO && x.k != K_INF) { if (x.k == K_ZERO) return indef(fsw); *fsw |= ZE; return inf(s); }
 	if (x.den | y.den) *fsw |= DE;
 	if (x.k == K_INF || y.k == K_INF) {
 		if (dv ? (x.k == y.k) : (x.k == K_ZERO || y.k == K_ZERO)) return indef(fsw);
 		return dv && y.k == K_INF ? mk(s, 0, 0) : inf(s);
 	}
-	if (dv && y.k == K_ZERO) { if (x.k == K_ZERO) return indef(fsw); *fsw |= ZE; return inf(s); }
 	if (x.k == K_ZERO || y.k == K_ZERO) return mk(s, 0, 0);
 	if (!dv) {
 		P = (u128)x.m * y.m; lz = (P >> 127) ? 0 : 1; P <<= lz;
@@ -225,8 +234,8 @@ static u64 to_ieee(fnvl_f80 a, u32 fcw, u32 *fsw, int eb, int mb)
 	if (x.k == K_INF || E > bi) goto ovf;
 	sh = E < emin ? emin - E : 0;
 	q = rnd((u128)x.m << 64, 64 + (63 - mb) + sh, s, rc, &inex, &inc);
-	if (inex) *fsw |= PE | (sh ? UE : 0);
-	if (inc && !(sh && q >> mb)) *fsw |= C1;      /* denormal rounding up into the normal range: C1 stays clear */
+	if (inex) *fsw |= PE | (tiny(x.m, 0, 63 - mb, sh, mb + 1, s, rc) ? UE : 0);
+	if (inc) *fsw |= C1;
 	bits = (sh ? 0 : (u64)(E + bi - 1) << mb) + (u64)q;
 	if ((bits >> mb) < emax) return (u64)s << (eb + mb) | bits;
 ovf:
@@ -281,6 +290,7 @@ u32 fnvl_x_xam(fnvl_f80 a, u32 empty)
 {
 	u32 e = a.se & 0x7FFF, r = a.se >> 15 ? C1 : 0;
 	if (empty) return 0x4100;
+	if (unpack(a).k == K_BAD) return r;                /* unsupported encoding: C3 C2 C0 = 000 */
 	if (e == 0x7FFF) return r | (a.m == INTBIT ? 0x500 : 0x100);
 	if (e == 0) return r | (a.m ? 0x4400 : 0x4000);
 	return r | 0x400;

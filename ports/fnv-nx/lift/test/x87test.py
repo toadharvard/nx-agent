@@ -57,6 +57,11 @@ OPS = {
  'fist16': (LD(16), b'', b'\xDF\x1F', 'un', 2, 0), 'fist32': (LD(16), b'', b'\xDB\x1F', 'un', 4, 0),
  'fist64': (LD(16), b'', b'\xDF\x3F', 'un', 8, 0),
  'fcom': (ab, b'\xD8\xD1', b'', 'bin', -1, 0x4500), 'fucom': (ab, b'\xDD\xE1', b'', 'bin', -1, 0x4500),
+ 'prem': (ab, b'\xD9\xF8', ST, 'bin', 0, 0), 'prem1': (ab, b'\xD9\xF5', ST, 'bin', 0, 0), 'scale': (ab, b'\xD9\xFD', ST, 'bin', 0, 0),
+ 'xtract': (LD(16), b'\xD9\xF4', ST + b'\xDB\x7F\x18', 'un', 0, 0), 'fbld': (b'\xDF\x66\x10', b'', ST, 'bcd', 0, 0),
+ 'fbstp': (LD(16), b'', b'\xDF\x37', 'un', 0, 0), 'ld80': (LD(16), b'', ST, 'un', 0, 0),
+ 'tst': (LD(16), b'\xD9\xE4', b'', 'un', -1, 0x4500),
+ 'fcomi': (ab, b'\xDB\xF1\x9F\x88\x67\x00', b'', 'bin', 1, 0), 'fucomi': (ab, b'\xDB\xE9\x9F\x88\x67\x00', b'', 'bin', 1, 0),
  'fxam': (LD(16), b'\xD9\xE5\xDD\x7F\x12\xDD\xD8\xD9\xE5', b'', 'un', -1, 0x4700),
 }
 NAMES = list(OPS)
@@ -220,6 +225,22 @@ def tie_unary(op, rng, N, m, se):
     nm |= U(1) << U(63)
     return nm, f80s((se >> 15), 16383 + E, nm)[1]
 
+def edge(op, rng, N, am, ase, bm, bse):
+    """Results landing at the exponent limits (min normal / max normal, +-2) with mostly-ones significands."""
+    t = rng.random(N) < 0.12; hi = rng.random(N) < 0.4; d = rng.integers(-2, 3, N); k = np.where(hi, 0x7FFE + d, d + 1)
+    if op == 'mul':
+        ea = np.where(hi, rng.integers(20000, 29000, N), rng.integers(1000, 15000, N)); eb = k + 16382 - ea
+    elif op == 'div':
+        ea = np.where(hi, rng.integers(17000, 32000, N), rng.integers(1, 16000, N)); eb = ea + 16383 - k
+    else:
+        ea = rng.integers(0, 4, N); eb = rng.integers(0, 4, N)
+    top = U(1) << U(63); ones = rng.random(N) < 0.5; sh = rng.integers(0, 40, N).astype(U)
+    m1 = np.where(ones, ~U(0) >> sh, rng.integers(0, 2**64, N, dtype=U)) | top
+    m2 = np.where(ones, ~U(0) << sh >> sh, rng.integers(0, 2**64, N, dtype=U)) | top
+    s1, s2 = (ase & 0x8000), (bse & 0x8000)
+    return (np.where(t, m1, am), np.where(t, (ea & 0x7FFF).astype(np.uint16) | s1, ase),
+            np.where(t, m2, bm), np.where(t, (eb & 0x7FFF).astype(np.uint16) | s2, bse))
+
 def gen(op, rng, N, fcw):
     kind = OPS[op][3]; p = pbits(fcw)
     if kind in ('f32', 'f64'):
@@ -239,6 +260,7 @@ def gen(op, rng, N, fcw):
     if kind == 'bin' and op in ('add', 'sub', 'mul', 'div'):
         tm = ties(op, rng, N, p)
         am, ase, bm, bse = [np.where(t, a, b) for a, b in zip(tm, (am, ase, bm, bse))]
+        am, ase, bm, bse = edge(op, rng, N, am, ase, bm, bse)
     elif op == 'sqrt':
         k = np.minimum(np.where(p == 24, 25, 32), rng.integers(1, 33, N)); y = oddbits(rng, k) >> U(64) - k.astype(U)
         y = y + (rng.integers(0, 3, N).astype(U) - U(1)) * (rng.random(N) < 0.3); y = np.maximum(y, U(1))
@@ -354,7 +376,7 @@ def main():
         print(f"{op} {N} equal {N - nd} diff {nd}{extra}")
         tot[0] += N; tot[1] += N - nd; tot[2] += nd
         for i in np.nonzero(ne)[0][:5]:
-            print(f"  {op} a={am[i]:016x}:{ase[i]:04x} b={bm[i]:016x}:{bse[i]:04x} fcw={fcw[i]:#x} got={got['r'][i]:016x}:{got['rse'][i]:04x}/{got['fsw'][i]:04x} want={want['r'][i]:016x}:{want['rse'][i]:04x}/{want['fsw'][i]:04x}")
+            print(f"  {op} a={am[i]:016x}:{ase[i]:04x} b={bm[i]:016x}:{bse[i]:04x} fcw={fcw[i]:#x} got={got['r'][i]:016x}:{got['rse'][i]:04x}/{got['fsw'][i]:04x}/{got['fsw2'][i]:04x} want={want['r'][i]:016x}:{want['rse'][i]:04x}/{want['fsw'][i]:04x}/{want['fsw2'][i]:04x}")
     print(f"total {tot[0]} equal {tot[1]} diff {tot[2] + bad}")
     return 1 if (tot[2] if full else 0) + bad else 0
 
