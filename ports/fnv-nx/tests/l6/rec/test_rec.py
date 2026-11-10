@@ -56,7 +56,10 @@ penv = dict(env, WINEDLLOVERRIDES=env["WINEDLLOVERRIDES"] + ";d3d9=n,b")
 def run(d, cap, tag, proxy):
     o = f"{W}/runs/{tag}/{cap[:-5]}"; shutil.rmtree(o, ignore_errors=True); os.makedirs(o)
     e = dict(penv, D9REC_OUT=replay.wine_path(o + ".d9s")) if proxy else env
-    p = sh(["wine", f"{W}/{d}/nxd9play.exe", replay.wine_path(f"{W}/caps/{cap}"), "-o", replay.wine_path(o)], env=e, timeout=600)
+    for _ in range(2):   # a signal exit at Wine teardown is retried once, as replay.py does (seen: -9 on a first run)
+        p = sh(["wine", f"{W}/{d}/nxd9play.exe", replay.wine_path(f"{W}/caps/{cap}"), "-o", replay.wine_path(o)], env=e, timeout=600)
+        if p.returncode >= 0: break
+        print(f"   {cap}: signal exit {p.returncode}, retried")
     return p.returncode, o, p.stderr[-300:]
 
 
@@ -105,6 +108,11 @@ try:
                 if v1 != v2: nondet[(f"{rr1.iface}::{rr1.name}", l, {0: "det", 1: "env", 2: "pix"}.get(c1, "?"))] += 1
         check(masked(r1) == masked(r2), f"(b) {n}: two runs equal after masking env/pix items")
         if first_stream is None: first_stream = d1
+    # (c/d) env probe: the questions nxd9play never asks
+    r = sh(["i686-w64-mingw32-gcc", "-O1", "-o", W + "/proxy/envprobe.exe", HERE + "/envprobe.c", "-ld3d9", "-luser32", "-static-libgcc"]); check(r.returncode == 0, "(d) envprobe build: " + r.stderr[-300:])
+    pr = sh(["wine", W + "/proxy/envprobe.exe"], env=dict(penv, D9REC_OUT=replay.wine_path(W + "/envprobe.d9s")), timeout=300)
+    check(pr.returncode == 0, f"(d) envprobe exit {pr.returncode} {pr.stderr[-200:]}")
+    probe = open(W + "/envprobe.d9s", "rb").read() if os.path.isfile(W + "/envprobe.d9s") else b""
 finally:
     sh(["wineserver", "-k"], env=env); x.close()
 open(W + "/nondet.tsv", "w").write("method\titem\tclass\tcount\n" + "".join(f"{m}\t{l}\t{c}\t{k}\n" for (m, l, c), k in sorted(nondet.items())))
@@ -112,10 +120,12 @@ print(f"(b) totals {tot}; differing bytes between two proxy runs before masking:
 print("    nondeterministic items: " + "; ".join(f"{m}.{l}[{c}] x{k}" for (m, l, c), k in sorted(nondet.items())[:12]))
 check(all(c in ("env", "pix") for (_, _, c) in nondet), "(b) every differing item is tagged env/pix")
 
-# ---- (d) caps dump
-if first_stream:
-    buf = io.StringIO(); n = dump_env.dump(first_stream, spec, buf); out = HERE + "/wine_llvmpipe_env.tsv"
-    open(out, "w").write(buf.getvalue()); ms = {l.split("\t")[1] for l in buf.getvalue().splitlines()[1:]}
-    check(n > 50 and any(m.endswith("GetDeviceCaps") for m in ms) and any(m.endswith("GetAdapterIdentifier") for m in ms), f"(d) env dump has caps/identifier rows ({n} rows)")
-    print(f"(d) {n} env rows, methods: {sorted(m.split('::')[1] for m in ms)} -> {out}")
+# ---- (d) caps dump: the probe's stream (all env questions) and one nxd9play run
+for name, data in (("wine_llvmpipe_env.tsv", probe), ("wine_llvmpipe_env_nxd9play.tsv", first_stream)):
+    if not data: check(False, f"(d) no stream for {name}"); continue
+    try: R.read_stream(data, spec)
+    except Exception as ex: check(False, f"(d) {name}: stream does not decode {ex!r}"); continue
+    buf = io.StringIO(); n = dump_env.dump(data, spec, buf); open(f"{HERE}/{name}", "w").write(buf.getvalue()); ms = {l.split("\t")[1].split("::")[1] for l in buf.getvalue().splitlines()[1:]}
+    if name == "wine_llvmpipe_env.tsv": need = {"GetDeviceCaps", "GetAdapterIdentifier", "CheckDeviceFormat", "CheckDeviceType", "CheckDepthStencilMatch", "CheckDeviceMultiSampleType", "CheckDeviceFormatConversion", "GetAvailableTextureMem", "EnumAdapterModes", "Reset", "CreateDevice"}; check(need <= ms, f"(d) probe dump lacks {sorted(need - ms)}")
+    print(f"(d) {name}: {n} rows; methods {sorted(ms)}")
 print(f"test_rec: {npass} checks passed, {len(fails)} failed"); sys.exit(1 if fails else 0)
