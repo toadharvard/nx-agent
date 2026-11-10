@@ -24,6 +24,9 @@
  *                             typeinfo, guard variable): the MSVC name is empty
  *       unnamed:<reason>      no rule here names it (the gate counts these; 0 is the gate)
  *
+ * .fnvnx.names: `<symbol>\t<MSVC name>` of every function and object the unit named, also those the object has no
+ * symbol for (inlined everywhere): for gates that follow a call into cl's code, not for the contract.
+ *
  * .fnvnx.vtpair: `<_ZTV symbol>\t<offset of the address point>\t<??_7 name>\t<offset of the vfptr in the object>`,
  * for every table group the unit defines or names. SDD2's symbol of an address point, `<_ZTV symbol>.fnvnx_ap<offset>`,
  * is that row's (it has no row of its own in .fnvnx.sympair).
@@ -791,6 +794,19 @@ static void finish_unit(void *, void *)
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.sympair,\"\",%%progbits\n");
   for (auto &r : rows)
     fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t%s\\t%s\\n\"\n", r.sym.c_str(), r.ms.c_str(), r.kind.c_str(), r.def ? "def" : "ref");
+  /* .fnvnx.names: every function and object the unit named, whether or not the object has a symbol for it (a
+     function inlined everywhere has none): `<symbol>\t<MSVC name>`. Read by gates that follow a call the compiler
+     inlined (tools/link/argordergate.py); the contract's pairs are .fnvnx.sympair's. */
+  fprintf(asm_out_file, "\t.popsection\n\t.pushsection\t.fnvnx.names,\"\",%%progbits\n");
+  {
+    std::set<std::string> done;
+    for (auto &e : early)
+      if (!e.second.ms.empty() && done.insert(e.second.sym).second)
+        fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", e.second.sym.c_str(), e.second.ms.c_str());
+    for (auto &r : rows)
+      if (!r.ms.empty() && done.insert(r.sym).second)
+        fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", r.sym.c_str(), r.ms.c_str());
+  }
   fprintf(asm_out_file, "\t.popsection\n\t.pushsection\t.fnvnx.vtpair,\"\",%%progbits\n");
   for (auto &r : vtrows)
       fprintf(asm_out_file, "\t.ascii\t\"%s\\t%ld\\t%s\\t%ld\\n\"\n", r.sym.c_str(), (long)r.ap, r.ms.c_str(), (long)r.off);

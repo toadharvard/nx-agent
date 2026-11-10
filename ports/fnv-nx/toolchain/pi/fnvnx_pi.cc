@@ -137,12 +137,18 @@ static bool uninit_use(tree op)
 /* ---- argument order (the lemma of rule ORDER-ARGS, toolchain/order): every call whose arguments (the object of a
    member call included) have side effects in two or more of them is written down before genericization, as the
    source has it:
-       function <TAB> callee <TAB> a0|a1|...      each a_k: the `,`-separated callees of the calls inside argument k
-   in section .fnvnx.argorder. The gate reads the same calls out of the MSVC object of the function and checks that
+       function <TAB> callee <TAB> a0|a1|... <TAB> k/n
+   each a_k: the `,`-separated callees of the calls inside argument k; k/n: this call is number k (from 0) of the
+   function's n calls of that callee, in the order of the source. In section .fnvnx.argorder. The gate reads the same calls out of the MSVC object of the function and checks that
    their order there is the one the order plugin makes GCC use. A site where that cannot be read from an object -
    an argument whose effect is not only calls of named functions, or two arguments calling the same function -
    puts the function outside Π (`argorder`): a static rule, no site is skipped. */
 static std::vector<std::string> arg_sites;
+/* per function, while it is walked: how many calls of each callee were met so far (source order), and the sites
+   found, each with the number its call has among the calls of its callee */
+static std::map<std::string, int> call_count;
+struct site_row { std::string head, callee; int ordinal; };
+static std::vector<site_row> fn_sites;
 static std::set<std::string> arg_unreadable;      /* functions (the declaration's symbol) with such a site */
 
 /* the function a call or an aggregate-initializing call names, else null */
@@ -188,13 +194,16 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
   std::vector<tree> args;
   if (TREE_CODE(t) == CALL_EXPR) for (int i = 0; i < call_expr_nargs(t); i++) args.push_back(CALL_EXPR_ARG(t, i));
   else for (int i = 0; i < aggr_init_expr_nargs(t); i++) args.push_back(AGGR_INIT_EXPR_ARG(t, i));
+  tree fn = callee_of(t);
+  std::string callee = fn && DECL_NAME(fn) ? asmname(fn) : "*";
+  int ordinal = call_count[callee]++;          /* every call counts, a site or not */
   int with = 0;
   for (size_t i = 0; i < args.size(); i++) if (args[i] && TREE_SIDE_EFFECTS(args[i])) with++;
   if (with < 2) return NULL_TREE;
-  tree fn = callee_of(t);
-  std::string row = std::string((const char *)data) + "\\t" + (fn && DECL_NAME(fn) ? asmname(fn) : "*") + "\\t";
+  std::string row = std::string((const char *)data) + "\\t" + callee + "\\t";
   bool readable = true;
   std::set<std::string> seen;
+  seen.insert(callee);                         /* the callee itself inside an argument: its calls cannot be told apart */
   for (size_t i = 0; i < args.size(); i++) {
     arg_effects e; e.other = false;
     if (args[i] && TREE_SIDE_EFFECTS(args[i])) {
@@ -205,7 +214,7 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
     if (i) row += "|";
     for (size_t k = 0; k < e.calls.size(); k++) row += (k ? "," : "") + e.calls[k];
   }
-  if (readable) arg_sites.push_back(row);
+  if (readable) fn_sites.push_back({row, callee, ordinal});
   else arg_unreadable.insert((const char *)data);
   return NULL_TREE;
 }
@@ -215,7 +224,10 @@ static void pre_genericize(void *gcc_data, void *)
   tree fn = (tree)gcc_data;
   if (!fn || TREE_CODE(fn) != FUNCTION_DECL || !DECL_SAVED_TREE(fn)) return;
   std::string name = asmname(fn);
+  call_count.clear(); fn_sites.clear();
   cp_walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
+  for (size_t i = 0; i < fn_sites.size(); i++)
+    arg_sites.push_back(fn_sites[i].head + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
 }
 
 /* a local of the source that lives in memory (its address is taken, or it is an aggregate) */
