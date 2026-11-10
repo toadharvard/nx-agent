@@ -60,10 +60,17 @@ by the control word, done by `rt/x87.c` and tested bit for bit against QEMU's so
 A double-based fast path is an optimization on top (allowed where it is provably equal: operands and result in the
 normal double range, precision 24 or 53) and is checked against the exact model, not against hope.
 
-Instructions whose result Intel does not define bit by bit (`rcpps`/`rsqrtps`/`rsqrtss`: a table inside the CPU):
-the rule is "equal to the reference CPU on every input". The 2^32 single-precision inputs are enumerated on the x86
-farm host and the lifted implementation is compared on all of them. The x87 transcendentals (`fsincos` and the CRT's
-`fsin`, `fyl2x`, ...) cannot be enumerated; their rule is open and reported to the orchestrator.
+### One reference CPU model (owner decision 2026-11-10)
+
+Everything that depends on the machine follows one fixed model, the same at every site:
+- x87 transcendentals (`fsin`, `fcos`, `fsincos`, `fptan`, `fpatan`, `f2xm1`, `fyl2x`, `fyl2xp1`, `fscale`): the
+  correctly rounded true value at the precision and rounding mode of the current control word. Gate: a
+  high-precision reference (MPFR) on a grid, the boundaries and the special values. Agreement with the farm's x86
+  host within 1 ulp is information, not a gate.
+- `rcpps`, `rcpss`, `rsqrtps`, `rsqrtss`: the reference CPU's table, equal on all 2^32 inputs, enumerated on the x86
+  farm host. The host model (family, stepping, microcode) is recorded with the table; the table is an artifact in
+  fnv-nx-build.
+- `cpuid`: the fixed answer of the reference CPU. `rdtsc`: the platform's monotonic timer.
 
 ## Faults and exceptions (owner order 2026-11-10)
 
