@@ -447,6 +447,7 @@ check("push: remote moved after the fetch -> exit 5, remote keeps the other comm
       and git(r, "rev-parse", "main") == base and git(r, "rev-parse", "refs/remotes/origin/main") == base, (rc, out, moved))
 # retry: local branch must be brought to the remote tip by the caller; the verdict is for the NEW tree
 tree_old = git(r, "merge-tree", "--write-tree", base, "feat").splitlines()[0]
+git(r, "fetch", "-q", "origin")
 git(r, "update-ref", "refs/heads/main", moved[0])
 rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--remote", "origin")
 new = git(bare, "rev-parse", "main")
@@ -455,7 +456,7 @@ check("push: retry after exit 5 merges onto the new tip and judges the new tree"
       rc == 0 and git(bare, "rev-parse", new + "^1") == moved[0] and tree_new != tree_old
       and os.path.isfile(os.path.join(vd, tree_new + ".json")) and "L1 green %s" % tree_new in out, (rc, out))
 
-r, bare, other = remote_setup("bad")
+r, bare, other = remote_setup()
 vd = tmp("verdicts")
 branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD})
 base = git(r, "rev-parse", "main")

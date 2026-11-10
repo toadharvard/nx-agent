@@ -176,9 +176,10 @@ def cmd_store(a):
     return 0
 
 def cmd_merge(a):
-    o = _opts(a, {"--repo": 0, "--into": 0, "--from": 0, "--verdicts": 0, "--gates": 0, "--prev-verdict": 1, "--message-prefix": 1, "--env-id": 1})
+    o = _opts(a, {"--repo": 0, "--into": 0, "--from": 0, "--verdicts": 0, "--gates": 0, "--prev-verdict": 1, "--message-prefix": 1, "--env-id": 1, "--base": 1})
     repo, ref = o["--repo"], "refs/heads/" + o["--into"]
-    old = _git_ok(repo, "rev-parse", "--verify", ref)
+    # --base C: merge onto commit C and move NO ref (the caller publishes the commit and moves refs itself; l1.py merge --remote)
+    old = o["--base"] if "--base" in o else _git_ok(repo, "rev-parse", "--verify", ref)
     src = _git_ok(repo, "rev-parse", "--verify", o["--from"] + "^{commit}")
     rc, out, err = _git(repo, "merge-tree", "--write-tree", old, src)
     if rc == 1:
@@ -211,7 +212,7 @@ def cmd_merge(a):
     msg = "%smerge %s\n\nverdict: green, tree %s, gates %d\n\n%s\n" % (o.get("--message-prefix", ""), o["--from"], tree,
                                                                         len(v["gates"]), TRAILER)
     new = _git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp=msg)
-    rc, _, err = _git(repo, "update-ref", ref, new, old)
+    rc, _, err = (0, "", "") if "--base" in o else _git(repo, "update-ref", ref, new, old)
     if rc:
         raise Err("blocked: %s moved concurrently, compare-and-swap failed: %s" % (o["--into"], err), 2)
     print(new)
