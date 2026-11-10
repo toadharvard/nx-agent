@@ -204,16 +204,6 @@ struct fnvnx_new_tag {};
 #define FNVNX_IDTOR1(cls) public: ~cls();
 /* HKRO1: Havok hkReferencedObject's getClassType / calcContentStatistics (exe slots 1 / 2) */
 #define FNVNX_HKRO1 virtual const void* GetClassType() const; virtual void CalcContentStatistics(void*, const void*) const;
-#ifdef FNVNX_SDD
-/* SDD1 (fnvnx_sdd.h): a virtual destructor has one slot, as in the exe, so the D22 / D26 / RAWVT1 family keeps the
- * decomp's own text (the MSVC definitions of tools/equiv/msvc/fnvnx_equiv_fi.h) */
-#define FNVNX_D22(C, ...) __VA_ARGS__
-#define FNVNX_D22I(C, ...) __VA_ARGS__
-#define FNVNX_D22_DROP(...) __VA_ARGS__
-#define FNVNX_D22_CALL(p, m, ...) (p)->m(__VA_ARGS__)
-#define FNVNX_VSLOT(k) (k)
-#define FNVNX_D26_SLOT(k) (k)
-#else
 /* D22: a listed class's slot-0 placeholder virtual becomes its virtual destructor (GCC's D1/D0 where MSVC's ??_G
  * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
 #define FNVNX_D22(C, ...) virtual ~C();
@@ -223,14 +213,18 @@ struct fnvnx_new_tag {};
  * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
 template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (flags & 1) delete p; else p->~T(); }
 #define FNVNX_D22_CALL(p, m, ...) fnvnx_d22_vdtor((p), (__VA_ARGS__))
+#ifdef FNVNX_SDD
+/* SDD2 (toolchain/sdd): the compiler gives a virtual destructor one slot, as in the exe, so a raw exe slot index is
+ * the native index (the MSVC definitions of tools/equiv/msvc/fnvnx_equiv_fi.h) */
+#define FNVNX_VSLOT(k) (k)
+#define FNVNX_D26_SLOT(k) (k)
+#else
 /* DBUG1 (V1): a hand-indexed `vtbl[k]` of an exe slot k past the receiver class's D1/D0 pair (slot 0 for most classes, 4 for
  * the TESForm / Actor family) is native slot k + 1 (D26 minus-one); MSVC keeps k. Use it only past the pair. */
 #define FNVNX_VSLOT(k) ((k) + 1)
 /* RAWVT1 (D26): a raw exe slot index on `this`; native vtables are minus-one */
 #define FNVNX_D26_SLOT(k) ((k) + 1)
 #endif
-/* SDD1: the macros of rule SDD1 (rules/sdd1.py); without FNVNX_SDD they give today's text */
-#include "fnvnx_sdd.h"
 /* EMPTY1: a declared-only empty-string object is the temporary T("") the exe builds */
 #define FNVNX_EMPTY1(T, name) T("")
 /* DTORB1: a destructor stand-in calls the address the recipe binds its ??1 to (the link's __fnv_<a>), the
