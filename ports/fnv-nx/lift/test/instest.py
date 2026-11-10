@@ -5,7 +5,8 @@ FalloutNV.exe really contains (recursive descent, never a linear sweep).  Report
 Inputs FNVNX_EXE / FNVNX_FUNCS.  Everything exe-derived goes to --work (default /home/user/l3work/instest), never the repo.
 Outcomes per case: equal, diff, unlifted, nocompile, fault (the ORACLE cannot run it: #DE, #GP, undecodable, x87 stack fault
 which no correct program executes, or the case collides with the harness region), x87-inexact (everything equal but an oracle
-ST is not exactly a double).  Not compared: mxcsr and C1/exception flags (struct cpu has no such field).
+ST is not exactly a double).  Compared since W6: mm0-7 (struct cpu mm[8]) and the MXCSR control bits (RC, FTZ, DAZ, masks; the exception status bits 0-5 are not modelled, so
+not compared).  Not compared: C1/exception flags.  SSE/MMX cases run with a random MXCSR (FPCR mirrors RC on the ARM side, as ldmxcsr does).
 A one-instruction function makes in-function branch targets (jecxz) fall outside the label set: that shows as nocompile."""
 import argparse, functools, hashlib, json, math, multiprocessing as mp, os, pickle, random, re, struct, subprocess, sys, time
 import numpy as np
@@ -167,17 +168,24 @@ class Oracle(World):
             for sg, sel in ((UC_X86_REG_SS, 16), (UC_X86_REG_DS, 16), (UC_X86_REG_ES, 16), (UC_X86_REG_FS, 8)): uc.reg_write(sg, sel)   # flat segments (loading the GDT broke SS.B)
             for k, v in zip(X86R, st['regs']): uc.reg_write(k, v)
             uc.reg_write(UC_X86_REG_EFLAGS, 0x202 | st['fl'])
-            if E['x87']:
+            if E['mmx']:      # Unicorn cannot access MM0-7 directly: they are the x87 registers' mantissas (TOP=0, all tags valid, as after any MMX insn)
+                uc.mem_write(HX + 0x100, struct.pack('<7I', 0x37f, 0, 0, 0, 0, 0, 0) + b''.join(struct.pack('<QH', v, 0xffff) for v in st['mm']))
+                s.mode = 'pro'; uc.emu_start(HX, HX + 6)
+            elif E['x87']:
                 top = st['ftop']; ftw = sum((0 if st['valid'] >> p & 1 else 3) << 2 * p for p in range(8))
                 regs = b''.join(struct.pack('<QH', *f2x80(st['st'][(top + i) & 7])) for i in range(8))
                 uc.mem_write(HX + 0x100, struct.pack('<7I', st['fcw'], top << 11 | st['fc'], ftw, 0, 0, 0, 0) + regs)
                 s.mode = 'pro'; uc.emu_start(HX, HX + 6)
             for i, x in enumerate(st['xmm']): uc.reg_write(UC_X86_REG_XMM0 + i, x)
+            uc.reg_write(UC_X86_REG_MXCSR, st['mxcsr'])
             s.mode = 'test'; uc.emu_start(E['addr'], 0xffffffffffffffff, timeout=2000000); s.mode = 'epi'
             if s.nxt is None or s.collide: return dict(fault='collide' if s.collide else 'no next instruction', collide=s.collide)
-            o = dict(regs=[uc.reg_read(k) for k in X86R], eip=s.nxt, fl=uc.reg_read(UC_X86_REG_EFLAGS) & 0xcd5, mem=s.written(), fp=None, xmm=None)
+            o = dict(regs=[uc.reg_read(k) for k in X86R], eip=s.nxt, fl=uc.reg_read(UC_X86_REG_EFLAGS) & 0xcd5, mem=s.written(), fp=None, xmm=None, mm=None,
+                     mxcsr=uc.reg_read(UC_X86_REG_MXCSR))
             if E['sse']: o['xmm'] = [uc.reg_read(UC_X86_REG_XMM0 + i) for i in range(8)]
-            if E['x87']:
+            if E['mmx']:
+                uc.emu_start(HX + 6, HX + 12); b = bytes(uc.mem_read(HX + 0x200, 108)); o['mm'] = [struct.unpack('<Q', b[28 + 10 * i:36 + 10 * i])[0] for i in range(8)]
+            elif E['x87']:
                 uc.emu_start(HX + 6, HX + 12); b = bytes(uc.mem_read(HX + 0x200, 108)); fcw, fsw, ftw = struct.unpack('<3I', b[:12]); top = fsw >> 11 & 7
                 if fsw & 0x40: return dict(fault='x87 stack fault')
                 o['fp'] = dict(top=top, fcw=fcw, cc=fsw & 0x4500, valid=sum(1 << p for p in range(8) if ftw >> 2 * p & 3 != 3),
@@ -202,19 +210,21 @@ class Arm(World):
     def run(s, E, st):
         uc = s.uc; s.reset(st['wk']); s.ev = None; r0 = st['regs']
         uc.mem_write(CPU, struct.pack('<13I', *r0, FSB, st['ftop'], st['valid'], st['fcw'], st['fc']) + b'\0' * 4 + struct.pack('<8Q', *st['st'])
-                     + b''.join(x.to_bytes(16, 'little') for x in st['xmm']) + struct.pack('<I', st['fl']))
+                     + b''.join(x.to_bytes(16, 'little') for x in st['xmm']) + struct.pack('<II8Q', st['fl'], st['mxcsr'], *st['mm']))
+        uc.reg_write(UC_ARM64_REG_FPCR, (0, 2, 1, 3)[st['mxcsr'] >> 13 & 3] << 22)      # what ldmxcsr does on the ARM side (x86 RC 1=down, 2=up)
         uc.reg_write(UC_ARM64_REG_X0, CPU); uc.reg_write(UC_ARM64_REG_SP, ASTACK); uc.reg_write(UC_ARM64_REG_X30, RETPAD)
         try: uc.emu_start(s.sym['L_%08x' % E['addr']], RETPAD, timeout=5000000, count=200000)
         except UcError as e: return dict(fault='%s at %s' % (e, s.bad))
         pc = uc.reg_read(UC_ARM64_REG_PC)
         if s.ev is None and pc != RETPAD: return dict(fault='budget')
-        b = bytes(uc.mem_read(CPU, 252)); v = struct.unpack_from('<8I', b)
+        b = bytes(uc.mem_read(CPU, 320)); v = struct.unpack_from('<8I', b)
         if s.ev is None:     # plain return: only `ret` is allowed to; the next EIP is the word it popped
             s.ensure(r0[4], 4, False); eip = struct.unpack('<I', bytes(uc.mem_read(r0[4], 4)))[0] if E['base'] in ('ret', 'retn') else 'returned'
         else: eip = s.ev[1] if s.ev[0] != 'fnvl_trap' or s.ev[2] == 2 else 'trap%d' % s.ev[2]
         ftop, ftag, fcw, fc = struct.unpack_from('<4I', b, 36); stv = struct.unpack_from('<8Q', b, 56)
         return dict(regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 248)[0] & 0xcd5, mem=s.written(), xmm=[int.from_bytes(b[120 + 16 * i:136 + 16 * i], 'little') for i in range(8)],
-                    fp=dict(top=ftop & 7, fcw=fcw, cc=fc & 0x4500, valid=ftag & 0xff, st=dict(enumerate(stv))))
+                    fp=dict(top=ftop & 7, fcw=fcw, cc=fc & 0x4500, valid=ftag & 0xff, st=dict(enumerate(stv))),
+                    mxcsr=struct.unpack_from('<I', b, 252)[0], mm=list(struct.unpack_from('<8Q', b, 256)))
 def gen_state(E, i, att):
     r = random.Random('%x:%d:%d' % (E['addr'], i, att)); regs = []
     for _ in range(8):
@@ -240,9 +250,17 @@ def gen_state(E, i, att):
         if t < .8: return int.from_bytes(b''.join(struct.pack('<Q', r.choice(P64)) for _ in range(2)), 'little')
         return int.from_bytes(b''.join(struct.pack('<I', r.randrange(0, 40)) for _ in range(4)), 'little')
     top, d = r.randrange(8), r.randrange(9)
-    return dict(regs=regs, fl=r.getrandbits(32) & 0xcd5, ftop=top, valid=sum(1 << ((top + k) & 7) for k in range(d)), st=[dv() for _ in range(8)],
+    # W6 state, drawn from its own generator so the other families' seeds are unchanged: NaNs with payloads in some float lanes, mm0-7, MXCSR
+    r2 = random.Random('w6:%x:%d:%d' % (E['addr'], i, att)); xm = [xv() for _ in range(8)]
+    for k in range(8):
+        if r2.random() < .3:
+            if r2.random() < .5: xm[k] = xm[k] & ~(0xffffffff << 32 * r2.randrange(4)) | r2.choice((0x7f800001, 0x7fc00000, 0xffc00000, 0xff800005, 0x7fa00001, 0x7fffffff)) << 32 * r2.randrange(4)
+            else: xm[k] = xm[k] & ~(2 ** 64 - 1 << 64 * r2.randrange(2)) | r2.choice(NANS + [0xfff0000000000007, 0x7ff4000000000000]) << 64 * r2.randrange(2)
+    mm = [r2.getrandbits(64) if r2.random() < .5 else int.from_bytes(bytes(r2.choice((0, 1, 0x7f, 0x80, 0xff, r2.getrandbits(8))) for _ in range(8)), 'little') for _ in range(8)]
+    mxcsr = 0x1f80 if r2.random() < .5 else 0x1f80 | r2.getrandbits(2) << 13 | r2.getrandbits(1) << 15 | r2.getrandbits(1) << 6
+    return dict(mm=mm, mxcsr=mxcsr, regs=regs, fl=r.getrandbits(32) & 0xcd5, ftop=top, valid=sum(1 << ((top + k) & 7) for k in range(d)), st=[dv() for _ in range(8)],
                 fcw=r.choice((0x27f, 0x7f, 0xa7f, 0xe7f, 0x37f)), fc=r.getrandbits(1) << 8 | r.getrandbits(1) << 10 | r.getrandbits(1) << 14,
-                xmm=[xv() for _ in range(8)], wk=((E['addr'] * 31 + i + 1000003 * att) & 0x7fffffff, i % 3))
+                xmm=xm, wk=((E['addr'] * 31 + i + 1000003 * att) & 0x7fffffff, i % 3))
 CF, PF, AF, ZF, SF, OF = 1, 4, 16, 64, 128, 0x800
 FLN = [(CF, 'CF'), (PF, 'PF'), (AF, 'AF'), (ZF, 'ZF'), (SF, 'SF'), (1 << 10, 'DF'), (OF, 'OF')]
 C0, C2, C3 = 0x100, 0x400, 0x4000
@@ -290,6 +308,9 @@ def compare(E, st, o, c, X):
                 elif w != g['st'][p]: return 'diff', 'x87 phys%d' % p + tg, '%016x' % g['st'][p], '%016x' % w
         dcc = (f['cc'] ^ g['cc']) & CC_DEF.get(E['base'], 0) if E['base'].startswith('f') else 0
         if dcc: return 'diff', 'x87 cc', '%x' % g['cc'], '%x' % f['cc']
+    if o['mm'] and o['mm'] != c['mm']:
+        i = next(i for i in range(8) if o['mm'][i] != c['mm'][i]); return 'diff', 'mm%d' % i, '%016x' % c['mm'][i], '%016x' % o['mm'][i]
+    if (o['mxcsr'] ^ c['mxcsr']) & 0xffc0: return 'diff', 'mxcsr', '%x' % c['mxcsr'], '%x' % o['mxcsr']
     if o['xmm'] and o['xmm'] != c['xmm']:
         i = next(i for i in range(8) if o['xmm'][i] != c['xmm'][i]); return 'diff', 'xmm%d' % i, '%032x' % c['xmm'][i], '%032x' % o['xmm'][i]
     return ('x87-inexact',) + inexact if inexact else ('equal', '', '', '')
@@ -319,8 +340,9 @@ def run_batch(job):
     for eid, key, addr, raw in batch:
         ins = next(L.core.md.disasm(raw, addr)); base = ins.mnemonic.split()[-1]; opc = form_key(ins, X)[1]
         enc[eid] = dict(addr=addr, raw=raw, ins=ins, base=base, rep=ins.mnemonic.split()[0] in ('rep', 'repe', 'repne', 'repz', 'repnz') and base in STRING,
-                        x87=0xd8 <= opc[0] <= 0xdf or base in ('fwait', 'emms') or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('mm') for o in ins.operands),
-                        sse=any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('xmm') for o in ins.operands))
+                        x87=0xd8 <= opc[0] <= 0xdf or base == 'fwait',
+                        mmx=base == 'emms' or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('mm') for o in ins.operands),
+                        sse=base in ('ldmxcsr', 'stmxcsr') or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg)[:2] in ('xm', 'mm') for o in ins.operands))
         try: items.append((addr, L.lift(img, addr, len(raw))[0]))
         except L.Unsupported as e: out[eid] = [('unlifted', str(e)[:70], '', '')] * n
         except Exception as e: out[eid] = [('unlifted', 'lifter error %s: %s' % (type(e).__name__, str(e)[:50]), '', '')] * n
@@ -347,13 +369,13 @@ def main():
     a = ap.parse_args(); t0 = time.time(); os.makedirs(a.work, exist_ok=True); sys.path.insert(0, a.lifter)
     import fnvlift as L, fnvlift.core
     G.update(L=L, img=L.Image(a.exe), work=a.work, rows=sorted((int(x.split('\t')[0], 16), int(x.split('\t')[1])) for x in open(a.funcs) if x[0] != '#'))
-    open(a.work + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_tail', 'fnvl_trap')) +
+    open(a.work + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_tail', 'fnvl_trap', 'fnvl_rcp32', 'fnvl_rsqrt32')) +   # fnvl_rcp32/rsqrt32: runtime-owner hooks, a bare `ret` here (their rows are 'hook', not gate failures)
         '.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memmove\nmemmove: cmp x0,x1\n b.ls 3f\n add x3,x0,x2\n add x1,x1,x2\n1: cbz x2,2f\n ldrb w4,[x1,#-1]!\n strb w4,[x3,#-1]!\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '3: mov x3,x0\n4: cbz x2,2b\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 4b\n')
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-c', a.work + '/rt.S', '-o', a.work + '/rt.o'])
-    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,st)==56&&offsetof(cpu,x)==120&&offsetof(cpu,fl)==248,"cpu layout");\n')
+    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,st)==56&&offsetof(cpu,x)==120&&offsetof(cpu,fl)==248&&offsetof(cpu,mxcsr)==252&&offsetof(cpu,mm)==256,"cpu layout");\n')
     subprocess.check_call(['aarch64-linux-gnu-g++'] + FLAGS + ['-fsyntax-only', a.work + '/off.cpp'])
     d = load_forms(a, G['rows']); forms = d['forms']; print('decoded: %d forms, %d functions (%d undecodable) in %.0fs' % (len(forms), d['nfuncs'], d['undecodable'], time.time() - t0), file=sys.stderr)
     keys = sorted(k for k in forms if not a.only or k.split('|')[0] in a.only.split(','))
