@@ -77,7 +77,7 @@ Forbidden:
 
 If no class-closing rule is known for some part, the session reports it to the orchestrator. It does not patch around it.
 
-The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), once it is published. Until then:
+The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/MASTER_PLAN4.md, published 2026-11-10). Where it conflicts with an older plan:
 - **MASTER_PLAN3 applies only where it does not contradict this order.**
 - **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
 
