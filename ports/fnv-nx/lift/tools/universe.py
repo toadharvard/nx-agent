@@ -35,7 +35,7 @@ tbl = bytearray(TN)                       # 1 = jump/index table data
 pedat = bytearray(TN)                     # 1 = named by a PE data directory
 tref = array('I', bytes(4 * TN))          # relocation (site) that names each data byte
 insns = {}                                # addr -> (size, mnem, feat, fall, targets)
-entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw', 'inner', 'ptr']
+entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'inner', 'ptr']
 tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
 vsites = set(); vok = set(); jtab = set(); tcons = {}; straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
@@ -63,13 +63,20 @@ def add_entry(a, kind, src=None):
     if a not in entries: entries[a] = None; kinds[a] = set(); queue.append(a)
     kinds[a].add(kind)
     if src is not None and kind != 'tail': esite.setdefault(a, src)
+def reloc_conflict(a, ins):
+    """a relocated dword must lie wholly inside an operand field of one instruction or wholly outside all instructions."""
+    i = bisect.bisect_left(relocs, a - 3); fs = (a + ins.disp_offset if ins.disp_size == 4 else -1, a + ins.imm_offset if ins.imm_size == 4 else -1)
+    while i < len(relocs) and relocs[i] < a + ins.size:
+        if relocs[i] not in fs: return True
+        i += 1
+    return False
 def walk(start, lo, hi, dec):
     """descent from start within [lo,hi) -> (ok, new insns, refs, tables)."""
     out = {}; refs = []; tabs = []; ok = True; work = [start]
     while work:
         a = work.pop(); trail = []
         while True:
-            if a in insns or a in out or not (lo <= a < hi) or not V[a - T0]: break
+            if a in insns or a in out or not (lo <= a < hi) or not V[a - T0] or (STRICT and (tbl[a - T0] or pedat[a - T0])): break
             if not dec:
                 if a != start and a in entries: refs.append(('tail', a)); break
                 if dmap[a - T0]:
@@ -82,6 +89,7 @@ def walk(start, lo, hi, dec):
                 a = ins.address; m = ins.mnemonic; mn = m.split()[-1]; nxt = a + ins.size; n += ins.size; ops = ins.operands
                 if a >= hi: break
                 if nxt > hi and dec: dmap[hi - T0:nxt - T0] = b'\1' * (nxt - hi); straddle.add(a)
+                if STRICT and reloc_conflict(a, ins): dinfo['reloc_conflict'] += 1; stop = True; break         # decoding ran into relocated data
                 feat = 0; tg = (); fall = True; px = ins.prefix
                 if px[1] == 0x64: feat |= 4
                 if px[0] == 0xf0: feat |= 16
@@ -279,7 +287,7 @@ def extent_insns(a):
     return seen
 def isdata(a): return sec(a) is not None and not (intext(a) and cov[a - T0])      # an address that is not known code
 X_ = SimpleNamespace(d=d, secs=secs, text=text, T0=T0, T1=T1, cov=cov, insns=insns, rset=rset, u32=u32, sec=sec, intext=intext, callers=callers, isdata=isdata,
-                     indec=indec, emit=add_entry, relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize=fsize, mark=mark, imports=imports, outdir=OUTD, cstr=M.cstr)
+                     indec=indec, emit=add_entry, relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize=fsize, mark=mark, imports=imports, outdir=OUTD, cstr=M.cstr, strict=STRICT)
 def entry_of(a):
     f = indec(a)
     if f: return f[0]
@@ -295,7 +303,7 @@ U = SimpleNamespace(PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_entries=bad_entr
                     entries=entries, fsize=fsize, funcs=funcs, indec=indec, intext=intext, kinds=kinds, md=md, pad_split=pad_split, parent=parent, psites=psites,
                     rejects=rejects, relocs=relocs, rset=rset, rvals=rvals, sec=sec, tcons=tcons, text=text, tref=tref, tslots=tslots, tbl=tbl, pedat=pedat, mark=mark,
                     dinfo=dinfo, settled=settled, site_kind=site_kind, disp_ref=disp_ref, ptr_target=ptr_target, deadops=deadops, u32=u32, imports=imports, cont=cont,
-                    vsites=vsites, vok=vok, tstarts=tstarts, eh_sites=eh.sites, outdir=OUTD)    # state shared with codemap (containers mutate in place)
+                    cstr=M.cstr, vsites=vsites, vok=vok, tstarts=tstarts, eh_sites=eh.sites, outdir=OUTD)    # state shared with codemap (containers mutate in place)
 fin = False
 for rnd in range(30):
     OWN[:] = sorted(entries); n0 = (len(entries), len(insns), len(tslots), len(tstarts))
@@ -359,6 +367,9 @@ if RL is None:
         ab += sum(1 for sz, o in ((g.disp_size, g.disp_offset), (g.imm_size, g.imm_offset)) if sz == 4 and base <= int.from_bytes(text[a - T0 + o:a - T0 + o + 4], 'little') < base + M.sizeimg)
     why.append('no .reloc: pointers cannot be classified by relocation (%d absolute-looking immediates/displacements in reached code)' % ab)
 if eh.unknown: why.append('%d frame-handler stubs reference FuncInfo with an unknown magic/version' % eh.unknown)
+if dinfo['table_over_insn']: why.append('%d bytes are both reached as instructions and named as data' % dinfo['table_over_insn'])
+if rejects: why.append('%d rejected pointers (%s)' % (len(rejects), ', '.join(sorted({k for k, r in rejects.values()}))))
+if bad_entries: why.append('%d bad-decode entries' % len(bad_entries))
 if nc: why.append('%d undetermined pointer targets' % nc)
 if unexpl: why.append('%d unexplained bytes' % unexpl)
 print('%s: sections %d (executable %d: %s), reloc %s (%d fixups), imports %d, exports code %d forwarders %d (ordinal base %d, funcs %d, names %d), entry rva %x' % (

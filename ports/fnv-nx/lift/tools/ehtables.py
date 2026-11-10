@@ -82,7 +82,10 @@ class EH:
         X = s.X; s.sorted_stubs = sorted(set(s.stubs) | s.seenstub)
         for m in RE_PUSHH.finditer(X.text):
             p = X.T0 + m.start(); H = le(m[1])
-            if p in s.seenh or X.cov[m.start()] != 1 or (p + 1) not in X.rset or not X.intext(H) or X.cov[H - X.T0] != 1: continue
+            if p in s.seenh or X.cov[m.start()] != 1 or (p + 1) not in X.rset or not X.intext(H): continue
+            if X.cov[H - X.T0] != 1:
+                if X.strict: s.emit(H, 'seh-frame', p + 1)       # module mode: `push handler; mov eax, fs:[0]` registers H in the exception chain, the OS transfers control through it
+                continue
             s.seenh.add(p)
             if s.is_stub(H): continue
             q = m.start() - 5

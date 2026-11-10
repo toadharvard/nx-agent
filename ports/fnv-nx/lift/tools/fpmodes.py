@@ -551,7 +551,7 @@ def depth1(F, tabl, ov, start=None):
                 nodepth=bool(unk), ind=ind, sites=sites, inddep=sum(1 for a in indpos if x87 and F.succ[a] and isx87(mn(F.ins[F.succ[a][0]]))))
 
 
-TC, EST = {}, []              # tailret cache, sorted (start, ext) of all entries
+TC, FC, EST = {}, {}, []              # tailret cache, sorted (start, ext) of all entries
 
 
 def tailret(t, tabl):
@@ -561,7 +561,11 @@ def tailret(t, tabl):
     TC[t] = 0
     k = bisect.bisect_right(EST, (t, M32)) - 1
     if k >= 0 and t < EST[k][0] + EST[k][1] + 512:
-        F = Fn(EST[k][0], EST[k][1], KINDS[EST[k][0]])
+        if EST[k][0] not in FC:
+            if len(FC) > 40:
+                FC.clear()
+            FC[EST[k][0]] = Fn(EST[k][0], EST[k][1], KINDS[EST[k][0]])
+        F = FC[EST[k][0]]
         if F.ok and t in F.ins:
             TC[t] = depth1(F, tabl, {}, t)['ret']
     return TC[t]

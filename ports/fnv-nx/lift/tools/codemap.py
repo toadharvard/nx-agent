@@ -203,15 +203,29 @@ def vstore(U, t):
         i = next(U.md.disasm(U.text[o:o + 15], U.T0 + o, 1)); X = U.X
         if i.mnemonic == 'mov' and i.operands[0].type == X.X86_OP_MEM and i.operands[1].type == X.X86_OP_IMM and U.T0 + o + i.imm_offset == q: U.vok.add(t); return True
     return False
+def rtti(U, w, ref):
+    """w is an MSVC RTTI Complete Object Locator (signature 0, relocated pTypeDescriptor and pClassHierarchyDescriptor): mark it and what it names as data."""
+    u = U.u32; rs = U.rset
+    if not (U.intext(w) and u(w) == 0 and w + 12 in rs and w + 16 in rs and U.intext(u(w + 12)) and U.intext(u(w + 16)) and u(u(w + 16)) == 0): return False
+    U.mark(w, 20, ref); td, ch = u(w + 12), u(w + 16); U.mark(td, 9 + len(U.cstr(td + 8)), w + 12)
+    n, ba = u(ch + 8), u(ch + 12); U.mark(ch, 16, w + 16)
+    if n <= 0x100 and ba + 4 * n and U.intext(ba): U.mark(ba, 4 * n, ch + 12)
+    for k in range(n if n <= 0x100 else 0):
+        b = u(ba + 4 * k)
+        if U.intext(b): U.mark(b, 24, ba + 4 * k)
+    U.dinfo['rtti_col'] += 1; return True
 def ptr_run(U, t):
-    """the relocated-dword run started at t is a vtable: every slot into executable bytes is a code entry; the run is class-3 data when it lies in .text."""
+    """the relocated-dword run started at t is a vtable (it ends at the next vptr-installed address): every slot into executable bytes is a code
+    entry unless it is an RTTI locator; the run is class-3 data when it lies in .text."""
     s = []; q = t
-    while q in U.rset: s.append(q); q += 4
-    if U.intext(t): U.mark(t, 4 * len(s), t)
-    U.tstarts.add(t); U.dinfo['vtable_runs'] += 1
+    while q in U.rset and (q == t or not vstore(U, q)): s.append(q); q += 4
+    if U.intext(t) and (t - 4) in U.rset and rtti(U, U.u32(t - 4), t - 4): U.mark(t - 4, 4, t - 4)
     for q in s:
+        if U.intext(U.u32(q)) and rtti(U, U.u32(q), q): U.mark(q, 4, q); U.settled.add(q); continue
+        if U.intext(t): U.mark(q, 4, t)
         U.settled.add(q); U.vsites.add(q)
         if U.intext(U.u32(q)): U.ptr_target(U.u32(q), q)
+    U.tstarts.add(t); U.dinfo['vtable_runs'] += 1
     return len(s)
 def strict_pass(U, final, eh):
     new = 0
