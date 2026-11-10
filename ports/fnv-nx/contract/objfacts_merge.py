@@ -10,7 +10,7 @@ in two inputs is an error: exit status 1, the key named.  Prints the same summar
 import argparse, glob, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import objfacts, store
+import store
 
 
 def merge(paths):
@@ -24,6 +24,12 @@ def merge(paths):
     return out
 
 
+def summary(out):
+    fns = [v for k, v in out.items() if k[1] != 'ztv']
+    return 'native functions with an exe address: %d; with vtable values: %d; vtable sites: %d (not stored plainly: %d)' % (
+        len(fns), sum(1 for v in fns if v[0]), sum(len(v[0]) for v in fns), sum(1 for v in fns for s in v[0] if s[3] is None))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--inputs', required=True)
@@ -35,7 +41,7 @@ def main():
         print('objfacts_merge: ' + str(e), file=sys.stderr)
         sys.exit(1)
     store.save(a.out, 'obj', out)
-    print(objfacts.summary(out))
+    print(summary(out))
 
 
 if __name__ == '__main__':
