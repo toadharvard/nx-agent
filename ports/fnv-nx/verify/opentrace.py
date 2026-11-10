@@ -72,13 +72,18 @@ STR = re.compile(r'"((?:[^"\\]|\\.)*)"')
 FLAGS = re.compile(r"\bO_[A-Z_]+\b")
 
 
+UNRESOLVED = "/<unresolved-cwd>"
+
+
 def parse(lines, cwd0):
     """Yield events (pid, kind, path, flags) kind in open/exec/fail; tracks cwd per pid."""
     cwd, pend, clone_pend = {}, {}, []
 
     def get_cwd(pid):
         if pid not in cwd:
-            cwd[pid] = cwd[clone_pend.pop()] if clone_pend else cwd0
+            # the first pid is the traced command; a new pid's parent is known only when exactly one clone is in
+            # flight. Otherwise its cwd is unknown, and a relative path of it resolves under UNRESOLVED (red).
+            cwd[pid] = cwd0 if not cwd else cwd[clone_pend[0]] if len(clone_pend) == 1 else UNRESOLVED
         return cwd[pid]
 
     for raw in lines:
