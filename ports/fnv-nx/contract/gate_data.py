@@ -28,7 +28,7 @@ def run(facts, obj, link):
         for ln in fh:
             m = AL.match(ln)
             if m:
-                al.append(int(m.group(1), 16))
+                al.append(int(m[1], 16))
     al.sort()
     va, vs = facts['secs']['.data'][:2]
 
@@ -61,4 +61,4 @@ def run(facts, obj, link):
             rows.append((a, v, 'exe_only=%d native_only=%d first=0x%08x' % (len(x - n), len(n - x), first)))
     counts = dict(counts)
     counts['cookie_refs_ignored'] = miss[cookie]
-    return {'counts': counts, 'rows': rows, 'fail': ['superset', 'different']}
+    return {'counts': counts, 'rows': rows, 'fail': ['superset', 'different'], 'judged': len(copies)}

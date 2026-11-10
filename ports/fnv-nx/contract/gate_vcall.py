@@ -34,7 +34,8 @@ def run(facts, obj, link):
         counts[ORDER[worst[0]]] += 1
         if ORDER[worst[0]] == 'other':
             rows.append((a, 'other', worst[1]))
+    judged = sum(counts.values())
     counts = dict(counts)
     for d, n in delta.most_common(10):
         counts['delta:%d' % d] = n
-    return {'counts': counts, 'rows': rows, 'fail': ['other']}
+    return {'counts': counts, 'rows': rows, 'fail': ['other'], 'judged': judged}

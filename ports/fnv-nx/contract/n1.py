@@ -2,7 +2,7 @@
 """n1 - identity with the exe (MASTER_PLAN4 R1/N1) and what follows from it: the address-map certificate and
 the vftable identity R6.
 
-    n1.py --exe FalloutNV.exe --units units.json --msvc <dir with obj/u<i>.obj> --out n1.pkl
+    n1.py --exe FalloutNV.exe --units units.json --msvc <dir with obj/u<i>.obj> --out n1.json
 
 N1(f): the function as MSVC compiled it from the pristine decomp (COFF object of its unit) equals the exe's
 bytes at address A outside its relocation words, and every relocation word of the exe at the same offset is
@@ -22,15 +22,21 @@ entry.  The port links by address per unit, so one unit's name for an address bi
 names bound to different addresses in different units are counted and reported, they are not an error.
 A DIR32 word the exe does not relocate pins the symbol to an absolute value.
 
+Gate `n1` ($GATE_OUT/n1.json, gatefile.py): universe = all decomp functions, certified = those with N1 or a non-empty
+reason (LIFTED); uncertified = neither (expected 0).
+
 R6: in an N1 function a relocation naming `??_7C@@6B...@` carries the exe vftable address.  The map
 (`??_7` symbol -> address) is a function by the fixed point; no learning, no order, no offsets.
 
-Output (exe- and decomp-derived: container and fnv-nx-build only):
+Output (store.py kind `n1`, canonical JSON; exe- and decomp-derived: container and fnv-nx-build only):
   fn    {address: dict(unit, sym, size, n1, why, relocs=[(off, type, symbol, target)])}
   sym   {(unit, symbol) or (unit, symbol index, symbol): address}
   vt    {(unit, `??_7` symbol): address}
 """
-import argparse, collections, json, os, pickle, struct, sys
+import argparse, collections, json, os, struct, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gatefile, store
 
 DIR32, DIR32NB, REL32, SECTION, SECREL = 6, 7, 20, 10, 11
 ABSOLUTE = 1 << 32
@@ -206,7 +212,6 @@ def main():
     ap.add_argument('--msvc', required=True)
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import exefacts
     img = exefacts.Image(a.exe)
     units = json.load(open(a.units))
@@ -230,8 +235,11 @@ def main():
     for k, v in sorted(c.items(), key=lambda x: -x[1]):
         print('%7d  %s' % (v, k))
     print('symbols pinned: %d; (unit, vftable symbol) pairs (R6): %d -> %d addresses' % (len(sym), len(vt), len(set(vt.values()))))
-    with open(a.out, 'wb') as fh:
-        pickle.dump(dict(fn=fn, sym=sym, vt=vt, exe_sha256=img.sha256), fh, protocol=4)
+    store.save(a.out, 'n1', dict(fn=fn, sym=sym, vt=vt, exe_sha256=img.sha256))
+    # gate `n1` (L4): every decomp function has a certificate (N1) or a LIFTED verdict with a reason (`why`)
+    bad = ['%08x' % A for A, F in sorted(fn.items()) if not (F['n1'] or F['why'])]
+    gatefile.write('n1', len(fn), len(fn) - len(bad), bad,
+                   'N1 functions %d of %d; the others are LIFTED with a reason' % (sum(1 for F in fn.values() if F['n1']), len(fn)))
 
 
 if __name__ == '__main__':

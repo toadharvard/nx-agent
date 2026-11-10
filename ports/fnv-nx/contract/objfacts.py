@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """objfacts - the native side of the set comparisons: what each compiled function references (L1 CONTRACT).
 
-    objfacts.py --link <link dir with out/addrmap.tsv and fixed/*.o> --facts facts.pkl --out objfacts.pkl
+    objfacts.py --link <link dir with out/addrmap.tsv and fixed/*.o> --facts facts.json --out obj.json [--jobs N]
 
 Per native function that the address map binds to an exe address:
   vt     [(insn_off, symbol, addend, base, store_off)]  vtable-pointer values the function materializes.
@@ -12,12 +12,16 @@ Per native function that the address map binds to an exe address:
   calls  {exe code address}      direct call/jump targets, by address
   other  {symbol}                direct call targets with no address
   vcall  [displacement]          `ldr wN, [xM, #d]` feeding `blr/br xN`
-Output is derived from decomp objects: container and fnv-nx-build only.
+Output (store.py kind `obj`, canonical JSON; the result does not depend on --jobs) is derived from decomp objects:
+container and fnv-nx-build only.
 """
-import argparse, bisect, collections, glob, os, pickle, re, struct, sys
+import argparse, bisect, collections, glob, os, re, struct, sys
 import capstone
 from elftools.elf.elffile import ELFFile
 from elftools.elf.relocation import RelocationSection
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import store
 
 IM = re.compile(r'__fnv_([0-9a-f]{8})$')
 R_GOT_PAGE, R_GOT_LO12, R_CALL26, R_JUMP26 = 26, 27, 20, 21   # R_AARCH64_P32_*
@@ -48,7 +52,7 @@ def scan_function(code, relocs, vftset):
     want = {}
     for off, typ, name in relocs:
         m = IM.match(name)
-        a = int(m.group(1), 16) if m else None
+        a = int(m[1], 16) if m else None
         if typ in (R_CALL26, R_JUMP26):
             if a is not None:
                 calls.add(a)
@@ -68,8 +72,8 @@ def scan_function(code, relocs, vftset):
         if ad in want:                       # ldr wN, [xN, :got_lo12:sym]
             g = LD.match(ops)
             if g:
-                val[g.group(1)] = (want[ad], 0, ad)
-                last.pop(g.group(1), None)
+                val[g[1]] = (want[ad], 0, ad)
+                last.pop(g[1], None)
             continue
         if mn == 'ret' and '0' in val and val['0'][2] not in used:
             s_, a_, o_ = val['0']
@@ -89,35 +93,35 @@ def scan_function(code, relocs, vftset):
             continue
         if mn in ('str', 'stlr'):
             g = LD.match(ops)
-            if g and g.group(1) in val:
-                s, a, o = val[g.group(1)]
-                vt.append((ad, s, a, 'stk' if g.group(2) in ('sp', '29') else 'obj', _n(g.group(3))))
+            if g and g[1] in val:
+                s, a, o = val[g[1]]
+                vt.append((ad, s, a, 'stk' if g[2] in ('sp', '29') else 'obj', _n(g[3])))
                 used.add(o)
             continue
         if mn == 'stp':
             g = STP.match(ops)
             if g:
-                for k, r in enumerate((g.group(1), g.group(2))):
+                for k, r in enumerate((g[1], g[2])):
                     if r in val:
                         s, a, o = val[r]
-                        vt.append((ad, s, a, 'stk' if g.group(3) in ('sp', '29') else 'obj', _n(g.group(4)) + 4 * k))
+                        vt.append((ad, s, a, 'stk' if g[3] in ('sp', '29') else 'obj', _n(g[4]) + 4 * k))
                         used.add(o)
             continue
         if mn == 'ldr':
             g = LD.match(ops)
             if g:
-                val.pop(g.group(1), None)
-                if g.group(2) != 'sp':
-                    last[g.group(1)] = _n(g.group(3))
+                val.pop(g[1], None)
+                if g[2] != 'sp':
+                    last[g[1]] = _n(g[3])
                 else:
-                    last.pop(g.group(1), None)
+                    last.pop(g[1], None)
                 continue
         if mn == 'add':
             g = ADD.match(ops)
-            if g and g.group(2) in val:
-                s, a, o = val[g.group(2)]
-                val[g.group(1)] = (s, a + int(g.group(3), 0), o)
-                last.pop(g.group(1), None)
+            if g and g[2] in val:
+                s, a, o = val[g[2]]
+                val[g[1]] = (s, a + int(g[3], 0), o)
+                last.pop(g[1], None)
                 continue
         if mn == 'mov':
             g = MOV.match(ops)
@@ -230,7 +234,7 @@ def build(link, vftset, jobs=4):
     chunks = [paths[i:i + 40] for i in range(0, len(paths), 40)]
     out = {}
     with multiprocessing.Pool(jobs, _init, (link, vftset)) as pool:
-        for r in pool.imap_unordered(_run, chunks):
+        for r in pool.imap(_run, chunks):
             out.update(r)
     return out
 
@@ -242,10 +246,9 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--jobs', type=int, default=4)
     a = ap.parse_args()
-    F = pickle.load(open(a.facts, 'rb'))
+    F = store.load(a.facts, 'facts')
     out = build(a.link, set(F['vft']), a.jobs)
-    with open(a.out, 'wb') as fh:
-        pickle.dump(out, fh, protocol=4)
+    store.save(a.out, 'obj', out)
     fns = [v for k, v in out.items() if k[1] != 'ztv']
     print('native functions with an exe address: %d; with vtable values: %d; vtable sites: %d (not stored plainly: %d)' % (
         len(fns), sum(1 for v in fns if v[0]), sum(len(v[0]) for v in fns), sum(1 for v in fns for s in v[0] if s[3] is None)))

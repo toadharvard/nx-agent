@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """ehfacts - MSVC x86 C++ exception-handling tables of the exe, and what each data code pointer is.
 
-    ehfacts.py --exe FalloutNV.exe --facts facts.pkl --out eh.pkl
+    ehfacts.py --exe FalloutNV.exe --facts facts.json --out eh.json
 
 parse(img, facts)    FuncInfo structures (found by magic, validated), their handler stubs and owner functions.
 classify(facts, eh)  {data va: 'slot' | 'xc' | 'eh_unwind' | 'eh_catch' | 'other'} for every facts['ptrs'] entry.
 The output is exe-derived: it stays out of the repository (docs/ARCHITECTURE.md, Legal).
 """
-import argparse, collections, os, pickle, sys, time
+import argparse, collections, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import exefacts
+import exefacts, store
 
 MAGICS = (0x19930520, 0x19930521, 0x19930522)
 MAX_STATE = 1 << 12
@@ -122,9 +122,8 @@ def main():
     ap.add_argument('--facts', required=True)
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
-    t0 = time.time()
     img = exefacts.Image(a.exe)
-    facts = pickle.load(open(a.facts, 'rb'))
+    facts = store.load(a.facts, 'facts')
     eh = parse(img, facts)
     kind = classify(facts, eh)
     fis = eh['funcinfo']
@@ -142,8 +141,7 @@ def main():
                               for d, t in facts['ptrs'] if kind[d] == 'other')
     print('other by (section, target is decomp fn)', dict(oth))
     eh['kind'] = kind
-    pickle.dump(eh, open(a.out, 'wb'))
-    print('seconds %.1f' % (time.time() - t0))
+    store.save(a.out, 'eh', eh)
 
 
 if __name__ == '__main__':
