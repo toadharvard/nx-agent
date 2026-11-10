@@ -59,7 +59,7 @@ files() { { find "${SCOPE[@]}" -type f \( -name '*.c' -o -name '*.cpp' -o -name 
     -not -path '*/__pycache__/*' -not -path 'render/total/census/*' 2>/dev/null; printf '%s\n' "${DOCS[@]}"; } | grep -v -x "$SELF" | sort -u; }
 FILES=$(files)
 hits() {  # pattern -> "file:line" lines, history notes excluded
-  echo "$FILES" | while read -r f; do [ -f "$f" ] && grep -nIF -e "$1" "$f" 2>/dev/null | grep -v 'removed 2026-11-10' | sed "s#^#$f:#"; done
+  echo "$FILES" | xargs -d '\n' grep -nIF -e "$1" 2>/dev/null | grep -v 'removed 2026-11-10' 
 }
 for pat in "${REMOVED_PATTERNS[@]}"; do
   h=$(hits "$pat"); [ -n "$h" ] && { echo "REMOVED pattern '$pat' occurs:"; echo "$h" | head -5 | sed 's/^/  /' | cut -c1-160; fail=$((fail+1)); }

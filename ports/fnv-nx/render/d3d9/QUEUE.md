@@ -109,3 +109,17 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | M1a | farm job: record the original under Wine with the new recorder (main menu, first cell), both profiles; stats: Create*Shader by frame, calls per frame; hand to L4 | T4a | next |
 | E1 | env table generator: envprobe over the whole query domain in both profiles -> render/d3d9/env table + answer functions | T4a | next |
 | V3 | FFP pixel check: scenes covering the decided-with-doubt points of F1/F2 against WineD3D | D5 | |
+
+## First recording of the original (d9rec 783ec078, farms s5b1 handheld / full1 docked, 2026-11-10)
+
+- 4 scene recordings x 2 runs, 0.39-1.69 M calls, 3900-9850 frames, 0 decode errors; one adapter mode per profile.
+- Create{Vertex,Pixel}Shader: 960 calls (765 distinct bytecodes), all in frame 0; 0 afterwards (menu frames only).
+- Draws without VS or PS: 0; SetTransform 12-14 k and SetTextureStageState 61 per recording; 73 of 497 methods called.
+- PROBLEM 1: the `cell` scene never rendered a world cell (max 28 draws per frame, as the menu). Task M1b: find why
+  the wine_ref scene flow does not reach the cell with the new proxy (S16_STOP_AFTER_FRAMES=1? console typing? a
+  wait on the old journal?), fix inside the job, ask L4 to rerun.
+- PROBLEM 2: the original's stream is not repeatable: equal for the first ~12200 records, then a float of
+  SetPixelShaderConstantF differs and frame counts differ by up to 5x (wall-clock time). Reported to the orchestrator
+  with the proposed rule "virtual clock driven by the Present count" for check runs on both sides (owner: L4 for
+  Wine, L5 for the guest). G-STREAM is blocked on it.
+- Farm notes: the report's "checkout is not 783ec078" line compares a short id with a full one (fix in the job).

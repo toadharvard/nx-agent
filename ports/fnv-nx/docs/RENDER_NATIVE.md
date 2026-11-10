@@ -650,7 +650,7 @@ Next: reading NiSkinInstance / NiSkinData / NiSkinPartition from engine objects 
 
 ### 4.5 d9 families (removed 2026-11-10, see render/d3d9)
 
-Removed: hand-written programs standing in for the game's programs are not a product path (owner order 2026-11-10; the translator `render/shaders` handles every program). `capture/d3d9_families.*`, the `d9_adts` / `d9_envmap` / `d9_fogpass` shaders, `nx_render --families` and their checks are gone.
+(removed 2026-11-10) Hand-written programs standing in for the game's programs are not a product path (owner order 2026-11-10; the translator `render/shaders` handles every program). `capture/d3d9_families.*`, the `d9_adts` / `d9_envmap` / `d9_fogpass` shaders, `nx_render --families` and their checks are gone (removed 2026-11-10).
 
 ## 5. Recommendation
 
@@ -977,7 +977,7 @@ net for peak scenes in shipped builds, never the baseline. The UI is never scale
 
 ### 9.1, 9.2 Dynamic resolution (removed 2026-11-10)
 
-Cancelled by the owner. `front/dynres.h`, the N0 scene `dynres` and `test_dynres` are removed; the gates measure the 1280x720 frame.
+Cancelled by the owner (removed 2026-11-10). `front/dynres.h`, the N0 scene `dynres` and `test_dynres` are removed; the gates measure the 1280x720 frame.
 
 ### 9.3 Presets
 

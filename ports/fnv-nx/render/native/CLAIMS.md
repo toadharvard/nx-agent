@@ -181,6 +181,6 @@ native GLSL lands.
 
 ## render-lit: d9 lit families (removed 2026-11-10, see render/d3d9)
 
-Rows L1-L4 and `capture/d3d9_families.*`, `d9_adts`/`d9_envmap`/`d9_fogpass`, `nx_render --families` / `--native` are removed:
-hand-written programs for the engine's D3D9 programs are not a product path.
+Rows L1-L4 and `capture/d3d9_families.*`, `d9_adts`/`d9_envmap`/`d9_fogpass`, `nx_render --families` / `--native`
+are removed 2026-11-10: hand-written programs for the engine's D3D9 programs are not a product path.
 

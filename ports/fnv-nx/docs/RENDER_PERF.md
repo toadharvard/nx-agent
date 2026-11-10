@@ -311,7 +311,7 @@ Choice: **`.nxd3d` stays internal; real captures come in as NXD9** (S6n's D3D9-l
 docs/RENDER_NATIVE.md §8.3, written by S16) through `perf/nxd9_import.py` (removed 2026-11-10 with `nxd9_gpu.py`, see render/d3d9; the commands below are history):
 
 ```sh
-python3 -I render/native/perf/nxd9_import.py <capture.nxd9> <work>/streams/game.nxd3d
+python3 -I render/native/perf/nxd9_import.py <capture.nxd9> <work>/streams/game.nxd3d   # removed 2026-11-10
 python3 render/native/perf/emu_count.py <work>/b/native_drv.nso <work>/streams/game.nxd3d <dir> [--dry]
 <work>/b/nine_drv <work>/streams/game.nxd3d 0          # under valgrind --tool=callgrind as in report.py
 <work>/b/native_drv_cap <work>/streams/game.nxd3d 0 game.nxcap - 2 && python3 -I render/native/perf/passes.py game.nxcap
