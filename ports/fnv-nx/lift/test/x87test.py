@@ -44,19 +44,19 @@ void run(int op, unsigned n, const unsigned char *in, unsigned char *out) {
 LD = lambda d: bytes([0xDB, 0x6E, d])          # fld tbyte [esi+d]
 ST = b'\xDB\x3F'                               # fstp tbyte [edi]
 BIN = lambda op: LD(32) + LD(16) + op + ST     # fld b; fld a; op st0,st1 (a op b)
-# name: (code body, kind, result width in bytes (0 = tbyte), status-mask, unsupported-operand-skip)
+# name: (code body, kind, result width in bytes (0 = tbyte, -1 = none), fsw mask compared)
 OPS = {
- 'add': (BIN(b'\xD8\xC1'), 'bin', 0, 0, 1), 'sub': (BIN(b'\xD8\xE1'), 'bin', 0, 0, 1),
- 'mul': (BIN(b'\xD8\xC9'), 'bin', 0, 0, 1), 'div': (BIN(b'\xD8\xF1'), 'bin', 0, 0, 1),
- 'sqrt': (LD(16) + b'\xD9\xFA' + ST, 'un', 0, 0, 1), 'rndint': (LD(16) + b'\xD9\xFC' + ST, 'un', 0, 0, 1),
- 'fld32': (b'\xD9\x46\x10' + ST, 'f32', 0, 0, 0), 'fld64': (b'\xDD\x46\x10' + ST, 'f64', 0, 0, 0),
- 'fild16': (b'\xDF\x46\x10' + ST, 'i16', 0, 0, 0), 'fild32': (b'\xDB\x46\x10' + ST, 'i32', 0, 0, 0),
- 'fild64': (b'\xDF\x6E\x10' + ST, 'i64', 0, 0, 0),
- 'fst32': (LD(16) + b'\xD9\x1F', 'un', 4, 0, 1), 'fst64': (LD(16) + b'\xDD\x1F', 'un', 8, 0, 1),
- 'fist16': (LD(16) + b'\xDF\x1F', 'un', 2, 0, 1), 'fist32': (LD(16) + b'\xDB\x1F', 'un', 4, 0, 1),
- 'fist64': (LD(16) + b'\xDF\x3F', 'un', 8, 0, 1),
- 'fcom': (LD(32) + LD(16) + b'\xD8\xD1', 'bin', -1, 0x4500, 0), 'fucom': (LD(32) + LD(16) + b'\xDD\xE1', 'bin', -1, 0x4500, 0),
- 'fxam': (LD(16) + b'\xD9\xE5\xDD\x7F\x12\xDD\xD8\xD9\xE5', 'un', -1, 0x4700, 0),
+ 'add': (BIN(b'\xD8\xC1'), 'bin', 0, 0), 'sub': (BIN(b'\xD8\xE1'), 'bin', 0, 0),
+ 'mul': (BIN(b'\xD8\xC9'), 'bin', 0, 0), 'div': (BIN(b'\xD8\xF1'), 'bin', 0, 0),
+ 'sqrt': (LD(16) + b'\xD9\xFA' + ST, 'un', 0, 0), 'rndint': (LD(16) + b'\xD9\xFC' + ST, 'un', 0, 0),
+ 'fld32': (b'\xD9\x46\x10' + ST, 'f32', 0, 0), 'fld64': (b'\xDD\x46\x10' + ST, 'f64', 0, 0),
+ 'fild16': (b'\xDF\x46\x10' + ST, 'i16', 0, 0), 'fild32': (b'\xDB\x46\x10' + ST, 'i32', 0, 0),
+ 'fild64': (b'\xDF\x6E\x10' + ST, 'i64', 0, 0),
+ 'fst32': (LD(16) + b'\xD9\x1F', 'un', 4, 0), 'fst64': (LD(16) + b'\xDD\x1F', 'un', 8, 0),
+ 'fist16': (LD(16) + b'\xDF\x1F', 'un', 2, 0), 'fist32': (LD(16) + b'\xDB\x1F', 'un', 4, 0),
+ 'fist64': (LD(16) + b'\xDF\x3F', 'un', 8, 0),
+ 'fcom': (LD(32) + LD(16) + b'\xD8\xD1', 'bin', -1, 0x4500), 'fucom': (LD(32) + LD(16) + b'\xDD\xE1', 'bin', -1, 0x4500),
+ 'fxam': (LD(16) + b'\xD9\xE5\xDD\x7F\x12\xDD\xD8\xD9\xE5', 'un', -1, 0x4700),
 }
 NAMES = list(OPS)
 FCWS = [0x7f | pc << 8 | rc << 10 for pc in (0, 2, 3) for rc in range(4)]
@@ -203,7 +203,7 @@ def gen(op, rng, N, fcw):
     if kind[0] == 'i':
         w = int(kind[1:]); k = rng.integers(0, w + 1, N).astype(U)
         v = rng.integers(0, 2**64, N, dtype=U) >> (U(64) - np.maximum(k, U(1)))
-        v = np.where(rng.random(N) < 0.15, rng.choice([0, 1, 2**(w - 1) - 1, 2**(w - 1), 2**w - 1, 2**w - 2], N).astype(U), v)
+        v = np.where(rng.random(N) < 0.15, rng.choice(np.array([0, 1, 2**(w - 1) - 1, 2**(w - 1), 2**w - 1, 2**w - 2], U), N), v)
         v = np.where(rng.random(N) < 0.5, (U(0) - v), v) & U(2**w - 1)
         return v, np.zeros(N, np.uint16), np.zeros(N, U), np.zeros(N, np.uint16)
     am, ase = marg(rng, N); bm, bse = marg(rng, N)
@@ -296,7 +296,7 @@ def main():
     ap.add_argument('--seed', type=int, default=1); ap.add_argument('--disasm', action='store_true'); a = ap.parse_args()
     if a.disasm: return disasm()
     lib = build(); lib.run.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
-    tot = [0, 0, 0, 0]; bad = vectors(lib)
+    tot = [0, 0, 0]; bad = vectors(lib)
     for oi, op in enumerate(NAMES):
         if a.op and a.op != op: continue
         rng = np.random.default_rng([a.seed, oi]); N = a.n * len(FCWS)
@@ -305,22 +305,18 @@ def main():
         rec = np.zeros(N, IN_T); rec['fcw'], rec['am'], rec['ase'], rec['bm'], rec['bse'] = fcw, am, ase, bm, bse
         want = oracle(op, rec); got = np.zeros(N, OUT_T)
         lib.run(oi, N, rec.ctypes.data, got.ctypes.data)
-        _, kind, w, smask, skipbad = OPS[op]
-        skip = np.zeros(N, bool)
-        if skipbad:                                        # unsupported encodings: QEMU 5.0 computes garbage; covered by vectors
-            skip = ((am >> U(63) == 0) & ((ase & 0x7FFF) != 0)) | ((kind == 'bin') & (bm >> U(63) == 0) & ((bse & 0x7FFF) != 0))
-            skip &= False
+        _, kind, w, smask = OPS[op]
         if w == 0: eq = (want['r'] == got['r']) & (want['rse'] == got['rse'])
         elif w > 0: msk = U(2 ** (8 * w) - 1) if w < 8 else ~U(0); eq = (want['r'] & msk) == (got['r'] & msk)
         else: eq = np.ones(N, bool)
         if smask: eq &= (want['fsw'] & smask) == (got['fsw'] & smask)
         if op == 'fxam': eq &= (want['fsw2'] & smask) == (got['fsw2'] & smask)
-        ne = ~eq & ~skip; nd = int(ne.sum()); ns = int(skip.sum())
-        print(f"{op} {N - ns} equal {N - ns - nd} diff {nd}" + (f" skip {ns}" if ns else ""))
-        tot[0] += N - ns; tot[1] += N - ns - nd; tot[2] += nd; tot[3] += ns
+        ne = ~eq; nd = int(ne.sum())
+        print(f"{op} {N} equal {N - nd} diff {nd}")
+        tot[0] += N; tot[1] += N - nd; tot[2] += nd
         for i in np.nonzero(ne)[0][:5]:
             print(f"  {op} a={am[i]:016x}:{ase[i]:04x} b={bm[i]:016x}:{bse[i]:04x} fcw={fcw[i]:#x} got={got['r'][i]:016x}:{got['rse'][i]:04x}/{got['fsw'][i]:04x} want={want['r'][i]:016x}:{want['rse'][i]:04x}/{want['fsw'][i]:04x}")
-    print(f"total {tot[0]} equal {tot[1]} diff {tot[2] + bad} skip {tot[3]}")
+    print(f"total {tot[0]} equal {tot[1]} diff {tot[2] + bad}")
     return 1 if tot[2] + bad else 0
 
 if __name__ == '__main__': sys.exit(main())

@@ -86,14 +86,24 @@ static fnvl_f80 addsub(fnvl_f80 a, fnvl_f80 b, u32 sub, u32 fcw, u32 *fsw)
 	}
 	if (x.den | y.den) *fsw |= DE;
 	if (x.k == K_ZERO && y.k == K_ZERO) return mk(sa == sb ? sa : rc == 1, 0, 0);
-	if (sa == sb) {   /* QEMU quirk (oracle bug): a pseudo-denormal operand makes the 64-bit significand sum lose its carry */
-		int ea = a.se & 0x7FFF, eb = b.se & 0x7FFF; u64 w = a.m + b.m;
-		if (ea == 0 && eb == 0) {
+	{   /* QEMU quirk (oracle bug): with a pseudo-denormal operand the 64-bit significand sum/difference wraps */
+		int ea = a.se & 0x7FFF, eb = b.se & 0x7FFF; u64 w;
+		if (ea == 0 && eb == 0 && sa == sb) {
+			w = a.m + b.m;
 			if (!w) return mk(sa, 0, 0);
 			lz = __builtin_clzll(w);
 			return rpack(sa, 1 - lz, w << lz, 0, fcw, fsw);
 		}
-		if (ea + eb == 1 && (ea ? b.m : a.m) >> 63 && w >> 63) return rpack(sa, 1, w, 0, fcw, fsw);
+		if (ea + eb == 1 && (ea ? b.m : a.m) >> 63) {          /* exp-1 operand P against pseudo-denormal Q */
+			u64 pm = ea ? a.m : b.m, qm = ea ? b.m : a.m; u32 ps = ea ? sa : sb;
+			w = sa == sb ? pm + qm : pm - qm;
+			if (sa == sb && !(w >> 63)) w = 0;               /* sum carried out cleanly: generic path below */
+			if (w || sa != sb) {
+				if (!w) return mk(ps, 0, 0);
+				lz = __builtin_clzll(w);
+				return rpack(ps, 1 - lz, w << lz, 0, fcw, fsw);
+			}
+		}
 	}
 	if (x.k == K_ZERO) return rpack(sb, y.e, y.m, 0, fcw, fsw);
 	if (y.k == K_ZERO) return rpack(sa, x.e, x.m, 0, fcw, fsw);

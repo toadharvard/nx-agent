@@ -6,7 +6,7 @@ the descent state; running this file runs the whole pipeline. Output: /home/user
 import os, re, sys, json, bisect
 from collections import Counter, defaultdict
 MAGIC = (0x19930520, 0x19930521, 0x19930522)
-THROW = 0x00ec5f70
+EXC_CODE = 0xE06D7363           # the thrower is the function whose code copies the EXCEPTION_RECORD template starting with this code
 RE_STUB = re.compile(rb'(?=\xb8(.{4})\xe9(.{4}))', re.S)
 RE_PUSHH = re.compile(rb'(?=\x68(.{4})\x64(?:\xa1|\xff\x35)\x00\x00\x00\x00)', re.S)
 OUT = '/home/user/l3facts/ehtables.json'
@@ -16,15 +16,11 @@ def le(b): return int.from_bytes(b, 'little')
 class EH:
     def __init__(s, X):
         s.X = X; s.fi = {}; s.stubs = {}; s.noise = Counter(); s.sites = {}; s.scopes = {}; s.helpers = {}; s.seenh = set()
-        s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.tinfo_bad = 0
+        s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.thrower = None
 
     def emit(s, tgt, kind, site, parent=None):
         if site not in s.sites: s.emitted += 1
         s.sites[site] = kind; s.X.emit(tgt, kind, site)
-
-    def ptr(s, a, intext_ok=False):
-        """validated pointer value of the dword at a (must carry a relocation); returns value or None."""
-        return s.X.u32(a) if a in s.X.rset else None
 
     # ---- C++ FuncInfo
     def parse_fi(s, a):
@@ -130,7 +126,10 @@ class EH:
 
     def scan_throw(s):
         X = s.X
-        for site in X.callers.get(THROW, ()):
+        if s.thrower is None:
+            for r in X.relocs:
+                if X.intext(r) and X.cov[r - X.T0] == 2 and X.sec(X.u32(r)) not in (None, '.text') and X.u32(X.u32(r)) == EXC_CODE: s.thrower = X.owner(r); break
+        for site in X.callers.get(s.thrower, ()):
             for p in range(site - 16, site - 4):
                 if X.text[p - X.T0] == 0x68 and X.cov[p - X.T0] == 1 and (p + 1) in X.rset and X.sec(X.u32(p + 1)) not in (None, '.text'):
                     S = X.u32(p + 1)
@@ -155,8 +154,9 @@ class EH:
                     s.conts[X.u32(x + 1)] = a; s.emit(X.u32(x + 1), 'eh-cont', x + 1)
 
     def scan(s):
-        e0 = s.emitted; s.scan_stubs(); s.scan_seh(); s.parse_scopes(); s.scan_throw(); s.scan_conts()
-        return s.emitted - e0 + len(s.fi) + len(s.stubs) + len(s.helpers)
+        z = lambda: s.emitted + len(s.fi) + len(s.stubs) + len(s.helpers) + len(s.scopes) + len(s.throws) + len(s.conts)
+        e0 = z(); s.scan_stubs(); s.scan_seh(); s.parse_scopes(); s.scan_throw(); s.scan_conts()
+        return z() - e0
 
     # ---- report
     def finish(s, entries):
@@ -198,7 +198,7 @@ class EH:
         sv = Counter(sc['ver'] for sc in s.scopes.values()); recs = [r for sc in s.scopes.values() for r in sc['recs']]
         L.append('scope tables v3 %d v4 %d (empty %d), records %d: filters %d, handlers %d (finally %d); SEH helpers %s' % (sv[3], sv[4], sum(1 for sc in s.scopes.values() if not sc['recs']),
             len(recs), sum(1 for r in recs if r[1]), len(recs), sum(1 for r in recs if not r[1]), ' '.join(h(k) for k in sorted(s.helpers))))
-        L.append('ThrowInfo %d (pmfnUnwind %d, copyFunction %d); catch continuations %d' % (len(s.throws), sum(1 for t in s.throws.values() if t['unwind']),
+        L.append('thrower (_CxxThrowException, by EXCEPTION_RECORD template) %s; ThrowInfo %d (pmfnUnwind %d, copyFunction %d); catch continuations %d' % ('%x' % (s.thrower or 0), len(s.throws), sum(1 for t in s.throws.values() if t['unwind']),
             len({t[3] for r in s.throws.values() for t in r['types'] if t[3]}), len(s.conts)))
         L.append('frame-handler targets (stubs with FuncInfo): ' + ', '.join('%s x%d' % (k, v) for k, v in J['frame_handlers'].items()) + '; mov-eax/jmp noise (not FuncInfo): ' + ', '.join('%x x%d' % kv for kv in s.noise.most_common(4)))
         L.append('functions owning a FuncInfo %d, of which decomp %d; FuncInfo without a referenced stub %d' % (len(owners), sum(1 for o in owners if o in X.fsize), sum(1 for a in ok if not fiown[a])))
