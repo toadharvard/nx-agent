@@ -3,29 +3,24 @@
 
     rules/sdd1.py <prepared tree> [--dry] [--report out.tsv]
 
-A whole-tree pass, run after every per-file rule: it needs every class head to know which classes have a virtual
-destructor through a base. It rewrites, in src/ and include/ of the tree:
+Run after every per-file rule, over src/ and include/ of the tree. It places macros by syntax alone; whether a class
+is polymorphic is decided by the compiler inside the macros, never here:
 
     virtual ~C();                 ->  FNVNX_VDTOR(C, bases...) FNVNX_SDD_VIRTUAL ~C();
     virtual ~C() = 0;             ->  ... ~C() FNVNX_SDD_PURE(= 0);
-    ~D();   (D in the set)        ->  FNVNX_VDTOR_O(D, bases...) ~D();
-    class D : B { ... }  (no destructor declared, D in the set)
-                                  ->  class D : B { ... FNVNX_SDD_IMPLICIT(D, B) }
+    class D : B { ... }           ->  class D : B { ... FNVNX_SDD_DERIVED(D, B) }      (every class with a base
+                                                                                        and no `virtual ~D`)
     p->~C()  /  x.~C()            ->  FNVNX_DESTROY(p, C)  /  FNVNX_DESTROY_REF(x, C)   (unqualified calls only)
     C::operator delete(p[, n])    ->  FNVNX_OPDELETE1(p, C)  /  FNVNX_OPDELETE2(p, n, C)
 
-The set: a class that declares `virtual ~C`, and every class with a base in the set. A base is resolved to the
-definition of that name earlier in the same file, else to the definitions in the files
-it includes, else to the definitions of the whole tree. A reference whose definitions disagree is reported
-(SDD1-MIXED) and taken as in the set: `override` in FNVNX_VDTOR_O makes a wrong guess a compile error.
-
 Every edit keeps the line count. Under MSVC the macros give the original text back, without FNVNX_SDD they give
-today's GCC text, so one tree serves both. Counts go to stdout as `id<TAB>files<TAB>edits`.
+today's GCC text, so one tree serves both. Counts go to stdout as `id<TAB>files<TAB>edits`. A construct the rule
+sees but cannot place (SDD1-*-MISSED, SDD1-ANON) is counted; the tree is accepted only with those at 0.
 """
 import os
 import re
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 
 EXT = ('.h', '.hpp', '.inl', '.cpp', '.cxx', '.cc', '.c')
 MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)', re.S)
@@ -36,7 +31,7 @@ SPEC = re.compile(r'(?:\b(?:virtual|inline|__forceinline|__inline|explicit|FNVNX
                   r'|__declspec\s*\((?:[^()]|\([^()]*\))*\)|__attribute__\s*\(\((?:[^()]|\([^()]*\))*\)\))\s*$')
 DCALL = re.compile(r'(->|\.)\s*~\s*([A-Za-z_]\w*(?:\s*<[^;{}()]*?>)?)\s*\(\s*\)')
 IDENT = re.compile(r'[A-Za-z_0-9]')
-TPARAM = re.compile(r'\b(?:class|typename)\s+([A-Za-z_]\w*)\s*(?=[,>=])')
+ANON = re.compile(r'\b(?:class|struct)\s*:(?!:)[^;{}()]*\{')
 OPDEL = re.compile(r'(?<![\w~:>])((?:[A-Za-z_]\w*\s*(?:<[^;{}()]*?>\s*)?::\s*)+)operator\s+delete\s*\(')
 
 
@@ -189,106 +184,26 @@ def scan(tree):
                     text = fh.read()
                 if 'class' not in text and 'struct' not in text and '~' not in text: continue
                 m = mask(text)
-                cs = classes(text, m)
-                tp = set(TPARAM.findall(m))
-                for c in cs: c['bases'] = [(sp, b) for sp, b in c['bases']]; c['tparams'] = tp
-                files[p] = (text, m, cs)
+                files[p] = (text, m, classes(text, m))
     return files
-
-
-INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]([^>"]+)[>"]', re.M)
-
-
-def include_closure(tree, files):
-    """{path: [paths it includes, transitively, nearest first]} over the scanned files"""
-    by_rel = {}
-    for p in files:
-        by_rel[os.path.relpath(p, tree).replace(os.sep, '/').lower()] = p
-    by_base = defaultdict(list)
-    for p in files: by_base[os.path.basename(p).lower()].append(p)
-    direct = {}
-    for p, (text, m, _) in files.items():
-        d = os.path.relpath(os.path.dirname(p), tree).replace(os.sep, '/').lower()
-        out = []
-        for inc in INCLUDE.findall(text):
-            inc = inc.replace('\\', '/').lower()
-            hit = None
-            for root in (d, 'include', 'src'):
-                q = os.path.normpath(root + '/' + inc).replace(os.sep, '/')
-                if q in by_rel: hit = by_rel[q]; break
-            if hit is None and len(by_base[os.path.basename(inc)]) == 1: hit = by_base[os.path.basename(inc)][0]
-            if hit and hit != p: out.append(hit)
-        direct[p] = out
-    memo = {}
-    def walk(p):
-        if p in memo: return memo[p]
-        seen, order, stack = {p}, [], list(reversed(direct.get(p, [])))
-        while stack:
-            q = stack.pop()
-            if q in seen: continue
-            seen.add(q); order.append(q)
-            stack.extend(reversed(direct.get(q, [])))
-        memo[p] = order
-        return order
-    return {p: walk(p) for p in files}
-
-
-def closure(files, tree=None):
-    """mark c['sdd'] for every class. A base name resolves to its definition earlier in the same file, else to the
-    definitions in the files this one includes, else to every definition of the tree. Returns the (file, class, base)
-    references whose definitions still disagree; those count as in the set (FNVNX_VDTOR_O's `override` then fails
-    to compile when the guess is wrong)."""
-    for _, _, cs in files.values():
-        for c in cs: c['sdd'] = c['vdtor']
-    inc = include_closure(tree, files) if tree else {p: [] for p in files}
-    mixed = set()
-    while True:
-        glob = defaultdict(set)
-        byfile = {}
-        for p, (_, _, cs) in files.items():
-            d = byfile[p] = defaultdict(set)
-            for c in cs:
-                glob[c['name']].add(c['sdd']); d[c['name']].add(c['sdd'])
-        changed = False
-        for p, (_, _, cs) in files.items():
-            local = {}
-            for c in cs:
-                if not c['sdd']:
-                    for _, b in c['bases']:
-                        if b in local: st = {local[b]}
-                        elif b in c['tparams']: continue     # a template parameter, not the class of that name
-                        else:
-                            st = set()
-                            for q in inc[p]:
-                                if b in byfile[q]: st |= byfile[q][b]
-                            if not st: st = glob.get(b, set())
-                        if st == {True, False}: mixed.add((p, c['name'], b))
-                        if True in st:
-                            c['sdd'] = True; changed = True; break
-                local[c['name']] = c['sdd'] or local.get(c['name'], False)
-        if not changed: break
-    return mixed
 
 
 def rewrite(text, m, cs, stats):
     edits = []                                           # (start, end, replacement)
     for c in cs:
         bases = ''.join(', ' + s for s, _ in c['bases'])
-        if c['dtor'] is not None:
-            if c['vdtor']:
-                vm = re.search(r'\bvirtual\b', m[c['spec']:c['dtor']])
-                edits.append((c['spec'], c['spec'], 'FNVNX_VDTOR(%s%s) ' % (c['name'], bases)))
-                edits.append((c['spec'] + vm.start(), c['spec'] + vm.end(), 'FNVNX_SDD_VIRTUAL'))
-                stats['SDD1-VDTOR'] += 1
-                if c['pure']:
-                    edits.append((c['pure'][0], c['pure'][1], 'FNVNX_SDD_PURE(= 0)'))
-                    stats['SDD1-PURE'] += 1
-            elif c['sdd']:
-                edits.append((c['spec'], c['spec'], 'FNVNX_VDTOR_O(%s%s) ' % (c['name'], bases)))
-                stats['SDD1-VDTOR-O'] += 1
-        elif c['sdd']:
-            edits.append((c['close'], c['close'], ' FNVNX_SDD_IMPLICIT(%s%s) ' % (c['name'], bases)))
-            stats['SDD1-IMPLICIT'] += 1
+        if c['vdtor']:
+            vm = re.search(r'\bvirtual\b', m[c['spec']:c['dtor']])
+            edits.append((c['spec'], c['spec'], 'FNVNX_VDTOR(%s%s) ' % (c['name'], bases)))
+            edits.append((c['spec'] + vm.start(), c['spec'] + vm.end(), 'FNVNX_SDD_VIRTUAL'))
+            stats['SDD1-VDTOR'] += 1
+            if c['pure']:
+                edits.append((c['pure'][0], c['pure'][1], 'FNVNX_SDD_PURE(= 0)'))
+                stats['SDD1-PURE'] += 1
+        elif c['bases']:
+            edits.append((c['close'], c['close'], ' FNVNX_SDD_DERIVED(%s%s) ' % (c['name'], bases)))
+            stats['SDD1-DERIVED'] += 1
+    stats['SDD1-ANON'] += len(ANON.findall(m))
     for d in DCALL.finditer(m):
         k = d.start()
         while k > 0 and m[k - 1] in ' \t\n': k -= 1
@@ -331,32 +246,29 @@ def rewrite(text, m, cs, stats):
 
 def run(tree, dry=False, report=None):
     files = scan(tree)
-    mixed = closure(files, tree)
     stats, nfiles = Counter(), Counter()
     rows = []
     for p in sorted(files):
         text, m, cs = files[p]
-        if 'FNVNX_VDTOR' in text or 'FNVNX_DESTROY' in text or 'FNVNX_SDD_IMPLICIT' in text or 'FNVNX_OPDELETE' in text:
+        if 'FNVNX_VDTOR' in text or 'FNVNX_DESTROY' in text or 'FNVNX_SDD_DERIVED' in text or 'FNVNX_OPDELETE' in text:
             stats['SDD1-ALREADY'] += 1
             continue
         st = Counter()
         new = rewrite(text, m, cs, st)
         assert new.count('\n') == text.count('\n'), p
         for k, v in st.items():
-            stats[k] += v; nfiles[k] += 1
+            if v: stats[k] += v; nfiles[k] += 1
         for c in cs:
-            if c['sdd']:
-                rows.append((os.path.relpath(p, tree), c['name'], 'virtual' if c['vdtor'] else
-                             'override' if c['dtor'] is not None else 'implicit', ' '.join(b for _, b in c['bases'])))
+            if c['vdtor'] or c['bases']:
+                rows.append((os.path.relpath(p, tree), c['name'], 'virtual' if c['vdtor'] else 'derived',
+                             ' '.join(b for _, b in c['bases'])))
         if new != text and not dry:
             with open(p, 'w', encoding='utf-8', errors='surrogateescape', newline='') as fh:
                 fh.write(new)
-    stats['SDD1-MIXED'] = len(mixed)
     if report:
         with open(report, 'w') as fh:
-            fh.write('# fnvnx-sdd1/1\nfile\tclass\tkind\tbases\n')
+            fh.write('# fnvnx-sdd1/2\nfile\tclass\tkind\tbases\n')
             for r in rows: fh.write('\t'.join(r) + '\n')
-            for f, c, b in sorted(mixed): fh.write('#mixed\t%s\t%s\t%s\n' % (os.path.relpath(f, tree), c, b))
     return stats, nfiles
 
 
