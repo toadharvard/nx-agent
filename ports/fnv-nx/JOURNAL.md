@@ -3829,3 +3829,13 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   4. lifted bodies into the link (EH, FP certificates);
   5. boot to the main menu;
   6. the first frame.
+
+### J-0170 | 2026-11-10 | stream: orchestration | status: paused | parent: J-0169
+
+* **decided (owner)**
+  - At 08:45Z the owner told L4 to resume toward the first fully lifted ELF.
+  - At 08:52Z the owner stopped again ("no chance it converges fast"). They asked for every missing piece, a plan, and an estimate of who does how much. Only token-free farm runs continue.
+* **did** - Wrote docs/PLAN_FIRST_ELF.md, sourced from L4's l4-verify-005:
+  - tables A–E: first ELF, then menu/frame, green conditions, native step, load per lead;
+  - the critical path, with a proposal to split L3 into L3a and L3b.
+* **running** - REC/PATCH certification of 7200c194 (lc1), D3D9 docked recording (full1), Sail build plus proofs (l3c).
