@@ -12,11 +12,9 @@ Goal that was started: the first guest binary of the new scheme, fully lifted, s
   point through CRT code).
 - `loader/src/tls.c`: per-thread TLS block from the exe's TLS directory.
 
-## Half-done (WIP in this commit, UNVERIFIED)
-- `loader/src/start.c`, `loader/include/fnvnx_start.h`, `tests/loader/test_start.c` and any change to pe.c /
-  fnvnx_loader.h / Makefile in this commit: a worker was stopped mid-task. I have not built or read them.
-  Treat them as a draft: first step on resume is to build, run the test, and review against the sequence in
-  the header comment.
+## Not started
+- Loader start sequence (`loader/src/start.c`: identity, map, import slots, TLS, TEB, stack, entry through
+  `fnvnx_lift_enter`). A worker was stopped before it wrote any file; nothing of it is in the tree.
 
 ## Open questions sent, no answer yet
 - L3: module load bases. Module universes are at preferred base 0x00400000, the same as the exe, so an image
@@ -27,7 +25,7 @@ Goal that was started: the first guest binary of the new scheme, fully lifted, s
   universe, import entries, thread/TEB entry `fnvnx_lift_enter`.
 
 ## Exact next steps on resume
-1. Verify or redo the start sequence (above).
+1. Write the start sequence (above), test first.
 2. On L3's answer: modules.tsv and the 40 module slots in iat.tsv.
 3. Gate "dispatcher entries = universe" from L3's entries.tsv.
 4. Send `merge claude/fnv-l1-contract` to MERGER.
