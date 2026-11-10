@@ -86,6 +86,13 @@ rc, r, e = pure(d)
 check("pure: shell file is an uncertified item", rc != 0 and r["status"] == "red" and r["universe"] == 1
       and r["certified"] == 0 and r["uncertified"] == ["link/run.sh"], (rc, r, e))
 
+d = tmp("pure-tests")
+put(d, "link/a.py", CLEAN)
+put(d, "link/tests/test_a.py", BAD)
+rc, r, e = pure(d)
+check("pure: files below tests/ are outside the universe", rc == 0 and r["status"] == "green"
+      and (r["universe"], r["certified"]) == (1, 1), (rc, r, e))
+
 d = tmp("pure-import")
 put(d, "link/a.py", "import b\n")
 put(d, "link/b.py", CLEAN)
