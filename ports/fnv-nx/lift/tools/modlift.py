@@ -116,7 +116,7 @@ def run(path):
         ch = tail_pass() + eh.scan()
         if not queue and not ch: break
     # ---- per-entry descents under NORETURN (a path ends at another entry, ret, indirect jmp, ud, the span end, or a call to a never-returning callee)
-    E = es(); cnt = {}; udinfo = {}; RET = ('ret', 'retf', 'iret', 'iretd'); nrcall, nrjmp = codemap.nr_sites(X_, imports)
+    E = es(); cnt = {}; udinfo = {}; RET = ('ret', 'retf', 'iret', 'iretd'); nrcall, nrjmp, nrname = codemap.nr_sites(X_, imports)
     def trav(e, N):
         ext = []; seen = set(); deps = set(); ends = set(); n_ud = n_xf = n_mf = 0; uds = []; st = [(e, 0)]
         while st:
@@ -140,7 +140,7 @@ def run(path):
         cnt[e] = (n_ud, n_xf, n_mf); udinfo[e] = uds
         return ext, deps, ends
     NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent))
-    exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
+    seedn = {eh.thrower} & set(ent); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
     # ---- provenance: proven roots + control-transfer consumers (jump tables, vptr-store runs) found in proven code
     proven = set(); pset = set(); stored = {}; vptr = set()
     for r in sorted(r for r in relocs if intext(r)):             # data addresses that decoded code stores into memory (`mov [m], imm32`)
@@ -231,7 +231,14 @@ def run(path):
         pk = next(k for k in PRI if k in ent[e]); n_ud, n_xf, n_mf = cnt[e]; kc[pk] += 1
         fl = ['proven' if e in proven else 'candidate'] + sorted(ent[e] - {pk}) + (['first-ud'] if e in ud else []) + ['%s=%d' % kv for kv in (('ud', n_ud), ('xf', n_xf), ('reloc-misfit', n_mf)) if kv[1]]
         out.append('%08x\t%s\t%d\t%s' % (e, pk, sum(dec[a][0] for a in exts[e]), ','.join(fl)))
-    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the preferred image base (not RVAs); columns: entry, kind, extent bytes, flags\n' % M.base + '\n'.join(out) + '\n')
+    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the preferred image base (not RVAs); columns: entry, kind, extent, flags; extent is the SUM of the bytes the entry reaches (not a contiguous span), see ranges.tsv\n' % M.base + '\n'.join(out) + '\n')
+    hd = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)\n' % M.base; bad = 0; rg = []
+    for e, row in zip(E, out):
+        r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += sum(b - a for a, b in r) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
+    open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
+    nrr = codemap.nr_rows(NR, res, nrname, seedn)
+    open(outd + '/noreturn.tsv', 'w').write(hd.rstrip() + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in nrr))
+    print('ranges.tsv %d rows, noreturn.tsv %d rows, range-sum vs extent mismatches %d' % (len(rg), len(nrr), bad))
     # ---- totality gate
     targets = {v for r, v in rvals} | set(XC) | ({M.base + M.entry} if M.entry else set()) | {t for t in callers if intext(t)} | set(tailsrc) | {t for t, ks in ent.items() if ks & {'tls', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}}
     cert = sum(1 for t in targets if t in ent and (t in dec or t in ud or t in xf))
@@ -241,6 +248,7 @@ def run(path):
     if RL is None: why.append('no .reloc: pointers into executable bytes cannot be enumerated')
     if cert != len(targets): why.append('%d targets without a completed descent' % (len(targets) - cert))
     if lvp: why.append('%d direct branches of proven code leave the executable spans' % len(lvp))
+    if bad: why.append('%d entries whose ranges do not sum to the extent' % bad)
     if eh.unknown: why.append('%d frame-handler stubs with unknown FuncInfo magic' % eh.unknown)
     # ---- information: pointer targets by old classes, mnemonics
     pt = sorted({v for r, v in rvals}); dread = set()

@@ -113,7 +113,7 @@ def select(a, meta, ent):
 def compile_all(a, funcs):
     """funcs: sorted addresses -> (elf, bad {addr: reason})"""
     import chrun; T = chrun.T
-    flags = [f for f in T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-DFNVL_TRACE']; od = a.work + '/obj'; os.makedirs(od, exist_ok=True)
+    flags = [f for f in T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-DFNVL_TRACE', '-I', a.lifter + '/rt']; od = a.work + '/obj'; os.makedirs(od, exist_ok=True)
     texts = {}
     for f in funcs: texts[f] = G['L'].lift(G['img'], **lift_args(f))[0]
     chunks = [funcs[i:i + 40] for i in range(0, len(funcs), 40)]
@@ -139,7 +139,7 @@ def comp_chunk(t):
     os.remove(o[:-2] + '.cpp'); return o, ''
 
 
-def link(a, objs, syms, flags):
+def link(a, objs, syms, flags, ldextra=()):
     import phf
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
     d = a.work; h = phf.build(list(syms)) if a.dispatch == 'phf' else None
@@ -148,7 +148,7 @@ def link(a, objs, syms, flags):
     for src, extra in (('%s/rt/rt.c' % a.lifter, df), (d + '/tab.c', []), (d + '/libc.S', [])):
         subprocess.check_call(['aarch64-linux-gnu-gcc'] + CF + extra + [src, '-o', '%s/%s.o' % (d, os.path.basename(src)[:-2])])
     elf = d + '/chain.elf'; open(d + '/objs.txt', 'w').write('\n'.join(sorted(objs)))
-    r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % 0xE0000000, '-e', '0', '-o', elf, d + '/rt.o', d + '/tab.o', d + '/libc.o'] + sorted(objs), capture_output=True, text=True)
+    r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % 0xE0000000, '-e', '0', '-o', elf] + list(ldextra) + [d + '/rt.o', d + '/tab.o', d + '/libc.o'] + sorted(objs), capture_output=True, text=True)
     if r.returncode: sys.exit('link failed: ' + r.stderr[:300])
     return elf
 

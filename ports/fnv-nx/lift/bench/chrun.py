@@ -32,6 +32,14 @@ def st80(t):
     except OverflowError: return s * float('inf')
 
 
+def carrier_d(v, e, k):
+    """the double value of an x87 carrier (struct fv, rt/fnvl_x87.h): 1 F64 bits, 2 F32 pattern, 3-5 integer, 6 M80"""
+    if k == 1: return struct.unpack('<d', struct.pack('<Q', v))[0]
+    if k == 2: return struct.unpack('<f', struct.pack('<I', v))[0]
+    if k in (3, 4, 5): return float(v - (1 << 64) if v >> 63 else v)
+    return st80((v, e))
+
+
 class X86(T.World):
     def run(s, root, ents, st, budget):
         uc = Uc(UC_ARCH_X86, UC_MODE_32); s.init_world(uc, True); s.reset(st['wk']); s.ents, s.trace, s.n = ents, [], 0
@@ -74,6 +82,7 @@ class Arm(T.World):
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)
         sp = st['regs'][4]; s.ensure(sp, 4, False); uc.mem_write(sp, struct.pack('<I', SENT))
         uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, ac, a, n, v, ud: None if T.HARN <= a < T.HARN_END else s.writes.add((a & 0xffffffff, n)))
+        for a_, v_ in st.get('init', ()): s.ensure(a_, 4, False); uc.mem_write(a_, struct.pack('<I', v_))     # extra initial memory words (fs:[0] chain head)
         s.writes.clear()
         uc.mem_write(s.CPU, struct.pack('<13I', *st['regs'], st.get('fs', 0), 0, 0, 0x27f, 0) + b'\0' * 4 + b'\0' * 64 + b'\0' * 128 + struct.pack('<II', 0, 0x1f80) + b'\0' * 64 + b'\0' * 4)
         s.im, s.n, s.nl, s.nd, s.nt, s.nr, s.ntr, s.trace, s.ev = im, 0, 0, 0, 0, 0, 0, [], None
@@ -86,9 +95,9 @@ class Arm(T.World):
         except UcError as e: status = 'fault %s at %x' % (e, uc.reg_read(UC_ARM64_REG_PC))
         if s.ev: status = s.ev
         elif status == 'ok' and uc.reg_read(UC_ARM64_REG_PC) != s.RETPAD: status = 'budget'
-        b = bytes(uc.mem_read(s.CPU, 324)); ftop, ftag = struct.unpack_from('<2I', b, 36); stv = struct.unpack_from('<8d', b, 56)
-        return dict(status=status, regs=list(struct.unpack_from('<8I', b)), n=s.n, nl=s.nl, nd=s.nd, ndisp=s.nr, ntr=s.ntr, trace=s.trace, ftop=ftop & 7,
-                    st0=stv[ftop & 7] if ftag >> (ftop & 7) & 1 else None, ra=struct.unpack_from('<I', b, 320)[0], mem=s.written() if status == 'ok' or status.startswith('unhandled') else {})
+        b = bytes(uc.mem_read(s.CPU, 456)); ftop, ftag = struct.unpack_from('<2I', b, 36); fx = struct.unpack_from('<QII', b, 328 + 16 * (ftop & 7))      # W13: carrier (payload, e, kind) of ST0
+        return dict(status=status, regs=list(struct.unpack_from('<8I', b)) if status == 'ok' else [uc.reg_read(k) & 0xffffffff for k in T.GREG], n=s.n, nl=s.nl, nd=s.nd, ndisp=s.nr, ntr=s.ntr, trace=s.trace, ftop=ftop & 7,
+                    st0=carrier_d(*fx) if fx[2] else None, ra=struct.unpack_from('<I', b, 320)[0], mem=s.written() if status == 'ok' or status.startswith('unhandled') else {})
 
     def code(s, uc, a, size, ud):
         s.n += 1

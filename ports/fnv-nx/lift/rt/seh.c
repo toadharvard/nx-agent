@@ -34,8 +34,8 @@ static void f80(u32 p, double d) {          /* double -> 80-bit extended at gues
 }
 
 /* CONTEXT of the guest state now (esp/eip given) */
-static u32 make_context(u32 sp, u32 eip) {
-    u32 x = sp - CTX_SIZE; zero(x, CTX_SIZE);
+static u32 make_context(u32 top, u32 sp, u32 eip) {      /* placed below `top`; Context.Esp = sp */
+    u32 x = top - CTX_SIZE; zero(x, CTX_SIZE);
     M32(x + C_FLAGS) = 0x1000F;
     M32(x + C_FLOAT) = c->fcw; M32(x + C_FLOAT + 4) = ((c->ftop & 7) << 11) | c->fc;
     u32 tag = 0; for (int i = 0; i < 8; i++) tag |= ((c->ftag >> i & 1) ? 0u : 3u) << 2 * i;
@@ -82,7 +82,7 @@ static void raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u3
     u32 rec = sp - REC_SIZE; zero(rec, REC_SIZE);
     M32(rec) = code; M32(rec + 4) = flags; M32(rec + 12) = addr; M32(rec + 16) = np;
     for (u32 i = 0; i < np; i++) M32(rec + 20 + 4 * i) = info[i];
-    u32 ctx = make_context(rec, eip); esp = ctx;            /* record and context live on the guest stack below the faulting esp */
+    u32 ctx = make_context(rec, sp, eip); esp = ctx;            /* record and context live on the guest stack below the faulting esp */
     u32 saved_esp = sp;
     int d = dispatch(rec, ctx);
     if (d == 2) { fnvl_os_unhandled(rec, ctx); __builtin_trap(); }
@@ -116,7 +116,7 @@ extern "C" void fnvl_os_RtlUnwind(void) {
     u32 ra = M32(esp), target = M32(esp + 4), rec = M32(esp + 12), rv = M32(esp + 16), sp0 = esp, sp = esp + 20;
     if (!rec) { rec = sp0 - REC_SIZE; zero(rec, REC_SIZE); M32(rec) = 0xC0000027u; M32(rec + 12) = ra; sp0 = rec; }
     M32(rec + 4) |= EXC_UNWINDING | (target ? 0 : EXC_EXIT_UNWIND);
-    u32 save_eax = eax; eax = rv; u32 ctx = make_context(sp0, ra); M32(ctx + C_ESP) = sp; eax = save_eax; esp = ctx;
+    u32 save_eax = eax; eax = rv; u32 ctx = make_context(sp0, sp, ra); eax = save_eax; esp = ctx;
     u32 fs0 = c->fs, frame = M32(fs0);
     while (frame != 0xffffffffu && frame != target) {
         u32 disp = esp - 16, r = 1; zero(disp, 16); M32(disp) = frame; esp = disp;

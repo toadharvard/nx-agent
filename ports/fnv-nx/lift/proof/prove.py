@@ -79,7 +79,13 @@ def check(conds, assume, args):
 def prove_one(mod, F, code, key, args):
     """-> (result, note, certificate extras)"""
     base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base) if F.faults else base
-    M = mod.model_post(code, PRE); D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
+    drv = False; M = mod.model_post(code, PRE); D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
+    if not any(b in (0x64, 0x65) for b in code[:defects.prefix_skip(code)]) and any(b in (0x64, 0x65) for b in code[:4]):
+        # model_sail.py takes a 0x64/0x65 ModRM/SIB/opcode byte among the first four bytes for an FS/GS prefix and adds a free fs_base/gs_base to every address;
+        # with no segment prefix the base is 0 (flat), so those free variables are set to 0 in the model terms
+        z0 = [(z3.BitVec('fs_base', 32), z3.BitVecVal(0, 32)), (z3.BitVec('gs_base', 32), z3.BitVecVal(0, 32))]
+        M = {k: (z3.substitute(v, *z0) if not isinstance(v, dict) else {n: z3.substitute(t, *z0) for n, t in v.items()}) for k, v in M.items()}
+        assume = M.get('assume', z3.BoolVal(True)); drv = True
     if F.faults: assume_d = z3.And(assume, D['fault'] == 0)
     else: assume_d = assume
     probe = z3.BitVec('probe', 32); diffs = []                     # (field, dsl, model, strict difference)
@@ -87,7 +93,7 @@ def prove_one(mod, F, code, key, args):
     for f in FLAGS: diffs.append((f, D['flags'][f], M['flags'][f], z3.And(D['defined'][f], D['flags'][f] != M['flags'][f])))
     dm, mm = z3.Select(D['mem'], probe), z3.Select(M['mem'], probe)
     diffs += [('mem', dm, mm, dm != mm), ('eip', D['eip'], M['eip'], D['eip'] != M['eip'])]
-    extra = {'model_sha256': hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest(), 'fault_checks': ''}
+    extra = {'model_sha256': hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest(), 'fault_checks': '', 'driver_fs_gs_base_forced_to_0': drv}
     r, s = check([d for *_, d in diffs], assume_d, args); notes = []; ids = []
     if r == z3.sat:                                              # does a declared model defect explain every disagreement?
         mo = s.model(); ev = lambda e: mo.eval(e, model_completion=True)

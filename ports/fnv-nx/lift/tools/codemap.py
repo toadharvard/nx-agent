@@ -278,13 +278,36 @@ def ptrclass(U):
 NRIMP = {'ExitProcess', 'ExitThread', '_exit', 'exit', 'abort', '_amsg_exit', '_CxxThrowException', 'longjmp'}      # imports documented as never returning
 def nr_sites(U, imports):
     """({`call [iat]` insn addresses}, {`jmp [iat]` insn addresses}) whose IAT slot imports a documented never-returning function."""
-    slots = {a for a, n in imports.items() if n.split('!')[-1] in NRIMP}; calls = set(); jmps = set()
+    slots = {a: n.split('!')[-1] for a, n in imports.items() if n.split('!')[-1] in NRIMP}; calls = set(); jmps = set(); names = {}
     for r in U.relocs:
         if U.intext(r) and U.u32(r) in slots and U.intext(r - 2):
             b = U.text[r - 2 - U.T0:r - U.T0]
-            if b == b'\xff\x15': calls.add(r - 2)
-            elif b == b'\xff\x25': jmps.add(r - 2)
-    return calls, jmps
+            if b == b'\xff\x15': calls.add(r - 2); names[r - 2] = slots[U.u32(r)]
+            elif b == b'\xff\x25': jmps.add(r - 2); names[r - 2] = slots[U.u32(r)]
+    return calls, jmps, names
+def nr_rows(N, res, names, seeds, T0=0):
+    """[(entry, reason)] sorted: import:<names> | calls-to-noreturn | ud | fault | infinite-loop | seed:thrower."""
+    out = []
+    for e in sorted(N):
+        ext, deps, ends = res[e]
+        imp = sorted({names[a] for a in ext if a in names})
+        if e in seeds: r = 'seed:thrower'
+        elif 'nrimp' in ends: r = 'import:' + ','.join(imp)
+        elif 'callN' in ends or any(isinstance(x, int) for x in ends): r = 'calls-to-noreturn'
+        elif 'ud' in ends: r = 'ud'
+        elif 'fault' in ends: r = 'fault'
+        else: r = 'infinite-loop'
+        out.append((e, r))
+    return out
+def ranges(ext, size):
+    """merged half-open byte ranges of an extent (instruction granular): [(start, end)]."""
+    out = []
+    for a in sorted(ext):
+        e = a + size(a)
+        if out and out[-1][1] == a: out[-1][1] = e
+        else: out.append([a, e])
+    return out
+def rng_str(r): return ','.join('%x-%x' % (a, b) for a, b in r)
 def noreturn_lfp(E, trav, seeds):
     """N = least set such that an entry is in N iff no path of its descent reaches a ret, every path ends in a call to a member of N, a call/jmp to a
     never-returning import, `ud`, a fault, an infinite loop or a tail jump (or fall-through) into a member of N, and no path ends in an unknown
@@ -305,7 +328,7 @@ def exe_noreturn(U, thrower):
     """exe pipeline: compute N over the converged entry set, then unreach the instructions that only flow after a call to a member of N (entries are unchanged).
     -> (|N|, removed instructions, removed bytes)."""
     ins = U.insns; ent = U.entries; fs = U.fsize; T0, T1 = U.T0, U.T1; RET = ('ret', 'retf', 'iret', 'iretd')
-    calltg = {a: t for t, ss in sorted(U.callers.items()) for a in ss}; nrcall, nrjmp = nr_sites(U, U.imports)
+    calltg = {a: t for t, ss in sorted(U.callers.items()) for a in ss}; nrcall, nrjmp, nrname = nr_sites(U, U.imports)
     def trav(e, N):
         f = U.indec(e); lo, hi = (f[0], f[0] + f[1]) if f else (T0, T1); dec = e in fs
         ext = []; seen = set(); deps = set(); ends = set(); st = [e]
@@ -331,10 +354,10 @@ def exe_noreturn(U, thrower):
                     break
                 a += di[0]
         return ext, deps, ends
-    E = sorted(ent); N, res = noreturn_lfp(E, trav, {thrower} & set(ent)); keep = bytearray(U.TN)
+    E = sorted(ent); seeds = {thrower} & set(ent); N, res = noreturn_lfp(E, trav, seeds); keep = bytearray(U.TN)
     for e in E:
         for a in res[e][0]: keep[a - T0] = 1
     gone = [a for a in sorted(ins) if not keep[a - T0]]; nb = nbd = 0
     for a in gone:
         sz = ins[a][0]; nb += sz; nbd += sz * U.dmap[a - T0]; U.cov[a - T0:a - T0 + sz] = bytes(sz); del ins[a]
-    return len(N), len(gone), (nb, nbd)
+    return len(N), len(gone), (nb, nbd), nr_rows(N, res, nrname, seeds)

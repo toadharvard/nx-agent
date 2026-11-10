@@ -5,8 +5,16 @@ from .core import lift, Unsupported
 from . import universe
 from . import f_int, f_string, f_flow, f_x87, f_sse, f_simd_int  # noqa: F401  (f_x87 before f_sse: fallback order)
 
-with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt', 'fnvl.h'), newline='') as _f:
-    PRELUDE = _f.read()
+_RT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')
+
+
+def _inline(name):
+    """rt/<name> with its `#include "x"` lines for files of rt/ replaced by their (recursively inlined) text: the lifted .cpp is compiled elsewhere"""
+    with open(os.path.join(_RT, name), newline='') as f:
+        return ''.join(_inline(l.split('"')[1]) if l.startswith('#include "') else l for l in f.read().splitlines(True))
+
+
+PRELUDE = _inline('fnvl.h')
 
 
 def lift_entry(img, a):

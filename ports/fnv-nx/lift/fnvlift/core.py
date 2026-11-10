@@ -15,6 +15,10 @@ class Unsupported(Exception):
     pass
 
 
+class X87Dyn(Exception):
+    """raised by an x87 handler of the static-depth path that cannot be modelled statically: the function is lifted again with the dynamic stack"""
+
+
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 SUB = {}
 for i, r in enumerate(R32):
@@ -174,7 +178,7 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
                 else:
                     work.extend(taken)
                 break
-            if m in ('ret', 'retf', 'int3', 'hlt', 'ud2'):
+            if m in ('ret', 'retf', 'hlt', 'ud2') or (m == 'int3' and nxt >= hi):     # an int3 inside the extent can be resumed after (#BP, ContinueExecution)
                 break
             if m.startswith('j') or m in ('loop', 'loope', 'loopne'):
                 work.append(ops[0].imm & 0xffffffff)
@@ -194,11 +198,12 @@ def dispatch(cx, ins):
     raise Unsupported('insn ' + (cx.pfx + ' ' if cx.pfx else '') + cx.m)
 
 
-def lift(img, addr, size, popn=None, start=None, owns=None, strict=True):
+def lift(img, addr, size, popn=None, start=None, owns=None, strict=True, x87=None):
     """-> (C text, meta). Raises Unsupported(reason).
     [addr, addr+size) is the code range of the function (for a funclet: of its parent); `start` (default addr) the entry the body is the descent
     from, named L_<start>; `owns` the other universe entries with this range as parent: they are explored and are labels of the nonlocal loop;
-    strict=False (instest only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error."""
+    strict=False (instest only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error.
+    x87 (instest only): None = the pre-pass decides (f_x87_ctl.py), 'dyn' = dynamic x87 stack, an int = static stack with that entry depth."""
     from . import universe
     if start is None and owns is None:
         ua = universe.entry_args(addr)
@@ -210,14 +215,22 @@ def lift(img, addr, size, popn=None, start=None, owns=None, strict=True):
         owns = universe.load()[1].get(addr, ())
     owns = sorted(x for x in owns if lo <= x < hi)
     try:
-        return lift1(img, lo, hi, start, owns, strict, True)
+        return lift1(img, lo, hi, start, owns, strict, True, x87)
     except Unsupported:
         if not owns or start != addr:
             raise
-        return lift1(img, lo, hi, start, owns, strict, False)    # a label of the parent that cannot be lifted must not sink the parent
+        return lift1(img, lo, hi, start, owns, strict, False, x87)    # a label of the parent that cannot be lifted must not sink the parent
 
 
-def lift1(img, lo, hi, start, owns, strict, explore_owns):
+def lift1(img, lo, hi, start, owns, strict, explore_owns, x87=None):
+    try:
+        return lift2(img, lo, hi, start, owns, strict, explore_owns, x87)
+    except X87Dyn:                                  # an x87 form the static stack cannot model: again with the dynamic stack
+        return lift2(img, lo, hi, start, owns, strict, explore_owns, 'dyn')
+
+
+def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
+    from . import f_x87_ctl as xc
     addr, size = lo, hi - lo
     fall_hi = hi + 0x1000 if strict else hi
     code = img.bytes(addr, fall_hi - addr)
@@ -226,6 +239,8 @@ def lift1(img, lo, hi, start, owns, strict, explore_owns):
     if not order:
         raise Unsupported('undecodable bytes')
     cx = Ctx(addr, size, insns, tables, taken)
+    cx.start = start
+    xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
     em = cx.em
     kinds = cx.kinds
     for idx, a in enumerate(order):
@@ -243,6 +258,8 @@ def lift1(img, lo, hi, start, owns, strict, explore_owns):
         cx.a, cx.nxt, cx.m, cx.pfx, cx.ops = a, nxt, m, pfx, ops
         cx.s = ops[0].size * 8 if ops else 32
         cx.term = False
+        cx.xdp = cx.xd.get(a, 0)
+        n0 = len(cx.L)
         cx.b0 = ins.opcode[0]
         cx.modrm = ins.modrm
         dispatch(cx, ins)
@@ -253,6 +270,8 @@ def lift1(img, lo, hi, start, owns, strict, explore_owns):
                 em('SYNC_OUT; fnvl_raise(2,0x%xu); return;' % nxt)
             else:
                 raise Unsupported('falls into undecoded bytes at %x' % nxt)
+        if cx.xm == 's':
+            xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
         em('%s: ; SYNC_OUT; REGS(); fnvl_raise(FNVL_UD,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), a))
@@ -260,16 +279,16 @@ def lift1(img, lo, hi, start, owns, strict, explore_owns):
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:
         labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) if x in insns or x in bad))
-        cases = ' '.join('case 0x%xu: goto %s;' % (x, cx.lab(x)) for x in labs)
+        cases = ' '.join('case 0x%xu: %sgoto %s;' % (x, xc.case_pre(cx, x), cx.lab(x)) for x in labs)
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
     body = '\n'.join(cx.L)
-    fl = ('SYNC_F_IN;' if 'x87' in kinds else '') + ('SYNC_X_IN;' if 'sse' in kinds else '')
-    body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_F_OUT;' if 'x87' in kinds else '') + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
+    fl = 'SYNC_X_IN;' if 'sse' in kinds else ''
+    body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
     body = body.replace('SYNC_IN;', 'SYNC_IN;' + fl)
     decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))
-    txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s u32 E=esp; TRACE(0x%xu);\n%s\n}\n' % (
-        decl, start, fl, ' u32 fsb=c->fs;' if cx.usesfs else '', start, body)
+    txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s%s u32 E=esp; %s\n%s\n}\n' % (
+        decl, start, xc.decl(cx), fl, ' u32 fsb=c->fs;' if cx.usesfs else '', 'TRACE(0x%xu);' % start if start == addr else '', body)
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),

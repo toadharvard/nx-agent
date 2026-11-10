@@ -51,6 +51,9 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
 - The eight guest registers live in fixed callee-saved host registers (GCC global register variables, w19..w26), the
   `struct cpu` pointer in x27. Lifted code never copies registers in or out; native code preserves them by the AAPCS;
   a host fault inside lifted code finds the exact guest register state in the host context.
+  A lifted function is `void L_<addr>(void)` (registers and `c` are the globals). Native code that CALLS a lifted function
+  saves x19..x28 and moves the registers through `fnvl_enter(c, fn)` (rt/rt.c: `c->r[]` is only its save area), because lifted
+  code does not preserve them. `struct cpu` has the field `ra` (offset 320).
 - `call` pushes the image return address NXT, calls the callee's `X_` entry as a C call, and on return compares the
   address the callee actually returned to (`c->ra`, set by every `ret` from the popped word) with NXT. Equal: go on.
 - Not equal, or any indirect `jmp`, is a **non-local transfer** to address t, resolved by one loop that every
@@ -60,6 +63,8 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   of t through the dispatcher on top of this frame and repeat with what it returns. This one rule covers tail
   jumps, `push addr; ret`, helpers that return with a changed esp (`__chkstk`, `_alloca_probe`), `longjmp`, and the
   exe's own unwinder jumping into a handler or a catch continuation of an outer live frame.
+- A hardware fault is `fnvl_raise(code, at)` (rt/seh.c); it leaves `c->ra` = the resume address (ContinueExecution, or a handler's
+  own non-local jump) and the function continues in its loop; every raise site and the instruction after it are labels of that loop.
 - Exceptions (R4): a faulting instruction (#DE, #UD, `int3`, access violation taken by the host) builds the
   EXCEPTION_RECORD and CONTEXT from the guest registers and runs the dispatch the OS would run: walk `fs:[0]`, call
   each handler (lifted exe code) on the guest stack. `RtlUnwind` and continuation are non-local transfers as above.
