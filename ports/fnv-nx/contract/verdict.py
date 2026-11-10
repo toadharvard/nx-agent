@@ -2,7 +2,7 @@
 """verdict - the L1 verdict: every whole-binary gate on one link, one line each, green or red (owner rule:
 a merge into the clean branch needs a green verdict; budget 5 minutes, enforced by the L4 verdict).
 
-    verdict.py --exe FalloutNV.exe --units units.json --msvc <pristine objects> --link <link dir> --work <dir>
+    verdict.py --exe FalloutNV.exe --units units.json --msvc <pristine objects> --link <link dir> --universe <L3 universe.tsv> --work <dir>
 
 <link dir> holds fixed/*.o (the game objects are src_*.o), out/addrmap.tsv, out/aliases.ld, guest/fnvnx.elf.
 Stages run in order; each is a pure function of its listed inputs (no fuzz, boot or scenario output is read):
@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def main():
     ap = argparse.ArgumentParser()
-    for k in ('exe', 'units', 'msvc', 'link', 'work'):
+    for k in ('exe', 'units', 'msvc', 'link', 'universe', 'work'):
         ap.add_argument('--' + k, required=True)
     a = ap.parse_args()
     w = a.work
@@ -41,7 +41,7 @@ def main():
         ('rtti', py('gate_rtti.py', '--objects', w + '/game'), True),
         ('pcrel', py('gate_pcrel.py', '--elf', os.path.join(a.link, 'guest', 'fnvnx.elf'), '--objects', os.path.join(a.link, 'fixed'),
                       '--work', w + '/pcrel'), True),
-        ('bodysel', py('bodysel.py', '--facts', w + '/facts.json', '--n1', w + '/n1.json', '--gates', w + '/gates',
+        ('bodysel', py('bodysel.py', '--universe', a.universe, '--n1', w + '/n1.json', '--gates', w + '/gates',
                        '--out', w + '/bodysel.tsv'), False),
     ]
     red = []
