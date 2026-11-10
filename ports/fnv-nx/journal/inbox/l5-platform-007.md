@@ -20,7 +20,7 @@
 |---|---|---|
 | Сводка утечки указателей импортов для L3 (по бэкенду Horizon, libnx b156b47 в /home/user/gd/libnx — контейнерный путь, пропадёт) | `platform/manifest/import_escape.py`, `test_import_escape.sh`, `escape_fixture/` | инструмент писался; таблица `import_escape.tsv` НЕ выдана, L3 её ждёт |
 | Шрифтовой gdi32, этап 1 (FreeType эталона, метрики и GetGlyphOutline против `fontdump.txt`) | `platform/win32/gdifont.cpp`, `gdi_int.h`, правки `gdi32.cpp`, `tests/s4/Makefile`, `tests/s4/test_gdifont.cpp`, `tools/fetch_freetype.sh` | в середине реализации; число совпавших строк эталона не снято |
-| kernel32: соответствие ENV-TRUTH и 20 отсутствующих функций | `platform/win32/sysinfo.cpp`, `services.cpp`, `module.cpp`, `crt_kernel32.cpp`, `tests/s4/test_env_contract.cpp` | в середине; Steam/консоль/DebugBreak/таблица модулей могли быть правлены частично |
+| kernel32: соответствие ENV-TRUTH и 20 отсутствующих функций | файлов нет | исполнитель остановлен до первой записи: в дереве от этой задачи ничего нет, начинать с нуля по прежнему ТЗ |
 
 ### Точный следующий шаг при возобновлении
 1. `git checkout` ветки, собрать `tests/s4` и `tests/s7` (нужны `NLS_DIR`, `FNVNX_FONT_REF`, `ext/freetype` — см.
