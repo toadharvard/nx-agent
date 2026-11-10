@@ -76,6 +76,7 @@ extern "C" {
  * load and load -> store), _WriteBarrier dmb ishst (store -> store). Volatile accesses get acquire/release from the
  * fnvnx_order plugin (toolchain/order). FNVNX_COMPILER_BARRIERS=1 keeps the compiler-only barriers (A/B
  * measurement only: not a valid multicore build). */
+#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
 #if defined(FNVNX_COMPILER_BARRIERS) && FNVNX_COMPILER_BARRIERS
 inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
 inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
@@ -85,11 +86,15 @@ inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __v
 inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("dmb ishld" ::: "memory"); }
 inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volatile__("dmb ishst" ::: "memory"); }
 #endif
+#endif
 /* winnt.h MemoryBarrier (x86: a locked or, a full barrier) and YieldProcessor (pause) */
 inline __attribute__((always_inline)) void MemoryBarrier(void) { __asm__ __volatile__("dmb ish" ::: "memory"); }
 inline __attribute__((always_inline)) void YieldProcessor(void) { __asm__ __volatile__("yield" ::: "memory"); }
+#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
 inline __attribute__((always_inline)) void __debugbreak(void) { __builtin_trap(); }
+#endif
 /* <stdlib.h> rotates (intrinsics on MSVC; the decomp declares some itself, extern "C" unsigned int _rotl(...)) */
+#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
 inline __attribute__((always_inline)) unsigned int _rotl(unsigned int v, int s)
 {
     s &= 31;
@@ -100,8 +105,11 @@ inline __attribute__((always_inline)) unsigned int _rotr(unsigned int v, int s)
     s &= 31;
     return s ? (v >> s) | (v << (32 - s)) : v;
 }
+#endif
 /* SEH has no exceptions on the target (below): the code of the exception being handled is never asked for */
+#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
 inline __attribute__((always_inline)) unsigned long _exception_code(void) { return 0UL; }
+#endif
 #ifdef __cplusplus
 }
 #endif
@@ -160,7 +168,11 @@ template <> struct fnvnx_int_of_align<1> { typedef unsigned char type; };
 template <> struct fnvnx_int_of_align<2> { typedef unsigned short type; };
 template <> struct fnvnx_int_of_align<4> { typedef unsigned int type; };
 template <> struct fnvnx_int_of_align<8> { typedef unsigned long long type; };
+#ifndef FNVNX_MSVC_NAMES
 template <> struct fnvnx_int_of_align<16> { typedef unsigned __int128 type; };
+#else   /* no __int128 on the name pass's 32-bit target; same alignment */
+template <> struct fnvnx_int_of_align<16> { typedef unsigned int type __attribute__((aligned(16))); };
+#endif
 template <> struct fnvnx_int_of_align<32> { typedef unsigned int type __attribute__((aligned(32))); };
 template <> struct fnvnx_int_of_align<64> { typedef unsigned int type __attribute__((aligned(64))); };
 template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribute__((aligned(128))); };
