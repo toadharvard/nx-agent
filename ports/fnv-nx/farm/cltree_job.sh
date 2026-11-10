@@ -84,6 +84,10 @@ if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$CB:refs/remotes/origin/$CB"
 fi
 
 # 4. cl objects (the tool skips units already built; its rc is recorded, clbuild.tsv decides)
+# equiv.gen_dir() writes its generated headers through a temporary file named by the process id; build_tree.py's
+# workers are threads of one process, so the first use must happen once, before the pool (reported to L2).
+(cd "$P/tools/equiv" && python3 -c 'import equiv; equiv.gen_dir()') > "$W/gen_dir.log" 2>&1 \
+  || { tail -5 "$W/gen_dir.log" | cut -c1-300; die "equiv.gen_dir() failed"; }
 nice -n "$NICE" python3 "$P/tools/equiv/build_tree.py" "$EXT/fnv_decomp" "$TREE" "$OUT" --units "shard:$K/$N" --jobs "$JOBS" \
   > "$W/build_tree-$K.log" 2> "$W/build_tree-$K.err" && brc=0 || brc=$?
 t2=$(date +%s)
