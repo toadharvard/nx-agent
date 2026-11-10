@@ -93,6 +93,14 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   and out of range; the `fldcw ... fistp ... fldcw` bracket is proven inside the function and folded), E2
   comparisons and SSE min/max, E3 bit copies, E4 the rcp/rsqrt table and `fprem`, `frndint`, `fabs`, `fchs`,
   `fxtract`. `rt/x87.c` (80-bit, integer-only) serves only the m80 forms: `fld`/`fstp tbyte`, `fbld`/`fbstp`.
+- **R8, control state (resolution of 2026-11-10).** `struct cpu` holds two rounding-control fields (x87, SSE). The host
+  FPCR carries the common value while they are equal; when they differ (`rc_split`), each FP block sets its own
+  rounding mode first: one flag test per block. FTZ/DAZ: FPCR.FZ when both are set, the same flag and explicit
+  handling when they differ. Sticky exception flags are the host FPSR's cumulative bits (IEEE semantics, per R8),
+  kept separate for the two classes by rule, always: two shadow sets `x87_flags` and `sse_flags`; on a change
+  between an x87 block and an SSE block the FPSR is OR-ed into the leaving class's set and cleared; `fnstsw`,
+  `fnstenv`, `fnsave` and `stmxcsr` read their set plus the live FPSR when the current block is of their class;
+  `fnclex` and `ldmxcsr` clear their set.
 - **R9, memory order.** Guest threads run in parallel. Every memory access has a class by static rule: (a) a guest
   stack slot whose address provably does not leave the function is a plain load/store; (b) everything else is
   `ldar`/`stlr`, with an alignment test and a complete second path (`ldr` + `dmb ishld`, `dmb ishst` + `str`) for
