@@ -8,9 +8,14 @@ exe.  GCC's own RTTI is bound by name across units, which the link no longer doe
 of every game object there must be
   0 relocations naming `_ZTI*` or `_ZTS*`,
   0 calls of `__dynamic_cast`, `__cxa_bad_cast`, `__cxa_bad_typeid` or `std::type_info::operator==` / `before`.
-Exit status 1 otherwise.  Counts only.
+Exit status 1 otherwise.  Counts only on stdout.
+Gate file `rtti` ($GATE_OUT/rtti.json, gatefile.py): universe = the objects, certified = the objects without a row,
+uncertified = the basenames of the others (sorted).
 """
 import argparse, collections, glob, os, re, subprocess, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gatefile
 
 SEC = re.compile(r"Relocation section '\.rela(\.text[^']*)'")
 CALLS = ('__dynamic_cast', '__cxa_bad_cast', '__cxa_bad_typeid', '_ZNKSt9type_infoeqERKS_', '_ZNKSt9type_info6beforeERKS_')
@@ -46,6 +51,8 @@ def main():
     for k, v in sorted(c.items()):
         print('%7d  %s' % (v, k))
     print('%7d  objects with a row (of %d)' % (len(objs), len(files)))
+    gatefile.write('rtti', len(files), len(files) - len(objs), [os.path.basename(o) for o in sorted(objs)],
+                   '; '.join('%d %s' % (v, k) for k, v in sorted(c.items())))
     sys.exit(1 if c else 0)
 
 

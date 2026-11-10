@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """proto - the prototype of the native side of every boundary (MASTER_PLAN4 R5).
 
-    proto.py --n1 n1.pkl --out proto.tsv
+    proto.py --n1 n1.json --out proto.tsv
 
 The prototype of a function is read from the MSVC decorated name of the symbol whose bytes equal the exe (N1):
 convention, stack words, varargs, struct return, return class and argument classes.  Nothing is inferred from the exe body (no arity arithmetic,
@@ -13,8 +13,11 @@ proto.tsv (decomp-derived: container and fnv-nx-build only):  address, kind, cc,
 """
 import argparse
 import collections
-import pickle
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import store
 
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi', 'ebp')
 CC = {'A': 'cdecl', 'C': 'pascal', 'E': 'thiscall', 'G': 'stdcall', 'I': 'fastcall'}
@@ -266,7 +269,7 @@ def main():
     ap.add_argument('--n1', required=True)
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
-    n1 = pickle.load(open(a.n1, 'rb'))
+    n1 = store.load(a.n1, 'n1')
     P = build(n1)
     with open(a.out, 'w') as fh:
         for addr, d in sorted(P.items()):

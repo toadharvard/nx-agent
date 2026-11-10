@@ -14,4 +14,4 @@ def run(facts, obj, link):
         v = 'missing_decomp' if facts['fn'].get(a, {}).get('decomp') else 'missing_other'
         counts[v] += 1
         rows.append((a, v, 'no native body'))
-    return {'counts': dict(counts), 'rows': rows, 'fail': ['missing_decomp', 'missing_other']}
+    return {'counts': dict(counts), 'rows': rows, 'fail': ['missing_decomp', 'missing_other'], 'judged': len(facts['xc'])}

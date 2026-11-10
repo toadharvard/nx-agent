@@ -9,9 +9,14 @@ game name inside its unit, by address, and never globally by name.  So over the 
   referenced  a name defined in one unit and undefined in another (the linker would bind them by name).
 By-address symbols (`__fnv_<address>` and the generated `__fnvnx_*`) are not names of the game.  A name
 defined only in generated/platform objects is the platform's interface and is not counted.
-Gate: merged == 0 and referenced == 0.  Exit status 1 otherwise.  Counts only.
+Gate: merged == 0 and referenced == 0.  Exit status 1 otherwise.  Counts only on stdout.
+Gate file `xunit` ($GATE_OUT/xunit.json, gatefile.py): universe = the game names defined in the objects, certified =
+universe - merged - referenced, uncertified = the offending names (sorted).
 """
 import argparse, collections, glob, os, re, subprocess, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gatefile
 
 LINE = re.compile(r'(\S+?\.o):(?:[0-9a-f]+ )?\s*(\S) (\S+)$')
 
@@ -22,8 +27,8 @@ def scan(files):
         out = subprocess.run(['aarch64-linux-gnu-nm', '-A', '-g'] + files[i:i + 200], capture_output=True, text=True).stdout
         for ln in out.splitlines():
             m = LINE.match(ln)
-            if m and not m.group(3).startswith(('__fnv_', '__fnvnx')):
-                (undef if m.group(2) in 'Uwv' else defs)[m.group(3)].add(m.group(1))
+            if m and not m[3].startswith(('__fnv_', '__fnvnx')):
+                (undef if m[2] in 'Uwv' else defs)[m[3]].add(m[1])
     return defs, undef
 
 
@@ -34,15 +39,21 @@ def main():
     a = ap.parse_args()
     defs, undef = scan(sorted(glob.glob(os.path.join(a.objects, '*.o'))))
     c = collections.Counter()
-    for name, obs in defs.items():
+    bad = []
+    for name, obs in sorted(defs.items()):
         if len(obs) > 1:
             c['merged'] += 1
+            bad.append(name)
         elif undef.get(name, set()) - obs:
             c['referenced'] += 1
+            bad.append(name)
         else:
             c['global, unused across units'] += 1
     for k in ('merged', 'referenced', 'global, unused across units'):
         print('%7d  %s' % (c[k], k))
+    gatefile.write('xunit', len(defs), len(defs) - len(bad), bad,
+                   'merged %d, referenced %d, global unused across units %d' % (
+                       c['merged'], c['referenced'], c['global, unused across units']))
     sys.exit(1 if c['merged'] or c['referenced'] else 0)
 
 

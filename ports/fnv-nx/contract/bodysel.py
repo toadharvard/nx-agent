@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bodysel - the static body selector (MASTER_PLAN4 R1): NATIVE(f) iff N1 and N2 and N3 and N4, else LIFTED.
 
-    bodysel.py --facts facts.pkl --n1 n1.pkl --gates <dir with bodysel.tsv of registry.py> [--n3 n3.tsv] --out bodysel.tsv
+    bodysel.py --facts facts.json --n1 n1.json --gates <dir with bodysel.tsv of registry.py> [--n3 n3.tsv] --out bodysel.tsv
 
 Inputs are static facts only: the exe fact base, the N1 certificate, the object gates of N2 and L2's compiler
 plugin verdict for N3 (address <tab> ok|ok+E|reason <tab> inlined callee addresses...; `ok+E`: the body is a
@@ -17,8 +17,14 @@ therefore has no "unresolved" decision of its own: an unresolved reference there
 "N1/certificate violated: tool defect", expected 0 times.
 The selector is total: every code address of the fact base gets NATIVE with its certificate, or LIFTED with
 the first reason.  Incompleteness costs speed, never correctness.
+Gate `bodysel` ($GATE_OUT/bodysel.json, gatefile.py): universe = the code addresses of the fact base, certified = those
+with a verdict (totality).  The result is a function of the argument files only; rows are written sorted.
 """
-import argparse, collections, os, pickle
+import argparse, collections, os, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import store
+import gatefile
 
 
 def decide(facts, n1, gate_rows, n3):
@@ -70,10 +76,14 @@ def main():
         for ln in open(a.n3):
             p = ln.rstrip('\n').split('\t')
             n3[int(p[0], 16)] = (p[1], [int(x, 16) for x in p[2:] if x])
-    out = decide(pickle.load(open(a.facts, 'rb')), pickle.load(open(a.n1, 'rb')), rows, n3)
+    out = decide(store.load(a.facts, 'facts'), store.load(a.n1, 'n1'), rows, n3)
     with open(a.out, 'w') as fh:
         for addr, (v, why) in sorted(out.items()):
             fh.write('%08x\t%s\t%s\n' % (addr, v.lower(), why))
+    # gate `bodysel` (L4): totality - every code address of the fact base has NATIVE (certificate) or LIFTED (reason)
+    bad = ['%08x' % x for x, (v, why) in sorted(out.items()) if not (v in ('NATIVE', 'LIFTED') and why)]
+    gatefile.write('bodysel', len(out), len(out) - len(bad), bad,
+                   'native %d, lifted %d' % (sum(1 for v, _ in out.values() if v == 'NATIVE'), sum(1 for v, _ in out.values() if v == 'LIFTED')))
     c = collections.Counter((v, why.split(':')[0]) for v, why in out.values())
     for k, n in sorted(c.items(), key=lambda x: -x[1]):
         print('%7d  %s  %s' % (n, k[0], k[1]))

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """link stage `tables` - vtables as data (L1 CONTRACT, M2).  No compile, no probe.
 
-    tables.py --facts facts.pkl --vtid vtid.pkl --addrmap out/addrmap.tsv --out <dir>
+    tables.py --facts facts.json --vtid vtid.json --addrmap out/addrmap.tsv --out <dir>
 
 The exe's vftables stay where they are in the data image; an object's vptr is the exe vftable address.  So the
 stage emits only data:
@@ -18,7 +18,10 @@ stage emits only data:
 
 image_ptrs.S and vtsites.tsv are exe-derived: container and fnv-nx-build only.
 """
-import argparse, collections, json, os, pickle
+import argparse, collections, json, os, sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
+import store
 
 
 def load_bodies(addrmap):
@@ -47,8 +50,8 @@ def main():
     ap.add_argument('--addrmap', required=True)
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
-    facts = pickle.load(open(a.facts, 'rb'))
-    bind = pickle.load(open(a.vtid, 'rb'))['bind']
+    facts = store.load(a.facts, 'facts')
+    bind = store.load(a.vtid, 'vtid')['bind']
     have = load_bodies(a.addrmap)
     os.makedirs(a.out, exist_ok=True)
     ptrs = image_pointers(facts, have)

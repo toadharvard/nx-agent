@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """vtid - vftable identity by construction (MASTER_PLAN4 R6).
 
-    vtid.py --n1 n1.pkl --facts facts.pkl --pairs <dir or file from L2> --out vtid.pkl
+    vtid.py --n1 n1.json --facts facts.json --units units.json --pairs <dir or file from L2> --out vtid.json
 
 R6: in a function that is byte-equal to the exe (N1) a COFF relocation names `??_7C@@6B...@` and the exe holds
 the vftable address at the same offset.  n1.py turns that into the map (unit, `??_7` symbol) -> address, a
@@ -17,11 +17,14 @@ A row is an error (the stage fails) when the pair names a `??_7` the unit's N1 f
 when two rows bind one (unit, _ZTV, offset) to different addresses.  Checks on a bound row: the address is a
 vftable of the exe fact base.
 
-Output (exe- and decomp-derived: container and fnv-nx-build only):
+Output (store.py kind `vtid`, canonical JSON; exe- and decomp-derived: container and fnv-nx-build only):
   bind   {(unit source, _ZTV symbol, offset): vftable address}
   errors [(unit, _ZTV, offset, reason)]
 """
-import argparse, collections, glob, json, os, pickle, sys
+import argparse, collections, glob, json, os, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import store
 
 
 def read_pairs(path):
@@ -57,11 +60,11 @@ def main():
     ap.add_argument('--pairs', required=True)
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
-    n1 = pickle.load(open(a.n1, 'rb'))
-    facts = pickle.load(open(a.facts, 'rb'))
+    n1 = store.load(a.n1, 'n1')
+    facts = store.load(a.facts, 'facts')
     unit_index = {un['source']: i for i, un in enumerate(json.load(open(a.units))['units'])}
     out, errors = bind(n1, facts, read_pairs(a.pairs), unit_index)
-    pickle.dump(dict(bind=out, errors=errors), open(a.out, 'wb'), protocol=4)
+    store.save(a.out, 'vtid', dict(bind=out, errors=errors))
     c = collections.Counter(e[3].split(' naming ')[0].split(' is not ')[-1] for e in errors)
     print('bound %d; errors %d %s' % (len(out), len(errors), dict(c)))
     sys.exit(1 if errors else 0)

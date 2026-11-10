@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """exefacts - the one fact base read from the player's executable (L1 CONTRACT, M0).
 
-    exefacts.py --exe FalloutNV.exe --units units.json --out facts.pkl [--jobs N]
+    exefacts.py --exe FalloutNV.exe --units units.json --out facts.json [--jobs N]
 
 Everything a boundary needs is a fact of the exe: base relocations, imports, RTTI vftables, and per function
 the `ret N` set, direct and indirect calls, vptr stores (in order, with base and
 displacement), data references and code pointers.  The output is exe-derived: it stays in the container or in
 fnv-nx-build, never in this repository (docs/ARCHITECTURE.md, Legal).
 
-Facts (pickle, one dict):
+Facts (store.py kind `facts`, canonical JSON, one dict; the result does not depend on --jobs):
   meta      sha256 of the exe and of this file, counts
   base, secs{name: (va, vsize, raw_off, raw_size)}, relocs[sorted va]
   imports   {iat_slot_va: (dll, name)}
@@ -18,9 +18,12 @@ Facts (pickle, one dict):
   xc        [target ...]     the C++ initializer table, in order
   fn        {va: F}          F as returned by analyze() plus 'sym', 'decomp', 'unit'
 """
-import argparse, bisect, collections, hashlib, json, pickle, struct, sys
+import argparse, bisect, collections, hashlib, json, os, struct, sys
 import capstone
 from capstone import x86_const as X
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import store
 
 VERSION = 8
 
@@ -386,7 +389,7 @@ def build(exe, units, jobs=4, log=print):
                 jobs_.append((a, known.get(a, 0), bound))
             chunks = [jobs_[i:i + 400] for i in range(0, len(jobs_), 400)]
             new = set()
-            for res in pool.imap_unordered(_run, chunks):
+            for res in pool.imap(_run, chunks):   # ordered: the merge order is the chunk order
                 for F in res:
                     fn[F['a']] = F
                     for _, t in F['calls'] + F['tails'] + F['codeptrs']:
@@ -421,8 +424,7 @@ def main():
     ap.add_argument('--jobs', type=int, default=4)
     a = ap.parse_args()
     facts = build(a.exe, a.units, a.jobs, log=lambda s: print(s, file=sys.stderr))
-    with open(a.out, 'wb') as fh:
-        pickle.dump(facts, fh, protocol=4)
+    store.save(a.out, 'facts', facts)
     print(json.dumps(facts['meta'], indent=1))
 
 

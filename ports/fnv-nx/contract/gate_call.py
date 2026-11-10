@@ -39,4 +39,4 @@ def run(facts, obj, link):
         counts[ORDER[k]] += 1
         if ORDER[k] == 'different':
             rows.append((a, 'different', 'exe_only=%d native_only=%d first=0x%08x' % (len(x - n), len(n - x), min(x ^ n))))
-    return {'counts': dict(counts), 'rows': rows, 'fail': ['different']}
+    return {'counts': dict(counts), 'rows': rows, 'fail': ['different'], 'judged': len(copies)}
