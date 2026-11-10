@@ -35,3 +35,13 @@ for t in stateblock device d3d9ex visual; do   # -include initguid.h: the IIDs (
 done
 "$ROOT/render/d3d9/rec/build.sh" "$W/rec" >/dev/null
 ls -l "$W"/out/*.exe "$W/rec/d3d9.dll" | awk '{print $5, $9}'
+# Variant WORK/rec_nofree/d3d9.dll: identical except the wrapper of an object whose Release returned 0 is NOT freed (d9stream.cpp D9Rec::commit,
+# `free_obj(ret[i])` dropped). Needed because Wine's d3d9 keeps objects alive after a Release to 0 (implicit swapchain, back buffers) and the
+# tests use the pointer again (device.c:1294 test_swapchain): the as-built recorder then dereferences a freed wrapper (see README).
+N=$W/rec_nofree; rm -rf "$N/src"; mkdir -p "$N"; cp -r "$W/rec/src" "$N/src"; S=$N/src
+sed -i 's/for (unsigned i = 0; i < nret; i++) free_obj(ret\[i\]);//' "$S/d9stream.cpp"; grep -q 'free_obj(ret' "$S/d9stream.cpp" && { echo "nofree patch did not apply" >&2; exit 1; }
+CXX=${MINGW_CXX:-i686-w64-mingw32-g++-win32}; command -v "$CXX" >/dev/null || CXX=i686-w64-mingw32-g++
+CXXF="-std=c++17 -O2 -w -fno-exceptions -fno-rtti -fno-threadsafe-statics -I$S"
+rm -f "$S"/*.o; for f in d9wrap.gen d9stream rec_main rec_dc; do $CXX $CXXF -c "$S/$f.cpp" -o "$S/$f.o"; done
+$CXX -shared -o "$N/d3d9.dll" "$S"/*.o "$S/d9rec.def" -static-libgcc -static-libstdc++ -Wl,--enable-stdcall-fixup -Wl,--kill-at -lgdi32 -luser32
+echo "$N/d3d9.dll"

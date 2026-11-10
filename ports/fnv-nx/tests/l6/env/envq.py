@@ -18,7 +18,7 @@ def d3dformat_enum():
 
 
 FOURCC_LIST = ["DXT1", "DXT2", "DXT3", "DXT4", "DXT5", "ATI1", "ATI2", "INTZ", "RAWZ", "DF16", "DF24", "NULL", "NVDB", "RESZ", "ATOC", "A2M0", "A2M1", "INST", "R2VB",
-               "YUY2", "UYVY", "GRGB", "RGBG", "MET1", "NV12", "YV12", "AYUV"]   # D3DFMT_G8R8_G8B8 = 'GRGB', R8G8_B8G8 = 'RGBG', MULTI2_ARGB8 = 'MET1'
+               "YUY2", "UYVY", "GRGB", "RGBG", "MET1", "NV12", "YV12", "AYUV", "NVHU", "NVHS", " R16", "AL16"]   # D3DFMT_G8R8_G8B8 = 'GRGB', R8G8_B8G8 = 'RGBG', MULTI2_ARGB8 = 'MET1'
 UNKNOWN_FMT = [fcc("ZZZZ"), fcc("abcd"), fcc("~!@#"), 1, 37, 255, 0x7fffffff, 0x41420143]
 FMT = sorted(set(d3dformat_enum()) | {fcc(s) for s in FOURCC_LIST} | set(UNKNOWN_FMT))
 DEVT = [1, 2, 3, 4]; DEVT_BAD = [0, 5, 0x7fffffff]

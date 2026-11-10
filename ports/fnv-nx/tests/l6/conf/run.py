@@ -10,7 +10,8 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = Tru
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 CMP = os.path.join(ROOT, "render", "d3d9", "cmp"); sys.path[:0] = [CMP, os.path.join(ROOT, "tools", "compare")]
 import d9s1 as R, replay  # noqa: E402
-W = os.environ.get("CONF_WORK", "/home/user/work/l6/conf"); TMO = int(os.environ.get("CONF_TIMEOUT", "600"))
+W = os.environ.get("CONF_WORK", "/home/user/work/l6/conf"); REC = os.environ.get("CONF_REC", "rec_nofree")   # recorder dir under W: rec (as built) or rec_nofree
+TAG = "" if REC == "rec_nofree" else "." + REC; TMO = int(os.environ.get("CONF_TIMEOUT", "600"))
 SPECF = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json"); spec = json.load(open(SPECF))
 TESTS = (os.environ.get("CONF_TESTS") or "stateblock,device,d3d9ex,visual").split(",")
 SUM = re.compile(r"(\d+) tests executed \((\d+) marked as todo, (\d+) as flaky, (\d+) failures?\), (\d+) skipped")
@@ -64,12 +65,12 @@ try:
     for k, v in (("Debugger", "false"), ("Auto", "1")):   # a crashing test must end the process, not wait for winedbg on a headless host
         subprocess.run(["wine", "reg", "add", r"HKLM\Software\Microsoft\Windows NT\CurrentVersion\AeDebug", "/v", k, "/t", "REG_SZ", "/d", v, "/f"], env=env, capture_output=True)
     for t in TESTS:
-        d = f"{W}/runs/{t}"; shutil.rmtree(d, ignore_errors=True)
+        d = f"{W}/runs{TAG}/{t}"; shutil.rmtree(d, ignore_errors=True)
         for n in ("plain", "A", "B"):   # plain: exe alone (no d3d9.dll beside it); A/B: exe + our proxy d3d9.dll
             os.makedirs(f"{d}/{n}"); shutil.copy(f"{W}/out/{t}.exe", f"{d}/{n}/")
-            if n != "plain": shutil.copy(f"{W}/rec/d3d9.dll", f"{d}/{n}/")
-        os.makedirs(W + "/streams", exist_ok=True); os.makedirs(W + "/cmp", exist_ok=True)
-        sp = {"A": f"{W}/streams/{t}.d9s", "B": f"{W}/streams/{t}.b.d9s"}
+            if n != "plain": shutil.copy(f"{W}/{REC}/d3d9.dll", f"{d}/{n}/")
+        os.makedirs(W + "/streams" + TAG, exist_ok=True); os.makedirs(W + "/cmp" + TAG, exist_ok=True)
+        sp = {"A": f"{W}/streams{TAG}/{t}.d9s", "B": f"{W}/streams{TAG}/{t}.b.d9s"}
         res = {"plain": wine(env, f"{t}.exe", f"{d}/plain", f"{d}/plain.out")}
         for n in ("A", "B"):
             if os.path.exists(sp[n]): os.remove(sp[n])
@@ -88,8 +89,8 @@ try:
         a, b = analyse(sp["A"]), analyse(sp["B"])
         check(a["decode_err"] == 0 and b["decode_err"] == 0 and a["records"] > 0, f"(ii) decode {t}")
         called |= a["methods"] | b["methods"]
-        p = subprocess.run([sys.executable, "-I", f"{CMP}/d9cmp.py", sp["A"], sp["B"], "--max", "20", "--json", f"{W}/cmp/{t}.json"], capture_output=True, text=True)
-        try: j = json.load(open(f"{W}/cmp/{t}.json"))
+        p = subprocess.run([sys.executable, "-I", f"{CMP}/d9cmp.py", sp["A"], sp["B"], "--max", "20", "--json", f"{W}/cmp{TAG}/{t}.json"], capture_output=True, text=True)
+        try: j = json.load(open(f"{W}/cmp{TAG}/{t}.json"))
         except (OSError, ValueError): j = {}
         verdict = {0: "equal", 1: "det_mismatch"}.get(p.returncode, f"cmp_error({p.returncode})")
         if p.returncode == 0 and j.get("env_diff"): verdict = "equal_modulo_env"
@@ -104,9 +105,9 @@ finally:
     subprocess.run(["wineserver", "-k"], env=env); x.close()
 H = ["test", "exit_plain", "exit_recA", "exit_recB", "summary_plain(exec,todo,flaky,fail,skip)", "summary_rec", "neutral", "stream_bytes", "records", "distinct_methods", "exports_called",
      "failed_hresult_recs", "threads", "max_depth", "decode_errors", "determinism", "det_mismatch", "env_diff", "masked_pix", "interleave_swaps", "secs_rec", "records_per_iface", "top_failed_methods"]
-open(HERE + "/conf_summary.tsv", "w").write("\t".join(H) + "\n" + "".join("\t".join(map(str, r)) + "\n" for r in rows))
+open(HERE + "/conf_summary" + TAG + ".tsv", "w").write("\t".join(H) + "\n" + "".join("\t".join(map(str, r)) + "\n" for r in rows))
 never = sorted(f"{i}::{n}" for (i, s), n in allm.items() if (i, s) not in called)
-open(HERE + "/conf_never_called.txt", "w").write("".join(n + "\n" for n in never))
+open(HERE + "/conf_never_called" + TAG + ".txt", "w").write("".join(n + "\n" for n in never))
 open(W + "/nondet.txt", "w").write("".join(f"{t}\t{m}\n" for t, m in nondet))
 print(f"methods called by at least one test: {len(called)} of {len(allm)}; never called {len(never)} -> conf_never_called.txt; nondet details {W}/nondet.txt")
 print(f"run.py: {len(fails)} checks failed"); sys.exit(1 if fails else 0)
