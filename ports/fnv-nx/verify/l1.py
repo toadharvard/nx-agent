@@ -11,6 +11,7 @@
 Both run `envcheck.py check` FIRST against the verify/env.json OF THAT COMMIT/TREE; on a mismatch they print `blocked: env` and the
 mismatch lines, exit 4, run no gate and store nothing. The verdict carries "env_id" (sha256 of that env.json); merge only accepts a
 stored verdict with the env_id of the merge tree's env.json.
+Gates get GATE_CACHE = VDIR/cache (content-keyed results of gates such as selftests; see verdict.py).
 Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool>`; merge adds `merged <commit>` or `blocked: <reason>`."""
 import contextlib
 import io
@@ -57,7 +58,8 @@ def _blocked_env(bad):
 def _check(repo, commit, vdir, budget, gates, td, env_id):
     """verdict.py run + store for COMMIT; returns the stored verdict dict."""
     outp = os.path.join(td, "verdict.json")
-    args = ["--repo", repo, "--commit", commit, "--gates", gates, "--out", outp, "--env-id", env_id]
+    args = ["--repo", repo, "--commit", commit, "--gates", gates, "--out", outp, "--env-id", env_id,
+            "--cache", os.path.join(vdir, "cache")]  # content-keyed gate results (verdict.py gate contract, GATE_CACHE)
     if budget is not None:
         args += ["--budget-s", budget]
     verdict.cmd_run(args)

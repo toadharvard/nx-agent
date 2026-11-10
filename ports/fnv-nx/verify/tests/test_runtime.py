@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Tests for verify/runtime.py (python runtime as sandbox inputs + stage documents). Plain script: exit 0 on pass,
-one PASS/FAIL line per case. Needs root (sandbox). Store: /root/l4/rt-test."""
+one PASS/FAIL line per case. Needs root (sandbox). Scratch: a fresh mkdtemp under /root/l4 (or ~), removed at exit."""
+import atexit
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +16,8 @@ VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 
-BASE = "/root/l4/rt-test"
+BASE = tempfile.mkdtemp(dir="/root/l4" if os.path.isdir("/root/l4") else os.path.expanduser("~"), prefix="rt-test-")  # own dir per run: files run concurrently
+atexit.register(shutil.rmtree, BASE, ignore_errors=True)
 STORE = BASE + "/store"
 WORK = BASE + "/work"
 PY = [sys.executable, "-I"]
