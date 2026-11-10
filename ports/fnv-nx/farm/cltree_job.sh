@@ -17,7 +17,7 @@
 # A tree whose hash differs from the published c/<c12>/<k>of<N> meta.json tree_hash: adopted trees exit 1; a freshly
 # prepared one is still built and published, and the report says why the name gate did not run.
 # Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS ($FARM_HOME/artifacts), JOBS (nproc), NICE (10), FNVNX_PREPARE_SKIP,
-# CLTREE_BRANCH, CLTREE_SRC, CLTREE_NAMEGATE (1). Needs: what equiv_job.sh --toolchain and compile_job.sh need (root, Wine,
+# CLTREE_BRANCH, CLTREE_SRC, CLTREE_NAMEGATE (1), CLTREE_OBJS_C12 (GCC objects from c/<that>/<k>of<N>; same tree hash required). Needs: what equiv_job.sh --toolchain and compile_job.sh need (root, Wine,
 # ~6 GB toolchain + the tree + objects, aarch64 binutils for the gate). Exit 0: report written (publish ok); 1: the
 # job could not run (no toolchain, no tree, no clbuild.tsv, publish failed; the report says which when it was started).
 # The tree and the objects are decomp-derived: private artifacts repository only; the report holds numbers and unit names.
@@ -76,7 +76,7 @@ else
   printf '%s\n%s\n' "$KEY" "$(TH)" > "$W/tree.id"
 fi
 TREE_HASH=$(TH); t1=$(date +%s); log "tree $TREE_HASH: $how"
-CB=c/$C12/${K}of$N; GCCMETA=""
+CB=c/${CLTREE_OBJS_C12:-$C12}/${K}of$N; GCCMETA=""   # CLTREE_OBJS_C12: the GCC objects of another commit; the tree hash decides
 if git -C "$ARTIFACTS" fetch -q origin "+refs/heads/$CB:refs/remotes/origin/$CB" 2>/dev/null; then
   GCCMETA=$(git -C "$ARTIFACTS" show "refs/remotes/origin/$CB:meta.json")
   ghash=$(python3 -I -c 'import json,sys; print(json.loads(sys.argv[1]).get("tree_hash",""))' "$GCCMETA")
