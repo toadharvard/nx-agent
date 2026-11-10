@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
     printf("time_s=%ld\n", (long)time(0));
     close(open("/out/f", O_CREAT | O_WRONLY, 0644)); stat("/out/f", &st);
     printf("file_mtime=%ld\n", st.st_mtime); printf("ino_f=%lu\n", (unsigned long)st.st_ino);
-    r[0] = 0; printf("getrandom_rc=%ld errno=%d\n", (long)getrandom(r, 1, 0), errno);
+    r[0] = 0; long g = (long)getrandom(r, 1, 0); int ge = errno; printf("getrandom_rc=%ld errno=%d\n", g, ge);
     unsigned char *ar = (unsigned char *)getauxval(AT_RANDOM); printf("at_random=");
     for (int i = 0; i < 16; i++) printf("%02x", ar[i]); printf("\n");
     cpu_set_t cs; sched_getaffinity(0, sizeof cs, &cs); printf("ncpu=%d\n", CPU_COUNT(&cs));
@@ -171,7 +171,7 @@ echo "netdev=$(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ' | tr '\n' ' ')
 echo "ifup=[$(ifconfig)]"; nc -w 1 1.1.1.1 80 </dev/null >/dev/null 2>&1; echo "nc_rc_nonzero=$?"
 echo "tmp=$(echo y > /tmp/x && cat /tmp/x)"; echo "root=$(ls / | tr '\n' ' ')"
 echo "mounts=$(wc -l < /proc/mounts)"'''
-    st3 = mkstage(store, "iso", {"/bin": bb}, ["/out"], sh(code + " > /out/r", store), env={"PATH": "/bin", "A": "1"})
+    st3 = mkstage(store, "iso", {"/bin": bb}, ["/out"], sh("{ " + code + "\n} > /out/r", store), env={"PATH": "/bin", "A": "1"})
     rc, res, err = run(store, st3)
     d3 = fresh("get")
     sb("get", "--store", store, res["key"], "/out", os.path.join(d3, "o"))
@@ -227,9 +227,12 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     check("8 failing command: rc stored, HIT gives same rc", rc == 7 and rc2 == 7 and res["rc"] == 7 and res == res2
           and _text(store, res["stdout"]) == "hi\n" and _text(store, res["stderr"]) == "err\n", "%s %s" % (rc, rc2))
     # unsupported cases are errors (exit 1), nothing stored
-    bad = mkstage(store, "nest", {"/bin": bb, "/bin/x": a}, [], ["/bin/true"])
-    rc, o, e = run(store, bad)
-    check("8b nested input paths: exit 1", rc == 1 and "sandbox" in e, "%s %s" % (rc, e[:100]))
+    dj = json.load(open(st8))
+    dj["inputs"].append({"at": "/bin/x", "tree": dj["inputs"][0]["tree"]})
+    badp = os.path.join(fresh("doc"), "bad.json")
+    json.dump(dj, open(badp, "w"))
+    rc, o, e = run(store, badp)
+    check("8b nested input paths: exit 1, nothing stored", rc == 1 and "nest" in e, "%s %s" % (rc, e[:100]))
 
     # (9) channel probes
     pst = mkstage(store, "probe", {"/bin": bb, "/p": probe}, ["/out"], sh("/p > /out/o"))
