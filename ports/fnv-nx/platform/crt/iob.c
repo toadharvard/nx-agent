@@ -56,6 +56,27 @@ static struct fdent g_fd[MAX_FD] = {
     { FD_OPEN | FD_TEXT | FD_DEV | FD_WRITE, -1, NULL, OS_LOCK_INIT },
 };
 static os_lock_t g_fd_lock;
+
+/* MSVCRT.DLL's lowio table, which lifted code reads directly: __pioinfo[fd >> 5][fd & 31], 8-byte ioinfo
+ * {osfhnd, osfile, pipech}. osfile bits: 0x01 FOPEN, 0x02 FEOFLAG, 0x20 FAPPEND, 0x40 FDEV, 0x80 FTEXT. Every change of
+ * a descriptor's state goes through ioinfo_sync, so the table is the descriptor table seen in MSVCRT's encoding.
+ * osfhnd is the os descriptor (the standard devices: 0..2); a closed entry is 0. */
+struct fnvnx_ioinfo { uint32_t osfhnd; uint8_t osfile; char pipech; uint8_t pad[2]; };
+static struct fnvnx_ioinfo g_info[MAX_FD] = { { 0, 0xC1, 10, { 0 } }, { 1, 0xC1, 10, { 0 } }, { 2, 0xC1, 10, { 0 } } };
+struct fnvnx_ioinfo *__pioinfo[64] = { g_info, g_info + 32, g_info + 64, g_info + 96, g_info + 128, g_info + 160,
+                                       g_info + 192, g_info + 224 };
+struct fnvnx_ioinfo __badioinfo = { 0xFFFFFFFFu, 0x80, 10, { 0 } };
+static void ioinfo_sync(struct fdent *d)
+{
+    struct fnvnx_ioinfo *i = &g_info[d - g_fd];
+    int f = d->flags;
+    i->osfile = (uint8_t)((f & FD_OPEN ? 0x01 : 0) | (f & FD_CTRLZ ? 0x02 : 0) | (f & FD_APPEND ? 0x20 : 0) |
+                          (f & FD_DEV ? 0x40 : 0) | (f & FD_TEXT ? 0x80 : 0));
+    i->osfhnd = (f & FD_OPEN) ? (f & FD_DEV ? (uint32_t)(d - g_fd) : (uint32_t)d->os) : 0;
+}
+
+/* _isatty: the descriptor is a character device (the standard streams) */
+int fnvnx_isatty(int fd) { return fd >= 0 && fd < MAX_FD && (g_fd[fd].flags & (FD_OPEN | FD_DEV)) == (FD_OPEN | FD_DEV); }
 int fnvnx_fmode = FNVNX_O_TEXT;
 
 static int fail(int e)
@@ -144,6 +165,7 @@ static int fd_open(const char *path, int oflag, unsigned caller)
     d->tmpname = (oflag & FNVNX_O_TEMPORARY) ? strdup(host) : NULL;
     d->flags = FD_OPEN | (is_text_mode(oflag) ? FD_TEXT : 0) | ((oflag & FNVNX_O_APPEND) ? FD_APPEND : 0) |
                ((of & OS_O_READ) ? FD_READ : 0) | ((of & OS_O_WRITE) ? FD_WRITE : 0);
+    ioinfo_sync(d);
     os_unlock(&g_fd_lock);
     return fd;
 }
@@ -164,6 +186,7 @@ static int fd_close(int fd)
     }
     d->flags = 0;
     d->os = -1;
+    ioinfo_sync(d);
     os_unlock(&g_fd_lock);
     return r;
 }
@@ -249,7 +272,7 @@ int fnvnx_read(int fd, void *buf, unsigned int n)
         for (size_t i = 0; i < (size_t)r; i++) {
             unsigned char c = raw[i];
             if (c == CTRLZ) { /* end of file: leave the descriptor at the Ctrl-Z */
-                d->flags |= FD_CTRLZ;
+                d->flags |= FD_CTRLZ, ioinfo_sync(d);
                 os_file_seek(d->os, -(int64_t)((size_t)r - i), OS_SEEK_CUR);
                 break;
             }
@@ -317,7 +340,7 @@ long long fnvnx_lseeki64(int fd, long long off, int whence)
     os_lock(&d->lock);
     int64_t r = os_file_seek(d->os, off, whence);
     if (r >= 0)
-        d->flags &= ~FD_CTRLZ;
+        d->flags &= ~FD_CTRLZ, ioinfo_sync(d);
     os_unlock(&d->lock);
     return r < 0 ? fail(EINVAL) : r;
 }
@@ -374,6 +397,7 @@ int fnvnx_setmode(int fd, int mode)
     os_lock(&d->lock);
     int old = (d->flags & FD_TEXT) ? FNVNX_O_TEXT : FNVNX_O_BINARY;
     d->flags = text ? d->flags | FD_TEXT : d->flags & ~FD_TEXT;
+    ioinfo_sync(d);
     os_unlock(&d->lock);
     return old;
 }
@@ -414,7 +438,7 @@ struct stream {
     struct stream *next;
 };
 
-struct _iobuf fnvnx_iob[3] = {
+struct _iobuf fnvnx_iob[FNVNX_IOB_COUNT] = {
     { NULL, 0, NULL, FNVNX_IOREAD, 0, 0, 0, NULL },
     { NULL, 0, NULL, FNVNX_IOWRT, 1, 0, 0, NULL },
     { NULL, 0, NULL, FNVNX_IOWRT, 2, 0, 0, NULL },
@@ -433,8 +457,12 @@ static struct sext *ext_of(struct _iobuf *f)
         errno = EINVAL;
         return NULL;
     }
-    if (f >= fnvnx_iob && f < fnvnx_iob + 3)
-        return &g_stdx[f - fnvnx_iob];
+    if (f >= fnvnx_iob && f < fnvnx_iob + FNVNX_IOB_COUNT) {
+        if (f < fnvnx_iob + 3)
+            return &g_stdx[f - fnvnx_iob];
+        errno = EINVAL; /* _iob[3..19]: the slots MSVCRT hands to fopen are not used here */
+        return NULL;
+    }
     struct stream *s = (struct stream *)f;
     if (s->magic != STREAM_MAGIC) {
         static int warned;
@@ -553,7 +581,7 @@ static int getch(struct _iobuf *f, struct sext *x, struct fdent *d)
         return c;
     }
     if (c == CTRLZ) { /* rpos stays on the Ctrl-Z, so ftell reports its offset */
-        d->flags |= FD_CTRLZ;
+        d->flags |= FD_CTRLZ, ioinfo_sync(d);
         goto eof;
     }
     x->rpos++;
@@ -794,7 +822,7 @@ struct _iobuf *fnvnx_iob_fdopen(int fd, const char *mode)
         return NULL;
     }
     if (oflag & FNVNX_O_APPEND)
-        d->flags |= FD_APPEND;
+        d->flags |= FD_APPEND, ioinfo_sync(d);
     return stream_new(fd, iobflag);
 }
 
@@ -1046,7 +1074,7 @@ int fnvnx_iob_fseeki64(struct _iobuf *f, long long off, int whence)
             x->rpos = x->rlen = 0;
             x->nungot = 0;
             x->last = LAST_NONE;
-            d->flags &= ~FD_CTRLZ;
+            d->flags &= ~FD_CTRLZ, ioinfo_sync(d);
             f->_flag &= ~FNVNX_IOEOF;
             r = 0;
         }
@@ -1119,7 +1147,7 @@ void fnvnx_iob_clearerr(struct _iobuf *f)
     f->_flag &= ~(FNVNX_IOERR | FNVNX_IOEOF);
     struct fdent *d = fd_get(x->fd);
     if (d)
-        d->flags &= ~FD_CTRLZ; /* MSVC clears the descriptor's end-of-file flag too */
+        d->flags &= ~FD_CTRLZ, ioinfo_sync(d); /* MSVC clears the descriptor's end-of-file flag too */
     os_unlock(&x->lock);
 }
 

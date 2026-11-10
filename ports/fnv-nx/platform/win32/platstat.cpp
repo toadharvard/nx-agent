@@ -1,8 +1,7 @@
 /* platstat.cpp - the platform lane's recorder (D25 #3, #4, #6; tools/perf/PLAT.md).
  *
  * Off until fnvnx_plat_start / fnvnx_plat_autostart (tools/perf/plat_autostart.c). While on, the stand-ins report:
- *   unimpl   a call to an entry whose function is missing (FNVNX_UNIMPL(): E_NOTIMPL methods, BinkOpen without a
- *            movie player, an unsupported TEB offset, ...); an import with no export is the boot's own line
+ *   unimpl   a call to an entry whose function is missing (FNVNX_UNIMPL(): E_NOTIMPL methods, an unsupported TEB offset, ...); an import with no export is the boot's own line
  *            ("fnvnx boot: import <dll>!<name>: no export") and its call a trap (tools/perf/plat.py reads both)
  *   noop     a call to an entry that is a documented no-op on the Switch (FNVNX_NOOP(): Steam / GOG Galaxy,
  *            winsock offline, DebugBreak): reported, not counted in the metric

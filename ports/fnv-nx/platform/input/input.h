@@ -85,4 +85,44 @@ void fnvnx_audio_input_register(void);
 #ifdef __cplusplus
 }
 #endif
+#ifdef FNVNX_SHIM_XINPUT_H   /* xinput.h included first: the documented XInput 1.3 exports beyond its subset */
+#ifndef BATTERY_TYPE_WIRED
+#define BATTERY_DEVTYPE_GAMEPAD 0x00
+#define BATTERY_DEVTYPE_HEADSET 0x01
+#define BATTERY_TYPE_DISCONNECTED 0x00
+#define BATTERY_TYPE_WIRED 0x01
+#define BATTERY_LEVEL_EMPTY 0x00
+#define BATTERY_LEVEL_FULL 0x03
+#define XINPUT_KEYSTROKE_KEYDOWN 0x0001
+#define XINPUT_KEYSTROKE_KEYUP 0x0002
+#define XINPUT_KEYSTROKE_REPEAT 0x0004
+#define VK_PAD_A 0x5800
+#define VK_PAD_B 0x5801
+#define VK_PAD_X 0x5802
+#define VK_PAD_Y 0x5803
+#define VK_PAD_RSHOULDER 0x5804
+#define VK_PAD_LSHOULDER 0x5805
+#define VK_PAD_LTRIGGER 0x5806
+#define VK_PAD_RTRIGGER 0x5807
+#define VK_PAD_DPAD_UP 0x5810
+#define VK_PAD_DPAD_DOWN 0x5811
+#define VK_PAD_DPAD_LEFT 0x5812
+#define VK_PAD_DPAD_RIGHT 0x5813
+#define VK_PAD_START 0x5814
+#define VK_PAD_BACK 0x5815
+#define VK_PAD_LTHUMB_PRESS 0x5816
+#define VK_PAD_RTHUMB_PRESS 0x5817
+typedef struct _XINPUT_BATTERY_INFORMATION { BYTE BatteryType; BYTE BatteryLevel; } XINPUT_BATTERY_INFORMATION;
+typedef struct _XINPUT_KEYSTROKE { WORD VirtualKey; WCHAR Unicode; WORD Flags; BYTE UserIndex; BYTE HidCode; } XINPUT_KEYSTROKE;
+#ifdef __cplusplus
+extern "C" {
+#endif
+DWORD WINAPI XInputGetDSoundAudioDeviceGuids(DWORD dwUserIndex, GUID *pDSoundRenderGuid, GUID *pDSoundCaptureGuid);
+DWORD WINAPI XInputGetBatteryInformation(DWORD dwUserIndex, BYTE devType, XINPUT_BATTERY_INFORMATION *pBatteryInformation);
+DWORD WINAPI XInputGetKeystroke(DWORD dwUserIndex, DWORD dwReserved, XINPUT_KEYSTROKE *pKeystroke);
+#ifdef __cplusplus
+}
+#endif
+#endif
+#endif
 #endif

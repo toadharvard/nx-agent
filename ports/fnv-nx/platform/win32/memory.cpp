@@ -222,101 +222,250 @@ extern "C" SIZE_T VirtualQuery(LPCVOID addr, PMEMORY_BASIC_INFORMATION mbi, SIZE
     return sizeof *mbi;
 }
 
-/* ---- heaps: every heap is the C heap (the engine replaces allocation with its own MemoryManager) */
+/* ---- heaps over the C heap (the engine replaces allocation with its own MemoryManager).
+ * Every block carries a header {heap, requested size, capacity, list links}, 16-byte aligned, in front of the
+ * payload. A heap is {flags, fixed-size limit, bytes in use, block list, lock}; blocks belong to the heap in their
+ * header. Unless HEAP_NO_SERIALIZE is in effect (call flags | heap flags), every operation holds the heap's lock. */
 #define PROCESS_HEAP ((HANDLE)(uintptr_t)0x00150000u)
-
-static size_t usable(void *p)
-{
-#if defined(__GLIBC__) || defined(__NEWLIB__) || defined(__SWITCH__)
-    return malloc_usable_size(p);
-#else
-    (void)p;
-    return 0;
+#ifndef STATUS_NO_MEMORY
+#define STATUS_NO_MEMORY 0xC0000017u
 #endif
+#ifndef HEAP_NO_SERIALIZE
+#define HEAP_NO_SERIALIZE 0x00000001
+#endif
+#ifndef HEAP_GENERATE_EXCEPTIONS
+#define HEAP_GENERATE_EXCEPTIONS 0x00000004
+#endif
+#define HEAP_MAX_BLOCK 0x7FFF8u   /* the largest single block of a fixed-size heap (MSDN) */
+#define HEAP_PAGE 4096u
+
+struct w32_heap;
+struct alignas(16) heap_blk {
+    w32_heap *heap;
+    size_t size, cap;   /* requested size; usable bytes (size <= cap) */
+    heap_blk *prev, *next;
+};
+struct w32_heap {
+    DWORD flags;        /* HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS from HeapCreate */
+    size_t limit;       /* 0: growable; else total requested bytes allowed */
+    size_t used;        /* total requested bytes of live blocks */
+    heap_blk *blocks;
+    os_lock_t lock;
+    w32_heap *next;     /* registry of created heaps (HeapDestroy's handle check) */
+};
+
+static w32_heap g_proc_heap;
+static w32_heap *g_heaps;   /* created heaps */
+static os_lock_t g_heaps_lock;
+
+static w32_heap *heap_of(HANDLE h) { return h == PROCESS_HEAP ? &g_proc_heap : (w32_heap *)h; }
+static heap_blk *blk_of(const void *p) { return (heap_blk *)p - 1; }
+static size_t cap_of(size_t n) { return n ? (n + 15) & ~(size_t)15 : 16; }
+
+static void blk_link(w32_heap *h, heap_blk *b)
+{
+    b->heap = h;
+    b->prev = NULL;
+    b->next = h->blocks;
+    if (h->blocks) h->blocks->prev = b;
+    h->blocks = b;
+}
+static void blk_unlink(w32_heap *h, heap_blk *b)
+{
+    if (b->prev) b->prev->next = b->next; else h->blocks = b->next;
+    if (b->next) b->next->prev = b->prev;
+}
+/* may a block of n bytes replace one of old bytes (0 for a new block) in h? */
+static bool heap_fits(const w32_heap *h, size_t old, size_t n)
+{
+    if (!h->limit) return true;
+    return n <= HEAP_MAX_BLOCK && n <= h->limit && h->used - old <= h->limit - n;
+}
+static void heap_enter(w32_heap *h, DWORD eff) { if (!(eff & HEAP_NO_SERIALIZE)) os_lock(&h->lock); }
+static void heap_leave(w32_heap *h, DWORD eff) { if (!(eff & HEAP_NO_SERIALIZE)) os_unlock(&h->lock); }
+static DWORD heap_eff(HANDLE hh, DWORD flags) { return W32_DW(flags) | heap_of(hh)->flags; }
+
+/* an allocation failed: with HEAP_GENERATE_EXCEPTIONS the caller raises instead of returning NULL */
+static void *heap_failed(DWORD eff)
+{
+    if (eff & HEAP_GENERATE_EXCEPTIONS)
+        RaiseException(STATUS_NO_MEMORY, 0, 0, NULL);
+    return NULL;
 }
 
-extern "C" HANDLE GetProcessHeap(void) { return PROCESS_HEAP; }
-extern "C" HANDLE HeapCreate(DWORD f, SIZE_T i, SIZE_T m) { W32_UNUSED(f); W32_UNUSED(i); W32_UNUSED(m); return PROCESS_HEAP; }
-extern "C" BOOL HeapDestroy(HANDLE h) { W32_UNUSED(h); return TRUE; }
-
-extern "C" LPVOID HeapAlloc(HANDLE h, DWORD flags, SIZE_T n)
+static void *heap_new(w32_heap *h, DWORD eff, size_t n)   /* under the heap's lock */
 {
-    W32_UNUSED(h);
-    int in = fnvnx_mem_enter(MEM_RA);   /* the memory lane: recorded here, by the game's call site */
-    void *p = (W32_DW(flags) & HEAP_ZERO_MEMORY) ? calloc(1, n ? n : 1) : malloc(n ? n : 1);
-    if (in) {
-        if (p) fnvnx_mem_note(MEMK_HEAP, p, n, MEM_RA); else fnvnx_mem_fail(MEMK_HEAP, n, MEM_RA);
-        fnvnx_mem_leave(in);
-    }
-    if (!p)
-        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    if (!heap_fits(h, 0, n) || n > (size_t)-1 / 2) return NULL;
+    size_t cap = cap_of(n);
+    heap_blk *b = (heap_blk *)malloc(sizeof *b + cap);
+    if (!b) return NULL;
+    b->size = n;
+    b->cap = cap;
+    blk_link(h, b);
+    h->used += n;
+    void *p = b + 1;
+    if (eff & HEAP_ZERO_MEMORY) memset(p, 0, cap);
     return p;
 }
 
-extern "C" LPVOID HeapReAlloc(HANDLE h, DWORD flags, LPVOID p, SIZE_T n)
+/* in place when the new size fits the block's capacity; the grown part is zeroed on request */
+static bool heap_resize_inplace(w32_heap *h, heap_blk *b, DWORD eff, size_t n)
 {
-    W32_UNUSED(h);
-    if (!p) {   /* unlike realloc, a NULL block is an error */
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return NULL;
-    }
-    if (W32_DW(flags) & HEAP_REALLOC_IN_PLACE_ONLY)
-        return usable(p) >= n ? p : NULL;
-    size_t old = (W32_DW(flags) & HEAP_ZERO_MEMORY) ? usable(p) : 0;
-    int in = fnvnx_mem_enter(MEM_RA);
-    if (in)   /* before: once realloc freed p, another thread may get the address (a failed realloc leaves p untracked) */
-        fnvnx_mem_forget(MEMK_HEAP, p);
-    void *q = realloc(p, n ? n : 1);
-    if (in) {
-        if (q) fnvnx_mem_note(MEMK_HEAP, q, n, MEM_RA); else fnvnx_mem_fail(MEMK_HEAP, n, MEM_RA);
-        fnvnx_mem_leave(in);
-    }
-    if (q && n > old && (W32_DW(flags) & HEAP_ZERO_MEMORY))
-        memset((char *)q + old, 0, n - old);
-    if (!q)
-        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-    return q;
+    if (n > b->cap || !heap_fits(h, b->size, n)) return false;
+    if ((eff & HEAP_ZERO_MEMORY) && n > b->size) memset((char *)(b + 1) + b->size, 0, n - b->size);
+    h->used = h->used - b->size + n;
+    b->size = n;
+    return true;
 }
 
-extern "C" BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p)
+static void heap_free_blk(w32_heap *h, heap_blk *b)   /* under the heap's lock; after the memory lane forgot it */
 {
-    W32_UNUSED(h);
-    W32_UNUSED(flags);
-    if (!p)
-        return TRUE;
+    blk_unlink(h, b);
+    h->used -= b->size;
+    free(b);
+}
+
+extern "C" HANDLE GetProcessHeap(void) { return PROCESS_HEAP; }
+
+extern "C" HANDLE HeapCreate(DWORD f, SIZE_T i, SIZE_T m)
+{
+    w32_heap *h = (w32_heap *)calloc(1, sizeof *h);
+    if (!h) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return NULL;
+    }
+    h->flags = W32_DW(f) & (HEAP_NO_SERIALIZE | HEAP_GENERATE_EXCEPTIONS);
+    if (m) {   /* fixed size: rounded up to pages, and at least the initial size */
+        size_t lim = m < i ? i : m;
+        h->limit = (lim + HEAP_PAGE - 1) & ~(size_t)(HEAP_PAGE - 1);
+        if (!h->limit) h->limit = lim;   /* wrapped around: the largest size */
+    }
+    os_lock(&g_heaps_lock);
+    h->next = g_heaps;
+    g_heaps = h;
+    os_unlock(&g_heaps_lock);
+    return (HANDLE)h;
+}
+
+extern "C" BOOL HeapDestroy(HANDLE hh)
+{
+    w32_heap *h = NULL;
+    os_lock(&g_heaps_lock);   /* only a created, not yet destroyed heap is valid (never the process heap) */
+    for (w32_heap **pp = &g_heaps; *pp; pp = &(*pp)->next)
+        if ((HANDLE)*pp == hh) {
+            h = *pp;
+            *pp = h->next;
+            break;
+        }
+    os_unlock(&g_heaps_lock);
+    if (!h) {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
     int in = fnvnx_mem_enter(MEM_RA);
-    if (in)
-        fnvnx_mem_forget(MEMK_HEAP, p);
-    free(p);
+    os_lock(&h->lock);
+    while (h->blocks) {
+        heap_blk *b = h->blocks;
+        if (in) fnvnx_mem_forget(MEMK_HEAP, b + 1);
+        heap_free_blk(h, b);
+    }
+    os_unlock(&h->lock);
+    free(h);
     fnvnx_mem_leave(in);
     return TRUE;
 }
 
-extern "C" SIZE_T HeapSize(HANDLE h, DWORD flags, LPCVOID p)
+static void *heap_alloc(unsigned ra, HANDLE hh, DWORD flags, SIZE_T n)
 {
-    W32_UNUSED(h);
-    W32_UNUSED(flags);
-    return usable((void *)p);
-}
-
-extern "C" HANDLE LocalAlloc(UINT flags, SIZE_T n)
-{
-    int in = fnvnx_mem_enter(MEM_RA);
-    void *p = (flags & 0x40 /* LMEM_ZEROINIT */) ? calloc(1, n ? n : 1) : malloc(n ? n : 1);
+    w32_heap *h = heap_of(hh);
+    DWORD eff = heap_eff(hh, flags);
+    int in = fnvnx_mem_enter(ra);   /* the memory lane: recorded here, by the game's call site */
+    heap_enter(h, eff);
+    void *p = heap_new(h, eff, n);
+    heap_leave(h, eff);
     if (in) {
-        if (p) fnvnx_mem_note(MEMK_HEAP, p, n, MEM_RA); else fnvnx_mem_fail(MEMK_HEAP, n, MEM_RA);
+        if (p) fnvnx_mem_note(MEMK_HEAP, p, n, ra); else fnvnx_mem_fail(MEMK_HEAP, n, ra);
         fnvnx_mem_leave(in);
     }
-    return (HANDLE)p;
+    return p ? p : heap_failed(eff);
+}
+
+extern "C" LPVOID HeapAlloc(HANDLE h, DWORD flags, SIZE_T n) { return heap_alloc(MEM_RA, h, flags, n); }
+
+extern "C" LPVOID HeapReAlloc(HANDLE hh, DWORD flags, LPVOID p, SIZE_T n)
+{
+    if (!p) {   /* unlike realloc, a NULL block is an error */
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+    unsigned ra = MEM_RA;
+    w32_heap *h = heap_of(hh);
+    DWORD eff = heap_eff(hh, flags);
+    heap_blk *b = blk_of(p);
+    int in = fnvnx_mem_enter(ra);
+    heap_enter(h, eff);
+    size_t old = b->size;
+    if (in)   /* before: once p is freed, another thread may get the address */
+        fnvnx_mem_forget(MEMK_HEAP, p);
+    void *q = NULL;
+    if (heap_resize_inplace(h, b, eff, n)) {
+        q = p;
+    } else if (!(eff & HEAP_REALLOC_IN_PLACE_ONLY) && (q = heap_new(h, eff & ~(DWORD)HEAP_ZERO_MEMORY, n)) != NULL) {
+        size_t keep = old < n ? old : n;
+        memcpy(q, p, keep);
+        if ((eff & HEAP_ZERO_MEMORY) && n > keep) memset((char *)q + keep, 0, n - keep);
+        heap_free_blk(h, b);
+    }
+    heap_leave(h, eff);
+    if (in) {
+        if (q) fnvnx_mem_note(MEMK_HEAP, q, n, ra);
+        else { fnvnx_mem_note(MEMK_HEAP, p, old, ra); fnvnx_mem_fail(MEMK_HEAP, n, ra); }   /* p stays valid */
+        fnvnx_mem_leave(in);
+    }
+    return q ? q : heap_failed(eff);
+}
+
+static BOOL heap_free(unsigned ra, HANDLE hh, DWORD flags, LPVOID p)
+{
+    if (!p)
+        return TRUE;
+    w32_heap *h = heap_of(hh);
+    DWORD eff = heap_eff(hh, flags);
+    int in = fnvnx_mem_enter(ra);
+    if (in)
+        fnvnx_mem_forget(MEMK_HEAP, p);
+    heap_enter(h, eff);
+    heap_free_blk(h, blk_of(p));
+    heap_leave(h, eff);
+    fnvnx_mem_leave(in);
+    return TRUE;
+}
+
+extern "C" BOOL HeapFree(HANDLE h, DWORD flags, LPVOID p) { return heap_free(MEM_RA, h, flags, p); }
+
+extern "C" SIZE_T HeapSize(HANDLE hh, DWORD flags, LPCVOID p)
+{
+    if (!p) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return (SIZE_T)-1;
+    }
+    w32_heap *h = heap_of(hh);
+    DWORD eff = heap_eff(hh, flags);
+    heap_enter(h, eff);
+    size_t n = blk_of(p)->size;
+    heap_leave(h, eff);
+    return n;
+}
+
+/* LMEM_FIXED blocks are blocks of the process heap */
+extern "C" HANDLE LocalAlloc(UINT flags, SIZE_T n)
+{
+    return (HANDLE)heap_alloc(MEM_RA, PROCESS_HEAP, (flags & 0x40 /* LMEM_ZEROINIT */) ? HEAP_ZERO_MEMORY : 0, n);
 }
 
 extern "C" HANDLE LocalFree(HANDLE h)
 {
-    int in = fnvnx_mem_enter(MEM_RA);
-    if (in)
-        fnvnx_mem_forget(MEMK_HEAP, h);
-    free(h);
-    fnvnx_mem_leave(in);
+    heap_free(MEM_RA, PROCESS_HEAP, 0, h);
     return NULL;
 }
 

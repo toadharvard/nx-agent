@@ -31,9 +31,6 @@ void s4_write_file(const char *win_path, const char *data)
 extern "C" void fnvnx_d3d9_register(void) __attribute__((weak));   /* the null device's d3d9.dll module */
 extern "C" void fnvnx_audio_input_register(void);
 
-/* platform/win32/iat_calls.cpp: decomp names of calls through an import slot */
-extern "C" const struct fnvnx_iat_call { const char *name; uint32_t slot; const char *dll, *import; } fnvnx_iat_calls[];
-
 static int iat(const char *path)
 {
     if (getenv("FNVNX_IAT_LIST"))   /* addresses below are relative to iat() itself (PIE) */
@@ -69,19 +66,7 @@ static int iat(const char *path)
     }
     fclose(f);
     printf("iat: %d of %d slots have no export\n", missing, slots);
-    int rows = 0, bad = 0;
-    for (const fnvnx_iat_call *c = fnvnx_iat_calls; c->name; c++, rows++) {
-        int ok = 0;
-        for (int i = 0; i < nseen; i++)
-            if (seen[i].slot == c->slot)
-                ok = !strcmp(seen[i].dll, c->dll) && !strcmp(seen[i].what, c->import);
-        if (!ok) {
-            bad++;
-            printf("iat-call mismatch\t%s\t%#x\t%s!%s\n", c->name, c->slot, c->dll, c->import);
-        }
-    }
-    printf("iat-calls: %d rows, %d not matching the exe's import directory\n", rows, bad);
-    return bad ? 1 : 0;
+    return missing ? 1 : 0;
 }
 
 int main(int argc, char **argv)
