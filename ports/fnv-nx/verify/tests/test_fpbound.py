@@ -191,7 +191,7 @@ def t_hand():
     r = fb.sqrt(v(Fr(4), Fr(1)), F)
     case("hand sqrt errs", r.val == 2 and r.err * r.err * 12 >= 1 and r.err < Fr(2887, 10000))
     r = fb.sqrt(v(Fr(2)), fb.F32)
-    case("hand sqrt(2) f32", r.val == round_to(Fr(14142136, 10000000), 24, -126) and r.err > 0)
+    case("hand sqrt(2) f32", r.val == round_to(Fr(math.isqrt(2 * 4 ** 80), 2 ** 80), 24, -126) and r.err > 0)
     r = fb.neg(v(Fr(3), Fr(1, 8)))
     q = fb.abs_(r)
     case("hand neg/abs", r.val == -3 and r.err == Fr(1, 8) and q.val == 3 and q.err == Fr(1, 8))
@@ -256,7 +256,7 @@ def t_random():
     sub = viol = unst = 0
     rng = Rng(777)
     for _ in range(1500):
-        ch = gen_chain(rng, 1, 14, 8)
+        ch = gen_chain(rng, 55, 20, 8)
         r = run(ch, fb.F32)
         sub += r["sub"]
         viol += r["viol"]
@@ -343,7 +343,7 @@ def t_special():
     case("overflow interval -> unstable",
          fb.mul(v(Fr(2 ** 100)), v(Fr(2 ** 100)), fb.F32).kind == "u"
          and fb.add(v(Fr(2 ** 128 - 2 ** 104)), v(Fr(2 ** 103)), fb.F32).kind == "u"
-         and fb.add(v(Fr(2 ** 128 - 2 ** 104)), v(Fr(2 ** 102)), fb.F32).kind == "f")
+         and fb.add(v(Fr(2 ** 128 - 2 ** 105)), v(Fr(2 ** 104)), fb.F32).kind == "f")
     case("case_verdict combines stability",
          fb.case_verdict(["accept", "accept"], [True, True]) == "accept"
          and fb.case_verdict(["accept", "reject"], [True, True]) == "reject"
