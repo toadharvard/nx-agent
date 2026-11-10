@@ -4,6 +4,11 @@
          tracking in x86flow; funclets are analysed as part of their parent frame);
  rule 2  a frame address that only reaches direct calls whose parameter summary says "does not escape" (greatest fixed point over
          the call graph) contaminates nothing; otherwise it contaminates its object extent (up to the next directly accessed slot).
+ Parameter summary lattice (per callee parameter): 0 `n` does not escape  <  1 `r` may be returned (eax) but does not otherwise escape  <  2 `e` escapes.
+ Least fixed point from 0 (= greatest set of non-escaping parameters). Transfer: a sink of a parameter value contributes
+ e for store / indirect call / unknown use, r for return, and for a call (callee, par) the callee's own value if it is e, else 0;
+ a conditional sink (X, cond, s) contributes s only when some (callee, par) in cond is >= r (the callee may hand the address back in eax,
+ so the caller's eax is the same frame address). Imports come from FNVNX_IMPORT_ESCAPE (dll, name, args over {n, r, e}); missing = all e.
  ro-const (IAT, .rdata, jump tables) is plain; TLS stays ordered. Count-only stdout; per-entry TSV in /home/user/l3facts/memclass/."""
 import os, sys, json, bisect, hashlib
 from array import array
@@ -14,6 +19,13 @@ import x86flow as W
 from x86flow import X, M32, mn, rn, base, memslot, Fn, FUNK, KINDS, THUNK, IATADDR, track, frame_events, load_universe, pmap
 
 EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
+IMPTAB = os.environ.get('FNVNX_IMPORT_ESCAPE', '/home/user/l3facts/import_escape.tsv')
+IMPESC = {}                  # import name -> per-argument string over n / r / e (conservative default: all e)
+if os.path.exists(IMPTAB):
+    for _ln in open(IMPTAB).read().splitlines():
+        _f = _ln.split('\t')
+        if len(_f) >= 3 and not _ln.startswith('#'):
+            IMPESC[_f[1]] = _f[2]
 OUT = '/home/user/l3facts/memclass'
 STK = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-funclet', 'stack-escaped', 'stack-unk')
 ORDER = STK + ('ro-iat', 'ro-rdata', 'ro-text', 'tls', 'tls-derived', 'global', 'heap/other')
@@ -130,7 +142,7 @@ def sink(F, x, par):
 
 def skey(sk):
     """summary key of a call sink: callee address, or 'imp:Name' for an import."""
-    return sk[1] if sk[0] == 'A' else 'imp:' + sk[1]
+    return '%08x' % sk[1] if sk[0] == 'A' else 'imp:' + sk[1]
 
 
 def fcoord(F, a, p):
@@ -446,46 +458,90 @@ def main():
             owner.setdefault(x, a)
     # funclets belong to their parent frame
     par = parents_map(rows)
-    # ---- parameter summaries: greatest fixed point (start non-escaping, remove on evidence)
-    bad, rev, rf = {}, defaultdict(list), defaultdict(list)
-    CAUSE = {'S': 'stored', 'R': 'returned', 'I': 'indirect', 'M': 'import', 'U': 'unknown'}
-    for f in sorted(R):
-        for p, sk in sorted(R[f]['summ'].items()):
-            if p == 'fwd':
-                for t in sk:
-                    rf[t].append(f)
-                continue
-            for s_ in sk:
-                if s_[0] != 'A':
-                    bad.setdefault((f, p), CAUSE[s_[0]] if s_[0] != 'U' else 'unk:' + s_[1].split(':')[0])
-                elif s_[1] not in R:
-                    bad.setdefault((f, p), 'callee-undecoded')
-                elif R[s_[1]]['allstack'] and s_[2][0] == 's':
-                    bad.setdefault((f, p), 'callee-allstack')
-                else:
-                    rev[(s_[1], s_[2])].append((f, p))
-        if R[f]['allstack']:
-            for p in sorted(R[f]['summ']):
-                if p[0] == 's':
-                    bad.setdefault((f, p), 'allstack')
-    work, rounds = sorted(bad), 0
-    while work:
-        rounds += 1; nxt = []
-        for g, q in work:
-            for d in rev.get((g, q), []) + [(f, q) for f in rf.get(g, [])]:
-                if d not in bad:
-                    bad[d] = bad[(g, q)]; nxt.append(d)
-        work = sorted(nxt)
+    # ---- parameter summaries (lattice n < r < e, least fixed point from n)
+    keys = [(f, p) for f in sorted(R) for p in sorted(R[f]['summ']) if p != 'fwd']
 
-    def isbad(t, p, seen=()):
-        return t not in R or (t, p) in bad or (R[t]['allstack'] and p[0] == 's') or any(isbad(u, p, seen + (t,)) for u in R[t]['summ'].get('fwd', []) if u not in seen and u != t)
-    npar = Counter(('esc' if (f, p) in bad else 'ok') for f in sorted(R) for p in sorted(R[f]['summ']) if p != 'fwd')
-    pcause = Counter(bad[k] for k in sorted(bad) if k[1] in R[k[0]]['summ'])
-    # ---- frame contamination per owning function: an escaped event contaminates its object extent (up to the next directly
-    # accessed slot) or the whole frame if offsets are computed; everything else in the frame is private, hence plain
-    def verdict(sk):
-        r = [s for s in sk if s[0] in 'SRIU'] + [s for s in sk if s[0] == 'M'] + [s for s in sk if s[0] == 'A' and isbad(s[1], s[2])]
-        return sorted({'stored' if s[0] == 'S' else 'returned' if s[0] == 'R' else 'indirect' if s[0] == 'I' else 'unknown:' + s[1] if s[0] == 'U' else 'import:' + s[1] if s[0] == 'M' else 'callee' for s in r})
+    def solve(old):
+        """old=True reproduces the previous rule set: a returned parameter counts as escaping and there is no conditional flow."""
+        val, cause = {}, {}
+
+        def impv(name, q):
+            st = IMPESC.get(name, '')
+            return {'n': 0, 'r': 1, 'e': 2}.get(st[int(q[1:])] if q[0] == 's' and int(q[1:]) < len(st) else 'e', 2)
+
+        def getv(t, q, seen=()):
+            if isinstance(t, str) and t.startswith('imp:'):
+                return impv(t[4:], q)
+            t = int(t, 16) if isinstance(t, str) else t
+            if t not in R or (R[t]['allstack'] and q[0] == 's'):
+                return 2
+            v = val.get((t, q), 0)
+            for u in R[t]['summ'].get('fwd', []):                       # tail-jump forwarding: same parameter of the target
+                if u not in seen and u != t:
+                    v = max(v, getv(u, q, seen + (t,)))
+            return v
+
+        def why(s_):
+            """(level, cause) of one sink."""
+            k = s_[0]
+            if k == 'S':
+                return 2, 'stored'
+            if k == 'I':
+                return 2, 'indirect'
+            if k == 'U':
+                return 2, 'unk:' + s_[1].split(':')[0]
+            if k == 'R':
+                return (2, 'returned') if old else (1, 'returned')
+            if k in ('A', 'M'):
+                t = skey(s_)
+                v = getv(t, s_[2])
+                c = 'import:' + s_[1] if k == 'M' else cause.get((int(t, 16), s_[2]), 'callee')
+                return (2, c if c.startswith('import:') else 'callee') if v == 2 else (0, '')
+            if old:
+                return 0, ''
+            return why(s_[2]) if any(getv(t, q) >= 1 for t, q in s_[1]) else (0, '')
+        rounds = 0
+        while True:
+            changed = False
+            for f, p in keys:
+                v = val.get((f, p), 0)
+                if v == 2:
+                    continue
+                nv, nc = v, ''
+                if R[f]['allstack'] and p[0] == 's':
+                    nv, nc = 2, 'allstack'
+                for s_ in R[f]['summ'][p]:
+                    lv, c = why(s_)
+                    if lv > nv:
+                        nv, nc = lv, c
+                if nv > v:
+                    val[(f, p)] = nv
+                    cause[(f, p)] = nc
+                    changed = True
+            if not changed:
+                break
+            rounds += 1
+        return val, cause, getv, why, rounds
+    SOLVE = {True: solve(True), False: solve(False)}
+    val, cause, getv, why, rounds = SOLVE[False]
+    npar = Counter(val.get(k, 0) for k in keys)
+    pcause = Counter(cause[k] for k in keys if val.get(k, 0) == 2)
+
+    def verdict(sk, old):
+        """reasons (sorted strings) for which the frame-address sinks sk of one event escape; a returned frame address always escapes."""
+        w = SOLVE[old][3]
+        r = []
+        for s_ in sk:
+            while s_[0] == 'X' and not old and any(SOLVE[old][2](t, q) >= 1 for t, q in s_[1]):
+                s_ = s_[2]
+            if s_[0] == 'X':
+                continue
+            lv, c = w(s_)
+            if s_[0] == 'R':
+                lv, c = 2, 'returned'
+            if lv == 2:
+                r.append(c if c != 'unk:' + (s_[1].split(':')[0] if s_[0] == 'U' else '') else 'unknown:' + s_[1])
+        return sorted(set(r))
     fro = defaultdict(list)
     for f in sorted(R):
         for p in (par.get(f, []) if kind[f] in FUNK else [f]):
@@ -501,10 +557,10 @@ def main():
             for c, idx, sk in r['ev']:
                 if fun:
                     c = None if c is None or bp is None else bp + c
-                evs.append((c, idx, verdict(sk), bool(sk)))
+                evs.append((c, idx, verdict(sk, False), bool(sk), verdict(sk, True)))
             bnd.update(c if not fun else (bp + c if bp is not None else 0) for x, ls, w, role, c in r['fr'] if role in 'alorp')
         frame[g] = (sorted(bnd), evs, whole)
-    res_t, per, lost = Counter(), {}, Counter()
+    res_t, per, lost, whatif, retrule = Counter(), {}, Counter(), Counter(), Counter()
     nescf, reasons, rule2, rulef, ureasons = 0, Counter(), Counter(), Counter(), Counter()
     for g in sorted(R):
         bnd, evs, whole = frame[g]
@@ -515,21 +571,26 @@ def main():
             for r in sorted({r for e in anyv for r in e[2] if r.startswith('unknown')}):
                 ureasons[r[8:].split(':')[0]] += 1
 
-    def contam(g, c, final):
+    def pick(e, mode):
+        return e[2] if mode == 'new' else e[4] if mode == 'old' else (e[2] or e[4] or ['callee']) if e[3] else []
+
+    def contam(g, c, mode):
+        """reasons for which slot c of frame g is contaminated under rule set mode (new | old | v1 = any sink counts)."""
         bnd, evs, whole = frame[g]
         hit = []
-        for ec, idx, vd, anyk in evs:
-            if not (vd if final else anyk):
+        for e in evs:
+            vd = pick(e, mode)
+            if not vd:
                 continue
-            if ec is None or idx or whole:
-                return vd or ['callee']
-            j = bisect.bisect_right(bnd, ec)
-            if ec <= c and (j >= len(bnd) or bnd[j] > c):
-                hit += vd or ['callee']
+            if e[0] is None or e[1] or whole:
+                return vd
+            j = bisect.bisect_right(bnd, e[0])
+            if e[0] <= c and (j >= len(bnd) or bnd[j] > c):
+                hit += vd
         return sorted(set(hit))
 
-    def anyesc(g, final):
-        return any(e[2] if final else e[3] for e in frame[g][1])
+    def anyesc(g, mode):
+        return any(pick(e, mode) for e in frame[g][1])
     tot, ent, imp, fl = Counter(), defaultdict(Counter), Counter(), Counter()
     pending = []
     for a in order:
@@ -556,19 +617,23 @@ def main():
                     if kind[a] in FUNK and role == 'p':
                         cc = None if R[g]['bpv'] is None else R[g]['bpv'] + c
                     if role in 'alorp' and cc is not None:
-                        v = contam(g, cc, True); v1 = contam(g, cc, False)
+                        v = contam(g, cc, 'new'); v1 = contam(g, cc, 'old'); v0 = contam(g, cc, 'v1')
                     else:
-                        v = ['frame'] if anyesc(g, True) else []; v1 = ['frame'] if anyesc(g, False) else []
-                    cl[g] = (v, v1)
-                if any(v for v, v1 in cl.values()):
+                        v = ['frame'] if anyesc(g, 'new') else []; v1 = ['frame'] if anyesc(g, 'old') else []; v0 = ['frame'] if anyesc(g, 'v1') else []
+                    cl[g] = (v, v1, v0)
+                if any(c3[0] for c3 in cl.values()):
                     cls = 'stack-escaped'
-                    for v, v1 in cl.values():
-                        for t in v:
-                            if t.startswith('import:'):
-                                lost[t[7:]] += 1
+                    rs_ = sorted({t for c3 in cl.values() for t in c3[0]})
+                    for t in rs_:
+                        if t.startswith('import:'):
+                            lost[t[7:]] += 1
+                    if len(rs_) == 1 and rs_[0].startswith('import:'):
+                        whatif[rs_[0][7:]] += 1
                 else:
                     cls = 'stack-funclet' if kind[a] in FUNK else 'stack-args-in' if role == 'a' else 'stack-args-out' if role == 'o' else 'stack-local'
-                    if any(v1 for v, v1 in cl.values()):
+                    if any(c3[1] for c3 in cl.values()):
+                        retrule[role] += 1                       # contaminated under the previous rules, plain with conditional return flow
+                    elif any(c3[2] for c3 in cl.values()):
                         rule2[role] += 1
                     elif role in 'up' and not kind[a] in FUNK:
                         rulef['unresolved-offset'] += 1
@@ -595,8 +660,10 @@ def main():
         nescf, len(frame), dict(sorted(reasons.items())), sum(1 for g in frame if frame[g][2]), sum(1 for a in R if R[a]['allstack'])))
     print('  arg-area flag reasons (entries): ' + ' '.join('%s=%d' % kv for kv in sorted(Counter(w for a in R for w in R[a]['aw']).items())))
     print('  unknown-sink reasons (frames): ' + ' '.join('%s=%d' % kv for kv in sorted(ureasons.items(), key=lambda kv: (-kv[1], kv[0]))[:10]))
-    print('parameter summaries: %d non-escaping, %d escaping (root causes: %s); fixed-point rounds %d' % (npar['ok'], npar['esc'], ' '.join('%s=%d' % kv for kv in sorted(pcause.items())), rounds))
-    print('top imports by accesses lost: ' + ' '.join('%s=%d' % kv for kv in sorted(lost.items(), key=lambda kv: (-kv[1], kv[0]))[:15]))
+    print('parameter summaries: %d n (non-escaping), %d r (returned only), %d e (escaping; root causes: %s); fixed-point rounds %d (old rules: %d)' % (npar[0], npar[1], npar[2], ' '.join('%s=%d' % kv for kv in sorted(pcause.items())), rounds, SOLVE[True][4]))
+    print('returned rule: %d accesses plain that the previous rules (returned = escape) contaminated (by role %s); import table: %d imports read from %s' % (sum(retrule.values()), dict(sorted(retrule.items())), len(IMPESC), IMPTAB))
+    print('top imports by accesses lost: ' + ' '.join('%s=%d' % kv for kv in sorted(lost.items(), key=lambda kv: (-kv[1], kv[0]))[:20]))
+    print('HYPOTHETICAL what-if (not measured with a table): accesses recovered if the pointer parameters of this import alone were n: ' + ' '.join('%s=%d' % kv for kv in sorted(whatif.items(), key=lambda kv: (-kv[1], kv[0]))[:20]))
     print('atomics: lock %d xchg-mem %d cmpxchg %d xadd %d; tls displacements: %s' % (fl['lock'], fl['xchg'], fl['cmpxchg'], fl['xadd'], ' '.join('%s=%d' % kv for kv in sorted(fl.items()) if kv[0].startswith('tls:'))[:150]))
     ck = lambda n: n.startswith('Interlocked') or n.endswith('CriticalSection') or n in ('TlsGetValue', 'TlsSetValue', 'TlsAlloc', 'CreateThread')
     print('import call sites: ' + ' '.join('%s=%d' % (k[4:], v) for k, v in sorted(fl.items()) if k.startswith('imp:') and ck(k[4:])))
