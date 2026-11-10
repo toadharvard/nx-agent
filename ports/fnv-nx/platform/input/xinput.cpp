@@ -148,6 +148,8 @@ static kev g_q[128];
 static unsigned g_qhead, g_qcount;
 static uint32_t g_active;
 static uint64_t g_next_repeat[32];
+/* ENVIRONMENT CHOICE, not a documented value: XInputGetKeystroke's documentation states no repeat timing. 400 ms
+ * before the first repeat and 100 ms between repeats are this layer's own choice (needs an owner decision). */
 #define XK_REPEAT_DELAY_NS 400000000ull
 #define XK_REPEAT_RATE_NS 100000000ull
 

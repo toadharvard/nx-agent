@@ -15,6 +15,7 @@
 #include <vector>
 
 extern "C" {
+DWORD GetCurrentThreadId(void);
 void fnvnx_waveout_service(void);
 UINT waveOutGetNumDevs(void);
 UINT waveOutGetDevCapsA(uintptr_t, void *, UINT);
@@ -185,7 +186,7 @@ TEST(waveout_open_close_callbacks)
 
     MSG m; memset(&m, 0, sizeof m);
     void *h3 = nullptr;
-    CHECK_EQ(waveOutOpen(&h3, 0, &f, 1, 0, CB_THREAD), OK);
+    CHECK_EQ(waveOutOpen(&h3, 0, &f, GetCurrentThreadId(), 0, CB_THREAD), OK);
     settle();
     CHECK(PeekMessageA(&m, nullptr, 0, 0, 1));
     CHECK_EQ(m.message, 0x3BBu);

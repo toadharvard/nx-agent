@@ -239,6 +239,8 @@ extern "C" BOOL PostMessageA(HWND h, UINT m, WPARAM w, LPARAM l)
     if (err) SetLastError(err);
     return !err;
 }
+/* PostThreadMessage: a thread message (hwnd NULL) to the thread with id tid; 0 ok, else the error (waveOut CALLBACK_THREAD) */
+extern "C" int fnvnx_post_thread_message(DWORD tid, UINT m, WPARAM w, LPARAM l) { return post_to(tid, NULL, m, w, l); }
 extern "C" void fnvnx_post_message(HWND h, UINT m, WPARAM w, LPARAM l) { PostMessageA(h ? h : fnvnx_main_window(), m, w, l); }
 extern "C" void PostQuitMessage(int code)
 {

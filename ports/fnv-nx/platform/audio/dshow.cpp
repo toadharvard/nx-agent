@@ -11,7 +11,11 @@
  * signalled while events wait. Other formats than MP3 fail Render with VFW_E_CANNOT_RENDER.
  *
  * The interfaces are declared here with DirectShow's vtable order (strmif.h / control.h); only what the game calls
- * does more than return E_NOTIMPL. */
+ * does more than return E_NOTIMPL.
+ *
+ * Lock order (outer to inner): Graph::lock > mixer lock (g_lock in mixer.cpp). The graph lock guards the track,
+ * ring and state; every mixer_* call made under it takes the mixer lock inside, and the mixer never calls back
+ * into the graph (the pump reads the voice through mixer_voice_* only), so the order has no cycle. */
 #include "mixer.h"
 #include "../os/os.h"
 #include "fnvnx_win32_ext.h"
@@ -208,7 +212,7 @@ struct Graph final : IGraphBuilder_ {
     Position position;
     Audio audio;
     Unk *filters[8] = {};
-    os_lock_t lock;
+    os_lock_t lock = {0};   /* a free lock is the word 0: Graph() is user-provided, so a plain member holds heap garbage */
     /* the track */
     uint8_t *file = nullptr;
     size_t file_size = 0;

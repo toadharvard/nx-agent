@@ -11,11 +11,12 @@
  * Locks: g_lock guards the handle list; each handle's wlock guards its queue/position and is taken by pull()
  * inside the mixer's render lock, so a holder of wlock never calls the mixer or takes g_lock (order: g_lock >
  * mixer lock > wlock > g_qlock). A block's length must be whole frames (else MMSYSERR_INVALPARAM). CALLBACK_THREAD
- * posts to the layer's one message queue (no PostThreadMessageA exists, the thread id is not used). */
+ * posts a thread message to the thread whose id the caller gave (dwCallback), as the documented contract. */
 #include "../win32/w32.h"
 #include <dsound.h>
 #include "backend.h"
 #include "mixer.h"
+extern "C" int fnvnx_post_thread_message(DWORD tid, UINT m, WPARAM w, LPARAM l);
 
 #include <stdlib.h>
 #include <string.h>
@@ -78,7 +79,7 @@ void deliver(const msg *q)
         break;
     case CB_EVENT: SetEvent((HANDLE)q->cb.target); break;
     case CB_WINDOW: PostMessageA((HWND)q->cb.target, q->m, (WPARAM)q->hwo, (LPARAM)q->p1); break;
-    case CB_THREAD: PostMessageA(NULL, q->m, (WPARAM)q->hwo, (LPARAM)q->p1); break;
+    case CB_THREAD: fnvnx_post_thread_message((DWORD)q->cb.target, q->m, (WPARAM)q->hwo, (LPARAM)q->p1); break;
     }
 }
 
