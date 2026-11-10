@@ -156,10 +156,10 @@ def t_cold():
     run("run", st, g)
     p, r = run("run", st, g, "--cold")
     case("--cold on a deterministic graph exits 0", p.returncode == 0, p.stderr[-300:])
-    g2 = graph({}, [stage("t", "$B date +%s%N > /out/v")])
+    g2 = graph({}, [stage("t", "$B sleep 1; $B date +%s > /out/v")])
     run("run", st, g2)
     p, r = run("run", st, g2, "--cold")
-    case("--cold on date +%s%N exits 3 and lists the stage", p.returncode == 3 and "NOT A FUNCTION" in p.stderr + p.stdout, p.stderr[-300:])
+    case("--cold on a wall-clock stage exits 3 and lists the stage", p.returncode == 3 and "NOT A FUNCTION" in p.stderr + p.stdout, p.stderr[-300:])
 
 def t_keys_why():
     st, sa, sc = tmp("store"), src("1\n"), src("2\n")
