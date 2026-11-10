@@ -42,7 +42,7 @@ iswspace	platform/crt/msvcrt_exports.cpp	TOTAL
 tolower	platform/crt/msvcrt_exports.cpp	TOTAL
 toupper	platform/crt/msvcrt_exports.cpp	TOTAL
 setlocale	platform/crt/msvcrt_exports.cpp	TOTAL
-sprintf	platform/crt/msvcrt_exports.cpp (engine fnvnx_msvc_format)	TOTAL except: %f/%e/%g digits are the exact correctly rounded value, not MSVCRT.DLL 17-digit-then-round-half-up; %a %F %z %j %t print the letter
+sprintf	platform/crt/msvcrt_exports.cpp (engine fnvnx_msvc_format)	TOTAL except %a %F %z %j %t (print the letter); float digits: exact expansion, half up, as the reference msvcrt
 _snprintf	platform/crt/string.c (engine in platform/crt/msvcrt_exports.cpp)	TOTAL except: float digits as for sprintf
 _vsnprintf	platform/crt/string.c (engine in platform/crt/msvcrt_exports.cpp)	TOTAL except: float digits as for sprintf
 sscanf	platform/crt/msvcrt_exports.cpp	TOTAL

@@ -261,6 +261,24 @@ TEST(msvcrt_printf)
     CHECK_EQ(strlen(big), 500);
 }
 
+/* float rounding of MSVCRT.DLL as the reference implements it: the exact decimal expansion, ties away from zero */
+TEST(msvcrt_printf_rounding)
+{
+    char b[160];
+    SP(b, "%.0f|%.0f|%.0f|%.0f|%.2f|%.1f", 0.5, 1.5, 2.5, -2.5, 0.125, 0.25);
+    CHECK_STR(b, "1|2|3|-3|0.13|0.3");
+    SP(b, "%.3f|%.0f|%.1f|%f", 2.0005, 0.49999999999999994, 0.05, 1e22);
+    CHECK_STR(b, "2.001|0|0.1|10000000000000000000000.000000");
+    SP(b, "%.0e|%.1e|%.0e|%e", 2.5, 0.25, 9.5, 0.0);
+    CHECK_STR(b, "3e+000|2.5e-001|1e+001|0.000000e+000");
+    SP(b, "%g|%g|%g|%g|%g|%.3g|%.2g|%#g", 100000.0, 1e6, 0.0001, 0.00001, 0.0, 2.5, 0.125, 1.0);
+    CHECK_STR(b, "100000|1e+006|0.0001|1e-005|0|2.5|0.13|1.00000");
+    SP(b, "%.0f|%.1f|%.3e|%g", 999.5, 9.95, 9.9995, 999999.5);
+    CHECK_STR(b, "1000|9.9|9.999e+000|1e+006");
+    SP(b, "%.20f|%.0f", 0.1, 5e-324);
+    CHECK_STR(b, "0.10000000000000000555|0");
+}
+
 TEST(msvcrt_sscanf)
 {
     auto ss = fn<sscanf_t>("sscanf");

@@ -302,22 +302,71 @@ void put_float(Out &o, double v, char conv, bool plus, bool space, bool alt, int
         }
         zero = false;
     } else {
-        char spec[16], *s = spec;
-        *s++ = '%';
-        if (alt)
-            *s++ = '#';
-        if (prec >= 0)
-            *s++ = '.', *s++ = '*';
-        *s++ = conv;
-        *s = 0;
-        int need = prec >= 0 ? snprintf(NULL, 0, spec, prec, v) : snprintf(NULL, 0, spec, v);
-        if ((size_t)need + 8 > sizeof tmp)
-            buf = heap = (char *)malloc((size_t)need + 8);
+        /* MSVCRT.DLL rounds the exact decimal expansion half UP (away from zero) at the requested digit; the
+         * reference implementation compares twice the dropped part with the unit (>=). The exact expansion comes
+         * from the C library's %.800e (a double has at most 767 significant decimal digits; glibc and gdtoa print
+         * them exactly), the rounding and the layout are done here. */
+        char ex[832];
+        snprintf(ex, sizeof ex, "%.800e", std::fabs(v));
+        char dg[804];                       /* dg[0..800]: significant digits, value = 0.d0d1... * 10^(x10+1) */
+        dg[0] = ex[0];
+        memcpy(dg + 1, ex + 2, 800);
+        int x10 = atoi(strchr(ex, 'e') + 1);
+        bool is0 = v == 0;
+        auto round_at = [&](char *d, int n, int &x) { /* keep n digits (n >= 0) of d, half up; may carry into x */
+            if (n > 800) n = 800;
+            bool up = n < 801 && d[n < 0 ? 0 : n] >= '5' && n >= 0;
+            if (n < 0) up = false;
+            for (int i = (n < 0 ? 0 : n); i < 801; i++) d[i] = '0';
+            for (int i = n - 1; up && i >= 0; i--) {
+                if (d[i] == '9') d[i] = '0';
+                else { d[i]++; up = false; }
+            }
+            if (up) { memmove(d + 1, d, 800); d[0] = '1'; x++; }
+        };
+        int P = prec < 0 ? 6 : prec;
+        char c = conv;
+        bool strip = false;
+        if (conv == 'g' || conv == 'G') {
+            if (P == 0) P = 1;
+            char t[804];
+            memcpy(t, dg, 801);
+            int x = x10;
+            round_at(t, P, x);
+            if (is0) x = 0;
+            strip = !alt;
+            if (x < -4 || x >= P) { c = conv == 'g' ? 'e' : 'E'; P = P - 1; }
+            else { c = 'f'; P = P - 1 - x; }
+        }
+        size_t cap = (size_t)P + (x10 > 0 ? (size_t)x10 : 0) + 32;
+        if (cap > sizeof tmp)
+            buf = heap = (char *)malloc(cap);
         if (!buf) {
             o.len = (size_t)-1;
             return;
         }
-        bl = (size_t)(prec >= 0 ? snprintf(buf, (size_t)need + 1, spec, prec, v) : snprintf(buf, (size_t)need + 1, spec, v));
+        bl = 0;
+        if (c == 'f') {
+            int x = x10, keep = x10 + 1 + P;          /* digits kept: integer part plus P fraction digits */
+            if (keep < 0) { for (int i = 0; i < 801; i++) dg[i] = '0'; x = -P - 1; keep = 0; }
+            else round_at(dg, keep, x);
+            if (x < 0) buf[bl++] = '0';
+            for (int i = 0; i <= x; i++) buf[bl++] = i < 801 ? dg[i] : '0';
+            if (P > 0 || alt) buf[bl++] = '.';
+            for (int i = 1; i <= P; i++) { int k = x + i; buf[bl++] = k < 0 || k > 800 ? '0' : dg[k]; }
+        } else {
+            int x = x10;
+            round_at(dg, P + 1, x);
+            if (is0) x = 0;
+            buf[bl++] = dg[0];
+            if (P > 0 || alt) buf[bl++] = '.';
+            for (int i = 1; i <= P; i++) buf[bl++] = i < 801 ? dg[i] : '0';
+            if (strip) { while (bl && buf[bl - 1] == '0') bl--; if (bl && buf[bl - 1] == '.') bl--; }
+            bl += (size_t)snprintf(buf + bl, 12, "%c%c%02d", c, x < 0 ? '-' : '+', x < 0 ? -x : x);
+            strip = false;
+        }
+        if (strip && memchr(buf, '.', bl)) { while (bl && buf[bl - 1] == '0') bl--; if (bl && buf[bl - 1] == '.') bl--; }
+        buf[bl] = 0;
         if (buf[0] == '-') /* the sign is a field prefix, written ahead of the zero padding */
             memmove(buf, buf + 1, bl--);
         if (conv != 'f') { /* MSVCRT prints at least three exponent digits */
