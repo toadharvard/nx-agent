@@ -46,6 +46,58 @@ def apply(root, text='// @fnv 0x00401000\nvoid f() {}\n'):
     return out, st
 
 
+def patch_cert(root):
+    """PATCH-CERT: a site patch applies as a whole, and only with a certificate for this rule set"""
+    sys.path.insert(0, os.path.join(TOOLS, 'rules'))
+    pm = load('s1b_patches_t', os.path.join(TOOLS, 'rules', 's1b_patches.py'))
+    pdir = os.path.join(root, 'patches'); os.makedirs(pdir)
+    open(os.path.join(pdir, 't.s1b'), 'w').write(
+        '@@ XINC1 src/h.cpp file\n# evidence\n<<<\nint a;\n===\nint a1;\n>>>\n<<<\nint b;\n===\nint b1;\n>>>\n'
+        '@@ XINC1 src/h.cpp file\n# evidence\n<<<\nint c;\n===\nint c1;\n>>>\n')
+    pm.SITES = pm.load_sites(pdir); pm.BY_FILE = {}
+    for s in pm.SITES: pm.BY_FILE.setdefault(s.path, []).append(s)
+    certs = os.path.join(pdir, 'certs.json')
+    def run(text):
+        pm._CERT.pop(certs, None)
+        st = Counter(); out = pm.apply_sites('/x/src/h.cpp', text, st, 'XINC1', [], certs)
+        return out, st
+    os.environ.pop('FNVNX_PATCH_CERTIFY', None)
+    out, st = run('int a;\nint b;\nint c;\n')
+    check('no certificate: no site applied', out == 'int a;\nint b;\nint c;\n' and st['XINC1-NOCERT'] == 2, (out, dict(st)))
+    os.environ['FNVNX_PATCH_CERTIFY'] = '1'
+    out, st = run('int a;\nint b;\nint c;\n')
+    check('the certifying run applies every site and counts each outcome',
+          out == 'int a1;\nint b1;\nint c1;\n' and st['S1B-SITE/t.s1b:1/applied'] == 1 and st['S1B-SITE/t.s1b:13/applied'] == 1, (out, dict(st)))
+    out, st = run('int a;\nint c;\n')
+    check('a site applies as a whole or not at all (its second hunk has no match: the first is not applied either)',
+          out == 'int a;\nint c1;\n' and st['XINC1-MISS'] == 1 and st['S1B-SITE/t.s1b:1/miss'] == 1 and st['XINC1'] == 1, (out, dict(st)))
+    del os.environ['FNVNX_PATCH_CERTIFY']
+    # stamp: applied + GCC unit ok + MSVC identical
+    stats = os.path.join(root, 'ps.tsv'); objs = os.path.join(root, 'po.tsv'); rep = os.path.join(root, 'pm.jsonl')
+    open(stats, 'w').write('S1B-SITE/t.s1b:1/applied\t1 files\t1 edits\nS1B-SITE/t.s1b:13/miss\t1 files\t1 edits\n')
+    open(objs, 'w').write('src/h.cpp\t/x/h.o\tok\n')
+    open(rep, 'w').write(json.dumps({'unit': 0, 'source': 'src/h.cpp', 'addr': '0x00401000', 'status': 'identical'}) + '\n')
+    real = rc.TOOLS
+    import shutil
+    fake = os.path.join(root, 'tools'); shutil.copytree(real, fake, ignore=shutil.ignore_patterns('__pycache__', 'equiv', 'link', 'farm', 'difffuzz'))
+    rcf = load('reccert_f', os.path.join(fake, 'rules', 'reccert.py'))
+    # the stamping module reads the patches next to its own tools/: give it this test's
+    os.makedirs(os.path.join(root, 'patches'), exist_ok=True)
+    cur, n, rows = rcf.stamp_patches(stats, objs, rep, out=certs)
+    c = json.load(open(certs))
+    check('stamp-patches writes the rule set and one entry per certified site',
+          c['format'] == 'fnvnx-patchcert/1' and c['rules'] == rcf.rules_hash() and set(c['sites']) == {'t.s1b:1'}, c)
+    out, st = run('int a;\nint b;\nint c;\n')
+    check('the certified site applies, the other does not', out == 'int a1;\nint b1;\nint c;\n' and st['XINC1-NOCERT'] == 1, (out, dict(st)))
+    open(os.path.join(pdir, 't.s1b'), 'a').write('')
+    c['sites']['t.s1b:1']['site'] = 'other text'; json.dump(c, open(certs, 'w'))
+    out, st = run('int a;\nint b;\nint c;\n')
+    check('a certificate of other site text does not apply', out == 'int a;\nint b;\nint c;\n', out)
+    open(rep, 'w').write(json.dumps({'unit': 0, 'source': 'src/h.cpp', 'addr': '0x00401000', 'status': 'differs'}) + '\n')
+    cur, n, rows = rcf.stamp_patches(stats, objs, rep, out=certs)
+    check('stamp-patches: MSVC differs -> not certified', n == 0 and any('MSVC: differs' in r[4] for r in rows), rows)
+
+
 def main():
     for k in ('FNVNX_RECON_CERTIFY', 'FNVNX_PREPARE_SKIP'): os.environ.pop(k, None)
     root = tempfile.mkdtemp()
@@ -104,6 +156,7 @@ def main():
     write(dict(recon, functions=[]))
     rc.stamp(os.path.join(root, 'recon'), objs, mdir)
     check('stamp: a recon that places no function is certified by the compile', cert() and cert()['match'] == 'no placed function', cert())
+    patch_cert(root)
     print('test_reccert: %s' % ('FAILED %d' % len(FAILS) if FAILS else 'ok'))
     return 1 if FAILS else 0
 

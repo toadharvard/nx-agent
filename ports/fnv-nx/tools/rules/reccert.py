@@ -3,6 +3,8 @@
 
     python3 tools/rules/reccert.py hash
     python3 tools/rules/reccert.py stamp <recon dir> --objects <objects.tsv> --match <dir> [--report out.tsv]
+    python3 tools/rules/reccert.py stamp-patches --stats <tree>/prepare_stats.tsv --objects <objects.tsv>
+                                                 --msvc <msvc_check report.jsonl> [--out patches/certs.json]
 
 A reconstruction (fnv-nx-build recon/*, rule REC1) is text written against the text prepare produced when it was
 accepted. When a rule changes, that text may change under it: a body that defined what a dropped rule had declared
@@ -25,6 +27,9 @@ Certifying (a farm job, whenever the rule set changes):
      by the compile). Any other recon loses its certificate. All recons of a unit stand or fall with the unit's
      compile: which of them broke it is not decided here.
 The stamped recon.json files go back to their recon/* branches.
+
+PATCH-CERT is the same rule for the site patches (patches/*.s1b, tools/rules/s1b_patches.py): `stamp-patches` writes
+patches/certs.json from the same certifying run (FNVNX_PATCH_CERTIFY=1) and tests/s1b/msvc_check.py's report.
 """
 import argparse
 import datetime
@@ -113,15 +118,84 @@ def stamp(recon_dir, objects, match_dir, now=None, report=None):
     return cur, n, rows
 
 
+def stamp_patches(stats_tsv, objects, msvc_report, out=None, now=None, report=None):
+    """PATCH-CERT: patches/certs.json for the rule set of this checkout, from a certifying run.
+    A site (tools/rules/s1b_patches.py) is certified when
+      - it applied as a whole in the certifying prepare (FNVNX_PATCH_CERTIFY=1: `S1B-SITE/<origin>/applied` in the
+        tree's prepare_stats.tsv),
+      - GCC built its unit in that tree (objects.tsv `ok`), and
+      - MSVC compiles the patched function to the bytes of the pristine one (tests/s1b/msvc_check.py --report: the
+        row of the site's address, or every row of the unit for a `file` site, is `identical`); the gated classes
+        are exempt from the byte check by their definition.
+    A site in a file that is not a unit (a header) has no unit of its own in either report, so nothing certifies
+    it here. Everything not certified is listed with the reason."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('fnvnx_s1b_patches', os.path.join(TOOLS, 'rules', 's1b_patches.py'))
+    sys.path.insert(0, TOOLS)
+    pm = importlib.util.module_from_spec(spec); spec.loader.exec_module(pm)
+    cur = rules_hash()
+    now = now or datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    applied, missed = set(), set()
+    for l in open(stats_tsv):
+        k = l.split('\t')[0]
+        if k.startswith('S1B-SITE/'):
+            _, origin, res = k.split('/', 2)
+            (applied if res == 'applied' else missed).add(origin)
+    built = {}
+    for l in open(objects):
+        p = l.rstrip('\n').split('\t')
+        if len(p) >= 3: built[p[0]] = p[2]
+    msvc = {}
+    for l in open(msvc_report):
+        l = l.strip()
+        if l:
+            r = json.loads(l)
+            msvc.setdefault(r.get('source'), []).append((str(r.get('addr', '')).lower(), r.get('status')))
+    sites, rows = {}, []
+    for st in pm.SITES:
+        why, m = '', None
+        if st.origin in missed or st.origin not in applied: why = 'did not apply as a whole in the certifying prepare'
+        elif st.path not in built: why = 'its file is not a unit that was compiled (a header, or outside the run)'
+        elif built[st.path] != 'ok': why = 'GCC does not build its unit'
+        elif st.rule in pm.GATED: m = 'exempt (gated class)'
+        else:
+            got = msvc.get(st.path, [])
+            want = [x for x in got if st.addr is None or x[0] == '0x%08x' % st.addr]
+            if not want: why = 'no MSVC row for the site'
+            elif any(x[1] != 'identical' for x in want): why = 'MSVC: ' + ','.join(sorted({str(x[1]) for x in want if x[1] != 'identical'}))
+            else: m = 'identical'
+        if not why: sites[st.origin] = {'site': pm.site_hash(st), 'gcc': 'ok', 'msvc': m}
+        rows.append((st.origin, st.rule, st.path, 'certified' if not why else 'not certified', why or m))
+    out = out or pm.CERTS
+    with open(out, 'w') as o:
+        json.dump({'format': 'fnvnx-patchcert/1', 'rules': cur, 'certified': now, 'sites': dict(sorted(sites.items()))}, o, indent=1)
+        o.write('\n')
+    if report:
+        with open(report, 'w') as o:
+            o.write('#site\trule\tfile\tresult\twhy\n')
+            for row in rows: o.write('\t'.join(row) + '\n')
+    return cur, len(sites), rows
+
+
 def main(argv):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('hash')
     p = sub.add_parser('stamp'); p.add_argument('recon'); p.add_argument('--objects', required=True)
     p.add_argument('--match', required=True); p.add_argument('--report'); p.add_argument('--now')
+    p = sub.add_parser('stamp-patches'); p.add_argument('--stats', required=True); p.add_argument('--objects', required=True)
+    p.add_argument('--msvc', required=True); p.add_argument('--out'); p.add_argument('--report'); p.add_argument('--now')
     a = ap.parse_args(argv)
     if a.cmd == 'hash':
         print(rules_hash()); return 0
+    if a.cmd == 'stamp-patches':
+        cur, n, rows = stamp_patches(a.stats, a.objects, a.msvc, a.out, a.now, a.report)
+        print('reccert: rule set %s: %d of %d patch sites certified' % (cur, n, len(rows)))
+        by = {}
+        for r in rows:
+            if r[3] != 'certified': by[r[4].split(':')[0]] = by.get(r[4].split(':')[0], 0) + 1
+        for why, k in sorted(by.items(), key=lambda kv: -kv[1]): print('%6d  %s' % (k, why))
+        return 0
     cur, n, rows = stamp(a.recon, a.objects, a.match, a.now, a.report)
     print('reccert: rule set %s: %d certified, %d not certified' % (cur, n['certified'], n['not certified']))
     by = {}

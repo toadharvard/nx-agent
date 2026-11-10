@@ -19,7 +19,8 @@ Patch file format (UTF-8 text):
 The old text of a hunk must occur exactly once in the window of its site: from the `// @fnv` tag before the one of
 the site (or the start of the file) to the tag after it (or the end of the file); `file` sites search the whole
 file. Matching is exact first, then whitespace-insensitive (other rules may have re-spaced the text). A hunk that does
-not apply is counted as `<RULE>-MISS` and reported on stderr; the file is left as it was for that hunk.
+not apply is counted as `<RULE>-MISS` and reported on stderr; the file is left as it was for that whole site
+(PATCH-CERT: a site applies as a whole, and only with a certificate for the current rule set, see certified_sites).
 
 Definitions whose signature a patch changes get another MSVC decoration: `patches/units_renames.tsv` lists them (and
 the new decorated reference names) as measured from MSVC objects of the patched units; `fix_units_json()` applies it
@@ -176,31 +177,88 @@ def find_once(text, old, lo, hi):
     return None, 'not found' if not ms else 'ambiguous (%d matches)' % len(ms)
 
 
-def apply_sites(path, text, stats, rule, report=None):
+CERTS = os.path.join(PATCH_DIR, 'certs.json')
+_CERT = {}
+
+
+def site_hash(s):
+    """what a certificate names: the site's own text (rule, file, address, hunks)"""
+    import hashlib
+    h = hashlib.sha256(('%s\0%s\0%s\0' % (s.rule, s.path, s.addr)).encode())
+    for (old, new), mode in zip(s.hunks, s.modes + [''] * len(s.hunks)):
+        h.update(old.encode('utf-8', 'surrogateescape') + b'\0' + new.encode('utf-8', 'surrogateescape') + b'\0' + mode.encode() + b'\0')
+    return h.hexdigest()[:24]
+
+
+def _reccert():
+    import importlib.util
+    if 'm' not in _CERT:
+        spec = importlib.util.spec_from_file_location('fnvnx_reccert', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reccert.py'))
+        _CERT['m'] = importlib.util.module_from_spec(spec); spec.loader.exec_module(_CERT['m'])
+    return _CERT['m']
+
+
+def certified_sites(certs=None):
+    """PATCH-CERT: {origin: site hash} of the sites certified for the rule set of this prepare; None in the certifying
+    run (FNVNX_PATCH_CERTIFY=1), where every site is tried. A site patch is data with a certificate, like a recon
+    (tools/rules/reccert.py): text written against the text the rules produce. It is applied only when
+    patches/certs.json was stamped for exactly this rule set and names the site with its present text; any other
+    site is skipped (<RULE>-NOCERT) and the function goes the general way (native if it passes N1-N4, else lifted)."""
+    if os.environ.get('FNVNX_PATCH_CERTIFY') == '1':
+        return None
+    key = certs or CERTS
+    if key not in _CERT:
+        import json
+        got = {}
+        try:
+            c = json.load(open(key))
+            if c.get('format') == 'fnvnx-patchcert/1' and c.get('rules') == _reccert().rules_hash():
+                got = {o: v.get('site') for o, v in c.get('sites', {}).items() if isinstance(v, dict)}
+        except (OSError, ValueError):
+            got = {}
+        _CERT[key] = got
+    return _CERT[key]
+
+
+def apply_sites(path, text, stats, rule, report=None, certs=None):
+    """Every site of `rule` for this file, each as a whole: all its hunks apply (each exactly once in its window, in
+    order), or the text is left as it was for that site (<RULE>-MISS, one per site). In the certifying run the
+    outcome of every site is also counted under `S1B-SITE/<origin>/applied|miss` (prepare_stats.tsv), which is what
+    reccert.py stamps from."""
     p = path.replace(os.sep, '/')
+    cert = certified_sites(certs)
     for key, sites in BY_FILE.items():
         if not p.endswith('/' + key) and p != key:
             continue
         for s in sites:
             if s.rule != rule:
                 continue
+            if cert is not None and cert.get(s.origin) != site_hash(s):
+                stats[rule + '-NOCERT'] += 1
+                continue
+            work, bad = text, None
             for k, (old, new) in enumerate(s.hunks):
                 hmode = s.modes[k] if k < len(s.modes) else ''
-                w = window(text, s.addr)
-                res = (None, 'tag 0x%08x not in the file' % s.addr) if w is None else find_once(text, old, *w)
+                w = window(work, s.addr)
+                res = (None, 'tag 0x%08x not in the file' % s.addr) if w is None else find_once(work, old, *w)
                 if res[0] is None:
-                    stats[rule + '-MISS'] += 1
-                    msg = 's1b_patches: %s hunk %d of %s (%s) does not apply: %s' % (rule, k + 1, s.origin, key, res[1])
-                    if report is not None:
-                        report.append(msg)
-                    else:
-                        print(msg, file=sys.stderr)
-                    continue
+                    bad = (k, res[1]); break
                 a, b = res
                 if rule in GATED:
-                    new = mt1_emit(text[a:b], new, hmode)
-                text = text[:a] + new + text[b:]
-                stats[rule] += 1
+                    new = mt1_emit(work[a:b], new, hmode)
+                work = work[:a] + new + work[b:]
+            if bad is not None:
+                stats[rule + '-MISS'] += 1
+                msg = 's1b_patches: %s site %s (%s) is not applied: hunk %d %s' % (rule, s.origin, key, bad[0] + 1, bad[1])
+                if report is not None:
+                    report.append(msg)
+                else:
+                    print(msg, file=sys.stderr)
+            else:
+                text = work
+                stats[rule] += len(s.hunks)
+            if cert is None:
+                stats['S1B-SITE/%s/%s' % (s.origin, 'miss' if bad is not None else 'applied')] += 1
     return text
 
 
