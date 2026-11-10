@@ -295,3 +295,31 @@ u32 fnvl_x_xam(fnvl_f80 a, u32 empty)
 	if (e == 0) return r | (a.m ? 0x4400 : 0x4000);
 	return r | 0x400;
 }
+
+/* ---- packed BCD (fbld / fbstp): 18 digits, nibble i = digit 10^i, bit 79 = sign ---- */
+fnvl_f80 fnvl_x_from_bcd(const u8 *p)
+{
+	u64 v = 0, w = 1; int i;
+	for (i = 0; i < 9; i++, w *= 100) v += (u64)((p[i] & 15) + 10 * (p[i] >> 4)) * w;
+	return p[9] & 0x80 ? (v ? fnvl_x_from_i64(-(long long)v) : mk(1, 0, 0)) : fnvl_x_from_i64((long long)v);
+}
+
+void fnvl_x_to_bcd(fnvl_f80 a, u32 fcw, u8 *out, u32 *fsw)
+{
+	un_t x = unpack(a); u32 inex, inc; int E, i; u64 mag = 0;
+	*fsw &= ~C1;
+	for (i = 0; i < 10; i++) out[i] = 0;
+	if (x.k == K_ZERO) { out[9] = x.s << 7; return; }
+	E = x.e - BIAS;
+	if (x.k != K_NUM || E >= 64) goto bad;
+	mag = (u64)rnd((u128)x.m << 64, 64 + 63 - E, x.s, fcw >> 10 & 3, &inex, &inc);
+	if (mag >= 1000000000000000000ull) goto bad;
+	if (inex) *fsw |= PE;
+	if (inc) *fsw |= C1;
+	for (i = 0; i < 9; i++, mag /= 100) out[i] = (u8)((mag % 100 / 10) << 4 | mag % 10);
+	out[9] = x.s << 7;
+	return;
+bad:
+	*fsw |= IE;
+	out[7] = 0xC0; out[8] = out[9] = 0xFF;
+}

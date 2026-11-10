@@ -25,6 +25,8 @@ u64 fnvl_x_to_f64(fnvl_f80 a, u32 fcw, u32 *fsw);
 long long fnvl_x_to_i64(fnvl_f80 a, u32 rc, u32 bits, u32 *fsw);  /* bits = 16, 32, 64; fist/fistp/fisttp */
 u32 fnvl_x_cmp(fnvl_f80 a, fnvl_f80 b, u32 quiet, u32 *fsw);       /* C3<<14 | C2<<10 | C0<<8 */
 u32 fnvl_x_xam(fnvl_f80 a, u32 empty);                             /* C3,C2,C1,C0 in fsw positions */
+void fnvl_x_to_bcd(fnvl_f80 a, u32 fcw, u8 *out10, u32 *fsw);       /* fbstp: 18-digit packed BCD, indefinite on error */
+fnvl_f80 fnvl_x_from_bcd(const u8 *in10);                         /* fbld */
 #ifdef __cplusplus
 }
 #endif

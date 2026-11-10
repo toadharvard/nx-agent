@@ -222,7 +222,7 @@ def ptr_pass(data, final, eh):
         if data and r in eh.sites: settled.add(r); continue
         k, ins = skind.get(r) or site_kind(r)
         if k == 'slot' and not final: continue
-        if k == 'slot': dinfo['slot_unattached'] += 1
+        if k == 'slot': dinfo['slot_unattached'] += 1; tbl[r - T0:r - T0 + 4] = b'\1\1\1\1'
         if k in ('data', 'imm', 'slot'): new += ptr_target(v, r); settled.add(r)
         elif k == 'tbl': settled.add(r)
         elif k == 'disp': disp_ref(r, v, ins, final); settled.add(r); new += 1
@@ -315,7 +315,7 @@ for rnd in range(30):
     ch = ptr_pass(False, fin, eh); drain()
     OWN[:] = sorted(entries); ch += eh.scan(); drain()
     ch += ptr_pass(True, fin, eh); drain()
-    cls = classify(); n = orphan_pass(pad_split(cls)); drain()
+    cls = classify(); n = orphan_pass(pad_split(cls)) if fin else 0; drain()
     if (len(entries), len(insns), len(tslots), len(tstarts)) == n0 and not ch and not n:
         if fin: break
         fin = True

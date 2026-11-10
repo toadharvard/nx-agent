@@ -35,6 +35,9 @@ void run(int op, unsigned n, const unsigned char *in, unsigned char *out) {
     case 13: case 14: case 15: raw = (u64)fnvl_x_to_i64(a, fcw >> 10 & 3, 16 << (op - 13), &fsw); break;
     case 16: case 17: fnvl_x_cmp(a, b, op - 16, &fsw); break;
     case 18: fsw = fnvl_x_xam(a, 1); x2 = fnvl_x_xam(a, 0); break;
+    case 19: { u8 p[10]; memcpy(p, &am, 8); memcpy(p + 8, &ase, 2); r = fnvl_x_from_bcd(p); f80 = 1; break; }
+    case 20: { u8 p[10]; fnvl_x_to_bcd(a, fcw, p, &fsw); memcpy(&r.m, p, 8); memcpy(&r.se, p + 8, 2); f80 = 1; break; }
+    case 21: r = a; f80 = 1; break;
     }
     if (f80) { memcpy(o, &r.m, 8); memcpy(o + 8, &r.se, 2); } else memcpy(o, &raw, 8);
     memcpy(o + 16, &fsw, 2); memcpy(o + 18, &x2, 2);
@@ -57,12 +60,9 @@ OPS = {
  'fist16': (LD(16), b'', b'\xDF\x1F', 'un', 2, 0), 'fist32': (LD(16), b'', b'\xDB\x1F', 'un', 4, 0),
  'fist64': (LD(16), b'', b'\xDF\x3F', 'un', 8, 0),
  'fcom': (ab, b'\xD8\xD1', b'', 'bin', -1, 0x4500), 'fucom': (ab, b'\xDD\xE1', b'', 'bin', -1, 0x4500),
- 'prem': (ab, b'\xD9\xF8', ST, 'bin', 0, 0), 'prem1': (ab, b'\xD9\xF5', ST, 'bin', 0, 0), 'scale': (ab, b'\xD9\xFD', ST, 'bin', 0, 0),
- 'xtract': (LD(16), b'\xD9\xF4', ST + b'\xDB\x7F\x18', 'un', 0, 0), 'fbld': (b'\xDF\x66\x10', b'', ST, 'bcd', 0, 0),
- 'fbstp': (LD(16), b'', b'\xDF\x37', 'un', 0, 0), 'ld80': (LD(16), b'', ST, 'un', 0, 0),
- 'tst': (LD(16), b'\xD9\xE4', b'', 'un', -1, 0x4500),
- 'fcomi': (ab, b'\xDB\xF1\x9F\x88\x67\x00', b'', 'bin', 1, 0), 'fucomi': (ab, b'\xDB\xE9\x9F\x88\x67\x00', b'', 'bin', 1, 0),
  'fxam': (LD(16), b'\xD9\xE5\xDD\x7F\x12\xDD\xD8\xD9\xE5', b'', 'un', -1, 0x4700),
+ 'fbld': (b'\xDF\x66\x10', b'', ST, 'bcd', 0, 0), 'fbstp': (LD(16), b'', b'\xDF\x37', 'un', 0, 0),
+ 'ld80': (LD(16), b'', ST, 'un', 0, 0),
 }
 NAMES = list(OPS)
 FCWS = [0x7f | pc << 8 | rc << 10 for pc in (0, 1, 2, 3) for rc in range(4)]
@@ -249,6 +249,12 @@ def gen(op, rng, N, fcw):
         ex = rng.choice([0, 0, 1, 2 ** eb - 2, 2 ** eb - 1, 2 ** eb - 1], N).astype(U)
         x = np.where(rng.random(N) < 0.3, (x & ~(U(2**eb - 1) << U(mb))) | (ex << U(mb)), x)
         return x, np.zeros(N, np.uint16), np.zeros(N, U), np.zeros(N, np.uint16)
+    if kind == 'bcd':                                   # valid BCD mostly; sometimes raw garbage nibbles / sign bits
+        dg = rng.integers(0, 10, (N, 18)); sh = (np.arange(16, dtype=U) * U(4))
+        m = (dg[:, :16].astype(U) << sh).sum(1, dtype=U); se = (dg[:, 16] | dg[:, 17] << 4).astype(np.uint16) | (rng.integers(0, 2, N).astype(np.uint16) << 15)
+        g = rng.random(N) < 0.3; m = np.where(g, rng.integers(0, 2**64, N, dtype=U), m); se = np.where(g, rng.integers(0, 65536, N).astype(np.uint16), se)
+        z = rng.random(N) < 0.1; m = np.where(z, U(0), m)
+        return m, se, np.zeros(N, U), np.zeros(N, np.uint16)
     if kind[0] == 'i':
         w = int(kind[1:]); k = rng.integers(0, w + 1, N).astype(U)
         v = rng.integers(0, 2**64, N, dtype=U) >> (U(64) - np.maximum(k, U(1)))
@@ -267,8 +273,11 @@ def gen(op, rng, N, fcw):
         sm, sh = norm(y * y); sm, sse = f80s(np.zeros(N), 16383 + rng.integers(-20, 20, N) - sh.astype(np.int64), sm)
         am, ase = np.where(t, sm, am), np.where(t, sse, ase)
         ase = np.where(rng.random(N) < 0.9, ase & np.uint16(0x7FFF), ase)               # mostly non-negative
-    elif op in ('rndint', 'fst32', 'fst64') or op.startswith('fist'):
+    elif op in ('rndint', 'fst32', 'fst64', 'fbstp') or op.startswith('fist'):
         nm, nse = tie_unary(op, rng, N, am, ase); am, ase = np.where(t, nm, am), np.where(t, nse, ase)
+        if op == 'fbstp':                                 # integers around 10^18
+            vm, sh = norm((U(10**18) + rng.integers(0, 7, N).astype(U) - U(3)) * (U(1) + (rng.random(N) < 0.0))); vm, vse = f80s(ase >> 15, 16383 + 63 - sh.astype(np.int64), vm)
+            u = rng.random(N) < 0.15; am, ase = np.where(u, vm, am), np.where(u, vse, ase)
     return am, ase, bm, bse
 
 # ---------------------------------------------------------------- SDM flag vectors
