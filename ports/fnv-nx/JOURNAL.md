@@ -3767,3 +3767,34 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - The clean branch is created after P0.
   - At most 12 farms.
 * **next** - L5 PLATFORM and L6 RENDER start at the P0 gate. L7 PERF starts after the first measured frame.
+
+### J-0168 | 2026-11-10 | stream: orchestration | status: active | parent: J-0167
+
+* **decided (owner)**
+  - Class-closing rules only (CLAUDE.md order).
+  - MASTER_PLAN4 is the plan of record.
+  - Real multicore parallelism with the TSO-MAP rule.
+  - N1-N4 without SMT for native bodies; SMT against Sail x86 for lifter forms.
+  - Plain IEEE float, with exact classes for ftoi, NaN compares and bit patterns.
+  - One reference CPU model.
+  - Perf counted in executed instructions.
+  - Downloads authorized.
+  - Merges into the clean branch only on a green L1 verdict.
+  - Switch product decisions recorded in CLAUDE.md.
+* **did** - Started L5 PLATFORM (`claude/fnv-l5-platform`) and L6 RENDER (`claude/fnv-l6-render`).
+  - New areas:
+    - L4: NRO packaging plus console smoke package, and the scenario bench.
+    - L1: loader and start.
+    - L5: the Switch app lifecycle, and memory including code size.
+  - ARCHITECTURE.md and RENDER_NATIVE.md marked as superseded in part.
+* **found** (lead notes)
+  - L1: N1 holds for 68,354 / 68,657 functions; the exefacts base takes 33 s; the gates take 2.4 s.
+  - L4: instruction counter delivered; 357 M instructions before WinMain; link breakdown 835 s (exe RTTI 38 %).
+  - L3: the m80 core equals the host on 70.4 M cases; 482 instruction forms, 407 equal.
+* **P0 exit**
+  - L1 ≤5 min, measured twice.
+  - The sandbox plus the R12-T determinism rule.
+  - The instruction counter.
+  - Tables as data and static BODYSEL.
+  - The clean branch is created at P0 exit.
+* **next** - L7 PERF starts at the first measured frame.
