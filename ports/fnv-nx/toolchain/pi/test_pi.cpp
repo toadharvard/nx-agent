@@ -28,3 +28,10 @@ int o2() { return two(ga(), ga()); }              // the same function twice: no
 int o3(int i) { return two(i++, ga()); }          // an effect that is not a call
 int o4() { return two(ga(), 1); }                 // one argument with an effect: no question of order
 int o5(W& x) { return x.self().w(ga(), 2); }      // the object counts
+// FALL2: the end of a non-void function
+[[noreturn]] void die();
+int fo1(int x) { if (x) return 1; }                               // reaches the end
+int fo2(int x) { for (;;) { if (x) return 1; } }                  // every path returns: the end is not in the CFG
+int fo3(int x) { switch (x) { case 0: return 1; default: return 2; } }
+int fo4(int x) { if (x) return 1; die(); }                        // ends in a call that does not return
+int fo5(int x) { while (x) { if (x == 3) return 1; x--; } }       // the loop can end

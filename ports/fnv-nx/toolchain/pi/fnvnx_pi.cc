@@ -19,6 +19,8 @@
  *              asm       an asm statement
  *              setjmp    calls setjmp
  *              varargs   the definition takes variable arguments
+ *              falloff   control can reach the end of the function, which must return a value (FALL2: the front
+ *                        end's own mark, in a block the CFG reaches). The exe returns what eax holds there
  *              volatile  a volatile access
  *              fpfast    the unit is built with /fp:fast (a fact of the recipe, plugin argument `fpfast`) and
  *                        the body has a floating-point operand: the source does not fix what the exe computes
@@ -297,7 +299,7 @@ struct cfg_pass : gimple_opt_pass {
   cfg_pass(gcc::context *c) : gimple_opt_pass(cfg_data, c) {}
   unsigned int execute(function *fun) override
   {
-    bool r_asm = false, r_vol = false, r_div = false, r_shift = false, r_fp = false;
+    bool r_asm = false, r_vol = false, r_div = false, r_shift = false, r_fp = false, r_fall = false;
     facts f; f.emitted = false;
     basic_block bb;
     FOR_EACH_BB_FN(bb, fun)
@@ -305,6 +307,13 @@ struct cfg_pass : gimple_opt_pass {
         gimple *st = gsi_stmt(gsi);
         if (is_gimple_debug(st) || gimple_clobber_p(st)) continue;      /* an end-of-life mark is no access */
         if (gimple_code(st) == GIMPLE_ASM) r_asm = true;
+        /* FALL2: the front end's own mark of "control reaches the end of a non-void function" (it has no source
+           position), in a block the function's CFG reaches. The exe returns whatever eax holds there; C++ gives
+           no value and GCC lets the code run on, so the body is not portable. (Blocks no path reaches are already
+           gone from the CFG: a function whose every path returns has no mark left.) */
+        if ((gimple_call_builtin_p(st, BUILT_IN_UNREACHABLE) || gimple_call_builtin_p(st, BUILT_IN_UNREACHABLE_TRAP))
+            && LOCATION_LOCUS(gimple_location(st)) <= BUILTINS_LOCATION && !VOID_TYPE_P(TREE_TYPE(TREE_TYPE(fun->decl))))
+          r_fall = true;
         if (gimple_has_volatile_ops(st) || walk_gimple_op(st, walk_volatile, NULL)) r_vol = true;
         if (is_gimple_assign(st)) {
           tree_code c = gimple_assign_rhs_code(st);
@@ -326,7 +335,7 @@ struct cfg_pass : gimple_opt_pass {
     FOR_EACH_LOCAL_DECL(fun, ix, v) note_type(TREE_TYPE(v), f.types);
     /* `uninit` (a local in a register) is decided on SSA and comes before uninit-mem in the order of reasons */
     f.verdict = r_asm ? "asm" : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
-              : r_vol ? "volatile" : r_fp ? "fpfast" : arg_unreadable.count(source_name(fn)) ? "argorder"
+              : r_fall ? "falloff" : r_vol ? "volatile" : r_fp ? "fpfast" : arg_unreadable.count(source_name(fn)) ? "argorder"
               : r_div ? "div" : r_shift ? "shift" : "";
     f.mem = unproven_memory_read(fun);
     free_dominance_info(CDI_DOMINATORS);

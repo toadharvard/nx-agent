@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
-    cxx = shutil.which('aarch64-linux-gnu-g++')
+    cxx = shutil.which(os.environ.get('CXX') or 'aarch64-linux-gnu-g++')   # the compiler the plugins are built for
     if not cxx:
         print('skip: no aarch64-linux-gnu-g++'); return 0
     with tempfile.TemporaryDirectory() as td:
@@ -60,6 +60,11 @@ def main():
         ('_Z2o3i', ''): ['argorder', '', ''],
         ('_Z2o4v', ''): ['ok', '', ''],
         ('_Z2o5R1W', ''): ['ok', '', '1W'],
+        ('_Z3fo1i', ''): ['falloff', '', ''],                          # FALL2
+        ('_Z3fo2i', ''): ['ok', '', ''],
+        ('_Z3fo3i', ''): ['ok', '', ''],
+        ('_Z3fo4i', ''): ['ok', '', ''],
+        ('_Z3fo5i', ''): ['falloff', '', ''],
         ('_ZN1KC2Ev', ''): ['ok', '', '1K'],
         ('_ZN1KD2Ev', ''): ['ok', '', '1K'],
         ('_ZN1KC1Ev', 'alias'): ['ok', '', '1K'],                      # the same body under its other symbol
