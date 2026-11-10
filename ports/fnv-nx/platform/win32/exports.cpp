@@ -74,9 +74,19 @@ int BinkSetSoundSystem(void *, unsigned long);
 int GetWindowTextA(HWND, LPSTR, int);
 int GetClassNameA(HWND, LPSTR, int);
 BOOL EnumDisplayDevicesA(LPCSTR, DWORD, void *, DWORD);
+/* resource.cpp */
 BOOL InitCommonControlsEx(const void *);
 void *ImageList_LoadImageA(HINSTANCE, LPCSTR, int, int, DWORD, UINT, UINT);
 BOOL ImageList_Destroy(void *);
+int ImageList_GetImageCount(void *);
+BOOL ImageList_GetIconSize(void *, int *, int *);
+void *FindResourceA(HMODULE, LPCSTR, LPCSTR);
+void *FindResourceExA(HMODULE, LPCSTR, LPCSTR, WORD);
+void *LoadResource(HMODULE, void *);
+void *LockResource(void *);
+DWORD SizeofResource(HMODULE, void *);
+BOOL FreeResource(void *);
+BOOL EnumResourceNamesA(HMODULE, LPCSTR, BOOL (*)(HMODULE, LPCSTR, LPSTR, LONG_PTR), LONG_PTR);
 /* winmm waveOut (platform/audio/waveout.cpp) */
 #define FNVNX_WAVEOUT_EXPORTS(X)                                                                            \
     X(waveOutOpen) X(waveOutClose) X(waveOutPrepareHeader) X(waveOutUnprepareHeader) X(waveOutWrite)         \
@@ -182,6 +192,9 @@ const exp g_exports[] = {
     U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA), U(GetClassLongA),
     U(SetCursor), U(SetDoubleClickTime),
     E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
+    E("comctl32", ImageList_GetImageCount), E("comctl32", ImageList_GetIconSize),
+    K(FindResourceA), K(FindResourceExA), K(LoadResource), K(LockResource), K(SizeofResource), K(FreeResource),
+    K(EnumResourceNamesA),
     E("gdi32", GetStockObject), E("gdi32", DeleteObject), E("gdi32", CreateCompatibleDC), E("gdi32", DeleteDC),
     E("gdi32", CreateCompatibleBitmap), E("gdi32", CreateDIBSection), E("gdi32", SelectObject), E("gdi32", GetDIBits),
     E("gdi32", GetPixel), E("gdi32", SetPixel), E("gdi32", StretchBlt), E("gdi32", SetStretchBltMode),

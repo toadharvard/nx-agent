@@ -561,24 +561,26 @@ extern "C" UINT SendInput(UINT n, void *in, int sz)
 }
 
 /* ---- cursor */
-static HCURSOR sys_handle(int *tab, int count, HINSTANCE i, LPCSTR n, const uint16_t *ids)
+extern "C" HANDLE fnvnx_load_icon_resource(HINSTANCE, LPCSTR, int is_cursor);   /* resource.cpp */
+static HCURSOR sys_handle(int *tab, int count, HINSTANCE i, LPCSTR n, const uint16_t *ids, int is_cursor)
 {
     uintptr_t id = (uintptr_t)n;
+    if (i) return (HCURSOR)fnvnx_load_icon_resource(i, n, is_cursor);   /* a module's resource: the PE resource directory */
     if (!i && id <= 0xFFFF)
         for (int k = 0; k < count; k++)
             if (ids[k] == id) return (HCURSOR)&tab[k];
-    SetLastError(i ? ERROR_RESOURCE_DATA_NOT_FOUND : 1814 /* ERROR_RESOURCE_NAME_NOT_FOUND */);   /* the layer has no resource loader */
+    SetLastError(1814 /* ERROR_RESOURCE_NAME_NOT_FOUND */);
     return NULL;
 }
 extern "C" HCURSOR LoadCursorA(HINSTANCE i, LPCSTR n)
 {
     static const uint16_t ids[17] = { 32512, 32513, 32514, 32515, 32516, 32640, 32641, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651, 32652 };
-    return sys_handle(g_cursors, 17, i, n, ids);
+    return sys_handle(g_cursors, 17, i, n, ids, 1);
 }
 extern "C" HICON LoadIconA(HINSTANCE i, LPCSTR n)
 {
     static const uint16_t ids[8] = { 32512, 32513, 32514, 32515, 32516, 32517, 32518, 32519 };
-    return (HICON)sys_handle(g_icons, 8, i, n, ids);
+    return (HICON)sys_handle(g_icons, 8, i, n, ids, 0);
 }
 extern "C" HCURSOR fnmq_arrow_cursor(void) { return (HCURSOR)&g_cursors[0]; }
 extern "C" HCURSOR fnmq_set_cursor(HCURSOR c)

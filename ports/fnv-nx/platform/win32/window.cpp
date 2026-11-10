@@ -1470,13 +1470,7 @@ extern "C" BOOL EnumDisplayDevicesA(LPCSTR dev, DWORD i, void *out, DWORD flags)
     d->flags = 0x1 /* ATTACHED_TO_DESKTOP */ | 0x4 /* PRIMARY_DEVICE */;
     return TRUE;
 }
-extern "C" BOOL InitCommonControlsEx(const void *icc) { return icc != NULL; }
-extern "C" void *ImageList_LoadImageA(HINSTANCE i, LPCSTR bmp, int cx, int grow, DWORD mask, UINT type, UINT f)
-{
-    W32_UNUSED(i); W32_UNUSED(bmp); W32_UNUSED(cx); W32_UNUSED(grow); W32_UNUSED(mask); W32_UNUSED(type); W32_UNUSED(f);
-    return NULL;   /* no resources: the caller's image list stays empty */
-}
-extern "C" BOOL ImageList_Destroy(void *l) { return l != NULL; }
+/* InitCommonControlsEx, ImageList_*: platform/win32/resource.cpp */
 
 /* ---- message boxes: logged; the answer is the default button */
 static fnvnx_msgbox_hook g_msgbox_hook;
