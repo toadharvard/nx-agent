@@ -406,6 +406,7 @@ HR BPin::Connect(IPin_ *r, const MT *want)
             r->AddRef();
             mt_free(&cur);
             mt_copy(&cur, &cand[i]);
+            if (owner->graph) owner->graph->bump_version();
         } else if (hr == VFW_E_ALREADY_CONNECTED_ || hr == VFW_E_NOT_STOPPED_ || hr == E_OUTOFMEMORY_ || hr == E_ABORT_ || explicit_type)
             last = hr;   /* a reason that no other type can cure (an explicit type reports its own failure) */
     }
@@ -427,6 +428,7 @@ HR BPin::ReceiveConnection(IPin_ *c, const MT *mt)
     c->AddRef();
     mt_free(&cur);
     mt_copy(&cur, mt);
+    if (owner->graph) owner->graph->bump_version();
     return S_OK_;
 }
 HR BPin::Disconnect()
@@ -437,6 +439,7 @@ HR BPin::Disconnect()
     peer = nullptr;
     mt_free(&cur);
     if (dir == PINDIR_INPUT) owner->input_disconnected(this);
+    if (owner->graph) owner->graph->bump_version();
     p->Release();   /* last: it may free the filter on the other side */
     return S_OK_;
 }

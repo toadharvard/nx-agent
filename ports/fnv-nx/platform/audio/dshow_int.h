@@ -39,6 +39,7 @@ DSH_L(IID_IEnumFilters_, 0x56a86893);
 DSH_L(IID_IBaseFilter_, 0x56a86895);
 DSH_L(IID_IReferenceClock_, 0x56a86897);
 DSH_L(IID_IMediaFilter_, 0x56a86899);
+DSH_L(IID_IGraphVersion_, 0x56a868ab);
 DSH_L(IID_IMediaEventSink_, 0x56a868a2);
 DSH_L(IID_IFilterMapper_, 0x56a868a3);
 DSH_L(IID_IEnumRegFilters_, 0x56a868a4);
@@ -83,21 +84,21 @@ const HR S_OK_ = 0, S_FALSE_ = 1, E_NOTIMPL_ = (HR)0x80004001, E_NOINTERFACE_ = 
          VFW_E_ALREADY_CONNECTED_ = (HR)0x80040204, VFW_E_NOT_FOUND_ = (HR)0x80040216, VFW_E_CANNOT_CONNECT_ = (HR)0x80040217,
          VFW_E_CANNOT_RENDER_ = (HR)0x80040218, VFW_E_NOT_STOPPED_ = (HR)0x80040224, VFW_E_TYPE_NOT_ACCEPTED_ = (HR)0x8004022A,
          VFW_E_DUPLICATE_NAME_ = (HR)0x8004022D, VFW_E_START_TIME_AFTER_END_ = (HR)0x80040228, VFW_E_ENUM_OUT_OF_SYNC_ = (HR)0x80040203,
-         VFW_E_UNKNOWN_FILE_TYPE_ = (HR)0x80040240, VFW_E_NOT_IN_GRAPH_ = (HR)0x8004025C,
-         VFW_E_UNSUPPORTED_AUDIO_ = (HR)0x80040259, VFW_E_NO_TRANSPORT_ = (HR)0x80040267,
+         VFW_E_UNKNOWN_FILE_TYPE_ = (HR)0x80040240, VFW_E_NOT_IN_GRAPH_ = (HR)0x8004025F,
+         VFW_E_UNSUPPORTED_AUDIO_ = (HR)0x8004025C, VFW_E_NO_TRANSPORT_ = (HR)0x80040266,
          VFW_S_DUPLICATE_NAME_ = (HR)0x0004022D, VFW_S_STATE_INTERMEDIATE_ = (HR)0x00040237, VFW_S_PARTIAL_RENDER_ = (HR)0x00040242,
          VFW_S_CANT_CUE_ = (HR)0x00040268, VFW_S_NO_MORE_ITEMS_ = (HR)0x00040103,
          DISP_E_UNKNOWNINTERFACE_ = (HR)0x80020001, DISP_E_MEMBERNOTFOUND_ = (HR)0x80020003, DISP_E_TYPEMISMATCH_ = (HR)0x80020005,
          DISP_E_UNKNOWNNAME_ = (HR)0x80020006, DISP_E_EXCEPTION_ = (HR)0x80020009, DISP_E_BADINDEX_ = (HR)0x8002000B,
          DISP_E_BADPARAMCOUNT_ = (HR)0x8002000E, TYPE_E_CANTLOADLIBRARY_ = (HR)0x80029C4A;
-enum { EC_COMPLETE_ = 1, EC_USERABORT_ = 2, EC_ERRORABORT_ = 3, EC_DEVICE_LOST_ = 0x1F, EC_STATE_CHANGE_ = 0x32 };
+enum { EC_COMPLETE_ = 1, EC_USERABORT_ = 2, EC_ERRORABORT_ = 3, EC_PAUSED_ = 0x0E, EC_DEVICE_LOST_ = 0x1F, EC_STATE_CHANGE_ = 0x32 };
 enum { State_Stopped = 0, State_Paused = 1, State_Running = 2 };
 enum { PINDIR_INPUT = 0, PINDIR_OUTPUT = 1 };
 enum { SEEK_CanSeekAbsolute = 1, SEEK_CanSeekForwards = 2, SEEK_CanSeekBackwards = 4, SEEK_CanGetCurrentPos = 8,
        SEEK_CanGetStopPos = 0x10, SEEK_CanGetDuration = 0x20 };
 enum { SEEK_NoPositioning = 0, SEEK_Absolute = 1, SEEK_Relative = 2, SEEK_Incremental = 3, SEEK_PosMask = 3,
        SEEK_KeyFrame = 4, SEEK_ReturnTime = 8, SEEK_Segment = 0x10, SEEK_NoFlush = 0x20 };
-const uint32_t MERIT_NORMAL_ = 0x600000, MERIT_PREFERRED_ = 0x800000;
+const uint32_t MERIT_NORMAL_ = 0x600000, MERIT_PREFERRED_ = 0x800000, MERIT_UNLIKELY_ = 0x400000, MERIT_DO_NOT_USE_ = 0x200000;
 
 struct MT {   /* AM_MEDIA_TYPE */
     Guid major, sub;
@@ -275,6 +276,9 @@ struct IObjectWithSite_ : Unk {
     virtual HR SetSite(Unk *) = 0;
     virtual HR GetSite(const void *iid, void **) = 0;
 };
+struct IGraphVersion_ : Unk {
+    virtual HR QueryVersion(long *version) = 0;
+};
 struct IFilterMapper_ : Unk {
     virtual HR RegisterFilter(Guid clsid, const WCH *name, uint32_t merit) = 0;
     virtual HR RegisterFilterInstance(Guid clsid, const WCH *name, Guid *mrid) = 0;
@@ -356,6 +360,8 @@ struct BFilter;
 struct GraphCore {
     os_lock_t lock = {0};
     volatile int abort = 0;
+    volatile int version = 0;   /* IGraphVersion: +1 on every AddFilter / RemoveFilter / pin connect / pin disconnect */
+    void bump_version() { __atomic_add_fetch(&version, 1, __ATOMIC_ACQ_REL); }
     virtual bool event_locked(long code, intptr_t p1, intptr_t p2) = 0;   /* queue an event; true if a window post is due */
     virtual void completion_locked(BFilter *renderer) = 0;                /* a renderer played its last frame */
     virtual void start_pump() = 0;

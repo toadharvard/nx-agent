@@ -130,7 +130,7 @@ struct Mapper final : IFilterMapper_ {
         RegEntry *e = new RegEntry();
         e->clsid = clsid;
         e->instance = true;
-        e->merit = base ? base->merit : 0x200000;   /* MERIT_DO_NOT_USE: an instance of a filter nobody registered */
+        e->merit = base ? base->merit : MERIT_DO_NOT_USE_;   /* MERIT_DO_NOT_USE: an instance of a filter nobody registered */
         wcopy(e->name, 64, name);
         for (int i = 0; i < 4; i++) { uint32_t r = os_random32(); memcpy((uint8_t *)&e->mrid + 4 * i, &r, 4); }
         *mrid = e->mrid;
@@ -264,8 +264,12 @@ struct DispParams { Var *rg; long *named; unsigned cargs, cnamed; };
 struct Excep { uint16_t code, r; void *src, *desc, *help; uint32_t ctx; void *res; void *fill; HR scode; };
 enum { VT_I2_ = 2, VT_I4_ = 3, VT_R4_ = 4, VT_R8_ = 5, VT_BSTR_ = 8, VT_BOOL_ = 11, VT_UI1_ = 17, VT_BYREF_ = 0x4000 };
 enum { DM_METHOD = 1, DM_GET = 2, DM_PUT = 4 };
-struct DM { const char *name; uint8_t flags; };
-const long DISPID_BASE = 0x60020000;   /* UNVERIFIED: vtable order from the type library's first member */
+/* DISPID rule (control.idl carries no id() attributes): the type library compiler (widl/MIDL) numbers the members of an
+ * interface derived from IDispatch as 0x60020000 + the index of the declaration among that interface's own methods,
+ * every [propget]/[propput] accessor counting as one declaration; the accessors of one name share the id of the first
+ * declared. `id` below is that index, copied from the declaration order of control.idl. */
+struct DM { const char *name; uint8_t flags; uint8_t id; };
+const long DISPID_BASE = 0x60020000;
 
 bool w_ieq(const WCH *w, const char *a)
 {
@@ -342,15 +346,17 @@ HR disp_names(const DM *tbl, unsigned n, const void *riid, WCH **names, unsigned
     for (unsigned k = 0; k < cnames; k++) {
         ids[k] = -1;
         for (unsigned i = 0; k == 0 && i < n; i++)
-            if (w_ieq(names[0], tbl[i].name)) ids[0] = DISPID_BASE + (long)i;
+            if (w_ieq(names[0], tbl[i].name)) ids[0] = DISPID_BASE + (long)tbl[i].id;
         if (ids[k] == -1) hr = DISP_E_UNKNOWNNAME_;   /* named parameters are not supported */
     }
     return hr;
 }
 HR disp_invoke(const DM *tbl, unsigned n, void *self, InvFn fn, long id, uint16_t flags, DispParams *dp, Var *res, Excep *ex, unsigned *argerr)
 {
-    if (id < DISPID_BASE || (unsigned long)(id - DISPID_BASE) >= n) return DISP_E_MEMBERNOTFOUND_;
-    unsigned m = (unsigned)(id - DISPID_BASE);
+    unsigned m = n;
+    for (unsigned i = 0; i < n && id >= DISPID_BASE; i++)
+        if (id - DISPID_BASE == tbl[i].id) m = i;
+    if (m >= n) return DISP_E_MEMBERNOTFOUND_;
     int kind;
     if (flags & (4 | 8)) kind = DM_PUT;
     else if (flags & 2) kind = DM_GET;
@@ -391,13 +397,16 @@ struct Ev { long code; intptr_t p1, p2; };
     HR GetIDsOfNames(const void *riid, WCH **names, unsigned n, uint32_t, long *ids) override;               \
     HR Invoke(long id, const void *riid, uint32_t, uint16_t fl, void *dp, void *res, void *ex, unsigned *ae) override;
 
-const DM kControlDM[] = {{"Run", DM_METHOD}, {"Pause", DM_METHOD}, {"Stop", DM_METHOD}, {"GetState", DM_METHOD}, {"RenderFile", DM_METHOD},
-                         {"AddSourceFilter", DM_METHOD}, {"FilterCollection", DM_GET}, {"RegFilterCollection", DM_GET}, {"StopWhenReady", DM_METHOD}};
-const DM kEventDM[] = {{"GetEventHandle", DM_METHOD}, {"GetEvent", DM_METHOD}, {"WaitForCompletion", DM_METHOD}, {"CancelDefaultHandling", DM_METHOD},
-                       {"RestoreDefaultHandling", DM_METHOD}, {"FreeEventParams", DM_METHOD}};
-const DM kPositionDM[] = {{"Duration", DM_GET}, {"CurrentPosition", DM_GET | DM_PUT}, {"StopTime", DM_GET | DM_PUT}, {"PrerollTime", DM_GET | DM_PUT},
-                          {"Rate", DM_GET | DM_PUT}, {"CanSeekForward", DM_GET}, {"CanSeekBackward", DM_GET}};
-const DM kAudioDM[] = {{"Volume", DM_GET | DM_PUT}, {"Balance", DM_GET | DM_PUT}};
+const DM kControlDM[] = {{"Run", DM_METHOD, 0}, {"Pause", DM_METHOD, 1}, {"Stop", DM_METHOD, 2}, {"GetState", DM_METHOD, 3},
+                         {"RenderFile", DM_METHOD, 4}, {"AddSourceFilter", DM_METHOD, 5}, {"FilterCollection", DM_GET, 6},
+                         {"RegFilterCollection", DM_GET, 7}, {"StopWhenReady", DM_METHOD, 8}};
+const DM kEventDM[] = {{"GetEventHandle", DM_METHOD, 0}, {"GetEvent", DM_METHOD, 1}, {"WaitForCompletion", DM_METHOD, 2},
+                       {"CancelDefaultHandling", DM_METHOD, 3}, {"RestoreDefaultHandling", DM_METHOD, 4},
+                       {"FreeEventParams", DM_METHOD, 5}};
+const DM kPositionDM[] = {{"Duration", DM_GET, 0}, {"CurrentPosition", DM_GET | DM_PUT, 1}, {"StopTime", DM_GET | DM_PUT, 3},
+                          {"PrerollTime", DM_GET | DM_PUT, 5}, {"Rate", DM_GET | DM_PUT, 7}, {"CanSeekForward", DM_METHOD, 9},
+                          {"CanSeekBackward", DM_METHOD, 10}};
+const DM kAudioDM[] = {{"Volume", DM_GET | DM_PUT, 0}, {"Balance", DM_GET | DM_PUT, 2}};
 #define NDM(t) (sizeof(t) / sizeof(t[0]))
 
 struct Control final : IMediaControl_ {
@@ -479,6 +488,10 @@ struct Audio final : IBasicAudio_ {
     HR put_Balance(long) override;
     HR get_Balance(long *) override;
 };
+struct Version final : IGraphVersion_ {
+    SUB_UNK
+    HR QueryVersion(long *v) override;
+};
 struct Site final : IObjectWithSite_ {
     SUB_UNK
     HR SetSite(Unk *) override;
@@ -522,6 +535,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
     Position position;
     Audio audio;
     Site site_if;
+    Version version_if;
     VideoWindow vwin;
     BasicVideo bvid;
     Vec<Entry> filters;
@@ -550,7 +564,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
 
     Graph()
     {
-        control.g = event.g = sink.g = mfilter.g = seeking.g = position.g = audio.g = site_if.g = vwin.g = bvid.g = this;
+        control.g = event.g = sink.g = mfilter.g = seeking.g = position.g = audio.g = site_if.g = version_if.g = vwin.g = bvid.g = this;
         evt = CreateEventA(nullptr, TRUE, FALSE, nullptr);
     }
     ~Graph();
@@ -616,7 +630,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
     unsigned long T::AddRef() { return g->AddRef(); }                                                         \
     unsigned long T::Release() { return g->Release(); }
 SUB_UNK_IMPL(Control) SUB_UNK_IMPL(Event) SUB_UNK_IMPL(Sink) SUB_UNK_IMPL(MFilter) SUB_UNK_IMPL(Seeking) SUB_UNK_IMPL(Position)
-SUB_UNK_IMPL(Audio) SUB_UNK_IMPL(Site) SUB_UNK_IMPL(VideoWindow) SUB_UNK_IMPL(BasicVideo)
+SUB_UNK_IMPL(Audio) SUB_UNK_IMPL(Version) SUB_UNK_IMPL(Site) SUB_UNK_IMPL(VideoWindow) SUB_UNK_IMPL(BasicVideo)
 
 HR Graph::QueryInterface(const void *iid, void **out)
 {
@@ -633,6 +647,7 @@ HR Graph::QueryInterface(const void *iid, void **out)
     else if (geq(iid, IID_IBasicAudio_)) *out = static_cast<IBasicAudio_ *>(&audio);
     else if (geq(iid, IID_IVideoWindow_)) *out = static_cast<VideoWindowI *>(&vwin);
     else if (geq(iid, IID_IBasicVideo_)) *out = static_cast<BasicVideoI *>(&bvid);
+    else if (geq(iid, IID_IGraphVersion_)) *out = static_cast<IGraphVersion_ *>(&version_if);
     else if (geq(iid, IID_IObjectWithSite_)) *out = static_cast<IObjectWithSite_ *>(&site_if);
     else return E_NOINTERFACE_;
     AddRef();
@@ -722,6 +737,7 @@ HR Graph::add_filter(Unk *u, const WCH *name, bool)
         }
         u->AddRef();
         filters.push(e);
+        bump_version();
     }
     if (bf) {
         HR j = bf->JoinFilterGraph(static_cast<IFilterGraph2_ *>(this), e.name);
@@ -737,6 +753,12 @@ HR Graph::add_filter(Unk *u, const WCH *name, bool)
     ascii(e.name, nm, sizeof nm);
     logf("AddFilter '%s'%s", nm, hr == VFW_S_DUPLICATE_NAME_ ? " (renamed)" : "");
     return hr;
+}
+HR Version::QueryVersion(long *v)
+{
+    if (!v) return E_POINTER_;
+    *v = (long)__atomic_load_n(&g->version, __ATOMIC_ACQUIRE);
+    return S_OK_;
 }
 HR Graph::AddFilter(IBaseFilter_ *f, const WCH *name)
 {
@@ -764,7 +786,7 @@ HR Graph::RemoveFilter(IBaseFilter_ *f)
         GL l(this);
         for (size_t i = 0; i < filters.n; i++)
             if (filters[i].u == (Unk *)f) { e = filters[i]; filters.erase(i); found = true; break; }
-        if (found) { stop_req = -1; done.n = 0; }
+        if (found) { stop_req = -1; done.n = 0; bump_version(); }
     }
     if (!found) return VFW_E_NOT_FOUND_;
     char nm[128];

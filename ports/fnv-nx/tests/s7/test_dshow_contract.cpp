@@ -299,7 +299,20 @@ TEST(dshow_contract_graph_building)
     CHECK_EQ(G.g->AddFilter(&a, n1.data()), 0);
     CHECK_EQ(a.joins, 1);
     CHECK(a.graph != nullptr && a.name == "src");
+    IGraphVersion_ *gv = nullptr;   /* IGraphVersion: the counter moves on every graph change */
+    CHECK_EQ(G.g->QueryInterface(&IID_IGraphVersion_, (void **)&gv), 0);
+    long v0 = -1, v1 = -1;
+    CHECK(gv != nullptr);
+    if (gv) {
+        CHECK_EQ(gv->QueryVersion(nullptr), E_POINTER_);
+        CHECK_EQ(gv->QueryVersion(&v0), 0);
+    }
     CHECK_EQ(G.g->AddFilter(&b, n1.data()), VFW_S_DUPLICATE_NAME_);
+    if (gv) {
+        CHECK_EQ(gv->QueryVersion(&v1), 0);
+        CHECK(v1 > v0);
+        gv->Release();
+    }
     CHECK(b.name != "src" && b.name.compare(0, 3, "src") == 0);
     CHECK_EQ(G.g->AddFilter(nullptr, n1.data()), E_POINTER_);
     CHECK_EQ(G.nfilters(), 2);

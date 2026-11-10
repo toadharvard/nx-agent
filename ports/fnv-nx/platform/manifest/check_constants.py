@@ -13,6 +13,12 @@ Names are compared after dropping trailing '_' and a leading 'k'; ALIASES maps a
 reference name where the source uses its own short name. The I3DL2 preset table of dsound.cpp is compared with
 the 30 I3DL2_ENVIRONMENT_PRESET_* macros (12 values each), rows identified by their trailing /* NAME */ comment.
 Expressions that cannot be evaluated (they name something outside both sides) are skipped and counted.
+DirectShow part: reference side also reads uuids.h (OUR_GUID_ENTRY(name, ...) lines), vfwmsgs.h, evcode.h, winerror.h
+and the .idl files (strmif, axcore, axextend, control, oaidl, ...: `uuid(...)` followed by `interface|coclass|
+dispinterface NAME` is IID_NAME / CLSID_NAME; enums with explicit or implicit values). Our side adds the dshow
+sources, whose GUID forms are DSH_G(name, l, w1, w2, b0..b7) and the shorthand DSH_L/E/M/T(name, l) (fixed tail of the
+quartz interface / quartz media type / FOURCC-derived / time-format GUID families); the local name's trailing '_' is
+dropped, so IID_IFilterGraph_ is compared with IID_IFilterGraph. DSHOW_TAILS holds the tails of the shorthands.
 Exit status: 0 no mismatch, 1 at least one mismatch, 2 usage error."""
 import ast
 import glob
@@ -48,7 +54,18 @@ ALIASES = {
     "dinput.cpp": {"P_" + n: "DIPROP_" + n for n in (
         "BUFFERSIZE AXISMODE GRANULARITY RANGE DEADZONE SATURATION FFGAIN FFLOAD AUTOCENTER CALIBRATIONMODE "
         "CALIBRATION GUIDANDPATH INSTANCENAME PRODUCTNAME JOYSTICKID KEYNAME SCANCODE VIDPID USERNAME TYPENAME").split()},
+    "dshow_int.h": dict(
+        {"SEEK_" + a: "AM_SEEKING_" + b for a, b in (
+            ("CanSeekAbsolute", "CanSeekAbsolute"), ("CanSeekForwards", "CanSeekForwards"),
+            ("CanSeekBackwards", "CanSeekBackwards"), ("CanGetCurrentPos", "CanGetCurrentPos"),
+            ("CanGetStopPos", "CanGetStopPos"), ("CanGetDuration", "CanGetDuration"),
+            ("NoPositioning", "NoPositioning"), ("Absolute", "AbsolutePositioning"),
+            ("Relative", "RelativePositioning"), ("Incremental", "IncrementalPositioning"),
+            ("PosMask", "PositioningBitsMask"), ("KeyFrame", "SeekToKeyFrame"), ("ReturnTime", "ReturnTime"),
+            ("Segment", "Segment"), ("NoFlush", "NoFlush"))},
+        CLSID_MPEG1Splitter_="CLSID_MPEG1Splitter", CLSID_MPEGAudioDecoder_="CLSID_CMpegAudioCodec"),
 }
+ALIASES["dshow.cpp"] = ALIASES["dshow_filters.cpp"] = ALIASES["dshow_int.h"]
 # our name = a value derived from reference names (an expression over the reference side)
 DERIVED = {
     "SEM_KBD": "DIKEYBOARD_ESCAPE & ~DIK_ESCAPE",
@@ -66,7 +83,7 @@ WAIVED = {
                                              "reference has no proof either way: needs a decision",
 }
 
-CAST = re.compile(r"\(\s*(?:const\s+)?(?:unsigned|signed|int|long|short|char|DWORD|WORD|BYTE|UINT|ULONG|LONG|HRESULT|"
+CAST = re.compile(r"\(\s*(?:const\s+)?(?:unsigned|signed|int|long|short|char|DWORD|WORD|BYTE|UINT|ULONG|LONG|HRESULT|HR|uint32_t|"
                   r"INT|SHORT|USHORT|BOOL|size_t|uint\d+_t|int\d+_t|float|double|LPARAM|WPARAM|UINT_PTR|ULONG_PTR)"
                   r"(?:\s+(?:long|int|short|char))*\s*\)")
 NUMSUF = re.compile(r"\b(0[xX][0-9a-fA-F]+|\d+)(?:[uU][lL]{0,2}|[lL]{1,2}[uU]?)\b")
@@ -111,7 +128,7 @@ class Side:
         if m:
             v = self.ev_expr(m.group(1), stack)
             return None if v is None else ("prop", v)
-        e = re.sub(r"__MSABI_LONG\s*\(", "(", e)
+        e = re.sub(r"__MSABI_LONG\s*\(|_HRESULT_TYPEDEF_\s*\(", "(", e)
         e = re.sub(r"(\d\.\d*|\.\d+)[fF]\b", r"\1", e)
         e = CAST.sub(" ", e)
         e = NUMSUF.sub(lambda m_: m_.group(1), e)
@@ -219,7 +236,12 @@ def guid_tuple(args):
     return tuple(vals)
 
 
-GUID_MACROS = r"(?:DEFINE_GUID|FNVNX_DS_GUID|FNVNX_DI_GUID|DS_IID|DEFINE_OLEGUID)"
+# DSH_L/E/M/T shorthands of dshow_int.h: (w1, w2, b0..b7) after the first data word
+DSHOW_TAILS = {"L": (0x0ad4, 0x11ce, 0xb0, 0x3a, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70),
+               "E": (0x524f, 0x11ce, 0x9f, 0x53, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70),
+               "M": (0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71),
+               "T": (0x8c82, 0x11cf, 0xbc, 0x0c, 0x00, 0xaa, 0x00, 0xac, 0x74, 0xf6)}
+GUID_MACROS = r"(?:DEFINE_GUID|FNVNX_DS_GUID|FNVNX_DI_GUID|DS_IID|DEFINE_OLEGUID|DSH_G)"
 
 
 def parse_text(side, text, fname, ours):
@@ -232,6 +254,32 @@ def parse_text(side, text, fname, ours):
         g = guid_tuple(a[1:])
         if g and re.fullmatch(r"[A-Za-z_]\w*", a[0].strip()):
             side.guid.setdefault(a[0].strip(), (g, fname))
+    # reference uuids.h: OUR_GUID_ENTRY(name, l, w1, w2, b1..b8) without a trailing ';'
+    for m in re.finditer(r"^[ \t]*OUR_GUID_ENTRY\s*\(([^)\n]*)\)", t, re.M):
+        a = split_top(m.group(1))
+        g = guid_tuple(a[1:])
+        if g and re.fullmatch(r"[A-Za-z_]\w*", a[0].strip()):
+            side.guid.setdefault(a[0].strip(), (g, fname))
+    # our dshow_int.h: DSH_L/E/M/T(name, first) shorthands
+    for m in re.finditer(r"^[ \t]*DSH_([LEMT])\s*\(([^;\n]*)\)\s*;", t, re.M):
+        a = split_top(m.group(2))
+        v = Side("tmp").ev_expr(a[1], ()) if len(a) == 2 else None
+        if isinstance(v, int) and re.fullmatch(r"[A-Za-z_]\w*", a[0].strip()):
+            side.guid.setdefault(a[0].strip(), ((v,) + DSHOW_TAILS[m.group(1)], fname))
+    # .idl: [ ... uuid(...) ... ] interface|coclass|dispinterface NAME  ->  IID_NAME / CLSID_NAME
+    for m in re.finditer(r"\buuid\s*\(\s*([0-9a-fA-F]{8})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-"
+                         r"([0-9a-fA-F]{12})\s*\)", t):
+        j, depth = m.end(), 1
+        while j < len(t) and depth:   # skip to the ']' that closes the attribute list
+            depth += (t[j] == "[") - (t[j] == "]")
+            j += 1
+        k = re.match(r"\s*(interface|coclass|dispinterface)\s+(\w+)", t[j:])
+        if not k:
+            continue
+        hx = m.group(4) + m.group(5)
+        g = (int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)) + tuple(
+            int(hx[i:i + 2], 16) for i in range(0, 16, 2))
+        side.guid.setdefault(("CLSID_" if k.group(1) == "coclass" else "IID_") + k.group(2), (g, fname))
     for m in re.finditer(r"\bconst(?:expr)?\s+GUID\s+([A-Za-z_]\w*)\s*=\s*\{\s*([^;]*?)\}\s*;", t, re.S):
         a = split_top(m.group(2).replace("{", " ").replace("}", " "))
         g = guid_tuple(a)
@@ -264,16 +312,22 @@ def parse_text(side, text, fname, ours):
                         side.add(n.strip(), e, fname)
 
 
+REF_FILES = ("dsound.h", "dinput.h", "xinput.h", "mmsystem.h", "dsconf.h", "uuids.h", "vfwmsgs.h", "evcode.h",
+             "winerror.h", "strmif.idl", "axcore.idl", "axextend.idl", "control.idl", "oaidl.idl", "unknwn.idl",
+             "mmreg.h", "amvideo.idl", "ks.h", "ksmedia.h")
+
+
 def collect_ref(paths):
     side = Side("reference")
     files = []
     for p in paths:
         if os.path.isdir(p):
             files += sorted(glob.glob(os.path.join(p, "**", "*.h"), recursive=True))
+            files += sorted(glob.glob(os.path.join(p, "**", "*.idl"), recursive=True))
         else:
             files.append(p)
     for f in files:
-        if os.path.basename(f) in ("dsound.h", "dinput.h", "xinput.h", "mmsystem.h", "dsconf.h"):
+        if os.path.basename(f) in REF_FILES:
             parse_text(side, open(f, errors="replace").read(), os.path.basename(f), False)
     return side, files
 
@@ -322,7 +376,8 @@ def fmt(v):
 
 
 def fmt_guid(g):
-    return "{%08x-%04x-%04x-%s}" % (g[0], g[1], g[2], "".join("%02x" % b for b in g[3:]))
+    return "{%08x-%04x-%04x-%s-%s}" % (g[0], g[1], g[2], "".join("%02x" % b for b in g[3:5]),
+                                      "".join("%02x" % b for b in g[5:]))
 
 
 def i3dl2(ref, per_file):
@@ -396,6 +451,8 @@ def main(argv):
             ov, rv = sub.evaluate(n), ref.evaluate(rn)
             if ov is None or rv is None:
                 unevaluable += 1
+                if os.environ.get("CHECK_CONSTANTS_VERBOSE"):
+                    print("UNEVALUABLE %s (%s): ours %r ref %r" % (n, rn, sub.raw[n][0][:40], ref.raw[rn][0][:40]))
                 continue
             compared += 1
             if not same(ov, rv):
