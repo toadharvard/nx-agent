@@ -81,16 +81,16 @@ FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugi
         -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
         -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR" -fplugin-arg-fnvnx_order-assign="$ORDER_ASSIGN")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
-# FNVNX_SDD=1 (SDD2, toolchain/sdd): one vtable slot per virtual destructor, as MSVC's ??_G, and one symbol per
-# vtable address point. The fnvnx_sdd plugin makes the deleting destructor non-virtual inside the front end, so GCC
-# itself builds every table, index and member pointer with one slot. -DFNVNX_SDD makes the raw-slot macros of the
-# shim (VSLOT, D26_SLOT, RAWVT, VTM1) the identity. -fno-devirtualize: MSVC 2008 kept every virtual call of an object
-# of unknown dynamic type virtual, so the exe's functions have those calls and the vcall gate pairs them one to one
-# (65 units: functions whose call count differs from the exe 532 -> 425, paired sites at delta 0 3,643 -> 4,617);
-# a speculative direct call would also go to a unit-local alias, past the link's by-address binding. A layout flag:
-# objects with and without it must never mix. Default 0 until the one full recompile (M6).
+# SDD2 and the semantics set (toolchain/sdd, pi, dispatch, addr, names): one vtable slot per virtual destructor, as
+# MSVC's ??_G, and one symbol per vtable address point. The fnvnx_sdd plugin makes the deleting destructor non-virtual
+# inside the front end, so GCC itself builds every table, index and member pointer with one slot. -fno-devirtualize:
+# MSVC 2008 kept every virtual call of an object of unknown dynamic type virtual, so the exe's functions have those
+# calls and the vcall gate pairs them one to one; a speculative direct call would also go to a unit-local alias,
+# past the link's by-address binding. This is the only way the tree compiles to the exe's tables: the source rules
+# that rewrote slot numbers are gone. FNVNX_SDD=0 remains only to read old objects' flags; such objects never mix
+# with these.
 SDD_SO=""; PI_SO=""; DISPATCH_SO=""; ADDR_SO=""; NAMES_SO=""
-if [ "${FNVNX_SDD:-0}" = 1 ]; then
+if [ "${FNVNX_SDD:-1}" = 1 ]; then
   SDD_SO=$(CXX=$CXX bash "$HERE/toolchain/sdd/build.sh" "$OUT/.sdd") \
     || { echo "compile.sh: the fnvnx_sdd plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
   FLAGS+=(-DFNVNX_SDD=1 -fno-devirtualize -fplugin="$SDD_SO")
@@ -209,7 +209,7 @@ done
 export CC CFLAGS_STR="${CFLAGS[*]}"
 # A unit the recipe builds with /fp:fast tells the N3 plugin so (FNVNX_SDD=1): there the source does not fix the
 # exe's floating-point semantics, and the plugin puts its functions that use floating point outside the subset.
-FPFAST_ARG=""; [ "${FNVNX_SDD:-0}" = 1 ] && FPFAST_ARG="-fplugin-arg-fnvnx_pi-fpfast"
+FPFAST_ARG=""; [ "${FNVNX_SDD:-1}" = 1 ] && FPFAST_ARG="-fplugin-arg-fnvnx_pi-fpfast"
 jq -r --arg fpfast "$FPFAST_ARG" '.units[] | [.source, (([.flags[]? | select(startswith("/D")) | "-D" + .[2:]]
     + (if $fpfast != "" and ([.flags[]? | select(. == "/fp:fast")] | length) > 0 then [$fpfast] else [] end)) | join(" "))] | @tsv' \
   "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
