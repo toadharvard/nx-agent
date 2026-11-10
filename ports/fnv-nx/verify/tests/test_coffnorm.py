@@ -313,8 +313,11 @@ def t_real():
         o = src + ".%d.obj" % i
         env = dict(os.environ, SOURCE_DATE_EPOCH=epoch)
         subprocess.run([cc] + extra + ["-c", src, "-o", o], check=True, env=env)
+        os.makedirs(src + ".d%d" % i)
+        same = os.path.join(src + ".d%d" % i, "q.obj")
+        shutil.copy(o, same)
         lib = src + ".%d.lib" % i
-        subprocess.run(["ar", "rc", lib, o], check=True)
+        subprocess.run(["ar", "rc", os.path.abspath(lib), "q.obj"], check=True, cwd=os.path.dirname(same))
         outs.append(o)
         libs.append(lib)
         time.sleep(1.2)
