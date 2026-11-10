@@ -5,6 +5,8 @@ calls (bridges).  Several native copies of one address: each is judged, the wors
 """
 import collections, re
 
+import store
+
 NAME = 'call'
 ORDER = ('none', 'equal', 'subset', 'superset', 'different')   # best .. worst
 AN = re.compile(r'([0-9a-f]{8})')
@@ -12,8 +14,9 @@ AN = re.compile(r'([0-9a-f]{8})')
 
 def run(facts, obj, link):
     copies = collections.defaultdict(list)
-    for (_, a), v in obj.items():
-        if a != 'ztv' and a in facts['fn']:
+    for k, v in obj.items():
+        a = k[1]
+        if store.is_function_key(k) and a in facts['fn']:
             copies[a].append(v)
     counts, rows = collections.Counter(), []
     for a, vs in sorted(copies.items()):

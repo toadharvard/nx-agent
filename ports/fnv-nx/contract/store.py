@@ -18,8 +18,13 @@ Kinds (the explicit per-file encoding):
   n1     n1.py         fn keys decimal address, F['relocs'] list of tuples;
                        sym keys "unit\\tsymbol" (2-tuple) or "unit\\tindex\\tsymbol" (3-tuple), unit and index decimal;
                        vt keys "unit\\tsymbol"
-  obj    objfacts.py   keys "object basename\\t%08x" (function) or "object basename\\tztv"; function value
-                       (vt [tuples], data set, calls set, other set, vcall list), ztv value {symbol: [tuples]}
+  obj    objfacts.py   keys "object basename\\t%08x" (function) or "object basename\\t<section kind>", the kind one of
+                       SECTION_KINDS; function value (vt [tuples], data set, calls set, other set, vcall list), ztv value
+                       {symbol: [tuples]}, sympair / vtpair / n3 values the row lists of l2sections.py (tuples; in n3 rows
+                       the inlined and types fields are tuples too)
+  bind   bind.py       sym keys "object\\tsymbol" -> address; vt keys "object\\t_ZTV symbol\\toffset" -> address; n3 keys
+                       "object\\t%08x" -> [verdict, [addresses]]; unbound sym [(object, symbol, kind, reason)] and
+                       vt [(object, _ZTV symbol, offset, reason)]
   objone objfacts_one.py  the same encoding as `obj`, for the entries of one object (one file per object)
   vtid   vtid.py       bind keys "unit\\t_ZTV symbol\\toffset" (offset decimal), errors [tuples]
   eh     ehfacts.py    funcinfo/stubs/owner/kind keys decimal address; unwind_at, catch_at sorted lists (sets in memory)
@@ -92,11 +97,23 @@ def _n1_dec(o):
 
 
 # ---- obj ---------------------------------------------------------------------------------------------------------
+SECTION_KINDS = ('ztv', 'sympair', 'vtpair', 'n3')       # the non-function entries (object, kind) of an obj / objone file
+
+
+def is_function_key(k):
+    """True for a key (object, exe address) of a function entry; False for (object, one of SECTION_KINDS)."""
+    return k[1] not in SECTION_KINDS
+
+
+def _n3_row(r):
+    return (r[0], r[1], tuple(r[2]), r[3], tuple(r[4]))
+
+
 def _obj_enc(o):
     out = {}
     for (ob, a), v in o.items():
-        if a == 'ztv':
-            out[_tab(ob, 'ztv')] = v
+        if a in SECTION_KINDS:
+            out[_tab(ob, a)] = v
         else:
             vt, data, calls, other, vcall = v
             out[_tab(ob, '%08x' % a)] = [vt, sorted(data), sorted(calls), sorted(other), vcall]
@@ -108,11 +125,38 @@ def _obj_dec(o):
     for k, v in o.items():
         ob, a = k.split('\t')
         if a == 'ztv':
-            out[(ob, 'ztv')] = {n: _tl(pts) for n, pts in v.items()}
+            out[(ob, a)] = {n: _tl(pts) for n, pts in v.items()}
+        elif a in ('sympair', 'vtpair'):
+            out[(ob, a)] = _tl(v)
+        elif a == 'n3':
+            out[(ob, a)] = [_n3_row(r) for r in v]
         else:
             vt, data, calls, other, vcall = v
             out[(ob, int(a, 16))] = (_tl(vt), set(data), set(calls), set(other), vcall)
     return out
+
+
+# ---- bind --------------------------------------------------------------------------------------------------------
+def _bind_enc(o):
+    return dict(sym={_tab(*k): v for k, v in o['sym'].items()}, vt={_tab(*k): v for k, v in o['vt'].items()},
+                n3={_tab(ob, '%08x' % a): [v, list(ad)] for (ob, a), (v, ad) in o['n3'].items()},
+                unbound_sym=o['unbound_sym'], unbound_vt=o['unbound_vt'])
+
+
+def _bind_dec(o):
+    sym = {}
+    for k, v in o['sym'].items():
+        ob, s = k.split('\t')
+        sym[(ob, s)] = v
+    vt = {}
+    for k, v in o['vt'].items():
+        ob, z, off = k.split('\t')
+        vt[(ob, z, int(off))] = v
+    n3 = {}
+    for k, (v, ad) in o['n3'].items():
+        ob, a = k.split('\t')
+        n3[(ob, int(a, 16))] = (v, list(ad))
+    return dict(sym=sym, vt=vt, n3=n3, unbound_sym=_tl(o['unbound_sym']), unbound_vt=_tl(o['unbound_vt']))
 
 
 # ---- vtid --------------------------------------------------------------------------------------------------------
@@ -150,7 +194,7 @@ def _eh_dec(o):
 
 
 KINDS = dict(facts=(_facts_enc, _facts_dec), n1=(_n1_enc, _n1_dec), obj=(_obj_enc, _obj_dec), objone=(_obj_enc, _obj_dec),
-             vtid=(_vtid_enc, _vtid_dec), eh=(_eh_enc, _eh_dec))
+             bind=(_bind_enc, _bind_dec), vtid=(_vtid_enc, _vtid_dec), eh=(_eh_enc, _eh_dec))
 
 
 def save(path, kind, obj):

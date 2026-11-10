@@ -25,7 +25,7 @@ def merge(paths):
 
 
 def summary(out):
-    fns = [v for k, v in out.items() if k[1] != 'ztv']
+    fns = [v for k, v in out.items() if store.is_function_key(k)]
     return 'native functions with an exe address: %d; with vtable values: %d; vtable sites: %d (not stored plainly: %d)' % (
         len(fns), sum(1 for v in fns if v[0]), sum(len(v[0]) for v in fns), sum(1 for v in fns for s in v[0] if s[3] is None))
 

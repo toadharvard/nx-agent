@@ -33,6 +33,12 @@ try:
     raise SystemExit('TAB in a key was accepted')
 except ValueError:
     pass
+sec = {('a.o', 'sympair'): [('s', 'm', 'func', 'def')], ('a.o', 'vtpair'): [('_ZTV1', 8, '??_7C@@6B@', 0)],
+       ('a.o', 'n3'): [('s', 'ok', ('i', 'j'), 'inline', ('1R',))], ('b.o', 'n3'): []}
+for k in ('obj', 'objone'):
+    store.save(d + '/s.json', k, sec)
+    assert store.load(d + '/s.json', k) == sec
+assert not any(store.is_function_key(k) for k in sec) and store.is_function_key(('a.o', 16))
 # gate file: shape, order, cap, no output without GATE_OUT
 os.environ.pop('GATE_OUT', None)
 assert gatefile.write('t', 1, 1, [], '') is None

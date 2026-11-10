@@ -12,6 +12,8 @@ Per native function that the address map binds to an exe address:
          symbol is `_ZTV...` or `__fnv_<vftable>`; addend is what the code adds to the GOT value; base is
          'obj' (a pointer register), 'stk' (sp/x29) or None when the value is not stored by a plain `str`.
   (object, 'ztv') -> {`_ZTV` symbol: [(address point, -offset_to_top, [slot symbol or None])]}
+  (object, 'sympair' | 'vtpair' | 'n3') -> the row lists of the object's L2 sections (l2sections.py; [] when absent);
+         store.is_function_key tells these four entries from the function entries
   data   {exe data address}      `__fnv_<addr>` references outside .text
   calls  {exe code address}      direct call/jump targets, by address
   other  {symbol}                direct call targets with no address
@@ -25,7 +27,7 @@ from elftools.elf.elffile import ELFFile
 from elftools.elf.relocation import RelocationSection
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import store
+import store, l2sections
 
 IM = re.compile(r'__fnv_([0-9a-f]{8})$')
 R_GOT_PAGE, R_GOT_LO12, R_CALL26, R_JUMP26 = 26, 27, 20, 21   # R_AARCH64_P32_*
@@ -218,6 +220,8 @@ def scan_object(path, amap, vftset):
                     pt[2] = [rel.get((shndx, v + o)) for o in range(pt[0], end, 4)]
                 ztv[name] = [tuple(pt) for pt in pts]
         out[(ob, 'ztv')] = ztv
+        for kind, rows in sorted(l2sections.read(path).items()):
+            out[(ob, kind)] = rows
         # functions with an address but no relocations still need a vcall list and an entry
         for k, d in fb.items():
             sec = None
