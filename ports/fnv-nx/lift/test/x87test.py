@@ -14,7 +14,7 @@ DRIVER = r'''
 #include <string.h>
 void run(int op, unsigned n, const unsigned char *in, unsigned char *out) {
   for (unsigned i = 0; i < n; i++) {
-    const unsigned char *c = in + 48 * i; unsigned char *o = out + 32 * i;
+    const unsigned char *c = in + 48 * i; unsigned char *o = out + 48 * i;
     u32 fcw, fsw = 0, x2 = 0; u64 am, bm, raw = 0; u16 ase, bse; fnvl_f80 a, b, r = {0, 0}; int f80 = 0;
     memcpy(&fcw, c, 4); memcpy(&am, c + 16, 8); memcpy(&ase, c + 24, 2); memcpy(&bm, c + 32, 8); memcpy(&bse, c + 40, 2);
     a.m = am; a.se = ase; b.m = bm; b.se = bse;
@@ -43,46 +43,66 @@ void run(int op, unsigned n, const unsigned char *in, unsigned char *out) {
 '''
 LD = lambda d: bytes([0xDB, 0x6E, d])          # fld tbyte [esi+d]
 ST = b'\xDB\x3F'                               # fstp tbyte [edi]
-BIN = lambda op: LD(32) + LD(16) + op + ST     # fld b; fld a; op st0,st1 (a op b)
-# name: (code body, kind, result width in bytes (0 = tbyte, -1 = none), fsw mask compared)
+FS = b'\xDD\x7F\x10'                           # fnstsw [edi+16]
+# name: (load, op, store, kind, result bytes (0 = tbyte, -1 = none), fsw mask for the unicorn mode); ab = fld b; fld a
+ab = LD(32) + LD(16)
 OPS = {
- 'add': (BIN(b'\xD8\xC1'), 'bin', 0, 0), 'sub': (BIN(b'\xD8\xE1'), 'bin', 0, 0),
- 'mul': (BIN(b'\xD8\xC9'), 'bin', 0, 0), 'div': (BIN(b'\xD8\xF1'), 'bin', 0, 0),
- 'sqrt': (LD(16) + b'\xD9\xFA' + ST, 'un', 0, 0), 'rndint': (LD(16) + b'\xD9\xFC' + ST, 'un', 0, 0),
- 'fld32': (b'\xD9\x46\x10' + ST, 'f32', 0, 0), 'fld64': (b'\xDD\x46\x10' + ST, 'f64', 0, 0),
- 'fild16': (b'\xDF\x46\x10' + ST, 'i16', 0, 0), 'fild32': (b'\xDB\x46\x10' + ST, 'i32', 0, 0),
- 'fild64': (b'\xDF\x6E\x10' + ST, 'i64', 0, 0),
- 'fst32': (LD(16) + b'\xD9\x1F', 'un', 4, 0), 'fst64': (LD(16) + b'\xDD\x1F', 'un', 8, 0),
- 'fist16': (LD(16) + b'\xDF\x1F', 'un', 2, 0), 'fist32': (LD(16) + b'\xDB\x1F', 'un', 4, 0),
- 'fist64': (LD(16) + b'\xDF\x3F', 'un', 8, 0),
- 'fcom': (LD(32) + LD(16) + b'\xD8\xD1', 'bin', -1, 0x4500), 'fucom': (LD(32) + LD(16) + b'\xDD\xE1', 'bin', -1, 0x4500),
- 'fxam': (LD(16) + b'\xD9\xE5\xDD\x7F\x12\xDD\xD8\xD9\xE5', 'un', -1, 0x4700),
+ 'add': (ab, b'\xD8\xC1', ST, 'bin', 0, 0), 'sub': (ab, b'\xD8\xE1', ST, 'bin', 0, 0),
+ 'mul': (ab, b'\xD8\xC9', ST, 'bin', 0, 0), 'div': (ab, b'\xD8\xF1', ST, 'bin', 0, 0),
+ 'sqrt': (LD(16), b'\xD9\xFA', ST, 'un', 0, 0), 'rndint': (LD(16), b'\xD9\xFC', ST, 'un', 0, 0),
+ 'fld32': (b'\xD9\x46\x10', b'', ST, 'f32', 0, 0), 'fld64': (b'\xDD\x46\x10', b'', ST, 'f64', 0, 0),
+ 'fild16': (b'\xDF\x46\x10', b'', ST, 'i16', 0, 0), 'fild32': (b'\xDB\x46\x10', b'', ST, 'i32', 0, 0),
+ 'fild64': (b'\xDF\x6E\x10', b'', ST, 'i64', 0, 0),
+ 'fst32': (LD(16), b'', b'\xD9\x1F', 'un', 4, 0), 'fst64': (LD(16), b'', b'\xDD\x1F', 'un', 8, 0),
+ 'fist16': (LD(16), b'', b'\xDF\x1F', 'un', 2, 0), 'fist32': (LD(16), b'', b'\xDB\x1F', 'un', 4, 0),
+ 'fist64': (LD(16), b'', b'\xDF\x3F', 'un', 8, 0),
+ 'fcom': (ab, b'\xD8\xD1', b'', 'bin', -1, 0x4500), 'fucom': (ab, b'\xDD\xE1', b'', 'bin', -1, 0x4500),
+ 'fxam': (LD(16), b'\xD9\xE5\xDD\x7F\x12\xDD\xD8\xD9\xE5', b'', 'un', -1, 0x4700),
 }
 NAMES = list(OPS)
-FCWS = [0x7f | pc << 8 | rc << 10 for pc in (0, 2, 3) for rc in range(4)]
+FCWS = [0x7f | pc << 8 | rc << 10 for pc in (0, 1, 2, 3) for rc in range(4)]
 IN_T = np.dtype({'names': ['fcw', 'am', 'ase', 'bm', 'bse'], 'formats': ['<u4', '<u8', '<u2', '<u8', '<u2'],
                  'offsets': [0, 16, 24, 32, 40], 'itemsize': 48})
-OUT_T = np.dtype({'names': ['r', 'rse', 'fsw', 'fsw2'], 'formats': ['<u8', '<u2', '<u2', '<u2'],
-                  'offsets': [0, 8, 16, 18], 'itemsize': 32})
+OUT_T = np.dtype({'names': ['r', 'rse', 'fsw', 'fsw2', 'r2', 'r2se'], 'formats': ['<u8', '<u2', '<u2', '<u2', '<u8', '<u2'],
+                  'offsets': [0, 8, 16, 18, 24, 32], 'itemsize': 48})
+NATIVE = r"""
+#define _GNU_SOURCE
+#include <sys/mman.h>
+#include <string.h>
+/* run the same instruction sequence the unicorn loop uses on the real x87: fn(out in rdi, in in rsi) per case */
+int nat_run(const unsigned char *code, int len, unsigned n, const unsigned char *in, unsigned char *out) {
+  void *p = mmap(0, 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (p == MAP_FAILED) return -1;
+  memcpy(p, code, len);
+  for (unsigned i = 0; i < n; i++) ((void (*)(unsigned char *, const unsigned char *))p)(out + 48 * i, in + 48 * i);
+  munmap(p, 4096); return 0;
+}
+"""
 
 def build():
     os.makedirs(SCR, exist_ok=True)
-    open(SCR + "driver.c", "w").write(DRIVER)
+    open(SCR + "driver.c", "w").write(DRIVER); open(SCR + "native.c", "w").write(NATIVE)
     subprocess.check_call(["gcc", "-O2", "-shared", "-fPIC", "-I", HERE + "/../rt", HERE + "/../rt/x87.c",
                            SCR + "driver.c", "-o", SCR + "x87t.so"])
-    return ctypes.CDLL(SCR + "x87t.so")
+    subprocess.check_call(["gcc", "-O1", "-shared", "-fPIC", SCR + "native.c", "-o", SCR + "nat.so"])
+    return ctypes.CDLL(SCR + "x87t.so"), ctypes.CDLL(SCR + "nat.so")
+
+def body(op):
+    ld, o, st, *_ = OPS[op]
+    return ld + o + (FS + st if st[:2] == ST else st + FS)      # status word before the m80 store (which clears C1)
+
+def native(op, rec, nat):
+    code = b'\xDB\xE3\xD9\x2E' + body(op) + b'\xDB\xE3\xC3'      # fninit; fldcw [rsi]; ...; fninit; ret
+    out = np.zeros(len(rec), OUT_T)
+    assert nat.nat_run(code, len(code), len(rec), rec.ctypes.data_as(ctypes.c_char_p), out.ctypes.data_as(ctypes.c_char_p)) == 0
+    return out
 
 # ---------------------------------------------------------------- oracle (Unicorn)
-def program(body):
-    pro = b'\xDB\xE3\xD9\x2E'                                   # fninit; fldcw [esi]
-    epi = b'\xDD\x7F\x10\x83\xC6\x30\x83\xC7\x20\x49'           # fnstsw [edi+16]; esi+=48; edi+=32; dec ecx
-    code = pro + body + epi
-    return code + b'\x0F\x85' + (-(len(code) + 6)).to_bytes(4, 'little', signed=True)
-
 CH, CODE, INB, OUTB = 32768, 0x1000, 0x100000, 0x400000
 def oracle(op, rec):
     uc = Uc(UC_ARCH_X86, UC_MODE_32)
-    code = program(OPS[op][0])
+    code = b'\xDB\xE3\xD9\x2E' + body(op) + b'\x83\xC6\x30\x83\xC7\x30\x49'      # ...; esi+=48; edi+=48; dec ecx
+    code += b'\x0F\x85' + (-(len(code) + 6)).to_bytes(4, 'little', signed=True)
     uc.mem_map(CODE, 0x1000); uc.mem_map(INB, 0x300000); uc.mem_map(OUTB, 0x200000)
     uc.mem_write(CODE, code)
     out = np.zeros(len(rec), OUT_T)
@@ -91,13 +111,21 @@ def oracle(op, rec):
         uc.mem_write(INB, rec[i:i + k].tobytes())
         uc.reg_write(UC_X86_REG_ESI, INB); uc.reg_write(UC_X86_REG_EDI, OUTB); uc.reg_write(UC_X86_REG_ECX, k)
         uc.emu_start(CODE, CODE + len(code))
-        out[i:i + k] = np.frombuffer(bytes(uc.mem_read(OUTB, 32 * k)), OUT_T)
+        out[i:i + k] = np.frombuffer(bytes(uc.mem_read(OUTB, 48 * k)), OUT_T)
     return out
 
 def disasm():
     from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-    for n, (b, *_r) in OPS.items():
-        print(n, '; '.join(f"{i.mnemonic} {i.op_str}" for i in Cs(CS_ARCH_X86, CS_MODE_32).disasm(program(b), 0)))
+    for n in OPS:
+        print(n, '; '.join(f"{i.mnemonic} {i.op_str}" for i in Cs(CS_ARCH_X86, CS_MODE_32).disasm(b'\xDB\xE3\xD9\x2E' + body(n), 0)))
+
+def cpu_id():
+    d = {}
+    for l in open('/proc/cpuinfo'):
+        if ':' in l:
+            k, v = [x.strip() for x in l.split(':', 1)]
+            if k in ('vendor_id', 'cpu family', 'model', 'stepping', 'microcode', 'model name'): d.setdefault(k, v)
+    return f"cpu {d.get('vendor_id')} family {d.get('cpu family')} model {d.get('model')} stepping {d.get('stepping')} microcode {d.get('microcode')} ({d.get('model name')})"
 
 # ---------------------------------------------------------------- operand generator
 def norm(v):                       # uint64 array -> (normalized m, shift)
@@ -193,7 +221,7 @@ def tie_unary(op, rng, N, m, se):
     return nm, f80s((se >> 15), 16383 + E, nm)[1]
 
 def gen(op, rng, N, fcw):
-    kind = OPS[op][1]; p = pbits(fcw)
+    kind = OPS[op][3]; p = pbits(fcw)
     if kind in ('f32', 'f64'):
         w = 32 if kind == 'f32' else 64
         x = rng.integers(0, 2**64, N, dtype=U) & U(2**w - 1); eb = 8 if w == 32 else 11; mb = w - 1 - eb
@@ -291,32 +319,43 @@ def vectors(lib):
     print(f"vectors {n} equal {n - bad} diff {bad}"); return bad
 
 # ---------------------------------------------------------------- main
+def eqmask(op, want, got, full):
+    """Result bytes equal and status bits equal (full: all flags + C bits except TOP; else the unicorn-reliable C bits)."""
+    _, _, _, kind, w, smask = OPS[op]
+    if w == 0: eq = (want['r'] == got['r']) & (want['rse'] == got['rse'])
+    elif w > 0: msk = U(2 ** (8 * w) - 1) if w < 8 else ~U(0); eq = (want['r'] & msk) == (got['r'] & msk)
+    else: eq = np.ones(len(want), bool)
+    if op == 'xtract': eq &= (want['r2'] == got['r2']) & (want['r2se'] == got['r2se'])
+    m = 0xC7FF if full else smask
+    if m:
+        eq &= (want['fsw'] & m) == (got['fsw'] & m)
+        if op == 'fxam': eq &= (want['fsw2'] & m) == (got['fsw2'] & m)
+    return eq
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--n', type=int, default=20000); ap.add_argument('--op')
-    ap.add_argument('--seed', type=int, default=1); ap.add_argument('--disasm', action='store_true'); a = ap.parse_args()
+    ap.add_argument('--seed', type=int, default=1); ap.add_argument('--disasm', action='store_true')
+    ap.add_argument('--oracle', choices=['native', 'unicorn'], default='native'); a = ap.parse_args()
     if a.disasm: return disasm()
-    lib = build(); lib.run.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
-    tot = [0, 0, 0]; bad = vectors(lib)
+    lib, nat = build(); lib.run.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+    print(cpu_id()); print(f"oracle {a.oracle} seed {a.seed} n {a.n}")
+    tot = [0, 0, 0]; bad = vectors(lib); full = a.oracle == 'native'
     for oi, op in enumerate(NAMES):
         if a.op and a.op != op: continue
         rng = np.random.default_rng([a.seed, oi]); N = a.n * len(FCWS)
         fcw = np.tile(np.array(FCWS, np.uint32), a.n)
         am, ase, bm, bse = gen(op, rng, N, fcw)
         rec = np.zeros(N, IN_T); rec['fcw'], rec['am'], rec['ase'], rec['bm'], rec['bse'] = fcw, am, ase, bm, bse
-        want = oracle(op, rec); got = np.zeros(N, OUT_T)
-        lib.run(oi, N, rec.ctypes.data, got.ctypes.data)
-        _, kind, w, smask = OPS[op]
-        if w == 0: eq = (want['r'] == got['r']) & (want['rse'] == got['rse'])
-        elif w > 0: msk = U(2 ** (8 * w) - 1) if w < 8 else ~U(0); eq = (want['r'] & msk) == (got['r'] & msk)
-        else: eq = np.ones(N, bool)
-        if smask: eq &= (want['fsw'] & smask) == (got['fsw'] & smask)
-        if op == 'fxam': eq &= (want['fsw2'] & smask) == (got['fsw2'] & smask)
-        ne = ~eq; nd = int(ne.sum())
-        print(f"{op} {N} equal {N - nd} diff {nd}")
+        got = np.zeros(N, OUT_T); lib.run(oi, N, rec.ctypes.data, got.ctypes.data)
+        hw = native(op, rec, nat)
+        if full: want, extra = hw, ''
+        else: want = oracle(op, rec); extra = f" unicorn_vs_hw {int((~eqmask(op, want, hw, False)).sum())}"
+        ne = ~eqmask(op, want, got, full); nd = int(ne.sum())
+        print(f"{op} {N} equal {N - nd} diff {nd}{extra}")
         tot[0] += N; tot[1] += N - nd; tot[2] += nd
         for i in np.nonzero(ne)[0][:5]:
             print(f"  {op} a={am[i]:016x}:{ase[i]:04x} b={bm[i]:016x}:{bse[i]:04x} fcw={fcw[i]:#x} got={got['r'][i]:016x}:{got['rse'][i]:04x}/{got['fsw'][i]:04x} want={want['r'][i]:016x}:{want['rse'][i]:04x}/{want['fsw'][i]:04x}")
     print(f"total {tot[0]} equal {tot[1]} diff {tot[2] + bad}")
-    return 1 if tot[2] + bad else 0
+    return 1 if (tot[2] if full else 0) + bad else 0
 
 if __name__ == '__main__': sys.exit(main())

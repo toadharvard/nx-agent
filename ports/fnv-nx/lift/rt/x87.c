@@ -86,25 +86,6 @@ static fnvl_f80 addsub(fnvl_f80 a, fnvl_f80 b, u32 sub, u32 fcw, u32 *fsw)
 	}
 	if (x.den | y.den) *fsw |= DE;
 	if (x.k == K_ZERO && y.k == K_ZERO) return mk(sa == sb ? sa : rc == 1, 0, 0);
-	{   /* QEMU quirk (oracle bug): with a pseudo-denormal operand the 64-bit significand sum/difference wraps */
-		int ea = a.se & 0x7FFF, eb = b.se & 0x7FFF; u64 w;
-		if (ea == 0 && eb == 0 && sa == sb) {
-			w = a.m + b.m;
-			if (!w) return mk(sa, 0, 0);
-			lz = __builtin_clzll(w);
-			return rpack(sa, 1 - lz, w << lz, 0, fcw, fsw);
-		}
-		if (ea + eb == 1 && (ea ? b.m : a.m) >> 63) {          /* exp-1 operand P against pseudo-denormal Q */
-			u64 pm = ea ? a.m : b.m, qm = ea ? b.m : a.m; u32 ps = ea ? sa : sb;
-			w = sa == sb ? pm + qm : pm - qm;
-			if (sa == sb && !(w >> 63)) w = 0;               /* sum carried out cleanly: generic path below */
-			if (w || sa != sb) {
-				if (!w) return mk(ps, 0, 0);
-				lz = __builtin_clzll(w);
-				return rpack(ps, 1 - lz, w << lz, 0, fcw, fsw);
-			}
-		}
-	}
 	if (x.k == K_ZERO) return rpack(sb, y.e, y.m, 0, fcw, fsw);
 	if (y.k == K_ZERO) return rpack(sa, x.e, x.m, 0, fcw, fsw);
 	if (x.e < y.e || (x.e == y.e && x.m < y.m)) { t = x; x = y; y = t; ts = sa; sa = sb; sb = ts; }
@@ -190,7 +171,7 @@ fnvl_f80 fnvl_x_rndint(fnvl_f80 a, u32 fcw, u32 *fsw)
 	if (x.k == K_BAD) return indef(fsw);
 	if (ISNAN(x.k)) return nan2(a, x, a, x, fsw);
 	E = x.e - BIAS;
-	if (x.k == K_ZERO || x.k == K_INF || E >= 63 || (!(a.se & 0x7FFF) && !(a.m << 1))) return a;   /* QEMU: pseudo-denormal 2^63 returned as is */
+	if (x.k == K_ZERO || x.k == K_INF || E >= 63) return a;
 	q = (u64)rnd((u128)x.m << 64, 64 + 63 - E, x.s, fcw >> 10 & 3, &inex, &inc);
 	if (inex) *fsw |= PE;
 	if (inc) *fsw |= C1;
@@ -214,7 +195,7 @@ static fnvl_f80 from_ieee(u64 b, int eb, int mb, u32 *fsw)
 	if (ex == (1u << eb) - 1) {
 		if (!f) return inf(s);
 		if (!(f >> (mb - 1))) *fsw |= IE;
-		return mk(s, 0x7FFF, INTBIT | f << (63 - mb));     /* QEMU does not quiet an SNaN on load (hardware does) */
+		return mk(s, 0x7FFF, 3ull << 62 | f << (63 - mb));
 	}
 	if (ex == 0) {
 		if (!f) return mk(s, 0, 0);
@@ -235,8 +216,7 @@ static u64 to_ieee(fnvl_f80 a, u32 fcw, u32 *fsw, int eb, int mb)
 	if (x.k == K_BAD) { *fsw |= IE; return 1ull << (eb + mb) | emax << mb | 1ull << (mb - 1); }
 	if (ISNAN(x.k)) {
 		if (x.k == K_SNAN) *fsw |= IE;
-		mant = (a.m << 1) >> (64 - mb);
-		if (!mant) { s = 1; mant = 1ull << (mb - 1); }
+		mant = ((a.m | 1ull << 62) << 1) >> (64 - mb);     /* quieted */
 		return (u64)s << (eb + mb) | emax << mb | mant;
 	}
 	if (x.k == K_ZERO) return (u64)s << (eb + mb);
@@ -298,7 +278,7 @@ u32 fnvl_x_cmp(fnvl_f80 a, fnvl_f80 b, u32 quiet, u32 *fsw)
 u32 fnvl_x_xam(fnvl_f80 a, u32 empty)
 {
 	u32 e = a.se & 0x7FFF, r = a.se >> 15 ? C1 : 0;
-	if (empty) return 0x4100;                          /* QEMU: C1 clear for an empty register */
+	if (empty) return r | 0x4100;
 	if (e == 0x7FFF) return r | (a.m == INTBIT ? 0x500 : 0x100);
 	if (e == 0) return r | (a.m ? 0x4400 : 0x4000);
 	return r | 0x400;

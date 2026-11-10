@@ -16,7 +16,10 @@ struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]
 #define FL_OUT do{}while(0)
 #endif
 extern "C" { void fnvl_call(struct cpu*, u32 target); void fnvl_tail(struct cpu*, u32 target); void fnvl_trap(struct cpu*, u32 at, u32 why); }
-#define P(a) ((unsigned long)(u32)(a))
+/* Guest address -> host pointer. x86 addresses wrap at 2^32. GCC for AArch64 ILP32 folds a constant of a 32-bit
+   sum into the 64-bit addressing mode (uxtw x0,w0; ldr [x0,#64]), which does not wrap; the empty asm makes the 32-bit
+   sum a value of its own, so every access uses the wrapped address (test/addrwrap.py). */
+static inline __attribute__((always_inline)) unsigned long P(u32 a){ __asm__("" : "+r"(a)); return (unsigned long)a; }
 #define M8(a) (*(u8a*)P(a))
 #define M16(a) (*(u16a*)P(a))
 #define M32(a) (*(u32a*)P(a))
