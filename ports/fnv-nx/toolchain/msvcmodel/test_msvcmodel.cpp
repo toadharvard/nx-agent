@@ -1,4 +1,4 @@
-// test_msvcmodel.cpp - what toolchain/gcc/test_msvcmodel.py compiles with the game's compiler (MSVCMODEL1).
+// test_msvcmodel.cpp - what toolchain/msvcmodel/test_msvcmodel.py compiles with the game's compiler (MSVCMODEL1).
 // The numbers in the comments are the pinned cl's (MSVC 2008 SP1 /O2) for the same lines.
 #ifdef _MSC_VER                 // the same file compiles with cl, to reread its numbers
 typedef int ptrdiff_t;

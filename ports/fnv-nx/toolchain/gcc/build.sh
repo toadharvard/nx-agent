@@ -1,56 +1,136 @@
-#!/usr/bin/env bash
-# build.sh - the game's compiler: GCC 13.3.0 for aarch64-linux-gnu with msvcmodel.patch (MSVCMODEL1).
+#!/bin/bash
+# Build "fnvnx-a64": devkitA64's binutils/gcc/newlib (same sources and devkitPro patches) with an extra
+# AArch64 ILP32 multilib, so one aarch64-none-elf toolchain serves both LP64 (libnx, host) and ILP32 (game).
 #
-#   toolchain/gcc/build.sh <work dir> <prefix>      -> <prefix>/bin/aarch64-linux-gnu-g++ (prints its path)
+#   toolchain/gcc/build.sh <tarball dir> <build dir> <prefix> <devkitPro buildscripts checkout>
 #
-# Under -mabi=ilp32 the compiler's data model and array new/delete are the exe's (32-bit Visual C++ 2008):
-#   size_t = unsigned int, ptrdiff_t = int (types of their own in overloads, templates and names);
-#   the count before a new[] array exists exactly when the element has a non-trivial destructor, is one size_t
-#   whatever the alignment; a two-argument operator delete[] gets the size of one element; a size that overflows
-#   goes to the allocation function as the largest size (nothing thrown before the call).
-# Each rule is what the pinned cl compiles (test_msvcmodel.py has cl's own numbers). LP64 is untouched.
+# Tarballs (GNU and sourceware mirrors; devkitPro's own hosts are not needed):
+#   https://ftp.gnu.org/gnu/binutils/binutils-2.45.1.tar.xz
+#   https://ftp.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz
+#   https://sourceware.org/pub/newlib/newlib-4.6.0.20260123.tar.gz
+# Patches: git clone https://github.com/devkitPro/buildscripts (patches/*.patch).
+# Host packages: libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex.
 #
-# The rest is the distribution's cross compiler: the same version, the same target headers and library headers
-# (include search list checked below), the distribution's assembler and linker. Plugins are built against this
-# compiler's own plugin headers (toolchain/*/build.sh take them from $CXX), so CXX=<prefix>/bin/aarch64-linux-gnu-g++
-# is all tools/link/compile.sh needs. Needs: g++, make, libgmp-dev, libmpfr-dev, libmpc-dev, zlib1g-dev,
-# g++-13-aarch64-linux-gnu (for its headers and binutils). About 30 minutes on 4 cores.
+# GCC is pinned to 15.x: -mabi=ilp32 is deprecated since GCC 15 (it warns) and may be removed later.
 set -euo pipefail
-W=$(mkdir -p "$1" && cd "$1" && pwd)
-P=$(mkdir -p "$2" && cd "$2" && pwd)
-HERE=$(cd "$(dirname "$0")" && pwd)
-V=13.3.0
-SHA256=0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083
-cd "$W"
-if [ ! -f gcc-$V.tar.xz ] || ! echo "$SHA256  gcc-$V.tar.xz" | sha256sum -c --quiet; then
-  curl -fsSL --retry 5 -C - -o gcc-$V.tar.xz "${GCC_TARBALL_URL:-https://ftp.gnu.org/gnu/gcc/gcc-$V/gcc-$V.tar.xz}"
-  echo "$SHA256  gcc-$V.tar.xz" | sha256sum -c --quiet
+
+DL=$(realpath "$1"); BUILD=$(mkdir -p "$2" && realpath "$2"); PREFIX=$3; DKP=$(realpath "$4")
+BINUTILS_VER=2.45.1; BINUTILS_REL=2
+GCC_VER=15.2.0;      GCC_REL=7
+NEWLIB_VER=4.6.0.20260123; NEWLIB_REL=4
+TARGET=aarch64-none-elf
+JOBS=${JOBS:-$(nproc)}
+export PATH=$PREFIX/bin:$PATH
+
+cd "$BUILD"
+step() { [ -f "stamp-$1" ]; }
+done_() { touch "stamp-$1"; }
+
+unpack() { # name ver rel ext
+	if ! step "unpack-$1"; then
+		rm -rf "$1-$2"; tar -xf "$DL/$1-$2.tar.$4"
+		patch -p1 -d "$1-$2" -i "$DKP/patches/$1-$2-$3.patch"
+		done_ "unpack-$1"
+	fi
+}
+unpack binutils $BINUTILS_VER $BINUTILS_REL xz
+unpack gcc      $GCC_VER      $GCC_REL      xz
+unpack newlib   $NEWLIB_VER   $NEWLIB_REL   gz
+
+# Our only change on top of devkitA64: multilibs. devkitA64 builds {default, mcmodel=large, fPIC}; we build
+# {default (lp64), fPIC, mabi=ilp32, mabi=ilp32/fPIC}. -fpie/-fPIE select the fPIC variant as in devkitA64.
+if ! step multilib; then
+	python3 - "gcc-$GCC_VER/gcc/config/aarch64/t-aarch64" <<'EOF'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+new = ("MULTILIB_OPTIONS    = mabi=ilp32 fPIC\n"
+       "MULTILIB_DIRNAMES   = ilp32 pic\n"
+       "MULTILIB_REQUIRED   = mabi=ilp32 fPIC mabi=ilp32/fPIC\n"
+       "MULTILIB_MATCHES    = fPIC=fpic fPIC=fpie fPIC=fPIE\n")
+s2, n = re.subn(r"MULTILIB_OPTIONS    = mcmodel=large fPIC\n.*?MULTILIB_MATCHES[^\n]*\n", new, s, flags=re.S)
+assert n == 1, "devkitA64 multilib block not found"
+open(p, "w").write(s2)
+EOF
+	done_ multilib
 fi
-STAMP=$(sha256sum "$HERE/msvcmodel.patch" | cut -c1-16)
-if [ ! -f "$P/.msvcmodel-$STAMP" ]; then
-  rm -rf src build
-  mkdir src build
-  tar -xJf gcc-$V.tar.xz -C src --strip-components=1
-  patch -d src -p1 < "$HERE/msvcmodel.patch"
-  cd build
-  ../src/configure --target=aarch64-linux-gnu --prefix="$P" --program-prefix=aarch64-linux-gnu- \
-    --enable-languages=c,c++ --disable-bootstrap --disable-multilib --enable-plugin --disable-nls \
-    --enable-checking=release --disable-werror --with-system-zlib --enable-multiarch \
-    --with-sysroot=/ --includedir=/usr/aarch64-linux-gnu/include \
-    --with-gxx-include-dir=/usr/aarch64-linux-gnu/include/c++/13 \
-    --with-as=/usr/bin/aarch64-linux-gnu-as --with-ld=/usr/bin/aarch64-linux-gnu-ld \
-    --with-pkgversion="fnv-nx msvcmodel $STAMP" > configure.log 2>&1
-  make -j"${JOBS:-$(nproc)}" all-gcc > make.log 2>&1
-  make install-gcc > install.log 2>&1
-  touch "$P/.msvcmodel-$STAMP"
+
+# GCC 15 warns "-mabi=ilp32 is deprecated" (OPT_Wdeprecated); libgcc builds with -Werror, so the ILP32
+# multilib fails. Drop the warning (the deprecation itself is documented in docs/TOOLCHAIN.md).
+if ! step nodeprecate; then
+	python3 - "gcc-$GCC_VER/gcc/config/aarch64/aarch64.cc" <<'EOF'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'warning (OPT_Wdeprecated, "%<-mabi=ilp32%> is deprecated");'
+assert s.count(old) == 1, "ilp32 deprecation warning not found"
+open(p, "w").write(s.replace(old, '/* fnvnx-a64: ILP32 deprecation warning removed */;'))
+EOF
+	done_ nodeprecate
 fi
-CXX=$P/bin/aarch64-linux-gnu-g++
-# the include search list must be the distribution compiler's, but for the compiler's own directory
-list() { echo | "$1" -mabi=ilp32 -xc++ -E -v - 2>&1 | sed -n '/#include <...> search starts here/,/End of search list/p' \
-         | sed '1d;$d' | while read -r d; do readlink -m "$d"; done | grep -v '/lib/gcc' ; }
-if [ "$(list "$CXX")" != "$(list aarch64-linux-gnu-g++)" ]; then
-  echo "build.sh: the include search list differs from the distribution compiler's:" >&2
-  diff <(list "$CXX") <(list aarch64-linux-gnu-g++) >&2 || true
-  exit 3
+
+# Note: no "a && b" for build steps, set -e does not stop on a failing left side of &&.
+if ! step binutils; then
+	mkdir -p b-binutils; cd b-binutils
+	../binutils-$BINUTILS_VER/configure --prefix="$PREFIX" --target=$TARGET --disable-nls --disable-werror \
+		--disable-shared --disable-debug --enable-lto --enable-plugins --enable-poison-system-directories
+	make -j"$JOBS"
+	make install
+	cd ..; done_ binutils
 fi
-echo "$CXX"
+
+GCC_CONF=(--target=$TARGET --prefix="$PREFIX" --enable-languages=c,c++,lto
+	--with-gnu-as --with-gnu-ld --with-gcc --enable-cxx-flags=-ffunction-sections
+	--disable-libstdcxx-verbose --enable-poison-system-directories --enable-threads=posix
+	--disable-win32-registry --disable-nls --disable-debug --disable-libmudflap --disable-libssp
+	--disable-libgomp --disable-libstdcxx-pch --enable-libstdcxx-time=yes --enable-libstdcxx-filesystem-ts
+	--with-newlib=yes --with-native-system-header-dir=/include --with-sysroot="$PREFIX/$TARGET"
+	--enable-lto --disable-tm-clone-registry --disable-__cxa_atexit --with-bugurl=none
+	--with-march=armv8 --enable-multilib --with-pkgversion=fnvnx-a64)
+
+if ! step gcc1; then
+	mkdir -p b-gcc; cd b-gcc
+	if [ ! -f config.status ]; then
+		CFLAGS_FOR_TARGET="-O2 -ffunction-sections -fdata-sections" \
+		CXXFLAGS_FOR_TARGET="-O2 -ffunction-sections -fdata-sections" LDFLAGS_FOR_TARGET="" \
+			../gcc-$GCC_VER/configure "${GCC_CONF[@]}"
+	fi
+	make -j"$JOBS" all-gcc
+	make install-gcc
+	cd ..; done_ gcc1
+fi
+
+if ! step newlib; then
+	mkdir -p b-newlib; cd b-newlib
+	CFLAGS_FOR_TARGET="-O2 -ffunction-sections -fdata-sections" \
+		../newlib-$NEWLIB_VER/configure --disable-newlib-supplied-syscalls --enable-newlib-mb \
+		--disable-newlib-wide-orient --enable-newlib-register-fini --target=$TARGET --prefix="$PREFIX"
+	make -j"$JOBS"
+	make install -j1
+	cd ..; done_ newlib
+fi
+
+# Stage 1 generated gcc's <limits.h> before newlib's headers existed, so it does not #include_next the
+# newlib one (no PATH_MAX, which libnx needs). Regenerate it now that newlib is installed.
+if ! step limits; then
+	rm -f b-gcc/gcc/stmp-int-hdrs b-gcc/gcc/include/limits.h
+	make -C b-gcc -j"$JOBS" all-gcc
+	make -C b-gcc install-gcc
+	grep -q syslimits "$PREFIX/lib/gcc/$TARGET/$GCC_VER/include/limits.h"
+	done_ limits
+fi
+
+if ! step gcc2; then
+	cd b-gcc
+	make -j"$JOBS"
+	make install-strip
+	cd ..; done_ gcc2
+fi
+
+for lib in libgcc.a libstdc++.a libsupc++.a; do   # every multilib must have them
+	for d in $($TARGET-gcc -print-multi-lib | cut -d';' -f1); do
+		f=$($TARGET-gcc $(echo "$($TARGET-gcc -print-multi-lib | grep "^$d;" | cut -d';' -f2)" | sed 's/@/ -/g') \
+			-print-file-name=$lib)
+		[ -f "$f" ] || { echo "missing $lib for multilib $d"; exit 1; }
+	done
+done
+$TARGET-gcc -print-multi-lib
+echo "fnvnx-a64 installed in $PREFIX"

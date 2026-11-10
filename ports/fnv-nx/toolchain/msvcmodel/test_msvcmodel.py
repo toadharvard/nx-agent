@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_msvcmodel.py - the game's compiler has the exe's data model and array new/delete (MSVCMODEL1).
 
-    CXX=<prefix>/bin/aarch64-linux-gnu-g++ python3 toolchain/gcc/test_msvcmodel.py
+    CXX=<prefix>/bin/aarch64-linux-gnu-g++ python3 toolchain/msvcmodel/test_msvcmodel.py
 
 Compiles test_msvcmodel.cpp (-mabi=ilp32 -O2, exceptions on) and checks the constants the compiler passes against
 the pinned cl's code for the same lines (the comments of test_msvcmodel.cpp). Skips when $CXX is a compiler without
