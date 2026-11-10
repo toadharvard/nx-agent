@@ -23,7 +23,8 @@ POLICY = [
 ]
 # attribute names that carry a rule on ANY expression
 ATTR = {"imap_unordered": "completion-order", "iterdir": "unsorted-listing", "glob": "unsorted-listing",
-        "rglob": "unsorted-listing", "st_ino": "inode", "st_dev": "inode", "st_nlink": "inode", "inode": "inode",
+        "rglob": "unsorted-listing", "st_ino": "inode", "st_dev": "inode", "st_nlink": "inode", "inode": "inode", "st_uid": "host", "st_gid": "host",
+        "owner": "host", "group": "host",
         "native_id": "host", "stat": "stat-result", "lstat": "stat-result", "fstat": "stat-result",
         "now": "clock", "today": "clock", "utcnow": "clock", "__hash__": "entropy"}
 ATTR.update({a: "clock" for a in "st_mtime st_atime st_ctime st_mtime_ns st_atime_ns st_ctime_ns st_birthtime".split()})
@@ -43,7 +44,7 @@ MODECALLS = "gzip.open gzip.GzipFile gzip.compress zipfile.ZipFile tarfile.open 
 # (a) PURE: stdlib modules whose documented behaviour is a function of their arguments (assumption A-stdlib)
 PURE = set(("ast json hashlib re struct collections itertools functools dataclasses typing enum abc math bisect heapq "
             "array binascii base64 zlib io string textwrap shlex fnmatch posixpath copy contextlib types argparse errno "
-            "stat csv difflib bz2 lzma codecs unicodedata decimal fractions statistics traceback warnings keyword "
+            "stat csv difflib bz2 lzma codecs unicodedata decimal fractions traceback warnings keyword "
             "tokenize token __future__ ntpath genericpath").split())
 # (b) RESTRICTED: module -> allowed members ("*" all, "P_*" prefix, dotted "a.b" entries); rules above apply first
 RESTRICTED = {
