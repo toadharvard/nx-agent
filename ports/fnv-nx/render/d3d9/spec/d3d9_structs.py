@@ -103,8 +103,8 @@ def load():
 
 def decl_fields(body):
     out = []
-    for stmt in body.split(";"):
-        stmt = " ".join(stmt.split())
+    for stmt in re.sub(r"(?m)^\s*#.*$", "", body).split(";"):
+        stmt = re.sub(r"\s+\[", "[", " ".join(stmt.split()))
         if not stmt: continue
         parts = [p.strip() for p in stmt.split(",")]
         head = parts[0]
