@@ -2,6 +2,7 @@
 """Hermetic build sandbox (rule R12 BUILD-PURE): a stage sees ONLY its declared inputs, so its outputs are a
 function of the stage key. Needs root, Linux x86-64. Stage document "fnvnx-stage/1":
   {"format","stage","argv":[abs tool, args], "cwd","env":{COMPLETE env},"inputs":[{"at","tree"}],"outputs":[dirs]}
+  optional "class": "build" | "verification" (part of the key; verdict.py provenance requires it).
 key = cas.stage_key(document + {"sandbox": {sandbox.py sha256, cas.py sha256}}). Results: STORE/keys/<key>/result.json.
 Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked from the CAS and bound read-only;
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
@@ -64,7 +65,8 @@ def check_doc(doc):
           and isinstance(doc.get("argv"), list) and doc["argv"] and all(isinstance(a, str) for a in doc["argv"])
           and doc["argv"][0].startswith("/") and isinstance(doc.get("cwd"), str) and doc["cwd"].startswith("/")
           and isinstance(doc.get("env"), dict) and isinstance(doc.get("inputs"), list)
-          and isinstance(doc.get("outputs"), list) and set(doc) == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"})
+          and isinstance(doc.get("outputs"), list) and set(doc) - {"class"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and doc.get("class", "build") in ("build", "verification"))
     if not ok:
         raise SbxError("malformed stage document")
     for i in doc["inputs"]:
