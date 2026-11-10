@@ -226,6 +226,10 @@ static void pre_genericize(void *gcc_data, void *)
   std::string name = asmname(fn);
   call_count.clear(); fn_sites.clear();
   cp_walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
+  /* the in-charge form of a constructor or destructor is never emitted: its clones (C1/C2, D0/D1/D2) are, and each
+     clone with a body of its own comes here itself. The form is still walked: the verdict of its clones is looked
+     up by its name (source_name). */
+  if (DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) return;
   for (size_t i = 0; i < fn_sites.size(); i++)
     arg_sites.push_back(fn_sites[i].head + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
 }

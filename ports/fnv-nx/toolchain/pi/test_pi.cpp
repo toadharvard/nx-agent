@@ -28,6 +28,8 @@ int o2() { return two(ga(), ga()); }              // the same function twice: no
 int o3(int i) { return two(i++, ga()); }          // an effect that is not a call
 int o4() { return two(ga(), 1); }                 // one argument with an effect: no question of order
 int o5(W& x) { return x.self().w(ga(), 2); }      // the object counts
+struct KD { ~KD(); }; KD::~KD() { two(ga(), gb()); }   // one row, for the emitted clone, none for the in-charge form
+struct KE { ~KE(); }; KE::~KE() { two(ga(), ga()); }   // the verdict reaches the clones
 // FALL2: the end of a non-void function
 [[noreturn]] void die();
 int fo1(int x) { if (x) return 1; }                               // reaches the end

@@ -66,6 +66,10 @@ def main():
         ('_Z3fo4i', ''): ['ok', '', ''],
         ('_Z3fo5i', ''): ['falloff', '', ''],
         ('_ZN1KC2Ev', ''): ['ok', '', '1K'],
+        ('_ZN2KDD2Ev', ''): ['ok', '', '2KD'],
+        ('_ZN2KDD1Ev', 'alias'): ['ok', '', '2KD'],
+        ('_ZN2KED2Ev', ''): ['argorder', '', '2KE'],
+        ('_ZN2KED1Ev', 'alias'): ['argorder', '', '2KE'],
         ('_ZN1KD2Ev', ''): ['ok', '', '1K'],
         ('_ZN1KC1Ev', 'alias'): ['ok', '', '1K'],                      # the same body under its other symbol
         ('_ZN1KD1Ev', 'alias'): ['ok', '', '1K'],
@@ -81,7 +85,8 @@ def main():
         print('FAIL rows', sorted(set(rows) ^ set(want)))
     ao = re.findall(r'\.ascii\s+"(.*)\\n"', s2)
     # the last field: the call's number among the function's calls of that callee / how many there are
-    wantao = ['_Z2o1v\\t_Z3twoii\\t_Z2gav|_Z2gbv\\t0/1', '_Z2o5R1W\\t_ZN1W1wEii\\t_ZN1W4selfEv|_Z2gav|\\t0/1']
+    wantao = ['_Z2o1v\\t_Z3twoii\\t_Z2gav|_Z2gbv\\t0/1', '_Z2o5R1W\\t_ZN1W1wEii\\t_ZN1W4selfEv|_Z2gav|\\t0/1',
+              '_ZN2KDD2Ev\\t_Z3twoii\\t_Z2gav|_Z2gbv\\t0/1']
     if ao != wantao:
         fails += 1
         print('FAIL argorder rows', ao)
