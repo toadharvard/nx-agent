@@ -13,7 +13,11 @@ routes bind a key to an exe vftable, and they must agree:
   N  name: the unit's own MSVC symbol `??_7Class@@6B...@` (units.json gives its exe address); the sub-vtable is
      chosen by the offset the Itanium address point and the exe's COL both carry.
 
-Verdicts per key: bound (by P, by N, by both), CONFLICT (P gives two tables), DISAGREE (P != N), unbound.
+  S  slots: the one exe vftable whose slot targets are the exe addresses of the functions the native
+     sub-vtable holds (through the address map), allowing the one-slot shift of a doubled destructor.
+
+Verdicts per key: bound (with the routes that voted), CONFLICT (P gives two tables), DISAGREE (routes differ),
+unbound.
 The gate is: CONFLICT == 0, DISAGREE == 0, unbound == 0; anything else is a BODYSEL row for the functions
 that hold the key.  Output is exe- and decomp-derived: container and fnv-nx-build only.
 """
@@ -42,6 +46,18 @@ def itanium_class(sym):
 
 def msvc_vftable_prefix(parts):
     return '??_7' + '@'.join(reversed(parts)) + '@@6B'
+
+
+BR = re.compile(r'__fnv(?:nx_br|nx_vflag)?_([0-9a-f]{8})')
+
+
+def slot_address(amap, ob, name):
+    if not name:
+        return None
+    m = BR.match(name)
+    if m:
+        return int(m.group(1), 16)
+    return amap.get((ob, name))
 
 
 def exe_groups(Fx):
@@ -84,7 +100,7 @@ def embeddings(nat, exe, known, limit=2):
     return out
 
 
-def solve(facts, obj, units):
+def solve(facts, obj, units, amap):
     fn, vft = facts['fn'], facts['vft']
     unit_of = {}
     usym = {}
@@ -99,7 +115,7 @@ def solve(facts, obj, units):
     gz = collections.defaultdict(set)
     for ob, d in ztv.items():
         for s, pts in d.items():
-            gz[s].add(tuple(pts))
+            gz[s].add(tuple((x[0], x[1]) for x in pts))
     funcs = {k: v for k, v in obj.items() if k[1] != 'ztv' and v[0]}
     keys = set()
     for (ob, a), v in funcs.items():
@@ -168,7 +184,7 @@ def solve(facts, obj, units):
         parts = itanium_class(sym)
         if parts is None or add is None:
             continue
-        pts = dict(ztv.get(ob, {}).get(sym) or (next(iter(gz[sym])) if len(gz.get(sym, ())) == 1 else ()))
+        pts = {x[0]: x[1] for x in (ztv.get(ob, {}).get(sym) or (next(iter(gz[sym])) if len(gz.get(sym, ())) == 1 else ()))}
         if add not in pts:
             continue
         off = pts[add]
@@ -178,25 +194,52 @@ def solve(facts, obj, units):
             c = {a for s, aa in gname.items() if s.startswith(pre) for a in aa if a in vft and vft[a][1] == off}
         if len(c) == 1:
             Nn[K] = next(iter(c))
+    # route S: the exe vftable whose slots are the functions the native sub-vtable holds
+    by_slot = collections.defaultdict(set)
+    for V, (_, _, slots, _) in vft.items():
+        for i, t in enumerate(slots):
+            by_slot[(i, t)].add(V)
+    S = {}
+    for K in keys:
+        ob, sym, add = K
+        grp = [x for x in ztv.get(ob, {}).get(sym, ()) if x[0] == add]
+        if not grp:
+            continue
+        addrs = [slot_address(amap, ob, n) for n in grp[0][2]]
+        score = collections.Counter()
+        nk = 0
+        for shift in (0, 1):                 # 1: two Itanium destructor slots stand where the exe has one
+            known = [(i - shift, t) for i, t in enumerate(addrs) if t is not None and i - shift >= 0]
+            nk = max(nk, len(known))
+            sc = collections.Counter()
+            for it in known:
+                for V in by_slot.get(it, ()):
+                    sc[V] += 1
+            for V, n in sc.items():
+                score[V] = max(score[V], n)
+        top = score.most_common(2)
+        # the table that holds every known slot, and no other table does
+        if top and top[0][1] == nk and (len(top) == 1 or top[1][1] < nk):
+            S[K] = top[0][0]
     verdict = {}
     bind = {}
     for K in keys:
-        p, n = P.get(K), Nn.get(K)
-        if p and len(p) > 1:
+        votes = {}
+        if K in P and len(P[K]) > 1:
             verdict[K] = 'CONFLICT'
-        elif p and n is not None:
-            verdict[K] = 'bound: P and N agree' if next(iter(p)) == n else 'DISAGREE'
-            if verdict[K][0] == 'b':
-                bind[K] = n
-        elif p:
-            verdict[K] = 'bound: P only'
-            bind[K] = next(iter(p))
-        elif n is not None:
-            verdict[K] = 'bound: N only'
-            bind[K] = n
+            continue
+        for r, v in (('P', next(iter(P[K])) if K in P else None), ('N', Nn.get(K)), ('S', S.get(K))):
+            if v is not None:
+                votes.setdefault(v, []).append(r)
+        if len(votes) == 1:
+            V, rs = next(iter(votes.items()))
+            verdict[K] = 'bound: ' + '+'.join(rs)
+            bind[K] = V
+        elif votes:
+            verdict[K] = 'DISAGREE: ' + ' vs '.join(sorted('+'.join(rs) for rs in votes.values()))
         else:
             verdict[K] = 'unbound' if K[2] is not None else 'unbound: value not stored plainly'
-    return dict(keys=keys, P=P, N=Nn, verdict=verdict, bind=bind, stats=st, funcs=funcs)
+    return dict(keys=keys, P=P, N=Nn, S=S, verdict=verdict, bind=bind, stats=st, funcs=funcs)
 
 
 def report(R, facts, lst=0):
@@ -221,10 +264,10 @@ def report(R, facts, lst=0):
         for tag in ('CONFLICT', 'DISAGREE'):
             n = 0
             for K, v in sorted(R['verdict'].items(), key=str):
-                if v == tag and n < lst:
+                if v.startswith(tag) and n < lst:
                     n += 1
-                    print(tag, K, 'P', [(hex(x), vft[x][0], vft[x][1]) for x in R['P'].get(K, ())],
-                          'N', R['N'].get(K) and (hex(R['N'][K]), vft[R['N'][K]][0]))
+                    d = lambda x: x and (hex(x), vft[x][0], vft[x][1])
+                    print(v, K, 'P', [d(x) for x in R['P'].get(K, ())], 'N', d(R['N'].get(K)), 'S', d(R['S'].get(K)))
     return c, fbad
 
 
@@ -233,14 +276,16 @@ def main():
     ap.add_argument('--facts', required=True)
     ap.add_argument('--obj', required=True)
     ap.add_argument('--units', required=True)
+    ap.add_argument('--link', required=True, help='link dir (out/addrmap.tsv)')
     ap.add_argument('--out')
     ap.add_argument('--list', type=int, default=0)
     a = ap.parse_args()
     facts = pickle.load(open(a.facts, 'rb'))
-    R = solve(facts, pickle.load(open(a.obj, 'rb')), json.load(open(a.units)))
+    import objfacts
+    R = solve(facts, pickle.load(open(a.obj, 'rb')), json.load(open(a.units)), objfacts.load_addrmap(a.link))
     c, fbad = report(R, facts, a.list)
     if a.out:
-        pickle.dump(dict(bind=R['bind'], verdict=R['verdict'], P=R['P'], N=R['N'], bodysel=sorted(fbad)), open(a.out, 'wb'), protocol=4)
+        pickle.dump(dict(bind=R['bind'], verdict=R['verdict'], P=R['P'], N=R['N'], S=R['S'], bodysel=sorted(fbad)), open(a.out, 'wb'), protocol=4)
 
 
 if __name__ == '__main__':

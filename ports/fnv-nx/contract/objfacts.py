@@ -7,6 +7,7 @@ Per native function that the address map binds to an exe address:
   vt     [(insn_off, symbol, addend, base, store_off)]  vtable-pointer values the function materializes.
          symbol is `_ZTV...` or `__fnv_<vftable>`; addend is what the code adds to the GOT value; base is
          'obj' (a pointer register), 'stk' (sp/x29) or None when the value is not stored by a plain `str`.
+  (object, 'ztv') -> {`_ZTV` symbol: [(address point, -offset_to_top, [slot symbol or None])]}
   data   {exe data address}      `__fnv_<addr>` references outside .text
   calls  {exe code address}      direct call/jump targets, by address
   other  {symbol}                direct call targets with no address
@@ -192,8 +193,11 @@ def scan_object(path, amap, vftset):
                 pts = []
                 for o in range(v, v + sz - 4, 4):
                     if (shndx, o) not in rel and rel.get((shndx, o + 4), '').startswith('_ZTI'):
-                        pts.append((o + 8 - v, -struct.unpack_from('<i', sec, o)[0]))
-                ztv[name] = pts
+                        pts.append([o + 8 - v, -struct.unpack_from('<i', sec, o)[0], []])
+                for i, pt in enumerate(pts):          # slot symbols up to the next group's offset-to-top word
+                    end = pts[i + 1][0] - 8 if i + 1 < len(pts) else sz
+                    pt[2] = [rel.get((shndx, v + o)) for o in range(pt[0], end, 4)]
+                ztv[name] = [tuple(pt) for pt in pts]
         out[(ob, 'ztv')] = ztv
         # functions with an address but no relocations still need a vcall list and an entry
         for k, d in fb.items():
