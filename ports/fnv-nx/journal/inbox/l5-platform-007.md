@@ -23,6 +23,13 @@
 | kernel32: соответствие ENV-TRUTH и 20 отсутствующих функций | файлов нет | исполнитель остановлен до первой записи: в дереве от этой задачи ничего нет, начинать с нуля по прежнему ТЗ |
 
 ### Точный следующий шаг при возобновлении
+0. ПЕРВЫМ ДЕЛОМ — исправить противоречия утверждённой ENV-TRUTH, найденные аудитом (audit2/all.tsv), по прежнему ТЗ
+   задачи «kernel32: соответствие ENV-TRUTH», с падающим тестом вперёд:
+   - M6: `SteamAPI_Init` и `SteamAPI_IsSteamRunning` возвращают true — должны false; аксессоры интерфейсов — NULL;
+   - F5: `GetStdHandle` и консольные функции отвечают успехом — должны NULL / отказ с `ERROR_INVALID_HANDLE`;
+   - P3: `DebugBreak` только пишет в журнал — должен поднимать `EXCEPTION_BREAKPOINT`;
+   - M5: `GetModuleHandle`/`LoadLibrary`/`GetProcAddress` знают 6 системных DLL из 14 — должны все 14;
+   - P4, P5: нет `GetVersionExA`/`GetVersion` (6.1.7601 SP1) и системных каталогов (`C:\Windows`, `C:\Windows\system32`).
 1. `git checkout` ветки, собрать `tests/s4` и `tests/s7` (нужны `NLS_DIR`, `FNVNX_FONT_REF`, `ext/freetype` — см.
    `tests/s4/Makefile` и `platform/win32/tools/fetch_freetype.sh`); снять число провалов на WIP-голове.
 2. Довести три задачи выше, каждую отдельным исполнителем с прежним ТЗ (приёмка: набор зелёный; для шрифтов — побайтное
