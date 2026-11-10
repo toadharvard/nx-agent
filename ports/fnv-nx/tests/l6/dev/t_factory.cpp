@@ -1,10 +1,10 @@
 #include "t_common.h"
 #include <stdlib.h>
-const char* g_part = "?"; int g_checks[8], g_fails[8], g_part_i = 0; int g_preloads = 0;
+const char* g_ctx = ""; const char* g_part = "?"; int g_checks[8], g_fails[8], g_part_i = 0; int g_preloads = 0;
 void t_part(const char* name) { g_part = name; g_part_i = name[0] - 'a'; }
 bool t_check(bool ok, const char* what, const char* file, int line) {
     g_checks[g_part_i]++;
-    if (!ok) { if (g_fails[g_part_i]++ < 12) printf("FAIL %s: %s (%s:%d)\n", g_part, what, strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line); }
+    if (!ok) { if (g_fails[g_part_i]++ < 12) printf("FAIL %s: %s [%s] (%s:%d)\n", g_part, what, g_ctx, strrchr(file, '/') ? strrchr(file, '/') + 1 : file, line); }
     return ok;
 }
 static const GUID g_trk = {0x7a1b2c3d, 0x1111, 0x2222, {1, 2, 3, 4, 5, 6, 7, 8}};
@@ -18,6 +18,9 @@ static D3DSURFACE_DESC g_desc[256]; static NxSurface9* g_surf[256]; static int g
 NxSurface9* t_surface(const TEnv& e, uint32_t usage, uint32_t w, uint32_t h) {
     NxSurface9* s = t_child<NxSurface9>(e); D3DSURFACE_DESC d = D3DSURFACE_DESC(); d.Usage = usage; d.Width = w; d.Height = h;
     g_surf[g_nsurf] = s; g_desc[g_nsurf++] = d; return s;
+}
+NxSurface9* t_subsurface(const TEnv& e, NxObj* cont, uint32_t usage, uint32_t w, uint32_t h) {
+    NxSurface9* s = new NxSurface9; s->asSubResource(e.dev, cont); D3DSURFACE_DESC d = D3DSURFACE_DESC(); d.Usage = usage; d.Width = w; d.Height = h; g_surf[g_nsurf] = s; g_desc[g_nsurf++] = d; return s;
 }
 HRESULT STDMETHODCALLTYPE NxSurface9::GetDesc(D3DSURFACE_DESC* p) { for (int i = 0; i < g_nsurf; i++) if (g_surf[i] == this) { *p = g_desc[i]; return D3D_OK; } return D3DERR_INVALIDCALL; }
 // declaration module stand-ins required by state_rt.h: implicit FVF declarations (device-cached: one per FVF, owned by the device), PreLoad backend

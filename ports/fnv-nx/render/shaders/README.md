@@ -44,7 +44,8 @@ bytecode --> front end (frontend.c) --> reflection JSON / CTAB    <- stable
   D3D9 code and the DKSH stage stay untouched. Not built (and, after J-0015, not planned).
 * **Layout contract** (`fnvnx_dk_layout.h`, mirrored in the patch):
   UBO 0 = float constants `vec4 c[256]` by register; UBO 1 = `ivec4 i[16]` + `bool b[16]` (std140,
-  bools at byte 256 + 16n); UBO 2 = driver constants; sampler binding = sampler register; vertex
+  bools at byte 256 + 16n); UBO 2 = driver constants (the PS block is 352 bytes: `uvec4 stype[2]` appended at byte 320,
+  the ps_1_x sampler type words, below); sampler binding = sampler register (ps_1_x: 2D n, CUBE 8 + n, VOLUME 16 + n, below); vertex
   attribute location and VS->PS varying location by the total declaration-set rule below (fog at 18).
 * **D3D9 conventions** in the `glsldk` profile: VS epilogue `gl_Position.xy += posfix.xy * w` (half-pixel,
   driver sets `(-1/w, +1/h)`) and `gl_Position.y *= posfix.z` (y flip, -1 with OriginUpperLeft); depth is
@@ -174,14 +175,34 @@ Requested by S6n for the lit and image-space families. Findings on the pinned ua
   bound at all. If they are, the TGSI route above is the plan, starting with an HFMA2 encoder test against
   bit patterns confirmed on hardware.
 
+## SM1-3 totality classes (the gate `tests/l6/test_sm_total.py`; behavioural tests `tests/l6/sm_fix/test_ps1x.py`, `test_sm_ops.py`)
+
+Rules, each from the MS D3D9 asm reference page named in the code comment, each with a test that runs the GLSL on llvmpipe and compares
+with values computed by hand:
+
+* **ps_1_x sampler dimensionality is data.** ps_1_x has no dcl: the type is that of the texture bound at draw time (and a CTAB is D3DX
+  metadata, never trusted). Every ps_1_x stage that samples declares `sampler2D` at binding n, `samplerCube` at 8 + n, `sampler3D` at
+  16 + n (the numbering `ffp.frag.glsl` uses) and one helper `ps_dk_smpN(vec3)` that selects by the stage's type word
+  `ps_drv_stype[n / 4][n % 4]` (0 2D, 1 CUBE, 2 VOLUME; PS driver block byte 320, `FNVNX_DK_PS_STYPE_OFFSET`); every texture instruction
+  samples through it (2D uses xy, the others xyz; a 2D-coordinate instruction passes z = 0). A zeroed block = 2D everywhere. The reflection
+  JSON lists such a stage as `"type": "bound"` with its three bindings and `type_word`. Hosts must allocate 352 bytes for the PS block.
+* **Relative constant reads need no CTAB**: `c[a0 + n]` / `c[aL + n]` always read the stage's constant file by register through
+  `dk_relc` (def'd values overlaid, 0 outside c[0..256) vs / c[0..224) ps).
+* **ps_1_x texture instructions**: `texreg2ar/gb/rgb`, `texdp3`, `texdp3tex`, `bem`, `texdepth`, `texm3x2depth` implemented (depth: `z / w`,
+  1.0 when `w == 0`, clamped to [0, 1], written to `gl_FragDepth`); `texm3x3spec` (upstream multiplied componentwise instead of the dot
+  product and its eye vector read the wrong register), `texbeml` (the luminance offset came from the bump matrix) repaired.
+* **Predicates**: `setp` writes p0 by its write mask (upstream reduced every p0 write to `.x`); `if` / `callnz` / `breakp` take one component
+  by the replicate swizzle with an optional NOT (`[!]p0.c`).
+* **texld family**: `texldd` / `texldl` on cube and volume (`textureGrad`), `texldp` on a cube (xyz / w), ps_3_0 `texld*` coordinate with a source
+  modifier, vs_3_0 `dcl_cube` / `dcl_volume` (reserved-bit mask).
+* **Front-end refusals of legal programs**: one-source `sgn` in vs_3_0 (the form is read from the instruction's length field; the MS form's two
+  scratch temporaries are written by the instruction, so they need no earlier write, and the translator never writes them: their contents
+  after the instruction are undefined), `m4x4` / `m3x4` with `.xyz`, `_sat` on `frc` / `sincos` in pixel shaders, `sincos` `.xyz` (z, w are
+  undefined by MS: written 0), vs_1_1 `frc` any mask, labels up to l2047 in sm3, forward calls (prototypes for every called label).
+
 ## Known gaps
 
-* MojoShader GLSL does not implement `texreg2rgb`, `texdp3tex`, `texdp3`, `texm3x2depth` (ps_1_2/1_3);
-  `setp` with scalar sources into a wider mask.
-  Translation fails with a clear error (ps12_texdp3tex in the corpus checks this).
-* ps_1_x sampler types are not declared in the bytecode: `tex`/`texld` assume 2D (cube only where the
-  opcode implies it). D3D picks the type from the bound texture; the front end needs a per-shader sampler
-  type map (MojoShader's `MOJOSHADER_samplerMap`) or per-type variants.
+* `setp` with scalar sources into a wider mask.
 * Vertex attributes: 16 locations (uam limit), so only POSITION0, BLENDWEIGHT0, BLENDINDICES0, NORMAL0,
   COLOR0-1, TEXCOORD0-7, TANGENT0, BINORMAL0 are mapped; other usages fail translation.
 * mojoshader_assembler (tests only) lacks predication and SM1 relative addressing (patched in

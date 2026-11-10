@@ -92,7 +92,7 @@ void t_defaults() {
     float np = 7; (void)np; d->SetNPatchMode(2.5f); CHECK(d->GetNPatchMode() == 2.5f); UINT pal = 9; d->SetCurrentTexturePalette(4); d->GetCurrentTexturePalette(&pal); CHECK_EQ(pal, 4);
     CHECK_EQ(d->GetNPatchMode() == 2.5f, 1);
     PALETTEENTRY pe[256]; uint8_t* pb = (uint8_t*)pe; for (int i = 0; i < 1024; i++) pb[i] = (i & 3) == 3 ? 255 : (uint8_t)i; uint8_t gb[1024];
-    for (UINT p : {0u, 1u, 255u, 65535u, 0xffffffffu}) { CHECK_HR(d->SetPaletteEntries(p, pe), D3D_OK); pb[0] = (uint8_t)p; }
+    for (UINT p : {0u, 1u, 255u, 65535u, 0xffffffffu}) { pb[0] = (uint8_t)p; CHECK_HR(d->SetPaletteEntries(p, pe), D3D_OK); }
     CHECK_HR(d->GetPaletteEntries(255, (PALETTEENTRY*)gb), D3D_OK); CHECK(gb[0] == 0xff && gb[1] == 1);
     IDirect3DSurface9* sr = t_surface(e, D3DUSAGE_RENDERTARGET, 800, 600), *sr2; CHECK_HR(d->SetRenderTarget(0, sr), D3D_OK); d->GetRenderTarget(0, &sr2); CHECK(sr2 == sr); sr2->Release();
     CHECK_HR(d->GetRenderTarget(1, &sr2), D3DERR_NOTFOUND); CHECK(sr2 == nullptr);
