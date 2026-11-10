@@ -175,7 +175,7 @@ def main():
     rc, _, err = build(["u/a.cpp"], flags=["-M"], name="r11")
     check("caller flags that change the stage's job are refused", rc == 1, err[-200:])
 
-    docs = sorted(os.path.join(STORE, "stage-docs", f) for f in os.listdir(STORE + "/stage-docs"))
+    docs = sorted(os.path.join(r, f) for r, _, fs in os.walk(STORE + "/stage-docs") for f in fs)
     tf = subprocess.run(PY + [VERIFY + "/toolflags.py", "check"] + docs, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     check("toolflags clean for every DEPS and COMPILE document", tf.returncode == 0 and len(docs) >= 6, tf.stdout[-300:])
 
