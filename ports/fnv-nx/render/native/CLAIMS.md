@@ -177,10 +177,10 @@ native GLSL lands.
 
 | stream | branch | families | native GLSL (`shaders/`) |
 |---|---|---|---|
-| render-land | claude/fnv-render-land | terrain (LAND*, DISTLOD), sky (SKY*), water (WATER*, water FFT), depth / shadow map (ZONLY, DEPTHMAP, SM3ZOnly/SM3DepthMap/SM3SimpleShadow, shadow casters), post (image space: IS* - HDR, bloom/blur, copy, cinematic, DOF, radial blur, refraction, sunbeams, VATS, TV, noise, map) | `is_*.glsl`, `land*`, `sky*`, `water*`, `depth*` (draws mapped in `shaders/native.tsv`) |
+| render-land | claude/fnv-render-land | terrain (LAND*, DISTLOD), sky (SKY*), water (WATER*, water FFT), depth / shadow map (ZONLY, DEPTHMAP, SM3ZOnly/SM3DepthMap/SM3SimpleShadow, shadow casters), post (image space: IS* - HDR, bloom/blur, copy, cinematic, DOF, radial blur, refraction, sunbeams, VATS, TV, noise, map) | `is_*.glsl` (removed 2026-11-10), `land*`, `sky*`, `water*`, `depth*` (draw map `shaders/native.tsv` removed 2026-11-10) |
 
 ## render-lit: d9 lit families (removed 2026-11-10, see render/d3d9)
 
-Rows L1-L4 and `capture/d3d9_families.*`, `d9_adts`/`d9_envmap`/`d9_fogpass`, `nx_render --families` / `--native`
-are removed 2026-11-10: hand-written programs for the engine's D3D9 programs are not a product path.
+Rows L1-L4 (removed 2026-11-10): `capture/d3d9_families.*`, `d9_adts`/`d9_envmap`/`d9_fogpass`, `nx_render --families` / `--native`
+(removed 2026-11-10): hand-written programs for the engine's D3D9 programs are not a product path.
 
