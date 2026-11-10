@@ -80,11 +80,11 @@ static fnvl_f80 addsub(fnvl_f80 a, fnvl_f80 b, u32 sub, u32 fcw, u32 *fsw)
 	if (x.k == K_BAD || y.k == K_BAD) return indef(fsw);
 	if (ISNAN(x.k) || ISNAN(y.k)) return nan2(a, x, b, y, fsw);
 	sa = x.s; sb = y.s ^ sub;
+	if (x.den | y.den) *fsw |= DE;
 	if (x.k == K_INF || y.k == K_INF) {
 		if (x.k == K_INF && y.k == K_INF && sa != sb) return indef(fsw);
 		return inf(x.k == K_INF ? sa : sb);
 	}
-	if (x.den | y.den) *fsw |= DE;
 	if (x.k == K_ZERO && y.k == K_ZERO) return mk(sa == sb ? sa : rc == 1, 0, 0);
 	if (x.k == K_ZERO) return rpack(sb, y.e, y.m, 0, fcw, fsw);
 	if (y.k == K_ZERO) return rpack(sa, x.e, x.m, 0, fcw, fsw);
@@ -117,13 +117,13 @@ static fnvl_f80 muldiv(fnvl_f80 a, fnvl_f80 b, u32 dv, u32 fcw, u32 *fsw)
 	if (x.k == K_BAD || y.k == K_BAD) return indef(fsw);
 	if (ISNAN(x.k) || ISNAN(y.k)) return nan2(a, x, b, y, fsw);
 	s = x.s ^ y.s;
+	if (x.den | y.den) *fsw |= DE;
 	if (x.k == K_INF || y.k == K_INF) {
 		if (dv ? (x.k == y.k) : (x.k == K_ZERO || y.k == K_ZERO)) return indef(fsw);
 		return dv && y.k == K_INF ? mk(s, 0, 0) : inf(s);
 	}
 	if (dv && y.k == K_ZERO) { if (x.k == K_ZERO) return indef(fsw); *fsw |= ZE; return inf(s); }
 	if (x.k == K_ZERO || y.k == K_ZERO) return mk(s, 0, 0);
-	if (x.den | y.den) *fsw |= DE;
 	if (!dv) {
 		P = (u128)x.m * y.m; lz = (P >> 127) ? 0 : 1; P <<= lz;
 		return rpack(s, x.e + y.e - 16382 - lz, (u64)(P >> 64), (u64)P, fcw, fsw);
@@ -171,6 +171,7 @@ fnvl_f80 fnvl_x_rndint(fnvl_f80 a, u32 fcw, u32 *fsw)
 	if (x.k == K_BAD) return indef(fsw);
 	if (ISNAN(x.k)) return nan2(a, x, a, x, fsw);
 	E = x.e - BIAS;
+	if (x.den) *fsw |= DE;
 	if (x.k == K_ZERO || x.k == K_INF || E >= 63) return a;
 	q = (u64)rnd((u128)x.m << 64, 64 + 63 - E, x.s, fcw >> 10 & 3, &inex, &inc);
 	if (inex) *fsw |= PE;
@@ -225,7 +226,7 @@ static u64 to_ieee(fnvl_f80 a, u32 fcw, u32 *fsw, int eb, int mb)
 	sh = E < emin ? emin - E : 0;
 	q = rnd((u128)x.m << 64, 64 + (63 - mb) + sh, s, rc, &inex, &inc);
 	if (inex) *fsw |= PE | (sh ? UE : 0);
-	if (inc) *fsw |= C1;
+	if (inc && !(sh && q >> mb)) *fsw |= C1;      /* denormal rounding up into the normal range: C1 stays clear */
 	bits = (sh ? 0 : (u64)(E + bi - 1) << mb) + (u64)q;
 	if ((bits >> mb) < emax) return (u64)s << (eb + mb) | bits;
 ovf:
@@ -255,11 +256,10 @@ bad:
 	return (long long)(0 - lim);
 }
 
-/* Unsupported encodings: unordered + IE. Otherwise QEMU's floatx80_compare: lexicographic (se, m) compare of
-   equal-sign operands (so a pseudo-denormal sorts below any exponent-1 value, as in the oracle). */
+/* Unsupported encodings: unordered + IE. Otherwise a numeric compare (pseudo-denormals have exponent 1). */
 u32 fnvl_x_cmp(fnvl_f80 a, fnvl_f80 b, u32 quiet, u32 *fsw)
 {
-	un_t x = unpack(a), y = unpack(b); u32 sa = a.se >> 15, sb = b.se >> 15, r, lt;
+	un_t x = unpack(a), y = unpack(b); u32 r; int xe, ye;
 	*fsw &= ~(C1 | 0x4500u);
 	if (x.k == K_BAD || y.k == K_BAD) { *fsw |= IE; r = 0x4500; }
 	else if (ISNAN(x.k) || ISNAN(y.k)) {
@@ -267,9 +267,11 @@ u32 fnvl_x_cmp(fnvl_f80 a, fnvl_f80 b, u32 quiet, u32 *fsw)
 		r = 0x4500;
 	} else {
 		if (x.den | y.den) *fsw |= DE;
-		lt = a.se < b.se || (a.se == b.se && a.m < b.m);
-		if (sa != sb) r = (!(((a.se | b.se) << 1) & 0xFFFF) && !(a.m | b.m)) ? 0x4000 : sa ? 0x100 : 0;
-		else r = (a.m == b.m && a.se == b.se) ? 0x4000 : (sa ^ lt) ? 0x100 : 0;
+		xe = x.k == K_ZERO ? -999999 : x.e; ye = y.k == K_ZERO ? -999999 : y.e;
+		if (x.k == K_ZERO && y.k == K_ZERO) r = 0x4000;
+		else if (x.s != y.s) r = x.s ? 0x100 : 0;
+		else if (xe == ye && x.m == y.m) r = 0x4000;
+		else r = ((xe < ye || (xe == ye && x.m < y.m)) ^ x.s) ? 0x100 : 0;
 	}
 	*fsw |= r;
 	return r;
@@ -278,7 +280,7 @@ u32 fnvl_x_cmp(fnvl_f80 a, fnvl_f80 b, u32 quiet, u32 *fsw)
 u32 fnvl_x_xam(fnvl_f80 a, u32 empty)
 {
 	u32 e = a.se & 0x7FFF, r = a.se >> 15 ? C1 : 0;
-	if (empty) return r | 0x4100;
+	if (empty) return 0x4100;
 	if (e == 0x7FFF) return r | (a.m == INTBIT ? 0x500 : 0x100);
 	if (e == 0) return r | (a.m ? 0x4400 : 0x4000);
 	return r | 0x400;

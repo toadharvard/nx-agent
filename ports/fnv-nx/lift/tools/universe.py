@@ -266,13 +266,16 @@ def pad_split(cls):
     return runs
 
 def orphan_pass(runs):
+    """a gap that decodes cleanly end to end and ends in ret/jmp: code nothing references; one entry per terminator-delimited piece."""
     n = 0
     for s, e in runs:
-        tot = 0; last = None
-        for ins in md.disasm(text[s:e], T0 + s): tot += ins.size; last = ins
-        if tot == e - s and last.mnemonic in ('ret', 'retf', 'jmp') and (T0 + s) not in entries:
-            res = walk(T0 + s, T0, T1, False)
-            if res[1]: entries[T0 + s] = None; kinds[T0 + s] = {'orphan'}; commit(res); n += 1
+        ins = list(md.disasm(text[s:e], T0 + s))
+        if sum(i.size for i in ins) != e - s or ins[-1].mnemonic not in ('ret', 'retf', 'jmp'): continue
+        starts = [T0 + s] + [i.address + i.size for i in ins[:-1] if i.mnemonic in ('ret', 'retf', 'jmp', 'int3') and i.address + i.size < T0 + e]
+        for a in starts:
+            if a in entries or cov[a - T0]: continue
+            res = walk(a, T0, T1, False)
+            if res[1]: entries[a] = None; kinds[a] = {'orphan'}; commit(res); n += 1
     return n
 
 # ---- seeds and fixed point
