@@ -72,6 +72,7 @@ class Ctx:
         self.calls, self.tails = set(), set()    # direct call targets / jumps to entries outside the function (meta, closure of the bench)
         self.nonlocal_ = False                   # a `goto nonlocal` / `goto after_tail` was emitted: the function needs the loop
         self.imports = False
+        self.raises = set()                      # addresses of instructions that can raise: ContinueExecution resumes there, so they are labels of the loop
 
     def em(self, t):
         self.L.append(t)
@@ -127,10 +128,12 @@ class Ctx:
         return ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
 
 
-def explore(img, lo, hi, code, start=None, extra=()):
+def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     """Recursive descent over [lo, hi) from `start` (default lo) and the `extra` labels: -> (insns by address, jump tables by jmp address,
-    address-taken labels)."""
-    insns = {}
+    address-taken labels, addresses of undecodable bytes a path reaches). Falling through (not jumping) past hi decodes on up to fall_hi: only
+    true undecodable bytes end such a path. `code` covers [lo, fall_hi)."""
+    fall_hi = hi if fall_hi is None else fall_hi
+    insns, bad = {}, set()
     work = [lo if start is None else start] + [x for x in extra if lo <= x < hi]
     tables = {}
     i0 = bisect.bisect_left(img.taken, lo)
@@ -141,12 +144,16 @@ def explore(img, lo, hi, code, start=None, extra=()):
         g = md.disasm(code[a - lo:a - lo + 16], a, 1)
         for ins in g:
             return ins
-        raise Unsupported('undecodable bytes')
+        return None
 
     while work:
         a = work.pop()
-        while lo <= a < hi and a not in insns:
+        fell = False
+        while (lo <= a < hi or (fell and a < fall_hi)) and a not in insns and a not in bad:
             ins = decode(a)
+            if ins is None:
+                bad.add(a)
+                break
             insns[a] = ins
             m = ins.mnemonic
             nxt = a + ins.size
@@ -172,7 +179,8 @@ def explore(img, lo, hi, code, start=None, extra=()):
             if m.startswith('j') or m in ('loop', 'loope', 'loopne'):
                 work.append(ops[0].imm & 0xffffffff)
             a = nxt
-    return insns, tables, taken
+            fell = True
+    return insns, tables, taken, bad
 
 
 def dispatch(cx, ins):
@@ -186,17 +194,37 @@ def dispatch(cx, ins):
     raise Unsupported('insn ' + (cx.pfx + ' ' if cx.pfx else '') + cx.m)
 
 
-def lift(img, addr, size, popn=None, start=None, owns=(), strict=True):
+def lift(img, addr, size, popn=None, start=None, owns=None, strict=True):
     """-> (C text, meta). Raises Unsupported(reason).
     [addr, addr+size) is the code range of the function (for a funclet: of its parent); `start` (default addr) the entry the body is the descent
     from, named L_<start>; `owns` the other universe entries with this range as parent: they are explored and are labels of the nonlocal loop;
     strict=False (instest only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error."""
-    lo, hi = addr, addr + size
+    from . import universe
+    if start is None and owns is None:
+        ua = universe.entry_args(addr)
+        if ua is not None and ua['start'] != ua['addr']:        # an inner entry: its own function from its label inside the parent's range
+            addr, size, start = ua['addr'], ua['size'], ua['start']
     start = addr if start is None else start
-    code = img.bytes(addr, size)
+    lo, hi = addr, addr + size
+    if owns is None:
+        owns = universe.load()[1].get(addr, ())
     owns = sorted(x for x in owns if lo <= x < hi)
-    insns, tables, taken = explore(img, lo, hi, code, start, owns if start == addr else ())
+    try:
+        return lift1(img, lo, hi, start, owns, strict, True)
+    except Unsupported:
+        if not owns or start != addr:
+            raise
+        return lift1(img, lo, hi, start, owns, strict, False)    # a label of the parent that cannot be lifted must not sink the parent
+
+
+def lift1(img, lo, hi, start, owns, strict, explore_owns):
+    addr, size = lo, hi - lo
+    fall_hi = hi + 0x1000 if strict else hi
+    code = img.bytes(addr, fall_hi - addr)
+    insns, tables, taken, bad = explore(img, lo, hi, code, start, owns if start == addr and explore_owns else (), fall_hi)
     order = sorted(insns)
+    if not order:
+        raise Unsupported('undecodable bytes')
     cx = Ctx(addr, size, insns, tables, taken)
     em = cx.em
     kinds = cx.kinds
@@ -219,16 +247,19 @@ def lift(img, addr, size, popn=None, start=None, owns=(), strict=True):
         cx.modrm = ins.modrm
         dispatch(cx, ins)
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
-            if nxt in insns:
+            if nxt in insns or nxt in bad:
                 em('goto %s;' % cx.lab(nxt))
             elif not strict:
                 em('SYNC_OUT; fnvl_raise(2,0x%xu); return;' % nxt)
             else:
                 raise Unsupported('falls into undecoded bytes at %x' % nxt)
+    for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
+        cx.nonlocal_ = True
+        em('%s: ; SYNC_OUT; REGS(); fnvl_raise(FNVL_UD,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), a))
     if start != order[0]:
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:
-        labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken if x in insns))
+        labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) if x in insns or x in bad))
         cases = ' '.join('case 0x%xu: goto %s;' % (x, cx.lab(x)) for x in labs)
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)

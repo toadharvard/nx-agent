@@ -1,177 +1,166 @@
 #!/usr/bin/env python3
-"""Gate for the DSL forms (fnvlift/dsl.py, proof/forms.py).  Two independent checks:
-  prove.py --model MODULE   obligation per encoding: exists pre-state with DSL post-state != reference post-state;  unsat = proved.
-  prove.py --backends       emitted C++ (g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined) agrees with the z3 term on N inputs.
-Options: --only SUBSTR (form key or encoding hex)  --n 1000  --forms PATH (alternative forms.py, e.g. a deliberately broken copy)
-         --cert DIR (default /home/user/l3work/proof)  --timeout SEC (per form, default 300)  --all (backends: every encoding, not one per key)
+"""Gate for the DSL forms (fnvlift/dsl.py, proof/forms*.py).  Two independent checks:
+  prove.py --model MODULE   per encoding: exists a pre-state with DSL post-state != reference post-state;  unsat = proved.  One line per FORM KEY
+                            (all its encodings: the real ones of instest/result.json plus enc_table.py), then totals and gate_forms.json.
+  prove.py --backends       emitted C++ (g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined) agrees with the z3 term on N inputs (backends.py).
+Options: --only SUBSTR  --n 1000  --forms-dir DIR (alternative forms*.py, e.g. a deliberately broken copy)  --cert DIR  --timeout SEC  --all
+Result per key: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout  (worst over its encodings in that order of severity).
 Reference model plug-in: a module on sys.path (proof/ itself) with one function
     model_post(code: bytes, pre: dict) -> dict
   pre  = {'regs': {'eax'..'edi': z3 BitVec(name,32)}, 'flags': {'cf','pf','af','zf','sf','of': z3 BitVec(name,1)},
-          'mem': z3 Array(BV32->BV8) named 'mem', 'eip': BitVecVal(ADDR,32)}      (ADDR = 0x401000, code is ONE instruction)
-  ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': Array BV32->BV8 (post-state memory), 'eip': BV32}
-  All terms are over the pre variables; flags the model does not touch are returned as the pre variables.
-  Optional key 'assume': a Bool over the pre variables (and free model variables) restricting the obligation to the states for which the
-  model defines the behaviour (e.g. no segment-limit fault); the solver gets it as a conjunct, and it is part of the model hash.
-  A model that cannot express the instruction raises an exception whose class is named ModelGap (result model-gap)."""
-import argparse, hashlib, importlib, importlib.util, json, os, random, subprocess, sys, time
+          'mem': z3 Array(BV32->BV8) named 'mem', 'eip': BitVecVal(0x401000,32)}      (code is ONE instruction)
+  ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': post-state Array, 'eip': BV32, optional 'assume': Bool (pre-states the model is defined on)}
+  Other pre-state names shared with the model by name: fs_base, gs_base (BV32), rflags_other (BV32; DF = bit 10) which prove.py maps onto the DSL inputs df / flo.
+  A model that cannot express the instruction raises an exception whose class is named ModelGap (result model-gap).
+Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) assume => DSL does not fault, and (2) for forms
+  without a memory operand, DSL does not fault => assume (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
+Unobserved: the model interface returns neither DF nor the other EFLAGS bits; a form writing them is certified on its other fields only and reported model-gap."""
+import argparse, hashlib, importlib, json, os, re, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, '..'))
 import z3
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-from enc_table import encodings
+import universe, defects
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
+RFO = z3.BitVec('rflags_other', 32)
+SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RFO & 0xFFFFF328)]    # DSL inputs df / flo = bits of the model's free rflags_other
+SEVERITY = ['FAILED(dsl)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
 
-def load_forms(path):
-    if not path: import forms; return forms
-    sp = importlib.util.spec_from_file_location('forms_alt', path); m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); return m
+class Perm(set):                      # tolerated model faults for forms with fault(DE): the divide error paths
+    def __ge__(self, other): return all(re.match(r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE', m) or m in self for m in other)
+
+def load_forms(forms_dir):
+    if forms_dir:
+        sys.path.insert(0, os.path.abspath(forms_dir))
+        for m in [m for m in sys.modules if m.startswith('forms')]: del sys.modules[m]
+    import forms; return forms
 
 def items(forms, args):
-    cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; out = []
-    for b in encodings():
+    """[(key, source, F or None, bytes, width, error)] : real encodings of every in-scope key, then enc_table.py extras"""
+    import enc_table
+    cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; keys, real = universe.load(); out = []
+    def add(b, src, key=None):
         ins = list(cs.disasm(b, ADDR))
-        assert len(ins) == 1 and ins[0].size == len(b), b.hex()
-        F = forms.build(ins[0], ADDR)
-        if args.only and args.only not in F.key and args.only not in b.hex(): continue
-        w = ins[0].operands[0].size * 8 if ins[0].operands else 32
-        out.append((F, b, w))
-    return out
+        if len(ins) != 1 or ins[0].size != len(b): out.append((key or '?', src, None, b, 0, 'decode')); return
+        k = forms.form_key(ins[0]); w = ins[0].operands[0].size * 8 if ins[0].operands and ins[0].operands[0].size else 32
+        if key and k != key: out.append((key, src, None, b, w, 'key mismatch ' + k)); return
+        try: out.append((k, src, forms.build(ins[0], ADDR), b, w, None))
+        except (KeyError, AssertionError) as e: out.append((k, src, None, b, w, 'no form: %r' % (e,)))
+    for k in keys:
+        for b in real[k]: add(b, 'real', k)
+        if not real[k]: out.append((k, 'real', None, b'', 0, 'no real encoding in result.json'))
+    for b in enc_table.encodings(): add(b, 'table')
+    if args.only: out = [o for o in out if args.only in o[0] or args.only in o[3].hex()]
+    return keys, out
 
 def zser(terms):
-    """canonical DAG text of z3 terms (hash input for the model-side certificate)"""
     ids, out = {}, []
     def go(e):
         if e.get_id() in ids: return ids[e.get_id()]
         a = [go(c) for c in e.children()]; ids[e.get_id()] = i = len(ids)
-        out.append('n%d=%s %s %s' % (i, e.decl().name(), ','.join('n%d' % j for j in a), e.sexpr() if not a else ''))
-        return i
+        out.append('n%d=%s %s %s' % (i, e.decl().name(), ','.join('n%d' % j for j in a), e.sexpr() if not a else '')); return i
     for k, t in terms: out.append('%s n%d' % (k, go(t)))
     return '\n'.join(out)
 
 def pre_state():
     return {'regs': {r: z3.BitVec(r, 32) for r in REGS}, 'flags': {f: z3.BitVec(f, 1) for f in FLAGS},
             'mem': z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8)), 'eip': z3.BitVecVal(ADDR, 32)}
+PRE = pre_state()
 
-def compare(D, M):
-    probe = z3.BitVec('probe', 32); diffs = []                      # (field, dsl term, model term, difference condition)
-    for r in REGS: diffs.append((r, D['regs'][r], M['regs'][r], D['regs'][r] != M['regs'][r]))
+def subst(t): return z3.substitute(t, *SUBS)
+def post_of(F):
+    D = F.post(); r = {k: subst(v) for k, v in D.items() if not isinstance(v, dict)}
+    for k in ('regs', 'flags', 'defined', 'rdefined'): r[k] = {n: subst(v) for n, v in D[k].items()}
+    return r
+
+def check(conds, assume, args):
+    s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(assume); s.add(z3.Or(conds) if conds else z3.BoolVal(False)); return s.check(), s
+
+def prove_one(mod, F, code, key, args):
+    """-> (result, note, certificate extras)"""
+    base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base) if F.faults else base
+    M = mod.model_post(code, PRE); D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
+    if F.faults: assume_d = z3.And(assume, D['fault'] == 0)
+    else: assume_d = assume
+    probe = z3.BitVec('probe', 32); diffs = []                     # (field, dsl, model, strict difference)
+    for r in REGS: diffs.append((r, D['regs'][r], M['regs'][r], z3.And(D['rdefined'][r], D['regs'][r] != M['regs'][r])))
     for f in FLAGS: diffs.append((f, D['flags'][f], M['flags'][f], z3.And(D['defined'][f], D['flags'][f] != M['flags'][f])))
     dm, mm = z3.Select(D['mem'], probe), z3.Select(M['mem'], probe)
-    diffs.append(('mem@probe', dm, mm, dm != mm)); diffs.append(('eip', D['eip'], M['eip'], D['eip'] != M['eip']))
-    return diffs
+    diffs += [('mem', dm, mm, dm != mm), ('eip', D['eip'], M['eip'], D['eip'] != M['eip'])]
+    extra = {'model_sha256': hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest(), 'fault_checks': ''}
+    r, s = check([d for *_, d in diffs], assume_d, args); notes = []; ids = []
+    if r == z3.sat:                                              # does a declared model defect explain every disagreement?
+        mo = s.model(); ev = lambda e: mo.eval(e, model_completion=True)
+        regs = defects.regions(key, (code, PRE))
+        def excl(field, cond):
+            for _, _, fr, other in regs:
+                reg = fr.get(field, other)
+                if reg is not None: cond = z3.And(cond, z3.Not(reg))
+            return cond
+        r2, _ = check([excl(f, d) for f, _, _, d in diffs], assume_d, args)
+        if r2 == z3.unsat:
+            for i, sdm, fr, other in regs:                       # which declared defects are actually exercised
+                c = [z3.And(d, fr.get(f, other)) for f, _, _, d in diffs if fr.get(f, other) is not None]
+                if c and check(c, assume_d, args)[0] == z3.sat: ids.append(i)
+            return 'FAILED(model-defect:%s)' % ','.join(ids), 'defects: ' + '; '.join(sdm[:90] for i, sdm, _, _ in regs if i in ids), extra
+        fld = next(k for k, a, c, d in diffs if z3.is_true(ev(d)))
+        inp = ' '.join('%s=%x' % (v, ev(z3.BitVec(v, 32)).as_long()) for v in REGS) + ' ' + ' '.join('%s=%d' % (v, ev(z3.BitVec(v, 1)).as_long()) for v in FLAGS)
+        d = [(a, c) for k, a, c, _ in diffs if k == fld][0]
+        return 'FAILED(dsl)', 'CE %s: %s dsl=%s model=%s' % (fld, inp, ev(d[0]), ev(d[1])), extra
+    if r != z3.unsat: return 'timeout', '', extra
+    if F.faults:                                                 # the model faults exactly where the DSL does
+        r1, _ = check([D['fault'] != 0], assume, args); has_mem = 'm' in key.split('|')[1].replace('imm', '')
+        r2 = z3.unsat if has_mem else check([z3.Not(assume)], D['fault'] == 0, args)[0]
+        extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem else r2)
+        if r1 != z3.unsat or r2 != z3.unsat: return 'FAILED(dsl)', 'fault condition differs: ' + extra['fault_checks'], extra
+    if F.writes_unobserved(): return 'model-gap', 'post-state of df / other EFLAGS bits is not exposed by the model interface (other fields proved)', extra
+    return 'proved', '', extra
 
 def prove(args):
-    forms = load_forms(args.forms); mod = importlib.import_module(args.model); os.makedirs(args.cert, exist_ok=True)
-    pre = pre_state(); tot = {'proved': 0, 'FAILED': 0, 'model-gap': 0, 'timeout': 0}; slow = []; T0 = time.time(); its = items(forms, args)
-    for F, b, w in its:
-        t0 = time.time(); res = None; ce = ''; msha = ''
-        try:
-            M = mod.model_post(b, pre); D = F.post(); diffs = compare(D, M)
-            asm = M.get('assume')                                   # optional: pre-states the model defines (no fault); the obligation is over these
-            msha = hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs] + ([('assume', asm)] if asm is not None else [])).encode()).hexdigest()
-            s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(z3.Or([d for *_, d in diffs]))
-            if asm is not None: s.add(asm)
-            r = s.check()
-            if r == z3.unsat: res = 'proved'
-            elif r == z3.sat:
-                res = 'FAILED'; mo = s.model(); ev = lambda e: mo.eval(e, model_completion=True)
-                fld = next(k for k, a, c, d in diffs if z3.is_true(ev(d)))
-                inp = ' '.join('%s=%x' % (v, ev(z3.BitVec(v, 32)).as_long()) for v in REGS) + ' ' + ' '.join('%s=%d' % (v, ev(z3.BitVec(v, 1)).as_long()) for v in FLAGS)
-                d = [(a, c) for k, a, c, _ in diffs if k == fld][0]
-                ce = '  CE %s: %s | %s dsl=%s model=%s probe=%x' % (F.key, inp, fld, ev(d[0]), ev(d[1]), ev(z3.BitVec('probe', 32)).as_long())
-            else: res = 'timeout'
-        except Exception as e:
-            if type(e).__name__ != 'ModelGap': raise
-            res = 'model-gap'; ce = '  GAP %s: %s' % (F.key, str(e)[:100])
-        dt = time.time() - t0; tot[res] += 1; slow.append((dt, F.key, b.hex()))
-        print('%s %d %s %s %.2f' % (F.key, w, b.hex(), res, dt)); ce and print(ce)
-        json.dump({'form': F.key, 'encoding': b.hex(), 'result': res, 'dsl_sha256': F.sha(), 'model_sha256': msha, 'z3': z3.get_version_string(),
-                   'model': args.model, 'seconds': round(dt, 3)}, open(os.path.join(args.cert, '%s_%s.json' % (F.key.replace('|', '_').replace(',', '-'), b.hex())), 'w'))
-    slow.sort(reverse=True)
-    print('TOTAL forms=%d proved=%d FAILED=%d model-gap=%d timeout=%d seconds=%.1f slowest=%s %.1fs' % (
-        len(its), tot['proved'], tot['FAILED'], tot['model-gap'], tot['timeout'], time.time() - T0, slow[0][1] if slow else '-', slow[0][0] if slow else 0))
-    return tot['FAILED'] + tot['timeout']
-
-HARN = r'''#include <cstdio>
-#include <map>
-#include <vector>
-static std::map<u32, u8> ov; static std::vector<u32> wlog;
-static u8 rb(u32 a) { auto it = ov.find(a); return it == ov.end() ? (u8)((a * 0x9E3779B1u) >> 24) : it->second; }
-static void wb(u32 a, u8 v) { ov[a] = v; wlog.push_back(a); }
-template<int N> struct Ref {
-  u32 a; explicit Ref(u32 a_) : a(a_) {}
-  operator u32() const { u32 v = 0; for (int i = N - 1; i >= 0; i--) v = (v << 8) | rb(a + (u32)i); return v; }
-  Ref& operator=(u32 v) { for (int i = 0; i < N; i++) wb(a + (u32)i, (u8)(v >> (8 * i))); return *this; }
-};
-#define M8(a) Ref<1>{(a)}
-#define M16(a) Ref<2>{(a)}
-#define M32(a) Ref<4>{(a)}
-'''
-MAIN = r'''
-int main() {
-  unsigned idx; u32 v[14];
-  while (scanf("%u", &idx) == 1) {
-    for (int i = 0; i < 14; i++) if (scanf("%x", &v[i]) != 1) return 2;
-    ov.clear(); wlog.clear(); u32 eip = 0; TAB[idx](v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13], eip);
-    for (int i = 0; i < 14; i++) printf("%x ", v[i]);
-    printf("%x", eip); u32 pa = wlog.empty() ? 0 : wlog.back() + 1;
-    for (int k = 0; k < 4; k++) { u32 a = k < (int)wlog.size() ? wlog[k] : pa + (u32)k; printf(" %x %x", a, (u32)rb(a)); }
-    printf("\n"); fflush(stdout);
-  }
-}
-'''
-SPECIAL = [0, 1, 2, 0x7f, 0x80, 0xff, 0x100, 0x7fff, 0x8000, 0xffff, 0x7fffffff, 0x80000000, 0xffffffff, 0xfffffffe, 0x12345678, 0xfffffff0, 0x10, 0x1f, 0x20]
-
-def backends(args):
-    forms = load_forms(args.forms); its = items(forms, args); seen = set(); sel = []
-    for F, b, w in its:
-        if args.all or F.key not in seen: seen.add(F.key); sel.append((F, b, w))
-    wd = args.work; os.makedirs(wd, exist_ok=True)
-    src = '\n'.join(['#include <cstdint>', 'typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef unsigned long long u64;'] +
-                    [l for l in importlib.import_module('fnvlift.dsl').PRELUDE.split('\n')[1:]] + [HARN] + [F.to_c('f%d' % i) for i, (F, _, _) in enumerate(sel)])
-    src += '\ntypedef void (*FN)(%s);\nstatic FN TAB[] = {%s};\n' % (','.join(['u32&'] * 15), ','.join('f%d' % i for i in range(len(sel)))) + MAIN
-    open(wd + '/gen.cpp', 'w').write(src); t0 = time.time()
-    cc = subprocess.run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined', '-fno-sanitize-recover=all', wd + '/gen.cpp', '-o', wd + '/gen'],
-                        capture_output=True, text=True)
-    if cc.returncode: print('COMPILE FAILED\n' + cc.stderr[:1500]); return 1
-    print('compiled %d forms as C++17 with -Wall -Wextra -Werror -fsanitize=undefined: ok (%.1fs)' % (len(sel), time.time() - t0))
-    rng = random.Random(7); lines = []; cases = []
-    for i in range(len(sel)):
-        for _ in range(args.n):
-            pick = lambda: rng.choice(SPECIAL) if rng.random() < .5 else rng.getrandbits(32)
-            vals = [pick() for _ in range(8)] + [rng.getrandbits(1) for _ in range(6)]
-            cases.append((i, vals)); lines.append('%d %s' % (i, ' '.join('%x' % x for x in vals)))
-    rr = subprocess.run([wd + '/gen'], input='\n'.join(lines) + '\n', capture_output=True, text=True)
-    out = rr.stdout.strip().split('\n') if rr.stdout.strip() else []
-    if rr.returncode or len(out) != len(cases):
-        bad = sel[cases[len(out)][0]][0].key if len(out) < len(cases) else '?'
-        print('RUNTIME FAILURE (ubsan/abort) in form %s\n%s' % (bad, rr.stderr[:600])); return 1
-    K = z3.BitVecVal(0x9E3779B1, 32); a = z3.BitVec('lam_a', 32); lam = z3.Lambda([a], z3.Extract(31, 24, a * K)); mem = z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8))
-    PR = [z3.BitVec('probe%d' % k, 32) for k in range(4)]; bad = 0; ci = 0; T0 = time.time()
-    for i, (F, b, w) in enumerate(sel):
-        D = F.post(); outs = [D['regs'][r] for r in REGS] + [D['flags'][f] for f in FLAGS] + [D['eip']] + [z3.Select(D['mem'], p) for p in PR]
-        widths = [32] * 8 + [1] * 6 + [32] + [8] * 4; big = z3.substitute(z3.Concat(*outs), (mem, lam)); fails = 0; first = ''
-        invars = [z3.BitVec(r, 32) for r in REGS] + [z3.BitVec(f, 1) for f in FLAGS]
-        for _ in range(args.n):
-            _, vals = cases[ci]; o = out[ci].split(); ci += 1
-            cv = [int(x, 16) for x in o[:15]] + [int(x, 16) for x in o[15:]]
-            subs = [(v, z3.BitVecVal(x, v.size())) for v, x in zip(invars, vals)] + [(PR[k], z3.BitVecVal(cv[15 + 2 * k], 32)) for k in range(4)]
-            r = z3.simplify(z3.substitute(big, *subs)); assert z3.is_bv_value(r), 'not constant: ' + F.key
-            r = r.as_long(); got = []
-            for wd_ in reversed(widths): got.append(r & ((1 << wd_) - 1)); r >>= wd_
-            got.reverse(); exp = cv[:15] + [cv[16 + 2 * k] for k in range(4)]
-            if got != exp:
-                fails += 1
-                if not first: first = 'in=%s z3=%s c=%s' % (' '.join('%x' % x for x in vals), ' '.join('%x' % x for x in got), ' '.join('%x' % x for x in exp))
-        bad += fails > 0
-        print('%s %d %s %s %d/%d' % (F.key, w, b.hex(), 'agree' if not fails else 'DISAGREE', args.n - fails, args.n)); first and print('  ' + first)
-    print('TOTAL forms=%d agree=%d disagree=%d inputs/form=%d compile+run+z3 %.1fs' % (len(sel), len(sel) - bad, bad, args.n, time.time() - t0))
-    return bad
+    forms = load_forms(args.forms_dir); mod = importlib.import_module(args.model); os.makedirs(args.cert, exist_ok=True)
+    base_keys, its = items(forms, args); T0 = time.time(); per = {}; order = []
+    for key, src, F, b, w, err in its:
+        e = per.setdefault(key, {'src': src, 'enc': [], 'builds': 0, 'w': w, 'dt': 0.0, 'notes': []})
+        if key not in order: order.append(key)
+        if F is None: e['notes'].append('%s %s: %s' % (b.hex(), src, err)); continue
+        e['builds'] += 1; t0 = time.time(); extra = {}
+        try: res, note, extra = prove_one(mod, F, b, key, args)
+        except Exception as ex:
+            if type(ex).__name__ != 'ModelGap': raise
+            res, note = 'model-gap', 'GAP ' + str(ex)[:110]
+        dt = time.time() - t0; e['enc'].append((res, b.hex())); e['dt'] += dt; note and e['notes'].append('%s: %s' % (b.hex(), note[:230]))
+        json.dump(dict(form=key, encoding=b.hex(), result=res, dsl_sha256=F.sha(), z3=z3.get_version_string(), model=args.model, seconds=round(dt, 3), note=note, **extra),
+                  open(os.path.join(args.cert, '%s_%s.json' % (re.sub(r'[^\w-]', '_', key), b.hex())), 'w'))
+    tot = {k: 0 for k in ('proved', 'FAILED(dsl)', 'FAILED(model-defect)', 'model-gap', 'timeout')}; status = {}; missing = []
+    for key in order:
+        e = per[key]
+        if not e['builds']: missing.append(key); res = 'no-form'
+        else:
+            rs = [r for r, _ in e['enc']]
+            sev = lambda r: SEVERITY.index('FAILED(model-defect)' if r.startswith('FAILED(model-defect') else r)
+            res = max(rs, key=lambda r: -sev(r)); ids = sorted(set(i for r in rs if r.startswith('FAILED(model-defect:') for i in r[20:-1].split(',')))
+            if res.startswith('FAILED(model-defect'): res = 'FAILED(model-defect:%s)' % ','.join(ids)
+            tot[res if res in tot else 'FAILED(model-defect)'] += 1
+        status[key] = res
+        print('%s %d %s %s %.2f n=%d' % (key, e['w'], e['enc'][0][1] if e['enc'] else '-', res, e['dt'], len(e['enc'])))
+        for n in e['notes'][:2]: res != 'proved' and print('   ' + n)
+    scope = [k for k in order if k in base_keys]; hasf = [k for k in order if per[k]['builds']]
+    slow = max(order, key=lambda k: per[k]['dt'])
+    print('TOTAL keys=%d with_dsl_form=%d proved=%d FAILED(dsl)=%d FAILED(model-defect)=%d model-gap=%d timeout=%d seconds=%.1f slowest=%s %.1fs' % (
+        len(order), len(hasf), tot['proved'], tot['FAILED(dsl)'], tot['FAILED(model-defect)'], tot['model-gap'], tot['timeout'], time.time() - T0, slow, per[slow]['dt']))
+    print('in-scope keys (result.json)=%d  without a DSL form: %s' % (len(scope), [k for k in scope if k in missing]))
+    cert = [k for k in order if status[k] == 'proved']
+    json.dump({'schema': 'fnvnx-gate/1', 'name': 'l3.forms.int', 'status': 'green' if not (tot['FAILED(dsl)'] or tot['timeout'] or [k for k in scope if k in missing]) else 'red',
+               'universe': order, 'certified': cert, 'uncertified': [k for k in order if k not in cert], 'status_by_key': status},
+              open(os.path.join(args.cert, 'gate_forms.json'), 'w'), indent=1)
+    return tot['FAILED(dsl)'] + tot['timeout']
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(); ap.add_argument('--model'); ap.add_argument('--backends', action='store_true'); ap.add_argument('--only')
-    ap.add_argument('--n', type=int, default=1000); ap.add_argument('--forms'); ap.add_argument('--cert', default='/home/user/l3work/proof')
-    ap.add_argument('--timeout', type=float, default=300); ap.add_argument('--all', action='store_true'); ap.add_argument('--work', default='/home/user/l3work/proof/backends')
+    ap.add_argument('--n', type=int, default=1000); ap.add_argument('--forms-dir'); ap.add_argument('--cert', default='/home/user/l3work/proof')
+    ap.add_argument('--timeout', type=float, default=180); ap.add_argument('--all', action='store_true'); ap.add_argument('--work', default='/home/user/l3work/proof/backends')
     a = ap.parse_args()
-    if a.backends: sys.exit(1 if backends(a) else 0)
+    if a.backends:
+        import backends; sys.exit(1 if backends.run(a, load_forms(a.forms_dir), items, post_of) else 0)
     if not a.model: sys.exit('prove.py: give --model MODULE (reference model plug-in, see the docstring) or --backends')
     sys.exit(1 if prove(a) else 0)

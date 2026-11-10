@@ -27,6 +27,11 @@ register struct cpu *c asm("x27");
 #define REGS() __asm__ volatile("" : "+r"(eax),"+r"(ecx),"+r"(edx),"+r"(ebx),"+r"(esp),"+r"(ebp),"+r"(esi),"+r"(edi))
 /* Control transfer (README): a lifted function is `void L_<addr>(void)`. X_ is the x86-state entry of an address: L_ while everything is lifted
    (the bench); FNVL_STUBX (test/instest.py) makes a call/tail to another entry a stub event instead. */
+/* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.c maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
+#define FNVL_DE0 1
+#define FNVL_DEOVF 5
+#define FNVL_BP 3
+#define FNVL_UD 4
 extern "C" { void fnvl_call(struct cpu*, u32 target); void fnvl_tail(struct cpu*, u32 target); void (*fnvl_dispatch(u32 image_addr))(void); void fnvl_raise(u32 code, u32 at);
              void fnvl_trace(u32 entry, u32 esp); }
 #ifdef FNVL_STUBX

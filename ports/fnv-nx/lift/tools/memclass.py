@@ -140,24 +140,25 @@ def fcoord(F, a, p):
 def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
     """sinks of the frame / parameter address held in regs after x0 (or at entry): set of ('S',) ('R',) ('I',) ('U',) ('M', n) ('A', callee, param)."""
     sinks, seen = set(), set()
-    work = [(x0, frozenset(regs), frozenset(slots0))] if entry else [(s, frozenset(regs), frozenset(slots0)) for s in F.succ[x0]]
+    work = [(x0, frozenset(regs), frozenset(slots0), frozenset())] if entry else [(s, frozenset(regs), frozenset(slots0), frozenset()) for s in F.succ[x0]]
     while work:
-        a, T, S = work.pop()
-        if (a, T, S) in seen:
+        a, T, S, P = work.pop()
+        if (a, T, S, P) in seen:
             continue
-        seen.add((a, T, S))
+        seen.add((a, T, S, P))
         if len(seen) > 400:
             sinks.add(('U', 'limit')); break
-        i = F.ins[a]; m = mn(i); o = i.operands; N = set(T); NS = set(S)
+        i = F.ins[a]; m = mn(i); o = i.operands; N = set(T); NS = set(S); NP = set(P)
         reg = lambda p: base(i.reg_name(p.reg)) if p.type == X.X86_OP_REG else None
         mc = [fcoord(F, a, p) for p in o]
         if S and m not in ('mov', 'push', 'cmp', 'test') and any(c in S for c in mc if c is not None):
             sinks.add(('U', 'slot-use'))
         if m == 'call' or (m == 'jmp' and (a in F.tails or not F.succ[a])):
             for r in sorted(T & set(REGS)):
-                if m == 'jmp' or r in ('eax', 'ecx', 'edx') or target(F, a)[0] != 'A':
-                    sinks.add(sink(F, a, r))
-            N = set() if m == 'jmp' else N - {'eax', 'ecx', 'edx'}
+                sinks.add(sink(F, a, r))
+            direct = target(F, a)[0] == 'A'
+            N = set() if m == 'jmp' else (N - {'eax', 'ecx', 'edx'}) | ({'eax'} if direct and (a in P or T & {'eax', 'ecx', 'edx'}) else set())   # a direct callee may return its argument
+            NP.discard(a)
         elif m in ('ret', 'retf'):
             if 'eax' in T:
                 sinks.add(('R',))
@@ -166,6 +167,8 @@ def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
             pa = None if a in saved else pusharg(F, a)
             if a not in saved:
                 sinks.add(('U', 'pusharg') if pa is None else sink(F, pa[0], 's%d' % pa[1]))
+                if pa is not None:
+                    NP.add(pa[0])
         elif m in ('mov', 'lea') and o[0].type == X.X86_OP_REG and base(i.reg_name(o[0].reg)) is not None:
             d = reg(o[0])
             src = reg(o[1]) if o[1].type == X.X86_OP_REG else None
@@ -200,8 +203,8 @@ def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
                     N.discard(r)
             if 'eax' in T and m in IMPL:
                 sinks.add(('U', 'implicit-eax'))
-        if N or NS:
-            work += [(s, frozenset(N), frozenset(NS)) for s in F.succ[a]]
+        if N or NS or NP:
+            work += [(s, frozenset(N), frozenset(NS), frozenset(NP)) for s in F.succ[a]]
     return sinks
 
 
@@ -246,6 +249,7 @@ def analyze(args):
     reach, saved = argreach(F)
     nf, fr, misc, ev, srcs, taint, prev, offs, cidx = [], [], [], [], [], {}, None, [], False
     allstack = F.multi and not fun
+    aw = {'multi'} if allstack else set()
     for x in sorted(F.ins):
         i = F.ins[x]; m = mn(i); o = i.operands; s = F.sp.get(x); b = F.bp.get(x)
         if F.preds.get(x, []) != [prev]:
@@ -323,10 +327,14 @@ def analyze(args):
                     nf.append((x, ls, w, 'heap/other'))
             if bs in ('esp', 'ebp') and not ok and not fun:
                 allstack = allstack or ix is not None
+                if ix is not None:
+                    aw.add('indexed')
         if kind not in FUNK and (any(p.type == X.X86_OP_MEM and p.mem.base and i.reg_name(p.mem.base) in ('esp', 'ebp') and not p.mem.index and p.access & 3 and s is None and F.bp.get(x) is None for p in o)):
-            allstack = True
+            allstack = True; aw.add('unresolved-esp')
     fe = frame_events(F)
     allstack = allstack or (not fun and any(c is not None and c >= 4 for x, c, idx, dst, sl in fe))
+    if not fun and any(c is not None and c >= 4 for x, c, idx, dst, sl in fe):
+        aw.add('argarea-address')
     evflows = lambda sp_: [(c, idx, sorted(flow(F, x, [dst], saved, False, sp_)) if dst else sorted(flow(F, x, [], saved, False, True, [sl])) if sl is not None and sp_ else [('U', 'spill' if sl is not None else 'push/store-esp')]) for x, c, idx, dst, sl in fe]
     events = evflows(False)
     base_ok = not fun and not F.multi and not cidx and not any(f[3] == 'u' for f in fr)
@@ -336,18 +344,18 @@ def analyze(args):
     spill = base_ok and not any(e[2] for e in events)
     if not fun:
         for r in livein(F, saved):
-            summ[r] = sorted(flow(F, F.a, [r], saved, True, spill))
+            summ[r] = sorted(t for t in flow(F, F.a, [r], saved, True, spill) if t != ('R',))
         for x, d, par in srcs:
             if d is None:
                 pa = pusharg(F, x)
                 sk = [('U', 'pusharg')] if pa is None else [sink(F, pa[0], 's%d' % pa[1])]
             else:
-                sk = sorted(flow(F, x, [d], saved, False, spill))
+                sk = sorted(t for t in flow(F, x, [d], saved, False, spill) if t != ('R',))
             summ[par] = sorted(set(summ.get(par, [])) | set(sk))
         for t in sorted({t for x in F.tails for t in F.tails[x] if mn(F.ins[x]) == 'jmp'}):
             summ.setdefault('fwd', []).append(t)
     bpv = sorted({v for v in F.bp.values() if v is not None})
-    return a, dict(addrs=array('I', sorted(F.ins)).tobytes(), nf=nf, fr=fr, misc=misc, ev=events, summ=summ, allstack=allstack, cidx=cidx, multi=F.multi,
+    return a, dict(addrs=array('I', sorted(F.ins)).tobytes(), nf=nf, fr=fr, misc=misc, ev=events, summ=summ, allstack=allstack, aw=sorted(aw), cidx=cidx, multi=F.multi,
                    why=F.why, bpv=bpv[0] if len(bpv) == 1 else None, offs=offs[:5], undecoded=not F.ok)
 
 
@@ -399,7 +407,7 @@ def main():
                 continue
             for s_ in sk:
                 if s_[0] != 'A':
-                    bad.setdefault((f, p), CAUSE[s_[0]])
+                    bad.setdefault((f, p), CAUSE[s_[0]] if s_[0] != 'U' else 'unk:' + s_[1].split(':')[0])
                 elif s_[1] not in R:
                     bad.setdefault((f, p), 'callee-undecoded')
                 elif R[s_[1]]['allstack'] and s_[2][0] == 's':
@@ -534,6 +542,7 @@ def main():
         sum(1 for a in order if R[a]['why']), sum(1 for a in order if R[a]['why'] and kind[a] not in FUNK), dict(sorted(rs.items())), res_t['funclet-parent-unknown']))
     print('frames with an escaping address: %d of %d; first reason: %s; frames flagged whole-frame (computed offsets / epochs): %d; entries taking their arg-area address: %d' % (
         nescf, len(frame), dict(sorted(reasons.items())), sum(1 for g in frame if frame[g][2]), sum(1 for a in R if R[a]['allstack'])))
+    print('  arg-area flag reasons (entries): ' + ' '.join('%s=%d' % kv for kv in sorted(Counter(w for a in R for w in R[a]['aw']).items())))
     print('  unknown-sink reasons (frames): ' + ' '.join('%s=%d' % kv for kv in sorted(ureasons.items(), key=lambda kv: (-kv[1], kv[0]))[:10]))
     print('parameter summaries: %d non-escaping, %d escaping (root causes: %s); fixed-point rounds %d' % (npar['ok'], npar['esc'], ' '.join('%s=%d' % kv for kv in sorted(pcause.items())), rounds))
     print('top imports by accesses lost: ' + ' '.join('%s=%d' % kv for kv in sorted(lost.items(), key=lambda kv: (-kv[1], kv[0]))[:15]))

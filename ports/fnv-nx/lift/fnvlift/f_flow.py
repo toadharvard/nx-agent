@@ -85,7 +85,21 @@ def h_ret(cx, ins):
     cx.term = True
 
 
+def raise_site(cx, code):
+    """a hardware exception at this instruction (R4): fnvl_raise runs the OS dispatch on the guest state and leaves the resume address in c->ra
+    (ContinueExecution) with esp restored; the loop then continues there. The instruction's own address is a label of the loop (retry)."""
+    cx.nonlocal_ = True
+    cx.raises.add(cx.a)
+    return 'SYNC_OUT; REGS(); fnvl_raise(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (code, cx.a)
+
+
 @op('int3')
 def h_int3(cx, ins):
-    cx.em('SYNC_OUT; fnvl_raise(3,0x%xu); return;' % cx.a)
+    cx.em(raise_site(cx, 'FNVL_BP'))
+    cx.term = True
+
+
+@op('ud2')
+def h_ud2(cx, ins):
+    cx.em(raise_site(cx, 'FNVL_UD'))
     cx.term = True
