@@ -3,7 +3,6 @@
 #include "d3d9cap.h"
 #include "nx/front.h"
 #include "d3d9_state.h"
-#include "d3d9_families.h"
 #include "nx_shaders.h"
 #include <map>
 #include <string>
@@ -28,10 +27,8 @@ struct Tex { uint32_t image = 0, format = 0, w = 0, h = 0, levels = 1, flags = 0
 struct Surf { uint32_t kind = 0, format = 0, w = 0, h = 0, tex = 0, image = 0; };
 struct Buf { vector<uint8_t> data; uint32_t format = 0; };
 struct Elem { uint16_t stream, offset; uint8_t type, method, usage, index; };
-struct Shader { uint32_t version = 0; string glsl; bool native = false;   // native: hand-written GLSL (--native)
-                NxD9Class cls = {NxD9_None, 0, 0, 0}; uint32_t lo = 0, hi = 0; };   // cls: d9 family (--families)
+struct Shader { uint32_t version = 0; string glsl; uint32_t lo = 0, hi = 0; };
 
-uint32_t g_families = 1u;   // NxD9Family bits; only None (translated) until D21 step 1 holds (CLAIMS.md)
 bool g_forceVisible = false;
 FILE* g_drawLog = nullptr;
 
@@ -105,7 +102,7 @@ vector<Decl> Decls(const string& s) {
 
 class Exec {
 public:
-    const NxGpuApi* api; nx::Backend* be; const char* shaderDir; const char* nativeDir = nullptr;
+    const NxGpuApi* api; nx::Backend* be; const char* shaderDir;
     void (*onPresent)(void*, uint32_t, uint32_t); void* user;
     NxD9Stats* st; char* err; size_t errlen;
 
@@ -202,11 +199,8 @@ public:
         return true;
     }
 
-    // --native <dir>: <hash>.glsl there is our hand-written shader for that original and replaces its translation
-    // (render/native/shaders/native.tsv, laid out by render/native/tools/native_dir.py). Else the record's GLSL,
-    // else --shaders <dir>.
+    // The record's GLSL, else --shaders <dir>/<hash>.glsl.
     bool LoadGlsl(Shader& s, uint32_t lo, uint32_t hi) {
-        if (nativeDir && ReadFile(nativeDir, lo, hi, s.glsl)) { s.native = true; st->nativeShaders++; return true; }
         if (!s.glsl.empty()) return true;
         if (!shaderDir) return false;
         return ReadFile(shaderDir, lo, hi, s.glsl);
@@ -303,7 +297,6 @@ public:
         auto di = decls.find(curDecl);
         if (vi == vsh.end() || pi == psh.end()) { Skip("unknown shader id"); return true; }
         if (di == decls.end()) { Skip("no vertex declaration (FVF)"); return true; }
-        if (vi->second.native && pi->second.native) st->nativeDraws++;
         auto bi = vb.find(strmVB);
         if (bi == vb.end() || !strmStride) { Skip("no stream 0"); return true; }
         // textures whose contents changed since their image was made get a new image now (TEXU / TEXC are lazy)
@@ -341,13 +334,8 @@ public:
         auto ak = std::make_pair(curVS * 65599u + curPS, curDecl);
         auto pr = programs.find(key);
         auto am = attrMaps.find(ak);
-        // a hand-written d9 family when both programs are one of its variants (d3d9_families.h), else translated
-        const char* fam = (g_families >> vi->second.cls.family) & 1 ? nx_d9_pair(vi->second.cls, pi->second.cls) : nullptr;
-        int fvs = fam ? nx_shader_find(fam, 0) : -1, fps = fam ? nx_shader_find(fam, 1) : -1;
-        if (fvs < 0 || fps < 0) fam = nullptr;
-        const string vsrc = fam ? string((const char*)nx_shader_blobs[fvs].glsl, nx_shader_blobs[fvs].glsl_size) : vi->second.glsl;
-        const string psrc = fam ? string((const char*)nx_shader_blobs[fps].glsl, nx_shader_blobs[fps].glsl_size) : pi->second.glsl;
-        const NxD9Family family = fam ? vi->second.cls.family : NxD9_None;
+        const string& vsrc = vi->second.glsl;
+        const string& psrc = pi->second.glsl;
         if (pr == programs.end() || am == attrMaps.end() || am->second != locToAttr) {
             string v = SpecialiseVS(vsrc, psrc, locToAttr);
             NxShaderDesc d; memset(&d, 0, sizeof d);
@@ -472,11 +460,9 @@ public:
         } else {
             a = enc.Op(NxOp_Draw, 5); a[0] = kPrim[prim]; a[1] = verts; a[2] = 1; a[3] = 0; a[4] = 0;
         }
-        st->familyDraws[family]++;
-        if (family != NxD9_None && !(vi->second.native && pi->second.native)) st->nativeDraws++;
         if (g_drawLog)
-            fprintf(g_drawLog, "%u\t%u\t%u\t%08x%08x\t%08x%08x\t%s\t%s\n", frameNo, st->draws - 1, backendDraw++,
-                    vi->second.hi, vi->second.lo, pi->second.hi, pi->second.lo, nx_d9_family_name(family), fam ? fam : "-");
+            fprintf(g_drawLog, "%u\t%u\t%u\t%08x%08x\t%08x%08x\n", frameNo, st->draws - 1, backendDraw++,
+                    vi->second.hi, vi->second.lo, pi->second.hi, pi->second.lo);
         return true;
     }
 
@@ -663,7 +649,6 @@ public:
                 char h[32]; snprintf(h, sizeof h, "%08x%08x", U(p, 2), U(p, 1));
                 return Fail("no GLSL for shader %s (in the record or --shaders <dir>/<hash>.glsl)", h);
             }
-            s.cls = nx_d9_classify(p + 16, bc);
             s.lo = U(p, 1); s.hi = U(p, 2);
             (tag == kD9VShader ? vsh : psh)[U(p, 0)] = s;
             break;
@@ -723,11 +708,8 @@ public:
 
 } // namespace
 
-void nx_d3d9_set_families(uint32_t mask) { g_families = mask | 1u; }
 void nx_d3d9_set_draw_log(FILE* log) { g_drawLog = log; }
 void nx_d3d9_set_force_visible(int on) { g_forceVisible = on != 0; }
-static const char* g_nativeDir = nullptr;
-void nx_d3d9_native_dir(const char* dir) { g_nativeDir = dir; }
 
 int nx_d3d9_run(const NxGpuApi* api, const uint8_t* data, size_t size, const char* shaderDir,
                 void (*onPresent)(void*, uint32_t, uint32_t), void* user, NxD9Stats* stats, char* err, size_t errlen) {
@@ -735,7 +717,7 @@ int nx_d3d9_run(const NxGpuApi* api, const uint8_t* data, size_t size, const cha
     if (!stats) stats = &local;
     memset(stats, 0, sizeof *stats);
     Exec* x = new Exec();
-    x->api = api; x->be = nx::GpuBackend(api); x->shaderDir = shaderDir; x->nativeDir = g_nativeDir; x->onPresent = onPresent; x->user = user;
+    x->api = api; x->be = nx::GpuBackend(api); x->shaderDir = shaderDir; x->onPresent = onPresent; x->user = user;
     x->st = stats; x->err = err; x->errlen = errlen;
     if (err && errlen) err[0] = 0;
     int rc = x->be && x->Run(data, size) ? 0 : -1;

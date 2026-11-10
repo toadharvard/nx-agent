@@ -13,8 +13,8 @@ Parts of the JSON:
             and passes by family (the pixel program's name without digits)
   ref       nxd9play under Wine: frames rendered, frame ms (frames.tsv: a record, not a metric), per-draw coverage of
             frame F (--draw-stats: pixels each draw changes on render target 0)
-  paths     "translated" (nx_render's default) and "families" (--families all): exit, skipped draws, draws per path
-            (--draw-log: translated or the hand-written family that took it), per-frame parity (capcompare's
+  paths     "translated" (nx_render): exit, skipped draws, draws per path
+            (--draw-log), per-frame parity (capcompare's
             bounds), and for frame F, when it fails, the first divergent draw (a multi-section search over per-draw
             targets: nxd9play --per-draw-at on the reference, nx_render --per-draw pruned as it writes) with its
             drawgate class (shader / format / state / constants), program names and metrics
@@ -23,7 +23,7 @@ Parts of the JSON:
             pixels = the reference's coverage of that draw (a lower bound: depth-rejected or unchanged pixels are not
             counted), ALU = Maxwell instructions / lanes (uam's DKSH of the translated program), TEX = texture
             instructions x 1.5 / 16 (uam's TGSI, with --uam), ROP 1 / 16 (1 / 8 for 64-bit targets); summed per pass
-            and per family. The hand-written families are costed with the translated program's numbers (a stand-in).
+            and per family. 
 Exit 0 with any verdict; 1 when the capture cannot be read or the reference does not render.
 """
 import argparse, collections, json, os, re, shutil, struct, subprocess, sys, tempfile, threading, time
@@ -359,7 +359,7 @@ def main():
         perm_fail = {r['hash'] for r in json.load(open(a.perm))['rows'] if r['class'] in ('over', 'ill')}
     drawsF = frames[F]['draws']
     out['paths'] = {}
-    for pname, extra in (('translated', []), ('families', ['--families', 'all'])):
+    for pname, extra in (('translated', []),):   # the hand-written families path was removed 2026-11-10
         cd = os.path.join(work, pname)
         shutil.rmtree(cd, ignore_errors=True)
         dl = os.path.join(work, pname + '.drawlog')
@@ -370,8 +370,8 @@ def main():
         if os.path.isfile(dl):
             for line in open(dl):
                 f = line.rstrip('\n').split('\t')
-                if len(f) >= 7:
-                    by_path[f[6] if f[6] != '-' else 'translated'] += 1
+                if len(f) >= 5:
+                    by_path['translated'] += 1
         fv = frame_verdicts(os.path.join(rd, name), cd, len(frames))
         p = {'rc': rc, 'skipped': int(m.group(1)) if m else None, 'summary': summ, 'draws_by_path': dict(by_path),
              'frames': fv, 'frames_over': sum(1 for x in fv if not x['pass'])}

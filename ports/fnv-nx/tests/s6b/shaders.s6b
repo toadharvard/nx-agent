@@ -37,7 +37,7 @@ mad oFog, r0.x, c4.x, c4.y
 === vs11_reladdr
 // SM1.1 VS: a0 relative addressing (skinning palette), def literals, normal/blend semantics
 // ctab: Bones float 10 30 matrix_rows float 3 4
-// expect: ARRAYBASE_
+// expect: vs_dk_relc(10 + vs_a0.x)
 // expect: layout(location = 2) in vec4
 // expect: layout(location = 3) in vec4
 vs_1_1
@@ -58,7 +58,7 @@ mov oT0.yzw, c9.yyz
 === vs11_constarray
 // SM1.1 VS: relative addressing into def'd constants (const array path)
 // ctab: Palette float 20 4 vector float 1 4
-// expect: const vec4 vs_const_array_
+// expect: vs_dk_relc(20 + vs_a0.x)
 vs_1_1
 def c20, 1.0, 0.0, 0.0, 1.0
 def c21, 0.0, 1.0, 0.0, 1.0
@@ -221,8 +221,8 @@ texm3x3tex t3, t0_bx2
 mov r0, t3
 
 === ps12_texdp3tex
-// SM1.2 PS: texdp3tex - not implemented by MojoShader's GLSL emitter (known gap)
-// expect-fail: TEXDP3TEX
+// SM1.2 PS: texdp3tex - the dot of t1's coordinate and t0 is the (u, 0) lookup of stage 1 (sampler type = data, ps_drv_stype)
+// expect: ps_dk_smp1(vec3(dot(ps_t1.xyz, ps_t0.xyz), 0.0, 0.0))
 ps_1_2
 tex t0
 texdp3tex t1, t0
