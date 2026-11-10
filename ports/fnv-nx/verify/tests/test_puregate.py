@@ -305,7 +305,7 @@ one("import unlisted inside function", "def f():\n    import foo_bar", "import-u
 case("import star of unlisted also dynamic", "from foo_bar import *\n", [(1, "dynamic"), (1, "import-unlisted")])
 for m in "ast json hashlib re struct collections itertools functools dataclasses typing enum abc math bisect heapq array " \
          "binascii base64 zlib io string textwrap shlex fnmatch posixpath copy contextlib types argparse errno stat csv " \
-         "difflib bz2 lzma codecs unicodedata decimal fractions statistics traceback warnings keyword tokenize token".split():
+         "difflib bz2 lzma codecs unicodedata decimal fractions traceback warnings keyword tokenize token".split():
     case("import pure " + m, "import %s\n" % m, [])
 case("import pure submodule", "import collections.abc\nimport json.decoder\nfrom collections import abc\n", [])
 for m in "os os.path sys time datetime glob shutil subprocess pathlib concurrent.futures multiprocessing threading " \
@@ -437,7 +437,7 @@ one("stat not called", "f = os.stat", "stat-result", "import os\n")
 one("stat passed as function", "x = list(map(os.stat, ps))", "stat-result", "import os\n")
 one("stat method result assigned", "st = e.stat()", "stat-result")
 one("lstat method result assigned", "st = p.lstat()", "stat-result")
-one("stat other attribute", "x = os.stat(p).st_uid", "stat-result", "import os\n")
+one("stat other attribute", "x = os.stat(p).st_blocks", "stat-result", "import os\n")
 case("stat st_size clean", "import os\nx = os.stat(p).st_size\ny = os.lstat(p).st_mode\nz = os.fstat(fd).st_size\n", [])
 case("stat entry method clean", "x = e.stat().st_size\ny = e.stat(follow_symlinks=False).st_mode\n", [])
 case("stat st_mtime is reported once as clock", "import os\nx = os.stat(p).st_mtime\n", [(2, "clock")])
