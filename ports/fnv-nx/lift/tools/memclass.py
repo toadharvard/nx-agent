@@ -1,124 +1,40 @@
 #!/usr/bin/env python3
-"""W10-B: class of every memory operand of FalloutNV.exe (rule R9: plain load/store only if provably thread-local).
-Classes: stack-local, stack-args-in, stack-args-out, stack-escaped, stack-unk, ro-iat, ro-rdata, ro-text, tls, tls-derived,
-global, heap/other. Count-only stdout; per-entry TSV under /home/user/l3facts/memclass/. Reuses the decoder of fpmodes.py."""
-import os, sys, struct, hashlib, time, bisect
+"""W10b: class of every memory operand of FalloutNV.exe (rule R9). Class (a) = plain load/store, by PROOF:
+ rule 1  a frame none of whose addresses escapes is private: locals, incoming and outgoing argument slots are plain (total esp/ebp
+         tracking in x86flow; funclets are analysed as part of their parent frame);
+ rule 2  a frame address that only reaches direct calls whose parameter summary says "does not escape" (greatest fixed point over
+         the call graph) contaminates nothing; otherwise it contaminates its object extent (up to the next directly accessed slot).
+ ro-const (IAT, .rdata, jump tables) is plain; TLS stays ordered. Count-only stdout; per-entry TSV in /home/user/l3facts/memclass/."""
+import os, sys, json, bisect, hashlib
 from array import array
 from collections import Counter, defaultdict
 from multiprocessing import Pool
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fpmodes as P
-from fpmodes import X, M32, mn, IMG, decode, load_universe, KINDS
+import x86flow as W
+from x86flow import X, M32, mn, rn, base, memslot, Fn, FUNK, KINDS, THUNK, IATADDR, track, frame_events, load_universe, pmap
 
+EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
 OUT = '/home/user/l3facts/memclass'
-RETN, THUNK = {}, {}                                   # entry -> callee-popped bytes (None = ambiguous); entry -> IAT slot of a jmp thunk
-STK = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-escaped', 'stack-unk')
+STK = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-funclet', 'stack-escaped', 'stack-unk')
 ORDER = STK + ('ro-iat', 'ro-rdata', 'ro-text', 'tls', 'tls-derived', 'global', 'heap/other')
+PLAIN = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-funclet', 'ro-iat', 'ro-rdata', 'ro-text')
 WID = (1, 2, 4, 8, 10, 16)
-SECS, IAT = [], {}
-
-
-def parse_pe():
-    d = IMG.d; pe = struct.unpack_from('<I', d, 0x3c)[0]; n = struct.unpack_from('<H', d, pe + 6)[0]; o = pe + 24 + struct.unpack_from('<H', d, pe + 20)[0]
-    for k in range(n):
-        vs, va, rs, ro, _, _, _, _, ch = struct.unpack_from('<IIIIIIHHI', d, o + 8 + 40 * k)
-        SECS.append((IMG.base + va, IMG.base + va + max(vs, rs), bool(ch & 0x80000000), bool(ch & 0x20000000)))
-    SECS.sort()
-    rva, _ = struct.unpack_from('<II', d, pe + 24 + 96 + 8)
-    while rva:
-        oft, _, _, nm, ft = struct.unpack_from('<IIIII', IMG.bytes(IMG.base + rva, 20), 0)
-        if not nm:
-            break
-        for k in range(100000):
-            v = IMG.u32(IMG.base + (oft or ft) + 4 * k)
-            if not v:
-                break
-            nb = IMG.bytes(IMG.base + v + 2, 64).split(b'\0')[0].decode('latin1') if not v & 0x80000000 else '#%d' % (v & 0xffff)
-            IAT[IMG.base + ft + 4 * k] = nb
-        rva += 20
+REGS = ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi')
+IMPL = frozenset('mul imul div idiv cdq cwde cwd cbw lodsb lodsw lodsd stosb stosw stosd scasb scasw scasd xchg cmpxchg xadd lahf sahf xlatb'.split())
+BEFORE = {'stack-local': 44.6, 'stack-args-in': 5.3, 'stack-args-out': 9.8, 'stack-escaped': 7.6, 'stack-unk': 11.1}   # v1 run (recorded)
 
 
 def absclass(a, store):
-    k = bisect.bisect_right(SECS, (a, M32, 0, 0)) - 1
-    if k < 0 or a >= SECS[k][1]:
-        return 'heap/other'
-    if a in IAT and not store:
-        return 'ro-iat'
-    if not SECS[k][2] and not store:
-        return 'ro-text' if SECS[k][3] else 'ro-rdata'
-    return 'global'
-
-
-def rn(i, op):
-    return i.reg_name(op.reg) if op.type == X.X86_OP_REG else None
-
-
-def phase0(args):
-    a, ext, kind = args
-    F = P.Fn(a, ext, kind)
-    if not F.ok:
-        return a, None, None, b''
-    r = {(o[0].imm if o else 0) for i in F.ins.values() if mn(i) == 'ret' for o in [i.operands]}
-    tl = {t for ts in F.tails.values() for t in ts}
-    f = F.ins.get(a); th = None
-    if f is not None and mn(f) == 'jmp' and f.operands[0].type == X.X86_OP_MEM and not f.operands[0].mem.base and not f.operands[0].mem.index:
-        th = f.operands[0].mem.disp & M32
-    return a, (r.pop() if len(r) == 1 else None) if r else (('t', tl.pop()) if len(tl) == 1 else 0), th, array('I', sorted(F.ins)).tobytes()
-
-
-def spscan(F, reach, saved):
-    """(sp, bp) before each insn (esp offset rel. entry esp; ebp offset or None), bad flag. Callee pops: direct = callee's ret N; indirect = pushed
-    bytes since the last call unless an 'add esp' follows. Verified by: every ret at sp 0 and joins agree."""
-    st = {F.a: (0, None, 0)}; work = [F.a]; bad = False
-    while work:
-        a = work.pop(); s, b, pb = st[a]; i = F.ins[a]; m = mn(i); o = i.operands
-        r0 = rn(i, o[0]) if o else None; r1 = rn(i, o[1]) if len(o) > 1 else None
-        if m in ('push', 'pushfd'):
-            s -= 4; pb += 4 * (reach.get(a, False) and a not in saved)
-        elif m in ('pop', 'popfd'):
-            s += 4; pb = max(0, pb - 4); b = None if r0 == 'ebp' else b
-        elif m in ('pushal', 'popal', 'enter'):
-            bad = True
-        elif m == 'leave':
-            bad = bad or b is None; s = (b or 0) + 4; b = None
-        elif m == 'call':
-            if o[0].type == X.X86_OP_IMM:
-                pop = RETN.get(o[0].imm & M32, 0)
-                bad = bad or pop is None
-                s += pop or 0
-            else:
-                n = F.ins.get(a + i.size)
-                s += 0 if n is not None and mn(n) == 'add' and rn(n, n.operands[0]) == 'esp' else pb
-            pb = 0
-        elif m == 'mov' and r0 == 'esp':
-            bad = bad or r1 != 'ebp' or b is None; s = b or 0; pb = 0
-        elif m == 'mov' and r0 == 'ebp':
-            b = s if r1 == 'esp' else None
-        elif m in ('add', 'sub') and r0 == 'esp':
-            if o[1].type != X.X86_OP_IMM:
-                bad = True
-            else:
-                s += o[1].imm if m == 'add' else -o[1].imm
-            pb = 0
-        elif m in ('ret', 'retf'):
-            bad = bad or s != 0
-        elif r0 == 'esp' and m not in ('cmp', 'test'):
-            bad = True
-        elif r0 == 'ebp' and m not in ('cmp', 'test', 'push'):
-            b = None
-        for t in F.succ[a]:
-            if t not in st:
-                st[t] = (s, b, pb); work.append(t)
-            elif st[t][0] != s:
-                bad = True
-            elif st[t][1] != b:
-                st[t] = (s, None, pb); work.append(t)
-    return {a: v[0] for a, v in st.items()}, {a: v[1] for a, v in st.items()}, bad
+    for n, va, vs, ro, rs, ch in W.IMG.secs:
+        if va <= a < va + max(vs, rs):
+            if a in IATADDR and not store:
+                return 'ro-iat'
+            return 'global' if ch & 0x80000000 or store else 'ro-text' if ch & 0x20000000 else 'ro-rdata'
+    return 'heap/other'
 
 
 def tls_taint(F, i, m, o, r0, taint):
-    """update taint {reg: 'A' (fs:[0x2c] array pointer) | 'S' (element loaded through it)} after insn i; returns an offence string if a
-    tainted register value (not just a base/index) is stored, pushed, passed at a call, returned or otherwise consumed."""
+    """taint {reg: 'A' (fs:[0x2c] array pointer) | 'S' (element loaded through it)}; returns an offence if an 'A' value leaves in a register."""
     nm = lambda p: i.reg_name(p.reg) if p.type == X.X86_OP_REG else None
     if m == 'push' and o[0].type == X.X86_OP_MEM and o[0].mem.segment and o[0].mem.disp == 0x2c:
         return 'push fs:[2c]'
@@ -135,13 +51,13 @@ def tls_taint(F, i, m, o, r0, taint):
         elif (mm.base and taint.get(i.reg_name(mm.base)) == 'A') or (mm.index and taint.get(i.reg_name(mm.index)) == 'A'):
             new = 'S'
     elif m == 'mov' and r0 and o[1].type == X.X86_OP_REG and taint.get(nm(o[1])) == 'A':
-        new = taint[nm(o[1])]
+        new = 'A'
     elif m == 'lea' and r0 and o[1].mem.base and taint.get(i.reg_name(o[1].mem.base)) == 'A':
         new = 'A'
     off = None
     for k, p in enumerate(o):
         if p.type == X.X86_OP_REG and taint.get(nm(p)) == 'A' and p.access & 1 and m not in ('cmp', 'test') and not (m == 'mov' and k == 1 and r0 and o[0].type == X.X86_OP_REG):
-            if not (k == 0 and p.access & 2 and m in ('add', 'sub', 'and', 'or', 'inc', 'dec') and len(o) < 2 or m in ('add', 'sub') and k == 0 and o[1].type == X.X86_OP_IMM):
+            if not (m in ('add', 'sub', 'inc', 'dec') and k == 0):
                 off = off or '%s uses tainted %s' % (m, nm(p))
     if r0 and o[0].access & 2 and o[0].type == X.X86_OP_REG:
         taint.pop(r0, None)
@@ -151,8 +67,7 @@ def tls_taint(F, i, m, o, r0, taint):
 
 
 def argreach(F):
-    """reach[x]: a call is reached from x along the fall-through chain with no pop/add esp/jump/ret in between (x = outgoing-argument candidate);
-    saved: the callee-saved register pushes at function entry."""
+    """reach[x]: a call follows x on the fall-through chain (x = outgoing-argument push candidate); saved: entry register saves."""
     reach = {}
     for x in sorted(F.ins, reverse=True):
         i = F.ins[x]; m = mn(i)
@@ -162,275 +77,456 @@ def argreach(F):
             reach[x] = False
         else:
             reach[x] = reach.get(F.succ[x][0], False)
-    saved, k = set(), F.a
+    saved, k = [], F.a
     while k in F.ins and len(F.succ[k]) == 1:
         i = F.ins[k]; m = mn(i)
         if m == 'push' and rn(i, i.operands[0]) in ('ebp', 'ebx', 'esi', 'edi'):
-            saved.add(k)
+            saved.append(k)
         elif not (m == 'mov' and rn(i, i.operands[0]) == 'ebp') and not (m == 'sub' and rn(i, i.operands[0]) == 'esp'):
             break
         k = F.succ[k][0]
-    return reach, saved
+    return reach, frozenset(saved)
 
 
-def reg_escapes(F, x, r):
-    """can the frame address loaded into register r at x leave the frame (stored to non-fs memory, pushed, left in eax/ecx/edx at a call,
-    returned, copied, or still unresolved after 300 steps)? Use as a memory base/index only is not an escape."""
-    seen, work = set(), list(F.succ[x])
+def target(F, x):
+    """sink of a value passed at the call/tail jump x: ('A', callee) | ('I',) | ('M', import)."""
+    o = F.ins[x].operands[0]
+    if o.type == X.X86_OP_IMM:
+        t = o.imm & M32
+        return ('M', IATADDR.get(THUNK[t], '?')) if t in THUNK else ('A', t)
+    if o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and (o.mem.disp & M32) in IATADDR:
+        return ('M', IATADDR[o.mem.disp & M32])
+    return ('I',)
+
+
+def pusharg(F, x):
+    """(call address, argument index) of the push at x, or None."""
+    k = x
+    for _ in range(40):
+        k = F.succ[k][0] if len(F.succ.get(k, ())) == 1 else None
+        if k is None:
+            return None
+        if mn(F.ins[k]) == 'call':
+            a, b = F.sp.get(k), F.sp.get(x)
+            return (k, (a - b + 4) // 4) if a is not None and b is not None and a - b + 4 >= 4 and not F.multi else None
+        if mn(F.ins[k]) in ('pop', 'ret', 'jmp') or mn(F.ins[k])[0] == 'j':
+            return None
+    return None
+
+
+def sink(F, x, par):
+    t = target(F, x)
+    return t + (par,) if t[0] == 'A' else t
+
+
+def fcoord(F, a, p):
+    """entry-relative coordinate of a direct esp/ebp memory operand at a, or None."""
+    i = F.ins[a]
+    if p.type != X.X86_OP_MEM or not p.mem.base or p.mem.index or F.multi:
+        return None
+    bs = i.reg_name(p.mem.base)
+    v = F.sp.get(a) if bs == 'esp' else F.bp.get(a) if bs == 'ebp' else None
+    return None if v is None else v + p.mem.disp
+
+
+def flow(F, x0, regs, saved, entry=False, spill=False):
+    """sinks of the frame / parameter address held in regs after x0 (or at entry): set of ('S',) ('R',) ('I',) ('U',) ('M', n) ('A', callee, param)."""
+    sinks, seen = set(), set()
+    work = [(x0, frozenset(regs), frozenset())] if entry else [(s, frozenset(regs), frozenset()) for s in F.succ[x0]]
     while work:
-        a = work.pop()
-        if a in seen:
+        a, T, S = work.pop()
+        if (a, T, S) in seen:
             continue
-        seen.add(a)
-        if len(seen) > 300:
-            return True
-        i = F.ins[a]; m = mn(i); o = i.operands; fs = any(p.type == X.X86_OP_MEM and p.mem.segment and i.reg_name(p.mem.segment) == 'fs' for p in o)
-        if m in ('call', 'ret', 'retf') or a in F.tails:
-            if r in ('eax', 'ecx', 'edx') or (m != 'call' and r == 'eax'):
-                return True
-            if m != 'call':
-                continue
-        kill = False
-        if (m == 'lea' and any(p.type == X.X86_OP_MEM and r in (i.reg_name(p.mem.base) if p.mem.base else '', i.reg_name(p.mem.index) if p.mem.index else '') for p in o)) or \
-                (r == 'eax' and m in P.IMPL):
-            return True
-        for k, p in enumerate(o):
-            if p.type == X.X86_OP_REG and P.core.SUB.get(i.reg_name(p.reg), (0,))[0] == r:
-                if p.access & 1 and not (m in ('cmp', 'test') or fs and m == 'mov' and k == 1 and False) and not (fs and k == 1 and m == 'mov'):
-                    if not (m in ('xor', 'sub') and len(o) == 2 and o[0].reg == o[1].reg):
-                        return True
-                if p.access & 2 and not p.access & 1 and k == 0:
-                    kill = True
-        if not kill:
-            work += F.succ[a]
-    return False
+        seen.add((a, T, S))
+        if len(seen) > 400:
+            sinks.add(('U',)); break
+        i = F.ins[a]; m = mn(i); o = i.operands; N = set(T); NS = set(S)
+        reg = lambda p: base(i.reg_name(p.reg)) if p.type == X.X86_OP_REG else None
+        mc = [fcoord(F, a, p) for p in o]
+        if S and m not in ('mov', 'push', 'cmp', 'test') and any(c in S for c in mc if c is not None):
+            sinks.add(('U',))
+        if m == 'call' or (m == 'jmp' and (a in F.tails or not F.succ[a])):
+            for r in sorted(T):
+                if m == 'jmp' or r in ('eax', 'ecx', 'edx') or target(F, a)[0] != 'A':
+                    sinks.add(sink(F, a, r))
+            N = set() if m == 'jmp' else N - {'eax', 'ecx', 'edx'}
+        elif m in ('ret', 'retf'):
+            if 'eax' in T:
+                sinks.add(('R',))
+            N = set()
+        elif m == 'push' and (reg(o[0]) in T or (mc[0] is not None and mc[0] in S)):
+            pa = None if a in saved else pusharg(F, a)
+            if a not in saved:
+                sinks.add(('U',) if pa is None else sink(F, pa[0], 's%d' % pa[1]))
+        elif m in ('mov', 'lea') and o[0].type == X.X86_OP_REG and base(i.reg_name(o[0].reg)) is not None:
+            d = reg(o[0])
+            src = reg(o[1]) if o[1].type == X.X86_OP_REG else None
+            if m == 'mov' and o[1].type == X.X86_OP_REG and src in T:
+                N.add(d)
+            elif m == 'lea' and ((o[1].mem.base and base(i.reg_name(o[1].mem.base)) in T) or (o[1].mem.index and base(i.reg_name(o[1].mem.index)) in T)):
+                N.add(d)
+            elif m == 'mov' and mc[1] is not None and mc[1] in S:
+                N.add(d)
+            elif o[0].size == 4:
+                N.discard(d)
+        elif m == 'mov' and o[0].type == X.X86_OP_MEM and len(o) > 1 and reg(o[1]) in T:
+            mm = o[0].mem
+            if mm.segment and i.reg_name(mm.segment) == 'fs':
+                pass
+            elif spill and mc[0] is not None:
+                NS.add(mc[0])
+            elif mm.base and i.reg_name(mm.base) in ('esp', 'ebp') and not mm.index:
+                sinks.add(('U',))
+            else:
+                sinks.add(('S',))
+        elif m in ('cmp', 'test'):
+            pass
+        elif m == 'mov' and o[0].type == X.X86_OP_MEM and mc[0] is not None and mc[0] in S:
+            NS.discard(mc[0])
+        else:
+            for k, p in enumerate(o):
+                r = reg(p)
+                if r in T and p.access & 1 and not (k == 0 and m in ('add', 'sub', 'and', 'or', 'inc', 'dec', 'xor') and (len(o) < 2 or o[1].type == X.X86_OP_IMM)):
+                    sinks.add(('U',))
+                elif r in T and p.access & 2 and k == 0 and not p.access & 1:
+                    N.discard(r)
+            if 'eax' in T and m in IMPL:
+                sinks.add(('U',))
+        if N or NS:
+            work += [(s, frozenset(N), frozenset(NS)) for s in F.succ[a]]
+    return sinks
+
+
+def livein(F, saved):
+    """registers possibly read (or passed on at a call / tail jump) before being written, from the entry."""
+    seen, work, rd = set(), [(F.a, frozenset(REGS))], set()
+    while work:
+        a, T = work.pop()
+        if (a, T) in seen or not T:
+            continue
+        seen.add((a, T))
+        i = F.ins[a]; m = mn(i); o = i.operands; N = set(T)
+        used = {base(i.reg_name(p.reg)) for p in o if p.type == X.X86_OP_REG and p.access & 1}
+        used |= {base(i.reg_name(p.mem.base)) for p in o if p.type == X.X86_OP_MEM and p.mem.base} | {base(i.reg_name(p.mem.index)) for p in o if p.type == X.X86_OP_MEM and p.mem.index}
+        if m in IMPL:
+            used.add('eax')
+        if m in ('xor', 'sub') and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg:
+            used = set()
+        if m == 'call':
+            used |= {'eax', 'ecx', 'edx'}
+        if m == 'jmp' and a in F.tails:
+            used |= set(REGS)
+        if a in saved:
+            used = set()
+        rd |= used & T
+        for p in o[:1]:
+            if p.type == X.X86_OP_REG and p.access & 2 and not p.access & 1 and p.size == 4 and m != 'push':
+                N.discard(base(i.reg_name(p.reg)))
+        if m == 'call':
+            N -= {'eax', 'ecx', 'edx'}
+        work += [(s, frozenset(N)) for s in F.succ[a]]
+    return sorted(rd)
 
 
 def analyze(args):
-    a, ext, kind, skip = args
-    skip = skip or ()
-    F = P.Fn(a, ext, kind)
+    a, ext, kind = args
+    F = Fn(a, ext, kind)
     if not F.ok:
         return a, None
-    FUN = kind in ('inner', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw')
+    track(F)
+    fun = kind in FUNK
     reach, saved = argreach(F)
-    sp, bp, bad = spscan(F, reach, saved)
-    if FUN:
-        sp, bp, bad = {}, {}, True                       # runs in its parent's frame: frame offsets are unknown
-    ins = F.ins; C = Counter(); fl = Counter(); imp = Counter(); tlsd = Counter(); off = []
-    acc = []                                               # (addr, store, width, kind, payload)
-    tk, bnd, cidx, anyesc = [], [], False, False
-    targets = {t for ts in F.succ.values() for t in ts}
-    taint, prev, offs = {}, None, []
-    for x in sorted(ins):
-        i = ins[x]; m = mn(i); o = i.operands; s = sp.get(x); b = bp.get(x)
-        r0 = rn(i, o[0]) if o else None; r1 = rn(i, o[1]) if len(o) > 1 else None
+    nf, fr, misc, ev, srcs, taint, prev, offs, cidx = [], [], [], [], [], {}, None, [], False
+    allstack = F.multi and not fun
+    for x in sorted(F.ins):
+        i = F.ins[x]; m = mn(i); o = i.operands; s = F.sp.get(x); b = F.bp.get(x)
         if F.preds.get(x, []) != [prev]:
             taint = {}
         prev = x
+        r0 = rn(i, o[0]) if o else None
+        ok = s is not None and not F.multi
         if m in ('push', 'pushfd'):
-            acc.append((x, 1, 4, 'push', s - 4 if s is not None and not bad else None))
+            if fun or not ok:
+                fr.append((x, 1, 4, 'u', 0))
+            else:
+                fr.append((x, 1, 4, 'o' if reach.get(x) and x not in saved else 'l', s - 4))
         elif m in ('pop', 'popfd'):
-            acc.append((x, 0, 4, 'stk', s if s is not None and not bad else None))
-        elif m == 'call':
-            acc.append((x, 1, 4, 'ret', None))
-        elif m in ('ret', 'retf'):
-            acc.append((x, 0, 4, 'ret', None))
+            fr.append((x, 0, 4, 'u' if fun or not ok else 'l', 0 if fun or not ok else s))
+        elif m in ('call', 'ret', 'retf'):
+            nf.append((x, 1 if m == 'call' else 0, 4, 'stack-local'))
         elif m == 'leave':
-            acc.append((x, 0, 4, 'ret', None))
-        tx = None
-        if m == 'lea' and o[1].mem.base and i.reg_name(o[1].mem.base) in ('esp', 'ebp'):
-            tx = (i.reg_name(o[1].mem.base), o[1].mem.disp, bool(o[1].mem.index), r0)
-        elif m == 'mov' and r1 in ('esp', 'ebp') and r0 not in ('esp', 'ebp') and o[0].type == X.X86_OP_REG:
-            tx = (r1, 0, False, r0)
-        elif m == 'push' and r0 in ('esp', 'ebp') and (r0 == 'esp' or bp.get(x) is not None):
-            tx = (r0, 0, False, None)
-        elif m == 'mov' and r1 in ('esp', 'ebp') and o[0].type == X.X86_OP_MEM:
-            fsm = o[0].mem.segment and i.reg_name(o[0].mem.segment) == 'fs'
-            tx = None if fsm else (r1, 0, False, None)
-        if tx:
-            base, d, idx, dst = tx
-            v = (s if base == 'esp' else b)
-            c = None if v is None or bad and base == 'esp' else v + d
-            esc = True if dst is None else reg_escapes(F, x, dst)
-            if esc:
-                anyesc = True; tk.append((c, idx))
-        if taint or any(p.type == X.X86_OP_MEM and p.mem.segment and i.reg_name(p.mem.segment) == 'fs' and p.mem.disp == 0x2c for p in o):
+            fr.append((x, 0, 4, 'u' if fun or b is None or F.multi else 'r', 0 if fun or b is None or F.multi else b))
+        if taint or any(p.type == X.X86_OP_MEM and p.mem.segment and p.mem.disp == 0x2c for p in o):
             td = tls_taint(F, i, m, o, r0, taint)
-            offs += [(x, td)] if td else []
-        if x not in skip and (m.startswith('lock') or i.prefix[0] == 0xf0):
-            fl['lock'] += 1
-        if x not in skip and m in ('xchg', 'cmpxchg', 'xadd') and any(p.type == X.X86_OP_MEM for p in o):
-            fl[m] += 1
+            if td:
+                offs.append((x, td))
+        if i.prefix[0] == 0xf0:
+            misc.append((x, 'lock'))
+        if m in ('xchg', 'cmpxchg', 'xadd') and any(p.type == X.X86_OP_MEM for p in o):
+            misc.append((x, m))
+        if m == 'call':
+            t = target(F, x)
+            if t[0] == 'M':
+                misc.append((x, 'imp:' + t[1]))
         for p in o:
             if p.type != X.X86_OP_MEM or m in ('lea', 'nop') or m.startswith('prefetch'):
                 continue
             ld, stt = bool(p.access & 1), bool(p.access & 2)
-            dv = bool(taint) and ((p.mem.base and taint.get(i.reg_name(p.mem.base)) == 'A') or (p.mem.index and taint.get(i.reg_name(p.mem.index)) == 'A'))
             if m[0] == 'f' and m not in ('fxsave', 'fxrstor'):
                 stt = m.startswith(('fst', 'fist', 'fnst', 'fbst', 'fnsave', 'fsave')); ld = not stt
             if m in ('fxsave', 'stmxcsr'):
-                stt = True; ld = False
-            if m in ('call', 'jmp') or m == 'push':
-                ld = True; stt = False
+                stt, ld = True, False
+            if m in ('call', 'jmp', 'push'):
+                ld, stt = True, False
             if m == 'pop':
-                ld = False; stt = True
+                ld, stt = False, True
             mm = p.mem; bs = i.reg_name(mm.base) if mm.base else None; sg = i.reg_name(mm.segment) if mm.segment else None
-            for st_ in ((0, ld), (1, stt)):
-                if st_[1]:
-                    acc.append((x, st_[0], p.size, 'op', (bs, mm.disp, i.reg_name(mm.index) if mm.index else None, sg, m, dv)))
-            if bs in ('esp', 'ebp') and mm.index:
-                cidx = True
-            if bs in ('esp', 'ebp') and not mm.index and (stt or ld):
-                v = s if bs == 'esp' else b
-                if v is not None and not (bad and bs == 'esp'):
-                    bnd.append(v + mm.disp)
-            if m == 'call' and not p.mem.base and not mm.index and (mm.disp & M32) in IAT:
-                imp[IAT[mm.disp & M32]] += x not in skip
-        if m == 'call' and o[0].type == X.X86_OP_IMM:
-            t = o[0].imm & M32
-            if t in THUNK and THUNK[t] in IAT:
-                imp[IAT[THUNK[t]]] += x not in skip
-        if m == 'push' or m == 'pop':
-            if s is not None and not bad:
-                bnd.append(s - 4 if m == 'push' else s)
-    acc = [t for t in acc if t[0] not in skip]
-    bnd = sorted(set(bnd)); T = sorted({c for c, _ in tk if c is not None}); tall = any(c is None or ix for c, ix in tk)
-    fpass = not anyesc
-    order = sorted(ins)
-    taint = {}                                              # reg -> 'A' (TLS array ptr) / 'S' (slot value) within a basic block
-    off = []
-    for x in order:
-        i = ins[x]; m = mn(i); o = i.operands
-        if len(F.preds.get(x, ())) != 1 or x in targets and False:
-            taint = {}
-        r0 = rn(i, o[0]) if o else None
-    # classification
-    sprev = None
-    for x, stt, w, k, pay in acc:
-        wk = w if w in WID else 'o'
-        ls = 'S' if stt else 'L'
-        if k == 'ret':
-            cls = 'stack-local'
-        elif k in ('push', 'stk'):
-            c = pay
-            cls = 'stack-unk' if c is None else fcls(c, bnd, T, tall, cidx, fpass)
-            if k == 'push' and cls == 'stack-local' and reach.get(x, False) and x not in saved:
-                cls = 'stack-args-out'
-        else:
-            bs, disp, ix, sg, m, dv = pay; s = sp.get(x); b = bp.get(x)
-            if dv:
-                cls = 'tls-derived'
-            elif sg == 'fs':
-                cls = 'tls'; tlsd['%x' % (disp & M32) if bs is None and ix is None else 'reg'] += 1
-            elif bs in ('esp', 'ebp'):
-                v = s if bs == 'esp' else b
-                if ix is not None:
-                    cls = 'stack-local' if fpass else 'stack-escaped'
-                elif v is None or (bs == 'esp' and bad):
-                    cls = 'stack-unk'
+            ix = i.reg_name(mm.index) if mm.index else None
+            dv = bool(taint) and (taint.get(bs) == 'A' or taint.get(ix) == 'A')
+            for ls, on in ((0, ld), (1, stt)):
+                if not on:
+                    continue
+                w = p.size
+                if sg == 'fs':
+                    nf.append((x, ls, w, 'tls:%x' % (mm.disp & M32) if bs is None and ix is None else 'tls:reg'))
+                elif dv:
+                    nf.append((x, ls, w, 'tls-derived'))
+                elif bs in ('esp', 'ebp'):
+                    v = s if bs == 'esp' else b
+                    if ix is not None:
+                        cidx = True
+                        fr.append((x, ls, w, 'u', 0))
+                    elif fun:
+                        fr.append((x, ls, w, 'p' if bs == 'ebp' and v is not None else 'u', (v + mm.disp) if bs == 'ebp' and v is not None else 0))
+                    elif v is None or F.multi:
+                        fr.append((x, ls, w, 'u', 0))
+                    else:
+                        c = v + mm.disp
+                        fr.append((x, ls, w, 'a' if c >= 4 else 'r' if c >= 0 else 'l', c))
+                        if c >= 4 and ls == 0 and not fun and w == 4 and o[0].type == X.X86_OP_REG and m in ('mov', 'push') and p is o[-1]:
+                            srcs.append((x, base(i.reg_name(o[0].reg)), 's%d' % ((c - 4) // 4)))
+                        elif c >= 4 and ls == 0 and m == 'push':
+                            srcs.append((x, None, 's%d' % ((c - 4) // 4)))
+                elif bs is None and ix is None:
+                    nf.append((x, ls, w, absclass(mm.disp & M32, bool(ls))))
+                elif bs is None:
+                    nf.append((x, ls, w, absclass(mm.disp & M32, bool(ls))))
                 else:
-                    cls = fcls(v + disp, bnd, T, tall, cidx, fpass)
-            elif bs is None and ix is None:
-                cls = absclass(disp & M32, stt)
-            elif bs is None:
-                cls = absclass(disp & M32, stt)
+                    nf.append((x, ls, w, 'heap/other'))
+            if bs in ('esp', 'ebp') and not ok and not fun:
+                allstack = allstack or ix is not None
+        if kind not in FUNK and (any(p.type == X.X86_OP_MEM and p.mem.base and i.reg_name(p.mem.base) in ('esp', 'ebp') and not p.mem.index and p.access & 3 and s is None and F.bp.get(x) is None for p in o)):
+            allstack = True
+    events = []
+    for x, c, idx, dst in frame_events(F):
+        sk = sorted(flow(F, x, [dst], saved)) if dst else [('U',)]
+        if c is not None and c >= 4 and not fun:
+            allstack = True
+        events.append((c, idx, sk))
+    summ = {}
+    spill = not fun and not F.multi and not cidx and not any(e[2] for e in events) and not any(f[3] == 'u' for f in fr)
+    if not fun:
+        for r in livein(F, saved):
+            summ[r] = sorted(flow(F, F.a, [r], saved, True, spill))
+        for x, d, par in srcs:
+            if d is None:
+                pa = pusharg(F, x)
+                sk = [('U',)] if pa is None else [sink(F, pa[0], 's%d' % pa[1])]
             else:
-                cls = 'heap/other'
-        C[(cls, ls, wk)] += 1
-    return a, dict(offs=offs[:5], n=len(ins) - len(skip), C=C, fl=fl, imp=imp, tlsd=tlsd, fpass=fpass, bad=bad, acc=len(acc), nm=len({t[0] for t in acc}))
+                sk = sorted(flow(F, x, [d], saved, False, spill))
+            summ[par] = sorted(set(summ.get(par, [])) | set(sk))
+        for t in sorted({t for x in F.tails for t in F.tails[x] if mn(F.ins[x]) == 'jmp'}):
+            summ.setdefault('fwd', []).append(t)
+    bpv = sorted({v for v in F.bp.values() if v is not None})
+    return a, dict(addrs=array('I', sorted(F.ins)).tobytes(), nf=nf, fr=fr, misc=misc, ev=events, summ=summ, allstack=allstack, cidx=cidx, multi=F.multi,
+                   why=F.why, bpv=bpv[0] if len(bpv) == 1 else None, offs=offs[:5], undecoded=not F.ok)
 
 
-def fcls(c, bnd, T, tall, cidx, fpass):
-    if c >= 4:
-        return 'stack-args-in'
-    if c >= 0:
-        return 'stack-local'
-    if cidx or tall:
-        return 'stack-local' if fpass else 'stack-escaped'
-    k = bisect.bisect_right(T, c) - 1
-    if k >= 0:
-        t = T[k]; j = bisect.bisect_right(bnd, t)
-        if j >= len(bnd) or bnd[j] > c:
-            return 'stack-escaped'
-    return 'stack-local'
+def parents_map(rows):
+    par = {}
+    for a, e, k in rows:
+        for t in W.FLAGS.get(a, '').split(','):
+            if t.startswith('parent='):
+                par.setdefault(a, []).append(int(t[7:], 16))
+    d = json.load(open(W.EHJ))
+    for fi in d['funcinfo']:
+        for st, u in fi['unwind']:
+            par.setdefault(int(u, 16), []).extend(int(o, 16) for o in fi['owners'])
+    for sc in d['scopes']:
+        for rec in sc['records']:
+            for v in rec[1:]:
+                par.setdefault(int(v, 16), []).extend(int(o, 16) for o in sc['owners'])
+    return {a: sorted(set(v)) for a, v in par.items()}
 
 
 def main():
-    t0 = time.time()
-    parse_pe()
-    raw, rows = load_universe()
-    print('memclass: exe sha256 %s  universe.tsv md5 %s  entries %d' % (hashlib.sha256(open(P.EXE, 'rb').read()).hexdigest()[:12], hashlib.md5(raw).hexdigest()[:12], len(rows)))
-    kind = {a: k for a, e, k in rows}; addrs = {}
-    with Pool(3) as pool:
-        for a, r, th, ad in pool.imap(phase0, [(a, e, k) for a, e, k in rows], chunksize=300):
-            addrs[a] = ad
-            if r is not None or th:
-                RETN[a] = r
-            if th:
-                THUNK[a] = th
-    owner, skip = {}, defaultdict(set)                  # every instruction address is counted once: decomp entries first, then by address
-    for a in sorted(addrs, key=lambda a: (kind[a] != 'decomp', a)):
-        for x in array('I', addrs[a]):
-            if owner.setdefault(x, a) != a:
-                skip[a].add(x)
-    uniq = len(owner); owner = addrs = None
-    for a, r in list(RETN.items()):                    # jmp-thunk chains: the callee pops what its tail target pops
-        for _ in range(6):
-            if isinstance(r, tuple):
-                r = RETN.get(r[1], 0)
-        RETN[a] = r if not isinstance(r, tuple) else 0
-    res = {}
-    with Pool(3) as pool:
-        for a, r in pool.imap(analyze, [(a, e, k, skip.get(a)) for a, e, k in rows], chunksize=100):
-            res[a] = r
-    os.makedirs(OUT, exist_ok=True)
-    good = {a: r for a, r in res.items() if r}
-    tot = Counter(); fl = Counter(); imp = Counter(); nins = sum(r['n'] for r in good.values())
-    allad = Counter()
-    for a, r in good.items():
-        tot.update(r['C']); fl.update(r['fl']); imp.update(r['imp'])
+    raw, rows = load_universe(EXE)
+    key = hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:16] + hashlib.md5(raw).hexdigest()[:16]
+    print('memclass: exe sha256 %s  universe.tsv md5 %s  entries %d' % (key[:12], key[16:28], len(rows)))
+    kind = {a: k for a, e, k in rows}
+    with Pool(2) as p0:
+        W.prepare(p0, rows, key)
+    with Pool(2) as pool:
+        out = pmap(pool, analyze, [(a, e, k) for a, e, k in rows], 100)
+    R = {a: r for a, r in out if r}
+    order = sorted(R, key=lambda a: (kind[a] != 'decomp', a))
+    owner = {}
+    for a in order:
+        for x in array('I', R[a]['addrs']):
+            owner.setdefault(x, a)
+    par = parents_map(rows)
+    # ---- parameter summaries: greatest fixed point (start non-escaping, remove on evidence)
+    bad, rev, rf = set(), defaultdict(list), defaultdict(list)
+    for f in sorted(R):
+        for p, sk in sorted(R[f]['summ'].items()):
+            if p == 'fwd':
+                for t in sk:
+                    rf[t].append(f)
+                continue
+            for s in sk:
+                if s[0] != 'A':
+                    bad.add((f, p))
+                elif s[1] not in R or (R[s[1]]['allstack'] and s[2][0] == 's'):
+                    bad.add((f, p))
+                else:
+                    rev[(s[1], s[2])].append((f, p))
+    for f in sorted(R):
+        if R[f]['allstack']:
+            for p in sorted(R[f]['summ']):
+                if p[0] == 's':
+                    bad.add((f, p))
+    work, rounds = sorted(bad), 0
+    while work:
+        rounds += 1; nxt = []
+        for g, q in work:
+            for d in rev.get((g, q), []) + [(f, q) for f in rf.get(g, [])]:
+                if d not in bad:
+                    bad.add(d); nxt.append(d)
+        work = sorted(nxt)
+
+    def isbad(t, p, seen=()):
+        return t not in R or (t, p) in bad or (R[t]['allstack'] and p[0] == 's') or any(isbad(u, p, seen + (t,)) for u in R[t]['summ'].get('fwd', []) if u not in seen and u != t)
+    npar = Counter(('esc' if (f, p) in bad else 'ok') for f in sorted(R) for p in sorted(R[f]['summ']) if p != 'fwd')
+    # ---- frame contamination per owning function
+    def verdict(sk):
+        r = [s for s in sk if s[0] in 'SRIU'] + [s for s in sk if s[0] == 'M'] + [s for s in sk if s[0] == 'A' and isbad(s[1], s[2])]
+        return sorted({'stored' if s[0] == 'S' else 'returned' if s[0] == 'R' else 'indirect' if s[0] == 'I' else 'unknown' if s[0] == 'U' else 'import:' + s[1] if s[0] == 'M' else 'callee' for s in r})
+    fro = defaultdict(list)
+    for f in sorted(R):
+        for p in (par.get(f, []) if kind[f] in FUNK else [f]):
+            if p in R and kind[p] not in FUNK:
+                fro[p].append(f)
+    frame = {}
+    for g in sorted(R):
+        evs, bnd, whole, esc = [], set(), False, Counter()
+        for f in fro.get(g, []):
+            r = R[f]; fun = f != g
+            bp = R[g]['bpv']
+            whole = whole or (r['multi'] and not fun) or r['cidx']
+            for c, idx, sk in r['ev']:
+                if fun:
+                    c = None if c is None or bp is None else bp + c
+                evs.append((c, idx, verdict(sk), bool(sk)))
+            bnd.update(c if not fun else (bp + c if bp is not None else 0) for x, ls, w, role, c in r['fr'] if role in 'alorp')
+        frame[g] = (sorted(bnd), evs, whole)
+    res_t, per, lost = Counter(), {}, Counter()
+    nescf, reasons, rule2, rulef = 0, Counter(), Counter(), Counter()
+    for g in sorted(R):
+        bnd, evs, whole = frame[g]
+        anyv = [e for e in evs if e[2]]
+        if anyv:
+            nescf += 1
+            reasons[(sorted(r for e in anyv for r in e[2])[0]).split(':')[0]] += 1
+
+    def contam(g, c, final):
+        bnd, evs, whole = frame[g]
+        hit = []
+        for ec, idx, vd, anyk in evs:
+            if not (vd if final else anyk):
+                continue
+            if ec is None or idx or whole:
+                return vd or ['callee']
+            j = bisect.bisect_right(bnd, ec)
+            if ec <= c and (j >= len(bnd) or bnd[j] > c):
+                hit += vd or ['callee']
+        return sorted(set(hit))
+
+    def anyesc(g, final):
+        return any(e[2] if final else e[3] for e in frame[g][1])
+    tot, ent, imp, fl = Counter(), defaultdict(Counter), Counter(), Counter()
+    pending = []
+    for a in order:
+        r = R[a]; mine = lambda x: owner[x] == a
+        for x, ls, w, cls in r['nf']:
+            if mine(x):
+                k = 'tls' if cls.startswith('tls:') else cls
+                if cls.startswith('tls:'):
+                    fl[cls] += 1
+                tot[(k, 'S' if ls else 'L', w if w in WID else 'o')] += 1; ent[a][(k, ls)] += 1
+        for x, kd in r['misc']:
+            if mine(x):
+                fl[kd] += 1
+        for x, ls, w, role, c in r['fr']:
+            if not mine(x):
+                continue
+            ps = [p for p in (par.get(a, []) if kind[a] in FUNK else [a]) if p in R and kind[p] not in FUNK]
+            if not ps:
+                cls = 'stack-unk'; res_t['funclet-parent-unknown'] += 1
+            else:
+                cl = {}
+                for g in ps:
+                    cc = c
+                    if kind[a] in FUNK and role == 'p':
+                        cc = None if R[g]['bpv'] is None else R[g]['bpv'] + c
+                    if role in 'alorp' and cc is not None:
+                        v = contam(g, cc, True); v1 = contam(g, cc, False)
+                    else:
+                        v = ['frame'] if anyesc(g, True) else []; v1 = ['frame'] if anyesc(g, False) else []
+                    cl[g] = (v, v1)
+                if any(v for v, v1 in cl.values()):
+                    cls = 'stack-escaped'
+                    for v, v1 in cl.values():
+                        for t in v:
+                            if t.startswith('import:'):
+                                lost[t[7:]] += 1
+                else:
+                    cls = 'stack-funclet' if kind[a] in FUNK else 'stack-args-in' if role == 'a' else 'stack-args-out' if role == 'o' else 'stack-local'
+                    if any(v1 for v, v1 in cl.values()):
+                        rule2[role] += 1
+                    elif role in 'up' and not kind[a] in FUNK:
+                        rulef['unresolved-offset'] += 1
+            tot[(cls, 'S' if ls else 'L', w if w in WID else 'o')] += 1; ent[a][(cls, ls)] += 1
     nacc = sum(tot.values())
-    print('entries decoded %d (undecodable %d); instructions (each address counted once, %d duplicate address-entry pairs dropped) %d, with a memory operand (explicit or implicit) %d; memory accesses %d (loads %d, stores %d)' % (
-        len(good), len(res) - len(good), sum(len(v) for v in skip.values()), nins, sum(r['nm'] for r in good.values()), nacc, sum(v for k, v in tot.items() if k[1] == 'L'), sum(v for k, v in tot.items() if k[1] == 'S')))
-    print('%-15s %9s %9s %6s   widths 1/2/4/8/10/16/other (loads | stores)' % ('class', 'loads', 'stores', 'share'))
-    pc = {}
+    pc = {c: sum(v for k, v in tot.items() if k[0] == c) for c in ORDER}
+    print('entries decoded %d (undecodable %d); instructions %d (each counted once); memory accesses %d (loads %d, stores %d)' % (
+        len(R), len(rows) - len(R), len(owner), nacc, sum(v for k, v in tot.items() if k[1] == 'L'), sum(v for k, v in tot.items() if k[1] == 'S')))
+    print('%-15s %9s %9s %6s %6s   widths 1/2/4/8/10/16/o (loads | stores)' % ('class', 'loads', 'stores', 'share', 'v1'))
     for c in ORDER:
-        L = sum(v for k, v in tot.items() if k[0] == c and k[1] == 'L'); S = sum(v for k, v in tot.items() if k[0] == c and k[1] == 'S'); pc[c] = L + S
-        wl = '/'.join(str(tot[(c, 'L', w)]) for w in WID + ('o',)); ws = '/'.join(str(tot[(c, 'S', w)]) for w in WID + ('o',))
-        print('%-15s %9d %9d %5.1f%%   %s | %s' % (c, L, S, 100.0 * (L + S) / max(nacc, 1), wl, ws))
-    stk = sum(pc[c] for c in STK)
-    fp = [a for a, r in good.items() if r['fpass']]
-    fpacc = sum(v for a in fp for k, v in good[a]['C'].items() if k[0] in STK)
-    FUNK = ('inner', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'eh-throw')
-    print('stack-unk accesses: %d in funclet-kind entries (parent frame), %d in %d other entries with inconsistent esp tracking' % (
-        sum(v for a, r in good.items() if kind[a] in FUNK for k, v in r['C'].items() if k[0] == 'stack-unk'),
-        sum(v for a, r in good.items() if kind[a] not in FUNK for k, v in r['C'].items() if k[0] == 'stack-unk'), sum(1 for a, r in good.items() if r['bad'] and kind[a] not in FUNK)))
-    print('functions passing the function-level escape test (no frame address leaves): %d of %d; they contain %.1f%% of all stack accesses; esp tracking inconsistent (stack-unk) in %d entries' % (
-        len(fp), len(good), 100.0 * fpacc / max(stk, 1), sum(1 for r in good.values() if r['bad'])))
-    unkok = sum(v for a in fp for k, v in good[a]['C'].items() if k[0] == 'stack-unk')
-    td = Counter()
-    for r in good.values():
-        td.update(r['tlsd'])
-    print('tls displacements: ' + ' '.join('%s=%d' % kv for kv in sorted(td.items(), key=lambda kv: -kv[1])[:8]))
-    print('atomics: lock-prefixed %d  xchg-mem %d  cmpxchg-mem %d  xadd-mem %d' % (fl['lock'], fl['xchg'], fl['cmpxchg'], fl['xadd']))
-    ck = lambda n: n.startswith('Interlocked') or n.endswith('CriticalSection') or n.endswith('CriticalSectionAndSpinCount') or n in ('TlsGetValue', 'TlsSetValue', 'TlsAlloc', 'CreateThread')
-    print('import call sites (direct + via thunk): ' + ' '.join('%s=%d' % kv for kv in sorted(imp.items()) if ck(kv[0])))
-    offs = [(x, w, a) for a, r in sorted(good.items()) for x, w in r['offs']]
-    tl = pc['tls'] + pc['tls-derived']
-    hard = [o for o in offs if not o[1].startswith('call with')]
-    print('tls check (no function stores/passes on an address derived from fs:[0x2c]): %s; offending sites %d = %d left in eax/ecx/edx at a call (callee use not analysed) + %d store/push/return/other' % (
-        'PASSED' if not offs else 'FAILED', len(offs), len(offs) - len(hard), len(hard)))
-    print('  first call-left: %s;  first other: %s' % (' '.join('%08x' % x for x, w, a in offs if w.startswith('call with'))[:80], ' '.join('%08x(%s)' % (x, w) for x, w, a in hard[:4])))
-    plain = pc['stack-local'] + pc['ro-iat'] + pc['ro-rdata'] + pc['ro-text'] + (0 if offs else tl)
-    print('plain-eligible accesses %d of %d (%.1f %%)  [stack-local %d + ro-const %d; tls (%d) and tls-derived (%d) excluded; +%d stack-unk in escape-free functions; +%d args-in/out]' % (
-        plain, nacc, 100.0 * plain / max(nacc, 1), pc['stack-local'], plain - pc['stack-local'], pc['tls'], pc['tls-derived'], unkok, pc['stack-args-in'] + pc['stack-args-out']))
-    print('files: %s  runtime %.0fs' % (OUT, time.time() - t0))
+        L, S = [sum(v for k, v in tot.items() if k[0] == c and k[1] == t) for t in 'LS']
+        print('%-15s %9d %9d %5.1f%% %6s   %s | %s' % (c, L, S, 100.0 * (L + S) / max(nacc, 1), BEFORE.get(c, '-'), '/'.join(str(tot[(c, 'L', w)]) for w in WID + ('o',)), '/'.join(str(tot[(c, 'S', w)]) for w in WID + ('o',))))
+    offs = [(x, w) for a in order for x, w in R[a]['offs'] if owner.get(x) == a]
+    tlsp = pc['tls'] + pc['tls-derived']
+    plain = sum(pc[c] for c in PLAIN)
+    print('plain-eligible accesses %d of %d (%.1f %%)  [v1: 46.1 %%]; tls (%d) and tls-derived (%d) stay ordered: check %s (%d offending sites)' % (
+        plain, nacc, 100.0 * plain / max(nacc, 1), pc['tls'], pc['tls-derived'], 'PASSED' if not offs else 'FAILED', len(offs)))
+    print('contribution: rule1 locals %d, args-in %d, args-out %d, funclet frames %d; formerly stack-unk now plain (non-funclet unresolved offsets) %d; rule2 (summary-proved, formerly stack-escaped) %d (by role %s)' % (
+        pc['stack-local'], pc['stack-args-in'], pc['stack-args-out'], pc['stack-funclet'], rulef['unresolved-offset'], sum(rule2.values()), dict(sorted(rule2.items()))))
+    rs = Counter(w for a in order if kind[a] not in FUNK for w in R[a]['why'][:1])
+    print('esp-tracking residue: entries with an unresolved instruction %d (non-funclet %d) by first reason: %s; funclets without a known parent frame: %d accesses' % (
+        sum(1 for a in order if R[a]['why']), sum(1 for a in order if R[a]['why'] and kind[a] not in FUNK), dict(sorted(rs.items())), res_t['funclet-parent-unknown']))
+    print('frames with an escaping address: %d of %d; first reason: %s; frames flagged whole-frame (computed offsets / epochs): %d; entries taking their arg-area address: %d' % (
+        nescf, len(frame), dict(sorted(reasons.items())), sum(1 for g in frame if frame[g][2]), sum(1 for a in R if R[a]['allstack'])))
+    print('parameter summaries: %d non-escaping, %d escaping; fixed-point rounds %d' % (npar['ok'], npar['esc'], rounds))
+    print('top imports by accesses lost: ' + ' '.join('%s=%d' % kv for kv in sorted(lost.items(), key=lambda kv: (-kv[1], kv[0]))[:15]))
+    print('atomics: lock %d xchg-mem %d cmpxchg %d xadd %d; tls displacements: %s' % (fl['lock'], fl['xchg'], fl['cmpxchg'], fl['xadd'], ' '.join('%s=%d' % kv for kv in sorted(fl.items()) if kv[0].startswith('tls:'))[:150]))
+    ck = lambda n: n.startswith('Interlocked') or n.endswith('CriticalSection') or n in ('TlsGetValue', 'TlsSetValue', 'TlsAlloc', 'CreateThread')
+    print('import call sites: ' + ' '.join('%s=%d' % (k[4:], v) for k, v in sorted(fl.items()) if k.startswith('imp:') and ck(k[4:])))
+    os.makedirs(OUT, exist_ok=True)
     with open(OUT + '/entries.tsv', 'w') as f:
-        f.write('entry\tkind\tinsns\tfnpass\tspbad\t' + '\t'.join(c.replace('/', '_') + '.L\t' + c.replace('/', '_') + '.S' for c in ORDER) + '\n')
-        for a in sorted(good):
-            r = good[a]
-            f.write('%08x\t%s\t%d\t%d\t%d\t' % (a, kind[a], r['n'], r['fpass'], r['bad']) + '\t'.join('%d\t%d' % (sum(v for k, v in r['C'].items() if k[0] == c and k[1] == 'L'), sum(v for k, v in r['C'].items() if k[0] == c and k[1] == 'S')) for c in ORDER) + '\n')
+        f.write('entry\tkind\tevents_escaping\twhole\tawhy\t' + '\t'.join(c.replace('/', '_') + '.L\t' + c.replace('/', '_') + '.S' for c in ORDER) + '\n')
+        for a in sorted(R):
+            f.write('%08x\t%s\t%d\t%d\t%s\t' % (a, kind[a], sum(1 for e in frame[a][1] if e[2]) if a in frame else 0, int(frame[a][2]) if a in frame else 0, ','.join(R[a]['why']) or '-')
+                    + '\t'.join('%d\t%d' % (ent[a][(c, 0)], ent[a][(c, 1)]) for c in ORDER) + '\n')
 
 
 if __name__ == '__main__':
