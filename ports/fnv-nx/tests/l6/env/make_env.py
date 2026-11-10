@@ -56,6 +56,8 @@ def xcheck(stream, rows, spec):
     a = [(r.name, int.from_bytes(v, "little") if isinstance(v, (bytes, bytearray)) else v) for r in recs if (r.iface or "").startswith("IDirect3D9") and "Device" not in r.iface and r.name in ops
          for (l, c, rc, v) in r.items if l == "ret"]
     b = [(m.group(1), int(t[1], 16)) for t in (x.split("\t") for x in rows if not x.startswith("#")) for m in [re.match(r"(\w+)\(", t[0])] if m and m.group(1) in ops]
+    nz = lambda l: [(n, int(v != 0) if n == "GetAdapterMonitor" else v) for n, v in l]   # an HMONITOR is a handle: the stream carries the recorder's token, so only NULL / non-NULL is comparable
+    a, b = nz(a), nz(b)
     nenv = sum(1 for r in recs for (l, c, rc, v) in r.items if l == "ret" and c == 1)
     return len(recs), len(a), len(b), a == b, nenv
 
@@ -81,7 +83,7 @@ def main():
             gl = [re.sub(r"^\S+ ", "", l) for l in g.splitlines() if "GL_RENDERER" in l or "GL_VERSION" in l or "GL_VENDOR" in l][:3]
             sh(["wineserver", "-k"], env=env)
         finally:
-            x.close()
+            x.close(); lock.close()   # the prefix lock is per process: a second profile would block on it forever
         a, b = (open(t, "rb").read() for t, _ in res)
         dmrow = next(l for l in a.decode().splitlines() if l.startswith("GetAdapterDisplayMode(0)")); check(f"Width={w:x} Height={h:x} " in dmrow, f"{name}: display mode is not {w}x{h}: {dmrow}")
         check(a == b, f"{name}: two runs differ (determinism)"); rows = a.decode().splitlines()

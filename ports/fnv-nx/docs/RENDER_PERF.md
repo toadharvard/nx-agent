@@ -308,7 +308,7 @@ not cover, and where a 3-5x would have to come from:
 ## 7. Input formats and the hook for S16's captures
 
 Choice: **`.nxd3d` stays internal; real captures come in as NXD9** (S6n's D3D9-level capture format,
-docs/RENDER_NATIVE.md §8.3, written by S16) through `perf/nxd9_import.py`:
+docs/RENDER_NATIVE.md §8.3, written by S16) through `perf/nxd9_import.py` (removed 2026-11-10 with `nxd9_gpu.py`, see render/d3d9; the commands below are history):
 
 ```sh
 python3 -I render/native/perf/nxd9_import.py <capture.nxd9> <work>/streams/game.nxd3d
