@@ -62,7 +62,7 @@ TEST(crt_k32_multibyte_to_wide_utf8)
     SetLastError(0);
     CHECK_EQ(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bad, 4, w, 8), 0);
     CHECK_EQ(GetLastError(), ERROR_NO_UNICODE_TRANSLATION);
-    CHECK_EQ(MultiByteToWideChar(CP_UTF8, 0, "\xed\xa0\x80", 3, NULL, 0), 1);   /* an encoded surrogate */
+    CHECK_EQ(MultiByteToWideChar(CP_UTF8, 0, "\xed\xa0\x80", 3, NULL, 0), 3);   /* an encoded surrogate: one per maximal subpart */
 }
 
 TEST(crt_k32_wide_to_multibyte)
@@ -74,10 +74,13 @@ TEST(crt_k32_wide_to_multibyte)
     CHECK_EQ(WideCharToMultiByte(CP_ACP, 0, w, 3, a, 8, NULL, &used), 3);
     CHECK(!used);
     CHECK(!memcmp(a, "H\xe9\x80", 3));
-    CHECK_EQ(WideCharToMultiByte(CP_ACP, 0, w, -1, a, 8, "#", &used), 5);
+    CHECK_EQ(WideCharToMultiByte(CP_ACP, 0, w, -1, a, 8, "#", &used), 5);   /* best fit: A-macron -> A */
+    CHECK(!used);
+    CHECK_STR(a, "H\xe9\x80" "A");
+    CHECK_EQ(WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, w, -1, a, 8, "#", &used), 5);
     CHECK(used);
     CHECK_STR(a, "H\xe9\x80#");
-    CHECK_EQ(WideCharToMultiByte(CP_ACP, 0, w, -1, a, 8, NULL, NULL), 5);
+    CHECK_EQ(WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, w, -1, a, 8, NULL, NULL), 5);
     CHECK_STR(a, "H\xe9\x80?");
     SetLastError(0);
     CHECK_EQ(WideCharToMultiByte(CP_ACP, 0, w, -1, a, 4, NULL, NULL), 0);
@@ -107,7 +110,7 @@ TEST(crt_k32_wide_to_multibyte)
 TEST(crt_k32_code_pages)
 {
     CHECK_EQ(GetACP(), 1252);
-    CHECK_EQ(GetOEMCP(), 1252);
+    CHECK_EQ(GetOEMCP(), 437);   /* the environment: OEM code page 437 */
     CHECK_EQ(GetConsoleCP(), 1252);
     CHECK_EQ(GetConsoleOutputCP(), 1252);
     CHECK(IsValidCodePage(1252));
@@ -161,14 +164,14 @@ TEST(crt_k32_lcmapstring)
     int n2 = LCMapStringA(0x0409, LCMAP_SORTKEY, "A", -1, (char *)k2, 32);
     int n3 = LCMapStringA(0x0409, LCMAP_SORTKEY, "ab", -1, (char *)k3, 32);
     int n4 = LCMapStringW(0x0409, LCMAP_SORTKEY, L"B", -1, (WCHAR *)k4, 32);
-    CHECK_EQ(n1, 6);
-    CHECK_EQ(LCMapStringA(0x0409, LCMAP_SORTKEY, "a", -1, NULL, 0), 6);
-    CHECK_EQ(n2, 6);
-    CHECK_EQ(n4, 6);
-    CHECK_EQ(n3, 9);
-    CHECK(memcmp(k1, k2, 6) < 0);
-    CHECK(memcmp(k2, k3, 6) < 0);
-    CHECK(memcmp(k3, k4, 6) < 0);
+    CHECK_EQ(n1, 11);   /* 3 bytes primary, 3 diacritic, 1 case, 4 separators/terminator per level */
+    CHECK_EQ(LCMapStringA(0x0409, LCMAP_SORTKEY, "a", -1, NULL, 0), 11);
+    CHECK_EQ(n2, 11);
+    CHECK_EQ(n4, 11);
+    CHECK_EQ(n3, 18);
+    CHECK(memcmp(k1, k2, 11) < 0);
+    CHECK(memcmp(k2, k3, 11) < 0);
+    CHECK(memcmp(k3, k4, 11) < 0);
     CHECK_EQ(LCMapStringA(0x0409, LCMAP_SORTKEY, "ab", -1, (char *)k3, 8), 0);
     CHECK_EQ(GetLastError(), ERROR_INSUFFICIENT_BUFFER);
 }
@@ -217,7 +220,7 @@ TEST(crt_k32_string_types)
     CHECK_EQ(t[3], C1_CNTRL | C1_DEFINED);
     CHECK_EQ(t[4], 0x5555);
     CHECK(GetStringTypeW(CT_CTYPE2, L"a", 1, t));
-    CHECK_EQ(t[0], 0);
+    CHECK_EQ(t[0], 1);   /* C2_LEFTTORIGHT */
     SetLastError(0);
     CHECK(!GetStringTypeW(0x10, L"a", 1, t));
     CHECK_EQ(GetLastError(), ERROR_INVALID_FLAGS);
@@ -238,8 +241,8 @@ TEST(crt_k32_locale_info)
     CHECK_EQ(GetLocaleInfoA(0x0409, LOCALE_IDEFAULTANSICODEPAGE, NULL, 0), 5);
     CHECK_EQ(GetLocaleInfoA(0x0409, LOCALE_IDEFAULTANSICODEPAGE, a, 64), 5);
     CHECK_STR(a, "1252");
-    CHECK_EQ(GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_IDEFAULTCODEPAGE, a, 64), 5);
-    CHECK_STR(a, "1252");
+    CHECK_EQ(GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_IDEFAULTCODEPAGE, a, 64), 4);
+    CHECK_STR(a, "437");   /* the OEM code page */
     CHECK_EQ(GetLocaleInfoA(0x0409, LOCALE_ILANGUAGE, a, 64), 5);
     CHECK_STR(a, "0409");
     CHECK_EQ(GetLocaleInfoA(0x0409, LOCALE_SENGLANGUAGE | LOCALE_NOUSEROVERRIDE, a, 64), 8);
