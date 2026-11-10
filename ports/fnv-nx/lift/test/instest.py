@@ -175,6 +175,18 @@ def img80(k, v, e):
     if k in (3, 4, 5): return i80(v - (1 << 64) if v >> 63 else v)
     return (v, e)
 QN = lambda b, w: b | (1 << (51 if w == 64 else 22)) if (b >> (52 if w == 64 else 23)) & (0x7ff if w == 64 else 0xff) == (0x7ff if w == 64 else 0xff) and b & ((1 << (52 if w == 64 else 23)) - 1) else b
+def x87_range(E):
+    """(least, most) stack depth at which the instruction raises no x87 stack fault: the QEMU oracle does not model overflow/underflow (the lifted dynamic
+    stack does: see test/x87dyn.py for its checks), so the generator stays inside"""
+    ins = E['ins']; b0, mr = ins.opcode[0], ins.modrm; g = mr >> 3 & 7; i = mr & 7
+    if mr < 0xc0:
+        if (b0, g) in ((0xd9, 0), (0xdb, 0), (0xdb, 5), (0xdd, 0), (0xdf, 0), (0xdf, 5)): return 0, 7
+        if (b0, g) in ((0xd9, 5), (0xd9, 7), (0xdd, 7)): return 0, 8
+        return 1, 8
+    if b0 == 0xd9: return (i + 1, 7) if mr < 0xc8 else (i + 1, 8) if mr < 0xd0 else (0, 8) if mr in (0xd0, 0xe5) else (0, 7) if 0xe8 <= mr <= 0xee else (1, 8)
+    if mr in (0xd9, 0xe9) and b0 in (0xde, 0xda): return 2, 8
+    if (b0, mr) in ((0xdb, 0xe2), (0xdb, 0xe3), (0xdf, 0xe0)) or b0 == 0xdd and mr < 0xd0 or b0 == 0xdf and mr < 0xc8: return 0, 8
+    return max(1, i + 1), 8
 def gen_x87(r, d, top):
     """8 physical carriers (k, v, e); k == 0 for the empty ones; slot i from TOP is valid for i < d. Kinds: F64 F32 I16 I32 I64 M80 with edge values."""
     def m80():
@@ -305,6 +317,7 @@ def gen_state(E, i, att, xd=None):
         return int.from_bytes(b''.join(struct.pack('<I', r.randrange(0, 40)) for _ in range(4)), 'little')
     top, d = r.randrange(8), r.randrange(9)
     if xd is not None: d = xd
+    if E['x87']: lo, hi = x87_range(E); d = min(max(d, lo), hi)
     # W6 state, drawn from its own generator so the other families' seeds are unchanged: NaNs with payloads in some float lanes, mm0-7, MXCSR
     r2 = random.Random('w6:%x:%d:%d' % (E['addr'], i, att)); xm = [xv() for _ in range(8)]
     for k in range(8):
@@ -369,6 +382,10 @@ def compare(E, st, o, c, X):
     if E['base'] == 'fnstsw' and E['ins'].operands[0].type != X.X86_OP_REG and o['wr']:     # FNSTSW m16: mask the same bits (byte 0 all, byte 1 bits 1 and 7)
         a0 = min(a for a, n in o['wr']); mk = {a0: 0xff, a0 + 1: 0x82}
         om = {a: v & ~mk.get(a, 0) for a, v in om.items()}; cm = {a: v & ~mk.get(a, 0) for a, v in cm.items()}
+    if om != cm and E['base'] in ('fst', 'fstp') and o['wr'] and len(o['wr']) == 1 and o['wr'][0][1] in (4, 8):    # QEMU 5.0 narrows an 80-bit SNaN to m32/m64 without setting the quiet bit; the x87 does
+        a0, w = o['wr'][0]; orig = lambda x: (imgpage(x & ~0xfff) or genpage(st['wk'][0], st['wk'][1], x & ~0xfff))[x & 0xfff]
+        ov, cv = (int.from_bytes(bytes(d.get((a0 + k) & 0xffffffff, orig((a0 + k) & 0xffffffff)) for k in range(w)), 'little') for d in (om, cm)); qb = 1 << (22 if w == 4 else 51); ex = (0xff, 23) if w == 4 else (0x7ff, 52)
+        if ov | qb == cv and (cv >> ex[1]) & ex[0] == ex[0]: om = cm
     if om != cm:
         for a in sorted(set(o['mem']) | set(c['mem'])):
             if o['mem'].get(a) != c['mem'].get(a): return 'diff', 'mem[%x]' % a, str(c['mem'].get(a)), str(o['mem'].get(a))
@@ -387,10 +404,13 @@ def compare(E, st, o, c, X):
         if bad:
             p = bad[0]; gi = gi80(p); oi = f['st'][p]; det = ('x87 phys%d' % p + tg, '%04x%016x' % gi[::-1], '%04x%016x' % oi[::-1])
             nan = lambda m, e: e & 0x7fff == 0x7fff and m << 1 & (2 ** 64 - 1)
-            exin = any(f['valid'] >> q & 1 and x80d(*f['st'][q]) is None for q in range(8) if q not in bad)                 # an operand that is not exactly a double: the first use rounds
-            if nan(*gi) and nan(*oi): prec = prec or (det if gi[1] >> 15 == oi[1] >> 15 else None)                           # two NaNs: payload selection may differ, the sign must not
+            exin = any(st['valid'] >> q & 1 and x80d(*img80(*st['fx'][q])) is None for q in range(8))                         # an operand that is not exactly a double: the first use rounds
+            nn = sum(1 for q in range(8) if st['valid'] >> q & 1 and nan(*img80(*st['fx'][q]))) + (1 if any(o.type == X.X86_OP_MEM for o in E['ins'].operands) else 0)   # NaN operands (a memory one counts as one)
+            if exin: prec = prec or det
+            elif nan(*gi) and nan(*oi):                                                                                      # two NaN operands: the pick (payload, sign) may differ
+                if gi != oi: prec = prec or det if nn >= 2 else None
             elif nan(*gi) or nan(*oi): return ('diff',) + det
-            elif (f['fcw'] >> 8 & 3) != 2 or exin or not all(ndbl(*f['st'][q]) for q in bad): prec = prec or det
+            elif (f['fcw'] >> 8 & 3) != 2 or not all(ndbl(*f['st'][q]) for q in bad): prec = prec or det
             else: return ('diff',) + det
             if prec is None: return ('diff',) + det
         dcc = (f['cc'] ^ g['cc']) & CC_DEF.get(E['base'], 0) if E['base'].startswith('f') else 0

@@ -70,3 +70,11 @@ Doubts: (1) CF of shl/shr/sar beyond the width: undefined in the model (see abov
 rol agrees with the DSL (lsb of the unchanged result) at count 8/16; ror disagrees only because of the model's ror CF bug; r8 counts 16/24 hit the rotate bug.
 (3) `lea r16`: proved, low 16 bits of the 32-bit address, upper half of the destination kept. (4) 16-bit cmovcc (all 16 conditions, reg-reg): proved, the upper half is unchanged whether or not the move happens.
 Memory forms rely on the `assume` (no segment-limit #GP: access wrapping past 4 GiB).
+
+### Sail model patches (W9b)
+`proof/sail_patches/rotate_count.sail` (rotate_left_bits/rotate_right_bits reduce the count mod width) and `ror_cf.sail` (ROR CF = msb of the result for masked
+count >= 2) are spliced in by `sail_build.sh` (default, `x86_proof.ir` sha256 3acf7d99...); `sail_build.sh --stock` builds the unpatched `x86_proof_stock.ir`
+(sha256 1de1cdc6...). `test/rothost.py` compares the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
+CF-in, cl and imm8 forms, second pre-flag pattern too): 488,112,128 cases, diff 0 on every SDM-defined output; `mfree` = model leaves a defined output
+undefined (shl/shr/sar CF beyond the width), `undef-info` = host value of an SDM-undefined output differing from the model's.
+Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/ror OF at masked count 0, shl/shr/sar CF beyond the width), model-gap 2.

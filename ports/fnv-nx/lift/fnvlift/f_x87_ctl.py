@@ -83,7 +83,7 @@ def succs(cx, a, ins, m):
 
 def prepass(cx, img, force, entry):
     """sets cx.xm ('s' static / 'd' dynamic / None: no x87), cx.xd (depth before each instruction), cx.xa (after), cx.xmax, cx.xe (entry depth)"""
-    cx.xm, cx.xd, cx.xa, cx.xmax, cx.xe = None, {}, {}, 0, entry or 0
+    cx.xm, cx.xd, cx.xa, cx.xmax, cx.xe, cx.xwhy = None, {}, {}, 0, entry or 0, ''
     if not any(0xd8 <= i.opcode[0] <= 0xdf for i in cx.insns.values()):
         return
     cx.kinds.add('x87')
@@ -94,8 +94,14 @@ def prepass(cx, img, force, entry):
     ok = analyze(cx, img)
     cx.xm = 's' if ok else 'd'
     cx.kinds.add('x87s' if ok else 'x87d')
+    cx.kinds.add('x87why:' + cx.xwhy) if cx.xwhy else None
     if not ok:
         cx.xd, cx.xa = {}, {}
+
+
+def no(cx, why):
+    cx.xwhy = why
+    return False
 
 
 def analyze(cx, img):
@@ -106,7 +112,7 @@ def analyze(cx, img):
             a, d = todo.pop()
             if a in D:
                 if D[a] != d:
-                    return False
+                    return no(cx, 'join conflict')
                 continue
             D[a] = d
             ins = I[a]
@@ -120,12 +126,12 @@ def analyze(cx, img):
                 elif o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment:
                     e = 0                                        # import: Win32 / CRT calls return nothing on the x87 stack
                 else:
-                    return False                                 # indirect: result class unknown
+                    return no(cx, 'indirect call')               # result class unknown
                 if e is None:
-                    return False
+                    return no(cx, 'callee without a usable depth row')
             nd = 0 if reset else d + e
             if nd < 0 or nd > 8 or d > 8:
-                return False
+                return no(cx, 'depth out of range')
             A[a] = nd
             cx.xmax = max(cx.xmax, d, nd)
             todo.extend((s, nd) for s in succs(cx, a, ins, m) if s in I)
