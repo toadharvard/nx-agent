@@ -12,6 +12,7 @@ destructor through a base. It rewrites, in src/ and include/ of the tree:
     class D : B { ... }  (no destructor declared, D in the set)
                                   ->  class D : B { ... FNVNX_SDD_IMPLICIT(D, B) }
     p->~C()  /  x.~C()            ->  FNVNX_DESTROY(p, C)  /  FNVNX_DESTROY_REF(x, C)   (unqualified calls only)
+    C::operator delete(p[, n])    ->  FNVNX_OPDELETE1(p, C)  /  FNVNX_OPDELETE2(p, n, C)
 
 The set: a class that declares `virtual ~C`, and every class with a base in the set. A base is resolved to the
 definition of that name earlier in the same file, else to the definitions in the files
@@ -35,6 +36,8 @@ SPEC = re.compile(r'(?:\b(?:virtual|inline|__forceinline|__inline|explicit|FNVNX
                   r'|__declspec\s*\((?:[^()]|\([^()]*\))*\)|__attribute__\s*\(\((?:[^()]|\([^()]*\))*\)\))\s*$')
 DCALL = re.compile(r'(->|\.)\s*~\s*([A-Za-z_]\w*(?:\s*<[^;{}()]*?>)?)\s*\(\s*\)')
 IDENT = re.compile(r'[A-Za-z_0-9]')
+TPARAM = re.compile(r'\b(?:class|typename)\s+([A-Za-z_]\w*)\s*(?=[,>=])')
+OPDEL = re.compile(r'(?<![\w~:>])((?:[A-Za-z_]\w*\s*(?:<[^;{}()]*?>\s*)?::\s*)+)operator\s+delete\s*\(')
 
 
 def mask(text):
@@ -139,6 +142,16 @@ def receiver_start(m, i):
             first = False
             k2 = j
             while k2 > 0 and m[k2 - 1] in ' \t': k2 -= 1
+            if k2 > 0 and m[k2 - 1] == '>' and m[k2 - 2:k2] != '->':     # xxx_cast<T>(p), f<T>(p)
+                d, k3 = 0, k2 - 1
+                while k3 >= 0:
+                    if m[k3] == '>': d += 1
+                    elif m[k3] == '<':
+                        d -= 1
+                        if d == 0: break
+                    elif m[k3] in ';{}': k3 = -1; break
+                    k3 -= 1
+                if k3 > 0 and IDENT.match(m[k3 - 1]): k2 = k3
             if k2 > 0 and (IDENT.match(m[k2 - 1]) or m[k2 - 1] in ')]'):
                 j = k2
                 if IDENT.match(m[j - 1]):
@@ -176,7 +189,10 @@ def scan(tree):
                     text = fh.read()
                 if 'class' not in text and 'struct' not in text and '~' not in text: continue
                 m = mask(text)
-                files[p] = (text, m, classes(text, m))
+                cs = classes(text, m)
+                tp = set(TPARAM.findall(m))
+                for c in cs: c['bases'] = [(sp, b) for sp, b in c['bases']]; c['tparams'] = tp
+                files[p] = (text, m, cs)
     return files
 
 
@@ -240,6 +256,7 @@ def closure(files, tree=None):
                 if not c['sdd']:
                     for _, b in c['bases']:
                         if b in local: st = {local[b]}
+                        elif b in c['tparams']: continue     # a template parameter, not the class of that name
                         else:
                             st = set()
                             for q in inc[p]:
@@ -286,6 +303,23 @@ def rewrite(text, m, cs, stats):
         nl = '\n' * text[s:d.end()].count('\n')          # keep the line count
         edits.append((s, d.end(), '%s(%s, %s)%s' % (macro, recv.replace('\n', ' '), ' '.join(d.group(2).split()), nl)))
         stats['SDD1-DESTROY'] += 1
+    for d in OPDEL.finditer(m):
+        pre = m[max(0, d.start() - 40):d.start()].rstrip()
+        if re.search(r'(?:\bvoid|\b__cdecl|\bstatic|\binline|\bfriend|\*|&)$', pre): continue      # a definition
+        p = close_of(m, d.end() - 1, '(', ')')
+        if p < 0: continue
+        args, depth, cur = [], 0, ''
+        for ch in text[d.end():p] + ',':
+            if ch in '(<[': depth += 1
+            elif ch in ')>]': depth -= 1
+            if ch == ',' and depth == 0: args.append(cur.strip()); cur = ''
+            else: cur += ch
+        cls = ' '.join(d.group(1).split()).rstrip(':').rstrip()
+        if len(args) not in (1, 2) or not args[0] or '\n' in text[d.start():p]:
+            stats['SDD1-OPDELETE-MISSED'] += 1
+            continue
+        edits.append((d.start(), p + 1, 'FNVNX_OPDELETE%d(%s, %s)' % (len(args), ', '.join(args), cls)))
+        stats['SDD1-OPDELETE'] += 1
     edits.sort(key=lambda e: (e[0], e[1]))
     out, at = [], 0
     for a, b, r in edits:
@@ -302,7 +336,7 @@ def run(tree, dry=False, report=None):
     rows = []
     for p in sorted(files):
         text, m, cs = files[p]
-        if 'FNVNX_VDTOR' in text or 'FNVNX_DESTROY' in text or 'FNVNX_SDD_IMPLICIT' in text:
+        if 'FNVNX_VDTOR' in text or 'FNVNX_DESTROY' in text or 'FNVNX_SDD_IMPLICIT' in text or 'FNVNX_OPDELETE' in text:
             stats['SDD1-ALREADY'] += 1
             continue
         st = Counter()
