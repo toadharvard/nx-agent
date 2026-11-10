@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """registry - run every contract gate on one (facts, objfacts) pair and write the verdicts (L1 CONTRACT).
 
-    registry.py --facts facts.pkl --obj objfacts.pkl --link <link dir> --out <dir> [--only data,call]
+    registry.py --facts facts.pkl --obj objfacts.pkl --n1 n1.pkl --link <link dir> --out <dir> [--only data,call]
 
 A gate is a module `gate_<name>.py` in this directory with
 
@@ -27,11 +27,16 @@ def main():
     ap.add_argument('--obj', required=True)
     ap.add_argument('--link', required=True)
     ap.add_argument('--out', required=True)
+    ap.add_argument('--n1', required=True, help='N1 certificate: gives the address of ___security_cookie')
     ap.add_argument('--only', default='')
     a = ap.parse_args()
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     facts = pickle.load(open(a.facts, 'rb'))
     obj = pickle.load(open(a.obj, 'rb'))
+    ck = {v for k, v in pickle.load(open(a.n1, 'rb'))['sym'].items() if len(k) == 2 and k[1] == '___security_cookie'}
+    if len(ck) != 1:
+        sys.exit('___security_cookie is not one address in the N1 map: %r' % sorted(ck))
+    facts['cookie'] = ck.pop()
     os.makedirs(a.out, exist_ok=True)
     summary = {}
     rows = []

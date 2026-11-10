@@ -1,7 +1,8 @@
 """gate_data - .data references of the exe function versus each native copy (L1 CONTRACT).
 
 Addresses are canonicalised to the start of the containing variable (sorted __fnv_XXXXXXXX of out/aliases.ld).
-The /GS cookie is the single most frequently missing target; it is computed, then dropped from both sides.
+The /GS cookie (`___security_cookie`, its address from the N1 symbol map: facts['cookie']) is the compiler's own
+check, not a reference of the source; it is dropped from both sides.
 Several native copies of one address: each is judged, the worst verdict stands.
 """
 import bisect, collections, os, re
@@ -47,7 +48,7 @@ def run(facts, obj, link):
     for a, ns in copies.items():
         for n in ns:
             miss.update(exe[a] - n)
-    cookie = miss.most_common(1)[0][0] if miss else None
+    cookie = canon(facts['cookie'])
     counts, rows = collections.Counter(), []
     for a, ns in sorted(copies.items()):
         x = exe[a] - {cookie}
@@ -59,5 +60,5 @@ def run(facts, obj, link):
             first = min(x ^ n)
             rows.append((a, v, 'exe_only=%d native_only=%d first=0x%08x' % (len(x - n), len(n - x), first)))
     counts = dict(counts)
-    counts['cookie_refs_ignored'] = miss[cookie] if cookie is not None else 0
+    counts['cookie_refs_ignored'] = miss[cookie]
     return {'counts': counts, 'rows': rows, 'fail': ['superset', 'different']}
