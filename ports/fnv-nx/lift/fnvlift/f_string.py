@@ -8,8 +8,8 @@ from .core import op, SKIP, MASK
 @op('movsb', 'movsw', 'movsd', 'stosb', 'stosw', 'stosd', 'scasb', 'cmpsb', 'lodsb', 'lodsd')
 def h_string(cx, ins):
     m, ops, pfx, em = cx.m, cx.ops, cx.pfx, cx.em
-    if not (not ops or ops[0].type == X.X86_OP_MEM):
-        return SKIP
+    if not (not ops or ops[0].type == X.X86_OP_MEM) or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('xmm') for o in ops):
+        return SKIP     # SSE2 movsd [mem], xmm has an xmm operand; the string forms never do
     zsp = cx.zsp
     w = {'b': 8, 'w': 16, 'd': 32}[m[-1]]
     st = 'u32 st=df?-%du:%du;' % (w // 8, w // 8)
