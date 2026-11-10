@@ -257,6 +257,7 @@ int dll_eq(const char *a, const char *b)
 } // namespace
 
 extern "C" void *fnvnx_registered_module_export(const char *dll, const char *proc);   // module.cpp
+extern "C" void *fnvnx_msvcrt_lookup(const char *name);                                // crt/msvcrt_exports.cpp
 
 /* DLLs the exe imports under another module's name: GalaxyWrp.dll (GOG's build) wraps the Steam API with the
  * same export names; WSOCK32 (Winsock 1.1) forwards to ws2_32 */
@@ -277,6 +278,8 @@ extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
     for (const exp &e : g_exports)
         if (e.fn && !strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
             return e.fn;
+    if (dll && dll_eq(dll, "msvcrt"))
+        return fnvnx_msvcrt_lookup(name);
     /* not an S4 export: modules registered at run time (S7's dsound/dinput8/xinput/vorbisfile) */
     return dll ? fnvnx_registered_module_export(dll, name) : NULL;
 }
