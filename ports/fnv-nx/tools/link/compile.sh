@@ -94,6 +94,8 @@ if [ "${FNVNX_SDD:-1}" = 1 ]; then
   SDD_SO=$(CXX=$CXX bash "$HERE/toolchain/sdd/build.sh" "$OUT/.sdd") \
     || { echo "compile.sh: the fnvnx_sdd plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
   FLAGS+=(-DFNVNX_SDD=1 -fno-devirtualize -fplugin="$SDD_SO")
+  # FTOI: a direct float -> enum conversion is an error, as for cl (C2440): the source names the integer type
+  FLAGS+=(-fplugin-arg-fnvnx_ftoi-enum=error)
   # uninit=keep: the order plugin's default reads an unassigned local as 0, a stand-in (forbidden, MASTER_PLAN4) that
   # also hides the read from the N3 verdict below. With keep, a function that reads an unassigned local gets the
   # verdict `uninit` / `uninit-mem` and is not a native body; nothing is invented for it.
