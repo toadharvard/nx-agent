@@ -27,7 +27,7 @@ def main():
         print('skip: no aarch64-linux-gnu-g++'); return 0
     with tempfile.TemporaryDirectory() as td:
         sos = []
-        for d in ('sdd', 'dispatch'):
+        for d in ('sdd', 'names', 'dispatch'):
             r = subprocess.run(['bash', os.path.join(HERE, '..', d, 'build.sh'), os.path.join(td, d)], capture_output=True, text=True)
             if r.returncode != 0:
                 print('skip: the plugins do not build here'); return 0

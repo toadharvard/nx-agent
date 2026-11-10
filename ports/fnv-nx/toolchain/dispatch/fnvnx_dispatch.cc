@@ -26,7 +26,7 @@
  *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h (a homogeneous
  *          floating-point aggregate) | s<N>r (passed as a reference to a copy)
  * The convention is the declaration's own: CC1 keeps MSVC's __cdecl / __stdcall / __fastcall / __thiscall as the
- * type attribute fnvnx_cc (shim/include/fnvnx_compat.h), which this plugin registers.
+ * type attribute fnvnx_cc (shim/include/fnvnx_compat.h), which the fnvnx_names plugin registers.
  *
  * Every indirect call is rewritten; there is no list of exceptions. A call the pass cannot rewrite or describe is
  * an error.
@@ -132,6 +132,12 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
 static tree descriptor(gcall *call)
 {
   location_t loc = gimple_location(call);
+  static bool checked;
+  if (!checked) {
+    checked = true;
+    if (!lookup_attribute_spec(get_identifier("fnvnx_cc")))
+      error("DISPATCH1: the fnvnx_names plugin is not loaded: the calling conventions of the declarations are lost");
+  }
   tree ft = gimple_call_fntype(call);
   if (!ft) { error_at(loc, "DISPATCH1: an indirect call without a function type"); return NULL_TREE; }
   const char *conv = TREE_CODE(ft) == METHOD_TYPE ? "this" : "stack";
@@ -225,23 +231,6 @@ static void rewrite(function *fun, gimple *st)
   update_stmt(call);
 }
 
-/* ---- CC1: the convention attribute */
-
-static tree handle_cc(tree *node, tree name, tree args, int, bool *no_add_attrs)
-{
-  tree v = args ? TREE_VALUE(args) : NULL_TREE;
-  if (!v || TREE_CODE(v) != STRING_CST) { error("%qE takes one string", name); *no_add_attrs = true; return NULL_TREE; }
-  if (TREE_CODE(*node) != FUNCTION_TYPE && TREE_CODE(*node) != METHOD_TYPE) {
-    /* MSVC accepts the keyword on a declaration that is no function (it has no meaning there) */
-    *no_add_attrs = true;
-  }
-  return NULL_TREE;
-}
-
-static struct attribute_spec cc_attr = { "fnvnx_cc", 1, 1, false, true, true, false, handle_cc, NULL };
-
-static void register_attrs(void *, void *) { register_attribute(&cc_attr); }
-
 namespace {
 const pass_data dispatch_data = { GIMPLE_PASS, "fnvnx_dispatch", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0,
                                   TODO_update_ssa_only_virtuals | TODO_cleanup_cfg };
@@ -272,6 +261,5 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   p.ref_pass_instance_number = 1;
   p.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &p);
-  register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
   return 0;
 }
