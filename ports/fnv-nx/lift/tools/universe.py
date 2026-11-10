@@ -330,8 +330,8 @@ def gate(green, TNu, why):
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')
     print('gate l3.codemap%s: %s (certified %d of %d, uncertified %d, rejected pointers %d, bad-decode entries %d)%s' % ('.' + NAME if STRICT else '', 'green' if green else 'red', TNu - unexpl, TNu, unexpl, len(rejects), len(bad_entries), ''.join('; RED: ' + w for w in why)))
     sys.exit(0 if green else 1)
+CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
 if not STRICT:
-    CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
     midf = len({s for t, s in midsrc if s is not None and indec(s)}); nonde = [a for a in entries if a not in fsize]
     exo = sorted(a for a, v in insns.items() if v[1] in EXOTIC)
     print('\n'.join(eh.finish(entries)))
