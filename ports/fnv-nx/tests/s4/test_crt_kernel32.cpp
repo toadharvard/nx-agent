@@ -364,7 +364,7 @@ TEST(crt_k32_create_file_w_and_modules)
     SetLastError(0);
     CHECK(CreateFileW(L"C:\\FalloutNV\\\u0416.txt", GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL) ==
           INVALID_HANDLE_VALUE);
-    CHECK_EQ(GetLastError(), ERROR_INVALID_NAME);
+    CHECK_EQ(GetLastError(), ERROR_FILE_NOT_FOUND);
     CHECK(GetModuleHandleW(NULL) == GetModuleHandleA(NULL));
     CHECK(GetModuleHandleW(L"FalloutNV.exe") == GetModuleHandleA(NULL));
     /* the CRT's _mtinit needs kernel32; its Fls* are absent (TLS fallback), its exports resolve */

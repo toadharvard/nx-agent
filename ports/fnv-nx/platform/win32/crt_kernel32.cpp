@@ -840,18 +840,40 @@ static bool narrow_name(LPCWSTR w, char *out, size_t n)
     return r > 0 && !used;
 }
 
+HANDLE w32_create_file_name(LPCSTR name, DWORD access, DWORD share, DWORD disp, DWORD flags, int utf8); /* file.cpp */
 extern "C" HANDLE CreateFileW(LPCWSTR name, DWORD access, DWORD share, void *sa, DWORD disp, DWORD flags, HANDLE tmpl)
 {
-    char a[W32_PATH_MAX];
+    (void)sa; (void)tmpl;
     if (!name) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return INVALID_HANDLE_VALUE;
     }
-    if (!narrow_name(name, a, sizeof a)) {   /* a character outside 1252: no file the A API can name */
-        SetLastError(ERROR_INVALID_NAME);
-        return INVALID_HANDLE_VALUE;
+    /* the layer names files in UTF-8 inside: the full UTF-16 name, surrogate pairs included, converts losslessly */
+    char u[W32_PATH_MAX];
+    size_t o = 0;
+    for (const WCHAR *w = name; *w; w++) {
+        uint32_t c = (uint16_t)*w;
+        if (c >= 0xD800 && c < 0xDC00 && (uint16_t)w[1] >= 0xDC00 && (uint16_t)w[1] < 0xE000)
+            c = 0x10000 + ((c - 0xD800) << 10) + ((uint16_t)*++w - 0xDC00);
+        else if (c >= 0xD800 && c < 0xE000) {
+            SetLastError(ERROR_INVALID_NAME);
+            return INVALID_HANDLE_VALUE;
+        }
+        int k = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+        if (o + (size_t)k + 1 > sizeof u) {
+            SetLastError(ERROR_INVALID_NAME);
+            return INVALID_HANDLE_VALUE;
+        }
+        if (k == 1)
+            u[o++] = (char)c;
+        else {
+            u[o++] = (char)((k == 2 ? 0xC0 : k == 3 ? 0xE0 : 0xF0) | (c >> (6 * (k - 1))));
+            for (int i = k - 2; i >= 0; i--)
+                u[o++] = (char)(0x80 | ((c >> (6 * i)) & 0x3F));
+        }
     }
-    return CreateFileA(a, access, share, sa, disp, flags, tmpl);
+    u[o] = 0;
+    return w32_create_file_name(u, access, share, disp, flags, 1);
 }
 
 extern "C" HMODULE GetModuleHandleW(LPCWSTR name)
