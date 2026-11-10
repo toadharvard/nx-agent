@@ -35,7 +35,7 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | id | task | depends | state |
 |---|---|---|---|
 | T1 | RD1 spec json + test_spec | - | done: 497 methods, 53 structs, 88 length rules, test 0 failures |
-| T2 | gen: journaling wrapper (one C++ source, builds for i686-mingw and ILP32/-m32) + stream writer; self-test around a generated echo implementation with -m32 | T1 | running |
+| T2 | gen: journaling wrapper (one C++ source, builds for i686-mingw and ILP32/-m32) + stream writer; self-test around a generated echo implementation with -m32 | T1 | done: 497/497 methods, 9/14 exports (5 lack a signature in the spec), 10073 items 0 diffs |
 | T3 | gen: replayer (stream -> calls on an implementation, compares det outs) + comparator (stream vs stream, masks `pix`) | T1 | |
 | T4 | rec: Wine recorder DLL (all d3d9.dll exports), ENV adaptor, shadow lock memory; round trip under Wine on tools/compare synth captures | T2, E1 | |
 | E1 | env: ENV table (caps, adapter, modes, format x role), each line justified; request owner approval through the orchestrator | - | lead |
@@ -49,10 +49,10 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | D5 | dev: draw path (program pair resolve, layout, state words, UP draws, instancing, flush policy RD3) | D2-D4, B2 | |
 | D6 | dev: Clear, StretchRect, ColorFill, UpdateSurface/Texture, GetRenderTargetData, GetFrontBufferData | D4, B2 | |
 | D7 | dev: swap chains, Present, Reset, device-lost contract, queries, cursor, gamma, palettes, clip status, patches per ENV | D2, B2 | |
-| F1 | ffp: pixel stage (one program + CPU reference) | - | running |
-| F2 | ffp: vertex stage (transform, 4-matrix blending, lighting, material sources, texgen, texture transforms, fog, point size) | - | |
-| S1 | shaders: RD4 legality table with sources + universe gate (census: 1011 of 1147 ok) | census | running |
-| S3 | shaders: fix the failing classes one root cause per task; remove the CTAB dependency | S1 | |
+| F1 | ffp: pixel stage (one program + CPU reference) | - | done: 477352 cases 0 failed; GLSL on llvmpipe 2392 states 0 mismatches |
+| F2 | ffp: vertex stage (transform, 4-matrix blending, lighting, material sources, texgen, texture transforms, fog, point size) | - | running |
+| S1 | shaders: RD4 legality table with sources + universe gate | census | done: universe 7538, ok 7077, fail 461 in 38 classes, unresolved 8, conflicts 4 |
+| S3 | shaders: fix the failing classes one root cause per task; remove the CTAB dependency | S1 | S3a running (aL, layout totality, scalar outputs, 1_0 tokens) |
 | R1 | runtime translator (orchestrator decision 2026-11-10): MojoShader + uam built for Horizon LP64 host module, cache by bytecode hash, pre-filled cache from the player's packages; translate off the main thread | S1 | |
 | R2 | measure on AArch64: NSO size, instructions per shader (first estimate on x86-64: 2.90 MB; 143 ms per game shader, uam = 99.9 % of it: 0.16 s of 116 s is bytecode -> GLSL) | R1 | |
 | S2 | shaders: VS epilogue additions (user clip planes, point size), flat/smooth variants, pack format keyed by bytecode hash | S1 | |
@@ -82,3 +82,5 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 - Measure once the recorder exists (task M1, with L4's counter): (a) where the game calls Create*Shader (start and
   loading, or gameplay frames), (b) cache misses on a standard install, (c) instructions per uam translation.
 - A direct bytecode -> Maxwell code backend without GLSL/NIR is an L7 lever, only by measurement, only hash-equal.
+| T1b | spec fixes from T2's list: signatures of the 5 undocumented exports (from Wine), ret_size, GetGammaRamp `when`, machine-readable sub-resource mapping, per-level copy taint, binding source for pix(rendertargets) | T2 | |
+| T4a | rec: observational recorder d3d9.dll under Wine; neutrality, decode, determinism modulo env/pix; dump of Wine/llvmpipe env answers | T2 | running |
