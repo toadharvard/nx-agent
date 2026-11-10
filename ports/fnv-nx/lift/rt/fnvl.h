@@ -5,7 +5,8 @@ typedef u8 __attribute__((may_alias)) u8a; typedef u16 __attribute__((aligned(1)
 typedef u32 __attribute__((aligned(1),may_alias)) u32a; typedef u64 __attribute__((aligned(1),may_alias)) u64a;
 typedef float __attribute__((aligned(1),may_alias)) f32a; typedef double __attribute__((aligned(1),may_alias)) f64a;
 typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]; u16 w[8]; s16 sw[8]; s32 sd[4]; s64 sq[2]; } __attribute__((may_alias)) xmm_t;
-struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6) */
+struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; u32 ra; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6). r[] is only the save area of the
+   entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README) */
 /* FNVL_FLAGS_IO (test/instest.py): the arithmetic flags, DF and the x87 condition bits also travel in c->fl / c->fc.
    fl: the EFLAGS bit positions (CF 0, PF 2, AF 4, ZF 6, SF 7, DF 10, OF 11); fc: C0 bit 8, C2 bit 10, C3 bit 14. */
 #ifdef FNVL_FLAGS_IO
@@ -15,7 +16,29 @@ struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]
 #define FL_IN do{}while(0)
 #define FL_OUT do{}while(0)
 #endif
-extern "C" { void fnvl_call(struct cpu*, u32 target); void fnvl_tail(struct cpu*, u32 target); void fnvl_trap(struct cpu*, u32 at, u32 why); }
+/* Guest registers: GCC global register variables in callee-saved host registers (ILP32: the 32-bit view w19..w26), the per-thread
+   `struct cpu *` in x27. Lifted files are compiled with -ffixed-x19..-ffixed-x27; code compiled without it (the runtime) preserves them by the
+   AAPCS, so a call into it keeps the guest state. REGS() is an empty asm that tells GCC every guest register is read and written at that point:
+   it stands before and after each call so no guest register value is cached or dropped across it. Native code that calls a lifted function
+   saves x19..x27 itself (fnvl_enter). */
+register u32 eax asm("x19"); register u32 ecx asm("x20"); register u32 edx asm("x21"); register u32 ebx asm("x22");
+register u32 esp asm("x23"); register u32 ebp asm("x24"); register u32 esi asm("x25"); register u32 edi asm("x26");
+register struct cpu *c asm("x27");
+#define REGS() __asm__ volatile("" : "+r"(eax),"+r"(ecx),"+r"(edx),"+r"(ebx),"+r"(esp),"+r"(ebp),"+r"(esi),"+r"(edi))
+/* Control transfer (README): a lifted function is `void L_<addr>(void)`. X_ is the x86-state entry of an address: L_ while everything is lifted
+   (the bench); FNVL_STUBX (test/instest.py) makes a call/tail to another entry a stub event instead. */
+extern "C" { void fnvl_call(struct cpu*, u32 target); void fnvl_tail(struct cpu*, u32 target); void (*fnvl_dispatch(u32 image_addr))(void); void fnvl_raise(u32 code, u32 at);
+             void fnvl_trace(u32 entry, u32 esp); }
+#ifdef FNVL_STUBX
+#define CALLX(h) fnvl_call(c,0x##h)
+#else
+#define CALLX(h) L_##h()
+#endif
+#ifdef FNVL_TRACE
+#define TRACE(a) fnvl_trace(a,esp)
+#else
+#define TRACE(a) do{}while(0)
+#endif
 /* Guest address -> host pointer. x86 addresses wrap at 2^32. GCC for AArch64 ILP32 folds a constant of a 32-bit
    sum into the 64-bit addressing mode (uxtw x0,w0; ldr [x0,#64]), which does not wrap; the empty asm makes the 32-bit
    sum a value of its own, so every access uses the wrapped address (test/addrwrap.py). */
@@ -27,9 +50,9 @@ static inline __attribute__((always_inline)) unsigned long P(u32 a){ __asm__("" 
 #define MF32(a) (*(f32a*)P(a))
 #define MF64(a) (*(f64a*)P(a))
 #define PAR(x) (!(__builtin_popcount((x)&0xffu)&1))
-#define DECL u32 eax,ecx,edx,ebx,esp,ebp,esi,edi; u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,df=0; u32 ftop=0,ftag=0,fcw=0x27f,c0=0,c2=0,c3=0; double st[8]; xmm_t x0,x1,x2,x3,x4,x5,x6,x7; (void)af;(void)pf;(void)df;(void)c2
-#define SYNC_IN do{ eax=c->r[0];ecx=c->r[1];edx=c->r[2];ebx=c->r[3];esp=c->r[4];ebp=c->r[5];esi=c->r[6];edi=c->r[7]; FL_IN; }while(0)
-#define SYNC_OUT do{ c->r[0]=eax;c->r[1]=ecx;c->r[2]=edx;c->r[3]=ebx;c->r[4]=esp;c->r[5]=ebp;c->r[6]=esi;c->r[7]=edi; FL_OUT; }while(0)
+#define DECL u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,df=0; u32 ftop=0,ftag=0,fcw=0x27f,c0=0,c2=0,c3=0; double st[8]; xmm_t x0,x1,x2,x3,x4,x5,x6,x7; (void)af;(void)pf;(void)df;(void)c2
+#define SYNC_IN do{ FL_IN; }while(0)
+#define SYNC_OUT do{ FL_OUT; }while(0)   /* the general registers need no sync; flags (instest), x87 and xmm state are appended by the lifter */
 #define SYNC_F_IN do{ ftop=c->ftop;ftag=c->ftag;fcw=c->fcw; for(int i_=0;i_<8;i_++) st[i_]=c->st[i_]; }while(0)
 #define SYNC_F_OUT do{ c->ftop=ftop;c->ftag=ftag;c->fcw=fcw; for(int i_=0;i_<8;i_++) c->st[i_]=st[i_]; }while(0)
 #define SYNC_X_IN do{ x0=c->x[0];x1=c->x[1];x2=c->x[2];x3=c->x[3];x4=c->x[4];x5=c->x[5];x6=c->x[6];x7=c->x[7]; }while(0)

@@ -1,113 +1,22 @@
 #!/usr/bin/env python3
 """W10-A: whole-program static analysis of the floating-point control state of FalloutNV.exe (x87 CW, MXCSR, status
-readers, x87 stack depth). Count-only on stdout; site lists under /home/user/l3facts/fpmodes/. Sound = over-approximate:
-anything not decided is reported as unknown. Inputs: FNVNX_EXE, /home/user/l3facts/universe.tsv (read-only)."""
-import os, sys, hashlib, time, itertools, bisect
+readers, x87 stack depth). Count-only stdout; site lists under /home/user/l3facts/fpmodes/. Sound = over-approximate:
+anything not decided is reported as unknown. Inputs: FNVNX_EXE, /home/user/l3facts/universe.tsv (read-only). Shared decoder,
+CFG and esp tracking: x86flow.py."""
+import os, sys, hashlib
 from collections import Counter, defaultdict
 from multiprocessing import Pool
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import fnvlift
-from fnvlift import core
-from capstone import x86 as X
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import x86flow as W
+from x86flow import X, M32, SUB, mn, rn, memslot, Fn, UNC, KINDS, isx87, depth, track, frame_events, load_universe, pmap
 
 EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
-UNI = '/home/user/l3facts/universe.tsv'
 OUT = '/home/user/l3facts/fpmodes'
-M32 = 0xffffffff
-IMG = fnvlift.Image(EXE)
 T = {}                      # entry -> net x87 depth change at return (nonzero only), set before each wave
 KNOWN = set()
-UNC = set()                 # entries with an undecidable depth conflict: callers treat their result class as unknown
 EAXLIVE = set()             # entries that may read eax at entry (LTCG register args), set before the status pass
-RETS = ('ret', 'retf', 'int3', 'hlt', 'ud2')
 FSAFE = ('fld', 'fild', 'fxch', 'fst', 'fstp', 'fist', 'fistp', 'fisttp', 'fld1', 'fldz', 'wait', 'fwait', 'fnop')
-PUSH = set('fld fild fld1 fldz fldpi fldl2e fldl2t fldlg2 fldln2 fbld fsincos fptan fxtract fdecstp'.split())
-POP = set('fstp fistp fisttp fbstp fcomp fucomp ficomp fcomip fucomip faddp fsubp fsubrp fmulp fdivp fdivrp fpatan fyl2x fyl2xp1 fincstp'.split())
-NOTX87 = {'fxsave', 'fxrstor', 'femms', 'fs'}
 WSTORE = ('fst', 'fist', 'fnst', 'fbst', 'stmxcsr', 'fisttp', 'fxsave', 'fnsave', 'fsave')
-
-
-def mn(i):
-    return i.mnemonic.split()[-1]
-
-
-def isx87(m):
-    return (m[0] == 'f' and m not in NOTX87) or m in ('wait',)
-
-
-def memslot(i, o, sz):
-    m = o.mem
-    if m.index or (m.segment and i.reg_name(m.segment) != 'ds'):
-        return None
-    b = i.reg_name(m.base) if m.base else None
-    return ('s', m.disp, sz) if b == 'esp' else ('b', m.disp, sz) if b == 'ebp' else ('g', m.disp & M32) if b is None else None
-
-
-KINDS = {}                  # entry -> kind (set before forking workers)
-STARTS = {'decomp', 'call', 'entry', 'tail', 'export', 'tls'}
-
-
-def load_universe():
-    raw = open(UNI, 'rb').read()
-    rows = [(int(f[0], 16), int(f[2]), f[1]) for f in (ln.split('\t') for ln in raw.decode().splitlines()) if len(f) >= 3 and f[2].isdigit() and int(f[2]) > 0]
-    KINDS.update((a, k) for a, e, k in rows)
-    EST[:] = sorted((a, e) for a, e, k in rows)
-    return raw, rows
-
-
-def decode(a, ext, kind='decomp'):
-    """recursive descent over [a, a+ext). Non-decomp extents are byte sums, not spans: the range is widened (up to +512) while a
-    jump leaves it towards a target that is not another function start, and on undecodable tails."""
-    hi = a + ext
-    for _ in range(40):
-        try:
-            ins, tb, tk = core.explore(IMG, a, hi, IMG.bytes(a, hi - a))
-        except Exception:
-            if kind == 'decomp' or hi >= a + ext + 512:
-                return None
-            hi += 16; continue
-        succ, tails = {}, {}
-        for x, i in ins.items():
-            m = mn(i); n = x + i.size; o = i.operands
-            if m == 'jmp':
-                s = [o[0].imm & M32] if o[0].type == X.X86_OP_IMM else tb.get(x, list(tk))
-            elif m in RETS:
-                s = []
-            else:
-                s = [n] + ([o[0].imm & M32] if m[0] == 'j' or m.startswith('loop') else [])
-            succ[x] = [t for t in s if t in ins]
-            out = [t for t in s if t not in ins and (m[0] == 'j' or m.startswith('loop') or t == n)]
-            if out and (m != 'jmp' or o[0].type == X.X86_OP_IMM):
-                tails[x] = out
-        far = [t for x, ts in tails.items() for t in ts if t != x + ins[x].size and hi <= t < a + ext + 512 and KINDS.get(t) not in STARTS]
-        if kind != 'decomp' and far:
-            hi = max(far) + 16; continue
-        return ins, succ, tails
-    return None
-
-
-class Fn:
-    def __init__(s, a, ext, kind):
-        s.a, s.kind, s.memo, s.steps, s.w = a, kind, {}, 0, 2
-        r = decode(a, ext, kind)
-        s.ok = r is not None
-        if not r:
-            return
-        s.ins, s.succ, s.tails = r
-        s.preds = defaultdict(list)
-        for x in sorted(s.succ):
-            for t in s.succ[x]:
-                s.preds[t].append(x)
-        s.taken = False         # frame address taken (lea/mov r,esp|ebp except mov ebp,esp, push esp)
-        for x, i in s.ins.items():
-            m = mn(i); o = i.operands
-            if m == 'lea' and o[1].mem.base and i.reg_name(o[1].mem.base) in ('esp', 'ebp'):
-                s.taken = True
-            elif m == 'mov' and len(o) == 2 and o[1].type == X.X86_OP_REG and i.reg_name(o[1].reg) in ('esp', 'ebp') and \
-                    not (o[0].type == X.X86_OP_REG and i.reg_name(o[0].reg) == 'ebp'):
-                s.taken = True
-            elif m == 'push' and o[0].type == X.X86_OP_REG and i.reg_name(o[0].reg) == 'esp':
-                s.taken = True
 
 
 def espd(i):
@@ -181,7 +90,7 @@ def srcval(F, p, i, o, dep):
     if o.type == X.X86_OP_IMM:
         return {('c', o.imm & M32)}
     if o.type == X.X86_OP_REG:
-        b, sh, bits = core.SUB.get(i.reg_name(o.reg), (None, 0, 0))
+        b, sh, bits = SUB.get(i.reg_name(o.reg), (None, 0, 0))
         return val(F, p, ('r', b), dep) if b and sh == 0 else {('?', 'hireg')}
     l = memslot(i, o, min(o.size, F.w))
     if l is None:
@@ -196,13 +105,13 @@ def step(F, p, loc, dep):
         if k == 'r':
             return {('?', 'call')} if loc[1] in ('eax', 'ecx', 'edx') else ('go', p, loc)
         cc = coord(F, p, loc, 0)
-        if cc is not None and cc >= F.sp[p] and not aliased(F, cc, loc[2]):
+        if cc is not None and F.sp.get(p) is not None and cc >= F.sp[p] and not aliased(F, cc, loc[2]):
             return ('go', p, loc)
         return {('?', 'call')}
     if k == 'b' and m == 'mov' and o[0].type == X.X86_OP_REG and i.reg_name(o[0].reg) == 'ebp' and o[1].type == X.X86_OP_REG and i.reg_name(o[1].reg) == 'esp':
         return ('go', p, ('s',) + loc[1:])
     try:
-        W = {core.SUB[i.reg_name(r)][0] for r in i.regs_access()[1] if i.reg_name(r) in core.SUB}
+        W = {SUB[i.reg_name(r)][0] for r in i.regs_access()[1] if i.reg_name(r) in SUB}
     except Exception:
         return {('?', 'regs')}
     if k == 'r':
@@ -210,9 +119,9 @@ def step(F, p, loc, dep):
             return ('go', p, loc)
         if m == 'pop':
             return ('go', p, ('s', 0, 4))
-        if o[0].type != X.X86_OP_REG or core.SUB.get(i.reg_name(o[0].reg), (0,))[0] != loc[1] or len(o) > 2:
+        if o[0].type != X.X86_OP_REG or SUB.get(i.reg_name(o[0].reg), (0,))[0] != loc[1] or len(o) > 2:
             return {('?', 'def:' + m)}
-        _, sh, bits = core.SUB[i.reg_name(o[0].reg)]
+        _, sh, bits = SUB[i.reg_name(o[0].reg)]
         msk = ((1 << bits) - 1) << sh
         if m in ('xor', 'sub') and o[1].type == X.X86_OP_REG and o[1].reg == o[0].reg:
             return {('c', 0)}
@@ -255,7 +164,7 @@ def step(F, p, loc, dep):
                 c2 = coord(F, p, (bs[1], op.mem.disp, sz), 0, True)
                 if cc is None or c2 is None or (c2 + sz > cc and cc + loc[2] > c2):
                     return {('?', 'alias')}
-            elif bs in ('esp', 'ebp') or (cc is None and F.taken) or (cc is not None and aliased(F, cc, loc[2])):
+            elif bs in ('esp', 'ebp') or cc is None or (cc is not None and aliased(F, cc, loc[2])):
                 return {('?', 'alias')}
             continue
         if l2[1] + sz <= kb or kb + loc[2] <= l2[1]:
@@ -274,66 +183,18 @@ def step(F, p, loc, dep):
     return ('go', p, nl)
 
 
-def norm(F):
-    """F.sp/F.bp: esp / ebp offset (rel. entry esp) before each insn; F.tc: address-taken frame coordinates. Valid only if every
-    ret sees esp offset 0 and joins agree; else F.nok False (callers fall back to the whole-function F.taken flag)."""
-    if hasattr(F, 'nok'):
-        return F.nok
-    sp, bp, F.tc, F.tall, ok, work = {F.a: 0}, {F.a: None}, set(), False, True, [F.a]
-    while work and ok:
-        a = work.pop(); s0, b0 = sp[a], bp[a]; i = F.ins[a]; m = mn(i); o = i.operands; s1, b1 = s0, b0
-        r0 = i.reg_name(o[0].reg) if o and o[0].type == X.X86_OP_REG else None
-        r1 = i.reg_name(o[1].reg) if len(o) > 1 and o[1].type == X.X86_OP_REG else None
-        if m in ('push', 'pushfd'):
-            s1 = s0 - 4
-            if r0 in ('esp', 'ebp') and (r0 == 'esp' or b0 is not None):
-                F.tc.add(s0 if r0 == 'esp' else b0)
-        elif m in ('pop', 'popfd'):
-            s1 = s0 + 4
-            b1 = None if r0 == 'ebp' else b0
-        elif m == 'leave':
-            ok = b0 is not None; s1 = (b0 or 0) + 4; b1 = None
-        elif m == 'mov' and r0 == 'esp':
-            ok = r1 == 'ebp' and b0 is not None; s1 = b0
-        elif m == 'mov' and r0 == 'ebp':
-            b1 = s0 if r1 == 'esp' else None
-        elif m in ('add', 'sub') and r0 == 'esp':
-            ok = o[1].type == X.X86_OP_IMM; s1 = s0 + (o[1].imm if m == 'add' else -o[1].imm) if ok else 0
-        elif m in ('ret', 'retf'):
-            ok = s0 == 0
-        elif m in ('pushal', 'popal', 'enter') or (r0 == 'esp' and m not in ('cmp', 'test')):
-            ok = False
-        elif r0 == 'ebp' and m not in ('cmp', 'test'):
-            b1 = None
-        if m == 'lea' and o[1].mem.base:
-            bs = i.reg_name(o[1].mem.base)
-            if bs == 'esp' or (bs == 'ebp' and b0 is not None):
-                F.tall = F.tall or bool(o[1].mem.index)
-                F.tc.add((s0 if bs == 'esp' else b0) + o[1].mem.disp)
-        elif m == 'mov' and r1 in ('esp', 'ebp') and r0 != 'ebp' and (r1 == 'esp' or b0 is not None):
-            F.tc.add(s0 if r1 == 'esp' else b0)
-        for t in F.succ[a]:
-            if t not in sp:
-                sp[t], bp[t] = s1, b1; work.append(t)
-            elif sp[t] != s1:
-                ok = False
-            elif bp[t] != b1 and bp[t] is not None:
-                bp[t] = None; work.append(t)
-    F.sp, F.bp, F.nok = sp, bp, ok
-    return ok
-
-
 def coord(F, p, loc, d, before=False):
-    """normalised frame coordinate of loc (esp/ebp slot); loc is relative to the state after p unless before (d = esp delta of p)."""
-    if not norm(F) or p not in F.sp:
-        return None
-    if loc[0] == 's':
-        return F.sp[p] + (0 if before else d) + loc[1]
-    return None if F.bp[p] is None else F.bp[p] + loc[1]
+    """frame coordinate (esp-at-entry relative) of an esp/ebp slot; loc is relative to the state after p unless before."""
+    track(F)
+    v = F.sp.get(p) if loc[0] == 's' else F.bp.get(p)
+    return None if F.multi or v is None else v + (d if loc[0] == 's' and not before else 0) + loc[1]
 
 
 def aliased(F, c, sz):
-    return F.tall or (F.taken if not norm(F) else any(c <= t < c + sz for t in F.tc))
+    if not hasattr(F, 'tc'):
+        ev = frame_events(F)
+        F.tc, F.tall = [e[1] for e in ev if e[1] is not None], any(e[2] or e[1] is None for e in ev)
+    return F.multi or F.tall or any(c <= t < c + sz for t in F.tc)
 
 
 def forced(A, O):
@@ -388,7 +249,7 @@ def between(F, x):
 
 
 SAHF_OK = {'b', 'ae', 'e', 'ne', 'be', 'a', 'p', 'np'}
-TESTM = sum(getattr(X, n) for n in dir(X) if n.startswith('X86_EFLAGS_TEST_'))
+TESTM = X.X86_EFLAGS_TEST_AF | X.X86_EFLAGS_TEST_CF | X.X86_EFLAGS_TEST_DF | X.X86_EFLAGS_TEST_OF | X.X86_EFLAGS_TEST_PF | X.X86_EFLAGS_TEST_SF | X.X86_EFLAGS_TEST_ZF
 MODM = X.X86_EFLAGS_MODIFY_CF | X.X86_EFLAGS_MODIFY_ZF | X.X86_EFLAGS_MODIFY_PF
 
 
@@ -409,7 +270,7 @@ def statclass(F, x):
         i = F.ins[a]; m = mn(i); o = i.operands; lo, ah, fl = st
         nm = [i.reg_name(op.reg) if op.type == X.X86_OP_REG else None for op in o]
         try:
-            rd = {core.SUB[i.reg_name(r)][0] for r in i.regs_access()[0] if i.reg_name(r) in core.SUB}
+            rd = {SUB[i.reg_name(r)][0] for r in i.regs_access()[0] if i.reg_name(r) in SUB}
         except Exception:
             return 'status-escapes', 'regs'
         if m == 'call':
@@ -507,86 +368,6 @@ def eaxscan(F):
     return rd, sorted(cl)
 
 
-def depth1(F, tabl, ov, start=None):
-    """one forward x87 depth dataflow. ov: assumed result delta per unknown-callee site. -> dict (+ 'sites')"""
-    start = F.a if start is None else start
-    d0 = {start: 0}; work = [start]; conf = set(); mx = mi = 0; rets = set(); unk = ind = 0; x87 = False; sites = []; indpos = []
-    while work:
-        a = work.pop(); d = d0[a]; i = F.ins[a]; m = mn(i); e = 0
-        if isx87(m):
-            x87 = True
-            e = 1 if m in PUSH else -1 if m in POP else -2 if m in ('fcompp', 'fucompp') else 0
-            if m in ('fninit', 'finit', 'fnsave', 'fsave', 'emms'):
-                d = 0
-            elif m in ('frstor', 'fldenv', 'fxrstor'):
-                d = None
-        elif m == 'call':
-            o = i.operands[0]
-            if o.type == X.X86_OP_IMM:
-                t = o.imm & M32
-                if t in UNC:
-                    sites.append(a); e = ov.get(a, 0)
-                else:
-                    e = tabl.get(t, 0)
-            elif not (o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index):
-                ind += 1; indpos.append(a); sites.append(a); e = ov.get(a, 0)
-        nd = None if d is None else d + e
-        if nd is None:
-            unk = 1
-        else:
-            mx = max(mx, nd); mi = min(mi, nd)
-        if m in ('ret', 'retf'):
-            rets.add(nd)
-        for t in F.tails.get(a, ()):
-            if t in UNC:
-                sites.append(a)
-            rets.add(None if nd is None else nd + (ov.get(a, 0) if t in UNC else tabl.get(t, 0) if t in KINDS else tailret(t, tabl)))
-        for s_ in F.succ[a]:
-            if s_ not in d0:
-                d0[s_] = nd; work.append(s_)
-            elif d0[s_] != nd and d0[s_] is not None and nd is not None:
-                conf.add((s_, d0[s_], nd))
-    rd = sorted(r for r in rets if r is not None)
-    return dict(x87=x87, conf=sorted(conf)[:3], nconf=len(conf) + (len(set(rd)) > 1) + (mi < 0 and F.kind == 'decomp'), mx=mx, mi=mi, ret=rd[0] if len(set(rd)) == 1 else 0,
-                nodepth=bool(unk), ind=ind, sites=sites, inddep=sum(1 for a in indpos if x87 and F.succ[a] and isx87(mn(F.ins[F.succ[a][0]]))))
-
-
-TC, FC, EST = {}, {}, []              # tailret cache, sorted (start, ext) of all entries
-
-
-def tailret(t, tabl):
-    """net depth change at return of the code starting at t, a jump target inside another entry (not an entry start)."""
-    if t in TC:
-        return TC[t]
-    TC[t] = 0
-    k = bisect.bisect_right(EST, (t, M32)) - 1
-    if k >= 0 and t < EST[k][0] + EST[k][1] + 512:
-        if EST[k][0] not in FC:
-            if len(FC) > 40:
-                FC.clear()
-            FC[EST[k][0]] = Fn(EST[k][0], EST[k][1], KINDS[EST[k][0]])
-        F = FC[EST[k][0]]
-        if F.ok and t in F.ins:
-            TC[t] = depth1(F, tabl, {}, t)['ret']
-    return TC[t]
-
-
-def depth(F, tabl):
-    """static depth with unknown-callee result classes (indirect calls, callees with a depth conflict) inferred if all-zero fails."""
-    r = depth1(F, tabl, {})
-    r['status'] = 'static'
-    st = sorted(set(r['sites']))
-    if r['nconf'] and 0 < len(st) <= 10:
-        for combo in itertools.islice(sorted(itertools.product((0, 1), repeat=len(st)), key=sum), 150):
-            r2 = depth1(F, tabl, dict(zip(st, combo)))
-            if not r2['nconf']:
-                r2['status'] = 'inferred'; r = r2; break
-    if r['nconf']:
-        r['status'] = 'conflict' if len(st) <= 10 else 'conflict-undecided'
-    r['ret'] = r['ret'] if r['status'] != 'conflict' else 0
-    return r
-
-
 def work(args):
     a, ext, kind, mode = args
     F = Fn(a, ext, kind)
@@ -665,12 +446,13 @@ def callargs(args):
 
 
 def main():
-    t0 = time.time()
-    raw, rows = load_universe()
+    raw, rows = load_universe(EXE)
     print('fpmodes: exe sha256 %s  universe.tsv md5 %s  entries %d' % (hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:12], hashlib.md5(raw).hexdigest()[:12], len(rows)))
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
-    with Pool(3) as pool:
+    with Pool(2) as p0:
+        W.prepare(p0, rows, hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:16] + hashlib.md5(raw).hexdigest()[:16])
+    with Pool(2) as pool:
         for a, r in pool.imap(work, [(a, e, k, 'all') for a, e, k in rows], chunksize=200):
             res[a] = r
     bad = sorted(a for a in res if res[a] is None)
@@ -687,7 +469,7 @@ def main():
         for sdef in (res[a]['sites'] if res[a] else ()):
             if sdef[2] == 'pending':
                 pend[a].append(sdef[1])
-    with Pool(3) as pst:
+    with Pool(2) as pst:
         stat = {x: (c, why) for lst in pst.imap(statpass, [(a, ext[a], kind[a], xs) for a, xs in sorted(pend.items())], chunksize=20) for x, c, why in lst}
     callers = defaultdict(set)
     for a, r in res.items():
@@ -700,10 +482,10 @@ def main():
         newu = {a for a, d in dep.items() if d['status'].startswith('conflict') or d['nodepth']}
         if new == T and newu == UNC and wave:
             stable = True; break
-        ch = {a for a in set(new) | set(T) if new.get(a, 0) != T.get(a, 0)} | (newu ^ UNC)
+        ch = sorted({a for a in sorted(set(new) | set(T)) if new.get(a, 0) != T.get(a, 0)} | (newu ^ UNC))
         T.clear(); T.update(new); UNC.clear(); UNC.update(newu)
         todo = sorted({c for a in ch for c in callers.get(a, ()) if c in res and res[c]})
-        with Pool(3) as p2:
+        with Pool(2) as p2:
             for a, d in p2.imap(work, [(a, ext[a], kind[a], 'depth') for a in todo], chunksize=50):
                 if d:
                     dep[a] = d
@@ -758,7 +540,7 @@ def main():
     L.append('CRT control/status entries (arg-derived fldcw/ldmxcsr, or CRT-range fnclex/fninit/escaping fnstsw, <400B): %d: %s' % (len(K), ' '.join('%08x' % a for a in sorted(K)[:12])))
     cs = []
     todo = sorted({c for k in K for c in callers.get(k, ())})
-    with Pool(3) as p3:
+    with Pool(2) as p3:
         for r in p3.imap(callargs, [(a, ext[a], kind[a], K) for a in todo]):
             cs += r
     cs.sort()
@@ -789,7 +571,7 @@ def main():
         max([d['mx'] for d in ds.values()] + [0]), sum(1 for d in ds.values() if d['mx'] > 8), sum(1 for d in ds.values() if d['mi'] < 0), dict(sorted(Counter(d['ret'] for d in dep.values()).items()))))
     L.append('  x87 entries with an indirect (non-IAT) call=%d; indirect call immediately followed by x87 insn=%d entries; ret-depth fixpoint stable=%s' % (
         sum(1 for d in ds.values() if d['ind']), sum(1 for d in ds.values() if d['inddep']), stable))
-    L.append('files: %s  runtime %.0fs' % (OUT, time.time() - t0))
+    L.append('files: ' + OUT)
     print('\n'.join(L))
     with open(OUT + '/sites.tsv', 'w') as f:
         for x in sorted(sites):

@@ -10,6 +10,8 @@ Reference model plug-in: a module on sys.path (proof/ itself) with one function
           'mem': z3 Array(BV32->BV8) named 'mem', 'eip': BitVecVal(ADDR,32)}      (ADDR = 0x401000, code is ONE instruction)
   ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': Array BV32->BV8 (post-state memory), 'eip': BV32}
   All terms are over the pre variables; flags the model does not touch are returned as the pre variables.
+  Optional key 'assume': a Bool over the pre variables (and free model variables) restricting the obligation to the states for which the
+  model defines the behaviour (e.g. no segment-limit fault); the solver gets it as a conjunct, and it is part of the model hash.
   A model that cannot express the instruction raises an exception whose class is named ModelGap (result model-gap)."""
 import argparse, hashlib, importlib, importlib.util, json, os, random, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, '..'))
@@ -64,8 +66,11 @@ def prove(args):
         t0 = time.time(); res = None; ce = ''; msha = ''
         try:
             M = mod.model_post(b, pre); D = F.post(); diffs = compare(D, M)
-            msha = hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest()
-            s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(z3.Or([d for *_, d in diffs])); r = s.check()
+            asm = M.get('assume')                                   # optional: pre-states the model defines (no fault); the obligation is over these
+            msha = hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs] + ([('assume', asm)] if asm is not None else [])).encode()).hexdigest()
+            s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(z3.Or([d for *_, d in diffs]))
+            if asm is not None: s.add(asm)
+            r = s.check()
             if r == z3.unsat: res = 'proved'
             elif r == z3.sat:
                 res = 'FAILED'; mo = s.model(); ev = lambda e: mo.eval(e, model_completion=True)

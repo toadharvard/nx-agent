@@ -96,7 +96,7 @@ def run(path):
                          outdir=outd, cstr=M.cstr, strict=True, entry_of=entry_of)
     eh = ehtables.EH(X_)
     if M.entry: add(M.base + M.entry, 'entry', True)
-    XC, XFW, XN = pemod.exports(M)
+    XC, XFW, XN = pemod.exports(M); XD = [a for a in XC if not intext(a)]; XC = [a for a in XC if intext(a)]      # exported data is not code
     for a in XC: add(a, 'export', True)
     tls = M.dirent(9)
     if tls[0]:
@@ -244,7 +244,7 @@ def run(path):
     mp = Counter(dec[a][1] for a in pset); new_mn = sorted(((k, n) for k, n in mp.items() if k not in exe_mn), key=lambda kv: (-kv[1], kv[0]))[:60]
     fi = eh.finish(ent)
     exs = [n for n, a, z, ro in M.xs]; green = not why
-    print('%s: sections %d (executable %d: %s), reloc %s (%d fixups), imports %d, exports code %d forwarders %d, entry rva %x' % (os.path.basename(path), len(M.secs), len(exs), ' '.join(exs[:4]) + (' ...' if len(exs) > 4 else ''), 'yes' if RL is not None else 'NO', len(relocs), len(imports), len(XC), XFW, M.entry))
+    print('%s: sections %d (executable %d: %s), reloc %s (%d fixups), imports %d, exports code %d (data %d) forwarders %d, entry rva %x' % (os.path.basename(path), len(M.secs), len(exs), ' '.join(exs[:4]) + (' ...' if len(exs) > 4 else ''), 'yes' if RL is not None else 'NO', len(relocs), len(imports), len(XC), len(XD), XFW, M.entry))
     print('\n'.join(fi[:3]))
     print('entries %d (proven %d, candidate %d): %s' % (len(E), len(proven), len(E) - len(proven), dict(sorted(kc.items()))))
     print('entries with ud %d (candidate %d), candidate entries whose first instruction is ud %d, with xf %d, with reloc-misfit %d' % (

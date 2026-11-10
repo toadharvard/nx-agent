@@ -69,6 +69,9 @@ class Ctx:
         self.usesfs = False
         self.kinds = set()
         self.selfcalls = {}
+        self.calls, self.tails = set(), set()    # direct call targets / jumps to entries outside the function (meta, closure of the bench)
+        self.nonlocal_ = False                   # a `goto nonlocal` / `goto after_tail` was emitted: the function needs the loop
+        self.imports = False
 
     def em(self, t):
         self.L.append(t)
@@ -124,10 +127,11 @@ class Ctx:
         return ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
 
 
-def explore(img, lo, hi, code):
-    """Recursive descent over [lo, hi): -> (insns by address, jump tables by jmp address, address-taken labels)."""
+def explore(img, lo, hi, code, start=None, extra=()):
+    """Recursive descent over [lo, hi) from `start` (default lo) and the `extra` labels: -> (insns by address, jump tables by jmp address,
+    address-taken labels)."""
     insns = {}
-    work = [lo]
+    work = [lo if start is None else start] + [x for x in extra if lo <= x < hi]
     tables = {}
     i0 = bisect.bisect_left(img.taken, lo)
     i1 = bisect.bisect_left(img.taken, hi)
@@ -182,11 +186,16 @@ def dispatch(cx, ins):
     raise Unsupported('insn ' + (cx.pfx + ' ' if cx.pfx else '') + cx.m)
 
 
-def lift(img, addr, size, popn=None):
-    """-> (C text, meta). Raises Unsupported(reason)."""
+def lift(img, addr, size, popn=None, start=None, owns=(), strict=True):
+    """-> (C text, meta). Raises Unsupported(reason).
+    [addr, addr+size) is the code range of the function (for a funclet: of its parent); `start` (default addr) the entry the body is the descent
+    from, named L_<start>; `owns` the other universe entries with this range as parent: they are explored and are labels of the nonlocal loop;
+    strict=False (instest only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error."""
     lo, hi = addr, addr + size
+    start = addr if start is None else start
     code = img.bytes(addr, size)
-    insns, tables, taken = explore(img, lo, hi, code)
+    owns = sorted(x for x in owns if lo <= x < hi)
+    insns, tables, taken = explore(img, lo, hi, code, start, owns if start == addr else ())
     order = sorted(insns)
     cx = Ctx(addr, size, insns, tables, taken)
     em = cx.em
@@ -212,14 +221,31 @@ def lift(img, addr, size, popn=None):
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns:
                 em('goto %s;' % cx.lab(nxt))
-            elif m not in ('ret', 'jmp', 'int3'):
-                em('SYNC_OUT; fnvl_trap(c,0x%xu,2); return;' % nxt)
+            elif not strict:
+                em('SYNC_OUT; fnvl_raise(2,0x%xu); return;' % nxt)
+            else:
+                raise Unsupported('falls into undecoded bytes at %x' % nxt)
+    if start != order[0]:
+        cx.L.insert(0, 'goto %s;' % cx.lab(start))
+    if cx.nonlocal_:
+        labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken if x in insns))
+        cases = ' '.join('case 0x%xu: goto %s;' % (x, cx.lab(x)) for x in labs)
+        em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
+        em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
     body = '\n'.join(cx.L)
     fl = ('SYNC_F_IN;' if 'x87' in kinds else '') + ('SYNC_X_IN;' if 'sse' in kinds else '')
     body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_F_OUT;' if 'x87' in kinds else '') + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
     body = body.replace('SYNC_IN;', 'SYNC_IN;' + fl)
-    txt = 'extern "C" void L_%08x(struct cpu *c)\n{ DECL; SYNC_IN;%s%s\n%s\n}\n' % (addr, fl, ' u32 fsb=c->fs;' if cx.usesfs else '', body)
+    decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))
+    txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s u32 E=esp; TRACE(0x%xu);\n%s\n}\n' % (
+        decl, start, fl, ' u32 fsb=c->fs;' if cx.usesfs else '', start, body)
     if cx.usesfs:
         kinds.add('fs')
-    meta = dict(addr=addr, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables))
+    meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
+                calls=sorted(cx.calls), tails=sorted(cx.tails))
     return txt, meta
+
+
+def tables_all(tables):
+    for v in tables.values():
+        yield from v

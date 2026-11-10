@@ -19,7 +19,7 @@ FLAGS = ('-mabi=ilp32 -std=gnu++17 -c -O2 -fms-extensions -fshort-wchar -froundi
          '-fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off '
          '-fPIC -fpermissive -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection '
          '-mno-outline-atomics -U_FORTIFY_SOURCE -ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-math-errno -w '
-         '-DFNVL_FLAGS_IO').split()
+         '-DFNVL_FLAGS_IO -DFNVL_STUBX -ffixed-x19 -ffixed-x20 -ffixed-x21 -ffixed-x22 -ffixed-x23 -ffixed-x24 -ffixed-x25 -ffixed-x26 -ffixed-x27').split()
 HARN, HARN_END, CPU, ASTACK, RETPAD = 0xE0000000, 0xE2000000, 0xE1000000, 0xE1F00000, 0xE1FF0000
 HX = 0xE1E00000                  # x86 oracle harness page (inside the guarded range: a test access to it counts as a collision)
 FSB = 0x7FFDF000                 # fs base on both sides
@@ -28,6 +28,7 @@ OUTS = ('equal', 'diff', 'unlifted', 'nocompile', 'fault', 'x87-inexact')
 G = {}
 R8 = {'al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'}; R16 = {'ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'}
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']; SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
+GREG = [UC_ARM64_REG_X19 + i for i in range(8)]
 X86R = [UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EBX, UC_X86_REG_ESP, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI]
 PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
 STRING = {a + b for a in ('movs', 'stos', 'lods', 'scas', 'cmps', 'ins', 'outs') for b in 'bwd'}
@@ -201,26 +202,29 @@ class Arm(World):
         uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM); s.init_world(uc, False); uc.mem_map(HARN, HARN_END - HARN)
         for va, d in segs: uc.mem_write(va, d)
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)
-        s.stubs = {s.sym[k]: k for k in ('fnvl_call', 'fnvl_tail', 'fnvl_trap')}
+        s.stubs = {s.sym[k]: k for k in ('fnvl_call', 'fnvl_dispatch', 'fnvl_raise')}
         uc.hook_add(UC_HOOK_CODE, s.stub, None, min(s.stubs), max(s.stubs) + 4)
         uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, ac, a, n, v, ud: None if HARN <= a < HARN_END else s.writes.add((a & 0xffffffff, n)))
     def stub(s, uc, addr, size, ud):
         k = s.stubs.get(addr)
-        if k: s.ev = (k, uc.reg_read(UC_ARM64_REG_X1) & 0xffffffff, uc.reg_read(UC_ARM64_REG_X2) & 0xffffffff); uc.emu_stop()
+        if k:     # event (kind, target or fault address, fault code): fnvl_call(c, t) / fnvl_dispatch(t) / fnvl_raise(code, at)
+            x0, x1 = uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff, uc.reg_read(UC_ARM64_REG_X1) & 0xffffffff
+            s.ev = (k, x1, 0) if k == 'fnvl_call' else (k, x0, 0) if k == 'fnvl_dispatch' else (k, x1, x0); uc.emu_stop()
     def run(s, E, st):
         uc = s.uc; s.reset(st['wk']); s.ev = None; r0 = st['regs']
         uc.mem_write(CPU, struct.pack('<13I', *r0, FSB, st['ftop'], st['valid'], st['fcw'], st['fc']) + b'\0' * 4 + struct.pack('<8Q', *st['st'])
                      + b''.join(x.to_bytes(16, 'little') for x in st['xmm']) + struct.pack('<II8Q', st['fl'], st['mxcsr'], *st['mm']))
         uc.reg_write(UC_ARM64_REG_FPCR, (0, 2, 1, 3)[st['mxcsr'] >> 13 & 3] << 22)      # what ldmxcsr does on the ARM side (x86 RC 1=down, 2=up)
-        uc.reg_write(UC_ARM64_REG_X0, CPU); uc.reg_write(UC_ARM64_REG_SP, ASTACK); uc.reg_write(UC_ARM64_REG_X30, RETPAD)
+        for k, v in zip(GREG, r0): uc.reg_write(k, v)      # guest registers live in w19..w26, the cpu pointer in x27
+        uc.reg_write(UC_ARM64_REG_X27, CPU); uc.reg_write(UC_ARM64_REG_SP, ASTACK); uc.reg_write(UC_ARM64_REG_X30, RETPAD)
         try: uc.emu_start(s.sym['L_%08x' % E['addr']], RETPAD, timeout=5000000, count=200000)
         except UcError as e: return dict(fault='%s at %s' % (e, s.bad))
         pc = uc.reg_read(UC_ARM64_REG_PC)
         if s.ev is None and pc != RETPAD: return dict(fault='budget')
-        b = bytes(uc.mem_read(CPU, 320)); v = struct.unpack_from('<8I', b)
+        b = bytes(uc.mem_read(CPU, 320)); v = [uc.reg_read(k) & 0xffffffff for k in GREG]
         if s.ev is None:     # plain return: only `ret` is allowed to; the next EIP is the word it popped
             s.ensure(r0[4], 4, False); eip = struct.unpack('<I', bytes(uc.mem_read(r0[4], 4)))[0] if E['base'] in ('ret', 'retn') else 'returned'
-        else: eip = s.ev[1] if s.ev[0] != 'fnvl_trap' or s.ev[2] == 2 else 'trap%d' % s.ev[2]
+        else: eip = s.ev[1] if s.ev[0] != 'fnvl_raise' or s.ev[2] == 2 else 'trap%d' % s.ev[2]
         ftop, ftag, fcw, fc = struct.unpack_from('<4I', b, 36); stv = struct.unpack_from('<8Q', b, 56)
         return dict(regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 248)[0] & 0xcd5, mem=s.written(), xmm=[int.from_bytes(b[120 + 16 * i:136 + 16 * i], 'little') for i in range(8)],
                     fp=dict(top=ftop & 7, fcw=fcw, cc=fc & 0x4500, valid=ftag & 0xff, st=dict(enumerate(stv))),
@@ -356,7 +360,7 @@ def run_batch(job):
                         x87=0xd8 <= opc[0] <= 0xdf or base == 'fwait',
                         mmx=base == 'emms' or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('mm') for o in ins.operands),
                         sse=base in ('ldmxcsr', 'stmxcsr') or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg)[:2] in ('xm', 'mm') for o in ins.operands))
-        try: items.append((addr, L.lift(img, addr, len(raw))[0]))
+        try: items.append((addr, L.lift(img, addr, len(raw), strict=False)[0]))
         except L.Unsupported as e: out[eid] = [('unlifted', str(e)[:70], '', '')] * n
         except Exception as e: out[eid] = [('unlifted', 'lifter error %s: %s' % (type(e).__name__, str(e)[:50]), '', '')] * n
     elf, bad = build(bid, items, work); arm = Arm(elf) if elf else None
@@ -382,7 +386,7 @@ def main():
     a = ap.parse_args(); t0 = time.time(); os.makedirs(a.work, exist_ok=True); sys.path.insert(0, a.lifter)
     import fnvlift as L, fnvlift.core
     G.update(L=L, img=L.Image(a.exe), work=a.work, rows=sorted((int(x.split('\t')[0], 16), int(x.split('\t')[1])) for x in open(a.funcs) if x[0] != '#'))
-    open(a.work + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_tail', 'fnvl_trap', 'fnvl_rcp32', 'fnvl_rsqrt32')) +   # fnvl_rcp32/rsqrt32: runtime-owner hooks, a bare `ret` here (their rows are 'hook', not gate failures)
+    open(a.work + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_dispatch', 'fnvl_raise', 'fnvl_trace', 'fnvl_rcp32', 'fnvl_rsqrt32')) +   # fnvl_rcp32/rsqrt32: runtime-owner hooks, a bare `ret` here (their rows are 'hook', not gate failures)
         '.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memmove\nmemmove: cmp x0,x1\n b.ls 3f\n add x3,x0,x2\n add x1,x1,x2\n1: cbz x2,2f\n ldrb w4,[x1,#-1]!\n strb w4,[x3,#-1]!\n sub x2,x2,#1\n b 1b\n2: ret\n'

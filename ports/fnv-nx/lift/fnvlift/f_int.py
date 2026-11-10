@@ -143,9 +143,9 @@ def h_div(cx, ins):
     if cx.s != 32:
         raise Unsupported(m + ' r/m%d' % cx.s)
     if m == 'div':
-        cx.em('{ u32 d=%s; u64 n=((u64)edx<<32)|eax; if(d==0||n/d>0xffffffffull){SYNC_OUT; fnvl_trap(c,0x%xu,1); return;} eax=(u32)(n/d); edx=(u32)(n%%d); }' % (cx.rd(ins, cx.ops[0]), a))
+        cx.em('{ u32 d=%s; u64 n=((u64)edx<<32)|eax; if(d==0||n/d>0xffffffffull){SYNC_OUT; fnvl_raise(1,0x%xu); return;} eax=(u32)(n/d); edx=(u32)(n%%d); }' % (cx.rd(ins, cx.ops[0]), a))
     else:
-        cx.em('{ s32 d=(s32)%s; s64 n=(s64)(((u64)edx<<32)|eax); if(d==0||(n==(s64)0x8000000000000000ull&&d==-1)||n/d>0x7fffffffll||n/d<-0x80000000ll){SYNC_OUT; fnvl_trap(c,0x%xu,1); return;} eax=(u32)(n/d); edx=(u32)(n%%d); }' % (cx.rd(ins, cx.ops[0]), a))
+        cx.em('{ s32 d=(s32)%s; s64 n=(s64)(((u64)edx<<32)|eax); if(d==0||(n==(s64)0x8000000000000000ull&&d==-1)||n/d>0x7fffffffll||n/d<-0x80000000ll){SYNC_OUT; fnvl_raise(1,0x%xu); return;} eax=(u32)(n/d); edx=(u32)(n%%d); }' % (cx.rd(ins, cx.ops[0]), a))
 
 
 @op('cdq')
