@@ -5,7 +5,7 @@
  * only by the units VTM1 rewrites (never force-included). */
 #ifndef FNVNX_VTM_H
 #define FNVNX_VTM_H
-#if defined(_MSC_VER) && !defined(__clang__) || defined(FNVNX_STATIC_MSVC)
+#if defined(_MSC_VER) && !defined(__clang__) || defined(FNVNX_STATIC_MSVC) || defined(FNVNX_SDD)
 #define FNVNX_VTM1_PAD
 #else
 #define FNVNX_VTM1_PAD void *fnvnx_vtm1_d0;

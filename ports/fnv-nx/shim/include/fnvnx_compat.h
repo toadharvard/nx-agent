@@ -202,12 +202,22 @@ struct fnvnx_new_tag {};
 /* IDTOR1: a body-less destructor declaration for a class whose implicit destructor the recipe binds (GCC calls the
  * bound D1 by name instead of defining it inline); MSVC's implicit one already compiles to that call */
 #define FNVNX_IDTOR1(cls) public: ~cls();
+/* HKRO1: Havok hkReferencedObject's getClassType / calcContentStatistics (exe slots 1 / 2) */
+#define FNVNX_HKRO1 virtual const void* GetClassType() const; virtual void CalcContentStatistics(void*, const void*) const;
+#ifdef FNVNX_SDD
+/* SDD1 (fnvnx_sdd.h): a virtual destructor has one slot, as in the exe, so the D22 / D26 / RAWVT1 family keeps the
+ * decomp's own text (the MSVC definitions of tools/equiv/msvc/fnvnx_equiv_fi.h) */
+#define FNVNX_D22(C, ...) __VA_ARGS__
+#define FNVNX_D22I(C, ...) __VA_ARGS__
+#define FNVNX_D22_DROP(...) __VA_ARGS__
+#define FNVNX_D22_CALL(p, m, ...) (p)->m(__VA_ARGS__)
+#define FNVNX_VSLOT(k) (k)
+#define FNVNX_D26_SLOT(k) (k)
+#else
 /* D22: a listed class's slot-0 placeholder virtual becomes its virtual destructor (GCC's D1/D0 where MSVC's ??_G
  * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
 #define FNVNX_D22(C, ...) virtual ~C();
 #define FNVNX_D22I(C, ...) virtual ~C() {}
-/* HKRO1: Havok hkReferencedObject's getClassType / calcContentStatistics (exe slots 1 / 2) */
-#define FNVNX_HKRO1 virtual const void* GetClassType() const; virtual void CalcContentStatistics(void*, const void*) const;
 #define FNVNX_D22_DROP(...)
 /* D26: a call of a converted slot-0 placeholder (MSVC: the deleting destructor ??_G(flags)) is a virtual destructor
  * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
@@ -218,6 +228,9 @@ template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (f
 #define FNVNX_VSLOT(k) ((k) + 1)
 /* RAWVT1 (D26): a raw exe slot index on `this`; native vtables are minus-one */
 #define FNVNX_D26_SLOT(k) ((k) + 1)
+#endif
+/* SDD1: the macros of rule SDD1 (rules/sdd1.py); without FNVNX_SDD they give today's text */
+#include "fnvnx_sdd.h"
 /* EMPTY1: a declared-only empty-string object is the temporary T("") the exe builds */
 #define FNVNX_EMPTY1(T, name) T("")
 /* DTORB1: a destructor stand-in calls the address the recipe binds its ??1 to (the link's __fnv_<a>), the

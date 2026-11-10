@@ -8,7 +8,7 @@
  * Included only by the units RAWVT1-DYN rewrites (never force-included). Under MSVC the index is k. */
 #ifndef FNVNX_RAWVT_H
 #define FNVNX_RAWVT_H
-#if defined(_MSC_VER) && !defined(__clang__) || defined(FNVNX_STATIC_MSVC)
+#if defined(_MSC_VER) && !defined(__clang__) || defined(FNVNX_STATIC_MSVC) || defined(FNVNX_SDD)
 #define FNVNX_RAWVT_DYN(vp, k) (vp)[(k)]
 #define FNVNX_RAWVT_DYNOFF(vp, off) (off)
 #define FNVNX_RAWVT_DYNK(vp, k) (k)
