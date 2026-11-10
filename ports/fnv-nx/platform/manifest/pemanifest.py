@@ -11,7 +11,9 @@ GetModuleHandle*, GetProcAddress, CoCreateInstance) with the constant string or
 GUID operand when the bytes before the call push one. A site without a constant
 is reported as `dynamic`: the implementation must be total over all names anyway.
 
-Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir> [contract-only.dll,...]
+Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir> [contract-only.dll,...] [dynamic.dll,...]
+(dynamic: lifted modules that reachable code loads by constant name with LoadLibrary;
+they join the closure as extra roots.)
 (contract-only: a module present in the directory whose exports are implemented by
 contract under ENV-TRUTH instead of being lifted; it is not loaded, so its own imports
 are not part of the manifest.)
@@ -117,11 +119,13 @@ class Mod:
                 yield site, nm, " ".join(ops) if ops else "dynamic"
 
 
-def main(d, root, out, contract=""):
+def main(d, root, out, contract="", dynamic=""):
     contract = {c.lower() for c in contract.split(",") if c}
     files = {f.lower(): os.path.join(d, f) for f in os.listdir(d)
              if f.lower().endswith((".exe", ".dll"))}
-    mods, absent, todo = {}, set(), [root.lower()]
+    mods, absent = {}, set()
+    todo = [m.lower() for m in dynamic.split(",") if m] + [root.lower()]
+    dyn = set(todo[:-1])
     while todo:
         n = todo.pop()
         if n in mods or n in absent:
@@ -145,7 +149,7 @@ def main(d, root, out, contract=""):
                 fi.write("%s\t%s\t%s\t0x%08x\t%d\t%d\n" % (n, dll, nm, slot, len(code[slot]), len(data[slot])))
             for site, nm, op in sorted(m.dynsites(code)):
                 fd.write("%s\t0x%08x\t%s\t%s\n" % (n, site, nm, op))
-            fc.write("%s\t%s\t%d\t%d\n" % (n, "root" if n == root.lower() else "static", len(m.imports), m.exports))
+            fc.write("%s\t%s\t%d\t%d\n" % (n, "root" if n == root.lower() else "dynamic" if n in dyn else "static", len(m.imports), m.exports))
         for n in sorted(absent):
             fc.write("%s\t%s\t-\t-\n" % (n, "contract-only" if n in contract else "absent"))
         for n in sorted(set(files) - set(mods)):
@@ -153,4 +157,4 @@ def main(d, root, out, contract=""):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:5])
+    main(*sys.argv[1:6])

@@ -10,11 +10,11 @@
 
 | # | Состояние | Импорты | Результат по контракту | Ст. |
 |---|---|---|---|---|
-| M1 | Несистемные PE игры присутствуют и переводятся лифтером (R10в): `binkw32.dll`, `libvorbisfile.dll`, `libvorbis.dll`, `atimgpud.dll`, `d3dx9_38.dll` (решение оркестратора для L6) | статические импорты exe; `LoadLibraryA("ATIMGPUD.dll")` | модуль загружен, его код — lifted; его собственные импорты входят в манифест | Р |
+| M1 | Несистемные PE игры присутствуют и переводятся лифтером (R10в): `binkw32.dll`, `libvorbisfile.dll`, `libvorbis.dll`, `atimgpud.dll`, `d3dx9_38.dll`, `d3dx9_31.dll` (решения оркестратора; d3dx9_31 грузится из d3dx9_38 по константному имени, достижимость по графу L1) | статические импорты exe; `LoadLibraryA("ATIMGPUD.dll")` | модуль загружен, его код — lifted; его собственные импорты входят в манифест | Р |
 | M2 | Драйверных DLL производителей GPU нет: `nvapi.dll`, `atiadlxx.dll`, `atiadlxy.dll` | `LoadLibraryA` | `NULL`, `ERROR_MOD_NOT_FOUND` (как на ПК без этого драйвера) | Р |
 | M3 | `dbghelp.dll` нет (Havok StackTracer) | `LoadLibraryA` | `NULL`, `ERROR_MOD_NOT_FOUND` | Р |
 | M4 | `mscoree.dll` не загружен (процесс не .NET) | `GetModuleHandleW` | `NULL`, `ERROR_MOD_NOT_FOUND` | Р |
-| M5 | Системные DLL из таблицы импорта (`kernel32`, `user32`, `gdi32`, `advapi32`, `shell32`, `ole32`, `comctl32`, `winmm`, `wsock32`, `dsound`, `dinput8`, `xinput1_3`, `d3d9`) «загружены»; `GetProcAddress` отвечает по таблице экспортов манифеста, для прочих имён — `NULL`, `ERROR_PROC_NOT_FOUND` | `GetModuleHandle*`, `LoadLibraryA`, `GetProcAddress` | экспорт вне манифеста, запрошенный по константному имени (`EncodePointer`, `DecodePointer`, `IsProcessorFeaturePresent`, `InitializeCriticalSectionAndSpinCount`, `Direct3DCreate9`…), обязан быть в манифесте: такие имена собирает перепись мест вызова | Р |
+| M5 | Системные DLL из таблицы импорта (`kernel32`, `user32`, `gdi32`, `advapi32`, `shell32`, `ole32`, `comctl32`, `winmm`, `wsock32`, `dsound`, `dinput8`, `xinput1_3`, `d3d9`) «загружены»; `GetProcAddress` отвечает по таблице экспортов манифеста, для прочих имён — `NULL`, `ERROR_PROC_NOT_FOUND` | `GetModuleHandle*`, `LoadLibraryA`, `GetProcAddress` | экспорт вне манифеста, запрошенный по константному имени (`EncodePointer`, `DecodePointer`, `IsProcessorFeaturePresent`, `InitializeCriticalSectionAndSpinCount`, `Direct3DCreate9`, `Direct3DShaderValidatorCreate9`…), обязан быть в манифесте: такие имена собирает перепись мест вызова | Р |
 | M6 | Клиент Steam/Galaxy не запущен. GalaxyWrp.dll и Galaxy.dll не переводятся: 11 импортов exe суть функции Steamworks API с публичным контрактом | 11 импортов `galaxywrp.dll` | `SteamAPI_Init` = `false`, `SteamAPI_IsSteamRunning` = `false`, аксессоры интерфейсов = `NULL`, остальное по документации Steamworks для неинициализированного API. Оригинал под Wine без клиента — только проверка | Р |
 
 ## 2. Сеть
@@ -84,10 +84,3 @@
 - F1/F3: путь установки и ключи реестра извлекаются из сценария GOG-установщика (innoextract) — задача L5.
 - M6: Galaxy.dll и GalaxyWrp.dll исключены из MODULE-LIFT; msvcr110/msvcp110/ws2_32/bcrypt в манифест не входят.
 - N1: Winsock 1.1 → BSD-сокеты Horizon, nifm не запрашивается.
-
-## Кандидаты (не утверждены)
-
-| # | Состояние | Импорты | Результат | Ст. |
-|---|---|---|---|---|
-| M7 | `d3dx9_31.dll` не установлен (GOG-установщик ставит только те версии D3DX, которые несёт его редист; проверить по сценарию установщика). По графу L1 его загрузка из `d3dx9_38.dll` достижима на двух путях компиляции шейдеров при флаге `0x10000` | `LoadLibraryA("d3dx9_31.dll")` внутри d3dx9_38 | `NULL`, `ERROR_MOD_NOT_FOUND`; иначе модуль входит в MODULE-LIFT | ? |
-| M8 | `d3d9.dll!Direct3DShaderValidatorCreate9` (недокументированный экспорт d3d9, достижим из d3dx9_38, 4 места) | `GetProcAddress` | экспорт входит в манифест d3d9 (реализация — L6) | ? |
