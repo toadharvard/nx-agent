@@ -52,7 +52,8 @@ if [ -n "$need" ]; then   # (sweep_job.sh's apt block is not callable: L4 note i
 	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wine32:i386 wine g++-mingw-w64-i686 xvfb xdotool x11-apps imagemagick xz-utils \
 		libgl1-mesa-dri:i386 libgl1-mesa-dri >/dev/null || fail "apt-get"
 fi
-[ "$(git -C "$P" rev-parse HEAD 2>/dev/null)" = "$COMMIT" ] || NOTES+=("checkout is not $H12 (HEAD $(git -C "$P" rev-parse --short=12 HEAD 2>/dev/null)): the recorder is built from the checkout")
+HEADC=$(git -C "$P" rev-parse HEAD 2>/dev/null)   # $COMMIT is a full id or any prefix of one: compare as a prefix, never short against full
+case "$HEADC" in "$COMMIT"?*|"$COMMIT") ;; *) NOTES+=("checkout is not $H12 (HEAD ${HEADC:0:12}): the recorder is built from the checkout") ;; esac
 # Xvfb with RandR off, found first on PATH: wine_ref.sh's xstart calls plain `Xvfb` (its lines 41-42 have no argument hook; README proposes S16_XVFB_ARGS)
 REALX=$(command -v Xvfb); mkdir -p "$WK/shim"; printf '#!/bin/sh\nexec %s "$@" -extension RANDR\n' "$REALX" >"$WK/shim/Xvfb"; chmod +x "$WK/shim/Xvfb"
 export PATH=$WK/shim:$PATH
@@ -103,7 +104,10 @@ profile_check() {
 CELLID=""; CELLKIND=""
 if [ "$DRY" != 1 ]; then
 	if [ -n "${D9REC_CELL:-}" ]; then CELLID=$D9REC_CELL; CELLKIND=interior
-	else IFS=$'\t' read -r _ CELLKIND CELLID _ < <(python3 -I "$CMP/cells.py" list "$GAME/Data/FalloutNV.esm" | head -1); fi
+	else   # the whole list goes to a file first: `| head -1` closed the pipe early and cells.py died with BrokenPipeError
+		python3 -I "$CMP/cells.py" list "$GAME/Data/FalloutNV.esm" >"$WK/cells.tsv" 2>"$WK/cells.err" || fail "cells.py list (log $WK/cells.err)"
+		IFS=$'\t' read -r _ CELLKIND CELLID _ <"$WK/cells.tsv"
+	fi
 	[ -n "$CELLID" ] || fail "no first cell (cells.py list)"
 	python3 -I - "$CMP/scenes.json" "$WK/scenes.json" "$CELLID" "$CELLKIND" "$SHOTS" <<'EOF' || fail "scenes.json"
 import json, sys, os
@@ -127,30 +131,48 @@ run_game() {   # run_game <scene> <out.d9s> <dir>: one recorded run; sets RC (12
 		( cd "$GAME" && DISPLAY=$DISP D9REC_OUT=$(wpath "$out") timeout -k 30 "${D9REC_TIMEOUT_S:-1200}" wine nxd9play.exe "$(wpath "$cap")" -o "$(wpath "$dir")" >"$dir/wine.log" 2>&1 ); RC=$?
 		kill "$xp" 2>/dev/null; rm -f "$GAME/d3d9.dll"; wineserver -k 2>/dev/null; return
 	fi
+	# the job watches the game while it runs: every 5 s the stream size and the number of game processes (watch.tsv), so the report can tell a crash
+	# (process gone, stream stopped) from a hang (process alive, stream stopped) from a finished run
+	local wpat=FalloutNV.exe wpid; watch "$out" "$wpat" >"$dir/watch.tsv" & wpid=$!
 	# wine_ref.sh run: S16_D9CAP is only the name of the proxy DLL it copies beside the exe and enables via WINEDLLOVERRIDES (d3d9=n,b)
 	D9REC_OUT=$(wpath "$out") S16_W=$SW S16_H=$SH S16_PCI_DEVICE=00000193 S16_SCENES=$WK/scenes.json S16_D9CAP=$DLL S16_STOP_AFTER_FRAMES=1 \
-	S16_FRAME_GAP_S=$GAP S16_DISPLAY=$DISP S16_SETTLE_S=${S16_SETTLE_S:-30} \
+	S16_FRAME_GAP_S=$GAP S16_DISPLAY=$DISP S16_SETTLE_S=${S16_SETTLE_S:-30} WINEDEBUG=${D9REC_WINEDEBUG:-err+all} \
 		timeout -k 30 "${D9REC_TIMEOUT_S:-1200}" bash "$CMP/wine_ref.sh" run "$PFXW" "$sc" "$dir" >"$dir/run.log" 2>&1
-	RC=$?; wineserver -k 2>/dev/null; rm -f "$GDIR/d3d9.dll"
+	RC=$?; kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null; wineserver -k 2>/dev/null; rm -f "$GDIR/d3d9.dll"
+}
+watch() {   # watch <stream> <process name pattern>: "seconds<TAB>stream bytes<TAB>matching processes" every 5 s until killed
+	local t=$SECONDS; while :; do printf '%s\t%s\t%s\n' $((SECONDS - t)) "$(stat -c %s "$1" 2>/dev/null || echo 0)" "$(pgrep -fc "$2" || true)"; sleep 5; done
+}
+watch_line() {   # watch_line <watch.tsv>: one report line
+	awk -F'\t' '$2 != ps { ls = $1; ps = $2 } $3 > 0 { lp = $1 } { n = $1 } END { if (!NR) print "no watch samples"; else printf "watched %s s: stream last grew at %s s (%s bytes), game process last seen at %s s%s", n, ls, ps, lp + 0, (lp + 0 < n - 10 ? " (GONE before the end: crash or exit)" : "") }' "$1" 2>/dev/null
 }
 
 scene() {   # scene <menu|cell>: two recorded runs, stats, env answers, d9cmp
-	local sc=$1 s=$WK/$1 n; local -a st
+	local sc=$1 s=$WK/$1 n; local -a st sec
 	rm -rf "$s"; mkdir -p "$s"; log "scene $sc"
 	for n in 1 2; do
-		run_game "$sc" "$s/run$n.d9s" "$s/out$n"; st[n]=$RC
-		log "scene $sc run $n: exit $RC, $(stat -c %s "$s/run$n.d9s" 2>/dev/null || echo 0) bytes"
+		local t1=$SECONDS; run_game "$sc" "$s/run$n.d9s" "$s/out$n"; st[n]=$RC; sec[n]=$((SECONDS - t1))
+		log "scene $sc run $n: exit $RC, $(stat -c %s "$s/run$n.d9s" 2>/dev/null || echo 0) bytes, ${sec[n]} s"
 	done
 	local f="$SEC/$sc.md"
 	{ echo "## Scene $sc"; echo
 	  for n in 1 2; do
 		if [ "${st[n]}" = 124 ] || [ "${st[n]}" = 137 ]; then echo "- run $n: TIMEOUT after ${D9REC_TIMEOUT_S:-1200} s (hang; stream as far as written)"
 		elif [ "${st[n]}" != 0 ]; then echo "- run $n: exit ${st[n]} (crash or script failure; last wine.log lines: $(tail -n 3 "$s/out$n/wine.log" "$s/out$n/run.log" 2>/dev/null | tr '\n' '|' | cut -c1-300))"
-		else echo "- run $n: exit 0"; fi
+		else echo "- run $n: exit 0 (a script that kept typing at a dead game also exits 0: the world verdict below decides)"; fi
+		echo "- run $n: ${sec[n]} s; $([ -s "$s/out$n/watch.tsv" ] && watch_line "$s/out$n/watch.tsv" || echo 'no watch data')"
+		local wl; wl=$(ls "$s/out$n/$sc/wine.log" "$s/out$n/wine.log" 2>/dev/null | head -1)   # wine_ref.sh writes <out>/<scene>/wine.log; the dry run <out>/wine.log
+		[ -n "$wl" ] && echo "- run $n: wine.log $(wc -l <"$wl") lines; error/crash lines: $(grep -aiE 'err:|wine:|unhandled|page fault|exception|crash' "$wl" | head -4 | cut -c1-160 | tr '\n' '|')"
 		[ -s "$s/run$n.d9s" ] || echo "- run $n: NO STREAM (the game never created a device)"
 	  done; echo
 	  if [ -s "$s/run1.d9s" ]; then
-		python3 -I "$REC/farm/d9rec_stats.py" "$s/run1.d9s" --tsv-dir "$s/tsv1" --json "$s/stats1.json" --title "$sc run 1" | sed 's/^#/##/'
+		local -a req=(); [ "$sc" = cell ] && req=(--require-world)   # the menu scene is not expected to reach a world; the cell scene must
+		python3 -I "$REC/farm/d9rec_stats.py" "$s/run1.d9s" --tsv-dir "$s/tsv1" --json "$s/stats1.json" --title "$sc run 1" "${req[@]}" \
+			--world-min-draws "${D9REC_WORLD_MIN_DRAWS:-100}" --world-min-frames "${D9REC_WORLD_MIN_FRAMES:-10}" --world-min-textures "${D9REC_WORLD_MIN_TEXTURES:-50}" \
+			>"$s/stats1.md" 2>"$s/stats1.err"; local wr=$?
+		sed 's/^#/##/' "$s/stats1.md"
+		[ "$wr" = 4 ] && NOTES+=("FAILED: scene $sc did not reach a world cell: $(tail -n 1 "$s/stats1.err" | cut -c1-300)")
+		[ "$wr" != 0 ] && [ "$wr" != 4 ] && NOTES+=("FAILED: scene $sc: stats exit $wr")
 		python3 -I "$P/tests/l6/rec/dump_env.py" "$s/run1.d9s" "$s/env_answers.tsv" >/dev/null 2>&1; echo "- env answers (separate TSV): $(($(wc -l <"$s/env_answers.tsv") - 1)) rows"; echo
 	  fi
 	  echo "### Determinism: run 1 vs run 2 of scene $sc (d9cmp.py)"; echo

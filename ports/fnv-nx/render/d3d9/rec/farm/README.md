@@ -35,6 +35,17 @@ the player's install as `$FARM_HOME/game` (`tools/gamedata_fetch.sh`, as sweep).
    `env_answers.tsv`, `perframe.tsv`, `methods.tsv`, `modes.tsv`, `stats1.json`, `cmp.txt`, `cmp.json`, `env_probe.tsv`, `probe.d9s`, `SHA256SUMS`. Game-derived: private only.
    The report names no cell (the cell id names game content); it is counts.
 
+## M1b: the first farm run never rendered a world cell (783ec078)
+Recorded timeline (docked `cell`, 6,010 frames): menu from frame 1,990 (19-28 draws, 225 calls per frame, constant), first change at frame 5,752 (+1 draw, a vertex buffer
+created: the console opening), frame 6,008 releases the 26 menu vertex buffers, then 137 calls after the last Present (CreateTexture 1024x512 DXT1, 11 levels, the game's own
+CPU mip chain: GetSurfaceLevel / GetDesc / LockRect / UnlockRect for levels 0-3) and the stream ends **between GetDesc and the LockRect of level 3**. Handheld: identical 137
+trailing calls, change at frame 9,447 of 9,854. The scene flow itself worked (the console opened and `coc` began to unload the menu: the loading screen's textures are what was being built).
+The game stopped calling D3D (crash, hang or kill) at the first LockRect after the load started; wine_ref.sh went on typing and sleeping and exited 0. Nothing in the flow depends
+on d9cap (d9cap.c reads only S16_CAPTURE*, S16_REAL_D3D9; no frame counter, marker or stop mechanism). Job changes: world verdict (`d9rec_stats.py --require-world`, section 11, exit 4;
+the job marks `FAILED: scene cell did not reach a world cell` and exits 1), per-run watcher (`watch.tsv`: stream size and game-process count every 5 s: crash vs hang), wine.log
+error lines (`WINEDEBUG=err+all`, `D9REC_WINEDEBUG`), the commit check as a prefix compare, cells.py output to a file instead of `| head -1`.
+Env: `D9REC_WORLD_MIN_DRAWS/FRAMES/TEXTURES` (100 / 10 / 50: the rule is in the `d9rec_stats.py` docstring).
+
 ## Not reusable from tools/farm and tools/compare without edits (for L4 / the compare owner)
 - `tools/farm/sweep_job.sh` `setup()` (apt block, shader tools, nxd9play, worktree) runs on `source`; no function library. Proposal: move the tool check + apt install into
   `tools/farm/lib_job.sh` as `farm_need_tools <cmds>` and use it here (this job only needs wine, Xvfb, xdotool, xwd, convert, xz, mingw g++).

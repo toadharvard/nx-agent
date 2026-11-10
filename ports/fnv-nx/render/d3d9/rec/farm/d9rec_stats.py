@@ -6,7 +6,13 @@ Frame index f = number of Present / PresentEx / swap-chain Present records (dept
 Calls after the last Present are frame `frames` (trailing, counted separately).  Shader hash = FNV-1a 64 of the bytecode (as tools/compare).
 FFP rule: a draw's vertex (pixel) stage is "none" when the last SetVertexShader (SetPixelShader) of that device passed id 0, "unknown" after
 a state-block Apply (until the next Set), a Reset sets both to none, and the initial state is none.
---expect-mode: exit 3 unless every adapter mode returned for X8R8G8B8 is exactly that one mode.  Exit 0 ok, 2 unreadable stream."""
+--expect-mode: exit 3 unless every adapter mode returned for X8R8G8B8 is exactly that one mode.
+--require-world: exit 4 unless the stream reached a world cell (WORLD-REACHED rule below; thresholds --world-min-draws/-frames/-textures).
+WORLD-REACHED rule (a measured property of the original game's streams, not a guess from names): the stream has a run of >= 10 consecutive complete
+frames that each have >= 100 draw calls and, over the run, bind >= 50 distinct textures (SetTexture with a non-null texture id).  Measured basis
+(farm run of 783ec078, 4 recordings, 26,000 frames of boot, loading screens and the main menu): draws per frame never exceed 28 (median 4-19);
+a world cell has hundreds of draws per frame.  Per-frame draw percentiles are printed whatever the verdict.
+Exit 0 ok, 2 unreadable stream, 4 world not reached (with --require-world)."""
 import argparse, collections, json, os, re, struct, sys
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +46,7 @@ def analyse(data, spec):
     called = collections.Counter(); hr_fail = collections.Counter(); env_rec = collections.Counter(); env_items = collections.Counter()
     threads = collections.OrderedDict(); depth_hist = collections.Counter(); fr = []     # per-frame dicts
     new_fr = lambda: collections.Counter()
-    fr.append(new_fr()); f = 0
+    fr.append(new_fr()); f = 0; texs = [set()]
     vs, ps, hashes = {}, {}, {"VS": collections.Counter(), "PS": collections.Counter()}
     creates = collections.Counter(); other_create_by_method = collections.Counter(); first_draw = None
     modes, mcount = [], []; first_hash_frame = {}
@@ -71,6 +77,9 @@ def analyse(data, spec):
                 if a == 0: c["draws_no_vs"] += 1
                 if b == 0: c["draws_no_ps"] += 1
                 if a == 0 and b == 0: c["draws_no_vs_no_ps"] += 1
+        elif dev and n == "SetTexture":
+            t = byl.get("in:pTexture")
+            if t is not None and t.data and len(t.data) >= 4 and struct.unpack("<I", t.data[:4])[0]: texs[f].add(struct.unpack("<I", t.data[:4])[0])
         elif dev and n in ("SetVertexShader", "SetPixelShader"):
             (vs if n == "SetVertexShader" else ps)[r.this] = struct.unpack("<I", byl["in:pShader"].data)[0]
         elif dev and n in ("Reset", "ResetEx"): vs[r.this] = ps[r.this] = 0
@@ -82,13 +91,39 @@ def analyse(data, spec):
         if n == "EnumAdapterModes" and "out:pMode" in byl and byl["out:pMode"].data:
             w, h, rr, fm = struct.unpack("<4I", byl["out:pMode"].data[:16]); modes.append((struct.unpack("<I", byl["in:Format"].data)[0], struct.unpack("<I", byl["in:Mode"].data)[0], w, h, rr, fm))
         if n in ("Present", "PresentEx") and r.depth == 0 and (dev or (r.iface or "").startswith("IDirect3DSwapChain9")):
-            f += 1; fr.append(new_fr())
-    return dict(hdr=hdr, recs=recs, err=err, called=called, hr_fail=hr_fail, env_rec=env_rec, env_items=env_items, threads=threads, depth=depth_hist,
+            f += 1; fr.append(new_fr()); texs.append(set())
+    return dict(texs=texs, tail=[(r.thread, (r.iface or "").replace("IDirect3D", ""), r.name) for r in recs[-8:]], hdr=hdr, recs=recs, err=err, called=called, hr_fail=hr_fail, env_rec=env_rec, env_items=env_items, threads=threads, depth=depth_hist,
                 fr=fr, frames=f, creates=creates, other_create=other_create_by_method, hashes=hashes, first_hash_frame=first_hash_frame, first_draw=first_draw,
                 modes=modes, mcount=mcount, names=names, nbytes=len(data))
 
 
-def build(a, spec, window):
+WORLD_DEFAULT = (100, 10, 50)   # min draws per frame, min consecutive frames, min distinct textures over the run
+
+
+def pct(v, q):
+    v = sorted(v); return v[min(len(v) - 1, int(q * len(v)))] if v else 0
+
+
+def world_verdict(draws, texs, min_draws=WORLD_DEFAULT[0], min_frames=WORLD_DEFAULT[1], min_tex=WORLD_DEFAULT[2], window=100):
+    """draws: draws per complete frame; texs: set of bound texture ids per complete frame.  Rule: see the module doc.  Pure function of the two lists."""
+    runs, i, n = [], 0, len(draws)
+    while i < n:
+        if draws[i] >= min_draws:
+            j = i
+            while j < n and draws[j] >= min_draws: j += 1
+            runs.append((j - i, i, len(set().union(*texs[i:j])))); i = j
+        else: i += 1
+    ok = [r for r in runs if r[0] >= min_frames and r[2] >= min_tex]
+    best = max(runs, key=lambda r: (r[0], r[2]), default=(0, None, 0))
+    last = draws[-window:]
+    return {"reached": bool(ok), "rule": f">= {min_frames} consecutive frames with >= {min_draws} draws, >= {min_tex} distinct textures bound over the run",
+            "thresholds": [min_draws, min_frames, min_tex], "frames": n, "frames_over_threshold": sum(1 for d in draws if d >= min_draws),
+            "best_run_frames": best[0], "best_run_start": best[1], "best_run_textures": best[2], "first_world_frame": ok[0][1] if ok else None,
+            "draws_pct": {"all": {q: pct(draws, q / 100) for q in (50, 90, 99, 100)}, "last": {q: pct(last, q / 100) for q in (50, 90, 99, 100)}},
+            "last_window": len(last), "distinct_textures_all": len(set().union(*texs)) if texs else 0}
+
+
+def build(a, spec, window, world=WORLD_DEFAULT):
     fr, f = a["fr"], a["frames"]; recs = a["recs"]
     tot = collections.Counter()
     for c in fr: tot.update(c)
@@ -106,6 +141,9 @@ def build(a, spec, window):
          "env_by_method": {f"{i or '(export)'}::{n}": [a["env_rec"][(i, n)], a["env_items"][(i, n)]] for (i, n) in sorted(a["env_rec"], key=lambda k: (str(k[0]), k[1]))},
          "failed_hresult": {f"{i or '(export)'}::{n} {h}": v for (i, n, h), v in sorted(a["hr_fail"].items(), key=lambda kv: (str(kv[0][0]), kv[0][1], kv[0][2]))},
          "modes": a["modes"], "mode_counts": a["mcount"]}
+    nc = f if f < len(fr) else len(fr)
+    R["world"] = world_verdict([fr[i]["draws"] for i in range(nc)], a["texs"][:nc], *world, window=window)
+    R["tail"] = {"calls_after_last_present": R["trailing_calls"], "last_calls": [f"t{t} {i}::{n}" for t, i, n in a["tail"]]}
     R["never_called"] = sorted(f"{i}::{n}" for (i, n) in a["names"] - set(a["called"]) if i)
     R["never_called_exports"] = sorted(n for (i, n) in a["names"] - set(a["called"]) if not i)
     call = lambda *ns: {n: sum(v for (i, k), v in a["called"].items() if k == n and i in DEVS) for n in ns}
@@ -118,6 +156,16 @@ def build(a, spec, window):
 
 
 COLS = ["frame", "calls", "create_VS", "create_PS", "create_other", "locks", "unlocks", "lock_bytes_in", "unlock_bytes", "draws", "draws_no_vs", "draws_no_ps", "draws_unknown_stage"]
+
+
+def world_md(R):
+    w, p, t = R["world"], R["world"]["draws_pct"], R["tail"]
+    pr = lambda d: ", ".join(f"p{q} {v}" for q, v in d.items())
+    return ["## 11. World reached (does the stream show a world cell, not the menu / loading screens?)",
+            f"- verdict: {'WORLD-REACHED' if w['reached'] else 'NOT WORLD-REACHED (menu / loading only)'}; rule: {w['rule']}",
+            f"- draws per frame, all {w['frames']} complete frames: {pr(p['all'])}; last {w['last_window']} frames: {pr(p['last'])}; frames with >= {w['thresholds'][0]} draws: {w['frames_over_threshold']}",
+            f"- longest run of frames over the draw threshold: {w['best_run_frames']} (from frame {w['best_run_start']}), distinct textures bound in it: {w['best_run_textures']}; distinct textures bound in the stream: {w['distinct_textures_all']}",
+            f"- stream end: {t['calls_after_last_present']} calls after the last Present; last calls: {'; '.join(t['last_calls'][-4:])}"]
 
 
 def md(R, title):
@@ -153,16 +201,19 @@ def md(R, title):
     by = collections.defaultdict(list)
     for k in R["never_called"]: i, n = k.split("::"); by[i].append(n)
     o += [f"- {i}: {', '.join(v)}" for i, v in sorted(by.items())]
+    o += ["", *world_md(R)]
     return "\n".join(o) + "\n"
 
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("stream"); ap.add_argument("--md"); ap.add_argument("--json"); ap.add_argument("--tsv-dir")
     ap.add_argument("--window", type=int, default=100); ap.add_argument("--expect-mode"); ap.add_argument("--spec", default=DEF_SPEC); ap.add_argument("--title", default="")
+    ap.add_argument("--require-world", action="store_true"); ap.add_argument("--world-min-draws", type=int, default=WORLD_DEFAULT[0])
+    ap.add_argument("--world-min-frames", type=int, default=WORLD_DEFAULT[1]); ap.add_argument("--world-min-textures", type=int, default=WORLD_DEFAULT[2])
     o = ap.parse_args(); raw = open(o.spec, "rb").read(); spec = json.loads(raw)
     try: a = analyse(open(o.stream, "rb").read(), spec)
     except (d9s1.ReadError, OSError, KeyError, IndexError) as ex: print(f"d9rec_stats: unreadable stream: {ex!r}", file=sys.stderr); return 2
-    R = build(a, spec, o.window); txt = md(R, o.title or os.path.basename(o.stream))
+    R = build(a, spec, o.window, (o.world_min_draws, o.world_min_frames, o.world_min_textures)); txt = md(R, o.title or os.path.basename(o.stream))
     if o.md: open(o.md, "w").write(txt)
     else: sys.stdout.write(txt)
     if o.json: json.dump({k: v for k, v in R.items() if k != "frame_rows"}, open(o.json, "w"), indent=1)
@@ -171,6 +222,8 @@ def main():
         open(o.tsv_dir + "/perframe.tsv", "w").write("\t".join(COLS) + "\n" + "".join("\t".join(map(str, r)) + "\n" for r in R["frame_rows"]))
         open(o.tsv_dir + "/methods.tsv", "w").write("method\tcalls\n" + "".join(f"{k}\t{v}\n" for k, v in R["called"].items()))
         open(o.tsv_dir + "/modes.tsv", "w").write("format\tindex\twidth\theight\trefresh\tmode_format\n" + "".join("\t".join(map(str, m)) + "\n" for m in R["modes"]))
+    print(f"d9rec_stats: {'WORLD-REACHED' if R['world']['reached'] else 'NOT WORLD-REACHED'} ({R['world']['rule']}; best run {R['world']['best_run_frames']} frames, max draws {R['world']['draws_pct']['all'][100]})", file=sys.stderr)
+    if o.require_world and not R["world"]["reached"]: return 4
     if o.expect_mode:
         w, h, r = map(int, re.fullmatch(r"(\d+)x(\d+)@(\d+)", o.expect_mode).groups())
         ms = [m for m in R["modes"] if m[0] == 22]; cnt = [v for k, v in R["mode_counts"] if k == 22]
