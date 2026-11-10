@@ -72,7 +72,8 @@ static const char *asmname(tree d) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NA
 
 static bool is_table(tree v)
 {
-  if (!v || !VAR_P(v) || !DECL_VIRTUAL_P(v) || !DECL_ASSEMBLER_NAME_SET_P(v)) return false;
+  /* by symbol, not by DECL_VIRTUAL_P: a hand-declared `extern void* const t[] __asm__("_ZTV...")` is the table too */
+  if (!v || !VAR_P(v) || !DECL_ASSEMBLER_NAME_SET_P(v)) return false;
   const char *n = asmname(v);
   return !strncmp(n, "_ZTV", 4) || !strncmp(n, "_ZTC", 4);
 }
