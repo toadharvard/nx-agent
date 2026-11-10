@@ -84,3 +84,28 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 - A direct bytecode -> Maxwell code backend without GLSL/NIR is an L7 lever, only by measurement, only hash-equal.
 | T1b | spec fixes from T2's list: signatures of the 5 undocumented exports (from Wine), ret_size, GetGammaRamp `when`, machine-readable sub-resource mapping, per-level copy taint, binding source for pix(rendertargets) | T2 | |
 | T4a | rec: observational recorder d3d9.dll under Wine; neutrality, decode, determinism modulo env/pix; dump of Wine/llvmpipe env answers | T2 | running |
+
+## ENV profile (approved by the orchestrator 2026-11-10, rule "one reference environment")
+
+- The profile = the answers of the pinned recording environment: Wine 9.0 + Mesa llvmpipe + a fixed screen. The guest
+  answers every environment question from the same table; `env_diff` is a separate counter of d9cmp. Everything the
+  table promises is implemented totally. First dump: tests/l6/rec/wine_llvmpipe_env.tsv (6052 answers).
+- Two recording profiles: 1280x720@60 (handheld) and 1920x1080@60 (docked), one adapter mode each; the stream check
+  runs in both.
+- Direct3DCreate9Ex exists as in the reference environment; the Ex interfaces are implemented in full.
+- GetAvailableTextureMem: Wine's accounting formula with the profile's video memory = the Switch GPU budget from L5
+  (asked 2026-11-10); the original is recorded under Wine with the same value (registry VideoMemorySize).
+
+## More tasks
+
+| id | task | depends | state |
+|---|---|---|---|
+| T3 | comparator d9cmp + generated replayer | T1 | done: 75 checks, 497/497 methods replayed |
+| F2 | ffp vertex stage | - | done: 24980 states 0 failed; llvmpipe 5980 states 0 mismatches |
+| S3a | translator: aL, layout totality, scalar outputs, 1_0 tokens | S1 | done: 7077 -> 7398 of 7538 |
+| S3b | translator: the remaining 22 classes | S3a | running |
+| D1+D2 | dev: object model + declarative state model, state blocks, gate G-METHOD | T1 | running |
+| V1a | Wine d3d9 conformance tests recorded as replay vectors | T4a | running |
+| M1a | farm job: record the original under Wine with the new recorder (main menu, first cell), both profiles; stats: Create*Shader by frame, calls per frame; hand to L4 | T4a | next |
+| E1 | env table generator: envprobe over the whole query domain in both profiles -> render/d3d9/env table + answer functions | T4a | next |
+| V3 | FFP pixel check: scenes covering the decided-with-doubt points of F1/F2 against WineD3D | D5 | |
