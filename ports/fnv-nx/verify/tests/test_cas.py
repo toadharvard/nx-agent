@@ -216,6 +216,17 @@ def _():
     return cas.ingest(dest, st) == h
 
 
+@case("tree_hash equals ingest, ignores mtimes, skips named entries")
+def _():
+    d = base_tree(fresh("th"))
+    h = cas.tree_hash(d)
+    st = fresh("th-store")
+    same = h == cas.ingest(d, st) and not os.listdir(fresh("th-empty"))
+    os.utime(d + "/a.txt", (5, 5))
+    write(d + "/__pycache__/x.pyc", b"junk")
+    return same and cas.tree_hash(d, skip=("__pycache__",)) == h and cas.tree_hash(d) != h and cas.tree_hash(d + "/a.txt") == cas.ingest(d + "/a.txt", st)
+
+
 def _cleanup():
     for dp, dns, fns in os.walk(ROOT):
         for n in dns:
