@@ -22,3 +22,10 @@ fx.dll	fx_ret_big		stdcall	i	ii	fx_ret_big
 fx.dll	fx_ret_store		stdcall	i	i	fx_ret_store
 fx.dll	fx_ret_derived		stdcall	i	i	fx_ret_derived
 fx.dll	fx_local_noinline		stdcall	i	i	fx_local_noinline
+fx.dll	fx_callee_write		stdcall	i	i	fx_callee_write
+fx.dll	fx_stash_write		stdcall	i	i	fx_stash_write
+fx.dll	fx_unused		stdcall	i	i	fx_unused
+fx.dll	fx_gep_read		stdcall	i	ii	fx_gep_read
+fx.dll	fx_gep_write		stdcall	i	ii	fx_gep_write
+fx.dll	fx_contract		stdcall	i	i	fx_contract
+fx.dll	fx_contract_ro		stdcall	i	i	fx_contract_ro

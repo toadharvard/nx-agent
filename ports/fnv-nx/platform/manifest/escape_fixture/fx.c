@@ -46,3 +46,16 @@ int *fx_ret_big(int *p, int n) {
 }
 int *fx_ret_store(int *p) { g_saved = p; return p; }
 int *fx_ret_derived(int *p) { return p + 1; }
+
+/* writes-column cases */
+static void __attribute__((noinline)) helper_write(int *p) { *p = 7; }
+void fx_callee_write(int *p) { helper_write(p); }                  /* written only by a callee: writes y */
+void fx_stash_write(int *q) { *g_saved = *q; }                     /* q only read; the write goes through a pointer stashed earlier by fx_global: q n/n (another alias is not claimed) */
+void fx_unused(int *p) { (void)p; }                                /* never dereferenced: readnone: n/n */
+int fx_gep_read(const int *p, int i) { return p[i] + p[i + 1]; }   /* derived pointers, loads only: n */
+void fx_gep_write(int *p, int i) { p[i] = 1; }                     /* store through a derived pointer: y */
+/* declared contracts (fx_contract.tsv): external declarations whose attributes come only from the contract */
+extern void ext_hook(const char *n);       /* contract: nocapture, readonly */
+extern void ext_hook_ro(const char *n);    /* contract: readonly only (may keep the pointer) */
+void fx_contract(const char *n) { ext_hook(n); }
+void fx_contract_ro(const char *n) { ext_hook_ro(n); }
