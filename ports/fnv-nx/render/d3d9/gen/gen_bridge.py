@@ -11,8 +11,7 @@ Rules (total over the spec's item kinds; an item this file has no rule for stops
   handle by reference (out) the method stores our object; the thunk replaces it by its face (null stays null)
   buffer with canon `handle` (an array of interface pointers, in)   converted element by element into a native array of the same length
   buffer with canon `ohandle` (private data D3DSPD_IUNKNOWN)        the bytes are a GUEST object pointer: passed through unchanged. The calls our
-                            object model makes on it (AddRef / Release, obj.cpp) are calls INTO the guest and need the lifter runtime's
-                            guest-call hook: OPEN (QUEUE.md CB2), not solved here
+                            object model makes on it (AddRef / Release) go through nxd3d_app_* (dev/app_unk_guest.cpp -> fnvnx_guest_invoke of L3a)
   ret: void `v`, float `f` (x87 ST0 on the guest side), everything else one 32-bit `i` (HRESULT, counts, enums, opaque handles)."""
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); SPEC = os.path.join(HERE, "..", "spec", "d3d9_spec.json")

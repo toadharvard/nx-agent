@@ -9,7 +9,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
 INC = os.path.join(ROOT, "shim", "include"); NXF = os.path.join(ROOT, "render", "native")
-LIB = ["obj.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]
+LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]
 TESTS = ["test_dev.cpp", "t_factory.cpp", "t_defaults.cpp", "t_valid.cpp", "t_blocks.cpp", "t_refs.cpp"]
 fails = []
 
@@ -89,7 +89,7 @@ def main():
                 ("d", "state_model.py", "LASTPIXEL 1 P RASTER", "LASTPIXEL 1 - RASTER"), ("d", "state_model.py", "dict(name=\"viewport\", ct=\"D3DVIEWPORT9\", n=\"1\", shape=\"val0\", default=\"@viewport\", blocks=\"\"", "dict(name=\"viewport\", ct=\"D3DVIEWPORT9\", n=\"1\", shape=\"val0\", default=\"@viewport\", blocks=\"-\""),
                 ("c", "state_model.py", 'SAMP_RANGES = [("0", "16", 0)', 'SAMP_RANGES = [("0", "17", 0)'), ("c", "state_gen.py", "k >= r[i].lo && k < r[i].hi", "k >= r[i].lo && k <= r[i].hi"),
                 ("e", "obj.cpp", "if (n == 1 && owner) owner->addref();", ""), ("e", "obj.cpp", "if (!managed() || ci->rtype == D3DRTYPE_SURFACE) return 0;", "if (ci->rtype == D3DRTYPE_SURFACE) return 0;"),
-                ("e", "obj.cpp", "    if (unk) { e->u = *(IUnknown* const*)data; e->u->AddRef(); }", "    if (unk) { e->u = *(IUnknown* const*)data; }"),
+                ("e", "obj.cpp", "    if (unk) { e->u = *(IUnknown* const*)data; uref(e); }", "    if (unk) { e->u = *(IUnknown* const*)data; }"),
                 ("d", "state_rt.cpp", "if (nw) nx_obj_of(nw)->bindRef();", ""), ("d", "state_rt.cpp", "if (e.has_light) { D3DLIGHT9 l = e.light; d->SetLight(e.idx, &l); }", ""),
                 ("b", "state_ext.cpp", "d.Direction.z = 1.0f;", "d.Direction.z = 0.0f;"), ("d", "state_rt.cpp", "if (rec && bit(nx_tab.mask[0], slot))", "if (false)"),
                 ("c", "state_ext.cpp", "light->Type > D3DLIGHT_DIRECTIONAL", "light->Type > D3DLIGHT_DIRECTIONAL + 1")]

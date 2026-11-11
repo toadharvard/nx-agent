@@ -3,6 +3,7 @@
  a  guest-side calls through key tables: exports return faces, out handles are faces with identity, the class table is the object's own
  b  rows: one per spec method (dll !<iface>, ordinal = slot) + one per signed export; every native symbol is defined (the link) and unique
  c  a row missing from the import table is reported by nx_bridge_init
+ e  private data D3DSPD_IUNKNOWN of a guest object: AddRef / Release go through fnvnx_guest_invoke (app_unk_guest.cpp)
  d  generator totality: a spec item without a rule stops the generator (exit 2)"""
 import copy, json, os, subprocess, sys, tempfile, shutil
 sys.dont_write_bytecode = True
@@ -29,7 +30,7 @@ def main():
         f.write('extern "C" {\n' + "".join(f"void {r[6]}();\n" for r in rows) + "}\nstruct Row { const char* dll; const char* name; uint32_t ordinal; void* fn; };\nstatic const Row g_rows[] = {\n")
         f.write("".join(f'    {{"{r[0]}", "{r[1]}", {r[2] or "0xffffffffu"}, (void*){r[6]}}},\n' for r in rows) + f"}};\nenum {{ G_NROWS = {len(rows)} }};\n")
     fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-fpermissive", "-I", INC, "-I", tmp, "-I", DEV, "-I", HERE]
-    srcs = [os.path.join(DEV, s) for s in ("obj.cpp", "d3d9_adapter.cpp", "d3d9_exports.cpp")] + [os.path.join(tmp, s) for s in ("d9impl_unk.gen.cpp", "d9bridge.gen.cpp")] + \
+    srcs = [os.path.join(DEV, s) for s in ("obj.cpp", "app_unk_native.cpp", "d3d9_adapter.cpp", "d3d9_exports.cpp")] + [os.path.join(tmp, s) for s in ("d9impl_unk.gen.cpp", "d9bridge.gen.cpp")] + \
            [os.path.join(tmp, s) for s in os.listdir(tmp) if s.startswith("env_") and s.endswith(".cpp")] + [os.path.join(HERE, "t_bridge.cpp")]
     exe = os.path.join(tmp, "t_bridge")
     r = sh(fl + srcs + ["-o", exe, "-Wl,--unresolved-symbols=ignore-all"])   # methods without a body yet (G-METHOD) stay unresolved; this test calls none of them
@@ -40,6 +41,12 @@ def main():
         got = {m.group(1): (int(m.group(2)), int(m.group(3))) for m in re.finditer(r"PART (\w): (\d+) checks, (\d+) failed", r.stdout)}
         for p in parts if not arg else "a":
             if r.returncode or p not in got or got[p][1] or not got[p][0]: fails.append(f"{parts}: {got.get(p)} rc={r.returncode}")
+    # e: application IUnknown objects through the lifter runtime's guest-call primitive
+    exe2 = os.path.join(tmp, "t_appunk")
+    r = sh(fl + [os.path.join(DEV, "obj.cpp"), os.path.join(DEV, "app_unk_guest.cpp"), os.path.join(tmp, "d9impl_unk.gen.cpp"), os.path.join(HERE, "t_appunk.cpp"), "-o", exe2, "-Wl,--unresolved-symbols=ignore-all"])
+    if r.returncode: print("BUILD FAILED (e)\n" + r.stderr[-1500:]); return 1
+    r = sh([exe2]); print(r.stdout[-600:], end="")
+    if r.returncode or "PART e:" not in r.stdout or ", 0 failed" not in r.stdout: fails.append("e: rc=%d" % r.returncode)
     # d: totality of the generator
     muts = [("struct by value", lambda s: next(p for m in s["methods"] for p in m["params"] if p["kind"] == "struct").update(byref=False)),
             ("8-byte value", lambda s: next(p for m in s["methods"] for p in m["params"] if p["kind"] == "value" and not p["byref"]).update(size=8)),

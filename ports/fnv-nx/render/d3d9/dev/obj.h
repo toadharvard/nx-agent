@@ -12,6 +12,10 @@
 void* nxd3d_alloc(size_t n);  // the only allocator the layer uses (obj.cpp: malloc/free); replaceable per platform
 void nxd3d_free(void* p);
 enum { NX_FACE_SIZE = 8 };  // face.h
+// IUnknown objects of the application kept as private data (D3DSPD_IUNKNOWN): AddRef / Release on them are calls into the application.
+// app_unk_guest.cpp (lifted guest: fnvnx_guest_invoke) or app_unk_native.cpp (native hosts: tests, the replayer) defines them; exactly one is linked.
+ULONG nxd3d_app_addref(IUnknown* u); ULONG nxd3d_app_release(IUnknown* u);
+enum : uint32_t { NX_SPD_NATIVE = 0x40000000u };  // setPrivateData flag of the layer's own callers: the IUnknown is a native object of the layer
 
 struct NxObj;
 struct NxClassInfo {  // generated (gen_impl.py): IID lattice = this interface then its bases up to IUnknown

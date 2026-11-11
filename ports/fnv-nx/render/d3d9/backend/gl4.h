@@ -111,9 +111,11 @@ void gl4_op_blit(const uint32_t* a, uint32_t argc);
 void gl4_op_genmips(const uint32_t* a, uint32_t argc);
 /* attaches one subresource of an image (colour or depth-stencil) to a framebuffer attachment point */
 void gl4_attach(GLuint fbo, GLenum att, const Gl4Image* im, uint32_t level, uint32_t layer);
-GLuint gl4_resolve(const Gl4Image* im, uint32_t level, uint32_t layer, GLuint* tex_out);
+/* a new single-sample 2D texture holding the resolve of a multisampled image (the caller deletes it) */
+GLuint gl4_resolve_tex(const Gl4Image* im);
 /* gl4_state.c */
 void gl4_apply_state(const NxRenderState* rs, int force);
+void gl4_apply_stencil(uint64_t w1, uint32_t ref);   /* stencil funcs of both faces with the given reference */
 void gl4_op_begin_pass(const uint32_t* a, uint32_t argc);
 void gl4_op_clear(const uint32_t* a, uint32_t argc);
 void gl4_bind_layout(uint32_t lay);

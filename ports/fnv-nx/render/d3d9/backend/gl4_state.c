@@ -49,7 +49,7 @@ static GLenum glbop(uint32_t o) {
     return GL_FUNC_ADD;
 }
 
-static void apply_stencil_funcs(uint64_t w1, uint32_t ref) {
+void gl4_apply_stencil(uint64_t w1, uint32_t ref) {
     uint32_t rm = NXRS_GET(w1, NXRS_S_READMASK, 8);
     p_glStencilFuncSeparate(GL_FRONT, glcmp(NXRS_GET(w1, NXRS_S_FUNC, 3)), (GLint)ref, rm);
     p_glStencilFuncSeparate(GL_BACK, glcmp(NXRS_GET(w1, NXRS_S_BFUNC, 3)), (GLint)ref, rm);
@@ -103,7 +103,7 @@ void gl4_apply_state(const NxRenderState* rs, int force) {
         }
     }
     g4.stencilRef = NXRS_GET(w1, NXRS_S_REF, 8);   /* ref and masks are re-applied at every BindState */
-    if (NXRS_GET(w1, NXRS_S_ENABLE, 1)) apply_stencil_funcs(w1, g4.stencilRef);
+    if (NXRS_GET(w1, NXRS_S_ENABLE, 1)) gl4_apply_stencil(w1, g4.stencilRef);
     if (force || w2 != g4.applied.w[2]) {
         apply_cull(NXRS_GET(w2, NXRS_R_CULL, 2));
         p_glPolygonMode(GL_FRONT_AND_BACK, glfill(NXRS_GET(w2, NXRS_R_FILL, 2)));

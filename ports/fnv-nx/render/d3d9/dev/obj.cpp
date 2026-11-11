@@ -77,13 +77,16 @@ HRESULT NxObj::getContainer(REFIID riid, void** pp) {
 // entry, Set AddRefs the new object before releasing the replaced one, Get with null data reports the size and succeeds, Get with a too small size
 // is D3DERR_MOREDATA with the size set and the buffer untouched, an unknown guid is D3DERR_NOTFOUND with outputs untouched, sub-resources have their own store.
 static NxPriv** find(NxPriv** h, REFGUID g) { while (*h && !eq((*h)->g, g)) h = &(*h)->next; return h; }
-static void drop(NxPriv* e) { if (e->flags & D3DSPD_IUNKNOWN) e->u->Release(); else nxd3d_free(e->d); nxd3d_free(e); }
+// An IUnknown entry holds either an object of the APPLICATION (set through the interface: its AddRef / Release are calls into the application, nxd3d_app_*)
+// or one of the layer's own native objects (set by the layer with NX_SPD_NATIVE, a bit the interface never passes on: `flags & D3DSPD_IUNKNOWN` below).
+static void uref(NxPriv* e) { if (e->flags & NX_SPD_NATIVE) e->u->AddRef(); else nxd3d_app_addref(e->u); }
+static void drop(NxPriv* e) { if (e->flags & D3DSPD_IUNKNOWN) { if (e->flags & NX_SPD_NATIVE) e->u->Release(); else nxd3d_app_release(e->u); } else nxd3d_free(e->d); nxd3d_free(e); }
 HRESULT NxObj::setPrivateData(REFGUID g, const void* data, DWORD size, DWORD flags) {
     bool unk = (flags & D3DSPD_IUNKNOWN) != 0;
     if (!data || (unk && size != sizeof(IUnknown*))) return D3DERR_INVALIDCALL;
     NxPriv* e = (NxPriv*)nxd3d_alloc(sizeof(NxPriv)); if (!e) return E_OUTOFMEMORY;
-    e->g = g; e->size = size; e->flags = flags & D3DSPD_IUNKNOWN; e->next = nullptr;
-    if (unk) { e->u = *(IUnknown* const*)data; e->u->AddRef(); }
+    e->g = g; e->size = size; e->flags = flags & (D3DSPD_IUNKNOWN | (unk ? NX_SPD_NATIVE : 0)); e->next = nullptr;
+    if (unk) { e->u = *(IUnknown* const*)data; uref(e); }
     else { e->d = (uint8_t*)nxd3d_alloc(size ? size : 1); if (!e->d) { nxd3d_free(e); return E_OUTOFMEMORY; } memcpy(e->d, data, size); }
     NxPriv** s = find(&priv, g);
     if (*s) { NxPriv* old = *s; e->next = old->next; *s = e; drop(old); } else { e->next = priv; priv = e; }
@@ -95,7 +98,7 @@ HRESULT NxObj::getPrivateData(REFGUID g, void* data, DWORD* size) {
     if (!e) return D3DERR_NOTFOUND;
     if (!data) { *size = e->size; return D3D_OK; }
     if (*size < e->size) { *size = e->size; return D3DERR_MOREDATA; }
-    if (e->flags & D3DSPD_IUNKNOWN) { *(IUnknown**)data = e->u; e->u->AddRef(); } else memcpy(data, e->d, e->size);
+    if (e->flags & D3DSPD_IUNKNOWN) { *(IUnknown**)data = e->u; uref(e); } else memcpy(data, e->d, e->size);
     *size = e->size; return D3D_OK;
 }
 HRESULT NxObj::freePrivateData(REFGUID g) {

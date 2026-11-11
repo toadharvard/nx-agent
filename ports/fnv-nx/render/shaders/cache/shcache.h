@@ -86,11 +86,10 @@ shcache *shcache_open(const void *main_bytes, size_t main_n, const void *log_byt
 void shcache_close(shcache *c);
 void shcache_get_info(const shcache *c, shcache_info *info);
 int shcache_lookup(const shcache *c, const shcache_key *k, const void **payload, size_t *n);   /* 1 hit, 0 miss */
-/* adds the entry (payload copied) and hands one complete log record to sink; the first record of a log is preceded by the header
- * (shcache_log_header) when the host found log_valid_len == 0. Returns 1 stored, 0 key already present, -1 out of memory or sink failure
- * (nothing stored). */
+/* adds the entry (payload copied) and hands ONE buffer to sink: the record, preceded by the 24-byte log header when the log has no valid
+ * header yet (log_valid_len == 0), so a fresh log is never headerless. The host truncates its log file to info.log_valid_len at open and
+ * appends what the sink gets. Returns 1 stored, 0 key already present, -1 out of memory or sink failure (nothing stored). */
 int shcache_put(shcache *c, const shcache_key *k, const void *payload, size_t n, shcache_sink sink, void *user);
-int shcache_log_header(const shcache *c, shcache_sink sink, void *user);
 /* on-disk encodings, shared with the builder tool's tests */
 size_t shcache_log_record(const shcache_key *k, const void *payload, size_t n, uint8_t *out, size_t cap);   /* bytes written, 0 if cap too small */
 

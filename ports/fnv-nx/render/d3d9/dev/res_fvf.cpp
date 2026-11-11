@@ -81,7 +81,7 @@ IDirect3DVertexDeclaration9* nx_device_fvf_decl(NxDeviceCore* dev, DWORD fvf) {
     NxFvfLayout L; if (!fvf || !nx_fvf_to_decl(fvf, &L)) return nullptr;
     FvfCache* c = nullptr; DWORD sz = sizeof c;
     if (dev->getPrivateData(kCache, &c, &sz) == D3D_OK) c->Release();
-    else { c = new FvfCache; dev->setPrivateData(kCache, &c, sizeof c, D3DSPD_IUNKNOWN); c->Release(); }
+    else { c = new FvfCache; dev->setPrivateData(kCache, &c, sizeof c, D3DSPD_IUNKNOWN | NX_SPD_NATIVE); c->Release(); }
     if (FvfEnt* f = c->m.find(fvf)) return f->d;
     NxVertexDeclaration9* d = new NxVertexDeclaration9; d->asImplicit(dev, nullptr); d->fvf = fvf;
     d->n = L.n + 1; d->el = (D3DVERTEXELEMENT9*)nxd3d_alloc(d->n * sizeof(D3DVERTEXELEMENT9)); memcpy(d->el, L.el, d->n * sizeof(D3DVERTEXELEMENT9));
