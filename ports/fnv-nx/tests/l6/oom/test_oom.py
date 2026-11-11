@@ -6,7 +6,7 @@
  d  the compiler-derived completeness gates: seeded defects of every call shape present in the code must be caught (gcc -fanalyzer + -Werror=unused-result / deprecated, and the clang-AST rule allocscan.py), the real tree must be clean
  e  gate T over the guest objects (build_guest.sh): no reference to a noreturn routine of the toolchain (set derived from the toolchain headers by clang's AST), no brk / udf instruction
  f  mutations: one null check removed in a copy of the tree -> the sweep must fail
-Files owned by other workers (dev_*.cpp, draw_*.cpp, glue_present.cpp) are NOT in the native build; they are scanned and their findings are listed (OTHER ...) but not counted."""
+Every product file of render/d3d9/dev and render/d3d9/front is scanned and gated, except ffp_*.cpp / m1_*.cpp (other workers, in progress: scanned, findings listed as OTHER, not counted; ffp_* is not in the native build)."""
 import concurrent.futures as cf, glob, json, os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -14,10 +14,11 @@ sys.path.insert(0, HERE)
 import allocscan  # noqa: E402
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")
 INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(D3, "front"); BACK = os.path.join(D3, "backend")
-LIB = ["app_unk_native", "state_rt", "state_ext"]
-RES = ["res_buf", "res_fvf", "res_decl", "res_shader", "res_smcheck", "res_query", "res_fmt", "res_tex", "res_surf", "res_create"]
-GLUE = ["glue_stream", "glue_image", "glue_query", "glue_buf"]; COPY = ["copy_util", "copy_clear", "copy_stretch", "copy_update", "copy_dc", "copy_misc"]
-OWNED = ["obj"] + LIB + RES + GLUE + COPY + ["d3d9_adapter", "d3d9_exports", "app_unk_guest"]
+ALL_DEV = sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(DEV, "*.cpp")))
+NOT_YET = [n for n in ALL_DEV if n.startswith(("ffp_", "m1_"))]   # other workers, in progress: scanned and listed (OTHER), not gated, not mutated
+OWNED = [n for n in ALL_DEV if n not in NOT_YET]
+NATIVE = [n for n in ALL_DEV if n not in ("obj", "app_unk_guest", "d3d9_exports") and not n.startswith("ffp_") and (not n.startswith("m1_") or n == "m1_stats")]   # m1_stats defines NxChainCore::presented: linked (the rest of m1_ is in progress and overlaps copy_misc)
+FRONT_C = sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(FRONT, "front_*.c")))
 GENS = ["d9impl_unk", "state", "env_table", "d9bridge"]
 CXX = ["-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti"]
 fails = []; checks = {}; nfail = {}
@@ -56,7 +57,7 @@ def flags(gen): return CXX + ["-O1", "-w", "-I", INC, "-I", gen, "-I", DEV, "-I"
 
 def build(tmp, jobs=3):
     gen = os.path.join(tmp, "gen"); generate(gen); os.makedirs(os.path.join(tmp, "o"), exist_ok=True)
-    jl = [("g++", flags(gen), os.path.join(DEV, n + ".cpp"), n) for n in LIB + RES + GLUE + COPY + ["d3d9_adapter"]] + [("g++", flags(gen), os.path.join(gen, n + ".gen.cpp"), n) for n in GENS] + [("g++", flags(gen), os.path.join(HERE, "t_oom.cpp"), "t_oom")]
+    jl = [("g++", flags(gen), os.path.join(DEV, n + ".cpp"), n) for n in NATIVE] + [("g++", flags(gen), os.path.join(gen, n + ".gen.cpp"), n) for n in GENS] + [("g++", flags(gen), os.path.join(HERE, "t_oom.cpp"), "t_oom")]
     xo = os.path.join(tmp, "obj_x.cpp"); open(xo, "w").write(obj_cpp(open(os.path.join(DEV, "obj.cpp")).read())); jl.append(("g++", flags(gen), xo, "obj"))
     for f in sorted(glob.glob(os.path.join(FRONT, "front_*.c"))): jl.append(("gcc", ["-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK], f, "nx_" + os.path.basename(f)))
     cmds = [[cc] + fl + ["-c", src, "-o", os.path.join(tmp, "o", n + ".o")] for cc, fl, src, n in jl]
@@ -110,8 +111,8 @@ void seed_ok_image(NxImg* i) { if (!i->upload()) return; }   // CONTROL
 """
 
 
-def gcc_findings(src, gen):
-    r = sh(["g++"] + CXX + ["-O0", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT] + GCC_FLAGS + ["-c", src, "-o", os.devnull])
+def gcc_findings(src, gen, c=False):
+    r = sh((["gcc", "-m32", "-std=gnu11"] if c else ["g++"] + CXX) + ["-O0", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT] + GCC_FLAGS + ["-c", src, "-o", os.devnull])
     out = []
     for l in r.stderr.split("\n"):
         m = re.match(r"^(\S+?):(\d+):(\d+): (?:warning|error): (.*?) \[-W(?:error=)?([a-z-]+)", l)
@@ -122,7 +123,7 @@ def gcc_findings(src, gen):
     return out
 
 
-def ast_args(gen): return ["--target=i386-linux-gnu", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT]
+def ast_args(gen, c=False): return ["--target=i386-linux-gnu"] + (["-std=gnu11"] if c else ["-std=c++17", "-fno-exceptions", "-fno-rtti"]) + ["-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT]
 
 
 def analyzers(tmp, gen):
@@ -131,7 +132,7 @@ def analyzers(tmp, gen):
     sd = os.path.join(tmp, "seed"); os.makedirs(sd, exist_ok=True); src = os.path.join(sd, "seed.cpp"); open(src, "w").write(SEED)
     lines = SEED.split("\n"); seeds = {i + 1: l.split("// SEED ")[1] for i, l in enumerate(lines) if "// SEED " in l}; controls = [i + 1 for i, l in enumerate(lines) if "// CONTROL" in l]
     g = gcc_findings(src, gen); gl = {f[1] for f in g if f[0].endswith("seed.cpp")}
-    is_main = lambda f: f is not None and (f.endswith("seed.cpp") or f.startswith(DEV) or f.startswith(gen))
+    is_main = lambda f: f is not None and (f.endswith("seed.cpp") or f.startswith(DEV) or f.startswith(gen) or f.startswith(FRONT))
     res = allocscan.scan(clang, ast_args(gen), src, is_main)
     part("d", res is not None, "clang AST of the seed file")
     al = {f[1] for f in res[1] if f[0].endswith("seed.cpp")} if res else set()
@@ -142,13 +143,15 @@ def analyzers(tmp, gen):
     for l in controls: part("d", l not in gl and l not in al, f"false positive on correct control at seed.cpp:{l}")
     # ---- the real tree: owned files must be clean, other workers' files are listed
     owned = [os.path.join(DEV, n + ".cpp") for n in OWNED] + [os.path.join(gen, n + ".gen.cpp") for n in GENS]
-    others = sorted(p for p in glob.glob(os.path.join(DEV, "*.cpp")) if os.path.splitext(os.path.basename(p))[0] not in OWNED)
-    def one(p): return p, gcc_findings(p, gen), allocscan.scan(clang, ast_args(gen), p, is_main)
+    others = [os.path.join(DEV, n + ".cpp") for n in NOT_YET]; fronts = [os.path.join(FRONT, n + ".c") for n in FRONT_C]; owned += fronts
+    def one(p):
+        c = p.endswith(".c")
+        return p, gcc_findings(p, gen, c), allocscan.scan(shutil.which("clang") if c else clang, ast_args(gen, c), p, is_main)
     with cf.ThreadPoolExecutor(3) as ex: rs = list(ex.map(one, owned + others))
     sites = 0; per = {}; hdr = set(); nreal = 0
     for p, gf, sc in rs:
         mine = p in owned; name = os.path.basename(p)
-        if sc is None: part("d", False, f"AST of {name}"); continue
+        if sc is None: part("d", mine and False, f"AST of {name}") if mine else print(f"OTHER {name}: AST not available"); continue
         s_sites, s_find = sc; uniq = {(a, b) for a, b, c in s_sites if a == p}; per[name] = len(uniq); sites += len(uniq) if mine else 0
         hdr |= {(os.path.basename(a), b) for a, b, c in s_sites if a.startswith(DEV) and a.endswith(".h")}
         fl = sorted({(os.path.basename(a), b, c) for a, b, c in s_find} | {(os.path.basename(a), b, "%s: %s" % (c, d[:80])) for a, b, c, d in gf})
@@ -226,6 +229,12 @@ MUTS = [   # (file under dev/, old, new): one null check removed (or its result 
     ("res_query.cpp", "nx_make<NxQuery9>(); if (!q) return E_OUTOFMEMORY;", "nx_make<NxQuery9>();"),
     ("state_ext.cpp", "if (!e) { static_cast<NxObj*>(b)->release(); return E_OUTOFMEMORY; }", "if (!e) { return E_OUTOFMEMORY; }"),
     ("res_tex.cpp", "if (!src || !dst) { nxd3d_free(src); nxd3d_free(dst); return false; }", "if (!src || !dst) { return false; }"),
+    ("dev_create.cpp", "C* dev = nx_make<C>(); if (!dev) return E_OUTOFMEMORY;", "C* dev = nx_make<C>();"),
+    ("dev_chain.cpp", "NxChainCore** n = (NxChainCore**)nxd3d_alloc(sizeof(void*) * (nchains + 1)); if (!n) return false;", "NxChainCore** n = (NxChainCore**)nxd3d_alloc(sizeof(void*) * (nchains + 1));"),
+    ("dev_chain.cpp", "if (!upload_all(this)) return E_OUTOFMEMORY;", "nx_ignore(upload_all(this));"),
+    ("dev_chain.cpp", "if (hr != D3D_OK) { for (uint32_t k = 0; k < made; k++) { nb[k]->owned = 0; nb[k]->ci->destroy(nb[k]); } nxd3d_free(nb); return hr; }", "if (hr != D3D_OK) { nxd3d_free(nb); return hr; }"),
+    ("dev_misc.cpp", "if (!px) { bool w0; nx_img_unlock(im, 0, 0, &w0); return E_OUTOFMEMORY; }", "if (!px) { bool w0; nx_img_unlock(im, 0, 0, &w0); }"),
+    ("dev_create.cpp", "if (hr != D3D_OK) { o->owned = 0; o->ci->destroy(o); return hr; }", "if (hr != D3D_OK) { return hr; }"),
 ]
 
 
@@ -262,6 +271,7 @@ def main():
         if not ok: print("LINK FAILED\n" + err); return 1
         r, parts, last = run(os.path.join(tmp, "t_oom"))
         print(r.stdout[-3000:]); sys.stdout.flush()
+        if "--keep" in sys.argv: shutil.copy(os.path.join(tmp, "t_oom"), "/tmp/t_oom_keep"); print("kept /tmp/t_oom_keep")
         for p in "abc":
             if p not in parts: part(p, False, f"part {p} missing: exit {r.returncode}, last sentinel {last or 'none'} (a crash ends the sweep)"); continue
             checks[p] = parts[p][0]; nfail[p] = parts[p][1]

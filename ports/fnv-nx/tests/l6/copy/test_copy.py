@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_copy.py: tests of render/d3d9/dev/glue_*.cpp and copy_*.cpp (D6: Clear, ColorFill, StretchRect, UpdateSurface, UpdateTexture, GetRenderTargetData, ValidateDevice, patches, GetDC / ReleaseDC,
+"""test_copy.py: tests of render/d3d9/dev/glue_*.cpp and copy_*.cpp (D6: Clear, ColorFill, StretchRect, UpdateSurface, UpdateTexture, GetRenderTargetData, patches, GetDC / ReleaseDC,
 CreateOffscreenPlainSurfaceEx; the product definitions of the image / query / buffer hooks). python3 -I tests/l6/copy/test_copy.py [--no-mutations]
  a legality of every method over its parameter domain against the python oracle below (rules of the file headers + the env tsv)   b pixels on llvmpipe: Clear / ColorFill / StretchRect / UpdateSurface /
  UpdateTexture / GetRenderTargetData against a CPU reference for every creatable format pair   c the storage conversions of the gap formats both ways (exhaustive <= 2^16 texels, structured above)
@@ -71,7 +71,7 @@ def run(exe, data, server, arena):
     return r, ps
 
 
-MINE = ["Clear", "ColorFill", "StretchRect", "UpdateSurface", "UpdateTexture", "GetRenderTargetData", "ValidateDevice", "DrawRectPatch", "DrawTriPatch", "DeletePatch"]
+MINE = ["Clear", "ColorFill", "StretchRect", "UpdateSurface", "UpdateTexture", "GetRenderTargetData", "DrawRectPatch", "DrawTriPatch", "DeletePatch"]
 LEFT = ["ProcessVertices", "SetClipStatus", "GetClipStatus"]   # no complete contract: no body (copy_misc.cpp header)
 
 

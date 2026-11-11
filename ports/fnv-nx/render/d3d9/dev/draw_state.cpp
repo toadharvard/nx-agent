@@ -11,6 +11,11 @@
 #include "draw_core.h"
 
 NxBound g_nxb;
+void nx_bind_shutdown();   // draw_bind.cpp
+void nx_draw_shutdown() {
+    for (auto& st : g_nxb.ubo) for (auto& c : st) nxd3d_free(c.data);
+    nx_bind_shutdown(); memset(&g_nxb, 0, sizeof g_nxb);
+}
 NxDrawDev* nx_draw_dev(NxDeviceCore* d) { if (!d->draw) d->draw = nx_make_plain<NxDrawDev>(); return static_cast<NxDrawDev*>(d->draw); }   // null = no memory (nx_draw_exec asks first)
 
 namespace {

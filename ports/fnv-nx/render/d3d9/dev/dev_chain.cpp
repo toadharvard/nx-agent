@@ -59,8 +59,8 @@ HRESULT NxChainCore::make_buffers(const NxPPEff& e, const D3DPRESENT_PARAMETERS&
     bb = nb; nbb = e.count; return D3D_OK;
 }
 HRESULT nx_chain_create(NxDeviceCore* d, const D3DPRESENT_PARAMETERS& p, const NxPPEff& e, bool implicit, NxChainCore** out) {
-    NxDevLife* L = nx_life(d); NxChainCore* c; NxObj* o;
-    if (L->ex) { NxSwapChain9Ex* x = nx_make<NxSwapChain9Ex>(); c = x; o = x; } else { NxSwapChain9* x = nx_make<NxSwapChain9>(); c = x; o = x; }
+    NxDevLife* L = nx_life(d); NxChainCore* c = nullptr; NxObj* o = nullptr;
+    if (L->ex) { NxSwapChain9Ex* x = nx_make<NxSwapChain9Ex>(); if (x) { c = x; o = x; } } else { NxSwapChain9* x = nx_make<NxSwapChain9>(); if (x) { c = x; o = x; } }
     if (!c) return E_OUTOFMEMORY;   // d3d9 swapchain.c: calloc failure
     if (implicit) o->asImplicit(d, d); else o->asChild(d, ~0u);
     c->d = d; c->pp = p; c->pp.BackBufferWidth = e.w; c->pp.BackBufferHeight = e.h; c->pp.BackBufferFormat = (D3DFORMAT)e.fmt; c->pp.BackBufferCount = e.count; c->pp.hDeviceWindow = (HWND)e.win; c->pp.Flags &= 0xfffu;

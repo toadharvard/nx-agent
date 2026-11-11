@@ -48,15 +48,6 @@ static void ops(TDev& d, bool ex) {
             char* q = p; unsigned rtid = strtoul(q, &q, 10); int dsid = strtol(q, &q, 10); unsigned fl = strtoul(q, &q, 10), nr = strtoul(q, &q, 10), hasr = strtoul(q, &q, 10); want = (HRESULT)strtoul(q, &q, 16);
             d.i9->SetRenderTarget(0, g_z[rtid]); d.i9->SetDepthStencilSurface(dsid < 0 ? nullptr : g_z[dsid]); D3DRECT rc[2] = {{4, 4, 12, 12}, {8, 8, 40, 40}};
             hr = d.i9->Clear(nr, hasr ? rc : nullptr, fl, 0xff102030, 1.0f, 0);
-        } else if (!strcmp(op, "VD")) {
-            char* q = p; unsigned minf = strtoul(q, &q, 10), magf = strtoul(q, &q, 10), mipf = strtoul(q, &q, 10), tx = strtoul(q, &q, 10), z = strtoul(q, &q, 10), zw = strtoul(q, &q, 10), st = strtoul(q, &q, 10), dsid = strtoul(q, &q, 10);
-            want = (HRESULT)strtoul(q, &q, 16); static IDirect3DTexture9* tx1 = nullptr; static IDirect3DTexture9* tx2 = nullptr;
-            if (!tx1) { d.i9->CreateTexture(8, 8, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tx1, nullptr); d.i9->CreateTexture(8, 8, 1, 0, (D3DFORMAT)116, D3DPOOL_DEFAULT, &tx2, nullptr); }
-            d.i9->SetTexture(0, tx == 1 ? (IDirect3DBaseTexture9*)tx1 : tx == 2 ? (IDirect3DBaseTexture9*)tx2 : nullptr);
-            d.i9->SetSamplerState(0, D3DSAMP_MINFILTER, minf); d.i9->SetSamplerState(0, D3DSAMP_MAGFILTER, magf); d.i9->SetSamplerState(0, D3DSAMP_MIPFILTER, mipf);
-            d.i9->SetRenderState(D3DRS_ZENABLE, z); d.i9->SetRenderState(D3DRS_ZWRITEENABLE, zw); d.i9->SetRenderState(D3DRS_STENCILENABLE, st);
-            d.i9->SetRenderTarget(0, g_z[15]); d.i9->SetDepthStencilSurface(g_z[dsid]); DWORD np = 0; hr = d.i9->ValidateDevice(&np); if (hr == D3D_OK) CHECK_EQ(np, 1);
-            d.i9->SetRenderState(D3DRS_ZENABLE, 0); d.i9->SetRenderState(D3DRS_ZWRITEENABLE, 0); d.i9->SetRenderState(D3DRS_STENCILENABLE, 0);
         } else if (!strcmp(op, "PT")) {
             char* q = p; a = strtoul(q, &q, 10); want = (HRESULT)strtoul(q, &q, 16); float seg[4] = {1, 1, 1, 1}; D3DRECTPATCH_INFO ri = {}; D3DTRIPATCH_INFO ti = {};
             hr = a == 0 ? d.i9->DrawRectPatch(1, seg, &ri) : a == 1 ? d.i9->DrawTriPatch(1, seg, &ti) : d.i9->DeletePatch(1);

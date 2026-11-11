@@ -242,7 +242,7 @@ def main():
     cls = lambda m: m.split("::")[0]; mine = ("NxDevice9", "NxDevice9Ex", "NxSwapChain9", "NxSwapChain9Ex", "NxDirect3D9", "NxDirect3D9Ex")
     print(f"g: G-METHOD missing before (without dev_*.cpp) {len(before[1])} -> after {len(miss)} of {len(want)}")
     for c in mine: print(f"   {c}: {sum(1 for m in before[1] if cls(m) == c)} -> {sum(1 for m in miss if cls(m) == c)}")
-    LEFT = {"NxSwapChain9Ex::GetPresentStats", "NxDevice9Ex::SetConvolutionMonoKernel", "NxDevice9Ex::ComposeRects"}
+    LEFT = set()   # GetPresentStats, SetConvolutionMonoKernel, ComposeRects have bodies since M1 (dev/m1_*.cpp, tests/l6/m1)
     other = {"UpdateSurface", "UpdateTexture", "GetRenderTargetData", "StretchRect", "ColorFill", "Clear", "SetClipStatus", "GetClipStatus", "ValidateDevice", "DrawPrimitive", "DrawIndexedPrimitive", "DrawPrimitiveUP", "DrawIndexedPrimitiveUP", "ProcessVertices", "DrawRectPatch", "DrawTriPatch", "DeletePatch"}
     mm = [m for m in miss if cls(m) in mine and m.split("::")[1] not in other]; print("   my methods without a body: " + ", ".join(mm))
     if set(mm) != LEFT: fails.append(f"g: methods without a body {sorted(set(mm) ^ LEFT)}")

@@ -12,7 +12,7 @@
 #include "d3d9_adapter.h"
 #include "face.h"
 #include "dev_core.h"
-#include "draw_ffp.h"
+#include "draw_core.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +29,7 @@ static bool check(bool ok, const char* what, int line) {
 #define CHECK(c) check((c), #c, __LINE__)
 
 // ---------------------------------------------------------------------------------------------------- injection + balance
-struct Live { void* p; int kind; };
+struct Live { void* p; int kind; size_t n; };
 static Live g_live[1 << 15]; static int g_nlive = 0, g_bad_free = 0;
 static uint64_t g_count = 0, g_fail_at = 0, g_nhit = 0; static bool g_armed = false, g_sticky = false;
 static uint8_t g_img[NX_MAX_IMAGES + 1]; static int g_nimg = 0, g_nblk = 0; static uint32_t g_next_img = 1, g_next_blk = 1; static uint8_t g_blk[1 << 16];
@@ -42,12 +42,12 @@ static bool inject() {
     if (g_fail_at && (g_sticky ? g_count >= g_fail_at : g_count == g_fail_at)) { g_nhit++; g_hits_total++; cover(g_ctx_now); return true; }
     return false;
 }
-static void track(void* p, int kind) { if (g_nlive < (int)(sizeof g_live / sizeof *g_live)) g_live[g_nlive++] = {p, kind}; }
+static void track(void* p, int kind, size_t n = 0) { if (g_nlive < (int)(sizeof g_live / sizeof *g_live)) g_live[g_nlive++] = {p, kind, n}; }
 static void untrack(void* p, int kind) {
     for (int i = g_nlive - 1; i >= 0; i--) if (g_live[i].p == p && g_live[i].kind == kind) { g_live[i] = g_live[--g_nlive]; return; }
     g_bad_free++;
 }
-void* nxd3d_alloc(size_t n) { if (inject()) return nullptr; void* p = malloc(n ? n : 1); track(p, 0); return p; }
+void* nxd3d_alloc(size_t n) { if (inject()) return nullptr; void* p = malloc(n ? n : 1); track(p, 0, n); return p; }
 void nxd3d_free(void* p) { if (!p) return; untrack(p, 0); free(p); }
 void* nxd3d_gpu_alloc(size_t n) { if (inject()) return nullptr; void* p = nullptr; if (posix_memalign(&p, 4096, n ? n : 4096)) return nullptr; track(p, 1); return p; }
 void nxd3d_gpu_free(void* p) { if (!p) return; untrack(p, 1); free(p); }
@@ -57,7 +57,7 @@ uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t* a, uint32_t) {
     case NXGPU_FN_IMAGE_DESTROY: { if (a[0] >= NX_MAX_IMAGES) return NXGPU_BAD_CALL; g_nimg--; return 0; }
     case NXGPU_FN_MEM_CREATE: { if (inject()) return NXGPU_BAD_CALL; g_nblk++; return g_next_blk++; }
     case NXGPU_FN_MEM_DESTROY: g_nblk--; return 0;
-    case NXGPU_FN_SHADER_CREATE_D3D: { static uint32_t id = 1000; if (inject()) return NXGPU_BAD_CALL; return id++; }
+    case NXGPU_FN_SHADER_CREATE_D3D: { static uint32_t id = 1000; return id++; }   // not an allocation event: the backend contract has no exhaustion result for it (0 = a defect)
     case NXGPU_FN_SAMPLER_CREATE: { static uint32_t sid = 1; return sid++ % 200 + 1; }
     case NXGPU_FN_QUERY_RESULT: { uint64_t* out = (uint64_t*)a[2]; *out = 1; return 0; }
     default: return 0;   // SUBMIT, WAIT_FRAME, IMAGE_READ (the staging keeps whatever it held)
@@ -76,7 +76,6 @@ static uint8_t g_ubo_v[64], g_ubo_p[32];
 uint32_t nx_ffp_vs_program(NxDeviceCore*, NxFfpVsBind* o) { memset((void*)o, 0, sizeof *o); o->n_in = 1; o->in_pair[0] = FNVNX_DK_PAIR(0, 0); o->in_loc[0] = 0; o->n_ubo = 1; o->ubo[0] = {4, sizeof g_ubo_v, g_ubo_v}; return 90; }
 uint32_t nx_ffp_ps_program(NxDeviceCore*, NxFfpPsBind* o) { memset((void*)o, 0, sizeof *o); o->n_in = 1; o->in_pair[0] = FNVNX_DK_PAIR(5, 0); o->n_ubo = 1; o->ubo[0] = {3, sizeof g_ubo_p, g_ubo_p}; return 91; }
 extern "C" uint32_t fnvnx_import_key(const char*, const char*, uint32_t ordinal) { return 0x1000 + ordinal; }   // the loader's import key of a method row (any nonzero key: the table is only read through the face)
-HRESULT STDMETHODCALLTYPE NxDevice9Ex::CheckResourceResidency(IDirect3DResource9**, UINT32) { return D3D_OK; }   // device-lifecycle module (not linked here): the thunk under test only converts its array
 extern "C" HRESULT nxb_IDirect3DDevice9Ex_CheckResourceResidency(void* nxb_this, void** resources, UINT32 resource_count);   // d9bridge.gen.cpp: the one generated thunk that allocates
 
 // ---------------------------------------------------------------------------------------------------- the world
@@ -86,7 +85,7 @@ struct W {
     IDirect3DVertexBuffer9* vb[3] = {}; IDirect3DIndexBuffer9* ib[2] = {}; IDirect3DVertexDeclaration9* decl = nullptr; IDirect3DVertexShader9* vs = nullptr; IDirect3DPixelShader9* ps = nullptr;
     IDirect3DQuery9* q[4] = {};
     IDirect3DTexture9* tex[8] = {}; IDirect3DCubeTexture9* cube = nullptr; IDirect3DVolumeTexture9* vol = nullptr;
-    IDirect3DSurface9* rt = nullptr; IDirect3DSurface9* rt2 = nullptr; IDirect3DSurface9* rt3 = nullptr; IDirect3DSurface9* ds = nullptr; IDirect3DSurface9* sys = nullptr; IDirect3DSurface9* sysc = nullptr; IDirect3DSurface9* defc = nullptr;
+    IDirect3DSurface9* rt = nullptr; IDirect3DSurface9* rt2 = nullptr; IDirect3DSurface9* rt3 = nullptr; IDirect3DSurface9* ds = nullptr; IDirect3DSurface9* sys = nullptr; IDirect3DSurface9* sysc = nullptr; IDirect3DSurface9* xs = nullptr; IDirect3DSurface9* defc = nullptr;
     IDirect3DStateBlock9* sb[4] = {}; bool recording = false; HDC dc = nullptr;
     IDirect3DDevice9* ld = nullptr; IDirect3DSwapChain9* sc = nullptr;   // the lifecycle device made inside the scenario and its additional swap chain
 };
@@ -114,12 +113,12 @@ static Snap snap(W& w) {   // through the public Get* interface, plus the counts
 }
 static bool in(HRESULT hr, HRESULT a, HRESULT b = 0, HRESULT c = 0) { return hr == a || (b && hr == b) || (c && hr == c); }
 static const HRESULT OOM = E_OUTOFMEMORY, OVM = D3DERR_OUTOFVIDEOMEMORY, DRV = D3DERR_DRIVERINTERNALERROR, NAV = D3DERR_NOTAVAILABLE;
-static int g_nsteps = 0;
+static int g_nsteps = 0; static bool g_trace = false;
 // STEP: a call of the scenario. No failure met inside it: the documented success; a failure met: one of the documented failure results, and the snapshot is unchanged.
 #define STEP(WORLD, NAME, OK, FAIL_A, FAIL_B, EXPR)                                                                                                                                  \
     do {                                                                                                                                                                              \
-        g_ctx = NAME; g_ctx_now = NAME; g_nsteps++; Snap s0_ = snap(WORLD); uint64_t h0_ = g_nhit; HRESULT hr_ = (EXPR); bool hit_ = g_nhit != h0_;                                                     \
-        if (!hit_) CHECK(hr_ == (OK)); else { CHECK(in(hr_, FAIL_A, FAIL_B)); CHECK(snap(WORLD) == s0_); }                                                                              \
+        g_ctx = NAME; g_ctx_now = NAME; g_nsteps++; Snap s0_ = snap(WORLD); uint64_t h0_ = g_nhit; HRESULT hr_ = (EXPR); bool hit_ = g_nhit != h0_; if (g_trace) printf("  step %s -> 0x%08x%s\n", NAME, (unsigned)hr_, hit_ ? " (failure met)" : "");                                                     \
+        if (!hit_) { if (!CHECK(hr_ == (OK)) && g_fails[g_pi] <= 10) printf("   hr = 0x%08x\n", (unsigned)hr_); } else { CHECK(in(hr_, FAIL_A, FAIL_B)); CHECK(snap(WORLD) == s0_); }                                                                              \
     } while (0)
 // OUT: the same for a call that creates an object: on a failure *out stays null (checked by the caller of this macro through `p`)
 #define CREATE(WORLD, NAME, FAIL_A, FAIL_B, PTR, EXPR) do { PTR = nullptr; uint64_t hc_ = g_nhit; STEP(WORLD, NAME, D3D_OK, FAIL_A, FAIL_B, EXPR); if (g_nhit != hc_) CHECK(PTR == nullptr); } while (0)
@@ -200,8 +199,9 @@ static void scenario(W& w) {
     g_ctx = g_ctx_now = "GenerateMipSubLevels";
     if (w.tex[4]) { Snap s0 = snap(w); w.tex[4]->GenerateMipSubLevels(); CHECK(snap(w) == s0); }
     // ---- the generated bridge thunk with an allocation (CheckResourceResidency: the guest's face array is converted into a native array), on the Ex device
-    if (w.devx && w.vb[0] && w.tex[0] && w.rt) {
-        void* faces[3] = {nx_face((IUnknown*)w.vb[0]), nx_face((IUnknown*)w.tex[0]), nx_face((IUnknown*)w.rt)};
+    if (w.devx) CREATE(w, "CreateOffscreenPlainSurface (Ex device)", OVM, OOM, w.xs, w.devx->CreateOffscreenPlainSurface(16, 16, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &w.xs, nullptr));
+    if (w.devx && w.xs) {
+        void* faces[3] = {nx_face((IUnknown*)w.xs), nx_face((IUnknown*)w.xs), nx_face((IUnknown*)w.xs)};
         STEP(w, "CheckResourceResidency (bridge thunk)", D3D_OK, OOM, OOM, nxb_IDirect3DDevice9Ex_CheckResourceResidency(nx_face((IUnknown*)static_cast<IDirect3DDevice9Ex*>(w.devx)), faces, 3));
     }
     // ---- copies: Clear, ColorFill, StretchRect, UpdateSurface (converted format), UpdateTexture, GetRenderTargetData (read-back), GetDC / ReleaseDC (CPU copy of a GPU-only surface)
@@ -232,7 +232,7 @@ static void scenario(W& w) {
         if (!hit) { CHECK(hr == D3D_OK && w.dc); if (w.dc) STEP(w, "ReleaseDC", D3D_OK, OOM, OOM, w.rt2->ReleaseDC(w.dc)); w.dc = nullptr; } else { CHECK(hr == OOM && !w.dc); CHECK(snap(w) == s0); }
     }
     // ---- draw path: the four Draw* (fixed function, programs, UP paths); programs are created lazily by the first draw that names them
-    if (w.rt && w.vb[1] && w.ib[0] && w.vb[2]) {
+    if (w.rt && w.ds && w.vb[1] && w.ib[0] && w.vb[2]) {
         float verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0}; uint16_t idx[3] = {0, 1, 2}; bool bound;
         d->SetFVF(D3DFVF_XYZ); bound = SUCCEEDED(d->SetStreamSource(0, w.vb[1], 0, 12)) && SUCCEEDED(d->SetIndices(w.ib[0]));
         if (bound) {
@@ -254,7 +254,7 @@ static void scenario(W& w) {
         D3DPRESENT_PARAMETERS pp; memset(&pp, 0, sizeof pp); pp.Windowed = TRUE; pp.SwapEffect = D3DSWAPEFFECT_DISCARD; pp.BackBufferCount = 2; pp.BackBufferWidth = 64; pp.BackBufferHeight = 64; pp.hDeviceWindow = (HWND)1;
         pp.EnableAutoDepthStencil = TRUE; pp.AutoDepthStencilFormat = D3DFMT_D24S8; pp.BackBufferFormat = D3DFMT_X8R8G8B8; D3DPRESENT_PARAMETERS pp0 = pp;
         IDirect3DDevice9* ld = nullptr; STEP(w, "CreateDevice", D3D_OK, OOM, OVM, w.d3d->CreateDevice(0, D3DDEVTYPE_HAL, (HWND)1, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &pp, &ld)); (void)pp0;
-        CHECK(ld != nullptr || g_nhit != 0 ? true : false); if (g_nhit && !ld) {} w.ld = ld;
+        w.ld = ld;
         if (ld) {
             W lw; lw.d3d = w.d3d; lw.dev = static_cast<NxDevice9*>(ld); lw.i9 = ld; D3DPRESENT_PARAMETERS p2 = pp0; p2.BackBufferCount = 1; IDirect3DSwapChain9* sc = nullptr;
             CREATE(lw, "CreateAdditionalSwapChain", OOM, OVM, sc, ld->CreateAdditionalSwapChain(&p2, &sc)); w.sc = sc;
@@ -286,22 +286,23 @@ static uint64_t run(uint64_t fail_at, bool sticky) {
     IDirect3D9Ex* ex = nullptr; if (SUCCEEDED(nx_Direct3DCreate9Ex(0, &ex))) { w.d3dx = static_cast<NxDirect3D9Ex*>(ex); w.devx = new NxDevice9Ex; NxObj* ox = w.devx; ox->asDevice(w.d3dx); w.devx->init(cp); }
     g_armed = true; scenario(w); g_armed = false; uint64_t events = g_count;
     // teardown: everything created is released (public count 1 each), then the device and the factory
-    rel(w.sc); rel(w.ld);
+    rel(w.sc); rel(w.ld); rel(w.xs);
     for (auto& p : w.sb) rel(p);
     rel(w.defc); rel(w.sysc); rel(w.sys); rel(w.ds); rel(w.rt3); rel(w.rt2); rel(w.rt); rel(w.vol); rel(w.cube); for (auto& p : w.tex) rel(p); for (auto& p : w.q) rel(p);
     rel(w.ps); rel(w.vs); rel(w.decl); for (auto& p : w.ib) rel(p); for (auto& p : w.vb) rel(p); rel(w.f9x); rel(w.f9);
     for (NxObj* r = static_cast<NxObj*>(w.dev)->rhead; r; r = r->rnext) CHECK(r->binds > 0);   // what is still registered is held by the device's own bindings (render target / depth stencil), nothing else outlived its release
     if (w.devx) { static_cast<NxObj*>(w.devx)->release(); static_cast<NxObj*>(w.d3dx)->release(); }
     w.dev->release(); static_cast<NxObj*>(w.d3d)->release();
-    nxs_shutdown();
+    nx_draw_shutdown(); nxs_shutdown();
     CHECK(g_nlive == 0); CHECK(g_bad_free == 0); CHECK(g_nimg == 0); CHECK(g_nblk == 0); CHECK(nxs_errors() == err0);   // no invariant of glue_stream.h E1 / E3 was violated (nxs_error) in this run
-    if (g_nlive || g_nimg || g_nblk) { int n = 0; for (int i = 0; i < g_nlive && n < 3; i++, n++) printf("  leaked block kind %d at run k=%llu\n", g_live[i].kind, (unsigned long long)fail_at); }
+    if (g_nlive || g_nimg || g_nblk) { int n = 0; for (int i = 0; i < g_nlive && n < 3; i++, n++) printf("  leaked block kind %d size %zu at run k=%llu\n", g_live[i].kind, g_live[i].n, (unsigned long long)fail_at); }
     g_nlive = 0; g_bad_free = 0; g_nimg = 0; g_nblk = 0; return events;
 }
 static void sentinel(const char* tag, uint64_t k) { char b[64]; int n = snprintf(b, sizeof b, "@%s %llu\n", tag, (unsigned long long)k); if (write(2, b, n) < 0) {} }
 
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
+    if (argc > 2 && !strcmp(argv[1], "k")) { g_trace = true; g_pi = 1; g_run = "single"; run(strtoull(argv[2], nullptr, 10), false); printf("PART b: %d checks, %d failed\n", g_checks[1], g_fails[1]); return 0; }
     g_pi = 0; g_run = "base run"; uint64_t n = run(0, false);   // part a: the run without failures: every step succeeds, the balance is zero
     printf("N %llu steps %d allocation events of the base run\n", (unsigned long long)n, g_nsteps);
     g_hits_total = 0; g_ncov = 0;

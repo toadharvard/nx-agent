@@ -1,5 +1,6 @@
 // test harness of tests/l6/m1 (M1 device methods): counted checks per part (a ValidateDevice, b GetPresentStats, c ComposeRects, d mono kernel, e rechecked lifecycle decisions); recording backend / platform hooks as tests/l6/devlife
 #pragma once
+#include <initializer_list>
 #include "d9impl.gen.h"
 #include "res_tex.h"
 #include "dev_core.h"

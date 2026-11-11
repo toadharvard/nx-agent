@@ -64,6 +64,7 @@ struct NxBound {
     uint32_t pass_epoch; bool pass_ok; NxTarget col[4]; uint32_t nc; NxTarget dep; bool has_dep;   // the pass this module began
 };
 extern NxBound g_nxb;
+void nx_draw_shutdown();   // returns the process-wide memory of the draw path (the constant-block caches of g_nxb, the zero block of draw_bind.cpp) and forgets what the stream had bound: platform teardown, tests (with nxs_shutdown)
 struct NxDrawDev : NxDevLifeBase { NxD3D9Latch latch; NxDrawDev() { nx_d3d9_latch_init(&latch); } };
 NxDrawDev* nx_draw_dev(NxDeviceCore* d);
 

@@ -74,3 +74,8 @@ void nx_bind_flush(const NxDrawReq& r, const NxLayout& lay, const NxBindPlan& bp
     else { memcpy(b.idx, v, 16); b.idx_ok = 1; }
     uint32_t* w = nxs_op(NxOp_BindIdx, 4); w[0] = v[0]; w[1] = v[1]; w[2] = v[2]; w[3] = v[3];                                                         // B4
 }
+void nx_bind_shutdown() {   // the zero block: its backend memory block, then its memory (nxs_shutdown does not know it)
+    if (g_zblk) { uint64_t a[1] = {g_zblk}; nx_ignore(nxd3d_gpu_call(NXGPU_FN_MEM_DESTROY, a, 1)); }
+    if (g_zmem) nxd3d_gpu_free(g_zmem);
+    g_zmem = nullptr; g_zblk = 0; g_nseen = 0;
+}

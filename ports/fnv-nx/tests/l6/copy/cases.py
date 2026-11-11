@@ -158,14 +158,6 @@ def clear(flags, nrect, has_rects, ds, rt0, hasrt0=True):
     return OK
 
 
-def validate(minf, magf, mipf, texfmt_filterable, textured, z, zw, st, rt, ds):
-    if minf == 0 or magf == 0: return UNSUPFILTER
-    if textured and not texfmt_filterable:
-        if magf != 1 or minf != 1 or mipf not in (0, 1): return FAIL
-    if (z or zw or st) and rt and ds and (ds.w < rt.w or ds.h < rt.h): return CONFLICT
-    return OK
-
-
 RECTS = {"-": None, "sub": (4, 4, 12, 12), "sub2": (8, 8, 24, 24), "flip": (12, 12, 4, 4), "out": (0, 0, 1000, 1000), "empty": (4, 4, 4, 8), "neg": (-4, 0, 8, 8), "full32": (0, 0, 32, 32), "odd": (1, 1, 7, 7)}
 PTS = {"-": None, "p8": (8, 8), "neg": (-1, 0), "far": (60, 60), "p4": (4, 4)}
 
@@ -211,16 +203,7 @@ def write(d, native=None):
                 for flags in range(0, 9):
                     for nr, hr_ in ((0, 0), (1, 1), (2, 1), (1, 0), (0, 1)):
                         w("CL %d %d %d %d %d %x" % (rt.id, -1 if ds is None else ds.id, flags, nr, hr_, clear(flags, nr, bool(hr_), ds, rt)))
-        # ValidateDevice
-        tex0 = Z[28]
-        for minf in (0, 1, 2):
-            for magf in (0, 1, 2):
-                for mipf in (0, 1, 2):
-                    for tx in (0, 1, 2):          # no texture / A8R8G8B8 texture / A32B32G32R32F texture (filterable per the env table?)
-                        for z, zw, st in ((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)):
-                            for ds in (24, 25):
-                                filt = tx != 2 or CDF.get((0x20000, 3, 116)) == 0
-                                w("VD %d %d %d %d %d %d %d %d %x" % (minf, magf, mipf, tx, z, zw, st, ds, validate(minf, magf, mipf, filt, tx > 0, z, zw, st, Z[15], Z[ds])))
+        # ValidateDevice moved to render/d3d9/dev/m1_validate.cpp (tests/l6/m1 part a)
         for k in range(3): w("PT %d %x" % (k, INV))
         # CreateOffscreenPlainSurfaceEx domain
         for pool in (0, 1, 2, 3, 4):
