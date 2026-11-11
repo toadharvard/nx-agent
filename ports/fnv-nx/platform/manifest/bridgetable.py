@@ -21,7 +21,7 @@ Output rows: dll, name, ordinal, conv, ret, args, native_symbol, bind
 A name missing from its spec file, a forward to another DLL that cannot be followed,
 or an unknown argument type is an error: the table is total or the script fails.
 
-Usage: bridgetable.py sys_names.tsv <spec-dir> out.tsv <defined-symbols.txt> <msvcrt_exports.cpp>
+Usage: bridgetable.py sys_names.tsv <spec-dir> out.tsv <defined-symbols.txt> <msvcrt_exports.cpp> [extra-rows.tsv ...]
 """
 import os, re, sys
 
@@ -113,7 +113,7 @@ def native(dll, name):
     return name
 
 
-def main(names, spec_dir, out, symfile, crt_table):
+def main(names, spec_dir, out, symfile, crt_table, *extra):
     syms = set(open(symfile).read().split())
     crt = set(re.findall(r'R\("([^"]+)",', open(crt_table).read()))
     rows, errors = [], []
@@ -143,6 +143,21 @@ def main(names, spec_dir, out, symfile, crt_table):
         else:
             bind = "sym" if sym in syms else "none"
         rows.append((dll, real, ordn, conv, ret, args, sym, bind))
+    # rows of other owners in this format, without a header (L6: render/d3d9/gen/gen_bridge.py - the d3d9.dll exports and
+    # the methods of the COM interfaces as dll `!<Interface>`, ordinal = vtable slot, first slot = this). A row of
+    # the same (dll, name) replaces the one derived above; a duplicate inside the extra files is an error.
+    seen = {}
+    for path in extra:
+        for line in open(path):
+            r = tuple(line.rstrip("\n").split("\t"))
+            if len(r) != 8:
+                errors.append("%s: not 8 columns: %r" % (path, line))
+            elif (r[0], r[1]) in seen:
+                errors.append("%s!%s: given twice (%s, %s)" % (r[0], r[1], seen[(r[0], r[1])], path))
+            else:
+                seen[(r[0], r[1])] = path
+                rows = [x for x in rows if (x[0], x[1]) != (r[0], r[1])] + [r]
+    rows.sort(key=lambda r: (r[0].lower(), r[1]))
     with open(out, "w") as f:
         f.write("dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n")
         for r in rows:
@@ -154,4 +169,4 @@ def main(names, spec_dir, out, symfile, crt_table):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:6])
+    main(*sys.argv[1:])
