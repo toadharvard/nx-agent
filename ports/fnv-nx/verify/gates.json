@@ -30,6 +30,223 @@
     "ports/fnv-nx/lift"
    ],
    "result": "selftests.json"
+  },
+  {
+   "name": "admit",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_admit.py"
+   ],
+   "result": "admit.json"
+  },
+  {
+   "name": "oracle",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_oracle.py"
+   ],
+   "result": "oracle.json"
+  },
+  {
+   "name": "build",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_build.py"
+   ],
+   "result": "build.json"
+  },
+  {
+   "name": "objstub",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_objstub.py"
+   ],
+   "result": "objstub.json"
+  },
+  {
+   "name": "linkstrict",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_linkstrict.py"
+   ],
+   "result": "linkstrict.json"
+  },
+  {
+   "name": "determinism",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_determinism.py"
+   ],
+   "result": "determinism.json"
+  },
+  {
+   "name": "n1",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "n1"
+   ],
+   "result": "n1.json"
+  },
+  {
+   "name": "n2_data",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "n2_data"
+   ],
+   "result": "n2_data.json"
+  },
+  {
+   "name": "n2_call",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "n2_call"
+   ],
+   "result": "n2_call.json"
+  },
+  {
+   "name": "n2_vcall",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "n2_vcall"
+   ],
+   "result": "n2_vcall.json"
+  },
+  {
+   "name": "xc",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "xc"
+   ],
+   "result": "xc.json"
+  },
+  {
+   "name": "xunit",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "xunit"
+   ],
+   "result": "xunit.json"
+  },
+  {
+   "name": "rtti",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "rtti"
+   ],
+   "result": "rtti.json"
+  },
+  {
+   "name": "pcrel",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "pcrel"
+   ],
+   "result": "pcrel.json"
+  },
+  {
+   "name": "bodysel",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "bodysel"
+   ],
+   "result": "bodysel.json"
+  },
+  {
+   "name": "abs",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "abs"
+   ],
+   "result": "abs.json"
+  },
+  {
+   "name": "disp",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "disp"
+   ],
+   "result": "disp.json"
+  },
+  {
+   "name": "reach",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "reach"
+   ],
+   "result": "reach.json"
+  },
+  {
+   "name": "reachlink",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "reachlink"
+   ],
+   "result": "reachlink.json"
+  },
+  {
+   "name": "gpa",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_contract.py",
+    "--gate",
+    "gpa"
+   ],
+   "result": "gpa.json"
+  },
+  {
+   "name": "argordergate",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_argorder.py"
+   ],
+   "result": "argordergate.json"
   }
  ]
 }

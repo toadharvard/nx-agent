@@ -3,7 +3,7 @@
 python script on it. The sandbox has no host /usr, so the interpreter is a content-hashed input (runtime_id is in the key).
 
     runtime.py python --store S [--python P] [--site PKG]... -o runtime.json
-    runtime.py tool --store S --exe AT... [--tree DIR]... -o toolrt.json
+    runtime.py tool --store S --exe AT... [--tree DIR|HOST@AT]... -o toolrt.json
     runtime.py stage --store S --runtime runtime.json --name N --class build|verification [--input AT=HOST]... [--output D]...
                      [--env K=V]... [--cwd D] -o stage.json -- SCRIPT args...
 
@@ -24,15 +24,17 @@ python script on it. The sandbox has no host /usr, so the interpreter is a conte
      Its package directory (or module file) is covered by (c), or else added at its real path.
 Output: {"format":"fnvnx-runtime/1","python","version","inputs":[{"at","tree"}] sorted,"env","runtime_id":cas.stage_key(inputs)}.
 `tool` is the same for any native tool (a compiler driver): each --exe AT is placed at the path AT as the tool looks it up (a
-symlink name such as /usr/aarch64-linux-gnu/bin/as keeps its name; the content is the resolved file), alone with the other exes of
+symlink name such as /usr/aarch64-linux-gnu/bin/as keeps its name; the content is the resolved file; an exe inside a --tree is already there), alone with the other exes of
 its directory in a directory input (so PATH can name it); its loader closure is rule (b). Each --tree DIR is ingested whole at
-DIR; every x86-64 ET_EXEC/ET_DYN ELF file in it is a further root of the closure (other ELF files, e.g. foreign-arch objects, are
+DIR (or the directory HOST of this machine at the sandbox path AT: HOST@AT; the loader closure is then resolved as the loader
+resolves it inside the sandbox: paths under AT are the files under HOST, a path under HOST outside AT does not exist, every other
+path is a declared host input; an unresolvable library is an error naming object and name); every x86-64 ET_EXEC/ET_DYN ELF file in it is a further root of the closure (other ELF files, e.g. foreign-arch objects, are
 data). The caller names the exes and trees (unitstage.gcc_set derives them from the compiler's own -print-* output).
 Output: {"format","kind":"tool","exes","inputs","env":{},"runtime_id"}.
 `stage` writes the "fnvnx-stage/1" document (+ "tool":"python"): argv = [python,-s,-B]+given, env = runtime env + TZ=UTC LC_ALL=C
 SOURCE_DATE_EPOCH=0 COLUMNS=80 PATH=<interpreter dir> + given. PYTHONNOUSERSITE is left out of the stage env (toolflags allows only
-PYTHONHASHSEED/PYTHONDONTWRITEBYTECODE; -s does the same job). sandbox.check_doc rejects the key "tool", so a second file
-NAME.run.json without "tool" is written for `sandbox.py run`; both are otherwise identical.
+PYTHONHASHSEED/PYTHONDONTWRITEBYTECODE; -s does the same job). sandbox.check_doc ACCEPTS the optional key "tool" (and it is part of
+the stage key), so the one document serves toolflags.py and `sandbox.py run` alike; there is no second NAME.run.json.
 """
 import argparse
 import glob
@@ -122,8 +124,18 @@ def origin(dirs, base):
 def under(p, d):
     return p == d or p.startswith(d.rstrip("/") + "/")
 
-def closure(roots, trees, chain0=()):
-    """{at: source} of every file the loader needs for ROOTS (paths), without those inside TREES."""
+def closure(roots, trees, chain0=(), maps=()):
+    """{at: source} of every file the loader needs for ROOTS (sandbox paths), without those inside TREES (sandbox paths).
+    MAPS [(host, at)]: a tree that lives at HOST on this machine and appears at AT in the sandbox. The loader is simulated as it runs
+    INSIDE the sandbox: a path under AT is the file under HOST; a path under HOST (but not AT) does not exist there; every other path
+    is a host file that becomes a declared input at that same path. A library that is found nowhere is an error naming the
+    object and the name (a path that does not exist in the sandbox is never taken from the host)."""
+    def real(p):
+        for h, a in maps:
+            if under(p, a):
+                return h + p[len(a):]
+        return None if any(under(p, h) for h, _ in maps) else p
+    isfile = lambda p: real(p) is not None and os.path.isfile(real(p))  # noqa: E731
     out, seen, cdirs = {}, set(), conf_dirs()
     todo = [(r, tuple(chain0)) for r in roots]
     while todo:
@@ -131,26 +143,26 @@ def closure(roots, trees, chain0=()):
         if path in seen:
             continue
         seen.add(path)
-        info = elf(path)
+        info = elf(real(path))
         if info is None:
             raise RtError("%s: not an ELF file" % path)
         interp, needed, rpath, runpath = info
-        want = ident(path)
+        want = ident(real(path))
         if interp and interp not in out and not any(under(interp, t) for t in trees):
-            if ident(interp) != want:
+            if not isfile(interp) or ident(real(interp)) != want:
                 raise RtError("PT_INTERP %s of %s: missing or not of the same ELF class/encoding/machine" % (interp, path))
-            out[interp] = os.path.realpath(interp)
+            out[interp] = os.path.realpath(real(interp))
         base = os.path.dirname(path)
         rp = tuple(origin(rpath, base)) if not runpath else ()
         dirs = list(rp) + list(chain) + origin(runpath, base) + cdirs + DEFAULT_DIRS
         for n in needed:
             cand = [n] if "/" in n else [os.path.join(d, n) for d in dirs]
             # like ld.so: a candidate of another class/data encoding/machine is skipped and the search goes on
-            hit = next((c for c in cand if os.path.isfile(c) and ident(c) == want), None)
+            hit = next((c for c in cand if isfile(c) and ident(real(c)) == want), None)
             if hit is None:
                 raise RtError("unresolved DT_NEEDED %s of %s: no ELF of class/data/machine %s in %s" % (n, path, want, ", ".join(dict.fromkeys(os.path.dirname(c) for c in cand))))
             if not any(under(hit, t) for t in trees):
-                out[hit] = os.path.realpath(hit)
+                out[hit] = os.path.realpath(real(hit))
             todo.append((hit, tuple(chain) + rp))
     return out
 
@@ -215,31 +227,36 @@ def build(store, python, sites):
             "runtime_id": cas.stage_key(inputs)}
 
 def build_tool(store, exes, trees):
-    """Tool runtime (see the docstring): exes = [AT], trees = [DIR]."""
+    """Tool runtime (see the docstring): exes = [AT], trees = [DIR or HOST@AT]."""
     def loadable(p):
         h = open(p, "rb").read(20)
         return ident(p) == X86_64 and struct.unpack_from("<H", h, 16)[0] in (2, 3)
     ats = sorted({os.path.normpath(os.path.abspath(e)) for e in exes})
-    tdirs = sorted({os.path.normpath(os.path.abspath(t)) for t in trees})
-    for t in tdirs:
-        if not os.path.isdir(os.path.realpath(t)):
-            raise RtError("--tree %s is not a directory" % t)
-    tmp, src, roots = tempfile.mkdtemp(prefix="rt-tool-"), {t: os.path.realpath(t) for t in tdirs}, []
+    def hostat(t):
+        h, sep, at = t.partition("@")
+        return os.path.normpath(os.path.abspath(h)), os.path.normpath(os.path.abspath(at if sep else h))
+    maps = sorted({hostat(t) for t in trees}, key=lambda m: m[1])
+    for h, _ in maps:
+        if not os.path.isdir(os.path.realpath(h)):
+            raise RtError("--tree %s is not a directory" % h)
+    tdirs = [a for _, a in maps]
+    tmp, src, roots = tempfile.mkdtemp(prefix="rt-tool-"), {a: os.path.realpath(h) for h, a in maps}, []
     try:
         for at in ats:
-            if not os.path.isfile(os.path.realpath(at)):
-                raise RtError("--exe %s is not a file" % at)
-            if os.path.dirname(at) in tdirs:
-                raise RtError("--exe %s lies directly in --tree %s" % (at, os.path.dirname(at)))
+            inside = next(((h, a) for h, a in maps if under(at, a)), None)
+            if not os.path.isfile(os.path.realpath(inside[0] + at[len(inside[1]):] if inside else at)):
+                raise RtError("--exe %s is not a file%s" % (at, " (in the tree at %s)" % inside[1] if inside else ""))
+            if inside:
+                continue  # the tree provides it; its ELF files are roots below
             d = src.setdefault(os.path.dirname(at), os.path.join(tmp, str(len(src))))
             os.makedirs(d, exist_ok=True)
             shutil.copy2(os.path.realpath(at), os.path.join(d, os.path.basename(at)))
-            roots.append(os.path.realpath(at))
-        for t in tdirs:
-            roots += [p for p in (os.path.join(r, f) for r, _, fs in os.walk(os.path.realpath(t)) for f in fs)
+            roots.append(at)
+        for h, a in maps:
+            roots += [a + p[len(os.path.realpath(h)):] for p in (os.path.join(r, f) for r, _, fs in os.walk(os.path.realpath(h)) for f in fs)
                       if os.path.isfile(p) and not os.path.islink(p) and loadable(p)]
         tops = list(src)
-        libs = closure(roots, tops)
+        libs = closure(roots, tops, (), maps)
         src.update({at: f for at, f in libs.items() if not any(under(at, t) for t in tops)})
         for a in src:
             if any(b != a and under(a, b) for b in src):
@@ -257,11 +274,10 @@ def make_stage(a):
     env.update(a["env"])
     ins = rt["inputs"] + [{"at": at, "tree": cas.ingest(h, a["store"])} for at, h in a["input"]]
     doc = {"format": "fnvnx-stage/1", "stage": a["name"], "argv": [py, "-s", "-B"] + a["argv"], "cwd": a["cwd"], "env": env,
-           "inputs": sorted(ins, key=lambda i: i["at"]), "outputs": sorted(a["output"]), "class": a["cls"]}
+           "inputs": sorted(ins, key=lambda i: i["at"]), "outputs": sorted(a["output"]), "class": a["cls"], "tool": "python"}
     sandbox.check_doc(doc)
     o = a["o"]
-    open(o, "wb").write(cas.canon(dict(doc, tool="python")) + b"\n")
-    open(o[:-5] + ".run.json" if o.endswith(".json") else o + ".run", "wb").write(cas.canon(doc) + b"\n")
+    open(o, "wb").write(cas.canon(doc) + b"\n")
 
 def parse(argv):
     k = argv.index("--") if "--" in argv else len(argv)
@@ -287,7 +303,7 @@ def main(argv):
             doc = build(a["store"], a["python"], a["site"])
             open(a["o"], "wb").write(json.dumps(doc, sort_keys=True, indent=1).encode() + b"\n")
             print("runtime %s: %d inputs" % (doc["runtime_id"], len(doc["inputs"])))
-        elif argv[:1] == ["tool"] and a["exe"]:
+        elif argv[:1] == ["tool"] and (a["exe"] or a["tree"]):
             doc = build_tool(a["store"], a["exe"], a["tree"])
             open(a["o"], "wb").write(json.dumps(doc, sort_keys=True, indent=1).encode() + b"\n")
             print("toolrt %s: %d inputs" % (doc["runtime_id"], len(doc["inputs"])))

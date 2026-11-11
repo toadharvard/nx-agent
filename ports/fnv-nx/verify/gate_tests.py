@@ -36,8 +36,11 @@ CACHE_FORMAT = "fnvnx-selftests-cache/1"
 def run_one(path, timeout):
     """(passed, seconds)"""
     t0 = time.time()
+    # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
+    # would otherwise share this gate's result cache and outputs)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
     p = subprocess.Popen([sys.executable, "-I", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+                         stderr=subprocess.DEVNULL, start_new_session=True, env=env)
     try:
         ok = p.wait(timeout=timeout) == 0
     except subprocess.TimeoutExpired:
@@ -109,11 +112,16 @@ def store(path, key, rows):
                                                                  for r in rows}}, fh, sort_keys=True)
     os.replace(tmp, path)
 
-def main(argv):
-    o, dirs = parse(argv)
+def universe(dirs):
+    """the test files of the doc comment's universe (gate "oracle" judges the same list)"""
     files = []
     for d in dirs:
         files += sorted(os.path.normpath(f) for f in glob.glob(os.path.join(glob.escape(d), "tests", "test_*.py")))
+    return files
+
+def main(argv):
+    o, dirs = parse(argv)
+    files = universe(dirs)
     t0 = time.time()
     key = cpath = None
     if o["cache"] and files:
