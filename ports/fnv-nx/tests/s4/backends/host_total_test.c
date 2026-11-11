@@ -38,7 +38,7 @@ static int s_tz_fail;
 Result timeToCalendarTimeWithMyRule(u64 ts, TimeCalendarTime *c, TimeCalendarAdditionalInfo *i)
 {
     memset(c, 0, sizeof *c); memset(i, 0, sizeof *i);
-    i->offset = (s32)(ts % 7200) - 3600; i->DST = (ts & 1); strcpy(i->timezoneName, "CESTXYZW");
+    i->offset = (s32)(ts % 7200) - 3600; i->DST = (ts & 1); memcpy(i->timezoneName, "CESTXYZW", 8);
     return s_tz_fail ? MAKERESULT(Module_Libnx, LibnxError_NotFound) : 0;
 }
 uint64_t host_sock_call_ext(uint32_t fn, const uint64_t *a, uint32_t n);   /* host_sock_total.c: the real host_sock.inc */
