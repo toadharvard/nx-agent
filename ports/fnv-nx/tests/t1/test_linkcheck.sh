@@ -8,9 +8,9 @@ set -uo pipefail
 P=$(cd "$(dirname "$0")/../.." && pwd); T=${KEEP_T:-$(mktemp -d)}; [ -n "${KEEP_T:-}" ] || trap 'rm -rf "$T"' EXIT
 fails=0; ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 S=$T/src; Q=$S/ports/fnv-nx
-mkdir -p "$Q/tools/farm" "$Q/tools/link" "$Q/toolchain/gcc" "$Q/toolchain/devkita64" "$Q/toolchain/cross" "$Q/toolchain/vorbis"
+mkdir -p "$Q/tools/farm" "$Q/tools/link" "$Q/toolchain/gcc" "$Q/toolchain/devkita64" "$Q/toolchain/cross"
 for f in linkcheck_job.sh link_key.sh lib_job.sh linkcache.sh fetch_tree.sh tree_hash.sh; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
-for f in toolchain/sources.sh toolchain/gcc/build.sh toolchain/devkita64/x toolchain/cross/x toolchain/vorbis/build.sh; do echo x > "$Q/$f"; done
+for f in toolchain/sources.sh toolchain/gcc/build.sh toolchain/devkita64/x toolchain/cross/x; do echo x > "$Q/$f"; done
 printf '# pins\n' > "$Q/tools/fetch.sh"; echo 'v1' > "$Q/tools/link/fnvlink.py"; echo readme > "$Q/README"
 mkdir -p "$Q/shim/include"; echo '#define A 1' > "$Q/shim/include/fnvnx_compat.h"
 cat > "$Q/Makefile" <<'MK'

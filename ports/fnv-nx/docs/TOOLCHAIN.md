@@ -310,13 +310,6 @@ initialised once across threads, std::thread + std::mutex, bounded-queue condvar
 times out, recursive pthread mutex, stdio/fstream/stat/readdir/rename/remove, C++ exceptions through 5 frames,
 `std::out_of_range` from `vector::at`, RTTI (`dynamic_cast`, `typeid`), global constructors: **PASS**.
 
-### Ogg Vorbis (`toolchain/vorbis/build.sh`)
-
-libogg 1.3.5 and libvorbis 1.3.7 (BSD-3-Clause) from the xiph GitHub tags (downloads.xiph.org fails TLS from the
-container): ogg `e1774cd7`, SHA-256 of `git archive` 8ecebc1f247ef0da4d9913e41c5e217fad5e3b311cc74a09469194356cc22d30;
-vorbis `0657aee6`, f58777e598c5ef1c9f21698e581f6e62729f3d343ec4aa270051fb304a56fe26. Built for ILP32 directly (no
-autotools); the game link uses `-DFNVNX_HAVE_VORBIS -lvorbisfile -lvorbis -logg`.
-
 ### Full game link (`toolchain/game/build.sh`)
 
 Inputs: S2's fixed objects (2,069, already with `zz_bridges.o`, `zz_addrmap.o`) + `aliases.ld`, platform/ (win32,
@@ -399,7 +392,7 @@ one grows with the image. It is also cheap, but needs three facts found on the w
 
 The host places a relocatable guest after the reservation in the first free gap of the small map above the data
 window (`pick_guest_base`), from a staging buffer at the top of the guest heap (the host heap is 64 MiB), with
-`svcMapProcessCodeMemory` + segment permissions as before. `vorbis` and the guest runtime are now built `-fPIC`
+`svcMapProcessCodeMemory` + segment permissions as before. The guest runtime is now built `-fPIC`
 (non-PIC objects put pointer tables in `.rodata`: "read-only segment has dynamic relocations").
 
 A fixed guest stays supported: `GUEST=fixed` in the game build (`FNVNX_GUEST_BASE`, default `0x02100000`) and a host
@@ -439,7 +432,7 @@ on. Result:
 ## 10. Round 4: S2c's fresh object set, WinMain entered (J-0032, J-0042 follow-up)
 
 Input: S2c's J-0034 object set (3,464 objects incl. WinMain and S1's XC1 rewrite; address map 61,620 entries),
-`D3D9=null`, vorbis on. `toolchain/game/build.sh` links it unchanged apart from the points below; one build takes
+`D3D9=null`. `toolchain/game/build.sh` links it unchanged apart from the points below; one build takes
 35 to 50 s with `JOBS=3`. mkxctab: 17,191 initializers from the address map (6,265 of them `__fnvnx_dyninit_`),
 all inside the group 0x00f34eb0..0x00fc7a70. Guest: relocatable, 19 MiB incl. bss (0x13d4000), `guest.nso`
 10.99 MB.
@@ -743,7 +736,7 @@ Both f11 packages pass: `HOST=plain` (D3D9=null guest, text console) and `HOST=n
 Gallium Nine host, `NINE=` the render/nine work dir; no console, log file only).
 
 ```
-DEVKITPRO=<dkp> toolchain/game/build.sh <S2 out> <S2 fixed> <g> <vorbis>          # D3D9=null guest
+DEVKITPRO=<dkp> toolchain/game/build.sh <S2 out> <S2 fixed> <g>          # D3D9=null guest
 DEVKITPRO=<dkp> toolchain/package/build.sh <g>/guest.nso <pkg> <program id> <g>/fnvnx.elf
 #  Nine: GUEST_ONLY=1 render/nine/game/build.sh <S2 out> <S2 fixed> <n>, then
 #  HOST=nine NINE=<dir> toolchain/package/build.sh <n>/game/guest.nso <pkg> <program id> <n>/game/fnvnx.elf

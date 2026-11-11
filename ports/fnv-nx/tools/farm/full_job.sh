@@ -9,8 +9,8 @@
 # variables apply), plus, under $FARM_HOME:
 #   toolchain  toolchain-<id>, shared by every commit with the same toolchain scripts and pins: the pinned Ubuntu
 #              AArch64 cross packages (toolchain/cross/setup.sh), fnvnx-a64 + DEVKITPRO with libnx (~1 h on 4 cores
-#              the first time, resumable), Ogg Vorbis (`make toolchain` in that directory; FNVNX_TC / DEVKITPRO /
-#              VORBIS reuse existing ones)
+#              the first time, resumable) (`make toolchain` in that directory; FNVNX_TC / DEVKITPRO
+#              reuse existing ones)
 #   pristine   S11's MSVC 2008 objects of the pristine decomp from branch msvc/pristine/<decomp12>, for the boot's
 #              synthesized data image (PRISTINE_OBJS=<dir> instead); without them the boot uses the zero image
 # The build directory full/build persists across commits. The host gates are not run (TESTS=none; TESTS=all runs
@@ -69,7 +69,7 @@ log "recon: $RECON_NOTE"
 
 # 1. The toolchain, shared by the commits that build it the same way.
 TCID=$(cat "$P"/toolchain/sources.sh "$P"/toolchain/gcc/build.sh "$P"/toolchain/devkita64/* "$P"/toolchain/cross/* \
-	"$P"/toolchain/vorbis/build.sh "$P"/tools/fetch.sh | sha256sum | cut -c1-12)
+	"$P"/tools/fetch.sh | sha256sum | cut -c1-12)
 TCB=$FARM_HOME/toolchain-$TCID
 mkdir -p "$TCB"
 if [ -z "${FNVNX_TC:-}${DEVKITPRO:-}" ] && [ ! -f "$TCB/toolchain/prefix/.fnvnx-build-id" ]; then
@@ -89,7 +89,6 @@ art() { python3 -I -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.
 stage_ok "$TCB" toolchain || { echo "toolchain stage failed, see $TCB/make.log"; tail -5 "$TCB/make.log"; exit 1; }
 ARGS=(FNVNX_TC="$(art prefix)" DEVKITPRO="$(art devkitpro)")
 XCB=$(usable_cross "$(art cross_bin)"); [ -n "$XCB" ] && ARGS+=(CROSS_BIN="$XCB")
-if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORBIS=none); fi
 
 # 2. The link (link_job.sh in this job's build directory; it publishes link/<commit12> already, without v1/: the
 # previous commit's audits are removed first).

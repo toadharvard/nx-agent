@@ -31,7 +31,7 @@ sys.path.insert(0, HERE)
 from check_fs import strip_comments  # noqa: E402
 from check_nro import Checks  # noqa: E402
 
-SITES = ["toolchain/nro", "toolchain/host", "startup/host", "render/nine/host", "render/native/host", "loader/host"]
+SITES = ["toolchain/nro", "toolchain/host", "startup/host", "render/nine/host", "render/native/host"]
 PRIO_LO, PRIO_HI = 0x1C, 0x3B
 PC_MAIN_STACK = 0x100000   # FalloutNV.exe 1.4.0.525, optional header SizeOfStackReserve
 

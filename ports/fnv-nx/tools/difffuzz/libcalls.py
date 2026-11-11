@@ -59,7 +59,7 @@ A64.update({'strcasecmp': 'stricmp', '_stricmp': 'stricmp', 'stricmp': 'stricmp'
             'atan2': 'atan2', 'atan2f': 'atan2f', 'tan': 'tan', 'tanf': 'tanf', 'atan': 'atan', 'atanf': 'atanf',
             'asin': 'asin', 'asinf': 'asinf', 'acos': 'acos', 'acosf': 'acosf', 'fmod': 'fmod', 'fmodf': 'fmodf',
             'floor': 'floor', 'floorf': 'floorf', 'ceil': 'ceil', 'ceilf': 'ceilf',
-            'fnvnx_byteswap_ulong': 'bswap', '__builtin_bswap32': 'bswap',
+            '__builtin_bswap32': 'bswap',
             'fnvnx_rt_dynamic_cast': 'rtdyncast', '__dynamic_cast': 'rtdyncast',
             '_memcpy': 'memcpy', '_memmove': 'memmove',
             # MSVC's rep movsd / rep movsb intrinsics, declared as functions by Havok units (platform/crt/msvc_names.c

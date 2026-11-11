@@ -56,7 +56,7 @@ step sources
 
 # the toolchain: the same directory as full_job.sh's, shared by the commits that build it the same way
 TCID=$(cat "$P"/toolchain/sources.sh "$P"/toolchain/gcc/build.sh "$P"/toolchain/devkita64/* "$P"/toolchain/cross/* \
-	"$P"/toolchain/vorbis/build.sh "$P"/tools/fetch.sh | sha256sum | cut -c1-12)
+	"$P"/tools/fetch.sh | sha256sum | cut -c1-12)
 TCB=$FARM_HOME/toolchain-$TCID; mkdir -p "$TCB"
 # T1: a fresh machine restores the built toolchain of this TCID from the artifacts repository (hostcache.sh) instead
 # of building it (gcc ~45 min on 4 cores); the first machine to build it publishes it, in the background
@@ -74,7 +74,6 @@ step toolchain
 if [ -z "$FAIL" ]; then
 	ARGS=(FNVNX_TC="$(art prefix)" DEVKITPRO="$(art devkitpro)" LINK_OVERRIDES="${LINK_OVERRIDES:-render}")
 	XCB=$(usable_cross "$(art cross_bin)"); [ -n "$XCB" ] && ARGS+=(CROSS_BIN="$XCB")
-	if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORBIS=none); fi
 	[ -n "${RENDER_LIB:-}" ] && ARGS+=(RENDER_LIB="$RENDER_LIB")
 	job_pristine                          # the link's resolve --msvc-code, as full_job.sh links
 	[ -n "$PR" ] && ARGS+=(PRISTINE_OBJS="$PR" MSVC_CODE="$PR")

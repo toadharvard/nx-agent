@@ -63,7 +63,7 @@ address. In a race build, hb.c's wraps hand the game's own call site through `fn
 
 | step | tool | what it does |
 |---|---|---|
-| guest | `tools/threads/variant.sh <pipeline build> <out>` | relinks a build's guest exactly as its guest stage did (same script, link outputs, override archive, D3D9, GAME_NEW, Vorbis), adding autostart.o, plus hb.o and the wraps with `RACE=1`, through the link script's `EXTRA_OBJS`; the build directory is not touched |
+| guest | `tools/threads/variant.sh <pipeline build> <out>` | relinks a build's guest exactly as its guest stage did (same script, link outputs, override archive, D3D9, GAME_NEW), adding autostart.o, plus hb.o and the wraps with `RACE=1`, through the link script's `EXTRA_OBJS`; the build directory is not touched |
 | run | `tests/s15/mtqemu/boot_game.sh <elf> <exe> <work>` | runs the guest under qemu-aarch64 on real host threads |
 | report | `tools/threads/report.py <logs> --elf <elf> --out r.md` | races per unordered function pair, deadlock cycles and long waits per caller function; each pc is mapped to its function's start address with nm; also writes `r.json` (fnvnx-threads/1) |
 | job | `tools/farm/threads_job.sh <commit> <report.md>` | `tests/s15/test_mtqemu.py`, then the guest (variant + boot, or `THREADS_LOGS` handed in), then the report |

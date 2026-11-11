@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # variant.sh <pipeline build dir> <out dir> - relink a pipeline build's guest as a report lane's guest (D25 #7):
-# the same guest-link script, link outputs, override archive, D3D9 and GAME_NEW choice and Vorbis prefix as the
+# the same guest-link script, link outputs, override archive, D3D9 and GAME_NEW choice as the
 # build's guest stage (<build>/{guest,link,toolchain}/stage.json), plus through the script's EXTRA_OBJS:
 #   tools/threads/autostart.c   the wait-graph watchdog on from the first constructor (WG_LIMIT_MS, default 10000)
 #   RACE=1: tests/s15/mtqemu/hb.c (game-sized tables) and the --wrap of the Win32 sync calls. Only meaningful when the
@@ -33,7 +33,7 @@ g, l, t = rec('guest'), rec('link'), rec('toolchain')
 ga, la, ta = g.get('artifacts', {}), l.get('artifacts', {}), t.get('artifacts', {})
 vals = {'SCRIPT': path(ga.get('script')), 'LOUT': path(la.get('out')), 'FIXED': path(la.get('fixed')),
         'OLIB': path(la.get('override_lib')), 'TC_PREFIX': path(ta.get('prefix')), 'TC_DKP': path(ta.get('devkitpro')),
-        'VORBIS': path(g.get('vorbis') or ta.get('vorbis')), 'D3D9': g.get('d3d9') or 'null',
+        'D3D9': g.get('d3d9') or 'null',
         'GAME_NEW': g.get('game_new') or 'runtime'}
 for k, v in vals.items():
     print('%s=%s' % (k, shlex.quote(v or '')))
@@ -80,8 +80,8 @@ fi
 [ -n "$OLIB" ] && X+=("$OLIB")
 export EXTRA_OBJS="${EXTRA_OBJS:-} ${X[*]}"
 case "$SCRIPT" in
-	*/render/nine/*) argv=(bash "$SCRIPT" "$LOUT" "$FIXED" "$OUT/nine"); export GUEST_ONLY=1; [ -n "$VORBIS" ] && export VORBIS ;;
-	*) argv=(bash "$SCRIPT" "$LOUT" "$FIXED" "$OUT"); [ -n "$VORBIS" ] && argv+=("$VORBIS") ;;
+	*/render/nine/*) argv=(bash "$SCRIPT" "$LOUT" "$FIXED" "$OUT/nine"); export GUEST_ONLY=1 ;;
+	*) argv=(bash "$SCRIPT" "$LOUT" "$FIXED" "$OUT") ;;
 esac
 echo "variant.sh: $SCRIPT (D3D9=$D3D9 GAME_NEW=$GAME_NEW RACE=${RACE:-0} WATCHDOG=${WATCHDOG:-1} MEM=${MEM:-0} PLAT=${PLAT:-0})"
 "${argv[@]}" > "$OUT/link.log" 2>&1 || { tail -20 "$OUT/link.log" >&2; exit 1; }

@@ -94,8 +94,6 @@ CONFIG = [
                            'tools/pipeline/guest_link.py'),
     ('GAME_NEW', 'runtime', 'global operator new/delete of the guest (toolchain/game/build.sh GAME_NEW): runtime '
                             '(malloc stand-ins) or game (the game objects\' own)'),
-    ('VORBIS', 'auto', 'libogg/libvorbis ILP32 prefix for the guest link (S5 script only): auto = built by the '
-                       'toolchain stage (toolchain/vorbis/build.sh), none = without, or a prefix'),
     ('BOOT', '0', '1: the boot stage (emulated boot of the game guest + boot frontier) runs with `all`; it also runs '
                   'when named as a goal (make boot)'),
     ('BOOT_IMAGE', 'auto', 'data image for the emulated boot (sdmc:/switch/fnv/FalloutNV.exe): auto = S14\'s '
@@ -793,32 +791,6 @@ def provide_fnvnx_a64(b, r, d):
     return prefix, dkp
 
 
-def provide_vorbis(b, r, d, dkp):
-    """libogg/libvorbis for the guest (platform/audio/vorbisfile.cpp): VORBIS=<prefix> when given, none: without;
-    auto: toolchain/vorbis/build.sh into build/toolchain/vorbis (pinned git tags, a few files with fnvnx-a64)."""
-    v = b.cfg['VORBIS']
-    if v == 'none':
-        return None
-    if v and v != 'auto':
-        return os.path.abspath(v)
-    if not dkp:
-        r.note('VORBIS=auto needs DEVKITPRO: the guest links without Ogg Vorbis')
-        return None
-    out, work = os.path.join(d, 'vorbis'), os.path.join(d, 'vorbis-work')
-    vid = build_id('toolchain/vorbis', extra=[dkp])
-    f = os.path.join(out, '.fnvnx-build-id')
-    if read_id(f) == vid:
-        return out
-    shutil.rmtree(out, ignore_errors=True)
-    b.say('toolchain: Ogg Vorbis for the guest (toolchain/vorbis/build.sh)')
-    b.sh(['bash', os.path.join(ROOT, 'toolchain', 'vorbis', 'build.sh'), work, out], r['log'],
-         env=b.env({'DEVKITPRO': dkp}), check=True, timeout=3600)
-    with open(f, 'w') as fh:
-        fh.write(vid + '\n')
-    remove_work(b, r, [work], 'the Ogg Vorbis sources')
-    return out
-
-
 class Toolchain(Stage):
     name = 'toolchain'
     soft = ('fetch',)       # the pinned libnx for the DEVKITPRO tree it may build
@@ -837,9 +809,8 @@ class Toolchain(Stage):
         b.cross_bin = saved
         gc = b.cfg['GAME_CXX']
         return ['toolchain-v3', [b.cfg[k] for k in ('FNVNX_TC', 'DEVKITPRO', 'TC_DL', 'GAME_CXX', 'CROSS_BIN', 'CROSS',
-                                                    'VORBIS', 'MIN_FREE_GB')],
-                tree_hash('toolchain/cross', 'toolchain/sources.sh', 'toolchain/gcc', 'toolchain/devkita64',
-                          'toolchain/vorbis'), up_id(b, 'fetch'),
+                                                    'MIN_FREE_GB')],
+                tree_hash('toolchain/cross', 'toolchain/sources.sh', 'toolchain/gcc', 'toolchain/devkita64'), up_id(b, 'fetch'),
                 [stat_id(os.path.realpath(k)) for k in keys], [stat_id(os.path.realpath(t)) if t else None for t in tools],
                 gc not in ('auto', 'tc', 'standin') and stat_id(b.which(shlex.split(gc)[0]) if gc else None),
                 importlib.util.find_spec('unicorn') is not None, importlib.util.find_spec('elftools') is not None]
@@ -851,7 +822,6 @@ class Toolchain(Stage):
         d = b.sdir('toolchain')
         b.cross_bin = cross_bin = provide_cross(b, r, d)
         prefix, dkp = provide_fnvnx_a64(b, r, d)
-        vorbis = provide_vorbis(b, r, d, dkp)
         checks = []   # (item, value, state)
 
         def chk(item, value, good, required=True):
@@ -917,7 +887,6 @@ class Toolchain(Stage):
                 r.note('the standin compiler is not the pinned Ubuntu build (toolchain/cross/packages.tsv): objects '
                        'may differ from other machines\' (CROSS=auto unpacks the pinned one)')
                 r['status'] = 'warn'
-        r.metric('vorbis', 1 if vorbis else 0)
 
         free = free_bytes(b.out)
         r.metric('disk_free_gib', round(free / 2**30, 1))
@@ -936,17 +905,16 @@ class Toolchain(Stage):
         r.artifact('prefix', prefix)
         r.artifact('devkitpro', dkp)
         r.artifact('cross_bin', cross_bin)
-        r.artifact('vorbis', vorbis)
         r.artifact('game_cxx', game_cxx)
         r.artifact('game_cxx_kind', kind)
         r['game_cxx_id'] = sha(game_cxx, gver)
-        r['output_id'] = sha(prefix, dkp, game_cxx, gver, [c for c in checks], vorbis)
+        r['output_id'] = sha(prefix, dkp, game_cxx, gver, [c for c in checks])
         missing_req = [c[0] for c in checks if c[2] == 'MISSING']
         missing_opt = [c[0] for c in checks if c[2] == 'missing']
         r.metric('tc_missing_required', len(missing_req))
         r.metric('tc_missing_optional', len(missing_opt))
-        r['summary'] = 'prefix %s, DEVKITPRO %s, GAME_CXX %s, cross tools: %s, vorbis %s' % (
-            prefix or '-', dkp or '-', kind, r.get('cross', '-'), b.rel(vorbis) or 'none')
+        r['summary'] = 'prefix %s, DEVKITPRO %s, GAME_CXX %s, cross tools: %s' % (
+            prefix or '-', dkp or '-', kind, r.get('cross', '-'))
         if missing_opt:
             r.note('optional tools missing: ' + ', '.join(missing_opt))
         if missing_req:
@@ -2120,7 +2088,7 @@ class Guest(Stage):
                 tree_hash('tools/pipeline/undef.py', 'toolchain/game', 'toolchain/guest', 'toolchain/include',
                           'toolchain/tools', 'platform', 'loader', 'startup', 'shim/include', 'tests/s5/dynbrk.py'),
                 tree_hash('render/nine') if b.cfg['NINE'] == '1' else '',
-                up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.art('toolchain', 'vorbis'), b.cfg['GAME_NEW'],
+                up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.cfg['GAME_NEW'],
                 file_hash(b.art('link', 'override_lib')),
                 b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
 
@@ -2162,13 +2130,6 @@ class Guest(Stage):
         b.say('guest: ILP32 guest link via %s' % r['method'])
         argv = ([PY, '-I', scr] if scr.endswith('.py') else ['bash', scr]) + [lout, fixed,
                                                                           os.path.join(d, 'nine') if nine_game else d]
-        vorbis = b.art('toolchain', 'vorbis')        # VORBIS: a prefix, built by the toolchain stage, or none
-        r['vorbis'] = vorbis
-        if vorbis and not scr.endswith('.py'):
-            if nine_game:
-                extra['VORBIS'] = vorbis
-            else:
-                argv.append(vorbis)
         rc = b.sh(argv, r['log'], env=b.env(extra), timeout=7200)
         if prod != d:
             for n in ('fnvnx.elf', 'guest.nso', 'undefined.txt', 'fnvnx.map'):
@@ -2762,10 +2723,6 @@ def suites(b):
     lt = sorted(f for f in os.listdir(os.path.join(ROOT, 'tools', 'link')) if re.match(r'test_.*\.py$', f))
     s.append(Suite('s2-link', ['tools/link'], [[PY, '-I', 'tools/link/' + f] for f in lt],
                    needs=('qemu-aarch64', 'llvm-undname')))
-    if os.path.isdir(os.path.join(ROOT, 'tests', 's3')):
-        s.append(Suite('s3', ['tests/s3', 'loader'], [
-            ['env', 'FNVNX_S3_OUT=' + os.path.join(t, 's3'), PY, '-I', 'tests/s3/test_s3.py'],
-            ['make', '-C', 'loader', 'OUT=' + os.path.join(t, 's3', 'ilp32'), 'ilp32-check']]))
     for n in ('s4', 's7'):
         if os.path.isfile(os.path.join(ROOT, 'tests', n, 'Makefile')):
             s.append(Suite(n, ['tests/' + n, 'platform', 'shim/include'], [

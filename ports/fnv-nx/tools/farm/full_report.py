@@ -156,9 +156,8 @@ def main(argv):
     L.append('- pins: ' + ', '.join('%s `%s`' % (k[4:], v) for k, v in sorted(R['fetch'].get('metrics', {}).items())
                                     if k.startswith('pin_')))
     t = R['toolchain']
-    L.append('- toolchain: %s; units compiled with %s; cross tools: %s; Ogg Vorbis %s' % (
-        clean(t.get('metrics', {}).get('tc_gcc')), clean(t.get('metrics', {}).get('game_cxx')), clean(t.get('cross')),
-        'yes' if t.get('artifacts', {}).get('vorbis') else 'no'))
+    L.append('- toolchain: %s; units compiled with %s; cross tools: %s' % (
+        clean(t.get('metrics', {}).get('tc_gcc')), clean(t.get('metrics', {}).get('game_cxx')), clean(t.get('cross'))))
     L.append('')
     L.append('## Provenance')
     L.append('')
@@ -238,9 +237,9 @@ def main(argv):
     if gu.get('metrics'):
         L.append('## Guest')
         L.append('')
-        L.append('- %s; D3D9 %s, GAME_NEW %s, Ogg Vorbis %s; guest.nso %s bytes; PC-relative absolute references %s; '
+        L.append('- %s; D3D9 %s, GAME_NEW %s; guest.nso %s bytes; PC-relative absolute references %s; '
                  'initializers with a trap %s of %s, finalizers %s of %s' % (
-                     gu.get('method'), gu.get('d3d9', '-'), gu.get('game_new', '-'), 'yes' if gu.get('vorbis') else 'no',
+                     gu.get('method'), gu.get('d3d9', '-'), gu.get('game_new', '-'),
                      fmt(m.get('guest_guest_nso_bytes')), fmt(m.get('guest_pcrel_abs_refs')),
                      fmt(m.get('guest_dyninit_brk')), fmt(m.get('guest_dyninit_functions')),
                      fmt(m.get('guest_dynexit_brk')), fmt(m.get('guest_dynexit_functions'))))

@@ -84,7 +84,7 @@ fi
 log "tree: $NOTE_TREE; objects: $NOTE_OBJS; $NOTE_PR; exe: $NOTE_EXE; $NOTE_KEYS"
 printf 'TREE=%q\nOBJS=%q\nOBJ_COMMIT=%q\nNOTE_TREE=%q\nNOTE_OBJS=%q\n' "$TREE" "$OBJS" "$OBJ_COMMIT" "$NOTE_TREE" "$NOTE_OBJS" \
 	> "$(dirname "$LB")/inputs-$C12.env"     # for full_job.sh, which builds on this link
-ARGS=(TC_DL=none VORBIS=none)          # the link needs only the cross tools, not fnvnx-a64
+ARGS=(TC_DL=none)          # the link needs only the cross tools, not fnvnx-a64
 ARGS+=(LINK_OVERRIDES=none)            # the pristine path for the fuzz and equivalence farms (full_job.sh: render)
 # S2c's resolve --msvc-code: ecx-not-passed / this-not-passed judged on the definitions' MSVC code (capstone)
 [ -n "$PR" ] && ARGS+=(MSVC_CODE="$PR")

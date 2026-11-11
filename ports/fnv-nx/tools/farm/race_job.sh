@@ -40,7 +40,7 @@ fail_report() { printf '# threads (RACE=1) %s\n\n- verdict: not run\n- %s\n' "${
 
 # 1. toolchain (shared with full_job.sh), tree, RACE objects, pristine objects, exe
 TCID=$(cat "$P"/toolchain/sources.sh "$P"/toolchain/gcc/build.sh "$P"/toolchain/devkita64/* "$P"/toolchain/cross/* \
-	"$P"/toolchain/vorbis/build.sh "$P"/tools/fetch.sh | sha256sum | cut -c1-12)
+	"$P"/tools/fetch.sh | sha256sum | cut -c1-12)
 TCB=$FARM_HOME/toolchain-$TCID; mkdir -p "$TCB"
 log "toolchain $TCB"
 make -C "$P" fetch toolchain BUILD_DIR="$TCB" EXT="$EXT" JOBS="$JOBS" TESTS=none > "$TCB/make.log" 2>&1 || true
@@ -49,7 +49,6 @@ art() { python3 -I -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r.
 	"$TCB/toolchain/stage.json" "$1"; }
 ARGS=(FNVNX_TC="$(art prefix)" DEVKITPRO="$(art devkitpro)")
 XCB=$(usable_cross "$(art cross_bin)"); [ -n "$XCB" ] && ARGS+=(CROSS_BIN="$XCB")
-if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORBIS=none); fi
 export OBJ_PREFIX=cr
 job_inputs "$RB"
 [ -n "$TREE" ] || fail_report "no tree: $NOTE_TREE"

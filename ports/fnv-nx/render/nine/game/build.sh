@@ -2,7 +2,7 @@
 # The game with Gallium Nine (stream S6c-nine): S5's full game guest link (toolchain/game/build.sh with
 # D3D9=external) + the guest side of the D3D9 proxy, and the Nine host module (render/nine/switch_host.sh).
 #
-#   SSE2NEON=<sse2neon> DEVKITPRO=<S5 dkp> NINE=<render/nine/build.sh work dir> [VORBIS=<ILP32 vorbis prefix>] \
+#   SSE2NEON=<sse2neon> DEVKITPRO=<S5 dkp> NINE=<render/nine/build.sh work dir> \
 #       render/nine/game/build.sh <S2 out dir> <S2 fixed objects dir> <out dir> [program id]
 #   GUEST_ONLY=1 ...: only the game guest (what test/gate.py --game runs); NINE is not needed then.
 #
@@ -38,7 +38,7 @@ aarch64-none-elf-gcc $ARCH -O2 -g -ffunction-sections -fdata-sections -Wall -std
 OBJS="$OBJS $G/heaplog.o"
 
 # the game guest (S5): D3D9=external drops the null device; our objects provide Direct3DCreate9, d3d9.dll
-D3D9=external EXTRA_OBJS="$OBJS" "$TC/game/build.sh" "$S2" "$FIXED" "$OUT/game" ${VORBIS:-}
+D3D9=external EXTRA_OBJS="$OBJS" "$TC/game/build.sh" "$S2" "$FIXED" "$OUT/game"
 [ -z "${GUEST_ONLY:-}" ] || { echo "built $OUT/game/guest.nso (game guest with the Nine proxy)"; exit 0; }
 
 "$R/switch_host.sh" "$OUT/host"

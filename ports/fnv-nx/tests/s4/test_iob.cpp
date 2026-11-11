@@ -33,6 +33,16 @@ void put_file(const char *win, const std::string &data)
 }
 } // namespace
 
+/* formatted output through the iob layer's va_list entry (MSVC formats: %I64d ...) */
+static int iob_printf(_iobuf *f, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int r = fnvnx_iob_vfprintf(f, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
 TEST(iob_layout_and_std_streams)
 {
     _iobuf *iob = __iob_func();
@@ -52,7 +62,7 @@ TEST(iob_layout_and_std_streams)
     CHECK(fnvnx_iob_feof(&iob[0]));
     fnvnx_iob_clearerr(&iob[0]);
     CHECK(!fnvnx_iob_feof(&iob[0]));
-    CHECK_EQ(fnvnx_iob_fprintf(&iob[1], "%s", ""), 0);
+    CHECK_EQ(iob_printf(&iob[1], "%s", ""), 0);
     CHECK_EQ(fnvnx_iob_fflush(&iob[1]), 0);
     CHECK_EQ(fnvnx_iob_fflush(NULL), 0);
     CHECK_EQ(fnvnx_iob_fseek(&iob[1], 0, SEEK_SET), -1); /* a device */
@@ -154,7 +164,7 @@ TEST(iob_text_write)
         return;
     CHECK_EQ(fnvnx_iob_fputs("l1\nl2\n", f), 0);
     CHECK_EQ(fnvnx_iob_ftell(f), 8); /* CR counted: raw offset */
-    CHECK_EQ(fnvnx_iob_fprintf(f, "%d %I64d\n", 5, 1LL << 40), 16);
+    CHECK_EQ(iob_printf(f, "%d %I64d\n", 5, 1LL << 40), 16);
     CHECK_EQ(fnvnx_iob_fputc('\n', f), '\n');
     CHECK_EQ(fnvnx_iob_fwrite("a\nb", 1, 3, f), 3u);
     CHECK_EQ(fnvnx_iob_fwrite("12345678", 4, 2, f), 2u);
@@ -190,13 +200,10 @@ TEST(iob_seek_tell_unget)
     fnvnx_iob_fgets(b, sizeof b, f);
     long pos = fnvnx_iob_ftell(f);
     CHECK_EQ(pos, 5);
-    long long fp = -1;
-    CHECK_EQ(fnvnx_iob_fgetpos(f, &fp), 0);
-    CHECK_EQ(fp, 5);
     CHECK_STR(fnvnx_iob_fgets(b, sizeof b, f), "two\n");
     CHECK_EQ(fnvnx_iob_fseek(f, pos, SEEK_SET), 0);
     CHECK_STR(fnvnx_iob_fgets(b, sizeof b, f), "two\n");
-    CHECK_EQ(fnvnx_iob_fsetpos(f, &fp), 0);
+    CHECK_EQ(fnvnx_iob_fseek(f, 5, SEEK_SET), 0);
     CHECK_EQ(fnvnx_iob_fgetc(f), 't');
     CHECK_EQ(fnvnx_iob_ungetc('T', f), 'T');
     CHECK_EQ(fnvnx_iob_ftell(f), 5);

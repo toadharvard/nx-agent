@@ -36,16 +36,6 @@ extern "C" void *fnvnx_exception_ctor_noalloc(void *self, const char *const *wha
     return new (self) exc<std::exception>(what ? *what : nullptr, false);
 }
 
-extern "C" void *fnvnx_exception_copy_ctor(void *self, const void *other)
-{
-    exc<std::exception> *e = new (self) exc<std::exception>();
-    if (other) {
-        const exc_fields *o = (const exc_fields *)other;
-        e->assign(o->_m_what, o->_m_doFree);
-    }
-    return self;
-}
-
 /* operator=: the fields only (the vptr of the target stays) */
 extern "C" void *fnvnx_exception_assign(void *self, const void *other)
 {
@@ -68,22 +58,6 @@ extern "C" void *fnvnx_exception_assign(void *self, const void *other)
         }
     }
     return self;
-}
-
-/* ~exception: frees an owned string; works on any MSVC-layout exception object (the vptr is not used) */
-extern "C" void fnvnx_exception_dtor(void *self)
-{
-    exc_fields *s = (exc_fields *)self;
-    if (s->_m_doFree)
-        free((void *)s->_m_what);
-    s->_m_what = nullptr;
-    s->_m_doFree = 0;
-}
-
-extern "C" const char *fnvnx_exception_what(const void *self)
-{
-    const exc_fields *s = (const exc_fields *)self;
-    return s->_m_what ? s->_m_what : "Unknown exception";
 }
 
 /* bad_alloc(const char *msg = "bad allocation"): an exception copying msg, catchable as std::bad_alloc */
@@ -135,20 +109,6 @@ rmtx *mtx_of(void *self)
 volatile int g_init_locks;
 } // namespace
 
-extern "C" void *fnvnx_mutex_ctor(void *self)
-{
-    ((mutex *)self)->_Mtx = calloc(1, sizeof(rmtx));
-    if (!((mutex *)self)->_Mtx)
-        throw std::bad_alloc();
-    return self;
-}
-
-extern "C" void fnvnx_mutex_dtor(void *self)
-{
-    free(((mutex *)self)->_Mtx);
-    ((mutex *)self)->_Mtx = nullptr;
-}
-
 extern "C" void fnvnx_mutex_lock(void *self)
 {
     rmtx *m = mtx_of(self);
@@ -171,19 +131,6 @@ extern "C" void fnvnx_mutex_unlock(void *self)
         __atomic_store_n(&m->owner, 0u, __ATOMIC_RELAXED);
         os_gunlock(&m->l);
     }
-}
-
-/* _Init_locks: VC9 initializes the eight _Lockit locks here; the runtime's are statically initialized */
-extern "C" void *fnvnx_init_locks_ctor(void *self)
-{
-    __atomic_add_fetch(&g_init_locks, 1, __ATOMIC_RELAXED);
-    return self;
-}
-
-extern "C" void fnvnx_init_locks_dtor(void *self)
-{
-    (void)self;
-    __atomic_sub_fetch(&g_init_locks, 1, __ATOMIC_RELAXED);
 }
 
 /* ---- locale: one immortal global _Locimp ("C", all categories, no facets, not transparent) */
@@ -232,8 +179,6 @@ facet **g_facets;
 size_t g_nfacets, g_capfacets;
 } // namespace
 
-extern "C" void *fnvnx_locale_init(void) { return global_locimp(); }            /* locale::_Init */
-
 /* locale::facet::_Incref: one more reference, under the locale lock; an immortal facet ((size_t)-1) stays so */
 extern "C" void fnvnx_facet_incref(void *fp)
 {
@@ -242,7 +187,6 @@ extern "C" void fnvnx_facet_incref(void *fp)
     if (f->_Refs < (size_t)-1 - 1)
         ++f->_Refs;
 }
-extern "C" void *fnvnx_locale_getgloballocale(void) { return global_locimp(); } /* locale::_Getgloballocale */
 
 /* locale::facet::_Facet_Register: remembered so fnvnx_cpplib_facet_tidy can release them (VC9 does at exit;
  * the runtime leaves them alive at exit, static destructors of the game may still use facets) */
@@ -284,22 +228,6 @@ extern "C" void fnvnx_cpplib_facet_tidy(void)
     }
 }
 
-/* ---- _Locinfo: the port's C library locale is always "C".
- * _Locinfo_ctor(_Locinfo *, const string &): the exe passes the locale name as a VC9 std::string by reference (R2:
- * the byte-matched 0x00ad3ca0 does), so the name is read through its c_str() (inline when _Myres < 16, else heap). */
-extern "C" void fnvnx_locinfo_ctor(void *self, const void *locname_str)
-{
-    locinfo *p = (locinfo *)self;
-    const char *locname = locname_str ? ((const string *)locname_str)->c_str() : nullptr;
-    p->_Oldlocname.assign_short("C");
-    const char *n = "*"; /* setlocale failed */
-    if (locname && (!*locname || !strcmp(locname, "C")))
-        n = "C";
-    p->_Newlocname.assign_short(n);
-}
-
-extern "C" void fnvnx_locinfo_dtor(void *self) { (void)self; /* would restore _Oldlocname: never changed */ }
-
 /* ---- ctype for the "C" locale (_Getctype, _Tolower, _Toupper) */
 namespace {
 /* MSVC's _pctype in the "C" locale: _UPPER 1, _LOWER 2, _DIGIT 4, _SPACE 8, _PUNCT 0x10, _CONTROL 0x20,
@@ -335,54 +263,12 @@ constexpr ctype_table g_ctype;
 
 extern "C" const short *fnvnx_msvc_ctype_table(void) { return g_ctype.t; }
 
-extern "C" fnvnx_ctypevec fnvnx_getctype(void)
-{
-    fnvnx_ctypevec v;
-    v._Hand = 0; /* LCID of the C locale */
-    v._Page = 0;
-    v._Table = g_ctype.t;
-    v._Delfl = 0; /* static table: ctype<char>::_Tidy must not free it */
-    return v;
-}
-
-/* Only the low byte decides: the decomp declares these char(char, char *), and AAPCS64 leaves the upper bits of
- * a char argument unspecified. Only the C locale exists, so the _Ctypevec is not consulted. */
-extern "C" int fnvnx_tolower_ctype(int c, const fnvnx_ctypevec *v)
-{
-    (void)v;
-    unsigned char u = (unsigned char)c;
-    return u >= 'A' && u <= 'Z' ? u + ('a' - 'A') : c;
-}
-
-extern "C" int fnvnx_toupper_ctype(int c, const fnvnx_ctypevec *v)
-{
-    (void)v;
-    unsigned char u = (unsigned char)c;
-    return u >= 'a' && u <= 'z' ? u - ('a' - 'A') : c;
-}
-
 /* ---- ios_base */
 namespace {
 const int NSTDSTR = 8;
 ios_base *g_stdstr[NSTDSTR];
 int g_stdopens[NSTDSTR];
 } // namespace
-
-/* ios_base::_Addstd: registers a standard stream (cin, cout, ...) in the next free slot 1..7 */
-extern "C" void fnvnx_ios_base_addstd(void *self)
-{
-    ios_base *p = (ios_base *)self;
-    lockit_guard g(LOCK_STREAM);
-    for (p->_Stdstr = 0; ++p->_Stdstr < (size_t)NSTDSTR;)
-        if (!g_stdstr[p->_Stdstr] || g_stdstr[p->_Stdstr] == p)
-            break;
-    if (p->_Stdstr >= (size_t)NSTDSTR) {
-        p->_Stdstr = 0;
-        return;
-    }
-    g_stdstr[p->_Stdstr] = p;
-    ++g_stdopens[p->_Stdstr];
-}
 
 /* ios_base::_Ios_base_dtor: last close of a standard stream, or any other stream: erase_event callbacks, frees
  * the iword/pword and callback lists, deletes the locale */
@@ -415,6 +301,22 @@ extern "C" void fnvnx_ios_base_dtor(void *self)
     }
 }
 
+/* ios_base::_Addstd: registers a standard stream (cin, cout, ...) in the next free slot 1..7; used by basic_ios_init */
+static void fnvnx_ios_base_addstd(void *self)
+{
+    ios_base *p = (ios_base *)self;
+    lockit_guard g(LOCK_STREAM);
+    for (p->_Stdstr = 0; ++p->_Stdstr < (size_t)NSTDSTR;)
+        if (!g_stdstr[p->_Stdstr] || g_stdstr[p->_Stdstr] == p)
+            break;
+    if (p->_Stdstr >= (size_t)NSTDSTR) {
+        p->_Stdstr = 0;
+        return;
+    }
+    g_stdstr[p->_Stdstr] = p;
+    ++g_stdopens[p->_Stdstr];
+}
+
 /* basic_ios<char>::init(basic_streambuf *sb, bool isstd): ios_base::_Init (every field but the vptr, which the
  * caller's constructor has set) with a new locale of the global locimp, then the stream buffer, no tie, fill ' ',
  * badbit without a buffer, and _Addstd for a standard stream. For the decomp's unit copies of basic_istream (S4 STL2,
@@ -444,21 +346,6 @@ extern "C" void fnvnx_basic_ios_init(void *self, void *strbuf, int isstd)
         b->_Mystate |= 4; /* badbit */
     if (isstd)
         fnvnx_ios_base_addstd(b);
-}
-
-/* basic_ostream<char>::basic_ostream(basic_streambuf *sb, bool isstd) with MSVC's hidden "construct the virtual
- * base" flag: the library's standard ostream object in the image (only constructed and destroyed by the game, never
- * written to). Builds the MSVC layout so that the game's destructor (vbptr lookup, _Ios_base_dtor) works; the
- * ios_base / basic_ios vptrs stay NULL - there is no native vftable for them. */
-extern "C" void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase)
-{
-    static const int32_t vbtable[2] = { 0, (int32_t)offsetof(ostream, ios) };
-    ostream *o = (ostream *)self;
-    if (construct_vbase)
-        o->vbptr = vbtable;
-    o->ios.base.vptr = nullptr;
-    fnvnx_basic_ios_init(&o->ios, strbuf, isstd);
-    return self;
 }
 
 /* ---- _Fiopen(const char *name, ios_base::openmode mode, int prot): the FILE behind basic_filebuf::open */

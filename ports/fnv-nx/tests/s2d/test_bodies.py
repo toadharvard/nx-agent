@@ -500,13 +500,13 @@ class Exe(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, 'crt.tsv')
             with open(p, 'w') as fo:
-                fo.write('# address\tclass\tidentification\thow\tunits\tsrc\tprovider\n'
-                         '0x00401000\tcpplib\tstd::_Lockit::_Lockit(int)\tn\t2\t3\tfnvnx_lockit_ctor\n'
-                         '0x00401010\tcpplib\tstd::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)\ti\t1\t2\tx\n'
-                         '0x00401020\tcpplib\tstd::locale::_Getgloballocale() [locale::_Getfacet fallback, locale() _Incref]\ti\t2\t2\tx\n'
-                         '0x00401030\tcpplib\tstd::ios_base::_Ios_base_dtor\tn\t4\t4\tx\n'
-                         '0x00401040\tcpplib\tstd::bad_cast::bad_cast(const char*)\tn\t1\t1\tx\n'
-                         '0x00401050\tcpplib\tstd::map<int, int>::find(std::pair<int, int>)\tn\t1\t1\tx\n')
+                fo.write('# address\tclass\tidentification\tunits\tsrc\tprovider\n'
+                         '0x00401000\tcpplib\tstd::_Lockit::_Lockit(int)\t2\t3\tfnvnx_lockit_ctor\n'
+                         '0x00401010\tcpplib\tstd::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)\t1\t2\tx\n'
+                         '0x00401020\tcpplib\tstd::locale::_Getgloballocale() [locale::_Getfacet fallback, locale() _Incref]\t2\t2\tx\n'
+                         '0x00401030\tcpplib\tstd::ios_base::_Ios_base_dtor\t4\t4\tx\n'
+                         '0x00401040\tcpplib\tstd::bad_cast::bad_cast(const char*)\t1\t1\tx\n'
+                         '0x00401050\tcpplib\tstd::map<int, int>::find(std::pair<int, int>)\t1\t1\tx\n')
             got = bodies.load_provider_params(p)
         self.assertEqual(got, {0x401000: 1, 0x401010: 2, 0x401020: 0, 0x401040: 1, 0x401050: 1})
 

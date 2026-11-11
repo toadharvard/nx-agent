@@ -266,7 +266,7 @@ def main():
             for rel in SRC:
                 f.write('%s\t%s\tok\n' % (rel, objs[rel]))
         crt = os.path.join(t, 'crt_symbols.tsv')   # S4's table: the exe's _purecall has a platform provider
-        open(crt, 'w').write('0x004010e0\tcrt\t_purecall\tn\t0\t0\tplatform/crt: _purecall\n')
+        open(crt, 'w').write('0x004010e0\tcrt\t_purecall\t0\t0\tplatform/crt: _purecall\n')
         res = {}
         for name, exe_arg in (('none', 'none'), ('exe', exe)):
             out, fixed = os.path.join(t, 'out-' + name), os.path.join(t, name, 'fixed')
