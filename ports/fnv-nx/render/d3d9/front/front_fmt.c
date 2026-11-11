@@ -37,17 +37,17 @@ NxFmtRow nxfront_fmt_row(uint32_t d) {
     case NX_D3DFMT_A4R4G4B4: NAT(NxFmt_A4R4G4B4, R, G, B, A, 0, 2); break;
     case NX_D3DFMT_X4R4G4B4: NAT(NxFmt_A4R4G4B4, R, G, B, 1, 0, 2); break;
     case NX_D3DFMT_A2B10G10R10: NAT(NxFmt_RGB10A2, R, G, B, A, RT_, 4); break;
-    case NX_D3DFMT_A2R10G10B10: CNV(NxFmt_RGB10A2, R, G, B, A, 0, 4, 4, NXCONV_A2R10G10B10); break;   /* R and B swapped on upload */
+    case NX_D3DFMT_A2R10G10B10: NAT(NxFmt_BGR10A2, R, G, B, A, RT_, 4); break;               /* GL_RGB10_A2 read as GL_BGRA / 2_10_10_10_REV: the D3D bits exactly */
     case NX_D3DFMT_G16R16: NAT(NxFmt_RG16, R, G, 1, 1, RT_, 4); break;
     case NX_D3DFMT_A16B16G16R16: NAT(NxFmt_RGBA16, R, G, B, A, RT_, 8); break;
-    case NX_D3DFMT_A8: CNV(NxFmt_RGBA8, R, G, B, A, 0, 4, 1, NXCONV_A8); break;               /* -> (0, 0, 0, A) */
-    case NX_D3DFMT_L8: CNV(NxFmt_RGBA8, R, G, B, 1, SR_, 4, 1, NXCONV_L8); break;             /* -> (L, L, L, 1) */
+    case NX_D3DFMT_A8: CNV(NxFmt_RGBA8, R, G, B, A, RT_, 4, 1, NXCONV_A8); break;              /* -> (0, 0, 0, A); target: write mask A (nx_d3d9_rt_rule) */
+    case NX_D3DFMT_L8: CNV(NxFmt_RGBA8, R, G, B, 1, SR_ | RT_, 4, 1, NXCONV_L8); break;       /* -> (L, L, L, 1); target: red written to all three (nx_d3d9_rt_rule) */
     case NX_D3DFMT_A8L8: CNV(NxFmt_RGBA8, R, G, B, A, SR_, 4, 2, NXCONV_A8L8); break;         /* -> (L, L, L, A) */
     case NX_D3DFMT_L16: CNV(NxFmt_RGBA16, R, G, B, 1, 0, 8, 2, NXCONV_L16); break;            /* -> (L, L, L, 1) */
-    case NX_D3DFMT_V8U8: NAT(NxFmt_RG8S, R, G, 1, 1, 0, 2); break;
-    case NX_D3DFMT_Q8W8V8U8: NAT(NxFmt_RGBA8S, R, G, B, A, 0, 4); break;
-    case NX_D3DFMT_V16U16: NAT(NxFmt_RG16S, R, G, 1, 1, 0, 4); break;
-    case NX_D3DFMT_Q16W16V16U16: NAT(NxFmt_RGBA16S, R, G, B, A, 0, 8); break;
+    case NX_D3DFMT_V8U8: NAT(NxFmt_RG8S, R, G, 1, 1, RT_, 2); break;
+    case NX_D3DFMT_Q8W8V8U8: NAT(NxFmt_RGBA8S, R, G, B, A, RT_, 4); break;
+    case NX_D3DFMT_V16U16: NAT(NxFmt_RG16S, R, G, 1, 1, RT_, 4); break;
+    case NX_D3DFMT_Q16W16V16U16: NAT(NxFmt_RGBA16S, R, G, B, A, RT_, 8); break;
     case NX_D3DFMT_R16F: NAT(NxFmt_R16F, R, 1, 1, 1, RT_, 2); break;
     case NX_D3DFMT_G16R16F: NAT(NxFmt_RG16F, R, G, 1, 1, RT_, 4); break;
     case NX_D3DFMT_A16B16G16R16F: NAT(NxFmt_RGBA16F, R, G, B, A, RT_, 8); break;
@@ -76,14 +76,14 @@ NxFmtRow nxfront_fmt_row(uint32_t d) {
     case NX_D3DFMT_D24X4S4: DEP(NxFmt_None, R, G, B, A, 0, 0, 16777216.0f); break;
     /* enumerators without a native layout: no row to fill (NONE above) */
     case NX_D3DFMT_UNKNOWN: break;
-    case NX_D3DFMT_R8G8B8: break;
+    case NX_D3DFMT_R8G8B8: CNV(NxFmt_BGRX8, R, G, B, 1, SR_ | RT_, 4, 3, NXCONV_R8G8B8); break;   /* bytes B,G,R -> B,G,R,x */
     case NX_D3DFMT_R3G3B2: break;
     case NX_D3DFMT_A8R3G3B2: break;
     case NX_D3DFMT_A8P8: break;
     case NX_D3DFMT_P8: break;
     case NX_D3DFMT_A4L4: break;
-    case NX_D3DFMT_L6V5U5: break;
-    case NX_D3DFMT_X8L8V8U8: break;
+    case NX_D3DFMT_L6V5U5: CNV(NxFmt_RGBA8, R, G, B, 1, 0, 4, 2, NXCONV_L6V5U5); break;        /* biased integers + sampler fixup (nx_d3d9_sample_fixup) */
+    case NX_D3DFMT_X8L8V8U8: CNV(NxFmt_RGBA8, R, G, B, 1, 0, 4, 4, NXCONV_X8L8V8U8); break;
     case NX_D3DFMT_A2W10V10U10: break;
     case NX_D3DFMT_UYVY: break;
     case NX_D3DFMT_YUY2: break;
@@ -93,8 +93,8 @@ NxFmtRow nxfront_fmt_row(uint32_t d) {
     case NX_D3DFMT_D32_LOCKABLE: break;
     case NX_D3DFMT_S8_LOCKABLE: break;
     case NX_D3DFMT_VERTEXDATA: break;
-    case NX_D3DFMT_INDEX16: break;
-    case NX_D3DFMT_INDEX32: break;
+    case NX_D3DFMT_INDEX16: NAT(NxFmt_R16, R, 1, 1, 1, RT_, 2); break;                         /* R16_UINT: the bits are the texel (storage; a draw reads v / 65535) */
+    case NX_D3DFMT_INDEX32: NAT(NxFmt_R32F, R, 1, 1, 1, RT_, 4); break;                        /* R32_UINT: the bits are the texel (storage; a draw reads them as a float) */
     case NX_D3DFMT_CxV8U8: break;
     case NX_D3DFMT_A1: break;
     case NX_D3DFMT_A2B10G10R10_XR_BIAS: break;
@@ -106,7 +106,7 @@ NxFmtRow nxfront_fmt_row(uint32_t d) {
     case NX_D3DFMT_NVHU: break;
     case NX_D3DFMT_NVHS: break;
     case NX_D3DFMT_RESZ: break;
-    case NX_D3DFMT_NULL: break;
+    case NX_D3DFMT_NULL: ROW(NxFmt_None, R, G, B, A, NXFMT_NULL, 0, 0, B_DEFAULT, NXCONV_NONE); break;   /* a target without storage (wined3d WINED3DFMT_NULL) */
     case NX_D3DFMT_R16: break;
     case NX_D3DFMT_AL16: break;
     case NX_D3DFMT_NV12: break;

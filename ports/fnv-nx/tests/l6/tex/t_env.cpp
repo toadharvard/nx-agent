@@ -27,8 +27,10 @@ void nxd3d_image_read(NxObj*, uint32_t id, uint32_t lv, uint32_t ly, void* dst, 
 void nxd3d_gen_mips(NxObj*, uint32_t id, uint32_t filter) { rec(R_GEN, id)->row = filter; }
 int nx_env_profile_of(NxObj*) { return g_profile; }
 void nxd3d_preload(NxObj* o) { nx_tex_preload(o); }
-bool nx_env_decltype_supported(uint32_t t) { return t != D3DDECLTYPE_FLOAT16_4; }
-bool nx_env_query_supported(uint32_t t) { return t != D3DQUERYTYPE_VCACHE; }
+void nxd3d_buf_destroy(NxBufCore*) {}
+void nxd3d_dc_release(void*) {}
+bool nxd3d_query_create(NxQueryCore*) { return true; }
+void nxd3d_query_destroy(NxQueryCore*) {}
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0); if (argc > 1) g_data = argv[1];
     t_a(); t_b(); t_c(); t_d(); t_e(); t_h();

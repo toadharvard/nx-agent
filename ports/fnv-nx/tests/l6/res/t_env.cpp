@@ -14,9 +14,12 @@ TEnv t_env(bool ex) {
     return e;
 }
 // ENV answers and backend hooks of the test: the environment supports every type except VCACHE and decl type FLOAT16_4 (so both branches are exercised)
+void nxd3d_preload(NxObj*) {}
+void nxd3d_buf_destroy(NxBufCore*) {}
+bool nxd3d_query_create(NxQueryCore*) { return true; }
+void nxd3d_query_destroy(NxQueryCore*) {}
 bool nx_env_decltype_supported(uint32_t t) { return t != D3DDECLTYPE_FLOAT16_4; }
 bool nx_env_query_supported(uint32_t t) { return t != D3DQUERYTYPE_VCACHE; }
-void nxd3d_preload(NxObj*) {}
 bool g_q_ready = false; int g_q_issues = 0, g_q_flushes = 0; DWORD g_q_last_flags = 0;
 void nxd3d_query_issue(NxQueryCore*, DWORD f) { g_q_issues++; g_q_last_flags = f; }
 bool nxd3d_query_ready(NxQueryCore*) { return g_q_ready; }

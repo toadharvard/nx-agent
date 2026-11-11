@@ -37,6 +37,7 @@ Gl4Fmt gl4_fmt(uint32_t nxfmt) {
     case NxFmt_X1R5G5B5: return (Gl4Fmt)C(GL_RGB5_A1, GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV, 0, 2);
     case NxFmt_A4R4G4B4: return (Gl4Fmt)C(GL_RGBA4, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV, 0, 2);
     case NxFmt_RGB10A2: return (Gl4Fmt)C(GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, 0, 4);
+    case NxFmt_BGR10A2: return (Gl4Fmt)C(GL_RGB10_A2, GL_BGRA, GL_UNSIGNED_INT_2_10_10_10_REV, 0, 4);
     case NxFmt_R8: return (Gl4Fmt)C(GL_R8, GL_RED, GL_UNSIGNED_BYTE, 0, 1);
     case NxFmt_RG8: return (Gl4Fmt)C(GL_RG8, GL_RG, GL_UNSIGNED_BYTE, 0, 2);
     case NxFmt_R16: return (Gl4Fmt)C(GL_R16, GL_RED, GL_UNSIGNED_SHORT, 0, 2);

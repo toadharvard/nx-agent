@@ -6,17 +6,17 @@
  b  state sweeps: for every enumeration and EVERY value in [0, max+2] plus 0x7fffffff and 0xffffffff (D3DFORMAT: [0, 0xca] plus every
     enumerator +-1, see fmt_domain) in two contexts, the C word / bits / sampler == the python oracle written from the wined3d 9.0 rules
  c  latch: the four states whose out-of-range result is "GL keeps its value" over every (valid value, out-of-range value) pair
- d  formats: table == oracle table (all values of the domain); against the env table (render/d3d9/env/env_docked.tsv through
-    tests/l6/env/envq.py): every format the reference environment creates as texture / render target / depth stencil is listed
-    with what the table gives it, the gaps must equal EXPECTED_GAPS exactly (they are reported, not accepted silently)
- e  texel conversion (A8 L8 A8L8 L16 A2R10G10B10 ATI1 against an independent BC4 decoder)
+ d  formats: table == oracle table (all values of the domain); against the env table (render/d3d9/env/env_*.tsv through tests/l6/env/envq.py), PER ROLE (resource type x usage; buffers are
+    not image types): every format an application can create has a native format with the capability of the role, or is NULL (a target without storage: NXFMT_NULL), or is a zero-size
+    class (capability probe, layout oracle of tests/l6/tex). No pinned list of exceptions: a gap fails the part.
+ e  texel conversion (A8 L8 A8L8 L16 R8G8B8 ATI1 against an independent BC4 decoder; L6V5U5 over all 2^16 texels, X8L8V8U8 / R8G8B8 structured; target rules, clear value, read-back, sampler fixup)
  f  mutations of a copy of the sources: each must make the sweeps fail, or the build (a case removed from a switch)
 The oracles are independent of the C: python tables and rules from wined3d 9.0 (state.c, stateblock.c, shader.c, utils.c) and Nine."""
 import ctypes as C, json, os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACKEND = os.path.join(ROOT, "render", "d3d9", "backend")
-sys.path.insert(0, os.path.join(HERE, "..", "env")); import envq   # noqa: E402  (query domains of the environment table)
+sys.path.insert(0, os.path.join(HERE, "..", "env")); sys.path.insert(0, os.path.join(HERE, "..", "tex")); import envq, texoracle   # noqa: E402  (query domains of the environment table; the layout oracle)
 M32, MASKS = 0xffffffff, [0, 1, 2, 3, 0xf, 0x10, 0xff, 0x100, 0x80000000, 0x7fffffff, 0xffffffff]
 
 # ---- independent table: the numbers of d3d9types.h for the consumed enumerations (without FORCE_DWORD) ----------------------------
@@ -61,7 +61,7 @@ NxCull_CW NxCull_CCW NxFill_Solid NxFill_Wireframe NxFill_Point NxFog_None NxFog
 NxWrap_MirrorOnce NxMip_None NxMip_Nearest NxMip_Linear NXSMP_MIN_LINEAR NXSMP_MAG_LINEAR NXSMP_MIP_SHIFT NXSMP_SRGB NXSMP_SHADOW NXRS_B_ENABLE NXRS_B_SRC NXRS_B_DST NXRS_B_OP
 NXRS_B_SRCA NXRS_B_DSTA NXRS_B_OPA NXRS_D_TEST NXRS_D_WRITE NXRS_D_FUNC NXRS_S_ENABLE NXRS_S_TWOSIDED NXRS_S_FUNC NXRS_S_BFUNC NXRS_S_READMASK NXRS_S_WRITEMASK NXRS_S_REF
 NXRS_R_CULL NXRS_R_FILL NXRS_R_BIAS NXRS_R_SCISSOR NXRS_R_SRGB NXRS_R_FLAT NXRS_R_CLIP NXRS_R_POINTSPRITE NXSB_ALPHAFUNC NXSB_ALPHATEST NXSB_FOG NXFMT_COMPRESSED NXFMT_DEPTH
-NXFMT_STENCIL NXFMT_SRGB NXFMT_RENDER NXFMT_CONVERT NxFmt_None NxFmt_RGBA8 NxFmt_BGRA8 NxFmt_BC1 NxFmt_BC2 NxFmt_BC3 NxFmt_R5G6B5 NxFmt_RGBA16F NxFmt_R32F NxFmt_Z24S8 NxFmt_Z32F
+NXFMT_STENCIL NXFMT_SRGB NXFMT_RENDER NXFMT_CONVERT NXFMT_NULL NxFmt_BGR10A2 NxFmt_R16 NxFmt_None NxFmt_RGBA8 NxFmt_BGRA8 NxFmt_BC1 NxFmt_BC2 NxFmt_BC3 NxFmt_R5G6B5 NxFmt_RGBA16F NxFmt_R32F NxFmt_Z24S8 NxFmt_Z32F
 NxFmt_BGRX8 NxFmt_RGBX8 NxFmt_A1R5G5B5 NxFmt_X1R5G5B5 NxFmt_A4R4G4B4 NxFmt_RGB10A2 NxFmt_RG16 NxFmt_RGBA16 NxFmt_RG8S NxFmt_RGBA8S NxFmt_RG16S NxFmt_RGBA16S NxFmt_R16F
 NxFmt_RG16F NxFmt_RG32F NxFmt_RGBA32F NxFmt_BC5 NxFmt_Z16 NxFmt_Z24X8 NxFmt_Z32FS8 NxSwz_R NxSwz_G NxSwz_B NxSwz_A NxSwz_0 NxSwz_1""".split()
 
@@ -206,10 +206,11 @@ def fmt_table(K):
     E = ORACLE_ENUMS["D3DFORMAT"]; e = lambda s: E["D3DFMT_" + s]
     put(21, "BGRA8", (R, G, B, A), SR | RT, 4); put(22, "BGRX8", (R, G, B, S1), SR | RT, 4); put(32, "RGBA8", (R, G, B, A), SR | RT, 4); put(33, "RGBX8", (R, G, B, S1), SR | RT, 4)
     put(23, "R5G6B5", (R, G, B, S1), RT, 2); put(24, "X1R5G5B5", (R, G, B, S1), RT, 2); put(25, "A1R5G5B5", (R, G, B, A), RT, 2); put(26, "A4R4G4B4", (R, G, B, A), 0, 2)
-    put(30, "A4R4G4B4", (R, G, B, S1), 0, 2); put(31, "RGB10A2", (R, G, B, A), RT, 4); put(35, "RGB10A2", (R, G, B, A), CV, 4); put(34, "RG16", (R, G, S1, S1), RT, 4)
-    put(36, "RGBA16", (R, G, B, A), RT, 8); put(28, "RGBA8", (R, G, B, A), CV, 4, 1); put(50, "RGBA8", (R, G, B, S1), SR | CV, 4, 1); put(51, "RGBA8", (R, G, B, A), SR | CV, 4, 2)
-    put(81, "RGBA16", (R, G, B, S1), CV, 8, 2); put(60, "RG8S", (R, G, S1, S1), 0, 2); put(63, "RGBA8S", (R, G, B, A), 0, 4); put(64, "RG16S", (R, G, S1, S1), 0, 4)
-    put(110, "RGBA16S", (R, G, B, A), 0, 8); put(111, "R16F", (R, S1, S1, S1), RT, 2); put(112, "RG16F", (R, G, S1, S1), RT, 4); put(113, "RGBA16F", (R, G, B, A), RT, 8)
+    put(30, "A4R4G4B4", (R, G, B, S1), 0, 2); put(31, "RGB10A2", (R, G, B, A), RT, 4); put(35, "BGR10A2", (R, G, B, A), RT, 4); put(34, "RG16", (R, G, S1, S1), RT, 4)
+    put(36, "RGBA16", (R, G, B, A), RT, 8); put(28, "RGBA8", (R, G, B, A), CV | RT, 4, 1); put(50, "RGBA8", (R, G, B, S1), SR | CV | RT, 4, 1); put(51, "RGBA8", (R, G, B, A), SR | CV, 4, 2)
+    put(81, "RGBA16", (R, G, B, S1), CV, 8, 2); put(60, "RG8S", (R, G, S1, S1), RT, 2); put(63, "RGBA8S", (R, G, B, A), RT, 4); put(64, "RG16S", (R, G, S1, S1), RT, 4)
+    put(110, "RGBA16S", (R, G, B, A), RT, 8); put(20, "BGRX8", (R, G, B, S1), SR | CV | RT, 4, 3); put(61, "RGBA8", (R, G, B, S1), CV, 4, 2); put(62, "RGBA8", (R, G, B, S1), CV, 4, 4)
+    put(101, "R16", (R, S1, S1, S1), RT, 2); put(102, "R32F", (R, S1, S1, S1), RT, 4); put(111, "R16F", (R, S1, S1, S1), RT, 2); put(112, "RG16F", (R, G, S1, S1), RT, 4); put(113, "RGBA16F", (R, G, B, A), RT, 8)
     put(114, "R32F", (R, S1, S1, S1), RT, 4); put(115, "RG32F", (R, G, S1, S1), RT, 8); put(116, "RGBA32F", (R, G, B, A), RT, 16)
     put(e("DXT1"), "BC1", (R, G, B, A), CMP | SR, 8); put(e("DXT2"), "BC2", (R, G, B, A), CMP | SR, 16); put(e("DXT3"), "BC2", (R, G, B, A), CMP | SR, 16)
     put(e("DXT4"), "BC3", (R, G, B, A), CMP | SR, 16); put(e("DXT5"), "BC3", (R, G, B, A), CMP | SR, 16)
@@ -314,29 +315,31 @@ def latch_checks(L, K, ck):
 
 
 def format_checks(L, K, ck):
-    lib = L.lib; FT = fmt_table(K); gaps = {"texture": [], "render": [], "depth": []}
+    lib = L.lib; FT = fmt_table(K); gaps = {k: [] for k in ("texture", "texture RT", "texture DS", "cube", "cube RT", "cube DS", "volume", "volume RT", "volume DS", "surface", "surface RT", "surface DS")}
     for v in fmt_domain():
-        i = lib.nx_d3d9_format(v); got = (i.format, tuple(i.swizzle), i.flags, i.bytes, i.srcBytes) if i.format else (0, tuple(i.swizzle), 0, 0, 0)
-        w = FT.get(v); want = (w[0], w[1], w[2], w[3], w[4]) if w and w[0] else (0, (K["NxSwz_R"], K["NxSwz_G"], K["NxSwz_B"], K["NxSwz_A"]), 0, 0, 0)
+        i = lib.nx_d3d9_format(v); got = (i.format, tuple(i.swizzle), i.flags, i.bytes, i.srcBytes) if i.format else (0, tuple(i.swizzle), i.flags, 0, 0)
+        w = FT.get(v); want = (w[0], w[1], w[2], w[3], w[4]) if w and w[0] else (0, (K["NxSwz_R"], K["NxSwz_G"], K["NxSwz_B"], K["NxSwz_A"]), K["NXFMT_NULL"] if v == FCC("NULL") else 0, 0, 0)
         ck.ok("d", got == want, f"format {v:#x}: {got} != {want}")
         ck.ok("d", lib.nx_d3d9_bias_scale(v) == (w[5] if w else 2.0 ** 23), f"bias scale {v:#x}")
-    # the environment table: what the reference environment (Wine 9.0) creates (CheckDeviceFormat, adapter X8R8G8B8, resource TEXTURE)
-    rows = {}
-    for ln in open(os.path.join(ROOT, "render", "d3d9", "env", "env_docked.tsv")):
-        m = re.match(r"CheckDeviceFormat\(0,1,16,([0-9a-f]+),3,([0-9a-f]+)\)\t([0-9a-f]+)\t", ln)
-        if m and int(m.group(3), 16) == 0: rows.setdefault(int(m.group(1), 16), set()).add(int(m.group(2), 16))
-    ck.ok("d", all(v in envq.FMT for s in rows.values() for v in s), "env formats are in the envq domain")
-    for use, key, need in ((0, "texture", None), (1, "render", K["NXFMT_RENDER"]), (2, "depth", K["NXFMT_DEPTH"])):
-        for v in sorted(rows.get(use, ())):
+    # the environment table, per ROLE (resource type x usage): every format the reference environment (Wine 9.0 + llvmpipe) lets an application create in an image role
+    # has a native format with the capability the role needs, or is NULL (a target without storage), or is a zero-size class (a capability probe, not creatable storage:
+    # the layout oracle of tests/l6/tex). Buffers (index / vertex) are not image types and are not asked.
+    cdf = {}
+    for prof in ("handheld", "docked"):
+        for ln in open(os.path.join(ROOT, "render", "d3d9", "env", f"env_{prof}.tsv")):
+            m = re.match(r"CheckDeviceFormat\(0,1,16,([0-9a-f]+),([0-9a-f]+),([0-9a-f]+)\)\t([0-9a-f]+)\t", ln)
+            if m and int(m.group(4), 16) == 0: cdf.setdefault((int(m.group(1), 16), int(m.group(2), 16)), set()).add(int(m.group(3), 16))   # (usage, resource type)
+    ck.ok("d", all(v in envq.FMT for s in cdf.values() for v in s), "env formats are in the envq domain")
+    for (rt, us), name in (((3, 0), "texture"), ((3, 1), "texture RT"), ((3, 2), "texture DS"), ((5, 0), "cube"), ((5, 1), "cube RT"), ((5, 2), "cube DS"), ((4, 0), "volume"), ((4, 1), "volume RT"),
+                           ((4, 2), "volume DS"), ((1, 0), "surface"), ((1, 1), "surface RT"), ((1, 2), "surface DS")):
+        need = {0: 0, 1: K["NXFMT_RENDER"], 2: K["NXFMT_DEPTH"]}[us]
+        for v in sorted(cdf.get((us, rt), ())):   # key (usage, resource type)
             i = lib.nx_d3d9_format(v)
-            if i.format == 0 or (need and not i.flags & need): gaps[key].append(v)
-    return {k: sorted(x) for k, x in gaps.items()}
-
-
-EXPECTED_GAPS = {   # creatable in the reference environment, no native layout / not renderable in the table: reported to the lead, not accepted
-    "texture": sorted([61, 62, 101, 102, FCC("ATOC"), FCC("NULL"), FCC("INST"), FCC("RESZ")]),
-    "render": sorted([28, 35, 50, 60, 63, 64, 101, 102, 110, FCC("NULL"), FCC("RESZ")]),
-    "depth": []}
+            if texoracle.layout(v) is None: continue                       # zero-size class: not creatable
+            if i.format == 0 and (i.flags & K["NXFMT_NULL"]): continue      # NULL: no storage by rule
+            if rt == 1 and us == 0: continue                                # a plain offscreen surface needs a memory layout only (CPU copy)
+            if i.format == 0 or (need and not i.flags & need): gaps[name].append(v)
+    return {k: sorted(x) for k, x in gaps.items() if x}
 
 
 def conv_checks(L, K, ck):
@@ -348,8 +351,43 @@ def conv_checks(L, K, ck):
     n, r, o = run(50, 2, 1, 1, 1, [7, 9]); ck.ok("e", o == bytes([7, 7, 7, 255, 9, 9, 9, 255]), f"L8 {o}")
     n, r, o = run(51, 1, 1, 1, 1, [7, 9]); ck.ok("e", o == bytes([7, 7, 7, 9]), f"A8L8 {o}")
     n, r, o = run(81, 1, 1, 1, 1, [0x34, 0x12]); ck.ok("e", o == bytes([0x34, 0x12, 0x34, 0x12, 0x34, 0x12, 255, 255]), f"L16 {o}")
-    v = 0xC0000000 | 0x155 << 20 | 0x2aa << 10 | 0x0ff; n, r, o = run(35, 1, 1, 1, 1, list(v.to_bytes(4, "little")))
-    ck.ok("e", int.from_bytes(o, "little") == (0xC0000000 | 0x0ff << 20 | 0x2aa << 10 | 0x155), f"A2R10G10B10 {o.hex()}")
+    ck.ok("e", lib.nx_d3d9_convert(35, 1, 1, 1, 1, bytes(4), 4, bytes(4), 4) == 0 and lib.nx_d3d9_converted_size(35, 4, 4, 1, 1) == 64, "A2R10G10B10 is native (no conversion)")
+    # R8G8B8: bytes B,G,R -> B,G,R,255; unconvert is the inverse
+    px = [(0, 0, 0), (1, 2, 3), (255, 0, 128), (200, 100, 50)]; src = [c for p in px for c in p]
+    n, r, o = run(20, 4, 1, 1, 1, src); ck.ok("e", o == bytes(c for p in px for c in (*p, 255)), f"R8G8B8 {o.hex()}")
+    nb = (C.c_uint8 * 12)(); lib.nx_d3d9_unconvert.restype = C.c_uint32; lib.nx_d3d9_unconvert.argtypes = [C.c_uint32] * 3 + [C.c_void_p, C.c_uint32, C.c_void_p, C.c_uint32]
+    ck.ok("e", lib.nx_d3d9_unconvert(20, 4, 1, o, 16, nb, 12) == 12 and bytes(nb) == bytes(src), "R8G8B8 unconvert = inverse")
+    # L6V5U5: every one of the 2^16 texels against an independent decoder (python), then the sampler fixup reproduces the D3D value
+    def sgn(v, bits): return v - (1 << bits) if v >> (bits - 1) else v
+    sc, of = (C.c_float * 4)(), (C.c_float * 4)(); lib.nx_d3d9_sample_fixup.argtypes = [C.c_uint32, C.c_void_p, C.c_void_p]
+    ck.ok("e", lib.nx_d3d9_sample_fixup(61, sc, of) == 1, "L6V5U5 has a fixup")
+    allv = b"".join(v.to_bytes(2, "little") for v in range(65536)); n, r, o = run(61, 65536, 1, 1, 1, list(allv)); good = n == 65536 * 4
+    for v in range(65536):
+        u, vv, l = sgn(v & 31, 5), sgn(v >> 5 & 31, 5), v >> 10; w = o[4 * v:4 * v + 4]
+        ru, rv = max(u, -15) / 15, max(vv, -15) / 15                     # the D3D value: s / 15, -16 clamped to -1
+        d0, d1, d2 = w[0] / 255 * sc[0] + of[0], w[1] / 255 * sc[1] + of[1], w[2] / 255 * sc[2] + of[2]
+        if not (w[3] == 255 and abs(d0 - ru) < 1e-6 and abs(d1 - rv) < 1e-6 and abs(d2 - l / 63) < 1e-6): good = False; ck.ok("e", False, f"L6V5U5 {v:#06x}: {w.hex()} -> {d0, d1, d2} vs {ru, rv, l / 63}"); break
+    ck.ok("e", good, "L6V5U5 all 65536 texels")
+    # X8L8V8U8: boundary sweep (every value of U, V; L; X) against the decoder
+    ck.ok("e", lib.nx_d3d9_sample_fixup(62, sc, of) == 1, "X8L8V8U8 has a fixup")
+    vals = [(u, v, l, x) for u in range(256) for v in (0, 1, 127, 128, 129, 255) for l in (0, 77, 255) for x in (0, 200)]
+    src = b"".join(bytes(t) for t in vals); n, r, o = run(62, len(vals), 1, 1, 1, list(src)); good = n == len(vals) * 4
+    for k, (u, v, l, x) in enumerate(vals):
+        w = o[4 * k:4 * k + 4]; ru, rv = max(sgn(u, 8), -127) / 127, max(sgn(v, 8), -127) / 127
+        d0, d1 = w[0] / 255 * sc[0] + of[0], w[1] / 255 * sc[1] + of[1]
+        if not (w[3] == 255 and w[2] == l and abs(d0 - ru) < 1e-6 and abs(d1 - rv) < 1e-6): good = False; ck.ok("e", False, f"X8L8V8U8 {(u, v, l, x)}: {w.hex()}"); break
+    ck.ok("e", good, "X8L8V8U8 structured sweep")
+    # target rules: write mask / replication / clear value / read-back of A8, L8, R8G8B8; everything else the identity
+    m, rp = C.c_uint8(), C.c_uint8(); lib.nx_d3d9_rt_rule.argtypes = [C.c_uint32, C.c_void_p, C.c_void_p]; lib.nx_d3d9_clear_rgba8.restype = C.c_uint32; lib.nx_d3d9_clear_rgba8.argtypes = [C.c_uint32] * 2
+    for f, wm, wr in ((28, 8, 0), (50, 7, 1), (20, 7, 0), (21, 15, 0), (51, 15, 0), (36, 15, 0)):
+        lib.nx_d3d9_rt_rule(f, C.byref(m), C.byref(rp)); ck.ok("e", (m.value, rp.value) == (wm, wr), f"rt rule of {f}: {m.value, rp.value}")
+    col = 0x80402010                                                                   # A 0x80, R 0x40, G 0x20, B 0x10
+    for f, want in ((28, 0xFF000000 & 0 | 0x80000000), (50, 0xFF404040), (20, 0xFF102040), (21, 0x80102040)):
+        ck.ok("e", lib.nx_d3d9_clear_rgba8(f, col) == want, f"clear value of {f}: {lib.nx_d3d9_clear_rgba8(f, col):#x} != {want:#x}")
+    nat = bytes([5, 6, 7, 8, 1, 2, 3, 4]); b4 = (C.c_uint8 * 2)()
+    ck.ok("e", lib.nx_d3d9_unconvert(28, 2, 1, nat, 8, b4, 2) == 2 and bytes(b4) == bytes([8, 4]), "A8 unconvert takes alpha")
+    ck.ok("e", lib.nx_d3d9_unconvert(50, 2, 1, nat, 8, b4, 2) == 2 and bytes(b4) == bytes([5, 1]), "L8 unconvert takes red")
+    ck.ok("e", lib.nx_d3d9_unconvert(21, 2, 1, nat, 8, b4, 2) == 0 and lib.nx_d3d9_unconvert(20, 2, 1, nat, 7, bytes(6), 6) == 0, "no unconvert for a plain format / a short source")
     for blk in ([200, 100, 0x88, 0xc6, 0xfa, 0x1b, 0x2d, 0x3f], [10, 200, 0x91, 0x2a, 0x55, 0xaa, 0x0f, 0xf0], [0, 0] + [0xff] * 6):
         e = [blk[0], blk[1]]
         if e[0] > e[1]: e += [((8 - c) * e[0] + (c - 1) * e[1]) // 7 for c in range(2, 8)]
@@ -380,7 +418,7 @@ def enum_checks(tmp, ck):
 def check_all(L, K, tmp, ck, with_enum=True):
     if with_enum: enum_checks(tmp, ck)
     sweeps(L, K, ck); latch_checks(L, K, ck); gaps = format_checks(L, K, ck); conv_checks(L, K, ck)
-    ck.ok("d", gaps == EXPECTED_GAPS, f"gaps {gaps} != EXPECTED_GAPS")
+    ck.ok("d", not gaps, f"formats the env table lets an application create without storage rule / native format: {gaps}")
     return gaps
 
 

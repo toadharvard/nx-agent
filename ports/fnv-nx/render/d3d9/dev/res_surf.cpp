@@ -44,7 +44,8 @@ HRESULT nx_img_unlock(NxImg* im, uint32_t level, uint32_t face, bool* was) {
     return D3D_OK;
 }
 // ---- surfaces
-NxSurfCore::~NxSurfCore() { delete own; }
+void nxd3d_dc_release(void* dc);   // platform (copy_util.h)
+NxSurfCore::~NxSurfCore() { if (dc) nxd3d_dc_release(dc); delete own; }   // a DC still handed out (GetDC without ReleaseDC) goes with the surface (wined3d_texture_destroy_dc)
 HRESULT NxSurfCore::desc(D3DSURFACE_DESC* d) {
     if (!d) return D3DERR_INVALIDCALL;
     const NxSub* s = img->at(level, face);

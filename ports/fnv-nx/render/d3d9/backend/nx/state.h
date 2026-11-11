@@ -190,6 +190,7 @@ enum NxFormat {
     NxFmt_R16F = 26, NxFmt_RG16F = 27, NxFmt_RG32F = 28, NxFmt_RGBA32F = 29,
     NxFmt_BC4 = 30, NxFmt_BC5 = 31,
     NxFmt_Z16 = 32, NxFmt_Z24X8 = 33, NxFmt_Z32FS8 = 34,
+    NxFmt_BGR10A2 = 35,        /* u32: B 0-9, G 10-19, R 20-29, A 30-31 (D3DFMT_A2R10G10B10; GL_RGB10_A2 / GL_BGRA / 2_10_10_10_REV) */
     NxFmt_Count
 };
 enum NxSwizzle { NxSwz_R = 0, NxSwz_G = 1, NxSwz_B = 2, NxSwz_A = 3, NxSwz_0 = 4, NxSwz_1 = 5 };
@@ -198,6 +199,8 @@ enum NxSwizzle { NxSwz_R = 0, NxSwz_G = 1, NxSwz_B = 2, NxSwz_A = 3, NxSwz_0 = 4
 #define NXFMT_STENCIL    0x04
 #define NXFMT_SRGB       0x08  /* an sRGB view exists on both backends */
 #define NXFMT_RENDER     0x10  /* usable as a colour render target */
+#define NXFMT_NULL       0x40  /* NxFormatInfo.format is NxFmt_None AND the D3D format is a target without storage (D3DFMT_NULL): a pass
+                                  simply has no attachment for it; it is not an unsupported format */
 #define NXFMT_CONVERT    0x20  /* the D3D texel data must go through nx_d3d9_convert() before the upload: the format
                                   is stored expanded so that no view swizzle has to move or invent a channel (a view
                                   swizzle also applies to the BORDER colour; Nine's formats have no such swizzle) */

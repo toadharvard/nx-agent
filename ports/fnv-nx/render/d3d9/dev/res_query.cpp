@@ -41,7 +41,9 @@ static HRESULT make(NxObj* dev, D3DQUERYTYPE t, IDirect3DQuery9** pp) {
     uint32_t sz = nx_query_data_size(t);
     if (!sz || !nx_env_query_supported(t)) { if (pp) *pp = nullptr; return D3DERR_NOTAVAILABLE; }
     if (!pp) return D3D_OK;
-    NxQuery9* q = new NxQuery9; q->asChild(dev, ~0u); q->type = t; q->data_size = sz; *pp = q; return D3D_OK;
+    NxQuery9* q = new NxQuery9; q->asChild(dev, ~0u); q->type = t; q->data_size = sz;
+    if (!nxd3d_query_create(q)) { NxObj* o = q; o->release(); return D3DERR_OUTOFVIDEOMEMORY; }   // the backend has no id left (nxgpu4.h: ids 1..4096)
+    *pp = q; return D3D_OK;
 }
 HRESULT STDMETHODCALLTYPE NxDevice9::CreateQuery(D3DQUERYTYPE t, IDirect3DQuery9** pp) { return make(this, t, pp); }
 HRESULT STDMETHODCALLTYPE NxDevice9Ex::CreateQuery(D3DQUERYTYPE t, IDirect3DQuery9** pp) { return make(this, t, pp); }

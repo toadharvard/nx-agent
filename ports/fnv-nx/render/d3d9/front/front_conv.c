@@ -80,13 +80,14 @@ uint32_t nx_d3d9_convert(uint32_t d3dfmt, uint32_t w, uint32_t h, uint32_t mips,
         case NXCONV_A8L8: d[0] = d[1] = d[2] = s[0]; d[3] = s[1]; s += 2; d += 4; break;
         case NXCONV_L16:
             d[0] = d[2] = d[4] = s[0]; d[1] = d[3] = d[5] = s[1]; d[6] = d[7] = 255; s += 2; d += 8; break;
-        case NXCONV_A2R10G10B10: {
-            uint32_t v = (uint32_t)s[0] | (uint32_t)s[1] << 8 | (uint32_t)s[2] << 16 | (uint32_t)s[3] << 24;
-            v = (v & 0xC00FFC00u) | (v >> 20 & 0x3FF) | (v & 0x3FF) << 20;
-            d[0] = (uint8_t)v; d[1] = (uint8_t)(v >> 8); d[2] = (uint8_t)(v >> 16); d[3] = (uint8_t)(v >> 24);
-            s += 4; d += 4;
+        case NXCONV_R8G8B8: d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255; s += 3; d += 4; break;
+        case NXCONV_L6V5U5: {   /* U 0-4 and V 5-9 signed, L 10-15 unsigned -> biased unsigned bytes (front_rt.c: the sampler undoes the bias) */
+            uint32_t v = (uint32_t)s[0] | (uint32_t)s[1] << 8;
+            d[0] = nxfront_bias((int)(v & 31) - ((v & 16) ? 32 : 0), 15); d[1] = nxfront_bias((int)(v >> 5 & 31) - ((v & 512) ? 32 : 0), 15);
+            d[2] = (uint8_t)(v >> 10); d[3] = 255; s += 2; d += 4;
             break;
         }
+        case NXCONV_X8L8V8U8: d[0] = nxfront_bias((int8_t)s[0], 127); d[1] = nxfront_bias((int8_t)s[1], 127); d[2] = s[2]; d[3] = 255; s += 4; d += 4; break;
         case NXCONV_ATI1: break;   /* handled above (blocks, not pixels) */
         case NXCONV_NONE: break;   /* excluded by the NXFMT_CONVERT test above */
         }

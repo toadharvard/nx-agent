@@ -44,6 +44,8 @@ struct NxImg {
     void upload();                                                    // flush: image_update per dirty sub-resource (face-major, level order), then clear
     void sync(bool gen);                                              // upload(), and (gen) the AUTOGENMIPMAP generation when the levels changed
 };
+void nx_img_push(NxImg*, uint32_t level, uint32_t face, const NxSub* s, const NxBox3* b);   // image_update of a box of a D3D-layout sub-resource (converts formats with NXFMT_CONVERT)
+void nx_img_push_at(NxImg*, uint32_t level, uint32_t face, const NxBox3* b, const uint8_t* texels, uint32_t row, uint32_t slice);   // the same for texels (D3D layout) given by the pointer to the first one of the box
 enum { NXI_DISCARD = 1 };            // NxImg::flags: Discard flag of CreateDepthStencilSurface
 // ---- locks (res_surf.cpp): `box` null = the whole sub-resource
 HRESULT nx_img_lock(NxImg* img, uint32_t level, uint32_t face, const D3DBOX* box, DWORD flags, void** bits, uint32_t* row, uint32_t* slice);

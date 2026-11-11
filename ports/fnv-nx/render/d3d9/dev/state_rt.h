@@ -53,7 +53,12 @@ struct NxDeclCore : NxObj { DWORD fvf = 0; };  // base of NxVertexDeclaration9: 
 // the implicit declaration of an FVF (device-cached, one per FVF). Defined by the declaration module; undefined = link error.
 IDirect3DVertexDeclaration9* nx_device_fvf_decl(NxDeviceCore* dev, DWORD fvf);
 
+struct NxDevLifeBase {  // owner of the lifecycle state of a device (dev_core.h NxDevLife): implicit swap chain, back buffers, auto depth stencil, cursor; destroyed with the device after its bindings are dropped
+    virtual ~NxDevLifeBase() {}
+    void* operator new(size_t n) { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }
+};
 struct NxDeviceCore : NxObj {
+    NxDevLifeBase* life = nullptr;
     NxDeviceState cur; NxStateBlockCore* rec = nullptr; uint64_t dirty = 0; NxCreateParams cp = {};
     NxSparse<NxLightEnt> lights; NxSparse<NxPalEnt> pals; uint32_t swvp = 0;
     NxDeviceCore() { memset((void*)&cur, 0, sizeof cur); }

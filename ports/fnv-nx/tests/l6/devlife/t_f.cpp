@@ -1,0 +1,31 @@
+// part f: the Ex methods (Wine d3d9_device_{PresentEx, Set/GetMaximumFrameLatency, CheckDeviceState, GetDisplayModeEx}, MS D3D9Ex pages for GPU priority / WaitForVBlank / CheckResourceResidency)
+#include "t_common.h"
+void t_f() {
+    t_part('f'); g_profile = 1; IDirect3D9* dx = t_d3d(true); IDirect3D9Ex* x3d = static_cast<IDirect3D9Ex*>(dx); D3DPRESENT_PARAMETERS pp = t_pp(); IDirect3DDevice9Ex* e = static_cast<IDirect3DDevice9Ex*>(t_dev(dx, &pp)); CHECK(e); t_clear_hooks();
+    UINT lat = 99; CHECK_HR(e->GetMaximumFrameLatency(&lat), D3D_OK); CHECK_EQ(lat, 3); CHECK_HR(e->SetMaximumFrameLatency(0), D3D_OK); e->GetMaximumFrameLatency(&lat); CHECK_EQ(lat, 3); CHECK_HR(e->SetMaximumFrameLatency(30), D3D_OK); e->GetMaximumFrameLatency(&lat); CHECK_EQ(lat, 30);
+    CHECK_HR(e->SetMaximumFrameLatency(31), D3DERR_INVALIDCALL); e->GetMaximumFrameLatency(&lat); CHECK_EQ(lat, 30); CHECK_HR(e->GetMaximumFrameLatency(nullptr), D3DERR_INVALIDCALL);
+    INT pr = 99; CHECK_HR(e->GetGPUThreadPriority(&pr), D3D_OK); CHECK_EQ(pr, 0); CHECK_HR(e->SetGPUThreadPriority(7), D3D_OK); e->GetGPUThreadPriority(&pr); CHECK_EQ(pr, 7); CHECK_HR(e->SetGPUThreadPriority(8), D3DERR_INVALIDCALL); CHECK_HR(e->SetGPUThreadPriority(-8), D3DERR_INVALIDCALL);
+    CHECK_HR(e->SetGPUThreadPriority(-7), D3D_OK); e->GetGPUThreadPriority(&pr); CHECK_EQ(pr, -7); CHECK_HR(e->GetGPUThreadPriority(nullptr), D3DERR_INVALIDCALL);
+    CHECK_HR(e->WaitForVBlank(0), D3D_OK); CHECK_EQ(g_nvblank, 1); CHECK_HR(e->WaitForVBlank(1), D3DERR_INVALIDCALL); CHECK_EQ(g_nvblank, 1);
+    IDirect3DTexture9* t = nullptr; e->CreateTexture(8, 8, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t, nullptr); IDirect3DSurface9* sf; t->GetSurfaceLevel(0, &sf); IDirect3DResource9* rs[2] = {t, sf};
+    CHECK_HR(e->CheckResourceResidency(rs, 2), D3D_OK); CHECK_HR(e->CheckResourceResidency(nullptr, 1), D3DERR_INVALIDCALL); CHECK_HR(e->CheckResourceResidency(rs, 0), D3DERR_INVALIDCALL);
+    IDirect3D9* d2 = t_d3d(true); IDirect3DDevice9Ex* other = static_cast<IDirect3DDevice9Ex*>(t_dev(d2, &pp)); IDirect3DTexture9* ot = nullptr; other->CreateTexture(8, 8, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &ot, nullptr); IDirect3DResource9* orr[1] = {ot};
+    CHECK_HR(e->CheckResourceResidency(orr, 1), D3DERR_INVALIDCALL); IDirect3DResource9* nr[1] = {(IDirect3DResource9*)(void*)static_cast<IDirect3DDevice9*>(e)}; CHECK_HR(e->CheckResourceResidency(nr, 1), D3DERR_INVALIDCALL);
+    ot->Release(); other->Release(); d2->Release(); sf->Release(); t->Release();
+    // ---- presentation: TestCooperativeLevel is always OK, a lost device occludes, FORCEIMMEDIATE overrides the interval, the swap chain counts presents
+    D3DPRESENT_PARAMETERS ip = t_pp(); ip.PresentationInterval = D3DPRESENT_INTERVAL_TWO; IDirect3DDevice9Ex* ie = static_cast<IDirect3DDevice9Ex*>(t_dev(dx, &ip)); CHECK_HR(ie->PresentEx(nullptr, nullptr, nullptr, nullptr, 0), D3D_OK); CHECK_EQ(g_pres[0].p.interval, 2);
+    CHECK_HR(ie->PresentEx(nullptr, nullptr, nullptr, nullptr, D3DPRESENT_FORCEIMMEDIATE), D3D_OK); CHECK_EQ(g_pres[1].p.interval, 0); CHECK_HR(ie->Present(nullptr, nullptr, nullptr, nullptr), D3D_OK);
+    IDirect3DSwapChain9* sc; ie->GetSwapChain(0, &sc); IDirect3DSwapChain9Ex* sx; CHECK_HR(sc->QueryInterface(IID_IDirect3DSwapChain9Ex, (void**)&sx), D3D_OK); UINT pc = 99; CHECK_HR(sx->GetLastPresentCount(&pc), D3D_OK); CHECK_EQ(pc, 3);
+    CHECK_HR(sx->Present(nullptr, nullptr, nullptr, nullptr, D3DPRESENT_FORCEIMMEDIATE), D3D_OK); CHECK_EQ(g_pres[3].p.interval, 0); sx->GetLastPresentCount(&pc); CHECK_EQ(pc, 4); CHECK_HR(sx->GetLastPresentCount(nullptr), D3DERR_INVALIDCALL);
+    D3DDISPLAYMODEEX m = {sizeof m}; D3DDISPLAYROTATION rot = (D3DDISPLAYROTATION)9; CHECK_HR(sx->GetDisplayModeEx(&m, &rot), D3D_OK); CHECK(m.Width == 1920 && m.Height == 1080 && m.Format == D3DFMT_X8R8G8B8 && m.ScanLineOrdering == D3DSCANLINEORDERING_PROGRESSIVE && rot == D3DDISPLAYROTATION_IDENTITY);
+    D3DDISPLAYMODEEX m2 = {sizeof m}; CHECK_HR(ie->GetDisplayModeEx(0, &m2, nullptr), D3D_OK); CHECK(!memcmp(&m, &m2, sizeof m)); m2.Size = 20; CHECK_HR(ie->GetDisplayModeEx(0, &m2, nullptr), D3DERR_INVALIDCALL); m2.Size = sizeof m2; CHECK_HR(ie->GetDisplayModeEx(1, &m2, nullptr), D3DERR_INVALIDCALL); m2.Size = 20; CHECK_HR(sx->GetDisplayModeEx(&m2, nullptr), D3DERR_INVALIDCALL);
+    sx->Release(); sc->Release(); NxDevLife* L = nx_life(O(ie)); L->state = NX_DEV_LOST; CHECK_HR(ie->TestCooperativeLevel(), D3D_OK); CHECK_HR(ie->Present(nullptr, nullptr, nullptr, nullptr), S_PRESENT_OCCLUDED); CHECK_HR(ie->PresentEx(nullptr, nullptr, nullptr, nullptr, 0), S_PRESENT_OCCLUDED); L->state = NX_DEV_OK;
+    // ---- CheckDeviceState (rows DEV.CheckDeviceState): windowed always OK; full screen: the device window OK, another window occluded (while the device is OK)
+    CHECK_HR(ie->CheckDeviceState((HWND)W_A), D3D_OK); CHECK_HR(ie->CheckDeviceState((HWND)W_SMALL), D3D_OK); uint32_t sw, sh; t_screen(&sw, &sh);
+    D3DPRESENT_PARAMETERS fp = t_pp(false); fp.BackBufferWidth = sw; fp.BackBufferHeight = sh; fp.hDeviceWindow = (HWND)W_SCREEN; IDirect3DDevice9Ex* fe = static_cast<IDirect3DDevice9Ex*>(t_dev(dx, &fp, nullptr, (void*)W_SCREEN));
+    if (CHECK(fe)) { CHECK_HR(fe->CheckDeviceState((HWND)W_SCREEN), D3D_OK); CHECK_HR(fe->CheckDeviceState((HWND)W_A), S_PRESENT_OCCLUDED); NxDevLife* F = nx_life(O(fe)); F->state = NX_DEV_NOTRESET; CHECK_HR(fe->CheckDeviceState((HWND)W_SCREEN), S_PRESENT_OCCLUDED); CHECK_HR(fe->CheckDeviceState((HWND)W_A), D3D_OK); fe->Release(); }
+    // ---- CreateDeviceEx ignores the mode (Wine) and fails like CreateDevice; ResetEx is part c
+    IDirect3DDevice9Ex* ce = nullptr; D3DDISPLAYMODEEX dm = {sizeof dm, sw, sh, 0, D3DFMT_X8R8G8B8, D3DSCANLINEORDERING_PROGRESSIVE}; D3DPRESENT_PARAMETERS cp = t_pp(); cp.SwapEffect = (D3DSWAPEFFECT)6; CHECK_HR(x3d->CreateDeviceEx(0, D3DDEVTYPE_HAL, (HWND)W_A, 0, &cp, &dm, &ce), D3DERR_INVALIDCALL); CHECK(ce == nullptr);
+    cp.SwapEffect = D3DSWAPEFFECT_FLIPEX; cp.BackBufferCount = 30; CHECK_HR(x3d->CreateDeviceEx(0, D3DDEVTYPE_HAL, (HWND)W_A, 0, &cp, nullptr, &ce), D3D_OK); if (ce) ce->Release(); cp.BackBufferCount = 31; CHECK_HR(x3d->CreateDeviceEx(0, D3DDEVTYPE_HAL, (HWND)W_A, 0, &cp, nullptr, &ce), D3DERR_INVALIDCALL);
+    ie->Release(); e->Release(); dx->Release();
+}

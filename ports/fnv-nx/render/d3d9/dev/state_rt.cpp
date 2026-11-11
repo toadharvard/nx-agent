@@ -45,7 +45,7 @@ void NxDeviceCore::put(uint32_t slot, const void* e) {
 void NxDeviceCore::init(const NxCreateParams& p) {
     cp = p; nx_state_defaults(&cur, &cp); lights.clear(); pals.clear(); swvp = 0; dirty = ~0ull;
 }
-NxDeviceCore::~NxDeviceCore() { nx_state_drop(&cur); if (rec) rec->unbindRef(); }
+NxDeviceCore::~NxDeviceCore() { nx_state_drop(&cur); if (rec) rec->unbindRef(); delete life; }
 
 // Capture: re-read every member from the device; Apply: write every member to the device. Block members are the mask bits (a type's mask or the recorded set).
 HRESULT NxStateBlockCore::Capture() {

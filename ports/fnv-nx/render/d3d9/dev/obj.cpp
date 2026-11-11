@@ -21,6 +21,7 @@ void NxObj::asRoot(uint32_t refs) { pub = refs; }
 void NxObj::asDevice(NxObj* d3d) { pub = 1; owner = d3d; if (d3d) d3d->addref(); }
 void NxObj::asChild(NxObj* device, uint32_t pool) {
     pub = 1; dev = owner = device; this->pool = (uint8_t)pool; device->addref();
+    if (this->pool != 0xFF) { rnext = device->rhead; if (rnext) rnext->rprev = this; device->rhead = this; rlinked = 1; }
 }
 void NxObj::asImplicit(NxObj* device, NxObj* cont) { pub = 0; dev = owner = device; container = cont; owned = 1; }
 void NxObj::asSubResource(NxObj* device, NxObj* cont) { dev = device; container = cont; fwd = 1; pool = cont ? cont->pool : 0xFF; }
@@ -106,7 +107,9 @@ HRESULT NxObj::freePrivateData(REFGUID g) {
     if (!*s) return D3DERR_NOTFOUND;
     NxPriv* e = *s; *s = e->next; drop(e); return D3D_OK;
 }
-NxObj::~NxObj() { while (priv) { NxPriv* e = priv; priv = e->next; drop(e); } }
+NxObj::~NxObj() {
+    if (rlinked) { if (rprev) rprev->rnext = rnext; else dev->rhead = rnext; if (rnext) rnext->rprev = rprev; }
+    while (priv) { NxPriv* e = priv; priv = e->next; drop(e); } }
 
 // ---- priority: MS IDirect3DResource9::SetPriority "managed resources only"; Wine test_resource_priority: textures / buffers of D3DPOOL_MANAGED keep it,
 // everything else (other pools, all surfaces, render targets) reads 0 after Set; Set returns the previous value.

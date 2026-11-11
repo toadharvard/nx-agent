@@ -118,3 +118,22 @@ uint32_t nxenv_check_conversion(int p, uint32_t ad, uint32_t dev, uint32_t s, ui
     return T_SRC(p)[nxenv_format_class(s)] && T_DST(p)[nxenv_format_class(d)] ? HR_OK : HR_NA;
 }
 uint32_t nxenv_video_memory(int p) { return sc(p, SC_VMEM); }                                                      /* wined3d_device_get_available_texture_mem with nothing allocated: VideoMemorySize MiB */
+/* nxenv_stretch_filter_ok: StretchRect's filter argument (d3d9 / wined3d wined3d_device_context_blt: NONE, POINT, LINEAR only; D3DCAPS9.StretchRectFilterCaps tells which of POINT / LINEAR the device offers:
+ * D3DPTFILTERCAPS_MINFPOINT 0x100 + MAGFPOINT 0x1000000, MINFLINEAR 0x200 + MAGFLINEAR 0x2000000). Every other value (ANISOTROPIC, the cubic / quad filters, garbage) is not a StretchRect filter. */
+int nxenv_stretch_filter_ok(int p, uint32_t f) {
+    uint32_t c = sc(p, SC_STRETCH);
+    if (f == 0u) return 1;                                                 /* D3DTEXF_NONE */
+    if (f == 1u) return (c & 0x01000100u) == 0x01000100u;                  /* D3DTEXF_POINT */
+    if (f == 2u) return (c & 0x02000200u) == 0x02000200u;                  /* D3DTEXF_LINEAR */
+    return 0;
+}
+/* The two "environment module" answers the resource layer asks (res_core.h); profile 0: the caps image and the GL version are the same in both profiles (asserted by gen_env.py).
+ * nx_env_decltype_supported: D3DDECLTYPE -> D3DCAPS9.DeclTypes (MS D3DDTCAPS): FLOAT1-4, D3DCOLOR, SHORT2, SHORT4 have no caps bit and always exist; UBYTE4 0x1, UBYTE4N 0x2, SHORT2N 0x4, SHORT4N 0x8,
+ * USHORT2N 0x10, USHORT4N 0x20, UDEC3 0x40, DEC3N 0x80, FLOAT16_2 0x100, FLOAT16_4 0x200; UNUSED (17) and above are no type.
+ * nx_env_query_supported: gen_env.py QUERY_GL: the types wined3d's GL adapter implements whose extension the recorded GL version has (bit t of SC_QMASK). */
+bool nx_env_decltype_supported(uint32_t type) {
+    static const int8_t bit[17] = {-1, -1, -1, -1, -1, 0, -1, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    if (type > 16u) return false;
+    return bit[type] < 0 || (sc(0, SC_DECLTYPES) >> bit[type] & 1u) != 0u;
+}
+bool nx_env_query_supported(uint32_t type) { return type < 32u && (sc(0, SC_QMASK) >> type & 1u) != 0u; }

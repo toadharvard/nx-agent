@@ -41,13 +41,14 @@ HRESULT NxImg::init(NxObj* own, uint32_t k, uint32_t w_, uint32_t h_, uint32_t d
     if (ni.format != NxFmt_None && (p == D3DPOOL_DEFAULT || p == D3DPOOL_MANAGED)) {
         NxImageDesc4 g; memset(&g, 0, sizeof g);
         g.width = (uint16_t)w; g.height = (uint16_t)h; g.depth = (uint16_t)d; g.type = k == NXK_CUBE ? NxImgType_Cube : k == NXK_VOLUME ? NxImgType_3D : NxImgType_2D;
-        g.format = ni.format; g.mips = (uint8_t)nlev; g.samples = (uint8_t)samples; g.flags = (uint8_t)(((u | bind) & D3DUSAGE_RENDERTARGET ? NxImg_RenderTarget : 0) | ((u | bind) & D3DUSAGE_DEPTHSTENCIL ? NxImg_Depth : 0) | (k == NXK_CUBE ? NxImg_Cube : 0));
+        g.format = ni.format; g.mips = (uint8_t)nlev; g.samples = (uint8_t)samples; g.flags = (uint8_t)((((u | bind) & D3DUSAGE_RENDERTARGET) || (k == NXK_SURFACE && (ni.flags & NXFMT_RENDER)) ? NxImg_RenderTarget : 0) | ((u | bind) & D3DUSAGE_DEPTHSTENCIL ? NxImg_Depth : 0) | (k == NXK_CUBE ? NxImg_Cube : 0));
         gpu = nxd3d_image_create(own, &g);
     }
     for (uint32_t fi = 0; fi < fc; fi++) for (uint32_t l = 0; l < nlev; l++) {
         NxBox3 whole = {0, 0, 0, dim(w, l), dim(h, l), dim(d, l)};
         if (l < lv && rec_dirty) add_dirty(l, fi, nullptr);                          // wined3d_texture_init: the whole image is dirty
-        else if (gpu && (p == D3DPOOL_DEFAULT || l >= lv)) {                                      // zero upload: D3D-layout zero texels through the same path as any upload
+        else if (gpu && samples <= 1 && (p == D3DPOOL_DEFAULT || l >= lv)) {   // a multisampled image takes no ImageUpdate (nxgpu4.h): its contents are undefined until a pass writes it
+                                      // zero upload: D3D-layout zero texels through the same path as any upload
             uint32_t sz = (uint32_t)nx_tex_size(tf, whole.r, whole.b, whole.k); uint8_t* z = (uint8_t*)nxd3d_alloc(sz ? sz : 1); memset(z, 0, sz ? sz : 1);
             NxSub t = {}; t.mem = z; t.w = whole.r; t.h = whole.b; t.d = whole.k; if (tf.flags & NXTF_BROKEN) { t.row = t.w * tf.bytes; t.slice = t.h * t.row; } else nx_tex_pitch(tf, t.w, t.h, &t.row, &t.slice);
             extern void nx_img_push(NxImg*, uint32_t, uint32_t, const NxSub*, const NxBox3*); nx_img_push(this, l, fi, &t, &whole); nxd3d_free(z);
@@ -61,21 +62,25 @@ void NxImg::add_dirty(uint32_t level, uint32_t face, const NxBox3* b) {
     NxBox3& o = s->dbox; if (n.l < o.l) o.l = n.l; if (n.t < o.t) o.t = n.t; if (n.k > o.k) o.k = n.k; if (n.r > o.r) o.r = n.r; if (n.b > o.b) o.b = n.b;
     uint32_t f0 = n.f < o.f ? n.f : o.f; o.f = f0;   // front / back union (k = back)
 }
-// push: box of a D3D-layout sub-resource `s` (mem, row, slice) -> nxd3d_image_update in native texels
-void nx_img_push(NxImg* im, uint32_t level, uint32_t face, const NxSub* s, const NxBox3* bx) {
-    const NxTexFmt& f = im->tf; NxBox3 b = *bx; const uint8_t* base = s->mem; uint32_t row = s->row, slice = s->slice;
-    if (f.flags & NXTF_BROKEN) { b = {0, 0, 0, s->w, s->h, s->d}; row = ((s->w + f.bw - 1) / f.bw) * f.bb; slice = row * ((s->h + f.bh - 1) / f.bh); }   // blocks stored contiguously
-    bool blk = (f.flags & NXTF_BLOCKS) != 0;
+// push: box of a D3D-layout sub-resource `s` (mem, row, slice) -> nxd3d_image_update in native texels. nx_img_push_at: the same for texels given as `p` = the first texel of the box (rows `row`, slices `slice` apart)
+void nx_img_push_at(NxImg* im, uint32_t level, uint32_t face, const NxBox3* bx, const uint8_t* p, uint32_t row, uint32_t slice) {
+    const NxTexFmt& f = im->tf; const NxBox3& b = *bx; bool blk = (f.flags & NXTF_BLOCKS) != 0;
     uint32_t rb = blk ? ((b.r - b.l + f.bw - 1) / f.bw) * f.bb : (b.r - b.l) * f.bytes, rows = blk ? (b.b - b.t + f.bh - 1) / f.bh : b.b - b.t, ns = b.k - b.f;
-    const uint8_t* p = base + (size_t)b.f * slice + (size_t)(blk ? b.t / f.bh : b.t) * row + (size_t)(blk ? b.l / f.bw : b.l) * (blk ? f.bb : f.bytes);
-    if (!(im->ni.flags & NXFMT_CONVERT)) { nxd3d_image_update(im->owner, im->gpu, level, face, &b, p, row, slice); return; }
+    if (!(im->ni.flags & NXFMT_CONVERT)) { nxd3d_image_update(im->owner, im->gpu, level, face, bx, p, row, slice); return; }
     uint32_t w = b.r - b.l, h = b.b - b.t, ob = ((im->fmt == NXD3D_FOURCC('A', 'T', 'I', '1')) ? w * 4 : w * im->ni.bytes);   // native tight row bytes (ATI1: decoded RGBA8)
     uint32_t nsz = nx_d3d9_converted_size(im->fmt, w, h, 1, 1); uint8_t* src = (uint8_t*)nxd3d_alloc((size_t)rb * rows * ns + 1); uint8_t* dst = (uint8_t*)nxd3d_alloc((size_t)nsz * ns + 1);
     for (uint32_t z = 0; z < ns; z++) {
         for (uint32_t y = 0; y < rows; y++) memcpy(src + ((size_t)z * rows + y) * rb, p + (size_t)z * slice + (size_t)y * row, rb);
         nx_d3d9_convert(im->fmt, w, h, 1, 1, src + (size_t)z * rows * rb, rows * rb, dst + (size_t)z * nsz, nsz);
     }
-    nxd3d_image_update(im->owner, im->gpu, level, face, &b, dst, ob, ob * h); nxd3d_free(src); nxd3d_free(dst);
+    nxd3d_image_update(im->owner, im->gpu, level, face, bx, dst, ob, ob * h); nxd3d_free(src); nxd3d_free(dst);
+}
+void nx_img_push(NxImg* im, uint32_t level, uint32_t face, const NxSub* s, const NxBox3* bx) {
+    const NxTexFmt& f = im->tf; NxBox3 b = *bx; const uint8_t* base = s->mem; uint32_t row = s->row, slice = s->slice;
+    if (f.flags & NXTF_BROKEN) { b = {0, 0, 0, s->w, s->h, s->d}; row = ((s->w + f.bw - 1) / f.bw) * f.bb; slice = row * ((s->h + f.bh - 1) / f.bh); }   // blocks stored contiguously
+    bool blk = (f.flags & NXTF_BLOCKS) != 0;
+    const uint8_t* p = base + (size_t)b.f * slice + (size_t)(blk ? b.t / f.bh : b.t) * row + (size_t)(blk ? b.l / f.bw : b.l) * (blk ? f.bb : f.bytes);
+    nx_img_push_at(im, level, face, &b, p, row, slice);
 }
 void NxImg::upload() {
     if (!gpu) return;

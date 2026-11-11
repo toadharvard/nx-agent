@@ -29,7 +29,7 @@ const TFmt g_fmts[] = {
     F(NxFmt_RG32F, "RG32F", 8, 0, 0, K_F32, 0), F(NxFmt_RGBA32F, "RGBA32F", 16, 0, 0, K_F32, 0),
     F(NxFmt_BC4, "BC4", 8, 1, 0, K_RAW, 0), F(NxFmt_BC5, "BC5", 16, 1, 0, K_RAW, 0),
     F(NxFmt_Z16, "Z16", 2, 0, 1, K_RAW, 0), F(NxFmt_Z24X8, "Z24X8", 4, 0, 1, K_RAW, 0),
-    F(NxFmt_Z32FS8, "Z32FS8", 8, 0, 1, K_Z32FS8, 0),
+    F(NxFmt_Z32FS8, "Z32FS8", 8, 0, 1, K_Z32FS8, 0), F(NxFmt_BGR10A2, "BGR10A2", 4, 0, 0, K_RAW, 0),
 };
 const int g_nfmts = sizeof g_fmts / sizeof g_fmts[0];
 _Static_assert(sizeof g_fmts / sizeof g_fmts[0] == NxFmt_Count - 1, "the oracle table covers every NxFormat");

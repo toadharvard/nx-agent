@@ -38,6 +38,7 @@ struct NxObj {
     uint8_t owned = 0;           // lifetime belongs to owner/container (implicit back buffer, auto depth, implicit swap chain): never destroyed by counts
     uint8_t pool = 0xFF;         // D3DPOOL of a resource (0xFF = not a pool resource); MANAGED: SetPriority takes effect
     NxPriv* priv = nullptr;
+    NxObj* rnext = nullptr; NxObj* rprev = nullptr; NxObj* rhead = nullptr; uint8_t rlinked = 0;   // device resource registry: a device's rhead lists its live Create* resources (pool != 0xFF); Reset / eviction / memory accounting walk it
     // every object is allocated behind its guest face (face.h): NX_FACE_SIZE bytes in front of the complete object
     void* operator new(size_t n) noexcept { uint8_t* r = (uint8_t*)nxd3d_alloc(n + NX_FACE_SIZE); if (!r) return nullptr; for (int i = 0; i < NX_FACE_SIZE; i++) r[i] = 0; return r + NX_FACE_SIZE; }
     void operator delete(void* p) { if (p) nxd3d_free((uint8_t*)p - NX_FACE_SIZE); }

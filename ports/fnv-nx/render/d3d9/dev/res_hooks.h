@@ -16,3 +16,7 @@
 #define NX_BASES_NxBaseTexture9 NxTexCore
 #define NX_BASES_NxSurface9 NxSurfCore
 #define NX_BASES_NxVolume9 NxVolCore
+// D7 (dev_core.h): swap chains
+#include "dev_core.h"
+#define NX_BASES_NxSwapChain9 NxChainCore
+#define NX_BASES_NxSwapChain9Ex NxChainCore

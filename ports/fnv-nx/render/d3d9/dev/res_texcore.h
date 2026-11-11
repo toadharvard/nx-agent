@@ -15,6 +15,7 @@ struct NxTexCore : NxObj {           // NxTexture9 / NxCubeTexture9 / NxVolumeTe
 };
 struct NxSurfCore : NxObj {          // NxSurface9: a level / face of a texture (tex != null) or a stand-alone surface (own)
     NxImg* img = nullptr; NxImg* own = nullptr; uint32_t level = 0, face = 0;
+    void* dc = nullptr;   // the GDI DC handed out by GetDC (copy_dc.cpp), null = none
     ~NxSurfCore();
     HRESULT desc(D3DSURFACE_DESC* d); HRESULT lockRect(D3DLOCKED_RECT* lr, const RECT* r, DWORD f); HRESULT unlockRect();
 };

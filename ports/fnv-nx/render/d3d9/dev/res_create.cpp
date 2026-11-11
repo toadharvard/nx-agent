@@ -5,7 +5,7 @@
 // Order of checks = Wine's. Pool SCRATCH skips the cap loop (resource_init). AUTOGENMIPMAP: levels exposed 1; the GPU chain is the full chain iff CheckDeviceFormat(GENMIPMAP) == D3D_OK (d3d9_texture_init).
 // DECISIONS (doubt): levels > 32 = D3DERR_INVALIDCALL (no chain is longer; Wine accepts any); an image above NX_MAX_TEX_BYTES = OUT-OF-MEMORY (GPU pools D3DERR_OUTOFVIDEOMEMORY, others E_OUTOFMEMORY); a single GPU-pool resource
 // above the env VideoMemorySize = OUTOFVIDEOMEMORY (non-Ex; no cross-resource accounting, the device has none); Lockable RT with a multisample type = INVALIDCALL (MS CreateRenderTarget: only non-multisampled targets are lockable);
-// CreateOffscreenPlainSurfaceEx is left out (Wine's answer is E_NOTIMPL, there is no source for the Windows result). Null output pointer = INVALIDCALL (Windows faults).
+// CreateOffscreenPlainSurfaceEx (D6, below): MS page, shares mk_surf. Null output pointer = INVALIDCALL (Windows faults).
 #include "res_tex.h"
 #include "d9impl.gen.h"
 #include "env_table.gen.h"
@@ -117,5 +117,7 @@ static HRESULT mk_surf(NxObj* dev, int what /*0 RT, 1 DS, 2 plain*/, UINT w, UIN
     HRESULT STDMETHODCALLTYPE C::CreateDepthStencilSurface(UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE m, DWORD q, BOOL dc, IDirect3DSurface9** pp, HANDLE* sh) { return mk_surf(this, 1, w, h, f, m, q, dc, D3DPOOL_DEFAULT, pp, sh, 0, false); } \
     HRESULT STDMETHODCALLTYPE C::CreateOffscreenPlainSurface(UINT w, UINT h, D3DFORMAT f, D3DPOOL p, IDirect3DSurface9** pp, HANDLE* sh) { return mk_surf(this, 2, w, h, f, D3DMULTISAMPLE_NONE, 0, 0, p, pp, sh, 0, false); }
 CREATE(NxDevice9, 0) CREATE(NxDevice9Ex, 1)
+// CreateOffscreenPlainSurfaceEx: MS (usage 0 = none, else D3DUSAGE constants; the surface type fixes RT / DS, as for the other Ex creators) shares CreateOffscreenPlainSurface's validation; Wine returns E_NOTIMPL (a stub)
+HRESULT STDMETHODCALLTYPE NxDevice9Ex::CreateOffscreenPlainSurfaceEx(UINT w, UINT h, D3DFORMAT f, D3DPOOL p, IDirect3DSurface9** pp, HANDLE* sh, DWORD u) { return mk_surf(this, 2, w, h, f, D3DMULTISAMPLE_NONE, 0, 0, p, pp, sh, u, true); }
 HRESULT STDMETHODCALLTYPE NxDevice9Ex::CreateRenderTargetEx(UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE m, DWORD q, BOOL lk, IDirect3DSurface9** pp, HANDLE* sh, DWORD u) { return mk_surf(this, 0, w, h, f, m, q, lk, D3DPOOL_DEFAULT, pp, sh, u, true); }
 HRESULT STDMETHODCALLTYPE NxDevice9Ex::CreateDepthStencilSurfaceEx(UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE m, DWORD q, BOOL dc, IDirect3DSurface9** pp, HANDLE* sh, DWORD u) { return mk_surf(this, 1, w, h, f, m, q, dc, D3DPOOL_DEFAULT, pp, sh, u, true); }
