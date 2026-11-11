@@ -22,5 +22,4 @@ fnvnx_modules_process_detach   # loader L1: fnvnx_start.h
 # Lifter runtime (L3a), branch claude/fnv-l3a-lift, ports/fnv-nx/lift/rt/enter.c:
 fnvnx_lift_enter               # lifter runtime L3a (also declared by the loader's fnvnx_start.h)
 fnvnx_guest_invoke             # lifter runtime L3a
-# REQUESTED from L3a, no header has it yet: the calling guest thread's esp and TEB, which fnvnx_module_load needs
-fnvnx_guest_current            # lifter runtime L3a (requested)
+fnvnx_guest_current            # lifter runtime L3a: the calling guest thread's esp and TEB (fnvnx_module_load needs them)
