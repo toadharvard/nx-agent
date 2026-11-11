@@ -105,7 +105,11 @@ The owner's words: "Транк никогда красный. Всегда зе�
     - (b) guest memory only through one accessor with a range check; an invalid guest pointer raises the contract's exception through R4, as on Windows;
     - (c) no recursion, and a static stack bound over the call graph.
   - The gate is a GCC plugin, "body in the subset" (a compile error otherwise). The IKOS sound analyzer is a check only.
-  - L4 owns the subset definition and the gate.
+  - L4 owns the subset definition and the gate (verify/MEMSAFE.md).
+  - External libraries outside our control (libc, libnx, FreeType, minimp3) are not proven.
+    - The owner's words: "не будем пытаться доказывать то, как работают библиотеки, которые не под нашим контролем".
+    - Their pointer-taking functions are declared from their documentation (`borrows`). This is a stated assumption.
+    - Each row cites its documentation. The list's length is a gate number.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
