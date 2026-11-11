@@ -11,19 +11,12 @@
 #include <stdio.h>
 #include <string.h>
 
-/* ---- the tables are complete, or B2b is explicitly pending ----------------------------------------------------- */
+/* ---- the tables are total ----------------------------------------------------------------------------------------- */
 #define CNT1(a) +1
-#define CNT3(a, b, c) +1
-enum { N_OPS = 0 NXGL4_OP_LIST(CNT1), N_FNS = 2 NXGL4_FN_LIST(CNT3) };
-#ifdef NXGL4_B2B_PENDING
-_Static_assert(N_OPS == NxOp_Count4 - 5 && N_FNS == NXGPU_FN_COUNT4 - 3, "B2a tables = v4 minus the B2b entries");
-#define NXGL4_VERSION NXGPU_VERSION   /* 3: the device refuses to start on a backend without every v4 entry */
-#else
-_Static_assert(N_OPS == NxOp_Count4 && N_FNS == NXGPU_FN_COUNT4,
-               "gl4: the op/function tables lack the B2b entries (BeginPass4, DefineLayout4, BindVtxN, QueryBegin/End, "
-               "sampler_update, query_result, present): build with -DNXGL4_B2B_PENDING until B2b lands");
+#define CNT4(a, b, c, d) +1
+enum { N_OPS = 0 NXGL4_OP_LIST(CNT1), N_FNS = 2 NXGL4_FN_LIST(CNT4) };
+_Static_assert(N_OPS == NxOp_Count4 && N_FNS == NXGPU_FN_COUNT4, "gl4: the op/function tables cover ABI v4 exactly");
 #define NXGL4_VERSION NXGPU_VERSION4
-#endif
 
 /* ---- memory blocks ----------------------------------------------------------------------------------------------- */
 const Gl4Mem* gl4_mem(uint32_t id) { return id && id <= GL4_MAX_MEM && g4.mem[id].used ? &g4.mem[id] : NULL; }
@@ -48,7 +41,6 @@ uint64_t gl4_api_mem_destroy(uint64_t id) {
     if (id > GL4_MAX_MEM || !gl4_mem((uint32_t)id)) { gl4_err("mem_destroy: %llu is not a live block", (unsigned long long)id); return NXGPU_BAD_CALL; }
     p_glDeleteBuffers(1, &g4.mem[id].buf);
     memset(&g4.mem[id], 0, sizeof g4.mem[id]);
-    if (g4.vtxBlock == id) g4.vtxBlock = 0;
     if (g4.idxBlock == id) g4.idxBlock = 0;
     return 0;
 }
@@ -69,14 +61,27 @@ static uint64_t api_info(uint64_t out) {
 static uint64_t api_shutdown(void) { p_glFinish(); return 0; }
 
 typedef uint64_t (*Fn1)(uint64_t);
-#define FNENT(id, field, impl) [NXGPU_FN_##id] = impl,
-static const Fn1 k_fn[NXGPU_FN_COUNT4] = { NXGL4_FN_LIST(FNENT) };
+typedef uint64_t (*Fn2)(uint64_t, uint64_t);
+typedef uint64_t (*Fn3)(uint64_t, uint64_t, uint64_t);
+typedef struct { uint32_t argc; Fn1 f1; Fn2 f2; Fn3 f3; } FnEnt;   /* exactly the member of the arity is set */
+#define FNENT(id, field, impl, n) [NXGPU_FN_##id] = {n, FNSET##n(impl)},
+#define FNSET1(f) f, 0, 0
+#define FNSET2(f) 0, f, 0
+#define FNSET3(f) 0, 0, f
+static const FnEnt k_fn[NXGPU_FN_COUNT4] = { NXGL4_FN_LIST(FNENT) };
 
 uint64_t nxgl4_ext(uint32_t fn, const uint64_t* a, uint32_t n) {
     if (fn == NXGPU_FN_SHUTDOWN) return api_shutdown();
-    if (fn >= NXGPU_FN_COUNT4 || (n && !a) || n < 1) return NXGPU_BAD_CALL;
-    if (fn == NXGPU_FN_INFO) return api_info(a[0]);
-    return k_fn[fn] ? k_fn[fn](a[0]) : NXGPU_BAD_CALL;   /* NULL: a B2b function while B2b is pending */
+    if (fn >= NXGPU_FN_COUNT4) return NXGPU_BAD_CALL;
+    if (fn == NXGPU_FN_INFO) return n >= 1 && a ? api_info(a[0]) : NXGPU_BAD_CALL;
+    const FnEnt* e = &k_fn[fn];
+    if (n < e->argc || !a) return NXGPU_BAD_CALL;
+    switch (e->argc) {
+    case 1: return e->f1(a[0]);
+    case 2: return e->f2(a[0], a[1]);
+    case 3: return e->f3(a[0], a[1], a[2]);
+    }
+    return NXGPU_BAD_CALL;   /* argc is 1..3 for every entry of the list */
 }
 
 /* ---- init ----------------------------------------------------------------------------------------------------- */
@@ -106,6 +111,8 @@ const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t
     p_glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
     p_glFrontFace(GL_CCW);   /* on-screen CW = front: the image's y runs the other way (see nxgl v3) */
     p_glEnable(GL_PROGRAM_POINT_SIZE);
+    p_glGetIntegerv(GL_MAX_VERTEX_ATTRIB_STRIDE, &g4.maxVtxStride);
+    p_glGetIntegerv(GL_MAX_VERTEX_ATTRIB_RELATIVE_OFFSET, &g4.maxAttrOffset);
     p_glGenVertexArrays(1, &g4.lay[0].vao);
     p_glBindVertexArray(g4.lay[0].vao);
     if (width && height) {
@@ -119,7 +126,7 @@ const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t
     NxGpuApi4* api = &g4.api;
     api->v3.info.magic = NXGPU_MAGIC; api->v3.info.version = NXGL4_VERSION; api->v3.info.frames_in_flight = 2;
     api->v3.info.width = width; api->v3.info.height = height; api->v3.info.backend = 2;
-#define SLOT(id, field, impl) api->field = (uint64_t)(uintptr_t)impl;
+#define SLOT(id, field, impl, n) api->field = (uint64_t)(uintptr_t)impl;
     NXGL4_FN_LIST(SLOT)
 #undef SLOT
     api->v3.shutdown = (uint64_t)(uintptr_t)api_shutdown;

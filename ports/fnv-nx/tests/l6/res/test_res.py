@@ -8,7 +8,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
 TOT = os.path.join(ROOT, "render", "shaders", "total"); CENSUS = os.path.join(ROOT, "render", "total", "census"); DEVT = os.path.join(ROOT, "tests", "l6", "dev")
-INC = os.path.join(ROOT, "shim", "include"); NXF = os.path.join(ROOT, "render", "native")
+INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACKEND = os.path.join(ROOT, "render", "d3d9", "backend"); FRONT_C = sorted(f for f in os.listdir(FRONT) if f.endswith(".c"))
 LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]; RES = ["res_buf.cpp", "res_fvf.cpp", "res_decl.cpp", "res_shader.cpp", "res_smcheck.cpp", "res_query.cpp"]
 TESTS = ["t_env.cpp", "t_buf.cpp", "t_decl.cpp", "t_fvf.cpp", "t_shader.cpp", "t_query.cpp"]
 fails = []
@@ -26,12 +26,12 @@ def build(dev, tmp, jobs=8):
     fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", INC, "-I", tmp, "-I", HERE, "-I", dev]
     jobs_ = [(os.path.join(dev, s), s) for s in LIB + RES] + [(os.path.join(tmp, s), s) for s in GENS] + [(os.path.join(HERE, s), s) for s in TESTS]
     cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in jobs_]
-    cmds.append(["gcc", "-m32", "-std=c11", "-w", "-I", os.path.join(NXF, "include"), "-c", os.path.join(NXF, "front", "d3d9_state.c"), "-o", os.path.join(tmp, "nxstate.o")])
+    cmds += [["gcc", "-m32", "-std=c11", "-w", "-I", BACKEND, "-I", FRONT, "-c", os.path.join(FRONT, c), "-o", os.path.join(tmp, "nxfront_" + c[:-2] + ".o")] for c in FRONT_C]
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
         if r.returncode: return None, None, " ".join(c[-3:]) + "\n" + r.stderr[-1500:]
     prod = [os.path.join(tmp, n + ".o") for _, n in jobs_ if n in LIB + GENS + RES]
-    allo = prod + [os.path.join(tmp, n + ".o") for n in TESTS] + [os.path.join(tmp, "nxstate.o")]
+    allo = prod + [os.path.join(tmp, n + ".o") for n in TESTS] + [os.path.join(tmp, "nxfront_" + c[:-2] + ".o") for c in FRONT_C]
     r = sh(["g++", "-m32", "-no-pie", "-o", os.path.join(tmp, "test_res")] + allo + ["-Wl,--unresolved-symbols=ignore-all"])
     return (os.path.join(tmp, "test_res"), prod, "") if r.returncode == 0 else (None, None, r.stderr[-800:])
 

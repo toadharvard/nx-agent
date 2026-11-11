@@ -11,7 +11,7 @@ Oracle = CPU code in tests/l6/gl4 (patterns, filters, format table); LP64 host b
 import os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXINC = os.path.join(ROOT, "render", "native", "include")
+BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXINC = BACK
 ENV = dict(os.environ, LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe", EGL_PLATFORM="surfaceless")
 TESTS = ["t_main.c", "t_parts_ab.c", "t_parts_cd.c", "t_parts_ef.c"]
 fails = []

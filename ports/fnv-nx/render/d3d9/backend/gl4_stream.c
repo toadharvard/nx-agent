@@ -1,7 +1,8 @@
-/* fnv-nx L6 GL 4.5 backend v4: replay of the command stream. Every op of NxOp_Count4 that this backend implements
- * has one handler in the table k_op (built from NXGL4_OP_LIST, completeness asserted in gl4_core.c). An opcode
- * outside the table is a malformed stream: the submit returns NXGPU_BAD_CALL before executing anything; an op that
- * violates its contract stops the replay and the submit returns NXGPU_BAD_CALL. */
+/* fnv-nx L6 GL 4.5 backend v4: replay of the command stream. Every op of NxOp_Count4 has one handler in the table
+ * k_op (built from NXGL4_OP_LIST, completeness asserted in gl4_core.c). A malformed stream (an opcode outside the
+ * table, an op overrunning the stream, an op whose arguments gl4_stream_check refuses: pass targets that disagree,
+ * layouts, render-state bits GL 4.5 cannot express) makes the submit return NXGPU_BAD_CALL before anything executes;
+ * an op that violates its contract at run time stops the replay and the submit returns NXGPU_BAD_CALL. */
 #define _GNU_SOURCE
 #include "gl4.h"
 #include <string.h>
@@ -23,15 +24,12 @@ static void op_DefineState(const uint32_t* a, uint32_t argc, Ctx* c) {
     s->prog = gl4_program_for(s->vs, s->ps); s->epoch = g4.progEpoch;
     s->defined = 1;
 }
-static void op_DefineLayout(const uint32_t* a, uint32_t argc, Ctx* c) {
-    (void)c; NEED(10, DefineLayout);
-    if (!a[0] || a[0] > GL4_MAX_LAYOUTS) { gl4_err("DefineLayout: id %u", a[0]); return; }
-    Gl4Layout* l = &g4.lay[a[0]];
-    if (l->vao) p_glDeleteVertexArrays(1, &l->vao);
-    memcpy(&l->l, a + 1, sizeof(NxVtxLayout));
-    l->defined = 1;
-    l->vao = 0;   /* (re)built at first use */
-}
+static void op_DefineLayout(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_define_layout(a, argc); }
+static void op_DefineLayout4(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_define_layout4(a, argc); }
+static void op_BindVtxN(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_bind_vtxn(a, argc); }
+static void op_BeginPass4(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_begin_pass4(a, argc); }
+static void op_QueryBegin(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_query_begin(a, argc); }
+static void op_QueryEnd(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_query_end(a, argc); }
 static void op_BeginPass(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_begin_pass(a, argc); }
 static void op_EndPass(const uint32_t* a, uint32_t argc, Ctx* c) {   /* GL has no pass object: leave the target, no state */
     (void)a; (void)c; (void)argc;
@@ -65,11 +63,7 @@ static void op_BindUbo(const uint32_t* a, uint32_t argc, Ctx* c) {
     if (a[0] & 1) p_glBindBufferRange(GL_UNIFORM_BUFFER, 0 * 16 + a[1], g4.mem[a[2]].buf, a[3], a[4]);
     if (a[0] & 2) p_glBindBufferRange(GL_UNIFORM_BUFFER, 1 * 16 + a[1], g4.mem[a[2]].buf, a[3], a[4]);
 }
-static void op_BindVtx(const uint32_t* a, uint32_t argc, Ctx* c) {
-    (void)c; NEED(3, BindVtx);
-    gl4_upload_range(a[0], a[1], a[2]);
-    g4.vtxBlock = a[0]; g4.vtxOffset = a[1]; g4.vtxDirty = 1;
-}
+static void op_BindVtx(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_bind_vtx(a, argc); }
 static void op_BindIdx(const uint32_t* a, uint32_t argc, Ctx* c) {
     (void)c; NEED(4, BindIdx);
     if (!gl4_mem(a[0])) { gl4_err("BindIdx: block %u", a[0]); return; }
@@ -104,24 +98,17 @@ static GLenum glprim(uint32_t p) {
     gl4_err("primitive %u", p);
     return GL_TRIANGLES;
 }
-static void flush_vertex_buffer(void) {
-    if (!g4.vtxDirty) return;
-    const Gl4State* s = &g4.st[g4.boundState];
-    uint32_t stride = s->layout && s->layout <= GL4_MAX_LAYOUTS ? g4.lay[s->layout].l.stride : 0;
-    if (gl4_mem(g4.vtxBlock)) p_glBindVertexBuffer(0, g4.mem[g4.vtxBlock].buf, g4.vtxOffset, (GLsizei)stride);
-    g4.vtxDirty = 0;
-}
 static void op_Draw(const uint32_t* a, uint32_t argc, Ctx* c) {
     NEED(5, Draw);
     if (!g4.boundState) { gl4_err("Draw: no state bound"); return; }
-    flush_vertex_buffer();
+    if (gl4_vtx_flush()) return;
     p_glDrawArraysInstancedBaseInstance(glprim(a[0]), (GLint)a[3], (GLsizei)a[1], (GLsizei)a[2], a[4]);
     c->stats->draws++; g4.frameDraws++;
 }
 static void op_DrawIndexed(const uint32_t* a, uint32_t argc, Ctx* c) {
     NEED(6, DrawIndexed);
     if (!g4.boundState) { gl4_err("DrawIndexed: no state bound"); return; }
-    flush_vertex_buffer();
+    if (gl4_vtx_flush()) return;
     uint32_t isz = g4.idxType ? 4 : 2;
     p_glDrawElementsInstancedBaseVertexBaseInstance(glprim(a[0]), (GLsizei)a[1], g4.idxType ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT,
         (const void*)(uintptr_t)(g4.idxOffset + a[3] * isz), (GLsizei)a[2], (GLint)a[4], a[5]);
@@ -176,12 +163,13 @@ static int stream_ok(const uint32_t* w, const uint32_t* end) {
     gl4_err("stream: no End op");
     return 0;
 }
+static int stream_valid(const uint32_t* w, const uint32_t* end) { return stream_ok(w, end) && gl4_stream_check(w, end); }
 
 /* Executes until End or the first op that violated its contract (no later op runs after a violation). */
 static void replay(const NxSubmit* sub, Ctx* ctx) {
     const uint32_t* w = (const uint32_t*)nxgl4_guest_ptr(sub->stream, (uint64_t)sub->words * 4);
     const uint32_t* end = w + sub->words;
-    if (!stream_ok(w, end)) return;
+    if (!stream_valid(w, end)) return;
     while (!ctx->done) {
         uint32_t op = w[0] & 0xFFFF, argc = w[0] >> 16, errs = g4.errCount;
         k_op[op](w + 1, argc, ctx);
@@ -201,8 +189,11 @@ uint64_t gl4_api_submit(uint64_t a) {
     uint32_t errs = g4.errCount;
     if (g4.drawsFrame != (uint64_t)s->frame + 1) { g4.frameDraws = 0; g4.drawsFrame = (uint64_t)s->frame + 1; }
     Ctx ctx = {&st, 0};
+    gl4_query_submit_begin();
     replay(s, &ctx);
+    gl4_query_submit_end();
     p_glFinish();
+    gl4_query_collect();
     clock_gettime(CLOCK_MONOTONIC, &t1);
     st.record_us = (uint32_t)((t1.tv_sec - t0.tv_sec) * 1000000 + (t1.tv_nsec - t0.tv_nsec) / 1000);
     GLenum e = p_glGetError();

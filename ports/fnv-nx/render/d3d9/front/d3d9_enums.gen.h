@@ -24,7 +24,7 @@ typedef enum NxD3DBLEND {
     NX_D3DBLEND_INVSRCCOLOR2 = 17,
     NX_D3DBLEND_FORCE_DWORD = 2147483647,
 } NxD3DBLEND;
-static inline int nxd3d_in_BLEND(uint32_t v) {
+static inline int nxd3d_in_D3DBLEND(uint32_t v) {
     switch ((NxD3DBLEND)v) {
     case NX_D3DBLEND_ZERO:
     case NX_D3DBLEND_ONE:
@@ -57,7 +57,7 @@ typedef enum NxD3DBLENDOP {
     NX_D3DBLENDOP_MAX = 5,
     NX_D3DBLENDOP_FORCE_DWORD = 2147483647,
 } NxD3DBLENDOP;
-static inline int nxd3d_in_BLENDOP(uint32_t v) {
+static inline int nxd3d_in_D3DBLENDOP(uint32_t v) {
     switch ((NxD3DBLENDOP)v) {
     case NX_D3DBLENDOP_ADD:
     case NX_D3DBLENDOP_SUBTRACT:
@@ -81,7 +81,7 @@ typedef enum NxD3DCMPFUNC {
     NX_D3DCMP_ALWAYS = 8,
     NX_D3DCMP_FORCE_DWORD = 2147483647,
 } NxD3DCMPFUNC;
-static inline int nxd3d_in_CMPFUNC(uint32_t v) {
+static inline int nxd3d_in_D3DCMPFUNC(uint32_t v) {
     switch ((NxD3DCMPFUNC)v) {
     case NX_D3DCMP_NEVER:
     case NX_D3DCMP_LESS:
@@ -103,7 +103,7 @@ typedef enum NxD3DCULL {
     NX_D3DCULL_CCW = 3,
     NX_D3DCULL_FORCE_DWORD = 2147483647,
 } NxD3DCULL;
-static inline int nxd3d_in_CULL(uint32_t v) {
+static inline int nxd3d_in_D3DCULL(uint32_t v) {
     switch ((NxD3DCULL)v) {
     case NX_D3DCULL_NONE:
     case NX_D3DCULL_CW:
@@ -120,7 +120,7 @@ typedef enum NxD3DFILLMODE {
     NX_D3DFILL_SOLID = 3,
     NX_D3DFILL_FORCE_DWORD = 2147483647,
 } NxD3DFILLMODE;
-static inline int nxd3d_in_FILLMODE(uint32_t v) {
+static inline int nxd3d_in_D3DFILLMODE(uint32_t v) {
     switch ((NxD3DFILLMODE)v) {
     case NX_D3DFILL_POINT:
     case NX_D3DFILL_WIREFRAME:
@@ -138,7 +138,7 @@ typedef enum NxD3DFOGMODE {
     NX_D3DFOG_LINEAR = 3,
     NX_D3DFOG_FORCE_DWORD = 2147483647,
 } NxD3DFOGMODE;
-static inline int nxd3d_in_FOGMODE(uint32_t v) {
+static inline int nxd3d_in_D3DFOGMODE(uint32_t v) {
     switch ((NxD3DFOGMODE)v) {
     case NX_D3DFOG_NONE:
     case NX_D3DFOG_EXP:
@@ -234,7 +234,7 @@ typedef enum NxD3DFORMAT {
     NX_D3DFMT_DF24 = 875710020,
     NX_D3DFMT_ATOC = 1129272385,
 } NxD3DFORMAT;
-static inline int nxd3d_in_FORMAT(uint32_t v) {
+static inline int nxd3d_in_D3DFORMAT(uint32_t v) {
     switch ((NxD3DFORMAT)v) {
     case NX_D3DFMT_UNKNOWN:
     case NX_D3DFMT_R8G8B8:
@@ -329,7 +329,7 @@ typedef enum NxD3DSHADEMODE {
     NX_D3DSHADE_PHONG = 3,
     NX_D3DSHADE_FORCE_DWORD = 2147483647,
 } NxD3DSHADEMODE;
-static inline int nxd3d_in_SHADEMODE(uint32_t v) {
+static inline int nxd3d_in_D3DSHADEMODE(uint32_t v) {
     switch ((NxD3DSHADEMODE)v) {
     case NX_D3DSHADE_FLAT:
     case NX_D3DSHADE_GOURAUD:
@@ -351,7 +351,7 @@ typedef enum NxD3DSTENCILOP {
     NX_D3DSTENCILOP_DECR = 8,
     NX_D3DSTENCILOP_FORCE_DWORD = 2147483647,
 } NxD3DSTENCILOP;
-static inline int nxd3d_in_STENCILOP(uint32_t v) {
+static inline int nxd3d_in_D3DSTENCILOP(uint32_t v) {
     switch ((NxD3DSTENCILOP)v) {
     case NX_D3DSTENCILOP_KEEP:
     case NX_D3DSTENCILOP_ZERO:
@@ -375,7 +375,7 @@ typedef enum NxD3DTEXTUREADDRESS {
     NX_D3DTADDRESS_MIRRORONCE = 5,
     NX_D3DTADDRESS_FORCE_DWORD = 2147483647,
 } NxD3DTEXTUREADDRESS;
-static inline int nxd3d_in_TEXTUREADDRESS(uint32_t v) {
+static inline int nxd3d_in_D3DTEXTUREADDRESS(uint32_t v) {
     switch ((NxD3DTEXTUREADDRESS)v) {
     case NX_D3DTADDRESS_WRAP:
     case NX_D3DTADDRESS_MIRROR:
@@ -400,7 +400,7 @@ typedef enum NxD3DTEXTUREFILTERTYPE {
     NX_D3DTEXF_CONVOLUTIONMONO = 8,
     NX_D3DTEXF_FORCE_DWORD = 2147483647,
 } NxD3DTEXTUREFILTERTYPE;
-static inline int nxd3d_in_TEXTUREFILTERTYPE(uint32_t v) {
+static inline int nxd3d_in_D3DTEXTUREFILTERTYPE(uint32_t v) {
     switch ((NxD3DTEXTUREFILTERTYPE)v) {
     case NX_D3DTEXF_NONE:
     case NX_D3DTEXF_POINT:
@@ -423,7 +423,7 @@ typedef enum NxD3DZBUFFERTYPE {
     NX_D3DZB_USEW = 2,
     NX_D3DZB_FORCE_DWORD = 2147483647,
 } NxD3DZBUFFERTYPE;
-static inline int nxd3d_in_ZBUFFERTYPE(uint32_t v) {
+static inline int nxd3d_in_D3DZBUFFERTYPE(uint32_t v) {
     switch ((NxD3DZBUFFERTYPE)v) {
     case NX_D3DZB_FALSE:
     case NX_D3DZB_TRUE:

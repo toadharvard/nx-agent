@@ -11,7 +11,7 @@ codes the reference implementation (Wine 9.0, wined3d_private.h enum wined3d_for
 WINEMAKEFOURCC) gives a format id; they are added to D3DFORMAT here, with the value of their four bytes.
 
 Output header: for each enumeration `typedef enum NxD3D<name> {NX_<enumerator> = value, ...} NxD3D<name>;` and
-`static inline int nxd3d_in_<name>(uint32_t v)`, true iff v is one of its enumerators (a switch over the enum type without
+`static inline int nxd3d_in_<enum>(uint32_t v)` (<enum> = D3DCMPFUNC, ...), true iff v is one of its enumerators (a switch over the enum type without
 a default, compiled with -Werror=switch-enum: it cannot go out of step with the enum). The translation functions are switches
 over these types with no default branch and are compiled with -Werror=switch -Werror=switch-enum, so an enumerator of the
 spec without a case is a compile error. The optional JSON lists the enumerations for the gate and the test."""
@@ -73,7 +73,7 @@ def render(vals):
         o += ["    NX_%s = %d," % (n, v) for n, v in lst]
         o.append("} NxD3D%s;" % e[3:])
         if e in SWITCHED:
-            o.append("static inline int nxd3d_in_%s(uint32_t v) {" % e[3:])
+            o.append("static inline int nxd3d_in_%s(uint32_t v) {" % e)
             o.append("    switch ((NxD3D%s)v) {" % e[3:])
             o += ["    case NX_%s:" % n for n, _ in lst]
             o += ["        return 1;", "    }", "    return 0;", "}"]
