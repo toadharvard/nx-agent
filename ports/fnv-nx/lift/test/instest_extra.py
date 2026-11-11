@@ -147,7 +147,7 @@ CLASS_EXPECT = [
     ('67e3fa', 'jcxz', ['(ecx&0xffffu)==0']), ('67e2fa', 'loop (CX)', ['ecx=(ecx&0xffff0000u)|((ecx-1)&0xffffu)', '(ecx&0xffffu)!=0']),
     ('f390', 'pause', ['yield']), ('0faef0', 'mfence', ['__sync_synchronize']), ('0fae38', 'clflush [eax]', ['M8(']), ('f30fbcc1', 'tzcnt = bsf', ['__builtin_ctz']), ('f30fbdc1', 'lzcnt = bsr', ['__builtin_clz']),
     ('0f1c00', 'cldemote (reserved NOP)', [NORAISE]), ('f30f1efb', 'endbr32', [NORAISE]), ('0f1a00', 'bndldx', [NORAISE]), ('0f0d00', 'prefetch', [NORAISE]), ('0f19c0', 'nop eax,eax', [NORAISE]),
-    ('f30f1ec8', 'rdsspd', [NORAISE]), ('0f1ed0', 'nop edx? reserved NOP', [NORAISE]),
+    ('f30f1ec8', 'rdsspd', [NORAISE]),
     ('f2700a', 'bnd jo', ['if(of)']), ('f2c3', 'bnd ret', ['return;']), ('3effe0', 'notrack jmp eax', ['c->ra=eax']), ('f2f00108', 'xacquire lock add [eax],ecx', ['M32(']),
     ('f30fb8c1', 'popcnt', [RUD]), ('0f38f001', 'movbe', [RUD]), ('f20f38f1c1', 'crc32', [RUD]), ('0fc7f0', 'rdrand', [RUD]), ('0f01d0', 'xgetbv', [RUD]), ('0fae20', 'xsave', [RUD]), ('0f05', 'syscall', [RUD]),
     ('0f07', 'sysret', [RUD]), ('0f01f8', 'swapgs', [RUD]), ('0f01c1', 'vmcall', [RUD]), ('0f01c8', 'monitor', [RUD]), ('0fb9c1', 'ud1', [RUD]), ('0fff00', 'ud0', [RUD]), ('c5f877', 'vzeroupper', [RUD]),
@@ -155,7 +155,7 @@ CLASS_EXPECT = [
     ('c7f800000000', 'xbegin', [RUD]), ('0f0b', 'ud2', ['fnvl_raise(FNVL_UD,']), ('0f01d6', 'xtest', [RUD]), ('0faee0', 'ptwrite? (F3 0F AE /4 needs F3: this is 0F AE E0 = xsave-like #UD)', []),
 ]
 # reserved-NOP bytes capstone refuses: (hex, expected instruction length or None). Lengths cross-checked against the Unicorn oracle over the whole 0F 0D / 0F 18..1F ModRM grid (340 encodings, 0 mismatches).
-NOPGAP = [('0f1ed0', 3), ('0f1a20', 3), ('0f1b3800', 4), ('660f1c4004', 5), ('0f1b0500000000', 7), ('0f1d0424', 4), ('0f1d042500000000', 8), ('670f1c4000', 5), ('670f1c0600', 5), ('0f0d18', 3),
+NOPGAP = [('0f1ed0', 3), ('0f1a20', 3), ('0f1b3800', 3), ('660f1c4004', 5), ('0f1b0500000000', 7), ('0f1d0424', 4), ('0f1d042500000000', 8), ('670f1c4000', 5), ('670f1c0600', 6), ('0f0d18', 3),
           ('0f0dc0', None), ('0f18c0', None), ('f00f1ed0', None), ('0f1fd0', 3)]
 def nopgap():
     bad = 0
