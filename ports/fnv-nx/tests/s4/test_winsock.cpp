@@ -146,13 +146,13 @@ TEST(ws_hostnames)
     char name[64];
     CHECK_EQ(fnvnx_ws2_gethostname(name, sizeof name), 0);
     CHECK(name[0] != 0);
-    h = (ws_hostent *)fnvnx_ws2_gethostbyname(name);
+    h = (ws_hostent *)fnvnx_ws2_gethostbyname(name);   /* the declared computer name: Wine's magic loopback address */
     CHECK(h != NULL);
+    if (h) CHECK(h->addrs && h->addrs[0] && memcmp(h->addrs[0], "\x7f\x0c\x22\x38", 4) == 0);
     char tiny[1];
     CHECK_EQ(fnvnx_ws2_gethostname(tiny, 1), -1); CHECK_EQ(LASTERR(), 10014);   /* WSAEFAULT: buffer too small */
     CHECK(fnvnx_ws2_gethostbyname("no-such-host.invalid") == NULL);
-    int e = LASTERR();
-    CHECK(e == 11001 || e == 11002 || e == 11003 || e == 11004);
+    CHECK_EQ(LASTERR(), 11001);   /* no resolver in the declared machine: WSAHOST_NOT_FOUND, never a host lookup */
     fnvnx_ws2_WSACleanup();
 }
 
@@ -241,6 +241,36 @@ TEST(ws_error_matrix)
     CHECK_EQ(fnvnx_ws2_ioctlsocket(u, (long)0x8004667E, &nb), 0);
     CHECK_EQ(fnvnx_ws2_recv(u, b, 4, 0), -1); CHECK_EQ(LASTERR(), 10035);
     fnvnx_ws2_closesocket(u);
+    fnvnx_ws2_WSACleanup();
+}
+
+/* THE DECLARED NETWORK (head of platform/win32/winsock.cpp): the same answer for every external destination, before any host call */
+TEST(ws_no_network)
+{
+    start();
+    UINT_PTR t = fnvnx_ws2_socket(2, 1, 0);
+    ws_in ext = addr_of(0x08080808u, 53), any = addr_of(0, 53), bc = addr_of(0xFFFFFFFFu, 53), mc = addr_of(0xE0000001u, 53);
+    CHECK_EQ(fnvnx_ws2_connect(t, &ext, sizeof ext), -1); CHECK_EQ(LASTERR(), 10051);   /* WSAENETUNREACH */
+    CHECK_EQ(fnvnx_ws2_connect(t, &bc, sizeof bc), -1); CHECK_EQ(LASTERR(), 10051);
+    CHECK_EQ(fnvnx_ws2_connect(t, &mc, sizeof mc), -1); CHECK_EQ(LASTERR(), 10051);
+    CHECK_EQ(fnvnx_ws2_connect(t, &any, sizeof any), -1); CHECK_EQ(LASTERR(), 10049);   /* WSAEADDRNOTAVAIL */
+    CHECK_EQ(fnvnx_ws2_bind(t, &ext, sizeof ext), -1); CHECK_EQ(LASTERR(), 10049);      /* no such local address */
+    CHECK_EQ(fnvnx_ws2_bind(t, &mc, sizeof mc), -1); CHECK_EQ(LASTERR(), 10049);
+    ws_in l127 = addr_of(0x7F0C2238u, 0);                                                /* all of 127/8 is local */
+    CHECK_EQ(fnvnx_ws2_bind(t, &l127, sizeof l127), 0);
+    fnvnx_ws2_closesocket(t);
+    UINT_PTR a = fnvnx_ws2_socket(2, 1, 0);
+    ws_in w = addr_of(0, 0);                                                             /* INADDR_ANY binds */
+    CHECK_EQ(fnvnx_ws2_bind(a, &w, sizeof w), 0);
+    fnvnx_ws2_closesocket(a);
+    UINT_PTR u = fnvnx_ws2_socket(2, 2, 17);
+    struct { uint32_t group, ifc; } m = { 0x010000E0u, 0 };                              /* 224.0.0.1 */
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 12, (const char *)&m, 8), -1); CHECK_EQ(LASTERR(), 10049);   /* IP_ADD_MEMBERSHIP */
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 13, (const char *)&m, 8), -1); CHECK_EQ(LASTERR(), 10049);   /* IP_DROP_MEMBERSHIP */
+    uint32_t ifc = 0x08080808u;
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 9, (const char *)&ifc, 4), -1); CHECK_EQ(LASTERR(), 10049);  /* IP_MULTICAST_IF external */
+    fnvnx_ws2_closesocket(u);
+    CHECK(fnvnx_ws2_gethostbyname("www.example.com") == NULL); CHECK_EQ(LASTERR(), 11001);
     fnvnx_ws2_WSACleanup();
 }
 

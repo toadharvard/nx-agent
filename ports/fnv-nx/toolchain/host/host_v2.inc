@@ -174,7 +174,16 @@ static u64 h_wall_time_us(void) {
     gettimeofday(&tv, NULL);
     return (u64)((s64)tv.tv_sec * 1000000 + tv.tv_usec);
 }
-static u64 h_tz_offset_minutes(void) { return 0; }   /* TODO: time:u LocationName / CalendarAdditionalInfo */
+/* hostapi.h: off_s / 60 (C division) of the TZ_AT zone (the console's time service, timeToCalendarTimeWithMyRule) at this moment; 0 when
+ * the time service has no answer for it. The same source as TZ_AT (host_platform.inc). */
+static u64 h_tz_offset_minutes(void) {
+    struct timeval tv;
+    TimeCalendarTime cal;
+    TimeCalendarAdditionalInfo info;
+    gettimeofday(&tv, NULL);
+    if (R_FAILED(timeToCalendarTimeWithMyRule((u64)tv.tv_sec, &cal, &info))) return 0;
+    return (u64)(s64)(info.offset / 60);
+}
 static u64 h_random64(void) { return randomGet64(); }
 static u64 h_memory_info(u64 out) {
     FnvnxMemInfo *m = (FnvnxMemInfo *)out;
