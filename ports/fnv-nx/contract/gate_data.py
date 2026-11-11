@@ -7,6 +7,8 @@ Several native copies of one address: each is judged, the worst verdict stands.
 """
 import bisect, collections, os, re
 
+import store
+
 NAME = 'data'
 ORDER = ('none', 'equal', 'subset', 'superset', 'different')   # best .. worst
 AL = re.compile(r'__fnv_([0-9a-f]{8}) =')
@@ -40,8 +42,9 @@ def run(facts, obj, link):
         return {canon(t) for t in addrs if va <= t < va + vs}
 
     copies = collections.defaultdict(list)
-    for (_, a), v in obj.items():
-        if a != 'ztv' and a in facts['fn']:
+    for k, v in obj.items():
+        a = k[1]
+        if store.is_function_key(k) and a in facts['fn']:
             copies[a].append(pick(v[1]))
     exe = {a: pick(t for _, t in facts['fn'][a]['data']) for a in copies}
     miss = collections.Counter()

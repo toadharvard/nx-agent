@@ -67,6 +67,21 @@ Wine 9.0 does, with one log line at the call. The source of the behaviour is Win
 - The gate result reports the call sites per `id` (`wine_fixme`), so growth is visible. The renderer's owner fills the
   table from the Wine 9.0 source.
 
+## Declared-machine bodies (owner decision of 2026-11-11, CLAUDE.md "The declared machine")
+
+An environment query answered from the declared machine is a complete implementation, not a stub: no network (every network call returns
+the documented error for that state), a fixed time zone, registry values from static reads (an undeclared key is absent). The rule is the
+Wine rule with a second citation function, one rule for every function, no list of functions:
+
+- A body calls `fnvnx_declared_machine(id)` (C linkage, writes nothing, returns) with a constant `id`; `verify/declared_machine.tsv` has the row
+  `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`. `fact` is `no-network`, `time-zone` or `registry`; `source` is the documented
+  origin of the value, `win-doc:<documentation page or header path>:<function>` or `wine-9.0:<path>:<function>`; `kind`/`value` as for Wine rows.
+- `objstub` accepts the body iff it is otherwise vacuous, passes exactly one id of one citation function on every path, and its result equals the
+  row. Findings: `declared-machine-{unknown-id,mismatch,nonconstant,in-real-body,address-taken}`. A bare constant body without the citation stays V.
+- Limit (stated): the gate cannot tell which return value of a function is success, so it cannot reject a row that says success for a network
+  call; it rejects a body whose result differs from its row. Row against documentation or Wine source is the oracle class (10), not done.
+  A body that calls something or stores (SetLastError, a filled TIME_ZONE_INFORMATION) is not V and needs no citation.
+
 ## Proven-unreachable branches (owner decision of 2026-11-11, option iii)
 
 A branch that the call graph proves unreachable goes to `fnvnx_reach_violation(fact_id)`, which exits through the
@@ -155,6 +170,8 @@ Accepted assumptions that cannot be removed (MASTER_PLAN4 section 4):
 - **Behaviour of the console** (Horizon, memory limits on hardware) stays an assumption until a run on the console.
 
 ## Assumptions
+
+The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) are defined in `RULES.md`.
 
 - A2: the compiler is correct. The gates judge its output, not its internals.
 - The set of terminating routines for class 1 is derived from the toolchain's own headers (the `noreturn`

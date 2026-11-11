@@ -3,7 +3,7 @@
 
     objfacts_one.py --object <one .o> --vft vft.json --addrmap <addrmap.tsv> --out <X.obj.json>
 
-Exactly the per-function tuples and the `(object, 'ztv')` entry that objfacts.py computes for this object (same
+Exactly the per-function tuples and the `(object, 'ztv' | 'sympair' | 'vtpair' | 'n3')` entries that objfacts.py computes for this object (same
 code: objfacts.scan_object), keyed by (object basename, address) as there.  Output: store kind `objone`
 (the encoding of kind `obj`).  Inputs: the object, the vftable address list (exefacts.py --vft-out: a sorted JSON list, small, so the
 stage does not load the whole fact base), the address-map rows of this object.
