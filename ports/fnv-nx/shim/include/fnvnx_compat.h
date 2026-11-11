@@ -223,21 +223,10 @@ struct fnvnx_new_tag {};
 /* EBO2: first in an empty base whose derived class introduces a vfptr: not empty (MSVC puts it after the vfptr),
  * still 0 bytes */
 #define FNVNX_EBO2 char fnvnx_ebo2[0];
-/* IDTOR1: a body-less destructor declaration for a class whose implicit destructor the recipe binds (GCC calls the
- * bound D1 by name instead of defining it inline); MSVC's implicit one already compiles to that call */
-#define FNVNX_IDTOR1(cls) public: ~cls();
-/* HKRO1: Havok hkReferencedObject's getClassType / calcContentStatistics (exe slots 1 / 2) */
-#define FNVNX_HKRO1 virtual const void* GetClassType() const; virtual void CalcContentStatistics(void*, const void*) const;
 /* A raw exe vftable slot index is the native index: the compiler gives a virtual destructor its one slot, as in the
  * exe (SDD2, toolchain/sdd). The two names are kept for text that still spells an index through them. */
 #define FNVNX_VSLOT(k) (k)
 #define FNVNX_D26_SLOT(k) (k)
-/* EMPTY1: a declared-only empty-string object is the temporary T("") the exe builds */
-#define FNVNX_EMPTY1(T, name) T("")
-/* DTORB1: a destructor stand-in calls the address the recipe binds its ??1 to (the link's __fnv_<a>), the
- * original body unreachable */
-#define FNVNX_DTORB_BEGIN(a) { extern void fnvnx_dtorb_##a(void*) __asm__("__fnv_" #a); fnvnx_dtorb_##a((void*)this); } if (0) {
-#define FNVNX_DTORB_END }
 #endif
 
 /* SAL annotations (sal.h) used without an include in pasted CRT prototypes */

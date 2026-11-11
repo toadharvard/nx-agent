@@ -1,37 +1,5 @@
 """Prepare rules of stream S2-bodies (tools/rules/README.md).
 
-STAND5 - in-class stand-in bodies MSVC called out of line.
-
-STAND1/STAND2 (s1_compile.py) drop untagged out-of-class definitions bound to another function's address. The same
-happens with a member defined in its class body: blk_00c60000_od_ob1_variant.cpp's `List62::Add62` is a list append
-written inline in `struct List62`, while the unit's units.json `symbols` bind ?Add62@List62@@... to 0x00c62cc0, which
-the exe's code calls and which is an array Add (grow through 0x00c628c0, then SetAt 0x00c62b90; R6, recon6-002). A
-name in `symbols` is one the MSVC object references out of line, so the original called the address there. GCC
-inlines the local body instead, which references List62::NewItem and Item62::SetElement: names no exe function
-has.
-
-STAND5 turns such an in-class body into its declaration, so the call stays a call of the name the link binds to the
-address. Gates: a member function body directly inside a class (only namespaces and classes around it); not virtual,
-not a destructor or operator; untagged (no `// @fnv` above it); every spelling of its MSVC name in the unit's symbols
-binds an address that another unit's `functions` define and this unit does not.
-
-Also (R6 class 5): a constructor without an initializer list (menu.cpp's `FUN_00a0ac80()` builds four entries
-through Init, where the exe's 0x00a0ac80 builds a list: `??0` bound there); a head with `__declspec(noinline)`
-(bhkrigidbody.cpp's ObjectListC8E::AddTail, 0x00c80a30); and a member of a class template whose head says
-`__declspec(noinline)`, so MSVC called every instantiation out of line and each is in the symbols
-(blk_00c80000_o2.cpp's BSSimpleListC9A<..>::Remove, 0x00631620), when the unit defines none of them. The class name
-comes from its head, past a base clause (`struct D : public B`).
-
-Also (s2d crt-import): in the decomp's unit copies of the MSVC STL (`namespace fnv_<a> { namespace std`), members of
-class templates and of classes nested in them, and constructors with an initializer list, under the same symbol
-gate (`_stl_copy_edits`): MSVC called `basic_ofstream(const char*, int, int)` (0x00acdc90), `basic_filebuf::close`
-(0x00acfb90) and `basic_ostream::sentry::sentry` out of line, where GCC inlined the decomp's partial model of them
-and referenced members it never defines (`basic_filebuf::open`, `_Init`, `basic_streambuf::_Lock`).
-
-And the converse (`_stl_string_bodies`): `~basic_string()` and `operator=(const basic_string&)` of those copies, declared and
-defined nowhere because VC9 wrote both inline, get the bodies the exe's inlined sites show: `_Tidy(true, 0)` and
-`assign(r, 0, npos)`.
-
 HARN1 - the decomp's harness-only code gets internal linkage.
 
 The decomp keeps byte-matching harnesses next to the matched code: convention callers that exist only so MSVC emits
@@ -60,13 +28,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import prepare                     # noqa: E402
-import s1_compile                  # noqa: E402  (the units.json readers STAND1/2 use)
+import s1_compile                  # noqa: E402  (the units.json readers)
 
-INCLASS_DEF = re.compile(r'^([ \t]*)((?:(?:__declspec\s*\(\s*\w+\s*\)|[\w:<>,\*&]+)[ \t\*&]+)*?)([A-Za-z_]\w*)\s*'
-                         r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*((?:const\s*)?)\{', re.M)
 CLASS_HEAD = re.compile(r'^(?:template\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\s*)?(?:typedef\s+)?(?:class|struct|union)\s+'
                         r'(?:__declspec\s*\([^()]*\)\s*)?([A-Za-z_]\w*)')
-NOINLINE = re.compile(r'__declspec\s*\(\s*noinline\s*\)')
+UNIT_NS_HEAD = re.compile(r'^fnv_[0-9a-f]{8}$')
 
 
 def _scope_name(kind, head):
@@ -75,239 +41,6 @@ def _scope_name(kind, head):
         m = CLASS_HEAD.match(head.strip())
         return m.group(1) if m else None
     return head.split()[-1] if head.split() else None
-
-
-SKIP_HEAD = re.compile(r'\b(?:virtual|operator|return|else|case|new|delete|throw|typedef|friend)\b')
-
-
-TEMPLATE_HEAD = re.compile(r'template\s*<')
-_FUNCTION_NAMES = {}
-
-
-def _unit_function_names(path):
-    """The MSVC names the unit's units.json `functions` define (with their fold aliases)."""
-    if not _FUNCTION_NAMES:
-        import json
-        root, uj = prepare._units_json(path)
-        _FUNCTION_NAMES[None] = True
-        if uj:
-            for u in json.load(open(uj))['units']:
-                _FUNCTION_NAMES[os.path.normpath(os.path.join(root, u['source']))] = {
-                    n for f in u.get('functions') or () for n in [f['symbol']] + list(f.get('fold_aliases') or ())}
-    return _FUNCTION_NAMES.get(os.path.normpath(os.path.abspath(path)), set())
-
-
-def msvc_void_params(name):
-    """Whether an MSVC function name's parameter list is `()`: it ends in `XZ` (X = void, then the throw
-    specification Z); a list of parameters ends in `@` or `Z` (ellipsis) before that Z."""
-    return name.endswith('XZ')
-
-
-def r_stand_in_class_bodies(path, text, stats):
-    """STAND5: an in-class body whose MSVC name the unit binds to another unit's function becomes a declaration."""
-    if not path.endswith('.cpp'):
-        return text
-    syms = s1_compile._unit_symbols(path)
-    info = s1_compile._unit_info(path)
-    if not syms or info is None:
-        return text
-    elsewhere = s1_compile._all_unit_functions(path) - info[1]
-    tagged = {int(a, 16) for a in s1_compile.FNV_TAG_ADDR.findall(text)}
-    own_names = _unit_function_names(path)
-    spans, edits = None, []
-    for m in INCLASS_DEF.finditer(text):
-        name, head = m.group(3), m.group(2) or ''
-        if name in s1_compile.NOT_FUNCTIONS or name in s1_compile.CXX_KEYWORDS or SKIP_HEAD.search(head):
-            continue
-        if re.search(r'\b(?:virtual|operator)\b', text[max(0, m.start() - 80):m.start()].split('\n')[-1]):
-            continue
-        before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before):
-            continue
-        if spans is None:
-            spans = prepare.scope_spans(text)
-        chain = prepare.scope_chain(spans, m.start())
-        if not chain or chain[-1][0] != 'class' or any(k not in ('namespace', 'class') for k, _ in chain):
-            continue
-        scope = [_scope_name(k, h) for k, h in reversed(chain) if h.split() and h.split()[-1] != 'namespace']
-        if not scope or None in scope or name == '~' + scope[0] or any('<' in s for s in scope):
-            continue
-        template = TEMPLATE_HEAD.match(chain[-1][1].strip()) is not None
-        if template and (len(scope) != 1 or not NOINLINE.search(head)):
-            continue
-        if any(TEMPLATE_HEAD.match(h.strip()) for _, h in chain[:-1]):
-            continue
-        if name == scope[0]:   # a constructor: one without an initializer list (INCLASS_DEF ends at `)`)
-            prefix = '??0' + ('?$' + scope[0] + '@' if template else '@'.join(scope) + '@@')
-        else:
-            prefix = '?' + name + '@' + ('?$' + scope[0] + '@' if template else '@'.join(scope) + '@@')
-        # only the spellings of this overload's parameter list: MSVC ends a `()` list in `XZ` (X = void, Z = no
-        # throw specification), any other list in `@Z` or `ZZ` (W44: tiletext.cpp's `TextString()` went because
-        # ??0TextString@@QAE@PBD@Z and the copy constructor's name bind 0x0040c0e0 / 0x004047f0)
-        void = m.group(4).strip() in ('', 'void')
-        bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix) and msvc_void_params(k) == void]
-        if not bound or not all(a in elsewhere and a not in tagged for a in bound):
-            continue
-        if template and any(n.startswith(prefix) for n in own_names):
-            continue
-        o = m.end() - 1
-        c = prepare.match_brace(text, o)
-        decl = text[m.start():o].rstrip()
-        decl = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', decl)
-        nl = '\n' * (text.count('\n', m.start(), c) - decl.count('\n'))   # line numbers stay
-        edits.append((m.start(), c, decl + '; /* fnv-nx STAND5: bound to the address MSVC called */' + nl))
-    spans = spans or prepare.scope_spans(text)
-    edits += _stl_copy_edits(path, text, syms, tagged, own_names, spans)
-    edits += _stl_string_bodies(text, spans)
-    if not edits:
-        return text
-    out, pos = [], 0
-    for a, b, r in sorted(edits):
-        if a < pos:
-            continue
-        out.append(text[pos:a]); out.append(r); pos = b
-        stats['STAND5'] += 1
-    out.append(text[pos:])
-    return ''.join(out)
-
-
-# STAND5 for the decomp's unit copies of the MSVC STL (`namespace fnv_<a> { namespace std { ... } }`)
-UNIT_NS_HEAD = re.compile(r'^fnv_[0-9a-f]{8}$')
-STL_NS = ('std', 'stdext')
-INCLASS_HEAD = re.compile(r'^([ \t]*)((?:(?:__declspec\s*\(\s*\w+\s*\)|[\w:<>,\*&]+)[ \t\*&]+)*?)([A-Za-z_]\w*)\s*\(',
-                          re.M)
-
-
-def _close_paren(text, i):
-    """Index of the ')' matching text[i] == '(', or -1."""
-    d = 0
-    for j in range(i, min(len(text), i + 4000)):
-        c = text[j]
-        if c == '(':
-            d += 1
-        elif c == ')':
-            d -= 1
-            if d == 0:
-                return j
-        elif c in ';{}' and d:
-            return -1
-    return -1
-
-
-def _stl_copy_edits(path, text, syms, tagged, own_names, spans):
-    """STAND5's edits for members of the decomp's unit-local copies of MSVC STL classes, where its general gates are
-    narrower: a member of a class template or of a class nested in one (`basic_ofstream<C, T>::basic_ofstream`,
-    `basic_ostream<C, T>::sentry::sentry`, `basic_filebuf<C, T>::close`), and a constructor with an initializer list.
-    The unit's symbols name such a member under the copy's MSVC name (`??0?$basic_ofstream@...@std@fnv_00ac9790@@...`)
-    only because MSVC called it out of line there: the body is the library's (VC9 STL, instantiated in the exe once),
-    and GCC inlining the decomp's partial model of it references members the model declares and never defines
-    (`basic_filebuf::open`, `_Init`, `_Endwrite`, `basic_streambuf::_Lock`: the bodycause `crt-import` class). Gates:
-    the class chain is inside `namespace fnv_<a> { namespace std` (or stdext); untagged; not virtual, a destructor or
-    an operator; every symbol of the member's MSVC name (any instantiation) binds an address some unit's `functions`
-    define, none tagged here, and this unit defines none of those names itself."""
-    if not syms:
-        return []
-    every = s1_compile._all_unit_functions(path)
-    edits = []
-    for m in INCLASS_HEAD.finditer(text):
-        name, head = m.group(3), m.group(2) or ''
-        if name in s1_compile.NOT_FUNCTIONS or name in s1_compile.CXX_KEYWORDS or SKIP_HEAD.search(head):
-            continue
-        if re.search(r'\b(?:virtual|operator)\b', text[max(0, m.start() - 80):m.start()].split('\n')[-1]):
-            continue
-        close = _close_paren(text, m.end() - 1)
-        if close < 0:
-            continue
-        rest = re.match(r'\s*((?:const\s*)?)(\{|:)', text[close + 1:close + 400])
-        if not rest:
-            continue
-        o = close + 1 + rest.end() - 1
-        if rest.group(2) == ':':   # an initializer list: the body opens at the first `{` outside parentheses
-            d, o = 0, -1
-            for j in range(close + 1 + rest.end(), min(len(text), close + 4000)):
-                c = text[j]
-                if c == '(':
-                    d += 1
-                elif c == ')':
-                    d -= 1
-                elif c == ';' and not d:
-                    break
-                elif c == '{' and not d:
-                    o = j
-                    break
-            if o < 0:
-                continue
-        before = text[max(0, m.start() - 400):m.start()]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before):
-            continue
-        chain = prepare.scope_chain(spans, m.start())
-        if not chain or chain[-1][0] != 'class' or any(k not in ('namespace', 'class') for k, _ in chain):
-            continue
-        names = [_scope_name(k, h) for k, h in chain]
-        if None in names:
-            continue
-        nss = [n for (k, _), n in zip(chain, names) if k == 'namespace']
-        if not any(UNIT_NS_HEAD.match(a) and b in STL_NS for a, b in zip(nss, nss[1:])):
-            continue
-        templ = [k == 'class' and TEMPLATE_HEAD.match(h.strip()) is not None for k, h in chain]
-        ctor = name == names[-1]
-        if not (any(templ) or (ctor and rest.group(2) == ':')):
-            continue   # the general STAND5 above handles the rest
-        comps = ''.join((r'\?\$' + re.escape(n) + r'@.+?@') if t else re.escape(n) + '@'
-                        for n, t in reversed(list(zip(names, templ))))
-        rx = re.compile('^' + (r'\?\?0' if ctor else r'\?' + re.escape(name) + '@') + comps + '@')
-        bound = [int(a, 16) for k, a in syms.items() if rx.match(k)]
-        if not bound or not all(a in every and a not in tagged for a in bound):
-            continue
-        if any(rx.match(n) for n in own_names):
-            continue
-        c = prepare.match_brace(text, o)
-        decl = (text[m.start():close + 1] + (' const' if rest.group(1).strip() else '')).rstrip()
-        decl = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', decl)
-        nl = '\n' * (text.count('\n', m.start(), c) - decl.count('\n'))   # line numbers stay
-        edits.append((m.start(), c, decl + '; /* fnv-nx STAND5: bound to the address MSVC called */' + nl))
-    return edits
-
-
-STRING_DTOR = re.compile(r'^([ \t]*)~basic_string\s*\(\s*\)\s*;', re.M)
-STRING_ASSIGN = re.compile(r'^([ \t]*)basic_string\s*&\s*operator\s*=\s*\(\s*const\s+basic_string\s*&\s*\)\s*;', re.M)
-STRING_TIDY = re.compile(r'\b_Tidy\s*\(\s*bool\b[^()]*\)\s*[;{]')
-STRING_ASSIGN3 = re.compile(r'\bassign\s*\(\s*const\s+basic_string\s*&\s*,\s*unsigned(?:\s+int)?\s*,\s*unsigned(?:\s+int)?\s*\)\s*;')
-STRING_NPOS = re.compile(r'\bstatic\s+const\s+unsigned(?:\s+int)?\s+npos\s*;')
-
-
-def _stl_string_bodies(text, spans):
-    """Members of the decomp's unit copies of `basic_string` (`namespace fnv_<a> { namespace std { template <..> class
-    basic_string`) that the model declares and nothing defines: VC9 wrote both inline, so MSVC never called them out of
-    line and the unit's symbols hold no address for them (crt-import: `~basic_string`, `operator=` of fnv_00ac9790,
-    fnv_00ad60c0, fnv_00ad61e0). Their bodies are what the exe's inlined copies do, read from its call sites:
-    - `~basic_string() { _Tidy(true, 0); }`: the destructor sites push 0, push 1 and call `_Tidy` (0x0044a730, bound by
-      the unit) - `6a 00 6a 01 lea ecx, [..]; call 0x0044a730`, 21 + 20 + 18 + ... sites in the exe;
-    - `operator=(const basic_string& r) { return assign(r, 0, npos); }`: std::_Copy_opt's element copy (0x00ad5a80)
-      pushes `[0x010173f0]` (npos), 0 and the source, then calls `assign(const string&, size_t, size_t)` (0x0044a580).
-    Gates: the class declares the member without a body, the helper it calls with the exact signature (and `npos` for
-    the assignment), and the unit has no out-of-line definition of the member."""
-    edits = []
-    for o, c, kind, head in spans:
-        if kind != 'class' or _scope_name('class', head) != 'basic_string' or not TEMPLATE_HEAD.match(head.strip()):
-            continue
-        chain = [(k, h) for k, h in prepare.scope_chain(spans, o)]
-        nss = [_scope_name(k, h) for k, h in chain if k == 'namespace']
-        if len(chain) != len(nss) or not any(UNIT_NS_HEAD.match(a or '') and b in STL_NS for a, b in zip(nss, nss[1:])):
-            continue
-        body = text[o:c]
-        for rx, need, repl, out_of_class in (
-                (STRING_DTOR, (STRING_TIDY,), '~basic_string() { _Tidy(true, 0); }', r'basic_string\s*(?:<[^;{]*?>)?\s*::\s*~'),
-                (STRING_ASSIGN, (STRING_ASSIGN3,), 'basic_string& operator=(const basic_string& _Right) '
-                 '{ return assign(_Right, 0, %s); }', r'basic_string\s*(?:<[^;{]*?>)?\s*::\s*operator\s*=')):
-            m = rx.search(body)
-            if not m or not all(n.search(body) for n in need) or re.search(out_of_class, text):
-                continue
-            a = o + m.start() + len(m.group(1))
-            if '%s' in repl:   # npos where the model declares it, else its own spelling of it (assign(rhs, 0, -1))
-                repl = repl % ('npos' if STRING_NPOS.search(body) else '-1')
-            edits.append((a, o + m.end(), repl + ' /* fnv-nx STAND5: the exe\'s inlined body */'))
-    return edits
 
 
 # ---------------------------------------------------------------------------------------------------------- HARN1
@@ -502,90 +235,6 @@ def r_harness_internal(path, text, stats):
         out.append(text[pos:a]); out.append(r); pos = b
     out.append(text[pos:])
     stats['HARN1'] += sum(1 for a, b, r in edits)
-    return ''.join(out)
-
-
-# ---------------------------------------------------------------------------------------------------------- STAND6
-#
-# STAND2 for a stand-in marked `__declspec(noinline)`, in any unit. STAND2 leaves units compiled with /O1 /O2 /Ox
-# /Ob2 alone because MSVC may have inlined the stand-in there, so the exe may run its body. A noinline definition
-# MSVC never inlined: its callers called the name, and the matcher bound that name to the address another unit
-# decompiles (units.json `symbols`). blk_00c60000_od_o2_nood_variant_rtm_variant.cpp (/O2) defines
-# `__declspec(noinline) P064Quad* bhkWorldObject::FUN_00560e10()` untagged, a probe over `probe_vectors` (declared,
-# defined nowhere); the unit binds its MSVC name to 0x00560e10, whose code (a getter through 0x004ae750 and
-# 0x00560e50) tesobjectrefr.cpp decompiles. GCC compiled the probe body and the link bound its call there, so the
-# guest ran the probe and read a zero placeholder for `probe_vectors`.
-#
-# Gates: an out-of-class member or free definition at namespace scope whose head has `__declspec(noinline)`;
-# untagged; not virtual in the unit (the native vtable stays as it is), not inline / static / a template; every
-# spelling of its MSVC name in the unit's symbols binds an address another unit defines and this unit does not. A
-# member's definition goes (its in-class declaration stays); a free function keeps a declaration. Line numbers stay.
-
-NOINLINE_DEF = re.compile(r'^([ \t]*)((?:[\w:<>,\*&]+[ \t\*&]+)*?)__declspec\s*\(\s*noinline\s*\)[ \t]+'
-                          r'((?:[\w:<>,\*&]+[ \t\*&]+)*?)((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
-                          r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?\{', re.M)
-
-
-def r_noinline_stand_ins(path, text, stats):
-    """STAND6: an untagged noinline definition bound to an address another unit defines (see above)."""
-    if not path.endswith('.cpp') or 'noinline' not in text:
-        return text
-    syms = s1_compile._unit_symbols(path)
-    info = s1_compile._unit_info(path)
-    if not syms or info is None:
-        return text
-    elsewhere = s1_compile._all_unit_functions(path) - info[1]
-    tagged = {int(a, 16) for a in s1_compile.FNV_TAG_ADDR.findall(text)}
-    masked = s1_compile._mask_code(text)
-    spans, edits = None, []
-    for m in NOINLINE_DEF.finditer(text):
-        if masked[m.end() - 1] != '{':
-            continue
-        head = (m.group(2) or '') + ' ' + (m.group(3) or '')
-        if re.search(r'\b(?:inline|__inline|__forceinline|static|virtual|template|friend|FNVNX_KEEP|return|else)\b',
-                     head):
-            continue
-        q = re.sub(r'\s+', '', m.group(4))
-        parts = q.split('::')
-        name = parts[-1]
-        if name in s1_compile.NOT_FUNCTIONS or name in s1_compile.CXX_KEYWORDS or name.startswith('~'):
-            continue
-        if len(parts) >= 2 and name == parts[-2]:
-            continue                                      # constructors: STAND2's business
-        line0 = text.rfind('\n', 0, m.start(2)) + 1
-        before = text[max(0, line0 - 400):line0]
-        if re.search(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*$', before) or \
-                re.search(r'template\s*<[^;{}]*>\s*$', before):
-            continue
-        if spans is None:
-            spans = prepare.scope_spans(text)
-        chain = prepare.scope_chain(spans, m.start(4))
-        if any(k != 'namespace' for k, _ in chain):
-            continue
-        ns = [h.split()[-1] for _, h in chain if h.split()[-1] != 'namespace']
-        prefix = '?' + '@'.join([name] + list(reversed(parts[:-1])) + list(reversed(ns))) + '@@'
-        bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
-        if not bound or not all(a in elsewhere and a not in tagged for a in bound):
-            continue
-        if re.search(r'\bvirtual\b[^;{}]*[\s\*&]%s\s*\(' % re.escape(name), text):
-            continue
-        o = m.end() - 1
-        c = prepare.match_brace(text, o)
-        nl = '\n' * text.count('\n', m.start(), c)
-        if len(parts) == 1:
-            decl = text[m.start():o].rstrip()
-            edits.append((m.start(), c, decl + '; /* fnv-nx STAND6 */' + nl[decl.count('\n'):]))
-        else:
-            edits.append((m.start(), c, '/* fnv-nx STAND6: %s is the function at the bound address */%s' % (q, nl)))
-    if not edits:
-        return text
-    out, pos = [], 0
-    for a, b, r in sorted(edits):
-        if a < pos:
-            continue
-        out.append(text[pos:a]); out.append(r); pos = b
-        stats['STAND6'] += 1
-    out.append(text[pos:])
     return ''.join(out)
 
 
@@ -1275,7 +924,7 @@ def r_code_address_casts(path, text, stats):
     return ADDRFN_CAST.sub(sub, text)
 
 
-RULES = [r_stand_in_class_bodies, r_harness_internal, r_noinline_stand_ins, r_code_address_casts]
+RULES = [r_harness_internal, r_code_address_casts]
 POST = [pop_chains]
 
 # ---------------------------------------------------------------------------------------------------------- THIS2

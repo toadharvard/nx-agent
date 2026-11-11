@@ -215,17 +215,10 @@ check('CTOR1 explicit constructor call of a template class',
 check('CTOR1 a constructor definition after a comment ending in "." is not a call',
       run(s1.r_ctor_calls, '// see the matcher checks.\nA::A(int x)\n    : m(x)\n{}\n'), ['A::A(int x)'], ['::new'])
 
-# ---- CSX1 / CSX2
+# ---- CSX1
 got = run(s1.r_xbox_cs_asserts, 'FNV_STATIC_ASSERT(sizeof(RecursiveLock) == 0x28);\n'
           'FNV_STATIC_ASSERT(offsetof(_FILETIME, dwHighDateTime) == 0x0);\n')
 check('CSX1 drops only the Xbox _FILETIME order now', got, ['sizeof(RecursiveLock) == 0x28', 'CSX1'], ['dwHighDateTime) =='])
-got = run(s1.r_critical_section_tail, 'class RecursiveLock\n{\n  public:\n    _RTL_CRITICAL_SECTION CriticalSection;  // +0x0\n'
-          '    unsigned long m_uiFirstValue;  // +0x1C\n};\nFNV_STATIC_ASSERT(offsetof(RecursiveLock, CriticalSection) == 0x0);\n'
-          'FNV_STATIC_ASSERT(offsetof(RecursiveLock, m_uiFirstValue) == 0x1C);\n'
-          'struct PcLock\n{\n    _RTL_CRITICAL_SECTION cs;\n    int n;\n};\nFNV_STATIC_ASSERT(offsetof(PcLock, cs) == 0);\n'
-          'FNV_STATIC_ASSERT(offsetof(PcLock, n) == 24);\n')
-check('CSX2 gives a section the class asserts as 28 bytes its 4 bytes', got,
-      ['_RTL_CRITICAL_SECTION CriticalSection; unsigned int CriticalSection_fnvnx_tail;', '    _RTL_CRITICAL_SECTION cs;\n    int n;'])
 
 # ---- LEX1
 got = run(s1.r_msvc_tokens, 'extern"C"enum E { A };\nchar pad[0xae-0x34];\nlong long k = 0xff00ffffui64 + 5i64;\n'
@@ -294,30 +287,10 @@ check('NEW1 size parameter -> size_t, reference parameter kept',
       prepare.r_newdel_size('x.cpp', 'static void* operator new[](unsigned int size, unsigned int& total);\n', Counter()),
       ['operator new[](size_t size, unsigned int& total)'])
 
-# ---- DTOR1
-DTOR1_HEAD = 'template <class T> class NiPointer\n{\n    T* m_pObject;\n    ~NiPointer()\n    {\n        if (m_pObject)\n            m_pObject->DecRefCount();\n    }\n};\nclass Qa;\nclass Ra;\nclass Sa;\nnamespace N { class Qa : public Base {}; }\nclass Base { void DecRefCount(); };\nclass Ra : public Base {};\nclass Sa { void DecRefCount(); };\nstruct B { virtual void k(); NiPointer<Qa> q; NiPointer<Ra> r; NiPointer<Sa> s; };\n'
+# ---- TPL1
 import tempfile
 _d = tempfile.mkdtemp()
 os.makedirs(os.path.join(_d, 'src'))
-with open(os.path.join(_d, 'src', 'b.h'), 'w') as _h: _h.write(DTOR1_HEAD)
-_unit = os.path.join(_d, 'src', 'b.cpp')
-check('DTOR1 an include-only unit (a header unit): the declarations after its includes',
-      run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n// end', _unit),
-      ['// end\ntemplate <> NiPointer<Qa>::~NiPointer(); /* fnv-nx DTOR1 */'], ['NiPointer<Ra>::~'])
-check('DTOR1 an include-only unit with nothing to declare: unchanged',
-      run(s1.r_incomplete_pointee_dtors, '#include "none.h"', os.path.join(_d, 'src', 'e.cpp')) == '#include "none.h"' and 'x' or '',
-      ['x'])
-got = run(s1.r_incomplete_pointee_dtors, '#include "b.h"\n// k\nvoid B::k() {}\n', _unit)
-check('DTOR1 declares the destructor for a pointee never completed at file scope', got,
-      ['template <> NiPointer<Qa>::~NiPointer(); /* fnv-nx DTOR1 */'], ['NiPointer<Ra>::~', 'NiPointer<Sa>::~'])
-
-with open(os.path.join(_d, 'src', 'c.h'), 'w') as _h:
-    _h.write(DTOR1_HEAD.replace('template <class T> class NiPointer', '#define NiPointer X\ntemplate <class T> class NiPointer')
-             + '#undef NiPointer\ntemplate <class T> class NiPointer\n{\n    T* m_pObject;\n};\n')
-check('DTOR1 a unit-local NiPointer without that destructor: nothing',
-      run(s1.r_incomplete_pointee_dtors, '#include "c.h"\nvoid B::k() {}\n', os.path.join(_d, 'src', 'c.cpp')), (), ['DTOR1'])
-
-# ---- TPL1
 got = run(s1.r_dependent_base_members,
           'template<class T> struct Store {\n T* data; int size; int capacity;\n void own(T* p,int n) {data=p;size=n;}\n'
           ' typedef T value;\n};\n'
@@ -725,253 +698,12 @@ check('REC1-RETARGET moves the placed symbol', repr((_r1, _u['functions'][0]['sy
 _r2 = s1.recon_retarget(_u, {'address': '0x008d1e50', 'old': '?F@S@@QAEMXZ', 'new': '?G@@'})
 check('REC1-RETARGET leaves another old symbol alone', repr((_r2, _u['functions'][0]['symbol'])), ["(0, '?F@S@@QAEPAXXZ')"])
 
-# ---- STAND1 (needs a units.json: a small tree of its own; the symbol cache is reset around it)
-import json as _json
-_s = tempfile.mkdtemp()
-os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
-_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {'??0FUN_00632ec0@@QAE@XZ': '0x00632ec0',
-                                                                 '?Helper@@YAHXZ': '0x00401230', '?Copy@@YAPAHU?$It@H@ns@@0@Z': '0x00401230',
-                                                                 '?Make@V@@QAEPAU1@H@Z': '0x00401230'}}]},
-           open(os.path.join(_s, 'build', 'units.json'), 'w'))
-_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
-got = run(s1.r_stand_in_definitions,
-          'struct FUN_00632ec0\n{\n    unsigned char m_data[0x114];\n    FUN_00632ec0();\n};\nFUN_00632ec0::FUN_00632ec0()\n{}\n'
-          'inline int Helper()\n{\n    return 0;\n}\nvoid f() { new FUN_00632ec0; Helper(); }\n'
-          'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b)\n{\n    return 0;\n}\n__declspec(noinline) V*\nV::Make(int n)\n{\n    return 0;\n}\n'
-          'namespace fnv_00632ec0 {\nstruct FUN_00632ec0 { FUN_00632ec0(); };\n// @fnv 0x00632ec0\n'
-          'FUN_00632ec0::FUN_00632ec0()\n{\n    ((int*)this)[0] = 1;\n}\n}\n// @fnv 0x00401230\nint Other()\n{\n    return 1;\n}\n',
-          os.path.join(_s, 'src', 'staging', 'u.cpp'))
-s1._UNIT_SYMBOLS = _saved
-check('STAND1 drops the stand-ins of tagged addresses', got,
-      ['/* fnv-nx STAND1: FUN_00632ec0::FUN_00632ec0 is the function at the tagged address */\n',
-       'int Helper(); /* fnv-nx STAND1 */', '((int*)this)[0] = 1;', 'void f() { new FUN_00632ec0; Helper(); }',
-       'int* __cdecl Copy(ns::It<int> a,\n    ns::It<int> b); /* fnv-nx STAND1 */', '/* fnv-nx STAND1: V::Make is'],
-      ['__declspec(noinline) V*\n/*', 'FUN_00632ec0::FUN_00632ec0()\n{}'])
-
-# STAND1 keeps a tagged definition whose own name the unit binds to its address, with pragmas, a type declaration
-# or a whole type between the tag and the head, or a head over two lines (R6 0x004ab230, 0x0087ce70, 0x00660400, 0x00a8a200;
-# R1 0x0046ffd0); an untagged stand-in after such a tagged function still goes
-_s = tempfile.mkdtemp()
-os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
-_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {
-    '?Get@Bip@@QAEPAHH@Z': '0x00401000', '?Map@@YAPAU?$M@H@@XZ': '0x00401010', '?Next@@YAPAU?$L@H@@PAU1@@Z': '0x00401020',
-    '?Set@Cls@@QAEXXZ': '0x00401030', '?Stand@Cls@@QAEXXZ': '0x00401030', '?Pool@@YAXXZ': '0x00401060'}}]},
-           open(os.path.join(_s, 'build', 'units.json'), 'w'))
-_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
-got = run(s1.r_stand_in_definitions,
-          '// @fnv 0x00401000\n#pragma optimize("", off)\n#pragma optimize("y", off)\nint* Bip::Get(int i)\n{\n    return p + i;\n}\n'
-          '#pragma optimize("", on)\n// @fnv 0x00401010\nM<int>* __cdecl\n    Map()\n{\n    return &g;\n}\n'
-          '// @fnv 0x00401020\ntemplate <class T> struct L;\nL<int>* Next(L<int>* a)\n{\n    return a->n;\n}\n'
-          '// @fnv 0x00401030\ntemplate <> struct A<void*>\n{\n    static void __cdecl Free(void**);\n};\n'
-          'void __thiscall Cls::Set()\n{\n    *(int*)this = 1;\n}\nvoid Cls::Stand()\n{\n}\n'
-          '// @fnv 0x00401060\ntemplate <class T> struct P\n{\n    struct E\n    {\n        E* next;\n    };\n    static E* ms;\n};\n'
-          'void Pool()\n{\n    pooled = 1;\n}\n',
-          os.path.join(_s, 'src', 'staging', 'u.cpp'))
-s1._UNIT_SYMBOLS = _saved
-_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
-_json.dump({'units': [{'source': 'src/staging/u.cpp', 'symbols': {
-    '?Find@@YAPAUA@@PAU1@H@Z': '0x00401040', '?Find@@YAPAUB@@PAU1@H@Z': '0x00401040',
-    '?Pick@@YAHH@Z': '0x00401050', '?Pick@@YAHN@Z': '0x00401050'}}]}, open(os.path.join(_s, 'build', 'units.json'), 'w'))
-got4 = run(s1.r_static_stand_ins,
-           '// @fnv 0x00401040\nstatic __declspec(noinline) A* Find(A* a, int n)\n{\n    return a + n;\n}\n'
-           'static __declspec(noinline) B* Find(B* b,\n                                    int n)\n{\n    return b->pick(n);\n}\n'
-           '// @fnv 0x00401050\nstatic int Pick(int k)\n{\n    return k;\n}\nstatic int Pick(double d);\n'
-           'static int Pick(double d)\n{\n    return 2;\n}\n', os.path.join(_s, 'src', 'staging', 'u.cpp'))
-s1._UNIT_SYMBOLS = _saved
-check('STAND4 an untagged static overload of a tagged address becomes an extern declaration (R6 0x00cb3d10)', got4,
-      ['__declspec(noinline) B* Find(B* b,\n                                    int n); /* fnv-nx STAND4 0x00401040 */',
-       'return a + n;', 'return 2;', 'static int Pick(double d);'], ['b->pick(n)'])
-check('STAND1 keeps tagged definitions behind pragmas, declarations, a type or a two-line head', got,
-      ['return p + i;', 'return &g;', 'return a->n;', '*(int*)this = 1;', 'pooled = 1;',
-       '/* fnv-nx STAND1: Cls::Stand is the function at the tagged address */'], ['fnv-nx STAND1: Bip', 'Map();'])
-
-# STAND1 keeps an untagged definition the unit's own units.json `functions` place, even when another definition
-# carries the address's tag (R2: caravanmenu 0x0073b730)
-_s = tempfile.mkdtemp()
-os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
-_json.dump({'units': [{'source': 'src/staging/u.cpp',
-                       'functions': [{'address': '0x0073b730', 'symbol': '?Run@Hand@@QAEXPAH@Z', 'size': 168}],
-                       'symbols': {'?Run@Hand@@QAEXPAH@Z': '0x0073b730', '?Stand@Hand@@QAEXXZ': '0x0073b730'}}]},
-           open(os.path.join(_s, 'build', 'units.json'), 'w'))
-_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
-got = run(s1.r_stand_in_definitions,
-          'struct Card\n{\n// @fnv 0x0073b730\n    virtual char* Run_card()\n    {\n        return 0;\n    }\n};\n'
-          'struct Hand { void Run(int* p); void Stand(); };\nvoid Hand::Run(int* p)\n{\n    p[0] = 7;\n}\n'
-          'void Hand::Stand()\n{\n}\n', os.path.join(_s, 'src', 'staging', 'u.cpp'))
-s1._UNIT_SYMBOLS = _saved
-check('STAND1 keeps a definition its unit places, whatever carries the tag', got,
-      ['p[0] = 7;', '/* fnv-nx STAND1: Hand::Stand is the function at the tagged address */'],
-      ['fnv-nx STAND1: Hand::Run'])
-_json.dump({'units': [{'source': 'src/staging/u.cpp',
-                       'functions': [{'address': '0x00b26260', 'symbol': '?Sort@@YAXPAH@Z', 'size': 40}],
-                       'symbols': {'?Sort@@YAXPAH@Z': '0x00b26260', '?Sort@@YAXPAN@Z': '0x00b26260'}}]},
-           open(os.path.join(_s, 'build', 'units.json'), 'w'))
-_saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
-got = run(s1.r_stand_in_definitions,
-          '// @fnv 0x00b26260\nvoid Sort(int* p)\n{\n    p[0] = 1;\n}\nvoid Sort(double* p)\n{\n    p[0] = 2;\n}\n',
-          os.path.join(_s, 'src', 'staging', 'u.cpp'))
-s1._UNIT_SYMBOLS = _saved
-check('STAND1 still drops the untagged overload of a tagged, placed name', got,
-      ['p[0] = 1;', 'void Sort(double* p); /* fnv-nx STAND1 */'], ['p[0] = 2;'])
-
-# ---- STAND2 (an address another unit defines; only units without auto-inlining, only non-inline, non-virtual)
-_s = tempfile.mkdtemp()
-os.makedirs(os.path.join(_s, 'src', 'staging')); os.makedirs(os.path.join(_s, 'build'))
-_od, _o2 = ['/MT', '/Od', '/Oy-', '/GS'], ['/MT', '/O2', '/GS']
-_syms = {'?Clear@G@@QAEX_N@Z': '0x00845000', '?Reset@G@@QAEXXZ': '0x00644000', '?Free@@YAHH@Z': '0x00845100',
-         '?Keep@@YAHH@Z': '0x00845100', '?Loc@@YAHH@Z': '0x00845100', '?Vir@G@@UAEXXZ': '0x00845200',
-         '?Mine@G@@QAEXXZ': '0x00644100', '?Two@G@@QAEXH@Z': '0x00845000', '?Two@G@@QAEXM@Z': '0x00644100'}
-_json.dump({'units': [
-    {'source': 'src/staging/u.cpp', 'flags': _od, 'symbols': _syms,
-     'functions': [{'address': '0x00644000'}, {'address': '0x00644100'}]},
-    {'source': 'src/staging/o2.cpp', 'flags': _o2, 'symbols': _syms, 'functions': []},
-    {'source': 'src/staging/other.cpp', 'flags': _od, 'symbols': {},
-     'functions': [{'address': '0x00845000'}, {'address': '0x00845100'}, {'address': '0x00845200'}]}]},
-    open(os.path.join(_s, 'build', 'units.json'), 'w'))
-_STAND2_SRC = ('struct G\n{\n    int* p;\n    void Clear(bool);\n    void Reset();\n    virtual void Vir();\n    void Mine();\n'
-               '    void Two(int);\n    void Two(float);\n};\nvoid G::Clear(bool b)\n{\n    delete[] p;\n}\n'
-               'int Free(int a)\n{\n    return a;\n}\ninline int Keep(int a)\n{\n    return a;\n}\n'
-               'static int Loc(int a)\n{\n    return a;\n}\nvoid G::Vir()\n{\n}\nvoid G::Mine()\n{\n}\n'
-               'void G::Two(int)\n{\n}\n// @fnv 0x00644000\nvoid G::Reset()\n{\n    p = 0;\n    Clear(true);\n}\n')
-_saved = s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
-got = run(s1.r_stand_in_definitions_elsewhere, _STAND2_SRC, os.path.join(_s, 'src', 'staging', 'u.cpp'))
-got_o2 = run(s1.r_stand_in_definitions_elsewhere, _STAND2_SRC, os.path.join(_s, 'src', 'staging', 'o2.cpp'))
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
-check('STAND2 drops a stand-in of an address another unit defines (/Od)', got,
-      ['/* fnv-nx STAND2: G::Clear is the function at the tagged address */\n', 'int Free(int a); /* fnv-nx STAND2 */',
-       'inline int Keep(int a)\n{', 'static int Loc(int a)\n{', 'void G::Vir()\n{', 'void G::Mine()\n{',
-       'void G::Two(int)\n{', 'void G::Reset()\n{\n    p = 0;\n    Clear(true);'],
-      ['delete[] p'])
-check('STAND2 leaves units MSVC compiled with auto-inlining', got_o2, ['delete[] p', 'int Free(int a)\n{'], ['STAND2'])
-check('STAND2 keeps the line count', 'lines %d' % got.count('\n'), ['lines %d' % _STAND2_SRC.count('\n')])
-
-# ---- STAND4, lone static noinline stand-ins (W6-EQ: hkpcylindershape 0x00d57aa0 / 0x00d57b20; units.json of its own)
-_s4 = tempfile.mkdtemp()
-os.makedirs(os.path.join(_s4, 'src')); os.makedirs(os.path.join(_s4, 'build'))
-_S4SYMS = {'?Zero@@YAMXZ': '0x00d571d0', '?Same@ns@@YAMXZ': '0x00d571d0', '?Tagged@@YAHXZ': '0x00401230',
-           '?Mine@@YAHXZ': '0x00401240', '?Aligned@@YAHXZ': '0x00d571d0'}
-_json.dump({'units': [
-    {'source': 'src/u.cpp', 'flags': ['/MT', '/O2'], 'symbols': _S4SYMS, 'functions': [{'address': '0x00401230'}]},
-    {'source': 'src/other.cpp', 'flags': ['/MT', '/Od'], 'symbols': {}, 'functions': [{'address': '0x00d571d0'}]}]},
-    open(os.path.join(_s4, 'build', 'units.json'), 'w'))
-_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
-got = run(s1.r_static_stand_ins,
-          'static __declspec(noinline) float Zero()\n{\n    return 0.0f;\n}\n'
-          'namespace ns {\nstatic __declspec(noinline) float Same()\n{\n    return G;\n}\n}\n'
-          '// @fnv 0x00401230\nint Real()\n{\n    return 1;\n}\n'
-          'static __declspec(noinline) int Tagged()\n{\n    return 2;\n}\n'
-          'static __declspec(noinline) int Mine()\n{\n    return 3;\n}\n'
-          'static __declspec(noinline) __declspec(align(16)) int Aligned()\n{\n    return 4;\n}\n'
-          'static __declspec(noinline) int NoAddress()\n{\n    return 5;\n}\n',
-          os.path.join(_s4, 'src', 'u.cpp'))
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
-check('STAND4 a lone static noinline stand-in bound to an address another unit defines (any flags)', got,
-      ['__declspec(noinline) float Zero(); /* fnv-nx STAND4 0x00d571d0 */',
-       '__declspec(noinline) float Same(); /* fnv-nx STAND4 0x00d571d0 */',
-       '__declspec(noinline) int Tagged(); /* fnv-nx STAND4 0x00401230 */'],
-      ['return 0.0f', 'return G', 'return 2'])
-check('STAND4 keeps a noinline stand-in whose address nobody else defines, other declspecs, unbound names', got,
-      ['return 3;', 'return 4;', 'return 5;'])
-
-# ---- STAND3 (a units.json of its own: an /Od unit, an /O2 unit and the decompiled addresses of a third)
-_s3 = tempfile.mkdtemp()
-os.makedirs(os.path.join(_s3, 'src')); os.makedirs(os.path.join(_s3, 'build'))
-_STAND3_SYMS = {'??1Mem@@QAE@XZ': '0x0040c110', '??0Guard@@QAE@PAH@Z': '0x00528cb0', '?Helper@@YAHXZ': '0x00401230',
-                '?Get@Box@@QAEHXZ': '0x00401240', '?Put@Box@@QAEHXZ': '0x00401240', '??1Mem@ns@@QAE@XZ': '0x00500000', '?Two@@YAHH@Z': '0x00401230',
-                '?Two@@YAHM@Z': '0x00401240', '?Virt@Box@@UAEHXZ': '0x00401240', '??1Der@@QAE@XZ': '0x0040c110',
-                '?Tagged@@YAHXZ': '0x00401230'}
-_json.dump({'units': [
-    {'source': 'src/od.cpp', 'flags': ['/MT', '/Od', '/Oy-', '/GS', '/EHsc', '/Gy'], 'symbols': _STAND3_SYMS,
-     'functions': []},
-    {'source': 'src/o2.cpp', 'flags': ['/MT', '/O2', '/GS', '/EHsc', '/Gy'], 'symbols': _STAND3_SYMS, 'functions': []},
-    {'source': 'src/ob1.cpp', 'flags': ['/MT', '/Od', '/Oy-', '/GS', '/EHsc', '/Gy', '/Ob1'], 'symbols': _STAND3_SYMS,
-     'functions': []},
-    {'source': 'src/other.cpp', 'flags': ['/MT', '/Od'], 'symbols': {},
-     'functions': [{'address': a, 'symbol': '?f@@YAXXZ', 'size': 4}
-                   for a in ('0x0040c110', '0x00528cb0', '0x00401230', '0x00401240')]}]},
-           open(os.path.join(_s3, 'build', 'units.json'), 'w'))
-_STAND3_SRC = ('struct Mem\n{\n    int a;\n    ~Mem()\n    {\n        Free(this);\n    }\n};\n'
-               'struct Guard\n{\n    int* p;\n    Guard(int* q) : p(q)\n    {\n        Lock(q);\n    }\n};\n'
-               'inline int Helper()\n{\n    return 0;\n}\n'
-               'struct Box\n{\n    int Get();\n    int Put();\n    virtual int Virt()\n    {\n        return 1;\n    }\n};\n'
-               'inline int Box::Get()\n{\n    return 2;\n}\nint Box::Put()\n{\n    return 5;\n}\n'
-               'namespace ns {\nstruct Mem\n{\n    ~Mem()\n    {\n        Free(this);\n    }\n};\n}\n'
-               'int Two(int)\n{\n    return 3;\n}\n'
-               'struct Base\n{\n    virtual ~Base();\n};\nstruct Der : Base\n{\n    ~Der()\n    {\n        Free(this);\n    }\n};\n'
-               '// @fnv 0x00401230\nint Tagged()\n{\n    return 4;\n}\n'
-               'template <class T> struct Tm\n{\n    ~Tm()\n    {\n        Free(this);\n    }\n};\n'
-               'void use() { Mem m; Guard g(0); Helper(); }\n')
-_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
-got = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'od.cpp'))
-got_o2 = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'o2.cpp'))
-got_ob1 = run(s1.r_inline_stand_ins, _STAND3_SRC, os.path.join(_s3, 'src', 'ob1.cpp'))
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
-check('STAND3 in-class destructor bound to a decompiled address of another unit becomes a declaration', got,
-      ['    ~Mem(); /* fnv-nx STAND3 0x0040c110 */\n\n\n\n};'], ['        Free(this);\n    }\n};\nstruct Guard'])
-check('STAND3 constructor: declaration without its initializer list', got,
-      ['    Guard(int* q); /* fnv-nx STAND3 0x00528cb0 */'], ['p(q)'])
-check('STAND3 free inline function keeps a plain declaration', got,
-      ['int Helper(); /* fnv-nx STAND3 0x00401230 */'], ['inline int Helper'])
-check('STAND3 inline out-of-class member definition goes, a non-inline one is STAND2\'s', got,
-      ['/* fnv-nx STAND3: Box::Get is the function at 0x00401240 */', 'int Box::Put()\n{\n    return 5;'], ['return 2;'])
-check('STAND3 keeps: virtual, address no unit decompiles, two overloads at two addresses, tagged, template, '
-      'destructor of a derived class', got,
-      ['virtual int Virt()\n    {\n        return 1;', 'namespace ns {\nstruct Mem\n{\n    ~Mem()\n    {', 'int Two(int)\n{',
-       '// @fnv 0x00401230\nint Tagged()\n{', 'template <class T> struct Tm\n{\n    ~Tm()\n    {',
-       'struct Der : Base\n{\n    ~Der()\n    {'])
-check('STAND3 line count unchanged', got, [], []) if got.count('\n') == _STAND3_SRC.count('\n') else \
-    check('STAND3 line count unchanged', 'lines %d != %d' % (got.count('\n'), _STAND3_SRC.count('\n')), ['never'])
-check('STAND3 leaves an /O2 unit alone (MSVC may inline there)', got_o2, [_STAND3_SRC], [])
-check('STAND3 leaves an /Od /Ob1 unit alone (/Ob1 inlines in-class and inline definitions)', got_ob1, [_STAND3_SRC], [])
-
 # ---- STR1 uses the declaration in scope
 got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(&str_01082ab8); }\nnamespace N {\n'
           'extern char str_01082ab8;\nvoid h() { g(&str_01082ab8); }\n}\nextern "C" char str_a0000000[], str_b0000000[],\n'
           '    str_c0000000[];\nvoid k() { const char* p = str_c0000000; g(&str_c0000000); }\n')
 check('STR1 rewrites only where the array is the declaration in scope', got,
       ['void f() { g(str_01082ab8); }', 'void h() { g(&str_01082ab8); }', 'g(str_c0000000); }'])
-
-# ---- VTBL1
-got = run(s1.r_stand_in_interfaces, 'int a;\nstruct FUN_00aa2230_BSNiAllocator\n{\n    virtual void m_virtual0();\n'
-          '    FUN_00aa2230_BSNiAllocator();\n};\nint b;\n', '/x/src/staging/blk_00aa0000_o2.cpp')
-check('VTBL1 BSNiAllocator gets its 10 slots, same line count', got,
-      ['virtual void* Allocate(', 'virtual void Slot9();', 'AllocateZeroedMemory(size, alignment', '}\n\n\n\n\nint b;'],
-      ['m_virtual0'])
-
-got = run(s1.r_stand_in_interfaces, 'int a;\nstruct NiStandardAllocator\n{\n    static void* __cdecl operator new(size_t);\n'
-          '    virtual void func();\n};\nint b;\n', '/x/src/gamebryo2.2/corelibs/nimain/nigpuprogramcache.cpp')
-check('VTBL1 NiStandardAllocator gets its 10 slots, 7 / 8 Initialize / Shutdown, same line count', got,
-      ['inline virtual void* Destroy(unsigned int flags);', 'FUN_00aa3150(p, event, size);',
-       'virtual void Initialize() { fnv_00aa3430::AllocateStandardAllocator(); }',
-       'virtual void Shutdown() { DestroySmallAllocPools(); }', 'virtual void Slot9();', '}\n\n\n\n\nint b;'],
-      ['func()'])
-got = run(s1.r_stand_in_interfaces, 'struct StdAllocator\n{\n    virtual ~StdAllocator();\n    virtual void* Allocate();\n};\n',
-          '/x/src/gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp')
-check('VTBL1 StdAllocator: the destructor is MSVC slot 0, one plain slot', got,
-      ['    virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1', '    virtual void* Allocate();'], ['~StdAllocator'])
-
-got = run(s1.r_stand_in_interfaces, 'struct FUN_00aa7400 : HeapBlockBase\n{\n    int m_1c;\n    HeapBlockLink m_20;\n'
-          '    FUN_00aa7400(unsigned int a, unsigned int b);\n    virtual void v00();\n};\nint z;\n',
-          '/x/src/staging/blk_00aa0000_od_ob1_variant.cpp')
-check('VTBL1 the FUN_00aa7400 heap gets the AbstractHeap slots, same line count', got,
-      ['virtual void v00(); /* fnv-nx VTBL1', 'virtual void v2();', 'virtual void v13(void* value); };', '\nint z;'])
-check('VTBL1 FUN_00aa7400 keeps the line count', str(got.count('\n')), ['8'])
-
-got = run(s1.r_stand_in_interfaces, 'class M : public MB\n{\n};\nclass A660A0Map : public A660A0MapBase\n{\n  public:\n'
-          '    __forceinline A660A0Map() throw() : A660A0MapBase(59)\n    {}\n    virtual ~A660A0Map();\n};\nint z;\n',
-          '/x/src/gamebryo2.2/corelibs/nimain/nistream.cpp')
-check('VTBL1 A660A0Map: NiTMapBase slots 1-6 after the destructor, declared only', got,
-      ['virtual ~A660A0Map(); /* fnv-nx VTBL1', 'virtual unsigned int KeyToHashIndex(const char* key) const; '
-       'virtual bool IsKeysEqual(const char* key1, const char* key2) const; virtual void SetValue(',
-       'virtual void ClearValue(void* item); virtual void* NewItem(); virtual void DeleteItem(void* item); };',
-       '\nint z;'], ['{ return', 'FUN_'])
-check('VTBL1 A660A0Map keeps the line count', str(got.count('\n')), ['11'])
-got = run(s1.r_stand_in_interfaces, 'class A660A0Map : public A660A0MapBase\n{\n    virtual ~A660A0Map();\n};\n',
-          '/x/src/gamebryo2.2/corelibs/nimain/nistream_rtm_variant.cpp')
-check('VTBL1 A660A0Map: only in nistream.cpp', got, [], ['VTBL1'])
 
 # ---- FRIEND1
 src = ('namespace N {\nint a;\nclass A : public B\n{\n    friend class W;\n    W* m_w;\n};\nclass W { int x; };\n}\n'
@@ -988,16 +720,6 @@ check('FRIEND1 keeps the line count', str(got.count('\n')), [str(src.count('\n')
 got = run(s1.r_friend_class_visibility, '#include "a.h"\nclass A\n{\n    friend class W;\n    W* m_w;\n};\n', '/nonexistent/src/f.cpp')
 check('FRIEND1 at the start of a file stays off the #include line', got,
       ['#include "a.h"\n class W; /* fnv-nx FRIEND1 */ class A\n'])
-
-# ---- INIT1
-got = run(s1.r_static_initializers, 'int a;\n// @fnv 0x00a8a5f0\nvoid* FUN_00a8a5f0_class::FUN_00a8a5f0()\n{\n'
-          '    void* old = (void*)DAT_011f5b84;\n    if (!old)\n    {\n        g();\n    }\n    return this;\n}\nint b;\n',
-          '/x/src/staging/blk_00a80000_o2.cpp')
-check('INIT1 one static NiMainSDM after its constructor, same line count', got,
-      ['    return this;\n} /* fnv-nx INIT1', 'static FUN_00a8a5f0_class fnvnx_init1_NiMainSDM; static void* const '
-       'fnvnx_init1_NiMainSDM_ctor = fnvnx_init1_NiMainSDM.FUN_00a8a5f0();\nint b;\n'], ["\\'"])
-check('INIT1 only in the constructor\'s unit', run(s1.r_static_initializers, '// @fnv 0x00a8a5f0\nvoid* '
-      'FUN_00a8a5f0_class::FUN_00a8a5f0()\n{\n}\n', '/x/src/staging/blk_00a80000_o2_noehsc_variant.cpp'), [], ['INIT1'])
 
 # ---- ALIGN1
 got = run(s1.r_class_alignment, '__declspec(align(16)) struct S_V4 { float x, y, z, w; };\n'
@@ -1022,26 +744,6 @@ check('ENUM2 gives enums with values >= 2^31 MSVC\'s int', got,
        'enum ShaderParameter : int { SP_NONE = (int)0xffffffff, SP_X = (int)0x80000000u, SP_Y = -1 };',
        'enum Small { S0 = 1 };', 'enum Expr { E0 = 0x80000000 | 1 };', 'enum class Sc { Q = 0x80000000 };',
        'enum Huge { H = 0x100000000 };', 'enum Based : unsigned { U = 0x80000000 };'])
-
-# ---- BIND1 (units.json)
-_c = Counter()
-_data = {'units': [{'source': 'src/staging/blk_00aa0000_od_ob1_variant.cpp', 'symbols': {'?x@@3HA': '0x1'}},
-                   {'source': 'src/other.cpp', 'symbols': {}}]}
-s1.bind_units_data(_data, _c)
-s1.bind_units_data(_data, _c)
-check('BIND1 binds the stand-in names once, in their unit only', repr(_data) + ' %d' % _c['BIND1'],
-      ["'?Allocate@MemoryManagerAA3880@@QAEPAXI@Z': '0x00aa3e40'", "'?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A': '0x011f6238'",
-       "'?entryNpos@@3IA': '0x010173f0'", "'symbols': {}}]} 4", "'?x@@3HA': '0x1'",
-       "'?smallPools@fnv_00aafc80@@3PAPAUDeallocPool@1@A': '0x011f67b8'"])
-# W28: the memory manager of src/bssystem/archive.cpp (top-down 109) and the small-pool table (44) are bound in their units
-_c = Counter()
-_data = {'units': [{'source': 'src/bssystem/archive.cpp', 'symbols': {}}]}
-s1.bind_units_data(_data, _c)
-check('BIND1 binds archive.cpp\'s g_memoryManager_af5480 to the memory manager', repr(_data['units'][0]['symbols']),
-      ["'?g_memoryManager_af5480@fnv_00af5480@@3UMemoryManager_af5480@1@A': '0x011f6238'"])
-check('BIND1 rows are all well-formed (MSVC data names at image data addresses)',
-      repr([r for r in s1.BIND1_REFS if not (r[1].startswith('?') and r[2].startswith('0x') and
-                                              0x00401000 <= int(r[2], 16) < 0x02100000)]), ['[]'])
 
 # ---- NATIVE1 (render R3): the drop list's matching, shared by prepare's drop_native_units and tools/rules/native1.py
 _spec = importlib.util.spec_from_file_location('native1', os.path.join(HERE, '..', '..', 'tools', 'rules', 'native1.py'))
@@ -1661,42 +1363,6 @@ if _shutil.which('aarch64-linux-gnu-g++'):
     check('EBO3 output: the empty base at +16, after the base with data; sizes as MSVC (ILP32)',
           _r.stderr or _r.stdout, ['mov\tw0, 16'], ['error'])
 
-# ---- S1-layout: IDTOR1 (an implicit destructor the recipe binds is declared, so GCC calls it by name)
-_i1 = tempfile.mkdtemp()
-os.makedirs(os.path.join(_i1, 'src')); os.makedirs(os.path.join(_i1, 'build'))
-_json.dump({'units': [
-    {'source': 'src/u.cpp', 'flags': ['/MT', '/Od'], 'symbols': {
-        '??1List@ns@@QAE@XZ': '0x0046ffb0', '??1Own@@QAE@XZ': '0x0046ffb0', '??1Virt@@UAE@XZ': '0x0046ffb0',
-        '??1Far@@QAE@XZ': '0x00999999', '??1Inner@Outer@@QAE@XZ': '0x0046ffb0'},
-     'functions': [{'address': '0x0046ffb0', 'symbol': '??1Lst@@QAE@XZ', 'size': 4}]}]},
-           open(os.path.join(_i1, 'build', 'units.json'), 'w'))
-_I1 = ('struct ListX\n{\n    ~ListX();\n};\nnamespace ns {\nstruct List\n{\n    int dummy;\n    void RemoveAll();\n'
-       '    ListX m_uiX;\n};\nstruct Holder\n{\n    List m_kNode;\n    ~Holder();\n};\n'
-       'Holder::~Holder() { m_kNode.RemoveAll(); }\n}\n'
-       'struct Own\n{\n    ListX x;\n    ~Own();\n};\n'
-       'struct Far\n{\n    ListX x;\n};\n'
-       'class Outer\n{\n    class Inner\n    {\n        ListX x;\n    };\n};\n'
-       'template <class T> struct List2\n{\n    ListX x;\n};\n')
-_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
-_i1o = run(s1.r_implicit_bound_destructors, _I1, os.path.join(_i1, 'src', 'u.cpp'))
-_i1h = run(s1.r_implicit_bound_destructors, _I1, os.path.join(_i1, 'src', 'u.h'))
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
-check('IDTOR1 a class whose implicit destructor the recipe binds (in a namespace, nested) declares it', _i1o,
-      ['    ListX m_uiX;\n FNVNX_IDTOR1(List) /* fnv-nx IDTOR1 0x0046ffb0 */\n};',
-       '        ListX x;\n     FNVNX_IDTOR1(Inner) /* fnv-nx IDTOR1 0x0046ffb0 */\n};'])
-check('IDTOR1 a declared destructor, an undecompiled address, a template, the holder: nothing', _i1o, [],
-      ['FNVNX_IDTOR1(Own)', 'FNVNX_IDTOR1(Far)', 'FNVNX_IDTOR1(List2)', 'FNVNX_IDTOR1(Holder)', 'FNVNX_IDTOR1(ListX)'])
-check('IDTOR1 headers are left alone', _i1h, [], ['FNVNX_IDTOR1'])
-if _shutil.which('aarch64-linux-gnu-g++'):
-    _cI = os.path.join(tempfile.mkdtemp(), 'i1.cpp')
-    _mI = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
-           if l.startswith('#define FNVNX_IDTOR1')]
-    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x',
-                          'c++', '-'], input=''.join(_mI) + _i1o, capture_output=True, text=True)
-    check('IDTOR1 output: ~Holder calls ns::List::~List by name, not ListX::~ListX at +4 (ILP32)',
-          _r.stderr or _r.stdout, ['\t_ZN2ns4ListD1Ev\n'], ['error', '_ZN5ListXD1Ev'])
-
 # ---- S1-rules: VLIT2 (a vptr literal by the exe's vftables: slot 0 at the store's offset, the function's class)
 _vl = tempfile.mkdtemp(); os.makedirs(os.path.join(_vl, 'src')); os.makedirs(os.path.join(_vl, 'build'))
 _json.dump({'units': [{'source': 'src/a.cpp', 'symbols': {}, 'functions': [{'address': '0x00487220', 'symbol': '?f@@YAXXZ', 'size': 4}]}]},
@@ -1744,49 +1410,8 @@ check('STAND7 an inline out-of-class template member bound to another unit\'s ad
       ['#ifdef _MSC_VER /* fnv-nx STAND7 */\ntemplate <class C', '    return *this;\n}\n#endif\n'])
 check('STAND7 not in an /Od /Ob1 unit: nothing', _s7b, [], ['STAND7'])
 
-# ---- S1-rules: DTORB1 (a destructor stand-in calls the address its ??1 is bound to, under GCC)
-_db = tempfile.mkdtemp(); os.makedirs(os.path.join(_db, 'src')); os.makedirs(os.path.join(_db, 'build'))
-_json.dump({'units': [{'source': 'src/u.cpp', 'symbols': {'??1S@@UAE@XZ': '0x004aa280', '??1T@@UAE@XZ': '0x004aa280'},
-                       'functions': [{'address': '0x004aa1e0', 'symbol': '??_GS@@UAEPAXI@Z', 'size': 44},
-                                     {'address': '0x004aa300', 'symbol': '??_GT@@UAEPAXI@Z', 'size': 44},
-                                     {'address': '0x004aa280', 'symbol': '??1Y@@UAE@XZ', 'size': 92}]}]},
-           open(os.path.join(_db, 'build', 'units.json'), 'w'))
-_DB = ('struct S\n{\n    virtual ~S();\n    int x;\n};\n// @fnv 0x004aa1e0\nS::~S()\n{}\n'
-       'struct M { ~M(); };\nstruct T\n{\n    virtual ~T();\n    M m;\n};\n// @fnv 0x004aa300\nT::~T()\n{}\n')
-_saved = (s1._UNIT_SYMBOLS, prepare.__dict__.get('_fnvnx_dtorb_funcs'))
-s1._UNIT_SYMBOLS = None; prepare.__dict__['_fnvnx_dtorb_funcs'] = None
-_dbo = run(s1.r_bound_dtor_stand_ins, _DB, os.path.join(_db, 'src', 'u.cpp'))
-s1._UNIT_SYMBOLS = _saved[0]; prepare.__dict__['_fnvnx_dtorb_funcs'] = _saved[1]
-check('DTORB1 the stand-in body calls the bound address under GCC', _dbo,
-      ['S::~S()\n{ FNVNX_DTORB_BEGIN(004aa280) /* fnv-nx DTORB1 */ FNVNX_DTORB_END }'])
-check('DTORB1 a class with a member that has a destructor: nothing', _dbo, [], ['T::~T()\n{ FNVNX_DTORB'])
-if _shutil.which('aarch64-linux-gnu-g++'):
-    _mB = [l for l in open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h'))
-           if l.startswith('#define FNVNX_DTORB')]
-    _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-O2', '-S', '-w', '-o', '-', '-x', 'c++',
-                          '-'], input=''.join(_mB) + _dbo.split('struct M')[0], capture_output=True, text=True)
-    check('DTORB1 output: S::~S calls __fnv_004aa280 (ILP32)', _r.stderr or _r.stdout, ['__fnv_004aa280'], ['error'])
-
 _save_d22 = os.environ.pop('FNVNX_D22', None); _save_rc = os.environ.pop('FNVNX_RECON', None)
-# ---- S1-rules: EMPTY1 (R2 trap rank 32: treeengine's declared-only TagEmpty is the temporary TagText(""))
-_EM = ('struct TagText\n{\n    int w;\n    TagText(const char*);\n};\nextern const TagText TagEmpty;\n'
-       'TagText g(bool s) { return s ? TagText("x") : TagEmpty; }\n')
-check('EMPTY1 a declared-only empty-string object -> FNVNX_EMPTY1(T, name)', run(s1.r_empty_string_objects, _EM),
-      [': FNVNX_EMPTY1(TagText, TagEmpty); }', 'extern const TagText TagEmpty;'])
-check('EMPTY1 not when the file defines it, or T has no const char* constructor',
-      run(s1.r_empty_string_objects, _EM + 'const TagText TagEmpty("");\n') +
-      run(s1.r_empty_string_objects, _EM.replace('TagText(const char*);', 'TagText(int);')), [], ['FNVNX_EMPTY1'])
-_eo2 = tempfile.mkdtemp(); open(os.path.join(_eo2, 'exe_order_classes.tsv'), 'w').write(
-    'class\tvftable\treason\tsymbol\nHeapStandIn\t0101cd04\tdefined-slot0\t_ZTV1X\nOther\t01\tmulti-vtable\t_ZTV1Y\n')
-os.environ['FNVNX_EXE_ORDER'] = os.path.join(_eo2, 'exe_order_classes.tsv'); prepare.__dict__['_fnvnx_exe_order'] = None
-del os.environ['FNVNX_EXE_ORDER']; prepare.__dict__['_fnvnx_exe_order'] = None
-# ---- S1-rules: HKRO1 (Havok hkReferencedObject's two base virtuals after its destructor)
-_HK = 'class hkReferencedObject\n{\npublic:\nvirtual ~hkReferencedObject(){}\nvoid removeReference()const;\n};\n'
-check('HKRO1 a destructor-only hkReferencedObject gets FNVNX_HKRO1 after its destructor',
-      run(s1.r_hk_referenced_object_slots, _HK), ['virtual ~hkReferencedObject(){} FNVNX_HKRO1 /* fnv-nx HKRO1 */'])
-check('HKRO1 not a full one, nor another class',
-      run(s1.r_hk_referenced_object_slots, _HK.replace('void removeReference', 'virtual const void* GetClassType() const;\nvoid removeReference')) +
-      run(s1.r_hk_referenced_object_slots, _HK.replace('hkReferencedObject', 'hkOther')), [], ['FNVNX_HKRO1'])
+
 # ---- S1-rules: TAIL1-PACK (the base filler under #pragma pack(N): MSVC's min(alignof(base), N); LAYOUT gate pack rows)
 _PK = ('struct B { virtual void f(); };\n#pragma pack(push, 1)\nstruct P : B { short a; };\n#pragma pack(pop)\n'
        'struct Q : B { short a; };\n#pragma pack(push, 4)\n#pragma pack(push, 2)\nstruct R : B { int a; };\n#pragma pack(pop)\n'
@@ -1795,8 +1420,6 @@ _pko = run(s1.r_msvc_base_layout, _PK)
 check('TAIL1-PACK under pack(1) / nested push 2: FNVNX_MSVC_BASE_END_PACK(N, base); after the pops the plain filler',
       _pko, ['struct P : B { FNVNX_MSVC_BASE_END_PACK(1, B)', 'struct Q : B { FNVNX_MSVC_BASE_END(B)',
              'struct R : B { FNVNX_MSVC_BASE_END_PACK(2, B)', 'struct S : B { FNVNX_MSVC_BASE_END_PACK(4, B)'])
-# S5-boot (actor.cpp NiTMap_S): an unqualified `v0(p)` in a member of an unrelated class is that class's own call
-# S5-boot (modelloader_activator_declarations.h BGSOpenCloseForm): a body-less non-virtual `~C();` gives way
 if _save_d22 is not None: os.environ['FNVNX_D22'] = _save_d22
 if _save_rc is not None: os.environ['FNVNX_RECON'] = _save_rc
 prepare.__dict__['_fnvnx_d22'] = None
@@ -1834,21 +1457,6 @@ check('determinism: all rules give the same output under PYTHONHASHSEED 1, 2, 3'
       [], ['error', ' | '])
 _shutil.rmtree(_dd, ignore_errors=True)
 
-# ---- PHSLOT1
-_ph = ('struct Shell\n{\n    virtual void v000()\n    {}\n    virtual void v00c()\n    {}\n'
-       '    virtual void v058(Shell*);\n    virtual void Named()\n    {}\n    virtual int v003()\n    {}\n'
-       '    virtual void v004()\n    { g(); }\n};\n')
-_ph_out = run(s1.r_placeholder_slots, _ph)
-check('PHSLOT1 empty placeholder bodies become declarations',
-      _ph_out, ['virtual void v000();', 'virtual void v00c();', 'virtual void v058(Shell*);'],
-      ['virtual void v000()\n', 'virtual void v00c()\n'])
-check('PHSLOT1 a named virtual, a non-void placeholder and a placeholder with a body stay',
-      _ph_out, ['virtual void Named()\n    {}', 'virtual int v003()\n    {}', 'virtual void v004()\n    { g(); }'])
-_st = Counter()
-s1.r_placeholder_slots('/nonexistent/src/x.cpp', _ph, _st)
-check('PHSLOT1 stats', str(_st['PHSLOT1']), ['2'])
-check('PHSLOT1 idempotent', run(s1.r_placeholder_slots, _ph_out), [_ph_out])
-
 # ---- VFTBL1: a table the decomp defines for a name bound to an exe vftable becomes a declaration
 _VP = os.path.normpath(os.path.abspath('/nonexistent/src/x.cpp'))
 _saved_v = s1._VFT_NAMES
@@ -1875,44 +1483,6 @@ check('VFTBL1 a name no unit binds to an exe vftable stays', run(s1.r_vftable_st
 s1._VFT_NAMES = _saved_v
 check('VFTBL1 the committed list has the exe vftables 0x010ce838 and 0x0102e388',
       str({0x010ce838, 0x0102e388} <= s1._exe_vftable_addrs()), ['True'])
-
-# ---- REC1 x STAND4 (W6 widened STAND4 to lone static noinline stand-ins; STAND4 runs before REC1, so a recon whose
-# `replace` spans such a stand-in saw only the extern declaration and was rejected, 7 recons): the recon applies.
-# Our own snippet; the units.json is the STAND4 case's above.
-_r4 = tempfile.mkdtemp()
-os.makedirs(os.path.join(_r4, 'recon', 'x'))
-_json.dump({'format': 'fnvnx-recon/1', 'unit': 'src/u.cpp',
-            'replace': [{'old': 'static __declspec(noinline) float Zero()\n{\n    return 0.0f;\n}\nint Use() { return Zero(); }\n',
-                         'new': 'static __declspec(noinline) float Zero()\n{\n    return 1.0f;\n}\nint Use() { return Zero() + 1; }\n'},
-                        {'old': 'int Last() { return 9; }', 'new': 'int Last() { return 10; }'}]},
-           open(os.path.join(_r4, 'recon', 'x', 'recon.json'), 'w'))
-_u4 = os.path.join(_s4, 'src', 'u.cpp')
-_src4 = ('// @fnv 0x00401230\nint Real() { return 1; }\nstatic __declspec(noinline) float Zero()\n{\n    return 0.0f;\n}\nint Use() { return Zero(); }\n'
-         'int Last() { return 9; }\n')
-_saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
-_saved_env = os.environ.get('FNVNX_RECON')
-os.environ['FNVNX_RECON'] = os.path.join(_r4, 'recon')
-prepare.__dict__['_fnvnx_recon'] = None
-prepare.__dict__['_fnvnx_recon_rejected'] = []
-prepare.__dict__['_fnvnx_stand4_spans'] = {}
-_st = Counter()
-_t4 = s1.r_static_stand_ins(_u4, _src4, _st)          # as the rule order runs it: STAND4, then (later) REC1
-_n4 = _st['STAND4']
-_t4 = s1.r_recon_bodies(_u4, _t4, _st)
-s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved
-if _saved_env is None:
-    os.environ.pop('FNVNX_RECON', None)
-else:
-    os.environ['FNVNX_RECON'] = _saved_env
-check('REC1 x STAND4: the stand-in is rewritten before REC1 runs', str(_n4), ['1'])
-check('REC1 x STAND4: a recon whose replace spans the stand-in is applied, not rejected',
-      _t4 + str(dict(_st)) + repr(prepare.__dict__['_fnvnx_recon_rejected']),
-      ['return Zero() + 1;', 'int Last() { return 10; }', "'REC1-REPL': 2", '[]'],
-      ["'REC1-REJECT'", 'return Zero(); }'])
-check('REC1 x STAND4: STAND4 converts what the replace left (no static body, one declaration)',
-      _t4, ['__declspec(noinline) float Zero(); /* fnv-nx STAND4 0x00d571d0 */'],
-      ['return 1.0f', 'return 0.0f', 'static __declspec'])
 
 # ---- S1-rules: VFPAD1 (MSVC pads a class's own vfptr to the class's alignment; LAYOUT gate vfpad rows)
 _VF = ('struct V16 { virtual ~V16(); unsigned int m10; hkVector4 m20; };\n'

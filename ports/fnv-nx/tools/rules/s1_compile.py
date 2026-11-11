@@ -162,7 +162,7 @@ SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_
 # hkpcpuworldgetclosestpointsjob merges winnt.h's two records into `typedef struct _RTL_CRITICAL_SECTION_DEBUG {...}
 # RTL_CRITICAL_SECTION, *PRTL_CRITICAL_SECTION;` (so its CRITICAL_SECTION was the 32-byte debug record under MSVC);
 # dropped, the unit's CRITICAL_SECTION is the platform's 24-byte PC section (D15; no assert of the unit sizes it, so
-# neither CSX1 nor CSX2 applies, and no code of the unit reads the holder's layout)
+# neither CSX1 applies, and no code of the unit reads the holder's layout)
 SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in '''DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR
     DWORD_PTR WPARAM LPARAM LRESULT HINSTANCE HMODULE HWND HHOOK HKEY HDC HICON HMENU HBRUSH HFONT HBITMAP HCURSOR
     UINT_PTR LONG_PTR INT_PTR ATOM COLORREF LPSTR LPCSTR'''.split()}
@@ -1116,7 +1116,7 @@ def r_ref_cast_temporaries(path, text, stats):
 #
 # Asserts of the decomp's generated layouts that only hold on the Xbox 360: the member order of its big-endian
 # _FILETIME (tesform's layout header). The critical-section asserts this rule dropped under D15 (J-0051) hold again
-# since D15 was reopened (J-0067): CSX2 gives the generated sections their 28 bytes. Every other assert stays.
+# since D15 was reopened (J-0067). Every other assert stays.
 
 CSX1_ASSERTS = {
     # not a critical section: the Xbox 360 SDK's big-endian _FILETIME puts dwHighDateTime first (PC: dwLowDateTime)
@@ -1417,128 +1417,9 @@ def r_va_list(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-# ---------------------------------------------------------------------------------------------------------- VIEW1
-#
-# Some units carry a partial view of a class (only the members that unit's original code needed, as the decomp
-# reconstructed it) and then call a member the view lacks. When another definition of the same class in the decomp
-# declares that member as a non-virtual member function, VIEW1 adds that declaration (without its body) to the
-# partial view. A non-virtual member function takes no storage and no vtable slot, so the class layout cannot change
-# (checked on the affected units with GCC's class dumps: identical sizes and offsets). The call then binds to the
-# fuller definition's function (same class name, same signature) at link time. VIEW_MEMBERS lists the
-# (class, member) pairs GCC reported missing (census c9); only declarations whose types the unit already names are
-# added.
-# NOT IN RULES: measured on the 10 units with these errors it adds 55 declarations and makes none of them clean
-# (12->3, 26->22, 16->15 errors; the rest unchanged), while touching every definition of Actor / TESBoundObject.
-# Kept for when those units' other errors are gone.
-
-VIEW_MEMBERS = {
-    'NiD3DPass': ['GetRenderStateGroup', 'IncRefCount', 'DecRefCount'],
-    'TESBoundObject': ['GetFormType'],
-    'MemRouter': ['heap'],
-    'RouterX': ['heap'],
-    'FUN_008b70d0_shell': ['FUN_008b70d0'],
-    'P09PC': ['GetAnimation'],
-    'P09ActorH': ['GetAnimation'],
-    'hkpCdBody': ['getRootCollidable'],
-    'FUN_00b355d0': ['size', 'begin'],
-    'Actor': ['GetActorStateFlags'],
-    'TESObjectWEAP': ['GetWeaponType'],
-}
-_VIEW_DECLS = None
 CXX_WORDS = set('''const volatile unsigned signed int char short long float double bool void virtual static inline
     struct class enum typename operator return this true false wchar_t __int64 __cdecl __stdcall __thiscall
     __fastcall FNVNX_KEEP'''.split())
-
-def _class_body_spans(text, cls):
-    for m in re.finditer(r'\b(?:class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*%s\b\s*(?:final\s*)?'
-                         r'(?::[^;{}]*)?\{' % re.escape(cls), text):
-        yield m.end(), prepare.match_brace(text, m.end() - 1) - 1
-
-def _member_decl(body, member):
-    """The declaration of member function `member` in a class body (without its body), or None if it is virtual,
-    static data, or absent."""
-    depth, start = 0, 0
-    i = 0
-    while i < len(body):
-        c = body[i]
-        if c == '{':
-            if depth == 0:
-                stmt = body[start:i]
-                if re.search(r'(?<![\w~])%s\s*\(' % re.escape(member), stmt) and stmt.count('(') >= 1:
-                    return stmt
-            depth += 1
-        elif c == '}':
-            depth -= 1
-            if depth == 0: start = i + 1
-        elif c == ';' and depth == 0:
-            stmt = body[start:i]
-            if re.search(r'(?<![\w~])%s\s*\(' % re.escape(member), stmt): return stmt
-            start = i + 1
-        elif c == ':' and depth == 0 and re.search(r'\b(?:public|private|protected)\s*$', body[start:i]):
-            start = i + 1
-        i += 1
-    return None
-
-def _view_decls(path):
-    global _VIEW_DECLS
-    if _VIEW_DECLS is not None: return _VIEW_DECLS
-    root, found = _roots(path), {}
-    for top in ('src', 'include'):
-        for dp, _, fs in os.walk(os.path.join(root, top)):
-            for f in sorted(fs):
-                if not f.endswith(('.h', '.cpp', '.inl', '.hpp')): continue
-                with open(os.path.join(dp, f), encoding='utf-8', errors='surrogateescape') as h: t = h.read()
-                for cls, members in VIEW_MEMBERS.items():
-                    if cls not in t: continue
-                    for a, b in _class_body_spans(t, cls):
-                        body = COMMENT.sub(' ', t[a:b])
-                        for mem in members:
-                            if (cls, mem) in found: continue
-                            d = _member_decl(body, mem)
-                            if not d or re.search(r'\bvirtual\b', d): continue
-                            d = re.sub(r'\s+', ' ', d).strip()
-                            d = re.sub(r'\)\s*:\s*[\w:]+\s*\(.*$', ')', d)       # constructor initializer list
-                            d = re.sub(r'^(?:FNVNX_KEEP\s+|__forceinline\s+|inline\s+)+', '', d)
-                            found[(cls, mem)] = d
-    _VIEW_DECLS = found
-    return found
-
-def _decl_type_names(d, mem):
-    """Identifiers naming types in a member function declaration (parameter names left out)."""
-    i = re.search(r'(?<![\w~])%s\s*\(' % re.escape(mem), d)
-    ret, rest = d[:i.start()], d[i.end():]
-    names = set(re.findall(r'\b[A-Za-z_]\w*\b', ret))
-    params = rest[:rest.rfind(')')] if ')' in rest else rest
-    for p in _split_args(params):
-        ids = [w for w in re.findall(r'\b[A-Za-z_]\w*\b', re.sub(r'=.*', '', p)) if w not in CXX_WORDS]
-        names |= set(ids[:-1] if len(ids) > 1 else ids)
-    return names - CXX_WORDS
-
-def r_complete_views(path, text, stats):
-    """VIEW1: add missing non-virtual member function declarations to partial class views (see above)."""
-    if not any(c in text for c in VIEW_MEMBERS): return text
-    decls = _view_decls(path)
-    edits = []
-    for cls, members in VIEW_MEMBERS.items():
-        if cls not in text: continue
-        for a, b in _class_body_spans(text, cls):
-            body = text[a:b]
-            add = []
-            for mem in members:
-                d = decls.get((cls, mem))
-                if not d or re.search(r'(?<![\w~])%s\s*\(' % re.escape(mem), body): continue
-                names = _decl_type_names(d, mem) - {cls}
-                if any(not re.search(r'\b%s\b' % re.escape(n), text[:a]) for n in names): continue
-                add.append(d + ';')
-            if add:
-                edits.append((b, ' public: ' + ' '.join(add) + ' /* fnv-nx VIEW1 */ '))
-                stats['VIEW1'] += len(add)
-    if not edits: return text
-    out, pos = [], 0
-    for at, s in sorted(edits):
-        out.append(text[pos:at]); out.append(s); pos = at
-    out.append(text[pos:])
-    return ''.join(out)
 
 # ---------------------------------------------------------------------------------------------------------- STATIC1
 #
@@ -1814,8 +1695,6 @@ INT32_TYPES = re.compile(r'^(?:const\s+|volatile\s+)*(?:(?:signed|unsigned)(?:\s
                          r'unsigned\s+long\s+int|__int32|size_t|DWORD|UINT|INT|LONG|ULONG|BOOL)(?:\s+const)?$')
 _UNIT_SYMBOLS = None
 
-_UNIT_PLACED = {}   # absolute unit source -> the decorated names its units.json `functions` place (_unit_symbols)
-
 def _unit_symbols(path):
     """{absolute unit source: {decorated name: address}}"""
     global _UNIT_SYMBOLS
@@ -1824,12 +1703,9 @@ def _unit_symbols(path):
         _UNIT_SYMBOLS = {}
         root, uj = prepare._units_json(path)
         if uj:
-            _UNIT_PLACED.clear()
             for u in json.load(open(uj))['units']:
                 _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = dict(u.get('symbols', {}))
-                _UNIT_PLACED[os.path.normpath(os.path.join(root, u['source']))] = {
-                    f['symbol'] for f in u.get('functions') or () if f.get('symbol')}
-            # BIND1's rows (a POST hook on units.json): the source rules see the bindings the link will have
+            # BIND1's rows and VLIT's bindings: the source rules see these names bound
             for src, name, addr in BIND1_REFS + sorted(VLIT1_BINDS):
                 k = os.path.normpath(os.path.join(root, src))
                 if k in _UNIT_SYMBOLS:
@@ -2492,22 +2368,10 @@ def r_namespace_specializations(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-# ---------------------------------------------------------------------------------------------------------- DTOR1
+# -------------------------------------------------------------------------------------------------------- closure
 #
-# GCC emits a class's vtable where its key function (the first virtual member not defined in the class) is defined,
-# and with it the implicit virtual destructor, which destroys every member: a `NiPointer<QueuedFile>` member
-# instantiates NiPointer<QueuedFile>::~NiPointer(), whose body calls m_pObject->DecRefCount() and so needs a complete
-# QueuedFile with that member. MSVC emits a vtable where an object is constructed and never needed that destructor in
-# these units (middlehighprocess, tileimage, grenadeprojectile, skytexturemanager...), where the pointee is only
-# forward-declared, or declared without DecRefCount, in the whole unit. DTOR1 declares the explicit specialization
-# `template <> NiPointer<T>::~NiPointer();` for each such T in front of the unit's first line of code, after its
-# includes (at the end of a unit that is only includes, a header unit such as middlehighprocess_h_unit: GCC
-# instantiates the destructor at the end of the unit, so a declaration there comes before it): nothing in the unit
-# instantiates the destructor then, and a use of it is a call of the game's destructor
-# (the link binds it like any other declared function, e.g. ??1?$NiPointer@VQueuedFile@@@@QAE@XZ -> 0x0044cbf0).
+# The text of a unit's local headers, transitively, for the rules that read declarations from them.
 
-NIPTR_MEMBER = re.compile(r'\bNiPointer\s*<\s*([A-Za-z_]\w*)\s*>\s*[A-Za-z_]\w*\s*(?:\[[^\]]*\]\s*)?;')
-NIPTR_DTOR = re.compile(r'~NiPointer\s*\(\s*\)\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*DecRefCount')
 _CLOSURE_CACHE = {}
 
 def _closure(path, text):
@@ -2526,65 +2390,6 @@ def _closure(path, text):
             out.append((f, bare))
             todo.append((f, t2))
     return out
-
-def r_incomplete_pointee_dtors(path, text, stats):
-    """DTOR1: explicit specialization declarations of NiPointer<T>::~NiPointer() for member pointees T the unit never
-    completes with a DecRefCount (see above)."""
-    if not path.endswith('.cpp') or '#include' not in text: return text
-    # the unit's first line of code at file scope, after its leading includes
-    lines, pos, lead_end = text.split('\n'), 0, None
-    for line in lines:
-        s = line.strip()
-        if s.startswith('#'):
-            if not re.match(r'#\s*(?:include|pragma)\b', s): return text      # conditional prologue: leave it
-        elif s and not s.startswith('//'):
-            lead_end = pos; break
-        pos += len(line) + 1
-    if lead_end is None: lead_end = len(text)              # a unit of includes only (a header unit): after them
-    whole = _closure(path, text)
-    alltext = '\n'.join(t for _, t in whole)
-    if 'NiPointer' not in alltext or not NIPTR_DTOR.search(alltext): return text
-    lead = '\n'.join(t for _, t in _closure(path, text[:lead_end]))
-    if not NIPTR_DTOR.search(lead): return text
-    # every NiPointer template the unit defines must declare that destructor (main.h defines its own without one,
-    # behind a macro that renames the canonical template)
-    for d in re.finditer(r'\btemplate\s*<\s*(?:class|typename)\s+\w+\s*>\s*class\s+NiPointer\s*\{', alltext):
-        if not NIPTR_DTOR.search(alltext[d.end() - 1:prepare.match_brace(alltext, d.end() - 1)]): return text
-    spans = {}
-    def defs(name):
-        """[(base clause, body)] of the file-scope definitions of class `name` in the unit"""
-        found = []
-        for f, t in whole:
-            if name not in t: continue
-            for d in re.finditer(CLASS_DEF % re.escape(name), t):
-                if f not in spans: spans[f] = prepare.scope_spans(t)
-                if any(k != 'extern' for k, _ in prepare.scope_chain(spans[f], d.start())): continue
-                found.append((d.group(1) or '', t[d.end():prepare.match_brace(t, d.end() - 1)]))
-        return found
-    def refcounted(name, depth=0):
-        """True when a file-scope definition of `name` (or of a base) declares DecRefCount; None when unknown"""
-        if depth > 8: return None
-        for bases, body in defs(name):
-            if re.search(r'\bDecRefCount\b', body): return True
-            for b in re.findall(r'([A-Za-z_][\w:<>, ]*?)\s*(?:,|$)', re.sub(r'\b(?:public|protected|private|virtual)\b', '',
-                                                                       bases.lstrip(':'))):
-                b = b.strip()
-                if not re.match(r'^[A-Za-z_]\w*$', b): return None      # a template or qualified base: unknown
-                r = refcounted(b, depth + 1)
-                if r is not False: return r
-        return False
-    out = []
-    for t in sorted(set(NIPTR_MEMBER.findall(alltext))):
-        if TEMPLATE_PARAM_LIKE.match(t) or re.search(r'\btemplate\s*<\s*>\s*(?:class|struct)\s+NiPointer\s*<\s*%s\s*>' % t,
-                                                     alltext):
-            continue
-        if not re.search(r'^[ \t]*(?:class|struct)\s+%s\s*;' % t, lead, re.M): continue    # declared before the code
-        if refcounted(t) is not False: continue
-        out.append('template <> NiPointer<%s>::~NiPointer();' % t)
-    if not out: return text
-    stats['DTOR1'] += len(out)
-    if lead_end == len(text) and not text.endswith('\n'): text += '\n'; lead_end += 1
-    return text[:lead_end] + ' '.join(out) + ' /* fnv-nx DTOR1 */ ' + text[lead_end:]
 
 # ---------------------------------------------------------------------------------------------------------- STL2
 #
@@ -3516,33 +3321,13 @@ def r_pointer_zero_compares(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-# ---------------------------------------------------------------------------------------------------------- STAND1
+# ---------------------------------------------------------------------------------------------------------- UNITS
 #
-# One function per address. Some units carry an untagged stand-in next to the tagged definition of the same address:
-# blk_00620000_od.cpp has a global `struct FUN_00632ec0 { char m_data[0x114]; FUN_00632ec0(); }` with an empty
-# constructor, while the tagged `fnv_00632ec0::FUN_00632ec0::FUN_00632ec0` (0x00632ec0) stores the vptr; the recipe
-# binds the stand-in's name ??0FUN_00632ec0@@QAE@XZ to 0x00632ec0 too. MSVC's /Od code called the stand-in by name
-# and the link took it to 0x00632ec0; GCC inlines the empty body and `new FUN_00632ec0` leaves the vptr 0 (S5 g4:
-# 60 null reads). STAND1 removes an untagged out-of-class or free definition whose MSVC name the unit's units.json
-# symbols bind to an address that a tagged definition in the same unit provides: the calls stay calls of that name,
-# which the link binds to the tagged function's address. A free function keeps its declaration.
-#
-# STAND2 widens this to an address tagged in ANOTHER unit (units.json `functions` of some other unit): blk_00640000_od
-# defines `GlobalObject_00869f00::Clear` (delete[] p) untagged, and its symbols bind ?Clear@GlobalObject_00869f00@@QAEX_N@Z
-# to 0x008454f0, the tagged FUN_008454f0::Clear of bssimplearray.cpp. MSVC's /Od code calls the name and the exe runs
-# 0x008454f0; GCC inlines the local body into the tagged ResetPointer 0x006442e0 (fuzz: the native calls delete, the
-# oracle the function). Only where MSVC can never have inlined the stand-in, so the oracle never ran its body: a
-# non-inline, non-static out-of-class or free definition in a unit compiled without /O1, /O2, /Ox or /Ob2 (/Ob1
-# inlines only `inline` functions), and only when every spelling of the name in the unit's symbols binds an address
-# that another unit defines and this unit does not. A name the unit declares virtual is left alone (the native
-# vtable and its kind-V pairing stay as they are).
+# Helpers shared with s2_bodies.py: the unit's flags and function addresses from build/units.json, and the @fnv tag.
 
-STAND_DEF = re.compile(r'^[ \t]*((?:[\w:<>,\*&]+[ \t\*&]+)*?)((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
-                       r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?::[^;{}]*)?\{', re.M)
 FNV_TAG_ADDR = re.compile(r'//[ \t]*@fnv[ \t]+0x([0-9a-fA-F]+)')
 NOT_FUNCTIONS = set('if for while switch return sizeof catch do else'.split())
 
-STAND2_INLINING_FLAGS = {'/O1', '/O2', '/Ox', '/Ob2'}
 _UNIT_INFO = None
 
 def _unit_info(path):
@@ -3567,630 +3352,6 @@ def _all_unit_functions(path):
         _unit_info(path)
         _ALL_FUNCTIONS = set().union(*(fs for _, fs in _UNIT_INFO.values())) if _UNIT_INFO else set()
     return _ALL_FUNCTIONS
-
-# The tag of a definition: `// @fnv 0x<a>` above its head, with only blank, comment and preprocessor lines (the
-# unit's `#pragma optimize`) and type declarations in between: `template <class T> struct L;`, or a whole
-# `template <> struct M<void*> { static void __cdecl F(void**); };` (one level of nested braces). The head may span
-# lines (a return type over two lines, `static void __declspec(noinline)` above the name): STAND_DEF matches from its
-# last line. Seen as untagged, a tagged definition whose own name the unit binds to its address was dropped as its own
-# stand-in (R6: 0x004ab230 BipedAnim::GetBoneNode, 0x0087ce70, 0x00660400, 0x00a8a200; R1: 0x0046ffd0).
-STAND_TAG = re.compile(r'//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n')
-STAND_GAP_ITEM = re.compile(r'\s+|//[^\n]*|/\*.*?\*/|#[^\n]*|(?:template\s*<[^;{}]*>\s*)?(?:struct|class|union|enum)\s+'
-                            r'[\w:<>, \t*]+?\s*(?::[^;{}]*)?(?:;|\{(?:[^{}]|\{[^{}]*\})*\}\s*;)', re.S)
-
-def _stand_head(text, at, lines=3):
-    """Start of the line where the head of the definition matched at `at` begins: up to `lines` lines above, while
-    the line above is part of a declaration (not blank, a comment, a preprocessor line or the end of a statement)."""
-    start = text.rfind('\n', 0, at) + 1
-    for _ in range(lines):
-        if start == 0: break
-        ls = text.rfind('\n', 0, start - 1) + 1
-        prev = text[ls:start].strip()
-        if not prev or prev.startswith(('#', '//', '/*')) or prev.endswith((';', '}', '{', '*/')): break
-        start = ls
-    return start
-
-def _stand_gap_only(gap):
-    """gap holds only what may sit between a tag and its definition (STAND_GAP_ITEM)."""
-    i = 0
-    while i < len(gap):
-        m = STAND_GAP_ITEM.match(gap, i)
-        if not m or m.end() == i: return False
-        i = m.end()
-    return True
-
-def _stand_tagged(text, at):
-    """The definition whose head STAND_DEF matched at `at` carries its own `@fnv` tag (see above)."""
-    for h in sorted({_stand_head(text, at), text.rfind('\n', 0, at) + 1, at}):
-        window = text[max(0, h - 2000):h]
-        tags = list(STAND_TAG.finditer(window))
-        if tags and _stand_gap_only(window[tags[-1].end():]): return True
-    return False
-
-def r_stand_in_definitions(path, text, stats):
-    """STAND1: drop untagged definitions bound to the address of a tagged definition in the same unit (see above)."""
-    return _stand_ins(path, text, stats, 'STAND1')
-
-def r_stand_in_definitions_elsewhere(path, text, stats):
-    """STAND2: drop untagged definitions bound to an address another unit defines, where MSVC cannot have inlined
-    them: non-inline, non-static, non-virtual, in a unit without /O1, /O2, /Ox, /Ob2 (see above)."""
-    return _stand_ins(path, text, stats, 'STAND2')
-
-def _stand_ins(path, text, stats, which):
-    if not path.endswith('.cpp') or '@fnv' not in text: return text
-    syms = _unit_symbols(path)
-    if not syms: return text
-    tagged = {int(a, 16) for a in FNV_TAG_ADDR.findall(text)}
-    elsewhere = set()
-    if which == 'STAND2':
-        info = _unit_info(path)
-        if info is None or set(info[0]) & STAND2_INLINING_FLAGS: return text
-        elsewhere = _all_unit_functions(path) - info[1]
-    spans, edits, cands, tagged_prefixes = None, [], [], set()
-    for m in STAND_DEF.finditer(text):
-        q = re.sub(r'\s+', '', m.group(2))
-        parts = q.split('::')
-        if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS: continue
-        if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', m.group(1) or ''): continue
-        if spans is None: spans = prepare.scope_spans(text)
-        chain = prepare.scope_chain(spans, m.start())
-        if any(k != 'namespace' for k, _ in chain): continue
-        ns = [h.split()[-1] for _, h in chain if h.split()[-1] != 'namespace']
-        scope = list(reversed(parts[:-1])) + list(reversed(ns))
-        name = parts[-1]
-        if len(parts) >= 2 and name == parts[-2]: prefix = '??0' + '@'.join(scope) + '@@'
-        elif name.startswith('~'): prefix = '??1' + '@'.join(scope) + '@@'
-        else: prefix = '?' + '@'.join([name] + scope) + '@@'
-        if _stand_tagged(text, m.start()):
-            tagged_prefixes.add(prefix); continue
-        cands.append((m, q, parts, name, prefix))
-    placed = _UNIT_PLACED.get(os.path.normpath(os.path.abspath(path)), ())
-    for m, q, parts, name, prefix in cands:
-        if which == 'STAND1':
-            if not any(k.startswith(prefix) and int(a, 16) in tagged for k, a in syms.items()): continue
-            # the unit's own recipe places this name and no tagged definition of the unit has it: it is the function,
-            # the tag sits on another one (R2: caravanmenu 0x0073b730, the tag is on TESCaravanCard::
-            # FUN_0073b730_card, units.json places NPCHandArrayInfo's). A tagged overload of the name keeps STAND1.
-            if prefix not in tagged_prefixes and any(k.startswith(prefix) for k in placed):
-                continue
-        else:
-            bound = [int(a, 16) for k, a in syms.items() if k.startswith(prefix)]
-            if not (bound and all(a in elsewhere and a not in tagged for a in bound)): continue
-            if re.search(r'\b(?:inline|__inline|__forceinline|static)\b', m.group(1) or ''): continue
-            if re.search(r'\b(?:inline|__inline|__forceinline|static)\s+$', text[max(0, m.start() - 200):m.start()]):
-                continue
-            if re.search(r'\bvirtual\b[^;{}]*[\s\*&]%s\s*\(' % re.escape(name), text): continue   # vtable: S2c
-        o = m.end() - 1
-        c = prepare.match_brace(text, o)
-        start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
-        for _ in range(3):                                 # the head may begin on the lines above
-            ls = text.rfind('\n', 0, start - 1) + 1 if start > 0 else 0
-            prev = text[ls:start].strip()
-            if not prev or prev.startswith(('#', '//')) or prev.endswith((';', '}', '{', '*/', ':', ')')): break
-            start = ls
-        nl = '\n' * text.count('\n', start, c)
-        if len(parts) == 1:                                # a free function keeps its declaration
-            if re.search(r'\bstatic\b', m.group(1) or ''): continue     # internal: the link cannot rebind it
-            head = text[start:o].rstrip()
-            head = re.sub(r'\b(?:inline|__inline|__forceinline)\s+', '', head)
-            edits.append((start, c, head + '; /* fnv-nx %s */' % which + nl[head.count('\n'):]))
-        else:
-            edits.append((start, c, '/* fnv-nx %s: %s is the function at the tagged address */%s' % (which, q, nl)))
-    if not edits: return text
-    out, pos = [], 0
-    for a, b, r in sorted(edits):
-        if a < pos: continue
-        out.append(text[pos:a]); out.append(r); pos = b
-        stats[which] += 1
-    out.append(text[pos:])
-    return ''.join(out)
-
-# ---------------------------------------------------------------------------------------------------------- STAND4
-#
-# STAND1 / STAND2 for `static` free stand-ins (S1-layout, S13b native-empty-body). tesconditionfunctions.cpp defines
-# `static bool __cdecl InFactionConditionForPlayerCallee(...) { return false; }` untagged, and the tagged 0x0059f790
-# returns its result; the recipe binds `?InFactionConditionForPlayerCallee@@YA_NPAVTESObjectREFR@@PAX1AAN@Z` to
-# 0x0059f630 (GetInFaction, tagged in the same unit). MSVC decorates a static free function like an extern one and
-# its /Od code calls it by that name, so the exe runs 0x0059f630; GCC inlines `return false` (fuzz: the native makes
-# no call). STAND1/2 leave static ones alone because an internal name cannot be rebound. STAND4 replaces the
-# definition by an extern declaration and drops `static` from the unit's other declarations of that name, so the
-# call is a call of the decorated name that the link binds. Same gates as STAND1 (an address tagged in the unit) or
-# STAND2 (an address only other units define, in a unit without /O1 /O2 /Ox /Ob2), for an untagged free function at
-# namespace scope; not inline, not a template, not overloaded in the unit (one definition of the name).
-#
-# An overload is converted too when every spelling of the name binds one address that the unit tags and the unit
-# has no other `static` declaration of the name (R6 class 5): hkpworldoperationutil.cpp tags its static
-# FindItemForThreshold at 0x00cb3d10 and defines a second static FindItemForThreshold(S00cb5100_World*, ...) that
-# calls `pick`, which MSVC called as 0x00cb3d10 too (both spellings bound there). Such an overload's head may carry
-# `__declspec(noinline)` (STAND4_DEF); a single static noinline definition stays (S5's register-allocation
-# stand-ins).
-
-STAND4_DEF = re.compile(r'^[ \t]*((?:(?:__declspec\s*\(\s*\w+\s*\)|[\w:<>,\*&]+)[ \t\*&]+)*?)'
-                        r'((?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*)\s*'
-                        r'\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?(?:throw\s*\([^)]*\)\s*)?(?::[^;{}]*)?\{', re.M)
-
-def r_static_stand_ins(path, text, stats):
-    """STAND4: a static free stand-in bound to a decompiled address becomes an extern declaration (above)."""
-    if not path.endswith('.cpp') or '@fnv' not in text or 'static' not in text: return text
-    syms = _unit_symbols(path)
-    if not syms: return text
-    info = _unit_info(path)
-    tagged = {int(a, 16) for a in FNV_TAG_ADDR.findall(text)}
-    elsewhere = set() if info is None or set(info[0]) & STAND2_INLINING_FLAGS else _all_unit_functions(path) - info[1]
-    spans, edits, names = None, [], collections.Counter()
-    defs = []
-    names0 = collections.Counter()   # the definitions STAND_DEF sees (heads without __declspec)
-    for m in STAND4_DEF.finditer(text):
-        q = re.sub(r'\s+', '', m.group(2))
-        if '::' in q or q in NOT_FUNCTIONS or q in CXX_KEYWORDS: continue
-        names[q] += 1
-        names0[q] += '__declspec' not in (m.group(1) or '')
-        defs.append((m, q))
-    for m, name in defs:
-        lead = m.group(1) or ''
-        if not re.search(r'\bstatic\b', lead): continue
-        single = names0[name] == 1 and '__declspec' not in lead   # the rule as it was
-        overload = not single and names[name] != 1
-        # A lone `static __declspec(noinline)` stand-in (W6-EQ, 0x00d57aa0 / 0x00d57b20: `static __declspec(noinline)
-        # float FUN_00d571d0() { return DAT_01030ff0; }`, whose name the unit binds to 0x00d571d0, a function the exe
-        # calls there): MSVC never inlines it, so every caller called the bound name, in any optimization flags. The
-        # same address gates apply, with `elsewhere` taken over all units for it (STAND6's argument). Other
-        # __declspec heads (align, naked, ...) and names with no address are still S5's.
-        noinline = (not single and re.search(r'\bnoinline\b', lead)
-                    and not re.search(r'__declspec\s*\(\s*(?!noinline)\w+', lead))
-        if not single and not overload and not noinline: continue
-        if overload and re.search(r'(?m)^[ \t]*static\s+[^;{}()]*\b%s\s*\([^;{}]*\)\s*;' % re.escape(name), text): continue
-        if re.search(r'\b(?:inline|__inline|__forceinline|constexpr|template)\b', lead): continue
-        if re.match(r'\s*(?:return|else|case|new|delete|throw)\b', lead): continue
-        before = text[max(0, m.start() - 400):m.start()]
-        if _stand_tagged(text, m.start()): continue
-        if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
-        if spans is None: spans = prepare.scope_spans(text)
-        chain = prepare.scope_chain(spans, m.start())
-        if any(k != 'namespace' for k, _ in chain): continue
-        ns = [h.split()[-1] for _, h in chain if h.split()[-1] != 'namespace']
-        if len(ns) != sum(1 for _ in chain): continue                     # an anonymous namespace
-        prefix = '?' + '@'.join([name] + list(reversed(ns))) + '@@'
-        bound = {int(a, 16) for k, a in syms.items() if k.startswith(prefix)}
-        if not bound or len(bound) != 1: continue
-        if noinline:
-            if not (bound <= tagged or (info is not None and bound <= _all_unit_functions(path) - info[1] and not bound & tagged)):
-                continue
-        elif not (bound <= tagged or (bound <= elsewhere and not bound & tagged and single)): continue
-        o = m.end() - 1
-        c = prepare.match_brace(text, o)
-        start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
-        nl = '\n' * text.count('\n', start, c)
-        head = re.sub(r'\bstatic\s+', '', text[start:o].rstrip(), count=1)
-        edits.append((start, c, head + '; /* fnv-nx STAND4 0x%08x */' % next(iter(bound)) + nl[head.count('\n'):]))
-        # the other declarations of the name lose `static` too (a first static declaration keeps the name internal)
-        for d in re.finditer(r'(?m)^([ \t]*)static\s+(?=(?:__declspec\s*\(\s*\w+\s*\)|[^;{}()])*\b%s\s*\([^;{}]*\)\s*;)' % re.escape(name), text):
-            if d.start() < start or d.start() >= c:
-                edits.append((d.start(), d.end(), d.group(1)))
-    if not edits: return text
-    out, pos = [], 0
-    keep = os.environ.get('FNVNX_RECON') and 'STAND4' in ''.join(e[2] for e in edits)
-    spans4 = prepare.__dict__.setdefault('_fnvnx_stand4_spans', {}).setdefault(os.path.abspath(path), []) if keep else None
-    for a, b, r in sorted(edits):
-        if a < pos: continue
-        if spans4 is not None and 'STAND4' in r: spans4.append((r, text[a:b]))   # REC1 matches on the text before this
-        out.append(text[pos:a]); out.append(r); pos = b
-    out.append(text[pos:])
-    stats['STAND4'] += sum(1 for e in edits if 'STAND4' in e[2])
-    return ''.join(out)
-
-# ---------------------------------------------------------------------------------------------------------- STAND3
-#
-# STAND2 for inline stand-ins (S1-fuzzA). The decomp writes small helpers as in-class bodies (modelloader.cpp
-# `struct _Mem_00441d20 { int a; ~_Mem_00441d20() { FUN_0044b160(this); } };`), and the recipe binds their MSVC names
-# to the exe function the call went to (`??1_Mem_00441d20@@QAE@XZ` -> 0x0040c110, FUN_0040c110 of magicitem.cpp).
-# STAND2 leaves in-class and `inline` definitions alone, because /Ob1 inlines exactly those. In an /Od unit without
-# /Ob1, /Ob2, /O1, /O2 or /Ox MSVC inlines nothing, so the exe calls that address at every site and the local body
-# never runs; GCC inlines it (fuzz: 9 native-null-read functions in modelloader, the native running FUN_0044b160's
-# lock loop where the exe calls 0x0040c110). STAND3 drops such a body and keeps the declaration (a constructor's
-# without its initializer list), so each call stays a call of that name and the link binds it to the exe's address
-# (units.json symbols, tier unit/exact). Only: a .cpp of such a unit; an untagged in-class definition, or an
-# untagged out-of-class or free one marked inline, at namespace or class scope (no local class, no template, not
-# virtual, static, constexpr or forceinline, no operator); every units.json spelling of the name in the unit bound
-# to one address that some unit decompiles; not a destructor of a class with a base or virtual members (any class of
-# that name in the unit), not a name the unit declares virtual (an implicit override's vtable slot stays as it is).
-
-STAND3_INLINING_FLAGS = ('/Ob1', '/Ob2', '/O1', '/O2', '/Ox')
-
-STAND3_CLASS = re.compile(r'^(?:typedef\s+)?(?:class|struct|union)\s+(?:__declspec\s*\([^()]*\)\s*)?([A-Za-z_]\w*)\s*(?::|$)')
-
-def _stand3_maybe_virtual(text, cls, name):
-    """True when member `name` of class `cls` may be virtual without saying so: a destructor of a class that has a
-    base or virtual members (any class of that name in the unit), or a name the unit declares virtual anywhere."""
-    if name.startswith('~'):
-        for m in re.finditer(r'\b(?:class|struct)\s+(?:__declspec\s*\([^()]*\)\s*)?%s\b\s*([^;{()]*)\{' % re.escape(cls), text):
-            if ':' in m.group(1).replace('::', ''): return True
-            c = prepare.match_brace(text, m.end() - 1)
-            if re.search(r'\bvirtual\b', text[m.end():c]): return True
-        return False
-    return bool(re.search(r'\bvirtual\b[^;{}()]*\b%s\s*\(' % re.escape(name), text))
-
-STAND3_BUILTIN = {'char': 'D', 'signed char': 'C', 'unsigned char': 'E', 'short': 'F', 'unsigned short': 'G',
-                  'int': 'H', 'unsigned int': 'I', 'unsigned': 'I', 'long': 'J', 'unsigned long': 'K', 'float': 'M',
-                  'double': 'N', 'bool': '_N', '__int64': '_J', 'unsigned __int64': '_K', 'void': 'X',
-                  'wchar_t': '_W'}
-
-def _stand3_param_codes(params):
-    """MSVC's encoding of a parameter list of builtin types and pointers / references to them (`int, const char*` ->
-    `HPBD`), None when a parameter is anything else (a class type, a typedef, a function pointer, an array, `...`).
-    MSVC abbreviates a repeated multi-character type to a back-reference digit, so lists with a repeated pointer
-    or reference type are not encoded either."""
-    if params in ('', 'void'): return ''
-    out, seen = [], set()
-    for p in _split_args(params):
-        p = re.sub(r'=.*$', '', p).strip()
-        m = re.fullmatch(r'((?:const\s+|volatile\s+)*)((?:unsigned\s+|signed\s+)?(?:__int64|char|short|int|long|float|'
-                         r'double|bool|void|wchar_t)|unsigned)((?:\s*const)?)\s*([*&]?)\s*(?:const\s*)?(?:[A-Za-z_]\w*)?', p)
-        if not m: return None
-        base = re.sub(r'\s+', ' ', m.group(2)).strip()
-        code = STAND3_BUILTIN.get(base)
-        if code is None or (code == 'X' and not m.group(4)): return None
-        cq = bool(m.group(1).strip()) or bool(m.group(3).strip())
-        if m.group(4):
-            code = {'*': 'PA', '&': 'AA'}[m.group(4)][0] + ('B' if cq else 'A') + code
-            if code in seen: return None
-            seen.add(code)
-        out.append(code)
-    return ''.join(out)
-
-def _stand3_overloads(text, spans, pos, name, in_class, cls):
-    """Declarations and definitions of `name` in the scope that holds the definition at `pos`: the class body for an
-    in-class member, the body of class `cls` for an out-of-class one (0 when the unit does not define it), the
-    enclosing namespace scope for a free function."""
-    pat = re.compile(r'(?<![\w.>:~])%s\s*\(' % re.escape(name))
-    if in_class:
-        body = next(((o, c) for o, c, k, _ in reversed([sp for sp in spans if sp[0] < pos < sp[1]]) if k == 'class'), None)
-    elif cls:
-        cm = re.search(r'\b(?:class|struct)\s+%s\b[^;{()]*\{' % re.escape(cls), text)
-        body = (cm.end() - 1, prepare.match_brace(text, cm.end() - 1) - 1) if cm else None
-        if body is None: return 0
-    else:
-        body = None
-    n = 0
-    for mm in pat.finditer(text):
-        at = mm.start()
-        if body is not None:
-            if not body[0] < at < body[1]: continue
-            inner = [sp for sp in spans if sp[0] < at < sp[1] and body[0] <= sp[0] and sp[0] != body[0]]
-            if inner: continue                            # inside a member's body or a nested class
-        else:
-            if any(k != 'namespace' for k, _ in prepare.scope_chain(spans, at)): continue
-        if re.search(r'[=(,!&|+\-*/?:<>]\s*$|\breturn\s*$|\.\s*$|->\s*$', text[max(0, at - 40):at]): continue   # a call
-        n += 1
-    return n
-
-def r_inline_stand_ins(path, text, stats):
-    """STAND3: drop untagged inline bodies of an /Od unit without inlining flags whose MSVC name binds the address of
-    a decompiled function (see above): in-class definitions become declarations, out-of-class ones go, free ones keep
-    their declaration."""
-    if not path.endswith('.cpp') or '@fnv' not in text: return text
-    info = _unit_info(path)
-    if info is None or '/Od' not in info[0] or set(info[0]) & set(STAND3_INLINING_FLAGS): return text
-    decompiled = _all_unit_functions(path)
-    syms = _unit_symbols(path)
-    if not syms: return text
-    spans, edits = None, []
-    for m in STAND_DEF.finditer(text):
-        q = re.sub(r'\s+', '', m.group(2))
-        parts = q.split('::')
-        if parts[-1] in NOT_FUNCTIONS or parts[-1] in CXX_KEYWORDS or 'operator' in parts[-1]: continue
-        lead = m.group(1) or ''
-        if re.match(r'\s*(?:return|else|case|new|delete|throw|goto)\b', lead): continue
-        if re.search(r'\b(?:virtual|static|template|__forceinline|FNV_FORCEINLINE|constexpr)\b', lead): continue
-        before = text[max(0, m.start() - 400):m.start()]
-        if _stand_tagged(text, m.start()): continue
-        if re.search(r'\btemplate\s*<[^;{}]*$', before): continue
-        if spans is None: spans = prepare.scope_spans(text)
-        chain = prepare.scope_chain(spans, m.start())
-        if any(k not in ('namespace', 'class') for k, _ in chain): continue
-        scope_names, ok = [], True
-        for k, h in chain:
-            if k == 'namespace':
-                n = h.split()[-1]
-                if n != 'namespace': scope_names.append(n)
-            else:
-                if 'template' in h: ok = False; break
-                cm = STAND3_CLASS.match(h.strip())
-                if not cm: ok = False; break
-                scope_names.append(cm.group(1))
-        if not ok: continue
-        in_class = bool(chain) and chain[-1][0] == 'class'
-        if in_class and len(parts) > 1: continue
-        if not in_class and not (re.search(r'\b(?:inline|__inline)\b', lead) or
-                                 re.search(r'\b(?:inline|__inline)\s+$', text[max(0, m.start() - 200):m.start()])):
-            continue                                       # a non-inline definition is STAND2's
-        if not in_class and any(k == 'class' for k, _ in chain): continue
-        scope = list(reversed(parts[:-1])) + list(reversed(scope_names))
-        name = parts[-1]
-        cls = parts[-2] if len(parts) >= 2 else (scope_names[-1] if in_class and scope_names else None)
-        if cls and name == cls: prefix = '??0' + '@'.join(scope) + '@@'
-        elif name.startswith('~'):
-            if not cls or name[1:] != cls: continue
-            prefix = '??1' + '@'.join(scope) + '@@'
-        else: prefix = '?' + '@'.join([name] + scope) + '@@'
-        # the definition's own spelling, not an overload's (V2 O1/O2: tesworldspace `NiPoint2() {}` took the address of
-        # the bound NiPoint2(float, float)). A spelling agrees with the definition on an empty parameter list (`XZ`),
-        # on const (`QBE` / `QAE`) and, when every parameter is a builtin type or a pointer / reference to one, on the
-        # encoded parameters; exactly one spelling must agree, and with a class-type parameter the name must have no
-        # other declaration in its scope
-        params = re.sub(r'\s+', ' ', m.group(3) or '').strip()
-        tail = text[m.end(3) + 1:m.end() - 1]
-        is_const = bool(re.match(r'\s*const\b', tail))
-        enc = _stand3_param_codes(params)
-        def agrees(k):
-            if (params in ('', 'void')) != k.endswith('XZ'): return False
-            if cls and not name.startswith('~') and name != cls and \
-                    k[len(prefix) + 1:len(prefix) + 2] != ('B' if is_const else 'A'): return False
-            return enc is None or params in ('', 'void') or k.endswith(enc + '@Z')
-        spell = [k for k in syms if k.startswith(prefix) and agrees(k)]
-        if len(spell) != 1: continue
-        if enc is None and _stand3_overloads(text, spans, m.start(), name, in_class, cls) != 1: continue
-        addrs = {int(syms[spell[0]], 16)}
-        if not addrs <= decompiled: continue
-        if cls and _stand3_maybe_virtual(text, cls, name): continue
-        o = m.end() - 1
-        c = prepare.match_brace(text, o)
-        start = m.start() + len(text[m.start():m.end()]) - len(text[m.start():m.end()].lstrip())
-        for _ in range(3):                                 # the head may begin on the lines above
-            ls = text.rfind('\n', 0, start - 1) + 1 if start > 0 else 0
-            prev = text[ls:start].strip()
-            if not prev or prev.startswith(('#', '//')) or prev.endswith((';', '}', '{', '*/', ':', ')')): break
-            if in_class and re.match(r'(?:public|private|protected)\s*:$', prev): break
-            start = ls
-        nl = '\n' * text.count('\n', start, c)
-        x = '%08x' % next(iter(addrs))
-        if in_class or len(parts) == 1:                    # keep the declaration (without an initializer list)
-            after = text[m.end(3) + 1:o]
-            cv = re.match(r'\s*(?:const\b\s*)?(?:throw\s*\([^)]*\)\s*)?', after).group(0).rstrip()
-            head = (text[start:m.end(3) + 1] + cv).rstrip()
-            head = re.sub(r'\b(?:inline|__inline)\s+', '', head)
-            edits.append((start, c, head + '; /* fnv-nx STAND3 0x%s */' % x + nl[head.count('\n'):]))
-        else:
-            edits.append((start, c, '/* fnv-nx STAND3: %s is the function at 0x%s */%s' % (q, x, nl)))
-    if not edits: return text
-    out, pos = [], 0
-    for a, b, r in sorted(edits):
-        if a < pos: continue
-        out.append(text[pos:a]); out.append(r); pos = b
-        stats['STAND3'] += 1
-    out.append(text[pos:])
-    return ''.join(out)
-
-# ---------------------------------------------------------------------------------------------------------- CSX2
-#
-# D15 reopened (J-0067): the decomp's generated layouts were taken from the Xbox 360 build, whose
-# RTL_CRITICAL_SECTION is 28 bytes, and the PC code keeps those 28 bytes. S11's MSVC gate shows the byte-matched
-# GraphicsRenderer::BeginUsingRenderTargetGroup reading +0x200 / +0x208, which only holds when each of its three
-# NiCriticalSections is 128 bytes with m_ulThreadOwner at 0x1C - 4 bytes behind the 24-byte PC section (the
-# section itself starts at +0x0: NiCriticalSection hands `this` to EnterCriticalSection). CSX2 puts those 4 bytes
-# back behind every member of the decomp's generated `_RTL_CRITICAL_SECTION` type whose class asserts the next
-# member (or its size) 0x1C bytes after the section: NiCriticalSection (7 layout copies) and RecursiveLock, and with
-# them every holder (GraphicsRenderer, BSShaderAccumulator, NiGlobalStringTable, NiRenderer, BSThread, AbstractHeap,
-# OEI::IO::IO_Thread). The decomp's asserts then hold again; what the PC build keeps in those 4 bytes is not known
-# (no code of the binary reads them).
-
-CS_MEMBER = re.compile(r'^([ \t]*)_RTL_CRITICAL_SECTION\s+([A-Za-z_]\w*)\s*;', re.M)
-
-def r_critical_section_tail(path, text, stats):
-    """CSX2: 4 bytes behind a generated-layout _RTL_CRITICAL_SECTION member that the class asserts as 28 bytes."""
-    if '_RTL_CRITICAL_SECTION' not in text or 'offsetof' not in text and 'sizeof' not in text: return text
-    spans, edits = None, []
-    for m in CS_MEMBER.finditer(text):
-        if spans is None: spans = prepare.scope_spans(text)
-        cls = [sp for sp in spans if sp[0] < m.start() < sp[1] and sp[2] == 'class']
-        if not cls: continue
-        o, c, _, head = max(cls)
-        name_m = re.search(r'(?:class|struct)\s+([A-Za-z_]\w*)\b(?:(?!\b(?:class|struct)\b)[^{])*$', head)
-        if not name_m: continue
-        cname, member = name_m.group(1), m.group(2)
-        asserts = text[c:c + 8000]
-        at = re.search(r'offsetof\s*\(\s*%s\s*,\s*%s\s*\)\s*==\s*(0[xX][0-9a-fA-F]+|\d+)' % (cname, member), asserts)
-        if not at: continue
-        start = int(at.group(1), 0)
-        eol = text.find('\n', m.end())
-        nxt = re.match(r'\s*(?:[\w:<>\*& \t]+?[\s\*&])([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;', text[eol:c])
-        want = None
-        if nxt:
-            nm = re.search(r'offsetof\s*\(\s*%s\s*,\s*%s\s*\)\s*==\s*(0[xX][0-9a-fA-F]+|\d+)' % (cname, nxt.group(1)), asserts)
-            if nm: want = int(nm.group(1), 0)
-        else:
-            sm = re.search(r'sizeof\s*\(\s*%s\s*\)\s*==\s*(0[xX][0-9a-fA-F]+|\d+)' % cname, asserts)
-            if sm: want = int(sm.group(1), 0)
-        if want != start + 0x1C: continue
-        edits.append((m.end(), ' unsigned int %s_fnvnx_tail; /* fnv-nx CSX2: the 28 bytes of the layout */' % member))
-    if not edits: return text
-    out, pos = [], 0
-    for at, s in edits:
-        out.append(text[pos:at]); out.append(s); pos = at
-        stats['CSX2'] += 1
-    out.append(text[pos:])
-    return ''.join(out)
-
-# ---------------------------------------------------------------------------------------------------------- VTBL1
-#
-# A stand-in polymorphic class whose native vtable is too short for the slots the game calls through it. The
-# decomp declares BSNiAllocator (constructor 0x00aa2230, vftable 0x010a2528) with one virtual, so the native vtable
-# has one slot, while NiMemoryManager calls slot 1 (Allocate, FUN_00aa1070), slot 4 (FUN_00aa1130) and InitHolder
-# slot 7 (S14 r2: the vftable has 10 slots, bounded by the next COL word at 0x010a2550). VTBL1 gives the stand-in
-# the interface in MSVC slot order. The slot functions the decomp knows are its BSNiAllocator functions
-# (gamebryo2.2/corelibs/nisystem/bsniallocator.cpp, called through these slots with these signatures in
-# nimemorydefines.cpp): 0 scalar deleting destructor 0x00aa24a0, 1 Allocate 0x00aa2240, 2 Deallocate 0x00aa22b0
-# (S13), 3 Reallocate 0x00aa22f0, 4 aligned Allocate 0x00aa2370, 5 aligned Deallocate 0x00aa23e0, 6 aligned
-# Reallocate 0x00aa2420; each slot forwards to that function by its decomp name (the link binds it by address).
-# Slots 7-9 (7 is InitHolder's no-argument call) have no function in the decomp: declared only, they stay
-# unresolved until the exe gives their addresses.
-#
-# NiStandardAllocator (vftable 0x010a24fc, 10 slots; nigpuprogramcache.cpp's FUN_00aa2200 creates it with one
-# virtual, and InitHolder's tail call goes through its slot 7, f13 J-0080). Its functions are the ones of
-# gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp (the 360 source path of 0x00aa3090..0x00aa3560), laid out in
-# slot order like BSNiAllocator's and with the same signatures: 1 Allocate 0x00aa30c0 (prepends the size for the
-# default alignment, small blocks <= 0x100 from the small-object allocator DAT_011f622c), 2 Deallocate 0x00aa3150,
-# 3 Reallocate 0x00aa31b0 (StdAllocator::FUN_00aa31b0, which calls slots 1 and 2 itself), 4-6 the aligned set
-# 0x00aa3300 / 0x00aa3370 / 0x00aa33a0 (event 0xd / 0xe aligned blocks from MemoryManager), 7 Initialize 0x00aa3430
-# (creates the small-object allocator, Gamebryo's NiStandardAllocator::Initialize) and 8 Shutdown 0x00aa3460
-# (deletes it, NiStandardAllocator::Shutdown); `this` is unused in all of them, the decomp writes them as free
-# __stdcall / __cdecl functions. Slot 0 (scalar deleting destructor) and slot 9 have no function in the decomp and
-# stay unresolved (slot 0 is declared inline so that Allocate is the key function and the vtable is emitted).
-# StdAllocator::FUN_00aa31b0 reaches slots 1 and 2 through StdAllocator's own declaration, whose virtual destructor
-# takes two Itanium slots: there it becomes the MSVC slot-0 plain virtual, so Allocate / Deallocate are slots 1 / 2.
-
-VTBL1_NISTD = '''unsigned char* __stdcall FUN_00aa30c0(unsigned int* pCount, int* pType, int eType, unsigned char bFlag, int a4, int a5, int a6);
-void __stdcall FUN_00aa3150(void* pvMemory, int aiAllocationType, unsigned int stSizeInBytes);
-struct StdAllocator
-{
-    void* FUN_00aa31b0(void* pvMemory, unsigned int& stSizeInBytes, unsigned int& stAlignment, int aiAllocationType,
-                       bool bProvideAccurateSizeOnDeallocate, unsigned int stSizeCurrent, const char* pcFile, int iLine,
-                       const char* pcFunction);
-};
-void* __stdcall FUN_00aa3300(unsigned int puiSize, unsigned char* pucAlign, int iType, int iUnk, int iUnkCur, int iUnkValue, int iNewUnk);
-void __stdcall FUN_00aa3370(void* apBlock, int e, unsigned int s);
-void* __stdcall FUN_00aa33a0(void* pvMem, unsigned int* puiSize, unsigned char* pucAlign, int iType, int iUnk, int iUnkCur, int iUnkValue, int iNewUnk, int iTmpUnk);
-namespace fnv_00aa3430 { void __cdecl AllocateStandardAllocator(); }
-void __cdecl DestroySmallAllocPools();
-struct NiStandardAllocator   /* fnv-nx VTBL1: the 10 slots of the vftable at 0x010a24fc in MSVC order */
-{
-    static void* __cdecl operator new(size_t);   /* NEW1's form */
-    inline virtual void* Destroy(unsigned int flags);   /* slot 0: not in the decomp */
-    virtual void* Allocate(unsigned int& size, unsigned int& alignment, int event, bool accurate, const char* file,
-                           int line, const char* function);   /* the key function: defined below */
-    virtual void Deallocate(void* p, int event, unsigned int size) { FUN_00aa3150(p, event, size); }
-    virtual void* Reallocate(void* p, unsigned int& size, unsigned int& alignment, int event, bool accurate,
-                             unsigned int current, const char* file, int line, const char* function)
-    {
-        return ((StdAllocator*)this)->FUN_00aa31b0(p, size, alignment, event, accurate, current, file, line, function);
-    }
-    virtual void* AlignedAllocate(unsigned int& size, unsigned int& alignment, int event, bool accurate,
-                                  const char* file, int line, const char* function)
-    {
-        return FUN_00aa3300((unsigned int)&size, (unsigned char*)&alignment, event, accurate, (int)file, line,
-                            (int)function);
-    }
-    virtual void AlignedDeallocate(void* p, int event, unsigned int size) { FUN_00aa3370(p, event, size); }
-    virtual void* AlignedReallocate(void* p, unsigned int& size, unsigned int& alignment, int event, bool accurate,
-                                    unsigned int current, const char* file, int line, const char* function)
-    {
-        return FUN_00aa33a0(p, &size, (unsigned char*)&alignment, event, accurate, (int)current, (int)file, line,
-                            (int)function);
-    }
-    virtual void Initialize() { fnv_00aa3430::AllocateStandardAllocator(); }
-    virtual void Shutdown() { DestroySmallAllocPools(); }
-    virtual void Slot9();   /* not in the decomp */
-};
-void* NiStandardAllocator::Allocate(unsigned int& size, unsigned int& alignment, int event, bool accurate,
-                                    const char* file, int line, const char* function)
-{
-    return FUN_00aa30c0(&size, (int*)&alignment, event, accurate, (int)file, line, (int)function);
-}'''
-VTBL1_NISTD_RX = re.compile(r'^struct NiStandardAllocator\s*\{\s*static void\* __cdecl operator new\((?:unsigned int|size_t)\);\s*'
-                            r'virtual void func\(\);\s*\};', re.M)
-
-# A660A0Map (gamebryo2.2/corelibs/nimain/nistream.cpp, namespace fnv_00a660a0) is the NiStream loader map
-# DAT_011f4784 (Gamebryo's NiStream::ms_pkLoaders, a NiTStringPointerMap<CreateFunction>) that FUN_00a660a0 creates
-# with `new A660A0Map`, vftable 0x0109bf4c (units.json `??_7A660A0Map@fnv_00a660a0@@6B@`). The decomp declares only its
-# destructor, so the native vtable has D1/D0 and nothing else, while RegisterObjectLoader 0x00a64900 calls
-# NiTStringTemplateMap<...>::SetAt 0x00a642a0, which calls KeyToHashIndex, IsKeysEqual and SetValue through it
-# (Itanium slots 2-4 of nitstringmap_decls.h's NiTStringTemplateMap: D1, D0, then those three). The interface is
-# Gamebryo's NiTMapBase in MSVC order: 0 destructor, 1 KeyToHashIndex, 2 IsKeysEqual, 3 SetValue, 4 ClearValue,
-# 5 NewItem, 6 DeleteItem. No slot has a function in the decomp: 0x0109bf4c is bound by nistream.cpp only (and only
-# with that destructor), its base chain 0x0109bcc4 / 0x0109bca4 / 0x0109bc84 is written only by the destructors
-# 0x00a63850 / 0x00a63a20 of other maps, and the decomp's string-map slot definitions belong to other vftables
-# (NiTStringTemplateMap<.., int>::SetValue 0x00a1e770, Tile__MenuStringMap's case-insensitive 0x00a0d180 / 0x00a0d1b0,
-# NiTStringPointerMap<ShaderBufferRecord*> at 0x010af6cc). Folding by MSVC would make some of them the same code, but
-# that is analogy, not evidence: all six are declared only (vslot traps, unresolved until the exe's vftable gives
-# their addresses). The native vtable then has the slots SetAt calls, at the same Itanium positions as SetAt's
-# declaration. A660A0MapBase (0x0109bc84) keeps its one virtual: only construction and destruction use its vptr.
-A660A0_SLOTS = ('virtual unsigned int KeyToHashIndex(const char* key) const; '
-                'virtual bool IsKeysEqual(const char* key1, const char* key2) const; '
-                'virtual void SetValue(void* item, const char* key, void* value); virtual void ClearValue(void* item); '
-                'virtual void* NewItem(); virtual void DeleteItem(void* item);')
-
-VTBL1_SITES = [
-    ('gamebryo2.2/corelibs/nimain/nigpuprogramcache.cpp', VTBL1_NISTD_RX, VTBL1_NISTD),
-    ('gamebryo2.2/corelibs/nimain/nigpuprogramcache_rtm_variant.cpp', VTBL1_NISTD_RX, VTBL1_NISTD),
-    ('gamebryo2.2/corelibs/nisystem/nistandardallocator.cpp',
-     re.compile(r'^([ \t]*)virtual ~StdAllocator\(\);', re.M),
-     r'\1virtual void* Destroy(unsigned int flags);   /* fnv-nx VTBL1: MSVC slot 0, the scalar deleting destructor */'),
-    # the second heap MemoryManager::InitializeHeaps creates (constructor 0x00aa7400): the decomp declares one
-    # virtual, MemoryManager::Allocate+0xa8 calls its slot 2 (S5 J-0102: 4,327 of 4,343 initializer skips); it is an
-    # AbstractHeap, whose 14 slots the same unit declares (v0 .. v13): the native vtable gets them all
-    ('staging/blk_00aa0000_od_ob1_variant.cpp',
-     re.compile(r'(\n[ \t]*HeapBlockLink m_20;\s*FUN_00aa7400\(unsigned int a, unsigned int b\);\s*virtual void v00\(\);)(\s*\};)'),
-     r'\1 /* fnv-nx VTBL1: the AbstractHeap slots 1-13 */ virtual void v1(); virtual void v2(); virtual void v3(); '
-     r'virtual void v4(); virtual void v5(); virtual void v6(); virtual void v7(); virtual void v8(); virtual void v9(); '
-     r'virtual void v10(); virtual void v11(); virtual void v12(); virtual void v13(void* value);\2'),
-    # the NiStream loader map (DAT_011f4784, vftable 0x0109bf4c) FUN_00a660a0 creates: the decomp declares only the
-    # destructor, NiTStringTemplateMap::SetAt 0x00a642a0 (nitstringmap.inl) calls KeyToHashIndex, IsKeysEqual and
-    # SetValue through it (see A660A0_SLOTS above)
-    ('gamebryo2.2/corelibs/nimain/nistream.cpp',
-     re.compile(r'(\bclass A660A0Map : public A660A0MapBase\s*\{[^{}]*\{\s*\}\s*virtual ~A660A0Map\(\);)(\s*\};)'),
-     r'\1 /* fnv-nx VTBL1: NiTMapBase slots 1-6 in MSVC order, none in the decomp (vslot traps) */ ' + A660A0_SLOTS
-     + r'\2'),
-    ('staging/blk_00aa0000_o2.cpp',
-        re.compile(r'^struct FUN_00aa2230_BSNiAllocator\s*\{\s*virtual void m_virtual0\(\);\s*'
-                   r'FUN_00aa2230_BSNiAllocator\(\);\s*\};', re.M),
-        '''enum NiMemEventTypeAA2 { NI_MEM_EVENT_AA2_UNKNOWN };
-void* __stdcall AllocateZeroedMemory(unsigned int&, unsigned int&, NiMemEventTypeAA2, bool, const char*, int, const char*);
-struct BSNiAllocator { void FUN_00aa22b0(void* pvMemory, int aiAllocationType, unsigned int stSizeInBytes); };
-char* __stdcall ResizeHeapBlock(char*, int*, unsigned char*, int, int, int, int, int, int);
-unsigned int __stdcall AllocateAlignedBuffer(unsigned int*, unsigned char*, int, int, int, int, int);
-namespace fnv_00aa23e0 { void __stdcall FUN_00aa23e0(void* pvMemory, int aiAllocationType, unsigned int stSizeInBytes); }
-void* __stdcall FUN_00aa2420(void*, unsigned int&, unsigned char&, int, bool, unsigned int, const char*, int, const char*);
-namespace fnv_00aa24a0 { struct BSNiAllocator { void* Destroy(unsigned int); }; }
-struct FUN_00aa2230_BSNiAllocator   /* fnv-nx VTBL1: the 10 slots of the vftable at 0x010a2528 in MSVC order */
-{
-    virtual void* Destroy(unsigned int flags);   /* the key function: defined below, so the vtable is emitted here */
-    virtual void* Allocate(unsigned int& size, unsigned int& alignment, int event, bool accurate, const char* file,
-                           int line, const char* function)
-    {
-        return AllocateZeroedMemory(size, alignment, (NiMemEventTypeAA2)event, accurate, file, line, function);
-    }
-    virtual void Deallocate(void* p, int event, unsigned int size) { ((BSNiAllocator*)this)->FUN_00aa22b0(p, event, size); }
-    virtual void* Reallocate(void* p, unsigned int& size, unsigned char& alignment, int event, bool accurate,
-                             unsigned int current, const char* file, int line, const char* function)
-    {
-        return ResizeHeapBlock((char*)p, (int*)&size, &alignment, event, accurate, (int)current, (int)file, line,
-                               (int)function);
-    }
-    virtual void* AlignedAllocate(unsigned int& size, unsigned int& alignment, int event, bool accurate,
-                                  const char* file, int line, const char* function)
-    {
-        return (void*)AllocateAlignedBuffer(&size, (unsigned char*)&alignment, event, accurate, (int)file, line,
-                                            (int)function);
-    }
-    virtual void AlignedDeallocate(void* p, int event, unsigned int size) { fnv_00aa23e0::FUN_00aa23e0(p, event, size); }
-    virtual void* AlignedReallocate(void* p, unsigned int& size, unsigned char& alignment, int event, bool accurate,
-                                    unsigned int current, const char* file, int line, const char* function)
-    {
-        return FUN_00aa2420(p, size, alignment, event, accurate, current, file, line, function);
-    }
-    virtual void Slot7();   /* InitHolder's call (Initialize?): not in the decomp */
-    virtual void Slot8();   /* not in the decomp */
-    virtual void Slot9();   /* not in the decomp */
-    FUN_00aa2230_BSNiAllocator();
-};
-void* FUN_00aa2230_BSNiAllocator::Destroy(unsigned int flags)
-{
-    return ((fnv_00aa24a0::BSNiAllocator*)this)->Destroy(flags);
-}'''),
-]
-
-def r_stand_in_interfaces(path, text, stats):
-    """VTBL1: the full virtual interface, in MSVC slot order, for the stand-ins listed in VTBL1_SITES (see above)."""
-    rel = path.replace(os.sep, '/')
-    for unit, rx, body in VTBL1_SITES:
-        if not rel.endswith('/src/' + unit): continue
-        m = rx.search(text)
-        if not m: continue
-        # same line count: the replacement is longer, so it goes on the stand-in's lines joined up
-        nl = m.group(0).count('\n')
-        text = text[:m.start()] + m.expand(body).replace('\n', ' ') + '\n' * nl + text[m.end():]
-        stats['VTBL1'] += 1
-    return text
 
 # ---------------------------------------------------------------------------------------------------------- ALIGN1
 #
@@ -4268,31 +3429,7 @@ BIND1_REFS = [
     ('src/bssystem/archive.cpp', '?g_memoryManager_af5480@fnv_00af5480@@3UMemoryManager_af5480@1@A', '0x011f6238'),
 ]
 
-def bind_units_data(data, stats, refs=BIND1_REFS):
-    """BIND1 on a units.json object (in place): add each listed name to its unit's symbols unless it is bound."""
-    by_src = {}
-    for src, name, addr in refs:
-        by_src.setdefault(src, []).append((name, addr))
-    for u in data['units']:
-        for name, addr in by_src.get(u['source'], ()):
-            if name not in u.setdefault('symbols', {}):
-                u['symbols'][name] = addr
-                stats['BIND1'] += 1
-    return data
-
-def bind_stand_in_names(out_root, stats, files=None):
-    """POST hook: BIND1 on <out_root>/build/units.json."""
-    import json
-    p = os.path.join(out_root, 'build', 'units.json')
-    if not os.path.exists(p): return
-    data = json.load(open(p))
-    before = stats['BIND1']
-    bind_units_data(data, stats, BIND1_REFS + sorted(VLIT1_BINDS))
-    if stats['BIND1'] != before:
-        json.dump(data, open(p, 'w'))
-        if files is not None: files['BIND1'] += 1
-
-POST = [bind_stand_in_names]
+POST = []
 
 # ---------------------------------------------------------------------------------------------------------- VA2
 #
@@ -4507,38 +3644,6 @@ def r_keep_definitions(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-# ---------------------------------------------------------------------------------------------------------- INIT1
-#
-# A static object whose dynamic initializer the exe has and the decomp does not. Gamebryo gives every unit that
-# includes NiMain.h a `static NiMainSDM` object; its constructor (0x00a8a5f0, `FUN_00a8a5f0_class::FUN_00a8a5f0` in
-# staging/blk_00a80000_o2.cpp) counts the objects in DAT_011f5b84 and the first one registers NiMain's init and
-# shutdown (InitializeGameSystems 0x00a89cc0, FUN_00a8a280) with NiStaticDataManager (FUN_00aa2060: 0x011f6110 /
-# 0x011f6114), which NiInit 0x00aa20b0 runs. The exe calls it from many dynamic initializers; nothing in the decomp
-# calls it, so on the target 0x011f6110 stays 0, NiInit skips NiMain's init and the NiStream loader map, its
-# post-process array and the global string table stay NULL (S5 J-0106, known_faults `before-winmain 0x00a8a5f0`).
-# INIT1 adds one such static to the constructor's own unit. S5 (J-0109, TOOLCHAIN.md section 19): a native static's
-# .init_array entry runs after boot_banner (data image mapped, memory manager constructed), before every game
-# initializer and before WinMain. Game statics run before the platform's constructors, so the constructor may not
-# use the clock, the profile strings or exceptions: 0x00a8a5f0 and FUN_00aa2060 only write image variables. Same
-# line count: the static joins the line of the constructor's closing brace.
-
-INIT1_SITES = [
-    ('staging/blk_00a80000_o2.cpp',
-     re.compile(r'(// @fnv 0x00a8a5f0\s*\nvoid\* FUN_00a8a5f0_class::FUN_00a8a5f0\(\)\s*\{(?:[^{}]|\{[^{}]*\})*\})'),
-     r"\1 /* fnv-nx INIT1: the exe's static NiMainSDM objects (none in the decomp) */ "
-     r'static FUN_00a8a5f0_class fnvnx_init1_NiMainSDM; '
-     r'static void* const fnvnx_init1_NiMainSDM_ctor = fnvnx_init1_NiMainSDM.FUN_00a8a5f0();'),
-]
-
-def r_static_initializers(path, text, stats):
-    """INIT1: static objects whose dynamic initializers the exe has and the decomp lacks (INIT1_SITES, see above)."""
-    rel = path.replace(os.sep, '/')
-    for unit, rx, repl in INIT1_SITES:
-        if not rel.endswith('/src/' + unit): continue
-        text, n = rx.subn(repl, text, count=1)
-        stats['INIT1'] += n
-    return text
-
 # ---------------------------------------------------------------------------------------------------------- FRIEND1
 #
 # `friend class hkpWorld;` in a class body, with hkpWorld declared nowhere before it: MSVC 2008 makes the friend's
@@ -4611,7 +3716,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_stand_in_definitions, r_stand_in_definitions_elsewhere, r_inline_stand_ins, r_static_stand_ins, r_stand_in_interfaces, r_static_initializers, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_critical_section_tail, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_incomplete_pointee_dtors, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
+RULES = [r_unit_renames, r_include_case, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
 #
@@ -5614,150 +4719,15 @@ def r_later_empty_base(path, text, stats):
     stats['EBO3'] += len(edits)
     return text
 
-# ---------------------------------------------------------------------------------------------------------- IDTOR1
-#
-# An implicit destructor the recipe binds (S1-layout, S13b layout-offset). A class C that declares no destructor but
-# has a member with one gets an implicit, non-trivial `C::~C`. MSVC 2008 emits it as a COMDAT and calls it by name;
-# the recipe binds that name to the exe function the call went to (extradataobjects.cpp `struct List_009e03e0 { int
-# dummy; void RemoveAll(); ListX m_uiX; }`: `??1List_009e03e0@fnv_00434dc0@@QAE@XZ` -> 0x0046ffb0, BSSimpleList's
-# destructor, which receives the list at this+0xc; build_and_match: 293 / 293 functions). GCC defines the implicit
-# destructor itself, inline, from the decomp's placeholder members: it destroys `m_uiX` at this+0x10 (the exe passes
-# this+0xc to 0x0046ffb0, the native this+0x10 to `ListX::~ListX`), so the exe's destructor never runs. IDTOR1
-# writes FNVNX_IDTOR1(C) at the end of C's body: under GCC `public: ~C();` (body-less), so GCC calls C's D1 by name
-# and the link binds it to the exe's address, as for MSVC; empty under MSVC, whose implicit destructor already is that
-# call (a real declaration there would renumber the unit's $SG string literals the recipe binds). Only: a .cpp; C defined once at namespace or class scope (no template, no local class, no
-# anonymous namespace) that declares no `~C` in its body; the unit binds `??1C@<scopes>@@QAE@XZ` (the
-# non-virtual form: a virtual one would be an implicit override's vtable slot) to one address some unit decompiles.
-
-def r_implicit_bound_destructors(path, text, stats):
-    """IDTOR1: declare `~C();` in a class whose implicit destructor the recipe binds to a decompiled address (above)."""
-    if not path.endswith('.cpp') or 'struct' not in text and 'class' not in text: return text
-    syms = _unit_symbols(path)
-    if not syms or not any(k.startswith('??1') and k.endswith('@@QAE@XZ') for k in syms): return text
-    decompiled = _all_unit_functions(path)
-    spans = prepare.scope_spans(text)
-    cands, seen = [], collections.Counter()
-    for o, c, k, h in spans:
-        if k != 'class': continue
-        bare = prepare.HEAD_DECOR.sub(' ', h).strip()
-        if re.match(r'\s*template\b', bare) or re.search(r'\btemplate\s*<', bare): continue
-        cm = re.match(r'(?:typedef\s+)?(?:class|struct)\s+([A-Za-z_]\w*)\s*(?::(?!:)|$)', bare)
-        if not cm: continue
-        chain = prepare.scope_chain(spans, o)
-        scope, ok = [], True
-        for kk, hh in chain:
-            if kk == 'namespace':
-                n = hh.split()[-1]
-                if n == 'namespace': ok = False; break                   # anonymous namespace
-                scope.append(n)
-            elif kk == 'class':
-                hb = prepare.HEAD_DECOR.sub(' ', hh).strip()
-                if re.search(r'\btemplate\b', hb): ok = False; break
-                hm = re.match(r'(?:typedef\s+)?(?:class|struct|union)\s+([A-Za-z_]\w*)', hb)
-                if not hm: ok = False; break
-                scope.append(hm.group(1))
-            else:
-                ok = False; break
-        if not ok: continue
-        name = cm.group(1)
-        key = '??1' + '@'.join([name] + list(reversed(scope))) + '@@QAE@XZ'
-        seen[key] += 1
-        cands.append((key, name, o, c, bare.startswith('class') or bare.startswith('typedef class')))
-    edits = []
-    for key, name, o, c, is_class in cands:
-        if seen[key] != 1 or key not in syms: continue
-        try: a = int(syms[key], 16)
-        except ValueError: continue
-        if a not in decompiled: continue
-        if re.search(r'~\s*%s\s*\(' % re.escape(name), text[o:c]): continue   # a destructor of its own
-        edits.append((c, ' FNVNX_IDTOR1(%s) /* fnv-nx IDTOR1 0x%08x */\n' % (name, a)))
-    if not edits: return text
-    for at, ins in sorted(edits, reverse=True):
-        text = text[:at] + ins + text[at:]
-    stats['IDTOR1'] += len(edits)
-    return text
-
 # --------------------------------------------------------------------------------------------- class scanner
 #
-# d22_mask / d22_classes: the classes of a text with their declared virtuals (comments and literals masked). The
-# rule they were written for, D22 (a virtual destructor declared in place of a slot-0 placeholder, from a list of
-# classes read off the exe), is gone with the other slot heuristics: the compiler gives a virtual destructor its one
-# slot (SDD2, toolchain/sdd). The scanner stays for the rules below that still read class bodies.
+# d22_mask: a text with comments and literals blanked, for the rules below.
 
 D22_MASK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?(?:\*/|\Z)', re.S)
-D22_CLASS_HEAD = re.compile(r'\b(class|struct)\s+(?:__declspec\s*\((?:[^()]|\([^()]*\))*\)\s*)*([A-Za-z_]\w*)'
-                            r'\s*(?:final\s*)?(:[^;{}]*)?$', re.S)
-D22_VIRTUAL = re.compile(r'\bvirtual\b')
-D22_TEMPLATE = re.compile(r'\btemplate\s*<[^;{}]*>\s*$', re.S)
 
 def d22_mask(text):
     """text with comments and string / character literals blanked (same length, line breaks kept)"""
     return D22_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
-
-def d22_classes(text, masked=None):
-    """Every class / struct definition of text: dict(qual=[outer..., name], open, close, bases, template, dtor,
-    first=(start, end, member, decl) of the first declared virtual at the class's own depth, or None)."""
-    masked = masked if masked is not None else d22_mask(text)
-    spans = prepare.scope_spans(masked)
-    out = []
-    for i, (o, c, kind, head) in enumerate(spans):
-        if kind != 'class': continue
-        m = D22_CLASS_HEAD.search(masked[max(0, o - 600):o].rstrip())
-        if not m: continue
-        hs = max(0, o - 600) + m.start()
-        qual, own = [], []
-        for o2, c2, k2, h2 in spans:
-            if o2 >= o: break
-            if o2 < o < c2:
-                if k2 == 'namespace':
-                    nm = re.match(r'(?:inline\s+)?namespace\s+(\w+)', h2 or '')
-                    qual.append(nm.group(1) if nm else '{anon}')
-                elif k2 == 'class':
-                    hm = D22_CLASS_HEAD.search(masked[max(0, o2 - 600):o2].rstrip())
-                    qual.append(hm.group(2) if hm else '{?}')
-                elif k2 != 'extern':
-                    qual.append('{local}')
-        # the class's own depth: positions inside the body not inside a nested brace pair
-        nested = [(o2, c2) for o2, c2, _, _ in spans if o < o2 < c]
-        def own_depth(pos):
-            return not any(o2 < pos < c2 for o2, c2 in nested)
-        virtuals, dtor, dtor_decl = [], False, None
-        name = m.group(2)
-        for dm in re.finditer(r'~\s*%s\s*\(' % re.escape(name), masked[o:c]):
-            if own_depth(o + dm.start()):
-                if dtor: dtor_decl = None; break
-                dtor = True
-                # a body-less, non-virtual `~C();` alone on its line (D26 (b): it gives way to `virtual ~C()`)
-                ls = masked.rfind('\n', 0, o + dm.start()) + 1
-                le = masked.find('\n', o + dm.start())
-                le = c if le < 0 or le > c else le
-                if re.match(r'^[ \t]*~\s*%s\s*\(\s*(?:void\s*)?\)\s*;[ \t]*$' % re.escape(name), masked[ls:le]):
-                    dtor_decl = (ls + len(masked[ls:le]) - len(masked[ls:le].lstrip()), le)
-        skip_to = o + 1
-        for vm in D22_VIRTUAL.finditer(masked, o + 1, c):
-            if vm.start() < skip_to or not own_depth(vm.start()): continue
-            # the declaration runs to `;` at the class's depth, or to the end of its inline body
-            j, end = vm.end(), None
-            while j < c:
-                ch = masked[j]
-                if ch == ';': end = j + 1; break
-                if ch == '{':
-                    end = prepare.match_brace(masked, j); break
-                j += 1
-            if end is None: break
-            decl = masked[vm.start():end]
-            mm = re.search(r'(~?\s*[A-Za-z_]\w*|operator\s*[^\s(]+)\s*\(', decl)
-            ls = masked.rfind('\n', 0, vm.start()) + 1
-            pre = masked[ls:vm.start()]
-            start = vm.start()
-            if re.match(r'^\s*[A-Z_][A-Z0-9_]*(?:\s+[A-Z_][A-Z0-9_]*)*\s*$', pre) and pre.strip():
-                start = ls + len(pre) - len(pre.lstrip())                    # FNVNX_KEEP virtual ...
-            virtuals.append((start, end, re.sub(r'\s+', '', mm.group(1)) if mm else None, text[start:end]))
-            skip_to = end
-        out.append(dict(qual=qual + [name], open=o, close=c, head=hs, bases=(m.group(3) or '')[1:].strip(),
-                        template=bool(D22_TEMPLATE.search(masked[max(0, hs - 300):hs])), dtor=dtor, dtor_decl=dtor_decl,
-                        first=virtuals[0] if virtuals else None, virtuals=virtuals, kind=m.group(1)))
-    return out
 
 
 # ---------------------------------------------------------------------------------------------------------- VSPLIT1
@@ -5808,164 +4778,6 @@ def r_split_virtual_declarators(path, text, stats):
     if not edits: return text
     for a, b, rep in sorted(edits, reverse=True):
         text = text[:a] + rep + text[b:]
-    return text
-
-# ---------------------------------------------------------------------------------------------------------- HKRO1
-#
-# Havok's hkReferencedObject declares, after its destructor, `getClassType()` and `calcContentStatistics(collector,
-# cls)`: every hkReferencedObject-derived exe vftable has 0x00c90350 / 0x00c90360 at slots 1 / 2 (R4 vtgate abi_check:
-# hkpWeldingViewer 010d1634 slot 3 is 0x00c90360; S2-bodies W32: 11 Havok tables one slot off from slot 2 on). 17 units
-# declare hkReferencedObject with the destructor only (9 have the full form, 12 the two without the destructor), so
-# their derived classes number every own virtual two slots early. HKRO1 adds the two declarations after the destructor
-# under GCC (FNVNX_HKRO1; empty under MSVC, whose objects stay as they are), with `void` parameter types (the unit may
-# not declare hkClass): declared-only slots, which the link fills from the exe's. Only a class named
-# hkReferencedObject whose virtuals are exactly its destructor.
-def r_hk_referenced_object_slots(path, text, stats):
-    """HKRO1: hkReferencedObject's two missing base virtuals after its destructor (see above)."""
-    if 'hkReferencedObject' not in text: return text
-    masked = d22_mask(text)
-    edits = []
-    for c in d22_classes(text, masked):
-        if c['qual'][-1] != 'hkReferencedObject': continue
-        if [v[2] for v in c['virtuals']] != ['~hkReferencedObject']: continue
-        edits.append(c['virtuals'][0][1])
-    for at in sorted(edits, reverse=True):
-        text = text[:at] + ' FNVNX_HKRO1 /* fnv-nx HKRO1 */' + text[at:]
-    stats['HKRO1'] += len(edits)
-    return text
-
-# ---------------------------------------------------------------------------------------------------------- EMPTY1
-#
-# A placeholder object for an empty string (R2's trap list, rank 32: fnv_00b2d2e0::TagEmpty). The decomp writes the
-# `sys == false` arm of the runtime-error constructor FUN_00b09480 (treeengine units) as `extern const TagText TagEmpty;`,
-# defined nowhere: the native link has no data at that name (a trap). The exe's 0x00b09480 builds that arm from the
-# empty literal at 0x01011584 through 0x0044a4c0 (TagText's constructor), a temporary like the other arm. EMPTY1
-# writes a use of such a name as `FNVNX_EMPTY1(T, Name)`: `T("")` under GCC, the original name under MSVC
-# (fnvnx_equiv_fi.h), only where the file declares `extern const T Name;` (Name ends with `Empty`), never defines
-# it, and declares `T(const char*)` in T.
-EMPTY1_DECL = re.compile(r'^[ \t]*extern[ \t]+const[ \t]+([A-Za-z_]\w*)[ \t]+([A-Za-z_]\w*Empty)[ \t]*;', re.M)
-
-def r_empty_string_objects(path, text, stats):
-    """EMPTY1: a declared-only empty-string object -> FNVNX_EMPTY1(T, Name) (see above)."""
-    if 'Empty' not in text: return text
-    masked = d22_mask(text)
-    for m in list(EMPTY1_DECL.finditer(masked)):
-        t, nm = m.group(1), m.group(2)
-        if re.search(r'(?<![\w:])(?:const\s+)?%s\s+(?:\w+::)*%s\s*(?:\(|=|\{)' % (re.escape(t), re.escape(nm)), masked):
-            continue                                            # defined in the file
-        cls = [c for c in d22_classes(text, masked) if c['qual'][-1] == t]
-        if len(cls) != 1 or not re.search(r'(?<![\w~])%s\s*\(\s*const\s+char\s*\*\s*\w*\s*\)' % re.escape(t),
-                                          masked[cls[0]['open']:cls[0]['close']]):
-            continue
-        uses = [u for u in re.finditer(r'(?<![\w:.>])%s\b' % re.escape(nm), masked) if not (m.start() <= u.start() < m.end())]
-        for u in reversed(uses):
-            text = text[:u.start()] + 'FNVNX_EMPTY1(%s, %s)' % (t, nm) + text[u.end():]
-        stats['EMPTY1'] += len(uses)
-        masked = d22_mask(text)
-    return text
-
-
-# ---------------------------------------------------------------------------------------------------------- PHSLOT1
-#
-# The decomp's reconstructed classes (a shell standing for a class of the exe) list the exe vftable's slots as
-# placeholders `virtual void vNNN()`. Most only declare them; some write `{}` after them, an empty body that is no
-# function of the game: NiAVObject (magicprojectile.cpp) defines v000..v057 that way, so its native vtable names
-# `_ZN10NiAVObject4v003Ev`, a `ret`, where the exe's slot 3 is 0x00acbb70 (`xor eax, eax; ret`, a native function
-# of the address map) and virtual callers get whatever x0 held (EQ difffuzz records 0x00477560, 0x009abe40). A
-# declared-only slot is a trap stub, which exe_slot_fill (fnvlink.py) binds to the exe slot's function; an empty
-# stand-in is not a trap, so the fill never looked at it. The body is dropped: `virtual void vNNN();`. Only the
-# placeholder names (v + three hex digits) with an empty void body; a named virtual with `{}` is the decomp's own
-# knowledge and stays.
-PHSLOT1_RX = re.compile(r'^([ \t]*virtual[ \t]+void[ \t]+v[0-9A-Fa-f]{3}\(\))[ \t]*\r?\n[ \t]*\{\}[ \t]*$', re.M)
-
-def r_placeholder_slots(path, text, stats):
-    """PHSLOT1: `virtual void vNNN()` followed by an empty body -> declared only (see above)."""
-    if 'virtual void v' not in text: return text
-    text, n = PHSLOT1_RX.subn(r'\1;', text)
-    if n: stats['PHSLOT1'] += n
-    return text
-
-# ---------------------------------------------------------------------------------------------------------- DTORB1
-#
-# A destructor stand-in whose MSVC name the recipe binds to another function (S1-rules, fuzz oracle-fault). The decomp
-# tags `X::~X() {}` with the address of X's scalar deleting destructor ??_G, and the unit binds `??1X` to another
-# address A: blk_004a0000_od.cpp's `FUN_004aa1e0::~FUN_004aa1e0() {}` at 0x004aa1e0 (??_GFUN_004aa1e0), where
-# `??1FUN_004aa1e0@@UAE@XZ` is bound to 0x004aa280, `FUN_004aa280::~FUN_004aa280`, which stores the vptrs and calls
-# 0x00438af0. MSVC's ??_G calls ??1X, so the exe runs A. GCC's D0 calls X's own D1, the empty stand-in, so the native
-# skipped A (the fuzz oracle faulted inside A on the planted object; the native returned). 65 tagged destructors in
-# the decomp have such a binding, 50 of them to a function of the same unit.
-# DTORB1 gives the stand-in's body, under GCC only, a call of A through the link's address symbol `__fnv_<A>` (the
-# native definition at A, `this` in x0). The original body follows, unreachable: FNVNX_DTORB_BEGIN(A) ...
-# FNVNX_DTORB_END expands to `{ __fnv_<A>(this); } if (0) {` ... `}`. MSVC expands both to nothing, so its objects
-# are unchanged. Only where:
-# - the tag is the unit's ??_GX (or ??_EX);
-# - X is defined in the file without bases and its data members are of built-in or pointer type (GCC's D1 destroys
-#   nothing after the body);
-# - A is a function of some unit whose MSVC name takes only `this` (`...@@[QUA]AE@XZ` / `...@@[QUA]AEXXZ`).
-_DTORB_FUNCS = None
-
-def _dtorb_functions(path):
-    """{address: MSVC symbol} of every function of build/units.json (cached on prepare)."""
-    got = prepare.__dict__.get('_fnvnx_dtorb_funcs')
-    if got is not None: return got
-    import json
-    out = {}
-    root, uj = prepare._units_json(path)
-    if uj:
-        for u in json.load(open(uj))['units']:
-            for f in u.get('functions') or ():
-                out.setdefault(int(f['address'], 16), f.get('symbol') or '')
-    prepare.__dict__['_fnvnx_dtorb_funcs'] = out
-    return out
-
-DTORB_DEF = re.compile(r'//[ \t]*@fnv[ \t]+0x([0-9a-fA-F]+)[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*'
-                       r'(?:(?:FNVNX_[A-Z0-9_]+|inline|__thiscall)\s+)*((?:[A-Za-z_]\w*::)*)([A-Za-z_]\w*)::~\3\s*\(\s*(?:void)?\s*\)\s*\{')
-DTORB_THIS_ONLY = re.compile(r'@@[QUA][AE]E(?:@|X)XZ$')
-DTORB_BUILTIN = re.compile(r'^\s*(?:(?:unsigned|signed|const|volatile|static)\s+)*(?:char|short|int|long|float|double|bool|'
-                           r'void|__int64|wchar_t|DWORD|WORD|BYTE|UINT|ULONG|LONG|BOOL)\b|\*')
-
-def _dtorb_plain_class(text, name):
-    """X is defined in text once, without bases, and every data member is of built-in or pointer type"""
-    ms = list(re.finditer(r'\b(?:struct|class)\s+%s\s*(:[^{;]*)?\{' % re.escape(name), text))
-    if len(ms) != 1 or ms[0].group(1): return False
-    o = ms[0].end() - 1
-    c = prepare.match_brace(text, o) - 1                                     # the closing brace
-    body = text[o + 1:c]
-    if '{' in body: return False
-    for decl in body.split(';'):
-        d = re.sub(r'^\s*(?:public|private|protected)\s*:', '', decl.strip()).strip()
-        if not d or '(' in d or d.startswith(('typedef', 'friend', 'using', 'enum')): continue
-        if not DTORB_BUILTIN.search(d): return False
-    return True
-
-def r_bound_dtor_stand_ins(path, text, stats):
-    """DTORB1: a tagged destructor stand-in whose ??1 the unit binds elsewhere calls the bound address under GCC."""
-    if '~' not in text or '@fnv' not in text or not path.endswith('.cpp'): return text
-    syms = _unit_symbols(path)
-    if not syms: return text
-    funcs = None
-    edits = []
-    for m in DTORB_DEF.finditer(text):
-        tag, name = int(m.group(1), 16), m.group(3)
-        bound = {int(v, 16) for k, v in syms.items() if k.startswith('??1%s@' % name)}
-        if len(bound) != 1: continue
-        a = next(iter(bound))
-        if a == tag: continue
-        if funcs is None: funcs = _dtorb_functions(path)
-        if not funcs.get(tag, '').startswith(('??_G%s@' % name, '??_E%s@' % name)):
-            stats['DTORB1-NOTAG'] += 1; continue
-        if not DTORB_THIS_ONLY.search(funcs.get(a, '')):
-            stats['DTORB1-TARGET'] += 1; continue
-        if not _dtorb_plain_class(text, name):
-            stats['DTORB1-CLASS'] += 1; continue
-        o = m.end() - 1
-        c = prepare.match_brace(text, o) - 1                                 # the closing brace
-        edits.append((o + 1, c, a))
-    if not edits: return text
-    for o, c, a in sorted(edits, reverse=True):
-        text = (text[:o] + ' FNVNX_DTORB_BEGIN(%08x) /* fnv-nx DTORB1 */' % a + text[o:c] + ' FNVNX_DTORB_END '
-                + text[c:])
-    stats['DTORB1'] += len(edits)
     return text
 
 # ---------------------------------------------------------------------------------------------------------- STAND7
@@ -6022,6 +4834,5 @@ REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_add
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
               r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
-              r_implicit_bound_destructors, r_split_virtual_declarators, r_hk_referenced_object_slots, r_placeholder_slots, r_bound_dtor_stand_ins,
-              r_template_member_stand_ins, r_empty_string_objects]
+              r_split_virtual_declarators, r_template_member_stand_ins]
 RULES += REFS_RULES
