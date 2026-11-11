@@ -189,6 +189,7 @@ alignas(16) u8 __nx_exception_stack[0x4000];
 u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
 static FsFileSystem *g_sd_fs;   /* sdmc's file system, taken at start: the handler makes raw fsFs calls */
 static u64 g_crash_guest_base, g_crash_guest_size;
+static const char *g_crash_note;   /* why the process ends when the crash is a decision (host_fault.inc), else NULL */
 static char g_crash_buf[4096];
 static size_t g_crash_len;
 
@@ -216,6 +217,7 @@ static void creg(const char *name, u64 v) {
 void __libnx_exception_handler(ThreadExceptionDump *ctx) {
     g_crash_len = 0;
     cput(g_exiting ? "fnv-nx crash during exit\n" : "fnv-nx crash\n");
+    if (g_crash_note) { cput("note "); cput(g_crash_note); cput("\n"); }
     cput("program ");
     chex(g_program_id, 16);
     cput("\nerror_desc ");

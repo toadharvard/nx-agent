@@ -219,8 +219,7 @@ typedef struct FnvnxHostApi {
  * registered). The frame's `pstate` carries only the condition flags NZCV (bits 31..28); every other bit reads as 0 and is
  * ignored when the host resumes. A fault taken while the HOST dereferences a bad guest pointer passed to a host slot is not
  * delivered to the guest: the process ends.
- * NOT SERVED YET by the console host (toolchain/host/host_platform.inc has no row for 10): ext_call answers FNVNX_EXT_NO_SERVICE
- * until the access-fault delivery exists; tests/s4/backends/hostapi_total.py fails on this until then. */
+ * Served by the console host: toolchain/host/host_fault.inc (the delivery rule and its proof), row 10 of host_platform.inc. */
 #define FNVNX_PLAT_ACCESS_FAULT_HANDLER 10u
 typedef struct FnvnxFaultFrame {
     uint32_t kind;        /* 0 read, 1 write, 2 execute */
@@ -327,8 +326,9 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *                            test:protect_mapfixed test:protect_window test:protect_not_owned test:protect_partial_failure
  *  9 DISPLAY_DOCKED     n=0  1 docked | 0 handheld
  *                            host_platform.inc:pf_display_docked                                              test:display_docked
- * 10 ACCESS_FAULT_HANDLER    NOT SERVED: NO_SERVICE (-254). The delivery of a guest fault to a guest handler (resume from the handler's frame)
- *                            has no proven kernel mechanism in the host yet; reported open.                   test:total_declared (fails)
+ * 10 ACCESS_FAULT_HANDLER n=2  0 | 0xCC01 (stack_top not 16-aligned, < sizeof(FnvnxFaultFrame) or >= 4 GiB; handler == 0 unregisters and skips the check)
+ *                            host_fault.inc:host_fault_register, fnvnx_fault_deliver (decode + delivery rule), fnvnx_fault_entry (asm) test:fault_register
+ *                            test:fault_deliver test:fault_resume test:fault_masked test:fault_die test:fault_logic
  * 11 SECTION_CREATE     n=1  id | -(0xCA01 | 0xCE01 | 0xD001 | kernel | 0x1359 no own-process handle)
  * 12 SECTION_MAP        n=4  address | -(0xCA01 | 0xCC01 | 0xE401 | 0xD401 | 0xCE01 | 0xDA01 | 0xD001 | kernel), the order of checks is in the text above
  * 13 SECTION_UNMAP      n=2  0 | -(0xD401 not exactly a view | kernel)

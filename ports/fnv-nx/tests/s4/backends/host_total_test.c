@@ -54,6 +54,15 @@ static struct { int core3, boost_loading; } g_cfg = {1, 1};
 #include "../../../toolchain/host/host_section.inc"
 #include "../../../toolchain/host/host_ext.inc"
 #include "../../../toolchain/host/host_message.inc"
+/* host_fault.inc as the console build has it (the entry asm is assembled and never run here: host_fault_test.c runs it against the kernel double) */
+#include <stdalign.h>
+#define HOST_FAULT_EXIT(c) ((void)(c))
+#define HOST_FAULT_CRASH(d) ((void)(d))
+#define HOST_FAULT_TERMINATE() ((void)0)
+static u64 g_crash_guest_base, g_crash_guest_size;
+static const char *g_crash_note;
+alignas(16) u8 __nx_exception_stack[0x4000];
+#include "../../../toolchain/host/host_fault.inc"
 #include "../../../toolchain/host/host_platform.inc"
 #undef free
 #undef memalign
@@ -126,7 +135,7 @@ int main(int argc, char **argv)
         {FNVNX_PLAT_CPU_BOOST, 1}, {FNVNX_PLAT_THREAD_ACTIVITY, 2}, {FNVNX_PLAT_MESSAGE, 2}, {FNVNX_PLAT_VM_RESERVE, 2}, {FNVNX_PLAT_VM_COMMIT, 2},
         {FNVNX_PLAT_VM_DECOMMIT, 2}, {FNVNX_PLAT_VM_RELEASE, 1}, {FNVNX_PLAT_VM_PROTECT, 3}, {FNVNX_PLAT_DISPLAY_DOCKED, 0},
         {FNVNX_PLAT_SECTION_CREATE, 1}, {FNVNX_PLAT_SECTION_MAP, 4}, {FNVNX_PLAT_SECTION_UNMAP, 2}, {FNVNX_PLAT_SECTION_FREE, 1},
-        {FNVNX_PLAT_UNMAP_FIXED, 3}, {FNVNX_PLAT_TZ_AT, 2}, {FNVNX_PLAT_THREAD_SELF, 0},
+        {FNVNX_PLAT_UNMAP_FIXED, 3}, {FNVNX_PLAT_TZ_AT, 2}, {FNVNX_PLAT_THREAD_SELF, 0}, {FNVNX_PLAT_ACCESS_FAULT_HANDLER, 2},
     };
     int calls0 = s_act_calls + s_boost_calls + s_shown;
     for (size_t i = 0; i < sizeof need / sizeof need[0]; i++) {
@@ -238,6 +247,17 @@ int main(int argc, char **argv)
         T(call(2, 2, sid2, 1, 0, 0) == 0 && s_act_handle == OWN_THREAD && s_act_calls == cc + 1);
         T(host_id_del(HOST_ID_THREAD, sid2) == sh);
         free(sh);
+    }
+    /* ---- access_fault_handler (10): {handler, stack_top} -> 0 registers for the CALLING thread; a stack top that is not 16-aligned, below 816
+     * or at/above 4 GiB -> HE_ADDR with nothing registered; handler 0 unregisters (the stack is not looked at) */
+    {
+        T(call(10, 2, 0x1000, 0x2000, 0, 0) == 0 && fnvnx_hf_tls.handler == 0x1000 && fnvnx_hf_tls.stack_top == 0x2000);   /* test:fault_register */
+        T(call(10, 2, 0x1000, 0x2008, 0, 0) == FNVNX_HE_ADDR && fnvnx_hf_tls.handler == 0x1000 && fnvnx_hf_tls.stack_top == 0x2000);
+        T(call(10, 2, 0x1000, 815, 0, 0) == FNVNX_HE_ADDR && call(10, 2, 0x1000, 0, 0, 0) == FNVNX_HE_ADDR);
+        T(call(10, 2, 0x1000, 0x100000000ull, 0, 0) == FNVNX_HE_ADDR && call(10, 2, 0x1000, ~0ull & ~15ull, 0, 0) == FNVNX_HE_ADDR);
+        T(call(10, 2, 0x1000, 816, 0, 0) == 0 && fnvnx_hf_tls.stack_top == 816 && call(10, 2, 0x1000, 0xFFFFFFF0ull, 0, 0) == 0);
+        T(call(10, 2, 0, 7, 0, 0) == 0 && fnvnx_hf_tls.handler == 0);
+        T(call(10, 2, 0x1000, 0x100000000ull, 0, 0) == FNVNX_HE_ADDR && fnvnx_hf_tls.handler == 0);
     }
     /* ---- sockets 16..33 reach the real handler: a wrong count is -WE_INVAL (the handler's own rule), 35 and up are NO_SERVICE (36 and up) */
     for (u32 fn = FNVNX_PLAT_SOCK_FIRST; fn <= FNVNX_PLAT_SOCK_LAST; fn++) T(call(fn, 0, 0, 0, 0, 0) == (u64)-(s64)FNVNX_WE_INVAL);
