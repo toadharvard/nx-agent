@@ -156,3 +156,8 @@ Accepted assumptions that cannot be removed (MASTER_PLAN4 section 4):
 - The set of terminating routines for class 1 is derived from the toolchain's own headers (the `noreturn`
   attribute); a terminating routine without that attribute would be missed.
 - The verdict runs gates in a clean worktree of the commit, in the environment declared by `env.json`.
+
+## Compiler plugins (`build` gate)
+A product root with native or decomp C++ is compiled with `fnvnx_order` and `fnvnx_ftoi` (RECIPE.md, "Plugins"); a root whose C++ is all lifted
+(declared `cxx_origin` of its admit.json entry, consistency checked against the recipe) needs none. A missing plugin, a changed source or argument, or
+an undeclared origin makes the recipe invalid and the `build` gate red. Tests: `verify/tests/test_plugins.py`.
