@@ -30,6 +30,7 @@ typedef struct fnvnx_reflection {
     /* location rule result (fnvnx_dk_assign) indexed by FNVNX_DK_PAIR; -1 = not declared; copy: VS writes a varying copy of POSITION0/PSIZE0 */
     signed char attrib_loc[224], varying_loc[224];
     unsigned char copy[224];
+    int vs_complete;                      /* FNVNX_SHADER_VS_COMPLETE (vertex shaders) */
 } fnvnx_reflection;
 
 typedef struct fnvnx_glsl_backend {

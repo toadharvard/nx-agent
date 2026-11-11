@@ -1,5 +1,5 @@
 /* Part e: ids (reuse only after destroy), destroy of mem / shaders / images, the tables (version 3 while B2b is
- * pending), a malformed stream executes nothing. Part f: the v3 ops still work (draws, UBO, vertex / index buffers,
+ ), a malformed stream executes nothing. Part f: the v3 ops still work (draws, UBO, vertex / index buffers,
  * textures with mips, rect and sRGB clears, depth / stencil readback). */
 #include "t_common.h"
 
@@ -81,14 +81,14 @@ static void part_e(void) {
     CHECK(v1 && v2 && v1 != v2);
     CHECK(t_ext(NXGPU_FN_SHADER_DESTROY, 1, (uint64_t)v1) == 0 && t_ext(NXGPU_FN_SHADER_DESTROY, 1, (uint64_t)v1) == NXGPU_BAD_CALL);
     CHECK(shader(NxStage_Vertex, k_vs) == v1);
-    /* tables: B2b pending -> version 3, B2b slots empty, B2b functions are bad calls */
+    /* tables: version 4; v4 functions with arguments that name nothing are bad calls */
     NxGpuInfo info;
-    CHECK(t_ext(NXGPU_FN_INFO, 1, (uint64_t)(uintptr_t)&info) == 0 && info.magic == NXGPU_MAGIC && info.backend == 2 && info.version == NXGPU_VERSION);
+    CHECK(t_ext(NXGPU_FN_INFO, 1, (uint64_t)(uintptr_t)&info) == 0 && info.magic == NXGPU_MAGIC && info.backend == 2 && info.version == NXGPU_VERSION4);
     CHECK(t_ext(NXGPU_FN_SAMPLER_UPDATE, 2, (uint64_t)1, (uint64_t)0) == NXGPU_BAD_CALL);
     CHECK(t_ext(NXGPU_FN_QUERY_RESULT, 3, (uint64_t)1, (uint64_t)0, (uint64_t)0) == NXGPU_BAD_CALL);
     CHECK(t_ext(NXGPU_FN_PRESENT, 1, (uint64_t)0) == NXGPU_BAD_CALL);
     CHECK(t_ext(NXGPU_FN_COUNT4, 1, (uint64_t)0) == NXGPU_BAD_CALL);
-    /* a stream with a B2b opcode is malformed as a whole: nothing before it executes */
+    /* a stream with a malformed v4 op (BeginPass4 without its target words) is refused as a whole: nothing before it executes */
     t_op(s, NxOp_BeginPass, 8, b, 0, 1, 0xFFFF0000u, 0, 0, 8, 8);
     t_op(s, NxOp_BeginPass4, 1, 0);
     CHECK(t_submit(s) == NXGPU_BAD_CALL);

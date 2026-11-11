@@ -63,14 +63,14 @@ static void c_scale(void) {
     for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) memcpy(dp + ((4 + y) * 16 + 4 + x) * 4, sp + ((2 + y / 2) * 8 + 2 + x / 2) * 4, 4);
     got = t_read_all(d2, 0, 0, 16, 16, 1, f);
     CHECK(got && !memcmp(got, dp, sizeof dp)); free(got);
-    /* point downscale 16 -> 8: a texel of the 2x2 footprint (the centre lies on a texel boundary) */
+    /* point downscale 16 -> 8: the rule takes the texel 2d + 1 of each pair */
     uint32_t big = mk(NxFmt_RGBA8, 16, 16, 9, &sp), small = mk(NxFmt_RGBA8, 8, 8, 0, NULL);
     uint32_t bs[4] = {0, 0, 16, 16}, ss[4] = {0, 0, 8, 8};
     CHECK(blit(big, bs, small, ss, 0) == 0);
     uint8_t e8[8 * 8 * 4];
     got = t_read_all(small, 0, 0, 8, 8, 1, f);
-    (void)e8;
-    CHECK(got && point_ok(sp, 16, 16, 1, got, 8, 8, 1, 4)); free(got);
+    ref_point(sp, 16, 16, e8, 8, 8, 4);
+    CHECK(got && !memcmp(got, e8, sizeof e8)); free(got);
     /* linear: 2x up, 2:1 down (box), 3:2 up against the bilinear reference, <= 1 LSB */
     static const int sizes[3][2] = {{8, 16}, {16, 8}, {8, 12}};
     for (int k = 0; k < 3; k++) {
@@ -241,8 +241,12 @@ static void d_check(uint32_t img, uint32_t type, uint32_t w, uint32_t h, uint32_
                     ref_bilinear(src, sw, sh, ex, dw, dh, nch);
                 }
             }
-            if (filter == 0) {
-                if (!point_ok(src, sw, sh, sd, got, dw, dh, ddp, nch)) { bad++; printf("  %s level %u: point result is not a footprint texel\n", what, l); }
+            if (filter == 0) {   /* exactly the rule: texel floor((d + 0.5) * s / dsize) per axis (slice rule on z for 3D) */
+                for (uint32_t z = 0; z < ddp; z++) {
+                    uint32_t zs = type == NxImgType_3D ? (uint32_t)(((2ull * z + 1) * sd) / (2ull * ddp)) : 0;
+                    ref_point(src + (size_t)zs * sw * sh * nch, (int)sw, (int)sh, ex + (size_t)z * dw * dh * nch, (int)dw, (int)dh, nch);
+                }
+                if (memcmp(got, ex, (size_t)dw * dh * ddp * nch)) { bad++; printf("  %s level %u: point result differs from the rule\n", what, l); }
                 free(src); free(got); free(ex);
                 continue;
             }

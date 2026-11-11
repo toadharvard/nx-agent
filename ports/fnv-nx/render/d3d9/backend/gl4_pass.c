@@ -107,8 +107,8 @@ static void clear_depth_stencil(uint32_t flags, const Gl4Image* z, uint32_t zbit
 
 /* binds the targets and sets what a pass starts with: viewport (0.5, 0.5, w, h) = D3D9's full viewport, depth range
  * [0,1], scissor (0, 0, w, h), blend constant (1,1,1,1), depth bias 0, no state bound */
-static void begin(const Gl4Pass* p, uint32_t w, uint32_t h) {
-    g4.passN = p->nColor;
+static void begin(const Gl4Pass* p, uint32_t w, uint32_t h, uint32_t samples) {
+    g4.passN = p->nColor; g4.passSamples = samples;
     p_glBindFramebuffer(GL_FRAMEBUFFER, fbo_for(p));
     g4.passW = w; g4.passH = h;
     p_glDisable(GL_SCISSOR_TEST);   /* clears: full target, all channels, no sRGB encoding of the clear colour */
@@ -133,7 +133,7 @@ void gl4_op_begin_pass(const uint32_t* a, uint32_t argc) {
     memset(&p, 0, sizeof p);
     p.nColor = 1; p.c[0].image = a[0] ? a[0] : g4.swapImage; p.d.image = a[1];
     if (gl4_pass_check(&p, &w, &h, &ns)) return;
-    begin(&p, a[6], a[7]);
+    begin(&p, a[6], a[7], ns);
     if (a[2] & NxClear_Color) clear_color(a[3]);
     if ((a[2] & 6) && p.d.image) clear_depth_stencil(a[2], gl4_img(p.d.image), a[4], a[5]);
     begin_end();
@@ -144,7 +144,7 @@ void gl4_op_begin_pass4(const uint32_t* a, uint32_t argc) {
     Gl4Pass p;
     uint32_t w, h, ns;
     if (gl4_pass_parse4(a, argc, &p) || gl4_pass_check(&p, &w, &h, &ns)) return;
-    begin(&p, w, h);
+    begin(&p, w, h, ns);
     begin_end();
 }
 

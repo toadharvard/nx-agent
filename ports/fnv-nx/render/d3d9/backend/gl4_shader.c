@@ -154,3 +154,27 @@ uint16_t gl4_program_for(uint16_t vs, uint16_t ps) {
     g4.prog[freeSlot].vs = vs; g4.prog[freeSlot].ps = ps; g4.prog[freeSlot].prog = p; g4.prog[freeSlot].used = 1;
     return (uint16_t)freeSlot;
 }
+
+/* Internal programs (scaling, present): GLSL 4.50 core, compiled as given. 0 and a recorded error on failure. */
+GLuint gl4_compile_program(const char* vs, const char* fs) {
+    GLuint sh[2] = {p_glCreateShader(GL_VERTEX_SHADER), p_glCreateShader(GL_FRAGMENT_SHADER)}, p = p_glCreateProgram();
+    const char* src[2] = {vs, fs};
+    GLint ok = 1;
+    char log[1500];
+    for (int i = 0; i < 2; i++) {
+        GLint c = 0;
+        p_glShaderSource(sh[i], 1, &src[i], NULL);
+        p_glCompileShader(sh[i]);
+        p_glGetShaderiv(sh[i], GL_COMPILE_STATUS, &c);
+        if (!c) { p_glGetShaderInfoLog(sh[i], sizeof log, NULL, log); gl4_err("internal shader %d: %s", i, log); ok = 0; }
+        p_glAttachShader(p, sh[i]);
+    }
+    if (ok) {
+        p_glLinkProgram(p);
+        p_glGetProgramiv(p, GL_LINK_STATUS, &ok);
+        if (!ok) { p_glGetProgramInfoLog(p, sizeof log, NULL, log); gl4_err("internal program: %s", log); }
+    }
+    p_glDeleteShader(sh[0]); p_glDeleteShader(sh[1]);
+    if (!ok) { p_glDeleteProgram(p); return 0; }
+    return p;
+}

@@ -7,18 +7,21 @@
  * conversion, no view swizzle: the source is read through a view with identity swizzle).
  *   colour        one fragment per destination texel writes the fetched vec4 (the destination format converts);
  *   depth         gl_FragDepth = the fetched depth (depth test ALWAYS, writes on);
- *   stencil       GL 4.5 has no stencil export: the destination stencil of the rect is cleared to 0 and bit b
+ *   stencil       (every format whose GL storage has stencil bits, so the x byte of Z24X8 is copied too) GL 4.5 has no stencil export: the destination stencil of the rect is cleared to 0 and bit b
  *                 (b = 0..7) is written by a pass that discards fragments whose source stencil bit b is 0 and
  *                 REPLACEs with ref 0xFF under write mask 1 << b.
  * The optional ramp (3 x 256 u16: red, green, blue) is the present gamma: out = ramp[c][round(clamp(c, 0, 1) * 255)]
- * >> 8, / 255 (the destination must be an 8-bit unorm colour image). */
+ * >> 8, / 255 (the destination must be an 8-bit unorm colour image). The backend's own draws are not counted by
+ * occlusion queries (the slice is paused). */
 #include "gl4.h"
+#include <stdio.h>
 #include <string.h>
 
 #ifndef GL_DEPTH_STENCIL_TEXTURE_MODE
 #define GL_DEPTH_STENCIL_TEXTURE_MODE 0x90EA
 #endif
 
+#define SCALE_UNIT 62   /* texture units 62 / 63: above every unit a guest stage * 16 + slot can name */
 enum { P_C2D, P_CARR, P_C3D, P_DEPTH, P_STENCIL };
 
 static const char k_vs[] = "#version 450 core\nvoid main() { vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); "
@@ -26,7 +29,7 @@ static const char k_vs[] = "#version 450 core\nvoid main() { vec2 p = vec2((gl_V
 static const char k_head[] =
     "#version 450 core\nlayout(location = 0) uniform ivec4 src;\nlayout(location = 1) uniform ivec4 dst;\n"
     "layout(location = 2) uniform ivec2 lz;\nlayout(location = 3) uniform int mode;\n"
-    "layout(binding = 1) uniform usampler2D ramp;\n";
+    "layout(binding = 63) uniform usampler2D ramp;\n";
 static const char k_tex[] = "ivec2 t = src.xy + ((2 * (ivec2(gl_FragCoord.xy) - dst.xy) + 1) * src.zw) / (2 * dst.zw);\n";
 static const char k_gamma[] =
     "if (mode == 1) { ivec3 i = ivec3(round(clamp(c.rgb, 0.0, 1.0) * 255.0));\n"
@@ -38,7 +41,7 @@ static GLuint program(int kind) {
     static const char* const fetch[] = {"texelFetch(s, t, 0)", "texelFetch(s, ivec3(t, lz.y), 0)", "texelFetch(s, ivec3(t, lz.y), 0)"};
     if (g4.scaleProg[kind]) return g4.scaleProg[kind];
     char fs[1800];
-    int n = snprintf(fs, sizeof fs, "%slayout(binding = 0) uniform %s s;\n", k_head, smp[kind]);
+    int n = snprintf(fs, sizeof fs, "%slayout(binding = 62) uniform %s s;\n", k_head, smp[kind]);
     if (kind <= P_C3D)
         snprintf(fs + n, sizeof fs - (size_t)n, "layout(location = 0) out vec4 o;\nvoid main() {\n%s vec4 c = %s;\n%s o = c; }\n", k_tex, fetch[kind], k_gamma);
     else if (kind == P_DEPTH)
@@ -80,8 +83,8 @@ static GLuint source_view(const Gl4Sub* s, int stencil) {
 
 static void draw(GLuint prog, GLuint view, const Gl4Sub* s, const Gl4Sub* d, uint32_t zlayer, int mode) {
     p_glUseProgram(prog);
-    p_glBindTextureUnit(0, view); p_glBindSampler(0, g4.nearestSmp);
-    p_glBindTextureUnit(1, g4.rampTex); p_glBindSampler(1, g4.nearestSmp);
+    p_glBindTextureUnit(SCALE_UNIT, view); p_glBindSampler(SCALE_UNIT, g4.nearestSmp);
+    p_glBindTextureUnit(SCALE_UNIT + 1, g4.rampTex); p_glBindSampler(SCALE_UNIT + 1, g4.nearestSmp);
     p_glProgramUniform4i(prog, 0, (GLint)s->x, (GLint)s->y, (GLint)s->w, (GLint)s->h);
     p_glProgramUniform4i(prog, 1, (GLint)d->x, (GLint)d->y, (GLint)d->w, (GLint)d->h);
     p_glProgramUniform2i(prog, 2, 0, (GLint)zlayer);
@@ -114,7 +117,7 @@ void gl4_scale_point(const Gl4Sub* s, const Gl4Sub* d, const uint16_t* ramp) {
         p_glEnable(GL_DEPTH_TEST); p_glDepthFunc(GL_ALWAYS); p_glDepthMask(GL_TRUE);
         draw(prog, view, s, d, 0, 0);
         p_glDisable(GL_DEPTH_TEST);
-        if (f.stencil) {
+        if (f.glds) {
             GLuint sview = source_view(s, 1);
             const GLint zero = 0;
             p_glStencilMaskSeparate(GL_FRONT_AND_BACK, 0xFF);

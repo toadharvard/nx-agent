@@ -1,7 +1,7 @@
 /*
  * sdp2dksh - thin CLI over libfnvnx_shaders.
  *
- *   sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] [--variants] PACKAGE.sdp...   translate every entry
+ *   sdp2dksh [-o DIR] [--glsl] [--no-dksh] [--strict] [--variants] [--vs-complete] [--link U:I,...] PACKAGE.sdp...   translate every entry
  *   sdp2dksh [-o DIR] [--glsl] --blob FILE...                         translate raw bytecode files
  *   sdp2dksh --list PACKAGE.sdp                                       list entries
  *   sdp2dksh --ctab [--blob] FILE...                                  dump constant tables (TSV)
@@ -155,6 +155,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--glsl")) c.flags |= FNVNX_SHADER_KEEP_GLSL;
         else if (!strcmp(argv[i], "--no-dksh")) c.flags |= FNVNX_SHADER_NO_DKSH;
         else if (!strcmp(argv[i], "--strict")) c.strict = 1;
+        else if (!strcmp(argv[i], "--vs-complete")) c.flags |= FNVNX_SHADER_VS_COMPLETE;   /* vertex shaders: the complete variant (fnvnx_dk_layout.h) */
         else if (!strcmp(argv[i], "--variants")) vars = 1;
         else if (!strcmp(argv[i], "--blob")) blob = 1;
         else if (!strcmp(argv[i], "--list")) list = 1;

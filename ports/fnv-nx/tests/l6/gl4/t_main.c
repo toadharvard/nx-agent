@@ -8,6 +8,8 @@ uint8_t* g_scratch;
 static uint32_t g_frame;
 NxFrameStats g_stats;
 
+uint32_t g_present_count, g_present_last = 0xFFFFFFFFu;
+void nxgl4_on_present(uint32_t frame) { g_present_count++; g_present_last = frame; }   /* the embedder's hook */
 void* nxgl4_guest_ptr(uint64_t addr, uint64_t size) { (void)size; return (void*)(uintptr_t)addr; }   /* identity embedder */
 
 #define F(f, n, b, c, d, k, s) {f, n, b, c, d, k, s}
@@ -146,15 +148,65 @@ uint16_t t_tohalf(float f) {   /* nearest, for values in the normal range */
     return (uint16_t)(best | (f < 0 ? 0x8000 : 0));
 }
 
+const char T_VS_FULL[] = "#version 460\nvoid main() { vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position = vec4(p * 4.0 - 2.0, 0.5, 1.0); }\n";
+const char T_FS_WHITE[] = "#version 460\nlayout (location = 0) out vec4 o;\nvoid main() { o = vec4(1.0); }\n";
+
+void t_viewport(Stream* s, float x, float y, float w, float h) {
+    uint32_t b[6], one = 0x3F800000u;
+    memcpy(&b[0], &x, 4); memcpy(&b[1], &y, 4); memcpy(&b[2], &w, 4); memcpy(&b[3], &h, 4); b[4] = 0; b[5] = one;
+    t_op(s, NxOp_Viewport, 6, b[0], b[1], b[2], b[3], b[4], b[5]);
+}
+const TFmt* t_fmt(uint32_t nxfmt) { for (int i = 0; i < g_nfmts; i++) if (g_fmts[i].fmt == nxfmt) return &g_fmts[i]; return NULL; }
+
+uint32_t t_shader(uint32_t stage, const char* src) {
+    NxShaderDesc d = {stage, 0, 0, (uint64_t)(uintptr_t)src, (uint32_t)strlen(src), 0};
+    return (uint32_t)t_ext(NXGPU_FN_SHADER_CREATE, 1, (uint64_t)(uintptr_t)&d);
+}
+void t_state(Stream* s, uint32_t id, uint32_t vs, uint32_t ps, uint32_t layout, uint64_t w0, uint64_t w1, uint64_t w2, uint64_t w3) {
+    t_op(s, NxOp_DefineState, 12, id, vs, ps, layout, (uint32_t)w0, (uint32_t)(w0 >> 32), (uint32_t)w1, (uint32_t)(w1 >> 32),
+         (uint32_t)w2, (uint32_t)(w2 >> 32), (uint32_t)w3, (uint32_t)(w3 >> 32));
+}
+int t_readback(uint32_t img, uint32_t fmt, uint32_t w, uint32_t h, void* dst, size_t size) {
+    NxReadback rd = {img, 0, 0, w, h, fmt, (uint64_t)(uintptr_t)dst, (uint32_t)size, 0};
+    return t_ext(NXGPU_FN_READBACK, 1, (uint64_t)(uintptr_t)&rd) == 0;
+}
+void t_zero(uint32_t img, uint32_t type, uint32_t fmt, uint32_t w, uint32_t h, uint32_t d, uint32_t mips) {
+    const TFmt* f = t_fmt(fmt);
+    uint32_t layers = type == NxImgType_Cube ? 6 : 1;
+    for (uint32_t l = 0; l < mips; l++)
+        for (uint32_t ly = 0; ly < layers; ly++) {
+            uint32_t lw = lvl(w, l), lh = lvl(h, l), ld = type == NxImgType_3D ? lvl(d, l) : 1, box[6] = {0, 0, 0, lw, lh, ld};
+            size_t rb = t_rowbytes(f, lw), n = rb * t_rows(f, lh) * ld;
+            uint8_t* z = (uint8_t*)calloc(1, n);
+            t_update(img, l, ly, box, z, n, rb, 0);
+            free(z);
+        }
+}
+uint32_t t_sampler(const NxSamplerState* s) { return (uint32_t)t_ext(NXGPU_FN_SAMPLER_CREATE, 1, (uint64_t)(uintptr_t)s); }
+void t_layout4(Stream* s, uint32_t id, const NxVtxLayout4* l) {
+    uint32_t w[1 + sizeof *l / 4];
+    w[0] = id;
+    memcpy(w + 1, l, sizeof *l);
+    s->w[s->n++] = NxOp_DefineLayout4 | (uint32_t)(1 + sizeof *l / 4) << 16;
+    memcpy(s->w + s->n, w, sizeof w);
+    s->n += (uint32_t)(sizeof w / 4);
+}
+
 int main(int argc, char** argv) {
-    const char* which = argc > 1 ? argv[1] : "abcdef";
+    const char* which = argc > 1 ? argv[1] : "abcdefijklmn";
     int bad = 0;
     for (const char* c = which; *c; c++) {
         g_checks = g_fail = 0;
         if (t_setup(16, 16)) { printf("PART %c: setup failed\n", *c); bad = 1; continue; }
         if (*c == 'a' || *c == 'b') part_ab(*c);
         else if (*c == 'c' || *c == 'd') part_cd(*c);
-        else part_ef(*c);
+        else if (*c == 'e' || *c == 'f') part_ef(*c);
+        else if (*c == 'i') part_i();
+        else if (*c == 'j') part_j();
+        else if (*c == 'k') part_k();
+        else if (*c == 'l') part_l();
+        else if (*c == 'm') part_m();
+        else part_n();
         t_teardown();
         printf("PART %c: %d checks, %d failed\n", *c, g_checks, g_fail);
         if (g_fail) bad = 1;

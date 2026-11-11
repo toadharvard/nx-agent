@@ -3,15 +3,19 @@
  * Blit (outside any pass) is, by rule:
  *   1. identical format, identical rect size, equal sample counts -> glCopyImageSubData: an exact copy of any
  *      format (BCn, depth-stencil, multisampled included);
- *   2. otherwise a framebuffer blit between the base textures (no sRGB conversion, raw values: D3D9 StretchRect):
- *      colour with point (0) or linear (1) filter and conversion to the destination format; depth-stencil only
- *      with the same format and always point sampled (GL requires it); a multisampled source is first resolved
- *      (whole image) into a single-sample texture, then blitted. A multisampled destination is not a blit target.
+ *   2. POINT filter (0) with different rect sizes -> gl4_scale_point (gl4_scale.c): destination texel d takes the
+ *      source texel floor((d + 0.5) * sw / dw), same in y, any colour or depth-stencil format (identical formats
+ *      for depth-stencil); a multisampled source is first resolved;
+ *   3. otherwise (linear filter, or equal sizes with a format conversion) a framebuffer blit between the base
+ *      textures (no sRGB conversion, raw values: D3D9 StretchRect): colour with the linear filter (GL's bilinear
+ *      at the destination centre) and conversion to the destination format; depth-stencil only with the same
+ *      format; a multisampled source is first resolved (whole image) into a single-sample texture. A
+ *      multisampled destination is not a blit target.
  * Rects use the texel space of the subresource (row 0 = top) on both sides; dst image 0 = the swapchain image.
- * GenMips(image, filter) = for every level l >= 1 and layer: Blit(level l - 1 whole -> level l whole, filter);
- * point picks a texel of the destination texel's source footprint (for an exact 2:1 the centre lies on a texel
- * boundary and GL leaves the choice open: report, open point), linear is the 2x2 box for halving. A 3D image with the linear filter uses glGenerateTextureMipmap (GL leaves its filter implementation
- * defined: see the report); point on 3D picks the slice floor((2z + 1) * srcDepth / (2 * dstDepth)). */
+ * GenMips(image, filter) = for every level l >= 1 and layer: Blit(level l - 1 whole -> level l whole, filter): point
+ * is the rule above (an exact 2:1 takes the texel 2d + 1), linear is the 2x2 box for halving. A 3D image takes the
+ * slice floor((2z + 1) * srcDepth / (2 * dstDepth)) of level l - 1 for slice z of level l (point rule on z) and, with
+ * the linear filter, uses glGenerateTextureMipmap (GL leaves its filter implementation defined: open point). */
 #include "gl4.h"
 #include <string.h>
 
@@ -24,23 +28,13 @@ void gl4_attach(GLuint fbo, GLenum att, const Gl4Image* im, uint32_t level, uint
         p_glNamedFramebufferTexture(fbo, att, im->tex, (GLint)level);
 }
 
-static void detach_all(GLuint fbo) {
+void gl4_detach_all(GLuint fbo) {
     p_glNamedFramebufferTexture(fbo, GL_COLOR_ATTACHMENT0, 0, 0);
     p_glNamedFramebufferTexture(fbo, GL_DEPTH_ATTACHMENT, 0, 0);
     p_glNamedFramebufferTexture(fbo, GL_DEPTH_STENCIL_ATTACHMENT, 0, 0);
 }
 
-/* blit state the GL blit would otherwise inherit from the draw state; the next BindState re-applies everything */
-static void neutral_state(void) {
-    p_glDisable(GL_SCISSOR_TEST);
-    p_glDisable(GL_FRAMEBUFFER_SRGB);
-    p_glColorMaski(0, 1, 1, 1, 1);
-    p_glDepthMask(GL_TRUE);
-    p_glStencilMaskSeparate(GL_FRONT_AND_BACK, 0xFF);
-    g4.haveApplied = 0;
-}
-
-typedef struct { const Gl4Image* im; uint32_t level, layer, x, y, w, h; } Sub;
+typedef Gl4Sub Sub;
 
 /* the framebuffer blit of rule 2 (src already single-sample) */
 static void fbo_blit(const Sub* s, const Sub* d, uint32_t filter) {
@@ -48,16 +42,16 @@ static void fbo_blit(const Sub* s, const Sub* d, uint32_t filter) {
     const Gl4Fmt f = gl4_fmt(s->im->fmt);
     GLenum att = f.depth ? (f.glds ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT) : GL_COLOR_ATTACHMENT0;
     GLbitfield mask = f.depth ? GL_DEPTH_BUFFER_BIT | (f.stencil ? GL_STENCIL_BUFFER_BIT : 0) : GL_COLOR_BUFFER_BIT;
-    detach_all(g4.blitFbo[0]); detach_all(g4.blitFbo[1]);
+    gl4_detach_all(g4.blitFbo[0]); gl4_detach_all(g4.blitFbo[1]);
     gl4_attach(g4.blitFbo[0], att, s->im, s->level, s->layer);
     gl4_attach(g4.blitFbo[1], att, d->im, d->level, d->layer);
     p_glNamedFramebufferReadBuffer(g4.blitFbo[0], f.depth ? GL_NONE : GL_COLOR_ATTACHMENT0);
     p_glNamedFramebufferDrawBuffer(g4.blitFbo[1], f.depth ? GL_NONE : GL_COLOR_ATTACHMENT0);
-    neutral_state();
+    gl4_neutral_state();
     p_glBlitNamedFramebuffer(g4.blitFbo[0], g4.blitFbo[1], (GLint)s->x, (GLint)s->y, (GLint)(s->x + s->w), (GLint)(s->y + s->h),
                              (GLint)d->x, (GLint)d->y, (GLint)(d->x + d->w), (GLint)(d->y + d->h), mask,
                              !f.depth && filter ? GL_LINEAR : GL_NEAREST);
-    detach_all(g4.blitFbo[0]); detach_all(g4.blitFbo[1]);
+    gl4_detach_all(g4.blitFbo[0]); gl4_detach_all(g4.blitFbo[1]);
 }
 
 GLuint gl4_resolve_tex(const Gl4Image* im) {
@@ -95,10 +89,11 @@ static void blit_sub(const Sub* s, const Sub* d, uint32_t filter) {
         t.tex = tmp; t.target = GL_TEXTURE_2D; t.samples = 1;
         Sub rs = *s;
         rs.im = &t;
-        fbo_blit(&rs, d, filter);
+        if (filter == 0 && (s->w != d->w || s->h != d->h)) gl4_scale_point(&rs, d, NULL); else fbo_blit(&rs, d, filter);
         p_glDeleteTextures(1, &tmp);
         return;
     }
+    if (filter == 0 && (s->w != d->w || s->h != d->h)) { gl4_scale_point(s, d, NULL); return; }
     fbo_blit(s, d, filter);
 }
 

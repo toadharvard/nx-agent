@@ -11,6 +11,10 @@
  * VS driver UBO: vec4 posfix  (xy = half-pixel offset in NDC (-1/w, +1/h), applied * gl_Position.w;
  *                              z  = y scale, -1 for DkDeviceFlags_OriginUpperLeft;
  *                              w  = 0: the opaque zero, below)
+ *               vec4 pad     (byte offset FNVNX_DK_VS_PAD_OFFSET = 16; x = the default of the diffuse (COLOR0) components a VS does not write:
+ *                              1.0 when the pair's pixel stage is not ps_3_0 (ps_1_x, ps_2_x, fixed function), 0.0 for ps_3_0;
+ *                              yzw reserved, write 0)
+ *               vec4 reserved[2]  (bytes 32..63; block size 64, nothing before them moved)
  * PS driver UBO: vec4 fogcolor; vec4 fog (x mode 0 off/1 vertex/2 exp/3 exp2/4 linear, y start, z end,
  *                w density); ivec4 alpha (x = D3DCMPFUNC, 0 = alpha test off); vec4 alpharef (x, 0..1);
  *                vec4 texbem[16] (2 per stage: bump matrix 00,01,10,11; then lscale, loffset);
@@ -44,6 +48,8 @@
 #define FNVNX_DK_NUM_BOOL    16
 #define FNVNX_DK_BOOL_OFFSET 256  /* bytes, inside UBO 1 */
 #define FNVNX_DK_FOG_VARYING 18
+#define FNVNX_DK_VS_PAD_OFFSET     16   /* bytes, inside the VS driver block: vec4 pad, x = the COLOR0 default (1.0 unless the pixel stage is ps_3_0) */
+#define FNVNX_DK_VS_DRIVER_SIZE    64
 #define FNVNX_DK_PS_STYPE_OFFSET   320  /* bytes, inside the PS driver block: uvec4 stype[2], stage n at word n */
 #define FNVNX_DK_STYPE_2D          0
 #define FNVNX_DK_STYPE_CUBE        1
@@ -141,6 +147,31 @@ static inline int fnvnx_dk_assign(int kind, const unsigned char *pairs, int n, s
                 if (slot >= slots) return -1;                         /* unreachable: see the proof */
                 loc[i] = (signed char)slot++;
             }
+    return 0;
+}
+
+/* ---- Varying completion (the "unwritten pixel input" rule) -----------------------------------------------------------------
+ * D3D9 leaves a pixel shader input the vertex shader does not write undefined (MS register pages: "Defaults: None"); GL cannot link it. The
+ * project's reference profile, WineD3D 9.0, defines it per component: diffuse (COLOR0) 1.0 for a pixel stage below ps_3_0 / fixed function, 0.0
+ * for ps_3_0; every other pair 0.0 (an unwritten oFog is 0.0). Every translated VS therefore writes, with no run-time decision:
+ *   base     : the components of each declared output it leaves out, the pairs of the link set L it does not declare, and FOG0
+ *              (a VS that does not write oFog / a FOG output writes 0.0: ps < 3.0 reads the fog factor at FNVNX_DK_FOG_VARYING);
+ *   complete : (FNVNX_SHADER_VS_COMPLETE) additionally every slot 0..30 still unwritten, with its canonical pair's default.
+ * COLOR0's default is the VS driver word pad.x (data). The variant of the VS is a pure function of the two stages' reflection
+ * ("varyings_written" of the VS, "varyings_read" of the PS, FNVNX_DK_PAIR codes): complete iff the PS reads a canonical pair the VS does not
+ * write (FOG0 is always written). A non-canonical pair the PS reads is in L (the location rule above), which the VS writes. Proof: a pair q the PS
+ * reads is (a) written by the VS (declared: its missing components are base-completed), or (b) in L (written by base), or (c) canonical and
+ * not written: then the complete variant writes its slot, and the slots 0..30 are exactly the canonical slots (the table above is a bijection onto them),
+ * so no slot a pixel stage can read is ever left unwritten. */
+static inline int fnvnx_dk_vs_needs_complete(const unsigned char *vs_written, int nvs, const unsigned char *ps_read, int nps)
+{
+    int i, j;
+    for (i = 0; i < nps; i++) {
+        int found = 0;
+        if (ps_read[i] / 16 > 13 || fnvnx_dk_varying_location(ps_read[i] / 16, ps_read[i] % 16) < 0) continue;   /* non-canonical: in L */
+        for (j = 0; j < nvs; j++) if (vs_written[j] == ps_read[i]) { found = 1; break; }
+        if (!found) return 1;
+    }
     return 0;
 }
 

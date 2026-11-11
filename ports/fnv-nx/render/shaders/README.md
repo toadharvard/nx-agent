@@ -44,7 +44,7 @@ bytecode --> front end (frontend.c) --> reflection JSON / CTAB    <- stable
   D3D9 code and the DKSH stage stay untouched. Not built (and, after J-0015, not planned).
 * **Layout contract** (`fnvnx_dk_layout.h`, mirrored in the patch):
   UBO 0 = float constants `vec4 c[256]` by register; UBO 1 = `ivec4 i[16]` + `bool b[16]` (std140,
-  bools at byte 256 + 16n); UBO 2 = driver constants (the PS block is 352 bytes: `uvec4 stype[2]` appended at byte 320,
+  bools at byte 256 + 16n); UBO 2 = driver constants (the VS block is 64 bytes: `posfix` at 0, `pad` at 16, below; the PS block is 352 bytes: `uvec4 stype[2]` appended at byte 320,
   the ps_1_x sampler type words, below); sampler binding = sampler register (ps_1_x: 2D n, CUBE 8 + n, VOLUME 16 + n, below); vertex
   attribute location and VS->PS varying location by the total declaration-set rule below (fog at 18).
 * **D3D9 conventions** in the `glsldk` profile: VS epilogue `gl_Position.xy += posfix.xy * w` (half-pixel,
@@ -79,6 +79,48 @@ Consequences for consumers: pairs that had a location keep it, so `d3d9_exec.cpp
 (COLOR0=0, COLOR1=1, TEXCOORDn=2+n, fog=18) are unchanged and correct for canonical shaders. A full redesign would make `AttribLocation()` read the
 reflection JSON `inputs[].location` (needed for TEXCOORD8..15, POSITION1.., PSIZE, FOG, DEPTH, SAMPLE, TESSFACTOR, POSITIONT inputs) and make the
 device compute L per VS/PS pair when either stage has a non-canonical varying.
+
+## Varying completion: the unwritten pixel input rule (vertex shader epilogue; `tests/l6/sm_link/test_sm_link.py`)
+
+A pixel input (usage, index) that the paired vertex shader does not write is undefined in D3D9 (the MS register pages for oD#/oT#/oFog and
+ps_3_0 v# list "Defaults: None") and **unlinked in GL** (`dk_fog_in` at location 18 made all 33 recorded pairs fail to link on llvmpipe; deko3d
+links it and reads garbage). The project's reference profile, WineD3D 9.0, defines every case, so the rule is Wine's, per component:
+
+| input | value when the VS does not write it | WineD3D 9.0 `glsl_shader.c` |
+|---|---|---|
+| fog factor, VS writes oFog / FOG0 | the value, saturated (vs < 3.0 oFog is saturated in the epilogue; ps < 3.0 clamps again) | `shader_glsl_generate_vs3_rasterizer_input_setup` (`ffp_varying_fogcoord = clamp(outputs[].x, 0, 1)`) |
+| fog factor, VS does not write it | **0.0** ("fully fogged: start = 1.0, end = 0.0") | `shader_glsl_generate_vs_epilogue` (`else if (!reg_maps->fog) ffp_varying_fogcoord = 0.0`) |
+| diffuse (COLOR0) components not written | **1.0** below ps_3_0 and for fixed function, **0.0** for ps_3_0 | `..._rasterizer_input_setup` (ps_major < 3: `ffp_varying_diffuse = vec4(1.0)`), `shader_glsl_setup_vs3_output` (unwritten comps = 0.0) |
+| specular, texcoord, every other pair, components not written | **0.0** | same two functions |
+| PS-read PSIZE0, VS has no oPts | **0.0** (not the undefined `gl_PointSize`) | `shader_glsl_setup_vs3_output` |
+
+Fog source and table fog: with a vertex shader the factor is the oFog value (MS "Vertex Fog": "When using a vertex shader, you must use vertex fog ... write
+the per-vertex fog intensity to oFog"; Wine `state_fog_fragpart`: FOGTABLEMODE NONE with a VS = linear fog with start 1, end 0, which is the factor
+itself). FOGTABLEMODE != NONE is pixel fog: MS "Pixel Fog" / "Fog Parameters" define it on the device-space depth in [0, 1], which is exactly what the
+ps < 3.0 epilogue reads (`gl_FragCoord.z`, mode 2..4 of `ps_drv_fog.x`); the varying is read only in mode 1. (Wine routes `gl_Position.z` through
+the same varying, `VS_FOG_Z` in `find_vs_compile_args`, an approximation of the depth GL cannot give a VS; here the depth is exact, so the VS needs
+no render state: the fog rule has **no driver field other than the existing `ps_drv_fog.x`**, mode 1 iff FOGENABLE && FOGTABLEMODE == NONE.)
+
+What a VS writes, with no run-time decision (`dk_pad_varyings` in the patch, `fnvnx_dk_layout.h` "Varying completion"):
+
+* **base** (every vertex shader): the components a declared output leaves out (union of the instruction write masks, per component), the pairs of
+  the link set L it does not declare, and **FOG0 whenever it does not declare it** (so ps < 3.0's location 18 is always written).
+* **complete** (`FNVNX_SHADER_VS_COMPLETE`, `sdp2dksh --vs-complete`, a Create-time variant like the epilogue variants): additionally every slot 0..30
+  still unwritten, with the default of the pair whose canonical slot it is. The canonical map is a bijection onto 0..30 (checked in the test), so no slot
+  a pixel stage with canonical inputs can read is left unwritten. Cost: about 5 Maxwell instructions per extra vec4 slot (19 -> 164 for a vs_1_1 that
+  writes oPos only), which is why it is a variant and not the base.
+* The device picks the variant by `fnvnx_dk_vs_needs_complete(vs_written, ps_read)`: complete iff the PS reads a canonical pair the VS does not
+  write. The reflection JSON carries the two arrays (`varyings_written` of a VS: its outputs without POSITION0/PSIZE0, plus FOG0 always;
+  `varyings_read` of a PS: its inputs, plus FOG0 for ps < 3.0, ps_1_x `t#` included). Non-canonical pairs the PS reads are in L (location rule above).
+  Proof: a PS-read pair is declared by the VS (missing components base-completed), or in L (base writes it), or canonical and unwritten (complete writes its slot).
+* **Driver data**: COLOR0's default depends on the pair's pixel model, which a stage translated alone does not know: VS driver block word
+  `vs_drv_pad.x` (byte `FNVNX_DK_VS_PAD_OFFSET` = 16 of the 64-byte block; `posfix` at 0 unchanged) = **1.0 unless the pixel stage is ps_3_0, then 0.0**.
+  A zeroed block means the ps_3_0 rule. Everything else is bytecode.
+* **No rule**: none left. The MS pages say "None" where Wine defines a value, and the only per-pair datum (COLOR0's) is data. Not covered by
+  either source: a *partial* PS read mask on a scalar register (FOG, PSIZE) is completed like any component (Wine does the same through the output mask).
+
+Also here: the front end reports vs < 3.0 oFog / oPts as FOG0 / PSIZE0 (the bytecode profile said index 1 / 2, which made the location table give oFog slot 1,
+the slot of COLOR1) and lists ps_1_x `t#` among the PS inputs.
 
 ## API (`include/fnvnx_shaders.h`)
 

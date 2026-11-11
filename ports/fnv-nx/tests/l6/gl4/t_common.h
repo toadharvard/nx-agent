@@ -11,6 +11,7 @@
 #include "gl4.h"
 
 extern int g_checks, g_fail;
+extern uint32_t g_present_count, g_present_last;   /* nxgl4_on_present calls and the last frame it got */
 #define CHECK(c) do { g_checks++; if (!(c)) { g_fail++; if (g_fail < 25) printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
 #define CHECKM(c, ...) do { g_checks++; if (!(c)) { g_fail++; if (g_fail < 25) { printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } } while (0)
 
@@ -51,8 +52,29 @@ uint8_t* t_read_all(uint32_t img, uint32_t level, uint32_t layer, uint32_t w, ui
 float t_half(uint16_t h);
 uint16_t t_tohalf(float f);
 
+/* ---- helpers of the v4 parts (t_main.c) ---- */
+#define T_W0_ALL (0xFFFFull << 32)                 /* w[0]: no blend, all four write masks of all four targets */
+#define T_W3_ALL (0xFFFFFFFFull << 32)             /* w[3]: sample mask = all samples (0 would mask every sample) */
+#define T_W1_DEPTH_ALWAYS 31ull                    /* w[1]: depth test on, write on, func Always */
+extern const char T_VS_FULL[];                      /* triangle covering the whole viewport, with D3D9's half-pixel offset, at depth 0.5 (gl_VertexID) */
+extern const char T_FS_WHITE[];
+uint32_t t_shader(uint32_t stage, const char* src);
+void t_state(Stream* s, uint32_t id, uint32_t vs, uint32_t ps, uint32_t layout, uint64_t w0, uint64_t w1, uint64_t w2, uint64_t w3);
+int t_readback(uint32_t img, uint32_t fmt, uint32_t w, uint32_t h, void* dst, size_t size);   /* v3 NxReadback; 1 = ok */
+void t_zero(uint32_t img, uint32_t type, uint32_t fmt, uint32_t w, uint32_t h, uint32_t d, uint32_t mips);   /* zero-fill every subresource */
+uint32_t t_sampler(const NxSamplerState* s);
+void t_layout4(Stream* s, uint32_t id, const NxVtxLayout4* l);
+const TFmt* t_fmt(uint32_t nxfmt);
+void t_viewport(Stream* s, float x, float y, float w, float h);   /* NxOp_Viewport, depth range 0..1 */
+
 /* parts */
 void part_ab(char which);
 void part_cd(char which);
 void part_ef(char which);
+void part_i(void);   /* BeginPass4 */
+void part_j(void);   /* layouts, vertex types, instancing, streams */
+void part_k(void);   /* queries, sampler_update */
+void part_l(void);   /* present */
+void part_m(void);   /* w[3] bits */
+void part_n(void);   /* the point rule */
 #endif

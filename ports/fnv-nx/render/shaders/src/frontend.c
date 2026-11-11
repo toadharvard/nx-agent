@@ -65,18 +65,54 @@ static const char *symtype(int t)
     return (t >= 0 && t < (int)(sizeof n / sizeof n[0])) ? n[t] : "?";
 }
 
-static void emit_io(sb *s, const char *key, const MOJOSHADER_attribute *a, int count, int is_vs_input, int is_vs, const fnvnx_reflection *refl)
+/* vs < 3.0 oFog / oPts are registers 1 / 2 of the RASTOUT file, which the bytecode profile reports as index 1 / 2 of their usage; their
+ * pair is FOG0 / PSIZE0 (D3D9: one fog and one point size per vertex), as the glsldk profile treats them. */
+static int out_index(const MOJOSHADER_parseData *pd, const MOJOSHADER_attribute *a)
+{
+    return (pd->major_ver < 3 && (a->usage == MOJOSHADER_USAGE_FOG || a->usage == MOJOSHADER_USAGE_POINTSIZE)) ? 0 : a->index;
+}
+
+/* The varyings a stage writes (VS) or reads (PS), as FNVNX_DK_PAIR codes, for the static variant rule fnvnx_dk_vs_needs_complete() (fnvnx_dk_layout.h).
+ * VS: its outputs except the built-ins POSITION0 / PSIZE0, and FOG0 always (every VS writes it, README "Varying completion"). PS: its inputs
+ * (not vPos / vFace), and FOG0 for a ps < 3.0 (its epilogue reads the fog factor). Returns the count. */
+static int stage_pairs(const MOJOSHADER_parseData *pd, int is_vs, unsigned char *out)
+{
+    int n = 0, i, q;
+    #define ADDP(pr) do { int d_ = 0; for (int k_ = 0; k_ < n; k_++) if (out[k_] == (pr)) d_ = 1; if (!d_ && n < 224) out[n++] = (unsigned char)(pr); } while (0)
+    if (is_vs) {
+        for (i = 0; i < pd->output_count; i++) {
+            const MOJOSHADER_attribute *a = &pd->outputs[i]; const int idx = out_index(pd, a);
+            if (a->usage < 0 || a->usage > 13 || idx < 0 || idx > 15) continue;
+            if (idx == 0 && (a->usage == MOJOSHADER_USAGE_POSITION || a->usage == MOJOSHADER_USAGE_POINTSIZE)) continue;
+            ADDP(FNVNX_DK_PAIR(a->usage, idx));
+        }
+        ADDP(FNVNX_DK_PAIR(MOJOSHADER_USAGE_FOG, 0));
+    } else {
+        for (i = 0; i < pd->attribute_count; i++) {
+            const MOJOSHADER_attribute *a = &pd->attributes[i];
+            if (a->usage < 0 || a->usage > 13 || a->index < 0 || a->index > 15) continue;
+            if (!(a->usage == MOJOSHADER_USAGE_COLOR && strstr(a->name ? a->name : "", "oC"))) ADDP(FNVNX_DK_PAIR(a->usage, a->index));
+        }
+        if (pd->major_ver < 3) ADDP(FNVNX_DK_PAIR(MOJOSHADER_USAGE_FOG, 0));
+    }
+    #undef ADDP
+    for (i = 1; i < n; i++) { unsigned char v = out[i]; for (q = i; q > 0 && out[q - 1] > v; q--) out[q] = out[q - 1]; out[q] = v; }   /* ascending */
+    return n;
+}
+
+static void emit_io(sb *s, const MOJOSHADER_parseData *pd, const char *key, const MOJOSHADER_attribute *a, int count, int is_vs_input, int is_vs, const fnvnx_reflection *refl)
 {
     sb_printf(s, ",\n  \"%s\": [", key);
     for (int i = 0; i < count; i++) {
         int loc;
-        const int k = a[i].usage * 16 + a[i].index;
-        const int ok = a[i].usage >= 0 && a[i].usage < 14 && a[i].index >= 0 && a[i].index < 16;
+        const int idx = (is_vs && !is_vs_input) ? out_index(pd, &a[i]) : a[i].index;
+        const int k = a[i].usage * 16 + idx;
+        const int ok = a[i].usage >= 0 && a[i].usage < 14 && idx >= 0 && idx < 16;
         if (is_vs_input) loc = ok ? refl->attrib_loc[k] : -1;
-        else if (a[i].index == 0 && is_vs && (a[i].usage == MOJOSHADER_USAGE_POSITION || a[i].usage == MOJOSHADER_USAGE_POINTSIZE)) loc = -2; /* gl_Position / gl_PointSize (+ copy at the varying location when linked) */
+        else if (idx == 0 && is_vs && (a[i].usage == MOJOSHADER_USAGE_POSITION || a[i].usage == MOJOSHADER_USAGE_POINTSIZE)) loc = -2; /* gl_Position / gl_PointSize (+ copy at the varying location when linked) */
         else if (a[i].usage == MOJOSHADER_USAGE_COLOR && !is_vs_input && strstr(a[i].name ? a[i].name : "", "oC")) loc = a[i].index;
         else loc = ok ? refl->varying_loc[k] : -1;
-        sb_printf(s, "%s\n    {\"usage\": \"%s\", \"index\": %d, \"name\": ", i ? "," : "", usage_name(a[i].usage), a[i].index);
+        sb_printf(s, "%s\n    {\"usage\": \"%s\", \"index\": %d, \"name\": ", i ? "," : "", usage_name(a[i].usage), idx);
         sb_str(s, a[i].name);
         sb_printf(s, ", \"location\": %d}", loc);
     }
@@ -107,9 +143,10 @@ static int compute_locations(const MOJOSHADER_parseData *pd, int is_vs, const un
     }
     if (is_vs) for (i = 0; i < pd->output_count; i++) {
         const MOJOSHADER_attribute *a = &pd->outputs[i];
-        if (a->usage < 0 || a->usage > 13 || a->index < 0 || a->index > 15) { snprintf(err, errlen, "front end: output usage %d index %d outside the D3D9 range", a->usage, a->index); return -1; }
-        if (a->index == 0 && (a->usage == MOJOSHADER_USAGE_POSITION || a->usage == MOJOSHADER_USAGE_POINTSIZE)) continue;  /* built-ins */
-        ADD(FNVNX_DK_PAIR(a->usage, a->index));
+        const int idx = out_index(pd, a);
+        if (a->usage < 0 || a->usage > 13 || idx < 0 || idx > 15) { snprintf(err, errlen, "front end: output usage %d index %d outside the D3D9 range", a->usage, a->index); return -1; }
+        if (idx == 0 && (a->usage == MOJOSHADER_USAGE_POSITION || a->usage == MOJOSHADER_USAGE_POINTSIZE)) continue;  /* built-ins */
+        ADD(FNVNX_DK_PAIR(a->usage, idx));
     }
     for (uint32_t k = 0; k < nlink; k++) { if (link[k] / 16 > 13) { snprintf(err, errlen, "link pair %u outside the D3D9 range", link[k]); return -1; } if (n < 224) ADD(link[k]); }
     #undef ADD
@@ -174,8 +211,12 @@ int fnvnx_frontend_parse(const void *bc, size_t n, const unsigned char *link, ui
         sb_printf(&s, "%s\n    {\"reg\": %d, \"type\": \"%s\", \"binding\": %d, \"texbem\": %s}", i ? "," : "", m->index, t, m->index, m->texbem ? "true" : "false");
     }
     sb_printf(&s, "%s]", pd->sampler_count ? "\n  " : "");
-    emit_io(&s, "inputs", pd->attributes, pd->attribute_count, is_vs, is_vs, refl);
-    emit_io(&s, "outputs", pd->outputs, pd->output_count, 0, is_vs, refl);
+    emit_io(&s, pd, "inputs", pd->attributes, pd->attribute_count, is_vs, is_vs, refl);
+    emit_io(&s, pd, "outputs", pd->outputs, pd->output_count, 0, is_vs, refl);
+    { unsigned char pr[224]; int np = stage_pairs(pd, is_vs, pr);
+      sb_printf(&s, ",\n  \"%s\": [", is_vs ? "varyings_written" : "varyings_read");
+      for (int i = 0; i < np; i++) sb_printf(&s, "%s%d", i ? ", " : "", pr[i]);
+      sb_printf(&s, "]"); }
     sb_printf(&s, ",\n  \"ctab\": [");
     for (int i = 0; i < pd->symbol_count; i++) {
         const MOJOSHADER_symbol *y = &pd->symbols[i];

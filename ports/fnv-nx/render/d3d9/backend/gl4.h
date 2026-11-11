@@ -80,7 +80,7 @@ typedef struct Gl4 {
     Gl4Layout lay[GL4_MAX_LAYOUTS + 1];
     Gl4Fbo fbo[GL4_MAX_FBOS]; uint32_t nFbo, fboNext;
     GLuint blitFbo[2];          /* scratch read/draw framebuffers of blits and reads */
-    uint32_t swapImage, passN, frameDraws;
+    uint32_t swapImage, passN, passSamples, frameDraws;
     uint64_t drawsFrame;
     uint32_t errCount;          /* contract violations recorded (gl4_err) */
     char err[2048];
@@ -124,9 +124,11 @@ void gl4_op_image_update(const uint32_t* a, uint32_t argc);
 uint64_t gl4_api_image_read(uint64_t desc);
 uint64_t gl4_api_readback(uint64_t desc);
 /* gl4_blit.c */
+typedef struct { const Gl4Image* im; uint32_t level, layer, x, y, w, h; } Gl4Sub;   /* a rect of one subresource */
 void gl4_op_blit(const uint32_t* a, uint32_t argc);
 void gl4_op_genmips(const uint32_t* a, uint32_t argc);
 /* attaches one subresource of an image (colour or depth-stencil) to a framebuffer attachment point */
+void gl4_detach_all(GLuint fbo);   /* no attachment left on fbo */
 void gl4_attach(GLuint fbo, GLenum att, const Gl4Image* im, uint32_t level, uint32_t layer);
 /* a new single-sample 2D texture holding the resolve of a multisampled image (the caller deletes it) */
 GLuint gl4_resolve_tex(const Gl4Image* im);
@@ -163,7 +165,6 @@ void gl4_query_collect(void);        /* after glFinish: adds the finished slices
 void gl4_query_pause(void);          /* internal draws (scale blits) must not count: close / reopen the slice */
 void gl4_query_resume(void);
 /* gl4_scale.c: point-filtered scaling by rule (source texel floor((d + 0.5) * sw / dw)), texelFetch shaders */
-typedef struct { const Gl4Image* im; uint32_t level, layer, x, y, w, h; } Gl4Sub;
 void gl4_scale_point(const Gl4Sub* s, const Gl4Sub* d, const uint16_t* ramp);   /* ramp: 3 x 256 u16 or NULL */
 /* gl4_present.c */
 uint64_t gl4_api_present(uint64_t desc);

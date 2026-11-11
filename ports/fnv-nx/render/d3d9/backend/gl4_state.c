@@ -9,8 +9,9 @@
  *   NOCLIP      GL_DEPTH_CLAMP: primitives are not clipped by the near / far planes, their depth is clamped to the
  *               depth range (x / y guard-band clipping has no visible effect and w <= 0 is clipped as always);
  *               user clip planes (w[2] bits 8-15) are independent of it
- *   SAMPLEMASK  GL_SAMPLE_MASK + glSampleMaski(0, mask), disabled for 0xFFFFFFFF; bit i = sample i, bit 0 is the
- *               only sample of a single-sample target */
+ *   SAMPLEMASK  GL_SAMPLE_MASK + glSampleMaski(0, mask) on a multisampled target, disabled for 0xFFFFFFFF; bit i =
+ *               sample i. D3D9 defines the mask for multisample render targets only: on a single-sample target
+ *               it has no effect (a rule of this backend, independent of what a GL implementation does there) */
 #include "gl4.h"
 #include <string.h>
 
@@ -131,7 +132,7 @@ void gl4_apply_state(const NxRenderState* rs, int force) {
         if (w3 >> NXRS_M_MSAA & 1) p_glEnable(GL_MULTISAMPLE); else p_glDisable(GL_MULTISAMPLE);
         if (w3 >> NXRS_M_AALINE & 1) p_glEnable(GL_LINE_SMOOTH); else p_glDisable(GL_LINE_SMOOTH);
         if (w3 >> NXRS_M_NOCLIP & 1) p_glEnable(GL_DEPTH_CLAMP); else p_glDisable(GL_DEPTH_CLAMP);
-        if (mask != 0xFFFFFFFFu) { p_glEnable(GL_SAMPLE_MASK); p_glSampleMaski(0, mask); } else p_glDisable(GL_SAMPLE_MASK);
+        if (mask != 0xFFFFFFFFu && g4.passSamples > 1) { p_glEnable(GL_SAMPLE_MASK); p_glSampleMaski(0, mask); } else p_glDisable(GL_SAMPLE_MASK);
     }
     g4.applied = *rs;
     g4.haveApplied = 1;

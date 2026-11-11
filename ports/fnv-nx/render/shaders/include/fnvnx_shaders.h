@@ -38,7 +38,12 @@ enum {
     /* D3D9's implementation-defined numerics (rcp/rsq/log of 0, nrm of a zero vector): WineD3D's IEEE results by
      * default (the original under Wine, the reference of the S16 sweeps); with this flag Gallium Nine's clamped
      * ones (V6n's oracle, softpipe). The GLSL carries both behind DK_NUMERICS_NINE; the flag defines it. */
-    FNVNX_SHADER_NUMERICS_NINE = 1u << 5
+    FNVNX_SHADER_NUMERICS_NINE = 1u << 5,
+    /* Vertex shaders: the "complete" variant (README "Varying completion"): besides the base completion (the components a declared output
+     * leaves out, the link set L, FOG0) every varying slot 0..30 that is still unwritten gets the default of its canonical pair, so any
+     * pixel stage whose inputs are canonical links. The device picks this variant of the VS iff fnvnx_dk_vs_needs_complete(). Ignored for
+     * pixel shaders. Part of the variant key. */
+    FNVNX_SHADER_VS_COMPLETE = 1u << 6
 };
 
 typedef struct fnvnx_shader_opts {

@@ -9,13 +9,14 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ---- the tables are total ----------------------------------------------------------------------------------------- */
 #define CNT1(a) +1
 #define CNT4(a, b, c, d) +1
 enum { N_OPS = 0 NXGL4_OP_LIST(CNT1), N_FNS = 2 NXGL4_FN_LIST(CNT4) };
-_Static_assert(N_OPS == NxOp_Count4 && N_FNS == NXGPU_FN_COUNT4, "gl4: the op/function tables cover ABI v4 exactly");
+_Static_assert((int)N_OPS == (int)NxOp_Count4 && (int)N_FNS == (int)NXGPU_FN_COUNT4, "gl4: the op/function tables cover ABI v4 exactly");
 #define NXGL4_VERSION NXGPU_VERSION4
 
 /* ---- memory blocks ----------------------------------------------------------------------------------------------- */
@@ -135,6 +136,9 @@ const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t
 }
 
 void nxgl4_destroy(void) {
+    for (uint32_t i = 0; i < NX4_MAX_STREAMS; i++) free(g4.vtx[i].data);
+    for (uint32_t i = 0; i < g4.nSlices; i++) free(g4.slices[i].ids);
+    free(g4.slices);
     if (g4.dpy) {
         eglMakeCurrent(g4.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (g4.ctx) eglDestroyContext(g4.dpy, g4.ctx);
