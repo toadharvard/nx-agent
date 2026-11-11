@@ -10,8 +10,8 @@ set(MOJO ${FNVNX_DEPS}/mojoshader)
 set(UAM ${FNVNX_DEPS}/uam)
 
 add_library(fnvnx_shaders STATIC
-    src/sdp.c glsl/src/frontend.c glsl/src/backend_mojoshader.c glsl/src/translate.c src/translate_dksh.c src/dk.cpp)
-target_include_directories(fnvnx_shaders PUBLIC glsl/include PRIVATE glsl/src src ${MOJO} ${UAM}/source)
+    src/sdp.c translator/src/frontend.c translator/src/backend_mojoshader.c translator/src/translate.c src/translate_dksh.c src/dk.cpp)
+target_include_directories(fnvnx_shaders PUBLIC translator/include PRIVATE translator/src src ${MOJO} ${UAM}/source)
 target_link_libraries(fnvnx_shaders PUBLIC ${MOJO}/build/libmojoshader.a ${UAM}/build/libuam.a m pthread)
 
 add_executable(sdp2dksh src/sdp2dksh.c)

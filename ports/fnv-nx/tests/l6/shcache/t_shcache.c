@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "shcache.h"
-#include "../../../render/shaders/glsl/include/fnvnx_dk_layout.h"
+#include "../../../render/shaders/translator/include/fnvnx_dk_layout.h"
 
 static int checks, fails;
 #define CHECK(c) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); } } while (0)

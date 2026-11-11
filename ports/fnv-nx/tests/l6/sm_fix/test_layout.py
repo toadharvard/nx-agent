@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T-SM-LAYOUT: the location rule of render/shaders/glsl/include/fnvnx_dk_layout.h (class B of the SM totality gate).
+"""T-SM-LAYOUT: the location rule of render/shaders/translator/include/fnvnx_dk_layout.h (class B of the SM totality gate).
 python3 -I tests/l6/sm_fix/test_layout.py [--build DIR]
  (a) rule properties in C on the header itself: every (usage 0..13, index 0..15) is assignable alone; random legal declaration sets
      (up to the slot limit) are injective, in range, and keep canonical slots; illegal sets are rejected.

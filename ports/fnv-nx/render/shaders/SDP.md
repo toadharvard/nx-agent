@@ -27,7 +27,7 @@ Entry:
 Names ending in `.vso` are vertex shaders, `.pso` pixel shaders; the stage and shader model are taken from
 the version token, never from the name.
 
-## Reader (`glsl/include/fnvnx_sdp.h`, `src/sdp.c`)
+## Reader (`translator/include/fnvnx_sdp.h`, `src/sdp.c`)
 
 Strict, on a caller-owned buffer (entries point into it):
 

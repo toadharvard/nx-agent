@@ -3,7 +3,7 @@
 // WINED3DERR_INVALIDCALL; wined3d_shader_get_byte_code: pData null -> size query; *size too small -> D3DERR_INVALIDCALL (MSDN says MOREDATA, Wine's comment: not actually true); copy leaves *size).
 // Create*Shader: null byte_code / out pointer, no walkable END (spec sm_bytes), wrong stage word (a pixel blob to CreateVertexShader), any validator error (res_smcheck.cpp rules R1-R9) = D3DERR_INVALIDCALL.
 // Allocation failure = E_OUTOFMEMORY (Wine d3d9 device.c d3d9_device_CreateVertexShader / CreatePixelShader, wined3d shader.c shader_init), nothing left behind.
-// The hash is fnvnx_shader_hash (render/shaders/glsl/src/translate.c: FNV-1a 64 of the bytecode, offset 0xcbf29ce484222325, prime 0x100000001b3) re-implemented here: that TU links MojoShader (the translator
+// The hash is fnvnx_shader_hash (render/shaders/translator/src/translate.c: FNV-1a 64 of the bytecode, offset 0xcbf29ce484222325, prime 0x100000001b3) re-implemented here: that TU links MojoShader (the translator
 // front end parse / reflection is MojoShader based: frontend.c needs mojoshader.h, so it cannot be linked into this freestanding object; the interface in res_sm.h is our own decoder's).
 #include "res_core.h"
 #include "d9impl.gen.h"

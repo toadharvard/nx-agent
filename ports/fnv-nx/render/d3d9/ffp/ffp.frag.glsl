@@ -3,7 +3,7 @@
 // NxFfpPsState (ffp_state.h, std140, UBO binding 3). Twin of ffp_ps_ref.c (same function names, same statements);
 // semantic source for open points: WineD3D ffp fragment generator, deviations in README.md.
 //
-// Interface (render/shaders/glsl/include/fnvnx_dk_layout.h): varyings by fnvnx_dk_varying_location: COLOR0 diffuse = 0,
+// Interface (render/shaders/translator/include/fnvnx_dk_layout.h): varyings by fnvnx_dk_varying_location: COLOR0 diffuse = 0,
 // COLOR1 specular = 1, TEXCOORDn = 2 + n (n = 0..7, all vec4). Fog factor at 18 is read by d9_epilogue.glsl.
 // D3DRS_SHADEMODE = FLAT: the vertex stage and this program must both qualify locations 0 and 1 `flat`; build the
 // program with NX_FFP_FLAT defined (nx-variants line below). Texcoord varyings are never flat.

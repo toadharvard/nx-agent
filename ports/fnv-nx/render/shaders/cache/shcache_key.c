@@ -1,7 +1,7 @@
 /* shcache_key.c - key construction, the link-set rule and the payload container of shcache.h. */
 #include "shcache.h"
 #include <string.h>
-#include "../glsl/include/fnvnx_dk_layout.h"
+#include "../translator/include/fnvnx_dk_layout.h"
 
 uint64_t shcache_hash64(const void *p, size_t n)
 {

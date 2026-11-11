@@ -1,5 +1,5 @@
 // draw_prog.cpp: the program pair of a draw: backend shader ids of (vertex shader, pixel shader), the link set L, the VS variant bit, the vertex input signature.
-// Rules (all from render/shaders/glsl/include/fnvnx_dk_layout.h and render/shaders/cache/shcache.h, restated here):
+// Rules (all from render/shaders/translator/include/fnvnx_dk_layout.h and render/shaders/cache/shcache.h, restated here):
 //  P1 vertex inputs: the declared inputs of the VS (v<n> with their dcl (usage, index)); vs_1_x has no dcl: v<n> = the usage of the Shader Model 1 register table (v0 POSITION, v1 BLENDWEIGHT, v2 BLENDINDICES,
 //     v3 NORMAL, v4 PSIZE, v5 COLOR0, v6 COLOR1, v7-v14 TEXCOORD0-7, v15 POSITION1: mojoshader.c shader_model_1_input_usage, which the translator uses). Location of input k = fnvnx_dk_assign(ATTRIB) over the set.
 //  P2 L = the varying link set of the pair: (VS outputs without POSITION0 / PSIZE0) U (PS inputs), empty when every pair is canonical (fnvnx_dk_varying_location >= 0), else the set ascending (shcache_link_set).

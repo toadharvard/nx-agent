@@ -5,7 +5,7 @@
  *   device validated the bytecode, so the device never asks for a shader the D3D9 validator rejects; it answers a 0 with D3DERR_DRIVERINTERNALERROR and records nothing).
  *
  *   bytecode / size  the D3D9 token stream (version token .. END), `link_pairs` n_link_pairs bytes of FNVNX_DK_PAIR codes (usage * 16 + index) ascending, unique = the link set L of
- *                    render/shaders/glsl/include/fnvnx_dk_layout.h "Location rule" (fnvnx_shader_opts.link_pairs); n_link_pairs 0 = the stage alone (every pair of the draw is canonical).
+ *                    render/shaders/translator/include/fnvnx_dk_layout.h "Location rule" (fnvnx_shader_opts.link_pairs); n_link_pairs 0 = the stage alone (every pair of the draw is canonical).
  *   stage            0 vertex, 1 pixel (must match the bytecode's version token)
  *   variant          bit 0: vertex shader complete (FNVNX_SHADER_VS_COMPLETE; fnvnx_dk_vs_needs_complete), all other bits 0
  *   hash             fnvnx_shader_hash(bytecode) (FNV-1a 64), the cache key's code hash

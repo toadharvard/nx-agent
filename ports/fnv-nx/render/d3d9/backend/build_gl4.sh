@@ -3,7 +3,7 @@
 #   usage: FNVNX_SHADERS_BUILD=DIR build_gl4.sh [out.so]      or      build_gl4.sh --shaders-build DIR [out.so]      (default out ./libnxgl4.so)
 # REQUIRED input: the translator build directory (render/shaders/build.sh output: libfnvnx_shaders.a + CMakeCache.txt naming its deps). Missing = exit 2 with a message, nothing is built.
 # Link line: gcc -std=c11 -Wall -Werror -Werror=switch-enum -O2 -fPIC -shared -I<backend> gl4_*.c nxgpu4_check.c <gl4_xlator.sh flags> -Wl,--version-script=libnxgl4.map -lEGL -lGL -lm
-#   (translator flags = -I<render/shaders/glsl/include> libfnvnx_shaders.a libmojoshader.a libuam.a -lstdc++ -lm -lpthread)
+#   (translator flags = -I<render/shaders/translator/include> libfnvnx_shaders.a libmojoshader.a libuam.a -lstdc++ -lm -lpthread)
 # Exports nxgl4_create, nxgl4_destroy, nxgl4_ext (the ext_call dispatch of module 10), nxgl4_last_error and
 # nxgl4_shim_glsl. Leaves two symbols undefined for the embedder to provide (no -Wl,-z,defs):
 #   void* nxgl4_guest_ptr(uint64_t addr, uint64_t size);   guest address -> host pointer

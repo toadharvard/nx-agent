@@ -19,8 +19,8 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/render/shaders/glsl/include",
-  "ports/fnv-nx/render/shaders/glsl/src",
+  "ports/fnv-nx/render/shaders/translator/include",
+  "ports/fnv-nx/render/shaders/translator/src",
   "/ext/mojoshader"
  ],
  "units": "all",
