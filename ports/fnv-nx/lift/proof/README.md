@@ -71,9 +71,19 @@ rol agrees with the DSL (lsb of the unchanged result) at count 8/16; ror disagre
 (3) `lea r16`: proved, low 16 bits of the 32-bit address, upper half of the destination kept. (4) 16-bit cmovcc (all 16 conditions, reg-reg): proved, the upper half is unchanged whether or not the move happens.
 Memory forms rely on the `assume` (no segment-limit #GP: access wrapping past 4 GiB).
 
+### One-command toolchain build (L3b C2)
+`bash proof/sail_setup.sh` builds everything from a clean Ubuntu 24.04 root shell: apt packages, opam 2.2.1, opam-repository pinned to one commit,
+switch `sail` (OCaml 4.14.2, the 52 pinned opam packages incl. sail 0.20.3), isla e9b5d94 (`cargo build --release --locked`) and its isla-sail plugin,
+z3-solver 5.4.0.0 (pip, libz3.so.5.4), sail-x86-from-acl2 0c6c023, then `sail_build.sh` (stock IR, proof IR, smoke test); it prints the sha256 of
+`x86_proof.ir` and exits 1 unless it equals the pin. Every version, commit and sha256 is in `proof/sail_pins.txt`. Env: `REMS` `TOOLS` `WORK` `JOBS`.
+`MIRROR=<dir> bash proof/sail_setup.sh` takes every download from `<dir>`; `bash proof/sail_setup.sh --make-mirror <dir>` fills it from the network.
+The IR is path independent: isla-sail records source file names in the IR, so `sail_build.sh` runs it in a staging tree with relative names only.
+Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice files by absolute path (`$HERE`); run from `/home/user/nx-agent/ports/...` it gives
+3acf7d99 (10,389,604 B), from `/home/user/nx-l3/ports/...` 66cf6d73 (10,389,595 B), both reproduced. The staged build gives 55f87ab6 (10,389,242 B) in every directory.
+
 ### Sail model patches (W9b)
 `proof/sail_patches/rotate_count.sail` (rotate_left_bits/rotate_right_bits reduce the count mod width) and `ror_cf.sail` (ROR CF = msb of the result for masked
-count >= 2) are spliced in by `sail_build.sh` (default, `x86_proof.ir` sha256 3acf7d99...); `sail_build.sh --stock` builds the unpatched `x86_proof_stock.ir`
+count >= 2) are spliced in by `sail_build.sh` (default; `x86_proof.ir` sha256 55f87ab6... since the path-independent build, was 3acf7d99... / 66cf6d73... with absolute paths); `sail_build.sh --stock` builds the unpatched `x86_proof_stock.ir`
 (sha256 1de1cdc6...). `test/rothost.py` compares the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
 CF-in, cl and imm8 forms, second pre-flag pattern too): 488,112,128 cases, diff 0 on every SDM-defined output; `mfree` = model leaves a defined output
 undefined (shl/shr/sar CF beyond the width), `undef-info` = host value of an SDM-undefined output differing from the model's.
