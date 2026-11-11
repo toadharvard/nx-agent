@@ -1154,6 +1154,21 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
+## verify/gate_argorder.py
+
+```text
+Gate "argordergate" (fnvnx-gate/1, VERDICT.md class: calling convention / argument order): every native C++ unit of a guest root is compiled with
+the fnvnx_order plugin (MSVC evaluation order of arguments, objects, operators, assignments) loaded in the rule's order.
+    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/argordergate.json
+Universe: the C++ units of every admitted product root with "target": "guest" and "cxx_origin": "native" (admit.json; the lifter emits the order
+itself, a lifted root has none). No such root: universe 0, green.
+Certificate of a unit, all of: (1) the recipe of its root validates (recipe.check, which holds the plugin rule); (2) the recipe's plugin list is
+the rule's list in the rule's load order (recipe.PLUGIN_SOURCES order, the order of compile.sh) and holds fnvnx_order with exactly the rule's arguments (args=rtl, ...)
+(recipe.PLUGIN_ARGS); (3) the build is green and its result holds the fnvnx_order .so (the file built by the hermetic plugin stage); (4) the unit's object
+was built. The .so is a declared input of every CC stage of a C++ unit (recipe.Job.compile: cc_inputs), so it is in the CC stage key; an
+object compiled without it, or with another .so, has another key and is not this object. A red build or invalid recipe certifies no unit of the root.
+```
+
 ## verify/gate_objstub.py
 
 ```text
