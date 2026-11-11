@@ -11,6 +11,7 @@ enum { NXTF_BLOCKS = 1, NXTF_NOVERIFY = 2, NXTF_BROKEN = 4, NXTF_MAPPABLE = 8, N
 struct NxTexFmt { uint8_t bytes, bw, bh, bb, flags, hn, hd; };   // bytes per pixel (bb per block), block size, height scale hn/hd (YV12, NV12)
 bool nx_texfmt(uint32_t d3dfmt, NxTexFmt* f);                      // false: no layout (UNKNOWN, unmapped id, unknown FOURCC): wined3d size 0
 void nx_tex_pitch(const NxTexFmt& f, uint32_t w, uint32_t h, uint32_t* row, uint32_t* slice);   // wined3d_format_calculate_pitch, alignment 4 (d3d9 device.c)
+uint64_t nx_tex_store(const NxTexFmt& f, uint32_t w, uint32_t h, uint32_t d);   // storage bytes of a sub-resource (>= nx_tex_size)
 uint64_t nx_tex_size(const NxTexFmt& f, uint32_t w, uint32_t h, uint32_t d);                    // wined3d_format_calculate_size
 
 // ---- backend hooks (thin, 1:1 onto nxgpu4.h; `res` is the owning texture / surface object). Declared here, DEFINED BY THE TESTS / the platform.

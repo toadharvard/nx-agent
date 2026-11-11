@@ -8,7 +8,7 @@
 // Layer-private exception: QueryInterface(IID_NxObj) (obj.h: the identity query nx_obj_of / nx_face use on every object of the layer, never an application iid) answers the object itself.
 // Evidence for the callers (D3DX call sites, shim/include/d3d9.h comment): D3DX calls Create with no arguments, Begin(callback, context, arg3), Instruction(file, line, tokens, count), End() and Release(),
 // all stdcall, and treats a NULL Create result or a failing Begin as "no validation"; it never calls QueryInterface.
-#include <atomic>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include "d9impl.gen.h"
@@ -27,13 +27,11 @@ HRESULT STDMETHODCALLTYPE NxShaderValidator9::Begin(D3DSHADERVALIDATORCALLBACK, 
 HRESULT STDMETHODCALLTYPE NxShaderValidator9::Instruction(const char*, int, const DWORD*, unsigned int) { fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Instruction); return S_OK; }
 HRESULT STDMETHODCALLTYPE NxShaderValidator9::End() { fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_End); return S_OK; }
 
-// the one static object, behind its guest face (face.h); made on first use (0 = not made, 1 = being made, 2 = made)
-alignas(8) static unsigned char g_mem[NX_FACE_SIZE + sizeof(NxShaderValidator9)];
-static std::atomic<int> g_state{0};
+// the one static object behind its guest face (face.h), constant-initialised: no code runs to make it and the create function is "log line + address"
+struct NxValidatorCell { uint32_t face[NX_FACE_SIZE / 4]; NxShaderValidator9 obj; constexpr NxValidatorCell() : face{}, obj() {} };
+static_assert(offsetof(NxValidatorCell, obj) == NX_FACE_SIZE, "the object sits right behind its face");
+static NxValidatorCell g_mem;   // static storage, constant initialisation (the constructor above is constexpr)
 IDirect3DShaderValidator9* nx_Direct3DShaderValidatorCreate9(void) {
     fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidatorCreate9);
-    int z = 0;
-    if (g_state.compare_exchange_strong(z, 1)) { ::new (g_mem + NX_FACE_SIZE) NxShaderValidator9(); g_state.store(2); }
-    else while (g_state.load() != 2) {}
-    return static_cast<NxShaderValidator9*>(reinterpret_cast<NxShaderValidator9*>(g_mem + NX_FACE_SIZE));
+    return &g_mem.obj;
 }

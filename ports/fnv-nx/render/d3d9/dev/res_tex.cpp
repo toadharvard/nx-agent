@@ -30,7 +30,7 @@ HRESULT NxImg::init(NxObj* own, uint32_t k, uint32_t w_, uint32_t h_, uint32_t d
     uint64_t tot = 0;
     for (uint32_t fi = 0; fi < fc; fi++) for (uint32_t l = 0; l < lv; l++) {
         NxSub* s = at(l, fi); s->w = dim(w, l); s->h = dim(h, l); s->d = dim(d, l);
-        s->size = (uint32_t)nx_tex_size(tf, s->w, s->h, s->d);
+        s->size = (uint32_t)nx_tex_store(tf, s->w, s->h, s->d);
         if (tf.flags & NXTF_BROKEN) { s->row = s->w * tf.bytes; s->slice = s->h * s->row; } else nx_tex_pitch(tf, s->w, s->h, &s->row, &s->slice);   // texture_resource_sub_resource_get_map_pitch
         tot += (s->size + 15u) & ~15u;
     }
@@ -54,7 +54,7 @@ HRESULT NxImg::init(NxObj* own, uint32_t k, uint32_t w_, uint32_t h_, uint32_t d
         if (l < lv && rec_dirty) add_dirty(l, fi, nullptr);                          // wined3d_texture_init: the whole image is dirty
         else if (gpu && samples <= 1 && (p == D3DPOOL_DEFAULT || l >= lv)) {   // a multisampled image takes no ImageUpdate (nxgpu4.h): its contents are undefined until a pass writes it
                                       // zero upload: D3D-layout zero texels through the same path as any upload
-            uint32_t sz = (uint32_t)nx_tex_size(tf, whole.r, whole.b, whole.k); uint8_t* z = (uint8_t*)nxd3d_alloc(sz ? sz : 1); if (!z) return E_OUTOFMEMORY;
+            uint32_t sz = (uint32_t)nx_tex_store(tf, whole.r, whole.b, whole.k); uint8_t* z = (uint8_t*)nxd3d_alloc(sz ? sz : 1); if (!z) return E_OUTOFMEMORY;
             memset(z, 0, sz ? sz : 1);
             NxSub t = {}; t.mem = z; t.w = whole.r; t.h = whole.b; t.d = whole.k; if (tf.flags & NXTF_BROKEN) { t.row = t.w * tf.bytes; t.slice = t.h * t.row; } else nx_tex_pitch(tf, t.w, t.h, &t.row, &t.slice);
             bool ok = nx_img_push(this, l, fi, &t, &whole); nxd3d_free(z); if (!ok) return E_OUTOFMEMORY;

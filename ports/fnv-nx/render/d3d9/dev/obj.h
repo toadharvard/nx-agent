@@ -92,6 +92,6 @@ inline void nx_destroy(NxObj* o) { o->ci->destroy(o); }
 template <class T> inline void nx_ignore(const T&) {}
 // null-safe: NxObj of one of our objects, or null for null / foreign pointers
 NxObj* nx_obj_of(IUnknown* p);
-inline void nx_obj_init(NxObj* o, IUnknown* self, const NxClassInfo* ci) { o->self = self; o->ci = ci; }
+constexpr inline void nx_obj_init(NxObj* o, IUnknown* self, const NxClassInfo* ci) { o->self = self; o->ci = ci; }
 // Backend hook for IDirect3DResource9::PreLoad of a managed resource (upload to the GPU). Defined by the resource module; undefined = link error.
 void nxd3d_preload(NxObj* resource);

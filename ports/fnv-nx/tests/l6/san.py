@@ -36,7 +36,7 @@ def env(base=None):
     if not _modes: return e
     log = os.environ.get("NX_SAN_LOG")
     halt = "0" if _recover else "1"
-    a = "detect_leaks=1:abort_on_error=0:halt_on_error=%s:detect_stack_use_after_return=1:strict_string_checks=1:check_initialization_order=1" % halt
+    a = "detect_leaks=1:abort_on_error=0:halt_on_error=%s:detect_stack_use_after_return=1:allocator_may_return_null=1:strict_string_checks=1:check_initialization_order=1" % halt
     u = "print_stacktrace=1:halt_on_error=%s" % halt
     if log: os.makedirs(log, exist_ok=True); a += ":log_path=" + os.path.join(log, "asan"); u += ":log_path=" + os.path.join(log, "ubsan")
     pre = e.pop("NX_SAN_PRELOADED", None)   # the preload is for this python process only, not for its children (compilers, servers)

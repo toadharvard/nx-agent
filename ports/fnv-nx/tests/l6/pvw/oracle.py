@@ -135,9 +135,9 @@ def model(c):
     rs = c["rs"]
     if rs["CLIPPING"]: fx.add(10)
     dfvf = c["dstfvf"]; vs, f2 = fvf_size(dfvf); fx |= f2
-    left = (c["dstidx"] * vs) & 0xffffffff; dst = bytearray([c["dstinit"]]) * c["dstlen"] if False else bytearray(c["dstbytes"]); L = len(dst)
+    left = (c["dstidx"] * vs) & 0xffffffff; alias = c.get("alias"); dst = bytearray(c["streams"][0]["data"] if alias else c["dstbytes"]); L = len(dst)
     def rd(slot, i, n):
-        st, stride, base, ty = si[slot]; buf = c["streams"][st]["data"]; off = base + ((i * stride) & 0xffffffff)
+        st, stride, base, ty = si[slot]; buf = dst if (alias and st == 0) else c["streams"][st]["data"]; off = base + ((i * stride) & 0xffffffff)
         if off + n > len(buf): raise OOB
         return buf[off:off + n]
     class OOB(Exception): pass
@@ -147,6 +147,7 @@ def model(c):
             if spill: return
             raise OOB
         writes.append((off, bytes(data)))
+        if alias: dst[off:off + len(data)] = data
     view, proj, world = c["view"], c["proj"], c["world"]
     mat = mm(view, world); mat = mm(proj, mat)
     vp = c["vp"]; vx, vy, vw, vh = F(vp[0]), F(vp[1]), F(vp[2]), F(vp[3]); minz = vp[4]; maxz = vp[5] if vp[5] > minz + f32(0.001) else minz + f32(0.001)
@@ -236,7 +237,7 @@ def model(c):
                 dp += n
     except OOB:
         return INV, fx - {11, 12}, None   # the real pass (fixmes of the loop) never runs after a failed validation
-    for off, d in writes: dst[off:off + len(d)] = d
+    for off, d in writes: dst[off:off + len(d)] = d   # (alias: already applied one by one, so later source reads saw them)
     global EXT; EXT = (left, max(o + len(d) for o, d in writes)) if writes else None
     return 0, fx, bytes(dst)
 

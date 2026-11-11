@@ -50,7 +50,8 @@ def main():
         h.append(f"extern const NxClassInfo nx_ci_{c};")
         h.append(f"#ifndef NX_BASES_{c}\n#define NX_BASES_{c} NxObj\n#endif")
         h.append(f"struct {c} : {i}, NX_BASES_{c} {{")
-        h.append(f"    {c}() {{ nx_obj_init(static_cast<NxObj*>(this), static_cast<IUnknown*>(this), &nx_ci_{c}); }}")
+        ce = "constexpr " if i in NO_COMMON else ""   # a static object of such a class is constant-initialised (no first-use construction)
+        h.append(f"    {ce}{c}() {{ nx_obj_init(static_cast<NxObj*>(this), static_cast<IUnknown*>(this), &nx_ci_{c}); }}")
         for m in ms:
             ps = ", ".join(f"{p['ctype']} {p['name']}" for p in m["params"])
             h.append(f"    virtual {m['ret']} STDMETHODCALLTYPE {m['name']}({ps}) override;  // slot {m['slot']}")

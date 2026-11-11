@@ -24,6 +24,11 @@ bool nx_texfmt(uint32_t d, NxTexFmt* f) {
     for (const Row& r : T) if (r.id == d) { *f = {r.bytes, r.bw, r.bh, r.bb, r.flags, r.hn, r.hd}; return true; }
     return false;   // INST / RESZ / ATOC / NVDB (bytes 0), UNKNOWN, unmapped numbers, unknown FOURCCs
 }
+uint64_t nx_tex_store(const NxTexFmt& f, uint32_t w, uint32_t h, uint32_t d) {   // bytes the layer keeps for a sub-resource: the D3D size, and for BROKEN_PITCH formats at least the whole blocks nx_img_push reads (w*h*bytes is below one block for 1x1..4x1)
+    uint64_t n = nx_tex_size(f, w, h, d);
+    if (f.flags & NXTF_BROKEN) { uint64_t c = (uint64_t)((w + f.bw - 1) / f.bw) * f.bb * ((h + f.bh - 1) / f.bh) * d; if (c > n) n = c; }
+    return n;
+}
 void nx_tex_pitch(const NxTexFmt& f, uint32_t w, uint32_t h, uint32_t* row, uint32_t* slice) {
     if (f.flags & NXTF_BLOCKS) {
         uint32_t rb = (w + f.bw - 1) / f.bw, sb = (h + f.bh - 1) / f.bh;

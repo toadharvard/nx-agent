@@ -75,6 +75,6 @@ void t_refs() {
     uint32_t data[4] = {1, 2, 3, 4}, back[4] = {}; NxSurface9* lv0 = t_subsurface(e, t2, 0, 4, 4); NxSurface9* lv1 = t_subsurface(e, t2, 0, 2, 2);
     CHECK_HR(t2->SetPrivateData(G1, data, sizeof data, 0), D3D_OK); size = sizeof back; CHECK_HR(lv0->GetPrivateData(G1, back, &size), D3DERR_NOTFOUND); CHECK_HR(t2->GetPrivateData(G1, back, &size), D3D_OK); CHECK(!memcmp(data, back, 16));
     CHECK_HR(lv0->SetPrivateData(G2, data, sizeof data, 0), D3D_OK); CHECK_HR(lv1->GetPrivateData(G2, back, &size), D3DERR_NOTFOUND); CHECK_HR(lv0->FreePrivateData(G2), D3D_OK);
-    // ---- state blocks hold a device reference like every child; releasing past zero stays at zero; the last device reference destroys the device and drops the IDirect3D9 reference
-    IDirect3DStateBlock9* sb; ULONG r2 = rc(du); d->CreateStateBlock(D3DSBT_ALL, &sb); CHECK_EQ(rc(du), r2 + 1); CHECK_EQ(sb->Release(), 0); CHECK_EQ(rc(du), r2); CHECK_EQ(sb->Release(), 0);
+    // ---- state blocks hold a device reference like every child; the last device reference destroys the device and drops the IDirect3D9 reference
+    IDirect3DStateBlock9* sb; ULONG r2 = rc(du); d->CreateStateBlock(D3DSBT_ALL, &sb); CHECK_EQ(rc(du), r2 + 1); CHECK_EQ(sb->Release(), 0); CHECK_EQ(rc(du), r2);   // a destroyed state block is not touched again (Release past zero on freed memory is the application's defect, not a behaviour)
 }
