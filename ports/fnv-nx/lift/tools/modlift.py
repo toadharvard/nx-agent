@@ -1,30 +1,35 @@
 #!/usr/bin/env python3
-"""Module universe under the "mapped read-only image + dispatcher" model (used by `universe.py --module PATH`). No pointer is classified
-as code or data: EVERY relocated dword whose value lies in an executable section is an entry, as are the PE entry point, code exports, TLS
-callbacks, EH/SEH targets and the closure under direct call / tail-jump targets. Each entry has its own recursive descent; entries may
-overlap. A path ends at ret / indirect jmp / another entry / `ud` (bytes that do not decode: the lifted body raises #UD) / the end of the
-executable span. Provenance: `proven` = reachable by direct flow from entry point, exports, TLS, EH tables or from a pointer whose consumer
-transfers control (vptr-store run, jump table); `candidate` = known only as a relocated pointer target. The entry set is CLOSED under the direct call/jmp/jcc targets of every entry (proven or candidate): an in-span target
-not reached by the jumping entry's own descent is an entry (kind call/tail, candidate if only candidates reach it, `first-ud` when its bytes do not decode, overlap
-allowed); targets outside the executable spans get no entry and are listed in outside.tsv. Gate: totality of targets, red if the closure is not reached.
-Output: /home/user/l3facts/<module>/{universe.tsv,codemap.tsv,ehtables.json,gate_codemap.json}."""
-import os, re, sys, json, bisect
+"""Module universe under the "mapped read-only image + dispatcher" model (`universe.py --module NAME`, NAME or path of a file listed in modules.tsv).
+The module is processed AT THE BASE THE LOADER ASSIGNED (L1's modules.tsv, assigned_base), as if the Windows loader had applied the module's own relocations:
+every address (universe, codemap, ranges) is an absolute VA there, the one dispatcher of the process being keyed by image address. The rules are the exe's:
+R3: EVERY relocated dword whose value lies in an executable section is an entry (no pointer is classified as code or data); the PE entry point, every code export of
+the export directory, the TLS callbacks and the EH/SEH targets are entries; rule C: the entry set is closed under the direct call targets and the direct jump targets
+that leave the lifter's range of each entry (the lifter's own fnvlift.core.explore over [entry, entry + extent), as universe.py does for the exe); a target outside every
+executable section is no entry (the lifter sends it through the dispatcher). Each entry has its own recursive descent; entries may overlap. A path ends at ret /
+indirect jmp / another entry / `ud` (bytes that do not decode: the lifted body raises #UD) / the end of the executable span. Provenance: `proven` = reachable by direct
+flow from entry point, exports, TLS, EH tables or from a pointer whose consumer transfers control (vptr-store run, jump table); `candidate` = known only as a relocated
+pointer target. Byte accounting: every byte of the executable sections is exactly one class (entry body, PE-directory data, padding, relocation slot, dead gap) or is
+reported UNEXPLAINED by reason; the gate is red then. Output: $FNVNX_FACTS_OUT (default /home/user/l3facts2)/<module>/{universe,codemap,ranges,noreturn,outside,imports}.tsv, ehtables.json, gate_codemap.json."""
+import os, re, sys, json, bisect, hashlib
 from array import array
 from itertools import groupby
 from collections import Counter, deque
 from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pemod, ehtables, codemap
+from fnvlift import Image as LImage; from fnvlift import core as LCore
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
 PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']
-CN = {1: 'code-proven', 2: 'code-candidate', 3: 'pe-header-data', 4: 'padding', 5: 'non-code'}
+CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
 
-def run(path):
-    name = os.path.splitext(os.path.basename(path))[0].lower(); outd = '/home/user/l3facts/' + name; os.makedirs(outd, exist_ok=True)
+def run(arg):
+    path, mrow = pemod.locate(arg)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
+    name = os.path.splitext(mrow.name)[0]; outd = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2') + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
-    M = pemod.load(path); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
+    M = pemod.load(path, mrow.base); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
     T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0
     V = bytearray(TN); tx = bytearray(b'\xcc' * TN)
     for n, a, z, ro in M.xs: V[a - T0:a - T0 + z] = b'\1' * z; tx[a - T0:a - T0 + z] = M.d[ro:ro + z]
@@ -137,25 +142,42 @@ def run(path):
                 prev = a; a += di[0]
         cnt[e] = (n_ud, n_xf, n_mf); udinfo[e] = uds
         return ext, deps, ends
-    # ---- closure: the entry set is closed under the direct control transfers of EVERY entry (proven or candidate)
-    clos = {}; closure_new = Counter(); rounds = 0; n_before = 0
+    # ---- rule C: the entry set is closed under the direct control transfers of EVERY entry (proven or candidate), computed with the lifter's own explore: the body of entry e is
+    # the descent from e over the range [e, e + extent(e)) (extent = the universe.tsv column), a direct call target is an entry (the lifter emits L_<target>() for every
+    # direct call), a direct jmp/jcc/loop target outside the range is an entry; a target outside every executable section is no entry (the lifter sends it through the dispatcher).
+    limg = LImage(path, M.base); lcache = {}; clos = {}; closure_new = Counter(); rounds = 0; n_before = 0; JMP = ('loop', 'loope', 'loopne')
+    def lc_targets(e, ext):
+        k = (e, ext)
+        if k not in lcache:
+            lo, hi = e, e + ext; fh = hi + 0x1000; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, fh - lo), e, (), fh); cs = {}; ts = {}; jx = set()
+            for a_, g in sorted(ins.items()):
+                m = g.mnemonic; o = g.operands
+                if m == 'call' and o[0].type == X.X86_OP_IMM: cs.setdefault(o[0].imm & M32, a_)
+                elif (m == 'jmp' or (m[0] == 'j' and m != 'jecxz') or m in JMP) and o[0].type == X.X86_OP_IMM:
+                    t = o[0].imm & M32
+                    if not lo <= t < hi: ts.setdefault(t, a_)
+                elif m == 'jecxz' and not lo <= (o[0].imm & M32) < hi: jx.add(a_)
+            lcache[k] = (cs, ts, jx)
+        return lcache[k]
     while True:
         while True:
             while queue: descend(queue.popleft())
             ch = tail_pass() + eh.scan()
             if not queue and not ch: break
         E = es(); NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent)); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
-        rounds += 1; n_before = n_before or len(E); viol = {}
+        rounds += 1; n_before = n_before or len(E); viol = {}; outside = {}; jxs = set()
         for e in E:
-            ss = set(exts[e])
-            for a in exts[e]:
-                for t in dec[a][4] + ((calltg[a],) if a in calltg else ()):
-                    if intext(t) and t not in ent and t not in ss: viol.setdefault(t, 'call' if calltg.get(a) == t else 'tail')
-        if not viol or rounds > 30: break
+            cs, ts, jx = lc_targets(e, sum(dec[a][0] for a in exts[e])); jxs |= {(e, x) for x in jx}
+            for kd, T in (('call', cs), ('tail', ts)):
+                for t, a_ in T.items():
+                    if t in ent: continue
+                    if intext(t): viol.setdefault(t, kd)
+                    else: outside[e, a_, t] = kd
+        if not viol or rounds > 300: break
         for t, k in sorted(viol.items()):
             closure_new['first-ud' if t in ud or t in xf else 'mid-instruction' if cov[t - T0] == 2 else 'other'] += 1; clos[t] = k; add(t, k)
     seedn = {eh.thrower} & set(ent)
-    outside = sorted({(e, a, t) for e in E for a in exts[e] for t in dec[a][4] + ((calltg[a],) if a in calltg else ()) if not intext(t)})
+    outside = sorted(outside)
     # ---- provenance: proven roots + control-transfer consumers (jump tables, vptr-store runs) found in proven code
     proven = set(); pset = set(); stored = {}; vptr = set()
     for r in sorted(r for r in relocs if intext(r)):             # data addresses that decoded code stores into memory (`mov [m], imm32`)
@@ -219,45 +241,83 @@ def run(path):
         if g.mnemonic == 'nop' or (g.mnemonic == 'lea' and len(o) == 2 and o[1].mem.index == 0 and o[1].mem.base == o[0].reg and o[1].mem.disp == 0) or (
                 g.mnemonic == 'mov' and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg): return g.size
         return 0
+    # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
+    # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
+    # HIGHLOW fixup site: a relocated pointer slot, e.g. a jump table), UNEXPLAINED (reason named). Nothing else is ever called data or dead.
+    TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}; rsl = bytearray(TN); unx = []; rslot = array('I', bytes(4 * TN))
+    for r in relocs:
+        if T0 <= r < T1:
+            for k in range(max(r, T0), min(r + 4, T1)): rsl[k - T0] = 1; rslot[k - T0] = r
+    def residual(p, q):
+        """[p, q) offsets of one residue run: swept from its first byte. At a boundary k that is a byte of a relocation site the bytes are slots (data named by the fixup; an instruction that
+        starts at k would have the fixup in its operand field, at an offset >= 1); else the instruction at k must decode inside the run, with relocation sites only at its disp / imm
+        fields. Each maximal stretch of instructions is a dead gap iff it ends at a terminator, at a slot or at the next reached instruction. The first violation ends the sweep: the
+        rest of the run is UNEXPLAINED with that reason."""
+        k = p; segs = []; why = None
+        while k < q:
+            if rsl[k]:
+                j = k
+                while j < q and rsl[j]: j += 1
+                segs.append((k, j, 5)); k = j; continue
+            g = next(md.disasm(text[k:min(k + 15, q)], T0 + k, 1), None)
+            if g is None: why = 'undecodable'; break
+            f = {g.address + g.disp_offset if g.disp_size == 4 else -1, g.address + g.imm_offset if g.imm_size == 4 else -1}
+            if any(x not in f for x in relocs[bisect.bisect_left(relocs, T0 + k):bisect.bisect_left(relocs, T0 + k + g.size)]): why = 'reloc-not-operand'; break
+            if segs and segs[-1][2] == 6: segs[-1] = (segs[-1][0], k + g.size, 6, g.mnemonic)
+            else: segs.append((k, k + g.size, 6, g.mnemonic))
+            k += g.size
+        for i, sg in enumerate(segs):                                     # a stretch of instructions is a dead gap iff it ends at a terminator or (at the run's end) at the next reached instruction
+            if sg[2] == 6 and not (sg[3] in TERMS or (i + 1 == len(segs) and not why and q < TN and cov[q] == 1)):
+                last = i + 1 == len(segs); k = sg[0]; segs = segs[:i]; why = why if (last and why) else 'no-end'; break
+        for sg in segs: cl[sg[0]:sg[1]] = bytes([sg[2]]) * (sg[1] - sg[0])
+        if why: cl[k:q] = b'\x08' * (q - k); unx.append((T0 + k, q - k, why))
     for m in re.finditer(rb'\x00+', bytes(cl)):
         s, e = m.span(); p = s
-        while s > 0 and cl[s - 1] == 1 and p < e and padlen(p, e): p += padlen(p, e)
+        while p < e and padlen(p, e): p += padlen(p, e)
         q = e
-        if e < TN and cl[e] == 1:
-            while q > p and text[q - 1] in (0xCC, 0x90): q -= 1
-            for k in range(max(p, q - 15), q):
-                x = k
-                while x < q and padlen(x, q): x += padlen(x, q)
-                if x == q: q = k; break
-        cl[s:p] = b'\4' * (p - s); cl[q:e] = b'\4' * (e - q); cl[p:q] = b'\5' * (q - p)
+        while q > p and text[q - 1] in (0xCC, 0x90): q -= 1
+        for k in range(max(p, q - 15), q):
+            x = k
+            while x < q and padlen(x, q): x += padlen(x, q)
+            if x == q: q = k; break
+        cl[s:p] = b'\4' * (p - s); cl[q:e] = b'\4' * (e - q)
+        if p < q: residual(p, q)
     cc = Counter(cl); rows = []
-    for c in (1, 2, 3, 4, 5):
+    for c in (1, 2, 3, 4, 5, 6, 8):
         for m in re.finditer(bytes([c]) + b'+', bytes(cl)):
             s, e = m.span()
             if c in (1, 2):
                 x = s
                 for k, g in groupby(own[s:e]):
-                    n = len(list(g)); rows.append((x, n, c, 'entry:%08x' % k)); x += n
-            else: rows.append((s, e - s, c, '-'))
+                    n = len(list(g)); rows.append((x, n, 1, 'entry:%08x' % k)); x += n
+            elif c == 5:
+                x = s
+                for y in range(s + 1, e + 1):
+                    if y == e or rslot[y] != rslot[x]: rows.append((x, y - x, c, 'reloc:%08x' % rslot[x])); x = y
+            else: rows.append((s, e - s, c, '-' if c != 3 else 'pe-header'))
     rows.sort(); open(outd + '/codemap.tsv', 'w').write(''.join('%08x\t%d\t%s\t%s\n' % (T0 + s, n, CN[c], o) for s, n, c, o in rows))
+    nunx = cc[8]; unxr = Counter()
+    print('UNEXPLAINED runs %d, bytes %d; first: %s' % (len(unx), cc[8], ' '.join('%08x+%d:%s:%s' % (x, n, r, text[x - T0:x - T0 + 6].hex()) for x, n, r in unx[:8])))
+    for a_, n_, r_ in unx: unxr[r_] += n_
     # ---- universe.tsv
     out = []; kc = Counter()
     for e in E:
         pk = next(k for k in PRI if k in ent[e]); n_ud, n_xf, n_mf = cnt[e]; kc[pk] += 1
         fl = ['proven' if e in proven else 'candidate'] + sorted(ent[e] - {pk}) + (['first-ud'] if e in ud else []) + ['%s=%d' % kv for kv in (('ud', n_ud), ('xf', n_xf), ('reloc-misfit', n_mf)) if kv[1]]
         out.append('%08x\t%s\t%d\t%s' % (e, pk, sum(dec[a][0] for a in exts[e]), ','.join(fl)))
-    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the preferred image base (not RVAs); columns: entry, kind, extent, flags; extent is the SUM of the bytes the entry reaches (not a contiguous span), see ranges.tsv\n' % M.base + '\n'.join(out) + '\n')
-    hd = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)\n' % M.base; bad = 0; rg = []
+    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the assigned load base (not RVAs; preferred base 0x%08x); columns: entry, kind, extent, flags; extent is the SUM of the bytes the entry reaches (not a contiguous span), see ranges.tsv\n' % (M.base, M.pref) + '\n'.join(out) + '\n')
+    hd = '# base=0x%08x: absolute VAs at the assigned load base (not RVAs)\n' % M.base; bad = 0; rg = []
     for e, row in zip(E, out):
         r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += sum(b - a for a, b in r) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
     open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
     nrr = codemap.nr_rows(NR, res, nrname, seedn)
     open(outd + '/noreturn.tsv', 'w').write(hd.rstrip() + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in nrr))
     open(outd + '/outside.tsv', 'w').write(hd.rstrip() + '; columns: entry, instruction, target outside the executable spans (the lifted jump faults)\n' + ''.join('%08x\t%08x\t%08x\n' % x for x in outside))
+    unent = sorted({v for r, v in rvals if v not in ent})        # rule R3 check: every relocated in-span value is an entry
     ins_ = [r for r, v in rvals if intext(r)]; outr = sum(1 for r in ins_ if not (covP[r - T0] or covC[r - T0]))
     print('rule 1: relocated in-span values: %d sites, %d distinct, not entries %d (before = after = %d entries from pointers); reloc sites lying in the span: %d (inside reached ranges %d, outside every range %d)' % (
         len(rvals), len({v for r, v in rvals}), len(unent), len({v for r, v in rvals}), len(ins_), len(ins_) - outr, outr))
-    print('closure: entries %d -> %d in %d rounds; new by cause %s; outside-span direct targets %d (%d distinct, %d rows in outside.tsv)' % (n_before, len(E), rounds, dict(sorted(closure_new.items())), len(outside), len({t for e, a, t in outside}), len(outside)))
+    print('closure (rule C, lifter explore): entries %d -> %d in %d rounds; new by cause %s; direct targets outside the executable sections (via the dispatcher, no entry) %d refs / %d distinct targets (outside.tsv); jecxz leaving its range %d' % (n_before, len(E), rounds, dict(sorted(closure_new.items())), len(outside), len({t for e, a, t in outside}), len(jxs)))
     print('ranges.tsv %d rows, noreturn.tsv %d rows, range-sum vs extent mismatches %d' % (len(rg), len(nrr), bad))
     # ---- totality gate
     targets = {v for r, v in rvals} | set(XC) | ({M.base + M.entry} if M.entry else set()) | {t for t in callers if intext(t)} | set(tailsrc) | set(clos) | {t for t, ks in ent.items() if ks & {'tls', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}}
@@ -267,9 +327,9 @@ def run(path):
     why = []
     if RL is None: why.append('no .reloc: pointers into executable bytes cannot be enumerated')
     if cert != len(targets): why.append('%d targets without a completed descent' % (len(targets) - cert))
-    if lvp: why.append('%d direct branches of proven code leave the executable spans' % len(lvp))
-    unent = sorted({v for r, v in rvals if v not in ent})        # rule 1 check: every relocated in-span value is an entry
     if unent: why.append('%d relocated in-span values are not entries' % len(unent))
+    if nunx: why.append('%d unexplained bytes (%s)' % (nunx, ', '.join('%s %d' % kv for kv in sorted(unxr.items()))))
+    if mrow.size != len(M.d) or mrow.sizeimg != M.sizeimg or mrow.pref != M.pref or mrow.entry != M.entry or mrow.tls != (1 if M.dirent(9)[0] else 0): why.append('modules.tsv row disagrees with the PE header')
     if len(targets) != len(E): why.append('gate universe %d != universe.tsv rows %d' % (len(targets), len(E)))
     if viol: why.append('%d in-span direct targets are not entries (closure not reached)' % len(viol))
     if bad: why.append('%d entries whose ranges do not sum to the extent' % bad)
@@ -290,9 +350,21 @@ def run(path):
     mp = Counter(dec[a][1] for a in pset); new_mn = sorted(((k, n) for k, n in mp.items() if k not in exe_mn), key=lambda kv: (-kv[1], kv[0]))[:60]
     fi = eh.finish(ent)
     exs = [n for n, a, z, ro in M.xs]; green = not why
+        # ---- exports against L1's list, imports by DLL, delay imports
+    l1 = {}; l1f = os.path.join(os.path.dirname(os.environ.get('FNVNX_MODULES', pemod.MODULES)), 'exports', mrow.name + '.tsv')
+    for ln in (open(l1f) if os.path.exists(l1f) else ()):
+        f = ln.rstrip('\n').split('\t')
+        if len(f) > 1 and not f[2]: l1[f[0]] = int(f[1], 16)
+    xl = set(l1.values()); xp = set(XC) | set(XD)
+    xdiff = (sorted(xp - xl), sorted(xl - xp)) if os.path.exists(l1f) else None
+    dl = Counter(n.split('!')[0] for n in imports.values()); dd = pemod.delay_imports(M)
+    open(outd + '/imports.tsv', 'w').write('# dll, imported name or #ordinal, IAT slot VA (delay imports: slot -)\n' + ''.join('%s\t%s\t%08x\n' % (n.split('!')[0], n.split('!', 1)[1], v) for v, n in sorted(imports.items())) + ''.join('%s\t%s\t-\n' % x for x in dd))
+    print('exports: PE code %d, PE data %d (not code: no entry), forwarders %d; every code export is an entry: %s; L1 exports.tsv %s; entry point %08x is an entry: %s; TLS callbacks %d' % (
+        len(XC), len(XD), XFW, all(a in ent for a in XC), 'ABSENT' if xdiff is None else 'differs: PE-only %d L1-only %d' % (len(xdiff[0]), len(xdiff[1])), M.base + M.entry, (M.base + M.entry) in ent if M.entry else 'n/a', sum(1 for ks in ent.values() if 'tls' in ks)))
+    print('imports %d by DLL: %s; delay imports %d' % (len(imports), ' '.join('%s=%d' % kv for kv in sorted(dl.items())), len(dd)))
     print('%s: sections %d (executable %d: %s), reloc %s (%d fixups), imports %d, exports code %d (data %d) forwarders %d, entry rva %x' % (os.path.basename(path), len(M.secs), len(exs), ' '.join(exs[:4]) + (' ...' if len(exs) > 4 else ''), 'yes' if RL is not None else 'NO', len(relocs), len(imports), len(XC), len(XD), XFW, M.entry))
     print('\n'.join(fi[:3]))
-    print('README: addresses in universe.tsv/codemap.tsv are absolute VAs at the preferred image base 0x%08x (RVA = VA - base)' % M.base)
+    print('README: addresses in universe.tsv/codemap.tsv are absolute VAs at the assigned load base 0x%08x (preferred base 0x%08x; RVA = VA - base)' % (M.base, M.pref))
     nri = sorted({n.split('!')[-1] for n in imports.values()} & codemap.NRIMP)
     print('noreturn entries %d (seeds: thrower %s; never-returning imports present: %s; call sites %d, jmp sites %d)' % (len(NR), 'yes' if eh.thrower in ent else 'no', ' '.join(nri) or 'none', len(nrcall), len(nrjmp)))
     pu = [e for e in E if e in proven and cnt[e][0]]; why_ud = Counter()
@@ -316,11 +388,11 @@ def run(path):
     print('entries with ud %d (candidate %d), candidate entries whose first instruction is ud %d, with xf %d, with reloc-misfit %d' % (
         sum(1 for e in E if cnt[e][0]), sum(1 for e in E if cnt[e][0] and e not in proven), sum(1 for e in E if e in ud and e not in proven), sum(1 for e in E if cnt[e][1]), sum(1 for e in E if cnt[e][2])))
     print('instructions: proven %d, candidate-only %d; ud sites %d, xf sites %d, misfit %d; vtable runs proven %d, jump tables proven %d' % (len(pset), cand_only, len(ud), len(xf), len(misfit), len(donevt), len(donejt)))
-    print('bytes of %d: %s' % (TN - cc[7], ', '.join('%s %d' % (CN[c], cc[c]) for c in sorted(CN))))
+    print('bytes of %d: %s' % (TN - cc[7], ', '.join('%s %d' % (CN[c] + ('-proven' if c == 1 else '-candidate' if c == 2 else ''), cc[c]) for c in sorted(CN))))
     print('pointer targets %d: (a) proven code %d, (b) data-read or PE-directory %d, (c) other %d; direct targets leaving spans: proven %d, candidate %d (in image %d)' % (len(pt), na, nb, nc, len(lvp), len(lv) - len(lvp), sum(1 for a, t in lv if img(t))))
     cm = {k: n for k, n in mcand.items() if k not in mp}
     print('mnemonics only in candidate-only code: %d mnemonics, %d instructions (of %d candidate-only); top 30: %s' % (len(cm), sum(cm.values()), cand_only, ' '.join('%s=%d' % kv for kv in sorted(cm.items(), key=lambda kv: (-kv[1], kv[0]))[:30])))
     print('mnemonics in proven code not in the exe universe (%d%s): %s' % (len([k for k in mp if k not in exe_mn]), '' if exe_mn else ', exe list missing', ' '.join('%s=%d' % kv for kv in new_mn)))
-    open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': len(targets), 'certified': cert, 'uncertified': len(targets) - cert}) + '\n')
-    print('gate l3.codemap.%s: %s (targets %d, certified %d)%s' % (name, 'green' if green else 'red', len(targets), cert, ''.join('; RED: ' + w for w in why)))
+    open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': TN - cc[7], 'certified': TN - cc[7] - nunx, 'uncertified': nunx, 'targets': len(targets), 'targets_certified': cert}) + '\n')
+    print('gate l3.codemap.%s: %s (bytes %d, unexplained %d; targets %d, certified %d)%s' % (name, 'green' if green else 'red', TN - cc[7], nunx, len(targets), cert, ''.join('; RED: ' + w for w in why)))
     return 0 if green else 1

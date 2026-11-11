@@ -2,6 +2,7 @@
 """The packager: the lifter's output for the whole code universe as linkable objects.
     liftall.py --shard K/N --out DIR [--jobs J]    lift + compile the entries whose index (address order) mod N == K  -> lift_K_of_N.a, manifest_K.tsv, missing_K.tsv, forms_K.tsv, undef_K.tsv
     liftall.py --finish --out DIR                  merge the shards -> manifest/missing/forms/undef.tsv, entries.tsv, disp.o (perfect-hash table, position independent), rt.a, gate_liftall.json
+liftall.py --module NAME ...                  (any mode) a module of modules.tsv: its file, its assigned load base (FNVNX_BASE) and FNVNX_FACTS_OUT/<name>/universe.tsv
 Deterministic: sorted iteration, no clocks in the outputs. Inputs FNVNX_EXE, FNVNX_UNIVERSE (universe.tsv), FNVNX_PROOF (certificates); outputs only under --out (exe-derived, never in the repository).
 Prerequisites: python3 with capstone, numpy, pyelftools, unicorn (test/instest.py imports them); aarch64-linux-gnu-g++/gcc/binutils."""
 import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, subprocess, sys, threading, time
@@ -160,9 +161,15 @@ def finish(a):
     syms = {int(r[0], 16): r[1] for r in man}
     code = dict(syms)
     imp = []
+    # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
+    rd = out + '/rt'; os.makedirs(rd, exist_ok=True)
+    jobs = [([CC] + CF, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c')]
+    jobs += [([CC] + CF + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists('%s/rt/%s' % (LIFT, f))]
+    for cmd, f in jobs: subprocess.check_call(cmd + ['%s/rt/%s' % (LIFT, f), '-o', '%s/%s.o' % (rd, f[:-2])])
+    rtdef = set(l.split()[-1] for _, f in jobs for l in run([NM, '-g', '--defined-only', '%s/%s.o' % (rd, f[:-2])]).stdout.splitlines() if l.split())
     if a.bridge:           # import entries (tools/impgen.py): keys of the bridge table join the dispatcher's domain
         import impgen
-        imp, blocked, hit, absent = impgen.generate(a.bridge, out, a.need, a.l3)
+        imp, blocked, hit, absent = impgen.generate(a.bridge, out, a.need, a.l3, rtdef)
         if hit or absent: sys.exit('finish: an import row a loaded image needs has no entry (imp_blocked.tsv)')
         assert not set(k for k, *_ in imp) & set(syms)
         syms.update({k: s for k, s, *_ in imp})
@@ -170,18 +177,13 @@ def finish(a):
     w('entries', [('%08x' % x, s, 'code' if x in code else 'import') for x, s in sorted(syms.items())])
     if imp: open(out + '/entries.tsv', 'a').write(open(out + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
     subprocess.check_call([CC, '-mabi=ilp32', '-fPIC', '-c', out + '/disp.S', '-o', out + '/disp.o'])
-    # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
-    rd = out + '/rt'; os.makedirs(rd, exist_ok=True)
-    jobs = [([CC] + CF, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c')]
-    jobs += [([CC] + CF + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists('%s/rt/%s' % (LIFT, f))]
-    for cmd, f in jobs: subprocess.check_call(cmd + ['%s/rt/%s' % (LIFT, f), '-o', '%s/%s.o' % (rd, f[:-2])])
     if imp:
         subprocess.check_call([CXX] + flags() + ['-x', 'c++', out + '/imp.cpp', '-o', rd + '/imp.o']); jobs.append((None, 'imp.c'))
     if os.path.exists(out + '/rt.a'): os.remove(out + '/rt.a')
     sf = sorted(l.split()[-1] for l in run([NM, '-g', '--defined-only', rd + '/x87.o']).stdout.splitlines() if l.split())      # the 80-bit integer-only core: the SoftFloat class of the instruction counter (L4)
     open(out + '/softfloat.tsv', 'w').write(''.join(x + '\n' for x in sf))
     subprocess.check_call([AR, 'Dcr', out + '/rt.a'] + ['%s/%s.o' % (rd, f[:-2]) for _, f in jobs])
-    nobody = len(ent) - len(syms)
+    nobody = len(ent) - len(man)
     cert = sum(v[0] for v in forms.values() if v[1] == 'sail'); tot = sum(v[0] for v in forms.values()); nc = sum(1 for v in forms.values() if v[1] == 'sail')
     reasons = collections.Counter(rclass(r[2]) for r in miss).most_common(5)
     bytes_ = sum(int(r[3]) for r in man)
@@ -194,12 +196,22 @@ def finish(a):
     if res['status'] != 'green': sys.exit('finish: %d universe entries have no body (missing.tsv): the pack is not complete' % (len(ent) - len(man)))
 
 
+def module_env(name):
+    """--module NAME: the file, the assigned load base and the universe of a modules.tsv module, as the environment the lifter tools read (FNVNX_EXE, FNVNX_BASE, FNVNX_UNIVERSE)."""
+    import pemod
+    path, row = pemod.locate(name); u = '%s/%s/universe.tsv' % (os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2'), os.path.splitext(row.name)[0])
+    if not os.path.exists(u): sys.exit('--module %s: no universe %s (tools/universe.py --module)' % (name, u))
+    os.environ.update(FNVNX_EXE=path, FNVNX_BASE='%08x' % row.base, FNVNX_UNIVERSE=u)
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--shard'); A('--finish', action='store_true'); A('--out', default='/home/user/l3work/liftall'); A('--jobs', type=int, default=3)
-    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe'))
+    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module', help='a module of modules.tsv (lifted at its assigned base, with its universe)')
     A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None)     # --finish: import entries
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True)
+    if a.module: a.exe = module_env(a.module)
     if a.finish: finish(a)
     elif a.shard: shard(a)
     else: ap.error('--shard K/N or --finish')

@@ -293,6 +293,10 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     fall_hi = hi + 0x1000 if strict else hi
     code = img.bytes(addr, fall_hi - addr)
     insns, tables, taken, bad = explore(img, lo, hi, code, start, owns if start == addr and explore_owns else (), fall_hi)
+    if start not in insns and start not in bad:     # an entry with an empty range (the universe found no decodable byte at it): its body is the #UD at its address
+        if next(iter(md.disasm(img.bytes(start, 16), start, 1)), None) is not None:
+            raise Unsupported('entry %x decodes but lies outside its range' % start)
+        bad = set(bad) | {start}
     order = sorted(insns)
     def head4(a):
         """the first four bytes at `a` (what KiTrap06Handler scans for F0): from `code`, beyond it from the image (none when the image has no byte there)"""

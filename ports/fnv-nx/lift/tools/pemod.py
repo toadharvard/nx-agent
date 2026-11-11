@@ -1,13 +1,38 @@
 #!/usr/bin/env python3
 """PE32 generalities for the lifter tools: sections, address translation, relocations, imports, exports, and the byte ranges that
 the PE data directories name (import/export/IAT/delay/debug/load-config/TLS/bound/resource/reloc). Pure functions of the file bytes."""
-import struct, bisect
+import os, struct, bisect
 from types import SimpleNamespace
 EXEC = 0x20000000 | 0x20           # IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE
+MODULES = '/home/user/wt-l1/modules/modules.tsv'                                  # L1's static load bases (env FNVNX_MODULES)
+MODDIRS = '/home/user/wt-exe:/home/user/wt-redist:/home/user/game'                # where the module files live (env FNVNX_MODDIRS)
+
+def modules(path=None):
+    """{lower-case file name: SimpleNamespace(name, sha256, size, pref, base, sizeimg, tls, entry, static)} from modules.tsv (L1: assigned_base is the load base of the image)."""
+    out = {}
+    for l in open(path or os.environ.get('FNVNX_MODULES', MODULES)):
+        if l[0] == '#' or not l.strip(): continue
+        f = l.rstrip('\n').split('\t'); h = lambda x: int(x, 16)
+        out[f[0].lower()] = SimpleNamespace(name=f[0].lower(), sha256=f[1], size=int(f[2]), pref=h(f[3]), base=h(f[4]), sizeimg=h(f[5]), tls=int(f[6]), entry=h(f[7]), static=int(f[8]))
+    return out
+
+def locate(arg):
+    """arg = a module file name or a path -> (path, modules.tsv row). The name must be in modules.tsv (else KeyError) and the file's sha256 and size must equal the row (else ValueError)."""
+    import hashlib
+    name = os.path.basename(arg).lower(); mods = modules()
+    if name not in mods and not name.endswith('.dll'): name += '.dll'
+    if name not in mods: raise KeyError('%s is not in modules.tsv' % name)
+    row = mods[name]; cand = [arg] if os.path.isfile(arg) else [os.path.join(d, f) for d in os.environ.get('FNVNX_MODDIRS', MODDIRS).split(':') if os.path.isdir(d) for f in sorted(os.listdir(d)) if f.lower() == name]
+    if not cand: raise FileNotFoundError('%s: no file in %s' % (name, os.environ.get('FNVNX_MODDIRS', MODDIRS)))
+    for c in cand:
+        h = hashlib.sha256(open(c, 'rb').read()).hexdigest()
+        if h == row.sha256 and os.path.getsize(c) == row.size: return c, row
+    raise ValueError('%s: sha256 mismatch against modules.tsv (%s has %s, expected %s)' % (name, cand[0], h, row.sha256))
 
 def load(path, newbase=None):
     """newbase=None: the file as stored (preferred base). Else the image as the Windows loader maps it at `base`: every address (sections, relocations,
     exports, entry VAs) at `newbase`, delta = newbase - preferred added to the dword of every HIGHLOW fixup, so all stored VAs (TLS directory, load config, tables) speak `newbase`."""
+    if newbase is None and os.environ.get('FNVNX_BASE'): newbase = int(os.environ['FNVNX_BASE'], 16)      # same resolver as fnvlift.Image
     d = open(path, 'rb').read(); pe = struct.unpack_from('<I', d, 0x3c)[0]
     assert d[pe:pe + 4] == b'PE\0\0' and struct.unpack_from('<H', d, pe + 24)[0] == 0x10b, 'not a PE32 image'
     nsec, soh = struct.unpack_from('<H', d, pe + 6)[0], struct.unpack_from('<H', d, pe + 20)[0]
@@ -75,6 +100,18 @@ def imports(M):
             v = M.u32(it + 4 * k)
             out[ia + 4 * k] = '%s!%s' % (dll, '#%d' % (v & 0xffff) if v >> 31 else M.cstr(b + (v & 0x7fffffff) + 2).decode('latin1')); k += 1
         a += 20
+    return out
+
+def delay_imports(M):
+    """[(dll, name)] of the delay-import directory."""
+    out = []; rva, sz = M.dirent(13)
+    if not rva: return out
+    a = M.base + rva
+    while M.u32(a + 4):
+        v = 0 if M.u32(a) & 1 else M.base; dll = M.cstr(v + M.u32(a + 4)).decode('latin1').lower(); k = 0; it = v + M.u32(a + 16)
+        while M.u32(it + 4 * k):
+            w = M.u32(it + 4 * k); out.append((dll, '#%d' % (w & 0xffff) if w >> 31 else M.cstr(v + (w & 0x7fffffff) + 2).decode('latin1'))); k += 1
+        a += 32
     return out
 
 def exports(M):

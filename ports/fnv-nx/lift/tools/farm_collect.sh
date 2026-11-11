@@ -4,12 +4,12 @@
 # Fetches fnv-nx-build l3a-lift/obj/<lifter sha12>/<K>of<N> for K = 0..N-1 (all must exist), runs liftall.py --finish (dispatcher table, runtime archive, import
 # entries when a bridge table is given) and test/liftall_check.py, and pushes the result as ONE orphan commit to fnv-nx-build branch l3a-lift/pack/<sha12>:
 # shards.txt (the N branches that hold lift_K_of_N.a), rt.a, disp.o, entries.tsv, manifest.tsv, missing.tsv, forms.tsv, undef.tsv, imp_entries.tsv, imp_blocked.tsv, gate_liftall.json, check.txt.
-# Env as farm_liftall.sh. Nothing exe-derived is written into this repository.
+# Env as farm_liftall.sh; FNVNX_PACK_SHA = the 12-digit lifter sha of the shards when the runtime (rt/, built here) is newer than the shards. Nothing exe-derived is written into this repository.
 set -euo pipefail
 N=$1; shift; BRIDGE=${1:-}; [ $# -gt 0 ] && shift
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/farm}
-SHA=$(git -C "$HERE" rev-parse HEAD | cut -c1-12); out="$W/pack-$SHA"; mkdir -p "$out"
+SHA=${FNVNX_PACK_SHA:-$(git -C "$HERE" rev-parse HEAD | cut -c1-12)}; out="$W/pack-$SHA"; mkdir -p "$out"
 export FNVNX_EXE="$W/in/gamedata_exe/FalloutNV.exe" FNVNX_UNIVERSE="$W/in/l3a-lift_facts/universe.tsv" PYTHONHASHSEED=0 LC_ALL=C
 for K in $(seq 0 $((N - 1))); do
     [ -f "$out/lift_${K}_of_${N}.a" ] && continue

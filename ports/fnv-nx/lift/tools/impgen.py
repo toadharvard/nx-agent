@@ -68,7 +68,9 @@ def thunk(r, target):
             '  fnvl_native_out(&nf); REGS(); %s c->ra=M32(sp); esp=sp+%du; }\n') % (r['key'], r['dll'], r['name'], conv, ret, args, do, put, pop)
 
 
-def generate(bridge, out, need=(), l3=None):
+def generate(bridge, out, need=(), l3=None, rt_defined=None):
+    """rt_defined: the global symbols the runtime objects define (nm); a bind-l3 row whose symbol is not among them has no body yet and is blocked like a
+    bind-none row (None: not checked, the unit test's case)."""
     rs, table_id = rows(bridge)
     over = {}
     if l3 and os.path.exists(l3):
@@ -88,6 +90,8 @@ def generate(bridge, out, need=(), l3=None):
             blocked.append((0xffffffff, r['dll'], r['name'], 'object address, not code (data)')); continue
         if k in over or r['bind'] == 'l3':
             s = over.get(k, r['sym'])
+            if rt_defined is not None and s not in rt_defined:
+                blocked.append((r['key'], r['dll'], r['name'], 'no body in the lifter runtime (bind l3)')); continue
             ent.append((r['key'], s, r['dll'], r['name'], 'l3')); continue
         why = ('no body in the platform (bind none)' if r['bind'] == 'none' else 'object address, not code (bind data)' if r['bind'] == 'data' or r['conv'] == 'data'
                else 'variadic: needs a platform body taking the address of the argument words' if r['conv'] == 'vararg' else None)
