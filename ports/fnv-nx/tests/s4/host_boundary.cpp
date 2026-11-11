@@ -23,6 +23,7 @@ extern "C" void fnvnx_reach_violation(uint32_t fact_id)
 
 extern "C" int g_bnd_lock_violations;
 extern "C" const char *g_bnd_test;
+void (*g_bnd_process_detach_hook)(void);
 extern "C" unsigned fnvnx_bnd_locks_held(void);
 
 /* ---- the platform locks each thread holds (os_posix.c reports every os_lock / os_trylock / os_unlock). The list keeps the
@@ -151,6 +152,17 @@ void fnvnx_bnd_print_lock_violations(void)
         print_site(g_sites[k].site, ", guest callee ", g_sites[k].callee);
 }
 
+struct fnvnx_bnd_mark fnvnx_bnd_violation_mark(void)
+{
+    return fnvnx_bnd_mark{__atomic_load_n(&g_bnd_lock_violations, __ATOMIC_RELAXED), g_nsites};
+}
+
+void fnvnx_bnd_violation_forget(struct fnvnx_bnd_mark m)
+{
+    __atomic_store_n(&g_bnd_lock_violations, m.violations, __ATOMIC_RELAXED);
+    g_nsites = m.sites;
+}
+
 void fnvnx_bnd_print_held(void)
 {
     for (unsigned i = 0; i < t_nheld && i < HELD_MAX; i++)
@@ -269,5 +281,7 @@ void fnvnx_bnd_process_detach(void)
 {
     enter_game("process_detach", 0);   /* DllMain(DLL_PROCESS_DETACH) of the modules */
     __atomic_fetch_add(&g_bnd_process_detaches, 1, __ATOMIC_RELAXED);
+    if (g_bnd_process_detach_hook)
+        g_bnd_process_detach_hook();
 }
 }
