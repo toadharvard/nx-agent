@@ -160,7 +160,7 @@ StreamKind sniff_reader(AsyncReader *rd)
     if (rd->Length(&total, &avail) < 0 || total <= 0) return SK_UNKNOWN;
     return sniff_core(rd_reader, rd, (uint64_t)total, nullptr, nullptr, nullptr);
 }
-HR read_all(AsyncReader *rd, Blob **out, volatile int *abort)
+HR read_all(AsyncReader *rd, Blob **out, volatile int *aborted)
 {
     LL total = 0, avail = 0;
     HR hr = rd->Length(&total, &avail);
@@ -169,7 +169,7 @@ HR read_all(AsyncReader *rd, Blob **out, volatile int *abort)
     Blob *b = blob_new((size_t)total);
     if (!b) return E_OUTOFMEMORY_;
     for (LL at = 0; at < total;) {   /* in pieces the reader can serve */
-        if (abort && *abort) { blob_unref(b); return E_ABORT_; }
+        if (aborted && *aborted) { blob_unref(b); return E_ABORT_; }
         long n = total - at < (1 << 16) ? (long)(total - at) : (1 << 16);
         hr = rd->SyncRead(at, n, b->data + at);
         if (hr < 0) { blob_unref(b); return hr; }
@@ -422,7 +422,7 @@ HR BPin::ReceiveConnection(IPin_ *c, const MT *mt)
     int cd = -1;
     if (c->QueryDirection(&cd) < 0 || cd != PINDIR_OUTPUT) return VFW_E_INVALID_DIRECTION_;
     if (QueryAccept(mt) != S_OK_) return VFW_E_TYPE_NOT_ACCEPTED_;
-    HR hr = owner->input_connected(this, c, mt);
+    HR hr = as_stage(owner)->input_connected(this, c, mt);
     if (hr < 0) return hr;
     peer = c;
     c->AddRef();
@@ -438,7 +438,7 @@ HR BPin::Disconnect()
     IPin_ *p = peer;
     peer = nullptr;
     mt_free(&cur);
-    if (dir == PINDIR_INPUT) owner->input_disconnected(this);
+    if (dir == PINDIR_INPUT) as_stage(owner)->input_disconnected(this);
     if (owner->graph) owner->graph->bump_version();
     p->Release();   /* last: it may free the filter on the other side */
     return S_OK_;
@@ -584,7 +584,7 @@ HR BFilter::QueryInterface(const void *iid, void **out)
     *out = nullptr;
     if (geq(iid, IID_IUnknown_) || geq(iid, IID_IPersist_) || geq(iid, IID_IMediaFilter_) || geq(iid, IID_IBaseFilter_))
         *out = static_cast<IBaseFilter_ *>(this);
-    else if (geq(iid, IID_IReferenceClock_) && kind == K_RENDERER) *out = static_cast<IReferenceClock_ *>(this);
+    else if (geq(iid, IID_IReferenceClock_) && kind == K_RENDERER) *out = static_cast<IReferenceClock_ *>(as_renderer(this));
     else if (geq(iid, IID_DshFilter_)) *out = this;
     else return E_NOINTERFACE_;
     AddRef();
@@ -651,11 +651,11 @@ HR BFilter::JoinFilterGraph(IFilterGraph_ *g, const WCH *n)
 
 /* ---- the MPEG-1 audio splitter: a Layer III stream in, the frames out */
 namespace {
-struct Splitter final : BFilter {
+struct Splitter final : Stage, ByteSource {
     Blob *blob = nullptr;
     uint32_t hz = 0, ch = 0, kbps = 0;
     BPin *in, *out;
-    Splitter() : BFilter(K_SPLITTER, &CLSID_MPEG1Splitter_)
+    Splitter() : Stage(K_SPLITTER, &CLSID_MPEG1Splitter_)
     {
         in = add_pin(PINDIR_INPUT, "Input");
         out = add_pin(PINDIR_OUTPUT, "Audio");
@@ -673,7 +673,7 @@ struct Splitter final : BFilter {
         HR hr = S_OK_;
         Blob *b = nullptr;
         if (sniff_reader(rd) != SK_MP3) hr = VFW_E_TYPE_NOT_ACCEPTED_;
-        else hr = read_all(rd, &b, graph ? &graph->abort : nullptr);
+        else hr = read_all(rd, &b, graph ? &graph->aborted : nullptr);
         rd->Release();   /* the stream is in memory: the source's reader is not kept */
         if (hr < 0) return hr;
         blob_unref(blob);
@@ -692,14 +692,14 @@ struct Splitter final : BFilter {
 };
 
 /* ---- the MPEG audio (Layer III) decoder, minimp3 */
-struct Decoder final : BFilter {
+struct Decoder final : Stage, PcmSource {
     mp3dec_ex_t dec;
     bool open = false;
     Blob *blob = nullptr;
     uint32_t hz = 0, ch = 0;
     BPin *in, *out;
     mp3d_sample_t tmp[2048 * 2];
-    Decoder() : BFilter(K_DECODER, &CLSID_MPEGAudioDecoder_)
+    Decoder() : Stage(K_DECODER, &CLSID_MPEGAudioDecoder_)
     {
         memset(&dec, 0, sizeof dec);
         in = add_pin(PINDIR_INPUT, "In");
@@ -721,7 +721,8 @@ struct Decoder final : BFilter {
     HR input_connected(BPin *, IPin_ *peer, const MT *) override
     {
         BPin *up = internal_pin(peer);   /* our splitter: the byte stream is its output pin's */
-        Blob *b = up ? up->owner->bytes(up) : nullptr;
+        ByteSource *bs = up ? as_bytes(up->owner) : nullptr;
+        Blob *b = bs ? bs->bytes(up) : nullptr;
         if (!b) return VFW_E_NO_TRANSPORT_;
         close();
         blob = blob_ref(b);
@@ -772,12 +773,12 @@ struct Decoder final : BFilter {
 };
 
 /* ---- the WAVE parser: RIFF/WAVE with PCM (or WAVE_FORMAT_EXTENSIBLE PCM), 8 or 16 bits, mono or stereo */
-struct Parser final : BFilter {
+struct Parser final : Stage, PcmSource {
     Blob *blob = nullptr;
     uint32_t rate = 0, ch = 0, bits = 0;
     uint64_t data_off = 0, frames = 0, pos = 0;
     BPin *in, *out;
-    Parser() : BFilter(K_PARSER, &CLSID_WAVEParser_)
+    Parser() : Stage(K_PARSER, &CLSID_WAVEParser_)
     {
         in = add_pin(PINDIR_INPUT, "input pin");
         out = add_pin(PINDIR_OUTPUT, "Output");
@@ -829,7 +830,7 @@ struct Parser final : BFilter {
         HR hr = S_OK_;
         Blob *b = nullptr;
         if (sniff_reader(rd) != SK_WAVE) hr = VFW_E_TYPE_NOT_ACCEPTED_;
-        else hr = read_all(rd, &b, graph ? &graph->abort : nullptr);
+        else hr = read_all(rd, &b, graph ? &graph->aborted : nullptr);
         rd->Release();
         if (hr < 0) return hr;
         if (!parse(b)) { blob_unref(b); return VFW_E_TYPE_NOT_ACCEPTED_; }
@@ -879,6 +880,7 @@ struct Advise { uintptr_t h; LL at, period; bool periodic; uintptr_t cookie; };
 struct DSoundRender final : Renderer {
     BPin *in;
     BPin *up = nullptr;
+    PcmSource *src = nullptr;   /* what feeds up: set with it */
     mix_voice *voice = nullptr;
     int16_t *ring = nullptr;
     uint32_t rate = 0, last_cursor = 0;
@@ -918,13 +920,15 @@ struct DSoundRender final : Renderer {
         BPin *u = internal_pin(peer);
         uint32_t r = 0;
         uint64_t fr = 0;
-        if (!u || !u->owner->pcm_info(u, &r, &fr)) return VFW_E_NO_TRANSPORT_;   /* only a stream of ours can be pulled */
+        PcmSource *ps = u ? as_pcm(u->owner) : nullptr;
+        if (!ps || !ps->pcm_info(u, &r, &fr)) return VFW_E_NO_TRANSPORT_;   /* only a stream of ours can be pulled */
         Lk lk(graph);
         if (!ring) ring = (int16_t *)calloc(RING_FRAMES, 2 * sizeof(int16_t));
         mix_format f = {r, 2, 16, 4, 0};
         voice = ring ? mixer_voice_create(&f, (uint8_t *)ring, RING_FRAMES * 4) : nullptr;
         if (!voice) return E_OUTOFMEMORY_;
         up = u;
+        src = ps;
         rate = r;
         total = fr;
         stop_frame = ~0ull;
@@ -942,6 +946,7 @@ struct DSoundRender final : Renderer {
         free(ring);
         ring = nullptr;
         up = nullptr;
+        src = nullptr;
         total = rate = 0;
     }
     void input_disconnected(BPin *) override { detach(); }
@@ -950,7 +955,7 @@ struct DSoundRender final : Renderer {
         if (frame > total) frame = total;
         bool run = voice && fstate == State_Running;
         if (voice && run) mixer_voice_stop(voice);
-        if (up) up->owner->pcm_seek(up, frame);
+        if (src) src->pcm_seek(up, frame);
         start_frame = frame;
         stop_frame = stop;
         decoded = played = 0;
@@ -981,7 +986,7 @@ struct DSoundRender final : Renderer {
             uint64_t want = played + AHEAD_FRAMES - decoded;
             if (want > 4096) want = 4096;
             if (want > lim - at_abs) want = lim - at_abs;
-            size_t got = up->owner->pcm_read(up, tmp, (size_t)want);
+            size_t got = src->pcm_read(up, tmp, (size_t)want);
             if (!got) { eos = errored = true; break; }   /* the stream ended before its length: a read error */
             for (size_t i = 0; i < got; i++) {
                 uint32_t at = (uint32_t)((decoded + i) % RING_FRAMES);
@@ -1139,6 +1144,15 @@ struct DSoundRender final : Renderer {
 /* the renderer's pin reacts to the stream-control calls: EndOfStream ends the stream where it is, BeginFlush /
  * EndFlush discard what is queued, NewSegment's rate becomes the voice's playback rate */
 Renderer *as_renderer(BFilter *f) { return f && f->kind == K_RENDERER ? static_cast<Renderer *>(f) : nullptr; }
+Stage *as_stage(BFilter *f) { return f && f->kind != K_FILESRC ? static_cast<Stage *>(f) : nullptr; }
+PcmSource *as_pcm(BFilter *f)
+{
+    if (!f) return nullptr;
+    if (f->kind == K_DECODER) return static_cast<Decoder *>(f);
+    if (f->kind == K_PARSER) return static_cast<Parser *>(f);
+    return nullptr;
+}
+ByteSource *as_bytes(BFilter *f) { return f && f->kind == K_SPLITTER ? static_cast<Splitter *>(f) : nullptr; }
 
 /* ---- the file source (AddSourceFilter / RenderFile): the file through the layer's CreateFileA / ReadFile */
 namespace {
@@ -1230,7 +1244,7 @@ struct ReaderPin final : IPin_ {
         if (hr >= 0) { peer = r; r->AddRef(); }
         return hr;
     }
-    HR ReceiveConnection(IPin_ *, const MT *) override { return VFW_E_INVALID_DIRECTION_; }
+    HR ReceiveConnection(IPin_ *, const MT *) override;
     HR Disconnect() override
     {
         if (!peer) return S_FALSE_;
@@ -1255,12 +1269,13 @@ struct ReaderPin final : IPin_ {
         return *e ? S_OK_ : E_OUTOFMEMORY_;
     }
     HR QueryInternalConnections(IPin_ **, uint32_t *n) override { *n = 0; return S_OK_; }
-    HR EndOfStream() override { return E_UNEXPECTED_; }
-    HR BeginFlush() override { return E_UNEXPECTED_; }
-    HR EndFlush() override { return E_UNEXPECTED_; }
-    HR NewSegment(LL, LL, double) override { return E_UNEXPECTED_; }
+    HR EndOfStream() override;
+    HR BeginFlush() override;
+    HR EndFlush() override;
+    HR NewSegment(LL, LL, double) override;
 };
 }   // namespace
+#include "dshow_filters.env_const.gen.inc"   /* BFilter::QueryVendorInfo and the output pin's stream calls: manifest/env_const.tsv */
 
 void reader_pin_orphan(IPin_ *p) { static_cast<ReaderPin *>(p)->rd = nullptr; }
 IPin_ *make_reader_pin(AsyncReader *rd) { return new (std::nothrow) ReaderPin(rd); }

@@ -81,7 +81,7 @@ test: $(OUT)/s4_tests
 # missing when a cross compiler replaced them; the x86-64 asm headers serve i386 too.
 M32OUT := $(OUT)-m32
 M32FLAGS := -m32 -idirafter /usr/include/x86_64-linux-gnu $(FLAGS) -I$(ROOT)/shim/include
-M32_CXX := $(PLAT_CXX) $(wildcard $(P)/audio/*.cpp) $(wildcard $(P)/input/*.cpp)   # input_horizon.cpp: host no-op pump
+M32_CXX := $(PLAT_CXX) $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only; m32/host_input.cpp pumps
 # the D3D9=null guest's D3D side (toolchain/game/build.sh): D3DX and the null device (d3d9.dll module)
 M32_D3D := $(wildcard $(ROOT)/render/nine/d3dx/*.cpp) $(ROOT)/toolchain/game/null_d3d9.cpp
 M32_TEST := $(wildcard $(HERE)/m32/*.cpp)
@@ -97,6 +97,12 @@ $(M32OUT)/toolchain/game/null_d3d9.cpp.o: $(ROOT)/toolchain/game/null_d3d9.cpp
 $(M32OUT)/tests/s4/m32/%.cpp.o: $(HERE)/m32/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -std=gnu++17 $(M32FLAGS) -include $(HERE)/m32/compat_m32.h -c $< -o $@
+# the imports whose documented result is one constant are generated from platform/manifest/env_const.tsv
+ENVC_SRC := audio/dshow audio/dshow_filters audio/dsound audio/waveout input/dinput
+$(P)/%.env_const.gen.inc: $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only $*.cpp
+$(foreach s,$(ENVC_SRC),$(eval $(M32OUT)/platform/$(s).cpp.o: $(P)/$(s).env_const.gen.inc))
+
 $(M32OUT)/%.c.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(M32FLAGS) -c $< -o $@

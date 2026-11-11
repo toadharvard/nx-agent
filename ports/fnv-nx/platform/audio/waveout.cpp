@@ -210,7 +210,7 @@ void fnvnx_waveout_service(void)
     }
 }
 
-UINT waveOutGetNumDevs(void) { return 1; }
+#include "waveout.env_const.gen.inc"   /* waveOutGetNumDevs: manifest/env_const.tsv */
 
 UINT waveOutGetDevCapsA(uintptr_t id, void *out, UINT cb)
 {

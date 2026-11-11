@@ -498,31 +498,28 @@ struct Site final : IObjectWithSite_ {
     HR GetSite(const void *iid, void **) override;
 };
 /* IVideoWindow (39 methods) and IBasicVideo (32): the graph forwards to a video renderer; with none every method fails
- * with E_NOINTERFACE, as an audio-only graph does. The slots are what matters; the arguments are not read. */
+ * with E_NOINTERFACE, as an audio-only graph does (the bodies are the table rows; the slots are what matters). */
 #define V10(n) virtual HR n##0() = 0; virtual HR n##1() = 0; virtual HR n##2() = 0; virtual HR n##3() = 0; virtual HR n##4() = 0; \
                virtual HR n##5() = 0; virtual HR n##6() = 0; virtual HR n##7() = 0; virtual HR n##8() = 0; virtual HR n##9() = 0;
-#define O10(n) HR n##0() override { return E_NOINTERFACE_; } HR n##1() override { return E_NOINTERFACE_; } HR n##2() override { return E_NOINTERFACE_; } \
-               HR n##3() override { return E_NOINTERFACE_; } HR n##4() override { return E_NOINTERFACE_; } HR n##5() override { return E_NOINTERFACE_; } \
-               HR n##6() override { return E_NOINTERFACE_; } HR n##7() override { return E_NOINTERFACE_; } HR n##8() override { return E_NOINTERFACE_; } \
-               HR n##9() override { return E_NOINTERFACE_; }
+#define O10(n) HR n##0() override; HR n##1() override; HR n##2() override; HR n##3() override; HR n##4() override; \
+               HR n##5() override; HR n##6() override; HR n##7() override; HR n##8() override; HR n##9() override;
 struct VideoWindowI : IDispatch_ { V10(a) V10(b) V10(c) virtual HR d0() = 0; virtual HR d1() = 0; virtual HR d2() = 0; virtual HR d3() = 0; virtual HR d4() = 0; virtual HR d5() = 0; virtual HR d6() = 0; virtual HR d7() = 0; virtual HR d8() = 0; };
 struct BasicVideoI : IDispatch_ { V10(a) V10(b) V10(c) virtual HR d0() = 0; virtual HR d1() = 0; };
 #define NOVIDEO_DISPATCH                                                                                      \
     HR GetTypeInfoCount(unsigned *n) override { if (!n) return E_POINTER_; *n = 1; return S_OK_; }           \
     HR GetTypeInfo(unsigned i, uint32_t, void **o) override { if (o) *o = nullptr; return i ? DISP_E_BADINDEX_ : TYPE_E_CANTLOADLIBRARY_; } \
-    HR GetIDsOfNames(const void *, WCH **, unsigned, uint32_t, long *) override { return E_NOINTERFACE_; }  \
-    HR Invoke(long, const void *, uint32_t, uint16_t, void *, void *, void *, unsigned *) override { return E_NOINTERFACE_; }
+    HR GetIDsOfNames(const void *, WCH **, unsigned, uint32_t, long *) override;                            \
+    HR Invoke(long, const void *, uint32_t, uint16_t, void *, void *, void *, unsigned *) override;
 struct VideoWindow final : VideoWindowI {
     SUB_UNK NOVIDEO_DISPATCH
     O10(a) O10(b) O10(c)
-    HR d0() override { return E_NOINTERFACE_; } HR d1() override { return E_NOINTERFACE_; } HR d2() override { return E_NOINTERFACE_; }
-    HR d3() override { return E_NOINTERFACE_; } HR d4() override { return E_NOINTERFACE_; } HR d5() override { return E_NOINTERFACE_; }
-    HR d6() override { return E_NOINTERFACE_; } HR d7() override { return E_NOINTERFACE_; } HR d8() override { return E_NOINTERFACE_; }
+    HR d0() override; HR d1() override; HR d2() override; HR d3() override; HR d4() override;
+    HR d5() override; HR d6() override; HR d7() override; HR d8() override;
 };
 struct BasicVideo final : BasicVideoI {
     SUB_UNK NOVIDEO_DISPATCH
     O10(a) O10(b) O10(c)
-    HR d0() override { return E_NOINTERFACE_; } HR d1() override { return E_NOINTERFACE_; }
+    HR d0() override; HR d1() override;
 };
 
 struct Graph final : IFilterGraph2_, GraphCore {
@@ -590,8 +587,8 @@ struct Graph final : IFilterGraph2_, GraphCore {
     HR RenderFile(const WCH *, const WCH *) override;
     HR AddSourceFilter(const WCH *, const WCH *, IBaseFilter_ **) override;
     HR SetLogFile(uintptr_t h) override { logh = h; return S_OK_; }
-    HR Abort() override { abort = 1; return S_OK_; }
-    HR ShouldOperationContinue() override { return abort ? S_FALSE_ : S_OK_; }
+    HR Abort() override { aborted = 1; return S_OK_; }
+    HR ShouldOperationContinue() override { return aborted ? S_FALSE_ : S_OK_; }
     HR AddSourceFilterForMoniker(void *, void *, const WCH *, IBaseFilter_ **) override;
     HR ReconnectEx(IPin_ *p, const MT *mt) override { return reconnect(p, mt); }
     HR RenderEx(IPin_ *, uint32_t, uint32_t *) override;
@@ -631,6 +628,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
     unsigned long T::Release() { return g->Release(); }
 SUB_UNK_IMPL(Control) SUB_UNK_IMPL(Event) SUB_UNK_IMPL(Sink) SUB_UNK_IMPL(MFilter) SUB_UNK_IMPL(Seeking) SUB_UNK_IMPL(Position)
 SUB_UNK_IMPL(Audio) SUB_UNK_IMPL(Version) SUB_UNK_IMPL(Site) SUB_UNK_IMPL(VideoWindow) SUB_UNK_IMPL(BasicVideo)
+#include "dshow.env_const.gen.inc"   /* the video methods: manifest/env_const.tsv rows of audio/dshow.cpp */
 
 HR Graph::QueryInterface(const void *iid, void **out)
 {
@@ -937,7 +935,7 @@ HR Graph::downstream(BFilter *f, IPin_ *target, bool existing_only, int depth)
 HR Graph::build(IPin_ *out, IPin_ *target, bool existing_only, int depth)
 {
     if (depth > 6) return VFW_E_CANNOT_CONNECT_;
-    if (abort) return E_ABORT_;
+    if (aborted) return E_ABORT_;
     HR fail = target ? VFW_E_CANNOT_CONNECT_ : VFW_E_CANNOT_RENDER_;
     if (target) {
         HR hr = connect_logged(out, target);
@@ -963,7 +961,7 @@ HR Graph::build(IPin_ *out, IPin_ *target, bool existing_only, int depth)
         for (size_t k = 0; k < bf->pins.n && result < 0; k++) {
             BPin *p = bf->pins[k];
             if (p->dir != PINDIR_INPUT || p->peer || static_cast<IPin_ *>(p) == target) continue;
-            if (abort) { result = E_ABORT_; break; }
+            if (aborted) { result = E_ABORT_; break; }
             if (connect_logged(out, static_cast<IPin_ *>(p)) < 0) continue;
             HR hr = downstream(bf, target, existing_only, depth);
             if (hr >= 0) result = hr;
@@ -1000,7 +998,7 @@ HR Graph::build(IPin_ *out, IPin_ *target, bool existing_only, int depth)
         os_unlock(&g_reg_lock);
     }
     for (size_t i = 0; i < cands.n && result < 0; i++) {
-        if (abort) { result = E_ABORT_; break; }
+        if (aborted) { result = E_ABORT_; break; }
         BFilter *nf = make_filter(cands[i].clsid);
         if (!nf) continue;   /* registered, but not a filter this environment can create */
         if (add_filter(static_cast<IBaseFilter_ *>(nf), cands[i].name, true) < 0) { nf->Release(); continue; }
@@ -1022,7 +1020,7 @@ HR Graph::build(IPin_ *out, IPin_ *target, bool existing_only, int depth)
 HR Graph::Connect(IPin_ *out, IPin_ *in)
 {
     if (!out || !in) return E_POINTER_;
-    abort = 0;
+    aborted = 0;
     int d1 = -1, d2 = -1;
     if (out->QueryDirection(&d1) < 0 || in->QueryDirection(&d2) < 0 || d1 != PINDIR_OUTPUT || d2 != PINDIR_INPUT) return VFW_E_INVALID_DIRECTION_;
     if (!pin_in_graph(out) || !pin_in_graph(in)) return VFW_E_NOT_IN_GRAPH_;
@@ -1033,7 +1031,7 @@ HR Graph::Connect(IPin_ *out, IPin_ *in)
 HR Graph::render(IPin_ *pin, bool existing_only)
 {
     if (!pin) return E_POINTER_;
-    abort = 0;
+    aborted = 0;
     IPin_ *ip = nullptr, *legacy = nullptr;
     if (pin->QueryInterface(&IID_IPin_, (void **)&ip) < 0 || !ip) {   /* a source that only exposes IAsyncReader */
         AsyncReader *rd = nullptr;
@@ -1075,7 +1073,7 @@ HR Graph::RenderEx(IPin_ *pin, uint32_t flags, uint32_t *context)
 HR Graph::AddSourceFilter(const WCH *file, const WCH *name, IBaseFilter_ **out)
 {
     if (!file || !out) return E_POINTER_;
-    abort = 0;
+    aborted = 0;
     *out = nullptr;
     BFilter *src = nullptr;
     HR hr = make_file_source(file, &src);
@@ -1769,7 +1767,7 @@ void pump_main(void *p)
         {
             GL l(g);
             for (size_t i = 0; i < g->filters.n; i++)
-                if (g->filters[i].bf) g->filters[i].bf->tick_locked();
+                if (Renderer *r = as_renderer(g->filters[i].bf)) r->tick_locked();
         }
         g->flush_window();
         os_sleep_ns(10 * 1000000ull);

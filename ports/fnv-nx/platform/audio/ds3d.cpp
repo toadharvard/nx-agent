@@ -24,10 +24,10 @@ static ds3d_vec cross(ds3d_vec a, ds3d_vec b)
     return v3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
 }
 static float len(ds3d_vec a) { return sqrtf(dot(a, a)); }
-static ds3d_vec norm(ds3d_vec a, ds3d_vec fallback)
+static ds3d_vec norm(ds3d_vec a, ds3d_vec dflt)
 {
     float l = len(a);
-    return l > 1e-12f ? scale(a, 1.0f / l) : fallback;
+    return l > 1e-12f ? scale(a, 1.0f / l) : dflt;
 }
 
 void ds3d_source_merge(ds3d_source *d, const ds3d_source *s, unsigned m)

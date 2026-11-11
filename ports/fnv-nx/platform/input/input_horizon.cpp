@@ -1,12 +1,9 @@
 /* input_horizon.cpp - libnx hid sources: Npad -> pad source (players 1..4), vibration, USB keyboard and mouse,
- * touch screen -> touch-as-mouse. Unbuilt so far (S5 owns the toolchain); syntax-checked against libnx headers.
- * On a host build this file only provides fnvnx_input_pump() as a no-op. */
+ * touch screen -> touch-as-mouse. Built only against libnx (host builds and the guest link leave it out; they define
+ * fnvnx_input_pump themselves). */
 #include "input.h"
 #include "../os/os.h"
 
-#ifndef __SWITCH__
-extern "C" void fnvnx_input_pump(void) {}
-#else
 #include <switch.h>
 #include <string.h>
 
@@ -137,4 +134,3 @@ static void hz_vibrate(unsigned i, float lo, float hi)
 
 static const fnvnx_pad_source g_src = {hz_read, hz_vibrate};
 extern "C" const fnvnx_pad_source *fnvnx_pad_horizon_source(void) { return &g_src; }
-#endif

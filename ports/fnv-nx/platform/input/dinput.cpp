@@ -520,7 +520,7 @@ struct Device final : IDirectInputDevice8A {
     HRESULT STDMETHODCALLTYPE EnumEffects(void *cb, LPVOID, DWORD) override { return cb ? DI_OK : DIERR_INVALIDPARAM; }
     HRESULT STDMETHODCALLTYPE GetEffectInfo(void *p, REFGUID) override { return p ? DIERR_UNSUPPORTED : DIERR_INVALIDPARAM; }
     HRESULT STDMETHODCALLTYPE GetForceFeedbackState(LPDWORD p) override { return p ? DIERR_UNSUPPORTED : DIERR_INVALIDPARAM; }
-    HRESULT STDMETHODCALLTYPE SendForceFeedbackCommand(DWORD) override { return DIERR_UNSUPPORTED; }
+    HRESULT STDMETHODCALLTYPE SendForceFeedbackCommand(DWORD) override;   /* env_const.tsv */
     HRESULT STDMETHODCALLTYPE EnumCreatedEffectObjects(void *cb, LPVOID, DWORD fl) override { return !cb || fl ? DIERR_INVALIDPARAM : DI_OK; }
     HRESULT STDMETHODCALLTYPE Escape(void *p) override { return p ? DIERR_UNSUPPORTED : DIERR_INVALIDPARAM; }
     HRESULT STDMETHODCALLTYPE Poll() override
@@ -850,6 +850,7 @@ struct DInput final : IDirectInput8A {
     }
 };
 
+#include "dinput.env_const.gen.inc"   /* Device::SendForceFeedbackCommand: manifest/env_const.tsv */
 } // namespace
 
 extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE, DWORD ver, REFIID iid, LPVOID *out, LPUNKNOWN outer)

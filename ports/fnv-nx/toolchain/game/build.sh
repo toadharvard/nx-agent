@@ -47,6 +47,9 @@ compile() {   # src obj extra-flags...
 }
 export -f compile; export COMMON PINC ARCH
 
+for s in audio/dshow audio/dshow_filters audio/dsound audio/waveout input/dinput; do   # constant-result imports: manifest/env_const.tsv
+	python3 -I "$P/manifest/gen_env_const.py" "$P/manifest/env_const.tsv" "$P/$s.env_const.gen.inc" --only "$s.cpp" || exit 1
+done
 SRCS=()
 for f in "$P"/win32/*.cpp "$P"/crt/*.c "$P"/crt/*.cpp "$P"/audio/*.cpp "$P"/input/*.cpp; do
 	case "$f" in */input_horizon.cpp) continue ;; esac   # its libnx part is on the host (host_v3.inc)

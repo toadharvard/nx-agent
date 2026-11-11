@@ -351,7 +351,7 @@ void blob_unref(Blob *b);
 
 enum StreamKind { SK_UNKNOWN, SK_MP3, SK_WAVE };
 StreamKind sniff_reader(AsyncReader *rd);   /* what the stream is, from its bytes (the graph's byte-pattern check) */
-HR read_all(AsyncReader *rd, Blob **out, volatile int *abort);   /* the whole stream through Length/SyncRead */
+HR read_all(AsyncReader *rd, Blob **out, volatile int *aborted);   /* the whole stream through Length/SyncRead */
 
 enum Kind { K_SPLITTER, K_PARSER, K_DECODER, K_RENDERER, K_FILESRC };
 struct BFilter;
@@ -359,7 +359,7 @@ struct BFilter;
 /* what the filters need of their graph; implemented by Graph (dshow.cpp) */
 struct GraphCore {
     os_lock_t lock = {0};
-    volatile int abort = 0;
+    volatile int aborted = 0;
     volatile int version = 0;   /* IGraphVersion: +1 on every AddFilter / RemoveFilter / pin connect / pin disconnect */
     void bump_version() { __atomic_add_fetch(&version, 1, __ATOMIC_ACQ_REL); }
     virtual bool event_locked(long code, intptr_t p1, intptr_t p2) = 0;   /* queue an event; true if a window post is due */
@@ -413,7 +413,7 @@ struct BPin : IPin_, AsyncReader {   /* IAsyncReader is served only by a file so
 BPin *internal_pin(IPin_ *p);   /* our own pin behind an IPin, else null */
 BFilter *internal_filter(Unk *f);
 
-struct BFilter : IBaseFilter_, IReferenceClock_ {
+struct BFilter : IBaseFilter_ {
     int refs = 1;
     Kind kind;
     GraphCore *graph = nullptr;
@@ -440,24 +440,31 @@ struct BFilter : IBaseFilter_, IReferenceClock_ {
     HR FindPin(const WCH *, IPin_ **) override;
     HR QueryFilterInfo(FilterInfo *) override;
     HR JoinFilterGraph(IFilterGraph_ *, const WCH *) override;
-    HR QueryVendorInfo(WCH **) override { return E_NOTIMPL_; }   /* the SDK's result for a filter without vendor info */
-    /* the stage's hooks */
-    virtual HR input_connected(BPin *in, IPin_ *peer, const MT *mt) { return S_OK_; }
-    virtual void input_disconnected(BPin *in) {}
+    HR QueryVendorInfo(WCH **) override;   /* env_const.tsv: MSDN says E_NOTIMPL for a filter without vendor info */
     virtual bool accepts(BPin *p, const MT *mt);
     virtual void set_state(int st) { fstate = st; }
-    virtual void tick_locked() {}   /* the pump, graph lock held */
-    /* the pull path: stereo int16 frames out of an output pin; the byte stream out of a splitter's output pin */
-    virtual bool pcm_info(BPin *out, uint32_t *rate, uint64_t *frames) { return false; }
-    virtual bool pcm_seek(BPin *out, uint64_t frame) { return false; }
-    virtual size_t pcm_read(BPin *out, int16_t *dst, size_t frames) { return 0; }
-    virtual Blob *bytes(BPin *out) { return nullptr; }
-    /* IReferenceClock_ (a renderer's) */
-    HR GetTime(LL *t) override { return t ? E_NOINTERFACE_ : E_POINTER_; }
-    HR AdviseTime(LL, LL, uintptr_t, uintptr_t *) override { return E_NOINTERFACE_; }
-    HR AdvisePeriodic(LL, LL, uintptr_t, uintptr_t *) override { return E_NOINTERFACE_; }
-    HR Unadvise(uintptr_t) override { return E_NOINTERFACE_; }
 };
+
+/* a filter with an input pin (every kind but the file source): its input connects and disconnects */
+struct Stage : BFilter {
+    using BFilter::BFilter;
+    virtual HR input_connected(BPin *in, IPin_ *peer, const MT *mt) = 0;
+    virtual void input_disconnected(BPin *in) = 0;
+};
+Stage *as_stage(BFilter *f);   /* null for the file source */
+
+/* the pull path: stereo int16 frames out of an output pin (decoder, WAVE parser) */
+struct PcmSource {
+    virtual bool pcm_info(BPin *out, uint32_t *rate, uint64_t *frames) = 0;
+    virtual bool pcm_seek(BPin *out, uint64_t frame) = 0;
+    virtual size_t pcm_read(BPin *out, int16_t *dst, size_t frames) = 0;
+};
+PcmSource *as_pcm(BFilter *f);   /* null for a filter that offers no PCM */
+/* the byte stream out of a splitter's output pin */
+struct ByteSource {
+    virtual Blob *bytes(BPin *out) = 0;
+};
+ByteSource *as_bytes(BFilter *f);   /* null for a filter that offers no byte stream */
 
 /* a snapshot enumerator: pins and filters (AddRef'd Unk), media types (MT copies), registry filters (RegFilter copies) */
 enum EnumKind { EK_UNK, EK_MT, EK_REG };
@@ -473,8 +480,12 @@ struct ClassDesc { const Guid *clsid; const char *name; uint32_t merit; Kind kin
 extern const ClassDesc g_classes[4];
 
 /* the renderer's per-stream engine (graph lock held by the caller) */
-struct Renderer : BFilter {
-    Renderer() : BFilter(K_RENDERER, &CLSID_DSoundRender_) {}
+struct Renderer : Stage, IReferenceClock_ {
+    Renderer() : Stage(K_RENDERER, &CLSID_DSoundRender_) {}
+    HR QueryInterface(const void *iid, void **out) override { return BFilter::QueryInterface(iid, out); }   /* one identity for both bases */
+    unsigned long AddRef() override { return BFilter::AddRef(); }
+    unsigned long Release() override { return BFilter::Release(); }
+    virtual void tick_locked() = 0;   /* the pump, graph lock held */
     virtual bool connected() = 0;
     virtual uint64_t total_frames() = 0;
     virtual uint32_t src_rate() = 0;

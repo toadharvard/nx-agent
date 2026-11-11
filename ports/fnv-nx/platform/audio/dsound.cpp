@@ -341,7 +341,7 @@ struct Ks final : KsProperty {
     ULONG STDMETHODCALLTYPE AddRef() override;
     ULONG STDMETHODCALLTYPE Release() override;
     HRESULT STDMETHODCALLTYPE Get(REFGUID, ULONG, LPVOID, ULONG, LPVOID, ULONG, PULONG ret) override { if (ret) *ret = 0; return E_PROP_ID_UNSUPPORTED_; }
-    HRESULT STDMETHODCALLTYPE Set(REFGUID, ULONG, LPVOID, ULONG, LPVOID, ULONG) override { return E_PROP_ID_UNSUPPORTED_; }
+    HRESULT STDMETHODCALLTYPE Set(REFGUID, ULONG, LPVOID, ULONG, LPVOID, ULONG) override;   /* env_const.tsv */
     HRESULT STDMETHODCALLTYPE QuerySupport(REFGUID, ULONG, PULONG sup) override { if (sup) *sup = 0; return E_PROP_ID_UNSUPPORTED_; }
 };
 
@@ -506,7 +506,7 @@ struct Buffer final : IDirectSoundBuffer8 {
         *s = st;
         return DS_OK;
     }
-    HRESULT STDMETHODCALLTYPE Initialize(IDirectSound *, LPCDSBUFFERDESC) override { return DSERR_ALREADYINITIALIZED; }
+    HRESULT STDMETHODCALLTYPE Initialize(IDirectSound *, LPCDSBUFFERDESC) override;   /* env_const.tsv */
     HRESULT STDMETHODCALLTYPE Lock(DWORD off, DWORD bytes, LPVOID *p1, LPDWORD b1, LPVOID *p2, LPDWORD b2, DWORD fl) override;
     HRESULT STDMETHODCALLTYPE Play(DWORD, DWORD prio, DWORD fl) override;
     HRESULT STDMETHODCALLTYPE SetCurrentPosition(DWORD pos) override
@@ -549,7 +549,7 @@ struct Buffer final : IDirectSoundBuffer8 {
         return DS_OK;
     }
     HRESULT STDMETHODCALLTYPE Unlock(LPVOID p1, DWORD b1, LPVOID p2, DWORD b2) override;
-    HRESULT STDMETHODCALLTYPE Restore() override { return DS_OK; }   /* buffers are never lost */
+    HRESULT STDMETHODCALLTYPE Restore() override;   /* env_const.tsv: buffers are never lost */
     HRESULT STDMETHODCALLTYPE SetFX(DWORD n, LPDSEFFECTDESC d, LPDWORD results) override;
     HRESULT STDMETHODCALLTYPE AcquireResources(DWORD fl, DWORD n, LPDWORD results) override
     {
@@ -1172,6 +1172,7 @@ HRESULT Device::DuplicateSoundBuffer(IDirectSoundBuffer *orig, IDirectSoundBuffe
     return DS_OK;
 }
 
+#include "dsound.env_const.gen.inc"   /* Ks::Set, Buffer::Initialize, Buffer::Restore: manifest/env_const.tsv */
 } // namespace
 
 /* One output device: NULL, DSDEVID_DefaultPlayback / DefaultVoicePlayback and the enumerated GUIDs name it. */

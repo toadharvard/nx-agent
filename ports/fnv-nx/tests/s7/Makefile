@@ -18,7 +18,7 @@ CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
 S4_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
 S4_CXX := $(wildcard $(P)/win32/*.cpp) $(wildcard $(P)/crt/*.cpp)
-S7_CXX := $(wildcard $(P)/audio/*.cpp) $(wildcard $(P)/input/*.cpp)
+S7_CXX := $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only (make ilp32)
 S7_HZ := $(P)/audio/backend_audren.c
 TEST_CXX := $(wildcard $(HERE)/*.cpp)
 
@@ -26,6 +26,13 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
 
 .PHONY: all test ilp32 qemu clean
 all: test
+
+# the imports whose documented result is one constant are generated from platform/manifest/env_const.tsv
+ENVC_SRC := audio/dshow audio/dshow_filters audio/dsound audio/waveout input/dinput
+ENVC_INC := $(foreach s,$(ENVC_SRC),$(P)/$(s).env_const.gen.inc)
+$(P)/%.env_const.gen.inc: $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only $*.cpp
+$(foreach s,$(ENVC_SRC),$(eval $(OUT)/platform/$(s).cpp.o: $(P)/$(s).env_const.gen.inc))
 -include $(OBJS:.o=.d)
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -57,7 +64,7 @@ XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
 XFLAGS := -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
           -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(ROOT)/ext/freetype/include
-ilp32:
+ilp32: $(ENVC_INC)
 	@set -e; for f in $(S7_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done
 	@echo "ilp32 (libnx) platform/audio/backend_audren.c platform/input/input_horizon.cpp"
 	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(ROOT)/tests/s4/ilp32-stubs -I$(LIBNX)/nx/include $(S7_HZ)
