@@ -3,7 +3,7 @@
 // (Windows-validated: a DEFAULT pool resource makes Reset fail with D3DERR_INVALIDCALL and the device then reports D3DERR_DEVICENOTRESET until a Reset succeeds), test_swapchain_parameters (invalid parameters: INVALIDCALL,
 // no state change), test_reset_resources. Non-Ex Reset: recording state block dropped, ALL state back to its defaults (NxDeviceCore::init), RT 0 / depth stencil = the new implicit objects; Ex Reset keeps the state, RT 0 =
 // the new back buffer, RT 1-3 empty, depth stencil = the new auto depth stencil, viewport / scissor = the new size. Implicit objects are RECREATED (new identities; an Ex back buffer the application still holds survives
-// as an ordinary object). DECISIONS (doubt): the back buffer count changes as requested (Wine: "Cannot change the back buffer count yet", keeps the old count); state blocks and additional swap chains do not block Reset
+// as an ordinary object). M1 recheck: the back buffer count changes as requested (MS D3DPRESENT_PARAMETERS BackBufferCount is a parameter of the new swap chain; Windows rows of test_swapchain_parameters: Reset with 0 / 1 / 2 / 3 = D3D_OK, 4 and COPY with 2 = INVALIDCALL; Wine keeps the old count, a Wine limitation, no Windows row shows that); DECISIONS (doubt): state blocks and additional swap chains do not block Reset
 // (Wine: only DEFAULT pool resources do; MS lists state blocks / additional chains: not checked by any source we have); the gamma ramp and present count are kept; the gamma ramp is the chain's (task rule).
 #include "res_tex.h"
 #include "d9impl.gen.h"

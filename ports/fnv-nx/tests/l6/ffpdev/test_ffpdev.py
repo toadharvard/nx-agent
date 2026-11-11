@@ -127,6 +127,7 @@ def guest_report(tmp):
     if not deps or not os.path.isdir(deps): return ["guest build: skipped (set FNVNX_SHADERS_DEPS)"], None
     before_root = os.path.join(tmp, "before"); os.makedirs(before_root)
     shutil.copytree(os.path.join(ROOT, "render"), os.path.join(before_root, "render"), ignore=shutil.ignore_patterns("build", "__pycache__")); shutil.copytree(os.path.join(ROOT, "shim"), os.path.join(before_root, "shim"))
+    shutil.copytree(os.path.join(ROOT, "tests", "l6", "env"), os.path.join(before_root, "tests", "l6", "env"), ignore=shutil.ignore_patterns("__pycache__"))   # gen_env.py reads its tables
     for f in FFPDEV: os.remove(os.path.join(before_root, "render", "d3d9", "dev", f))
     b = guest_undefined(before_root, os.path.join(tmp, "gb")); a = guest_undefined(ROOT, os.path.join(tmp, "ga"))
     if not b or not a or not isinstance(a[0], dict) or not isinstance(b[0], dict): return ["guest build FAILED: before %s after %s" % (b and b[0], a and a[0])], False

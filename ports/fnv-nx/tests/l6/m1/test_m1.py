@@ -255,9 +255,9 @@ def main():
     if len(before[1]) - len(miss) != 5: fails.append(f"f: gate improved by {len(before[1]) - len(miss)}, expected 5")
     if "--no-guest" not in sys.argv:
         a, an = guest(ROOT, os.path.join(tmp, "guest_after"))
-        if a is None: fails.append("f: guest build after failed: " + str(an)); print("guest build failed:", an)
+        if a is None: fails.append("f: guest build after failed: " + str(an)); print("guest build (after) failed:", an)
         else:   # before = the same tree without the M1 files and without their hooks (a scratch copy; the repository is never touched)
-            sroot = os.path.join(tmp, "tree"); os.makedirs(os.path.join(sroot, "render")); os.symlink(os.path.join(ROOT, "shim"), os.path.join(sroot, "shim"))
+            sroot = os.path.join(tmp, "tree"); os.makedirs(os.path.join(sroot, "render")); os.symlink(os.path.join(ROOT, "shim"), os.path.join(sroot, "shim")); os.symlink(os.path.join(ROOT, "tests"), os.path.join(sroot, "tests"))
             for e in os.listdir(os.path.join(ROOT, "render")):
                 if e != "d3d9": os.symlink(os.path.join(ROOT, "render", e), os.path.join(sroot, "render", e))
             shutil.copytree(D3, os.path.join(sroot, "render", "d3d9"), ignore=shutil.ignore_patterns("__pycache__")); cd = os.path.join(sroot, "render", "d3d9", "dev")
@@ -270,10 +270,10 @@ def main():
     # ---- g: mutations
     if "--no-mutations" not in sys.argv:
         P = lambda f, old, new: (f, old, new)
-        muts = [("a", *P("m1_validate.cpp", "if (mn == D3DTEXF_NONE || mg == D3DTEXF_NONE || !filt_ok", "if (!filt_ok")), ("a", *P("m1_validate.cpp", "(mp != D3DTEXF_NONE && mp != D3DTEXF_POINT)", "(mp != D3DTEXF_NONE)")),
-                ("a", *P("m1_validate.cpp", "sel <= D3DTA_CONSTANT &&", "sel <= 7 &&")), ("a", *P("m1_validate.cpp", "return op >= 1 && op <= 26 &&", "return op <= 26 &&")),
+        muts = [("a", *P("m1_validate.cpp", "return v == D3DTEXF_NONE || (v == D3DTEXF_POINT", "return (v == D3DTEXF_POINT")), ("a", *P("m1_validate.cpp", "(mp != D3DTEXF_NONE && mp != D3DTEXF_POINT)", "(mp != D3DTEXF_NONE)")),
+                ("a", *P("m1_validate.cpp", "sel <= D3DTA_CONSTANT &&", "sel <= 7 &&")), ("a", *P("m1_validate.cpp", "(caps >> (op - 1) & 1)", "(caps >> op & 1)")),
                 ("a", *P("m1_validate.cpp", "b->w != w || b->h != h || n != sm) return", "b->w != w || b->h != h) return")), ("a", *P("m1_validate.cpp", "if (!L->ex && L->state != NX_DEV_OK)", "if (L->state != NX_DEV_OK)")),
-                ("a", *P("m1_validate.cpp", "if (!d->cur.vdecl[0]) return D3DERR_INVALIDCALL;  ", "if (false) return D3DERR_INVALIDCALL;  ")), ("a", *P("m1_validate.cpp", "(op >= 2 && op != 3 && op <= 26)", "(op >= 2 && op != 3 && op != 17 && op <= 26)")),
+                ("a", *P("m1_validate.cpp", "if (!d->cur.vdecl[0]) return D3DERR_INVALIDCALL;  ", "if (false) return D3DERR_INVALIDCALL;  ")), ("a", *P("m1_validate.cpp", "(op >= 2 && op != 3 && op <= 26)", "(op >= 2 && op <= 26)")),
                 ("a", *P("m1_validate.cpp", "i >= 16 ? c.VertexTextureFilterCaps :", "")), ("a", *P("m1_validate.cpp", "if (hr == D3D_OK) *n = 1;", "if (hr == D3D_OK) *n = 2;")),
                 ("a", *P("m1_validate.cpp", "s.rs[D3DRS_ZENABLE] || s.rs[D3DRS_ZWRITEENABLE] ||", "s.rs[D3DRS_ZENABLE] ||")), ("a", *P("m1_validate.cpp", "if (ao && !op_ok(aop, c.TextureOpCaps))", "if (false)")),
                 ("b", *P("m1_stats.cpp", "+ (qpc % f) * r / f", "")), ("b", *P("m1_stats.cpp", "s->PresentCount = pcount;", "s->PresentCount = pcount + 1;")), ("b", *P("m1_stats.cpp", "s->SyncQPCTime.QuadPart = (LONGLONG)c;", "s->SyncQPCTime.QuadPart = 0;")),
