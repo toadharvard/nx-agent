@@ -18,6 +18,7 @@
 #define FNVNX_HOSTAPI_H
 
 #include <stdint.h>
+#include "fnvnx/sockwire.h"
 
 #define FNVNX_HOSTAPI_MAGIC   0x48584e46u /* "FNXH" */
 #define FNVNX_GUEST_MAGIC     0x47584e46u /* "FNXG", at guest text + 8 */
@@ -115,6 +116,60 @@ typedef struct FnvnxHostApi {
 #define FNVNX_PLAT_VM_COMMIT 5u
 #define FNVNX_PLAT_VM_DECOMMIT 6u
 #define FNVNX_PLAT_VM_RELEASE 7u
+/* 8 is FNVNX_PLAT_VM_PROTECT (another lead); 9..15 are left free for that family. */
+
+/* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..33; guest: toolchain/guest/sock_guest.c, host:
+ * toolchain/host/host_sock.inc; the wire constants and structs: fnvnx/sockwire.h). The rule: EVERY BSD-socket
+ * operation of the guest is one of these services; the guest's C library has no network device of its own.
+ *  - Arguments are the uint64 words of ext_call's args array; nargs must be exactly the count shown, else the
+ *    result is -FNVNX_WE_INVAL. A pointer argument is a guest address zero-extended to 64 bits (one shared address
+ *    space, as for fs_read); 0 is the null pointer where "or 0" is said.
+ *  - Result: an int64 in a uint64, value >= 0, or -errno with errno a WIRE number (sockwire.h FNVNX_WIRE_ERRNO_LIST,
+ *    the Linux numbers). The guest translates wire errno into newlib's and the host translates its own into the wire
+ *    ones, both by name, so nothing assumes that two systems' errno numbers agree. FNVNX_EXT_NO_MODULE is what a host
+ *    without these services returns for every one of them.
+ *  - A socket handle h is the host's descriptor number; the guest keeps it inside its own descriptor table (a newlib
+ *    device "soc"), so close/read/write/dup/fcntl on a socket descriptor reach these services.
+ *  - Blocking: a blocking call (connect, accept, sendto, recvfrom, poll with a timeout, the resolution of
+ *    GAI_OPEN) blocks only the calling guest thread: ext_call runs on the caller's own thread, as audio_submit and
+ *    the file services do. A new socket is blocking until FNVNX_PLAT_SOCK_SETFL says otherwise. There are no signals:
+ *    EINTR does not occur and sends never raise SIGPIPE (the host passes MSG_NOSIGNAL where the OS has it). */
+#define FNVNX_PLAT_SOCK_SOCKET 16u      /* (domain WAF_*, type WSOCK_*, protocol IANA) -> h */
+#define FNVNX_PLAT_SOCK_CLOSE 17u       /* (h) -> 0; the handle is gone whatever the result */
+#define FNVNX_PLAT_SOCK_BIND 18u        /* (h, const FnvnxWireSockaddr *) -> 0 */
+#define FNVNX_PLAT_SOCK_LISTEN 19u      /* (h, backlog) -> 0 */
+#define FNVNX_PLAT_SOCK_ACCEPT 20u      /* (h, FnvnxWireSockaddr *peer or 0) -> new h (blocking mode); blocks until a
+                                           connection arrives, -EAGAIN when non-blocking and none is pending */
+#define FNVNX_PLAT_SOCK_CONNECT 21u     /* (h, const FnvnxWireSockaddr *) -> 0; non-blocking: -FNVNX_WE_INPROGRESS */
+#define FNVNX_PLAT_SOCK_SENDTO 22u      /* (h, buf, len, FNVNX_WIRE_MSG_LIST flags, const FnvnxWireSockaddr *to or 0)
+                                           -> bytes sent; len > 0x7FFFFFFF is -FNVNX_WE_INVAL */
+#define FNVNX_PLAT_SOCK_RECVFROM 23u    /* (h, buf, len, flags, FnvnxWireSockaddr *from or 0) -> bytes received (0 =
+                                           orderly shutdown of a stream); *from is written on every success (family
+                                           WAF_UNSPEC when the socket has no source address) */
+#define FNVNX_PLAT_SOCK_SETSOCKOPT 24u  /* (h, level, option, const void *val, vallen) -> 0; level FNVNX_WLVL_SOCKET or
+                                           an IANA protocol number; option and value shape: the FNVNX_WIRE_*_OPT_LISTs */
+#define FNVNX_PLAT_SOCK_GETSOCKOPT 25u  /* (h, level, option, void *val, uint32_t *vallen; in: capacity, out: size of
+                                           the option's value) -> 0; at most the capacity is written */
+#define FNVNX_PLAT_SOCK_POLL 26u        /* (FnvnxWirePollfd *fds, nfds, timeout_ms int32, -1 = forever) -> number of
+                                           entries with revents != 0; fd < 0 entries are ignored, an fd that is not an
+                                           open socket gets FNVNX_WPOLLNVAL */
+#define FNVNX_PLAT_SOCK_SHUTDOWN 27u    /* (h, how 0 read / 1 write / 2 both) -> 0 */
+#define FNVNX_PLAT_SOCK_GETSOCKNAME 28u /* (h, FnvnxWireSockaddr *out) -> 0 */
+#define FNVNX_PLAT_SOCK_GETPEERNAME 29u /* (h, FnvnxWireSockaddr *out) -> 0 */
+#define FNVNX_PLAT_SOCK_GETFL 30u       /* (h) -> FNVNX_WO_RDWR | (non-blocking ? FNVNX_WO_NONBLOCK : 0) */
+#define FNVNX_PLAT_SOCK_SETFL 31u       /* (h, flags) -> 0; only FNVNX_WO_NONBLOCK of flags is applied (POSIX F_SETFL) */
+/* getaddrinfo is two services: its result list lives in host memory, which a 32-bit guest cannot address. GAI_OPEN
+ * resolves once and keeps the result under a ticket; GAI_FETCH copies it into a guest buffer. */
+#define FNVNX_PLAT_SOCK_GAI_OPEN 32u    /* (node or 0, service or 0: guest C strings, const FnvnxWireAddrinfo *hints or 0,
+                                           int32_t *sys_errno or 0) -> ticket > 0, or -FNVNX_WEAI_x (sockwire.h; for
+                                           FNVNX_WEAI_SYSTEM the wire errno is stored to *sys_errno) */
+#define FNVNX_PLAT_SOCK_GAI_FETCH 33u   /* (ticket, buf or 0, cap) -> total bytes of the result: a sequence of
+                                           FnvnxWireAddrinfo records each followed by its canonical name bytes, padded
+                                           to 8. cap < total: nothing is written, the ticket stays. cap >= total: the
+                                           records are written and the ticket is freed. -FNVNX_WE_INVAL for a ticket
+                                           that is not open. */
+#define FNVNX_PLAT_SOCK_FIRST 16u
+#define FNVNX_PLAT_SOCK_LAST 33u
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
  * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
@@ -184,8 +239,9 @@ _Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(F
  * code. The first words of the guest module are:
  *   +0 branch to the entry, +4 offset of MOD0 from the module base, +8 FNVNX_GUEST_MAGIC, +12 ABI version. */
 
-#if defined(__ILP32__)
-/* Guest-side helpers: call an LP64 host function through its slot. */
+#if defined(__ILP32__) || defined(FNVNX_HOST_CALLS)
+/* (FNVNX_HOST_CALLS: the same helpers in an LP64 test process, tests/s4/sock_wire.)
+ * Guest-side helpers: call an LP64 host function through its slot. */
 #define FNVNX_ADDR(p) ((uint64_t)(uintptr_t)(p))
 typedef uint64_t (*fnvnx_hfn0)(void);
 typedef uint64_t (*fnvnx_hfn1)(uint64_t);
