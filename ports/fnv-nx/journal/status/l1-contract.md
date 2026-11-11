@@ -1,15 +1,15 @@
 # L1 CONTRACT status (lead: Opus 5.5, session started 2026-11-11 22:34Z)
 
-Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` a2453fe9 (w4 @39c419fb merged at f409e8a3, L1 green 3.7 s warm / 236 s cold), 23 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
+Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` f1059af7 (L5 w4r @0533f920 merged, tree e74c793f, cold 225 s), 25 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
 
 ## Tasks
 
 | # | Task | Worker session | Branch | Status |
 |---|---|---|---|---|
-| 1a | merge queue via MERGER: w8 exepin | session_01KmtZKRkugvim1Bfui5aFTw (w4 takes it over) | claude/fnv-l1-contract-w8 a6753733 | blocked: conflict with a2453fe9 (test_gates.py); w4 rebasing |
+| 1a | merge queue via MERGER: w8 exepin | session_01KmtZKRkugvim1Bfui5aFTw (w4 takes it over) | claude/fnv-l1-contract-w8 a6753733 | doing: w4 rebasing on f1059af7 |
 | 1b | merge queue: w4 msvcmodel compiler + plugins fnvnx_order/fnvnx_ftoi (= item 3): MERGED e90a7e43; still open B2 (5 L2 plugins), guest_compiler 2nd external + platform build.json, G | session_01KmtZKRkugvim1Bfui5aFTw | claude/fnv-l1-contract-w4 bc406ec0 | doing: rebase onto a3e9f0a9 + verdict; then guest_compiler.json (fnvnx-a64-msvcmodel 00e3d42a) + sample platform build.json (L5 waits), B2 seven L2 plugins as stages, G build-once manifest |
-| 1c | merge queue: w5 python pins / TMPDIR | session_01KmtZKRw5sTxarSdSFC6Njj | claude/fnv-l1-contract-w5 db15c7ac | 66a23098 blocked at MERGER: conflict with a2453fe9 (envcheck.py), rebasing first; doing: setup_verdict_env.sh from scratch with sha256 pins (helper w13) |
-| 1d | merge queue: L5 imports + machine f15935a9 | L5 | - | blocked: conflict with a2453fe9 (TOOLS.md, gates.json, test_gates.py), L5 rebases |
+| 1c | merge queue: w5 python pins / TMPDIR | session_01KmtZKRw5sTxarSdSFC6Njj | claude/fnv-l1-contract-w5 db15c7ac | rebasing on f1059af7; doing: setup_verdict_env.sh from scratch with sha256 pins (helper w13) |
+| 1d | merge queue: L5 imports + machine f15935a9 | L5 | claude/fnv-l5-platform-w4r 0533f920 | done (trunk f1059af7) |
 | 2 | incremental verdict speed (S0 cold, S1 no change, S2 comment header, S3 one .cc, S4 tool) + census of second build paths in verify/ | session_01KmtZKS82vxSbxtKufqbp4i | claude/fnv-l1-contract-w14 | doing |
 | 3s | goal step 3: guest ELF link through recipe.py (link.roots, link.libs, fixed PIE options, ldcheck post stage from ld.py; delete the out-of-recipe linker path) | session_01KmtZKRyNHyAGWeTxKmbdfZ | claude/fnv-l1-contract-w15 | doing |
 | 3r | recipe: Rule A (first, blocks platform root): "sources" list of patched externals, any root class incl. guest product (FreeType); Rule B (generated runs a root ELF) after first frame (uam/sdp2dksh are deko-only); host tool roots from patched external sources (uam, MojoShader) + generated steps that run a root's ELF (render FFP DKSH, L6/L6A) | session_01KmtZKRpuoHrhZqwnLDyQ8L | claude/fnv-l1-contract-w16 | doing |
@@ -20,16 +20,18 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` a2453fe9 (w4 @39c4
 | 3a | recipe: bare prog name (as, ld) resolved like the driver (programs: list, then PATH); host x86_64 roots red today (L6A render/gl4) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3n | recipe check: include dir inside the root's own tree refused (#pragma once identity; L6) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
-| 1u | GalaxyWrp: no row (bridge dll, decided (a)); one image-set rule for images.py+modules.py (bridge dll = not an image, not walked); then contract-gate universe for roots without game/link (lift/rt) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
+| 1u | owner order 9e5856f0: Galaxy/GalaxyWrp not lifted. One rule for images.py+modules.py: guest image = found, no bridge row, closure resolves; else declared-machine module (kind declared, bodies = L5 bridge rows, not walked); then contract-gate universe for roots without game/link (lift/rt) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
+| 3f | link root over admitted roots of mixed cxx_origin (L3b product ELF/tests) | w15 | claude/fnv-l1-contract-w15 | doing |
+| 3x | fixture roots: per-unit gate + expected finding, never linked or in a universe (L3b forms/fpexact tests) | w16 | claude/fnv-l1-contract-w16 | queued |
 | 3w | recipe: -Werror=attributes required in guest roots (L3a); envcheck before any stage, env failures never cached (L2) | w14 | claude/fnv-l1-contract-w14 | queued |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
 | 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
 | 4b | w11 test-defined symbols ∩ product-root symbols = ∅ in objstub | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w11 001306f0 | doing: stage 2 (COMDAT, python AST rule, six L1 names to 0) |
-| 4c | w12 hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 (from 6766d18a) | doing: diagnose 3 red selftests (trunk / branch / without -dU), inline-wrapper and range-marker tests; L4, L5 told to delete their side |
+| 4c | w12 hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 (from 6766d18a) | doing: L5 took 6766d18a (3bf9c4d6); delete zero-use slots console_flush, tz_offset_minutes, ACCESS_FAULT_HANDLER 10, main_loop/buttons_down (test-only), UNMAP_FIXED unless a loader unit calls it; numbers kept as holes; selftest diagnosis |
 
 ## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
 
-Global count: 13 missing of 32 required at trunk a2453fe9 (gates.json has 23). No product root can be admitted until 0.
+Global count: 11 missing of 32 required at trunk f1059af7 (gates.json has 25; imports, machine merged). No product root can be admitted until 0.
 
 | Gate | Owner | Branch | Commit | MERGER |
 |---|---|---|---|---|
