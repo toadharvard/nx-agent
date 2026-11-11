@@ -12,7 +12,7 @@
 #    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
 #    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
 #    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
-#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (exe_entry_va) + the loader's
+#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present) + the loader's
 #    console lines of run.txt (when present) -> the bootmiles table; optional softfloat.syms or softfloat.tsv (one symbol
 #    per line). Every missing required file is listed and fails the job
 #  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)

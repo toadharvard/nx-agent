@@ -16,16 +16,25 @@ row or line a converter does not understand is an InputError carrying the file l
   milestones --table milestones.tsv --run run.txt [--entries entries.tsv] [--stage-table FILE] -o table.txt
                                       milestones.tsv + the loader's console lines of the contract's run.txt (every line that is exactly
                                       three spaces + `fnvnx-start: ...`, in file order, each distinct) -> a bootmiles table.
-                                      Accepted grammar of milestones.tsv (TAB separated; `# table_id H` once, which must equal entries.tsv's;
-                                      any other comment and every other row is an error naming its line):
-                                        exe_entry_va  <TAB> 0xADDR                    exactly once  -> milestone exe-entry (call)
-                                        module_entry  <TAB> NAME <TAB> 0xADDR <TAB> S  S = 1|0 (static|not). S=1 -> milestone
-                                                                                       module-entry-NAME (call); S=0 -> no milestone.
-                                                                                       NAME unique, [A-Za-z0-9_.-]
-                                        present_key   <TAB> 0xKEY                     one row per Present import key (must be an import
-                                                                                       row of entries.tsv when --entries is given); all
-                                                                                       together -> milestone first-present, group any,
-                                                                                       one `call` part per key
+                                      Accepted grammar of milestones.tsv, the contract's own (link/milestones.py): TAB separated rows
+                                      `NAME <TAB> KIND <TAB> VALUE <TAB> SOURCE [<TAB> EXTRA]`, VALUE = exactly 8 lowercase hex digits (no 0x),
+                                      then the LAST line `# table_id H` (H = 64 hex digits, must equal entries.tsv's); every other comment, a
+                                      blank line, a missing / repeated / not-last trailer and every other row is an error naming its line:
+                                        exe_entry <TAB> exe_entry <TAB> ADDR <TAB> exe PE ImageBase+AddressOfEntryPoint
+                                                                                       exactly once -> milestone exe-entry (call)
+                                        module_entry:NAME <TAB> module_entry <TAB> ADDR <TAB> modules.tsv assigned_base+entry_rva <TAB> S
+                                                                                       S = the `static` column of modules.tsv (column 9, the
+                                                                                       10th counted from 0: 1 = in the exe's import closure,
+                                                                                       0 = not); NAME unique, [A-Za-z0-9_.-]. S=1 ->
+                                                                                       milestone module-entry-NAME (call); S=0 -> none.
+                                        WinMain <TAB> winmain <TAB> ADDR <TAB> n1.json N1 function SYMBOL     at most once -> milestone
+                                                                                       winmain (call). A stage-table milestone `winmain` then
+                                                                                       is an error (the contract does not win silently).
+                                        import:DLL!Present <TAB> import <TAB> KEY <TAB> keys.tsv import key   one or more (DLL unique) -> ONE
+                                                                                       milestone first-present, group any, one `call` part
+                                                                                       per KEY; every KEY must be an import row of entries.tsv
+                                                                                       when --entries is given
+                                      The old single-row file of the first ELF (`exe_entry_va <TAB> 0xADDR`) is NOT accepted: it is another grammar.
                                       Milestones come out in this order: start-01.. (console lines), then the rows above in FILE order
                                       (file order = boot order, as the ELF owner states it), then the stage table.
                                       --stage-table FILE: a table in the bootmiles format (verify/bootmiles.py), its milestones appended after
@@ -193,9 +202,41 @@ def stage_check(stage_text, man, taken):
     return [ln.strip() for ln in stage_text.split("\n") if ln.strip() and not ln.strip().startswith("#")]
 
 
+HEX8 = frozenset("0123456789abcdef")
+SOURCES = {"exe_entry": "exe PE ImageBase+AddressOfEntryPoint", "module_entry": "modules.tsv assigned_base+entry_rva", "import": "keys.tsv import key"}
+
+
+def _contract_rows(text):
+    """(rows, table_id) of milestones.tsv by the grammar of the module docstring; a row is (line number, name, kind, value, source, extra or None)"""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    rows, tid = [], None
+    for no, line in enumerate(lines, 1):
+        line = line.rstrip("\r")
+        if line.startswith("# table_id "):
+            if no != len(lines):
+                raise InputError(f"line {no}: the `# table_id` trailer must be the last line")
+            tid = line[len("# table_id "):]
+            if len(tid) != 64 or any(c not in HEX8 for c in tid):
+                raise InputError(f"line {no}: table_id must be 64 lowercase hex digits")
+            continue
+        if line.startswith("#") or not line:
+            raise InputError(f"line {no}: unexpected {'comment' if line else 'blank line'} {line[:60]!r}")
+        f = line.split("\t")
+        if len(f) not in (4, 5):
+            raise InputError(f"line {no}: expected 4 or 5 tab-separated fields, got {len(f)}")
+        if len(f[2]) != 8 or any(c not in HEX8 for c in f[2]):
+            raise InputError(f"line {no}: value must be 8 lowercase hex digits, got {f[2]!r}")
+        rows.append((no, f[0], f[1], int(f[2], 16), f[3], f[4] if len(f) == 5 else None))
+    if tid is None:
+        raise InputError("milestones.tsv: no `# table_id` trailer")
+    return rows, tid
+
+
 def milestone_table(milestones_text, run_text, entries_id=None, stage_text=None, man=None):
-    rows, tid = _rows(milestones_text)
-    if tid is not None and entries_id is not None and tid != entries_id:
+    rows, tid = _contract_rows(milestones_text)
+    if entries_id is not None and tid != entries_id:
         raise InputError(f"milestones.tsv table_id {tid} differs from entries.tsv {entries_id}")
     lines = [line[3:].rstrip("\r") for line in run_text.split("\n") if line.startswith(CONSOLE_PREFIX)]
     if len(set(lines)) != len(lines):
@@ -203,42 +244,45 @@ def milestone_table(milestones_text, run_text, entries_id=None, stage_text=None,
     out = [f"# generated from milestones.tsv and the loader's console lines of run.txt (table_id {tid})"]
     for i, ln in enumerate(lines, 1):
         out.append("start-%02d any host %s" % (i, boot.console_part(ln)))
-    names, entry_seen, present = set(), False, []
-    present_at = None
-    body = []   # (kind, ...) in file order
-    for no, f in rows:
-        k = f[0]
-        if k == "exe_entry_va" and len(f) == 2:
-            if entry_seen:
-                raise InputError(f"line {no}: exe_entry_va twice")
-            entry_seen = True
-            body.append(("exe-entry", _addr(f[1], "exe_entry_va", no)))
-        elif k == "module_entry" and len(f) == 4:
-            if not f[1] or any(c not in NAME_CHARS for c in f[1]):
-                raise InputError(f"line {no}: bad module name {f[1]!r}")
-            if f[3] not in ("0", "1"):
-                raise InputError(f"line {no}: the static flag must be 0 or 1, got {f[3]!r}")
-            if f[1] in names:
-                raise InputError(f"line {no}: module {f[1]!r} twice")
-            names.add(f[1])
-            addr = _addr(f[2], "module_entry address", no)
-            if f[3] == "1":
-                body.append(("module-entry-" + f[1], addr))
-        elif k == "present_key" and len(f) == 2:
-            key = _addr(f[1], "present_key", no)
-            if man is not None and key not in man.imports:
-                raise InputError(f"line {no}: present key 0x{key:x} is not an import row of entries.tsv")
-            if key in present:
-                raise InputError(f"line {no}: present key 0x{key:x} twice")
-            present.append(key)
-            if present_at is None:
-                present_at = len(body)
+    seen, present, present_dlls = set(), [], set()
+    body = []   # milestone name and address in file order; None = the place of first-present
+    for no, name, kind, value, src, extra in rows:
+        if name in seen:
+            raise InputError(f"line {no}: row {name!r} twice")
+        seen.add(name)
+        if kind in SOURCES and src != SOURCES[kind]:
+            raise InputError(f"line {no}: {kind} row: the source text must be {SOURCES[kind]!r}, got {src!r}")
+        if kind in ("exe_entry", "winmain", "import") and extra is not None:
+            raise InputError(f"line {no}: {kind} row has no fifth field")
+        if kind == "exe_entry" and name == "exe_entry":
+            body.append(("exe-entry", value))
+        elif kind == "winmain" and name == "WinMain" and src.startswith("n1.json N1 function ") and len(src) > 20:
+            body.append(("winmain", value))
+        elif kind == "module_entry" and name.startswith("module_entry:"):
+            mod = name[len("module_entry:"):]
+            if not mod or any(c not in NAME_CHARS for c in mod):
+                raise InputError(f"line {no}: bad module name {mod!r}")
+            if extra not in ("0", "1"):
+                raise InputError(f"line {no}: the static flag (fifth field) must be 0 or 1, got {extra!r}")
+            if extra == "1":
+                body.append(("module-entry-" + mod, value))
+        elif kind == "import" and name.startswith("import:") and name.endswith("!Present") and len(name) > len("import:!Present"):
+            dll = name[len("import:"):-len("!Present")]
+            if "!" in dll or dll in present_dlls:
+                raise InputError(f"line {no}: bad or repeated import dll {dll!r}")
+            present_dlls.add(dll)
+            if man is not None and value not in man.imports:
+                raise InputError(f"line {no}: import key 0x{value:x} is not an import row of entries.tsv")
+            if value in present:
+                raise InputError(f"line {no}: import key 0x{value:x} twice")
+            present.append(value)
+            if len(present) == 1:
                 body.append(None)
         else:
-            raise InputError(f"line {no}: row {k!r} with {len(f)} fields is not understood "
-                             "(exe_entry_va/2, module_entry/4, present_key/2)")
-    if not entry_seen:
-        raise InputError("milestones.tsv: no exe_entry_va row")
+            raise InputError(f"line {no}: row {name!r} of kind {kind!r} is not understood "
+                             "(exe_entry, module_entry:NAME, WinMain/winmain, import:DLL!Present/import)")
+    if sum(1 for it in body if it and it[0] == "exe-entry") != 1:
+        raise InputError("milestones.tsv: want exactly one exe_entry row")
     for item in body:
         if item is None:
             out += ["first-present any call 0x%x" % key for key in present]
