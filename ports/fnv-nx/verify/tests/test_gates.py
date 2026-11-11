@@ -152,7 +152,7 @@ spec = json.load(open(os.path.join(VERIFY, "gates.json")))
 byname = {g["name"]: g for g in spec["gates"]}
 dirs_pure = [a.rsplit("/", 1)[-1] for a in byname["pure"]["argv"][3:]]
 dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
-check("gates.json: format and the two gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests"]
+check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit"]
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
       and dirs_pure == ["contract", "link", "rules", "lift"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift"]
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]

@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Host test of farm/boot_job.sh: a local bare git repository stands in for the artifacts repository (branches
+l1-contract/elf/<id>), a scratch directory for HOME and a directory with a dummy FalloutNV.exe for the game. The guests
+are the tiny ELFs of test_bootmachine.build (MODE 6: a clean exit; MODE 3: a fault), with the code section renamed to
+.text.fnvl as the job's icount spec expects. No network, no game data, no package installs. Plain script: exit 0 on pass.
+Scratch: tempfile.mkdtemp, removed at exit."""
+import atexit
+import hashlib
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+VERIFY = os.path.dirname(HERE)
+NX = os.path.dirname(VERIFY)
+sys.path.insert(0, HERE)
+sys.path.insert(0, VERIFY)
+import boot  # noqa: E402
+import test_bootmachine as tb  # noqa: E402
+
+JOB = os.path.join(NX, "farm", "boot_job.sh")
+SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
+atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
+LINE = "fnvnx-start: identity ok"
+TABLE = """# milestones of the test guest
+seqm  seq:s call    0x1000
+seqm  seq:s retzero 0x1000
+call2 any   call    0x2000
+rettrue2 any rettrue 0x2000
+console any host    %s
+all3  all:g ret     0x3000
+all3  all:g call    0x3000
+""" % boot.console_part(LINE)
+MANIFEST = "1000\tfnvboot_a\n2000\tfnvboot_b\n3000\tfnvboot_c\n"
+TRAILER = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+) main=(\d+) threads=(\d+) seconds=(\d+) "
+                   r"published=(\S+)@([0-9a-f]{12})$")
+HOME = os.path.join(SCRATCH, "home")
+BARE = os.path.join(SCRATCH, "artifacts.git")
+GAME = os.path.join(SCRATCH, "game")
+EXE = b"dummy FalloutNV.exe for the job test\n"
+
+
+def git(*args, cwd=None, check=True):
+    r = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@invalid", *args], cwd=cwd, capture_output=True, text=True)
+    if check and r.returncode:
+        raise RuntimeError("git %s: %s" % (" ".join(args), r.stderr))
+    return r.stdout
+
+
+def lifted_elf(mode):
+    """the guest of test_bootmachine.build(mode) with .text renamed to .text.fnvl (crt0 header patched as build() does)"""
+    renamed = os.path.join(SCRATCH, "g%d.fnvl.elf" % mode)
+    raw_path = tb.build(mode)[1]
+    subprocess.run(["aarch64-linux-gnu-objcopy", "--rename-section", ".text=.text.fnvl", raw_path, renamed], check=True)
+    data = bytearray(open(renamed, "rb").read())
+    phoff, phnum = struct.unpack_from("<I", data, 28)[0], struct.unpack_from("<H", data, 44)[0]
+    loads = [p for p in (struct.unpack_from("<8I", data, phoff + 32 * i) for i in range(phnum)) if p[0] == 1]
+    lo = min(p[3] for p in loads) // 4096 * 4096
+    hi = (max(p[3] + p[5] for p in loads) + 4095) // 4096 * 4096
+    first_x = next(p for p in loads if p[6] & 1)
+    struct.pack_into("<III", data, first_x[1] + 16, lo, hi - lo, 1)
+    return bytes(data)
+
+
+def publish_branch(name, files):
+    work = os.path.join(SCRATCH, "w-" + name.replace("/", "-"))
+    os.makedirs(work)
+    git("init", "-q", work)
+    git("checkout", "-q", "--orphan", name, cwd=work)
+    for fn, data in files.items():
+        with open(os.path.join(work, fn), "wb") as f:
+            f.write(data)
+    git("add", "-A", cwd=work)
+    git("commit", "-q", "-m", "contract", cwd=work)
+    git("push", "-q", BARE, "%s:refs/heads/%s" % (name, name), cwd=work)
+
+
+def run_job(args, env_extra=None, game=GAME):
+    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8"}
+    if game:
+        env["GAME_DIR"] = game
+    env.update(env_extra or {})
+    r = subprocess.run(["bash", JOB, *args], env=env, capture_output=True, text=True)
+    return r.returncode, r.stdout, r.stderr
+
+
+def published(branch):
+    """{file: bytes} of the published branch, its commit message and its commit id"""
+    cm = git("rev-parse", "refs/heads/" + branch, cwd=BARE).strip()
+    names = git("ls-tree", "--name-only", cm, cwd=BARE).split()
+    files = {n: subprocess.run(["git", "show", "%s:%s" % (cm, n)], cwd=BARE, capture_output=True, check=True).stdout for n in names}
+    return files, git("log", "-1", "--format=%B", cm, cwd=BARE), cm
+
+
+def main():
+    t0 = time.time()
+    os.makedirs(HOME)
+    os.makedirs(GAME)
+    with open(os.path.join(GAME, "FalloutNV.exe"), "wb") as f:
+        f.write(EXE)
+    git("init", "-q", "--bare", BARE)
+    git("config", "uploadpack.allowFilter", "true", cwd=BARE)
+    contract = {"entries.tsv": MANIFEST.encode(), "modules.tsv": b"exe\t400000\t2100000\n", "keys.tsv": b"f0000\t200000\n",
+                "milestones.tsv": TABLE.encode()}
+    ok_elf, fault_elf = lifted_elf(6), lifted_elf(3)
+    publish_branch("l1-contract/elf/testid", dict(contract, **{"guest.elf": ok_elf}))
+    publish_branch("l1-contract/elf/faultid", dict(contract, **{"guest.elf": fault_elf}))
+    publish_branch("l1-contract/elf/softid", dict(contract, **{"guest.elf": ok_elf, "softfloat.syms": b"fnvboot_b\n"}))
+    noent = {k: v for k, v in contract.items() if k != "entries.tsv"}
+    publish_branch("l1-contract/elf/noentries", dict(noent, **{"guest.elf": ok_elf}))
+    tb.case("setup: contract branches built", True)
+
+    rc, out, err = run_job(["testid"])
+    last = out.strip().splitlines()[-1] if out.strip() else ""
+    m = FINAL.match(last)
+    tb.case("clean guest: exit 0, final line has every field", rc == 0 and m is not None and out.count("\n") == 1, (rc, out, err[-600:]))
+    f = m.groups() if m else ("",) * 10
+    tb.case("final line values", f[0] == "testid" and f[1] == "0" and f[2] == "exit" and f[3] == "all3" and int(f[4]) > 0
+            and int(f[5]) > 0 and f[6] == "1" and f[8] == "l4-verify/boot/testid", f)
+    files, msg, cm = published("l4-verify/boot/testid")
+    tb.case("published: exactly the four files", sorted(files) == ["OUT.console.txt", "OUT.json", "meta.json", "spec.json"], sorted(files))
+    tb.case("published commit id is the one reported", cm[:12] == f[9], (cm, f[9]))
+    meta = json.loads(files["meta.json"]) if "meta.json" in files else {}
+    elf_commit = git("rev-parse", "refs/heads/l1-contract/elf/testid", cwd=BARE).strip()
+    nx_commit = git("rev-parse", "HEAD", cwd=NX).strip()
+    tb.case("meta.json keys and values", sorted(meta) == sorted(["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc",
+            "seconds", "limit_instructions", "profile", "host_cpu_model", "softfloat"])
+            and meta["elf_id"] == "testid" and meta["elf_branch_commit"] == elf_commit and meta["nx_agent_commit"] == nx_commit
+            and meta["exe_sha256"] == hashlib.sha256(EXE).hexdigest() and meta["boot_rc"] == 0 and meta["limit_instructions"] is None
+            and meta["profile"] == "handheld" and meta["host_cpu_model"] and meta["softfloat"] == "absent", meta)
+    tb.case("commit message ends with exactly the trailer line", msg.rstrip("\n").splitlines()[-1] == TRAILER
+            and msg.count("Co-Authored-By") == 1, msg)
+    blob = b"\n".join(files.values()).decode(errors="replace") + msg
+    tb.case("no session text anywhere", "session" not in blob.lower() and "claude.ai" not in blob.lower(), "")
+    doc = json.loads(files["OUT.json"]) if "OUT.json" in files else {}
+    spec = json.loads(files["spec.json"]) if "spec.json" in files else {}
+    tb.case("OUT.json is the boot result, spec.json has the lifted range and no softfloat class",
+            doc.get("last_reached") == "all3" and "lifted" in spec.get("ranges", {}) and "softfloat" not in spec.get("entries", {}), (doc.get("last_reached"), spec))
+    tb.case("console file holds the guest's line", LINE in files.get("OUT.console.txt", b"").decode(), files.get("OUT.console.txt"))
+    rc2, out2, err2 = run_job(["testid"])
+    files2 = published("l4-verify/boot/testid")[0]
+    tb.case("second run republishes byte-equal OUT.json and console", rc2 == 0 and files2.get("OUT.json") == files["OUT.json"]
+            and files2.get("OUT.console.txt") == files["OUT.console.txt"], (rc2, err2[-400:]))
+
+    rc, out, err = run_job(["testid", "--limit-instructions", "40", "--profile", "docked"])
+    m = FINAL.match(out.strip().splitlines()[-1]) if out.strip() else None
+    meta = json.loads(published("l4-verify/boot/testid")[0]["meta.json"])
+    tb.case("limit and profile: reason limit, recorded in meta.json", rc == 0 and m and m.group(3) == "limit"
+            and meta["limit_instructions"] == 40 and meta["profile"] == "docked", (rc, out, err[-400:], meta))
+
+    rc, out, err = run_job(["faultid"])
+    m = FINAL.match(out.strip().splitlines()[-1]) if out.strip() else None
+    tb.case("faulting guest: boot rc 2 is a published result, job exit 0", rc == 0 and m and m.group(2) == "2" and m.group(3) == "fault"
+            and m.group(9) == "l4-verify/boot/faultid" and json.loads(published("l4-verify/boot/faultid")[0]["meta.json"])["boot_rc"] == 2,
+            (rc, out, err[-400:]))
+
+    rc, out, err = run_job(["softid"])
+    meta = json.loads(published("l4-verify/boot/softid")[0]["meta.json"]) if rc == 0 else {}
+    spec = json.loads(published("l4-verify/boot/softid")[0]["spec.json"]) if rc == 0 else {}
+    tb.case("softfloat.syms present: class in the spec, recorded", rc == 0 and meta.get("softfloat") == "present"
+            and len(spec.get("entries", {}).get("softfloat", [])) == 1, (rc, err[-400:], spec))
+
+    rc, out, err = run_job(["noentries"])
+    tb.case("missing entries.tsv: job fails naming the file, nothing published", rc == 1 and "entries.tsv" in err and "lacks" in err
+            and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/noentries"], cwd=BARE).returncode != 0, (rc, err[-400:]))
+    rc, out, err = run_job(["nosuchid"])
+    tb.case("missing branch: job fails naming it", rc == 1 and "l1-contract/elf/nosuchid" in err, (rc, err[-400:]))
+    empty = os.path.join(SCRATCH, "nogame")
+    os.makedirs(empty)
+    rc, out, err = run_job(["testid"], game=empty)
+    tb.case("game without FalloutNV.exe: job fails naming it", rc == 1 and "FalloutNV.exe" in err, (rc, err[-400:]))
+    rc, out, err = run_job(["testid", "--profile", "tv"])
+    tb.case("bad profile: job fails", rc == 1 and "--profile" in err, (rc, err[-400:]))
+    rc, out, err = run_job(["testid", "--limit-instructions", "0"])
+    tb.case("bad limit: job fails", rc == 1 and "--limit-instructions" in err, (rc, err[-400:]))
+    print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
+    return 1 if tb.FAILED else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -30,6 +30,15 @@
     "ports/fnv-nx/lift"
    ],
    "result": "selftests.json"
+  },
+  {
+   "name": "admit",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_admit.py"
+   ],
+   "result": "admit.json"
   }
  ]
 }
