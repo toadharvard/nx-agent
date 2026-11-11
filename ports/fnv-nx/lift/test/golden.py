@@ -27,7 +27,6 @@ def work(arg):
         a = int(a, 16); s = int(s) if not whole else a
         try: t, m = L.lift_entry(img, a) if whole else L.lift(img, a, s); out.append((a, 1, t))
         except L.Unsupported as e: out.append((a, 0, 'unsupported: ' + str(e)))
-        except Exception as e: out.append((a, 0, 'error: ' + type(e).__name__))
     return out
 
 if __name__ == '__main__':

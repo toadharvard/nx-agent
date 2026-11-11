@@ -8,17 +8,17 @@
      2. For every other input the true value v is irrational (even transcendental: Lindemann-Weierstrass for sin/cos/tan/2^x-1 of a non-zero algebraic,
         atan2 of a rational pair = argument of an algebraic number, Gelfond-Schneider for log2 of a rational that is not a power of two; times a non-zero
         rational y). So v is never a double and never a midpoint of two neighbouring doubles.
-     3. For n = 6, 12, 24, ... limbs of 32 bits the evaluator produces A and an integer B with |A - v| <= 2^-B |v| (proved per evaluator, below).
+     3. For n = 4, 8, 16, ... limbs of 32 bits the evaluator produces A and an integer B with |A - v| <= 2^-B |v| (proved per evaluator, below).
         The interval [A(1-2^(2-B)), A(1+2^(2-B))] contains v. If it lies inside ONE half-ulp cell of the binary64 grid (same binade, same cell index of the
         half-ulp lattice; subnormals and the overflow boundary are part of the lattice), v rounds (nearest-even) to the double of that cell, which is the
         answer; otherwise n doubles. Termination: v is not on the lattice, so some finite n puts it strictly inside a cell with room to spare, and the
         interval shrinks to v (B grows with n). There is no cap and no give-up path.
    BIG FLOATS: value = (-1)^s m 2^(e-32n), m an n-limb integer with its top bit set (so |value| in [2^(e-1), 2^e)); e is an int (range far beyond binary64).
      Every primitive truncates (toward zero) and its absolute error is <= 2^(emax-32n+1), emax = the larger operand exponent (bf_mul, bf_div, bf_*_u32:
-     relative error <= 2^(2-32n)); bf_add of numbers whose bits fit the window is exact. Series (Taylor/Euler/atanh/Machin) of N <= 32n terms with
-     |argument| < 1: each term carries <= 3N primitive errors, so the sum has relative error <= 12 N^2 2^-32n * (sum of |terms| / |sum|) <= 2^(-32n+40)*2
-     for n <= 2^15 (N <= 2^20); the constants pi, ln 2 inherit the same bound. We state every result with the guard G = 64 bits (> 42 + ceil(log2 of the
-     amplification, always <= 8 here)); assumption recorded: n <= 2^15 limbs (4 MiB of mantissa), which no double input approaches (hard cases need ~ 200 bits).
+     relative error <= 2^(2-32n)); bf_add of numbers whose bits fit the window is exact.
+     Series (Taylor, Euler, atanh, Machin) are summed term by term until the term is below 2^-(32n+4) of the sum (tail <= 2 terms): error bound GUARD(n) below.
+     The constants pi and ln 2 come from a generated table (n <= 40 limbs, truncated: relative error < 2^(2-32n)) or from the series (n > 40). Assumption
+     recorded: n <= 2^15 limbs (4 MiB of mantissa), which no double input approaches (hard cases need ~ 200 bits).
    WIDE ARGUMENT STEPS are done in a second context cw with more limbs so that they are exact or carry an explicit absolute bound.
    PER FUNCTION (exact cases handled before the loop / evaluator and its error budget):
      sin cos tan: x = 0, |x| < 2^-27 (sin, tan -> x; cos -> 1: proved at fnvl_m_sin) and non-finite operands by the table; else |x| = k pi/2 + r with the exact
@@ -33,7 +33,7 @@
    EXACT FORMS (no engine): fscale = integer exponent shift with one rounding (exact_double); fxtract = bit fields; fprem / fprem1 = long division of 53-bit
      mantissas, C0 = Q2, C3 = Q1, C1 = Q0, C2 = 0 for D = exponent difference < 64; D >= 64: C2 = 1 and the reduction by exactly 32 floor(D/32) - 32 bits (the reference CPU, below).
    FLAGS: IE, ZE, OE, UE (tiny before rounding and inexact), PE and C1 (= rounded up in magnitude) are derived from the same cell the rounding uses.
-   Memory: VLAs on the stack, 4 (48 n + 24 nw) bytes (n = 6, nw = 72: 8 KB), released every iteration. No static state: reentrant, thread safe. */
+   Memory: VLAs on the stack, 4 (48 n + 24 nw) bytes (n = 4, nw = 72: 7.6 KB), released every iteration. No static state: reentrant, thread safe. */
 #pragma GCC optimize("no-tree-loop-distribute-patterns")      /* no memset/memcpy calls: this file links without libc */
 #include "fmath.h"
 typedef long long s64;
@@ -86,6 +86,12 @@ static void bf_u64(cx *c, bf *r, u64 v, int sh, int s) {
   t[0] = (u32)v; t[1] = (u32)(v >> 32);
   bf_nw(c, r, t, 2, 64 + sh, s);
 }
+/* GUARD(n): bits lost to the primitive errors of a series evaluation at n limbs. Each series has N <= 32 n terms (every term gains >= 1.2 bits: the slowest
+   are Euler's atan(j/8), ratio <= 49/113, and atanh(1/3)); term k carries <= 4k primitive errors of 2^(2-32n) relative and the sum <= N additions of 2^(1-32n), and the
+   terms fall geometrically, so the total relative error is <= (2N + 64) 2^-32n times the cancellation factor (<= 8, counted separately in each evaluator);
+   2N + 64 <= 2^(bitlen(32 n) + 7), so 12 + 2 bitlen(32 n) bits are a safe (twice too generous) guard. test/fmathtest.py checks the claimed bounds against MPFR. */
+static int bitlen_(unsigned v) { int b = 0; while (v) { b++; v >>= 1; } return b; }
+#define GUARD(n) (12 + 2 * bitlen_(32u * (unsigned)(n)))
 /* convert a bf of context cw (nw limbs) into context c */
 static void bf_conv(cx *c, int nw, bf *r, const bf *a) { if (a->z) bzero_(r); else bf_nw(c, r, a->m, nw, a->e, a->s); }
 static int cmpmag(const bf *a, const bf *b, int n) {
@@ -438,7 +444,7 @@ static int ev_trig(cx *c, cx *cw, const za *a, bf *A, int *B) {
     bf_conv(c, nw, &R, &Rw);
     cw->p = mkw;
   }
-  if (br > 32 * n - 64) br = 32 * n - 64;
+  if (br > 32 * n - GUARD(n)) br = 32 * n - GUARD(n);
   if (br < 16) { c->p = mk; return 0; }
   bf S = bnew(c), C = bnew(c);
   int ws = a->w, neg;
@@ -489,7 +495,7 @@ static int ev_exp(cx *c, cx *cw, const za *a, bf *A, int *B) {
   ser_expm1(c, &S, &T);
   S.e += k;
   bf_add(c, A, &S, &W);
-  *B = 32 * c->n - 64 - 8;
+  *B = 32 * c->n - GUARD(c->n) - 8;
   c->p = mk;
   return 1;
 }
@@ -520,7 +526,7 @@ static int ev_log(cx *c, cx *cw, const za *a, bf *A, int *B) {
   bf_ln2(c, &L2); bf_div(c, &Q, &Lw, &L2);
   bf_add(c, &V, &Kb, &Q);
   bf_mul(c, A, &Y, &V);
-  *B = 32 * c->n - 64 - 12;
+  *B = 32 * c->n - GUARD(c->n) - 12;
   cw->p = mkw; c->p = mk;
   return 1;
 }
@@ -557,7 +563,7 @@ static int ev_atan(cx *c, cx *cw, const za *a, bf *A, int *B) {
   if (swap) { bf T2 = bnew(c); bf_sub(c, &T2, &pi2, &Th); Th = T2; }
   if (ux >> 63) { bf T3 = bnew(c); bf_sub(c, &T3, &pi, &Th); Th = T3; }
   bf_cpy(c, A, &Th); if (!A->z) A->s = (int)(uy >> 63);
-  *B = 32 * c->n - 64 - 12;
+  *B = 32 * c->n - GUARD(c->n) - 12;
   cw->p = mkw; c->p = mk;
   return 1;
 }
@@ -570,7 +576,7 @@ static int ev_piq(cx *c, cx *cw, const za *a, bf *A, int *B) {
   if (a->q == 3) { bf_mulu(c, &t, &pi, 3); t.e -= 2; } else { t = pi; t.e -= (a->q == 1) ? 2 : (a->q == 2) ? 1 : 0; }
   bf_cpy(c, A, &t);
   A->s = (int)(d2u(a->y) >> 63);
-  *B = 32 * c->n - 64 - 4;
+  *B = 32 * c->n - GUARD(c->n) - 4;
   c->p = mk;
   return 1;
 }
@@ -586,11 +592,11 @@ int fm_dbg_const(int which, int n, int notable, u32 *m, int *e) {
 }
 #endif
 #ifdef FM_DEBUG                  /* test/fmathtest.py: start limb count and a hook that reports every evaluation (A, B) so the error bounds can be checked against MPFR */
-int fm_nstart = 6;
+int fm_nstart = 4;
 void (*fm_hook)(int n, const u32 *m, int e, int s, int z, int B, int r);
 #define FM_NSTART fm_nstart
 #else
-#define FM_NSTART 6
+#define FM_NSTART 4
 #endif
 static double ziv(int w, double x, double y, int q, u32 *fl) {
   u64 ux = d2u(x);

@@ -239,12 +239,7 @@ def lift(img, addr, size, popn=None, start=None, owns=None, strict=True, x87=Non
     if owns is None:
         owns = universe.load()[1].get(addr, ())
     owns = sorted(x for x in owns if lo <= x < hi)
-    try:
-        return lift1(img, lo, hi, start, owns, strict, True, x87)
-    except Unsupported:
-        if not owns or start != addr:
-            raise
-        return lift1(img, lo, hi, start, owns, strict, False, x87)    # a label of the parent that cannot be lifted must not sink the parent
+    return lift1(img, lo, hi, start, owns, strict, True, x87)
 
 
 def lift1(img, lo, hi, start, owns, strict, explore_owns, x87=None):

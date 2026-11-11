@@ -90,7 +90,7 @@ def build():
     open(WORK + '/driver.c', 'w').write(DRIVER)
     subprocess.check_call(['gcc', '-O2', '-shared', '-fPIC', '-DFM_DEBUG', '-I', RT, RT + '/fmath.c', WORK + '/driver.c', '-o', WORK + '/fmath_t.so'])
     LIB = ctypes.CDLL(WORK + '/fmath_t.so')
-    LIB.set_nstart(int(os.environ.get('FMATH_NSTART', '6')))
+    LIB.set_nstart(int(os.environ.get('FMATH_NSTART', '4')))
 
 
 def u64_(x): return struct.unpack('<Q', struct.pack('<d', x))[0]
@@ -400,10 +400,10 @@ def bound_check(args):
     opn = OPS[which]
     m = (ctypes.c_uint * 4096)(); info = (ctypes.c_int * 8)()
     LIB.dbg_eval.argtypes = [ctypes.c_int, ctypes.c_double, ctypes.c_double, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
-    bad = []; used = 0
+    bad = []; used = 0; worst = 0.0
     for i, p in enumerate(pts):
         a, b = (p if two else (p, 0.0))
-        for ns in (6, 7, 9):
+        for ns in (3, 4, 5, 6, 9):
             if not LIB.dbg_eval(opn, a, b, ns, ctypes.addressof(m), ctypes.addressof(info)):
                 continue
             n, e, sg, z, B, r = info[0], info[1], info[2], info[3], info[4], info[5]
@@ -419,9 +419,10 @@ def bound_check(args):
             with prec(32 * n):
                 A = gmpy2.mpfr(mi) * gmpy2.mpfr(2) ** (e - 32 * n) * (-1 if sg else 1)
                 err = abs(A - v) * gmpy2.mpfr(2) ** B
+                worst = max(worst, float(err / abs(v)))
                 if err > abs(v):
                     bad.append((p, ns, B, float(err / abs(v))))
-    return used, bad
+    return used, bad, worst
 
 
 def gen_consts(N=40):
@@ -704,13 +705,13 @@ def main():
     for b in badc[:5]:
         print('   CONST', b)
     fail += len(badc)
-    # the error bounds claimed by the evaluators (the proof obligation), checked on a deterministic sample at n = 6, 7, 9 limbs
+    # the error bounds claimed by the evaluators (the proof obligation), checked on a deterministic sample at n = 3, 4, 5, 6, 9 limbs
     for f in fns:
         pts = gens[f]()
-        r2 = random.Random(o.seed + 1); smp = r2.sample(pts, min(len(pts), 3000))
+        r2 = random.Random(o.seed + 1); smp = r2.sample(pts, min(len(pts), 6000))
         res = pool.map(bound_check, [(f, smp[i::4]) for i in range(4)])
         used = sum(x[0] for x in res); bad = [b for x in res for b in x[1]]
-        print('%-7s claimed error bound 2^-B vs MPFR: %6d evaluations, violated %d' % (f, used, len(bad)))
+        print('%-7s claimed error bound 2^-B vs MPFR: %6d evaluations, violated %d (worst observed error / claimed bound: %.3g)' % (f, used, len(bad), max(x[2] for x in res)))
         for b in bad[:5]:
             print('   BOUND', b)
         fail += len(bad)

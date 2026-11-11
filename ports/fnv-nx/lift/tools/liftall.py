@@ -55,8 +55,6 @@ def lift_one(a):
         t, m = L.lift_entry(G['img'], a)
     except L.Unsupported as e:
         return None, str(e)
-    except Exception as e:
-        return None, 'error: ' + type(e).__name__
     t = re.sub(r'extern "C" void (L_%08x\(void\)\n\{)' % a, r'extern "C" __attribute__((section(".text.fnvl"))) void \1', t, count=1)
     assert '.text.fnvl' in t
     return t, formcert.census(G['cap'][-1][0])
@@ -104,8 +102,7 @@ def sampler(box):
     me = os.getpid()
     while not box.get('stop'):
         kids = subprocess.run(['ps', '-o', 'rss=', '--ppid', str(me)], capture_output=True, text=True).stdout.split()
-        try: own = int(re.search(r'VmRSS:\s+(\d+)', open('/proc/self/status').read()).group(1))
-        except Exception: own = 0
+        own = int(re.search(r'VmRSS:\s+(\d+)', open('/proc/self/status').read()).group(1))
         box['peak'] = max(box.get('peak', 0), own + sum(map(int, kids)))
         time.sleep(2)
 

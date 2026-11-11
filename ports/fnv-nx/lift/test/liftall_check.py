@@ -74,12 +74,12 @@ def run_dispatch(out, arcs, ents, uni, und):
     if r.returncode: return False, 'link of the blob failed: ' + r.stderr[:200]
     with open(elf, 'rb') as fh:
         e = ELFFile(fh); sym = {s.name: s['st_value'] for s in e.get_section_by_name('.symtab').iter_symbols() if s.name}
-        uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM); mapped = set()
         for p in e.iter_segments():
             if p['p_type'] != 'PT_LOAD': continue
             lo = p['p_vaddr'] & ~0xfff; hi = (p['p_vaddr'] + p['p_memsz'] + 0xfff) & ~0xfff
-            try: uc.mem_map(lo, hi - lo)
-            except Exception: pass
+            for pg in range(lo, hi, 0x1000):
+                if pg not in mapped: uc.mem_map(pg, 0x1000); mapped.add(pg)
             uc.mem_write(p['p_vaddr'], p.data())
     uc.mem_map(0x7f000000, 0x10000); uc.mem_map(0x7e000000, 0x1000)
     keys = sorted(ents); sample = [keys[i * len(keys) // 200] for i in range(200)] if len(keys) >= 200 else keys

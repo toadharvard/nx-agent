@@ -19,7 +19,6 @@ def lift_part(arg):
     for a in ent[k::n]:
         try: t, m = L.lift_entry(img, a)
         except L.Unsupported as e: why['unsupported: ' + re.sub(r'[0-9a-f]{5,8}', 'ADDR', str(e))] += 1; continue
-        except Exception as e: why['error: ' + type(e).__name__] += 1; continue
         ok += 1; ts = set(m['calls']) | set(m['tails']); seen += len(ts)
         for x in ts:
             if x not in es: miss[x] += 1

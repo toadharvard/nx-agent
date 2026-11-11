@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 for p in ('bench', 'tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, instest, phf, impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
-from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM
+from unicorn import Uc, UcError, UC_ARCH_ARM64, UC_MODE_ARM
 from unicorn.arm64_const import UC_ARM64_REG_X0, UC_ARM64_REG_X30, UC_ARM64_REG_SP, UC_ARM64_REG_CPACR_EL1
 from elftools.elf.elffile import ELFFile
 
@@ -152,7 +152,7 @@ def main():
         for i, v in enumerate((ents[name][0], gsp, 0x50000000, HSTACK + 0x100)): uc.reg_write(UC_ARM64_REG_X0 + i, v)
         try:
             uc.emu_start(sym['test_main'], STOP, count=2000000); got = uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff; err = ''
-        except Exception as ex: got = None; err = str(ex)
+        except UcError as ex: got = None; err = str(ex)
         o = struct.unpack('<3I', bytes(uc.mem_read(HSTACK + 0x100, 12)))
         good = got == want and o == (0, 0, 0) and uc.reg_read(UC_ARM64_REG_SP) == HSTACK + 0x3f000
         bad += not good
