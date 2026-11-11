@@ -70,7 +70,14 @@ job_pristine; [ -n "$PR" ] || die "no pristine MSVC objects for msvc_check.py: $
 T1=$(now)
 # 2. the recon set (recon.sh as prepare_job.sh uses it) and the map recon.json -> branch / tip / blob
 R=$W/recon; nb=$(GITA ls-remote origin 'refs/heads/recon/*' | grep -c . || true)
-. "$P/tools/farm/recon.sh"; fetch_recon "$ARTIFACTS" "$R" > "$W/recon.log" 2>&1 || true
+# fetch_recon fetches the branches one at a time and leaves a failed one out; a network failure is retried here (one
+# fetch of all of them first, then up to three passes), and the count check below still decides.
+for i in 2 4 8 16; do GITA fetch -q origin '+refs/heads/recon/*:refs/remotes/origin/recon/*' 2> "$W/recon-bulk.log" && break; sleep $i; done
+. "$P/tools/farm/recon.sh"; : > "$W/recon.log"
+for i in 1 2 3; do
+  fetch_recon "$ARTIFACTS" "$R" >> "$W/recon.log" 2>&1 || true
+  [ "${RECON_NOTE%% *}" = "$nb" ] && break; echo "pass $i: $RECON_NOTE" >> "$W/recon.log"; sleep $((i * 10))
+done
 { [ -n "${FNVNX_RECON:-}" ] && [ -n "${RECON_ID:-}" ]; } || die "no recon set fetched: $RECON_NOTE"
 [ "${RECON_NOTE%% *}" = "$nb" ] || die "$nb recon/* branches listed, fetch_recon took ${RECON_NOTE%% *} (a branch was left out: $W/recon.log)"
 python3 -I - "$R" "$ARTIFACTS" "$W" > "$W/recon.counts" <<'EOF' || die "recon map failed"
