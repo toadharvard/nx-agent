@@ -49,6 +49,25 @@ Each case is a PE32 exe (`abi_fixture.PE`) plus a hand-written obj store and bin
 slot, broken destructor pair, missing row, malformed input, missing exe, mutated store entries).
 Blocked as a unit: the exe side is the PE (cl toolchain); the obj side would have to be extracted from real objects by the same build.
 
-## Status of the move (updated below as items land)
-- Moved: 0 of 124. Blocked (PE or cl side): all 124 depend on a PE or COFF/CodeView builder except the 10 GCC-side-only cases of gate_names and the
-  malformed/absent/empty GCC-section cases of gate_r7 (about 14), which can move to real ELF objects.
+## Status of the move (head of branch claude/fnv-l2-source-w2 after the move)
+Real object: `fixtures/names_basic.cc` (names plugin rows: func, ctor/dtor, data, vtable) and `fixtures/r7_types.cc` (33 record types, layout plugin
+rows), built by `realobj.py` through `verify/recipe.py` (toy guest root, msvcmodel compiler pinned in verify/guest_compiler.json, all 8 plugins,
+`target: guest`, `cxx_origin: native`). Negatives are `mutate.py` edits located through `elfobj` (replace_section, rename_section, duplicate_section,
+drop_symtab, truncate, rename_symbol, set_section_flags). `synth.elf` is removed; no direct compiler call in the six files.
+
+| file | cases | GCC side real | blocked (reason) |
+|---|---|---|---|
+| test_gate_names.py | 38 check sites (was 39) | 38 | the cl side of every paired case stays `synth.coff` (cl toolchain as recipe external, L1); the ELF64 case ("elf64 gives the same verdicts") is dropped: the guest compiler yields ELF32 objects, an ELF64 real object needs an LP64 host root (not a guest product) |
+| test_gate_r7.py | 35 (loops count once) | 35 | cl side (`synth.CV`/`synth.coff`) hand-built for every case; `!_ZN3fooE` nokey row is a text edit of the real `UE@foo@@` row (no C++ fixture produces a nokey row) |
+| test_exevft.py | 24 | 0 | blocked: cl toolchain as recipe external (L1) (abi_fixture.PE) |
+| test_thisadj.py | 7 | 0 | blocked: cl toolchain as recipe external (L1) (abi_fixture.scene: PE + hand obj/bind stores) |
+| test_vslots.py | 8 | 0 | same |
+| test_vtables.py | 11 | 0 | same |
+| total | 123 | 73 | 50 fully blocked (PE) + the cl side of 73 |
+
+Real-compiler finding made while building fixtures: a by-value return of a polymorphic struct (`UVf f(UVf x)` with `virtual void f(); int m;`) is an
+internal compiler error of the msvcmodel compiler under the plugins (`expand_expr_addr_expr_1, at expr.cc:8710`, stage cc, during RTL pass expand).
+The fixtures use pointers instead; the ICE is reported to the L2 lead, not worked around in the compiler.
+
+Direct compiler calls still present in link/tests (outside the six files): test_gate_abs.py, test_gate_addr.py, test_gate_disp.py, test_gate_order.py,
+test_odr.py, test_abi.py (they call aarch64-linux-gnu-gcc/g++/as/ld themselves).
