@@ -36,7 +36,7 @@ struct NxChainCore : NxObj {
     void presented();                                 // a present succeeded: pcount++, stamp pres_vb (m1_stats.cpp)
     HRESULT present_stats(D3DPRESENTSTATS* s);        // IDirect3DSwapChain9Ex::GetPresentStats (m1_stats.cpp)
     // creation of the back buffers (also Reset): a surface per buffer, GPU image, lockable per D3DPRESENTFLAG_LOCKABLE_BACKBUFFER
-    HRESULT make_buffers(const NxPPEff& e, const D3DPRESENT_PARAMETERS& p);
+    NX_MUST_USE HRESULT make_buffers(const NxPPEff& e, const D3DPRESENT_PARAMETERS& p);
 };
 
 // ---- device lifecycle state (NxDeviceCore::life)
@@ -49,10 +49,10 @@ struct NxDevLife : NxDevLifeBase {
     uint32_t state = NX_DEV_OK; bool in_scene = false, ex = false, dialog = false; int32_t gpu_prio = 0; uint32_t latency = 3, frame = 0; uint32_t prof = 0;
     NxCursorState cur;
     ~NxDevLife();
-    void add_chain(NxChainCore* c); void del_chain(NxChainCore* c);
+    NX_MUST_USE bool add_chain(NxChainCore* c); void del_chain(NxChainCore* c);
 };
 inline NxDevLife* nx_life(NxObj* dev) { return static_cast<NxDevLife*>(static_cast<NxDeviceCore*>(dev)->life); }
-NxDevLife* nx_life_make(NxDeviceCore* d, bool ex, int prof);   // allocates and attaches the (empty) lifecycle state
+NX_MUST_USE NxDevLife* nx_life_make(NxDeviceCore* d, bool ex, int prof);   // nullptr = out of memory; allocates and attaches the (empty) lifecycle state
 HRESULT nx_make_auto_ds(NxDeviceCore* d, const NxPPEff& e, const D3DPRESENT_PARAMETERS& p, NxObj** out);   // implicit depth stencil surface for (eff size / samples, AutoDepthStencilFormat)
 HRESULT nx_chain_create(NxDeviceCore* d, const D3DPRESENT_PARAMETERS& p, const NxPPEff& e, bool implicit, NxChainCore** out);
 void nx_dev_bind_defaults(NxDeviceCore* d);   // CreateDevice / Reset: state defaults, RT 0 = back buffer 0 of chain 0, depth stencil = the auto depth stencil

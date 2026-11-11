@@ -28,11 +28,13 @@ static HRESULT d_cursor_props(NxObj* d, UINT hx, UINT hy, IDirect3DSurface9* bmp
     NxDevLife* L = nx_life(d); NxObj* o = nx_obj_of(bmp); if (!bmp || !o || o->ci->rtype != D3DRTYPE_SURFACE) return INV;
     NxImg* im = static_cast<NxSurfCore*>(o)->img; NxEnvMode m; nxenv_display_mode((int)L->prof, L->cp.AdapterOrdinal, &m);
     if (im->w > m.Width || im->h > m.Height) return INV;
-    nxd3d_free(L->cur.bgra); L->cur.bgra = nullptr; L->cur.w = L->cur.h = 0;                // wined3d_device_set_cursor_properties drops the old image first
-    if (im->fmt != D3DFMT_A8R8G8B8 || (im->w & (im->w - 1)) || (im->h & (im->h - 1))) return INV;
-    void* bits; uint32_t row, slice; if (FAILED(nx_img_lock(im, 0, 0, nullptr, D3DLOCK_READONLY, &bits, &row, &slice))) return INV;
-    uint8_t* px = (uint8_t*)nxd3d_alloc((size_t)im->w * im->h * 4); for (uint32_t y = 0; y < im->h; y++) memcpy(px + (size_t)y * im->w * 4, (uint8_t*)bits + (size_t)y * row, (size_t)im->w * 4);
-    bool was; nx_img_unlock(im, 0, 0, &was); L->cur.bgra = px; L->cur.w = im->w; L->cur.h = im->h; L->cur.hx = hx; L->cur.hy = hy; return D3D_OK;
+    // wined3d_device_set_cursor_properties drops the old image first: for every refusal below. A failure for lack of memory changes nothing (the old image stays: README "Allocation failure"): E_OUTOFMEMORY.
+    if (im->fmt != D3DFMT_A8R8G8B8 || (im->w & (im->w - 1)) || (im->h & (im->h - 1))) { nxd3d_free(L->cur.bgra); L->cur.bgra = nullptr; L->cur.w = L->cur.h = 0; return INV; }
+    void* bits; uint32_t row, slice; if (FAILED(nx_img_lock(im, 0, 0, nullptr, D3DLOCK_READONLY, &bits, &row, &slice))) { nxd3d_free(L->cur.bgra); L->cur.bgra = nullptr; L->cur.w = L->cur.h = 0; return INV; }
+    uint8_t* px = (uint8_t*)nxd3d_alloc((size_t)im->w * im->h * 4);
+    if (!px) { bool w0; nx_img_unlock(im, 0, 0, &w0); return E_OUTOFMEMORY; }
+    for (uint32_t y = 0; y < im->h; y++) memcpy(px + (size_t)y * im->w * 4, (uint8_t*)bits + (size_t)y * row, (size_t)im->w * 4);
+    bool was; nx_img_unlock(im, 0, 0, &was); nxd3d_free(L->cur.bgra); L->cur.bgra = px; L->cur.w = im->w; L->cur.h = im->h; L->cur.hx = hx; L->cur.hy = hy; return D3D_OK;
 }
 static BOOL d_show_cursor(NxObj* d, BOOL show) {
     NxCursorState& c = nx_life(d)->cur; BOOL old = c.visible;

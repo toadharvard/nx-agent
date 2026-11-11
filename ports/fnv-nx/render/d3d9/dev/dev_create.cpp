@@ -14,9 +14,13 @@
 
 HRESULT nx_make_auto_ds(NxDeviceCore* d, const NxPPEff& e, const D3DPRESENT_PARAMETERS& p, NxObj** out) {
     NxTexFmt f; nx_texfmt(p.AutoDepthStencilFormat, &f);
-    NxImg* img = new NxImg(); NxSurface9* s = new NxSurface9; s->img = s->own = img; NxObj* o = s; o->asImplicit(d, d); o->pool = D3DPOOL_DEFAULT;
-    img->init(s, NXK_SURFACE, e.w, e.h, 1, 1, 1, p.AutoDepthStencilFormat, D3DUSAGE_DEPTHSTENCIL, D3DPOOL_DEFAULT, (f.flags & NXTF_MAPPABLE) ? 12 : 0, false, nullptr, p.MultiSampleType, p.MultiSampleQuality, e.ds_samples, D3DUSAGE_DEPTHSTENCIL);
-    if (!img->gpu && !(img->ni.flags & NXFMT_NULL)) { o->owned = 0; o->ci->destroy(o); return D3DERR_OUTOFVIDEOMEMORY; }
+    // Allocation failure: E_OUTOFMEMORY (objects), D3DERR_OUTOFVIDEOMEMORY (NxImg::init / no native format); what was made is destroyed (README "Allocation failure").
+    NxImg* img = nx_make_plain<NxImg>(); if (!img) return E_OUTOFMEMORY;
+    NxSurface9* s = nx_make<NxSurface9>(); if (!s) { delete img; return E_OUTOFMEMORY; }
+    s->img = s->own = img; NxObj* o = s; o->asImplicit(d, d); o->pool = D3DPOOL_DEFAULT;
+    HRESULT hr = img->init(s, NXK_SURFACE, e.w, e.h, 1, 1, 1, p.AutoDepthStencilFormat, D3DUSAGE_DEPTHSTENCIL, D3DPOOL_DEFAULT, (f.flags & NXTF_MAPPABLE) ? 12 : 0, false, nullptr, p.MultiSampleType, p.MultiSampleQuality, e.ds_samples, D3DUSAGE_DEPTHSTENCIL);
+    if (hr == D3D_OK && !img->gpu && !(img->ni.flags & NXFMT_NULL)) hr = D3DERR_OUTOFVIDEOMEMORY;
+    if (hr != D3D_OK) { o->owned = 0; o->ci->destroy(o); return hr; }
     *out = o; return D3D_OK;
 }
 void nx_dev_bind_defaults(NxDeviceCore* d) {
@@ -33,16 +37,20 @@ void nx_pp_write_back(D3DPRESENT_PARAMETERS* pp, const NxPPEff& e, bool reset) {
 }
 template <class C> static HRESULT make_device(NxObj* d3d, bool ex, UINT adapter, D3DDEVTYPE type, HWND focus, DWORD flags, D3DPRESENT_PARAMETERS* pp, void** out) {
     if (!pp || !out) return D3DERR_INVALIDCALL;
-    C* dev = new C; NxObj* o = dev; o->asDevice(d3d); int prof = nx_env_profile_of(o);
+    C* dev = nx_make<C>(); if (!dev) return E_OUTOFMEMORY;   // d3d9_CreateDevice: calloc failure -> E_OUTOFMEMORY
+    NxObj* o = dev; o->asDevice(d3d); int prof = nx_env_profile_of(o);
     NxDeviceCore* core = dev; HRESULT hr; NxPPEff e;
     if (adapter >= nxenv_adapter_count(prof)) hr = D3DERR_INVALIDCALL;
     else if (!pp->Windowed && !nxd3d_window_client(focus ? (void*)focus : (void*)pp->hDeviceWindow, nullptr)) hr = E_FAIL;       // wined3d_device_acquire_focus_window
     else if (SUCCEEDED(hr = nx_pp_resolve(prof, ex, NX_PP_CREATE, pp, (void*)focus, &e))) {
-        NxDevLife* L = nx_life_make(core, ex, prof); L->cp.AdapterOrdinal = adapter; L->cp.DeviceType = type; L->cp.hFocusWindow = focus; L->cp.BehaviorFlags = flags;
+        NxDevLife* L = nx_life_make(core, ex, prof);
+        if (!L) hr = E_OUTOFMEMORY; else {
+        L->cp.AdapterOrdinal = adapter; L->cp.DeviceType = type; L->cp.hFocusWindow = focus; L->cp.BehaviorFlags = flags;
         NxChainCore* c = nullptr; NxObj* ds = nullptr;
         if (SUCCEEDED(hr = nx_chain_create(core, *pp, e, true, &c)) && (!pp->EnableAutoDepthStencil || SUCCEEDED(hr = nx_make_auto_ds(core, e, *pp, &ds)))) {
             L->ds = ds; nx_dev_bind_defaults(core); nx_pp_write_back(pp, e, false);
             *out = static_cast<IDirect3DDevice9*>(dev); return D3D_OK;
+        }
         }
     }
     o->release();   // public 1 -> 0: destroys the device (and what it owns), releases IDirect3D9

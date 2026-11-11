@@ -16,9 +16,10 @@
 #include <string.h>
 #define INV D3DERR_INVALIDCALL
 
-void NxDevLife::add_chain(NxChainCore* c) {
-    NxChainCore** n = (NxChainCore**)nxd3d_alloc(sizeof(void*) * (nchains + 1)); if (nchains) memcpy(n, chains, sizeof(void*) * nchains);
-    n[nchains] = c; c->index = nchains++; nxd3d_free(chains); chains = n;
+bool NxDevLife::add_chain(NxChainCore* c) {   // false = out of memory, the list is unchanged
+    NxChainCore** n = (NxChainCore**)nxd3d_alloc(sizeof(void*) * (nchains + 1)); if (!n) return false;
+    if (nchains) memcpy(n, chains, sizeof(void*) * nchains);
+    n[nchains] = c; c->index = nchains++; nxd3d_free(chains); chains = n; return true;
 }
 void NxDevLife::del_chain(NxChainCore* c) {
     uint32_t k = 0; for (uint32_t i = 0; i < nchains; i++) if (chains[i] != c) { chains[k] = chains[i]; chains[k]->index = k; k++; }
@@ -29,7 +30,7 @@ NxDevLife::~NxDevLife() {
     if (ds) ds->ci->destroy(ds);
     nxd3d_free(chains);
 }
-NxDevLife* nx_life_make(NxDeviceCore* d, bool ex, int prof) { NxDevLife* l = new NxDevLife; l->ex = ex; l->prof = (uint32_t)prof; d->life = l; return l; }
+NxDevLife* nx_life_make(NxDeviceCore* d, bool ex, int prof) { NxDevLife* l = nx_make_plain<NxDevLife>(); if (!l) return nullptr; l->ex = ex; l->prof = (uint32_t)prof; d->life = l; return l; }
 
 // destroys the buffers without public references; a buffer the application still holds (Ex Reset) becomes an ordinary object of the device that dies with its last reference
 NxObj* NxChainCore::destroy_bbs() {
@@ -42,36 +43,39 @@ NxObj* NxChainCore::destroy_bbs() {
 }
 NxChainCore::~NxChainCore() { destroy_bbs(); if (d && d->life) nx_life(d)->del_chain(this); }
 
+// Allocation failure (README "Allocation failure"): E_OUTOFMEMORY for the objects / the array (d3d9 swapchain.c / wined3d swapchain init), D3DERR_OUTOFVIDEOMEMORY when the image cannot be made (NxImg::init) or has no native format;
+// every buffer made so far is destroyed, the chain keeps its old (empty after destroy_bbs) buffer set.
 HRESULT NxChainCore::make_buffers(const NxPPEff& e, const D3DPRESENT_PARAMETERS& p) {
-    NxObj** nb = (NxObj**)nxd3d_alloc(sizeof(NxObj*) * e.count); NxTexFmt f; nx_texfmt(e.fmt, &f);
-    bool lock = (p.Flags & D3DPRESENTFLAG_LOCKABLE_BACKBUFFER) != 0;
-    for (uint32_t n = 0; n < e.count; n++) {
-        NxImg* img = new NxImg(); NxSurface9* s = new NxSurface9; s->img = s->own = img; NxObj* o = s; o->asImplicit(d, this); o->pool = D3DPOOL_DEFAULT; if (index) o->owner = this;
-        img->init(s, NXK_SURFACE, e.w, e.h, 1, 1, 1, e.fmt, D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT, (lock || (f.flags & NXTF_MAPPABLE)) ? 12 : 0, false, nullptr, p.MultiSampleType, p.MultiSampleQuality, e.samples, D3DUSAGE_RENDERTARGET);
-        nb[n] = o;
-        if (!img->gpu && !(img->ni.flags & NXFMT_NULL)) { for (uint32_t k = 0; k <= n; k++) { nb[k]->owned = 0; nb[k]->ci->destroy(nb[k]); } nxd3d_free(nb); return D3DERR_OUTOFVIDEOMEMORY; }   // the env table says the format exists: a backend defect
+    NxObj** nb = (NxObj**)nxd3d_alloc(sizeof(NxObj*) * (e.count ? e.count : 1)); if (!nb) return E_OUTOFMEMORY;
+    NxTexFmt f; nx_texfmt(e.fmt, &f); bool lock = (p.Flags & D3DPRESENTFLAG_LOCKABLE_BACKBUFFER) != 0; uint32_t made = 0; HRESULT hr = D3D_OK;
+    for (uint32_t n = 0; n < e.count && hr == D3D_OK; n++) {
+        NxImg* img = nx_make_plain<NxImg>(); if (!img) { hr = E_OUTOFMEMORY; break; }
+        NxSurface9* s = nx_make<NxSurface9>(); if (!s) { delete img; hr = E_OUTOFMEMORY; break; }
+        s->img = s->own = img; NxObj* o = s; o->asImplicit(d, this); o->pool = D3DPOOL_DEFAULT; if (index) o->owner = this; nb[made++] = o;   // from here the surface owns the image
+        hr = img->init(s, NXK_SURFACE, e.w, e.h, 1, 1, 1, e.fmt, D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT, (lock || (f.flags & NXTF_MAPPABLE)) ? 12 : 0, false, nullptr, p.MultiSampleType, p.MultiSampleQuality, e.samples, D3DUSAGE_RENDERTARGET);
+        if (hr == D3D_OK && !img->gpu && !(img->ni.flags & NXFMT_NULL)) hr = D3DERR_OUTOFVIDEOMEMORY;   // no native representation of the format
     }
+    if (hr != D3D_OK) { for (uint32_t k = 0; k < made; k++) { nb[k]->owned = 0; nb[k]->ci->destroy(nb[k]); } nxd3d_free(nb); return hr; }
     bb = nb; nbb = e.count; return D3D_OK;
 }
 HRESULT nx_chain_create(NxDeviceCore* d, const D3DPRESENT_PARAMETERS& p, const NxPPEff& e, bool implicit, NxChainCore** out) {
     NxDevLife* L = nx_life(d); NxChainCore* c; NxObj* o;
-    if (L->ex) { NxSwapChain9Ex* x = new NxSwapChain9Ex; c = x; o = x; } else { NxSwapChain9* x = new NxSwapChain9; c = x; o = x; }
+    if (L->ex) { NxSwapChain9Ex* x = nx_make<NxSwapChain9Ex>(); c = x; o = x; } else { NxSwapChain9* x = nx_make<NxSwapChain9>(); c = x; o = x; }
+    if (!c) return E_OUTOFMEMORY;   // d3d9 swapchain.c: calloc failure
     if (implicit) o->asImplicit(d, d); else o->asChild(d, ~0u);
     c->d = d; c->pp = p; c->pp.BackBufferWidth = e.w; c->pp.BackBufferHeight = e.h; c->pp.BackBufferFormat = (D3DFORMAT)e.fmt; c->pp.BackBufferCount = e.count; c->pp.hDeviceWindow = (HWND)e.win; c->pp.Flags &= 0xfffu;
     for (int i = 0; i < 256; i++) c->ramp.red[i] = c->ramp.green[i] = c->ramp.blue[i] = (WORD)(i * 257);   // the identity ramp (the display's initial ramp)
-    L->add_chain(c);
-    HRESULT hr = c->make_buffers(e, c->pp);
+    HRESULT hr = L->add_chain(c) ? c->make_buffers(e, c->pp) : E_OUTOFMEMORY;
     if (FAILED(hr)) { if (implicit) { o->owned = 0; o->ci->destroy(o); } else o->release(); return hr; }
     *out = c; return D3D_OK;
 }
 
-static void rotate(NxChainCore* c) {   // see the header: images rotate, objects stay
+static NxImg* bbimg(NxChainCore* c, uint32_t i) { return static_cast<NxSurfCore*>(c->bb[i])->img; }
+static bool upload_all(NxChainCore* c) { for (uint32_t i = 0; i < c->nbb; i++) if (!bbimg(c, i)->upload()) return false; return true; }   // pending CPU writes of every buffer, BEFORE anything of the present changes
+static void rotate(NxChainCore* c) {   // see the header: images rotate, objects stay; in place, nothing can fail (the buffers were uploaded by upload_all)
     if (c->nbb < 2) return;
-    NxImg** im = (NxImg**)nxd3d_alloc(sizeof(NxImg*) * c->nbb);
-    for (uint32_t i = 0; i < c->nbb; i++) { im[i] = static_cast<NxSurfCore*>(c->bb[i])->img; im[i]->upload(); }
-    uint32_t first = im[0]->gpu; for (uint32_t i = 0; i + 1 < c->nbb; i++) im[i]->gpu = im[i + 1]->gpu; im[c->nbb - 1]->gpu = first;
-    for (uint32_t i = 0; i < c->nbb; i++) if (im[i]->sub[0].mem) im[i]->sub[0].gpu_newer = 1;
-    nxd3d_free(im);
+    uint32_t first = bbimg(c, 0)->gpu; for (uint32_t i = 0; i + 1 < c->nbb; i++) bbimg(c, i)->gpu = bbimg(c, i + 1)->gpu; bbimg(c, c->nbb - 1)->gpu = first;
+    for (uint32_t i = 0; i < c->nbb; i++) if (bbimg(c, i)->sub[0].mem) bbimg(c, i)->sub[0].gpu_newer = 1;
 }
 HRESULT NxChainCore::present(const RECT* s, const RECT* dr, void* ov, DWORD flags) {
     (void)ov; NxDevLife* L = nx_life(d);
@@ -82,7 +86,8 @@ HRESULT NxChainCore::present(const RECT* s, const RECT* dr, void* ov, DWORD flag
     if (dr) dst = *dr; else { if (!win) return INV; dst.left = dst.top = 0; dst.right = cw; dst.bottom = ch; }
     if (src.left < 0 || src.top < 0 || src.left >= src.right || src.top >= src.bottom || src.right > (LONG)pp.BackBufferWidth || src.bottom > (LONG)pp.BackBufferHeight) return INV;
     if (!win || dst.left < 0 || dst.top < 0 || dst.left >= dst.right || dst.top >= dst.bottom || dst.right > cw || dst.bottom > ch) return INV;
-    NxImg* img = static_cast<NxSurfCore*>(bb[0])->img; img->upload();
+    if (!upload_all(this)) return E_OUTOFMEMORY;   // a conversion buffer; nothing was presented, nothing rotated, the dirty regions stay
+    NxImg* img = static_cast<NxSurfCore*>(bb[0])->img;
     if (!img->gpu) { L->frame++; rotate(this); presented(); return D3D_OK; }   // NXFMT_NULL: no pixels
     NxPresent p = {}; p.image = img->gpu; p.sx = src.left; p.sy = src.top; p.sw = src.right - src.left; p.sh = src.bottom - src.top; p.dx = dst.left; p.dy = dst.top; p.dw = dst.right - dst.left; p.dh = dst.bottom - dst.top;
     p.interval = (flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 : nx_pp_interval(pp.PresentationInterval); p.gamma = ramp_set ? (uint64_t)(uintptr_t)&ramp : 0; p.frame = ++L->frame;

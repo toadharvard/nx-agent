@@ -11,6 +11,8 @@
 #include "glue_buf.h"
 #include "d3d9_adapter.h"
 #include "face.h"
+#include "dev_core.h"
+#include "draw_ffp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,6 +57,8 @@ uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t* a, uint32_t) {
     case NXGPU_FN_IMAGE_DESTROY: { if (a[0] >= NX_MAX_IMAGES) return NXGPU_BAD_CALL; g_nimg--; return 0; }
     case NXGPU_FN_MEM_CREATE: { if (inject()) return NXGPU_BAD_CALL; g_nblk++; return g_next_blk++; }
     case NXGPU_FN_MEM_DESTROY: g_nblk--; return 0;
+    case NXGPU_FN_SHADER_CREATE_D3D: { static uint32_t id = 1000; if (inject()) return NXGPU_BAD_CALL; return id++; }
+    case NXGPU_FN_SAMPLER_CREATE: { static uint32_t sid = 1; return sid++ % 200 + 1; }
     case NXGPU_FN_QUERY_RESULT: { uint64_t* out = (uint64_t*)a[2]; *out = 1; return 0; }
     default: return 0;   // SUBMIT, WAIT_FRAME, IMAGE_READ (the staging keeps whatever it held)
     }
@@ -63,6 +67,14 @@ struct FakeDc { void* mem; };
 void* nxd3d_dc_create(void* mem, uint32_t, uint32_t, uint32_t, uint32_t) { FakeDc* d = (FakeDc*)malloc(sizeof(FakeDc)); d->mem = mem; return d; }
 void nxd3d_dc_release(void* dc) { free(dc); }
 NxEnvProfile nx_env_profile() { return NX_ENV_HANDHELD; }
+// platform facts of the lifecycle module (dev_hooks.h): every non-null window is an 800 x 600 client area at (10, 20)
+bool nxd3d_window_client(void* h, RECT* r) { if (!h) return false; if (r) { r->left = 10; r->top = 20; r->right = 810; r->bottom = 620; } return true; }
+uint64_t nxd3d_perf_counter(uint64_t* f) { static uint64_t c = 0; *f = 1000000; c += 7777; return c; }
+void nxd3d_os_cursor_pos(int32_t* x, int32_t* y) { *x = 100; *y = 100; }
+// the fixed-function programs are another module (ffp_*.cpp): doubles that name two backend shaders, as tests/l6/draw does
+static uint8_t g_ubo_v[64], g_ubo_p[32];
+uint32_t nx_ffp_vs_program(NxDeviceCore*, NxFfpVsBind* o) { memset((void*)o, 0, sizeof *o); o->n_in = 1; o->in_pair[0] = FNVNX_DK_PAIR(0, 0); o->in_loc[0] = 0; o->n_ubo = 1; o->ubo[0] = {4, sizeof g_ubo_v, g_ubo_v}; return 90; }
+uint32_t nx_ffp_ps_program(NxDeviceCore*, NxFfpPsBind* o) { memset((void*)o, 0, sizeof *o); o->n_in = 1; o->in_pair[0] = FNVNX_DK_PAIR(5, 0); o->n_ubo = 1; o->ubo[0] = {3, sizeof g_ubo_p, g_ubo_p}; return 91; }
 extern "C" uint32_t fnvnx_import_key(const char*, const char*, uint32_t ordinal) { return 0x1000 + ordinal; }   // the loader's import key of a method row (any nonzero key: the table is only read through the face)
 HRESULT STDMETHODCALLTYPE NxDevice9Ex::CheckResourceResidency(IDirect3DResource9**, UINT32) { return D3D_OK; }   // device-lifecycle module (not linked here): the thunk under test only converts its array
 extern "C" HRESULT nxb_IDirect3DDevice9Ex_CheckResourceResidency(void* nxb_this, void** resources, UINT32 resource_count);   // d9bridge.gen.cpp: the one generated thunk that allocates
@@ -76,6 +88,7 @@ struct W {
     IDirect3DTexture9* tex[8] = {}; IDirect3DCubeTexture9* cube = nullptr; IDirect3DVolumeTexture9* vol = nullptr;
     IDirect3DSurface9* rt = nullptr; IDirect3DSurface9* rt2 = nullptr; IDirect3DSurface9* rt3 = nullptr; IDirect3DSurface9* ds = nullptr; IDirect3DSurface9* sys = nullptr; IDirect3DSurface9* sysc = nullptr; IDirect3DSurface9* defc = nullptr;
     IDirect3DStateBlock9* sb[4] = {}; bool recording = false; HDC dc = nullptr;
+    IDirect3DDevice9* ld = nullptr; IDirect3DSwapChain9* sc = nullptr;   // the lifecycle device made inside the scenario and its additional swap chain
 };
 template <class T> static void rel(T*& p) { if (p) { p->Release(); p = nullptr; } }
 
@@ -218,6 +231,50 @@ static void scenario(W& w) {
         g_ctx = g_ctx_now = "GetDC"; Snap s0 = snap(w); uint64_t h0 = g_nhit; HRESULT hr = w.rt2->GetDC(&w.dc); bool hit = g_nhit != h0;
         if (!hit) { CHECK(hr == D3D_OK && w.dc); if (w.dc) STEP(w, "ReleaseDC", D3D_OK, OOM, OOM, w.rt2->ReleaseDC(w.dc)); w.dc = nullptr; } else { CHECK(hr == OOM && !w.dc); CHECK(snap(w) == s0); }
     }
+    // ---- draw path: the four Draw* (fixed function, programs, UP paths); programs are created lazily by the first draw that names them
+    if (w.rt && w.vb[1] && w.ib[0] && w.vb[2]) {
+        float verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0}; uint16_t idx[3] = {0, 1, 2}; bool bound;
+        d->SetFVF(D3DFVF_XYZ); bound = SUCCEEDED(d->SetStreamSource(0, w.vb[1], 0, 12)) && SUCCEEDED(d->SetIndices(w.ib[0]));
+        if (bound) {
+            STEP(w, "DrawPrimitive (fixed function)", D3D_OK, OVM, OOM, d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1));
+            STEP(w, "DrawPrimitive (again)", D3D_OK, OVM, OOM, d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1));
+            STEP(w, "DrawIndexedPrimitive", D3D_OK, OVM, OOM, d->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, 0, 3, 0, 1));
+        }
+        STEP(w, "DrawPrimitiveUP", D3D_OK, OVM, OOM, d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, verts, 12));
+        STEP(w, "DrawIndexedPrimitiveUP", D3D_OK, OVM, OOM, d->DrawIndexedPrimitiveUP(D3DPT_TRIANGLELIST, 0, 3, 1, idx, D3DFMT_INDEX16, verts, 12));
+        if (w.vs && w.ps && w.decl && SUCCEEDED(d->SetStreamSource(0, w.vb[1], 0, 20))) {
+            nx_ignore(d->SetVertexShader(w.vs)); nx_ignore(d->SetPixelShader(w.ps)); nx_ignore(d->SetVertexDeclaration(w.decl));
+            STEP(w, "DrawPrimitive (shader program creation)", D3D_OK, OVM, OOM, d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1));
+            STEP(w, "DrawPrimitive (program cached)", D3D_OK, OVM, OOM, d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1));
+            nx_ignore(d->SetVertexShader(nullptr)); nx_ignore(d->SetPixelShader(nullptr));
+        }
+    }
+    // ---- device lifecycle: CreateDevice, additional swap chains, cursor, Present, Reset (a failed Reset leaves the device NOT RESET: Wine d3d9_device_reset, MS Reset: "the device is placed in the lost state")
+    {
+        D3DPRESENT_PARAMETERS pp; memset(&pp, 0, sizeof pp); pp.Windowed = TRUE; pp.SwapEffect = D3DSWAPEFFECT_DISCARD; pp.BackBufferCount = 2; pp.BackBufferWidth = 64; pp.BackBufferHeight = 64; pp.hDeviceWindow = (HWND)1;
+        pp.EnableAutoDepthStencil = TRUE; pp.AutoDepthStencilFormat = D3DFMT_D24S8; pp.BackBufferFormat = D3DFMT_X8R8G8B8; D3DPRESENT_PARAMETERS pp0 = pp;
+        IDirect3DDevice9* ld = nullptr; STEP(w, "CreateDevice", D3D_OK, OOM, OVM, w.d3d->CreateDevice(0, D3DDEVTYPE_HAL, (HWND)1, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &pp, &ld)); (void)pp0;
+        CHECK(ld != nullptr || g_nhit != 0 ? true : false); if (g_nhit && !ld) {} w.ld = ld;
+        if (ld) {
+            W lw; lw.d3d = w.d3d; lw.dev = static_cast<NxDevice9*>(ld); lw.i9 = ld; D3DPRESENT_PARAMETERS p2 = pp0; p2.BackBufferCount = 1; IDirect3DSwapChain9* sc = nullptr;
+            CREATE(lw, "CreateAdditionalSwapChain", OOM, OVM, sc, ld->CreateAdditionalSwapChain(&p2, &sc)); w.sc = sc;
+            if (w.sys) { STEP(lw, "SetCursorProperties", D3D_OK, OOM, OOM, ld->SetCursorProperties(1, 1, w.sys)); nx_ignore(ld->ShowCursor(TRUE)); ld->SetCursorPosition(20, 30, 0); }
+            STEP(lw, "Present (cursor)", D3D_OK, OVM, OOM, ld->Present(nullptr, nullptr, nullptr, nullptr));
+            STEP(lw, "Present (again)", D3D_OK, OVM, OOM, ld->Present(nullptr, nullptr, nullptr, nullptr));
+            if (sc) STEP(lw, "SwapChain::Present", D3D_OK, OVM, OOM, sc->Present(nullptr, nullptr, nullptr, nullptr, 0));
+            // Reset: all or nothing is not possible (the old buffers are gone first); the rule is the device state: NOT RESET until a Reset succeeds
+            g_ctx = g_ctx_now = "Reset"; uint64_t h0 = g_nhit; D3DPRESENT_PARAMETERS pr = pp0; pr.BackBufferWidth = 32; pr.BackBufferHeight = 32; HRESULT hr = ld->Reset(&pr); bool hit = g_nhit != h0;
+            if (!hit) { CHECK(hr == D3D_OK); CHECK(ld->TestCooperativeLevel() == D3D_OK); }
+            else {
+                CHECK(in(hr, OOM, OVM)); CHECK(ld->TestCooperativeLevel() == D3DERR_DEVICENOTRESET);
+                STEP(lw, "Present (device not reset)", D3DERR_DEVICELOST, OOM, OVM, ld->Present(nullptr, nullptr, nullptr, nullptr));
+                uint64_t h1 = g_nhit; D3DPRESENT_PARAMETERS pr2 = pp0; pr2.BackBufferWidth = 32; pr2.BackBufferHeight = 32; hr = ld->Reset(&pr2);   // the retry
+                if (g_nhit == h1) { CHECK(hr == D3D_OK); CHECK(ld->TestCooperativeLevel() == D3D_OK); } else CHECK(in(hr, OOM, OVM) && ld->TestCooperativeLevel() == D3DERR_DEVICENOTRESET);
+            }
+            if (ld->TestCooperativeLevel() == D3D_OK) STEP(lw, "Present (after Reset)", D3D_OK, OVM, OOM, ld->Present(nullptr, nullptr, nullptr, nullptr));
+            g_ctx_now = "(none)";
+        }
+    }
     g_ctx_now = "(teardown)"; CHECK(g_nhit >= hits0);
 }
 
@@ -229,6 +286,7 @@ static uint64_t run(uint64_t fail_at, bool sticky) {
     IDirect3D9Ex* ex = nullptr; if (SUCCEEDED(nx_Direct3DCreate9Ex(0, &ex))) { w.d3dx = static_cast<NxDirect3D9Ex*>(ex); w.devx = new NxDevice9Ex; NxObj* ox = w.devx; ox->asDevice(w.d3dx); w.devx->init(cp); }
     g_armed = true; scenario(w); g_armed = false; uint64_t events = g_count;
     // teardown: everything created is released (public count 1 each), then the device and the factory
+    rel(w.sc); rel(w.ld);
     for (auto& p : w.sb) rel(p);
     rel(w.defc); rel(w.sysc); rel(w.sys); rel(w.ds); rel(w.rt3); rel(w.rt2); rel(w.rt); rel(w.vol); rel(w.cube); for (auto& p : w.tex) rel(p); for (auto& p : w.q) rel(p);
     rel(w.ps); rel(w.vs); rel(w.decl); for (auto& p : w.ib) rel(p); for (auto& p : w.vb) rel(p); rel(w.f9x); rel(w.f9);
