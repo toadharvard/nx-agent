@@ -1,5 +1,11 @@
-/* SHA-256 (FIPS 180-4), small and portable; only used for the content probes. */
+/* SHA-256 (FIPS 180-4), used for the content probes (the start sequence hashes the whole exe).  One block function per build,
+   chosen at compile time: with __ARM_FEATURE_SHA2 (the guest is built with -march=armv8-a+crc+crypto) the ARMv8 SHA-256
+   instructions through the ACLE intrinsics, else the portable C code (host test build).  No runtime dispatch.  Equality of the two
+   is checked by `make sha256check` (loader/host/sha256check.c). */
 #include "internal.h"
+#ifdef __ARM_FEATURE_SHA2
+#include <arm_neon.h>
+#endif
 
 static const uint32_t K[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -11,6 +17,23 @@ static const uint32_t K[64] = {
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
+#ifdef __ARM_FEATURE_SHA2
+static void block(uint32_t h[8], const uint8_t *p) {
+    uint32x4_t abcd = vld1q_u32(h), efgh = vld1q_u32(h + 4), s0 = abcd, s1 = efgh, m[4], tmp, t;
+    unsigned i;
+    for (i = 0; i < 4; i++) m[i] = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(p + 16 * i)));
+    for (i = 0; i < 16; i++) {
+        uint32x4_t *w = &m[i & 3];
+        tmp = vaddq_u32(*w, vld1q_u32(K + 4 * i));
+        if (i < 12) *w = vsha256su1q_u32(vsha256su0q_u32(*w, m[(i + 1) & 3]), m[(i + 2) & 3], m[(i + 3) & 3]);
+        t = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, tmp);
+        efgh = vsha256h2q_u32(efgh, t, tmp);
+    }
+    vst1q_u32(h, vaddq_u32(abcd, s0));
+    vst1q_u32(h + 4, vaddq_u32(efgh, s1));
+}
+#else
 #define ROR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
 
 static void block(uint32_t h[8], const uint8_t *p) {
@@ -31,6 +54,7 @@ static void block(uint32_t h[8], const uint8_t *p) {
     }
     h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += k;
 }
+#endif
 
 void fnvnx_sha256(const void *data, size_t size, uint8_t out[32]) {
     uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};

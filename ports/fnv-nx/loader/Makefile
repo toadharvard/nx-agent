@@ -60,3 +60,17 @@ modcheck: $(OUT)/modcheck
 	$(OUT)/modcheck $(OUT)/sm
 
 .PHONY: modcheck
+
+# SHA-256: the ARMv8 intrinsic build (selected by __ARM_FEATURE_SHA2) against the NIST vectors and the portable build, under qemu-aarch64.
+A64_CC ?= aarch64-linux-gnu-gcc
+QEMU   ?= qemu-aarch64
+$(OUT)/sha256check: host/sha256check.c src/sha256.c include/fnvnx_loader.h src/internal.h | $(OUT)
+	$(A64_CC) -O2 -std=c99 -Wall -Wextra -Werror -march=armv8-a+crypto $(INC) -c src/sha256.c -o $(OUT)/sha256_isa.o
+	$(A64_CC) -O2 -std=c99 -Wall -Wextra -Werror -march=armv8-a -Dfnvnx_sha256=fnvnx_sha256_portable $(INC) -c src/sha256.c -o $(OUT)/sha256_portable.o
+	$(A64_CC) -O2 -std=c99 -Wall -Wextra -Werror $(INC) host/sha256check.c $(OUT)/sha256_isa.o $(OUT)/sha256_portable.o -static -o $@
+	@aarch64-linux-gnu-objdump -d $(OUT)/sha256_isa.o | grep -q sha256h || { echo "sha256check: the ISA build has no SHA-256 instruction"; exit 1; }
+	@! aarch64-linux-gnu-objdump -d $(OUT)/sha256_portable.o | grep -q sha256h || { echo "sha256check: the portable build has SHA-256 instructions"; exit 1; }
+
+sha256check: $(OUT)/sha256check
+	$(QEMU) $(OUT)/sha256check
+.PHONY: sha256check
