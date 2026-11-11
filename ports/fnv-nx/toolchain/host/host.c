@@ -188,6 +188,7 @@ static void set_cpu_boost(int mode) {
 }
 #include "host_message.inc"
 #include "host_vm.inc"
+#include "host_section.inc"
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     if (fn == FNVNX_PLAT_CPU_BOOST && nargs >= 1) {
         if (!g_cfg.boost_loading) return 1;
@@ -200,6 +201,10 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
     if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_DECOMMIT && nargs >= 2) return host_vm_decommit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_RELEASE && nargs >= 1) return host_vm_release(args[0]);
+    if (fn == FNVNX_PLAT_SECTION_CREATE && nargs >= 1) return host_section_create(args[0]);
+    if (fn == FNVNX_PLAT_SECTION_MAP && nargs >= 4) return host_section_map(args[0], args[1], args[2], args[3]);
+    if (fn == FNVNX_PLAT_SECTION_UNMAP && nargs >= 2) return host_section_unmap(args[0], args[1]);
+    if (fn == FNVNX_PLAT_SECTION_FREE && nargs >= 1) return host_section_free(args[0]);
     return FNVNX_EXT_NO_MODULE;
 }
 

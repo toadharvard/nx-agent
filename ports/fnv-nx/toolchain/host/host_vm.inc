@@ -29,6 +29,23 @@ static FnvnxVmExtent g_vm_ext[FNVNX_VM_EXTENTS];
 static int g_vm_next;
 static Mutex g_vm_lock;
 
+/* a page of [a, a+n) is a view of a memory section (host_section.inc): its kernel type is MemType_ProcessMem (svcMapProcessMemory,
+ * SharedCode), and the host maps nothing else that way. Views are not VM-committed memory, so commit, decommit and
+ * (through its decommit) release refuse a range holding one, with the kernel's InvalidCurrentMemory (0xD401). */
+#define FNVNX_VM_E_VIEW MAKERESULT(Module_Kernel, 106)
+static int vm_has_view(u64 a, u64 n) {
+    for (u64 p = a; p < a + n;) {
+        MemoryInfo mi;
+        u32 pi;
+        if (R_FAILED(svcQueryMemory(&mi, &pi, p))) return 1;   /* cannot tell: do not touch */
+        if ((mi.type & 0xFFu) == MemType_ProcessMem) return 1;
+        u64 end = mi.addr + mi.size;
+        if (end <= p) return 1;
+        p = end;
+    }
+    return 0;
+}
+
 /* the address range is unmapped memory (svcQueryMemory) */
 static int vm_unmapped(u64 a, u64 n) {
     for (u64 p = a; p < a + n;) {
@@ -93,6 +110,7 @@ static u64 host_vm_commit(u64 a, u64 n) {
     mutexLock(&g_vm_lock);
     Result rc = 0;
     if (!n || !vm_resv_of(lo, hi - lo)) rc = MAKERESULT(Module_Libnx, LibnxError_BadInput);
+    else if (vm_has_view(lo, hi - lo)) rc = FNVNX_VM_E_VIEW;
     for (u64 p = lo; !rc && p < hi;) {
         u64 next = hi;   /* the end of the gap that starts at p, or skip the extent that covers p */
         int covered = 0;
@@ -134,6 +152,10 @@ static u64 host_vm_decommit(u64 a, u64 n) {
     u64 lo = a & ~0xFFFull, hi = (a + n + 0xFFF) & ~0xFFFull;
     Result rc = 0;
     mutexLock(&g_vm_lock);
+    if (vm_has_view(lo, hi - lo)) {
+        mutexUnlock(&g_vm_lock);
+        return FNVNX_VM_E_VIEW;
+    }
     for (int i = 0; i < g_vm_next; i++) {
         FnvnxVmExtent *e = &g_vm_ext[i];
         if (!e->size || e->addr >= hi || e->addr + e->size <= lo) continue;
