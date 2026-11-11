@@ -16,6 +16,7 @@
 #include "../../platform/audio/backend.h"
 #include "../../platform/audio/mixer.h"
 #include "../../platform/input/input.h"
+#include "../../platform/include/fnvnx_render_hooks.h"
 #include "../../platform/os/os.h"
 #include "fnvnx/hostapi.h"
 
@@ -110,4 +111,13 @@ extern "C" void fnvnx_input_pump(void) {
 
 extern "C" void fnvnx_guest_platform_init(void) {
     fnvnx_pad_set_source(fnvnx_pad_horizon_source());
+}
+
+/* ---- GPU backend: the product side of nxd3d_gpu_call (platform/include/fnvnx_render_hooks.h). The call is the host
+ * extension call of module FNVNX_EXT_GPU with the guest address of the caller's argument words; the result is the
+ * host's uint64_t unchanged. A host without the ext_call slot has no module: FNVNX_EXT_NO_MODULE, as the host's own
+ * answer for an unregistered module. */
+uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t *args, uint32_t nargs) {
+    if (!fnvnx_host->ext_call) return FNVNX_EXT_NO_MODULE;
+    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_GPU, fn, FNVNX_ADDR(args), nargs);
 }

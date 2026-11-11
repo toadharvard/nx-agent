@@ -108,6 +108,8 @@ struct obj {
     uint32_t own;
     int32_t ts[GDI_TS_COUNT];                /* DC text state, GDI_TS_* (gdi_int.h) */
     void *fdata;                             /* font: LOGFONTW copy (gdifont.cpp) */
+    bool ext;                                /* bitmap: bits are the caller's memory (memdc_over_bits), never freed here */
+    uint32_t xbmp;                           /* DC made by memdc_over_bits: the bitmap it made */
 };
 struct slot { obj *o; uint32_t gen; };
 slot g_slots[65536];
@@ -145,7 +147,7 @@ void release(uint32_t h)
     uint32_t idx = h & 0xFFFF;
     obj *o = g_slots[idx].o;
     if (!o) return;
-    free(o->bits);
+    if (!o->ext) free(o->bits);
     free(o->fdata);
     free(o);
     g_slots[idx].o = NULL;
@@ -881,4 +883,40 @@ extern "C" int gdi_dc_poly(void *hd, const int32_t *xy, int n, uint32_t c)
         }
     }
     return 1;
+}
+
+/* ---- a memory DC whose bitmap IS the caller's pixels (nxd3d_dc_create, render_hooks.cpp): a top-down DIB of
+ * bpp 16 / 24 / 32 with the given channel masks (zero for 24), rows `pitch` bytes apart (every primitive reads the
+ * bitmap's stored pitch). The memory stays the caller's: it is never freed here and outlives the DC. 0 = bad
+ * arguments (bpp, pitch below one row, size over 1 GiB). */
+extern "C" HDC fnvnx_gdi_memdc_over_bits(void *mem, int w, int h, int bpp, const uint32_t *masks, size_t pitch)
+{
+    Lk l;
+    init_stock();
+    if (!mem || w <= 0 || h <= 0 || (bpp != 16 && bpp != 24 && bpp != 32) || !masks) return NULL;
+    if (pitch < (size_t)(((int64_t)w * bpp + 7) / 8) || pitch > (1u << 30) || (int64_t)pitch * h > (1 << 30)) return NULL;
+    obj *b = NULL;
+    uint32_t bh = alloc(T_BMP, &b);
+    if (!bh) return NULL;
+    b->w = w; b->h = h; b->bpp = bpp; b->pitch = (int)pitch; b->td = true; b->dib = true; b->bits = (uint8_t *)mem; b->ext = true;
+    memcpy(b->mask, masks, sizeof b->mask);
+    uint32_t dh = new_dc(K_MEM, NULL);
+    if (!dh) { release(bh); return NULL; }
+    obj *d = get((void *)(uintptr_t)dh, T_DC);
+    if (obj *p = get((void *)(uintptr_t)d->bmp, T_BMP)) deselect(p);
+    b->selin = dh;
+    d->bmp = d->xbmp = bh;
+    return (HDC)(uintptr_t)dh;
+}
+/* ends a DC of memdc_over_bits together with its bitmap; FALSE (nothing done) for any other handle */
+extern "C" BOOL fnvnx_gdi_memdc_over_bits_release(HDC hd)
+{
+    Lk l;
+    obj *d = get(hd, T_DC);
+    if (!d || d->kind != K_MEM || !d->xbmp) return FALSE;
+    uint32_t bh = d->xbmp;
+    free_dc((uint32_t)(uintptr_t)hd, d);
+    obj *b = get((void *)(uintptr_t)bh, T_BMP);
+    if (b && !b->selin) release(bh);
+    return TRUE;
 }
