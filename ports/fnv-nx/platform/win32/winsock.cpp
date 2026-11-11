@@ -27,7 +27,7 @@ extern "C" BOOL GetComputerNameA(LPSTR, LPDWORD);
 namespace {
 enum { MAXS = 256, FD_RD = 1, FD_WR = 2, FD_OOB_ = 4, FD_ACC = 8, FD_CONN = 0x10, FD_CLS = 0x20 };
 enum { F_NB = 1, F_LISTEN = 2, F_CONNECTING = 4, F_CONNECTED = 8, F_RD_POSTED = 16, F_ACC_POSTED = 32,
-       F_CLS_POSTED = 64, F_OOB_POSTED = 128, F_WR_BLOCKED = 256, F_WR_NOW = 512, F_DGRAM = 1024 };
+       F_CLS_POSTED = 64, F_OOB_POSTED = 128, F_WR_BLOCKED = 256, F_WR_NOW = 512, F_DGRAM = 1024, F_EXCL = 2048 };
 struct Sock { int fd; unsigned f; HWND hwnd; UINT msg; long mask; };
 struct Ev { HWND h; UINT m; UINT_PTR s; LPARAM l; };
 struct ws_set { uint32_t count; UINT_PTR arr[64]; };
@@ -346,7 +346,7 @@ extern "C" UINT_PTR fnvnx_ws2_accept(UINT_PTR s, void *addr, int *len)
     int fd = ::accept(k.fd, (sockaddr *)&h, &hl);
     int e = errno;
     with(s, [](Sock &x) { x.f &= ~F_ACC_POSTED; });
-    if (fd < 0) { SetLastError((DWORD)map_errno(e)); return ~(UINT_PTR)0; }
+    if (fd < 0) { SetLastError((DWORD)((e == EAGAIN || e == EWOULDBLOCK) && !(k.f & F_NB) ? 10060 : map_errno(e))); return ~(UINT_PTR)0; }
     UINT_PTR n = add(fd, F_CONNECTED | (k.mask ? F_NB : 0) | (k.mask & FD_WR ? F_WR_NOW : 0), &k);   /* inherits the selection */
     if (!n) { close(fd); SetLastError(10024); return ~(UINT_PTR)0; }
     set_nb(fd, k.mask != 0);
@@ -372,6 +372,8 @@ extern "C" int fnvnx_ws2_send(UINT_PTR s, const char *b, int n, int flags)
     ssize_t r = ::send(k.fd, b, (size_t)n, hf);
     if (r >= 0) return (int)r;
     int e = errno;
+    if ((e == EAGAIN || e == EWOULDBLOCK) && !(k.f & F_NB))
+        return fail(10060);   /* a blocking socket that would block has run into its SO_SNDTIMEO: WSAETIMEDOUT */
     if (e == EAGAIN || e == EWOULDBLOCK) with(s, [](Sock &x) { x.f |= F_WR_BLOCKED; });
     return fail(map_errno(e));
 }
@@ -384,40 +386,137 @@ extern "C" int fnvnx_ws2_recv(UINT_PTR s, char *b, int n, int flags)
     ssize_t r = ::recv(k.fd, b, (size_t)n, hf);
     int e = errno;
     if (r >= 0 && !(flags & 2)) with(s, [flags](Sock &x) { x.f &= ~F_RD_POSTED; if (flags & 1) x.f &= ~F_OOB_POSTED; });   /* recv re-arms FD_READ */
+    if (r < 0 && (e == EAGAIN || e == EWOULDBLOCK) && !(k.f & F_NB))
+        return fail(10060);   /* a blocking socket that would block has run into its SO_RCVTIMEO: WSAETIMEDOUT */
     return r < 0 ? fail(map_errno(e)) : (int)r;
 }
+/* setsockopt: Winsock's option set at SOL_SOCKET (0xFFFF), IPPROTO_IP (0), IPPROTO_TCP (6) and IPPROTO_UDP (17).
+ * Rules (MSDN setsockopt): optval NULL or optlen below the option's size: WSAEFAULT; a level that is none of those: WSAEINVAL;
+ * an option that is unknown, get-only, or not supported on the socket: WSAENOPROTOOPT; a value outside its range: WSAEINVAL.
+ * Options the Microsoft providers accept without any effect (SO_DEBUG, SO_USELOOPBACK, SO_GROUP_PRIORITY,
+ * SO_CONDITIONAL_ACCEPT, TCP_BSDURGENT) succeed without a host call. Timeouts are DWORD milliseconds (0: none). */
 extern "C" int fnvnx_ws2_setsockopt(UINT_PTR s, int level, int opt, const char *val, int len)
 {
     Sock k;
     if (!lookup(s, &k)) return -1;
     if (!val) return fail(10014);
-    int hl, ho, v = 0;
+    if (level != (int)0xFFFF && level != 0 && level != 6 && level != 17) return fail(10022);
+    int hl = 0, ho = 0, v = 0;
     linger lg;
+    timeval tv;
+    ip_mreq mr;
+    in_addr ia;
+    unsigned char opts[40];
     const void *hv = &v;
     socklen_t hn = sizeof v;
-    if (level == (int)0xFFFF && opt == 0x80) {                     /* SO_LINGER: struct of two u_short */
-        if (len < 4) return fail(10014);
-        uint16_t w[2]; memcpy(w, val, 4);
-        lg.l_onoff = w[0]; lg.l_linger = w[1];
-        hl = SOL_SOCKET; ho = SO_LINGER; hv = &lg; hn = sizeof lg;
-    } else {
-        if (len < 4) return fail(10014);
+    bool host = true, excl_set = false;
+    auto need = [&](int n) { return len >= n; };
+    auto boolean = [&](int h_l, int h_o) {
         memcpy(&v, val, 4);
-        if (level == (int)0xFFFF) {
-            hl = SOL_SOCKET;
-            switch (opt) {
-            case 4: ho = SO_REUSEADDR; break;
-            case 8: ho = SO_KEEPALIVE; break;
-            case 0x20: ho = SO_BROADCAST; break;
-            case 0x1001: ho = SO_SNDBUF; break;
-            case 0x1002: ho = SO_RCVBUF; break;
-            case ~0x80: ho = SO_LINGER; lg.l_onoff = v ? 0 : 1; lg.l_linger = 0; hv = &lg; hn = sizeof lg; break;   /* SO_DONTLINGER */
-            default: return fail(10042);
-            }
-        } else if (level == 6 && opt == 1) { hl = IPPROTO_TCP; ho = TCP_NODELAY; }
+        v = v != 0;
+        hl = h_l; ho = h_o;
+    };
+    if (level == (int)0xFFFF) {
+        switch (opt) {
+        case 0x80: {                                             /* SO_LINGER: struct linger of two u_short */
+            if (!need(4)) return fail(10014);
+            uint16_t w[2]; memcpy(w, val, 4);
+            lg.l_onoff = w[0]; lg.l_linger = w[1];
+            hl = SOL_SOCKET; ho = SO_LINGER; hv = &lg; hn = sizeof lg;
+            break;
+        }
+        case ~0x80:                                              /* SO_DONTLINGER: BOOL, TRUE = linger off */
+            if (!need(4)) return fail(10014);
+            memcpy(&v, val, 4);
+            lg.l_onoff = v ? 0 : 1; lg.l_linger = 0;
+            hl = SOL_SOCKET; ho = SO_LINGER; hv = &lg; hn = sizeof lg;
+            break;
+        case 0x1005: case 0x1006: {                              /* SO_SNDTIMEO / SO_RCVTIMEO: DWORD milliseconds */
+            if (!need(4)) return fail(10014);
+            uint32_t ms; memcpy(&ms, val, 4);
+            tv.tv_sec = (time_t)(ms / 1000); tv.tv_usec = (suseconds_t)(ms % 1000) * 1000;
+            hl = SOL_SOCKET; ho = opt == 0x1005 ? SO_SNDTIMEO : SO_RCVTIMEO; hv = &tv; hn = sizeof tv;
+            break;
+        }
+        case 0x1001: case 0x1002:                                /* SO_SNDBUF / SO_RCVBUF: bytes */
+            if (!need(4)) return fail(10014);
+            memcpy(&v, val, 4);
+            if (v < 0) return fail(10022);
+            hl = SOL_SOCKET; ho = opt == 0x1001 ? SO_SNDBUF : SO_RCVBUF;
+            break;
+        case 4: if (!need(4)) return fail(10014); boolean(SOL_SOCKET, SO_REUSEADDR); break;
+        case 8: if (!need(4)) return fail(10014); boolean(SOL_SOCKET, SO_KEEPALIVE); break;
+        case 0x10: if (!need(4)) return fail(10014); boolean(SOL_SOCKET, SO_DONTROUTE); break;
+        case 0x20: if (!need(4)) return fail(10014); boolean(SOL_SOCKET, SO_BROADCAST); break;
+        case 0x100: if (!need(4)) return fail(10014); boolean(SOL_SOCKET, SO_OOBINLINE); break;
+        case ~4:                                                 /* SO_EXCLUSIVEADDRUSE: no other socket may share the address */
+            if (!need(4)) return fail(10014);
+            boolean(SOL_SOCKET, SO_REUSEADDR);
+            excl_set = v != 0;
+            v = 0;                                               /* exclusive use is the host default (SO_REUSEADDR off) */
+            break;
+        case 1: case 0x40: case 0x2002: case 0x3002:             /* SO_DEBUG, SO_USELOOPBACK, SO_GROUP_PRIORITY, SO_CONDITIONAL_ACCEPT */
+            if (!need(4)) return fail(10014);
+            host = false;
+            break;
+        default:                                                 /* get-only (ACCEPTCONN, ERROR, TYPE, GROUP_ID, MAX_MSG_SIZE, ...), watermarks, unknown */
+            return fail(10042);
+        }
+    } else if (level == 6) {                                     /* IPPROTO_TCP */
+        if (k.f & F_DGRAM) return fail(10042);
+        if (opt == 1) { if (!need(4)) return fail(10014); boolean(IPPROTO_TCP, TCP_NODELAY); }
+        else if (opt == 0x7000) { if (!need(4)) return fail(10014); host = false; }   /* TCP_BSDURGENT */
         else return fail(10042);
+    } else if (level == 17) {                                    /* IPPROTO_UDP: UDP_NOCHECKSUM is the only option and needs no host effect */
+        if (!(k.f & F_DGRAM)) return fail(10042);
+        if (opt != 1) return fail(10042);
+        if (!need(1)) return fail(10014);
+        host = false;
+    } else {                                                     /* IPPROTO_IP */
+        hl = IPPROTO_IP;
+        switch (opt) {
+        case 3: case 4: case 10: {                               /* IP_TOS, IP_TTL, IP_MULTICAST_TTL: 0..255 */
+            if (!need(4)) return fail(10014);
+            memcpy(&v, val, 4);
+            if (v < 0 || v > 255) return fail(10022);
+            ho = opt == 3 ? IP_TOS : opt == 4 ? IP_TTL : IP_MULTICAST_TTL;
+            break;
+        }
+        case 11: if (!need(4)) return fail(10014); boolean(IPPROTO_IP, IP_MULTICAST_LOOP); break;
+        case 9: {                                                /* IP_MULTICAST_IF: the interface's in_addr */
+            if (!need(4)) return fail(10014);
+            memcpy(&ia, val, 4);
+            ho = IP_MULTICAST_IF; hv = &ia; hn = sizeof ia;
+            break;
+        }
+        case 12: case 13:                                        /* IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP: struct ip_mreq */
+            if (!need(8)) return fail(10014);
+            if (!(k.f & F_DGRAM)) return fail(10042);
+            memcpy(&mr.imr_multiaddr, val, 4); memcpy(&mr.imr_interface, val + 4, 4);
+            ho = opt == 12 ? IP_ADD_MEMBERSHIP : IP_DROP_MEMBERSHIP; hv = &mr; hn = sizeof mr;
+            break;
+        case 1:                                                  /* IP_OPTIONS: at most 40 bytes of IP options */
+            if (len > 40) return fail(10022);
+            memcpy(opts, val, (size_t)len);
+            ho = IP_OPTIONS; hv = opts; hn = (socklen_t)len;
+            break;
+#ifdef IP_MTU_DISCOVER
+        case 14: {                                               /* IP_DONT_FRAGMENT */
+            if (!need(4)) return fail(10014);
+            memcpy(&v, val, 4);
+            v = v ? IP_PMTUDISC_DO : IP_PMTUDISC_DONT;
+            ho = IP_MTU_DISCOVER;
+            break;
+        }
+#endif
+        default:                                                 /* IP_HDRINCL needs a raw socket, none exists; unknown options */
+            return fail(10042);
+        }
     }
-    return setsockopt(k.fd, hl, ho, hv, hn) < 0 ? fail_errno() : 0;
+    if (host && setsockopt(k.fd, hl, ho, hv, hn) < 0) return fail_errno();
+    if (level == (int)0xFFFF && opt == ~4)
+        with(s, [excl_set](Sock &x) { if (excl_set) x.f |= F_EXCL; else x.f &= ~F_EXCL; });
+    return 0;
 }
 extern "C" int fnvnx_ws2_ioctlsocket(UINT_PTR s, long cmd, unsigned long *arg)
 {
@@ -511,7 +610,8 @@ extern "C" int fnvnx_ws2_WSAAsyncSelect(UINT_PTR s, HWND h, UINT msg, long ev)
 {
     Sock k;
     if (!lookup(s, &k)) return -1;
-    if (ev && !h) return fail(10022);
+    if (ev & ~0x3FF) return fail(10022);                          /* FD_READ .. FD_ADDRESS_LIST_CHANGE are the events */
+    if (ev && (!h || !IsWindow(h))) return fail(10022);            /* the window must exist */
     if (ev && !start_pump()) return fail(10055);
     if (ev) set_nb(k.fd, true);
     with(s, [=](Sock &x) {
