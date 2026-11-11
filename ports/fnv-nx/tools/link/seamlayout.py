@@ -103,6 +103,15 @@ class Image:
 
 # ------------------------------------------------------------------------------------------------ the link
 
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
+
+
 def demangle(names):
     """{mangled: demangled} through c++filt."""
     names = sorted(set(names))
@@ -254,7 +263,7 @@ class Link:
 
 
 def crt_starts(root_hint=None):
-    path = os.path.join(os.path.dirname(HERE), '..', 'platform', 'crt', 'crt_symbols.tsv')
+    path = _table('crt_symbols.tsv')
     out = set()
     try:
         for line in open(path):

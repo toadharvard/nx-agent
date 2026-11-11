@@ -18,6 +18,15 @@ from collections import Counter
 
 # ---------------------------------------------------------------------------------------------------------- helpers
 
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
+
+
 def match_brace(text, open_at):
     """Index just past the '}' matching text[open_at] == '{' (ignores braces in strings/comments, good enough)."""
     depth, i, n = 0, open_at, len(text)
@@ -907,7 +916,7 @@ _GAME_FLOAT_RET = {}
 def crt_inline_float():
     """addresses of the game's out-of-line copies of MSVC's float math overloads (platform/crt/crt_symbols.tsv
     `crt_inline` rows `name(float) -> namef`)"""
-    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'platform', 'crt', 'crt_symbols.tsv')
+    here = _table('crt_symbols.tsv')
     out = set()
     if os.path.exists(here):
         for line in open(here):

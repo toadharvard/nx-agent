@@ -1,0 +1,10 @@
+# iat_slot	dll	api	units	other_decomp_names	provider
+0x00fdf05c	kernel32	EnterCriticalSection	1	-	synthetic
+0x00fdf10c	kernel32	VirtualFree	1	-	synthetic
+0x00fdf114	kernel32	VirtualAlloc	1	-	synthetic
+0x00fdf1c4	kernel32	InterlockedDecrement	1	-	synthetic
+0x00fdf2ec	user32	GetClassLongA	1	-	synthetic
+0x00fdf380	ws2_32	__WSAFDIsSet	1	-	synthetic
+0x00fdf3d4	d3dx9_38	D3DXSaveTextureToFileA	1	-	synthetic
+0x010b7eb0	(not an IAT slot)	FreeBlockImp	1	-	synthetic
+0x010c4cec	(not an IAT slot)	Free	1	-	synthetic

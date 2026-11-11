@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """V2 check of S2c-abi ced8846 / e4fcbdc (tools/difffuzz/causes.py): a call-target divergence where the native shows
-an IAT slot and the oracle `imp:<api>` is runtime-equiv exactly when the slot's api (platform/win32/imports.tsv) is
+an IAT slot and the oracle `imp:<api>` is runtime-equiv exactly when the slot's api (tests/imports_synth.tsv, synthetic) is
 that import.
 
     python3 tests/v2/test_s2c_import_slot.py
@@ -19,6 +19,10 @@ sys.path.insert(0, os.path.join(PORT, 'tools', 'difffuzz'))
 import causes  # noqa: E402
 
 
+SYN = os.path.join(PORT, 'tests', 'imports_synth.tsv')
+causes._IAT = {int(l.split('\t')[0], 16): l.split('\t')[2] for l in open(SYN) if l.startswith('0x')}
+
+
 def refined(x86, arm):
     rec = dict(source='src/t.cpp', address='00401000', symbol='?f@@YAXXZ', case={}, hint=dict(cause='call-flow'),
                divergence=dict(kind='call-target', index=0, x86=x86, arm=arm))
@@ -33,7 +37,7 @@ def main():
         print('%s %s' % ('ok' if c else 'FAIL', what))
         fails += not c
     slots = collections.defaultdict(set)
-    for line in open(os.path.join(PORT, 'platform', 'win32', 'imports.tsv')):
+    for line in open(SYN):
         f = line.rstrip('\n').split('\t')
         if len(f) >= 3 and f[0].startswith('0x'):
             slots[f[2]].add(f[0])

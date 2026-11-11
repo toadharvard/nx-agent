@@ -2,7 +2,7 @@
 """V2 check of S2c-abi af48fa3 (tools/link/xexit.py: native stand-ins of the exe exit thunks a unit hands to atexit,
 V2 X2's follow-up).
 
-    FNVNX_EXE=<FalloutNV.exe> python3 tests/v2/test_s2c_xexit.py     (skip without the exe; nothing is copied)
+    FNVNX_EXE=<FalloutNV.exe> python3 tests/v2/test_s2c_xexit.py     (skip without the exe; nothing is copied; imports.tsv comes from FNVNX_TABLES, the private pin)
 
   X1  the real site: xexit.decode(0x00fdd3b0) is a NiPointer release of the static at 0x012024f8 through MSVC slot 1
       (DeleteThis; Itanium slot 2 after D1/D0), and the `call [slot]` in those bytes is InterlockedDecrement's slot
@@ -20,6 +20,7 @@ import sys
 PORT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 sys.path.insert(0, os.path.join(PORT, 'tools', 'link'))
 sys.path.insert(0, os.path.join(PORT, 'loader', 'tools'))
+sys.path.insert(0, os.path.join(PORT, 'tools'))
 
 
 def main():
@@ -34,7 +35,8 @@ def main():
     i = raw.find(b'\xff\x15') if raw else -1
     slot = struct.unpack_from('<I', raw, i + 2)[0] if i >= 0 else None
     api = None
-    for line in open(os.path.join(PORT, 'platform', 'win32', 'imports.tsv')):
+    import tables
+    for line in open(tables.path('imports.tsv')):
         f = line.split('\t')
         if slot is not None and f[0] == '0x%08x' % slot:
             api = f[2]

@@ -1629,7 +1629,7 @@ def link_tool_inputs(b):
     """What fnvlink reads besides its arguments: its own code, S4's provider tables, S1b's renames (default
     --units-renames), the shim and sse2neon (layout probes and vtable synthesis compile against them)."""
     rn = b.cfg['UNITS_RENAMES']
-    return [tree_hash('tools/link', 'platform/crt/crt_symbols.tsv', 'platform/win32/imports.tsv',
+    return [tree_hash('tools/link', 'tools/tables.pin.json',
                       'platform/win32/exports.cpp', 'shim/include', 'tools/difffuzz/check_rebind.py'),
             file_hash(os.path.join(ROOT, 'patches', 'units_renames.tsv')) if not rn else
             (rn if rn == 'none' else file_hash(os.path.abspath(rn))),
@@ -2222,7 +2222,7 @@ def synth_inputs_id(b):
         return ''
     po = os.path.abspath(po)
     objs = sorted(os.path.join(po, n) for n in os.listdir(po) if n.endswith('.obj')) if os.path.isdir(po) else []
-    return sha(tree_hash('loader/synth', 'platform/win32/imports.tsv'), listing_id(objs),
+    return sha(tree_hash('loader/synth', 'tools/tables.pin.json'), listing_id(objs),
                file_hash(os.path.join(b.art('fetch', 'decomp') or '', 'build', 'units.json')))
 
 
@@ -2255,7 +2255,7 @@ def boot_image(b, r, d):
     open(slog, 'w').close()
     rc = b.sh([PY, '-I', os.path.join(ROOT, 'loader', 'synth', 'synth_image.py'),
                '--units', os.path.join(b.art('fetch', 'decomp'), 'build', 'units.json'), '--objdir', os.path.abspath(po),
-               '--imports', os.path.join(ROOT, 'platform', 'win32', 'imports.tsv'), '--out', out,
+               '--out', out,
                '--summary', os.path.join(sd, 'summary.txt'), '--report', os.path.join(sd, 'report.json'),
                '--missing', os.path.join(sd, 'missing.tsv'), '--cache', os.path.join(sd, 'phase1.pickle')],
               slog, cwd=ROOT, timeout=7200)
@@ -2291,7 +2291,7 @@ class Boot(Stage):
         ini = os.path.join(os.path.dirname(os.path.abspath(img)), 'Fallout_default.ini') if os.path.isfile(img) else ''
         return ['boot-v4', tree_hash('tests/s5/emu_guest.py', 'tests/s5/frontier.py', 'tests/s5/emu_summary.py',
                                      'tests/s5/milestones.txt',
-                                     'toolchain/tools', 'toolchain/game/undef_report.py', 'platform/win32/imports.tsv'),
+                                     'toolchain/tools', 'toolchain/game/undef_report.py', 'tools/tables.pin.json'),
                 up_id(b, 'guest'), img if img in ('auto', 'none', '') else file_hash(os.path.abspath(img)),
                 synth_inputs_id(b) if img == 'auto' else '',
                 file_hash(os.path.abspath(bc)) if bc else up_id(b, 'census'), b.cfg['EMU_TIMEOUT'], emu_slicing(b),

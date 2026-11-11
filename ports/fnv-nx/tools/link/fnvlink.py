@@ -94,6 +94,15 @@ STR_IN_NAME = re.compile(r'^str_([0-9a-f]{8})$')
 FUNC_SPANS = ([], [])   # sorted starts and their ends of units.json functions with a size (set by resolve)
 
 
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
+
+
 def inside_function(a):
     """True when a lies strictly inside a function units.json places (start < a < start + size): not a function
     start, so a FUN_<a> name cannot name one (R1: FnvString::FUN_0044aa30 / FUN_0044ab60 inside ResizeBuffer
@@ -393,7 +402,7 @@ def reset_synth(out):
 
 def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None, override_lib=None,
             units_renames=None, exe=None):
-    """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
+    """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the tables of the FNVNX_TABLES directory, tools/tables.py; the files of
     this tree, 'none': not used). exe: the player's FalloutNV.exe (None: FNVNX_EXE / PLAYER_EXE, 'none': not used):
     its RTTI pairs each image vftable with its own class's native vtable (exevft.py)."""
     import time
@@ -714,12 +723,12 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     xexit_left = set()   # callback labels whose exe thunk has no native stand-in (they trap)
     exports = load_exports(EXPORTS if imports is None else (os.path.join(os.path.dirname(imports), 'exports.cpp')
                                                              if imports != 'none' else None))
-    providers, crt_classes = load_providers(CRT_SYMBOLS if crt_symbols is None else
+    providers, crt_classes = load_providers(_table('crt_symbols.tsv') if crt_symbols is None else
                                             (None if crt_symbols == 'none' else crt_symbols), exports)
-    import_syms = load_imports(IMPORTS if imports is None else (None if imports == 'none' else imports), exports)
+    import_syms = load_imports(_table('imports.tsv') if imports is None else (None if imports == 'none' else imports), exports)
     # import thunks (`jmp [IAT]`, 6 bytes) the decomp spells as functions calling the import: compiled, they lose or
     # retype the caller's arguments (S6c); their address binds to the import itself, like a provider
-    iat = load_iat(IMPORTS if imports is None else (None if imports == 'none' else imports))
+    iat = load_iat(_table('imports.tsv') if imports is None else (None if imports == 'none' else imports))
     thunks = find_import_thunks(native, units, iat, import_syms, gdef, gref, anydef, msvc, itanium)
     thunk_undef = collections.defaultdict(dict)   # source -> {thunk definition: import symbol}: the object's own
     for a, (sym, text) in thunks.items():         # calls follow (apply undefines, then renames them)
@@ -5597,8 +5606,6 @@ def write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req=None
 
 
 PORT = os.path.dirname(os.path.dirname(HERE))
-CRT_SYMBOLS = os.path.join(PORT, 'platform', 'crt', 'crt_symbols.tsv')
-IMPORTS = os.path.join(PORT, 'platform', 'win32', 'imports.tsv')
 EXPORTS = os.path.join(PORT, 'platform', 'win32', 'exports.cpp')
 IDENT = re.compile(r'^[A-Za-z_]\w*$')
 
