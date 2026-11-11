@@ -1,0 +1,544 @@
+#!/usr/bin/env python3
+"""recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", contract in RECIPE.md) on the stage machinery:
+every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
+    python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
+    python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
+Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
+name-complete views, then CC on the preprocessed text), .s/.S = one stage on the whole root and include views, (3) the link stage
+(`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
+RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
+RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
+  strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
+  single-dash name needs >= 2 chars); `-z undefs|muldefs` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options
+  they pass; `@file` is refused (cannot be analysed). An ambiguous abbreviation is refused too (ld would reject it anyway).
+EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from ARTIFACTS_URL into a bare cache (--ext DIR, shared by
+  builds that must not share stores), checked out, ingested; the CAS tree hash must equal tree_sha256 (else the build is red naming
+  the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
+  is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
+  compiler {"external": N, cc, cxx}: its loader closure comes from runtime.closure() on the checked-out tree (see RECIPE.md limits).
+Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
+  {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
+Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of
+  sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose)."""
+import argparse
+import concurrent.futures
+import hashlib
+import json
+import os
+import posixpath
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cas  # noqa: E402
+import runtime  # noqa: E402
+import sandbox  # noqa: E402
+import toolflags  # noqa: E402
+import unitstage  # noqa: E402
+
+FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
+TREE = "ports/fnv-nx"
+ADMIT = TREE + "/verify/admit.json"
+KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "constants", "link", "external"}
+EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
+SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
+STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
+SBIND = {1: "GLOBAL", 2: "WEAK", 10: "UNIQUE"}
+ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
+CC_EXT, CXX_EXT, ASM_EXT = (".c",), (".cc", ".cpp", ".cxx"), (".s", ".S")
+LONG_R = ("unresolved-symbols", "allow-shlib-undefined", "noinhibit-exec", "defsym", "wrap", "allow-multiple-definition",
+          "warn-unresolved-symbols")
+
+
+class RecipeError(Exception):
+    def __init__(self, errors):
+        Exception.__init__(self, "; ".join(errors))
+        self.errors = list(errors)
+
+
+class BuildRed(Exception):
+    pass
+
+
+def refused(tokens):
+    """Options of the refusal set R in TOKENS (see the module docstring for the grammar)."""
+    toks, i = [], 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t.startswith("-Wl,"):
+            toks += t[4:].split(",")
+        elif t == "-Xlinker" and i + 1 < len(tokens):
+            i += 1
+            toks.append(tokens[i])
+        else:
+            toks.append(t)
+        i += 1
+    bad = []
+    for i, t in enumerate(toks):
+        name = t.lstrip("-").split("=", 1)[0] if t.startswith("-") else ""
+        long_ = t.startswith("--") or len(name) >= 2
+        hit = t.startswith("@") or (name and long_ and any(r.startswith(name) for r in LONG_R)) or (
+            t == "-z" and toks[i + 1:i + 2] in (["undefs"], ["muldefs"])) or t in ("-zundefs", "-zmuldefs")
+        if hit:
+            bad.append(t)
+    return bad
+
+
+def is_unit(p):
+    return p.endswith(CC_EXT + CXX_EXT + ASM_EXT)
+
+
+def rel_ok(p):
+    return isinstance(p, str) and p != "" and not p.startswith("/") and posixpath.normpath(p) == p and p != ".." \
+        and not p.startswith("../")
+
+
+def under(p, d):
+    return p == d or p.startswith(d + "/")
+
+
+def load_admit(repo="."):
+    with open(os.path.join(repo, ADMIT)) as f:
+        return {r["path"]: r for r in json.load(f)["roots"]}
+
+
+def tracked(repo="."):
+    out = subprocess.run(["git", "-C", repo, "ls-files", "-z", "--", TREE], capture_output=True, check=True).stdout
+    return sorted(p for p in out.decode("utf-8", "surrogateescape").split("\0") if p)
+
+
+def load_recipe(repo, roots, root):
+    with open(os.path.join(repo, roots[root]["recipe"])) as f:
+        return json.load(f)
+
+
+def generated_outputs(rec):
+    g = rec.get("generated")
+    return [o for x in (g if isinstance(g, list) else []) if isinstance(x, dict) and isinstance(x.get("outputs"), list)
+            for o in x["outputs"] if isinstance(o, str)]
+
+
+def units_of(rec, root, files):
+    """Sorted root-relative unit paths: tracked source files + generated outputs with a source name."""
+    mine = {f[len(root) + 1:] for f in files if under(f, root)}
+    return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
+
+
+def check(rec, root, files, roots):
+    """Every problem of recipe REC of product root ROOT; roots {path: root entry}. -> [str] (empty = valid)."""
+    if not isinstance(rec, dict):
+        return ["recipe is not a JSON object"]
+    err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
+    err += ["missing key %r" % k for k in ("format", "compiler", "flags", "include", "units") if k not in rec]
+    if rec.get("format") != FORMAT:
+        err.append("format is not " + FORMAT)
+    if rec.get("units") != "all":
+        err.append('units must be "all" (no tracked source file can be left out)')
+    mine = {f[len(root) + 1:] for f in files if under(f, root)}
+    gen = generated_outputs(rec)
+    comp, exts, ats = rec.get("compiler"), rec.get("external", []), []
+    if not isinstance(exts, list):
+        err.append("external must be a list")
+        exts = []
+    for i, e in enumerate(exts):
+        if not (isinstance(e, dict) and set(e) == EXT_KEYS and all(isinstance(v, str) for v in e.values())):
+            err.append("external[%d] needs exactly %s (strings)" % (i, ", ".join(sorted(EXT_KEYS))))
+            continue
+        at = e["at"]
+        for ok, why in ((e["repo"] == "fnv-nx-build", "repo must be fnv-nx-build"), (re.fullmatch("[0-9a-f]{40}", e["commit"]), "commit is not 40 hex"),
+                        (re.fullmatch("[0-9a-f]{64}", e["tree_sha256"]), "tree_sha256 is not 64 hex"), (re.fullmatch("[A-Za-z0-9._-]+", e["name"]), "bad name"),
+                        (at.startswith("/") and at != "/" and posixpath.normpath(at) == at, "at is not an absolute normalised path"),
+                        (not any(under(at, p) or under(p, at) for p in SANDBOX_PATHS), "at overlaps a path the stages use itself %s" % (SANDBOX_PATHS,)),
+                        (not any(under(at, a) or under(a, at) for a in ats), "at overlaps another external's at"),
+                        (e["name"] not in [x["name"] for x in exts[:i] if isinstance(x, dict) and "name" in x], "duplicate name")):
+            if not ok:
+                err.append("external %r: %s" % (e["name"], why))
+        ats.append(at)
+    names = {e["name"] for e in exts if isinstance(e, dict) and isinstance(e.get("name"), str)}
+    word = lambda v: isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", v)  # noqa: E731
+    if isinstance(comp, dict) and set(comp) == {"external", "cc", "cxx"}:
+        if comp["external"] not in names:
+            err.append("compiler.external %r names no external" % (comp["external"],))
+        if not (rel_ok(comp["cc"]) and rel_ok(comp["cxx"])):
+            err.append("compiler cc/cxx of an external must be relative paths inside it")
+    elif not (isinstance(comp, dict) and set(comp) == {"cc", "cxx"} and word(comp["cc"]) and word(comp["cxx"])):
+        err.append('compiler must be {"cc": NAME, "cxx": NAME} (drivers under /usr/bin) or {"external": N, "cc": PATH, "cxx": PATH}')
+    fl = rec.get("flags")
+    if not (isinstance(fl, dict) and set(fl) == {"c", "cxx", "asm"} and all(isinstance(v, list) and all(isinstance(t, str) for t in v)
+                                                                             for v in fl.values())):
+        err.append('flags must be {"c": [..], "cxx": [..], "asm": [..]} of strings')
+        fl = {}
+    for k, toks in fl.items():
+        err += ["flags.%s: %s is in the refusal set R" % (k, t) for t in refused(toks)]
+        err += ["flags.%s: %s changes a stage's job (use include / the unit's own name)" % (k, t) for t in toks if t in (
+            "-o", "-c", "-E", "-S", "-x") or t.startswith(("-I", "-M"))]
+    inc = rec.get("include")
+    for d in inc if isinstance(inc, list) else err.append("include must be a list") or []:
+        if isinstance(d, str) and any(under(d, a) for a in ats):
+            continue
+        if not rel_ok(d) or not any(under(d, r) for r in roots):
+            err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
+        elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
+            err.append("include %r holds no tracked or generated file" % d)
+    seen = set()
+    for i, g in enumerate(rec.get("generated", []) if isinstance(rec.get("generated", []), list) else err.append("generated is not a list") or []):
+        if not (isinstance(g, dict) and set(g) == {"tool", "args", "inputs", "outputs"}):
+            err.append("generated[%d] needs exactly tool, args, inputs, outputs" % i)
+            continue
+        t, ins, outs = g["tool"], g["inputs"], g["outputs"]
+        owner = next((r for r in roots if isinstance(t, str) and under(t, r)), None)
+        if not (isinstance(t, str) and t in files and t.endswith(".py") and owner and roots[owner]["class"] in ("tool", "product")):
+            err.append("generated[%d].tool %r is not a tracked .py file of an admitted tool or product root" % (i, t))
+        if not (isinstance(g["args"], list) and all(isinstance(a, str) for a in g["args"])):
+            err.append("generated[%d].args must be strings" % i)
+        if not (isinstance(ins, list) and all(rel_ok(p) and any(f == p or under(f, p) for f in files) for p in ins)):
+            err.append("generated[%d].inputs must be tracked files or directories (repo-relative)" % i)
+        elif any(a != b and under(a, b) for a in ins for b in ins):
+            err.append("generated[%d].inputs nest" % i)
+        if not (isinstance(outs, list) and outs and all(rel_ok(o) for o in outs)):
+            err.append("generated[%d].outputs must be a non-empty list of root-relative paths" % i)
+            continue
+        for o in outs:
+            if o in mine:
+                err.append("generated output %s is also a tracked file" % o)
+            if o in seen:
+                err.append("generated output %s is produced twice" % o)
+            seen.add(o)
+    units = set(units_of(rec, root, files))
+    ol = rec.get("os_layer", [])
+    for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
+        if u not in units:
+            err.append("os_layer entry %r is not a unit" % (u,))
+    c = rec.get("constants")
+    if c is not None and not (rel_ok(c) and (c in mine or c in seen)):
+        err.append("constants %r is neither a tracked file of the root nor a generated output" % (c,))
+    lk = rec.get("link")
+    if lk is not None:
+        if not (isinstance(lk, dict) and set(lk) == {"script", "output", "flags"} and isinstance(lk["flags"], list)
+                and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str)
+                and re.fullmatch(r"[A-Za-z0-9._-]+\.elf", lk["output"]) and rel_ok(lk["script"]) and lk["script"] in mine):
+            err.append("link must be {script: tracked file of the root, output: NAME.elf, flags: [..]}")
+        else:
+            err += ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])]
+    return err
+
+
+def _copy(repo, files, base, dest):
+    for f in files:
+        d = os.path.join(dest, f[len(base) + 1:] if base else f)
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        shutil.copyfile(os.path.join(repo, f), d)
+
+
+def tail(store, res):
+    p = cas._obj(store, cas.manifest(res["stderr"], store))
+    return open(p, errors="replace").read().splitlines()[-20:]
+
+
+def symbols(path, unit):
+    """(defined [{symbol,bind,type,object}], undefined {symbol}) of the global and weak symbols of ELF64 LE object PATH (.symtab)."""
+    d = open(path, "rb").read()
+    if d[:4] != b"\x7fELF" or d[4:6] != b"\x02\x01":
+        raise ValueError("%s: not an ELF64 little-endian object" % path)
+    shoff, = struct.unpack_from("<Q", d, 0x28)
+    esz, num = struct.unpack_from("<HH", d, 0x3a)
+    secs = [struct.unpack_from("<IIQQQQIIQQ", d, shoff + i * esz) for i in range(num)]   # name type flags addr off size link info align entsize
+    defined, undefined = [], set()
+    for s in (x for x in secs if x[1] == 2):
+        st = secs[s[6]]
+        strtab = d[st[4]:st[4] + st[5]]
+        for off in range(s[4], s[4] + s[5], 24):
+            name, info, _, shndx, _, _ = struct.unpack_from("<IBBHQQ", d, off)
+            n = strtab[name:strtab.index(b"\0", name)].decode()
+            if info >> 4 in SBIND and n:
+                if shndx == 0:
+                    undefined.add(n)
+                else:
+                    defined.append({"symbol": n, "bind": SBIND[info >> 4], "type": STYPE.get(info & 15, str(info & 15)), "object": unit})
+    return defined, undefined
+
+
+class Job:
+    def __init__(self, repo, root, store, jobs, ext):
+        self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
+        self.roots, self.files = load_admit(repo), tracked(repo)
+        self.rec = load_recipe(repo, self.roots, root)
+        self.keys, self.run, self.hit, self.ext = set(), 0, 0, {}
+        os.makedirs(os.path.join(store, "rt"), exist_ok=True)
+
+    def stage(self, doc):
+        v = toolflags.check_doc(doc)
+        if v:
+            raise BuildRed({"stage": doc["stage"], "exit": None, "stderr": ["toolflags: %s %s" % (r, d) for r, d, _ in v][:20]})
+        try:
+            key, res, st, _ = unitstage.run_stage(self.store, doc, False)
+        except (sandbox.SbxError, unitstage.UnitError) as e:
+            raise BuildRed({"stage": doc["stage"], "exit": None, "stderr": [str(e)[-300:]]})
+        self.keys.add(key)
+        self.run, self.hit = self.run + (st == "run"), self.hit + (st == "hit")
+        if res["rc"]:
+            raise BuildRed({"stage": doc["stage"], "exit": res["rc"], "stderr": tail(self.store, res)})
+        return key, res
+
+    def cached_rt(self, name, make):
+        p = os.path.join(self.store, "rt", name + ".json")
+        if not os.path.exists(p):
+            with open(p + ".tmp", "w") as f:
+                json.dump(make(), f, sort_keys=True)
+            os.replace(p + ".tmp", p)
+        return p, json.load(open(p))
+
+    def externals(self, ws):
+        """Fetch by exact commit into the shared bare cache, check out, ingest, require tree_sha256 (BuildRed naming the external)."""
+        url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        for e in self.rec.get("external", []):
+            stage, bare, dest = "external:" + e["name"], os.path.join(self.extcache, e["commit"]), os.path.join(ws, "ext", e["name"])
+            try:
+                if not os.path.isdir(bare):
+                    tmp = "%s.tmp%d" % (bare, os.getpid())
+                    os.makedirs(tmp)
+                    for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, e["commit"]]):
+                        subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
+                    os.replace(tmp, bare)
+                os.makedirs(dest)
+                ienv = dict(env, GIT_INDEX_FILE=os.path.join(ws, "idx-" + e["name"]))
+                subprocess.run(["git", "--git-dir", bare, "read-tree", e["commit"]], env=ienv, check=True, capture_output=True)
+                subprocess.run(["git", "--git-dir", bare, "--work-tree", dest, "checkout-index", "-a", "-f"], env=ienv, check=True, capture_output=True)
+            except (subprocess.CalledProcessError, OSError) as x:
+                raise BuildRed({"stage": stage, "exit": getattr(x, "returncode", None),
+                                "stderr": (getattr(x, "stderr", b"") or str(x).encode()).decode(errors="replace").splitlines()[-20:]})
+            tree = cas.ingest(dest, self.store)
+            if tree != e["tree_sha256"]:
+                raise BuildRed({"stage": stage, "exit": None, "stderr": ["tree_sha256 is %s, recipe says %s" % (tree, e["tree_sha256"])]})
+            self.ext[e["name"]] = {"host": dest, "tree": tree, "at": e["at"]}
+
+    def drivers(self):
+        c = self.rec["compiler"]
+        if "external" in c:
+            e = self.ext[c["external"]]
+            return e["at"] + "/" + c["cc"], e["at"] + "/" + c["cxx"]
+        return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
+
+    def hostpath(self, p):
+        for e in self.ext.values():
+            if under(p, e["at"]):
+                return e["host"] + p[len(e["at"]):]
+        return p
+
+    def toolrt(self, paths):
+        """Tool runtime (runtime.py rules) of driver PATHS plus every external as declared input. External compiler: the loader closure
+        of every x86-64 ELF of its tree, by runtime.closure() on the checked-out copy (libraries inside the tree are its own)."""
+        xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
+        tag = hashlib.sha256(repr((paths, xin)).encode()).hexdigest()[:16]
+        if "external" in self.rec["compiler"]:
+            e = self.ext[self.rec["compiler"]["external"]]
+
+            def make():
+                libs = runtime.closure(runtime.elf_files(e["host"], runtime.X86_64), [e["host"]])
+                inputs = xin + [{"at": at, "tree": cas.ingest(src, self.store)} for at, src in sorted(libs.items())]
+                return {"format": runtime.FORMAT, "kind": "tool", "exes": sorted(paths), "inputs": sorted(inputs, key=lambda i: i["at"]), "env": {}}
+        else:
+            def make():
+                exes, trees = [], []
+                for p in paths:
+                    x, t = unitstage.gcc_set(p)
+                    exes, trees = exes + x, trees + t
+                return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(trees))))
+        return self.cached_rt("tool-" + tag, make)
+
+    def plus(self, rt):
+        rt["inputs"] = sorted(rt["inputs"] + [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()], key=lambda i: i["at"])
+        return rt
+
+    def ingest_files(self, tmp, name, files, base):
+        d = os.path.join(tmp, name)
+        os.makedirs(d, exist_ok=True)
+        _copy(self.repo, files, base, d)
+        return cas.ingest(d, self.store)
+
+    def generate(self, ws):
+        if not self.rec.get("generated"):
+            return
+        _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
+        xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
+        for i, g in enumerate(self.rec["generated"]):
+            owner = next(r for r in self.roots if under(g["tool"], r))
+            tmp = tempfile.mkdtemp(dir=ws)
+            ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin
+            for p in g["inputs"]:
+                sub = [f for f in self.files if f == p or under(f, p)]
+                ins.append({"at": "/in/" + p, "tree": cas.ingest(os.path.join(self.repo, p), self.store) if sub == [p] else
+                            self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
+            env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
+            env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
+            doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
+                   "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
+                   "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
+            res = self.stage(doc)[1]
+            got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
+            if got != sorted(g["outputs"]):
+                raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs %s differ from the declared %s" % (got, sorted(g["outputs"]))]})
+            cas.materialize(res["outputs"]["/out"], self.store, os.path.join(tmp, "out"))
+            for o in g["outputs"]:
+                os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
+                shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
+
+    def overlay(self, ws, d):
+        if under(d, self.root):
+            return os.path.join(ws, "root", d[len(self.root) + 1:])
+        if any(under(d, e["at"]) for e in self.ext.values()):
+            return self.hostpath(d)
+        _copy(self.repo, [f for f in self.files if under(f, d)], "", os.path.join(ws, "inc"))
+        return os.path.join(ws, "inc", d)
+
+    def compile(self, ws, units):
+        rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
+        incs = ["%s@/inc/%d" % (self.overlay(ws, d), n) for n, d in enumerate(rec["include"])]
+        kinds = {u: ("c" if u.endswith(CC_EXT) else "cxx" if u.endswith(CXX_EXT) else "asm") for u in units}
+        used = sorted({drv["c" if k == "asm" else k] for k in kinds.values()})
+        if not used:
+            return {}
+        rtp, rt = self.toolrt(used)
+        builds = {}
+        for k in sorted(set(kinds.values()) - {"asm"}):
+            fp = os.path.join(ws, "flags-%s.json" % k)
+            json.dump({"argv": (["-x", "c"] if k == "c" else []) + rec["flags"][k]}, open(fp, "w"))
+            builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv[k], toolrt=rtp, flags_file=fp,
+                                                           src_root=os.path.join(ws, "root") + "@/src", include=incs))
+
+        def one(u):
+            try:
+                return u, (self.asm(ws, u, rt, incs, drv["c"]) if kinds[u] == "asm" else builds[kinds[u]].unit(u))
+            except (sandbox.SbxError, unitstage.UnitError) as e:
+                return u, {"status": "cc-failed", "failure": {"stage": "cc:" + u, "exit": None, "stderr": [str(e)[-300:]]}}
+        res, failed = {}, {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.jobs) as ex:
+            for u, e in ex.map(one, units):
+                if e["status"] != "ok":
+                    cc = e["status"] == "cc-failed"
+                    key = e.get("cc_key" if cc else "pp_key")
+                    failed[u] = e.get("failure") or {"stage": "%s:%s" % ("cc" if cc else "pp", u), "exit": e.get("cc_rc" if cc else "pp_rc"),
+                                                     "stderr": tail(self.store, sandbox._load(self.store, key))}
+                    continue
+                self.keys |= {e[k] for k in ("pp_key", "cc_key") if e.get(k)}
+                self.run += (e.get("pp_status") == "run") + (e.get("cc_status") == "run")
+                self.hit += (e.get("pp_status") == "hit") + (e.get("cc_status") == "hit")
+                res[u] = e["object"]
+        if failed:
+            raise BuildRed(dict(failed[sorted(failed)[0]], units=sorted(failed), done=sorted(res)))
+        return res
+
+    def asm(self, ws, u, rt, incs, cc):
+        roots = [("/src", cas.ingest(os.path.join(ws, "root"), self.store))] + [
+            ("/inc/%d" % n, cas.ingest(i.split("@")[0], self.store)) for n, i in enumerate(incs)]
+        argv = [cc] + ["-I/inc/%d" % n for n in range(len(incs))] + self.rec["flags"]["asm"] + [
+            "-frandom-seed=" + hashlib.sha256(u.encode()).hexdigest(), "-Werror=date-time"] + [
+            "-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in roots] + ["-c", "-o", "/out/unit.o", "/src/" + u]
+        doc = {"format": "fnvnx-stage/1", "stage": "as:" + u, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(cc)), "outputs": ["/out"],
+               "inputs": sorted(rt["inputs"] + [{"at": a, "tree": t} for a, t in roots], key=lambda i: i["at"])}
+        try:
+            return {"status": "ok", "object": self.stage(doc)[1]["outputs"]["/out"]}
+        except BuildRed as r:
+            return {"status": "cc-failed", "failure": r.args[0]}
+
+    def link(self, ws, objs):
+        lk, cc = self.rec["link"], self.drivers()[0]
+        pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
+        ld = posixpath.normpath(pn)
+        if "external" in self.rec["compiler"]:
+            e = self.ext[self.rec["compiler"]["external"]]
+            ld = e["at"] + ld[len(e["host"]):] if ld.startswith(e["host"] + "/") else ld
+            rt = self.toolrt([cc])[1]
+        else:
+            rt = self.cached_rt("tool-ld-" + hashlib.sha256(ld.encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], [])))[1]
+        od, sd = os.path.join(ws, "objs"), os.path.join(ws, "ld")
+        for u, o in objs.items():
+            os.makedirs(os.path.dirname(os.path.join(od, u + ".o")), exist_ok=True)
+            shutil.copyfile(cas._obj(self.store, cas.manifest(o, self.store)["entries"]["unit.o"]), os.path.join(od, u + ".o"))
+        os.makedirs(sd)
+        shutil.copyfile(os.path.join(self.repo, self.root, lk["script"]), os.path.join(sd, os.path.basename(lk["script"])))
+        argv = [ld, "--build-id=none", "-T", "/ld/" + os.path.basename(lk["script"])] + lk["flags"] + ["-o", "/out/" + lk["output"]] + [
+            "/objs/%s.o" % u for u in sorted(objs)]
+        doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
+               "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": cas.ingest(od, self.store)},
+                                                {"at": "/ld", "tree": cas.ingest(sd, self.store)}], key=lambda i: i["at"])}
+        return self.stage(doc)[1]["outputs"]["/out"]
+
+
+def build(repo, root, store, out, jobs=4, ext=None):
+    """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
+    externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
+    j = Job(repo, root, store, jobs, ext or os.path.join(store, "external"))
+    errs = check(j.rec, root, j.files, j.roots)
+    if errs:
+        raise RecipeError(errs)
+    units = units_of(j.rec, root, j.files)
+    res = {"format": OBJ_FORMAT, "root": root, "objects": [], "elf": None, "constants": None, "defined": [], "undefined": [],
+           "stage_keys": [], "status": "green"}
+    ws = tempfile.mkdtemp(prefix="recipe-")
+    os.makedirs(out, exist_ok=True)
+    try:
+        _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
+        j.externals(ws)
+        j.generate(ws)
+        objs, und = j.compile(ws, units), set()
+        for u in units:
+            dest = os.path.join(out, "obj", u + ".o")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            ent = cas.manifest(objs[u], store)["entries"]["unit.o"]
+            shutil.copyfile(cas._obj(store, ent), dest)
+            d, x = symbols(dest, u)
+            res["defined"] += d
+            und |= x
+            res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
+        res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
+        if j.rec.get("link"):
+            name = j.rec["link"]["output"]
+            ent = cas.manifest(j.link(ws, objs), store)["entries"][name]
+            shutil.copyfile(cas._obj(store, ent), os.path.join(out, name))
+            res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent["h"]}
+        if j.rec.get("constants"):
+            shutil.copyfile(os.path.join(ws, "root", j.rec["constants"]), os.path.join(out, "constants.tsv"))
+            res["constants"] = os.path.abspath(os.path.join(out, "constants.tsv"))
+    except BuildRed as r:
+        res.update(status="red", failure=r.args[0], failed_units=r.args[0].get("units", []))
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units)
+    with open(os.path.join(out, "objects.json"), "w") as f:
+        json.dump(res, f, indent=1, sort_keys=True)
+        f.write("\n")
+    return res
+
+
+def main(argv):
+    opt = dict(zip(argv[1::2], argv[2::2]))
+    try:
+        repo = "."
+        if argv[:1] == ["check"]:
+            roots = load_admit(repo)
+            errs = check(load_recipe(repo, roots, opt["--root"]), opt["--root"], tracked(repo), roots)
+            print("\n".join(errs) or "recipe valid")
+            return 2 if errs else 0
+        res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"))
+        print("%s: %d objects, stages run %d hit %d" % (res["status"], len(res["objects"]), res["stages"]["run"], res["stages"]["hit"]))
+        if res["status"] == "red":
+            print(json.dumps(res["failure"], indent=1))
+        return 0 if res["status"] == "green" else 2
+    except RecipeError as e:
+        print("\n".join(e.errors), file=sys.stderr)
+        return 2
+    except (KeyError, OSError, ValueError, struct.error, cas.CasError, sandbox.SbxError, runtime.RtError, unitstage.UnitError) as e:
+        print("recipe: error: %s" % e, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
