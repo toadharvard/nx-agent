@@ -58,7 +58,7 @@ def has(errs, word):
 
 
 e, c = run(base())
-check("registry positive", e == [] and c["OWNER"] == 2 and c["REMOVE"] == {"L1": 1} and c["planned"] == 1 and c["trunk"] == 3, (e, c))
+check("registry positive", e == [] and c["OWNER"] == 2 and c["REMOVE"] == {"L1": 1} and c["planned"] == 1, (e, c))
 
 d = base()
 d["entries"].append({"id": asm(3), "text": "t", "used_by": [T + "docs/a.md"], "aliases": [], "status": "OWNER",
@@ -129,23 +129,23 @@ for rb, key in (("gate:g", None), ("fact:" + T + "docs/a.md", None), ("no gate y
 
 d = base()
 d["entries"][2]["pending"] = "claude/x@abcdef1"
-d["entries"][2]["used_by"] = [T + "other/branch.md"]
-d["entries"][2]["removed_by"] = "gate:later"
-e, c = run(d)
-check("pending relaxes absence of used_by and gate, counted as planned",
-      e == [] and c["pending"] == {"claude/x": 1} and c["trunk"] == 2 and c["planned"] == 1, (e, c))
+check("a pending key is red (the field is removed)", has(run(d)[0], "keys are not"), run(d)[0])
 
 d = base()
-d["entries"][2]["pending"] = "no-commit"
-check("pending without a commit is red", has(run(d)[0], "pending"), run(d)[0])
+d["entries"][2]["used_by"] = [T + "other/branch.md"]
+check("used_by of a file that is not in the tree is red", has(run(d)[0], "not a tracked file"), run(d)[0])
+
+d = base()
+d["entries"][2]["removed_by"] = "gate:later"
+check("removed_by of a gate that does not exist is red", has(run(d)[0], "removed_by"), run(d)[0])
+
+d = base()
+d["entries"][2]["owner"] = "L6A"
+check("owner L6A is green", run(d)[0] == [], run(d)[0])
 
 d = base()
 d["entries"][2]["extra"] = 1
 check("unknown key is red", has(run(d)[0], "keys are not"), run(d)[0])
-
-d = base()
-d["entries"][0]["pending"] = "claude/x@abcdef1"
-check("pending on OWNER is red", has(run(d)[0], "keys are not"), run(d)[0])
 
 check("missing registry is red", run(None)[0] != [], run(None))
 check("wrong format is red", run({"format": "x", "entries": []})[0] != [], "")

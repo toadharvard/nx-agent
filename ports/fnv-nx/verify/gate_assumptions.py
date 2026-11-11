@@ -8,8 +8,8 @@ Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries a
   ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
     OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
     REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
-    optional: "note": STR; for REMOVE "pending": "BRANCH@COMMIT" (the entry is carried by a branch that is not merged yet:
-              its used_by paths and its gate:/fact: target may be absent from this tree, and nothing else is relaxed).
+    optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
+              branch enters with that branch's merge, and every rule below applies to every entry without exception.
 Universe: the MENTIONS of the tree. A text file is a tracked file below ports/fnv-nx that decodes as UTF-8 without NUL
 bytes and is not data (suffix .json); a file of a root of verify/admit.json marked "record": true is an append-only log
 (its dated entries state what was said then; the owner forbids editing it) and is not scanned. CLAUDE.md (the owner's
@@ -23,15 +23,14 @@ universe is (path, first line of the block). A mention is certified iff ALL hold
 The registry is certified iff ALL hold:
   3. ids are unique and well formed, aliases are unique across entries, text is not empty;
   4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
-     place of reliance, so an entry nobody cites is dead and is red); a pending entry may name a path of its branch;
+     place of reliance, so an entry nobody cites is dead and is red);
   5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
      the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
      exactly the owner's list, so a tenth OWNER entry without the owner's item is red;
   6. a REMOVE entry has an owner of LEADS (or two joined by +) and `removed_by` of one of the forms `gate:NAME` (NAME is a
      gate of verify/gates.json), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
      (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
-     (nobody has a discharge yet). planned, no gate yet, OPEN and a pending gate that does not exist yet are reported by
-     count; they are the debt of the owner named in the entry.
+     (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
 And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
 not in the registry is red wherever it is written.
 Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a
@@ -60,8 +59,7 @@ FORMAT = "fnvnx-assumptions/1"
 OWNER_FILE = "CLAUDE.md"
 OWNER_HEAD = "OWNER, the only accepted ones:"
 NUMBERED = re.compile(r"(\s*)\d+\.\s")
-PENDING = re.compile(r"[A-Za-z0-9._/-]+@[0-9a-f]{7,40}\Z")
-LEADS = ("L1", "L2", "L3a", "L3b", "L4", "L5", "L6")
+LEADS = ("L1", "L2", "L3a", "L3b", "L4", "L5", "L6", "L6A")
 STATUSES = ("OWNER", "REMOVE")
 WORD = re.compile(r"(?<!\w)assum|(?<!\w)допущени", re.I)
 ID = re.compile(r"\bASM-(\d{3})\b")
@@ -174,7 +172,7 @@ def judge_registry(doc, tracked, read, gate_names):
             or not isinstance(doc["entries"], list):
         return ["registry is missing or is not %s with keys format, entries" % FORMAT], {}
     ids, aliases = set(), {}
-    count = {"OWNER": 0, "REMOVE": {}, "no gate yet": 0, "planned": 0, "OPEN": 0, "pending": {}, "trunk": 0,
+    count = {"OWNER": 0, "REMOVE": {}, "no gate yet": 0, "planned": 0, "OPEN": 0,
              "entries": len(doc["entries"])}
     items = owner_items(read(OWNER_FILE)) if OWNER_FILE in tracked else []
     taken = {}
@@ -196,12 +194,9 @@ def judge_registry(doc, tracked, read, gate_names):
             continue
         want = {"id", "text", "used_by", "aliases", "status"} | ({"decision"} if st == "OWNER" else {"removed_by", "owner"})
         extra = set(e) - want
-        if st == "REMOVE":
-            extra -= {"note", "pending"}
-        elif "note" in extra:
-            extra.discard("note")
+        extra.discard("note")
         if set(want) - set(e) or extra:
-            err.append(w + "keys are not %s (optional: note%s)" % (", ".join(sorted(want)), ", pending" if st == "REMOVE" else ""))
+            err.append(w + "keys are not %s (optional: note)" % ", ".join(sorted(want)))
             continue
         if "note" in e and (not isinstance(e["note"], str) or not e["note"].strip()):
             err.append(w + "note is empty")
@@ -215,14 +210,6 @@ def judge_registry(doc, tracked, read, gate_names):
                 if a in aliases:
                     err.append(w + "alias %r is also an alias of %s" % (a, aliases[a]))
                 aliases[a] = i
-        pend = e.get("pending")
-        if "pending" in e:
-            if not isinstance(pend, str) or not PENDING.match(pend):
-                err.append(w + "pending %r is not BRANCH@COMMIT" % (pend,))
-            else:
-                count["pending"][pend.split("@")[0]] = count["pending"].get(pend.split("@")[0], 0) + 1
-        else:
-            count["trunk"] += 1
         ub = e["used_by"]
         if not isinstance(ub, list) or not ub or not all(isinstance(p, str) for p in ub):
             err.append(w + "used_by is empty (a dead entry)")
@@ -231,7 +218,7 @@ def judge_registry(doc, tracked, read, gate_names):
                 if p in tracked:
                     if i not in set("ASM-" + n for n in ID.findall(read(p))):
                         err.append(w + "used_by %s does not cite %s" % (p, i))
-                elif pend is None:
+                else:
                     err.append(w + "used_by %r is not a tracked file" % (p,))
         if st == "OWNER":
             count["OWNER"] += 1
@@ -261,9 +248,7 @@ def judge_registry(doc, tracked, read, gate_names):
             if isinstance(rb, str):
                 if rb.startswith("gate:") or rb.startswith("fact:"):
                     exists = rb[5:] in (gate_names if rb[0] == "g" else tracked)
-                    ok = exists or (pend is not None and bool(rb[5:].strip()))
-                    if ok and not exists:
-                        count["planned"] += 1
+                    ok = exists
                 else:
                     for form in ("planned:", "no gate yet:", "OPEN:"):
                         if rb.startswith(form) and rb[len(form):].strip():
@@ -343,11 +328,10 @@ def main():
     status = "green" if not bad and not errors else "red"
     rem = count.get("REMOVE", {})
     nogate = count.get("planned", 0) + count.get("no gate yet", 0) + count.get("OPEN", 0)
-    detail = "%d of %d mentions cite a registry id; %d entries (%d OWNER, %d REMOVE: %s); trunk %d, pending %s; " \
+    detail = "%d of %d mentions cite a registry id; %d entries (%d OWNER, %d REMOVE: %s); " \
         "without an existing gate: %d (planned %d, no gate yet %d, OPEN %d)" % (
             n, len(mentions), count.get("entries", 0), count.get("OWNER", 0), sum(rem.values()),
-            ", ".join("%s %d" % kv for kv in sorted(rem.items())), count.get("trunk", 0),
-            ", ".join("%s %d" % kv for kv in sorted(count.get("pending", {}).items())) or "0", nogate,
+            ", ".join("%s %d" % kv for kv in sorted(rem.items())), nogate,
             count.get("planned", 0), count.get("no gate yet", 0), count.get("OPEN", 0))
     res = {"format": "fnvnx-gate/1", "name": "assumptions", "status": status, "universe": len(mentions), "certified": n,
            "uncertified": ["%s:%d" % k for k in sorted(bad)][:50], "detail": "; ".join(errors[:20] + [detail])[:2000],
