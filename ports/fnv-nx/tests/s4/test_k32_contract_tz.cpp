@@ -160,3 +160,23 @@ TEST(k32c_timezone_absolute_dates)
     CHECK_EQ(bad, 0);
     set_zone(NULL);
 }
+
+/* one zone source: the clock's zone (real and virtual alike) is the host's (TZ_AT / the scripted TZ), UTC when the host's zone is UTC */
+#include "../../platform/include/fnvnx_clock.h"
+TEST(k32c_timezone_one_source)
+{
+    set_zone("UTC0");
+    CHECK_EQ(clk_tz_offset_minutes(), 0);
+    clk_tzrule_t r;
+    CHECK_EQ(clk_tz_rule(&r), 0);
+    CHECK_STR(r.std_name, "UTC");
+    TIME_ZONE_INFORMATION tz;
+    CHECK_EQ(GetTimeZoneInformation(&tz), TIME_ZONE_ID_UNKNOWN);
+    CHECK_EQ(tz.Bias, 0);
+    set_zone("JST-9");
+    CHECK_EQ(clk_tz_offset_minutes(), 540);
+    CHECK_EQ(clk_tz_offset_minutes(), os_tz_offset_minutes());
+    CHECK_EQ(GetTimeZoneInformation(&tz), TIME_ZONE_ID_UNKNOWN);
+    CHECK_EQ(tz.Bias, -540);
+    set_zone(NULL);
+}

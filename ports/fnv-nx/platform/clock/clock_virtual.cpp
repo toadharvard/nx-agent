@@ -182,13 +182,16 @@ uint32_t clk_peek_tick_ms(void) { return (uint32_t)(t_now / 1000000ull); }
 uint64_t clk_peek_ns(void) { return t_now; }
 int64_t clk_peek_filetime(void) { return EPOCH_FT + (int64_t)(t_now / Q); }
 
-int32_t clk_tz_offset_minutes(void) { return 0; }
+/* The zone is not a property of the clock: it is the host's (TZ_AT; the emulator's host answers UTC, the posix test backend the scripted
+ * zone). One source for the real and the virtual clock, no literal here. */
+int32_t clk_tz_offset_minutes(void) { return os_tz_offset_minutes(); }
 int clk_tz_rule(clk_tzrule_t *r)
 {
-    memset(r, 0, sizeof *r);
-    memcpy(r->std_name, "UTC", 4);
-    memcpy(r->dst_name, "UTC", 4);
-    return 0;
+    os_tzrule_t o;
+    int rc = os_tz_rule(&o);
+    if (rc == 0)
+        memcpy(r, &o, sizeof *r);
+    return rc;
 }
 
 void clk_sleep_ns(uint64_t ns)
