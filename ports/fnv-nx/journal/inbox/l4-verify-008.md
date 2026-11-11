@@ -66,3 +66,12 @@ The boot run does not wait for P2-P5 before WinMain: the guest reaches module 10
 - Time: no model clock. The vsync event is signalled at each 1/60 s boundary of the boot machine's monotonic timer;
   eventWait returns on signal or timeout with libnx's documented results.
 - L6A's 12 harnesses (137 doubled symbols) become LP64 host-test images linking the real backend files (D1/D2).
+
+## Owner order 22:50Z: OpenGL is the reference for deko3d (trunk CLAUDE.md d7fac9b50)
+
+- `verify/bootgpu.py` with its GL library stays in the boot machine and produces the GL reference frames; the dk model
+  (module 12, libdkmodel, DKSH interpreter) is built beside it.
+- **D6, deko acceptance check (P6, after P5):** the same nxgpu command stream (same D3D9 front end, same scenes and game
+  frames) is rendered through `bootgpu.py` (GL) and through the dk model; the frames are compared. A difference is a
+  deko3d defect until a rule explains it. The check verifies the deko3d backend; it never selects code. The recorded
+  stream is the input of both runs, so the comparison does not depend on two runs of the game being equal.
