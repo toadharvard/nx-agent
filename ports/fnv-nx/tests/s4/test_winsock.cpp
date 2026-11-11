@@ -227,7 +227,13 @@ TEST(ws_error_matrix)
     CHECK_EQ(fnvnx_ws2_send(WS_INVALID, b, 4, 0), -1); CHECK_EQ(LASTERR(), 10038);
     CHECK_EQ(fnvnx_ws2_socket(23, 1, 0), WS_INVALID); CHECK_EQ(LASTERR(), 10047);
     CHECK_EQ(fnvnx_ws2_socket(2, 9, 0), WS_INVALID); CHECK_EQ(LASTERR(), 10044);
-    CHECK_EQ(fnvnx_ws2_socket(2, 1, 17), WS_INVALID); CHECK(LASTERR() == 10043 || LASTERR() == 10041);
+    CHECK_EQ(fnvnx_ws2_socket(2, 1, 17), WS_INVALID); CHECK_EQ(LASTERR(), 10043);
+    CHECK_EQ(fnvnx_ws2_socket(2, 2, 6), WS_INVALID); CHECK_EQ(LASTERR(), 10043);
+    { UINT_PTR q;
+      q = fnvnx_ws2_socket(2, 1, 0);  CHECK(q != WS_INVALID); fnvnx_ws2_closesocket(q);
+      q = fnvnx_ws2_socket(2, 1, 6);  CHECK(q != WS_INVALID); fnvnx_ws2_closesocket(q);
+      q = fnvnx_ws2_socket(2, 2, 0);  CHECK(q != WS_INVALID); fnvnx_ws2_closesocket(q);
+      q = fnvnx_ws2_socket(2, 2, 17); CHECK(q != WS_INVALID); fnvnx_ws2_closesocket(q); }
     UINT_PTR u = fnvnx_ws2_socket(2, 2, 17);
     CHECK(u != WS_INVALID);
     int v = 1;
