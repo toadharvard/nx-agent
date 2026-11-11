@@ -14,6 +14,7 @@
 # GCC is pinned to 15.x: -mabi=ilp32 is deprecated since GCC 15 (it warns) and may be removed later.
 set -euo pipefail
 
+HERE=$(cd "$(dirname "$0")" && pwd)
 DL=$(realpath "$1"); BUILD=$(mkdir -p "$2" && realpath "$2"); PREFIX=$3; DKP=$(realpath "$4")
 BINUTILS_VER=2.45.1; BINUTILS_REL=2
 GCC_VER=15.2.0;      GCC_REL=7
@@ -60,7 +61,7 @@ fi
 # libsupc++) is what they link with, so it is built under the same model: `operator new(unsigned int)` is one
 # symbol on both sides.
 if ! step msvcmodel; then
-	patch -p1 -d "gcc-$GCC_VER" -i "$(dirname "$(realpath "$0")")/../msvcmodel/msvcmodel.patch"
+	patch -p1 -d "gcc-$GCC_VER" -i "$HERE/../msvcmodel/msvcmodel.patch"
 	done_ msvcmodel
 fi
 

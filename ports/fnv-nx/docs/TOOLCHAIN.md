@@ -137,6 +137,20 @@ Our changes on top (`toolchain/gcc/build.sh`):
 * the `-mabi=ilp32 is deprecated` warning is removed: GCC 15 emits it under `-Wdeprecated` and libgcc builds
   with `-Werror`, so the ILP32 multilib does not build otherwise. GCC 16.1 still supports ILP32 (still
   deprecated); upstream removal would freeze us on the last release that has it, the main long-term risk of D1.
+* the `msvcmodel` step applies `toolchain/msvcmodel/msvcmodel.patch` (MSVCMODEL1, written for GCC 13.3.0; applies to
+  15.2.0 with offsets and fuzz 1 in `gcc/cp/init.cc`) before the build: under `-mabi=ilp32` `size_t` is `unsigned int`
+  and `ptrdiff_t` is `int`, so newlib and libstdc++ of the ILP32 multilibs are built under the exe's model and
+  `operator new(unsigned int)` (`_Znwj`) is the one symbol on both sides. LP64 is untouched (`_Znwm`). Without the
+  step `size_t` is `unsigned long` and the game units would not link. Checked on the build: `nm -g` of
+  `aarch64-none-elf/lib/ilp32/libstdc++.a` and `ilp32/pic` give `T _Znwj`, `.` and `pic` give `T _Znwm`; `void f(size_t)`
+  mangles `_Z1fj`; a file with `<stddef.h> <cstddef> <stdio.h> <new> <string> <vector>` compiles `-Wall -Wextra -Werror`
+  with static_asserts on the types; `platform/build_guest.sh` passes (115 sources, UNRESOLVED 0) with no source change.
+* Mirror: the install tree of that build (`make install-strip`, 391 MB, 2070 files, before `devkita64/setup.sh` adds
+  `base_rules`) is the private branch `tools/fnvnx-a64-msvcmodel` of `toadharvard/fnv-nx-build`, commit
+  `00e3d42acd10593d534b9a70bb8940cee7991436`, `tree_sha256`
+  `3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d` (`verify/cas.py ingest` of the commit's
+  checkout-index, as RECIPE.md "External inputs"). Its README has the source versions, the patch list and the
+  build host (Ubuntu 24.04, gcc 13.3.0, ld 2.42, JOBS=3). Not checked: bit-for-bit reproducibility.
 * gcc's `limits.h` is regenerated after newlib is installed (stage 1 made one that does not chain to newlib's,
   so `PATH_MAX`, needed by libnx, was missing).
 
