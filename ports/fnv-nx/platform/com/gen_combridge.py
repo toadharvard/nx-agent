@@ -19,6 +19,8 @@ Spec kinds (the vocabulary of d3d9_spec.json, plus the two this bridge needs):
   value | flags | enum   one 32-bit word `i` (a scalar, a handle value, or a guest address typed by a pointer typedef): word<T>
   float f | double d | int64 q      their own slot classes (a float is one word, a double and an int64 take two stack words)
   struct byref           a pointer to the struct (`i`); REFIID / REFGUID (a C++ reference) are dereferenced
+  buffer + members       a struct the callee fills that carries interface pointers (PIN_INFO.pFilter, FILTER_INFO.pGraph): each member
+                         is converted like an out handle (face / the game's own pointer)
   struct by value        size/4 words `i` (a GUID passed by value, IFilterMapper)
   buffer                 a guest address `i`, passed on as typed
   handle                 an interface pointer of an object the platform implements.  in: a pointer from the game (the face of a platform
@@ -72,6 +74,9 @@ def ret_letter(what, m):
     die(f"{what}: return kind {rk} has no rule")
 
 
+FAMILY = {"ds": 1, "di": 1, "dsh": 2}
+
+
 class Gen:
     def __init__(self, spec):
         self.spec = spec
@@ -107,6 +112,7 @@ class Gen:
 
     # ---- a thunk: game -> platform
     def thunk(self, what, sym, m, callee, this_if):
+        fam = FAMILY[self.spec["interfaces"][this_if]["family"]] if this_if else 0
         P = m["params"]
         decl, args, pre, post = [], [], [], []
         letters = ["i"] if this_if else []
@@ -159,6 +165,11 @@ class Gen:
             elif kd == "buffer":
                 pre.append(f"static_assert(std::is_pointer<{ct}>::value, \"{what}: {p['name']} is not a pointer\");")
                 args.append(f"({ct}){a}")
+                for mem in p.get("members", []):   # a struct the method fills with interface pointers: each becomes a face
+                    if m["ret_kind"] != "hresult" or mem["iface"] not in self.ix:
+                        die(f"{what}: struct member {mem['name']} has no rule")
+                    pre.append(f"if ({a}) (({p['struct']} *){a})->{mem['name']} = nullptr;")
+                    post.append(f"if ({a}) (({p['struct']} *){a})->{mem['name']} = (int32_t)r >= 0 ? nxcom::to_game((void *)(({p['struct']} *){a})->{mem['name']}, NXIF_{mem['iface']}) : nullptr;")
             elif kd == "callback":
                 args.append(f"{ct}((uintptr_t){a})")
             elif kd in ("handle", "giface") and not p["byref"]:
@@ -176,7 +187,7 @@ class Gen:
                 ifc = p["iface"]
                 if ifc.startswith("$"):
                     cexp = self.canon(P, ifc[1:], var_of, what)
-                    post.append(f"if ({a} && *(void **){a}) {{ void *p_ = *(void **){a}; uint8_t c[16]; {cexp}; int ix = nxcom::iface_for_iid(c);\n"
+                    post.append(f"if ({a} && *(void **){a}) {{ void *p_ = *(void **){a}; uint8_t c[16]; {cexp}; int ix = nxcom::iface_for_iid(c, {fam});\n"
                                 f"        if ((int32_t)r >= 0 && ix >= 0) *(void **){a} = nxcom::to_game(p_, (unsigned)ix);\n"
                                 f"        else {{ if ((int32_t)r >= 0) {{ ((::IUnknown *)p_)->Release(); r = ({m['ret']}){E_NOINTERFACE}; }} *(void **){a} = nullptr; }} }}")
                 else:
@@ -232,7 +243,7 @@ class Gen:
                 cexp, ptr = "nxcom_canon_guid(&a0, c)", "(const void *)&a0"
             else:
                 cexp, ptr = "nxcom_canon_raw((const void *)a0, c)", "(const void *)a0"
-            return f"{head} {{ uint8_t c[16]; {cexp}; return ({ret})nxcom::px_qi(rec, c, {ptr}, (void **)a1); }}"
+            return f"{head} {{ uint8_t c[16]; {cexp}; return ({ret})nxcom::px_qi(rec, c, {ptr}, (void **)a1, {FAMILY[self.spec['interfaces'][iname]['family']]}); }}"
         if role == "addref":
             return f"{head} {{ return ({ret})nxcom::px_addref(rec); }}"
         if role == "release":
@@ -242,6 +253,9 @@ class Gen:
             kd, ct, a = p["kind"], p["ctype"], f"a{k}"
             if kd in ("float", "double", "int64", "value", "flags", "enum", "buffer"):
                 args.append(a)
+                for mem in p.get("members", []):   # the game fills the struct: its interface pointers become the platform's references
+                    pre.append(f"if ({a}) {a}->{mem['name']} = nullptr;")
+                    post.append(f"if ({a}) {a}->{mem['name']} = (int32_t)r >= 0 ? nxcom::adopt_game((void *){a}->{mem['name']}, NXIF_{mem['iface']}) : nullptr;")
             elif kd == "struct" and p["byref"]:
                 args.append(f"(const void *)&{a}" if ct in ("REFIID", "REFGUID", "REFCLSID") else a)
             elif kd == "struct":
@@ -259,7 +273,7 @@ class Gen:
                 ifc = p["iface"]
                 if ifc.startswith("$"):
                     cexp = self.canon(P, ifc[1:], type("V", (), {"raw": False, "__call__": lambda s, kk: f"a{kk}"})(), what)
-                    pre.insert(0, f"uint8_t c[16]; {cexp}; int ix = nxcom::iface_for_iid(c); if (ix < 0) return ({ret}){E_NOINTERFACE};")
+                    pre.insert(0, f"uint8_t c[16]; {cexp}; int ix = nxcom::iface_for_iid(c, {FAMILY[self.spec['interfaces'][iname]['family']]}); if (ix < 0) return ({ret}){E_NOINTERFACE};")
                     post.append(f"if ({a}) *(void **){a} = ((int32_t)r >= 0 && g{k}) ? nxcom::adopt_game(g{k}, (unsigned)ix) : nullptr;")
                 else:
                     post.append(f"if ({a}) *(void **){a} = ((int32_t)r >= 0 && g{k}) ? nxcom::adopt_game(g{k}, NXIF_{ifc}) : nullptr;")
@@ -368,11 +382,11 @@ template <class MP> int vslot(MP mp)
     # object implements it, and the runtime consumes no game object of it (px_get: no maker)
     no_proxy = set()
     for n in g.names:
-        if not spec["interfaces"][n]["hidden"] and any(1 + sum(len(words_of(p, n)) for p in m["params"]) > 16 for m in g.by[n]):
+        if any(1 + sum(len(words_of(p, n)) for p in m["params"]) > 16 for m in g.by[n]):
             no_proxy.add(n)
     for n in g.names:
         info = spec["interfaces"][n]
-        if info["hidden"] or n in no_proxy:
+        if n in no_proxy:
             continue
         cpp.append(f"namespace {{\nstruct Px_{n} final : {info['cxx']} {{\n    nxcom::ProxyRec *rec;\n    explicit Px_{n}(nxcom::ProxyRec *r) : rec(r) {{}}")
         for m in g.by[n]:
@@ -390,11 +404,14 @@ template <class MP> int vslot(MP mp)
     cpp.append("static const nxcom::Iface g_ifaces[] = {")
     for n in g.names:
         info = spec["interfaces"][n]
-        base = g.ix[info["base"]] if info["base"] else -1
+        par = info.get("parent", info["base"])
+        base = g.ix[par] if par else -1
+        al = g.ix[info["alias"]] if info.get("alias") else -1
+        mk = "&mk_%s, &fr_%s" % (n, n) if n not in no_proxy else "nullptr, nullptr"
         if info["hidden"]:
-            cpp.append(f'    {{"{n}", {info["slots"]}, 0, {base}, true, nullptr, nullptr, nullptr, nullptr}},')
+            cpp.append(f'    {{"{n}", {info["slots"]}, 0, {base}, true, {al}, {FAMILY[info["family"]]}, nullptr, nullptr, {mk}}},')
         else:
-            cpp.append(f'    {{"{n}", {info["slots"]}, {g.keyoff[n]}, {base}, false, names_{n}, thunks_{n}, {"&mk_%s, &fr_%s" % (n, n) if n not in no_proxy else "nullptr, nullptr"}}},')
+            cpp.append(f'    {{"{n}", {info["slots"]}, {g.keyoff[n]}, {base}, false, {al}, {FAMILY[info["family"]]}, names_{n}, thunks_{n}, {mk}}},')
     cpp.append("};")
     iids = []   # (iface, symbol or literal)
     for n in g.names:

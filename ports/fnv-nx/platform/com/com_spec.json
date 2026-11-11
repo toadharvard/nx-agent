@@ -218,6 +218,7 @@
  ],
  "interfaces": {
   "IAsyncReader": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::AsyncReader",
    "family": "dsh",
@@ -226,9 +227,11 @@
    "iids": [
     "dsh::IID_IAsyncReader_"
    ],
+   "parent": "Unk",
    "slots": 11
   },
   "IBaseFilter": {
+   "alias": null,
    "base": "IMediaFilter",
    "cxx": "dsh::IBaseFilter_",
    "family": "dsh",
@@ -237,9 +240,11 @@
    "iids": [
     "dsh::IID_IBaseFilter_"
    ],
+   "parent": "IMediaFilter",
    "slots": 15
   },
   "IBasicAudio": {
+   "alias": null,
    "base": "IDispatch",
    "cxx": "dsh::IBasicAudio_",
    "family": "dsh",
@@ -248,9 +253,11 @@
    "iids": [
     "dsh::IID_IBasicAudio_"
    ],
+   "parent": "IDispatch",
    "slots": 11
   },
   "IBasicVideo": {
+   "alias": null,
    "base": "IDispatch",
    "cxx": "dsh::IBasicVideo_",
    "family": "dsh",
@@ -259,9 +266,11 @@
    "iids": [
     "dsh::IID_IBasicVideo_"
    ],
+   "parent": "IDispatch",
    "slots": 39
   },
   "IDirectInput8A": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectInput8A",
    "family": "di",
@@ -270,9 +279,11 @@
    "iids": [
     "IID_IDirectInput8A"
    ],
+   "parent": "IUnknownCom",
    "slots": 11
   },
   "IDirectInputDevice8A": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectInputDevice8A",
    "family": "di",
@@ -283,18 +294,22 @@
     "5944e682-c92e-11cf-bfc7-444553540000",
     "57d7c6bc-2356-11d3-8e9d-00c04f6844ae"
    ],
+   "parent": "IUnknownCom",
    "slots": 32
   },
   "IDirectInputEffect": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectInputEffect",
    "family": "di",
    "header": "dinput.h",
    "hidden": false,
    "iids": [],
+   "parent": "IUnknownCom",
    "slots": 13
   },
   "IDirectSound": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectSound",
    "family": "ds",
@@ -303,9 +318,11 @@
    "iids": [
     "IID_IDirectSound"
    ],
+   "parent": "IUnknownCom",
    "slots": 11
   },
   "IDirectSound3DBuffer": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectSound3DBuffer",
    "family": "ds",
@@ -314,9 +331,11 @@
    "iids": [
     "IID_IDirectSound3DBuffer"
    ],
+   "parent": "IUnknownCom",
    "slots": 21
   },
   "IDirectSound3DListener": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectSound3DListener",
    "family": "ds",
@@ -325,9 +344,11 @@
    "iids": [
     "IID_IDirectSound3DListener"
    ],
+   "parent": "IUnknownCom",
    "slots": 18
   },
   "IDirectSound8": {
+   "alias": null,
    "base": "IDirectSound",
    "cxx": "::IDirectSound8",
    "family": "ds",
@@ -336,9 +357,11 @@
    "iids": [
     "IID_IDirectSound8"
    ],
+   "parent": "IDirectSound",
    "slots": 12
   },
   "IDirectSoundBuffer": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectSoundBuffer",
    "family": "ds",
@@ -347,9 +370,11 @@
    "iids": [
     "IID_IDirectSoundBuffer"
    ],
+   "parent": "IUnknownCom",
    "slots": 21
   },
   "IDirectSoundBuffer8": {
+   "alias": null,
    "base": "IDirectSoundBuffer",
    "cxx": "::IDirectSoundBuffer8",
    "family": "ds",
@@ -358,9 +383,11 @@
    "iids": [
     "IID_IDirectSoundBuffer8"
    ],
+   "parent": "IDirectSoundBuffer",
    "slots": 24
   },
   "IDirectSoundFXChorus": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::FxIf<::FxChorus>",
    "family": "ds",
@@ -369,9 +396,11 @@
    "iids": [
     "IID_Chorus"
    ],
+   "parent": "IUnknownCom",
    "slots": 5
   },
   "IDirectSoundFXCompressor": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::FxIf<::FxCompressor>",
    "family": "ds",
@@ -380,9 +409,11 @@
    "iids": [
     "IID_Compressor"
    ],
+   "parent": "IUnknownCom",
    "slots": 5
   },
   "IDirectSoundFXDistortion": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::FxIf<::FxDistortion>",
    "family": "ds",
@@ -391,9 +422,11 @@
    "iids": [
     "IID_Distortion"
    ],
+   "parent": "IUnknownCom",
    "slots": 5
   },
   "IDirectSoundFXEcho": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::FxIf<::FxEcho>",
    "family": "ds",
@@ -402,9 +435,11 @@
    "iids": [
     "IID_Echo"
    ],
+   "parent": "IUnknownCom",
    "slots": 5
   },
   "IDirectSoundFXFlanger": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::FxIf<::FxChorus>",
    "family": "ds",
@@ -413,9 +448,11 @@
    "iids": [
     "IID_Flanger"
    ],
+   "parent": "IUnknownCom",
    "slots": 5
   },
   "IDirectSoundFXGargle": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::FxIf<::FxGargle>",
    "family": "ds",
@@ -424,9 +461,11 @@
    "iids": [
     "IID_Gargle"
    ],
+   "parent": "IUnknownCom",
    "slots": 5
   },
   "IDirectSoundFXI3DL2Reverb": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectSoundFXI3DL2Reverb",
    "family": "ds",
@@ -435,9 +474,11 @@
    "iids": [
     "IID_IDirectSoundFXI3DL2Reverb8"
    ],
+   "parent": "IUnknownCom",
    "slots": 9
   },
   "IDirectSoundFXParamEq": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::FxIf<::FxParamEq>",
    "family": "ds",
@@ -446,9 +487,11 @@
    "iids": [
     "IID_ParamEq"
    ],
+   "parent": "IUnknownCom",
    "slots": 5
   },
   "IDirectSoundFXWavesReverb": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectSoundFXWavesReverb",
    "family": "ds",
@@ -457,9 +500,11 @@
    "iids": [
     "IID_IDirectSoundFXWavesReverb8"
    ],
+   "parent": "IUnknownCom",
    "slots": 5
   },
   "IDirectSoundNotify": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::IDirectSoundNotify",
    "family": "ds",
@@ -468,9 +513,11 @@
    "iids": [
     "IID_IDirectSoundNotify"
    ],
+   "parent": "IUnknownCom",
    "slots": 4
   },
   "IDispatch": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IDispatch_",
    "family": "dsh",
@@ -479,9 +526,11 @@
    "iids": [
     "dsh::IID_IDispatch_"
    ],
+   "parent": "Unk",
    "slots": 7
   },
   "IEnumFilters": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IEnum_",
    "family": "dsh",
@@ -490,9 +539,11 @@
    "iids": [
     "dsh::IID_IEnumFilters_"
    ],
+   "parent": "Unk",
    "slots": 7
   },
   "IEnumMediaTypes": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IEnum_",
    "family": "dsh",
@@ -501,9 +552,11 @@
    "iids": [
     "dsh::IID_IEnumMediaTypes_"
    ],
+   "parent": "Unk",
    "slots": 7
   },
   "IEnumPins": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IEnum_",
    "family": "dsh",
@@ -512,9 +565,11 @@
    "iids": [
     "dsh::IID_IEnumPins_"
    ],
+   "parent": "Unk",
    "slots": 7
   },
   "IEnumRegFilters": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IEnum_",
    "family": "dsh",
@@ -523,9 +578,11 @@
    "iids": [
     "dsh::IID_IEnumRegFilters_"
    ],
+   "parent": "Unk",
    "slots": 7
   },
   "IFileSourceFilter": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IFileSource_",
    "family": "dsh",
@@ -534,9 +591,11 @@
    "iids": [
     "dsh::IID_IFileSourceFilter_"
    ],
+   "parent": "Unk",
    "slots": 5
   },
   "IFilterGraph": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IFilterGraph_",
    "family": "dsh",
@@ -545,9 +604,11 @@
    "iids": [
     "dsh::IID_IFilterGraph_"
    ],
+   "parent": "Unk",
    "slots": 11
   },
   "IFilterGraph2": {
+   "alias": null,
    "base": "IGraphBuilder",
    "cxx": "dsh::IFilterGraph2_",
    "family": "dsh",
@@ -556,9 +617,11 @@
    "iids": [
     "dsh::IID_IFilterGraph2_"
    ],
+   "parent": "IGraphBuilder",
    "slots": 21
   },
   "IFilterMapper": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IFilterMapper_",
    "family": "dsh",
@@ -567,9 +630,11 @@
    "iids": [
     "dsh::IID_IFilterMapper_"
    ],
+   "parent": "Unk",
    "slots": 11
   },
   "IGraphBuilder": {
+   "alias": null,
    "base": "IFilterGraph",
    "cxx": "dsh::IGraphBuilder_",
    "family": "dsh",
@@ -578,9 +643,11 @@
    "iids": [
     "dsh::IID_IGraphBuilder_"
    ],
+   "parent": "IFilterGraph",
    "slots": 18
   },
   "IGraphVersion": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IGraphVersion_",
    "family": "dsh",
@@ -589,9 +656,11 @@
    "iids": [
     "dsh::IID_IGraphVersion_"
    ],
+   "parent": "Unk",
    "slots": 4
   },
   "IKsPropertySet": {
+   "alias": null,
    "base": "IUnknownCom",
    "cxx": "::KsProperty",
    "family": "ds",
@@ -600,9 +669,11 @@
    "iids": [
     "IID_KsPropertySet"
    ],
+   "parent": "IUnknownCom",
    "slots": 6
   },
   "IMediaControl": {
+   "alias": null,
    "base": "IDispatch",
    "cxx": "dsh::IMediaControl_",
    "family": "dsh",
@@ -611,9 +682,11 @@
    "iids": [
     "dsh::IID_IMediaControl_"
    ],
+   "parent": "IDispatch",
    "slots": 16
   },
   "IMediaEvent": {
+   "alias": null,
    "base": "IDispatch",
    "cxx": "dsh::IMediaEvent_",
    "family": "dsh",
@@ -622,9 +695,11 @@
    "iids": [
     "dsh::IID_IMediaEvent_"
    ],
+   "parent": "IDispatch",
    "slots": 13
   },
   "IMediaEventEx": {
+   "alias": null,
    "base": "IMediaEvent",
    "cxx": "dsh::IMediaEventEx_",
    "family": "dsh",
@@ -633,9 +708,11 @@
    "iids": [
     "dsh::IID_IMediaEventEx_"
    ],
+   "parent": "IMediaEvent",
    "slots": 16
   },
   "IMediaEventSink": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IMediaEventSink_",
    "family": "dsh",
@@ -644,9 +721,11 @@
    "iids": [
     "dsh::IID_IMediaEventSink_"
    ],
+   "parent": "Unk",
    "slots": 4
   },
   "IMediaFilter": {
+   "alias": null,
    "base": "IPersist",
    "cxx": "dsh::IMediaFilter_",
    "family": "dsh",
@@ -655,9 +734,11 @@
    "iids": [
     "dsh::IID_IMediaFilter_"
    ],
+   "parent": "IPersist",
    "slots": 10
   },
   "IMediaPosition": {
+   "alias": null,
    "base": "IDispatch",
    "cxx": "dsh::IMediaPosition_",
    "family": "dsh",
@@ -666,9 +747,11 @@
    "iids": [
     "dsh::IID_IMediaPosition_"
    ],
+   "parent": "IDispatch",
    "slots": 18
   },
   "IMediaSeeking": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IMediaSeeking_",
    "family": "dsh",
@@ -677,9 +760,11 @@
    "iids": [
     "dsh::IID_IMediaSeeking_"
    ],
+   "parent": "Unk",
    "slots": 20
   },
   "IObjectWithSite": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IObjectWithSite_",
    "family": "dsh",
@@ -688,9 +773,11 @@
    "iids": [
     "dsh::IID_IObjectWithSite_"
    ],
+   "parent": "Unk",
    "slots": 5
   },
   "IPersist": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IPersist_",
    "family": "dsh",
@@ -699,9 +786,11 @@
    "iids": [
     "dsh::IID_IPersist_"
    ],
+   "parent": "Unk",
    "slots": 4
   },
   "IPin": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IPin_",
    "family": "dsh",
@@ -710,9 +799,11 @@
    "iids": [
     "dsh::IID_IPin_"
    ],
+   "parent": "Unk",
    "slots": 18
   },
   "IReferenceClock": {
+   "alias": null,
    "base": "Unk",
    "cxx": "dsh::IReferenceClock_",
    "family": "dsh",
@@ -721,9 +812,11 @@
    "iids": [
     "dsh::IID_IReferenceClock_"
    ],
+   "parent": "Unk",
    "slots": 7
   },
   "IUnknownCom": {
+   "alias": null,
    "base": null,
    "cxx": "::IUnknown",
    "family": "ds",
@@ -732,9 +825,11 @@
    "iids": [
     "00000000-0000-0000-c000-000000000046"
    ],
+   "parent": null,
    "slots": 3
   },
   "IVideoWindow": {
+   "alias": null,
    "base": "IDispatch",
    "cxx": "dsh::IVideoWindow_",
    "family": "dsh",
@@ -743,15 +838,20 @@
    "iids": [
     "dsh::IID_IVideoWindow_"
    ],
+   "parent": "IDispatch",
    "slots": 46
   },
   "Unk": {
+   "alias": "IUnknownCom",
    "base": null,
    "cxx": "dsh::Unk",
    "family": "dsh",
    "header": "dshow_int.h",
    "hidden": true,
-   "iids": [],
+   "iids": [
+    "00000000-0000-0000-c000-000000000046"
+   ],
+   "parent": "IUnknownCom",
    "slots": 3
   }
  },
@@ -6348,10 +6448,17 @@
     {
      "byref": true,
      "ctype": "FilterInfo *",
-     "dir": "in",
+     "dir": "out",
      "kind": "buffer",
+     "members": [
+      {
+       "iface": "IFilterGraph",
+       "name": "graph"
+      }
+     ],
      "name": "a0",
-     "size": 4
+     "size": 4,
+     "struct": "FilterInfo"
     }
    ],
    "ret": "HR",
@@ -6549,10 +6656,17 @@
     {
      "byref": true,
      "ctype": "PinInfo *",
-     "dir": "in",
+     "dir": "out",
      "kind": "buffer",
+     "members": [
+      {
+       "iface": "IBaseFilter",
+       "name": "filter"
+      }
+     ],
      "name": "a0",
-     "size": 4
+     "size": 4,
+     "struct": "PinInfo"
     }
    ],
    "ret": "HR",
@@ -13146,7 +13260,7 @@
      "byref": false,
      "ctype": "Unk *",
      "dir": "in",
-     "iface": "IUnknownCom",
+     "iface": "Unk",
      "kind": "giface",
      "name": "a0",
      "size": 4

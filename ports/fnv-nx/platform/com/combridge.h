@@ -38,7 +38,9 @@ struct Iface {
     unsigned nslots;
     unsigned keyoff;            /* index of slot 0 in Tables::keys */
     int base;                   /* the interface this one derives from (an `IBaseFilter` pointer is an `IMediaFilter`), -1: none */
-    bool hidden;                /* a C++ base class of an interface family that has no key table of its own (dsh::Unk) */
+    bool hidden;                /* has no key table and no rows: dsh::Unk, the DirectShow spelling of IUnknown (its proxy exists) */
+    int alias;                  /* an interface a pointer of which is also a pointer of this one (Unk: IUnknownCom), -1: none */
+    unsigned family;            /* 1: GUID-typed IID arguments (DirectSound, DirectInput), 2: raw 16-byte IIDs (DirectShow) */
     const char *const *names;   /* the method names by slot */
     const void *const *thunks;  /* nxb_<Interface>_<Method> by slot (the native entry the key stands for) */
     void *(*make_proxy)(ProxyRec *);
@@ -87,7 +89,9 @@ void *from_game(const void *gp, unsigned iface);   /* a borrowed argument */
 void *adopt_game(void *gp, unsigned iface);
 void face_ref(Face *f);
 void face_unref(Face *f);                        /* one game reference less (the object's own Release is the caller's) */
-int iface_for_iid(const uint8_t canon[16]);      /* -1: not an interface of the spec */
+/* -1: not an interface of the spec. IUnknown has one entry per family (the C++ class of the object differs): the entry of `family`
+ * wins, family 0 (a creation function: no object yet) takes the first. */
+int iface_for_iid(const uint8_t canon[16], unsigned family = 0);
 bool iface_is(unsigned have, unsigned want);     /* have == want or derives from it */
 
 /* observers (tests): the faces and proxies the game / the platform holds a reference through */
@@ -97,7 +101,7 @@ unsigned live_proxies();
 /* the platform calls a proxy's IUnknown */
 unsigned long px_addref(ProxyRec *r);
 unsigned long px_release(ProxyRec *r);
-int32_t px_qi(ProxyRec *r, const uint8_t canon[16], const void *riid, void **out);
+int32_t px_qi(ProxyRec *r, const uint8_t canon[16], const void *riid, void **out, unsigned family);
 
 /* words of the x86 stack -> a value, by the C++ type (class closing: the type decides, no list) */
 template <class T> inline T word(uintptr_t w)

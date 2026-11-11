@@ -141,16 +141,21 @@ unsigned init()
 bool iface_is(unsigned have, unsigned want)
 {
     for (int i = (int)have; i >= 0; i = g_tables.ifaces[i].base)
-        if ((unsigned)i == want) return true;
+        if ((unsigned)i == want || g_tables.ifaces[want].alias == i) return true;
     return false;
 }
 
-int iface_for_iid(const uint8_t canon[16])
+int iface_for_iid(const uint8_t canon[16], unsigned family)
 {
     init();
-    for (unsigned i = 0; i < g_tables.niid; i++)
-        if (!memcmp(g_tables.iids[i].bytes, canon, 16)) return (int)g_tables.iids[i].iface;
-    return -1;
+    int any = -1;
+    for (unsigned i = 0; i < g_tables.niid; i++) {
+        if (memcmp(g_tables.iids[i].bytes, canon, 16)) continue;
+        unsigned f = g_tables.iids[i].iface;
+        if (family && g_tables.ifaces[f].family == family) return (int)f;
+        if (any < 0) any = (int)f;
+    }
+    return any;
 }
 
 Face *face_from(const void *gp)
@@ -262,11 +267,11 @@ unsigned long px_release(ProxyRec *r)
     if (last) game_release(r->gp);
     return (unsigned long)n;
 }
-int32_t px_qi(ProxyRec *r, const uint8_t canon[16], const void *riid, void **out)
+int32_t px_qi(ProxyRec *r, const uint8_t canon[16], const void *riid, void **out, unsigned family)
 {
     if (!out) return (int32_t)0x80004003;   /* E_POINTER */
     *out = nullptr;
-    int ix = iface_for_iid(canon);
+    int ix = iface_for_iid(canon, family);
     if (ix < 0) return (int32_t)0x80004002;   /* E_NOINTERFACE: the platform consumes only the interfaces of its spec */
     int32_t hr = fnvnx_guest_com_call<int32_t>(r->gp, 0, riid, (void **)out);
     if (hr >= 0 && *out) {

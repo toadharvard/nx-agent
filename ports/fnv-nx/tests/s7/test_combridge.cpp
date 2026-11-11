@@ -8,6 +8,7 @@
 #include <dinput.h>
 #include <dsound.h>
 #include "fnvnx_win32_ext.h"
+#define DSH_IMPL
 #include "../../platform/audio/dshow_int.h"
 #include "../../platform/com/combridge.h"
 #include "../s4/host_boundary.h"
@@ -423,6 +424,31 @@ TEST(cb_dshow_game_filter)
     CHECK_EQ(nxcom::live_faces(), 1u);   /* the graph (the face lent to JoinFilterGraph carries no reference) */
     /* the proxies are one per (game object, interface), alive while the graph holds the filter */
     CHECK(nxcom::live_proxies() >= 1);
+    /* IObjectWithSite: SetSite takes an IUnknown. A game object is held through its proxy (one reference of the game's object);
+       GetSite asks it, and the game gets its own pointer back, with the reference of the QueryInterface */
+    RawG ows = {0xFC4801A3, 0x2BA9, 0x11CF, {0xA2, 0x29, 0x00, 0xAA, 0x00, 0x3D, 0x73, 0x52}};
+    RawG ibf = {0x56a86895, 0x0ad4, 0x11ce, {0xb0, 0x3a, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
+    RawG ifg = {0x56a8689f, 0x0ad4, 0x11ce, {0xb0, 0x3a, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
+    W site = 0;
+    CHECK_EQ(gcall(graph, 0, {(W)&ows, (W)&site}), 0u);
+    CHECK(is_face_of(site, "IObjectWithSite"));
+    int r0 = gf.refs;
+    CHECK_EQ(gcall(site, 3, {(W)(dsh::IBaseFilter_ *)&gf}), 0u);
+    CHECK_EQ(gf.refs, r0 + 1);
+    W gs = 0;
+    CHECK_EQ(gcall(site, 4, {(W)&ibf, (W)&gs}), 0u);
+    CHECK_EQ(gs, (W)(dsh::IBaseFilter_ *)&gf);
+    CHECK_EQ(gf.refs, r0 + 2);
+    gf.Release();
+    /* a face of the platform's own, of ANY interface, is an IUnknown: unwrapped, not proxied; GetSite hands the face back */
+    CHECK_EQ(gcall(site, 3, {graph}), 0u);
+    CHECK_EQ(gf.refs, r0);   /* the old site's reference went back */
+    W gsite = 0;
+    CHECK_EQ(gcall(site, 4, {(W)&ifg, (W)&gsite}), 0u);
+    CHECK_EQ(gsite, gseen);   /* the IFilterGraph face of the graph: the same one JoinFilterGraph was lent */
+    gcall(gsite, 2);
+    CHECK_EQ(gcall(site, 3, {0}), 0u);
+    gcall(site, 2);
     /* RemoveFilter(slot 4) */
     unsigned before = recorded(&gf, 13);
     CHECK_EQ(gcall(graph, 4, {(W)(dsh::IBaseFilter_ *)&gf}), 0u);
@@ -437,6 +463,56 @@ TEST(cb_dshow_game_filter)
     gcall(gseen, 1);   /* the game keeps a reference of the graph through the face it was lent, and drops it */
     gcall(gseen, 2);
     CHECK_EQ(gcall(graph, 2), 0u);   /* the last one: the graph is gone */
+    CHECK_EQ(nxcom::live_faces(), 0u);
+}
+
+/* ---- DirectShow objects of the platform seen from the game: interfaces of one object, interface pointers inside structs */
+TEST(cb_dshow_platform_objects)
+{
+    dsh::BFilter *f = dsh::make_filter(dsh::CLSID_DSoundRender_);
+    CHECK(f != nullptr);
+    if (!f) return;
+    W bf = (W)nxcom::to_game(static_cast<dsh::IBaseFilter_ *>(f), ifx("IBaseFilter"));   /* the creation reference is the game's now */
+    CHECK(is_face_of(bf, "IBaseFilter"));
+    /* QueryInterface by a 16-byte IID: other interfaces of the object; IPersist is a prefix of the same pointer */
+    RawG ip = {0x0000010c, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
+    RawG imf = {0x56a86899, 0x0ad4, 0x11ce, {0xb0, 0x3a, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
+    RawG iclk = {0x56a86897, 0x0ad4, 0x11ce, {0xb0, 0x3a, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
+    RawG bogus = {0x12345678, 1, 2, {1, 2, 3, 4, 5, 6, 7, 8}};
+    W persist = 0, mf = 0, clk = 0, none = 0x42;
+    CHECK_EQ(gcall(bf, 0, {(W)&ip, (W)&persist}), 0u);
+    CHECK(is_face_of(persist, "IPersist"));
+    CHECK_EQ(gcall(bf, 0, {(W)&imf, (W)&mf}), 0u);
+    CHECK(is_face_of(mf, "IMediaFilter"));
+    CHECK_EQ(gcall(bf, 0, {(W)&iclk, (W)&clk}), 0u);   /* the renderer is also the clock: the other base, another pointer */
+    CHECK(is_face_of(clk, "IReferenceClock"));
+    CHECK(nxcom::face_from((const void *)clk)->obj != nxcom::face_from((const void *)bf)->obj);
+    CHECK_EQ(gcall(bf, 0, {(W)&bogus, (W)&none}), 0x80004002u);
+    CHECK_EQ(none, 0u);
+    int64_t t = -1;
+    CHECK_EQ(gcall(clk, 3, {(W)&t}), 0u);   /* IReferenceClock::GetTime(LL *) */
+    CHECK(t >= 0);
+    /* EnumPins -> an enumerator of pins; Next hands out faces of IPin; QueryPinInfo puts the filter's face in the struct */
+    W en = 0;
+    CHECK_EQ(gcall(bf, 10, {(W)&en}), 0u);
+    CHECK(is_face_of(en, "IEnumPins"));
+    W pin = 0;
+    uint32_t got = 0;
+    CHECK_EQ(gcall(en, 3, {1, (W)&pin, (W)&got}), 0u);
+    CHECK_EQ(got, 1u);
+    CHECK(is_face_of(pin, "IPin"));
+    dsh::PinInfo pi;
+    memset(&pi, 0x5a, sizeof pi);
+    CHECK_EQ(gcall(pin, 8, {(W)&pi}), 0u);
+    CHECK_EQ((W)pi.filter, bf);   /* the same interface of the same object: the same face */
+    dsh::FilterInfo fi;
+    memset(&fi, 0x5a, sizeof fi);
+    CHECK_EQ(gcall(bf, 12, {(W)&fi}), 0u);
+    CHECK(fi.graph == nullptr);   /* not in a graph */
+    /* releases: the filter's count is the object's: the game holds bf, mf, persist, pi.filter, clk(shared object? no: the same
+       object through another pointer) */
+    for (W p : {pin, en, (W)pi.filter, persist, mf, clk}) gcall(p, 2);
+    CHECK_EQ(gcall(bf, 2), 0u);   /* the last reference: the filter is gone */
     CHECK_EQ(nxcom::live_faces(), 0u);
 }
 

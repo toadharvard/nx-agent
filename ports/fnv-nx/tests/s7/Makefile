@@ -28,7 +28,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: all test ilp32 qemu clean
+.PHONY: all test ilp32 qemu clean com-spec-check com-nocompile
 all: test
 
 # the imports whose documented result is one constant are generated from platform/manifest/env_const.tsv
@@ -75,7 +75,12 @@ $(FTLIB):
 $(OUT)/s7_tests: $(OBJS) $(FTLIB)
 	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
 
-test: $(OUT)/s7_tests
+# the spec is derived from the C++ declarations: it must be what the extractor writes now
+com-spec-check:
+	@mkdir -p $(OUT) && python3 -I $(P)/com/spec_extract.py $(OUT)/com_spec.check.json >/dev/null && cmp -s $(OUT)/com_spec.check.json $(P)/com/com_spec.json \
+		|| { echo "com_spec.json is not what platform/com/spec_extract.py derives from the headers (run it)"; exit 1; }
+
+test: com-spec-check $(OUT)/s7_tests
 	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
 
 # the same tests built static for AArch64 and run under qemu-aarch64
@@ -101,3 +106,15 @@ ilp32: $(ENVC_INC) $(COMOUT)
 
 clean:
 	rm -rf $(OUT) $(OUT)-a64
+
+# ---- the spec is checked against the declarations (not part of the default target): a spec whose argument type differs from the
+# header's must not compile (static_assert), and a spec item the generator has no rule for must stop it (exit 2)
+com-nocompile: $(COMOUT)
+	@d=$(OUT)/com-nocompile && rm -rf $$d && mkdir -p $$d && \
+	python3 -I $(P)/com/com_spec_mutate.py $(P)/com/com_spec.json $$d/type.json ctype LPDWORD && \
+	python3 -I $(P)/com/com_spec_mutate.py $(P)/com/com_spec.json $$d/kind.json kind weird && \
+	python3 -I $(P)/com/gen_combridge.py $$d/type.json $$d >/dev/null && \
+	if $(CXX) $(CXXFLAGS_) -DFNVNX_PLATFORM_BUILD -I$(P)/com -I$$d -fsyntax-only $$d/combridge.gen.cpp >$$d/type.log 2>&1; then echo "com-nocompile: a wrong argument type COMPILED"; exit 1; fi && \
+	grep -q "the spec and the declaration disagree" $$d/type.log && \
+	if python3 -I $(P)/com/gen_combridge.py $$d/kind.json $$d/k >/dev/null 2>&1; then echo "com-nocompile: an unknown kind did not stop the generator"; exit 1; fi && \
+	echo "com-nocompile: ok (a wrong type fails the build, an unknown kind stops the generator)"

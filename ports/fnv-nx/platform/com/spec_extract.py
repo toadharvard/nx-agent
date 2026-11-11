@@ -84,7 +84,7 @@ CXX2SPEC = {}
 for n, h, st, cxx, b, f, iid, al in IFACES:
     CXX2SPEC.setdefault(st.split(":")[0], n)
 CXX2SPEC["IEnum_"] = None
-CXX2SPEC["Unk"] = "IUnknownCom"   # a parameter `Unk *` is the game's IUnknown
+CXX2SPEC["Unk"] = "Unk"   # a parameter `Unk *` is the game's IUnknown, in DirectShow's spelling (raw 16-byte IIDs)
 CXX2SPEC["LPUNKNOWN"] = "IUnknownCom"
 CXX2SPEC["IUnknown"] = "IUnknownCom"
 CXX2SPEC["KsProperty"] = "IKsPropertySet"
@@ -110,8 +110,11 @@ ENUM_NEXT_NAMES = {}      # filled per interface below
 
 IID_LIT = {   # IIDs the C++ headers do not name as a constant
     "IUnknownCom": ["00000000-0000-0000-c000-000000000046"],
+    "Unk": ["00000000-0000-0000-c000-000000000046"],
     "IDirectInputDevice8A": ["5944e682-c92e-11cf-bfc7-444553540000", "57d7c6bc-2356-11d3-8e9d-00c04f6844ae"],   # IDirectInputDevice2A, 7A: prefixes of the 8A vtable
 }
+# the COM structs that carry interface pointers (MSDN: PIN_INFO.pFilter, FILTER_INFO.pGraph): member -> interface; the callee fills them
+STRUCT_IFACE = {"PinInfo": [("filter", "IBaseFilter")], "FilterInfo": [("graph", "IFilterGraph")]}
 FLOAT_T = {"float", "D3DVALUE", "FLOAT"}
 DOUBLE_T = {"double", "REFTIME", "DOUBLE"}
 INT64_T = {"LL", "int64_t", "LONGLONG", "ULONGLONG", "uint64_t", "REFERENCE_TIME", "long long"}
@@ -224,6 +227,8 @@ def classify(spec_if, mname, k, pname, ctype, iface_ov, family):
         p.update(kind="int64", byref=False, dir="in", size=8)
     elif stars or re.match(r"^(LP|P)[A-Z]", base) or "&" in t:
         p.update(kind="buffer", byref=True, dir="in", size=4)
+        if base in STRUCT_IFACE:   # a struct the callee fills that carries interface pointers (PIN_INFO, FILTER_INFO)
+            p.update(dir="out", struct=base, members=[{"name": m, "iface": i} for m, i in STRUCT_IFACE[base]])
     else:
         p.update(kind="value", byref=False, dir="in", size=4)
     if p["kind"] == "value" and re.match(r"^(ULONG|DWORD|UINT|uint\d+_t|unsigned.*|WORD|UINT_PTR|uintptr_t)$", base):
@@ -277,7 +282,9 @@ def main(out):
         ms = full(n)
         if n == "IUnknownCom":
             ms = own[n]
-        interfaces[n] = {"base": base, "cxx": cxx, "family": fam, "iids": ([iid] if iid else []) + IID_LIT.get(n, []), "hidden": n == "Unk", "slots": len(ms), "header": h}
+        interfaces[n] = {"base": base, "cxx": cxx, "family": fam, "iids": ([iid] if iid else []) + IID_LIT.get(n, []), "hidden": n == "Unk", "alias": "IUnknownCom" if n == "Unk" else None,
+                         # the interface a pointer of this one may be used as (every interface is an IUnknown)
+                         "parent": base if base else ("IUnknownCom" if n != "IUnknownCom" else None), "slots": len(ms), "header": h}
         for slot, (mname, ret, ps) in enumerate(ms):
             ov = OVERLAY.get((n, mname), {})
             params = []
