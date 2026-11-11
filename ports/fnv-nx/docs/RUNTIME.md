@@ -192,8 +192,14 @@ Not here: d3d9, d3dx9_38 and binkw32 (S6), dinput8, dsound, xinput1_3 and vorbis
 * **Windows**: one process-wide message queue; `SendMessage` calls the window procedure; `FindWindowA` only sees
   windows the game created (so the single-instance check passes); `MessageBoxA` logs and returns the default
   button; display size from `fnvnx_set_display_size` (S6), keys and cursor from `fnvnx_set_key_state` /
-  `fnvnx_set_cursor_pos` / `fnvnx_post_message` (S7). Registry: in memory, seeded with
-  `HKLM\SOFTWARE\Bethesda Softworks\FalloutNV\Installed Path = C:\FalloutNV\`.
+  `fnvnx_set_cursor_pos` / `fnvnx_post_message` (S7). Registry: a persistent hive file
+  (`C:\FalloutNV\registry.hiv`, `registry.cpp`). The hive holds exactly the keys the exe and the modules read, found
+  statically from their call sites (`platform/manifest/regsites.py`, run by `pemanifest.py`: root, key and value name by
+  data-flow, wrapper arguments from the callers; the table is the private `regsites.tsv`). Values come from the declared
+  machine, `platform/manifest/declared_registry.tsv` (`Installed Path` = the game directory, `W32_GAME_DIR` + `\`); on the
+  first boot, when the hive does not exist, `boot.cpp` makes it from those rows (`registry_seed.cpp`, rows generated into
+  the build by `gen_registry_seed.py`, which refuses a declared row that no static read site reads). A key with no declared
+  value is absent, ERROR_FILE_NOT_FOUND. No installer script and no seed file.
 * **Wide characters**: the game's `WCHAR`/`wchar_t` is 16-bit (`-fshort-wchar`); the runtime is built the same way
   and never passes game wide strings to libc wide functions.
 * **CRT `rand`** must be MSVC's (the engine divides by 32767); `clock` counts milliseconds.

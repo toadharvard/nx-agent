@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <string>
+#include "../../platform/win32/w32.h"
 
 extern "C" void fnvnx_registry_set_path(const char *host_path);
 extern "C" void fnvnx_registry_reset_for_test(void);
@@ -461,4 +462,66 @@ TEST(registry_set_path_flushes_and_reloads)
     CHECK_EQ(RegQueryValueExA(x, "n", NULL, NULL, (LPBYTE)&out, &len), ERROR_SUCCESS);
     CHECK_EQ(out, 42);
     RegCloseKey(x);
+}
+
+/* ---- the first boot's seed (registry_seed.cpp): the declared rows of platform/manifest/declared_registry.tsv */
+extern "C" void fnvnx_registry_first_run(void);
+extern "C" int fnvnx_registry_hive_present(void);
+
+TEST(registry_first_run_declared_value)
+{
+    reg_fresh("seed1.hiv");
+    CHECK(!fnvnx_registry_hive_present());
+    fnvnx_registry_first_run();
+    CHECK(fnvnx_registry_hive_present());
+    fnvnx_registry_reset_for_test();   /* the values below come from the hive file, not from memory */
+    HKEY k = NULL;
+    CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Bethesda Softworks\\FalloutNV", 0, T_KEY_READ, &k), ERROR_SUCCESS);
+    DWORD type = 0, len = 0;
+    CHECK_EQ(RegQueryValueExA(k, "Installed Path", NULL, &type, NULL, &len), ERROR_SUCCESS);   /* NULL data: size only */
+    CHECK_EQ(type, REG_SZ);
+    CHECK_EQ(len, 14);                                   /* the game directory with its backslash, and the NUL */
+    char small[3] = { 'x', 'x', 'x' };
+    len = 3;
+    CHECK_EQ(RegQueryValueExA(k, "installed path", NULL, &type, (LPBYTE)small, &len), ERROR_MORE_DATA);   /* case-insensitive */
+    CHECK_EQ(len, 14);
+    char buf[64];
+    len = sizeof buf;
+    CHECK_EQ(RegQueryValueExA(k, "Installed Path", NULL, &type, (LPBYTE)buf, &len), ERROR_SUCCESS);
+    CHECK_EQ(len, 14);
+    CHECK_STR(buf, (std::string(W32_GAME_DIR) + "\\").c_str());
+    /* a value nothing declared is absent */
+    len = sizeof buf;
+    CHECK_EQ(RegQueryValueExA(k, "Undeclared", NULL, &type, (LPBYTE)buf, &len), ERROR_FILE_NOT_FOUND);
+    RegCloseKey(k);
+}
+
+TEST(registry_undeclared_key_is_absent)
+{
+    reg_fresh("seed2.hiv");
+    fnvnx_registry_first_run();
+    fnvnx_registry_reset_for_test();
+    HKEY k = NULL;
+    CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Direct3D", 0, T_KEY_READ, &k), ERROR_FILE_NOT_FOUND);
+    CHECK_EQ(RegOpenKeyExA(HKEY_CURRENT_USER, "Control Panel\\Mouse", 0, T_KEY_READ, &k), ERROR_FILE_NOT_FOUND);
+    CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Bethesda Softworks\\Other", 0, T_KEY_READ, &k), ERROR_FILE_NOT_FOUND);
+}
+
+TEST(registry_first_run_keeps_an_existing_hive)
+{
+    reg_fresh("seed3.hiv");
+    fnvnx_registry_first_run();
+    HKEY k = NULL;
+    CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Bethesda Softworks\\FalloutNV", 0, T_KEY_ALL, &k), ERROR_SUCCESS);
+    const char mine[] = "D:\\Mine\\";
+    CHECK_EQ(RegSetValueExA(k, "Installed Path", 0, REG_SZ, (const BYTE *)mine, sizeof mine), ERROR_SUCCESS);
+    CHECK_EQ(RegCloseKey(k), ERROR_SUCCESS);
+    fnvnx_registry_reset_for_test();
+    fnvnx_registry_first_run();   /* the hive exists: nothing is applied over a change */
+    CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Bethesda Softworks\\FalloutNV", 0, T_KEY_READ, &k), ERROR_SUCCESS);
+    char buf[64];
+    DWORD type = 0, len = sizeof buf;
+    CHECK_EQ(RegQueryValueExA(k, "Installed Path", NULL, &type, (LPBYTE)buf, &len), ERROR_SUCCESS);
+    CHECK_STR(buf, "D:\\Mine\\");
+    RegCloseKey(k);
 }

@@ -32,6 +32,7 @@ Output (exe-derived; keep out of the public repository):
   imports.tsv   module, dll, name|#ordinal, slot_va, code_refs, data_refs
   closure.tsv   module, role (root|static|absent), imports, exports
   dynsites.tsv  module, site_va, api, operand, hmod
+  regsites.tsv  module, site, api, root, subkey, value, status, reason  (registry call sites, see regsites.py)
 """
 import bisect, collections, os, struct, sys
 import capstone
@@ -349,6 +350,9 @@ def main(d, root, out, contract="", dynamic=""):
             for site, nm, op, hm in sorted(set(m.dynsites(code))):
                 fd.write("%s\t0x%08x\t%s\t%s\t%s\n" % (n, site, nm, op, hm))
             fc.write("%s\t%s\t%d\t%d\n" % (n, "root" if n == root.lower() else "dynamic" if n in dyn else "static", len(m.imports), m.exports))
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import regsites
+        regsites.write(mods, out)
         for n in sorted(absent):
             fc.write("%s\t%s\t-\t-\n" % (n, "contract-only" if n in contract else "absent"))
         for n in sorted(set(files) - set(mods)):
