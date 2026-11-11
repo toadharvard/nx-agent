@@ -280,6 +280,16 @@ void nxdk_target_bind(DkCmdBuf cmd, const NxDkSub* dst);
 /* ---- dk_scale.c: point-filtered scaling by rule (source texel floor((d + 0.5) * sw / dw); reference gl4_scale.c), internal DKSH programs */
 uint32_t nxdk_scale_init(void);                   /* 0 = ok; called by nxdk_stream_init */
 void nxdk_scale_shutdown(void);
+/* ---- dk_msres.c: multisample resolve by shader (texelFetch on the multisampled source), internal DKSH programs; fragment UBO slot 15 and texture slot 31 */
+#define NXDK_HAVE_MSRES 1
+enum { NXDK_MSRES_AVG = 0, NXDK_MSRES_S0_DEPTH = 1, NXDK_MSRES_S0_STENCIL = 2 };
+/* layer `layer` of the 2/4/8-sample 2D image src into the single-sample dst of the same format and size; 0 = recorded, 1 = one nxdk_err */
+uint32_t nxdk_ms_resolve(const NxDkImage* src, uint32_t layer, const NxDkImage* dst, uint32_t mode);
+uint32_t nxdk_msres_init(void);                   /* 0 = ok; called by nxdk_stream_init after nxdk_scale_init */
+void nxdk_msres_shutdown(void);
+/* dk_stream.c: nxdk_img_storage for a temporary image; dk_stream.c releases it after the wait of the SUBMIT that covers every command recorded up to
+ * that SUBMIT (and at nxdk_stream_shutdown); the caller never releases it; 0 = ok, 1 = one nxdk_err */
+uint32_t nxdk_tmp_image(NxDkImage* im);
 void nxdk_query_shutdown(void);    /* dk_query.c: frees the query tables; nxdk_destroy calls it while the device lives */
 void nxdk_scale_point(DkCmdBuf cmd, const NxDkSub* s, const NxDkSub* d, const uint16_t* ramp);   /* ramp: 3 x 256 u16 or NULL */
 /* ---- dk_present.c: the compose passes of PRESENT: writes the source rect of `src` into the destination rect of nxdk.front (gamma ramp: 3 x 256 u16 or

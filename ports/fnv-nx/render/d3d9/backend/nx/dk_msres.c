@@ -32,12 +32,6 @@
 #include "dk_fmt.h"
 #include "dk_msres_dksh.h"
 
-#ifndef NXDK_HAVE_MSRES   /* dk.h defines this once it carries the CONTRACT-REQUEST above */
-enum { NXDK_MSRES_AVG = 0, NXDK_MSRES_S0_DEPTH = 1, NXDK_MSRES_S0_STENCIL = 2 };
-uint32_t nxdk_ms_resolve(const NxDkImage* src, uint32_t layer, const NxDkImage* dst, uint32_t mode);
-uint32_t nxdk_msres_init(void);
-void nxdk_msres_shutdown(void);
-#endif
 
 enum { MR_UBO = 15, MR_TEX = 31, MR_RANGE = 256, MR_OFF_IMG = 2048, MR_OFF_SMP = 2080, MR_STAGE = 4096 };
 #define MR_CTL_MAX 512u
