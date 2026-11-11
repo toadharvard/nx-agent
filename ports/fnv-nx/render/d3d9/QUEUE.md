@@ -148,3 +148,14 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 - Calls into the guest: only AddRef / Release of application IUnknown private data, through `fnvnx_guest_invoke` (`dev/app_unk_guest.cpp`). L3a's conditions: guest thread only; no lock held across the call.
 - OPEN (no rule yet): the guest may leave `fnvnx_guest_invoke` by a non-local unwind, native frames are then dropped. In `NxObj::setPrivateData` the entry list stays consistent, but the entry allocated before the AddRef call leaks; in object destruction the remaining entries are not released.
 - Owner order relayed by the orchestrator: zero stubs in the tree, gate `nostub` (L4) at absolute 0 for merges into clean. First item when L4's table arrives: remove every stub / no-op / trap path in L6 directories so that absence is a build error; report before -> after. Known candidates: old null device and skip-draw paths, `abort()` on allocation failure in `nxd3d_alloc`.
+
+## B2a accepted 2026-11-11 (GL 4.5 backend v4, base + images)
+
+`render/d3d9/backend/gl4_*` 1580 lines, test `tests/l6/gl4/test_gl4.py` (lead's run): a 2062, b 35, c 380, d 53, e 50, f 18 checks, 0 failed; 7/7 mutations caught; NxFormat 34/34 in 2D. A stream is checked whole before anything executes; an opcode outside the build's set = NXGPU_BAD_CALL. Without `-DNXGL4_B2B_PENDING` the build fails a static assert until B2b lands.
+
+ABI points the lead must close in nxgpu4.h (no rule yet; the backend refuses, it does not guess):
+1. point filter on an exact 2:1 downscale (GenMips point, Blit point): which source texel; llvmpipe is inconsistent. Needs a stated rule + texelFetch path.
+2. depth-stencil Blit between different formats; scaled depth Blit exactness (float path, Z24 +-1 LSB); BCn Blit with scaling / conversion; multisampled Blit destination.
+3. 3D BC4/BC5 and 8x MSAA are not creatable on llvmpipe GL 4.5: the env table must not promise them (check env_*.tsv against this).
+4. X channels (BGRX8, RGBX8 read back 0xFF); 3D linear GenMips uses the GL-defined filter.
+5. 3D box addressing in ImageUpdate / image_read (z/d = slices, layer 0; slice pitch = rows * rowPitch) and native depth byte layouts are now written in gl4_fmt.c: copy into nxgpu4.h.
