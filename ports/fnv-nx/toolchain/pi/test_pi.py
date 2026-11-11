@@ -118,6 +118,12 @@ def main():
         ('_ZL2z8i', 'inline'): ['ok', '', ''],
         ('_ZL3ip9PFiiEi', 'inline'): ['ok', '', ''],
         ('_ZL2r7i', 'inline'): ['ok', '', ''],
+        # INL4: records under bodies inside removed code are consumed by the callgraph's own removal facts
+        ('_Z4inl4P2Ta', ''): ['uninit-mem', '_ZN2MaC4Ev,_ZN2RaC4Ev,_ZN2TaC4Ev,_ZN2VaC4Ev', '2Ta,2Va'],
+        ('_ZN2TaC2Ev', 'inline'): ['ok', '', '2Ta'],
+        ('_ZN2MaC2Ev', 'inline'): ['ok', '', '2Ma'],
+        ('_ZN2RaC2Ev', 'inline'): ['ok', '', '2Ra'],
+        ('_ZN2VaC2Ev', 'inline'): ['ok', '', '2Va'],
     }
     fails = 0
     for k, w in want.items():

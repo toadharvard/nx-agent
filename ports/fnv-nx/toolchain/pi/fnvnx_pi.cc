@@ -125,6 +125,9 @@ static std::map<std::string, std::set<std::string> > inl_walk;
    from it). inl_dead: functions whose node the callgraph removed as a node of its own (inlined_to == NULL) - the
    removal of a function whose every caller took its body, or of one nobody reaches. */
 static std::set<std::string> inl_used, inl_dead;
+/* inl_gone: bodies that were inlined into a root function the callgraph had already removed (see inline_clone_removed):
+   their copy is in no emitted code. */
+static std::set<std::string> inl_gone;
 
 static void note_inlined(tree into, tree callee)
 {
@@ -133,9 +136,19 @@ static void note_inlined(tree into, tree callee)
   inl_walk[asmname(into)].insert(asmname(callee));
 }
 
+/* What the hook may read (GCC 13 cgraph_node::remove, cgraph.cc: it calls the removal hooks first, then
+   memset()s the node to zero): the node being removed is intact (decl, inlined_to). Its inlined_to node, however,
+   may have been removed already - remove_unreachable_nodes (ipa.cc) deletes unreachable nodes in list order, an
+   inline clone after the function it was inlined into - and a removed node is all zero, decl == NULL. That
+   receiver was removed as a node of its own (its own hook call put it in inl_dead), so the copy of n inside it is in no
+   emitted code: n goes to inl_gone, the receiver is never dereferenced. */
 static void inline_clone_removed(cgraph_node *n, void *)
 {
-  if (n->inlined_to) note_inlined(n->inlined_to->decl, n->decl);
+  if (!n->decl) return;
+  if (n->inlined_to) {
+    if (n->inlined_to->decl) note_inlined(n->inlined_to->decl, n->decl);
+    else if (DECL_ASSEMBLER_NAME_SET_P(n->decl)) inl_gone.insert(asmname(n->decl));
+  }
   else if (DECL_ASSEMBLER_NAME_SET_P(n->decl)) inl_dead.insert(asmname(n->decl));
 }
 
@@ -553,14 +566,32 @@ static void ipa_start(void *, void *)
 }
 
 /* A record (receiver R, callee C) that no written row read means C's body may sit in emitted code under a name this
-   file does not list. Decided by callgraph facts: R is dead when its node was removed as a node of its own (inl_dead)
-   and no row was written for it (it is not in inl_used and, being a receiver of a record no chain reached, is neither
-   emitted nor inlined into an emitted function: both would have put it in a chain). Code inlined into a dead R is in
-   no emitted code. Anything else is an error. */
+   file does not list. Decided by callgraph facts. Every node that holds a body ends one of three ways: expanded
+   (its row is written and inlined_book() read its record: inl_used), removed as a node of its own (inl_dead), or
+   inlined into a root function X (the hook recorded (X, R), so X's chain reaches R: inl_used when X is written).
+   A record left over therefore belongs to a body whose every copy sits inside functions that were removed as nodes of
+   their own: a dead X, or a body inlined into a dead X, at any depth (the in-place inline of a function into its
+   last caller keeps the receiver's name for the inlinee records while the function itself is gone with its caller).
+   `inside` is that closure: from each dead X or inl_gone body, its callees by their own names (inl_walk) and by origin names
+   (inl_direct), transitively. A record whose receiver is used, dead or inside dead code is consumed or in no emitted
+   code. Anything else is an error. */
 static void check_records()
 {
+  std::set<std::string> inside(inl_dead.begin(), inl_dead.end());
+  inside.insert(inl_gone.begin(), inl_gone.end());
+  std::vector<std::string> work(inside.begin(), inside.end());
+  while (!work.empty()) {
+    std::string f = work.back(); work.pop_back();
+    for (int k = 0; k < 2; k++) {
+      std::map<std::string, std::set<std::string> > &mp = k ? inl_walk : inl_direct;
+      std::map<std::string, std::set<std::string> >::iterator m = mp.find(f);
+      if (m == mp.end()) continue;
+      for (std::set<std::string>::iterator c = m->second.begin(); c != m->second.end(); ++c)
+        if (inside.insert(*c).second) work.push_back(*c);
+    }
+  }
   for (std::map<std::string, std::set<std::string> >::iterator m = inl_direct.begin(); m != inl_direct.end(); ++m) {
-    if (inl_used.count(m->first) || inl_dead.count(m->first)) continue;
+    if (inl_used.count(m->first) || inside.count(m->first)) continue;
     for (std::set<std::string>::iterator c = m->second.begin(); c != m->second.end(); ++c)
       error("N3: %qs inlined into %qs, which reached no row and was not removed from the callgraph", c->c_str(), m->first.c_str());
   }

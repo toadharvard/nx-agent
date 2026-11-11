@@ -84,3 +84,11 @@ int f10(int a) { return h10(a); }
 AI int i11(int a) { return plain(a + 11); }
 struct Z { int z; Z(int a) : z(i11(a)) {} };
 int f11(int a) { Z z(a); return z.z; }
+// INL4: a receiver with no record of its own that reached no row (an implicit constructor chain inlined in place into a
+// constructor that is itself removed unused): its record is inside code the callgraph removed
+#define FI4 inline __attribute__((always_inline))
+struct Va { float x[4]; FI4 Va() {} };
+struct Ma { Va a, b, c; };
+struct Ra : Ma {};
+struct Ta { Ra r; Va t; FI4 Ta() {} };
+float inl4(Ta* p) { Ta l; return l.t.x[0] + p->t.x[1]; }
