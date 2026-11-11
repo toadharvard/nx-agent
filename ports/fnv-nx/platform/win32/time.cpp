@@ -129,63 +129,126 @@ static int days_in_month(int64_t y, unsigned m)
 
 static const int64_t FT_UNIX_EPOCH = 116444736000000000ll; /* 1970-01-01 in FILETIME units */
 
-static void ft_to_st(ULONGLONG ft, SYSTEMTIME *st)
+/* ---- FILETIME <-> SYSTEMTIME: Wine 9.0's integer arithmetic, line for line (it is the declared machine's behaviour
+ * for every input, in or out of the documented domain). TIME_FIELDS members are CSHORT (int16): a SYSTEMTIME field
+ * above 32767 is negative there, which the range checks reject.
+ * wine-9.0:dlls/ntdll/time.c:RtlTimeToTimeFields, wine-9.0:dlls/ntdll/time.c:RtlTimeFieldsToTime. */
+struct tfields { int16_t Year, Month, Day, Hour, Minute, Second, Milliseconds, Weekday; };
+
+/* wine-9.0:dlls/ntdll/time.c:RtlTimeToTimeFields (C truncating division, as there; the caller rejects a negative time) */
+static void time_to_fields(int64_t t, tfields *tf)
 {
-    int64_t t = (int64_t)ft - FT_UNIX_EPOCH;          /* 100 ns since 1970 */
-    int64_t secs = t >= 0 ? t / 10000000 : -((-t + 9999999) / 10000000);
-    int64_t rem = t - secs * 10000000;
-    int64_t days = secs >= 0 ? secs / 86400 : -((-secs + 86399) / 86400);
-    int64_t sod = secs - days * 86400;
-    int y;
-    unsigned m, d;
-    civil_from_days(days, &y, &m, &d);
-    st->wYear = (WORD)y;
-    st->wMonth = (WORD)m;
-    st->wDay = (WORD)d;
-    st->wDayOfWeek = (WORD)((days % 7 + 7 + 4) % 7); /* 1970-01-01 was a Thursday */
-    st->wHour = (WORD)(sod / 3600);
-    st->wMinute = (WORD)(sod / 60 % 60);
-    st->wSecond = (WORD)(sod % 60);
-    st->wMilliseconds = (WORD)(rem / 10000);
+    tf->Milliseconds = (int16_t)((t % 10000000) / 10000);
+    int64_t Time = t / 10000000;
+    int64_t Days = Time / 86400;
+    int SecondsInDay = (int)(Time % 86400);
+    tf->Hour = (int16_t)(SecondsInDay / 3600);
+    SecondsInDay %= 3600;
+    tf->Minute = (int16_t)(SecondsInDay / 60);
+    tf->Second = (int16_t)(SecondsInDay % 60);
+    tf->Weekday = (int16_t)((1 + Days) % 7);
+    int64_t cleaps = (3 * ((4 * Days + 1227) / (365 * 400 + 97)) + 3) / 4;
+    Days += 28188 + cleaps;
+    int64_t years = (20 * Days - 2442) / (5 * (365 * 4 + 1));
+    int64_t yearday = Days - (years * (365 * 4 + 1)) / 4;
+    int64_t months = (64 * yearday) / 1959;
+    if (months < 14) {
+        tf->Month = (int16_t)(months - 1);
+        tf->Year = (int16_t)(years + 1524);
+    } else {
+        tf->Month = (int16_t)(months - 13);
+        tf->Year = (int16_t)(years + 1525);
+    }
+    tf->Day = (int16_t)(yearday - (1959 * months) / 64);
 }
 
-extern "C" BOOL FileTimeToSystemTime(const FILETIME *ft, LPSYSTEMTIME st)
+static void fields_to_st(const tfields *tf, SYSTEMTIME *st)
 {
-    ULONGLONG v = w32_ft64(ft);
-    if (v >> 63) {
+    st->wYear = (WORD)tf->Year;
+    st->wMonth = (WORD)tf->Month;
+    st->wDay = (WORD)tf->Day;
+    st->wHour = (WORD)tf->Hour;
+    st->wMinute = (WORD)tf->Minute;
+    st->wSecond = (WORD)tf->Second;
+    st->wMilliseconds = (WORD)tf->Milliseconds;
+    st->wDayOfWeek = (WORD)tf->Weekday;
+}
+
+/* wine-9.0:dlls/kernelbase/file.c:FileTimeToSystemTime: a negative FILETIME is ERROR_INVALID_PARAMETER */
+static BOOL ft_to_st(int64_t ft, SYSTEMTIME *st)
+{
+    if (ft < 0) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    ft_to_st(v, st);
+    tfields tf;
+    time_to_fields(ft, &tf);
+    fields_to_st(&tf, st);
     return TRUE;
 }
 
+/* wine-9.0:dlls/ntdll/time.c:RtlTimeFieldsToTime, with two documented-Windows corrections (Win32 as documented, ASSUMPTIONS
+ * 3): Wine indexes MonthLengths[Month == 2 || IsLeapYear(Year)], which gives February 29 days in every year, and accepts years
+ * up to 32767 with the 64-bit tick count wrapping; Windows and the SYSTEMTIME documentation reject both (the domain is
+ * 1601..30827, February 29 only in a leap year), so they return FALSE + ERROR_INVALID_PARAMETER here. */
+static bool st_to_time(const SYSTEMTIME *st, int64_t *out)
+{
+    static const int MonthLengths[2][12] = {
+        { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 },
+        { 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 } };
+    int16_t Year = (int16_t)st->wYear, Month = (int16_t)st->wMonth, Day = (int16_t)st->wDay, Hour = (int16_t)st->wHour,
+            Minute = (int16_t)st->wMinute, Second = (int16_t)st->wSecond, Ms = (int16_t)st->wMilliseconds;
+    bool leap = Year % 4 == 0 && (Year % 100 != 0 || Year % 400 == 0);
+    if (Ms < 0 || Ms > 999 || Second < 0 || Second > 59 || Minute < 0 || Minute > 59 || Hour < 0 || Hour > 23 ||
+        Month < 1 || Month > 12 || Day < 1 || Day > MonthLengths[Month == 2 && leap][Month - 1] || Year < 1601 || Year > 30827)
+        return false;
+    int month, year;
+    if (Month < 3) {
+        month = Month + 13;
+        year = Year - 1;
+    } else {
+        month = Month + 1;
+        year = Year;
+    }
+    int cleaps = (3 * (year / 100) + 3) / 4;
+    int day = (36525 * year) / 100 - cleaps + (1959 * month) / 64 + Day - 584817;
+    uint64_t t = (((((uint64_t)(int64_t)day * 24 + Hour) * 60 + Minute) * 60 + Second) * 1000 + Ms) * 10000;
+    *out = (int64_t)t;
+    return true;
+}
+
+/* wine-9.0:dlls/kernelbase/file.c:SystemTimeToFileTime */
 extern "C" BOOL SystemTimeToFileTime(const SYSTEMTIME *st, LPFILETIME ft)
 {
-    if (st->wMonth < 1 || st->wMonth > 12 || st->wDay < 1 || st->wHour > 23 ||
-        st->wMinute > 59 || st->wSecond > 59 || st->wMilliseconds > 999 || st->wYear < 1601 || st->wYear > 30827 ||
-        st->wDay > days_in_month(st->wYear, st->wMonth)) {
+    int64_t t;
+    if (!st_to_time(st, &t)) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    int64_t days = days_from_civil(st->wYear, st->wMonth, st->wDay);
-    int64_t t = ((days * 86400 + st->wHour * 3600 + st->wMinute * 60 + st->wSecond) * 1000 + st->wMilliseconds) * 10000;
-    w32_set_ft(ft, (ULONGLONG)(t + FT_UNIX_EPOCH));
+    w32_set_ft(ft, (ULONGLONG)t);
     return TRUE;
 }
 
+extern "C" BOOL FileTimeToSystemTime(const FILETIME *ft, LPSYSTEMTIME st) { return ft_to_st((int64_t)w32_ft64(ft), st); }
+
+/* wine-9.0:dlls/kernelbase/file.c:GetSystemTimeAsFileTime */
 extern "C" void GetSystemTimeAsFileTime(LPFILETIME ft) { w32_set_ft(ft, (ULONGLONG)clk_read_filetime()); }
 
-extern "C" void GetSystemTime(LPSYSTEMTIME st) { ft_to_st((ULONGLONG)clk_read_filetime(), st); }
+/* wine-9.0:dlls/kernelbase/file.c:GetSystemTime (the result of FileTimeToSystemTime is not used there) */
+extern "C" void GetSystemTime(LPSYSTEMTIME st) { ft_to_st(clk_read_filetime(), st); }
 
-extern "C" void GetLocalTime(LPSYSTEMTIME st)
-{
-    ft_to_st((ULONGLONG)(clk_read_filetime() + (int64_t)clk_tz_offset_minutes() * 600000000ll), st);
-}
+/* the local time of a UTC FILETIME: wine-9.0:dlls/ntdll/time.c:RtlSystemTimeToLocalTime = utc - TimeZoneBias, the
+ * bias of the declared machine's zone now (TZ_AT through clk_tz_offset_minutes: east positive, so minus the bias is
+ * plus the offset); 64-bit wrapping */
+static int64_t ft_utc_to_local(int64_t utc) { return (int64_t)((uint64_t)utc + (uint64_t)((int64_t)clk_tz_offset_minutes() * 600000000ll)); }
 
+/* wine-9.0:dlls/kernelbase/file.c:GetLocalTime */
+extern "C" void GetLocalTime(LPSYSTEMTIME st) { ft_to_st(ft_utc_to_local(clk_read_filetime()), st); }
+
+/* wine-9.0:dlls/kernelbase/file.c:FileTimeToLocalFileTime (always TRUE: RtlSystemTimeToLocalTime is STATUS_SUCCESS) */
 extern "C" BOOL FileTimeToLocalFileTime(const FILETIME *in, LPFILETIME out)
 {
-    w32_set_ft(out, w32_ft64(in) + (ULONGLONG)((int64_t)clk_tz_offset_minutes() * 600000000ll));
+    w32_set_ft(out, (ULONGLONG)ft_utc_to_local((int64_t)w32_ft64(in)));
     return TRUE;
 }
 
@@ -269,27 +332,105 @@ extern "C" DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION tz)
     return tz_is_dst(tz, (clk_peek_filetime() - FT_UNIX_EPOCH) / 10000000) ? 2 /* TIME_ZONE_ID_DAYLIGHT */ : 1 /* TIME_ZONE_ID_STANDARD */;
 }
 
+#ifndef TIME_ZONE_ID_STANDARD
+#define TIME_ZONE_ID_STANDARD 1
+#endif
+#ifndef TIME_ZONE_ID_DAYLIGHT
+#define TIME_ZONE_ID_DAYLIGHT 2
+#endif
+
+/* wine-9.0:dlls/kernelbase/locale.c:compare_tzdate */
+static int compare_tzdate(const tfields *tf, const SYSTEMTIME *compare)
+{
+    static const int month_lengths[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    int first, last, limit, dayinsecs;
+
+    if (tf->Month < (int)compare->wMonth) return -1;
+    if (tf->Month > (int)compare->wMonth) return 1;
+    if (!compare->wYear) {
+        first = (6 + compare->wDayOfWeek - tf->Weekday + tf->Day) % 7 + 1;
+        last = month_lengths[tf->Month - 1] + (tf->Month == 2 && (!(tf->Year % 4) && (tf->Year % 100 || !(tf->Year % 400))));
+        limit = first + 7 * (compare->wDay - 1);
+        if (limit > last) limit -= 7;
+    } else
+        limit = compare->wDay;
+    limit = ((limit * 24 + compare->wHour) * 60 + compare->wMinute) * 60;
+    dayinsecs = ((tf->Day * 24 + tf->Hour) * 60 + tf->Minute) * 60 + tf->Second;
+    return dayinsecs - limit;
+}
+
+/* wine-9.0:dlls/kernelbase/locale.c:get_timezone_id (is_local = FALSE: `time` is UTC) */
+static DWORD get_timezone_id(const TIME_ZONE_INFORMATION *info, int64_t time)
+{
+    int year;
+    bool before_standard_date, after_daylight_date;
+    int64_t t2;
+    tfields tf;
+
+    if (!info->DaylightDate.wMonth) return TIME_ZONE_ID_UNKNOWN;
+    if (info->StandardDate.wMonth == 0 ||
+        (info->StandardDate.wYear == 0 && (info->StandardDate.wDay < 1 || info->StandardDate.wDay > 5 ||
+                                           info->DaylightDate.wDay < 1 || info->DaylightDate.wDay > 5))) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0xFFFFFFFFu;   /* TIME_ZONE_ID_INVALID */
+    }
+    time = (int64_t)((uint64_t)time - (uint64_t)((int64_t)info->Bias * 600000000ll));
+    time_to_fields(time, &tf);
+    year = tf.Year;
+    t2 = (int64_t)((uint64_t)time - (uint64_t)((int64_t)info->DaylightBias * 600000000ll));
+    time_to_fields(t2, &tf);
+    if (tf.Year == year)
+        before_standard_date = compare_tzdate(&tf, &info->StandardDate) < 0;
+    else
+        before_standard_date = tf.Year < year;
+    t2 = (int64_t)((uint64_t)time - (uint64_t)((int64_t)info->StandardBias * 600000000ll));
+    time_to_fields(t2, &tf);
+    if (tf.Year == year)
+        after_daylight_date = compare_tzdate(&tf, &info->DaylightDate) >= 0;
+    else
+        after_daylight_date = tf.Year > year;
+    if (info->DaylightDate.wMonth < info->StandardDate.wMonth) {   /* Northern hemisphere */
+        if (before_standard_date && after_daylight_date) return TIME_ZONE_ID_DAYLIGHT;
+    } else if (before_standard_date || after_daylight_date)         /* Down south */
+        return TIME_ZONE_ID_DAYLIGHT;
+    return TIME_ZONE_ID_STANDARD;
+}
+
+/* wine-9.0:dlls/kernelbase/locale.c:SystemTimeToTzSpecificLocalTime. A NULL zone is the declared machine's current
+ * zone (RtlQueryTimeZoneInformation there). */
 extern "C" BOOL SystemTimeToTzSpecificLocalTime(LPTIME_ZONE_INFORMATION tz, const SYSTEMTIME *utc, LPSYSTEMTIME local)
 {
-    FILETIME ft;
-    if (!utc || !local || !SystemTimeToFileTime(utc, &ft))
-        return FALSE;
+    int64_t ft;
     TIME_ZONE_INFORMATION cur;
-    if (!tz) {      /* NULL: the active time zone, with its rule applied to this time */
+    if (!utc || !local)
+        return FALSE;
+    if (!tz) {
         if (!tz_current(&cur)) {
-            SetLastError(ERROR_INVALID_FUNCTION);
+            SetLastError(ERROR_INVALID_FUNCTION);   /* the platform has no time zone data */
             return FALSE;
         }
         tz = &cur;
     }
-    int64_t usecs = ((int64_t)w32_ft64(&ft) - FT_UNIX_EPOCH) / 10000000;
-    int64_t off_min = -((int64_t)tz->Bias + (tz_is_dst(tz, usecs) ? tz->DaylightBias : tz->StandardBias));
-    ft_to_st((ULONGLONG)((int64_t)w32_ft64(&ft) + off_min * 600000000ll), local);
-    return TRUE;
+    if (!st_to_time(utc, &ft)) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    int64_t bias_min;
+    switch (get_timezone_id(tz, ft)) {
+    case TIME_ZONE_ID_UNKNOWN: bias_min = tz->Bias; break;
+    case TIME_ZONE_ID_STANDARD: bias_min = (int64_t)tz->Bias + tz->StandardBias; break;
+    case TIME_ZONE_ID_DAYLIGHT: bias_min = (int64_t)tz->Bias + tz->DaylightBias; break;
+    default: return FALSE;
+    }
+    ft = (int64_t)((uint64_t)ft - (uint64_t)(bias_min * 600000000ll));
+    return ft_to_st(ft, local);
 }
 
+/* wine-9.0:dlls/kernelbase/file.c:CompareFileTime (NULL on either side is -1; the parts compare unsigned, high first) */
 extern "C" LONG CompareFileTime(const FILETIME *a, const FILETIME *b)
 {
+    if (!a || !b)
+        return -1;
     ULONGLONG x = w32_ft64(a), y = w32_ft64(b);
     return x < y ? -1 : x > y ? 1 : 0;
 }
