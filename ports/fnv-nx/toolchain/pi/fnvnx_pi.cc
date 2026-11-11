@@ -28,11 +28,10 @@
  *              falloff   control can reach the end of the function, which must return a value (FALL2: the front
  *                        end's own mark, in a block the CFG reaches). The exe returns what eax holds there
  *              volatile  a volatile access
- *              fpfast    the unit is built with /fp:fast (a fact of the recipe, plugin argument `fpfast`) and
- *                        the body has a floating-point operand: the source does not fix what the exe computes
- *              argorder  a call with side effects in two or more arguments, always (the right-to-left lemma does
- *                        not hold for the class; see "argument order" below); also any call of two or more arguments with a
- *                        side-effecting argument of non-scalar type, which the order plugin leaves in GCC order
+ *              argorder  a call with effects in two or more arguments, always (the right-to-left lemma does
+ *                        not hold for the class; "effect" is defined under "argument order" below); also any call of
+ *                        two or more arguments with a side-effecting argument of non-scalar type, which the order
+ *                        plugin leaves in GCC order
  *              div       an integer division or remainder by a non-constant (x86 traps where AArch64 gives 0)
  *              shift     a shift or rotate by a non-constant count (x86 masks the count, C leaves it undefined)
  *              uninit    a use of a local that no path has assigned
@@ -88,7 +87,6 @@ int plugin_is_GPL_compatible;
 
 struct facts { std::string verdict; std::set<std::string> types; bool emitted, mem; };
 static std::map<std::string, facts> early;       /* by assembler name of the function */
-static bool unit_fpfast;                           /* the recipe builds this unit with /fp:fast */
 static std::vector<std::string> lines;
 static std::set<std::string> all_thunks;          /* every thunk of the unit, listed before code generation */
 static std::set<std::string> thunk_rows;          /* thunks that went through the passes */
@@ -239,7 +237,7 @@ static bool uninit_use(tree op)
 }
 
 /* ---- argument order (the lemma of rule ORDER-ARGS, toolchain/order): every call whose arguments (the object of a
-   member call included) have side effects in two or more of them is written down before genericization, as the
+   member call included) have an effect (EFFECT, below) in two or more of them is written down before genericization, as the
    source has it:
        function <TAB> callee <TAB> a0|a1|... <TAB> k/n
    each a_k: the `,`-separated callees of the calls inside argument k; k/n: this call is number k (from 0) of the
@@ -261,6 +259,137 @@ static tree callee_of(tree t)
   tree f = AGGR_INIT_EXPR_FN(t);
   if (f && TREE_CODE(f) == ADDR_EXPR) f = TREE_OPERAND(f, 0);
   return f && TREE_CODE(f) == FUNCTION_DECL ? f : NULL_TREE;
+}
+
+
+/* ---- EFFECT: the rule that says which arguments make the order of evaluation matter. An expression has an effect iff
+   it contains
+     - a store (an assignment, an initialization, an increment or decrement) to anything but a private object: a
+       compiler temporary made inside the expression (the slot of a TARGET_EXPR), or, in the body of a function being
+       summarized, a non-static local, parameter or result object of that function reached without a dereference;
+       no other code can see such an object;
+     - a volatile access;
+     - a throwing or non-returning construct: a throw, an allocation or deallocation expression, a call of a function
+       that never returns or may not return (GCC's noreturn, looping const/pure), asm;
+     - a call of a function that is not known side-effect-free by the compiler's own facts at the point the plugin
+       decides: the callee's own ECF_CONST / ECF_PURE (the declaration or its type, `__attribute__((const/pure))`
+       included; for a built-in, the flags GCC gives the built-in's declaration), or an always_inline function whose
+       body was already judged free by this same rule (its summary, memoized by DECL_UID, is made when its definition
+       is finished, so a callee defined later, an indirect or virtual callee, or a recursive one has no summary and is an
+       effect). Names are never looked at.
+   Assumption: the contract GCC itself relies on for const and pure (no store, no throw, termination); the arguments of
+   a free call are walked by the same rule.
+   What the rule decides: two arguments without an effect commute with each other (each only reads); the verdict
+   `argorder` is for a call with two or more arguments that have one, whose relative order the exe's code fixes and no
+   rule here proves. An argument with an effect against one that only reads is the case of the order plugin's
+   right-to-left rule, as before.
+   A body summary also treats a loop, a goto or label, a try block and a statement expression as effects: termination
+   and control flow are not judged. */
+static std::map<unsigned, bool> body_free;        /* DECL_UID of an always_inline function -> its body has no effect */
+
+struct eff_ctx { tree self; std::vector<tree> priv; bool effect; };
+
+/* the object a store writes, through components and indices but no dereference; null when it goes through memory */
+static tree store_base(tree t)
+{
+  for (;;) {
+    switch (TREE_CODE(t)) {
+      case COMPONENT_REF: case ARRAY_REF: case BIT_FIELD_REF: case REALPART_EXPR: case IMAGPART_EXPR: case VIEW_CONVERT_EXPR:
+      case NOP_EXPR: case NON_LVALUE_EXPR:
+        t = TREE_OPERAND(t, 0); continue;
+      case VAR_DECL: case PARM_DECL: case RESULT_DECL:
+        return t;
+      default:
+        return NULL_TREE;
+    }
+  }
+}
+
+static bool private_store(tree lhs, eff_ctx *c)
+{
+  tree b = store_base(lhs);
+  if (!b || TREE_THIS_VOLATILE(b) || TREE_STATIC(b) || DECL_EXTERNAL(b) || TREE_CODE(TREE_TYPE(b)) == REFERENCE_TYPE) return false;
+  for (size_t i = 0; i < c->priv.size(); i++) if (c->priv[i] == b) return true;
+  if (!c->self) return false;
+  if (TREE_CODE(b) == RESULT_DECL) return b == DECL_RESULT(c->self);      /* no context is set on it yet */
+  if (TREE_CODE(b) == PARM_DECL) {
+    for (tree a = DECL_ARGUMENTS(c->self); a; a = DECL_CHAIN(a)) if (a == b) return true;
+    return false;
+  }
+  return DECL_CONTEXT(b) == c->self;
+}
+
+static bool call_free(tree t)
+{
+  tree fn = callee_of(t);
+  int flags;
+  if (fn) flags = flags_from_decl_or_type(fn);
+  else {
+    tree f = TREE_CODE(t) == CALL_EXPR ? CALL_EXPR_FN(t) : AGGR_INIT_EXPR_FN(t);
+    tree ft = f && POINTER_TYPE_P(TREE_TYPE(f)) ? TREE_TYPE(TREE_TYPE(f)) : NULL_TREE;
+    flags = ft ? flags_from_decl_or_type(ft) : 0;
+  }
+  if (flags & (ECF_NORETURN | ECF_LOOPING_CONST_OR_PURE)) return false;
+  if (flags & (ECF_CONST | ECF_PURE)) return true;
+  if (fn && lookup_attribute("always_inline", DECL_ATTRIBUTES(fn))) {
+    std::map<unsigned, bool>::iterator m = body_free.find(DECL_UID(fn));
+    return m != body_free.end() && m->second;
+  }
+  return false;
+}
+
+static tree walk_effect(tree *tp, int *walk_subtrees, void *data)
+{
+  eff_ctx *c = (eff_ctx *)data;
+  tree t = *tp;
+  if (TYPE_P(t)) { *walk_subtrees = 0; return NULL_TREE; }
+  switch (TREE_CODE(t)) {
+    case CALL_EXPR: case AGGR_INIT_EXPR:
+      if (!call_free(t)) { c->effect = true; return t; }
+      return NULL_TREE;
+    case TARGET_EXPR:
+      c->priv.push_back(TARGET_EXPR_SLOT(t));
+      return NULL_TREE;
+    case MODIFY_EXPR: case INIT_EXPR:
+      if (!private_store(TREE_OPERAND(t, 0), c)) { c->effect = true; return t; }
+      return NULL_TREE;
+    case PREINCREMENT_EXPR: case PREDECREMENT_EXPR: case POSTINCREMENT_EXPR: case POSTDECREMENT_EXPR:
+      if (!private_store(TREE_OPERAND(t, 0), c)) { c->effect = true; return t; }
+      return NULL_TREE;
+    case DECL_EXPR: {
+      tree d = DECL_EXPR_DECL(t);
+      if (c->self && VAR_P(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d) && DECL_CONTEXT(d) == c->self) {
+        if (tree i = DECL_INITIAL(d)) cp_walk_tree_without_duplicates(&i, walk_effect, c);
+        return c->effect ? t : NULL_TREE;
+      }
+      c->effect = true; return t;
+    }
+    case THROW_EXPR: case NEW_EXPR: case VEC_NEW_EXPR: case DELETE_EXPR: case VEC_DELETE_EXPR: case VA_ARG_EXPR:
+    case STMT_EXPR: case ASM_EXPR: case TRY_BLOCK: case CLEANUP_STMT: case GOTO_EXPR: case LABEL_EXPR: case FOR_STMT:
+    case WHILE_STMT: case DO_STMT: case RANGE_FOR_STMT: case LOOP_EXPR: case EXIT_EXPR: case EH_SPEC_BLOCK:
+      c->effect = true; return t;
+    default:
+      if (TREE_THIS_VOLATILE(t)) { c->effect = true; return t; }
+      if (TREE_CODE(t) == ADDR_EXPR && DECL_P(TREE_OPERAND(t, 0))) *walk_subtrees = 0;   /* an address is no access */
+      return NULL_TREE;
+  }
+}
+
+static bool arg_has_effect(tree arg)
+{
+  eff_ctx c; c.self = NULL_TREE; c.effect = false;
+  cp_walk_tree_without_duplicates(&arg, walk_effect, &c);
+  return c.effect;
+}
+
+/* the summary of an always_inline function, made when its definition is finished (before any caller that follows it) */
+static void summarize(tree fn)
+{
+  if (!lookup_attribute("always_inline", DECL_ATTRIBUTES(fn))) return;
+  eff_ctx c; c.self = fn; c.effect = false;
+  tree body = DECL_SAVED_TREE(fn);
+  cp_walk_tree_without_duplicates(&body, walk_effect, &c);
+  body_free[DECL_UID(fn)] = !c.effect;
 }
 
 struct arg_effects { std::vector<std::string> calls; bool other; };
@@ -301,7 +430,8 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
   std::string callee = fn && DECL_NAME(fn) ? asmname(fn) : "*";
   int ordinal = call_count[callee]++;          /* every call counts, a site or not */
   int with = 0;
-  for (size_t i = 0; i < args.size(); i++) if (args[i] && TREE_SIDE_EFFECTS(args[i])) with++;
+  std::vector<bool> effect(args.size());
+  for (size_t i = 0; i < args.size(); i++) if ((effect[i] = args[i] && arg_has_effect(args[i]))) with++;
   /* A call the order plugin leaves in GCC's order: at least one argument (after `this` of a method call) has side
      effects and is not of scalar (register) type, and the call has two or more arguments. This condition must stay
      equal to the one in toolchain/order/fnvnx_order.cc reorder_call (skip on `!scalar_arg(a)` with TREE_SIDE_EFFECTS
@@ -319,7 +449,7 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
   }
   if (with < 2) return NULL_TREE;
   /* ORDER-ARGS: the lemma "cl evaluates the arguments right to left" does not hold for the whole class (the gate found
-     contradictions against cl's code), so no function may rely on it: two or more side-effecting arguments, readable
+     contradictions against cl's code), so no function may rely on it: two or more arguments with an effect, readable
      or not, put the function outside Π. The row below is still written, as a measurement for the gate. */
   arg_unreadable.insert((const char *)data);
   std::string row = std::string((const char *)data) + "\\t" + callee + "\\t";
@@ -328,7 +458,7 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
   seen.insert(callee);                         /* the callee itself inside an argument: its calls cannot be told apart */
   for (size_t i = 0; i < args.size(); i++) {
     arg_effects e; e.other = false;
-    if (args[i] && TREE_SIDE_EFFECTS(args[i])) {
+    if (effect[i]) {
       cp_walk_tree_without_duplicates(&args[i], walk_effects, &e);
       if (e.other || e.calls.empty()) readable = false;
       for (size_t k = 0; k < e.calls.size(); k++) if (!seen.insert(e.calls[k]).second) readable = false;
@@ -344,6 +474,7 @@ static void pre_genericize(void *gcc_data, void *)
 {
   tree fn = (tree)gcc_data;
   if (!fn || TREE_CODE(fn) != FUNCTION_DECL || !DECL_SAVED_TREE(fn)) return;
+  summarize(fn);
   std::string name = asmname(fn);
   call_count.clear(); fn_sites.clear();
   cp_walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
@@ -437,7 +568,7 @@ struct cfg_pass : gimple_opt_pass {
   unsigned int execute(function *fun) override
   {
     const char *r_lift = NULL;
-    bool r_asm = false, r_vol = false, r_div = false, r_shift = false, r_fp = false, r_fall = false;
+    bool r_asm = false, r_vol = false, r_div = false, r_shift = false, r_fall = false;
     facts f; f.emitted = false;
     basic_block bb;
     FOR_EACH_BB_FN(bb, fun)
@@ -467,9 +598,6 @@ struct cfg_pass : gimple_opt_pass {
         }
         walk_stmt_info wi; memset(&wi, 0, sizeof wi); wi.info = &f.types;
         walk_gimple_op(st, walk_types, &wi);
-        if (unit_fpfast)
-          for (unsigned k = 0; k < gimple_num_ops(st); k++)
-            if (gimple_op(st, k) && TREE_TYPE(gimple_op(st, k)) && SCALAR_FLOAT_TYPE_P(TREE_TYPE(gimple_op(st, k)))) r_fp = true;
       }
     tree fn = fun->decl;
     for (tree p = DECL_ARGUMENTS(fn); p; p = DECL_CHAIN(p)) note_type(TREE_TYPE(p), f.types);
@@ -477,7 +605,7 @@ struct cfg_pass : gimple_opt_pass {
     FOR_EACH_LOCAL_DECL(fun, ix, v) note_type(TREE_TYPE(v), f.types);
     /* `uninit` (a local in a register) is decided on SSA and comes before uninit-mem in the order of reasons */
     f.verdict = r_asm ? "asm" : r_lift ? r_lift : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
-              : r_fall ? "falloff" : r_vol ? "volatile" : r_fp ? "fpfast" : arg_unreadable.count(source_name(fn)) ? "argorder"
+              : r_fall ? "falloff" : r_vol ? "volatile" : arg_unreadable.count(source_name(fn)) ? "argorder"
               : r_div ? "div" : r_shift ? "shift" : "";
     f.mem = unproven_memory_read(fun);
     free_dominance_info(CDI_DOMINATORS);
@@ -642,9 +770,14 @@ static void register_attrs(void *, void *) { register_attribute(&lifted_attr); }
 
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
-  if (!plugin_default_version_check(ver, &gcc_version)) return 1;
-  for (int i = 0; i < info->argc; i++)
-    if (!strcmp(info->argv[i].key, "fpfast")) unit_fpfast = true;
+  if (!plugin_default_version_check(ver, &gcc_version)) {
+    error("%<fnvnx_pi%>: built for GCC %s, loaded by %s", gcc_version.basever, ver->basever);
+    return 1;
+  }
+  if (info->argc) {   /* no silent modes: this plugin has no options */
+    error("%<fnvnx_pi%>: unknown plugin argument %qs", info->argv[0].key);
+    return 1;
+  }
   register_pass_info pc;
   pc.pass = new cfg_pass(g);
   pc.reference_pass_name = "cfg";

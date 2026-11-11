@@ -70,7 +70,19 @@ int plugin_is_GPL_compatible;
 enum Mode { DROP, MANGLE, ESCAPE, RESULT };
 enum DtorKind { DT_NONE, DT_BASE, DT_VBASE, DT_SCALAR, DT_VECTOR };
 
-static std::map<tree, int> scope_no;      /* a function-local static or class -> its MSVC scope number */
+/* GC invariant: trees live in garbage-collected memory and ggc_collect runs between functions, so a tree this file
+ * keeps across one may be freed and its address reused by another tree. No container here is keyed by an address:
+ * each is keyed by a UID (DECL_UID, TYPE_UID of the main variant), which the front end allocates from a counter and
+ * never reuses, so a stale entry can only be unreachable, never wrong. The two UID spaces are separate, hence the
+ * `type` flag in the key. A mapped value holds no tree that is read after a collection except through its owner
+ * (vpaths_memo's bases are reachable from the class's own binfo while the class lives, and the entry is looked
+ * up only through the class). */
+typedef std::pair<bool, unsigned> UidKey;
+static UidKey uid_decl(tree d) { return UidKey(false, DECL_UID(d)); }
+static UidKey uid_type(tree t) { t = TYPE_MAIN_VARIANT(t); return UidKey(true, TYPE_UID(t)); }
+static UidKey uid_of(tree x) { return TYPE_P(x) ? uid_type(x) : uid_decl(x); }
+
+static std::map<UidKey, int> scope_no;    /* a function-local static or class -> its MSVC scope number */
 
 /* ---- the class key in a name (U struct, V class)
  *
@@ -81,7 +93,8 @@ static std::map<tree, int> scope_no;      /* a function-local static or class ->
  * reference key is the other one). The assumption: the warning is not suppressed for a declaration (system
  * header, #pragma GCC diagnostic); tools/link/namegate.py compares every name with cl's.
  */
-static std::map<tree, bool> ref_class_key;        /* class -> the reference key is `class` */
+static std::map<UidKey, bool> ref_class_key;      /* class (type uid) -> the reference key is `class` */
+static std::map<UidKey, bool> def_class_key;      /* class (type uid) -> its definition had the key `class` */
 static printer_fn old_decoder;
 
 static bool key_decoder(pretty_printer *pp, text_info *text, const char *spec, int precision, bool wide,
@@ -95,7 +108,7 @@ static bool key_decoder(pretty_printer *pp, text_info *text, const char *spec, i
     const char *k = va_arg(ap, const char *);
     va_end(ap);
     tree t = td && TREE_CODE(td) == TYPE_DECL ? TREE_TYPE(td) : td;
-    if (t && TYPE_P(t) && k) ref_class_key[TYPE_MAIN_VARIANT(t)] = strcmp(k, "class") != 0;
+    if (t && TYPE_P(t) && k) ref_class_key[uid_type(t)] = strcmp(k, "class") != 0;
   }
   return old_decoder(pp, text, spec, precision, wide, set_locus, hash, quoted, buffer_ptr);
 }
@@ -103,12 +116,16 @@ static bool key_decoder(pretty_printer *pp, text_info *text, const char *spec, i
 static bool declared_class(tree t)
 {
   t = TYPE_MAIN_VARIANT(t);
-  auto it = ref_class_key.find(t);
+  auto it = ref_class_key.find(uid_type(t));
   if (it != ref_class_key.end()) return it->second;
   if (CLASSTYPE_TEMPLATE_INFO(t) && TREE_CODE(CLASSTYPE_TI_TEMPLATE(t)) == TEMPLATE_DECL) {
     tree pat = TREE_TYPE(most_general_template(CLASSTYPE_TI_TEMPLATE(t)));
-    if (pat && (it = ref_class_key.find(TYPE_MAIN_VARIANT(pat))) != ref_class_key.end()) return it->second;
+    if (pat && (it = ref_class_key.find(uid_type(pat))) != ref_class_key.end()) return it->second;
   }
+  /* The key of the definition, read when the definition finished: GCC's flag is rewritten later by a
+   * `typename ::C` elaborated specifier (FNVNX_MSVC_BASE_END(typename ::Base)), which clears it with no report. */
+  auto d = def_class_key.find(uid_type(t));
+  if (d != def_class_key.end()) return d->second;
   return CLASSTYPE_DECLARED_CLASS(t);
 }
 
@@ -132,6 +149,29 @@ static char ptr_letter(int q)
   return c && v ? 'S' : v ? 'R' : c ? 'Q' : 'P';
 }
 
+/* The parameters' top-level qualifiers and array form are those of the function's FIRST declaration (checked against cl: a
+ * declaration `f(int *p)` and a definition `f(int *const p)` are `?f@@YAXPAH@Z`, the reverse `QAH`, and a third declaration
+ * does not matter). GCC keeps only the last declaration's PARM_DECLs, so the first is recorded when it is declared, by the
+ * uid of the declaration that survives the merge (a template instance: of its most general template's pattern). A function
+ * whose first declaration is its definition, or that was never declared before (no record), has its own. */
+struct ParmForm { int quals; bool array; };
+static std::map<UidKey, std::vector<ParmForm>> first_parms;
+static UidKey parm_key(tree f)
+{
+  f = DECL_ORIGIN(f);
+  if (DECL_LANG_SPECIFIC(f) && DECL_TEMPLATE_INFO(f) && TREE_CODE(DECL_TI_TEMPLATE(f)) == TEMPLATE_DECL) {
+    tree g = DECL_TEMPLATE_RESULT(most_general_template(DECL_TI_TEMPLATE(f)));
+    if (g) f = g;
+  }
+  return uid_decl(f);
+}
+static std::vector<ParmForm> parm_forms(tree f)
+{
+  std::vector<ParmForm> v;
+  for (tree p = DECL_ARGUMENTS(f) ? FUNCTION_FIRST_USER_PARM(f) : NULL_TREE; p; p = DECL_CHAIN(p))
+    v.push_back({cp_type_quals(TREE_TYPE(p)), (bool)DECL_ARRAY_PARAMETER_P(p)});
+  return v;
+}
 struct ArgKey { tree type; int quals; bool array; };
 
 struct M {
@@ -212,7 +252,7 @@ struct M {
         entity = TYPE_MAIN_VARIANT(ctx);
         ctx = CP_TYPE_CONTEXT(ctx);
       } else if (TREE_CODE(ctx) == FUNCTION_DECL) {
-        auto it = scope_no.find(entity);
+        auto it = scope_no.find(uid_of(entity));
         if (it == scope_no.end()) { fail("local scope number"); return; }
         out += '?'; number(it->second); out += '?';
         decl(ctx, DT_NONE);
@@ -269,6 +309,7 @@ struct M {
   void type(tree t, Mode m, int q = -1)
   {
     if (q < 0) q = cp_type_quals(t);
+    bool restrict_p = (q & TYPE_QUAL_RESTRICT) != 0;   /* MSVC's `I` after the pointer letter */
     q &= TYPE_QUAL_CONST | TYPE_QUAL_VOLATILE;
     if (TREE_CODE(t) == ARRAY_TYPE) {
       if (m == MANGLE) out += 'A'; else if (m == ESCAPE || m == RESULT) out += "$$B";
@@ -303,8 +344,8 @@ struct M {
       case ENUMERAL_TYPE: out += "W4"; type_name(t); break;
       case RECORD_TYPE: out += declared_class(t) ? 'V' : 'U'; type_name(t); break;
       case UNION_TYPE: out += 'T'; type_name(t); break;
-      case POINTER_TYPE: out += ptr_letter(q); type(TREE_TYPE(t), MANGLE); break;
-      case REFERENCE_TYPE: out += 'A'; type(TREE_TYPE(t), MANGLE); break;
+      case POINTER_TYPE: out += ptr_letter(q); if (restrict_p) out += 'I'; type(TREE_TYPE(t), MANGLE); break;
+      case REFERENCE_TYPE: out += 'A'; type(TREE_TYPE(t), MANGLE); break;   /* cl ignores a qualifier on a reference */
       case OFFSET_TYPE:
         out += ptr_letter(q); out += qual_letter(cp_type_quals(TREE_TYPE(t)), true);
         type_name(TYPE_OFFSET_BASETYPE(t));
@@ -315,10 +356,13 @@ struct M {
          * the vectors the target's intrinsics header gives them: 4 x float, 2 x 64-bit integer, 2 x double */
         tree e = TREE_TYPE(t);
         unsigned HOST_WIDE_INT n = TYPE_VECTOR_SUBPARTS(t).to_constant();
-        if (SCALAR_FLOAT_TYPE_P(e) && TYPE_PRECISION(e) == 32 && n == 4) out += "T__m128@@";
-        else if (INTEGRAL_TYPE_P(e) && TYPE_PRECISION(e) == 64 && n == 2) out += "T__m128i@@";
-        else if (SCALAR_FLOAT_TYPE_P(e) && TYPE_PRECISION(e) == 64 && n == 2) out += "U__m128d@@";
+        const char *key = "T", *nm = NULL;
+        if (SCALAR_FLOAT_TYPE_P(e) && TYPE_PRECISION(e) == 32 && n == 4) nm = "__m128";
+        else if (INTEGRAL_TYPE_P(e) && TYPE_PRECISION(e) == 64 && n == 2) nm = "__m128i";
+        else if (SCALAR_FLOAT_TYPE_P(e) && TYPE_PRECISION(e) == 64 && n == 2) nm = "__m128d", key = "U";
         else fail("a vector type that is not __m128, __m128i or __m128d");
+        /* a tag name like any other: the second `__m128` of a name is a back-reference to the first */
+        if (nm) { out += key; source_name(nm); out += '@'; }
         break;
       }
       default: fail(std::string("type ") + get_tree_code_name(TREE_CODE(t)));
@@ -348,7 +392,8 @@ struct M {
 
   void arg(tree t, int q, bool is_array)
   {
-    q &= TYPE_QUAL_CONST | TYPE_QUAL_VOLATILE;
+    q &= TYPE_QUAL_CONST | TYPE_QUAL_VOLATILE | TYPE_QUAL_RESTRICT;
+    if (TYPE_REF_P(t)) q &= ~TYPE_QUAL_RESTRICT;      /* cl ignores a qualifier on a reference, also as a back-reference key */
     for (size_t i = 0; i < args.size(); i++)
       if (args[i].quals == q && args[i].array == is_array && same_type_p(args[i].type, t)) { out += (char)('0' + i); return; }
     size_t before = out.size();
@@ -369,6 +414,12 @@ struct M {
     tree p = d ? FUNCTION_FIRST_USER_PARMTYPE(d) : TYPE_ARG_TYPES(ft);
     if (!d && TREE_CODE(ft) == METHOD_TYPE && p) p = TREE_CHAIN(p);
     tree parm = d && DECL_ARGUMENTS(d) ? FUNCTION_FIRST_USER_PARM(d) : NULL_TREE;
+    const std::vector<ParmForm> *first = NULL;
+    if (d && parm) {
+      auto fp = first_parms.find(parm_key(d));
+      if (fp != first_parms.end() && fp->second.size() == parm_forms(d).size()) first = &fp->second;
+    }
+    size_t pi = 0;
     bool var = variadic(ft), any = false;
     for (; p && p != void_list_node; p = TREE_CHAIN(p)) {
       any = true;
@@ -377,6 +428,8 @@ struct M {
       if (parm) {
         q = cp_type_quals(TREE_TYPE(parm));
         is_array = DECL_ARRAY_PARAMETER_P(parm);
+        if (first) { q = (*first)[pi].quals; is_array = (*first)[pi].array; }
+        pi++;
         parm = DECL_CHAIN(parm);
       }
       arg(t, q, is_array);
@@ -449,6 +502,7 @@ struct M {
         type_name(TYPE_PTRMEMFUNC_P(t) ? TYPE_PTRMEMFUNC_OBJECT_TYPE(t) : TYPE_OFFSET_BASETYPE(t));
       } else if (INDIRECT_TYPE_P(t)) {
         type(t, DROP);
+        if (q & TYPE_QUAL_RESTRICT) out += 'I';
         out += qual_letter(cp_type_quals(TREE_TYPE(t)), false);
       } else if (TREE_CODE(t) == ARRAY_TYPE) {
         tree e = TREE_TYPE(t);
@@ -608,8 +662,8 @@ static void name_decl(tree d, bool def)
  * (layoutgate's subject): a class whose vfptr offsets differ from GCC's vptr offsets gets `unnamed:` rows.
  */
 struct VPath { std::vector<tree> path; tree next; HOST_WIDE_INT off; std::vector<tree> vbases; HOST_WIDE_INT full; };
-static std::map<tree, std::vector<VPath>> vpaths_memo;
-static std::map<tree, int> own_memo;
+static std::map<UidKey, std::vector<VPath>> vpaths_memo;
+static std::map<UidKey, int> own_memo;
 
 static bool has_own_vfptr(tree c);
 static tree primary_nv_base(tree c);
@@ -641,7 +695,7 @@ static bool overrides_in(tree binfo, tree fn)
 static bool has_own_vfptr(tree c)
 {
   c = TYPE_MAIN_VARIANT(c);
-  auto it = own_memo.find(c);
+  auto it = own_memo.find(uid_type(c));
   if (it != own_memo.end()) return it->second;
   bool r = false;
   if (TYPE_POLYMORPHIC_P(c)) {
@@ -655,13 +709,13 @@ static bool has_own_vfptr(tree c)
       /* SDD2 clears DECL_VIRTUAL_P of nothing a class declares; the destructor's own declaration stays virtual */
     }
   }
-  return own_memo[c] = r;
+  return own_memo[uid_type(c)] = r;
 }
 
 static const std::vector<VPath> &vpaths(tree c)
 {
   c = TYPE_MAIN_VARIANT(c);
-  auto it = vpaths_memo.find(c);
+  auto it = vpaths_memo.find(uid_type(c));
   if (it != vpaths_memo.end()) return it->second;
   std::vector<VPath> ps;
   if (has_own_vfptr(c)) ps.push_back({{}, c, 0, {}, 0});
@@ -695,7 +749,7 @@ static const std::vector<VPath> &vpaths(tree c)
     for (size_t i = 0; i < ps.size(); i++)
       if (amb[i] && ps[i].next) { ps[i].path.push_back(ps[i].next); ps[i].next = NULL_TREE; changed = true; }
   }
-  return vpaths_memo[c] = ps;
+  return vpaths_memo[uid_type(c)] = ps;
 }
 
 struct VtRow { std::string sym, ms; HOST_WIDE_INT ap, off; };
@@ -743,7 +797,7 @@ static void name_vtable(tree vt)
 
 /* ---- the unit */
 
-static std::map<tree, Row> early;       /* named while parameters and bodies are still there */
+static std::map<UidKey, Row> early;     /* by decl uid: named while parameters and bodies are still there */
 
 static void ipa_start(void *, void *)
 {
@@ -753,7 +807,7 @@ static void ipa_start(void *, void *)
     if (!TREE_PUBLIC(d) || !VAR_OR_FUNCTION_DECL_P(d)) continue;
     size_t before = rows.size();
     name_decl(d, false);
-    early[d] = rows.back();
+    early[uid_decl(d)] = rows.back();
     rows.resize(before);
     if (VAR_P(d) && DECL_VTABLE_OR_VTT_P(d) && asmname(d).compare(0, 4, "_ZTV") == 0) name_vtable(d);
   }
@@ -769,7 +823,7 @@ static void finish_unit(void *, void *)
     bool def = n->definition && !DECL_EXTERNAL(d) && (TREE_ASM_WRITTEN(d) || n->alias);
     bool ref = TREE_SYMBOL_REFERENCED(DECL_ASSEMBLER_NAME(d));
     if (!def && !ref) continue;
-    auto it = early.find(d);
+    auto it = early.find(uid_decl(d));
     if (it != early.end()) { rows.push_back(it->second); rows.back().def = def; }
     else name_decl(d, def);
     emitted.insert(rows.back().sym);
@@ -839,15 +893,17 @@ static bool outermost_block_p()
 static void finish_decl(void *gcc_data, void *)
 {
   tree d = (tree)gcc_data;
-  if (d && VAR_P(d) && TREE_STATIC(d) && DECL_FUNCTION_SCOPE_P(d) && outermost_block_p()) scope_no[d] = 2;
+  if (d && TREE_CODE(d) == FUNCTION_DECL && DECL_ARGUMENTS(d)) first_parms.emplace(parm_key(d), parm_forms(d));   /* the first wins */
+  if (d && VAR_P(d) && TREE_STATIC(d) && DECL_FUNCTION_SCOPE_P(d) && outermost_block_p()) scope_no[uid_decl(d)] = 2;
 }
 
 static void finish_type(void *gcc_data, void *)
 {
   tree t = (tree)gcc_data;
+  if (t && TYPE_P(t) && CLASS_TYPE_P(t) && TREE_CODE(t) == RECORD_TYPE) def_class_key[uid_type(t)] = CLASSTYPE_DECLARED_CLASS(t);
   if (t && TYPE_P(t) && (CLASS_TYPE_P(t) || TREE_CODE(t) == ENUMERAL_TYPE) && TYPE_CONTEXT(t)
       && TREE_CODE(TYPE_CONTEXT(t)) == FUNCTION_DECL && outermost_block_p())
-    scope_no[TYPE_MAIN_VARIANT(t)] = 2;
+    scope_no[uid_type(t)] = 2;
 }
 
 /* ---- CC1: the convention attribute */
@@ -870,6 +926,10 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
 {
   if (!plugin_default_version_check(version, &gcc_version)) {
     error("%<fnvnx_names%>: built for GCC %s, loaded by %s", gcc_version.basever, version->basever);
+    return 1;
+  }
+  if (info->argc) {   /* no silent modes: this plugin has no options */
+    error("%<fnvnx_names%>: unknown plugin argument %qs", info->argv[0].key);
     return 1;
   }
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
