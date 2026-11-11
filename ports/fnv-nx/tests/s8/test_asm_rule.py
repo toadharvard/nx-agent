@@ -43,6 +43,8 @@ CASES = {
     'define-stmt-run': '#define NOPS __asm nop \\\n__asm nop\nvoid f() { NOPS; }\n',
     'define-oneline': '#define BRK() __asm { int 3 }\nvoid f() { BRK(); }\n',
     'header-inline-fn': '#pragma once\n__forceinline int fnv_F(float v)\n{\n    int i;\n    __asm {\n        fld v\n        fistp i\n    }\n    return i;\n}\n',
+    'block-brace-same-line-no-space': 'void f()\n{\n    unsigned t;\n    __asm{\n        rdtsc\n        mov dword ptr[t], eax\n    }\n    use(t);\n}\n',
+    'stmt-newline-after-asm': 'void f()\n{\n    __asm\n    g();\n}\n',
     'crlf-free-eof': 'void f() { __asm nop }',
 }
 # __forceinline and the like are not known to plain g++: predefine for the preprocess runs
@@ -67,6 +69,7 @@ for name, src in CASES.items():
         check(m.group(1) in src, '%s: pristine branch not verbatim' % name)
     # line numbering: the first line after the span keeps its number (#line)
     check(not has_asm(M.gcc_view(new)), '%s: gcc_view' % name)
+    check(not M.totality_violations(name, src, new), '%s: totality %s' % (name, M.totality_violations(name, src, new)))
 
 # specific shapes
 n, c = M.rewrite('t', CASES['stmt-run']); check(c['run'] == 1 and c['block'] == 0, 'stmt-run is one construct: %r' % c)
@@ -106,6 +109,8 @@ if os.path.isdir(root):
                 except M.ASMError as e:
                     fails += 1; print('FAIL real tree:', e); continue
                 tot.update(cnt)
+                tv = M.totality_violations(p, text, new)
+                if tv: fails += 1; print('FAIL totality', p, tv)
                 if M.gcc_leftovers(new): fails += 1; print('FAIL leftover', p)
                 if not all(m.group(1) in text for m in re.finditer(r'#ifdef _MSC_VER\n(.*?)\n#else\n', new, re.S)):
                     fails += 1; print('FAIL pristine', p)
