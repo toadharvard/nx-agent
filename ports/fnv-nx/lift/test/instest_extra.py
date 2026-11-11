@@ -188,6 +188,8 @@ CLASS_EXPECT = [
     ('f30fb8c1', 'popcnt', [RUD]), ('0f38f001', 'movbe (F0 is its opcode byte: KiTrap06 reports a lock sequence)', [RLOCK]), ('f20f38f1c1', 'crc32', [RUD]), ('0fc7f0', 'rdrand (F0 = its ModRM byte)', [RLOCK]), ('0f01d0', 'xgetbv', [RUD]), ('0fae20', 'xsave', [RUD]), ('0f05', 'syscall', [RUD]),
     ('0f07', 'sysret', [RUD]), ('0f01f8', 'swapgs', [RUD]), ('0f01c1', 'vmcall', [RUD]), ('0f01c8', 'monitor', [RUD]), ('0fb9c1', 'ud1', [RUD]), ('0fff00', 'ud0', [RUD]), ('c5f877', 'vzeroupper', [RUD]),
     ('c5e1e3c0', 'vpavgw', [RUD]), ('c4e171e300', 'vpavgw 3-byte VEX, memory', [RUD]), ('0f380000', 'pshufb', [RUD]), ('660f3a0f0000', 'palignr', [RUD]), ('f20f7c00', 'haddps', [RUD]), ('c4e272f7c1', 'sarx', [RUD]), ('62f17c4858c0', 'evex vaddps', [RUD]),
+    ('db08', 'fisttp m32 (x87 opcode gated by SSE3: f_cpufeat)', [RUD]), ('dd08', 'fisttp m64 (SSE3)', [RUD]), ('df08', 'fisttp m16 (SSE3)', [RUD]), ('f20ff000', 'lddqu (SSE3: has an SSE handler, the CPUID-UD rule comes first; its opcode byte F0 is KiTrap06 lock-sequence data, like movbe above)', [RLOCK]),
+    ('db18', 'fistp m32 (x87, no feature gate)', [NORAISE]), ('f30f6f00', 'movdqu (SSE2, in the model)', [NORAISE]), ('0f6f00', 'movq mm0,[eax] (MMX, in the model)', [NORAISE]), ('0f77', 'emms (MMX, in the model)', [NORAISE]),
     ('c7f800000000', 'xbegin', [RUD]), ('0f0b', 'ud2', ['fnvl_raise(FNVL_UD,']), ('0f01d6', 'xtest', [RUD]), ('0faee0', 'ptwrite? (F3 0F AE /4 needs F3: this is 0F AE E0 = xsave-like #UD)', []),
 ]
 # reserved-NOP bytes capstone refuses: (hex, expected instruction length or None). Lengths cross-checked against the Unicorn oracle over the whole 0F 0D / 0F 18..1F ModRM grid (340 encodings, 0 mismatches).
