@@ -51,7 +51,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check
+.PHONY: all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check dynsites-check
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -125,7 +125,13 @@ PROBE_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/test
 $(OUT)/platform/manifest/probe_imports.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/probe_imports: $(PROBE_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(PROBE_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
-probe: $(OUT)/probe_imports
+probe: $(OUT)/probe_imports $(OUT)/probe_dynsites
+
+# the probe of the module/name lookups (platform/manifest/probe_dynsites.cpp), driven by platform/manifest/check_dynsites.py
+DYN_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/tests/s4/host_boundary.cpp.o $(OUT)/platform/manifest/probe_dynsites.cpp.o
+$(OUT)/platform/manifest/probe_dynsites.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(OUT)/probe_dynsites: $(DYN_OBJS) $(OUT)/libfreetype.a
+	$(CXX) $(CXXFLAGS_) $(DYN_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 
 # ---- the same test objects linked with the virtual clock (platform/clock/clock_virtual.cpp) instead of the real one; runs the vc_ cases
 # (tests/s4/test_vclock.cpp: each returns at once unless the linked clock says "virtual")
@@ -148,6 +154,13 @@ private: $(OUT)/s4_tests_private
 # every ext_call of the guest sources is a service of toolchain/include/fnvnx/hostapi.h with its declared argument count
 hostapi-check:
 	python3 -I $(ROOT)/platform/manifest/check_hostapi.py --root $(ROOT)
+
+# every dynamic module/name lookup of the exe-derived private manifest against the platform's own answers; skips (rc 0)
+# with a message when the private manifest is absent:  make -C tests/s4 dynsites-check [DYNSITES=<dynsites.tsv>]
+DYNSITES ?= /home/user/fnv-nx-build/manifest/dynsites.tsv
+dynsites-check: probe
+	python3 -I $(ROOT)/platform/manifest/check_dynsites.py --selftest
+	python3 -I $(ROOT)/platform/manifest/check_dynsites.py $(DYNSITES) --root $(ROOT)
 
 test: hostapi-check $(OUT)/s4_tests
 	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
