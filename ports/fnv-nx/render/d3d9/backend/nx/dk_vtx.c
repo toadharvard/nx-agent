@@ -10,6 +10,8 @@
  *     ONE block of nxdk_stage_alloc (16-byte aligned, CpuUncached: no cache flush) and binds them. The stage list dies at the end of every SUBMIT and the
  *     SUBMIT starts with a BindState, so every layout bind marks the streams dirty again and the block is staged again: no block outlives its submit.
  *  V4 UDEC3 / DEC3N: bits 30-31 of every word of the attribute become 01 (w = +1 as D3D9 reads it) in the staged copy only (gl4_vtx.c stage()).
+ *  V6 nxdk_vtx_shutdown frees every host copy (the only heap blocks of this file) and zeroes every file-static: all have a zero start value
+ *     (no initializer; test_dkvtx.py checks that), so afterwards the file is as in a fresh process, and a second call frees nothing.
  *  V5 An attribute slot no attribute of the layout reads keeps deko3d's constant (0, 0, 0, 1) = D3D9's default, as GL's does. */
 #include "dk.h"
 #include <stdlib.h>
@@ -165,4 +167,10 @@ uint32_t nxdk_vtx_flush(void) {
     dkCmdBufBindVtxBufferState(nxdk_s.cmd, bs, nb);
     dkCmdBufBindVtxBuffers(nxdk_s.cmd, 0, ex, nb);
     return errs != 0;
+}
+
+void nxdk_vtx_shutdown(void) {
+    for (uint32_t s = 0; s < NX4_MAX_STREAMS; s++) { free(g_vtx[s].data); }
+    memset(g_vtx, 0, sizeof g_vtx); memset(g_lay, 0, sizeof g_lay);
+    memset(&g_cur, 0, sizeof g_cur); g_curId = 0; g_dirty = 0;
 }

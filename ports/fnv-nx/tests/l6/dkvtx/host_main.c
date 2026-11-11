@@ -1,5 +1,6 @@
 /* Host harness of test_dkvtx.py: dk_vtx.c (the real product file) against a recording double of the deko3d calls and of the neighbouring backend files.
  * Driven by command lines on stdin, one reply line per command:
+ *   shutdown (nxdk_vtx_shutdown) | heap (live blocks of dk_vtx.c's malloc/realloc/free) | statics (names) | zero (name=0/1: the static is all-zero = its start value) |
  *   mem ID SIZE | memfill ID OFF HEX | memfree ID | def3 W.. | def4 W.. | bindvtx W.. | bindvtxn W.. | layout N | flush | stagefree | failstage N | limits STRIDE OFFSET | state
  * Every reply is  R ret E errors M message C calls  where calls are the deko3d calls since the previous command, joined with ';':
  *   A i buf off size type bgra fixed (attribute), AN n (attribute array length), B i stride divisor, BN n, X id addr size [data hex] (a vertex buffer).
@@ -11,6 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "dk.h"
+#ifndef VTX_SRC
+#error "VTX_SRC: the product file under test"
+#endif
 
 NxDk nxdk;
 NxDkStream nxdk_s;
@@ -67,6 +71,19 @@ void dkCmdBufBindVtxBuffers(DkCmdBuf c, uint32_t first, DkBufExtents const e[], 
     }
 }
 
+/* The product file is included (not linked) so that the test reads its statics; its heap calls are counted: a block is live from its realloc(NULL, n)
+ * to its free. A double free or a write after free is ASan's; a block still referenced by a static is not a leak to LSan, hence the count. */
+static int heap_live;
+__attribute__((unused)) static void* hrealloc(void* p, size_t n) { void* q = realloc(p, n); if (q && !p) heap_live++; return q; }
+__attribute__((unused)) static void hfree(void* p) { if (p) heap_live--; free(p); }
+#define realloc hrealloc
+#define free hfree
+#include VTX_SRC
+#undef realloc
+#undef free
+#define STATICS(X) X(g_lay) X(g_vtx) X(g_cur) X(g_curId) X(g_dirty)
+static int is_zero(const void* p, size_t n) { for (size_t i = 0; i < n; i++) if (((const uint8_t*)p)[i]) return 0; return 1; }
+
 /* ---- commands ----------------------------------------------------------------------------------------------------------------------------- */
 static void result(uint64_t r) {
     printf("R %llx E %u O %d M %s C %s\n", (unsigned long long)r, nxdk.errCount, oob, nxdk.errCount ? nxdk.lastErr : "-", logn ? log_ : "-");
@@ -94,6 +111,20 @@ int main(void) {
         else if (!strcmp(c, "stagefree")) { nxdk_stage_free(); puts("OK"); }
         else if (!strcmp(c, "failstage") && na == 1) { nstage_fail = (int)w[0]; puts("OK"); }
         else if (!strcmp(c, "limits") && na == 2) { env.maxVtxStride = (int32_t)w[0]; env.maxAttrOffset = (int32_t)w[1]; puts("OK"); }
+        else if (!strcmp(c, "shutdown")) { nxdk_vtx_shutdown(); puts("OK"); }
+        else if (!strcmp(c, "heap")) printf("H %d\n", heap_live);
+        else if (!strcmp(c, "statics")) {
+#define P(n) printf("%s ", #n);
+            STATICS(P)
+#undef P
+            puts("");
+        }
+        else if (!strcmp(c, "zero")) {
+#define P(n) printf("%s=%d ", #n, is_zero(&n, sizeof n));
+            STATICS(P)
+#undef P
+            puts("");
+        }
         else if (!strcmp(c, "state")) { int live = 0; for (int i = 0; i < nblk; i++) live += blks[i].live; printf("S live %d made %d\n", live, nblk); }
         else { printf("BADCMD %s\n", c); return 2; }
         fflush(stdout);

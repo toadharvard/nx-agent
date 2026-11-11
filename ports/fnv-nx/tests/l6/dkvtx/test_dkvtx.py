@@ -5,6 +5,7 @@
  b  cross build (aarch64, -Werror) by build_dk.sh; the undefined symbols of dk_vtx.o are the neighbour hooks, nxdk / nxchk_*, deko3d calls and libc
  c  the format table: every NxAttrType4 / NxAttrType maps to the deko3d size / type of the GL reference's format (gl4_vtx.c attr_fmt)
  d  host run of the real product file under ASan + UBSan against a recording double of deko3d (host_main.c)
+ f  nxdk_vtx_shutdown: all statics zero (their start value) and every heap block freed once; script A twice = byte-identical logs; double shutdown
  e  mutations of a copy of the product file: every one must be caught
 Output: the check count, mutations caught, ALL OK."""
 import os, re, shutil, struct, subprocess, sys, tempfile
@@ -33,6 +34,14 @@ m = FORBID.search(SRC); check(not m, "dk_vtx.c contains the forbidden word " + (
 check(not re.search(r"\)\s*\{\s*\}", SRC), "dk_vtx.c has an empty function body")
 check("__attribute__" not in SRC, "dk_vtx.c uses an attribute")
 
+# every file-static object (not a function, not const) has no initializer, so its start value is zero; the host checks each one after a shutdown
+STAT = []
+for l in SRC.splitlines():
+    m = re.match(r"static\s+(?!const\b)([^()=;]*?)\b(\w+)(\[[^\]]*\])*\s*(=[^;]*)?;", l)
+    if m:
+        check(m.group(4) is None, "static %s has an initializer: its start value is not zero" % m.group(2)); STAT.append(m.group(2))
+check(len(STAT) >= 5, "static scan found %s" % STAT)
+
 # ---- b ------------------------------------------------------------------------------------------------------------------------------------------
 out = os.path.join(tmp, "cross")
 r = sh(["sh", os.path.join(NXD, "build_dk.sh"), out])
@@ -43,7 +52,7 @@ if os.path.exists(os.path.join(out, "dk_vtx.o")):
     check({"nxdk_mem", "nxdk_guest_ptr", "nxdk_stage_alloc", "nxdk_chk_env", "nxchk_layout4", "nxchk_bind_vtxn", "nxchk_err"} <= set(syms), "dk_vtx.o does not use the hooks: " + " ".join(syms))
     check(all(OK_UND.match(s) for s in syms), "unexpected undefined symbols: " + " ".join(s for s in syms if not OK_UND.match(s)))
     check(not re.search(r"^\S*\s+[Ww]\s", nm, re.M), "a weak symbol is present")
-    for s in ("nxdk_op_define_layout", "nxdk_op_define_layout4", "nxdk_op_bind_vtx", "nxdk_op_bind_vtxn", "nxdk_vtx_bind_layout", "nxdk_vtx_flush"):
+    for s in ("nxdk_op_define_layout", "nxdk_op_define_layout4", "nxdk_op_bind_vtx", "nxdk_op_bind_vtxn", "nxdk_vtx_bind_layout", "nxdk_vtx_flush", "nxdk_vtx_shutdown"):
         check(re.search(r"\sT %s$" % s, nm, re.M) is not None, s + " is not defined")
 
 # ---- c: format tables ---------------------------------------------------------------------------------------------------------------------------
@@ -90,6 +99,35 @@ OFF = lambda i: attr_line(i, 0, 0, 0x12, FLOAT, 0, 1)   # a slot no attribute re
 def X(i, off, size, data=None):
     return "X %d %x %d %s %s" % (i, off, size, "stage" if size else "none", data.hex() if data else "")
 def mem(off, size): return bytes(pat(i) for i in range(off, off + size))
+
+def script_a():
+    # a fresh process answers the first lines the same way every time: nothing defined, nothing bound
+    return ["layout 5", "flush", "mem 1 256", "bindvtx 1 0 16", "def4 5 " + l4([(0, 0, 3, 0), (12, 0, 5, 1), (0, 2, 1, 2), (0, 3, 13, 3)], inst=1 << 2, div=[0, 0, 3] + [0] * 13),
+            "layout 5", "flush", "bindvtxn 0 1 0 20 20", "bindvtxn 2 1 100 40 8", "bindvtxn 3 1 8 16 4", "layout 5", "flush", "stagefree",
+            "bindvtxn 0 1 0 100 20", "bindvtxn 0 1 0 250 20", "bindvtxn 1 1 0 64 16", "bindvtxn 2 1 0 8 8", "layout 5", "flush", "stagefree",
+            "def3 6 " + l3(2, 16, [(0, 0, 3, 0), (12, 1, 4, 0)]), "layout 6", "bindvtx 1 3 200", "flush", "bindvtxn 3 0 0 0 0", "layout 5", "flush", "stagefree",
+            "layout 6", "flush", "layout 77", "flush", "bindvtxn 0 1 250 10 4", "def3 0 " + l3(1, 16, [(0, 0, 3, 0)])]
+
+def run_a(h): return [h.cmd(c) if c.split()[0] in ("mem", "stagefree") else "|".join(map(str, h.call(c))) for c in script_a()]
+
+def shutdown_checks(h, ck):
+    # the heap, double shutdown, every static back to its start value
+    ck(h.cmd("heap") != "H 0", "the scenarios left host copies allocated (the heap check would prove nothing)")
+    h.cmd("stagefree"); h.cmd("shutdown")
+    ck(h.cmd("heap") == "H 0", "heap blocks of dk_vtx.c after shutdown: " + h.cmd("heap"))
+    z = h.cmd("zero"); ck(re.fullmatch(r"(\w+=1 )+", z) is not None, "statics after shutdown not all zero: " + z)
+    ck(sorted(h.cmd("statics").split()) == sorted(STAT), "host checks %s, the file declares %s" % (h.cmd("statics"), STAT))
+    h.cmd("shutdown"); ck(h.cmd("heap") == "H 0" and re.fullmatch(r"(\w+=1 )+", h.cmd("zero")) is not None, "second shutdown in a row")
+    # the op handlers behave as in a fresh process: A, shutdown, A, shutdown shutdown, A
+    logs = []
+    for rnd in range(3):
+        logs.append(run_a(h)); h.cmd("stagefree")
+        ck(h.cmd("heap") != "H 0", "script A allocates host copies")
+        h.cmd("shutdown")
+        if rnd == 1: h.cmd("shutdown")
+        ck(h.cmd("heap") == "H 0" and re.fullmatch(r"(\w+=1 )+", h.cmd("zero")) is not None, "after round %d: heap / statics" % rnd)
+    ck(logs[0] == logs[1] == logs[2], "script A after a shutdown differs from the first run: " + str([(a, b) for a, b in zip(logs[0], logs[1]) if a != b][:2]))
+    ck(logs[0][0].startswith("0|0|0|-|['AN 0']") and "has no BindVtxN" in "".join(logs[0]), "script A probes the fresh state: " + logs[0][0])
 
 def scenarios(exe):
     h = Host(exe); n = [0]; f = []
@@ -210,13 +248,14 @@ def scenarios(exe):
     h.call("layout 13"); r = h.call("flush")
     ck(r[0] == 0 and r[4][0] == "BN 16" and [c for c in r[4] if c.startswith("X ")] == [X(s, s * 16, 16, mem(s * 4, 16)) for s in range(16)], "16 streams: %s" % (r,))
     ck(h.live() == 1, "16 streams are one block")
+    shutdown_checks(h, ck)
     rc, err = h.close(); ck(rc == 0 and not err.strip(), "host exit %d: %s" % (rc, tail(err, 6)))
     return n[0], f
 
 def host_build(src, exe):
     inc = ["-I" + os.path.join(DK, "dkp", "libnx", "include"), "-I" + os.path.join(DK, "deko3d", "include"), "-I" + NXD, "-I" + BACK, "-I" + os.path.join(ROOT, "tests", "l6", "dkcore", "shim")]
     return sh(["gcc", "-std=gnu11", "-g", "-O1", "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined", "-Wall", "-Wextra", "-Werror"] + inc +
-              [os.path.join(HERE, "host_main.c"), src, os.path.join(BACK, "nxgpu4_check.c"), "-o", exe])
+              ['-DVTX_SRC="%s"' % src, os.path.join(HERE, "host_main.c"), os.path.join(BACK, "nxgpu4_check.c"), "-o", exe])
 
 def run_host(src, tag):
     exe = os.path.join(tmp, "host_" + tag); b = host_build(src, exe)
@@ -247,6 +286,20 @@ MUT = [
     ("layout bind not dirtying", "g_dirty = 1; g_curId = 0;", "g_curId = 0;"),
     ("bgra lost", "DkVtxAttribType_Unorm, 1, 0 }", "DkVtxAttribType_Unorm, 0, 0 }"),
     ("components 0 not 1", "components ? l->l3.attr[i].components : 1u", "components"),
+    # nxdk_vtx_shutdown: dropped free, dropped reset of one static, free twice, partial loops
+    ("shutdown: free dropped", "free(g_vtx[s].data);", ";"),
+    ("shutdown: free dropped, pointers zeroed (LSan leak)", "free(g_vtx[s].data);", "(void)g_vtx[s].data;"),
+    ("shutdown: last stream not freed", "s < NX4_MAX_STREAMS; s++) { free", "s + 1 < NX4_MAX_STREAMS; s++) { free"),
+    ("shutdown: first stream not freed", "for (uint32_t s = 0; s < NX4_MAX_STREAMS; s++) { free", "for (uint32_t s = 1; s < NX4_MAX_STREAMS; s++) { free"),
+    ("shutdown: free twice", "free(g_vtx[s].data);", "free(g_vtx[s].data); if (s == 3) free(g_vtx[s].data);"),
+    ("shutdown: g_vtx not reset (dangling copy)", "memset(g_vtx, 0, sizeof g_vtx);", ""),
+    ("shutdown: g_vtx pointer nulled only", "memset(g_vtx, 0, sizeof g_vtx);", "for (uint32_t s = 0; s < NX4_MAX_STREAMS; s++) { g_vtx[s].data = NULL; }"),
+    ("shutdown: g_lay not reset", "memset(g_lay, 0, sizeof g_lay);", ""),
+    ("shutdown: g_cur not reset", "memset(&g_cur, 0, sizeof g_cur);", ""),
+    ("shutdown: g_curId not reset", "g_curId = 0; g_dirty = 0;", "g_dirty = 0;"),
+    ("shutdown: g_dirty not reset", "g_curId = 0; g_dirty = 0;", "g_curId = 0;"),
+    ("shutdown: only half of g_lay reset", "memset(g_lay, 0, sizeof g_lay);", "memset(g_lay, 0, sizeof g_lay / 2);"),
+    ("shutdown: g_vtx cap kept (pointer null, cap stale)", "memset(g_vtx, 0, sizeof g_vtx);", "for (uint32_t s = 0; s < NX4_MAX_STREAMS; s++) { free(g_vtx[s].data); g_vtx[s].data = NULL; g_vtx[s].size = 0; g_vtx[s].bound = 0; }"),
 ]
 caught = 0
 if "--no-mutations" not in sys.argv and n is not None and not bad:
@@ -257,7 +310,7 @@ if "--no-mutations" not in sys.argv and n is not None and not bad:
         if mn is None or mbad: caught += 1; print("  mutation %-40s caught (%s)" % (name, (mbad or ["?"])[0][:70]))
         else: check(False, "mutation '%s' NOT CAUGHT" % name)
     print("e  mutations caught %d/%d" % (caught, len(MUT)))
-    check(caught >= 8, "fewer than 8 mutations caught")
+    check(caught == len(MUT), "not every mutation caught")
 shutil.rmtree(tmp, ignore_errors=True)
 print("ALL OK" if not fails else "FAILED %d" % len(fails))
 sys.exit(1 if fails else 0)
