@@ -37,11 +37,13 @@ def xlat(c):
 
 @handler('push')
 def push(c):
-    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; v = rd(o, w)      # operand size: the 66 prefix pushes a word (SDM PUSH), the stack size is 32 bits
+    """SDM PUSH: operand size 32, or 16 under the 0x66 prefix (ESP - 2, a 16-bit store; the stack address size is SS.B = 32, the 0x67 prefix does not change it).
+    The value of a register operand is its pre-state value (PUSH ESP / SP pushes the value before the decrement)."""
+    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; v = rd(o, w)
     F.reg('esp', V('esp', 32) - w // 8); F.store(V('esp', 32) - w // 8, v)
 @handler('pop')
 def pop(c):
-    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; esp = V('esp', 32); F.reg('esp', esp + w // 8)
+    F, o = c.F, c.ops[0]; esp = V('esp', 32); w = 16 if c.o16 else 32; F.reg('esp', esp + w // 8)
     if o.k == 'm': F.store(ea(o, esp + w // 8), load(esp, w))      # SDM POP: ESP as base of the destination is incremented before the address is computed
     else: wr(F, o, load(esp, w))
 @handler('pushal', 'pushad')
