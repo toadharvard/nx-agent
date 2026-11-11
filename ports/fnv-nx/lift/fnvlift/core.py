@@ -88,21 +88,30 @@ class Ctx:
         return 'L_%08x' % a
 
     def ea(self, ins, op):
+        """effective address of a memory operand. 0x67 (16-bit addressing, SDM Vol 1 3.7.5): base + index + disp are summed modulo 2^16 and zero-extended; the segment base is added after.
+        Segment overrides: FS = c->fs (fnvl_seg_set keeps it right); GS = FNVL_GS_BASE() by the CURRENT c->sel[GS] (the null / code-selector #GP is the guard lift2 emits before the
+        instruction, gs_guard); ES/CS/SS/DS (and the defaults) are flat while the selector in that register is a valid flat one (open class: DS/ES/SS/FS reloaded, README of the lift lead)."""
         m = op.mem
-        parts = []
+        seg = None
         if m.segment:
             if m.segment == X.X86_REG_FS:
-                parts.append('fsb')
+                seg = 'fsb'
                 self.usesfs = True
+            elif m.segment == X.X86_REG_GS:
+                seg = 'FNVL_GS_BASE()'
             elif m.segment not in (X.X86_REG_DS, X.X86_REG_SS, X.X86_REG_ES, X.X86_REG_CS):
                 raise Unsupported('segment')
+        parts = []
         if m.base:
             parts.append(reg(ins.reg_name(m.base))[0])
         if m.index:
             parts.append('%s*%du' % (reg(ins.reg_name(m.index))[0], m.scale))
-        if m.disp or not parts:
+        if m.disp or not (parts or seg):
             parts.append('0x%xu' % (m.disp & 0xffffffff))
-        return '(u32)(' + '+'.join(parts) + ')'
+        off = '+'.join(parts)
+        if parts and ins.prefix[3] == 0x67:
+            off = '((%s)&0xffffu)' % off
+        return '(u32)(' + '+'.join(([seg] if seg else []) + ([off] if off else [])) + ')'
 
     def rd(self, ins, op, size=None):
         s = (size or op.size) * 8
@@ -151,7 +160,8 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
         g = md.disasm(code[a - lo:a - lo + 16], a, 1)
         for ins in g:
             return ins
-        return None
+        from . import f_sys
+        return f_sys.nop_gap(code[a - lo:a - lo + 16])      # reserved-NOP encodings capstone refuses (every CPU executes them as NOP)
 
     while work:
         a = work.pop()
@@ -261,13 +271,38 @@ def lift1(img, lo, hi, start, owns, strict, explore_owns, x87=None):
         return lift2(img, lo, hi, start, owns, strict, explore_owns, 'dyn')
 
 
+NO_ACCESS = ('lea', 'nop', 'prefetch', 'prefetchnta', 'prefetcht0', 'prefetcht1', 'prefetcht2', 'prefetchw')      # a memory operand that is only an address / a hint: no segment check
+
+
+def gs_guard(cx, ins):
+    """the #GP of a `gs:` access (SDM Vol 3 5.3 / 3.4.2): one guard at the start of the instruction, whichever handler uses the operand (ea adds the base). With GS holding the null selector any
+    access is #GP(0); a write through a code segment (GS loaded with CS: readable code, not writable) is #GP(0) too. #GP(0) is STATUS_ACCESS_VIOLATION {0, 0xFFFFFFFF} (f_sys.gp_cond)."""
+    from . import f_sys
+    g = [o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS]
+    if not g or ins.mnemonic.split(' ')[-1] in NO_ACCESS:
+        return
+    cond = 'SELK(c->sel[SEG_GS])==0'
+    if any(o.access & capstone.CS_AC_WRITE for o in g):
+        cond += '||SELK(c->sel[SEG_GS])==SELK(SEL_CS)'
+    cx.em(f_sys.gp_cond(cx, cond))
+
+
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
-    from . import f_x87_ctl as xc
+    from . import f_x87_ctl as xc, f_sys
     addr, size = lo, hi - lo
     fall_hi = hi + 0x1000 if strict else hi
     code = img.bytes(addr, fall_hi - addr)
     insns, tables, taken, bad = explore(img, lo, hi, code, start, owns if start == addr and explore_owns else (), fall_hi)
     order = sorted(insns)
+    def head4(a):
+        """the first four bytes at `a` (what KiTrap06Handler scans for F0): from `code`, beyond it from the image (none when the image has no byte there)"""
+        t = code[a - lo:a - lo + 4]
+        if len(t) < 4:
+            try:
+                t = img.bytes(a, 4)
+            except (TypeError, ValueError, IndexError):
+                pass
+        return t
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
@@ -288,9 +323,13 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         pfx = ''
         if m.startswith('rep ') or m.startswith('repe ') or m.startswith('repne '):
             pfx, m = m.split(' ', 1)
-        if m.startswith('lock '):
-            m = m.split(' ', 1)[1]
-            kinds.add('lock')
+        bad_lock = False
+        w = m.split(' ')
+        if 'lock' in w[:-1] and all(x + ' ' in f_sys.STRIP for x in w[:-1]):      # LOCK among the leading prefix words (capstone: `lock add`, `xacquire lock add`): SDM Vol 2 "LOCK"
+            m = w[-1]
+            bad_lock = not f_sys.lock_ok(ins, m)
+            if not bad_lock:
+                kinds.add('lock')
         cx.a, cx.nxt, cx.m, cx.pfx, cx.ops = a, nxt, m, pfx, ops
         cx.s = ops[0].size * 8 if ops else 32
         cx.term = False
@@ -298,7 +337,13 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         n0 = len(cx.L)
         cx.b0 = ins.opcode[0]
         cx.modrm = ins.modrm
-        dispatch(cx, ins)
+        if bad_lock:
+            f_sys.ud_site(cx)                  # LOCK on an instruction that cannot take it (or with a register destination): #UD
+        else:
+            gs_guard(cx, ins)
+            dispatch(cx, ins)
+        if any('fnvl_raise(FNVL_UD,' in t for t in cx.L[n0:]) and 0xf0 in head4(a):      # KiTrap06Handler: a #UD with an F0 byte among the first four bytes at Eip is STATUS_INVALID_LOCK_SEQUENCE
+            cx.L[n0:] = [t.replace('fnvl_raise(FNVL_UD,', 'fnvl_raise(FNVL_LOCK,') for t in cx.L[n0:]]
         cx.L[n0:] = _r9.apply(cx, ins, n0, MEMCLASS)
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
@@ -311,7 +356,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
-        em('%s: ; SYNC_OUT; REGS(); fnvl_raise(FNVL_UD,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), a))
+        em('%s: ; SYNC_OUT; REGS(); fnvl_raise(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_LOCK' if 0xf0 in head4(a) else 'FNVL_UD', a))
     if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:

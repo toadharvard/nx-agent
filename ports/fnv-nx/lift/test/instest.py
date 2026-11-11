@@ -31,6 +31,7 @@ NOT_EQ = ('diff', 'unlifted', 'nocompile', 'x87-prec')
 OUTS = ('equal', 'diff', 'unlifted', 'nocompile', 'fault', 'x87-prec')
 XD = 3                           # entry depth of the static-stack variant
 G = {}
+LOWOK = False       # instest_extra: 16-bit addressing (0x67) reaches the low 64 KiB, which the census run treats as a NULL-page collision
 R8 = {'al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'}; R16 = {'ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'}
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']; SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
 GREG = [UC_ARM64_REG_X19 + i for i in range(8)]
@@ -128,7 +129,7 @@ class World:
         return True
     def unm(s, uc, access, addr, size, value, ud):
         s.bad = '%x+%d' % (addr, size)
-        if s.guard and access != UC_MEM_FETCH_UNMAPPED and (addr < 0x10000 or addr + size > 0xffff0000): s.collide = True; return False
+        if s.guard and access != UC_MEM_FETCH_UNMAPPED and ((addr < 0x10000 and not LOWOK) or addr + size > 0xffff0000): s.collide = True; return False
         if addr + size > 0x100000000: return False   # NULL page / top 64K: no Win32 code touches them, 32-bit address wrap is out of scope
         return s.ensure(addr, size, s.guard and access != UC_MEM_FETCH_UNMAPPED)
     def reset(s, wk):
@@ -276,7 +277,7 @@ class Arm(World):
         uc = s.uc; s.reset(st['wk']); s.ev = None; r0 = st['regs']
         uc.mem_write(CPU, struct.pack('<13I', *r0, FSB, st['ftop'], st['valid'], st['fcw'], st['fc']) + b'\0' * 4 + struct.pack('<8Q', *st['st'])
                      + b''.join(x.to_bytes(16, 'little') for x in st['xmm']) + struct.pack('<II8Q', st['fl'], st['mxcsr'], *st['mm']) + struct.pack('<II', 0, 0)
-                     + b''.join(struct.pack('<QII', v, e, k) for k, v, e in st['fx']) + struct.pack('<I', st['eflx']))
+                     + b''.join(struct.pack('<QII', v, e, k) for k, v, e in st['fx']) + struct.pack('<I', st['eflx']) + b'\0' * 12 + struct.pack('<7I', 0x23, 0x1b, 0x23, 0x23, 0x3b, 0, FSB))     # sel[6] ES CS SS DS FS GS, teb (fnvl_seg_init)
         uc.reg_write(UC_ARM64_REG_FPCR, (0, 2, 1, 3)[(st['fcw'] >> 10 if E['x87'] else st['mxcsr'] >> 13) & 3] << 22)      # what ldmxcsr does on the ARM side (x86 RC 1=down, 2=up)
         for k, v in zip(GREG, r0): uc.reg_write(k, v)      # guest registers live in w19..w26, the cpu pointer in x27
         if E['base'] in ('popf', 'popfd'): s.ensure(r0[4], 4, False); uc.mem_write(r0[4], struct.pack('<I', st['stk']))
@@ -378,7 +379,14 @@ def ndbl(m, se):
     """a normal double or zero?"""
     w = x80d(m, se)
     return w is not None and (((w >> 52) & 0x7ff) not in (0, 0x7ff) or w << 1 & (2 ** 64 - 1) == 0)
-PRIV_OPS = ('cli', 'sti', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd', 'rdmsr', 'wrmsr', 'invd', 'wbinvd', 'clts', 'rdpmc')
+def priv_want(E):
+    """the CPL-0-only instructions at CPL 3 (the lifter's class 2, f_sys.PRIV_MN): #GP(0), which Windows reports by KiTrap0D's opcode table (f_sys.trap0d_privileged: STATUS_PRIVILEGED_INSTRUCTION =
+    fnvl_raise code 6, else STATUS_ACCESS_VIOLATION = fnvl_raise_av). -> the expected event ('trap6' / 'trap99') or None when the form is not of that class. Unicorn runs ring 0 and executes them."""
+    f = G['L'].f_sys
+    return None if E['base'] not in f.PRIV_MN else 'trap6' if f.trap0d_privileged(E['ins'].bytes) else 'trap99'
+def gs_null_av(E, X):
+    """a `gs:` memory access that touches memory, with the harness' GS = the null selector (fnvl_seg_init): #GP(0) -> access violation event; the Unicorn oracle has a flat GS"""
+    return any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS for o in E['ins'].operands) and E['ins'].mnemonic.split(' ')[-1] not in G['L'].core.NO_ACCESS
 SELV = {'cs': 0x1b, 'ss': 0x23, 'ds': 0x23, 'es': 0x23, 'fs': 0x3b, 'gs': 0}       # selectors of a Win32 x86 user process (rt/seh.c CONTEXT); Unicorn's flat selectors are its own
 def origbyte(st, x): return (imgpage(x & ~0xfff) or genpage(st['wk'][0], st['wk'][1], x & ~0xfff))[x & 0xfff]
 def model_fix(E, st, o, c, X):
@@ -407,7 +415,9 @@ def model_fix(E, st, o, c, X):
     return None
 def compare(E, st, o, c, X):
     if 'fault' in c: return 'diff', 'lifted ' + c['fault'], '', ''
-    if E['base'] in PRIV_OPS: return ('equal', '', '', '') if c['eip'] == 'trap6' else ('diff', 'privileged instruction: want FNVL_PRIV (6)', str(c['eip']), '')   # Unicorn runs ring 0 and executes them; a ring-3 Win32 process gets #GP -> STATUS_PRIVILEGED_INSTRUCTION
+    pw = priv_want(E)
+    if pw: return ('equal', '', '', '') if c['eip'] == pw else ('diff', 'privileged instruction: want ' + pw, str(c['eip']), '')
+    if gs_null_av(E, X): return ('equal', '', '', '') if c['eip'] == 'trap99' else ('diff', 'gs: access with GS null: want #GP(0) = AV', str(c['eip']), '')
     r_ = model_fix(E, st, o, c, X)
     if r_: return r_
     if (o['eflx'] ^ c['eflx']): return 'diff', 'eflags AC/ID', '%x' % c['eflx'], '%x' % o['eflx']
@@ -534,7 +544,7 @@ def main():
     open(a.work + '/hostshim.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ return 0; }\n')
     subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-o', a.work + '/cpumodel_host.so', os.path.join(a.lifter, 'rt', 'cpumodel.c'), a.work + '/hostshim.c'])
     import ctypes; G['cpum'] = ctypes.CDLL(a.work + '/cpumodel_host.so')
-    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,st)==56&&offsetof(cpu,x)==120&&offsetof(cpu,fl)==248&&offsetof(cpu,mxcsr)==252&&offsetof(cpu,mm)==256&&offsetof(cpu,ra)==320&&offsetof(cpu,fx)==328&&offsetof(cpu,eflx)==456&&sizeof(cpu)==472,"cpu layout");\n')
+    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,st)==56&&offsetof(cpu,x)==120&&offsetof(cpu,fl)==248&&offsetof(cpu,mxcsr)==252&&offsetof(cpu,mm)==256&&offsetof(cpu,ra)==320&&offsetof(cpu,fx)==328&&offsetof(cpu,eflx)==456&&offsetof(cpu,sel)==472&&offsetof(cpu,teb)==496&&sizeof(cpu)==504,"cpu layout");\n')
     subprocess.check_call(['aarch64-linux-gnu-g++'] + FLAGS + ['-fsyntax-only', a.work + '/off.cpp'])
     d = load_forms(a, G['rows']); forms = d['forms']; print('decoded: %d forms, %d functions (%d undecodable) in %.0fs' % (len(forms), d['nfuncs'], d['undecodable'], time.time() - t0), file=sys.stderr)
     keys = sorted(k for k in forms if not a.only or k.split('|')[0] in a.only.split(','))

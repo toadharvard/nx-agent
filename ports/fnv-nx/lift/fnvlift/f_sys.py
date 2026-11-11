@@ -231,7 +231,7 @@ def h_repz_ret(cx, ins):
 
 # ---- class 3: segment registers, far transfers, descriptor-table instructions --------------------------------------------------------------------------------------
 # Model (rt/fnvl.h): CS, DS=ES=SS, FS (base = TEB) of the process; fnvl_gdt_hi / fnvl_seg_ok decide every selector. State needed to be exact (the lead owns struct cpu):
-# the six selector values c->sel[6] and the TEB base c->teb (fnvl_seg_set / fnvl_seg_get of rt/fnvl.h); reads of a segment register still use the process constants (f_int.SEG_STATE).
+# the six selector values c->sel[6] and the TEB base c->teb (fnvl_seg_set / fnvl_seg_get of rt/fnvl.h); reads of a segment register use fnvl_seg_get (f_int.SEG_STATE = True).
 SEGIDX = {'es': 0, 'cs': 1, 'ss': 2, 'ds': 3, 'fs': 4, 'gs': 5}
 
 
