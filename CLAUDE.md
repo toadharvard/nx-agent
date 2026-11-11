@@ -83,6 +83,18 @@ The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/
 - **MASTER_PLAN3 applies only where it does not contradict this order.**
 - **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
 
+## Owner order of 2026-11-11: the trunk is always green (priority 1, binding)
+
+The owner's words: "Транк никогда красный. Всегда зеленый. И когда он зеленый, это означает, что то, что собирается компилятором, оно в рантайме не упадет." Removing stubs is the first priority: "если это не работает, то значит ничего не работает. Слияния встанут, и это правильно".
+
+- The trunk `claude/fnv-nx-clean` is green at every commit. Green means: what the compiler built does not fail at run time.
+- Every class of run-time failure has a static gate in the L1 verdict (`verify/VERDICT.md`, `gates.json`): a missing import body, a code address without a dispatcher entry, an uncertified form, an uncovered D3D9 enum or SM op, an unresolved symbol, a layout or calling-convention mismatch, a non-deterministic build, a test without a reference, and any stub.
+- A class of run-time failure without a gate is reported to the orchestrator.
+- The stub gate is an absolute 0. It is never "not worse than the base", and there is no allow-list.
+  - Stubs, no-ops, trap paths, "not implemented", fallbacks on failure and fake success are deleted, so that the absence becomes a build error.
+  - Code that does not pass is removed from the trunk whole. Its completion lives on the lead's branch.
+- Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
+
 ## Owner decisions of 2026-11-10 (do not re-ask)
 
 - **Full autonomy (owner, 2026-11-11):** "Я разрешаю все, делайте все, что угодно. Только меня не беспокойте."
