@@ -1,4 +1,5 @@
 #include "t_common.h"
+#include "../t_keep.h"
 const char* g_data = "."; int g_checks[8], g_fails[8], g_pi = 0;
 void t_part(char p) { g_pi = p - 'a'; }
 bool t_check(bool ok, const char* what, const char* file, int line) {
@@ -9,8 +10,8 @@ bool t_check(bool ok, const char* what, const char* file, int line) {
 FILE* t_open(const char* name) { char p[1024]; snprintf(p, sizeof p, "%s/%s", g_data, name); FILE* f = fopen(p, "r"); if (!f) { printf("FAIL: cannot open %s\n", p); g_fails[g_pi]++; } return f; }
 TEnv t_env(bool ex) {
     TEnv e = {}; NxCreateParams cp = {1, 640, 480, D3DCREATE_MIXED_VERTEXPROCESSING};
-    if (ex) { NxDirect3D9Ex* d = new NxDirect3D9Ex; d->asRoot(1); e.devex = new NxDevice9Ex; e.devex->asDevice(d); e.devex->init(cp); e.core = e.devex; e.obj = e.devex; }
-    else { e.d3d = new NxDirect3D9; e.d3d->asRoot(1); e.dev = new NxDevice9; e.dev->asDevice(e.d3d); e.dev->init(cp); e.core = e.dev; e.obj = e.dev; }
+    if (ex) { NxDirect3D9Ex* d = t_new<NxDirect3D9Ex>(); d->asRoot(1); e.devex = t_new<NxDevice9Ex>(); e.devex->asDevice(d); e.devex->init(cp); e.core = e.devex; e.obj = e.devex; }
+    else { e.d3d = t_new<NxDirect3D9>(); e.d3d->asRoot(1); e.dev = t_new<NxDevice9>(); e.dev->asDevice(e.d3d); e.dev->init(cp); e.core = e.dev; e.obj = e.dev; }
     return e;
 }
 // backend hooks of the test: record every call

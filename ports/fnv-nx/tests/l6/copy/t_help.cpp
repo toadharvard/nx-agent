@@ -1,11 +1,12 @@
 #include "t_common.h"
+#include "../t_keep.h"
 TDev t_dev(bool ex, uint32_t w, uint32_t h) {
     TDev e = {}; NxCreateParams cp = {0, w, h, D3DCREATE_MIXED_VERTEXPROCESSING};
-    if (ex) { NxDirect3D9Ex* d = new NxDirect3D9Ex; d->asRoot(1); e.devex = new NxDevice9Ex; e.devex->asDevice(d); e.devex->init(cp); e.core = e.devex; e.obj = e.devex; e.i9 = e.devex; }
-    else { e.d3d = new NxDirect3D9; e.d3d->asRoot(1); e.dev = new NxDevice9; e.dev->asDevice(e.d3d); e.dev->init(cp); e.core = e.dev; e.obj = e.dev; e.i9 = e.dev; }
+    if (ex) { NxDirect3D9Ex* d = t_new<NxDirect3D9Ex>(); d->asRoot(1); e.devex = t_new<NxDevice9Ex>(); e.devex->asDevice(d); e.devex->init(cp); e.core = e.devex; e.obj = e.devex; e.i9 = e.devex; }
+    else { e.d3d = t_new<NxDirect3D9>(); e.d3d->asRoot(1); e.dev = t_new<NxDevice9>(); e.dev->asDevice(e.d3d); e.dev->init(cp); e.core = e.dev; e.obj = e.dev; e.i9 = e.dev; }
     return e;
 }
-void t_scene(TDev& d, bool in) { if (!d.core->life) d.core->life = new NxDevLife; static_cast<NxDevLife*>(d.core->life)->in_scene = in; }
+void t_scene(TDev& d, bool in) { if (!d.core->life) d.core->life = t_new<NxDevLife>(); static_cast<NxDevLife*>(d.core->life)->in_scene = in; }
 uint32_t t_lcg(uint32_t* s) { *s = *s * 1664525u + 1013904223u; return *s >> 8; }
 uint32_t t_rowbytes(uint32_t fmt, uint32_t w) { NxTexFmt f; if (!nx_texfmt(fmt, &f)) return 0; return (f.flags & NXTF_BLOCKS) ? ((w + f.bw - 1) / f.bw) * f.bb : w * f.bytes; }
 IDirect3DSurface9* t_surf(TDev& d, int what, uint32_t w, uint32_t h, uint32_t fmt, D3DPOOL pool, uint32_t ms, bool lockable) {

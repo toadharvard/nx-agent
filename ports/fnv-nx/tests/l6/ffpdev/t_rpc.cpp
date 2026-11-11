@@ -1,5 +1,6 @@
 // RPC client of tests/l6/ffpdev (the arena / pipe scheme of tests/l6/copy/t_rpc.cpp): nxd3d_gpu_call -> the LP64 replay process over libnxgl4 (llvmpipe); nxd3d_gpu_alloc from a shared arena.
 #include "t_common.h"
+#include "../t_keep.h"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -55,7 +56,7 @@ uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t* args, uint32_t n) {
 int nx_env_profile_of(NxObj*) { return 0; }
 TDev t_dev(uint32_t w, uint32_t h) {
     TDev e = {}; NxCreateParams cp = {0, w, h, D3DCREATE_MIXED_VERTEXPROCESSING};
-    e.d3d = new NxDirect3D9; e.d3d->asRoot(1); e.dev = new NxDevice9; e.dev->asDevice(e.d3d); e.dev->init(cp); e.core = e.dev; e.i9 = e.dev; return e;
+    e.d3d = t_new<NxDirect3D9>(); e.d3d->asRoot(1); e.dev = t_new<NxDevice9>(); e.dev->asDevice(e.d3d); e.dev->init(cp); e.core = e.dev; e.i9 = e.dev; return e;
 }
 void t_target(TDev& d, uint32_t w, uint32_t h) {
     IDirect3DSurface9* s = nullptr; CHECK_HR(d.i9->CreateRenderTarget(w, h, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &s, nullptr), D3D_OK); CHECK_HR(d.i9->SetRenderTarget(0, s), D3D_OK); if (s) s->Release();   // the device's bind reference keeps it

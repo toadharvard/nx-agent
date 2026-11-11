@@ -1,6 +1,7 @@
 // part e: the object model. Numbers are the real D3D9 behaviour as recorded by Wine's d3d9 tests (device.c test_refcount / test_private_data /
 // test_resource_priority, written against Windows) and MS IUnknown / IDirect3DResource9 / IDirect3DSurface9 documentation.
 #include "t_tables.h"
+#include "../t_keep.h"
 static const GUID IID_IUnknown = {0, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
 static ULONG rc(IUnknown* p) { p->AddRef(); return p->Release(); }  // the public count, as the Wine tests read it
 static const GUID G1 = {0xe5aa4a21, 1, 2, {3, 3, 3, 3, 3, 3, 3, 3}}, G2 = {0xe5aa4a22, 1, 2, {3, 3, 3, 3, 3, 3, 3, 3}};
@@ -25,7 +26,7 @@ void t_refs() {
     d->SetTexture(1, nullptr); CHECK_EQ(tx->Release(), 0); CHECK(tt.alive());   // the level bound as render target keeps its container alive
     CHECK_HR(d->SetRenderTarget(0, t_surface(e, D3DUSAGE_RENDERTARGET, 8, 8)), D3D_OK); CHECK(!tt.alive());
     // ---- implicit surfaces / chain: public 0, hold the device only while public > 0, never freed by their count, no forwarding
-    NxSwapChain9* sc = t_child<NxSwapChain9>(e); NxSurface9* bb = new NxSurface9; bb->asImplicit(e.dev, sc); TTracker tb; tb.watch(bb); ULONG dv0 = rc(du);
+    NxSwapChain9* sc = t_child<NxSwapChain9>(e); NxSurface9* bb = t_new<NxSurface9>(); bb->asImplicit(e.dev, sc); TTracker tb; tb.watch(bb); ULONG dv0 = rc(du);
     CHECK_EQ(rc(bb), 0); CHECK_EQ(rc(du), dv0); CHECK_EQ(bb->AddRef(), 1); CHECK_EQ(rc(du), dv0 + 1); CHECK_EQ(bb->AddRef(), 2); CHECK_EQ(rc(du), dv0 + 1); CHECK_EQ(rc(sc), 1);
     CHECK_EQ(bb->Release(), 1); CHECK_EQ(bb->Release(), 0); CHECK_EQ(rc(du), dv0); CHECK_EQ(bb->Release(), 0); CHECK_EQ(bb->Release(), 0); CHECK(tb.alive());
     void* cont = nullptr; CHECK_HR(bb->GetContainer(IID_IDirect3DSwapChain9, &cont), D3D_OK); CHECK(cont == (IDirect3DSwapChain9*)sc); CHECK_EQ(rc(sc), 2); sc->Release();   // GetContainer AddRefs the container
@@ -34,8 +35,8 @@ void t_refs() {
     IDirect3DDevice9* gd; ULONG before = rc(du); CHECK_HR(ps->GetDevice(&gd), D3D_OK); CHECK(gd == d); CHECK_EQ(rc(du), before + 1); gd->Release(); CHECK_HR(ps->GetDevice(nullptr), D3DERR_INVALIDCALL);
     // ---- QueryInterface: the IID lattice of each class (single chain: same address), E_NOINTERFACE + null otherwise, AddRef on success
     struct Q { IUnknown* o; const GUID* yes[5]; const GUID* no[3]; };
-    NxSurface9* su = t_surface(e, 0, 4, 4); NxTexture9* t2 = t_child<NxTexture9>(e); NxVolumeTexture9* vt = t_child<NxVolumeTexture9>(e); NxVolume9* vo = new NxVolume9; vo->asSubResource(e.dev, vt);
-    NxDevice9Ex* dx = new NxDevice9Ex; dx->asDevice(e.d3d); NxVertexDeclaration9* vd = t_decl(e); NxSwapChain9Ex* sx = t_child<NxSwapChain9Ex>(e);
+    NxSurface9* su = t_surface(e, 0, 4, 4); NxTexture9* t2 = t_child<NxTexture9>(e); NxVolumeTexture9* vt = t_child<NxVolumeTexture9>(e); NxVolume9* vo = t_new<NxVolume9>(); vo->asSubResource(e.dev, vt);
+    NxDevice9Ex* dx = t_new<NxDevice9Ex>(); dx->asDevice(e.d3d); NxVertexDeclaration9* vd = t_decl(e); NxSwapChain9Ex* sx = t_child<NxSwapChain9Ex>(e);
     Q qs[] = {{su, {&IID_IUnknown, &IID_IDirect3DSurface9, &IID_IDirect3DResource9}, {&IID_IDirect3DTexture9, &IID_IDirect3DBaseTexture9, &IID_IDirect3DDevice9}},
               {t2, {&IID_IUnknown, &IID_IDirect3DTexture9, &IID_IDirect3DBaseTexture9, &IID_IDirect3DResource9}, {&IID_IDirect3DSurface9, &IID_IDirect3DCubeTexture9, &IID_IDirect3DVolumeTexture9}},
               {vt, {&IID_IUnknown, &IID_IDirect3DVolumeTexture9, &IID_IDirect3DBaseTexture9, &IID_IDirect3DResource9}, {&IID_IDirect3DTexture9, &IID_IDirect3DVolume9, &IID_IDirect3D9}},

@@ -1,6 +1,7 @@
 // part e of test_bridge.py: private data D3DSPD_IUNKNOWN with app_unk_guest.cpp. The "guest object" is a raw x86-shaped COM object (a table of 32-bit code
 // addresses); the test's fnvnx_guest_invoke plays the lifter runtime: it calls the address with the stack words as cdecl arguments and records the call.
 #include <stdio.h>
+#include "../t_keep.h"
 #include "d9impl.gen.h"
 extern "C" { struct fnvnx_guest_ret { uint32_t eax, edx; double st0; };
 static uint32_t g_calls, g_last_addr, g_bad;
@@ -16,7 +17,7 @@ static int fails, checks;
 int main() {
     static uint32_t vt[3] = {(uint32_t)(uintptr_t)g_qi, (uint32_t)(uintptr_t)g_addref, (uint32_t)(uintptr_t)g_release};
     GObj g = {(uint32_t)(uintptr_t)vt, 1}; void* gp = &g; static const GUID k = {7, 7, 7, {7}};
-    NxDirect3D9* d = new NxDirect3D9; NxObj* o = d; o->asRoot(1);
+    NxDirect3D9* d = t_new<NxDirect3D9>(); NxObj* o = d; o->asRoot(1);
     CHECK(o->setPrivateData(k, &gp, 4, D3DSPD_IUNKNOWN) == D3D_OK); CHECK(g.refs == 2 && g_calls == 1 && g_last_addr == vt[1]);
     void* q = nullptr; DWORD sz = 4; CHECK(o->getPrivateData(k, &q, &sz) == D3D_OK && q == gp && g.refs == 3 && g_calls == 2);
     CHECK(o->setPrivateData(k, &gp, 4, D3DSPD_IUNKNOWN) == D3D_OK); CHECK(g.refs == 3 && g_calls == 4 && g_last_addr == vt[2]);   // AddRef new, then Release old

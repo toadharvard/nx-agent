@@ -6,6 +6,7 @@
 // balance is zero (live CPU blocks, live backend memory, backend images and memory blocks);  (iv) the process never crashes (the python side reads the sentinel on stderr).
 // Output: "PART b: n checks, f failed" (one-shot sweep) and "PART c: ..." (sticky sweep); "N <events>" first.
 #include "d9impl.gen.h"
+#include "../t_keep.h"
 #include "res_tex.h"
 #include "copy_util.h"
 #include "glue_buf.h"
@@ -282,8 +283,8 @@ static uint64_t run(uint64_t fail_at, bool sticky) {
     // setup: not counted (the factory and the device are made with the injector disarmed)
     g_armed = false; g_count = 0; g_fail_at = fail_at; g_sticky = sticky; g_nhit = 0; uint32_t err0 = nxs_errors();
     W w; w.d3d = static_cast<NxDirect3D9*>(nx_Direct3DCreate9(0)); NxCreateParams cp = {0, 64, 64, D3DCREATE_MIXED_VERTEXPROCESSING};
-    w.dev = new NxDevice9; NxObj* o = w.dev; o->asDevice(w.d3d); w.dev->init(cp); w.i9 = w.dev;
-    IDirect3D9Ex* ex = nullptr; if (SUCCEEDED(nx_Direct3DCreate9Ex(0, &ex))) { w.d3dx = static_cast<NxDirect3D9Ex*>(ex); w.devx = new NxDevice9Ex; NxObj* ox = w.devx; ox->asDevice(w.d3dx); w.devx->init(cp); }
+    w.dev = t_new<NxDevice9>(); NxObj* o = w.dev; o->asDevice(w.d3d); w.dev->init(cp); w.i9 = w.dev;
+    IDirect3D9Ex* ex = nullptr; if (SUCCEEDED(nx_Direct3DCreate9Ex(0, &ex))) { w.d3dx = static_cast<NxDirect3D9Ex*>(ex); w.devx = t_new<NxDevice9Ex>(); NxObj* ox = w.devx; ox->asDevice(w.d3dx); w.devx->init(cp); }
     g_armed = true; scenario(w); g_armed = false; uint64_t events = g_count;
     // teardown: everything created is released (public count 1 each), then the device and the factory
     rel(w.sc); rel(w.ld); rel(w.xs);

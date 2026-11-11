@@ -1,6 +1,7 @@
 // test harness: counted checks per part (b defaults/roundtrip, c validation, d state blocks, e refcounts); output lines `PART x: n checks, f failed`
 #pragma once
 #include "d9impl.gen.h"
+#include "../t_keep.h"
 #include <stdio.h>
 extern const char* g_ctx; extern const char* g_part; extern int g_checks[8], g_fails[8]; extern int g_part_i;
 void t_part(const char* name);
@@ -12,7 +13,7 @@ void t_defaults(); void t_valid(); void t_blocks(); void t_refs();
 // ---- test-only factory: the generated classes with the minimal definitions this test provides (t_factory.cpp)
 struct TEnv { NxDirect3D9* d3d; NxDevice9* dev; };
 TEnv t_env(uint32_t auto_depth = 1, uint32_t behavior = D3DCREATE_MIXED_VERTEXPROCESSING, uint32_t w = 640, uint32_t h = 480);
-template <class T> T* t_child(const TEnv& e, uint32_t pool = D3DPOOL_DEFAULT) { T* o = new T; o->asChild(e.dev, pool); return o; }
+template <class T> T* t_child(const TEnv& e, uint32_t pool = D3DPOOL_DEFAULT) { T* o = t_new<T>(); o->asChild(e.dev, pool); return o; }
 NxSurface9* t_surface(const TEnv& e, uint32_t usage, uint32_t w, uint32_t h);   // device child with a GetDesc
 NxSurface9* t_subsurface(const TEnv& e, NxObj* container, uint32_t usage, uint32_t w, uint32_t h);  // a level: refcount is the container's
 NxVertexDeclaration9* t_decl(const TEnv& e);

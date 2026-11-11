@@ -1,5 +1,6 @@
 // the recording backend, the harness main and the device helpers of tests/l6/draw.
 #include "t_common.h"
+#include "../t_keep.h"
 int g_checks[8], g_fails[8], g_pi = 0; const char* g_data = ".";
 void t_part(char p) { g_pi = p - 'a'; }
 bool t_check(bool ok, const char* what, const char* file, int line) {
@@ -65,8 +66,8 @@ int nx_env_profile_of(NxObj*) { return 0; }
 // ---- device helpers
 TDev t_dev(bool ex, uint32_t w, uint32_t h) {
     TDev e = {}; NxCreateParams cp = {0, w, h, D3DCREATE_MIXED_VERTEXPROCESSING};
-    if (ex) { NxDirect3D9Ex* d = new NxDirect3D9Ex; d->asRoot(1); e.devex = new NxDevice9Ex; e.devex->asDevice(d); e.devex->init(cp); e.core = e.devex; e.i9 = e.devex; }
-    else { e.d3d = new NxDirect3D9; e.d3d->asRoot(1); e.dev = new NxDevice9; e.dev->asDevice(e.d3d); e.dev->init(cp); e.core = e.dev; e.i9 = e.dev; }
+    if (ex) { NxDirect3D9Ex* d = t_new<NxDirect3D9Ex>(); d->asRoot(1); e.devex = t_new<NxDevice9Ex>(); e.devex->asDevice(d); e.devex->init(cp); e.core = e.devex; e.i9 = e.devex; }
+    else { e.d3d = t_new<NxDirect3D9>(); e.d3d->asRoot(1); e.dev = t_new<NxDevice9>(); e.dev->asDevice(e.d3d); e.dev->init(cp); e.core = e.dev; e.i9 = e.dev; }
     return e;
 }
 void t_target(TDev& d, uint32_t w, uint32_t h, bool depth) {
