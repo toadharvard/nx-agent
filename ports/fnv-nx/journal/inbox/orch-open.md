@@ -43,3 +43,16 @@ so no game code is built or gated on trunk yet. Frames rendered: 0.
 | 15 | exe pin | exepin.py WIP, worker interrupted | L1 w8 8eb087d5 |
 | 17 | references | fontstate farm job written; cltree 0; published 0 | L4 0570c774 |
 | 18 | ELF on trunk | 0 | - |
+
+## Numbers, 2026-11-11 21:55Z (changes since 21:45Z; source commit per row)
+
+| # | item | number | source |
+|---|---|---|---|
+| 8 | platform | guest archive UNRESOLVED 0 (newlib 141, runtime 18, hooks 14); s4 498 tests / 406 189 checks / 0 fail; s7 84 / 3 239 / 0; hooks called 14; platform/build.json waits 22:42Z | L5 1b27c5bf, 935d2355 |
+| 10 | lift exe | instest call/jmp 280/280; formgate 0/26 500 (input not yet an external); `pure` 221 violations in 49/90 lift files | L3b 60e9b6b7, 9ea1b6c2 |
+| 12 | L2 | R9 TSO-MAP in ORDERING.md; STATIC_CHECKS.md, ASM.md deleted; 262 names mismatches open | L2 068f6f59 |
+| 13 | gates | trunk 7; L1 w6 gates.json 21 (7 + 14 contract, red until contract_inputs.json); VERDICT A-G 7/7 listed on w6; REQUIRED_PRODUCT 32 | L1 d38e80f6 |
+| 13 | oracle | 35/35 (verify 31, contract 4); refs spec 59, contract 1; test_oracle 49 cases | L4 e4460fdf |
+| 13 | MERGER | w3 merged; w4 bf3556e0 rerun after ENOSPC (17 leaked /tmp/objstub-* x 937 MB); w7 0d378d6a queued | L1 note |
+| 17 | references | d3dx9 farms F-a 5/5 (127 s), F-b 13/13 (324 s), F-c running | L4 note |
+| 16 | loader rules S1-S8, M2-M4 | no source in any plan; L1 defines them in verify/RULES.md during the loader rewrite | orch 21:55Z |
