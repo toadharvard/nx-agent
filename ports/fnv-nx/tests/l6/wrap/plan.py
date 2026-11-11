@@ -28,7 +28,8 @@ class Plan:
     def __init__(self, spec):
         self.spec, self.names = spec, sorted(spec["interfaces"]); self.objs, self.calls, self.cache, self.slot, self.inst, self.open = {}, [], {}, 0, {}, {}
         self.meths = sorted(spec["methods"], key=lambda m: (m["iface"], m["slot"])); self.sidx = spec["structs"]
-        self.iid = {n: bytes.fromhex(spec["interfaces"][n]["iid"].replace("-", "")) for n in names_(spec)}
+        self.iid = {n: bytes.fromhex(spec["interfaces"][n]["iid"].replace("-", "")) for n in names_(spec) if spec["interfaces"][n]["iid"]}   # `iid: null` (IDirect3DShaderValidator9): no IID, never a QueryInterface target
+        self.rnames = [n for n in self.names if n in self.iid]
         self.iid = {n: b[0:4][::-1] + b[4:6][::-1] + b[6:8][::-1] + b[8:] for n, b in self.iid.items()}
 
     # ---- object model
@@ -166,7 +167,7 @@ class Plan:
 
     def handle_out(self, c, p, o):
         m, a = c["m"], c["args"]; iface = p["iface"]
-        if iface == "$riid": iface = next(n for n in self.names if self.iid[n] == a["riid"])
+        if iface == "$riid": iface = next(n for n in self.rnames if self.iid[n] == a["riid"])
         if p["own"] == "new": return self.new_obj(iface, m["name"], 1).num
         key = (c["this"], m["name"], p["name"], iface, tuple(a.get(x) for x in ("Level", "FaceType", "iSwapChain", "Type", "iSwapChain")))
         if key not in self.cache:
@@ -229,7 +230,7 @@ class Plan:
         ex = [(i, e) for i, e in enumerate(spec["exports"]) if "params" in e and "ret_kind" in e]
         for i, e in ex:
             c = self.call(e, 0, export=i)
-            if e["ret_kind"] == "handle": c["retv"] = self.new_obj("IDirect3D9", e["name"], 1).num; self.inst["IDirect3D9"] = c["retv"]
+            if e["ret_kind"] == "handle": c["retv"] = self.new_obj(e["iface"], e["name"], 1).num; self.inst.setdefault(e["iface"], c["retv"])
             elif e["name"] == "Direct3DCreate9Ex": self.inst["IDirect3D9Ex"] = c["outs"]["ppD3D"]
         for _ in range(len(self.names)):
             for t in self.names:
@@ -242,7 +243,7 @@ class Plan:
         for t in self.names:
             for _ in range(3): self.call(M[(t, "AddRef")], self.inst[t])
         first = len(self.calls); self.cover = first
-        for m in self.meths: self.call(m, self.inst[m["iface"]], riid=self.names[len(self.calls) % len(self.names)])
+        for m in self.meths: self.call(m, self.inst[m["iface"]], riid=self.rnames[len(self.calls) % len(self.rnames)])
         for c in list(self.calls[first:]):
             for p in c["m"]["params"]:
                 if p["kind"] == "handle" and p["dir"] == "out" and p["own"] == "addref" and c["hr"] == 0 and c["outs"][p["name"]] and p["iface"] != "$riid":
