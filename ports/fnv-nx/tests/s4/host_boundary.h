@@ -6,9 +6,14 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* guest calls made while the calling thread held a platform lock that is in scope of the rule (platform/include/fnvnx_lockcount.h):
-   the test mains require it to stay 0. The check is test-side only; the product boundary does not make it. */
+/* guest calls made while the calling thread held a platform lock (every os_lock/os_trylock of the platform; the game's own
+   os_glock family is not counted): the test mains require it to stay 0. The count is kept by the host test backend
+   (platform/os/os_posix.c calls fnvnx_lockcount_note, defined in host_boundary.cpp); the product has neither. */
 extern int g_bnd_lock_violations;
+/* the number of platform locks the calling thread holds now */
+unsigned fnvnx_bnd_locks_held(void);
+/* the first distinct acquisition sites of the locks that were held at a guest call (module offsets for addr2line), to stdout */
+void fnvnx_bnd_print_lock_violations(void);
 extern int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;
 /* the modules (bases) DisableThreadLibraryCalls told the boundary about */

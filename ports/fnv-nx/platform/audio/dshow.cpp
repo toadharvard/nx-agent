@@ -28,7 +28,7 @@
  * the lock, a plain integer -- no call), not an AddRef: removing a Hold from its slot only RETIRES it, and the reference
  * is released, outside the lock, by whoever ends the last use. Nothing holds a lock or a half-updated table across a call:
  * a call that never returns leaves, at worst, one in-use count that keeps one removed filter's reference unreleased.
- * The test boundary checks it (fnvnx_bnd_locks_held(), platform/include/fnvnx_lockcount.h). The renderer's methods and
+ * The test boundary checks it (os_lock counts per thread in the host backend, tests/s4/host_boundary.cpp). The renderer's methods and
  * decoders (as_renderer, as_pcm: the platform's own classes, known by the kind the graph gave them) run under the lock;
  * they call the mixer only. */
 #define DSH_IMPL
@@ -51,7 +51,7 @@ BOOL CloseHandle(HANDLE);
 namespace dsh {
 namespace {
 
-typedef GraphLock GL;   /* the graph lock (dshow_int.h): counted for fnvnx_bnd_locks_held() */
+typedef GraphLock GL;   /* the graph lock (dshow_int.h) */
 
 /* ---- the registry: what the mapper registers and the graph's intelligent connect searches */
 struct RegType { Guid maj, sub; };

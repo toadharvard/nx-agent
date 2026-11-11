@@ -20,7 +20,7 @@ os_lock_t w32_wait_lock;
 static_assert(sizeof(void *) != 4 || sizeof(CRITICAL_SECTION) == 24, "CRITICAL_SECTION must keep the 32-bit SDK layout");
 static_assert(sizeof(((CRITICAL_SECTION *)0)->LockSemaphore) >= sizeof(os_lock_t), "lock word must fit LockSemaphore");
 
-/* ---- critical sections */
+/* ---- critical sections: the game's own locks, so os_glock/os_gtrylock/os_gunlock (not counted, os.h) */
 static inline os_lock_t *cs_lock(LPCRITICAL_SECTION cs) { return (os_lock_t *)(void *)&cs->LockSemaphore; }
 static inline HANDLE tid_handle(DWORD tid) { return (HANDLE)(uintptr_t)tid; }
 
@@ -59,7 +59,7 @@ static bool cs_spin_acquire(LPCRITICAL_SECTION cs)
         spin = W32_CS_SPIN_MAX;
     os_lock_t *l = cs_lock(cs);
     for (DWORD i = 0; i < spin; i++) {
-        if (__atomic_load_n(&l->word, __ATOMIC_SEQ_CST) == 0 && os_trylock(l))   /* 0: unlocked */
+        if (__atomic_load_n(&l->word, __ATOMIC_SEQ_CST) == 0 && os_gtrylock(l))   /* 0: unlocked */
             return true;
         cpu_relax();
     }
@@ -74,13 +74,13 @@ extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
         cs->RecursionCount++;
         return;
     }
-    if (!os_trylock(cs_lock(cs)) && !cs_spin_acquire(cs)) {
+    if (!os_gtrylock(cs_lock(cs)) && !cs_spin_acquire(cs)) {
         if (__builtin_expect(w32_wg_on, 0)) {   /* the wait-graph watchdog (waitgraph.cpp) */
             w32_wg_cs_begin(self, cs, (uint32_t)(uintptr_t)__builtin_return_address(0));
-            os_lock(cs_lock(cs));
+            os_glock(cs_lock(cs));
             w32_wg_end(self);
         } else {
-            os_lock(cs_lock(cs));
+            os_glock(cs_lock(cs));
         }
     }
     __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_SEQ_CST);
@@ -95,7 +95,7 @@ extern "C" BOOL TryEnterCriticalSection(LPCRITICAL_SECTION cs)
         cs->RecursionCount++;
         return TRUE;
     }
-    if (!os_trylock(cs_lock(cs)))
+    if (!os_gtrylock(cs_lock(cs)))
         return FALSE;
     __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_SEQ_CST);
     cs->RecursionCount = 1;
@@ -112,7 +112,7 @@ extern "C" void LeaveCriticalSection(LPCRITICAL_SECTION cs)
     if (--cs->RecursionCount == 0) {
         __atomic_store_n(&cs->OwningThread, (HANDLE)0, __ATOMIC_SEQ_CST);
         cs->LockCount = -1;
-        os_unlock(cs_lock(cs));
+        os_gunlock(cs_lock(cs));
     }
 }
 

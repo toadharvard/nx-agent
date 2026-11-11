@@ -2,7 +2,6 @@
 #include "mixer.h"
 #include "reverb.h"
 #include "../os/os.h"
-#include "fnvnx_lockcount.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -34,9 +33,9 @@ struct mix_voice {
 };
 
 static os_lock_t g_lock;
-/* the mixer lock counts as a platform lock held (fnvnx_lockcount.h): nothing under it may call the game */
-static inline void mx_lock() { os_lock(&g_lock); fnvnx_bnd_lock_note(1); }
-static inline void mx_unlock() { fnvnx_bnd_lock_note(-1); os_unlock(&g_lock); }
+/* nothing under the mixer lock may call the game (a platform lock: os.h) */
+static inline void mx_lock() { os_lock(&g_lock); }
+static inline void mx_unlock() { os_unlock(&g_lock); }
 static mix_voice *g_voices;
 static uint32_t g_rate = 48000, g_chunk = 256;
 static float g_master = 1.0f;

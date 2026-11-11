@@ -78,6 +78,10 @@ _Static_assert(sizeof(CondVar) == sizeof(os_cond_t), "libnx CondVar must be one 
 void os_lock(os_lock_t *l) { mutexLock((Mutex *)&l->word); }
 int os_trylock(os_lock_t *l) { return mutexTryLock((Mutex *)&l->word) ? 1 : 0; }
 void os_unlock(os_lock_t *l) { mutexUnlock((Mutex *)&l->word); }
+/* the game's own locks (os.h): the same word, the same mutex */
+void os_glock(os_lock_t *l) { mutexLock((Mutex *)&l->word); }
+int os_gtrylock(os_lock_t *l) { return mutexTryLock((Mutex *)&l->word) ? 1 : 0; }
+void os_gunlock(os_lock_t *l) { mutexUnlock((Mutex *)&l->word); }
 
 int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns)
 {

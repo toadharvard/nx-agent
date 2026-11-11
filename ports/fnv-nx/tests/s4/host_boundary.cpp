@@ -5,7 +5,8 @@
  * counted (host_boundary.h) so the tests can see what the platform sent through the boundary. */
 #include "fnvnx_boundary.h"
 #include "host_boundary.h"
-#include "fnvnx_lockcount.h"
+#include <dlfcn.h>
+#include <stdio.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -19,8 +20,68 @@ extern "C" void fnvnx_reach_violation(uint32_t fact_id)
     throw ReachHit{fact_id};
 }
 
+/* ---- the platform locks each thread holds (os_posix.c reports every os_lock / os_trylock / os_unlock). The list keeps the
+ * lock and the address its acquirer returns to, so a violation names the acquisition site. */
+namespace {
+struct Held { const void *lock, *site; };
+const unsigned HELD_MAX = 256;
+__thread Held t_held[HELD_MAX];
+__thread unsigned t_nheld;
+const int SITES_MAX = 32;
+struct Site { const void *site; const void *callee; };
+Site g_sites[SITES_MAX];
+int g_nsites;
+volatile int g_sites_lock;
+}
+
+extern "C" void fnvnx_lockcount_note(int delta, const void *lock, const void *site)
+{
+    if (delta > 0) {
+        if (t_nheld < HELD_MAX)
+            t_held[t_nheld] = Held{lock, site};
+        t_nheld++;
+        return;
+    }
+    unsigned n = t_nheld < HELD_MAX ? t_nheld : HELD_MAX;
+    for (unsigned i = n; i-- > 0;)
+        if (t_held[i].lock == lock) {
+            for (unsigned j = i + 1; j < n; j++)
+                t_held[j - 1] = t_held[j];
+            t_nheld--;
+            return;
+        }
+    /* a lock released by a thread other than the one that took it: not in this thread's list */
+}
+
+static void note_violation(fnvnx_gaddr callee)
+{
+    while (__atomic_exchange_n(&g_sites_lock, 1, __ATOMIC_ACQUIRE)) {}
+    unsigned n = t_nheld < HELD_MAX ? t_nheld : HELD_MAX;
+    for (unsigned i = 0; i < n; i++) {
+        bool seen = false;
+        for (int k = 0; k < g_nsites; k++)
+            seen |= g_sites[k].site == t_held[i].site;
+        if (!seen && g_nsites < SITES_MAX)
+            g_sites[g_nsites++] = Site{t_held[i].site, (const void *)(uintptr_t)callee};
+    }
+    __atomic_store_n(&g_sites_lock, 0, __ATOMIC_RELEASE);
+}
+
 extern "C" {
-int g_bnd_lock_violations;   /* guest calls made while the thread held an in-scope platform lock (fnvnx_lockcount.h) */
+unsigned fnvnx_bnd_locks_held(void) { return t_nheld; }
+
+void fnvnx_bnd_print_lock_violations(void)
+{
+    for (int k = 0; k < g_nsites; k++) {
+        Dl_info di = {};
+        dladdr(g_sites[k].site, &di);
+        printf("  lock taken at %p (%s+0x%lx, module offset 0x%lx), guest callee %p\n", g_sites[k].site,
+               di.dli_sname ? di.dli_sname : "?", di.dli_saddr ? (unsigned long)((const char *)g_sites[k].site - (const char *)di.dli_saddr) : 0ul,
+               (unsigned long)((const char *)g_sites[k].site - (const char *)di.dli_fbase), g_sites[k].callee);
+    }
+}
+
+int g_bnd_lock_violations;   /* guest calls made while the thread held a platform lock (see host_boundary.h) */
 int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;
 uint32_t (*g_bnd_loader)(const char *name, uint32_t *base);
@@ -38,8 +99,10 @@ void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, cons
                             struct fnvnx_bnd_ret *out)
 {
     __atomic_fetch_add(&g_bnd_invokes, 1, __ATOMIC_RELAXED);
-    if (fnvnx_bnd_locks_held())
+    if (fnvnx_bnd_locks_held()) {
         __atomic_fetch_add(&g_bnd_lock_violations, 1, __ATOMIC_RELAXED);
+        note_violation(addr);
+    }
     if (g_bnd_invoke_hook && g_bnd_invoke_hook(addr, ecx, nargs, args, kind, out))
         return;
     W a[16] = {0};

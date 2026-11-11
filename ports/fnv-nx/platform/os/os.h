@@ -41,6 +41,14 @@ typedef struct { volatile uint32_t word; } os_lock_t;
 void os_lock(os_lock_t *l);
 int os_trylock(os_lock_t *l);               /* 1 if acquired */
 void os_unlock(os_lock_t *l);
+/* os_lock/os_trylock/os_unlock (and the lock a condition wait drops and re-takes) are the PLATFORM's locks: the rule
+ * "no platform lock is held across a call into the game" applies to every one of them, and the host test backend
+ * (os_posix.c) counts them per thread for the test boundary. A lock that implements a synchronisation object OWNED BY
+ * THE GAME (a CRITICAL_SECTION: the game holds it across its own callbacks, legitimately) takes the same word through
+ * os_glock/os_gtrylock/os_gunlock, which are not counted: the two families differ only in the count. */
+void os_glock(os_lock_t *l);
+int os_gtrylock(os_lock_t *l);              /* 1 if acquired */
+void os_gunlock(os_lock_t *l);
 
 /* ---- condition variables: one 32-bit word, all-zero = valid. Spurious wakeups allowed. */
 typedef struct { volatile uint32_t word; } os_cond_t;

@@ -381,7 +381,6 @@ struct IMoniker_ : Unk {   /* the slots up to BindToObject (IPersist, IPersistSt
 #include "mixer.h"
 #include "../os/os.h"
 #include "fnvnx_win32_ext.h"
-#include "fnvnx_lockcount.h"
 namespace dsh {
 
 /* private IIDs: our own pin / filter behind an IPin / IBaseFilter (no RTTI: the game's toolchain has none) */
@@ -438,10 +437,10 @@ struct GraphCore {
     /* The graph lock guards the graph's own tables (filter list, state, clock, event queue, the renderers' streams) and nothing
      * else: NO call into an object that is not provably the platform's own type is made with it held (such an object may be
      * the game's, a call into the game may not return, and the game may re-enter the graph from inside it). Taken only through
-     * GraphLock, which counts it for fnvnx_bnd_locks_held(). */
+     * GraphLock. */
     os_lock_t lock = {0};
-    void lock_enter() { os_lock(&lock); fnvnx_bnd_lock_note(1); }
-    void lock_leave() { fnvnx_bnd_lock_note(-1); os_unlock(&lock); }
+    void lock_enter() { os_lock(&lock); }
+    void lock_leave() { os_unlock(&lock); }
     volatile int aborted = 0;
     volatile int version = 0;   /* IGraphVersion: +1 on every AddFilter / RemoveFilter / pin connect / pin disconnect */
     void bump_version() { __atomic_add_fetch(&version, 1, __ATOMIC_ACQ_REL); }

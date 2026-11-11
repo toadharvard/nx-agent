@@ -46,6 +46,10 @@ uint32_t os_random32(void) { return (uint32_t)fnvnx_hcall0(fnvnx_host->random64)
 void os_lock(os_lock_t *l) { fnvnx_lock(&l->word); }
 int os_trylock(os_lock_t *l) { return fnvnx_trylock(&l->word); }
 void os_unlock(os_lock_t *l) { fnvnx_unlock(&l->word); }
+/* the game's own locks (os.h): the same word, the same runtime lock */
+void os_glock(os_lock_t *l) { fnvnx_lock(&l->word); }
+int os_gtrylock(os_lock_t *l) { return fnvnx_trylock(&l->word); }
+void os_gunlock(os_lock_t *l) { fnvnx_unlock(&l->word); }
 int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns) {
     return fnvnx_cond_wait(&c->word, &l->word, timeout_ns);
 }

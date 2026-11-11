@@ -88,8 +88,14 @@ static void futex_wake(volatile uint32_t *addr, int n)
 #endif
 }
 
-/* ---- locks: 0 free, 1 locked, 2 locked with waiters (Drepper, "Futexes are tricky", mutex 3) */
-void os_lock(os_lock_t *l)
+/* ---- locks: 0 free, 1 locked, 2 locked with waiters (Drepper, "Futexes are tricky", mutex 3)
+ * The host test processes define fnvnx_lockcount_note (tests/s4/host_boundary.cpp): os_lock/os_trylock/os_unlock report
+ * every platform lock taken and released by the calling thread (the lock, the address the acquiring caller returns to),
+ * which the test boundary checks at each call into the game. The product's backends (os_horizon.c, os_guest.c) do not
+ * count. The game's own locks (os_glock family) are not reported. */
+extern void fnvnx_lockcount_note(int delta, const void *lock, const void *site);
+
+static void lock_raw(os_lock_t *l)
 {
     uint32_t c = 0;
     if (__atomic_compare_exchange_n(&l->word, &c, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
@@ -108,13 +114,13 @@ void os_lock(os_lock_t *l)
     }
 }
 
-int os_trylock(os_lock_t *l)
+static int trylock_raw(os_lock_t *l)
 {
     uint32_t c = 0;
     return __atomic_compare_exchange_n(&l->word, &c, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
 }
 
-void os_unlock(os_lock_t *l)
+static void unlock_raw(os_lock_t *l)
 {
     if (__atomic_fetch_sub(&l->word, 1, __ATOMIC_RELEASE) != 1) {
         __atomic_store_n(&l->word, 0, __ATOMIC_RELEASE);
@@ -122,12 +128,37 @@ void os_unlock(os_lock_t *l)
     }
 }
 
-/* ---- condvars: sequence counter */
+void os_lock(os_lock_t *l)
+{
+    lock_raw(l);
+    fnvnx_lockcount_note(1, l, __builtin_return_address(0));
+}
+
+int os_trylock(os_lock_t *l)
+{
+    if (!trylock_raw(l))
+        return 0;
+    fnvnx_lockcount_note(1, l, __builtin_return_address(0));
+    return 1;
+}
+
+void os_unlock(os_lock_t *l)
+{
+    fnvnx_lockcount_note(-1, l, 0);
+    unlock_raw(l);
+}
+
+void os_glock(os_lock_t *l) { lock_raw(l); }
+int os_gtrylock(os_lock_t *l) { return trylock_raw(l); }
+void os_gunlock(os_lock_t *l) { unlock_raw(l); }
+
+/* ---- condvars: sequence counter. The wait drops the lock and takes it again before it returns: for the count the
+ * thread holds the lock throughout (no guest call can happen on it while it waits). */
 int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns)
 {
     uint32_t seq = __atomic_load_n(&c->word, __ATOMIC_ACQUIRE);
     uint64_t start = timeout_ns == OS_WAIT_FOREVER ? 0 : os_monotonic_ns();
-    os_unlock(l);
+    unlock_raw(l);
     if (timeout_ns == OS_WAIT_FOREVER) {
         futex_wait(&c->word, seq, NULL);
     } else {
@@ -137,7 +168,7 @@ int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns)
     /* futex_wait gives no reliable "timed out" result through spurious wakes, measure instead */
     int timed_out = timeout_ns != OS_WAIT_FOREVER && __atomic_load_n(&c->word, __ATOMIC_ACQUIRE) == seq &&
                     os_monotonic_ns() - start >= timeout_ns;
-    os_lock(l);
+    lock_raw(l);
     return timed_out;
 }
 
