@@ -15,7 +15,11 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 | 4 | forms prover: per-encoding cert key (key, shape_sha, IR sha), 0x67 prefix, push/pop r16 + bound builders, farm run from the mirror | w4 session_01KmtZKSmVSGEpAznLZh6oF7 | claude/fnv-l3b-lift-w4 | doing |
 | 4b | Full shape-prover farm run over 19 481 encodings, certs.tsv | farms (to start) | fnv-nx-build l3b-lift/shapeprove | next, after w4 (cert keys must survive DSL edits) |
 | 4c | gate forms red: liftpack external (shapes.tsv) not declared | - | - | blocked by the pack coordinates, L3a (liftgen writes shapes.tsv at L3a 3461ebb3; pack l3a-lift/pack/3461ebb3… being published) |
-| 4d | Test migration plan: tests -> recipe-built objects (lift/rt + generated test roots), run as test ELFs in verify/boot.py, per-symbol real definitions and gaps | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3 | doing |
+| 4d | Test migration plan (8 tests, 10 gaps) | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3 | done ca4bcfe4 |
+| 4e | dsl_emit_test onto the recipe: generated lifted root lift/test/dslemit, FNVL_EMIT as generator argument, no direct g++ | w3 | claude/fnv-l3b-lift-w3 | doing |
+| 4f | Tests needing a link (instest_extra, x87dyn, mmxtest, sehcodes, chain, ehtest) | - | - | blocked by: two-root link (L1); G1 ticks, G2 tls slot, G3 set_raise_backend, G5 libc (L5); G4 dispatcher table generator, G7 cpu entry (L3a); G6 watch-point log, G8 test layout (L4) |
+| 4g | EH oracle independent of rt/seh (Wine 9.0 trace or cited ReactOS rules) for ehtest (G9) | - | - | open, L3b (with item 5) |
+| 4h | test_fpexact onto recipe fixtures | - | - | blocked by: negative-fixture root class (L1), w2g |
 | 5 | EH/SEH through lifted frames against the exe's EH tables (gate `eh`, class D) | - | - | open |
 | 6 | Open assumption records (12 of 41 open; A-FPMASK 55/830 unproven; fpm bundle WIP: libvorbis 15 -> 12) | - | - | open |
 | 7 | A-CTX: seh.c restores only integer regs + eip from CONTEXT after ContinueExecution; Windows also restores FP/SSE | - | - | open, reported to the orchestrator |
