@@ -1,7 +1,7 @@
 #include "obj.h"
 #include <stdlib.h>
 #include <string.h>
-void* nxd3d_alloc(size_t n) { void* p = malloc(n ? n : 1); if (!p) abort(); return p; }  // out of memory is fatal, as everywhere in the layer
+void* nxd3d_alloc(size_t n) { return malloc(n ? n : 1); }  // NULL on exhaustion: a result (obj.h)
 void nxd3d_free(void* p) { free(p); }
 const GUID IID_NxObj = {0x4e784f62, 0x6a5b, 0x4cf1, {0x9d, 0x01, 0x6e, 0x3f, 0xa0, 0x5b, 0x00, 0x01}};
 static bool eq(const GUID& a, const GUID& b) { return memcmp(&a, &b, sizeof(GUID)) == 0; }

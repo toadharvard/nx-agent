@@ -9,8 +9,18 @@
 #ifndef E_POINTER
 #define E_POINTER ((HRESULT)0x80004003L)
 #endif
-void* nxd3d_alloc(size_t n);  // the only allocator the layer uses (obj.cpp: malloc/free); replaceable per platform
+// The allocation contract of the whole layer (README "Allocation failure"): memory is a RESULT, never a trap. nxd3d_alloc returns NULL when the platform has no memory left (the guest's address window is reserved
+// whole, so this is an ordinary, reachable state); every caller returns the failure upward as the D3D9 HRESULT of the call that needed the memory, with nothing partial left behind.
+// The compiler enforces completeness: the result is warn_unused_result (-Werror=unused-result), the allocators are `malloc` attributed WITHOUT returns_nonnull, so GCC's -fanalyzer tracks "possibly NULL" through
+// every use (tests/l6/oom: gate N; build flags in tests/l6/oom/test_oom.py). Clang has no such attribute: the analyzer gate is GCC's.
+#if defined(__GNUC__) && !defined(__clang__)
+#define NX_ALLOCATOR(dealloc) __attribute__((malloc(dealloc, 1), warn_unused_result))
+#else
+#define NX_ALLOCATOR(dealloc) __attribute__((warn_unused_result))
+#endif
+#define NX_MUST_USE __attribute__((warn_unused_result))
 void nxd3d_free(void* p);
+void* nxd3d_alloc(size_t n) NX_ALLOCATOR(nxd3d_free);  // the only CPU allocator the layer uses (obj.cpp: malloc/free); replaceable per platform; NULL = out of memory
 enum { NX_FACE_SIZE = 8 };  // face.h
 // IUnknown objects of the application kept as private data (D3DSPD_IUNKNOWN): AddRef / Release on them are calls into the application.
 // app_unk_guest.cpp (lifted guest: fnvnx_guest_invoke) or app_unk_native.cpp (native hosts: tests, the replayer) defines them; exactly one is linked.
@@ -40,7 +50,8 @@ struct NxObj {
     NxPriv* priv = nullptr;
     NxObj* rnext = nullptr; NxObj* rprev = nullptr; NxObj* rhead = nullptr; uint8_t rlinked = 0;   // device resource registry: a device's rhead lists its live Create* resources (pool != 0xFF); Reset / eviction / memory accounting walk it
     // every object is allocated behind its guest face (face.h): NX_FACE_SIZE bytes in front of the complete object
-    void* operator new(size_t n) noexcept { uint8_t* r = (uint8_t*)nxd3d_alloc(n + NX_FACE_SIZE); if (!r) return nullptr; for (int i = 0; i < NX_FACE_SIZE; i++) r[i] = 0; return r + NX_FACE_SIZE; }
+    // `new T` of any object yields nullptr on exhaustion (noexcept: the compiler skips the constructor): EVERY use of `new` of a layer class is followed by a check
+    void* operator new(size_t n) noexcept NX_MUST_USE { uint8_t* r = (uint8_t*)nxd3d_alloc(n + NX_FACE_SIZE); if (!r) return nullptr; for (int i = 0; i < NX_FACE_SIZE; i++) r[i] = 0; return r + NX_FACE_SIZE; }
     void operator delete(void* p) { if (p) nxd3d_free((uint8_t*)p - NX_FACE_SIZE); }
     ~NxObj();                    // frees private data (Releases D3DSPD_IUNKNOWN entries)
     // ---- construction (the creating code calls exactly one of these after `new`)
