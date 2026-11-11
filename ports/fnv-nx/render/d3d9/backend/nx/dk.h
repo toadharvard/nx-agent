@@ -268,6 +268,7 @@ void nxdk_op_bind_vtx(const uint32_t* a, uint32_t argc);
 void nxdk_op_bind_vtxn(const uint32_t* a, uint32_t argc);
 uint32_t nxdk_vtx_bind_layout(uint32_t layout);   /* records the attribute and buffer state of a defined layout; 0 = ok, 1 = nxdk_err'd */
 uint32_t nxdk_vtx_flush(void);                    /* before a draw: binds (and flushes, S5) the streams the bound layout reads; 0 = ok */
+void nxdk_vtx_shutdown(void);                   /* nxdk_destroy: frees the host copies of the streams and returns every layout and binding to the state before the first op */
 /* ---- dk_pass.c */
 void nxdk_op_begin_pass(const uint32_t* a, uint32_t argc);
 void nxdk_op_begin_pass4(const uint32_t* a, uint32_t argc);
