@@ -4,6 +4,7 @@ Compiles with aarch64-linux-gnu-gcc in both ABIs (ilp32, lp64); scratch under te
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -52,7 +53,7 @@ tiny = os.path.join(ROOT, "tiny.h")
 open(tiny, "w").write("void myabort(void) __attribute__((noreturn));\nvoid fine(void);\n")
 tf = os.path.join(ROOT, "terms.txt")
 names = objstub.derive_terminators(CC, ["-I" + ROOT], ["tiny.h"], "c", tf)
-check("terminators: tiny header", names == ["myabort"], names)
+check("terminators: tiny header (and the EH-resume builtin as an unwinder)", [n for n in names if n[0] != "~"] == ["myabort"] and "~_Unwind_Resume" in names, names)
 libc = objstub.derive_terminators(CC, [], ["stdlib.h", "unistd.h", "assert.h", "signal.h"], "c", tf + ".libc")
 check("terminators: libc set", all(x in libc for x in ("abort", "exit", "_Exit", "quick_exit")) and "atexit" not in libc
       and "raise" not in libc, libc)
@@ -222,6 +223,144 @@ check("cache key changes with the os-layer flag and with a terminator the object
       objstub.object_key(many[0][1], {"abort"}, True)[0] != objstub.object_key(many[0][1], {"abort"}, False)[0])
 oc = build("void abort(void);\nvoid q(void){abort();}", "lp64")
 check("cache key: terminators & names", objstub.object_key(oc, {"abort"}, False)[0] != objstub.object_key(oc, set(), False)[0])
+# --- C++ objects (both ABIs): COMDAT sections, landing pads ending in _Unwind_Resume, thunks, guards, startup/cold/hot sections
+CXX = """
+#include <exception>
+#include <cstdlib>
+struct B { virtual ~B(); virtual int f(); };
+struct C { virtual void g(); int c; };
+struct D : B, C { void g() override; int f() override; };
+struct L { L(); ~L(); int v; };
+int may_throw(int);
+int use(int x) { L l; return may_throw(x) + l.v; }
+int stat_local(int x) { static int s = may_throw(x); return s; }
+template <class T> inline T twice(T x) { return x + x; }
+int tw(int x) { return twice(x) + (int)twice(2.0); }
+int B::f() { return 3; }
+B::~B() {}
+void D::g() { may_throw(1); }
+int D::f() { return may_throw(2); }
+int thrower(int x) { if (x) throw 5; return 0; }
+void caller(B *b) { delete b; }
+int hot(int x) __attribute__((hot));
+int hot(int x) { return x + 1; }
+int cold(int x) __attribute__((cold));
+int cold(int x) { return may_throw(x) * 2; }
+L glob;
+void term(int x) { if (x) std::terminate(); }
+void ab(int x) { if (x) abort(); }
+"""
+for abi in ("ilp32", "lp64"):
+    T = lambda n: "%s/%s" % (abi, n)
+    o = build(CXX, abi, "cc")
+    tl = os.path.join(ROOT, "cxx-%s.txt" % abi)
+    cterms = set(objstub.derive_terminators("aarch64-linux-gnu-g++", ["-mabi=" + abi], ["cstdlib", "exception", "new", "typeinfo", "cxxabi.h", "unwind.h"], "c++", tl))
+    secs = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", o], capture_output=True, text=True).stdout
+    check(T("C++ unit has COMDAT groups, .text.startup, .text.unlikely, .text.hot"), all(x in secs for x in (".group", ".text.startup", ".text.unlikely", ".text.hot")), secs[:300])
+    check(T("terminator rule: process end only (terminate, abort, exit); unwinding and throwing are unwinders (~), the EH-resume builtin is one"),
+          {"_ZSt9terminatev", "abort", "exit"} <= cterms and "~_Unwind_Resume" in cterms and "~__cxa_throw" in cterms and "__cxa_throw" not in cterms
+          and "_Unwind_Resume" not in cterms, sorted(cterms))
+    items, finds = objstub.run_check([(o, o)], cterms, {}, set())
+    bad = {(n, k) for _, n, k, _ in finds if k not in ("V",)}
+    check(T("C++: cleanup landing pads (_Unwind_Resume tail), throw, guards, thunks, startup/cold/hot, virtual destructors: only the two process-end calls are findings"),
+          bad == {(f, k) for f in ("_Z4termi", "_Z2abi") for k in ("T2", "T2-noreturn-tail")} and len(items) >= 15, (bad, len(items)))
+    check(T("C++: no T2-noreturn-tail anywhere (use, stat_local end in _Unwind_Resume; thrower ends in __cxa_throw)"), not any(k == "T2-noreturn-tail" and n not in ("_Z4termi", "_Z2abi") for _, n, k, _ in finds), finds)
+    check(T("C++: without the unwinder entries the same objects are findings (the rule is what accepts them)"),
+          any(k == "T2-noreturn-tail" and n == "_Z3usei" for _, n, k, _ in objstub.run_check([(o, o)], {x for x in cterms if x[0] != "~"}, {}, set())[1]))
+    cc = build('#include <cstdlib>\nextern "C" void fatal(void) __attribute__((noreturn));\nint f(int x) { if (x) fatal(); return 1; }', abi, "cc")
+    check(T("C++: a user noreturn function that is not nothrow is an unwinder by the compiler's flags, so a call in the middle is no finding (stated limit)"),
+          not any(k == "T2" for _, _, k, _ in objstub.run_check([(cc, cc)], {x for x in cterms}, {}, set())[1]))
+
+# --- wine_fixme (the bodies that do what Wine 9.0's simplified implementation does)
+WT = {5: ("IDirect3DDevice9::X", "wine-9.0:dlls/d3d9/device.c:foo", "u32", "7"), 6: ("IDirect3DDevice9::Y", "wine-9.0:dlls/d3d9/device.c:bar", "void", "")}
+HDR = "void fnvnx_wine_fixme(unsigned);\n"
+for abi in ("ilp32", "lp64"):
+    T = lambda n: "%s/%s" % (abi, n)
+    wk = lambda src, tbl=WT, extra=(): kinds_w(build(HDR + src, abi, extra=extra), tbl)
+    def kinds_w(o, tbl):
+        items, finds = objstub.run_check([(o, o)], set(), {}, set(), None, None, 1, tbl)
+        return {(n, k) for _, n, k, _ in finds}, finds
+    k, f = wk("int f(void) { fnvnx_wine_fixme(5); return 7; }")
+    check(T("wine: log call with constant id 5 and the row's value: certified (no V, no call finding)"), not k, f)
+    k, f = wk("int f(void) { fnvnx_wine_fixme(5); return 8; }")
+    check(T("wine: result differs from the row: wine-fixme-mismatch"), k == {("f", "wine-fixme-mismatch")}, f)
+    k, f = wk("int f(void) { fnvnx_wine_fixme(9); return 7; }")
+    check(T("wine: id not in the table: wine-fixme-unknown-id"), k == {("f", "wine-fixme-unknown-id")}, f)
+    k, f = wk("void f(unsigned a) { fnvnx_wine_fixme(a); }", extra=["-fno-optimize-sibling-calls"])
+    check(T("wine: non-constant id: wine-fixme-nonconstant"), ("f", "wine-fixme-nonconstant") in k, f)
+    k, f = wk("int f(void) { fnvnx_wine_fixme(5); fnvnx_wine_fixme(5); return 7; }")
+    check(T("wine: two log calls on one path: not exactly one id: wine-fixme-mismatch"), k == {("f", "wine-fixme-mismatch")}, f)
+    k, f = wk("int g;\nint f(void) { fnvnx_wine_fixme(5); g = 1; return 7; }")
+    check(T("wine: log call in a function that also stores to a global: wine-fixme-in-real-body"), k == {("f", "wine-fixme-in-real-body")}, f)
+    k, f = wk("void f(void) { fnvnx_wine_fixme(6); }", extra=["-fno-optimize-sibling-calls"])
+    check(T("wine: void kind, log call only: certified"), not k, f)
+    k, f = wk("int f(void) { fnvnx_wine_fixme(5); return 7; }", tbl={})
+    check(T("wine: empty table (the tree's header-only wine_fixme.tsv): wine-fixme-unknown-id"), k == {("f", "wine-fixme-unknown-id")}, f)
+    k, f = wk("void *h(void) { return (void *)fnvnx_wine_fixme; }")
+    check(T("wine: address taken in code: wine-fixme-address-taken"), ("h", "wine-fixme-address-taken") in k, f)
+    k, f = wk("void (*volatile ptr)(unsigned) = fnvnx_wine_fixme;")
+    check(T("wine: address taken in data: wine-fixme-address-taken"), any(kk == "wine-fixme-address-taken" for _, kk in k), f)
+    k, f = wk("int f(void) { fnvnx_wine_fixme(5); return fnvnx_wine_fixme_res(); }\n".replace("fnvnx_wine_fixme_res()", "ext()") .replace("int f", "int ext(void);\nint f"))
+    check(T("wine: another call in the body is a real body"), k == {("f", "wine-fixme-in-real-body")}, f)
+    items, finds = objstub.run_check([(build(HDR + "int f(void) { fnvnx_wine_fixme(5); return 7; }\nint g(void) { fnvnx_wine_fixme(5); return 7; }", abi),) * 2], set(), {}, set(), None, None, 1, WT)
+    cnt = objstub.wine_counts(objstub.analyse_all([("x", build(HDR + "int f(void) { fnvnx_wine_fixme(5); return 7; }\nint g(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set()))
+    check(T("wine: call sites per id are counted"), cnt == {5: 2}, cnt)
+# u32nz<N>: `p ? 0 : E_INVALIDCALL` style bodies at every optimisation level
+NZ = {2: ("IDirect3DDevice9::SetClipStatus", "wine-9.0:dlls/wined3d/device.c:wined3d_device_set_clip_status", "u32nz1", "0x8876086C,0")}
+SWAP = {2: NZ[2][:3] + ("0,0x8876086C",)}
+for abi in ("ilp32", "lp64"):
+    for opt in ("-O0", "-O1", "-O2", "-Os"):
+        T = lambda n: "%s%s/%s" % (abi, opt, n)
+        def nzk(src, tbl):
+            o_ = build(HDR + src, abi, extra=[opt])
+            items, finds = objstub.run_check([(o_, o_)], set(), {}, set(), None, None, 1, tbl)
+            return {(n, k) for _, n, k, _ in finds}, finds
+        SRC = "unsigned f(void *self, void *p) { (void)self; fnvnx_wine_fixme(2); return p ? 0u : 0x8876086Cu; }"
+        k, f = nzk(SRC, NZ)
+        check(T("wine u32nz1: p ? 0 : 0x8876086C certified"), not k, f)
+        k, f = nzk(SRC, SWAP)
+        check(T("wine u32nz1: swapped row values: wine-fixme-mismatch"), k == {("f", "wine-fixme-mismatch")}, f)
+        k, f = nzk("unsigned f(void *self, int *p) { (void)self; fnvnx_wine_fixme(2); return *p ? 0u : 0x8876086Cu; }", NZ)
+        check(T("wine u32nz1: a body that dereferences p: wine-fixme-in-real-body"), k == {("f", "wine-fixme-in-real-body")}, f)
+        k, f = nzk("unsigned f(void *self, unsigned long p) { (void)self; fnvnx_wine_fixme(2); return p + 1 ? 0u : 0x8876086Cu; }", NZ)
+        check(T("wine u32nz1: arithmetic on p: not certified"), k and ("f", "wine-fixme-mismatch") in k or ("f", "wine-fixme-in-real-body") in k, f)
+
+# kind addr: the function returns the address of a named object
+for abi in ("ilp32", "lp64"):
+    ob = build(HDR + "static int obj;\nint *f(void) { fnvnx_wine_fixme(7); return &obj; }\nint *h(void) { fnvnx_wine_fixme(8); return &obj; }", abi)
+    items, finds = objstub.run_check([(ob, ob)], set(), {}, set(), None, None, 1, {7: ("m", "wine-9.0:a.c:f", "addr", "obj"), 8: ("m", "wine-9.0:a.c:g", "addr", "other")})
+    check("%s/wine: kind addr: the symbol's address certifies, another symbol is wine-fixme-mismatch" % abi, {(n, k) for _, n, k, _ in finds} == {("h", "wine-fixme-mismatch")}, finds)
+for abi in ("ilp32", "lp64"):
+    ob = build('extern "C" void fnvnx_wine_fixme(unsigned);\n' + "static char g_mem[32] = {1};\nvoid *f() { fnvnx_wine_fixme(20); return g_mem + 8; }", abi, "cc")
+    for val, ok in (("_ZL5g_mem+8", True), ("_ZL5g_mem+0x8", True), ("_ZL5g_mem+4", False), ("_ZL5g_mem", False)):
+        items, finds = objstub.run_check([(ob, ob)], set(), {}, set(), None, None, 1, {20: ("m", "wine-9.0:a.c:f", "addr", val)})
+        check("%s/wine: kind addr SYMBOL+OFFSET (local C++ static, section+addend resolved): row %s -> %s" % (abi, val, "certified" if ok else "mismatch"),
+              not finds if ok else {(n, k) for _, n, k, _ in finds} == {("_Z1fv", "wine-fixme-mismatch")}, finds)
+# two ids on two paths (assembled: the paths branch on a register)
+ao = build(".text\n.global f\n.type f,%function\nf: stp x29,x30,[sp,-16]!\n cbz x0, 1f\n mov w0,5\n bl fnvnx_wine_fixme\n b 2f\n1: mov w0,6\n bl fnvnx_wine_fixme\n2: ldp x29,x30,[sp],16\n ret\n.size f,.-f\n", "ilp32", "s")
+oo = objstub.Obj(ao)
+tsec = next(i for i, x in enumerate(oo.secs) if x[0] == ".text")
+words = {a: struct.unpack_from("<I", oo.data, oo.secs[tsec][3] + a)[0] for a in range(0, oo.secs[tsec][4], 4)}
+bls = [a for a, w in words.items() if w >> 26 == 0b100101]
+check("wine: two different ids on two paths: no single id (wine_path_id None); one id on both paths: that id",
+      objstub.wine_path_id(words, 0, oo.secs[tsec][4], {bls[0]: 5, bls[1]: 6}) is None and objstub.wine_path_id(words, 0, oo.secs[tsec][4], {bls[0]: 5, bls[1]: 5}) == 5)
+for bad in ("5\tx\twine-9.0:a.c:f\tu32", "5\tx\twine:a.c:f\tu32\t1", "5\tx\twine-9.0:a.c:f\tu64\tzz", "x\tx\twine-9.0:a.c:f\tvoid\t", "5\tx\twine-9.0:a.c:f\tvoid\t1",
+            "5\tx\twine-9.0:a.c:f\tvoid\t\n5\ty\twine-9.0:a.c:g\tvoid\t"):
+    tf_ = os.path.join(ROOT, "w.tsv")
+    open(tf_, "w").write(bad + "\n")
+    try:
+        objstub.read_wine_table(tf_)
+        check("wine table: malformed row rejected: %r" % bad[:30], False)
+    except ValueError:
+        check("wine table: malformed row rejected: %r" % bad[:30], True)
+open(tf_, "w").write("# header\n5\tm\twine-9.0:dlls/x/y.c:f\tu32\t0x10\n")
+check("wine table: header comment and a valid row", objstub.read_wine_table(tf_) == {5: ("m", "wine-9.0:dlls/x/y.c:f", "u32", "0x10")})
+try:
+    objstub.read_wine_table(os.path.join(ROOT, "nonexistent.tsv"))
+    check("wine table: missing file is an error", False)
+except ValueError:
+    check("wine table: missing file is an error", True)
+
 # gate on the toy product root of test_recipe.py
 sys.path.insert(0, HERE)
 import test_recipe as TR  # noqa: E402
@@ -280,6 +419,25 @@ check("terminators come from the headers the unit includes (stdlib.h via the uni
 open(facts, "w").write("not a row\n")
 rc, g, _, txt, st = gate(repo3, ROOT + "/g7", GC)
 check("a malformed facts file: red, input error", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
+
+# wine_fixme and ILP32 at the gate level
+WC = '#include "toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
+for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", "green"), ("row value differs", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t8\n", "red"),
+                       ("malformed table", "5\tm\tnot-a-ref\tu32\t7\n", "input")):
+    wr = TR.make_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
+    rc, g, _, txt, st = gate(wr, ROOT + "/gw" + tag.replace(" ", "-"), GC)
+    check("gate, wine_fixme table, case %s: expected %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"] and g["wine_fixme"] == {"5": 1} and st[0] == "green") if want == "green" else
+          (rc == 2 and ("wine-fixme-mismatch 1" in g["detail"] if want == "red" else "input error" in g["detail"])), (g, txt))
+r32 = TR.make_repo("os-toy32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST})
+t0 = time.time()
+rc, g, secs, txt, st = gate(r32, ROOT + "/g32", GC)
+check("ILP32 toy root (ELF32 objects, aarch64linux32 link): gate green 4/4, accepted by verdict", rc == 0 and g["universe"] == 4 == g["certified"] and st[0] == "green", (g, txt))
+print("INFO ILP32 toy gate cold %.1f s" % secs)
+rc, g, secs, txt, st = gate(r32, ROOT + "/g32b", GC)
+print("INFO ILP32 toy gate warm %.1f s" % secs)
+r32r = TR.make_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
+rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
+check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
 
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)
