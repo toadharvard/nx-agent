@@ -7,7 +7,7 @@ Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
 import os, sys
 sys.path.insert(0, os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc
+from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc, zext
 from capstone import x86 as X
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
@@ -29,6 +29,7 @@ def form_key(ins):
     return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex())
 
 class Op:
+    a16 = False                      # address-size attribute 16 (set by build() from the 0x67 prefix)
     def __init__(s, ins, o):
         s.w = o.size * 8
         if o.type == X.X86_OP_REG: s.k, s.name = 'r', ins.reg_name(o.reg)
@@ -45,6 +46,17 @@ class Op:
         if s.w == 16: return 'e' + n, 0
         return 'e' + n[0] + 'x', (8 if n[1] == 'h' else 0)
 def ea(op, esp=None):
+    """effective address of a memory operand.  Address-size attribute 16 (prefix 0x67 in a 32-bit code segment, SDM Vol. 2 2.1.5 / Table 2-1, Vol. 1 3.7.5):
+    the offset is base16 + index16 + disp, computed modulo 2^16 and zero-extended to 32 bits; the segment base is added after.  Capstone names the 16-bit
+    registers (bx, bp, si, di): their values are the low words of ebx, ebp, esi, edi, so the sum of the 32-bit registers has the same low 16 bits."""
+    if op.a16:
+        sub16 = lambda n: V('e' + n, 32)
+        a = C(op.disp, 32)
+        if op.base: a = a + sub16(op.base)
+        if op.index: a = a + sub16(op.index) * op.scale
+        a = zext(trunc(a, 16), 32)
+        if op.seg: a = a + V(op.seg + '_base', 32)
+        return a
     sub = lambda n: esp if (n == 'esp' and esp is not None) else V(n, 32)
     a = C(op.disp, 32)
     if op.base: a = a + sub(op.base)
@@ -74,6 +86,16 @@ def cond(cc):                        # condition code 0..15 as a 1-bit node over
 def undef(F, names, sdm):
     for f in names: F.undefined(f, sdm)
 
+class AReg:
+    """an address-size register of the string / loop / xlat instructions (ESI, EDI, ECX / SI, DI, CX under the 0x67 prefix, SDM Vol. 2 MOVS, LODS, STOS, CMPS,
+    SCAS, LOOP, JCXZ).  .val = the register as an unsigned 32-bit value (zero-extended CX/SI/DI under a16); .put(F, v, when) writes v to it: the low
+    word only under a16 (the upper half of the 32-bit register is kept: SDM 'the 16-bit register is written, bits 31:16 are not modified')."""
+    def __init__(s, c, name):
+        s.name, s.a16 = name, c.a16; s.cur = V(name, 32)
+        s.val = zext(trunc(s.cur, 16), 32) if s.a16 else s.cur
+    def put(s, F, v, when=None):
+        F.reg(s.name, concat(extract(s.cur, 31, 16), trunc(v, 16)) if s.a16 else v, when)
+
 class Ctx:
     pass
 H = {}
@@ -89,8 +111,9 @@ def build(ins, addr):
     c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
     words = ins.mnemonic.split(); c.rep = words[0] if len(words) > 1 else ''; c.m = words[-1]
     c.ops = [Op(ins, o) for o in ins.operands]
-    raw = bytes(ins.bytes); i = 0; c.o16 = False
-    while raw[i] in PFX: c.o16 |= raw[i] == 0x66; i += 1
+    raw = bytes(ins.bytes); i = 0; c.o16 = False; c.a16 = False
+    while raw[i] in PFX: c.o16 |= raw[i] == 0x66; c.a16 |= raw[i] == 0x67; i += 1
+    for o in c.ops: o.a16 = c.a16
     c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw
     fn = H.get(c.m)
     if fn is None and c.m[0] == 'j': fn = H['jcc']

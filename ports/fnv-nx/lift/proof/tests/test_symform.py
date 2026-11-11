@@ -38,6 +38,15 @@ CASES = [
     ('bt r/m32,imm8', '0fba2005'),
     ('test r/m8,imm8', 'f6c101'),
     ('or m16,imm8 (sign-extended to 16 bits)', '66830880'),
+    ('0x67 mov r32,[bx+si]', '678b00'),
+    ('0x67 mov r32,[bp+disp8]', '678b4605'),
+    ('0x67 mov r32,[disp16]', '678b062211'),
+    ('0x67 add m8,imm8 [bx+di+disp16]', '678081221180'),
+    ('0x67 movsb', '67a4'),
+    ('0x67 rep movsb', '67f3a4'),
+    ('0x67 loop', '67e2fb'),
+    ('0x67 xlat', '67d7'),
+    ('0x67 mov moffs16', '67a12211'),
     ('add r16,imm16', '6681c03412'),
     ('rep movsd', 'f3a5'),
 ]
@@ -124,6 +133,57 @@ class SymFormTest(unittest.TestCase):
         out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout.strip(), symform.shape_sha(shape.shape_key(decode('83c105', 0))))
+
+
+class AddressSize16(unittest.TestCase):
+    """prefix 0x67 (SDM Vol. 2 2.1.5, Table 2-1): the effective address is the 16-bit sum, zero-extended; the string / loop registers are SI, DI, CX"""
+    def setUp(self):
+        import z3
+        self.z3 = z3
+
+    def form(self, h):
+        return forms.build(symform.decode(bytes.fromhex(h), 0), dsl.C(0, 32))
+
+    def valid(self, a, b):
+        z3 = self.z3
+        s = z3.Solver()
+        s.add(dsl.to_smt(a) != b)
+        return s.check() == z3.unsat
+
+    def test_modrm_address_wraps_at_16_bits(self):
+        z3 = self.z3
+        f = self.form('678b0b')                   # mov ecx, [bp+di]
+        load = f.regs[0][1]
+        ebp, edi = z3.BitVec('ebp', 32), z3.BitVec('edi', 32)
+        self.assertTrue(self.valid(load.a[0], z3.ZeroExt(16, z3.Extract(15, 0, ebp + edi))))
+
+    def test_moffs16(self):
+        z3 = self.z3
+        f = self.form('678b0e2211')              # mov ecx, [0x1122] (16-bit absolute: mod 0 rm 6)
+        self.assertTrue(self.valid(f.regs[0][1].a[0], z3.BitVecVal(0x1122, 32)))
+
+    def test_string_registers_are_16_bit_and_upper_halves_kept(self):
+        z3 = self.z3
+        f = self.form('67a4')                    # movsb es:[di], [si]
+        regs = dict((r, v) for r, v, _ in f.regs)
+        esi, df = z3.BitVec('esi', 32), z3.BitVec('df', 1)
+        step = z3.If(df == 1, z3.BitVecVal(-1, 16), z3.BitVecVal(1, 16))
+        self.assertTrue(self.valid(regs['esi'], z3.Concat(z3.Extract(31, 16, esi), z3.Extract(15, 0, esi) + step)))
+        self.assertEqual(len(f.stores), 1)
+
+    def test_loop_counts_cx(self):
+        z3 = self.z3
+        f = self.form('67e2fb')
+        ecx = z3.BitVec('ecx', 32)
+        regs = dict((r, v) for r, v, _ in f.regs)
+        self.assertTrue(self.valid(regs['ecx'], z3.Concat(z3.Extract(31, 16, ecx), z3.Extract(15, 0, ecx) - 1)))
+
+    def test_prefix_changes_the_form_only_where_the_address_size_matters(self):
+        def effects(h):
+            f = self.form(h)
+            return [(r, dsl.to_smt(v).sexpr()) for r, v, _ in f.regs] + [(fl, dsl.to_smt(v).sexpr()) for fl, v, _ in f.flags]
+        self.assertEqual(effects('6783c001'), effects('83c001'))          # register-only: the prefix is ignored
+        self.assertNotEqual(effects('678b00'), effects('8b00'))           # a memory operand: 16-bit addressing
 
 
 if __name__ == '__main__':
