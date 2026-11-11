@@ -38,7 +38,7 @@ layout(location = 5) in vec4 vTc3;  layout(location = 6) in vec4 vTc4;  layout(l
 layout(location = 8) in vec4 vTc6;  layout(location = 9) in vec4 vTc7;
 layout(location = 0) out vec4 outColor;
 
-#include "../../native/shaders/d9_epilogue.glsl"
+#include "d9_epilogue.glsl"
 
 // ---- domain functions (D3DTEXTUREOP 1..26 and D3DTA_*: see ffp_state.h) -----------------------------------------
 const uint NOP = 0u, DISABLE = 1u, SEL1 = 2u, SEL2 = 3u, MOD = 4u, MOD2X = 5u, MOD4X = 6u, ADD = 7u, ADDS = 8u,

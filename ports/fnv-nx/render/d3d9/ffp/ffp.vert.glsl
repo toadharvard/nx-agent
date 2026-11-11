@@ -35,6 +35,13 @@ layout (location = 2) out vec4 oTex0;  layout (location = 3) out vec4 oTex1;  la
 layout (location = 5) out vec4 oTex3;  layout (location = 6) out vec4 oTex4;  layout (location = 7) out vec4 oTex5;
 layout (location = 8) out vec4 oTex6;  layout (location = 9) out vec4 oTex7;
 layout (location = 18) out vec4 oFog;
+// Every other canonical varying slot (fnvnx_dk_layout.h fnvnx_dk_varying_location: 10-17 TEXCOORD8-15, 19-30 NORMAL0/1, TANGENT0, BINORMAL0, BLENDWEIGHT0,
+// BLENDINDICES0, POSITION1-3, DEPTH0, PSIZE1-2) is written 0.0, so this stage is "complete" (draw_ffp.h): it pairs with any pixel stage ("Varying completion").
+layout (location = 10) out vec4 oPad10;  layout (location = 11) out vec4 oPad11;  layout (location = 12) out vec4 oPad12;  layout (location = 13) out vec4 oPad13;
+layout (location = 14) out vec4 oPad14;  layout (location = 15) out vec4 oPad15;  layout (location = 16) out vec4 oPad16;  layout (location = 17) out vec4 oPad17;
+layout (location = 19) out vec4 oPad19;  layout (location = 20) out vec4 oPad20;  layout (location = 21) out vec4 oPad21;  layout (location = 22) out vec4 oPad22;
+layout (location = 23) out vec4 oPad23;  layout (location = 24) out vec4 oPad24;  layout (location = 25) out vec4 oPad25;  layout (location = 26) out vec4 oPad26;
+layout (location = 27) out vec4 oPad27;  layout (location = 28) out vec4 oPad28;  layout (location = 29) out vec4 oPad29;  layout (location = 30) out vec4 oPad30;
 out gl_PerVertex { vec4 gl_Position; float gl_PointSize; float gl_ClipDistance[6]; };
 
 float sat(float x) { return clamp(x, 0.0, 1.0); }
@@ -229,5 +236,8 @@ void main() {
         gl_ClipDistance[i] = (clipOn && ((rsMisc.x >> i) & 1u) != 0u) ? dot(ecRaw, clipPlane[i]) : 1.0;
 
     // ---- position convention of the translated shaders (render/shaders/README.md "D3D9 conventions")
+    oPad10 = vec4(0.0); oPad11 = vec4(0.0); oPad12 = vec4(0.0); oPad13 = vec4(0.0); oPad14 = vec4(0.0); oPad15 = vec4(0.0); oPad16 = vec4(0.0);
+    oPad17 = vec4(0.0); oPad19 = vec4(0.0); oPad20 = vec4(0.0); oPad21 = vec4(0.0); oPad22 = vec4(0.0); oPad23 = vec4(0.0); oPad24 = vec4(0.0);
+    oPad25 = vec4(0.0); oPad26 = vec4(0.0); oPad27 = vec4(0.0); oPad28 = vec4(0.0); oPad29 = vec4(0.0); oPad30 = vec4(0.0);
     gl_Position = vec4(clip.x + posfix.x * clip.w, (clip.y + posfix.y * clip.w) * posfix.z, clip.z, clip.w);
 }

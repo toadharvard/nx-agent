@@ -6,8 +6,8 @@
 // A NULL render target format (NXFMT_NULL, wined3d WINED3DFMT_NULL) has no storage: its chain is created without images and a Present of it copies no pixels (nothing to present; the frame counter and the rotation still run).
 // DECISIONS (doubt): Present rectangles must be non-empty and inside the back buffer (source) / the client area of the chain's window (destination, in client coordinates; the platform's presented image is
 // the window's client area), else D3DERR_INVALIDCALL (Wine clips in the GL blit, the backend ABI refuses); an absent destination with an invalid window = INVALIDCALL; the destination window override
-// is ignored (one output); GetFrontBufferData accepts dest formats A8R8G8B8 / X8R8G8B8 (MS: A8R8G8B8), dest in SYSTEMMEM-like lockable pools only (the surface must be CPU writable), windowed: the client origin offset
-// of wined3d_swapchain_get_front_buffer_data; GetLastPresentCount = number of presents of this chain (MS; Wine returns 0); GetPresentStats has no source for sync times: LEFT OUT.
+// is ignored (one output); GetFrontBufferData accepts dest format A8R8G8B8 only (MS), dest in SYSTEMMEM-like lockable pools only (the surface must be CPU writable), windowed: the client origin offset
+// of wined3d_swapchain_get_front_buffer_data; GetLastPresentCount = number of presents of this chain (MS; Wine returns 0); GetPresentStats: m1_stats.cpp.
 #include "res_tex.h"
 #include "d9impl.gen.h"
 #include "dev_core.h"
@@ -83,12 +83,12 @@ HRESULT NxChainCore::present(const RECT* s, const RECT* dr, void* ov, DWORD flag
     if (src.left < 0 || src.top < 0 || src.left >= src.right || src.top >= src.bottom || src.right > (LONG)pp.BackBufferWidth || src.bottom > (LONG)pp.BackBufferHeight) return INV;
     if (!win || dst.left < 0 || dst.top < 0 || dst.left >= dst.right || dst.top >= dst.bottom || dst.right > cw || dst.bottom > ch) return INV;
     NxImg* img = static_cast<NxSurfCore*>(bb[0])->img; img->upload();
-    if (!img->gpu) { L->frame++; rotate(this); pcount++; return D3D_OK; }   // NXFMT_NULL: no pixels
+    if (!img->gpu) { L->frame++; rotate(this); presented(); return D3D_OK; }   // NXFMT_NULL: no pixels
     NxPresent p = {}; p.image = img->gpu; p.sx = src.left; p.sy = src.top; p.sw = src.right - src.left; p.sh = src.bottom - src.top; p.dx = dst.left; p.dy = dst.top; p.dw = dst.right - dst.left; p.dh = dst.bottom - dst.top;
     p.interval = (flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 : nx_pp_interval(pp.PresentationInterval); p.gamma = ramp_set ? (uint64_t)(uintptr_t)&ramp : 0; p.frame = ++L->frame;
     if (L->cur.visible && L->cur.bgra) { p.cursor = (uint64_t)(uintptr_t)L->cur.bgra; p.cw = L->cur.w; p.ch = L->cur.h; p.cx = L->cur.x - (int32_t)L->cur.hx - cr.left; p.cy = L->cur.y - (int32_t)L->cur.hy - cr.top; }   // nxgpu4.h P2: blended onto the presented image, never into the back buffer
     if (int rc = nxd3d_present(this, &p)) return rc == NXD3D_HOOK_NOMEM ? D3DERR_OUTOFVIDEOMEMORY : D3DERR_DRIVERINTERNALERROR;   // the rects were validated: a refusal is a backend defect
-    rotate(this); pcount++; return D3D_OK;
+    rotate(this); presented(); return D3D_OK;
 }
 HRESULT NxChainCore::backbuffer(UINT i, IDirect3DSurface9** out) {   // backbuffer type ignored by native (Wine comment); the out pointer is untouched on failure (test_swapchain)
     if (!out || i >= nbb) return INV;
@@ -97,13 +97,13 @@ HRESULT NxChainCore::backbuffer(UINT i, IDirect3DSurface9** out) {   // backbuff
 HRESULT NxChainCore::frontbuffer_data(IDirect3DSurface9* dst) {
     NxObj* o = nx_obj_of(dst); if (!o || o->ci->rtype != D3DRTYPE_SURFACE) return INV;
     NxImg* im = static_cast<NxSurfCore*>(o)->img; uint32_t w = pp.BackBufferWidth, h = pp.BackBufferHeight; RECT cr = {0, 0, 0, 0};
-    if (im->fmt != D3DFMT_A8R8G8B8 && im->fmt != D3DFMT_X8R8G8B8) return INV;
+    if (im->fmt != D3DFMT_A8R8G8B8) return INV;   // MS GetFrontBufferData: "converted to the standard 32 bits per pixel format D3DFMT_A8R8G8B8"; Windows rows (visual.c, SYSTEMMEM surface and texture level) use only that
     uint32_t ox = 0, oy = 0; if (pp.Windowed) { if (!nxd3d_window_client(pp.hDeviceWindow, &cr) || cr.left < 0 || cr.top < 0) return INV; ox = (uint32_t)cr.left; oy = (uint32_t)cr.top; }   // wined3d: MapWindowPoints
     D3DBOX box = {ox, oy, ox + w, oy + h, 0, 1}; void* bits; uint32_t row, slice;
     if (!nx_box_valid(im, 0, &box) || FAILED(nx_img_lock(im, 0, 0, &box, 0, &bits, &row, &slice))) return INV;
     uint8_t* tmp = (uint8_t*)nxd3d_alloc((size_t)w * h * 4); int rc = tmp ? nxd3d_frontbuffer_read(this, w, h, tmp, w * 4) : NXD3D_HOOK_NOMEM;
     if (rc) { nxd3d_free(tmp); bool w0; nx_img_unlock(im, 0, 0, &w0); return rc == NXD3D_HOOK_NOMEM ? D3DERR_OUTOFVIDEOMEMORY : D3DERR_DRIVERINTERNALERROR; }
-    for (uint32_t y = 0; y < h; y++) { const uint8_t* sp = tmp + (size_t)y * w * 4; uint8_t* dp = (uint8_t*)bits + (size_t)y * row; for (uint32_t x = 0; x < w; x++, sp += 4, dp += 4) { dp[0] = sp[2]; dp[1] = sp[1]; dp[2] = sp[0]; dp[3] = im->fmt == D3DFMT_X8R8G8B8 ? 0xFF : sp[3]; } }
+    for (uint32_t y = 0; y < h; y++) { const uint8_t* sp = tmp + (size_t)y * w * 4; uint8_t* dp = (uint8_t*)bits + (size_t)y * row; for (uint32_t x = 0; x < w; x++, sp += 4, dp += 4) { dp[0] = sp[2]; dp[1] = sp[1]; dp[2] = sp[0]; dp[3] = sp[3]; } }
     nxd3d_free(tmp); bool was; nx_img_unlock(im, 0, 0, &was); return D3D_OK;
 }
 HRESULT NxChainCore::raster(D3DRASTER_STATUS* r) {   // wined3d_output_get_raster_status: a scan line faked from the performance counter, 20 lines of vertical blank, refresh 60 when the mode has none

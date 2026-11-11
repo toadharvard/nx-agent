@@ -169,6 +169,8 @@ FAMILIES = [
     dict(name="psb", ct="BOOL", n="NX_CONST_B", shape="range", default="0", blocks="P", group="PSCONST", set="SetPixelShaderConstantB", get="GetPixelShaderConstantB", arg="BOOL", w=1),
     dict(name="npatch", ct="float", n="1", shape="val0", default="0.0f", blocks="V", group="TESS", set="SetNPatchMode", get="GetNPatchMode", arg="float", retval=1),
     dict(name="curpal", ct="UINT", n="1", shape="val0", default="0", blocks="", group="PALETTE", set="SetCurrentTexturePalette", get="GetCurrentTexturePalette", arg="UINT"),
+    # SetConvolutionMonoKernel (m1_misc.cpp): width / height of the kernel, hand-written setter (Ex only, no getter in the API); MS: recorded in D3DSBT_PIXELSTATE
+    dict(name="convk", ct="uint32_t", n="2", shape="none", default="1", blocks="P", group="MISC"),
     # not in any block (MS: render targets, depth-stencil are device bindings; set/get hand-written in state_ext.cpp because of RT0 -> viewport/scissor reset)
     dict(name="rt", ct="IDirect3DSurface9*", n="NX_D3D_MAX_RTS", shape="none", blocks="-", group="RT"),
     dict(name="ds", ct="IDirect3DSurface9*", n="1", shape="none", blocks="-", group="DS"),

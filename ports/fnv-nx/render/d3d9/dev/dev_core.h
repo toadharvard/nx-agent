@@ -23,7 +23,7 @@ struct NxChainCore : NxObj {
     NxDeviceCore* d = nullptr; uint32_t index = 0;
     D3DPRESENT_PARAMETERS pp = {};                    // what GetPresentParameters reports: effective size / format / count, window = the chain's window, interval as given
     NxObj** bb = nullptr; uint32_t nbb = 0;           // back buffer objects (NxSurface9, implicit: public 0, owned); identity is fixed, the IMAGE contents rotate (dev_chain.cpp rotate)
-    D3DGAMMARAMP ramp = {}; bool ramp_set = false; uint32_t pcount = 0;
+    D3DGAMMARAMP ramp = {}; bool ramp_set = false; uint32_t pcount = 0, pres_vb = 0;   // pcount: successful presents (GetLastPresentCount, PresentCount); pres_vb: vblank counter when the last present returned (m1_stats.cpp)
     NxObj* destroy_bbs();                             // destroys the back buffers that have no public reference, detaches the others (Ex Reset): they become ordinary objects
     ~NxChainCore();
     HRESULT present(const RECT* src, const RECT* dst, void* override_win, DWORD flags);   // flags: D3DPRESENT_FORCEIMMEDIATE = interval 0
@@ -33,6 +33,8 @@ struct NxChainCore : NxObj {
     HRESULT display(D3DDISPLAYMODE* m); HRESULT display_ex(D3DDISPLAYMODEEX* m, D3DDISPLAYROTATION* rot);
     HRESULT present_params(D3DPRESENT_PARAMETERS* out);
     HRESULT last_present_count(UINT* c);
+    void presented();                                 // a present succeeded: pcount++, stamp pres_vb (m1_stats.cpp)
+    HRESULT present_stats(D3DPRESENTSTATS* s);        // IDirect3DSwapChain9Ex::GetPresentStats (m1_stats.cpp)
     // creation of the back buffers (also Reset): a surface per buffer, GPU image, lockable per D3DPRESENTFLAG_LOCKABLE_BACKBUFFER
     HRESULT make_buffers(const NxPPEff& e, const D3DPRESENT_PARAMETERS& p);
 };

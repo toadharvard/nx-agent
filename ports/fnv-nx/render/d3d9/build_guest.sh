@@ -5,7 +5,7 @@
 #
 # Output:  OUT_DIR/gen/                 generated sources and tables (gen_impl, state_model, res_smgen, gen_bridge, gen_env)
 #          OUT_DIR/libfnvnx-d3d9.a      every product source: dev/*.cpp except app_unk_native.cpp (the guest uses app_unk_guest.cpp),
-#                                       the generated .cpp files, front/*.c. Deterministic (ar D, fixed member order, no paths).
+#                                       the generated .cpp files, front/*.c, ffp/ffp_state.c, ffp/ffp_vs_state.c. Deterministic (ar D, fixed member order, no paths).
 #          OUT_DIR/defined_nxb.txt      the nxb_* symbols the archive defines (expected: column 7 of gen/d9bridge_rows.tsv; set-compared)
 #          OUT_DIR/undefined.tsv        every symbol undefined in the archive as a whole: symbol, demangled, owner, members
 #          OUT_DIR/build.json           compiler version, flags, sources with sha256, archive sha256
@@ -38,6 +38,11 @@ PY=(python3 -I)
 "${PY[@]}" "$HERE/dev/res_smgen.py" "$GEN" "$ROOT/render/shaders/total/sm_table.json" "$HERE/spec/d3d9_tables.py"
 "${PY[@]}" "$HERE/gen/gen_bridge.py" "$GEN" "$SPEC"
 "${PY[@]}" "$HERE/env/gen_env.py" "$GEN"
+# fixed-function programs (dev/ffp_prog.cpp): the GLSL text for the GL backend (ffp_glsl.gen.h) and the DKSH images for deko3d (ffp_dksh.gen.h), compiled by uam of the translator build. The translator build is a
+# DECLARED INPUT of the guest build: FNVNX_SHADERS_DEPS = the deps directory of render/shaders/build.sh (default render/shaders/build/deps); without uam there is no deko3d program, so the build stops.
+UAM=${FNVNX_SHADERS_DEPS:-$ROOT/render/shaders/build/deps}/uam/build/uam
+[ -x "$UAM" ] || { echo "build_guest: the fixed-function programs need DKSH images compiled by uam, which the translator build provides: run render/shaders/build.sh and/or set FNVNX_SHADERS_DEPS=<its deps directory> (expected executable: $UAM)"; exit 2; }
+"${PY[@]}" "$HERE/ffp/gen_glsl.py" "$GEN" --uam "$UAM"
 
 # ---- flags (platform/build_guest.sh ARCH + COMMON without -w)
 ARCH=(-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-pie -ftls-model=local-exec -fsigned-char)
@@ -55,6 +60,7 @@ while IFS= read -r f; do
 done < <(find "$HERE/dev" -maxdepth 1 -name '*.cpp' | sort)
 while IFS= read -r f; do echo "cxx gen:$(basename "$f")" >>"$JOBLIST"; done < <(find "$GEN" -maxdepth 1 -name '*.cpp' | sort)
 while IFS= read -r f; do echo "c ${f#"$ROOT/"}" >>"$JOBLIST"; done < <(find "$HERE/front" -maxdepth 1 -name '*.c' | sort)
+for f in ffp_state.c ffp_vs_state.c; do echo "c render/d3d9/ffp/$f" >>"$JOBLIST"; done     # the fixed-function state modules (the CPU references ffp_*_ref.c are test code)
 export GCC GXX ROOT GEN OBJ LOGS CXXF_S="${CXXF[*]}" CF_S="${CF[*]}"
 compile_one() {                                   # kind source
     local kind=$1 src=$2 abs obj log

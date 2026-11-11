@@ -45,8 +45,9 @@ def generate(tmp):
 
 def obj_cpp(text):
     """obj.cpp of the native test build: the platform allocator (the two definitions) is the harness's (t_oom.cpp), so it can inject faults"""
-    out = [l for l in text.split("\n") if not (l.startswith("void* nxd3d_alloc(size_t n)") or l.startswith("void nxd3d_free(void* p)"))]
-    assert len(out) == len(text.split("\n")) - 2, "obj.cpp: the allocator definitions moved"
+    lines = text.split("\n")
+    out = [l for l in lines if not (l.startswith("void* nxd3d_alloc(size_t n)") or l.startswith("void nxd3d_free(void* p)"))]
+    assert len(out) == len(lines) - 2, "obj.cpp: the allocator definitions moved"
     return "\n".join(out)
 
 
@@ -78,7 +79,8 @@ def run(exe, mode=None, timeout=900):
 
 
 # ---------------------------------------------------------------------------------------------------- d: analyzers
-GCC_FLAGS = ["-fanalyzer", "-Werror=analyzer-possible-null-dereference", "-Werror=analyzer-possible-null-argument", "-Werror=analyzer-null-dereference", "-Werror=analyzer-null-argument", "-Werror=unused-result", "-Werror=deprecated-declarations", "-Wanalyzer-possible-null-dereference", "-Wanalyzer-possible-null-argument", "-Wanalyzer-null-dereference", "-Wanalyzer-null-argument", "-Wunused-result", "-Wdeprecated-declarations",
+GCC_FLAGS = ["-fanalyzer", "-Wanalyzer-possible-null-dereference", "-Wanalyzer-possible-null-argument", "-Wanalyzer-null-dereference", "-Wanalyzer-null-argument", "-Wunused-result", "-Wdeprecated-declarations",
+             "-Werror=analyzer-possible-null-dereference", "-Werror=analyzer-possible-null-argument", "-Werror=analyzer-null-dereference", "-Werror=analyzer-null-argument", "-Werror=unused-result", "-Werror=deprecated-declarations",
              "-Wno-analyzer-malloc-leak", "-Wno-analyzer-mismatching-deallocation", "-Wno-analyzer-deref-before-check", "-Wno-analyzer-use-of-uninitialized-value", "-Wno-analyzer-out-of-bounds", "-Wno-analyzer-allocation-size"]
 CATS = ("analyzer-possible-null-dereference", "analyzer-possible-null-argument", "analyzer-null-dereference", "analyzer-null-argument", "unused-result", "deprecated-declarations")
 SEED = """#include "d9impl.gen.h"
@@ -108,14 +110,15 @@ void seed_ok_image(NxImg* i) { if (!i->upload()) return; }   // CONTROL
 """
 
 
-def gcc_findings(src, gen, extra=()):
-    r = sh(["g++"] + CXX + ["-O0", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT] + GCC_FLAGS + list(extra) + ["-c", src, "-o", os.devnull])
+def gcc_findings(src, gen):
+    r = sh(["g++"] + CXX + ["-O0", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT] + GCC_FLAGS + ["-c", src, "-o", os.devnull])
     out = []
     for l in r.stderr.split("\n"):
-        m = re.match(r"^(\S+?):(\d+):(\d+): (?:warning|error): (.*?) \[-W(?:error=)?([a-z-]+)\]", l)
+        m = re.match(r"^(\S+?):(\d+):(\d+): (?:warning|error): (.*?) \[-W(?:error=)?([a-z-]+)", l)
         if m and m.group(5) in CATS: out.append((m.group(1), int(m.group(2)), m.group(5), m.group(4)))
-        elif re.match(r"^(\S+?):(\d+):(\d+): (?:warning|error): .*deprecated", l):
-            m = re.match(r"^(\S+?):(\d+):(\d+): (?:warning|error): (.*)", l); out.append((m.group(1), int(m.group(2)), "deprecated-declarations", m.group(4)))
+        else:
+            m = re.match(r"^(\S+?):(\d+):(\d+): (?:warning|error): (.*deprecated.*)", l)
+            if m: out.append((m.group(1), int(m.group(2)), "deprecated-declarations", m.group(4)))
     return out
 
 
@@ -140,26 +143,20 @@ def analyzers(tmp, gen):
     # ---- the real tree: owned files must be clean, other workers' files are listed
     owned = [os.path.join(DEV, n + ".cpp") for n in OWNED] + [os.path.join(gen, n + ".gen.cpp") for n in GENS]
     others = sorted(p for p in glob.glob(os.path.join(DEV, "*.cpp")) if os.path.splitext(os.path.basename(p))[0] not in OWNED)
-    def one(p):
-        return p, gcc_findings(p, gen), allocscan.scan(clang, ast_args(gen), p, is_main)
+    def one(p): return p, gcc_findings(p, gen), allocscan.scan(clang, ast_args(gen), p, is_main)
     with cf.ThreadPoolExecutor(3) as ex: rs = list(ex.map(one, owned + others))
-    sites = 0; per = {}
+    sites = 0; per = {}; hdr = set(); nreal = 0
     for p, gf, sc in rs:
         mine = p in owned; name = os.path.basename(p)
         if sc is None: part("d", False, f"AST of {name}"); continue
         s_sites, s_find = sc; uniq = {(a, b) for a, b, c in s_sites if a == p}; per[name] = len(uniq); sites += len(uniq) if mine else 0
+        hdr |= {(os.path.basename(a), b) for a, b, c in s_sites if a.startswith(DEV) and a.endswith(".h")}
         fl = sorted({(os.path.basename(a), b, c) for a, b, c in s_find} | {(os.path.basename(a), b, "%s: %s" % (c, d[:80])) for a, b, c, d in gf})
-        if mine:
-            part("d", not fl, f"{name}: {fl[:4]}")
+        if mine: nreal += len(fl); part("d", not fl, f"{name}: {fl[:4]}")
         else:
             for f in fl: print(f"OTHER {f[0]}:{f[1]}: {f[2]}")
-    hdr = set()
-    for p, gf, sc in rs:
-        if sc:
-            for a, b, c in sc[0]:
-                if a.startswith(DEV) and a.endswith(".h"): hdr.add((os.path.basename(a), b))
     print(f"allocation-function call sites (compiler AST, owned files): {sites} in .cpp files, {len(hdr)} in headers; per file: " + ", ".join(f"{k}={v}" for k, v in sorted(per.items()) if v and k.replace('.cpp', '').replace('.gen', '') in OWNED + GENS))
-    print(f"real tree: owned translation units scanned {len(owned)}, findings {sum(1 for f in fails if f.startswith('d:') and 'seed' not in f)}; other workers' units scanned {len(others)}")
+    print(f"real tree: owned translation units scanned {len(owned)}, findings {nreal}; other workers' units scanned {len(others)}")
 
 
 # ---------------------------------------------------------------------------------------------------- e: gate T
@@ -185,8 +182,7 @@ def terminators(objdir, noret):
     for o in sorted(glob.glob(os.path.join(objdir, "*.o"))):
         for l in sh([nm, "-u", o]).stdout.split("\n"):
             if l.strip().startswith("U ") and l.split()[1] in noret: refs.setdefault(os.path.basename(o), set()).add(l.split()[1])
-        d = sh([od, "-dr", o]).stdout
-        for l in d.split("\n"):
+        for l in sh([od, "-dr", o]).stdout.split("\n"):
             m = re.match(r"^\s+[0-9a-f]+:\s+R_AARCH64_\w+\s+(\S+?)(?:\+0x[0-9a-f]+)?$", l)
             if m and m.group(1) in noret: refs.setdefault(os.path.basename(o), set()).add(m.group(1))
             if re.match(r"^\s+[0-9a-f]+:\s+[0-9a-f]{8}\s+(brk|udf)\b", l): traps.append((os.path.basename(o), l.strip()))
@@ -201,9 +197,16 @@ def guest_gate(tmp):
     noret = probe_noreturn(tmp)
     if not part("e", bool(noret) and "abort" in noret and "__cxa_pure_virtual" in noret and "__assert_func" in noret, "noreturn set derived from the toolchain headers"): return
     refs, traps = terminators(os.path.join(out, "obj"), noret)
-    print(f"gate T: noreturn routines declared by the toolchain headers (clang AST): {len(noret)}; guest objects scanned: {len(glob.glob(os.path.join(out, 'obj', '*.o')))}; references: {sum(len(v) for v in refs.values())} {dict((k, sorted(v)) for k, v in refs.items())}; brk/udf instructions: {len(traps)}")
-    part("e", not refs, f"references to terminating routines: {refs}"); part("e", not traps, f"trap instructions: {traps[:3]}")
-    return refs, traps
+    def owned(o):   # object name = source path with / -> _ : render_d3d9_dev_<file>.cpp.o, gen_<file>.o, render_d3d9_front_<file>.c.o
+        m = re.match(r"^render_d3d9_dev_(.*)\.cpp\.o$", o); return not m or m.group(1) in OWNED
+    mine_refs = {k: v for k, v in refs.items() if owned(k)}; mine_traps = [t for t in traps if owned(t[0])]
+    n_obj = len(glob.glob(os.path.join(out, "obj", "*.o")))
+    print(f"gate T: noreturn routines declared by the toolchain headers (clang AST): {len(noret)}; guest objects scanned: {n_obj}; owned objects: references {sum(len(v) for v in mine_refs.values())}, brk/udf instructions {len(mine_traps)}")
+    for k, v in refs.items():
+        if not owned(k): print(f"OTHER {k}: references {sorted(v)}")
+    for t in traps:
+        if not owned(t[0]): print(f"OTHER {t[0]}: trap instruction {t[1].split(chr(9))[-2:]}")
+    part("e", not mine_refs, f"references to terminating routines: {mine_refs}"); part("e", not mine_traps, f"trap instructions: {mine_traps[:3]}")
 
 
 # ---------------------------------------------------------------------------------------------------- f: mutations
@@ -241,8 +244,8 @@ def mutations(tmp, objs, gen):
         if not ok: return i, f, "link error"
         try: r, parts, last = run(exe, "one", 300)
         except subprocess.TimeoutExpired: return i, f, "killed: timeout (counts as detected: a hang is a failure)"
-        bad = r.returncode != 0
-        return i, f, ("detected: " + ("crash %d at %s" % (r.returncode, last) if r.returncode < 0 else "%d failed checks" % sum(v[1] for v in parts.values()) if bad else "")) if bad else "NOT DETECTED"
+        if r.returncode == 0: return i, f, "NOT DETECTED"
+        return i, f, "detected: " + ("crash %d at %s" % (r.returncode, last) if r.returncode < 0 else "%d failed checks" % sum(v[1] for v in parts.values()))
     with cf.ThreadPoolExecutor(2) as ex: res = list(ex.map(one, jobs))
     n = 0
     for i, f, msg in res:
