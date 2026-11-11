@@ -268,7 +268,7 @@ def h_lxs(cx, ins):
     cx.em('{ u32 ad=%s; u32 o=M%d(ad); u32 s=M16(ad+%du); %s %s }' % (cx.ea(ins, cx.ops[1]), 8 * w, w, seg_load(cx, sg), cx.wr(ins, cx.ops[0], 'o')))
 
 
-def far_target(cx, sel, off):
+def far_target(cx, sel):
     """a far JMP/CALL through a code-segment selector: the only code descriptor of the model GDT is CS (flat, DPL 3, non-conforming); the transfer requires RPL <= CPL (always true at
     CPL 3) and DPL == CPL, so it is valid exactly for the CS index (SDM Vol 3 5.8.1 / 5.8.1.2: JMP/CALL to a non-conforming code segment); anything else (a data selector, the null selector,
     a call-gate / TSS selector, kernel segments) is #GP(selector). CS keeps the model value SEL_CS (the new CS RPL is CPL)."""
