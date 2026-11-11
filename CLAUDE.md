@@ -28,8 +28,7 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
   - They never go into this public repository. That is how the Legal section is met: they are not distributed.
 - Long jobs (more than about 10 minutes) run on the farms (D17). The farms are cloud sessions the owner runs on
   purpose.
-- Commit messages end with exactly one trailer line, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-  There is no Claude-Session line, and no session URL or session id in any commit or file.
+- Commit messages carry no trailers: no Co-Authored-By, no Claude-Session, no session URL or id, in any commit or file.
 - Push to your own branch after every finished item. Open no pull requests. Do not edit JOURNAL.md: write inbox
   notes (docs/MACHINES.md).
 - Every check runs in the background, never blocking work. This covers tests, censuses, builds, boots and fuzz
@@ -146,3 +145,21 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - Packaging is deferred until the game runs in the emulator.
     - The final package is the game's own installed title: an NSP with its own title id, NPDM (32-bit address space), NACP and icon, packed with the owner's console keys.
     - Development runs use an Atmosphere exefs override.
+
+## The prepared build machinery is the only one (owner, 2026-11-11, binding)
+
+The owner's words: "Я буквально сказал, что я использую только конкретный компилятор... Мы нахуя инструменты подготавливали? Чтобы потом просто игнорить?"
+
+- **Compiler:** only the one pinned in `verify/env.json` (g++-13-aarch64-linux-gnu 13.3.0-6ubuntu2~24.04.1cross1, binutils 2.42-4ubuntu2.10), installed by `farm/setup_verdict_env.sh` and checked by `envcheck.py`. No unpinned apt, no other gcc.
+- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, and MSVC's new[] cookie and delete[] size. The headers and binutils come from the pinned distribution cross packages in `env.json`.
+  - It enters every guest product root as the recipe's external compiler (`{"external", "cc", "cxx"}`, RECIPE.md): a fnv-nx-build mirror `tools/gcc-ilp32-msvcmodel`, pinned by commit and `tree_sha256`.
+  - Our GCC plugins are built against its own plugin headers, as hermetic recipe stages; each `.so` is a declared input, so it is in every key. They are `fnvnx_order` (x86 TSO and MSVC volatile become `ldar`/`stlr`; MSVC argument order), `fnvnx_ftoi` (MSVC `_ftol`), and L2's `addr`, `dispatch`, `names`, `sdd` and `pi` (plus the clang `vtnames`).
+  - Native and decomp C++ load them all.
+  - Lifted C++ is compiled by the same compiler; the lifter emits the memory ordering itself (R9 (б)).
+  - The stock `g++-13` of `env.json` is the base the compiler is built from. It is not the game's compiler.
+  - fnvnx-a64 (gcc 15 + newlib) provides the guest's libc/libstdc++ and libnx.
+- **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
+- **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
+- **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
+- **Lifter:** `liftall.py` generates C++. Its objects are built by `recipe.py` in that store, as a product root with the pack as an external.
+- Missing something in this machinery? Extend it and say so in the inbox. A parallel path is a rule violation.

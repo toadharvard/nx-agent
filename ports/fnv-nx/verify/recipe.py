@@ -43,7 +43,7 @@ import unitstage  # noqa: E402
 FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "constants", "contract_names", "link", "external",
+KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
         "plugins", "plugin_cxx"}
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -261,6 +261,9 @@ def check(rec, root, files, roots, pin=None):
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
         if u not in units:
             err.append("os_layer entry %r is not a unit" % (u,))
+    gm = rec.get("game")
+    if gm is not None and not (isinstance(gm, str) and rel_ok(gm) and any(u.startswith(gm.strip("/") + "/") for u in units)):
+        err.append("game %r is not a root-relative directory holding units" % (gm,))
     for key in ("constants", "contract_names"):
         c = rec.get(key)
         if c is not None and not (isinstance(c, str) and rel_ok(c) and (c in mine or c in seen)):
@@ -386,6 +389,36 @@ def symbols(path, unit):
     return defined, undefined
 
 
+def fetch_externals(exts, store, extcache, ws):
+    """Content-pinned inputs: each external of EXTS fetched by exact commit into the bare cache EXTCACHE/<commit>, checked out at
+    WS/ext/<name>, ingested into the CAS STORE; its tree hash must equal tree_sha256 (BuildRed naming the external). -> {name: {host, tree, at}}.
+    Used by a recipe (Job.externals) and by gate_contract.py (the exe-derived inputs of the contract gates), one mechanism."""
+    out = {}
+    url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    for e in exts:
+        stage, bare, dest = "external:" + e["name"], os.path.join(extcache, e["commit"]), os.path.join(ws, "ext", e["name"])
+        try:
+            if not os.path.isdir(bare):
+                tmp = "%s.tmp%d-%s" % (bare, os.getpid(), os.urandom(4).hex())
+                os.makedirs(tmp)
+                for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, e["commit"]]):
+                    subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
+                os.replace(tmp, bare)
+            os.makedirs(dest)
+            ienv = dict(env, GIT_INDEX_FILE=os.path.join(ws, "idx-" + e["name"]))
+            subprocess.run(["git", "--git-dir", bare, "read-tree", e["commit"]], env=ienv, check=True, capture_output=True)
+            subprocess.run(["git", "--git-dir", bare, "--work-tree", dest, "checkout-index", "-a", "-f"], env=ienv, check=True, capture_output=True)
+        except (subprocess.CalledProcessError, OSError) as x:
+            raise BuildRed({"stage": stage, "exit": getattr(x, "returncode", None),
+                            "stderr": (getattr(x, "stderr", b"") or str(x).encode()).decode(errors="replace").splitlines()[-20:]})
+        tree = cas.ingest(dest, store)
+        if tree != e["tree_sha256"]:
+            raise BuildRed({"stage": stage, "exit": None, "stderr": ["tree_sha256 is %s, recipe says %s" % (tree, e["tree_sha256"])]})
+        out[e["name"]] = {"host": dest, "tree": tree, "at": e["at"]}
+    return out
+
+
 class Job:
     def __init__(self, repo, root, store, jobs, ext):
         self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
@@ -419,28 +452,7 @@ class Job:
 
     def externals(self, ws):
         """Fetch by exact commit into the shared bare cache, check out, ingest, require tree_sha256 (BuildRed naming the external)."""
-        url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
-        for e in self.rec.get("external", []):
-            stage, bare, dest = "external:" + e["name"], os.path.join(self.extcache, e["commit"]), os.path.join(ws, "ext", e["name"])
-            try:
-                if not os.path.isdir(bare):
-                    tmp = "%s.tmp%d-%s" % (bare, os.getpid(), os.urandom(4).hex())
-                    os.makedirs(tmp)
-                    for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, e["commit"]]):
-                        subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
-                    os.replace(tmp, bare)
-                os.makedirs(dest)
-                ienv = dict(env, GIT_INDEX_FILE=os.path.join(ws, "idx-" + e["name"]))
-                subprocess.run(["git", "--git-dir", bare, "read-tree", e["commit"]], env=ienv, check=True, capture_output=True)
-                subprocess.run(["git", "--git-dir", bare, "--work-tree", dest, "checkout-index", "-a", "-f"], env=ienv, check=True, capture_output=True)
-            except (subprocess.CalledProcessError, OSError) as x:
-                raise BuildRed({"stage": stage, "exit": getattr(x, "returncode", None),
-                                "stderr": (getattr(x, "stderr", b"") or str(x).encode()).decode(errors="replace").splitlines()[-20:]})
-            tree = cas.ingest(dest, self.store)
-            if tree != e["tree_sha256"]:
-                raise BuildRed({"stage": stage, "exit": None, "stderr": ["tree_sha256 is %s, recipe says %s" % (tree, e["tree_sha256"])]})
-            self.ext[e["name"]] = {"host": dest, "tree": tree, "at": e["at"]}
+        self.ext.update(fetch_externals(self.rec.get("external", []), self.store, self.extcache, ws))
 
     def drivers(self):
         c = self.rec["compiler"]

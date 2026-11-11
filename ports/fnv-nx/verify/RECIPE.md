@@ -33,6 +33,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   Outputs are root-relative, never tracked files, and appear in the root's view for `include` and as units when named like a source.
   The script must itself pass `puregate`; wall-clock reads and other open channels of the sandbox make `determinism` red.
 - `os_layer`: units that implement the OS interface (may contain SVC). They are flagged `os_layer: true` in objects.json for `objstub --os-layer`.
+- `game`: root-relative directory whose units are the game's (decomp) objects; the contract gates (gate_contract.py) require it of a root that links, no default.
 - `constants`: the constants table, a tracked file or a generated output, copied to `constants.tsv`. Rows
   `unit<TAB>symbol<TAB>kind<TAB>value<TAB>contract_ref`, key (unit, symbol), `unit` = the root-relative unit path as in `objects.json`
   (so two local symbols of equal name in two objects do not collide). Kinds: `void`, `u32`, `u64`, `addr` (the value of a function that

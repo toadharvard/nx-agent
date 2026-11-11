@@ -112,11 +112,16 @@ def store(path, key, rows):
                                                                  for r in rows}}, fh, sort_keys=True)
     os.replace(tmp, path)
 
-def main(argv):
-    o, dirs = parse(argv)
+def universe(dirs):
+    """the test files of the doc comment's universe (gate "oracle" judges the same list)"""
     files = []
     for d in dirs:
         files += sorted(os.path.normpath(f) for f in glob.glob(os.path.join(glob.escape(d), "tests", "test_*.py")))
+    return files
+
+def main(argv):
+    o, dirs = parse(argv)
+    files = universe(dirs)
     t0 = time.time()
     key = cpath = None
     if o["cache"] and files:

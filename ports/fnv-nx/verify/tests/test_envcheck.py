@@ -43,7 +43,7 @@ d0 = doc()
 check("env.json: format, programs owned, non-trivial package list", d0["format"] == "fnvnx-env/1" and d0["uid"] == 0
       and d0["arch"] == "x86_64" and {"strace", "busybox", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-as"} <= set(d0["programs"])
       and {"busybox-static", "gcc-13-plugin-dev-aarch64-linux-gnu", "libc6-dev-arm64-cross", "strace"} <= set(d0["packages"])
-      and set(d0["python"]["modules"]) == {"capstone", "unicorn", "pyelftools"}, d0["programs"])
+      and set(d0["python"]["modules"]) == {"capstone", "numpy", "unicorn", "pyelftools"}, d0["programs"])
 
 def mutate(f):
     d = doc()
