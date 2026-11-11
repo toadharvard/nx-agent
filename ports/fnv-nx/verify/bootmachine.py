@@ -128,7 +128,7 @@ EXT_NO_MODULE, EXT_NO_SERVICE, EXT_BAD_NARGS = U64 - 254, U64 - 253, U64 - 252  
 FNVNX_EXT_MODULES, UINT32_MAX, INT64_MAX = 64, 0xFFFFFFFF, (1 << 63) - 1
 FAULT_FRAME = 816
 FNVNX_TEXT_ENTRY_MAX = 500   # hostapi.h
-# hostapi.h TOTALITY TABLE, module 11 services 1..15, 34, 35 and 36: fn -> (name, least nargs). The sockets 16..33 are SOCK_SERVICES;
+# hostapi.h TOTALITY TABLE, module 11 services 1..15, 34, 35 and 36: fn -> (name, least nargs). The sockets 16..26, 30, 31 are SOCK_SERVICES;
 # both tables are checked against the header's parsed table by tests/test_bootmachine.py.
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3), 9: ("display_docked", 0),
@@ -136,9 +136,7 @@ PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2
                 14: ("section_free", 1), 15: ("unmap_fixed", 3), 34: ("tz_at", 2), 35: ("thread_self", 0), 36: ("text_entry", 5)}
 SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind", 2), 19: ("sock_listen", 2), 20: ("sock_accept", 2),
                  21: ("sock_connect", 2), 22: ("sock_sendto", 5), 23: ("sock_recvfrom", 5), 24: ("sock_setsockopt", 5),
-                 25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 27: ("sock_shutdown", 2), 28: ("sock_getsockname", 2),
-                 29: ("sock_getpeername", 2), 30: ("sock_getfl", 1), 31: ("sock_setfl", 2), 32: ("sock_gai_open", 4),
-                 33: ("sock_gai_fetch", 3)}
+                 25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 30: ("sock_getfl", 1), 31: ("sock_setfl", 2)}
 # wire numbers and lists of sockwire.h live in bootsock.py (tests/test_bootmachine.py compares them with the fixture copy)
 from bootsock import (WE_BADF, WE_FAULT, WE_INVAL, WE_OVERFLOW, WE_AFNOSUPPORT, WIRE_AF, WIRE_SOCKTYPE, WIRE_AI_MASK,  # noqa: F401
                       WEAI_BADFLAGS, WEAI_NONAME, WEAI_FAMILY, WEAI_SOCKTYPE, WPOLLNVAL)
@@ -623,7 +621,7 @@ class Machine:
     def _platform_ext(self, fn, args, nargs):
         """host_platform.inc: sockets 16..33 check nargs themselves (exactly the count, else -WE_INVAL); a fn without a row is
         NO_SERVICE; fewer arguments than the row, or nargs > 0 with a null array, is BAD_NARGS; extra arguments are ignored"""
-        if fn in SOCK_SERVICES:   # host_platform.inc: 16..33 dispatch BEFORE the general nargs / null-array check
+        if fn in SOCK_SERVICES:   # host_platform.inc: 16..31 dispatch BEFORE the general nargs / null-array check
             if nargs != SOCK_SERVICES[fn][1]:
                 return -WE_INVAL & U64
             if not args:

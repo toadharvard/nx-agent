@@ -238,6 +238,15 @@
     "gpa"
    ],
    "result": "gpa.json"
+  },
+  {
+   "name": "hostapi",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_hostapi.py"
+   ],
+   "result": "hostapi.json"
   }
  ]
 }
