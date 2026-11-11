@@ -3,12 +3,13 @@
  * This file is the Win32 side: the section and view objects, the argument validation and access rules, the process'
  * page map (memory.cpp, w32_vm_view_*: views are MEM_MAPPED, or MEM_IMAGE for a SEC_IMAGE section). The memory behind
  * a section is filemap_backing.h's interface, implemented by filemap_shared.cpp (host tests: shared memory objects) or
- * filemap_private.cpp (the product: private pages), whichever the program links.
+ * filemap_private.cpp (the product: private pages and host section objects), whichever the program links.
  * A file-backed section keeps the file object open through its own handle (so the section outlives CloseHandle of the
  * caller's file handle, as on Windows); the bytes a writable shared view changed go back to the file at
  * UnmapViewOfFile / FlushViewOfFile. A SEC_IMAGE section is laid out as the PE sections say (headers and sections at
  * their RVAs, zero fill, per-section page protection). */
 #include "filemap_backing.h"
+#include "reach.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -206,7 +207,7 @@ static DWORD image_fill(void *mem, void *c)
 
 /* validates the file as a PE32 image and creates the section's backing (the layout of image_fill) with the page
  * protections; 0 or the error */
-static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_base)
+static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_base, uint32_t *reach)
 {
     unsigned char hdr[0x1000];
     size_t got = 0;
@@ -239,7 +240,8 @@ static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_b
     struct image_ctx x = { m, oh + optsz, nsec, hsize, salign, fsize, imsz };
     struct fm_spec sp = { imsz, m->prot, true, true, false, m->fh, w32_file_writers_possible(m->fh) };
     DWORD err = 0;
-    m->bk = fm_backing_create(&sp, image_fill, &x, &err);
+    if ((*reach = fm_backing_reach(&sp)) == 0)
+        m->bk = fm_backing_create(&sp, image_fill, &x, &err);
     return err;
 }
 
@@ -295,12 +297,14 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
     m->reserve = (sec & SEC_RESERVE) != 0;
     m->file = !pagefile;
     DWORD err = 0;
+    uint32_t reach = 0;   /* the fact of a section the backend does not express (filemap_backing.h) */
     if (pagefile) {
         if (!want)
             err = ERROR_INVALID_PARAMETER;
         else {
             struct fm_spec sp = { want, base, false, false, m->reserve != 0, NULL, false };
-            m->bk = fm_backing_create(&sp, NULL, NULL, &err);
+            if ((reach = fm_backing_reach(&sp)) == 0)
+                m->bk = fm_backing_create(&sp, NULL, NULL, &err);
         }
         m->size = want;
     } else {
@@ -320,7 +324,7 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
             err = GetLastError();
         if (!err && m->image) {
             uint32_t pref = 0;
-            err = image_load(m, fsize, &pref);
+            err = image_load(m, fsize, &pref, &reach);
             m->size = m->image_size;
         } else if (!err) {
             uint64_t size = want ? want : fsize;
@@ -342,10 +346,15 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
                 m->size = size;
                 if (!err) {
                     struct fm_spec sp = { size, base, true, false, false, m->fh, w32_file_writers_possible(m->fh) };
-                    m->bk = fm_backing_create(&sp, NULL, NULL, &err);
+                    if ((reach = fm_backing_reach(&sp)) == 0)
+                        m->bk = fm_backing_create(&sp, NULL, NULL, &err);
                 }
             }
         }
+    }
+    if (reach) {   /* no lock is held and the section has no memory yet: its handles and file go with the object */
+        w32_obj_unref(&m->o);
+        w32_reach(reach);
     }
     if (err) {
         w32_obj_unref(&m->o);
@@ -498,6 +507,11 @@ extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD of
     {
         size_t span = (size_t)((len + PAGE - 1) & ~(uint64_t)(PAGE - 1));
         struct osmap_ctx c = { m->bk, off, m->reserve ? OS_VM_NONE : m->image ? OS_VM_READ | OS_VM_WRITE : os_prot_of_page(page), priv };
+        uint32_t reach = fm_view_reach(m->bk, c.prot, priv);
+        if (reach) {   /* a request the backend's memory cannot express (filemap_backing.h) */
+            w32_obj_unref(&m->o);
+            w32_reach(reach);
+        }
         struct view *v = (struct view *)calloc(1, sizeof *v);
         if (!v) {
             err = ERROR_NOT_ENOUGH_MEMORY;
@@ -530,6 +544,8 @@ extern "C" LPVOID MapViewOfFile(HANDLE hmap, DWORD access, DWORD offhi, DWORD of
                 p = q;
             }
         }
+        if (int alias = fm_backing_alias(m->bk))
+            w32_vm_view_alias((uintptr_t)res, span, alias == FM_ALIAS_FILE);
         v->base = (uintptr_t)res;
         v->size = span;
         v->m = m;
@@ -565,7 +581,7 @@ extern "C" BOOL UnmapViewOfFile(LPCVOID addr)
     }
     BOOL ok = writeback(v, v->base, v->size);
     DWORD err = ok ? 0 : GetLastError();
-    fm_view_unmap((void *)v->base, v->size);   /* the OS range first: the map keeps the address until it is really free */
+    fm_view_unmap(v->m->bk, (void *)v->base, v->size);   /* the OS range first: the map keeps the address until it is really free */
     w32_vm_view_remove(v->base);
     w32_obj_unref(&v->m->o);
     free(v);

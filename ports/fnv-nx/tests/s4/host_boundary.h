@@ -20,5 +20,12 @@ extern int (*g_bnd_invoke_hook)(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, 
                                 struct fnvnx_bnd_ret *out);
 #ifdef __cplusplus
 }
+/* the host test definition of fnvnx_reach_violation (loader/include/fnvnx_reach.h; noreturn): it records the fact and
+ * throws a ReachHit, so a test can assert "this call reaches fact N" without the process ending. REACH_EXPECT runs
+ * stmt and yields the fact it reached, or 0 when it returned. */
+struct ReachHit { uint32_t fact; };
+extern uint32_t g_reach_last;
+extern int g_reach_count;
+#define REACH_EXPECT(stmt) ([&]() -> uint32_t { try { stmt; } catch (const ReachHit &h_) { return h_.fact; } return 0; }())
 #endif
 #endif

@@ -9,6 +9,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+uint32_t g_reach_last;
+int g_reach_count;
+extern "C" void fnvnx_reach_violation(uint32_t fact_id)
+{
+    g_reach_last = fact_id;
+    g_reach_count++;
+    throw ReachHit{fact_id};
+}
+
 extern "C" {
 int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;

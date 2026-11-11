@@ -34,13 +34,13 @@ FT_CFLAGS := -O2 -w -DFT2_BUILD_LIBRARY -I$(FT)/include -I$(FT)/src
 CC ?= gcc
 CXX ?= g++
 FLAGS := -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar -pthread \
-         -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
+         -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include -I$(ROOT)/loader/include -I$(ROOT)/toolchain/include
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
 PLAT_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
 PLAT_CXX := $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp)   # audio: winmm waveOut* are exports of the table
-TEST_CXX := $(filter-out %/private_residue_probe.cpp,$(wildcard $(HERE)/*.cpp))   # the probe belongs to the private binary only
+TEST_CXX := $(filter-out %/host_section.cpp,$(wildcard $(HERE)/*.cpp))   # the host section services belong to the private binary only
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 
@@ -116,8 +116,8 @@ $(OUT)/probe_imports: $(PROBE_OBJS) $(OUT)/libfreetype.a
 probe: $(OUT)/probe_imports
 
 # ---- the same test objects linked with the product's file-mapping backend (platform/win32/filemap_private.cpp) instead of
-# filemap_shared.cpp, plus the test-only definition of its residue (private_residue_probe.cpp); runs the vmp_ cases
-PRIV_OBJS := $(filter-out %/filemap_shared.cpp.o,$(OBJS)) $(OUT)/platform/win32/filemap_private.cpp.o $(OUT)/tests/s4/private_residue_probe.cpp.o
+# filemap_shared.cpp, plus the test-only host implementation of the section services it calls (host_section.cpp); runs the vmp_ cases
+PRIV_OBJS := $(filter-out %/filemap_shared.cpp.o,$(OBJS)) $(OUT)/platform/win32/filemap_private.cpp.o $(OUT)/tests/s4/host_section.cpp.o
 $(OUT)/platform/win32/filemap_private.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/s4_tests_private: $(PRIV_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(PRIV_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
@@ -202,7 +202,7 @@ XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
 XFLAGS := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
-          -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
+          -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include -I$(ROOT)/loader/include -I$(ROOT)/toolchain/include
 ilp32: $(ENV_GEN)
 	@set -e; for f in $(PLAT_C); do echo "ilp32 cc  $${f#$(ROOT)/}"; $(XCC) -std=gnu11 $(XFLAGS) $$f; done
 	@set -e; for f in $(PLAT_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done

@@ -4,9 +4,11 @@
  * Two implementations, chosen when the program is linked, never at run time:
  *   filemap_shared.cpp   over os_shm_* (shared memory objects): every kind of section with its full contract; the host
  *                        test builds (tests/s4, tests/s7) link it.
- *   filemap_private.cpp  the product (guest) build, which has no shared-memory primitive: a view is private pages
- *                        holding the section's bytes; build_guest.sh links it. It expresses exactly the sections whose
- *                        views never need to alias (see its header comment); the rest goes to fm_private_residue.
+ *   filemap_private.cpp  the product (guest) build: a view is private pages holding the section's bytes where views
+ *                        never need to alias, and a view of a host section object (the host's section services,
+ *                        hostapi.h FNVNX_PLAT_SECTION_*) where they do; build_guest.sh links it. What the section
+ *                        services cannot express is a branch the reachability gate proves unreachable: the two
+ *                        fm_*_reach predicates name its fact (see its header comment).
  * A section is created with fm_backing_create; a view of it is one fm_view_map ... fm_view_unmap pair. */
 #ifndef FNVNX_FILEMAP_BACKING_H
 #define FNVNX_FILEMAP_BACKING_H
@@ -31,16 +33,34 @@ struct fm_spec {
 /* filled by the backend into zeroed memory of the section's size, before the section exists (SEC_IMAGE: the layout) */
 typedef DWORD (*fm_fill_fn)(void *mem, void *ctx);
 
-/* NULL with *err set when the section cannot be created */
+/* 0 when the backend creates the section described by sp, else the reach fact (reach_local.h) of the proven-unreachable
+ * branch the section belongs to: the caller (CreateFileMappingA) has released what it holds and ends in w32_reach(fact).
+ * The backend whose contract is the full one (filemap_shared.cpp) always answers 0. */
+uint32_t fm_backing_reach(const struct fm_spec *sp);
+
+/* NULL with *err set when the section cannot be created (a spec that fm_backing_reach answered 0 for) */
 struct fm_backing *fm_backing_create(const struct fm_spec *sp, fm_fill_fn fill, void *ctx, DWORD *err);
 void fm_backing_free(struct fm_backing *b);
 
+/* what a view of the section is: FM_ALIAS_NONE: ordinary pages of its own (VirtualProtect works on them); else the view
+ * aliases the pages of a host section object (the kind says which creation fact made the section: paging-file-backed,
+ * or file-backed writable): the OS cannot re-protect it, so memory.cpp ends VirtualProtect of it in that fact */
+enum { FM_ALIAS_NONE = 0, FM_ALIAS_PAGEFILE = 1, FM_ALIAS_FILE = 2 };
+int fm_backing_alias(const struct fm_backing *b);
+
+/* 0 when the backing gives the view MapViewOfFile asks for (os_prot: OS_VM_* bits; priv: copy-on-write pages), else the
+ * reach fact of the request it cannot express (the caller ends in w32_reach(fact)); no state changes */
+uint32_t fm_view_reach(const struct fm_backing *b, int os_prot, int priv);
+
 /* makes the content of [off, off + len) of the section ready for views; 0 or the Win32 error */
 DWORD fm_view_prepare(struct fm_backing *b, uint64_t off, uint64_t len);
-/* the OS range of a view: [off, off + size) (page multiples) of the section at exactly hint, or anywhere when hint is
- * NULL; os_prot: OS_VM_* bits; priv: copy-on-write pages. NULL: the OS refused */
+/* the OS range of a view: [off, off + size) (page multiples) of the section at exactly hint (the address the page map
+ * chose, granule aligned), or anywhere when hint is NULL; os_prot: OS_VM_* bits; priv: copy-on-write pages. NULL: the OS
+ * does not have that range (the page map tries the next one); W32_VIEW_FAIL with the last error set: no range will do */
 void *fm_view_map(struct fm_backing *b, uint64_t off, size_t size, void *hint, int os_prot, int priv);
-void fm_view_unmap(void *addr, size_t size);
+/* the view fm_view_map made at addr with that size (the arguments are the ones of its call: a view of a section object is
+ * unmapped exactly) */
+void fm_view_unmap(struct fm_backing *b, void *addr, size_t size);
 
 /* the file access of filemap.cpp, at an offset, leaving the file pointer where it was (the backends read through it) */
 bool fm_file_io(HANDLE h, void *buf, uint64_t off, size_t n, bool write, size_t *done);

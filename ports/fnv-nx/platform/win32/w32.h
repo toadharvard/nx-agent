@@ -116,12 +116,15 @@ int w32_wildcard_match(const char *pat, const char *name); /* Windows *, ? match
 
 /* ---- the page map's services (memory.cpp) to IsBad*Ptr (module.cpp) and to file views (filemap.cpp) */
 int w32_vm_probe(const void *p, size_t n, int access);   /* access 0 read, 1 write, 8 code; 1: accessible */
-typedef void *(*w32_view_osmap)(void *hint, size_t size, void *ctx);   /* maps the OS range of a view: exactly at hint */
+#define W32_VIEW_FAIL ((void *)~(uintptr_t)0)   /* osmap's answer "no range will do": the last error is set, the page map stops */
+typedef void *(*w32_view_osmap)(void *hint, size_t size, void *ctx);   /* maps the OS range of a view: exactly at hint; NULL: the OS
+                                                                          does not have it, the next free fit is tried */
 /* enters a view allocation of size bytes (granule placement at want or anywhere; osmap is called with the address
  * the map chose, and again with the next one if the OS refuses); image: MEM_IMAGE, else MEM_MAPPED. NULL: last error */
 void *w32_vm_view_place(uintptr_t want, size_t size, w32_view_osmap osmap, void *ctx, DWORD alloc_prot, DWORD page_prot,
                         int committed, int image, int reserve_section);
 size_t w32_vm_view_remove(uintptr_t base);   /* the view allocation at base leaves the map; its size, 0: not a view base */
+void w32_vm_view_alias(uintptr_t base, size_t size, int file);   /* the view's pages alias a host section object (file: of a file-backed section) */
 void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot);   /* the pages' current protection (map only) */
 
 /* file.cpp: can the bytes of the file behind this handle change while the handle's file object lives? Yes iff the open

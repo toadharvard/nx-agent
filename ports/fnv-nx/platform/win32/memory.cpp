@@ -12,6 +12,7 @@
  * Memory the platform or the loader got elsewhere is entered with fnvnx_win32_vm_note (flag F_FOREIGN: the OS
  * range is not ours to release); file views are entered by filemap.cpp through w32_vm_view_*. */
 #include "w32.h"
+#include "reach.h"
 
 #include <malloc.h>
 #include <stdlib.h>
@@ -25,7 +26,8 @@
 
 enum { ST_FREE = 0, ST_RESERVE = 1, ST_COMMIT = 2 };
 enum { TY_PRIVATE = 0, TY_MAPPED = 1, TY_IMAGE = 2 };
-enum { F_FOREIGN = 1, F_VIEW = 2, F_RESERVESEC = 4, F_RESET = 8, F_NEW = 16, F_WATCH = 32 };
+/* F_ALIAS_PF / F_ALIAS_FILE: the page is a view of a host section object (filemap_backing.h FM_ALIAS_*), which the OS cannot re-protect */
+enum { F_FOREIGN = 1, F_VIEW = 2, F_RESERVESEC = 4, F_RESET = 8, F_NEW = 16, F_WATCH = 32, F_ALIAS_PF = 64, F_ALIAS_FILE = 128 };
 struct pg {
     uint32_t base;      /* allocation base address >> 12; 0: free */
     uint32_t caller;    /* the memory lane (memtrack.cpp): the call that reserved the allocation */
@@ -193,8 +195,9 @@ static size_t place(uintptr_t want, size_t n, bool top_down, osmap_fn osmap, voi
             return NPAGES;
         }
         void *p = osmap((void *)paddr(first), n * PAGE, ctx);
-        if (!p) {
-            SetLastError(ERROR_INVALID_ADDRESS);
+        if (!p || p == W32_VIEW_FAIL) {
+            if (!p)
+                SetLastError(ERROR_INVALID_ADDRESS);
             return NPAGES;
         }
         return first;
@@ -208,6 +211,8 @@ static size_t place(uintptr_t want, size_t n, bool top_down, osmap_fn osmap, voi
         }
         /* the OS may hold the address (the host's own mappings): the map is the rule, the next free fit is the answer */
         void *p = osmap((void *)paddr(at), n * PAGE, ctx);
+        if (p == W32_VIEW_FAIL)   /* no range will do: the osmap has set the error */
+            return NPAGES;
         if (p)
             return at;
         if (top_down)
@@ -541,8 +546,12 @@ int w32_vm_probe(const void *p, size_t n, int access)
     return ok;
 }
 
-static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)   /* 0 or the error */
+/* 0 or the error. A range with a page of a view that aliases a host section object (F_ALIAS_*) cannot be re-protected by
+ * the OS: that request is the branch of the creation fact of its section (reach.h), taken after the lock is released
+ * and only when the call is otherwise valid (every error of the contract above it keeps its answer). */
+static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
 {
+    uint32_t reach = 0;
     uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
     DWORD err = 0;
     os_lock(&g_vm_lock);
@@ -555,9 +564,14 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)   /*
                 err = ERROR_INVALID_ADDRESS;
         if (!err && g_pg[f].type != TY_PRIVATE && ((prot_write(prot) && !prot_write(g_pg[f].aprot)) || (prot_exec(prot) && !prot_exec(g_pg[f].aprot))))
             err = ERROR_INVALID_PARAMETER;   /* beyond what the section / view grants */
-        if (!err && !(g_pg[f].flags & F_WATCH) && os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(prot)))
+        for (size_t i = f; i <= l && !err && !reach; i++)
+            if (g_pg[i].flags & F_ALIAS_FILE)
+                reach = REACH_KERNEL32_CreateFileMappingA_PROT;
+            else if (g_pg[i].flags & F_ALIAS_PF)
+                reach = REACH_KERNEL32_CreateFileMappingA_HFILE;
+        if (!err && !reach && !(g_pg[f].flags & F_WATCH) && os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(prot)))
             err = ERROR_INVALID_PARAMETER;
-        if (!err) {
+        if (!err && !reach) {
             *was = g_pg[f].cur;
             for (size_t i = f; i <= l; i++)
                 g_pg[i].cur = (uint16_t)prot;
@@ -568,6 +582,8 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)   /*
         }
     }
     os_unlock(&g_vm_lock);
+    if (reach)
+        w32_reach(reach);
     return err;
 }
 
@@ -816,6 +832,16 @@ size_t w32_vm_view_remove(uintptr_t base)
     }
     os_unlock(&g_vm_lock);
     return n * PAGE;
+}
+
+void w32_vm_view_alias(uintptr_t base, size_t size, int file)
+{
+    os_lock(&g_vm_lock);
+    if (pg_init() && base >= UMIN && base + size <= UEND)
+        for (size_t i = pidx(base), e = pidx(base + size - 1); i <= e; i++)
+            if (g_pg[i].flags & F_VIEW)
+                g_pg[i].flags |= file ? F_ALIAS_FILE : F_ALIAS_PF;
+    os_unlock(&g_vm_lock);
 }
 
 void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot)

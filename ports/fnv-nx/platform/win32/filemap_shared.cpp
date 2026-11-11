@@ -21,6 +21,11 @@ struct fm_backing {
 
 const char *fm_backend_name(void) { return "shared"; }
 
+/* the full contract: every section and every view is expressed */
+uint32_t fm_backing_reach(const struct fm_spec *) { return 0; }
+int fm_backing_alias(const struct fm_backing *) { return FM_ALIAS_NONE; }
+uint32_t fm_view_reach(const struct fm_backing *, int, int) { return 0; }
+
 static uint64_t page_round(uint64_t n) { return (n + PAGE - 1) & ~(uint64_t)(PAGE - 1); }
 
 struct fm_backing *fm_backing_create(const struct fm_spec *sp, fm_fill_fn fill, void *ctx, DWORD *err)
@@ -104,4 +109,4 @@ void *fm_view_map(struct fm_backing *b, uint64_t off, size_t size, void *hint, i
     return os_shm_map(b->shm, off, size, hint, os_prot, priv);
 }
 
-void fm_view_unmap(void *addr, size_t size) { os_shm_unmap(addr, size); }
+void fm_view_unmap(struct fm_backing *, void *addr, size_t size) { os_shm_unmap(addr, size); }
