@@ -56,3 +56,12 @@ so no game code is built or gated on trunk yet. Frames rendered: 0.
 | 13 | MERGER | w3 merged; w4 bf3556e0 rerun after ENOSPC (17 leaked /tmp/objstub-* x 937 MB); w7 0d378d6a queued | L1 note |
 | 17 | references | d3dx9 farms F-a 5/5 (127 s), F-b 13/13 (324 s), F-c running | L4 note |
 | 16 | loader rules S1-S8, M2-M4 | no source in any plan; L1 defines them in verify/RULES.md during the loader rewrite | orch 21:55Z |
+
+## Numbers, 2026-11-11 22:00Z
+
+| # | item | number | source |
+|---|---|---|---|
+| 11 | liftgen packs at 16ad274b (fnv-nx-build l3a-lift/src/16ad274b2498*) | exe 64/64, d3dx9_38 32/32, binkw32 1/1, libvorbis 1/1, libvorbisfile 1/1; 0 failed; objects via recipe 0 | farms G1-G4 |
+| 17 | fontstate | tools/fonts fcf99a1 published; 2 runs matched | farm fontstate |
+| 1 | msvcmodel mirror | tools/gcc-ilp32-msvcmodel absent (0 refs); farm still building | fnv-nx-build refs |
+| 13 | oracle caveat (a) | rule: a "spec" reference counts only with a resolving path+anchor outside the subject's import closure; free text = no reference | orch 22:00Z |
