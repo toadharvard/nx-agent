@@ -87,6 +87,14 @@ count >= 2) are spliced in by `sail_build.sh` (default; `x86_proof.ir` sha256 55
 (sha256 1de1cdc6...). `test/rothost.py` compares the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
 CF-in, cl and imm8 forms, second pre-flag pattern too): 488,112,128 cases, diff 0 on every SDM-defined output; `mfree` = model leaves a defined output
 undefined (shl/shr/sar CF beyond the width), `undef-info` = host value of an SDM-undefined output differing from the model's.
+Third patch (L3b, `sail_patches/bt_bitnumber.sail`): `x86_bt_0f_a3` (BT r/m, r with a memory operand) took `bitnumber = mod(abs(signed(offset)), 8)` while the byte
+address is `floor(offset / 8)`: for a negative offset it selected the mirror bit (offset -1: bit 1 of byte -1; SDM and hardware: bit 7). The patch uses
+`offset - 8 * floor2(offset, 8)`. The SDM says the addressed unit is `EA + size/8 * (BitOffset DIV size)` and the bit `BitOffset MOD size` (floor); `test/bthost.py` runs the real
+instruction on the host (bt/bts/btr/btc, m16 and m32, register offset, memory window compared byte by byte, two memory patterns) against the DSL: m16 all 2^16 offsets,
+m32 a class cover (all 32 residues x q in -4096..4095 and every power-of-two boundary up to 2^26 and both extremes), 2,642,944 cases, 0 disagreements; the stock formula
+disagrees with the host in 123,756 of the bt cases. The DSL (and the hand emitter `fnvlift/f_int.py bitstr`, which uses the same word-wise rule) is right. The model implements only 0F A3 and 0F BA /4 of the bit group;
+0F AB/B3/BB and 0F BA /5../7 are `Opcode Unimplemented` (model-gap, so bts/btr/btc shapes cannot be certified against it: their DSL is checked on the host only), 0F BA /4 takes the
+bit index mod size from an 8-bit immediate (no sign issue). The IR is now sha256 e436ee6f... (10,389,445 B).
 Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/ror OF at masked count 0, shl/shr/sar CF beyond the width), model-gap 2.
 
 ### Shape proofs (L3b C1c): the unit is the encoding SHAPE, not one encoding

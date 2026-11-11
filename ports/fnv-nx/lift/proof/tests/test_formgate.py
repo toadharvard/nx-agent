@@ -28,7 +28,7 @@ class workdir:
         shutil.rmtree(self.path)
 
 MD = shape.decoder()
-MODEL = '55f87ab6d6b7d5b26ac0bf4481b3854acee5a5cf2e1d55d842195be6497884f4'
+MODEL = 'e436ee6f79856a7ac9543400b7973dd1f0057410426f08b1e456c1d1c43e654a'
 # encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fld st(1))
 GOOD = ['01c8', '31c0', '8b4510', '6a05', 'c3', '90']
 NOBUILD = ['d9c1']
