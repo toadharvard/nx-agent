@@ -27,8 +27,7 @@
   "output": "libnxgl4.so",
   "version_script": "libnxgl4.map",
   "libs": [
-   "libEGL.so.1",
-   "libGL.so.1"
+   "libEGL.so.1"
   ],
   "roots": [
    "ports/fnv-nx/render/nxgpu@x86_64",

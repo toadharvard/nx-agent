@@ -30,3 +30,5 @@ Key names beyond kind/version_script are my reading of the lead's text; w15's sc
 - Source edit, one commit alone: gl4_d3dshader.c line 58 fnvnx_shader_translate( -> fnvnx_shader_translate_glsl(, same arguments.
 - Proof so far: the source has 0 `fnvnx_shader_translate(` calls. The PP output cannot be produced yet (gcc -E stops at missing GL/glcorearb.h, w16). Note: PP output will still contain the declaration of fnvnx_shader_translate from fnvnx_shaders.h (line 90), so "0 references" must mean 0 call sites, not 0 textual matches.
 - Undefined-symbols subset check: after the build, not done.
+
+link.libs = ["libEGL.so.1"] only (lead: every GL entry point loads through eglGetProcAddress; L4's pinned run-time set has no libGL). L1 ldcheck proves it; a direct gl* call would be reported by unit and symbol, not fixed with libGL.
