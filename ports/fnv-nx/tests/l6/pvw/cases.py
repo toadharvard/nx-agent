@@ -68,3 +68,71 @@ def gen_a(seed):
         c = base_case(r, decl=fixed, streams=streams, start=r.randint(0, 2), count=r.randint(1, 3), dstidx=r.randint(0, 2), dstfvf=r.choice([XYZ | D | S, RHW | D | tex_fvf([2, 3]), XYZ | N | D | tex_fvf([4, 1])]), vp=r.choice(VPS), proj=persp(1.0, 1.3, 1.0, 50.0), view=trans(0, 0, 2))
         c["rs"] = rand_rs(r); c["material"] = rand_material(r); c["lights"] = pick_lights(r); out.append(finalize(c, r))
     return out
+
+def simple(r, sfvf=XYZ | D, dfvf=RHW | D, count=3, **kw):
+    c = src_case(r, sfvf, count, kw.pop("start", 0)); c.update(dstfvf=dfvf, vp=VPS[1], proj=persp(1.0, 4 / 3, 1.0, 100.0), view=trans(0, 0, 3), **kw); c["rs"]["LIGHTING"] = kw.get("lit", 0) if False else c["rs"]["LIGHTING"]
+    c["rs"]["LIGHTING"] = 0; return c
+def gen_b(seed):
+    r = random.Random(seed); out = []; add = lambda c, **k: out.append(finalize(c, r, **k))
+    for ex in (0, 1):
+        # return codes
+        c = simple(r, ex=ex); c.update(decl=[], streams={}, usefvf=None); add(c)                                         # no declaration bound: INVALIDCALL (no position source)
+        c = simple(r, ex=ex); c.update(decl=[], streams={}, usefvf=None, declarg=1); add(c)                              # ... and the declaration argument's FIXME still fires first
+        c = simple(r, sfvf=N | XYZ, ex=ex); c["decl"] = [e for e in c["decl"] if e[3] != 0]; c["usefvf"] = None; add(c)   # declaration without position
+        c = simple(r, ex=ex); c["streams"] = {}; add(c)                                                                  # declaration but no stream buffer bound: INVALIDCALL
+        c = simple(r, ex=ex, dstnull=1); add(c); c = simple(r, ex=ex, dstnull=1, declarg=1); add(c)                      # NULL destination (rule P1): INVALIDCALL, nothing, no FIXME
+        c = simple(r, ex=ex, declarg=1); add(c); c = simple(r, ex=ex, declarg=0); add(c)                                 # fixme 1 / none
+        for clip in (0, 1):
+            c = simple(r, ex=ex); c["rs"]["CLIPPING"] = clip; add(c)                                                     # fixme 10 iff CLIPPING
+        c = simple(r, ex=ex, dfvf=0); add(c); c = simple(r, ex=ex, dfvf=0, count=0); add(c)                              # FVF without position: fixme 13, writes nothing, D3D_OK
+        c = simple(r, sfvf=XYZ | N | D, dfvf=XYZ | N | D, ex=ex); add(c)                                               # dst NORMAL with source normal: fixme 11
+        c = simple(r, sfvf=XYZ | D, dfvf=XYZ | N | D, ex=ex); add(c)                                                    # dst NORMAL without source normal (rule M2): INVALIDCALL
+        c = simple(r, sfvf=XYZ | D, dfvf=XYZ | N, count=0, ex=ex); add(c)                                                # ... but count 0 never reaches the loop: D3D_OK
+        c = simple(r, ex=ex); c["decl"] = [(0, 0, 2, 0, 0), (0, 12, 5, 10, 0)]; add(c)                                  # UBYTE4 colour: fixme 12 (once per call), colour (0,0,0,1)
+        c = simple(r, ex=ex, count=4); c["decl"] = [(0, 0, 2, 0, 0), (0, 12, 5, 10, 0)]; c["rs"]["LIGHTING"] = 1; c["lights"] = pick_lights(r, 3); c["rs"]["COLORVERTEX"] = 1; add(c)
+        c = simple(r, ex=ex); c["vs"] = 1; add(c); c = simple(r, ex=ex); c["flags"] = 1; add(c)                           # a bound vertex shader and D3DPV_DONOTCOPYDATA change nothing
+        c = simple(r, ex=ex, count=0); add(c)                                                                            # count 0
+        c = simple(r, ex=ex, sfvf=XYZ, dfvf=RHW | tex_fvf([2, 4]), count=2); add(c)                                      # destination texcoords without source: bytes skipped (ERR in Wine)
+        # out of range (rules M1)
+        for k in range(8):
+            c = simple(r, ex=ex, count=3); kind = k
+            if kind == 0: c["count"] = 100
+            elif kind == 1: c["start"] = 50
+            elif kind == 2: c["dstidx"] = 100
+            elif kind == 3: c["streams"][0]["offset"] += 4000
+            elif kind == 4: c["count"] = 0xFFFFFFFF; c["streams"][0]["stride"] = 0 if False else c["streams"][0]["stride"]
+            elif kind == 5: c["dlen"] = 40
+            elif kind == 6: c["start"] = 0x40000000; c["streams"][0]["stride"] = 16
+            elif kind == 7: c["dstidx"] = 0x10000000
+            add(c)
+        # exact fit and one byte short
+        c = simple(r, ex=ex, dfvf=RHW | D, count=3); add(c, dlen=48 + 0); c = simple(r, ex=ex, dfvf=RHW | D, count=3); add(c, dlen=47)
+        c = simple(r, ex=ex, dfvf=XYZ, count=3); add(c, dlen=36); c = simple(r, ex=ex, dfvf=XYZ, count=3); add(c, dlen=35)    # XYZ: the spill float of the last vertex is dropped
+        c = simple(r, ex=ex, dfvf=XYZ | PS, count=3); add(c, dlen=48)                                                  # XYZ|PSIZE: rhw lands in the PSIZE slot
+        # declaration shapes
+        c = simple(r, ex=ex); c["decl"] = [(0, 0, 2, 0, 0), (0, 12, 4, 10, 0), (0, 0, 3, 9, 0)]; c["decl"][2] = (0, 0, 2, 9, 0); add(c)   # POSITION then POSITIONT of the same slot: the last wins
+        c = simple(r, ex=ex); c["decl"] = c["decl"] + [(0, 12, 4, 10, 2)]; add(c)                                      # COLOR 2 is no fixed-function input
+        c = simple(r, ex=ex, sfvf=XYZ | tex_fvf([2]), dfvf=RHW | tex_fvf([2])); c["decl"] = c["decl"] + [(0, 12, 1, 5, 8)]; add(c)   # TEXCOORD 8 ignored
+        c = simple(r, ex=ex, sfvf=XYZ | D | S, dfvf=RHW | D | S); c["rs"]["DIFFUSEMATERIALSOURCE"] = 2; c["rs"]["LIGHTING"] = 1; c["rs"]["COLORVERTEX"] = 1; add(c)
+        # more than 32 enabled lights: only the first 32 (ascending index) count
+        c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 1
+        c["lights"] = {i: rand_light(r, [1, 2, 3][i % 3]) for i in range(40)}; c["lights"] = dict(sorted(c["lights"].items(), reverse=True)); add(c)
+        # singular modelview (the normal matrix is the modelview itself)
+        c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 1; c["world"] = scale(1, 0, 1); c["lights"] = pick_lights(r, 3); add(c)
+    return out
+def gen_c(seed):
+    r = random.Random(seed); out = []
+    for pool in (0, 1, 2):
+        for ex in (0, 1):
+            if ex and pool == 1: continue
+            for dfvf, cnt, di in ((RHW | D, 3, 0), (RHW | D, 2, 2), (XYZ, 3, 1), (XYZ | PS, 2, 0), (RHW | tex_fvf([2]), 2, 1)):
+                c = simple(r, ex=ex, pool=pool, dfvf=dfvf, count=cnt, dstidx=di, start=1); out.append(finalize(c, r))
+    # in place: the destination is stream 0 itself (Wine's loop reads and writes the same memory vertex by vertex)
+    for ex in (0, 1):
+        for k in range(6):
+            fvf = r.choice([RHW | D, XYZ | D, RHW | D | S, XYZ | D | S | tex_fvf([2])]); el, stride = fvf_layout(fvf); nv = 6
+            data = bytearray()
+            for i in range(nv): data += rand_vertex(r, el, stride)
+            data += bytes(16); c = base_case(r, ex=ex, pool=2, decl=el, streams={0: dict(stride=stride, offset=0, data=bytes(data), cfvf=fvf)}, dstfvf=fvf, alias=1, start=r.randint(0, 2), dstidx=r.randint(0, 2), count=r.randint(1, 3), vp=VPS[1])
+            c["rs"]["LIGHTING"] = 0; c["dlen"] = len(data); c["dstbytes"] = bytes(data); out.append(c)
+    return out

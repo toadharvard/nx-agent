@@ -2,6 +2,7 @@
 invert_matrix, context.c wined3d_stream_info_from_declaration) with numpy float32 scalars: every operation is one IEEE binary32 operation in the order Wine's C evaluates it. powf / expf / cosf are the host libm's (the test binary uses
 the same glibc routines; checked bit-equal over 200000 random powf inputs between the 32 bit and the 64 bit libm). Out-of-buffer accesses (rules M1 / M2 of pvw_core.cpp) give INVALIDCALL."""
 import ctypes, struct, numpy as np
+np.seterr(all="ignore")
 f32 = np.float32
 libm = ctypes.CDLL("libm.so.6")
 for n, k in (("powf", 2), ("expf", 1), ("cosf", 1)): getattr(libm, n).restype = ctypes.c_float; getattr(libm, n).argtypes = [ctypes.c_float] * k
