@@ -63,7 +63,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=()):
         if v is not None:
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
-    root = {"path": ROOT, "class": "product", "gates": [], "recipe": ROOT + "/build.json"}
+    root = {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"}
     if origin is not None:
         root["cxx_origin"] = origin
     w(repo, T + "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
@@ -75,7 +75,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=()):
 
 
 def errs(repo, rec):
-    return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo))
+    return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), recipe.load_pin(repo))
 
 
 def build(repo, store, out=None):
@@ -212,6 +212,7 @@ def main():
     check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
 
 
-main()
-print("FAILED: %s" % FAILED if FAILED else "all passed")
-sys.exit(1 if FAILED else 0)
+if __name__ == "__main__":
+    main()
+    print("FAILED: %s" % FAILED if FAILED else "all passed")
+    sys.exit(1 if FAILED else 0)

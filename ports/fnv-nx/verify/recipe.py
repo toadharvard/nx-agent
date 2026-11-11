@@ -46,6 +46,8 @@ ADMIT = TREE + "/verify/admit.json"
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "constants", "contract_names", "link", "external",
         "plugins", "plugin_cxx"}
 PLUGIN_KEYS = {"name", "source", "args"}
+GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
+GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
 # "Plugins"). The arguments are the MSVC semantics (evaluation order of arguments, objects, operators, assignments; enum conversion
 # an error as for cl). The other values the plugins accept (ltr, first, cpp17) exist for A/B measurements and are no product.
@@ -136,8 +138,34 @@ def units_of(rec, root, files):
     return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
 
 
-def check(rec, root, files, roots):
-    """Every problem of recipe REC of product root ROOT; roots {path: root entry}. -> [str] (empty = valid)."""
+def load_pin(repo="."):
+    """verify/guest_compiler.json of the checkout, or None when the tree has none."""
+    p = os.path.join(repo, GUEST_PIN)
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def guest_errors(rec, root, roots, pin):
+    """The admit.json entry of a product root declares "target": "guest" (the game's code: compiled by the game's compiler) or "host".
+    A guest root's compiler is the external of verify/guest_compiler.json, exactly (name, commit, tree, mount point, driver paths): the
+    distribution's g++-13 is not the compiler of guest code, for C and C++ alike (one compiler key serves both)."""
+    t = roots.get(root, {}).get("target")
+    if t not in GUEST_TARGETS:
+        return ['admit.json %s: a product root declares "target": "guest" or "host"' % root]
+    if t == "host":
+        return []
+    if not isinstance(pin, dict) or not isinstance(pin.get("external"), dict):
+        return ["guest root %s: %s is missing or has no external" % (root, GUEST_PIN)]
+    c = rec.get("compiler")
+    if not (isinstance(c, dict) and set(c) == {"external", "cc", "cxx"}):
+        return ["guest root %s: compiler must be the external compiler %r (not a distribution driver)" % (root, pin["external"].get("name"))]
+    ex = next((e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == c["external"]), None)
+    bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
+    bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
+    return ["guest root %s: %s" % (root, b) for b in bad]
+
+
+def check(rec, root, files, roots, pin=None):
+    """Every problem of recipe REC of product root ROOT; roots {path: root entry}; PIN = load_pin(). -> [str] (empty = valid)."""
     if not isinstance(rec, dict):
         return ["recipe is not a JSON object"]
     err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
@@ -234,6 +262,7 @@ def check(rec, root, files, roots):
             err.append("link must be {script: tracked file of the root, output: NAME.elf, flags: [..]}")
         else:
             err += ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])]
+    err += guest_errors(rec, root, roots, pin)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err
 
@@ -417,6 +446,15 @@ class Job:
             if "external" in c:
                 x = self.ext[c["external"]]
                 exes, trees = paths, ["%s@%s" % (x["host"], x["at"])]
+                # What the external compiler itself names outside its tree (its own answers, as gcc_set asks a distribution compiler): the
+                # assembler and linker it is configured with, and the header directories of its search list, symlink targets included
+                # (the distribution's cross headers and binutils, pinned by env.json). They are declared inputs at their own paths.
+                host = self.hostpath(paths[0])
+                xs, ts = unitstage.gcc_set(host)
+                q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
+                out = lambda p: not any(under(p, e["host"]) for e in self.ext.values())  # noqa: E731
+                exes += [p for p in xs[1:] + [q("ld")] if os.path.isabs(p) and out(p)]
+                trees += sorted({r for t in ts for r in (t, os.path.realpath(t)) if out(r) and os.path.isdir(r)})
             else:
                 exes, trees = [], []
                 for p in paths:
@@ -632,7 +670,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
     j = Job(repo, root, store, jobs, ext or os.path.join(store, "external"))
-    errs = check(j.rec, root, j.files, j.roots)
+    errs = check(j.rec, root, j.files, j.roots, load_pin(repo))
     if errs:
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
@@ -687,7 +725,7 @@ def main(argv):
         repo = "."
         if argv[:1] == ["check"]:
             roots = load_admit(repo)
-            errs = check(load_recipe(repo, roots, opt["--root"]), opt["--root"], tracked(repo), roots)
+            errs = check(load_recipe(repo, roots, opt["--root"]), opt["--root"], tracked(repo), roots, load_pin(repo))
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0
         res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"))

@@ -23,3 +23,13 @@ documents hold no `/ext/<name>`; an `asm(".incbin \"/ext/pack/pack.txt\"")` in a
 Cases where CC legitimately reads more: none found. `.s` units already see only their own file (assemble stage). Inline-asm `.incbin`/`.include` of an
 external path in C++/C/.S text was readable in CC before and is now a loud CC error; it was never in the PP closure, so it was untracked by the key anyway.
 If a root needs such data in an object, it must come through the preprocessor (a header the PP stage reads) - not decided here.
+
+## Part 1 of the msvcmodel extension (A, B, C, D for order/ftoi)
+- A: `toolchain/msvcmodel/*` imported from claude/port-nsw-un6t9s (build.sh, patch, test_msvcmodel.cpp/py).
+- B/C: admit.json product roots declare `"target": "guest"|"host"` (required, checked by recipe.check, so by `build`). `verify/guest_compiler.json` pins the
+  external compiler of guest roots (name, repo, ref, commit, tree_sha256, at, driver paths); a guest root must use exactly it for C and C++. The file is NOT yet
+  in the tree: it needs the commit and tree_sha256 of fnv-nx-build `tools/gcc-ilp32-msvcmodel` (L4). Until then no guest root is valid.
+- External compiler mechanism extended (the "tree copy" assumed a self-contained prefix): the assembler, linker and header directories the compiler itself
+  names outside its tree (the distribution cross binutils/headers of env.json) become declared inputs of the tool runtime.
+- D (order, ftoi): plugin stage reads the plugin headers of the external compiler. Tests: tests/test_guest.py (rule: 8 cases; the compiler cases need
+  FNVNX_TEST_GCC_PREFIX = a prefix built by toolchain/msvcmodel/build.sh and print SKIP without it).

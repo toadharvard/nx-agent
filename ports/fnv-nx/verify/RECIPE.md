@@ -67,6 +67,18 @@ them: x86_64 `x86_64-linux-gnu-g++-13` (the bare `g++-13` prints no path for `as
   no plugin. `toolflags` accepts `-fplugin=P` only under a declared input; it is not relaxed.
 - Memory ordering has no option: `fnvnx_order` makes every access to memory that is not a proven local `ldar`/`stlr` (x86 TSO), volatile or not.
   `ORDER_MODE` of the old compile.sh no longer exists in the plugin (it rejects an unknown argument).
+### Guest roots: the game's compiler (MSVCMODEL1)
+Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
+compiler, for C and C++ alike, is the external compiler pinned in `verify/guest_compiler.json`
+(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx"}`): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
+(`tools/gcc-ilp32-msvcmodel`). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
+tree_sha256, at) with the pinned driver paths. The distribution g++-13 is the base the compiler is built from, never the compiler of guest code. A tree
+without the pin file has no valid guest root. The plugins are built against this compiler's own plugin headers (the plugin stage reads
+`<cxx> -print-file-name=plugin`, inside the external).
+What an external compiler names outside its tree is declared as inputs at their own paths, from the compiler's own answers: the assembler and linker it is
+configured with (`-print-prog-name=as|ld`) and the header directories of its search list, symlink targets included (the distribution's cross binutils and
+headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
+
 ### Gate rule: native and decomp C++ is compiled with both plugins; lifted C++ with none
 `admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
 `{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Missing declaration = invalid recipe = red `build`.
