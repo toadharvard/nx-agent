@@ -135,7 +135,7 @@ uint64_t gl4_api_wait_frame(uint64_t frame);
 /* The op and function tables (X-macro lists; the handlers are gl4_op_<name> / gl4_api_<name>). The B2b entries
  * are not here: gl4_core.c asserts that the lists cover NxOp_Count4 / NXGPU_FN_COUNT4. */
 #define NXGL4_OP_LIST(X) \
-    X(DefineState) X(DefineLayout) X(BeginPass) X(EndPass) X(Barrier) X(BindState) X(BindUbo) X(BindVtx) \
+    X(End) X(DefineState) X(DefineLayout) X(BeginPass) X(EndPass) X(Barrier) X(BindState) X(BindUbo) X(BindVtx) \
     X(BindIdx) X(BindTextures) X(Draw) X(DrawIndexed) X(Viewport) X(Scissor) X(StencilRef) X(BlendConst) \
     X(DepthBias) X(Clear) X(Marker) X(ImageUpdate) X(Blit) X(GenMips)
 /* function list: X(FN id suffix, NxGpuApi4 field, implementation) ; INFO and SHUTDOWN are handled by the core */

@@ -1,18 +1,19 @@
 /* fnv-nx L6 GL 4.5 backend v4: replay of the command stream. Every op of NxOp_Count4 that this backend implements
  * has one handler in the table k_op (built from NXGL4_OP_LIST, completeness asserted in gl4_core.c). An opcode
- * outside the table or a malformed op is a contract violation: it is recorded (gl4_err), skipped by its word count
- * and makes the submit return NXGPU_BAD_CALL - nothing is ignored silently. */
+ * outside the table is a malformed stream: the submit returns NXGPU_BAD_CALL before executing anything; an op that
+ * violates its contract stops the replay and the submit returns NXGPU_BAD_CALL. */
 #define _GNU_SOURCE
 #include "gl4.h"
 #include <string.h>
 #include <time.h>
 
-typedef struct { NxFrameStats* stats; } Ctx;
+typedef struct { NxFrameStats* stats; int done; } Ctx;
 typedef void (*OpFn)(const uint32_t* a, uint32_t argc, Ctx* c);
 #define NEED(n, name) do { if ((uint64_t)argc < (uint64_t)(n)) { gl4_err(#name ": %u words, need %llu", argc, (unsigned long long)(n)); return; } } while (0)
 
 static float asf(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 
+static void op_End(const uint32_t* a, uint32_t argc, Ctx* c) { (void)a; (void)argc; c->done = 1; }
 static void op_DefineState(const uint32_t* a, uint32_t argc, Ctx* c) {
     (void)c; NEED(12, DefineState);
     if (!a[0] || a[0] > GL4_MAX_STATES) { gl4_err("DefineState: id %u", a[0]); return; }
@@ -162,17 +163,30 @@ static void op_GenMips(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_
 #define OPENT(name) [NxOp_##name] = op_##name,
 static const OpFn k_op[NxOp_Count4] = { NXGL4_OP_LIST(OPENT) };
 
+/* An opcode outside the table (not an op of this build) or an op overrunning the stream makes the whole stream
+ * malformed: it is refused before anything is executed. */
+static int stream_ok(const uint32_t* w, const uint32_t* end) {
+    while (w < end) {
+        uint32_t op = w[0] & 0xFFFF, argc = w[0] >> 16;
+        if (op >= NxOp_Count4 || !k_op[op]) { gl4_err("stream: opcode %u is not an op of this build", op); return 0; }
+        if (w + 1 + argc > end) { gl4_err("stream: op %u overruns the stream", op); return 0; }
+        if (op == NxOp_End) return 1;
+        w += 1 + argc;
+    }
+    gl4_err("stream: no End op");
+    return 0;
+}
+
+/* Executes until End or the first op that violated its contract (no later op runs after a violation). */
 static void replay(const NxSubmit* sub, Ctx* ctx) {
     const uint32_t* w = (const uint32_t*)nxgl4_guest_ptr(sub->stream, (uint64_t)sub->words * 4);
     const uint32_t* end = w + sub->words;
-    while (w < end) {
-        uint32_t op = w[0] & 0xFFFF, argc = w[0] >> 16;
-        const uint32_t* a = w + 1;
-        if (a + argc > end) { gl4_err("stream: op %u overruns the stream", op); return; }
+    if (!stream_ok(w, end)) return;
+    while (!ctx->done) {
+        uint32_t op = w[0] & 0xFFFF, argc = w[0] >> 16, errs = g4.errCount;
+        k_op[op](w + 1, argc, ctx);
+        if (g4.errCount != errs) return;
         w += 1 + argc;
-        if (op == NxOp_End) return;
-        if (op >= NxOp_Count4 || !k_op[op]) { gl4_err("stream: opcode %u not implemented", op); continue; }
-        k_op[op](a, argc, ctx);
     }
 }
 
@@ -186,7 +200,7 @@ uint64_t gl4_api_submit(uint64_t a) {
     st.frame = s->frame; st.cmd_words = s->words;
     uint32_t errs = g4.errCount;
     if (g4.drawsFrame != (uint64_t)s->frame + 1) { g4.frameDraws = 0; g4.drawsFrame = (uint64_t)s->frame + 1; }
-    Ctx ctx = {&st};
+    Ctx ctx = {&st, 0};
     replay(s, &ctx);
     p_glFinish();
     clock_gettime(CLOCK_MONOTONIC, &t1);

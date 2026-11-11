@@ -28,4 +28,16 @@ static inline int maxdiff(const uint8_t* a, const uint8_t* b, size_t n) {
     for (size_t i = 0; i < n; i++) { int d = abs((int)a[i] - (int)b[i]); if (d > m) m = d; }
     return m;
 }
+/* point minification: GL leaves the texel under a destination centre that falls exactly on a texel boundary (2:1)
+ * open, so the oracle accepts any texel of the destination texel's source footprint (per axis) */
+static inline int point_ok(const uint8_t* s, int sw, int sh, int sd, const uint8_t* d, int dw, int dh, int dd, int bpp) {
+    for (int k = 0; k < dd; k++) for (int j = 0; j < dh; j++) for (int i = 0; i < dw; i++) {
+        int x0 = i * sw / dw, x1 = ((i + 1) * sw + dw - 1) / dw - 1, y0 = j * sh / dh, y1 = ((j + 1) * sh + dh - 1) / dh - 1;
+        int z0 = k * sd / dd, z1 = ((k + 1) * sd + dd - 1) / dd - 1, found = 0;
+        for (int z = z0; z <= z1 && !found; z++) for (int y = y0; y <= y1 && !found; y++) for (int x = x0; x <= x1 && !found; x++)
+            found = !memcmp(d + (((size_t)k * dh + j) * dw + i) * bpp, s + (((size_t)z * sh + y) * sw + x) * bpp, bpp);
+        if (!found) return 0;
+    }
+    return 1;
+}
 #endif

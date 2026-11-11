@@ -229,7 +229,7 @@ void gl4_bind_layout(uint32_t lay) {
             case NxAttr_Float16: type = GL_HALF_FLOAT; break;
             }
             GLuint loc = l->l.attr[i].location ? (GLuint)(l->l.attr[i].location - 1) : i;
-            if (loc > 15) { gl4_err("layout %u: location %u", lay, loc); continue; }
+            if (loc > 15) { gl4_err("layout %u: location %u", lay, loc); break; }
             p_glVertexAttribFormat(loc, c, type, norm, l->l.attr[i].offset);
             p_glVertexAttribBinding(loc, 0);
             p_glEnableVertexAttribArray(loc);

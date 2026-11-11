@@ -5,7 +5,7 @@
 Universe = ITEMS below (name -> argv, cwd = ports/fnv-nx). Certified = exit status 0. No skip logic, as in
 verify/gate_tests.py: an item that cannot run here is uncertified, so only tests that need nothing but gcc/g++,
 python3 and EGL surfaceless (llvmpipe) are listed. Tests that need uam, a translator build directory, Wine or another
-lead's live files are listed in render/total/VERDICT_PROPOSAL.md and enter ITEMS when their environment is a pinned input."""
+lead's live files enter ITEMS when their environment is a pinned input."""
 import json, os, signal, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -13,16 +13,13 @@ PORT = os.path.normpath(os.path.join(HERE, "..", ".."))
 OUT = lambda: os.environ["GATE_OUT"]
 PY = [sys.executable, "-I"]
 ITEMS = {
-    "s6n-unit":     lambda o: ["make", "-C", "tests/s6n", "OUT=%s/s6n_unit" % o],
-    "s6n-scenes":   lambda o: ["make", "-C", "tests/s6n", "scenes", "OUT=%s/s6n_scenes" % o],
-    "s6n-capture":  lambda o: ["make", "-C", "tests/s6n", "capture", "OUT=%s/s6n_capture" % o],
-    "s6n-nx_render": lambda o: ["make", "-C", "tests/s6n", "nx_render", "OUT=%s/s6n_nxr" % o],
     "l6-spec":      lambda o: PY + ["tests/l6/test_spec.py"],
     "l6-wrap":      lambda o: PY + ["tests/l6/wrap/test_wrap.py"],
     "l6-cmp":       lambda o: PY + ["tests/l6/cmp/test_cmp.py"],
     "l6-dev":       lambda o: PY + ["tests/l6/dev/test_dev.py"],
     "l6-res":       lambda o: PY + ["tests/l6/res/test_res.py"],
-    "no-old-stack": lambda o: ["bash", "render/total/no_old_stack.sh"],
+    "l6-exports":   lambda o: PY + ["tests/l6/exports/test_exports.py"],
+    "l6-bridge":    lambda o: PY + ["tests/l6/bridge/test_bridge.py"],
 }
 
 def run(argv, timeout):

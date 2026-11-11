@@ -14,7 +14,7 @@
 /* ---- the tables are complete, or B2b is explicitly pending ----------------------------------------------------- */
 #define CNT1(a) +1
 #define CNT3(a, b, c) +1
-enum { N_OPS = 1 NXGL4_OP_LIST(CNT1), N_FNS = 2 NXGL4_FN_LIST(CNT3) };
+enum { N_OPS = 0 NXGL4_OP_LIST(CNT1), N_FNS = 2 NXGL4_FN_LIST(CNT3) };
 #ifdef NXGL4_B2B_PENDING
 _Static_assert(N_OPS == NxOp_Count4 - 5 && N_FNS == NXGPU_FN_COUNT4 - 3, "B2a tables = v4 minus the B2b entries");
 #define NXGL4_VERSION NXGPU_VERSION   /* 3: the device refuses to start on a backend without every v4 entry */

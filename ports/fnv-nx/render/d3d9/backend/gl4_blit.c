@@ -9,9 +9,9 @@
  *      (whole image) into a single-sample texture, then blitted. A multisampled destination is not a blit target.
  * Rects use the texel space of the subresource (row 0 = top) on both sides; dst image 0 = the swapchain image.
  * GenMips(image, filter) = for every level l >= 1 and layer: Blit(level l - 1 whole -> level l whole, filter);
- * point picks the texel under the destination texel centre (floor((i + 0.5) * src / dst)), linear is the 2x2 box for
- * halving. A 3D image with the linear filter uses glGenerateTextureMipmap (GL leaves its filter implementation
- * defined: see the report); point on 3D picks slice floor((z + 0.5) * srcDepth / dstDepth). */
+ * point picks a texel of the destination texel's source footprint (for an exact 2:1 the centre lies on a texel
+ * boundary and GL leaves the choice open: report, open point), linear is the 2x2 box for halving. A 3D image with the linear filter uses glGenerateTextureMipmap (GL leaves its filter implementation
+ * defined: see the report); point on 3D picks the slice floor((2z + 1) * srcDepth / (2 * dstDepth)). */
 #include "gl4.h"
 #include <string.h>
 
