@@ -22,7 +22,7 @@ python3 -s -B "$HERE/test/liftall_check.py" --out "$out" > "$out/check.txt" 2>&1
 tail -8 "$out/check.txt"
 p="$W/pub-pack"; rm -rf "$p"; mkdir -p "$p"; git -C "$p" init -q; git -C "$p" checkout -q --orphan pub
 for K in $(seq 0 $((N - 1))); do echo "l3a-lift/obj/$SHA/${K}of${N}"; done > "$p/shards.txt"      # the archives stay on their shard branches (one push of all of them is too large)
-cp "$out"/rt.a "$out"/disp.o "$out"/{entries,manifest,missing,forms,undef}.tsv "$out"/gate_liftall.json "$out"/check.txt "$out"/finish.txt "$p/"
+cp "$out"/softfloat.tsv "$out"/rt.a "$out"/disp.o "$out"/{entries,manifest,missing,forms,undef}.tsv "$out"/gate_liftall.json "$out"/check.txt "$out"/finish.txt "$p/"
 cp "$out"/imp_entries.tsv "$out"/imp_blocked.tsv "$p/" 2>/dev/null || true
 git -C "$p" add -A; git -C "$p" -c user.name=farm -c user.email=farm@localhost commit -q -m "l3a-lift pack: lifter $SHA, $N shards, check rc=$rc"
 git -C "$p" push -q -f "$(git -C "$B" remote get-url origin)" "pub:refs/heads/l3a-lift/pack/$SHA"

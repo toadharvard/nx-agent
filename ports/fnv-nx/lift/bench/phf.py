@@ -64,5 +64,7 @@ def table_asm(syms, phf):
     def empty(i):       # the key of an empty slot must not be an address that hashes to this slot, or a lookup of that address would hit it
         return next(k for k in range(M, M - 64, -1) if idx(k) != i)
     out += [' .long 0x%x, %s - fnvl_disp_table' % (a, syms[a]) if a is not None else ' .long 0x%x, 0' % empty(i) for i, a in enumerate(phf['slots'])]
-    out += ['.globl fnvl_g', '.balign 2', 'fnvl_g:'] + [' .short %d' % g for g in phf['g']]
+    out += ['.size fnvl_disp_table, . - fnvl_disp_table', '.globl fnvl_g', '.balign 2', 'fnvl_g:'] + [' .short %d' % g for g in phf['g']] + ['.size fnvl_g, . - fnvl_g']
+    # the hash parameters live with the table (one source): rt.c -DFNVL_PHF_REL reads them from here
+    out += ['.balign 4', '.globl fnvl_phf_params', 'fnvl_phf_params:', ' .long %d, %d, %d, %d' % (phf['k1'], phf['k2'], phf['nbits'], phf['tbits']), '.size fnvl_phf_params, . - fnvl_phf_params']
     return '\n'.join(out) + '\n'

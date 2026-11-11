@@ -21,12 +21,14 @@ static void fnvl_miss(void) {}
    (the dispatcher's callers hold the thread's struct cpu in x27: lifted frames and fnvl_enter; c->ra is at offset 320, checked by rt/enter.c). */
 extern const u32 fnvl_disp_table[];
 extern const u16 fnvl_g[];
+extern const u32 fnvl_phf_params[4];
 extern void fnvl_nobody(void);
 void (*fnvl_dispatch(u32 a))(void)
 {
-    u32 i = ((a ^ fnvl_g[(a * FNVL_K1) >> (32 - FNVL_NBITS)]) * FNVL_K2) >> (32 - FNVL_TBITS);
+    const u32 *q = fnvl_phf_params;          /* K1, K2, NBITS, TBITS: stored with the table (disp.o), the one source */
+    u32 i = ((a ^ fnvl_g[(a * q[0]) >> (32 - q[2])]) * q[1]) >> (32 - q[3]);
     const u32 *s = fnvl_disp_table + 2 * i;
-    if (s[0] == a) return (void (*)(void))((const char *)fnvl_disp_table + (int)s[1]);
+    if (s[0] == a && s[1]) return (void (*)(void))((const char *)fnvl_disp_table + (int)s[1]);
     u32 *cp; __asm__("mov %w0, w27" : "=r"(cp)); cp[80] = a;
     return fnvl_nobody;
 }

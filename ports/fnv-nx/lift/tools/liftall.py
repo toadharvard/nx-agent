@@ -174,13 +174,15 @@ def finish(a):
     if imp: open(out + '/entries.tsv', 'a').write(open(out + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
     subprocess.check_call([CC, '-mabi=ilp32', '-fPIC', '-c', out + '/disp.S', '-o', out + '/disp.o'])
     # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
-    rd = out + '/rt'; os.makedirs(rd, exist_ok=True); df = ['-DFNVL_PHF_REL', '-DFNVL_K1=%du' % h['k1'], '-DFNVL_K2=%du' % h['k2'], '-DFNVL_NBITS=%d' % h['nbits'], '-DFNVL_TBITS=%d' % h['tbits']]
+    rd = out + '/rt'; os.makedirs(rd, exist_ok=True); df = ['-DFNVL_PHF_REL']
     jobs = [([CC] + CF + df, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c')]
     jobs += [([CC] + CF + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists('%s/rt/%s' % (LIFT, f))]
     for cmd, f in jobs: subprocess.check_call(cmd + ['%s/rt/%s' % (LIFT, f), '-o', '%s/%s.o' % (rd, f[:-2])])
     if imp:
         subprocess.check_call([CXX] + flags() + ['-x', 'c++', out + '/imp.cpp', '-o', rd + '/imp.o']); jobs.append((None, 'imp.c'))
     if os.path.exists(out + '/rt.a'): os.remove(out + '/rt.a')
+    sf = sorted(l.split()[-1] for l in run([NM, '-g', '--defined-only', rd + '/x87.o']).stdout.splitlines() if l.split())      # the 80-bit integer-only core: the SoftFloat class of the instruction counter (L4)
+    open(out + '/softfloat.tsv', 'w').write(''.join(x + '\n' for x in sf))
     subprocess.check_call([AR, 'Dcr', out + '/rt.a'] + ['%s/%s.o' % (rd, f[:-2]) for _, f in jobs])
     nobody = len(ent) - len(syms)
     cert = sum(v[0] for v in forms.values() if v[1] == 'sail'); tot = sum(v[0] for v in forms.values()); nc = sum(1 for v in forms.values() if v[1] == 'sail')
