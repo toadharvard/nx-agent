@@ -1,4 +1,4 @@
-ext/
+ext
 build/
 render/native/vftables.tsv
 platform/win32/nls_tables.inc
