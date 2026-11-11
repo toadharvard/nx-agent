@@ -298,7 +298,7 @@ static int copy_current_record(u32 rec)
     u32 prev = fnvl_msvcrt_td()->exc_record;
     if (!prev) return 0;
     for (u32 i = 0; i < REC_WORDS; i++) M32(rec + 4 * i) = M32(prev + 4 * i);
-    M32(rec + 4) &= ~EH_UNWINDING;
+    M32(rec + 4) = M32(rec + 4) & ~EH_UNWINDING;
     return 1;
 }
 
