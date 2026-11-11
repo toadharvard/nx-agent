@@ -99,6 +99,24 @@ put(d, "link/b.py", CLEAN)
 rc, r, e = pure(d)
 check("pure: project imports resolve across the run", rc == 0 and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
 
+ADM = lambda cls: json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": "ports/fnv-nx/verify", "class": cls, "gates": []}]})
+VD = "ports/fnv-nx/verify/"
+d = tmp("pure-iroot")
+put(d, "link/a.py", "import vhelp\n")
+put(d, VD + "vhelp.py", CLEAN)
+put(d, VD + "admit.json", ADM("tool"))
+rc, r, e = pure(d)
+check("pure: a pure module of an import root (verify/, admitted tool root) is importable and not an item", rc == 0 and r["status"] == "green"
+      and (r["universe"], r["certified"]) == (1, 1), (rc, r, e))
+put(d, VD + "vhelp.py", BAD)
+rc, r, e = pure(d)
+check("pure: an impure module of an import root makes its importer red", rc != 0 and r["uncertified"] == ["link/a.py"], (rc, r, e))
+put(d, VD + "vhelp.py", CLEAN)
+put(d, VD + "admit.json", ADM("doc"))
+rc, r, e = pure(d)
+check("pure: an import root that is not an admitted tool root is red with the reason", rc != 0 and r["status"] == "red"
+      and "not an admitted tool root" in r["detail"], (rc, r, e))
+
 d = tmp("pure-cap")
 for i in range(60):
     put(d, "link/m%02d.py" % i, BAD)
@@ -188,6 +206,7 @@ def small_repo(gates=None, link=None):
     for f in SMALL:
         shutil.copy(os.path.join(VERIFY, f), os.path.join(r, "ports/fnv-nx/verify", f))
     put(r, "ports/fnv-nx/verify/gates.json", json.dumps(gates or two_gates()))
+    put(r, VD + "admit.json", ADM("tool"))  # gate pure: its import root (verify/) must be an admitted tool root
     shutil.copy(os.path.join(VERIFY, "env.json"), os.path.join(r, "ports/fnv-nx/verify/env.json"))
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
     for k, v in (link or {}).items():
