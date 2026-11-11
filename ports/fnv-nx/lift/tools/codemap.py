@@ -5,7 +5,11 @@
 7 hole between executable sections (not part of the universe), 0 unexplained (build error).
 Dead = a run no path reaches that decodes completely from its first byte (no bytes left over), ends at a terminator or at the
 next reached byte, has relocated fields only at instruction operand fields, and has no relocated dword (from a live site) and no
-call pointing into it. Output: <outdir>/codemap.tsv (start, length, class, owner entry or referencing relocation)."""
+call pointing into it. Entries made by rule R3 alone (kind ptr, universe.r3: a relocated value whose bytes no rule above reached as an instruction start) are bodies re-read
+from bytes that are already classified exactly once here; they add no class of their own and take no owner cut in codemap.tsv. Where such a body overlaps
+data named by a relocation (class 3) or instructions of another entry, the byte keeps its class (instruction of a committed entry, else relocation-named
+data): class precedence is for accounting only, the entry still exists and its undecodable bytes raise #UD at run time.
+Output: <outdir>/codemap.tsv (start, length, class, owner entry or referencing relocation)."""
 import re, bisect
 from collections import Counter
 CLS = {7: 'hole', 8: 'data-pe-header', 1: 'entry-decomp', 2: 'entry-nondecomp', 3: 'data-reloc', 4: 'padding', 5: 'dead-decomp', 6: 'dead-gap', 0: 'UNEXPLAINED'}
@@ -76,7 +80,7 @@ def finish(U):
     for s, e, st in bad: L.append('  UNEXPLAINED %08x len %d: %s; bytes %s; relocs-into %s' % (U.T0 + s, e - s, st, U.text[s:s + 8].hex(),
         ' '.join('%x' % r for r, v in U.rvals if U.T0 + s <= v < U.T0 + e)[:40] or '-'))
     # ---- codemap.tsv
-    OWNL = sorted(a for a in U.entries if a not in U.parent); rows = []
+    OWNL = sorted(a for a in U.entries if a not in U.parent and a not in U.r3); rows = []
     for c in (1, 2, 5, 3, 8, 4, 6, 0):
         for m in re.finditer(bytes([c]) + b'+', bytes(cls)):
             s, e = m.span()
@@ -126,7 +130,7 @@ def consumers(U, eh):
         if r in sc: return sc[r]
         m = U.tcons.get(r)
         return 'ctl:indexed-' + m if m in ('call', 'jmp') else 'res:indexed-load' if m else 'res:address-taken-by-code' if U.cov[r - U.T0] == 2 else 'res:slot-in-unreached-text'
-    po = [a for a in sorted(U.entries) if U.kinds[a] == {'ptr'} and a not in U.fsize]; cl = {a: [scat(r) for r in U.psites.get(a, ())] for a in po}
+    po = [a for a in sorted(U.entries) if U.kinds[a] == {'ptr'} and a not in U.fsize and a not in U.r3]; cl = {a: [scat(r) for r in U.psites.get(a, ())] for a in po}
     ctl = [a for a in po if any(k.startswith(('ctl', 'data')) for k in cl[a])]; cs_ = Counter(k for a in ctl for k in sorted({k for k in cl[a] if k.startswith('ctl')})[:1])
     rs = Counter(sorted(k for k in cl[a] if k.startswith('res'))[0] for a in po if a not in set(ctl))
     L.append('ptr-only entries %d: consumer transfers control %d (%s); RESIDUAL consumer unknown %d (%s)' % (len(po), len(ctl), ', '.join('%s %d' % kv for kv in sorted(cs_.items())), len(po) - len(ctl), ', '.join('%s %d' % kv for kv in sorted(rs.items()))))
