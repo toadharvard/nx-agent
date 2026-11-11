@@ -119,47 +119,13 @@ IDirectInput8A *di()
 BOOL count_dev(LPCDIDEVICEINSTANCEA, LPVOID n) { ++*(int *)n; return DIENUM_CONTINUE; }
 } // namespace
 
-/* the exe's GUIDs in .text, unmapped in the port: g_text_key stands for one (garbage where it lies); the game build's
- * fnvnx_image_const (toolchain/game/boot.cpp) gives its bytes from the exe file, here GUID_Key */
-GUID g_text_key;
-DIOBJECTDATAFORMAT g_text_objs[256];   /* an object table where it lies: garbage; its bytes come from g_kbd_objs */
-DIDATAFORMAT g_text_fmt;               /* a header where it lies: garbage; its bytes come from g_real_fmt */
-DIDATAFORMAT g_real_fmt;
-extern "C" const void *fnvnx_image_const(const void *p, uint32_t n, void *buf)
+TEST(input_dinput_format_guid_mismatch_fails)
 {
-    if (p == &g_text_key && n == sizeof(GUID)) {
-        memcpy(buf, &GUID_Key, sizeof(GUID));
-        return buf;
-    }
-    if (p == g_text_objs && n <= sizeof g_text_objs) {
-        memcpy(buf, g_kbd_objs, n);
-        return buf;
-    }
-    if (p == &g_text_fmt && n == sizeof g_text_fmt) {
-        memcpy(buf, &g_real_fmt, n);
-        return buf;
-    }
-    return p;
-}
-
-TEST(input_dinput_format_guids_from_the_image)
-{
-    memset(&g_text_key, 0xCC, sizeof g_text_key);
     IDirectInput8A *in = di();
     IDirectInputDevice8A *k = nullptr;
     CHECK_EQ(in->CreateDevice(GUID_SysKeyboard, &k, nullptr), DI_OK);
     DIDATAFORMAT f = kbd_format();
-    for (int i = 0; i < 256; i++)
-        g_kbd_objs[i].pguid = &g_text_key;   /* a table pointing into the exe's .text, as c_dfDIKeyboard does */
     CHECK_EQ(k->SetDataFormat(&f), DI_OK);
-    /* the object table and the header where the port does not map them (97deacd38aec's stub boot) */
-    memset(g_text_objs, 0xCC, sizeof g_text_objs);
-    memset(&g_text_fmt, 0xCC, sizeof g_text_fmt);
-    DIDATAFORMAT ft = f;
-    ft.rgodf = g_text_objs;
-    CHECK_EQ(k->SetDataFormat(&ft), DI_OK);
-    g_real_fmt = ft;
-    CHECK_EQ(k->SetDataFormat(&g_text_fmt), DI_OK);
     uint8_t ks[256];
     CHECK_EQ(k->Acquire(), DI_OK);
     CHECK_EQ(k->GetDeviceState(256, ks), DI_OK);   /* the format took: state reads work */

@@ -24,14 +24,9 @@
 
 namespace {
 
-/* both sides through fnvnx_image_const: the game's DIOBJECTDATAFORMAT tables (c_dfDIKeyboard, c_dfDIMouse in its
- * .data) point at GUIDs MSVC placed in the exe's .text, which the port does not map (a stub boot faulted here) */
-bool guid_eq(const GUID &a, const GUID &b)
-{
-    GUID ta, tb;
-    const void *pa = fnvnx_image_const(&a, sizeof(GUID), &ta), *pb = fnvnx_image_const(&b, sizeof(GUID), &tb);
-    return !memcmp(pa, pb, sizeof(GUID));
-}
+/* the game's DIOBJECTDATAFORMAT tables (c_dfDIKeyboard, c_dfDIMouse) point at GUIDs MSVC placed in the exe's .text:
+ * the loader maps the whole image as the Windows loader does, so they are read where they lie */
+bool guid_eq(const GUID &a, const GUID &b) { return !memcmp(&a, &b, sizeof(GUID)); }
 const GUID IID_IUnknown_ = {0x00000000, 0x0000, 0x0000, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
 const GUID IID_IDirectInputDevice2A_ = {0x5944e682, 0xc92e, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
 const GUID IID_IDirectInputDevice7A_ = {0x57d7c6bc, 0x2356, 0x11d3, {0x8e, 0x9d, 0x00, 0xc0, 0x4f, 0x68, 0x44, 0xae}};
@@ -651,8 +646,6 @@ Device::Device(Kind k) : kind(k)
 HRESULT Device::SetDataFormat(LPCDIDATAFORMAT f)
 {
     if (!f) return DIERR_INVALIDPARAM;
-    DIDATAFORMAT f_copy;   /* the header too, if the exe keeps it where the port does not map */
-    f = (LPCDIDATAFORMAT)fnvnx_image_const(f, (uint32_t)sizeof f_copy, &f_copy);
     if (acquired) return DIERR_ACQUIRED;
     if (DW(f->dwSize) != sizeof(DIDATAFORMAT) || DW(f->dwObjSize) != sizeof(DIOBJECTDATAFORMAT)) return DIERR_INVALIDPARAM;
     uint32_t fflags = DW(f->dwFlags);   /* exactly one of DIDF_ABSAXIS / DIDF_RELAXIS */
@@ -663,14 +656,9 @@ HRESULT Device::SetDataFormat(LPCDIDATAFORMAT f)
     if ((size & 3) || size > (1u << 20)) return DIERR_INVALIDPARAM;
     Map *m = n ? (Map *)calloc(n, sizeof *m) : nullptr;
     if (n && !m) return DIERR_OUTOFMEMORY;
-    /* the object table itself may lie in the exe's unmapped .text, like the GUIDs it points at (c_dfDIKeyboard /
-     * c_dfDIMouse2: a stub boot of 97deacd38aec still faulted reading rgodf[i].dwType): a copy through
-     * fnvnx_image_const, kept until the loop is done */
-    DIOBJECTDATAFORMAT *od_copy = n ? (DIOBJECTDATAFORMAT *)malloc((size_t)n * sizeof(DIOBJECTDATAFORMAT)) : nullptr;
     uint8_t *occ = (uint8_t *)calloc(size ? size : 1, 1);   /* bytes of the data block already taken: objects must not overlap */
-    if ((n && !od_copy) || !occ) { free(m); free(od_copy); free(occ); return DIERR_OUTOFMEMORY; }
-    const DIOBJECTDATAFORMAT *od = n ? (const DIOBJECTDATAFORMAT *)fnvnx_image_const(
-                                           f->rgodf, n * (uint32_t)sizeof(DIOBJECTDATAFORMAT), od_copy) : nullptr;
+    if (!occ) { free(m); return DIERR_OUTOFMEMORY; }
+    const DIOBJECTDATAFORMAT *od = n ? f->rgodf : nullptr;
     bool used[KEYS];
     for (int i = 0; i < KEYS; i++) used[i] = false;
     uint32_t nm = 0;
@@ -704,7 +692,6 @@ HRESULT Device::SetDataFormat(LPCDIDATAFORMAT f)
         m[nm].app = (UINT_PTR)-1;
         nm++;
     }
-    free(od_copy);
     free(occ);
     if (hr != DI_OK) { free(m); return hr; }
     os_lock(&g_lock);
