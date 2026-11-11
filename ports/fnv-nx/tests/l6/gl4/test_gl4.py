@@ -12,7 +12,7 @@
  j  vertex layouts: every NxAttrType4 vs the CPU expansion, instancing, 16 streams, refused layouts / binds
  k  queries (occlusion exact, overlapping, event, timestamp, wait 0/1), sampler_update
  l  present: rects, gamma ramp vs CPU, frame files, on_present, refused presents
- m  w[3] bits: MSAA, AALINE, NOCLIP, SAMPLEMASK (multisampled targets) change the output; LASTPIXEL + line refused; reserved bits
+ m  w[3] bits: MSAA, AALINE, NOCLIP, SAMPLEMASK (multisampled targets) change the output; LASTPIXEL changes nothing (lines draw as GL diamond-exit lines, Wine 9.0); reserved bits
  n  the point rule floor((d + 0.5) * sw / dw) exactly: colour formats, depth-stencil, multisampled source
  q  NXGPU_FN_SHADER_CREATE_D3D: ids of every model class, refusals (hash, size, stage, variant, reserved, L, descriptor, garbage), memo + owners, variants / link sets, every VS x PS pair draws
  p  libnxgl4.so: built by build_gl4.sh, exports nxgl4_ext, leaves nxgl4_guest_ptr / nxgl4_on_present undefined; loaded
@@ -164,7 +164,6 @@ MUTS = [  # (part that must catch it, file, old text (exactly once), replacement
     ("m", "gl4_state.c", "if (w3 >> NXRS_M_MSAA & 1) p_glEnable(GL_MULTISAMPLE); else p_glDisable(GL_MULTISAMPLE);", "p_glEnable(GL_MULTISAMPLE);"),
     ("m", "gl4_state.c", "if (w3 >> NXRS_M_AALINE & 1) p_glEnable(GL_LINE_SMOOTH); else p_glDisable(GL_LINE_SMOOTH);", "p_glDisable(GL_LINE_SMOOTH);"),
     ("m", "gl4_state.c", "if (mask != 0xFFFFFFFFu && g4.passSamples > 1) { p_glEnable(GL_SAMPLE_MASK); p_glSampleMaski(0, mask); } else p_glDisable(GL_SAMPLE_MASK);", "if (mask == 0x12345u && g4.passSamples > 1) { p_glEnable(GL_SAMPLE_MASK); p_glSampleMaski(0, mask); } else p_glDisable(GL_SAMPLE_MASK);"),
-    ("m", "gl4_check.c", "&& lastpixel[bound])", "&& lastpixel[bound] && 0)"),
     ("o", "gl4_present.c", "d[c] * (255 - a) + 127) / 255);", "d[c] * (255 - a) + 0) / 255);"),
     ("o", "gl4_present.c", "if (ramp) v = ramp[c * 256 + v] >> 8;", "if (0) v = ramp[c * 256 + v] >> 8;"),
     ("o", "gl4_present.c", "if (x1 > sw->w) x1 = sw->w;", "if (x1 > sw->w) x1 = sw->w - 1;"),

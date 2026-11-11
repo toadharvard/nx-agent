@@ -114,7 +114,7 @@ What a VS writes, with no run-time decision (`dk_pad_varyings` in the patch, `fn
   `varyings_read` of a PS: its inputs, plus FOG0 for ps < 3.0, ps_1_x `t#` included). Non-canonical pairs the PS reads are in L (location rule above).
   Proof: a PS-read pair is declared by the VS (missing components base-completed), or in L (base writes it), or canonical and unwritten (complete writes its slot).
 * **Driver data**: COLOR0's default depends on the pair's pixel model, which a stage translated alone does not know: VS driver block word
-  `vs_drv_pad.x` (byte `FNVNX_DK_VS_PAD_OFFSET` = 16 of the 64-byte block; `posfix` at 0 unchanged) = **1.0 unless the pixel stage is ps_3_0, then 0.0**.
+  `vs_drv_pad.x` (byte `FNVNX_DK_VS_PAD_OFFSET` = 16 of the 208-byte block; `posfix` at 0 unchanged; `vs_drv_clip[8]` at byte 64 = the user clip planes, `vs_drv_point` at byte 192 = (POINTSIZE, min, max): Clip planes and point size below) = **1.0 unless the pixel stage is ps_3_0, then 0.0**.
   A zeroed block means the ps_3_0 rule. Everything else is bytecode.
 * **No rule**: none left. The MS pages say "None" where Wine defines a value, and the only per-pair datum (COLOR0's) is data. Not covered by
   either source: a *partial* PS read mask on a scalar register (FOG, PSIZE) is completed like any component (Wine does the same through the output mask).
@@ -257,3 +257,10 @@ with values computed by hand:
 * uam's thin `libuam.a` is host-only; a console build needs a regular archive (meson option) and
   devkitA64 for the deps.
 * No `shaders_nx.pak` packer yet: output is a directory of `<hash>.dksh` + `.json` + `index.tsv`.
+
+### Clip planes and point size (VS driver block, WineD3D 9.0)
+
+Every translated VS epilogue writes `gl_ClipDistance[i] = dot(gl_Position, vs_drv_clip[i])` (i < 8, the raw oPos before the posfix; WineD3D 9.0
+glsl_shader.c shader_glsl_generate_vs_epilogue, planes unflipped as shader_glsl_clip_plane_uniform) and `gl_PointSize = min(max(PSIZE or vs_drv_point.x,
+vs_drv_point.y), vs_drv_point.z)` (PSIZE when the shader writes oPts / PSIZE, else the POINTSIZE state). Which planes act is the backend's enable mask
+(CLIPPING ? CLIPPLANEENABLE : 0, state.c state_clipping), and the host writes a disabled plane as zero (distance 0, never clipped), so the result does not depend on how a GL implementation treats an unenabled distance. The block is 208 bytes.

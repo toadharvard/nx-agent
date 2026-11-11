@@ -126,7 +126,9 @@ def rnd_f(r): return f32(r.choice([0.0, 1.0, -1.0, 0.5, 255.0, 1e-3, r.uniform(-
 def fog_mode(en, tab, psver):   # d3d9_state.h "Fog:" + shaders README: 0 off / 1 vertex / 2 exp / 3 exp2 / 4 linear
     if en == 0 or psver >= 0x300: return 0
     return {0: 1, 1: 2, 2: 3, 3: 4}.get(tab, 0)
-def vs_block(psver): return pk(0.0, 0.0, 1.0, 0.0, 0.0 if psver == 0x300 else 1.0, 0.0, 0.0, 0.0) + bytes(32)
+def vs_block(psver, rs):   # 208 bytes: posfix/pad/reserved (64), vs_drv_clip[8] (planes are never set by this generator: zero), vs_drv_point = POINTSIZE, MIN, MAX raw (defaults 1.0)
+    pt = [rs.get(k, 0x3F800000) for k in (154, 155, 166)]
+    return pk(0.0, 0.0, 1.0, 0.0, 0.0 if psver == 0x300 else 1.0, 0.0, 0.0, 0.0) + bytes(32) + bytes(128) + pk(*pt, 0)
 def ps_block(rs, tss, psver, stype):
     fe = rs.get(28, 0); tab = rs.get(35, 0); at = rs.get(15, 0) != 0; af = rs.get(25, 8); ar = rs.get(24, 0)
     func = af if 1 <= af <= 8 else 8
@@ -172,7 +174,7 @@ def write_d(d):
         out += ["ffv " + ffv.hex(), "ffp " + ffp.hex()]
         def blk(tab, n_, wide): b = b"".join(pk(*[fbits(x) for x in tab.get(i, [0.0] * 4)]) if False else struct.pack("<4I", *[fbits(x) for x in tab.get(i, [0.0] * 4)]) for i in range(n_)); return b + bytes(wide - len(b))
         def ib(ti, tb): return b"".join(struct.pack("<4i", *ti.get(i, [0] * 4)) for i in range(16)) + b"".join(struct.pack("<4I", int(tb.get(i, 0) != 0), 0, 0, 0) for i in range(16))
-        out += ["ubo 0 0 " + blk(vsf, 256, 4096).hex(), "ubo 0 1 " + ib(vsi, vsb).hex(), "ubo 0 2 " + vs_block(psver).hex(), "ubo 1 0 " + blk(psf, 224, 4096).hex(), "ubo 1 1 " + ib(psi, psb).hex(),
+        out += ["ubo 0 0 " + blk(vsf, 256, 4096).hex(), "ubo 0 1 " + ib(vsi, vsb).hex(), "ubo 0 2 " + vs_block(psver, rs).hex(), "ubo 1 0 " + blk(psf, 224, 4096).hex(), "ubo 1 1 " + ib(psi, psb).hex(),
                 "ubo 1 2 " + ps_block(rs, tss, psver, stype).hex()]
         if vk == "ffp": out.append("ubo 0 4 " + ffv.hex())
         if pk_ == "ffp": out.append("ubo 1 3 " + ffp.hex())

@@ -4,8 +4,8 @@
  *               MULTISAMPLEANTIALIAS = FALSE); no effect on a single-sample target
  *   AALINE      GL_LINE_SMOOTH: lines get fractional coverage (the exact coverage function is implementation
  *               defined in GL and in D3D9)
- *   LASTPIXEL   GL cannot draw the last pixel of a line: a line draw under a state with the bit set is refused by
- *               gl4_check.c; the bit has no GL state
+ *   LASTPIXEL   no GL state (Wine 9.0 wined3d: WINED3D_RS_LASTPIXEL is stored and never applied); lines are GL's
+ *               diamond-exit lines for both values
  *   NOCLIP      GL_DEPTH_CLAMP: primitives are not clipped by the near / far planes, their depth is clamped to the
  *               depth range (x / y guard-band clipping has no visible effect and w <= 0 is clipped as always);
  *               user clip planes (w[2] bits 8-15) are independent of it

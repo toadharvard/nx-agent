@@ -14,7 +14,9 @@
  *               vec4 pad     (byte offset FNVNX_DK_VS_PAD_OFFSET = 16; x = the default of the diffuse (COLOR0) components a VS does not write:
  *                              1.0 when the pair's pixel stage is not ps_3_0 (ps_1_x, ps_2_x, fixed function), 0.0 for ps_3_0;
  *                              yzw reserved, write 0)
- *               vec4 reserved[2]  (bytes 32..63; block size 64, nothing before them moved)
+ *               vec4 reserved[2]  (bytes 32..63, write 0)
+ *               vec4 clip[8]      (byte FNVNX_DK_VS_CLIP_OFFSET = 64; plane i as SetClipPlane stored it, raw clip space; zero unless CLIPPING and the plane is enabled, 6 and 7 always zero)
+ *               vec4 point        (byte FNVNX_DK_VS_POINT_OFFSET = 192; x = POINTSIZE, y = size min, z = size max (raw; the shader takes min(max(size, y), z), so min > max gives max); w 0; block size 208, nothing before 64 moved)
  * PS driver UBO: vec4 fogcolor; vec4 fog (x mode 0 off/1 vertex/2 exp/3 exp2/4 linear, y start, z end,
  *                w density); ivec4 alpha (x = D3DCMPFUNC, 0 = alpha test off); vec4 alpharef (x, 0..1);
  *                vec4 texbem[16] (2 per stage: bump matrix 00,01,10,11; then lscale, loffset);
@@ -49,7 +51,9 @@
 #define FNVNX_DK_BOOL_OFFSET 256  /* bytes, inside UBO 1 */
 #define FNVNX_DK_FOG_VARYING 18
 #define FNVNX_DK_VS_PAD_OFFSET     16   /* bytes, inside the VS driver block: vec4 pad, x = the COLOR0 default (1.0 unless the pixel stage is ps_3_0) */
-#define FNVNX_DK_VS_DRIVER_SIZE    64
+#define FNVNX_DK_VS_CLIP_OFFSET    64   /* bytes: vec4 clip[8] */
+#define FNVNX_DK_VS_POINT_OFFSET   192  /* bytes: vec4 point = (POINTSIZE, min, max, 0) */
+#define FNVNX_DK_VS_DRIVER_SIZE    208
 #define FNVNX_DK_PS_STYPE_OFFSET   320  /* bytes, inside the PS driver block: uvec4 stype[2], stage n at word n */
 #define FNVNX_DK_STYPE_2D          0
 #define FNVNX_DK_STYPE_CUBE        1

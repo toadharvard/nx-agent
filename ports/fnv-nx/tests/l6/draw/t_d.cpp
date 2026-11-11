@@ -1,5 +1,7 @@
 // part d: state flush. d1 constant blocks and driver blocks byte-exact against the python model of the layout contract (oracle.py write_d); d2 every dirty group produces exactly its ops, nothing when clean,
 // everything again after a pass epoch change (another module's pass) and for another device.
+#include <unistd.h>
+#include <cstring>
 #include "t_common.h"
 static std::vector<uint8_t> unhex(const char* s) { std::vector<uint8_t> v; for (; s[0] && s[1] && s[0] != '\n'; s += 2) { char b[3] = {s[0], s[1], 0}; v.push_back((uint8_t)strtoul(b, nullptr, 16)); } return v; }
 static IDirect3DBaseTexture9* mktex(TDev& d, int kind) {
@@ -81,6 +83,15 @@ static void part_d2() {
     // the render-state words 3 (nxgpu4.h NXRS_M_*) and 0 (colour write masks): MSAA (default 1) | LASTPIXEL (default 1) | NOCLIP (CLIPPING 0) | MULTISAMPLEMASK << 32
     d.i9->SetRenderState(D3DRS_CLIPPING, 0); d.i9->SetRenderState(D3DRS_MULTISAMPLEMASK, 5); d.i9->SetRenderState(D3DRS_COLORWRITEENABLE, 5); d.i9->SetRenderState(D3DRS_ANTIALIASEDLINEENABLE, 1); t_clear(); draw(false); t_flush();
     { const Ev* ds = nullptr; for (auto& e : g_ev) if (e.op == NxOp_DefineState) ds = &e; CHECK(ds && ds->a[10] == ((1u << NXRS_M_MSAA) | (1u << NXRS_M_AALINE) | (1u << NXRS_M_LASTPIXEL) | (1u << NXRS_M_NOCLIP)) && ds->a[11] == 5 && (ds->a[5] & 0xF) == 5); }
+    // D3DRS_LASTPIXEL (Wine 9.0 wined3d_device_apply_stateblock): TRUE draws silently; FALSE logs ONE fixme (id 40) for the process and changes nothing else but the state word bit
+    { fflush(stderr); FILE* tf = tmpfile(); int sv = dup(2); dup2(fileno(tf), 2);
+      d.i9->SetRenderState(D3DRS_LASTPIXEL, 1); t_clear(); draw(false); t_flush(); fflush(stderr); long n_true = ftell(tf);
+      d.i9->SetRenderState(D3DRS_LASTPIXEL, 0); const Ev* ds = nullptr; uint32_t w3 = 0;
+      for (int k = 0; k < 2; k++) { t_clear(); draw(false); t_flush(); for (auto& e : g_ev) if (e.op == NxOp_DefineState) { ds = &e; w3 = e.a[10]; } }   // the state is defined by the first draw only
+      fflush(stderr); dup2(sv, 2); close(sv); rewind(tf); char buf[512] = {0}; size_t n = fread(buf, 1, sizeof buf - 1, tf); fclose(tf);
+      CHECK(n_true == 0); CHECK(strstr(buf, "fnvnx-wine-fixme: 40\n") && !strstr(strstr(buf, "fnvnx-wine-fixme: 40\n") + 1, "fnvnx-wine-fixme: 40"));
+      CHECK(ds && !(w3 & (1u << NXRS_M_LASTPIXEL)));
+      d.i9->SetRenderState(D3DRS_LASTPIXEL, 1); }
     // sRGB view rule: SRGBTEXTURE set and the format has a view = image id + 1 (nxgpu4.h / gpu_abi.h)
     { NxImg* im = nx_img_of(nx_obj_of(tex)); d.i9->SetTexture(0, tex); d.i9->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, 0); t_clear(); draw(false); t_flush(); const Ev* bt = t_nth(NxOp_BindTextures, 0); CHECK(bt && (bt->a[3] & 0xFFFFF) == im->gpu);
       d.i9->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, 1); t_clear(); draw(false); t_flush(); bt = t_nth(NxOp_BindTextures, 0); CHECK(bt && (bt->a[3] & 0xFFFFF) == im->gpu + 1); }

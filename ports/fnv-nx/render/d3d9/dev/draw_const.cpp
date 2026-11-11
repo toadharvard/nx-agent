@@ -2,14 +2,13 @@
 // UBO 2 = the driver block) plus the blocks of the fixed-function module (draw_ffp.h, bound to the slots it names).
 //  C1 UBO 0: the float registers Set*ShaderConstantF stored (immediate `def` constants are in the shader); the pixel block has 224 registers, c224..c255 are 0 ("0 outside"). UBO 1: the int registers, the bool registers as
 //     0 / 1 (BOOL != 0 is true). Both are rebuilt when the VSCONST / PSCONST group is dirty or the stream is rebound in full, and bound when their bytes differ from what the stream holds.
-//  C2 VS driver block (64 bytes): posfix = (0, 0, 1, 0): xy 0 because the viewport carries the half pixel (draw_state.cpp S4: nx/state.h NxViewport, docs/RENDER_NATIVE.md "VS posfix (0, 0, 1)"), z = 1 (backend window space is y-down
-//     like D3D9), w = 0 (the opaque zero); byte 16 (vs_drv_pad.x) = 0.0 when the pair's pixel stage is ps_3_0, else 1.0 (ps_1_x, ps_2_x, fixed function; README "Varying completion"); the rest 0.
+//  C2 VS driver block (208 bytes): posfix = (0, 0, 1, 0): xy 0 because the viewport carries the half pixel (draw_state.cpp S4: nx/state.h NxViewport, docs/RENDER_NATIVE.md "VS posfix (0, 0, 1)"), z = 1 (backend window space is y-down
+//     like D3D9), w = 0 (the opaque zero); byte 16 (vs_drv_pad.x) = 0.0 when the pair's pixel stage is ps_3_0, else 1.0 (ps_1_x, ps_2_x, fixed function; README "Varying completion"); bytes 64..191 = the 8 clip planes (SetClipPlane's, raw; zero unless CLIPPING and the plane's CLIPPLANEENABLE bit are set, and 6 and 7: a zero plane has distance 0 and never clips, so the shader needs no enable word), bytes 192.. = (POINTSIZE, min, max, 0) raw: the shader's min(max(size, min), max) is max when min > max, as WineD3D 9.0 utils.c get_pointsize_minmax; the rest 0.
 //  C3 PS driver block (352 bytes): fogcolor = FOGCOLOR as RGBA; fog = (mode, FOGSTART, FOGEND, FOGDENSITY) with mode 0 off / 1 vertex / 2 exp / 3 exp2 / 4 linear = the front's NxFog (None, Vertex, Exp, Exp2, Linear) of
 //     nx_d3d9_shader_bits(rs, ps_version) renumbered per the shaders README (FOGENABLE == 0 or ps_3_0 = off; FOGTABLEMODE NONE = vertex fog); alpha = (D3DCMPFUNC of ALPHAFUNC when ALPHATESTENABLE else 0, 0, 0, 0); alpharef.x =
 //     ALPHAREF / 255; texbem[2n] = (BUMPENVMAT00, 01, 10, 11) and texbem[2n + 1] = (BUMPENVLSCALE, BUMPENVLOFFSET, 0, 0) of stage n < 8; stype word n = the dimension of the texture bound at stage n (0 2D, 1 cube, 2 volume)
 //     for a ps_1_x shader and the fixed-function pixel stage, 0 for ps_2 and later.
-//  NOT carried (no field in the contract; the translator's driver blocks have none): user clip plane equations (only the enable mask reaches the backend, NxRenderState w[2] bits 8-15) and the point size / point scale
-//  of programmable vertex shaders (S2 task "VS epilogue additions").
+//  NOT carried: point scale (attenuation) of programmable vertex shaders (WineD3D 9.0 get_pointsize applies it to the fixed-function pipeline only).
 #include "draw_core.h"
 
 static float fbits(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
@@ -29,6 +28,9 @@ void nx_driver_blocks(NxDeviceCore* d, const NxProg& pr, uint8_t* vs, uint8_t* p
     const NxDeviceState& s = d->cur; memset(vs, 0, FNVNX_DK_VS_DRIVER_SIZE); memset(ps, 0, FNVNX_DK_PS_DRIVER_SIZE);
     float* v = (float*)vs; v[2] = 1.0f; v[FNVNX_DK_VS_PAD_OFFSET / 4] = pr.ps_version == 0x0300 ? 0.0f : 1.0f;                                  // C2
     NxD3D9Input in; memset(&in, 0, sizeof in); in.rs = s.rs; in.ps_version = pr.ps_version; NxDynamicState dyn; uint32_t sb; nx_d3d9_translate(&in, nullptr, &dyn, &sb);   // dynamics only: no latch needed
+    static_assert(sizeof s.clip == 96, "six planes");
+    if (s.rs[D3DRS_CLIPPING]) for (uint32_t i = 0; i < 6; i++) if (s.rs[D3DRS_CLIPPLANEENABLE] >> i & 1) memcpy(vs + FNVNX_DK_VS_CLIP_OFFSET + 16 * i, &s.clip[i], 16);   // a zero plane has distance 0, never clipped
+    { float* q = (float*)(vs + FNVNX_DK_VS_POINT_OFFSET); q[0] = fbits(s.rs[D3DRS_POINTSIZE]); q[1] = fbits(s.rs[D3DRS_POINTSIZE_MIN]); q[2] = fbits(s.rs[D3DRS_POINTSIZE_MAX]); }
     float* p = (float*)ps; memcpy(p, dyn.fogColor, 16);                                                                                          // C3
     uint32_t fm = (sb >> NXSB_FOG) & 7, mode = fm == NxFog_Vertex ? 1 : fm == NxFog_Exp ? 2 : fm == NxFog_Exp2 ? 3 : fm == NxFog_Linear ? 4 : 0;
     p[4] = (float)mode; p[5] = fbits(s.rs[D3DRS_FOGSTART]); p[6] = dyn.fogEnd; p[7] = dyn.fogDensity;

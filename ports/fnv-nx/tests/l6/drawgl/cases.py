@@ -1,5 +1,5 @@
 """cases.py: the cases of tests/l6/drawgl (synthetic hand-assembled shaders, render/shaders/total/sm_hand.py) and their CPU references.  Each case: Case(name, part, tol) + script + c.ref(ix, iy) -> [rgba per render
-target] (a value or None = the pixel keeps the clear colour).  Parts: a constants, b textures, c vertex colour + the unwritten-input rule + non-canonical links, d fog, e alpha test, f MRT / sRGB / vertex+index buffers, g fixed function."""
+target] (a value or None = the pixel keeps the clear colour).  Parts: a constants, b textures, c vertex colour + the unwritten-input rule + non-canonical links, d fog, e alpha test, f MRT / sRGB / vertex+index buffers, g fixed function, h user clip planes and point size with a programmable VS."""
 import math
 from clib import *
 
@@ -203,4 +203,42 @@ def make(asm_fn):
     t = c.tex(0, 4, 4, 1, T4); c.bind(0, t); c.tss(0, 1, 4); c.tss(0, 2, 2); c.tss(0, 3, 0); c.tss(0, 4, 4); c.tss(0, 5, 2); c.tss(0, 6, 0); c.tss(1, 1, 1); c.tss(1, 4, 1); c.samp(0, "ADDRESSU", 3); c.samp(0, "ADDRESSV", 3)
     s, vv2 = tri([("pos", None), ("f4", cf), ("f2", lambda sx, sy: ((sx + 0.5) / 32, (sy + 0.5) / 32))]); c.run("up", s, vv2)
     c.ref = full(lambda ix, iy: tuple(t4(min(ix // 8, 3), min(iy // 8, 3))[k] * cf(ix, iy)[k] for k in range(4)))
+    # ---------------------------------------------------------------- h: user clip planes and point size with a programmable vertex shader (WineD3D 9.0 shader_glsl_generate_vs_epilogue)
+    VS_PC = "vs_2_0\ndcl_position v0\ndcl_color0 v1\nmov oPos, v0\nmov oD0, v1\n"
+    VS_PC3 = "vs_3_0\ndcl_position v0\ndcl_color0 v1\ndcl_position o0\ndcl_color0 o1\nmov o0, v0\nmov o1, v1\n"
+    HC = (0.3, 0.6, 0.9, 1.0)
+    pvs = [[fb(x) for x in (*ndc(p), Z, 1.0)] + [fb(v) for v in HC] for p in SCR]
+    def clipcase(nm, vsa, planes, enable, f, clipping=1):
+        c = mk(nm, "h"); vs = c.vs(A(vsa)); ps = c.ps(A(PS_COL)); c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0), (FLOAT4, COLOR, 0)])))
+        c.rs("CLIPPING", clipping); c.rs("CLIPPLANEENABLE", enable)
+        for i, p in planes: c.plane(i, p)
+        c.run("up", 32, pvs); c.ref = full(lambda ix, iy: HC if f(ix, iy) else None)
+    PX, PY = (1.0, 0.0, 0.0, 0.03), (0.0, -1.0, 0.0, 0.03)     # keep ndc x >= -0.03 (ix >= 16, W = 32) / ndc y <= 0.03 (iy >= 16): the plane value is dot(clip position, plane), raw
+    kx, ky = (lambda ix, iy: ix >= 16), (lambda ix, iy: iy >= 16)
+    clipcase("clip_vs2_plane0_x", VS_PC, [(0, PX)], 1, kx)
+    clipcase("clip_vs2_plane1_y_no_inversion", VS_PC, [(1, PY)], 2, ky)
+    clipcase("clip_vs2_two_planes", VS_PC, [(0, PX), (1, PY)], 3, lambda ix, iy: kx(ix, iy) and ky(ix, iy))
+    clipcase("clip_vs3_plane5", VS_PC3, [(5, PX)], 32, kx)
+    clipcase("clip_vs2_plane_not_enabled", VS_PC, [(0, PX), (1, PY)], 0, lambda ix, iy: True)
+    clipcase("clip_vs2_enabled_only_plane1", VS_PC, [(0, PX), (1, PY)], 2, ky)
+    clipcase("clip_vs2_clipping_off", VS_PC, [(0, PX)], 1, lambda ix, iy: True, clipping=0)
+    def ptcase(nm, vsa, size, mn, mx, want, cst=None):
+        c = mk(nm, "h"); vs = c.vs(A(vsa)); ps = c.ps(A(PS_COL)); c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0), (FLOAT4, COLOR, 0)])))
+        c.rsf("POINTSIZE", size); c.rsf("POINTSIZE_MIN", mn); c.rsf("POINTSIZE_MAX", mx)
+        if cst is not None: c.consts(0, 0, [cst, 0, 0, 0])
+        pt = [[fb(x) for x in (2 * 16.5 / W - 1, 1 - 2 * 16.5 / H, Z, 1.0)] + [fb(v) for v in HC]]
+        c.run_prim(1, 1, 32, pt); h = want / 2
+        c.ref = full(lambda ix, iy: HC if abs(ix - 16.5) <= h and abs(iy - 16.5) <= h else None)
+    VS_PS = "vs_2_0\ndcl_position v0\ndcl_color0 v1\nmov oPos, v0\nmov oD0, v1\nmov oPts, c0.x\n"
+    VS_PS3 = "vs_3_0\ndcl_position v0\ndcl_color0 v1\ndcl_position o0\ndcl_color0 o1\ndcl_psize o2\nmov o0, v0\nmov o1, v1\nmov o2, c0.x\n"
+    ptcase("point_vs2_state_size", VS_PC, 4, 1, 64, 4)
+    ptcase("point_vs2_state_size_min", VS_PC, 2, 6, 64, 6)
+    ptcase("point_vs2_state_size_max", VS_PC, 8, 1, 2, 2)
+    ptcase("point_vs2_min_above_max", VS_PC, 3, 5, 2, 2)
+    ptcase("point_vs3_state_size", VS_PC3, 6, 1, 64, 6)
+    ptcase("point_vs2_oPts", VS_PS, 2, 1, 64, 6, cst=6.0)
+    ptcase("point_vs2_oPts_max", VS_PS, 2, 1, 4, 4, cst=6.0)
+    ptcase("point_vs2_oPts_min", VS_PS, 8, 4, 64, 4, cst=1.0)
+    ptcase("point_vs3_psize_out", VS_PS3, 2, 1, 64, 6, cst=6.0)
+    ptcase("point_vs3_psize_out_min_above_max", VS_PS3, 2, 6, 4, 4, cst=6.0)
     return out

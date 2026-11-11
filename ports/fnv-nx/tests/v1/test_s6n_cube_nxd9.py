@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 's6n'))
 import nxd9  # noqa: E402
 
 VS = """#version 450 core
-layout(std140, binding = 2) uniform vs_driver { vec4 vs_drv_posfix; vec4 vs_drv_reserved[3]; };
+layout(std140, binding = 2) uniform vs_driver { vec4 vs_drv_posfix; vec4 vs_drv_reserved[3]; };  // prefix of the 208-byte block (std140 binding 2 reads the first 64 bytes only)
 layout(std140, binding = 0) uniform vs_cbuf_f { vec4 vs_uniforms_vec4[256]; };
 layout(location = 0) in vec4 vs_v0;
 layout(location = 4) in vec4 vs_v1;
