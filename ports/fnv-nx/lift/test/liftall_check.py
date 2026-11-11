@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(LIFT, 'tools'))
 from liftall import classify
 
 
-def tsv(f): return [l.rstrip('\n').split('\t') for l in open(f)]
+def tsv(f): return [l.rstrip('\n').split('\t') for l in open(f) if l[0] != '#']
 
 
 def defined(archives):
@@ -70,7 +70,7 @@ def run_dispatch(out, arcs, ents, uni, und):
     from elftools.elf.elffile import ELFFile
     elf = out + '/blob.elf'     # symbols still undefined after (e) are pointed at fnvl_nobody here: the blob only has to run the dispatcher
     open(out + '/blob.args', 'w').write(''.join('--defsym=%s=fnvl_nobody\n' % s for s in sorted(und)))
-    r = subprocess.run([LD, '-m', 'aarch64elf32', '-Ttext=0x10000000', '-e', 'fnvl_dispatch', '@' + out + '/blob.args', '-o', elf, '--whole-archive'] + arcs + ['--no-whole-archive', out + '/rt.a', out + '/disp.o'], capture_output=True, text=True)
+    r = subprocess.run([LD, '-m', 'aarch64elf32', '-Ttext=0x10000000', '-e', 'fnvl_dispatch', '@' + out + '/blob.args', '-o', elf, '--whole-archive'] + arcs + ['--no-whole-archive', '--start-group', out + '/rt.a', out + '/disp.o', '--end-group'], capture_output=True, text=True)
     if r.returncode: return False, 'link of the blob failed: ' + r.stderr[:200]
     with open(elf, 'rb') as fh:
         e = ELFFile(fh); sym = {s.name: s['st_value'] for s in e.get_section_by_name('.symtab').iter_symbols() if s.name}

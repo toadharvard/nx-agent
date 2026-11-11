@@ -529,6 +529,9 @@ static double ziv(int w, double x, double y, int q, u32 *fl) {
   for (int n = 6;; n *= 2) {
     int nw = (w <= W_TAN) ? n + (exx >> 5) + 5 : 72;
     u32 arena[48 * n + 24 * nw];
+#ifdef FM_DEBUG
+    for (int i = 0; i < 48 * n + 24 * nw; i++) arena[i] = 0x9e3779b9u * (u32)(i + 1);
+#endif
     cx c, cw; c.n = n; c.p = arena; c.end = arena + 48 * n; cw.n = nw; cw.p = arena + 48 * n; cw.end = arena + 48 * n + 24 * nw;
     za a; a.x = x; a.y = y; a.w = w; a.q = q;
     bf A = bnew(&c); int B = 0, r;

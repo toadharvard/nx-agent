@@ -24,13 +24,15 @@ def lift_part(arg):
         for x in ts:
             if x not in es: miss[x] += 1
     return miss, why, ok, seen
-def check_c(fd):
+def check_c(fd, ix):
     with mp.Pool(2) as p: rs = p.map(lift_part, [(fd, k, 2) for k in range(2)])
     miss = Counter(); why = Counter()
     for m, w, o, s in rs: miss.update(m); why.update(w)
     ok = sum(r[2] for r in rs); seen = sum(r[3] for r in rs)
     print('(c) closure under direct targets: %d entries lifted, %d direct call/tail references, targets that are not entries: %d (named by %d lifted entries)' % (ok, seen, len(miss), sum(miss.values())))
     print('(c) lift raised (counted apart, not in (c)): %d; by reason class: %s' % (sum(why.values()), dict(why.most_common(8))))
+    out = [v for v in miss if not ix(v)]; ins = sorted(v for v in miss if ix(v))
+    print('(c) of them outside every executable section: %d %s; inside executable sections: %d %s' % (len(out), ' '.join('%08x' % v for v in sorted(out)[:6]), len(ins), ' '.join('%08x' % v for v in ins[:6])))
     return miss
 def main():
     fd = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts')
@@ -54,6 +56,6 @@ def main():
     need = sum(b - a for a, b in xs)
     print('codemap.tsv: classified %d of %d executable bytes, unexplained %d, overlapping runs %d, gaps %d' % (tot, need, unx, ovl, gaps))
     if tot != need or unx or ovl or gaps: bad.append('codemap not total')
-    if '--no-c' not in sys.argv and check_c(fd): bad.append('targets that are not entries')
+    if '--no-c' not in sys.argv and check_c(fd, ix): bad.append('targets that are not entries')
     print('RESULT: ' + ('FAIL (%s)' % ', '.join(bad) if bad else 'PASS')); return 1 if bad else 0
 sys.exit(main())

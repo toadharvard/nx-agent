@@ -357,7 +357,7 @@ def uni(I):
 # are kept in scx (not in insns/cov), so byte accounting is unchanged. A target outside every executable section is not an entry (counted: lifter needs a rule there).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fnvlift import Image as LImage; from fnvlift import core as LCore
-limg = LImage(EXE); cl_cache = {}; cl_out = Counter(); cl_outex = {}; cl_add = Counter(); cl_jx = set(); cl_rounds = 0
+limg = LImage(EXE); cl_cache = {}; cl_out = Counter(); cl_outex = {}; cl_outt = {}; cl_outsrc = Counter(); cl_add = Counter(); cl_jx = set(); cl_rounds = 0
 def cl_range(a):
     p = parent.get(a)
     if p is not None and p in entries: return p, p + fsize[p]
@@ -386,7 +386,7 @@ while True:
         for kd, T in (('call', cs), ('tail', ts)):
             for t in T:
                 if t in entries: continue
-                if not intext(t): cl_out[kd, sec(t)] += 1; cl_outex.setdefault((kd, sec(t)), t); continue
+                if not intext(t): cl_out[kd, sec(t)] += 1; cl_outex.setdefault((kd, sec(t)), t); cl_outt.setdefault(t, a); cl_outsrc['R3/closure body' if a in r3set else 'decomp' if a in fsize else 'other'] += 1; continue
                 miss.setdefault(t, (set(), a))[0].add(kd)
     if not miss: break
     cl_rounds += 1
@@ -415,8 +415,8 @@ open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.j
 print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
     len(r3set), len(r3set) - len(scx), len(scx), len(udset), sum(1 for a in r3set if a in parent), dict(sorted(r3call.items()))))
 print('closure check (old, report only): direct jmp/jcc targets of non-decomp entries inside the span that are neither entries nor in the entry\'s own extent: %d' % eclo)
-print('closure under direct targets: %d rounds, entries added %s; targets outside executable sections (not entries) %d refs / %d targets, by kind and section %s; jecxz leaving range %d' % (
-    cl_rounds, dict(sorted(cl_add.items())), sum(cl_out.values()), len(cl_outex), {'%s %s' % k: '%d e.g. %08x' % (v, cl_outex[k]) for k, v in sorted(cl_out.items(), key=str)}, len(cl_jx)))
+print('closure under direct targets: %d rounds, entries added %s; targets outside executable sections (not entries) %d refs / %d distinct targets, by source entry %s, by kind and section %s; first sources %s; jecxz leaving range %d' % (
+    cl_rounds, dict(sorted(cl_add.items())), sum(cl_out.values()), len(cl_outt), dict(cl_outsrc), {'%s %s' % k: '%d e.g. %08x' % (v, cl_outex[k]) for k, v in sorted(cl_out.items(), key=str)}, ' '.join('%08x<-%08x' % (t, a) for t, a in sorted(cl_outt.items())[:4]), len(cl_jx)))
 print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches %d (non-decomp rows: equality; %d decomp rows: sum <= declared size)' % (len(rgs), len(NRR), rbad, rdec))
 def gate(green, TNu, why):
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')

@@ -11,6 +11,7 @@
    (rt/unhandled.c; the benches supply their own stop hook): the process ends, or execution continues from the CONTEXT. Not modelled: EFLAGS (lifted flags are locals: Context.EFlags = 0x202), FP/SSE restore
    from the CONTEXT, nested/collided unwind dispositions (reported as STATUS_INVALID_DISPOSITION to the unhandled hook). */
 #include "fnvl.h"
+#include "imp.h"
 extern "C" {
 u32 fnvl_os_unhandled(u32 record, u32 context);
 void fnvl_raise(u32 code, u32 at);
@@ -18,6 +19,8 @@ void fnvl_raise_ud(u32 at);
 void fnvl_raise_av(u32 access, u32 addr, u32 at);
 void fnvl_os_RtlUnwind(void);
 void fnvl_os_RaiseException(void);
+void fnvl_os_DebugBreak(void);
+int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp);
 }
 enum { CTX_SIZE = 716, REC_SIZE = 80, RET_SENT = 0xDEADBEE0u, EXC_UNWINDING = 2, EXC_EXIT_UNWIND = 4, EXC_NONCONT = 1 };
 enum { C_FLAGS = 0, C_FLOAT = 28, C_GS = 140, C_FS = 144, C_ES = 148, C_DS = 152, C_EDI = 156, C_ESI = 160, C_EBX = 164, C_EDX = 168, C_ECX = 172, C_EAX = 176,
@@ -79,7 +82,8 @@ static int dispatch(u32 rec, u32 ctx) {
     return 2;
 }
 
-static void raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp) {
+/* -> 1 execution continues from the CONTEXT (registers loaded, c->ra = Context.Eip), 0 a handler or the filter left by a non-local transfer */
+int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp) {
     u32 rec = sp - REC_SIZE; zero(rec, REC_SIZE);
     M32(rec) = code; M32(rec + 4) = flags; M32(rec + 12) = addr; M32(rec + 16) = np;
     for (u32 i = 0; i < np; i++) M32(rec + 20 + 4 * i) = info[i];
@@ -87,18 +91,19 @@ static void raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u3
     u32 saved_esp = sp;
     int d = dispatch(rec, ctx);
     if (d == 2) {              /* no handler took it: the OS's last step (rt/unhandled.c). It returns only for EXCEPTION_CONTINUE_EXECUTION */
-        if (!fnvl_os_unhandled(rec, ctx)) return;
+        if (!fnvl_os_unhandled(rec, ctx)) return 0;
         eax = M32(ctx + C_EAX); ecx = M32(ctx + C_ECX); edx = M32(ctx + C_EDX); ebx = M32(ctx + C_EBX); ebp = M32(ctx + C_EBP);
         esi = M32(ctx + C_ESI); edi = M32(ctx + C_EDI); esp = M32(ctx + C_ESP); c->ra = M32(ctx + C_EIP);
     }
     (void)saved_esp;
+    return d != 0;
 }
 
 extern "C" void fnvl_raise(u32 code, u32 at) {
     u32 sp = esp, eip = at, info[2] = { 0, 0 };
     u32 nt = code == FNVL_DE0 ? 0xC0000094u : code == FNVL_DEOVF ? 0xC0000095u : code == FNVL_BP ? 0x80000003u : 0xC000001Du;
     if (code == FNVL_BP) eip = at + 1;                      /* Windows: ExceptionAddress is the int3, Context.Eip the byte after it */
-    raise_rec(nt, 0, at, code == FNVL_BP ? 1 : 0, info, eip, sp);
+    fnvl_raise_rec(nt, 0, at, code == FNVL_BP ? 1 : 0, info, eip, sp);
 }
 
 /* a transfer to an address without a body (the dispatcher's miss, rt/rt.c): #UD at that address */
@@ -106,7 +111,7 @@ extern "C" void fnvl_raise_ud(u32 at) { fnvl_raise(FNVL_UD, at); }
 
 extern "C" void fnvl_raise_av(u32 access, u32 addr, u32 at) {
     u32 info[2] = { access, addr };
-    raise_rec(0xC0000005u, 0, at, 2, info, at, esp);
+    fnvl_raise_rec(0xC0000005u, 0, at, 2, info, at, esp);
 }
 
 /* guest entry, stdcall: RaiseException(code, flags, nargs, args) */
@@ -115,8 +120,15 @@ extern "C" void fnvl_os_RaiseException(void) {
     if (n > 15) n = 15;
     for (u32 i = 0; i < n; i++) info[i] = M32(args + 4 * i);
     esp = sp;                                              /* the caller's state after the call returns */
-    raise_rec(code, fl, ra, n, info, ra, sp);
+    fnvl_raise_rec(code, fl, ra, n, info, ra, sp);
     c->ra = c->ra;                                         /* ContinueExecution: c->ra = Context.Eip (the return address), registers loaded */
+}
+
+/* guest entry, stdcall, no arguments: kernel32!DebugBreak = EXCEPTION_BREAKPOINT reported at the return address; continuing resumes there */
+extern "C" void fnvl_os_DebugBreak(void) {
+    u32 ra = M32(esp), sp = esp + 4, info[1] = { 0 };
+    esp = sp;
+    fnvl_raise_rec(0x80000003u, 0, ra, 1, info, ra, sp);
 }
 
 /* guest entry, stdcall: RtlUnwind(TargetFrame, TargetIp, ExceptionRecord, ReturnValue) */

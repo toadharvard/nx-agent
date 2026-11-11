@@ -171,6 +171,7 @@ def finish(a):
         syms.update({k: s for k, s, *_ in imp})
     h = phf.build(list(syms)); open(out + '/disp.S', 'w').write(phf.table_asm(syms, h))
     w('entries', [('%08x' % x, s, 'code' if x in code else 'import') for x, s in sorted(syms.items())])
+    if imp: open(out + '/entries.tsv', 'a').write(open(out + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
     subprocess.check_call([CC, '-mabi=ilp32', '-fPIC', '-c', out + '/disp.S', '-o', out + '/disp.o'])
     # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
     rd = out + '/rt'; os.makedirs(rd, exist_ok=True); df = ['-DFNVL_PHF_REL', '-DFNVL_K1=%du' % h['k1'], '-DFNVL_K2=%du' % h['k2'], '-DFNVL_NBITS=%d' % h['nbits'], '-DFNVL_TBITS=%d' % h['tbits']]
@@ -197,7 +198,7 @@ def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--shard'); A('--finish', action='store_true'); A('--out', default='/home/user/l3work/liftall'); A('--jobs', type=int, default=3)
     A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe'))
-    A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=LIFT + '/rt/bridge_l3.tsv')     # --finish: import entries
+    A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None)     # --finish: import entries
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)
     elif a.shard: shard(a)

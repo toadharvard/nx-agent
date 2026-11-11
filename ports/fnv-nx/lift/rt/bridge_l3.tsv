@@ -1,3 +1,0 @@
-# dll	name	guest entry of the lifter runtime (services that work on the guest state itself; rt/seh.c)
-kernel32.dll	RaiseException	fnvl_os_RaiseException
-kernel32.dll	RtlUnwind	fnvl_os_RtlUnwind
