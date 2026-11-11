@@ -211,9 +211,9 @@ def link_and_gate(ents, out, far, absref=None, scale=None):
     os.chmod(wrap, 0o755)
     env = dict(os.environ, GATE_OUT=go)
     res, meas = {}, {}
-    cmd = [sys.executable, '-I', os.path.join(LINK, 'ld.py'), '--ld', wrap, '--ld-arg', '-m', '--ld-arg', 'aarch64linux32']
+    cmd = [sys.executable, '-I', os.path.join(LINK, 'ld.py'), '--ld', wrap, '--ld-arg=-m', '--ld-arg=aarch64linux32']
     if absref is not None:
-        cmd += ['--ld-arg', '--defsym=fnv_abs=0x400000']
+        cmd += ['--ld-arg=--defsym=fnv_abs=0x400000']
     cmd += ['--script', os.path.join(LINK, 'guest.ld'), '--in', os.path.join(out, 'in'), '--out', os.path.join(out, 'ld')]
     t = time.monotonic()
     r = subprocess.run(cmd, capture_output=True, text=True, env=env)
