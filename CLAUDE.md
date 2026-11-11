@@ -238,3 +238,61 @@ The owner's words, on a render defect that unit tests missed because the sibling
   Windows, Wine 9.0 or the console documents. A test never injects it by replacing a function.
 - Existing tests with doubles are rewritten onto the real files and the shared model, or deleted. Each lead gives the
   global count of its tests with doubles (files and symbols, with the commit) and takes it to 0.
+
+## Owner orders of 2026-11-11, late night: leads, workers, one fast build (binding)
+
+The owner's words: "Агенты вызывают соннетов которые делают задачи. Задачи соннетов механические. Опусы чекают
+корректность в рамках своей области. Обязательно трекать текущие задачи, статусы и общий прогресс." and "Заниматься
+остальным можно только когда сборка идет и нет более приоритетных задач. Сборка с гейтами должна оставаться почти
+моментальной. Сборка должна быть универсальной. И всегда быстрой. Единой."
+
+- **Leads are Opus 5.5** (`claude-opus-5-5`), one per layer: L1 contract and verdict, L2 source, rules and plugins,
+  L3a lift, L3b lift certification, L4 verify and boot machine, L5 platform, L6 render (D3D9 front end), L6A deko3d.
+  - The lead gives mechanical tasks to **Sonnet 5.5 workers** (`claude-sonnet-5-5`): edits by a stated rule, builds
+    and runs through the recipe or a farm, censuses, moving tests onto the real files.
+    - A worker task names the files, the rule, the check that proves it and the branch.
+    - Farms are Sonnet sessions too.
+  - The lead checks every worker result for correctness within its layer before it takes it into the lead branch:
+    - the rule closes the whole class;
+    - the numbers are global, with the commit;
+    - the build used the prepared machinery.
+  - The lead does not do mechanical work itself.
+- **The build comes first.** The one build is `verify/recipe.py` plus the L1 gates, in `GATE_CACHE`.
+  - Any other work is done only while that build is running and nothing of higher priority is open.
+  - The build with gates stays almost instant: content-keyed, so an unchanged unit is never rebuilt and a gate reads
+    cached facts.
+  - It is universal: every product root (platform, lifted packs, render, deko, loader, tests, sanitizer variant) is
+    built by this one build. There is no per-layer build script, no second cache and no direct compiler call.
+  - It is always fast. A change that makes the incremental verdict slower than its budget is red like any failing gate.
+- **No idling.** Each lead always has its layer's next step on the goal path in progress.
+  - Waiting on another layer is a reason to take the next item, not to stop.
+  - A blocked item names its blocker and the layer that owns it.
+- **Status, always current.** Each lead keeps `ports/fnv-nx/journal/status/<layer>.md` on its branch and pushes it after
+  every finished item. It holds:
+  - every current task, with its worker session id and status: doing, done (commit) or blocked (by what, owner);
+  - the layer's global progress numbers, with the commit they were measured at.
+  - The orchestrator collects these files into the overall progress.
+- **One render backend: deko3d.**
+  - Desktop GL (`gl4`), Mesa (llvmpipe, switch-mesa, Gallium Nine) and host GL packages are not product, and are not
+    part of the boot machine.
+  - The emulator runs the same product backend as the console. The boot machine's GPU is the L4 model of the deko3d
+    boundary (the dk* functions, the libnx calls it uses and the command buffers).
+  - Shaders run in that model from the DKSH that the build produced. An instruction that the model does not cover makes
+    the build red.
+
+## Owner order of 2026-11-11, night: the first frame in this budget, correct by construction (binding)
+
+The owner's words: "Трекай прогресс послойно и прогрессируй всегда. Задача понятная. Осталось 50% недельного лимита. За
+это время можно закрыть первый кадр точно. Что говорить об остальном. Опять же все должно быть корректно по
+построению."
+
+- **Target:** the first frame in the L4 emulator within the remaining half of the weekly usage limit. Everything a
+  session does is measured against that path: product roots → lifted packs as roots → ELF → boot → WinMain → menu →
+  first frame.
+- **Spend only on the path.** Work that does not move a layer toward the first frame waits until after it. Workers are
+  Sonnet; long or mechanical runs go to farms or workers, not to a lead's own context. No repeated censuses of numbers
+  that did not change; a gate reads cached facts.
+- **Correct by construction.** Each step is closed by its rule and gate, never by a run that happened to pass. A shortcut
+  that breaks a rule (a stub, a double, a second build path, a new assumption, a heuristic) is not progress: it is red.
+- **Progress is tracked per layer** in `ports/fnv-nx/journal/status/<layer>.md` (see "late night"); the orchestrator
+  collects them into `ports/fnv-nx/journal/status/ALL.md` on the integration branch every hour.

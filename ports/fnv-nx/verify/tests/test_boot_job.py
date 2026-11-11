@@ -38,7 +38,6 @@ MANIFEST = "00001000\tfnvboot_a\tcode\n00002000\tfnvboot_b\tcode\n00003000\tfnvb
 MODULES = ("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n"
            "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\n" % ("a" * 64))
 KEYS_TSV = "# table_id %s\n000ff000\tm.dll\tf\t1\tstdcall\ti\ti\tI_rt\n" % TID
-TRAILER = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+) main=(\d+) threads=(\d+) seconds=(\d+) "
                    r"published=(\S+)@([0-9a-f]{12})( presents=\d+)? stage_table=(\S+)$")
 HOME = os.path.join(SCRATCH, "home")
@@ -68,7 +67,7 @@ def git(*args, cwd=None, check=True):
 def lifted_elf(mode):
     """the guest of test_bootmachine.build(mode) with .text renamed to .text.fnvl (crt0 header patched as build() does)"""
     renamed = os.path.join(SCRATCH, "g%d.fnvl.elf" % mode)
-    raw_path = tb.build(mode)[1]
+    raw_path = tb.build(mode, tg.MODE50)[1]   # MODE 50: the renderer guest of test_bootgpu
     subprocess.run(["aarch64-linux-gnu-objcopy", "--rename-section", ".text=.text.fnvl", raw_path, renamed], check=True)
     data = bytearray(open(renamed, "rb").read())
     phoff, phnum = struct.unpack_from("<I", data, 28)[0], struct.unpack_from("<H", data, 44)[0]
@@ -112,7 +111,6 @@ def published(branch):
 
 def main():
     t0 = time.time()
-    tb.GUEST = tb.GUEST.replace("#if MODE == 6", tg.MODE50, 1)   # MODE 50: the renderer guest of test_bootgpu
     os.makedirs(HOME)
     os.makedirs(GAME)
     with open(os.path.join(GAME, "FalloutNV.exe"), "wb") as f:
@@ -181,8 +179,7 @@ def main():
             and meta["elf_id"] == "testid" and meta["elf_branch_commit"] == elf_commit and meta["nx_agent_commit"] == nx_commit
             and meta["exe_sha256"] == hashlib.sha256(EXE).hexdigest() and meta["boot_rc"] == 0 and meta["limit_instructions"] is None
             and meta["profile"] == "handheld" and meta["host_cpu_model"] and meta["softfloat"] == "absent", meta)
-    tb.case("commit message ends with exactly the trailer line", msg.rstrip("\n").splitlines()[-1] == TRAILER
-            and msg.count("Co-Authored-By") == 1, msg)
+    tb.case("commit message is one line without a trailer", len(msg.rstrip("\n").splitlines()) == 1 and "Co-Authored-By" not in msg, msg)
     blob = b"\n".join(files.values()).decode(errors="replace") + msg
     tb.case("no session text anywhere", "session" not in blob.lower() and "claude.ai" not in blob.lower(), "")
     doc = json.loads(files["OUT.json"]) if "OUT.json" in files else {}
