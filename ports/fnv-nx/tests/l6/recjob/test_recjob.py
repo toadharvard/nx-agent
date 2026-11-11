@@ -14,8 +14,8 @@ captures under caps; if absent test_rec.py is run there), D9REC_HOST (shader hos
 import collections, json, os, re, shutil, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-FARM = os.path.join(ROOT, "render", "d3d9", "rec", "farm"); JOB = FARM + "/d9rec_job.sh"; STATS = FARM + "/d9rec_stats.py"
-sys.path[:0] = [os.path.join(ROOT, "tools", "compare"), os.path.join(ROOT, "render", "d3d9", "cmp"), FARM]
+FARM = os.path.join(ROOT, "render", "tools", "rec", "farm"); JOB = FARM + "/d9rec_job.sh"; STATS = FARM + "/d9rec_stats.py"
+sys.path[:0] = [os.path.join(ROOT, "tools", "compare"), os.path.join(ROOT, "render", "tools", "cmp"), FARM]
 import nxd9io, d9s1  # noqa: E402
 RECW = os.environ.get("D9REC_WORK", "/home/user/work/l6/rec"); W = os.environ.get("D9REC_TEST_WORK", "/home/user/work/l6/recjob")
 fails = []; npass = 0

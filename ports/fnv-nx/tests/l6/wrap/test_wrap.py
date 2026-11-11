@@ -25,7 +25,7 @@ def sh(cmd, **kw):
 
 
 def compile_(src, out):
-    r = sh(["g++", "-m32", "-std=c++17", "-O0", "-w", "-I", INC, "-I", GEN, "-I", os.path.dirname(src), "-c", src, "-o", out])
+    r = sh(["g++", "-m32", "-std=c++17", "-O0", "-w", "-I", INC, "-I", GEN, "-I", os.path.dirname(src), "-I", os.path.join(ROOT, "render", "tools", "replay"), "-c", src, "-o", out])
     return r.returncode == 0, r.stderr[-1500:]
 
 
@@ -72,7 +72,7 @@ def main():
     variants.update({"mut_input": ("in", mi), "mut_output": ("out", mo), "mut_handle": ("handle", mh)})
     objs = {}
     with cf.ThreadPoolExecutor(4) as ex:
-        fut = {"gen": ex.submit(compile_, os.path.join(tmp, "d9wrap.gen.cpp"), os.path.join(tmp, "gen.o")), "st": ex.submit(compile_, os.path.join(GEN, "d9stream.cpp"), os.path.join(tmp, "st.o"))}
+        fut = {"gen": ex.submit(compile_, os.path.join(tmp, "d9wrap.gen.cpp"), os.path.join(tmp, "gen.o")), "st": ex.submit(compile_, os.path.join(ROOT, "render", "tools", "replay", "d9stream.cpp"), os.path.join(tmp, "st.o"))}
         for v, mut in variants.items():
             src = os.path.join(tmp, f"echo_{v}.cpp"); open(src, "w").write(gen_echo.Echo(pl, spec, mut).render()); fut[v] = ex.submit(compile_, src, os.path.join(tmp, f"echo_{v}.o"))
         for k, f in fut.items():

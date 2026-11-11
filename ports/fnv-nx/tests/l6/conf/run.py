@@ -8,7 +8,7 @@ Output: WORK/streams/<t>.d9s (+ .b.d9s), WORK/runs/<t>/*.out, WORK/cmp/<t>.json,
 import collections, json, os, re, shutil, signal, struct, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-CMP = os.path.join(ROOT, "render", "d3d9", "cmp"); sys.path[:0] = [CMP, os.path.join(ROOT, "tools", "compare")]
+CMP = os.path.join(ROOT, "render", "tools", "cmp"); sys.path[:0] = [CMP, os.path.join(ROOT, "tools", "compare")]
 import d9s1 as R, replay  # noqa: E402
 W = os.environ.get("CONF_WORK", "/home/user/work/l6/conf"); REC = os.environ.get("CONF_REC", "rec_nofree")   # recorder dir under W: rec (as built) or rec_nofree
 TAG = "" if REC == "rec_nofree" else "." + REC; TMO = int(os.environ.get("CONF_TIMEOUT", "600"))
