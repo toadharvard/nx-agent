@@ -11,6 +11,8 @@ Handoff read: d79467e6 (journal/inbox/l2-source-handoff-opus.md). Trunk CLAUDE.m
 | 2b | vtnames (clang plugin) | not started | waits on libclang-18-dev in env.json (w4 168006e9, not on trunk) |
 | 3 | names to all units by rule | — | waits: not on the first-frame path (uncertified names go LIFTED; the first ELF is fully lifted) |
 | 4 | 6 link test files onto msvcmodel objects from the recipe; negatives = byte mutations | w2 session_01KmtZKUiDYYhRvaS8TJ2kGu, branch claude/fnv-l2-source-w2 | doing (ELF side; COFF/CV/PE side blocked by the cl toolchain as a recipe external, L1) |
+| 6 | Plugins on the first product root (platform/): every plugin diagnostic on its units is L2's to fix by rule | L5 asked who writes the fnvnx-recipe/1 root; L2 offered a measurement build | doing (waiting on L5's answer) |
+| 7 | abi_native/vslots minus-one destructor rule is dead under sdd (mandatory for every native root; tables hold dtor.sdd, a D0 in a table is a plugin compile error): delete the rule, make dtor.d0/d1 in a table a finding | — | waits: not on the first-frame path |
 | 5 | VC8 for cl u2713: installer toolchain/msvc/setup_msvc.sh (6892de7), mirror fnv-nx-build tools/msvc8 @ 5881374b0e69 | — | done 6892de7; u2713 /Z7 object to rebuild on a farm |
 
 ## Global numbers (from the handoff, not re-measured)
