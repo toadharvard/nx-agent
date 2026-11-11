@@ -48,12 +48,12 @@ def effect(b0, mr):
     if mr < 0xc0:
         if b0 in (0xd8, 0xdc, 0xda, 0xde):
             return (-1 if g == 3 else 0), False
-        t = {0xd9: {0: 1, 3: -1}, 0xdb: {0: 1, 1: -1, 3: -1, 5: 1, 7: -1}, 0xdd: {0: 1, 1: -1, 3: -1}, 0xdf: {0: 1, 1: -1, 3: -1, 5: 1, 7: -1}}.get(b0, {})
+        t = {0xd9: {0: 1, 3: -1}, 0xdb: {0: 1, 1: -1, 3: -1, 5: 1, 7: -1}, 0xdd: {0: 1, 1: -1, 3: -1}, 0xdf: {0: 1, 1: -1, 3: -1, 4: 1, 5: 1, 6: -1, 7: -1}}.get(b0, {})
         return t.get(g, 0), False
     if b0 == 0xd8:
         return (-1 if g == 3 else 0), False
     if b0 == 0xd9:                                                    # fld sti, fld1..fldz push; fptan fsincos fxtract push; fpatan fyl2x fyl2xp1 pop
-        return (1 if mr < 0xc8 or 0xe8 <= mr <= 0xee else {0xf1: -1, 0xf2: 1, 0xf3: -1, 0xf4: 1, 0xf9: -1, 0xfb: 1}.get(mr, 0)), False
+        return (1 if mr < 0xc8 or 0xe8 <= mr <= 0xee else -1 if 0xd8 <= mr <= 0xdf else {0xf1: -1, 0xf2: 1, 0xf3: -1, 0xf4: 1, 0xf9: -1, 0xfb: 1}.get(mr, 0)), False
     if b0 == 0xda:
         return (-2 if mr == 0xe9 else 0), False
     if b0 == 0xdb:
@@ -180,6 +180,30 @@ def fold_fcw_bracket(cx, ins):
     return False
 
 
+def env(cx, ins, b0, g):
+    """fldenv (D9 /4), fnstenv (D9 /6), frstor (DD /4), fnsave (DD /6). The image is the protected-mode layout of SDM Vol 1 8.1.10 figures 8-9 (32-bit operand size: m28 / m108)
+    and 8-11 (66 prefix: m14 / m94), selected by the operand-size prefix; the whole x87 state lives in c->fx / c->ftop, so a function with one of these is lifted with the
+    dynamic stack (X87Dyn: the static path keeps the stack in C locals and cannot hand the physical registers and tags to an image).
+
+    LOADS (fldenv, frstor): FCW through FLDCW (the one control-word hook: host rounding mode synced), FSW -> TOP, C0 C2 C3 (the lifter's locals), the exception bits IE..PE, SF, C1 -> c->fex
+    (the host sticky flags are cleared: c->fex plus the host flags is what FSWV reads); FTW: tag 11 = empty register, any other tag = non-empty (the tag of a non-empty register is
+    recomputed from its contents by every store, SDM 8.1.7, so 00/01/10 carry no state); frstor also loads ST(0..7) as 80-bit images into M80 carriers; FIP and FDP are loaded into
+    c->fip / c->fdp.
+    STORES (fnstenv, fnsave): FCW, FSW (FSWV: TOP, C0..C3, C1, sticky bits), FTW from the register contents, FIP, FCS | FOP << 16, FDP, FDS from the last-instruction state (c->fip, c->fdp:
+    rt/fnvl_x87.h, SDM 8.1.8, assumptions A-FDP A-FDS A-FOP A-RES there); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
+    Assumptions: A-EMPTY a register that the image marks non-empty but whose carrier is empty holds the real indefinite (the value the tree gives every read of an empty register:
+    dyn_rd; the carrier of an empty register keeps no value; fnsave writes it for an empty register too); A-ES the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending
+    in the model (R8: all masked, FSWV never reports them)."""
+    if cx.xm == 's':
+        raise X87Dyn()
+    d32 = 0 if ins.prefix[2] == 0x66 else 1
+    a = cx.ea(ins, cx.ops[0])
+    if g == 6:
+        cx.em(('FNSTENV(%s,%d,FSWV(c->ftop));' if b0 == 0xd9 else 'FNSAVE(%s,%d,FSWV(c->ftop));') % (a, d32))
+    else:
+        cx.em(('FLDENV(%s,%d);' if b0 == 0xd9 else 'FRSTOR(%s,%d);') % (a, d32))
+
+
 # ---- control and status instructions (b0 d8..df); returns True when handled ----
 def ctl(cx, ins, b0, mr, g):
     em = cx.em
@@ -193,6 +217,8 @@ def ctl(cx, ins, b0, mr, g):
             em('M16(%s)=c->fcw;' % cx.ea(ins, cx.ops[0]))
         elif b0 == 0xdd and g == 7:
             em('M16(%s)=FSWV(%s);' % (cx.ea(ins, cx.ops[0]), top))
+        elif b0 in (0xd9, 0xdd) and g in (4, 6):
+            env(cx, ins, b0, g)
         else:
             return False
         return True
