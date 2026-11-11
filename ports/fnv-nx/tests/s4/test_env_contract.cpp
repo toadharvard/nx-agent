@@ -351,8 +351,8 @@ TEST(env_modules)
     CHECK(GetProcAddress(seen[8], "WSAStartup") == (FARPROC)fnvnx_win32_lookup_export("wsock32", "WSAStartup"));
     CHECK(GetProcAddress(seen[8], "WSAStartup") != NULL);
     CHECK(GetProcAddress(seen[8], (LPCSTR)(uintptr_t)115) == GetProcAddress(seen[8], "WSAStartup"));
-    CHECK(GetProcAddress(seen[13], "strlen") == (FARPROC)fnvnx_msvcrt_lookup("strlen"));
-    CHECK(GetProcAddress(seen[13], "strlen") != NULL);
+    CHECK(GetProcAddress(seen[13], "memcpy") == (FARPROC)fnvnx_msvcrt_lookup("memcpy"));
+    CHECK(GetProcAddress(seen[13], "memcpy") != NULL);
     ERR_AFTER(CHECK(GetProcAddress(k, "MessageBoxA") == NULL), 127);   /* another module's export */
     ERR_AFTER(CHECK(GetProcAddress(k, "NoSuchExport") == NULL), 127);
     ERR_AFTER(CHECK(GetProcAddress(seen[8], (LPCSTR)(uintptr_t)999) == NULL), 127);
