@@ -133,7 +133,7 @@ def image(d, ent):
 
 
 def finish(a):
-    import phf, fnvlift as L, impgen
+    import dispgen, fnvlift as L, impgen
     out = a.out; pk = out + '/pack'
     for d in (pk + '/u', pk + '/inc'): os.makedirs(d, exist_ok=True)
     images = [(out, L.universe.load()[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
@@ -171,10 +171,12 @@ def finish(a):
     for k, s in EH_KEYS:
         assert k not in syms
         syms[k] = s
-    h = phf.build(list(syms)); open(pk + '/disp.S', 'w').write(phf.table_asm(syms, h))
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
-    w('entries', [('%08x' % x, s, 'code' if x in code else 'import' if s.startswith('I_') or x >= 0x00100000 else 'runtime') for x, s in sorted(syms.items())])
+    rows = [('%08x' % x, s, 'code' if x in code else 'import' if s.startswith('I_') or x >= 0x00100000 else 'runtime') for x, s in sorted(syms.items())]
+    w('entries', rows)
     open(pk + '/entries.tsv', 'a').write(open(pk + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
+    asm, h = dispgen.table(rows)      # the one dispatcher generator (tools/dispgen.py): disp.S is a pure function of the entry rows
+    open(pk + '/disp.S', 'w').write(asm)
     w('shapes', [(k, shape_fam[k], n) for k, n in sorted(shapes.items(), key=lambda t: t[0].encode())])      # the universe of formgate: exactly what was lifted
     w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
