@@ -1,7 +1,8 @@
 /* host_platform.inc - ext_call module FNVNX_EXT_PLATFORM (hostapi.h 1..15): ONE table, one row per service number: the
  * least number of arguments and the handler. platform_ext is total: every (fn, nargs) has exactly one answer.
- *   fn 16..33 (sockets): host_sock_call answers (nargs wrong -> -FNVNX_WE_INVAL, its own rule)
- *   fn without a row (0, 10 until the access-fault delivery exists, 36 and up) -> FNVNX_EXT_NO_SERVICE
+ *   a socket service (host_sock_nargs(fn) >= 0, the FNVNX_PLAT_SOCK_* names of hostapi.h): host_sock_call answers (nargs wrong -> -FNVNX_WE_INVAL, its own rule)
+ *   every other number, i.e. a number without a row and not a socket service (0, 10 until the access-fault delivery exists, 27..29, 32, 33,
+ *   37 and up: whatever hostapi.h does not declare) -> FNVNX_EXT_NO_SERVICE
  *   nargs below the row's number, or nargs > 0 with a null argument array     -> FNVNX_EXT_BAD_NARGS
  *   otherwise the handler's answer, which hostapi.h states per service; more arguments than the row needs are ignored.
  * A service declared in hostapi.h without a row is a test failure (tests/s4/backends/hostapi_total.py).
@@ -35,7 +36,7 @@ static u64 pf_section_create(const u64 *a) { return host_section_create(a[0]); }
 static u64 pf_section_map(const u64 *a) { return host_section_map(a[0], a[1], a[2], a[3]); }
 static u64 pf_section_unmap(const u64 *a) { return host_section_unmap(a[0], a[1]); }
 static u64 pf_section_free(const u64 *a) { return host_section_free(a[0]); }
-static u64 pf_thread_self(const u64 *a) { (void)a; return h_thread_self(); }   /* L5 ADDITION, hostapi.h */
+static u64 pf_thread_self(const u64 *a) { (void)a; return h_thread_self(); }  
 static u64 pf_unmap_fixed(const u64 *a) { return h_unmap_fixed(a[0], a[1], a[2]); }
 /* TZ_AT (utc_seconds, FnvnxTzAt *): the platform lead's service, verbatim (hostapi.h states: 0, or non-zero without time zone data) */
 static u64 pf_tz_at(const u64 *args) {
@@ -67,11 +68,11 @@ static const PlatService g_plat[] = {
     [FNVNX_PLAT_SECTION_FREE] = {1, pf_section_free},
     [FNVNX_PLAT_UNMAP_FIXED] = {3, pf_unmap_fixed},
     [FNVNX_PLAT_TZ_AT] = {2, pf_tz_at},
-    [FNVNX_PLAT_THREAD_SELF] = {0, pf_thread_self},   /* L5 ADDITION */
+    [FNVNX_PLAT_THREAD_SELF] = {0, pf_thread_self},
 };
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
-    /* 16..33: the sockets (host_sock.inc, the platform lead's): it checks nargs itself (exactly the count: else -FNVNX_WE_INVAL) */
-    if (fn >= FNVNX_PLAT_SOCK_FIRST && fn <= FNVNX_PLAT_SOCK_LAST) return host_sock_call(fn, args, nargs);
+    /* the sockets (host_sock.inc): host_sock_nargs names the served ones; it checks nargs itself (exactly the count: else -FNVNX_WE_INVAL) */
+    if (host_sock_nargs(fn) >= 0) return host_sock_call(fn, args, nargs);
     if (fn >= sizeof g_plat / sizeof g_plat[0] || !g_plat[fn].fn) return FNVNX_EXT_NO_SERVICE;
     if (nargs < g_plat[fn].nargs || (nargs && !args)) return FNVNX_EXT_BAD_NARGS;
     return g_plat[fn].fn(args);
