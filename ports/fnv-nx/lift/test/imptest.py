@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start-runtime test: import entries (tools/impgen.py), thread entry, native -> guest callbacks and unwinding through a native frame (rt/enter.c, rt/imp.h).
+"""Start-runtime test: import entries (tools/impgen.py), thread entry, native -> guest callbacks and unwinding through a native frame (rt/enter.cc, rt/imp.h).
     imptest.py [--work DIR]
 Hand-assembled x86 guest functions (synthetic image at 0x401000) call imports through an import table; the natives are C functions of this file.
 The whole thing (lifted guest code + generated import entries + rt) is linked as AArch64 ILP32 and run under Unicorn from a native `test_main`.
@@ -133,7 +133,7 @@ def main():
     assert {n: k for k, s, d, n, b in ent} == {r[1]: KEY[r[1]] for r in BRIDGE if r[6] != 'none'}
     h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(w + '/native.c', 'w').write(NATIVE); open(w + '/guest.cpp', 'w').write(L.PRELUDE + '\n'.join(texts))
     jobs = [(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], w + '/guest.cpp'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], w + '/imp.cpp'),
-            (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/enter.c'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/seh.c'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/unhandled.c'),
+            (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/enter.cc'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/seh.cc'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/unhandled.cc'),
             (['aarch64-linux-gnu-gcc'] + CF, LIFT + '/rt/rt.c'), (['aarch64-linux-gnu-gcc'] + CF, LIFT + '/rt/rcptab.c'), (['aarch64-linux-gnu-gcc'] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/x87.c'),
             (['aarch64-linux-gnu-gcc'] + CF, w + '/tab.S'), (['aarch64-linux-gnu-gcc'] + CF, w + '/native.c')]
     objs = []

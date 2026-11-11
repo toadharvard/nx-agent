@@ -62,7 +62,7 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   of t through the dispatcher on top of this frame and repeat with what it returns. This one rule covers tail
   jumps, `push addr; ret`, helpers that return with a changed esp (`__chkstk`, `_alloca_probe`), `longjmp`, and the
   exe's own unwinder jumping into a handler or a catch continuation of an outer live frame.
-- A hardware fault is `fnvl_raise(code, at)` (rt/seh.c); it leaves `c->ra` = the resume address (ContinueExecution, or a handler's
+- A hardware fault is `fnvl_raise(code, at)` (rt/seh.cc); it leaves `c->ra` = the resume address (ContinueExecution, or a handler's
   own non-local jump) and the function continues in its loop; every raise site and the instruction after it are labels of that loop.
 - Exceptions (R4): a faulting instruction (#DE, #UD, `int3`, access violation taken by the host) builds the
   EXCEPTION_RECORD and CONTEXT from the guest registers and runs the dispatch the OS would run: walk `fs:[0]`, call
@@ -144,7 +144,7 @@ Everything that depends on the machine follows one fixed model, the same at ever
 No trap paths. Whatever the x86 code does on the CPU, the lifted code does:
 - a hardware fault of the instruction (divide error, `int3`, access violation is the host's own fault) raises the
   same SEH exception through the thread's `fs:[0]` chain, which the lifted frames build exactly as the exe does;
-- `rt/seh.c` is the dispatcher the exe expects from the OS: it walks `fs:[0]`, calls each handler (lifted code of
+- `rt/seh.cc` is the dispatcher the exe expects from the OS: it walks `fs:[0]`, calls each handler (lifted code of
   the exe: `__except_handler3/4`, `__CxxFrameHandler3`, which interpret the exe's own scope tables and FuncInfo),
   and performs the unwind (`RtlUnwind`) those handlers ask for. The exe's EH machinery is lifted code like any
   other, so FuncInfo, try maps, catchable types, rethrow and local destructors run from the exe's own tables;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""C-level check of rt/seh.c's exception-code mapping and of the segment state (rt/fnvl.h fnvl_seg_*): rt/seh.c is compiled for AArch64 ILP32 and run under Unicorn with a driver.
+"""C-level check of rt/seh.cc's exception-code mapping and of the segment state (rt/fnvl.h fnvl_seg_*): rt/seh.cc is compiled for AArch64 ILP32 and run under Unicorn with a driver.
     sehcodes.py
 The driver calls fnvl_raise(code, at) / fnvl_raise_av on a struct cpu laid out in guest memory with an EMPTY SEH chain (fs:[0] = -1), so the record and the CONTEXT go to the unhandled hook of the
 driver, which keeps their addresses. Compared against hand-written rows (NTSTATUS, ExceptionAddress, number of parameters, Context.Eip): the Windows 7 trap handlers as ReactOS transcribes them
@@ -25,10 +25,10 @@ STUBS = ('.text\n.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#
 def build():
     os.makedirs(W, exist_ok=True); fl = [f for f in T.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', LIFT + '/rt']
     open(W + '/drv.cpp', 'w').write(DRV); open(W + '/stubs.S', 'w').write(STUBS)
-    for src, extra in ((W + '/drv.cpp', []), (LIFT + '/rt/seh.c', ['-x', 'c++'])):
+    for src, extra in ((W + '/drv.cpp', []), (LIFT + '/rt/seh.cc', ['-x', 'c++'])):
         subprocess.check_call(['aarch64-linux-gnu-g++'] + fl + extra + [src, '-o', W + '/' + os.path.basename(src) + '.o'])
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-c', W + '/stubs.S', '-o', W + '/stubs.S.o'])
-    subprocess.check_call(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0xE0000000', '-e', '0', '-o', W + '/drv.elf'] + [W + '/%s.o' % n for n in ('drv.cpp', 'seh.c', 'stubs.S')])
+    subprocess.check_call(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0xE0000000', '-e', '0', '-o', W + '/drv.elf'] + [W + '/%s.o' % n for n in ('drv.cpp', 'seh.cc', 'stubs.S')])
     with open(W + '/drv.elf', 'rb') as fh:
         e = ELFFile(fh); segs = [(p['p_vaddr'], p.data()) for p in e.iter_segments() if p['p_type'] == 'PT_LOAD']
         return segs, {x.name: x['st_value'] for x in e.get_section_by_name('.symtab').iter_symbols() if x.name}

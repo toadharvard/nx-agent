@@ -1,16 +1,16 @@
 /* msvcrt.dll exception handling on the GUEST state: the guest entries of the bridge rows bound `l3` (symbol fnvl_msvcrt_<name>). C++, lifted-code flags
-   (guest registers in w19..w26, c in x27): aarch64-linux-gnu-g++ -x c++ <FLAGS> -I rt -c msvcrt_eh.c
+   (guest registers in w19..w26, c in x27): aarch64-linux-gnu-g++ -x c++ <FLAGS> -I rt -c msvcrt_eh.cc
    Reference: Wine 9.0 dlls/msvcrt (i386): except_i386.c, except.c, cpp.c; every function below names the Wine function it transcribes. The code is written
    against the documented MSVC structures (EH_PROLOG frame, FuncInfo / TryBlockMap / HandlerType / UnwindMap, ThrowInfo / CatchableTypeArray, _JUMP_BUFFER),
    with pointers as 32-bit guest addresses read through M8 / M32.
    Conventions. A guest entry reads its arguments from the guest stack at esp+4.. and ends with `c->ra = M32(sp0); esp = sp0 + 4 [+ 4n for stdcall]`.
-   Guest code is called like rt/seh.c call_handler does: arguments and the sentinel RET_SENT are pushed, fnvl_dispatch(addr)() runs it, and c->ra == RET_SENT
+   Guest code is called like rt/seh.cc call_handler does: arguments and the sentinel RET_SENT are pushed, fnvl_dispatch(addr)() runs it, and c->ra == RET_SENT
    afterwards means it returned. Anything else means the callee (or something it called) left by a NON-LOCAL transfer (a catch continuation, an __except block,
    longjmp, a handler of an older frame): every function here then returns at once, with registers and c->ra exactly as they are (return value 0 of the
    internal helpers). The same holds for the transfers this file makes itself (jump to an __except block, continue after a catch, longjmp): registers set,
    c->ra = target, return.
    Guest stack: every object the runtime needs (EXCEPTION_POINTERS, registrations, the catch frame) is carved below esp, which is lowered over it, so nested
-   guest calls and rt/seh.c (which builds its records below esp) never overwrite it.
+   guest calls and rt/seh.cc (which builds its records below esp) never overwrite it.
    Per-thread state: struct fnvl_msvcrt_thread (rt/msvcrt.h). Process state: fnvl_msvcrt_sighandlers.
    Platform symbols: free (type_info_dtor), abort (terminate: the default terminate handler of msvcrt), both `lookup` rows of bridge.tsv.
    Not here (no row, no body): the se_translator branch of Wine's cxx_frame_handler: `_set_se_translator` has no bridge row, so no translator can be installed
@@ -86,7 +86,7 @@ static int gcall(u32 fn, u32 ecx_v, int set_ebp, u32 ebp_v, const u32 *a, u32 n,
 }
 static inline int funclet(u32 fn, u32 ebp_v, u32 *res) { return gcall(fn, 0, 1, ebp_v, 0, 0, res); }
 
-/* RtlUnwind(target, 0, rec, 0): the runtime's own guest entry (rt/seh.c fnvl_os_RtlUnwind), stdcall; 1 returned, 0 non-local */
+/* RtlUnwind(target, 0, rec, 0): the runtime's own guest entry (rt/seh.cc fnvl_os_RtlUnwind), stdcall; 1 returned, 0 non-local */
 static int rtl_unwind(u32 target, u32 rec)
 {
     u32 sv_esp = esp;
@@ -396,7 +396,7 @@ extern "C" void fnvl_msvcrt_eh_nested_catch(void)
 }
 
 /* _CxxThrowException(object, type), stdcall: RaiseException(CXX_EXCEPTION, EXCEPTION_NONCONTINUABLE, 3, {magic, object, type}). The record is raised at the
-   thrower's return address with the thrower's esp after the `ret 8` (rt/seh.c fnvl_raise_rec, what fnvl_os_RaiseException does for a direct call): the state
+   thrower's return address with the thrower's esp after the `ret 8` (rt/seh.cc fnvl_raise_rec, what fnvl_os_RaiseException does for a direct call): the state
    after it returns -- a handler that continued, or a non-local transfer -- is whatever fnvl_raise_rec left. */
 extern "C" void fnvl_msvcrt_CxxThrowException(void)
 {

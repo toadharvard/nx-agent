@@ -375,7 +375,7 @@ def priv_want(E):
 def gs_null_av(E, X):
     """a `gs:` memory access that touches memory, with the harness' GS = the null selector (fnvl_seg_init): #GP(0) -> access violation event; the Unicorn oracle has a flat GS"""
     return any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS for o in E['ins'].operands) and E['ins'].mnemonic.split(' ')[-1] not in G['L'].core.NO_ACCESS
-SELV = {'cs': 0x1b, 'ss': 0x23, 'ds': 0x23, 'es': 0x23, 'fs': 0x3b, 'gs': 0}       # selectors of a Win32 x86 user process (rt/seh.c CONTEXT); Unicorn's flat selectors are its own
+SELV = {'cs': 0x1b, 'ss': 0x23, 'ds': 0x23, 'es': 0x23, 'fs': 0x3b, 'gs': 0}       # selectors of a Win32 x86 user process (rt/seh.cc CONTEXT); Unicorn's flat selectors are its own
 def origbyte(st, x): return (imgpage(x & ~0xfff) or genpage(st['wk'][0], st['wk'][1], x & ~0xfff))[x & 0xfff]
 def model_fix(E, st, o, c, X):
     """W14: forms whose result is defined by the reference model, not by Unicorn: cpuid (rt/cpumodel.c through ctypes), rdtsc (ticks = 2100 * the stub counter; Unicorn's TSC is its own),

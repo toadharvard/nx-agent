@@ -12,7 +12,7 @@ A1  FCW / MXCSR LOAD SITES.  A load is `fldcw m16`, `ldmxcsr m32`, `fninit`/`fin
     new = (cur & A) | O), or unknown (data dependent, aliased, argument of an entry, produced by a call).  REACHABLE SET R of control words: the least fixed point of
     R = {start} U {constants} U {t(r) : r in R, t a transform}; sound because a transform only ever applies to a value `fnstcw` stored earlier, which was the control word at that time
     and so is in R (induction on the number of loads).  Fields that can leave their start value are read off R.  An unknown load makes R unbounded: the facts say `unproven`.
-    Start values: thread entry (rt/enter.c: FCW 0x027F, MXCSR 0x1F80, assumption A-START: every guest thread starts there).
+    Start values: thread entry (rt/enter.cc: FCW 0x027F, MXCSR 0x1F80, assumption A-START: every guest thread starts there).
 A2  READERS of sticky status: `fnstsw ax` (fpmodes.statclass: forward walk of the value through eax/ah/flags; cc-only = only C0-C3/TOP can influence anything), `fnstsw m16`, `fnstenv`,
     `fnsave`, `stmxcsr`, `fxsave` (the value escapes to memory: all bits observed), the imports _clearfp/_statusfp/_status87/_controlfp.  `fnclex` sites are listed.
 A3  OCCURRENCES: wait forms, MMX instructions, instructions whose CPUID feature the model (rt/cpumodel.c) does not have (fnvlift/f_cpufeat.py), with the handler that would take them.

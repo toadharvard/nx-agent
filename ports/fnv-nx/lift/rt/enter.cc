@@ -118,6 +118,6 @@ WRAP(fnvnx_lift_detach, fnvl_detach_main)
 WRAP(fnvnx_guest_invoke, fnvl_invoke_main)
 WRAP(fnvnx_guest_current, fnvl_current_main)
 
-/* The routine an address that is not a key of the dispatcher table resolves to (rt/rt.c): #UD at that address, through the SEH runtime (rt/seh.c).
+/* The routine an address that is not a key of the dispatcher table resolves to (rt/rt.c): #UD at that address, through the SEH runtime (rt/seh.cc).
    The table holds every entry of the universe (tools/liftall.py --finish fails otherwise), so no relocated code pointer and no direct target gets here. */
 extern "C" void fnvl_nobody(void) { REGS(); fnvl_raise_ud(c->ra); REGS(); }

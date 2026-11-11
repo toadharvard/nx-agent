@@ -33,7 +33,7 @@ register struct cpu *c asm("x27");
 #define REGS() __asm__ volatile("" : "+r"(eax),"+r"(ecx),"+r"(edx),"+r"(ebx),"+r"(esp),"+r"(ebp),"+r"(esi),"+r"(edi))
 /* Control transfer (README): a lifted function is `void L_<addr>(void)`. A direct call or tail to another entry is a C call of its
    L_ function (CALLX); the one-instruction tests (test/instest.py) redefine CALLX after the prelude in their own sources. */
-/* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.c maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
+/* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.cc maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
 #define FNVL_DE0 1
 #define FNVL_DEOVF 5
 #define FNVL_BP 3
@@ -105,7 +105,7 @@ static inline int sse_sat(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
 static inline u64 sse_sad(const u8*a,const u8*b){ u32 s=0; for(int i=0;i<8;i++) s+=a[i]>b[i]?a[i]-b[i]:b[i]-a[i]; return s; }
 static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=(u32)(s.b[i]>>7)<<i; return r; }
 /* ---- Integer / system helpers (W14). ---- */
-/* more hardware exception codes for fnvl_raise(code, at); rt/seh.c maps them (the case in its status mapping is the runtime owner's):
+/* more hardware exception codes for fnvl_raise(code, at); rt/seh.cc maps them (the case in its status mapping is the runtime owner's):
    FNVL_PRIV 6  STATUS_PRIVILEGED_INSTRUCTION 0xC0000096, a fault: ExceptionAddress = Context.Eip = at
    FNVL_BOUNDS 7  STATUS_ARRAY_BOUNDS_EXCEEDED 0xC000008C (bound, `int 5`), a fault: Eip = at
    FNVL_INTO 8  STATUS_INTEGER_OVERFLOW 0xC0000095 (into, `int 4`), a trap: ExceptionAddress = at, Context.Eip = at+1
@@ -121,18 +121,18 @@ extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void
    popfd loads CF PF AF ZF SF DF OF; AC and ID are kept in c->eflx; TF/IF/IOPL/NT/RF/VM/VIF/VIP changes are ignored (user mode cannot change them). */
 #define EFL_PUSH() ((u32)((cf&1)|2u|((pf&1)<<2)|((af&1)<<4)|((zf&1)<<6)|((sf&1)<<7)|0x200u|((df&1)<<10)|((of&1)<<11)|(c->eflx&0x240000u)))
 #define EFL_POP(v_) do{ u32 f_=(v_); cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c->eflx=f_&0x240000u; }while(0)
-/* aam/aad/aaa/aas/daa/das are generated inline; segment selector values of a Win32 x86 user process (as in rt/seh.c's CONTEXT) */
+/* aam/aad/aaa/aas/daa/das are generated inline; segment selector values of a Win32 x86 user process (as in rt/seh.cc's CONTEXT) */
 #define SEL_CS 0x1bu
 #define SEL_DS 0x23u
 #define SEL_FS 0x3bu
 /* ---- W15: class rules of the system / rare-instruction family (fnvlift/f_sys.py, f_int.py). Appended; nothing above changed. ----
-   More hardware exception codes for fnvl_raise(code, at) (the mapping lines for rt/seh.c are in the W15 report):
+   More hardware exception codes for fnvl_raise(code, at) (the mapping lines for rt/seh.cc are in the W15 report):
    FNVL_STEP 10  STATUS_SINGLE_STEP 0x80000004 (`int1` / icebp, F1: a debug TRAP): ExceptionAddress = Context.Eip = at, which is the address of the NEXT instruction
    (KiTrap01: KiDispatchException0Args(STATUS_SINGLE_STEP, TrapFrame->Eip), no parameters). */
 #define FNVL_STEP 10
 /* FNVL_LOCK 11  STATUS_INVALID_LOCK_SEQUENCE 0xC000001E: #UD of an instruction that has an F0 prefix among its bytes (KiTrap06Handler); at = the instruction, a fault. */
 #define FNVL_LOCK 11
-/* Segment registers of the process model (rt/seh.c CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
+/* Segment registers of the process model (rt/seh.cc CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
    (base = TEB, limit 0xFFF); the only descriptors a ring-3 load can reach are the three of the model GDT below, plus the null selector for ES/DS/FS/GS.
    SELK strips the RPL: it keeps the descriptor index and the TI bit (a TI=1 selector names the LDT, which a Win32 process has none of: always invalid). */
 #define SEG_ES 0
@@ -159,7 +159,7 @@ static inline u32 fnvl_seg_ok(u32 idx, u32 sel){ u32 k=SELK(sel);
    instruction and, while f_int.SEG_STATE is False, still reads the register as the process constant of SEGSEL. */
 static inline void fnvl_seg_set(struct cpu *p, u32 idx, u32 sel){ p->sel[idx]=sel; if(idx==SEG_FS) p->fs=(SELK(sel)==SELK(SEL_FS))?p->teb:0u; }
 static inline u32 fnvl_seg_get(struct cpu *p, u32 idx){ return p->sel[idx]; }
-/* Segment state of a fresh thread (rt/enter.c cpu_reset): the process constants of a native 32-bit Windows 7 user process (rt/seh.c make_context): CS 0x1b, DS=ES=SS 0x23, FS 0x3b with
+/* Segment state of a fresh thread (rt/enter.cc cpu_reset): the process constants of a native 32-bit Windows 7 user process (rt/seh.cc make_context): CS 0x1b, DS=ES=SS 0x23, FS 0x3b with
    base = TEB, GS null. struct cpu.sel is indexed ES, CS, SS, DS, FS, GS (SEG_*); sel and teb are the last fields of struct cpu. */
 static inline void fnvl_seg_init(struct cpu *p, u32 teb){ p->teb=teb; p->sel[SEG_ES]=SEL_DS; p->sel[SEG_CS]=SEL_CS; p->sel[SEG_SS]=SEL_DS; p->sel[SEG_DS]=SEL_DS; p->sel[SEG_FS]=SEL_FS; p->sel[SEG_GS]=0u; p->fs=teb; }
 /* Base of a `gs:` access, by the CURRENT GS selector (the null selector never gets here: the lifter emits a #GP(0) guard before the instruction): the FS descriptor -> TEB, a flat one -> 0. */

@@ -30,7 +30,7 @@
        2^k expm1(f ln 2) + (2^k - 1), k = nearest integer, f = x - k exact.
      y log2(x), y log2(x+1): the table of FYL2X / FYL2XP1 for zero / infinite / NaN / out-of-domain operands and x = 1 (or x = +-0); u = x or 1 + x is formed EXACTLY in cw
        (every bit between 2^-1074 and 2^1025 fits in 72 limbs), u = 2^k w, z = w - 1 exact; u a power of two (z = 0) gives y k exactly; else ln w = 2 atanh(z/(2+z)).
-   MSVCRT LIBRARY FUNCTIONS (the 15 _CI* intrinsics, rt/msvcrt_ci.c): acos asin atan cosh sinh tanh exp log pow by the same engine (start limb count n >= 2), fmod and sqrt exact. Same rule, same steps 1-3.
+   MSVCRT LIBRARY FUNCTIONS (the 15 _CI* intrinsics, rt/msvcrt_ci.cc): acos asin atan cosh sinh tanh exp log pow by the same engine (start limb count n >= 2), fmod and sqrt exact. Same rule, same steps 1-3.
      Irrationality (step 2): for a non-zero algebraic x, e^x (Hermite-Lindemann) and so exp, sinh, cosh, tanh (sinh x = s algebraic gives e^x a root of E^2 - 2 s E - 1, cosh and tanh likewise) are transcendental;
        ln x for algebraic x > 0, x != 1 is transcendental (e^(ln x) = x algebraic); asin, acos, atan: sin / cos / tan of a non-zero algebraic number is transcendental, and tan(atan x) = x, sin(asin x) = x, cos(acos x) = x
        are algebraic, so the angle is not algebraic: never a double or half-way point (the lattice of step 3 contains only dyadic rationals). Exact cases decided before the loop: exp 0 -> 1, log 1 -> +0, acos 1 -> +0,

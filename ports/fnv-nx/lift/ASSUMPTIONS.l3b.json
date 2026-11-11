@@ -113,7 +113,7 @@
    "area": "x87",
    "file": "lift/rt/fnvl_x87.h",
    "statement": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
-   "disposition": "open: closable by canonicalising on resume in rt/seh.c (L3a)"
+   "disposition": "open: closable by canonicalising on resume in rt/seh.cc (L3a)"
   },
   {
    "id": "A-STALE",
@@ -274,7 +274,7 @@
    "area": "fp",
    "file": "lift/tools/fpstate.py",
    "statement": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
-   "disposition": "fact: set by the runtime at thread entry (rt/enter.c); being verified against the code with the FP-mask fact"
+   "disposition": "fact: set by the runtime at thread entry (rt/enter.cc); being verified against the code with the FP-mask fact"
   },
   {
    "id": "A-SYS",
@@ -288,7 +288,7 @@
    "area": "fp",
    "file": "lift/tools/fpstate.py",
    "statement": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
-   "disposition": "open: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact"
+   "disposition": "open: a handler may write the FP control words in CONTEXT; being checked against rt/seh.cc with the FP-mask fact"
   }
  ],
  "not_mine": [
@@ -303,12 +303,12 @@
    "owner": "L3a"
   },
   {
-   "file": "lift/rt/unhandled.c:37",
+   "file": "lift/rt/unhandled.cc:37",
    "statement": "A8: handler changes to the CONTEXT of a native frame do not reach native state",
    "owner": "L3a"
   },
   {
-   "file": "lift/rt/msvcrt_eh.c:461",
+   "file": "lift/rt/msvcrt_eh.cc:461",
    "statement": "_XcptFilter: ex equals the record code",
    "owner": "L3a"
   }

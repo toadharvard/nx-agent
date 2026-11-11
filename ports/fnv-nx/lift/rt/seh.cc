@@ -1,5 +1,5 @@
 /* What the OS does on a hardware exception in a Win32 process, on the guest state (R4). C++ (it includes fnvl.h: guest registers w19..w26,
-   c in x27); compile with the lifted-code flags, -x c++, WITHOUT -DFNVL_TRACE:  aarch64-linux-gnu-g++ -x c++ <FLAGS> -c seh.c
+   c in x27); compile with the lifted-code flags, -x c++, WITHOUT -DFNVL_TRACE:  aarch64-linux-gnu-g++ -x c++ <FLAGS> -c seh.cc
    Entry points:
      fnvl_raise(code, at)            hardware fault of the instruction at guest address `at` (code: the FNVL_* list of fnvl.h, a total switch) -- called by lifted code
      fnvl_raise_av(access, addr, at) access violation (access 0 read, 1 write, 8 execute); the host fault handler calls it with the guest eip
@@ -8,7 +8,7 @@
    non-local transfer (the exe's __except_handler3/4 jump to their except block) -> registers and c->ra exactly as the handler left them. The
    lifted raise site then runs the non-local loop, which serves Eip when it is a label of the faulting function (the faulting instruction, an
    except/catch continuation) or an entry; it cannot serve any other address (documented limit). Unhandled: fnvl_os_unhandled(record, context)
-   (rt/unhandled.c; the benches supply their own stop hook): the process ends, or execution continues from the CONTEXT. Not modelled: EFLAGS (lifted flags are locals: Context.EFlags = 0x202), FP/SSE restore
+   (rt/unhandled.cc; the benches supply their own stop hook): the process ends, or execution continues from the CONTEXT. Not modelled: EFLAGS (lifted flags are locals: Context.EFlags = 0x202), FP/SSE restore
    from the CONTEXT, nested/collided unwind dispositions (reported as STATUS_INVALID_DISPOSITION to the unhandled hook). */
 #include "fnvl.h"
 #include "imp.h"
@@ -91,7 +91,7 @@ int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 e
     u32 ctx = make_context(rec, sp, eip); esp = ctx;            /* record and context live on the guest stack below the faulting esp */
     u32 saved_esp = sp;
     int d = dispatch(rec, ctx);
-    if (d == 2) {              /* no handler took it: the OS's last step (rt/unhandled.c). It returns only for EXCEPTION_CONTINUE_EXECUTION */
+    if (d == 2) {              /* no handler took it: the OS's last step (rt/unhandled.cc). It returns only for EXCEPTION_CONTINUE_EXECUTION */
         if (!fnvl_os_unhandled(rec, ctx)) return 0;
         eax = M32(ctx + C_EAX); ecx = M32(ctx + C_ECX); edx = M32(ctx + C_EDX); ebx = M32(ctx + C_EBX); ebp = M32(ctx + C_EBP);
         esi = M32(ctx + C_ESI); edi = M32(ctx + C_EDI); esp = M32(ctx + C_ESP); c->ra = M32(ctx + C_EIP);

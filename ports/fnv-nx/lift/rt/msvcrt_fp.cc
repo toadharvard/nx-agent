@@ -1,5 +1,5 @@
 /* msvcrt.dll floating-point control and classification on the GUEST fp state: the guest entries of the bridge rows bound `l3` (_controlfp, _clearfp, _fpclass,
-   _finite, _isnan). C++, lifted-code flags: aarch64-linux-gnu-g++ -x c++ <FLAGS> -I rt -c msvcrt_fp.c
+   _finite, _isnan). C++, lifted-code flags: aarch64-linux-gnu-g++ -x c++ <FLAGS> -I rt -c msvcrt_fp.cc
    Reference: Wine 9.0 dlls/msvcrt/math.c (i386, sse2_supported = the reference CPU has SSE2): _controlfp -> _control87 -> __control87_2 -> _setfp (x87) and
    _setfp_sse; _clearfp -> _setfp / _setfp_sse with sw_mask = _MCW_EM; _fpclass, _finite, _isnan. cdecl: arguments at esp+4.., result in eax.
    The state is the lifted code's own (rt/fnvl.h, rt/fnvl_x87.h): the x87 control word c->fcw and the SSE control/status word c->mxcsr, changed with the same
