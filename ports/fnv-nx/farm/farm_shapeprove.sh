@@ -20,6 +20,7 @@ B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/far
 PREFIX=${BRANCH_PREFIX:-l3b-lift/shapeprove}; PUBLISH=${PUBLISH:-1}
 WORKDIR=${WORK:-/home/user/l3work/proof}
 mkdir -p "$W/in"
+exec 9> "$W/in/.lock"; flock 9      # shards started together on one machine fetch the inputs one after the other
 T0=$(date +%s)
 fetch_branch() {   # fetch_branch <branch> <dir>: a worktree of the branch head in <dir> (reused when present)
     local d=$2
@@ -48,8 +49,10 @@ for ln in open(os.path.join(d, 'KEYS.tsv')):
         r = ln.rstrip('\n').split('\t'); assert sha(os.path.join(d, r[0], 'shapes.tsv')) == r[4], r[0]
 PY
     SHAPES="$W/in/shapes_union.tsv"
-    ( for m in $(cut -f1 "$W/in/shapes/KEYS.tsv" | grep -v '^#' | sort); do grep -hv '^#' "$W/in/shapes/$m/shapes.tsv" | cut -f1; done | LC_ALL=C sort -u ) > "$SHAPES"
+    ( for m in $(cut -f1 "$W/in/shapes/KEYS.tsv" | grep -v '^#' | sort); do grep -hv '^#' "$W/in/shapes/$m/shapes.tsv" | cut -f1; done | LC_ALL=C sort -u ) > "$SHAPES.tmp"
+    mv "$SHAPES.tmp" "$SHAPES"
 fi
+flock -u 9
 ID=$(python3 -I "$HERE/certs_build.py" --id)
 OUT="$W/out/$ID"; mkdir -p "$OUT"
 BR="$PREFIX/$ID/${K}of${N}"
