@@ -1,6 +1,6 @@
 # L4 VERIFY status (lead: Opus 5.5, branch claude/fnv-l4-verify)
 
-Updated 2026-11-11 22:55Z. Trunk CLAUDE.md d7fac9b50 merged (GL is the reference for deko3d). claude/fnv-l4-verify-w1 (68e37dab7) is never merged. L4 fully in the trunk: claude/fnv-nx-clean 41c9eca merged a4b0a84 (93477f2, 5d106a8 included).
+Updated 2026-11-11 22:47Z. Trunk claude/fnv-nx-clean a2453fe9 holds L4 e8b2c4ad (L1 green, tree 6dbf402b, 23 gates). Trunk CLAUDE.md d7fac9b50 merged (GL is the reference for deko3d). claude/fnv-l4-verify-w1 (68e37dab7) is never merged. L4 fully in the trunk: claude/fnv-nx-clean 41c9eca merged a4b0a84 (93477f2, 5d106a8 included).
 
 ## Tasks
 
