@@ -42,10 +42,10 @@ iswspace	platform/crt/msvcrt_exports.cpp	TOTAL
 tolower	platform/crt/msvcrt_exports.cpp	TOTAL
 toupper	platform/crt/msvcrt_exports.cpp	TOTAL
 setlocale	platform/crt/msvcrt_exports.cpp	TOTAL
-sprintf	platform/crt/msvcrt_exports.cpp (engine fnvnx_msvc_format)	TOTAL except %a %F %z %j %t (print the letter); float digits: exact expansion, half up, as the reference msvcrt
-_snprintf	platform/crt/string.c (engine in platform/crt/msvcrt_exports.cpp)	TOTAL except: float digits as for sprintf
-_vsnprintf	platform/crt/string.c (engine in platform/crt/msvcrt_exports.cpp)	TOTAL except: float digits as for sprintf
-sscanf	platform/crt/msvcrt_exports.cpp	TOTAL
+sprintf	platform/crt/msvcrt_format.cpp (one engine over an argument source; translated callers: fnvnx_msvcrt_va_sprintf reads x86 stack words)	TOTAL except %a %z %j %t (print the letter); float digits: exact big-integer expansion, half up, as the reference msvcrt
+_snprintf	platform/crt/string.c + msvcrt_format.cpp (translated callers: fnvnx_msvcrt_va_snprintf)	TOTAL except: float digits as for sprintf
+_vsnprintf	platform/crt/msvcrt_format.cpp (fnvnx_msvcrt_va_vsnprintf: its va_list is a pointer to x86 stack words; native callers use _vsnprintf in string.c)	TOTAL except: float digits as for sprintf
+sscanf	platform/crt/msvcrt_format.cpp (translated callers: fnvnx_msvcrt_va_sscanf)	TOTAL; %f / strtod: exact big-integer decimal-to-binary, nearest even
 atof	platform/crt/msvcrt_exports.cpp	TOTAL
 atoi	platform/crt/msvcrt_exports.cpp	TOTAL
 atol	platform/crt/msvcrt_exports.cpp	TOTAL
