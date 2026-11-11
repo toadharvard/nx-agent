@@ -141,7 +141,7 @@ def guest_report(tmp):
     r = sh(["bash", os.path.join(before_root, "render", "d3d9", "build_guest.sh"), os.path.join(tmp, "gn")], env=env)
     miss_ok = r.returncode != 0 and "FNVNX_SHADERS_DEPS" in (r.stdout + r.stderr)
     out.append("  guest build without the translator build: exit %d, message names FNVNX_SHADERS_DEPS: %s" % (r.returncode, miss_ok))
-    return out, bool(gone) and not still and len(gone) == 2 and miss_ok
+    return out, bool(gone) and not still and len(gone) == 3 and miss_ok
 
 
 # mutations: (part that must fail, file, old, new)

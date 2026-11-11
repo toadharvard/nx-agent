@@ -575,7 +575,7 @@ diff --git a/mojoshader.h b/mojoshader.h
 index 5a89569..9fd1117 100644
 --- a/mojoshader.h
 +++ b/mojoshader.h
-@@ -714,6 +714,31 @@ typedef struct MOJOSHADER_parseData
+@@ -714,6 +714,37 @@ typedef struct MOJOSHADER_parseData
   */
  #define MOJOSHADER_PROFILE_GLSLES3 "glsles3"
  
@@ -603,6 +603,12 @@ index 5a89569..9fd1117 100644
 + *  leave unwritten (README "Varying completion"); the default (0) writes only the completion the base rule needs.
 + */
 +void MOJOSHADER_glsldkSetComplete(int complete);
++
++/*
++ * glsldk, NEXT MOJOSHADER_parse() on this thread: nonzero = every varying of usage COLOR (oD0/oD1, v0/v1, SM3 COLOR registers) is declared
++ *  `flat`: the provoking (first) vertex value, D3DRS_SHADEMODE = D3DSHADE_FLAT (Wine 9.0 state_shademode). All other varyings stay interpolated.
++ */
++void MOJOSHADER_glsldkSetFlat(int flat);
 +
  /*
   * Profile string for OpenGL ARB 1.0 shaders: GL_ARB_(vertex|fragment)_program.
@@ -756,7 +762,7 @@ index 319e3cb..e77f7cb 100644
  
  #pragma GCC visibility push(hidden)
  
-@@ -27,6 +28,102 @@ static inline const char *get_GLSL_register_string(Context *ctx,
+@@ -27,6 +28,110 @@ static inline const char *get_GLSL_register_string(Context *ctx,
      return get_D3D_register_string(ctx,regtype,regnum,regnum_str,regnum_size);
  } // get_GLSL_register_string
  
@@ -767,6 +773,7 @@ index 319e3cb..e77f7cb 100644
 +static __thread const signed char *dk_tab_attrib, *dk_tab_varying;
 +static __thread const unsigned char *dk_tab_copy;
 +static __thread int dk_complete;
++static __thread int dk_flat;
 +
 +void MOJOSHADER_glsldkSetLocations(const signed char *attrib, const signed char *varying,
 +                                   const unsigned char *copy)
@@ -778,6 +785,11 @@ index 319e3cb..e77f7cb 100644
 +{
 +    dk_complete = complete;
 +} // MOJOSHADER_glsldkSetComplete
++
++void MOJOSHADER_glsldkSetFlat(int flat)
++{
++    dk_flat = flat;
++} // MOJOSHADER_glsldkSetFlat
 +
 +static int dk_attrib_location(Context *ctx, MOJOSHADER_usage usage, int index)
 +{
@@ -849,7 +861,9 @@ index 319e3cb..e77f7cb 100644
 +    if (!support_glsldk(ctx)) { buf[0] = '\0'; return; }
 +    const int loc = is_attrib ? dk_attrib_location(ctx, usage, index)
 +                              : dk_varying_location(ctx, usage, index);
-+    snprintf(buf, len, "layout(location = %d) ", loc);
++    // D3DSHADE_FLAT: the COLOR varyings (never the vertex attributes) take the provoking vertex (Wine 9.0 state_shademode: GL_FLAT shades the colours only).
++    const int flat = !is_attrib && dk_flat && (usage == MOJOSHADER_USAGE_COLOR);
++    snprintf(buf, len, "layout(location = %d) %s", loc, flat ? "flat " : "");
 +} // dk_layout
 +#endif
 +
@@ -1192,7 +1206,7 @@ index 319e3cb..e77f7cb 100644
 +        {
 +            snprintf(lhs, sizeof (lhs), "dk_pad_%d", s);
 +            push_output(ctx, &ctx->globals);
-+            output_line(ctx, "layout(location = %d) out highp vec4 %s;", s, lhs);
++            output_line(ctx, "layout(location = %d) %sout highp vec4 %s;", s, (dk_flat && (q / 16 == MOJOSHADER_USAGE_COLOR)) ? "flat " : "", lhs);
 +            pop_output(ctx);
 +        } // else
 +        {
@@ -1833,7 +1847,7 @@ index 319e3cb..e77f7cb 100644
 +            //  sampling as a "centroid in" declaration, but Mesa's GL linker
 +            //  (25.x, the V6n parity target) rejects some explicit-location
 +            //  centroid inputs as having "no matching output".
-+            dk_centroid = 1;
++            dk_centroid = !(dk_flat && (usage == MOJOSHADER_USAGE_COLOR));  // a flat input has one value: centroid is moot (and interpolateAtCentroid needs an interpolated input)
 +        } // if
 +        else if (flags & MOD_CENTROID)  // !!! FIXME
          {
