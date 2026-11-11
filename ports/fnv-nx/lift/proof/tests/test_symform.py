@@ -1,17 +1,15 @@
 """Unit tests of proof/symform.py on synthetic encodings (nothing derived from game data):
 the symbolic Form of a shape, instantiated with the field bytes and the address of a concrete instruction, equals the concrete Form of that instruction."""
 import os
-import random
 import subprocess
 import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..'))
-import forms
-import forms_alu, forms_flow, forms_move  # noqa: F401  (register the builders before a test patches one)
-import shape
-import symform
+sys.path.insert(0, os.path.join(HERE, '..', '..'))
+from fnvlift import dsl
+from proof import forms, forms_alu, forms_flow, forms_move, shape, symform  # noqa: F401  (the forms_* modules register the builders before a test patches one)
+from proof.detrand import Rng
 
 MD = shape.decoder()
 
@@ -66,7 +64,7 @@ def instances(h, rnd, n=6):
 
 class SymFormTest(unittest.TestCase):
     def test_link_on_synthetic_encodings(self):
-        rnd = random.Random(7)
+        rnd = Rng(7)
         for name, h in CASES:
             key = shape.shape_key(decode(h, 0))
             sf = symform.symbuild(key)
@@ -112,7 +110,7 @@ class SymFormTest(unittest.TestCase):
             def bad(c):                                                        # ADD whose immediate is zero-extended instead of sign-extended in the symbolic build only
                 orig(c)
                 if hasattr(c.ops[1].val, '_node'):
-                    c.F.regs.clear(); c.F.flags.clear(); c.F.reg('ecx', forms.V('ecx', 32) + forms.zext(forms.C(c.ops[1].val, 8), 32))
+                    c.F.regs.clear(); c.F.flags.clear(); c.F.reg('ecx', dsl.V('ecx', 32) + dsl.zext(dsl.C(c.ops[1].val, 8), 32))
             forms.H['add'] = bad
             sf = symform.symbuild(key)
         finally:
@@ -120,9 +118,9 @@ class SymFormTest(unittest.TestCase):
         self.assertFalse(symform.link_ok(sf, bytes.fromhex(h), 0x401000)[0])
 
     def test_hash_needs_no_z3(self):
-        code = ("import sys; sys.path.insert(0, %r); import symform, shape\n"
+        code = ("import sys; sys.path.insert(0, %r); from proof import symform, shape\n"
                 "k = shape.shape_key(list(shape.decoder().disasm(bytes.fromhex('83c105'), 0))[0])\n"
-                "print(symform.shape_sha(k)); assert 'z3' not in sys.modules" % os.path.join(HERE, '..'))
+                "print(symform.shape_sha(k)); assert 'z3' not in sys.modules" % os.path.join(HERE, '..', '..'))
         out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout.strip(), symform.shape_sha(shape.shape_key(decode('83c105', 0))))

@@ -1,8 +1,10 @@
 """C backend == SMT term check (called by prove.py --backends): every selected form is emitted as a C++ function (fnvlift.dsl Form.to_c), compiled with
 g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all, run on N random inputs, and compared with the z3 post-state of the
 same form: 8 registers, six flags, DF, other EFLAGS bits, eip, the fault code, and four probed memory bytes (memory = hash of the address overlaid by writes)."""
-import importlib, os, random, subprocess, time
+import os, subprocess
 import z3
+from fnvlift import dsl
+from proof.detrand import Rng
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of'); XIN = ('df', 'flo', 'fs_base', 'gs_base')
 NIN = len(REGS) + len(FLAGS) + len(XIN)
 HARN = r'''#include <cstdio>
@@ -36,21 +38,21 @@ int main() {
 SPECIAL = [0, 1, 2, 0x7f, 0x80, 0xff, 0x100, 0x7fff, 0x8000, 0xffff, 0x7fffffff, 0x80000000, 0xffffffff, 0xfffffffe, 0x12345678, 0xfffffff0, 0x10, 0x1f, 0x20, 0x401000]
 
 def run(args, forms, items, post_of):
-    dsl = importlib.import_module('fnvlift.dsl'); keys, its = items(forms, args); seen = set(); sel = []
+    keys, its = items(forms, args); seen = set(); sel = []
     for key, src, F, b, w, err in its:
         if F is not None and (args.all or key not in seen): seen.add(key); sel.append((F, b, w))
     wd = args.work; os.makedirs(wd, exist_ok=True)
     src = '\n'.join(['#include <cstdint>'] + dsl.PRELUDE.split('\n') + [HARN] + [F.to_c('f%d' % i) for i, (F, _, _) in enumerate(sel)])
     ps = ','.join('v[%d]' % i for i in range(NIN))
     src += '\ntypedef u32 (*FN)(%s);\nstatic FN TAB[] = {%s};\n' % (','.join(['u32&'] * (NIN + 1)), ','.join('f%d' % i for i in range(len(sel)))) + MAIN % (NIN, NIN, ps, NIN)
-    open(wd + '/gen.cpp', 'w').write(src); t0 = time.time()
+    open(wd + '/gen.cpp', 'w').write(src)
     cc = subprocess.run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined', '-fno-sanitize-recover=all', wd + '/gen.cpp', '-o', wd + '/gen'], capture_output=True, text=True)
     if cc.returncode: print('COMPILE FAILED\n' + cc.stderr[:1500]); return 1
-    print('compiled %d forms as C++17 with -Wall -Wextra -Werror -fsanitize=undefined: ok (%.1fs)' % (len(sel), time.time() - t0))
-    rng = random.Random(7); lines = []; cases = []
+    print('compiled %d forms as C++17 with -Wall -Wextra -Werror -fsanitize=undefined: ok' % len(sel))
+    rng = Rng(7); lines = []; cases = []
     for i in range(len(sel)):
         for _ in range(args.n):
-            pick = lambda: rng.choice(SPECIAL) if rng.random() < .5 else rng.getrandbits(32)
+            pick = lambda: rng.choice(SPECIAL) if rng.getrandbits(1) else rng.getrandbits(32)
             vals = [pick() for _ in range(8)] + [rng.getrandbits(1) for _ in range(6)] + [rng.getrandbits(1), pick(), pick(), pick()]
             cases.append((i, vals)); lines.append('%d %s' % (i, ' '.join('%x' % x for x in vals)))
     rr = subprocess.run([wd + '/gen'], input='\n'.join(lines) + '\n', capture_output=True, text=True)
@@ -59,7 +61,7 @@ def run(args, forms, items, post_of):
         bad = sel[cases[len(out)][0]][0].key if len(out) < len(cases) else '?'
         print('RUNTIME FAILURE (ubsan/abort) in form %s\n%s' % (bad, rr.stderr[:600])); return 1
     K = z3.BitVecVal(0x9E3779B1, 32); a = z3.BitVec('lam_a', 32); lam = z3.Lambda([a], z3.Extract(31, 24, a * K)); mem = z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8))
-    PR = [z3.BitVec('probe%d' % k, 32) for k in range(4)]; bad = ci = 0; T0 = time.time()
+    PR = [z3.BitVec('probe%d' % k, 32) for k in range(4)]; bad = ci = 0
     invars = [z3.BitVec(r, 32) for r in REGS] + [z3.BitVec(f, 1) for f in FLAGS] + [z3.BitVec('df', 1), z3.BitVec('flo', 32), z3.BitVec('fs_base', 32), z3.BitVec('gs_base', 32)]
     for i, (F, b, w) in enumerate(sel):
         D = F.post(); outs = [D['regs'][r] for r in REGS] + [D['flags'][f] for f in FLAGS] + [D['flags']['df'], D['flo']] + [z3.BitVecVal(0, 32)] * 2 + \
@@ -79,5 +81,5 @@ def run(args, forms, items, post_of):
                 if not first: first = 'in=%s z3=%s c=%s' % (' '.join('%x' % x for x in vals), ' '.join('%x' % x for x in got), ' '.join('%x' % x for x in got_c))
         bad += fails > 0
         print('%s %d %s %s %d/%d' % (F.key, w, b.hex(), 'agree' if not fails else 'DISAGREE', args.n - fails, args.n)); first and print('  ' + first[:400])
-    print('TOTAL forms=%d agree=%d disagree=%d inputs/form=%d compile+run+z3 %.1fs' % (len(sel), len(sel) - bad, bad, args.n, time.time() - t0))
+    print('TOTAL forms=%d agree=%d disagree=%d inputs/form=%d' % (len(sel), len(sel) - bad, bad, args.n))
     return bad

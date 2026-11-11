@@ -159,9 +159,9 @@ class Env:
             if op == 'repeat': return z3.RepeatBitVec(int(h[2]), a[0])
             raise ModelGap('unsupported indexed op ' + op)
         if h == '_':                                    # (_ bvN w)
-            m = re.fullmatch(r'bv(-?\d+)', e[1])
-            if not m: raise ModelGap('unsupported constant %s' % (e,))
-            return z3.BitVecVal(int(m.group(1)) % (1 << int(e[2])), int(e[2]))
+            digits = e[1][3:] if e[1].startswith('bv-') else e[1][2:] if e[1].startswith('bv') else ''      # bv<N> | bv-<N> (decimal digits)
+            if not digits.isdecimal(): raise ModelGap('unsupported constant %s' % (e,))
+            return z3.BitVecVal(int(e[1][2:]) % (1 << int(e[2])), int(e[2]))
         a = [self.ev(x) for x in e[1:]]
         if h == 'ite': return z3.If(a[0], a[1], a[2])
         if h == 'not': return z3.Not(a[0]) if z3.is_bool(a[0]) else ~a[0]

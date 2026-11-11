@@ -17,13 +17,13 @@ derivation is a hypothesis about capstone; its soundness for every instruction o
 Builders may only compute with the field (DSL nodes).  A builder that BRANCHES on it (compares, truth value, int()) raises SymbolicBranch(file:line):
 that builder cannot be made symbolic by substitution (class `builder-branches-on-field`)."""
 import os, sys, traceback
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, '..'))
-import hashlib, random
-import forms
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+import hashlib
 from fnvlift import dsl
 from fnvlift.dsl import N, mk, C, V, F, mask
 from capstone import x86 as X
-import shape as shp
+from proof import forms, shape as shp
+from proof.detrand import Rng
 
 M32 = 0xffffffff
 def eip(): return V('eip', 32)
@@ -82,18 +82,39 @@ class Slice:
         return (v & 0xffff if s.ext == 's16' else v + (addr + size if s.rel else 0)) & M32
 
 class SymMem:
+    """a capstone memory operand whose displacement is a symbolic value; the other members forms*.py reads (base, index, scale, segment) are the decoder's"""
     def __init__(s, mem, disp): s._m, s.disp = mem, disp
-    def __getattr__(s, a): return getattr(s._m, a)
+    @property
+    def base(s): return s._m.base
+    @property
+    def index(s): return s._m.index
+    @property
+    def scale(s): return s._m.scale
+    @property
+    def segment(s): return s._m.segment
 class SymOp:
+    """a capstone operand whose immediate / memory operand may be symbolic; the other members forms*.py reads (type, size, reg) are the decoder's"""
     def __init__(s, op, imm=None, mem=None): s._o, s._imm, s._mem = op, imm, mem
-    def __getattr__(s, a): return getattr(s._o, a)
+    @property
+    def type(s): return s._o.type
+    @property
+    def size(s): return s._o.size
+    @property
+    def reg(s): return s._o.reg
     @property
     def mem(s): return s._mem if s._mem is not None else s._o.mem
     @property
     def imm(s): return s._imm if s._imm is not None else s._o.imm
 class SymIns:
+    """a capstone instruction with symbolic operands; the other members forms*.py reads (bytes, size, mnemonic, reg_name) are the decoder's"""
     def __init__(s, ins, ops): s._i, s.operands = ins, ops
-    def __getattr__(s, a): return getattr(s._i, a)
+    @property
+    def bytes(s): return s._i.bytes
+    @property
+    def size(s): return s._i.size
+    @property
+    def mnemonic(s): return s._i.mnemonic
+    def reg_name(s, r): return s._i.reg_name(r)
 
 # ------------------------------------------------------------------------------------------------ derivation of the adapter from the decoder
 _md = shp.decoder()
@@ -103,7 +124,7 @@ def decode(raw, addr):
     return l[0]
 
 def _probes(width, seed):
-    rnd = random.Random(seed); top = 1 << (width - 1)
+    rnd = Rng(seed); top = 1 << (width - 1)
     return sorted(set([0, 1, top, top - 1, top + 1, mask(width), mask(width) - 1] + [rnd.getrandbits(width) for _ in range(6)]))
 ADDRS = (0, 0x401000, 0x7ffffff0)
 
@@ -133,8 +154,8 @@ class SymForm:
         out, seen, st = set(), set(), list(s.form.roots()) + ([s.form.addr] if isinstance(s.form.addr, N) else [])
         while st:
             n = st.pop()
-            if id(n) in seen: continue
-            seen.add(id(n))
+            if n.u in seen: continue
+            seen.add(n.u)
             if n.op in ('fld', 'var'): out.add(n.x)
             st.extend(n.a)
         return out
@@ -185,8 +206,8 @@ def eip_dependence(sf):
         seen, st = set(), list(roots)
         while st:
             n = st.pop()
-            if id(n) in seen: continue
-            seen.add(id(n))
+            if n.u in seen: continue
+            seen.add(n.u)
             if n.op == 'var' and n.x == 'eip': return True
             st.extend(n.a)
         return False
@@ -227,14 +248,14 @@ class Subst:
     after folding iff their serializations are equal."""
     def __init__(s, env): s.env, s.memo = env, {}
     def __call__(s, n):
-        r = s.memo.get(id(n))
+        r = s.memo.get(n.u)
         if r is not None: return r
         if n.op in ('fld', 'var') and (n.op, n.x) in s.env: r = C(s.env[(n.op, n.x)], n.w)
         elif n.op in ('const', 'var', 'fld'): r = n
         else:
             a = [s(c) for c in n.a]
             r = C(_ev(n, [c.x for c in a]), n.w) if n.op != 'load' and all(c.op == 'const' for c in a) else mk(n.op, n.w, a, n.x)
-        s.memo[id(n)] = r; return r
+        s.memo[n.u] = r; return r
 
 def normalize(form, env=None):
     """a copy of the Form with env substituted and constants folded; env: {'imm': v, 'disp': v, 'eip': v}"""

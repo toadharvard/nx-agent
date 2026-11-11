@@ -26,9 +26,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import forms  # noqa: E402
-import shape  # noqa: E402
+sys.path.insert(0, os.path.dirname(HERE))
+from proof import forms, shape  # noqa: E402
 
 PINS = os.path.join(HERE, 'formgate_pins.json')
 FORMAT = 'fnvnx-gate/1'
