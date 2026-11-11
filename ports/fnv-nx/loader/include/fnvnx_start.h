@@ -61,7 +61,7 @@ typedef struct fnvnx_thread_block {
     uint32_t teb_va;               /* the 4 KiB TEB page; fs:[0] of the thread */
     uint32_t tls_vec_va;           /* uint32_t[fnvnx_proc.tls_slots]; slot 0 = tls_block_va (0 without a TLS dir), slot i = the
                                       block of the module with TLS index i */
-    uint32_t tls_block_va;         /* the exe's block
+    uint32_t tls_block_va;         /* the exe's block */
 } fnvnx_thread_block;
 
 /* One mapped image (the exe, or a module). */
