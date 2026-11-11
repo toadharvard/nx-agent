@@ -181,7 +181,8 @@ def expect(s, d, ramp, ser):
     sw = "%d%d%d%d" % (SW0, SW1, SW2, SW3)
     ev = ["imgdesc serial=%d im=%d type=%d fmt=%d sw=%s mip=%d,1 lay=%d,%d lo=0 ms=0" % (ser + 1, s[0], ty, fmt, sw, s[1], lay[0], lay[1]),
           "smpdesc serial=%d min=%d mag=%d mip=%d wrap=%d,%d,%d cmp=0 aniso=%s" % (ser + 2, NEAR, NEAR, MIPN, CLAMP, CLAMP, CLAMP, fmtf(ANISO)),
-          "query_pause", "target_bind im=%d id=%d level=%d layer=%d rect=%d,%d,%d,%d" % (d[0], d[0], d[1], d[2], d[3], d[4], d[5], d[6]), "draw_neutral",
+          "query_pause", "target_bind im=%d id=%d level=%d layer=%d rect=%d,%d,%d,%d" % (d[0], d[0], d[1], d[2], d[3], d[4], d[5], d[6]),
+          "draw_neutral %d %d" % (max(1, IMGS[d[0]][3] >> d[1]), max(1, IMGS[d[0]][4] >> d[1])),
           "viewport first=0 n=1 %d,%d,%d,%d,0,1" % (d[3], d[4], d[5], d[6]), "scissor first=0 n=1 %d,%d,%d,%d" % (d[3], d[4], d[5], d[6])]
     ctl = lambda n: "%08x" % fnv(PROG[n][0][:struct.unpack_from("<I", PROG[n][0], 8)[0]])
     ev.append("bind_shaders mask=%d n=2 [ctl=%s code=0 stage=0] [ctl=%s code=%d stage=1]" % (VF_MASK, ctl("vs"), ctl("fs%d" % kind), OFFS["fs%d" % kind]))
@@ -223,7 +224,8 @@ def scenarios(exe):
     PAIRS = [(sub(0, 0, 0, 0, 0, 640, 480), sub(1, 0, 0, 0, 0, 1280, 720), False), (sub(0, 1, 0, 10, 20, 100, 50), sub(1, 0, 0, 300, 200, 33, 77), True),
              (sub(2, 0, 3, 0, 0, 256, 256), sub(1, 0, 0, 5, 5, 1, 1), False), (sub(3, 0, 5, 1, 2, 3, 4), sub(6, 0, 0, 0, 0, 1000, 700), True),
              (sub(7, 0, 0, 0, 0, 16384, 16384), sub(8, 0, 0, 0, 0, 16384, 16384), False), (sub(0, 2, 0, 0, 0, 160, 120), sub(1, 0, 0, 1279, 719, 1, 1), True),
-             (sub(10, 0, 0, 63, 63, 1, 1), sub(1, 0, 0, 0, 0, 1280, 720), True)]
+             (sub(10, 0, 0, 63, 63, 1, 1), sub(1, 0, 0, 0, 0, 1280, 720), True),
+             (sub(1, 0, 0, 0, 0, 1280, 720), sub(0, 1, 0, 3, 4, 50, 40), False), (sub(1, 0, 0, 0, 0, 640, 360), sub(0, 2, 0, 0, 0, 160, 120), True)]   # destination levels 1, 2
     for s, d, ramp in PAIRS:
         r = h.call("scale %s %s %s" % (sstr(s), sstr(d), "p" if ramp else "none")); want = expect(s, d, ramp, ser[0]); ser[0] += 2
         got = [re.sub(r"blk=\d+", "blk=@", e) for e in r[3]]; blk = re.search(r"blk=(\d+)", r[3][-5]) if len(r[3]) > 5 else None
@@ -306,6 +308,9 @@ MUT = [
     ('linear filter', 'smp.minFilter = smp.magFilter = DkFilter_Nearest;', 'smp.minFilter = smp.magFilter = DkFilter_Linear;'),
     ('first barrier without invalidate', 'dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Descriptors);', 'dkCmdBufBarrier(cmd, DkBarrier_Full, 0);'),
     ('uniform range cut', 'g, SC_UBO_BYTES);', 'g, 48);'),
+    ('neutral size ignores the level', 'nxchk_lvl(d->im->w, d->level), nxchk_lvl(d->im->h, d->level)', 'd->im->w, d->im->h'),
+    ('neutral size swaps w / h', 'nxchk_lvl(d->im->w, d->level), nxchk_lvl(d->im->h, d->level)', 'nxchk_lvl(d->im->h, d->level), nxchk_lvl(d->im->w, d->level)'),
+    ('neutral size is the sub-rect', 'nxchk_lvl(d->im->w, d->level), nxchk_lvl(d->im->h, d->level)', 'd->w, d->h'),
     ('NULL destination unchecked', 'if (!s || !d)', 'if (!s)'),
 ]
 caught = 0

@@ -54,7 +54,8 @@ if r.returncode == 0:
     check(all(OK_UND.match(s) for s in syms), "unexpected undefined symbols: " + " ".join(s for s in syms if not OK_UND.match(s)))
     check(not re.search(r"^\S*\s+[Ww]\s", sh([NM, os.path.join(out, "dk_msres.o")]).stdout, re.M), "a weak symbol is present")
     dfn = sh([NM, "--defined-only", os.path.join(out, "dk_msres.o")]).stdout
-    check({"nxdk_ms_resolve", "nxdk_msres_init", "nxdk_msres_shutdown"} <= set(re.findall(r"\sT\s(\w+)", dfn)), "dk_msres.o does not define the three entry points")
+    check({"nxdk_ms_resolve", "nxdk_ms_resolve_on", "nxdk_msres_init", "nxdk_msres_shutdown"} <= set(re.findall(r"\sT\s(\w+)", dfn)),
+          "dk_msres.o does not define the four entry points")
 
 # ---- c ------------------------------------------------------------------------------------------------------------------------------------------
 env = dict(os.environ); env.setdefault("UAM", "/home/user/work/l6a/uam/bin/uam")
@@ -127,18 +128,19 @@ class Host:
         self.p.stdin.close(); rc = self.p.wait(timeout=120); return rc, self.p.stderr.read()
 
 def ubo_bytes(samples, b): return struct.pack("<4I4f", samples, 1 << b, 0, 0, 1.0 / samples, 0.0, 0.0, 0.0) + bytes(RANGE - 32)
-def expect(si, layer, di, mode, ser):
-    """The exact recorded sequence of nxdk_ms_resolve(src si, layer, dst di, mode); the uniform data is checked apart (data=@)."""
+def expect(si, layer, di, mode, ser, q=True):
+    """The exact recorded sequence of nxdk_ms_resolve(src si, layer, dst di, mode); the uniform data is checked apart (data=@).
+    q: the query pause / resume are recorded (the stream cmd; a cmd outside a SUBMIT has no open query slice)."""
     s, d = si, di; w, h = d[3], d[4]; m = MODES[mode]
     ds = k.DSS if mode == 2 else k.DSD
     sw = "%d%d%d%d" % (k.SW0, k.SW1, k.SW2, k.SW3)
     ev = ["imgdesc serial=%d im=%d type=%d fmt=0 sw=%s mip=0,1 lay=0,%d lo=0 ms=0 ds=%d" % (ser + 1, s[0], k.T2DMS, sw, k.DEFLAYERS, ds),
           "smpdesc serial=%d min=%d mag=%d mip=%d wrap=%d,%d,%d cmp=0 aniso=%g" % (ser + 2, k.NEAR, k.NEAR, k.MIPN, k.CLAMP, k.CLAMP, k.CLAMP, K["ANISO"]),
-          "query_pause"]
+          ] + (["query_pause"] if q else [])
     if mode == 0: ev.append("target_bind im=%d id=0 level=0 layer=%d rect=0,0,%d,%d" % (d[0], layer, w, h))
     else: ev += ["rt n=0 depth im=%d type=%d fmt=0 mip=0,1 lay=%d,%d ds=%d" % (d[0], k.T2D, layer, k.DEFLAYERS, k.DSD),
                  "viewport first=0 n=1 0,0,%d,%d,0,1" % (w, h), "scissor first=0 n=1 0,0,%d,%d" % (w, h)]
-    ev.append("draw_neutral")
+    ev.append("draw_neutral %d %d" % (w, h))
     if mode == 1: ev.append("dss dt=1 dw=1 st=0 dcmp=%d front=%d,%d,%d,%d back=%d,%d,%d,%d" % ((k.ALWAYS,) + (k.KEEP, k.REPLACE, k.KEEP, k.ALWAYS) * 2))
     if mode == 2:
         ev.append("dss dt=0 dw=0 st=1 dcmp=%d front=%d,%d,%d,%d back=%d,%d,%d,%d" % ((k.ALWAYS,) + (k.KEEP, k.REPLACE, k.KEEP, k.ALWAYS) * 2))
@@ -151,8 +153,8 @@ def expect(si, layer, di, mode, ser):
         if mode == 2: ev.append("stencil face=%d mask=%d ref=%d fmask=255" % (k.FB, 1 << b, 1 << b))
         ev += ["ubo stage=%d id=15 n=1 blk=@ off=%d size=32 data=@" % (k.STG_FRAG, b * RANGE), "draw prim=%d v=3 i=1 fv=0 fi=0" % k.TRI]
     ev.append("bind_descriptors_global")
-    if mode: ev.append("draw_neutral")
-    ev += ["barrier mode=%d flags=%d" % (k.FULL, k.INV_DESC | k.INV_IMG), "query_resume"]
+    if mode: ev.append("draw_neutral %d %d" % (w, h))
+    ev += ["barrier mode=%d flags=%d" % (k.FULL, k.INV_DESC | k.INV_IMG)] + (["query_resume"] if q else [])
     return ev
 
 # images: (id, type, fmt, w, h, samples, mips, layers); type 0 2D, 1 cube, 2 3D; fmt 1 RGBA8, 2 BGRA8, 11 Z24S8 ...
@@ -243,6 +245,36 @@ def scenarios(exe):
     h.cmd("failstage 1"); r = h.call("resolve 20 0 21 0"); h.cmd("failstage 0")
     ck(r[0] == 1 and r[1] == 1 and "staging" in r[2] and r[3] == [], "staging refused: the refusal's own error only, nothing recorded: %s" % (r,))
     r = h.call("resolve 20 0 21 0"); ck(r[0] == 0 and r[1] == 0 and r[3] != [], "still working after the refusals: %s" % (r,))
+    ser[0] += 2
+    # nxdk_ms_resolve_on: a command buffer of its own, outside a SUBMIT (nxdk_s.cmd NULL) or beside the stream's; the destination is 40 x 24 (w != h, != 64 x 32)
+    z24 = FM["Z24S8"]; rg = FM["RGBA8"]
+    img(60, 0, rg, 40, 24, 4); img(61, 0, rg, 40, 24, 1); img(62, 0, z24, 40, 24, 8); img(63, 0, z24, 40, 24, 1)
+    PAIR = {0: ((60, 0, rg, 40, 24, 4, 1, 1), (61, 0, rg, 40, 24, 1, 1, 1)), 1: ((62, 0, z24, 40, 24, 8, 1, 1), (63, 0, z24, 40, 24, 1, 1, 1))}
+    PAIR[2] = PAIR[1]
+    def norm(ev): return [re.sub(r"blk=\d+", "blk=@", re.sub(r"data=\w+", "data=@", e)) for e in ev]
+    def run_ok(line, mode, q, tag):
+        S, D = PAIR[mode]; r = h.call(line); want = expect(S, 0, D, mode, ser[0], q); ser[0] += 2; h.cmd("stagefree")
+        ck(r[:2] == (0, 0) and norm(r[3]) == want, "%s:\n   got  %s\n   want %s" % (tag, norm(r[3]), want))
+        ck(not any(e.startswith("query_") for e in r[3]) or q, "%s: no query pause / resume outside the stream cmd" % tag)
+    for mode in (0, 1, 2):
+        s_, d_ = PAIR[mode][0][0], PAIR[mode][1][0]
+        h.cmd("cmd 0"); run_ok("resolveon %d 0 %d %d 2" % (s_, d_, mode), mode, False, "on a cmd of its own, no stream cmd, mode %d" % mode)
+        r = h.call("resolve %d 0 %d %d" % (s_, d_, mode)); ck(r[0] == 1 and r[1] == 1 and "outside a SUBMIT" in r[2] and r[3] == [], "stream form outside a SUBMIT: %s" % (r,))
+        r = h.call("resolveon %d 0 %d %d 0" % (s_, d_, mode)); ck(r[0] == 1 and r[1] == 1 and r[3] == [], "NULL cmd, no stream cmd, mode %d: %s" % (mode, r))
+        h.cmd("cmd 1"); run_ok("resolveon %d 0 %d %d 2" % (s_, d_, mode), mode, False, "on a cmd beside the stream's, mode %d" % mode)
+        run_ok("resolveon %d 0 %d %d 1" % (s_, d_, mode), mode, True, "on the stream cmd, mode %d" % mode)
+        run_ok("resolve %d 0 %d %d" % (s_, d_, mode), mode, True, "stream form, mode %d" % mode)
+        r = h.call("resolveon %d 0 %d %d 0" % (s_, d_, mode)); ck(r[0] == 1 and r[1] == 1 and "command buffer" in r[2] and r[3] == [], "NULL cmd, stream live, mode %d: %s" % (mode, r))
+        h.cmd("inpass 1"); r = h.call("resolveon %d 0 %d %d 2" % (s_, d_, mode)); h.cmd("inpass 0")
+        ck(r[0] == 1 and r[1] == 1 and "open pass" in r[2] and r[3] == [], "own cmd with a pass open, mode %d: %s" % (mode, r))
+        for fl, mine in (("failneutral", 1), ("failbind", mode == 0)):   # a refused helper is never reported as success, whichever cmd
+            for sel in (1, 2):
+                h.cmd("%s 1" % fl); r = h.call("resolveon %d 0 %d %d %d" % (s_, d_, mode, sel)); h.cmd("%s 0" % fl); ser[0] += 2; h.cmd("stagefree")
+                ck(r[0] == (1 if mine else 0) and (r[1] >= 1) == bool(mine) and (not mine or "refused (double)" in r[2]),
+                   "%s, mode %d, cmd %d: the helper's error makes the result 1: %s" % (fl, mode, sel, r[:3]))
+            h.cmd("%s 1" % fl); r = h.call("resolve %d 0 %d %d" % (s_, d_, mode)); h.cmd("%s 0" % fl); ser[0] += 2; h.cmd("stagefree")
+            ck(r[0] == (1 if mine else 0) and (r[1] >= 1) == bool(mine), "%s, mode %d, stream form: result 1 after a helper error: %s" % (fl, mode, r[:3]))
+        run_ok("resolveon %d 0 %d %d 2" % (s_, d_, mode), mode, False, "after the helper errors, mode %d" % mode)
     # shutdown
     h.cmd("stagefree"); r = h.call("shutdown"); ck(r[1] == 0 and h.cmd("state")[0].startswith("S live 0 "), "shutdown frees the code block: %s" % h.cmd("state")[0])
     r = h.call("shutdown"); ck(r[1] == 0 and r[3] == [], "second shutdown is harmless")
@@ -267,8 +299,22 @@ if n is not None and not bad: print("d  checks passed %d/%d (ASan + UBSan)" % (n
 
 # ---- e ------------------------------------------------------------------------------------------------------------------------------------------
 MUT = [
-    ('query pause dropped', '    nxdk_query_pause();\n', ''),
-    ('query resume dropped', '    nxdk_query_resume();\n', ''),
+    ('query pause dropped', '    if (inSubmit) nxdk_query_pause();\n', ''),
+    ('query resume dropped', '    if (inSubmit) nxdk_query_resume();\n', ''),
+    ('query pause on every cmd', 'if (inSubmit) nxdk_query_pause();', 'nxdk_query_pause();'),
+    ('query resume on every cmd', 'if (inSubmit) nxdk_query_resume();', 'nxdk_query_resume();'),
+    ('inSubmit always true', 'const int inSubmit = cmd == nxdk_s.cmd;', 'const int inSubmit = 1;'),
+    ('inSubmit when a stream cmd exists', 'const int inSubmit = cmd == nxdk_s.cmd;', 'const int inSubmit = nxdk_s.cmd != NULL;'),
+    ('records into the stream cmd', 'const int inSubmit = cmd == nxdk_s.cmd;', 'const int inSubmit = cmd == nxdk_s.cmd; cmd = nxdk_s.cmd;'),
+    ('helper error ignored', 'return nxdk.errCount != errs;', 'return 0;'),
+    ('error threshold of two', 'return nxdk.errCount != errs;', 'return nxdk.errCount > errs + 1;'),
+    ('stream form without the SUBMIT text', 'viaStream ? "msres: outside a SUBMIT" : "msres: no command buffer"', '"msres: no command buffer"'),
+    ('stream form as _on', 'return mr_run(nxdk_s.cmd, 1,', 'return mr_run(nxdk_s.cmd, 0,'),
+    ('_on records into the stream cmd', 'return mr_run(cmd, 0,', 'return mr_run(nxdk_s.cmd, 0,'),
+    ('open pass refused only on the stream cmd', 'if (nxdk_s.inPass) MR_FAIL', 'if (nxdk_s.inPass && cmd == nxdk_s.cmd) MR_FAIL'),
+    ('neutral size swaps w / h (first)', 'nxdk_draw_neutral(cmd, dst->w, dst->h);\n    if (mode != NXDK_MSRES_AVG) {', 'nxdk_draw_neutral(cmd, dst->h, dst->w);\n    if (mode != NXDK_MSRES_AVG) {'),
+    ('neutral size swaps w / h (second)', 'if (mode != NXDK_MSRES_AVG) nxdk_draw_neutral(cmd, dst->w, dst->h);', 'if (mode != NXDK_MSRES_AVG) nxdk_draw_neutral(cmd, dst->h, dst->w);'),
+    ('neutral size is the source size (first)', 'nxdk_draw_neutral(cmd, dst->w, dst->h);\n    if (mode != NXDK_MSRES_AVG) {', 'nxdk_draw_neutral(cmd, src->w + 1, dst->h);\n    if (mode != NXDK_MSRES_AVG) {'),
     ('draw of 4 vertices', 'DkPrimitive_Triangles, 3, 1, 0, 0', 'DkPrimitive_Triangles, 4, 1, 0, 0'),
     ('source view not 2DMS', 'v.type = DkImageType_2DMS;', 'v.type = DkImageType_2D;'),
     ('source view mip count 2', ' v.mipLevelCount = 1;', ' v.mipLevelCount = 2;'),
@@ -293,10 +339,10 @@ MUT = [
     ('depth compare Less', 'ds.depthCompareOp = DkCompareOp_Always;', 'ds.depthCompareOp = DkCompareOp_Less;'),
     ('stencil test always on', 'ds.stencilTestEnable = mode == NXDK_MSRES_S0_STENCIL;', 'ds.stencilTestEnable = 1;'),
     ('stencil test off', 'ds.stencilTestEnable = mode == NXDK_MSRES_S0_STENCIL;', 'ds.stencilTestEnable = 0;'),
-    ('depth / stencil state not reset', 'if (mode != NXDK_MSRES_AVG) nxdk_draw_neutral(cmd);', ''),
+    ('depth / stencil state not reset', 'if (mode != NXDK_MSRES_AVG) nxdk_draw_neutral(cmd, dst->w, dst->h);', ''),
     ('descriptors not restored', '    nxdk_bind_descriptors(cmd);\n', ''),
     ('first barrier without image flag', 'DkInvalidateFlags_Descriptors | DkInvalidateFlags_Image);   /* the source', 'DkInvalidateFlags_Descriptors);   /* the source'),
-    ('last barrier without image flag', 'DkInvalidateFlags_Image);\n    nxdk_query_resume', 'DkInvalidateFlags_Descriptors);\n    nxdk_query_resume'),
+    ('last barrier without image flag', 'DkInvalidateFlags_Image);\n    if (inSubmit) nxdk_query_resume', 'DkInvalidateFlags_Descriptors);\n    if (inSubmit) nxdk_query_resume'),
     ('colour layer ignored', 'const NxDkSub t = { dst, 0, 0, layer,', 'const NxDkSub t = { dst, 0, 0, 0,'),
     ('depth layer ignored', 'dv.layerOffset = layer;', 'dv.layerOffset = 0;'),
     ('depth view not 2D', 'dv.type = DkImageType_2D;', 'dv.type = DkImageType_None;'),
@@ -320,7 +366,7 @@ MUT = [
     ('depth of colour', 'if (mode == NXDK_MSRES_S0_DEPTH && !(f & DKFMT_DEPTH))', 'if (0)'),
     ('stencil of depth-only', 'if (mode == NXDK_MSRES_S0_STENCIL && !(f & DKFMT_STENCIL))', 'if (0)'),
     ('open pass allowed', 'if (nxdk_s.inPass)', 'if (0)'),
-    ('no recording buffer allowed', 'if (!nxdk_s.cmd)', 'if (0)'),
+    ('no recording buffer allowed', 'if (!cmd) MR_FAIL(viaStream', 'if (0) MR_FAIL(viaStream'),
     ('NULL images unchecked', '!s || !s->used || !d || !d->used', '!s->used || !d->used'),
     ('dead images allowed', '!s || !s->used || !d || !d->used', '!s || !d'),
     ('uninitialised use allowed', 'if (!mr_code) MR_FAIL("msres: not initialised");', ''),

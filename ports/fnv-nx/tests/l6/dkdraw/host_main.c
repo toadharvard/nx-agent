@@ -101,16 +101,19 @@ static void defstate(uint32_t id, uint32_t vs, uint32_t ps, uint32_t lay, const 
     call(nxdk_op_define_state, 12, 12, a);
 }
 /* expected log of the state records of BindState / neutral, from the real nxdk_state / nxdk_dyn of the same words */
+static int ex_srgb = 1;
 static void ex_rec(const uint64_t w[4], uint32_t samples, const char* scissor) {
     static const NxDynamicState z; NxRenderState rs; NxDkState s; NxDkDyn d; DkMultisampleState m;
     memcpy(rs.w, w, sizeof rs.w);
     if (nxdk_state(&rs, samples, &s) || nxdk_dyn(&rs, &z, samples, &d)) { ex("EXPECTED STATE REJECTED"); return; }
     dkMultisampleStateDefaults(&m); m.mode = m.rasterizerMode = s.derived.msMode;
-    ex("srgb %u", s.derived.srgbWrite != 0); ex("rast %s", fr(&s.rast)); ex("color %s", fc(&s.color)); ex("cw %08x", s.write.masks); ex("blend first0 n4");
+    if (ex_srgb) ex("srgb %u", s.derived.srgbWrite != 0);
+    ex("rast %s", fr(&s.rast)); ex("color %s", fc(&s.color)); ex("cw %08x", s.write.masks); ex("blend first0 n4");
     for (int i = 0; i < 4; i++) ex(" %s", fb(&s.blend));
     ex("ds %s", fd(&s.ds)); ex("ms %s", fm(&m)); ex("stencil face%u mask%02x ref%02x fmask%02x", U(DkFace_FrontAndBack), d.stencilWriteMask, d.stencilRef, d.stencilReadMask);
     ex("samplemask %x", d.sampleMask); ex("scissor first0 n1"); ex(" %s", scissor);
 }
+static void ex_rec_nosrgb(const uint64_t w[4], uint32_t samples, const char* scissor) { ex_srgb = 0; ex_rec(w, samples, scissor); ex_srgb = 1; }
 static void pass(uint32_t on, uint32_t samples) { nxdk_s.inPass = on; nxdk_s.passSamples = samples; nxdk_s.passW = 640; nxdk_s.passH = 480; }
 static void sc(int32_t x, int32_t y, int32_t w, int32_t h) { nxdk_s.scissor[0] = x; nxdk_s.scissor[1] = y; nxdk_s.scissor[2] = w; nxdk_s.scissor[3] = h; }
 static char* last_line(void) { char* e = L + strlen(L); if (e > L) e--; while (e > L && e[-1] != '\n') e--; return e; }
@@ -313,15 +316,22 @@ static void t_dyn(void) {
 }
 
 static void t_neutral(void) {
-    nxdk_s.boundState = 5; pass(1, 4); want = CMD2; reset(); nxdk_draw_neutral(CMD2);
-    ex_rec(WN, 4, "0 0 640 480"); eqlog("neutral in a 4x pass");
-    CHK("neutral facts", strstr(L, "srgb 0\n") && strstr(L, "cw ffffffff\n") && strstr(L, "samplemask ffff\n") && strstr(L, fmt("ms mode%u rmode%u", U(DkMsMode_4x), U(DkMsMode_4x))) &&
-        strstr(L, "stencil face3 mask00 ref00 fmask00\n") && strstr(L, "color bm00") && strstr(L, "ds dt0 dw0 st0"));
+    /* outside a pass the state is single-sample, nothing calls nxdk_pass_srgb (the log would hold "srgb"), the scissor is the arguments, whatever the stale pass state */
+    nxdk_s.boundState = 5; pass(0, 4); nxdk_s.passW = 640; nxdk_s.passH = 480; want = CMD2; reset(); nxdk_draw_neutral(CMD2, 100, 50);
+    ex_rec_nosrgb(WN, 1, "0 0 100 50"); eqlog("neutral outside a pass");
+    CHK("neutral facts", !strstr(L, "srgb") && strstr(L, "cw ffffffff\n") && strstr(L, "samplemask ffff\n") && strstr(L, fmt("ms mode%u rmode%u", U(DkMsMode_1x), U(DkMsMode_1x))) &&
+        strstr(L, "stencil face3 mask00 ref00 fmask00\n") && strstr(L, "color bm00") && strstr(L, "ds dt0 dw0 st0") && !nxdk.errCount);
     CHK("neutral forces the next BindState", nxdk_s.boundState == 0);
-    nxdk_s.boundState = 5; pass(0, 1); reset(); nxdk_draw_neutral(CMD2); ex_rec(WN, 1, "0 0 640 480"); eqlog("neutral outside a pass");
-    nxdk_s.boundState = 1; pass(1, 3); reset(); nxdk_draw_neutral(CMD2);
-    err1("neutral in a 3-sample pass", "draw_neutral: render state rejected by nxdk_state, code 2"); CHK("neutral error keeps the bound state", nxdk_s.boundState == 1);
+    nxdk_s.boundState = 5; pass(0, 0); nxdk_s.passW = 0; nxdk_s.passH = 0; reset(); nxdk_draw_neutral(CMD2, 7, 3);
+    ex_rec_nosrgb(WN, 1, "0 0 7 3"); eqlog("neutral with zero stale pass size");
+    nxdk_s.boundState = 5; pass(0, 3); reset(); nxdk_draw_neutral(CMD2, 640, 480);
+    ex_rec_nosrgb(WN, 1, "0 0 640 480"); eqlog("neutral ignores a stale pass sample count");
+    nxdk_s.boundState = 1; pass(1, 4); reset(); nxdk_draw_neutral(CMD2, 640, 480);
+    err1("neutral inside a pass", "draw_neutral: inside an open pass"); CHK("neutral inside a pass keeps the bound state", nxdk_s.boundState == 1);
     want = CMD; nxdk_s.boundState = 0; pass(1, 4); OP(nxdk_op_draw, 0, 3, 1, 0, 0); err1("draw after neutral needs a BindState", "Draw: no state bound");
+    /* BindState inside a pass still rebinds sRGB first and takes the pass scissor */
+    pass(1, 4); defstate(9, 1, 2, 3, WN); reset(); OP(nxdk_op_bind_state, 9);
+    CHK("BindState keeps the sRGB rebind", L[0] && !strncmp(L, "layout", 6) && strstr(L, "srgb 0\n"));
 }
 
 int main(void) {

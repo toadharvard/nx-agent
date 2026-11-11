@@ -10,23 +10,31 @@
  *   uint32_t nxdk_msres_init(void); void nxdk_msres_shutdown(void);   called by dk_stream.c next to nxdk_scale_init / nxdk_scale_shutdown (nxdk_stream_init)
  *   Callers (dk_read.c, dk_blit.c, dk_present.c) create the single-sample destination with the nxdk_tmp_image helper that dk_blit.c already requests (same
  *   format, same size, freed after the SUBMIT wait) and then read / blit / present from it with the existing single-sample same-format paths.
+ *   uint32_t nxdk_ms_resolve_on(DkCmdBuf cmd, ...): the same recording into `cmd` (dk.h).
  *   Fragment uniform-buffer slot 15 and texture slot 31 are reserved (as dk_scale.c); nxdk_draw_neutral makes the next BindState re-apply.
  * Semantics: src is a live 2D image with 2, 4 or 8 samples; dst is a live single-sample non-3D image of the same fmt / w / h; layer is the destination layer
  * (the cube face of a cube dst, 0 for a 2D dst; src has one layer). Refused with one nxdk_err inside an open pass (the target would replace the pass's, P8)
- * and outside a SUBMIT (no command buffer).
+ * and without a command buffer (nxdk_ms_resolve: outside a SUBMIT; nxdk_ms_resolve_on: NULL cmd).
+ * Return value: 0 only if no helper (nxdk_stage_alloc, nxdk_target_bind, nxdk_draw_neutral) issued an nxdk_err during the call, so a refused helper is never
+ * reported as success (nxdk.errCount before / after, one rule for every helper).
  * Decisions:
  *  - The sample count is a uniform, not a variant: the loop bound u.x is exact and one program serves 2 / 4 / 8, so no variant table can fall out of step.
  *  - Depth destination: the depth plane of a same-format depth image, written by gl_FragDepth (depth test Always, write on: Maxwell writes depth only with
- *    the test on). The result is bit exact (proof in dk_msres_fs_depth.glsl). Console-only assumptions: round-to-nearest sampler and ROP conversions.
+ *    the test on). The result is bit exact (proof in dk_msres_fs_depth.glsl). Console-only facts of the GPU: round-to-nearest sampler and ROP conversions.
  *  - Stencil destination: Maxwell has no shader stencil output. The stencil plane is cleared to 0 and eight draws set one bit each (draw b discards unless
  *    bit b of sample 0 is set; stencil Always / Replace, reference = write mask = 1 << b), so every one of the 256 values is reproduced.
  *  - No integer branch: dk_fmt.c lists 35 formats and every DKFMT_RENDER colour format is unorm, snorm or float (sRGB are views of unorm ones), so the
  *    sum of n samples in float scaled by the exact 1 / n is the average for every format that can be multisampled (X1: only renderable formats are).
  *    Formats with a view swizzle (BGR10A2, A4R4G4B4) are not DKFMT_RENDER, so they cannot be multisampled and need no branch either.
- * Recording: queries paused, destination bound, neutral state, viewport 0..1 and scissor = the target, the internal programs, a private descriptor set
- * (image 0 = the source view, sampler 0 = nearest / clamp) and the uniform ranges in one staging block, the draw(s), the global descriptor sets restored,
- * the neutral state recorded again (so the depth / stencil state set here never leaks), the queries resumed. Assumption (as dk_scale.c): the device is
- * OriginUpperLeft + YAxisPointsUp + DepthZeroToOne, so gl_FragCoord.xy is the image column / row. */
+ * Recording: queries paused (stream cmd only), destination bound, neutral state for the w x h target (viewport 0..1, scissor (0,0,w,h) = the whole target,
+ * both set by nxdk_target_bind / here, and by nxdk_draw_neutral(cmd, w, h) which reads no pass state), then the depth / stencil state of this file (set
+ * after the neutral call, which would otherwise overwrite it), the internal programs, a private descriptor set (image 0 = the source view, sampler 0 =
+ * nearest / clamp) and the uniform ranges in one staging block, the draw(s), the global descriptor sets restored, the neutral state recorded again (so the
+ * depth / stencil state set here never leaks), the queries resumed (stream cmd only). The device is OriginUpperLeft + YAxisPointsUp + DepthZeroToOne
+ * (as dk_scale.c), so gl_FragCoord.xy is the image column / row.
+ * Query rule: only the stream cmd has an open query slice (dk_query.c: slice_close does nothing when no slice is current, and no slice is open outside a
+ * SUBMIT), so pause / resume are recorded exactly when cmd == nxdk_s.cmd.
+ * Pass rule: nxdk_s.inPass refuses unconditionally. Precondition for _on outside a SUBMIT: nxdk_s.inPass is false there (it is cleared at SUBMIT end). */
 #include <string.h>
 #include "dk.h"
 #include "dk_fmt.h"
@@ -80,9 +88,9 @@ void nxdk_msres_shutdown(void) {
 
 #define MR_FAIL(...) do { nxdk_err(__VA_ARGS__); return 1; } while (0)
 
-static uint32_t mr_check(const NxDkImage* s, uint32_t layer, const NxDkImage* d, uint32_t mode) {
+static uint32_t mr_check(DkCmdBuf cmd, int viaStream, const NxDkImage* s, uint32_t layer, const NxDkImage* d, uint32_t mode) {
     if (!mr_code) MR_FAIL("msres: not initialised");
-    if (!nxdk_s.cmd) MR_FAIL("msres: outside a SUBMIT");
+    if (!cmd) MR_FAIL(viaStream ? "msres: outside a SUBMIT" : "msres: no command buffer");
     if (nxdk_s.inPass) MR_FAIL("msres: inside an open pass");
     if (!s || !s->used || !d || !d->used) MR_FAIL("msres: %s image is not live", s && s->used ? "destination" : "source");
     if (mode > NXDK_MSRES_S0_STENCIL) MR_FAIL("msres: unknown mode %u", mode);
@@ -98,11 +106,12 @@ static uint32_t mr_check(const NxDkImage* s, uint32_t layer, const NxDkImage* d,
     return 0;
 }
 
-uint32_t nxdk_ms_resolve(const NxDkImage* src, uint32_t layer, const NxDkImage* dst, uint32_t mode) {
-    if (mr_check(src, layer, dst, mode)) return 1;
+static uint32_t mr_run(DkCmdBuf cmd, int viaStream, const NxDkImage* src, uint32_t layer, const NxDkImage* dst, uint32_t mode) {
+    if (mr_check(cmd, viaStream, src, layer, dst, mode)) return 1;
+    const uint32_t errs = nxdk.errCount;
+    const int inSubmit = cmd == nxdk_s.cmd;
     DkMemBlock blk = nxdk_stage_alloc(MR_STAGE);                     /* refused: nxdk_stage_alloc has reported it, nothing is recorded */
     if (!blk) return 1;
-    DkCmdBuf cmd = nxdk_s.cmd;
     uint8_t* cpu = (uint8_t*)dkMemBlockGetCpuAddr(blk);
     memset(cpu, 0, MR_STAGE);
     for (uint32_t b = 0; b < 8; b++) {                               /* range b: u = (samples, 1 << b, 0, 0), f = (1 / samples, 0, 0, 0); 1 / n is exact */
@@ -128,7 +137,7 @@ uint32_t nxdk_ms_resolve(const NxDkImage* src, uint32_t layer, const NxDkImage* 
     const DkViewport vp = { 0.0f, 0.0f, (float)dst->w, (float)dst->h, 0.0f, 1.0f };
     const DkScissor sc = { 0, 0, dst->w, dst->h };
     const DkShader* sh[2] = { &mr_sh[0], &mr_sh[1 + mode] };
-    nxdk_query_pause();
+    if (inSubmit) nxdk_query_pause();
     if (mode == NXDK_MSRES_AVG) {
         const NxDkSub t = { dst, 0, 0, layer, 0, 0, dst->w, dst->h };
         nxdk_target_bind(cmd, &t);                                   /* colour target + viewport + scissor */
@@ -142,7 +151,7 @@ uint32_t nxdk_ms_resolve(const NxDkImage* src, uint32_t layer, const NxDkImage* 
         dkCmdBufSetViewports(cmd, 0, &vp, 1);
         dkCmdBufSetScissors(cmd, 0, &sc, 1);
     }
-    nxdk_draw_neutral(cmd);
+    nxdk_draw_neutral(cmd, dst->w, dst->h);
     if (mode != NXDK_MSRES_AVG) {
         DkDepthStencilState ds;
         dkDepthStencilStateDefaults(&ds);
@@ -164,8 +173,16 @@ uint32_t nxdk_ms_resolve(const NxDkImage* src, uint32_t layer, const NxDkImage* 
         dkCmdBufDraw(cmd, DkPrimitive_Triangles, 3, 1, 0, 0);
     }
     nxdk_bind_descriptors(cmd);
-    if (mode != NXDK_MSRES_AVG) nxdk_draw_neutral(cmd);               /* neutral depth / stencil state again (draw state, mask, reference) */
+    if (mode != NXDK_MSRES_AVG) nxdk_draw_neutral(cmd, dst->w, dst->h);             /* neutral depth / stencil state again (draw state, mask, reference) */
     dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Descriptors | DkInvalidateFlags_Image);
-    nxdk_query_resume();
-    return 0;
+    if (inSubmit) nxdk_query_resume();
+    return nxdk.errCount != errs;
+}
+
+uint32_t nxdk_ms_resolve(const NxDkImage* src, uint32_t layer, const NxDkImage* dst, uint32_t mode) {
+    return mr_run(nxdk_s.cmd, 1, src, layer, dst, mode);
+}
+
+uint32_t nxdk_ms_resolve_on(DkCmdBuf cmd, const NxDkImage* src, uint32_t layer, const NxDkImage* dst, uint32_t mode) {
+    return mr_run(cmd, 0, src, layer, dst, mode);
 }

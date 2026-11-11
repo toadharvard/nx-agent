@@ -2,7 +2,8 @@
  * files it uses (dk_state / dk_pass / dk_draw / dk_image / dk_xfer). Every call that records GPU work prints one "EV ..." line; every command then prints
  * "R <ret> E <errs> M <text>". Commands (stdin):
  *   init | shutdown | img I type fmt w h samples mips layers | dead I | cmd 0|1 (the recording buffer is NULL / live) | inpass 0|1 |
- *   resolve SRC LAYER DST MODE | stagefree | failblock N | failstage N | block I N | state */
+ *   resolve SRC LAYER DST MODE | resolveon SRC LAYER DST MODE SEL (SEL 0 = NULL cmd, 1 = the stream cmd object, 2 = another cmd object) |
+ *   failneutral 0|1 | failbind 0|1 (the helper issues one nxdk_err) | stagefree | failblock N | failstage N | block I N | state */
 #define _GNU_SOURCE
 #include <stdarg.h>
 #include <stdio.h>
@@ -51,37 +52,43 @@ void dkShaderInitialize(DkShader* o, DkShaderMaker const* m) {
 bool dkShaderIsValid(DkShader const* o) { (void)o; return true; }
 
 /* ---- the recording ---------------------------------------------------------------------------------------------------------------------- */
-static int cmdobj; static const DkCmdBuf CMD = (DkCmdBuf)&cmdobj;
+static int cmdobj, cmdobj2; static const DkCmdBuf CMD = (DkCmdBuf)&cmdobj, OTHER = (DkCmdBuf)&cmdobj2;
+static DkCmdBuf want = (DkCmdBuf)&cmdobj;   /* the command buffer the running command must record into: every call checks it */
+static int fail_neutral, fail_bind;
+#define CK(c) do { if ((c) != want) puts("BADCMD"); } while (0)
 #define EV(...) do { printf("EV "); printf(__VA_ARGS__); putchar('\n'); } while (0)
 void nxdk_query_pause(void) { EV("query_pause"); }
 void nxdk_query_resume(void) { EV("query_resume"); }
-void nxdk_draw_neutral(DkCmdBuf c) { if (c != CMD) puts("BADCMD"); EV("draw_neutral"); }
+void nxdk_draw_neutral(DkCmdBuf c, uint32_t w, uint32_t h) {
+    CK(c); if (fail_neutral) { nxdk_err("draw_neutral: refused (double)"); return; }
+    EV("draw_neutral %u %u", w, h);
+}
 void nxdk_target_bind(DkCmdBuf c, const NxDkSub* d) {
-    if (c != CMD) puts("BADCMD");
+    CK(c); if (fail_bind) { nxdk_err("target_bind: refused (double)"); return; }
     EV("target_bind im=%u id=%u level=%u layer=%u rect=%u,%u,%u,%u", (unsigned)d->im->dk._storage[0], d->id, d->level, d->layer, d->x, d->y, d->w, d->h);
 }
 void dkCmdBufBindRenderTargets(DkCmdBuf c, DkImageView const* const col[], uint32_t n, DkImageView const* d) {
-    (void)col; if (c != CMD) puts("BADCMD");
+    (void)col; if (c != want) puts("BADCMD");
     if (!d) { EV("rt n=%u depth=none", n); return; }
     EV("rt n=%u depth im=%u type=%d fmt=%d mip=%u,%u lay=%u,%u ds=%d", n, (unsigned)d->pImage->_storage[0], (int)d->type, (int)d->format, d->mipLevelOffset,
        d->mipLevelCount, d->layerOffset, d->layerCount, (int)d->dsSource);
 }
 void dkCmdBufBindDepthStencilState(DkCmdBuf c, DkDepthStencilState const* s) {
-    if (c != CMD) puts("BADCMD");
+    if (c != want) puts("BADCMD");
     EV("dss dt=%d dw=%d st=%d dcmp=%d front=%d,%d,%d,%d back=%d,%d,%d,%d", s->depthTestEnable, s->depthWriteEnable, s->stencilTestEnable, (int)s->depthCompareOp,
        (int)s->stencilFrontFailOp, (int)s->stencilFrontPassOp, (int)s->stencilFrontDepthFailOp, (int)s->stencilFrontCompareOp,
        (int)s->stencilBackFailOp, (int)s->stencilBackPassOp, (int)s->stencilBackDepthFailOp, (int)s->stencilBackCompareOp);
 }
-void dkCmdBufSetStencil(DkCmdBuf c, DkFace f, uint8_t mask, uint8_t ref, uint8_t fm) { if (c != CMD) puts("BADCMD"); EV("stencil face=%d mask=%u ref=%u fmask=%u", (int)f, mask, ref, fm); }
-void dkCmdBufClearDepthStencil(DkCmdBuf c, bool cd, float dv, uint8_t sm, uint8_t sv) { if (c != CMD) puts("BADCMD"); EV("clear_ds cd=%d d=%g smask=%u sval=%u", cd, (double)dv, sm, sv); }
-void nxdk_bind_descriptors(DkCmdBuf c) { if (c != CMD) puts("BADCMD"); EV("bind_descriptors_global"); }
+void dkCmdBufSetStencil(DkCmdBuf c, DkFace f, uint8_t mask, uint8_t ref, uint8_t fm) { if (c != want) puts("BADCMD"); EV("stencil face=%d mask=%u ref=%u fmask=%u", (int)f, mask, ref, fm); }
+void dkCmdBufClearDepthStencil(DkCmdBuf c, bool cd, float dv, uint8_t sm, uint8_t sv) { if (c != want) puts("BADCMD"); EV("clear_ds cd=%d d=%g smask=%u sval=%u", cd, (double)dv, sm, sv); }
+void nxdk_bind_descriptors(DkCmdBuf c) { if (c != want) puts("BADCMD"); EV("bind_descriptors_global"); }
 void dkCmdBufBindShaders(DkCmdBuf c, uint32_t mask, DkShader const* const sh[], uint32_t n) {
-    (void)c; printf("EV bind_shaders mask=%u n=%u", mask, n);
+    CK(c); printf("EV bind_shaders mask=%u n=%u", mask, n);
     for (uint32_t i = 0; i < n; i++) { uint32_t h, off; memcpy(&h, sh[i]->_storage, 4); memcpy(&off, sh[i]->_storage + 4, 4); printf(" [ctl=%08x code=%u stage=%u]", h, off, sh[i]->_storage[8]); }
     putchar('\n');
 }
-void dkCmdBufBindImageDescriptorSet(DkCmdBuf c, DkGpuAddr a, uint32_t n) { (void)c; uint32_t off; Blk* b = blk_of(a, &off); uint32_t s; memcpy(&s, b->mem + off, 4); EV("bind_img_set blk=%d off=%u n=%u serial=%u", b->idx, off, n, s); }
-void dkCmdBufBindSamplerDescriptorSet(DkCmdBuf c, DkGpuAddr a, uint32_t n) { (void)c; uint32_t off; Blk* b = blk_of(a, &off); uint32_t s; memcpy(&s, b->mem + off, 4); EV("bind_smp_set blk=%d off=%u n=%u serial=%u", b->idx, off, n, s); }
+void dkCmdBufBindImageDescriptorSet(DkCmdBuf c, DkGpuAddr a, uint32_t n) { CK(c); uint32_t off; Blk* b = blk_of(a, &off); uint32_t s; memcpy(&s, b->mem + off, 4); EV("bind_img_set blk=%d off=%u n=%u serial=%u", b->idx, off, n, s); }
+void dkCmdBufBindSamplerDescriptorSet(DkCmdBuf c, DkGpuAddr a, uint32_t n) { CK(c); uint32_t off; Blk* b = blk_of(a, &off); uint32_t s; memcpy(&s, b->mem + off, 4); EV("bind_smp_set blk=%d off=%u n=%u serial=%u", b->idx, off, n, s); }
 static uint32_t serial;
 void dkImageDescriptorInitialize(DkImageDescriptor* o, DkImageView const* v, bool lo, bool ms) {
     memset(o, 0, sizeof *o); serial++; memcpy(o->_storage, &serial, 4);
@@ -93,17 +100,17 @@ void dkSamplerDescriptorInitialize(DkSamplerDescriptor* o, DkSampler const* s) {
     EV("smpdesc serial=%u min=%d mag=%d mip=%d wrap=%d,%d,%d cmp=%d aniso=%g", serial, (int)s->minFilter, (int)s->magFilter, (int)s->mipFilter, (int)s->wrapMode[0],
        (int)s->wrapMode[1], (int)s->wrapMode[2], (int)s->compareEnable, (double)s->maxAnisotropy);
 }
-void dkCmdBufBindTextures(DkCmdBuf c, DkStage st, uint32_t id, DkResHandle const* h, uint32_t n) { (void)c; EV("bind_tex stage=%d id=%u n=%u h0=%u", (int)st, id, n, (unsigned)h[0]); }
+void dkCmdBufBindTextures(DkCmdBuf c, DkStage st, uint32_t id, DkResHandle const* h, uint32_t n) { CK(c); EV("bind_tex stage=%d id=%u n=%u h0=%u", (int)st, id, n, (unsigned)h[0]); }
 void dkCmdBufBindUniformBuffers(DkCmdBuf c, DkStage st, uint32_t id, DkBufExtents const* e, uint32_t n) {
-    (void)c; uint32_t off; Blk* b = blk_of(e[0].addr, &off);
+    CK(c); uint32_t off; Blk* b = blk_of(e[0].addr, &off);
     printf("EV ubo stage=%d id=%u n=%u blk=%d off=%u size=%u data=", (int)st, id, n, b->idx, off, e[0].size);
     for (uint32_t i = 0; i < e[0].size; i++) printf("%02x", b->mem[off + i]);
     putchar('\n');
 }
-void dkCmdBufSetViewports(DkCmdBuf c, uint32_t f, DkViewport const* v, uint32_t n) { (void)c; EV("viewport first=%u n=%u %g,%g,%g,%g,%g,%g", f, n, (double)v[0].x, (double)v[0].y, (double)v[0].width, (double)v[0].height, (double)v[0].near, (double)v[0].far); }
-void dkCmdBufSetScissors(DkCmdBuf c, uint32_t f, DkScissor const* s, uint32_t n) { (void)c; EV("scissor first=%u n=%u %u,%u,%u,%u", f, n, s[0].x, s[0].y, s[0].width, s[0].height); }
-void dkCmdBufBarrier(DkCmdBuf c, DkBarrier m, uint32_t f) { (void)c; EV("barrier mode=%d flags=%u", (int)m, f); }
-void dkCmdBufDraw(DkCmdBuf c, DkPrimitive p, uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) { (void)c; EV("draw prim=%d v=%u i=%u fv=%u fi=%u", (int)p, v, i, fv, fi); }
+void dkCmdBufSetViewports(DkCmdBuf c, uint32_t f, DkViewport const* v, uint32_t n) { CK(c); EV("viewport first=%u n=%u %g,%g,%g,%g,%g,%g", f, n, (double)v[0].x, (double)v[0].y, (double)v[0].width, (double)v[0].height, (double)v[0].near, (double)v[0].far); }
+void dkCmdBufSetScissors(DkCmdBuf c, uint32_t f, DkScissor const* s, uint32_t n) { CK(c); EV("scissor first=%u n=%u %u,%u,%u,%u", f, n, s[0].x, s[0].y, s[0].width, s[0].height); }
+void dkCmdBufBarrier(DkCmdBuf c, DkBarrier m, uint32_t f) { CK(c); EV("barrier mode=%d flags=%u", (int)m, f); }
+void dkCmdBufDraw(DkCmdBuf c, DkPrimitive p, uint32_t v, uint32_t i, uint32_t fv, uint32_t fi) { CK(c); EV("draw prim=%d v=%u i=%u fv=%u fi=%u", (int)p, v, i, fv, fi); }
 
 /* ---- images and commands --------------------------------------------------------------------------------------------------------------- */
 static NxDkImage ims[64];
@@ -129,7 +136,13 @@ int main(void) {
         else if (!strcmp(t[0], "resolve") && nt == 5) {
             int s = atoi(t[1]), d = atoi(t[3]);
             result(nxdk_ms_resolve(s < 0 ? NULL : &ims[s], (uint32_t)atoi(t[2]), d < 0 ? NULL : &ims[d], (uint32_t)atoi(t[4])));
-        } else if (!strcmp(t[0], "stagefree")) { nxdk_stage_free(); puts("OK"); }
+        } else if (!strcmp(t[0], "resolveon") && nt == 6) {
+            int s = atoi(t[1]), d = atoi(t[3]), sel = atoi(t[5]); DkCmdBuf c = sel == 0 ? NULL : sel == 1 ? CMD : OTHER;
+            want = c ? c : CMD;
+            result(nxdk_ms_resolve_on(c, s < 0 ? NULL : &ims[s], (uint32_t)atoi(t[2]), d < 0 ? NULL : &ims[d], (uint32_t)atoi(t[4]))); want = CMD;
+        } else if (!strcmp(t[0], "failneutral") && nt == 2) { fail_neutral = atoi(t[1]); puts("OK"); }
+        else if (!strcmp(t[0], "failbind") && nt == 2) { fail_bind = atoi(t[1]); puts("OK"); }
+        else if (!strcmp(t[0], "stagefree")) { nxdk_stage_free(); puts("OK"); }
         else if (!strcmp(t[0], "failblock") && nt == 2) { fail_blk = atoi(t[1]); puts("OK"); }
         else if (!strcmp(t[0], "failstage") && nt == 2) { fail_stage = atoi(t[1]); puts("OK"); }
         else if (!strcmp(t[0], "block") && nt == 3) {   /* block I N: size flags live, N bytes hex */

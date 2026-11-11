@@ -50,7 +50,7 @@ static int cmdobj; static const DkCmdBuf CMD = (DkCmdBuf)&cmdobj;
 #define EV(...) do { printf("EV "); printf(__VA_ARGS__); putchar('\n'); } while (0)
 void nxdk_query_pause(void) { EV("query_pause"); }
 void nxdk_query_resume(void) { EV("query_resume"); }
-void nxdk_draw_neutral(DkCmdBuf c) { if (c != CMD) puts("BADCMD"); EV("draw_neutral"); }
+void nxdk_draw_neutral(DkCmdBuf c, uint32_t w, uint32_t h) { if (c != CMD) puts("BADCMD"); EV("draw_neutral %u %u", w, h); }
 void nxdk_target_bind(DkCmdBuf c, const NxDkSub* d) { if (c != CMD) puts("BADCMD"); EV("target_bind im=%u id=%u level=%u layer=%u rect=%u,%u,%u,%u", (unsigned)d->im->dk._storage[0], d->id, d->level, d->layer, d->x, d->y, d->w, d->h); }
 void nxdk_bind_descriptors(DkCmdBuf c) { if (c != CMD) puts("BADCMD"); EV("bind_descriptors_global"); }
 void dkCmdBufBindShaders(DkCmdBuf c, uint32_t mask, DkShader const* const sh[], uint32_t n) {

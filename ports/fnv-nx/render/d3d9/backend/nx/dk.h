@@ -260,7 +260,7 @@ void nxdk_op_scissor(const uint32_t* a, uint32_t argc);
 void nxdk_op_stencil_ref(const uint32_t* a, uint32_t argc);
 void nxdk_op_blend_const(const uint32_t* a, uint32_t argc);
 void nxdk_op_depth_bias(const uint32_t* a, uint32_t argc);
-void nxdk_draw_neutral(DkCmdBuf cmd);   /* known state for internal draws (scale, compose): no blend, no tests, all channels, cull none; forces the next BindState to re-apply */
+void nxdk_draw_neutral(DkCmdBuf cmd, uint32_t w, uint32_t h);   /* known state for an internal draw onto the w x h single-sample target bound outside any pass: no blend, no tests, all channels, cull none, scissor (0,0,w,h); one error inside a pass; forces the next BindState to re-apply */
 /* ---- dk_vtx.c */
 void nxdk_op_define_layout(const uint32_t* a, uint32_t argc);
 void nxdk_op_define_layout4(const uint32_t* a, uint32_t argc);

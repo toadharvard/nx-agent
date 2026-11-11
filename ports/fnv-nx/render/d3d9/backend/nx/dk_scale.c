@@ -117,7 +117,7 @@ void nxdk_scale_point(DkCmdBuf cmd, const NxDkSub* s, const NxDkSub* d, const ui
     const DkShader* sh[2] = { &sc_sh[0], &sc_sh[1 + kind] };
     nxdk_query_pause();
     nxdk_target_bind(cmd, d);
-    nxdk_draw_neutral(cmd);
+    nxdk_draw_neutral(cmd, nxchk_lvl(d->im->w, d->level), nxchk_lvl(d->im->h, d->level));
     dkCmdBufSetViewports(cmd, 0, &vp, 1);
     dkCmdBufSetScissors(cmd, 0, &sc, 1);
     dkCmdBufBindShaders(cmd, DkStageFlag_Vertex | DkStageFlag_Fragment, sh, 2);

@@ -61,10 +61,10 @@ static void set_stencil(DkCmdBuf cmd, const NxDkDyn* d) {
 }
 
 /* D2, D4: converts and checks, records nothing. who = the op's name for the messages. */
-static int convert(const char* who, const NxRenderState* rs, Conv* c) {
+static int convert(const char* who, const NxRenderState* rs, uint32_t samples, Conv* c) {
     static const NxDynamicState zero;
-    int e = nxdk_state(rs, samples_now(), &c->s);
-    if (!e) e = nxdk_dyn(rs, &zero, samples_now(), &c->d);
+    int e = nxdk_state(rs, samples, &c->s);
+    if (!e) e = nxdk_dyn(rs, &zero, samples, &c->d);
     if (e) { nxdk_err("%s: render state rejected by nxdk_state, code %d", who, e); return 1; }
     const NxDkDerived* v = &c->s.derived;
     if (v->clipPlaneMask) { nxdk_err("%s: derived property clipPlaneMask %u has no rule in this backend", who, v->clipPlaneMask); return 1; }
@@ -73,13 +73,13 @@ static int convert(const char* who, const NxRenderState* rs, Conv* c) {
     return 0;
 }
 
-/* D1: the part of a state that BindState and the neutral state have in common */
-static void record(DkCmdBuf cmd, const Conv* c) {
+/* D1: the part of a state that BindState and the neutral state have in common: everything except the sRGB-write rebind (it needs an open pass) and the
+ * scissor (the pass rect, or the caller's target rect for the neutral state) */
+static void record_core(DkCmdBuf cmd, const Conv* c) {
     DkBlendState bl[4] = { c->s.blend, c->s.blend, c->s.blend, c->s.blend };
     DkMultisampleState ms;
     dkMultisampleStateDefaults(&ms);
     ms.mode = ms.rasterizerMode = c->s.derived.msMode;
-    nxdk_pass_srgb(c->s.derived.srgbWrite != 0);
     dkCmdBufBindRasterizerState(cmd, &c->s.rast);
     dkCmdBufBindColorState(cmd, &c->s.color);
     dkCmdBufBindColorWriteState(cmd, &c->s.write);
@@ -88,6 +88,11 @@ static void record(DkCmdBuf cmd, const Conv* c) {
     dkCmdBufBindMultisampleState(cmd, &ms);
     set_stencil(cmd, &c->d);
     dkCmdBufSetSampleMask(cmd, c->d.sampleMask);
+}
+
+static void record(DkCmdBuf cmd, const Conv* c) {   /* BindState: sRGB rebind of the open pass first, the pass scissor last */
+    nxdk_pass_srgb(c->s.derived.srgbWrite != 0);
+    record_core(cmd, c);
     set_scissor(cmd, c->s.derived.scissorEnable);
 }
 
@@ -109,7 +114,7 @@ void nxdk_op_bind_state(const uint32_t* a, uint32_t argc) {
     Conv c;
     nxdk_s.stats->state_binds++;
     if (!sh[0] || !sh[1]) { nxdk_err("BindState: shader %u is not live", sh[0] ? s->ps : s->vs); return; }
-    if (convert("BindState", &s->rs, &c)) return;
+    if (convert("BindState", &s->rs, samples_now(), &c)) return;
     if (nxdk_vtx_bind_layout(s->layout)) return;
     dkCmdBufBindShaders(nxdk_s.cmd, DkStageFlag_Vertex | DkStageFlag_Fragment, sh, 2);
     record(nxdk_s.cmd, &c);
@@ -218,11 +223,18 @@ void nxdk_op_depth_bias(const uint32_t* a, uint32_t argc) {
 }
 
 /* gl4_neutral_state: all channels written, no blend, no depth or stencil test, cull none, solid, no bias, no scissor test, linear write, full sample mask,
- * multisample on: the zero state with write masks 15, depth mask on (as GL; nxdk_state writes depth only with the test on), MSAA on, sample mask all ones. */
-void nxdk_draw_neutral(DkCmdBuf cmd) {
+ * multisample on: the zero state with write masks 15, depth mask on (as GL; nxdk_state writes depth only with the test on), MSAA on, sample mask all ones.
+ * Internal draws (scale, resolve) run OUTSIDE any pass onto a target the caller bound with nxdk_target_bind: single-sample views without sRGB (dk_pass.c,
+ * bind(..., srgb = 0)) and scissor (0,0,w,h) of the level. So the state is converted for 1 sample (no pass state is read), nxdk_pass_srgb is not called
+ * (the bound views already are the non-sRGB ones that the state's srgb = 0 asks for) and the scissor is the caller's w x h. Inside a pass the target
+ * would be the pass's: one error, nothing recorded (as nxdk_target_bind, P8). */
+void nxdk_draw_neutral(DkCmdBuf cmd, uint32_t w, uint32_t h) {
     const NxRenderState rs = { { 0xFFFFull << 32, 1ull << NXRS_D_WRITE, 0, 1ull << NXRS_M_MSAA | 0xFFFFFFFFull << NXRS_M_SAMPLEMASK } };
     Conv c;
-    if (convert("draw_neutral", &rs, &c)) return;
-    record(cmd, &c);
+    if (nxdk_s.inPass) { nxdk_err("draw_neutral: inside an open pass"); return; }
+    if (convert("draw_neutral", &rs, 1, &c)) return;
+    record_core(cmd, &c);
+    const DkScissor sc = { 0, 0, w, h };
+    dkCmdBufSetScissors(cmd, 0, &sc, 1);
     nxdk_s.boundState = 0;
 }
