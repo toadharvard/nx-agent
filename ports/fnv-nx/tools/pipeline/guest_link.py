@@ -89,6 +89,7 @@ def main(argv):
         d = os.path.join(P, sub)
         if os.path.isdir(d):
             srcs += [os.path.join(d, n) for n in sorted(os.listdir(d)) if n.endswith(exts)]
+    srcs += [os.path.join(P, 'clock', n) for n in ('clock_rt.cpp', 'clock_real.cpp')]   # the clock interface (the product's real clock)
     for n in ('os_guest.c', 'platform_glue.cpp'):            # S5's guest OS backend, when present
         if os.path.isfile(os.path.join(g, n)):
             srcs.append(os.path.join(g, n))

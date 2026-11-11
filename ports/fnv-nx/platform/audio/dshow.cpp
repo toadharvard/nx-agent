@@ -633,7 +633,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
     Vec<intptr_t> done;   /* filters that reported EC_COMPLETE since the stream started */
     Hold *site = nullptr;    /* IObjectWithSite */
     uintptr_t logh = 0;
-    os_thread *pump = nullptr;
+    void *pump = nullptr;   /* the clock's pump (fnvnx_clock.h) */
     volatile int quit = 0;
 
     Graph()
@@ -1846,7 +1846,7 @@ HR Event::GetEventHandle(uintptr_t *h)
 HR Event::GetEvent(long *code, intptr_t *p1, intptr_t *p2, long ms)
 {
     if (!code || !p1 || !p2) return E_POINTER_;
-    uint64_t until = os_monotonic_ns() + (ms < 0 ? 0 : (uint64_t)ms * 1000000ull);
+    uint64_t until = clk_peek_ns() + (ms < 0 ? 0 : (uint64_t)ms * 1000000ull);
     for (;;) {
         {
             GL l(g);
@@ -1861,21 +1861,21 @@ HR Event::GetEvent(long *code, intptr_t *p1, intptr_t *p2, long ms)
                 return S_OK_;
             }
         }
-        if (ms >= 0 && os_monotonic_ns() >= until) return E_ABORT_;   /* no event */
-        os_sleep_ns(2 * 1000000ull);
+        if (ms >= 0 && clk_peek_ns() >= until) return E_ABORT_;   /* no event */
+        clk_sleep_ns(2 * 1000000ull);
     }
 }
 HR Event::WaitForCompletion(long ms, long *code)
 {
     if (!code) return E_POINTER_;
-    uint64_t until = os_monotonic_ns() + (ms < 0 ? 0 : (uint64_t)ms * 1000000ull);
+    uint64_t until = clk_peek_ns() + (ms < 0 ? 0 : (uint64_t)ms * 1000000ull);
     for (;;) {
         {
             GL l(g);
             if (g->latch) { *code = g->latch_code; return S_OK_; }
         }
-        if (ms >= 0 && os_monotonic_ns() >= until) { *code = 0; return E_ABORT_; }
-        os_sleep_ns(2 * 1000000ull);
+        if (ms >= 0 && clk_peek_ns() >= until) { *code = 0; return E_ABORT_; }
+        clk_sleep_ns(2 * 1000000ull);
     }
 }
 HR Event::CancelDefaultHandling(long c)
@@ -1966,36 +1966,28 @@ HR Site::GetSite(const void *iid, void **out)
 }
 
 /* ---- the pump: keeps the renderers' rings filled, reports the end of the stream */
-void pump_main(void *p)
+void pump_step(void *p, uint32_t)   /* once per 10 ms of the clock */
 {
     Graph *g = (Graph *)p;
-    while (!g->quit) {
-        {
-            GL l(g);
-            for (size_t i = 0; i < g->filters.n; i++)
-                if (Renderer *r = as_renderer(g->filters[i]->bf)) r->tick_locked();
-        }
-        g->flush_window();
-        os_sleep_ns(10 * 1000000ull);
+    if (g->quit)
+        return;
+    {
+        GL l(g);
+        for (size_t i = 0; i < g->filters.n; i++)
+            if (Renderer *r = as_renderer(g->filters[i]->bf)) r->tick_locked();
     }
+    g->flush_window();
 }
 void Graph::start_pump()   /* graph lock held (a renderer connected) */
 {
     if (pump) return;
-    pump = os_thread_create(pump_main, this, 128 * 1024, 1, -1);
-    if (pump && os_thread_start(pump)) {
-        os_thread_free(pump);
-        pump = nullptr;
-    }
+    pump = clk_pump_start(pump_step, nullptr, this, 100, 1, 128 * 1024, 1, -1);
 }
 Graph::~Graph()
 {
     refs = 1 << 20;   /* the teardown below takes and drops references of its own (QueryFilterInfo's graph pointer) */
     quit = 1;
-    if (pump) {
-        os_thread_join(pump);
-        os_thread_free(pump);
-    }
+    clk_pump_stop(pump);
     stop_all();
     while (filters.n) {   /* (no other thread uses a graph that is being destroyed) */
         Entry *e = filters[filters.n - 1];

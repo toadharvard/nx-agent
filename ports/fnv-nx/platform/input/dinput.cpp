@@ -12,6 +12,7 @@
 
 #include "input.h"
 #include "../os/os.h"
+#include "fnvnx_clock.h"
 
 #include <stddef.h>
 #include <new>
@@ -102,7 +103,7 @@ struct Event {
 };
 
 
-uint32_t now_ms() { return (uint32_t)GetTickCount(); }
+uint32_t now_ms() { return clk_peek_tick_ms(); }   /* the injecting side's time, no advance (fnvnx_clock.h) */
 
 struct Device;
 os_lock_t g_lock;      /* guards every device and the global state */

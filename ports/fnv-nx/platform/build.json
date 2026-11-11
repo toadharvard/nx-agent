@@ -6,6 +6,7 @@
  "command": ["platform/build_guest.sh", "<out>"],
  "command_env": {
   "FNVNX_TC": "<toolchain prefix: the unpacked hostcache/toolchain-1fc1f7b1ef44>",
+  "FNVNX_CLOCK": "<real (default, the product's clock) | virtual (the verification mode's virtual clocks, VC1)>",
   "NLS_DIR": "<tools/nls>",
   "EXT": "<directory holding freetype/ and minimp3/>",
   "LIBNX_INC": "<libnx include directory, inside the toolchain mirror>"
@@ -14,7 +15,7 @@
  "inputs": {
   "tree": [
    "platform/win32", "platform/crt", "platform/audio", "platform/input", "platform/boundary", "platform/com",
-   "platform/os", "platform/include", "platform/manifest/env_const.tsv", "platform/manifest/gen_env_const.py",
+   "platform/os", "platform/clock", "platform/include", "platform/manifest/env_const.tsv", "platform/manifest/gen_env_const.py",
    "platform/manifest/env_const_export.py", "platform/guest_hooks.txt", "platform/build.json",
    "toolchain/guest", "toolchain/include", "shim/include", "loader/include", "tests/s4/Makefile"
   ],
@@ -33,7 +34,8 @@
   "objstub_constants": "env_const.objstub.tsv",
   "objects_list": "objects.list",
   "svc_counts": "svc.txt",
-  "compile_commands": "compile_cmds.txt"
+  "compile_commands": "compile_cmds.txt",
+  "clock": "clock.txt"
  },
  "os_layer": [],
  "os_layer_note": "Objects allowed to contain svc instructions (objstub --os-layer). The guest archive issues no SVC (it calls the host); the build fails if svc.txt names an object that is not listed here.",

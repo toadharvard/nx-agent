@@ -257,6 +257,7 @@ struct w32_thread_obj {
     int prio;
     int cpu;
     int boost;                     /* OS_THREAD_BOOST from the role hook */
+    uint64_t clk_parent;           /* the creator's clock stamp at CreateThread (fnvnx_clock.h) */
     void *tls_block;               /* the image's TLS block of the new thread, until the thread adopts it */
     fnvnx_bnd_thread *gt;          /* the game thread context (fnvnx_boundary.h); NULL once released */
     os_cond_t resumed;             /* a thread that suspended itself waits here until its count is 0 */
@@ -298,6 +299,7 @@ static void thread_trampoline(void *p)
     struct w32_thread_obj *to = (struct w32_thread_obj *)p;
     struct w32_thread *self = w32_self();
     /* adopt the id handed out by CreateThread */
+    clk_thread_start(to->clk_parent);
     self->tid = to->tid;
     self->self_obj = &to->o;
     if (to->tls_block) {
@@ -336,6 +338,7 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
     t->tid = __atomic_fetch_add(&g_next_tid, 4, __ATOMIC_RELAXED);
     t->exit_code = STILL_ACTIVE;
     t->cpu = -1;
+    t->clk_parent = clk_stamp();
     if (!fnvnx_image_tls_hook && g_tls_total) {
         t->tls_block = tls_block_new();
         if (!t->tls_block) {
@@ -437,7 +440,7 @@ extern "C" DWORD SuspendThread(HANDLE h)
         /* the calling thread: no kernel pauses itself (Horizon refuses), so it waits until ResumeThread from
          * another thread brings the count back to 0, which is what the caller observes on Windows */
         while (t->suspend_count > 0)
-            os_cond_wait(&t->resumed, &w32_wait_lock, OS_WAIT_FOREVER);
+            os_cond_wait(&t->resumed, &w32_wait_lock);
         os_unlock(&w32_wait_lock);
         return (DWORD)prev;
     }
@@ -568,13 +571,11 @@ extern "C" DWORD SetThreadIdealProcessor(HANDLE h, DWORD cpu)
 extern "C" void Sleep(DWORD ms)
 {
     ms = W32_DW(ms);
-    if (ms == 0)
-        os_yield();
-    else if (ms == INFINITE)
+    if (ms == INFINITE)
         for (;;)
-            os_sleep_ns(3600ull * 1000000000ull);
+            clk_rt_sleep_ns(3600ull * 1000000000ull);   /* never returns: no time passes for the thread */
     else
-        os_sleep_ns((uint64_t)ms * 1000000ull);
+        clk_sleep_ns((uint64_t)ms * 1000000ull);   /* Sleep(0) yields; the virtual clock advances by ms (0: one quantum) */
 }
 
 extern "C" DWORD SleepEx(DWORD ms, BOOL alertable)

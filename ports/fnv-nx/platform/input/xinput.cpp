@@ -10,6 +10,7 @@
 #include <xinput.h>
 #include "input.h"
 #include "../os/os.h"
+#include "fnvnx_clock.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -173,7 +174,7 @@ static void track_keys(const fnvnx_xpad &x)   /* g_xlock held */
     if (x.rt > XINPUT_GAMEPAD_TRIGGER_THRESHOLD) a |= 1u << 7;
     a |= stick_keys(x.lx, x.ly, XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE, 16);
     a |= stick_keys(x.rx, x.ry, XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE, 24);
-    uint64_t now = os_monotonic_ns();
+    uint64_t now = clk_peek_ns();
     for (int i = 0; i < 32; i++) {
         uint32_t m = 1u << i;
         if ((a & m) && !(g_active & m)) { kq_push(g_vk[i], XINPUT_KEYSTROKE_KEYDOWN); g_next_repeat[i] = now + XK_REPEAT_DELAY_NS; }

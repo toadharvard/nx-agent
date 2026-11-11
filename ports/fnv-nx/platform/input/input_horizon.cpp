@@ -3,6 +3,7 @@
  * fnvnx_input_pump themselves). */
 #include "input.h"
 #include "../os/os.h"
+#include "fnvnx_clock.h"
 
 #include <switch.h>
 #include <string.h>
@@ -73,13 +74,13 @@ static void pump_locked(void)
             pts[i].y = (int32_t)ts.touches[i].y;
             pts[i].id = ts.touches[i].finger_id;
         }
-        fnvnx_touch_frame(pts, n, os_monotonic_ns() / 1000000u);
+        fnvnx_touch_frame(pts, n, clk_rt_ns() / 1000000u);
     }
 }
 
 extern "C" void fnvnx_input_pump(void)
 {
-    uint64_t now = os_monotonic_ns();
+    uint64_t now = clk_rt_ns();
     os_lock(&g_lock);
     if (!g_init || now - g_last_pump >= 1000000u) {   /* at most once per ms */
         g_last_pump = now;

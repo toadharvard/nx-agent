@@ -13,6 +13,10 @@
 # LIBNX_INC   libnx's include directory (headers only; sockets declarations of winsock.cpp).
 # EXT         directory with freetype/ (win32/tools/fetch_freetype.sh; mirror tools/freetype) and minimp3/ (mirror tools/minimp3;
 #             pinned ea99364f..., checked by content) (default <fnv-nx>/ext).
+# FNVNX_CLOCK real (default) | virtual: which clock the archive contains (platform/include/fnvnx_clock.h). real is the product's;
+#             virtual is the verification mode's virtual clocks (definition VC1: platform/clock/clock_virtual.cpp). The clock is
+#             chosen here, at link time of the platform objects: one of platform/clock/clock_real.cpp, clock_virtual.cpp is in
+#             the archive (with clock_rt.cpp), never both; <out>/clock.txt names it.
 # Offline: nothing is fetched. A missing input stops the script with a message that names it.
 #
 # Output:  <out>/libfnvnx-platform.a   every source of platform/{win32,crt,audio,input,boundary,com,os} + toolchain/guest/{os_guest.c,
@@ -148,6 +152,13 @@ for sub in win32 crt audio input boundary com os; do
     [ -d "$HERE/$sub" ] || continue
     while IFS= read -r f; do add_src "$f"; done < <(find "$HERE/$sub" -maxdepth 1 -type f \( -name '*.c' -o -name '*.cpp' \) | sort)
 done
+CLOCK=${FNVNX_CLOCK:-real}
+case $CLOCK in real|virtual) ;; *) echo "build_guest: FNVNX_CLOCK must be real or virtual (got '$CLOCK')"; exit 2;; esac
+for n in clock_rt.cpp "clock_$CLOCK.cpp"; do
+    [ -f "$HERE/clock/$n" ] || { echo "build_guest: missing platform/clock/$n"; exit 2; }
+    add_src "$HERE/clock/$n"
+done
+echo "$CLOCK" >"$OUT/clock.txt"
 for n in os_guest.c platform_glue.cpp; do
     [ -f "$TCDIR/guest/$n" ] || { echo "build_guest: missing toolchain/guest/$n"; exit 2; }
     add_src "$TCDIR/guest/$n"
@@ -246,6 +257,7 @@ comm -23 "$OUT/rest2.txt" "$OUT/provider_hooks.txt" >"$OUT/undef_unresolved.txt"
 rm -f "$OUT/rest1.txt" "$OUT/rest2.txt"
 wcl() { wc -l <"$1" | tr -d ' '; }
 SIZE=$(stat -c %s "$OUT/libfnvnx-platform.a")
+echo "build_guest: clock $CLOCK (platform/clock/clock_$CLOCK.cpp)"
 echo "build_guest: $NALL sources compiled, 0 failed; libfnvnx-platform.a $SIZE bytes; defined $(wcl "$OUT/defined.txt"), undefined $(wcl "$OUT/undef.txt")"
 echo "build_guest: undefined by provider: newlib/libgcc/libstdc++ $(wcl "$OUT/undef_newlib.txt"), runtime $(wcl "$OUT/undef_runtime.txt"), hooks $(wcl "$OUT/undef_hooks.txt"), UNRESOLVED $(wcl "$OUT/undef_unresolved.txt")"
 if [ -s "$OUT/undef_unresolved.txt" ]; then

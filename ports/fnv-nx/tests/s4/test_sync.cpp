@@ -1,7 +1,7 @@
 /* test_sync.cpp - critical sections, Interlocked*, events, semaphores, mutexes, waits, threads, TLS. */
 #include "s4_test.h"
 
-#include "../../platform/os/os.h"
+#include "../../platform/os/os_clock.h"
 
 static uint64_t now_ms(void) { return os_monotonic_ns() / 1000000ull; }
 

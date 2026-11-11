@@ -182,7 +182,7 @@ void pump(void *)
             g_ph[n++] = (UINT_PTR)(i + 1);
         }
         os_unlock(&g_lk);
-        if (n) poll(g_pf, (nfds_t)n, 10); else os_sleep_ns(10000000ull);
+        if (n) poll(g_pf, (nfds_t)n, 10); else clk_rt_sleep_ns(10000000ull);
         os_lock(&g_lk);
         g_nev = 0;
         for (int i = 0; i < n; i++) {
@@ -579,6 +579,7 @@ extern "C" int fnvnx_ws2_select(int, void *r, void *w, void *x, const void *tvp)
     }
     int pr = poll(pf, (nfds_t)n, ms);
     if (pr < 0) return fail_errno();
+    if (pr == 0 && ms >= 0) clk_wait_timeout((uint64_t)ms * 1000000ull);   /* the select timed out */
     UINT_PTR keep[3][64]; uint32_t kc[3] = { 0, 0, 0 };
     for (int i = 0; i < n; i++) {
         cerr[i] = 0;

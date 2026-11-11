@@ -18,6 +18,7 @@
 #include "../../platform/input/input.h"
 #include "../../platform/include/fnvnx_render_hooks.h"
 #include "../../platform/os/os.h"
+#include "../../platform/include/fnvnx_clock.h"
 #include "fnvnx/hostapi.h"
 
 extern "C" const fnvnx_audio_backend fnvnx_audio_backend_audren;
@@ -81,7 +82,7 @@ static os_lock_t g_ilock;
 static uint64_t g_last_pump;
 
 extern "C" void fnvnx_input_pump(void) {
-    uint64_t now = os_monotonic_ns();
+    uint64_t now = clk_rt_ns();
     os_lock(&g_ilock);
     if (g_last_pump && now - g_last_pump < 1000000u) { os_unlock(&g_ilock); return; }   /* <= once per ms */
     g_last_pump = now;

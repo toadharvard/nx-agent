@@ -5,7 +5,7 @@
  * FnvnxHostApi: threads are host threads with guest TLS, locks/condvars are the runtime's futex words, files
  * go to the host's newlib/fsdev. Paths are host paths ("sdmc:/...").
  */
-#include "../../platform/os/os.h"
+#include "../../platform/os/os_clock.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,9 +50,10 @@ void os_unlock(os_lock_t *l) { fnvnx_unlock(&l->word); }
 void os_glock(os_lock_t *l) { fnvnx_lock(&l->word); }
 int os_gtrylock(os_lock_t *l) { return fnvnx_trylock(&l->word); }
 void os_gunlock(os_lock_t *l) { fnvnx_unlock(&l->word); }
-int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns) {
+int os_cond_timedwait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns) {
     return fnvnx_cond_wait(&c->word, &l->word, timeout_ns);
 }
+void os_cond_wait(os_cond_t *c, os_lock_t *l) { os_cond_timedwait(c, l, OS_WAIT_FOREVER); }
 void os_cond_signal(os_cond_t *c) { fnvnx_cond_signal(&c->word); }
 void os_cond_broadcast(os_cond_t *c) { fnvnx_cond_broadcast(&c->word); }
 

@@ -5,7 +5,7 @@
  * Every wait in here has a finite timeout (WAIT_MAX) so a regression fails a check instead of hanging the suite. */
 #include "s4_test.h"
 
-#include "../../platform/os/os.h"
+#include "../../platform/os/os_clock.h"
 
 #define WAIT_MAX 5000u
 

@@ -39,7 +39,10 @@ CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
 PLAT_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
-PLAT_CXX := $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp)   # audio: winmm waveOut* are exports of the table
+# the clock interface (platform/include/fnvnx_clock.h): clock_rt.cpp is in both, clock_real.cpp is the product's clock; `make vclock`
+# links clock_virtual.cpp instead (the verification mode, definition VC1)
+CLOCK_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp
+PLAT_CXX := $(CLOCK_CXX) $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp)   # audio: winmm waveOut* are exports of the table
 TEST_CXX := $(filter-out %/host_section.cpp,$(wildcard $(HERE)/*.cpp))   # the host section services belong to the private binary only
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
@@ -48,7 +51,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: all test probe private ilp32 m32 iat device qemu clean gfn-nocompile
+.PHONY: all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -123,6 +126,15 @@ $(OUT)/platform/manifest/probe_imports.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUIL
 $(OUT)/probe_imports: $(PROBE_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(PROBE_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 probe: $(OUT)/probe_imports
+
+# ---- the same test objects linked with the virtual clock (platform/clock/clock_virtual.cpp) instead of the real one; runs the vc_ cases
+# (tests/s4/test_vclock.cpp: each returns at once unless the linked clock says "virtual")
+VC_OBJS := $(filter-out %/clock_real.cpp.o,$(OBJS)) $(OUT)/platform/clock/clock_virtual.cpp.o
+$(OUT)/platform/clock/clock_virtual.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(OUT)/s4_tests_vclock: $(VC_OBJS) $(OUT)/libfreetype.a
+	$(CXX) $(CXXFLAGS_) $(VC_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
+vclock: $(OUT)/s4_tests_vclock
+	rm -rf $(OUT)/root-vclock && FNVNX_TEST_ONLY=vc_ FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s4_tests_vclock
 
 # ---- the same test objects linked with the product's file-mapping backend (platform/win32/filemap_private.cpp) instead of
 # filemap_shared.cpp, plus the test-only host implementation of the section services it calls (host_section.cpp); runs the vmp_ cases
@@ -215,6 +227,7 @@ XFLAGS := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -fsyntax-only -frounding-math -Wall
 ilp32: $(ENV_GEN)
 	@set -e; for f in $(PLAT_C); do echo "ilp32 cc  $${f#$(ROOT)/}"; $(XCC) -std=gnu11 $(XFLAGS) $$f; done
 	@set -e; for f in $(PLAT_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done
+	@echo "ilp32 c++ platform/clock/clock_virtual.cpp"; $(XCXX) -std=gnu++17 $(XFLAGS) $(P)/clock/clock_virtual.cpp
 	@echo "ilp32 cc  platform/os/os_horizon.c (libnx headers, newlib lock stub)"
 	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(HERE)/ilp32-stubs -I$(LIBNX)/nx/include $(P)/os/os_horizon.c
 	@echo "ilp32: all platform sources parse"

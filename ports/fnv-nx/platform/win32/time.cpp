@@ -1,6 +1,6 @@
 /* time.cpp - tick counts, the performance counter, wall-clock time and FILETIME/SYSTEMTIME conversion.
  *
- * QueryPerformanceCounter/Frequency read os_ticks(): on Horizon that is CNTVCT_EL0 at CNTFRQ_EL0 (19.2 MHz),
+ * QueryPerformanceCounter/Frequency read the clock interface (fnvnx_clock.h): the real clock on Horizon that is CNTVCT_EL0 at CNTFRQ_EL0 (19.2 MHz),
  * the same counter S8's __rdtsc replacement reads, so code that calibrates rdtsc against QPC (Havok's
  * hkStopwatch) gets an exact ratio. On the host it is a 10 MHz monotonic counter. */
 #include "w32.h"
@@ -13,7 +13,7 @@ extern "C" BOOL QueryPerformanceCounter(LARGE_INTEGER *c)
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    c->QuadPart = (LONGLONG)os_ticks();
+    c->QuadPart = (LONGLONG)clk_read_ticks();
     return TRUE;
 }
 
@@ -23,13 +23,11 @@ extern "C" BOOL QueryPerformanceFrequency(LARGE_INTEGER *f)
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    f->QuadPart = (LONGLONG)os_tick_freq();
+    f->QuadPart = (LONGLONG)clk_tick_freq();
     return TRUE;
 }
 
-static uint64_t g_boot_ns; /* GetTickCount starts at an arbitrary value on Windows too; keep it small */
-
-extern "C" DWORD GetTickCount(void) { return W32_DW((DWORD)((os_monotonic_ns() - g_boot_ns) / 1000000ull)); }
+extern "C" DWORD GetTickCount(void) { return W32_DW((DWORD)clk_read_tick_ms()); }
 extern "C" DWORD timeGetTime(void) { return GetTickCount(); }
 /* timer resolution: the device range is 1..1000000 ms (timeGetDevCaps); timeBeginPeriod(p) adds one reference to
  * period p, timeEndPeriod(p) removes one of the same p (TIMERR_NOCANDO when there is none); the effective
@@ -176,18 +174,18 @@ extern "C" BOOL SystemTimeToFileTime(const SYSTEMTIME *st, LPFILETIME ft)
     return TRUE;
 }
 
-extern "C" void GetSystemTimeAsFileTime(LPFILETIME ft) { w32_set_ft(ft, w32_unix_us_to_filetime(os_wall_time_us())); }
+extern "C" void GetSystemTimeAsFileTime(LPFILETIME ft) { w32_set_ft(ft, (ULONGLONG)clk_read_filetime()); }
 
-extern "C" void GetSystemTime(LPSYSTEMTIME st) { ft_to_st(w32_unix_us_to_filetime(os_wall_time_us()), st); }
+extern "C" void GetSystemTime(LPSYSTEMTIME st) { ft_to_st((ULONGLONG)clk_read_filetime(), st); }
 
 extern "C" void GetLocalTime(LPSYSTEMTIME st)
 {
-    ft_to_st(w32_unix_us_to_filetime(os_wall_time_us() + (int64_t)os_tz_offset_minutes() * 60000000ll), st);
+    ft_to_st((ULONGLONG)(clk_read_filetime() + (int64_t)clk_tz_offset_minutes() * 600000000ll), st);
 }
 
 extern "C" BOOL FileTimeToLocalFileTime(const FILETIME *in, LPFILETIME out)
 {
-    w32_set_ft(out, w32_ft64(in) + (ULONGLONG)((int64_t)os_tz_offset_minutes() * 600000000ll));
+    w32_set_ft(out, w32_ft64(in) + (ULONGLONG)((int64_t)clk_tz_offset_minutes() * 600000000ll));
     return TRUE;
 }
 
@@ -222,7 +220,7 @@ static bool tz_is_dst(const TIME_ZONE_INFORMATION *tz, int64_t utc)
     return begin < end ? (std_local >= begin && dst_local < end) : (std_local >= begin || dst_local < end);
 }
 
-static void tz_date(SYSTEMTIME *st, const os_tzdate_t *d)
+static void tz_date(SYSTEMTIME *st, const clk_tzdate_t *d)
 {
     memset(st, 0, sizeof *st);
     st->wYear = d->year;
@@ -239,9 +237,9 @@ static void tz_date(SYSTEMTIME *st, const os_tzdate_t *d)
  * daylight time the dates are zero (TIME_ZONE_ID_UNKNOWN). */
 static bool tz_current(TIME_ZONE_INFORMATION *tz)
 {
-    os_tzrule_t r;
+    clk_tzrule_t r;
     memset(tz, 0, sizeof *tz);
-    if (os_tz_rule(&r))
+    if (clk_tz_rule(&r))
         return false;
     tz->Bias = -(LONG)r.std_off_min;
     for (int i = 0; i < 8 && r.std_name[i]; i++)
@@ -268,7 +266,7 @@ extern "C" DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION tz)
     }
     if (!tz->StandardDate.wMonth)
         return TIME_ZONE_ID_UNKNOWN;
-    return tz_is_dst(tz, os_wall_time_us() / 1000000) ? 2 /* TIME_ZONE_ID_DAYLIGHT */ : 1 /* TIME_ZONE_ID_STANDARD */;
+    return tz_is_dst(tz, (clk_peek_filetime() - FT_UNIX_EPOCH) / 10000000) ? 2 /* TIME_ZONE_ID_DAYLIGHT */ : 1 /* TIME_ZONE_ID_STANDARD */;
 }
 
 extern "C" BOOL SystemTimeToTzSpecificLocalTime(LPTIME_ZONE_INFORMATION tz, const SYSTEMTIME *utc, LPSYSTEMTIME local)
@@ -296,4 +294,3 @@ extern "C" LONG CompareFileTime(const FILETIME *a, const FILETIME *b)
     return x < y ? -1 : x > y ? 1 : 0;
 }
 
-__attribute__((constructor(FNVNX_INIT_CLOCK))) static void time_init(void) { g_boot_ns = os_monotonic_ns() - 60000000000ull; }

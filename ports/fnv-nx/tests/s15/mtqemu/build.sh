@@ -24,6 +24,7 @@ cc() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CC -std=gnu11 "$
 cxx() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CXX "${GXX[@]}" "${G[@]}" "$@" -c "$shift_src" -o "$o"; objs+=("$o"); }
 
 for f in sync thread handles waitgraph platstat; do cxx "$ROOT/platform/win32/$f.cpp"; done
+for f in clock_real clock_rt; do cxx "$ROOT/platform/clock/$f.cpp"; done   # the clock interface (fnvnx_clock.h) the sync layer reads time through
 cc "$ROOT/toolchain/guest/os_guest.c"
 cc "$ROOT/toolchain/guest/threads.c" -Wno-missing-field-initializers
 cc "$HERE/mlibc.c" -fno-builtin -fno-tree-loop-distribute-patterns -Wno-builtin-declaration-mismatch

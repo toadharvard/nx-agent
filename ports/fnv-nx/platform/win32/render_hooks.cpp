@@ -64,11 +64,11 @@ bool nxd3d_window_client(void *hwnd, RECT *r)
     }
     return true;
 }
-/* the counter and the frequency of QueryPerformanceCounter / QueryPerformanceFrequency (time.cpp): os_ticks / os_tick_freq */
+/* the counter and the frequency of QueryPerformanceCounter / QueryPerformanceFrequency (time.cpp): clk_read_ticks / clk_tick_freq */
 uint64_t nxd3d_perf_counter(uint64_t *freq)
 {
-    if (freq) *freq = os_tick_freq();
-    return os_ticks();
+    if (freq) *freq = clk_tick_freq();
+    return clk_read_ticks();
 }
 /* GetCursorPos's state; both pointers are required (platform_hooks.tsv gives no null case) */
 void nxd3d_os_cursor_pos(int32_t *x, int32_t *y)

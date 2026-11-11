@@ -2,6 +2,7 @@
 #include "backend.h"
 #include "mixer.h"
 #include "../os/os.h"
+#include "fnvnx_clock.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,10 +81,11 @@ void fnvnx_audio_stop(void)
     os_unlock(&g_lock);
 }
 
-/* ---- paced host thread shared by null and wav */
-static os_thread *g_thread;
-static volatile int g_run;
+/* ---- paced pump shared by null and wav: the clock (fnvnx_clock.h) calls pump_step once per period: on a thread paced by the
+ * monotonic clock (product), or in virtual time (the verification mode) */
 static uint32_t g_rate, g_period;
+static int16_t *g_buf;
+static void *g_pump;
 static FILE *g_wav;
 static uint32_t g_wav_bytes;
 
@@ -100,36 +102,29 @@ static void wav_header(FILE *f, uint32_t rate, uint32_t data_bytes)
     fwrite(h, 1, sizeof h, f);
 }
 
-static void pump(void *arg)
+static void pump_step(void *, uint32_t frames)
 {
-    (void)arg;
-    int16_t *buf = (int16_t *)malloc((size_t)g_period * 4);
-    uint64_t next = os_monotonic_ns();
-    const uint64_t period_ns = (uint64_t)g_period * 1000000000ull / g_rate;
-    while (g_run && buf) {
-        mixer_render_s16(buf, g_period);
-        if (g_wav) {
-            fwrite(buf, 4, g_period, g_wav);
-            g_wav_bytes += g_period * 4;
-        }
-        next += period_ns;
-        uint64_t now = os_monotonic_ns();
-        if (next > now)
-            os_sleep_ns(next - now);
-        else
-            next = now;
+    mixer_render_s16(g_buf, frames);
+    if (g_wav) {
+        fwrite(g_buf, 4, frames, g_wav);
+        g_wav_bytes += frames * 4;
     }
-    free(buf);
 }
+
+extern "C" void fnvnx_waveout_service(void);   /* waveout.cpp: every queued callback has returned */
+static void pump_after(void *, uint32_t) { fnvnx_waveout_service(); }
 
 static int paced_start(uint32_t rate, uint32_t period)
 {
     g_rate = rate;
     g_period = period;
-    g_run = 1;
-    g_thread = os_thread_create(pump, NULL, 64 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));
-    if (!g_thread || os_thread_start(g_thread)) {
-        g_run = 0;
+    g_buf = (int16_t *)malloc((size_t)period * 4);
+    if (!g_buf)
+        return -1;
+    g_pump = clk_pump_start(pump_step, pump_after, NULL, rate, period, 64 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));
+    if (!g_pump) {
+        free(g_buf);
+        g_buf = NULL;
         return -1;
     }
     return 0;
@@ -137,12 +132,10 @@ static int paced_start(uint32_t rate, uint32_t period)
 
 static void paced_stop(void)
 {
-    g_run = 0;
-    if (g_thread) {
-        os_thread_join(g_thread);
-        os_thread_free(g_thread);
-        g_thread = NULL;
-    }
+    clk_pump_stop(g_pump);
+    g_pump = NULL;
+    free(g_buf);
+    g_buf = NULL;
     if (g_wav) {
         wav_header(g_wav, g_rate, g_wav_bytes);
         fclose(g_wav);

@@ -4,6 +4,7 @@
 
 #include "fnvnx_win32_ext.h"
 #include "../os/os.h"
+#include "fnvnx_clock.h"
 
 #include <stdarg.h>
 #include <string.h>
@@ -22,7 +23,7 @@ struct w32_wait_rec {
     int kind;                      /* 0 none, W32_WG_CS, W32_WG_OBJ */
     uint32_t pc;                   /* return address of the Win32 call (a guest code address) */
     uint32_t ms;                   /* the wait's timeout (INFINITE for none) */
-    uint64_t t0;                   /* os_monotonic_ns() at the start */
+    uint64_t t0;                   /* clk_rt_ns() at the start */
     int all, n;                    /* WaitForMultipleObjects' bWaitAll and count (n <= W32_WG_MAXOBJ recorded) */
     void *obj[W32_WG_MAXOBJ];      /* W32_WG_CS: the CRITICAL_SECTION; W32_WG_OBJ: struct w32_obj * */
 };
@@ -59,6 +60,7 @@ struct w32_obj {
     int refs;                      /* atomic */
     struct w32_link waiters;       /* list head, guarded by w32_wait_lock */
     void (*destroy)(struct w32_obj *);
+    uint64_t clk_t;                /* the clock stamp of the last signal (creation for an object made signaled): a wait that succeeds takes it */
 };
 struct w32_obj *w32_obj_new(int type, size_t size, void (*destroy)(struct w32_obj *));
 /* Handles are indices into a table with a generation count (stale or double-closed handles fail with

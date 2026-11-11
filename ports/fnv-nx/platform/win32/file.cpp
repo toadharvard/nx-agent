@@ -61,6 +61,7 @@ struct w32_file {
     int fd;         /* -1: a directory handle the host could not open (attribute queries only) */
     DWORD access;
     int async, append, is_dir, linked;
+    int dirty;      /* written to: CloseHandle stamps the write time (fnvnx_clock.h) */
     int dev;        /* 1: the NUL device (no descriptor, no share entry) */
     int nobuf, wt;  /* FILE_FLAG_NO_BUFFERING (sector rules) / FILE_FLAG_WRITE_THROUGH */
     struct share_ent se;
@@ -136,6 +137,8 @@ static void file_destroy(struct w32_obj *o)
     struct w32_file *f = (struct w32_file *)o;
     if (f->fd >= 0)
         os_file_close(f->fd);
+    if (f->dirty)
+        clk_file_stamp(f->se.host, CLK_FS_WRITE);
     if (!f->linked)
         return;
     os_lock(&g_flock);
@@ -152,6 +155,7 @@ static void file_destroy(struct w32_obj *o)
                 os_rmdir(f->se.host);
             else
                 os_remove(f->se.host);
+            clk_file_removed(f->se.host);
             ro_clear(f->se.key);
         }
     }
@@ -394,6 +398,10 @@ static HANDLE create_core(LPCSTR name, DWORD access, DWORD share, DWORD disp, DW
     }
     f->linked = 1;
     ent_link(&f->se);
+    if (!isdir && !exists)
+        clk_file_stamp(host, CLK_FS_CREATE);                                  /* a new file: created now */
+    else if (!isdir && (disp == CREATE_ALWAYS || disp == TRUNCATE_EXISTING))
+        clk_file_stamp(host, CLK_FS_WRITE);                                   /* replaced or truncated: written now */
     if (!exists || disp == CREATE_ALWAYS) { /* a created or replaced file takes the attributes of this call */
         ro_clear(key);
         if (flags & FILE_ATTRIBUTE_READONLY)
@@ -564,6 +572,10 @@ extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAP
     }
     if (put)
         *put = (DWORD)done;
+    if (!f->dev && done > 0) {
+        f->dirty = 1;
+        clk_file_stamp(f->se.host, CLK_FS_WRITE);
+    }
     if (f->wt && !f->dev)
         os_file_sync(f->fd);                                    /* WRITE_THROUGH: on the medium before return */
     if (ov && !f->async && !f->dev) {
@@ -700,6 +712,8 @@ extern "C" BOOL SetEndOfFile(HANDLE h)
         SetLastError(w32_os_error(r));
         return FALSE;
     }
+    f->dirty = 1;
+    clk_file_stamp(f->se.host, CLK_FS_WRITE);
     return TRUE;
 }
 
@@ -713,6 +727,13 @@ extern "C" BOOL GetFileTime(HANDLE h, LPFILETIME c, LPFILETIME a, LPFILETIME w)
     }
     if (!f || os_file_fstat(f->fd, &st))
         return FALSE;
+    int64_t ft[3];
+    if (clk_file_times(f->se.host, ft)) {   /* the verification mode's stamps */
+        if (c) w32_set_ft(c, (ULONGLONG)ft[0]);
+        if (a) w32_set_ft(a, (ULONGLONG)ft[1]);
+        if (w) w32_set_ft(w, (ULONGLONG)ft[2]);
+        return TRUE;
+    }
     if (c) w32_set_ft(c, w32_unix_us_to_filetime(st.ctime_us));
     if (a) w32_set_ft(a, w32_unix_us_to_filetime(st.atime_us));
     if (w) w32_set_ft(w, w32_unix_us_to_filetime(st.mtime_us));
@@ -753,6 +774,7 @@ static BOOL delete_core(LPCSTR name, int utf8)
         else {
             ent_retire(key);
             ro_clear(key);
+            clk_file_removed(host);
             ok = TRUE;
         }
     }
@@ -784,6 +806,7 @@ extern "C" BOOL CreateDirectoryA(LPCSTR name, void *sa)
             SetLastError(ERROR_PATH_NOT_FOUND);
         return FALSE;
     }
+    clk_file_stamp(host, CLK_FS_CREATE);
     return TRUE;
 }
 
@@ -797,6 +820,7 @@ extern "C" BOOL RemoveDirectoryA(LPCSTR name)
         fail_os(r, host);
         return FALSE;
     }
+    clk_file_removed(host);
     return TRUE;
 }
 
@@ -830,6 +854,7 @@ static BOOL move_core(LPCSTR from, LPCSTR to, int utf8)
             ent_rekey(ka, b, kb);
             if (ro)
                 ro_set(kb);
+            clk_file_moved(a, b);
             ok = TRUE;
         }
     }
@@ -920,6 +945,8 @@ extern "C" BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists)
     ro_clear(sb.key); /* CopyFile carries the attributes: the copy is read-only iff the source is */
     if (ok && src_ro)
         ro_set(sb.key);
+    if (ok)
+        clk_file_stamp(b, CLK_FS_CREATE);   /* the copy is a file written now */
     os_unlock(&g_flock);
     return ok;
 }
@@ -995,9 +1022,16 @@ static BOOL find_fill(struct w32_find *f, LPWIN32_FIND_DATAA fd)
         os_lock(&g_flock);
         fd->dwFileAttributes = attrs_locked(p, &st);
         os_unlock(&g_flock);
+        int64_t cft[3];
+        if (clk_file_times(p, cft)) {   /* the verification mode's stamps */
+            w32_set_ft(&fd->ftCreationTime, (ULONGLONG)cft[0]);
+            w32_set_ft(&fd->ftLastAccessTime, (ULONGLONG)cft[1]);
+            w32_set_ft(&fd->ftLastWriteTime, (ULONGLONG)cft[2]);
+        } else {
         w32_set_ft(&fd->ftCreationTime, w32_unix_us_to_filetime(st.ctime_us));
         w32_set_ft(&fd->ftLastAccessTime, w32_unix_us_to_filetime(st.atime_us));
         w32_set_ft(&fd->ftLastWriteTime, w32_unix_us_to_filetime(st.mtime_us));
+        }
         fd->nFileSizeHigh = st.is_dir ? 0 : (DWORD)(st.size >> 32);
         fd->nFileSizeLow = st.is_dir ? 0 : (DWORD)(st.size & 0xFFFFFFFFu);
         snprintf(fd->cFileName, sizeof fd->cFileName, "%s", name);

@@ -1,7 +1,7 @@
 /* os_posix.c - host backend of os.h (Linux; futex locks). Used for the host tests and as a reference for
  * os_horizon.c. Builds for x86-64 LP64 and for aarch64 ILP32 (syntax only, no ILP32 libc exists on hosts). */
 #define _GNU_SOURCE
-#include "os.h"
+#include "os_clock.h"
 #include "os_shm.h"
 
 /* os_tick_freq, os_fs_case_insensitive: manifest/env_const.tsv */
@@ -154,7 +154,7 @@ void os_gunlock(os_lock_t *l) { unlock_raw(l); }
 
 /* ---- condvars: sequence counter. The wait drops the lock and takes it again before it returns: for the count the
  * thread holds the lock throughout (no guest call can happen on it while it waits). */
-int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns)
+int os_cond_timedwait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns)
 {
     uint32_t seq = __atomic_load_n(&c->word, __ATOMIC_ACQUIRE);
     uint64_t start = timeout_ns == OS_WAIT_FOREVER ? 0 : os_monotonic_ns();
@@ -171,6 +171,8 @@ int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns)
     lock_raw(l);
     return timed_out;
 }
+
+void os_cond_wait(os_cond_t *c, os_lock_t *l) { os_cond_timedwait(c, l, OS_WAIT_FOREVER); }
 
 void os_cond_signal(os_cond_t *c)
 {

@@ -212,7 +212,7 @@ static void flusher(void *arg)
     W32_UNUSED(arg);
     while (__atomic_load_n(&g_run, __ATOMIC_ACQUIRE)) {
         for (unsigned left = 30000; left && __atomic_load_n(&g_run, __ATOMIC_ACQUIRE); left -= 50)
-            os_sleep_ns(50000000ull);
+            clk_rt_sleep_ns(50000000ull);
         if (__atomic_load_n(&g_run, __ATOMIC_ACQUIRE))
             fnvnx_plat_flush();
     }

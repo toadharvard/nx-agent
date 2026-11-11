@@ -54,7 +54,7 @@ void os_gunlock(os_lock_t *l);
 typedef struct { volatile uint32_t word; } os_cond_t;
 #define OS_COND_INIT { 0 }
 #define OS_WAIT_FOREVER UINT64_MAX
-int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns); /* 0 woken, 1 timed out */
+void os_cond_wait(os_cond_t *c, os_lock_t *l);   /* releases l, waits for a signal (spurious wakeups allowed), takes l again; the timed form is os_cond_timedwait (os_clock.h) */
 void os_cond_signal(os_cond_t *c);
 void os_cond_broadcast(os_cond_t *c);
 
@@ -93,28 +93,9 @@ int os_thread_suspend(os_thread *t);        /* -1 where unsupported */
 int os_thread_resume(os_thread *t);
 void os_thread_exit(void) __attribute__((noreturn));
 void os_yield(void);
-void os_sleep_ns(uint64_t ns);
 
-/* ---- time */
-uint64_t os_ticks(void);                    /* monotonic */
-uint64_t os_tick_freq(void);                /* ticks per second */
-uint64_t os_monotonic_ns(void);
-uint64_t os_cycle_counter(void);            /* cheap free-running counter (rdtsc stand-in) */
-int64_t os_wall_time_us(void);              /* microseconds since 1970-01-01 UTC */
-int32_t os_tz_offset_minutes(void);         /* local = UTC + offset */
-/* The zone's rule in the terms of a Windows TIME_ZONE_INFORMATION (derived from the platform's own time zone data). A date is
- * recurring (year == 0: `week` = 1..5 is the n-th, 5 the last, `wday` of `month`) or absolute (year != 0: `week` is the day of
- * the month); `hour`:`minute` is the wall time just before the transition. dst_begin is in standard wall time, dst_end in
- * daylight wall time. Without daylight time has_dst is 0 and both offsets are the present one. Offsets: local = UTC + offset.
- * Returns 0, or < 0 when the platform has no zone data. */
-typedef struct { uint16_t year, month, wday, week, hour, minute; } os_tzdate_t;
-typedef struct {
-    int32_t std_off_min, dst_off_min;
-    int has_dst;
-    os_tzdate_t dst_begin, dst_end;
-    char std_name[8], dst_name[8];       /* the zone's abbreviations */
-} os_tzrule_t;
-int os_tz_rule(os_tzrule_t *r);
+/* ---- time: the clock primitives are in os_clock.h, which only the clock implementations (platform/clock/clock_*.cpp)
+ * and the OS backends include; the platform above reads time through fnvnx_clock.h */
 
 /* ---- files (host paths, '/' separated) */
 #define OS_O_READ   0x01

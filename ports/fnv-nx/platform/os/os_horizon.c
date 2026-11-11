@@ -7,7 +7,7 @@
  *     ranges are carved out of the alias region (svcGetInfo InfoType_AliasRegionAddress/Size);
  *   - the address-space type must keep the alias region inside the 32-bit range used by ILP32 pointers.
  */
-#include "os.h"
+#include "os_clock.h"
 
 /* os_cpu_count, os_vm_page_size, os_default_root, os_fs_case_insensitive: manifest/env_const.tsv (os_default_root = FNVNX_SD_DIR,
  * toolchain/include/fnvnx/sdlayout.h) */
@@ -83,13 +83,14 @@ void os_glock(os_lock_t *l) { mutexLock((Mutex *)&l->word); }
 int os_gtrylock(os_lock_t *l) { return mutexTryLock((Mutex *)&l->word) ? 1 : 0; }
 void os_gunlock(os_lock_t *l) { mutexUnlock((Mutex *)&l->word); }
 
-int os_cond_wait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns)
+int os_cond_timedwait(os_cond_t *c, os_lock_t *l, uint64_t timeout_ns)
 {
     Result rc = condvarWaitTimeout((CondVar *)&c->word, (Mutex *)&l->word,
                                    timeout_ns == OS_WAIT_FOREVER ? UINT64_MAX : timeout_ns);
     return R_VALUE(rc) == KERNELRESULT(TimedOut) ? 1 : 0;
 }
 
+void os_cond_wait(os_cond_t *c, os_lock_t *l) { os_cond_timedwait(c, l, OS_WAIT_FOREVER); }
 void os_cond_signal(os_cond_t *c) { condvarWakeOne((CondVar *)&c->word); }
 void os_cond_broadcast(os_cond_t *c) { condvarWakeAll((CondVar *)&c->word); }
 

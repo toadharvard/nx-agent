@@ -16,6 +16,7 @@ struct w32_obj *w32_obj_new(int type, size_t size, void (*destroy)(struct w32_ob
     o->refs = 1;
     o->waiters.next = o->waiters.prev = &o->waiters;
     o->destroy = destroy;
+    o->clk_t = clk_stamp();
     return o;
 }
 

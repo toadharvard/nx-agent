@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include "../../platform/win32/w32.h"
+#include "../../platform/os/os_clock.h"
 
 struct tz_zone {
     const char *tz;                 /* POSIX TZ string */

@@ -77,7 +77,7 @@ def check(run: bool) -> Checks:
     c.ok("hid.launcher", "padInitializeAny" in nro, "the launcher reads only one controller style")
     for k in ("audrenInitialize", "audrenStartAudioRenderer", "audrenExit", "audrenWaitFrame"):
         c.ok(f"audio.{k}", k in v3, f"host_v3 lacks {k}")
-    c.ok("audio.role", re.search(r'os_thread_create\(pump,[^;]*OS_THREAD_ROLE\(OS_ROLE_AUDIO\)', src("platform/audio/backend.cpp"))
+    c.ok("audio.role", re.search(r'clk_pump_start\(pump_step,[^;]*OS_THREAD_ROLE\(OS_ROLE_AUDIO\)', src("platform/audio/backend.cpp"))
          is not None, "the audio pump thread has no audio role (placement.h row)")
 
     mainf = body(host, "main")

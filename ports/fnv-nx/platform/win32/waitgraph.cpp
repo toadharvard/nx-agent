@@ -100,7 +100,7 @@ void w32_wg_cs_begin(struct w32_thread *t, LPCRITICAL_SECTION cs, uint32_t pc)
     t->wait.kind = W32_WG_CS;
     t->wait.pc = t->wg_caller ? t->wg_caller : pc;
     t->wait.ms = INFINITE;
-    t->wait.t0 = os_monotonic_ns();
+    t->wait.t0 = clk_rt_ns();
     t->wait.all = 1;
     t->wait.n = 1;
     t->wait.obj[0] = cs;
@@ -114,7 +114,7 @@ void w32_wg_obj_begin(struct w32_thread *t, struct w32_obj *const *objs, DWORD n
     t->wait.kind = W32_WG_OBJ;
     t->wait.pc = t->wg_caller ? t->wg_caller : pc;
     t->wait.ms = ms;
-    t->wait.t0 = os_monotonic_ns();
+    t->wait.t0 = clk_rt_ns();
     t->wait.all = all || n == 1;
     t->wait.n = n > W32_WG_MAXOBJ ? W32_WG_MAXOBJ : (int)n;
     for (int i = 0; i < t->wait.n; i++)
@@ -202,7 +202,7 @@ extern "C" void fnvnx_waitgraph_scan(void)
 {
     static struct node v[WG_SLOTS];
     int nv = 0;
-    uint64_t now = os_monotonic_ns();
+    uint64_t now = clk_rt_ns();
     os_lock(&g_reg);
     os_lock(&w32_wait_lock);
     for (int s = 0; s < WG_SLOTS; s++) {
@@ -332,18 +332,18 @@ extern "C" void fnvnx_threads_flush(void)
 static void scanner(void *arg)
 {
     W32_UNUSED(arg);
-    uint64_t next_dump = os_monotonic_ns() + FNVNX_THREADS_DUMP_S * 1000000000ull;
+    uint64_t next_dump = clk_rt_ns() + FNVNX_THREADS_DUMP_S * 1000000000ull;
     while (__atomic_load_n(&g_run, __ATOMIC_SEQ_CST)) {
         for (unsigned left = g_period_ms; left && __atomic_load_n(&g_run, __ATOMIC_SEQ_CST);) {
             unsigned step = left > 50 ? 50 : left;
-            os_sleep_ns((uint64_t)step * 1000000ull);
+            clk_rt_sleep_ns((uint64_t)step * 1000000ull);
             left -= step;
         }
         if (__atomic_load_n(&g_run, __ATOMIC_SEQ_CST))
             fnvnx_waitgraph_scan();
-        if (g_sink == NULL && os_monotonic_ns() >= next_dump) {   /* a lane's guest: periodic flush */
+        if (g_sink == NULL && clk_rt_ns() >= next_dump) {   /* a lane's guest: periodic flush */
             fnvnx_threads_flush();
-            next_dump = os_monotonic_ns() + FNVNX_THREADS_DUMP_S * 1000000000ull;
+            next_dump = clk_rt_ns() + FNVNX_THREADS_DUMP_S * 1000000000ull;
         }
     }
 }

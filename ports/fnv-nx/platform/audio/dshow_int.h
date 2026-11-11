@@ -380,6 +380,7 @@ struct IMoniker_ : Unk {   /* the slots up to BindToObject (IPersist, IPersistSt
 }   /* namespace dsh */
 #include "mixer.h"
 #include "../os/os.h"
+#include "fnvnx_clock.h"
 #include "fnvnx_win32_ext.h"
 namespace dsh {
 

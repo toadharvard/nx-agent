@@ -5,8 +5,9 @@
  *    zero-initialised for each thread of the guest runtime's TLS, toolchain/guest/threads.c); the runtime keeps the
  *    calling thread's `struct cpu *` there.
  *  fnvl_host_ticks_ns: monotonic nanoseconds of the clock QueryPerformanceCounter / GetTickCount read
- *    (win32/time.cpp: os_ticks; os_monotonic_ns converts the same counter), so there is one clock. */
-#include "../os/os.h"
+ *    (win32/time.cpp: clk_read_ticks; clk_read_ns converts the same counter), so there is one clock; a read
+ *    like the others (the virtual clock advances by one quantum). */
+#include "../include/fnvnx_clock.h"
 
 struct cpu;
 
@@ -18,6 +19,6 @@ struct cpu **fnvl_host_tls_slot(void)
     return &slot;
 }
 
-unsigned long long fnvl_host_ticks_ns(void) { return os_monotonic_ns(); }
+unsigned long long fnvl_host_ticks_ns(void) { return clk_read_ns(); }
 
 }

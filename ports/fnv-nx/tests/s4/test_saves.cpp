@@ -8,7 +8,7 @@
  * that the files land under <root>/user/Documents/My Games/FalloutNV/Saves on the host fs (sdmc: on the device). */
 #include "s4_test.h"
 #include "fnvnx_msvcrt.h"
-#include "../../platform/os/os.h"
+#include "../../platform/os/os_clock.h"
 
 #include <stdio.h>
 #include <stdlib.h>

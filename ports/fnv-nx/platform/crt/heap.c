@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "../os/os.h"
+#include "fnvnx_clock.h"
 
 size_t _msize(void *p) { return p ? malloc_usable_size(p) : (size_t)-1; }
 
@@ -115,9 +116,7 @@ void fnvnx_cexit(void) { fnvnx_doexit(0, 0, 1); }         /* _cexit: handlers, n
 void fnvnx_c_exit(void) { fnvnx_doexit(0, 1, 1); }        /* _c_exit: neither */
 
 /* clock(): MSVC counts wall time since process start, CLOCKS_PER_SEC = 1000 */
-static uint64_t g_start_ns;
-__attribute__((constructor(FNVNX_INIT_CLOCK))) static void clock_init(void) { g_start_ns = os_monotonic_ns(); }
-unsigned int fnvnx_clock(void) { return (unsigned int)((os_monotonic_ns() - g_start_ns) / 1000000ull); }
+unsigned int fnvnx_clock(void) { return clk_read_process_ms(); }
 
 /* rand/srand with MSVC's generator: per-thread state (seed 1), x = x * 214013 + 2531011, RAND_MAX 0x7FFF.
  * The engine scales rand() by 32767, so the libc generator (RAND_MAX 2^31-1 on newlib/glibc) cannot be used. */
@@ -131,7 +130,7 @@ int fnvnx_rand(void)
 
 long long _time64(long long *t)
 {
-    long long v = (long long)(os_wall_time_us() / 1000000);
+    long long v = (clk_read_filetime() - 116444736000000000ll) / 10000000;
     if (t)
         *t = v;
     return v;

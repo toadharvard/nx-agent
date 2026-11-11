@@ -403,6 +403,7 @@ extern "C" HANDLE CreateSemaphoreA(void *sa, LONG initial, LONG max, LPCSTR name
 
 void w32_obj_signal_locked(struct w32_obj *o)
 {
+    o->clk_t = clk_stamp();
     for (struct w32_link *l = o->waiters.next; l != &o->waiters; l = l->next)
         os_cond_signal(&l->t->waiter.cond);
 }
@@ -580,7 +581,9 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
             return WAIT_FAILED;
         }
     }
-    uint64_t deadline = ms == INFINITE ? 0 : os_monotonic_ns() + (uint64_t)ms * 1000000ull;
+    uint64_t deadline = ms == INFINITE ? 0 : clk_rt_deadline((uint64_t)ms * 1000000ull);
+    uint64_t sig_t = 0;            /* the latest signal time of what was acquired (fnvnx_clock.h: the wait takes it) */
+    int idled = 0;
     DWORD res = WAIT_TIMEOUT;
     int wg = __builtin_expect(w32_wg_on, 0) && ms != 0, recorded = 0;
     if (wg)
@@ -593,9 +596,11 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
                 k++;
             if (k == n) {
                 res = WAIT_OBJECT_0;
-                for (DWORD i = 0; i < n; i++)
+                for (DWORD i = 0; i < n; i++) {
                     if (acquire(objs[i], self->tid) && res == WAIT_OBJECT_0)
                         res = WAIT_ABANDONED + i;
+                    if (objs[i]->clk_t > sig_t) sig_t = objs[i]->clk_t;
+                }
                 break;
             }
         } else {
@@ -604,16 +609,24 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
                 k++;
             if (k < n) {
                 res = (acquire(objs[k], self->tid) ? WAIT_ABANDONED : WAIT_OBJECT_0) + k;
+                sig_t = objs[k]->clk_t;
                 break;
             }
         }
         uint64_t left = OS_WAIT_FOREVER;
         if (ms != INFINITE) {
-            uint64_t now = os_monotonic_ns();
-            if (ms == 0 || now >= deadline)
+            if (ms == 0 || !clk_rt_left(deadline, &left))
                 break;
-            left = deadline - now;
         }
+        if (!idled) {   /* about to block: virtual time may have work for this wait (the audio device), outside the lock */
+            idled = 1;
+            os_unlock(&w32_wait_lock);
+            int worked = clk_wait_idle((const void *const *)hs, n, ms == INFINITE ? UINT64_MAX : (uint64_t)ms * 1000000ull);
+            os_lock(&w32_wait_lock);
+            if (worked) idled = 0;
+            continue;
+        }
+        idled = 0;
         if (wg && !recorded) {   /* recorded and cleared under w32_wait_lock while objs[] are referenced */
             w32_wg_obj_begin(self, objs, n, all, ms, pc);
             recorded = 1;
@@ -625,7 +638,7 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
             objs[i]->waiters.next->prev = &links[i];
             objs[i]->waiters.next = &links[i];
         }
-        os_cond_wait(&self->waiter.cond, &w32_wait_lock, left);
+        clk_rt_cond_timedwait(&self->waiter.cond, &w32_wait_lock, left);
         for (DWORD i = 0; i < n; i++) {
             links[i].prev->next = links[i].next;
             links[i].next->prev = links[i].prev;
@@ -636,6 +649,10 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
     os_unlock(&w32_wait_lock);
     for (DWORD i = 0; i < n; i++)
         w32_obj_unref(objs[i]);
+    if (res == WAIT_TIMEOUT)
+        clk_wait_timeout(ms == INFINITE ? 0 : (uint64_t)ms * 1000000ull);   /* the thread's time passes by the timeout */
+    else
+        clk_merge(sig_t);                                                    /* a success takes the signaller's time */
     return res;
 }
 

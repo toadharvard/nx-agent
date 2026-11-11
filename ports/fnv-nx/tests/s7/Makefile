@@ -17,7 +17,7 @@ CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
 S4_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
-S4_CXX := $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)
+S4_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)
 S7_CXX := $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(P)/com/combridge_exports.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only (make ilp32)
 S7_HZ := $(P)/audio/backend_audren.c
 TEST_CXX := $(wildcard $(HERE)/*.cpp) $(ROOT)/tests/s4/host_boundary.cpp
@@ -28,7 +28,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: all test ilp32 qemu clean com-spec-check com-nocompile
+.PHONY: all test vclock ilp32 qemu clean com-spec-check com-nocompile
 all: test
 
 # the imports whose documented result is one constant are generated from platform/manifest/env_const.tsv
@@ -74,6 +74,14 @@ $(FTLIB):
 	$(MAKE) -C $(HERE)/../s4 $(FTLIB)
 $(OUT)/s7_tests: $(OBJS) $(FTLIB)
 	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
+
+# the same test objects linked with the virtual clock (platform/clock/clock_virtual.cpp): the vc_ cases (tests/s7/test_vclock_audio.cpp)
+VC_OBJS := $(filter-out %/clock_real.cpp.o,$(OBJS)) $(OUT)/platform/clock/clock_virtual.cpp.o
+$(OUT)/platform/clock/clock_virtual.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(OUT)/s7_tests_vclock: $(VC_OBJS) $(FTLIB)
+	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
+vclock: com-spec-check $(OUT)/s7_tests_vclock
+	rm -rf $(OUT)/root-vclock && mkdir -p $(OUT)/root-vclock/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s7_tests_vclock vc_
 
 # the spec is derived from the C++ declarations: it must be what the extractor writes now
 com-spec-check:

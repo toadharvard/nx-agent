@@ -4,6 +4,7 @@
 #include "s4_test.h"
 
 #include "../../platform/win32/w32.h"
+#include "../../platform/os/os_clock.h"
 
 #include <stdlib.h>
 #include <sys/wait.h>
