@@ -4,7 +4,7 @@ A proxy `d3d9.dll` for the original game: the generated journaling wrapper (`../
 Purely observational: calls are forwarded unchanged and recorded as a D9S1 stream (`../gen/STREAM.md`).
 
 ## Build
-`render/d3d9/rec/build.sh OUTDIR` -> `OUTDIR/d3d9.dll` (mingw-w64 i686, win32 threads, static libgcc/libstdc++, no exceptions/RTTI; needs
+`render/tools/rec/build.sh OUTDIR` -> `OUTDIR/d3d9.dll` (mingw-w64 i686, win32 threads, static libgcc/libstdc++, no exceptions/RTTI; needs
 `g++-mingw-w64-i686`). It runs `gen/gen_wrap.py` and `gen_ids.py` (derives the exports `.def` and the Present (iface, slot) list from the spec),
 copies the gen runtime plus this directory's `d9wrap_port.h` (CRITICAL_SECTION lock) into `OUTDIR/src` and compiles there. `gen/` is never edited.
 

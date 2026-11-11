@@ -5,7 +5,7 @@ exit 2, naming it): devtype / adapter-format independence, format classes, usage
 Profiles differ only where reported by the `profile differences` line."""
 import os, re, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
-sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "tests", "l6", "env")); import envq  # noqa: E402
+sys.path.insert(0, HERE); import envq  # noqa: E402
 PROFILES = ["handheld", "docked"]; X8, R5, X1, A2R10 = 22, 23, 24, 35; HRC = [0, 0x8876086A, 0x8876086C, 0x0876086F]; HRN = {v: i for i, v in enumerate(HRC)}
 NA, INV = 0x8876086A, 0x8876086C
 # CreateQuery (nx_env_query_supported). Rule: d3d9 query_init passes the type through (wined3d_query_type = D3DQUERYTYPE); wined3d GL adapter_gl_create_query implements EVENT (ARB_sync / fences),

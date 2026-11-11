@@ -8,7 +8,7 @@ Records the original game's D3D9 call stream under Wine with our recorder (`../`
 
 ## Wiring (L4): one line in `tools/farm/runner.sh`, before the `*)` case
 ```
-    d9rec)   bash "$NX/ports/fnv-nx/render/d3d9/rec/farm/d9rec_job.sh" "$H" "$@" "$R" ;;
+    d9rec)   bash "$NX/ports/fnv-nx/render/tools/rec/farm/d9rec_job.sh" "$H" "$@" "$R" ;;
 ```
 Start: `farm/start.sh d9r1 d9rec handheld` and `farm/start.sh d9r2 d9rec docked` (arguments after the job name: profile). Needs `ARTIFACTS` (push) and
 the player's install as `$FARM_HOME/game` (`tools/gamedata_fetch.sh`, as sweep). Exit 0 with any verdict, 1 when setup/profile check/a scene stream failed

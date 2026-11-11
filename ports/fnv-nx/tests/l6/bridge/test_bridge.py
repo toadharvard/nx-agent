@@ -31,7 +31,7 @@ def main():
         f.write('extern "C" {\n' + "".join(f"void {r[6]}();\n" for r in rows) + "}\nstruct Row { const char* dll; const char* name; uint32_t ordinal; void* fn; };\nstatic const Row g_rows[] = {\n")
         f.write("".join(f'    {{"{r[0]}", "{r[1]}", {r[2] or "0xffffffffu"}, (void*){r[6]}}},\n' for r in rows) + f"}};\nenum {{ G_NROWS = {len(rows)} }};\n")
     fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-fpermissive", "-I", INC, "-I", tmp, "-I", DEV, "-I", HERE]
-    srcs = [os.path.join(DEV, s) for s in ("obj.cpp", "app_unk_native.cpp", "d3d9_adapter.cpp", "d3d9_exports.cpp")] + [os.path.join(tmp, s) for s in ("d9impl_unk.gen.cpp", "d9bridge.gen.cpp")] + \
+    srcs = [os.path.join(os.path.join(ROOT, "tests", "l6", "native") if s == "app_unk_native.cpp" else DEV, s) for s in ("obj.cpp", "app_unk_native.cpp", "d3d9_adapter.cpp", "d3d9_exports.cpp")] + [os.path.join(tmp, s) for s in ("d9impl_unk.gen.cpp", "d9bridge.gen.cpp")] + \
            [os.path.join(tmp, s) for s in os.listdir(tmp) if s.startswith("env_") and s.endswith(".cpp")] + [os.path.join(HERE, "t_bridge.cpp")]
     exe = os.path.join(tmp, "t_bridge")
     r = sh(fl + srcs + ["-o", exe, "-Wl,--unresolved-symbols=ignore-all"])   # methods without a body yet (G-METHOD) stay unresolved; this test calls none of them

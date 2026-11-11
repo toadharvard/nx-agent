@@ -6,7 +6,9 @@ D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-
 (see render/d3d9/env/README.md for why single bits + pairs cover the usage function)."""
 import os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
-HDR = os.path.join(HERE, "..", "..", "..", "shim", "include", "d3d9types.h")
+# the port tree: the checkout (this file at render/d3d9/env) or, in a recipe generator stage, the declared inputs mounted at /in/<repo path>
+TREE = "/in/ports/fnv-nx" if HERE.startswith("/tool/") else os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+HDR = os.path.join(TREE, "shim", "include", "d3d9types.h")
 fcc = lambda s: sum(ord(c) << (8 * i) for i, c in enumerate(s))
 
 
@@ -84,7 +86,7 @@ def emit():
     return "\n".join(o) + "\n"
 
 
-SPEC = os.path.join(HERE, "..", "..", "..", "render", "d3d9", "spec", "d3d9_spec.json")
+SPEC = os.path.join(HERE, "..", "spec", "d3d9_spec.json")
 OUT_STRUCTS = ["D3DCAPS9", "D3DADAPTER_IDENTIFIER9", "D3DDISPLAYMODE", "D3DDISPLAYMODEEX", "LUID"]
 
 

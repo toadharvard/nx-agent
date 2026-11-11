@@ -1,4 +1,4 @@
-/* fnv-nx L6: D3D9 state -> backend state words (render/d3d9/backend/nx/state.h). Pure functions: C99, no globals, no
+/* fnv-nx L6: D3D9 state -> backend state words (render/backend/nx/state.h). Pure functions: C99, no globals, no
  * allocation, no I/O. In-range semantics mirror Gallium Nine (nine_pipe.c nine_convert_*_state); the result for a value
  * OUTSIDE a D3D9 enumeration is Wine 9.0's (wined3d state.c / stateblock.c / utils.c), see "Totality" below.
  *

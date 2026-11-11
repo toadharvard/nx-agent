@@ -12,7 +12,7 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | `render/d3d9/dev/` | the implementation: objects, device state, state blocks, resources, draw path, copies, present |
 | `render/d3d9/ffp/` | RD5 fixed-function programs (VS, PS) + CPU references |
 | `render/d3d9/env/` | RD6 ENV table (caps, modes, identifier, format x role table) |
-| `render/d3d9/rec/` | Wine-side recorder DLL = generated wrapper + ENV adaptor + shadow locks (RD7) |
+| `render/tools/rec/` | Wine-side recorder DLL = generated wrapper + ENV adaptor + shadow locks (RD7) |
 | `render/total/` | totality gates (enum, SM op, method, no-skip) and the census |
 | `render/shaders/` | translator (existing); RD4 universe gate |
 | `tests/l6/` | tests of all of the above |
@@ -181,7 +181,7 @@ Numbers on the four recordings (worker's run, artifacts in the container only, /
 
 ## N1 accepted 2026-11-11 (state translation total by construction, gate d3d9total): gate RED on the SM part
 
-`render/d3d9/front/` (enum header generated from the spec, switches without default under -Werror=switch-enum, out-of-range values by wined3d's rule before the switch), headers moved to `render/d3d9/backend/nx/`, `render/native` is down to `gl/`. Lead's run: test_front a 88, b 7770, c 341, d 570, e 10, f 14 checks, 0 failed; dev, res, spec green.
+`render/d3d9/front/` (enum header generated from the spec, switches without default under -Werror=switch-enum, out-of-range values by wined3d's rule before the switch), headers moved to `render/backend/nx/`, `render/native` is down to `gl/`. Lead's run: test_front a 88, b 7770, c 341, d 570, e 10, f 14 checks, 0 failed; dev, res, spec green.
 Gate `GATE_OUT=<dir> python3 -I ports/fnv-nx/render/total/gate_d3d9total.py` (1.5 s): universe 332, certified 161, RED. Enum values 161 of 161 (12 enumerations, sensitivity 12 of 12). SM1-3 opcodes 0 of 171.
 - SM part, what is missing: a header generated from sm_table.json included by the patched mojoshader.c with static asserts (opcode value = row of the X-macro list, stage mask); the gate must then compile the pinned MojoShader clone, so it needs that clone as a declared input.
 - Spec defect fixed on the way: D3DFORMAT had junk names from MAKEFOURCC (96 -> 66 names).

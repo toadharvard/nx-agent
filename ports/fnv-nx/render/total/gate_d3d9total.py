@@ -39,7 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, "..", ".."))
 REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = os.path.relpath(PORT, REPO)
-INPUTS = ["render/d3d9/front", "render/d3d9/backend", "render/d3d9/spec/d3d9_spec.json", "shim/include",
+INPUTS = ["render/d3d9/front", "render/backend", "render/d3d9/spec/d3d9_spec.json", "shim/include",
           "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h",
           "render/shaders/mojoshader.patch", "render/shaders/build.sh", "render/total/externals.json"]
 GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
@@ -225,7 +225,7 @@ def front_build(front, backend, flags):
 
 
 def enum_part(inp, work):
-    front, backend = os.path.join(inp, "render", "d3d9", "front"), os.path.join(inp, "render", "d3d9", "backend")
+    front, backend = os.path.join(inp, "render", "d3d9", "front"), os.path.join(inp, "render", "backend")
     gen = module_lists(os.path.join(front, "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])
     spec = json.load(open(os.path.join(inp, "render", "d3d9", "spec", "d3d9_spec.json")))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]

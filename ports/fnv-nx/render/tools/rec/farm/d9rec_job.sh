@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# d9rec_job.sh - farm job (M1a): record the ORIGINAL game's D3D9 call stream under Wine with our recorder (render/d3d9/rec) in one
+# d9rec_job.sh - farm job (M1a): record the ORIGINAL game's D3D9 call stream under Wine with our recorder (render/tools/rec) in one
 # reference-environment profile, for two scenes (menu, first sweep cell), twice each; statistics, determinism check, publish.
 #
-#   render/d3d9/rec/farm/d9rec_job.sh <commit> <profile: handheld|docked> <report.md>       runner job `d9rec <profile>`
+#   render/tools/rec/farm/d9rec_job.sh <commit> <profile: handheld|docked> <report.md>       runner job `d9rec <profile>`
 #
 # Profile (QUEUE.md "ENV profile"): handheld = 1280x720@60, docked = 1920x1080@60, ONE adapter mode (Xvfb with -extension RANDR off: Wine then
 # exposes only the current mode, at 60 Hz; with RandR on it reports 0 Hz and 16-bit formats too); Wine's video memory = D9REC_VIDEO_MEM_MB
@@ -19,7 +19,7 @@ COMMIT=${1:?commit}; PROFILE=${2:?profile handheld|docked}; REPORT=${3:?report.m
 D9REC_VIDEO_MEM_MB=${D9REC_VIDEO_MEM_MB:-960}        # the ONE place of the number (QUEUE.md: the Switch GPU budget, shared with L5's D5)
 case "$PROFILE" in handheld) SW=1280; SH=720 ;; docked) SW=1920; SH=1080 ;; *) echo "profile: handheld|docked" >&2; exit 2 ;; esac
 P=$(cd "$(dirname "$0")/../../../.." && pwd)        # ports/fnv-nx
-CMP=$P/tools/compare; REC=$P/render/d3d9/rec; D9=$P/render/d3d9
+CMP=$P/tools/compare; REC=$P/render/tools/rec; D9=$P/render/d3d9
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}; H12=${COMMIT:0:12}; DRY=${D9REC_DRY:-0}
 WK=${D9REC_WORK:-$FARM_HOME/d9rec/$H12/$PROFILE}; PFXW=$WK/wine; DISP=${D9REC_DISPLAY:-:77}; PDISP=${D9REC_PROBE_DISPLAY:-:79}
 BRANCH=l6-render/d9rec/$H12/$PROFILE; SHOTS=${D9REC_HOLD_SHOTS:-6}; GAP=${D9REC_HOLD_GAP_S:-5}
@@ -75,10 +75,10 @@ fi
 wine reg add 'HKCU\Software\Wine\Direct3D' /v VideoMemorySize /t REG_SZ /d "$D9REC_VIDEO_MEM_MB" /f >"$WK/reg.log" 2>&1; wineserver -w
 VMEM=$(wine reg query 'HKCU\Software\Wine\Direct3D' /v VideoMemorySize 2>/dev/null | tr -d '\r' | awk '/VideoMemorySize/ { print $NF }')
 [ "$VMEM" = "$D9REC_VIDEO_MEM_MB" ] || fail "registry VideoMemorySize is '$VMEM', wanted $D9REC_VIDEO_MEM_MB (log $WK/reg.log)"
-# recorder: keyed build of render/d3d9/rec + gen at this checkout
+# recorder: keyed build of render/tools/rec + gen at this checkout
 K=$(cat "$REC"/build.sh "$REC"/*.cpp "$REC"/*.h "$REC"/*.py "$D9"/gen/*.py "$D9"/gen/*.cpp "$D9"/gen/*.h "$D9/spec/d3d9_spec.json" 2>/dev/null | sha256sum | cut -c1-12)
 DLL=$WK/rec-$K/d3d9.dll
-[ -f "$DLL" ] || bash "$REC/build.sh" "$WK/rec-$K" >"$WK/rec_build.log" 2>&1 || fail "render/d3d9/rec/build.sh (log $WK/rec_build.log)"
+[ -f "$DLL" ] || bash "$REC/build.sh" "$WK/rec-$K" >"$WK/rec_build.log" 2>&1 || fail "render/tools/rec/build.sh (log $WK/rec_build.log)"
 i686-w64-mingw32-gcc -O1 -o "$WK/envprobe.exe" "$P/tests/l6/rec/envprobe.c" -ld3d9 -luser32 -static-libgcc >"$WK/envprobe_build.log" 2>&1 || fail "envprobe build"
 
 xvfb() { Xvfb "$1" -screen 0 "${SW}x${SH}x24" -nolisten tcp -noreset >/dev/null 2>&1 & XPIDS+=($!); sleep 2; }

@@ -1,4 +1,4 @@
-/* d9wrap_port.h (Windows/Wine build of the recorder): replaces render/d3d9/gen/d9wrap_port.h in the build directory; identical except the
+/* d9wrap_port.h (Windows/Wine build of the recorder): replaces render/tools/replay/d9wrap_port.h in the build directory; identical except the
  * lock, which is a CRITICAL_SECTION (initialised on first use: the runtime's locks are zero-initialised statics) and Sleep-free. */
 #ifndef D9WRAP_PORT_H
 #define D9WRAP_PORT_H

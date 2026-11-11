@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_rec.py: the Windows-side recorder (render/d3d9/rec) under Wine. (a) build + export list; (b) nxd9play on synthetic captures with and
+"""test_rec.py: the Windows-side recorder (render/tools/rec) under Wine. (a) build + export list; (b) nxd9play on synthetic captures with and
 without the proxy: exit codes, PNG neutrality, stream decodes fully, call histogram vs the NXD9 capture, two-run determinism after masking
 env/pix items (differences listed in $W/nondet.tsv); (d) caps dump -> wine_llvmpipe_env.tsv.
 env: D9REC_WORK (work dir, default /home/user/work/l6/rec), D9REC_HOST (render/shaders host tools, default /home/user/work/l6/sm/host),
@@ -25,7 +25,7 @@ def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **
 
 # ---- (a) build, exports
 os.makedirs(W, exist_ok=True)
-r = sh([os.path.join(ROOT, "render/d3d9/rec/build.sh"), W + "/rec"]); check(r.returncode == 0, "(a) build.sh: " + r.stderr[-400:])
+r = sh([os.path.join(ROOT, "render/tools/rec/build.sh"), W + "/rec"]); check(r.returncode == 0, "(a) build.sh: " + r.stderr[-400:])
 dll = W + "/rec/d3d9.dll"
 exp = []
 if os.path.isfile(dll):

@@ -2,7 +2,7 @@
 Without it the test stops with the message of render/d3d9/backend/gl4_xlator.sh (exit 2): there is no mode without the translator."""
 import os, re, subprocess, sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend")
+BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXB = os.path.normpath(os.path.join(BACK, "..", "..", "backend"))
 _flags = None
 
 

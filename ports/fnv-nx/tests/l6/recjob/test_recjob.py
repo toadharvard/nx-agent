@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_recjob.py: M1a, the d9rec farm job and its statistics tool (render/d3d9/rec/farm).
+"""test_recjob.py: M1a, the d9rec farm job and its statistics tool (render/tools/rec/farm).
 (a) d9rec_stats.py on the streams tests/l6/rec/test_rec.py records from synthetic captures: frames/draws/shader creates against the NXD9
     counts of >= 3 captures, the per-frame create histogram against a hand count over the NXD9 records of one capture, a truncated stream.
 (a2) M1b: the WORLD-REACHED verdict: world_verdict() on synthetic per-frame draw/texture lists (menu-only flagged, high-draw phase passes, too short / too few
