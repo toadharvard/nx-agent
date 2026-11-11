@@ -46,3 +46,22 @@ Q5. Not covered yet: shxlate (cache/shxlate.c) and tests/s6b_* roots; libfnvnx_s
   4. External pins are accepted as written (names, commits, tree_sha256, `at` /ext/uam, /ext/mojoshader).
 - Patches on externals (`sources.patches`) and the multi-external root are w16 keys; `check` cannot judge them.
 - Selftest tests/l6/shaders_gen/test_uam_gen.py: run once with bison 3.8.2 (distro), flex 2.6.4 (built from the westes tarball sha256 e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995), mako 1.4.3: tree_sha256 of the input = the pin, 9/9 generated files byte-equal to uam_gen.patch, ALL OK.
+
+## RE-SCOPE RESULT (GL path first): host library root render/shaders/glsl
+Root `ports/fnv-nx/render/shaders/glsl` (class product, target host, link null; needs an admit.json entry + `render/shaders/total` admitted as a tool root for the generator).
+- Own units (tracked, units=all): glsl/src/{frontend.c, backend_mojoshader.c, translate.c} = 3. Headers: glsl/include/{fnvnx_shaders.h, fnvnx_dk_layout.h, fnvnx_sdp.h}, glsl/src/backend.h.
+- External mojoshader (`sources`, w16) with patches `mojoshader.patch` + `patches/mojoshader_units.patch`: 13 units. Generated: fnvnx_sm_rows.h (gen_sm_rows.py), 1 header. Total 16 units.
+- No dk.cpp, no uam reference in the root. translate.c was split: `fnvnx_shader_translate_glsl` (GLSL half, result in r->glsl, always) stays in the root;
+  `fnvnx_shader_translate` + `fnvnx_dksh_validate` moved to render/shaders/src/translate_dksh.c (DKSH side, with dk.cpp, sdp.c, sdp2dksh.c, new src/dk_api.h holding fnvnx_dk_out/fnvnx_dk_compile).
+- API used by render/d3d9/backend/gl4_d3dshader.c (all in this root): fnvnx_shader_hash, fnvnx_shader_opts, fnvnx_shader_result, fnvnx_shader_result_free, and ONE CHANGE
+  NEEDED in gl4_d3dshader.c (L6A's file, not edited by me): call `fnvnx_shader_translate_glsl` instead of `fnvnx_shader_translate` (it already passes NO_DKSH|KEEP_GLSL; same args, same result).
+  Include path: `glsl/include` (render/shaders/include moved there; references updated in d3d9/dev, d3d9/backend, cache, tests/l6, CMakeLists.txt).
+- recipe.py check (trunk a2453fe9, temp admit entries, not committed): `recipe valid` with `sources` removed; with `sources`: only "unknown key 'sources'" (w16). w16/w15 are still not on the remote.
+- Removed: patches/uam_gen.patch, uam_nomain.patch, roots/ drafts, tests/l6/shaders_gen (it checked uam_gen.patch).
+
+## AFTER THE FIRST FRAME (drafts, not in the tree)
+- Pin in env.json: bison 3.8.2, flex 2.6.4 (westes tarball sha256 e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995), python3-mako 1.4.3.
+- uam (tools/uam 5a5afc2b..., tree_sha256 8dbb502d...): 9 generated files from bison/flex/mako as `generated` steps with "tool": {"env": ...}
+  (glsl_parser.{cpp,h}: bison -p _mesa_glsl_; glsl_lexer.cpp: flex; glcpp-parse.{c,h}: bison -p glcpp_parser_; glcpp-lex.c: flex; ir_expression_operation{,_constant,_strings}.h: python+mako).
+- Root `uam_lib` (link null) = 179 units, reused by sdp2dksh and the uam ELF via link.roots; uam ELF root patch reduces to adding main.cpp (180 units). Same flags in all, so units cache once.
+- Root sdp2dksh: own src/*.c(pp) (dk.cpp, sdp.c, translate_dksh.c, sdp2dksh.c) + link.roots = [glsl, uam_lib]; flags gnu99/gnu++17; link -lm -lpthread.

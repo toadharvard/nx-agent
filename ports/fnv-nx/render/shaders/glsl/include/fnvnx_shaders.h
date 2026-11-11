@@ -82,7 +82,11 @@ typedef struct fnvnx_shader_result {
 /* Cache key: FNV-1a 64 of the bytecode. */
 uint64_t fnvnx_shader_hash(const void *bytecode, size_t n);
 
-/* Returns result->ok. Never throws; result must be freed with fnvnx_shader_result_free. */
+/* GLSL half (the GL path; no uam, no DKSH): front end -> GLSL backend. Returns result->ok; the GLSL is always in result->glsl. */
+int fnvnx_shader_translate_glsl(const void *d3d_bytecode, size_t n, const fnvnx_shader_opts *opts,
+                                fnvnx_shader_result *result);
+
+/* GLSL + DKSH (adds uam; src/translate_dksh.c). Returns result->ok. Never throws; result must be freed with fnvnx_shader_result_free. */
 int fnvnx_shader_translate(const void *d3d_bytecode, size_t n, const fnvnx_shader_opts *opts,
                            fnvnx_shader_result *result);
 void fnvnx_shader_result_free(fnvnx_shader_result *result);

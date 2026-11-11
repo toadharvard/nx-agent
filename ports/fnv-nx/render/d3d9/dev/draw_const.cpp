@@ -1,4 +1,4 @@
-// draw_const.cpp: the uniform blocks of a draw, byte-exact per render/shaders/include/fnvnx_dk_layout.h (per stage: UBO 0 = vec4 c[256] by register, UBO 1 = ivec4 i[16] at 16 * n and one uint per bool at 256 + 16 * n,
+// draw_const.cpp: the uniform blocks of a draw, byte-exact per render/shaders/glsl/include/fnvnx_dk_layout.h (per stage: UBO 0 = vec4 c[256] by register, UBO 1 = ivec4 i[16] at 16 * n and one uint per bool at 256 + 16 * n,
 // UBO 2 = the driver block) plus the blocks of the fixed-function module (draw_ffp.h, bound to the slots it names).
 //  C1 UBO 0: the float registers Set*ShaderConstantF stored (immediate `def` constants are in the shader); the pixel block has 224 registers, c224..c255 are 0 ("0 outside"). UBO 1: the int registers, the bool registers as
 //     0 / 1 (BOOL != 0 is true). Both are rebuilt when the VSCONST / PSCONST group is dirty or the stream is rebound in full, and bound when their bytes differ from what the stream holds.

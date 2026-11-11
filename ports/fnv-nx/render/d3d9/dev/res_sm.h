@@ -18,7 +18,7 @@ struct NxSmIface {
     uint32_t ci_mask, cb_mask;      // integer / boolean constant registers read (i<n>, b<n>) or defined
     uint32_t def_f, def_i, def_b;   // number of def / defi / defb in the shader
     uint32_t pair_set[7];           // bit (usage * 16 + index) = the (usage, index) pair is a varying of the stage: vertex = a written output (declared with dcl in sm3, written in sm < 3: oPos POSITION0, oFog FOG0, oPts PSIZE0, oD# COLOR#, oT# TEXCOORD#),
-                                    // pixel = a read input (sm3 dcl'd v#; sm < 3 the t# / v# registers used or dcl'd: TEXCOORD# / COLOR#). vPos / vFace and oC / oDepth are not pairs. The mapping of mojoshader's attribute / output lists (render/shaders/src/frontend.c)
+                                    // pixel = a read input (sm3 dcl'd v#; sm < 3 the t# / v# registers used or dcl'd: TEXCOORD# / COLOR#). vPos / vFace and oC / oDepth are not pairs. The mapping of mojoshader's attribute / output lists (render/shaders/glsl/src/frontend.c)
 };
 // The resumable scanner behind nx_sm_check (res_smcheck.cpp): the same rules, fed in pieces. A scan is exactly one call of nx_sm_check on the concatenation of its feeds:
 // nx_sm_scan_feed returns the first violation (sticky) as soon as the instruction holding it is complete, 0 while the stream is legal so far; nx_sm_scan_end additionally requires the closing END (UNTERMINATED otherwise).

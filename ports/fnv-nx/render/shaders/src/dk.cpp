@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "uam_api.h"
-#include "backend.h"
+#include "dk_api.h"
 
 extern "C" int fnvnx_dk_compile(fnvnx_shader_stage stage, const char* glsl, fnvnx_dk_out* out, char* err, size_t errlen)
 {

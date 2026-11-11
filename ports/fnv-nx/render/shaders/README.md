@@ -128,7 +128,7 @@ the slot of COLOR1) and lists ps_1_x `t#` among the PS inputs.
 optional `result.glsl`, `result.stats` (D3D slots, GLSL statements, Maxwell instructions, GPRs, code
 bytes: the baseline for any later backend). `fnvnx_shader_ctab` returns the constant table as structs.
 `fnvnx_shader_hash` = FNV-1a 64 of the bytecode (cache key). `fnvnx_dksh_validate` checks DKSH headers.
-SDP reader/writer: `include/fnvnx_sdp.h`, format in [`SDP.md`](SDP.md).
+SDP reader/writer: `glsl/include/fnvnx_sdp.h`, format in [`SDP.md`](SDP.md).
 
 ## Fixes to MojoShader in the patch (besides the profile)
 

@@ -590,7 +590,7 @@ index 5a89569..9fd1117 100644
 +
 +/*
 + * glsldk locations for the NEXT MOJOSHADER_parse() on this thread (fnv-nx; the rule is fnvnx_dk_assign() in
-+ *  render/shaders/include/fnvnx_dk_layout.h, computed by the caller). attrib/varying: 224 entries indexed
++ *  render/shaders/glsl/include/fnvnx_dk_layout.h, computed by the caller). attrib/varying: 224 entries indexed
 + *  usage*16+index, -1 = not declared; copy: 224 entries, nonzero = the vertex shader also writes a varying copy
 + *  of POSITION0 / PSIZE0 at that pair's varying location. NULL (the default) = the canonical fixed table.
 + *  The tables are borrowed until MOJOSHADER_glsldkSetLocations(NULL, NULL, NULL).
@@ -763,7 +763,7 @@ index 319e3cb..e77f7cb 100644
 +#if SUPPORT_PROFILE_GLSLDK
 +// fnv-nx deko3d profile: fixed locations so separately compiled stages and
 +//  the D3D9 front end (vertex declarations) agree without linking.
-+//  Keep in sync with render/shaders/include/fnvnx_dk_layout.h.
++//  Keep in sync with render/shaders/glsl/include/fnvnx_dk_layout.h.
 +static __thread const signed char *dk_tab_attrib, *dk_tab_varying;
 +static __thread const unsigned char *dk_tab_copy;
 +static __thread int dk_complete;

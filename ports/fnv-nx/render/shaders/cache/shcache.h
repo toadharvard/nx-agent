@@ -1,5 +1,5 @@
 /*
- * shcache.h - the shader translation cache: a pre-filled MEMO of fnvnx_shader_translate (render/shaders/include/fnvnx_shaders.h).
+ * shcache.h - the shader translation cache: a pre-filled MEMO of fnvnx_shader_translate (render/shaders/glsl/include/fnvnx_shaders.h).
  * Portable C11, libc only (malloc), no I/O: the host hands the cache file and the append log in as memory and receives log records
  * through a sink. Builds for LP64 and ILP32 (every on-disk field is read byte-wise, little-endian; no struct is cast).
  *
