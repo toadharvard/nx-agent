@@ -199,11 +199,11 @@ def judge_test(entry, tracked, roots, pins, read, artifact):
     for ref in refs:
         if "path" in ref and ref["path"] in clo:
             return "%s %s is in the import closure of the subject" % (ref["kind"], ref["path"])
-    if any(root_of(s, roots)["class"] == "product" for s in subject):
+    if any(root_of(s, roots).get("class") == "product" for s in subject):
         if not any(ref["kind"] in ("wine-exe", "spec") for ref in refs):
             return "a product subject has no wine-exe or spec reference"
         for ref in refs:
-            if "path" in ref and root_of(ref["path"], roots)["class"] == "product":
+            if "path" in ref and root_of(ref["path"], roots).get("class") == "product":
                 return "reference %s of a product subject lies in a product root" % ref["path"]
     return None
 

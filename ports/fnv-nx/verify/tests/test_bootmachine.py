@@ -647,7 +647,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("tz-1970", plat(34, 0, FNVNX_ADDR(zw), 0, 2)); num("tz-1970-off", zw[0]);
     num("tz-2100-last", plat(34, 4133980799ull, FNVNX_ADDR(zw), 0, 2));
     zw[0] = 0xAAAAAAAA;
-    num("tz-2101", plat(34, 4133980800ull, FNVNX_ADDR(zw), 0, 2)); num("tz-2101-untouched", zw[0]);
+    num("tz-2101", plat(34, 4133980800ull, FNVNX_ADDR(zw), 0, 2)); num("tz-2101-untouched", zw[0]);   /* the label is historic: the offset 0 is written */
     num("tz-u64max", plat(34, ~0ull, FNVNX_ADDR(zw), 0, 2));
     num("tz-negative-main", plat(34, 0x8000000000000000ull, FNVNX_ADDR(zw), 0, 2));
     num("tz-null-out", plat(34, 5, 0, 0, 2));
@@ -1217,8 +1217,8 @@ def main():
               "gai-both-null": ne(2002), "gai-both-null-errno": ne(2002), "gai-badflags": ne(2001), "gai-badfamily": ne(2005),
               "gai-badtype": ne(2006), "gai-order": ne(2001), "gai-hints-ok-both-null": ne(2002), "gai-errno-kept": "77",
               "fetch-1": ne(22), "fetch-0": ne(22), "fetch-wide": ne(22),
-              "tz-0": "0", "tz-off": "0", "tz-dst": "0", "tz-abbr": "435455", "tz-abbr-rest": "0", "tz-max": ne(75), "tz-1970": "0", "tz-1970-off": "0", "tz-2100-last": "0", "tz-2101": ne(75), "tz-2101-untouched": "aaaaaaaa",
-              "tz-u64max": ne(75), "tz-negative-main": ne(75),
+              "tz-0": "0", "tz-off": "0", "tz-dst": "0", "tz-abbr": "435455", "tz-abbr-rest": "0", "tz-max": "0", "tz-1970": "0", "tz-1970-off": "0", "tz-2100-last": "0", "tz-2101": "0", "tz-2101-untouched": "0",
+              "tz-u64max": "0", "tz-negative-main": "0",
               "tz-null-out": ne(14), "tz-slot": "0"}
     bad49 = {n: (k49.get(n), v) for n, v in want49.items() if k49.get(n) != v}
     case("sockets and TZ_AT (guest): every result the arguments fix with no socket open: errno classes, -EBADF for each handle-first service, "
@@ -1227,7 +1227,7 @@ def main():
     r50, l50 = run(built[50][0], root)[:2]
     k50 = kv(l50)
     BI, NF = "1759", "1359"
-    want50 = {"self-id": "1", "self-distinct": "1", "self-start": BI, "self-join": BI, "self-prio": "0", "self-resume": "f201",
+    want50 = {"self-id": "1", "self-distinct": "1", "self-start": BI, "self-join": BI, "self-prio": "0", "self-resume": "f401",
               "self-free": "0", "self-free-again": NF, "self-use-freed": NF, "pause-by-worker": "64", "act-new": BI, "start": "0",
               "start-again": BI, "start-finished": BI, "act-finished": BI, "count": "65"}
     bad50 = {n: (k50.get(n), v) for n, v in want50.items() if k50.get(n) != v}
@@ -1242,17 +1242,17 @@ def main():
          r52["reason"] == "ext-module-missing" and r52["ext"] == {"module": 11, "fn": 32}
          and [e["kind"] for e in r52["events"]] == ["sock-undetermined"], r52)
     r53, l53 = run(built[53][0], root)[:2]
-    case("TZ_AT beyond year 2100 is -EOVERFLOW and the run goes on", r53["reason"] == "exit"
-         and kv(l53) == {"tz-below": "%x" % (M - 75), "tz-above": "%x" % (M - 75)}, (r53, l53))
+    case("TZ_AT at INT64_MAX and INT64_MIN: the fixed UTC zone answers every instant", r53["reason"] == "exit"
+         and kv(l53) == {"tz-below": "0", "tz-above": "0"}, (r53, l53))
     r54, l54 = run(built[54][0], root)[:2]
-    case("THREAD_ACTIVITY on the calling thread's own THREAD_SELF record: ResultBusy 0xF201 for pause and resume, the run goes on",
-         r54["reason"] == "exit" and kv(l54) == {"self-pause": "f201", "self-resume": "f201"} and "after the pause" in l54, (r54, l54))
+    case("THREAD_ACTIVITY on the calling thread's own THREAD_SELF record: ResultBusy 0xF401 for pause and resume, the run goes on",
+         r54["reason"] == "exit" and kv(l54) == {"self-pause": "f401", "self-resume": "f401"} and "after the pause" in l54, (r54, l54))
     r55, l55 = run(built[55][0], root)[:2]
     k55 = kv(l55)
     want55 = {"not-started-pause": "1759", "resume-running": "fa01", "pause": "0", "pause-paused": "fa01", "resume": "0", "resume-again": "fa01",
-              "finished": "1759", "me-pause": "f201", "me-resume": "f201", "me-zero": "1759", "rec-finished": "1759", "rec-finished-resume": "1759",
+              "finished": "1759", "me-pause": "f401", "me-resume": "f401", "me-zero": "1759", "rec-finished": "1759", "rec-finished-resume": "1759",
               "no-record": "1359"}
-    case("THREAD_ACTIVITY: new / finished thread or record BadInput, resume of a running and pause of a paused thread 0xFA01, own record 0xF201, "
+    case("THREAD_ACTIVITY: new / finished thread or record BadInput, resume of a running and pause of a paused thread 0xFA01, own record 0xF401, "
          "unknown id NotFound (%d values)" % len(want55), r55["reason"] == "exit" and k55 == want55, (k55, r55))
     r56, l56 = run(built[56][0], root)[:2]
     k56 = kv(l56)

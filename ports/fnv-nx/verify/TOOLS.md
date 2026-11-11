@@ -59,10 +59,30 @@ with a verdict (totality).  The result is a function of the argument files only;
 ## contract/gate_call.py
 
 ```text
-gate_call - direct call/tail targets of the exe function versus each native copy (L1 CONTRACT).
+gate_call - call targets of the exe function versus each native copy, and the declaration of every edge (L1 CONTRACT).
 
-Native targets are `calls` plus any 8-hex-digit address inside an `other` symbol name that the exe function also
-calls (bridges).  Several native copies of one address: each is judged, the worst verdict stands.
+Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED).
+
+1. Address sets (verdicts none/equal/subset/superset/different; red row only for `different`).  Native targets are `calls`
+   plus any 8-hex-digit address inside an `other` symbol name that the exe function also calls (bridges).
+2. Declaration equality (verdict `undeclared`).  Rule: for EVERY cross-boundary edge of a native copy - a call/tail target
+   (`calls`, bridge addresses) or a data reference (`data`; the /GS cookie is the compiler's own, dropped as in gate_data) to
+   an exe address Y - the copy's object has a `.fnvnx.sympair` row of direction `ref` whose MSVC name is byte-equal to the COFF
+   symbol name of Y in the pristine MSVC objects (facts['pristine'], built from the N1 certificate by `pristine_names`), and
+   that name is decorated (starts with `?`).  Not provable, by rule and with no name table: no sympair section in the object;
+   Y has no pristine COFF symbol; the pristine symbol is undecorated (extern "C", every asm/x87/register CRT helper such as
+   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `unnamed:*`) has the pristine name; a covering
+   row with an undecorated name.  Edge and row are matched by the exe address (objfacts keeps no ELF symbol of an edge): the
+   rows that "cover" Y are the ref rows whose name is a pristine name of Y; all of them must be decorated and one must exist.
+   Proof argument: proto.py (R5) derives cc, stack words, varargs, sret and the argument classes of a boundary only from the
+   decorated name.  The caller's declaration was written by the `names` plugin as `msvc_name`; byte-equality of the full
+   decorated names implies equality of every one of these (and of the scope and the data type), so the call convention and the
+   by-value/sret shape the caller compiled against are the callee's exe contract.  A name that carries no types gives no such
+   equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
+   judged, the worst verdict stands.
+Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule); the pristine cl symbol
+names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 ```
 
 ## contract/gate_data.py
@@ -120,7 +140,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017, ASM-018, ASM-019)
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -133,7 +153,7 @@ that the facts' ranges contain every executed instruction of the images (A4).  T
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
 Outputs ($GATE_OUT, gatefile.py): reach.json (gate `reach`; universe = facts, certified = certified facts; uncertified ids
-`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids (ASM-016)
+`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids
 (all of them, sorted), reach.facts.tsv (`fact_id<TAB>sha256 of the certificate`, certified facts only, sorted by id).  --out: per
 fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<DLL>_<NAME>_<n> with n the 1-based position among
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
@@ -233,7 +253,7 @@ value the dispatcher of the lifted code maps to an entry.  Rule, total over the 
             from the ELF symbol).
 
 Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the first guest frame) below them.
-Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
+Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
 
@@ -275,7 +295,7 @@ RULE: the set is the transitive closure of the PE import directories (normal and
 reading. An imported dll name (iat.norm_dll: ASCII lowercase, ".dll" when it has no '.') is resolved case-insensitively against the
 files of the given directories (first directory in list order that has it; two files of one directory that differ only in case are an
 error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
-and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule. (ASM-021)
+and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
 ```
 
@@ -331,7 +351,7 @@ reaches memory only through an ESCAPE).  For a global, additionally (W1) no dire
 (exact for [disp]; [disp+idx*s] covers [disp, disp+max*s+size) when the index maximum is proven (and-mask, movzx, constant)
 and else the whole section), no relocated data word points into the section (that word is a pointer stored in memory: an
 ESCAPE of the section's closure), and the loader does not write L (base relocations, import slots, IAT / TLS-index of the
-PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a (ASM-010, ASM-013, ASM-017, ASM-022)
+PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
@@ -446,6 +466,36 @@ when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build
 WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
+```
+
+## farm/runner.sh
+
+```text
+runner.sh - L4 farm job: the after-merge verification of one commit of the trunk. It reports facts; it decides nothing
+and blocks nothing (a commit that a report shows broke something is reverted by the merger).
+
+  [ARTIFACTS=...] bash <checkout>/ports/fnv-nx/farm/runner.sh <commit> <job>[=<arg>[,<arg>...]] ...
+
+Steps:
+ 1 <commit> (40 hex) of the checkout's repository is fetched from its origin when the object is absent, and checked out
+   detached into a fresh directory $FARM_HOME/runner/<commit12>/src. Every job runs there, from the repository root: the
+   code that verifies is the code of the verified commit, never of the checkout that holds this script
+ 2 verify/envcheck.py check of that tree. A mismatch ends the job with exit 1 and nothing is published: a verification
+   outside the declared environment is not a result
+ 3 the jobs, in the order given, each with its arguments. A job name outside the table below is a usage error (exit 1,
+   before step 1). Jobs:
+     oraclecheck[=TEST,...]   python3 -I verify/oraclecheck.py --jobs $RUNNER_JOBS (default: nproc) --out oraclecheck.json
+                              [TEST...]: the declaration of every test file (or of the TESTs named, repo-relative)
+                              against the files its run opens. Result file oraclecheck.json. Exit 0 = every declaration
+                              holds, 2 = at least one does not; any other exit ends the runner with exit 1
+ 4 publish the orphan commit {report.json, one result file and one <job>.log per job} to branch
+   l4-verify/after-merge/<commit12> of the artifacts repository (forced: the newest run of a commit replaces the older)
+   report.json ("fnvnx-aftermerge/1"): commit, env_id, host_cpu_model, jobs [{name, args, rc, seconds, result}]
+ 5 final line: AFTERMERGE commit=<commit12> jobs=<n> violated=<names joined by ","|none> published=<branch>@<commit12>
+   exit 0 = every job exited 0; 2 = at least one job reports a violation (the result is published either way);
+   1 = usage, environment, tool or publishing error
+Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS (/home/user/fnv-nx-build; a checkout whose origin is the artifacts repository),
+     ARTIFACTS_URL (default: that checkout's origin), RUNNER_JOBS.
 ```
 
 ## farm/setup_verdict_env.sh
@@ -738,7 +788,7 @@ Rules:
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
-   for every instant of the years 1970..2100 inclusive (0 <= utc_seconds < 4133980800; stated assumption of the stage), else -EOVERFLOW (-75), nothing written; (ASM-047)
+   for every instant (utc_seconds is any int64: the declared machine's zone in the emulator is fixed UTC, CLAUDE.md "The declared machine", and UTC has one rule at every instant, so the stage's time service refuses nothing and -EOVERFLOW (-75) never comes from the stage);
    tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
    ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
@@ -759,8 +809,8 @@ Rules:
    stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: BadInput 0x1759). decommit has no size or reservation check (host_vm.inc): view page -> 0xD401 first, else the extents inside the range are handled, a range holding none is 0. Pages committed here are
    owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): tid 0 (the calling thread) BadInput 0x1759; a paused thread is
    never picked; unknown tid NotFound 0x1359, a thread not started or ended BadInput 0x1759 (no kernel call, also for a THREAD_SELF record of such a thread); a thread (or the
-   record of a thread) that is the CALLING thread: ResultBusy 0xF201, pause or resume; another live thread: pause of a paused one or resume of one that is not paused
-   ResultInvalidState 0xFA01, else 0 (the two kernel codes are the header owner's statement from memory; assumption of the stage). (ASM-048)
+   record of a thread) that is the CALLING thread: ResultBusy 0xF401, pause or resume; another live thread: pause of a paused one or resume of one that is not paused
+   ResultInvalidState 0xFA01, else 0 (svcSetThreadActivity as Atmosphere's libmesosphere states it, source/svc/kern_svc_activity.cpp and KThread::SetActivity: svc::ResultBusy for the current thread, svc::ResultInvalidState for a pause of a paused or a resume of a not paused thread; a result is module | description << 9, module Kernel = 1, descriptions Busy 122, InvalidState 125 - libnx b156b4774fb2 nx/include/switch/result.h MAKERESULT, where 122 is spelled KernelError_AlreadyExists).
 5e. UNMAP_FIXED (fn 15, addr, size, src): the undo of exactly one earlier map_fixed. addr or src unaligned 0xCC01; size 0 / unaligned 0xCA01; (addr, size,
    src) not exactly a live map_fixed mapping 0xD401 (so a second unmap refuses). Success: the range is unmapped (an access faults), the src heap block
    is accessible RW again with the content the mapping had, and addr may be mapped again. A page of the range that is not RW is the header's
@@ -875,11 +925,16 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 "ext-module-missing" naming the service. A guest address that is not readable / writable memory raises BadGuestMemory (a violated
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
-Stated assumptions (each is a fact of the stage's model, not of the header): (ASM-049, ASM-050, ASM-051, ASM-052)
-  A1 handle numbers: the header says only that a handle is the descriptor number the bsd service returned and that the host keeps just the
-     set of open ones (no numbering of its own, no "lowest free"). The stage's model chooses: the lowest number >= 3 that is not open (0..2
-     are stdio); a number is reused after its close. Guest programs must not depend on it. SOCKET never fails for lack of room.
-  A2 the host's loopback has the addresses 127.0.0.0/8 and ::1; "any" is 0.0.0.0 / ::; every other unicast address is not local.
+Stated assumptions (each is a fact of the stage's model, not of the header):
+  A1 handle numbers (a rule of the model, deterministic): a new handle is the lowest number >= 3 that is not open (0..2 are stdio); a
+     number is free again after its close. This is the descriptor rule of POSIX.1-2017 2.14 "File Descriptor Allocation" (the lowest
+     number not open), which the bsd service's descriptors follow. Nothing above the host may depend on the number: the header says only
+     that a handle is the descriptor number the service returned, and on the Windows side a SOCKET is an opaque handle whose only
+     special value is INVALID_SOCKET (Winsock "Socket Data Type"), so a program correct on Windows reads no meaning from it. SOCKET
+     never fails for lack of room.
+  A2 addresses (facts, cited): loopback is 127.0.0.0/8 (RFC 1122 3.2.1.3 (g)) and ::1 (RFC 4291 2.5.3); "any" is 0.0.0.0 (RFC 1122
+     3.2.1.3 (a)) and :: (RFC 4291 2.5.2); the declared machine has no network connection (CLAUDE.md "The declared machine"), so it has
+     no interface but loopback and every other unicast address is not local.
   A3 getaddrinfo with no network: a numeric node is parsed (strict dotted quad, or an RFC 4291 text without a scope) and a null hints
      argument is a hints record of zeros (POSIX); the list of a numeric node is one record per socket type STREAM/TCP 6, DGRAM/UDP 17,
      RAW/0 (the type given in the hints keeps one; the protocol given keeps those with that protocol), in this order, ai_flags = hints flags.
@@ -1001,7 +1056,7 @@ tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linu
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts).
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts).
 ```
 
 ## verify/fpbound.py
@@ -1060,7 +1115,7 @@ Classes:
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
-Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit). (ASM-041)
+Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit).
 ```
 
 ## verify/gate_build.py
@@ -1154,6 +1209,21 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
+## verify/gate_argorder.py
+
+```text
+Gate "argordergate" (fnvnx-gate/1, VERDICT.md class: calling convention / argument order): every native C++ unit of a guest root is compiled with
+the fnvnx_order plugin (MSVC evaluation order of arguments, objects, operators, assignments) loaded in the rule's order.
+    python3 -I gate_argorder.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/argordergate.json
+Universe: the C++ units of every admitted product root with "target": "guest" and "cxx_origin": "native" (admit.json; the lifter emits the order
+itself, a lifted root has none). No such root: universe 0, green.
+Certificate of a unit, all of: (1) the recipe of its root validates (recipe.check, which holds the plugin rule); (2) the recipe's plugin list is
+the rule's list in the rule's load order (recipe.PLUGIN_SOURCES order, the order of compile.sh) and holds fnvnx_order with exactly the rule's arguments (args=rtl, ...)
+(recipe.PLUGIN_ARGS); (3) the build is green and its result holds the fnvnx_order .so (the file built by the hermetic plugin stage); (4) the unit's object
+was built. The .so is a declared input of every CC stage of a C++ unit (recipe.Job.compile: cc_inputs), so it is in the CC stage key; an
+object compiled without it, or with another .so, has another key and is not this object. A red build or invalid recipe certifies no unit of the root.
+```
+
 ## verify/gate_objstub.py
 
 ```text
@@ -1215,58 +1285,9 @@ Argument: an expected value "comes from the code under test" when its declared s
 through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text at a place that exists in a
 file, a contract table and a model, the last three outside everything the subject can load, and for product code never
 the product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
-Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and (ASM-042)
+Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and
 the test compares against the declared references. The after-merge verifier runs every test under verify/opentrace.py
 and compares the tracked files it opened with subject + references (verify/oraclecheck.py).
-```
-
-## verify/gate_assumptions.py
-
-```text
-Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
-(verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
-    python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json
-
-Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
-  {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
-  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
-    OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
-    REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
-    optional: "note": STR; for REMOVE "pending": "BRANCH@COMMIT" (the entry is carried by a branch that is not merged yet:
-              its used_by paths and its gate:/fact: target may be absent from this tree, and nothing else is relaxed).
-Universe: the MENTIONS of the tree. A text file is a tracked file below ports/fnv-nx that decodes as UTF-8 without NUL
-bytes and is not data (suffix .json); a file of a root of verify/admit.json marked "record": true is an append-only log
-(its dated entries state what was said then; the owner forbids editing it) and is not scanned. CLAUDE.md (the owner's
-words) is read for the decisions, not scanned. A BLOCK is the unit of a text file: in a .md file a paragraph (lines up to a
-blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
-mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive); the prose of a .py file is
-its comments and docstrings (code and string values are not statements), of any other file the whole text. An item of the
-universe is (path, first line of the block). A mention is certified iff ALL hold:
-  1. its raw block contains at least one id of the form ASM-NNN, for example ASM-001 (the compiler is correct);
-  2. every id in it is the id of an entry of the registry.
-The registry is certified iff ALL hold:
-  3. ids are unique and well formed, aliases are unique across entries, text is not empty;
-  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
-     place of reliance, so an entry nobody cites is dead and is red); a pending entry may name a path of its branch;
-  5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
-     the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
-     exactly the owner's list, so a tenth OWNER entry without the owner's item is red;
-  6. a REMOVE entry has an owner of LEADS (or two joined by +) and `removed_by` of one of the forms `gate:NAME` (NAME is a
-     gate of verify/gates.json), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
-     (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
-     (nobody has a discharge yet). planned, no gate yet, OPEN and a pending gate that does not exist yet are reported by
-     count; they are the debt of the owner named in the entry.
-And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
-not in the registry is red wherever it is written.
-Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a
-mention passes only if it names a registry entry, so a new assumption that is written with the word has an id, and an id has
-an entry (2, and the last rule); the entry has an owner decision or a named discharge (5, 6), and the files that rely on it
-cite it (4). The verdict is green only if certified == universe and the registry is certified. The accepted
-assumptions of the rule itself are ASM-001 (the compiler) and ASM-004 (the console), as for every gate.
-Limits of this rule (stated as ASM-001..009 do not cover them; they are what a gate over words can close): an assumption that
-is written without the words of the pattern is not seen (the rule closes the class "written with the word"; review closes the
-rest); a data file (.json) states values, the rule that reads it is the code or document that cites ids; the append-only
-logs are not scanned.
 ```
 
 ## verify/gate_pure.py
@@ -1428,7 +1449,7 @@ objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
@@ -1444,7 +1465,7 @@ whose symbol is global/weak and in the TERMINATOR SET (calls, tail calls, GOT/AD
 can be incomplete; a local symbol cannot be the library routine). `T2-noreturn-tail`: the last instruction is a direct BL (callee a symbol; control
 runs off the end after a call the compiler knew not to return), except a BL of `fnvnx_reach_violation` (reach rule below); another last instruction that can fall through (not RET, B, BR*, T1) is
 `fallthrough`. Reachability of a trap is NOT computed: presence anywhere in a function is a finding; every function is judged, so
-a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
+a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
 class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
@@ -1496,7 +1517,7 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
+taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction
 writes (a missed write of x0 would make a constant wrong).
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
@@ -1543,7 +1564,7 @@ Exit: 0 green, 2 red, 1 usage/tool error.
 ## verify/oraclecheck.py
 
 ```text
-oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true. (ASM-042)
+oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true.
     python3 -I oraclecheck.py [--jobs N] [--timeout-s N] --out REPORT.json [TEST...]      cwd = checkout root
 
 Runs each test file of the oracle universe (or the TESTs named, repo-relative) as `python3 -I FILE` under
@@ -1556,6 +1577,9 @@ ALLOWED = CLOSURE + the reference paths + the test file + the tracked files unde
   unopened     subject files the run never opened: the test does not exercise what it declares;
   refs_in_run  reference paths the run opened (information: a reference read by the test is compared by the machine,
                one that is not is a text for the reader).
+Limit of the method: Linux allows one tracer per process, so a test that itself runs strace (through opentrace.py or the
+`kernel ptrace` item of envcheck.py) exits non-zero under this checker and is reported as not passing; its declaration
+is not checked by this tool (at 0b9ad57: test_envcheck.py, test_gates.py, test_opentrace.py, 3 of 47).
 A test passes iff it exits 0, undeclared and unopened are empty. The report states these facts per test; it ranks
 nothing and excuses nothing. Exit 0 iff every test passes, 2 otherwise, 1 on a usage or tool error.
 This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: it needs strace and runs every test.
@@ -1572,7 +1596,7 @@ puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a f
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
 `file:line: RULE symbol`, at most 200 lines (JSON: all). Policy tables: puregate_policy.py (data only; rule classes there).
 "Accepted" means: no Python code in the checked files can read an undeclared channel (clock, entropy, host identity,
-directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass. (ASM-032, ASM-033, ASM-034, ASM-035, ASM-036, ASM-037)
+directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass.
 Names resolve through import bindings with Python scoping; a name bound by an import and by anything else in one scope is
 `dynamic`; an escape of a module/class that carries rules (other than as an attribute base) is `dynamic`.
 Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host completion-order dynamic) plus
@@ -1609,7 +1633,7 @@ ASSUMPTIONS (named; what "accepted" does NOT prove):
 ## verify/puregate_policy.py
 
 ```text
-puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions). (ASM-032, ASM-033)
+puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions).
 
 Rule classes: clock (wall/monotonic time, file times), inode (inode/device/link identity), entropy (random, id, hash),
 unsorted-listing (directory order), unsorted-set (set iteration order), host (machine identity/load), completion-order
@@ -1640,7 +1664,7 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from A
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
 Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
   {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
-Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
+Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose).
 ```
 
@@ -1744,14 +1768,14 @@ unreadable or a cycle: `response-file-unreadable`). Output `STAGE: RULE detail [
 Declared dependencies, NOT checked here: "no_date_time_macros": {"checked_by": NAME} names the stage/gate proving the sources
 use no __DATE__/__TIME__ (VC9 has no switch); "coff_normalize"/"pe_normalize": the consumer normalizes time stamps
 (verify/coffnorm.py); a python script must itself pass puregate.
-ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds (ASM-038)
+ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds
 documentation; the gate enforces the invocation, it does not prove the tool.
 ```
 
 ## verify/toolflags_policy.py
 
 ```text
-toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env. (ASM-038)
+toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env.
 Rows citing VC9 are UNVERIFIED (no VC9 here); GCC 13.3 / binutils 2.42 rows were checked against the installed --help.
 ```
 
@@ -1781,7 +1805,7 @@ Closure discovery (this runner, outside the sandbox, a pure function of stage re
   hashes); the accepted result is the run on the view of D. ARGUMENT that the hint never changes the result: the accepted run opened
   only files of D, all real, and saw the true name tree, so every include search and probe got the answer it gets on the real tree and
   every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
-  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a (ASM-040)
+  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
   #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
 Languages by suffix (LANG): .c gets `-x c` (PP) and `-x c -fpreprocessed` (CC); .S gets `-x assembler-with-cpp` and `-x assembler` (CC on the
   preprocessed text, the same two stages); .s has no PP stage (its CC stage reads the unit alone, a `.include` fails). `--include` may also be
