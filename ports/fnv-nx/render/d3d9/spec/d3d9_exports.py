@@ -1,5 +1,5 @@
 """d3d9_exports.py: the export table of d3d9.dll (all __stdcall on x86). Signatures are the public SDK ones where documented
-(Direct3DCreate9, Direct3DCreate9Ex, D3DPERF_*); the rest is undocumented: nothing is guessed, `params` is left out."""
+(Direct3DCreate9, Direct3DCreate9Ex, D3DPERF_*) and the ones read off the callers (DebugSetMute, Direct3DShaderValidatorCreate9: render/d3d9/dev/x1_validator.h); the rest is undocumented: nothing is guessed, `params` is left out."""
 
 def _v(name, ctype, size=4, signed=False): return {"name": name, "ctype": ctype, "dir": "in", "kind": "value", "size": size, "signed": signed, "byref": False}
 def _wstr(name): return {"name": name, "ctype": "LPCWSTR", "dir": "in", "kind": "buffer", "elem": 2, "len": f"wstr_bytes({name})", "null": True, "byref": False}
@@ -31,8 +31,8 @@ def exports():
         _fn("D3DPERF_SetOptions", "void", [_v("dwOptions", "DWORD")], "void"),
         _fn("D3DPERF_SetRegion", "void", [col, ev], "void"),
         _undoc("DebugSetLevel", "export of the debug runtime; not in the SDK headers and absent from Wine; signature unknown"),
-        _undoc("DebugSetMute", "export of the debug runtime; Wine declares void DebugSetMute(void); not in the SDK headers"),
-        _undoc("Direct3DShaderValidatorCreate9", "returns an IDirect3DShaderValidator9*; reverse engineered by Wine (no params), not in the SDK"),
+        _fn("DebugSetMute", "void", [], "void"),
+        _fn("Direct3DShaderValidatorCreate9", "IDirect3DShaderValidator9*", [], "handle", "env", "fails (NULL) when the object cannot be allocated", iface="IDirect3DShaderValidator9", own="new"),
         _undoc("PSGPError", "internal processor-specific-geometry-pipeline hook; not in the SDK; signature unknown"),
         _undoc("PSGPSampleTexture", "internal processor-specific-geometry-pipeline hook; not in the SDK; signature unknown"),
     ]

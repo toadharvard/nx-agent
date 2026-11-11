@@ -16,7 +16,8 @@ SLOTS = {"IUnknown": 3, "IDirect3D9": 17, "IDirect3D9Ex": 22, "IDirect3DDevice9"
          "IDirect3DTexture9": 22, "IDirect3DCubeTexture9": 22, "IDirect3DVolumeTexture9": 22, "IDirect3DSurface9": 17,
          "IDirect3DVolume9": 11, "IDirect3DVertexBuffer9": 14, "IDirect3DIndexBuffer9": 14,
          "IDirect3DVertexDeclaration9": 5, "IDirect3DVertexShader9": 5, "IDirect3DPixelShader9": 5,
-         "IDirect3DStateBlock9": 6, "IDirect3DQuery9": 8}
+         "IDirect3DStateBlock9": 6, "IDirect3DQuery9": 8,
+         "IDirect3DShaderValidator9": 6}   # undocumented (x1): Begin / Instruction / End after IUnknown (Wine 9.0 d3d9_main.c; D3DX call sites vtbl +0xc / +0x10 / +0x14)
 EXPORTS = ["Direct3DCreate9", "Direct3DCreate9Ex", "D3DPERF_BeginEvent", "D3DPERF_EndEvent", "D3DPERF_GetStatus",
            "D3DPERF_QueryRepeatFrame", "D3DPERF_SetMarker", "D3DPERF_SetOptions", "D3DPERF_SetRegion", "DebugSetLevel",
            "DebugSetMute", "Direct3DShaderValidatorCreate9", "PSGPError", "PSGPSampleTexture"]

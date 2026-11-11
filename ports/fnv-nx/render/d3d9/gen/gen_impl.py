@@ -58,6 +58,7 @@ def main():
         # class info: IID chain self -> IUnknown
         chain = []; k = i
         while k: chain.append(k); k = ifs[k]["base"]
+        chain = [k for k in chain if ifs[k]["iid"]]   # an interface whose IID no source gives (`iid: null`, IDirect3DShaderValidator9) is not in the lattice: QueryInterface answers its bases only
         cpp.append(f"static const GUID nx_g_{c}[] = {{ " + ", ".join(guid(ifs[k]["iid"]) for k in chain) + " };")
         t = RES_TYPES.get(i)
         cpp.append(f"static void nx_destroy_{c}(NxObj* o) {{ delete static_cast<{c}*>(o); }}")

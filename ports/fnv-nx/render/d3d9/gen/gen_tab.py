@@ -44,12 +44,15 @@ def structs(spec):
 def ids(spec, names):
     L = [f"enum {{ {', '.join(f'D9I_{n} = {i}' for i, n in enumerate(names))} }};", f"static const int D9_NIFACE = {len(names)};"]
     rows = []
+    has = []
     for n in names:
-        h = spec["interfaces"][n]["iid"].replace("-", ""); b = bytes.fromhex(h)
+        iid = spec["interfaces"][n]["iid"]; has.append(int(bool(iid)))       # `iid: null` = no source gives the IID (IDirect3DShaderValidator9): the interface is never the answer of an IID lookup
+        b = bytes.fromhex((iid or "0" * 32).replace("-", ""))
         le = b[0:4][::-1] + b[4:6][::-1] + b[6:8][::-1] + b[8:]
         rows.append("{" + ",".join(str(x) for x in le) + "}")
     L.append(f"static const unsigned char d9_iid[{len(names)}][16] = {{{', '.join(rows)}}};")
-    L.append("int d9s_iid_iface(const void *g) { for (int i = 0; i < D9_NIFACE; i++) if (!memcmp(g, d9_iid[i], 16)) return i; return -1; }")
+    L.append(f"static const unsigned char d9_has_iid[{len(names)}] = {{{', '.join(map(str, has))}}};")
+    L.append("int d9s_iid_iface(const void *g) { for (int i = 0; i < D9_NIFACE; i++) if (d9_has_iid[i] && !memcmp(g, d9_iid[i], 16)) return i; return -1; }")
     isa = []
     for a in names:
         row, c = [0] * len(names), a

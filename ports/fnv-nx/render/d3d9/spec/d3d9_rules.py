@@ -68,6 +68,10 @@ RULES = {
     "GetAdapterDisplayModeEx": {"mode": S(d="inout")}, "GetDisplayModeEx": {"mode": S(d="inout")},
     "GetFVF": {"pFVF": F("D3DFVF", "out")},
     "RegisterSoftwareDevice": {"pInitializeFunction": O("function pointer", d="in")},
+    # IDirect3DShaderValidator9 (x1): the callback is a code address of the CALLER (guest code when the caller is the lifted game), the context an opaque value of the caller; both are passed through as values
+    # (bridge rule of `ohandle`) and canonicalised by first appearance in a recording. file: the NUL-terminated source name D3DX passes (NULL = none).
+    "ShaderValidator9.Begin": {"callback": O("guest callback", True, "in"), "context": O("guest pointer", True, "in"), "arg3": V(4)},
+    "ShaderValidator9.Instruction": {"file": B(1, "str_bytes(file)", null=True, d="in"), "tokens": B(4, "token_count*4", null=True)},
     "CreateDevice": {"BehaviorFlags": F("D3DCREATE"), **PP_IN}, "CreateDeviceEx": {"flags": F("D3DCREATE"), **PP_IN, "mode": S(True, "inout")},
     "Reset": PP_IN, "ResetEx": {**PP_IN, "mode": S(True, "inout")}, "CreateAdditionalSwapChain": PP_IN,
     "AddDirtyRect": {"dirty_rect": S(True)}, "AddDirtyBox": {"dirty_box": S(True)},
