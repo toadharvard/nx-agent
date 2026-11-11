@@ -22,6 +22,7 @@
  * outcome (signalled or timed out) between two threads that race is not defined by VC1; neither is the order in which two
  * threads that both became runnable run: see the report of the task that wrote this file. */
 #include "../include/fnvnx_clock.h"
+#include "../os/os_clock.h"
 
 #include <stdlib.h>
 #include <string.h>

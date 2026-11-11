@@ -120,6 +120,15 @@ ilp32: $(ENVC_INC) $(COMOUT)
 	@$(XCXX) -std=gnu++17 $(subst -mabi=ilp32,-mabi=lp64,$(XFLAGS)) -D__SWITCH__ -I$(ROOT)/tests/s4/ilp32-stubs -I$(LIBNX)/nx/include $(P)/input/input_horizon.cpp
 	@echo "ilp32: all S7 sources parse"
 
+# the link maps of the S7 binaries, one TSV line each (platform/manifest/check_doubles.py); builds their objects
+TAB := $(shell printf '\t')
+empty :=
+space := $(empty) $(empty)
+linkmap: $(OBJS) $(VC_OBJS)
+	@printf 's7_tests$(TAB)%s\n' "$(subst $(space),$(TAB),$(OBJS))"
+	@printf 's7_tests_vclock$(TAB)%s\n' "$(subst $(space),$(TAB),$(VC_OBJS))"
+.PHONY: linkmap
+
 clean:
 	rm -rf $(OUT) $(OUT)-a64
 
