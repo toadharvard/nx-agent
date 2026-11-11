@@ -8,14 +8,14 @@
    "area": "proof",
    "file": "lift/proof/shapeprove.py",
    "statement": "The Sail x86 model (sail-x86-from-acl2 at the pinned commit, plus lift/proof/sail_patches) is the semantics of the reference CPU for every proved shape.",
-   "disposition": "waits-owner: trust in a pinned formal model, same kind as \"the compiler is correct\"; question passed to the owner by the orchestrator"
+   "disposition": "owner: 9, pinned formal tools and published theorems (owner decision, CLAUDE.md of the trunk 55cbf861); the Sail model with the pinned patch of 5b76d567"
   },
   {
    "id": "A-PROVER",
    "area": "proof",
    "file": "lift/proof/prove.py",
    "statement": "isla and z3 at the pinned versions are sound: an unsat answer means no counterexample.",
-   "disposition": "waits-owner: trust in pinned formal tools (isla, z3); question passed to the owner by the orchestrator"
+   "disposition": "owner: 9, pinned formal tools and published theorems (owner decision, CLAUDE.md of the trunk 55cbf861)"
   },
   {
    "id": "A-FLAT",
@@ -211,7 +211,7 @@
    "area": "r9",
    "file": "lift/rt/fnvl.h",
    "statement": "The mapping x86-TSO -> Armv8 (ordered load = ldar or load+dmb ishld, ordered store = stlr or dmb ishst+store, locked RMW = exclusive pair/CAS + dmb ish) preserves every x86-TSO behaviour bound.",
-   "disposition": "waits-owner: published theorem (Pulte 2018, Risotto 2022, Lasagne); question passed to the owner by the orchestrator"
+   "disposition": "owner: 9, pinned formal tools and published theorems (owner decision, CLAUDE.md of the trunk 55cbf861)"
   },
   {
    "id": "A-RCPHOST",
