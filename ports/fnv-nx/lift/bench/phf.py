@@ -41,7 +41,7 @@ def lookup(h, a):
 
 
 def table_asm(syms, phf):
-    """position-independent dispatcher table for rt.c (tools/liftall.py): AArch64 assembly, section .rodata.fnvl_disp.
+    """position-independent dispatcher table for rt.c (tools/liftgen.py): AArch64 assembly, section .rodata.fnvl_disp.
     slot i = {u32 key, s32 L_sym - fnvl_disp_table} (empty slot: a key that does not hash to it), then fnvl_g[] (u16). No absolute code address appears."""
     out = ['.section .rodata.fnvl_disp,"a"', '.balign 8', '.globl fnvl_disp_table', 'fnvl_disp_table:']
     def idx(a): return (((a ^ phf['g'][((a * phf['k1']) & M) >> (32 - phf['nbits'])]) * phf['k2']) & M) >> (32 - phf['tbits'])

@@ -31,7 +31,8 @@ register u32 eax asm("x19"); register u32 ecx asm("x20"); register u32 edx asm("
 register u32 esp asm("x23"); register u32 ebp asm("x24"); register u32 esi asm("x25"); register u32 edi asm("x26");
 register struct cpu *c asm("x27");
 #define REGS() __asm__ volatile("" : "+r"(eax),"+r"(ecx),"+r"(edx),"+r"(ebx),"+r"(esp),"+r"(ebp),"+r"(esi),"+r"(edi))
-/* Control transfer (README): a lifted function is `void L_<addr>(void)`; a direct call or tail jump to another entry calls it. */
+/* Control transfer (README): a lifted function is `void L_<addr>(void)`. A direct call or tail to another entry is a C call of its
+   L_ function (CALLX); the one-instruction tests (test/instest.py) redefine CALLX after the prelude in their own sources. */
 /* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.c maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
 #define FNVL_DE0 1
 #define FNVL_DEOVF 5

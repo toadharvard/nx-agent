@@ -4,7 +4,7 @@
 #   farm_liftgen.sh FIRST COUNT N [JOBS]     (env MODULE=<name.dll>: that module of L1's modules.tsv instead of the exe; branch .../src/<sha12>-<module>/<K>of<N>)
 #          shards are numbered 0 .. N-1; last line: LIFTGEN module= first= count= published= failed= seconds=; exit 1 if any shard is unpublished
 # Inputs (exe-derived, private): fnv-nx-build branches gamedata/exe, gamedata/redist, l3a-lift/facts (universe.tsv), l1-contract/mp4 (modules.tsv); the lifter is this checkout.
-# Output: fnv-nx-build branch l3a-lift/src/<lifter sha12>[-<module>]/<K>of<N> = texts_K.txt, missing_K.tsv, forms_K.tsv, shard.txt (the count line).
+# Output: fnv-nx-build branch l3a-lift/src/<lifter sha12>[-<module>]/<K>of<N> = texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shard.txt (the count line).
 # Nothing exe-derived is written into this repository. Env: FNVNX_BUILD (clone of fnv-nx-build, default /home/user/fnv-nx-build), FNVNX_WORK (default /home/user/l3work/farm).
 set -euo pipefail
 FIRST=$1; COUNT=$2; N=$3; JOBS=${4:-$(nproc)}
