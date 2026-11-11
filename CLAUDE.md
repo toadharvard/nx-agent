@@ -5,6 +5,8 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
 
 ## The orchestrator speaks for the owner
 
+> Handoff of 2026-11-11: the work moved to another account. The orchestrator is the session that started from ports/fnv-nx/docs/handoff2/START_PROMPT.md, and its full context is ports/fnv-nx/docs/HANDOFF2.md. Session ids from earlier notes are dead.
+
 - fnv-nx is run by one **orchestrator** session. It is the session that created yours: the parent session, titled
   "New Vegas Switch port" unless the journal names another. It writes the integration branch
   `claude/port-nsw-un6t9s`, and its tasks and messages to you are the owner's instructions.
@@ -26,8 +28,7 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
   - They never go into this public repository. That is how the Legal section is met: they are not distributed.
 - Long jobs (more than about 10 minutes) run on the farms (D17). The farms are cloud sessions the owner runs on
   purpose.
-- Commit messages end with exactly one trailer line, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-  There is no Claude-Session line, and no session URL or session id in any commit or file.
+- Commit messages carry no trailers: no Co-Authored-By, no Claude-Session, no session URL or id, in any commit or file.
 - Push to your own branch after every finished item. Open no pull requests. Do not edit JOURNAL.md: write inbox
   notes (docs/MACHINES.md).
 - Every check runs in the background, never blocking work. This covers tests, censuses, builds, boots and fuzz
@@ -81,8 +82,40 @@ The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/
 - **MASTER_PLAN3 applies only where it does not contradict this order.**
 - **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
 
+## Owner order of 2026-11-11: the trunk is always green (priority 1, binding)
+
+The owner's words: "Транк никогда красный. Всегда зеленый. И когда он зеленый, это означает, что то, что собирается компилятором, оно в рантайме не упадет." Removing stubs is the first priority: "если это не работает, то значит ничего не работает. Слияния встанут, и это правильно".
+
+- The trunk `claude/fnv-nx-clean` is green at every commit. Green means: what the compiler built does not fail at run time.
+- Every class of run-time failure has a static gate in the L1 verdict (`verify/VERDICT.md`, `gates.json`): a missing import body, a code address without a dispatcher entry, an uncertified form, an uncovered D3D9 enum or SM op, an unresolved symbol, a layout or calling-convention mismatch, a non-deterministic build, a test without a reference, and any stub.
+- A class of run-time failure without a gate is reported to the orchestrator.
+- The stub gate is an absolute 0. It is never "not worse than the base", and there is no allow-list.
+  - Stubs, no-ops, trap paths, "not implemented", fallbacks on failure and fake success are deleted, so that the absence becomes a build error.
+  - Code that does not pass is removed from the trunk whole. Its completion lives on the lead's branch.
+- **Proven-unreachable branches (owner decision, 2026-11-11, option iii).**
+  - Some branches inside an implementation are proven unreachable: for example, the argument values that a contract allows but the platform cannot express, when the call graph proves that no call site passes them.
+  - Such a branch goes to one function, `fnvnx_reach_violation(fact_id)`. It exits loudly through the host exit slot with the fact code.
+  - Every `fact_id` is produced only by the call-graph gate from the exe and module facts, and carries a certificate of unreachability. A missing certificate makes the build red. There are no hand-written lists.
+  - It is an assertion of a proven build invariant, not a trap path. Inventing behaviour or leaving the symbol undefined stays forbidden.
+  - Certificates count as valid only once every dynamic-name GetProcAddress site is statically resolved. Until then, the build is a measurement build.
+- **Memory safety of hand-written native code (owner decision, 2026-11-11, revised the same day).**
+  - The owner's words: "пока чтобы ничего не переписывал... можем пока что покрыть санитайзерами наш C++ код. Давай не будем извращаться... мы даже не добились того, чтобы это загрузилось."
+  - No rewrite of the native code for now.
+    - The checked subset (verify/MEMSAFE.md) is suspended and is not a gate.
+    - Standard C++ containers are allowed.
+  - Our C++ is covered by sanitizers (ASan, UBSan) in emulator and test runs. IKOS stays an advisory check.
+  - "Native code is tested, not proven, for memory safety" is a stated assumption.
+  - External libraries (libc, libnx, FreeType, minimp3) are taken by their documentation. They are not proven.
+  - The address space stays as decided: 32-bit, ILP32.
+    - A wild guest access into host pages is a stated assumption: the exe does not make wild accesses in normal operation.
+  - Priority: the game boots first. New proof work that does not block booting waits until after the first frame.
+- Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
+
 ## Owner decisions of 2026-11-10 (do not re-ask)
 
+- **Full autonomy (owner, 2026-11-11):** "Я разрешаю все, делайте все, что угодно. Только меня не беспокойте."
+  - Do not ask the owner for approvals or confirmations. Decide and act; report only milestones.
+  - The Legal limits and the class-closing rule order still hold.
 - **Downloads are authorized.** The owner's words, 2026-11-10: "Я разрешаю все что угодно качать".
   - Any fnv-nx session may clone or download any public external code, tools, formal models, packages or datasets the work needs. Examples: rems-project/isla, isla-snapshots, sail-x86-from-acl2, acl2/acl2, LLVM, CORE-MATH, MPFR.
   - Use add_repo (read) or plain git/https.
@@ -109,3 +142,24 @@ The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/
   - Rumble is on, through the game's own controller vibration.
   - Docked output is 1080p, handheld 720p.
   - Frame pacing on the 60 Hz panel is decided from the first measured frame.
+  - Packaging is deferred until the game runs in the emulator.
+    - The final package is the game's own installed title: an NSP with its own title id, NPDM (32-bit address space), NACP and icon, packed with the owner's console keys.
+    - Development runs use an Atmosphere exefs override.
+
+## The prepared build machinery is the only one (owner, 2026-11-11, binding)
+
+The owner's words: "Я буквально сказал, что я использую только конкретный компилятор... Мы нахуя инструменты подготавливали? Чтобы потом просто игнорить?"
+
+- **Compiler:** only the one pinned in `verify/env.json` (g++-13-aarch64-linux-gnu 13.3.0-6ubuntu2~24.04.1cross1, binutils 2.42-4ubuntu2.10), installed by `farm/setup_verdict_env.sh` and checked by `envcheck.py`. No unpinned apt, no other gcc.
+- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, and MSVC's new[] cookie and delete[] size. The headers and binutils come from the pinned distribution cross packages in `env.json`.
+  - It enters every guest product root as the recipe's external compiler (`{"external", "cc", "cxx"}`, RECIPE.md): a fnv-nx-build mirror `tools/gcc-ilp32-msvcmodel`, pinned by commit and `tree_sha256`.
+  - Our GCC plugins are built against its own plugin headers, as hermetic recipe stages; each `.so` is a declared input, so it is in every key. They are `fnvnx_order` (x86 TSO and MSVC volatile become `ldar`/`stlr`; MSVC argument order), `fnvnx_ftoi` (MSVC `_ftol`), and L2's `addr`, `dispatch`, `names`, `sdd` and `pi` (plus the clang `vtnames`).
+  - Native and decomp C++ load them all.
+  - Lifted C++ is compiled by the same compiler; the lifter emits the memory ordering itself (R9 (б)).
+  - The stock `g++-13` of `env.json` is the base the compiler is built from. It is not the game's compiler.
+  - fnvnx-a64 (gcc 15 + newlib) provides the guest's libc/libstdc++ and libnx.
+- **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
+- **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
+- **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
+- **Lifter:** `liftall.py` generates C++. Its objects are built by `recipe.py` in that store, as a product root with the pack as an external.
+- Missing something in this machinery? Extend it and say so in the inbox. A parallel path is a rule violation.

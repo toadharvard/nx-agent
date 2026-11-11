@@ -1137,7 +1137,8 @@ of `tests/s5/milestones.txt`: ini-read, archive-list, bsa-opened, esm-header, ma
 calls.
 
 **First boots on FalloutNV.exe 1.4.0.525 (GOG)**, guest of fa88387. That guest predates 8b24dc6, so its pe_open
-check of SizeOfImage was patched by hand for this analysis.
+check of SizeOfImage was patched by hand for this analysis. That guest also predates INIT1, so its stub table adds
+`before-winmain 0x00a8a5f0`.
 
 The loader:
 - the exe is taken, and the initializers run in IMAGE order: 17,191 natives, 537 missing;

@@ -142,12 +142,12 @@ The authoritative table with counts is `report.md` of a run; the classes are def
   [ORDERING.md](ORDERING.md)):** every call's scalar arguments are evaluated right to left; tests/s12/order args.cpp
   matches GCC x86-32 on 9 call shapes. ORDER-OBJECT and ORDER-OPERATOR are closed by `object=last` and `operator=rtl` (S11 confirms). ORDER-BINOP (both operands of a built-in operator) is
   unspecified on both compilers; it is listed, not judged.
-* **volatile and memory ordering (VOLATILE-DECL, POLL-VOLATILE, ATOMIC-*, BARRIER)**. MSVC's volatile
+* **volatile and memory ordering (VOLATILE-DECL, POLL-VOLATILE, POLL-PLAIN, ATOMIC-*, BARRIER)**. MSVC's volatile
   accesses are acquire/release and x86 is TSO; on AArch64 GCC gives neither. **Closed by S12-ordering**
   ([ORDERING.md](ORDERING.md)): the fnvnx_order plugin (volatile = ldar/stlr, Interlocked operands ordered), the
   barrier header (dmb ish / ishld / ishst), Interlocked* with a trailing dmb ish and a split lock for misaligned
-  operands. ATOMIC-PLAIN-STORE is closed by rule R9 (every non-local access ordered,
-  ORDERING.md). The bullets below are the analysis that led there.
+  operands. ATOMIC-PLAIN-STORE and POLL-PLAIN are closed by the whole-program key list (compile.sh's default
+  ORDER_KEYS, ORDERING.md "Whole-program keys"). The bullets below are the analysis that led there.
   * `_ReadWriteBarrier` / `_ReadBarrier` / `_WriteBarrier`: **header**. In `fnvnx_compat.h` they become
     `__atomic_thread_fence(__ATOMIC_SEQ_CST)`, `__ATOMIC_ACQUIRE` and `__ATOMIC_RELEASE` (`dmb ish` / `dmb ishld`)
     instead of an empty asm. Still open at 0c630cf and at the branch head: the shim keeps the empty asm, and the 436 f8
@@ -156,7 +156,9 @@ The authoritative table with counts is `report.md` of a run; the classes are def
     units into `ldar`/`stlr` (`/volatile:ms` emulation), or a rule wraps the listed declarations in
     `fnvnx_msvolatile<T>` (same size, acquire/release accessors).
   * plain stores to `Interlocked*` operands (ATOMIC-PLAIN-STORE), the unlock half of a spin lock: was per-site (rule
-    ATOM1); **closed by rule R9**, which reaches every unit (ATOM1 not needed).
+    ATOM1); **closed by the plugin with the whole-program key list**, which reaches every unit (ATOM1 not needed).
+  * POLL-PLAIN: was per-site; **closed by the plugin**: a wait-only loop's polled fields are ordered (ldar in the
+    loop) and, through the key list, every store to them in any unit is a release.
   * Interlocked on packed or misaligned fields (ATOMIC-UNALIGNED): **per-site**. `ldaxr`/`stlxr` fault on
     misalignment where x86 `lock` does not.
 * **record layout (LAYOUT-\*)**. Mixed-type bit-fields (MSVC opens a new unit whenever the declared type size
@@ -307,8 +309,8 @@ coverage. The classes added in this round have no earlier count.
 | F2S | 792 | 432 -> 432 | 536 | open: NaN / out of int32 give 0x80000000 on x86 (S13 0x00a1b450); the fnvnx_ftoi plugin closes it once compile.sh loads it |
 | ORDER-ARGS / -OBJECT / -OPERATOR | 1,018 / 578 / 53 | 441 / 270 / 24, unchanged | 897 / 490 / 47 | ORDER-ARGS closed: fnvnx_order args=rtl; -OBJECT / -OPERATOR closed: object=last, operator=rtl (ORDERING.md; S11 confirms) |
 | ORDER-BINOP / -ASSIGN | 1,046 / 17 | 470 / 4, unchanged | 831 / 51 | listed (unspecified on both) |
-| VOLATILE-DECL / BARRIER / POLL-* | 146 / 15 / 5 | 41 / 5 / 3, unchanged | 928 / 197 / 5 | closed: fnvnx_order + barrier header (ORDERING.md) |
-| ATOMIC-USE / ATOMIC-PLAIN-STORE | 148 / - | 42 / 0 -> 1 | 165 / 3 | ATOMIC-USE closed (fully ordered Interlocked, in-unit operands and forwarders); PLAIN-STORE closed: rule R9 (every non-local access ordered) |
+| VOLATILE-DECL / BARRIER / POLL-* | 146 / 15 / 5 | 41 / 5 / 3, unchanged | 928 / 197 / 5 | closed: fnvnx_order + barrier header (ORDERING.md); POLL-PLAIN: plain-poll rule + whole-program keys |
+| ATOMIC-USE / ATOMIC-PLAIN-STORE | 148 / - | 42 / 0 -> 1 | 165 / 3 | ATOMIC-USE closed (fully ordered Interlocked, in-unit operands and forwarders); PLAIN-STORE closed: compile.sh's whole-program ORDER_KEYS (default) |
 | ENUM-UNSIGNED | 14 | 5 -> 5 | 6 | open: S1's ENUM1 excludes these by design (ENUM2) |
 | P2I-SIGNED | 16 | 5 -> 5 | 12 | runtime (S5 heap below 2 GiB) |
 | SHIFT64-VAR | 2 | - | 10 | open (per-site) |
