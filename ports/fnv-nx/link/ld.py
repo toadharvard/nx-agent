@@ -127,21 +127,140 @@ def symbols(path):
     return sorted(out.items())
 
 
+def elf_header(d):
+    """(program headers [(type, offset, vaddr, filesz, memsz, flags)], e_entry) of an ELF32 little-endian file."""
+    if d[:4] != b'\x7fELF' or d[4] != 1 or d[5] != 1:
+        raise ValueError('not ELF32 little-endian')
+    entry, phoff = struct.unpack_from('<II', d, 24)
+    phentsize, phnum = struct.unpack_from('<HH', d, 42)
+    ph = []
+    for i in range(phnum):
+        typ, off, va, _, filesz, memsz, flags, _ = struct.unpack_from('<IIIIIIII', d, phoff + i * phentsize)
+        ph.append((typ, off, va, filesz, memsz, flags))
+    return ph, entry
+
+
+def file_offset(ph, addr, n):
+    """The file offset of the n bytes at virtual address addr inside the file image of one PT_LOAD (None when none holds them)."""
+    for typ, off, va, filesz, _, _ in ph:
+        if typ == PT_LOAD and va <= addr and addr + n <= va + filesz:
+            return off + addr - va
+    return None
+
+
+def dynamic(d, ph):
+    """{tag name: value} of the PT_DYNAMIC of the image (the last value of a repeated tag)."""
+    out = {}
+    names = {v: k for k, v in DT.items()}
+    for typ, off, _, filesz, _, _ in ph:
+        if typ == PT_DYNAMIC:
+            for o in range(off, off + filesz, 8):
+                tag, val = struct.unpack_from('<II', d, o)
+                if tag == 0:
+                    break
+                out[names.get(tag, 'tag_%x' % tag)] = val
+    return out
+
+
 def is_pie(path):
     """The linker's own mark of a position-independent executable: DT_FLAGS_1 has DF_1_PIE.  (e_type is not the
     witness: GNU ld writes ET_EXEC for a PIE whose first segment is linked at a non-zero address.)"""
     with open(path, 'rb') as fh:
         d = fh.read()
-    phoff, = struct.unpack_from('<I', d, 28)
-    phentsize, phnum = struct.unpack_from('<HH', d, 42)
-    for i in range(phnum):
-        typ, off, _, _, filesz = struct.unpack_from('<IIIII', d, phoff + i * phentsize)
-        if typ == 2:
-            for o in range(off, off + filesz, 8):
-                tag, val = struct.unpack_from('<II', d, o)
-                if tag == 0x6ffffffb:
-                    return bool(val & 0x08000000)
-    return False
+    ph, _ = elf_header(d)
+    return bool(dynamic(d, ph).get('FLAGS_1', 0) & 0x08000000)
+
+
+def dyn_relocs(path):
+    """({what: count}, [bad ids]) of the dynamic relocations of the image: `P32_RELATIVE` (RELA entries without symbol), `RELR` (words
+    the RELR bitmap entries relocate), and every other entry as a bad id `dynreloc:<offset>:<type or table>`; a REL, JMPREL or
+    PLTREL table, a symbol table (DT_SYMTAB with relocations that name it) or DT_TEXTREL is bad as well."""
+    with open(path, 'rb') as fh:
+        d = fh.read()
+    ph, _ = elf_header(d)
+    dy = dynamic(d, ph)
+    cnt, bad = {'P32_RELATIVE': 0, 'RELR': 0}, []
+
+    def table(tag, size_tag):
+        if tag not in dy or not dy.get(size_tag, 0):
+            return None, 0
+        o = file_offset(ph, dy[tag], dy[size_tag])
+        if o is None:
+            raise ValueError('%s lies outside the PT_LOAD image' % tag)
+        return o, dy[size_tag]
+    o, n = table('RELA', 'RELASZ')
+    for k in range(n // 12 if o is not None else 0):
+        off, info, _ = struct.unpack_from('<IIi', d, o + 12 * k)
+        if info == R_AARCH64_P32_RELATIVE:
+            cnt['P32_RELATIVE'] += 1
+        else:
+            bad.append('dynreloc:%08x:type%d%s' % (off, info & 0xff, '+sym' if info >> 8 else ''))
+    for tag, szt in (('REL', 'RELSZ'), ('JMPREL', 'PLTRELSZ')):
+        if dy.get(szt, 0):
+            bad.append('dynreloc:table:%s' % tag)
+    if 'TEXTREL' in dy:
+        bad.append('dynreloc:table:TEXTREL')
+    o, n = table('RELR', 'RELRSZ')
+    where = 0
+    for k in range(n // 4 if o is not None else 0):
+        e, = struct.unpack_from('<I', d, o + 4 * k)
+        if not e & 1:
+            where = e + 4
+            cnt['RELR'] += 1
+        else:
+            cnt['RELR'] += bin(e >> 1).count('1')
+            where += 31 * 4
+    return cnt, bad
+
+
+def write_header(path):
+    """Write the crt0 header words +16 (link address of the first PT_LOAD), +20 (bytes to map, first segment to the end of the last, page
+    aligned) and +24 (bit 0: relocatable) into the ELF, as elf2nso.py `patch_guest_header` does.  ValueError when the magic is not at
+    first segment + 8 or the entry is not the first segment.  Returns (base, span, flags)."""
+    with open(path, 'rb') as fh:
+        d = bytearray(fh.read())
+    ph, entry = elf_header(d)
+    loads = [p for p in ph if p[0] == PT_LOAD]
+    if not loads:
+        raise ValueError('no PT_LOAD segment')
+    _, off, base, filesz, _, _ = loads[0]
+    if filesz < 32 or struct.unpack_from('<I', d, off + 8)[0] != GUEST_MAGIC:
+        raise ValueError('the guest header magic FNXG is not at the first segment + 8')
+    if entry != base:
+        raise ValueError('the entry %#x is not the first segment %#x' % (entry, base))
+    last = loads[-1]
+    span = (last[2] + last[4] - base + PAGE - 1) & ~(PAGE - 1)
+    flags = 1 if dynamic(d, ph).get('FLAGS_1', 0) & 0x08000000 else 0
+    struct.pack_into('<III', d, off + 16, base, span, flags)
+    with open(path, 'wb') as fh:
+        fh.write(d)
+    return base, span, flags
+
+
+def map_members(path):
+    """Sorted [(archive path, member name)] the linker pulled in to satisfy a reference, from its map file."""
+    out, on = [], False
+    with open(path) as fh:
+        for ln in fh:
+            if ln.startswith('Archive member included'):
+                on = True
+            elif on and ln.strip() and not ln[0].isspace():
+                w = ln.split()[0]
+                if w.endswith(')') and '(' in w:
+                    out.append((w[:w.rindex('(')], w[w.rindex('(') + 1:-1]))
+                else:
+                    break
+    return sorted(set(out))
+
+
+def member_symbols(archive, name):
+    """{symbol: defined} of the member `name` of `archive` (ValueError when two members of that name differ)."""
+    found = [b for n, _, b in ar_members(archive) if n == name]
+    if not found:
+        raise ValueError('%s has no member %s' % (archive, name))
+    if len(set(found)) > 1:
+        raise ValueError('%s: the member name %s is ambiguous' % (archive, name))
+    return elf_symbols('%s(%s)' % (archive, name), found[0])
 
 
 def undefined(referenced, out_syms):
@@ -171,54 +290,95 @@ def inputs(dirs):
     return out
 
 
-def command(ld, script, out, rsp):
-    return list(ld) + ['-pie', '--no-dynamic-linker', '-z', 'text', '-z', 'max-page-size=0x1000',
-                       '-z', 'common-page-size=0x1000', '--unresolved-symbols=ignore-all', '--noinhibit-exec', '--whole-archive', '-T', script, '-o', out, '@' + rsp]
+def command(ld, script, out, rsp, libdirs=(), libs=(), startfiles=(), endfiles=(), mapfile=None):
+    """The linker command: the driver's line with guest_pie.specs (`-pie --no-dynamic-linker -z text -z now -z pack-relative-relocs
+    -z max-page-size=0x1000 --build-id=sha1`, startfiles, -L dirs, inputs, `--start-group -l.. --end-group`, endfiles) with our script,
+    no `--defsym` and no `--gc-sections`; our inputs whole, the toolchain's libraries searched."""
+    cmd = list(ld) + ['-pie', '--no-dynamic-linker', '-z', 'text', '-z', 'now', '-z', 'pack-relative-relocs', '-z', 'max-page-size=0x1000',
+                      '-z', 'common-page-size=0x1000', '--build-id=sha1', '--unresolved-symbols=ignore-all', '--noinhibit-exec',
+                      '-T', script, '-o', out]
+    if mapfile:
+        cmd += ['-Map', mapfile]
+    cmd += list(startfiles) + ['-L' + d for d in libdirs] + ['--whole-archive', '@' + rsp, '--no-whole-archive']
+    if libs:
+        cmd += ['--start-group'] + ['-l' + n for n in libs] + ['--end-group']
+    return cmd + list(endfiles)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--ld', required=True, help='path of the AArch64 ILP32 linker (no PATH lookup)')
-    ap.add_argument('--ld-arg', action='append', default=[], help='emulation and library options of the toolchain')
+    ap.add_argument('--ld-arg', action='append', default=[], help='emulation options of the toolchain (-m.., -EL, -X)')
     ap.add_argument('--script', required=True)
     ap.add_argument('--in', dest='ins', action='append', required=True)
     ap.add_argument('--out', required=True)
+    ap.add_argument('--lib-dir', action='append', default=[], help='-L directory of the toolchain libraries (the driver\'s search path)')
+    ap.add_argument('--lib', action='append', default=[], help='toolchain library NAME (-lNAME), searched in --lib-dir, not swallowed')
+    ap.add_argument('--startfile', action='append', default=[], help='object linked before the inputs (crti.o, crtbegin.o)')
+    ap.add_argument('--endfile', action='append', default=[], help='object linked after the libraries (crtend.o, crtn.o)')
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    elf, rsp, und = (os.path.join(a.out, n) for n in ('guest.elf', 'inputs.rsp', 'undefined.tsv'))
+    elf, rsp, und, mapf, libm = (os.path.join(a.out, n) for n in ('guest.elf', 'inputs.rsp', 'undefined.tsv', 'guest.map', 'libmembers.txt'))
     try:
         ins = inputs(a.ins)
     except ValueError as e:
         sys.exit('ld: %s' % e)
     with open(rsp, 'w', newline='\n') as fh:
         fh.write(''.join('"%s"\n' % p for p in ins))
-    for stale in (elf, und):
+    for stale in (elf, und, mapf, libm):
         if os.path.exists(stale):
             os.remove(stale)
-    r = subprocess.run(command([a.ld] + a.ld_arg, a.script, elf, rsp), capture_output=True, text=True)
+    r = subprocess.run(command([a.ld] + a.ld_arg, a.script, elf, rsp, a.lib_dir, a.lib, a.startfile, a.endfile, mapf), capture_output=True, text=True)
     if not os.path.exists(elf):
         sys.stderr.write(r.stderr[-4000:])
         sys.exit('ld: the linker failed (exit %d), no output' % r.returncode)
-    refs = {n for p in ins for n, df in symbols(p) if not df}
-    names = {n for p in ins for n, _ in symbols(p)}
+    try:
+        pulled = map_members(mapf)
+        libsyms = [member_symbols(ar, m) for ar, m in pulled]
+    except (OSError, ValueError) as e:
+        os.remove(elf)
+        sys.exit('ld: %s' % e)
+    with open(libm, 'w', newline='\n') as fh:
+        fh.write(''.join('%s(%s)\n' % x for x in pulled))
+    objs = a.startfile + ins + a.endfile
+    insyms = [dict(symbols(p)) for p in objs] + libsyms
+    refs = {n for sy in insyms for n, df in sy.items() if not df}
+    names = {n for sy in insyms for n in sy}
     bad = undefined(refs, symbols(elf))
-    detail = '%d inputs, %d names, %d undefined' % (len(ins), len(names), len(bad))
+    cnt, badrel = dyn_relocs(elf)
+    ndyn = cnt['P32_RELATIVE'] + cnt['RELR'] + len(badrel)
+    ids = list(bad) + badrel
+    pie = is_pie(elf)
+    if not pie:
+        ids.append('pie:no-DF_1_PIE')
+    hdr = None
+    if not ids and r.returncode == 0:
+        try:
+            hdr = write_header(elf)
+        except ValueError as e:
+            ids.append('header:%s' % e)
+    elif not any(i.startswith('header') for i in ids):
+        ids.append('header:not-written')
+    universe = len(names) + ndyn + 2
+    detail = '%d inputs, %d library members, %d names, %d undefined; dynamic relocations: P32_RELATIVE %d, RELR %d, other %d' % (
+        len(objs), len(pulled), len(names), len(bad), cnt['P32_RELATIVE'], cnt['RELR'], len(badrel))
+    if hdr:
+        detail += '; header base %#x size %#x flags %d' % hdr
+    gatefile.write('ld', universe, universe - len(ids), ids, detail)
+    gateids.write_ids('ld', ids)
+    print(detail)
     if bad:
-        gatefile.write('ld', len(names), len(names) - len(bad), bad, detail)
-        print(detail)
         with open(und, 'w', newline='\n') as fh:
             fh.write(''.join(n + '\n' for n in bad))
+    if ids:
         os.remove(elf)
+        if not bad and r.returncode != 0:
+            sys.stderr.write(r.stderr[-4000:])
         sys.exit(1)
     if r.returncode != 0:
         os.remove(elf)
         sys.stderr.write(r.stderr[-4000:])
         sys.exit('ld: the linker failed (exit %d)' % r.returncode)
-    if not is_pie(elf):
-        os.remove(elf)
-        sys.exit('ld: the output is not position independent (no DF_1_PIE)')
-    gatefile.write('ld', len(names), len(names), [], detail)
-    print(detail)
 
 
 if __name__ == '__main__':

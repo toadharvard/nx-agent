@@ -39,12 +39,14 @@ $CC -mabi=ilp32 -fPIC -specs="$R/toolchain/guest/guest_pie.specs" "$W/rt/crt0.o"
     -Wl,--whole-archive -lfnvnx-guest -Wl,--no-whole-archive -lfnvnx-loader -Wl,-Map,"$W/guest.map" -o "$W/guest.elf"
 python3 -I "$R/toolchain/tools/elf2nso.py" "$W/guest.elf" "$W/guest.nso" >/dev/null
 
-# the ELF: position independent, relocations only of the relative kind (no symbol, so none against an absolute one)
-t "ELF has DF_1_PIE" "aarch64-none-elf-readelf -d '$W/guest.elf' | grep -q 'Flags: PIE'"
+# the ELF: position independent; every relocation is the relative kind (RELR, or RELA of type P32_RELATIVE without a
+# symbol), so none is against an absolute symbol (the loader-side data rows are ordinary .bss objects here)
+aarch64-none-elf-readelf -dW "$W/guest.elf" > "$W/dynamic.txt"
 aarch64-none-elf-readelf -rW "$W/guest.elf" > "$W/relocs.txt"
-t "every relocation is R_AARCH64_P32_RELATIVE" "! grep -E '^[0-9a-f]{8} ' '$W/relocs.txt' | grep -qv 'R_AARCH64_P32_RELATIVE'"
-t "no relocation names a symbol" "! grep -E '^[0-9a-f]{8} ' '$W/relocs.txt' | awk '{print \$5}' | grep -q ."
-echo "relocations: $(grep -cE '^[0-9a-f]{8} ' "$W/relocs.txt") RELA entries, $(grep -c 'Relocation section' "$W/relocs.txt") sections"
+t "ELF has DF_1_PIE" "grep -E 'FLAGS_1.*PIE' '$W/dynamic.txt' >/dev/null"
+t "relocation sections are only .relr.dyn / .rela.dyn" "[ -z \"\$(grep 'Relocation section' '$W/relocs.txt' | grep -vE '[.](relr|rela)[.]dyn')\" ]"
+t "every RELA entry is R_AARCH64_P32_RELATIVE without a symbol" "! grep -E '^[0-9a-f]{8} +[0-9a-f]+ ' '$W/relocs.txt' | grep -vE 'R_AARCH64_P32_RELATIVE +[0-9a-f]+$' | grep -q ."
+echo "relocations: RELR relocates $(grep -oE 'which relocate [0-9]+' "$W/relocs.txt" | head -1), RELA entries $(grep -cE '^[0-9a-f]{8} +[0-9a-f]+ ' "$W/relocs.txt")"
 
 mkdir -p "$W/game" "$W/root"; ln -sf "$EXE" "$W/game/FalloutNV.exe"
 set +e
@@ -55,8 +57,8 @@ echo "guest: $(grep -o 'rc=0x[0-9a-f]*' "$LOG" | head -1)"
 t "identity ok" "grep -q 'fnvnx-start: identity ok' '$LOG'"
 t "image mapped" "grep -q 'fnvnx-start: image mapped' '$LOG'"
 if [ $MODE = refuse ]; then
-  NP=$(grep -c 'fnvnx-start: no provider for ' "$LOG" || true)
-  echo "slots listed without provider: $NP; modules: $(grep -o 'no provider for [a-z0-9_]*' "$LOG" | sort | uniq -c | tr '\n' ' ')"
+  NP=$(grep 'fnvnx-start: no provider for ' "$LOG" | grep -vc '\[debug\]' || true)
+  echo "slots listed without provider: $NP; modules: $(grep -v '\[debug\]' "$LOG" | grep -o 'no provider for [a-z0-9_]*' | sort | uniq -c | tr '\n' ' ')"
   t "40 slots listed" "[ $NP = 40 ]"
   t "start refused (failed -41, rc 0xf0000100)" "grep -q 'fnvnx-start: failed -41' '$LOG' && grep -q 'rc=0xf0000100' '$LOG'"
   t "no imports bound / no enter" "! grep -q 'fnvnx-start: imports bound' '$LOG' && ! grep -q 'fnvnx-start: enter' '$LOG'"
