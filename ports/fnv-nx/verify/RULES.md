@@ -29,6 +29,13 @@ Every prepare rule has a lemma of one of two kinds. Neutral: the tree's MSVC obj
 the pristine one, per function, without sampling. Targeted (SDD1, conventions, shim): changes only the representation at
 the contract boundary; the lemma is discharged by GCC-object gates for `f` at all sites: vcall offsets equal the exe, vptr
 stores equal exe addresses (R6), the set of data references equals the exe relocations, call targets equal the exe.
+Declaration equality (`n2_call`): for every cross-boundary edge of a native body (call, tail, bridge, data reference to an exe
+address Y) the body's object has a `.fnvnx.sympair` row of direction `ref` whose `msvc_name` is byte-equal to the pristine
+COFF symbol name of Y, and that name is decorated (`?...`). No row, an `unnamed:*` row, no pristine symbol at Y, or an
+undecorated one (extern "C", every asm/x87/register CRT helper: `_ftol2`, `_CI*`, `_alloca_probe`, with no name table) is
+not provable: the caller is not N2. Proof: R5 derives convention, stack words, varargs and sret from the decorated name;
+byte-equality of the full names gives equality of all of them. Assumptions: the `names` plugin ran on every native unit
+(recipe rule: guest compiler plus plugins); the pristine cl names are the exe's contract (N1).
 Gates: `n2_data`, `n2_call`, `n2_vcall`, `xc` (`contract/gate_data.py`, `gate_call.py`, `gate_vcall.py`, `gate_xc.py`;
 rows come from `contract/registry.py`; a function with a row is not N2 and becomes LIFTED in `bodysel`).
 
