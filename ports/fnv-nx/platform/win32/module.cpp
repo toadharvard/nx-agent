@@ -200,8 +200,17 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name)
     if (h)
         return h;
     /* not loaded: a translated module is loaded by the loader (it registers the image); anything else is absent */
-    uint32_t base = 0;
-    uint32_t err = fnvnx_bnd_module_load(name, &base);
+    /* the loader's table is by file name: a path must be the game directory's (the place translated modules live) */
+    char f[W32_PATH_MAX], dir[W32_PATH_MAX];
+    int hp;
+    uint32_t base = 0, err = ERROR_MOD_NOT_FOUND;
+    if (normalize(name, f, sizeof f, &hp)) {
+        snprintf(dir, sizeof dir, "%s", W32_EXE_PATH);
+        *(char *)base_name(dir) = 0;   /* the game directory, with its trailing '\\' */
+        size_t dl = strlen(dir);
+        if (!hp || (!w32_strnicmp(f, dir, dl) && f[dl] && !strpbrk(f + dl, "\\:")))
+            err = fnvnx_bnd_module_load(base_name(f), &base);
+    }
     if (!err) {
         h = module_lookup(name, 1);
         if (!h)
