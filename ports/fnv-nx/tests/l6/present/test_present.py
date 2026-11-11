@@ -36,7 +36,7 @@ def cxx(tmp, src, obj, dev=DEV):
 def sources(tmp):
     o = {}
     for f in sorted(os.listdir(DEV)):
-        if f.endswith(".cpp") and f != "app_unk_guest.cpp": o[f] = os.path.join(DEV, f)
+        if f.endswith(".cpp") and f != "app_unk_guest.cpp" and not f.startswith("ffp_"): o[f] = os.path.join(DEV, f)   # ffp_*: the fixed-function programs need generated GLSL / DKSH headers this harness does not build
     for g in GENS: o[g] = os.path.join(tmp, g)
     for f in sorted(os.listdir(FRONT)):
         if f.endswith(".c"): o["front_" + f] = os.path.join(FRONT, f)

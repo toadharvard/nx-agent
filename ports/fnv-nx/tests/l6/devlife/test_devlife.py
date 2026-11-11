@@ -205,7 +205,7 @@ def compile_all(tmp, dev, objs, jobs=4, only=None, outdir=None):
 def sources(tmp, dev):
     o = {}
     for f in sorted(os.listdir(dev)):
-        if f.endswith(".cpp") and f != "app_unk_guest.cpp" and not f.startswith("glue_"): o[f] = os.path.join(dev, f)   # glue_*.cpp = the product definitions of the backend hooks (nxg calls): the test records them instead
+        if f.endswith(".cpp") and f != "app_unk_guest.cpp" and not f.startswith(("glue_", "ffp_")): o[f] = os.path.join(dev, f)   # glue_*.cpp = the product definitions of the backend hooks (nxg calls): the test records them instead
     for g in GENS: o[g] = os.path.join(tmp, g)
     for f in sorted(os.listdir(FRONT)):
         if f.endswith(".c"): o["front_" + f] = os.path.join(FRONT, f)
