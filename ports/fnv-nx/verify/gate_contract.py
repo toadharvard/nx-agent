@@ -30,6 +30,7 @@ not match its hash, a root that has no link, no "game", does not build or lacks 
 n2_data n2_call n2_vcall xc (registry.py counts, rows = functions that are not N2): not failures in themselves (the function becomes LIFTED, a
 legal outcome); the invariant that closes the class is that EVERY row is turned into LIFTED by bodysel. Universe = the functions the gate
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract)."""
+import contextlib
 import hashlib
 import json
 import os
@@ -246,8 +247,11 @@ def judge_root(gate, repo, cache, root):
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
 
 
-def judge(gate, repo, cache, root):
-    """-> (universe, certified, ids, detail) of the gate on ROOT; raises Red."""
+@contextlib.contextmanager
+def chain(gate, repo, cache, root):
+    """The preamble of judge(), shared with the L2 gates (gate_l2native.py): the root's build, its result files, the stages GATE needs run
+    (cached), the externals fetched. Yields (doc, rec, objs, out, rp, ext, w): w holds the stage outputs (bodysel.tsv, gates/ ...); ext {name: {host}}
+    is valid inside the with block only. Raises Red."""
     doc = load_inputs(os.path.join(repo, INPUTS))
     for k in GATE_KEYS.get(gate, []):
         if not doc.get(k):
@@ -284,6 +288,15 @@ def judge(gate, repo, cache, root):
             os.rename(tmpl, w + "/link")
         for st in NEEDS[gate]:
             run_stage(st, w, doc, ext, rp)
+        yield doc, rec, objs, out, rp, ext, w
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+
+
+def judge(gate, repo, cache, root):
+    """-> (universe, certified, ids, detail) of the gate on ROOT; raises Red."""
+    with chain(gate, repo, cache, root) as (doc, rec, objs, out, rp, ext, w):
+        tree = gate_build.tree_of(repo)
         if gate == "reach":       # the facts file the objstub gate reads (gate_objstub.py): written only from a reach run of this tree
             d = os.path.join(cache, "reach", tree)
             os.makedirs(d, exist_ok=True)
@@ -305,8 +318,6 @@ def judge(gate, repo, cache, root):
         counts = json.load(open(w + "/gates/gates.json"))[g]["counts"]
         u, c, ids = n2_item(None, counts, rows, verd)
         return u, c, [root + ":" + i for i in ids], "judged %d, rows %d, every row must be LIFTED by bodysel" % (u, len(rows))
-    finally:
-        shutil.rmtree(ws, ignore_errors=True)
 
 
 if __name__ == "__main__":

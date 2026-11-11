@@ -247,6 +247,33 @@
     "ports/fnv-nx/verify/gate_argorder.py"
    ],
    "result": "argordergate.json"
+  },
+  {
+   "name": "abi",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_abi.py"
+   ],
+   "result": "abi.json"
+  },
+  {
+   "name": "namegate",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_namegate.py"
+   ],
+   "result": "namegate.json"
+  },
+  {
+   "name": "r7",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_r7gate.py"
+   ],
+   "result": "r7.json"
   }
  ]
 }
