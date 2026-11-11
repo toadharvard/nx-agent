@@ -12,14 +12,15 @@ Branch `claude/fnv-l1-contract`. Trunk measured against: `claude/fnv-nx-clean` 5
 | 1d | merge queue: L5 imports + machine f15935a9 | L5 | - | queued at MERGER |
 | 2 | incremental verdict speed (S0 cold, S1 no change, S2 comment header, S3 one .cc, S4 tool) + census of second build paths in verify/ | session_01KmtZKS82vxSbxtKufqbp4i | claude/fnv-l1-contract-w14 | doing |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
-| 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | predecessor's local agent w10 -> moving to a cloud worker | claude/fnv-l1-contract-w10 | doing: WIP push requested |
+| 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
 | 4b | w11 test-defined symbols ∩ product-root symbols = ∅ in objstub | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w11 001306f0 | doing: stage 2 (COMDAT, python AST rule, six L1 names to 0) |
-| 4c | w12 hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w12 | doing: WIP push requested |
+| 4c | w12 hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 (from 6766d18a) | doing: diagnose 3 red selftests (trunk / branch / without -dU), inline-wrapper and range-marker tests; L4, L5 told to delete their side |
 
 ## Global numbers (trunk 58a79b3e)
 
 - gates in gates.json: 22; product roots in admit.json: 0 (every per-root gate has universe 0).
 - verdict seconds: pending w13.
 - tests with doubles (trunk c9765781, AST rule, whole ports/fnv-nx): 8 of 47 python test files, 9 names; L1 owns 6 (gate_build.ensure, l1._check, runtime.DEFAULT_DIRS, runtime.conf_dirs, sandbox.launch, verdict._git), L4 owns 2.
-- assumptions: no total yet (w10).
+- assumptions (w10 b9f7cf14, before cleanup, not global): 100 records = 9 OWNER + 91 REMOVE; 47 of them pending -> removed; L6 not entered (enters with L6's merge).
+- hostapi (w12 6766d18a): 5 services removed (27, 28, 29, 32, 33; 0 call sites in platform 2951f7ae); gate hostapi 0 of 0, no roots.
 - handoff read: c1431c5d.
