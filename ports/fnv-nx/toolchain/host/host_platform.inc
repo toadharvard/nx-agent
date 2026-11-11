@@ -1,6 +1,7 @@
 /* host_platform.inc - ext_call module FNVNX_EXT_PLATFORM (hostapi.h 1..15): ONE table, one row per service number: the
  * least number of arguments and the handler. platform_ext is total: every (fn, nargs) has exactly one answer.
- *   fn 16..33 (sockets): host_sock_call answers (nargs wrong -> -FNVNX_WE_INVAL, its own rule)
+ *   fn 16..33 (sockets): host_sock_call answers, BEFORE the two checks below: nargs != the service's exact count -> -FNVNX_WE_INVAL
+ *                        (even for a null array); the exact count with a null array -> FNVNX_EXT_BAD_NARGS; else the service's answer
  *   fn without a row (0, 10 until the access-fault delivery exists, 36 and up) -> FNVNX_EXT_NO_SERVICE
  *   nargs below the row's number, or nargs > 0 with a null argument array     -> FNVNX_EXT_BAD_NARGS
  *   otherwise the handler's answer, which hostapi.h states per service; more arguments than the row needs are ignored.
