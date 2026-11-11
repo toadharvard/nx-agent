@@ -142,6 +142,17 @@ rc, r, e = tests(d, extra=("--timeout-s", "15"))
 check("tests: timeout is a failure", rc != 0 and r["uncertified"] == ["verify/tests/test_slow.py"] and r["certified"] == 1,
       (rc, r, e))
 
+d = tmp("tests-scratch")
+log = os.path.join(d, "where.txt")
+put(d, "verify/tests/test_leaves.py", "import tempfile\nd = tempfile.mkdtemp(prefix='left-')\nopen(d + '/f', 'w').write('x')\n"
+    "open(%r, 'a').write(d + '\\n')\n" % log)
+put(d, "verify/tests/test_leaves_fails.py", "import sys, tempfile\nopen(%r, 'a').write(tempfile.mkdtemp(prefix='left-') + '\\n')\nsys.exit(3)\n" % log)
+rc, r, e = tests(d)
+left = open(log).read().split()
+check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed", rc != 0 and r["certified"] == 1
+      and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
+      and all(os.path.basename(os.path.dirname(x)).startswith("selftest-") for x in left), (rc, r, left))
+
 d = tmp("tests-env")
 put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os.environ if k.startswith('GATE_')] else 0)\n")
 rc, r, e = tests(d)
