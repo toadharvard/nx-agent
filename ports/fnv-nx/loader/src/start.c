@@ -6,7 +6,7 @@
 #define NOINLINE __attribute__((noinline))
 
 static uint32_t page_up(uint32_t v) { return (v + PAGE - 1) & ~(PAGE - 1); }
-uint8_t *fnvnx_host(const fnvnx_proc *p, uint32_t va) { return (uint8_t *)((uintptr_t)va + p->cfg.bias); }
+uint8_t *fnvnx_gptr(const fnvnx_proc *p, uint32_t va) { return (uint8_t *)((uintptr_t)va + p->cfg.bias); }
 
 unsigned fnvnx_scn_prot(uint32_t ch) {
     return ((ch & FNVNX_SCN_MEM_READ) ? FNVNX_PROT_R : 0u) | ((ch & FNVNX_SCN_MEM_WRITE) ? FNVNX_PROT_W : 0u) |
@@ -231,10 +231,10 @@ int fnvnx_thread_block_create(fnvnx_proc *p, uint32_t stack_size, fnvnx_thread_b
     for (idx = 0; idx < p->tls_slots; idx++) {   /* every block from its image's template; the vector slot is its address */
         const fnvnx_loaded *L = tls_owner(p, idx);
         if (!L || !L->tls.present) continue;
-        if ((r = fnvnx_tls_block_init(&L->img, &L->tls, fnvnx_host(p, tls + off[idx])))) goto fail;
-        fnvnx_wr32(fnvnx_host(p, tls) + 4u * idx, tls + off[idx]);
+        if ((r = fnvnx_tls_block_init(&L->img, &L->tls, fnvnx_gptr(p, tls + off[idx])))) goto fail;
+        fnvnx_wr32(fnvnx_gptr(p, tls) + 4u * idx, tls + off[idx]);
     }
-    t = fnvnx_host(p, teb);                        /* the page is zeroed by alloc_va */
+    t = fnvnx_gptr(p, teb);                        /* the page is zeroed by alloc_va */
     fnvnx_wr32(t + 0x00, 0xffffffffu);             /* end of the SEH chain */
     fnvnx_wr32(t + 0x04, out->stack_base);
     fnvnx_wr32(t + 0x08, out->stack_limit);
@@ -313,7 +313,7 @@ uint32_t fnvnx_call_guest(const fnvnx_proc *p, const fnvnx_thread_block *b, uint
 
 uint32_t fnvnx_call_guest_at(const fnvnx_proc *p, uint32_t teb, uint32_t esp_now, uint32_t eip, uint32_t a1, uint32_t a2, uint32_t a3) {
     uint32_t esp = (esp_now - 16u) & ~15u;
-    uint8_t *s = fnvnx_host(p, esp);
+    uint8_t *s = fnvnx_gptr(p, esp);
     fnvnx_wr32(s, FNVNX_START_SENTINEL);
     fnvnx_wr32(s + 4, a1);
     fnvnx_wr32(s + 8, a2);

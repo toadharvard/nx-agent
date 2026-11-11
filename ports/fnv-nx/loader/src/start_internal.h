@@ -6,7 +6,7 @@
 
 #define FNVNX_PAGE 0x1000u
 
-uint8_t *fnvnx_host(const fnvnx_proc *p, uint32_t va);
+uint8_t *fnvnx_gptr(const fnvnx_proc *p, uint32_t va);
 unsigned fnvnx_scn_prot(uint32_t characteristics);
 /* the section map entry (not the headers) of L wholly containing [va, va+size), or NULL */
 const fnvnx_start_range *fnvnx_range_of(const fnvnx_loaded *L, uint32_t va, uint32_t size);

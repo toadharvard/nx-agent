@@ -250,11 +250,12 @@ def scan(dirs, system):
     order that has a name wins; a file that is not an i386 PE32 DLL image is an error naming it (all are listed)."""
     mods, errors = {}, []
     for d in dirs:
-        for f in sorted(os.listdir(d)):
+        files = sorted(os.listdir(d))
+        for f in files:
             name = lower(f)
             if not name.endswith('.dll') or not os.path.isfile(os.path.join(d, f)) or name in system or name in mods:
                 continue
-            if sum(1 for g in os.listdir(d) if lower(g) == name) > 1:
+            if sum(1 for g in files if lower(g) == name) > 1:
                 errors.append('%s: %s holds files that differ only in case' % (name, d))
                 continue
             with open(os.path.join(d, f), 'rb') as fh:

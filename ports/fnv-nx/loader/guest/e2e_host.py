@@ -10,7 +10,7 @@ The emulator stage proper (L4) must provide what this file adds; tests/s5 is not
   - the VM service on (it is opt-in in emu_guest);
   - at the end of the run: the protection map of [image base, + SizeOfImage) as the emulator holds it, compared page by
     page with the PE section table (R if MEM_READ, W if MEM_WRITE, never X, headers R, gaps no access), and nothing
-    mapped below the VM arena outside the exe and module images.  Prints `e2e-host: ...` lines.
+    mapped inside the reserved address set (keys range, exe, every row of modules.tsv) outside the loaded images.  Prints `e2e-host: ...` lines.
 """
 import os, struct, sys
 
@@ -115,19 +115,27 @@ class E2EEmu(emu_guest.Emu):
         bad = [hex(a) for a in want if have.get(a) != want[a]]
         x = [hex(a) for a, p in have.items() if p & UC_PROT_EXEC]
         # nothing else is mapped below the arena: the reserved address set is the exe, the modules and the keys' range
-        low = [hex(a) for a in self.mapped_perms(0, self.arena_lo()) if a not in have]
+        rows = [(0xf0000, 0x200000), (base, base + size)]
+        if mt:
+            for ln in open(mt):
+                c = ln.rstrip("\n").split("\t")
+                if ln[:1] != "#":
+                    rows.append((int(c[4], 16), int(c[4], 16) + int(c[5], 16)))
+        low = sorted(hex(a) for lo, hi in rows for a in self.mapped_perms(lo, hi) if a not in have)
         runs = []
         for a in sorted(have):
             if runs and runs[-1][1] == a and runs[-1][2] == have[a]:
                 runs[-1][1] = a + P
             else:
                 runs.append([a, a + P, have[a]])
+        if low:
+            print("e2e-host: unexpected pages %s .. %s (reserved set)" % (low[0], low[-1]))
         for s, e, p in runs:
             print("e2e-host: map %08x-%08x %s%s%s" % (s, e, "r" if p & 1 else "-", "w" if p & 2 else "-", "x" if p & 4 else "-"))
         for name, va, vs, prot in secs:
             print("e2e-host: section %-8s %08x +%06x %s%s" % (name, va, vs, "r" if prot & 1 else "-", "w" if prot & 2 else "-"))
         print("e2e-host: VM_PROTECT calls %d; image pages %d, differing from the section table %d, executable %d; "
-              "mapped below the arena outside the images %d" % (getattr(self, "protects", 0), len(want), len(bad), len(x), len(low)))
+              "mapped in the reserved address set outside the loaded images %d" % (getattr(self, "protects", 0), len(want), len(bad), len(x), len(low)))
         print("e2e-host: image protection %s" % ("ok" if not (bad or x or low) and getattr(self, "protects", 0) else "MISMATCH"))
 
 
