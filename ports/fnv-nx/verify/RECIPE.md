@@ -42,6 +42,10 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   the owner (an import name and the body that implements it). Gate `linkstrict` rule (c): every name is defined in the linked ELF with a
   nonzero size, and two names with different body ids never share an address.
 - `link`: `ld` of the compiler, `--build-id=none -T script flags -o output objects...` (objects in unit order). null = no ELF.
+- ABIs: the recipe names the ABI in its flags, and the build reads ELF32 and ELF64 AArch64 objects alike. ILP32 (the product): `-mabi=ilp32`
+  in `flags.c`, `flags.cxx` and `flags.asm`, and `-m aarch64linux32` first in `link.flags` (the emulation `gcc -mabi=ilp32 -###` passes to
+  `ld`; `aarch64elf32` also links a static image). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
+  the linked ELF is ELF32. LP64 is the default, with no flag.
 - `external`: content-pinned inputs (see below).
 
 ## Refusal set R (GNU ld option syntax, not a text guess)

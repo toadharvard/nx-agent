@@ -1,0 +1,8 @@
+# id	contract_name	wine_ref	kind	value
+# rows come from the Wine 9.0 source (renderer owner); wine_ref = wine-9.0:<path>:<function>; kinds void|u32|u64|u32nz<N> (see objstub.py read_wine_table)
+2	IDirect3DDevice9::SetClipStatus	wine-9.0:dlls/wined3d/device.c:wined3d_device_set_clip_status	u32nz1	0x8876086C,0
+3	IDirect3DDevice9::GetClipStatus	wine-9.0:dlls/wined3d/device.c:wined3d_device_get_clip_status	u32nz1	0x8876086C,0
+22	IDirect3DShaderValidator9::Begin	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_Begin	u32	0
+23	IDirect3DShaderValidator9::Instruction	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_Instruction	u32	0
+24	IDirect3DShaderValidator9::End	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_End	u32	0
+20	Direct3DShaderValidatorCreate9	wine-9.0:dlls/d3d9/d3d9_main.c:Direct3DShaderValidatorCreate9	addr	_ZL5g_mem+8

@@ -46,6 +46,7 @@ FILES = {
     "toy/os.S": ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
+    "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
     "toy/link.ld": "SECTIONS { . = 0x10000; .text : { *(.text*) } .data : { *(.data*) *(.bss*) } /DISCARD/ : { *(.note*) *(.comment*) *(.eh_frame*) } }\n",
 }
 
@@ -114,6 +115,22 @@ def mut(**kw):
     r = json.loads(json.dumps(RECIPE))
     r.update(kw)
     return r
+
+
+def abi_rec(abi, rec=None):
+    """Recipe REC (default RECIPE) for ABI "lp64" (unchanged) or "ilp32": -mabi=ilp32 for every compile and assemble flag list, and the
+    linker emulation the cross gcc driver itself passes for it (-maarch64linux32, see `gcc -mabi=ilp32 -###`) first among the link flags."""
+    r = json.loads(json.dumps(rec or RECIPE))
+    if abi == "ilp32":
+        r["flags"] = {k: ["-mabi=ilp32"] + v for k, v in r["flags"].items()}
+        if r.get("link"):
+            r["link"]["flags"] = ["-m", "aarch64linux32"] + r["link"]["flags"]
+    return r
+
+
+def elf_class(path):
+    """32 or 64: the EI_CLASS of an ELF file."""
+    return {1: 32, 2: 64}[open(path, "rb").read(5)[4]]
 
 
 MINI = {"toy/b.c": None, "toy/c.c": None, "toy/os.S": None,
@@ -211,6 +228,20 @@ def main():
         check("determinism gate green on the toy root, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
               and accepted("determinism", BASE + "/gd")[0] == "green", (g, txt))
 
+    def gate_toy32():
+        r32repo = make_repo("toy32g", rec=abi_rec("ilp32"))
+        og = BASE + "/gg32"
+        rc, g, tb, txt = gate(r32repo, "build", og, GC)
+        print("INFO ILP32 gate build cold-store %.1f s" % tb)
+        check("ILP32 toy root: build gate green 5/5, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
+              and accepted("build", og) == ("green", 5, 5, ""), (g, txt))
+        rc, g, tw, txt = gate(r32repo, "build", BASE + "/gg32w", GC)
+        print("INFO ILP32 gate build warm %.1f s" % tw)
+        rc, g, td, txt = gate(r32repo, "determinism", BASE + "/gd32", GC)
+        print("INFO ILP32 gate determinism (2 cold builds + warm check) %.1f s: %s" % (td, g and g["detail"]))
+        check("ILP32 toy root: determinism gate green 5/5, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
+              and accepted("determinism", BASE + "/gd32")[0] == "green", (g, txt))
+
     def gate_nd():
         for label, extra, red in (("wall clock (time.time_ns)", "import time|time.time_ns()", True),
                                   ("os.urandom and os.getpid", "import os|int.from_bytes(os.urandom(7), 'big') + os.getpid()", False)):
@@ -223,7 +254,7 @@ def main():
                 check("generator embedding %s: sandbox makes it constant, so two cold builds are equal (closed channel); without GATE_CACHE there is no warm build" % label,
                       rc == 0 and "no warm" in g["detail"] and g["universe"] == 2, (g, txt))
 
-    for fn in (gate_toy, gate_bad, gate_nd, gate_cases):
+    for fn in (gate_toy, gate_toy32, gate_bad, gate_nd, gate_cases):
         later(fn)
 
     # --- toy root, shared store: cold, then cached
@@ -293,6 +324,22 @@ def main():
     rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
     check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], rc_y["stages"])
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
+    # --- the same toy root in the ILP32 ABI: ELF32 objects and ELF, symbol tables, determinism
+    t0 = time.time()
+    r32 = recipe.build(make_repo("toy32", rec=abi_rec("ilp32")), ROOT, SS, BASE + "/out32")
+    print("INFO toy ILP32 build %.1f s, stages %s" % (time.time() - t0, r32.get("stages")))
+    check("ILP32 toy root builds green: 4 objects and the ELF are ELF32, the LP64 ones are ELF64",
+          r32["status"] == "green" and len(r32["objects"]) == 4 and r32["elf"]
+          and {elf_class(o["object"]) for o in r32["objects"]} | {elf_class(r32["elf"]["path"])} == {32}
+          and {elf_class(o["object"]) for o in r1["objects"]} | {elf_class(r1["elf"]["path"])} == {64}, r32.get("failure"))
+    d32 = r32["defined"]
+    check("ILP32 objects.json: the same defined and undefined symbols as LP64 (ELF32 .symtab read by struct)",
+          [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d32] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
+          and r32["undefined"] == u and [o["sha256"] for o in r32["objects"]] != [o["sha256"] for o in r1["objects"]], (d32, r32["undefined"]))
+    r32b = recipe.build(make_repo("toy32b", rec=abi_rec("ilp32")), ROOT, SS, BASE + "/out32b")
+    check("ILP32: a second build is all cache hits with identical objects and ELF", r32b["stages"]["run"] == 0
+          and r32b["elf"]["sha256"] == r32["elf"]["sha256"] and r32b["stage_keys"] == r32["stage_keys"], r32b.get("stages"))
+
     # --- validation
     check("unknown key 'exclude' is a RecipeError", any("unknown key 'exclude'" in e for e in errs(mut(exclude=["a.c"]))))
     check("units other than all rejected", any("units" in e for e in errs(mut(units=["a.c"]))))

@@ -241,19 +241,21 @@ def tail(store, res):
 
 
 def symbols(path, unit):
-    """(defined [{symbol,bind,type,object}], undefined {symbol}) of the global and weak symbols of ELF64 LE object PATH (.symtab)."""
+    """(defined [{symbol,bind,type,object}], undefined {symbol}) of the global and weak symbols of ELF32 or ELF64 little-endian
+    object PATH (.symtab; ELF32 is the ILP32 ABI, ELF64 the LP64 one: the layouts of Elf32_/Elf64_ Shdr and Sym)."""
     d = open(path, "rb").read()
-    if d[:4] != b"\x7fELF" or d[4:6] != b"\x02\x01":
-        raise ValueError("%s: not an ELF64 little-endian object" % path)
-    shoff, = struct.unpack_from("<Q", d, 0x28)
-    esz, num = struct.unpack_from("<HH", d, 0x3a)
-    secs = [struct.unpack_from("<IIQQQQIIQQ", d, shoff + i * esz) for i in range(num)]   # name type flags addr off size link info align entsize
+    if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1:
+        raise ValueError("%s: not an ELF32/ELF64 little-endian object" % path)
+    w64 = d[4] == 2
+    shoff, = struct.unpack_from("<Q" if w64 else "<I", d, 0x28 if w64 else 0x20)
+    esz, num = struct.unpack_from("<HH", d, 0x3a if w64 else 0x2e)
+    secs = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * esz) for i in range(num)]   # name type flags addr off size link info align entsize
     defined, undefined = [], set()
     for s in (x for x in secs if x[1] == 2):
         st = secs[s[6]]
         strtab = d[st[4]:st[4] + st[5]]
-        for off in range(s[4], s[4] + s[5], 24):
-            name, info, _, shndx, _, _ = struct.unpack_from("<IBBHQQ", d, off)
+        for t in struct.iter_unpack("<IBBHQQ" if w64 else "<IIIBBH", d[s[4]:s[4] + s[5]]):
+            name, info, shndx = (t[0], t[1], t[3]) if w64 else (t[0], t[3], t[5])
             n = strtab[name:strtab.index(b"\0", name)].decode()
             if info >> 4 in SBIND and n:
                 if shndx == 0:

@@ -6,6 +6,7 @@ every object and the ELF by sha256. Also the warm build of gate_build (GATE_CACH
 stages served from the cache) must equal them: R12 "warm == cold". Without GATE_CACHE there is no warm build and only the cold pair
 is compared (said in detail). Universe: every unit and ELF of every product root; certified: items equal in all builds; uncertified:
 repo-relative unit paths. A build that fails (red) certifies nothing of what it did not build. No product root: universe 0, green.
+ABIs: the rule is independent of the ABI; the toy root of tests/test_recipe.py is built and judged in LP64 and in ILP32 (`-mabi=ilp32`, ELF32 objects, `-m aarch64linux32`).
 What two cold builds can and cannot expose is stated in tests/test_recipe.py (sandbox.OPEN_CHANNELS: only channels that differ
 between two runs on one host are exposed: wall_clock, entropy by AT_RANDOM; host constants such as cpu count, kernel release, memory
 size are equal in both builds and stay open). EXTERNALS (recipe key "external"): fetched once into a bare cache shared by the two cold builds (GATE_CACHE/external or a temp dir), but each
