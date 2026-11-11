@@ -28,6 +28,6 @@ void t_d() {
     O(t)->preLoad(); t->LockRect(0, &a, nullptr, 0); t->UnlockRect(0); t_clear(); t->GenerateMipSubLevels(); CHECK_EQ(g_nrec, 0); O(t)->release();
     IDirect3DCubeTexture9* c; CHECK_HR(d->CreateCubeTexture(8, 0, D3DUSAGE_AUTOGENMIPMAP, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &c, nullptr), D3D_OK); CHECK_EQ(c->GetLevelCount(), 1); CHECK_HR(c->GetCubeMapSurface(D3DCUBEMAP_FACE_NEGATIVE_Z, 1, &s), D3DERR_INVALIDCALL);
     O(c)->preLoad(); c->LockRect(D3DCUBEMAP_FACE_NEGATIVE_Z, 0, &a, nullptr, 0); c->UnlockRect(D3DCUBEMAP_FACE_NEGATIVE_Z, 0); t_clear(); c->GenerateMipSubLevels(); CHECK_EQ(t_count(R_GEN), 1); CHECK_EQ(t_count(R_UPDATE), 1); CHECK_EQ(g_rec[0].layer, 5); O(c)->release();
-    IDirect3DVolumeTexture9* v; d->CreateVolumeTexture(4, 4, 4, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &v, nullptr); CHECK_HR(v->SetAutoGenFilterType(D3DTEXF_LINEAR), D3DERR_INVALIDCALL); CHECK_EQ(v->GetAutoGenFilterType(), D3DTEXF_NONE); t_clear(); v->GenerateMipSubLevels(); CHECK_EQ(g_nrec, 0);
-    CHECK_HR(d->CreateVolumeTexture(4, 4, 4, 1, D3DUSAGE_AUTOGENMIPMAP, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &v, nullptr), D3DERR_INVALIDCALL); O(v)->release();
+    IDirect3DVolumeTexture9* v; d->CreateVolumeTexture(4, 4, 4, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &v, nullptr); CHECK_HR(v->SetAutoGenFilterType(D3DTEXF_LINEAR), D3DERR_INVALIDCALL); CHECK_EQ(v->GetAutoGenFilterType(), D3DTEXF_NONE); t_clear(); v->GenerateMipSubLevels(); CHECK_EQ(g_nrec, 0); O(v)->release();
+    CHECK_HR(d->CreateVolumeTexture(4, 4, 4, 1, D3DUSAGE_AUTOGENMIPMAP, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &v, nullptr), D3DERR_INVALIDCALL);
 }

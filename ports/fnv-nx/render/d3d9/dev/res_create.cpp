@@ -58,7 +58,7 @@ static HRESULT mk_tex(NxObj* dev, uint32_t kind, UINT w, UINT h, UINT d, UINT le
     int p = nx_env_profile_of(dev); uint32_t rt = kind == NXK_TEXTURE ? 3 : kind == NXK_CUBE ? 5 : 4; bool ag = false;
     if (usage & D3DUSAGE_AUTOGENMIPMAP) {
         if (kind == NXK_VOLUME || pool == D3DPOOL_SYSTEMMEM || levels > 1) return D3DERR_INVALIDCALL;
-        ag = nxenv_check_device_format(p, 0, 1, 21, 0x400, 3, fmt) == 0; levels = 1;                 // WINED3DUSAGE_QUERY_GENMIPMAP on B8G8R8A8 adapter format; D3D_OK only (not NOAUTOGEN)
+        ag = nxenv_check_device_format(p, 0, 1, X8, 0x400, 3, fmt) == 0; levels = 1;                 // WINED3DUSAGE_QUERY_GENMIPMAP (adapter format X8R8G8B8: the env gate accepts only X8 / R5 / X1); D3D_OK only (not NOAUTOGEN)
     }
     if (!w || !h || !d || fmt == D3DFMT_UNKNOWN) return D3DERR_INVALIDCALL;
     if ((usage & D3DUSAGE_DYNAMIC) && (pool == D3DPOOL_MANAGED || pool == D3DPOOL_SCRATCH)) return D3DERR_INVALIDCALL;

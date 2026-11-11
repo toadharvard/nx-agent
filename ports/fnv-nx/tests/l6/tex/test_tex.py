@@ -116,7 +116,8 @@ def tex_oracle(E, kind, w, h, d, lv, usage, fmt, pool, ex):
     if L[4] and not L[5] and (w % L[1] or h % L[2]): return Z
     n = (1 if ag else lv) or chain(w, h, d); nlev = chain(w, h, d) if ag else n; faces = 6 if kind == 1 else 1
     gpu = int(pool in (0, 1) and fmt in NX); lock = int(pool != 0 or bool(usage & 0x200) or fmt in MAPPABLE)
-    return (0, n, gpu, lock, nlev * faces if gpu and pool == 0 else 0, n * faces if gpu and pool == 1 else 0)
+    zero = nlev * faces if pool == 0 else (nlev - n) * faces if pool == 1 else 0   # DEFAULT: every level; MANAGED: only the GPU-only levels of the AUTOGENMIPMAP chain (the exposed ones are dirty at creation)
+    return (0, n, gpu, lock, zero if gpu else 0, n * faces if gpu and pool == 1 else 0)
 
 
 def surf_oracle(E, what, w, h, fmt, ms, q, flag, pool, ex, usage):
@@ -188,7 +189,7 @@ def write_data(d):
         for rt in (1, 3, 4, 5):
             for us in (0, 1, 2):
                 for fmt in FMTS:
-                    if layout(fmt) is not None and E.ok(us, rt, fmt): f.write("F %d %d %d\n" % (rt, us, fmt))
+                    if layout(fmt) is not None and E.ok(us, rt, fmt): f.write("%s %d %d %d\n" % ("L" if rt == 1 and us == 0 else "F", rt, us, fmt))
     with open(os.path.join(d, "ag.txt"), "w") as f:
         for fmt in FMTS:
             if layout(fmt) is not None and fmt in NX and E.ok(0, 3, fmt) and tex_oracle(E, 0, 16, 16, 1, 0, 0, fmt, 1, 0)[0] == 0: f.write("G %d %d\n" % (fmt, int(E.ok(0x400, 3, fmt))))

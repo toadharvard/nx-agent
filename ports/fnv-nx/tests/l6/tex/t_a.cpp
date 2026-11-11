@@ -9,10 +9,10 @@ static void one_tex(char* line) {
     if (kind == 0) { IDirect3DTexture9* t = (IDirect3DTexture9*)1; r = ex ? dx->CreateTexture(w, h, lv, usage, (D3DFORMAT)fmt, (D3DPOOL)pool, &t, nullptr) : dv->CreateTexture(w, h, lv, usage, (D3DFORMAT)fmt, (D3DPOOL)pool, &t, nullptr); out = t; }
     else if (kind == 1) { IDirect3DCubeTexture9* t = (IDirect3DCubeTexture9*)1; r = ex ? dx->CreateCubeTexture(w, lv, usage, (D3DFORMAT)fmt, (D3DPOOL)pool, &t, nullptr) : dv->CreateCubeTexture(w, lv, usage, (D3DFORMAT)fmt, (D3DPOOL)pool, &t, nullptr); out = t; }
     else { IDirect3DVolumeTexture9* t = (IDirect3DVolumeTexture9*)1; r = ex ? dx->CreateVolumeTexture(w, h, d, lv, usage, (D3DFORMAT)fmt, (D3DPOOL)pool, &t, nullptr) : dv->CreateVolumeTexture(w, h, d, lv, usage, (D3DFORMAT)fmt, (D3DPOOL)pool, &t, nullptr); out = t; }
-    if (!CHECK_EQ(r, hr)) { printf("  case: %s", line); if (r == D3D_OK) O(out)->release(); return; }
+    if (!CHECK((uint32_t)r == hr)) { printf("  case: %s  got %x\n", line, (unsigned)r); if (r == D3D_OK) O(out)->release(); return; }
     if (r != D3D_OK) { CHECK(out == nullptr); CHECK_EQ(g_nrec, 0); return; }
     NxObj* o = O(out); NxTexCore* tc = static_cast<NxTexCore*>(o); NxImg* im = tc->img;
-    CHECK_EQ(tc->getLevelCount(), nlev); CHECK_EQ(t_count(R_CREATE), gpu); CHECK_EQ(t_count(R_UPDATE), zup);
+    CHECK_EQ(tc->getLevelCount(), nlev); CHECK_EQ(t_count(R_CREATE), gpu); if (!CHECK_EQ(t_count(R_UPDATE), zup)) printf("  case: %s  got %d\n", line, t_count(R_UPDATE));
     if (gpu) CHECK_EQ(g_rec[0].desc.mips, im->nlev);
     D3DLOCKED_RECT lr; D3DLOCKED_BOX lb; HRESULT lh = kind == 2 ? static_cast<NxVolumeTexture9*>(o)->LockBox(0, &lb, nullptr, 0) : kind == 1 ? static_cast<NxCubeTexture9*>(o)->LockRect(D3DCUBEMAP_FACE_POSITIVE_X, 0, &lr, nullptr, 0) : static_cast<NxTexture9*>(o)->LockRect(0, &lr, nullptr, 0);
     CHECK_HR(lh, lock ? D3D_OK : D3DERR_INVALIDCALL);
@@ -27,9 +27,9 @@ static void one_surf(char* line) {
     if (what == 0) r = ex ? (usage == 0xFFFFFFFFu ? dx->CreateRenderTarget(w, h, f, m, q, flag, &s, nullptr) : dx->CreateRenderTargetEx(w, h, f, m, q, flag, &s, nullptr, usage)) : dv->CreateRenderTarget(w, h, f, m, q, flag, &s, nullptr);
     else if (what == 1) r = ex ? (usage == 0xFFFFFFFFu ? dx->CreateDepthStencilSurface(w, h, f, m, q, flag, &s, nullptr) : dx->CreateDepthStencilSurfaceEx(w, h, f, m, q, flag, &s, nullptr, usage)) : dv->CreateDepthStencilSurface(w, h, f, m, q, flag, &s, nullptr);
     else r = ex ? dx->CreateOffscreenPlainSurface(w, h, f, (D3DPOOL)pool, &s, nullptr) : dv->CreateOffscreenPlainSurface(w, h, f, (D3DPOOL)pool, &s, nullptr);
-    if (!CHECK_EQ(r, hr)) { printf("  case: %s", line); if (r == D3D_OK) O(s)->release(); return; }
+    if (!CHECK((uint32_t)r == hr)) { printf("  case: %s  got %x\n", line, (unsigned)r); if (r == D3D_OK) O(s)->release(); return; }
     if (r != D3D_OK) { CHECK(s == nullptr); CHECK_EQ(g_nrec, 0); return; }
-    CHECK_EQ(t_count(R_CREATE), gpu); CHECK_EQ(t_count(R_UPDATE), zup);
+    CHECK_EQ(t_count(R_CREATE), gpu); if (!CHECK_EQ(t_count(R_UPDATE), zup)) printf("  case: %s  got %d\n", line, t_count(R_UPDATE));
     D3DSURFACE_DESC d; CHECK_HR(s->GetDesc(&d), D3D_OK); CHECK(d.Width == w && d.Height == h && d.Format == f && d.Type == D3DRTYPE_SURFACE && d.Pool == (what == 2 ? pool : 0) && d.MultiSampleType == m && d.MultiSampleQuality == q);
     D3DLOCKED_RECT lr; HRESULT lh = s->LockRect(&lr, nullptr, 0); CHECK_HR(lh, lock ? D3D_OK : D3DERR_INVALIDCALL); if (lock) s->UnlockRect();
     t_clear(); CHECK_EQ(O(s)->release(), 0); CHECK_EQ(t_count(R_DESTROY), gpu);

@@ -1,0 +1,5 @@
+D3DPERF_GetStatus	u32	0	Wine 9.0 dlls/d3d9/d3d9_main.c D3DPERF_GetStatus; MSDN D3DPERF_GetStatus: nonzero only while PIX profiles the process (ENV-TRUTH: no PIX on the console)
+D3DPERF_QueryRepeatFrame	u32	0	Wine 9.0 dlls/d3d9/d3d9_main.c D3DPERF_QueryRepeatFrame; MSDN: TRUE only while PIX replays a frame (ENV-TRUTH: no PIX)
+D3DPERF_SetMarker	void		Wine 9.0 dlls/d3d9/d3d9_main.c D3DPERF_SetMarker; MSDN: marks an instantaneous event for the attached profiler (ENV-TRUTH: no PIX)
+D3DPERF_SetOptions	void		Wine 9.0 dlls/d3d9/d3d9_main.c D3DPERF_SetOptions; MSDN: dwOptions = 1 forbids attaching a profiler (ENV-TRUTH: no PIX)
+D3DPERF_SetRegion	void		Wine 9.0 dlls/d3d9/d3d9_main.c D3DPERF_SetRegion; MSDN: marks a series of events for the attached profiler (ENV-TRUTH: no PIX)

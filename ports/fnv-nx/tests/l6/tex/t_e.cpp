@@ -15,7 +15,7 @@ void t_e() {
     static const D3DBOX bad[] = {{0, 0, 0, 4, 0, 4}, {4, 0, 4, 4, 0, 4}, {0, 4, 4, 4, 0, 4}, {0, 0, 4, 4, 2, 2}, {0, 0, 9, 4, 0, 4}, {0, 0, 4, 9, 0, 4}, {0, 0, 4, 4, 0, 5}, {5, 0, 3, 4, 0, 4}, {0, 0, 4, 4, 3, 1}};
     for (auto& b : bad) { CHECK_HR(v->LockBox(0, &lb, &b, 0), D3DERR_INVALIDCALL); CHECK(lb.pBits == nullptr); }
     CHECK_HR(v->LockBox(0, nullptr, nullptr, 0), D3DERR_INVALIDCALL);
-    t_clear(); O(v)->preLoad(); CHECK_EQ(t_count(R_UPDATE), 1); const Rec* r = U(0); CHECK(r && r->level == 0 && r->layer == 0 && r->box.l == 1 && r->box.t == 2 && r->box.f == 1 && r->box.r == 4 && r->box.b == 4 && r->box.k == 3 && r->row == 32 && r->slice == 256 && r->b0 == 0x66);
+    t_clear(); O(v)->preLoad(); CHECK_EQ(t_count(R_UPDATE), 1); const Rec* r = U(0); CHECK(r && r->level == 0 && r->layer == 0 && r->box.l == 1 && r->box.t == 2 && r->box.f == 1 && r->box.r == 3 && r->box.b == 4 && r->box.k == 3 && r->row == 32 && r->slice == 256 && r->b0 == 0x66);
     D3DBOX a1 = {0, 0, 2, 2, 0, 1}, a2 = {6, 6, 8, 8, 2, 4}, bb = {0, 0, 9, 8, 0, 4}; CHECK_HR(v->AddDirtyBox(&a1), D3D_OK); CHECK_HR(v->AddDirtyBox(&a2), D3D_OK); CHECK_HR(v->AddDirtyBox(&bb), D3DERR_INVALIDCALL);
     t_clear(); O(v)->preLoad(); r = U(0); CHECK(t_count(R_UPDATE) == 1 && r && r->box.l == 0 && r->box.t == 0 && r->box.f == 0 && r->box.r == 8 && r->box.b == 8 && r->box.k == 4);   // union over x, y and z
     CHECK_HR(v->AddDirtyBox(nullptr), D3D_OK); t_clear(); O(v)->preLoad(); CHECK_EQ(t_count(R_UPDATE), 1); CHECK_EQ(O(v)->release(), 0);

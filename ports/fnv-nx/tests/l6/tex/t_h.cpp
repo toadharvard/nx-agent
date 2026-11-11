@@ -6,7 +6,8 @@ void t_h() {
     while (f && fgets(line, sizeof line, f)) {
         unsigned rt, us, fmt; NxTexFmt tf;
         if (line[0] == 'Z') { sscanf(line, "Z %u", &fmt); CHECK(!nx_texfmt(fmt, &tf)); continue; }
-        if (sscanf(line, "F %u %u %u", &rt, &us, &fmt) != 3) { CHECK(false); continue; }
+        if (sscanf(line + 1, " %u %u %u", &rt, &us, &fmt) != 3) { CHECK(false); continue; }
+        if (line[0] == 'L') { if (!CHECK(nx_texfmt(fmt, &tf))) printf("  no layout: fmt %u\n", fmt); continue; }       // plain offscreen surface: memory layout only
         bool lay = nx_texfmt(fmt, &tf); NxFormatInfo ni = nx_d3d9_format(fmt);
         if (!CHECK(lay)) printf("  no layout: fmt %u\n", fmt);
         if (!CHECK(ni.format != NxFmt_None)) printf("  no NxFormat: resource %u usage %u fmt %#x\n", rt, us, fmt);
