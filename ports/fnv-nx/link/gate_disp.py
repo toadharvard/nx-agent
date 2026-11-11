@@ -15,13 +15,15 @@ Inputs:  --universe  the code entries (universe.tsv: first column the address as
          --entries   `address<TAB>symbol[<TAB>kind]` (liftall's entries.tsv), kind `code` (default) or `import`: an import row is a
                      dispatcher key that is not a universe address (its symbol is `I_<key>` or a runtime symbol); the last
                      line may be `# table_id <hex>`;
-         --keys      optional, `key<TAB>symbol`: more such keys; may carry `# table_id <hex>`.  When both files carry a table_id the two
-                     must be equal (else the item `table_id` is red);
+         --keys      optional, the import key set of the bridge (keys.tsv: first column the key as hex, other columns ignored, `#` lines
+                     skipped); each key must be named by an entries.tsv row (the symbol of its body is never taken from this file);
+                     it may carry `# table_id <hex>`.  When both files carry a table_id the two must be equal (else the item
+                     `table_id` is red);
          --missing   optional, `address` rows of universe addresses the lifter reports as without a body.  REPORTING only: it never
                      certifies anything; a universe address without an entry stays `no-entry` and red.  The detail line says how
                      the list and the entries agree.
 Rule, for EVERY key k of the universe, of the import rows and of --keys (no sampling), certified when all hold:
-  - a symbol is named for k (entries.tsv or keys.tsv; two files naming different symbols for k is a violation);
+  - a symbol is named for k by entries.tsv (two rows naming different symbols for k are a violation);
   - the ELF defines that symbol, at one address (a symbol defined at two addresses is a violation);
   - the LOOKUP: the slot i the hash computes for k is occupied, holds key k, and `table_address + stored_offset == symbol address`
     modulo 2^32 (`hash-miss` when slot i is not k's slot, `wrong-target` when it points elsewhere);
@@ -115,7 +117,7 @@ def slot_of(a, g, par):
     return ((((a ^ g[((a * k1) & M32) >> (32 - nb)]) & M32) * k2) & M32) >> (32 - tb)
 
 
-def tsv(path):
+def tsv(path, kinds=True):
     """[(address, symbol or None, kind)] of a tab-separated file (kind: third column, `code` when absent), `#` and empty lines skipped."""
     out = []
     with open(path) as fh:
@@ -123,7 +125,7 @@ def tsv(path):
             ln = ln.rstrip('\n')
             if ln and ln[0] != '#':
                 p = ln.split('\t')
-                kind = p[2] if len(p) > 2 else 'code'
+                kind = p[2] if kinds and len(p) > 2 else 'code'
                 if kind not in ('code', 'import'):
                     sys.exit('gate_disp: %s: unknown kind %r (address %s)' % (path, kind, p[0]))
                 out.append((int(p[0], 16), p[1] if len(p) > 1 else None, kind))
@@ -186,15 +188,16 @@ def main():
     ap.add_argument('--keys')
     ap.add_argument('--missing')
     a = ap.parse_args()
-    universe = {k for k, _, _ in tsv(a.universe)}
+    universe = {k for k, _, _ in tsv(a.universe, False)}
     named, extra = {}, set()
-    for path in [a.entries] + ([a.keys] if a.keys else []):
-        for k, sym, kind in tsv(path):
-            if sym is None:
-                sys.exit('gate_disp: %s: a row without a symbol (address %08x)' % (path, k))
-            named.setdefault(k, set()).add(sym)
-            if path == a.keys or kind == 'import':
-                extra.add(k)
+    for k, sym, kind in tsv(a.entries):
+        if sym is None:
+            sys.exit('gate_disp: %s: a row without a symbol (address %08x)' % (a.entries, k))
+        named.setdefault(k, set()).add(sym)
+        if kind == 'import':
+            extra.add(k)
+    if a.keys:
+        extra |= {k for k, _, _ in tsv(a.keys, False)}
     ids = [table_id(p) for p in [a.entries] + ([a.keys] if a.keys else [])]
     ids = [i for i in ids if i]
     id_bad = len(ids) == 2 and ids[0] != ids[1]
@@ -221,7 +224,7 @@ def main():
     if id_bad:
         detail += ', table_id differs (%s vs %s)' % (ids[0][:12], ids[1][:12])
     if a.missing:
-        miss = {k for k, _, _ in tsv(a.missing)}
+        miss = {k for k, _, _ in tsv(a.missing, False)}
         noentry = {k for k in universe if k not in named}
         detail += '; missing list %d: %d without entry, %d with an entry; without entry and not listed %d' % (
             len(miss), len(miss & noentry), len(miss - noentry), len(noentry - miss))

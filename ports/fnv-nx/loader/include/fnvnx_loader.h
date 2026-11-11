@@ -1,7 +1,7 @@
 /* fnvnx loader: PE32 parsing, mapping as the Windows loader maps, import binding (see fnvnx_start.h for the start
  * sequence that drives it).
  *
- * The only mapping rule: the headers and EVERY section of the player's own FalloutNV.exe are mapped at
+ * The only mapping rule: the headers and EVERY section of the player's own FalloutNV.exe (and of each lifted PE module) are mapped at
  * load_base + rva, protection taken from the section's own R/W bits, never host-executable (the x86 bytes are data;
  * every code address has a lifted body). No word of the image is rewritten except import slots and the TLS index.
  *
@@ -38,11 +38,18 @@ const char *fnvnx_strerror(int err);
 
 enum { FNVNX_PROT_R = 1u, FNVNX_PROT_W = 2u, FNVNX_PROT_X = 4u };
 
+#define FNVNX_FILE_EXE        0u
+#define FNVNX_FILE_MODULE(k)  ((uint32_t)(k) + 1u)
+
 /* OS hooks. EVERY hook is required: a NULL hook is FNVNX_E_ARG at the entry point that would use it. */
 typedef struct fnvnx_os {
     void *ctx;
-    /* Read size bytes of the executable at file offset off. 0 on success. */
-    int (*read)(void *ctx, uint32_t off, void *dst, uint32_t size);
+    /* Read size bytes of file `file` at file offset off. 0 on success. `file` selects the file: FNVNX_FILE_EXE is the
+     * executable, FNVNX_FILE_MODULE(k) the file of entry k of the module table (fnvnx_modules.h; the platform finds it
+     * next to the executable under the entry's name). Contract: a read that reaches past the end of the file, or of a
+     * file that does not exist, fails (the loader relies on this to check that a module file ends where its table
+     * entry says, and to refuse a missing module). */
+    int (*read)(void *ctx, uint32_t file, uint32_t off, void *dst, uint32_t size);
     /* Make [addr, addr+size) zero-filled read-write memory at exactly addr; fail (non-zero) if any of it is in use.
      * addr and size are multiples of 4 KiB. prot is the final protection the loader will ask for later. */
     int (*map_fixed)(void *ctx, uintptr_t addr, uint32_t size, unsigned prot);
@@ -82,6 +89,7 @@ enum { /* data directory indices */
 #define FNVNX_SCN_MEM_WRITE     0x80000000u
 
 typedef struct fnvnx_pe {
+    uint32_t file;        /* the os->read file selector this image was opened from */
     uint32_t file_size;
     uint16_t machine, characteristics, dll_characteristics, nsections;
     uint32_t timestamp, image_base, size_of_image, size_of_headers, entry_rva, checksum;
@@ -92,11 +100,11 @@ typedef struct fnvnx_pe {
     fnvnx_section sec[FNVNX_MAX_SECTIONS];
 } fnvnx_pe;
 
-/* Parse and validate the headers. Preconditions the mapping rule relies on (anything else is FNVNX_E_FORMAT or
+/* Parse and validate the headers of file `file` (os->read selector). Preconditions the mapping rule relies on (anything else is FNVNX_E_FORMAT or
  * FNVNX_E_UNSUPPORTED): i386 PE32 executable image; SectionAlignment 4 KiB (a section's rva is then a host page
  * address, which map_fixed needs); sections sorted by rva, page-disjoint, inside SizeOfImage (which is rounded up
  * to a page, as Windows does); every data directory inside the image. */
-int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size);
+int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file, uint32_t file_size);
 
 /* File offset of [rva, rva+size) if it lies in a section's raw data (or in the headers). */
 int fnvnx_pe_rva_to_off(const fnvnx_pe *pe, uint32_t rva, uint32_t size, uint32_t *off);

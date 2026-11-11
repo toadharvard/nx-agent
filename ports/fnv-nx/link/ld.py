@@ -501,8 +501,6 @@ def main():
                 hdr = write_header(elf)
             except ValueError as e:
                 ids.append('header:%s' % e)
-    else:
-        ids.append('header:not-written')
     ndyn = cnt['P32_RELATIVE'] + cnt['RELR'] + len(badrel)
     universe = len(names | scripted) + ndyn + 2
     detail = '%d inputs, %d library members, %d names, %d undefined (%d weak only); dynamic relocations: P32_RELATIVE %d, RELR %d, other %d' % (

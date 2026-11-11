@@ -42,7 +42,7 @@ def check(paths, absnames):
             rels, syms = relocs.scan(label, d)
             uni += len(rels)
             for sec, off, typ, (name, bind, stype, shndx) in rels:
-                if not name and typ:
+                if not name and stype == 0 and shndx == 0 and typ:
                     red.append('%s:%s+%08x:*ABS*' % (label, sec, off))
                 elif name and stype != relocs.STT_FILE and (shndx == relocs.SHN_ABS or (shndx == SHN_UNDEF and name in absnames)):
                     red.append('%s:%s+%08x:%s' % (label, sec, off, name))

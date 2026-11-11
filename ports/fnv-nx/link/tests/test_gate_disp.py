@@ -129,6 +129,8 @@ def run(slots, entries=None, keys=None, extra_syms=(), entries_extra='', keys_he
     if missing is not None:
         cmd += ['--missing', write('m.tsv', ''.join('%08x\n' % a for a in missing))]
     r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, GATE_OUT=go))
+    if not os.path.exists(os.path.join(go, 'disp.json')):
+        sys.exit('gate_disp failed: ' + r.stderr[-600:])
     with open(os.path.join(go, 'disp.json')) as fh:
         j = json.load(fh)
     with open(os.path.join(go, 'disp.ids')) as fh:
@@ -176,7 +178,7 @@ rc, g = run(slots)
 check('empty slot with a key', (rc, g['status']), (0, 'green'))
 # a duplicate key: the key of 0x00401000 also sits in an empty slot
 j = next(i for i, (k, o) in enumerate(table()) if not o)
-rc, g = run(table(extra=[]) if False else [(s if i != j else (0x00401000, BODIES[0x00401000] - TABLE)) for i, s in enumerate(table())])
+rc, g = run([(s if i != j else (0x00401000, BODIES[0x00401000] - TABLE)) for i, s in enumerate(table())])
 check('duplicate key', (rc, g['uncertified']), (1, ['00401000:duplicate-key']))
 # a key whose slot is not the one the hash computes (the dispatcher would not find it)
 rc, g = run(table(place={0x00401020: j}))
@@ -187,30 +189,29 @@ check('no slot', (rc, g['uncertified']), (1, ['00ff0000:no-slot']))
 # the stored parameters are not those the slots were placed with: the proof of the lookup fails for the keys it misplaces
 rc, g = run(table(), params=(K1, K2 ^ 0x10000, NB, TB))
 check('parameters do not match the table', (rc, g['status'], g['certified'] < 4, all(u.endswith(':hash-miss') for u in g['uncertified'])), (1, 'red', True, True))
-rc, g = run(table(), params=(K1 + 2, K2, NB, TB))
+rc, g = run(table(), params=(K1 ^ 0x5a5a5a5a, K2, NB, TB))
 check('K1 differs', (rc, g['status']), (1, 'red'))
 # sizes and parameters outside the table
-for name, kw in (('table size', dict(sizes=(8 << TB, 2 << NB, 16)) if False else dict(sizes=(8 << TB - 8, 2 << NB, 16))), ('g size', dict(sizes=(8 << TB, 2 << NB - 2, 16))),
+for name, kw in (('table size', dict(sizes=((8 << TB) - 8, 2 << NB, 16))), ('g size', dict(sizes=(8 << TB, (2 << NB) - 2, 16))),
                  ('params size', dict(sizes=(8 << TB, 2 << NB, 12))), ('NBITS 0', dict(params=(K1, K2, 0, TB))), ('TBITS 32', dict(params=(K1, K2, NB, 32))),
                  ('no params', dict(with_params=False))):
     rc, g = run(table(), **kw)
     check('red: %s' % name, (rc, g['status'], g['certified'], g['uncertified'][:1]), (1, 'red', 0, ['00401000:no-table']))
-# --keys: import keys outside the universe are certified, and are an extra key when they are not in --keys
+# --keys: the import key set; the symbols of the bodies are named by entries.tsv rows of kind import
 imp = [(k, v[0]) for k, v in sorted(IMPORTS.items())]
 xs = [('imp_a', 0x1800), ('imp_b', 0x1840)]
-rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs)
+irows = lambda names: ''.join('%08x\t%s\timport\n' % (k, n) for k, n in names)
+rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows(imp))
 check('keys green', (rc, g['status'], g['universe'], g['certified']), (0, 'green', 6, 6))
-rc, g = run(table(extra=sorted(IMPORTS)), keys=imp[:1], extra_syms=xs)
-check('key missing from --keys', (rc, g['uncertified']), (1, ['f0000002:extra-key']))
-rc, g = run(table(extra=sorted(IMPORTS)), keys=[(0xf0000001, 'imp_a'), (0xf0000002, 'imp_a')], extra_syms=xs)
+rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows(imp[:1]))
+check('a key of --keys that no entries row names', (rc, g['uncertified']), (1, ['f0000002:no-entry']))
+rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows([imp[0], (0xf0000002, 'imp_a')]))
 check('key names the wrong symbol', (rc, g['uncertified']), (1, ['f0000002:wrong-target']))
-# a key that is in the universe and in --keys must name the same symbol in both files
-rc, g = run(table(), keys=[(0x00401000, 'imp_a')], extra_syms=[('imp_a', 0x1800)])
-check('entry conflict', (rc, g['uncertified']), (1, ['00401000:entry-conflict']))
+rc, g = run(table(), extra_syms=[('imp_a', 0x1800)], entries_extra='00401000\timp_a\tcode\n')
+check('entry conflict: two rows name two symbols', (rc, g['uncertified']), (1, ['00401000:entry-conflict']))
 # entries.tsv third column: kind import makes the row a key that is not a universe address
 ents = dict(NAMES)
 ents.update({0xf0000001: 'imp_a', 0xf0000002: 'imp_b'})
-kinds = ''
 rc, g = run(table(extra=sorted(IMPORTS)), entries={a: s for a, s in ents.items()}, extra_syms=xs)
 check('import rows without the kind column are not keys: the slots are extra keys', (rc, g['uncertified']), (1, ['f0000001:extra-key', 'f0000002:extra-key']))
 e = write('e2.tsv', ''.join('%08x\t%s\tcode\n' % (a, NAMES[a]) for a in sorted(NAMES)) + ''.join('%08x\t%s\timport\n' % (k, IMPORTS[k][0]) for k in sorted(IMPORTS)) +

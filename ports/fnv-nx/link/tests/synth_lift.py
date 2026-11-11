@@ -14,7 +14,7 @@ scale x the extent of its row in bytes of real instructions, makes a direct `bl`
 farthest pair of the layout, so the linker has to reach across the whole `.text.fnvl` (veneers when it exceeds the 128 MiB of a bl).
 The L3a scratch copy is made with `git show origin/claude/fnv-l3a-lift:...` when it is missing.
 
-Then runs link/ld.py (guest.ld), gate_disp.py and gate_pcrel.py and prints one line per gate, the link wall time and the linker's
+Then runs link/ld.py (guest.ld), gate_disp.py, gate_pcrel.py and gate_abs.py and prints one line per gate, the link wall time and the linker's
 peak RSS.  --red-cases N repeats the run on the first N rows with one defect each: an entry dropped from its archive, a slot of
 the table retargeted, a body that takes the address of an absolute symbol PC-relatively.  Everything derived from the universe
 stays under DIR (container only, never the repository).
@@ -34,12 +34,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LINK = os.path.join(HERE, '..')
 sys.path.insert(0, LINK)
 import gate_disp
+import ld
 
 X = 'aarch64-linux-gnu-'
 CC, CXX, AR, NM, READELF, LD = X + 'gcc', X + 'g++', X + 'ar', X + 'nm', X + 'readelf', '/usr/bin/' + X + 'ld'
 L3A_REF = 'origin/claude/fnv-l3a-lift'
 L3A_FILES = ['lift/bench/phf.py', 'lift/rt/fnvl.h', 'lift/rt/fnvl_x87.h', 'lift/rt/x87.c', 'lift/rt/x87.h', 'lift/rt/seh.c', 'lift/rt/cpumodel.c',
-             'lift/rt/rt.c', 'lift/rt/enter.c']
+             'lift/rt/rt.c', 'lift/rt/enter.c', 'lift/rt/unhandled.c', 'lift/rt/fmath.c', 'lift/rt/fmath.h', 'lift/rt/rcptab.c', 'lift/rt/imp.h']
+TABLE_ID = '0' * 64           # the test id of the synthetic bridge table, in entries.tsv and keys.tsv
 CHUNK = 100                     # bodies per object
 BODY_FLAGS = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-w', '-c'] + \
     ['-ffixed-x%d' % r for r in range(19, 28)]
@@ -51,13 +53,20 @@ LIFT_CXX = ('-mabi=ilp32 -std=gnu++17 -c -O2 -fms-extensions -fshort-wchar -frou
             '-ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-math-errno -w -ffixed-x19 -ffixed-x20 -ffixed-x21 -ffixed-x22 '
             '-ffixed-x23 -ffixed-x24 -ffixed-x25 -ffixed-x26 -ffixed-x27').split()
 PAD = '.rept %d\\n\\tadd w9, w9, #1\\n\\teor w10, w10, w9\\n\\tlsl w11, w10, #3\\n\\torr w9, w9, w11\\n\\t.endr'     # 16 bytes each
-FIXTURE = """/* TEST FIXTURE (synth_lift.py): stands in for what the packaged platform runtime provides to L3a's rt.a. Not part of L3a's interface. */
-unsigned long long fnvl_host_ticks_ns(void) { return 0; }
-void fnvl_os_unhandled(unsigned int record, unsigned int context) { (void)record; (void)context; }
+FIXTURE = """/* TEST FIXTURE (synth_lift.py): what the packaged platform runtime provides to L3a's rt.a. Not part of L3a's interface. */
+static unsigned long long ticks;
+unsigned long long fnvl_host_ticks_ns(void) { return ++ticks; }
 void *memset(void *p, int c, __SIZE_TYPE__ n) { char *q = p; while (n--) *q++ = (char)c; return p; }
+static void *tls_slot;
+void *fnvl_host_tls_slot(void) { return &tls_slot; }
+static void (*raise_backend)(void);
+void fnvnx_win32_set_raise_backend(void (*f)(void)) { raise_backend = f; }
+unsigned UnhandledExceptionFilter(unsigned p) { return p ? 0u : 0xffffffffu; }
+void ExitProcess(unsigned code) { ticks += code; }
 """
-
-
+IMPORTS = """/* TEST FIXTURE (synth_lift.py): the bodies of the import keys of keys.tsv. */
+volatile unsigned fnvl_import_hits;
+"""
 def sh(cmd, **kw):
     r = subprocess.run(cmd, capture_output=True, text=True, **kw)
     if r.returncode:
@@ -133,7 +142,7 @@ def compile_chunks(ents, order, shards, scale, objdir, srcdir, drop, absref, job
     return out
 
 
-def build(ents, out, scale, shards, import_keys=8, l3a=None, drop=None, retarget=None, absref=None, jobs=3):
+def build(ents, out, scale, shards, import_keys=8, l3a=None, drop=None, retarget=None, absref=None, jobs=3, test_objects=True):
     """Build the synthetic liftall output in out (in/ holds the link inputs, obj/ every object, entries.tsv, keys.tsv).
     ents [(address, extent)] sorted; drop: address whose body is left out of its archive (entry and table slot stay);
     retarget: (address, other address): the table slot of the first names the body of the second; absref: address whose body
@@ -152,10 +161,11 @@ def build(ents, out, scale, shards, import_keys=8, l3a=None, drop=None, retarget
             sh([AR, 'Dcr', os.path.join(inn, 'lift_%d_of_%d.a' % (k, shards))] + chunks[k])
     syms = {a: 'L_%08x' % a for a, _ in ents}
     with open(os.path.join(out, 'entries.tsv'), 'w', newline='\n') as fh:
-        fh.write(''.join('%08x\t%s\n' % (a, syms[a]) for a in sorted(syms)))
-    keys = {0xf0000000 + 4 * i: 'fnvl_import_%d' % i for i in range(import_keys)}
+        keys = {0xf0000000 + 4 * i: 'fnvl_import_%d' % i for i in range(import_keys)}
+        fh.write(''.join('%08x\t%s\tcode\n' % (a, syms[a]) for a in sorted(syms)) + ''.join('%08x\t%s\timport\n' % (k, keys[k]) for k in sorted(keys)) +
+                 '# table_id %s\n' % TABLE_ID)
     with open(os.path.join(out, 'keys.tsv'), 'w', newline='\n') as fh:
-        fh.write(''.join('%08x\t%s\n' % (k, keys[k]) for k in sorted(keys)))
+        fh.write('# table_id %s\n' % TABLE_ID + ''.join('%08x\t%s\n' % (k, keys[k]) for k in sorted(keys)))
     tab = dict(syms)
     tab.update(keys)
     if retarget:
@@ -165,27 +175,40 @@ def build(ents, out, scale, shards, import_keys=8, l3a=None, drop=None, retarget
         fh.write(phf.table_asm(tab, h))
     sh([CC, '-mabi=ilp32', '-fPIC', '-c', os.path.join(out, 'disp.S'), '-o', os.path.join(inn, 'disp.o')])
     # the lifter runtime, as liftall.finish() builds it
-    df = ['-DFNVL_PHF_REL', '-DFNVL_K1=%du' % h['k1'], '-DFNVL_K2=%du' % h['k2'], '-DFNVL_NBITS=%d' % h['nbits'], '-DFNVL_TBITS=%d' % h['tbits']]
     rt = os.path.join(l3a, 'rt')
     rto = []
-    for cmd, f in (([CC] + PLAIN + df, 'rt.c'), ([CC] + PLAIN + ['-I', rt], 'x87.c'), ([CC] + PLAIN, 'cpumodel.c'),
-                   ([CXX] + LIFT_CXX + ['-I', rt, '-x', 'c++'], 'seh.c'), ([CXX] + LIFT_CXX + ['-I', rt, '-x', 'c++'], 'enter.c')):
+    jobs = [([CC] + PLAIN + ['-DFNVL_PHF_REL'], 'rt.c'), ([CC] + PLAIN + ['-I', rt], 'x87.c'), ([CC] + PLAIN, 'cpumodel.c'),
+            ([CXX] + LIFT_CXX + ['-I', rt, '-x', 'c++'], 'seh.c'), ([CXX] + LIFT_CXX + ['-I', rt, '-x', 'c++'], 'enter.c'),
+            ([CXX] + LIFT_CXX + ['-I', rt, '-x', 'c++'], 'unhandled.c')]
+    jobs += [([CC] + PLAIN + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists(os.path.join(rt, f))]
+    for cmd, f in jobs:
         o = os.path.join(objd, 'rt_%s.o' % f[:-2])
         sh(cmd + [os.path.join(rt, f), '-o', o])
         rto.append(o)
     sh([AR, 'Dcr', os.path.join(inn, 'rt.a')] + rto)
-    # test-only objects
+    # test-only objects: the import-key bodies always; the host fixture and the start object (a table of absolute pointers to bodies that
+    # gives the PIE its R_AARCH64_P32_RELATIVE relocations) only when test_objects (the real guest runtime brings its own start object)
     fx = os.path.join(out, 'src', 'fixture.c')
     with open(fx, 'w', newline='\n') as fh:
-        fh.write(FIXTURE + ''.join('void %s(void) {}\n' % keys[k] for k in sorted(keys)))
-    sh([CC] + PLAIN + ['-fno-builtin', '-fno-tree-loop-distribute-patterns', fx, '-o', os.path.join(objd, 'fixture.o')])
-    ptrs = [ents[i][0] for i in range(0, n, max(1, n // 64))]
-    with open(os.path.join(out, 'src', 'crt0.S'), 'w', newline='\n') as fh:
-        fh.write('.section .crt0,"ax"\n.globl __fnvnx_guest_start\n__fnvnx_guest_start:\n bl fnvnx_lift_enter\n ret\n'
-                 '.data\n.balign 4\n.globl fixture_entry_ptrs\nfixture_entry_ptrs:\n' + ''.join(' .word L_%08x\n' % a for a in ptrs))
-    sh([CC, '-mabi=ilp32', '-fPIC', '-c', os.path.join(out, 'src', 'crt0.S'), '-o', os.path.join(objd, 'crt0.o')])
-    for o in ('crt0.o', 'fixture.o'):
-        shutil.copy(os.path.join(objd, o), os.path.join(inn, o))
+        fh.write(IMPORTS + ''.join('void %s(void) { fnvl_import_hits++; }\n' % keys[k] for k in sorted(keys)))
+    sh([CC] + PLAIN + ['-fno-builtin', '-fno-tree-loop-distribute-patterns', fx, '-o', os.path.join(objd, 'imports.o')])
+    shutil.copy(os.path.join(objd, 'imports.o'), os.path.join(inn, 'imports.o'))
+    if test_objects:
+        fx = os.path.join(out, 'src', 'host.c')
+        with open(fx, 'w', newline='\n') as fh:
+            fh.write(FIXTURE)
+        sh([CC] + PLAIN + ['-fno-builtin', '-fno-tree-loop-distribute-patterns', fx, '-o', os.path.join(objd, 'fixture.o')])
+        ptrs = [ents[i][0] for i in range(0, n, max(1, n // 64))]
+        with open(os.path.join(out, 'src', 'crt0.S'), 'w', newline='\n') as fh:
+            fh.write('.section .crt0,"ax"\n.globl __fnvnx_guest_start\n__fnvnx_guest_start:\n b 1f\n .word 0\n .word 0x47584e46\n .word 3\n .word 0, 0, 0, 0\n1: bl fnvnx_lift_enter\n ret\n'
+                     '.data\n.balign 4\n.globl fixture_entry_ptrs\nfixture_entry_ptrs:\n' + ''.join(' .word L_%08x\n' % a for a in ptrs))
+        sh([CC, '-mabi=ilp32', '-fPIC', '-c', os.path.join(out, 'src', 'crt0.S'), '-o', os.path.join(objd, 'crt0.o')])
+        for o in ('crt0.o', 'fixture.o'):
+            shutil.copy(os.path.join(objd, o), os.path.join(inn, o))
+    if absref is not None:
+        with open(os.path.join(out, 'src', 'abs.s'), 'w', newline='\n') as fh:
+            fh.write('.globl fnv_abs\n.hidden fnv_abs\n.set fnv_abs, 0x400000\n')
+        sh([CC, '-mabi=ilp32', '-c', os.path.join(out, 'src', 'abs.s'), '-o', os.path.join(inn, 'abs.o')])
     shutil.rmtree(srcd)
     shutil.copy(os.path.join(inn, 'disp.o'), os.path.join(objd, 'disp.o'))
     return order[0], order[-1]
@@ -201,8 +224,9 @@ sys.exit(r.returncode)
 """
 
 
-def link_and_gate(ents, out, far, absref=None, scale=None):
-    """Run ld.py, gate_disp.py and gate_pcrel.py on out/in. Returns {gate: (exit status, stdout line)} and measurements."""
+def link_and_gate(ents, out, far, absref=None, scale=None, ld_extra=(), ld_args=('-m', 'aarch64linux32')):
+    """Run ld.py, gate_disp.py, gate_pcrel.py and gate_abs.py on out/in. ld_extra: more ld.py arguments (toolchain libraries, start files).
+    Returns {gate: (exit status, stdout line)} and measurements."""
     go = os.path.join(out, 'gates')
     shutil.rmtree(os.path.join(out, 'ld'), ignore_errors=True)
     os.makedirs(go, exist_ok=True)
@@ -212,10 +236,8 @@ def link_and_gate(ents, out, far, absref=None, scale=None):
     os.chmod(wrap, 0o755)
     env = dict(os.environ, GATE_OUT=go)
     res, meas = {}, {}
-    cmd = [sys.executable, '-I', os.path.join(LINK, 'ld.py'), '--ld', wrap, '--ld-arg=-m', '--ld-arg=aarch64linux32']
-    if absref is not None:
-        cmd += ['--ld-arg=--defsym=fnv_abs=0x400000']
-    cmd += ['--script', os.path.join(LINK, 'guest.ld'), '--in', os.path.join(out, 'in'), '--out', os.path.join(out, 'ld')]
+    cmd = [sys.executable, '-I', os.path.join(LINK, 'ld.py'), '--ld', wrap] + ['--ld-arg=' + x for x in ld_args]
+    cmd += ['--script', os.path.join(LINK, 'guest.ld'), '--in', os.path.join(out, 'in'), '--out', os.path.join(out, 'ld')] + list(ld_extra)
     t = time.monotonic()
     r = subprocess.run(cmd, capture_output=True, text=True, env=env)
     meas['ld.py wall s'] = round(time.monotonic() - t, 1)
@@ -226,16 +248,19 @@ def link_and_gate(ents, out, far, absref=None, scale=None):
         meas['linker wall s'], meas['linker peak RSS MB'] = float(w), round(int(rss) / 1024)
     except OSError:
         pass
+    rsp = os.path.join(out, 'ld', 'inputs.rsp')
     elf = os.path.join(out, 'ld', 'guest.elf')
+    r = subprocess.run([sys.executable, '-I', os.path.join(LINK, 'gate_abs.py'), '--inputs', rsp] + (['--elf', elf] if os.path.exists(elf) else []),
+                       capture_output=True, text=True, env=env)
+    res['abs'] = (r.returncode, r.stdout.strip() or r.stderr.strip()[-300:])
     if os.path.exists(elf):
         r = subprocess.run([sys.executable, '-I', os.path.join(LINK, 'gate_disp.py'), '--elf', elf, '--universe', os.path.join(out, 'universe.tsv'),
                             '--entries', os.path.join(out, 'entries.tsv'), '--keys', os.path.join(out, 'keys.tsv')], capture_output=True, text=True, env=env)
         res['disp'] = (r.returncode, r.stdout.strip() or r.stderr.strip()[-300:])
-        r = subprocess.run([sys.executable, '-I', os.path.join(LINK, '..', 'contract', 'gate_pcrel.py'), '--elf', elf, '--objects', os.path.join(out, 'obj'),
-                            '--work', os.path.join(out, 'pcrel'), '--readelf', READELF, '--nm', NM], capture_output=True, text=True, env=env)
+        r = subprocess.run([sys.executable, '-I', os.path.join(LINK, 'gate_pcrel.py'), '--elf', elf, '--inputs', rsp], capture_output=True, text=True, env=env)
         res['pcrel'] = (r.returncode, r.stdout.strip().replace('\n', '; ') or r.stderr.strip()[-300:])
-        rel = collections.Counter(l.split()[2] for l in sh([READELF, '-rW', elf]).splitlines() if len(l.split()) >= 3 and l.split()[2].startswith('R_AARCH64'))
-        meas['dynamic relocations'] = ', '.join('%s %d' % kv for kv in sorted(rel.items())) or 'none'
+        cnt, bad = ld.dyn_relocs(elf)
+        meas['dynamic relocations'] = ', '.join('%s %d' % kv for kv in sorted(cnt.items())) + ('; other %d' % len(bad) if bad else '')
         for l in sh([READELF, '-SW', elf]).splitlines():
             if '.text.fnvl' in l:
                 meas['.text.fnvl bytes'] = int(l.split('.text.fnvl')[1].split()[3], 16)
@@ -245,7 +270,7 @@ def link_and_gate(ents, out, far, absref=None, scale=None):
     return res, meas
 
 
-def run(universe, out, scale, shards, import_keys, l3a, rows=None, **defect):
+def run(universe, out, scale, shards, import_keys, l3a, rows=None, test_objects=True, ld_extra=(), **defect):
     os.makedirs(out, exist_ok=True)
     ents = load_universe(universe)
     if rows:
@@ -253,12 +278,12 @@ def run(universe, out, scale, shards, import_keys, l3a, rows=None, **defect):
     with open(os.path.join(out, 'universe.tsv'), 'w', newline='\n') as fh:
         fh.write(''.join('%08x\tdecomp\t%d\t-\n' % e for e in ents))
     t = time.monotonic()
-    far = build(ents, out, scale, shards, import_keys, l3a, **defect)
+    far = build(ents, out, scale, shards, import_keys, l3a, test_objects=test_objects, **defect)
     built = round(time.monotonic() - t, 1)
-    res, meas = link_and_gate(ents, out, far, defect.get('absref'))
+    res, meas = link_and_gate(ents, out, far, defect.get('absref'), ld_extra=ld_extra)
     meas['build s'] = built
     meas['gate files'] = {}
-    for g in ('ld', 'disp', 'pcrel'):
+    for g in ('ld', 'disp', 'pcrel', 'abs'):
         p = os.path.join(out, 'gates', g + '.json')
         if os.path.exists(p):
             with open(p) as fh:
@@ -269,7 +294,7 @@ def run(universe, out, scale, shards, import_keys, l3a, rows=None, **defect):
 
 def report(title, res, meas, gates=()):
     print('== %s' % title)
-    for g in ('ld', 'disp', 'pcrel'):
+    for g in ('ld', 'disp', 'pcrel', 'abs'):
         if g in res:
             print('%s gate: exit %d: %s' % (g, res[g][0], res[g][1]))
             if g in gates:

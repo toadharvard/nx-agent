@@ -54,7 +54,7 @@ int fnvnx_image_map(fnvnx_image *img, const fnvnx_pe *pe, const fnvnx_os *os, ui
             fnvnx_logf(os, "map_fixed 0x%08x+0x%x failed", m->va, m->size);
             return FNVNX_E_MAP;
         }
-        if (m->file_bytes && os->read(os->ctx, off, host, m->file_bytes)) return FNVNX_E_IO;
+        if (m->file_bytes && os->read(os->ctx, pe->file, off, host, m->file_bytes)) return FNVNX_E_IO;
         memset(host + m->file_bytes, 0, m->size - m->file_bytes);   /* .bss and the page tail */
     }
     return FNVNX_OK;

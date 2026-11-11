@@ -30,20 +30,21 @@ void fnvnx_logf(const fnvnx_os *os, const char *fmt, ...) {
 
 static uint32_t vsize_eff(const fnvnx_section *s) { return s->vsize ? s->vsize : s->raw_size; }
 
-int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
+int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file, uint32_t file_size) {
     uint8_t dos[64], nt[24], opt[224], sh[40];
     uint32_t lfanew, optsize, shoff, i, nrva;
     uint64_t end;
 
     if (!pe || !fnvnx_os_complete(os)) return FNVNX_E_ARG;
     memset(pe, 0, sizeof *pe);
+    pe->file = file;
     pe->file_size = file_size;
     if (file_size < sizeof dos) return FNVNX_E_FORMAT;
-    if (os->read(os->ctx, 0, dos, sizeof dos)) return FNVNX_E_IO;
+    if (os->read(os->ctx, file, 0, dos, sizeof dos)) return FNVNX_E_IO;
     if (dos[0] != 'M' || dos[1] != 'Z') return FNVNX_E_FORMAT;
     lfanew = fnvnx_rd32(dos + 0x3c);
     if (lfanew < 0x40 || lfanew > 0x1000 || (uint64_t)lfanew + sizeof nt > file_size) return FNVNX_E_FORMAT;
-    if (os->read(os->ctx, lfanew, nt, sizeof nt)) return FNVNX_E_IO;
+    if (os->read(os->ctx, file, lfanew, nt, sizeof nt)) return FNVNX_E_IO;
     if (memcmp(nt, "PE\0\0", 4)) return FNVNX_E_FORMAT;
     pe->machine = fnvnx_rd16(nt + 4);
     pe->nsections = fnvnx_rd16(nt + 6);
@@ -55,7 +56,7 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
     if (optsize < 96 || optsize > sizeof opt) return FNVNX_E_FORMAT;
     if (pe->nsections == 0 || pe->nsections > FNVNX_MAX_SECTIONS) return FNVNX_E_FORMAT;
     if ((uint64_t)lfanew + 24 + optsize > file_size) return FNVNX_E_FORMAT;
-    if (os->read(os->ctx, lfanew + 24, opt, optsize)) return FNVNX_E_IO;
+    if (os->read(os->ctx, file, lfanew + 24, opt, optsize)) return FNVNX_E_IO;
     if (fnvnx_rd16(opt) != 0x010b) return FNVNX_E_UNSUPPORTED;      /* PE32, not PE32+ */
     pe->entry_rva = fnvnx_rd32(opt + 16);
     pe->image_base = fnvnx_rd32(opt + 28);
@@ -94,7 +95,7 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
     if (pe->size_of_headers < shoff + 40u * pe->nsections || pe->size_of_headers > file_size) return FNVNX_E_FORMAT;
     for (i = 0; i < pe->nsections; i++) {
         fnvnx_section *s = &pe->sec[i];
-        if (os->read(os->ctx, shoff + 40 * i, sh, sizeof sh)) return FNVNX_E_IO;
+        if (os->read(os->ctx, file, shoff + 40 * i, sh, sizeof sh)) return FNVNX_E_IO;
         memcpy(s->name, sh, 8);
         s->name[8] = 0;
         s->vsize = fnvnx_rd32(sh + 8);
@@ -127,5 +128,5 @@ int fnvnx_pe_read_rva(const fnvnx_pe *pe, const fnvnx_os *os, uint32_t rva, void
     uint32_t off;
     int r = fnvnx_pe_rva_to_off(pe, rva, size, &off);
     if (r) return r;
-    return os->read(os->ctx, off, dst, size) ? FNVNX_E_IO : FNVNX_OK;
+    return os->read(os->ctx, pe->file, off, dst, size) ? FNVNX_E_IO : FNVNX_OK;
 }

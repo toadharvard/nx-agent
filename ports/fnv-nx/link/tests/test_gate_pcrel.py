@@ -42,6 +42,7 @@ ma = obj('ma', '.text\n.globl member_a\nmember_a: bl member_b\n ret\n')
 mb = obj('mb', '.text\n.globl member_b\nmember_b: adrp x0, fnv_abs\n add x0, x0, :lo12:fnv_abs\n ret\n')
 mc = obj('mc', '.text\n.globl member_c\nmember_c: adrp x0, data\n ret\n')
 absdef = obj('absdef', '.globl fnv_abs\n.set fnv_abs, 0x400000\n')
+reldef = obj('reldef', '.data\n.globl fnv_abs\nfnv_abs: .word 0\n')
 lib = os.path.join(d, 'lib.a')
 sh([X + 'ar', 'Dcr', lib, ma, mb, mc])
 
@@ -49,7 +50,7 @@ sh([X + 'ar', 'Dcr', lib, ma, mb, mc])
 def run(name, with_abs):
     elf = os.path.join(d, name + '.elf')
     sh([X + 'ld', '-m', 'aarch64linux32', '-no-pie', '-Ttext=0x100000', '-e', '_start', main, '--whole-archive', lib, '--no-whole-archive'] +
-       ([absdef] if with_abs else []) + ['-o', elf])
+       [absdef if with_abs else reldef] + ['-o', elf])
     rsp = os.path.join(d, name + '.rsp')
     with open(rsp, 'w') as fh:
         fh.write('"%s"\n"%s"\n' % (main, lib))
@@ -66,7 +67,8 @@ check('red: the site in the archive member is found', j['uncertified'], ['lib.a(
 check('red: every member and object is examined (2 + 1 + 1 + 1 pc-relative relocations)', (j['universe'], j['certified']), (5, 4))
 with open(ids) as fh:
     check('red: ids file', fh.read(), 'lib.a(mb.o):.text+00000000:fnv_abs\n')
-# the same link without an absolute symbol: the reference binds to nothing absolute (the symbol is undefined in the image, so the link is not made)
+rc, j, _ = run('green', False)
+check('green: the same inputs with a section-relative symbol', (rc, j['status'], j['universe'], j['certified']), (0, 'green', 5, 5))
 if fails:
     print('\n'.join(fails))
     sys.exit(1)

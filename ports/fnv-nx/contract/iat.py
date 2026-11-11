@@ -6,8 +6,9 @@
 Image code pointers are not rewritten and `call [slot]` is an ordinary indirect call, so a slot must hold a 32-bit
 value the dispatcher of the lifted code maps to an entry.  Rule, total over the image's import directory:
 
-  module    the dll is a lifted PE module: the slot holds the address of the module's export (exports.tsv: name or
-            #ordinal <tab> address at the module's load base), as the Windows loader does.
+  module    the dll is a lifted PE module: the slot holds the address of the module's export (exports.tsv of
+            modules.py: name or #ordinal, address at the module's assigned base, forwarder, ordinal), as the Windows
+            loader does; a forwarder export holds the value of its target (resolve_exports).
   key       the dll is implemented by the platform (a bridge.tsv row of L5): the slot holds the function's key,
             IMPORT_BASE + STEP * (index of (dll, name) among the non-data rows of bridge.tsv sorted by dll, name).
             One function has one key in every image, so pointer equality behaves as on Windows.
@@ -181,11 +182,66 @@ def c_source(rows, table_id):
     return ''.join(t), skipped
 
 
+def split_forwarder(fwd):
+    """PE export forwarder "DLL.Name" or "DLL.#N" -> (normalised dll, "Name" | "#N"), or None when it has no '.'.  The
+    dll part carries no extension in a forwarder (norm_dll appends ".dll"); the split is at the FIRST '.': function names
+    contain none (assumption of the PE format's "DLLNAME.Function" string)."""
+    i = fwd.find('.')
+    if i <= 0 or i + 1 >= len(fwd):
+        return None
+    return norm_dll(fwd[:i]), fwd[i + 1:]
+
+
+def resolve_exports(raw, bridge):
+    """raw {dll: [(key, address | None, forwarder | None, ordinal)]} (key = export name or "#ordinal"; a named export is
+    also reachable as "#ordinal") -> {dll: {key: value}}: the value an import of that export gets, as the loader's resolver
+    computes it.  A forwarder is resolved through the same rule: the forwarded (dll, name | #N) is a module export
+    (recursively; a cycle, or a target that is not there, leaves the export out = no provider) or a platform function
+    (its key).  A forwarder to a platform DATA row is left out too: its value is the address of a native object bound by
+    the loader, which this table cannot hold."""
+    keys = system_keys(bridge)
+    by_ord = {}
+    for b in bridge:
+        if len(b) > 3 and b[3] != '':
+            by_ord[(norm_dll(b[0]), '#%d' % int(b[3]))] = b[1]
+    index = {}
+    for dll, ents in raw.items():
+        d = index.setdefault(norm_dll(dll), {})
+        for key, addr, fwd, ordinal in ents:
+            d[key] = (addr, fwd)
+            d['#%d' % ordinal] = (addr, fwd)
+
+    def value(dll, key, hops):
+        if dll in index:
+            e = index[dll].get(key)
+            if e is None:
+                return None
+            if e[1] is None:
+                return e[0]
+            t = split_forwarder(e[1])
+            return None if t is None or hops >= len(index) else value(t[0], t[1], hops + 1)
+        return keys.get((dll, by_ord.get((dll, key), key)))
+
+    return {dll: {k: v for k in sorted(index[dll]) for v in [value(dll, k, 0)] if v is not None} for dll in sorted(index)}
+
+
+def read_exports(path):
+    """exports.tsv (modules.py): key, address (hex, empty for a forwarder), forwarder (empty for a code/data export),
+    ordinal (decimal) -> [(key, address | None, forwarder | None, ordinal)]"""
+    return [(p[0], int(p[1], 16) if p[1] else None, p[2] or None, int(p[3])) for p in read_tsv(path, 4)]
+
+
+def write_table(path, rows):
+    with open(path, 'w', newline='\n') as fh:
+        for slot, dll, name, kind, v in rows:
+            fh.write('%08x\t%s\t%s\t%s\t%s\n' % (slot, dll, name, kind, '' if v is None else '%08x' % v))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--facts', required=True)
     ap.add_argument('--bridge', required=True, help="L5's bridge.tsv: dll, name, ordinal, conv, ...")
-    ap.add_argument('--module', action='append', default=[], help='name.dll=exports.tsv (name|#ordinal, hex address)')
+    ap.add_argument('--module', action='append', default=[], help='name.dll=exports.tsv (modules.py: key, address, forwarder, ordinal)')
     ap.add_argument('--out', required=True)
     ap.add_argument('--keys-out', help='keys.tsv for the lifter stubs')
     ap.add_argument('--c-out', help='import_keys.c for loader/src/importkey.c')
@@ -195,10 +251,11 @@ def main():
         bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
         ktxt = keys_tsv(brows, table_id)
         ctxt, nodata = c_source(brows, table_id)
-        modules = {}
+        raw = {}
         for m in a.module:
             name, path = m.split('=', 1)
-            modules[norm_dll(name)] = {p[0]: int(p[1], 16) for p in read_tsv(path, 2)}
+            raw[norm_dll(name)] = read_exports(path)
+        modules = resolve_exports(raw, bridge)
         rows, bad = table(store.load(a.facts, 'facts')['imports'], bridge, modules)
     except ValueError as e:
         sys.exit('iat: %s' % e)
@@ -206,9 +263,7 @@ def main():
         if path:
             with open(path, 'w', newline='\n') as fh:
                 fh.write(txt)
-    with open(a.out, 'w', newline='\n') as fh:
-        for slot, dll, name, kind, v in rows:
-            fh.write('%08x\t%s\t%s\t%s\t%s\n' % (slot, dll, name, kind, '' if v is None else '%08x' % v))
+    write_table(a.out, rows)
     gatefile.write('iat', len(rows) + len(bad), len(rows), ['%08x %s!%s: %s' % b for b in bad], '%d slots, %d without a value' % (len(rows) + len(bad), len(bad)))
     print('%d slots with a value, %d without; %d data rows without a native object' % (len(rows), len(bad), nodata))
     for b in bad:

@@ -38,7 +38,7 @@ def check(paths, absnames):
                 if typ not in PCREL:
                     continue
                 examined += 1
-                if not name and typ:
+                if not name and stype == 0 and shndx == 0 and typ:
                     ids.append('%s:%s+%08x:*ABS*' % (label, sec, off))
                 elif name and bind != 0 and name in absnames or shndx == relocs.SHN_ABS:
                     ids.append('%s:%s+%08x:%s' % (label, sec, off, name))
