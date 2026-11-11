@@ -196,9 +196,27 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name)
         SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
     }
-    HMODULE h = module_lookup(name, 1);
-    if (h)
-        return h;
+    HMODULE h = module_lookup(name, 0);
+    if (h) {
+        /* a translated image the platform holds no explicit load of (count 0: kept alive only as a dependency, or loaded
+         * by the loader's own start) is held now, by the loader: the platform's count is the loader's hold */
+        char nf[W32_PATH_MAX];
+        int nhp;
+        bool hold = false;
+        os_lock(&g_mod_lock);
+        struct module *hm = h == EXE_MODULE ? NULL : module_of(h);
+        hold = hm && hm->image && !hm->system && hm->refs == 1;
+        os_unlock(&g_mod_lock);
+        if (hold && normalize(name, nf, sizeof nf, &nhp)) {
+            uint32_t hb = 0;
+            DWORD he = fnvnx_bnd_module_load(base_name(nf), &hb);
+            if (he && he != ERROR_MOD_NOT_FOUND) {   /* MOD_NOT_FOUND: not in the loader's table, nothing of the loader's to hold */
+                SetLastError(he);
+                return NULL;
+            }
+        }
+        return module_lookup(name, 1);
+    }
     /* not loaded: a translated module is loaded by the loader (it registers the image); anything else is absent */
     /* the loader's table is by file name: a path must be the game directory's (the place translated modules live) */
     char f[W32_PATH_MAX], dir[W32_PATH_MAX];
@@ -224,19 +242,58 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name)
     return h;
 }
 
-/* A reference is dropped down to the loader's own, which stays: translated code is never unmapped. */
+extern "C" void fnvnx_resource_register_image(HMODULE m, const void *base, size_t size);   /* resource.cpp */
+
+/* FreeLibrary. A reference is dropped; the platform's own count of a translated image (refs - 1: the extra one is the
+ * loader's registration) reaching 0 hands the module to the loader (fnvnx_bnd_module_unload), whose rule is that of the
+ * Windows loader: UNLOADED removes the image from the module table and its pages from the page map, KEPT leaves it
+ * loaded (a live module imports it) at count 0, still found by GetModuleHandle; PINNED (a static module) changes
+ * nothing and FreeLibrary still succeeds. A refusal of the loader is a bad handle (ERROR_INVALID_HANDLE) or a module this
+ * process holds no load of (ERROR_MOD_NOT_FOUND). The exe, the system DLLs and resolver modules are never unloaded. */
 extern "C" BOOL FreeLibrary(HMODULE h)
 {
     if (h == EXE_MODULE)
         return TRUE;
     os_lock(&g_mod_lock);
     struct module *m = module_of(h);
-    if (m && !m->system && m->refs > 1)
-        m->refs--;
-    os_unlock(&g_mod_lock);
-    if (!m)
+    if (!m) {
+        os_unlock(&g_mod_lock);
         SetLastError(ERROR_INVALID_HANDLE);
-    return m != NULL;
+        return FALSE;
+    }
+    if (m->system || !m->image) {
+        if (!m->system && m->refs > 1)
+            m->refs--;
+        os_unlock(&g_mod_lock);
+        return TRUE;
+    }
+    uint32_t base = m->base, size = m->size;
+    if (m->refs > 1)
+        m->refs--;
+    bool unload = m->refs == 1;
+    os_unlock(&g_mod_lock);
+    if (!unload)
+        return TRUE;
+    int outcome = FNVNX_BND_KEPT;
+    DWORD e = fnvnx_bnd_module_unload(base, &outcome);
+    if (e) {
+        SetLastError(e);
+        return FALSE;
+    }
+    if (outcome == FNVNX_BND_UNLOADED) {
+        os_lock(&g_mod_lock);
+        m = module_of(h);
+        if (m && m->image && m->base == base && m->refs == 1) {
+            m->image = 0;
+            m->file[0] = 0;
+            m->base = m->size = 0;
+            m->refs = 0;
+        }
+        os_unlock(&g_mod_lock);
+        fnvnx_resource_register_image(h, NULL, 0);
+        fnvnx_win32_vm_unnote(base, size);
+    }
+    return TRUE;
 }
 
 /* The exe and the platform's own modules have no per-thread notifications to suppress: the handle is only validated. A
@@ -464,6 +521,12 @@ extern "C" void fnvnx_win32_register_image(const char *name, uint32_t base, uint
         g_exe_size = size;
     } else {
         struct module *m = find_locked(f);   /* a system DLL's name, or the same module again: its image is replaced */
+        for (int i = 0; i < g_nmodules && !m; i++)   /* a slot an unloaded module left */
+            if (!g_modules[i].file[0] && !g_modules[i].system && !g_modules[i].image && !g_modules[i].resolve) {
+                m = &g_modules[i];
+                snprintf(m->file, sizeof m->file, "%s", f);
+                m->refs = 1;
+            }
         if (!m && g_nmodules < MAX_MODULES) {
             m = &g_modules[g_nmodules++];
             snprintf(m->file, sizeof m->file, "%s", f);

@@ -111,6 +111,20 @@ uint32_t fnvnx_bnd_module_load(const char *name, uint32_t *base)
     return 193;        /* ERROR_BAD_EXE_FORMAT: file / hash / PE / relocation error, a TLS directory */
 }
 
+/* FreeLibrary at a platform count of 0: fnvnx_module_unload's results become the boundary's outcome or a Win32 error */
+uint32_t fnvnx_bnd_module_unload(uint32_t base, int *outcome)
+{
+    uint32_t esp = 0, teb = 0;
+    fnvnx_guest_current(&esp, &teb);
+    int rc = fnvnx_module_unload(proc(), teb, esp, base);
+    if (rc == FNVNX_OK) { *outcome = FNVNX_BND_UNLOADED; return 0; }
+    if (rc == FNVNX_START_UNLOAD_KEPT) { *outcome = FNVNX_BND_KEPT; return 0; }
+    if (rc == FNVNX_START_E_PINNED) { *outcome = FNVNX_BND_PINNED; return 0; }
+    if (rc == FNVNX_START_E_NOTHELD)
+        return 126;    /* ERROR_MOD_NOT_FOUND */
+    return 6;          /* ERROR_INVALID_HANDLE: not the base of a loaded module (FNVNX_E_ARG), or any other refusal */
+}
+
 /* ExitProcess: DllMain(DLL_PROCESS_DETACH) with a non-NULL lpvReserved (the process is terminating) */
 void fnvnx_bnd_process_detach(void)
 {

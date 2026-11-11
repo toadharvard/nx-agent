@@ -110,5 +110,19 @@ uint32_t fnvnx_bnd_disable_thread_calls(uint32_t base)
     return 0;
 }
 
+/* FreeLibrary of a translated module: the host implementation records the calls; a test sets the answer */
+uint32_t g_bnd_unload_base[16];
+int g_bnd_unload_n;
+int g_bnd_unload_outcome = FNVNX_BND_PINNED;     /* the outcome the next calls report (default: a static module, never unloaded) */
+uint32_t g_bnd_unload_error;                     /* nonzero: the Win32 error the next calls report */
+uint32_t fnvnx_bnd_module_unload(uint32_t base, int *outcome)
+{
+    if (g_bnd_unload_n < 16)
+        g_bnd_unload_base[g_bnd_unload_n] = base;
+    g_bnd_unload_n++;
+    *outcome = g_bnd_unload_outcome;
+    return g_bnd_unload_error;
+}
+
 void fnvnx_bnd_process_detach(void) { __atomic_fetch_add(&g_bnd_process_detaches, 1, __ATOMIC_RELAXED); }
 }

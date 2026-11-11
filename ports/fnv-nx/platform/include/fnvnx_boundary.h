@@ -76,6 +76,15 @@ void fnvnx_bnd_thread_release(fnvnx_bnd_thread *t, int notify);
  * returned FALSE). `name` is the module name as the caller gave it. */
 uint32_t fnvnx_bnd_module_load(const char *name, uint32_t *base);
 
+/* FreeLibrary of a translated module whose LoadLibrary count (the platform's own, one per successful load it made) has reached 0:
+ * the loader releases the platform's hold and unloads the module when nothing else keeps it (fnvnx_module_unload). Returns 0 with
+ * *outcome = FNVNX_BND_UNLOADED (the module is gone: remove it from the module table), FNVNX_BND_KEPT (the platform's reference
+ * is dropped; the module stays loaded because a live module imports it) or FNVNX_BND_PINNED (a static module: nothing happens;
+ * FreeLibrary still returns TRUE); else the Win32 error FreeLibrary sets (ERROR_INVALID_HANDLE: not the base of a loaded
+ * module; ERROR_MOD_NOT_FOUND: loaded, but the platform holds no explicit load of it). */
+enum { FNVNX_BND_UNLOADED = 0, FNVNX_BND_KEPT = 1, FNVNX_BND_PINNED = 2 };
+uint32_t fnvnx_bnd_module_unload(uint32_t base, int *outcome);
+
 /* DisableThreadLibraryCalls of a translated module (the HMODULE is its base): from now on its DllMain and TLS callbacks are not
  * told of thread attach / detach. Returns 0, or the Win32 error (ERROR_MOD_NOT_FOUND: `base` is not the base of a
  * translated module). Idempotent. */

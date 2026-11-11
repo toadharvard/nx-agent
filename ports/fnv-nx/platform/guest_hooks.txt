@@ -16,6 +16,7 @@ fnvnx_start_proc               # loader L1: fnvnx_start.h
 fnvnx_thread_block_create      # loader L1: fnvnx_start.h
 fnvnx_thread_block_free        # loader L1: fnvnx_start.h
 fnvnx_module_load              # loader L1: fnvnx_start.h
+fnvnx_module_unload            # loader L1: fnvnx_start.h
 fnvnx_modules_thread_attach    # loader L1: fnvnx_start.h
 fnvnx_modules_thread_detach    # loader L1: fnvnx_start.h
 fnvnx_modules_process_detach   # loader L1: fnvnx_start.h
