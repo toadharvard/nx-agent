@@ -8,14 +8,14 @@
    "area": "proof",
    "file": "lift/proof/shapeprove.py",
    "statement": "The Sail x86 model (sail-x86-from-acl2 at the pinned commit, plus lift/proof/sail_patches) is the semantics of the reference CPU for every proved shape.",
-   "disposition": "open: not one of the eight. One defect already found (BT m,r negative offset, patched, hardware-checked by test/bthost.py). Needs an owner decision or a closing rule"
+   "disposition": "waits-owner: trust in a pinned formal model, same kind as \"the compiler is correct\"; question passed to the owner by the orchestrator"
   },
   {
    "id": "A-PROVER",
    "area": "proof",
    "file": "lift/proof/prove.py",
    "statement": "isla and z3 at the pinned versions are sound: an unsat answer means no counterexample.",
-   "disposition": "open: tool correctness other than the compiler; not one of the eight"
+   "disposition": "waits-owner: trust in pinned formal tools (isla, z3); question passed to the owner by the orchestrator"
   },
   {
    "id": "A-FLAT",
@@ -50,21 +50,21 @@
    "area": "forms",
    "file": "lift/proof/census.py",
    "statement": "Decoding (operand structure, family) is a function of the shape: masked imm/disp fields never change it.",
-   "disposition": "open: checked on the representative only; a rule over the opcode map would close it"
+   "disposition": "gate: same decoder-agreement gate, run on every occurrence (not the representative): operand structure of each occurrence equals that of its shape"
   },
   {
    "id": "A-CAPSTONE-X86",
    "area": "forms",
    "file": "lift/proof/shape.py",
    "statement": "capstone decodes every x86 instruction of the universe to its true length, fields and operands.",
-   "disposition": "open: tool correctness; closable by proving the decode against the Sail decoder per shape"
+   "disposition": "gate: agreement of independent decoders (capstone, LLVM MC, XED) on every byte of the code ranges of the exe and modules; any difference is red (orchestrator decision 2026-11-11)"
   },
   {
    "id": "A-GROUPS",
    "area": "lift",
    "file": "lift/fnvlift/f_cpufeat.py",
    "statement": "capstone group tags classify the instruction-set extension of a form correctly.",
-   "disposition": "open: same class as A-CAPSTONE-X86"
+   "disposition": "gate: same decoder-agreement gate, extension class compared with XED isa-set on every instruction"
   },
   {
    "id": "A-SDMREF",
@@ -85,7 +85,7 @@
    "area": "fp",
    "file": "lift/fnvlift/fpfacts.py",
    "statement": "No x87/SSE exception is ever unmasked (I-FPMASK); fwait and FP arithmetic never raise.",
-   "disposition": "open: owner word of 2026-11-11 until first frame, but not one of the eight. 167 control-word loads are unproven (exe 55, libvorbis 15, libvorbisfile 2, binkw32 1, d3dx9_31 43, d3dx9_38 51). Closing = full unmasked semantics"
+   "disposition": "fact: every control-word write (fldcw, ldmxcsr, fninit, frstor, fldenv, fxrstor, _controlfp/_control87 with operand) found statically and proved to keep the masks; if not proved, exact unmasked-exception semantics before the first frame (orchestrator decision 2026-11-11; owner of the work L3b)"
   },
   {
    "id": "A-FPSTICKY",
@@ -134,7 +134,7 @@
    "area": "x87",
    "file": "lift/fnvlift/f_x87_ctl.py",
    "statement": "ES (bit 7) and B (bit 15) of FSW are 0.",
-   "disposition": "open: follows from A-FPMASK; falls with it"
+   "disposition": "fact: follows the A-FPMASK fact, or is implemented with the unmasked semantics"
   },
   {
    "id": "A-FDP",
@@ -183,7 +183,7 @@
    "area": "r9",
    "file": "lift/tools/memclass.py",
    "statement": "Every callee (direct, indirect, import) pops esp as its RETN says and preserves ebp; stack coordinates survive a call.",
-   "disposition": "open: imports: Win32 by documentation. Direct/indirect guest callees: unproven; enforcing by closure makes 38 450 entries ORDERED (62 % of accesses). No cheaper class-closing rule known"
+   "disposition": "fact: stack delta and ebp/esp restore checked from the exe code for every function at every ret; a function without the fact gets the conservative (ORDERED) class (orchestrator decision 2026-11-11)"
   },
   {
    "id": "A-NOSTRADDLE",
@@ -211,7 +211,7 @@
    "area": "r9",
    "file": "lift/rt/fnvl.h",
    "statement": "The mapping x86-TSO -> Armv8 (ordered load = ldar or load+dmb ishld, ordered store = stlr or dmb ishst+store, locked RMW = exclusive pair/CAS + dmb ish) preserves every x86-TSO behaviour bound.",
-   "disposition": "open: rests on published proofs (Pulte et al. 2018, Risotto 2022, Lasagne Agda), not machine-checked here against the emitted code"
+   "disposition": "waits-owner: published theorem (Pulte 2018, Risotto 2022, Lasagne); question passed to the owner by the orchestrator"
   },
   {
    "id": "A-RCPHOST",
@@ -232,7 +232,7 @@
    "area": "fpexact",
    "file": "lift/proof/gate_fpexact.py",
    "statement": "capstone decodes every AArch64 instruction of an object to its architectural id; unmarked sections are code from their start.",
-   "disposition": "open: tool correctness; closable by a second decoder built from the Arm machine-readable spec"
+   "disposition": "gate: agreement of capstone and LLVM MC on every instruction of every object of ours; any difference is red (orchestrator decision 2026-11-11)"
   },
   {
    "id": "A-F2IHELPERS",
