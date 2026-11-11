@@ -73,3 +73,13 @@ so no game code is built or gated on trunk yet. Frames rendered: 0.
 - L3a's rule: every guest access ordered (ldar/stlr, alignment test, dmb path for unaligned); 18 lockable forms and xchg-with-memory as CAS; unaligned through the ATOMIC-UNALIGNED spin-lock.
 - Gate B/F checks the pack objects. Exempt bases are only host-private frames, with a proof in ORDERING.md; a guest-base register is never exempt.
 - Regenerate after R9 lands.
+
+## Numbers, 2026-11-11 22:15Z
+
+| # | item | number | source |
+|---|---|---|---|
+| 1 | game compiler mirror | DONE: tools/gcc-ilp32-msvcmodel b4057704, tree_sha256 b60eafe7…5116, reproducible A==B, test_msvcmodel 0, 5 plugin tests 0 | fnv-nx-build ref, farm report |
+| T | trunk | 9c22c3f8 (w3 + w7 merged), gates 7, product roots 0 | trunk |
+| 2 | guest_compiler.json | L1 w4 writes it, with provenance in the json; w4 waits for the test_guest -I fix | L1 note |
+| 10 | R9 | implemented 1bb8d0d; gate D (EH) af437959, about 17.3k targets, on synthetic tests only so far | L3a |
+| 13 | oracle | c6f1bf6: spec = file + anchor, oraclecheck.py under strace, 38/38 declared; resubmitting to MERGER | L4 |
