@@ -59,6 +59,10 @@ void fnvnx_set_command_line(int argc, char **argv);
 #define FNVNX_PROFILE_PREFS 2u    /* My Games\FalloutNV\FalloutPrefs.ini: Fallout_default.ini + [Display] sD3DDevice */
 #define FNVNX_PROFILE_PLUGINS 4u  /* AppData\Local\FalloutNV\plugins.txt: empty, as the launcher leaves it */
 unsigned fnvnx_first_run_profile(void);
+/* the registry's first boot (platform/win32/registry_seed.cpp): when the hive file does not exist, makes it from
+ * C:\FalloutNV\registry_seed.tsv, the installer-derived seed. Rows applied; 0: the hive already exists; -1: failed, the
+ * reason is in why (also logged) */
+int fnvnx_registry_first_run(char *why, size_t why_size);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
 BOOL fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */

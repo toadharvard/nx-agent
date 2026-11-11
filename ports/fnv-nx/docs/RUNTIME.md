@@ -192,8 +192,11 @@ Not here: d3d9, d3dx9_38 and binkw32 (S6), dinput8, dsound, xinput1_3 and vorbis
 * **Windows**: one process-wide message queue; `SendMessage` calls the window procedure; `FindWindowA` only sees
   windows the game created (so the single-instance check passes); `MessageBoxA` logs and returns the default
   button; display size from `fnvnx_set_display_size` (S6), keys and cursor from `fnvnx_set_key_state` /
-  `fnvnx_set_cursor_pos` / `fnvnx_post_message` (S7). Registry: in memory, seeded with
-  `HKLM\SOFTWARE\Bethesda Softworks\FalloutNV\Installed Path = C:\FalloutNV\`.
+  `fnvnx_set_cursor_pos` / `fnvnx_post_message` (S7). Registry: a persistent hive file
+  (`C:\FalloutNV\registry.hiv`, `registry.cpp`); on the first boot, when the hive does not exist, `boot.cpp` makes it
+  from `C:\FalloutNV\registry_seed.tsv` (`registry_seed.cpp`), the keys and values the GOG installer writes,
+  generated from its script by `platform/manifest/gen_registry_seed.py`, `{app}` = `C:\FalloutNV\`. A missing or
+  malformed seed stops the boot with the reason.
 * **Wide characters**: the game's `WCHAR`/`wchar_t` is 16-bit (`-fshort-wchar`); the runtime is built the same way
   and never passes game wide strings to libc wide functions.
 * **CRT `rand`** must be MSVC's (the engine divides by 32767); `clock` counts milliseconds.

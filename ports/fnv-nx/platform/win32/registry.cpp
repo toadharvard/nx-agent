@@ -12,6 +12,7 @@
  *   u32 nvalues { u32 namelen, name, u32 type, u32 size, data }*, u32 nkids { u32 namelen, name, key }*
  * written iteratively (preorder), so nesting depth is bounded by memory only. A hive that does not parse
  * (impossible after an atomic write, so only foreign damage) loads as the empty tree.
+ * The first boot's content comes from the installer's seed (registry_seed.cpp), not from this file.
  * Errors are returned as LSTATUS, never via SetLastError. One lock covers the tree and the handle table. */
 #include "w32.h"
 
@@ -53,7 +54,7 @@ struct Hnd { Key *key; DWORD sam; bool dirty; };
 os_lock_t g_lock;
 Key *g_roots[4];
 bool g_loaded, g_corrupt; /* g_corrupt: the hive exists but does not parse; never overwritten */
-std::string g_path = "registry.hiv";
+std::string g_path; /* empty: the install's hive, C:\\FalloutNV\\registry.hiv (hive_path) */
 std::map<uintptr_t, Hnd> g_h;
 uintptr_t g_next = 0x100;
 Hnd g_rootH[4];
@@ -91,6 +92,15 @@ void drop_tree(void)
 }
 
 /* ---- hive file */
+/* host path of the hive: the one fnvnx_registry_set_path gave, else the install's own C:\FalloutNV\registry.hiv
+ * through the path mounts (the hive is a file beside the game, on the SD card) */
+std::string hive_path(void)
+{
+    if (!g_path.empty()) return g_path;
+    char h[W32_PATH_MAX];
+    return w32_map_path("C:\\FalloutNV\\registry.hiv", h, sizeof h) == 0 ? std::string(h) : std::string("registry.hiv");
+}
+
 void put32(std::string &o, uint32_t v) { for (int i = 0; i < 4; i++) o.push_back((char)(v >> (8 * i))); }
 
 std::string serialize(void)
@@ -178,7 +188,7 @@ bool deserialize(const std::string &s)
 bool save(void)
 {
     if (g_corrupt) return false;
-    std::string o = serialize(), tmp = g_path + ".tmp";
+    std::string o = serialize(), path = hive_path(), tmp = path + ".tmp";
     int fd = os_file_open(tmp.c_str(), OS_O_WRITE | OS_O_CREATE | OS_O_TRUNC);
     if (fd < 0) return false;
     size_t off = 0;
@@ -190,7 +200,7 @@ bool save(void)
     }
     ok = ok && os_file_sync(fd) == 0;
     os_file_close(fd);
-    if (ok && os_rename(tmp.c_str(), g_path.c_str()) != 0) ok = false;
+    if (ok && os_rename(tmp.c_str(), path.c_str()) != 0) ok = false;
     if (!ok) os_remove(tmp.c_str());
     return ok;
 }
@@ -202,7 +212,7 @@ void ensure_loaded(void)
     g_corrupt = false;
     for (int i = 0; i < 4; i++) g_roots[i] = new Key("", false);
     g_loaded = true;
-    int fd = os_file_open(g_path.c_str(), OS_O_READ);
+    int fd = os_file_open(hive_path().c_str(), OS_O_READ);
     if (fd < 0) return;
     std::string s;
     char buf[65536];
@@ -312,8 +322,18 @@ extern "C" void fnvnx_registry_set_path(const char *host_path)
         g_loaded = false;
         g_corrupt = false;
     }
-    g_path = host_path && *host_path ? host_path : "registry.hiv";
+    g_path = host_path ? host_path : "";
     os_unlock(&g_lock);
+}
+
+/* 1 if the hive file exists (registry_seed.cpp: the first boot seeds only when it does not) */
+extern "C" int fnvnx_registry_hive_present(void)
+{
+    os_lock(&g_lock);
+    os_stat_t st;
+    int r = os_stat(hive_path().c_str(), &st) == 0;
+    os_unlock(&g_lock);
+    return r;
 }
 
 extern "C" void fnvnx_registry_reset_for_test(void)

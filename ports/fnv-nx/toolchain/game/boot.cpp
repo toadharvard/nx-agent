@@ -25,6 +25,7 @@ extern "C" {
 void fnvnx_guest_platform_init(void);
 void fnvnx_set_command_line(int argc, char **argv);
 unsigned fnvnx_first_run_profile(void);
+int fnvnx_registry_first_run(char *why, size_t why_size);
 void fnvnx_audio_input_register(void);
 void fnvnx_d3d9_register(void) __attribute__((weak));   /* D3D9=external: d3d9.dll module (render/nine) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
@@ -360,6 +361,13 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
         return 3;
     }
     memory_manager_state("before WinMain");
+    char reg_why[512];
+    int reg_rows = fnvnx_registry_first_run(reg_why, sizeof reg_why);   /* the installer's registry keys, before WinMain reads them */
+    if (reg_rows < 0) {
+        printf("fnvnx boot: STOP: registry first run: %s\n", reg_why);
+        return 3;
+    }
+    printf("fnvnx boot: registry first run: %d seed rows (0: the hive existed)\n", reg_rows);
     printf("fnvnx boot: first-run profile: mask %u\n", fnvnx_first_run_profile());   /* the launcher's files */
     printf("fnvnx boot: calling WinMain\n");
     g_trap_phase = 1;

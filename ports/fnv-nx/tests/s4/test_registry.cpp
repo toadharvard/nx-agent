@@ -462,3 +462,100 @@ TEST(registry_set_path_flushes_and_reloads)
     CHECK_EQ(out, 42);
     RegCloseKey(x);
 }
+
+/* ---- the first boot's seed (registry_seed.cpp), synthetic rows */
+extern "C" int fnvnx_registry_first_run(char *why, size_t why_size);
+extern "C" int fnvnx_registry_hive_present(void);
+#define SEED_WIN "C:\\FalloutNV\\registry_seed.tsv"
+
+TEST(registry_first_run_seed)
+{
+    reg_fresh("seed1.hiv");
+    s4_write_file(SEED_WIN,
+        "# synthetic\r\nFNVREGSEED 1\r\n"
+        "HKLM\tSoftware\\Synth Co\\Game\tInstalled Path\tREG_SZ\t{app}\r\n"
+        "HKLM\tSoftware\\Synth Co\\Game\tVersion\tREG_DWORD\t0x10\r\n"
+        "HKLM\tSoftware\\Synth Co\\Game\tBlob\tREG_BINARY\t0a0B\r\n"
+        "HKLM\tSoftware\\Synth Co\\Game\tLit\tREG_SZ\ta{{b\r\n"
+        "HKCU\tSoftware\\Synth Co\\Empty\t\tKEY\t\r\n");
+    char why[512];
+    CHECK_EQ(fnvnx_registry_first_run(why, sizeof why), 5);
+    CHECK(fnvnx_registry_hive_present());
+    fnvnx_registry_reset_for_test();   /* the values below come from the hive file, not from memory */
+    HKEY k = NULL;
+    CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Synth Co\\Game", 0, T_KEY_READ, &k), ERROR_SUCCESS);
+    DWORD type = 0, len = 0;
+    CHECK_EQ(RegQueryValueExA(k, "Installed Path", NULL, &type, NULL, &len), ERROR_SUCCESS);   /* NULL data: size only */
+    CHECK_EQ(type, REG_SZ);
+    CHECK_EQ(len, 14);                                   /* "C:\FalloutNV\" + NUL */
+    char small[3] = { 'x', 'x', 'x' };
+    len = 3;
+    CHECK_EQ(RegQueryValueExA(k, "installed path", NULL, &type, (LPBYTE)small, &len), ERROR_MORE_DATA);   /* case-insensitive */
+    CHECK_EQ(len, 14);
+    char buf[64];
+    len = sizeof buf;
+    CHECK_EQ(RegQueryValueExA(k, "Installed Path", NULL, &type, (LPBYTE)buf, &len), ERROR_SUCCESS);
+    CHECK_EQ(len, 14);
+    CHECK_STR(buf, "C:\\FalloutNV\\");
+    unsigned char dw[4];
+    len = 4;
+    CHECK_EQ(RegQueryValueExA(k, "Version", NULL, &type, (LPBYTE)dw, &len), ERROR_SUCCESS);
+    CHECK_EQ(type, REG_DWORD);
+    CHECK(dw[0] == 0x10 && dw[1] == 0 && dw[2] == 0 && dw[3] == 0);
+    len = sizeof buf;
+    CHECK_EQ(RegQueryValueExA(k, "Blob", NULL, &type, (LPBYTE)buf, &len), ERROR_SUCCESS);
+    CHECK_EQ(type, REG_BINARY);
+    CHECK(len == 2 && buf[0] == 0x0a && buf[1] == 0x0b);
+    len = sizeof buf;
+    CHECK_EQ(RegQueryValueExA(k, "Lit", NULL, &type, (LPBYTE)buf, &len), ERROR_SUCCESS);
+    CHECK_STR(buf, "a{b");
+    RegCloseKey(k);
+    HKEY e = NULL;
+    CHECK_EQ(RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Synth Co\\Empty", 0, T_KEY_READ, &e), ERROR_SUCCESS);   /* a key row */
+    RegCloseKey(e);
+
+    /* a change is never re-seeded over: the second boot finds the hive and does not even read the seed */
+    CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Synth Co\\Game", 0, T_KEY_ALL, &k), ERROR_SUCCESS);
+    const char mine[] = "D:\\Mine\\";
+    CHECK_EQ(RegSetValueExA(k, "Installed Path", 0, REG_SZ, (const BYTE *)mine, sizeof mine), ERROR_SUCCESS);
+    CHECK_EQ(RegCloseKey(k), ERROR_SUCCESS);
+    DeleteFileA(SEED_WIN);
+    fnvnx_registry_reset_for_test();
+    CHECK_EQ(fnvnx_registry_first_run(why, sizeof why), 0);
+    CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Synth Co\\Game", 0, T_KEY_READ, &k), ERROR_SUCCESS);
+    len = sizeof buf;
+    CHECK_EQ(RegQueryValueExA(k, "Installed Path", NULL, &type, (LPBYTE)buf, &len), ERROR_SUCCESS);
+    CHECK_STR(buf, "D:\\Mine\\");
+    RegCloseKey(k);
+}
+
+TEST(registry_first_run_seed_loud_failures)
+{
+    char why[512];
+    reg_fresh("seed2.hiv");
+    DeleteFileA(SEED_WIN);
+    CHECK_EQ(fnvnx_registry_first_run(why, sizeof why), -1);   /* no seed: no empty registry */
+    CHECK(strstr(why, "registry seed is missing") != NULL);
+    CHECK(!fnvnx_registry_hive_present());
+    static const struct { const char *text, *reason; } bad[] = {
+        { "", "no FNVREGSEED header" },
+        { "FNVREGSEED 2\n", "format 1" },
+        { "FNVREGSEED 1\n", "no rows" },
+        { "FNVREGSEED 1\nHKLM\tK\tn\tREG_SZ\n", "5 tab-separated fields" },
+        { "FNVREGSEED 1\nHKXX\tK\tn\tREG_SZ\tv\n", "unknown root" },
+        { "FNVREGSEED 1\nHKLM\tK\tn\tREG_FOO\tv\n", "unknown type" },
+        { "FNVREGSEED 1\nHKLM\tK\tn\tREG_SZ\t{pf}\\x\n", "bad installer constant" },
+        { "FNVREGSEED 1\nHKLM\tK\tn\tREG_DWORD\t4294967296\n", "bad number" },
+        { "FNVREGSEED 1\nHKLM\tK\tn\tREG_BINARY\t0g\n", "bad hex" },
+        { "FNVREGSEED 1\nHKLM\t\tn\tREG_SZ\tv\n", "bad key path" },
+        { "FNVREGSEED 1\nHKLM\tK\tn\tREG_SZ\tv\nHKLM\tK\tn\tREG_SZ\t{x}\n", "line 3" },
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        reg_fresh("seed2.hiv");
+        s4_write_file(SEED_WIN, bad[i].text);
+        CHECK_EQ(fnvnx_registry_first_run(why, sizeof why), -1);
+        CHECK(strstr(why, bad[i].reason) != NULL);
+        CHECK(!fnvnx_registry_hive_present());   /* a bad seed leaves no hive behind */
+    }
+    DeleteFileA(SEED_WIN);
+}
