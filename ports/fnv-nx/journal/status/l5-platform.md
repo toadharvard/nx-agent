@@ -9,7 +9,7 @@ Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-plat
 | # | Task | Worker | Branch | Status |
 |---|---|---|---|---|
 | 1 | First product root: `platform/build.json` fnvnx-recipe/1, msvcmodel external (b4057704 / b60eafe7) + fnvnx-a64-msvcmodel headers (00e3d42a / 3f25152c), 8 plugins, admitted, built by recipe.py in GATE_CACHE; census of red units by cause | w10 session_01KmtZKTMZZBSRk7vPjUsu95 | -w10 (trunk a2453fe9 + L5 -w4) | doing; FreeType via L1's `sources` key (L1 -w16); plugin census by L2 w3 session_01KmtZKSTD6uibY3r7BhtJ7f on this root |
-| 2 | imports + machine gates f15935a9 through MERGER | lead | -w4 | blocked by MERGER queue (accepted by L1, after its w8/w4/w5); gate selftests need the pinned env (here: no aarch64 gcc-13, 7 cases red on input error only) |
+| 2 | imports + machine gates f15935a9 through MERGER | lead | -w4r 0533f920 (rebased on trunk a2453fe9; -w4 f15935a9 superseded) | handed to MERGER via L1 table; admit 434/434 green; selftests need pinned env (MERGER verdict) |
 | 3a | Doubles census as a re-runnable check (`platform/manifest/check_doubles.py`, measurement; the gate stays L1's) + per-file replacement plan | w14 session_01KmtZKRTZQHQpngLDfUUZTy | -w14 | doing |
 | 3b | Doubles to 0: 582 tests (s4 498, s7 84), 6 files / 87 symbols + 7 boundary double files; 7 product units not linked — tests become guest ELFs on the root's objects in the L4 boot machine | — | — | blocked by w10 (root unit set) and L4 (`boot.py test --elf --root`, L4) |
 | 4a | DirectShow stubs out (old w1, reissued) | w11 session_01KmtZKRToHhAash6PcSd6rA | -w11 | doing |
