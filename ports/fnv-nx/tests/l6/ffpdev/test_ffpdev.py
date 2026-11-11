@@ -11,6 +11,7 @@ python3 -I tests/l6/ffpdev/test_ffpdev.py [--no-mutations] [--no-guest]      (FN
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
 sys.path.insert(0, HERE)
 import model, gen  # noqa: E402
 D3D9 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3D9, "dev"); FFP = os.path.join(D3D9, "ffp"); GENDIR = os.path.join(D3D9, "gen"); ENV = os.path.join(D3D9, "env"); BACK = os.path.join(D3D9, "backend")
@@ -44,7 +45,7 @@ def locations_check():
 
 def build_server(tmp):
     srcs = sorted(os.path.join(BACK, f) for f in os.listdir(BACK) if f.startswith("gl4_") and f.endswith(".c")) + [os.path.join(COPY, "server.c")]
-    out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, *srcs, "-lEGL", "-lGL", "-lm", "-o", out])
+    out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return (out, "") if r.returncode == 0 else (None, r.stderr[-800:])
 
 

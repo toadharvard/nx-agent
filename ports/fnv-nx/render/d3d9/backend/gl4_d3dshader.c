@@ -7,7 +7,7 @@
  *  D3 memo: the key is the bytecode itself (memcmp, so a hash collision cannot alias two codes) + stage + variant + L. A repeated key returns the id again and counts one more owner; SHADER_DESTROY takes
  *     one owner back (gl4_shader.c), the last one releases the id. Distinct variants / link sets are distinct ids.
  *  D4 the translator's output is the GLSL; the shader cache of render/shaders/cache holds DKSH + reflection only (shcache.h payload) and is keyed without the VS_COMPLETE bit, so it cannot serve
- *     this call: no cache path exists here (see the task report). */
+ *     this call: no cache path exists here . */
 #include "gl4.h"
 #include "fnvnx_shaders.h"
 #include <stdlib.h>

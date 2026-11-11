@@ -9,6 +9,7 @@ Prints `PART x: n checks, f failed` and `ALL OK`."""
 import concurrent.futures as cf, os, re, subprocess, sys, tempfile, shutil
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")
 INC = os.path.join(ROOT, "shim", "include"); BACK = os.path.join(D3, "backend"); FRONT = os.path.join(D3, "front"); COPY = os.path.join(ROOT, "tests", "l6", "copy"); TOT = os.path.join(ROOT, "render", "shaders", "total")
 GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp", "env_table.gen.cpp"]
@@ -65,7 +66,7 @@ def link(names, od, exe, repl=None):
 
 def build_server(out, backend=BACK):
     srcs = sorted(os.path.join(backend, f) for f in os.listdir(backend) if f.startswith("gl4_") and f.endswith(".c")) + [os.path.join(HERE, "server.c")]
-    r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", backend, *srcs, "-lEGL", "-lGL", "-lm", "-o", out])
+    r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", backend, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return r.stderr[-800:] if r.returncode else None
 
 

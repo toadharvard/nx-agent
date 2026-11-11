@@ -10,6 +10,7 @@ Oracle = independent python + C++ reference code in the t_*.cpp: the env tsv, th
 import concurrent.futures as cf, importlib.util, os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
 sys.path.insert(0, os.path.join(HERE, "..", "tex")); sys.path.insert(0, os.path.join(HERE, "..", "env"))
 import texoracle as T  # noqa: E402
 from texoracle import fcc  # noqa: E402
@@ -40,7 +41,7 @@ def native_formats(tmp):
 
 def build_server(tmp):
     srcs = sorted(os.path.join(BACK, f) for f in os.listdir(BACK) if f.startswith("gl4_") and f.endswith(".c")) + [os.path.join(HERE, "server.c")]
-    out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, *srcs, "-lEGL", "-lGL", "-lm", "-o", out])
+    out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return (out, "") if r.returncode == 0 else (None, r.stderr[-800:])
 
 
