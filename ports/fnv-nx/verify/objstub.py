@@ -2,8 +2,11 @@
 """objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap/abort path or (V) a vacuous function.
     objstub.py check --terminators FILE [--constants FILE] [--os-layer OBJ]... [--json OUT] OBJ...
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
-Inputs: ELF relocatable objects, ELF32 (ILP32) or ELF64, AArch64, little endian. Decoder: capstone (assumed correct for A64; the
-test cross-checks it against objdump). Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
+Inputs: ELF relocatable objects, ELF32 (ILP32) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
+the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
+(MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64
+instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
 one body. `uncovered`: size 0, a partial overlap or a range leaving the section, a code run of odd length, and executable bytes
@@ -11,8 +14,8 @@ outside every function unless alignment padding (all zero under $d, all NOP word
 function's first instruction). Mapping symbols $x/$d delimit data islands: bytes under $d are data. Code that cannot be delimited
 cannot be certified.
 
-(T) TRAP CLASS. T1: a function holds BRK, HLT, UDF (word >> 16 == 0), ERET, DCPS, or a word capstone cannot decode in a code run
-(`undecodable`); SVC/HVC/SMC are T1 unless the object is `--os-layer` (a fact of the build recipe). The encodings that raise
+(T) TRAP CLASS. T1: a function holds BRK, HLT, UDF (word >> 16 == 0), ERET, DCPS, or a word LLVM cannot decode in a code run
+(`undecodable`: the LLVM disassembler rejects it); SVC/HVC/SMC are T1 unless the object is `--os-layer` (a fact of the build recipe). The encodings that raise
 unconditionally are a finite set fixed by the architecture: T1 is exact given the decoder. T2: a relocation inside the function
 whose symbol is global/weak and in the TERMINATOR SET (calls, tail calls, GOT/ADRP references: ANY relocation kind, so no kind list
 can be incomplete; a local symbol cannot be the library routine). `T2-noreturn-tail`: the last instruction is BL/BLR (control runs
@@ -36,6 +39,7 @@ never K). Limits: (1) never-written x0 means void OR identity (`ret` is both), s
 row; (2) not complete: a body that logs and returns a constant is not V (class `oracle`). `--constants` rows (symbol, kind
 void/u32/u64/addr, value, ref): a V function is certified iff its row equals the result (u32: low 32 bits of x0; addr: canonical
 address; x1 and v0 unwritten); a row whose symbol is not V-flagged or differs is `constants-mismatch`."""
+import atexit
 import bisect
 import json
 import os
@@ -44,11 +48,23 @@ import subprocess
 import sys
 import tempfile
 
-import capstone
 HERE, NOP = os.path.dirname(os.path.abspath(__file__)), 0xD503201F
-T1_MN = ("brk", "hlt", "udf", "eret", "dcps")
-SYS_MN = ("svc", "hvc", "smc")
-END_MN = ("ret", "br", "eret", "hlt", "udf", "svc", "hvc", "smc", "dcps")  # last instructions that do not fall through
+A64_BUILD = "g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o OUT $(llvm-config-18 --ldflags --libs aarch64 mc mcdisassembler support)"
+_TOOL = []
+
+def tool():
+    """Path of the a64access binary: $A64ACCESS, else built once per process into a temporary directory (removed at exit)."""
+    if not _TOOL:
+        if os.environ.get("A64ACCESS"):
+            _TOOL.append(os.environ["A64ACCESS"])
+        else:
+            td = tempfile.mkdtemp(prefix="a64access")
+            atexit.register(lambda: subprocess.run(["rm", "-rf", td]))
+            r = subprocess.run(["bash", "-c", A64_BUILD.replace("OUT", td + "/a64access")], cwd=HERE, capture_output=True, text=True)
+            if r.returncode:
+                raise ValueError("a64access build failed: " + r.stderr[-300:])
+            _TOOL.append(td + "/a64access")
+    return _TOOL[0]
 
 class Obj:
     """ELF relocatable: secs [(name,type,flags,off,size,link,info)], syms [(name,value,size,type,bind,shndx)], rela {sec: {off: (sym,type,addend)}}."""
@@ -84,23 +100,42 @@ class Obj:
     def named(self, name):
         return next((("sec", s[5], s[1]) for s in self.syms if s[0] == name and 0 < s[5] < 0xFF00 and s[3] != 3), (name, 0))
 
-def decode_run(md, buf, s, e):
-    """[(addr, mnemonic or None)] for every word of buf[s:e]; a word capstone rejects gets None."""
-    out, pos = [], s
-    while pos < e:
-        run = [(a, m) for a, _, m, _ in md.disasm_lite(buf[pos:e], pos)]
-        out += run
-        pos += 4 * len(run)
-        if pos < e:  # capstone stopped here: this word is undecodable
-            out.append((pos, None))
-            pos += 4
+def decode(data, ranges):
+    """{byte offset in data: info} for every word of the ranges [(start, end)]; info = None for a word LLVM rejects, else
+    {"op", "R", "W", "MEM", "KIND"} as printed by a64access."""
+    args = [x for r in ranges for x in map(str, r)]
+    if not args:
+        return {}
+    p = subprocess.run([tool(), "-"] + args, input=data, capture_output=True)
+    if p.returncode:
+        raise ValueError("a64access failed: " + p.stderr.decode()[-300:])
+    out = {}
+    for ln in p.stdout.decode().splitlines():
+        f = ln.split()
+        out[int(f[0], 16)] = None if f[1] == "UNDECODABLE" else dict(op=f[1].lower(), **{x.split(":", 1)[0]: x.split(":", 1)[1] for x in f[2:]})
     return out
+
+def tclass(w):
+    """Encoding-field classes of the T rule: 'sys' (SVC/HVC/SMC: [31:24] = 0xD4, opc = 000, LL != 0), 'trap' (BRK/HLT/DCPS: the other
+    0xD4 words; ERET*: [31:25] = 1101011, opc = 0100; UDF: [31:16] = 0), else None."""
+    if w >> 24 == 0xD4:
+        return "sys" if (w >> 21) & 7 == 0 and w & 3 else "trap"
+    return "trap" if (w >> 25 == 0b1101011 and (w >> 21) & 15 == 4) or w >> 16 == 0 else None
+
+def lastkind(w):
+    """'call' (BL, BLR*), 'b', 'end' (cannot fall through: BR*, RET*, ERET*, exception generation, UDF), else None."""
+    opc = (w >> 21) & 15
+    if w >> 26 == 0b100101 or (w >> 25 == 0b1101011 and opc in (1, 9)):
+        return "call"
+    if w >> 26 == 0b000101:
+        return "b"
+    return "end" if (w >> 25 == 0b1101011 and opc in (0, 2, 4, 8)) or w >> 24 == 0xD4 or w >> 16 == 0 else None
 
 class Fail(Exception):  # reserved logical-immediate encoding: the value is unknown, nothing more
     pass
 
 
-class Unanalysable(Exception):  # capstone gives no access information for a word: finding `unanalysable`
+class Unanalysable(Exception):  # the LLVM disassembler rejects a word of a function under analysis: finding `unanalysable`
     pass
 
 
@@ -108,16 +143,10 @@ join = lambda x, y: x if x == y else ("D",) if x[0] in "ED" or y[0] in "ED" else
 sx = lambda v, bits: v - (1 << bits) if v >> (bits - 1) else v
 INP = (1 << 9) - 1 | 0xFF << 32  # input registers as bits of the register index: x0-x7, x8 (indirect result), v0-v7
 SIZE = {"b": 1, "h": 2, "w": 4, "s": 4, "x": 8, "d": 8, "q": 16, "v": 16}
-_IDX = {}
 
-
-def regidx(md, rid):
-    """One index per architectural register: x0-x30 = 0-30 (w aliases too), sp = 31, v0-v31 = 32-63 (b/h/s/d/q aliases); else None."""
-    if rid not in _IDX:
-        n = md.reg_name(rid) or "-"  # id 0 = no register
-        _IDX[rid] = 31 if n in ("sp", "wsp") else 29 if n == "fp" else 30 if n == "lr" else \
-            (int(n[1:]) + (0 if n[0] in "xw" else 32)) if n[0] in "xwbhsdqv" and n[1:].isdigit() else None
-    return _IDX[rid]
+def regidx(n):
+    """One index per architectural register: x0-x30 = 0-30, sp = 31, v0-v31 = 32-63 (a64access names); else None (nzcv, fpcr, ...)."""
+    return 31 if n == "sp" else int(n[1:]) + (32 if n[0] == "v" else 0) if n[0] in "xv" and n[1:].isdigit() else None
 
 
 def bitmasks(sf, n, immr, imms):
@@ -131,31 +160,20 @@ def bitmasks(sf, n, immr, imms):
     return sum(w << i for i in range(0, 64 if sf else 32, es))
 
 
-def access(md, w, off):
-    """Capstone access info of one word -> (read mask, write mask, mem (base, index, disp, size) or None, writeback imm or None).
-    Two capstone 5.0.7 defects are corrected by encoding invariants: flag-setting aliases with Rd = 31 (cmp/cmn/tst) list their first
-    source as written; FMOV scalar immediate lists its destination as read."""
-    try:
-        i = next(md.disasm(w.to_bytes(4, "little"), off))
-        rr, ww = i.regs_access()
-        ops = i.operands
-    except (StopIteration, capstone.CsError) as e:
-        raise Unanalysable("no access info for word 0x%08x" % w) from e
-    r = {regidx(md, x) for x in rr} - {None}
-    wr = {regidx(md, x) for x in ww} - {None}
-    regops = [o for o in ops if o.type == 1]
-    if regops and w & 31 == 31 and "nzcv" in [md.reg_name(x) for x in ww] and regidx(md, regops[0].reg) is not None:
-        r.add(regidx(md, regops[0].reg))
-        wr.discard(regidx(md, regops[0].reg))
-    if len(regops) == 1 and any(o.type == 4 for o in ops) and regops[0].access == 3:
-        r.discard(regidx(md, regops[0].reg))
-    mem = next(((regidx(md, o.mem.base), regidx(md, o.mem.index), o.mem.disp, sum(SIZE[md.reg_name(p.reg)[0]] for p in regops if md.reg_name(p.reg)[0] in SIZE) or 1)
-                for o in ops if o.type == 3), None)
-    wb = None
-    if i.writeback and mem:
-        post = [o.imm for o in ops if o.type == 2]
-        wb = post[0] if post else mem[2]
-    return sum(1 << x for x in r), sum(1 << x for x in wr), mem, wb
+def access(inf):
+    """a64access info of one word -> (read mask, write mask, mem (base, index, disp, size) or None, writeback imm or None).
+    The sets are LLVM's (MCInstrDesc defs/uses/implicit); mem is None for a word outside the load/store class and for a literal
+    load; disp/size are None where the encoding rule of a64access does not derive them."""
+    if inf is None:
+        raise Unanalysable("LLVM does not decode the word")
+    mask = lambda t: sum(1 << x for x in {regidx(n) for n in inf[t].split(",") if n} - {None})
+    mem = wb = None
+    if inf["MEM"] not in ("-",) and not inf["MEM"].startswith("pc,"):
+        base, idx, disp, size, w = inf["MEM"].split(",")
+        num = lambda v: None if v in ("?", "-") else int(v)
+        mem = (regidx(base), regidx(idx) if idx != "-" else None, num(disp), num(size))
+        wb = num(w)
+    return mask("R"), mask("W"), mem, wb
 
 
 def cfg(words, a, b, rels):
@@ -233,14 +251,14 @@ def step(off, w, st, rel, obj, inf):
     return tuple(regs)
 
 
-def vanalyse(words, a, b, rels, obj, md):
+def vanalyse(words, a, b, rels, obj, dec):
     """-> {'x0'|'x1'|'v0': None (never written) | ('K',c) | ('A',addr) | ('U',)} if the function is V (no proof of dependence or
     effect), else None. Non-vacuity proofs: cfg() (i, iv), a memory access whose base is not provably the own frame (ii, iii), an
     input register live at entry (v). Raises Unanalysable."""
     succ = cfg(words, a, b, rels)
     if succ is None:
         return None
-    inf = {o: access(md, words[o], o) for o in succ}
+    inf = {o: access(dec.get(o)) for o in succ}
     ld = lambda w: (w >> 27) & 1 and not (w >> 25) & 1
     if any(ld(words[o]) and inf[o][2] is None and not ((words[o] >> 27) & 7 == 0b011 and (words[o] >> 24) & 3 == 0) for o in succ):
         raise Unanalysable("load/store word without a memory operand")
@@ -257,7 +275,7 @@ def vanalyse(words, a, b, rels, obj, md):
         if mem:
             base, index, disp, size = mem
             v = ins[o][base] if base is not None else ("I",)
-            if not ((v[0] == "S" and (v[1] + disp + size <= 0 or index is not None)) or (base == 31 and v[0] != "S")):
+            if not ((v[0] == "S" and (index is not None or (disp is not None and size is not None and v[1] + disp + size <= 0))) or (base == 31 and v[0] != "S")):
                 return None
     live, ch = {o: 0 for o in succ}, True  # (v): backward liveness of the input registers
     while ch:
@@ -276,11 +294,9 @@ def vanalyse(words, a, b, rels, obj, md):
     return res
 
 
-def check_obj(path, terms, os_layer, md):
+def check_obj(path, terms, os_layer):
     """-> (Obj, items [name], findings [(name, KIND, detail, V result or None)])."""
     o = Obj(path)
-    dmd = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
-    dmd.detail = True
     items, finds = [], []
     tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0}
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
@@ -291,6 +307,8 @@ def check_obj(path, terms, os_layer, md):
         mkeys = [m[0] for m in maps]  # kind(x): "x" code or "d" data at offset x
         kind = lambda x: maps[bisect.bisect_right(mkeys, x) - 1][1] if bisect.bisect_right(mkeys, x) else "x"
         funcs = sorted((s[1], s[2], s[0]) for s in o.syms if s[5] == si and s[3] == 2)
+        cuts0 = [0] + [m for m in mkeys if 0 < m < ssize] + [ssize]   # one decoder run over every code island of the section
+        dec = decode(o.data, [(soff + x, soff + y) for x, y in zip(cuts0, cuts0[1:]) if kind(x) != "d"])
         thits = sorted((off, sidx) for off, (sidx, t, ad) in rel.items() if sidx in tid)
         tk, cover, last = [t[0] for t in thits], [], None
         for a, sz, name in funcs:
@@ -309,23 +327,27 @@ def check_obj(path, terms, os_layer, md):
                 if (e - s) % 4 or s % 4:
                     fnd.append((name, "uncovered", "code run of odd length at +0x%x" % s, None))
                     continue
-                for ad, m in decode_run(md, buf, s, e):
-                    w = struct.unpack_from("<I", buf, ad)[0]
-                    words[ad], lastm = w, (ad, m)
-                    if m is None and w >> 16:
+                for ad in range(s, e, 4):
+                    w, inf, tc = struct.unpack_from("<I", buf, ad)[0], dec.get(soff + ad), None
+                    words[ad], lastm = w, (ad, w, inf["op"] if inf else None)
+                    tc = tclass(w)
+                    if inf is None and not w >> 16:
+                        tc = "trap"
+                    if inf is None and w >> 16:
                         fnd.append((name, "undecodable", "word 0x%08x at +0x%x" % (w, ad - a), None))
-                    elif m is None or m.startswith(T1_MN) or (m.startswith(SYS_MN) and os.path.normpath(path) not in os_layer):
-                        fnd.append((name, "T1", "%s at +0x%x" % (m or "udf", ad - a), None))
+                    elif tc == "trap" or (tc == "sys" and os.path.normpath(path) not in os_layer):
+                        fnd.append((name, "T1", "%s at +0x%x" % ((inf["op"] if inf else "udf"), ad - a), None))
             for k in range(bisect.bisect_left(tk, a), bisect.bisect_left(tk, b)):
                 fnd.append((name, "T2", "reference to %s at +0x%x" % (o.syms[thits[k][1]][0], thits[k][0] - a), None))
-            lm = lastm[1] if lastm else "ret"
-            if lm in ("bl", "blr") or (lm or "").startswith("blr"):
+            lk = lastkind(lastm[1]) if lastm and lastm[2] else "end"  # an undecodable last word is judged by its own finding
+            lm = lastm[2] if lastm else "ret"
+            if lk == "call":
                 fnd.append((name, "T2-noreturn-tail", "call to %s ends the function" % (o.syms[rel[lastm[0]][0]][0] if lastm[0] in rel else "?"), None))
-            elif lm != "b" and not (lm or "ret").startswith(END_MN):
+            elif lk not in ("b", "end"):
                 fnd.append((name, "fallthrough", "last instruction %s can run into the next function" % lm, None))
             if not any(f[1] in ("T1", "undecodable", "uncovered") for f in fnd):
                 try:
-                    v = vanalyse(words, a, b, rel, o, dmd)
+                    v = vanalyse(words, a, b, rel, o, {x: dec.get(soff + x) for x in words})
                 except Unanalysable as e:
                     v = None
                     fnd.append((name, "unanalysable", str(e), None))
@@ -355,10 +377,9 @@ def matches(row, v, o):
 
 def run_check(objs, terms, rows, os_layer):
     """-> (items [(obj, name)], findings [(obj, name, KIND, detail)] sorted)."""
-    md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
     items, out, vflag = [], [], set()
     for p in objs:
-        o, its, fs = check_obj(p, terms, {os.path.normpath(x) for x in os_layer}, md)
+        o, its, fs = check_obj(p, terms, {os.path.normpath(x) for x in os_layer})
         items += [(p, i) for i in its]
         for name, kind, detail, v in fs:
             row = rows.get(name)

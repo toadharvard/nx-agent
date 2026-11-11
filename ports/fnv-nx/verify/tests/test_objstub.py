@@ -12,7 +12,6 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import capstone  # noqa: E402
 import objstub  # noqa: E402
 
 CC = "aarch64-linux-gnu-gcc"
@@ -58,7 +57,6 @@ cxx = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["cstdlib", "excep
 check("terminators: C++ set has mangled terminate", "_ZSt9terminatev" in cxx and "abort" in cxx, cxx)
 print("INFO libc set size %d, c++ set size %d" % (len(libc), len(cxx)))
 
-md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
 for abi in ("ilp32", "lp64"):
     T = lambda n: "%s/%s" % (abi, n)
     o = build("void f(void){__builtin_trap();}", abi)
@@ -133,15 +131,16 @@ for abi in ("ilp32", "lp64"):
     o = build(".text\n.global g1\n.type g1,%function\ng1: ret\n.size g1,.-g1\n.word 0x12345678\n.global g2\n.type g2,%function\ng2: ret\n.size g2,.-g2\n", abi, "s")
     k, _, _ = kinds(o)
     check(T("stray bytes between functions -> uncovered"), any(kd == "uncovered" for _, kd in k), k)
-    # capstone vs objdump on a mixed object
+    # a64access (LLVM) vs objdump on a mixed object
     o = build(src, abi)
     dump = subprocess.run(["aarch64-linux-gnu-objdump", "-d", o], capture_output=True, text=True).stdout
     od = [int(m.group(1), 16) for m in re.finditer(r"^\s+([0-9a-f]+):\t[0-9a-f]{8} \t(?!\.word)", dump, re.M)]
     ob = objstub.Obj(o)
     si = next(i for i, s in enumerate(ob.secs) if s[0] == ".text")
     sec = ob.secs[si]
-    cs = [a for a, _ in objstub.decode_run(md, ob.data[sec[3]:sec[3] + sec[4]], 0, sec[4])]
-    check(T("capstone decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
+    cs = [a for a, i in sorted(objstub.decode(ob.data, [(sec[3], sec[3] + sec[4])]).items()) if i]
+    cs = [a - sec[3] for a in cs]
+    check(T("LLVM (a64access) decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
 
 # determinism, CLI, gate wrapper, verdict acceptance
 o1 = build("void f(void){__builtin_trap();}\nint r(int a){return a+1;}", "lp64")

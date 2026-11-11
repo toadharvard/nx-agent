@@ -13,7 +13,9 @@ gcc's HOST_GCC_PROGS/HOST_GCC_FILES. The trees also get a listing digest (an ext
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
 tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
-git verdict.py,l1.py,test_gates; ldd,true test_runtime. Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts)."""
+git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
+The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts)."""
 import argparse
 import ctypes
 import hashlib
@@ -31,10 +33,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 FORMAT = "fnvnx-env/1"
 PROGRAMS = ["strace", "busybox", "gcc", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-nm", "aarch64-linux-gnu-readelf",
-            "aarch64-linux-gnu-as", "aarch64-linux-gnu-ld", "aarch64-linux-gnu-objcopy", "ar", "as", "ld", "clang", "git", "ldd", "true"]
+            "aarch64-linux-gnu-as", "aarch64-linux-gnu-ld", "aarch64-linux-gnu-objcopy", "ar", "as", "ld", "clang", "git", "ldd", "true", "g++", "llvm-config-18"]
 UNIT_CC = "aarch64-linux-gnu-g++"  # the unit stage ingests its trees whole
-HOST_GCC_PROGS = ["cc1", "collect2"]  # gcc -print-prog-name=: what the host gcc runs for the static probe / -fsyntax-only
-HOST_GCC_FILES = ["libc.a", "crt1.o", "libgcc.a", "libgcc_eh.a"]  # gcc -print-file-name=: what `gcc -static` links
+HOST_GCC_PROGS = ["cc1", "cc1plus", "collect2"]  # gcc -print-prog-name=: what the host gcc runs for the static probe / -fsyntax-only
+HOST_GCC_FILES = ["libc.a", "crt1.o", "libgcc.a", "libgcc_eh.a", "libstdc++.so"]  # gcc -print-file-name=: what `gcc -static` links
+A64ACCESS = (os.path.join(HERE, "a64access.cc"), ["aarch64", "mc", "mcdisassembler", "support"])  # source, llvm-config components
 PY_MODULES = {"capstone": "capstone", "unicorn": "unicorn", "pyelftools": "elftools"}   # distribution -> import name
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
@@ -163,6 +166,13 @@ def snapshot():
         add(p)
     loads([os.path.realpath(e) for e in exes] + [p for p in files if os.path.isfile(p) and not os.path.islink(p)
           and runtime.ident(p) == runtime.X86_64 and open(p, "rb").read(18)[16:18] in (b"\x02\x00", b"\x03\x00")])
+    src, comps = A64ACCESS
+    cxx = subprocess.run(["llvm-config-18", "--cxxflags"], capture_output=True, text=True, check=True).stdout.split()
+    deps = subprocess.run(["g++", "-std=c++17"] + cxx + ["-M", src], capture_output=True, text=True, check=True).stdout
+    for h in deps.replace("\\\n", " ").split()[2:]:
+        add(h)
+    for lib in subprocess.run(["llvm-config-18", "--libfiles"] + comps, capture_output=True, text=True, check=True).stdout.split():
+        add(lib)
     gcc = shutil.which("gcc")
     for flag, names in (("-print-prog-name=", HOST_GCC_PROGS), ("-print-file-name=", HOST_GCC_FILES)):
         for n in names:
