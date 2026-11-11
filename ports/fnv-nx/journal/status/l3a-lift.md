@@ -13,10 +13,13 @@ Lead: Opus 5.5, branch `claude/fnv-l3a-lift`. Handoff read: 422c3d39 (`journal/i
 | 5 | Gate D (eh): rules R1 ThrowInfo through caller arguments (interprocedural, address-taken = red), R2 callee-saved registers proven per callee (removes the REMOVE assumption), R3 SEH helper scope argument by dataflow (replaces the `helpers` heuristic), R4 trylevel/table length; gate_eh.py + test on the new facts; facts rerun; gate on the 160438e5 pack | w2 session_01KmtZKSUoqsFSfuD18vvg8X, branch claude/fnv-l3a-lift-w2 | doing |
 | 7 | GalaxyWrp.dll, Galaxy.dll (PE-import closure, L1): facts + LIFTGEN at 7b2faae2, then a re-pack with them | w4 session_01KmtZKRAqKi3LXmngGKy2eJ, branch claude/fnv-l3a-lift-w4 | doing |
 | 8 | A4 LOCK-SPLIT deleted: the misaligned locked path stops the world (fnvl_world_stop/resume) | L3b (rt/fnvl.h), L5 (host functions) | requested 22:43Z |
-| 9 | ASSUMPTIONS records A1 (OWNER 1 for compiler output; REMOVE for .S by a gate_order check), A2 (REMOVE: loader layout fact), A3 (REMOVE: L1 build manifest) | lead | sent to L1 22:43Z |
+| 9 | ASSUMPTIONS records A1 = ASM-001 for compiler output, ASM-200 (.S, REMOVE by gate_order), ASM-201 A2 (REMOVE, loader layout, L4+L5), ASM-202 A3 (REMOVE, fnvnx-built/1 + object rule); records in verify/ASSUMPTIONS.json in the same merge | w5 | doing (accepted by L1 22:43Z) |
 | 10 | gate_order: rows() for L1; per-object check of no write to x19..x27 outside the guest-register rule and no jump tables; .S callee-saved check; ORDERING.md A1/A3/A4 | w5 session_01KmtZKTakZKNZHndJajh1Qf, branch claude/fnv-l3a-lift-w5 | doing |
 | 11 | pure-gate violations in L3a files (104 in lift, by L3b's count) and test doubles (instest/mmxtest rt.S, sehcodes, imptest/msvcrttest native.c) to 0 | - | queued |
-| 6 | Orchestrator answer on the CPU-class and IMAGE-table exemptions of gate order | - | blocked by the orchestrator (asked 22:50Z by the previous lead) |
+| 6 | Gate order host classes (orchestrator 22:41Z): CPU = x27 never written + offset inside sizeof(struct cpu); IMAGE only into read-only sections (no SHF_WRITE), else guest | w5 | doing |
+| 12 | shapes.tsv in the pack (liftgen shard + finish, shape_key of lift/proof), for L3b's formgate; then relift + repack | w1 | doing (in parallel with the first build at 7b2faae2) |
+| 13 | rt/seh.c: continue from a CONTEXT restores FloatSave and the FXSAVE image under ContextFlags (exact inverse of capture) | w3 | queued after its build |
+| 14 | Undefined symbols of lift/rt (16 by L3b's census): owner per symbol by contract (OS/kernel service = L5, guest state only = rt), agreed with L5 | lead + w3 (the exact set from objects.json) | doing |
 
 ## Global numbers
 | what | number | commit |
