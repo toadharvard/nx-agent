@@ -1215,5 +1215,13 @@ static DWORD fm_message(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPSTR bu
 extern "C" LPSTR lstrcpyA(LPSTR d, LPCSTR s) { return d && s ? strcpy(d, s) : NULL; }
 extern "C" LPSTR lstrcatA(LPSTR d, LPCSTR s) { return d && s ? strcat(d, s) : NULL; }
 extern "C" int lstrlenA(LPCSTR s) { return s ? (int)strlen(s) : 0; }
-extern "C" int lstrcmpiA(LPCSTR a, LPCSTR b) { int c = w32_stricmp(a ? a : "", b ? b : ""); return c < 0 ? -1 : c > 0; }
+/* lstrcmpiA: the locale comparison CompareStringA(LOCALE_USER_DEFAULT, NORM_IGNORECASE) with word sort, minus 2
+ * (less -1, equal 0, greater 1); a NULL string sorts before any string, two NULLs are equal */
+extern "C" int CompareStringA(LCID, DWORD, LPCSTR, int, LPCSTR, int);   /* nls.cpp */
+extern "C" int lstrcmpiA(LPCSTR a, LPCSTR b)
+{
+    if (!a || !b)
+        return a == b ? 0 : !a ? -1 : 1;
+    return CompareStringA(0x0400 /* LOCALE_USER_DEFAULT */, 0x00000001 /* NORM_IGNORECASE */, a, -1, b, -1) - 2;
+}
 
