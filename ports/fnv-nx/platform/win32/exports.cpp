@@ -230,7 +230,7 @@ const exp g_exports[] = {
     E("gdi32", GetOutlineTextMetricsA), E("gdi32", GetCharABCWidthsI), E("gdi32", GetCharWidthI), E("gdi32", GetFontUnicodeRanges), E("gdi32", D3DKMTOpenAdapterFromHdc), E("gdi32", D3DKMTEscape), E("gdi32", CreateDCA), E("gdi32", ExtEscape),
     E("gdi32", GetDeviceCaps), E("user32", GetDC), E("user32", ReleaseDC), E("user32", BeginPaint), E("user32", EndPaint),
     E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA), E("advapi32", RegOpenKeyA),
-    E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA), E("advapi32", GetUserNameA),
+    E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA), E("advapi32", GetUserNameA), E("advapi32", SystemFunction036),
     E("shell32", CommandLineToArgvW), E("shell32", ShellExecuteA), E("shell32", SHGetFolderPathA),
     E("ole32", CoCreateGuid), E("ole32", CoCreateInstance), E("ole32", CoFreeUnusedLibraries),
     E("ole32", CoInitialize), E("ole32", CoInitializeEx), E("ole32", CoTaskMemAlloc), E("ole32", CoTaskMemFree),
@@ -296,26 +296,31 @@ static const char *dll_alias(const char *dll)
     return dll;
 }
 
-/* The system modules, derived from the rows above: the distinct DLL names of the export table, each under the
- * name the exe imports it by (an alias target is only the implementation of its alias). The i-th one, NULL past
- * the last. module.cpp turns each into a loaded, pinned module, so a DLL with exports cannot be missing there. */
+/* The system modules, derived from the rows above: every distinct DLL name of the export table AND every alias
+ * name that resolves to one of them (GetModuleHandleA("ws2_32"), ("wsock32"), ("steam_api"), ("galaxywrp") all name
+ * a module: the alias is the same implementation under a second name). The i-th one, NULL past the last.
+ * module.cpp turns each into a loaded, pinned module, so a DLL with exports cannot be missing there. */
 extern "C" const char *fnvnx_win32_system_module(unsigned i)
 {
     const char *seen[64];
     unsigned n = 0;
     for (const exp &e : g_exports) {
-        const char *pub = e.dll;
+        const char *cand[1 + sizeof g_alias / sizeof g_alias[0]];
+        unsigned nc = 0;
+        cand[nc++] = e.dll;
         for (const auto &a : g_alias)
-            if (!strcmp(pub, a[1]))
-                pub = a[0];
-        bool dup = false;
-        for (unsigned k = 0; k < n && !dup; k++)
-            dup = !strcmp(seen[k], pub);
-        if (dup)
-            continue;
-        if (n == i)
-            return pub;
-        seen[n++] = pub;
+            if (!strcmp(e.dll, a[1]))
+                cand[nc++] = a[0];
+        for (unsigned c = 0; c < nc; c++) {
+            bool dup = false;
+            for (unsigned k = 0; k < n && !dup; k++)
+                dup = !strcmp(seen[k], cand[c]);
+            if (dup)
+                continue;
+            if (n == i)
+                return cand[c];
+            seen[n++] = cand[c];
+        }
     }
     return NULL;
 }

@@ -343,6 +343,7 @@ BOOL IsValidLocale(LCID, DWORD);
 BOOL EnumSystemLocalesA(LOCALE_ENUMPROCA, DWORD);
 LCID GetUserDefaultLCID(void);
 BOOL GetUserNameA(LPSTR, LPDWORD);           /* advapi32 */
+unsigned char SystemFunction036(void *, unsigned long);   /* advapi32 RtlGenRandom, services.cpp */
 DWORD GetClassLongA(HWND, int);              /* user32 */
 BOOL GetVersionExA(void *);                  /* sysinfo.cpp */
 DWORD GetVersion(void);

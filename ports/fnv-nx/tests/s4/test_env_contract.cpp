@@ -307,8 +307,8 @@ static FARPROC game_resolve(const char *p) { return !strcmp(p, "AtiProbe") ? (FA
 TEST(env_modules)
 {
     static const char *const sys[] = { "kernel32", "user32", "gdi32", "advapi32", "shell32", "ole32", "comctl32", "winmm",
-                                       "wsock32", "dsound", "dinput8", "xinput1_3", "d3d9", "msvcrt" };
-    HMODULE seen[14];
+                                       "wsock32", "dsound", "dinput8", "xinput1_3", "d3d9", "msvcrt", "ws2_32", "steam_api", "galaxywrp" };
+    HMODULE seen[17];
     char b[MAX_PATH], want[MAX_PATH], q[MAX_PATH];
     for (int i = 0; i < 14; i++) {
         HMODULE h = GetModuleHandleA(sys[i]);
@@ -335,7 +335,7 @@ TEST(env_modules)
     CHECK(GetModuleHandleA(NULL) == (HMODULE)(uintptr_t)0x00400000u);
     CHECK(DisableThreadLibraryCalls(GetModuleHandleA(NULL)));
     static const char *const absent[] = { "nvapi.dll", "atiadlxx.dll", "atiadlxy.dll", "dbghelp.dll", "usp10.dll", "d3d9d.dll",
-                                          "mscoree.dll", "kernel33", "C:\\Windows\\system32\\nvapi.dll", "", "ws2_32.dll" };
+                                          "mscoree.dll", "kernel33", "C:\\Windows\\system32\\nvapi.dll", "" };
     for (const char *a : absent) {
         ERR_AFTER(CHECK(LoadLibraryA(a) == NULL), 126);
         ERR_AFTER(CHECK(GetModuleHandleA(a) == NULL), 126);

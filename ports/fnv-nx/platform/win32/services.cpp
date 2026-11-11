@@ -218,6 +218,28 @@ extern "C" HRESULT CoCreateInstance(const GUID *clsid, void *outer, DWORD ctx, c
     return f(iid, out);
 }
 
+/* advapi32!SystemFunction036 (= RtlGenRandom): fill len bytes of buf with random data, return TRUE. Contract:
+ * Wine 9.0 dlls/advapi32/crypt.c (SystemFunction036 -> RtlGenRandom, which writes exactly len bytes and answers
+ * TRUE). len 0 writes nothing and succeeds; a NULL buffer with len > 0 is a fault on Windows, here FALSE +
+ * ERROR_INVALID_PARAMETER. Source: the platform's os_random32 (os.h), the same one CoCreateGuid draws from.
+ * NOTE: os_random32 is documented non-cryptographic; the game (Gamebryo seeding) needs no more. */
+extern "C" unsigned char SystemFunction036(void *buf, unsigned long len)
+{
+    if (!len)
+        return 1;
+    if (!buf) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    unsigned char *p = (unsigned char *)buf;
+    while (len) {
+        uint32_t w = os_random32();
+        for (unsigned k = 0; k < 4 && len; k++, len--, w >>= 8)
+            *p++ = (unsigned char)w;
+    }
+    return 1;
+}
+
 extern "C" HRESULT CoCreateGuid(GUID *g)
 {
     uint32_t w[4];
