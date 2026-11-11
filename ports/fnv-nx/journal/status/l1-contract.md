@@ -17,13 +17,32 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` a2453fe9 (w4 @39c4
 | 3b | recipe build judges every unit, failed_units listed (L3a lift/rt, pack 4098 units) | session_01KmtZKS82vxSbxtKufqbp4i (w14 item 2) | claude/fnv-l1-contract-w14 | queued after census |
 | 3k | link kinds pie/exe/shared (+version_script) for GL backend render/gl4; shared roots via link.roots; target "variants" (root@NAME; also the sanitizer variant) (L6A) | session_01KmtZKRyNHyAGWeTxKmbdfZ (w15) | claude/fnv-l1-contract-w15 | doing |
 | 3e | env.json pins: patch, libegl-dev, libgl-dev | session_01KmtZKRpuoHrhZqwnLDyQ8L (w16) | claude/fnv-l1-contract-w16 | doing |
-| 1g | BLOCKER goal step 1: 13 REQUIRED_PRODUCT gates absent from gates.json. L1: datamodel + fpexact (native) | session_01KmtZKQzN38LhJYh6sixhL1 (w17) | claude/fnv-l1-contract-w17 | doing |
-| 1h | the other 11: exepin (L1, w8), imports+machine (L5), forms (L3b), d3d9total (L6), r7/namegate/abi/order (L2), eh (L3a+L3b), addr32 (L2+L3a) | owners | - | reported to orchestrator |
+| 3a | recipe: bare prog name (as, ld) resolved like the driver (programs: list, then PATH); host x86_64 roots red today (L6A render/gl4) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
 | 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
 | 4b | w11 test-defined symbols ∩ product-root symbols = ∅ in objstub | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w11 001306f0 | doing: stage 2 (COMDAT, python AST rule, six L1 names to 0) |
 | 4c | w12 hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 (from 6766d18a) | doing: diagnose 3 red selftests (trunk / branch / without -dU), inline-wrapper and range-marker tests; L4, L5 told to delete their side |
+
+## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
+
+Global count: 13 missing of 32 required at trunk a2453fe9 (gates.json has 23). No product root can be admitted until 0.
+
+| Gate | Owner | Branch | Commit | MERGER |
+|---|---|---|---|---|
+| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | - | doing |
+| exepin | L1 | claude/fnv-l1-contract-w8 (w4 rebasing) | a6753733 | blocked: conflict, rebase |
+| imports | L5 | claude/fnv-l5-platform-w4 | f15935a9 | blocked: conflict, L5 rebase |
+| machine | L5 | claude/fnv-l5-platform-w4 | f15935a9 | blocked: conflict, L5 rebase |
+| r7 | L2 | - | - | - |
+| namegate | L2 | - | - | - |
+| abi | L2 | - | - | - |
+| order | L3a | - | - | - |
+| eh | L3a | - | - | - |
+| addr32 | L3a | - | - | - |
+| forms | L3b | - | - | - |
+| fpexact | L3b | - | - | - |
+| d3d9total | L6 | - | - | - |
 
 ## Global numbers (trunk 58a79b3e)
 
