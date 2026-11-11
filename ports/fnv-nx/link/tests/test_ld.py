@@ -37,8 +37,6 @@ p = os.path.join(d, 'a.elf')
 open(p, 'wb').write(elf([('local', 1, 0, 2), ('defined', 1, 1, 2), ('missing', 0, 1, 0), ('weak_missing', 0, 2, 0), ('abs', 0xfff1, 1, 1)]))
 s = ld.symbols(p)
 check('symbols', s, [('abs', True), ('defined', True), ('missing', False), ('weak_missing', False)])
-check('undefined', ld.undefined({'missing', 'weak_missing', 'script_sym', 'defined'}, [('defined', True), ('script_sym', True), ('missing', False)]),
-      ['missing', 'weak_missing'])
 check('no dynamic segment: not pie', ld.is_pie(p), False)
 for flags, want in ((0x08000000, True), (1, False)):
     ph = struct.pack('<IIIIIIII', 2, 52 + 32, 0, 0, 16, 16, 6, 4)
@@ -82,14 +80,102 @@ except ValueError:
     pass
 cmd = ld.command(['/t/ld', '-m', 'aarch64elf32'], '/s/guest.ld', '/o/guest.elf', '/o/inputs.rsp')
 check('command', cmd, ['/t/ld', '-m', 'aarch64elf32', '-pie', '--no-dynamic-linker', '-z', 'text', '-z', 'now', '-z', 'pack-relative-relocs',
-                       '-z', 'max-page-size=0x1000', '-z', 'common-page-size=0x1000', '--build-id=sha1', '--unresolved-symbols=ignore-all', '--noinhibit-exec',
+                       '-z', 'max-page-size=0x1000', '-z', 'common-page-size=0x1000', '--build-id=sha1',
                        '-T', '/s/guest.ld', '-o', '/o/guest.elf', '--whole-archive', '@/o/inputs.rsp', '--no-whole-archive'])
-cmd = ld.command(['/t/ld'], '/s/guest.ld', '/o/guest.elf', '/o/inputs.rsp', ['/l1', '/l2'], ['gcc', 'c'], ['/l1/crti.o', '/l1/crtbegin.o'], ['/l1/crtend.o', '/l1/crtn.o'], '/o/m.map')
-check('command with libraries: the driver order, ours whole, libraries searched, no defsym, no gc-sections',
-      cmd[cmd.index('-Map'):], ['-Map', '/o/m.map', '/l1/crti.o', '/l1/crtbegin.o', '-L/l1', '-L/l2', '--whole-archive', '@/o/inputs.rsp', '--no-whole-archive',
-                                '--start-group', '-lgcc', '-lc', '--end-group', '/l1/crtend.o', '/l1/crtn.o'])
-check('no defsym, no gc-sections', [c for c in cmd if 'defsym' in c or 'gc-sections' in c], [])
+cmd = ld.command(['/t/ld'], '/s/guest.ld', '/o/guest.elf', '/o/inputs.rsp', ['/l1', '/l2'], ['gcc', 'c'], ['/l1/crti.o', '/l1/crtbegin.o'], ['/l1/crtend.o', '/l1/crtn.o'])
+check('command with libraries: the driver order, ours whole, libraries searched', cmd[cmd.index('-o'):],
+      ['-o', '/o/guest.elf', '/l1/crti.o', '/l1/crtbegin.o', '-L/l1', '-L/l2', '--whole-archive', '@/o/inputs.rsp', '--no-whole-archive',
+       '--start-group', '-lgcc', '-lc', '--end-group', '/l1/crtend.o', '/l1/crtn.o'])
+check('strict command: no option beyond the specs', [c for c in cmd if c.startswith('--') and c not in
+                                                    ('--no-dynamic-linker', '--build-id=sha1', '--whole-archive', '--no-whole-archive', '--start-group', '--end-group')], [])
+# the stage's --ld-arg: the emulation, -EL, -X; nothing else
+for ok in (['-m', 'aarch64linux32'], ['-maarch64elf32', '-EL', '-X']):
+    ld.check_ld_args(ok)
+for bad in (['-z', 'x'], ['-m'], ['--gc-sections'], ['-T', 'x.ld']):
+    try:
+        ld.check_ld_args(bad)
+        fails.append('ld-arg accepted: %r' % bad)
+    except ValueError:
+        pass
 
+
+def arch(members, armap=True, index=None):
+    """GNU ar bytes with a symbol index of the global definitions of `members` [(name, elf bytes)] (index overrides [(symbol, member #)])."""
+    body, offs, o = b'', [], 8
+    parts = []
+    for nm, b in members:
+        parts.append((nm, b))
+    hdr = lambda nm, b: nm.ljust(16).encode() + b'0'.ljust(12) + b'0'.ljust(6) + b'0'.ljust(6) + b'644'.ljust(8) + str(len(b)).encode().ljust(10) + b'`\n'
+    ent = []
+    for i, (nm, b) in enumerate(parts):
+        ent.append([(n, i) for n, df in sorted(ld.elf_symbols('m', b).items()) if df])
+    flat = [e for l in ent for e in l] if index is None else index
+    strs = b''.join(n.encode() + b'\0' for n, _ in flat)
+    mlen = [len(hdr(nm + '/', b)) + len(b) + (len(b) & 1) for nm, b in parts]
+    idx_len = 4 + 4 * len(flat) + len(strs)
+    start = 8 + (60 + idx_len + (idx_len & 1) if armap else 0)
+    offsets = [start + sum(mlen[:i]) for i in range(len(parts))]
+    out = b'!<arch>\n'
+    if armap:
+        ib = struct.pack('>I', len(flat)) + b''.join(struct.pack('>I', offsets[i]) for _, i in flat) + strs
+        out += hdr('/', ib) + ib + (b'\n' if len(ib) & 1 else b'')
+    for (nm, b) in parts:
+        out += hdr(nm + '/', b) + b + (b'\n' if len(b) & 1 else b'')
+    return out
+
+
+def info(syms):
+    return ld.symtab_info(elf(syms))
+
+
+# symbol tables: definitions, strong and weak references, COMMON, unmodelled symbols
+check('symtab_info', info([('f', 1, 1, 2), ('w', 1, 2, 2), ('r', 0, 1, 0), ('wr', 0, 2, 0), ('c', 0xfff2, 1, 1), ('loc', 1, 0, 2), ('ifn', 1, 1, 10), ('v@V1', 1, 1, 2)]),
+      ({'f', 'w', 'c', 'ifn', 'v@V1'}, {'r'}, {'wr'}, {'c'}, ['ifn', 'v@V1']))
+# the pull-in closure, as the linker does it: archives in order, rescanned (group), a strong reference pulls, a weak one does not
+base = [info([('main', 1, 1, 2), ('a', 0, 1, 0), ('w', 0, 2, 0), ('s', 0, 1, 0)])]
+liba = [('a1.o', elf([('a', 1, 1, 2), ('b', 0, 1, 0)])), ('a2.o', elf([('w', 1, 1, 2)])), ('a3.o', elf([('unused', 1, 1, 2)]))]
+libb = [('b1.o', elf([('b', 1, 1, 2), ('c', 0, 1, 0)])), ('b2.o', elf([('c', 1, 1, 2), ('a', 1, 1, 2)]))]
+LA, LB = os.path.join(d, 'liba.a'), os.path.join(d, 'libb.a')
+open(LA, 'wb').write(arch(liba))
+open(LB, 'wb').write(arch(libb))
+archives = []
+for pth in (LA, LB):
+    ix, mem = ld.armap(pth)
+    check('index matches members %s' % os.path.basename(pth), ld.index_matches(ix, mem), True)
+    archives.append((pth, ix, mem))
+taken, defs, strong, weak, problems = ld.closure(base, archives, {'s'})
+check('closure: a1 (a), b1 (b, rescan of libb after liba), b2 (c); a2 not (weak reference); a3 not', [m for _, m, _ in taken], ['a1.o', 'b1.o', 'b2.o'])
+check('closure: definitions', sorted(defs), ['a', 'b', 'c', 'main'])
+check('closure: what stays undefined (weak w, script s excluded by the caller)', sorted(strong - defs - {'s'}), [])
+check('closure: weak only', sorted(weak - strong - defs), ['w'])
+check('closure: no problem', problems, [])
+# both libraries define `a`: the first archive of the link line wins (libb first: b2 takes `a`, and nothing needs `b`)
+taken, *_ = ld.closure(base, archives[::-1], {'s'})
+check('closure: order of the link line', [m for _, m, _ in taken], ['b2.o'])
+# unmodelled: a member with a COMMON symbol, with an indirect function; an index that does not match; no index; the script defines a listed name
+open(LA, 'wb').write(arch([('x.o', elf([('a', 0xfff2, 1, 1)]))]))
+ix, mem = ld.armap(LA)
+check('closure: library COMMON is a problem', ld.closure(base, [(LA, ix, mem)], set())[4], ['%s(x.o): common a' % LA])
+open(LA, 'wb').write(arch([('x.o', elf([('a', 1, 1, 10)]))]))
+ix, mem = ld.armap(LA)
+check('closure: library indirect function is a problem', ld.closure(base, [(LA, ix, mem)], set())[4], ['%s(x.o): unmodelled symbol a' % LA])
+open(LA, 'wb').write(arch([('x.o', elf([('a', 1, 1, 2)]))], index=[]))
+ix, mem = ld.armap(LA)
+check('index that lacks a definition', ld.index_matches(ix, mem), False)
+open(LA, 'wb').write(arch([('x.o', elf([('a', 1, 1, 2)]))], armap=False))
+try:
+    ld.armap(LA)
+    fails.append('an archive without index accepted')
+except ValueError:
+    pass
+open(LA, 'wb').write(arch([('x.o', elf([('s', 1, 1, 2)]))]))
+ix, mem = ld.armap(LA)
+check('closure: the script defines a name the index lists', ld.closure([info([('s', 0, 1, 0)])], [(LA, ix, mem)], {'s'})[4], ['%s: the script defines s, which the library index lists' % LA])
+check('find_lib', ld.find_lib(['/nonexistent', d], 'a'), LA)
+# the empty object the script probe links is a well-formed object
+open(p, 'wb').write(ld.empty_object())
+check('empty object', ld.symbols(p), [])
+check('empty object symtab_info', ld.symtab_info(ld.empty_object()), (set(), set(), set(), set(), []))
 
 def guest_elf(rela=(), relr=(), magic=True, pie=True, entry=0, extra_dyn=()):
     """A minimal guest image: LOAD text (vaddr 0, the crt0 header words) and LOAD data (vaddr 0x1000: .dynamic, RELA, RELR; bss to 0x2300, so the span is 0x3000)."""
@@ -141,12 +227,6 @@ for nm, body in ((b'/', b'idx'), (b'//', lm), (b'/0', m1), (b's.o/', m2)):
     ar += nm.ljust(16) + b'0'.ljust(12) + b'0'.ljust(6) + b'0'.ljust(6) + b'644'.ljust(8) + str(len(body)).encode().ljust(10) + b'`\n' + body + (b'\n' if len(body) & 1 else b'')
 open(os.path.join(d, 'n.a'), 'wb').write(ar)
 check('ar names', [n for n, _, _ in ld.ar_members(os.path.join(d, 'n.a'))], ['a_member_with_a_long_name.o', 's.o'])
-check('member symbols', ld.member_symbols(os.path.join(d, 'n.a'), 'a_member_with_a_long_name.o'), {'f': False, 'k': False})
-open(os.path.join(d, 'x.map'), 'w').write('Discarded input sections\n\nArchive member included to satisfy reference by file (symbol)\n\n'
-                                          '/t/libc.a(lib_a-printf.o)\n                              hello.o (printf)\n'
-                                          '/t/very/long/path/libgcc.a(_aeabi.o)\n'
-                                          '                              /t/libc.a(lib_a-printf.o) (__aeabi)\n\nAllocating common symbols\n/t/x.a(no.o)\n')
-check('map members', ld.map_members(os.path.join(d, 'x.map')), [('/t/libc.a', 'lib_a-printf.o'), ('/t/very/long/path/libgcc.a', '_aeabi.o')])
 
 for f in fails:
     print('FAIL', f)

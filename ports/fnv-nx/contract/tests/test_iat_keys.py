@@ -30,8 +30,7 @@ ROWS = [('wsock32.dll', 'send', '19', 'stdcall', 'i', 'iiii', 'my_send', 'sym'),
         ('kernel32.dll', 'sleep', '', 'stdcall', 'v', 'i', 'sleep2', 'sym'),
         ('user32', 'Sleep', '', 'stdcall', 'v', 'i', 'usleep', 'sym'),
         ('msvcrt.dll', '_iob', '', 'data', 'i', '', 'my_iob', 'data'),
-        ('msvcrt.dll', '??2@YAPAXI@Z', '', 'cdecl', 'i', 'i', '-', 'lookup'),
-        ('msvcrt.dll', '_pioinfo', '', 'data', 'i', '', '-', 'data')]
+        ('msvcrt.dll', '??2@YAPAXI@Z', '', 'cdecl', 'i', 'i', '-', 'lookup')]
 
 
 def write_bridge(d, rows, name='bridge.tsv'):
@@ -63,7 +62,12 @@ with scratch_dir() as d:
     check('keys cols', ks[2], ['00100020', 'msvcrt.dll', '??2@YAPAXI@Z', '', 'cdecl', 'i', 'i', '-'])
     check('user32 normalised', [k[1] for k in ks if k[2] == 'Sleep'], ['kernel32.dll', 'user32.dll'])
     ctxt, skipped = iat.c_source(rows, tid)
-    check('skipped data rows', skipped, 1)
+    check('data rows without an object', skipped, 0)
+    try:
+        iat.c_source(rows + [dict(zip(iat.COLS, ('msvcrt.dll', '_pioinfo', '', 'data', 'i', '', '-', 'data')))], tid)
+        fails.append('a data row without a native object was accepted')
+    except ValueError:
+        pass
     check('deterministic', iat.c_source(rows, tid), (ctxt, skipped))
     check('order independent', iat.c_source(iat.bridge_rows(write_bridge(d, ROWS[::-1], 'rev.tsv'))[0], tid)[0].replace(tid, ''), ctxt.replace(tid, ''))
     check('table id in C', tid in ctxt, True)

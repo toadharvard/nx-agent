@@ -163,9 +163,6 @@ def c_source(rows, table_id):
         o = r['ordinal'] and '%du' % int(r['ordinal']) or '0xffffffffu'
         if r['conv'] == 'data':
             if not IDENT.match(r['native_symbol']):
-                if r['native_symbol'] == '-':
-                    skipped += 1
-                    continue
                 raise ValueError('data row %s!%s: native_symbol %r is not a C identifier' % (r['dll'], r['name'], r['native_symbol']))
             objs.append(r['native_symbol'])
             ent.append((r, '{%s, %s, %s, FNVNX_IMPORT_DATA, (uintptr_t)&%s}' % (cstr(r['dll']), cstr(r['name']), o, r['native_symbol'])))
