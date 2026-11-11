@@ -77,6 +77,9 @@ const NxDkImage* nxdk_img(uint32_t id) { return id == 5 ? &img_ok : id == 6 ? &i
 static const NxPresent* comp_p; static const NxDkImage* comp_s; static const uint16_t* comp_g; static const uint8_t* comp_c;
 void nxdk_present_compose(const NxPresent* p, const NxDkImage* s, const uint16_t* g, const uint8_t* c) { comp_p = p; comp_s = s; comp_g = g; comp_c = c; ev("compose"); }
 static int hit[24];
+uint32_t nxdk_img_init(void) { ev("img_init"); return 0; }
+void nxdk_img_shutdown(void) { ev("img_shutdown"); }
+void nxdk_img_describe(uint32_t id, const NxDkImage* im, int srgb) { (void)id; (void)im; (void)srgb; ev("img_describe"); }
 #define H1(name, n) uint64_t name(uint64_t a) { hit[n]++; return 0x1000u + n + a * 0x10000; }
 H1(nxdk_image_create, 3) H1(nxdk_sampler_create, 4) H1(nxdk_shader_create, 5) H1(nxdk_submit, 6) H1(nxdk_wait_frame, 7) H1(nxdk_readback, 8)
 H1(nxdk_image_create4, 10) H1(nxdk_image_destroy, 11) H1(nxdk_shader_destroy, 13) H1(nxdk_image_read, 15) H1(nxdk_shader_create_d3d, 19)
