@@ -241,9 +241,13 @@ python3 -I "$SRC/link/milestones.py" --exe "$EXE" --modules "$OUT/modules/module
 echo "milestones: $MS: $(wc -l <"$OUT/milestones.tsv" 2>/dev/null || echo 0) rows" >>"$OUT/gates.txt"
 
 # ---------------------------------------------------------------------------------------------------------------- manifest
+# render archive sha: the very file in the linker's --in directory "$I/d3d9" (see ins=() above), never a separate copy
+RENDER_A=$I/d3d9/libfnvnx-d3d9.a
+[ -n "$RENDER" ] && [ -f "$RENDER_A" ] || die "manifest: render archive $RENDER_A missing (--render ${RENDER:-not given})"
+RENDER_SHA=$(sha "$RENDER_A"); [[ "$RENDER_SHA" =~ ^[0-9a-f]{64}$ ]] || die "manifest: bad sha256 of $RENDER_A"
 ELF_SHA=$(sha "$OUT/guest.elf"); ELF_SIZE=$(stat -c %s "$OUT/guest.elf")
 python3 -I - "$OUT" "$ELF_SHA" "$ELF_SIZE" "$PACK" "$BRIDGE" "$TABLE_ID" "$PLAT_FULL" "$RENDER" "$TC_KEY" "$(git -C "$REPO" rev-parse HEAD)" \
-    "$FACTS_HEAD" "$red" "${UNDEF:-0}" "${WEAK:-0}" "${RELR:-0}" "${NIN:-0}" "${LD_WALL:-0}" "${LD_RSS:-0}" <<'PY'
+    "$FACTS_HEAD" "$red" "${UNDEF:-0}" "${WEAK:-0}" "${RELR:-0}" "${NIN:-0}" "${LD_WALL:-0}" "${LD_RSS:-0}" "$RENDER_SHA" <<'PY'
 import json, os, sys
 a = sys.argv
 out = a[1]
@@ -259,6 +263,7 @@ m = {'format': 'fnvnx-relink/1', 'elf': {'sha256': a[2], 'bytes': int(a[3])},
                 'relink_repo_head': a[10], 'facts': a[11]},
      'ld': {'undefined': int(a[13]), 'weak': int(a[14]), 'duplicates': 0, 'relr': int(a[15]), 'inputs': int(a[16]),
             'wall_s': float(a[17]), 'peak_rss_mb': int(a[18])},
+     'render': {'branch': 'l6-render/bridge/' + a[8], 'archive_sha256': a[19]},
      'gates': gates, 'green': a[12] == '0'}
 json.dump(m, open(os.path.join(out, 'manifest.json'), 'w'), indent=1, sort_keys=True)
 PY
