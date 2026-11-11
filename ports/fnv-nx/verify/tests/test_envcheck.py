@@ -60,6 +60,8 @@ CASES = [
      "env: python module z3-solver content sha256: want 000000000000, have "),
     ("python module without a content sha256", mutate(lambda d: d["python"]["wheels"].pop("gmpy2")),
      "env: python module gmpy2: no content sha256 in python.wheels"),
+    ("python module without a wheel sha256", mutate(lambda d: d["python"]["wheel_sha256"].pop("numpy")),
+     "env: python module numpy: no wheel sha256 in python.wheel_sha256"),
     ("python version", mutate(lambda d: d["python"].__setitem__("version", "2.7.0")), "env: python.version: want 2.7.0, have "),
     ("missing program", mutate(lambda d: d["programs"].append("no-such-program-xyz")), "env: program no-such-program-xyz: want in PATH, have missing"),
     ("program not owned by a listed package", mutate(lambda d: d["packages"].pop("busybox-static")), "env: program busybox: want owned by a listed package"),
@@ -98,8 +100,10 @@ pip = [ln for ln in lines if " pip install " in ln]
 check("setup --print: apt-get update, one install line with every package=version, pip with every module==version, then envcheck check",
       p.returncode == 0 and lines[0] == "apt-get update" and len(apt) == 1 and len(pip) == 1 and "--break-system-packages" in pip[0]
       and all(("%s=%s" % kv) in apt[0].split() for kv in d0["packages"].items())
-      and all(("%s==%s" % kv) in pip[0].split() for kv in d0["python"]["modules"].items())
-      and lines[-1].endswith("envcheck.py check --env " + ENVF) and len(lines) == 4, p.stdout[:300] + p.stderr)
+      and "--require-hashes" in pip[0].split() and "--no-deps" in pip[0].split()
+      and lines[lines.index("REQUIREMENTS:") + 1:-1] == ["%s==%s --hash=sha256:%s" % (m, v, d0["python"]["wheel_sha256"][m])
+                                                         for m, v in sorted(d0["python"]["modules"].items())]
+      and lines[-1].endswith("envcheck.py check --env " + ENVF), p.stdout[:300] + p.stderr)
 # the run mode (real apt-get, real pip) is not run here: it changes the machine. Every farm runs it for real and ends with envcheck.
 
 shutil.rmtree(TD, ignore_errors=True)

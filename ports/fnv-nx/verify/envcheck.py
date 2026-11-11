@@ -105,14 +105,18 @@ def _ptrace():
 
 PROBES = {KERNEL[0]: lambda: os.geteuid() == 0 and _children(_unshare), KERNEL[1]: lambda: _children(_seccomp), KERNEL[2]: _ptrace}
 
+# files the installer writes into .dist-info (not the wheel's content: they name the installer and how it was asked)
+INSTALLER_FILES = ("INSTALLER", "REQUESTED", "direct_url.json")
+
 def wheel_digest(dist):
     """sha256 of the installed content of distribution DIST: the sorted `path,hash` rows of its RECORD that carry a content hash (the
-    wheel's own file hashes, as the installer wrote them; unhashed rows such as __pycache__ are not content). A different wheel, a
+    wheel's own file hashes, as the installer wrote them; unhashed rows such as __pycache__, the installer's console scripts (paths outside the site directory, shebang rewritten) and the
+    installer's own INSTALLER/REQUESTED/direct_url.json are not content). A different wheel, a
     modified or a missing file is a different digest; the version alone does not pin the bytes."""
     rows = []
     for line in (metadata.distribution(dist).read_text("RECORD") or "").splitlines():
         f = next(csv.reader([line]), [])
-        if len(f) >= 2 and f[1]:
+        if len(f) >= 2 and f[1] and not f[0].startswith("../") and f[0].rsplit("/", 1)[-1] not in INSTALLER_FILES:
             rows.append(f[0] + "," + f[1])
     return hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()
 
@@ -142,6 +146,10 @@ def check(doc):
         cmp("python module %s content sha256" % m, dg[:12], have[:12])
     for m in sorted(set(doc["python"]["modules"]) - set(doc["python"].get("wheels", {}))):
         bad.append("env: python module %s: no content sha256 in python.wheels" % m)
+    for m in sorted(doc["python"]["modules"]):
+        h = doc["python"].get("wheel_sha256", {}).get(m)
+        if not (isinstance(h, str) and len(h) == 64 and all(c in "0123456789abcdef" for c in h)):
+            bad.append("env: python module %s: no wheel sha256 in python.wheel_sha256 (setup installs by hash)" % m)
     for t, dg in sorted(doc["trees"].items()):
         cmp("tree " + t, dg[:12], (tree_digest(t) if os.path.isdir(t) else "missing")[:12])
     own = None
@@ -160,7 +168,21 @@ def check(doc):
         cmp("kernel " + need, "available", "available" if ok else ("unavailable" if need in PROBES else "unknown capability"))
     return bad
 
-def snapshot():
+def wheel_pins(prev):
+    """python.wheel_sha256 of the new snapshot: the sha256 of each module's wheel FILE (what setup_verdict_env.sh installs with
+    pip --require-hashes). The installed package does not carry it, so it is taken from the previous env.json PREV for the same
+    version; a new module or version needs its hash added by hand from the index (a deliberate act), else this is an error."""
+    old = (prev or {}).get("python", {})
+    out = {}
+    for m in sorted(PY_MODULES):
+        h = old.get("wheel_sha256", {}).get(m)
+        if old.get("modules", {}).get(m) != metadata.version(m) or not h:
+            raise SystemExit("snapshot: %s %s: no wheel sha256 in the previous env.json for this version (add it: pip download %s==%s; sha256sum)"
+                             % (m, metadata.version(m), m, metadata.version(m)))
+        out[m] = h
+    return out
+
+def snapshot(prev=None):
     import runtime
     import unitstage
     own, pk = _owners(), set()
@@ -215,7 +237,8 @@ def snapshot():
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
-                       "wheels": {m: wheel_digest(m) for m in sorted(PY_MODULES)}},
+                       "wheels": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
+                       "wheel_sha256": wheel_pins(prev)},
             "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}}
 
 def main(argv):
@@ -229,7 +252,7 @@ def main(argv):
     if a.cmd == "snapshot":
         if not (a.o and a.from_code):
             ap.error("snapshot needs -o FILE --from-code")
-        open(a.o, "w").write(json.dumps(snapshot(), sort_keys=True, indent=1) + "\n")
+        open(a.o, "w").write(json.dumps(snapshot(json.load(open(a.env)) if os.path.exists(a.env) else None), sort_keys=True, indent=1) + "\n")
         return 0
     doc = json.load(open(a.env))
     if a.cmd == "id":

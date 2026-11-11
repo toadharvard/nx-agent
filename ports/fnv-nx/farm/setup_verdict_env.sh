@@ -4,8 +4,8 @@
 #
 #   bash ports/fnv-nx/farm/setup_verdict_env.sh [--print]      (--print: only print the command lines, run nothing)
 #
-# Installs exactly the Debian packages of env.json at exactly those versions (pkg=version) and exactly the python module
-# versions (pip --break-system-packages, as the other farm scripts), then runs `envcheck.py check` and exits with its status.
+# Installs exactly the Debian packages of env.json at exactly those versions (pkg=version) and exactly the python modules of
+# python.modules by the sha256 of their wheels (pip --require-hashes --no-deps --break-system-packages), then runs `envcheck.py check` and exits with its status.
 # The lists are generated from env.json (no second list). A package version that the apt sources no longer carry makes the
 # script FAIL naming the package; another version is never installed: the fix is a deliberate new snapshot commit
 # (`envcheck.py snapshot -o verify/env.json --from-code` on a machine set up by this script) .
@@ -16,12 +16,12 @@ ENV_JSON=$(readlink -f "${ENV_JSON:-$VERIFY/env.json}")
 MODE=${1:-run}; case $MODE in run|--print) ;; *) echo "usage: $0 [--print]" >&2; exit 1 ;; esac
 J() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); exec(sys.argv[2])' "$ENV_JSON" "$1"; }
 PKGS=$(J 'print(*[p + "=" + v for p, v in sorted(d["packages"].items())])')
-PIPS=$(J 'print(*[m + "==" + v for m, v in sorted(d["python"]["modules"].items())])')
+REQS=$(J 'print("\n".join("%s==%s --hash=sha256:%s" % (m, v, d["python"]["wheel_sha256"][m]) for m, v in sorted(d["python"]["modules"].items())))')
 CHECK="python3 -I $VERIFY/envcheck.py check --env $ENV_JSON"
 APT="apt-get install -y --no-install-recommends $PKGS"
-PIP="python3 -m pip install --break-system-packages $PIPS"
+PIP="python3 -m pip install --break-system-packages --require-hashes --no-deps -r"   # + a requirements file: name==version --hash=sha256:<wheel>
 if [ "$MODE" = --print ]; then
-  printf '%s\n' "apt-get update" "$APT" "$PIP" "$CHECK"
+  printf '%s\n' "apt-get update" "$APT" "$PIP REQUIREMENTS" "REQUIREMENTS:" "$REQS" "$CHECK"
   exit 0
 fi
 export DEBIAN_FRONTEND=noninteractive
@@ -34,5 +34,7 @@ for spec in $PKGS; do   # exact version or nothing: installed already, or offere
 done
 [ "$missing" = 0 ] || { echo "setup: FAILED, take a new env.json snapshot deliberately" >&2; exit 1; }
 $APT
-$PIP
-exec $CHECK
+RF=$(mktemp); trap 'rm -f "$RF"' EXIT
+printf '%s\n' "$REQS" > "$RF"
+$PIP "$RF"   # every wheel must match its sha256 of env.json (python.wheel_sha256) and nothing else is installed (--no-deps)
+$CHECK
