@@ -217,6 +217,32 @@ CORPUS = [
 ]
 LSE_FP_UNREPORTED = ('cas', 'swp', 'ldadd', 'fjcvtzs')       # capstone reports no register write for these; the encoding's fields do
 
+# rule (c): an object whose source is assembler preserves x19-x30 and sp on every path to every exit.  name: (body, order colour with --asm)
+# (x19-x26 are saved and restored in W-form: an X-form write of a guest register is red by rule (a))
+ASMCASES = {
+    'asm_leaf':           ('mov x0,#1\n ret', G),
+    'asm_frame':          ('stp x29,x30,[sp,#-16]!\n mov x29,sp\n bl g\n ldp x29,x30,[sp],#16\n ret', G),
+    'asm_saved_guest':    ('sub sp,sp,#16\n str w19,[sp,#8]\n mov w19,w0\n ldr w19,[sp,#8]\n add sp,sp,#16\n ret', G),
+    'asm_saved_pair':     ('stp w19,w20,[sp,#-16]!\n mov w19,w0\n mov w20,w1\n ldp w19,w20,[sp],#16\n ret', G),
+    'asm_saved_x28':      ('str x28,[sp,#-16]!\n mov x28,x0\n ldr x28,[sp],#16\n ret', G),
+    'asm_frame_pointer':  ('stp x29,x30,[sp,#-32]!\n mov x29,sp\n str x28,[x29,#16]\n mov x28,x0\n ldr x28,[x29,#16]\n mov sp,x29\n ldp x29,x30,[sp],#32\n ret', G),
+    'asm_one_path_saved': ('cbz x0,1f\n str x28,[sp,#-16]!\n mov x28,x0\n ldr x28,[sp],#16\n1: ret', G),
+    'asm_tail_call':      ('b g', G),
+    'asm_clobber':        ('mov w19,w0\n ret', R),
+    'asm_clobber_x28':    ('mov x28,x0\n ret', R),
+    'asm_clobber_x30':    ('bl g\n ret', R),
+    'asm_sp_not_restored': ('sub sp,sp,#16\n ret', R),
+    'asm_wrong_slot':     ('str x28,[sp,#-16]!\n mov x28,x0\n ldr x28,[sp,#8]\n add sp,sp,#16\n ret', R),
+    'asm_slot_overwritten': ('str x28,[sp,#-16]!\n str x0,[sp]\n mov x28,x0\n ldr x28,[sp],#16\n ret', R),
+    'asm_slot_half_overwritten': ('str x28,[sp,#-16]!\n strb w0,[sp,#3]\n mov x28,x0\n ldr x28,[sp],#16\n ret', R),
+    'asm_one_path_clobber': ('cbz x0,1f\n mov x28,x0\n1: ret', R),
+    'asm_swapped':        ('stp x28,x29,[sp,#-16]!\n ldp x29,x28,[sp],#16\n ret', R),
+    'asm_width_mismatch': ('str x28,[sp,#-16]!\n mov x28,x0\n ldr w28,[sp],#16\n ret', R),
+    'asm_escape_then_call': ('stp x29,x30,[sp,#-32]!\n str x28,[sp,#16]\n add x0,sp,#16\n bl g\n ldr x28,[sp,#16]\n ldp x29,x30,[sp],#32\n ret', R),
+    'asm_tail_call_clobber': ('mov x28,x0\n b g', R),
+    'asm_fall_into_next': ('mov x28,x0', R),
+}
+
 
 class T(unittest.TestCase):
     @classmethod
@@ -229,9 +255,9 @@ class T(unittest.TestCase):
     def asm(cls, name, text, march=None):
         s, o = os.path.join(cls.root, name + '.S'), os.path.join(cls.root, name + '.o')
         open(s, 'w').write(text); subprocess.run([a if not (march and a.startswith('-march')) else '-march=' + march for a in AS] + [s, '-o', o], check=True); return o
-    def gate(self, objs):
+    def gate(self, objs, asm=()):
         out = tempfile.mkdtemp(dir=self.root)
-        r = subprocess.run([sys.executable, '-I', GATE, self.rt] + objs, env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True, text=True)
+        r = subprocess.run([sys.executable, '-I', GATE, self.rt] + objs + [a for o in asm for a in ('--asm', o)], env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True, text=True)
         res = {g: json.load(open(os.path.join(out, g + '.json'))) for g in ('order', 'addrwrap', 'align')}
         for g, j in res.items(): self.assertEqual((j['format'], j['name']), ('fnvnx-gate/1', g))
         self.assertEqual(r.returncode == 0, all(j['status'] == G for j in res.values()), r.stderr); return res
@@ -240,6 +266,28 @@ class T(unittest.TestCase):
             with self.subTest(name):
                 res = self.gate([self.asm(name, FN.format(body))])
                 self.assertEqual([res[g]['status'] for g in ('order', 'addrwrap', 'align')], want, json.dumps(res, indent=1))
+    def test_asm_cases(self):
+        for name, (body, want) in sorted(ASMCASES.items()):
+            with self.subTest(name):
+                o = self.asm(name, FN.format(body))
+                res = self.gate([o], asm=[o])
+                self.assertEqual(res['order']['status'], want, json.dumps(res['order'], indent=1))
+    def test_asm_rule_needs_the_flag(self):
+        o = self.asm('noflag', FN.format(ASMCASES['asm_clobber'][0]))
+        self.assertEqual(self.gate([o])['order']['status'], G)                     # a compiler-output object is not held to rule (c)
+        self.assertEqual(self.gate([o], asm=[o])['order']['status'], R)
+        self.assertEqual(self.gate([self.asm('ok', FN.format(ASMCASES['asm_frame'][0]))], asm=[])['order']['certified'], 0)
+    def test_asm_code_outside_func(self):
+        o = self.asm('outside', '.text\n.globl f\n.type f,%function\nf: ret\n.size f,.-f\nh: mov x28,x0\n ret\n')
+        res = self.gate([o], asm=[o])['order']
+        self.assertEqual(res['status'], R); self.assertIn('code outside every STT_FUNC', json.dumps(res))
+        self.assertEqual(self.gate([o])['order']['status'], G)
+    def test_asm_rows(self):
+        o = self.asm('arow', FN.format('cbz x0,1f\n mov x28,x0\n1: ret'))
+        spec = importlib.util.spec_from_file_location('gate_order', GATE); go = importlib.util.module_from_spec(spec); sys.modules['gate_order'] = go; spec.loader.exec_module(go)
+        os.environ['JOBS'] = '1'; rw = go.rows(self.rt, [o], asm=[o])['order']
+        self.assertEqual([(r[0], r[1], r[2].split(':')[0]) for r in rw], [('arow', 'f+0x8', 'not preserved at the exit')])
+        self.assertIn('x28', rw[0][2])
     def test_counts(self):
         res = self.gate([self.asm('c1', FN.format(CASES['ordered_aligned'][0])), self.asm('c2', FN.format(CASES['plain_store'][0]))])
         self.assertEqual((res['order']['universe'], res['order']['certified'], len(res['order']['uncertified'])), (2, 1, 1))

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Gates "order", "addrwrap" and "align" (fnvnx-gate/1) on the compiled objects of the lifted pack: classes B and F of the
 owner orders (docs/ORDERING.md "Lifted code") and the alignment fault of the ordered instructions.
-    python3 -I gate_order.py RTOBJ OBJ...        env GATE_OUT (result dir), JOBS
+    python3 -I gate_order.py RTOBJ OBJ... [--asm OBJ]...        env GATE_OUT (result dir), JOBS
 RTOBJ  the runtime object of rt/enter.c: its 4-byte object symbol fnvnx_lift_cpu_bytes holds sizeof(struct cpu).
 OBJ    an ELF32 AArch64 object or a directory of *.o. Every object linked into the lifted image is given, the runtime ones too.
+--asm  an object whose source is assembler (the build manifest says which); it is gated like the others and also by rule (c) below.
 Every instruction of every executable section of every object is decoded (capstone). The gate decides from the decoded
 operands, the encodings and the relocation records only; no symbol name (other than fnvnx_lift_cpu_bytes of RTOBJ) and no
 source text is read.
@@ -44,6 +45,17 @@ X-form write of a guest register x19-x26 whose result is not proven below 2^32; 
 `dc`/`ic`/`sys` and LSE instructions; a memory operand without a general base register; a branch out of its section other
 than a relocated `b`; an undecodable word outside the $d ranges.
 
+Writes of x19-x27 (rule (a), docs/ORDERING.md): the destination registers of every instruction are taken from the capstone operand view
+and from the destination fields of the encoding (gprwrites: Rd, Rt, Rt2, the status register of exclusives, the base register of a
+writeback, mrs/umov/smov/fcvt-to-integer destinations); the union decides. A write capstone does not report is a rule violation of its own.
+x27 is never written; x19-x26 are written only by results proven below 2^32.
+
+Assembler objects (rule (c)): an object given with --asm is also held to this: every STT_FUNC preserves x19-x30 and sp on every path to every
+exit (ret, br, a relocated or out-of-range b, falling into the next symbol). The proof is a forward dataflow per function (asmcheck): a
+register holds its value at entry again only by a reload of the 8-byte slot (4-byte for x19-x26) that an `str`/`stp` through sp or a frame
+address filled with it, at the same constant offset from the entry sp, and sp comes back to its entry value. Code that no STT_FUNC range
+covers is red. Jump-table or loaded-code-pointer `br` (rule (b)) is not checked here: ORDERING.md has no rule for which `br` forms are legal.
+
 addrwrap (F). Universe: as order. A guest access is certified iff the operand is the base register alone (no displacement,
 no index, no writeback) and the base holds a 32-bit value: on every path its last writer is a W-form instruction, a copy
 of such a value, a value with an unsigned bound below 2^32, or a guest register (x19-x26, kept below 2^32 by the rule
@@ -80,7 +92,7 @@ COND_Z = {'eq': True, 'ne': False}
 
 
 def elf(path):
-    """-> [(section name, bytes, {offset: reloc type}, [function offsets], [data ranges], [(offset, name) of the STT_FUNC symbols])] for the executable sections."""
+    """-> [(section name, bytes, {offset: reloc type}, [function offsets], [data ranges], [(offset, name, size) of the STT_FUNC symbols])] for the executable sections."""
     b = open(path, 'rb').read()
     if b[:4] != b'\x7fELF' or b[4] != 1 or struct.unpack_from('<H', b, 18)[0] != 183:
         raise ValueError('%s: not an ELF32 AArch64 object' % path)
@@ -98,7 +110,7 @@ def elf(path):
                 if 0 < shndx < shnum and sh[shndx][1] == 1 and not sh[shndx][2] & 4: syms[k] = (shndx, val, sh[shndx][5])   # defined in a PROGBITS data section
                 if shndx not in out: continue
                 n = cstr(sh[s[6]][4], nm)
-                if info & 15 == 2: out[shndx][3].append(val); out[shndx][5].append((val, n))
+                if info & 15 == 2: out[shndx][3].append(val); out[shndx][5].append((val, n, _sz))
                 if n[:2] in ('$x', '$d'): marks.setdefault(shndx, []).append((val, n[1]))
             for i, m in marks.items():
                 m.sort(); end = len(out[i][1])
@@ -167,7 +179,7 @@ def gprwrites(w):
 
 
 class Ins:
-    __slots__ = ('a', 'txt', 'wr', 'fl', 'kind', 'arg', 'mem', 'term', 'bar', 'call', 'bad', 'wbbase', 'x', 'asz', 'sreg', 'srcs', 'img', 'ix')
+    __slots__ = ('a', 'txt', 'wr', 'fl', 'kind', 'arg', 'mem', 'term', 'bar', 'call', 'bad', 'wbbase', 'x', 'asz', 'sreg', 'srcs', 'img', 'ix', 'post', 'rd')
 
 
 def decode(md, code, relocs, data):
@@ -181,9 +193,10 @@ def decode(md, code, relocs, data):
             if isdata(ci.address): break
             got = True; pos = ci.address + 4
             i = Ins(); i.a = ci.address; m = ci.mnemonic; i.txt = m + ' ' + ci.op_str
-            i.kind = i.arg = i.mem = i.term = i.bar = i.bad = i.wbbase = i.x = i.asz = i.sreg = i.img = i.ix = None; i.srcs = (); i.call = False
+            i.kind = i.arg = i.mem = i.term = i.bar = i.bad = i.wbbase = i.x = i.asz = i.sreg = i.img = i.ix = i.post = None; i.srcs = (); i.call = False
             ops = ci.operands
             _rd, wrs = ci.regs_access()
+            i.rd = frozenset(g[0] for g in (regno(ci.reg_name(r)) for r in _rd) if g)
             i.wr = []; i.fl = False
             for r in wrs:
                 nm = ci.reg_name(r)
@@ -235,6 +248,7 @@ def decode(md, code, relocs, data):
                 else: sz = 0
                 wb = bool(ci.writeback) or (len(ops) > k + 1 and ops[k + 1].type == A.ARM64_OP_IMM)
                 i.mem = (base[0], bool(op.mem.index), op.mem.disp, wb, m.startswith('st'), sz)
+                if len(ops) > k + 1 and ops[k + 1].type == A.ARM64_OP_IMM: i.post = ops[k + 1].imm
                 if m[:2] in ('ld', 'st') and ops[0].type == A.ARM64_OP_REG:
                     core = m.rstrip('p') if m[-1] == 'p' else m
                     one = 4 if m.endswith('sw') else 1 if core[-1] == 'b' else 2 if core[-1] == 'h' else (4 if reg(0)[1] else 8) if reg(0) else {'wzr': 4, 'xzr': 8}.get(ci.reg_name(ops[0].reg)) or {'b': 1, 'h': 2, 's': 4, 'd': 8, 'q': 16}.get(ci.reg_name(ops[0].reg)[0])
@@ -273,9 +287,135 @@ def cpusize(path):
     raise ValueError('%s: no fnvnx_lift_cpu_bytes' % path)
 
 
-def init(n):
-    global CPUSIZE
-    CPUSIZE = n
+ASM = frozenset()
+
+
+def init(n, asm=frozenset()):
+    global CPUSIZE, ASM
+    CPUSIZE = n; ASM = asm
+
+
+def asmcheck(L, fsyms, code):
+    """Rule (c), for an object whose source is assembler: every STT_FUNC preserves x19-x30 and sp on every path to every exit (ret, br, a
+    relocated or out-of-range b, falling into the next symbol). -> [(Ins, reason or '')], one row per exit instruction, and rows for code that no
+    STT_FUNC covers. Forward dataflow over each function: a register holds INIT(r) (its value at entry), a frame address (sp, offset) or nothing
+    known; the frame slots hold the INIT value stored by an 8-byte `str`/`stp` through sp or a frame address, at a constant offset; a store that
+    may overlap a slot, an index register on a frame base, a store through a register that is not a frame address once a frame address was
+    handed out (copied to a register outside x19-x30, stored, or used in other arithmetic), and a call after that, forget the slots. sp changes only by a
+    constant, by a writeback of a frame base, or by a copy from a frame address. At an exit: sp offset 0 and every register INIT(r)."""
+    rows = []; starts = sorted(set(v for v, _, _ in fsyms)); rng = []
+    for fi, f in enumerate(starts):
+        nxt = starts[fi + 1] if fi + 1 < len(starts) else 1 << 62
+        sz = max(z for v, _, z in fsyms if v == f)
+        rng.append((f, min(nxt, f + sz) if sz else nxt))
+    for ins in L:
+        if not any(lo <= ins.a < hi for lo, hi in rng): rows.append((ins, 'code outside every STT_FUNC'))
+    for f, end in rng:
+        F = [i for i in L if f <= i.a < end]
+        if not F: continue
+        at = {i.a: k for k, i in enumerate(F)}
+        INIT = lambda r: ('i', r)
+        s0 = (0, tuple(INIT(r) for r in range(19, 31)), (), False)
+
+        def join(a, b):
+            sp = a[0] if a[0] == b[0] else None
+            regs = tuple(x if x == y else None for x, y in zip(a[1], b[1]))
+            da, db = dict(a[2]), dict(b[2])
+            return (sp, regs, tuple(sorted((k, v) for k, v in da.items() if db.get(k) == v)), a[3] or b[3])
+
+        def step(st, ins):
+            sp, regs, slots, esc = st; regs = list(regs); slots = dict(slots)
+            w = int.from_bytes(code[ins.a:ins.a + 4], 'little')
+            tok = lambda r: None if r < 19 or r == 31 else regs[r - 19] if r <= 30 else None
+            frame = lambda r: sp if r == 31 else tok(r)[1] if tok(r) and tok(r)[0] == 's' else None
+            wr = {q for q in gprwrites(w) if 19 <= q <= 30} | {r for r, _ in ins.wr if 19 <= r <= 30}
+            if ins.call: wr.add(30)
+            handled = False; newsp = sp; assign = {}
+            if ins.mem:
+                base, idx, disp, wb, store, _sz = ins.mem
+                fb = frame(base)
+                V = (w >> 26) & 1; pair = ins.txt.split()[0].startswith(('ldp', 'stp', 'ldnp', 'stnp'))
+                size = ins.asz
+                if fb is not None:
+                    handled = True
+                    if idx or size is None:
+                        if store: slots.clear()
+                    else:
+                        addr = fb + (0 if ins.post is not None else disp)
+                        u = size // 2 if pair else size                     # the width of each register
+                        rs = [w & 31, (w >> 10) & 31][:2 if pair else 1]
+                        if store:
+                            for k in [k for k, v in slots.items() if k < addr + size and addr < k + v[1]]: del slots[k]
+                            if any(tok(r) and tok(r)[0] == 's' for r in rs): esc = True       # a frame address stored to memory
+                            if not V and u in (4, 8):
+                                for n, r in enumerate(rs):
+                                    t = tok(r)
+                                    # a 4-byte slot keeps only a guest register (x19-x26: below 2^32 by the guest-register rule, so the upper half is zero)
+                                    if t is not None and (u == 8 or (t[0] == 'i' and 19 <= t[1] <= 26)): slots[addr + u * n] = (t, u)
+                        elif not V and u in (4, 8):
+                            for n, r in enumerate(rs):
+                                v = slots.get(addr + u * n)
+                                if 19 <= r <= 30 and v and v[1] == u and (u == 8 or v[0] == INIT(r)): assign[r] = v[0]
+                    if wb:
+                        nb = fb + (ins.post if ins.post is not None else disp)
+                        if base == 31: newsp = nb
+                        else: assign[base] = ('s', nb)
+                elif store and esc: slots.clear()
+                if wb and fb is None and 19 <= base <= 30: wr.add(base)
+                if store and fb is None: handled = False
+            elif ins.kind == 'addi' and ins.x and ins.x[0] == 'addi' and ins.arg == SP and ins.wr and ins.wr[0][0] == SP:       # add/sub sp, sp, #imm
+                if sp is not None: newsp = sp + ins.x[2]
+                else: newsp = None
+                handled = True
+            elif ins.kind in ('mov', 'addi') and ins.arg == SP and ins.wr and 19 <= ins.wr[0][0] <= 30 and not ins.wr[0][1]:     # a frame address into x19-x30
+                if sp is not None:
+                    assign[ins.wr[0][0]] = ('s', sp + (ins.x[2] if ins.kind == 'addi' and ins.x else 0)); handled = True
+            elif ins.kind == 'mov' and ins.wr and ins.wr[0][0] == SP and ins.arg != SP and tok(ins.arg) and tok(ins.arg)[0] == 's':   # mov sp, frame address
+                newsp = tok(ins.arg)[1]; handled = True
+            elif ins.wr and any(r == SP for r, _ in ins.wr): newsp = None
+            if not handled and (SP in ins.rd or any(tok(r) and tok(r)[0] == 's' for r in ins.rd)):
+                if not (ins.term and ins.txt.startswith('ret')): esc = True
+            if ins.call:
+                if esc: slots.clear()
+            for r in wr: regs[r - 19] = None
+            for r, t in assign.items():
+                if 19 <= r <= 30: regs[r - 19] = t
+            if ins.call: regs[11] = None
+            sp = newsp
+            return (sp, tuple(regs), tuple(sorted(slots.items())), esc)
+
+        def exitcheck(st):
+            bad = []
+            if st[0] != 0: bad.append('sp')
+            bad += ['x%d' % r for r in range(19, 31) if st[1][r - 19] != INIT(r)]
+            return ('not preserved at the exit: ' + ', '.join(bad)) if bad else ''
+
+        state = {f: s0}; work = [f]; exits = {}
+        while work:
+            a = work.pop(); k = at[a]; ins = F[k]; st = step(state[a], ins)
+            nxt = []
+            m = ins.txt.split()[0]
+            if ins.term and ins.term[0] == 'exit':
+                if m in ('ret', 'br') or (m == 'b'): exits.setdefault(ins.a, []).append(st)
+            else:
+                tg = ins.term[-1] if ins.term else None
+                if ins.term and ins.term[0] == 'b' and tg is not None: nxt.append(tg)
+                else:
+                    if tg is not None: nxt.append(tg)
+                    nxt.append(ins.a + 4)
+            for t in nxt:
+                if t not in at: exits.setdefault(ins.a, []).append(st); continue
+                if t not in state: state[t] = st; work.append(t)
+                else:
+                    j = join(state[t], st)
+                    if j != state[t]: state[t] = j; work.append(t)
+        # an exit's state is the join of the states that reached it, as computed at the last visit
+        for a, sts in sorted(exits.items()):
+            ins = F[at[a]]
+            cur = sts[0]
+            for x in sts[1:]: cur = join(cur, x)
+            rows.append((ins, exitcheck(cur)))
+    return rows
 
 
 def analyse(path):
@@ -288,7 +428,7 @@ def analyse(path):
 
     def label(a):           # the containing STT_FUNC symbol of the section: a name for the report, no input of any decision
         best = None
-        for v, nm in cur[1]:
+        for v, nm, _ in cur[1]:
             if v <= a and (best is None or v > best[0]): best = (v, nm)
         return '%s+%#x' % (best[1], a - best[0]) if best else '%s+%#x' % (cur[0], a)
 
@@ -306,6 +446,10 @@ def analyse(path):
         if L is None:
             i = Ins(); i.a = badoff; i.txt = '(undecodable)'; glob('undecodable word in ' + sname, i); continue
         tick('instructions', len(L))
+        if os.path.abspath(path) in ASM:
+            for ins, why in asmcheck(L, fsyms, code):
+                tick('asm_exits'); item('order', ins, 'asm')
+                if why: tick('rule_violations'); red('order', ins, why, 'asm')
         at = {ins.a: k for k, ins in enumerate(L)}
         lead = set(f for f in funcs if f in at)
         if L: lead.add(L[0].a)
@@ -558,24 +702,25 @@ def analyse(path):
     return res
 
 
-def run(rtobj, objs):
+def run(rtobj, objs, asm=()):
     """-> ({gate: [(object stem, 'FUNC+0xOFF', reason)]}, {counter: n}, number of objects). Every row is one universe item, sorted;
     a certified row has reason ''. The verdict is computed from these rows only (verdict)."""
-    files = []; init(cpusize(rtobj))
+    files = []; asm = frozenset(os.path.abspath(a) for a in asm); init(cpusize(rtobj), asm)
     for a in objs:
         files += sorted(os.path.join(a, f) for f in os.listdir(a) if f.endswith('.o')) if os.path.isdir(a) else [a]
+    files = list(dict.fromkeys(files))
     rows = {g: [] for g in GATES}; n = {}
-    with multiprocessing.Pool(int(os.environ.get('JOBS', '0')) or os.cpu_count(), init, (CPUSIZE,)) as pool:
+    with multiprocessing.Pool(int(os.environ.get('JOBS', '0')) or os.cpu_count(), init, (CPUSIZE, asm)) as pool:
         for r in pool.imap(analyse, files, chunksize=4):
             for g in GATES: rows[g] += r['rows'][g]
             for k, v in r['n'].items(): n[k] = n.get(k, 0) + v
     return {g: sorted(v) for g, v in rows.items()}, n, len(files)
 
 
-def rows(rtobj, objs):
+def rows(rtobj, objs, asm=()):
     """-> {'order': [...], 'addrwrap': [...], 'align': [...]}: for each gate, the sorted (object stem, 'FUNC+0xOFF', reason) of every
     universe item; reason '' is a certified item. FUNC is the containing STT_FUNC symbol, a label of the report and no input of a decision."""
-    return run(rtobj, objs)[0]
+    return run(rtobj, objs, asm)[0]
 
 
 def verdict(g, rws, n):
@@ -585,7 +730,11 @@ def verdict(g, rws, n):
 
 
 def main(argv):
-    rws, n, nfiles = run(argv[0], argv[1:]); rc = 0
+    objs, asm, k = [], [], 1
+    while k < len(argv):
+        if argv[k] == '--asm': asm.append(argv[k + 1]); k += 2
+        else: objs.append(argv[k]); k += 1
+    rws, n, nfiles = run(argv[0], objs + asm, asm); rc = 0
     for g in GATES:
         green, u, c, bad = verdict(g, rws[g], n)
         counts = ', '.join('%s %d' % kv for kv in sorted(n.items()))
