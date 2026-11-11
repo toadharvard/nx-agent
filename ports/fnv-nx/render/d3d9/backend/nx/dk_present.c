@@ -12,9 +12,10 @@
  * call, the blend reads them on the CPU). Staging blocks (scale descriptors and uniforms, the upload block) are listed by nxdk_stage_alloc and freed by
  * nxdk_sync_end after its fence wait; the read-back block and the temporary resolve image are created here and destroyed here exactly once, after the
  * wait that consumes them. Nothing outlives the call.
- * CONTRACT-REQUEST: nxdk_present_compose returns void, so dk_swap.c cannot see a failure (the flip still copies nxdk.front). Proposed: uint32_t (0 =
- * composed, 1 = nxdk_err'd) and nxdk_present returns NXGPU_BAD_CALL for 1, as the reference does. Meanwhile a failure is reported once through nxdk_err
- * (nxdk.errCount) and the failed pass is not continued. */
+ * Result (rule): nxdk_present_compose returns 0 = composed (a cursor that is NULL or entirely outside the image is composed: nothing to draw) or 1 = refused or
+ * failed; every exit that returns 1 issued exactly one nxdk_err first and every exit that returns 0 issued none, so the result is the error state of the call.
+ * What a failed pass already executed stays executed (the reference's front is likewise left as the executed passes made it); the caller presents nothing.
+ */
 #include "dk.h"
 #include <string.h>
 
@@ -58,14 +59,15 @@ static uint32_t pc_resolve(DkCmdBuf cmd, const NxDkImage* src, NxDkImage* tmp) {
     return 0;
 }
 
-/* pass 2 after the wait: blend rd (the front's rect) with the cursor and upload the result into the front; consumes and destroys rd */
-static void pc_cursor_upload(const NxPresent* p, const uint8_t* px, const uint16_t* ramp, int64_t x0, int64_t y0, uint32_t w, uint32_t h,
+/* pass 2 after the wait: blend rd (the front's rect) with the cursor and upload the result into the front; consumes and destroys rd; 0 = ok, 1 = nxdk_err'd */
+static uint32_t pc_cursor_upload(const NxPresent* p, const uint8_t* px, const uint16_t* ramp, int64_t x0, int64_t y0, uint32_t w, uint32_t h,
                              DkMemBlock rd) {
     NxDkSync up;
-    if (nxdk_sync_begin(&up)) { dkMemBlockDestroy(rd); return; }
+    if (nxdk_sync_begin(&up)) { dkMemBlockDestroy(rd); return 1; }
     uint8_t* wr = NULL;
     DkMemBlock wb = nxdk_stage_alloc(w * h * 4);
     if (wb) wr = (uint8_t*)dkMemBlockGetCpuAddr(wb);
+    uint32_t bad = !wr;   /* nxdk_stage_alloc refused: its own nxdk_err */
     if (wr) {
         pc_blend(p, px, ramp, x0, y0, w, h, (const uint8_t*)dkMemBlockGetCpuAddr(rd), wr);
         const uint32_t box[6] = { (uint32_t)x0, (uint32_t)y0, 0, w, h, 1 };
@@ -76,26 +78,26 @@ static void pc_cursor_upload(const NxPresent* p, const uint8_t* px, const uint16
         dkCmdBufCopyBufferToImage(up.cmd, &cb, &v, &r, 0);
     }
     dkMemBlockDestroy(rd);   /* the read-back block is consumed (the blend ran on the CPU after the first wait) */
-    nxdk_sync_end(&up);      /* submit, wait, free the upload block; a failure is its own nxdk_err */
+    return nxdk_sync_end(&up) | bad;   /* submit, wait, free the upload block; a failure is its own nxdk_err */
 }
 
-void nxdk_present_compose(const NxPresent* p, const NxDkImage* src, const uint16_t* gamma, const uint8_t* cursor) {
+uint32_t nxdk_present_compose(const NxPresent* p, const NxDkImage* src, const uint16_t* gamma, const uint8_t* cursor) {
     if (!p || !src || !src->used || src->isView || src->type != NxImgType_2D || (dk_fmt(src->fmt).flags & DKFMT_COMPRESSED)) {
         nxdk_err("present: bad image %u (not a live plain 2D colour image)", p ? p->image : 0u);
-        return;
+        return 1;
     }
     if (src->samples > 1 && (src->samples > 4 || !(dkImageFormatGetFlags(dk_fmt(src->fmt).format) & DkImageFlags_Usage2DEngine))) {
         nxdk_err("present: %u samples of format %u cannot be resolved by the 2D engine (X5)", src->samples, src->fmt);
-        return;
+        return 1;
     }
-    if (cursor && (!p->cw || !p->ch || p->cw > 4096 || p->ch > 4096)) { nxdk_err("present: cursor size %ux%u", p->cw, p->ch); return; }
+    if (cursor && (!p->cw || !p->ch || p->cw > 4096 || p->ch > 4096)) { nxdk_err("present: cursor size %ux%u", p->cw, p->ch); return 1; }
     int64_t x0 = p->cx < 0 ? 0 : p->cx, y0 = p->cy < 0 ? 0 : p->cy, x1 = (int64_t)p->cx + p->cw, y1 = (int64_t)p->cy + p->ch;
     if (x1 > nxdk.front.w) x1 = nxdk.front.w;
     if (y1 > nxdk.front.h) y1 = nxdk.front.h;
     const int vis = cursor && x0 < x1 && y0 < y1;   /* a cursor entirely outside the image changes nothing */
     const uint32_t w = vis ? (uint32_t)(x1 - x0) : 0, h = vis ? (uint32_t)(y1 - y0) : 0;
     NxDkSync sy;
-    if (nxdk_sync_begin(&sy)) return;
+    if (nxdk_sync_begin(&sy)) return 1;
     NxDkImage tmp;
     memset(&tmp, 0, sizeof tmp);
     const NxDkImage* use = src;
@@ -122,6 +124,6 @@ void nxdk_present_compose(const NxPresent* p, const NxDkImage* src, const uint16
     }
     bad |= nxdk_sync_end(&sy);   /* submit, signal, wait; the staging blocks of the scale are freed */
     nxdk_img_release(&tmp);
-    if (bad || !vis) { if (rd) dkMemBlockDestroy(rd); return; }
-    pc_cursor_upload(p, cursor, gamma, x0, y0, w, h, rd);
+    if (bad || !vis) { if (rd) dkMemBlockDestroy(rd); return bad; }
+    return pc_cursor_upload(p, cursor, gamma, x0, y0, w, h, rd);
 }

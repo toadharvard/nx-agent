@@ -155,10 +155,11 @@ def scenarios(exe):
     def run(P, cur_override=None):
         arg = "present %d %s %s %d %d %d %d %s %s" % (P["img"], " ".join(str(v) for v in P["s"]), " ".join(str(v) for v in P["d"]), P["cx"], P["cy"], P["cw"], P["ch"],
                                                      "p" if P["ramp"] else "none", cur_override or P["cur"])
-        r, ev = h.cmd(arg); m = re.match(r"R 0 E (\d+) M (.*)$", r)
+        r, ev = h.cmd(arg); m = re.match(r"R (\d+) E (\d+) M (.*)$", r)
         if not m: raise RuntimeError("bad reply: " + r)
         fr, _ = h.cmd("dumpfront 0 0 %d %d" % (FW, FH)); s, _ = h.cmd("state")
-        return int(m.group(1)), m.group(2), ev, bytes.fromhex(fr[2:]), s
+        ck(int(m.group(1)) == (1 if int(m.group(2)) else 0), "result %s with %s nxdk_err: 0 = composed, 1 = exactly the nxdk_err'd exits (%s)" % (m.group(1), m.group(2), arg))
+        return int(m.group(2)), m.group(3), ev, bytes.fromhex(fr[2:]), s
     def inv(ev, s, what):   # every run: balanced sections, blocks and images, nothing live afterwards, no use after the free
         nb = sum(1 for e in ev if e.startswith("sync_begin")); ne = sum(1 for e in ev if e.startswith("sync_end"))
         mk = sum(1 for e in ev if e.startswith("block_create")); dt = sum(1 for e in ev if e.startswith("block_destroy"))
@@ -278,20 +279,31 @@ MUT = [
     ('dest w / h swapped', '(uint32_t)p->dw, (uint32_t)p->dh }', '(uint32_t)p->dh, (uint32_t)p->dw }'), ('ramp not given to the scale', '&s, &d, gamma);', '&s, &d, NULL);'),
     ('ramp not given to the cursor', 'pc_cursor_upload(p, cursor, gamma,', 'pc_cursor_upload(p, cursor, NULL,'),
     ('read-back block leaked', '    dkMemBlockDestroy(rd);   /* the read-back', '    (void)rd;   /* the read-back'),
-    ('read-back leaked on failure', 'if (bad || !vis) { if (rd) dkMemBlockDestroy(rd); return; }', 'if (bad || !vis) { return; }'),
-    ('read-back leaked when the upload cannot start', 'if (nxdk_sync_begin(&up)) { dkMemBlockDestroy(rd); return; }', 'if (nxdk_sync_begin(&up)) { return; }'),
+    ('read-back leaked on failure', 'if (bad || !vis) { if (rd) dkMemBlockDestroy(rd); return bad; }', 'if (bad || !vis) { return bad; }'),
+    ('read-back leaked when the upload cannot start', 'if (nxdk_sync_begin(&up)) { dkMemBlockDestroy(rd); return 1; }', 'if (nxdk_sync_begin(&up)) { return 1; }'),
     ('read-back destroyed before its wait', 'bad |= nxdk_sync_end(&sy);', 'if (rd) { dkMemBlockDestroy(rd); rd = NULL; } bad |= nxdk_sync_end(&sy);'),
     ('copy barrier dropped', "            dkCmdBufBarrier(sy.cmd, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);\n", ''),
     ('read-back copy flags', 'dkCmdBufCopyImageToBuffer(sy.cmd, &v, &r, &cb, 0);', 'dkCmdBufCopyImageToBuffer(sy.cmd, &v, &r, &cb, 1);'),
     ('read-back box x / y swapped', BOX1, BOX1.replace("(uint32_t)x0, (uint32_t)y0", "(uint32_t)y0, (uint32_t)x0")),
     ('upload box x / y swapped', BOX2, BOX2.replace("(uint32_t)x0, (uint32_t)y0", "(uint32_t)y0, (uint32_t)x0")),
     ('upload block too small', 'nxdk_stage_alloc(w * h * 4)', 'nxdk_stage_alloc(w * h)'), ('upload copy flags', 'dkCmdBufCopyBufferToImage(up.cmd, &cb, &v, &r, 0);', 'dkCmdBufCopyBufferToImage(up.cmd, &cb, &v, &r, 1);'),
-    ('read-back block too small', 'pc_block(w * h * 4, &rd)', 'pc_block(w * h * 3, &rd)'), ('sync_begin failure ignored', 'if (nxdk_sync_begin(&sy)) return;', 'nxdk_sync_begin(&sy);'),
+    ('read-back block too small', 'pc_block(w * h * 4, &rd)', 'pc_block(w * h * 3, &rd)'), ('sync_begin failure ignored', 'if (nxdk_sync_begin(&sy)) return 1;', 'nxdk_sync_begin(&sy);'),
     ('cube accepted', ' || src->type != NxImgType_2D', ''), ('dead image accepted', '!src->used ||', ''), ('view accepted', 'src->isView ||', ''),
     ('compressed accepted', '(dk_fmt(src->fmt).flags & DKFMT_COMPRESSED)', '0'), ('NULL present accepted', 'if (!p || !src', 'if (!src'),
     ('size check without a cursor', 'if (cursor && (!p->cw', 'if (!cursor && (!p->cw'), ('block refusal continues', '} else bad = 1;', '}'),
     ('NULL cursor drawn', 'const int vis = cursor && x0 < x1', 'const int vis = x0 < x1'), ('resolve failure ignored', 'bad = pc_resolve(sy.cmd, src, &tmp);', 'pc_resolve(sy.cmd, src, &tmp);'),
     ('temporary storage failure ignored', 'if (nxdk_img_storage(tmp)) return 1;', 'nxdk_img_storage(tmp);'),
+    ('bad image returns 0', 'p ? p->image : 0u);\n        return 1;', 'p ? p->image : 0u);\n        return 0;'),
+    ('samples refusal returns 0', 'src->samples, src->fmt);\n        return 1;', 'src->samples, src->fmt);\n        return 0;'),
+    ('cursor size refusal returns 0', 'p->cw, p->ch); return 1; }', 'p->cw, p->ch); return 0; }'),
+    ('sync_begin refusal returns 0', 'if (nxdk_sync_begin(&sy)) return 1;', 'if (nxdk_sync_begin(&sy)) return 0;'),
+    ('pass 1 / read-back / wait failure returns 0', 'if (rd) dkMemBlockDestroy(rd); return bad; }', 'if (rd) dkMemBlockDestroy(rd); return 0; }'),
+    ('upload sync_begin refusal returns 0', 'dkMemBlockDestroy(rd); return 1; }', 'dkMemBlockDestroy(rd); return 0; }'),
+    ('upload staging refusal returns 0', 'uint32_t bad = !wr;', 'uint32_t bad = 0;'),
+    ('upload wait failure returns 0', 'return nxdk_sync_end(&up) | bad;', 'nxdk_sync_end(&up); return bad;'),
+    ('success returns 1', 'return pc_cursor_upload(', 'pc_cursor_upload('),
+    ('outside cursor returns 1', 'return bad; }\n    return pc', 'return bad | !vis; }\n    return pc'),
+    ('upload failure dropped', 'return pc_cursor_upload(p, cursor, gamma, x0, y0, w, h, rd);', 'pc_cursor_upload(p, cursor, gamma, x0, y0, w, h, rd); return 0;'),
     ('upload staging failure ignored', 'if (wr) {\n        pc_blend', 'if (1) {\n        pc_blend'),
 ]
 caught = 0

@@ -283,8 +283,9 @@ void nxdk_scale_shutdown(void);
 void nxdk_query_shutdown(void);    /* dk_query.c: frees the query tables; nxdk_destroy calls it while the device lives */
 void nxdk_scale_point(DkCmdBuf cmd, const NxDkSub* s, const NxDkSub* d, const uint16_t* ramp);   /* ramp: 3 x 256 u16 or NULL */
 /* ---- dk_present.c: the compose passes of PRESENT: writes the source rect of `src` into the destination rect of nxdk.front (gamma ramp: 3 x 256 u16 or
- * NULL), then blends the cursor (cw x ch BGRA or NULL), all queued on nxdk.q ahead of the flip (rule P1: it consumes the memory it reads before it returns) */
-void nxdk_present_compose(const NxPresent* p, const NxDkImage* src, const uint16_t* gamma, const uint8_t* cursor);
+ * NULL), then blends the cursor (cw x ch BGRA or NULL), all queued on nxdk.q ahead of the flip (rule P1: it consumes the memory it reads before it returns).
+ * Result: 0 = composed (a NULL or fully outside cursor is composed), 1 = refused or failed with exactly one nxdk_err; the caller then presents nothing */
+uint32_t nxdk_present_compose(const NxPresent* p, const NxDkImage* src, const uint16_t* gamma, const uint8_t* cursor);   /* 0 = composed, 1 = refused/failed (one nxdk_err issued) */
 /* ---- dk_blit.c */
 void nxdk_op_blit(const uint32_t* a, uint32_t argc);
 void nxdk_op_gen_mips(const uint32_t* a, uint32_t argc);

@@ -99,7 +99,9 @@ uint64_t nxdk_present(uint64_t a) {
         cursor = (const uint8_t*)nxdk_guest_ptr(p->cursor, (uint64_t)p->cw * p->ch * 4);
         if (!cursor) return bad("cursor pixels are not readable");
     }
-    nxdk_present_compose(p, src, gamma, cursor);
+    /* a failed compose presents nothing and counts no frame (reference: gl4_present.c, gl4_api_present returns NXGPU_BAD_CALL before nxgl4_on_present);
+     * nothing is acquired or recorded before this point, so there is nothing to release */
+    if (nxdk_present_compose(p, src, gamma, cursor)) return NXGPU_BAD_CALL;
     uint32_t slot = nxdk.slot;
     if (nxdk.fenceLive[slot] && dkFenceWait(&nxdk.fence[slot], -1) != DkResult_Success) return bad("fence wait failed");
     dkCmdBufClear(nxdk.cmd);

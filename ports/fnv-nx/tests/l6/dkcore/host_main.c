@@ -75,7 +75,10 @@ static NxDkImage img_ok = { .w = 1280, .h = 720, .fmt = NxFmt_RGBA8, .flags = Nx
 static NxDkImage img_depth = { .w = 1280, .h = 720, .fmt = NxFmt_Z24S8, .flags = NxImg_Depth };
 const NxDkImage* nxdk_img(uint32_t id) { return id == 5 ? &img_ok : id == 6 ? &img_depth : NULL; }
 static const NxPresent* comp_p; static const NxDkImage* comp_s; static const uint16_t* comp_g; static const uint8_t* comp_c;
-void nxdk_present_compose(const NxPresent* p, const NxDkImage* s, const uint16_t* g, const uint8_t* c) { comp_p = p; comp_s = s; comp_g = g; comp_c = c; ev("compose"); }
+static uint32_t comp_ret;   /* what the double returns: 0 = composed, 1 = refused (the contract of dk.h) */
+uint32_t nxdk_present_compose(const NxPresent* p, const NxDkImage* s, const uint16_t* g, const uint8_t* c) {
+    comp_p = p; comp_s = s; comp_g = g; comp_c = c; ev("compose"); return comp_ret;
+}
 static int hit[24];
 uint32_t nxdk_img_init(void) { ev("img_init"); return 0; }
 void nxdk_img_shutdown(void) { ev("img_shutdown"); }
@@ -177,6 +180,11 @@ static void scen_present(void) {
     pres(&p); CHK("present_fence_waited_second_round", cnt("fencewait") == 1 && pos("fencewait") < pos("cmdclear"));
     p = mkp(); p.gamma = P(ramp); p.cursor = P(cur); p.cw = 16; p.ch = 16; p.cx = -4; p.cy = 9;
     CHK("present_gamma_cursor_ok", pres(&p) == 0 && comp_g == ramp && comp_c == cur);
+    p = mkp(); comp_ret = 1; { const uint32_t slot0 = nxdk.slot; const uint64_t rf = pres(&p);
+    CHK("compose_failure_bad", rf == NXGPU_BAD_CALL && comp_p == &p && cnt("compose") == 1);
+    CHK("compose_failure_presents_nothing", cnt("fencewait") == 0 && cnt("cmdclear") == 0 && cnt("acquire") == 0 && cnt("copy") == 0 && cnt("submit") == 0 &&
+        cnt("interval") == 0 && cnt("present") == 0 && cnt("signal") == 0 && hook_n == 0 && nxdk.slot == slot0); }
+    comp_ret = 0; CHK("present_after_compose_failure_ok", pres(&p) == 0 && hook_n == 1 && hook_frame == 7 && cnt("present") == 1);
     for (uint32_t iv = 0; iv <= 4; iv++) { p = mkp(); p.interval = iv; CHK(iv == 0 ? "interval_0" : iv == 1 ? "interval_1" : iv == 2 ? "interval_2" : iv == 3 ? "interval_3" : "interval_4",
         pres(&p) == 0 && last_interval == iv); }
     p = mkp(); p.interval = 5; CHK("interval_5_bad", pres(&p) == NXGPU_BAD_CALL && untouched());

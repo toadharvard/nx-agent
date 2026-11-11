@@ -17,12 +17,12 @@ DK = os.environ.get("FNVNX_DK", "/home/user/work/l6/dk")
 NM = os.path.join(DK, "dkp", "devkitA64", "bin", "aarch64-none-elf-nm")
 FILES = ["dk_core.c", "dk_swap.c"]   # linked into the host harness; the other objects have their own test (tests/l6/dkimage)
 ALLC = FILES + ["dk_image.c", "dk_xfer.c", "dk_sampler.c", "dk_read.c", "dk_fmt.c"]
-EXPECT_CHECKS = 114
+EXPECT_CHECKS = 117
 MUST_NAMES = ["create_ok", "device_flags", "swap_layout", "front_layout", "swap_no_hwcompression", "swapchain_made", "front_zero_filled", "api_slots",
               "info_ok", "shutdown_waits_idle", "mem_ids_dense", "mem_flags_generic", "mem_flags_code", "mem_flags_image", "mem_gpu_addr",
               "mem_create_rejects", "mem_destroy_twice_bad", "mem_capacity_4096", "mem_all_destroyed", "present_ok", "present_order",
               "present_copy_front_to_slot", "present_barrier_before_copy", "present_signals_slot_fence", "present_fence_waited_second_round",
-              "interval_4", "interval_5_bad", "depth_image_bad", "src_overflow_bad", "cursor_big_bad", "present_null_struct_bad", "wait_vblank_ok",
+              "compose_failure_bad", "compose_failure_presents_nothing", "present_after_compose_failure_ok", "interval_4", "interval_5_bad", "depth_image_bad", "src_overflow_bad", "cursor_big_bad", "present_null_struct_bad", "wait_vblank_ok",
               "wait_vblank_bad_output", "destroy_order", "destroy_balanced", "noswap_present_bad", "noswap_balanced", "device_fail_reported",
               "vi_fail_reported"]
 # symbols of the backend files not merged yet (dk_scale, dk_present); empty once the backend is whole
@@ -124,6 +124,8 @@ MUT = [
     ("barrier before the flip dropped", "dk_swap.c", "    dkCmdBufBarrier(nxdk.cmd, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);\n", ""),
     ("depth image accepted", "dk_swap.c", " || (src->flags & NxImg_Depth)", ""),
     ("queue destroyed before the idle wait", "dk_core.c", "    if (nxdk.q) dkQueueWaitIdle(nxdk.q);\n    nxdk_stream_shutdown();\n    nxdk_swap_destroy();", "    nxdk_stream_shutdown();\n    nxdk_swap_destroy();\n    if (nxdk.q) dkQueueWaitIdle(nxdk.q);"),
+    ("compose result ignored", "dk_swap.c", "    if (nxdk_present_compose(p, src, gamma, cursor)) return NXGPU_BAD_CALL;\n", "    nxdk_present_compose(p, src, gamma, cursor);\n"),
+    ("compose failure returns success", "dk_swap.c", "if (nxdk_present_compose(p, src, gamma, cursor)) return NXGPU_BAD_CALL;", "if (nxdk_present_compose(p, src, gamma, cursor)) return 0;"),
     ("storage alignment check dropped", "dk_core.c", " || ((uintptr_t)host & (DK_MEMBLOCK_ALIGNMENT - 1))", ""),
 ]
 caught = 0

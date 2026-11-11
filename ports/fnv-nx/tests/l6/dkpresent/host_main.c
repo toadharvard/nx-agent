@@ -138,7 +138,8 @@ void dkCmdBufCopyBufferToImage(DkCmdBuf c, DkCopyBuf const* b, DkImageView const
 }
 
 /* ---- commands --------------------------------------------------------------------------------------------------------------------------- */
-static void result(void) { printf("R 0 E %u M %s\n", nxdk.errCount, nxdk.errCount ? nxdk.lastErr : "-"); fflush(stdout); }
+static uint32_t rv;   /* the result of nxdk_present_compose */
+static void result(void) { printf("R %u E %u M %s\n", rv, nxdk.errCount, nxdk.errCount ? nxdk.lastErr : "-"); fflush(stdout); }
 int main(void) {
     char line[512]; nxdk.dev = (DkDevice)(uintptr_t)0xD0;
     while (fgets(line, sizeof line, stdin)) {
@@ -179,7 +180,7 @@ int main(void) {
             const NxPresent* pp = &p; const NxDkImage* src = &ims[I];
             if (!strcmp(cs, "nullpresent")) pp = NULL;
             if (!strcmp(cs, "nullsrc")) src = NULL;
-            nxdk_present_compose(pp, src, rp, cp);
+            rv = nxdk_present_compose(pp, src, rp, cp);
             if (rp) memset(ramp, 0x5A, sizeof ramp);   /* P1: the guest's ramp and cursor are the caller's after the call: poison them */
             memset(cur, 0x5A, cn); free(cur);
             result();
