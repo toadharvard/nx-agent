@@ -7,7 +7,7 @@ the store is content-keyed, so a second run of an unchanged test is all hits). T
 C++ unit (PP then CC stage, loading the plugins in the given order with the given arguments). The recipe's native-root rule demands all
 plugins with fixed arguments, so a test of one plugin (or an A/B argument, or a missing plugin) is a root whose C++ is generated:
 cxx_origin {"lifted_by": gen/lift.py, "pack": the compiler external}; the generator copies the fixture text.
-Recipe stages emit objects only (unitstage forbids -S and -save-temps): `compile(asm=True)` therefore cannot return assembly text.
+Recipe stages emit objects only; tests read the object back with the pinned binutils (`objdump`, `cstring`, `section_size`, elfobj).
 Tests run as `python3 -I FILE` from the checkout root, so a test inserts its own directory in sys.path to import this."""
 import json
 import os
@@ -107,14 +107,13 @@ def build(name, tmp, source=None):
     return next(p['path'] for p in res['plugins'] if p['name'] == 'fnvnx_' + name)
 
 
-def compile(src, out, plugins, flags=None, args=(), asm=False):
+def compile(src, out, plugins, flags=None, args=(), keep=None):
     """compile src to out (an object) through the recipe with the product flags and the plugins (paths of .so made by build()), in that
     order; `args` holds extra compiler flags and -fplugin-arg-<plugin>-<key>[=<value>] plugin arguments; -> CompletedProcess (the caller
-    checks returncode: some tests expect an error). asm=True: recipe stages emit objects only, so no assembly can be returned: the build
-    is still run (its diagnostics are real) and a green one is reported as returncode 1 with the reason in stderr."""
-    pl, extra = [], []
+    checks returncode: some tests expect an error, and then stderr is the recipe's failure diagnostics)"""
     names = [re.fullmatch(r'fnvnx_([a-z0-9_]+)\.so', os.path.basename(p)).group(1) for p in plugins]
     pa = {n: {} for n in names}
+    extra = []
     for a in args:
         m = re.fullmatch(r'-fplugin-arg-fnvnx_([a-z0-9_]+)-([a-z][a-z0-9-]*)(?:=(.*))?', a)
         if m:
@@ -123,17 +122,130 @@ def compile(src, out, plugins, flags=None, args=(), asm=False):
             extra.append(a)
     tmp = tempfile.mkdtemp(prefix='plugbuild-')
     try:
-        base = os.path.basename(src)
-        res, odir = _recipe(tmp, [(n, pa[n]) for n in names], {base: open(src).read()}, (PRODUCT_FLAGS if flags is None else flags) + extra)
+        res, odir = _recipe(tmp, [(n, pa[n]) for n in names], {os.path.basename(src): open(src).read()}, (PRODUCT_FLAGS if flags is None else flags) + extra)
         if res['status'] != 'green':
             f = res['failure']
             return subprocess.CompletedProcess([], f.get('exit') or 1, '', '\n'.join(f.get('stderr') or []) + '\n' + json.dumps(f)[:600])
-        if asm:
-            return subprocess.CompletedProcess([], 1, '', 'recipe stages emit objects only (-S and -save-temps are forbidden by unitstage/toolflags): no assembly')
         shutil.copyfile(next(o['object'] for o in res['objects']), out)
         return subprocess.CompletedProcess([], 0, '', '')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def objdump(obj):
+    """the object read back with the pinned binutils (env.json): `objdump -dr` -> {symbol: [lines]} (a relocation is the line after its
+    instruction). Disassembly is reading, not compiling: the object is the recipe's."""
+    t = subprocess.run(['aarch64-linux-gnu-objdump', '-dr', obj], capture_output=True, text=True, check=True).stdout
+    out = {}
+    for m in re.finditer(r'^[0-9a-f]+ <([^>]+)>:\n(.*?)(?:\n\n|\Z)', t, re.S | re.M):
+        out[m.group(1)] = m.group(2).splitlines()
+    return out
+
+
+def cstring(obj, sec, off):
+    """the NUL-terminated string at offset OFF of section SEC of the object"""
+    d = elfobj.read(obj).section(sec)
+    return d[off:d.index(b'\0', off)].decode()
+
+
+def section_size(obj, name):
+    """size of section NAME (readelf -SW: NOBITS sections have no data in elfobj)"""
+    t = subprocess.run(['aarch64-linux-gnu-readelf', '-SW', obj], capture_output=True, text=True, check=True).stdout
+    m = re.search(r'\]\s+%s\s+\S+\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)' % re.escape(name), t)
+    return int(m.group(1), 16) if m else None
+
+
+_BR = {'b', 'bl', 'cbz', 'cbnz', 'tbz', 'tbnz'}
+
+
+def insns(obj, sym):
+    """function SYM of the object as one normalised string: instructions of `objdump -dr`, a call or jump with a relocation names its target
+    symbol, a PC-relative literal load shows its value (`ldr w9, =16`), the other branch targets become labels `L<n>:` numbered by address,
+    the literal pool is dropped. Comments, addresses and encodings are not kept."""
+    rec = []
+    for l in objdump(obj).get(sym, []):
+        m = re.match(r'\s*([0-9a-f]+):\s+(R_\S+)\s+(\S+)', l)
+        if m:
+            rec[-1]['rel'] = re.sub(r'\+0x[0-9a-f]+$', '', m.group(3))
+            continue
+        m = re.match(r'\s*([0-9a-f]+):\s+([0-9a-f]{8})\s+(\S+)\s*(.*)', l)
+        ops = re.sub(r'\s*<[^>]*>', '', re.sub(r'\s*//.*$', '', m.group(4))).strip()
+        rec.append({'addr': int(m.group(1), 16), 'mn': m.group(3), 'ops': ops, 'raw': int(m.group(2), 16)})
+    word = {r['addr']: r['raw'] - (1 << 32 if r['raw'] >> 31 else 0) for r in rec if r['mn'] == '.word'}
+    rec = [r for r in rec if r['mn'] != '.word']
+    tgt = set()
+    for r in rec:
+        m = re.search(r'(?:^|, )([0-9a-f]+)$', r['ops'])
+        if r['mn'] in _BR or r['mn'].startswith('b.'):
+            if r.get('rel'):
+                r['ops'] = re.sub(r'(?:^|, )?[0-9a-f]+$', lambda x: (', ' if x.group(0).startswith(', ') else '') + r['rel'], r['ops'])
+            elif m:
+                tgt.add(int(m.group(1), 16))
+        elif r['mn'] == 'ldr' and m and '[' not in r['ops']:
+            r['ops'] = r['ops'][:m.start()] + (', ' if r['ops'][:m.start()] else '') + '=%d' % word[int(m.group(1), 16)]
+    lab = {a: 'L%d' % (i + 1) for i, a in enumerate(sorted(tgt))}
+    out = []
+    for r in rec:
+        if r['addr'] in lab:
+            out.append(lab[r['addr']] + ':')
+        ops = r['ops']
+        if (r['mn'] in _BR or r['mn'].startswith('b.')) and not r.get('rel'):
+            m = re.search(r'(?:^|, )([0-9a-f]+)$', ops)
+            ops = ops[:m.start()] + (', ' if ops[:m.start()] else '') + lab[int(m.group(1), 16)]
+        out.append((r['mn'] + ' ' + ops).strip())
+    return ' '.join(out)
+
+
+def _tables(obj):
+    sec = {}
+    t = subprocess.run(['aarch64-linux-gnu-readelf', '-SW', obj], capture_output=True, text=True, check=True).stdout
+    for m in re.finditer(r'^\s*\[\s*(\d+)\]\s+(\S+)\s+\S+\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)', t, re.M):
+        sec[int(m.group(1))] = m.group(2)
+    syms = {}
+    t = subprocess.run(['aarch64-linux-gnu-readelf', '-sW', obj], capture_output=True, text=True, check=True).stdout
+    for m in re.finditer(r'^\s*\d+:\s+([0-9a-f]+)\s+(\d+)\s+(\w+)\s+(\w+)\s+\w+\s+(\w+)\s+(\S+)$', t, re.M):
+        syms[m.group(6)] = {'value': int(m.group(1), 16), 'size': int(m.group(2)), 'type': m.group(3), 'bind': m.group(4),
+                            'sec': sec.get(int(m.group(5))) if m.group(5).isdigit() else m.group(5)}
+    rel = {}
+    t = subprocess.run(['aarch64-linux-gnu-readelf', '-rW', obj], capture_output=True, text=True, check=True).stdout
+    cur = None
+    for l in t.splitlines():
+        m = re.match(r"Relocation section '\.rela(\S+)'", l)
+        if m:
+            cur = m.group(1)
+            rel[cur] = []
+            continue
+        m = re.match(r'([0-9a-f]{8,})\s+[0-9a-f]+\s+(\S+)\s+[0-9a-f]+\s+(\S+)(?:\s+([+-])\s+([0-9a-f]+))?', l)
+        if m and cur:
+            rel[cur].append((int(m.group(1), 16), m.group(2), m.group(3), int(m.group(5) or '0', 16) * (-1 if m.group(4) == '-' else 1)))
+    return sec, syms, rel
+
+
+def symbols_of(obj):
+    """{name: {value, size, type, bind, sec}} of the object's symbol table (readelf -sW; sec is the section name or UND/ABS)"""
+    return _tables(obj)[1]
+
+
+def relocs_of(obj):
+    """{section name: [(offset, type, symbol, addend)]} (readelf -rW)"""
+    return _tables(obj)[2]
+
+
+def words(obj, sym):
+    """the 32-bit words of data symbol SYM: the relocated symbol name (with +addend when not 0) or the signed value, as strings"""
+    sec, syms, rel = _tables(obj)
+    s = syms[sym]
+    data = elfobj.read(obj).section(s['sec'])[s['value']:s['value'] + s['size']]
+    rr = {o - s['value']: (n, a) for o, _, n, a in rel.get(s['sec'], []) if s['value'] <= o < s['value'] + s['size']}
+    out = []
+    for i in range(0, len(data), 4):
+        if i in rr:
+            n, a = rr[i]
+            out.append(n + ('%+d' % a if a else ''))
+        else:
+            v = int.from_bytes(data[i:i + 4], 'little')
+            out.append(str(v - (1 << 32 if v >> 31 else 0)))
+    return out
 
 
 def section(obj, name):
